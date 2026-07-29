@@ -2,7 +2,7 @@
 
 {# The certificate preview in the #certs section uses the same stylesheet as
    the real document, so the landing never drifts from it on the next change. #}
-{% block head_extra %}<link rel="stylesheet" href="/static/css/cert.css">{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/css/cert.css?v={{ asset_v }}">{% endblock %}
 
 {% block content %}
 

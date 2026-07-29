@@ -11,7 +11,9 @@ Uruchomienie:  uvicorn app.main:app --reload  (z katalogu backend/)
 from __future__ import annotations
 
 import json
+import os
 import secrets
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2452,9 +2454,15 @@ def public_stats():
 jinja = Jinja2Templates(directory=str(TEMPLATES))
 
 
+# Wersja assetów w linkach ?v= — bez tego przeglądarka potrafi trzymać stary
+# CSS/JS po deployu i "naprawione" style nigdy nie docierają do użytkownika.
+# Na Vercelu SHA commita jest stały per deploy; lokalnie wystarczy czas startu.
+ASSET_V = os.environ.get("VERCEL_GIT_COMMIT_SHA", "")[:10] or str(int(time.time()))
+
+
 def _page(request: Request, template: str, **extra):
     ctx = {"site_name": settings.site_name, "support_email": settings.support_email,
-           "base_url": settings.app_base_url, **extra}
+           "base_url": settings.app_base_url, "asset_v": ASSET_V, **extra}
     return jinja.TemplateResponse(request, template, ctx)
 
 

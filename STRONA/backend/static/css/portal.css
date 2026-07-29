@@ -29,10 +29,11 @@
 }
 
 *{box-sizing:border-box;margin:0;padding:0}
-/* html gets the app background — during macOS rubber-band overscroll the edge
-   beyond the page shows the root canvas, and a bare one flashes white. */
+/* html gets the app background and the root rubber-band bounce is disabled —
+   a hard scroll used to flash the bare white canvas past the page edge. */
 html,body{height:100%}
-html{background:var(--bg)}
+html{background:var(--bg);overscroll-behavior-y:none}
+body{overscroll-behavior-y:none}
 body{background:var(--bg);color:var(--txt);font-family:var(--body);font-size:15px;line-height:1.55;
   -webkit-font-smoothing:antialiased}
 ::selection{background:rgba(99,102,241,.18)}
