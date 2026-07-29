@@ -26,7 +26,7 @@
 }
 
 *{box-sizing:border-box;margin:0;padding:0}
-html{scroll-behavior:smooth;scroll-padding-top:84px}
+html{scroll-behavior:smooth;scroll-padding-top:84px;background:var(--bg)}
 body{background:var(--bg);color:var(--txt);font-family:var(--body);font-size:16px;line-height:1.65;
   -webkit-font-smoothing:antialiased;overflow-x:hidden}
 ::selection{background:rgba(99,102,241,.18)}
