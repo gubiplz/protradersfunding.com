@@ -59,7 +59,7 @@ tr.clickable{cursor:pointer}
   border-bottom:1px solid var(--line);background:#fff;flex:0 0 auto}
 .over-head h2{font-size:16.5px}
 .over-body{padding:18px 20px 34px;overflow-y:auto;display:flex;flex-direction:column;gap:14px;
-  overscroll-behavior:none}
+  overscroll-behavior:contain}
 
 .kv{display:flex;justify-content:space-between;gap:14px;font-size:13px;padding:5px 0;border-bottom:1px dashed var(--line)}
 .kv:last-child{border-bottom:0}

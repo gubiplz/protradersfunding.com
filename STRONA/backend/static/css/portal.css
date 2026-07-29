@@ -310,11 +310,14 @@ table.tbl td.sub-row{background:var(--panel2)}
 /* ---------------- MODAL ---------------- */
 /* The overlay scrolls when a modal is taller than the viewport — otherwise a
    long form (e.g. New challenge account) traps the close button off-screen.
-   overscroll-behavior:none — the overlay must not rubber-band: the bounce moves
-   the dark veil with it and bares the raw page along the edge (ugly contrast). */
+   The dark veil lives on a viewport-fixed ::before, NOT on the scroller itself:
+   painted on the scroller it bounced along with the rubber-band and bared the
+   raw page at the edge. The wrap must stay free of backdrop-filter/transform,
+   or the fixed pseudo would anchor to the wrap and move with it again. */
 .modal-wrap{position:fixed;inset:0;z-index:70;display:flex;align-items:flex-start;justify-content:center;
-  padding:18px;background:rgba(15,23,42,.4);backdrop-filter:blur(4px);overflow-y:auto;
-  overscroll-behavior:none}
+  padding:18px;overflow-y:auto;overscroll-behavior:contain}
+.modal-wrap::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:rgba(15,23,42,.4);backdrop-filter:blur(4px)}
 .modal-wrap>*{margin-top:auto;margin-bottom:auto}
 .modal{background:#fff;border:1px solid var(--line);border-radius:18px;width:100%;max-width:430px;
   padding:24px;box-shadow:0 40px 100px -30px rgba(15,23,42,.35);animation:pop .22s cubic-bezier(.22,1,.36,1)}
