@@ -122,7 +122,9 @@
   margin-top:auto;width:100%;display:grid;
   grid-template-columns:1fr auto;align-items:end;
   gap:clamp(10px,2.4cqw,24px);
-  padding-top:clamp(9px,2cqw,18px);border-top:1px solid var(--k-linia);
+  /* wyraźny oddech od krawędzi karty — podpis i QR nie mogą jej dotykać */
+  padding:clamp(9px,2cqw,18px) clamp(16px,4cqw,40px) 0;
+  border-top:1px solid var(--k-linia);
 }
 .cert-signblock{
   display:flex;flex-direction:column;align-items:flex-start;gap:.3em;
