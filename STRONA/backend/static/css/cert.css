@@ -141,7 +141,7 @@
 .cert-signblock .sig{
   font-family:'SignatureScript',var(--script);font-weight:400;
   font-size:clamp(28px,6.4cqw,58px);line-height:.85;letter-spacing:-.01em;
-  color:#e8edff;display:inline-block;transform:rotate(-4deg) skewX(-3deg) translateY(-10px);
+  color:#e8edff;display:inline-block;transform:rotate(-4deg) skewX(-3deg) translateY(-30px);
   text-shadow:0 0 1px rgba(232,237,255,.3);
   margin-bottom:-.1em;padding:0 .15em .08em .05em;
 }
@@ -174,7 +174,7 @@
 /* Verification address — one step larger than the old fine print
    and clearly lower, right under the edge of the document. */
 .cert-verify{
-  font-size:clamp(8px,1.55cqw,12.5px);color:var(--k-cichy);line-height:1.5;
+  font-size:clamp(7px,1.35cqw,11px);color:var(--k-cichy);line-height:1.5;
   margin-top:clamp(10px,2.4cqw,22px);text-align:center;overflow-wrap:anywhere;
 }
 
