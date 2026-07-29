@@ -23,7 +23,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import func
 
-from . import auth, billing, catalog, notify, poller, provisioning, rules, tradebot
+from . import auth, billing, catalog, metaquotes_web, notify, poller, provisioning, rules, tradebot
 from .config import get_settings
 from .db import SessionLocal, init_db
 from .models import (Account, Breach, Certificate, EquitySnapshot, JournalEntry, Order, Payout,
@@ -1709,7 +1709,14 @@ def admin_pool_list():
                 "trader_email": tr.email if tr else None,
                 "created_at": a.created_at.isoformat() if a.created_at else None,
             })
-        return {"pool": pula, "waiting": czekajace}
+        mozna, powod = _generator_status()
+        # Rozmiary bierzemy z katalogu, a nie z listy w kodzie panelu — inaczej po
+        # dodaniu nowego planu admin mogłby wrzucić do puli rachunek wielkości,
+        # której nikt nie kupi, i taki wpis nigdy by się nie przydzielił.
+        rozmiary = sorted({p.account_size for p in
+                           session.query(Product).filter(Product.active == True).all()})  # noqa: E712
+        return {"pool": pula, "waiting": czekajace, "sizes": rozmiary,
+                "can_generate": mozna, "generate_hint": powod}
     finally:
         session.close()
 
@@ -1727,6 +1734,134 @@ def admin_pool_add(payload: NewPoolAccount):
         session.add(p)
         session.commit()
         return {"id": p.id, "account_size": p.account_size}
+    finally:
+        session.close()
+
+
+def _generator_status() -> tuple[bool, str]:
+    """Czy da się TU zakładać konta demo na MetaQuotes-Demo, a jeśli nie — dlaczego.
+
+    Kanał steruje Playwrightem na `web.metatrader.app`, więc potrzebuje procesu
+    z przeglądarką. Na hostingu bezserwerowym (Vercel) Chromium (~150 MB) nie ma
+    prawa się znaleźć, dlatego panel musi umieć powiedzieć to wprost, zamiast
+    dawać przycisk, który zawsze kończy się błędem.
+    """
+    # Komunikaty po angielsku — trafiają wprost do panelu admina, który jest EN.
+    if not settings.metaquotes_web_enabled:
+        return False, ("The MetaQuotes channel is off. Set METAQUOTES_WEB_ENABLED=true "
+                       "on a host that has a browser.")
+    if not metaquotes_web.chromium_available():
+        return False, ("No Chromium browser here, so this server cannot open demo accounts — "
+                       "serverless hosting cannot run one. Generate them from your own machine "
+                       "instead: python scripts/pool_generate.py --size 50000 --count 5 "
+                       "--api <panel-url> --admin-token <token>")
+    return True, ""
+
+
+class PoolGenerateIn(BaseModel):
+    """Ile kont demo MT5 zalozyc i jakiego rozmiaru."""
+    account_size: float
+    count: int = 1
+    first_name: str = "Pro"
+    last_name: str = "Trader"
+
+
+@app.post("/api/admin/pool/generate", dependencies=[Depends(auth.require_admin)])
+async def admin_pool_generate(payload: PoolGenerateIn):
+    """Zakłada konta demo na MetaQuotes-Demo i wrzuca je do puli.
+
+    Ta sama ścieżka, którą wcześniej szedł provisioning: formularz „Open Demo
+    account" na web.metatrader.app sterowany Playwrightem. Różnica polega na tym,
+    że konta lądują w puli ZAWCZASU, zamiast powstawać w chwili zakupu — trader
+    nie czeka, aż przeglądarka przeklika formularz.
+    """
+    mozna, powod = _generator_status()
+    if not mozna:
+        raise HTTPException(400, powod)
+    if payload.account_size <= 0:
+        raise HTTPException(400, "Rozmiar konta musi być dodatni")
+    if not 1 <= payload.count <= 10:
+        raise HTTPException(400, "Na raz można założyć od 1 do 10 kont")
+
+    opener = metaquotes_web.make_opener(settings)
+    if opener is None:
+        raise HTTPException(400, "Kanał MetaQuotes jest wyłączony")
+
+    utworzone, bledy = [], []
+    for _ in range(payload.count):
+        spec = metaquotes_web.WebDemoSpec(
+            first_name=payload.first_name, last_name=payload.last_name,
+            email=settings.mail_from, phone=settings.metaquotes_web_default_phone,
+            deposit=payload.account_size, leverage=settings.metaquotes_web_leverage,
+            account_type=settings.metaquotes_web_account_type,
+        )
+        try:
+            creds = await opener.open_demo_account(spec)
+        except Exception as e:                      # kanał bywa kapryśny — resztę i tak zapisujemy
+            bledy.append(str(e)[:200])
+            continue
+        session = SessionLocal()
+        try:
+            p = PoolAccount(platform_login=str(creds.login), platform_password=creds.password,
+                            platform_server=creds.server, account_size=payload.account_size)
+            session.add(p)
+            session.commit()
+            utworzone.append({"id": p.id, "platform_login": p.platform_login,
+                              "platform_server": p.platform_server})
+        finally:
+            session.close()
+
+    if not utworzone:
+        raise HTTPException(502, "Nie udało się założyć żadnego konta: " + "; ".join(bledy))
+    return {"created": utworzone, "errors": bledy}
+
+
+class PoolPatchIn(BaseModel):
+    """Korekta wpisu w puli — wszystkie pola opcjonalne."""
+    platform_login: str | None = None
+    platform_password: str | None = None
+    platform_server: str | None = None
+    account_size: float | None = None
+
+
+@app.patch("/api/admin/pool/{pool_id}", dependencies=[Depends(auth.require_admin)])
+def admin_pool_edit(pool_id: int, payload: PoolPatchIn):
+    """Poprawia dane rachunku w puli.
+
+    Gdy rachunek jest już przydzielony, zmiana poświadczeń przechodzi TAKŻE na
+    konto tradera — inaczej po zmianie hasła u brokera portal pokazywałby stare
+    dane i trader nie zalogowałby się do terminala. Rozmiaru przydzielonego
+    rachunku nie ruszamy: konto challenge ma już od niego policzone limity.
+    """
+    session = SessionLocal()
+    try:
+        p = session.get(PoolAccount, pool_id)
+        if not p:
+            raise HTTPException(404, "Nie ma takiego wpisu w puli")
+        if payload.account_size is not None:
+            if p.claimed:
+                raise HTTPException(400, "Rachunek jest przydzielony — rozmiaru nie można zmienić")
+            if payload.account_size <= 0:
+                raise HTTPException(400, "Rozmiar konta musi być dodatni")
+            p.account_size = payload.account_size
+        for pole in ("platform_login", "platform_password", "platform_server"):
+            wartosc = getattr(payload, pole)
+            if wartosc is not None:
+                nowa = wartosc.strip()
+                if not nowa:
+                    raise HTTPException(400, f"Pole {pole} nie może być puste")
+                setattr(p, pole, nowa)
+
+        acc = session.get(Account, p.claimed_by_account_id) if p.claimed_by_account_id else None
+        if acc is not None:
+            acc.platform_login = p.platform_login
+            acc.platform_password = p.platform_password
+            acc.platform_server = p.platform_server
+            acc.login = p.platform_login
+        session.commit()
+        return {"id": p.id, "platform_login": p.platform_login,
+                "platform_server": p.platform_server, "account_size": p.account_size,
+                "propagated_to_account": acc.id if acc else None}
     finally:
         session.close()
 
