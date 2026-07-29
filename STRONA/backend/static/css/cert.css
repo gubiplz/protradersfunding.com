@@ -127,8 +127,14 @@
   border-top:1px solid var(--k-linia);
 }
 .cert-signblock{
-  display:flex;flex-direction:column;align-items:flex-start;gap:.3em;
-  text-align:left;min-width:0;
+  /* kolumna wycentrowana wzgledem srodka podpisu: bazgrol siedzi NA cienkiej
+     linii, a tytul CEO stoi pod nia, w osi podpisu */
+  display:flex;flex-direction:column;align-items:center;gap:0;
+  justify-self:start;text-align:center;min-width:0;
+}
+.cert-signblock .sig-line{
+  align-self:stretch;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(147,163,201,.7) 18%,rgba(147,163,201,.7) 82%,transparent);
 }
 /* CEO signature — Mr De Haviland: a thin, hurried, barely-legible pen stroke
    (deliberately NOT neat calligraphy). Shipped with the site, so it looks the
@@ -141,13 +147,15 @@
 .cert-signblock .sig{
   font-family:'SignatureScript',var(--script);font-weight:400;
   font-size:clamp(28px,6.4cqw,58px);line-height:.85;letter-spacing:-.01em;
-  color:#e8edff;display:inline-block;transform:rotate(-4deg) skewX(-3deg) translateY(-30px);
+  color:#e8edff;display:inline-block;transform:rotate(-4deg) skewX(-3deg);
   text-shadow:0 0 1px rgba(232,237,255,.3);
-  margin-bottom:-.1em;padding:0 .15em .08em .05em;
+  /* ogonki liter maja przecinac linie — jak realny podpis zlozony na linii */
+  margin-bottom:-.22em;padding:0 .4em .02em;
 }
 .cert-signblock span{
   font-family:var(--display);font-weight:600;text-transform:uppercase;
   letter-spacing:.14em;font-size:clamp(6.5px,1.3cqw,10px);color:var(--k-cichy);
+  margin-top:.6em;
 }
 
 .cert-qr{
