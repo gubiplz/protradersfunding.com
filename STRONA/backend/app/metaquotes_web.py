@@ -126,8 +126,8 @@ def parse_account_state(text: str) -> AccountState:
 
     if "balance" not in values or "equity" not in values:
         raise WebReadError(
-            f"Terminal nie pokazał salda/equity — sesja mogła wygasnąć. "
-            f"Odczytano: {sorted(values)}"
+            f"The terminal did not show balance/equity — the session may have expired. "
+            f"Read: {sorted(values)}"
         )
 
     has_open = not any(marker.lower() in (text or "").lower() for marker in _NO_POSITIONS)
@@ -201,11 +201,11 @@ def parse_result(text: str) -> DemoCredentials:
 
     if not (login and password):
         raise WebProvisioningError(
-            "Panel wyniku bez loginu/hasła — MetaQuotes zmienił układ strony "
-            f"albo rejestracja się nie powiodła. Odczytano: {lines[:12]}"
+            "Result panel has no login/password — MetaQuotes changed the page layout "
+            f"or the registration failed. Read: {lines[:12]}"
         )
     if not re.fullmatch(r"\d{4,}", login):
-        raise WebProvisioningError(f"Login nie wygląda na numer konta MT5: {login!r}")
+        raise WebProvisioningError(f"The login does not look like an MT5 account number: {login!r}")
 
     return DemoCredentials(login=login, password=password, server=server, investor_password=investor)
 
@@ -265,7 +265,7 @@ class MetaQuotesWebOpener:
             from playwright.async_api import async_playwright
         except ImportError as e:  # pragma: no cover - zależność opcjonalna
             raise WebProvisioningError(
-                "Brak playwrighta. Zainstaluj: pip install playwright && playwright install chromium"
+                "Playwright is missing. Install it: pip install playwright && playwright install chromium"
             ) from e
 
         async with async_playwright() as pw:
@@ -327,8 +327,8 @@ class MetaQuotesWebOpener:
         got = await page.input_value("input[name=deposit]")
         if got.replace(" ", "") != deposit:
             raise WebProvisioningError(
-                f"Formularz nie przyjął depozytu {deposit} (pokazuje {got!r}) — "
-                f"konto miałoby zły kapitał startowy"
+                f"The form did not accept the deposit {deposit} (it shows {got!r}) — "
+                f"the account would start with the wrong capital"
             )
 
         await page.check("input[name=disclaimer]")
@@ -353,8 +353,8 @@ class MetaQuotesWebOpener:
                 return last
             await page.wait_for_timeout(1000)
         raise WebProvisioningError(
-            f"Brak potwierdzenia założenia konta w {self._timeout_ms/1000:.0f}s. "
-            f"Ostatni ekran: {last[:300]!r}"
+            f"No confirmation of account creation within {self._timeout_ms/1000:.0f}s. "
+            f"Last screen: {last[:300]!r}"
         )
 
     # ------------------------------------------------------- odczyt stanu --
@@ -368,7 +368,7 @@ class MetaQuotesWebOpener:
         try:
             from playwright.async_api import async_playwright
         except ImportError as e:  # pragma: no cover
-            raise WebReadError("Brak playwrighta — pip install playwright") from e
+            raise WebReadError("Playwright is missing — pip install playwright") from e
 
         async with async_playwright() as pw:
             if self._cdp_url:
@@ -395,8 +395,8 @@ class MetaQuotesWebOpener:
                         return parse_account_state(last)
                     await page.wait_for_timeout(1000)
                 raise WebReadError(
-                    f"Nie zalogowano się na konto {login} w {self._timeout_ms/1000:.0f}s "
-                    f"(hasło mogło zostać zmienione). Ekran: {last[:200]!r}"
+                    f"Could not sign in to account {login} within {self._timeout_ms/1000:.0f}s "
+                    f"(the password may have been changed). Screen: {last[:200]!r}"
                 )
             except Exception:
                 await self._dump(locals().get("page"))
@@ -444,7 +444,7 @@ class MetaQuotesWebOpener:
         try:
             from playwright.async_api import async_playwright
         except ImportError as e:  # pragma: no cover
-            raise WebReadError("Brak playwrighta — pip install playwright") from e
+            raise WebReadError("Playwright is missing — pip install playwright") from e
 
         closed = 0
         async with async_playwright() as pw:

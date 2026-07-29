@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
-{# Podgląd certyfikatu w sekcji #certs korzysta z tego samego arkusza co realny
-   dokument, żeby landing nie rozjechał się z nim przy kolejnej zmianie. #}
+{# The certificate preview in the #certs section uses the same stylesheet as
+   the real document, so the landing never drifts from it on the next change. #}
 {% block head_extra %}<link rel="stylesheet" href="/static/css/cert.css">{% endblock %}
 
 {% block content %}
@@ -267,7 +267,7 @@
     <div class="sec-head" data-rv>
       <span class="pill">Leaderboard</span>
       <h2>Top traders right now</h2>
-      <p>Live from the platform. Names are masked for privacy; profits include past payouts.</p>
+      <p>Live from the platform — funded accounts, current equity. Names are masked for privacy.</p>
     </div>
     <div class="board" data-rv>
       <table class="lb">
@@ -294,9 +294,9 @@
         <button class="btn" type="submit">Verify</button>
       </form>
     </div>
-    {# Podglad uzywa DOKLADNIE tych samych klas co prawdziwy certyfikat
-       (cert.css), zeby landing nie rozjechal sie z dokumentem przy kolejnej
-       zmianie wygladu. #}
+    {# The preview uses EXACTLY the same classes as the real certificate
+       (cert.css), so the landing never drifts from the document on the next
+       redesign. #}
     <div class="cert-card cert-demo" data-rv>
       <div class="cert-inner">
         <div class="cert-logo"><img src="/static/img/logo.png" alt=""><span>{{ site_name }}</span></div>
@@ -315,8 +315,8 @@
           <div><b>2-Step</b><span>Program</span></div>
         </div>
 
-        {# Bez akapitu opisowego — po lewej stoi już ten sam komunikat, a w węższej
-           kolumnie landingu treść nie mieściła się w kwadracie. #}
+        {# No descriptive paragraph — the same message already stands on the left,
+           and in the narrower landing column it did not fit the square. #}
         <div class="cert-foot">
           <div class="cert-signblock"></div>
           <div class="cert-qr">

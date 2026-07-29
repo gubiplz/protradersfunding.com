@@ -95,7 +95,7 @@ class DemoCredentials:
         server = body.get("serverName") or body.get("server_name") or body.get("server")
         if not (login and password and server):
             raise ProvisioningError(
-                f"Odpowiedź MetaApi bez kompletu poświadczeń: {sorted(body)}", body=body
+                f"MetaApi response is missing credentials: {sorted(body)}", body=body
             )
         return cls(
             login=str(login),
@@ -132,7 +132,7 @@ class MetaApiProvisioner:
         clock=time.monotonic,
     ) -> None:
         if not token:
-            raise ProvisioningError("Brak METAAPI_TOKEN — nie mogę założyć konta demo")
+            raise ProvisioningError("METAAPI_TOKEN is missing — cannot create a demo account")
         self._token = token
         self._base_url = base_url.rstrip("/")
         self._transport = transport or self._httpx_transport
@@ -217,8 +217,8 @@ class MetaApiProvisioner:
                 body=last_body,
             )
         raise ProvisioningError(
-            f"MetaApi {path} nieosiągalne po {self._max_attempts} próbach "
-            f"(ostatnio: {last_status} {_short(last_body)})",
+            f"MetaApi {path} unreachable after {self._max_attempts} attempts "
+            f"(last: {last_status} {_short(last_body)})",
             status=last_status,
             body=last_body,
         )
@@ -229,7 +229,7 @@ class MetaApiProvisioner:
     ) -> DemoCredentials:
         """Krok 1: broker zakłada prawdziwe konto demo MT5."""
         if not profile_id:
-            raise ProvisioningError("Brak METAAPI_PROVISIONING_PROFILE_ID")
+            raise ProvisioningError("METAAPI_PROVISIONING_PROFILE_ID is missing")
         body = await self._post(
             f"/users/current/provisioning-profiles/{profile_id}/mt5-demo-accounts",
             spec.to_body(),
@@ -267,7 +267,7 @@ class MetaApiProvisioner:
         account_id = resp.get("id") or resp.get("_id") or resp.get("accountId")
         if not account_id:
             raise ProvisioningError(
-                f"MetaApi nie zwrócił id konta: {sorted(resp)}", body=resp
+                f"MetaApi did not return an account id: {sorted(resp)}", body=resp
             )
         return str(account_id)
 

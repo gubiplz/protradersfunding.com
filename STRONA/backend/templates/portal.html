@@ -80,7 +80,6 @@
       </button>
       <div><h1 id="pg-title">Challenges</h1><div class="crumb" id="pg-crumb"></div></div>
       <div class="top-right">
-        <span class="kyc-chip" id="kyc-chip"><span class="dot"></span><span id="kyc-txt">KYC</span></span>
         <button class="btn-p sm" onclick="go('store')">+ New challenge</button>
       </div>
     </div>
@@ -95,8 +94,8 @@ const $=id=>document.getElementById(id);
 const fmt=n=>(n??0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmt0=n=>(n??0).toLocaleString('en-US',{maximumFractionDigits:0});
 const dstr=iso=>new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
-// Sama data — historia transakcji nie podaje godziny. `YYYY-MM-DD` czytamy jako
-// UTC, zeby strefa przegladarki nie przesunela dnia o jeden wstecz.
+// Date only — trade history has no time component. `YYYY-MM-DD` is read as
+// UTC so the browser timezone does not shift the day back by one.
 const dday=d=>new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'});
 let TOKEN=localStorage.getItem('pf_token'), ME=null, AUTHMODE='login', chart=null;
 const H=()=>TOKEN?{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'}:{'Content-Type':'application/json'};
@@ -149,7 +148,7 @@ const NAV=[
 $('side-nav').innerHTML=NAV.map(n=>
   `<button class="sb-link" data-v="${n.v}" onclick="go('${n.v}')" title="${n.label}">${ICO[n.ico]}<span class="sb-txt">${n.label}</span></button>`).join('');
 
-/* ---------- toasty ---------- */
+/* ---------- toasts ---------- */
 function toast(msg,kind='ok',ms=6000){
   const t=document.createElement('div');
   t.className='toast '+kind; t.textContent=msg;
@@ -174,21 +173,21 @@ async function doAuth(){
     if(AUTHMODE==='signup'){body.full_name=$('a-name').value;body.referral=$('a-ref').value||null;res=await api('/api/auth/signup',{method:'POST',body:JSON.stringify(body)});}
     else res=await api('/api/auth/login',{method:'POST',body:JSON.stringify(body)});
     TOKEN=res.token;localStorage.setItem('pf_token',TOKEN);
-    // Logowanie jest JEDNO — panel admina odsyla tutaj z ?next=/admin i po
-    // udanym logowaniu wracamy dokladnie tam, zamiast gubic uzytkownika w portalu.
-    const dokad=new URLSearchParams(location.search).get('next');
-    if(dokad && dokad.startsWith('/') && !dokad.startsWith('//')){location.href=dokad;return}
+    // There is ONE login — the admin panel redirects here with ?next=/admin and
+    // after signing in we go exactly back there instead of losing the user here.
+    const nextUrl=new URLSearchParams(location.search).get('next');
+    if(nextUrl && nextUrl.startsWith('/') && !nextUrl.startsWith('//')){location.href=nextUrl;return}
     await boot();
   }catch(e){toast('Error: '+e.message,'err')}
 }
 function logout(){
-  // Ciasteczko sesji trzyma serwer (bramkuje strone /admin), wiec samo
-  // wyczyszczenie localStorage by nie wystarczylo.
+  // The session cookie is held by the server (it gates /admin), so clearing
+  // localStorage alone would not be enough.
   fetch('/api/auth/logout',{method:'POST'}).finally(()=>{
     TOKEN=null;localStorage.removeItem('pf_token');location.reload()});
 }
 
-/* ---------- powrot z platnosci ---------- */
+/* ---------- return from payment ---------- */
 async function handlePaymentReturn(){
   const q=new URLSearchParams(location.search);
   if(q.get('paid')){toast('✅ Payment received. Your MT5 account is being created — credentials will appear under Challenges and in your inbox.','ok',9000);go('accounts');return true}
@@ -202,7 +201,7 @@ async function handlePaymentReturn(){
   return false;
 }
 
-/* ---------- boot / nawigacja ---------- */
+/* ---------- boot / navigation ---------- */
 async function boot(){
   if(!TOKEN){$('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('login');return}
   try{ME=await api('/api/auth/me')}catch(e){logout();return}
@@ -211,9 +210,6 @@ async function boot(){
   $('ava').textContent=nm[0].toUpperCase();
   $('who-name').textContent=ME.full_name||'Trader';
   $('who-mail').textContent=ME.email;
-  const ok=ME.kyc_status==='approved';
-  $('kyc-chip').className='kyc-chip '+(ok?'ok':'warn');
-  $('kyc-txt').textContent=ok?'KYC verified':'KYC: '+ME.kyc_status;
   $('admin-link').style.display=ME.is_admin?'':'none';
   if(localStorage.getItem('pf_side_collapsed')==='1')$('side').classList.add('collapsed');
   if(await handlePaymentReturn())return;
@@ -250,7 +246,7 @@ function toggleCollapse(){
   localStorage.setItem('pf_side_collapsed',c?'1':'0');
 }
 
-/* Deep-link z cennika: /portal?buy=2step-100k -> od razu modal zakupu. */
+/* Deep link from pricing: /portal?buy=2step-100k -> straight to the purchase modal. */
 function highlightPlanFromUrl(){
   const key=new URLSearchParams(location.search).get('buy');
   if(!key)return;
@@ -261,7 +257,7 @@ function highlightPlanFromUrl(){
   openBuy(key);
 }
 
-/* ============================ WIDOKI ============================ */
+/* ============================ VIEWS ============================ */
 const VIEWS={
  async accounts(){
   const accs=await api('/api/me/accounts');
@@ -352,7 +348,7 @@ const VIEWS={
  async board(){
   const b=await api('/api/leaderboard');
   if(!b.length){$('view').innerHTML='<div class="empty"><h3>No ranked accounts yet</h3><p>The leaderboard fills up as traders make progress.</p></div>';return}
-  const totalProfit=b.reduce((s,r)=>s+r.profit_pct*r.account_size/100,0);
+  const totalEquity=b.reduce((s,r)=>s+(r.equity||0),0);
   const best=b[0];
   const medal=['gold','silver','bronze'];
   const podium=b.slice(0,3).map((r,i)=>`
@@ -362,7 +358,7 @@ const VIEWS={
       <div class="pod-name">${esc(r.trader)}${r.country?` <span class="muted" style="font-size:11px">· ${esc(r.country)}</span>`:''}</div>
       <div style="margin:6px 0 2px"><span class="status ${r.status==='funded'?'funded':'active'}"><span class="dot"></span>${r.status==='funded'?'Funded':'Evaluation'}</span></div>
       <div class="pod-ret">${r.profit_pct>=0?'+':''}${r.profit_pct.toFixed(2)}%</div>
-      <div class="pod-usd">$${fmt(r.profit_pct*r.account_size/100)} simulated profit</div>
+      <div class="pod-usd">$${fmt(r.equity||0)} current equity</div>
       <div class="pod-mini">
         <div><div class="l">Account</div><div class="v">$${fmt0(r.account_size)}</div></div>
         <div><div class="l">Stage</div><div class="v">${r.status==='funded'?'Funded':'Eval'}</div></div>
@@ -373,7 +369,7 @@ const VIEWS={
       <div class="stat-tile"><div class="tile-ic blue">${ICO.layers}</div>
         <div><div class="lbl">Traders ranked</div><div class="val">${b.length}</div></div></div>
       <div class="stat-tile"><div class="tile-ic green">${ICO.trend}</div>
-        <div><div class="lbl">Simulated profit</div><div class="val ${totalProfit>=0?'up':'down'}">$${fmt0(totalProfit)}</div></div></div>
+        <div><div class="lbl">Funded equity</div><div class="val up">$${fmt0(totalEquity)}</div></div></div>
       <div class="stat-tile"><div class="tile-ic purple">${ICO.trophy}</div>
         <div><div class="lbl">Best return</div><div class="val up">+${best.profit_pct.toFixed(2)}%</div></div></div>
       <div class="stat-tile"><div class="tile-ic orange">${ICO.cal}</div>
@@ -389,7 +385,7 @@ const VIEWS={
         <td><span class="status ${r.status==='funded'?'funded':'active'}"><span class="dot"></span>${r.status==='funded'?'Funded':'Evaluation'}</span></td>
         <td class="num ${r.profit_pct>=0?'up':'down'}" style="text-align:right">${r.profit_pct>=0?'+':''}${r.profit_pct.toFixed(2)}%</td></tr>`).join('')+`
       </tbody></table></div>`:''}
-    <p class="muted" style="font-size:11.5px;margin-top:12px">Real accounts, live data. Names are masked for privacy; profits include past payouts.</p>`;
+    <p class="muted" style="font-size:11.5px;margin-top:12px">Funded accounts only, ranked by current equity. Names are masked for privacy.</p>`;
  },
 
  async achievements(){
@@ -482,11 +478,11 @@ const VIEWS={
   const bestD=days.reduce((m,d)=>d.pnl>(m?.pnl??-1e18)?d:m,null);
   const worstD=days.reduce((m,d)=>d.pnl<(m?.pnl??1e18)?d:m,null);
   const green=days.filter(d=>d.pnl>0).length;
-  // Statystyki liczymy z samych TRANSAKCJI — wyplata to ruch kasowy, nie trade.
+  // Stats come from TRADES only — a payout is a cash movement, not a trade.
   const trades=(act.ledger||[]).filter(r=>r.kind==='trade');
   const wins=trades.filter(t=>t.pnl>0).length;
   const winRate=trades.length?wins/trades.length*100:null;
-  // rozbicie na instrumenty — tylko gdy konto ma zapisane transakcje
+  // per-instrument breakdown — only when the account has recorded trades
   const bySym={};
   trades.forEach(t=>{const s=bySym[t.symbol]||(bySym[t.symbol]={pnl:0,n:0,w:0});
     s.pnl+=t.pnl;s.n++;if(t.pnl>0)s.w++});
@@ -536,11 +532,11 @@ const VIEWS={
 
  async certificates(){
   const d=await api('/api/me/certificates');
-  const puste=!d.accounts.length&&!d.payouts.length;
-  if(puste){$('view').innerHTML='<div class="empty"><h3>No certificates yet</h3>'
+  const noCerts=!d.accounts.length&&!d.payouts.length;
+  if(noCerts){$('view').innerHTML='<div class="empty"><h3>No certificates yet</h3>'
     +'<p>Pass an evaluation stage or receive a payout and the document appears here.</p></div>';return}
 
-  const pozycja=(accId,it)=>{
+  const certRow=(accId,it)=>{
     if(it.url) return `<div class="cert-row done">
       <div><b>${esc(it.label)}</b><span>Issued · verifiable by its ID</span></div>
       <div class="acts">
@@ -563,7 +559,7 @@ const VIEWS={
         <span class="kyc-chip">${esc(a.product)} · $${fmt0(a.size)}</span>
         <span class="status ${esc(a.status)}"><span class="dot"></span>${a.status==='active'?'evaluation':esc(a.status)}</span>
       </div>
-      <div class="cert-list">${a.items.map(it=>pozycja(a.account_id,it)).join('')}</div>
+      <div class="cert-list">${a.items.map(it=>certRow(a.account_id,it)).join('')}</div>
     </div>`).join('')}
 
     <div class="sec-card">
@@ -640,13 +636,15 @@ const VIEWS={
     </div>
     ${funded.length?`<div class="panel" style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <span class="muted" style="font-size:13px;margin-right:6px">Request a payout:</span>
-      ${funded.map(a=>`<button class="btn-o sm" onclick="reqPayout(${a.id},true)">${esc(a.login)} · +$${fmt(Math.max(0,a.balance-a.initial_balance))}</button>`).join('')}
+      ${funded.map(a=>{const av=Math.max(0,(a.balance-a.initial_balance)*(a.profit_split_pct||80)/100);
+        return `<button class="btn-o sm" onclick="openPayoutModal(${a.id},${av.toFixed(2)})">${esc(a.login)} · $${fmt(av)} available</button>`}).join('')}
     </div>`:''}
     ${data.requests.length?`<div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>Date</th><th>Account</th><th>Profit</th><th>Your share</th><th>Status</th></tr></thead>
+      <thead><tr><th>Date</th><th>Account</th><th>Profit</th><th>Requested</th><th>Method</th><th>Status</th></tr></thead>
       <tbody>`+data.requests.map(r=>`<tr>
         <td class="muted">${dstr(r.ts)}</td><td class="num">${esc(r.account)}</td>
         <td class="num">$${fmt(r.profit_amount)}</td><td class="num">$${fmt(r.trader_share)}</td>
+        <td class="muted">${esc(payoutMethodLabel(r.method))}</td>
         <td><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending':'failed'}"><span class="dot"></span>${esc(r.status)}</span></td></tr>`).join('')+`
       </tbody></table></div>`
       :`<div class="empty"><h3>No payout requests yet</h3><p>Pass a challenge, get funded and request your first performance reward. Your challenge fee comes back with it.</p></div>`}
@@ -831,7 +829,7 @@ const VIEWS={
  },
 };
 
-/* ---------- akcje widokow ---------- */
+/* ---------- view actions ---------- */
 function goAffiliate(){go('rewards')}
 
 function openJournalModal(){
@@ -906,41 +904,41 @@ async function deleteAccount(){
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
-/* Zdjecie z telefonu ma 3-5 MB, a hosting bezserwerowy tnie CALE cialo requestu
-   powyzej ~4,5 MB — trzy dokumenty naraz konczyly sie bledem 413, zanim backend
-   w ogole je zobaczyl. Skalujemy wiec obrazy w przegladarce: dluzszy bok do
-   1600 px wystarczy, zeby odczytac dokument, a plik schodzi do ~200-400 KB.
-   PDF-a nie da sie tak przerobic — leci jak jest, tylko sprawdzamy rozmiar. */
-const MAX_BOK=1600, MAX_BAJTOW=4*1024*1024;
-function zmniejszObraz(plik){
-  return new Promise((ok,zle)=>{
-    if(!plik.type.startsWith('image/'))return ok(plik);
-    const url=URL.createObjectURL(plik), img=new Image();
+/* A phone photo is 3-5 MB, and serverless hosting cuts the WHOLE request body
+   above ~4.5 MB — three documents at once ended in a 413 before the backend
+   ever saw them. So images are scaled in the browser: the longer side down to
+   1600 px is enough to read a document, and the file drops to ~200-400 KB.
+   A PDF cannot be reprocessed like that — it goes as-is, only size-checked. */
+const MAX_SIDE=1600, MAX_BYTES=4*1024*1024;
+function shrinkImage(fileObj){
+  return new Promise((ok,rej)=>{
+    if(!fileObj.type.startsWith('image/'))return ok(fileObj);
+    const url=URL.createObjectURL(fileObj), img=new Image();
     img.onload=()=>{
       URL.revokeObjectURL(url);
-      const skala=Math.min(1,MAX_BOK/Math.max(img.width,img.height));
-      if(skala===1&&plik.size<=800*1024)return ok(plik);
+      const imgScale=Math.min(1,MAX_SIDE/Math.max(img.width,img.height));
+      if(imgScale===1&&fileObj.size<=800*1024)return ok(fileObj);
       const c=document.createElement('canvas');
-      c.width=Math.round(img.width*skala); c.height=Math.round(img.height*skala);
+      c.width=Math.round(img.width*imgScale); c.height=Math.round(img.height*imgScale);
       c.getContext('2d').drawImage(img,0,0,c.width,c.height);
       c.toBlob(b=>{
-        if(!b)return ok(plik);
-        const nazwa=plik.name.replace(/\.[^.]+$/,'')+'.jpg';
-        ok(new File([b],nazwa,{type:'image/jpeg'}));
+        if(!b)return ok(fileObj);
+        const jpgName=fileObj.name.replace(/\.[^.]+$/,'')+'.jpg';
+        ok(new File([b],jpgName,{type:'image/jpeg'}));
       },'image/jpeg',0.82);
     };
-    img.onerror=()=>{URL.revokeObjectURL(url);ok(plik)};
+    img.onerror=()=>{URL.revokeObjectURL(url);ok(fileObj)};
     img.src=url;
   });
 }
-async function wyslijDokument(pole,plik){
-  const fd=new FormData(); fd.append(pole,plik);
+async function uploadDocument(fieldName,fileObj){
+  const fd=new FormData(); fd.append(fieldName,fileObj);
   const r=await fetch('/api/me/kyc/docs',{method:'POST',
     headers:{'Authorization':'Bearer '+TOKEN},body:fd});
   if(!r.ok){
-    // 413 ucina serwer/hosting, wiec cialo bywa puste — wtedy tlumaczymy sami.
-    const detal=(await r.json().catch(()=>({}))).detail;
-    throw new Error(detal||(r.status===413
+    // a 413 is cut by the server/hosting, so the body may be empty — explain it ourselves.
+    const errDetail=(await r.json().catch(()=>({}))).detail;
+    throw new Error(errDetail||(r.status===413
       ? 'File too large for upload. Please use a smaller photo or a PDF under 4 MB.'
       : r.status));
   }
@@ -957,14 +955,14 @@ async function submitKyc(){
     await api('/api/me/kyc',{method:'POST',body:JSON.stringify({
       full_name:name,country,dob:$('k-dob').value||null,address:$('k-address').value||null,
       id_type:$('k-idtype').value,id_number:$('k-idnum').value||null})});
-    // Osobny request na dokument — nawet duze PDF-y nie sumuja sie wtedy do limitu.
-    for(const [pole,plik] of [['id_front',front],['id_back',back],['residence',res]]){
-      if(!plik)continue;
-      const gotowy=await zmniejszObraz(plik);
-      if(gotowy.size>MAX_BAJTOW){
-        throw new Error(`${plik.name} is ${(gotowy.size/1024/1024).toFixed(1)} MB — the limit is 4 MB. Please use a smaller file.`);
+    // One request per document — even large PDFs never add up to the limit then.
+    for(const [fieldName,fileObj] of [['id_front',front],['id_back',back],['residence',res]]){
+      if(!fileObj)continue;
+      const prepared=await shrinkImage(fileObj);
+      if(prepared.size>MAX_BYTES){
+        throw new Error(`${fileObj.name} is ${(prepared.size/1024/1024).toFixed(1)} MB — the limit is 4 MB. Please use a smaller file.`);
       }
-      await wyslijDokument(pole,gotowy);
+      await uploadDocument(fieldName,prepared);
     }
     ME=await api('/api/auth/me');boot();
     toast('KYC submitted — documents are under review.','ok');go('kyc');
@@ -972,30 +970,30 @@ async function submitKyc(){
   finally{if(btn){btn.disabled=false;btn.textContent='Submit KYC'}}
 }
 
-/* ---------- faktura ---------- */
-/* Kwota zamowienia na liscie i fakturze.
-   Granty maja w bazie 0 USD, ale faktura z zerem wyglada jak darmowy produkt —
-   wiec spadamy na cene z CENNIKA. Gdy przy grancie wskazano oplacony tier
-   (BOGO), `amount_usd` juz go trzyma i to on wygrywa. */
+/* ---------- invoice ---------- */
+/* Order amount on the list and the invoice.
+   Grants store 0 USD in the database, but an invoice with a zero looks like a
+   free product — so we fall back to the CATALOG price. When a paid tier was
+   set on the grant (BOGO), `amount_usd` already holds it and it wins. */
 function orderAmount(o){return o.amount_usd>0?o.amount_usd:(o.list_price||0)}
 
-/* Pozycje faktury. Przy BOGO na fakturze stoi tier, za ktory klient FAKTYCZNIE
-   zaplacil, plus wiersz opisujacy podbicie. */
+/* Invoice line items. With BOGO the invoice shows the tier the client
+   ACTUALLY paid for, plus a line describing the upgrade. */
 function invRows(o){
-  const kwota=v=>`<td style="text-align:right;font-family:var(--mono)">${v}</td>`;
+  const amountCell=v=>`<td style="text-align:right;font-family:var(--mono)">${v}</td>`;
   const bogo=o.bogo_paid_label&&o.bogo_paid_size&&o.account_size&&o.bogo_paid_size<o.account_size;
   if(bogo){
     const k=v=>v>=1000?'$'+Math.round(v/1000)+'K':'$'+fmt0(v);
     return `<tr>
         <td>Evaluation program access — ${esc(o.bogo_paid_label)}</td>
-        ${kwota('$'+fmt(o.bogo_paid_price))}</tr>
+        ${amountCell('$'+fmt(o.bogo_paid_price))}</tr>
       <tr><td style="color:#64748b">BOGO promotion — ${k(o.bogo_paid_size)} + ${k(o.bogo_paid_size)} free
         = <b style="color:#0f172a">$${fmt0(o.account_size)}</b> allocation</td>
-        ${kwota('included')}</tr>`;
+        ${amountCell('included')}</tr>`;
   }
   return `<tr>
     <td>Evaluation program access — ${esc(o.product_label||o.product_key)}${o.coupon?` (${esc(o.coupon)})`:''}</td>
-    ${kwota('$'+fmt(orderAmount(o)))}</tr>`;
+    ${amountCell('$'+fmt(orderAmount(o)))}</tr>`;
 }
 
 function openInvoice(orderId){
@@ -1027,7 +1025,7 @@ function openInvoice(orderId){
   document.body.appendChild(box);
 }
 
-/* ---------- poswiadczenia (kompakt) ---------- */
+/* ---------- credentials (compact) ---------- */
 function credsBlock(a, compact){
   if(!a) return '';
   if(a.status==='provisioning' || !a.platform_password){
@@ -1058,7 +1056,7 @@ function copyVal(btn, val){
   });
 }
 
-/* ---------- modal zakupu ---------- */
+/* ---------- purchase modal ---------- */
 let PRODUCTS=[];
 
 function openBuy(key){
@@ -1115,7 +1113,7 @@ async function buy(key){
   try{
     const res=await api('/api/checkout',{method:'POST',
       body:JSON.stringify({product_key:key,coupon,first_name:first,last_name:last,phone})});
-    if(res.checkout_url && !res.mock){window.location=res.checkout_url;return;}  // realny Stripe
+    if(res.checkout_url && !res.mock){window.location=res.checkout_url;return;}  // real Stripe
     let prov=res;
     if(res.mock){prov=await api(`/api/checkout/${res.order_id}/mock-complete`,{method:'POST'});}
     ME=await api('/api/auth/me');
@@ -1132,7 +1130,7 @@ async function buy(key){
   }
 }
 
-/* ---------- DETAL KONTA ---------- */
+/* ---------- ACCOUNT DETAIL ---------- */
 const COUNTRIES='Afghanistan|Albania|Algeria|Andorra|Angola|Antigua and Barbuda|Argentina|Armenia|Australia|Austria|Azerbaijan|Bahamas|Bahrain|Bangladesh|Barbados|Belarus|Belgium|Belize|Benin|Bhutan|Bolivia|Bosnia and Herzegovina|Botswana|Brazil|Brunei|Bulgaria|Burkina Faso|Burundi|Cambodia|Cameroon|Canada|Cape Verde|Central African Republic|Chad|Chile|China|Colombia|Comoros|Congo|Costa Rica|Croatia|Cuba|Cyprus|Czechia|Denmark|Djibouti|Dominica|Dominican Republic|Ecuador|Egypt|El Salvador|Equatorial Guinea|Eritrea|Estonia|Eswatini|Ethiopia|Fiji|Finland|France|Gabon|Gambia|Georgia|Germany|Ghana|Greece|Grenada|Guatemala|Guinea|Guinea-Bissau|Guyana|Haiti|Honduras|Hong Kong|Hungary|Iceland|India|Indonesia|Iran|Iraq|Ireland|Israel|Italy|Ivory Coast|Jamaica|Japan|Jordan|Kazakhstan|Kenya|Kiribati|Kosovo|Kuwait|Kyrgyzstan|Laos|Latvia|Lebanon|Lesotho|Liberia|Libya|Liechtenstein|Lithuania|Luxembourg|Macau|Madagascar|Malawi|Malaysia|Maldives|Mali|Malta|Marshall Islands|Mauritania|Mauritius|Mexico|Micronesia|Moldova|Monaco|Mongolia|Montenegro|Morocco|Mozambique|Myanmar|Namibia|Nauru|Nepal|Netherlands|New Zealand|Nicaragua|Niger|Nigeria|North Korea|North Macedonia|Norway|Oman|Pakistan|Palau|Palestine|Panama|Papua New Guinea|Paraguay|Peru|Philippines|Poland|Portugal|Qatar|Romania|Russia|Rwanda|Saint Kitts and Nevis|Saint Lucia|Saint Vincent and the Grenadines|Samoa|San Marino|Sao Tome and Principe|Saudi Arabia|Senegal|Serbia|Seychelles|Sierra Leone|Singapore|Slovakia|Slovenia|Solomon Islands|Somalia|South Africa|South Korea|South Sudan|Spain|Sri Lanka|Sudan|Suriname|Sweden|Switzerland|Syria|Taiwan|Tajikistan|Tanzania|Thailand|Timor-Leste|Togo|Tonga|Trinidad and Tobago|Tunisia|Turkey|Turkmenistan|Tuvalu|Uganda|Ukraine|United Arab Emirates|United Kingdom|United States|Uruguay|Uzbekistan|Vanuatu|Vatican City|Venezuela|Vietnam|Yemen|Zambia|Zimbabwe'.split('|');
 const PHASE_LABEL={eval_1:'Phase 1',eval_2:'Phase 2',funded:'Funded'};
 
@@ -1296,10 +1294,10 @@ function calRender(){
       <span><i style="background:var(--line2)"></i> No Trading</span>
     </div>`;
 }
-/* Konto przyznane opisujemy jako promocje BOGO. Zdanie o oplaconym tierze
-   pada TYLKO wtedy, gdy naprawde znamy ten tier — inaczej byloby zmyslone. */
+/* A granted account is described as the BOGO promotion. The sentence about
+   the paid tier appears ONLY when we truly know it — anything else is made up. */
 function tier(v){return v>=1000?'$'+Math.round(v/1000)+'K':'$'+fmt0(v)}
-/* Znak PRZED dolarem: „-$8.44", nie „$-8.44". */
+/* Sign BEFORE the dollar: "-$8.44", not "$-8.44". */
 function money(v){return (v<0?'-$':'+$')+fmt(Math.abs(v))}
 function bogoText(a){
   if(a.bogo_paid_size&&a.bogo_paid_size<a.initial_balance)
@@ -1310,10 +1308,10 @@ function bogoText(a){
     Same rules and the same profit split as a purchased account.`;
 }
 
-/* Ksiega konta: transakcje ORAZ wyplaty, w kolejnosci od najnowszej.
-   Saldo przychodzi z serwera (ze snapshotu z chwili zdarzenia). NIE liczyc go
-   wstecz od biezacego salda: wyplata i awans fazy resetuja saldo konta, wiec
-   cala historia przesuwala sie o wyplacona kwote. */
+/* Account ledger: trades AND payouts, newest first.
+   The balance comes from the server (a snapshot taken at the event). Do NOT
+   recompute it backwards from the current balance: a payout or a stage
+   promotion resets the balance, shifting the whole history by that amount. */
 function txTable(a,act){
   const rows=act.ledger||[];
   if(!rows.length)
@@ -1350,9 +1348,9 @@ async function issuePayoutCert(id){
     toast('Certificate ready.','ok'); window.open(r.url,'_blank'); go('certificates');
   }catch(e){toast('Error: '+e.message,'err')}
 }
-/* Poswiadczenia MT5 startuja UKRYTE i odslania sie je osobno dla kazdego konta.
-   Haslo do MT5 daje pelna kontrole nad rachunkiem — nie ma powodu, zeby wisialo
-   na ekranie przy samym wejsciu w liste zamowien. */
+/* MT5 credentials start HIDDEN and are revealed per account.
+   The MT5 password gives full control over the account — no reason for it to
+   sit on screen the moment the orders list opens. */
 function toggleOrderCreds(id){
   const row=$('crow-'+id), btn=$('cbtn-'+id);
   if(!row||!btn)return;
@@ -1374,14 +1372,62 @@ function prog(label,pct,danger,suffix){const p=Math.min(100,Math.max(0,pct||0));
   return `<div><div class="prog-top"><span>${label}</span><b>${suffix}</b></div>
    <div class="prog-bar"><i class="${cls}" style="width:${p}%"></i></div></div>`;}
 async function makePayoutCert(id){
-  // Starsze wyplaty powstaly przed certyfikatami — token dorabiamy na zadanie.
+  // Older payouts predate certificates — the token is minted on demand.
   try{const r=await api(`/api/me/payouts/${id}/certificate`,{method:'POST'});
     window.open(r.url,'_blank'); go('payouts');
   }catch(e){toast('Error: '+e.message,'err')}
 }
-async function reqPayout(id,stay){try{const r=await api(`/api/accounts/${id}/payout-request`,{method:'POST',body:JSON.stringify({method:'bank'})});
-  toast(`✅ Request submitted: payout $${fmt(r.trader_share)} (profit $${fmt(r.profit_amount)}). Awaiting review.`,'ok',8000);
-  stay?go('payouts'):openAcc(id);}catch(e){toast('Error: '+e.message,'err')}}
+/* Payout request: kwota + metoda + dane wymagane przez tę metodę.
+   Serwer waliduje to samo jeszcze raz — modal tylko oszczędza rundę błędów. */
+function payoutMethodLabel(m){return m==='usdt'?'USDT (crypto)':m==='wise'?'Wise':'Bank transfer'}
+function openPayoutModal(id,avail){
+  const w=document.createElement('div'); w.id='po-modal'; w.className='modal-wrap';
+  w.onclick=e=>{if(e.target===w)w.remove()};
+  w.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>Request a payout</h3></div>
+    <p class="muted" style="font-size:12.5px;margin:2px 0 12px">Available on this account: <b>$${fmt(avail)}</b> — your split of current profit. You can request part of it.</p>
+    <label class="muted" style="font-size:12px">Amount (USD)</label>
+    <input id="po-amount" class="inp" type="number" min="1" max="${avail}" step="0.01" value="${avail}" style="margin-bottom:10px">
+    <label class="muted" style="font-size:12px">Payout method</label>
+    <select id="po-method" class="inp" onchange="poFields()" style="margin-bottom:10px">
+      <option value="usdt">USDT — crypto</option>
+      <option value="bank">Bank transfer</option>
+      <option value="wise">Wise</option>
+    </select>
+    <div id="po-fields"></div>
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <button class="btn-p" onclick="submitPayout(${id})" id="po-send">Submit request</button>
+      <button class="btn-o" onclick="$('po-modal').remove()">Cancel</button>
+    </div></div>`;
+  document.body.appendChild(w); poFields();
+}
+function poFields(){
+  const m=$('po-method').value, F=$('po-fields'), L=t=>`<label class="muted" style="font-size:12px">${t}</label>`;
+  if(m==='usdt')F.innerHTML=L('Network')+`<select id="po-network" class="inp" style="margin-bottom:10px">
+      <option value="TRC20">TRC-20 (Tron) — lowest fees</option>
+      <option value="BEP20">BEP-20 (BNB Smart Chain)</option>
+      <option value="POLYGON">Polygon</option></select>`
+    +L('USDT wallet address')+`<input id="po-address" class="inp" placeholder="T… / 0x…" autocomplete="off">`;
+  else if(m==='bank')F.innerHTML=L('Account holder')+`<input id="po-holder" class="inp" placeholder="Full name" style="margin-bottom:10px">`
+    +L('IBAN / account number')+`<input id="po-iban" class="inp" style="margin-bottom:10px">`
+    +L('SWIFT / BIC')+`<input id="po-swift" class="inp" style="margin-bottom:10px">`
+    +L('Bank name (optional)')+`<input id="po-bank" class="inp">`;
+  else F.innerHTML=L('Wise account email')+`<input id="po-email" class="inp" type="email" placeholder="you@example.com">`;
+}
+async function submitPayout(id){
+  const m=$('po-method').value, amount=parseFloat($('po-amount').value||'0');
+  const details=m==='usdt'?{network:$('po-network').value,address:$('po-address').value.trim()}
+    :m==='bank'?{holder:$('po-holder').value.trim(),iban:$('po-iban').value.trim(),
+                 swift:$('po-swift').value.trim(),bank_name:$('po-bank').value.trim()}
+    :{email:$('po-email').value.trim()};
+  const btn=$('po-send'); btn.disabled=true;
+  try{const r=await api(`/api/accounts/${id}/payout-request`,{method:'POST',
+      body:JSON.stringify({method:m,amount,details})});
+    $('po-modal').remove();
+    toast(`✅ Request submitted: $${fmt(r.trader_share)} via ${payoutMethodLabel(m)}. Awaiting review.`,'ok',8000);
+    go('payouts');
+  }catch(e){btn.disabled=false;toast('Error: '+e.message,'err')}
+}
 
 boot();
 </script>

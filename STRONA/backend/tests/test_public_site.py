@@ -94,19 +94,20 @@ def test_leaderboard_maskuje_nazwiska():
     assert any(row["trader"] == "Ranking M." for row in r.json())
 
 
-def test_leaderboard_liczy_profit_narastajaco_po_wyplacie():
+def test_leaderboard_liczy_z_biezacego_equity_bez_doliczania_wyplat():
     tid, _ = _trader("payout-rank@test.pl", "Wyplacony Zysk")
-    # po zatwierdzonej wypłacie balance wraca do initial — bez sumowania Payout
-    # trader pokazywałby 0%.
+    # Ranking pokazuje STAN kont funded (bieżące equity/balance) — wypłacone
+    # zyski NIE są doliczane, po wypłacie trader świadomie spada w rankingu.
     aid = _konto(tid, "Wyplacony Zysk", "770002", status="funded", phase="funded",
-                 balance=10_000, initial=10_000)
+                 balance=10_400, initial=10_000)
     s = SessionLocal()
     s.add(Payout(account_id=aid, profit_amount=800.0, trader_share=640.0, paid=True))
     s.commit(); s.close()
     with TestClient(app) as c:
         r = c.get("/api/leaderboard")
     row = next(row for row in r.json() if row["trader"] == "Wyplacony Z.")
-    assert row["profit_pct"] == 8.0
+    assert row["profit_pct"] == 4.0, "wypłacony zysk nie może wracać do rankingu"
+    assert row["equity"] == 10_400.0
 
 
 def test_leaderboard_pokazuje_tylko_konta_funded():

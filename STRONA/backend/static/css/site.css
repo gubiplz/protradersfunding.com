@@ -1,5 +1,5 @@
 /* ============================================================
-   Pro Traders Funding — public site design system (LIGHT, wzorzec OneTraders)
+   Pro Traders Funding — public site design system (LIGHT, OneTraders-style)
    Space Grotesk (display) / Inter (body) / JetBrains Mono (numbers)
    ============================================================ */
 
@@ -91,7 +91,7 @@ h1,h2,h3,.display{font-family:var(--display);letter-spacing:-.02em}
 .hero-note span{display:flex;align-items:center;gap:7px}
 .hero-note svg{color:var(--green2)}
 
-/* hero: konfigurator challenge'u (realne plany, licznik kwot) */
+/* hero: challenge configurator (real plans, amount counter) */
 .cfg{background:#fff;border:1px solid var(--line);border-radius:20px;padding:24px;
   box-shadow:var(--shadow-lg);display:flex;flex-direction:column;gap:16px}
 .cfg-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
@@ -124,7 +124,7 @@ h1,h2,h3,.display{font-family:var(--display);letter-spacing:-.02em}
 .cfg-hl-sub{font-size:12px;color:var(--muted)}
 .cfg-fine{font-size:10.5px;color:var(--dim);text-align:center}
 
-/* dashboard mockup — jasna karta produktu */
+/* dashboard mockup — light product card */
 .mock{position:relative;background:#fff;border:1px solid var(--line);
   border-radius:20px;padding:18px;box-shadow:var(--shadow-lg)}
 .mock-head{display:flex;align-items:center;gap:8px;margin-bottom:14px}
@@ -269,10 +269,10 @@ table.lb .up{color:var(--green)} table.lb .down{color:var(--red)}
 
 /* certificate */
 .cert-wrap{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:center}
-/* Podglad certyfikatu na landingu uzywa juz klas z cert.css (ten sam dokument
-   co realny), wiec stare reguly .cert/.cert-brand/.cert-sub/.cert-name/.cert-meta
-   /.cert-id zostaly USUNIETE. Kilka z nich kolidowalo nazwami z cert.css i
-   przemalowywalo dokument — nie przywracac. */
+/* The landing certificate preview now uses classes from cert.css (the same
+   document as the real one), so the old .cert/.cert-brand/.cert-sub/.cert-name
+   /.cert-meta/.cert-id rules were REMOVED. Several collided by name with
+   cert.css and repainted the document — do not bring them back. */
 .verify-box{display:flex;gap:10px;margin-top:20px}
 .verify-box input{flex:1;background:#fff;border:1px solid var(--line2);border-radius:10px;color:var(--txt);
   padding:12px 14px;font-family:var(--mono);font-size:14px;outline:none;transition:.15s}
@@ -317,7 +317,7 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
 .foot-tags{display:flex;gap:8px;flex-wrap:wrap}
 .foot-tags .chip{font-size:11px}
 
-/* ---------------- podstrony (prose/legal/verify) ---------------- */
+/* ---------------- subpages (prose/legal/verify) ---------------- */
 .page-head{padding:140px 0 10px}
 .page-head h1{font-size:clamp(32px,4.4vw,48px);margin:16px 0 12px}
 .page-head .lede{color:var(--muted);font-size:17px;max-width:640px}

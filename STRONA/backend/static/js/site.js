@@ -1,6 +1,6 @@
-/* Strona publiczna: nav, reveals, countery, cennik/objectives z /api/products,
-   statystyki z /api/public/stats (kafelki zerowe UKRYWANE — bez lipnych liczb),
-   ranking z /api/leaderboard (maskowany po stronie API). */
+/* Public site: nav, reveals, counters, pricing/objectives from /api/products,
+   stats from /api/public/stats (zero tiles are HIDDEN — no fake numbers),
+   leaderboard from /api/leaderboard (masked on the API side). */
 (function () {
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -16,13 +16,13 @@
   if (burger) burger.addEventListener('click', () => mob.classList.toggle('open'));
   if (mob) $$('a', mob).forEach(a => a.addEventListener('click', () => mob.classList.remove('open')));
 
-  /* ---------- ?ref= capture (kod partnera dopina się przy rejestracji) ---------- */
+  /* ---------- ?ref= capture (partner code attaches at signup) ---------- */
   const ref = new URLSearchParams(location.search).get('ref');
   if (ref) try { localStorage.setItem('pf_ref', ref); } catch (e) {}
 
   const yearEl = $('#year'); if (yearEl) yearEl.textContent = new Date().getFullYear();
 
-  /* ---------- GSAP reveals + countery ---------- */
+  /* ---------- GSAP reveals + counters ---------- */
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const hasGsap = typeof gsap !== 'undefined' && typeof ScrollTrigger !== 'undefined';
   if (hasGsap) gsap.registerPlugin(ScrollTrigger);
@@ -50,10 +50,10 @@
     render(0);
   }
 
-  /* ---------- mockup: paski postępu ---------- */
+  /* ---------- mockup: progress bars ---------- */
   setTimeout(() => $$('.mbar i').forEach(b => { b.style.width = (b.dataset.w || 0) + '%'; }), 500);
 
-  /* ---------- /api/public/stats — kafelki tylko dla niezerowych metryk ---------- */
+  /* ---------- /api/public/stats — tiles only for non-zero metrics ---------- */
   async function stats() {
     const band = $('#statsBand'); if (!band) return;
     try {
@@ -65,7 +65,7 @@
         { v: s.funded_accounts, label: 'Funded accounts' },
         { v: s.countries_count, label: 'Countries' },
       ].filter(d => d.v > 0).slice(0, 4);
-      if (defs.length < 2) { band.remove(); return; }   // świeża instalacja: nic nie udajemy
+      if (defs.length < 2) { band.remove(); return; }   // fresh install: fake nothing
       $('#statsGrid').innerHTML = defs.map(d =>
         `<div class="stat"><div class="stat-num grad-text" data-count="${d.v}"${d.prefix ? ` data-prefix="${d.prefix}"` : ''}></div>
          <div class="stat-label">${d.label}</div></div>`).join('');
@@ -73,7 +73,7 @@
     } catch (e) { band.remove(); }
   }
 
-  /* ---------- /api/products — cennik + trading objectives ---------- */
+  /* ---------- /api/products — pricing + trading objectives ---------- */
   const GROUPS = [
     { id: '2step', name: '2-Step Evaluation', match: p => p.steps === 2 && p.price_usd > 0 },
     { id: '1step', name: '1-Step Evaluation', match: p => p.steps === 1 && p.price_usd > 0 },
@@ -155,7 +155,7 @@
   }
   const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
 
-  /* ---------- hero: konfigurator challenge'u ---------- */
+  /* ---------- hero: challenge configurator ---------- */
   function tweenNum(el, to, fmtFn) {
     if (!el) return;
     const from = parseFloat(el.dataset.v || '0');
@@ -214,7 +214,7 @@
     }
   }
 
-  /* ---------- /api/leaderboard — sekcja znika, gdy brak danych ---------- */
+  /* ---------- /api/leaderboard — the section hides when there is no data ---------- */
   async function board() {
     const sec = $('#lbSec'); if (!sec) return;
     try {

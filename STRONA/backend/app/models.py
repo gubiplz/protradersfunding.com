@@ -310,6 +310,9 @@ class PayoutRequest(Base):
     profit_amount: Mapped[float] = mapped_column(Float)
     trader_share: Mapped[float] = mapped_column(Float)
     method: Mapped[str] = mapped_column(String(40), default="bank")
+    # Dane wypłaty (JSON): usdt -> network+address, bank -> holder+iban+swift(+bank_name),
+    # wise -> email. Bez nich admin nie miałby dokąd wysłać pieniędzy.
+    details: Mapped[str | None] = mapped_column(String(400), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|approved|paid|rejected
 
     account: Mapped[Account] = relationship(back_populates="payout_requests")

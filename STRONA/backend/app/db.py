@@ -81,6 +81,9 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "claimed_at": "TIMESTAMP",
         "retired_reason": "VARCHAR(60)",
     },
+    "payout_requests": {
+        "details": "VARCHAR(400)",
+    },
     "payouts": {
         "method": "VARCHAR(40)",
         "note": "VARCHAR(160)",

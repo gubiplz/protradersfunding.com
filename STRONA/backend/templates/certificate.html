@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="/static/css/cert.css">
 <meta name="robots" content="noindex">
 <style>
-  /* Skryptowy krój bierzemy z systemu — nie dowozimy webfontu tylko po podpis. */
+  /* The script typeface comes from the system — no webfont shipped just for a signature. */
   :root{--script:'Snell Roundhand','Segoe Script','Brush Script MT','Bradley Hand',cursive}
 </style>
 </head>
@@ -41,8 +41,8 @@
     <p class="cert-blurb">{{ blurb }}</p>
     {% if note %}<p class="cert-note">{{ note }}</p>{% endif %}
 
-    {# Siatka 1fr/auto/1fr — QR zostaje IDEALNIE na środku niezależnie od tego,
-       jak szeroki jest podpis po lewej. #}
+    {# 1fr/auto/1fr grid — the QR stays PERFECTLY centred no matter how wide
+       the signature on the left is. #}
     <div class="cert-foot">
       <div class="cert-signblock">
         {% if signatory %}

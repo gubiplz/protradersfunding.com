@@ -13,9 +13,9 @@
 </head>
 <body>
 
-<!-- Panel startuje NIEWIDOCZNY. Odslania go dopiero potwierdzenie, ze sesja
-     nalezy do administratora — bez tego przypadkowy gosc widzialby cala
-     nawigacje panelu, zanim zdazy zadzialac przekierowanie. -->
+<!-- The panel starts HIDDEN. It is revealed only once the session is confirmed
+     to belong to an administrator — otherwise a random visitor would see the
+     whole panel navigation before the redirect kicks in. -->
 <div class="app" id="app-shell" style="visibility:hidden">
   <aside class="side" id="side">
     <div class="side-head">
@@ -75,22 +75,22 @@ const fmt0=n=>(n??0).toLocaleString('en-US',{maximumFractionDigits:0});
 const dstr=iso=>new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-/* Panel otwiera KONTO administratora, nie wspólny token. Sesja jest ta sama co
-   w portalu tradera (`pf_token`), więc zalogowany admin przechodzi między
-   panelem a portalem bez drugiego logowania. */
+/* The panel is opened by an administrator ACCOUNT, not a shared token. The
+   session is the same as the trader portal (`pf_token`), so a signed-in admin
+   moves between the panel and the portal without a second login. */
 let TOKEN=localStorage.getItem('pf_token')||null, ME=null;
 const adminH=()=>{const h={'Content-Type':'application/json'};
   if(TOKEN)h['Authorization']='Bearer '+TOKEN; return h};
 async function api(path,opts={}){
   const r=await fetch(path,{headers:adminH(),...opts});
-  if(r.status===401||r.status===403){signInForm();throw new Error('Brak dostępu')}
+  if(r.status===401||r.status===403){signInForm();throw new Error('Access denied')}
   if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||r.status);
   return r.json();
 }
 function signInForm(){
-  // Panel nie ma wlasnego logowania i NIC nie pokazuje: wejscie jest jedno,
-  // to samo co dla traderow. `replace` zamiast `href`, zeby cofniecie w
-  // przegladarce nie wracalo na pusty panel.
+  // The panel has no login of its own and shows NOTHING: there is one entry,
+  // the same as for traders. `replace` instead of `href` so the browser
+  // back button does not land on an empty panel.
   ME=null;
   location.replace('/portal?next=/admin');
 }
@@ -167,7 +167,7 @@ function mini(pct){const p=Math.min(100,Math.max(0,pct||0));
   const c=p>=100?'bad':p>=70?'warn':'ok';
   return `<div class="mini"><i class="${c}" style="width:${p}%"></i></div>`}
 
-/* ============================ WIDOKI ============================ */
+/* ============================ VIEWS ============================ */
 const VIEWS={
  async overview(){
   const [s,pay,kyc,tick,orders]=await Promise.all([
@@ -227,7 +227,12 @@ const VIEWS={
       <td class="muted">${dstr(r.ts)}</td><td class="num">${esc(r.account_login||'—')}</td>
       <td>${esc(r.trader_email||'—')}</td>
       <td class="num">$${fmt(r.profit_amount)}</td><td class="num up">$${fmt(r.trader_share)}</td>
-      <td class="muted">${esc(r.method||'bank')}</td>
+      <td>${(()=>{const d=r.details||{};
+        const label=r.method==='usdt'?'USDT':r.method==='wise'?'Wise':'Bank';
+        const info=r.method==='usdt'?[d.network,d.address].filter(Boolean).join(' · ')
+          :r.method==='wise'?(d.email||'')
+          :[d.holder,d.iban,d.swift,d.bank_name].filter(Boolean).join(' · ');
+        return `${esc(label)}${info?`<div class="muted mono" style="font-size:11px;max-width:260px;word-break:break-all">${esc(info)}</div>`:''}`})()}</td>
       <td><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending':'failed'}"><span class="dot"></span>${esc(r.status)}</span></td>
       <td style="text-align:right">${r.status==='pending'
         ?`<button class="btn-p sm" onclick="approvePayout(${r.id})">Approve &amp; pay</button>`:''}</td></tr>`).join('')}
@@ -301,16 +306,16 @@ const VIEWS={
  },
 
  async pool(){
-  const dane=await api('/api/admin/pool');
-  const rows=dane.pool||[], waiting=dane.waiting||[];
+  const poolData=await api('/api/admin/pool');
+  const rows=poolData.pool||[], waiting=poolData.waiting||[];
   const free=rows.filter(p=>!p.claimed).length;
-  // ile rachunkow brakuje na kazdy rozmiar — admin ma wiedziec CO dorzucic
-  const brakuje={};
-  waiting.forEach(w=>{brakuje[w.account_size]=(brakuje[w.account_size]||0)+1});
-  // rozmiary z katalogu — pula ma sens tylko dla wielkosci, ktore ktos moze kupic
-  const rozmiary=dane.sizes||[];
-  const opcjeRozmiaru=(wybrany)=>rozmiary.map(r=>
-    `<option value="${r}"${Number(wybrany)===r?' selected':''}>$${fmt0(r)}</option>`).join('');
+  // how many accounts are missing per size — the admin should know WHAT to add
+  const missingBySize={};
+  waiting.forEach(w=>{missingBySize[w.account_size]=(missingBySize[w.account_size]||0)+1});
+  // sizes from the catalog — the pool only makes sense for sizes someone can buy
+  const sizeList=poolData.sizes||[];
+  const sizeOptions=(chosenSize)=>sizeList.map(r=>
+    `<option value="${r}"${Number(chosenSize)===r?' selected':''}>$${fmt0(r)}</option>`).join('');
   $('view').innerHTML=`
     ${waiting.length?`<div class="sec-card" style="border-color:#f5d9a8;background:#fffaf0">
       <h3>${waiting.length} paid ${waiting.length===1?'order is':'orders are'} waiting for an MT5 account</h3>
@@ -323,16 +328,16 @@ const VIEWS={
           <td class="num"><b>$${fmt0(w.account_size)}</b></td>
           <td class="muted">${w.created_at?dstr(w.created_at):'—'}</td></tr>`).join('')}
         </tbody></table></div>
-      <p class="muted" style="font-size:12.5px;margin-top:10px">Missing: ${Object.entries(brakuje).map(([rozmiar,ile])=>`<b>${ile}×</b> $${fmt0(Number(rozmiar))}`).join(', ')}</p>
+      <p class="muted" style="font-size:12.5px;margin-top:10px">Missing: ${Object.entries(missingBySize).map(([sizeKey,cnt])=>`<b>${cnt}×</b> $${fmt0(Number(sizeKey))}`).join(', ')}</p>
     </div>`:''}
 
     <div class="sec-card">
       <h3>Auto-generate accounts</h3>
       <p class="muted" style="font-size:12.5px;margin-bottom:14px">Opens real demo accounts on <span class="mono">MetaQuotes-Demo</span> through the web terminal and puts the credentials straight into the pool — the same channel provisioning used before.</p>
-      ${dane.can_generate?`
+      ${poolData.can_generate?`
         <div class="pool-form">
           <div><label class="muted" style="font-size:12px">Account size</label>
-            <select id="gen-size" class="inp">${opcjeRozmiaru(50000)}</select></div>
+            <select id="gen-size" class="inp">${sizeOptions(50000)}</select></div>
           <div><label class="muted" style="font-size:12px">How many</label>
             <input id="gen-count" class="inp" type="number" min="1" max="10" value="1"></div>
         </div>
@@ -340,7 +345,7 @@ const VIEWS={
         <p class="muted" style="font-size:12px;margin-top:10px">Each account takes ~20–40 s — the browser fills the MetaQuotes form. Up to 10 at a time.</p>`
       :`<div class="warn-box" style="margin:0;background:#fffaf0;border:1px solid #f5d9a8;color:#8a6d3b">
           <b style="display:block">Not available on this server</b>
-          ${esc(dane.generate_hint||'')}
+          ${esc(poolData.generate_hint||'')}
         </div>`}
     </div>
 
@@ -351,7 +356,7 @@ const VIEWS={
         <input id="pl-login" class="inp" placeholder="MT5 login">
         <input id="pl-pass" class="inp" placeholder="Password">
         <input id="pl-server" class="inp" placeholder="Server">
-        <select id="pl-size" class="inp">${opcjeRozmiaru(null)}</select>
+        <select id="pl-size" class="inp">${sizeOptions(null)}</select>
       </div>
       <button class="btn-p" onclick="addPool()">+ Add to pool</button>
     </div>
@@ -381,7 +386,7 @@ const VIEWS={
             <input id="ed-login-${p.id}" class="inp" value="${esc(p.platform_login)}" placeholder="MT5 login">
             <input id="ed-pass-${p.id}" class="inp" placeholder="New password (leave empty to keep)">
             <input id="ed-server-${p.id}" class="inp" value="${esc(p.platform_server)}" placeholder="Server">
-            ${p.claimed?'':`<select id="ed-size-${p.id}" class="inp">${opcjeRozmiaru(p.account_size)}</select>`}
+            ${p.claimed?'':`<select id="ed-size-${p.id}" class="inp">${sizeOptions(p.account_size)}</select>`}
           </div>
           <button class="btn-p sm" onclick="savePool(${p.id},${p.claimed})">Save</button>
           <button class="btn-o sm" onclick="editPool(${p.id})">Cancel</button>
@@ -419,7 +424,7 @@ const VIEWS={
 };
 
 
-/* ---------- accounts: filtry + tabela ---------- */
+/* ---------- accounts: filters + table ---------- */
 function renderAccounts(){
   const list=window._accs||[];
   const q=(window._accQ||'').toLowerCase();
@@ -596,7 +601,7 @@ async function startBot(id){
     openAccount(id);
   }catch(e){toast('Error: '+e.message,'err')}
 }
-/* ---------- certyfikaty osiagniec ---------- */
+/* ---------- achievement certificates ---------- */
 async function renderCerts(id){
   const el=$('cert-card'); if(!el)return;
   let list; try{list=await api(`/api/admin/accounts/${id}/certificates`)}catch(e){
@@ -623,22 +628,22 @@ async function makeAchievementCert(id,kind){
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
-/* ---------- wyplaty + certyfikaty ---------- */
+/* ---------- payouts + certificates ---------- */
 async function breachAccount(id){
-  const powod=prompt('Breach this account?\n\nReason shown to the trader (optional):','');
-  if(powod===null)return;   // Anuluj — a pusty ciag jest dozwolony
+  const breachReason=prompt('Breach this account?\n\nReason shown to the trader (optional):','');
+  if(breachReason===null)return;   // Cancel — while an empty string is allowed
   try{const r=await api(`/api/admin/accounts/${id}/breach`,{method:'POST',
-      body:JSON.stringify({reason:powod})});
+      body:JSON.stringify({reason:breachReason})});
     toast(`Account closed: ${r.reason}`,'ok',8000); openAccount(id);
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
 async function setPhase(id,phase){
-  const nazwy={eval_1:'Phase 1',eval_2:'Phase 2',funded:'Funded'};
-  if(!confirm(`Move this account to ${nazwy[phase]}?\n\nBalance, drawdown and the trading-day `
+  const phaseNames={eval_1:'Phase 1',eval_2:'Phase 2',funded:'Funded'};
+  if(!confirm(`Move this account to ${phaseNames[phase]}?\n\nBalance, drawdown and the trading-day `
     +`counter reset — same as an automatic promotion.`))return;
   try{await api(`/api/admin/accounts/${id}/phase`,{method:'POST',body:JSON.stringify({phase})});
-    toast(`Account moved to ${nazwy[phase]}.`,'ok'); openAccount(id);
+    toast(`Account moved to ${phaseNames[phase]}.`,'ok'); openAccount(id);
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
@@ -720,9 +725,9 @@ async function setBotTarget(id){
   }catch(e){toast('Error: '+e.message,'err')}
 }
 async function stopBot(id){
-  // Po zatrzymaniu konto wraca pod realny feed i resynchronizuje sie do stanu
-  // rachunku MT5 — wygenerowany zysk znika z kokpitu. Admin musi to wiedziec
-  // ZANIM kliknie, bo z zewnatrz wyglada to jak utrata danych.
+  // After stopping, the account returns to the real feed and resyncs to the
+  // MT5 account state — generated profit vanishes from the dashboard. The admin
+  // must know that BEFORE clicking: from outside it looks like data loss.
   if(!confirm('Stop the Trade BOT?\n\nThe account goes back to the live MT5 feed, so its balance '
     +'and equity curve resync to the real account — the generated profit disappears from the dashboard. '
     +'The trade history stays.'))return;
@@ -738,7 +743,7 @@ async function deleteAccount(id,login){
   catch(e){toast('Error: '+e.message,'err')}
 }
 
-/* ---------- akcje ---------- */
+/* ---------- actions ---------- */
 async function approvePayout(id){
   try{const d=await api(`/api/admin/payout-requests/${id}/approve`,{method:'POST'});
     toast(`✅ Paid $${fmt(d.total_paid)}${d.fee_refund?` (incl. $${fmt(d.fee_refund)} fee refund)`:''}`,'ok');
@@ -789,13 +794,13 @@ async function addPool(){
   catch(e){toast('Error: '+e.message,'err')}
 }
 async function generatePool(){
-  const rozmiar=parseFloat($('gen-size').value||'0'), ile=parseInt($('gen-count').value||'1',10);
-  if(!rozmiar||rozmiar<=0){toast('Enter an account size.','err');return}
+  const sizeKey=parseFloat($('gen-size').value||'0'), cnt=parseInt($('gen-count').value||'1',10);
+  if(!sizeKey||sizeKey<=0){toast('Enter an account size.','err');return}
   const btn=$('gen-btn'); btn.disabled=true;
-  btn.textContent=`⏳ Opening ${ile} account${ile===1?'':'s'} on MetaQuotes…`;
+  btn.textContent=`⏳ Opening ${cnt} account${cnt===1?'':'s'} on MetaQuotes…`;
   try{
     const r=await api('/api/admin/pool/generate',{method:'POST',
-      body:JSON.stringify({account_size:rozmiar,count:ile})});
+      body:JSON.stringify({account_size:sizeKey,count:cnt})});
     const ok=r.created.length;
     toast(`⚡ ${ok} account${ok===1?'':'s'} added to the pool.`+(r.errors.length?` ${r.errors.length} failed.`:''),'ok');
     go('pool');
@@ -807,8 +812,8 @@ function editPool(id){
 async function savePool(id,claimed){
   const body={platform_login:$('ed-login-'+id).value.trim(),
               platform_server:$('ed-server-'+id).value.trim()};
-  const haslo=$('ed-pass-'+id).value.trim();
-  if(haslo)body.platform_password=haslo;
+  const newPass=$('ed-pass-'+id).value.trim();
+  if(newPass)body.platform_password=newPass;
   if(!claimed){const s=parseFloat($('ed-size-'+id).value||'0'); if(s>0)body.account_size=s}
   if(!body.platform_login||!body.platform_server){toast('Login and server cannot be empty.','err');return}
   try{
@@ -824,7 +829,7 @@ async function delPool(id,login){
   catch(e){toast('Error: '+e.message,'err')}
 }
 
-/* ---------- modal: przyznanie challenge'u ---------- */
+/* ---------- modal: grant a challenge ---------- */
 const GRANT_REASONS=['BOGO promotion','Free upgrade','Compensation','Partner deal','Contest prize','Marketing campaign'];
 
 async function openGrant(traderId){
@@ -878,7 +883,7 @@ async function submitGrant(){
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
-/* ---------- modal: nowe konto ---------- */
+/* ---------- modal: new account ---------- */
 async function openCreate(){
   let products=[];
   try{products=await (await fetch('/api/products')).json()}catch(e){}
@@ -932,7 +937,7 @@ async function submitCreate(){
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
-/* ---------- start + autoodświeżanie ---------- */
+/* ---------- start + auto-refresh ---------- */
 if(localStorage.getItem('pf_admin_collapsed')==='1')$('side').classList.add('collapsed');
 (async()=>{
   if(!TOKEN)return signInForm();
@@ -940,9 +945,9 @@ if(localStorage.getItem('pf_admin_collapsed')==='1')$('side').classList.add('col
     const m=await api('/api/auth/me');
     if(!m.is_admin)return signInForm();
     ME=m; $('tok-state').textContent=m.email;
-    $('app-shell').style.visibility='visible';   // dopiero teraz pokazujemy panel
+    $('app-shell').style.visibility='visible';   // only now reveal the panel
     go('overview');
-  }catch(e){/* api() juz odeslalo do logowania */}
+  }catch(e){/* api() already redirected to login */}
 })();
 setInterval(()=>{
   if(document.hidden)return;

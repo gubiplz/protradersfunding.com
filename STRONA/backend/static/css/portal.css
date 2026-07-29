@@ -1,6 +1,6 @@
 /* ============================================================
-   Trader Portal — LIGHT dashboard (wzorzec OneTraders)
-   Spójny z publicznym site.css: te same tokeny i fonty.
+   Trader Portal — LIGHT dashboard (OneTraders-style)
+   Consistent with the public site.css: same tokens and fonts.
    ============================================================ */
 
 @font-face{font-family:'Inter';src:url('/static/fonts/inter.woff2') format('woff2');font-weight:100 900;font-display:swap}
@@ -94,7 +94,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 
 .content{padding:24px 28px 60px;max-width:1240px;width:100%}
 
-/* ---------------- ELEMENTY ---------------- */
+/* ---------------- ELEMENTS ---------------- */
 .btn-p{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--grad);color:#fff;
   font-weight:600;font-size:14px;padding:10px 18px;border-radius:11px;transition:.16s;white-space:nowrap;
   box-shadow:0 8px 18px -8px rgba(99,102,241,.5)}
@@ -128,7 +128,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .status.pending{color:var(--gold);background:var(--gold-bg)}
 .status.paid{color:var(--green);background:var(--green-bg)}
 
-/* gradient banner (jak "SAME LEVEL UPGRADE") */
+/* gradient banner (like "SAME LEVEL UPGRADE") */
 .gradient-banner{background:linear-gradient(100deg,#6d28d9 0%,#7c3aed 35%,#a855f7 100%);color:#fff;
   border-radius:14px;padding:13px 18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
   margin-bottom:20px;box-shadow:0 14px 34px -14px rgba(124,58,237,.5)}
@@ -142,7 +142,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
   white-space:nowrap;transition:.15s;display:inline-flex;align-items:center;gap:6px}
 .gb-btn:hover{transform:translateY(-1px);box-shadow:0 8px 18px -8px rgba(0,0,0,.3)}
 
-/* stat tiles z pastelową ikoną */
+/* stat tiles with a pastel icon */
 .stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:14px;margin-bottom:20px}
 .stat-tile{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;
   display:flex;align-items:center;gap:14px;box-shadow:var(--shadow)}
@@ -157,7 +157,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .stat-tile .val small{font-size:13px;color:var(--muted);font-weight:500;font-family:var(--body)}
 .stat-tile .sub{font-size:11.5px;color:var(--dim);margin-top:1px}
 
-/* lista kont — poziome wiersze z gradientową krawędzią */
+/* account list — horizontal rows with a gradient edge */
 .acct-list{background:#fff;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;
   box-shadow:var(--shadow);position:relative}
 .acct-list::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;
@@ -177,7 +177,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .acct-col .l{font-size:11.5px;color:var(--dim)}
 .acct-col .v{font-family:var(--mono);font-weight:600;font-size:14.5px}
 
-/* ---------------- DETAL KONTA ---------------- */
+/* ---------------- ACCOUNT DETAIL ---------------- */
 .backlink{display:inline-flex;align-items:center;gap:8px;color:var(--muted);font-size:13.5px;font-weight:500;
   margin-bottom:16px;transition:.15s}
 .backlink:hover{color:var(--acc)}
@@ -222,7 +222,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 
 .chart-box{height:230px;position:relative}
 
-/* poświadczenia (kompakt w wierszach zamówień) */
+/* credentials (compact, inside order rows) */
 .creds{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:13px 14px}
 .creds-h{display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:700;letter-spacing:.06em;
   text-transform:uppercase;color:var(--muted);margin-bottom:7px}
@@ -237,7 +237,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
   border-radius:50%;animation:spin 1s linear infinite;flex:0 0 15px;margin-top:2px}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-/* sklep */
+/* shop */
 .shop-tabs{display:inline-flex;gap:5px;background:#fff;border:1px solid var(--line);border-radius:11px;
   padding:4px;margin-bottom:20px;box-shadow:var(--shadow)}
 .shop-tab{padding:8px 17px;border-radius:8px;font-size:13.5px;font-weight:600;color:var(--muted);transition:.15s}
@@ -258,7 +258,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .plan-feats b{color:var(--txt);font-family:var(--mono);font-weight:600}
 .plan-card .btn-p{margin-top:auto;width:100%}
 
-/* tabele */
+/* tables */
 .tbl-wrap{background:#fff;border:1px solid var(--line);border-radius:var(--r);overflow-x:auto;box-shadow:var(--shadow)}
 table.tbl{width:100%;border-collapse:collapse;font-size:13.5px;min-width:560px}
 table.tbl th{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);text-align:left;
@@ -320,7 +320,7 @@ table.tbl td.sub-row{background:var(--panel2)}
 .form-err{font-size:12.5px;color:var(--red)}
 .modal .hint{font-size:11px;color:var(--dim);text-align:center;margin-top:10px}
 
-/* ---------------- TOASTY ---------------- */
+/* ---------------- TOASTS ---------------- */
 #toasts{position:fixed;right:18px;bottom:18px;z-index:90;display:flex;flex-direction:column;gap:10px;max-width:370px}
 .toast{background:#fff;border:1px solid var(--line2);border-left:3px solid var(--acc);border-radius:12px;
   padding:13px 16px;font-size:13.5px;box-shadow:0 16px 44px -16px rgba(15,23,42,.3);
@@ -361,11 +361,11 @@ table.tbl td.sub-row{background:var(--panel2)}
 }
 
 /* ============================================================
-   Panel klienta v2 — collapse, kalendarz, podium, odznaki,
-   toggle, faktura, KYC, tickety, loyalty
+   Client panel v2 — collapse, calendar, podium, badges,
+   toggle, invoice, KYC, tickets, loyalty
    ============================================================ */
 
-/* --- collapse sidebara --- */
+/* --- sidebar collapse --- */
 .side-bottom{border-top:1px solid var(--line);padding:10px 12px;display:flex;flex-direction:column;gap:2px}
 .collapse-btn{display:flex;align-items:center;gap:12px;width:100%;padding:9px 12px;border-radius:10px;
   color:var(--muted);font-size:14px;font-weight:500;transition:.15s}
@@ -395,7 +395,7 @@ table.tbl td.sub-row{background:var(--panel2)}
   transition:width .8s cubic-bezier(.22,1,.36,1)}
 .phase-sub{font-size:12px;color:var(--dim);margin-top:8px}
 
-/* --- kalendarz --- */
+/* --- calendar --- */
 .cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
 .cal-head b{font-family:var(--display);font-size:15.5px}
 .cal-nav{display:flex;gap:6px}
@@ -473,7 +473,7 @@ table.tbl td.sub-row{background:var(--panel2)}
 .switch input:checked+i{background:var(--acc)}
 .switch input:checked+i::after{transform:translateX(20px)}
 
-/* --- tickety --- */
+/* --- tickets --- */
 .ticket-row{display:flex;align-items:center;gap:14px;padding:16px 20px;border-top:1px solid var(--line);
   cursor:pointer;transition:.15s}
 .ticket-row:first-child{border-top:0}
@@ -497,7 +497,7 @@ table.tbl td.sub-row{background:var(--panel2)}
 .file-row input[type=file]::file-selector-button{background:#fff;border:1px solid var(--line2);border-radius:8px;
   padding:7px 12px;font-size:12.5px;font-weight:600;color:var(--txt);cursor:pointer;margin-right:10px}
 
-/* --- faktura (drukowalna) --- */
+/* --- invoice (printable) --- */
 .inv-print{background:#fff;border-radius:14px;max-width:640px;width:100%;padding:34px;color:#0f172a}
 .inv-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:26px}
 .inv-head img{width:38px;height:38px}
@@ -517,15 +517,15 @@ table.tbl td.sub-row{background:var(--panel2)}
   #inv-modal .noprint{display:none!important}
 }
 
-/* --- historia transakcji: kierunek pozycji ---
-   NIE nazywać tego `.side` — ta klasa nosi sidebar portalu (<aside class="side">)
-   i taka kolizja rozwala cały lewy panel. */
+/* --- trade history: position direction ---
+   Do NOT name this `.side` — that class is the portal sidebar (<aside class="side">)
+   and the collision breaks the whole left panel. */
 .tside{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
   border-radius:6px;padding:3px 8px;border:1px solid transparent}
 .tside.buy{color:var(--green);background:var(--green-bg);border-color:#bbe7d4}
 .tside.sell{color:var(--red);background:var(--red-bg);border-color:#f5c6c6}
 
-/* --- Analytics: rozbicie na instrumenty --- */
+/* --- Analytics: per-instrument breakdown --- */
 .sym-list{display:flex;flex-direction:column;gap:12px}
 .sym-row{display:grid;grid-template-columns:88px 1fr minmax(70px,1.4fr) 96px;align-items:center;gap:14px;font-size:13px}
 .sym-row b{font-family:var(--mono);font-size:13px}
@@ -540,10 +540,10 @@ table.tbl td.sub-row{background:var(--panel2)}
   .sym-row .sym-bar{grid-column:1/-1}
 }
 
-/* wiersz wyplaty w ksiedze konta */
+/* payout row in the account ledger */
 .tside.payout{color:var(--acc);background:#eef0ff;border-color:#d5d9ff}
 
-/* --- zakladka Certificates --- */
+/* --- Certificates tab --- */
 .cert-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
 .cert-head h3{margin:0;font-family:var(--mono);font-size:17px}
 .cert-list{display:flex;flex-direction:column;gap:10px}
@@ -559,9 +559,9 @@ table.tbl td.sub-row{background:var(--panel2)}
   .cert-row .acts{width:100%}
 }
 
-/* Blok tytulu w pasku gornym musi moc sie skurczyc. Bez `min-width:0` element
-   flex nie zejdzie ponizej swojej tresci i dluzszy tytul (np. „Certificates”)
-   rozpychal strone o kilka pikseli w poziomie. */
-.topbar>div:not(.top-right){min-width:0}   /* NIE .top-right — tam min-width:0
-     pozwala przyciskom wyjsc poza kontener i rozpycha strone o kilkadziesiat px */
+/* The title block in the top bar must be able to shrink. Without `min-width:0`
+   a flex item never goes below its content size, and a longer title
+   (e.g. "Certificates") stretched the page a few pixels horizontally. */
+.topbar>div:not(.top-right){min-width:0}   /* NOT .top-right — min-width:0 there
+     lets the buttons escape the container and stretches the page by dozens of px */
 .topbar .crumb{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

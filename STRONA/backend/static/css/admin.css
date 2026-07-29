@@ -1,10 +1,10 @@
-/* Panel admina — dodatki do portal.css (ten sam jasny design system). */
+/* Admin panel — additions on top of portal.css (same light design system). */
 
 .side-head .brand-pill{background:linear-gradient(135deg,#0f172a,#334155);box-shadow:0 8px 18px -8px rgba(15,23,42,.45)}
 .admin-tag{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;background:rgba(255,255,255,.18);
   border-radius:6px;padding:2px 6px;margin-left:2px}
 
-/* pasek statusu systemu */
+/* system status bar */
 .sysbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
 .sys{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);
   border-radius:999px;padding:7px 14px;font-size:12.5px;color:var(--muted);box-shadow:var(--shadow)}
@@ -12,7 +12,7 @@
 .sys .dot{width:7px;height:7px;border-radius:50%;background:var(--green2)}
 .sys.warn .dot{background:#f59e0b} .sys.warn b{color:var(--gold)}
 
-/* filtry nad tabelą */
+/* filters above the table */
 .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
 .toolbar .inp{max-width:280px}
 .seg{display:inline-flex;gap:4px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:3px;
@@ -21,13 +21,13 @@
 .seg button.on{background:var(--grad);color:#fff}
 .count-pill{margin-left:auto;font-size:12px;color:var(--dim)}
 
-/* mini paski w wierszach tabeli */
+/* mini bars inside table rows */
 .mini{height:5px;border-radius:99px;background:var(--bg3);overflow:hidden;min-width:78px}
 .mini i{display:block;height:100%;border-radius:99px}
 .mini .ok{background:var(--green2)} .mini .warn{background:#f59e0b} .mini .bad{background:#ef4444}
 tr.clickable{cursor:pointer}
 
-/* action items na overview */
+/* action items on the overview */
 .todo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-bottom:18px}
 .todo{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;box-shadow:var(--shadow);
   display:flex;align-items:center;gap:14px;cursor:pointer;transition:.16s}
@@ -37,7 +37,7 @@ tr.clickable{cursor:pointer}
 .todo .go{margin-left:auto;color:var(--dim)}
 .todo.has .n{color:var(--acc)}
 
-/* slide-over (szczegóły konta / ticket) */
+/* slide-over (account details / ticket) */
 .over{position:fixed;inset:0;z-index:60;display:none}
 .over.open{display:block}
 .over-bg{position:absolute;inset:0;background:rgba(15,23,42,.4);backdrop-filter:blur(3px)}
@@ -58,21 +58,21 @@ tr.clickable{cursor:pointer}
 .breach-item{font-size:12.5px;color:var(--red);background:var(--red-bg);border:1px solid #f5c6c6;
   border-radius:10px;padding:9px 12px}
 
-/* formularz puli */
+/* pool form */
 .pool-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:12px}
 
 @media(max-width:640px){
   .toolbar .inp{max-width:none;width:100%}
   .count-pill{margin-left:0}
-  /* topbar: chip feedu i dwa CTA nie moga rozpychac strony */
+  /* topbar: the feed chip and the two CTAs must not stretch the page */
   .topbar{flex-wrap:wrap;row-gap:8px}
   .top-right{width:100%;margin-left:0;justify-content:flex-start;flex-wrap:wrap;gap:8px}
   .top-right .btn-p,.top-right .btn-o{flex:1 1 46%;justify-content:center;min-width:0}
   .top-right .kyc-chip{flex:1 1 100%;justify-content:center}
-  /* tabele scrollujemy w swoim kontenerze, nie w body */
+  /* tables scroll inside their own container, not the body */
   .sec-card>div[style*="overflow-x"],.sec-card table.tbl{max-width:100%}
   .sec-card{overflow-x:auto}
-  /* segmentowany filtr statusow zawija sie zamiast rozpychac widok */
+  /* the segmented status filter wraps instead of stretching the view */
   .seg{flex-wrap:wrap;width:100%}
   .seg button{flex:1 0 auto}
 }

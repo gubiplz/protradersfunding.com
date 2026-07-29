@@ -1,13 +1,13 @@
-/* Wykres equity konta — wspolny dla portalu tradera i panelu admina.
+/* Account equity chart — shared by the trader portal and the admin panel.
  *
- * Backend (`_equity_curve` w main.py) zwraca punkty
- * {i, ts, equity, balance, kind, symbol?, side?, lots?, pnl?, payout?}, gdzie
- * `kind` to start | trade | payout | open | tick, a `i` to NUMER TRANSAKCJI —
- * i to on jest osia pozioma. Wyplata nie jest transakcja, wiec dostaje ten sam
- * `i` co poprzedni punkt i rysuje sie jako pionowy krok w dol.
+ * The backend (`_equity_curve` in main.py) returns points
+ * {i, ts, equity, balance, kind, symbol?, side?, lots?, pnl?, payout?}, where
+ * `kind` is start | trade | payout | open | tick and `i` is the TRADE NUMBER —
+ * and that is the horizontal axis. A payout is not a trade, so it keeps the
+ * same `i` as the previous point and draws as a vertical step down.
  *
- * Konto bez ani jednej transakcji dostaje z backendu probki w czasie
- * (kind='tick') — wtedy os podpisujemy odczytami silnika ryzyka, nie tradami.
+ * An account with no trades at all gets time-based samples from the backend
+ * (kind='tick') — then the axis is labelled with risk-engine reads, not trades.
  */
 window.equityChartConfig = function (curve) {
   var byTrades = curve.some(function (p) { return p.kind === 'trade'; });

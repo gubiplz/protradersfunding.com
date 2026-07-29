@@ -10,6 +10,7 @@ Uruchomienie:  uvicorn app.main:app --reload  (z katalogu backend/)
 """
 from __future__ import annotations
 
+import json
 import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -55,11 +56,11 @@ def seed_demo() -> None:
         # Konta demo tylko w trybie sim (w metaapi konta tworzy realny provisioning)
         if settings.feed == "sim" and session.query(Account).count() == 0:
             demo = [
-                ("jan@demo.pl", "Jan Kowalski", "2step-100k", "static"),
-                ("anna@demo.pl", "Anna Nowak", "2step-100k", "trailing"),
-                ("piotr@demo.pl", "Piotr Wiśniewski", "2step-10k", "static"),
-                ("maria@demo.pl", "Maria Lewandowska", "2step-100k", "static"),
-                ("tomek@demo.pl", "Tomasz Zieliński", "1step-100k", "trailing"),
+                ("john@demo.test", "John Carter", "2step-100k", "static"),
+                ("anna@demo.test", "Anna Novak", "2step-100k", "trailing"),
+                ("peter@demo.test", "Peter Wagner", "2step-10k", "static"),
+                ("maria@demo.test", "Maria Lopez", "2step-100k", "static"),
+                ("thomas@demo.test", "Thomas Green", "1step-100k", "trailing"),
             ]
             now = datetime.now(timezone.utc)
             login_seq = 100001
@@ -523,6 +524,45 @@ class KycIn(BaseModel):
 
 class PayoutReqIn(BaseModel):
     method: str = "bank"
+    amount: float | None = None      # None = cała dostępna działka tradera
+    details: dict | None = None      # dane wypłaty zależne od metody
+
+
+# Pola WYMAGANE per metoda — bez nich admin nie ma jak wykonać przelewu.
+_PAYOUT_FIELDS = {
+    "usdt": ("network", "address"),
+    "bank": ("holder", "iban", "swift"),
+    "wise": ("email",),
+}
+_USDT_NETWORKS = {"TRC20", "BEP20", "POLYGON"}
+
+
+def _payout_details_json(method: str, details: dict) -> str:
+    """Waliduje dane wypłaty i zwraca je jako JSON do zapisania przy wniosku."""
+    if method not in _PAYOUT_FIELDS:
+        raise HTTPException(400, "Unknown payout method — use usdt, bank or wise")
+    clean: dict[str, str] = {}
+    for f in _PAYOUT_FIELDS[method]:
+        v = str((details or {}).get(f) or "").strip()
+        if not v:
+            labels = {"network": "USDT network", "address": "wallet address",
+                      "holder": "account holder", "iban": "IBAN / account number",
+                      "swift": "SWIFT / BIC", "email": "Wise email"}
+            raise HTTPException(400, f"Missing payout detail: {labels.get(f, f)}")
+        clean[f] = v[:120]
+    if method == "usdt":
+        clean["network"] = clean["network"].upper().replace("-", "")
+        if clean["network"] not in _USDT_NETWORKS:
+            raise HTTPException(400, "Unsupported USDT network — use TRC-20, BEP-20 or Polygon")
+        if len(clean["address"]) < 15:
+            raise HTTPException(400, "The wallet address looks too short")
+    if method == "bank":
+        v = str((details or {}).get("bank_name") or "").strip()
+        if v:
+            clean["bank_name"] = v[:120]
+    if method == "wise" and "@" not in clean["email"]:
+        raise HTTPException(400, "The Wise email does not look like an email address")
+    return json.dumps(clean)
 
 
 @app.get("/api/me/accounts")
@@ -597,9 +637,18 @@ def request_payout(account_id: int, payload: PayoutReqIn, trader: Trader = Depen
         profit = round(acc.balance - acc.initial_balance, 2)
         if profit <= 0:
             raise HTTPException(400, "No profit available to pay out")
-        share = round(profit * acc.profit_split_pct / 100.0, 2)
+        available = round(profit * acc.profit_split_pct / 100.0, 2)
+        # Trader sam wybiera kwotę (część lub całość dostępnej działki).
+        share = round(float(payload.amount), 2) if payload.amount is not None else available
+        if share <= 0:
+            raise HTTPException(400, "The payout amount must be greater than zero")
+        if share > available:
+            raise HTTPException(400, f"The amount exceeds your available share (${available:,.2f})")
+        method = (payload.method or "").lower()
+        details_json = _payout_details_json(method, payload.details or {})
         pr = PayoutRequest(account_id=acc.id, trader_id=tr.id, profit_amount=profit,
-                           trader_share=share, method=payload.method, status="pending")
+                           trader_share=share, method=method, details=details_json,
+                           status="pending")
         session.add(pr)
         session.commit()
         notify.send("payout_requested", tr.email, {"name": tr.full_name or tr.email,
@@ -851,7 +900,7 @@ def my_payouts(trader: Trader = Depends(auth.current_trader)):
             "requests": [{"id": r.id, "ts": r.ts.isoformat(),
                           "account": by_id[r.account_id].login if r.account_id in by_id else "?",
                           "profit_amount": r.profit_amount, "trader_share": r.trader_share,
-                          "status": r.status} for r in reqs],
+                          "method": r.method, "status": r.status} for r in reqs],
             # Zrealizowane wyplaty — wniosek to dopiero prosba, a trader chce
             # widziec, co faktycznie do niego trafilo i miec do tego certyfikat.
             "history": [{"id": p.id, "ts": p.ts.isoformat(),
@@ -1203,10 +1252,14 @@ def admin_payout_requests():
         for r in rows:
             acc = session.get(Account, r.account_id)
             tr = session.get(Trader, r.trader_id)
+            try:
+                details = json.loads(r.details) if r.details else {}
+            except ValueError:
+                details = {}
             out.append({"id": r.id, "account_login": acc.login if acc else None,
                         "trader_email": tr.email if tr else None, "profit_amount": r.profit_amount,
-                        "trader_share": r.trader_share, "method": r.method, "status": r.status,
-                        "ts": r.ts.isoformat()})
+                        "trader_share": r.trader_share, "method": r.method, "details": details,
+                        "status": r.status, "ts": r.ts.isoformat()})
         return out
     finally:
         session.close()
@@ -1232,14 +1285,19 @@ def admin_approve_payout(req_id: int):
 
         session.add(Payout(account_id=acc.id, profit_amount=r.profit_amount,
                            trader_share=round(r.trader_share + fee_refund, 2), paid=True,
-                           balance_reset=True))
+                           balance_reset=True, method=r.method))
         r.status = "paid"
-        # po wypłacie konto wraca do salda startowego (wypłacamy zysk)
-        acc.balance = acc.initial_balance
-        acc.equity = acc.initial_balance
-        acc.peak_equity = acc.initial_balance
-        acc.day_start_equity = acc.initial_balance
-        acc.day_start_balance = acc.initial_balance
+        # Trader mógł poprosić o CZĘŚĆ dostępnej działki — z salda schodzi profit
+        # proporcjonalny do wypłaconej kwoty (kwota / split). Pełna kwota sprowadza
+        # konto dokładnie do salda startowego, jak dotychczasowy reset.
+        split = acc.profit_split_pct / 100.0 if acc.profit_split_pct else 1.0
+        consumed = round(r.trader_share / split, 2)
+        new_balance = max(acc.initial_balance, round(acc.balance - consumed, 2))
+        acc.balance = new_balance
+        acc.equity = new_balance
+        acc.peak_equity = new_balance
+        acc.day_start_equity = new_balance
+        acc.day_start_balance = new_balance
         acc.best_day_profit = 0.0
         session.commit()
         notify.send("payout_approved", tr.email, {"name": tr.full_name or tr.email,
@@ -1282,7 +1340,7 @@ def admin_issue_payout(account_id: int, payload: IssuePayoutIn):
 
         if acc.status != "funded":
             raise HTTPException(400, "A payout can only be issued on a funded account — "
-                                     f"to konto ma status '{acc.status}'")
+                                     f"this account's status is '{acc.status}'")
         profit = round(max(0.0, acc.balance - acc.initial_balance), 2)
         share = payload.amount if payload.amount is not None else round(
             profit * acc.profit_split_pct / 100.0, 2)
@@ -1481,7 +1539,7 @@ def admin_issue_certificate(account_id: int, payload: CertIn):
         if not _cert_kind_available(acc, payload.kind):
             etap = CERT_KINDS[payload.kind][0]
             raise HTTPException(400, f"This account has not reached the {etap} stage. "
-                                     f"Przestaw najpierw fazę konta.")
+                                     f"Switch the account's phase first.")
         istnieje = (session.query(Certificate)
                     .filter(Certificate.account_id == account_id,
                             Certificate.kind == payload.kind).first())
@@ -2042,7 +2100,7 @@ def delete_account(account_id: int):
         # klientowi cudze transakcje i dałoby staremu dostęp do jego konta.
         # Zostaje `claimed` i dostaje powód wycofania — panel ma to pokazać.
         (session.query(PoolAccount).filter(PoolAccount.claimed_by_account_id == acc.id)
-         .update({PoolAccount.retired_reason: "konto usunięte"}, synchronize_session=False))
+         .update({PoolAccount.retired_reason: "account deleted"}, synchronize_session=False))
 
         session.delete(acc)
         session.commit()
@@ -2055,27 +2113,23 @@ def delete_account(account_id: int):
 def leaderboard():
     """Publiczny ranking — realne konta, ale nazwiska MASKOWANE (RODO/prywatność).
 
-    Zysk liczony narastająco: obecny profit + suma już wypłaconych zysków.
-    Bez tego trader po zatwierdzonej wypłacie spadałby na 0%, bo wypłata
-    resetuje balance do salda startowego.
+    Ranking liczony WPROST z bieżącego equity (balance) kont FUNDED — bez
+    doliczania wypłaconych zysków i bez kont w ewaluacji. Po wypłacie trader
+    świadomie schodzi w rankingu: pokazujemy stan konta, nie życiorys.
     """
     session = SessionLocal()
     try:
-        # Ranking pokazuje wylacznie konta FUNDED — to jest osiagniecie, ktore
-        # ma znaczenie. Konta w ewaluacji nie konkuruja z tymi, ktore ja przeszly.
         accs = session.query(Account).filter(Account.status == "funded").all()
-        paid_profit: dict[int, float] = {}
-        for p in session.query(Payout).all():
-            paid_profit[p.account_id] = paid_profit.get(p.account_id, 0.0) + p.profit_amount
         rows = []
         for a in accs:
-            profit = (a.balance - a.initial_balance) + paid_profit.get(a.id, 0.0)
-            profit_pct = round(profit / a.initial_balance * 100, 2)
+            equity_now = round(a.balance, 2)
+            profit_pct = round((equity_now - a.initial_balance) / a.initial_balance * 100, 2)
             tr = session.get(Trader, a.trader_id) if a.trader_id else None
             country = tr.kyc_country if (tr and tr.kyc_status == "approved" and tr.kyc_country) else None
             rows.append({"trader": _mask_name(a.trader_name or (tr.full_name if tr else "")),
                          "country": country, "phase": a.phase, "status": a.status,
-                         "profit_pct": profit_pct, "account_size": a.initial_balance})
+                         "equity": equity_now, "profit_pct": profit_pct,
+                         "account_size": a.initial_balance})
         rows.sort(key=lambda r: r["profit_pct"], reverse=True)
         return rows[:20]
     finally:

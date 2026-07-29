@@ -1,12 +1,12 @@
-/* Certyfikaty (wypłata / zaliczenie) — ciemna płyta z JASNYMI akcentami:
-   świecąca ramka w elektrycznym błękicie, logo marki, wielka kwota, stopka
-   z datą, numerem certyfikatu i kodem QR do weryfikacji.
+/* Certificates (payout / stage pass) — dark plate with BRIGHT accents:
+   glowing electric-blue frame, brand logo, large amount, footer with the
+   date, certificate number and a QR code for verification.
 
-   Świadomie BEZ numeru rachunku MT5 — dokument idzie na zewnątrz.
+   Deliberately WITHOUT the MT5 account number — this document goes external.
 
-   Rozmiary skalują się jednostkami KONTENERA (cqw), nie viewportu: karta ma
-   sufit 880 px, więc `vw` rosłoby razem z oknem i treść wychodziłaby poza
-   kartę na szerokim ekranie. */
+   Sizes scale with CONTAINER units (cqw), not the viewport: the card is
+   capped at 880 px, so `vw` would grow with the window and content would
+   overflow the card on wide screens. */
 
 :root{
   --k-tlo:#050914;
@@ -23,7 +23,7 @@
   background:radial-gradient(70% 55% at 50% 0%,#0d1a3a 0%,var(--k-tlo) 72%);
 }
 
-/* Ramka: jasna, świecąca krawędź — to ona daje „premium" na ciemnym tle */
+/* Frame: a bright glowing edge — it is what reads "premium" on the dark bg */
 .cert-card{
   container-type:inline-size;
   position:relative;width:min(880px,100%);
@@ -40,28 +40,28 @@
     radial-gradient(62% 44% at 50% 4%, rgba(43,139,255,.24) 0%, rgba(43,139,255,0) 64%),
     linear-gradient(168deg,#0b142c 0%,#070d1e 52%,#050914 100%);
 }
-/* znak wodny: nasze logo pod treścią */
+/* watermark: our logo behind the content */
 .cert-inner::before{
   content:"";position:absolute;z-index:-2;left:50%;top:48%;translate:-50% -50%;
   width:74%;aspect-ratio:1/1;
   background:url('/static/img/logo.png') center/contain no-repeat;
   opacity:.055;
 }
-/* gilosz — delikatny grawerunek, żeby płyta nie była pusta */
+/* guilloche — subtle engraving so the plate does not look empty */
 .cert-inner::after{
   content:"";position:absolute;z-index:-1;inset:-8%;
   background:url('/static/img/guilloche.svg') center/contain no-repeat;
   opacity:.16;mix-blend-mode:screen;pointer-events:none;
 }
 
-/* --- marka ---
-   NIE nazywać tego `.cert-brand` — ta klasa istnieje już w site.css (certyfikat
-   na landingu) i nadpisywała wordmark fioletem. */
+/* --- brand ---
+   Do NOT name this `.cert-brand` — that class already exists in site.css (the
+   landing-page certificate) and was repainting the wordmark purple. */
 .cert-logo{display:flex;align-items:center;gap:.45em;font-size:clamp(13px,2.8cqw,25px)}
 .cert-logo img{width:1.35em;height:1.35em}
 .cert-logo span{font-family:var(--display);font-weight:700;letter-spacing:-.015em}
 
-/* --- nagłówki --- */
+/* --- headings --- */
 .cert-eyebrow{
   display:flex;align-items:center;justify-content:center;gap:clamp(8px,1.7cqw,16px);
   margin-top:clamp(10px,2.4cqw,22px);width:min(72%,430px);
@@ -102,7 +102,7 @@
 }
 .cert-note{font-size:clamp(8.5px,1.6cqw,13px);color:var(--k-jasny);margin-top:clamp(4px,1cqw,9px)}
 
-/* --- metryki tuz pod kwota: data i rozmiar konta --- */
+/* --- metrics right below the amount: date and account size --- */
 .cert-meta{
   display:flex;justify-content:center;gap:clamp(18px,4.6cqw,52px);
   margin-top:clamp(8px,1.9cqw,17px);
@@ -117,7 +117,7 @@
   letter-spacing:.15em;font-size:clamp(7px,1.35cqw,10.5px);color:var(--k-cichy);
 }
 
-/* --- stopka: podpis + QR z numerem certyfikatu --- */
+/* --- footer: signature + QR with the certificate number --- */
 .cert-foot{
   margin-top:auto;width:100%;display:grid;
   grid-template-columns:1fr auto 1fr;align-items:end;
@@ -138,8 +138,8 @@
   display:flex;flex-direction:column;align-items:center;
   gap:clamp(3px,.7cqw,6px);
 }
-/* Bialy kafel z marginesem ciszy — tak QR skanuje sie najpewniej.
-   Modul ciemny na bieli, nie odwrotnie: czytniki tego oczekuja. */
+/* White tile with a quiet-zone margin — this is how a QR scans best.
+   Dark modules on white, not the other way round: readers expect that. */
 .cert-qr .qr-box{
   background:#fff;border-radius:10px;padding:clamp(6px,1.2cqw,11px);
   box-shadow:0 0 0 1px rgba(255,255,255,.5),0 8px 26px -12px rgba(0,0,0,.8);
@@ -155,19 +155,19 @@
   letter-spacing:.12em;font-size:clamp(5.5px,1.1cqw,8.5px);color:var(--k-cichy);
 }
 
-/* Adres weryfikacji — o stopień większy niż dawna nota drobnym drukiem
-   i wyraźnie niżej, pod samą krawędzią dokumentu. */
+/* Verification address — one step larger than the old fine print
+   and clearly lower, right under the edge of the document. */
 .cert-verify{
   font-size:clamp(8px,1.55cqw,12.5px);color:var(--k-cichy);line-height:1.5;
   margin-top:clamp(10px,2.4cqw,22px);text-align:center;overflow-wrap:anywhere;
 }
 
-/* --- pasek pod kartą (nie trafia na wydruk) --- */
+/* --- bar below the card (excluded from print) --- */
 .cert-actions{display:flex;gap:12px;align-items:center;font-size:13px;color:var(--k-cichy)}
 .cert-actions a{color:var(--k-jasny);text-decoration:none;font-weight:600}
 .cert-actions a:hover{text-decoration:underline}
 
-/* Na wąskim ekranie kwadrat robi się za ciasny i treść wychodziła poza kartę. */
+/* On narrow screens the square gets too tight and content overflowed the card. */
 @media (max-width:520px){
   .cert-inner{aspect-ratio:auto;padding-top:22px;padding-bottom:22px}
   .cert-foot{grid-template-columns:1fr;justify-items:center;gap:16px}
@@ -181,9 +181,9 @@
   .cert-card{box-shadow:none;width:100%;print-color-adjust:exact;-webkit-print-color-adjust:exact}
 }
 
-/* --- podglad na landingu (jasna sekcja) ---
-   Ta sama karta co realny dokument, tylko bez pelnoekranowego tla strony
-   i nieco luzniej, bo kolumna landingu jest wezsza niz sam certyfikat. */
+/* --- landing-page preview (light section) ---
+   The same card as the real document, only without the full-screen page
+   background and a bit looser: the landing column is narrower than the card. */
 .cert-demo{margin:0}
 .cert-demo .cert-inner{padding:clamp(16px,3.6cqw,30px)}
 .cert-demo .cert-blurb{max-width:44ch}
