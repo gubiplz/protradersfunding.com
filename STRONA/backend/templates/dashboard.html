@@ -189,7 +189,7 @@ const VIEWS={
     </div>
     <div class="todo-grid">
       ${todo(pendingPay,'payout requests to review','payouts','wallet')}
-      ${todo(kyc.length,'KYC submissions pending','kyc','shield')}
+      ${todo((kyc.pending||[]).length,'KYC submissions pending','kyc','shield')}
       ${todo(openTick,'support tickets open','tickets','chat')}
     </div>
     <div class="stats-row">
@@ -393,9 +393,11 @@ const VIEWS={
         <div><div class="lbl">Total in pool</div><div class="val">${rows.length}</div></div></div>
     </div>
     ${rows.length?`<div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>#</th><th>Login</th><th>Server</th><th>Size</th><th>State</th><th>Assigned to</th><th>When</th><th></th></tr></thead>
+      <thead><tr><th>#</th><th>Login</th><th>Password</th><th>Server</th><th>Size</th><th>State</th><th>Assigned to</th><th>When</th><th></th></tr></thead>
       <tbody>${rows.map(p=>`<tr>
         <td class="num">${p.id}</td><td class="num">${esc(p.platform_login)}${p.simulated?'<div class="muted" style="font-size:10.5px;letter-spacing:.06em">SIMULATED</div>':''}</td>
+        <td>${p.platform_password?`<span class="mono" style="cursor:pointer" title="Click to reveal"
+          onclick="this.textContent=this.textContent==='••••••••'?this.dataset.p:'••••••••'" data-p="${esc(p.platform_password)}">••••••••</span>`:'<span class="muted">—</span>'}</td>
         <td class="muted">${esc(p.platform_server)}</td><td class="num">$${fmt0(p.account_size)}</td>
         <td>${p.retired_reason?`<span class="status failed"><span class="dot"></span>retired</span>`
           :p.claimed?`<span class="status pending"><span class="dot"></span>assigned</span>`
@@ -405,7 +407,7 @@ const VIEWS={
         <td style="white-space:nowrap">
           <button class="btn-o sm" onclick="editPool(${p.id})">Edit</button>
           ${p.claimed?'':` <button class="btn-o sm" onclick="delPool(${p.id},'${esc(p.platform_login)}')">Remove</button>`}</td></tr>
-        <tr id="pool-edit-${p.id}" style="display:none"><td colspan="8" style="background:var(--bg)">
+        <tr id="pool-edit-${p.id}" style="display:none"><td colspan="9" style="background:var(--bg)">
           <div class="pool-form" style="margin:6px 0">
             <input id="ed-login-${p.id}" class="inp" value="${esc(p.platform_login)}" placeholder="MT5 login">
             <input id="ed-pass-${p.id}" class="inp" placeholder="New password (leave empty to keep)">

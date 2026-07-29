@@ -1844,6 +1844,10 @@ def admin_pool_list():
             acc = konta.get(p.claimed_by_account_id)
             pula.append({
                 "id": p.id, "platform_login": p.platform_login,
+                # Hasło jest potrzebne w panelu: wygenerowanych (simulated) nikt
+                # nigdy nie widział, a to admin przekazuje je dalej. Panel i tak
+                # jest za logowaniem administratora.
+                "platform_password": p.platform_password,
                 "platform_server": p.platform_server, "account_size": p.account_size,
                 "claimed": p.claimed, "claimed_by_account_id": p.claimed_by_account_id,
                 "claimed_at": p.claimed_at.isoformat() if p.claimed_at else None,
