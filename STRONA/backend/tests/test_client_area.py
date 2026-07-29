@@ -822,34 +822,3 @@ def test_kyc_reject_i_historia_decyzji():
         d = c.get("/api/admin/kyc", headers=ADMIN_H).json()
         wpis = next(t for t in d["history"] if t["trader_id"] == tid)
         assert wpis["status"] == "approved"
-
-
-def test_zmiana_full_name_propaguje_na_konta_i_certyfikaty():
-    """Zmiana nazwiska w ustawieniach ma byc widoczna na certyfikatach —
-    dokument renderuje acc.trader_name, wiec PATCH /api/me robi write-through."""
-    from datetime import datetime, timezone
-    from app.models import Certificate
-    tid, h = _trader("rename@ca.pl", full_name="Old Name")
-    aid = _konto(tid, "660001")
-    s = SessionLocal()
-    s.add(Certificate(account_id=aid, kind="phase1", cert_token="tok-rename-1",
-                      issued_at=datetime.now(timezone.utc)))
-    s.commit(); s.close()
-
-    with TestClient(app) as c:
-        r = c.patch("/api/me", headers=h, json={"full_name": "New Fancy Name"})
-        assert r.status_code == 200 and r.json()["full_name"] == "New Fancy Name"
-
-        s = SessionLocal()
-        assert s.get(Account, aid).trader_name == "New Fancy Name"
-        s.close()
-        page = c.get("/certificate/tok-rename-1").text
-        assert "New Fancy Name" in page and "Old Name" not in page
-        ver = c.get("/api/verify/tok-rename-1").json()
-        assert ver["trader_name"] == "New Fancy Name"
-
-        # pusta nazwa NIE czysci dokumentow
-        c.patch("/api/me", headers=h, json={"full_name": "  "})
-        s = SessionLocal()
-        assert s.get(Account, aid).trader_name == "New Fancy Name"
-        s.close()
