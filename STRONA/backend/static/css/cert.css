@@ -123,7 +123,7 @@
   grid-template-columns:1fr auto;align-items:end;
   gap:clamp(10px,2.4cqw,24px);
   /* wyraźny oddech od krawędzi karty — podpis i QR nie mogą jej dotykać */
-  padding:clamp(9px,2cqw,18px) clamp(16px,4cqw,40px) 0;
+  padding:clamp(9px,2cqw,18px) clamp(32px,8cqw,80px) 0;
   border-top:1px solid var(--k-linia);
 }
 .cert-signblock{
