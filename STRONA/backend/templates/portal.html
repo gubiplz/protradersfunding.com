@@ -701,6 +701,10 @@ const VIEWS={
     return;
   }
   $('view').innerHTML=`
+    ${s==='rejected'?`<div class="panel" style="max-width:760px;margin-bottom:14px;border-color:#f5c6c6;background:#fdf3f3">
+      <b style="font-size:13.5px">Your previous verification was declined.</b>
+      <p class="muted" style="font-size:12.5px;margin-top:4px">Please double-check your details and documents, then submit again. Reach out via Support if you need help.</p>
+    </div>`:''}
     <div class="sec-card" style="max-width:760px">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
         <div class="tile-ic blue">${ICO.shield}</div><h3 style="margin:0">Submit KYC Documents</h3>

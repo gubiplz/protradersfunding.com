@@ -793,3 +793,32 @@ def test_grant_zapisuje_oplacony_tier_na_koncie():
         assert c.post("/api/admin/grant", headers=ADMIN_H,
                       json={"trader_id": tid, "product_key": "2step-50k",
                             "bogo_paid_key": "nie-ma"}).status_code == 404
+
+
+def test_kyc_reject_i_historia_decyzji():
+    """Admin widzi pending + historię (approved/rejected); reject pozwala
+    traderowi wysłać wniosek ponownie."""
+    tid, h = _trader("kyc-hist@test.pl", "Historia Kyc")
+    with TestClient(app) as c:
+        c.post("/api/me/kyc", headers=h, json={"full_name": "Historia Kyc",
+                                               "country": "PL", "id_type": "passport"})
+        d = c.get("/api/admin/kyc", headers=ADMIN_H).json()
+        assert any(t["trader_id"] == tid for t in d["pending"])
+
+        r = c.post(f"/api/admin/kyc/{tid}/reject", headers=ADMIN_H)
+        assert r.status_code == 200
+        d = c.get("/api/admin/kyc", headers=ADMIN_H).json()
+        assert not any(t["trader_id"] == tid for t in d["pending"])
+        wpis = next(t for t in d["history"] if t["trader_id"] == tid)
+        assert wpis["status"] == "rejected" and wpis["reviewed_at"]
+
+        # trader może poprawić i wysłać ponownie -> wraca do pending
+        c.post("/api/me/kyc", headers=h, json={"full_name": "Historia Kyc",
+                                               "country": "PL", "id_type": "passport"})
+        d = c.get("/api/admin/kyc", headers=ADMIN_H).json()
+        assert any(t["trader_id"] == tid for t in d["pending"])
+
+        c.post(f"/api/admin/kyc/{tid}/approve", headers=ADMIN_H)
+        d = c.get("/api/admin/kyc", headers=ADMIN_H).json()
+        wpis = next(t for t in d["history"] if t["trader_id"] == tid)
+        assert wpis["status"] == "approved"

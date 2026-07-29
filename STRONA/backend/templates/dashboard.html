@@ -243,9 +243,10 @@ const VIEWS={
  },
 
  async kyc(){
-  const rows=await api('/api/admin/kyc');
-  $('view').innerHTML=rows.length?`<div class="badge-grid" style="grid-template-columns:repeat(auto-fill,minmax(320px,1fr))">`+
-    rows.map(t=>`<div class="panel">
+  const d=await api('/api/admin/kyc');
+  const pending=d.pending||[], hist=d.history||[];
+  const cards=pending.length?`<div class="badge-grid" style="grid-template-columns:repeat(auto-fill,minmax(320px,1fr))">`+
+    pending.map(t=>`<div class="panel">
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
         <div><h3 style="font-size:15.5px">${esc(t.full_name||t.email)}</h3>
           <div class="muted" style="font-size:12px">${esc(t.email)}</div></div>
@@ -262,22 +263,45 @@ const VIEWS={
         ${(t.docs||[]).length?t.docs.map(k=>`<button class="btn-o sm" onclick="viewDoc(${t.trader_id},'${k}')">${esc(k.replace('_',' '))}</button>`).join('')
           :'<span class="muted" style="font-size:12px">No documents uploaded</span>'}
       </div>
-      <button class="btn-p" style="width:100%" onclick="approveKyc(${t.trader_id})">Approve verification</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn-p" style="flex:1" onclick="approveKyc(${t.trader_id})">Approve</button>
+        <button class="btn-o" onclick="rejectKyc(${t.trader_id})">Reject</button>
+      </div>
     </div>`).join('')+`</div>`
     :`<div class="empty"><h3>Nothing to verify</h3><p>KYC submissions from traders show up here.</p></div>`;
+  const histTbl=hist.length?`<div class="sec-card" style="margin-top:18px">
+    <h3>History</h3>
+    <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Past verification decisions.</p>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Reviewed</th><th>Trader</th><th>Country</th><th>Document</th><th>Status</th><th>Documents</th></tr></thead>
+      <tbody>${hist.map(t=>`<tr>
+        <td class="muted">${t.reviewed_at?dstr(t.reviewed_at):'—'}</td>
+        <td>${esc(t.full_name||'—')}<div class="muted" style="font-size:11.5px">${esc(t.email)}</div></td>
+        <td class="muted">${esc(t.country||'—')}</td>
+        <td class="muted">${esc(t.id_type||'—')} ${esc(t.id_number||t.doc_ref||'')}</td>
+        <td><span class="status ${t.status==='approved'?'funded':'failed'}"><span class="dot"></span>${esc(t.status)}</span></td>
+        <td>${(t.docs||[]).map(k=>`<button class="btn-o sm" onclick="viewDoc(${t.trader_id},'${k}')">${esc(k.replace('_',' '))}</button>`).join(' ')||'<span class="muted">—</span>'}</td></tr>`).join('')}
+      </tbody></table></div></div>`:'';
+  $('view').innerHTML=cards+histTbl;
  },
 
  async tickets(){
   const rows=await api('/api/admin/tickets');
   window._tickets=rows;
-  $('view').innerHTML=rows.length?`<div class="tbl-wrap">`+rows.map(t=>`
+  const row=t=>`
     <div class="ticket-row" onclick="openTicket(${t.id})">
       <div class="tile-ic ${t.status==='open'?'orange':t.status==='answered'?'green':'blue'}" style="width:36px;height:36px;flex:0 0 36px">${ICO.chat}</div>
       <div class="sub"><b>${esc(t.subject)}</b>
         <span>#${t.id} · ${esc(t.trader_email||'—')} · ${t.messages} message${t.messages>1?'s':''} · ${dstr(t.last_ts)}</span></div>
       <span class="status ${t.status==='closed'?'failed':t.status==='answered'?'paid':'pending'}"><span class="dot"></span>${esc(t.status)}</span>
-    </div>`).join('')+`</div>`
-    :`<div class="empty"><h3>No tickets</h3><p>Support conversations started by traders appear here.</p></div>`;
+    </div>`;
+  const active=rows.filter(t=>t.status!=='closed'), closed=rows.filter(t=>t.status==='closed');
+  $('view').innerHTML=(active.length?`<div class="tbl-wrap">`+active.map(row).join('')+`</div>`
+      :`<div class="empty"><h3>No open tickets</h3><p>Support conversations started by traders appear here.</p></div>`)
+    +(closed.length?`<div class="sec-card" style="margin-top:18px">
+      <h3>History</h3>
+      <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Closed tickets — click to review the conversation.</p>
+      <div class="tbl-wrap">`+closed.map(row).join('')+`</div></div>`:'');
  },
 
  async orders(){
@@ -742,6 +766,11 @@ async function approvePayout(id){
 }
 async function approveKyc(tid){
   try{await api(`/api/admin/kyc/${tid}/approve`,{method:'POST'});toast('KYC approved.','ok');go('kyc')}
+  catch(e){toast('Error: '+e.message,'err')}
+}
+async function rejectKyc(tid){
+  if(!confirm('Reject this verification?\n\nThe trader will be asked to submit their KYC again.'))return;
+  try{await api(`/api/admin/kyc/${tid}/reject`,{method:'POST'});toast('KYC rejected.','ok');go('kyc')}
   catch(e){toast('Error: '+e.message,'err')}
 }
 async function viewDoc(tid,kind){

@@ -65,6 +65,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "kyc_doc_front": "VARCHAR(80)",
         "kyc_doc_back": "VARCHAR(80)",
         "kyc_doc_residence": "VARCHAR(80)",
+        "kyc_reviewed_at": "TIMESTAMP",
         "notify_updates": "BOOLEAN DEFAULT TRUE",
         "notify_trading": "BOOLEAN DEFAULT TRUE",
         "notify_payouts": "BOOLEAN DEFAULT TRUE",

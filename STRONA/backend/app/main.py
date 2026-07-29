@@ -1677,7 +1677,7 @@ def admin_bot_start(account_id: int, payload: BotIn):
             raise HTTPException(404, "Account not found")
         if acc.status not in ("active", "funded"):
             raise HTTPException(400, f"Account status is '{acc.status}' — the bot only runs "
-                                     f"na kontach aktywnych i funded")
+                                     f"on active and funded accounts")
         tradebot.start(session, acc, style=payload.style, pace=payload.pace,
                        target_pct=payload.target_pct)
         return {"bot_enabled": True, "login": acc.login, "style": acc.bot_style,
@@ -1736,18 +1736,29 @@ def admin_bot_stop(account_id: int):
         session.close()
 
 
+def _kyc_dict(t: Trader) -> dict:
+    return {"trader_id": t.id, "email": t.email, "full_name": t.kyc_fullname,
+            "country": t.kyc_country, "doc_ref": t.kyc_doc_ref,
+            "dob": t.kyc_dob, "address": t.kyc_address,
+            "id_type": t.kyc_id_type, "id_number": t.kyc_id_number,
+            "docs": [k for k, col in _KYC_KINDS.items() if getattr(t, col, None)],
+            "status": t.kyc_status,
+            "submitted_at": t.kyc_submitted_at.isoformat() if t.kyc_submitted_at else None,
+            "reviewed_at": t.kyc_reviewed_at.isoformat() if t.kyc_reviewed_at else None}
+
+
 @app.get("/api/admin/kyc", dependencies=[Depends(auth.require_admin)])
 def admin_kyc():
+    """Oczekujące wnioski + historia decyzji (approved/rejected) do przeglądania."""
     session = SessionLocal()
     try:
-        rows = session.query(Trader).filter(Trader.kyc_status == "pending").all()
-        return [{"trader_id": t.id, "email": t.email, "full_name": t.kyc_fullname,
-                 "country": t.kyc_country, "doc_ref": t.kyc_doc_ref,
-                 "dob": t.kyc_dob, "address": t.kyc_address,
-                 "id_type": t.kyc_id_type, "id_number": t.kyc_id_number,
-                 "docs": [k for k, col in _KYC_KINDS.items() if getattr(t, col, None)],
-                 "submitted_at": t.kyc_submitted_at.isoformat() if t.kyc_submitted_at else None}
-                for t in rows]
+        pending = session.query(Trader).filter(Trader.kyc_status == "pending").all()
+        history = (session.query(Trader)
+                   .filter(Trader.kyc_status.in_(("approved", "rejected")))
+                   .order_by(Trader.kyc_reviewed_at.desc().nullslast(), Trader.id.desc())
+                   .limit(200).all())
+        return {"pending": [_kyc_dict(t) for t in pending],
+                "history": [_kyc_dict(t) for t in history]}
     finally:
         session.close()
 
@@ -1760,9 +1771,27 @@ def admin_approve_kyc(trader_id: int):
         if not tr:
             raise HTTPException(404, "Trader not found")
         tr.kyc_status = "approved"
+        tr.kyc_reviewed_at = datetime.now(timezone.utc)
         session.commit()
         notify.send("kyc_approved", tr.email, {"name": tr.full_name or tr.email})
         return {"approved": trader_id}
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/kyc/{trader_id}/reject", dependencies=[Depends(auth.require_admin)])
+def admin_reject_kyc(trader_id: int):
+    """Odrzuca weryfikację — trader może poprawić dane i wysłać KYC ponownie."""
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader_id)
+        if not tr:
+            raise HTTPException(404, "Trader not found")
+        tr.kyc_status = "rejected"
+        tr.kyc_reviewed_at = datetime.now(timezone.utc)
+        session.commit()
+        notify.send("kyc_rejected", tr.email, {"name": tr.full_name or tr.email})
+        return {"rejected": trader_id}
     finally:
         session.close()
 

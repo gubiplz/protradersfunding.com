@@ -58,6 +58,7 @@ class Trader(Base):
     notify_payouts: Mapped[bool] = mapped_column(Boolean, default=True)
     notify_marketing: Mapped[bool] = mapped_column(Boolean, default=True)   # nic nie wysylamy, ale pref istnieje
     kyc_submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    kyc_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 

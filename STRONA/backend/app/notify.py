@@ -123,6 +123,11 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             "Identity verification approved ✅",
             f"{name}, your KYC verification has been accepted. You can now request payouts.",
         ),
+        "kyc_rejected": (
+            "Identity verification — action needed",
+            f"{name}, we could not verify your identity with the documents provided. "
+            f"Please review your details and submit the verification again from your dashboard.",
+        ),
         "ticket_reply": (
             f"Support replied to your ticket #{ctx.get('ticket_id')} 💬",
             f"{name}, our support team replied to your ticket "
@@ -214,7 +219,8 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
 # Kategoria preferencji per zdarzenie (Settings -> Notification Preferences).
 _PREF_BY_EVENT = {
     "welcome": "notify_updates", "credentials": "notify_updates",
-    "kyc_approved": "notify_updates", "ticket_reply": "notify_updates",
+    "kyc_approved": "notify_updates", "kyc_rejected": "notify_updates",
+    "ticket_reply": "notify_updates",
     "challenge_granted": "notify_updates",
     "phase_passed": "notify_trading", "account_funded": "notify_trading",
     "breached": "notify_trading",
