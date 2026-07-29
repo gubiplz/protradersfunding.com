@@ -69,3 +69,48 @@ def test_login_bez_malpy_dziala():
     _trader("admin", "admin", admin=True)
     r = _zaloguj("admin", "admin")
     assert r.status_code == 200 and r.json()["trader"]["is_admin"] is True
+
+
+# --------------------------------------------------------------------------- #
+#  Strona /admin — dla nie-admina po prostu NIE ISTNIEJE                        #
+# --------------------------------------------------------------------------- #
+def test_strona_admina_nie_istnieje_bez_logowania():
+    """404, a nie 401/403: „brak dostepu" potwierdzaloby, ze cos tam jest.
+
+    Wczesniej /admin zwracalo pelny HTML panelu — kazdy widzial nawigacje
+    (Accounts, Payouts, KYC, MT5 Pool...) i przyciski, zanim cokolwiek go
+    zapytalo o haslo.
+    """
+    # WLASNY klient: wspoldzielony `client` nosi ciasteczko z logowan w innych
+    # testach tego pliku i wpuscilby nas jako admin.
+    r = TestClient(app).get("/admin")
+    assert r.status_code == 404
+    assert "MT5 Pool" not in r.text and "Grant challenge" not in r.text
+
+
+def test_zwykly_trader_tez_nie_widzi_strony_admina():
+    _trader("szary@firma.pl", "tajne123", admin=False)
+    c = TestClient(app)
+    assert c.post("/api/auth/login", json={"email": "szary@firma.pl", "password": "tajne123"}).status_code == 200
+    assert c.get("/admin").status_code == 404      # ciasteczko sesji jest, ale bez is_admin
+
+
+def test_admin_dostaje_strone_po_zalogowaniu():
+    _trader("szefowa@firma.pl", "tajne123", admin=True)
+    c = TestClient(app)
+    r = c.post("/api/auth/login", json={"email": "szefowa@firma.pl", "password": "tajne123"})
+    assert r.status_code == 200
+    assert c.cookies.get("pf_session"), "logowanie ma zalozyc ciasteczko sesji"
+
+    strona = c.get("/admin")
+    assert strona.status_code == 200 and "MT5 Pool" in strona.text
+
+
+def test_wylogowanie_zamyka_strone_admina():
+    _trader("wyloguj@firma.pl", "tajne123", admin=True)
+    c = TestClient(app)
+    c.post("/api/auth/login", json={"email": "wyloguj@firma.pl", "password": "tajne123"})
+    assert c.get("/admin").status_code == 200
+
+    c.post("/api/auth/logout")
+    assert c.get("/admin").status_code == 404

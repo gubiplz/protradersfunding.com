@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from time import monotonic
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -334,12 +334,33 @@ class LoginIn(BaseModel):
     password: str
 
 
+SESSION_COOKIE = "pf_session"
+
+
+def _ustaw_ciasteczko_sesji(response: Response, token: str) -> None:
+    """Zapisuje sesje w ciasteczku, zeby SERWER mogl bramkowac strone /admin.
+
+    API dalej uwierzytelnia sie naglowkiem Authorization — ciasteczko sluzy
+    wylacznie do decyzji „czy w ogole wydac te strone", wiec nie otwiera drogi
+    do CSRF. HttpOnly, bo JavaScript i tak trzyma swoj token osobno.
+    """
+    response.set_cookie(SESSION_COOKIE, token, max_age=auth.TOKEN_MAX_AGE,
+                        httponly=True, samesite="lax",
+                        secure=settings.app_base_url.startswith("https"))
+
+
+@app.post("/api/auth/logout")
+def logout(response: Response):
+    response.delete_cookie(SESSION_COOKIE)
+    return {"ok": True}
+
+
 @app.post("/api/auth/signup")
-def signup(payload: SignupIn):
+def signup(payload: SignupIn, response: Response):
     session = SessionLocal()
     try:
         if session.query(Trader).filter(Trader.email == payload.email.lower()).first():
-            raise HTTPException(400, "Konto z tym e-mailem już istnieje")
+            raise HTTPException(400, "An account with this e-mail already exists")
         tr = Trader(
             email=payload.email.lower(), password_hash=auth.hash_password(payload.password),
             full_name=payload.full_name, referral_code=_gen_ref_code(),
@@ -348,20 +369,24 @@ def signup(payload: SignupIn):
         session.add(tr)
         session.commit()
         notify.send("welcome", tr.email, {"name": tr.full_name or tr.email})
-        return {"token": auth.make_token(tr.id), "trader": {"id": tr.id, "email": tr.email,
+        token = auth.make_token(tr.id)
+        _ustaw_ciasteczko_sesji(response, token)
+        return {"token": token, "trader": {"id": tr.id, "email": tr.email,
                 "full_name": tr.full_name, "referral_code": tr.referral_code}}
     finally:
         session.close()
 
 
 @app.post("/api/auth/login")
-def login(payload: LoginIn):
+def login(payload: LoginIn, response: Response):
     session = SessionLocal()
     try:
         tr = session.query(Trader).filter(Trader.email == payload.email.lower()).first()
         if not tr or not auth.verify_password(payload.password, tr.password_hash):
-            raise HTTPException(401, "Błędny e-mail lub hasło")
-        return {"token": auth.make_token(tr.id), "trader": {"id": tr.id, "email": tr.email,
+            raise HTTPException(401, "Wrong e-mail or password")
+        token = auth.make_token(tr.id)
+        _ustaw_ciasteczko_sesji(response, token)
+        return {"token": token, "trader": {"id": tr.id, "email": tr.email,
                 "full_name": tr.full_name, "is_admin": tr.is_admin, "referral_code": tr.referral_code}}
     finally:
         session.close()
@@ -530,7 +555,7 @@ def my_account_detail(account_id: int, trader: Trader = Depends(auth.current_tra
     try:
         acc = session.get(Account, account_id)
         if not acc or acc.trader_id != trader.id:
-            raise HTTPException(404, "Konto nie istnieje")
+            raise HTTPException(404, "Account not found")
         _ensure_cert_token(session, acc)
         return _account_detail(session, acc)
     finally:
@@ -563,15 +588,15 @@ def request_payout(account_id: int, payload: PayoutReqIn, trader: Trader = Depen
     try:
         acc = session.get(Account, account_id)
         if not acc or acc.trader_id != trader.id:
-            raise HTTPException(404, "Konto nie istnieje")
+            raise HTTPException(404, "Account not found")
         if acc.status != "funded":
-            raise HTTPException(400, "Wypłata tylko dla konta funded")
+            raise HTTPException(400, "Payouts are available on funded accounts only")
         tr = session.get(Trader, trader.id)
         if tr.kyc_status != "approved":
-            raise HTTPException(403, "Najpierw przejdź weryfikację KYC")
+            raise HTTPException(403, "Complete KYC verification first")
         profit = round(acc.balance - acc.initial_balance, 2)
         if profit <= 0:
-            raise HTTPException(400, "Brak zysku do wypłaty")
+            raise HTTPException(400, "No profit available to pay out")
         share = round(profit * acc.profit_split_pct / 100.0, 2)
         pr = PayoutRequest(account_id=acc.id, trader_id=tr.id, profit_amount=profit,
                            trader_share=share, method=payload.method, status="pending")
@@ -590,7 +615,7 @@ def request_payout(account_id: int, payload: PayoutReqIn, trader: Trader = Depen
 def _own_account(session, trader: Trader, account_id: int) -> Account:
     acc = session.get(Account, account_id)
     if not acc or acc.trader_id != trader.id:
-        raise HTTPException(404, "Konto nie istnieje")
+        raise HTTPException(404, "Account not found")
     return acc
 
 
@@ -770,7 +795,7 @@ def my_certificate_issue(payload: MyCertIn, trader: Trader = Depends(auth.curren
     wiec nie moze twierdzic czegos, czego nie ma w bazie.
     """
     if payload.kind not in CERT_KINDS:
-        raise HTTPException(400, "Nieznany rodzaj certyfikatu")
+        raise HTTPException(400, "Unknown certificate type")
     session = SessionLocal()
     try:
         acc = _own_account(session, trader, payload.account_id)
@@ -795,7 +820,7 @@ def my_payout_certificate(payout_id: int, trader: Trader = Depends(auth.current_
     try:
         pay = session.get(Payout, payout_id)
         if not pay:
-            raise HTTPException(404, "Wypłata nie istnieje")
+            raise HTTPException(404, "Payout not found")
         _own_account(session, trader, pay.account_id)   # rzuca 404 gdy nie jego
         if not pay.cert_token:
             pay.cert_token = secrets.token_urlsafe(16)[:32]
@@ -827,6 +852,14 @@ def my_payouts(trader: Trader = Depends(auth.current_trader)):
                           "account": by_id[r.account_id].login if r.account_id in by_id else "?",
                           "profit_amount": r.profit_amount, "trader_share": r.trader_share,
                           "status": r.status} for r in reqs],
+            # Zrealizowane wyplaty — wniosek to dopiero prosba, a trader chce
+            # widziec, co faktycznie do niego trafilo i miec do tego certyfikat.
+            "history": [{"id": p.id, "ts": p.ts.isoformat(),
+                         "account": by_id[p.account_id].login if p.account_id in by_id else "?",
+                         "profit_amount": p.profit_amount, "trader_share": p.trader_share,
+                         "method": p.method, "paid": bool(p.paid),
+                         "cert_token": p.cert_token}
+                        for p in sorted(pays, key=lambda x: x.ts, reverse=True)],
         }
     finally:
         session.close()
@@ -856,7 +889,7 @@ def journal_list(trader: Trader = Depends(auth.current_trader)):
 def journal_create(payload: JournalIn, trader: Trader = Depends(auth.current_trader)):
     title = payload.title.strip()
     if not title:
-        raise HTTPException(400, "Tytuł wpisu jest wymagany")
+        raise HTTPException(400, "An entry title is required")
     session = SessionLocal()
     try:
         if payload.account_id is not None:
@@ -876,7 +909,7 @@ def journal_delete(entry_id: int, trader: Trader = Depends(auth.current_trader))
     try:
         e = session.get(JournalEntry, entry_id)
         if not e or e.trader_id != trader.id:
-            raise HTTPException(404, "Wpis nie istnieje")
+            raise HTTPException(404, "Entry not found")
         session.delete(e)
         session.commit()
         return {"deleted": entry_id}
@@ -915,7 +948,7 @@ def _ticket_dict(session, t: SupportTicket, with_thread: bool = False) -> dict:
 def ticket_create(payload: TicketIn, trader: Trader = Depends(auth.current_trader)):
     subject, message = payload.subject.strip(), payload.message.strip()
     if not subject or not message:
-        raise HTTPException(400, "Temat i treść są wymagane")
+        raise HTTPException(400, "Subject and message are required")
     session = SessionLocal()
     try:
         t = SupportTicket(trader_id=trader.id, subject=subject[:200])
@@ -945,7 +978,7 @@ def ticket_view(ticket_id: int, trader: Trader = Depends(auth.current_trader)):
     try:
         t = session.get(SupportTicket, ticket_id)
         if not t or t.trader_id != trader.id:
-            raise HTTPException(404, "Ticket nie istnieje")
+            raise HTTPException(404, "Ticket not found")
         return _ticket_dict(session, t, with_thread=True)
     finally:
         session.close()
@@ -955,14 +988,14 @@ def ticket_view(ticket_id: int, trader: Trader = Depends(auth.current_trader)):
 def ticket_reply(ticket_id: int, payload: TicketReplyIn, trader: Trader = Depends(auth.current_trader)):
     body = payload.message.strip()
     if not body:
-        raise HTTPException(400, "Treść odpowiedzi jest wymagana")
+        raise HTTPException(400, "A reply message is required")
     session = SessionLocal()
     try:
         t = session.get(SupportTicket, ticket_id)
         if not t or t.trader_id != trader.id:
-            raise HTTPException(404, "Ticket nie istnieje")
+            raise HTTPException(404, "Ticket not found")
         if t.status == "closed":
-            raise HTTPException(400, "Ticket jest zamknięty")
+            raise HTTPException(400, "This ticket is closed")
         session.add(TicketMessage(ticket_id=t.id, author="trader", body=body[:20000]))
         t.status = "open"
         session.commit()
@@ -993,7 +1026,7 @@ def admin_ticket_view(ticket_id: int):
     try:
         t = session.get(SupportTicket, ticket_id)
         if not t:
-            raise HTTPException(404, "Ticket nie istnieje")
+            raise HTTPException(404, "Ticket not found")
         tr = session.get(Trader, t.trader_id)
         d = _ticket_dict(session, t, with_thread=True)
         d["trader_email"] = tr.email if tr else None
@@ -1008,7 +1041,7 @@ def admin_ticket_reply(ticket_id: int, payload: AdminTicketReplyIn):
     try:
         t = session.get(SupportTicket, ticket_id)
         if not t:
-            raise HTTPException(404, "Ticket nie istnieje")
+            raise HTTPException(404, "Ticket not found")
         tr = session.get(Trader, t.trader_id)
         if payload.message.strip():
             session.add(TicketMessage(ticket_id=t.id, author="admin", body=payload.message.strip()[:20000]))
@@ -1058,12 +1091,12 @@ class PasswordIn(BaseModel):
 @app.post("/api/me/password")
 def me_password(payload: PasswordIn, trader: Trader = Depends(auth.current_trader)):
     if len(payload.new_password) < 8:
-        raise HTTPException(400, "Nowe hasło musi mieć min. 8 znaków")
+        raise HTTPException(400, "The new password must be at least 8 characters")
     session = SessionLocal()
     try:
         tr = session.get(Trader, trader.id)
         if not auth.verify_password(payload.current_password, tr.password_hash):
-            raise HTTPException(400, "Obecne hasło jest nieprawidłowe")
+            raise HTTPException(400, "Your current password is wrong")
         tr.password_hash = auth.hash_password(payload.new_password)
         session.commit()
         return {"ok": True}
@@ -1083,9 +1116,9 @@ def me_delete(payload: DeleteIn, trader: Trader = Depends(auth.current_trader)):
     try:
         tr = session.get(Trader, trader.id)
         if not auth.verify_password(payload.password, tr.password_hash):
-            raise HTTPException(400, "Hasło jest nieprawidłowe")
+            raise HTTPException(400, "Wrong password")
         if tr.is_admin:
-            raise HTTPException(400, "Konta administratora nie można usunąć z portalu")
+            raise HTTPException(400, "An administrator account cannot be deleted from the portal")
         tr.email = f"deleted-{tr.id}@removed.invalid"
         tr.full_name = "Deleted User"
         tr.first_name = tr.last_name = tr.phone = None
@@ -1114,7 +1147,7 @@ async def kyc_upload_docs(trader: Trader = Depends(auth.current_trader),
                           residence: UploadFile | None = File(default=None)):
     files = {"id_front": id_front, "id_back": id_back, "residence": residence}
     if not any(files.values()):
-        raise HTTPException(400, "Nie przesłano żadnego pliku")
+        raise HTTPException(400, "No file was uploaded")
     session = SessionLocal()
     try:
         tr = session.get(Trader, trader.id)
@@ -1124,10 +1157,10 @@ async def kyc_upload_docs(trader: Trader = Depends(auth.current_trader),
                 continue
             ext = _KYC_MIME.get(up.content_type)
             if not ext:
-                raise HTTPException(400, f"{kind}: dozwolone formaty to JPG/PNG/PDF")
+                raise HTTPException(400, f"{kind}: allowed formats are JPG, PNG and PDF")
             data = await up.read()
             if len(data) > _KYC_MAX_BYTES:
-                raise HTTPException(400, f"{kind}: plik przekracza 5 MB")
+                raise HTTPException(400, f"{kind}: the file is larger than 5 MB")
             dirp = UPLOADS / "kyc" / str(tr.id)
             dirp.mkdir(parents=True, exist_ok=True)
             fname = f"{kind}-{secrets.token_hex(6)}{ext}"
@@ -1143,16 +1176,16 @@ async def kyc_upload_docs(trader: Trader = Depends(auth.current_trader),
 @app.get("/api/admin/kyc/{trader_id}/doc/{kind}", dependencies=[Depends(auth.require_admin)])
 def admin_kyc_doc(trader_id: int, kind: str):
     if kind not in _KYC_KINDS:
-        raise HTTPException(404, "Nieznany rodzaj dokumentu")
+        raise HTTPException(404, "Unknown document type")
     session = SessionLocal()
     try:
         tr = session.get(Trader, trader_id)
         fname = getattr(tr, _KYC_KINDS[kind], None) if tr else None
         if not fname:
-            raise HTTPException(404, "Brak dokumentu")
+            raise HTTPException(404, "No document uploaded")
         path = UPLOADS / "kyc" / str(trader_id) / fname
         if not path.exists():
-            raise HTTPException(404, "Plik nie istnieje")
+            raise HTTPException(404, "File not found")
         return FileResponse(str(path))
     finally:
         session.close()
@@ -1185,7 +1218,7 @@ def admin_approve_payout(req_id: int):
     try:
         r = session.get(PayoutRequest, req_id)
         if not r or r.status != "pending":
-            raise HTTPException(404, "Wniosek nie istnieje lub już rozpatrzony")
+            raise HTTPException(404, "The request does not exist or was already handled")
         acc = session.get(Account, r.account_id)
         tr = session.get(Trader, r.trader_id)
 
@@ -1245,17 +1278,17 @@ def admin_issue_payout(account_id: int, payload: IssuePayoutIn):
     try:
         acc = session.get(Account, account_id)
         if not acc:
-            raise HTTPException(404, "Konto nie istnieje")
+            raise HTTPException(404, "Account not found")
 
         if acc.status != "funded":
-            raise HTTPException(400, "Wypłatę można wystawić tylko na koncie funded — "
+            raise HTTPException(400, "A payout can only be issued on a funded account — "
                                      f"to konto ma status '{acc.status}'")
         profit = round(max(0.0, acc.balance - acc.initial_balance), 2)
         share = payload.amount if payload.amount is not None else round(
             profit * acc.profit_split_pct / 100.0, 2)
         share = round(float(share), 2)
         if share <= 0:
-            raise HTTPException(400, "Kwota wypłaty musi być dodatnia "
+            raise HTTPException(400, "The payout amount must be greater than zero "
                                      f"(zysk na koncie: ${profit:,.2f})")
 
         p = Payout(account_id=acc.id, profit_amount=profit, trader_share=share, paid=True,
@@ -1292,7 +1325,7 @@ def admin_account_payouts(account_id: int):
     try:
         acc = session.get(Account, account_id)
         if not acc:
-            raise HTTPException(404, "Konto nie istnieje")
+            raise HTTPException(404, "Account not found")
         rows = (session.query(Payout).filter(Payout.account_id == acc.id)
                 .order_by(Payout.id.desc()).all())
         available = round(max(0.0, acc.balance - acc.initial_balance)
@@ -1312,7 +1345,7 @@ def admin_payout_certificate(payout_id: int):
     try:
         p = session.get(Payout, payout_id)
         if not p:
-            raise HTTPException(404, "Wypłata nie istnieje")
+            raise HTTPException(404, "Payout not found")
         if not p.cert_token:
             p.cert_token = secrets.token_urlsafe(16)[:32]
             session.commit()
@@ -1356,7 +1389,7 @@ def admin_grant(payload: GrantIn):
     try:
         trader = session.get(Trader, payload.trader_id)
         if not trader or trader.is_admin:
-            raise HTTPException(404, "Trader nie istnieje")
+            raise HTTPException(404, "Trader not found")
         res = billing.grant_challenge(session, trader, payload.product_key, payload.note,
                                       payload.bogo_paid_key)
         if payload.funded and res.get("account_id"):
@@ -1424,7 +1457,7 @@ def admin_certificates(account_id: int):
     try:
         acc = session.get(Account, account_id)
         if not acc:
-            raise HTTPException(404, "Konto nie istnieje")
+            raise HTTPException(404, "Account not found")
         wydane = {c.kind: c for c in session.query(Certificate)
                   .filter(Certificate.account_id == account_id).all()}
         return [{"kind": k, "label": CERT_KINDS[k][0],
@@ -1439,15 +1472,15 @@ def admin_certificates(account_id: int):
 @app.post("/api/admin/accounts/{account_id}/certificate", dependencies=[Depends(auth.require_admin)])
 def admin_issue_certificate(account_id: int, payload: CertIn):
     if payload.kind not in CERT_KINDS:
-        raise HTTPException(400, "Nieznany rodzaj certyfikatu")
+        raise HTTPException(400, "Unknown certificate type")
     session = SessionLocal()
     try:
         acc = session.get(Account, account_id)
         if not acc:
-            raise HTTPException(404, "Konto nie istnieje")
+            raise HTTPException(404, "Account not found")
         if not _cert_kind_available(acc, payload.kind):
             etap = CERT_KINDS[payload.kind][0]
-            raise HTTPException(400, f"Konto nie osiągnęło etapu: {etap}. "
+            raise HTTPException(400, f"This account has not reached the {etap} stage. "
                                      f"Przestaw najpierw fazę konta.")
         istnieje = (session.query(Certificate)
                     .filter(Certificate.account_id == account_id,
@@ -1472,14 +1505,14 @@ def admin_set_phase(account_id: int, payload: PhaseIn):
     """Awans/cofnięcie fazy ręcznie. Automatyczny awans robi silnik reguł, ale
     przy odciętym feedzie (FEED=local) nikt kont nie tyka — wtedy to jedyna droga."""
     if payload.phase not in ("eval_1", "eval_2", "funded"):
-        raise HTTPException(400, "Nieznana faza")
+        raise HTTPException(400, "Unknown phase")
     session = SessionLocal()
     try:
         acc = session.get(Account, account_id)
         if not acc:
-            raise HTTPException(404, "Konto nie istnieje")
+            raise HTTPException(404, "Account not found")
         if payload.phase == "eval_2" and acc.steps < 2:
-            raise HTTPException(400, "Ten plan nie ma drugiego etapu")
+            raise HTTPException(400, "This plan has no second stage")
         _ustaw_faze(session, acc, payload.phase)
         trader = session.get(Trader, acc.trader_id) if acc.trader_id else None
         if trader and payload.phase == "funded":
@@ -1508,9 +1541,9 @@ def admin_breach_account(account_id: int, payload: BreachIn):
     try:
         acc = session.get(Account, account_id)
         if not acc:
-            raise HTTPException(404, "Konto nie istnieje")
+            raise HTTPException(404, "Account not found")
         if acc.status == "failed":
-            raise HTTPException(400, "To konto jest już zamknięte")
+            raise HTTPException(400, "This account is already closed")
 
         powod = (payload.reason or "").strip() or "Closed by the risk desk"
         if getattr(acc, "bot_enabled", False):
@@ -1549,9 +1582,9 @@ def admin_bot_start(account_id: int, payload: BotIn):
     try:
         acc = session.get(Account, account_id)
         if not acc:
-            raise HTTPException(404, "Konto nie istnieje")
+            raise HTTPException(404, "Account not found")
         if acc.status not in ("active", "funded"):
-            raise HTTPException(400, f"Konto ma status '{acc.status}' — bot działa tylko "
+            raise HTTPException(400, f"Account status is '{acc.status}' — the bot only runs "
                                      f"na kontach aktywnych i funded")
         tradebot.start(session, acc, style=payload.style, pace=payload.pace,
                        target_pct=payload.target_pct)
@@ -1580,14 +1613,14 @@ def admin_bot_pause(account_id: int, payload: BotPauseIn):
     try:
         acc = session.get(Account, account_id)
         if not acc:
-            raise HTTPException(404, "Konto nie istnieje")
+            raise HTTPException(404, "Account not found")
         if not acc.bot_enabled:
-            raise HTTPException(400, "Trade BOT nie jest uruchomiony na tym koncie")
+            raise HTTPException(400, "Trade BOT is not running on this account")
         if payload.paused is None and payload.target_pct is None:
-            raise HTTPException(400, "Podaj 'paused' albo 'target_pct'")
+            raise HTTPException(400, "Provide 'paused' or 'target_pct'")
         if payload.target_pct is not None:
             if payload.target_pct < 0:
-                raise HTTPException(400, "Cel nie może być ujemny")
+                raise HTTPException(400, "The target cannot be negative")
             tradebot.set_target(session, acc, payload.target_pct)
         if payload.paused is not None:
             tradebot.set_paused(session, acc, payload.paused)
@@ -1604,7 +1637,7 @@ def admin_bot_stop(account_id: int):
     try:
         acc = session.get(Account, account_id)
         if not acc:
-            raise HTTPException(404, "Konto nie istnieje")
+            raise HTTPException(404, "Account not found")
         tradebot.stop(session, acc)
         return {"bot_enabled": False, "login": acc.login, "balance": round(acc.balance, 2)}
     finally:
@@ -1633,7 +1666,7 @@ def admin_approve_kyc(trader_id: int):
     try:
         tr = session.get(Trader, trader_id)
         if not tr:
-            raise HTTPException(404, "Trader nie istnieje")
+            raise HTTPException(404, "Trader not found")
         tr.kyc_status = "approved"
         session.commit()
         notify.send("kyc_approved", tr.email, {"name": tr.full_name or tr.email})
@@ -1693,6 +1726,7 @@ def admin_pool_list():
                 "platform_server": p.platform_server, "account_size": p.account_size,
                 "claimed": p.claimed, "claimed_by_account_id": p.claimed_by_account_id,
                 "claimed_at": p.claimed_at.isoformat() if p.claimed_at else None,
+                "retired_reason": p.retired_reason,
                 "trader_email": tr.email if tr else None,
                 "trader_name": (tr.full_name if tr else None),
                 "account_status": acc.status if acc else None,
@@ -1781,13 +1815,13 @@ async def admin_pool_generate(payload: PoolGenerateIn):
     if not mozna:
         raise HTTPException(400, powod)
     if payload.account_size <= 0:
-        raise HTTPException(400, "Rozmiar konta musi być dodatni")
+        raise HTTPException(400, "Account size must be greater than zero")
     if not 1 <= payload.count <= 10:
-        raise HTTPException(400, "Na raz można założyć od 1 do 10 kont")
+        raise HTTPException(400, "You can open between 1 and 10 accounts at a time")
 
     opener = metaquotes_web.make_opener(settings)
     if opener is None:
-        raise HTTPException(400, "Kanał MetaQuotes jest wyłączony")
+        raise HTTPException(400, "The MetaQuotes channel is off")
 
     utworzone, bledy = [], []
     for _ in range(payload.count):
@@ -1814,7 +1848,7 @@ async def admin_pool_generate(payload: PoolGenerateIn):
             session.close()
 
     if not utworzone:
-        raise HTTPException(502, "Nie udało się założyć żadnego konta: " + "; ".join(bledy))
+        raise HTTPException(502, "Could not open any account: " + "; ".join(bledy))
     return {"created": utworzone, "errors": bledy}
 
 
@@ -1839,19 +1873,19 @@ def admin_pool_edit(pool_id: int, payload: PoolPatchIn):
     try:
         p = session.get(PoolAccount, pool_id)
         if not p:
-            raise HTTPException(404, "Nie ma takiego wpisu w puli")
+            raise HTTPException(404, "No such entry in the pool")
         if payload.account_size is not None:
             if p.claimed:
-                raise HTTPException(400, "Rachunek jest przydzielony — rozmiaru nie można zmienić")
+                raise HTTPException(400, "This account is assigned — its size cannot be changed")
             if payload.account_size <= 0:
-                raise HTTPException(400, "Rozmiar konta musi być dodatni")
+                raise HTTPException(400, "Account size must be greater than zero")
             p.account_size = payload.account_size
         for pole in ("platform_login", "platform_password", "platform_server"):
             wartosc = getattr(payload, pole)
             if wartosc is not None:
                 nowa = wartosc.strip()
                 if not nowa:
-                    raise HTTPException(400, f"Pole {pole} nie może być puste")
+                    raise HTTPException(400, f"Field {pole} cannot be empty")
                 setattr(p, pole, nowa)
 
         acc = session.get(Account, p.claimed_by_account_id) if p.claimed_by_account_id else None
@@ -1875,9 +1909,9 @@ def admin_pool_delete(pool_id: int):
     try:
         p = session.get(PoolAccount, pool_id)
         if not p:
-            raise HTTPException(404, "Nie ma takiego wpisu w puli")
+            raise HTTPException(404, "No such entry in the pool")
         if p.claimed:
-            raise HTTPException(400, "Ten rachunek jest przydzielony traderowi — nie można go usunąć")
+            raise HTTPException(400, "This account is assigned to a trader and cannot be removed")
         session.delete(p)
         session.commit()
         return {"deleted": pool_id}
@@ -1904,7 +1938,7 @@ def get_account(account_id: int):
     try:
         acc = session.get(Account, account_id)
         if not acc:
-            raise HTTPException(404, "Konto nie istnieje")
+            raise HTTPException(404, "Account not found")
         _ensure_cert_token(session, acc)
         return _account_detail(session, acc, admin_view=True)
     finally:
@@ -1912,11 +1946,20 @@ def get_account(account_id: int):
 
 
 class NewAccount(BaseModel):
+    """Challenge zakładany w całości ręcznie — z rachunku spoza puli.
+
+    Poświadczenia MT5 wpisuje admin, więc nic nie jest brane z puli i nie rusza
+    to jej stanu. Typ drawdownu bierze się z wybranego planu, a nie z osobnego
+    pola: to plan go definiuje i dwa źródła prawdy tylko by się rozjeżdżały.
+    """
     login: str
+    platform_password: str | None = None
+    platform_server: str | None = None
     trader_name: str = ""
+    trader_email: str | None = None
     product_key: str = "2step-100k"
-    drawdown_type: str = "static"
-    metaapi_account_id: str | None = None
+    note: str | None = None            # promocja / powód, jak przy Grant
+    bogo_paid_key: str | None = None   # tier, za który klient faktycznie zapłacił
 
 
 @app.post("/api/accounts", dependencies=[Depends(auth.require_admin)])
@@ -1925,22 +1968,56 @@ def create_account(payload: NewAccount):
     try:
         prod = session.query(Product).filter(Product.key == payload.product_key).first()
         if not prod:
-            raise HTTPException(404, "Produkt nie istnieje")
+            raise HTTPException(404, "Product not found")
+
+        # E-mail wiąże konto z zarejestrowanym traderem, żeby zobaczył je w portalu.
+        # Gdy takiego konta nie ma, challenge i tak powstaje — tylko bez właściciela,
+        # a panel to zgłasza, zamiast po cichu tworzyć osierocone konto.
+        trader = None
+        email = (payload.trader_email or "").strip().lower()
+        if email:
+            trader = session.query(Trader).filter(Trader.email == email).first()
+
+        oplacony = None
+        if payload.bogo_paid_key:
+            p2 = session.query(Product).filter(Product.key == payload.bogo_paid_key).first()
+            oplacony = p2.account_size if p2 else None
+
         bal = prod.account_size
         now = datetime.now(timezone.utc)
         acc = Account(
-            login=payload.login, trader_name=payload.trader_name, product_key=prod.key, preset=prod.key,
+            login=payload.login, trader_name=(payload.trader_name or (trader.full_name if trader else "")),
+            trader_id=(trader.id if trader else None),
+            platform_login=payload.login,
+            platform_password=(payload.platform_password or None),
+            platform_server=(payload.platform_server or None),
+            # Poświadczenia są prawdziwe (admin wziął je z terminala), więc feed
+            # może się takim kontem zajmować — inaczej niż przy generowanych lokalnie.
+            mt5_backed=bool(payload.platform_password and payload.platform_server),
+            product_key=prod.key, preset=prod.key,
             initial_balance=bal, steps=prod.steps, profit_target_p1=prod.profit_target_p1,
             profit_target_p2=prod.profit_target_p2, max_daily_loss_pct=prod.max_daily_loss_pct,
             max_overall_loss_pct=prod.max_overall_loss_pct, min_trading_days=prod.min_trading_days,
-            drawdown_type=payload.drawdown_type, profit_split_pct=prod.profit_split_pct,
-            metaapi_account_id=payload.metaapi_account_id, phase="eval_1", status="active",
+            drawdown_type=prod.drawdown_type, profit_split_pct=prod.profit_split_pct,
+            max_lots=getattr(prod, "max_lots", 0.0) or 0.0,
+            source=("grant" if payload.note else "manual"),
+            grant_note=(payload.note or None), bogo_paid_size=oplacony,
+            phase=("funded" if prod.steps == 0 else "eval_1"),
+            status=("funded" if prod.steps == 0 else "active"),
             balance=bal, equity=bal, peak_equity=bal, day_start_equity=bal, day_start_balance=bal,
             day_key=now.strftime("%Y-%m-%d"), created_at=now, started_at=now,
         )
         session.add(acc)
         session.commit()
-        return _account_dict(acc, with_credentials=True)
+
+        if trader and acc.platform_password:
+            notify.send(provisioning._creds_event(acc), trader.email,
+                        provisioning._creds_ctx(trader, acc))
+
+        d = _account_dict(acc, with_credentials=True, admin_view=True)
+        d["linked_trader"] = trader.email if trader else None
+        d["email_unknown"] = bool(email and trader is None)
+        return d
     finally:
         session.close()
 
@@ -1951,7 +2028,7 @@ def delete_account(account_id: int):
     try:
         acc = session.get(Account, account_id)
         if not acc:
-            raise HTTPException(404, "Konto nie istnieje")
+            raise HTTPException(404, "Account not found")
 
         # Zamówienie to dokument płatności — przeżywa konto. Odpinamy je zamiast
         # kasować, inaczej Postgres blokuje usunięcie (orders.account_id ma FK).
@@ -1959,10 +2036,13 @@ def delete_account(account_id: int):
          .update({Order.account_id: None}, synchronize_session=False))
         # Transakcje bez konta nie znaczą nic — lecą razem z nim.
         session.query(Trade).filter(Trade.account_id == acc.id).delete(synchronize_session=False)
-        # Zwolnij slot w puli MT5, żeby opłacone konto nie przepadło jako 'claimed'.
+        # Rachunek MT5 z puli NIE wraca do obiegu. Był już w rękach tradera: ma
+        # historię transakcji, saldo dawno nie startowe, a poświadczenia zna
+        # poprzedni właściciel. Przydzielenie go komuś innemu pokazałoby nowemu
+        # klientowi cudze transakcje i dałoby staremu dostęp do jego konta.
+        # Zostaje `claimed` i dostaje powód wycofania — panel ma to pokazać.
         (session.query(PoolAccount).filter(PoolAccount.claimed_by_account_id == acc.id)
-         .update({PoolAccount.claimed: False, PoolAccount.claimed_by_account_id: None},
-                 synchronize_session=False))
+         .update({PoolAccount.retired_reason: "konto usunięte"}, synchronize_session=False))
 
         session.delete(acc)
         session.commit()
@@ -2080,11 +2160,11 @@ def certificate(request: Request, cert_token: str):
         else:
             acc = session.query(Account).filter(Account.cert_token == cert_token).first()
             if not acc or not _cert_eligible(acc):
-                raise HTTPException(404, "Certyfikat nie istnieje")
+                raise HTTPException(404, "Certificate not found")
             kind = "funded" if acc.status == "funded" else "phase_1"
             when = acc.closed_at or acc.created_at
         if not acc:
-            raise HTTPException(404, "Certyfikat nie istnieje")
+            raise HTTPException(404, "Certificate not found")
 
         data = (when or datetime.now(timezone.utc)).strftime("%d %b %Y")
         eyebrow, seal = CERT_KINDS.get(kind, ("Evaluation passed", "Passed"))
@@ -2122,7 +2202,7 @@ def payout_certificate(request: Request, cert_token: str):
     try:
         p = session.query(Payout).filter(Payout.cert_token == cert_token).first()
         if not p:
-            raise HTTPException(404, "Certyfikat nie istnieje")
+            raise HTTPException(404, "Certificate not found")
         acc = session.get(Account, p.account_id)
         when = (p.ts or datetime.now(timezone.utc)).strftime("%d %b %Y")
         # Kwota bez groszy, gdy okrągła — „$9,070" czyta się lepiej niż „$9,070.00",
@@ -2202,7 +2282,7 @@ def _require_cron(x_admin_token: str | None = Header(default=None),
     if sekret and authorization and authorization.lower().startswith("bearer "):
         if secrets.compare_digest(authorization.split(" ", 1)[1].strip(), sekret):
             return
-    raise HTTPException(401, "Brak uprawnień do wyzwalania ticku")
+    raise HTTPException(401, "Not allowed to trigger the risk engine")
 
 
 @app.api_route("/api/tick", methods=["GET", "POST"], dependencies=[Depends(_require_cron)])
@@ -2379,8 +2459,39 @@ def verify_page(request: Request, cert_token: str | None = None):
     return _page(request, "verify.html", result=result, token=cert_token or "")
 
 
+def _admin_z_ciasteczka(request: Request) -> Trader | None:
+    """Trader-administrator z ciasteczka sesji albo None.
+
+    Ciasteczko slozy WYLACZNIE do wpuszczania na strone panelu — API dalej
+    uwierzytelnia sie naglowkiem Authorization. Dzieki temu samo istnienie
+    ciasteczka nie otwiera drogi do zadan CSRF: cudza strona moze je dolaczyc
+    do requestu, ale nie do naglowka.
+    """
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        return None
+    tid = auth.parse_token(token)
+    if tid is None:
+        return None
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, tid)
+        return tr if (tr and tr.is_admin) else None
+    finally:
+        session.close()
+
+
 @app.get("/admin")
 def dashboard(request: Request):
+    """Panel admina — dla kogokolwiek innego ta strona po prostu nie istnieje.
+
+    Zwracamy 404, a nie 401/403 i nie przekierowanie: odpowiedz „brak dostepu"
+    potwierdzalaby, ze pod tym adresem cos jest. Przy 404 osoba bez sesji
+    administratora nie dowie sie nawet, ze panel istnieje, ani jak wyglada jego
+    nawigacja.
+    """
+    if _admin_z_ciasteczka(request) is None:
+        raise HTTPException(404, "Not Found")
     # Render przez Jinja (nie FileResponse), żeby nazwa marki szła z SITE_NAME
     # zamiast być wpisana na sztywno w dwóch dodatkowych miejscach.
     return _page(request, "dashboard.html")

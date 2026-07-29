@@ -338,6 +338,10 @@ class PoolAccount(Base):
     # ten rachunek MT5", a przy realnych pieniadzach to pierwsze pytanie.
     claimed_by_trader_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Powod wycofania rachunku z obiegu (np. konto tradera skasowane). Rachunek
+    # raz wydany NIE wraca do puli — ma historie transakcji i zna go poprzedni
+    # wlasciciel — a to pole mowi panelowi, dlaczego wpis nie jest wolny.
+    retired_reason: Mapped[str | None] = mapped_column(String(60), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 

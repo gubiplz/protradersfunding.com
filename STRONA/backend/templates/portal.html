@@ -173,10 +173,20 @@ async function doAuth(){
   try{let res;
     if(AUTHMODE==='signup'){body.full_name=$('a-name').value;body.referral=$('a-ref').value||null;res=await api('/api/auth/signup',{method:'POST',body:JSON.stringify(body)});}
     else res=await api('/api/auth/login',{method:'POST',body:JSON.stringify(body)});
-    TOKEN=res.token;localStorage.setItem('pf_token',TOKEN);await boot();
+    TOKEN=res.token;localStorage.setItem('pf_token',TOKEN);
+    // Logowanie jest JEDNO — panel admina odsyla tutaj z ?next=/admin i po
+    // udanym logowaniu wracamy dokladnie tam, zamiast gubic uzytkownika w portalu.
+    const dokad=new URLSearchParams(location.search).get('next');
+    if(dokad && dokad.startsWith('/') && !dokad.startsWith('//')){location.href=dokad;return}
+    await boot();
   }catch(e){toast('Error: '+e.message,'err')}
 }
-function logout(){TOKEN=null;localStorage.removeItem('pf_token');location.reload()}
+function logout(){
+  // Ciasteczko sesji trzyma serwer (bramkuje strone /admin), wiec samo
+  // wyczyszczenie localStorage by nie wystarczylo.
+  fetch('/api/auth/logout',{method:'POST'}).finally(()=>{
+    TOKEN=null;localStorage.removeItem('pf_token');location.reload()});
+}
 
 /* ---------- powrot z platnosci ---------- */
 async function handlePaymentReturn(){
@@ -639,7 +649,24 @@ const VIEWS={
         <td class="num">$${fmt(r.profit_amount)}</td><td class="num">$${fmt(r.trader_share)}</td>
         <td><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending':'failed'}"><span class="dot"></span>${esc(r.status)}</span></td></tr>`).join('')+`
       </tbody></table></div>`
-      :`<div class="empty"><h3>No payout requests yet</h3><p>Pass a challenge, get funded and request your first performance reward. Your challenge fee comes back with it.</p></div>`}`;
+      :`<div class="empty"><h3>No payout requests yet</h3><p>Pass a challenge, get funded and request your first performance reward. Your challenge fee comes back with it.</p></div>`}
+
+    ${(data.history||[]).length?`<div class="sec-card" style="margin-top:18px">
+      <h3>Payout history</h3>
+      <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Rewards already paid out to you.</p>
+      <div class="tbl-wrap"><table class="tbl">
+        <thead><tr><th>Date</th><th>Account</th><th>Account profit</th><th>Paid to you</th><th>Method</th><th></th></tr></thead>
+        <tbody>${data.history.map(h=>`<tr>
+          <td class="muted">${dstr(h.ts)}</td>
+          <td class="num">${esc(h.account)}</td>
+          <td class="num">$${fmt(h.profit_amount)}</td>
+          <td class="num up">+$${fmt(h.trader_share)}</td>
+          <td class="muted">${esc(h.method||'—')}</td>
+          <td>${h.cert_token?`<a class="btn-o sm" href="/payout/${esc(h.cert_token)}" target="_blank">Certificate</a>`
+                            :`<button class="btn-o sm" onclick="makePayoutCert(${h.id})">Get certificate</button>`}</td>
+        </tr>`).join('')}</tbody></table></div>
+      <p class="muted" style="font-size:12.5px;margin-top:12px">Total paid out: <b>$${fmt(data.summary.total_paid)}</b></p>
+    </div>`:''}`;
  },
 
  async orders(){
@@ -879,23 +906,70 @@ async function deleteAccount(){
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
+/* Zdjecie z telefonu ma 3-5 MB, a hosting bezserwerowy tnie CALE cialo requestu
+   powyzej ~4,5 MB — trzy dokumenty naraz konczyly sie bledem 413, zanim backend
+   w ogole je zobaczyl. Skalujemy wiec obrazy w przegladarce: dluzszy bok do
+   1600 px wystarczy, zeby odczytac dokument, a plik schodzi do ~200-400 KB.
+   PDF-a nie da sie tak przerobic — leci jak jest, tylko sprawdzamy rozmiar. */
+const MAX_BOK=1600, MAX_BAJTOW=4*1024*1024;
+function zmniejszObraz(plik){
+  return new Promise((ok,zle)=>{
+    if(!plik.type.startsWith('image/'))return ok(plik);
+    const url=URL.createObjectURL(plik), img=new Image();
+    img.onload=()=>{
+      URL.revokeObjectURL(url);
+      const skala=Math.min(1,MAX_BOK/Math.max(img.width,img.height));
+      if(skala===1&&plik.size<=800*1024)return ok(plik);
+      const c=document.createElement('canvas');
+      c.width=Math.round(img.width*skala); c.height=Math.round(img.height*skala);
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+      c.toBlob(b=>{
+        if(!b)return ok(plik);
+        const nazwa=plik.name.replace(/\.[^.]+$/,'')+'.jpg';
+        ok(new File([b],nazwa,{type:'image/jpeg'}));
+      },'image/jpeg',0.82);
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);ok(plik)};
+    img.src=url;
+  });
+}
+async function wyslijDokument(pole,plik){
+  const fd=new FormData(); fd.append(pole,plik);
+  const r=await fetch('/api/me/kyc/docs',{method:'POST',
+    headers:{'Authorization':'Bearer '+TOKEN},body:fd});
+  if(!r.ok){
+    // 413 ucina serwer/hosting, wiec cialo bywa puste — wtedy tlumaczymy sami.
+    const detal=(await r.json().catch(()=>({}))).detail;
+    throw new Error(detal||(r.status===413
+      ? 'File too large for upload. Please use a smaller photo or a PDF under 4 MB.'
+      : r.status));
+  }
+}
 async function submitKyc(){
   const err=m=>{const el=$('kyc-err');el.textContent=m;el.classList.remove('hidden')};
   const name=$('k-name').value.trim(),country=$('k-country').value.trim();
   if(!name||!country){err('Full name and country are required.');return}
   const front=$('f-front').files[0],back=$('f-back').files[0],res=$('f-res').files[0];
   if(!front||!res){err('ID Front and Proof of Residence are required.');return}
+  const btn=document.querySelector("button[onclick='submitKyc()']");
+  if(btn){btn.disabled=true;btn.textContent='Uploading…'}
   try{
     await api('/api/me/kyc',{method:'POST',body:JSON.stringify({
       full_name:name,country,dob:$('k-dob').value||null,address:$('k-address').value||null,
       id_type:$('k-idtype').value,id_number:$('k-idnum').value||null})});
-    const fd=new FormData();
-    fd.append('id_front',front); if(back)fd.append('id_back',back); fd.append('residence',res);
-    const r=await fetch('/api/me/kyc/docs',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN},body:fd});
-    if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||r.status);
+    // Osobny request na dokument — nawet duze PDF-y nie sumuja sie wtedy do limitu.
+    for(const [pole,plik] of [['id_front',front],['id_back',back],['residence',res]]){
+      if(!plik)continue;
+      const gotowy=await zmniejszObraz(plik);
+      if(gotowy.size>MAX_BAJTOW){
+        throw new Error(`${plik.name} is ${(gotowy.size/1024/1024).toFixed(1)} MB — the limit is 4 MB. Please use a smaller file.`);
+      }
+      await wyslijDokument(pole,gotowy);
+    }
     ME=await api('/api/auth/me');boot();
     toast('KYC submitted — documents are under review.','ok');go('kyc');
   }catch(e){err('Error: '+e.message)}
+  finally{if(btn){btn.disabled=false;btn.textContent='Submit KYC'}}
 }
 
 /* ---------- faktura ---------- */
@@ -1299,6 +1373,12 @@ function prog(label,pct,danger,suffix){const p=Math.min(100,Math.max(0,pct||0));
   const cls=danger?(p>=100?'bad':p>=70?'warn':'mid'):'ok';
   return `<div><div class="prog-top"><span>${label}</span><b>${suffix}</b></div>
    <div class="prog-bar"><i class="${cls}" style="width:${p}%"></i></div></div>`;}
+async function makePayoutCert(id){
+  // Starsze wyplaty powstaly przed certyfikatami — token dorabiamy na zadanie.
+  try{const r=await api(`/api/me/payouts/${id}/certificate`,{method:'POST'});
+    window.open(r.url,'_blank'); go('payouts');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
 async function reqPayout(id,stay){try{const r=await api(`/api/accounts/${id}/payout-request`,{method:'POST',body:JSON.stringify({method:'bank'})});
   toast(`✅ Request submitted: payout $${fmt(r.trader_share)} (profit $${fmt(r.profit_amount)}). Awaiting review.`,'ok',8000);
   stay?go('payouts'):openAcc(id);}catch(e){toast('Error: '+e.message,'err')}}

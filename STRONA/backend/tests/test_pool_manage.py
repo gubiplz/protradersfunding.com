@@ -17,6 +17,7 @@ os.environ.setdefault("AUTO_SEED", "false")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from app import catalog  # noqa: E402
 from app import main as app_main  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
@@ -26,6 +27,11 @@ from app.models import Account, PoolAccount  # noqa: E402
 init_db()
 client = TestClient(app)
 ADMIN_H = {"X-Admin-Token": get_settings().admin_token}
+
+# AUTO_SEED jest wylaczone, a reczne tworzenie challenge'u potrzebuje katalogu planow.
+_s = SessionLocal()
+catalog.seed_products(_s)
+_s.close()
 
 
 def _wpis(login: str, rozmiar: float = 50_000.0, przydzielony_do: int | None = None) -> int:
@@ -40,13 +46,13 @@ def _wpis(login: str, rozmiar: float = 50_000.0, przydzielony_do: int | None = N
     return pid
 
 
-def _konto(login: str) -> int:
+def _konto(login: str, rozmiar: float = 50_000.0) -> int:
     s = SessionLocal()
     acc = Account(login=login, trader_name="Edit Tester", product_key="2step-50k",
-                  preset="2step-50k", initial_balance=50_000.0, steps=2, status="active",
+                  preset="2step-50k", initial_balance=rozmiar, steps=2, status="active",
                   phase="eval_1", platform_login=login, platform_password="Stare123",
-                  platform_server="GOMarketsLtd-Demo", balance=50_000.0, equity=50_000.0,
-                  peak_equity=50_000.0, day_start_equity=50_000.0, day_start_balance=50_000.0)
+                  platform_server="GOMarketsLtd-Demo", balance=rozmiar, equity=rozmiar,
+                  peak_equity=rozmiar, day_start_equity=rozmiar, day_start_balance=rozmiar)
     s.add(acc); s.commit()
     aid = acc.id
     s.close()
@@ -180,3 +186,162 @@ def test_opener_podlacza_sie_zamiast_uruchamiac(monkeypatch):
 
     monkeypatch.setattr(ustawienia, "browser_cdp_url", "")
     assert metaquotes_web.make_opener(ustawienia)._cdp_url == ""
+
+
+def test_rachunek_usunietego_konta_nie_wraca_do_puli():
+    """Rachunek byl juz w rekach tradera: ma historie i zna go poprzedni wlasciciel.
+
+    Gdyby wrocil do puli, nowy klient zobaczylby cudze transakcje, a stary
+    zachowalby dzialajace poswiadczenia do konta kogos innego.
+    """
+    aid = _konto("8600001")
+    pid = _wpis("8600001", przydzielony_do=aid)
+
+    assert client.delete(f"/api/accounts/{aid}", headers=ADMIN_H).status_code == 200
+
+    s = SessionLocal(); p = s.get(PoolAccount, pid)
+    assert p.claimed is True, "wpis nie moze wrocic do obiegu"
+    assert p.retired_reason, "panel musi wiedziec, dlaczego rachunek jest wycofany"
+    s.close()
+
+    dane = client.get("/api/admin/pool", headers=ADMIN_H).json()
+    wpis = [x for x in dane["pool"] if x["id"] == pid][0]
+    assert wpis["retired_reason"] and wpis["claimed"] is True
+
+
+def test_wycofany_rachunek_nie_zostanie_przydzielony_ponownie():
+    from app import provisioning
+
+    ROZMIAR = 87_000.0                       # unikalny, zeby zaden inny wpis nie pasowal
+    aid = _konto("8700001", ROZMIAR)
+    _wpis("8700001", ROZMIAR, przydzielony_do=aid)
+    client.delete(f"/api/accounts/{aid}", headers=ADMIN_H)
+
+    s = SessionLocal()
+    nowe = Account(login="8700002", trader_name="Nastepny", product_key="2step-50k",
+                   preset="2step-50k", initial_balance=ROZMIAR, steps=2, status="provisioning",
+                   phase="eval_1", balance=ROZMIAR, equity=ROZMIAR, peak_equity=ROZMIAR,
+                   day_start_equity=ROZMIAR, day_start_balance=ROZMIAR)
+    s.add(nowe); s.commit()
+
+    assert provisioning.claim_pool_account(s, nowe) is False, "wycofany rachunek nie moze wrocic"
+    s.close()
+
+
+def test_konto_ze_statusem_failed_trzyma_swoj_rachunek():
+    """Breach nie zwalnia rachunku — konto istnieje dalej, tylko przegralo."""
+    from app import provisioning
+
+    ROZMIAR = 88_000.0                       # jw. — wlasny rozmiar izoluje ten przypadek
+    aid = _konto("8800001", ROZMIAR)
+    pid = _wpis("8800001", ROZMIAR, przydzielony_do=aid)
+    s = SessionLocal()
+    s.get(Account, aid).status = "failed"
+    s.commit()
+
+    p = s.get(PoolAccount, pid)
+    assert p.claimed is True and p.claimed_by_account_id == aid
+
+    nowe = Account(login="8800002", trader_name="Nastepny", product_key="2step-50k",
+                   preset="2step-50k", initial_balance=ROZMIAR, steps=2, status="provisioning",
+                   phase="eval_1", balance=ROZMIAR, equity=ROZMIAR, peak_equity=ROZMIAR,
+                   day_start_equity=ROZMIAR, day_start_balance=ROZMIAR)
+    s.add(nowe); s.commit()
+    assert provisioning.claim_pool_account(s, nowe) is False
+    s.close()
+
+
+# --------------------------------------------------------------------------- #
+#  Reczne tworzenie challenge'u — bez ruszania puli                            #
+# --------------------------------------------------------------------------- #
+def test_reczny_challenge_z_pelnymi_poswiadczeniami_nie_rusza_puli():
+    from app.models import Product
+    s = SessionLocal()
+    wolnych_przed = s.query(PoolAccount).filter(PoolAccount.claimed == False).count()  # noqa: E712
+    plan = s.query(Product).filter(Product.active == True).first()  # noqa: E712
+    s.close()
+
+    r = client.post("/api/accounts", headers=ADMIN_H, json={
+        "login": "9100001", "platform_password": "Recznie1", "platform_server": "MetaQuotes-Demo",
+        "trader_name": "Reczny Klient", "product_key": plan.key})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["platform_login"] == "9100001" and d["platform_password"] == "Recznie1"
+    assert d["platform_server"] == "MetaQuotes-Demo"
+
+    s = SessionLocal()
+    assert s.query(PoolAccount).filter(PoolAccount.claimed == False).count() == wolnych_przed  # noqa: E712
+    s.close()
+
+
+def test_drawdown_bierze_sie_z_planu_a_nie_z_osobnego_pola():
+    """Pole drawdownu znikneło z panelu — plan jest jedynym zrodlem prawdy."""
+    from app.models import Product
+    s = SessionLocal()
+    plan = s.query(Product).filter(Product.active == True).first()  # noqa: E712
+    oczekiwany = plan.drawdown_type
+    s.close()
+
+    r = client.post("/api/accounts", headers=ADMIN_H,
+                    json={"login": "9200001", "product_key": plan.key})
+    assert r.status_code == 200
+
+    s = SessionLocal()
+    acc = s.query(Account).filter(Account.login == "9200001").first()
+    assert acc.drawdown_type == oczekiwany
+    s.close()
+
+
+def test_email_wiaze_konto_z_zarejestrowanym_traderem():
+    from app import auth as app_auth
+    from app.models import Product, Trader
+    s = SessionLocal()
+    tr = Trader(email="wlasciciel@reczne.pl", password_hash=app_auth.hash_password("x"),
+                full_name="Wlasciciel Reczny", referral_code="RECZ1")
+    s.add(tr); s.commit()
+    tid = tr.id
+    plan = s.query(Product).filter(Product.active == True).first()  # noqa: E712
+    s.close()
+
+    r = client.post("/api/accounts", headers=ADMIN_H, json={
+        "login": "9300001", "platform_password": "Haslo1", "platform_server": "MetaQuotes-Demo",
+        "trader_email": "WLASCICIEL@Reczne.pl", "product_key": plan.key})
+    assert r.status_code == 200 and r.json()["linked_trader"] == "wlasciciel@reczne.pl"
+
+    s = SessionLocal()
+    acc = s.query(Account).filter(Account.login == "9300001").first()
+    assert acc.trader_id == tid
+    s.close()
+
+
+def test_nieznany_email_nie_gubi_konta_ale_jest_zglaszany():
+    """Konto ma powstac, tylko panel musi powiedziec, ze nie ma wlasciciela."""
+    from app.models import Product
+    s = SessionLocal()
+    plan = s.query(Product).filter(Product.active == True).first()  # noqa: E712
+    s.close()
+
+    r = client.post("/api/accounts", headers=ADMIN_H, json={
+        "login": "9400001", "trader_email": "nikt@nieistnieje.pl", "product_key": plan.key})
+    assert r.status_code == 200
+    assert r.json()["email_unknown"] is True and r.json()["linked_trader"] is None
+
+
+def test_promocja_zapisuje_sie_jak_przy_grancie():
+    from app.models import Product
+    s = SessionLocal()
+    plany = s.query(Product).filter(Product.active == True).order_by(Product.account_size).all()  # noqa: E712
+    maly, duzy = plany[0], plany[-1]
+    s.close()
+
+    r = client.post("/api/accounts", headers=ADMIN_H, json={
+        "login": "9500001", "product_key": duzy.key,
+        "note": "BOGO promotion", "bogo_paid_key": maly.key})
+    assert r.status_code == 200
+
+    s = SessionLocal()
+    acc = s.query(Account).filter(Account.login == "9500001").first()
+    assert acc.grant_note == "BOGO promotion"
+    assert acc.bogo_paid_size == maly.account_size
+    assert acc.source == "grant"
+    s.close()

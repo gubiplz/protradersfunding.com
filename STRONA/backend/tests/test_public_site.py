@@ -154,12 +154,21 @@ def test_certyfikat_po_tokenie_a_nie_po_id():
 
 
 def test_wszystkie_strony_publiczne_odpowiadaja():
+    # /admin celowo NIE ma tu byc — panel jest zamkniety i dla goscia nie istnieje.
     strony = ["/", "/faq", "/affiliate", "/terms", "/privacy", "/risk-disclosure",
-              "/refund-policy", "/verify", "/portal", "/admin", "/robots.txt"]
+              "/refund-policy", "/verify", "/portal", "/robots.txt"]
     with TestClient(app) as c:
         for path in strony:
             r = c.get(path)
             assert r.status_code == 200, f"{path} -> {r.status_code}"
+
+
+def test_panel_admina_nie_jest_strona_publiczna():
+    """Gosc nie moze nawet stwierdzic, ze panel istnieje — stad 404."""
+    with TestClient(app) as c:
+        r = c.get("/admin")
+    assert r.status_code == 404
+    assert "MT5 Pool" not in r.text
 
 
 def test_weryfikacja_certyfikatu_na_stronie():

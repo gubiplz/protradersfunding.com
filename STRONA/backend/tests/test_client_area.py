@@ -751,7 +751,7 @@ def test_usuniecie_konta_nie_lamie_kluczy_obcych():
     s.close()
 
 
-def test_usuniecie_konta_zwalnia_slot_w_puli():
+def test_usuniecie_konta_NIE_zwalnia_slotu_w_puli():
     from app.models import PoolAccount
     tid, _ = _trader("delete-pool@test.pl")
     s = SessionLocal()
@@ -767,9 +767,13 @@ def test_usuniecie_konta_zwalnia_slot_w_puli():
     with TestClient(app) as c:
         assert c.delete(f"/api/accounts/{aid}", headers=ADMIN_H).status_code == 200
 
+    # Rachunek MT5 byl juz w rekach tradera — ma historie transakcji i zna go
+    # poprzedni wlasciciel. Powrot do puli oznaczalby, ze nowy klient dostaje
+    # cudze konto, a stary zachowuje do niego dzialajace haslo.
     s = SessionLocal()
     pool = s.query(PoolAccount).filter(PoolAccount.metaapi_account_id == "MT-DEL-1").first()
-    assert pool.claimed is False and pool.claimed_by_account_id is None
+    assert pool.claimed is True
+    assert pool.retired_reason, "wpis ma nosic powod wycofania"
     s.close()
 
 

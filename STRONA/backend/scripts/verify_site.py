@@ -15,7 +15,9 @@ OUT = Path(__file__).resolve().parent.parent / "verify-out"
 OUT.mkdir(exist_ok=True)
 
 PAGES = ["/", "/faq", "/affiliate", "/terms", "/privacy", "/risk-disclosure",
-         "/refund-policy", "/verify", "/portal", "/admin"]
+         "/refund-policy", "/verify", "/portal"]
+# /admin celowo poza lista: panel jest zamkniety i bez sesji administratora
+# zwraca 404, wiec sprawdzanie go tutaj zawsze konczyloby sie bledem.
 VIEWPORTS = {"desktop": {"width": 1440, "height": 900},
              "mobile": {"width": 390, "height": 844}}
 IGNORE = ("cdn.tailwindcss.com",)   # ostrzeżenie dev-buildu Tailwinda w portalu/adminie

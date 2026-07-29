@@ -13,7 +13,10 @@
 </head>
 <body>
 
-<div class="app">
+<!-- Panel startuje NIEWIDOCZNY. Odslania go dopiero potwierdzenie, ze sesja
+     nalezy do administratora — bez tego przypadkowy gosc widzialby cala
+     nawigacje panelu, zanim zdazy zadzialac przekierowanie. -->
+<div class="app" id="app-shell" style="visibility:hidden">
   <aside class="side" id="side">
     <div class="side-head">
       <a class="brand-pill" href="/"><img src="/static/img/logo.png" alt="">
@@ -84,34 +87,18 @@ async function api(path,opts={}){
   if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||r.status);
   return r.json();
 }
-function signInForm(msg){
-  ME=null; $('tok-state').textContent='not signed in';
-  $('view').innerHTML=`<div class="empty" style="max-width:380px;margin:40px auto">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
-    <h3>Admin sign in</h3><p>${esc(msg||'Sign in with your administrator account.')}</p>
-    <div style="display:flex;flex-direction:column;gap:10px;text-align:left">
-      <input id="lg-mail" class="inp" placeholder="Login" autocomplete="username">
-      <input id="lg-pass" class="inp" type="password" placeholder="Password" autocomplete="current-password">
-      <button class="btn-p" onclick="doLogin()">Sign in</button>
-    </div></div>`;
-  $('lg-pass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
-  $('lg-mail').focus();
+function signInForm(){
+  // Panel nie ma wlasnego logowania i NIC nie pokazuje: wejscie jest jedno,
+  // to samo co dla traderow. `replace` zamiast `href`, zeby cofniecie w
+  // przegladarce nie wracalo na pusty panel.
+  ME=null;
+  location.replace('/portal?next=/admin');
 }
-async function doLogin(){
-  const email=($('lg-mail').value||'').trim(), password=$('lg-pass').value||'';
-  if(!email||!password)return signInForm('Enter login and password.');
-  try{
-    const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({email,password})});
-    if(!r.ok)return signInForm('Wrong login or password.');
-    const res=await r.json();
-    if(!res.trader.is_admin)return signInForm('This account has no administrator rights.');
-    TOKEN=res.token; localStorage.setItem('pf_token',TOKEN); ME=res.trader;
-    $('tok-state').textContent=res.trader.email;
-    go(VIEW||'overview');
-  }catch(e){signInForm('Sign in failed: '+e.message)}
+
+function signOut(){
+  fetch('/api/auth/logout',{method:'POST'}).finally(()=>{
+    TOKEN=null;ME=null;localStorage.removeItem('pf_token');location.replace('/portal')});
 }
-function signOut(){TOKEN=null;ME=null;localStorage.removeItem('pf_token');location.reload()}
 
 const ICO={
   layers:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 2 9 5-9 5-9-5z"/><path d="m3 12 9 5 9-5M3 17l9 5 9-5"/></svg>',
@@ -381,9 +368,10 @@ const VIEWS={
       <tbody>${rows.map(p=>`<tr>
         <td class="num">${p.id}</td><td class="num">${esc(p.platform_login)}</td>
         <td class="muted">${esc(p.platform_server)}</td><td class="num">$${fmt0(p.account_size)}</td>
-        <td>${p.claimed?`<span class="status failed"><span class="dot"></span>assigned</span>`
+        <td>${p.retired_reason?`<span class="status failed"><span class="dot"></span>retired</span>`
+          :p.claimed?`<span class="status pending"><span class="dot"></span>assigned</span>`
           :'<span class="status funded"><span class="dot"></span>free</span>'}</td>
-        <td>${p.claimed?`${esc(p.trader_email||'—')}<div class="muted" style="font-size:11.5px">account #${p.claimed_by_account_id}${p.account_status?' · '+esc(p.account_status):''}</div>`:'<span class="muted">—</span>'}</td>
+        <td>${p.claimed?`${esc(p.trader_email||'—')}<div class="muted" style="font-size:11.5px">${p.retired_reason?esc(p.retired_reason)+' — not reusable':`account #${p.claimed_by_account_id}${p.account_status?' · '+esc(p.account_status):''}`}</div>`:'<span class="muted">—</span>'}</td>
         <td class="muted">${p.claimed_at?dstr(p.claimed_at):'—'}</td>
         <td style="white-space:nowrap">
           <button class="btn-o sm" onclick="editPool(${p.id})">Edit</button>
@@ -900,23 +888,47 @@ async function openCreate(){
     <div class="modal-head"><h3>New challenge account</h3>
       <button class="icon-btn" onclick="document.getElementById('create-modal').remove()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
-    <p class="muted" style="font-size:12.5px;margin-bottom:14px">Creates an account row manually — normally accounts are provisioned automatically after checkout.</p>
+    <p class="muted" style="font-size:12.5px;margin-bottom:14px">Everything typed by hand, from an MT5 account outside the pool — nothing is taken from MT5 Pool and its state stays untouched. Drawdown type comes from the plan you pick.</p>
     <div class="stack">
       <input id="c-login" class="inp" placeholder="MT5 login (e.g. 100099)">
+      <input id="c-pass" class="inp" placeholder="MT5 password">
+      <input id="c-server" class="inp" placeholder="MT5 server (e.g. MetaQuotes-Demo)">
       <input id="c-name" class="inp" placeholder="Trader name">
-      <select id="c-product" class="inp">${products.map(p=>`<option value="${esc(p.key)}">${esc(p.label)} — $${fmt0(p.price_usd)}</option>`).join('')}</select>
-      <select id="c-dd" class="inp"><option value="static">Drawdown: static</option><option value="trailing">Drawdown: trailing</option></select>
+      <input id="c-email" class="inp" placeholder="Trader e-mail (links the account to their portal)">
+      <div><label class="muted" style="font-size:12px">Challenge</label>
+        <select id="c-product" class="inp">${products.map(p=>
+          `<option value="${esc(p.key)}">${esc(p.label)} — $${fmt0(p.account_size)} · normally $${fmt0(p.price_usd)}</option>`).join('')}</select></div>
+      <div><label class="muted" style="font-size:12px">Promotion <span style="opacity:.65">(optional — shown to the trader)</span></label>
+        <select id="c-reason" class="inp" onchange="document.getElementById('c-note').value=this.value">
+          <option value="">— no promotion —</option>
+          ${GRANT_REASONS.map(r=>`<option>${r}</option>`).join('')}</select></div>
+      <input id="c-note" class="inp" placeholder="Label on the e-mail badge">
+      <div><label class="muted" style="font-size:12px">Customer paid for <span style="opacity:.65">(optional — BOGO upgrade)</span></label>
+        <select id="c-paid" class="inp">
+          <option value="">— not a paid upgrade —</option>
+          ${products.map(p=>`<option value="${esc(p.key)}">${esc(p.label)} — $${fmt0(p.account_size)}</option>`).join('')}</select></div>
       <button class="btn-p lg" style="width:100%" onclick="submitCreate()">Create account</button>
+      <p class="hint">If the e-mail matches a registered trader, the account shows up in their portal and they get the credentials by e-mail.</p>
     </div></div>`;
   box.onclick=()=>box.remove();
   document.body.appendChild(box);
 }
 async function submitCreate(){
-  const body={login:$('c-login').value.trim(),trader_name:$('c-name').value.trim(),
-    product_key:$('c-product').value,drawdown_type:$('c-dd').value};
+  const body={login:$('c-login').value.trim(),
+    platform_password:$('c-pass').value.trim()||null,
+    platform_server:$('c-server').value.trim()||null,
+    trader_name:$('c-name').value.trim(),
+    trader_email:$('c-email').value.trim()||null,
+    product_key:$('c-product').value,
+    note:($('c-note').value||'').trim()||null,
+    bogo_paid_key:$('c-paid').value||null};
   if(!body.login){toast('MT5 login is required.','err');return}
-  try{await api('/api/accounts',{method:'POST',body:JSON.stringify(body)});
-    document.getElementById('create-modal')?.remove();toast('Account created.','ok');go('accounts');
+  try{const r=await api('/api/accounts',{method:'POST',body:JSON.stringify(body)});
+    document.getElementById('create-modal')?.remove();
+    toast(r.email_unknown?'Account created, but no trader with that e-mail — it has no owner yet.'
+          :r.linked_trader?`Account created for ${r.linked_trader}.`:'Account created.',
+          r.email_unknown?'err':'ok');
+    go('accounts');
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
@@ -926,9 +938,11 @@ if(localStorage.getItem('pf_admin_collapsed')==='1')$('side').classList.add('col
   if(!TOKEN)return signInForm();
   try{
     const m=await api('/api/auth/me');
-    if(!m.is_admin)return signInForm('This account has no administrator rights.');
-    ME=m; $('tok-state').textContent=m.email; go('overview');
-  }catch(e){/* api() pokazalo juz formularz logowania */}
+    if(!m.is_admin)return signInForm();
+    ME=m; $('tok-state').textContent=m.email;
+    $('app-shell').style.visibility='visible';   // dopiero teraz pokazujemy panel
+    go('overview');
+  }catch(e){/* api() juz odeslalo do logowania */}
 })();
 setInterval(()=>{
   if(document.hidden)return;

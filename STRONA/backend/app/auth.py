@@ -54,17 +54,17 @@ def parse_token(token: str) -> int | None:
 # --- FastAPI dependencies ---
 def current_trader(authorization: str | None = Header(default=None)) -> Trader:
     if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(401, "Brak tokenu (zaloguj się)")
+        raise HTTPException(401, "Missing token (sign in)")
     tid = parse_token(authorization.split(" ", 1)[1].strip())
     if tid is None:
-        raise HTTPException(401, "Token nieprawidłowy lub wygasł")
+        raise HTTPException(401, "Invalid or expired token")
     session = SessionLocal()
     try:
         trader = session.get(Trader, tid)
         # Konto usunięte (Danger Zone) jest zanonimizowane, ale wiersz zostaje —
         # stary token nie może dalej działać.
         if not trader or trader.email.endswith("@removed.invalid"):
-            raise HTTPException(401, "Trader nie istnieje")
+            raise HTTPException(401, "Trader not found")
         session.expunge(trader)
         return trader
     finally:
@@ -88,4 +88,4 @@ def require_admin(
                     return
             finally:
                 session.close()
-    raise HTTPException(403, "Wymagane uprawnienia administratora")
+    raise HTTPException(403, "Administrator rights required")

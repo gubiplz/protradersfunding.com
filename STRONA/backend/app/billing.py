@@ -49,7 +49,7 @@ def save_customer_details(session, trader: Trader, *, first_name: str | None,
 def create_checkout(session, trader: Trader, product_key: str, coupon: str | None) -> dict:
     product = session.query(Product).filter(Product.key == product_key, Product.active == True).first()  # noqa: E712
     if not product:
-        raise HTTPException(404, "Produkt nie istnieje")
+        raise HTTPException(404, "Product not found")
 
     price, discount_pct = catalog.apply_coupon(product.price_usd, coupon)
     order = Order(trader_id=trader.id, product_key=product.key, amount_usd=price,
@@ -104,11 +104,11 @@ def grant_challenge(session, trader: Trader, product_key: str, note: str | None,
     """
     product = session.query(Product).filter(Product.key == product_key, Product.active == True).first()  # noqa: E712
     if not product:
-        raise HTTPException(404, "Produkt nie istnieje")
+        raise HTTPException(404, "Product not found")
     oplacony = (session.query(Product).filter(Product.key == bogo_paid_key).first()
                 if bogo_paid_key else None)
     if bogo_paid_key and not oplacony:
-        raise HTTPException(404, "Opłacony tier nie istnieje")
+        raise HTTPException(404, "The paid tier does not exist")
     # Przy BOGO klient FAKTYCZNIE zapłacił za mniejszy tier — zamówienie musi to
     # odzwierciedlać, inaczej na fakturze widniałoby 0 USD i wyglądałoby to na
     # darmowy produkt.
@@ -127,7 +127,7 @@ def grant_challenge(session, trader: Trader, product_key: str, note: str | None,
 def mock_complete(session, order_id: int, trader_id: int):
     order = session.get(Order, order_id)
     if not order or order.trader_id != trader_id:
-        raise HTTPException(404, "Zamówienie nie istnieje")
+        raise HTTPException(404, "Order not found")
     if order.status == "paid":
         return {"order_id": order.id, "account_id": order.account_id, "already": True}
     acc = provisioning.create_account_from_order(session, order)
@@ -140,7 +140,7 @@ def handle_webhook(session, payload: bytes, sig_header: str | None) -> dict:
         try:
             event = stripe.Webhook.construct_event(payload, sig_header, settings.stripe_webhook_secret)
         except Exception as e:
-            raise HTTPException(400, f"Nieprawidłowy podpis webhooka: {e}")
+            raise HTTPException(400, f"Invalid webhook signature: {e}")
     else:
         event = json.loads(payload.decode() or "{}")  # dev: bez weryfikacji podpisu
 

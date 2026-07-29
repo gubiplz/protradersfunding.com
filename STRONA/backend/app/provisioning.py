@@ -190,7 +190,9 @@ async def _provision_one(session_factory, feed, aid: int) -> None:
         acc = s.get(Account, aid)
         if not acc or acc.status != "provisioning":
             return
-        trader = s.get(Trader, acc.trader_id)
+        # Konto zalozone recznie przez admina moze nie miec wlasciciela — bez tego
+        # warunku SQLAlchemy ostrzega o odpytywaniu o klucz NULL przy kazdym tyknieciu.
+        trader = s.get(Trader, acc.trader_id) if acc.trader_id else None
         settings = get_settings()
 
         # 0) Realny provisioning wyłączony — dokończ konto lokalnie. Bez tego konta

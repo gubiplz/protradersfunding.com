@@ -79,6 +79,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
     "pool_accounts": {
         "claimed_by_trader_id": "INTEGER",
         "claimed_at": "TIMESTAMP",
+        "retired_reason": "VARCHAR(60)",
     },
     "payouts": {
         "method": "VARCHAR(40)",
