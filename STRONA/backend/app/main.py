@@ -1180,6 +1180,13 @@ def me_patch(payload: MePatch, trader: Trader = Depends(auth.current_trader)):
         tr = session.get(Trader, trader.id)
         if payload.full_name is not None:
             tr.full_name = payload.full_name.strip()[:120]
+            # Certyfikaty, weryfikator i leaderboard renderuja acc.trader_name
+            # (snapshot z utworzenia konta) — zmiana nazwiska w ustawieniach ma
+            # byc widoczna takze na juz wystawionych dokumentach. Pustej nazwy
+            # nie propagujemy, zeby nie wyczyscic dokumentow.
+            if tr.full_name:
+                session.query(Account).filter(Account.trader_id == tr.id).update(
+                    {Account.trader_name: tr.full_name})
         for field in ("notify_updates", "notify_trading", "notify_payouts", "notify_marketing"):
             v = getattr(payload, field)
             if v is not None:
