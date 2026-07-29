@@ -1562,13 +1562,20 @@ def admin_bot_start(account_id: int, payload: BotIn):
 
 
 class BotPauseIn(BaseModel):
-    paused: bool
+    """Zmiana ustawień DZIAŁAJĄCEGO bota — oba pola opcjonalne, ale co najmniej jedno."""
+    paused: bool | None = None
+    target_pct: float | None = None
 
 
 @app.patch("/api/admin/accounts/{account_id}/bot", dependencies=[Depends(auth.require_admin)])
 def admin_bot_pause(account_id: int, payload: BotPauseIn):
-    """Pauza/wznowienie. W odróżnieniu od Stop konto zostaje pod kontrolą bota,
-    więc saldo nie wraca do feedu — po wznowieniu krzywa idzie dalej bez uskoku."""
+    """Pauza/wznowienie oraz zmiana docelowego zysku.
+
+    W odróżnieniu od Stop konto zostaje pod kontrolą bota, więc saldo nie wraca
+    do feedu — ani po wznowieniu, ani po podniesieniu celu krzywa nie dostaje
+    uskoku. Podniesienie celu to jedyny sposób, żeby ruszyć bota, który dobił do
+    swojego `bot_target_pct` i przestał otwierać pozycje.
+    """
     session = SessionLocal()
     try:
         acc = session.get(Account, account_id)
@@ -1576,8 +1583,16 @@ def admin_bot_pause(account_id: int, payload: BotPauseIn):
             raise HTTPException(404, "Konto nie istnieje")
         if not acc.bot_enabled:
             raise HTTPException(400, "Trade BOT nie jest uruchomiony na tym koncie")
-        tradebot.set_paused(session, acc, payload.paused)
-        return {"bot_enabled": True, "bot_paused": acc.bot_paused, "login": acc.login}
+        if payload.paused is None and payload.target_pct is None:
+            raise HTTPException(400, "Podaj 'paused' albo 'target_pct'")
+        if payload.target_pct is not None:
+            if payload.target_pct < 0:
+                raise HTTPException(400, "Cel nie może być ujemny")
+            tradebot.set_target(session, acc, payload.target_pct)
+        if payload.paused is not None:
+            tradebot.set_paused(session, acc, payload.paused)
+        return {"bot_enabled": True, "bot_paused": acc.bot_paused,
+                "bot_target_pct": acc.bot_target_pct, "login": acc.login}
     finally:
         session.close()
 

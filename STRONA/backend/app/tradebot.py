@@ -236,6 +236,21 @@ def set_paused(session, acc: Account, paused: bool) -> None:
     session.commit()
 
 
+def set_target(session, acc: Account, target_pct: float) -> float:
+    """Zmienia docelowy zysk DZIAŁAJĄCEGO bota i zwraca nową wartość.
+
+    Po osiągnięciu celu bot przestaje otwierać pozycje, ale zostaje włączony —
+    bez tej funkcji jedynym wyjściem było zatrzymanie go (co resynchronizuje
+    saldo do feedu i robi uskok na krzywej) albo pauza, która niczego nie zmienia.
+    Podniesienie celu puszcza bota dalej z tego samego miejsca, bez uskoku.
+
+    0 znosi limit — bot handluje bez górnej granicy zysku.
+    """
+    acc.bot_target_pct = max(0.0, round(float(target_pct or 0.0), 1))
+    session.commit()
+    return acc.bot_target_pct
+
+
 def _open_trade(session, acc: Account) -> Trade | None:
     return (session.query(Trade)
             .filter(Trade.account_id == acc.id, Trade.status == "open")

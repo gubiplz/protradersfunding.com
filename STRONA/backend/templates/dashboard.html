@@ -513,11 +513,25 @@ async function openAccount(id){
           <span class="chip">pace <b>${esc(a.bot_pace||'active')}</b></span>
           ${a.bot_target_pct?`<span class="chip">stops at <b>+${a.bot_target_pct}%</b></span>`:''}
         </div>
+        ${(a.bot_target_pct && (m.profit_pct||0) >= a.bot_target_pct)?`
+          <div class="warn-box" style="margin:0 0 12px;background:#fffaf0;border:1px solid #f5d9a8;color:#8a6d3b">
+            <b style="display:block">Target reached — the bot stopped opening positions</b>
+            It is still running at +${(m.profit_pct||0).toFixed(2)}%, just idle. Raise the target below to continue from here.
+          </div>`:''}
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+          <div><label class="muted" style="font-size:12px">Target profit</label>
+            <input id="bot-newtarget" class="inp" type="number" step="0.1" min="0"
+                   style="max-width:130px" value="${(a.bot_target_pct||0).toFixed(1)}"></div>
+          <button class="btn-o" onclick="setBotTarget(${a.id})">Update target</button>
+        </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn-p" onclick="pauseBot(${a.id},${a.bot_paused?'false':'true'})">${a.bot_paused?'Resume bot':'Pause bot'}</button>
           <button class="btn-o" style="border-color:#f5c6c6;color:var(--red)" onclick="stopBot(${a.id})">Stop bot</button>
         </div>
         <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
+          <b>Target</b> is the account profit at which the bot stops trading — raise it in 0.1% steps
+          to let it keep going, or set <b>0</b> for no limit. Changing it never resyncs the balance,
+          so the equity curve continues without a jump.
           <b>Pause</b> only stops new entries — an open position runs to its close, the account
           stays on bot data and the balance is kept. <b>Stop</b> ends the bot for good and
           resyncs the balance to the live feed.</p>`
@@ -676,6 +690,17 @@ async function pauseBot(id,paused){
   try{await api(`/api/admin/accounts/${id}/bot`,{method:'PATCH',body:JSON.stringify({paused})});
     toast(paused?'⏸ Bot paused — no new entries, the account keeps its balance.'
                 :'▶️ Bot resumed.','ok');
+    openAccount(id);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function setBotTarget(id){
+  const cel=parseFloat($('bot-newtarget').value);
+  if(isNaN(cel)||cel<0){toast('Enter a target of 0% or more.','err');return}
+  try{
+    const r=await api(`/api/admin/accounts/${id}/bot`,{method:'PATCH',
+      body:JSON.stringify({target_pct:cel})});
+    toast(r.bot_target_pct?`🎯 Target set to +${r.bot_target_pct}% — the bot continues from here.`
+                          :'🎯 Target removed — the bot trades with no profit limit.','ok');
     openAccount(id);
   }catch(e){toast('Error: '+e.message,'err')}
 }
