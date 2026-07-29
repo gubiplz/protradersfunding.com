@@ -21,10 +21,12 @@ os.environ["NOTIFY_WEBHOOK_URL"] = ""
 # Poller nie moze chodzic w tle testow — przestawialby salda kont.
 os.environ["POLLER_ENABLED"] = "false"
 
-# Sekret crona musi byc znany JUZ TERAZ: `get_settings()` jest cache'owane, wiec
-# ustawienie go dopiero w module testowym trafia w gotowy obiekt ustawien i
-# `/api/tick` odbijalby crona 401-ka przy pelnym przebiegu.
+# Sekrety musza byc znane JUZ TERAZ: `get_settings()` jest cache'owane, wiec
+# obiekt ustawien powstaje przy pierwszym imporcie `app.config` — czyli w tym
+# pliku testowym, ktory pytest zbierze jako pierwszy. Ustawianie ich dopiero
+# w module testowym uzaleznialo wynik od kolejnosci alfabetycznej plikow.
 os.environ.setdefault("CRON_SECRET", "sekret-crona")
+os.environ.setdefault("ADMIN_TOKEN", "tajny-token")
 
 # Feed i seed: poszczególne pliki testów mogą nadpisać własnym setdefault-em
 # tylko wtedy, gdy ustawimy to przez setdefault (nie twardo).

@@ -6,15 +6,9 @@
     }
   },
   "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/api/index"
-    }
+    { "source": "/(.*)", "destination": "/api/index" }
   ],
   "crons": [
-    {
-      "path": "/api/tick",
-      "schedule": "0 3 * * *"
-    }
+    { "path": "/api/tick", "schedule": "0 3 * * *" }
   ]
 }

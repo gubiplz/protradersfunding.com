@@ -32,7 +32,7 @@
         <span class="sb-txt">Collapse</span></button>
       <div class="foot-user">
         <div class="avatar" style="background:linear-gradient(135deg,#0f172a,#334155)">A</div>
-        <div class="who"><div>Administrator</div><span id="tok-state">token: default</span></div>
+        <div class="who"><div>Administrator</div><span id="tok-state">not signed in</span></div>
       </div>
     </div>
   </aside>
@@ -73,24 +73,46 @@ const fmt0=n=>(n??0).toLocaleString('en-US',{maximumFractionDigits:0});
 const dstr=iso=>new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-let ADMIN=localStorage.getItem('pf_admin')||'admin';
-const adminH=()=>({'Content-Type':'application/json','X-Admin-Token':ADMIN});
+/* Panel otwiera KONTO administratora, nie wspólny token. Sesja jest ta sama co
+   w portalu tradera (`pf_token`), więc zalogowany admin przechodzi między
+   panelem a portalem bez drugiego logowania. */
+let TOKEN=localStorage.getItem('pf_token')||null, ME=null;
+const adminH=()=>{const h={'Content-Type':'application/json'};
+  if(TOKEN)h['Authorization']='Bearer '+TOKEN; return h};
 async function api(path,opts={}){
   const r=await fetch(path,{headers:adminH(),...opts});
-  if(r.status===401||r.status===403){authFail();throw new Error('Admin token rejected')}
+  if(r.status===401||r.status===403){signInForm();throw new Error('Brak dostępu')}
   if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||r.status);
   return r.json();
 }
-function authFail(){
-  $('view').innerHTML=`<div class="empty" style="max-width:520px;margin:40px auto">
+function signInForm(msg){
+  ME=null; $('tok-state').textContent='not signed in';
+  $('view').innerHTML=`<div class="empty" style="max-width:380px;margin:40px auto">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
-    <h3>Admin token required</h3><p>Set the token configured in <span class="mono">ADMIN_TOKEN</span> to access this panel.</p>
-    <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-      <input id="tok-inp" class="inp" style="max-width:220px" placeholder="Admin token" value="${esc(ADMIN)}">
-      <button class="btn-p" onclick="saveToken($('tok-inp').value)">Unlock</button></div></div>`;
+    <h3>Admin sign in</h3><p>${esc(msg||'Sign in with your administrator account.')}</p>
+    <div style="display:flex;flex-direction:column;gap:10px;text-align:left">
+      <input id="lg-mail" class="inp" placeholder="Login" autocomplete="username">
+      <input id="lg-pass" class="inp" type="password" placeholder="Password" autocomplete="current-password">
+      <button class="btn-p" onclick="doLogin()">Sign in</button>
+    </div></div>`;
+  $('lg-pass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
+  $('lg-mail').focus();
 }
-function saveToken(t){ADMIN=(t||'').trim()||'admin';localStorage.setItem('pf_admin',ADMIN);
-  $('tok-state').textContent='token: '+(ADMIN==='admin'?'default':'custom');go(VIEW);}
+async function doLogin(){
+  const email=($('lg-mail').value||'').trim(), password=$('lg-pass').value||'';
+  if(!email||!password)return signInForm('Enter login and password.');
+  try{
+    const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({email,password})});
+    if(!r.ok)return signInForm('Wrong login or password.');
+    const res=await r.json();
+    if(!res.trader.is_admin)return signInForm('This account has no administrator rights.');
+    TOKEN=res.token; localStorage.setItem('pf_token',TOKEN); ME=res.trader;
+    $('tok-state').textContent=res.trader.email;
+    go(VIEW||'overview');
+  }catch(e){signInForm('Sign in failed: '+e.message)}
+}
+function signOut(){TOKEN=null;ME=null;localStorage.removeItem('pf_token');location.reload()}
 
 const ICO={
   layers:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 2 9 5-9 5-9-5z"/><path d="m3 12 9 5 9-5M3 17l9 5 9-5"/></svg>',
@@ -330,10 +352,10 @@ const VIEWS={
   setFeedChip(s);
   $('view').innerHTML=`
     <div class="sec-card" style="max-width:560px"><h3>Admin access</h3>
-      <p class="muted" style="font-size:13px;margin:6px 0 12px">Sent as the <span class="mono">X-Admin-Token</span> header with every request. Must match <span class="mono">ADMIN_TOKEN</span> in your environment.</p>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <input id="set-token" class="inp" style="max-width:260px" value="${esc(ADMIN)}">
-        <button class="btn-p" onclick="saveToken($('set-token').value);toast('Admin token saved.','ok')">Save token</button>
+      <p class="muted" style="font-size:13px;margin:6px 0 12px">You are signed in with an administrator account. Access is granted by the <span class="mono">is_admin</span> flag on the account, not by a shared token.</p>
+      <div class="kv"><span>Signed in as</span><b>${esc(ME?.email||'—')}</b></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+        <button class="btn-o" onclick="signOut()">Sign out</button>
       </div></div>
 
     <div class="sec-card" style="max-width:560px"><h3>Runtime</h3>
@@ -793,8 +815,14 @@ async function submitCreate(){
 
 /* ---------- start + autoodświeżanie ---------- */
 if(localStorage.getItem('pf_admin_collapsed')==='1')$('side').classList.add('collapsed');
-$('tok-state').textContent='token: '+(ADMIN==='admin'?'default':'custom');
-go('overview');
+(async()=>{
+  if(!TOKEN)return signInForm();
+  try{
+    const m=await api('/api/auth/me');
+    if(!m.is_admin)return signInForm('This account has no administrator rights.');
+    ME=m; $('tok-state').textContent=m.email; go('overview');
+  }catch(e){/* api() pokazalo juz formularz logowania */}
+})();
 setInterval(()=>{
   if(document.hidden)return;
   if(VIEW==='overview'||VIEW==='accounts')VIEWS[VIEW]().catch(()=>{});

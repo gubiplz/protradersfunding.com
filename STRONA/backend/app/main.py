@@ -1945,6 +1945,48 @@ def payout_certificate(request: Request, cert_token: str):
         session.close()
 
 
+# Odczyty, przy ktorych warto dogonic silnik: lista kont tradera (portal),
+# lista kont admina i ranking. Reszta API zostaje szybka.
+_LAZY_TICK_PATHS = {"/api/me/accounts", "/api/accounts", "/api/leaderboard"}
+
+
+async def _lazy_tick() -> None:
+    """Dogania silnik przy wejściu na dashboard — dla hostingu bezserwerowego.
+
+    Poller nie ma tam procesu, w którym mógłby się kręcić, a cron Vercela na
+    koncie Hobby chodzi raz na dobę. Bez tego konta stoją w miejscu. Zamiast
+    trzymać stan w pamięci (instancja i tak ginie po requeście) pytamy bazę
+    o najświeższy snapshot: jeśli jest starszy niż `LAZY_TICK_SEC`, robimy jeden
+    przebieg. Efekt: konta żyją dokładnie wtedy, gdy ktoś na nie patrzy.
+    """
+    okno = settings.lazy_tick_sec
+    if okno <= 0:
+        return
+    session = SessionLocal()
+    try:
+        ostatni = session.query(func.max(EquitySnapshot.ts)).scalar()
+    finally:
+        session.close()
+    if ostatni is not None:
+        teraz = datetime.now(timezone.utc)
+        # Postgres oddaje TIMESTAMP bez strefy — porównujemy w tej samej skali.
+        if ostatni.tzinfo is None:
+            teraz = teraz.replace(tzinfo=None)
+        if (teraz - ostatni).total_seconds() < okno:
+            return
+    try:
+        await poller.tick_once()
+    except Exception as e:  # pragma: no cover - nie wywalamy odczytu przez tick
+        print(f"[lazy-tick] błąd przebiegu: {e}")
+
+
+@app.middleware("http")
+async def _lazy_tick_middleware(request: Request, call_next):
+    if settings.lazy_tick_sec > 0 and request.url.path in _LAZY_TICK_PATHS:
+        await _lazy_tick()
+    return await call_next(request)
+
+
 def _require_cron(x_admin_token: str | None = Header(default=None),
                   authorization: str | None = Header(default=None)) -> None:
     """Wpuszcza crona (Bearer CRON_SECRET) albo admina (X-Admin-Token).

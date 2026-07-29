@@ -113,6 +113,11 @@ class Settings:
     # przyjmuje wyłącznie token admina. Vercel Cron sam wysyła ten sekret
     # w nagłówku `Authorization: Bearer …`, gdy CRON_SECRET jest ustawiony.
     cron_secret: str = os.getenv("CRON_SECRET", "")
+    # Ile sekund może mieć najświeższy odczyt, zanim wejście na dashboard samo
+    # dogoni silnik. 0 = wyłączone (tak jest lokalnie, gdzie kręci się poller).
+    # Na hostingu bezserwerowym to JEDYNY sposób, żeby konta żyły — cron Vercela
+    # na koncie Hobby chodzi raz na dobę.
+    lazy_tick_sec: int = int(os.getenv("LAZY_TICK_SEC", "0"))
 
     # --- Stripe (brak kluczy => tryb MOCK) ---
     stripe_secret_key: str = os.getenv("STRIPE_SECRET_KEY", "")
