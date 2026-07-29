@@ -227,6 +227,7 @@
 }
 
 @media print{
+  html{background:#fff!important}   /* beats the inline dark bg on <html> */
   .cert-page{background:#fff;padding:0;min-height:auto}
   .noprint{display:none!important}
   .cert-card{box-shadow:none;width:100%;print-color-adjust:exact;-webkit-print-color-adjust:exact}
