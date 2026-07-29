@@ -56,7 +56,8 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
   border-radius:999px;padding:8px 18px 8px 10px;font-family:var(--display);font-weight:700;font-size:15.5px;
   box-shadow:0 8px 18px -8px rgba(99,102,241,.5);white-space:nowrap}
 .brand-pill img{width:22px;height:22px}
-.side-nav{padding:4px 12px;display:flex;flex-direction:column;gap:2px;flex:1;overflow-y:auto}
+.side-nav{padding:4px 12px;display:flex;flex-direction:column;gap:2px;flex:1;overflow-y:auto;
+  overscroll-behavior:contain}
 .side-sec{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);
   padding:16px 12px 8px;font-weight:700}
 .sb-link{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:11px;
@@ -262,7 +263,8 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .plan-card .btn-p{margin-top:auto;width:100%}
 
 /* tables */
-.tbl-wrap{background:#fff;border:1px solid var(--line);border-radius:var(--r);overflow-x:auto;box-shadow:var(--shadow)}
+.tbl-wrap{background:#fff;border:1px solid var(--line);border-radius:var(--r);overflow-x:auto;box-shadow:var(--shadow);
+  overscroll-behavior-x:contain}
 table.tbl{width:100%;border-collapse:collapse;font-size:13.5px;min-width:560px}
 table.tbl th{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);text-align:left;
   padding:13px 18px;background:var(--panel2);white-space:nowrap}

@@ -192,7 +192,8 @@ h1,h2,h3,.display{font-family:var(--display);letter-spacing:-.02em}
 .step p{font-size:14.5px;color:var(--muted)}
 
 /* objectives table */
-.obj-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);background:var(--panel);box-shadow:var(--shadow)}
+.obj-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);background:var(--panel);box-shadow:var(--shadow);
+  overscroll-behavior-x:contain}
 table.obj{width:100%;border-collapse:collapse;font-size:14.5px;min-width:640px}
 table.obj th,table.obj td{padding:15px 20px;text-align:left;border-top:1px solid var(--line)}
 table.obj thead th{border-top:0;font-family:var(--display);font-size:15px;padding:18px 20px;background:var(--panel2)}

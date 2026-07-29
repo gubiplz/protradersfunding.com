@@ -81,7 +81,7 @@ tr.clickable{cursor:pointer}
   .top-right .kyc-chip{flex:1 1 100%;justify-content:center}
   /* tables scroll inside their own container, not the body */
   .sec-card>div[style*="overflow-x"],.sec-card table.tbl{max-width:100%}
-  .sec-card{overflow-x:auto}
+  .sec-card{overflow-x:auto;overscroll-behavior-x:contain}
   /* the segmented status filter wraps instead of stretching the view */
   .seg{flex-wrap:wrap;width:100%}
   .seg button{flex:1 0 auto}

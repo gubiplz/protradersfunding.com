@@ -1318,7 +1318,7 @@ function txTable(a,act){
   if(!rows.length)
     return '<p class="muted" style="font-size:13px">Nothing here yet — close a trade and it will show up.</p>';
   const bal=v=>v==null?'—':'$'+fmt(v);
-  return `<div style="overflow-x:auto"><table class="tbl" style="min-width:560px">
+  return `<div style="overflow-x:auto;overscroll-behavior-x:contain"><table class="tbl" style="min-width:560px">
     <thead><tr><th>Date</th><th>Instrument</th><th>Side</th><th style="text-align:right">Lots</th>
       <th style="text-align:right">P&amp;L</th><th style="text-align:right">Balance</th></tr></thead>
     <tbody>${rows.map(r=>r.kind==='payout'?`<tr>

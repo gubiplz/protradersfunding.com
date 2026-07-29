@@ -200,7 +200,7 @@ const VIEWS={
     </div>
     <div class="sec-card">
       <h3>Recent orders</h3>
-      ${orders.length?`<div style="overflow-x:auto"><table class="tbl"><thead><tr>
+      ${orders.length?`<div style="overflow-x:auto;overscroll-behavior-x:contain"><table class="tbl"><thead><tr>
         <th>#</th><th>Trader</th><th>Product</th><th>Amount</th><th>Status</th><th>Account</th></tr></thead>
         <tbody>${orders.slice(0,8).map(o=>`<tr>
           <td class="num">${o.id}</td><td>${esc(o.trader_email||'—')}</td><td>${esc(o.product_key)}</td>
