@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pro Traders Funding — Coming Soon</title>
+    <meta name="description" content="Pro Traders Funding — profesjonalna firma prop tradingowa. Handluj naszym kapitałem. Wkrótce.">
+    <meta name="theme-color" content="#0f1729">
+
+    <link rel="icon" type="image/x-icon" href="assets/favicon/favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="assets/favicon/favicon.svg">
+    <link rel="icon" type="image/png" sizes="96x96" href="assets/favicon/favicon-96x96.png">
+    <link rel="apple-touch-icon" href="assets/favicon/apple-touch-icon.png">
+    <link rel="manifest" href="assets/favicon/site.webmanifest">
+
+    <meta property="og:title" content="Pro Traders Funding">
+    <meta property="og:description" content="Profesjonalna firma prop tradingowa. Wkrótce.">
+    <meta property="og:image" content="assets/logo.png">
+    <meta property="og:type" content="website">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="bg-gradient"></div>
+    <div class="bg-grid"></div>
+
+    <main class="container">
+        <div class="badge">
+            <span class="badge-dot"></span>
+            <span>Uruchomienie już wkrótce</span>
+        </div>
+
+        <img src="assets/logo.png" alt="Pro Traders Funding" class="logo">
+
+        <h1 class="headline">
+            Handluj naszym kapitałem.<br>
+            <span class="gold">Zatrzymaj swoje zyski.</span>
+        </h1>
+
+        <p class="subheadline">
+            Profesjonalna firma prop tradingowa dla ambitnych traderów.
+            Przejdź nasze wyzwanie i zyskaj dostęp do konta finansowanego kwotą do <strong>200 000 USD</strong>.
+        </p>
+
+        <div class="features">
+            <div class="feature">
+                <div class="feature-icon">01</div>
+                <div class="feature-text">
+                    <div class="feature-title">Do 90% zysku</div>
+                    <div class="feature-desc">Najwyższy split w branży</div>
+                </div>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">02</div>
+                <div class="feature-text">
+                    <div class="feature-title">Szybkie wypłaty</div>
+                    <div class="feature-desc">Bez zbędnych oczekiwań</div>
+                </div>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">03</div>
+                <div class="feature-text">
+                    <div class="feature-title">Elastyczne zasady</div>
+                    <div class="feature-desc">Handluj po swojemu</div>
+                </div>
+            </div>
+        </div>
+
+        <form class="notify-form" onsubmit="handleSubmit(event)">
+            <input
+                type="email"
+                name="email"
+                placeholder="Twój adres email"
+                required
+                class="notify-input"
+            >
+            <button type="submit" class="notify-button">
+                Powiadom mnie
+            </button>
+        </form>
+        <p class="form-note" id="formNote">Bądź pierwszy — dołącz do listy oczekujących.</p>
+
+        <footer class="footer">
+            <p>&copy; <span id="year"></span> Pro Traders Funding. Wszelkie prawa zastrzeżone.</p>
+        </footer>
+    </main>
+
+    <script>
+        document.getElementById('year').textContent = new Date().getFullYear();
+
+        function handleSubmit(e) {
+            e.preventDefault();
+            const email = e.target.email.value;
+            const note = document.getElementById('formNote');
+            note.textContent = `Dziękujemy! Powiadomimy Cię na ${email}, gdy wystartujemy.`;
+            note.classList.add('success');
+            e.target.reset();
+        }
+    </script>
+</body>
+</html>
