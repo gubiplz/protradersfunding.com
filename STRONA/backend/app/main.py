@@ -2374,6 +2374,67 @@ def _cert_ctx(request, *, headline_plain, eyebrow, trader_name, amount_label, am
     }
 
 
+@app.middleware("http")
+async def _html_no_cache(request: Request, call_next):
+    """Strony HTML zawsze swieze: assety maja ?v=, ale sam HTML nie — przegladarka
+    potrafila trzymac stara strone z linkami do starych wersji."""
+    resp = await call_next(request)
+    if resp.headers.get("content-type", "").startswith("text/html"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+@app.get("/api/verify/{cert_token}")
+def verify_api(request: Request, cert_token: str):
+    """Dane certyfikatu dla podgladu na landingu.
+
+    Token JEST przepustka do dokumentu (tak samo otwiera /certificate/{t}),
+    wiec zwracamy dokladnie to, co widac na samym certyfikacie."""
+    session = SessionLocal()
+    try:
+        cert = session.query(Certificate).filter(Certificate.cert_token == cert_token).first()
+        if cert:
+            acc = session.get(Account, cert.account_id)
+            kind, when = cert.kind, cert.issued_at
+        else:
+            acc = session.query(Account).filter(Account.cert_token == cert_token).first()
+            kind = when = None
+            if acc and _cert_eligible(acc):
+                kind = "funded" if acc.status == "funded" else "phase_1"
+                when = acc.closed_at or acc.created_at
+            else:
+                acc = None
+        weryfikacja = f"{_public_base(request)}/verify/{cert_token}"
+        if acc:
+            eyebrow, _seal = CERT_KINDS.get(kind, ("Evaluation passed", "Passed"))
+            data = (when or datetime.now(timezone.utc)).strftime("%d %b %Y")
+            return {"found": True, "variant": "pass", "eyebrow": eyebrow,
+                    "amount_label": "Account size", "amount": f"${acc.initial_balance:,.0f}",
+                    "trader_name": acc.trader_name or "—",
+                    "meta": [{"value": data, "label": "Date"},
+                             {"value": f"{acc.steps}-Step" if acc.steps else "Instant funding",
+                              "label": "Program"}],
+                    "cert_token": cert_token, "qr_svg": _qr_svg(weryfikacja),
+                    "open_url": f"/certificate/{cert_token}"}
+        payout = session.query(Payout).filter(Payout.cert_token == cert_token).first()
+        if payout:
+            pacc = session.get(Account, payout.account_id)
+            kwota = (f"${payout.trader_share:,.0f}" if float(payout.trader_share).is_integer()
+                     else f"${payout.trader_share:,.2f}")
+            data = (payout.ts or datetime.now(timezone.utc)).strftime("%d %b %Y")
+            return {"found": True, "variant": "payout", "eyebrow": "Payout",
+                    "amount_label": "For the amount of", "amount": kwota,
+                    "trader_name": (pacc.trader_name if pacc else None) or "—",
+                    "meta": [{"value": data, "label": "Date"},
+                             {"value": f"${(pacc.initial_balance if pacc else 0):,.0f}",
+                              "label": "Account size"}],
+                    "cert_token": cert_token, "qr_svg": _qr_svg(weryfikacja),
+                    "open_url": f"/payout/{cert_token}"}
+        raise HTTPException(404, "Certificate not found")
+    finally:
+        session.close()
+
+
 @app.get("/certificate/{cert_token}", response_class=HTMLResponse)
 def certificate(request: Request, cert_token: str):
     """Certyfikat po NIEODGADYWALNYM tokenie — link można udostępniać publicznie,

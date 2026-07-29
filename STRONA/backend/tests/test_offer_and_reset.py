@@ -85,3 +85,31 @@ def test_reset_hasla_dziala_a_stare_haslo_przestaje():
 
     r = client.post("/api/auth/reset", json={"token": "zepsuty-token", "password": "cokolwiek-123"})
     assert r.status_code == 400
+
+
+def test_api_verify_zwraca_dane_certyfikatu_dla_podgladu():
+    """Morph na LP: token dziala jak przepustka — API oddaje to, co widac
+    na samym dokumencie (payout = wariant zielony)."""
+    from datetime import datetime, timezone
+    from app.models import Account, Certificate, Payout
+    s = SessionLocal()
+    acc = Account(login="770777001", trader_name="Verify Morph", product_key="2step-50k",
+                  initial_balance=50_000, steps=2, status="funded", phase="funded",
+                  balance=50_000, equity=50_000, peak_equity=50_000,
+                  day_start_equity=50_000, day_start_balance=50_000)
+    s.add(acc); s.commit()
+    s.add(Certificate(account_id=acc.id, kind="funded", cert_token="tok-ver-funded-1",
+                      issued_at=datetime.now(timezone.utc)))
+    s.add(Payout(account_id=acc.id, profit_amount=800, trader_share=640.5, paid=True,
+                 cert_token="tok-ver-payout-1"))
+    s.commit(); s.close()
+
+    r = client.get("/api/verify/tok-ver-funded-1").json()
+    assert r["variant"] == "pass" and r["amount"] == "$50,000"
+    assert r["trader_name"] == "Verify Morph" and "<svg" in r["qr_svg"]
+
+    r = client.get("/api/verify/tok-ver-payout-1").json()
+    assert r["variant"] == "payout" and r["amount"] == "$640.50"
+    assert r["open_url"] == "/payout/tok-ver-payout-1"
+
+    assert client.get("/api/verify/nie-ma").status_code == 404

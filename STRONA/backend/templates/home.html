@@ -330,24 +330,26 @@
         <input id="verifyInput" placeholder="Paste a certificate ID…" aria-label="Certificate ID">
         <button class="btn" type="submit">Verify</button>
       </form>
+      <p class="verify-err" id="verifyErr" style="display:none">No certificate found for this ID.</p>
+      <a class="verify-open" id="pv-open" href="#" target="_blank" style="display:none">View the full certificate →</a>
     </div>
     {# The preview uses EXACTLY the same classes as the real certificate
        (cert.css), so the landing never drifts from the document on the next
        redesign. #}
-    <div class="cert-card cert-demo" data-rv>
+    <div class="cert-card cert-demo" data-rv id="pv-card">
       <div class="cert-inner">
         <div class="cert-logo"><img src="/static/img/logo.png" alt=""><span>{{ site_name }}</span></div>
 
-        <div class="cert-eyebrow"><s></s>Funded trader<s></s></div>
+        <div class="cert-eyebrow"><s></s><span id="pv-eyebrow">Funded trader</span><s></s></div>
         <h3 class="cert-title">Certificate</h3>
 
-        <div class="cert-amountlabel">Account size</div>
-        <div class="cert-amount">$100,000</div>
+        <div class="cert-amountlabel" id="pv-amountlabel">Account size</div>
+        <div class="cert-amount" id="pv-amount">$100,000</div>
 
         <div class="cert-presented">presented to</div>
-        <div class="cert-person">Your Name</div>
+        <div class="cert-person" id="pv-person">Your Name</div>
 
-        <div class="cert-meta">
+        <div class="cert-meta" id="pv-meta">
           <div><b>On your pass date</b><span>Date</span></div>
           <div><b>2-Step</b><span>Program</span></div>
         </div>
@@ -361,8 +363,8 @@
             <span>Chief Executive Officer</span>
           </div>
           <div class="cert-qr">
-            <div class="qr-box">{{ sample_qr | safe }}</div>
-            <b>a1b2-example</b>
+            <div class="qr-box" id="pv-qr">{{ sample_qr | safe }}</div>
+            <b id="pv-token">a1b2-example</b>
             <span>Certificate #</span>
           </div>
         </div>

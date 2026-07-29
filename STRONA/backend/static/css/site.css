@@ -374,6 +374,14 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
 .verify-result .rows span:first-child{color:var(--muted)}
 .verify-result .rows span:last-child{font-family:var(--mono)}
 
+/* verify na LP: blad + link + blysk karty po podmianie na realny dokument */
+.verify-err{margin-top:10px;font-size:13.5px;color:var(--red)}
+.verify-open{display:inline-block;margin-top:12px;font-size:14px;font-weight:600;color:var(--acc);text-decoration:underline}
+@keyframes pvflash{0%{transform:scale(.985);box-shadow:0 0 0 rgba(43,139,255,0)}
+  35%{transform:scale(1.008);box-shadow:0 0 70px rgba(43,139,255,.55)}
+  100%{transform:scale(1);box-shadow:0 0 44px rgba(43,139,255,.42)}}
+.pv-flash{animation:pvflash .7s cubic-bezier(.22,1,.36,1)}
+
 /* ---------------- reveals ---------------- */
 .rv{opacity:0;transform:translateY(26px)}
 .rv.in{opacity:1;transform:none;transition:opacity .7s ease,transform .7s cubic-bezier(.22,1,.36,1)}

@@ -39,6 +39,12 @@ def _account(login: str, *, size=100_000.0, max_lots=6.0, style="balanced",
                   started_at=START.replace(tzinfo=None))
     s.add(acc); s.commit()
     tradebot.start(s, acc, style=style, pace=pace, target_pct=target_pct)
+    # Seed z SAMEGO loginu: seed_for() miesza acc.id, a auto-increment zalezy od
+    # tego, ile kont zalozyly WCZESNIEJSZE pliki testow — trajektoria bota
+    # zmieniala sie od niepowiazanych testow i progi robily sie loteria.
+    import hashlib
+    acc.bot_seed = int.from_bytes(hashlib.sha256(login.encode()).digest()[:4], "big") & 0x7FFFFFFF
+    s.commit()
     aid = acc.id
     s.close()
     return aid

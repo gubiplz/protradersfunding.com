@@ -278,11 +278,36 @@
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   /* ---------- verify quick lookup ---------- */
+  /* Verify on the landing morphs the sample certificate into the REAL one —
+     the token works exactly like opening /certificate/{token}. */
   const vf = $('#verifyForm');
-  if (vf) vf.addEventListener('submit', e => {
+  if (vf) vf.addEventListener('submit', async e => {
     e.preventDefault();
     const v = $('#verifyInput').value.trim();
-    if (v) location.href = '/verify/' + encodeURIComponent(v);
+    if (!v) return;
+    const err = $('#verifyErr'), open = $('#pv-open');
+    try {
+      const r = await fetch('/api/verify/' + encodeURIComponent(v));
+      if (!r.ok) throw new Error();
+      const d = await r.json();
+      const card = $('#pv-card');
+      card.classList.toggle('cert-variant-payout', d.variant === 'payout');
+      $('#pv-eyebrow').textContent = d.eyebrow;
+      $('#pv-amountlabel').textContent = d.amount_label;
+      $('#pv-amount').textContent = d.amount;
+      $('#pv-person').textContent = d.trader_name;
+      $('#pv-meta').innerHTML = d.meta.map(m =>
+        `<div><b>${esc(m.value)}</b><span>${esc(m.label)}</span></div>`).join('');
+      $('#pv-qr').innerHTML = d.qr_svg;
+      $('#pv-token').textContent = d.cert_token;
+      if (open) { open.href = d.open_url; open.style.display = ''; }
+      if (err) err.style.display = 'none';
+      card.classList.remove('pv-flash'); void card.offsetWidth; card.classList.add('pv-flash');
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } catch (_) {
+      if (open) open.style.display = 'none';
+      if (err) err.style.display = '';
+    }
   });
 
   /* ---------- init ---------- */
