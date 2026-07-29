@@ -100,6 +100,8 @@
   font-family:var(--display);font-weight:700;letter-spacing:-.015em;
   font-size:clamp(19px,4.6cqw,40px);line-height:1.12;margin-top:clamp(1px,.4cqw,4px);
   text-wrap:balance;
+  /* cieple zloto jak logo marki — niuans z certyfikatow FTMO */
+  color:#e8c47c;text-shadow:0 0 22px rgba(232,196,124,.22);
 }
 .cert-blurb{
   font-size:clamp(8.5px,1.7cqw,13.5px);line-height:1.65;color:var(--k-cichy);
@@ -122,7 +124,11 @@
   letter-spacing:.15em;font-size:clamp(7px,1.35cqw,10.5px);color:var(--k-cichy);
 }
 
-/* wariant payout: motyw tla z zielonymi akcentami (wyplacony zysk) */
+/* wariant payout: kwota i motyw w zieleni (wyplacony zysk) */
+.cert-variant-payout .cert-amount{
+  color:#57e6b6;
+  text-shadow:0 0 38px rgba(95,240,192,.4),0 0 90px rgba(15,157,108,.3);
+}
 .cert-variant-payout .cert-inner{
   background:
     radial-gradient(62% 44% at 50% 4%, rgba(43,139,255,.24) 0%, rgba(43,139,255,0) 64%),

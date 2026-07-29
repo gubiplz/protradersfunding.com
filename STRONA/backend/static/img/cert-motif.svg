@@ -12,6 +12,9 @@
     </linearGradient>
   </defs>
 
+  <!-- delikatny ukosny pas przez gorna czesc karty -->
+  <path d="M0 330 L900 120 L900 190 L0 400 Z" fill="#2b8bff" fill-opacity=".05"/>
+  <path d="M0 400 L900 190 L900 208 L0 418 Z" fill="#2b8bff" fill-opacity=".08"/>
   <rect width="900" height="900" fill="url(#dots)"/>
 
   <!-- naroze gorne-prawe: schodkowe szewrony (rownolegloboki o pochyle logo) -->
