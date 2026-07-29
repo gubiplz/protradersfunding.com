@@ -2351,7 +2351,7 @@ def _public_base(request: Request) -> str:
 
 
 def _cert_ctx(request, *, headline_plain, eyebrow, trader_name, amount_label, amount,
-              blurb, meta, cert_token, seal, note=None) -> dict:
+              blurb, meta, cert_token, seal, note=None, variant="pass") -> dict:
     """Wspólny kontekst obu certyfikatów — jeden szablon, dwa warianty.
 
     Świadomie BEZ numeru rachunku MT5: dokument idzie na zewnątrz, a numer konta
@@ -2365,7 +2365,7 @@ def _cert_ctx(request, *, headline_plain, eyebrow, trader_name, amount_label, am
         "trader_name": trader_name or "—",
         "amount_label": amount_label, "amount": amount, "blurb": blurb,
         "meta": meta, "note": note,
-        "cert_token": cert_token, "seal": seal,
+        "cert_token": cert_token, "seal": seal, "variant": variant,
         "verify_url": f"/verify/{cert_token}",
         "verify_full_url": weryfikacja,
         "qr_svg": _qr_svg(weryfikacja),
@@ -2452,7 +2452,7 @@ def payout_certificate(request: Request, cert_token: str):
                    "released in full."),
             meta=[("Date", when),
                   ("Account size", f"${(acc.initial_balance if acc else 0):,.0f}")],
-            note=p.note, cert_token=cert_token, seal="Paid",
+            note=p.note, cert_token=cert_token, seal="Paid", variant="payout",
         )
         return jinja.TemplateResponse(request, "certificate.html", ctx)
     finally:

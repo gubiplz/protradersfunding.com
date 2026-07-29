@@ -1,51 +1,36 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 900" fill="none">
-  <!-- Bardzo lagodny motyw tradingowy pod tresc certyfikatu:
-       siatka punktowa + wznoszaca krzywa equity + rzadkie swiece.
-       Cala widocznosc kontrolowana TUTAJ (opacity), nie w CSS. -->
+  <!-- Motyw prop-fundingowy (inspiracja niuansami FTMO): geometryczne szewrony
+       w narozach — echo pochylego logo marki — + siatka punktowa i ledwie
+       widoczny wznoszacy przebieg. Widocznosc kontrolowana TUTAJ (opacity). -->
   <defs>
     <pattern id="dots" width="36" height="36" patternUnits="userSpaceOnUse">
-      <circle cx="1.2" cy="1.2" r="1.2" fill="#6fa8ff" fill-opacity=".05"/>
+      <circle cx="1.2" cy="1.2" r="1.2" fill="#6fa8ff" fill-opacity=".045"/>
     </pattern>
-    <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2b8bff" stop-opacity=".10"/>
-      <stop offset="1" stop-color="#2b8bff" stop-opacity="0"/>
+    <linearGradient id="chv" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#67d2ff"/>
+      <stop offset="1" stop-color="#1b4bd8"/>
     </linearGradient>
-    <linearGradient id="fadeX" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#fff" stop-opacity="0"/>
-      <stop offset=".14" stop-color="#fff" stop-opacity="1"/>
-      <stop offset=".86" stop-color="#fff" stop-opacity="1"/>
-      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
-    </linearGradient>
-    <mask id="edge"><rect width="900" height="900" fill="url(#fadeX)"/></mask>
   </defs>
 
-  <g mask="url(#edge)">
-    <rect width="900" height="900" fill="url(#dots)"/>
+  <rect width="900" height="900" fill="url(#dots)"/>
 
-    <!-- krzywa equity: lagodny wznoszacy przebieg przez dolna polowe -->
-    <path d="M0 700 C 90 688, 150 704, 215 668 S 330 600, 400 612 S 520 560, 590 540
-             S 720 470, 790 448 S 870 420, 900 408"
-          stroke="#67d2ff" stroke-opacity=".12" stroke-width="2.2" stroke-linecap="round"/>
-    <path d="M0 700 C 90 688, 150 704, 215 668 S 330 600, 400 612 S 520 560, 590 540
-             S 720 470, 790 448 S 870 420, 900 408 L 900 900 L 0 900 Z"
-          fill="url(#area)"/>
-
-    <!-- rzadkie swiece wzdluz przebiegu (jedna tonacja marki, rozne wysokosci) -->
-    <g stroke="#6fa8ff" stroke-opacity=".10" stroke-width="2">
-      <line x1="120" y1="640" x2="120" y2="742"/>
-      <line x1="260" y1="596" x2="260" y2="700"/>
-      <line x1="395" y1="560" x2="395" y2="668"/>
-      <line x1="530" y1="512" x2="530" y2="616"/>
-      <line x1="665" y1="462" x2="665" y2="566"/>
-      <line x1="800" y1="404" x2="800" y2="512"/>
-    </g>
-    <g fill="#6fa8ff" fill-opacity=".08">
-      <rect x="112" y="660" width="16" height="52" rx="2"/>
-      <rect x="252" y="618" width="16" height="48" rx="2"/>
-      <rect x="387" y="580" width="16" height="56" rx="2"/>
-      <rect x="522" y="532" width="16" height="50" rx="2"/>
-      <rect x="657" y="482" width="16" height="52" rx="2"/>
-      <rect x="792" y="424" width="16" height="56" rx="2"/>
-    </g>
+  <!-- naroze gorne-prawe: schodkowe szewrony (rownolegloboki o pochyle logo) -->
+  <g fill="url(#chv)">
+    <path d="M700 70 L790 70 L750 150 L660 150 Z" fill-opacity=".13"/>
+    <path d="M800 70 L890 70 L850 150 L760 150 Z" fill-opacity=".07"/>
+    <path d="M745 165 L835 165 L795 245 L705 245 Z" fill-opacity=".09"/>
+    <path d="M845 165 L900 165 L900 205 L825 205 Z" fill-opacity=".05"/>
+    <path d="M790 260 L880 260 L840 340 L750 340 Z" fill-opacity=".055"/>
   </g>
+
+  <!-- naroze dolne-lewe: mniejsze lustro -->
+  <g fill="url(#chv)">
+    <path d="M60 640 L150 640 L110 720 L20 720 Z" fill-opacity=".075"/>
+    <path d="M105 735 L195 735 L155 815 L65 815 Z" fill-opacity=".05"/>
+    <path d="M20 545 L110 545 L70 625 L0 625 L0 585 Z" fill-opacity=".045"/>
+  </g>
+
+  <!-- szept wznoszacego przebiegu — funded growth, bez swiec -->
+  <path d="M0 720 C 140 700, 260 660, 400 630 S 680 540, 900 470"
+        stroke="#67d2ff" stroke-opacity=".07" stroke-width="2" stroke-linecap="round"/>
 </svg>
