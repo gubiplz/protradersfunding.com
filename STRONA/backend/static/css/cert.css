@@ -123,7 +123,7 @@
   grid-template-columns:1fr auto;align-items:end;
   gap:clamp(10px,2.4cqw,24px);
   /* wyraźny oddech od krawędzi karty — podpis i QR nie mogą jej dotykać */
-  padding:clamp(9px,2cqw,18px) clamp(32px,8cqw,80px) 0;
+  padding:clamp(9px,2cqw,18px) clamp(64px,16cqw,160px) 0;
   border-top:1px solid var(--k-linia);
 }
 .cert-signblock{
@@ -141,7 +141,7 @@
 .cert-signblock .sig{
   font-family:'SignatureScript',var(--script);font-weight:400;
   font-size:clamp(28px,6.4cqw,58px);line-height:.85;letter-spacing:-.01em;
-  color:#e8edff;display:inline-block;transform:rotate(-4deg) skewX(-3deg);
+  color:#e8edff;display:inline-block;transform:rotate(-4deg) skewX(-3deg) translateY(-10px);
   text-shadow:0 0 1px rgba(232,237,255,.3);
   margin-bottom:-.1em;padding:0 .15em .08em .05em;
 }
