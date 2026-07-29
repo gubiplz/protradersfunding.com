@@ -5,7 +5,7 @@
    Deliberately WITHOUT the MT5 account number — this document goes external.
 
    Sizes scale with CONTAINER units (cqw), not the viewport: the card is
-   capped at 780 px, so `vw` would grow with the window and content would
+   capped at 620 px, so `vw` would grow with the window and content would
    overflow the card on wide screens. */
 
 :root{
@@ -30,7 +30,7 @@
 /* Frame: a bright glowing edge — it is what reads "premium" on the dark bg */
 .cert-card{
   container-type:inline-size;
-  position:relative;width:min(780px,100%);
+  position:relative;width:min(620px,100%);
   padding:clamp(3px,.7cqw,6px);border-radius:20px;
   background:linear-gradient(150deg,#67d2ff 0%,#2b8bff 38%,#1b4bd8 68%,#67d2ff 100%);
   box-shadow:0 0 44px rgba(43,139,255,.42),0 30px 80px -40px #000;
