@@ -48,6 +48,7 @@ def init_db() -> None:
     from . import models  # noqa: F401  (rejestracja tabel)
     Base.metadata.create_all(bind=engine)
     _add_missing_columns()
+    _relax_not_null()
 
 
 # Kolumny dodane po tym, jak ktoś już miał bazę. `create_all` NIE robi ALTER-ów,
@@ -102,6 +103,34 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "bot_started_at": "TIMESTAMP",
     },
 }
+
+
+# Kolumny, ktore PRZESTALY byc wymagane. `create_all` nie rusza istniejacych
+# tabel, wiec stara baza dalej ma na nich NOT NULL i INSERT bez tego pola leci
+# bledem — dokladnie tak wysypalo sie dodawanie wpisu do puli MT5 po tym, jak
+# admin przestal podawac metaapi_account_id. SQLite pomijamy: nie ma tam ALTER
+# COLUMN, a te bazy i tak powstaja od zera z modeli.
+_RELAXED_COLUMNS: dict[str, list[str]] = {
+    "pool_accounts": ["metaapi_account_id"],
+}
+
+
+def _relax_not_null() -> None:
+    from sqlalchemy import inspect, text
+
+    if not engine.dialect.name.startswith("postgres"):
+        return
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    with engine.begin() as conn:
+        for table, columns in _RELAXED_COLUMNS.items():
+            if table not in existing_tables:
+                continue
+            nullable = {c["name"]: c["nullable"] for c in inspector.get_columns(table)}
+            for name in columns:
+                if nullable.get(name) is False:
+                    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {name} DROP NOT NULL"))
+                    print(f"[db] {table}.{name} nie jest już wymagane")
 
 
 def _add_missing_columns() -> None:
