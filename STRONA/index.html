@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="pl">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pro Traders Funding — Coming Soon</title>
-    <meta name="description" content="Pro Traders Funding — profesjonalna firma prop tradingowa. Handluj naszym kapitałem. Wkrótce.">
+    <meta name="description" content="Pro Traders Funding — a professional prop trading firm. Trade our capital. Coming soon.">
     <meta name="theme-color" content="#0f1729">
 
     <link rel="icon" type="image/x-icon" href="assets/favicon/favicon.ico">
@@ -14,7 +14,7 @@
     <link rel="manifest" href="assets/favicon/site.webmanifest">
 
     <meta property="og:title" content="Pro Traders Funding">
-    <meta property="og:description" content="Profesjonalna firma prop tradingowa. Wkrótce.">
+    <meta property="og:description" content="A professional prop trading firm. Coming soon.">
     <meta property="og:image" content="assets/logo.png">
     <meta property="og:type" content="website">
 
@@ -28,50 +28,50 @@
     <div class="bg-gradient"></div>
     <div class="bg-grid"></div>
 
-    <!-- TYMCZASOWE: wejście do panelu tradera. Landing zajmuje "/", bo pliki
-         statyczne mają na Vercelu pierwszeństwo przed rewrite'ami, więc bez tego
-         przycisku dashboard jest nie do znalezienia z poziomu domeny. Do usunięcia,
-         gdy landing zastąpi docelowa strona albo panel dostanie własną subdomenę. -->
+    <!-- TEMPORARY: entry point to the trader panel. The landing owns "/" because
+         static files take precedence over rewrites on Vercel, so without this
+         button the dashboard cannot be reached from the domain. Remove once the
+         final site replaces the landing or the panel gets its own subdomain. -->
     <a class="cta-corner" href="/portal">Get Funded</a>
 
     <main class="container">
         <div class="badge">
             <span class="badge-dot"></span>
-            <span>Uruchomienie już wkrótce</span>
+            <span>Launching soon</span>
         </div>
 
         <img src="assets/logo.png" alt="Pro Traders Funding" class="logo">
 
         <h1 class="headline">
-            Handluj naszym kapitałem.<br>
-            <span class="gold">Zatrzymaj swoje zyski.</span>
+            Trade our capital.<br>
+            <span class="gold">Keep your profits.</span>
         </h1>
 
         <p class="subheadline">
-            Profesjonalna firma prop tradingowa dla ambitnych traderów.
-            Przejdź nasze wyzwanie i zyskaj dostęp do konta finansowanego kwotą do <strong>200 000 USD</strong>.
+            A professional prop trading firm for ambitious traders.
+            Pass our challenge and get access to a funded account of up to <strong>$200,000</strong>.
         </p>
 
         <div class="features">
             <div class="feature">
                 <div class="feature-icon">01</div>
                 <div class="feature-text">
-                    <div class="feature-title">Do 90% zysku</div>
-                    <div class="feature-desc">Najwyższy split w branży</div>
+                    <div class="feature-title">Up to 90% profit split</div>
+                    <div class="feature-desc">The highest split in the industry</div>
                 </div>
             </div>
             <div class="feature">
                 <div class="feature-icon">02</div>
                 <div class="feature-text">
-                    <div class="feature-title">Szybkie wypłaty</div>
-                    <div class="feature-desc">Bez zbędnych oczekiwań</div>
+                    <div class="feature-title">Fast payouts</div>
+                    <div class="feature-desc">No unnecessary waiting</div>
                 </div>
             </div>
             <div class="feature">
                 <div class="feature-icon">03</div>
                 <div class="feature-text">
-                    <div class="feature-title">Elastyczne zasady</div>
-                    <div class="feature-desc">Handluj po swojemu</div>
+                    <div class="feature-title">Flexible rules</div>
+                    <div class="feature-desc">Trade your own way</div>
                 </div>
             </div>
         </div>
@@ -80,18 +80,18 @@
             <input
                 type="email"
                 name="email"
-                placeholder="Twój adres email"
+                placeholder="Your email address"
                 required
                 class="notify-input"
             >
             <button type="submit" class="notify-button">
-                Powiadom mnie
+                Notify me
             </button>
         </form>
-        <p class="form-note" id="formNote">Bądź pierwszy — dołącz do listy oczekujących.</p>
+        <p class="form-note" id="formNote">Be first — join the waitlist.</p>
 
         <footer class="footer">
-            <p>&copy; <span id="year"></span> Pro Traders Funding. Wszelkie prawa zastrzeżone.</p>
+            <p>&copy; <span id="year"></span> Pro Traders Funding. All rights reserved.</p>
         </footer>
     </main>
 
@@ -102,7 +102,7 @@
             e.preventDefault();
             const email = e.target.email.value;
             const note = document.getElementById('formNote');
-            note.textContent = `Dziękujemy! Powiadomimy Cię na ${email}, gdy wystartujemy.`;
+            note.textContent = `Thank you! We will notify ${email} when we launch.`;
             note.classList.add('success');
             e.target.reset();
         }

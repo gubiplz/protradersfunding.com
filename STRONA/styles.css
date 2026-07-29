@@ -316,9 +316,9 @@ body {
 }
 
 
-/* TYMCZASOWE — przycisk wejścia do panelu tradera (/portal) w rogu strony.
-   Znika razem z <a class="cta-corner"> w index.html, gdy landing zastąpi
-   docelowa strona albo panel dostanie własną subdomenę. */
+/* TEMPORARY — corner button into the trader panel (/portal).
+   Goes away together with <a class="cta-corner"> in index.html once the final
+   site replaces the landing or the panel gets its own subdomain. */
 .cta-corner {
     position: fixed;
     top: 24px;
