@@ -58,7 +58,8 @@ tr.clickable{cursor:pointer}
 .over-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;
   border-bottom:1px solid var(--line);background:#fff;flex:0 0 auto}
 .over-head h2{font-size:16.5px}
-.over-body{padding:18px 20px 34px;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
+.over-body{padding:18px 20px 34px;overflow-y:auto;display:flex;flex-direction:column;gap:14px;
+  overscroll-behavior:none}
 
 .kv{display:flex;justify-content:space-between;gap:14px;font-size:13px;padding:5px 0;border-bottom:1px dashed var(--line)}
 .kv:last-child{border-bottom:0}
