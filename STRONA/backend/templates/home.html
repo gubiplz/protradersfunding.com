@@ -307,10 +307,12 @@
       <p>Live from the platform — funded accounts, current equity. Names are masked for privacy.</p>
     </div>
     <div class="board" data-rv>
-      <table class="lb">
-        <thead><tr><th>#</th><th>Trader</th><th>Account</th><th>Stage</th><th style="text-align:right">Profit</th></tr></thead>
-        <tbody id="lbBody"></tbody>
-      </table>
+      <div class="lb-scroll">
+        <table class="lb">
+          <thead><tr><th>#</th><th>Trader</th><th>Account</th><th>Stage</th><th style="text-align:right">Profit</th></tr></thead>
+          <tbody id="lbBody"></tbody>
+        </table>
+      </div>
       <div class="lb-note">Real accounts, real-time data. Simulated capital — see the disclaimer below.</div>
     </div>
   </div>
@@ -377,7 +379,7 @@
 <section class="sec sec-tight">
   <div class="wrap">
     <div class="aff-band" data-rv>
-      <div style="flex:1;min-width:260px">
+      <div style="flex:1;min-width:min(260px,100%)">
         <span class="pill">Affiliate program</span>
         <h2 style="margin-top:12px">Refer traders, earn on every challenge</h2>
         <p>Share your personal link and earn commission on each purchase made by traders you refer.

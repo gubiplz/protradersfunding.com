@@ -579,3 +579,68 @@ table.tbl td.sub-row{background:var(--panel2)}
 .topbar>div:not(.top-right){min-width:0}   /* NOT .top-right — min-width:0 there
      lets the buttons escape the container and stretches the page by dozens of px */
 .topbar .crumb{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ---------------- mobile (dopisane na koncu — wygrywa kolejnoscia w pliku;
+   sluzy OBU panelom: portal + admin) ---------------- */
+.scroll-x{overflow-x:auto;overscroll-behavior-x:contain}
+
+@media(max-width:960px){
+  /* scrim pod otwarta szuflada (.side z-index:40, topbar 30) + blokada scrolla */
+  body.nav-open::before{content:"";position:fixed;inset:0;z-index:39;
+    background:rgba(15,23,42,.45);backdrop-filter:blur(2px);animation:scrim-in .2s ease}
+  body.nav-open{overflow:hidden}
+  /* pill marki nie nachodzi na przycisk X szuflady */
+  .side-head{min-width:0}
+  .side-head .brand-pill{max-width:calc(100% - 44px);overflow:hidden}
+  .side-head .brand-txt{overflow:hidden;text-overflow:ellipsis}
+  /* tytul strony w topbarze: jedna linia z elipsa zamiast lamania na dwie */
+  .topbar h1{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* affordance przewijania tabel: cien na krawedzi znika, gdy dojedziesz do konca */
+  .tbl-wrap,.scroll-x{background:
+    linear-gradient(90deg,#fff 30%,rgba(255,255,255,0)) left/44px 100% no-repeat local,
+    linear-gradient(270deg,#fff 30%,rgba(255,255,255,0)) right/44px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%,rgba(15,23,42,.16),transparent) left/16px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%,rgba(15,23,42,.16),transparent) right/16px 100% no-repeat scroll,
+    #fff}
+}
+@keyframes scrim-in{from{opacity:0}}
+
+@media(max-width:640px){
+  .inp{font-size:16px}                              /* iOS zoomuje przy fokusie <16px */
+  .icon-btn{width:44px;height:44px;flex:0 0 44px}
+  .btn-o.sm,.btn-p.sm{min-height:40px;padding:9px 14px}
+  .copy{position:relative}
+  .copy::after{content:"";position:absolute;inset:-9px}   /* hit-area 44px bez zmiany layoutu */
+  .auth-tab{min-height:44px}
+  #a-forgot{padding:10px}
+  #toasts{left:12px;right:12px;bottom:12px;max-width:none}
+  /* siatki, ktore nie miescily sie w 3 kolumnach na telefonie */
+  .podium{grid-template-columns:1fr}
+  .tier-track{grid-template-columns:1fr}
+  /* kalendarz zostaje tygodniowy (7 kolumn) — kompaktowe komorki */
+  .cal-grid{gap:3px}
+  .cal-day{min-height:44px;padding:4px 3px;border-radius:7px;overflow:hidden}
+  .cal-day .d{font-size:10.5px}
+  .cal-day .pnl{font-size:9.5px;letter-spacing:-.02em}
+  .inv-print{padding:22px 16px}
+  .inv-total{gap:16px}
+  .stat-tile .val{font-size:clamp(14px,4.3vw,16.5px)}
+}
+@media(max-width:480px){
+  .grid2{grid-template-columns:1fr}      /* imie/nazwisko w modalu zakupu, pola KYC */
+}
+@media(max-width:400px){
+  .cal-day{padding:4px 2px}
+  .cal-day .pnl{font-size:9px}
+}
+@media(max-width:360px){
+  .stats-row{grid-template-columns:1fr}   /* dopiero naprawde waskie ekrany; 390px trzyma 2 kolumny */
+}
+
+@media(hover:none){
+  .btn-p:hover{filter:none;transform:none}
+  .gb-btn:hover{transform:none;box-shadow:none}
+  .plan-card:hover{transform:none;box-shadow:var(--shadow)}
+  .acct-row:hover,.ticket-row:hover{background:transparent}
+  table.tbl tr:hover td{background:transparent}
+}

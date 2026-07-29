@@ -215,9 +215,13 @@
 /* On narrow screens the square gets too tight and content overflowed the card. */
 @media (max-width:520px){
   .cert-inner{aspect-ratio:auto;padding-top:22px;padding-bottom:22px}
-  .cert-foot{grid-template-columns:1fr;justify-items:center;gap:16px}
-  .cert-signblock{align-items:center;text-align:center}
+  .cert-foot{grid-template-columns:1fr;justify-items:center;gap:16px;
+    padding-left:16px;padding-right:16px}   /* the 64px/side floor ate 42-55% of the card */
+  .cert-signblock{align-items:center;text-align:center;justify-self:center;margin-bottom:0}
+  .cert-signblock .sig{font-size:clamp(24px,8.5cqw,58px);white-space:nowrap}  /* one line at 320px */
   .cert-meta{gap:22px}
+  .cert-actions{flex-wrap:wrap;justify-content:center}
+  .cert-actions a{padding:10px 6px}
 }
 
 @media print{
@@ -234,5 +238,8 @@
 .cert-demo .cert-blurb{max-width:44ch}
 @media (max-width:900px){
   .cert-demo .cert-inner{aspect-ratio:auto;padding-top:24px;padding-bottom:24px}
-  .cert-demo .cert-foot{grid-template-columns:1fr;justify-items:center}
+  .cert-demo .cert-foot{grid-template-columns:1fr;justify-items:center;
+    padding-left:16px;padding-right:16px}
+  .cert-demo .cert-signblock{align-items:center;text-align:center;justify-self:center;margin-bottom:0}
+  .cert-demo .cert-signblock .sig{font-size:clamp(24px,8.5cqw,58px);white-space:nowrap}
 }

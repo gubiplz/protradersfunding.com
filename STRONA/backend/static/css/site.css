@@ -400,8 +400,6 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
   .pcfg-sizes{grid-template-columns:repeat(3,1fr)}
 }
 @media(max-width:820px){
-  .nav-links,.nav-login{display:none}
-  .burger{display:flex}
   .steps{grid-template-columns:1fr}
   .foot-grid{grid-template-columns:1fr 1fr}
   .stat{border-left:0;border-top:1px solid var(--line)}
@@ -427,4 +425,78 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
   .mock-live .dot{animation:none}
   .rv{opacity:1;transform:none}
   *{transition-duration:.01ms!important;animation-duration:.01ms!important}
+}
+
+/* ---------------- mobile (dopisane na koncu — wygrywa kolejnoscia w pliku;
+   szersze bloki przed wezszymi, hover:none na samym koncu) ---------------- */
+.lb-scroll{overflow-x:auto;overscroll-behavior-x:contain}
+table.lb{min-width:560px}
+
+@media(max-width:960px){
+  /* burger przejmuje nawigacje juz od 960 px — miedzy 821 a 960 linki sie nie miescily */
+  .nav-links,.nav-login{display:none}
+  .burger{display:flex;align-items:center;justify-content:center;
+    width:44px;height:44px;padding:0;flex:0 0 44px}
+  .nav .logo{flex:1 1 auto;min-width:0}
+  /* span jest flex-itemem — bez min-width:0 nie zejdzie ponizej szerokosci tekstu
+     i na 320px wypycha layout (emulacja oddala strone do ~357px) */
+  .nav .logo-txt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* menu mobilne: blokada scrolla, przewijalnosc w landscape, wygodne tapy, burger -> X */
+  body.menu-open{overflow:hidden}
+  .mobile-menu{max-height:calc(100dvh - 68px);overflow-y:auto;overscroll-behavior:contain}
+  .mobile-menu a{padding:10px 0}
+  .burger.open span:nth-child(1){transform:translateY(7px) rotate(45deg)}
+  .burger.open span:nth-child(2){opacity:0}
+  .burger.open span:nth-child(3){transform:translateY(-7px) rotate(-45deg)}
+  /* konfigurator: itemy gridow/flexow musza umiec sie kurczyc — bez min-width:0
+     min-content .pcfg (333px) rozpychal layout viewport na waskich telefonach */
+  .pcfg,.prules,.ptog,.psize,.pcfg-inp,.pcfg-addon div{min-width:0}
+  /* affordance przewijania tabel — cien na krawedzi znika na koncu zakresu */
+  .obj-scroll,.lb-scroll{background:
+    linear-gradient(90deg,#fff 30%,rgba(255,255,255,0)) left/44px 100% no-repeat local,
+    linear-gradient(270deg,#fff 30%,rgba(255,255,255,0)) right/44px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%,rgba(15,23,42,.16),transparent) left/16px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%,rgba(15,23,42,.16),transparent) right/16px 100% no-repeat scroll,
+    #fff}
+}
+@media(max-width:640px){
+  .verify-box input,.pcfg-inp{font-size:16px}   /* iOS zoomuje przy fokusie <16px */
+  .foot-col a{padding:10px 0}
+  .pcfg-addbtn{min-height:44px}
+  /* pas statystyk: 7-cyfrowe kwoty musza zmiescic sie w 2 kolumnach */
+  .stat{padding:26px 12px}
+  .stat-num{font-size:clamp(20px,5.8vw,28px)}
+  .pcfg-fee{font-size:clamp(30px,9vw,38px)}
+  .page-head{padding-top:110px}
+  .verify-result{padding:20px}
+  .verify-result .rows div{flex-wrap:wrap}
+  .verify-result .rows span:last-child{overflow-wrap:anywhere;text-align:right}
+}
+@media(max-width:480px){
+  .verify-box{flex-direction:column}
+  .verify-box .btn{width:100%}
+  .cfg-head{flex-wrap:wrap}
+}
+@media(max-width:440px){
+  .nav-in{gap:12px}
+  .nav-right{gap:8px}
+  .nav .logo{font-size:16px;gap:8px}
+  .nav .btn-sm{padding:8px 12px;font-size:13px}
+}
+@media(max-width:400px){
+  /* na najwezszych ekranach pas statystyk w 1 kolumnie; bordery z ukladu 2-kol.
+     nadpisane selektorem o tej samej specyficznosci — pozniejszy w pliku wygrywa */
+  .stats-grid{grid-template-columns:1fr}
+  .stat:nth-child(n){border-left:0;border-top:1px solid var(--line)}
+  .stat:first-child{border-top:0}
+}
+@media(max-width:340px){
+  .nav-right .btn-sm{display:none}
+}
+@media(hover:none){
+  /* dotyk: hover „przykleja sie" po tapnieciu — neutralizacja transformow/tel */
+  .btn:hover{transform:none;box-shadow:0 8px 20px -8px rgba(99,102,241,.5);filter:none}
+  .card:hover{border-color:var(--line)}
+  table.obj tr:hover td{background:transparent}
+  .cfg-size:hover{border-color:var(--line2)}
 }

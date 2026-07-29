@@ -13,8 +13,23 @@
   addEventListener('scroll', onScroll, { passive: true }); onScroll();
 
   const burger = $('#burger'), mob = $('#mobileMenu');
-  if (burger) burger.addEventListener('click', () => mob.classList.toggle('open'));
-  if (mob) $$('a', mob).forEach(a => a.addEventListener('click', () => mob.classList.remove('open')));
+  function menuSet(open) {
+    if (!mob) return;
+    mob.classList.toggle('open', open);
+    if (burger) { burger.classList.toggle('open', open); burger.setAttribute('aria-expanded', String(open)); }
+    document.body.classList.toggle('menu-open', open);
+  }
+  if (burger) burger.addEventListener('click', () => menuSet(!mob.classList.contains('open')));
+  if (mob) {
+    $$('a', mob).forEach(a => a.addEventListener('click', () => menuSet(false)));
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') menuSet(false); });
+    document.addEventListener('click', e => {
+      if (!mob.classList.contains('open')) return;
+      if (e.target.closest('#mobileMenu') || e.target.closest('#burger')) return;
+      menuSet(false);
+    });
+    addEventListener('resize', () => { if (innerWidth > 960) menuSet(false); }, { passive: true });
+  }
 
   /* ---------- ?ref= capture (partner code attaches at signup) ---------- */
   const ref = new URLSearchParams(location.search).get('ref');

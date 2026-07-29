@@ -150,7 +150,19 @@ function go(v){
   $('view').innerHTML='<div class="skel" style="height:110px;margin-bottom:16px"></div><div class="skel" style="height:260px"></div>';
   VIEWS[v]().catch(e=>{if(!String(e.message).includes('token'))toast('Error: '+e.message,'err')});
 }
-function toggleSide(open){$('side').classList.toggle('open',open)}
+function toggleSide(open){
+  $('side').classList.toggle('open',open);
+  document.body.classList.toggle('nav-open',open);
+}
+/* scrim + Escape zamykaja szuflade (tylko mobile — scrim zyje w MQ <=960) */
+document.addEventListener('click',e=>{
+  if(!document.body.classList.contains('nav-open'))return;
+  if(e.target.closest('#side')||e.target.closest('.burger'))return;
+  toggleSide(false);
+});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&document.body.classList.contains('nav-open'))toggleSide(false);
+});
 function toggleCollapse(){const c=$('side').classList.toggle('collapsed');
   localStorage.setItem('pf_admin_collapsed',c?'1':'0')}
 function toast(msg,kind='ok',ms=6000){
@@ -245,7 +257,7 @@ const VIEWS={
  async kyc(){
   const d=await api('/api/admin/kyc');
   const pending=d.pending||[], hist=d.history||[];
-  const cards=pending.length?`<div class="badge-grid" style="grid-template-columns:repeat(auto-fill,minmax(320px,1fr))">`+
+  const cards=pending.length?`<div class="badge-grid" style="grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr))">`+
     pending.map(t=>`<div class="panel">
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
         <div><h3 style="font-size:15.5px">${esc(t.full_name||t.email)}</h3>

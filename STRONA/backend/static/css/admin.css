@@ -86,3 +86,28 @@ tr.clickable{cursor:pointer}
   .seg{flex-wrap:wrap;width:100%}
   .seg button{flex:1 0 auto}
 }
+
+/* Chipy w slide-overze — .chip-row nie byl nigdzie ostylowany, a .chip zyje
+   tylko w site.css, ktorego dashboard nie laduje. */
+.chip-row{display:flex;gap:8px;flex-wrap:wrap}
+.chip{font-size:12px;font-family:var(--mono);color:var(--muted);border:1px solid var(--line);
+  background:var(--panel2);border-radius:8px;padding:5px 10px}
+.chip b{color:var(--txt);font-weight:600}
+
+/* ---------------- mobile ---------------- */
+@media(max-width:960px){
+  /* tabele i tak przewijaja sie w .tbl-wrap — komorki nie lamia "2step-100k"
+     w srodku tokenu; dluzsze teksty w divach (payout details, powod odrzucenia)
+     zawijaja sie dalej */
+  table.tbl td{white-space:nowrap}
+  table.tbl td div{white-space:normal}
+  /* admin.css laduje sie PO portal.css i jego max-width:100% wygrywalo —
+     pill musi zostawic miejsce na X szuflady takze w adminie */
+  .side-head .brand-pill{max-width:calc(100% - 44px)}
+}
+@media(max-width:640px){
+  .over-body{padding-bottom:calc(34px + env(safe-area-inset-bottom))}
+}
+@media(max-width:420px){
+  .top-right .btn-p,.top-right .btn-o{flex:1 1 100%}
+}

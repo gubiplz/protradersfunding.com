@@ -269,7 +269,19 @@ function go(v){
   $('view').innerHTML='<div class="skel" style="height:110px;margin-bottom:16px"></div><div class="skel" style="height:240px"></div>';
   VIEWS[v]();
 }
-function toggleSide(open){$('side').classList.toggle('open',open)}
+function toggleSide(open){
+  $('side').classList.toggle('open',open);
+  document.body.classList.toggle('nav-open',open);
+}
+/* scrim + Escape zamykaja szuflade (tylko mobile — scrim zyje w MQ <=960) */
+document.addEventListener('click',e=>{
+  if(!document.body.classList.contains('nav-open'))return;
+  if(e.target.closest('#side')||e.target.closest('.burger'))return;
+  toggleSide(false);
+});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&document.body.classList.contains('nav-open'))toggleSide(false);
+});
 function toggleCollapse(){
   const c=$('side').classList.toggle('collapsed');
   localStorage.setItem('pf_side_collapsed',c?'1':'0');
@@ -555,7 +567,8 @@ const VIEWS={
     data:{labels:days.map(d=>d.day),datasets:[{data:days.map(d=>d.pnl),
       backgroundColor:days.map(d=>d.pnl>=0?'rgba(16,185,129,.75)':'rgba(239,68,68,.75)'),borderRadius:5}]},
     options:{maintainAspectRatio:false,plugins:{legend:{display:false}},
-      scales:{x:{ticks:{color:'#94a3b8',font:{size:10}},grid:{display:false}},
+      scales:{x:{ticks:{color:'#94a3b8',font:{size:10},autoSkip:true,maxRotation:0,
+          maxTicksLimit:matchMedia('(max-width:640px)').matches?6:undefined},grid:{display:false}},
         y:{ticks:{color:'#94a3b8',font:{size:10},callback:v=>'$'+v},grid:{color:'#eef0f6'}}}}});
  },
 
@@ -1319,7 +1332,13 @@ function calRender(){
     let cls='',txt='';
     if(pnl!==undefined){
       cls=pnl>0?'profit':pnl<0?'loss':'flat';
-      txt=`<div class="pnl">${pnl>0?'+':''}$${fmt0(pnl)}</div>`;
+      if(matchMedia('(max-width:640px)').matches){
+        // waskie komorki: sama wielkosc (12345 -> 12.3k) — znak niesie kolor komorki
+        const a=Math.abs(pnl);
+        txt=`<div class="pnl">${a>=1000?(a/1000).toFixed(1).replace(/\.0$/,'')+'k':fmt0(a)}</div>`;
+      }else{
+        txt=`<div class="pnl">${pnl>0?'+':''}$${fmt0(pnl)}</div>`;
+      }
     }
     cells+=`<div class="cal-day ${cls}"><div class="d">${d}</div>${txt}</div>`;
   }
@@ -1363,7 +1382,7 @@ function txTable(a,act){
   if(!rows.length)
     return '<p class="muted" style="font-size:13px">Nothing here yet — close a trade and it will show up.</p>';
   const bal=v=>v==null?'—':'$'+fmt(v);
-  return `<div style="overflow-x:auto;overscroll-behavior-x:contain"><table class="tbl" style="min-width:560px">
+  return `<div class="scroll-x"><table class="tbl" style="min-width:560px">
     <thead><tr><th>Date</th><th>Instrument</th><th>Side</th><th style="text-align:right">Lots</th>
       <th style="text-align:right">P&amp;L</th><th style="text-align:right">Balance</th></tr></thead>
     <tbody>${rows.map(r=>r.kind==='payout'?`<tr>
