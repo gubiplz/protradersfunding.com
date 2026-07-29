@@ -233,9 +233,11 @@ const VIEWS={
           :r.method==='wise'?(d.email||'')
           :[d.holder,d.iban,d.swift,d.bank_name].filter(Boolean).join(' · ');
         return `${esc(label)}${info?`<div class="muted mono" style="font-size:11px;max-width:260px;word-break:break-all">${esc(info)}</div>`:''}`})()}</td>
-      <td><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending':'failed'}"><span class="dot"></span>${esc(r.status)}</span></td>
-      <td style="text-align:right">${r.status==='pending'
-        ?`<button class="btn-p sm" onclick="approvePayout(${r.id})">Approve &amp; pay</button>`:''}</td></tr>`).join('')}
+      <td><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending':'failed'}"><span class="dot"></span>${esc(r.status)}</span>
+        ${r.status==='rejected'&&r.reject_reason?`<div class="muted" style="font-size:11px;max-width:200px">${esc(r.reject_reason)}</div>`:''}</td>
+      <td style="text-align:right;white-space:nowrap">${r.status==='pending'
+        ?`<button class="btn-p sm" onclick="approvePayout(${r.id})">Approve &amp; pay</button>
+          <button class="btn-o sm" onclick="rejectPayout(${r.id})">Reject</button>`:''}</td></tr>`).join('')}
     </tbody></table></div>
     <p class="muted" style="font-size:11.5px;margin-top:10px">Approving pays the trader share and refunds the challenge fee on the first payout for that account.</p>`
     :`<div class="empty"><h3>No payout requests</h3><p>Requests from funded traders will appear here.</p></div>`;
@@ -330,24 +332,6 @@ const VIEWS={
         </tbody></table></div>
       <p class="muted" style="font-size:12.5px;margin-top:10px">Missing: ${Object.entries(missingBySize).map(([sizeKey,cnt])=>`<b>${cnt}×</b> $${fmt0(Number(sizeKey))}`).join(', ')}</p>
     </div>`:''}
-
-    <div class="sec-card">
-      <h3>Auto-generate accounts</h3>
-      <p class="muted" style="font-size:12.5px;margin-bottom:14px">Opens real demo accounts on <span class="mono">MetaQuotes-Demo</span> through the web terminal and puts the credentials straight into the pool — the same channel provisioning used before.</p>
-      ${poolData.can_generate?`
-        <div class="pool-form">
-          <div><label class="muted" style="font-size:12px">Account size</label>
-            <select id="gen-size" class="inp">${sizeOptions(50000)}</select></div>
-          <div><label class="muted" style="font-size:12px">How many</label>
-            <input id="gen-count" class="inp" type="number" min="1" max="10" value="1"></div>
-        </div>
-        <button class="btn-p" onclick="generatePool()" id="gen-btn">⚡ Generate accounts</button>
-        <p class="muted" style="font-size:12px;margin-top:10px">Each account takes ~20–40 s — the browser fills the MetaQuotes form. Up to 10 at a time.</p>`
-      :`<div class="warn-box" style="margin:0;background:#fffaf0;border:1px solid #f5d9a8;color:#8a6d3b">
-          <b style="display:block">Not available on this server</b>
-          ${esc(poolData.generate_hint||'')}
-        </div>`}
-    </div>
 
     <div class="sec-card">
       <h3>Add account manually</h3>
@@ -744,6 +728,14 @@ async function deleteAccount(id,login){
 }
 
 /* ---------- actions ---------- */
+async function rejectPayout(id){
+  const reason=prompt('Reject this payout request?\n\nReason shown to the trader (optional):','');
+  if(reason===null)return;   // Cancel — an empty reason is allowed
+  try{await api(`/api/admin/payout-requests/${id}/reject`,{method:'POST',
+      body:JSON.stringify({reason})});
+    toast('Request rejected.','ok');go('payouts')}
+  catch(e){toast('Error: '+e.message,'err')}
+}
 async function approvePayout(id){
   try{const d=await api(`/api/admin/payout-requests/${id}/approve`,{method:'POST'});
     toast(`✅ Paid $${fmt(d.total_paid)}${d.fee_refund?` (incl. $${fmt(d.fee_refund)} fee refund)`:''}`,'ok');
@@ -792,19 +784,6 @@ async function addPool(){
     toast('Login, password, server and account size are all required.','err');return}
   try{await api('/api/admin/pool',{method:'POST',body:JSON.stringify(body)});toast('Added to pool.','ok');go('pool')}
   catch(e){toast('Error: '+e.message,'err')}
-}
-async function generatePool(){
-  const sizeKey=parseFloat($('gen-size').value||'0'), cnt=parseInt($('gen-count').value||'1',10);
-  if(!sizeKey||sizeKey<=0){toast('Enter an account size.','err');return}
-  const btn=$('gen-btn'); btn.disabled=true;
-  btn.textContent=`⏳ Opening ${cnt} account${cnt===1?'':'s'} on MetaQuotes…`;
-  try{
-    const r=await api('/api/admin/pool/generate',{method:'POST',
-      body:JSON.stringify({account_size:sizeKey,count:cnt})});
-    const ok=r.created.length;
-    toast(`⚡ ${ok} account${ok===1?'':'s'} added to the pool.`+(r.errors.length?` ${r.errors.length} failed.`:''),'ok');
-    go('pool');
-  }catch(e){toast('Error: '+e.message,'err'); btn.disabled=false; btn.textContent='⚡ Generate accounts'}
 }
 function editPool(id){
   const w=$('pool-edit-'+id); w.style.display=(w.style.display==='none'?'table-row':'none');

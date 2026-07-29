@@ -314,6 +314,8 @@ class PayoutRequest(Base):
     # wise -> email. Bez nich admin nie miałby dokąd wysłać pieniędzy.
     details: Mapped[str | None] = mapped_column(String(400), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|approved|paid|rejected
+    # Powód odrzucenia — trader widzi go przy wniosku, więc pisany do klienta.
+    reject_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     account: Mapped[Account] = relationship(back_populates="payout_requests")
 

@@ -93,6 +93,30 @@ def test_brak_danych_wyplaty_odrzucony():
         assert r.status_code == 400
 
 
+def test_reject_z_powodem_widocznym_dla_tradera():
+    aid, h = _funded("po-reject@test.pl")
+    with TestClient(app) as c:
+        r = c.post(f"/api/accounts/{aid}/payout-request", headers=h,
+                   json={"method": "wise", "amount": 150,
+                         "details": {"email": "trader@example.com"}})
+        req_id = r.json()["id"]
+        r = c.post(f"/api/admin/payout-requests/{req_id}/reject", headers=ADMIN_H,
+                   json={"reason": "Bank details do not match your KYC name"})
+        assert r.status_code == 200
+
+        me = c.get("/api/me/payouts", headers=h).json()
+        mine = next(x for x in me["requests"] if x["id"] == req_id)
+        assert mine["status"] == "rejected"
+        assert mine["reject_reason"] == "Bank details do not match your KYC name"
+
+        # odrzucony wniosek nie zmienia salda i nie da sie go juz zatwierdzic
+        r = c.post(f"/api/admin/payout-requests/{req_id}/approve", headers=ADMIN_H)
+        assert r.status_code == 404
+    s = SessionLocal()
+    assert s.get(Account, aid).balance == KAPITAL + ZYSK
+    s.close()
+
+
 def test_approve_czesciowej_wyplaty_nie_zeruje_konta_do_startu():
     """$200 z dostepnych $800 => z salda schodzi 200/0.8 = $250 profitu,
     a NIE caly zysk — stary reset do salda startowego zabieralby traderowi

@@ -113,6 +113,12 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"{' (including your challenge fee refund)' if ctx.get('fee_refund') else ''}. "
             f"Funds are on the way.",
         ),
+        "payout_rejected": (
+            f"Payout request declined ({login})",
+            f"{name}, your payout request for {ctx.get('trader_share')} was declined. "
+            f"Reason: {ctx.get('reason')}. "
+            f"You can submit a new request from your dashboard at any time.",
+        ),
         "kyc_approved": (
             "Identity verification approved ✅",
             f"{name}, your KYC verification has been accepted. You can now request payouts.",
@@ -213,6 +219,7 @@ _PREF_BY_EVENT = {
     "phase_passed": "notify_trading", "account_funded": "notify_trading",
     "breached": "notify_trading",
     "payout_requested": "notify_payouts", "payout_approved": "notify_payouts",
+    "payout_rejected": "notify_payouts",
 }
 
 

@@ -900,7 +900,8 @@ def my_payouts(trader: Trader = Depends(auth.current_trader)):
             "requests": [{"id": r.id, "ts": r.ts.isoformat(),
                           "account": by_id[r.account_id].login if r.account_id in by_id else "?",
                           "profit_amount": r.profit_amount, "trader_share": r.trader_share,
-                          "method": r.method, "status": r.status} for r in reqs],
+                          "method": r.method, "status": r.status,
+                          "reject_reason": r.reject_reason} for r in reqs],
             # Zrealizowane wyplaty — wniosek to dopiero prosba, a trader chce
             # widziec, co faktycznie do niego trafilo i miec do tego certyfikat.
             "history": [{"id": p.id, "ts": p.ts.isoformat(),
@@ -1259,7 +1260,8 @@ def admin_payout_requests():
             out.append({"id": r.id, "account_login": acc.login if acc else None,
                         "trader_email": tr.email if tr else None, "profit_amount": r.profit_amount,
                         "trader_share": r.trader_share, "method": r.method, "details": details,
-                        "status": r.status, "ts": r.ts.isoformat()})
+                        "status": r.status, "reject_reason": r.reject_reason,
+                        "ts": r.ts.isoformat()})
         return out
     finally:
         session.close()
@@ -1305,6 +1307,36 @@ def admin_approve_payout(req_id: int):
                     "fee_refund": bool(fee_refund)})
         return {"approved": req_id, "fee_refund": fee_refund,
                 "total_paid": round(r.trader_share + fee_refund, 2)}
+    finally:
+        session.close()
+
+
+class PayoutRejectIn(BaseModel):
+    reason: str = ""
+
+
+@app.post("/api/admin/payout-requests/{req_id}/reject", dependencies=[Depends(auth.require_admin)])
+def admin_reject_payout(req_id: int, payload: PayoutRejectIn):
+    """Odrzuca wniosek z powodem, który trader zobaczy przy swoim wniosku.
+
+    Saldo konta nie zmienia się — odrzucenie niczego nie wypłaca, a trader może
+    złożyć nowy wniosek od razu (np. z poprawionymi danymi przelewu)."""
+    session = SessionLocal()
+    try:
+        r = session.get(PayoutRequest, req_id)
+        if not r or r.status != "pending":
+            raise HTTPException(404, "The request does not exist or was already handled")
+        r.status = "rejected"
+        r.reject_reason = (payload.reason or "").strip()[:200] or None
+        acc = session.get(Account, r.account_id)
+        tr = session.get(Trader, r.trader_id)
+        session.commit()
+        if tr:
+            notify.send("payout_rejected", tr.email, {
+                "name": tr.full_name or tr.email, "login": acc.login if acc else "",
+                "trader_share": r.trader_share,
+                "reason": r.reject_reason or "not specified"})
+        return {"rejected": req_id, "reason": r.reject_reason}
     finally:
         session.close()
 

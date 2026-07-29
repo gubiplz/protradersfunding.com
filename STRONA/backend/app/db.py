@@ -83,6 +83,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
     },
     "payout_requests": {
         "details": "VARCHAR(400)",
+        "reject_reason": "VARCHAR(200)",
     },
     "payouts": {
         "method": "VARCHAR(40)",
