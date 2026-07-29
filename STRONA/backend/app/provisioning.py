@@ -10,15 +10,17 @@ UWAGA: te poświadczenia wskazują na serwer, na którym konta NIE MA — trader
 spróbuje zalogować się w MetaTraderze, dostanie błąd. To świadomy etap przejściowy;
 `MT5_PROVISIONING=true` przywraca realne konta poniżej.
 
-Tryb metaapi (jak firmy fundingowe bez własnego serwera MT5): konto startuje
-jako 'provisioning', a poller próbuje je uzbroić w tej kolejności:
+`MT5_PROVISIONING=true` (jak firmy fundingowe bez własnego serwera MT5): konto
+startuje jako 'provisioning' i czeka na poświadczenia z PULI, którą admin
+uzupełnia ręcznie w panelu (login, hasło, serwer, rozmiar). Poller przydziela
+pierwszy wolny rachunek o pasującym rozmiarze i zapisuje, komu przypadł. Gdy
+puli brakuje rachunku danego rozmiaru, konto po prostu czeka — panel pokazuje
+takie zamówienia w sekcji MT5 Pool.
 
-  1. METAAPI_AUTO_CREATE=true → REALNE konto demo MT5 zakładane u brokera przez
-     REST MetaApi (`metaapi_provisioning.py`). Zwraca prawdziwy login/hasło/serwer.
-     Nieudana próba nakłada backoff na konto (30 s → 30 min), więc poller nie
-     zalewa API brokera.
-  2. PULA (PoolAccount) — gotowe konta MT5 dodane wcześniej do MetaApi. Działa
-     też u brokerów, którzy ZABRANIAJĄ programowego zakładania dem.
+Pula jest domyślnym i jedynym źródłem, bo brokerzy blokują programowe zakładanie
+dem, a admin wie, które rachunki naprawdę istnieją. `PROVISIONING_SOURCE=auto`
+przywraca wcześniejszą ścieżkę: najpierw próba założenia konta demo (web terminal
+MetaQuotes / REST MetaApi, z backoffem 30 s → 30 min), pula dopiero awaryjnie.
 
 Dopiero po uzyskaniu poświadczeń konto przechodzi w 'active' i trader dostaje
 maila. Do tego czasu nie jest handlowalne.
@@ -143,20 +145,30 @@ def _creds_ctx(trader: Trader, acc: Account) -> dict:
 
 
 def claim_pool_account(session, acc: Account) -> bool:
-    """Przydziel kontu wolne konto MT5 z puli o pasującym rozmiarze. True gdy się udało."""
+    """Przydziel kontu wolne konto MT5 z puli o pasującym rozmiarze. True gdy się udało.
+
+    Przy okazji zapisuje, KOMU rachunek przypadł i kiedy — bez tego pula jest
+    workiem loginów, z którego nie da się odtworzyć, czyj jest dany rachunek.
+    """
     pool = (session.query(PoolAccount)
             .filter(PoolAccount.claimed == False,  # noqa: E712
                     PoolAccount.account_size == acc.initial_balance)
             .order_by(PoolAccount.id).first())
     if not pool:
         return False
-    acc.metaapi_account_id = pool.metaapi_account_id
+    # metaapi_account_id zwykle jest puste (admin go nie podaje) — kopiujemy tylko,
+    # gdy ktoś kiedyś zarejestrował ten rachunek w MetaApi.
+    if pool.metaapi_account_id:
+        acc.metaapi_account_id = pool.metaapi_account_id
     acc.platform_login = pool.platform_login
     acc.platform_password = pool.platform_password
     acc.platform_server = pool.platform_server
     acc.login = pool.platform_login
+    acc.mt5_backed = True
     pool.claimed = True
     pool.claimed_by_account_id = acc.id
+    pool.claimed_by_trader_id = acc.trader_id
+    pool.claimed_at = datetime.now(timezone.utc)
     return True
 
 
@@ -193,9 +205,14 @@ async def _provision_one(session_factory, feed, aid: int) -> None:
                   f"({acc.platform_login}@{acc.platform_server})")
             return
 
-        # 1) REALNE konto demo MT5 (ścieżka główna, gdy włączona) — web terminal
-        #    MetaQuotes albo REST MetaApi, zależnie od konfiguracji.
-        if (settings.metaquotes_web_enabled or settings.metaapi_auto_create) and _may_attempt(aid):
+        # 1) Automatyczne zakładanie konta demo — TYLKO gdy ktoś świadomie wybierze
+        #    PROVISIONING_SOURCE=auto. Domyślnie ta gałąź nie jest brana pod uwagę:
+        #    źródłem jest wyłącznie pula, którą admin uzupełnia ręcznie. Brokerzy
+        #    i tak blokują programowe zakładanie dem, a admin wie, które rachunki
+        #    naprawdę istnieją.
+        if (settings.provisioning_source == "auto"
+                and (settings.metaquotes_web_enabled or settings.metaapi_auto_create)
+                and _may_attempt(aid)):
             creds = await _create_demo_account(feed, acc, trader, settings)
             if creds:
                 _apply_credentials(acc, creds)
@@ -208,16 +225,19 @@ async def _provision_one(session_factory, feed, aid: int) -> None:
                       f"{acc.platform_login}@{acc.platform_server} (metaapi_id={acc.metaapi_account_id})")
                 return
 
-        # 2) pula gotowych kont (awaryjnie / gdy broker nie pozwala na programowe dema)
+        # 2) PULA gotowych kont — domyślnie jedyne źródło poświadczeń.
         if claim_pool_account(s, acc):
             acc.status = "funded" if acc.phase == "funded" else "active"
             s.commit()
             if trader:
                 notify.send(_creds_event(acc), trader.email, _creds_ctx(trader, acc))
-            print(f"[provisioning] konto {aid} aktywne z puli (metaapi_id={acc.metaapi_account_id})")
+            print(f"[provisioning] konto {aid} = {acc.platform_login}@{acc.platform_server} "
+                  f"z puli, trader {trader.email if trader else '?'}")
             return
 
-        # 3) nic nie wyszło — konto czeka; poller spróbuje ponownie (z backoffem)
+        # 3) pula nie ma wolnego rachunku tego rozmiaru — konto czeka, aż admin go
+        #    doda. Panel pokazuje takie konta w sekcji MT5 Pool jako oczekujące.
+        print(f"[provisioning] konto {aid} czeka na rachunek ${acc.initial_balance:,.0f} z puli")
     finally:
         s.close()
 

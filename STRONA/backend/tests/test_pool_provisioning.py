@@ -1,0 +1,197 @@
+"""Pula MT5 jako JEDYNE źródło poświadczeń + ślad, komu rachunek przypadł.
+
+Broker nie pozwala zakładać kont demo programowo, więc rachunki powstają poza
+systemem i admin wkleja je do puli: login, hasło, serwer, rozmiar. Provisioning
+tylko je przypisuje — i musi zostawić ślad, czyj jest dany rachunek MT5, bo
+inaczej pula jest workiem loginów bez właścicieli.
+"""
+import asyncio
+import os
+import tempfile
+from contextlib import contextmanager
+
+os.environ.setdefault("DATABASE_URL", f"sqlite:///{tempfile.NamedTemporaryFile(suffix='.db', delete=False).name}")
+os.environ.setdefault("FEED", "sim")
+os.environ.setdefault("AUTO_SEED", "false")
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app import auth, provisioning  # noqa: E402
+from app.config import get_settings  # noqa: E402
+from app.db import SessionLocal, init_db  # noqa: E402
+from app.main import app  # noqa: E402
+from app.models import Account, PoolAccount, Trader  # noqa: E402
+
+init_db()
+client = TestClient(app)
+USTAWIENIA = get_settings()
+ADMIN_H = {"X-Admin-Token": USTAWIENIA.admin_token}
+
+
+@contextmanager
+def realny_provisioning(zrodlo: str = "pool"):
+    """MT5_PROVISIONING=true — konta czekaja na poswiadczenia zamiast dostac lokalne."""
+    prov, src = USTAWIENIA.mt5_provisioning, USTAWIENIA.provisioning_source
+    USTAWIENIA.mt5_provisioning = True
+    USTAWIENIA.provisioning_source = zrodlo
+    try:
+        yield
+    finally:
+        USTAWIENIA.mt5_provisioning = prov
+        USTAWIENIA.provisioning_source = src
+
+
+def _trader(email: str) -> int:
+    s = SessionLocal()
+    tr = s.query(Trader).filter(Trader.email == email).first()
+    if tr is None:
+        tr = Trader(email=email, password_hash=auth.hash_password("tajne123"),
+                    full_name="Pool Tester", referral_code=email[:8].upper())
+        s.add(tr); s.commit()
+    tid = tr.id
+    s.close()
+    return tid
+
+
+def _konto_czekajace(tid: int, rozmiar: float) -> int:
+    s = SessionLocal()
+    acc = Account(login="000000", trader_name="Pool Tester", trader_id=tid,
+                  product_key="2step-100k", preset="2step-100k", initial_balance=rozmiar,
+                  steps=2, phase="eval_1", status="provisioning", balance=rozmiar,
+                  equity=rozmiar, peak_equity=rozmiar, day_start_equity=rozmiar,
+                  day_start_balance=rozmiar)
+    s.add(acc); s.commit()
+    aid = acc.id
+    s.close()
+    return aid
+
+
+def test_przydzial_zapisuje_komu_rachunek_przypadl():
+    ROZMIAR = 71_000
+    tid = _trader("wlasciciel@pool.pl")
+    aid = _konto_czekajace(tid, ROZMIAR)
+    s = SessionLocal()
+    s.add(PoolAccount(platform_login="7100001", platform_password="Haslo123",
+                      platform_server="GOMarketsLtd-Demo", account_size=ROZMIAR))
+    s.commit(); s.close()
+
+    with realny_provisioning():
+        asyncio.run(provisioning.provision_pending(SessionLocal, None))
+
+    s = SessionLocal()
+    acc = s.get(Account, aid)
+    pool = s.query(PoolAccount).filter(PoolAccount.platform_login == "7100001").first()
+    assert acc.status == "active"
+    assert acc.platform_login == "7100001" and acc.platform_server == "GOMarketsLtd-Demo"
+    assert acc.platform_password == "Haslo123"
+    # slad przydzialu — to jest sedno monitorowania puli
+    assert pool.claimed is True
+    assert pool.claimed_by_account_id == aid
+    assert pool.claimed_by_trader_id == tid
+    assert pool.claimed_at is not None
+    s.close()
+
+
+def test_wpis_bez_metaapi_dziala_a_konto_nie_dostaje_zmyslonego_id():
+    """Admin nie podaje metaapi_account_id — konto nie moze go sobie wymyslic."""
+    ROZMIAR = 72_000
+    tid = _trader("bezmeta@pool.pl")
+    aid = _konto_czekajace(tid, ROZMIAR)
+    s = SessionLocal()
+    s.add(PoolAccount(platform_login="7200001", platform_password="Haslo123",
+                      platform_server="GOMarketsLtd-Demo", account_size=ROZMIAR))
+    s.commit(); s.close()
+
+    with realny_provisioning():
+        asyncio.run(provisioning.provision_pending(SessionLocal, None))
+
+    s = SessionLocal()
+    acc = s.get(Account, aid)
+    assert acc.status == "active" and acc.metaapi_account_id is None
+    s.close()
+
+
+def test_bez_pasujacego_rozmiaru_konto_czeka():
+    ROZMIAR = 73_000
+    tid = _trader("czeka@pool.pl")
+    aid = _konto_czekajace(tid, ROZMIAR)
+    s = SessionLocal()
+    s.add(PoolAccount(platform_login="7300099", platform_password="Haslo123",
+                      platform_server="GOMarketsLtd-Demo", account_size=ROZMIAR + 5_000))
+    s.commit(); s.close()
+
+    with realny_provisioning():
+        asyncio.run(provisioning.provision_pending(SessionLocal, None))
+
+    s = SessionLocal()
+    assert s.get(Account, aid).status == "provisioning"
+    s.close()
+
+
+def test_zrodlem_jest_wylacznie_pula_mimo_wlaczonych_kanalow_automatycznych():
+    """METAQUOTES_WEB_ENABLED nie ma znaczenia przy PROVISIONING_SOURCE=pool.
+
+    Gdyby kanal automatyczny mimo wszystko wystartowal, konto dostaloby
+    poswiadczenia z web terminala zamiast z puli — a caly sens tej zmiany polega
+    na tym, ze rachunki pochodza WYLACZNIE od admina.
+    """
+    ROZMIAR = 74_000
+    tid = _trader("tylkopula@pool.pl")
+    aid = _konto_czekajace(tid, ROZMIAR)
+    s = SessionLocal()
+    s.add(PoolAccount(platform_login="7400001", platform_password="Haslo123",
+                      platform_server="GOMarketsLtd-Demo", account_size=ROZMIAR))
+    s.commit(); s.close()
+
+    poprzednio = USTAWIENIA.metaquotes_web_enabled
+    USTAWIENIA.metaquotes_web_enabled = True
+    try:
+        with realny_provisioning("pool"):
+            asyncio.run(provisioning.provision_pending(SessionLocal, None))
+    finally:
+        USTAWIENIA.metaquotes_web_enabled = poprzednio
+
+    s = SessionLocal()
+    acc = s.get(Account, aid)
+    assert acc.platform_login == "7400001"      # z puli, nie z web terminala
+    assert acc.platform_server == "GOMarketsLtd-Demo"
+    s.close()
+
+
+def test_api_puli_przyjmuje_cztery_pola_i_pokazuje_przydzial():
+    r = client.post("/api/admin/pool", headers=ADMIN_H, json={
+        "platform_login": "7500001", "platform_password": "Haslo123",
+        "platform_server": "GOMarketsLtd-Demo", "account_size": 75_000})
+    assert r.status_code == 200
+
+    dane = client.get("/api/admin/pool", headers=ADMIN_H).json()
+    assert "pool" in dane and "waiting" in dane
+    wpis = [p for p in dane["pool"] if p["platform_login"] == "7500001"][0]
+    assert wpis["claimed"] is False and wpis["trader_email"] is None
+
+
+def test_api_puli_wystawia_zamowienia_czekajace_na_rachunek():
+    ROZMIAR = 76_000
+    tid = _trader("wkolejce@pool.pl")
+    aid = _konto_czekajace(tid, ROZMIAR)
+
+    dane = client.get("/api/admin/pool", headers=ADMIN_H).json()
+    czeka = [w for w in dane["waiting"] if w["account_id"] == aid]
+    assert czeka, "konto w statusie provisioning musi byc widoczne jako oczekujace"
+    assert czeka[0]["account_size"] == ROZMIAR
+    assert czeka[0]["trader_email"] == "wkolejce@pool.pl"
+
+
+def test_wolny_wpis_mozna_usunac_a_przydzielonego_nie():
+    s = SessionLocal()
+    wolny = PoolAccount(platform_login="7700001", platform_password="x",
+                        platform_server="S", account_size=77_000)
+    zajety = PoolAccount(platform_login="7700002", platform_password="x",
+                         platform_server="S", account_size=77_000,
+                         claimed=True, claimed_by_account_id=1)
+    s.add_all([wolny, zajety]); s.commit()
+    id_wolny, id_zajety = wolny.id, zajety.id
+    s.close()
+
+    assert client.delete(f"/api/admin/pool/{id_wolny}", headers=ADMIN_H).status_code == 200
+    assert client.delete(f"/api/admin/pool/{id_zajety}", headers=ADMIN_H).status_code == 400

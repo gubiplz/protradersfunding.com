@@ -75,6 +75,10 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
     "orders": {
         "bogo_paid_key": "VARCHAR(48)",
     },
+    "pool_accounts": {
+        "claimed_by_trader_id": "INTEGER",
+        "claimed_at": "TIMESTAMP",
+    },
     "payouts": {
         "method": "VARCHAR(40)",
         "note": "VARCHAR(160)",

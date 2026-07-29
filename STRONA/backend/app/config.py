@@ -45,6 +45,13 @@ class Settings:
     # przy zakupie, bez ani jednego strzału do MetaQuotes. Ustaw true, żeby wrócić
     # do realnego provisioningu (cała ścieżka MetaQuotes/MetaApi zostaje w kodzie).
     mt5_provisioning: bool = os.getenv("MT5_PROVISIONING", "false").lower() == "true"
+    # Skad brac poswiadczenia, gdy MT5_PROVISIONING=true:
+    #   "pool" (domyslnie) — WYLACZNIE z puli, ktora admin uzupelnia recznie,
+    #   "auto"             — najpierw probuj zalozyc konto demo (web terminal
+    #                        MetaQuotes / MetaApi), a pula dopiero awaryjnie.
+    # Pula jest domyslna, bo brokerzy blokuja programowe zakladanie dem i to
+    # admin wie, ktore rachunki naprawde istnieja.
+    provisioning_source: str = os.getenv("PROVISIONING_SOURCE", "pool").strip().lower()
 
     # --- MetaApi (tylko gdy FEED=metaapi) ---
     metaapi_token: str = os.getenv("METAAPI_TOKEN", "")

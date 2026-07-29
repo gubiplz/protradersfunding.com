@@ -316,17 +316,34 @@ const VIEWS={
  },
 
  async pool(){
-  const rows=await api('/api/admin/pool');
+  const dane=await api('/api/admin/pool');
+  const rows=dane.pool||[], waiting=dane.waiting||[];
   const free=rows.filter(p=>!p.claimed).length;
+  // ile rachunkow brakuje na kazdy rozmiar — admin ma wiedziec CO dorzucic
+  const brakuje={};
+  waiting.forEach(w=>{brakuje[w.account_size]=(brakuje[w.account_size]||0)+1});
   $('view').innerHTML=`
+    ${waiting.length?`<div class="sec-card" style="border-color:#f5d9a8;background:#fffaf0">
+      <h3>${waiting.length} paid ${waiting.length===1?'order is':'orders are'} waiting for an MT5 account</h3>
+      <p class="muted" style="font-size:12.5px;margin:6px 0 12px">These challenges are paid for but not tradable yet — the pool has no free account of that size. Add one below and it is assigned automatically.</p>
+      <div class="tbl-wrap"><table class="tbl">
+        <thead><tr><th>Account</th><th>Trader</th><th>Needs size</th><th>Waiting since</th></tr></thead>
+        <tbody>${waiting.map(w=>`<tr>
+          <td class="num">#${w.account_id}</td>
+          <td>${esc(w.trader_email||'—')}</td>
+          <td class="num"><b>$${fmt0(w.account_size)}</b></td>
+          <td class="muted">${w.created_at?dstr(w.created_at):'—'}</td></tr>`).join('')}
+        </tbody></table></div>
+      <p class="muted" style="font-size:12.5px;margin-top:10px">Missing: ${Object.entries(brakuje).map(([rozmiar,ile])=>`<b>${ile}×</b> $${fmt0(Number(rozmiar))}`).join(', ')}</p>
+    </div>`:''}
+
     <div class="sec-card">
       <h3>Add account to pool</h3>
-      <p class="muted" style="font-size:12.5px;margin-bottom:14px">Pre-provisioned MT5 accounts are assigned automatically when a matching challenge is purchased.</p>
+      <p class="muted" style="font-size:12.5px;margin-bottom:14px">Accounts you created at your broker. Paste the credentials here — provisioning assigns the first free account of a matching size when a challenge is purchased.</p>
       <div class="pool-form">
         <input id="pl-login" class="inp" placeholder="MT5 login">
         <input id="pl-pass" class="inp" placeholder="Password">
         <input id="pl-server" class="inp" placeholder="Server">
-        <input id="pl-meta" class="inp" placeholder="MetaApi account id">
         <input id="pl-size" class="inp" type="number" placeholder="Account size">
       </div>
       <button class="btn-p" onclick="addPool()">+ Add to pool</button>
@@ -334,17 +351,22 @@ const VIEWS={
     <div class="stats-row">
       <div class="stat-tile"><div class="tile-ic green">${ICO.bank}</div>
         <div><div class="lbl">Free accounts</div><div class="val">${free}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic purple">${ICO.users}</div>
+        <div><div class="lbl">Assigned</div><div class="val">${rows.length-free}</div></div></div>
       <div class="stat-tile"><div class="tile-ic blue">${ICO.layers}</div>
         <div><div class="lbl">Total in pool</div><div class="val">${rows.length}</div></div></div>
     </div>
     ${rows.length?`<div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>#</th><th>Login</th><th>Server</th><th>Size</th><th>State</th></tr></thead>
+      <thead><tr><th>#</th><th>Login</th><th>Server</th><th>Size</th><th>State</th><th>Assigned to</th><th>When</th><th></th></tr></thead>
       <tbody>${rows.map(p=>`<tr>
         <td class="num">${p.id}</td><td class="num">${esc(p.platform_login)}</td>
         <td class="muted">${esc(p.platform_server)}</td><td class="num">$${fmt0(p.account_size)}</td>
-        <td>${p.claimed?`<span class="status failed"><span class="dot"></span>assigned #${p.claimed_by_account_id}</span>`
-          :'<span class="status funded"><span class="dot"></span>free</span>'}</td></tr>`).join('')}
-      </tbody></table></div>`:`<div class="empty"><h3>Pool is empty</h3><p>Add ready MT5 accounts above, or use automatic provisioning.</p></div>`}`;
+        <td>${p.claimed?`<span class="status failed"><span class="dot"></span>assigned</span>`
+          :'<span class="status funded"><span class="dot"></span>free</span>'}</td>
+        <td>${p.claimed?`${esc(p.trader_email||'—')}<div class="muted" style="font-size:11.5px">account #${p.claimed_by_account_id}${p.account_status?' · '+esc(p.account_status):''}</div>`:'<span class="muted">—</span>'}</td>
+        <td class="muted">${p.claimed_at?dstr(p.claimed_at):'—'}</td>
+        <td>${p.claimed?'':`<button class="btn-o sm" onclick="delPool(${p.id},'${esc(p.platform_login)}')">Remove</button>`}</td></tr>`).join('')}
+      </tbody></table></div>`:`<div class="empty"><h3>Pool is empty</h3><p>Add the MT5 accounts you created at your broker — provisioning takes credentials only from here.</p></div>`}`;
  },
 
  async settings(){
@@ -449,7 +471,6 @@ async function openAccount(id){
       ${cred('Server',a.platform_server)}${cred('Login',a.platform_login)}
       ${cred('Password',a.platform_password)}
       ${a.mt5_backed===false?'<div class="kv"><span>Backed by MT5</span><b>no — generated locally</b></div>':''}
-      ${a.metaapi_account_id?cred('MetaApi id',a.metaapi_account_id):''}
       ${!a.platform_password?'<p class="muted" style="font-size:12.5px">Not provisioned yet.</p>':''}
     </div>
     <div class="sec-card" style="margin:0">
@@ -719,11 +740,17 @@ async function replyTicket(id,close){
   }catch(e){toast('Error: '+e.message,'err')}
 }
 async function addPool(){
-  const body={platform_login:$('pl-login').value,platform_password:$('pl-pass').value,
-    platform_server:$('pl-server').value,metaapi_account_id:$('pl-meta').value,
+  const body={platform_login:$('pl-login').value.trim(),platform_password:$('pl-pass').value.trim(),
+    platform_server:$('pl-server').value.trim(),
     account_size:parseFloat($('pl-size').value||'0')};
-  if(!body.platform_login||!body.account_size){toast('Login and account size are required.','err');return}
+  if(!body.platform_login||!body.platform_password||!body.platform_server||!body.account_size){
+    toast('Login, password, server and account size are all required.','err');return}
   try{await api('/api/admin/pool',{method:'POST',body:JSON.stringify(body)});toast('Added to pool.','ok');go('pool')}
+  catch(e){toast('Error: '+e.message,'err')}
+}
+async function delPool(id,login){
+  if(!confirm(`Remove ${login} from the pool? Only free accounts can be removed.`))return;
+  try{await api('/api/admin/pool/'+id,{method:'DELETE'});toast('Removed from pool.','ok');go('pool')}
   catch(e){toast('Error: '+e.message,'err')}
 }
 
@@ -797,7 +824,6 @@ async function openCreate(){
       <input id="c-name" class="inp" placeholder="Trader name">
       <select id="c-product" class="inp">${products.map(p=>`<option value="${esc(p.key)}">${esc(p.label)} — $${fmt0(p.price_usd)}</option>`).join('')}</select>
       <select id="c-dd" class="inp"><option value="static">Drawdown: static</option><option value="trailing">Drawdown: trailing</option></select>
-      <input id="c-meta" class="inp" placeholder="MetaApi account id (optional)">
       <button class="btn-p lg" style="width:100%" onclick="submitCreate()">Create account</button>
     </div></div>`;
   box.onclick=()=>box.remove();
@@ -805,8 +831,7 @@ async function openCreate(){
 }
 async function submitCreate(){
   const body={login:$('c-login').value.trim(),trader_name:$('c-name').value.trim(),
-    product_key:$('c-product').value,drawdown_type:$('c-dd').value,
-    metaapi_account_id:$('c-meta').value||null};
+    product_key:$('c-product').value,drawdown_type:$('c-dd').value};
   if(!body.login){toast('MT5 login is required.','err');return}
   try{await api('/api/accounts',{method:'POST',body:JSON.stringify(body)});
     document.getElementById('create-modal')?.remove();toast('Account created.','ok');go('accounts');

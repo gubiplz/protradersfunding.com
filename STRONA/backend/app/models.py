@@ -316,18 +316,28 @@ class PayoutRequest(Base):
 
 
 class PoolAccount(Base):
-    """Pula gotowych kont MT5 (dodanych do MetaApi) do przydzielenia przy zakupie.
-    Tak działają firmy fundingowe bez własnego serwera: pre-provisioning + assign."""
+    """Pula gotowych kont MT5, ktore admin wrzuca recznie, do przydzielenia przy zakupie.
+
+    Tak dziala firma fundingowa bez wlasnego serwera MT5: konta powstaja u brokera
+    poza systemem, admin wkleja tu ich poswiadczenia, a provisioning tylko je
+    przypisuje. Do wpisu potrzebne sa cztery rzeczy: login, haslo, serwer i rozmiar.
+    """
     __tablename__ = "pool_accounts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    metaapi_account_id: Mapped[str] = mapped_column(String(64))
     platform_login: Mapped[str] = mapped_column(String(64))
     platform_password: Mapped[str] = mapped_column(String(64))
     platform_server: Mapped[str] = mapped_column(String(64))
     account_size: Mapped[float] = mapped_column(Float, index=True)
+    # Zostaje dla kont, ktore ktos kiedys zarejestrowal w MetaApi — admin tego
+    # NIE wypelnia, pole nie pojawia sie w panelu.
+    metaapi_account_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     claimed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     claimed_by_account_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Komu konto trafilo — bez tego nie da sie odpowiedziec na pytanie "czyj jest
+    # ten rachunek MT5", a przy realnych pieniadzach to pierwsze pytanie.
+    claimed_by_trader_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 

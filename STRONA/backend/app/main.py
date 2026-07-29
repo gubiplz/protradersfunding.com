@@ -1648,7 +1648,7 @@ def admin_orders():
 #  PULA kont MT5 (pre-provisioning) — zasilana przez admina                   #
 # --------------------------------------------------------------------------- #
 class NewPoolAccount(BaseModel):
-    metaapi_account_id: str
+    """Wpis do puli — dokładnie to, co admin ma pod ręką z panelu brokera."""
     platform_login: str
     platform_password: str
     platform_server: str
@@ -1657,12 +1657,44 @@ class NewPoolAccount(BaseModel):
 
 @app.get("/api/admin/pool", dependencies=[Depends(auth.require_admin)])
 def admin_pool_list():
+    """Stan puli + zamówienia, które na nią czekają.
+
+    Do każdego przydzielonego rachunku dokładamy tradera i datę — panel ma
+    odpowiadać na pytanie „czyj jest ten rachunek MT5" bez grzebania w bazie.
+    `waiting` to konta w statusie `provisioning`, czyli opłacone zamówienia, dla
+    których w puli zabrakło rachunku danego rozmiaru.
+    """
     session = SessionLocal()
     try:
         rows = session.query(PoolAccount).order_by(PoolAccount.id.desc()).all()
-        return [{"id": p.id, "platform_login": p.platform_login, "platform_server": p.platform_server,
-                 "account_size": p.account_size, "claimed": p.claimed,
-                 "claimed_by_account_id": p.claimed_by_account_id} for p in rows]
+        traderzy = {t.id: t for t in session.query(Trader).all()}
+        konta = {a.id: a for a in session.query(Account).all()}
+        pula = []
+        for p in rows:
+            tr = traderzy.get(p.claimed_by_trader_id)
+            acc = konta.get(p.claimed_by_account_id)
+            pula.append({
+                "id": p.id, "platform_login": p.platform_login,
+                "platform_server": p.platform_server, "account_size": p.account_size,
+                "claimed": p.claimed, "claimed_by_account_id": p.claimed_by_account_id,
+                "claimed_at": p.claimed_at.isoformat() if p.claimed_at else None,
+                "trader_email": tr.email if tr else None,
+                "trader_name": (tr.full_name if tr else None),
+                "account_status": acc.status if acc else None,
+                "account_phase": acc.phase if acc else None,
+            })
+
+        czekajace = []
+        for a in (session.query(Account).filter(Account.status == "provisioning")
+                  .order_by(Account.id).all()):
+            tr = traderzy.get(a.trader_id)
+            czekajace.append({
+                "account_id": a.id, "account_size": a.initial_balance,
+                "product_key": a.product_key,
+                "trader_email": tr.email if tr else None,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+            })
+        return {"pool": pula, "waiting": czekajace}
     finally:
         session.close()
 
@@ -1672,13 +1704,31 @@ def admin_pool_add(payload: NewPoolAccount):
     session = SessionLocal()
     try:
         p = PoolAccount(
-            metaapi_account_id=payload.metaapi_account_id, platform_login=payload.platform_login,
-            platform_password=payload.platform_password, platform_server=payload.platform_server,
+            platform_login=payload.platform_login.strip(),
+            platform_password=payload.platform_password.strip(),
+            platform_server=payload.platform_server.strip(),
             account_size=payload.account_size,
         )
         session.add(p)
         session.commit()
         return {"id": p.id, "account_size": p.account_size}
+    finally:
+        session.close()
+
+
+@app.delete("/api/admin/pool/{pool_id}", dependencies=[Depends(auth.require_admin)])
+def admin_pool_delete(pool_id: int):
+    """Usuwa WOLNY wpis z puli. Przydzielonego nie ruszamy — stoi za nim konto tradera."""
+    session = SessionLocal()
+    try:
+        p = session.get(PoolAccount, pool_id)
+        if not p:
+            raise HTTPException(404, "Nie ma takiego wpisu w puli")
+        if p.claimed:
+            raise HTTPException(400, "Ten rachunek jest przydzielony traderowi — nie można go usunąć")
+        session.delete(p)
+        session.commit()
+        return {"deleted": pool_id}
     finally:
         session.close()
 
