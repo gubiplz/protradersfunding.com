@@ -32,3 +32,9 @@ os.environ.setdefault("ADMIN_TOKEN", "tajny-token")
 # tylko wtedy, gdy ustawimy to przez setdefault (nie twardo).
 os.environ.setdefault("FEED", "sim")
 os.environ.setdefault("AUTO_SEED", "false")
+
+# Promocja „Double your challenge size" jest domyślnie WŁĄCZONA w produkcji, ale
+# w testach musi być wyłączona: inaczej każdy zakup provisionowałby konto
+# większego tieru i asercje o rozmiarach kont zależałyby od tego, czy promocja
+# trwa. Testy promocji włączają ją same (monkeypatch na catalog.settings).
+os.environ["PROMO_UPGRADE"] = "false"

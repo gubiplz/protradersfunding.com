@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="en">
+<html lang="en"{% if promo %} class="has-promo"{% endif %}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{% block title %}{{ site_name }} — Prop Trading Challenges on Real MT5 Accounts{% endblock %}</title>
-<meta name="description" content="{% block description %}Trade our simulated capital on a real MetaTrader 5 account. Pass the evaluation, get funded and keep up to 90% of the rewards. Clear rules, automated risk engine, credentials in minutes.{% endblock %}">
+<meta name="description" content="{% block description %}Trade our simulated capital on a real MetaTrader 5 account — sizes up to $2,000,000. Pass the evaluation, get funded and keep up to 90% of the rewards. Clear rules, automated risk engine, credentials in minutes.{% endblock %}">
 <link rel="icon" href="/static/img/favicon.png" type="image/png">
 <link rel="preload" href="/static/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/space-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin>
@@ -12,13 +12,32 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="{{ site_name }}">
 <meta property="og:title" content="{% block og_title %}{{ site_name }} — Get Funded to Trade{% endblock %}">
-<meta property="og:description" content="{% block og_description %}Prop trading challenges on real MT5 infrastructure. Keep up to 90% of the rewards.{% endblock %}">
+<meta property="og:description" content="{% block og_description %}Prop trading challenges on real MT5 infrastructure, up to $2,000,000 in simulated capital. Keep up to 90% of the rewards.{% endblock %}">
 <meta property="og:image" content="/static/img/og.png">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"{{ site_name }}","logo":"/static/img/logo.png","email":"{{ support_email }}"}</script>
 {% block head_extra %}{% endblock %}
+{% if promo %}<script>
+/* Runs BEFORE the first paint: a dismissed bar must never flash in and push the
+   page down. The class drives --promo-h, so hiding it also restores every offset. */
+try{if(localStorage.getItem('promoOff')==='1')document.documentElement.classList.add('promo-off')}catch(e){}
+</script>{% endif %}
 </head>
 <body>
+
+{% if promo %}
+<div class="promo-bar" id="promoBar">
+  <div class="wrap promo-in">
+    <span class="promo-tag">{{ promo.name }}</span>
+    <span class="promo-txt">Pay for one account size and trade the next one up — <b>double the
+      capital, same fee</b>.{% if promo.ends %} Ends {{ promo.ends }}.{% endif %}</span>
+    <a class="promo-cta" href="/#pricing">See plans</a>
+    <button class="promo-x" id="promoX" aria-label="Dismiss">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+</div>
+{% endif %}
 
 <header class="nav">
   <div class="wrap nav-in">

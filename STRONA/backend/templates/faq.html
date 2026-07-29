@@ -8,7 +8,7 @@
 {"@context":"https://schema.org","@type":"FAQPage","mainEntity":[
  {"@type":"Question","name":"Are these live trading accounts?","acceptedAnswer":{"@type":"Answer","text":"No. All accounts are demo accounts with virtual funds in a simulated environment on real MetaTrader 5 servers. Rewards are performance-based."}},
  {"@type":"Question","name":"How fast do I get my account?","acceptedAnswer":{"@type":"Answer","text":"Provisioning is automated — MT5 credentials usually arrive within a minute of checkout."}},
- {"@type":"Question","name":"How do payouts work?","acceptedAnswer":{"@type":"Answer","text":"On a funded account you request a payout of your 80-90% share of simulated profits; after KYC each request is reviewed and paid, with the challenge fee refunded on the first payout."}},
+ {"@type":"Question","name":"How do payouts work?","acceptedAnswer":{"@type":"Answer","text":"On a funded account you request a payout of your share of simulated profits — 90% on evaluation plans, 70% on Instant Funding; after KYC each request is reviewed and paid, with the challenge fee refunded on the first payout."}},
  {"@type":"Question","name":"Is news trading allowed?","acceptedAnswer":{"@type":"Answer","text":"Yes — there are no news blackouts, weekend-flat requirements or banned strategies."}}
 ]}</script>
 {% endblock %}
@@ -68,10 +68,10 @@
       </details>
       <details>
         <summary>Static vs trailing drawdown — what's the difference?</summary>
-        <div class="a">Static drawdown (2-step plans) is a fixed floor below the starting balance — e.g.
-        $90,000 on a $100,000 account with a 10% limit, forever. Trailing drawdown (1-step plans) follows
-        your equity high-water mark: with a 6% limit, a new equity high of $103,000 moves the floor to
-        $96,820, and the floor stops rising once it reaches your starting balance.</div>
+        <div class="a">Static drawdown is a fixed floor below the starting balance — e.g. $90,000 on a
+        $100,000 account with a 10% limit, forever. Trailing drawdown instead follows your equity
+        high-water mark, so the floor climbs as you profit. Every plan we sell uses static drawdown
+        (10% on 2-Step, 8% on Instant Funding); we do not use trailing drawdown at all.</div>
       </details>
       <details>
         <summary>What happens when I break a rule?</summary>
@@ -103,7 +103,7 @@
         <summary>How do payouts work?</summary>
         <div class="a">On a funded account, request a payout from your dashboard whenever you have
         profit. After a one-time KYC verification each request is reviewed by our team and paid out.
-        Your share is 80–90% depending on the plan.</div>
+        Your share is 90% on evaluation plans and 70% on Instant Funding.</div>
       </details>
       <details>
         <summary>When do I get my challenge fee back?</summary>

@@ -56,8 +56,16 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
     # Add-on Weekend Trading: stala kwota, POZA rabatem kuponu (kupon dotyczy planu).
     if weekend_trading:
         price = round(price + catalog.WEEKEND_ADDON_USD, 2)
-    order = Order(trader_id=trader.id, product_key=product.key, amount_usd=price,
+
+    # Promocja „Double your challenge size": zamowienie idzie na WIEKSZY plan,
+    # ale kwota zostaje z planu WYBRANEGO (`price` wyliczone wyzej z `product`).
+    # `bogo_paid_key` mowi calej resztze systemu, za co klient faktycznie zaplacil —
+    # z tego pola zyja mail „we upgraded your allocation", baner w portalu i faktura.
+    upgrade = catalog.upgrade_target(session, product)
+    prowizjonowany = upgrade or product
+    order = Order(trader_id=trader.id, product_key=prowizjonowany.key, amount_usd=price,
                   coupon=(coupon or None), weekend_trading=bool(weekend_trading),
+                  bogo_paid_key=(product.key if upgrade else None),
                   provider="stripe" if settings.stripe_enabled else "mock")
     session.add(order)
     session.flush()
@@ -74,7 +82,8 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
             line_items=[{
                 "price_data": {
                     "currency": settings.currency,
-                    "product_data": {"name": f"{product.label} challenge"
+                    "product_data": {"name": f"{prowizjonowany.label} challenge"
+                                     + (f" ({catalog.PROMO_NAME} promo)" if upgrade else "")
                                      + (" + Weekend Trading" if weekend_trading else "")},
                     "unit_amount": int(round(price * 100)),
                 },

@@ -1,12 +1,17 @@
 """Katalog produktów (planów challenge'a), kupony i parametry afiliacji.
 
-Rozmiary i ceny wzorowane na FTMO / Alpha Capital Group (2026): 5k–200k,
-modele 1-step i 2-step (bez darmowego triala). Seed trafia do tabeli `products`,
-więc admin może je później edytować w bazie.
+Rozmiary i ceny wzorowane na FTMO / Alpha Capital Group (2026): 10k–2M,
+modele 2-Step i Instant Funding (bez darmowego triala). Seed trafia do tabeli
+`products`, więc admin może je później edytować w bazie.
 """
 from __future__ import annotations
 
+from datetime import date, datetime, timezone
+
+from .config import get_settings
 from .models import Product
+
+settings = get_settings()
 
 # Prowizja afiliacyjna (% od opłaconego zamówienia poleconego tradera)
 AFFILIATE_COMMISSION_PCT = 10.0
@@ -118,3 +123,67 @@ def apply_coupon(price: float, coupon: str | None) -> tuple[float, float]:
     if not pct:
         return price, 0.0
     return round(price * (1 - pct / 100.0), 2), pct
+
+
+# --------------------------------------------------------------------------- #
+#  Promocja „Double your challenge size"                                      #
+# --------------------------------------------------------------------------- #
+# Ile razy większe konto dostaje klient. 2.0 = „co najmniej dwa razy większe",
+# więc hasło „double" jest prawdą także tam, gdzie drabinka katalogu nie skacze
+# dokładnie ×2 (10k→25k, 200k→400k, 300k→800k). Ustawienie 1.0 daje zwykłe
+# „następny rozmiar w górę".
+PROMO_UPGRADE_X = 2.0
+PROMO_NAME = "Double Your Size"
+
+
+def promo_active(now: datetime | None = None) -> bool:
+    """Czy promocja obowiązuje TERAZ (flaga + opcjonalna data końcowa).
+
+    Jedno źródło prawdy dla treści na stronie i dla checkoutu — nie da się
+    reklamować upgrade'u, którego kasa nie zrobi, ani rozdawać go po terminie.
+    """
+    if not settings.promo_upgrade:
+        return False
+    koniec = settings.promo_upgrade_ends
+    if not koniec:
+        return True
+    try:
+        ostatni = date.fromisoformat(koniec)
+    except ValueError:      # zła data w configu = promocja wyłączona, nie „na wieczność"
+        return False
+    dzis = (now or datetime.now(timezone.utc)).date()
+    return dzis <= ostatni
+
+
+def upgrade_target(session, product: Product) -> Product | None:
+    """Plan, który klient FAKTYCZNIE dostanie, kupując `product`.
+
+    Najmniejszy aktywny plan tej samej rodziny (`steps`) o rozmiarze co najmniej
+    PROMO_UPGRADE_X × opłacony. Rodziny nie mieszamy — Instant Funding ma inne
+    limity i split niż ewaluacja. None = brak promocji albo brak większego planu
+    (największy tier w ofercie).
+    """
+    if not promo_active() or product.price_usd <= 0:
+        return None
+    return (session.query(Product)
+            .filter(Product.active == True,                                   # noqa: E712
+                    Product.steps == product.steps,
+                    Product.account_size >= product.account_size * PROMO_UPGRADE_X)
+            .order_by(Product.account_size)
+            .first())
+
+
+def upgrade_map(products: list[Product]) -> dict[str, Product]:
+    """To samo co `upgrade_target`, ale dla całej listy naraz (bez N+1 zapytań)."""
+    if not promo_active():
+        return {}
+    wynik: dict[str, Product] = {}
+    for rodzina in {p.steps for p in products}:
+        w_rodzinie = sorted((p for p in products if p.steps == rodzina and p.price_usd > 0),
+                            key=lambda p: p.account_size)
+        for p in w_rodzinie:
+            cel = next((x for x in w_rodzinie
+                        if x.account_size >= p.account_size * PROMO_UPGRADE_X), None)
+            if cel:
+                wynik[p.key] = cel
+    return wynik

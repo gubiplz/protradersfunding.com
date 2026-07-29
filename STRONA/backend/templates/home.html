@@ -14,7 +14,7 @@
       <span class="pill"><span class="dot"></span> Challenges run on real MT5 infrastructure</span>
       <h1>Trade our capital.<br><span class="grad-text">Keep up to 90%</span> of the rewards.</h1>
       <p class="hero-sub">Pass an evaluation on a real MetaTrader&nbsp;5 account, get funded and earn
-        performance-based rewards on simulated capital up to $200,000. Clear rules, an automated
+        performance-based rewards on simulated capital up to $2,000,000. Clear rules, an automated
         risk engine and credentials delivered in minutes.</p>
       <div class="hero-ctas">
         <a class="btn btn-lg" href="#pricing">Start a Challenge</a>
@@ -36,16 +36,17 @@
       <div class="cfg-sizes" id="cfg-sizes"></div>
       <div class="cfg-rows">
         <div class="cfg-row"><span>One-time fee</span><b><span id="cfg-fee">—</span> <em>refunded with 1st payout</em></b></div>
-        <div class="cfg-row"><span>Profit target — Phase 1</span><b id="cfg-target">—</b></div>
+        <div class="cfg-row"><span id="cfg-target-label">Profit target — Phase 1</span><b id="cfg-target">—</b></div>
         <div class="cfg-row"><span>Your profit split</span><b id="cfg-split">—</b></div>
       </div>
-      <div class="cfg-hl">
-        <div class="cfg-hl-label">Example first payout — you grow the account +10%</div>
-        <div class="cfg-hl-val" id="cfg-payout">$0</div>
-        <div class="cfg-hl-sub" id="cfg-payout-sub"></div>
+      {# Filled by renderConfigurator(); hidden entirely when the promo is off. #}
+      <div class="cfg-promo" id="cfg-promo" hidden>
+        <div class="cfg-promo-badge" id="cfg-promo-badge">Double your size</div>
+        <div class="cfg-promo-val" id="cfg-promo-val"></div>
+        <div class="cfg-promo-sub" id="cfg-promo-sub"></div>
       </div>
       <a class="btn btn-lg" id="cfg-cta" href="/portal" style="width:100%">Start this challenge →</a>
-      <div class="cfg-fine">*Illustrative math based on this plan's real split — not a promise. Rewards depend on your trading.</div>
+      <div class="cfg-fine" id="cfg-fine">*Illustrative math based on this plan's real split — not a promise. Rewards depend on your trading.</div>
     </div>
   </div>
 </section>
@@ -94,8 +95,8 @@
           <path d="m70 42 4 4 8-8" stroke="#34d399" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         <h3>Choose your challenge</h3>
-        <p>Pick an account size from $10,000 to $200,000: a 1-step or 2-step evaluation, or
-           Instant Funding if you'd rather skip the evaluation. One-time fee, no subscriptions.</p>
+        <p>Pick an account size from $10,000 to $2,000,000: a 2-step evaluation, or Instant
+           Funding if you'd rather skip the evaluation. One-time fee, no subscriptions.</p>
       </div>
       <div class="card step" data-rv>
         <div class="step-num">02</div>
@@ -140,7 +141,7 @@
     </div>
     <div class="obj-scroll" data-rv>
       <table class="obj">
-        <thead><tr><th>Objective</th><th>2-Step Evaluation</th><th>1-Step Evaluation</th></tr></thead>
+        <thead><tr><th>Objective</th><th>2-Step Evaluation</th><th>Instant Funding</th></tr></thead>
         <tbody id="objBody"></tbody>
       </table>
     </div>
@@ -232,7 +233,7 @@
       <div class="card" data-rv style="display:flex;flex-direction:column;justify-content:center;align-items:flex-start;gap:10px">
         <span class="pill">Performance rewards</span>
         <div class="big-split grad-text">90%</div>
-        <p class="muted">maximum profit split on 1-step funded accounts. 2-step accounts start at 80%.
+        <p class="muted">profit split on every funded evaluation account (70% on Instant Funding).
           Your challenge fee comes back in full with the first payout.</p>
       </div>
       <div class="card" data-rv>
@@ -421,9 +422,9 @@
       </details>
       <details>
         <summary>What is the difference between static and trailing drawdown?</summary>
-        <div class="a">Static drawdown is a fixed floor below your starting balance (e.g. 10% on 2-step
-        plans). Trailing drawdown (1-step plans, 6%) follows your equity high-water mark up until it
-        locks at breakeven. Each plan card states which type applies.</div>
+        <div class="a">Static drawdown is a fixed floor below your starting balance — 10% on 2-Step
+        plans, 8% on Instant Funding. Trailing drawdown instead follows your equity high-water mark;
+        we do not use it on any plan, so your loss limit never moves up with your profits.</div>
       </details>
       <details>
         <summary>What happens if I break a rule?</summary>
@@ -440,8 +441,8 @@
       <details>
         <summary>What is Instant Funding?</summary>
         <div class="a">A funded account without an evaluation — you skip the phases and can request
-        payouts from day one. In exchange the fee is higher, the risk limits are tighter (4% daily,
-        6% overall) and the profit split is 70% instead of 80–90%.</div>
+        payouts from day one. In exchange the fee is higher, the risk limits are tighter (5% daily,
+        8% overall) and the profit split is 70% instead of 90%.</div>
       </details>
       <details>
         <summary>Is news trading allowed? Can I hold over the weekend?</summary>
@@ -450,7 +451,8 @@
       </details>
       <details>
         <summary>How do payouts work?</summary>
-        <div class="a">On a funded account you can request a payout of your share (80–90%) of the
+        <div class="a">On a funded account you can request a payout of your share (90%, or 70% on
+        Instant Funding) of the
         simulated profits at any time. After a one-time KYC verification, each request is reviewed by
         our team and paid out; your first payout also includes a full refund of the challenge fee.</div>
       </details>

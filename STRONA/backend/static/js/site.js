@@ -31,6 +31,16 @@
     addEventListener('resize', () => { if (innerWidth > 960) menuSet(false); }, { passive: true });
   }
 
+  /* ---------- promo bar ---------- */
+  /* The class goes on <html>: it zeroes --promo-h, so every top offset on the
+     site (nav, hero, anchors) snaps back in one step. The same flag is read by
+     an inline script in <head>, so a dismissed bar never flashes on reload. */
+  const promoX = $('#promoX');
+  if (promoX) promoX.addEventListener('click', () => {
+    document.documentElement.classList.add('promo-off');
+    try { localStorage.setItem('promoOff', '1'); } catch (e) {}
+  });
+
   /* ---------- ?ref= capture (partner code attaches at signup) ---------- */
   const ref = new URLSearchParams(location.search).get('ref');
   if (ref) try { localStorage.setItem('pf_ref', ref); } catch (e) {}
@@ -89,12 +99,7 @@
   }
 
   /* ---------- /api/products — pricing + trading objectives ---------- */
-  const GROUPS = [
-    { id: '2step', name: '2-Step Evaluation', match: p => p.steps === 2 && p.price_usd > 0 },
-    { id: '1step', name: '1-Step Evaluation', match: p => p.steps === 1 && p.price_usd > 0 },
-    { id: 'instant', name: 'Instant Funding', match: p => p.steps === 0 && p.price_usd > 0 },
-  ];
-  let PRODUCTS = [], activeTab = '2step';
+  let PRODUCTS = [];
 
   /* Pricing configurator: type toggle + size grid + add-on + coupon on the
      left, live program rules on the right. Data comes from /api/products. */
@@ -202,7 +207,10 @@
       ['Weekend trading', '$199 add-on', ...col('$199 add-on')],
       ['Leverage', 'Up to 1:100', ...col('Up to 1:50')],
       ['Profit split', 'up to ' + Math.max(...g2.map(p => p.profit_split_pct)) + '%', ...col(ri && ri.profit_split_pct + '%')],
-      ['Refundable fee', '<span class="ok">✓ With first payout</span>', ...col('—')],
+      /* The engine refunds the fee on the FIRST payout for every plan
+         (main.py:1342) — Instant Funding included. */
+      ['Refundable fee', '<span class="ok">✓ With first payout</span>',
+        ...col('<span class="ok">✓ With first payout</span>')],
       ['One-time fee', 'from ' + money(Math.min(...g2.map(p => p.price_usd))), ...col(ri && 'from ' + money(Math.min(...gi.map(p => p.price_usd))))],
     ];
     body.innerHTML = rows.map(r => '<tr>' + r.map(c => `<td>${c}</td>`).join('') + '</tr>').join('');
@@ -226,40 +234,76 @@
       if (k < 1) requestAnimationFrame(step);
     })(t0);
   }
-  const kfmt = n => n >= 1000 ? (n / 1000) + 'K' : String(n);
   let cfgStep = '2step', cfgKey = null;
 
   function renderConfigurator() {
     const root = $('#cfg'); if (!root) return;
+    /* Two models in the catalog: 2-Step Evaluation (steps=2) and Instant Funding
+       (steps=0). Matching on steps===1 left the second tab permanently empty. */
     const gs = {
       '2step': PRODUCTS.filter(p => p.steps === 2 && p.price_usd > 0).sort((a, b) => a.account_size - b.account_size),
-      '1step': PRODUCTS.filter(p => p.steps === 1 && p.price_usd > 0).sort((a, b) => a.account_size - b.account_size),
+      'instant': PRODUCTS.filter(p => p.steps === 0 && p.price_usd > 0).sort((a, b) => a.account_size - b.account_size),
     };
-    if (!gs['2step'].length && !gs['1step'].length) { root.remove(); return; }
-    if (!gs[cfgStep].length) cfgStep = gs['2step'].length ? '2step' : '1step';
+    if (!gs['2step'].length && !gs['instant'].length) { root.remove(); return; }
+    if (!gs[cfgStep].length) cfgStep = gs['2step'].length ? '2step' : 'instant';
     const items = gs[cfgStep];
     if (!items.some(p => p.key === cfgKey)) {
       cfgKey = (items.find(p => p.account_size === 100000) || items[items.length - 1]).key;
     }
-    $('#cfg-tabs').innerHTML = [['2step', '2-Step Evaluation'], ['1step', '1-Step Evaluation']]
+    $('#cfg-tabs').innerHTML = [['2step', '2-Step Evaluation'], ['instant', 'Instant Funding']]
       .filter(([id]) => gs[id].length)
       .map(([id, nm]) => `<button class="cfg-tab${id === cfgStep ? ' on' : ''}" data-step="${id}">${nm}<small>from $${fmt(Math.min(...gs[id].map(p => p.price_usd)))}</small></button>`).join('');
     $$('#cfg-tabs .cfg-tab').forEach(b => b.addEventListener('click', () => { cfgStep = b.dataset.step; cfgKey = null; renderConfigurator(); }));
     $('#cfg-sizes').innerHTML = items.map(p =>
-      `<button class="cfg-size${p.key === cfgKey ? ' on' : ''}" data-key="${p.key}">$${kfmt(p.account_size)}</button>`).join('');
+      `<button class="cfg-size${p.key === cfgKey ? ' on' : ''}" data-key="${p.key}">${sizeLabel(p.account_size)}</button>`).join('');
     $$('#cfg-sizes .cfg-size').forEach(b => b.addEventListener('click', () => { cfgKey = b.dataset.key; renderConfigurator(); }));
 
     const p = items.find(x => x.key === cfgKey);
-    const share = p.account_size * 0.10 * p.profit_split_pct / 100;   // +10% × split
+    const instant = p.steps === 0;
     tweenNum($('#cfg-fee'), p.price_usd, v => '$' + fmt(Math.round(v)));
-    $('#cfg-target').innerHTML = `+${p.profit_target_p1}% = $<span id="cfg-tusd"></span>`;
-    tweenNum($('#cfg-tusd'), p.account_size * p.profit_target_p1 / 100, v => fmt(Math.round(v)));
+    /* Instant Funding has no phases — the row says so instead of printing
+       a "+0% = $0" target. */
+    $('#cfg-target-label').textContent = instant ? 'Profit target' : 'Profit target — Phase 1';
+    if (instant) {
+      $('#cfg-target').textContent = 'None — funded from day one';
+    } else {
+      $('#cfg-target').innerHTML = `+${p.profit_target_p1}% = $<span id="cfg-tusd"></span>`;
+      tweenNum($('#cfg-tusd'), p.account_size * p.profit_target_p1 / 100, v => fmt(Math.round(v)));
+    }
     $('#cfg-split').textContent = p.profit_split_pct + '%';
-    tweenNum($('#cfg-payout'), share, v => '$' + fmt(Math.round(v)));
-    $('#cfg-payout-sub').textContent = `+ $${fmt(p.price_usd)} challenge fee refunded with your first payout`;
+
+    /* Promo block: the size the account is actually created with. The API sends
+       promo_upgrade_size only while the promo is live, so the block and the
+       checkout can never tell two different stories. */
+    const promo = $('#cfg-promo'), fine = $('#cfg-fine');
+    const big = p.promo_upgrade_size;
+    const anyPromo = PRODUCTS.some(x => x.promo_upgrade_size);
+    if (promo) {
+      promo.hidden = !anyPromo;
+      if (anyPromo) {
+        promo.classList.toggle('is-max', !big);
+        if (big) {
+          $('#cfg-promo-badge').textContent = 'Double your size';
+          $('#cfg-promo-val').innerHTML =
+            `Pay for ${sizeLabel(p.account_size)} — trade <b>$${fmt(big)}</b>`;
+          $('#cfg-promo-sub').textContent =
+            'Your account is created one size up, automatically at checkout.';
+        } else {
+          $('#cfg-promo-badge').textContent = 'Largest size';
+          $('#cfg-promo-val').innerHTML = `${sizeLabel(p.account_size)} is our biggest account`;
+          $('#cfg-promo-sub').textContent =
+            'The free size upgrade applies to every smaller plan — pick one to double it.';
+        }
+      }
+    }
+    if (fine) {
+      fine.textContent = anyPromo
+        ? '*You pay the price of the size you pick; we create the account one size up while the promo runs. Fee still refunded with your first payout.'
+        : "*One-time fee, refunded with your first payout. Rewards depend on your trading.";
+    }
     const cta = $('#cfg-cta');
     cta.href = '/portal?buy=' + encodeURIComponent(p.key);
-    cta.textContent = `Start with $${kfmt(p.account_size)} → $${fmt(Math.round(p.price_usd))}`;
+    cta.textContent = `Start with ${sizeLabel(p.account_size)} → $${fmt(Math.round(p.price_usd))}`;
   }
 
   async function products() {

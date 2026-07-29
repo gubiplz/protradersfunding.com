@@ -644,3 +644,10 @@ table.tbl td.sub-row{background:var(--panel2)}
   .acct-row:hover,.ticket-row:hover{background:transparent}
   table.tbl tr:hover td{background:transparent}
 }
+
+/* ---- "Double your size" promo: what the account is ACTUALLY created with ---- */
+.plan-badge{display:inline-block;margin:2px 0 8px;font-size:11px;font-weight:700;letter-spacing:.02em;
+  color:#fff;background:var(--grad);border-radius:999px;padding:3px 9px}
+.plan-promo{margin:-4px 0 4px;font-size:12.5px;line-height:1.55;color:var(--muted);
+  background:var(--acc-bg);border:1px solid #dfe3ff;border-radius:10px;padding:9px 12px}
+.plan-promo b{color:var(--acc)}

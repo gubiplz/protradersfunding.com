@@ -164,6 +164,15 @@ def test_wszystkie_strony_publiczne_odpowiadaja():
             assert r.status_code == 200, f"{path} -> {r.status_code}"
 
 
+def test_link_afiliacyjny_bierze_host_z_zadania():
+    """Instrukcja na /affiliate pokazywala „http://localhost:8000/?ref=KOD" na
+    produkcji, bo APP_BASE_URL nie bylo ustawione. Adres bierzemy z ZADANIA."""
+    with TestClient(app, base_url="https://mypropfunds.example") as c:
+        html = c.get("/affiliate").text
+    assert "https://mypropfunds.example/?ref=YOURCODE" in html
+    assert "localhost" not in html and "127.0.0.1" not in html
+
+
 def test_panel_admina_nie_jest_strona_publiczna():
     """Gosc nie moze nawet stwierdzic, ze panel istnieje — stad 404."""
     with TestClient(app) as c:

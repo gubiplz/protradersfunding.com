@@ -94,6 +94,8 @@
 const $=id=>document.getElementById(id);
 const fmt=n=>(n??0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmt0=n=>(n??0).toLocaleString('en-US',{maximumFractionDigits:0});
+/* Catalog models: 0 = Instant Funding, 2 = 2-Step (1-Step is legacy, kept for old accounts). */
+const planKind=s=>s===0?'Instant':s===1?'1-Step':'2-Step';
 const dstr=iso=>new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
 // Date only — trade history has no time component. `YYYY-MM-DD` is read as
 // UTC so the browser timezone does not shift the day back by one.
@@ -338,7 +340,7 @@ const VIEWS={
         <div class="login">${a.status==='provisioning'?'<span class="muted">MT5 account pending…</span>':esc(a.login)}
           <span class="status ${esc(a.status)}"><span class="dot"></span>${a.status==='active'?'evaluation':esc(a.status)}</span>
 </div>
-        <div class="sub">${a.steps===1?'1-Step':'2-Step'} · $${fmt(a.initial_balance)} Account${
+        <div class="sub">${planKind(a.steps)} · $${fmt(a.initial_balance)} Account${
           a.status==='provisioning'?' · creating on MetaQuotes-Demo':(a.platform_server?' · '+esc(a.platform_server):'')}</div>
       </div>
       <div class="acct-cols">
@@ -355,7 +357,6 @@ const VIEWS={
   PRODUCTS=ps;
   const groups=[
     {id:'2step',name:'2-Step',match:p=>p.steps===2&&p.price_usd>0},
-    {id:'1step',name:'1-Step',match:p=>p.steps===1&&p.price_usd>0},
     {id:'instant',name:'Instant Funding',match:p=>p.steps===0&&p.price_usd>0},
   ].filter(g=>ps.some(g.match));
   window._shopTab=window._shopTab||(groups[0]&&groups[0].id);
@@ -369,7 +370,8 @@ const VIEWS={
     <div class="plan-grid">`+items.map(p=>`
     <div class="plan-card" data-plan="${esc(p.key)}">
       <div class="plan-size">$${fmt0(p.account_size)}</div>
-      <div class="plan-kind">${p.steps===0?'Instant Funding — no evaluation':p.steps===1?'1-Step Evaluation':'2-Step Evaluation'}</div>
+      ${p.promo_upgrade_size?`<div class="plan-badge">→ trade $${fmt0(p.promo_upgrade_size)} free</div>`:''}
+      <div class="plan-kind">${p.steps===0?'Instant Funding — no evaluation':'2-Step Evaluation'}</div>
       <div class="plan-price">$${fmt0(p.price_usd)} <small>one-time</small></div>
       <div class="plan-refund">✓ Refunded with your first payout</div>
       <ul class="plan-feats">
@@ -1024,24 +1026,27 @@ async function submitKyc(){
    set on the grant (BOGO), `amount_usd` already holds it and it wins. */
 function orderAmount(o){return o.amount_usd>0?o.amount_usd:(o.list_price||0)}
 
-/* Invoice line items. With BOGO the invoice shows the tier the client
-   ACTUALLY paid for, plus a line describing the upgrade. */
+/* Invoice line items. On an upgraded order the invoice names the tier the client
+   ACTUALLY paid for, plus a line describing the upgrade — and the rows always
+   add up to the total (the add-on row used to be dropped on promo orders). */
 function invRows(o){
   const amountCell=v=>`<td style="text-align:right;font-family:var(--mono)">${v}</td>`;
-  const bogo=o.bogo_paid_label&&o.bogo_paid_size&&o.account_size&&o.bogo_paid_size<o.account_size;
-  if(bogo){
-    const k=v=>v>=1000?'$'+Math.round(v/1000)+'K':'$'+fmt0(v);
-    return `<tr>
-        <td>Evaluation program access — ${esc(o.bogo_paid_label)}</td>
-        ${amountCell('$'+fmt(o.bogo_paid_price))}</tr>
-      <tr><td style="color:#64748b">BOGO promotion — ${k(o.bogo_paid_size)} + ${k(o.bogo_paid_size)} free
-        = <b style="color:#0f172a">$${fmt0(o.account_size)}</b> allocation</td>
-        ${amountCell('included')}</tr>`;
-  }
   const wk=o.weekend_trading?`<tr><td>Weekend Trading add-on — 2 extra trading days/week</td>${amountCell('$'+fmt(199))}</tr>`:'';
+  const plan=Math.max(0,orderAmount(o)-(o.weekend_trading?199:0));
+  const coupon=o.coupon?` (${esc(o.coupon)})`:'';
+  const upgraded=o.bogo_paid_label&&o.bogo_paid_size&&o.account_size&&o.bogo_paid_size<o.account_size;
+  if(upgraded){
+    const k=v=>v>=1e6?'$'+(v/1e6)+'M':'$'+Math.round(v/1000)+'K';
+    return `<tr>
+        <td>Evaluation program access — ${esc(o.bogo_paid_label)}${coupon}</td>
+        ${amountCell('$'+fmt(plan))}</tr>
+      <tr><td style="color:#64748b">Free size upgrade — ${k(o.bogo_paid_size)} →
+        <b style="color:#0f172a">${k(o.account_size)}</b> allocation</td>
+        ${amountCell('included')}</tr>`+wk;
+  }
   return `<tr>
-    <td>Evaluation program access — ${esc(o.product_label||o.product_key)}${o.coupon?` (${esc(o.coupon)})`:''}</td>
-    ${amountCell('$'+fmt(Math.max(0,orderAmount(o)-(o.weekend_trading?199:0))))}</tr>`+wk;
+    <td>Evaluation program access — ${esc(o.product_label||o.product_key)}${coupon}</td>
+    ${amountCell('$'+fmt(plan))}</tr>`+wk;
 }
 
 function openInvoice(orderId){
@@ -1061,7 +1066,7 @@ function openInvoice(orderId){
       <thead><tr><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
       <tbody>${invRows(o)}</tbody>
     </table>
-    <div class="inv-total"><span>Total</span><span>$${fmt(o.bogo_paid_price||orderAmount(o))} USD</span></div>
+    <div class="inv-total"><span>Total</span><span>$${fmt(orderAmount(o))} USD</span></div>
     <div class="inv-foot">One-time fee for access to a simulated trading evaluation on a demo account with virtual funds.
       No real-market trading service is provided. Fee refundable with the first payout under the Refund Policy.</div>
     <div class="noprint" style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
@@ -1122,8 +1127,10 @@ function openBuy(key){
       </div>
       <div class="plan-line">
         <b class="mono" id="buy-total" style="color:var(--txt);font-size:16px">$${fmt0(p.price_usd+(new URLSearchParams(location.search).get('wt')==='1'?199:0))}</b>
-        · simulated capital $${fmt0(p.account_size)} · split ${p.profit_split_pct}%
+        · simulated capital $${fmt0(p.promo_upgrade_size||p.account_size)} · split ${p.profit_split_pct}%
       </div>
+      ${p.promo_upgrade_size?`<div class="plan-promo"><b>Double your size</b> — you pay for the
+        $${fmt0(p.account_size)} plan and we create a <b>$${fmt0(p.promo_upgrade_size)}</b> account.</div>`:''}
       <div class="note">Your MT5 demo account is registered with MetaQuotes <b>under these details</b> —
         they must be real; your credentials are delivered to them.</div>
       <div class="stack">
@@ -1225,7 +1232,7 @@ async function openAcc(id){
       <span class="status passed" style="text-transform:none">${PHASE_LABEL[a.phase]||esc(a.phase)}</span>
       <span class="status ${esc(a.status)}"><span class="dot"></span>${a.status==='active'?'evaluation':esc(a.status)}</span>
       <div class="chips">
-        <span class="kyc-chip">${a.steps===1?'1-Step':'2-Step'} · $${fmt0(a.initial_balance)}</span>
+        <span class="kyc-chip">${planKind(a.steps)} · $${fmt0(a.initial_balance)}</span>
         <button class="btn-o sm" id="creds-btn" onclick="toggleCreds()">${ICO.key} Show Credentials</button>
       </div>
     </div>

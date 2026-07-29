@@ -23,10 +23,18 @@
   --display:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;
   --body:'Inter',ui-sans-serif,system-ui,sans-serif;
   --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,monospace;
+  /* Wysokosc paska promocyjnego. Kazdy offset liczony od gory strony (nav,
+     mobile-menu, hero, page-head, scroll-padding kotwic) dodaje ta zmienna,
+     wiec wygaszenie promocji albo zamkniecie paska zeruje geometrie w jednym
+     miejscu. Klasa siedzi na <html>, bo zmiennej z <body> nie widzi html. */
+  --promo-h:0px;
 }
+html.has-promo{--promo-h:38px}
+html.has-promo.promo-off{--promo-h:0px}
+html.promo-off .promo-bar{display:none}
 
 *{box-sizing:border-box;margin:0;padding:0}
-html{scroll-behavior:smooth;scroll-padding-top:84px;background:var(--bg)}
+html{scroll-behavior:smooth;scroll-padding-top:calc(84px + var(--promo-h));background:var(--bg)}
 body{background:var(--bg);color:var(--txt);font-family:var(--body);font-size:16px;line-height:1.65;
   -webkit-font-smoothing:antialiased;overflow-x:hidden}
 ::selection{background:rgba(99,102,241,.18)}
@@ -42,7 +50,7 @@ h1,h2,h3,.display{font-family:var(--display);letter-spacing:-.02em}
 .muted{color:var(--muted)}
 
 /* ---------------- NAV ---------------- */
-.nav{position:fixed;top:0;left:0;right:0;z-index:50;border-bottom:1px solid transparent;transition:.25s}
+.nav{position:fixed;top:var(--promo-h);left:0;right:0;z-index:50;border-bottom:1px solid transparent;transition:.25s}
 .nav.on{background:rgba(255,255,255,.85);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   border-color:var(--line);box-shadow:0 1px 2px rgba(15,23,42,.03)}
 .nav-in{display:flex;align-items:center;gap:28px;height:68px}
@@ -56,7 +64,7 @@ h1,h2,h3,.display{font-family:var(--display);letter-spacing:-.02em}
 .nav-login:hover{color:var(--txt)}
 .burger{display:none;flex-direction:column;gap:5px;padding:8px}
 .burger span{width:22px;height:2px;background:var(--txt);border-radius:2px;transition:.2s}
-.mobile-menu{display:none;position:fixed;top:68px;left:0;right:0;z-index:49;background:rgba(255,255,255,.98);
+.mobile-menu{display:none;position:fixed;top:calc(68px + var(--promo-h));left:0;right:0;z-index:49;background:rgba(255,255,255,.98);
   backdrop-filter:blur(14px);border-bottom:1px solid var(--line);padding:18px 24px 26px;flex-direction:column;gap:16px;font-size:16px;
   box-shadow:0 20px 40px -20px rgba(15,23,42,.15)}
 .mobile-menu.open{display:flex}
@@ -78,7 +86,7 @@ h1,h2,h3,.display{font-family:var(--display);letter-spacing:-.02em}
 .pill .dot{width:6px;height:6px;border-radius:50%;background:var(--green2);box-shadow:0 0 6px rgba(16,185,129,.6)}
 
 /* ---------------- HERO ---------------- */
-.hero{position:relative;padding:150px 0 70px;overflow:hidden}
+.hero{position:relative;padding:calc(150px + var(--promo-h)) 0 70px;overflow:hidden}
 .hero-glow{position:absolute;inset:0;pointer-events:none;
   background:
     radial-gradient(55% 45% at 20% 0%,rgba(99,102,241,.12),transparent 65%),
@@ -116,12 +124,20 @@ h1,h2,h3,.display{font-family:var(--display);letter-spacing:-.02em}
 .cfg-row span{color:var(--muted)}
 .cfg-row b{font-family:var(--mono);font-weight:600}
 .cfg-row em{font-style:normal;font-size:11px;color:var(--green);font-family:var(--body);font-weight:500}
-.cfg-hl{background:linear-gradient(120deg,#eef0ff,#f2fdf8);border:1px solid #dfe3ff;border-radius:14px;
-  padding:16px 18px;text-align:center}
-.cfg-hl-label{font-size:12px;color:var(--muted);font-weight:600}
-.cfg-hl-val{font-family:var(--mono);font-size:clamp(30px,3vw,38px);font-weight:800;color:var(--green);
-  letter-spacing:-.02em;margin:4px 0 2px}
-.cfg-hl-sub{font-size:12px;color:var(--muted)}
+/* promo slot in the hero configurator (replaced the illustrative payout) */
+.cfg-promo{position:relative;overflow:hidden;border-radius:14px;padding:16px 18px;text-align:center;
+  background:linear-gradient(120deg,#eef0ff,#f5f0ff 55%,#eef7ff);border:1px solid #dcd8ff}
+.cfg-promo::after{content:"";position:absolute;inset:-40% -10% auto auto;width:180px;height:180px;
+  background:radial-gradient(circle,rgba(124,58,237,.14),transparent 70%);pointer-events:none}
+.cfg-promo-badge{display:inline-block;font-family:var(--display);font-size:10.5px;font-weight:700;
+  letter-spacing:.1em;text-transform:uppercase;color:#fff;background:var(--grad);
+  border-radius:999px;padding:5px 11px}
+.cfg-promo-val{font-size:clamp(17px,2vw,21px);font-weight:700;font-family:var(--display);
+  letter-spacing:-.02em;margin:9px 0 3px;color:var(--txt)}
+.cfg-promo-val b{font-family:var(--mono);font-weight:800;color:var(--acc2)}
+.cfg-promo-sub{font-size:12px;color:var(--muted)}
+.cfg-promo.is-max{background:linear-gradient(120deg,#f4f6fb,#eef0f7)}
+.cfg-promo.is-max .cfg-promo-badge{background:var(--line2);color:var(--muted)}
 .cfg-fine{font-size:10.5px;color:var(--dim);text-align:center}
 
 /* dashboard mockup — light product card */
@@ -349,7 +365,7 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
 .foot-tags .chip{font-size:11px}
 
 /* ---------------- subpages (prose/legal/verify) ---------------- */
-.page-head{padding:140px 0 10px}
+.page-head{padding:calc(140px + var(--promo-h)) 0 10px}
 .page-head h1{font-size:clamp(32px,4.4vw,48px);margin:16px 0 12px}
 .page-head .lede{color:var(--muted);font-size:17px;max-width:640px}
 .prose{max-width:780px}
@@ -389,7 +405,7 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
 /* ---------------- responsive ---------------- */
 @media(max-width:1020px){
   .hero-grid{grid-template-columns:1fr;gap:44px}
-  .hero{padding-top:130px}
+  .hero{padding-top:calc(130px + var(--promo-h))}
   .hero-sub{max-width:none}
   .grid6{grid-template-columns:repeat(2,1fr)}
   .cert-wrap{grid-template-columns:1fr;gap:28px}
@@ -443,7 +459,7 @@ table.lb{min-width:560px}
   .nav .logo-txt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* menu mobilne: blokada scrolla, przewijalnosc w landscape, wygodne tapy, burger -> X */
   body.menu-open{overflow:hidden}
-  .mobile-menu{max-height:calc(100dvh - 68px);overflow-y:auto;overscroll-behavior:contain}
+  .mobile-menu{max-height:calc(100dvh - 68px - var(--promo-h));overflow-y:auto;overscroll-behavior:contain}
   .mobile-menu a{padding:10px 0}
   .burger.open span:nth-child(1){transform:translateY(7px) rotate(45deg)}
   .burger.open span:nth-child(2){opacity:0}
@@ -467,7 +483,7 @@ table.lb{min-width:560px}
   .stat{padding:26px 12px}
   .stat-num{font-size:clamp(20px,5.8vw,28px)}
   .pcfg-fee{font-size:clamp(30px,9vw,38px)}
-  .page-head{padding-top:110px}
+  .page-head{padding-top:calc(110px + var(--promo-h))}
   .verify-result{padding:20px}
   .verify-result .rows div{flex-wrap:wrap}
   .verify-result .rows span:last-child{overflow-wrap:anywhere;text-align:right}
@@ -499,4 +515,41 @@ table.lb{min-width:560px}
   .card:hover{border-color:var(--line)}
   table.obj tr:hover td{background:transparent}
   .cfg-size:hover{border-color:var(--line2)}
+}
+
+/* ---------------- /verify: the landing's two-column certificate layout ----------------
+   Self-contained block: base rules first, then its own media queries, so the
+   order inside it is correct regardless of what comes earlier in the file. */
+.verify-hero{padding-top:calc(140px + var(--promo-h))}                 /* clears the fixed nav, like .page-head */
+.verify-hero .sec-head h1{font-size:clamp(28px,3.6vw,42px);line-height:1.12;font-weight:700;margin:16px 0 14px}
+.verify-hero .verify-result{margin-top:26px}
+.cert-caption{margin-top:14px;text-align:center;font-size:12.5px;color:var(--dim);line-height:1.6}
+@media(max-width:640px){
+  .verify-hero{padding-top:calc(112px + var(--promo-h))}
+  .cert-caption{font-size:12px}
+}
+
+/* ---------------- promo bar (above the fixed nav) ----------------
+   Height lives in --promo-h (see :root) — dismissing the bar or ending the
+   promo restores every offset on the site from one value. */
+.promo-bar{position:fixed;top:0;left:0;right:0;height:var(--promo-h);z-index:60;
+  background:linear-gradient(90deg,#4f46e5 0%,#7c3aed 55%,#2563eb 100%);color:#fff;
+  box-shadow:0 1px 0 rgba(15,23,42,.12)}
+.promo-in{display:flex;align-items:center;gap:12px;height:100%;font-size:13px;line-height:1}
+.promo-tag{flex:none;font-family:var(--display);font-size:10.5px;font-weight:700;letter-spacing:.1em;
+  text-transform:uppercase;background:rgba(255,255,255,.18);border-radius:999px;padding:5px 10px}
+.promo-txt{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:rgba(255,255,255,.92)}
+.promo-txt b{color:#fff;font-weight:700}
+.promo-cta{flex:none;font-weight:700;font-size:12.5px;color:#fff;text-decoration:underline;
+  text-underline-offset:3px;white-space:nowrap}
+.promo-x{flex:none;display:flex;align-items:center;justify-content:center;width:24px;height:24px;
+  border-radius:6px;color:rgba(255,255,255,.75);background:transparent;transition:.15s}
+.promo-x svg{width:14px;height:14px}
+.promo-x:hover{background:rgba(255,255,255,.16);color:#fff}
+@media(max-width:640px){
+  html.has-promo{--promo-h:34px}
+  .promo-in{gap:8px;font-size:12px;padding:0 14px}
+  .promo-tag{display:none}          /* na telefonie liczy sie sama obietnica */
+  .promo-cta{font-size:12px}
 }

@@ -120,6 +120,16 @@ class Settings:
     cert_signatory_label: str = os.getenv("CERT_SIGNATORY_LABEL", "Chief Executive Officer")
     support_email: str = os.getenv("SUPPORT_EMAIL", "support@protradersfunding.com")
 
+    # --- Promocja „Double your challenge size" ---
+    # Zakup provisionuje konto co najmniej DWA RAZY większe niż opłacony tier
+    # (mnożnik: catalog.PROMO_UPGRADE_X). Klient płaci cenę wybranego planu.
+    # Ta jedna flaga rządzi WSZYSTKIM: paskiem na stronie, blokiem w hero i samą
+    # mechaniką w checkoucie — inaczej dałoby się reklamować coś, czego kasa nie
+    # realizuje (albo odwrotnie: rozdawać upgrade'y po zakończeniu promocji).
+    promo_upgrade: bool = os.getenv("PROMO_UPGRADE", "true").lower() == "true"
+    # Data ostatniego dnia promocji (YYYY-MM-DD, UTC, włącznie). Puste = bez końca.
+    promo_upgrade_ends: str = os.getenv("PROMO_UPGRADE_ENDS", "").strip()
+
     # --- Aplikacja / bezpieczeństwo ---
     app_base_url: str = os.getenv("APP_BASE_URL", "http://localhost:8000")
     secret_key: str = os.getenv("SECRET_KEY", "dev-secret-change-me")

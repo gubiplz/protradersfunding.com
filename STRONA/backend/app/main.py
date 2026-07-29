@@ -15,7 +15,7 @@ import os
 import secrets
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from time import monotonic
 
@@ -491,7 +491,17 @@ def list_products():
     session = SessionLocal()
     try:
         prods = session.query(Product).filter(Product.active == True).order_by(Product.steps, Product.account_size).all()  # noqa: E712
-        return [_product_dict(p) for p in prods]
+        # Cel promocji dołączony do każdego planu: landing i portal pokazują
+        # DOKŁADNIE to, co zrobi checkout (jedno źródło prawdy).
+        upgrades = catalog.upgrade_map(prods)
+        out = []
+        for p in prods:
+            d = _product_dict(p)
+            cel = upgrades.get(p.key)
+            d["promo_upgrade_size"] = cel.account_size if cel else None
+            d["promo_upgrade_label"] = cel.label if cel else None
+            out.append(d)
+        return out
     finally:
         session.close()
 
@@ -1417,7 +1427,7 @@ def _payout_dict(p: Payout, acc: Account | None = None) -> dict:
 
 
 @app.post("/api/admin/accounts/{account_id}/payout", dependencies=[Depends(auth.require_admin)])
-def admin_issue_payout(account_id: int, payload: IssuePayoutIn):
+def admin_issue_payout(request: Request, account_id: int, payload: IssuePayoutIn):
     """Wystawia wypłatę i od razu certyfikat — bez czekania na wniosek tradera.
 
     Idzie tą samą ścieżką księgową co zatwierdzenie wniosku: powstaje wiersz
@@ -1462,7 +1472,7 @@ def admin_issue_payout(account_id: int, payload: IssuePayoutIn):
             notify.send("payout_approved", trader.email,
                         {"name": trader.full_name or trader.email, "login": acc.login,
                          "trader_share": share, "fee_refund": False,
-                         "cert_url": f"{settings.app_base_url}/payout/{p.cert_token}"})
+                         "cert_url": f"{_public_base(request)}/payout/{p.cert_token}"})
         return _payout_dict(p, acc)
     finally:
         session.close()
@@ -2665,9 +2675,27 @@ jinja = Jinja2Templates(directory=str(TEMPLATES))
 ASSET_V = os.environ.get("VERCEL_GIT_COMMIT_SHA", "")[:10] or str(int(time.time()))
 
 
+def _promo_ctx() -> dict | None:
+    """Kontekst promocji dla stron publicznych albo None, gdy nie obowiązuje.
+
+    Ta sama bramka (`catalog.promo_active`) rządzi mechaniką w checkoucie, więc
+    pasek nie może obiecywać czegoś, czego kasa nie zrobi.
+    """
+    if not catalog.promo_active():
+        return None
+    do_kiedy = None
+    if settings.promo_upgrade_ends:
+        try:
+            do_kiedy = date.fromisoformat(settings.promo_upgrade_ends).strftime("%d %b")
+        except ValueError:
+            do_kiedy = None
+    return {"name": catalog.PROMO_NAME, "ends": do_kiedy}
+
+
 def _page(request: Request, template: str, **extra):
     ctx = {"site_name": settings.site_name, "support_email": settings.support_email,
-           "base_url": settings.app_base_url, "asset_v": ASSET_V, **extra}
+           "base_url": _public_base(request), "asset_v": ASSET_V,
+           "promo": _promo_ctx(), **extra}
     return jinja.TemplateResponse(request, template, ctx)
 
 
@@ -2710,6 +2738,34 @@ def refund_page(request: Request):
     return _page(request, "legal/refund-policy.html")
 
 
+def _cert_preview(request, cert_token: str, trader_masked: str, acc: Account | None, *,
+                  eyebrow: str, when, payout_share: float | None = None) -> dict:
+    """Dane repliki dokumentu pokazywanej obok formularza weryfikacji.
+
+    Dokładnie to, co widnieje na samym certyfikacie, z JEDNYM wyjątkiem:
+    nazwisko jest maskowane. Certyfikat ma `noindex`, a /verify jest publicznie
+    indeksowalne — pełne nazwisko zostaje na dokumencie.
+    """
+    data = (when or datetime.now(timezone.utc)).strftime("%d %b %Y")
+    rozmiar = f"${(acc.initial_balance if acc else 0):,.0f}"
+    if payout_share is not None:
+        kwota = (f"${payout_share:,.0f}" if float(payout_share).is_integer()
+                 else f"${payout_share:,.2f}")
+        return {"variant": "payout", "eyebrow": eyebrow, "amount_label": "For the amount of",
+                "amount": kwota, "person": trader_masked,
+                "meta": [{"value": data, "label": "Date"},
+                         {"value": rozmiar, "label": "Account size"}],
+                "token": cert_token,
+                "qr_svg": _qr_svg(f"{_public_base(request)}/verify/{cert_token}")}
+    return {"variant": "pass", "eyebrow": eyebrow, "amount_label": "Account size",
+            "amount": rozmiar, "person": trader_masked,
+            "meta": [{"value": data, "label": "Date"},
+                     {"value": f"{acc.steps}-Step" if acc and acc.steps else "Instant funding",
+                      "label": "Program"}],
+            "token": cert_token,
+            "qr_svg": _qr_svg(f"{_public_base(request)}/verify/{cert_token}")}
+
+
 @app.get("/verify")
 @app.get("/verify/{cert_token}")
 def verify_page(request: Request, cert_token: str | None = None):
@@ -2721,8 +2777,17 @@ def verify_page(request: Request, cert_token: str | None = None):
     inaczej odbiorca, który go dostał, słyszy „nie znaleziono".
     """
     result = None
+    podglad = None   # replika dokumentu obok formularza (te same klasy co certyfikat)
     if cert_token:
         session = SessionLocal()
+
+        def etykieta(a: Account | None) -> str:
+            """Nazwa planu, nie klucz z bazy — „2-Step 100K", nie „2step-100k"."""
+            if not a:
+                return "—"
+            prod = session.query(Product).filter(Product.key == a.product_key).first()
+            return prod.label if prod else a.product_key
+
         try:
             cert = session.query(Certificate).filter(Certificate.cert_token == cert_token).first()
             acc = (session.get(Account, cert.account_id) if cert
@@ -2732,30 +2797,44 @@ def verify_page(request: Request, cert_token: str | None = None):
             if cert and acc:
                 result = {"found": True, "kind": "account", "open_url": f"/certificate/{cert_token}",
                           "trader": _mask_name(acc.trader_name),
-                          "size": acc.initial_balance, "product": acc.product_key,
+                          "size": acc.initial_balance, "product": etykieta(acc),
                           "status": CERT_KINDS.get(cert.kind, ("Evaluation passed",))[0],
                           "token": cert_token}
+                podglad = _cert_preview(request, cert_token, result["trader"], acc,
+                                        eyebrow=CERT_KINDS.get(cert.kind, ("Evaluation passed",))[0],
+                                        when=cert.issued_at)
             elif acc and _cert_eligible(acc):
+                rodzaj = "funded" if acc.status == "funded" else "phase_1"
                 result = {"found": True, "kind": "account", "open_url": f"/certificate/{cert_token}",
                           "trader": _mask_name(acc.trader_name),
-                          "size": acc.initial_balance, "product": acc.product_key,
+                          "size": acc.initial_balance, "product": etykieta(acc),
                           "status": "Funded Trader" if acc.status == "funded" else "Evaluation Passed",
                           "token": cert_token}
+                podglad = _cert_preview(request, cert_token, result["trader"], acc,
+                                        eyebrow=CERT_KINDS[rodzaj][0],
+                                        when=acc.closed_at or acc.created_at)
             elif payout:
                 pacc = session.get(Account, payout.account_id)
                 result = {"found": True, "kind": "payout", "open_url": f"/payout/{cert_token}",
                           "trader": _mask_name(pacc.trader_name if pacc else ""),
                           "size": (pacc.initial_balance if pacc else 0.0),
-                          "product": (pacc.product_key if pacc else "—"),
+                          "product": etykieta(pacc),
                           "status": "Payout paid",
                           "amount": round(payout.trader_share, 2),
                           "issued": payout.ts.strftime("%d %b %Y") if payout.ts else None,
                           "token": cert_token}
+                podglad = _cert_preview(request, cert_token, result["trader"], pacc,
+                                        eyebrow="Payout", when=payout.ts,
+                                        payout_share=payout.trader_share)
             else:
                 result = {"found": False}
         finally:
             session.close()
-    return _page(request, "verify.html", result=result, token=cert_token or "")
+    return _page(request, "verify.html", result=result, preview=podglad,
+                 token=cert_token or "",
+                 signatory=settings.cert_signatory or None,
+                 signatory_label=settings.cert_signatory_label.replace(":", ""),
+                 sample_qr=_qr_svg(f"{_public_base(request)}/verify"))
 
 
 def _admin_z_ciasteczka(request: Request) -> Trader | None:

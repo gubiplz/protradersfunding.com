@@ -37,6 +37,12 @@ def _tier(value) -> str:
     return f"${v / 1000:.0f}K" if v >= 1000 else f"${v:,.0f}"
 
 
+def _promo_name() -> str:
+    """Nazwa promocji z katalogu — mail i strona mówią to samo."""
+    from . import catalog
+    return catalog.PROMO_NAME
+
+
 def _bogo_upgrade(ctx: dict) -> bool:
     """Czy to realny upgrade: klient zapłacił za mniejszy tier, dostał większy."""
     paid, got = ctx.get("bogo_paid_size"), ctx.get("initial_balance")
@@ -79,7 +85,13 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
         ),
         "credentials": (
             f"Your challenge account {login} is ready ⚡",
-            f"Hi {name}!\n\nYour challenge account has been created automatically.\n\n"
+            f"Hi {name}!\n\nYour challenge account has been created automatically."
+            # Zakup z promocja: konto jest WIEKSZE, niz tier, za ktory klient
+            # zaplacil — mail musi to powiedziec, inaczej klient szuka bledu.
+            + (f"\n\nYour {_promo_name()} promotion is applied: you paid for the "
+               f"{_tier(ctx.get('bogo_paid_size'))} tier and your account was created at "
+               f"${_num(ctx.get('initial_balance'))}." if _bogo_upgrade(ctx) else "")
+            + "\n\n"
             f"  MT5 login:  {ctx.get('platform_login')}\n"
             f"  Password:   {ctx.get('platform_password')}\n"
             f"  Server:     {ctx.get('platform_server')}\n"
@@ -163,14 +175,26 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
         return None
     brand = settings.site_name
     granted = event == "challenge_granted"
-    badge = (ctx.get("grant_note") or "BOGO activation complete") if granted else "Account ready"
-    headline = (("Your upgraded challenge is live" if _bogo_upgrade(ctx) else "Your BOGO challenge is live")
-                if granted else "Your challenge account is ready")
+    # Zakup z promocja tez jest upgrade'em — badge i tekst musza to powiedziec,
+    # bo konto jest wieksze niz tier, ktory klient widzial w koszyku.
+    upgraded = _bogo_upgrade(ctx)
+    badge = ((ctx.get("grant_note") or "BOGO activation complete") if granted
+             else (f"{_promo_name()} applied" if upgraded else "Account ready"))
+    headline = (("Your upgraded challenge is live" if upgraded else "Your BOGO challenge is live")
+                if granted else
+                ("Your upgraded challenge account is ready" if upgraded
+                 else "Your challenge account is ready"))
     steps = ctx.get("steps")
     kind = f"{steps}-Step challenge on MT5" if steps else "Challenge on MT5"
     lead = _bogo_intro(ctx)
-    intro = (f"Hi {ctx.get('name')}, {lead[0].lower()}{lead[1:]}" if granted
-             else f"Hi {ctx.get('name')}, your account has been created and is ready to trade.")
+    if granted:
+        intro = f"Hi {ctx.get('name')}, {lead[0].lower()}{lead[1:]}"
+    elif upgraded:
+        intro = (f"Hi {ctx.get('name')}, your account is ready — and your {_promo_name()} "
+                 f"promotion is applied: you paid for the {_tier(ctx.get('bogo_paid_size'))} tier "
+                 f"and we created the account at ${_num(ctx.get('initial_balance'))}.")
+    else:
+        intro = f"Hi {ctx.get('name')}, your account has been created and is ready to trade."
     cell = lambda label, value: f"""
       <td width="50%" style="padding:6px">
         <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e7eaf3;border-radius:12px;background:#fbfcfe">
