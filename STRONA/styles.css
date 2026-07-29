@@ -315,24 +315,48 @@ body {
     }
 }
 
-/* TYMCZASOWE — odnośnik do panelu tradera pod adresem /portal. Znika razem
-   z sekcją "portal-link" w index.html, gdy landing zastąpi docelowa strona. */
-.portal-link {
-    margin-top: 20px;
+
+/* TYMCZASOWE — przycisk wejścia do panelu tradera (/portal) w rogu strony.
+   Znika razem z <a class="cta-corner"> w index.html, gdy landing zastąpi
+   docelowa strona albo panel dostanie własną subdomenę. */
+.cta-corner {
+    position: fixed;
+    top: 24px;
+    right: 24px;
+    z-index: 10;
+    padding: 12px 22px;
+    background: linear-gradient(135deg, var(--gold-400) 0%, var(--gold-500) 100%);
+    color: var(--navy-950);
+    border-radius: 12px;
     font-size: 14px;
-    color: var(--text-400);
-}
-
-.portal-link a {
-    color: var(--gold-300);
+    font-weight: 600;
     text-decoration: none;
-    font-weight: 500;
-    border-bottom: 1px solid rgba(201, 169, 97, 0.35);
-    padding-bottom: 2px;
-    transition: color 0.2s ease, border-color 0.2s ease;
+    letter-spacing: 0.01em;
+    box-shadow: 0 4px 16px rgba(201, 169, 97, 0.25);
+    transition: all 0.2s ease;
 }
 
-.portal-link a:hover {
-    color: var(--gold-400);
-    border-color: var(--gold-400);
+.cta-corner:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(201, 169, 97, 0.4);
+    filter: brightness(1.05);
+}
+
+.cta-corner:active {
+    transform: translateY(0);
+}
+
+@media (max-width: 640px) {
+    .cta-corner {
+        top: 14px;
+        right: 14px;
+        padding: 10px 16px;
+        font-size: 13px;
+    }
+
+    /* Na waskim ekranie przycisk siedzi nad plakietka "Uruchomienie juz wkrotce"
+       — zsuwamy tresc, zeby sie nie nakladaly. */
+    .container {
+        padding-top: 76px;
+    }
 }
