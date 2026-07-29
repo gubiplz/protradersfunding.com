@@ -57,8 +57,8 @@
 /* --- brand ---
    Do NOT name this `.cert-brand` — that class already exists in site.css (the
    landing-page certificate) and was repainting the wordmark purple. */
-.cert-logo{display:flex;align-items:center;gap:.45em;font-size:clamp(13px,2.8cqw,25px)}
-.cert-logo img{width:1.35em;height:1.35em}
+.cert-logo{display:flex;align-items:center;gap:.45em;font-size:clamp(16px,3.6cqw,32px)}
+.cert-logo img{width:1.4em;height:1.4em}
 .cert-logo span{font-family:var(--display);font-weight:700;letter-spacing:-.015em}
 
 /* --- headings --- */
@@ -128,7 +128,21 @@
   display:flex;flex-direction:column;align-items:flex-start;gap:.3em;
   text-align:left;min-width:0;
 }
-.cert-signblock .sig{font-family:var(--script);font-weight:400;font-size:clamp(15px,3.4cqw,30px)}
+/* CEO signature — a real handwriting face shipped with the site, so the pen
+   stroke looks identical on every OS and in print. Slight tilt + baseline
+   overlap with the label sell the "signed with a pen" feel. */
+@font-face{
+  font-family:'Great Vibes';
+  src:url('/static/fonts/great-vibes.woff2') format('woff2');
+  font-weight:400;font-style:normal;font-display:swap;
+}
+.cert-signblock .sig{
+  font-family:'Great Vibes',var(--script);font-weight:400;
+  font-size:clamp(24px,5.4cqw,48px);line-height:.9;
+  color:#e8edff;display:inline-block;transform:rotate(-3.5deg);
+  text-shadow:0 0 1px rgba(232,237,255,.35);
+  margin-bottom:-.12em;padding:0 .15em .08em .05em;
+}
 .cert-signblock span{
   font-family:var(--display);font-weight:600;text-transform:uppercase;
   letter-spacing:.14em;font-size:clamp(6.5px,1.3cqw,10px);color:var(--k-cichy);

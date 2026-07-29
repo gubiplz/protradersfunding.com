@@ -114,8 +114,10 @@ class Settings:
     site_name: str = os.getenv("SITE_NAME", "Pro Traders Funding")
     # Podpis na certyfikatach. Puste = blok podpisu w ogóle się nie pokazuje —
     # nie wymyślamy nazwiska osoby, która miałaby firmować dokument.
-    cert_signatory: str = os.getenv("CERT_SIGNATORY", "")
-    cert_signatory_label: str = os.getenv("CERT_SIGNATORY_LABEL", "CEO signature:")
+    # Podpis CEO na certyfikatach — STALA marki: kazdy dokument wychodzi z
+    # odrecznym podpisem Matthew Harrisona (krój Great Vibes w cert.css).
+    cert_signatory: str = os.getenv("CERT_SIGNATORY", "Matthew Harrison")
+    cert_signatory_label: str = os.getenv("CERT_SIGNATORY_LABEL", "Chief Executive Officer")
     support_email: str = os.getenv("SUPPORT_EMAIL", "support@protradersfunding.com")
 
     # --- Aplikacja / bezpieczeństwo ---
