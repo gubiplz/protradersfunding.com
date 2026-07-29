@@ -1,0 +1,363 @@
+"""Modele ORM.
+
+Account trzyma konfigurację reguł + bieżący stan runtime (equity, peak, baseline
+dnia, liczniki). Dochodzą modele biznesowe prop firmy: Trader (konto klienta),
+Product (plan challenge'a), Order (zakup przez Stripe), PayoutRequest (wypłata)."""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from .db import Base
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+# --------------------------------------------------------------------------- #
+#  Trader — konto klienta (onboarding/login)                                  #
+# --------------------------------------------------------------------------- #
+class Trader(Base):
+    __tablename__ = "traders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(180), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    full_name: Mapped[str] = mapped_column(String(120), default="")
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Dane wymagane przez formularz rejestracji konta demo MT5 (zbierane przy płatności).
+    first_name: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    # program afiliacyjny / referral
+    referral_code: Mapped[str | None] = mapped_column(String(16), unique=True, index=True, nullable=True)
+    referred_by: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+    # KYC
+    kyc_status: Mapped[str] = mapped_column(String(16), default="none")  # none|pending|approved|rejected
+    kyc_fullname: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    kyc_country: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    kyc_doc_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    kyc_dob: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    kyc_address: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    kyc_id_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    kyc_id_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # nazwy plikow dokumentow w backend/uploads/kyc/{trader_id}/ (podglad tylko admin)
+    kyc_doc_front: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    kyc_doc_back: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    kyc_doc_residence: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+    # preferencje powiadomien e-mail (Settings -> Notification Preferences)
+    notify_updates: Mapped[bool] = mapped_column(Boolean, default=True)     # welcome/creds/kyc
+    notify_trading: Mapped[bool] = mapped_column(Boolean, default=True)     # fazy/funded/breach
+    notify_payouts: Mapped[bool] = mapped_column(Boolean, default=True)
+    notify_marketing: Mapped[bool] = mapped_column(Boolean, default=True)   # nic nie wysylamy, ale pref istnieje
+    kyc_submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    accounts: Mapped[list["Account"]] = relationship(back_populates="trader")
+    orders: Mapped[list["Order"]] = relationship(back_populates="trader")
+
+
+# --------------------------------------------------------------------------- #
+#  Product — plan challenge'a sprzedawany w sklepie                           #
+# --------------------------------------------------------------------------- #
+class Product(Base):
+    __tablename__ = "products"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(48), unique=True, index=True)
+    label: Mapped[str] = mapped_column(String(120))
+    account_size: Mapped[float] = mapped_column(Float)
+    steps: Mapped[int] = mapped_column(Integer, default=2)          # 1-step / 2-step
+    price_usd: Mapped[float] = mapped_column(Float)
+
+    profit_target_p1: Mapped[float] = mapped_column(Float, default=8)
+    profit_target_p2: Mapped[float] = mapped_column(Float, default=5)
+    max_daily_loss_pct: Mapped[float] = mapped_column(Float, default=5)
+    max_overall_loss_pct: Mapped[float] = mapped_column(Float, default=10)
+    drawdown_type: Mapped[str] = mapped_column(String(16), default="static")
+    min_trading_days: Mapped[int] = mapped_column(Integer, default=4)
+    profit_split_pct: Mapped[float] = mapped_column(Float, default=80)
+    # Limit lacznego wolumenu otwartych pozycji (w lotach) — anty-„fullport”.
+    max_lots: Mapped[float] = mapped_column(Float, default=6.0)
+    consistency_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+# --------------------------------------------------------------------------- #
+#  Order — zakup challenge'a (Stripe lub mock)                                #
+# --------------------------------------------------------------------------- #
+class Order(Base):
+    __tablename__ = "orders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    trader_id: Mapped[int] = mapped_column(ForeignKey("traders.id"), index=True)
+    product_key: Mapped[str] = mapped_column(String(48))
+    amount_usd: Mapped[float] = mapped_column(Float)
+    coupon: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending")   # pending|paid|failed
+    provider: Mapped[str] = mapped_column(String(16), default="mock")    # stripe|mock
+    stripe_session_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # BOGO: klucz produktu, za ktory klient zaplacil (gdy admin przyznaje wiekszy tier)
+    bogo_paid_key: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    trader: Mapped[Trader] = relationship(back_populates="orders")
+
+
+# --------------------------------------------------------------------------- #
+#  Account — konto challenge / funded                                         #
+# --------------------------------------------------------------------------- #
+class Account(Base):
+    __tablename__ = "accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    login: Mapped[str] = mapped_column(String(64), index=True)
+    trader_name: Mapped[str] = mapped_column(String(120), default="")
+    trader_id: Mapped[int | None] = mapped_column(ForeignKey("traders.id"), nullable=True, index=True)
+    metaapi_account_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # poświadczenia platformy MT5 dostarczane traderowi
+    platform_login: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    platform_password: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    platform_server: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Kolumna zostaje dla kont zalozonych wczesniej; NIC juz jej nie zapisuje
+    # ani nie pokazuje — hasla inwestora nie generujemy.
+    platform_investor_password: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Czy za kontem stoi REALNY rachunek MT5. False = poswiadczenia wygenerowane
+    # lokalnie; feed musi takie konto pominac, inaczej probowalby sie logowac do
+    # web terminala loginem, ktorego tam nie ma.
+    mt5_backed: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Skad wzielo sie konto: zakup klienta czy przyznanie przez admina
+    # (promocja/BOGO/rekompensata). Trader widzi to w portalu i w mailu.
+    source: Mapped[str] = mapped_column(String(16), default="purchase")   # purchase|grant
+    grant_note: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    # BOGO: rozmiar tieru, za ktory klient FAKTYCZNIE zaplacil. Bez tego pola
+    # zdanie „you paid for the $25K tier” byloby zmyslone — jest albo prawdziwe,
+    # albo mail w ogole go nie zawiera.
+    bogo_paid_size: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # --- Trade BOT (admin) ---
+    # Gdy wlaczony, konto NIE jest czytane z MT5 — snapshoty generuje tradebot.py.
+    bot_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    bot_seed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    bot_style: Mapped[str | None] = mapped_column(String(16), nullable=True)   # scalper|balanced|swing
+    bot_pace: Mapped[str | None] = mapped_column(String(16), nullable=True)    # realistic|active|demo
+    bot_target_pct: Mapped[float] = mapped_column(Float, default=0.0)          # 0 = bez limitu
+    # Pauza: bot NIE otwiera nowych pozycji, ale konto zostaje pod jego kontrolą
+    # (saldo nie resynchronizuje sie do feedu, jak przy pelnym Stopie).
+    bot_paused: Mapped[bool] = mapped_column(Boolean, default=False)
+    bot_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Nieodgadywalny token certyfikatu — publiczny link /certificate/{token}
+    # i weryfikacja /verify/{token} działają bez logowania, ale nie da się
+    # enumerować kont po kolejnych ID.
+    cert_token: Mapped[str | None] = mapped_column(String(32), unique=True, nullable=True)
+
+    # --- konfiguracja challenge'a (z Product) ---
+    product_key: Mapped[str] = mapped_column(String(48), default="2step-100k")
+    preset: Mapped[str] = mapped_column(String(32), default="2step-100k")  # back-compat
+    initial_balance: Mapped[float] = mapped_column(Float, default=100_000)
+    steps: Mapped[int] = mapped_column(Integer, default=2)
+    profit_target_p1: Mapped[float] = mapped_column(Float, default=8)
+    profit_target_p2: Mapped[float] = mapped_column(Float, default=5)
+    max_daily_loss_pct: Mapped[float] = mapped_column(Float, default=5)
+    max_overall_loss_pct: Mapped[float] = mapped_column(Float, default=10)
+    min_trading_days: Mapped[int] = mapped_column(Integer, default=4)
+    drawdown_type: Mapped[str] = mapped_column(String(16), default="static")
+    profit_split_pct: Mapped[float] = mapped_column(Float, default=80.0)
+    max_lots: Mapped[float] = mapped_column(Float, default=6.0)
+    consistency_pct: Mapped[float] = mapped_column(Float, default=0.0)  # 0 = wyłączona; 40 = reguła 40% best-day
+
+    # --- stan runtime ---
+    phase: Mapped[str] = mapped_column(String(16), default="eval_1")
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    balance: Mapped[float] = mapped_column(Float, default=0.0)
+    equity: Mapped[float] = mapped_column(Float, default=0.0)
+    open_pnl: Mapped[float] = mapped_column(Float, default=0.0)
+    peak_equity: Mapped[float] = mapped_column(Float, default=0.0)
+    day_key: Mapped[str] = mapped_column(String(16), default="")
+    day_start_equity: Mapped[float] = mapped_column(Float, default=0.0)
+    day_start_balance: Mapped[float] = mapped_column(Float, default=0.0)
+    best_day_profit: Mapped[float] = mapped_column(Float, default=0.0)
+    trading_days_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_counted_trading_day: Mapped[str] = mapped_column(String(16), default="")
+    breach_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    trader: Mapped[Trader | None] = relationship(back_populates="accounts")
+    snapshots: Mapped[list["EquitySnapshot"]] = relationship(back_populates="account", cascade="all, delete-orphan")
+    breaches: Mapped[list["Breach"]] = relationship(back_populates="account", cascade="all, delete-orphan")
+    payouts: Mapped[list["Payout"]] = relationship(back_populates="account", cascade="all, delete-orphan")
+    payout_requests: Mapped[list["PayoutRequest"]] = relationship(back_populates="account", cascade="all, delete-orphan")
+
+
+class EquitySnapshot(Base):
+    __tablename__ = "equity_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    balance: Mapped[float] = mapped_column(Float)
+    equity: Mapped[float] = mapped_column(Float)
+    open_pnl: Mapped[float] = mapped_column(Float, default=0.0)
+    day_key: Mapped[str] = mapped_column(String(16), default="")
+
+    account: Mapped[Account] = relationship(back_populates="snapshots")
+
+
+class Trade(Base):
+    """Rejestr pojedynczych transakcji na koncie.
+
+    Dzis wypelnia go wylacznie Trade BOT (`source='bot'`), ale tabela jest
+    swiadomie ogolna: gdy kiedys uda sie czytac historie z MT5, trafi w to samo
+    miejsce i portal nie bedzie wymagal zmian. Pozycja otwarta ma
+    `status='open'` i `closed_at=None` — dzieki temu restart procesu nie gubi
+    biezacej pozycji bota.
+    """
+    __tablename__ = "trades"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    symbol: Mapped[str] = mapped_column(String(16))
+    side: Mapped[str] = mapped_column(String(4))            # buy|sell
+    lots: Mapped[float] = mapped_column(Float)
+    open_price: Mapped[float] = mapped_column(Float)
+    close_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pnl: Mapped[float] = mapped_column(Float, default=0.0)  # dla otwartej = floating
+    opened_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String(8), default="open", index=True)  # open|closed
+    source: Mapped[str] = mapped_column(String(8), default="bot")
+    # Plan bota dla tej pozycji (docelowy wynik i moment zamkniecia) — trzymany
+    # w bazie, zeby restart nie przerywal transakcji w polowie.
+    plan_pnl: Mapped[float] = mapped_column(Float, default=0.0)
+    plan_close_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class Certificate(Base):
+    """Certyfikat osiagniecia — jeden wiersz na KAZDE osiagniecie konta.
+
+    Wczesniej konto mialo jeden `cert_token`, wiec nie dalo sie wystawic osobnego
+    dokumentu za zaliczenie etapu 1, etapu 2 i za funded. Tutaj kazdy z nich ma
+    wlasny numer, ktory da sie zweryfikowac osobno.
+    """
+    __tablename__ = "certificates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(16), index=True)   # phase_1|phase_2|funded
+    cert_token: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    issued_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class Breach(Base):
+    __tablename__ = "breaches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    type: Mapped[str] = mapped_column(String(32))
+    detail: Mapped[str] = mapped_column(String(255))
+    equity_at_breach: Mapped[float] = mapped_column(Float)
+
+    account: Mapped[Account] = relationship(back_populates="breaches")
+
+
+class Payout(Base):
+    __tablename__ = "payouts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    profit_amount: Mapped[float] = mapped_column(Float)
+    trader_share: Mapped[float] = mapped_column(Float)
+    paid: Mapped[bool] = mapped_column(Boolean, default=False)
+    method: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    # Nieodgadywalny token certyfikatu wyplaty — link mozna udostepniac, ale nie
+    # da sie enumerowac cudzych wyplat po ID.
+    cert_token: Mapped[str | None] = mapped_column(String(32), unique=True, nullable=True)
+    # Czy ta wyplata zdjela zysk z konta (saldo wrocilo do startowego). Krzywa
+    # equity musi wiedziec, w ktorym miejscu balans spadl — inaczej ostatni punkt
+    # wykresu nie zgadzalby sie z realnym saldem konta.
+    balance_reset: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    account: Mapped[Account] = relationship(back_populates="payouts")
+
+
+class PayoutRequest(Base):
+    __tablename__ = "payout_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    trader_id: Mapped[int] = mapped_column(ForeignKey("traders.id"), index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    profit_amount: Mapped[float] = mapped_column(Float)
+    trader_share: Mapped[float] = mapped_column(Float)
+    method: Mapped[str] = mapped_column(String(40), default="bank")
+    status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|approved|paid|rejected
+
+    account: Mapped[Account] = relationship(back_populates="payout_requests")
+
+
+class PoolAccount(Base):
+    """Pula gotowych kont MT5 (dodanych do MetaApi) do przydzielenia przy zakupie.
+    Tak działają firmy fundingowe bez własnego serwera: pre-provisioning + assign."""
+    __tablename__ = "pool_accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    metaapi_account_id: Mapped[str] = mapped_column(String(64))
+    platform_login: Mapped[str] = mapped_column(String(64))
+    platform_password: Mapped[str] = mapped_column(String(64))
+    platform_server: Mapped[str] = mapped_column(String(64))
+    account_size: Mapped[float] = mapped_column(Float, index=True)
+    claimed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    claimed_by_account_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class JournalEntry(Base):
+    """Dziennik tradera — prywatne notatki, opcjonalnie przypiete do konta."""
+    __tablename__ = "journal_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    trader_id: Mapped[int] = mapped_column(ForeignKey("traders.id"), index=True)
+    account_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    title: Mapped[str] = mapped_column(String(160))
+    content: Mapped[str] = mapped_column(Text, default="")
+
+
+class SupportTicket(Base):
+    __tablename__ = "support_tickets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    trader_id: Mapped[int] = mapped_column(ForeignKey("traders.id"), index=True)
+    subject: Mapped[str] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(16), default="open")  # open|answered|closed
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class TicketMessage(Base):
+    __tablename__ = "ticket_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("support_tickets.id"), index=True)
+    author: Mapped[str] = mapped_column(String(12))  # trader|admin
+    body: Mapped[str] = mapped_column(Text)
+    ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

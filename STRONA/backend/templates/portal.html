@@ -1,0 +1,1309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trader Portal — {{ site_name }}</title>
+<link rel="icon" href="/static/img/favicon.png" type="image/png">
+<link rel="stylesheet" href="/static/css/portal.css">
+<script src="/static/lib/chart.umd.min.js"></script>
+<script src="/static/js/equity-chart.js"></script>
+</head>
+<body>
+
+<!-- ======================= AUTH (split screen) ======================= -->
+<div id="auth" class="auth-wrap hidden">
+  <div class="auth-brand">
+    <a class="logo" href="/"><img src="/static/img/logo.png" alt="">{{ site_name }}</a>
+    <div class="auth-pitch">
+      <h2>Your funded journey<br>starts here.</h2>
+      <p>Log in to manage challenges, track objectives in real time and request payouts.</p>
+      <div class="auth-points">
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> Real MetaTrader 5 accounts, delivered in minutes</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> Automated risk engine — same rules for everyone</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> Performance rewards with up to 90% profit split</span>
+      </div>
+    </div>
+    <div class="auth-foot">All accounts are demo accounts with virtual funds in a simulated environment.
+      Rewards are performance-based and discretionary.</div>
+  </div>
+  <div class="auth-form">
+    <div class="auth-card">
+      <h3 id="auth-title">Welcome back</h3>
+      <div class="sub" id="auth-sub">Log in to your trader dashboard.</div>
+      <div class="auth-tabs">
+        <button id="tab-login" class="auth-tab on" onclick="authTab('login')">Log in</button>
+        <button id="tab-signup" class="auth-tab" onclick="authTab('signup')">Create account</button>
+      </div>
+      <div class="stack">
+        <input id="a-name" placeholder="Full name" class="inp hidden">
+        <input id="a-email" placeholder="E-mail" class="inp" autocomplete="email">
+        <input id="a-pass" type="password" placeholder="Password" class="inp" autocomplete="current-password">
+        <input id="a-ref" placeholder="Referral code (optional)" class="inp hidden">
+        <button id="a-submit" onclick="doAuth()" class="btn-p lg" style="width:100%">Log in</button>
+      </div>
+      <div class="auth-hint">Demo access: jan@demo.pl / demo1234</div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= APP ======================= -->
+<div id="app" class="app hidden">
+  <aside class="side" id="side">
+    <div class="side-head">
+      <a class="brand-pill" href="/"><img src="/static/img/logo.png" alt=""><span class="brand-txt">{{ site_name }}</span></a>
+      <button class="icon-btn side-close" style="margin-left:auto" onclick="toggleSide(false)" aria-label="Close menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <nav class="side-nav" id="side-nav"></nav>
+    <div class="side-bottom">
+      <a class="sb-link" id="admin-link" href="/admin" style="display:none" title="Admin panel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10.3 4.3a2 2 0 0 1 3.4 0l.6 1a2 2 0 0 0 1.7 1h1.2a2 2 0 0 1 1.7 3l-.6 1a2 2 0 0 0 0 2l.6 1a2 2 0 0 1-1.7 3h-1.2a2 2 0 0 0-1.7 1l-.6 1a2 2 0 0 1-3.4 0l-.6-1a2 2 0 0 0-1.7-1H6.8a2 2 0 0 1-1.7-3l.6-1a2 2 0 0 0 0-2l-.6-1a2 2 0 0 1 1.7-3H8a2 2 0 0 0 1.7-1z"/><circle cx="12" cy="12" r="2.6"/></svg>
+        <span class="sb-txt">Admin panel</span></a>
+      <button class="collapse-btn" onclick="toggleCollapse()" title="Collapse">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+        <span class="sb-txt">Collapse</span></button>
+      <button class="signout" onclick="logout()" title="Sign Out">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H3"/></svg>
+        <span class="sb-txt">Sign Out</span></button>
+      <div class="foot-user">
+        <div class="avatar" id="ava">?</div>
+        <div class="who"><div id="who-name">—</div><span id="who-mail"></span></div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <button class="icon-btn burger" onclick="toggleSide(true)" aria-label="Menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <div><h1 id="pg-title">Challenges</h1><div class="crumb" id="pg-crumb"></div></div>
+      <div class="top-right">
+        <span class="kyc-chip" id="kyc-chip"><span class="dot"></span><span id="kyc-txt">KYC</span></span>
+        <button class="btn-p sm" onclick="go('store')">+ New challenge</button>
+      </div>
+    </div>
+    <div class="content" id="view"></div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const fmt=n=>(n??0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmt0=n=>(n??0).toLocaleString('en-US',{maximumFractionDigits:0});
+const dstr=iso=>new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
+// Sama data — historia transakcji nie podaje godziny. `YYYY-MM-DD` czytamy jako
+// UTC, zeby strefa przegladarki nie przesunela dnia o jeden wstecz.
+const dday=d=>new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'});
+let TOKEN=localStorage.getItem('pf_token'), ME=null, AUTHMODE='login', chart=null;
+const H=()=>TOKEN?{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'}:{'Content-Type':'application/json'};
+async function api(path,opts={}){const r=await fetch(path,{headers:H(),...opts});if(!r.ok){throw new Error((await r.json().catch(()=>({}))).detail||r.status)}return r.json()}
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+const ICO={
+  copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>',
+  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg>',
+  key:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="14" r="4.2"/><path d="M11 11 20 2M16 6l3 3"/></svg>',
+  dollar:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v20M17 6.5c0-2-2.2-3-5-3s-5 1-5 3 2 2.8 5 3.4 5 1.6 5 3.6-2.2 3-5 3-5-1-5-3"/></svg>',
+  trend:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>',
+  layers:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 2 9 5-9 5-9-5z"/><path d="m3 12 9 5 9-5M3 17l9 5 9-5"/></svg>',
+  wallet:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="6" width="20" height="14" rx="3"/><path d="M2 10h20M16 15h2"/></svg>',
+  alert:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 2 20h20z"/><path d="M12 9.5V14M12 17h.01"/></svg>',
+  target:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="2"/></svg>',
+  cal:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M8 2.5V7M16 2.5V7M3 10.5h18"/></svg>',
+  eye:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.7"/></svg>',
+  spark:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2l1.8 5.6L19 9l-5.2 1.4L12 16l-1.8-5.6L5 9l5.2-1.4z"/><path d="M19 15l.9 2.6L22 18l-2.1.7L19 21l-.9-2.3L16 18l2.1-.4z"/></svg>',
+  trophy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 6H4v1.5A3.5 3.5 0 0 0 7.5 11M17 6h3v1.5A3.5 3.5 0 0 1 16.5 11"/></svg>',
+  crown:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 8 4.5 4L12 5l4.5 7L21 8l-1.6 10.5a1 1 0 0 1-1 .5H5.6a1 1 0 0 1-1-.5z"/></svg>',
+  book:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2z"/><path d="M19 17H6a2 2 0 0 0-2 2"/><path d="M9 7h6M9 11h4"/></svg>',
+  bars:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
+  gift:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="8" width="18" height="13" rx="2"/><path d="M12 8v13M3 12.5h18M12 8c-2.5 0-4.5-1.3-4.5-3S9.5 2.6 12 5c2.5-2.4 4.5-1.7 4.5 0S14.5 8 12 8z"/></svg>',
+  payout:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="8" width="20" height="12" rx="2.5"/><circle cx="12" cy="14" r="2.6"/><path d="M6 8V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2"/></svg>',
+  file:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></svg>',
+  shield:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2 4 6v6c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V6z"/><path d="m9 12 2 2 4-4"/></svg>',
+  help:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.2 9a3 3 0 0 1 5.8 1c0 2-3 2.4-3 4"/><path d="M12 17.5h.01"/></svg>',
+  gear:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10.3 4.3a2 2 0 0 1 3.4 0l.6 1a2 2 0 0 0 1.7 1h1.2a2 2 0 0 1 1.7 3l-.6 1a2 2 0 0 0 0 2l.6 1a2 2 0 0 1-1.7 3h-1.2a2 2 0 0 0-1.7 1l-.6 1a2 2 0 0 1-3.4 0l-.6-1a2 2 0 0 0-1.7-1H6.8a2 2 0 0 1-1.7-3l.6-1a2 2 0 0 0 0-2l-.6-1a2 2 0 0 1 1.7-3H8a2 2 0 0 0 1.7-1z"/><circle cx="12" cy="12" r="2.6"/></svg>',
+  medal:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="14.5" r="5.5"/><path d="m8.5 10 -3-7M15.5 10l3-7M9.5 3h5"/><path d="m12 12 .9 1.8 2 .3-1.4 1.4.3 2-1.8-1-1.8 1 .3-2-1.4-1.4 2-.3z"/></svg>',
+  chat:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12a8 8 0 0 1-8 8H4l2.3-2.8A8 8 0 1 1 21 12z"/><path d="M8.5 11h.01M12 11h.01M15.5 11h.01"/></svg>',
+  print:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 9V3h12v6M6 17H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="7"/></svg>',
+};
+
+const NAV=[
+  {v:'accounts',label:'Challenges',ico:'trend'},
+  {v:'board',label:'Leaderboard',ico:'trophy'},
+  {v:'achievements',label:'Achievements',ico:'medal'},
+  {v:'loyalty',label:'Loyalty',ico:'crown'},
+  {v:'journal',label:'Journal',ico:'book'},
+  {v:'analytics',label:'Analytics',ico:'bars'},
+  {v:'rewards',label:'Rewards',ico:'gift'},
+  {v:'payouts',label:'Payouts',ico:'payout'},
+  {v:'certificates',label:'Certificates',ico:'medal'},
+  {v:'orders',label:'Invoice',ico:'file'},
+  {v:'kyc',label:'KYC',ico:'shield'},
+  {v:'support',label:'Support',ico:'help'},
+  {v:'settings',label:'Settings',ico:'gear'},
+];
+$('side-nav').innerHTML=NAV.map(n=>
+  `<button class="sb-link" data-v="${n.v}" onclick="go('${n.v}')" title="${n.label}">${ICO[n.ico]}<span class="sb-txt">${n.label}</span></button>`).join('');
+
+/* ---------- toasty ---------- */
+function toast(msg,kind='ok',ms=6000){
+  const t=document.createElement('div');
+  t.className='toast '+kind; t.textContent=msg;
+  $('toasts').appendChild(t);
+  setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),350)},ms);
+}
+
+/* ---------- auth ---------- */
+function authTab(m){AUTHMODE=m;
+  $('tab-login').classList.toggle('on',m==='login');
+  $('tab-signup').classList.toggle('on',m==='signup');
+  $('a-name').classList.toggle('hidden',m==='login');
+  $('a-ref').classList.toggle('hidden',m==='login');
+  if(m==='signup'&&!$('a-ref').value){$('a-ref').value=localStorage.getItem('pf_ref')||''}
+  $('a-submit').textContent=m==='login'?'Log in':'Create account';
+  $('auth-title').textContent=m==='login'?'Welcome back':'Create your account';
+  $('auth-sub').textContent=m==='login'?'Log in to your trader dashboard.':'One account for challenges, payouts and the affiliate program.';
+}
+async function doAuth(){
+  const body={email:$('a-email').value,password:$('a-pass').value};
+  try{let res;
+    if(AUTHMODE==='signup'){body.full_name=$('a-name').value;body.referral=$('a-ref').value||null;res=await api('/api/auth/signup',{method:'POST',body:JSON.stringify(body)});}
+    else res=await api('/api/auth/login',{method:'POST',body:JSON.stringify(body)});
+    TOKEN=res.token;localStorage.setItem('pf_token',TOKEN);await boot();
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+function logout(){TOKEN=null;localStorage.removeItem('pf_token');location.reload()}
+
+/* ---------- powrot z platnosci ---------- */
+async function handlePaymentReturn(){
+  const q=new URLSearchParams(location.search);
+  if(q.get('paid')){toast('✅ Payment received. Your MT5 account is being created — credentials will appear under Challenges and in your inbox.','ok',9000);go('accounts');return true}
+  if(q.get('canceled')){toast('Payment canceled — nothing was charged.','err');return false}
+  const mo=q.get('mock_order');
+  if(mo){try{
+    const prov=await api(`/api/checkout/${mo}/mock-complete`,{method:'POST'});
+    toast(prov.provisioning?'✅ Payment received. Your MT5 account is being created (up to a minute).':'✅ Account created — credentials under Challenges.','ok',9000);
+    go('accounts');return true
+  }catch(e){toast('Error: '+e.message,'err')}}
+  return false;
+}
+
+/* ---------- boot / nawigacja ---------- */
+async function boot(){
+  if(!TOKEN){$('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('login');return}
+  try{ME=await api('/api/auth/me')}catch(e){logout();return}
+  $('auth').classList.add('hidden');$('app').classList.remove('hidden');
+  const nm=(ME.full_name||ME.email).trim();
+  $('ava').textContent=nm[0].toUpperCase();
+  $('who-name').textContent=ME.full_name||'Trader';
+  $('who-mail').textContent=ME.email;
+  const ok=ME.kyc_status==='approved';
+  $('kyc-chip').className='kyc-chip '+(ok?'ok':'warn');
+  $('kyc-txt').textContent=ok?'KYC verified':'KYC: '+ME.kyc_status;
+  $('admin-link').style.display=ME.is_admin?'':'none';
+  if(localStorage.getItem('pf_side_collapsed')==='1')$('side').classList.add('collapsed');
+  if(await handlePaymentReturn())return;
+  go(new URLSearchParams(location.search).get('buy')?'store':'accounts');
+}
+
+const TITLES={
+  accounts:['Challenges','Live overview of your challenge accounts'],
+  store:['New Challenge','One-time fee · refunded with your first payout'],
+  board:['Leaderboard','Top traders across the platform — all time, live data'],
+  achievements:['Achievements','Milestones earned from your real activity'],
+  loyalty:['Loyalty','Spend-based tiers with unlockable discounts'],
+  journal:['Journal','Your private trading notes'],
+  analytics:['Analytics','Daily P&L computed from your account history'],
+  rewards:['Rewards','Programs built into the platform'],
+  payouts:['Payouts','Performance rewards across all your accounts'],
+  certificates:['Certificates','Your verifiable documents — evaluation stages and payouts'],
+  orders:['Invoice','Payment history, delivered accounts and invoices'],
+  kyc:['KYC','Identity verification — required once, before your first payout'],
+  support:['Support','Get help from our team'],
+  settings:['Settings','Manage your account settings and preferences'],
+};
+function go(v){
+  document.querySelectorAll('.sb-link[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  const t=TITLES[v]||['',''];
+  $('pg-title').textContent=t[0]; $('pg-crumb').textContent=t[1];
+  toggleSide(false);
+  $('view').innerHTML='<div class="skel" style="height:110px;margin-bottom:16px"></div><div class="skel" style="height:240px"></div>';
+  VIEWS[v]();
+}
+function toggleSide(open){$('side').classList.toggle('open',open)}
+function toggleCollapse(){
+  const c=$('side').classList.toggle('collapsed');
+  localStorage.setItem('pf_side_collapsed',c?'1':'0');
+}
+
+/* Deep-link z cennika: /portal?buy=2step-100k -> od razu modal zakupu. */
+function highlightPlanFromUrl(){
+  const key=new URLSearchParams(location.search).get('buy');
+  if(!key)return;
+  const card=document.querySelector(`[data-plan="${CSS.escape(key)}"]`);
+  if(!card)return;
+  card.classList.add('hl');
+  card.scrollIntoView({behavior:'smooth',block:'center'});
+  openBuy(key);
+}
+
+/* ============================ WIDOKI ============================ */
+const VIEWS={
+ async accounts(){
+  const accs=await api('/api/me/accounts');
+  const live=accs.filter(a=>['active','funded','passed'].includes(a.status));
+  const balance=live.reduce((s,a)=>s+a.balance,0);
+  const profit=live.reduce((s,a)=>s+(a.balance-a.initial_balance),0);
+  const payouts=accs.reduce((s,a)=>s+(a.paid_out||0),0);
+  const banner=accs.length
+    ?`<div class="gradient-banner">
+        <span class="gb-tag">${ICO.spark} Refer &amp; earn</span><span class="gb-sep"></span>
+        <span class="gb-txt">Share your link and earn <b>10%</b> of every challenge your referrals buy — tracked automatically.</span>
+        <button class="gb-btn" onclick="goAffiliate()">Get your link ›</button>
+      </div>`
+    :'';
+  const stats=`<div class="stats-row">
+    <div class="stat-tile"><div class="tile-ic purple">${ICO.dollar}</div>
+      <div><div class="lbl">Total Balance</div><div class="val">$${fmt(balance)}</div></div></div>
+    <div class="stat-tile"><div class="tile-ic green">${ICO.trend}</div>
+      <div><div class="lbl">Total Profit</div><div class="val ${profit>=0?'up':'down'}">${profit>=0?'+':''}$${fmt(profit)}</div></div></div>
+    <div class="stat-tile"><div class="tile-ic blue">${ICO.layers}</div>
+      <div><div class="lbl">Total Accounts</div><div class="val">${accs.length} <small>${live.length} live</small></div></div></div>
+    <div class="stat-tile"><div class="tile-ic orange">${ICO.wallet}</div>
+      <div><div class="lbl">Total Payouts</div><div class="val">$${fmt(payouts)}</div></div></div>
+  </div>`;
+  if(!accs.length){
+    $('view').innerHTML=`<div class="empty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>
+      <h3>No challenges yet</h3><p>Start a challenge and your MT5 account will appear here within a minute.</p>
+      <button class="btn-p" onclick="go('store')">Browse challenges</button></div>`;
+    return;
+  }
+  $('view').innerHTML=banner+stats+`<div class="acct-list">`+accs.map(a=>{
+    const m=a.metrics||{};
+    return `<div class="acct-row">
+      <div class="acct-ava"><img src="/static/img/mt5.png" alt="MT5"></div>
+      <div class="acct-id">
+        <div class="login">${a.status==='provisioning'?'<span class="muted">MT5 account pending…</span>':esc(a.login)}
+          <span class="status ${esc(a.status)}"><span class="dot"></span>${a.status==='active'?'evaluation':esc(a.status)}</span>
+</div>
+        <div class="sub">${a.steps===1?'1-Step':'2-Step'} · $${fmt(a.initial_balance)} Account${
+          a.status==='provisioning'?' · creating on MetaQuotes-Demo':(a.platform_server?' · '+esc(a.platform_server):'')}</div>
+      </div>
+      <div class="acct-cols">
+        <div class="acct-col"><div class="l">Balance</div><div class="v">$${fmt(a.balance)}</div></div>
+        <div class="acct-col"><div class="l">Equity</div><div class="v">$${fmt(a.equity)}</div></div>
+        <div class="acct-col"><div class="l">Trading Days</div><div class="v">${m.trading_days??0}</div></div>
+        <button class="btn-o sm" onclick="openAcc(${a.id})">${ICO.eye} Dashboard</button>
+      </div>
+    </div>`}).join('')+`</div>`;
+ },
+
+ async store(){
+  const ps=await api('/api/products');
+  PRODUCTS=ps;
+  const groups=[
+    {id:'2step',name:'2-Step',match:p=>p.steps===2&&p.price_usd>0},
+    {id:'1step',name:'1-Step',match:p=>p.steps===1&&p.price_usd>0},
+    {id:'instant',name:'Instant Funding',match:p=>p.steps===0&&p.price_usd>0},
+  ].filter(g=>ps.some(g.match));
+  window._shopTab=window._shopTab||(groups[0]&&groups[0].id);
+  const buyKey=new URLSearchParams(location.search).get('buy');
+  if(buyKey){const g=groups.find(g=>ps.some(p=>g.match(p)&&p.key===buyKey));if(g)window._shopTab=g.id}
+  const g=groups.find(x=>x.id===window._shopTab)||groups[0];
+  if(!g){$('view').innerHTML='<div class="empty"><h3>No plans available</h3></div>';return}
+  const items=ps.filter(g.match).sort((a,b)=>a.account_size-b.account_size);
+  $('view').innerHTML=`
+    <div class="shop-tabs">${groups.map(x=>`<button class="shop-tab${x.id===g.id?' on':''}" onclick="window._shopTab='${x.id}';VIEWS.store()">${x.name}</button>`).join('')}</div>
+    <div class="plan-grid">`+items.map(p=>`
+    <div class="plan-card" data-plan="${esc(p.key)}">
+      <div class="plan-size">$${fmt0(p.account_size)}</div>
+      <div class="plan-kind">${p.steps===0?'Instant Funding — no evaluation':p.steps===1?'1-Step Evaluation':'2-Step Evaluation'}</div>
+      <div class="plan-price">$${fmt0(p.price_usd)} <small>one-time</small></div>
+      <div class="plan-refund">✓ Refunded with your first payout</div>
+      <ul class="plan-feats">
+        <li>${p.steps===0?'Funded from day one — <b>no profit target</b>'
+          :`Profit target <b>${p.profit_target_p1}%${p.steps>1?' / '+p.profit_target_p2+'%':''}</b>`}</li>
+        <li>Max daily loss <b>${p.max_daily_loss_pct}%</b></li>
+        <li>Max overall loss <b>${p.max_overall_loss_pct}% ${p.drawdown_type}</b></li>
+        <li>Max open volume <b>${p.max_lots} lots</b></li>
+        <li>Min trading days <b>${p.min_trading_days}</b> · split <b>${p.profit_split_pct}%</b></li>
+      </ul>
+      <button onclick="openBuy('${esc(p.key)}')" class="btn-p">Start Challenge</button>
+    </div>`).join('')+`</div>
+    <p class="muted" style="font-size:12px;margin-top:16px">Coupon codes accepted at checkout.</p>`;
+  highlightPlanFromUrl();
+ },
+
+ async board(){
+  const b=await api('/api/leaderboard');
+  if(!b.length){$('view').innerHTML='<div class="empty"><h3>No ranked accounts yet</h3><p>The leaderboard fills up as traders make progress.</p></div>';return}
+  const totalProfit=b.reduce((s,r)=>s+r.profit_pct*r.account_size/100,0);
+  const best=b[0];
+  const medal=['gold','silver','bronze'];
+  const podium=b.slice(0,3).map((r,i)=>`
+    <div class="pod-card${i===0?' first':''}">
+      <div class="pod-rank">Rank #${i+1}</div>
+      <div class="pod-medal ${medal[i]}">${ICO.trophy}</div>
+      <div class="pod-name">${esc(r.trader)}${r.country?` <span class="muted" style="font-size:11px">· ${esc(r.country)}</span>`:''}</div>
+      <div style="margin:6px 0 2px"><span class="status ${r.status==='funded'?'funded':'active'}"><span class="dot"></span>${r.status==='funded'?'Funded':'Evaluation'}</span></div>
+      <div class="pod-ret">${r.profit_pct>=0?'+':''}${r.profit_pct.toFixed(2)}%</div>
+      <div class="pod-usd">$${fmt(r.profit_pct*r.account_size/100)} simulated profit</div>
+      <div class="pod-mini">
+        <div><div class="l">Account</div><div class="v">$${fmt0(r.account_size)}</div></div>
+        <div><div class="l">Stage</div><div class="v">${r.status==='funded'?'Funded':'Eval'}</div></div>
+      </div>
+    </div>`).join('');
+  $('view').innerHTML=`
+    <div class="stats-row">
+      <div class="stat-tile"><div class="tile-ic blue">${ICO.layers}</div>
+        <div><div class="lbl">Traders ranked</div><div class="val">${b.length}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic green">${ICO.trend}</div>
+        <div><div class="lbl">Simulated profit</div><div class="val ${totalProfit>=0?'up':'down'}">$${fmt0(totalProfit)}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic purple">${ICO.trophy}</div>
+        <div><div class="lbl">Best return</div><div class="val up">+${best.profit_pct.toFixed(2)}%</div></div></div>
+      <div class="stat-tile"><div class="tile-ic orange">${ICO.cal}</div>
+        <div><div class="lbl">Updates</div><div class="val" style="font-size:17px">Live</div><div class="sub">all-time ranking</div></div></div>
+    </div>
+    <div class="podium">${podium}</div>
+    ${b.length>3?`<div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th style="width:52px">#</th><th>Trader</th><th>Account</th><th>Stage</th><th style="text-align:right">Profit</th></tr></thead>
+      <tbody>`+b.slice(3).map((r,i)=>`<tr>
+        <td class="num muted">${String(i+4).padStart(2,'0')}</td>
+        <td>${esc(r.trader)}${r.country?` <span class="muted" style="font-size:11.5px">· ${esc(r.country)}</span>`:''}</td>
+        <td class="num muted">$${fmt0(r.account_size)}</td>
+        <td><span class="status ${r.status==='funded'?'funded':'active'}"><span class="dot"></span>${r.status==='funded'?'Funded':'Evaluation'}</span></td>
+        <td class="num ${r.profit_pct>=0?'up':'down'}" style="text-align:right">${r.profit_pct>=0?'+':''}${r.profit_pct.toFixed(2)}%</td></tr>`).join('')+`
+      </tbody></table></div>`:''}
+    <p class="muted" style="font-size:11.5px;margin-top:12px">Real accounts, live data. Names are masked for privacy; profits include past payouts.</p>`;
+ },
+
+ async achievements(){
+  const list=await api('/api/me/achievements');
+  const done=list.filter(b=>b.unlocked).length;
+  $('view').innerHTML=`
+    <div class="panel" style="margin-bottom:16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <div class="tile-ic purple">${ICO.medal}</div>
+      <div style="flex:1"><h3>${done} / ${list.length} unlocked</h3>
+        <p class="muted" style="font-size:13px">Milestones are earned automatically from your real activity on the platform.</p></div>
+      <div class="phase-bar" style="width:180px"><i style="width:${list.length?done/list.length*100:0}%"></i></div>
+    </div>
+    <div class="badge-grid">`+list.map(b=>`
+      <div class="badge-card${b.unlocked?'':' locked'}">
+        <div class="badge-ic">${ICO.medal}</div>
+        <div><h4>${esc(b.name)}</h4><p>${esc(b.desc)}</p>
+          <div class="badge-state ${b.unlocked?'on':'off'}">${b.unlocked?'✓ UNLOCKED':'LOCKED'}</div></div>
+      </div>`).join('')+`</div>`;
+ },
+
+ async loyalty(){
+  const orders=await api('/api/orders');
+  const points=Math.round(orders.filter(o=>o.status==='paid').reduce((s,o)=>s+o.amount_usd,0));
+  const TIERS=[
+    {name:'Bronze',min:0,code:'WELCOME10',ben:'10% off any challenge'},
+    {name:'Silver',min:500,code:'VIP20',ben:'20% off any challenge'},
+    {name:'Gold',min:1500,code:'BLACKFRIDAY',ben:'30% off any challenge'},
+  ];
+  const tier=[...TIERS].reverse().find(t=>points>=t.min)||TIERS[0];
+  const next=TIERS.find(t=>t.min>points);
+  const prog=next?Math.min(100,points/next.min*100):100;
+  $('view').innerHTML=`
+    <div class="panel" style="margin-bottom:4px">
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+        <div class="tile-ic orange">${ICO.crown}</div>
+        <div style="flex:1;min-width:220px">
+          <h3>${tier.name} tier · ${fmt0(points)} points</h3>
+          <p class="muted" style="font-size:13px">You earn 1 point for every $1 spent on challenges (computed from your real orders).</p>
+        </div>
+        <div style="min-width:220px;flex:1">
+          <div class="prog-top"><span>${next?`Progress to ${next.name}`:'Top tier reached'}</span><b>${next?fmt0(points)+' / '+fmt0(next.min):'MAX'}</b></div>
+          <div class="phase-bar"><i style="width:${prog}%"></i></div>
+        </div>
+      </div>
+    </div>
+    <div class="tier-track">`+TIERS.map(t=>{
+      const unlocked=points>=t.min;
+      return `<div class="tier-card${t.name===tier.name?' on':''}${unlocked?'':' locked'}">
+        <div class="nm">${ICO.crown.replace('stroke-width="1.8"','stroke-width="1.8" width="18" height="18"')} ${t.name}</div>
+        <div class="req">${t.min===0?'from your first purchase':`from ${fmt0(t.min)} points`}</div>
+        <div class="ben">${t.ben}</div>
+        <div class="code">${unlocked?t.code:'🔒 locked'}</div>
+      </div>`}).join('')+`</div>
+    <p class="muted" style="font-size:12px;margin-top:14px">Use the unlocked code at checkout. Tiers are recalculated automatically from paid orders.</p>`;
+ },
+
+ async journal(){
+  const rows=await api('/api/me/journal');
+  const head=`<div style="display:flex;justify-content:flex-end;margin-bottom:14px">
+    <button class="btn-p sm" onclick="openJournalModal()">+ New Entry</button></div>`;
+  if(!rows.length){
+    $('view').innerHTML=head+`<div class="empty">
+      ${'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:38px;height:38px;margin:0 auto 14px;display:block;color:var(--dim)"><path d="M4 19V5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2z"/><path d="M19 17H6a2 2 0 0 0-2 2"/></svg>'}
+      <h3>No entries yet</h3><p>Write down your setups, mistakes and lessons — future you will thank you.</p>
+      <button class="btn-p" onclick="openJournalModal()">Write your first entry</button></div>`;
+    return;
+  }
+  $('view').innerHTML=head+rows.map(e=>`
+    <div class="panel" style="margin-bottom:12px">
+      <div style="display:flex;align-items:flex-start;gap:12px">
+        <div style="flex:1;min-width:0">
+          <h3 style="font-size:15.5px">${esc(e.title)}</h3>
+          <div class="muted" style="font-size:11.5px;margin:2px 0 8px">${dstr(e.ts)}${e.account?` · account ${esc(e.account)}`:''}</div>
+          <p style="font-size:13.5px;color:var(--muted);white-space:pre-line">${esc(e.content)}</p>
+        </div>
+        <button class="icon-btn" onclick="delJournal(${e.id})" title="Delete">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6"/></svg></button>
+      </div>
+    </div>`).join('');
+ },
+
+ async analytics(){
+  const accs=await api('/api/me/accounts');
+  if(!accs.length){$('view').innerHTML='<div class="empty"><h3>No accounts yet</h3><p>Analytics appear once you have a challenge account.</p></div>';return}
+  window._anAcc=window._anAcc||accs[0].id;
+  if(!accs.some(a=>a.id===window._anAcc))window._anAcc=accs[0].id;
+  const act=await api(`/api/me/accounts/${window._anAcc}/activity`);
+  const days=act.days;
+  const total=days.reduce((s,d)=>s+d.pnl,0);
+  const bestD=days.reduce((m,d)=>d.pnl>(m?.pnl??-1e18)?d:m,null);
+  const worstD=days.reduce((m,d)=>d.pnl<(m?.pnl??1e18)?d:m,null);
+  const green=days.filter(d=>d.pnl>0).length;
+  // Statystyki liczymy z samych TRANSAKCJI — wyplata to ruch kasowy, nie trade.
+  const trades=(act.ledger||[]).filter(r=>r.kind==='trade');
+  const wins=trades.filter(t=>t.pnl>0).length;
+  const winRate=trades.length?wins/trades.length*100:null;
+  // rozbicie na instrumenty — tylko gdy konto ma zapisane transakcje
+  const bySym={};
+  trades.forEach(t=>{const s=bySym[t.symbol]||(bySym[t.symbol]={pnl:0,n:0,w:0});
+    s.pnl+=t.pnl;s.n++;if(t.pnl>0)s.w++});
+  const syms=Object.entries(bySym).sort((x,y)=>y[1].pnl-x[1].pnl);
+  const maxAbs=Math.max(1,...syms.map(([,s])=>Math.abs(s.pnl)));
+  $('view').innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+      <select id="an-sel" class="inp" style="max-width:260px" onchange="window._anAcc=parseInt(this.value);VIEWS.analytics()">
+        ${accs.map(a=>`<option value="${a.id}"${a.id===window._anAcc?' selected':''}>${esc(a.login)} · ${esc(a.product_key)}</option>`).join('')}
+      </select>
+      <span class="muted" style="font-size:12px">Computed from real equity snapshots of this account.</span>
+    </div>
+    <div class="stats-row">
+      <div class="stat-tile"><div class="tile-ic ${total>=0?'green':'orange'}">${ICO.trend}</div>
+        <div><div class="lbl">Total P&amp;L</div><div class="val ${total>=0?'up':'down'}">${total>=0?'+':''}$${fmt(total)}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic green">${ICO.dollar}</div>
+        <div><div class="lbl">Best day</div><div class="val up">${bestD?'+$'+fmt(Math.max(0,bestD.pnl)):'—'}</div><div class="sub">${bestD?bestD.day:''}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic orange">${ICO.alert}</div>
+        <div><div class="lbl">Worst day</div><div class="val ${worstD&&worstD.pnl<0?'down':''}">${worstD?(worstD.pnl<0?'-$'+fmt(-worstD.pnl):'$'+fmt(worstD.pnl)):'—'}</div><div class="sub">${worstD?worstD.day:''}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic blue">${ICO.cal}</div>
+        <div><div class="lbl">Profitable days</div><div class="val">${green} / ${days.length}</div></div></div>
+      ${winRate!==null?`<div class="stat-tile"><div class="tile-ic purple">${ICO.target}</div>
+        <div><div class="lbl">Win rate</div><div class="val">${winRate.toFixed(1)}%</div>
+        <div class="sub">${wins} of ${trades.length} positions</div></div></div>`:''}
+    </div>
+    ${syms.length?`<div class="sec-card"><h3>Instruments</h3>
+      <div class="sym-list">${syms.map(([sym,s])=>`
+        <div class="sym-row">
+          <b>${esc(sym)}</b>
+          <span class="muted">${s.n} trade${s.n===1?'':'s'} · ${(s.w/s.n*100).toFixed(0)}% won</span>
+          <div class="sym-bar"><i class="${s.pnl>=0?'ok':'bad'}" style="width:${Math.abs(s.pnl)/maxAbs*100}%"></i></div>
+          <span class="num ${s.pnl>=0?'up':'down'}">${money(s.pnl)}</span>
+        </div>`).join('')}</div>
+    </div>`:''}
+    <div class="sec-card"><h3>Daily P&amp;L</h3>
+      ${days.length?'<div class="chart-box"><canvas id="an-chart"></canvas></div>'
+        :'<p class="muted" style="font-size:13px">No daily data yet — the chart appears after the first risk-engine readings.</p>'}
+    </div>`;
+  if(chart){chart.destroy();chart=null}
+  if(days.length)chart=new Chart($('an-chart'),{type:'bar',
+    data:{labels:days.map(d=>d.day),datasets:[{data:days.map(d=>d.pnl),
+      backgroundColor:days.map(d=>d.pnl>=0?'rgba(16,185,129,.75)':'rgba(239,68,68,.75)'),borderRadius:5}]},
+    options:{maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{x:{ticks:{color:'#94a3b8',font:{size:10}},grid:{display:false}},
+        y:{ticks:{color:'#94a3b8',font:{size:10},callback:v=>'$'+v},grid:{color:'#eef0f6'}}}}});
+ },
+
+ async certificates(){
+  const d=await api('/api/me/certificates');
+  const puste=!d.accounts.length&&!d.payouts.length;
+  if(puste){$('view').innerHTML='<div class="empty"><h3>No certificates yet</h3>'
+    +'<p>Pass an evaluation stage or receive a payout and the document appears here.</p></div>';return}
+
+  const pozycja=(accId,it)=>{
+    if(it.url) return `<div class="cert-row done">
+      <div><b>${esc(it.label)}</b><span>Issued · verifiable by its ID</span></div>
+      <div class="acts">
+        <a class="btn-p sm" href="${it.url}" target="_blank">Open</a>
+        <button class="btn-o sm" onclick="copyLink('${location.origin}${it.url}')">Copy link</button>
+      </div></div>`;
+    if(it.available) return `<div class="cert-row">
+      <div><b>${esc(it.label)}</b><span>Achieved — ready to issue</span></div>
+      <div class="acts"><button class="btn-p sm" onclick="issueCert(${accId},'${it.kind}')">Get certificate</button></div>
+    </div>`;
+    return `<div class="cert-row lock">
+      <div><b>${esc(it.label)}</b><span>Not reached yet</span></div>
+      <div class="acts"><span class="muted" style="font-size:12.5px">Locked</span></div></div>`;
+  };
+
+  $('view').innerHTML=`
+    ${d.accounts.map(a=>`<div class="sec-card">
+      <div class="cert-head">
+        <h3>${esc(a.login)}</h3>
+        <span class="kyc-chip">${esc(a.product)} · $${fmt0(a.size)}</span>
+        <span class="status ${esc(a.status)}"><span class="dot"></span>${a.status==='active'?'evaluation':esc(a.status)}</span>
+      </div>
+      <div class="cert-list">${a.items.map(it=>pozycja(a.account_id,it)).join('')}</div>
+    </div>`).join('')}
+
+    <div class="sec-card">
+      <h3>Payout certificates</h3>
+      ${d.payouts.length?`<div class="cert-list">${d.payouts.map(p=>`
+        <div class="cert-row ${p.url?'done':''}">
+          <div><b>$${fmt(p.amount)} payout</b><span>${esc(p.account)} · ${p.ts?dday(p.ts.slice(0,10)):'—'}</span></div>
+          <div class="acts">${p.url
+            ? `<a class="btn-p sm" href="${p.url}" target="_blank">Open</a>
+               <button class="btn-o sm" onclick="copyLink('${location.origin}${p.url}')">Copy link</button>`
+            : `<button class="btn-p sm" onclick="issuePayoutCert(${p.id})">Get certificate</button>`}
+          </div></div>`).join('')}</div>`
+        :'<p class="muted" style="font-size:13px">No payouts yet — request one from a funded account.</p>'}
+    </div>
+
+    <p class="muted" style="font-size:12px">Every document carries a unique ID and a QR code.
+      Anyone can check it at <a href="/verify" target="_blank" style="color:var(--acc)">/verify</a> —
+      recruiters, communities, or you in two years.</p>`;
+ },
+
+ async rewards(){
+  const aff=ME.affiliate||{};
+  const link=location.origin+'/?ref='+ME.referral_code;
+  const affPanel=`
+    <div class="panel" style="margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <div class="tile-ic blue">${ICO.spark}</div>
+        <div style="flex:1;min-width:240px">
+          <h3 style="font-size:15.5px">Your affiliate link</h3>
+          <div class="cred-row" style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 13px;margin-top:8px;max-width:520px">
+            <code style="font-family:var(--mono);font-size:12.5px">${esc(link)}</code>
+            <button class="copy" onclick="copyVal(this,'${esc(link)}')" title="Copy">${ICO.copy}</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:22px;text-align:center">
+          <div><div class="muted" style="font-size:11px">Referred</div><div class="mono" style="font-weight:700;font-size:18px">${aff.referred??0}</div></div>
+          <div><div class="muted" style="font-size:11px">Rate</div><div class="mono" style="font-weight:700;font-size:18px">${aff.commission_pct??10}%</div></div>
+          <div><div class="muted" style="font-size:11px">Earned</div><div class="mono up" style="font-weight:700;font-size:18px">$${fmt(aff.commission_earned??0)}</div></div>
+        </div>
+      </div>
+    </div>`;
+  const cards=[
+    {ic:'wallet',cls:'green',badge:'Active',name:'Refundable Fee',desc:'Your one-time challenge fee is refunded in full, automatically added to your first payout from a funded account.',cond:['Pass the evaluation','Complete KYC','Request your first payout']},
+    {ic:'trend',cls:'purple',badge:'Automatic',name:'Scaling Plan',desc:'Grow a funded account by +10% and the platform scales its balance by +25%. Repeatable, coded into the engine — no applications.',cond:['Funded account','+10% growth','Applied instantly']},
+    {ic:'spark',cls:'blue',badge:'10% recurring',name:'Affiliate Program',desc:'Share your referral link and earn 10% of every challenge purchased by traders you refer — for life, not just the first order.',cond:['Share your link','Friend buys a challenge','Commission tracked live']},
+    {ic:'crown',cls:'orange',badge:'Spend-based',name:'Loyalty Tiers',desc:'Every $1 spent earns a loyalty point. Reach Silver and Gold to unlock bigger discount codes for future challenges.',cond:['Bronze: from first purchase','Silver: 500 points','Gold: 1,500 points']},
+  ];
+  $('view').innerHTML=affPanel+`<div class="badge-grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">`+cards.map(c=>`
+    <div class="panel">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+        <div class="tile-ic ${c.cls}">${ICO[c.ic]}</div>
+        <div><h3 style="font-size:15.5px">${c.name}</h3>
+          <span class="status paid" style="margin-top:2px"><span class="dot"></span>${c.badge}</span></div>
+      </div>
+      <p class="muted" style="font-size:13px;margin-bottom:12px">${c.desc}</p>
+      <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 14px">
+        ${c.cond.map(x=>`<div style="font-size:12px;color:var(--muted);padding:3px 0">· ${x}</div>`).join('')}
+      </div>
+    </div>`).join('')+`</div>
+  <p class="muted" style="font-size:12px;margin-top:14px">Every program above is a real platform mechanism — nothing here requires manual approval games.</p>`;
+ },
+
+ async payouts(){
+  const [data,accs]=await Promise.all([api('/api/me/payouts'),api('/api/me/accounts')]);
+  const funded=accs.filter(a=>a.status==='funded');
+  $('view').innerHTML=`
+    <div class="stats-row">
+      <div class="stat-tile"><div class="tile-ic green">${ICO.wallet}</div>
+        <div><div class="lbl">Total paid out</div><div class="val up">$${fmt(data.summary.total_paid)}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic orange">${ICO.cal}</div>
+        <div><div class="lbl">Pending requests</div><div class="val">${data.summary.pending}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic purple">${ICO.dollar}</div>
+        <div><div class="lbl">Available to request</div><div class="val">$${fmt(data.summary.available)}</div><div class="sub">your split of current profits</div></div></div>
+    </div>
+    ${funded.length?`<div class="panel" style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <span class="muted" style="font-size:13px;margin-right:6px">Request a payout:</span>
+      ${funded.map(a=>`<button class="btn-o sm" onclick="reqPayout(${a.id},true)">${esc(a.login)} · +$${fmt(Math.max(0,a.balance-a.initial_balance))}</button>`).join('')}
+    </div>`:''}
+    ${data.requests.length?`<div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Date</th><th>Account</th><th>Profit</th><th>Your share</th><th>Status</th></tr></thead>
+      <tbody>`+data.requests.map(r=>`<tr>
+        <td class="muted">${dstr(r.ts)}</td><td class="num">${esc(r.account)}</td>
+        <td class="num">$${fmt(r.profit_amount)}</td><td class="num">$${fmt(r.trader_share)}</td>
+        <td><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending':'failed'}"><span class="dot"></span>${esc(r.status)}</span></td></tr>`).join('')+`
+      </tbody></table></div>`
+      :`<div class="empty"><h3>No payout requests yet</h3><p>Pass a challenge, get funded and request your first performance reward. Your challenge fee comes back with it.</p></div>`}`;
+ },
+
+ async orders(){
+  const os=await api('/api/orders');
+  window._orders=os;
+  $('view').innerHTML=`<div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th>#</th><th>Product</th><th>Amount</th><th>Status</th><th>Account</th><th></th></tr></thead>
+    <tbody>`+(os.map(o=>`<tr>
+      <td class="num">${o.id}</td><td>${esc(o.product_label||o.product_key)}</td>
+      <td class="num">$${fmt(orderAmount(o))}${o.coupon?` <span class="up" style="font-size:11px">(${esc(o.coupon)})</span>`:''}</td>
+      <td><span class="status ${o.status==='paid'?'paid':'pending'}"><span class="dot"></span>${esc(o.status)}</span></td>
+      <td class="num">${o.account_id||'—'}</td>
+      <td style="text-align:right;white-space:nowrap">
+        ${o.account?`<button class="btn-o sm" id="cbtn-${o.id}" onclick="toggleOrderCreds(${o.id})">${ICO.key} Show credentials</button> `:''}
+        ${o.status==='paid'?`<button class="btn-o sm" onclick="openInvoice(${o.id})">${ICO.print} Invoice</button>`:''}</td></tr>
+      ${o.account?`<tr class="hidden" id="crow-${o.id}"><td colspan="6" class="sub-row">${credsBlock(o.account,true)}</td></tr>`:''}`)
+      .join('')||'<tr><td colspan="6" class="muted" style="padding:26px 18px">No orders yet</td></tr>')+`
+    </tbody></table></div>`;
+ },
+
+ async kyc(){
+  const s=ME.kyc_status;
+  if(s==='approved'){
+    $('view').innerHTML=`<div class="panel" style="max-width:560px;display:flex;gap:14px;align-items:center">
+      <div class="tile-ic green">${ICO.shield}</div>
+      <div><h3>Identity verified</h3><p class="muted" style="font-size:13.5px">Your KYC is approved — you can request payouts on funded accounts.</p></div></div>`;
+    return;
+  }
+  if(s==='pending'){
+    $('view').innerHTML=`<div class="panel" style="max-width:560px;display:flex;gap:14px;align-items:center">
+      <div class="tile-ic orange">${ICO.shield}</div>
+      <div><h3>Documents under review</h3><p class="muted" style="font-size:13.5px">Our team is reviewing your submission — you'll get an e-mail once it's approved.</p></div></div>`;
+    return;
+  }
+  $('view').innerHTML=`
+    <div class="sec-card" style="max-width:760px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
+        <div class="tile-ic blue">${ICO.shield}</div><h3 style="margin:0">Submit KYC Documents</h3>
+      </div>
+      <p class="muted" style="font-size:13px;margin-bottom:18px">Required once, before your first payout. Data is used only for verification.</p>
+      <div class="grid2" style="margin-bottom:10px">
+        <div><label class="muted" style="font-size:12px">Full Name (as on ID)</label><input id="k-name" class="inp" placeholder="John Smith"></div>
+        <div><label class="muted" style="font-size:12px">Date of Birth</label><input id="k-dob" type="date" class="inp"></div>
+        <div><label class="muted" style="font-size:12px">Country</label>
+          <select id="k-country" class="inp">
+            <option value="">Select a country…</option>
+            ${COUNTRIES.map(k=>`<option${ME.kyc_country===k?' selected':''}>${k}</option>`).join('')}
+          </select></div>
+        <div><label class="muted" style="font-size:12px">ID Type</label>
+          <select id="k-idtype" class="inp"><option>Passport</option><option>National ID</option><option>Driver's License</option></select></div>
+      </div>
+      <div style="margin-bottom:10px"><label class="muted" style="font-size:12px">Full Address</label>
+        <input id="k-address" class="inp" placeholder="Street, city, postal code"></div>
+      <div style="margin-bottom:18px"><label class="muted" style="font-size:12px">ID Number</label>
+        <input id="k-idnum" class="inp" placeholder="Document number"></div>
+
+      <h3 style="font-size:15px;margin-bottom:6px">Document Uploads</h3>
+      <div class="file-row"><div class="fl"><b>ID Front *</b><p>JPG, PNG or PDF, max 5 MB</p></div>
+        <input type="file" id="f-front" accept=".jpg,.jpeg,.png,.pdf"></div>
+      <div class="file-row"><div class="fl"><b>ID Back (optional)</b><p>JPG, PNG or PDF, max 5 MB</p></div>
+        <input type="file" id="f-back" accept=".jpg,.jpeg,.png,.pdf"></div>
+      <div class="file-row"><div class="fl"><b>Proof of Residence *</b><p>Utility bill or bank statement, max 3 months old</p></div>
+        <input type="file" id="f-res" accept=".jpg,.jpeg,.png,.pdf"></div>
+      <p id="kyc-err" class="form-err hidden" style="margin-top:10px"></p>
+      <button class="btn-p lg" style="margin-top:16px" onclick="submitKyc()">Submit KYC</button>
+    </div>`;
+ },
+
+ async support(){
+  const tv=window._ticketView;
+  if(tv==='new'){
+    $('view').innerHTML=`
+      <button class="backlink" onclick="window._ticketView=null;go('support')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg> Back to Tickets</button>
+      <div class="sec-card" style="max-width:640px"><h3>Create New Ticket</h3>
+        <div style="display:flex;flex-direction:column;gap:11px;margin-top:12px">
+          <input id="t-subject" class="inp" placeholder="Subject">
+          <textarea id="t-msg" class="inp" rows="6" placeholder="Describe your issue…"></textarea>
+          <button class="btn-p" onclick="submitTicket()">Create Ticket</button>
+        </div></div>`;
+    return;
+  }
+  if(typeof tv==='number'){
+    const t=await api('/api/me/tickets/'+tv);
+    $('view').innerHTML=`
+      <button class="backlink" onclick="window._ticketView=null;go('support')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg> Back to Tickets</button>
+      <div class="sec-card" style="max-width:720px">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:14px">
+          <h3 style="margin:0">${esc(t.subject)}</h3>
+          <span class="status ${t.status==='closed'?'failed':t.status==='answered'?'paid':'pending'}"><span class="dot"></span>${t.status}</span>
+        </div>
+        <div class="thread">${t.thread.map(m=>`
+          <div class="msg ${m.author}"><div class="who">${m.author==='admin'?'Support team':'You'} · ${dstr(m.ts)}</div>${esc(m.body)}</div>`).join('')}
+        </div>
+        ${t.status!=='closed'?`
+        <div style="display:flex;gap:10px;margin-top:16px">
+          <input id="t-reply" class="inp" placeholder="Write a reply…">
+          <button class="btn-p" onclick="replyTicket(${t.id})">Send</button>
+        </div>`:'<p class="muted" style="font-size:12.5px;margin-top:14px">This ticket is closed. Create a new one if you need more help.</p>'}
+      </div>`;
+    return;
+  }
+  const rows=await api('/api/me/tickets');
+  const head=`<div style="display:flex;justify-content:flex-end;margin-bottom:14px">
+    <button class="btn-p sm" onclick="window._ticketView='new';go('support')">+ New Ticket</button></div>`;
+  if(!rows.length){
+    $('view').innerHTML=head+`<div class="empty">
+      ${'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:38px;height:38px;margin:0 auto 14px;display:block;color:var(--dim)"><path d="M21 12a8 8 0 0 1-8 8H4l2.3-2.8A8 8 0 1 1 21 12z"/></svg>'}
+      <h3>No Tickets Yet</h3><p>Need help with anything? Our team replies by the next business day.</p>
+      <button class="btn-p" onclick="window._ticketView='new';go('support')">Create Your First Ticket</button></div>`;
+    return;
+  }
+  $('view').innerHTML=head+`<div class="tbl-wrap">`+rows.map(t=>`
+    <div class="ticket-row" onclick="window._ticketView=${t.id};go('support')">
+      <div class="tile-ic blue" style="width:36px;height:36px;flex:0 0 36px">${ICO.chat}</div>
+      <div class="sub"><b>${esc(t.subject)}</b><span>#${t.id} · ${t.messages} message${t.messages>1?'s':''} · updated ${dstr(t.last_ts)}</span></div>
+      <span class="status ${t.status==='closed'?'failed':t.status==='answered'?'paid':'pending'}"><span class="dot"></span>${t.status}</span>
+    </div>`).join('')+`</div>`;
+ },
+
+ async settings(){
+  const n=ME.notify||{};
+  const sw=(key,label,desc)=>`
+    <div class="switch-row"><div><h4>${label}</h4><p>${desc}</p></div>
+      <label class="switch"><input type="checkbox" ${n[key]?'checked':''}
+        onchange="patchPref('${key}',this.checked)"><i></i></label></div>`;
+  $('view').innerHTML=`
+    <div class="sec-card" style="max-width:640px"><h3>Profile Information</h3>
+      <div style="display:flex;flex-direction:column;gap:11px;margin-top:12px">
+        <div><label class="muted" style="font-size:12px">Full Name</label>
+          <input id="s-name" class="inp" value="${esc(ME.full_name||'')}"></div>
+        <div><label class="muted" style="font-size:12px">Email Address</label>
+          <input class="inp" value="${esc(ME.email)}" disabled>
+          <p class="muted" style="font-size:11.5px;margin-top:4px">Email cannot be changed.</p></div>
+        <button class="btn-p" style="align-self:flex-start" onclick="saveProfile()">Save Changes</button>
+      </div></div>
+
+    <div class="sec-card" style="max-width:640px"><h3>Change Password</h3>
+      <div style="display:flex;flex-direction:column;gap:11px;margin-top:12px">
+        <input id="s-cur" type="password" class="inp" placeholder="Current password" autocomplete="current-password">
+        <input id="s-new" type="password" class="inp" placeholder="New password (min. 8 characters)" autocomplete="new-password">
+        <input id="s-new2" type="password" class="inp" placeholder="Confirm new password" autocomplete="new-password">
+        <button class="btn-p" style="align-self:flex-start" onclick="savePassword()">Change Password</button>
+      </div></div>
+
+    <div class="sec-card" style="max-width:640px"><h3>Notification Preferences</h3>
+      <div style="margin-top:6px">
+        ${sw('updates','Email Updates','Account creation, credentials and verification e-mails.')}
+        ${sw('trading','Trading Alerts','Phase passed, funded status and rule-breach notifications.')}
+        ${sw('payouts','Payout Notifications','Updates about your payout requests.')}
+        ${sw('marketing','Marketing Emails','Occasional product news. We send very few of these.')}
+      </div></div>
+
+    <div class="sec-card" style="max-width:640px;border-color:#f5c6c6"><h3 style="color:var(--red)">Danger Zone</h3>
+      <p class="muted" style="font-size:13px;margin:8px 0 14px">Deleting your account anonymizes your personal data and permanently disables login.
+        Trading records are retained for accounting. This cannot be undone.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <input id="s-delpass" type="password" class="inp" placeholder="Confirm with your password" style="max-width:280px">
+        <button class="btn-o" style="border-color:#f5c6c6;color:var(--red)" onclick="deleteAccount()">Delete Account</button>
+      </div></div>`;
+ },
+};
+
+/* ---------- akcje widokow ---------- */
+function goAffiliate(){go('rewards')}
+
+function openJournalModal(){
+  api('/api/me/accounts').then(accs=>{
+    const box=document.createElement('div');
+    box.id='j-modal'; box.className='modal-wrap';
+    box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-head"><h3>New Journal Entry</h3>
+        <button class="icon-btn" onclick="document.getElementById('j-modal').remove()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+      <div class="stack" style="margin-top:8px">
+        <input id="j-title" class="inp" placeholder="Title, e.g. 'NY session — gold short'">
+        <select id="j-acc" class="inp"><option value="">No account</option>
+          ${accs.map(a=>`<option value="${a.id}">${esc(a.login)} · ${esc(a.product_key)}</option>`).join('')}</select>
+        <textarea id="j-content" class="inp" rows="6" placeholder="What happened? What did you learn?"></textarea>
+        <button class="btn-p" onclick="saveJournal()">Save entry</button>
+      </div></div>`;
+    box.onclick=()=>box.remove();
+    document.body.appendChild(box);
+    setTimeout(()=>$('j-title').focus(),50);
+  });
+}
+async function saveJournal(){
+  try{
+    await api('/api/me/journal',{method:'POST',body:JSON.stringify({
+      title:$('j-title').value,content:$('j-content').value,
+      account_id:$('j-acc').value?parseInt($('j-acc').value):null})});
+    document.getElementById('j-modal')?.remove();
+    toast('Entry saved.','ok');go('journal');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function delJournal(id){
+  try{await api('/api/me/journal/'+id,{method:'DELETE'});go('journal')}
+  catch(e){toast('Error: '+e.message,'err')}
+}
+
+async function submitTicket(){
+  try{
+    await api('/api/me/tickets',{method:'POST',body:JSON.stringify({
+      subject:$('t-subject').value,message:$('t-msg').value})});
+    window._ticketView=null;toast('Ticket created — we usually reply within one business day.','ok');go('support');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function replyTicket(id){
+  try{
+    await api(`/api/me/tickets/${id}/reply`,{method:'POST',body:JSON.stringify({message:$('t-reply').value})});
+    go('support');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+
+async function saveProfile(){
+  try{await api('/api/me',{method:'PATCH',body:JSON.stringify({full_name:$('s-name').value})});
+    ME=await api('/api/auth/me');boot();toast('Profile saved.','ok');go('settings');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function savePassword(){
+  if($('s-new').value!==$('s-new2').value){toast('Passwords do not match.','err');return}
+  try{await api('/api/me/password',{method:'POST',body:JSON.stringify({
+    current_password:$('s-cur').value,new_password:$('s-new').value})});
+    toast('Password changed.','ok');go('settings');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function patchPref(key,val){
+  try{const r=await api('/api/me',{method:'PATCH',body:JSON.stringify({['notify_'+key]:val})});
+    ME.notify=r.notify;
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function deleteAccount(){
+  const pass=$('s-delpass').value;
+  if(!pass){toast('Enter your password to confirm.','err');return}
+  try{await api('/api/me/delete',{method:'POST',body:JSON.stringify({password:pass})});
+    toast('Account deleted.','ok');setTimeout(logout,800);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+
+async function submitKyc(){
+  const err=m=>{const el=$('kyc-err');el.textContent=m;el.classList.remove('hidden')};
+  const name=$('k-name').value.trim(),country=$('k-country').value.trim();
+  if(!name||!country){err('Full name and country are required.');return}
+  const front=$('f-front').files[0],back=$('f-back').files[0],res=$('f-res').files[0];
+  if(!front||!res){err('ID Front and Proof of Residence are required.');return}
+  try{
+    await api('/api/me/kyc',{method:'POST',body:JSON.stringify({
+      full_name:name,country,dob:$('k-dob').value||null,address:$('k-address').value||null,
+      id_type:$('k-idtype').value,id_number:$('k-idnum').value||null})});
+    const fd=new FormData();
+    fd.append('id_front',front); if(back)fd.append('id_back',back); fd.append('residence',res);
+    const r=await fetch('/api/me/kyc/docs',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN},body:fd});
+    if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||r.status);
+    ME=await api('/api/auth/me');boot();
+    toast('KYC submitted — documents are under review.','ok');go('kyc');
+  }catch(e){err('Error: '+e.message)}
+}
+
+/* ---------- faktura ---------- */
+/* Kwota zamowienia na liscie i fakturze.
+   Granty maja w bazie 0 USD, ale faktura z zerem wyglada jak darmowy produkt —
+   wiec spadamy na cene z CENNIKA. Gdy przy grancie wskazano oplacony tier
+   (BOGO), `amount_usd` juz go trzyma i to on wygrywa. */
+function orderAmount(o){return o.amount_usd>0?o.amount_usd:(o.list_price||0)}
+
+/* Pozycje faktury. Przy BOGO na fakturze stoi tier, za ktory klient FAKTYCZNIE
+   zaplacil, plus wiersz opisujacy podbicie. */
+function invRows(o){
+  const kwota=v=>`<td style="text-align:right;font-family:var(--mono)">${v}</td>`;
+  const bogo=o.bogo_paid_label&&o.bogo_paid_size&&o.account_size&&o.bogo_paid_size<o.account_size;
+  if(bogo){
+    const k=v=>v>=1000?'$'+Math.round(v/1000)+'K':'$'+fmt0(v);
+    return `<tr>
+        <td>Evaluation program access — ${esc(o.bogo_paid_label)}</td>
+        ${kwota('$'+fmt(o.bogo_paid_price))}</tr>
+      <tr><td style="color:#64748b">BOGO promotion — ${k(o.bogo_paid_size)} + ${k(o.bogo_paid_size)} free
+        = <b style="color:#0f172a">$${fmt0(o.account_size)}</b> allocation</td>
+        ${kwota('included')}</tr>`;
+  }
+  return `<tr>
+    <td>Evaluation program access — ${esc(o.product_label||o.product_key)}${o.coupon?` (${esc(o.coupon)})`:''}</td>
+    ${kwota('$'+fmt(orderAmount(o)))}</tr>`;
+}
+
+function openInvoice(orderId){
+  const o=(window._orders||[]).find(x=>x.id===orderId);
+  if(!o)return;
+  const box=document.createElement('div');
+  box.id='inv-modal'; box.className='modal-wrap';
+  const date=new Date(o.created_at).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+  box.innerHTML=`<div class="inv-print" onclick="event.stopPropagation()">
+    <div class="inv-head">
+      <div style="display:flex;align-items:center;gap:10px"><img src="/static/img/logo.png" alt="">
+        <div><div class="inv-h1">{{ site_name }}</div><div style="font-size:11px;color:#64748b">Trading skills evaluation platform</div></div></div>
+      <div class="inv-meta"><b>INVOICE #${o.id}</b><br>${date}<br>Status: ${esc(o.status)}</div>
+    </div>
+    <div style="font-size:12.5px;color:#64748b">Billed to<br><b style="color:#0f172a">${esc(ME.full_name||ME.email)}</b><br>${esc(ME.email)}</div>
+    <table class="inv-tbl">
+      <thead><tr><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
+      <tbody>${invRows(o)}</tbody>
+    </table>
+    <div class="inv-total"><span>Total</span><span>$${fmt(o.bogo_paid_price||orderAmount(o))} USD</span></div>
+    <div class="inv-foot">One-time fee for access to a simulated trading evaluation on a demo account with virtual funds.
+      No real-market trading service is provided. Fee refundable with the first payout under the Refund Policy.</div>
+    <div class="noprint" style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
+      <button class="btn-o sm" onclick="document.getElementById('inv-modal').remove()">Close</button>
+      <button class="btn-p sm" onclick="window.print()">${ICO.print} Print / Save PDF</button>
+    </div>
+  </div>`;
+  box.onclick=()=>box.remove();
+  document.body.appendChild(box);
+}
+
+/* ---------- poswiadczenia (kompakt) ---------- */
+function credsBlock(a, compact){
+  if(!a) return '';
+  if(a.status==='provisioning' || !a.platform_password){
+    return `<div class="creds-wait" onclick="event.stopPropagation()"><span class="spin"></span>
+      Opening your account on <b>MetaQuotes-Demo</b> — credentials appear here and in your inbox within a minute.</div>`;
+  }
+  const row=(label,val)=>`
+    <div class="cred-row">
+      <span class="k">${label}</span>
+      <span class="v"><code>${esc(val)}</code>
+        <button class="copy" onclick="event.stopPropagation();copyVal(this,'${esc(String(val)).replace(/'/g,"\\'")}')" title="Copy">${ICO.copy}</button>
+      </span>
+    </div>`;
+  return `
+    <div class="creds" onclick="event.stopPropagation()">
+      <div class="creds-h">${ICO.key} MT5 credentials</div>
+      ${row('Server', a.platform_server||'—')}
+      ${row('Login', a.platform_login||'—')}
+      ${row('Password', a.platform_password)}
+      ${compact?'':'<p style="font-size:11px;color:var(--dim);margin-top:6px">Works in MetaTrader 5 desktop, mobile and web — pick this server name.</p>'}
+    </div>`;
+}
+
+function copyVal(btn, val){
+  navigator.clipboard.writeText(val).then(()=>{
+    const old=btn.innerHTML; btn.innerHTML=ICO.check; btn.style.color='var(--green)';
+    setTimeout(()=>{btn.innerHTML=old;btn.style.color=''},1200);
+  });
+}
+
+/* ---------- modal zakupu ---------- */
+let PRODUCTS=[];
+
+function openBuy(key){
+  const p=PRODUCTS.find(x=>x.key===key);
+  if(!p)return;
+  const nm=(ME.full_name||'').trim().split(/\s+/);
+  const box=document.createElement('div');
+  box.id='buy-modal';
+  box.className='modal-wrap';
+  box.innerHTML=`
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-head">
+        <h3>${esc(p.label)}</h3>
+        <button class="icon-btn" onclick="closeBuy()" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>
+      <div class="plan-line">
+        <b class="mono" style="color:var(--txt);font-size:16px">$${fmt0(p.price_usd)}</b>
+        · simulated capital $${fmt0(p.account_size)} · split ${p.profit_split_pct}%
+      </div>
+      <div class="note">Your MT5 demo account is registered with MetaQuotes <b>under these details</b> —
+        they must be real; your credentials are delivered to them.</div>
+      <div class="stack">
+        <div class="grid2">
+          <input id="c-first" placeholder="First name" class="inp" value="${esc(ME.first_name||nm[0]||'')}">
+          <input id="c-last" placeholder="Last name" class="inp" value="${esc(ME.last_name||nm.slice(1).join(' ')||'')}">
+        </div>
+        <input id="c-phone" placeholder="Phone, e.g. +14155551234" class="inp" value="${esc(ME.phone||'')}">
+        <input id="c-email" class="inp" value="${esc(ME.email)}" disabled>
+        <input id="c-coupon" placeholder="Coupon code (optional)" class="inp">
+        <p id="buy-err" class="form-err hidden"></p>
+        <button id="buy-go" onclick="buy('${esc(p.key)}')" class="btn-p lg" style="width:100%">Buy &amp; create my account</button>
+        <p class="hint">One-time payment · fee refunded with your first payout</p>
+      </div>
+    </div>`;
+  box.onclick=closeBuy;
+  document.body.appendChild(box);
+  setTimeout(()=>$('c-first').focus(),50);
+}
+
+function closeBuy(){document.getElementById('buy-modal')?.remove()}
+
+function buyErr(msg){
+  const el=$('buy-err');
+  if(!el){toast(msg,'err');return}
+  el.textContent=msg; el.classList.remove('hidden');
+}
+
+async function buy(key){
+  const coupon=($('c-coupon').value||'').trim()||null;
+  const first=($('c-first').value||'').trim(), last=($('c-last').value||'').trim(), phone=($('c-phone').value||'').trim();
+  if(!first||!last||!phone){buyErr('Fill in your first name, last name and phone — the MT5 account is registered under these details.');return}
+  if(!/^\+?\d[\d\s-]{6,}$/.test(phone)){buyErr('Phone looks invalid — include the country code, e.g. +14155551234.');return}
+  const btn=$('buy-go'); if(btn){btn.disabled=true; btn.textContent='Processing…'}
+  try{
+    const res=await api('/api/checkout',{method:'POST',
+      body:JSON.stringify({product_key:key,coupon,first_name:first,last_name:last,phone})});
+    if(res.checkout_url && !res.mock){window.location=res.checkout_url;return;}  // realny Stripe
+    let prov=res;
+    if(res.mock){prov=await api(`/api/checkout/${res.order_id}/mock-complete`,{method:'POST'});}
+    ME=await api('/api/auth/me');
+    closeBuy();
+    if(prov.provisioning){
+      toast('✅ Payment received.\nYour MT5 demo account is being created — up to a minute.\nCredentials arrive by e-mail and under Challenges.','ok',9000);
+    }else{
+      toast(`✅ Account created!\nServer: ${prov.platform_server||'—'}\nLogin: ${prov.platform_login}\nPassword: ${prov.platform_password}\n(also sent by e-mail)`,'ok',12000);
+    }
+    go('accounts');
+  }catch(e){
+    buyErr('Error: '+e.message);
+    const btn=$('buy-go'); if(btn){btn.disabled=false; btn.textContent='Try again'}
+  }
+}
+
+/* ---------- DETAL KONTA ---------- */
+const COUNTRIES='Afghanistan|Albania|Algeria|Andorra|Angola|Antigua and Barbuda|Argentina|Armenia|Australia|Austria|Azerbaijan|Bahamas|Bahrain|Bangladesh|Barbados|Belarus|Belgium|Belize|Benin|Bhutan|Bolivia|Bosnia and Herzegovina|Botswana|Brazil|Brunei|Bulgaria|Burkina Faso|Burundi|Cambodia|Cameroon|Canada|Cape Verde|Central African Republic|Chad|Chile|China|Colombia|Comoros|Congo|Costa Rica|Croatia|Cuba|Cyprus|Czechia|Denmark|Djibouti|Dominica|Dominican Republic|Ecuador|Egypt|El Salvador|Equatorial Guinea|Eritrea|Estonia|Eswatini|Ethiopia|Fiji|Finland|France|Gabon|Gambia|Georgia|Germany|Ghana|Greece|Grenada|Guatemala|Guinea|Guinea-Bissau|Guyana|Haiti|Honduras|Hong Kong|Hungary|Iceland|India|Indonesia|Iran|Iraq|Ireland|Israel|Italy|Ivory Coast|Jamaica|Japan|Jordan|Kazakhstan|Kenya|Kiribati|Kosovo|Kuwait|Kyrgyzstan|Laos|Latvia|Lebanon|Lesotho|Liberia|Libya|Liechtenstein|Lithuania|Luxembourg|Macau|Madagascar|Malawi|Malaysia|Maldives|Mali|Malta|Marshall Islands|Mauritania|Mauritius|Mexico|Micronesia|Moldova|Monaco|Mongolia|Montenegro|Morocco|Mozambique|Myanmar|Namibia|Nauru|Nepal|Netherlands|New Zealand|Nicaragua|Niger|Nigeria|North Korea|North Macedonia|Norway|Oman|Pakistan|Palau|Palestine|Panama|Papua New Guinea|Paraguay|Peru|Philippines|Poland|Portugal|Qatar|Romania|Russia|Rwanda|Saint Kitts and Nevis|Saint Lucia|Saint Vincent and the Grenadines|Samoa|San Marino|Sao Tome and Principe|Saudi Arabia|Senegal|Serbia|Seychelles|Sierra Leone|Singapore|Slovakia|Slovenia|Solomon Islands|Somalia|South Africa|South Korea|South Sudan|Spain|Sri Lanka|Sudan|Suriname|Sweden|Switzerland|Syria|Taiwan|Tajikistan|Tanzania|Thailand|Timor-Leste|Togo|Tonga|Trinidad and Tobago|Tunisia|Turkey|Turkmenistan|Tuvalu|Uganda|Ukraine|United Arab Emirates|United Kingdom|United States|Uruguay|Uzbekistan|Vanuatu|Vatican City|Venezuela|Vietnam|Yemen|Zambia|Zimbabwe'.split('|');
+const PHASE_LABEL={eval_1:'Phase 1',eval_2:'Phase 2',funded:'Funded'};
+
+async function openAcc(id){
+  $('pg-title').textContent='Account Dashboard'; $('pg-crumb').textContent='Objectives, credentials and performance';
+  $('view').innerHTML='<div class="skel" style="height:110px;margin-bottom:16px"></div><div class="skel" style="height:300px"></div>';
+  const [a,act]=await Promise.all([api('/api/me/accounts/'+id),api(`/api/me/accounts/${id}/activity`)]);
+  const m=a.metrics||{};
+  window._act=act; window._accId=id;
+  const latest=act.days.length?act.days[act.days.length-1].day:null;
+  const base=latest?new Date(latest+'T00:00:00Z'):new Date();
+  window._calM=[base.getUTCFullYear(),base.getUTCMonth()];
+  const profitPct=m.profit_pct||0;
+  const profitUsd=a.balance-a.initial_balance;
+  const targetPct=m.profit_target_pct||0;
+  const targetUsd=a.initial_balance*targetPct/100;
+  const reach=targetPct?Math.min(100,Math.max(0,profitPct/targetPct*100)):100;
+  const ddPct=(m.overall_dd_used_pct||0)/100*(m.max_overall_loss_pct||0);
+  const ddUsd=a.initial_balance*ddPct/100, ddLimUsd=a.initial_balance*(m.max_overall_loss_pct||0)/100;
+  const dlPct=(m.daily_loss_used_pct||0)/100*(m.max_daily_loss_pct||0);
+  const dlUsd=a.initial_balance*dlPct/100, dlLimUsd=a.initial_balance*(m.max_daily_loss_pct||0)/100;
+  const curve=a.equity_curve||[];
+  $('view').innerHTML=`
+    <button class="backlink" onclick="go('accounts')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+      Back to Challenges</button>
+    ${a.source==='grant'?`<div class="gradient-banner" style="margin-bottom:18px">
+      <span class="gb-tag">${ICO.spark} ${esc(a.grant_note||'BOGO promotion')}</span><span class="gb-sep"></span>
+      <span class="gb-txt">${bogoText(a)}</span>
+    </div>`:''}
+    <div class="detail-head">
+      <h2>${a.status==='provisioning'?'MT5 account pending…':esc(a.login)}</h2>
+      <span class="status passed" style="text-transform:none">${PHASE_LABEL[a.phase]||esc(a.phase)}</span>
+      <span class="status ${esc(a.status)}"><span class="dot"></span>${a.status==='active'?'evaluation':esc(a.status)}</span>
+      <div class="chips">
+        <span class="kyc-chip">${a.steps===1?'1-Step':'2-Step'} · $${fmt0(a.initial_balance)}</span>
+        <button class="btn-o sm" id="creds-btn" onclick="toggleCreds()">${ICO.key} Show Credentials</button>
+      </div>
+    </div>
+
+    <div class="phase-card">
+      <div class="phase-top">
+        <div><h3>${PHASE_LABEL[a.phase]||a.phase}</h3>
+          <div class="t">${targetPct?`Target: ${targetPct}% profit ($${fmt(targetUsd)})`:'Funded account — no profit target. Trade and request payouts.'}</div></div>
+        <div class="phase-big"><div class="pct ${profitPct>=0?'up':'down'}">${profitPct>=0?'+':''}${profitPct.toFixed(2)}%</div>
+          <div class="usd">${profitUsd>=0?'+':''}$${fmt(profitUsd)}</div></div>
+      </div>
+      <div class="phase-bar"><i style="width:${reach}%"></i></div>
+      ${targetPct?`<div class="phase-sub">${reach.toFixed(1)}% of target reached</div>`:''}
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-tile"><div class="tile-ic purple">${ICO.dollar}</div>
+        <div><div class="lbl">Balance</div><div class="val">$${fmt(a.balance)}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic green">${ICO.trend}</div>
+        <div><div class="lbl">P&amp;L</div><div class="val ${profitPct>=0?'up':'down'}">${profitPct>=0?'+':''}${profitPct.toFixed(2)}%</div></div></div>
+      <div class="stat-tile"><div class="tile-ic orange">${ICO.alert}</div>
+        <div><div class="lbl">Max Drawdown</div><div class="val">${ddPct.toFixed(2)}% / ${m.max_overall_loss_pct}%</div>
+        <div class="sub">$${fmt(ddUsd)} / $${fmt(ddLimUsd)}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic blue">${ICO.target}</div>
+        <div><div class="lbl">Max Daily Loss</div><div class="val">${dlPct.toFixed(2)}% / ${m.max_daily_loss_pct}%</div>
+        <div class="sub">$${fmt(dlUsd)} / $${fmt(dlLimUsd)} limit</div></div></div>
+    </div>
+
+    <div class="wide-card">
+      <div><div class="lbl">Trading Days</div><div class="val">${m.trading_days??0}</div>
+        <div class="sub">minimum required: ${m.min_trading_days??0}</div></div>
+      <div class="tile-ic orange">${ICO.cal}</div>
+    </div>
+
+    <div class="sec-card hidden" id="creds-card">
+      <h3>Trading Credentials</h3>
+      <div class="warn-box">${ICO.alert}
+        <div><b>MT5 access is limited to one device per account</b>
+        Do not share these MT5 credentials or log in from multiple devices at the same time.</div>
+      </div>
+      <div class="creds-grid"${a.platform_password?'':' style="display:none"'}>
+        <div class="cred-cell"><div class="l">Platform</div><div class="v"><img src="/static/img/mt5.png" alt="MetaTrader 5"></div></div>
+        ${credCell('Server',a.platform_server)}
+        ${credCell('Login',a.platform_login)}
+        ${a.platform_password?credCell('Password',a.platform_password):''}
+        <div class="cred-cell"><div class="l">Leverage</div><div class="v">1:100</div></div>
+      </div>
+      ${(!a.platform_password)?'<div class="creds-wait"><span class="spin"></span> Setting up your trading account — server, login and password appear here in a moment.</div>':''}
+    </div>
+
+    <div class="sec-card">
+      <h3>Objectives</h3>
+      <div class="progress-list">
+        ${prog('Profit target',targetPct?(profitPct/targetPct*100):0,false,`${profitPct.toFixed(1)}% / ${targetPct}%`)}
+        ${prog('Daily loss used',m.daily_loss_used_pct,true,`${dlPct.toFixed(2)}% / ${m.max_daily_loss_pct}%`)}
+        ${prog('Max drawdown used',m.overall_dd_used_pct,true,`${ddPct.toFixed(2)}% / ${m.max_overall_loss_pct}%`)}
+        ${m.max_lots?prog('Open volume',(m.open_lots!=null?m.open_lots/m.max_lots*100:0),true,
+          `${m.open_lots!=null?m.open_lots.toFixed(2):'—'} / ${m.max_lots} lots`):''}
+      </div>
+      ${a.breach_reason?`<div class="warn-box" style="margin:16px 0 0;background:var(--red-bg);border-color:#f5c6c6;color:#a33">${ICO.alert}<div><b style="color:var(--red)">Rule breached</b>${esc(a.breach_reason)}</div></div>`:''}
+    </div>
+
+    <div class="sec-card">
+      <h3>Performance Overview</h3>
+      ${curve.length>1
+        ?'<div class="chart-box"><canvas id="d-chart"></canvas></div>'
+        :'<p class="muted" style="font-size:13px">The equity chart appears after the first risk-engine readings of this account.</p>'}
+    </div>
+
+    <div class="sec-card" id="cal-card"></div>
+
+    <div class="sec-card">
+      <h3>Transaction History</h3>
+      ${txTable(a,act)}
+    </div>
+
+    ${(a.payout_requests||[]).length?`<p class="muted" style="font-size:12.5px;margin-top:12px">Payout requests: ${a.payout_requests.map(r=>`${r.status} ($${fmt(r.trader_share)})`).join(', ')}</p>`:''}`;
+  calRender();
+  if(chart){chart.destroy();chart=null}
+  if(curve.length>1)chart=new Chart($('d-chart'),equityChartConfig(curve));
+}
+function toggleCreds(){
+  const card=$('creds-card'),btn=$('creds-btn');
+  const show=card.classList.toggle('hidden');
+  btn.innerHTML=(show?ICO.key+' Show Credentials':ICO.key+' Hide Credentials');
+  if(!show)card.scrollIntoView({behavior:'smooth',block:'center'});
+}
+function calShift(d){const [y,m]=window._calM;const nd=new Date(Date.UTC(y,m+d,1));
+  window._calM=[nd.getUTCFullYear(),nd.getUTCMonth()];calRender()}
+function calRender(){
+  const el=$('cal-card'); if(!el||!window._act)return;
+  const [y,m]=window._calM;
+  const map={}; window._act.days.forEach(d=>map[d.day]=d.pnl);
+  const first=new Date(Date.UTC(y,m,1));
+  const dow=first.getUTCDay();
+  const dim=new Date(Date.UTC(y,m+1,0)).getUTCDate();
+  const title=first.toLocaleString('en-US',{month:'long',year:'numeric',timeZone:'UTC'});
+  const pad=n=>String(n).padStart(2,'0');
+  let cells='';
+  for(let i=0;i<dow;i++)cells+='<div class="cal-day blank"></div>';
+  for(let d=1;d<=dim;d++){
+    const key=`${y}-${pad(m+1)}-${pad(d)}`;
+    const pnl=map[key];
+    let cls='',txt='';
+    if(pnl!==undefined){
+      cls=pnl>0?'profit':pnl<0?'loss':'flat';
+      txt=`<div class="pnl">${pnl>0?'+':''}$${fmt0(pnl)}</div>`;
+    }
+    cells+=`<div class="cal-day ${cls}"><div class="d">${d}</div>${txt}</div>`;
+  }
+  el.innerHTML=`
+    <div class="cal-head"><h3 style="margin:0">Trading Calendar</h3>
+      <div style="display:flex;align-items:center;gap:10px"><b>${title}</b>
+        <div class="cal-nav">
+          <button class="icon-btn" onclick="calShift(-1)" aria-label="Previous month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></button>
+          <button class="icon-btn" onclick="calShift(1)" aria-label="Next month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></button>
+        </div></div></div>
+    <div class="cal-grid">
+      ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=>`<div class="cal-dow">${d}</div>`).join('')}
+      ${cells}
+    </div>
+    <div class="cal-legend">
+      <span><i style="background:var(--green2)"></i> Profit Day</span>
+      <span><i style="background:#ef4444"></i> Loss Day</span>
+      <span><i style="background:var(--line2)"></i> No Trading</span>
+    </div>`;
+}
+/* Konto przyznane opisujemy jako promocje BOGO. Zdanie o oplaconym tierze
+   pada TYLKO wtedy, gdy naprawde znamy ten tier — inaczej byloby zmyslone. */
+function tier(v){return v>=1000?'$'+Math.round(v/1000)+'K':'$'+fmt0(v)}
+/* Znak PRZED dolarem: „-$8.44", nie „$-8.44". */
+function money(v){return (v<0?'-$':'+$')+fmt(Math.abs(v))}
+function bogoText(a){
+  if(a.bogo_paid_size&&a.bogo_paid_size<a.initial_balance)
+    return `Your promotion has been applied — you paid for the <b>${tier(a.bogo_paid_size)} tier</b>
+      and we upgraded your allocation to <b>$${fmt0(a.initial_balance)}</b>.
+      Same rules and the same profit split as a standard account.`;
+  return `<b>Buy one, get one free</b> — this bonus challenge is live on your account.
+    Same rules and the same profit split as a purchased account.`;
+}
+
+/* Ksiega konta: transakcje ORAZ wyplaty, w kolejnosci od najnowszej.
+   Saldo przychodzi z serwera (ze snapshotu z chwili zdarzenia). NIE liczyc go
+   wstecz od biezacego salda: wyplata i awans fazy resetuja saldo konta, wiec
+   cala historia przesuwala sie o wyplacona kwote. */
+function txTable(a,act){
+  const rows=act.ledger||[];
+  if(!rows.length)
+    return '<p class="muted" style="font-size:13px">Nothing here yet — close a trade and it will show up.</p>';
+  const bal=v=>v==null?'—':'$'+fmt(v);
+  return `<div style="overflow-x:auto"><table class="tbl" style="min-width:560px">
+    <thead><tr><th>Date</th><th>Instrument</th><th>Side</th><th style="text-align:right">Lots</th>
+      <th style="text-align:right">P&amp;L</th><th style="text-align:right">Balance</th></tr></thead>
+    <tbody>${rows.map(r=>r.kind==='payout'?`<tr>
+      <td class="muted">${dday(r.day)}</td>
+      <td style="font-weight:600">Payout<span class="muted" style="font-weight:400"> · $${fmt(r.trader_share)} to you</span></td>
+      <td><span class="tside payout">out</span></td>
+      <td class="num muted" style="text-align:right">—</td>
+      <td class="num down" style="text-align:right">${money(r.pnl)}</td>
+      <td class="num" style="text-align:right">${bal(r.balance)}</td></tr>`:`<tr>
+      <td class="muted">${dday(r.day)}</td>
+      <td class="num" style="font-weight:600">${esc(r.symbol)}</td>
+      <td><span class="tside ${esc(r.side)}">${esc(r.side)}</span></td>
+      <td class="num" style="text-align:right">${(r.lots||0).toFixed(2)}</td>
+      <td class="num ${r.pnl>=0?'up':'down'}" style="text-align:right">${money(r.pnl)}</td>
+      <td class="num" style="text-align:right">${bal(r.balance)}</td></tr>`).join('')}
+    </tbody></table></div>
+    <p class="muted" style="font-size:11px;margin-top:10px">Last ${rows.length} entr${rows.length===1?'y':'ies'}.
+      A payout removes the earned profit from the account — your share is paid out to you.</p>`;
+}
+async function issueCert(accId,kind){
+  try{const r=await api('/api/me/certificates',{method:'POST',
+      body:JSON.stringify({account_id:accId,kind})});
+    toast('Certificate ready.','ok'); window.open(r.url,'_blank'); go('certificates');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function issuePayoutCert(id){
+  try{const r=await api(`/api/me/payouts/${id}/certificate`,{method:'POST'});
+    toast('Certificate ready.','ok'); window.open(r.url,'_blank'); go('certificates');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+/* Poswiadczenia MT5 startuja UKRYTE i odslania sie je osobno dla kazdego konta.
+   Haslo do MT5 daje pelna kontrole nad rachunkiem — nie ma powodu, zeby wisialo
+   na ekranie przy samym wejsciu w liste zamowien. */
+function toggleOrderCreds(id){
+  const row=$('crow-'+id), btn=$('cbtn-'+id);
+  if(!row||!btn)return;
+  const ukryte=row.classList.toggle('hidden');
+  btn.innerHTML=ICO.key+(ukryte?' Show credentials':' Hide credentials');
+}
+function copyLink(url){navigator.clipboard.writeText(url)
+  .then(()=>toast('Link copied.','ok'),()=>toast('Could not copy.','err'))}
+
+function credCell(label,val){
+  if(!val)return '';
+  return `<div class="cred-cell"><div class="l">${label}</div>
+    <div class="v"><span class="mono">${esc(val)}</span>
+      <button class="copy" onclick="copyVal(this,'${esc(String(val)).replace(/'/g,"\\'")}')" title="Copy">${ICO.copy}</button>
+    </div></div>`;
+}
+function prog(label,pct,danger,suffix){const p=Math.min(100,Math.max(0,pct||0));
+  const cls=danger?(p>=100?'bad':p>=70?'warn':'mid'):'ok';
+  return `<div><div class="prog-top"><span>${label}</span><b>${suffix}</b></div>
+   <div class="prog-bar"><i class="${cls}" style="width:${p}%"></i></div></div>`;}
+async function reqPayout(id,stay){try{const r=await api(`/api/accounts/${id}/payout-request`,{method:'POST',body:JSON.stringify({method:'bank'})});
+  toast(`✅ Request submitted: payout $${fmt(r.trader_share)} (profit $${fmt(r.profit_amount)}). Awaiting review.`,'ok',8000);
+  stay?go('payouts'):openAcc(id);}catch(e){toast('Error: '+e.message,'err')}}
+
+boot();
+</script>
+</body>
+</html>

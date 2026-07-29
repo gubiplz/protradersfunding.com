@@ -1,0 +1,193 @@
+/* Certyfikaty (wypłata / zaliczenie) — ciemna płyta z JASNYMI akcentami:
+   świecąca ramka w elektrycznym błękicie, logo marki, wielka kwota, stopka
+   z datą, numerem certyfikatu i kodem QR do weryfikacji.
+
+   Świadomie BEZ numeru rachunku MT5 — dokument idzie na zewnątrz.
+
+   Rozmiary skalują się jednostkami KONTENERA (cqw), nie viewportu: karta ma
+   sufit 880 px, więc `vw` rosłoby razem z oknem i treść wychodziłaby poza
+   kartę na szerokim ekranie. */
+
+:root{
+  --k-tlo:#050914;
+  --k-tekst:#f2f6ff;
+  --k-cichy:#93a3c9;
+  --k-blekit:#2b8bff;
+  --k-jasny:#67d2ff;
+  --k-linia:rgba(120,170,255,.22);
+}
+
+.cert-page{
+  min-height:100vh;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:16px;padding:24px 16px;
+  background:radial-gradient(70% 55% at 50% 0%,#0d1a3a 0%,var(--k-tlo) 72%);
+}
+
+/* Ramka: jasna, świecąca krawędź — to ona daje „premium" na ciemnym tle */
+.cert-card{
+  container-type:inline-size;
+  position:relative;width:min(880px,100%);
+  padding:clamp(3px,.7cqw,6px);border-radius:20px;
+  background:linear-gradient(150deg,#67d2ff 0%,#2b8bff 38%,#1b4bd8 68%,#67d2ff 100%);
+  box-shadow:0 0 44px rgba(43,139,255,.42),0 30px 80px -40px #000;
+}
+.cert-inner{
+  position:relative;overflow:hidden;isolation:isolate;
+  aspect-ratio:1/1;display:flex;flex-direction:column;align-items:center;
+  padding:clamp(18px,4cqw,36px);border-radius:15px;text-align:center;
+  color:var(--k-tekst);
+  background:
+    radial-gradient(62% 44% at 50% 4%, rgba(43,139,255,.24) 0%, rgba(43,139,255,0) 64%),
+    linear-gradient(168deg,#0b142c 0%,#070d1e 52%,#050914 100%);
+}
+/* znak wodny: nasze logo pod treścią */
+.cert-inner::before{
+  content:"";position:absolute;z-index:-2;left:50%;top:48%;translate:-50% -50%;
+  width:74%;aspect-ratio:1/1;
+  background:url('/static/img/logo.png') center/contain no-repeat;
+  opacity:.055;
+}
+/* gilosz — delikatny grawerunek, żeby płyta nie była pusta */
+.cert-inner::after{
+  content:"";position:absolute;z-index:-1;inset:-8%;
+  background:url('/static/img/guilloche.svg') center/contain no-repeat;
+  opacity:.16;mix-blend-mode:screen;pointer-events:none;
+}
+
+/* --- marka ---
+   NIE nazywać tego `.cert-brand` — ta klasa istnieje już w site.css (certyfikat
+   na landingu) i nadpisywała wordmark fioletem. */
+.cert-logo{display:flex;align-items:center;gap:.45em;font-size:clamp(13px,2.8cqw,25px)}
+.cert-logo img{width:1.35em;height:1.35em}
+.cert-logo span{font-family:var(--display);font-weight:700;letter-spacing:-.015em}
+
+/* --- nagłówki --- */
+.cert-eyebrow{
+  display:flex;align-items:center;justify-content:center;gap:clamp(8px,1.7cqw,16px);
+  margin-top:clamp(10px,2.4cqw,22px);width:min(72%,430px);
+  font-family:var(--display);font-weight:700;text-transform:uppercase;
+  letter-spacing:.3em;font-size:clamp(8.5px,1.75cqw,14px);color:var(--k-jasny);
+}
+.cert-eyebrow s{flex:1;height:1px;text-decoration:none;
+  background:linear-gradient(90deg,transparent,var(--k-linia),transparent)}
+.cert-title{
+  font-family:var(--display);font-weight:800;text-transform:uppercase;
+  letter-spacing:.06em;font-size:clamp(20px,5.1cqw,45px);line-height:1;
+  margin:clamp(3px,.8cqw,7px) 0 0;
+}
+
+.cert-amountlabel{
+  font-family:var(--display);font-weight:600;text-transform:uppercase;
+  letter-spacing:.19em;font-size:clamp(8px,1.7cqw,13px);color:var(--k-cichy);
+  margin-top:clamp(7px,1.7cqw,15px);
+}
+.cert-amount{
+  font-family:var(--display);font-weight:800;letter-spacing:-.035em;
+  font-size:clamp(36px,11.2cqw,96px);line-height:1;margin-top:clamp(2px,.5cqw,5px);
+  text-shadow:0 0 38px rgba(103,210,255,.45),0 0 90px rgba(43,139,255,.3);
+}
+
+.cert-presented{
+  font-size:clamp(9px,1.85cqw,14.5px);color:var(--k-cichy);
+  margin-top:clamp(6px,1.4cqw,12px);
+}
+.cert-person{
+  font-family:var(--display);font-weight:700;letter-spacing:-.015em;
+  font-size:clamp(19px,4.6cqw,40px);line-height:1.12;margin-top:clamp(1px,.4cqw,4px);
+  text-wrap:balance;
+}
+.cert-blurb{
+  font-size:clamp(8.5px,1.7cqw,13.5px);line-height:1.65;color:var(--k-cichy);
+  max-width:62ch;margin:clamp(7px,1.6cqw,14px) auto 0;
+}
+.cert-note{font-size:clamp(8.5px,1.6cqw,13px);color:var(--k-jasny);margin-top:clamp(4px,1cqw,9px)}
+
+/* --- metryki tuz pod kwota: data i rozmiar konta --- */
+.cert-meta{
+  display:flex;justify-content:center;gap:clamp(18px,4.6cqw,52px);
+  margin-top:clamp(8px,1.9cqw,17px);
+}
+.cert-meta div{display:flex;flex-direction:column;align-items:center;gap:.22em}
+.cert-meta b{
+  font-family:var(--mono);font-weight:600;letter-spacing:-.01em;
+  font-size:clamp(13px,2.9cqw,26px);
+}
+.cert-meta span{
+  font-family:var(--display);font-weight:600;text-transform:uppercase;
+  letter-spacing:.15em;font-size:clamp(7px,1.35cqw,10.5px);color:var(--k-cichy);
+}
+
+/* --- stopka: podpis + QR z numerem certyfikatu --- */
+.cert-foot{
+  margin-top:auto;width:100%;display:grid;
+  grid-template-columns:1fr auto 1fr;align-items:end;
+  gap:clamp(10px,2.4cqw,24px);
+  padding-top:clamp(9px,2cqw,18px);border-top:1px solid var(--k-linia);
+}
+.cert-signblock{
+  display:flex;flex-direction:column;align-items:flex-start;gap:.3em;
+  text-align:left;min-width:0;
+}
+.cert-signblock .sig{font-family:var(--script);font-weight:400;font-size:clamp(15px,3.4cqw,30px)}
+.cert-signblock span{
+  font-family:var(--display);font-weight:600;text-transform:uppercase;
+  letter-spacing:.14em;font-size:clamp(6.5px,1.3cqw,10px);color:var(--k-cichy);
+}
+
+.cert-qr{
+  display:flex;flex-direction:column;align-items:center;
+  gap:clamp(3px,.7cqw,6px);
+}
+/* Bialy kafel z marginesem ciszy — tak QR skanuje sie najpewniej.
+   Modul ciemny na bieli, nie odwrotnie: czytniki tego oczekuja. */
+.cert-qr .qr-box{
+  background:#fff;border-radius:10px;padding:clamp(6px,1.2cqw,11px);
+  box-shadow:0 0 0 1px rgba(255,255,255,.5),0 8px 26px -12px rgba(0,0,0,.8);
+  line-height:0;
+}
+.cert-qr svg{width:clamp(72px,13.4cqw,118px);height:auto;display:block}
+.cert-qr b{
+  font-family:var(--mono);font-weight:600;font-size:clamp(7.5px,1.5cqw,11.5px);
+  letter-spacing:.02em;max-width:100%;overflow-wrap:anywhere;text-align:center;
+}
+.cert-qr span{
+  font-family:var(--display);font-weight:600;text-transform:uppercase;
+  letter-spacing:.12em;font-size:clamp(5.5px,1.1cqw,8.5px);color:var(--k-cichy);
+}
+
+/* Adres weryfikacji — o stopień większy niż dawna nota drobnym drukiem
+   i wyraźnie niżej, pod samą krawędzią dokumentu. */
+.cert-verify{
+  font-size:clamp(8px,1.55cqw,12.5px);color:var(--k-cichy);line-height:1.5;
+  margin-top:clamp(10px,2.4cqw,22px);text-align:center;overflow-wrap:anywhere;
+}
+
+/* --- pasek pod kartą (nie trafia na wydruk) --- */
+.cert-actions{display:flex;gap:12px;align-items:center;font-size:13px;color:var(--k-cichy)}
+.cert-actions a{color:var(--k-jasny);text-decoration:none;font-weight:600}
+.cert-actions a:hover{text-decoration:underline}
+
+/* Na wąskim ekranie kwadrat robi się za ciasny i treść wychodziła poza kartę. */
+@media (max-width:520px){
+  .cert-inner{aspect-ratio:auto;padding-top:22px;padding-bottom:22px}
+  .cert-foot{grid-template-columns:1fr;justify-items:center;gap:16px}
+  .cert-signblock{align-items:center;text-align:center}
+  .cert-meta{gap:22px}
+}
+
+@media print{
+  .cert-page{background:#fff;padding:0;min-height:auto}
+  .noprint{display:none!important}
+  .cert-card{box-shadow:none;width:100%;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+}
+
+/* --- podglad na landingu (jasna sekcja) ---
+   Ta sama karta co realny dokument, tylko bez pelnoekranowego tla strony
+   i nieco luzniej, bo kolumna landingu jest wezsza niz sam certyfikat. */
+.cert-demo{margin:0}
+.cert-demo .cert-inner{padding:clamp(16px,3.6cqw,30px)}
+.cert-demo .cert-blurb{max-width:44ch}
+@media (max-width:900px){
+  .cert-demo .cert-inner{aspect-ratio:auto;padding-top:24px;padding-bottom:24px}
+  .cert-demo .cert-foot{grid-template-columns:1fr;justify-items:center}
+}

@@ -1,0 +1,26 @@
+# Rdzeń (wymagane)
+fastapi>=0.110
+uvicorn[standard]>=0.27
+sqlalchemy>=2.0
+jinja2>=3.1
+python-multipart>=0.0.9   # uploady KYC (multipart/form-data)
+pydantic>=2.6
+python-dotenv>=1.0
+itsdangerous>=2.1          # podpisane tokeny auth
+segno>=1.6                 # kod QR na certyfikatach (czysty Python, zero zależności)
+
+# Płatności (realny Stripe; w trybie MOCK niewymagane)
+stripe>=7.0
+
+# Postgres / Supabase (produkcja — DATABASE_URL wskazuje na Postgres)
+psycopg[binary]>=3.1
+
+# Realne MT5 przez MetaApi (odkomentuj gdy FEED=metaapi)
+# metaapi-cloud-sdk>=27.0
+
+# Konta demo MT5 z web terminala MetaQuotes (FEED=metaquotes_web / METAQUOTES_WEB_ENABLED)
+# wymaga tez: playwright install chromium
+playwright>=1.40
+
+# Testy
+pytest>=8.0

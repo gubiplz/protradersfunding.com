@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Affiliate Program — {{ site_name }}{% endblock %}
+{% block description %}Earn 10% commission on every challenge purchased by traders you refer. Built-in tracking, live earnings dashboard.{% endblock %}
+{% block og_title %}Affiliate Program — {{ site_name }}{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="wrap">
+    <span class="pill">Affiliate program</span>
+    <h1>Earn <span class="grad-text">10%</span> of every referred challenge</h1>
+    <p class="lede">Share your personal link, and every challenge bought by a trader you referred earns
+       you commission. Tracking, attribution and earnings are built into the platform — no spreadsheets,
+       no chasing screenshots.</p>
+    <div style="margin-top:26px;display:flex;gap:14px;flex-wrap:wrap">
+      <a class="btn btn-lg" href="/portal">Get your link</a>
+      <a class="btn-ghost btn-lg" href="mailto:{{ support_email }}?subject=Affiliate%20program">Talk to us</a>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap">
+    <div class="sec-head" data-rv>
+      <h2>How it works</h2>
+    </div>
+    <div class="steps">
+      <div class="card step" data-rv>
+        <div class="step-num">01</div>
+        <h3>Create an account</h3>
+        <p>Every trader account comes with a personal referral code — find yours in the portal under
+           <b>Rewards</b>. Your link looks like <span class="mono" style="color:var(--txt)">{{ base_url }}/?ref=YOURCODE</span>.</p>
+      </div>
+      <div class="card step" data-rv>
+        <div class="step-num">02</div>
+        <h3>Share your link</h3>
+        <p>When someone opens the site through your link, your code is remembered and attached
+           automatically when they sign up. They can also type it manually at registration.</p>
+      </div>
+      <div class="card step" data-rv>
+        <div class="step-num">03</div>
+        <h3>Earn on every purchase</h3>
+        <p>You earn <b>10% of every challenge fee</b> paid by your referrals — not just the first one.
+           Referral count and earned commission update live in your portal.</p>
+      </div>
+    </div>
+
+    <div class="notice" data-rv>
+      <b>Payouts of affiliate commission</b> are handled by our team — request via
+      <a href="mailto:{{ support_email }}">{{ support_email }}</a> once your balance is above $50.
+      Self-referrals and coupon-stacking abuse are not eligible.
+    </div>
+  </div>
+</section>
+
+<section class="sec sec-tight">
+  <div class="wrap">
+    <div class="aff-band" data-rv>
+      <div style="flex:1;min-width:260px">
+        <h2>Why partner with {{ site_name }}?</h2>
+        <ul class="prose" style="margin-top:14px">
+          <li><b>Honest product</b> — real MT5 accounts and enforced-in-code rules make referrals easy to defend.</li>
+          <li><b>Lifetime attribution</b> — you earn on every purchase your referral makes, forever.</li>
+          <li><b>Live stats</b> — referral count and commission visible in your portal in real time.</li>
+        </ul>
+      </div>
+      <div style="text-align:center">
+        <div class="aff-pct grad-text">10%</div>
+        <div class="muted" style="font-size:13.5px">recurring, on every purchase</div>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

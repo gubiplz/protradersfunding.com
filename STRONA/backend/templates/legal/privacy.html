@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Privacy Policy — {{ site_name }}{% endblock %}
+{% block description %}How {{ site_name }} collects, uses and protects your personal data.{% endblock %}
+
+{% block content %}
+<section class="page-head"><div class="wrap">
+  <span class="pill">Legal</span>
+  <h1>Privacy Policy</h1>
+  <p class="updated">Last updated: July 2026</p>
+</div></section>
+
+<section class="sec sec-tight"><div class="wrap prose">
+  <div class="notice"><b>Template notice:</b> review with legal counsel (GDPR/local equivalents) and
+  fill in the data-controller identity before commercial operation.</div>
+
+  <h2>1. What we collect</h2>
+  <ul>
+    <li><strong>Account data:</strong> e-mail, password (stored as a salted hash), full name.</li>
+    <li><strong>Checkout data:</strong> first name, last name, phone number — required to open your
+        MetaTrader&nbsp;5 account with the platform provider.</li>
+    <li><strong>KYC data:</strong> name, country and a document reference, submitted by you before
+        rewards are paid.</li>
+    <li><strong>Trading telemetry:</strong> equity/balance snapshots, rule-breach events and challenge
+        progress of your simulated accounts.</li>
+    <li><strong>Payment data:</strong> processed by our payment provider (e.g. Stripe); we store order
+        metadata, never full card numbers.</li>
+  </ul>
+
+  <h2>2. What we use it for</h2>
+  <ul>
+    <li>Providing the service: creating MT5 accounts, monitoring objectives, paying rewards.</li>
+    <li>Transactional e-mail (credentials, phase results, payout status).</li>
+    <li>Fraud prevention and enforcing our Terms.</li>
+    <li>Legal obligations (accounting, AML/KYC where applicable).</li>
+  </ul>
+  <p>We do <strong>not</strong> sell personal data and we do not run third-party advertising trackers on this
+  site.</p>
+
+  <h2>3. Sharing</h2>
+  <p>Data is shared only with processors necessary to run the service: the MetaTrader&nbsp;5
+  infrastructure provider (account name on the demo server), the payment provider, and e-mail delivery.
+  Each processes data under its own agreement with us.</p>
+
+  <h2>4. Retention</h2>
+  <p>Account and order data are kept for as long as your account exists and thereafter as required by
+  law (typically accounting periods). Trading telemetry of closed accounts is retained for record and
+  certificate verification purposes.</p>
+
+  <h2>5. Your rights</h2>
+  <p>Depending on your jurisdiction, you may have the right to access, rectify, export or erase your
+  personal data, and to object to or restrict processing. Write to
+  <a href="mailto:{{ support_email }}">{{ support_email }}</a> — we respond within 30 days.</p>
+
+  <h2>6. Cookies and local storage</h2>
+  <p>We use only functional storage: your login token and, if you arrive through an affiliate link, the
+  referral code — both kept in your browser's local storage. No analytics or marketing cookies are set.</p>
+
+  <h2>7. Security</h2>
+  <p>Passwords are hashed (PBKDF2), credentials are transmitted over TLS, and access to production data
+  is restricted. No system is perfectly secure — report concerns to
+  <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p>
+
+  <h2>8. Contact</h2>
+  <p>Data controller: {{ site_name }} (contact: <a href="mailto:{{ support_email }}">{{ support_email }}</a>).</p>
+</div></section>
+{% endblock %}

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ headline_plain }} — {{ site_name }}</title>
+<link rel="icon" href="/static/img/favicon.png" type="image/png">
+<link rel="stylesheet" href="/static/css/site.css">
+<link rel="stylesheet" href="/static/css/cert.css">
+<meta name="robots" content="noindex">
+<style>
+  /* Skryptowy krój bierzemy z systemu — nie dowozimy webfontu tylko po podpis. */
+  :root{--script:'Snell Roundhand','Segoe Script','Brush Script MT','Bradley Hand',cursive}
+</style>
+</head>
+<body class="cert-page">
+
+<div class="cert-card">
+  <div class="cert-inner">
+
+    <div class="cert-logo">
+      <img src="/static/img/logo.png" alt="">
+      <span>{{ site_name }}</span>
+    </div>
+
+    <div class="cert-eyebrow"><s></s>{{ eyebrow }}<s></s></div>
+    <h1 class="cert-title">Certificate</h1>
+
+    <div class="cert-amountlabel">{{ amount_label }}</div>
+    <div class="cert-amount">{{ amount }}</div>
+
+    <div class="cert-presented">presented to</div>
+    <div class="cert-person">{{ trader_name }}</div>
+
+    <div class="cert-meta">
+      {% for label, value in meta %}
+      <div><b>{{ value }}</b><span>{{ label }}</span></div>
+      {% endfor %}
+    </div>
+
+    <p class="cert-blurb">{{ blurb }}</p>
+    {% if note %}<p class="cert-note">{{ note }}</p>{% endif %}
+
+    {# Siatka 1fr/auto/1fr — QR zostaje IDEALNIE na środku niezależnie od tego,
+       jak szeroki jest podpis po lewej. #}
+    <div class="cert-foot">
+      <div class="cert-signblock">
+        {% if signatory %}
+        <b class="sig">{{ signatory }}</b>
+        <span>{{ signatory_label|replace(':','') }}</span>
+        {% endif %}
+      </div>
+      <div class="cert-qr" title="Scan to verify this certificate">
+        <div class="qr-box">{{ qr_svg|safe }}</div>
+        <b>{{ cert_token }}</b>
+        <span>Certificate #</span>
+      </div>
+      <div></div>
+    </div>
+
+    <p class="cert-verify">Verify this certificate at {{ verify_full_url }}</p>
+  </div>
+</div>
+
+<div class="cert-actions noprint">
+  <a href="#" onclick="window.print();return false">Print / save as PDF</a>
+  <span>·</span><a href="{{ verify_url }}">Verify this certificate</a>
+</div>
+
+</body>
+</html>

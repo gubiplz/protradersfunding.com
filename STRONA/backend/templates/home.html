@@ -1,0 +1,449 @@
+{% extends "base.html" %}
+
+{# Podgląd certyfikatu w sekcji #certs korzysta z tego samego arkusza co realny
+   dokument, żeby landing nie rozjechał się z nim przy kolejnej zmianie. #}
+{% block head_extra %}<link rel="stylesheet" href="/static/css/cert.css">{% endblock %}
+
+{% block content %}
+
+<!-- ============================ HERO ============================ -->
+<section class="hero">
+  <div class="hero-glow"></div>
+  <div class="wrap hero-grid">
+    <div>
+      <span class="pill"><span class="dot"></span> Challenges run on real MT5 infrastructure</span>
+      <h1>Trade our capital.<br><span class="grad-text">Keep up to 90%</span> of the rewards.</h1>
+      <p class="hero-sub">Pass an evaluation on a real MetaTrader&nbsp;5 account, get funded and earn
+        performance-based rewards on simulated capital up to $200,000. Clear rules, an automated
+        risk engine and credentials delivered in minutes.</p>
+      <div class="hero-ctas">
+        <a class="btn btn-lg" href="#pricing">Start a Challenge</a>
+        <a class="btn-ghost btn-lg" href="#objectives">View Trading Objectives</a>
+      </div>
+      <div class="hero-note">
+        <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> One-time fee</span>
+        <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> No recurring costs</span>
+        <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> Fee refunded with first payout</span>
+      </div>
+    </div>
+    <div class="cfg" data-rv id="cfg">
+      <div class="cfg-head">
+        <div><h3>Configure your challenge</h3>
+          <span class="cfg-sub">Real plans, live from our catalog</span></div>
+        <span class="mock-live"><span class="dot"></span> INSTANT DELIVERY</span>
+      </div>
+      <div class="cfg-tabs" id="cfg-tabs"></div>
+      <div class="cfg-sizes" id="cfg-sizes"></div>
+      <div class="cfg-rows">
+        <div class="cfg-row"><span>One-time fee</span><b><span id="cfg-fee">—</span> <em>refunded with 1st payout</em></b></div>
+        <div class="cfg-row"><span>Profit target — Phase 1</span><b id="cfg-target">—</b></div>
+        <div class="cfg-row"><span>Your profit split</span><b id="cfg-split">—</b></div>
+      </div>
+      <div class="cfg-hl">
+        <div class="cfg-hl-label">Example first payout — you grow the account +10%</div>
+        <div class="cfg-hl-val" id="cfg-payout">$0</div>
+        <div class="cfg-hl-sub" id="cfg-payout-sub"></div>
+      </div>
+      <a class="btn btn-lg" id="cfg-cta" href="/portal" style="width:100%">Start this challenge →</a>
+      <div class="cfg-fine">*Illustrative math based on this plan's real split — not a promise. Rewards depend on your trading.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ STATS ============================ -->
+<section class="stats-band" id="statsBand">
+  <div class="wrap">
+    <div class="stats-grid" id="statsGrid"></div>
+    <div class="stats-note">Live numbers pulled straight from our platform — nothing curated by hand.</div>
+  </div>
+</section>
+
+<!-- ============================ PLATFORM ============================ -->
+<div class="wrap">
+  <div class="platform-strip" data-rv>
+    <div class="platform-badge"><img src="/static/img/mt5.png" alt="MetaTrader 5"> Powered by <b>&nbsp;MetaTrader&nbsp;5</b></div>
+    <div class="market-chips">
+      <span class="chip">Forex</span><span class="chip">Indices</span>
+      <span class="chip">Gold &amp; Metals</span><span class="chip">Crypto CFDs</span>
+    </div>
+  </div>
+  <div class="marquee" aria-hidden="true">
+    <div class="marquee-track">
+      <span>EURUSD</span><span>XAUUSD</span><span>US30</span><span>NAS100</span><span>GBPUSD</span><span>BTCUSD</span><span>SPX500</span><span>USDJPY</span><span>GER40</span><span>USOIL</span><span>ETHUSD</span><span>AUDUSD</span><span>XAGUSD</span><span>EURGBP</span><span>USDCAD</span>
+      <span>EURUSD</span><span>XAUUSD</span><span>US30</span><span>NAS100</span><span>GBPUSD</span><span>BTCUSD</span><span>SPX500</span><span>USDJPY</span><span>GER40</span><span>USOIL</span><span>ETHUSD</span><span>AUDUSD</span><span>XAGUSD</span><span>EURGBP</span><span>USDCAD</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ HOW IT WORKS ============================ -->
+<section class="sec" id="how">
+  <div class="wrap">
+    <div class="sec-head center" data-rv>
+      <span class="pill">Evaluation process</span>
+      <h2>Three steps to a funded account</h2>
+      <p>From checkout to MT5 credentials in minutes — the whole pipeline is automated.</p>
+    </div>
+    <div class="steps">
+      <div class="card step" data-rv>
+        <div class="step-num">01</div>
+        <svg class="ill" viewBox="0 0 120 80" fill="none">
+          <rect x="8" y="18" width="64" height="44" rx="8" stroke="#3b4674" stroke-width="2"/>
+          <rect x="24" y="10" width="64" height="44" rx="8" fill="#101626" stroke="#6366f1" stroke-width="2"/>
+          <path d="M34 26h28M34 34h20" stroke="#8b94ab" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="76" cy="42" r="14" fill="#101626" stroke="#34d399" stroke-width="2"/>
+          <path d="m70 42 4 4 8-8" stroke="#34d399" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <h3>Choose your challenge</h3>
+        <p>Pick an account size from $10,000 to $200,000: a 1-step or 2-step evaluation, or
+           Instant Funding if you'd rather skip the evaluation. One-time fee, no subscriptions.</p>
+      </div>
+      <div class="card step" data-rv>
+        <div class="step-num">02</div>
+        <svg class="ill" viewBox="0 0 120 80" fill="none">
+          <rect x="14" y="10" width="92" height="60" rx="8" fill="#101626" stroke="#3b4674" stroke-width="2"/>
+          <path d="M14 24h92" stroke="#3b4674" stroke-width="2"/>
+          <circle cx="24" cy="17" r="2.4" fill="#f87171"/><circle cx="32" cy="17" r="2.4" fill="#fbbf24"/><circle cx="40" cy="17" r="2.4" fill="#34d399"/>
+          <path d="M24 38h6l4 6 4-6h6" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="78" cy="46" r="11" stroke="#8b5cf6" stroke-width="2"/>
+          <path d="M78 41v5l4 3" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round"/>
+          <path d="M58 58h34" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-dasharray="2 5"/>
+        </svg>
+        <h3>Get MT5 credentials in minutes</h3>
+        <p>We open a real MetaTrader&nbsp;5 account for you automatically. Server, login and
+           password land in your dashboard and inbox — usually within a minute of payment.</p>
+      </div>
+      <div class="card step" data-rv>
+        <div class="step-num">03</div>
+        <svg class="ill" viewBox="0 0 120 80" fill="none">
+          <path d="M16 62 40 44l16 8 26-24" stroke="#34d399" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M70 26h12v12" stroke="#34d399" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="96" cy="52" r="16" fill="#101626" stroke="#6366f1" stroke-width="2"/>
+          <path d="M96 44v16M92 48.5c0-1.9 1.8-3 4-3s4 1.1 4 3-1.8 2.6-4 3.1-4 1.2-4 3 1.8 3 4 3 4-1.1 4-3" stroke="#818cf8" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <h3>Trade, pass, get funded</h3>
+        <p>Hit the profit target while respecting the loss limits. Pass verification, get funded
+           and request payouts of your share of the simulated profits — up to 90%.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ OBJECTIVES ============================ -->
+<section class="sec sec-tight" id="objectives">
+  <div class="wrap">
+    <div class="sec-head" data-rv>
+      <span class="pill">Trading objectives</span>
+      <h2>The rules we publish are the rules we enforce</h2>
+      <p>Every limit below is checked automatically by our risk engine — the same way, for everyone,
+         on every account, including the cap on total open volume. No fine print, no hidden
+         consistency traps.</p>
+    </div>
+    <div class="obj-scroll" data-rv>
+      <table class="obj">
+        <thead><tr><th>Objective</th><th>2-Step Evaluation</th><th>1-Step Evaluation</th></tr></thead>
+        <tbody id="objBody"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ PRICING ============================ -->
+<section class="sec" id="pricing">
+  <div class="wrap">
+    <div class="sec-head center" data-rv>
+      <span class="pill">Pricing</span>
+      <h2>Choose your challenge</h2>
+      <p>One-time fee. No recurring costs. Refunded in full with your first payout.</p>
+    </div>
+    <div style="text-align:center" data-rv><div class="tabs" id="tabs"></div></div>
+    <div class="plans" id="plans"></div>
+    <div class="pricing-note" data-rv>
+      <span>🔒 Secure checkout</span>
+      <span>⚡ Account delivered automatically</span>
+      <span>🏷️ Coupon codes accepted at checkout</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ SCALING ============================ -->
+<section class="sec sec-tight" id="scaling">
+  <div class="wrap">
+    <div class="split-grid">
+      <div class="sec-head" style="margin-bottom:0" data-rv>
+        <span class="pill">Scaling plan</span>
+        <h2>Grow the account. We scale it.</h2>
+        <p>Every time a funded account grows by <b class="mono" style="color:var(--txt)">+10%</b>,
+           we increase its balance by <b class="mono" style="color:var(--txt)">+25%</b>. The rule is
+           coded into the platform and applies automatically — no emails, no requests, no committees.</p>
+        <p style="margin-top:12px">Start at $100,000 and three scale-ups later you are managing
+           over $195,000 of simulated capital, with the same profit split.</p>
+      </div>
+      <div class="ladder" data-rv aria-hidden="true">
+        <div class="rung"><div class="rung-bar" style="height:34%"></div><div class="rung-cap">$100k</div><div class="rung-sub">start</div></div>
+        <div class="rung"><div class="rung-bar" style="height:52%"></div><div class="rung-cap">$125k</div><div class="rung-sub">after +10%</div></div>
+        <div class="rung"><div class="rung-bar" style="height:74%"></div><div class="rung-cap">$156k</div><div class="rung-sub">after +10%</div></div>
+        <div class="rung"><div class="rung-bar" style="height:100%"></div><div class="rung-cap">$195k</div><div class="rung-sub">after +10%</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ PAYOUTS ============================ -->
+<section class="sec" id="payouts">
+  <div class="wrap">
+    <div class="split-grid">
+      <div class="card" data-rv style="display:flex;flex-direction:column;justify-content:center;align-items:flex-start;gap:10px">
+        <span class="pill">Performance rewards</span>
+        <div class="big-split grad-text">90%</div>
+        <p class="muted">maximum profit split on 1-step funded accounts. 2-step accounts start at 80%.
+          Your challenge fee comes back in full with the first payout.</p>
+      </div>
+      <div class="card" data-rv>
+        <div class="payout-steps">
+          <div class="pstep"><div class="pstep-n">1</div><div><h4>Request a payout</h4>
+            <p>Any profit on a funded account can be requested from your dashboard.</p></div></div>
+          <div class="pstep"><div class="pstep-n">2</div><div><h4>KYC &amp; review</h4>
+            <p>One-time identity verification, then each request is reviewed by our team.</p></div></div>
+          <div class="pstep"><div class="pstep-n">3</div><div><h4>Get paid + certificate</h4>
+            <p>Receive your share of the simulated profits and a shareable, verifiable payout certificate.
+               First payout includes your challenge fee refund.</p></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ WHY US ============================ -->
+<section class="sec sec-tight" id="why">
+  <div class="wrap">
+    <div class="sec-head center" data-rv>
+      <span class="pill">Built different</span>
+      <h2>Transparency is the product</h2>
+      <p>Most of this industry runs on black boxes. We went the other way.</p>
+    </div>
+    <div class="grid6">
+      <div class="card why" data-rv>
+        <div class="why-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M6 6.5h.01M6 17.5h.01"/></svg></div>
+        <h3>Real MT5 accounts</h3>
+        <p>Your challenge runs on a real MetaTrader 5 server account — not an in-house simulator
+           we could quietly tweak.</p>
+      </div>
+      <div class="card why" data-rv>
+        <div class="why-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2 4 6v6c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V6z"/><path d="m9 12 2 2 4-4"/></svg></div>
+        <h3>Automated risk engine</h3>
+        <p>Equity is monitored continuously. Daily loss and max drawdown are enforced by code —
+           the same way for every trader, every time.</p>
+      </div>
+      <div class="card why" data-rv>
+        <div class="why-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2z"/><path d="M19 17H6a2 2 0 0 0-2 2"/><path d="M9 7h6M9 11h4"/></svg></div>
+        <h3>Published rules = enforced rules</h3>
+        <p>Every number on this page is exactly what the engine checks. If it's not written here,
+           it's not a rule.</p>
+      </div>
+      <div class="card why" data-rv>
+        <div class="why-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg></div>
+        <h3>Credentials in minutes</h3>
+        <p>Provisioning is fully automated — server, login and password are generated and delivered
+           right after checkout.</p>
+      </div>
+      <div class="card why" data-rv>
+        <div class="why-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M8 2v4M16 2v4M3 9h18"/><path d="m9 15 2 2 4-4"/></svg></div>
+        <h3>News &amp; weekend trading allowed</h3>
+        <p>No news blackouts, no forced flat over the weekend, no banned strategies. Trade your edge.</p>
+      </div>
+      <div class="card why" data-rv>
+        <div class="why-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="9" r="6"/><path d="m8.5 13.5-1.7 7L12 18l5.2 2.5-1.7-7"/><path d="m9.7 8.8 1.6 1.6 3-3.2"/></svg></div>
+        <h3>Verifiable certificates</h3>
+        <p>Every pass and payout comes with a certificate ID that anyone can check against our
+           database — proof that can't be photoshopped.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ LEADERBOARD ============================ -->
+<section class="sec sec-tight" id="lbSec">
+  <div class="wrap">
+    <div class="sec-head" data-rv>
+      <span class="pill">Leaderboard</span>
+      <h2>Top traders right now</h2>
+      <p>Live from the platform. Names are masked for privacy; profits include past payouts.</p>
+    </div>
+    <div class="board" data-rv>
+      <table class="lb">
+        <thead><tr><th>#</th><th>Trader</th><th>Account</th><th>Stage</th><th style="text-align:right">Profit</th></tr></thead>
+        <tbody id="lbBody"></tbody>
+      </table>
+      <div class="lb-note">Real accounts, real-time data. Simulated capital — see the disclaimer below.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ CERTIFICATES ============================ -->
+<section class="sec" id="certs">
+  <div class="wrap cert-wrap">
+    <div>
+      <div class="sec-head" style="margin-bottom:24px" data-rv>
+        <span class="pill">Certificates</span>
+        <h2>Verifiable, not just shareable</h2>
+        <p>Every passed evaluation and funded account gets a certificate with a unique ID.
+           Anyone can verify it against our database — recruiters, communities, or you in two years.</p>
+      </div>
+      <form class="verify-box" id="verifyForm" data-rv>
+        <input id="verifyInput" placeholder="Paste a certificate ID…" aria-label="Certificate ID">
+        <button class="btn" type="submit">Verify</button>
+      </form>
+    </div>
+    {# Podglad uzywa DOKLADNIE tych samych klas co prawdziwy certyfikat
+       (cert.css), zeby landing nie rozjechal sie z dokumentem przy kolejnej
+       zmianie wygladu. #}
+    <div class="cert-card cert-demo" data-rv>
+      <div class="cert-inner">
+        <div class="cert-logo"><img src="/static/img/logo.png" alt=""><span>{{ site_name }}</span></div>
+
+        <div class="cert-eyebrow"><s></s>Funded trader<s></s></div>
+        <h3 class="cert-title">Certificate</h3>
+
+        <div class="cert-amountlabel">Account size</div>
+        <div class="cert-amount">$100,000</div>
+
+        <div class="cert-presented">presented to</div>
+        <div class="cert-person">Your Name</div>
+
+        <div class="cert-meta">
+          <div><b>On your pass date</b><span>Date</span></div>
+          <div><b>2-Step</b><span>Program</span></div>
+        </div>
+
+        {# Bez akapitu opisowego — po lewej stoi już ten sam komunikat, a w węższej
+           kolumnie landingu treść nie mieściła się w kwadracie. #}
+        <div class="cert-foot">
+          <div class="cert-signblock"></div>
+          <div class="cert-qr">
+            <div class="qr-box">{{ sample_qr | safe }}</div>
+            <b>a1b2-example</b>
+            <span>Certificate #</span>
+          </div>
+          <div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ AFFILIATE ============================ -->
+<section class="sec sec-tight">
+  <div class="wrap">
+    <div class="aff-band" data-rv>
+      <div style="flex:1;min-width:260px">
+        <span class="pill">Affiliate program</span>
+        <h2 style="margin-top:12px">Refer traders, earn on every challenge</h2>
+        <p>Share your personal link and earn commission on each purchase made by traders you refer.
+           Tracking is built into the platform — see your referrals and earnings live in the portal.</p>
+        <div style="margin-top:22px"><a class="btn" href="/affiliate">Become an Affiliate</a></div>
+      </div>
+      <div style="text-align:center">
+        <div class="aff-pct grad-text">10%</div>
+        <div class="muted" style="font-size:13.5px">of every referred purchase</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ FAQ ============================ -->
+<section class="sec" id="faq">
+  <div class="wrap">
+    <div class="sec-head center" data-rv>
+      <span class="pill">FAQ</span>
+      <h2>Frequently asked questions</h2>
+    </div>
+    <div class="faq" data-rv>
+      <details>
+        <summary>Are these live trading accounts?</summary>
+        <div class="a">No. All accounts are demo accounts with virtual funds running in a simulated
+        environment on real MetaTrader 5 servers. You are never trading real money — you earn
+        performance-based rewards for passing objectives and trading profitably.</div>
+      </details>
+      <details>
+        <summary>How fast do I get my account?</summary>
+        <div class="a">Account creation is fully automated. Your MT5 server, login and password usually
+        appear in your dashboard (and inbox) within a minute of completing checkout.</div>
+      </details>
+      <details>
+        <summary>How is the daily loss limit calculated?</summary>
+        <div class="a">The daily loss limit (5%) is measured against your equity at the start of the
+        trading day (server time) and includes floating P&amp;L. If your equity drops below the daily
+        floor, the account fails automatically.</div>
+      </details>
+      <details>
+        <summary>What is the difference between static and trailing drawdown?</summary>
+        <div class="a">Static drawdown is a fixed floor below your starting balance (e.g. 10% on 2-step
+        plans). Trailing drawdown (1-step plans, 6%) follows your equity high-water mark up until it
+        locks at breakeven. Each plan card states which type applies.</div>
+      </details>
+      <details>
+        <summary>What happens if I break a rule?</summary>
+        <div class="a">The risk engine fails the account automatically, open positions are closed, and
+        you'll see the exact breach reason in your dashboard. You can always start a new challenge.</div>
+      </details>
+      <details>
+        <summary>Is there a limit on position size?</summary>
+        <div class="a">Yes — every account has a cap on the <b>total volume of open positions</b>
+        (6 lots on a $100,000 account, scaled proportionally to account size). It exists so the
+        challenge measures skill rather than one all-in trade. Exceeding it breaches the account,
+        the same as a loss limit.</div>
+      </details>
+      <details>
+        <summary>What is Instant Funding?</summary>
+        <div class="a">A funded account without an evaluation — you skip the phases and can request
+        payouts from day one. In exchange the fee is higher, the risk limits are tighter (4% daily,
+        6% overall) and the profit split is 70% instead of 80–90%.</div>
+      </details>
+      <details>
+        <summary>Is news trading allowed? Can I hold over the weekend?</summary>
+        <div class="a">Yes and yes. There are no news blackouts, no weekend-flat requirements and no
+        banned strategies. The only rules are the loss limits and targets published on this page.</div>
+      </details>
+      <details>
+        <summary>How do payouts work?</summary>
+        <div class="a">On a funded account you can request a payout of your share (80–90%) of the
+        simulated profits at any time. After a one-time KYC verification, each request is reviewed by
+        our team and paid out; your first payout also includes a full refund of the challenge fee.</div>
+      </details>
+      <details>
+        <summary>Is the fee really one-time? Any hidden costs?</summary>
+        <div class="a">One-time, per challenge. No subscriptions, no data fees, no platform fees — and
+        the fee is refunded in full with your first payout.</div>
+      </details>
+      <details>
+        <summary>Which platform and instruments can I trade?</summary>
+        <div class="a">MetaTrader 5 — desktop, mobile and web terminal, with the same credentials. You
+        can trade whatever the MT5 server offers: forex pairs, indices, gold and metals, and crypto CFDs.</div>
+      </details>
+      <details>
+        <summary>Can I have multiple accounts?</summary>
+        <div class="a">Yes, you can run multiple challenges in parallel — each account is evaluated
+        independently against its own objectives.</div>
+      </details>
+    </div>
+    <p style="text-align:center;margin-top:30px" class="muted" data-rv>
+      More questions? <a href="/faq" style="color:var(--acc-soft)">Read the full FAQ</a> or email
+      <a href="mailto:{{ support_email }}" style="color:var(--acc-soft)">{{ support_email }}</a>.
+    </p>
+  </div>
+</section>
+
+<!-- ============================ FINAL CTA ============================ -->
+<section class="final">
+  <div class="final-glow"></div>
+  <div class="wrap" data-rv>
+    <span class="pill"><span class="dot"></span> Accounts delivered automatically</span>
+    <h2 style="margin-top:18px">Ready to prove your edge?</h2>
+    <p>Pick a challenge, get your MT5 credentials in minutes and start trading toward a funded account.</p>
+    <a class="btn btn-lg" href="#pricing">Start Your Challenge</a>
+  </div>
+</section>
+
+{% endblock %}
+
+{% block scripts %}{% endblock %}
