@@ -148,3 +148,35 @@ def test_generowanie_zapisuje_konta_z_kanalu(monkeypatch):
     assert len(wpisy) == 2
     assert all(w.platform_server == "MetaQuotes-Demo" and not w.claimed for w in wpisy)
     s.close()
+
+
+def test_zdalna_przegladarka_odblokowuje_generator(monkeypatch):
+    """BROWSER_CDP_URL = przegladarka stoi poza tym procesem, wiec lokalna zbedna.
+
+    To jedyna droga, zeby kanal MetaQuotes dzialal na hostingu bezserwerowym —
+    bez tego panel slusznie odmawia, ale z ustawionym adresem ma przepuscic.
+    """
+    from app import metaquotes_web
+
+    monkeypatch.setattr(app_main.settings, "metaquotes_web_enabled", True)
+    monkeypatch.setattr(get_settings(), "browser_cdp_url", "http://zdalna:9222")
+
+    assert metaquotes_web.chromium_available() is True
+    dane = client.get("/api/admin/pool", headers=ADMIN_H).json()
+    assert dane["can_generate"] is True
+
+
+def test_opener_podlacza_sie_zamiast_uruchamiac(monkeypatch):
+    """Z adresem CDP opener ma sie LACZYC, a nie startowac wlasnego Chromium."""
+    from app import metaquotes_web
+
+    ustawienia = get_settings()
+    monkeypatch.setattr(ustawienia, "metaquotes_web_enabled", True)
+    monkeypatch.setattr(ustawienia, "browser_cdp_url", "wss://browserless.example/?token=abc")
+
+    opener = metaquotes_web.make_opener(ustawienia)
+    assert opener is not None
+    assert opener._cdp_url == "wss://browserless.example/?token=abc"
+
+    monkeypatch.setattr(ustawienia, "browser_cdp_url", "")
+    assert metaquotes_web.make_opener(ustawienia)._cdp_url == ""

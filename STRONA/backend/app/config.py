@@ -92,6 +92,12 @@ class Settings:
     metaquotes_web_screenshot_dir: str = os.getenv("METAQUOTES_WEB_SCREENSHOT_DIR", "")
     # Formularz wymaga telefonu — używane, gdy klient go nie poda.
     metaquotes_web_default_phone: str = os.getenv("METAQUOTES_WEB_DEFAULT_PHONE", "+10000000000")
+    # Adres ZDALNEJ przeglądarki (Chrome DevTools Protocol), np. usługa typu
+    # Browserless/Browserbase albo własny Chrome z --remote-debugging-port.
+    # Ustawiony => Playwright podłącza się do niej zamiast uruchamiać Chromium
+    # u siebie. To jedyny sposób, żeby kanał MetaQuotes działał na hostingu
+    # bezserwerowym, gdzie przeglądarki wgrać się nie da.
+    browser_cdp_url: str = os.getenv("BROWSER_CDP_URL", "")
     # Co ile odswiezac equity konta (logowanie do terminala trwa ~20 s).
     # To jest zarazem OPOZNIENIE wykrycia breachu.
     metaquotes_web_poll_sec: float = float(os.getenv("METAQUOTES_WEB_POLL_SEC", "120"))

@@ -226,10 +226,15 @@ class MetaQuotesWebOpener:
         timeout_ms: int = 45_000,
         min_interval_sec: float = 20.0,
         screenshot_dir: str | None = None,
+        cdp_url: str = "",
         sleep=asyncio.sleep,
         clock=time.monotonic,
     ) -> None:
         self._url = url
+        # Adres zdalnej przegladarki (CDP). Ustawiony => nie uruchamiamy Chromium
+        # lokalnie, tylko podlaczamy sie do cudzego. Dzieki temu kanal dziala tam,
+        # gdzie przegladarki wgrac sie NIE DA — np. na hostingu bezserwerowym.
+        self._cdp_url = (cdp_url or "").strip()
         self._headless = headless
         self._boot_wait_ms = boot_wait_ms
         self._timeout_ms = timeout_ms
@@ -264,7 +269,11 @@ class MetaQuotesWebOpener:
             ) from e
 
         async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=self._headless)
+            if self._cdp_url:
+                browser = await pw.chromium.connect_over_cdp(self._cdp_url,
+                                                             timeout=self._timeout_ms)
+            else:
+                browser = await pw.chromium.launch(headless=self._headless)
             try:
                 page = await browser.new_page(locale="en-US", viewport={"width": 1500, "height": 1000})
                 page.set_default_timeout(self._timeout_ms)
@@ -286,7 +295,13 @@ class MetaQuotesWebOpener:
                 await self._dump(locals().get("page"))
                 raise
             finally:
-                await browser.close()
+                # Zdalna przegladarka nie jest nasza — zamykamy tylko wlasna,
+                # inaczej ubilibysmy instancje wspoldzielona z innymi zadaniami.
+                if self._cdp_url:
+                    for kontekst in browser.contexts:
+                        await kontekst.close()
+                else:
+                    await browser.close()
 
     async def _fill_form(self, page, spec: WebDemoSpec) -> None:
         await page.fill("input[name=firstName]", spec.first_name)
@@ -356,7 +371,11 @@ class MetaQuotesWebOpener:
             raise WebReadError("Brak playwrighta — pip install playwright") from e
 
         async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=self._headless)
+            if self._cdp_url:
+                browser = await pw.chromium.connect_over_cdp(self._cdp_url,
+                                                             timeout=self._timeout_ms)
+            else:
+                browser = await pw.chromium.launch(headless=self._headless)
             try:
                 page = await browser.new_page(locale="en-US", viewport={"width": 1500, "height": 1000})
                 page.set_default_timeout(self._timeout_ms)
@@ -383,7 +402,13 @@ class MetaQuotesWebOpener:
                 await self._dump(locals().get("page"))
                 raise
             finally:
-                await browser.close()
+                # Zdalna przegladarka nie jest nasza — zamykamy tylko wlasna,
+                # inaczej ubilibysmy instancje wspoldzielona z innymi zadaniami.
+                if self._cdp_url:
+                    for kontekst in browser.contexts:
+                        await kontekst.close()
+                else:
+                    await browser.close()
 
     @staticmethod
     async def _accept_one_click_dialog(page) -> bool:
@@ -423,7 +448,11 @@ class MetaQuotesWebOpener:
 
         closed = 0
         async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=self._headless)
+            if self._cdp_url:
+                browser = await pw.chromium.connect_over_cdp(self._cdp_url,
+                                                             timeout=self._timeout_ms)
+            else:
+                browser = await pw.chromium.launch(headless=self._headless)
             try:
                 page = await browser.new_page(locale="en-US", viewport={"width": 1500, "height": 1000})
                 page.set_default_timeout(self._timeout_ms)
@@ -496,7 +525,13 @@ class MetaQuotesWebOpener:
                 await self._dump(locals().get("page"))
                 raise
             finally:
-                await browser.close()
+                # Zdalna przegladarka nie jest nasza — zamykamy tylko wlasna,
+                # inaczej ubilibysmy instancje wspoldzielona z innymi zadaniami.
+                if self._cdp_url:
+                    for kontekst in browser.contexts:
+                        await kontekst.close()
+                else:
+                    await browser.close()
 
     async def _dump(self, page) -> None:
         """Zrzut ekranu przy błędzie — bez tego debugowanie zmian na stronie jest zgadywanką."""
@@ -513,12 +548,19 @@ class MetaQuotesWebOpener:
 
 
 def chromium_available() -> bool:
-    """Czy przegladarka Playwrighta jest zainstalowana (`playwright install chromium`).
+    """Czy jest CZYM otworzyc strone: lokalne Chromium albo zdalna przegladarka.
 
-    Bez niej provisioning failuje przy pierwszym zakupie, a konto wisi w
-    statusie `provisioning` — lepiej ostrzec juz przy starcie serwera.
+    Bez tego provisioning failuje przy pierwszym zakupie, a konto wisi w statusie
+    `provisioning` — lepiej ostrzec juz przy starcie serwera. Ustawiony
+    BROWSER_CDP_URL wystarcza: przegladarka stoi wtedy poza tym procesem, wiec
+    lokalna instalacja jest zbedna.
     """
     import os
+
+    from .config import get_settings
+
+    if (get_settings().browser_cdp_url or "").strip():
+        return True
     from pathlib import Path as _Path
     env = os.getenv("PLAYWRIGHT_BROWSERS_PATH")
     roots = [_Path(env)] if env else [
@@ -542,4 +584,5 @@ def make_opener(settings=None) -> MetaQuotesWebOpener | None:
         min_interval_sec=settings.metaquotes_web_min_interval_sec,
         timeout_ms=settings.metaquotes_web_timeout_sec * 1000,
         screenshot_dir=(settings.metaquotes_web_screenshot_dir or None),
+        cdp_url=settings.browser_cdp_url,
     )

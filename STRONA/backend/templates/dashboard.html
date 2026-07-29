@@ -44,7 +44,6 @@
       </button>
       <div><h1 id="pg-title">Overview</h1><div class="crumb" id="pg-crumb"></div></div>
       <div class="top-right">
-        <span class="kyc-chip" id="feed-chip"><span class="dot"></span><span id="feed-txt">feed</span></span>
         <button class="btn-o sm" onclick="openCreate()">+ Manual account</button>
         <button class="btn-p sm" onclick="openGrant()">🎁 Grant challenge</button>
       </div>
@@ -187,7 +186,6 @@ const VIEWS={
   const [s,pay,kyc,tick,orders]=await Promise.all([
     api('/api/stats'),api('/api/admin/payout-requests'),api('/api/admin/kyc'),
     api('/api/admin/tickets'),api('/api/admin/orders')]);
-  setFeedChip(s);
   const revenue=orders.filter(o=>o.status==='paid').reduce((x,o)=>x+o.amount_usd,0);
   const pendingPay=pay.filter(r=>r.status==='pending').length;
   const openTick=tick.filter(t=>t.status==='open').length;
@@ -406,7 +404,6 @@ const VIEWS={
 
  async settings(){
   const s=await api('/api/stats');
-  setFeedChip(s);
   $('view').innerHTML=`
     <div class="sec-card" style="max-width:560px"><h3>Admin access</h3>
       <p class="muted" style="font-size:13px;margin:6px 0 12px">You are signed in with an administrator account. Access is granted by the <span class="mono">is_admin</span> flag on the account, not by a shared token.</p>
@@ -433,11 +430,6 @@ const VIEWS={
  },
 };
 
-function setFeedChip(s){
-  const sim=s.feed==='sim';
-  $('feed-chip').className='kyc-chip '+(sim?'warn':'ok');
-  $('feed-txt').textContent=`feed: ${s.feed}`;
-}
 
 /* ---------- accounts: filtry + tabela ---------- */
 function renderAccounts(){

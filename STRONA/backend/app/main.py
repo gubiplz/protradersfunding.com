@@ -1751,9 +1751,11 @@ def _generator_status() -> tuple[bool, str]:
         return False, ("The MetaQuotes channel is off. Set METAQUOTES_WEB_ENABLED=true "
                        "on a host that has a browser.")
     if not metaquotes_web.chromium_available():
-        return False, ("No Chromium browser here, so this server cannot open demo accounts — "
-                       "serverless hosting cannot run one. Generate them from your own machine "
-                       "instead: python scripts/pool_generate.py --size 50000 --count 5 "
+        return False, ("No browser available here. Serverless hosting cannot run Chromium, so "
+                       "either point BROWSER_CDP_URL at a hosted browser (Browserless, "
+                       "Browserbase, or your own Chrome started with --remote-debugging-port), "
+                       "or generate accounts from your own machine: "
+                       "python scripts/pool_generate.py --size 50000 --count 5 "
                        "--api <panel-url> --admin-token <token>")
     return True, ""
 
