@@ -1,0 +1,183 @@
+"""Publiczne API strony sprzedażowej: stats bez internali, ranking bez nazwisk,
+szczegóły konta tylko dla właściciela, certyfikat po nieodgadywalnym tokenie.
+
+UWAGA: pytest współdzieli moduły między plikami testów — env ustawia pierwszy
+zaimportowany plik, a baza jest wspólna. Dlatego: unikalne e-maile/nazwiska,
+asercje odporne na cudze wiersze i reset cache przed każdym odczytem statystyk.
+"""
+import os
+import tempfile
+
+os.environ.setdefault("DATABASE_URL", f"sqlite:///{tempfile.NamedTemporaryFile(suffix='.db', delete=False).name}")
+os.environ.setdefault("FEED", "sim")
+os.environ.setdefault("AUTO_SEED", "false")
+os.environ.setdefault("ADMIN_TOKEN", "tajny-token")
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app import auth, catalog  # noqa: E402
+from app import main as main_mod  # noqa: E402
+from app.config import get_settings  # noqa: E402
+from app.db import SessionLocal, init_db  # noqa: E402
+from app.main import app  # noqa: E402
+from app.models import Account, Payout, Trader  # noqa: E402
+
+init_db()
+_s = SessionLocal()
+catalog.seed_products(_s)
+_s.close()
+
+ADMIN_H = {"X-Admin-Token": get_settings().admin_token}
+
+
+def _fresh_stats_cache():
+    main_mod._PUBLIC_STATS_CACHE.update(ts=0.0, data=None)
+
+
+def _trader(email: str, full_name: str):
+    s = SessionLocal()
+    tr = Trader(email=email, password_hash=auth.hash_password("haslo1234"),
+                full_name=full_name, referral_code=auth.secrets.token_hex(3))
+    s.add(tr); s.commit()
+    tid = tr.id
+    s.close()
+    return tid, auth.make_token(tid)
+
+
+def _konto(trader_id: int, trader_name: str, login: str, *, status="active", phase="eval_1",
+           balance=None, initial=10_000.0):
+    s = SessionLocal()
+    acc = Account(login=login, trader_id=trader_id, trader_name=trader_name,
+                  platform_login=login, platform_password="Sekret123",
+                  platform_server="MetaQuotes-Demo",
+                  product_key="2step-10k", initial_balance=initial,
+                  balance=balance if balance is not None else initial,
+                  equity=balance if balance is not None else initial,
+                  peak_equity=initial, day_start_equity=initial, day_start_balance=initial,
+                  status=status, phase=phase)
+    s.add(acc); s.commit()
+    aid = acc.id
+    s.close()
+    return aid
+
+
+def test_public_stats_bez_internali():
+    _trader("stats@test.pl", "Stat Owy")
+    _fresh_stats_cache()
+    with TestClient(app) as c:
+        r = c.get("/api/public/stats")
+    assert r.status_code == 200
+    data = r.json()
+    for zakazane in ("feed", "stripe", "pool_free", "orders_paid", "provisioning"):
+        assert zakazane not in data, f"public stats ujawnia internal: {zakazane}"
+    assert data["traders_total"] >= 1
+
+
+def test_operacyjne_stats_tylko_dla_admina():
+    with TestClient(app) as c:
+        bez = c.get("/api/stats")
+        z = c.get("/api/stats", headers=ADMIN_H)
+    assert bez.status_code in (401, 403)
+    assert z.status_code == 200 and "feed" in z.json()
+
+
+def test_leaderboard_maskuje_nazwiska():
+    tid, _ = _trader("rank@test.pl", "Ranking Maskowany")
+    # Ranking pokazuje wylacznie konta FUNDED. Zysk na tyle duzy, zeby miejsce
+    # w TOP 20 bylo pewne: ranking zasilaja konta ze WSZYSTKICH plikow testow.
+    _konto(tid, "Ranking Maskowany", "770001", status="funded", balance=95_000)
+    with TestClient(app) as c:
+        r = c.get("/api/leaderboard")
+    assert r.status_code == 200
+    assert "Maskowany" not in r.text, "pełne nazwisko wyciekło do publicznego rankingu"
+    assert "login" not in (r.json()[0] if r.json() else {}), "ranking nie może ujawniać loginów MT5"
+    assert any(row["trader"] == "Ranking M." for row in r.json())
+
+
+def test_leaderboard_liczy_profit_narastajaco_po_wyplacie():
+    tid, _ = _trader("payout-rank@test.pl", "Wyplacony Zysk")
+    # po zatwierdzonej wypłacie balance wraca do initial — bez sumowania Payout
+    # trader pokazywałby 0%.
+    aid = _konto(tid, "Wyplacony Zysk", "770002", status="funded", phase="funded",
+                 balance=10_000, initial=10_000)
+    s = SessionLocal()
+    s.add(Payout(account_id=aid, profit_amount=800.0, trader_share=640.0, paid=True))
+    s.commit(); s.close()
+    with TestClient(app) as c:
+        r = c.get("/api/leaderboard")
+    row = next(row for row in r.json() if row["trader"] == "Wyplacony Z.")
+    assert row["profit_pct"] == 8.0
+
+
+def test_leaderboard_pokazuje_tylko_konta_funded():
+    """Ranking to lista tych, ktorzy PRZESZLI — konta w ewaluacji tam nie naleza."""
+    tid, _ = _trader("rank-eval@test.pl", "Wciaz Ewaluacja")
+    _konto(tid, "Wciaz Ewaluacja", "770010", status="active", phase="eval_1", balance=99_000)
+    tid2, _ = _trader("rank-passed@test.pl", "Tylko Passed")
+    _konto(tid2, "Tylko Passed", "770011", status="passed", phase="eval_2", balance=99_000)
+    with TestClient(app) as c:
+        rows = c.get("/api/leaderboard").json()
+    imiona = {r["trader"] for r in rows}
+    assert "Wciaz E." not in imiona and "Tylko P." not in imiona
+    assert all(r["status"] == "funded" for r in rows)
+
+
+def test_wlasciciel_widzi_szczegoly_konta_a_obcy_nie():
+    tid, token = _trader("detal@test.pl", "Detal Owner")
+    aid = _konto(tid, "Detal Owner", "770003")
+    _, token_obcy = _trader("obcy-detal@test.pl", "Obcy Detal")
+    with TestClient(app) as c:
+        moje = c.get(f"/api/me/accounts/{aid}", headers={"Authorization": f"Bearer {token}"})
+        cudze = c.get(f"/api/me/accounts/{aid}", headers={"Authorization": f"Bearer {token_obcy}"})
+        anonim = c.get(f"/api/me/accounts/{aid}")
+    assert moje.status_code == 200
+    d = moje.json()
+    assert "equity_curve" in d and "breaches" in d and "payout_requests" in d
+    assert d["platform_password"] == "Sekret123"
+    assert cudze.status_code == 404
+    assert anonim.status_code == 401
+
+
+def test_certyfikat_po_tokenie_a_nie_po_id():
+    tid, token = _trader("cert@test.pl", "Cert Owski")
+    aid = _konto(tid, "Cert Owski", "770004", status="funded", phase="funded")
+    with TestClient(app) as c:
+        lista = c.get("/api/me/accounts", headers={"Authorization": f"Bearer {token}"}).json()
+        cert_token = next(a["cert_token"] for a in lista if a["id"] == aid)
+        assert cert_token, "konto funded powinno dostać token certyfikatu"
+        cert = c.get(f"/certificate/{cert_token}")
+        zly = c.get("/certificate/nie-ma-takiego-tokenu")
+        stary = c.get(f"/api/accounts/{aid}/certificate")
+    assert cert.status_code == 200 and "Cert Owski" in cert.text
+    assert zly.status_code == 404
+    assert stary.status_code in (404, 405), "stary enumerowalny endpoint ma nie istnieć"
+
+
+def test_wszystkie_strony_publiczne_odpowiadaja():
+    strony = ["/", "/faq", "/affiliate", "/terms", "/privacy", "/risk-disclosure",
+              "/refund-policy", "/verify", "/portal", "/admin", "/robots.txt"]
+    with TestClient(app) as c:
+        for path in strony:
+            r = c.get(path)
+            assert r.status_code == 200, f"{path} -> {r.status_code}"
+
+
+def test_weryfikacja_certyfikatu_na_stronie():
+    tid, token = _trader("verify@test.pl", "Vera Fikacja")
+    _konto(tid, "Vera Fikacja", "770006", status="funded", phase="funded")
+    with TestClient(app) as c:
+        lista = c.get("/api/me/accounts", headers={"Authorization": f"Bearer {token}"}).json()
+        ct = next(a["cert_token"] for a in lista if a["trader_name"] == "Vera Fikacja")
+        ok = c.get(f"/verify/{ct}")
+        zly = c.get("/verify/xxx-nie-istnieje")
+    assert ok.status_code == 200 and "Certificate is valid" in ok.text
+    assert "Vera F." in ok.text and "Fikacja" not in ok.text.replace("Vera F.", "")
+    assert zly.status_code == 200 and "Certificate not found" in zly.text
+
+
+def test_konto_w_trakcie_eval1_nie_ma_certyfikatu():
+    tid, token = _trader("nocert@test.pl", "Bez Certa")
+    _konto(tid, "Bez Certa", "770005", status="active", phase="eval_1")
+    with TestClient(app) as c:
+        lista = c.get("/api/me/accounts", headers={"Authorization": f"Bearer {token}"}).json()
+    assert all(not a["cert_token"] for a in lista if a["trader_name"] == "Bez Certa")

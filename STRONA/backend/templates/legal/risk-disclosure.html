@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Risk Disclosure — {{ site_name }}{% endblock %}
+{% block description %}Risk disclosure for {{ site_name }} simulated trading evaluation programs.{% endblock %}
+
+{% block content %}
+<section class="page-head"><div class="wrap">
+  <span class="pill">Legal</span>
+  <h1>Risk Disclosure</h1>
+  <p class="updated">Last updated: July 2026</p>
+</div></section>
+
+<section class="sec sec-tight"><div class="wrap prose">
+  <h2>1. Simulated trading only</h2>
+  <p>All accounts provided by {{ site_name }} are <strong>demo accounts with virtual funds</strong>. All
+  trading activity conducted through the Platform is performed in a simulated environment. No real money
+  is at risk in the markets, no deposits are accepted, and no actual financial transactions occur. Any
+  reference to capital, profit or loss describes values inside the simulation.</p>
+
+  <h2>2. Rewards are not guaranteed</h2>
+  <p>Payments to traders are discretionary, performance-based rewards derived from simulated results
+  under our <a href="/terms">Terms of Service</a>. They are not investment returns. Past performance —
+  yours or anyone else's — does not guarantee future outcomes. Statistics displayed on this website are
+  historical records of the platform and are not a promise of future results.</p>
+
+  <h2>3. The fee is at risk</h2>
+  <p>The Challenge fee is a payment for access to an evaluation program. If you do not meet the trading
+  objectives, the fee is not returned (see the <a href="/refund-policy">Refund Policy</a> for the cases
+  where it is). Do not purchase a Challenge with money you cannot afford to spend.</p>
+
+  <h2>4. Leveraged products are inherently risky</h2>
+  <p>The simulation mirrors leveraged products — foreign exchange and CFDs on indices, metals and
+  cryptocurrencies. In real markets these instruments carry a high level of risk and can result in
+  losses exceeding deposits; they are not suitable for everyone. Skills demonstrated in a simulation may
+  not transfer to live market conditions, where slippage, liquidity, execution and psychology differ.</p>
+
+  <h2>5. No investment advice</h2>
+  <p>Nothing on this website — including educational content, statistics, leaderboards or certificates —
+  constitutes investment advice, a personal recommendation, or a solicitation to buy or sell any
+  financial instrument. {{ site_name }} is not a licensed broker or investment adviser and does not
+  provide regulated financial services.</p>
+
+  <h2>6. Technology risk</h2>
+  <p>The simulation depends on third-party MetaTrader&nbsp;5 infrastructure and market data feeds.
+  Outages, feed errors or maintenance windows can affect account monitoring. Material incidents are
+  handled under our Terms; the risk engine's recorded data is authoritative for rule enforcement.</p>
+
+  <h2>7. Questions</h2>
+  <p>If any part of this disclosure is unclear, contact
+  <a href="mailto:{{ support_email }}">{{ support_email }}</a> before purchasing.</p>
+</div></section>
+{% endblock %}

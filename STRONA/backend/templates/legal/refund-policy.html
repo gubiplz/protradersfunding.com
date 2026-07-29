@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Refund Policy — {{ site_name }}{% endblock %}
+{% block description %}When {{ site_name }} challenge fees are refundable.{% endblock %}
+
+{% block content %}
+<section class="page-head"><div class="wrap">
+  <span class="pill">Legal</span>
+  <h1>Refund Policy</h1>
+  <p class="updated">Last updated: July 2026</p>
+</div></section>
+
+<section class="sec sec-tight"><div class="wrap prose">
+  <div class="notice"><b>Template notice:</b> consumer-withdrawal rules differ by jurisdiction (e.g. the
+  EU 14-day right and its digital-services exception). Confirm final wording with counsel.</div>
+
+  <h2>1. The fee, in short</h2>
+  <p>A Challenge fee is a <strong>one-time payment</strong> for access to an evaluation program on a demo
+  account. There are no recurring charges.</p>
+
+  <h2>2. When you get the fee back</h2>
+  <ul>
+    <li><strong>Fee refund with first payout:</strong> when you pass the Challenge and receive your first
+        reward on the funded account, the full Challenge fee for that account is added to it.</li>
+    <li><strong>Before delivery:</strong> if you paid but your MT5 account has not yet been created, you
+        may cancel for a full refund — write to
+        <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</li>
+    <li><strong>Our error:</strong> duplicate charges, or an account that could not be provisioned within
+        24 hours, are refunded in full.</li>
+  </ul>
+
+  <h2>3. When the fee is not refundable</h2>
+  <ul>
+    <li>After your MT5 credentials have been delivered and trading is possible, the service is deemed
+        performed in full; starting the Challenge waives the standard withdrawal period to the extent
+        permitted by law.</li>
+    <li>Failing a Challenge (breaching a loss limit or otherwise not meeting the objectives) does not
+        entitle you to a refund.</li>
+    <li>Accounts terminated for prohibited conduct under the <a href="/terms">Terms</a> are not refunded.</li>
+  </ul>
+
+  <h2>4. Discounts and coupons</h2>
+  <p>If a coupon was applied at checkout, any refund equals the amount actually paid, not the list
+  price. Promotional discounts have no cash value on their own.</p>
+
+  <h2>5. How refunds are processed</h2>
+  <p>Approved refunds go back to the original payment method, normally within 5–10 business days
+  depending on the provider. To request one, e-mail
+  <a href="mailto:{{ support_email }}">{{ support_email }}</a> from your registered address with the
+  order number.</p>
+
+  <h2>6. Chargebacks</h2>
+  <p>Please contact us before opening a card dispute — unwarranted chargebacks lead to account
+  termination under the Terms. Legitimate refund claims are honoured without a dispute.</p>
+</div></section>
+{% endblock %}

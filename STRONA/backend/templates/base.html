@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}{{ site_name }} — Prop Trading Challenges on Real MT5 Accounts{% endblock %}</title>
+<meta name="description" content="{% block description %}Trade our simulated capital on a real MetaTrader 5 account. Pass the evaluation, get funded and keep up to 90% of the rewards. Clear rules, automated risk engine, credentials in minutes.{% endblock %}">
+<link rel="icon" href="/static/img/favicon.png" type="image/png">
+<link rel="preload" href="/static/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/space-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/css/site.css">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="{{ site_name }}">
+<meta property="og:title" content="{% block og_title %}{{ site_name }} — Get Funded to Trade{% endblock %}">
+<meta property="og:description" content="{% block og_description %}Prop trading challenges on real MT5 infrastructure. Keep up to 90% of the rewards.{% endblock %}">
+<meta property="og:image" content="/static/img/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"{{ site_name }}","logo":"/static/img/logo.png","email":"{{ support_email }}"}</script>
+{% block head_extra %}{% endblock %}
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap nav-in">
+    <a class="logo" href="/"><img src="/static/img/logo.png" alt=""> {{ site_name }}</a>
+    <nav class="nav-links">
+      <a href="/#how">How it works</a>
+      <a href="/#objectives">Objectives</a>
+      <a href="/#pricing">Pricing</a>
+      <a href="/#payouts">Payouts</a>
+      <a href="/faq">FAQ</a>
+      <a href="/affiliate">Affiliate</a>
+    </nav>
+    <div class="nav-right">
+      <a class="nav-login" href="/portal">Log in</a>
+      <a class="btn btn-sm" href="/#pricing">Get Funded</a>
+      <button class="burger" id="burger" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+  </div>
+</header>
+<div class="mobile-menu" id="mobileMenu">
+  <a href="/#how">How it works</a>
+  <a href="/#objectives">Trading Objectives</a>
+  <a href="/#pricing">Pricing</a>
+  <a href="/#payouts">Payouts</a>
+  <a href="/faq">FAQ</a>
+  <a href="/affiliate">Affiliate Program</a>
+  <a href="/portal">Log in</a>
+  <a class="btn" href="/#pricing">Get Funded</a>
+</div>
+
+{% block content %}{% endblock %}
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <a class="logo" href="/"><img src="/static/img/logo.png" alt=""> {{ site_name }}</a>
+        <p>A technology-driven trading skills evaluation platform. Real MetaTrader 5 infrastructure, automated risk engine, transparent rules.</p>
+      </div>
+      <div class="foot-col">
+        <h4>Product</h4>
+        <a href="/#how">How it works</a>
+        <a href="/#objectives">Trading Objectives</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/#scaling">Scaling Plan</a>
+        <a href="/faq">FAQ</a>
+      </div>
+      <div class="foot-col">
+        <h4>Company</h4>
+        <a href="/affiliate">Affiliate Program</a>
+        <a href="/verify">Verify a Certificate</a>
+        <a href="/portal">Trader Portal</a>
+        <a href="mailto:{{ support_email }}">Support</a>
+      </div>
+      <div class="foot-col">
+        <h4>Legal</h4>
+        <a href="/terms">Terms of Service</a>
+        <a href="/privacy">Privacy Policy</a>
+        <a href="/risk-disclosure">Risk Disclosure</a>
+        <a href="/refund-policy">Refund Policy</a>
+      </div>
+    </div>
+    <div class="foot-legal">
+      <p>All accounts provided by {{ site_name }} are demo accounts with virtual funds. All trading activity takes place in a simulated environment. No real money is deposited or traded, and no actual financial transactions occur in the markets. Performance-based rewards are discretionary and are not guaranteed. Past performance does not guarantee future results.</p>
+      <p>Trading foreign exchange and CFDs carries a high level of risk and may not be suitable for all investors. The content of this website is provided for informational purposes only and does not constitute investment advice, financial advice, or a solicitation to trade. {{ site_name }} does not provide investment services, brokerage services, or real trading accounts, and nothing on this website is an offer of employment or a promise of income.</p>
+    </div>
+    <div class="foot-bottom">
+      <span>© <span id="year"></span> {{ site_name }}. All rights reserved.</span>
+      <div class="foot-tags">
+        <span class="chip">Demo accounts</span>
+        <span class="chip">Virtual funds</span>
+        <span class="chip">Simulated environment</span>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script src="/static/lib/gsap.min.js"></script>
+<script src="/static/lib/ScrollTrigger.min.js"></script>
+<script src="/static/js/site.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

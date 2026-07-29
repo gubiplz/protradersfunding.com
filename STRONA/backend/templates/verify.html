@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Verify a Certificate — {{ site_name }}{% endblock %}
+{% block description %}Check the authenticity of any {{ site_name }} evaluation or funded-trader certificate by its unique ID.{% endblock %}
+{% block og_title %}Certificate Verification — {{ site_name }}{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="wrap">
+    <span class="pill">Certificate verification</span>
+    <h1>Check a certificate</h1>
+    <p class="lede">Every certificate we issue carries a unique ID. Paste it below to confirm it was
+       really issued by {{ site_name }} and see which achievement it documents.</p>
+  </div>
+</section>
+
+<section class="sec-tight sec">
+  <div class="wrap" style="max-width:640px">
+    <form class="verify-box" method="get" action="/verify" onsubmit="location.href='/verify/'+encodeURIComponent(this.q.value.trim());return false">
+      <input name="q" id="verifyInput" placeholder="e.g. dGVzdF90b2tlbg" value="{{ token }}" aria-label="Certificate ID">
+      <button class="btn" type="submit">Verify</button>
+    </form>
+
+    {% if result is not none %}
+      {% if result.found %}
+      <div class="verify-result ok">
+        <h3>✓ Certificate is valid</h3>
+        <p class="muted" style="font-size:14px">Issued by {{ site_name }} and matched against our database.</p>
+        <div class="rows">
+          <div><span>{{ 'Document' if result.kind == 'payout' else 'Achievement' }}</span><span>{{ result.status }}</span></div>
+          <div><span>Trader</span><span>{{ result.trader }}</span></div>
+          {% if result.kind == 'payout' %}
+          <div><span>Amount paid</span><span>${{ "{:,.2f}".format(result.amount) }}</span></div>
+          <div><span>Paid on</span><span>{{ result.issued }}</span></div>
+          {% endif %}
+          <div><span>Account size</span><span>${{ "{:,.0f}".format(result.size) }}</span></div>
+          <div><span>Program</span><span>{{ result.product }}</span></div>
+          <div><span>Certificate ID</span><span>{{ result.token }}</span></div>
+        </div>
+        <div style="margin-top:18px"><a class="btn-ghost btn-sm" href="{{ result.open_url }}" target="_blank">Open certificate</a></div>
+      </div>
+      {% else %}
+      <div class="verify-result bad">
+        <h3>✗ Certificate not found</h3>
+        <p class="muted" style="font-size:14px">No certificate with this ID exists in our database.
+        Check for typos — IDs are case-sensitive. If you believe this is an error, contact
+        <a href="mailto:{{ support_email }}" style="color:var(--acc-soft)">{{ support_email }}</a>.</p>
+      </div>
+      {% endif %}
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

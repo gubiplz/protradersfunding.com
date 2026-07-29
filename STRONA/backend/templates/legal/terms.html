@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Terms of Service — {{ site_name }}{% endblock %}
+{% block description %}Terms of Service for {{ site_name }} evaluation programs and funded accounts.{% endblock %}
+
+{% block content %}
+<section class="page-head"><div class="wrap">
+  <span class="pill">Legal</span>
+  <h1>Terms of Service</h1>
+  <p class="updated">Last updated: July 2026</p>
+</div></section>
+
+<section class="sec sec-tight"><div class="wrap prose">
+  <div class="notice"><b>Template notice:</b> this document is a working template prepared for launch.
+  Have it reviewed by qualified legal counsel in your jurisdiction before commercial operation.</div>
+
+  <h2>1. Who we are and what we offer</h2>
+  <p>{{ site_name }} ("we", "us", "the Platform") operates a trading skills evaluation service. We sell
+  access to <strong>evaluation programs ("Challenges")</strong> conducted on <strong>demo trading accounts
+  with virtual funds</strong> hosted on MetaTrader&nbsp;5 infrastructure. We are a technology and education
+  company: we are <strong>not</strong> a broker, investment firm, fund manager or financial adviser, and we do
+  not accept deposits or execute real-market transactions on your behalf.</p>
+
+  <h2>2. Simulated environment</h2>
+  <p>All accounts provided under these Terms are demo accounts. All trading occurs in a simulated
+  environment with fictitious funds. No real money is traded and your activity does not reach any real
+  market. Amounts referred to as "capital", "balance", "profit" or "drawdown" describe values inside the
+  simulation. Payments made to traders are <strong>discretionary performance-based rewards</strong> calculated
+  from simulated results, not proceeds of real trading.</p>
+
+  <h2>3. Eligibility and account registration</h2>
+  <ul>
+    <li>You must be at least 18 years old and legally able to enter into contracts.</li>
+    <li>Information provided at registration and checkout (name, e-mail, phone) must be accurate — it is
+        used, among other things, to open your MetaTrader&nbsp;5 account.</li>
+    <li>One person may hold one registration; running multiple Challenges under it is allowed.</li>
+    <li>You are responsible for keeping your login credentials confidential.</li>
+  </ul>
+
+  <h2>4. Challenges, rules and enforcement</h2>
+  <p>Each Challenge is governed by the objectives displayed on its plan card and on the
+  <a href="/#objectives">Trading Objectives</a> table at the time of purchase: profit targets, maximum
+  daily loss, maximum overall loss (static or trailing), and minimum trading days. These rules are
+  monitored and enforced automatically by our risk engine. If a rule is breached, the account is marked
+  as failed and open positions may be closed. Breach data (rule, time, equity) is recorded and shown in
+  your dashboard.</p>
+
+  <h2>5. Funded accounts, rewards and scaling</h2>
+  <ul>
+    <li>After passing all phases of a Challenge, your account is granted "funded" status in the simulation.</li>
+    <li>You may request a reward equal to your profit split (as stated on your plan, 80–90%) of the
+        simulated profits accrued on the funded account.</li>
+    <li>Reward requests require completed identity verification (KYC) and are reviewed by our team.
+        We may refuse a reward where results were produced by prohibited conduct (Section&nbsp;6).</li>
+    <li>Your first reward includes a refund of the Challenge fee for that account.</li>
+    <li>Funded accounts scale automatically: each time the account grows by +10%, its balance is
+        increased by +25%.</li>
+  </ul>
+
+  <h2>6. Prohibited conduct</h2>
+  <p>We do not restrict trading styles (news trading, weekend holding and EAs are allowed). The following
+  is prohibited and voids results:</p>
+  <ul>
+    <li>exploiting demo-environment artifacts (e.g. off-quotes pricing, latency or feed errors);</li>
+    <li>account sharing, buying/selling accounts, or having a third party trade your account;</li>
+    <li>fraud, chargeback abuse, identity misrepresentation or KYC falsification;</li>
+    <li>attacking, reverse-engineering or disrupting the Platform.</li>
+  </ul>
+
+  <h2>7. Fees and refunds</h2>
+  <p>Challenge fees are one-time payments per account, in USD, collected at checkout. Refund rights are
+  described in the <a href="/refund-policy">Refund Policy</a>, which forms part of these Terms.</p>
+
+  <h2>8. Intellectual property</h2>
+  <p>The Platform, its software, branding and content are our property or licensed to us. You receive a
+  personal, non-transferable right to use the Platform for its intended purpose.</p>
+
+  <h2>9. Disclaimers and limitation of liability</h2>
+  <p>The Platform is provided "as is". We do not warrant uninterrupted availability of the simulation,
+  the MetaTrader&nbsp;5 infrastructure (operated by third parties), or price feeds. Nothing on the Platform
+  is investment advice or a promise of income. To the maximum extent permitted by law, our total
+  liability under these Terms is limited to the fees you paid to us in the 12 months preceding the
+  claim.</p>
+
+  <h2>10. Termination</h2>
+  <p>You may stop using the Platform at any time. We may suspend or terminate accounts that violate
+  these Terms. Sections that by their nature should survive termination (liability, IP, disputes)
+  survive.</p>
+
+  <h2>11. Changes</h2>
+  <p>We may update these Terms; material changes will be announced on the Platform. Challenges already
+  purchased remain governed by the objectives shown at their time of purchase.</p>
+
+  <h2>12. Contact</h2>
+  <p>Questions about these Terms: <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p>
+</div></section>
+{% endblock %}
