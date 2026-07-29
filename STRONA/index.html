@@ -84,6 +84,15 @@
         </form>
         <p class="form-note" id="formNote">Bądź pierwszy — dołącz do listy oczekujących.</p>
 
+        <!-- TYMCZASOWE: wejście do panelu tradera. Landing zajmuje "/", bo pliki
+             statyczne mają na Vercelu pierwszeństwo przed rewrite'ami, więc bez
+             tego odnośnika dashboard jest nie do znalezienia z poziomu domeny.
+             Do usunięcia, gdy landing zastąpi docelowa strona albo panel dostanie
+             własną subdomenę. -->
+        <p class="portal-link">
+            Masz już konto? <a href="/portal">Zaloguj się do panelu &rarr;</a>
+        </p>
+
         <footer class="footer">
             <p>&copy; <span id="year"></span> Pro Traders Funding. Wszelkie prawa zastrzeżone.</p>
         </footer>

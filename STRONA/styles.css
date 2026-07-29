@@ -314,3 +314,25 @@ body {
         margin-top: 60px;
     }
 }
+
+/* TYMCZASOWE — odnośnik do panelu tradera pod adresem /portal. Znika razem
+   z sekcją "portal-link" w index.html, gdy landing zastąpi docelowa strona. */
+.portal-link {
+    margin-top: 20px;
+    font-size: 14px;
+    color: var(--text-400);
+}
+
+.portal-link a {
+    color: var(--gold-300);
+    text-decoration: none;
+    font-weight: 500;
+    border-bottom: 1px solid rgba(201, 169, 97, 0.35);
+    padding-bottom: 2px;
+    transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.portal-link a:hover {
+    color: var(--gold-400);
+    border-color: var(--gold-400);
+}
