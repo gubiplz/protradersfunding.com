@@ -1377,8 +1377,8 @@ async function makePayoutCert(id){
     window.open(r.url,'_blank'); go('payouts');
   }catch(e){toast('Error: '+e.message,'err')}
 }
-/* Payout request: kwota + metoda + dane wymagane przez tę metodę.
-   Serwer waliduje to samo jeszcze raz — modal tylko oszczędza rundę błędów. */
+/* Payout request: amount + method + the details that method requires.
+   The server validates the same rules again — the modal only saves an error round-trip. */
 function payoutMethodLabel(m){return m==='usdt'?'USDT (crypto)':m==='wise'?'Wise':'Bank transfer'}
 function openPayoutModal(id,avail){
   const w=document.createElement('div'); w.id='po-modal'; w.className='modal-wrap';
