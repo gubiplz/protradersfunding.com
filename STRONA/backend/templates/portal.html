@@ -38,10 +38,11 @@
         <input id="a-name" placeholder="Full name" class="inp hidden">
         <input id="a-email" placeholder="E-mail" class="inp" autocomplete="email">
         <input id="a-pass" type="password" placeholder="Password" class="inp" autocomplete="current-password">
+        <input id="a-pass2" type="password" placeholder="Repeat new password" class="inp hidden" autocomplete="new-password">
         <input id="a-ref" placeholder="Referral code (optional)" class="inp hidden">
         <button id="a-submit" onclick="doAuth()" class="btn-p lg" style="width:100%">Log in</button>
+        <button id="a-forgot" onclick="authTab('forgot')" style="font-size:12.5px;color:var(--muted);text-decoration:underline;background:none;border:0;cursor:pointer">Forgot password?</button>
       </div>
-      <div class="auth-hint">Demo access: jan@demo.pl / demo1234</div>
     </div>
   </div>
 </div>
@@ -158,16 +159,41 @@ function toast(msg,kind='ok',ms=6000){
 
 /* ---------- auth ---------- */
 function authTab(m){AUTHMODE=m;
-  $('tab-login').classList.toggle('on',m==='login');
-  $('tab-signup').classList.toggle('on',m==='signup');
-  $('a-name').classList.toggle('hidden',m==='login');
-  $('a-ref').classList.toggle('hidden',m==='login');
-  if(m==='signup'&&!$('a-ref').value){$('a-ref').value=localStorage.getItem('pf_ref')||''}
-  $('a-submit').textContent=m==='login'?'Log in':'Create account';
-  $('auth-title').textContent=m==='login'?'Welcome back':'Create your account';
-  $('auth-sub').textContent=m==='login'?'Log in to your trader dashboard.':'One account for challenges, payouts and the affiliate program.';
+  const login=m==='login',signup=m==='signup',forgot=m==='forgot',reset=m==='reset';
+  $('tab-login').classList.toggle('on',login);
+  $('tab-signup').classList.toggle('on',signup);
+  $('a-name').classList.toggle('hidden',!signup);
+  $('a-ref').classList.toggle('hidden',!signup);
+  $('a-pass').classList.toggle('hidden',forgot);
+  $('a-pass2').classList.toggle('hidden',!reset);
+  $('a-email').classList.toggle('hidden',reset);
+  $('a-forgot').classList.toggle('hidden',!login);
+  $('a-pass').placeholder=reset?'New password (min. 8 characters)':'Password';
+  if(signup&&!$('a-ref').value){$('a-ref').value=localStorage.getItem('pf_ref')||''}
+  $('a-submit').textContent=login?'Log in':signup?'Create account':forgot?'Send reset link':'Set new password';
+  $('auth-title').textContent=login?'Welcome back':signup?'Create your account':forgot?'Reset your password':'Choose a new password';
+  $('auth-sub').textContent=login?'Log in to your trader dashboard.'
+    :signup?'One account for challenges, payouts and the affiliate program.'
+    :forgot?'Enter your account e-mail — we will send you a reset link.'
+    :'Set a new password for your account.';
 }
 async function doAuth(){
+  if(AUTHMODE==='forgot'){
+    try{const r=await api('/api/auth/forgot',{method:'POST',body:JSON.stringify({email:$('a-email').value})});
+      toast(r.message||'Reset link sent — check your inbox.','ok',8000);authTab('login');
+    }catch(e){toast('Error: '+e.message,'err')}
+    return;
+  }
+  if(AUTHMODE==='reset'){
+    const p1=$('a-pass').value,p2=$('a-pass2').value;
+    if(p1!==p2){toast('Passwords do not match.','err');return}
+    try{await api('/api/auth/reset',{method:'POST',body:JSON.stringify({token:window._resetToken,password:p1})});
+      toast('Password changed — log in with your new password.','ok',8000);
+      window._resetToken=null;history.replaceState(null,'','/portal');
+      $('a-pass').value='';$('a-pass2').value='';authTab('login');
+    }catch(e){toast('Error: '+e.message,'err')}
+    return;
+  }
   const body={email:$('a-email').value,password:$('a-pass').value};
   try{let res;
     if(AUTHMODE==='signup'){body.full_name=$('a-name').value;body.referral=$('a-ref').value||null;res=await api('/api/auth/signup',{method:'POST',body:JSON.stringify(body)});}
@@ -203,6 +229,9 @@ async function handlePaymentReturn(){
 
 /* ---------- boot / navigation ---------- */
 async function boot(){
+  const rt=new URLSearchParams(location.search).get('reset');
+  if(rt){window._resetToken=rt;
+    $('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('reset');return}
   if(!TOKEN){$('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('login');return}
   try{ME=await api('/api/auth/me')}catch(e){logout();return}
   $('auth').classList.add('hidden');$('app').classList.remove('hidden');
@@ -996,9 +1025,10 @@ function invRows(o){
         = <b style="color:#0f172a">$${fmt0(o.account_size)}</b> allocation</td>
         ${amountCell('included')}</tr>`;
   }
+  const wk=o.weekend_trading?`<tr><td>Weekend Trading add-on — 2 extra trading days/week</td>${amountCell('$'+fmt(199))}</tr>`:'';
   return `<tr>
     <td>Evaluation program access — ${esc(o.product_label||o.product_key)}${o.coupon?` (${esc(o.coupon)})`:''}</td>
-    ${amountCell('$'+fmt(orderAmount(o)))}</tr>`;
+    ${amountCell('$'+fmt(Math.max(0,orderAmount(o)-(o.weekend_trading?199:0))))}</tr>`+wk;
 }
 
 function openInvoice(orderId){
@@ -1078,7 +1108,7 @@ function openBuy(key){
         <button class="icon-btn" onclick="closeBuy()" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
       </div>
       <div class="plan-line">
-        <b class="mono" style="color:var(--txt);font-size:16px">$${fmt0(p.price_usd)}</b>
+        <b class="mono" id="buy-total" style="color:var(--txt);font-size:16px">$${fmt0(p.price_usd+(new URLSearchParams(location.search).get('wt')==='1'?199:0))}</b>
         · simulated capital $${fmt0(p.account_size)} · split ${p.profit_split_pct}%
       </div>
       <div class="note">Your MT5 demo account is registered with MetaQuotes <b>under these details</b> —
@@ -1090,7 +1120,14 @@ function openBuy(key){
         </div>
         <input id="c-phone" placeholder="Phone, e.g. +14155551234" class="inp" value="${esc(ME.phone||'')}">
         <input id="c-email" class="inp" value="${esc(ME.email)}" disabled>
-        <input id="c-coupon" placeholder="Coupon code (optional)" class="inp">
+        <input id="c-coupon" placeholder="Coupon code (optional)" class="inp"
+          value="${esc(new URLSearchParams(location.search).get('coupon')||'')}">
+        <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
+          <input type="checkbox" id="c-weekend" onchange="buyTotal(${p.price_usd})"
+            ${new URLSearchParams(location.search).get('wt')==='1'?'checked':''}
+            style="width:15px;height:15px;accent-color:#6366f1">
+          <span><b>Weekend Trading</b> — 2 extra trading days/week <b>+$199</b></span>
+        </label>
         <p id="buy-err" class="form-err hidden"></p>
         <button id="buy-go" onclick="buy('${esc(p.key)}')" class="btn-p lg" style="width:100%">Buy &amp; create my account</button>
         <p class="hint">One-time payment · fee refunded with your first payout</p>
@@ -1101,6 +1138,9 @@ function openBuy(key){
   setTimeout(()=>$('c-first').focus(),50);
 }
 
+function buyTotal(base){
+  const t=$('buy-total'); if(t)t.textContent='$'+fmt0(base+($('c-weekend').checked?199:0));
+}
 function closeBuy(){document.getElementById('buy-modal')?.remove()}
 
 function buyErr(msg){
@@ -1117,7 +1157,8 @@ async function buy(key){
   const btn=$('buy-go'); if(btn){btn.disabled=true; btn.textContent='Processing…'}
   try{
     const res=await api('/api/checkout',{method:'POST',
-      body:JSON.stringify({product_key:key,coupon,first_name:first,last_name:last,phone})});
+      body:JSON.stringify({product_key:key,coupon,first_name:first,last_name:last,phone,
+        weekend_trading:!!($('c-weekend')&&$('c-weekend').checked)})});
     if(res.checkout_url && !res.mock){window.location=res.checkout_url;return;}  // real Stripe
     let prov=res;
     if(res.mock){prov=await api(`/api/checkout/${res.order_id}/mock-complete`,{method:'POST'});}

@@ -76,6 +76,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
     },
     "orders": {
         "bogo_paid_key": "VARCHAR(48)",
+        "weekend_trading": "BOOLEAN DEFAULT FALSE",
     },
     "pool_accounts": {
         "claimed_by_trader_id": "INTEGER",
@@ -100,6 +101,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "grant_note": "VARCHAR(160)",
         "max_lots": "FLOAT DEFAULT 6.0",
         "bogo_paid_size": "FLOAT",
+        "weekend_trading": "BOOLEAN DEFAULT FALSE",
         "mt5_backed": "BOOLEAN DEFAULT TRUE",
         "bot_enabled": "BOOLEAN DEFAULT FALSE",
         "bot_seed": "INTEGER",

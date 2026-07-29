@@ -123,6 +123,13 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             "Identity verification approved ✅",
             f"{name}, your KYC verification has been accepted. You can now request payouts.",
         ),
+        "password_reset": (
+            "Reset your password",
+            f"{name}, someone (hopefully you) requested a password reset for your "
+            f"{brand} account.\n\nSet a new password here (the link is valid for 1 hour):\n"
+            f"{ctx.get('reset_url')}\n\n"
+            f"If you didn't request this, you can safely ignore this e-mail.",
+        ),
         "kyc_rejected": (
             "Identity verification — action needed",
             f"{name}, we could not verify your identity with the documents provided. "

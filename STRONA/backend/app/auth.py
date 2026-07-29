@@ -51,6 +51,22 @@ def parse_token(token: str) -> int | None:
         return None
 
 
+# Osobna sol: token resetu nie moze dzialac jako token sesji (i odwrotnie).
+_reset_serializer = URLSafeTimedSerializer(settings.secret_key, salt="pw-reset")
+RESET_MAX_AGE = 60 * 60  # godzina
+
+
+def make_reset_token(trader_id: int) -> str:
+    return _reset_serializer.dumps({"tid": trader_id})
+
+
+def parse_reset_token(token: str) -> int | None:
+    try:
+        return int(_reset_serializer.loads(token, max_age=RESET_MAX_AGE)["tid"])
+    except (BadSignature, Exception):
+        return None
+
+
 # --- FastAPI dependencies ---
 def current_trader(authorization: str | None = Header(default=None)) -> Trader:
     if not authorization or not authorization.lower().startswith("bearer "):

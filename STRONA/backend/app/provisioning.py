@@ -88,6 +88,7 @@ def create_account_from_order(session, order: Order) -> Account:
         source=("grant" if order.provider == "grant" else "purchase"),
         grant_note=(order.coupon if order.provider == "grant" else None),
         bogo_paid_size=_bogo_paid_size(session, order),
+        weekend_trading=bool(getattr(order, "weekend_trading", False)),
         balance=bal, equity=bal, peak_equity=bal, day_start_equity=bal, day_start_balance=bal,
         day_key=now.strftime("%Y-%m-%d"),
         created_at=now, started_at=now,

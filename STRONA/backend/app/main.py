@@ -62,7 +62,7 @@ def seed_demo() -> None:
                 ("anna@demo.test", "Anna Novak", "2step-100k", "trailing"),
                 ("peter@demo.test", "Peter Wagner", "2step-10k", "static"),
                 ("maria@demo.test", "Maria Lopez", "2step-100k", "static"),
-                ("thomas@demo.test", "Thomas Green", "1step-100k", "trailing"),
+                ("thomas@demo.test", "Thomas Green", "instant-100k", "static"),
             ]
             now = datetime.now(timezone.utc)
             login_seq = 100001
@@ -174,6 +174,7 @@ def _account_dict(acc: Account, with_metrics: bool = True, with_credentials: boo
         "trader_id": acc.trader_id, "product_key": acc.product_key,
         "initial_balance": acc.initial_balance, "steps": acc.steps,
         "drawdown_type": acc.drawdown_type, "profit_split_pct": acc.profit_split_pct,
+        "weekend_trading": bool(getattr(acc, "weekend_trading", False)),
         "max_lots": getattr(acc, "max_lots", 0.0) or 0.0,
         "phase": acc.phase, "status": acc.status,
         "balance": round(acc.balance, 2), "equity": round(acc.equity, 2),
@@ -358,6 +359,50 @@ def logout(response: Response):
     return {"ok": True}
 
 
+class ForgotIn(BaseModel):
+    email: str
+
+
+class ResetIn(BaseModel):
+    token: str
+    password: str
+
+
+@app.post("/api/auth/forgot")
+def forgot_password(payload: ForgotIn, request: Request):
+    """Zawsze 200 — odpowiedź nie może zdradzać, czy e-mail istnieje w bazie."""
+    session = SessionLocal()
+    try:
+        tr = session.query(Trader).filter(Trader.email == payload.email.strip().lower()).first()
+        if tr:
+            token = auth.make_reset_token(tr.id)
+            reset_url = f"{_public_base(request)}/portal?reset={token}"
+            notify.send("password_reset", tr.email,
+                        {"name": tr.full_name or tr.email, "reset_url": reset_url})
+        return {"ok": True, "message": "If that e-mail exists, a reset link is on its way."}
+    finally:
+        session.close()
+
+
+@app.post("/api/auth/reset")
+def reset_password(payload: ResetIn):
+    tid = auth.parse_reset_token(payload.token)
+    if tid is None:
+        raise HTTPException(400, "This reset link is invalid or has expired — request a new one")
+    if len(payload.password) < 8:
+        raise HTTPException(400, "The password must be at least 8 characters long")
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, tid)
+        if not tr:
+            raise HTTPException(400, "This reset link is invalid or has expired — request a new one")
+        tr.password_hash = auth.hash_password(payload.password)
+        session.commit()
+        return {"ok": True}
+    finally:
+        session.close()
+
+
 @app.post("/api/auth/signup")
 def signup(payload: SignupIn, response: Response):
     session = SessionLocal()
@@ -424,11 +469,21 @@ def me(trader: Trader = Depends(auth.current_trader)):
 class CheckoutIn(BaseModel):
     product_key: str
     coupon: str | None = None
+    weekend_trading: bool = False
     # Dane potrzebne do założenia konta demo MT5 na nazwisko klienta.
     # Zbierane w kroku płatności; zapisywane na profilu tradera.
     first_name: str | None = None
     last_name: str | None = None
     phone: str | None = None
+
+
+@app.get("/api/coupon/{code}")
+def coupon_preview(code: str):
+    """Podgląd rabatu dla konfiguratora na landingu — sam procent, bez listy kodów."""
+    pct = catalog.COUPONS.get(code.strip().upper())
+    if not pct:
+        raise HTTPException(404, "Unknown coupon code")
+    return {"code": code.strip().upper(), "pct": pct}
 
 
 @app.get("/api/products")
@@ -449,7 +504,8 @@ def checkout(payload: CheckoutIn, trader: Trader = Depends(auth.current_trader))
             session, trader,
             first_name=payload.first_name, last_name=payload.last_name, phone=payload.phone,
         )
-        return billing.create_checkout(session, trader, payload.product_key, payload.coupon)
+        return billing.create_checkout(session, trader, payload.product_key, payload.coupon,
+                                       weekend_trading=payload.weekend_trading)
     finally:
         session.close()
 
@@ -492,6 +548,7 @@ def my_orders(trader: Trader = Depends(auth.current_trader)):
                    "product_label": prod.label if prod else o.product_key,
                    "list_price": prod.price_usd if prod else None,
                    "account_size": prod.account_size if prod else None,
+                   "weekend_trading": bool(getattr(o, "weekend_trading", False)),
                    "bogo_paid_key": getattr(o, "bogo_paid_key", None),
                    "bogo_paid_label": oplacony.label if oplacony else None,
                    "bogo_paid_price": oplacony.price_usd if oplacony else None,

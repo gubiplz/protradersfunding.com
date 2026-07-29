@@ -26,25 +26,36 @@ def max_lots_for(account_size: float) -> float:
     return max(1.0, round(account_size / 100_000 * 6 * 2) / 2)   # do 0.5 lota
 
 
+# Cena add-onu Weekend Trading (2 dodatkowe dni handlu w tygodniu) — jedna
+# kwota niezależnie od rozmiaru konta.
+WEEKEND_ADDON_USD = 199.0
+
 # (key, label, size, steps, price, p1, p2, daily, maxdd, dd_type, min_days, split)
+# Oferta 2026-07-29: dwa modele (2-Step i Instant Funding), rozmiary 10k–2M.
 _CATALOG = [
-    # --- 2-STEP (klasyczna ewaluacja) ---
-    ("2step-10k",  "2-Step 10k",  10_000,  2, 89,  8, 5, 5, 10, "static",   3, 80),
-    ("2step-25k",  "2-Step 25k",  25_000,  2, 189, 8, 5, 5, 10, "static",   4, 80),
-    ("2step-50k",  "2-Step 50k",  50_000,  2, 289, 8, 5, 5, 10, "static",   4, 80),
-    ("2step-100k", "2-Step 100k", 100_000, 2, 549, 8, 5, 5, 10, "static",   4, 80),
-    ("2step-200k", "2-Step 200k", 200_000, 2, 999, 8, 5, 5, 10, "static",   4, 80),
-    # --- 1-STEP (szybsza ścieżka, trailing DD) ---
-    ("1step-10k",  "1-Step 10k",  10_000,  1, 97,  10, 0, 5, 6,  "trailing", 3, 90),
-    ("1step-50k",  "1-Step 50k",  50_000,  1, 297, 10, 0, 5, 6,  "trailing", 3, 90),
-    ("1step-100k", "1-Step 100k", 100_000, 1, 577, 10, 0, 5, 6,  "trailing", 3, 90),
-    # --- INSTANT FUNDING (bez ewaluacji: konto od razu funded) ---
-    # steps=0 => brak celu zysku i faz; zarabiasz od pierwszego dnia, ale
-    # limity ryzyka są ciaśniejsze, a podział zysku niższy niż po ewaluacji.
-    ("instant-10k",  "Instant 10k",  10_000,  0, 249,  0, 0, 4, 6, "static", 3, 70),
-    ("instant-25k",  "Instant 25k",  25_000,  0, 499,  0, 0, 4, 6, "static", 3, 70),
-    ("instant-50k",  "Instant 50k",  50_000,  0, 799,  0, 0, 4, 6, "static", 3, 70),
-    ("instant-100k", "Instant 100k", 100_000, 0, 1499, 0, 0, 4, 6, "static", 3, 70),
+    # --- 2-STEP (klasyczna ewaluacja: P1 10% / P2 5%, DD 5/10, split do 90%) ---
+    ("2step-10k",  "2-Step 10K",  10_000,    2, 99,   10, 5, 5, 10, "static", 5, 90),
+    ("2step-25k",  "2-Step 25K",  25_000,    2, 249,  10, 5, 5, 10, "static", 5, 90),
+    ("2step-50k",  "2-Step 50K",  50_000,    2, 349,  10, 5, 5, 10, "static", 5, 90),
+    ("2step-100k", "2-Step 100K", 100_000,   2, 549,  10, 5, 5, 10, "static", 5, 90),
+    ("2step-200k", "2-Step 200K", 200_000,   2, 1049, 10, 5, 5, 10, "static", 5, 90),
+    ("2step-300k", "2-Step 300K", 300_000,   2, 1499, 10, 5, 5, 10, "static", 5, 90),
+    ("2step-400k", "2-Step 400K", 400_000,   2, 1999, 10, 5, 5, 10, "static", 5, 90),
+    ("2step-800k", "2-Step 800K", 800_000,   2, 2999, 10, 5, 5, 10, "static", 5, 90),
+    ("2step-1m",   "2-Step 1M",   1_000_000, 2, 3499, 10, 5, 5, 10, "static", 5, 90),
+    ("2step-2m",   "2-Step 2M",   2_000_000, 2, 5999, 10, 5, 5, 10, "static", 5, 90),
+    # --- INSTANT FUNDING (bez ewaluacji: od razu funded; DD 5/8, split 70%,
+    #     min. 30 dni handlu przed pierwszą wypłatą) ---
+    ("instant-10k",  "Instant 10K",  10_000,    0, 119,  0, 0, 5, 8, "static", 30, 70),
+    ("instant-25k",  "Instant 25K",  25_000,    0, 309,  0, 0, 5, 8, "static", 30, 70),
+    ("instant-50k",  "Instant 50K",  50_000,    0, 439,  0, 0, 5, 8, "static", 30, 70),
+    ("instant-100k", "Instant 100K", 100_000,   0, 689,  0, 0, 5, 8, "static", 30, 70),
+    ("instant-200k", "Instant 200K", 200_000,   0, 1309, 0, 0, 5, 8, "static", 30, 70),
+    ("instant-300k", "Instant 300K", 300_000,   0, 1869, 0, 0, 5, 8, "static", 30, 70),
+    ("instant-400k", "Instant 400K", 400_000,   0, 2499, 0, 0, 5, 8, "static", 30, 70),
+    ("instant-800k", "Instant 800K", 800_000,   0, 3749, 0, 0, 5, 8, "static", 30, 70),
+    ("instant-1m",   "Instant 1M",   1_000_000, 0, 4369, 0, 0, 5, 8, "static", 30, 70),
+    ("instant-2m",   "Instant 2M",   2_000_000, 0, 7499, 0, 0, 5, 8, "static", 30, 70),
 ]
 
 

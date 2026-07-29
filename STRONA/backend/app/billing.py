@@ -46,14 +46,18 @@ def save_customer_details(session, trader: Trader, *, first_name: str | None,
     return trader
 
 
-def create_checkout(session, trader: Trader, product_key: str, coupon: str | None) -> dict:
+def create_checkout(session, trader: Trader, product_key: str, coupon: str | None,
+                    weekend_trading: bool = False) -> dict:
     product = session.query(Product).filter(Product.key == product_key, Product.active == True).first()  # noqa: E712
     if not product:
         raise HTTPException(404, "Product not found")
 
     price, discount_pct = catalog.apply_coupon(product.price_usd, coupon)
+    # Add-on Weekend Trading: stala kwota, POZA rabatem kuponu (kupon dotyczy planu).
+    if weekend_trading:
+        price = round(price + catalog.WEEKEND_ADDON_USD, 2)
     order = Order(trader_id=trader.id, product_key=product.key, amount_usd=price,
-                  coupon=(coupon or None),
+                  coupon=(coupon or None), weekend_trading=bool(weekend_trading),
                   provider="stripe" if settings.stripe_enabled else "mock")
     session.add(order)
     session.flush()
@@ -70,7 +74,8 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
             line_items=[{
                 "price_data": {
                     "currency": settings.currency,
-                    "product_data": {"name": f"{product.label} challenge"},
+                    "product_data": {"name": f"{product.label} challenge"
+                                     + (" + Weekend Trading" if weekend_trading else "")},
                     "unit_amount": int(round(price * 100)),
                 },
                 "quantity": 1,

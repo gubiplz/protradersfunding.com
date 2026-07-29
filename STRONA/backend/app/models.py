@@ -108,6 +108,8 @@ class Order(Base):
     stripe_session_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # BOGO: klucz produktu, za ktory klient zaplacil (gdy admin przyznaje wiekszy tier)
     bogo_paid_key: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    # Add-on Weekend Trading ($199): 2 dodatkowe dni handlu w tygodniu.
+    weekend_trading: Mapped[bool] = mapped_column(Boolean, default=False)
     account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -148,6 +150,7 @@ class Account(Base):
     # zdanie „you paid for the $25K tier” byloby zmyslone — jest albo prawdziwe,
     # albo mail w ogole go nie zawiera.
     bogo_paid_size: Mapped[float | None] = mapped_column(Float, nullable=True)
+    weekend_trading: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # --- Trade BOT (admin) ---
     # Gdy wlaczony, konto NIE jest czytane z MT5 — snapshoty generuje tradebot.py.

@@ -81,76 +81,119 @@
   ];
   let PRODUCTS = [], activeTab = '2step';
 
-  function planCard(p, hot) {
-    const size = '$' + fmt(p.account_size);
-    return `<div class="plan${hot ? ' hot' : ''}" data-rv>
-      ${hot ? '<div class="plan-badge">MOST POPULAR</div>' : ''}
-      <div class="plan-size">${size}</div>
-      <div class="plan-type">${p.steps === 0 ? 'Instant Funding — no evaluation' : p.steps === 1 ? '1-Step Evaluation' : '2-Step Evaluation'}</div>
-      <div class="plan-price">$${fmt(p.price_usd)} <small>one-time</small></div>
-      <div class="plan-refund">${p.steps === 0 ? '✓ Funded from day one' : '✓ Refunded with your first payout'}</div>
-      <ul>
-        <li>${p.steps === 0 ? 'No profit target — <b>trade and get paid</b>'
-          : `Profit target <b>${p.profit_target_p1}%${p.steps > 1 ? ' / ' + p.profit_target_p2 + '%' : ''}</b>`}</li>
-        <li>Max daily loss <b>${p.max_daily_loss_pct}%</b></li>
-        <li>Max overall loss <b>${p.max_overall_loss_pct}% ${p.drawdown_type}</b></li>
-        <li>Max open volume <b>${p.max_lots} lots</b></li>
-        <li>Profit split up to <b>${p.profit_split_pct}%</b></li>
-        <li>Real MT5 account · news &amp; weekend trading <b>allowed</b></li>
-      </ul>
-      <a class="btn" href="/portal?buy=${encodeURIComponent(p.key)}">Start Challenge</a>
-    </div>`;
+  /* Pricing configurator: type toggle + size grid + add-on + coupon on the
+     left, live program rules on the right. Data comes from /api/products. */
+  let cfgType = '2step', cfgSize = null, cfgWt = false, cfgCoupon = null, cfgPct = 0;
+  const typeItems = t => PRODUCTS
+    .filter(p => (t === 'instant' ? p.steps === 0 : p.steps === 2) && p.price_usd > 0)
+    .sort((a, b) => a.account_size - b.account_size);
+  const sizeLabel = v => v >= 1e6 ? '$' + (v / 1e6) + 'M' : '$' + Math.round(v / 1e3) + 'K';
+
+  function renderPricing() {
+    const box = $('#pcfg'); if (!box) return;
+    let items = typeItems(cfgType);
+    if (!items.length) { cfgType = cfgType === '2step' ? 'instant' : '2step'; items = typeItems(cfgType); }
+    if (!items.length) { box.closest('.pcfg-grid')?.remove(); return; }
+    if (!items.some(x => x.account_size === cfgSize)) cfgSize = items[0].account_size;
+    const p = items.find(x => x.account_size === cfgSize);
+    const maxSize = Math.max(...items.map(x => x.account_size));
+
+    $('#pcfg-title').textContent = cfgType === 'instant' ? 'Instant Funding' : '2-Step Evaluation';
+    $('#pcfg-toggle').innerHTML = [['2step', '2-Step Evaluation'], ['instant', 'Instant Funding']]
+      .filter(([id]) => typeItems(id).length)
+      .map(([id, nm]) => `<button class="ptog${id === cfgType ? ' on' : ''}" data-t="${id}">${nm}</button>`).join('');
+    $$('#pcfg-toggle .ptog').forEach(b => b.addEventListener('click', () => { cfgType = b.dataset.t; renderPricing(); }));
+
+    $('#pcfg-sizes').innerHTML = items.map(x =>
+      `<button class="psize${x.account_size === cfgSize ? ' on' : ''}${x.account_size === maxSize ? ' hot' : ''}" data-s="${x.account_size}">${x.account_size === maxSize ? '<i>HOT</i>' : ''}${sizeLabel(x.account_size)}</button>`).join('');
+    $$('#pcfg-sizes .psize').forEach(b => b.addEventListener('click', () => { cfgSize = +b.dataset.s; renderPricing(); }));
+
+    const wt = $('#pcfg-wt');
+    wt.textContent = cfgWt ? '✓ Added' : 'Add $199';
+    wt.classList.toggle('on', cfgWt);
+
+    const fee = Math.round((p.price_usd * (1 - cfgPct / 100) + (cfgWt ? 199 : 0)) * 100) / 100;
+    $('#pcfg-fee').textContent = '$' + fee.toLocaleString('en-US',
+      { minimumFractionDigits: fee % 1 ? 2 : 0, maximumFractionDigits: 2 });
+    $('#pcfg-feesub').textContent = (cfgPct ? `${cfgPct}% coupon applied · ` : '')
+      + (cfgType === 'instant' ? 'one-time fee — funded from day one'
+         : 'one-time fee for evaluation access, refunded with your first payout');
+
+    const q = new URLSearchParams({ buy: p.key });
+    if (cfgWt) q.set('wt', '1');
+    if (cfgCoupon) q.set('coupon', cfgCoupon);
+    $('#pcfg-cta').href = '/portal?' + q.toString();
+
+    const wkVal = cfgWt ? '<span class="ok">✓ Added to your order</span>' : '$199 bonus add-on';
+    const rows = cfgType === 'instant' ? [
+      ['Profit target', 'None — funded from day one'],
+      ['Maximum daily drawdown', p.max_daily_loss_pct + '%'],
+      ['Maximum total drawdown', p.max_overall_loss_pct + '%'],
+      ['Drawdown type', 'Balance-based'],
+      ['Minimum trading days', p.min_trading_days + ' days before first payout'],
+      ['Reward frequency', 'Every 7 days'],
+      ['Profit split', p.profit_split_pct + '%'],
+      ['Max open volume', p.max_lots + ' lots'],
+      ['Weekend trading', wkVal],
+      ['News trading', '<span class="ok">✓ Allowed</span>'],
+      ['Leverage', 'Up to 1:50'],
+    ] : [
+      ['Profit target', `Phase 1: ${p.profit_target_p1}% | Phase 2: ${p.profit_target_p2}%`],
+      ['Maximum daily drawdown', p.max_daily_loss_pct + '%'],
+      ['Maximum total drawdown', p.max_overall_loss_pct + '%'],
+      ['Drawdown type', 'Balance-based'],
+      ['Minimum trading days', p.min_trading_days + ' days'],
+      ['Reward frequency', 'Bi-weekly'],
+      ['Profit split', 'Up to ' + p.profit_split_pct + '%'],
+      ['Max open volume', p.max_lots + ' lots'],
+      ['Fee refund', '<span class="ok">✓ With your first payout</span>'],
+      ['Weekend trading', wkVal],
+      ['News trading', '<span class="ok">✓ Allowed</span>'],
+      ['Leverage', 'Up to 1:100'],
+    ];
+    $('#prules-rows').innerHTML = rows.map(([l, v]) =>
+      `<div class="prule"><span>${l}</span><b>${v}</b></div>`).join('');
   }
 
-  function renderPlans() {
-    const g = GROUPS.find(g => g.id === activeTab);
-    const items = PRODUCTS.filter(g.match).sort((a, b) => a.account_size - b.account_size);
-    const hotIdx = items.length > 2 ? Math.floor(items.length / 2) : -1;
-    $('#plans').innerHTML = items.map((p, i) => planCard(p, i === hotIdx)).join('') ||
-      '<p class="muted">No plans available right now.</p>';
-    revealize($('#plans'));
-  }
-
-  function renderTabs() {
-    const withItems = GROUPS.filter(g => PRODUCTS.some(g.match));
-    $('#tabs').innerHTML = withItems.map(g =>
-      `<button class="tab${g.id === activeTab ? ' on' : ''}" data-tab="${g.id}">${g.name}</button>`).join('');
-    $$('#tabs .tab').forEach(b => b.addEventListener('click', () => {
-      activeTab = b.dataset.tab; renderTabs(); renderPlans();
-    }));
+  async function applyPricingCoupon() {
+    const inp = $('#pcfg-coupon'), code = (inp.value || '').trim();
+    inp.classList.remove('bad');
+    if (!code) { cfgCoupon = null; cfgPct = 0; renderPricing(); return; }
+    try {
+      const r = await fetch('/api/coupon/' + encodeURIComponent(code));
+      if (!r.ok) throw new Error();
+      const d = await r.json();
+      cfgCoupon = d.code; cfgPct = d.pct;
+    } catch (e) { cfgCoupon = null; cfgPct = 0; inp.classList.add('bad'); }
+    renderPricing();
   }
 
   function renderObjectives() {
     const body = $('#objBody'); if (!body) return;
     const g2 = PRODUCTS.filter(p => p.steps === 2 && p.price_usd > 0);
-    const g1 = PRODUCTS.filter(p => p.steps === 1 && p.price_usd > 0);
-    if (!g2.length || !g1.length) return;
-    const r2 = g2[g2.length - 1], r1 = g1[g1.length - 1];
-    const range = (arr, f) => {
-      const vs = [...new Set(arr.map(f))].sort((a, b) => a - b);
-      return vs.length > 1 ? vs[0] + '–' + vs[vs.length - 1] : String(vs[0]);
-    };
     const gi = PRODUCTS.filter(p => p.steps === 0 && p.price_usd > 0);
-    const ri = gi.length ? gi[gi.length - 1] : null;
-    const col = (v) => ri ? [v] : [];
+    if (!g2.length) return;
+    const r2 = g2[g2.length - 1], ri = gi.length ? gi[gi.length - 1] : null;
+    const col = v => ri ? [v] : [];
     const rows = [
-      ['Profit target — Phase 1', r2.profit_target_p1 + '%', r1.profit_target_p1 + '%', ...col('<span class="ok">none</span>')],
-      ['Profit target — Phase 2', r2.profit_target_p2 + '%', '—', ...col('—')],
-      ['Maximum daily loss', r2.max_daily_loss_pct + '%', r1.max_daily_loss_pct + '%', ...col(ri && ri.max_daily_loss_pct + '%')],
-      ['Maximum overall loss', r2.max_overall_loss_pct + '%', r1.max_overall_loss_pct + '%', ...col(ri && ri.max_overall_loss_pct + '%')],
-      ['Drawdown type', cap(r2.drawdown_type), cap(r1.drawdown_type), ...col(ri && cap(ri.drawdown_type))],
-      ['Max open volume', r2.max_lots + ' lots', r1.max_lots + ' lots', ...col(ri && ri.max_lots + ' lots')],
-      ['Minimum trading days', range(g2, p => p.min_trading_days), range(g1, p => p.min_trading_days), ...col(ri && String(ri.min_trading_days))],
-      ['News trading', '<span class="ok">✓ Allowed</span>', '<span class="ok">✓ Allowed</span>', ...col('<span class="ok">✓ Allowed</span>')],
-      ['Weekend holding', '<span class="ok">✓ Allowed</span>', '<span class="ok">✓ Allowed</span>', ...col('<span class="ok">✓ Allowed</span>')],
-      ['Profit split', 'up to ' + Math.max(...g2.map(p => p.profit_split_pct)) + '%', 'up to ' + Math.max(...g1.map(p => p.profit_split_pct)) + '%', ...col(ri && ri.profit_split_pct + '%')],
-      ['Refundable fee', '<span class="ok">✓ With first payout</span>', '<span class="ok">✓ With first payout</span>', ...col('—')],
-      ['One-time fee', 'from ' + money(Math.min(...g2.map(p => p.price_usd))), 'from ' + money(Math.min(...g1.map(p => p.price_usd))), ...col(ri && 'from ' + money(Math.min(...gi.map(p => p.price_usd))))],
+      ['Profit target — Phase 1', r2.profit_target_p1 + '%', ...col('<span class="ok">none</span>')],
+      ['Profit target — Phase 2', r2.profit_target_p2 + '%', ...col('—')],
+      ['Maximum daily loss', r2.max_daily_loss_pct + '%', ...col(ri && ri.max_daily_loss_pct + '%')],
+      ['Maximum overall loss', r2.max_overall_loss_pct + '%', ...col(ri && ri.max_overall_loss_pct + '%')],
+      ['Drawdown type', 'Balance-based', ...col('Balance-based')],
+      ['Minimum trading days', r2.min_trading_days + ' days', ...col(ri && ri.min_trading_days + ' days')],
+      ['Reward frequency', 'Bi-weekly', ...col('Every 7 days')],
+      ['News trading', '<span class="ok">✓ Allowed</span>', ...col('<span class="ok">✓ Allowed</span>')],
+      ['Weekend trading', '$199 add-on', ...col('$199 add-on')],
+      ['Leverage', 'Up to 1:100', ...col('Up to 1:50')],
+      ['Profit split', 'up to ' + Math.max(...g2.map(p => p.profit_split_pct)) + '%', ...col(ri && ri.profit_split_pct + '%')],
+      ['Refundable fee', '<span class="ok">✓ With first payout</span>', ...col('—')],
+      ['One-time fee', 'from ' + money(Math.min(...g2.map(p => p.price_usd))), ...col(ri && 'from ' + money(Math.min(...gi.map(p => p.price_usd))))],
     ];
-    body.innerHTML = rows.map(r => '<tr>' + r.map((c, i) => `<td>${c}</td>`).join('') + '</tr>').join('');
+    body.innerHTML = rows.map(r => '<tr>' + r.map(c => `<td>${c}</td>`).join('') + '</tr>').join('');
     const head = document.querySelector('#objectives thead tr');
-    if (head && ri && head.children.length === 3) {
-      const th = document.createElement('th'); th.textContent = 'Instant Funding'; head.appendChild(th);
+    if (head) {
+      head.innerHTML = '<th>Objective</th><th>2-Step Evaluation</th>' + (ri ? '<th>Instant Funding</th>' : '');
     }
   }
   const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
@@ -205,12 +248,15 @@
   }
 
   async function products() {
-    if (!$('#plans') && !$('#cfg')) return;
+    if (!$('#pcfg') && !$('#cfg')) return;
     try {
       PRODUCTS = await (await fetch('/api/products')).json();
-      renderTabs(); renderPlans(); renderObjectives(); renderConfigurator();
+      renderPricing(); renderObjectives(); renderConfigurator();
+      const ap = $('#pcfg-apply'); if (ap) ap.addEventListener('click', applyPricingCoupon);
+      const ci = $('#pcfg-coupon'); if (ci) ci.addEventListener('keydown', e => { if (e.key === 'Enter') applyPricingCoupon(); });
+      const wt = $('#pcfg-wt'); if (wt) wt.addEventListener('click', () => { cfgWt = !cfgWt; renderPricing(); });
     } catch (e) {
-      if ($('#plans')) $('#plans').innerHTML = '<p class="muted">Could not load plans — please refresh.</p>';
+      if ($('#pcfg')) $('#pcfg').innerHTML = '<p class="muted">Could not load plans — please refresh.</p>';
     }
   }
 

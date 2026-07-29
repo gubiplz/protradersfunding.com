@@ -88,7 +88,7 @@ def test_payout_request_and_fee_refund():
     res = billing.create_checkout(s, tr, "2step-100k", None)      # opłata 549
     done = billing.mock_complete(s, res["order_id"], tid)
     acc = s.get(Account, done["account_id"])
-    acc.status = "funded"; acc.balance = 110_000                  # +10k zysku, split 80%
+    acc.status = "funded"; acc.balance = 110_000                  # +10k zysku, split 90%
     s.commit()
     s.close()
 
@@ -97,7 +97,7 @@ def test_payout_request_and_fee_refund():
     acc = s.get(Account, done["account_id"])
     profit = acc.balance - acc.initial_balance
     share = profit * acc.profit_split_pct / 100.0
-    assert share == 8000.0                                        # 80% z 10k
+    assert share == 9000.0                                        # 90% z 10k
     first = s.query(Payout).filter(Payout.account_id == acc.id).count() == 0
     order = s.query(Order).filter(Order.account_id == acc.id, Order.status == "paid").first()
     fee_refund = order.amount_usd if first else 0
@@ -106,11 +106,20 @@ def test_payout_request_and_fee_refund():
 
 
 def test_1step_advance_goes_straight_to_funded():
-    """1-step: zaliczenie eval_1 przechodzi od razu na funded (pomija eval_2)."""
+    """1-step: zaliczenie eval_1 przechodzi od razu na funded (pomija eval_2).
+
+    Plany 1-step zniknely z oferty, ale mechanika w silniku zostaje — test
+    tworzy wlasny produkt, zeby jej pilnowac."""
     tid = _new_trader("onestep@test.pl")
     s = SessionLocal()
+    if not s.query(Product).filter(Product.key == "test-1step-100k").first():
+        s.add(Product(key="test-1step-100k", label="Test 1-Step 100K", account_size=100_000,
+                      steps=1, price_usd=577, profit_target_p1=10, profit_target_p2=0,
+                      max_daily_loss_pct=5, max_overall_loss_pct=6, drawdown_type="trailing",
+                      min_trading_days=3, profit_split_pct=90, max_lots=12, active=True))
+        s.commit()
     tr = s.get(Trader, tid)
-    done = billing.mock_complete(s, billing.create_checkout(s, tr, "1step-100k", None)["order_id"], tid)
+    done = billing.mock_complete(s, billing.create_checkout(s, tr, "test-1step-100k", None)["order_id"], tid)
     aid = done["account_id"]
     s.close()
 
@@ -147,7 +156,7 @@ def test_2step_awansuje_sam_eval1_potem_eval2_potem_funded():
         asyncio.run(poller.process_account(s, acc, Stub(MarketSnapshot(cel, cel, 0, True))))
         s.refresh(acc)
 
-    zalicz(108_000)                    # +8% => cel etapu 1
+    zalicz(110_000)                    # +10% => cel etapu 1
     assert acc.phase == "eval_2" and acc.status == "active"
     assert acc.balance == acc.initial_balance, "nowy etap startuje od kapitalu"
 

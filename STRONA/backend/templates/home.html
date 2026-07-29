@@ -152,15 +152,52 @@
   <div class="wrap">
     <div class="sec-head center" data-rv>
       <span class="pill">Pricing</span>
-      <h2>Choose your challenge</h2>
-      <p>One-time fee. No recurring costs. Refunded in full with your first payout.</p>
+      <h2>Configure your challenge</h2>
+      <p>One-time fee. No recurring costs. 2-Step fees are refunded in full with your first payout.</p>
     </div>
-    <div style="text-align:center" data-rv><div class="tabs" id="tabs"></div></div>
-    <div class="plans" id="plans"></div>
+    <div class="pcfg-grid" data-rv>
+      <div class="pcfg" id="pcfg">
+        <div class="pcfg-head">
+          <h3 id="pcfg-title">2-Step Evaluation</h3>
+          <span class="pcfg-sub">One-time fee · simulated capital</span>
+        </div>
+        <div class="pcfg-toggle" id="pcfg-toggle"></div>
+        <div class="pcfg-label">Simulated account size</div>
+        <div class="pcfg-sizes" id="pcfg-sizes"></div>
+        <div class="pcfg-label">Platform</div>
+        <div class="pcfg-platform">MetaTrader&nbsp;5</div>
+        <div class="pcfg-addon">
+          <div><b>Weekend Trading</b><span>Bonus add-on: $199 for 2 extra trading days/week</span></div>
+          <button class="pcfg-addbtn" id="pcfg-wt" type="button">Add $199</button>
+        </div>
+        <div class="pcfg-addon static">
+          <div><b>News Trading</b><span>Trade straight through high-impact news</span></div>
+          <span class="ok">✓ Included</span>
+        </div>
+        <div class="pcfg-label">Coupon code</div>
+        <div class="pcfg-coupon">
+          <input id="pcfg-coupon" class="pcfg-inp" placeholder="e.g. WELCOME10" autocomplete="off">
+          <button class="pcfg-apply" id="pcfg-apply" type="button">Apply</button>
+        </div>
+        <div class="pcfg-feerow">
+          <div class="pcfg-feelabel">Total due</div>
+          <div class="pcfg-fee" id="pcfg-fee">$—</div>
+          <div class="pcfg-feesub" id="pcfg-feesub"></div>
+        </div>
+        <a class="btn btn-lg" id="pcfg-cta" href="/portal" style="width:100%;text-align:center">Continue to payment →</a>
+        <div class="pcfg-fine">Secure checkout · MT5 credentials delivered to your dashboard and inbox automatically.</div>
+      </div>
+      <div class="prules">
+        <h3>Program Rules</h3>
+        <div id="prules-rows"></div>
+        <p class="prules-fine">All trading takes place in a simulated environment on virtual funds.
+          Performance rewards depend on your trading. See <a href="/terms">Terms of Service</a>.</p>
+      </div>
+    </div>
     <div class="pricing-note" data-rv>
       <span>🔒 Secure checkout</span>
       <span>⚡ Account delivered automatically</span>
-      <span>🏷️ Coupon codes accepted at checkout</span>
+      <span>🏷️ Coupon codes accepted</span>
     </div>
   </div>
 </section>
@@ -327,7 +364,6 @@
             <b>a1b2-example</b>
             <span>Certificate #</span>
           </div>
-          <div></div>
         </div>
       </div>
     </div>

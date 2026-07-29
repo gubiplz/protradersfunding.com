@@ -41,8 +41,7 @@
     <p class="cert-blurb">{{ blurb }}</p>
     {% if note %}<p class="cert-note">{{ note }}</p>{% endif %}
 
-    {# 1fr/auto/1fr grid — the QR stays PERFECTLY centred no matter how wide
-       the signature on the left is. #}
+    {# signature on the LEFT, QR on the RIGHT (1fr/auto grid) #}
     <div class="cert-foot">
       <div class="cert-signblock">
         {% if signatory %}
@@ -55,7 +54,6 @@
         <b>{{ cert_token }}</b>
         <span>Certificate #</span>
       </div>
-      <div></div>
     </div>
 
     <p class="cert-verify">Verify this certificate at {{ verify_full_url }}</p>
