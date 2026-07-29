@@ -183,7 +183,6 @@ const VIEWS={
     <div><div class="n">${n}</div><div class="l">${label}</div></div><span class="go">${ICO.arrow}</span></div>`;
   $('view').innerHTML=`
     <div class="sysbar">
-      <span class="sys ${s.feed==='sim'?'warn':''}"><span class="dot"></span>Feed: <b>${esc(s.feed)}</b></span>
       <span class="sys ${s.stripe==='mock'?'warn':''}"><span class="dot"></span>Payments: <b>${esc(s.stripe)}</b></span>
       <span class="sys"><span class="dot"></span>Provisioning queue: <b>${s.provisioning??0}</b></span>
       <span class="sys"><span class="dot"></span>Pool free: <b>${s.pool_free??0}</b></span>
@@ -391,7 +390,6 @@ const VIEWS={
 
     <div class="sec-card" style="max-width:560px"><h3>Runtime</h3>
       <div style="margin-top:8px">
-        <div class="kv"><span>Equity feed</span><b>${esc(s.feed)}</b></div>
         <div class="kv"><span>Payments</span><b>${esc(s.stripe)}</b></div>
         <div class="kv"><span>Accounts provisioning</span><b>${s.provisioning??0}</b></div>
         <div class="kv"><span>Free pool accounts</span><b>${s.pool_free??0}</b></div>
