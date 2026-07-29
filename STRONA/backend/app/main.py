@@ -29,9 +29,9 @@ from sqlalchemy import func
 from . import auth, billing, catalog, metaquotes_web, notify, poller, provisioning, rules, tradebot
 from .config import get_settings
 from .db import SessionLocal, init_db
-from .models import (Account, Breach, Certificate, EquitySnapshot, JournalEntry, Order, Payout,
-                     PayoutRequest, PoolAccount, Product, SupportTicket, TicketMessage,
-                     Trade, Trader)
+from .models import (Account, AppSetting, Breach, Certificate, EquitySnapshot, JournalEntry,
+                     Order, Payout, PayoutRequest, PoolAccount, Product, SupportTicket,
+                     TicketMessage, Trade, Trader)
 
 settings = get_settings()
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
@@ -1847,7 +1847,7 @@ def admin_pool_list():
                 "platform_server": p.platform_server, "account_size": p.account_size,
                 "claimed": p.claimed, "claimed_by_account_id": p.claimed_by_account_id,
                 "claimed_at": p.claimed_at.isoformat() if p.claimed_at else None,
-                "retired_reason": p.retired_reason,
+                "retired_reason": p.retired_reason, "simulated": bool(p.simulated),
                 "trader_email": tr.email if tr else None,
                 "trader_name": (tr.full_name if tr else None),
                 "account_status": acc.status if acc else None,
@@ -1871,7 +1871,61 @@ def admin_pool_list():
         rozmiary = sorted({p.account_size for p in
                            session.query(Product).filter(Product.active == True).all()})  # noqa: E712
         return {"pool": pula, "waiting": czekajace, "sizes": rozmiary,
-                "can_generate": mozna, "generate_hint": powod}
+                "can_generate": mozna, "generate_hint": powod,
+                "sim_fallback": provisioning.sim_fallback_enabled(session)}
+    finally:
+        session.close()
+
+
+class SimGenerateIn(BaseModel):
+    """Ile SYMULOWANYCH wpisów dodać do puli i jakiego rozmiaru."""
+    account_size: float
+    count: int = 1
+
+
+@app.post("/api/admin/pool/generate-simulated", dependencies=[Depends(auth.require_admin)])
+def admin_pool_generate_simulated(payload: SimGenerateIn):
+    """Dodaje do puli wpisy z wygenerowanymi u nas poświadczeniami w formacie
+    MetaQuotes-Demo. Za takim wpisem nie stoi żaden serwer — konto, które go
+    dostanie, ma mt5_backed=False i ruch generuje mu Trade BOT, nie realny feed."""
+    if payload.account_size <= 0:
+        raise HTTPException(400, "Enter an account size")
+    if not 1 <= payload.count <= 50:
+        raise HTTPException(400, "Count must be between 1 and 50")
+    session = SessionLocal()
+    try:
+        created = []
+        for _ in range(payload.count):
+            p = PoolAccount(platform_login=provisioning._gen_login(),
+                            platform_password=provisioning._gen_password(),
+                            platform_server=provisioning.PLATFORM_SERVER,
+                            account_size=payload.account_size, simulated=True)
+            session.add(p)
+            session.flush()
+            created.append({"id": p.id, "platform_login": p.platform_login})
+        session.commit()
+        return {"created": created}
+    finally:
+        session.close()
+
+
+class SimFallbackIn(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/admin/pool/sim-fallback", dependencies=[Depends(auth.require_admin)])
+def admin_pool_sim_fallback(payload: SimFallbackIn):
+    """Przełącznik: gdy pula nie ma wolnego rachunku, provisioning sam generuje
+    symulowane poświadczenia zamiast trzymać opłacone konto w kolejce."""
+    session = SessionLocal()
+    try:
+        row = session.get(AppSetting, provisioning.SIM_FALLBACK_KEY)
+        if row is None:
+            row = AppSetting(key=provisioning.SIM_FALLBACK_KEY)
+            session.add(row)
+        row.value = "1" if payload.enabled else "0"
+        session.commit()
+        return {"sim_fallback": payload.enabled}
     finally:
         session.close()
 

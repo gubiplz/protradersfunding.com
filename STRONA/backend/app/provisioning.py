@@ -33,7 +33,7 @@ from time import monotonic
 
 from . import metaapi_provisioning, metaquotes_web, notify
 from .config import get_settings
-from .models import Account, Order, PoolAccount, Product, Trader
+from .models import Account, AppSetting, Order, PoolAccount, Product, Trader
 
 PLATFORM_SERVER = "MetaQuotes-Demo"
 
@@ -164,7 +164,8 @@ def claim_pool_account(session, acc: Account) -> bool:
     acc.platform_password = pool.platform_password
     acc.platform_server = pool.platform_server
     acc.login = pool.platform_login
-    acc.mt5_backed = True
+    # Wpis symulowany = zmyslone poswiadczenia; realny feed nie ma sie nimi logowac.
+    acc.mt5_backed = not bool(getattr(pool, "simulated", False))
     pool.claimed = True
     pool.claimed_by_account_id = acc.id
     pool.claimed_by_trader_id = acc.trader_id
@@ -237,11 +238,35 @@ async def _provision_one(session_factory, feed, aid: int) -> None:
                   f"z puli, trader {trader.email if trader else '?'}")
             return
 
-        # 3) pula nie ma wolnego rachunku tego rozmiaru — konto czeka, aż admin go
-        #    doda. Panel pokazuje takie konta w sekcji MT5 Pool jako oczekujące.
+        # 3) pula pusta, ale admin włączył w panelu auto-provisioning symulowanych
+        #    poświadczeń — generujemy je od ręki zamiast trzymać tradera w kolejce.
+        if sim_fallback_enabled(s):
+            _apply_local_credentials(acc)
+            acc.status = "funded" if acc.phase == "funded" else "active"
+            s.commit()
+            if trader:
+                notify.send(_creds_event(acc), trader.email, _creds_ctx(trader, acc))
+            print(f"[provisioning] konto {aid} = SYMULOWANE poświadczenia "
+                  f"({acc.platform_login}@{acc.platform_server}) — pula była pusta")
+            return
+
+        # 4) konto czeka, aż admin doda rachunek do puli. Panel pokazuje takie
+        #    konta w sekcji MT5 Pool jako oczekujące.
         print(f"[provisioning] konto {aid} czeka na rachunek ${acc.initial_balance:,.0f} z puli")
     finally:
         s.close()
+
+
+SIM_FALLBACK_KEY = "provision_sim_fallback"
+
+
+def sim_fallback_enabled(session) -> bool:
+    """Czy przy pustej puli auto-generować symulowane poświadczenia.
+
+    Przełącznik z panelu admina, trzymany w bazie — na hostingu bezserwerowym
+    zmiana env oznaczałaby redeploy, a to ma działać od kliknięcia."""
+    row = session.get(AppSetting, SIM_FALLBACK_KEY)
+    return bool(row and row.value == "1")
 
 
 def _looks_like_account_number(value: str | None) -> bool:

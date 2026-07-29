@@ -357,6 +357,23 @@ const VIEWS={
     </div>`:''}
 
     <div class="sec-card">
+      <h3>Simulated accounts</h3>
+      <p class="muted" style="font-size:12.5px;margin-bottom:14px">Generates MT5-style credentials locally — no real server behind them. Accounts provisioned from these entries are driven by the Trade BOT, not a live feed.</p>
+      <div class="pool-form">
+        <div><label class="muted" style="font-size:12px">Account size</label>
+          <select id="sim-size" class="inp">${sizeOptions(50000)}</select></div>
+        <div><label class="muted" style="font-size:12px">How many</label>
+          <input id="sim-count" class="inp" type="number" min="1" max="50" value="5"></div>
+      </div>
+      <button class="btn-p" onclick="genSim()">Generate simulated accounts</button>
+      <label style="display:flex;align-items:center;gap:9px;margin-top:14px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="sim-fb" ${poolData.sim_fallback?'checked':''} onchange="setSimFallback(this.checked)" style="width:16px;height:16px;accent-color:#6366f1">
+        Auto-provision simulated credentials when the pool has no matching account
+      </label>
+      <p class="muted" style="font-size:12px;margin-top:6px">With this on, a paid challenge never waits: if no free account of the right size is in the pool, the platform generates simulated credentials and activates the account right away.</p>
+    </div>
+
+    <div class="sec-card">
       <h3>Add account manually</h3>
       <p class="muted" style="font-size:12.5px;margin-bottom:14px">Accounts you created at your broker. Paste the credentials here — provisioning assigns the first free account of a matching size when a challenge is purchased.</p>
       <div class="pool-form">
@@ -378,7 +395,7 @@ const VIEWS={
     ${rows.length?`<div class="tbl-wrap"><table class="tbl">
       <thead><tr><th>#</th><th>Login</th><th>Server</th><th>Size</th><th>State</th><th>Assigned to</th><th>When</th><th></th></tr></thead>
       <tbody>${rows.map(p=>`<tr>
-        <td class="num">${p.id}</td><td class="num">${esc(p.platform_login)}</td>
+        <td class="num">${p.id}</td><td class="num">${esc(p.platform_login)}${p.simulated?'<div class="muted" style="font-size:10.5px;letter-spacing:.06em">SIMULATED</div>':''}</td>
         <td class="muted">${esc(p.platform_server)}</td><td class="num">$${fmt0(p.account_size)}</td>
         <td>${p.retired_reason?`<span class="status failed"><span class="dot"></span>retired</span>`
           :p.claimed?`<span class="status pending"><span class="dot"></span>assigned</span>`
@@ -811,6 +828,19 @@ async function addPool(){
     toast('Login, password, server and account size are all required.','err');return}
   try{await api('/api/admin/pool',{method:'POST',body:JSON.stringify(body)});toast('Added to pool.','ok');go('pool')}
   catch(e){toast('Error: '+e.message,'err')}
+}
+async function genSim(){
+  const size=parseFloat($('sim-size').value||'0'), cnt=parseInt($('sim-count').value||'1',10);
+  try{const r=await api('/api/admin/pool/generate-simulated',{method:'POST',
+      body:JSON.stringify({account_size:size,count:cnt})});
+    toast(`${r.created.length} simulated account${r.created.length===1?'':'s'} added to the pool.`,'ok');
+    go('pool');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function setSimFallback(on){
+  try{await api('/api/admin/pool/sim-fallback',{method:'POST',body:JSON.stringify({enabled:on})});
+    toast(on?'Auto-provisioning of simulated credentials is ON.':'Auto-provisioning turned off.','ok');
+  }catch(e){toast('Error: '+e.message,'err');go('pool')}
 }
 function editPool(id){
   const w=$('pool-edit-'+id); w.style.display=(w.style.display==='none'?'table-row':'none');

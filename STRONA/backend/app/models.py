@@ -348,7 +348,19 @@ class PoolAccount(Base):
     # raz wydany NIE wraca do puli — ma historie transakcji i zna go poprzedni
     # wlasciciel — a to pole mowi panelowi, dlaczego wpis nie jest wolny.
     retired_reason: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    # SYMULOWANY wpis: login/haslo wygenerowane u nas, za rachunkiem nie stoi
+    # zaden serwer MT5. Konto, ktore go dostanie, ma miec mt5_backed=False —
+    # inaczej realny feed probowalby logowac sie zmyslonymi danymi.
+    simulated: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class AppSetting(Base):
+    """Ustawienia przelaczane z panelu w czasie dzialania (env wymagalby deployu)."""
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(String(200), default="")
 
 
 class JournalEntry(Base):

@@ -81,6 +81,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "claimed_by_trader_id": "INTEGER",
         "claimed_at": "TIMESTAMP",
         "retired_reason": "VARCHAR(60)",
+        "simulated": "BOOLEAN DEFAULT FALSE",
     },
     "payout_requests": {
         "details": "VARCHAR(400)",

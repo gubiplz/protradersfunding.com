@@ -195,3 +195,61 @@ def test_wolny_wpis_mozna_usunac_a_przydzielonego_nie():
 
     assert client.delete(f"/api/admin/pool/{id_wolny}", headers=ADMIN_H).status_code == 200
     assert client.delete(f"/api/admin/pool/{id_zajety}", headers=ADMIN_H).status_code == 400
+
+
+def test_generator_symulowanych_wpisow_i_przydzial_bez_mt5():
+    """Wpisy simulated maja poswiadczenia w formacie MetaQuotes, a konto z nich
+    dostaje mt5_backed=False — realny feed nie moze sie logowac zmyslonymi danymi."""
+    ROZMIAR = 73_000
+    r = client.post("/api/admin/pool/generate-simulated", headers=ADMIN_H,
+                    json={"account_size": ROZMIAR, "count": 3})
+    assert r.status_code == 200 and len(r.json()["created"]) == 3
+
+    lista = client.get("/api/admin/pool", headers=ADMIN_H).json()
+    nasze = [p for p in lista["pool"] if p["account_size"] == ROZMIAR]
+    assert len(nasze) == 3 and all(p["simulated"] for p in nasze)
+    assert all(len(p["platform_login"]) == 9 and p["platform_login"].isdigit() for p in nasze)
+
+    tid = _trader("sim-claim@pool.pl")
+    aid = _konto_czekajace(tid, ROZMIAR)
+    with realny_provisioning():
+        asyncio.run(provisioning.provision_pending(SessionLocal, None))
+    s = SessionLocal()
+    acc = s.get(Account, aid)
+    assert acc.status == "active" and acc.mt5_backed is False
+    assert acc.platform_server == "MetaQuotes-Demo"
+    s.close()
+
+    # limity generatora
+    assert client.post("/api/admin/pool/generate-simulated", headers=ADMIN_H,
+                       json={"account_size": ROZMIAR, "count": 51}).status_code == 400
+    assert client.post("/api/admin/pool/generate-simulated", headers=ADMIN_H,
+                       json={"account_size": 0, "count": 1}).status_code == 400
+
+
+def test_sim_fallback_aktywuje_konto_gdy_pula_pusta():
+    """Checkbox w panelu: pusta pula nie trzyma oplaconego konta w kolejce —
+    provisioning sam generuje symulowane poswiadczenia."""
+    ROZMIAR = 74_000   # zaden wpis w puli nie ma tego rozmiaru
+    tid = _trader("sim-fallback@pool.pl")
+    aid = _konto_czekajace(tid, ROZMIAR)
+
+    # wylaczony (domyslnie) -> konto czeka
+    with realny_provisioning():
+        asyncio.run(provisioning.provision_pending(SessionLocal, None))
+    s = SessionLocal(); assert s.get(Account, aid).status == "provisioning"; s.close()
+
+    r = client.post("/api/admin/pool/sim-fallback", headers=ADMIN_H, json={"enabled": True})
+    assert r.status_code == 200
+    assert client.get("/api/admin/pool", headers=ADMIN_H).json()["sim_fallback"] is True
+    try:
+        with realny_provisioning():
+            asyncio.run(provisioning.provision_pending(SessionLocal, None))
+        s = SessionLocal()
+        acc = s.get(Account, aid)
+        assert acc.status == "active" and acc.mt5_backed is False
+        assert acc.platform_login and acc.platform_password
+        assert acc.platform_server == "MetaQuotes-Demo"
+        s.close()
+    finally:
+        client.post("/api/admin/pool/sim-fallback", headers=ADMIN_H, json={"enabled": False})
