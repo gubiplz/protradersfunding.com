@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import secrets
 import time
 from contextlib import asynccontextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from time import monotonic
 
@@ -26,12 +27,12 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import func
 
-from . import auth, billing, catalog, metaquotes_web, notify, poller, provisioning, rules, tradebot
+from . import auth, billing, catalog, metaquotes_web, notify, poller, provisioning, push, rules, tradebot
 from .config import get_settings
 from .db import SessionLocal, init_db
 from .models import (Account, AppSetting, Breach, Certificate, EquitySnapshot, JournalEntry,
-                     Order, Payout, PayoutRequest, PoolAccount, Product, SupportTicket,
-                     TicketMessage, Trade, Trader)
+                     Order, Payout, PayoutRequest, PoolAccount, Product, PushSubscription,
+                     SupportTicket, TicketMessage, Trade, Trader)
 
 settings = get_settings()
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
@@ -145,6 +146,13 @@ def robots():
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon():
     return FileResponse(str(STATIC / "img" / "favicon.png"), media_type="image/png")
+
+
+@app.get("/sw.js", include_in_schema=False)
+def service_worker():
+    # Serwowany z korzenia (nie /static/), bo scope service workera nie może
+    # wychodzić ponad katalog, z którego jest zarejestrowany.
+    return FileResponse(str(STATIC / "sw.js"), media_type="application/javascript")
 
 
 # --------------------------------------------------------------------------- #
@@ -455,6 +463,12 @@ def me(trader: Trader = Depends(auth.current_trader)):
                 "kyc_country": trader.kyc_country,
                 "first_name": trader.first_name, "last_name": trader.last_name, "phone": trader.phone,
                 "referral_code": trader.referral_code,
+                # engagement: streak i punkty bonusowe dla portalu mobilnego
+                "bonus_points": trader.bonus_points or 0,
+                "checkin_streak": trader.checkin_streak or 0,
+                "checkin_last": trader.checkin_last,
+                "reveal_last": trader.reveal_last,
+                "streak_freezes": trader.streak_freezes or 0,
                 "notify": {"updates": bool(trader.notify_updates), "trading": bool(trader.notify_trading),
                            "payouts": bool(trader.notify_payouts), "marketing": bool(trader.notify_marketing)},
                 "affiliate": {"referred": referred, "commission_pct": catalog.AFFILIATE_COMMISSION_PCT,
@@ -1249,6 +1263,146 @@ def me_delete(payload: DeleteIn, trader: Trader = Depends(auth.current_trader)):
         tr.notify_updates = tr.notify_trading = tr.notify_payouts = tr.notify_marketing = False
         session.commit()
         return {"deleted": True}
+    finally:
+        session.close()
+
+
+# --- Engagement: dzienny check-in + mystery reveal ---------------------------
+# Bonusy za kamienie milowe serii (nieregularne odstepy sa celowe).
+_CHECKIN_BONUS = {3: 25, 7: 50, 12: 75, 18: 100, 25: 150, 40: 250, 60: 400}
+
+
+@app.post("/api/me/checkin")
+def me_checkin(trader: Trader = Depends(auth.current_trader)):
+    """Seria liczona po datach UTC; nagrody nadaje serwer, nie klient."""
+    now = datetime.now(timezone.utc)
+    today = now.strftime("%Y-%m-%d")
+    yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    day_before = (now - timedelta(days=2)).strftime("%Y-%m-%d")
+    session = SessionLocal()
+    try:
+        # FOR UPDATE: dwa rownolegle requesty nie moga podbic serii/bonusu podwojnie
+        # (SQLite ignoruje lock, ale i tak serializuje zapisy).
+        tr = session.query(Trader).filter(Trader.id == trader.id).with_for_update().one()
+        if tr.checkin_last == today:
+            return {"streak": tr.checkin_streak or 0, "already": True, "reward": None,
+                    "freeze_used": False, "freezes": tr.streak_freezes or 0}
+        freeze_used = False
+        if tr.checkin_last == yesterday:
+            tr.checkin_streak = (tr.checkin_streak or 0) + 1
+        elif tr.checkin_last == day_before and (tr.streak_freezes or 0) > 0:
+            # 1 dzien przerwy uratowany freezem — seria idzie dalej
+            tr.streak_freezes = (tr.streak_freezes or 0) - 1
+            tr.checkin_streak = (tr.checkin_streak or 0) + 1
+            freeze_used = True
+        else:
+            tr.checkin_streak = 1
+        tr.checkin_last = today
+        reward = None
+        bonus = _CHECKIN_BONUS.get(tr.checkin_streak)
+        if bonus:
+            tr.bonus_points = (tr.bonus_points or 0) + bonus
+            reward = {"type": "points", "amount": bonus}
+        session.commit()
+        return {"streak": tr.checkin_streak, "already": False, "reward": reward,
+                "freeze_used": freeze_used, "freezes": tr.streak_freezes or 0}
+    finally:
+        session.close()
+
+
+@app.post("/api/me/daily-reveal")
+def me_daily_reveal(trader: Trader = Depends(auth.current_trader)):
+    """Raz dziennie losowa karta; wynik trzymany w bazie, wiec refresh nie przelosowuje.
+
+    Kupony LUCKY sa osobiste: waznosc pilnowana po `expires_at` w payloadzie
+    (billing sprawdza go przy checkoucie), wiec kod wyciekniety na Discorda
+    nie dziala u nikogo, kto go nie wylosowal."""
+    now = datetime.now(timezone.utc)
+    today = now.strftime("%Y-%m-%d")
+    session = SessionLocal()
+    try:
+        tr = session.query(Trader).filter(Trader.id == trader.id).with_for_update().one()
+        if tr.reveal_last == today and tr.reveal_payload:
+            return {**json.loads(tr.reveal_payload), "already": True}
+        los = random.random()
+        if los < 0.62:
+            wynik = {"type": "tip", "index": random.randint(0, 23)}
+        elif los < 0.82:
+            wynik = {"type": "points", "amount": random.randint(5, 25)}
+            tr.bonus_points = (tr.bonus_points or 0) + wynik["amount"]
+        elif los < 0.90:
+            if (tr.streak_freezes or 0) >= 3:
+                # zapas pelny — freeze zamienia sie w punkty, zeby nagroda nie byla pusta
+                wynik = {"type": "points", "amount": random.randint(5, 25)}
+                tr.bonus_points = (tr.bonus_points or 0) + wynik["amount"]
+            else:
+                wynik = {"type": "freeze"}
+                tr.streak_freezes = (tr.streak_freezes or 0) + 1
+        elif los < 0.98:
+            wynik = {"type": "coupon", "code": "LUCKY10", "pct": 10,
+                     "expires_at": (now + timedelta(hours=48)).isoformat()}
+        else:
+            wynik = {"type": "coupon", "code": "LUCKY15", "pct": 15,
+                     "expires_at": (now + timedelta(hours=48)).isoformat()}
+        tr.reveal_last = today
+        tr.reveal_payload = json.dumps(wynik)
+        session.commit()
+        return {**wynik, "already": False}
+    finally:
+        session.close()
+
+
+# --- Web push (PWA) ---------------------------------------------------------
+class PushSubscribeIn(BaseModel):
+    endpoint: str
+    keys: dict   # {p256dh, auth} — dokładnie to, co oddaje pushManager.subscribe()
+
+
+class PushUnsubscribeIn(BaseModel):
+    endpoint: str
+
+
+@app.get("/api/push/public-key")
+def push_public_key():
+    """Klucz publiczny VAPID dla przeglądarki (applicationServerKey)."""
+    return {"enabled": push.is_enabled(),
+            "key": settings.vapid_public_key or None}
+
+
+@app.post("/api/me/push/subscribe")
+def push_subscribe(payload: PushSubscribeIn, trader: Trader = Depends(auth.current_trader)):
+    if not push.is_enabled():
+        raise HTTPException(503, "Push notifications are not configured")
+    p256dh = (payload.keys or {}).get("p256dh")
+    auth_key = (payload.keys or {}).get("auth")
+    if not payload.endpoint or not p256dh or not auth_key:
+        raise HTTPException(400, "Invalid push subscription")
+    session = SessionLocal()
+    try:
+        sub = (session.query(PushSubscription)
+               .filter(PushSubscription.endpoint == payload.endpoint).first())
+        if sub:
+            # ten sam endpoint może wrócić po re-instalacji PWA / zmianie konta
+            sub.trader_id, sub.p256dh, sub.auth = trader.id, p256dh, auth_key
+        else:
+            session.add(PushSubscription(trader_id=trader.id, endpoint=payload.endpoint,
+                                         p256dh=p256dh, auth=auth_key))
+        session.commit()
+        return {"ok": True}
+    finally:
+        session.close()
+
+
+@app.post("/api/me/push/unsubscribe")
+def push_unsubscribe(payload: PushUnsubscribeIn, trader: Trader = Depends(auth.current_trader)):
+    session = SessionLocal()
+    try:
+        (session.query(PushSubscription)
+         .filter(PushSubscription.endpoint == payload.endpoint,
+                 PushSubscription.trader_id == trader.id)
+         .delete(synchronize_session=False))
+        session.commit()
+        return {"ok": True}
     finally:
         session.close()
 
@@ -2601,6 +2755,38 @@ async def api_tick():
     return await poller.tick_once()
 
 
+@app.api_route("/api/cron/streak-reminder", methods=["GET", "POST"],
+               dependencies=[Depends(_require_cron)])
+def cron_streak_reminder():
+    """Push „Twoja seria wygaśnie" — odpalany raz dziennie po południu UTC.
+
+    Cel: seria >= 3 (jest czego bronić), check-in wczoraj, dziś jeszcze brak.
+    Cron chodzi raz na dobę, więc nie potrzeba deduplikacji. To ta sama pętla
+    dopaminowa co Duolingo: przypominamy o DYSCYPLINIE (wejściu do appki),
+    nigdy o wynikach tradingu."""
+    if not push.is_enabled():
+        return {"sent": 0, "push": "disabled"}
+    now = datetime.now(timezone.utc)
+    yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    session = SessionLocal()
+    try:
+        traders = (session.query(Trader)
+                   .join(PushSubscription, PushSubscription.trader_id == Trader.id)
+                   .filter(Trader.checkin_streak >= 3,
+                           Trader.checkin_last == yesterday,
+                           Trader.notify_updates != False)  # noqa: E712
+                   .distinct().all())
+        sent = 0
+        for tr in traders:
+            n = tr.checkin_streak or 0
+            sent += push.send_to_trader(
+                tr.id, f"Your {n}-day streak is on the line",
+                "Check in before midnight UTC to keep it alive.", tag="streak")
+        return {"sent": sent, "eligible": len(traders)}
+    finally:
+        session.close()
+
+
 @app.get("/api/stats", dependencies=[Depends(auth.require_admin)])
 def stats():
     """Statystyki OPERACYJNE (feed, tryb Stripe, pula) — tylko admin.
@@ -2716,6 +2902,12 @@ def faq_page(request: Request):
 @app.get("/affiliate")
 def affiliate_page(request: Request):
     return _page(request, "affiliate.html")
+
+
+@app.get("/install")
+def install_page(request: Request):
+    """Instrukcja instalacji PWA (iOS: Dodaj do ekranu, Android: beforeinstallprompt)."""
+    return _page(request, "install.html")
 
 
 @app.get("/terms")

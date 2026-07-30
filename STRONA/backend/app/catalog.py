@@ -21,7 +21,13 @@ COUPONS: dict[str, float] = {
     "WELCOME10": 10.0,
     "BLACKFRIDAY": 30.0,
     "VIP20": 20.0,
+    # nagrody z daily reveal (POST /api/me/daily-reveal) — osobiste i czasowe,
+    # billing.create_checkout wymaga aktywnego losowania u KONKRETNEGO tradera
+    "LUCKY10": 10.0,
+    "LUCKY15": 15.0,
 }
+
+LUCKY_CODES = {"LUCKY10", "LUCKY15"}
 
 # Limit ŁĄCZNEJ ekspozycji (suma wolumenu wszystkich otwartych pozycji).
 # Bez niego trader stawia cały depozyt na jedną świecę i „przechodzi” challenge

@@ -60,6 +60,14 @@ class Trader(Base):
     kyc_submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     kyc_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # engagement (portal mobilny): dzienny check-in + mystery reveal
+    checkin_streak: Mapped[int] = mapped_column(Integer, default=0)
+    checkin_last: Mapped[str | None] = mapped_column(String(10), nullable=True)     # UTC "YYYY-MM-DD"
+    bonus_points: Mapped[int] = mapped_column(Integer, default=0)
+    reveal_last: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    reveal_payload: Mapped[str | None] = mapped_column(String(240), nullable=True)  # JSON dzisiejszego wyniku
+    streak_freezes: Mapped[int] = mapped_column(Integer, default=1)                 # ratuje serię po 1 dniu przerwy
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     accounts: Mapped[list["Account"]] = relationship(back_populates="trader")
@@ -396,3 +404,19 @@ class TicketMessage(Base):
     author: Mapped[str] = mapped_column(String(12))  # trader|admin
     body: Mapped[str] = mapped_column(Text)
     ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class PushSubscription(Base):
+    """Subskrypcja web push jednego urządzenia (trader może mieć kilka).
+
+    Endpoint jest kluczem naturalnym: przeglądarka po re-instalacji PWA potrafi
+    oddać ten sam endpoint dla innego zalogowanego tradera, więc subscribe robi
+    upsert po endpointcie zamiast plodzić duplikaty."""
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    trader_id: Mapped[int] = mapped_column(ForeignKey("traders.id"), index=True)
+    endpoint: Mapped[str] = mapped_column(String(600), unique=True)
+    p256dh: Mapped[str] = mapped_column(String(200))    # klucz szyfrowania przegladarki
+    auth: Mapped[str] = mapped_column(String(100))      # sekret uwierzytelniajacy push service
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

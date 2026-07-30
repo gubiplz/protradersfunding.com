@@ -5,3 +5,6 @@ node_modules/
 .env.local
 .vercel
 *.log
+__pycache__/
+*.db
+STRONA/backend/uploads/

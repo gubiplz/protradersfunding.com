@@ -328,3 +328,14 @@ def send(event: str, to_email: str | None, ctx: dict | None = None) -> None:
             urllib.request.urlopen(req, timeout=8)
         except Exception as e:  # pragma: no cover
             print(f"[notify] webhook błąd: {e}")
+
+    # 3) web push (PWA) — tytuł = temat maila; awaria pusha nie może wywrócić
+    # requestu, który wywołał zdarzenie (np. approve payoutu w adminie).
+    # `to_email` jest już po bramce preferencji, więc wyłączona kategoria
+    # blokuje mail i push jednym przełącznikiem.
+    if to_email:
+        try:
+            from . import push
+            push.send_event(event, to_email, subject, ctx)
+        except Exception as e:  # pragma: no cover
+            print(f"[notify] push błąd: {e}")

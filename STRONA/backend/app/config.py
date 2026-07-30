@@ -163,6 +163,18 @@ class Settings:
     # --- Webhook powiadomień (np. Make/Telegram) — opcjonalny ---
     notify_webhook_url: str = os.getenv("NOTIFY_WEBHOOK_URL", "")
 
+    # --- Web push (PWA). Brak kluczy => push wyłączony ---
+    # Klucze VAPID (base64url): wygeneruj raz przez
+    #   python -m app.push  (wypisze parę do wklejenia w env)
+    # i NIE zmieniaj na produkcji — nowe klucze unieważniają wszystkie subskrypcje.
+    vapid_private_key: str = os.getenv("VAPID_PRIVATE_KEY", "")
+    vapid_public_key: str = os.getenv("VAPID_PUBLIC_KEY", "")
+    vapid_sub: str = os.getenv("VAPID_SUB", "")   # kontakt dla push service, np. mailto:...
+
+    @property
+    def push_enabled(self) -> bool:
+        return bool(self.vapid_private_key and self.vapid_public_key)
+
 
 @lru_cache
 def get_settings() -> Settings:
