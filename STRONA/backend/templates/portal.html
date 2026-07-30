@@ -38,6 +38,7 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
   </div>
   <div class="auth-form">
     <div class="auth-card">
+      <a class="auth-logo-m" href="/"><img src="/static/img/logo.png" alt=""><span>{{ site_name }}</span></a>
       <h3 id="auth-title">Welcome back</h3>
       <div class="sub" id="auth-sub">Log in to your trader dashboard.</div>
       <div class="auth-tabs">
@@ -52,6 +53,7 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
         <input id="a-ref" placeholder="Referral code (optional)" class="inp hidden">
         <button id="a-submit" onclick="doAuth()" class="btn-p lg" style="width:100%">Log in</button>
         <button id="a-forgot" onclick="authTab('forgot')" style="font-size:12.5px;color:var(--muted);text-decoration:underline;background:none;border:0;cursor:pointer">Forgot password?</button>
+        <button id="a-back" onclick="authTab('login')" class="hidden" style="font-size:13px;color:var(--muted);background:none;border:0;cursor:pointer">‹ Back to log in</button>
       </div>
     </div>
   </div>
@@ -98,6 +100,14 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
         </button>
         <button class="btn-p sm" onclick="go('store')">+ New challenge</button>
       </div>
+    </div>
+    <div class="verify-bar hidden" id="verify-bar">
+      <span class="vb-txt"><b>Confirm your e-mail.</b> We sent a 6-digit code to your inbox — enter it here or tap the link in the e-mail.</span>
+      <span class="vb-act">
+        <input id="vb-code" class="vb-inp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="Code">
+        <button class="vb-btn" onclick="verifyEmailCode()">Verify</button>
+        <button class="vb-link" onclick="resendVerify()">Resend</button>
+      </span>
     </div>
     <div class="content" id="view"></div>
   </div>
@@ -299,6 +309,8 @@ function authTab(m){AUTHMODE=m;
   $('a-pass2').classList.toggle('hidden',!reset);
   $('a-email').classList.toggle('hidden',reset);
   $('a-forgot').classList.toggle('hidden',!login);
+  $('a-back').classList.toggle('hidden',!(forgot||reset));
+  document.querySelector('.auth-tabs').classList.toggle('hidden',forgot||reset);
   $('a-pass').placeholder=reset?'New password (min. 8 characters)':'Password';
   if(signup&&!$('a-ref').value){$('a-ref').value=localStorage.getItem('pf_ref')||''}
   $('a-submit').textContent=login?'Log in':signup?'Create account':forgot?'Send reset link':'Set new password';
@@ -337,6 +349,19 @@ async function doAuth(){
     await boot();
   }catch(e){toast('Error: '+e.message,'err')}
 }
+async function verifyEmailCode(){
+  const c=$('vb-code').value.trim();
+  if(c.length!==6){toast('Enter the 6-digit code from the e-mail.','err');return}
+  try{await api('/api/me/verify-email',{method:'POST',body:JSON.stringify({code:c})});
+    ME.email_verified=true;$('verify-bar').classList.add('hidden');
+    toast('E-mail confirmed ✅','ok',8000);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function resendVerify(){
+  try{await api('/api/me/verify-email/resend',{method:'POST'});
+    toast('New code sent — check your inbox.','ok',8000);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
 function logout(){
   // The session cookie is held by the server (it gates /admin), so clearing
   // localStorage alone would not be enough.
@@ -360,7 +385,16 @@ async function handlePaymentReturn(){
 
 /* ---------- boot / navigation ---------- */
 async function boot(){
-  const rt=new URLSearchParams(location.search).get('reset');
+  const q0=new URLSearchParams(location.search);
+  /* Deep-link weryfikacji e-maila: dziala tez bez logowania (token z maila). */
+  const vt=q0.get('verify');
+  if(vt){
+    try{await api('/api/auth/verify-email',{method:'POST',body:JSON.stringify({token:vt})});
+      toast('E-mail confirmed ✅','ok',8000)}
+    catch(e){toast('Verification failed: '+e.message,'err',8000)}
+    history.replaceState(null,'','/portal');
+  }
+  const rt=q0.get('reset');
   if(rt){window._resetToken=rt;
     $('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('reset');return}
   if(!TOKEN){$('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('login');return}
@@ -372,6 +406,7 @@ async function boot(){
   $('who-mail').textContent=ME.email;
   $('admin-link').style.display=ME.is_admin?'':'none';
   $('admin-link-sheet').style.display=ME.is_admin?'':'none';
+  $('verify-bar').classList.toggle('hidden',ME.email_verified!==false);
   if(localStorage.getItem('pf_side_collapsed')==='1')$('side').classList.add('collapsed');
   initEngagement();
   if(await handlePaymentReturn())return;

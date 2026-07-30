@@ -82,6 +82,8 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "reveal_last": "VARCHAR(10)",
         "reveal_payload": "VARCHAR(240)",
         "streak_freezes": "INTEGER DEFAULT 1",
+        "email_verified": "BOOLEAN DEFAULT TRUE",
+        "email_verify_code": "VARCHAR(6)",
     },
     "products": {
         "max_lots": "FLOAT DEFAULT 6.0",
@@ -90,6 +92,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "bogo_paid_key": "VARCHAR(48)",
         "weekend_trading": "BOOLEAN DEFAULT FALSE",
         "credits_used": "FLOAT DEFAULT 0",
+        "flag": "VARCHAR(24)",
     },
     "pool_accounts": {
         "claimed_by_trader_id": "INTEGER",

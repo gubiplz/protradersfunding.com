@@ -823,3 +823,59 @@ def test_kyc_reject_i_historia_decyzji():
         d = c.get("/api/admin/kyc", headers=ADMIN_H).json()
         wpis = next(t for t in d["history"] if t["trader_id"] == tid)
         assert wpis["status"] == "approved"
+
+
+# ---------------- weryfikacja adresu e-mail ----------------
+def test_signup_wysyla_kod_i_weryfikacja_kodem_dziala():
+    with TestClient(app) as c:
+        r = c.post("/api/auth/signup", json={
+            "email": "verify-code@test.pl", "password": "haslo1234", "full_name": "Vera"})
+        assert r.status_code == 200
+        h = {"Authorization": f"Bearer {r.json()['token']}"}
+        assert c.get("/api/auth/me", headers=h).json()["email_verified"] is False
+        s = SessionLocal()
+        tr = s.query(Trader).filter(Trader.email == "verify-code@test.pl").first()
+        code = tr.email_verify_code
+        s.close()
+        assert code and len(code) == 6
+        zly = "000000" if code != "000000" else "111111"
+        assert c.post("/api/me/verify-email", headers=h, json={"code": zly}).status_code == 400
+        assert c.post("/api/me/verify-email", headers=h, json={"code": code}).status_code == 200
+        assert c.get("/api/auth/me", headers=h).json()["email_verified"] is True
+
+
+def test_weryfikacja_linkiem_dziala_bez_logowania():
+    with TestClient(app) as c:
+        r = c.post("/api/auth/signup", json={
+            "email": "verify-link@test.pl", "password": "haslo1234", "full_name": "Vera"})
+        tid = r.json()["trader"]["id"]
+        assert c.post("/api/auth/verify-email",
+                      json={"token": auth.make_verify_token(tid)}).status_code == 200
+        s = SessionLocal()
+        tr = s.get(Trader, tid)
+        assert tr.email_verified is True and tr.email_verify_code is None
+        s.close()
+        assert c.post("/api/auth/verify-email", json={"token": "zly"}).status_code == 400
+
+
+def test_resend_generuje_nowy_kod():
+    with TestClient(app) as c:
+        r = c.post("/api/auth/signup", json={
+            "email": "verify-resend@test.pl", "password": "haslo1234", "full_name": "Vera"})
+        tid = r.json()["trader"]["id"]
+        h = {"Authorization": f"Bearer {r.json()['token']}"}
+        s = SessionLocal(); stary = s.get(Trader, tid).email_verify_code; s.close()
+        assert c.post("/api/me/verify-email/resend", headers=h).status_code == 200
+        s = SessionLocal(); nowy = s.get(Trader, tid).email_verify_code; s.close()
+        assert nowy and len(nowy) == 6 and nowy != stary
+
+
+def test_mail_verify_email_ma_szablon_html_z_kodem():
+    html = notify._render_html("verify_email", {"name": "x", "code": "123456",
+                                                "verify_url": "https://x/portal?verify=t"}, "s")
+    assert html and "123456" in html and "logo.png" in html and "verify=t" in html
+
+
+def test_mail_credits_granted_ma_szablon_html():
+    html = notify._render_html("credits_granted", {"name": "x", "amount": 50, "balance": 75}, "s")
+    assert html and "logo.png" in html and "view=store" in html

@@ -167,6 +167,14 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"  Server:     {ctx.get('platform_server')}\n"
             f"\nLog in to the portal to see your objectives and progress.",
         ),
+        "verify_email": (
+            f"{ctx.get('code')} is your {brand} verification code",
+            f"Hi {name}!\n\nConfirm your e-mail address to finish setting up your "
+            f"{brand} account.\n\n  Verification code: {ctx.get('code')}\n\n"
+            f"Enter the code in the portal, or open this link:\n{ctx.get('verify_url')}\n\n"
+            f"The code and link are valid for 24 hours. If you didn't create an "
+            f"account, you can safely ignore this e-mail.",
+        ),
     }
     subject, body = T.get(event, (f"Notification: {event}", json.dumps(ctx, ensure_ascii=False)))
     return subject, body + footer
@@ -302,7 +310,7 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                 ("Leverage", "1:100"),
                 ("Profit split", f"{ctx.get('profit_split_pct')}%" if ctx.get("profit_split_pct") else None),
             ]),
-            _button_html("View Dashboard", portal),
+            _button_html("View Dashboard", f"{portal}?view=accounts"),
             _note_html("Sign in to the portal with your e-mail address. "
                        "The credentials above are only for the MetaTrader 5 platform."),
         ]
@@ -311,14 +319,14 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
             _head_html("Welcome", f"Welcome to {brand}",
                        f"Hi {name}, your account is ready. Pick a challenge in the portal "
                        f"and start your path to a funded account."),
-            _button_html("Open the Portal", portal),
+            _button_html("Open the Portal", f"{portal}?view=store"),
         ]
     elif event == "phase_passed":
         parts = [
             _head_html("Milestone", "Phase passed",
                        f"Great job {name} — account {login} moved from "
                        f"{ctx.get('from_phase')} to {ctx.get('to_phase')}."),
-            _button_html("View Progress", portal),
+            _button_html("View Progress", f"{portal}?view=accounts"),
         ]
     elif event == "account_funded":
         parts = [
@@ -326,14 +334,14 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                        f"{name}, account {login} is now funded. "
                        f"Complete KYC and you can request payouts."),
             _stat_html("Profit split", f"{ctx.get('split')}%", f"Account {login}"),
-            _button_html("View Dashboard", portal),
+            _button_html("View Dashboard", f"{portal}?view=accounts"),
         ]
     elif event == "breached":
         parts = [
             _head_html("Account closed", f"Account {login} was closed",
                        f"{name}, the account breached a rule: {ctx.get('reason')}. "
                        f"You can review the details in your dashboard and start a new challenge anytime."),
-            _button_html("Start a New Challenge", portal),
+            _button_html("Start a New Challenge", f"{portal}?view=store"),
         ]
     elif event == "payout_requested":
         parts = [
@@ -342,7 +350,7 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
             _rows_html([("Your share", ctx.get("trader_share")),
                         ("Profit", ctx.get("profit_amount")),
                         ("Status", "Under review")]),
-            _button_html("View Payouts", portal),
+            _button_html("View Payouts", f"{portal}?view=payouts"),
         ]
     elif event == "payout_approved":
         parts = [
@@ -351,27 +359,27 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                        f"{' — including your challenge fee refund' if ctx.get('fee_refund') else ''}. "
                        f"Funds are on the way."),
             _stat_html("Your payout", str(ctx.get("trader_share") or "—")),
-            _button_html("View Dashboard", portal),
+            _button_html("View Dashboard", f"{portal}?view=payouts"),
         ]
     elif event == "payout_rejected":
         parts = [
             _head_html("Payout", "Payout request declined",
                        f"{name}, your payout request for {ctx.get('trader_share')} was declined. "
                        f"Reason: {ctx.get('reason')}. You can submit a new request anytime."),
-            _button_html("Go to Dashboard", portal),
+            _button_html("Go to Dashboard", f"{portal}?view=payouts"),
         ]
     elif event == "kyc_approved":
         parts = [
             _head_html("Verification", "Identity verified",
                        f"{name}, your KYC verification has been accepted. You can now request payouts."),
-            _button_html("Request a Payout", portal),
+            _button_html("Request a Payout", f"{portal}?view=payouts"),
         ]
     elif event == "kyc_rejected":
         parts = [
             _head_html("Verification", "Verification needs another look",
                        f"{name}, we could not verify your identity with the documents provided. "
                        f"Please review your details and submit the verification again."),
-            _button_html("Retry Verification", portal),
+            _button_html("Retry Verification", f"{portal}?view=kyc"),
         ]
     elif event == "password_reset":
         parts = [
@@ -386,7 +394,26 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
         parts = [
             _head_html("Support", "New reply to your ticket",
                        f"{name}, our support team replied to “{ctx.get('subject')}”."),
-            _button_html("Read the Reply", portal),
+            _button_html("Read the Reply", f"{portal}?view=support"),
+        ]
+    elif event == "credits_granted":
+        parts = [
+            _head_html("Store credit", "Credit added to your account",
+                       f"{name}, we've just added store credit to your account — "
+                       f"it is applied automatically at your next checkout."),
+            _stat_html("Credit added", f"${_num(ctx.get('amount'))}",
+                       f"Current balance ${_num(ctx.get('balance'))}"),
+            _button_html("Browse Challenges", f"{portal}?view=store"),
+        ]
+    elif event == "verify_email":
+        parts = [
+            _head_html("Verify", "Confirm your e-mail",
+                       f"Hi {name}, enter this code in the portal — or tap the "
+                       f"button below — to confirm your e-mail address."),
+            _stat_html("Verification code", str(ctx.get("code") or "")),
+            _button_html("Verify E-mail", ctx.get("verify_url") or portal),
+            _note_html("The code and link are valid for 24 hours. If you didn't "
+                       "create an account, you can safely ignore this e-mail."),
         ]
     else:
         return None

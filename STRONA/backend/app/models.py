@@ -58,6 +58,11 @@ class Trader(Base):
     notify_payouts: Mapped[bool] = mapped_column(Boolean, default=True)
     notify_marketing: Mapped[bool] = mapped_column(Boolean, default=True)   # nic nie wysylamy, ale pref istnieje
 
+    # Weryfikacja adresu e-mail: nowi traderzy dostają 6-cyfrowy kod przy
+    # rejestracji; istniejące konta są uznane za zweryfikowane (DEFAULT TRUE).
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=True)
+    email_verify_code: Mapped[str | None] = mapped_column(String(6), nullable=True)
+
     # Kredyty sklepowe (USD) — nadaje admin, automatycznie odliczane od ceny
     # nastepnego zakupu w checkoucie. Pelna historia w tabeli credit_ledger.
     credits_usd: Mapped[float] = mapped_column(Float, default=0.0)
@@ -125,6 +130,8 @@ class Order(Base):
     # Kredyty sklepowe odliczone od ceny tego zamowienia. Saldo tradera schodzi
     # dopiero przy DOMKNIECIU platnosci — porzucony checkout nie pali srodkow.
     credits_used: Mapped[float] = mapped_column(Float, default=0.0)
+    # Reczna flaga admina dla nieoplaconych zamowien: NULL | awaiting_crypto
+    flag: Mapped[str | None] = mapped_column(String(24), nullable=True)
     account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

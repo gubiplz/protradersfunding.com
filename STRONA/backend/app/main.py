@@ -414,8 +414,75 @@ def reset_password(payload: ResetIn):
         session.close()
 
 
+def _wyslij_mail_weryfikacyjny(request: Request, tr: Trader) -> None:
+    verify_url = f"{_public_base(request)}/portal?verify={auth.make_verify_token(tr.id)}"
+    notify.send("verify_email", tr.email,
+                {"name": tr.full_name or tr.email, "code": tr.email_verify_code,
+                 "verify_url": verify_url})
+
+
+def _potwierdz_email(session, tr: Trader) -> None:
+    if tr.email_verified:
+        return
+    tr.email_verified = True
+    tr.email_verify_code = None
+    session.commit()
+    notify.send("welcome", tr.email, {"name": tr.full_name or tr.email})
+
+
+class VerifyTokenIn(BaseModel):
+    token: str
+
+
+@app.post("/api/auth/verify-email")
+def verify_email(payload: VerifyTokenIn):
+    """Weryfikacja linkiem z maila — działa również bez zalogowania."""
+    tid = auth.parse_verify_token(payload.token)
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, tid) if tid else None
+        if not tr:
+            raise HTTPException(400, "This verification link is invalid or has expired — request a new one")
+        _potwierdz_email(session, tr)
+        return {"ok": True}
+    finally:
+        session.close()
+
+
+class VerifyCodeIn(BaseModel):
+    code: str
+
+
+@app.post("/api/me/verify-email")
+def verify_email_code(payload: VerifyCodeIn, trader: Trader = Depends(auth.current_trader)):
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader.id)
+        if not tr.email_verified:
+            if not tr.email_verify_code or payload.code.strip() != tr.email_verify_code:
+                raise HTTPException(400, "Wrong code — check the e-mail we sent you")
+            _potwierdz_email(session, tr)
+        return {"ok": True}
+    finally:
+        session.close()
+
+
+@app.post("/api/me/verify-email/resend")
+def resend_verify_email(request: Request, trader: Trader = Depends(auth.current_trader)):
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader.id)
+        if not tr.email_verified:
+            tr.email_verify_code = f"{secrets.randbelow(1_000_000):06d}"
+            session.commit()
+            _wyslij_mail_weryfikacyjny(request, tr)
+        return {"ok": True}
+    finally:
+        session.close()
+
+
 @app.post("/api/auth/signup")
-def signup(payload: SignupIn, response: Response):
+def signup(payload: SignupIn, response: Response, request: Request):
     session = SessionLocal()
     try:
         if session.query(Trader).filter(Trader.email == payload.email.lower()).first():
@@ -424,10 +491,12 @@ def signup(payload: SignupIn, response: Response):
             email=payload.email.lower(), password_hash=auth.hash_password(payload.password),
             full_name=payload.full_name, referral_code=_gen_ref_code(),
             referred_by=(payload.referral or None),
+            email_verified=False, email_verify_code=f"{secrets.randbelow(1_000_000):06d}",
         )
         session.add(tr)
         session.commit()
-        notify.send("welcome", tr.email, {"name": tr.full_name or tr.email})
+        # welcome idzie dopiero po potwierdzeniu adresu — najpierw sam kod
+        _wyslij_mail_weryfikacyjny(request, tr)
         telemetry.track("signup", tr.id, referred=bool(payload.referral))
         token = auth.make_token(tr.id)
         _ustaw_ciasteczko_sesji(response, token)
@@ -464,6 +533,7 @@ def me(trader: Trader = Depends(auth.current_trader)):
         commission = round(sum(o.amount_usd for o in paid_orders) * catalog.AFFILIATE_COMMISSION_PCT / 100.0, 2)
         return {"id": trader.id, "email": trader.email, "full_name": trader.full_name,
                 "is_admin": trader.is_admin, "kyc_status": trader.kyc_status,
+                "email_verified": trader.email_verified is not False,
                 # potrzebne, żeby formularz KYC podświetlił zapisany kraj na liście
                 "kyc_country": trader.kyc_country,
                 "first_name": trader.first_name, "last_name": trader.last_name, "phone": trader.phone,
@@ -1504,6 +1574,28 @@ def admin_telemetry():
                 .order_by(dzien.desc(), TelemetryEvent.name).all())
         return {"items": [{"day": str(d), "name": n, "count": c, "traders": t}
                           for d, n, c, t in rows]}
+    finally:
+        session.close()
+
+
+@app.get("/api/admin/telemetry/events", dependencies=[Depends(auth.require_admin)])
+def admin_telemetry_events(name: str | None = None, day: str | None = None,
+                           trader_id: int | None = None):
+    """Drill-down agregatów: pojedyncze zdarzenia, filtr po nazwie/dniu/traderze."""
+    session = SessionLocal()
+    try:
+        q = (session.query(TelemetryEvent, Trader.email)
+             .outerjoin(Trader, Trader.id == TelemetryEvent.trader_id))
+        if name:
+            q = q.filter(TelemetryEvent.name == name)
+        if day:
+            q = q.filter(func.date(TelemetryEvent.created_at) == day)
+        if trader_id is not None:
+            q = q.filter(TelemetryEvent.trader_id == trader_id)
+        rows = q.order_by(TelemetryEvent.id.desc()).limit(300).all()
+        return {"items": [{"id": e.id, "ts": e.created_at.isoformat(), "name": e.name,
+                           "props": e.props, "trader_id": e.trader_id, "email": em}
+                          for e, em in rows]}
     finally:
         session.close()
 

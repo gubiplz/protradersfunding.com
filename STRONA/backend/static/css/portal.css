@@ -308,6 +308,22 @@ table.tbl td.sub-row{background:var(--panel2)}
 .auth-tab.on{background:var(--grad);color:#fff}
 .auth-card .stack{display:flex;flex-direction:column;gap:11px}
 .auth-hint{font-size:11.5px;color:var(--dim);text-align:center;margin-top:14px}
+/* logo w karcie — widoczne tylko na mobile, gdzie lewy panel brandu znika */
+.auth-logo-m{display:none;align-items:center;justify-content:center;gap:10px;margin:2px 0 20px;
+  font-family:var(--display);font-weight:700;font-size:17px;color:inherit;text-decoration:none}
+.auth-logo-m img{width:36px;height:36px}
+
+/* ---------------- VERIFY E-MAIL BAR ---------------- */
+.verify-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;
+  margin:14px 26px 0;padding:12px 16px;border-radius:14px;font-size:13.5px;
+  background:var(--acc-bg);border:1px solid var(--acc-line)}
+.verify-bar .vb-txt{color:var(--muted)}
+.verify-bar .vb-txt b{color:inherit}
+.verify-bar .vb-act{display:flex;gap:8px;align-items:center}
+.vb-inp{width:96px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;font:inherit;
+  font-size:14px;letter-spacing:.18em;text-align:center;background:#fff}
+.vb-btn{padding:9px 16px;border-radius:9px;background:var(--grad);color:#fff;font-size:13px;font-weight:600;cursor:pointer}
+.vb-link{background:none;border:0;cursor:pointer;font-size:12.5px;color:var(--muted);text-decoration:underline}
 
 /* ---------------- MODAL ---------------- */
 /* The overlay scrolls when a modal is taller than the viewport — otherwise a
@@ -352,6 +368,12 @@ table.tbl td.sub-row{background:var(--panel2)}
   .side-close{display:flex}
   .auth-wrap{grid-template-columns:1fr}
   .auth-brand{display:none}
+  .auth-logo-m{display:flex}
+  .auth-form{padding:28px 16px;align-items:flex-start;padding-top:max(40px,calc(env(safe-area-inset-top,0px) + 28px))}
+  .auth-card{max-width:430px;padding:26px 22px;border-radius:20px}
+  .verify-bar{margin:12px 16px 0}
+  .verify-bar .vb-act{width:100%}
+  .verify-bar .vb-inp{flex:1}
   .content{padding:18px 16px 50px}
   .topbar{padding:12px 16px}
   .acct-cols{gap:18px}

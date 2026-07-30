@@ -41,6 +41,7 @@ _EVENT_VIEW = {
 # ląduje w systemowej historii powiadomień urządzenia.
 _BODY: dict[str, str] = {
     "welcome": "Your trader portal is ready.",
+    "verify_email": "Confirm your e-mail address — enter the code from the e-mail.",
     "credentials": "Your MT5 credentials are ready — log in and start trading.",
     "challenge_granted": "A challenge account was added to your portal.",
     "phase_passed": "Objective complete — your next phase account is on the way.",
