@@ -877,7 +877,13 @@ html.pwa .topbar{padding-top:calc(13px + env(safe-area-inset-top))}  /* status b
 .rank-down{color:#dc2626}
 
 /* --- pull-to-refresh (mobile PWA) --- */
-html{overscroll-behavior-y:contain}
+/* contain tylko POZA standalone: blokuje natywny pull-to-refresh Chrome'a na
+   Androidzie; w PWA wystarcza html.pwa body{overscroll-behavior-y:none} wyżej,
+   a contain na html psuł na iOS pozycję fixed pasków przy dobiciu do dołu. */
+html:not(.pwa){overscroll-behavior-y:contain}
+/* własna warstwa kompozycji: bez niej iOS potrafi „zawiesić" fixed pasek
+   z backdrop-filter w połowie ekranu przy szybkim scrollu / rubber-bandzie */
+.tabbar,.botnav{transform:translateZ(0)}
 .ptr-spin{position:fixed;top:14px;left:50%;width:30px;height:30px;margin-left:-15px;z-index:96;
   border-radius:50%;border:3px solid var(--line);border-top-color:var(--acc,#6366f1);
   background:#fff;box-shadow:0 6px 18px -6px rgba(15,23,42,.3);

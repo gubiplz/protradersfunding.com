@@ -146,8 +146,27 @@ async function refreshLive(rerender=false){
   }catch(e){}
   if(rerender&&window._view&&VIEWS[window._view])go(window._view);
 }
+/* Cel kliku w push zapisany przez sw.js w Cache Storage: czytamy go przy
+   starcie ORAZ przy każdym powrocie do apki — iOS potrafi zgubić postMessage
+   do zawieszonej strony, więc to jest jedyna niezawodna ścieżka. */
+async function pendingNavView(){
+  let v=window._pendingView;window._pendingView=null;
+  try{
+    const c=await caches.open('pf-nav');const r=await c.match('/__pending-nav');
+    if(r){const d=await r.json();await c.delete('/__pending-nav');
+      if(!v&&Date.now()-d.ts<30000)v=new URL(d.url,location.origin).searchParams.get('view')}
+  }catch(_){}
+  return v||null;
+}
+async function applyPendingNav(){
+  const v=await pendingNavView();
+  if(!v||!VIEWS[v])return;
+  if(ME){go(v);refreshLive()}else window._pendingView=v; /* boot() dokończy */
+}
 document.addEventListener('visibilitychange',()=>{
-  if(document.visibilityState==='visible')refreshLive();
+  if(document.visibilityState!=='visible')return;
+  refreshLive();
+  applyPendingNav();setTimeout(applyPendingNav,600); /* retry: zapis SW mógł jeszcze trwać */
 });
 setInterval(()=>{if(document.visibilityState==='visible')refreshLive()},60000);
 
@@ -357,18 +376,10 @@ async function boot(){
   initEngagement();
   if(await handlePaymentReturn())return;
   const q=new URLSearchParams(location.search);
-  /* Deep-linki z powiadomien, w kolejnosci: postMessage odebrany przed ME
-     (_pendingView) -> swiezy wpis sw.js w Cache Storage (przezywa reload przy
-     wznowieniu iOS PWA, TTL 30 s; wygrywa ze STARYM ?view= zostalym w adresie
-     po poprzednim deep-linku) -> ?view= z URL (zimny start openWindow). */
-  let widok=window._pendingView||null;window._pendingView=null;
-  try{
-    const c=await caches.open('pf-nav');const r=await c.match('/__pending-nav');
-    if(r){const d=await r.json();await c.delete('/__pending-nav');
-      if(!widok&&Date.now()-d.ts<30000){
-        widok=new URL(d.url,location.origin).searchParams.get('view')}}
-  }catch(_){}
-  widok=widok||q.get('view');
+  /* Deep-linki z powiadomien: _pendingView / swiezy wpis sw.js z Cache Storage
+     (wygrywa ze STARYM ?view= zostalym w adresie po poprzednim deep-linku),
+     na koncu ?view= z URL (zimny start przez openWindow). */
+  const widok=(await pendingNavView())||q.get('view');
   go(q.get('buy')?'store':(widok&&VIEWS[widok]?widok:'accounts'));
   refreshNotif();
   track('view_open',{view:window._view,pwa:document.documentElement.classList.contains('pwa')?'1':'0'});
