@@ -919,11 +919,8 @@ html:not(.pwa){overscroll-behavior-y:contain}
 @keyframes ptr-rot{to{transform:rotate(360deg)}}
 
 /* ---------------- account detail v3 (FTMO-style layout) ----------------
-   Sidebar CTA on top, action-chip row, "Current Results" card with the
-   objective-lines chart and a right-hand account info card. */
-.side-cta{padding:2px 14px 8px}
-.side-new{width:100%;justify-content:center}
-.side.collapsed .side-cta{display:none}
+   Action-chip row, "Current Results" card with the objective-lines chart
+   and a right-hand account info card. */
 .sb-link{position:relative}
 .sb-link.on::before{content:"";position:absolute;left:-12px;top:8px;bottom:8px;width:3px;
   border-radius:0 99px 99px 0;background:var(--acc)}

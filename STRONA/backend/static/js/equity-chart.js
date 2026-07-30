@@ -29,7 +29,7 @@ window.chartTheme = function () {
     green: t('--green2', '#10b981'),
     red: t('--red', '#dc2626'),
     gold: t('--gold', '#d97706'),
-    dark: document.documentElement.dataset.theme !== 'light',
+    dark: document.documentElement.dataset.theme === 'dark',
   };
 };
 

@@ -177,13 +177,14 @@ def test_link_afiliacyjny_bierze_host_z_zadania():
     assert "localhost" not in html and "127.0.0.1" not in html
 
 
-def test_portal_ma_domyslny_ciemny_motyw_i_przelacznik():
-    """Dashboard renderuje sie w dark (atrybut na <html> przed pierwszym paintem),
-    ma przycisk przelacznika w topbarze i pre-paintowy odczyt pf_theme."""
+def test_portal_ma_domyslny_jasny_motyw_i_przelacznik():
+    """Dashboard renderuje sie w LIGHT (bez atrybutu data-theme na <html>);
+    zapamietany dark wlacza pre-paintowy skrypt z pf_theme, a przelacznik
+    mieszka na dole sidebara (klasa theme-toggle)."""
     with TestClient(app) as c:
         html = c.get("/portal").text
-    assert 'data-theme="dark"' in html
-    assert 'id="theme-btn"' in html
+    assert 'data-theme="dark"' not in html
+    assert "theme-toggle" in html and 'id="theme-btn"' in html
     assert "pf_theme" in html
 
 

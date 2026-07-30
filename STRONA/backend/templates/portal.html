@@ -1,20 +1,20 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Trader Portal — {{ site_name }}</title>
 <link rel="icon" href="/static/img/favicon.png" type="image/png">
 <link rel="manifest" href="/static/manifest.json">
-<meta name="theme-color" content="#0b0d12">
+<meta name="theme-color" content="#f6f7fb">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="ProTraders">
 <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png">
 <script>if(matchMedia('(display-mode: standalone)').matches||navigator.standalone)document.documentElement.classList.add('pwa');
-/* Pre-paint theme pick: dark is the server-rendered default, a stored "light"
-   flips the attribute before first paint so there is no flash of the wrong theme. */
-try{if(localStorage.getItem('pf_theme')==='light'){document.documentElement.dataset.theme='light';
-document.querySelector('meta[name="theme-color"]').setAttribute('content','#f6f7fb')}}catch(e){}
+/* Pre-paint theme pick: light is the default, a stored "dark" flips the
+   attribute before first paint so there is no flash of the wrong theme. */
+try{if(localStorage.getItem('pf_theme')==='dark'){document.documentElement.dataset.theme='dark';
+document.querySelector('meta[name="theme-color"]').setAttribute('content','#0b0d12')}}catch(e){}
 if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('/sw.js'))</script>
 <link rel="stylesheet" href="/static/css/portal.css?v={{ asset_v }}">
 <script src="/static/lib/chart.umd.min.js"></script>
@@ -74,12 +74,12 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
       </button>
     </div>
-    <div class="side-cta"><button class="btn-p side-new" onclick="go('store')">+ New challenge</button></div>
     <nav class="side-nav" id="side-nav"></nav>
     <div class="side-bottom">
       <a class="sb-link" id="admin-link" href="/admin" style="display:none" title="Admin panel">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10.3 4.3a2 2 0 0 1 3.4 0l.6 1a2 2 0 0 0 1.7 1h1.2a2 2 0 0 1 1.7 3l-.6 1a2 2 0 0 0 0 2l.6 1a2 2 0 0 1-1.7 3h-1.2a2 2 0 0 0-1.7 1l-.6 1a2 2 0 0 1-3.4 0l-.6-1a2 2 0 0 0-1.7-1H6.8a2 2 0 0 1-1.7-3l.6-1a2 2 0 0 0 0-2l-.6-1a2 2 0 0 1 1.7-3H8a2 2 0 0 0 1.7-1z"/><circle cx="12" cy="12" r="2.6"/></svg>
         <span class="sb-txt">Admin panel</span></a>
+      <button class="sb-link theme-toggle" id="theme-btn" onclick="toggleTheme()" title="Toggle light/dark theme"></button>
       <button class="collapse-btn" onclick="toggleCollapse()" title="Collapse">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
         <span class="sb-txt">Collapse</span></button>
@@ -105,7 +105,6 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
           <span class="bell-badge hidden" id="bell-badge"></span>
         </button>
-        <button class="icon-btn" id="theme-btn" onclick="toggleTheme()" aria-label="Toggle light/dark theme"></button>
         <button class="btn-p sm" onclick="go('store')">+ New challenge</button>
       </div>
     </div>
@@ -150,15 +149,20 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
    modal). Shared key with the landing page — one applied state everywhere. */
 function pfPromo(){try{return localStorage.getItem('pf_promo_code')||''}catch(e){return ''}}
 
-/* ---------- theme (dark by default; "light" persisted in pf_theme) ---------- */
+/* ---------- theme (light by default; "dark" persisted in pf_theme) ---------- */
 const THEME_SUN='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.4M12 19.6V22M2 12h2.4M19.6 12H22M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M19.1 4.9l-1.7 1.7M6.6 17.4l-1.7 1.7"/></svg>';
 const THEME_MOON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.4 14.2A8.5 8.5 0 0 1 9.8 3.6 8.5 8.5 0 1 0 20.4 14.2z"/></svg>';
-function themeNow(){return document.documentElement.dataset.theme==='light'?'light':'dark'}
+function themeNow(){return document.documentElement.dataset.theme==='dark'?'dark':'light'}
 function paintTheme(){
-  const t=themeNow(),b=$('theme-btn');
-  if(b){b.innerHTML=t==='dark'?THEME_SUN:THEME_MOON;
-    b.title=t==='dark'?'Switch to light mode':'Switch to dark mode'}
+  const t=themeNow();
+  /* One painter for every toggle placement (sidebar bottom, "More" sheet). */
+  document.querySelectorAll('.theme-toggle').forEach(b=>{
+    b.innerHTML=(t==='dark'?THEME_SUN:THEME_MOON)
+      +'<span class="sb-txt">'+(t==='dark'?'Light mode':'Dark mode')+'</span>';
+    b.title=t==='dark'?'Switch to light mode':'Switch to dark mode';
+  });
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content',t==='dark'?'#0b0d12':'#f6f7fb');
+  const sw=$('s-theme'); if(sw)sw.checked=(t==='dark');
 }
 function toggleTheme(){
   const next=themeNow()==='dark'?'light':'dark';
@@ -313,8 +317,10 @@ $('tabbar').innerHTML=TABS.map(t=>
 $('sheet-nav').innerHTML=NAV.filter(n=>!TABS.some(t=>t.v===n.v)).map(n=>
   `<button class="sb-link" data-v="${n.v}" onclick="go('${n.v}');closeSheet()">${ICO[n.ico]}<span class="sb-txt">${n.label}</span></button>`).join('')+
   `<div class="sheet-div"></div>
+   <button class="sb-link theme-toggle" onclick="toggleTheme()"></button>
    <a class="sb-link" id="admin-link-sheet" href="/admin" style="display:none">${ICO.gear}<span class="sb-txt">Admin panel</span></a>
    <button class="sb-link sheet-signout" onclick="logout()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H3"/></svg><span class="sb-txt">Sign Out</span></button>`;
+paintTheme();   /* the sheet's toggle was just rendered — give it its icon/label */
 function openSheet(){$('sheetVeil').classList.remove('hidden');$('sheet').classList.add('open')}
 function closeSheet(){$('sheetVeil').classList.add('hidden');$('sheet').classList.remove('open')}
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeSheet()});
@@ -1406,7 +1412,7 @@ const VIEWS={
 
     <div class="sec-card" style="max-width:640px"><h3>Appearance</h3>
       <div class="switch-row" style="border-bottom:0"><div><h4>Dark Mode</h4>
-        <p>Dark is the default. Your choice is saved on this device.</p></div>
+        <p>Switch the dashboard to a dark look. Saved on this device.</p></div>
         <label class="switch"><input type="checkbox" id="s-theme" ${themeNow()==='dark'?'checked':''}
           onchange="if((this.checked?'dark':'light')!==themeNow())toggleTheme()"><i></i></label></div>
     </div>
