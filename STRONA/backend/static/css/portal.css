@@ -903,6 +903,13 @@ html.pwa .topbar{padding-top:calc(13px + env(safe-area-inset-top))}  /* status b
   border:1px dashed rgba(255,255,255,.55);border-radius:12px;padding:9px 14px}
 .reveal-code code{font-family:var(--mono);font-size:20px;font-weight:800;letter-spacing:.06em}
 .reveal-code .copy{color:#fff}
+/* Desktop: the card spans the content column like every panel around it —
+   a 420px 16:9 tile glued to the left looked broken on wide screens. */
+@media(min-width:701px){
+  .reveal-wrap{max-width:none}
+  .reveal-card{aspect-ratio:auto;min-height:230px}
+  .reveal-t{max-width:none}
+}
 .reveal-code .copy:hover{color:#fff;background:rgba(255,255,255,.2)}
 
 /* --- celebration overlay (RFX.celebrate) --- */
