@@ -316,6 +316,9 @@ def _account_detail(session, acc: Account, admin_view: bool = False) -> dict:
     payouts = session.query(Payout).filter(Payout.account_id == acc.id).all()
     preqs = session.query(PayoutRequest).filter(PayoutRequest.account_id == acc.id).all()
     d = _account_dict(acc, with_credentials=True, admin_view=admin_view)
+    if admin_view and acc.trader_id:
+        tr = session.get(Trader, acc.trader_id)
+        d["trader_email"] = tr.email if tr else None
     d["equity_curve"] = _equity_curve(session, acc)
     d["breaches"] = [{"ts": b.ts.isoformat(), "type": b.type, "detail": b.detail} for b in breaches]
     d["payouts"] = [{"ts": p.ts.isoformat(), "profit_amount": p.profit_amount,
@@ -2687,11 +2690,13 @@ def list_accounts():
         zaplacone = dict(session.query(Order.account_id, func.max(Order.paid_at))
                          .filter(Order.account_id.isnot(None), Order.paid_at.isnot(None))
                          .group_by(Order.account_id).all())
+        emaile = dict(session.query(Trader.id, Trader.email).all())
         out = []
         for a in session.query(Account).order_by(Account.id).all():
             d = _account_dict(a, with_credentials=True, admin_view=True)
             p = zaplacone.get(a.id)
             d["paid_at"] = p.isoformat() if p else None
+            d["trader_email"] = emaile.get(a.trader_id)
             out.append(d)
         return out
     finally:

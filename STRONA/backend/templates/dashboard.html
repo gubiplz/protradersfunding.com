@@ -482,11 +482,12 @@ function renderAccounts(){
   const q=(window._accQ||'').toLowerCase();
   const f=window._accFilter;
   const rows=list.filter(a=>(f==='all'||a.status===f)&&
-    (!q||String(a.login).includes(q)||(a.trader_name||'').toLowerCase().includes(q)||(a.product_key||'').includes(q)));
+    (!q||String(a.login).includes(q)||(a.trader_name||'').toLowerCase().includes(q)
+      ||(a.trader_email||'').toLowerCase().includes(q)||(a.product_key||'').includes(q)));
   const seg=[['all','All'],['active','Evaluation'],['funded','Funded'],['failed','Failed'],['provisioning','Provisioning']];
   $('view').innerHTML=`
     <div class="toolbar">
-      <input class="inp" id="acc-q" placeholder="Search login, trader or plan…" value="${esc(window._accQ||'')}"
+      <input class="inp" id="acc-q" placeholder="Search login, trader, email or plan…" value="${esc(window._accQ||'')}"
         oninput="window._accQ=this.value;renderAccounts();document.getElementById('acc-q').focus()">
       <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._accFilter='${k}';renderAccounts()">${l}</button>`).join('')}</div>
       <span class="count-pill">${rows.length} of ${list.length}</span>
@@ -498,7 +499,7 @@ function renderAccounts(){
       <tbody>${rows.map(a=>{const m=a.metrics||{};
         return `<tr class="clickable" onclick="openAccount(${a.id})">
           <td class="num" style="font-weight:600">${a.status==='provisioning'?'<span class="muted">pending…</span>':esc(a.login)}${a.bot_enabled?(a.bot_paused?' <span title="Trade BOT paused">⏸</span>':' <span title="Trade BOT running">🤖</span>'):''}</td>
-          <td>${esc(a.trader_name||'—')}</td>
+          <td>${esc(a.trader_name||'—')}${a.trader_email?`<div class="muted" style="font-size:11px">${esc(a.trader_email)}</div>`:''}</td>
           <td class="muted">${esc(a.product_key)}</td>
           <td class="muted">${PHASE_LBL[a.phase]||esc(a.phase)}</td>
           <td><span class="status ${esc(a.status)}"><span class="dot"></span>${STATUS_LBL[a.status]||esc(a.status)}</span></td>
@@ -574,6 +575,7 @@ async function openAccount(id){
   openOver(`${a.login} · ${a.trader_name||'—'}`,`
     <div class="chip-row">
       <span class="status ${esc(a.status)}"><span class="dot"></span>${STATUS_LBL[a.status]||esc(a.status)}</span>
+      ${a.trader_email?`<span class="chip">${esc(a.trader_email)}</span>`:''}
       <span class="chip">${PHASE_LBL[a.phase]||esc(a.phase)}</span>
       <span class="chip">${esc(a.product_key)}</span>
       <span class="chip">DD <b>${esc(a.drawdown_type)}</b></span>
