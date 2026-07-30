@@ -791,6 +791,8 @@ def submit_kyc(payload: KycIn, trader: Trader = Depends(auth.current_trader)):
         tr.kyc_submitted_at = datetime.now(timezone.utc)
         session.commit()
         telemetry.track("kyc_submitted", trader.id)
+        notify.notify_admins("admin_kyc", "New KYC submission",
+                             tr.kyc_fullname or tr.email)
         return {"kyc_status": tr.kyc_status}
     finally:
         session.close()
@@ -827,6 +829,7 @@ def request_payout(account_id: int, payload: PayoutReqIn, trader: Trader = Depen
         session.commit()
         notify.send("payout_requested", tr.email, {"name": tr.full_name or tr.email,
                     "login": acc.login, "profit_amount": profit, "trader_share": share})
+        notify.notify_admins("admin_payout", f"Payout request ${share:,.2f}", tr.email)
         return {"id": pr.id, "profit_amount": profit, "trader_share": share, "status": "pending"}
     finally:
         session.close()
@@ -1217,6 +1220,7 @@ def ticket_create(payload: TicketIn, trader: Trader = Depends(auth.current_trade
         session.flush()
         session.add(TicketMessage(ticket_id=t.id, author="trader", body=message[:20000]))
         session.commit()
+        notify.notify_admins("admin_ticket", f"New ticket: {subject[:80]}", trader.email)
         return {"id": t.id, "status": t.status}
     finally:
         session.close()
@@ -1260,6 +1264,7 @@ def ticket_reply(ticket_id: int, payload: TicketReplyIn, trader: Trader = Depend
         session.add(TicketMessage(ticket_id=t.id, author="trader", body=body[:20000]))
         t.status = "open"
         session.commit()
+        notify.notify_admins("admin_ticket", f"Ticket reply: {t.subject[:80]}", trader.email)
         return _ticket_dict(session, t, with_thread=True)
     finally:
         session.close()
@@ -2259,6 +2264,27 @@ def admin_reject_kyc(trader_id: int):
         session.close()
 
 
+@app.post("/api/admin/kyc/{trader_id}/reset", dependencies=[Depends(auth.require_admin)])
+def admin_reset_kyc(trader_id: int):
+    """Cofa decyzję approve/reject — wniosek wraca do kolejki pending.
+
+    Celowo bez maila/pusha do tradera: to korekta po stronie admina, nie nowa
+    decyzja; trader zobaczy status "pending" w portalu."""
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader_id)
+        if not tr:
+            raise HTTPException(404, "Trader not found")
+        if tr.kyc_status not in ("approved", "rejected"):
+            raise HTTPException(400, "There is no KYC decision to revert")
+        tr.kyc_status = "pending"
+        tr.kyc_reviewed_at = None
+        session.commit()
+        return {"reset": trader_id}
+    finally:
+        session.close()
+
+
 @app.get("/api/admin/orders", dependencies=[Depends(auth.require_admin)])
 def admin_orders():
     session = SessionLocal()
@@ -2270,8 +2296,97 @@ def admin_orders():
             out.append({"id": o.id, "trader_email": tr.email if tr else None,
                         "product_key": o.product_key, "amount_usd": o.amount_usd,
                         "status": o.status, "provider": o.provider, "coupon": o.coupon,
+                        "flag": o.flag,
+                        "paid_at": o.paid_at.isoformat() if o.paid_at else None,
                         "account_id": o.account_id, "created_at": o.created_at.isoformat()})
         return out
+    finally:
+        session.close()
+
+
+class OrderFlagIn(BaseModel):
+    flag: str = ""
+
+
+@app.post("/api/admin/orders/{order_id}/flag", dependencies=[Depends(auth.require_admin)])
+def admin_flag_order(order_id: int, payload: OrderFlagIn):
+    """Ręczna flaga płatności — np. „czekam na przelew crypto"."""
+    if payload.flag not in ("", "awaiting_crypto"):
+        raise HTTPException(400, "Unknown flag")
+    session = SessionLocal()
+    try:
+        o = session.get(Order, order_id)
+        if not o:
+            raise HTTPException(404, "Order not found")
+        o.flag = payload.flag or None
+        session.commit()
+        return {"id": o.id, "flag": o.flag}
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/orders/{order_id}/mark-paid", dependencies=[Depends(auth.require_admin)])
+def admin_mark_order_paid(order_id: int):
+    """Ręczne domknięcie płatności (crypto/przelew poza Stripe).
+
+    Ta sama ścieżka co webhook Stripe i mock — provisioning tworzy konto,
+    ustawia status/paid_at, zdejmuje kredyty i wysyła traderowi poświadczenia."""
+    session = SessionLocal()
+    try:
+        o = session.get(Order, order_id)
+        if not o:
+            raise HTTPException(404, "Order not found")
+        if o.status == "paid":
+            return {"already": True, "account_id": o.account_id}
+        acc = provisioning.create_account_from_order(session, o, notify_admin=False)
+        o.flag = None
+        session.commit()
+        return {"paid": o.id, "account_id": acc.id}
+    finally:
+        session.close()
+
+
+@app.get("/api/admin/inbox", dependencies=[Depends(auth.require_admin)])
+def admin_inbox():
+    """Dzwonek w panelu: ostatnie „coś przyszło" ze wszystkich kolejek.
+
+    Agregacja z istniejących tabel (bez osobnej tabeli powiadomień admina);
+    co jest „nieprzeczytane" rozstrzyga frontend po localStorage."""
+    session = SessionLocal()
+    try:
+        emails: dict[int, str] = {}
+
+        def email_of(tid: int) -> str:
+            if tid not in emails:
+                t = session.get(Trader, tid)
+                emails[tid] = t.email if t else "?"
+            return emails[tid]
+
+        items = []
+        for o in session.query(Order).order_by(Order.id.desc()).limit(15).all():
+            items.append({"type": "order", "ts": (o.paid_at or o.created_at).isoformat(),
+                          "title": f"Order #{o.id} · {o.product_key} · {o.status}",
+                          "body": email_of(o.trader_id), "view": "orders"})
+        for t in (session.query(Trader).filter(Trader.kyc_status == "pending")
+                  .order_by(Trader.kyc_submitted_at.desc().nullslast()).limit(10).all()):
+            if t.kyc_submitted_at:
+                items.append({"type": "kyc", "ts": t.kyc_submitted_at.isoformat(),
+                              "title": f"KYC pending · {t.kyc_fullname or t.email}",
+                              "body": t.email, "view": "kyc"})
+        for pr in (session.query(PayoutRequest).filter(PayoutRequest.status == "pending")
+                   .order_by(PayoutRequest.id.desc()).limit(10).all()):
+            items.append({"type": "payout", "ts": pr.ts.isoformat(),
+                          "title": f"Payout request ${pr.trader_share:,.2f}",
+                          "body": email_of(pr.trader_id), "view": "payouts"})
+        for m, t in (session.query(TicketMessage, SupportTicket)
+                     .join(SupportTicket, SupportTicket.id == TicketMessage.ticket_id)
+                     .filter(TicketMessage.author == "trader")
+                     .order_by(TicketMessage.id.desc()).limit(10).all()):
+            items.append({"type": "ticket", "ts": m.ts.isoformat(),
+                          "title": f"Ticket #{t.id}: {t.subject}",
+                          "body": email_of(t.trader_id), "view": "tickets"})
+        items.sort(key=lambda i: i["ts"], reverse=True)
+        return {"items": items[:30]}
     finally:
         session.close()
 

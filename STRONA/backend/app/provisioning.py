@@ -50,8 +50,11 @@ def _gen_password() -> str:
     return "".join(secrets.choice(alphabet) for _ in range(8))
 
 
-def create_account_from_order(session, order: Order) -> Account:
-    """Tworzy konto challenge zgodnie z parametrami produktu z zamówienia."""
+def create_account_from_order(session, order: Order, notify_admin: bool = True) -> Account:
+    """Tworzy konto challenge zgodnie z parametrami produktu z zamówienia.
+
+    `notify_admin=False` gdy płatność domyka sam admin z panelu (mark-paid) —
+    nie ma sensu wysyłać mu pusha o jego własnym kliknięciu."""
     product = session.query(Product).filter(Product.key == order.product_key).first()
     trader = session.get(Trader, order.trader_id)
     now = datetime.now(timezone.utc)
@@ -112,6 +115,11 @@ def create_account_from_order(session, order: Order) -> Account:
     session.commit()
     telemetry.track("order_paid", trader.id, order=order.id, product=order.product_key,
                     amount=order.amount_usd, provider=order.provider)
+    # Granty pomijamy zawsze: przyznaje je admin, wiec sam o nich wie.
+    if notify_admin and order.provider != "grant":
+        notify.notify_admins("admin_order",
+                             f"New order: {order.product_key} ${order.amount_usd:,.0f}",
+                             trader.email)
 
     if not real_mode:
         notify.send(_creds_event(acc), trader.email, _creds_ctx(trader, acc))

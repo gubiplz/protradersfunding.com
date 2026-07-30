@@ -517,3 +517,29 @@ def send(event: str, to_email: str | None, ctx: dict | None = None) -> None:
             push.send_event(event, to_email, subject, ctx)
         except Exception as e:  # pragma: no cover
             print(f"[notify] push błąd: {e}")
+
+
+def notify_admins(event: str, title: str, body: str = "") -> None:
+    """Dzwonek + web push do wszystkich kont is_admin (url -> panel /admin).
+
+    Osobna ścieżka od send(): bez maila i bez bramki preferencji tradera —
+    to sygnał operacyjny „coś przyszło". NIGDY nie rzuca: zdarzenie admina
+    nie może wywrócić requestu tradera, który je wywołał."""
+    try:
+        from . import push
+        from .db import SessionLocal
+        from .models import Trader
+
+        session = SessionLocal()
+        try:
+            admin_ids = [t.id for t in
+                         session.query(Trader).filter(Trader.is_admin.is_(True)).all()]
+            for tid in admin_ids:
+                push._center_row(session, tid, event, title, body, "/admin")
+            session.commit()
+        finally:
+            session.close()
+        for tid in admin_ids:
+            push.send_to_trader(tid, title, body, url="/admin", tag=event)
+    except Exception as e:  # pragma: no cover
+        print(f"[notify] admin błąd: {e}")
