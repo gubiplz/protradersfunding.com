@@ -69,6 +69,28 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
   </div>
 </div>
 
+<!-- ======================= E-MAIL VERIFICATION GATE =======================
+     The dashboard opens only after the address is confirmed — new accounts
+     land here until they enter the 6-digit code (or tap the mailed link). -->
+<div id="verify-gate" class="auth-wrap hidden" style="grid-template-columns:1fr">
+  <div class="auth-form">
+    <div class="auth-card" style="text-align:center">
+      <h3>Confirm your e-mail</h3>
+      <div class="sub">We sent a 6-digit code to <b id="vg-mail"></b>.<br>
+        Enter it below or tap the link in the e-mail.</div>
+      <form class="stack" onsubmit="verifyEmailCode();return false">
+        <input id="vg-code" class="inp" inputmode="numeric" autocomplete="one-time-code"
+          maxlength="6" placeholder="6-digit code"
+          style="text-align:center;letter-spacing:.3em;font-family:var(--mono);font-size:18px">
+        <button type="submit" class="btn-p lg" style="width:100%">Verify</button>
+        <button type="button" class="linklike" onclick="resendVerify()">Resend code</button>
+        <button type="button" class="linklike" onclick="logout()" style="color:var(--muted)">Sign out</button>
+      </form>
+      <div class="auth-hint">Wrong address? Sign out and create the account again.</div>
+    </div>
+  </div>
+</div>
+
 <!-- ======================= APP ======================= -->
 <div id="app" class="app hidden">
   <aside class="side" id="side">
@@ -111,14 +133,6 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
         </button>
         <button class="btn-p sm" onclick="go('store')">+ New challenge</button>
       </div>
-    </div>
-    <div class="verify-bar hidden" id="verify-bar">
-      <span class="vb-txt"><b>Confirm your e-mail.</b> We sent a 6-digit code to your inbox — enter it here or tap the link in the e-mail.</span>
-      <span class="vb-act">
-        <input id="vb-code" class="vb-inp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="Code">
-        <button class="vb-btn" onclick="verifyEmailCode()">Verify</button>
-        <button class="vb-link" onclick="resendVerify()">Resend</button>
-      </span>
     </div>
     <div class="content" id="view"></div>
   </div>
@@ -424,11 +438,12 @@ async function doAuth(){
   }catch(e){toast('Error: '+e.message,'err');unlock()}
 }
 async function verifyEmailCode(){
-  const c=$('vb-code').value.trim();
+  const c=$('vg-code').value.trim();
   if(c.length!==6){toast('Enter the 6-digit code from the e-mail.','err');return}
   try{await api('/api/me/verify-email',{method:'POST',body:JSON.stringify({code:c})});
-    ME.email_verified=true;$('verify-bar').classList.add('hidden');
+    ME.email_verified=true;$('verify-gate').classList.add('hidden');
     toast('E-mail confirmed ✅','ok',8000);
+    await boot();
   }catch(e){toast('Error: '+e.message,'err')}
 }
 async function resendVerify(){
@@ -489,6 +504,15 @@ async function boot(){
     $('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('reset');loadAuthStats();return}
   if(!TOKEN){$('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('login');loadAuthStats();return}
   try{ME=await api('/api/auth/me')}catch(e){logout();return}
+  /* Hard gate: an unconfirmed address never reaches the dashboard. */
+  if(ME.email_verified===false){
+    $('auth').classList.add('hidden');$('app').classList.add('hidden');
+    $('vg-mail').textContent=ME.email;
+    $('verify-gate').classList.remove('hidden');
+    $('vg-code').focus();
+    return;
+  }
+  $('verify-gate').classList.add('hidden');
   $('auth').classList.add('hidden');$('app').classList.remove('hidden');
   const nm=(ME.full_name||ME.email).trim();
   $('ava').textContent=nm[0].toUpperCase();
@@ -496,7 +520,6 @@ async function boot(){
   $('who-mail').textContent=ME.email;
   $('admin-link').style.display=ME.is_admin?'':'none';
   $('admin-link-sheet').style.display=ME.is_admin?'':'none';
-  $('verify-bar').classList.toggle('hidden',ME.email_verified!==false);
   if(localStorage.getItem('pf_side_collapsed')==='1')$('side').classList.add('collapsed');
   initEngagement();
   if(await handlePaymentReturn())return;

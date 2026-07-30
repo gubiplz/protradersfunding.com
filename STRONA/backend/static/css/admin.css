@@ -60,6 +60,10 @@ tr.clickable{cursor:pointer}
 .over-head h2{font-size:16.5px}
 .over-body{padding:18px 20px 34px;overflow-y:auto;display:flex;flex-direction:column;gap:14px;
   overscroll-behavior:contain}
+/* Flex children must NEVER shrink to fit the panel: the <=640 rule below sets
+   overflow-x on .sec-card, which zeroes the automatic minimum size of a flex
+   item — every card collapsed to ~50px on mobile and clipped its content. */
+.over-body>*{flex:0 0 auto}
 
 .kv{display:flex;justify-content:space-between;gap:14px;font-size:13px;padding:5px 0;border-bottom:1px dashed var(--line)}
 .kv:last-child{border-bottom:0}
