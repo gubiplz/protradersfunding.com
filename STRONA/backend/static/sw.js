@@ -23,7 +23,14 @@ self.addEventListener('notificationclick', (e) => {
   e.notification.close();
   const url = (e.notification.data && e.notification.data.url) || '/portal';
   e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((ws) => {
-    for (const w of ws) if (w.url.includes('/portal') && 'focus' in w) return w.focus();
+    for (const w of ws) {
+      if (w.url.includes('/portal') && 'focus' in w) {
+        /* postMessage zamiast navigate(): SPA przełącza widok bez reloadu
+           (navigate() gubi stan i bywa zawodny w iOS PWA) */
+        w.postMessage({ type: 'navigate', url });
+        return w.focus();
+      }
+    }
     return self.clients.openWindow(url);
   }));
 });

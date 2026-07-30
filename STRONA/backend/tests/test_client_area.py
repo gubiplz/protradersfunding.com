@@ -281,8 +281,9 @@ def test_mail_grantu_ma_wersje_html_z_kwota_i_poswiadczeniami():
     assert "$50,000" in html and "2-Step challenge on MT5" in html
     assert "11546513" in html and "ichhl00j" in html and "MetaQuotes-Demo" in html
     assert "View Dashboard" in html
-    # zwykle powiadomienia zostaja plain-textem
-    assert notify._render_html("welcome", {"name": "x"}, "s") is None
+    # zwykle powiadomienia tez dostaja HTML we wspolnym layoucie z logo
+    welcome = notify._render_html("welcome", {"name": "x"}, "s")
+    assert welcome and "logo.png" in welcome
 
 
 # --------------------------------------------------------------------------- #

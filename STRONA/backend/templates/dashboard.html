@@ -127,6 +127,7 @@ const NAV=[
   {v:'tickets',label:'Tickets',ico:'chat'},
   {v:'orders',label:'Orders',ico:'file'},
   {v:'pool',label:'MT5 Pool',ico:'bank'},
+  {v:'telemetry',label:'Telemetry',ico:'trend'},
   {v:'settings',label:'Settings',ico:'gear'},
 ];
 $('side-nav').innerHTML=NAV.map(n=>
@@ -148,6 +149,7 @@ const TITLES={
   tickets:['Tickets','Support conversations with traders'],
   orders:['Orders','Purchases and revenue'],
   pool:['MT5 Pool','Pre-provisioned accounts ready to assign'],
+  telemetry:['Telemetry','Product events from the last 14 days'],
   settings:['Settings','Admin access and runtime configuration'],
 };
 let VIEW='overview';
@@ -470,6 +472,20 @@ const VIEWS={
         <a class="btn-o sm" href="/docs" target="_blank">API docs</a>
       </div></div>`;
  },
+
+ async telemetry(){
+  const d=await api('/api/admin/telemetry');
+  const items=d.items||[];
+  $('view').innerHTML=items.length?`<div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th>Day</th><th>Event</th><th style="text-align:right">Count</th>
+      <th style="text-align:right">Unique traders</th></tr></thead>
+    <tbody>${items.map(i=>`<tr><td class="num">${esc(i.day)}</td><td>${esc(i.name)}</td>
+      <td class="num" style="text-align:right">${i.count}</td>
+      <td class="num" style="text-align:right">${i.traders}</td></tr>`).join('')}
+    </tbody></table></div>`
+    :`<div class="empty"><h3>No events yet</h3>
+      <p>Product events (signups, logins, orders, check-ins) land here as traders use the platform.</p></div>`;
+ },
 };
 
 
@@ -491,7 +507,7 @@ function renderAccounts(){
     ${rows.length?`<div class="tbl-wrap"><table class="tbl">
       <thead><tr><th>Login</th><th>Trader</th><th>Plan</th><th>Phase</th><th>Status</th>
         <th style="text-align:right">Balance</th><th style="text-align:right">Equity</th><th style="text-align:right">P&amp;L</th>
-        <th>Daily</th><th>Max DD</th></tr></thead>
+        <th>Daily</th><th>Max DD</th><th>Created</th><th>Paid</th></tr></thead>
       <tbody>${rows.map(a=>{const m=a.metrics||{};
         return `<tr class="clickable" onclick="openAccount(${a.id})">
           <td class="num" style="font-weight:600">${a.status==='provisioning'?'<span class="muted">pending…</span>':esc(a.login)}${a.bot_enabled?(a.bot_paused?' <span title="Trade BOT paused">⏸</span>':' <span title="Trade BOT running">🤖</span>'):''}</td>
@@ -503,7 +519,9 @@ function renderAccounts(){
           <td class="num" style="text-align:right">$${fmt(a.equity)}</td>
           <td class="num ${(m.profit_pct||0)>=0?'up':'down'}" style="text-align:right">${(m.profit_pct||0)>=0?'+':''}${(m.profit_pct||0).toFixed(2)}%</td>
           <td>${mini(m.daily_loss_used_pct)}</td>
-          <td>${mini(m.overall_dd_used_pct)}</td></tr>`}).join('')}
+          <td>${mini(m.overall_dd_used_pct)}</td>
+          <td class="muted" style="white-space:nowrap">${a.created_at?dstr(a.created_at):'—'}</td>
+          <td class="muted" style="white-space:nowrap">${a.paid_at?dstr(a.paid_at):'—'}</td></tr>`}).join('')}
       </tbody></table></div>`
       :`<div class="empty"><h3>No accounts match</h3><p>Try a different search or filter.</p></div>`}`;
 }
@@ -573,6 +591,10 @@ async function openAccount(id){
       ${(a.breaches||[]).length?a.breaches.map(b=>`<div class="breach-item" style="margin-bottom:8px">${dstr(b.ts)} · [${esc(b.type)}] ${esc(b.detail)}</div>`).join('')
         :'<p class="muted" style="font-size:12.5px">None recorded.</p>'}
     </div>
+    <div class="sec-card" style="margin:0" id="hist-card">
+      <h3 style="font-size:15px;margin-bottom:10px">History</h3>
+      <div class="muted" style="font-size:12.5px">Loading…</div>
+    </div>
     <div class="sec-card" style="margin:0">
       <h3 style="font-size:15px;margin-bottom:10px">Trade BOT</h3>
       ${a.bot_enabled?`
@@ -633,6 +655,7 @@ async function openAccount(id){
     <button class="btn-o" style="border-color:#f5c6c6;color:var(--red)" onclick="deleteAccount(${a.id},'${esc(a.login)}')">Delete account</button>`);
   renderCerts(a.id);
   renderPayouts(a.id);
+  renderHistory(a.id);
   const c=a.equity_curve||[];
   if(window._oChart){window._oChart.destroy();window._oChart=null}
   if(c.length>1)window._oChart=new Chart($('o-chart'),equityChartConfig(c));
@@ -650,6 +673,22 @@ async function startBot(id){
     openAccount(id);
   }catch(e){toast('Error: '+e.message,'err')}
 }
+/* ---------- account timeline (orders, payments, breaches, payouts) ---------- */
+async function renderHistory(id){
+  const el=$('hist-card'); if(!el)return;
+  let d; try{d=await api(`/api/accounts/${id}/history`)}catch(e){
+    el.innerHTML='<h3 style="font-size:15px">History</h3>'
+      +`<p class="muted" style="font-size:12.5px">Could not load: ${esc(e.message)}</p>`;return}
+  const ic={order:'🧾',payment:'💳',breach:'⛔',payout:'💸',account:'🏁'};
+  el.innerHTML=`<h3 style="font-size:15px;margin-bottom:10px">History</h3>`
+    +((d.items||[]).length?d.items.map(i=>`
+      <div class="kv" style="align-items:flex-start">
+        <span style="white-space:nowrap" class="muted">${dstr(i.ts)}</span>
+        <b style="text-align:right;font-weight:500">${ic[i.kind]||'·'} ${esc(i.label)}</b>
+      </div>`).join('')
+      :'<p class="muted" style="font-size:12.5px">Nothing recorded yet.</p>');
+}
+
 /* ---------- achievement certificates ---------- */
 async function renderCerts(id){
   const el=$('cert-card'); if(!el)return;

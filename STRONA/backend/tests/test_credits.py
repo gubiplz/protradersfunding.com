@@ -124,3 +124,70 @@ def test_auth_me_pokazuje_saldo():
     assert r.status_code == 200 and r.json()["credits_usd"] == 75
     lista = client.get("/api/admin/traders", headers=ADMIN_H).json()
     assert next(t for t in lista if t["id"] == tid)["credits_usd"] == 75
+
+
+def test_grant_wysyla_powiadomienie_i_push(monkeypatch):
+    """Nadanie kredytów = wpis w dzwonku + push (mail idzie tą samą bramką)."""
+    from app import push
+    from app.models import Notification, PushSubscription
+
+    tid = _trader()
+    s = SessionLocal()
+    s.add(PushSubscription(trader_id=tid, endpoint=f"https://push.test/credits{tid}",
+                           p256dh="pdh", auth="au"))
+    s.commit(); s.close()
+
+    monkeypatch.setattr(push.settings, "vapid_private_key", "test-priv")
+    monkeypatch.setattr(push.settings, "vapid_public_key", "test-pub")
+    dostarczone = []
+    monkeypatch.setattr(push, "_deliver", lambda info, payload: dostarczone.append(payload))
+
+    r = client.post(f"/api/admin/traders/{tid}/credits", headers=ADMIN_H,
+                    json={"amount": 120, "note": "Promo"})
+    assert r.status_code == 200
+    s = SessionLocal()
+    wpis = (s.query(Notification)
+            .filter(Notification.trader_id == tid,
+                    Notification.event == "credits_granted").one())
+    assert "$120" in wpis.title and "store" in wpis.url
+    s.close()
+    assert len(dostarczone) == 1 and "store" in dostarczone[0]
+
+
+def test_korekta_w_dol_bez_powiadomienia(monkeypatch):
+    """Zabranie kredytów (kwota ujemna) nie generuje 'gratulacji'."""
+    from app.models import Notification
+
+    tid = _trader(credits=200)
+    r = client.post(f"/api/admin/traders/{tid}/credits", headers=ADMIN_H,
+                    json={"amount": -50})
+    assert r.status_code == 200
+    s = SessionLocal()
+    assert (s.query(Notification)
+            .filter(Notification.trader_id == tid).count()) == 0
+    s.close()
+
+
+def test_pref_updates_off_wycisza_kanal(monkeypatch):
+    """notify_updates=False => ani wpisu w dzwonku, ani pusha przy grancie."""
+    from app import push
+    from app.models import Notification
+
+    tid = _trader()
+    s = SessionLocal()
+    s.get(Trader, tid).notify_updates = False
+    s.commit(); s.close()
+
+    monkeypatch.setattr(push.settings, "vapid_private_key", "test-priv")
+    monkeypatch.setattr(push.settings, "vapid_public_key", "test-pub")
+    dostarczone = []
+    monkeypatch.setattr(push, "_deliver", lambda info, payload: dostarczone.append(payload))
+
+    r = client.post(f"/api/admin/traders/{tid}/credits", headers=ADMIN_H,
+                    json={"amount": 80})
+    assert r.status_code == 200
+    s = SessionLocal()
+    assert (s.query(Notification)
+            .filter(Notification.trader_id == tid).count()) == 0
+    s.close()
+    assert dostarczone == []

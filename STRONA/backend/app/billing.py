@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
-from . import catalog, provisioning
+from . import catalog, provisioning, telemetry
 from .config import get_settings
 from .models import Order, Product, Trader
 
@@ -102,6 +102,8 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
                   provider="stripe" if settings.stripe_enabled else "mock")
     session.add(order)
     session.flush()
+    telemetry.track("order_created", trader.id, order=order.id,
+                    product=order.product_key, amount=price)
 
     # Cena 0 (darmowy plan albo zakup w calosci pokryty kredytami) ->
     # provisioning od reki, bez Stripe'a.

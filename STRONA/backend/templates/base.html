@@ -16,6 +16,9 @@
 <meta property="og:image" content="/static/img/og.png">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"{{ site_name }}","logo":"/static/img/logo.png","email":"{{ support_email }}"}</script>
+{% if ga_id %}<script async src="https://www.googletagmanager.com/gtag/js?id={{ ga_id }}"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}
+gtag('js',new Date());gtag('config','{{ ga_id }}');</script>{% endif %}
 {% block head_extra %}{% endblock %}
 {% if promo %}<script>
 /* Runs BEFORE the first paint: a dismissed bar must never flash in and push the

@@ -152,6 +152,12 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"{name}, our support team replied to your ticket "
             f"\"{ctx.get('subject')}\". Log in to the portal to read the answer.",
         ),
+        "credits_granted": (
+            f"Store credit added: ${_num(ctx.get('amount'))} 🎁",
+            f"{name}, we've just added ${_num(ctx.get('amount'))} of store credit to your "
+            f"account. Your balance is now ${_num(ctx.get('balance'))} — it will be applied "
+            f"automatically at your next checkout.",
+        ),
         "challenge_granted": (
             _bogo_subject(ctx),
             f"Hi {name}!\n\n{_bogo_intro(ctx)}\n\n"
@@ -166,85 +172,225 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
     return subject, body + footer
 
 
-def _render_html(event: str, ctx: dict, subject: str) -> str | None:
-    """Wersja HTML dla maili z poświadczeniami (reszta leci plain textem).
+# ---------------------------------------------------------------------------
+# Szablony HTML — wspólny minimalistyczny layout (styl Apple/Dyson): biel,
+# dużo światła, czerń, złoto z logo jako jedyny akcent. Wyłącznie inline CSS
+# i tabele — klienty pocztowe nie mają nowoczesnego layoutu.
+# ---------------------------------------------------------------------------
+_FONT = "-apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif"
+_MONO = "'SF Mono',SFMono-Regular,Menlo,Consolas,monospace"
+_INK, _MUTE, _FAINT = "#1d1d1f", "#6e6e73", "#86868b"
+_HAIR, _GOLD, _GOLD_BG = "#e8e8ed", "#b7924e", "#f7f1e6"
 
-    Inline'owany CSS i tabele — klienty pocztowe nie mają nowoczesnego layoutu.
-    """
-    if event not in ("credentials", "challenge_granted"):
-        return None
+
+def _head_html(badge: str | None, title: str, intro: str) -> str:
+    b = (f'<div style="display:inline-block;background:{_GOLD_BG};color:{_GOLD};border-radius:999px;'
+         f'padding:8px 15px;font:600 11px/1 {_FONT};letter-spacing:.14em;text-transform:uppercase;'
+         f'margin:0 0 20px">{badge}</div>' if badge else "")
+    return f"""
+   <tr><td align="center" style="padding:6px 44px 0">
+     {b}
+     <h1 style="font:600 28px/1.25 {_FONT};letter-spacing:-.4px;color:{_INK};margin:0 0 12px">{title}</h1>
+     <p style="font:400 15px/1.7 {_FONT};color:{_MUTE};margin:0">{intro}</p>
+   </td></tr>"""
+
+
+def _stat_html(label: str, value: str, sub: str | None = None) -> str:
+    s = (f'<div style="font:400 13px/1.5 {_FONT};color:{_MUTE};margin-top:8px">{sub}</div>' if sub else "")
+    return f"""
+   <tr><td align="center" style="padding:32px 44px 4px">
+     <div style="font:600 11px/1 {_FONT};letter-spacing:.14em;color:{_GOLD};text-transform:uppercase">{label}</div>
+     <div style="font:700 46px/1.1 {_FONT};letter-spacing:-1.2px;color:{_INK};margin-top:10px">{value}</div>
+     {s}
+   </td></tr>"""
+
+
+def _rows_html(pairs: list[tuple[str, object]]) -> str:
+    rows = "".join(
+        f'<tr><td style="padding:13px 0;border-top:1px solid {_HAIR};'
+        f'font:400 12px/1.4 {_FONT};letter-spacing:.08em;color:{_FAINT};text-transform:uppercase">{k}</td>'
+        f'<td align="right" style="padding:13px 0;border-top:1px solid {_HAIR};'
+        f'font:500 15px/1.4 {_MONO};color:{_INK}">{v}</td></tr>'
+        for k, v in pairs if v)
+    if not rows:
+        return ""
+    return f"""
+   <tr><td style="padding:28px 44px 4px">
+     <table role="presentation" width="100%" cellpadding="0" cellspacing="0">{rows}</table>
+   </td></tr>"""
+
+
+def _button_html(label: str, url: str) -> str:
+    return f"""
+   <tr><td align="center" style="padding:32px 44px 4px">
+     <a href="{url}" style="display:inline-block;background:{_INK};color:#ffffff;text-decoration:none;
+       font:600 15px/1 {_FONT};padding:16px 36px;border-radius:999px">{label}</a>
+   </td></tr>"""
+
+
+def _note_html(text: str) -> str:
+    return f"""
+   <tr><td align="center" style="padding:22px 44px 0">
+     <p style="font:400 12px/1.7 {_FONT};color:{_FAINT};margin:0">{text}</p>
+   </td></tr>"""
+
+
+def _shell(parts: list[str]) -> str:
     brand = settings.site_name
-    granted = event == "challenge_granted"
-    # Zakup z promocja tez jest upgrade'em — badge i tekst musza to powiedziec,
-    # bo konto jest wieksze niz tier, ktory klient widzial w koszyku.
-    upgraded = _bogo_upgrade(ctx)
-    badge = ((ctx.get("grant_note") or "BOGO activation complete") if granted
-             else (f"{_promo_name()} applied" if upgraded else "Account ready"))
-    headline = (("Your upgraded challenge is live" if upgraded else "Your BOGO challenge is live")
-                if granted else
-                ("Your upgraded challenge account is ready" if upgraded
-                 else "Your challenge account is ready"))
-    steps = ctx.get("steps")
-    kind = f"{steps}-Step challenge on MT5" if steps else "Challenge on MT5"
-    lead = _bogo_intro(ctx)
-    if granted:
-        intro = f"Hi {ctx.get('name')}, {lead[0].lower()}{lead[1:]}"
-    elif upgraded:
-        intro = (f"Hi {ctx.get('name')}, your account is ready — and your {_promo_name()} "
-                 f"promotion is applied: you paid for the {_tier(ctx.get('bogo_paid_size'))} tier "
-                 f"and we created the account at ${_num(ctx.get('initial_balance'))}.")
-    else:
-        intro = f"Hi {ctx.get('name')}, your account has been created and is ready to trade."
-    cell = lambda label, value: f"""
-      <td width="50%" style="padding:6px">
-        <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e7eaf3;border-radius:12px;background:#fbfcfe">
-          <tr><td style="padding:14px 16px">
-            <div style="font:600 11px/1.4 Arial,Helvetica,sans-serif;letter-spacing:.08em;color:#94a3b8;text-transform:uppercase">{label}</div>
-            <div style="font:600 16px/1.4 'SFMono-Regular',Consolas,monospace;color:#0f172a;margin-top:4px">{value}</div>
-          </td></tr>
-        </table></td>"""
-    return f"""<!doctype html><html><body style="margin:0;padding:0;background:#f6f7fb">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f6f7fb;padding:28px 12px">
+    logo = f"{settings.app_base_url}/static/img/logo.png"
+    return f"""<!doctype html><html><body style="margin:0;padding:0;background:#f5f5f7">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f7;padding:44px 14px">
  <tr><td align="center">
-  <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border:1px solid #e7eaf3;border-radius:18px">
-   <tr><td style="padding:34px 34px 8px">
-     <div style="display:inline-block;background:#eef0ff;border-radius:999px;padding:8px 16px;
-       font:700 12px/1 Arial,Helvetica,sans-serif;letter-spacing:.1em;color:#4f46e5;text-transform:uppercase">{badge}</div>
-     <h1 style="font:700 30px/1.2 Arial,Helvetica,sans-serif;color:#0f172a;margin:18px 0 10px">{headline}</h1>
-     <p style="font:400 15px/1.6 Arial,Helvetica,sans-serif;color:#64748b;margin:0 0 22px">{intro}</p>
+  <table role="presentation" width="560" cellpadding="0" cellspacing="0"
+    style="max-width:560px;width:100%;background:#ffffff;border-radius:22px">
+   <tr><td align="center" style="padding:46px 44px 28px">
+     <img src="{logo}" width="46" height="46" alt="{brand}" style="display:block">
    </td></tr>
-   <tr><td style="padding:0 34px">
-     <table width="100%" cellpadding="0" cellspacing="0"
-       style="background:#5b5bd6;background-image:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:16px">
-       <tr><td style="padding:26px 28px">
-         <div style="font:700 12px/1 Arial,Helvetica,sans-serif;letter-spacing:.12em;color:#dcd9fb;text-transform:uppercase">Account allocation</div>
-         <div style="font:800 40px/1.1 Arial,Helvetica,sans-serif;color:#ffffff;margin:10px 0 6px">${_num(ctx.get('initial_balance'))}</div>
-         <div style="font:400 14px/1.4 Arial,Helvetica,sans-serif;color:#dcd9fb">{kind}</div>
-       </td></tr>
-     </table>
-   </td></tr>
-   <tr><td style="padding:16px 28px 0">
-     <table width="100%" cellpadding="0" cellspacing="0">
-       <tr>{cell('Platform', 'MetaTrader 5')}{cell('Server', ctx.get('platform_server') or '—')}</tr>
-       <tr>{cell('MT5 login', ctx.get('platform_login') or '—')}{cell('MT5 password', ctx.get('platform_password') or '—')}</tr>
-       <tr>{cell('Leverage', '1:100')}{cell('Profit split', str(ctx.get('profit_split_pct') or '—') + '%')}</tr>
-     </table>
-   </td></tr>
-   <tr><td align="center" style="padding:26px 34px 8px">
-     <a href="{settings.app_base_url}/portal" style="display:inline-block;background:#5b5bd6;
-       background-image:linear-gradient(135deg,#6366f1,#8b5cf6);color:#ffffff;text-decoration:none;
-       font:700 15px/1 Arial,Helvetica,sans-serif;padding:16px 34px;border-radius:999px">View Dashboard</a>
-   </td></tr>
-   <tr><td style="padding:18px 34px 30px">
-     <p style="font:400 13px/1.6 Arial,Helvetica,sans-serif;color:#94a3b8;margin:0">
-       Sign in to the portal with your e-mail{f" <a href='mailto:{ctx.get('email')}' style='color:#6366f1'>{ctx.get('email')}</a>" if ctx.get('email') else ''}.
-       MT5 credentials are only for the trading platform.</p>
-     <p style="font:400 11px/1.6 Arial,Helvetica,sans-serif;color:#b6bdcc;margin:14px 0 0">
-       {brand} · demo account with virtual funds in a simulated environment. Rewards are performance-based and discretionary.</p>
+   {''.join(parts)}
+   <tr><td style="padding:0 0 46px"></td></tr>
+  </table>
+  <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%">
+   <tr><td align="center" style="padding:26px 30px 0">
+     <p style="font:400 12px/1.7 {_FONT};color:{_FAINT};margin:0">
+       {brand} · <a href="mailto:{settings.support_email}" style="color:{_GOLD};text-decoration:none">{settings.support_email}</a></p>
+     <p style="font:400 11px/1.7 {_FONT};color:#b0b0b5;margin:6px 0 0">
+       Demo accounts with virtual funds in a simulated trading environment.
+       Rewards are performance-based and discretionary.</p>
    </td></tr>
   </table>
  </td></tr>
 </table></body></html>"""
+
+
+def _render_html(event: str, ctx: dict, subject: str) -> str | None:
+    """Wersja HTML każdego maila — wspólny layout, treść per zdarzenie."""
+    brand = settings.site_name
+    name = ctx.get("name") or "trader"
+    login = ctx.get("login", "")
+    portal = f"{settings.app_base_url}/portal"
+
+    if event in ("credentials", "challenge_granted"):
+        granted = event == "challenge_granted"
+        # Zakup z promocja tez jest upgrade'em — badge i tekst musza to powiedziec,
+        # bo konto jest wieksze niz tier, ktory klient widzial w koszyku.
+        upgraded = _bogo_upgrade(ctx)
+        badge = ((ctx.get("grant_note") or "BOGO activation complete") if granted
+                 else (f"{_promo_name()} applied" if upgraded else "Account ready"))
+        headline = (("Your upgraded challenge is live" if upgraded else "Your BOGO challenge is live")
+                    if granted else
+                    ("Your upgraded challenge account is ready" if upgraded
+                     else "Your challenge account is ready"))
+        steps = ctx.get("steps")
+        kind = f"{steps}-Step challenge on MT5" if steps else "Challenge on MT5"
+        lead = _bogo_intro(ctx)
+        if granted:
+            intro = f"Hi {name}, {lead[0].lower()}{lead[1:]}"
+        elif upgraded:
+            intro = (f"Hi {name}, your account is ready — and your {_promo_name()} "
+                     f"promotion is applied: you paid for the {_tier(ctx.get('bogo_paid_size'))} tier "
+                     f"and we created the account at ${_num(ctx.get('initial_balance'))}.")
+        else:
+            intro = f"Hi {name}, your account has been created and is ready to trade."
+        parts = [
+            _head_html(badge, headline, intro),
+            _stat_html("Account allocation", f"${_num(ctx.get('initial_balance'))}", kind),
+            _rows_html([
+                ("Platform", "MetaTrader 5"),
+                ("Server", ctx.get("platform_server")),
+                ("Login", ctx.get("platform_login")),
+                ("Password", ctx.get("platform_password")),
+                ("Leverage", "1:100"),
+                ("Profit split", f"{ctx.get('profit_split_pct')}%" if ctx.get("profit_split_pct") else None),
+            ]),
+            _button_html("View Dashboard", portal),
+            _note_html("Sign in to the portal with your e-mail address. "
+                       "The credentials above are only for the MetaTrader 5 platform."),
+        ]
+    elif event == "welcome":
+        parts = [
+            _head_html("Welcome", f"Welcome to {brand}",
+                       f"Hi {name}, your account is ready. Pick a challenge in the portal "
+                       f"and start your path to a funded account."),
+            _button_html("Open the Portal", portal),
+        ]
+    elif event == "phase_passed":
+        parts = [
+            _head_html("Milestone", "Phase passed",
+                       f"Great job {name} — account {login} moved from "
+                       f"{ctx.get('from_phase')} to {ctx.get('to_phase')}."),
+            _button_html("View Progress", portal),
+        ]
+    elif event == "account_funded":
+        parts = [
+            _head_html("Funded", "Your account is funded",
+                       f"{name}, account {login} is now funded. "
+                       f"Complete KYC and you can request payouts."),
+            _stat_html("Profit split", f"{ctx.get('split')}%", f"Account {login}"),
+            _button_html("View Dashboard", portal),
+        ]
+    elif event == "breached":
+        parts = [
+            _head_html("Account closed", f"Account {login} was closed",
+                       f"{name}, the account breached a rule: {ctx.get('reason')}. "
+                       f"You can review the details in your dashboard and start a new challenge anytime."),
+            _button_html("Start a New Challenge", portal),
+        ]
+    elif event == "payout_requested":
+        parts = [
+            _head_html("Payout", "Payout request received",
+                       f"{name}, we registered your payout request. Our team is reviewing it now."),
+            _rows_html([("Your share", ctx.get("trader_share")),
+                        ("Profit", ctx.get("profit_amount")),
+                        ("Status", "Under review")]),
+            _button_html("View Payouts", portal),
+        ]
+    elif event == "payout_approved":
+        parts = [
+            _head_html("Payout", "Payout approved",
+                       f"{name}, your payout has been approved"
+                       f"{' — including your challenge fee refund' if ctx.get('fee_refund') else ''}. "
+                       f"Funds are on the way."),
+            _stat_html("Your payout", str(ctx.get("trader_share") or "—")),
+            _button_html("View Dashboard", portal),
+        ]
+    elif event == "payout_rejected":
+        parts = [
+            _head_html("Payout", "Payout request declined",
+                       f"{name}, your payout request for {ctx.get('trader_share')} was declined. "
+                       f"Reason: {ctx.get('reason')}. You can submit a new request anytime."),
+            _button_html("Go to Dashboard", portal),
+        ]
+    elif event == "kyc_approved":
+        parts = [
+            _head_html("Verification", "Identity verified",
+                       f"{name}, your KYC verification has been accepted. You can now request payouts."),
+            _button_html("Request a Payout", portal),
+        ]
+    elif event == "kyc_rejected":
+        parts = [
+            _head_html("Verification", "Verification needs another look",
+                       f"{name}, we could not verify your identity with the documents provided. "
+                       f"Please review your details and submit the verification again."),
+            _button_html("Retry Verification", portal),
+        ]
+    elif event == "password_reset":
+        parts = [
+            _head_html(None, "Reset your password",
+                       f"{name}, someone (hopefully you) requested a password reset "
+                       f"for your {brand} account."),
+            _button_html("Set a New Password", ctx.get("reset_url") or portal),
+            _note_html("The link is valid for 1 hour. If you didn't request this, "
+                       "you can safely ignore this e-mail."),
+        ]
+    elif event == "ticket_reply":
+        parts = [
+            _head_html("Support", "New reply to your ticket",
+                       f"{name}, our support team replied to “{ctx.get('subject')}”."),
+            _button_html("Read the Reply", portal),
+        ]
+    else:
+        return None
+    return _shell(parts)
 
 
 # Kategoria preferencji per zdarzenie (Settings -> Notification Preferences).
@@ -253,6 +399,7 @@ _PREF_BY_EVENT = {
     "kyc_approved": "notify_updates", "kyc_rejected": "notify_updates",
     "ticket_reply": "notify_updates",
     "challenge_granted": "notify_updates",
+    "credits_granted": "notify_updates",
     "phase_passed": "notify_trading", "account_funded": "notify_trading",
     "breached": "notify_trading",
     "payout_requested": "notify_payouts", "payout_approved": "notify_payouts",

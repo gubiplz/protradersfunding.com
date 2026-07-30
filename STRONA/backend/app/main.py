@@ -27,12 +27,13 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import func
 
-from . import auth, billing, catalog, metaquotes_web, notify, poller, provisioning, push, rules, tradebot
+from . import auth, billing, catalog, metaquotes_web, notify, poller, provisioning, push, rules, telemetry, tradebot
 from .config import get_settings
 from .db import SessionLocal, init_db
 from .models import (Account, AppSetting, Breach, Certificate, CreditLedger, EquitySnapshot,
-                     JournalEntry, Notification, Order, Payout, PayoutRequest, PoolAccount,
-                     Product, PushSubscription, SupportTicket, TicketMessage, Trade, Trader)
+                     JournalEntry, KycFile, Notification, Order, Payout, PayoutRequest,
+                     PoolAccount, Product, PushSubscription, SupportTicket, TelemetryEvent,
+                     TicketMessage, Trade, Trader)
 
 settings = get_settings()
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
@@ -427,6 +428,7 @@ def signup(payload: SignupIn, response: Response):
         session.add(tr)
         session.commit()
         notify.send("welcome", tr.email, {"name": tr.full_name or tr.email})
+        telemetry.track("signup", tr.id, referred=bool(payload.referral))
         token = auth.make_token(tr.id)
         _ustaw_ciasteczko_sesji(response, token)
         return {"token": token, "trader": {"id": tr.id, "email": tr.email,
@@ -442,6 +444,7 @@ def login(payload: LoginIn, response: Response):
         tr = session.query(Trader).filter(Trader.email == payload.email.lower()).first()
         if not tr or not auth.verify_password(payload.password, tr.password_hash):
             raise HTTPException(401, "Wrong e-mail or password")
+        telemetry.track("login", tr.id)
         token = auth.make_token(tr.id)
         _ustaw_ciasteczko_sesji(response, token)
         return {"token": token, "trader": {"id": tr.id, "email": tr.email,
@@ -717,6 +720,7 @@ def submit_kyc(payload: KycIn, trader: Trader = Depends(auth.current_trader)):
         tr.kyc_doc_ref = payload.doc_ref or payload.id_number or ""
         tr.kyc_submitted_at = datetime.now(timezone.utc)
         session.commit()
+        telemetry.track("kyc_submitted", trader.id)
         return {"kyc_status": tr.kyc_status}
     finally:
         session.close()
@@ -1358,6 +1362,7 @@ def me_checkin(trader: Trader = Depends(auth.current_trader)):
             tr.bonus_points = (tr.bonus_points or 0) + bonus
             reward = {"type": "points", "amount": bonus}
         session.commit()
+        telemetry.track("checkin", trader.id, streak=tr.checkin_streak)
         return {"streak": tr.checkin_streak, "already": False, "reward": reward,
                 "freeze_used": freeze_used, "freezes": tr.streak_freezes or 0}
     finally:
@@ -1401,6 +1406,7 @@ def me_daily_reveal(trader: Trader = Depends(auth.current_trader)):
         tr.reveal_last = today
         tr.reveal_payload = json.dumps(wynik)
         session.commit()
+        telemetry.track("reveal", trader.id, kind=wynik.get("type"))
         return {**wynik, "already": False}
     finally:
         session.close()
@@ -1442,6 +1448,7 @@ def push_subscribe(payload: PushSubscribeIn, trader: Trader = Depends(auth.curre
             session.add(PushSubscription(trader_id=trader.id, endpoint=payload.endpoint,
                                          p256dh=p256dh, auth=auth_key))
         session.commit()
+        telemetry.track("push_subscribed", trader.id)
         return {"ok": True}
     finally:
         session.close()
@@ -1457,6 +1464,46 @@ def push_unsubscribe(payload: PushUnsubscribeIn, trader: Trader = Depends(auth.c
          .delete(synchronize_session=False))
         session.commit()
         return {"ok": True}
+    finally:
+        session.close()
+
+
+# --- Telemetria -------------------------------------------------------------
+class TelemetryIn(BaseModel):
+    name: str
+    props: dict | None = None
+
+
+# Whitelist zdarzeń klienckich: endpoint wymaga logowania, ale i tak nie
+# pozwalamy klientowi wstrzykiwać dowolnych nazw do statystyk admina.
+# Ruch marketingowy (strona publiczna) łapie GA4 — tu tylko produkt.
+_TELEMETRY_CLIENT_EVENTS = {"view_open", "pwa_install"}
+
+
+@app.post("/api/telemetry")
+def telemetry_ingest(payload: TelemetryIn, trader: Trader = Depends(auth.current_trader)):
+    if payload.name not in _TELEMETRY_CLIENT_EVENTS:
+        raise HTTPException(400, "Unknown event")
+    props = {str(k)[:32]: str(v)[:80] for k, v in (payload.props or {}).items()}
+    telemetry.track(payload.name, trader.id, **props)
+    return {"ok": True}
+
+
+@app.get("/api/admin/telemetry", dependencies=[Depends(auth.require_admin)])
+def admin_telemetry():
+    """Agregacja per dzień × zdarzenie z ostatnich 14 dni (UTC)."""
+    session = SessionLocal()
+    try:
+        od = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=14)
+        dzien = func.date(TelemetryEvent.created_at)
+        rows = (session.query(dzien, TelemetryEvent.name,
+                              func.count(TelemetryEvent.id),
+                              func.count(func.distinct(TelemetryEvent.trader_id)))
+                .filter(TelemetryEvent.created_at >= od)
+                .group_by(dzien, TelemetryEvent.name)
+                .order_by(dzien.desc(), TelemetryEvent.name).all())
+        return {"items": [{"day": str(d), "name": n, "count": c, "traders": t}
+                          for d, n, c, t in rows]}
     finally:
         session.close()
 
@@ -1484,14 +1531,19 @@ async def kyc_upload_docs(trader: Trader = Depends(auth.current_trader),
                 continue
             ext = _KYC_MIME.get(up.content_type)
             if not ext:
-                raise HTTPException(400, f"{kind}: allowed formats are JPG, PNG and PDF")
+                raise HTTPException(
+                    400, f"{kind}: allowed formats are JPG, PNG and PDF "
+                         f"(got {up.content_type or 'unknown'})")
             data = await up.read()
             if len(data) > _KYC_MAX_BYTES:
                 raise HTTPException(400, f"{kind}: the file is larger than 5 MB")
-            dirp = UPLOADS / "kyc" / str(tr.id)
-            dirp.mkdir(parents=True, exist_ok=True)
+            # Plik do bazy, nie na dysk — na Vercelu filesystem jest read-only.
             fname = f"{kind}-{secrets.token_hex(6)}{ext}"
-            (dirp / fname).write_bytes(data)
+            (session.query(KycFile)
+             .filter(KycFile.trader_id == tr.id, KycFile.kind == kind)
+             .delete(synchronize_session=False))
+            session.add(KycFile(trader_id=tr.id, kind=kind, filename=fname,
+                                mime=up.content_type, data=data))
             setattr(tr, _KYC_KINDS[kind], fname)
             saved.append(kind)
         session.commit()
@@ -1506,6 +1558,13 @@ def admin_kyc_doc(trader_id: int, kind: str):
         raise HTTPException(404, "Unknown document type")
     session = SessionLocal()
     try:
+        row = (session.query(KycFile)
+               .filter(KycFile.trader_id == trader_id, KycFile.kind == kind)
+               .first())
+        if row:
+            return Response(content=row.data, media_type=row.mime,
+                            headers={"Content-Disposition": f'inline; filename="{row.filename}"'})
+        # Stare uploady sprzed przejścia na bazę (tylko dev z zapisem na dysku)
         tr = session.get(Trader, trader_id)
         fname = getattr(tr, _KYC_KINDS[kind], None) if tr else None
         if not fname:
@@ -1766,7 +1825,14 @@ def admin_add_credits(trader_id: int, payload: CreditsIn):
         session.add(CreditLedger(trader_id=tr.id, amount=kwota,
                                  note=(payload.note or "").strip()[:160] or None))
         session.commit()
-        return {"trader_id": tr.id, "email": tr.email, "credits_usd": nowe}
+        email, imie = tr.email, (tr.full_name or tr.email)
+        session.close()
+        # Po committcie i poza sesją: mail + push + wpis w dzwonku jedną bramką.
+        # Korekty w dół (kwota ujemna) po cichu — nie chwalimy się zabieraniem.
+        if kwota > 0:
+            notify.send("credits_granted", email,
+                        {"name": imie, "amount": kwota, "balance": nowe})
+        return {"trader_id": trader_id, "email": email, "credits_usd": nowe}
     finally:
         session.close()
 
@@ -2410,8 +2476,57 @@ def admin_pool_delete(pool_id: int):
 def list_accounts():
     session = SessionLocal()
     try:
-        return [_account_dict(a, with_credentials=True, admin_view=True)
-                for a in session.query(Account).order_by(Account.id).all()]
+        # Data płatności do kolumny "Paid" — jedno zapytanie zamiast N per konto.
+        zaplacone = dict(session.query(Order.account_id, func.max(Order.paid_at))
+                         .filter(Order.account_id.isnot(None), Order.paid_at.isnot(None))
+                         .group_by(Order.account_id).all())
+        out = []
+        for a in session.query(Account).order_by(Account.id).all():
+            d = _account_dict(a, with_credentials=True, admin_view=True)
+            p = zaplacone.get(a.id)
+            d["paid_at"] = p.isoformat() if p else None
+            out.append(d)
+        return out
+    finally:
+        session.close()
+
+
+@app.get("/api/accounts/{account_id}/history", dependencies=[Depends(auth.require_admin)])
+def account_history(account_id: int):
+    """Timeline konta składany z istniejących wierszy (zamówienie, płatność,
+    start, breach, payouty) — bez osobnej tabeli event-logu."""
+    session = SessionLocal()
+    try:
+        acc = session.get(Account, account_id)
+        if not acc:
+            raise HTTPException(404, "Account not found")
+        items: list[dict] = []
+
+        def add(ts, label, kind):
+            if ts:
+                items.append({"ts": ts.isoformat(), "label": label, "kind": kind})
+
+        add(acc.created_at, "Account created", "account")
+        if acc.started_at and acc.started_at != acc.created_at:
+            add(acc.started_at, "Trading started", "account")
+        for o in session.query(Order).filter(Order.account_id == acc.id).all():
+            add(o.created_at,
+                f"Order #{o.id} created — {o.product_key}, ${o.amount_usd:,.2f} ({o.status})",
+                "order")
+            add(o.paid_at, f"Order #{o.id} paid — ${o.amount_usd:,.2f} via {o.provider}",
+                "payment")
+        for b in session.query(Breach).filter(Breach.account_id == acc.id).all():
+            add(b.ts, f"Breach: {b.type} — {b.detail}", "breach")
+        for pr in (session.query(PayoutRequest)
+                   .filter(PayoutRequest.account_id == acc.id).all()):
+            add(pr.ts, f"Payout request ${pr.trader_share:,.2f} ({pr.status})", "payout")
+        for p in session.query(Payout).filter(Payout.account_id == acc.id).all():
+            add(p.ts, f"Payout ${p.trader_share:,.2f}" + (" — paid" if p.paid else ""),
+                "payout")
+        if acc.closed_at:
+            add(acc.closed_at, f"Account closed ({acc.status})", "account")
+        items.sort(key=lambda i: i["ts"], reverse=True)
+        return {"items": items}
     finally:
         session.close()
 
@@ -2974,7 +3089,7 @@ def _promo_ctx() -> dict | None:
 def _page(request: Request, template: str, **extra):
     ctx = {"site_name": settings.site_name, "support_email": settings.support_email,
            "base_url": _public_base(request), "asset_v": ASSET_V,
-           "promo": _promo_ctx(), **extra}
+           "ga_id": settings.ga_measurement_id, "promo": _promo_ctx(), **extra}
     return jinja.TemplateResponse(request, template, ctx)
 
 

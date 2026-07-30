@@ -31,7 +31,7 @@ import secrets
 from datetime import datetime, timezone
 from time import monotonic
 
-from . import metaapi_provisioning, metaquotes_web, notify
+from . import metaapi_provisioning, metaquotes_web, notify, telemetry
 from .config import get_settings
 from .models import Account, AppSetting, CreditLedger, Order, PoolAccount, Product, Trader
 
@@ -110,6 +110,8 @@ def create_account_from_order(session, order: Order) -> Account:
         session.add(CreditLedger(trader_id=trader.id, amount=-zuzycie,
                                  note=f"Applied to order #{order.id}", order_id=order.id))
     session.commit()
+    telemetry.track("order_paid", trader.id, order=order.id, product=order.product_key,
+                    amount=order.amount_usd, provider=order.provider)
 
     if not real_mode:
         notify.send(_creds_event(acc), trader.email, _creds_ctx(trader, acc))

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -460,3 +460,34 @@ class PushSubscription(Base):
     p256dh: Mapped[str] = mapped_column(String(200))    # klucz szyfrowania przegladarki
     auth: Mapped[str] = mapped_column(String(100))      # sekret uwierzytelniajacy push service
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class KycFile(Base):
+    """Dokument KYC trzymany w bazie, nie na dysku — Vercel ma read-only
+    filesystem, a /tmp jest ulotny między requestami. Przy ≤5 MB × 3 pliki
+    na tradera Postgres spokojnie to udźwignie. Jeden wiersz na (trader, kind);
+    re-upload nadpisuje. UWAGA: kolumny `data` nie ładować w list-query'ach."""
+    __tablename__ = "kyc_files"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    trader_id: Mapped[int] = mapped_column(ForeignKey("traders.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))       # id_front|id_back|residence
+    filename: Mapped[str] = mapped_column(String(120))
+    mime: Mapped[str] = mapped_column(String(40))
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class TelemetryEvent(Base):
+    """Zdarzenie produktowe (telemetria wewnętrzna, bez zewnętrznych usług).
+
+    Zapisywane głównie server-side w miejscach, gdzie zdarzenie i tak zachodzi
+    (login, zamówienie, KYC...); frontend może dorzucić tylko whitelistowane
+    nazwy przez POST /api/telemetry. Agregacja w panelu admina."""
+    __tablename__ = "telemetry_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    trader_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(40), index=True)
+    props: Mapped[str | None] = mapped_column(String(400), nullable=True)  # JSON
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)

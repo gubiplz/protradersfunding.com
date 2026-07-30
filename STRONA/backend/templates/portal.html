@@ -132,6 +132,61 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
    modal). Shared key with the landing page — one applied state everywhere. */
 function pfPromo(){try{return localStorage.getItem('pf_promo_code')||''}catch(e){return ''}}
 
+/* ---------- live refresh + deep-linki z pusha ---------- */
+/* Świeże ME (kredyty, streak) + badge dzwonka bez reloadu strony. Re-render
+   bieżącego widoku tylko na żądanie (pull-to-refresh / nawigacja z pusha)
+   albo gdy zmieniło się saldo kredytów — żeby nie migać ekranem co minutę. */
+async function refreshLive(rerender=false){
+  if(!TOKEN||!ME)return;
+  refreshNotif();
+  try{
+    const stare=ME.credits_usd;
+    ME=await api('/api/auth/me');
+    if(!rerender&&ME.credits_usd!==stare)rerender=true;
+  }catch(e){}
+  if(rerender&&window._view&&VIEWS[window._view])go(window._view);
+}
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible')refreshLive();
+});
+setInterval(()=>{if(document.visibilityState==='visible')refreshLive()},60000);
+
+/* Telemetria produktowa (fire-and-forget): otwarcie portalu + instalacja PWA. */
+function track(name,props){try{
+  if(TOKEN)api('/api/telemetry',{method:'POST',body:JSON.stringify({name,props:props||{}})}).catch(()=>{})
+}catch(e){}}
+addEventListener('appinstalled',()=>track('pwa_install'));
+
+/* Klik w push przy otwartym portalu: sw.js robi postMessage zamiast navigate()
+   (reload gubi stan SPA). Listener na top-levelu — iOS potrafi zgubić
+   wiadomości, gdy rejestracja przyjdzie później. */
+if('serviceWorker' in navigator)navigator.serviceWorker.addEventListener('message',e=>{
+  const d=e.data||{};
+  if(d.type!=='navigate')return;
+  let v=null;
+  try{v=new URL(d.url,location.origin).searchParams.get('view')}catch(_){}
+  if(ME&&v&&VIEWS[v]){go(v);refreshLive()}
+});
+
+/* Pull-to-refresh (mobile PWA): przeciągnięcie >70px przy scrollu 0. */
+(function(){
+  let y0=null,pulled=false;
+  const top=()=>((document.scrollingElement||document.documentElement).scrollTop||0)<=0;
+  document.addEventListener('touchstart',e=>{
+    y0=(ME&&top()&&e.touches.length===1)?e.touches[0].clientY:null;pulled=false;
+  },{passive:true});
+  document.addEventListener('touchmove',e=>{
+    if(y0===null||pulled)return;
+    if(e.touches[0].clientY-y0>70&&top()){
+      pulled=true;
+      const s=document.createElement('div');s.className='ptr-spin';s.id='ptr-spin';
+      document.body.appendChild(s);
+      Promise.resolve(refreshLive(true)).finally(()=>setTimeout(()=>$('ptr-spin')?.remove(),400));
+    }
+  },{passive:true});
+  document.addEventListener('touchend',()=>{y0=null},{passive:true});
+})();
+
 const ICO={
   copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>',
   check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg>',
@@ -298,6 +353,7 @@ async function boot(){
   const widok=q.get('view');           /* deep-linki z powiadomien: /portal?view=payouts */
   go(q.get('buy')?'store':(widok&&VIEWS[widok]?widok:'accounts'));
   refreshNotif();
+  track('view_open',{view:window._view,pwa:document.documentElement.classList.contains('pwa')?'1':'0'});
 }
 
 const TITLES={
@@ -317,6 +373,7 @@ const TITLES={
   settings:['Settings','Manage your account settings and preferences'],
 };
 function go(v){
+  window._view=v;
   document.querySelectorAll('.sb-link[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const tv={store:'accounts',achievements:'rewards',loyalty:'rewards'}[v]||v;
   const tabs=[...document.querySelectorAll('.tab-item[data-v]')];
@@ -599,12 +656,20 @@ function toggleNotif(){
     +((r.items&&r.items.length)?r.items.map(n=>{
       const kiedy=n.created_at?new Date(n.created_at+(n.created_at.endsWith('Z')?'':'Z'))
         .toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
-      return `<a class="notif-row${n.read?'':' unread'}" href="${esc(n.url||'/portal')}">
+      return `<a class="notif-row${n.read?'':' unread'}" href="${esc(n.url||'/portal')}" onclick="return notifGo(this)">
         <div class="t">${esc(n.title)}</div>${n.body?`<div class="b">${esc(n.body)}</div>`:''}
         <div class="d">${kiedy}</div></a>`}).join('')
       :'<div class="notif-empty">Nothing yet — pass a phase and it lands here.</div>');
   p.classList.remove('hidden');
   if(r.unread)readNotif(false);
+}
+/* Wiersz dzwonka: przełącz widok w SPA zamiast pełnej nawigacji; przy braku
+   znanego widoku href zadziała normalnie (fallback). */
+function notifGo(a){
+  let v=null;
+  try{v=new URL(a.getAttribute('href'),location.origin).searchParams.get('view')}catch(_){}
+  if(v&&VIEWS[v]){go(v);return false}
+  return true;
 }
 async function readNotif(rerender=true){
   try{await api('/api/me/notifications/read',{method:'POST'});await refreshNotif()}catch(e){}
