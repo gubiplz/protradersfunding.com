@@ -28,7 +28,12 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
 <!-- ======================= AUTH (split screen) ======================= -->
 <div id="auth" class="auth-wrap hidden">
   <div class="auth-brand">
-    <a class="logo" href="/"><img src="/static/img/logo.png" alt="">{{ site_name }}</a>
+    <div class="auth-top">
+      <a class="auth-back" href="/" onclick="return authBack(event)" aria-label="Back to the previous page" title="Back">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      </a>
+      <a class="logo" href="/"><img src="/static/img/logo.png" alt="">{{ site_name }}</a>
+    </div>
     <div class="auth-pitch">
       <h2>Your funded journey<br>starts here.</h2>
       <p>Log in to manage challenges, track objectives in real time and request payouts.</p>
@@ -44,6 +49,9 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
       Rewards are performance-based and discretionary.</div>
   </div>
   <div class="auth-form">
+    <a class="auth-back auth-back-m" href="/" onclick="return authBack(event)" aria-label="Back to the previous page" title="Back">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+    </a>
     <div class="auth-card">
       <a class="auth-logo-m" href="/"><img src="/static/img/logo.png" alt=""><span>{{ site_name }}</span></a>
       <h3 id="auth-title">Welcome back</h3>
@@ -370,6 +378,17 @@ function toast(msg,kind='ok',ms=6000){
 }
 
 /* ---------- auth ---------- */
+/* Back arrow on the auth screen: real browser-back when the visitor came from
+   our own site (pricing, FAQ…), otherwise the landing page. */
+function authBack(e){
+  try{
+    if(document.referrer&&new URL(document.referrer).origin===location.origin&&history.length>1){
+      e.preventDefault();history.back();return false;
+    }
+  }catch(err){}
+  return true;   /* follow href="/" */
+}
+
 function authTab(m){AUTHMODE=m;
   const login=m==='login',signup=m==='signup',forgot=m==='forgot',reset=m==='reset';
   $('tab-login').classList.toggle('on',login);
