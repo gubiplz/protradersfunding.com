@@ -57,6 +57,10 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
         <input id="a-pass" type="password" placeholder="Password" class="inp" autocomplete="current-password">
         <input id="a-pass2" type="password" placeholder="Repeat new password" class="inp hidden" autocomplete="new-password">
         <input id="a-ref" placeholder="Referral code (optional)" class="inp hidden" autocomplete="off">
+        <label class="terms-row hidden" id="a-terms-row"><input type="checkbox" id="a-terms">
+          <span>I agree to the <a href="/terms" target="_blank">Terms of Service</a> and the
+          <a href="/privacy" target="_blank">Privacy Policy</a>, and I understand all accounts
+          are simulated with virtual funds.</span></label>
         <button id="a-submit" type="submit" class="btn-p lg" style="width:100%">Log in</button>
         <button id="a-forgot" type="button" onclick="authTab('forgot')" style="font-size:12.5px;color:var(--muted);text-decoration:underline;background:none;border:0;cursor:pointer">Forgot password?</button>
         <button id="a-back" type="button" onclick="authTab('login')" class="hidden" style="font-size:13px;color:var(--muted);background:none;border:0;cursor:pointer">‹ Back to log in</button>
@@ -129,6 +133,12 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
   <div class="notif-panel hidden" id="notif-panel"></div>
 </div>
 
+<div class="cookie-note hidden" id="cookie-note">
+  <span>We use only essential cookies — they keep you signed in. No ad tracking.
+    <a href="/privacy" target="_blank">Privacy Policy</a></span>
+  <button class="btn-p sm" onclick="cookieOk()">Got it</button>
+</div>
+
 <div id="toasts"></div>
 
 <script>
@@ -174,6 +184,11 @@ function toggleTheme(){
   if(ME){if(window._onDetail&&window._accId)openAcc(window._accId);else if(CURV)go(CURV)}
 }
 paintTheme();
+
+/* ---------- cookie notice (essential cookies only; shared key with the site) ---------- */
+function cookieOk(){try{localStorage.setItem('pf_cookie_ok','1')}catch(e){}
+  $('cookie-note').classList.add('hidden')}
+try{if(!localStorage.getItem('pf_cookie_ok'))$('cookie-note').classList.remove('hidden')}catch(e){}
 
 /* ---------- live refresh + push deep links ---------- */
 /* Fresh ME (credits, streak) + bell badge without a page reload. Re-render of
@@ -340,6 +355,7 @@ function authTab(m){AUTHMODE=m;
   $('tab-signup').classList.toggle('on',signup);
   $('a-name').classList.toggle('hidden',!signup);
   $('a-ref').classList.toggle('hidden',!signup);
+  $('a-terms-row').classList.toggle('hidden',!signup);
   $('a-pass').classList.toggle('hidden',forgot);
   $('a-pass2').classList.toggle('hidden',!reset);
   $('a-email').classList.toggle('hidden',reset);
@@ -383,9 +399,12 @@ async function doAuth(){
     }catch(e){toast('Error: '+e.message,'err')}
     unlock();return;
   }
+  if(AUTHMODE==='signup'&&!$('a-terms').checked){
+    toast('Please accept the Terms of Service and Privacy Policy.','err');unlock();return}
   const body={email:$('a-email').value,password:$('a-pass').value};
   try{let res;
-    if(AUTHMODE==='signup'){body.full_name=$('a-name').value;body.referral=$('a-ref').value||null;res=await api('/api/auth/signup',{method:'POST',body:JSON.stringify(body)});}
+    if(AUTHMODE==='signup'){body.full_name=$('a-name').value;body.referral=$('a-ref').value||null;
+      body.terms_accepted=$('a-terms').checked;res=await api('/api/auth/signup',{method:'POST',body:JSON.stringify(body)});}
     else res=await api('/api/auth/login',{method:'POST',body:JSON.stringify(body)});
     TOKEN=res.token;localStorage.setItem('pf_token',TOKEN);
     // There is ONE login — the admin panel redirects here with ?next=/admin and

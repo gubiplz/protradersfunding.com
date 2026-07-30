@@ -956,6 +956,20 @@ html:not(.pwa){overscroll-behavior-y:contain}
 .split-under{display:block;height:3px;border-radius:99px;background:var(--bg3);margin-top:4px;
   overflow:hidden;width:64px;margin-left:auto}
 .split-under i{display:block;height:100%;background:var(--acc)}
+.terms-row{display:flex;gap:9px;align-items:flex-start;font-size:12px;color:var(--muted);
+  cursor:pointer;line-height:1.5}
+.terms-row input{margin-top:2px;width:15px;height:15px;flex:none;accent-color:var(--acc)}
+.terms-row a{color:var(--acc);text-decoration:underline}
+
+/* Essential-cookies notice: above the mobile tab bar (50), below toasts (90). */
+.cookie-note{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));
+  z-index:80;margin:0 auto;max-width:600px;display:flex;align-items:center;gap:14px;
+  background:var(--panel);border:1px solid var(--line2);border-radius:14px;padding:12px 16px;
+  font-size:12.5px;color:var(--muted);box-shadow:var(--shadow-lg)}
+.cookie-note a{color:var(--acc);text-decoration:underline}
+.cookie-note .btn-p{flex:none}
+@media(max-width:700px){.cookie-note{bottom:calc(74px + env(safe-area-inset-bottom))}}
+
 .auth-stats{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px}
 .as-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:118px}
 .as-card b{font-family:var(--mono);font-size:18px;display:block;letter-spacing:-.01em}

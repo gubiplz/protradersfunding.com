@@ -84,6 +84,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "streak_freezes": "INTEGER DEFAULT 1",
         "email_verified": "BOOLEAN DEFAULT TRUE",
         "email_verify_code": "VARCHAR(6)",
+        "terms_accepted_at": "TIMESTAMP",
     },
     "products": {
         "max_lots": "FLOAT DEFAULT 6.0",

@@ -63,11 +63,11 @@ def test_login_i_signup_zostawiaja_slad():
     n = next(LICZNIK)
     email = f"tele-auth{n}@test.pl"
     r = client.post("/api/auth/signup", json={
-        "email": email, "password": "haslo1234", "full_name": "Tele Auth"})
+        "email": email, "password": "haslo1234", "terms_accepted": True, "full_name": "Tele Auth"})
     assert r.status_code == 200
     tid = r.json()["trader"]["id"]
     assert len(_wiersze("signup", tid)) == 1
-    r = client.post("/api/auth/login", json={"email": email, "password": "haslo1234"})
+    r = client.post("/api/auth/login", json={"email": email, "password": "haslo1234", "terms_accepted": True})
     assert r.status_code == 200
     assert len(_wiersze("login", tid)) == 1
 

@@ -131,6 +131,16 @@ if(localStorage.getItem('pf_promo_code'))document.documentElement.classList.add(
   </div>
 </footer>
 
+<div class="cookie-note hidden" id="cookie-note">
+  <span>We use only essential cookies — they keep you signed in to the trader portal. No ad tracking.
+    <a href="/privacy">Privacy Policy</a></span>
+  <button class="btn btn-sm" onclick="cookieOk()">Got it</button>
+</div>
+<script>/* Essential-cookies notice; pf_cookie_ok is shared with the portal. */
+function cookieOk(){try{localStorage.setItem('pf_cookie_ok','1')}catch(e){}
+  document.getElementById('cookie-note').classList.add('hidden')}
+try{if(!localStorage.getItem('pf_cookie_ok'))document.getElementById('cookie-note').classList.remove('hidden')}catch(e){}</script>
+
 <script src="/static/lib/gsap.min.js"></script>
 <script src="/static/lib/ScrollTrigger.min.js"></script>
 <script src="/static/js/site.js?v={{ asset_v }}"></script>

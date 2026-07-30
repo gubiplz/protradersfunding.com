@@ -123,10 +123,10 @@ def test_zmiana_hasla():
 def test_delete_anonimizuje_i_uniewaznia_token():
     tid, h = _trader("kasacja@test.pl")
     with TestClient(app) as c:
-        assert c.post("/api/me/delete", headers=h, json={"password": "haslo1234"}).json()["deleted"]
+        assert c.post("/api/me/delete", headers=h, json={"password": "haslo1234", "terms_accepted": True}).json()["deleted"]
         assert c.get("/api/auth/me", headers=h).status_code == 401, "token po delete ma być martwy"
         assert c.post("/api/auth/login",
-                      json={"email": "kasacja@test.pl", "password": "haslo1234"}).status_code == 401
+                      json={"email": "kasacja@test.pl", "password": "haslo1234", "terms_accepted": True}).status_code == 401
     s = SessionLocal()
     tr = s.get(Trader, tid)
     assert tr.email.endswith("@removed.invalid") and tr.full_name == "Deleted User"
@@ -869,7 +869,7 @@ def test_otwarte_pozycje_konta_widzi_tylko_wlasciciel():
 def test_signup_wysyla_kod_i_weryfikacja_kodem_dziala():
     with TestClient(app) as c:
         r = c.post("/api/auth/signup", json={
-            "email": "verify-code@test.pl", "password": "haslo1234", "full_name": "Vera"})
+            "email": "verify-code@test.pl", "password": "haslo1234", "terms_accepted": True, "full_name": "Vera"})
         assert r.status_code == 200
         h = {"Authorization": f"Bearer {r.json()['token']}"}
         assert c.get("/api/auth/me", headers=h).json()["email_verified"] is False
@@ -887,7 +887,7 @@ def test_signup_wysyla_kod_i_weryfikacja_kodem_dziala():
 def test_weryfikacja_linkiem_dziala_bez_logowania():
     with TestClient(app) as c:
         r = c.post("/api/auth/signup", json={
-            "email": "verify-link@test.pl", "password": "haslo1234", "full_name": "Vera"})
+            "email": "verify-link@test.pl", "password": "haslo1234", "terms_accepted": True, "full_name": "Vera"})
         tid = r.json()["trader"]["id"]
         assert c.post("/api/auth/verify-email",
                       json={"token": auth.make_verify_token(tid)}).status_code == 200
@@ -901,7 +901,7 @@ def test_weryfikacja_linkiem_dziala_bez_logowania():
 def test_resend_generuje_nowy_kod():
     with TestClient(app) as c:
         r = c.post("/api/auth/signup", json={
-            "email": "verify-resend@test.pl", "password": "haslo1234", "full_name": "Vera"})
+            "email": "verify-resend@test.pl", "password": "haslo1234", "terms_accepted": True, "full_name": "Vera"})
         tid = r.json()["trader"]["id"]
         h = {"Authorization": f"Bearer {r.json()['token']}"}
         s = SessionLocal(); stary = s.get(Trader, tid).email_verify_code; s.close()

@@ -27,7 +27,19 @@ _s.close()
 
 
 def _signup(c, email, password="haslo12345", **extra):
-    return c.post("/api/auth/signup", json={"email": email, "password": password, **extra})
+    return c.post("/api/auth/signup", json={"email": email, "password": password,
+                                            "terms_accepted": True, **extra})
+
+
+def test_signup_wymaga_akceptacji_regulaminu():
+    """Checkbox zgod jest wymagany — bez terms_accepted rejestracja pada."""
+    with TestClient(app) as c:
+        r = c.post("/api/auth/signup", json={"email": "bez-zgody@test.pl",
+                                             "password": "haslo12345"})
+    assert r.status_code == 400 and "Terms" in r.json()["detail"]
+    s = SessionLocal()
+    assert s.query(Trader).filter(Trader.email == "bez-zgody@test.pl").count() == 0
+    s.close()
 
 
 def test_signup_odrzuca_krotkie_haslo_i_zly_email():
@@ -144,3 +156,29 @@ def test_rate_limit_login(monkeypatch):
         assert kody[5] == 429
     finally:
         main_mod._RL_HITS.clear()
+
+
+def test_migracja_loginu_admina_na_admin_at_admin():
+    """Reczne konto „admin" (bez formatu e-mail) nie przechodzi walidacji
+    type=email w portalu — migracja startowa przemianowuje je na admin@admin
+    z haslem admin. Idempotentna: drugi bieg niczego nie zmienia.
+
+    Sprzatanie na wstepie: test_admin_login tez zaklada konto "admin", a kazdy
+    `with TestClient(app)` odpala lifespan (i te migracje) — bez czyszczenia
+    admin@admin bywa juz zajete i asercje zaleza od kolejnosci plikow."""
+    s = SessionLocal()
+    (s.query(Trader).filter(Trader.email.in_(("admin", "admin@admin")))
+     .delete(synchronize_session=False))
+    s.add(Trader(email="admin", password_hash=auth.hash_password("stare-haslo"),
+                 full_name="Administrator", is_admin=True,
+                 referral_code=auth.secrets.token_hex(3)))
+    s.commit(); s.close()
+    main_mod._migruj_login_admina()
+    main_mod._migruj_login_admina()          # drugi bieg = no-op
+    s = SessionLocal()
+    assert s.query(Trader).filter(Trader.email == "admin").count() == 0
+    assert s.query(Trader).filter(Trader.email == "admin@admin").count() == 1
+    s.close()
+    with TestClient(app) as c:
+        r = c.post("/api/auth/login", json={"email": "admin@admin", "password": "admin"})
+    assert r.status_code == 200 and r.json()["trader"]["is_admin"] is True

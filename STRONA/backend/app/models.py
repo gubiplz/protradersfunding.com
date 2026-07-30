@@ -63,6 +63,10 @@ class Trader(Base):
     email_verified: Mapped[bool] = mapped_column(Boolean, default=True)
     email_verify_code: Mapped[str | None] = mapped_column(String(6), nullable=True)
 
+    # Moment akceptacji regulaminu i polityki prywatności przy rejestracji
+    # (checkbox jest wymagany; konta sprzed wdrożenia mają NULL).
+    terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     # Kredyty sklepowe (USD) — nadaje admin, automatycznie odliczane od ceny
     # nastepnego zakupu w checkoucie. Pelna historia w tabeli credit_ledger.
     credits_usd: Mapped[float] = mapped_column(Float, default=0.0)

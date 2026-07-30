@@ -104,6 +104,29 @@ def _gen_ref_code() -> str:
     return secrets.token_hex(3).upper()
 
 
+def _migruj_login_admina() -> None:
+    """Jednorazowo: konto administratora „admin" → „admin@admin" (hasło: admin).
+
+    Pole logowania w portalu ma type=email, więc goły login „admin" nie
+    przechodzi walidacji przeglądarki i admin nie może się zalogować.
+    Idempotentne — po zmianie adresu warunek nie łapie już żadnego wiersza.
+    Rejestracja wymaga formatu e-mail, więc wiersz „admin" może być tylko
+    ręcznie założonym kontem administratora.
+    """
+    session = SessionLocal()
+    try:
+        tr = (session.query(Trader)
+              .filter(Trader.email == "admin", Trader.is_admin == True)  # noqa: E712
+              .first())
+        if tr and not session.query(Trader).filter(Trader.email == "admin@admin").first():
+            tr.email = "admin@admin"
+            tr.password_hash = auth.hash_password("admin")
+            session.commit()
+            print("[migracja] konto admina: login 'admin' -> 'admin@admin' (haslo: admin)")
+    finally:
+        session.close()
+
+
 def _warn_if_placeholder_provisioning() -> None:
     """Log startowy: w którym trybie stoi provisioning i skąd biorą się poświadczenia."""
     if provisioning.real_provisioning_enabled(settings):
@@ -127,6 +150,7 @@ def _warn_if_placeholder_provisioning() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    _migruj_login_admina()
     if settings.auto_seed:
         seed_demo()   # produkty + admin zawsze; konta demo tylko w trybie sim
     _warn_if_placeholder_provisioning()
@@ -346,6 +370,7 @@ class SignupIn(BaseModel):
     password: str
     full_name: str = ""
     referral: str | None = None
+    terms_accepted: bool = False
 
 
 class LoginIn(BaseModel):
@@ -533,6 +558,8 @@ def signup(payload: SignupIn, request: Request, response: Response):
     # do zalozenia konta ze slabszym haslem.
     if len(payload.password) < 8:
         raise HTTPException(400, "The password must be at least 8 characters long")
+    if not payload.terms_accepted:
+        raise HTTPException(400, "You must accept the Terms of Service and Privacy Policy")
     session = SessionLocal()
     try:
         if session.query(Trader).filter(Trader.email == email).first():
@@ -555,6 +582,7 @@ def signup(payload: SignupIn, request: Request, response: Response):
             full_name=payload.full_name.strip(), referral_code=code,
             referred_by=referred_by,
             email_verified=False, email_verify_code=f"{secrets.randbelow(1_000_000):06d}",
+            terms_accepted_at=datetime.now(timezone.utc),
         )
         session.add(tr)
         session.commit()
