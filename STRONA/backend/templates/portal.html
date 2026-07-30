@@ -13,10 +13,10 @@
 <script>if(matchMedia('(display-mode: standalone)').matches||navigator.standalone)document.documentElement.classList.add('pwa');
 /* Pre-paint theme pick: light is the default, a stored "dark" flips the
    attribute before first paint so there is no flash of the wrong theme.
-   Dark applies ONLY with a session on board — the login screen is always
-   light. Key bumped pf_theme -> pf_theme2: one-time reset of everyone back
+   The choice sticks to the whole portal — login screen included, also after
+   logout. Key bumped pf_theme -> pf_theme2: one-time reset of everyone back
    to the white default. */
-try{if(localStorage.getItem('pf_theme2')==='dark'&&localStorage.getItem('pf_token')){
+try{if(localStorage.getItem('pf_theme2')==='dark'){
 document.documentElement.dataset.theme='dark';
 document.querySelector('meta[name="theme-color"]').setAttribute('content','#0b0d12')}}catch(e){}
 if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('/sw.js'))</script>
@@ -219,14 +219,6 @@ function toggleTheme(){
   if(ME){if(window._onDetail&&window._accId)openAcc(window._accId);else if(CURV)go(CURV)}
 }
 paintTheme();
-/* The auth screen is ALWAYS light — the stored dark theme kicks in only once
-   a session reaches the dashboard (boot) and dies with it (logout reloads). */
-function applyStoredTheme(){
-  let dark=false;try{dark=localStorage.getItem('pf_theme2')==='dark'}catch(e){}
-  if(dark)document.documentElement.dataset.theme='dark';
-  else delete document.documentElement.dataset.theme;
-  paintTheme();
-}
 
 /* ---------- cookie notice (essential cookies only; shared key with the site) ---------- */
 function cookieOk(v){try{localStorage.setItem('pf_cookie_ok',v?'1':'0')}catch(e){}
@@ -535,12 +527,9 @@ async function boot(){
   }
   const rt=q0.get('reset');
   if(rt){window._resetToken=rt;
-    /* a logged-in visitor opening a reset link still gets the light auth */
-    delete document.documentElement.dataset.theme;paintTheme();
     $('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('reset');loadAuthStats();return}
   if(!TOKEN){$('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('login');loadAuthStats();return}
   try{ME=await api('/api/auth/me')}catch(e){logout();return}
-  applyStoredTheme();
   /* Hard gate: an unconfirmed address never reaches the dashboard. */
   if(ME.email_verified===false){
     $('auth').classList.add('hidden');$('app').classList.add('hidden');
