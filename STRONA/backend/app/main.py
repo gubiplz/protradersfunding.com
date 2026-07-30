@@ -614,6 +614,14 @@ def login(payload: LoginIn, request: Request, response: Response):
         session.close()
 
 
+def _ui_prefs_dict(trader: Trader) -> dict:
+    """ui_prefs to string JSON w bazie — do klienta zawsze idzie obiekt."""
+    try:
+        return json.loads(trader.ui_prefs or "{}") or {}
+    except ValueError:
+        return {}
+
+
 @app.get("/api/auth/me")
 def me(trader: Trader = Depends(auth.current_trader)):
     session = SessionLocal()
@@ -628,6 +636,8 @@ def me(trader: Trader = Depends(auth.current_trader)):
                 "email_verified": trader.email_verified is not False,
                 # potrzebne, żeby formularz KYC podświetlił zapisany kraj na liście
                 "kyc_country": trader.kyc_country,
+                "kyc_reject_reason": trader.kyc_reject_reason,
+                "ui_prefs": _ui_prefs_dict(trader),
                 "first_name": trader.first_name, "last_name": trader.last_name, "phone": trader.phone,
                 "referral_code": trader.referral_code,
                 "credits_usd": round(float(trader.credits_usd or 0), 2),
@@ -653,6 +663,7 @@ class CheckoutIn(BaseModel):
     coupon: str | None = None
     promo_code: str | None = None      # kod „Upgrade Your Size" (nie kupon rabatowy)
     weekend_trading: bool = False
+    use_credits: bool = True           # False = zostaw kredyty sklepowe na później
     # Dane potrzebne do założenia konta demo MT5 na nazwisko klienta.
     # Zbierane w kroku płatności; zapisywane na profilu tradera.
     first_name: str | None = None
@@ -710,7 +721,28 @@ def checkout(payload: CheckoutIn, trader: Trader = Depends(auth.current_trader))
         )
         return billing.create_checkout(session, trader, payload.product_key, payload.coupon,
                                        promo_code=payload.promo_code,
-                                       weekend_trading=payload.weekend_trading)
+                                       weekend_trading=payload.weekend_trading,
+                                       use_credits=payload.use_credits)
+    finally:
+        session.close()
+
+
+@app.get("/api/checkout/preview")
+def checkout_preview(product_key: str, coupon: str | None = None, promo_code: str | None = None,
+                     weekend: bool = False, use_credits: bool = True,
+                     trader: Trader = Depends(auth.current_trader)):
+    """Podgląd rozbicia ceny dla modala zakupu — dokładnie ta sama matematyka
+    co realny checkout (billing.compute_price), tylko bez tworzenia zamówienia.
+    Serwer i tak liczy wszystko ponownie przy POST /api/checkout."""
+    session = SessionLocal()
+    try:
+        q = billing.compute_price(session, trader, product_key, coupon,
+                                  promo_code=promo_code, weekend_trading=weekend,
+                                  use_credits=use_credits)
+        return {"plan_price_usd": q["plan_price_usd"], "discount_pct": q["discount_pct"],
+                "discount_usd": q["discount_usd"], "weekend_fee_usd": q["weekend_fee_usd"],
+                "credits_used": q["credits_used"], "total_due_usd": q["total_due_usd"],
+                "credits_balance": round(float(trader.credits_usd or 0), 2)}
     finally:
         session.close()
 
@@ -770,6 +802,25 @@ def my_orders(trader: Trader = Depends(auth.current_trader)):
                 }
             out.append(row)
         return out
+    finally:
+        session.close()
+
+
+@app.get("/api/me/credits")
+def my_credits(trader: Trader = Depends(auth.current_trader)):
+    """Saldo kredytów sklepowych + historia (nadania admina i zużycie w zakupach).
+
+    UWAGA: `note` z modala „Add credits" jest tu widoczne dla tradera — admin
+    ma pisać notatki „na zewnątrz" (np. "Contest prize").
+    """
+    session = SessionLocal()
+    try:
+        rows = (session.query(CreditLedger)
+                .filter(CreditLedger.trader_id == trader.id)
+                .order_by(CreditLedger.id.desc()).limit(100).all())
+        return {"balance_usd": round(float(trader.credits_usd or 0), 2),
+                "ledger": [{"ts": r.created_at.isoformat(), "amount": round(float(r.amount), 2),
+                            "note": r.note, "order_id": r.order_id} for r in rows]}
     finally:
         session.close()
 
@@ -1450,6 +1501,8 @@ class MePatch(BaseModel):
     notify_trading: bool | None = None
     notify_payouts: bool | None = None
     notify_marketing: bool | None = None
+    # Preferencje UI (np. sortowanie tabel) — mały JSON, nadpisywany w całości.
+    ui_prefs: dict | None = None
 
 
 @app.patch("/api/me")
@@ -1463,6 +1516,11 @@ def me_patch(payload: MePatch, trader: Trader = Depends(auth.current_trader)):
             v = getattr(payload, field)
             if v is not None:
                 setattr(tr, field, bool(v))
+        if payload.ui_prefs is not None:
+            blob = json.dumps(payload.ui_prefs, separators=(",", ":"))
+            if len(blob) > 2000:
+                raise HTTPException(400, "UI preferences too large")
+            tr.ui_prefs = blob
         session.commit()
         return {"ok": True, "full_name": tr.full_name,
                 "notify": {"updates": bool(tr.notify_updates), "trading": bool(tr.notify_trading),
@@ -2364,6 +2422,7 @@ def admin_approve_kyc(trader_id: int):
             raise HTTPException(404, "Trader not found")
         tr.kyc_status = "approved"
         tr.kyc_reviewed_at = datetime.now(timezone.utc)
+        tr.kyc_reject_reason = None
         session.commit()
         notify.send("kyc_approved", tr.email, {"name": tr.full_name or tr.email})
         return {"approved": trader_id}
@@ -2371,19 +2430,26 @@ def admin_approve_kyc(trader_id: int):
         session.close()
 
 
+class KycRejectIn(BaseModel):
+    reason: str | None = None          # pokazywany traderowi (portal + mail)
+
+
 @app.post("/api/admin/kyc/{trader_id}/reject", dependencies=[Depends(auth.require_admin)])
-def admin_reject_kyc(trader_id: int):
+def admin_reject_kyc(trader_id: int, payload: KycRejectIn | None = None):
     """Odrzuca weryfikację — trader może poprawić dane i wysłać KYC ponownie."""
     session = SessionLocal()
     try:
         tr = session.get(Trader, trader_id)
         if not tr:
             raise HTTPException(404, "Trader not found")
+        powod = ((payload.reason if payload else None) or "").strip()[:200] or None
         tr.kyc_status = "rejected"
         tr.kyc_reviewed_at = datetime.now(timezone.utc)
+        tr.kyc_reject_reason = powod
         session.commit()
-        notify.send("kyc_rejected", tr.email, {"name": tr.full_name or tr.email})
-        return {"rejected": trader_id}
+        notify.send("kyc_rejected", tr.email,
+                    {"name": tr.full_name or tr.email, "reason": powod})
+        return {"rejected": trader_id, "reason": powod}
     finally:
         session.close()
 
@@ -2403,6 +2469,7 @@ def admin_reset_kyc(trader_id: int):
             raise HTTPException(400, "There is no KYC decision to revert")
         tr.kyc_status = "pending"
         tr.kyc_reviewed_at = None
+        tr.kyc_reject_reason = None
         session.commit()
         return {"reset": trader_id}
     finally:

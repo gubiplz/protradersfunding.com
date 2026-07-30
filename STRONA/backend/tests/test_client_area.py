@@ -834,6 +834,49 @@ def test_kyc_reject_i_historia_decyzji():
         assert wpis["status"] == "approved"
 
 
+def test_ui_prefs_zapisywane_na_koncie():
+    """PATCH /api/me przyjmuje ui_prefs (JSON, np. sortowanie tabel) i oddaje
+    je w /api/auth/me — preferencja trzyma się konta, nie przeglądarki."""
+    tid, h = _trader("uiprefs@test.pl", "Prefs Tester")
+    with TestClient(app) as c:
+        assert c.get("/api/auth/me", headers=h).json()["ui_prefs"] == {}
+        r = c.patch("/api/me", headers=h,
+                    json={"ui_prefs": {"sort": {"portal.orders": [2, -1]}}})
+        assert r.status_code == 200
+        assert (c.get("/api/auth/me", headers=h).json()["ui_prefs"]
+                == {"sort": {"portal.orders": [2, -1]}})
+        # cap 2000 znaków — zbyt duży blob odrzucamy zamiast ucinać
+        za_duzo = {"sort": {f"tabela-{i}": [i, 1] for i in range(300)}}
+        assert c.patch("/api/me", headers=h,
+                       json={"ui_prefs": za_duzo}).status_code == 400
+        # PATCH bez ui_prefs nie kasuje zapisanych preferencji
+        c.patch("/api/me", headers=h, json={"full_name": "Prefs Tester"})
+        assert (c.get("/api/auth/me", headers=h).json()["ui_prefs"]
+                == {"sort": {"portal.orders": [2, -1]}})
+        # izolacja: preferencje nie przeciekają między traderami
+        _tid2, h2 = _trader("uiprefs2@test.pl", "Prefs Dwa")
+        assert c.get("/api/auth/me", headers=h2).json()["ui_prefs"] == {}
+
+
+def test_kyc_reject_z_powodem_widocznym_dla_tradera():
+    """Powód odrzucenia KYC trafia do /api/auth/me (portal go pokazuje)
+    i jest czyszczony przy approve."""
+    tid, h = _trader("kyc-powod@test.pl", "Powod Kyc")
+    with TestClient(app) as c:
+        c.post("/api/me/kyc", headers=h, json={"full_name": "Powod Kyc",
+                                               "country": "PL", "id_type": "passport"})
+        r = c.post(f"/api/admin/kyc/{tid}/reject", headers=ADMIN_H,
+                   json={"reason": "Document expired"})
+        assert r.status_code == 200 and r.json()["reason"] == "Document expired"
+        me = c.get("/api/auth/me", headers=h).json()
+        assert me["kyc_status"] == "rejected"
+        assert me["kyc_reject_reason"] == "Document expired"
+
+        c.post(f"/api/admin/kyc/{tid}/approve", headers=ADMIN_H)
+        me = c.get("/api/auth/me", headers=h).json()
+        assert me["kyc_reject_reason"] is None
+
+
 def test_otwarte_pozycje_konta_widzi_tylko_wlasciciel():
     """GET /api/me/accounts/{id}/positions — tabela "Open trades" w portalu.
 

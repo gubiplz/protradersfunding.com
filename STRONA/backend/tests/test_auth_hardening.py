@@ -165,10 +165,15 @@ def test_migracja_loginu_admina_na_admin_at_admin():
 
     Sprzatanie na wstepie: test_admin_login tez zaklada konto "admin", a kazdy
     `with TestClient(app)` odpala lifespan (i te migracje) — bez czyszczenia
-    admin@admin bywa juz zajete i asercje zaleza od kolejnosci plikow."""
+    admin@admin bywa juz zajete i asercje zaleza od kolejnosci plikow.
+    Zajete konta PRZEMIANOWUJEMY zamiast kasowac: wczesniejsze pliki zostawiaja
+    na nich wiersze z FK (telemetria logowan, powiadomienia) i twardy DELETE
+    wywala sie na FOREIGN KEY constraint."""
     s = SessionLocal()
-    (s.query(Trader).filter(Trader.email.in_(("admin", "admin@admin")))
-     .delete(synchronize_session=False))
+    for i, stary in enumerate(s.query(Trader)
+                              .filter(Trader.email.in_(("admin", "admin@admin"))).all()):
+        stary.email = f"zwolniony-admin-{i}@test.pl"
+        stary.is_admin = False          # migracja nie moze go widziec
     s.add(Trader(email="admin", password_hash=auth.hash_password("stare-haslo"),
                  full_name="Administrator", is_admin=True,
                  referral_code=auth.secrets.token_hex(3)))

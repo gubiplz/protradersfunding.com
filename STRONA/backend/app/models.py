@@ -57,6 +57,9 @@ class Trader(Base):
     notify_trading: Mapped[bool] = mapped_column(Boolean, default=True)     # fazy/funded/breach
     notify_payouts: Mapped[bool] = mapped_column(Boolean, default=True)
     notify_marketing: Mapped[bool] = mapped_column(Boolean, default=True)   # nic nie wysylamy, ale pref istnieje
+    # Preferencje UI (JSON jako string, np. {"sort": {...}}) — zapisywane z
+    # portalu i panelu admina przez PATCH /api/me, trzymane na koncie.
+    ui_prefs: Mapped[str | None] = mapped_column(String(2000), nullable=True)
 
     # Weryfikacja adresu e-mail: nowi traderzy dostają 6-cyfrowy kod przy
     # rejestracji; istniejące konta są uznane za zweryfikowane (DEFAULT TRUE).
@@ -72,6 +75,9 @@ class Trader(Base):
     credits_usd: Mapped[float] = mapped_column(Float, default=0.0)
     kyc_submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     kyc_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Powód odrzucenia KYC — pokazywany traderowi w portalu i w mailu;
+    # czyszczony przy approve/reset.
+    kyc_reject_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     # engagement (portal mobilny): dzienny check-in + mystery reveal
     checkin_streak: Mapped[int] = mapped_column(Integer, default=0)

@@ -144,8 +144,9 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
         ),
         "kyc_rejected": (
             "Identity verification — action needed",
-            f"{name}, we could not verify your identity with the documents provided. "
-            f"Please review your details and submit the verification again from your dashboard.",
+            f"{name}, we could not verify your identity with the documents provided."
+            + (f"\n\nReason: {ctx.get('reason')}" if ctx.get("reason") else "")
+            + "\n\nPlease review your details and submit the verification again from your dashboard.",
         ),
         "ticket_reply": (
             f"Support replied to your ticket #{ctx.get('ticket_id')} 💬",
@@ -377,8 +378,9 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
     elif event == "kyc_rejected":
         parts = [
             _head_html("Verification", "Verification needs another look",
-                       f"{name}, we could not verify your identity with the documents provided. "
-                       f"Please review your details and submit the verification again."),
+                       f"{name}, we could not verify your identity with the documents provided."
+                       + (f" Reason: {ctx.get('reason')}." if ctx.get("reason") else "")
+                       + " Please review your details and submit the verification again."),
             _button_html("Retry Verification", f"{portal}?view=kyc"),
         ]
     elif event == "password_reset":

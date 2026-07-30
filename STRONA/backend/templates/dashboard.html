@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="/static/css/admin.css?v={{ asset_v }}">
   <script src="/static/lib/chart.umd.min.js"></script>
 <script src="/static/js/equity-chart.js?v={{ asset_v }}"></script>
+<script src="/static/js/sortable.js?v={{ asset_v }}"></script>
 </head>
 <body class="has-botnav">
 
@@ -181,6 +182,8 @@ function toggleTheme(){
   paintTheme();
   /* Charts snapshot token colors at render time — repaint the active view. */
   if(typeof VIEW!=='undefined')go(VIEW);
+  /* The account slide-over lives outside #view — redraw its chart too. */
+  if(window._oAcc&&document.getElementById('o-chart'))drawAdminChart();
 }
 paintTheme();
 
@@ -278,10 +281,10 @@ const VIEWS={
 
  async payouts(){
   const rows=await api('/api/admin/payout-requests');
-  $('view').innerHTML=rows.length?`<div class="tbl-wrap"><table class="tbl">
-    <thead><tr><th>Date</th><th>Account</th><th>Trader</th><th>Profit</th><th>Trader share</th><th>Method</th><th>Status</th><th></th></tr></thead>
+  $('view').innerHTML=rows.length?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="admin.payouts">
+    <thead><tr><th>Date</th><th>Account</th><th>Trader</th><th>Profit</th><th>Trader share</th><th>Method</th><th>Status</th><th class="no-sort"></th></tr></thead>
     <tbody>${rows.map(r=>`<tr>
-      <td class="muted">${dstr(r.ts)}</td><td class="num">${esc(r.account_login||'—')}</td>
+      <td class="muted" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td><td class="num">${esc(r.account_login||'—')}</td>
       <td>${esc(r.trader_email||'—')}</td>
       <td class="num">$${fmt(r.profit_amount)}</td><td class="num up">$${fmt(r.trader_share)}</td>
       <td>${(()=>{const d=r.details||{};
@@ -330,10 +333,10 @@ const VIEWS={
   const histTbl=hist.length?`<div class="sec-card" style="margin-top:18px">
     <h3>History</h3>
     <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Past verification decisions.</p>
-    <div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>Reviewed</th><th>Trader</th><th>Country</th><th>Document</th><th>Status</th><th>Documents</th><th></th></tr></thead>
+    <div class="tbl-wrap"><table class="tbl sortable" data-tkey="admin.kyc">
+      <thead><tr><th>Reviewed</th><th>Trader</th><th>Country</th><th>Document</th><th>Status</th><th class="no-sort">Documents</th><th class="no-sort"></th></tr></thead>
       <tbody>${hist.map(t=>`<tr>
-        <td class="muted">${t.reviewed_at?dstr(t.reviewed_at):'—'}</td>
+        <td class="muted" data-sort="${esc(t.reviewed_at||'')}">${t.reviewed_at?dstr(t.reviewed_at):'—'}</td>
         <td>${esc(t.full_name||'—')}<div class="muted" style="font-size:11.5px">${esc(t.email)}</div></td>
         <td class="muted">${esc(t.country||'—')}</td>
         <td class="muted">${esc(t.id_type||'—')} ${esc(t.id_number||t.doc_ref||'')}</td>
@@ -383,13 +386,13 @@ const VIEWS={
     ${waiting.length?`<div class="sec-card" style="border-color:var(--gold-line);background:var(--gold-bg)">
       <h3>${waiting.length} paid ${waiting.length===1?'order is':'orders are'} waiting for an MT5 account</h3>
       <p class="muted" style="font-size:12.5px;margin:6px 0 12px">These challenges are paid for but not tradable yet — the pool has no free account of that size. Add one below and it is assigned automatically.</p>
-      <div class="tbl-wrap"><table class="tbl">
+      <div class="tbl-wrap"><table class="tbl sortable" data-tkey="admin.pool-waiting">
         <thead><tr><th>Account</th><th>Trader</th><th>Needs size</th><th>Waiting since</th></tr></thead>
         <tbody>${waiting.map(w=>`<tr>
           <td class="num">#${w.account_id}</td>
           <td>${esc(w.trader_email||'—')}</td>
           <td class="num"><b>$${fmt0(w.account_size)}</b></td>
-          <td class="muted">${w.created_at?dstr(w.created_at):'—'}</td></tr>`).join('')}
+          <td class="muted" data-sort="${esc(w.created_at||'')}">${w.created_at?dstr(w.created_at):'—'}</td></tr>`).join('')}
         </tbody></table></div>
       <p class="muted" style="font-size:12.5px;margin-top:10px">Missing: ${Object.entries(missingBySize).map(([sizeKey,cnt])=>`<b>${cnt}×</b> $${fmt0(Number(sizeKey))}`).join(', ')}</p>
     </div>`:''}
@@ -430,8 +433,8 @@ const VIEWS={
       <div class="stat-tile"><div class="tile-ic blue">${ICO.layers}</div>
         <div><div class="lbl">Total in pool</div><div class="val">${rows.length}</div></div></div>
     </div>
-    ${rows.length?`<div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>#</th><th>Login</th><th>Password</th><th>Server</th><th>Size</th><th>State</th><th>Assigned to</th><th>When</th><th></th></tr></thead>
+    ${rows.length?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="admin.pool">
+      <thead><tr><th>#</th><th>Login</th><th class="no-sort">Password</th><th>Server</th><th>Size</th><th>State</th><th>Assigned to</th><th>When</th><th class="no-sort"></th></tr></thead>
       <tbody>${rows.map(p=>`<tr>
         <td class="num">${p.id}</td><td class="num">${esc(p.platform_login)}${p.simulated?'<div class="muted" style="font-size:10.5px;letter-spacing:.06em">SIMULATED</div>':''}</td>
         <td>${p.platform_password?`<span class="mono" style="cursor:pointer" title="Click to reveal"
@@ -441,11 +444,11 @@ const VIEWS={
           :p.claimed?`<span class="status pending"><span class="dot"></span>assigned</span>`
           :'<span class="status funded"><span class="dot"></span>free</span>'}</td>
         <td>${p.claimed?`${esc(p.trader_email||'—')}<div class="muted" style="font-size:11.5px">${p.retired_reason?esc(p.retired_reason)+' — not reusable':`account #${p.claimed_by_account_id}${p.account_status?' · '+esc(p.account_status):''}`}</div>`:'<span class="muted">—</span>'}</td>
-        <td class="muted">${p.claimed_at?dstr(p.claimed_at):'—'}</td>
+        <td class="muted" data-sort="${esc(p.claimed_at||'')}">${p.claimed_at?dstr(p.claimed_at):'—'}</td>
         <td style="white-space:nowrap">
           <button class="btn-o sm" onclick="editPool(${p.id})">Edit</button>
           ${p.claimed?'':` <button class="btn-o sm" onclick="delPool(${p.id},'${esc(p.platform_login)}')">Remove</button>`}</td></tr>
-        <tr id="pool-edit-${p.id}" style="display:none"><td colspan="9" style="background:var(--bg)">
+        <tr id="pool-edit-${p.id}" class="tr-sub" style="display:none"><td colspan="9" style="background:var(--bg)">
           <div class="pool-form" style="margin:6px 0">
             <input id="ed-login-${p.id}" class="inp" value="${esc(p.platform_login)}" placeholder="MT5 login">
             <input id="ed-pass-${p.id}" class="inp" placeholder="New password (leave empty to keep)">
@@ -490,7 +493,7 @@ const VIEWS={
   const items=d.items||[];
   $('view').innerHTML=items.length?`
     <p class="muted" style="font-size:12.5px;margin-bottom:10px">Click a row to see the individual events; click a trader email inside to see everything that user did.</p>
-    <div class="tbl-wrap"><table class="tbl">
+    <div class="tbl-wrap"><table class="tbl sortable" data-tkey="admin.telemetry">
     <thead><tr><th>Day</th><th>Event</th><th style="text-align:right">Count</th>
       <th style="text-align:right">Unique traders</th></tr></thead>
     <tbody>${items.map(i=>`<tr class="clickable" onclick="openTelemetryDetail('${esc(i.day)}','${esc(i.name)}')">
@@ -520,7 +523,7 @@ function renderAccounts(){
       <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._accFilter='${k}';renderAccounts()">${l}</button>`).join('')}</div>
       <span class="count-pill">${rows.length} of ${list.length}</span>
     </div>
-    ${rows.length?`<div class="tbl-wrap"><table class="tbl">
+    ${rows.length?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="admin.accounts">
       <thead><tr><th>Login</th><th>Trader</th><th>Plan</th><th>Phase</th><th>Status</th>
         <th style="text-align:right">Balance</th><th style="text-align:right">Equity</th><th style="text-align:right">P&amp;L</th>
         <th>Daily</th><th>Max DD</th><th>Created</th><th>Paid</th></tr></thead>
@@ -534,10 +537,10 @@ function renderAccounts(){
           <td class="num" style="text-align:right">$${fmt(a.balance)}</td>
           <td class="num" style="text-align:right">$${fmt(a.equity)}</td>
           <td class="num ${(m.profit_pct||0)>=0?'up':'down'}" style="text-align:right">${(m.profit_pct||0)>=0?'+':''}${(m.profit_pct||0).toFixed(2)}%</td>
-          <td>${mini(m.daily_loss_used_pct)}</td>
-          <td>${mini(m.overall_dd_used_pct)}</td>
-          <td class="muted" style="white-space:nowrap">${a.created_at?dstr(a.created_at):'—'}</td>
-          <td class="muted" style="white-space:nowrap">${a.paid_at?dstr(a.paid_at):'—'}</td></tr>`}).join('')}
+          <td data-sort="${(m.daily_loss_used_pct||0).toFixed(2)}">${mini(m.daily_loss_used_pct)}</td>
+          <td data-sort="${(m.overall_dd_used_pct||0).toFixed(2)}">${mini(m.overall_dd_used_pct)}</td>
+          <td class="muted" style="white-space:nowrap" data-sort="${esc(a.created_at||'')}">${a.created_at?dstr(a.created_at):'—'}</td>
+          <td class="muted" style="white-space:nowrap" data-sort="${esc(a.paid_at||'')}">${a.paid_at?dstr(a.paid_at):'—'}</td></tr>`}).join('')}
       </tbody></table></div>`
       :`<div class="empty"><h3>No accounts match</h3><p>Try a different search or filter.</p></div>`}`;
 }
@@ -566,10 +569,10 @@ function renderOrders(){
         oninput="window._ordQ=this.value;renderOrders();document.getElementById('ord-q').focus()">
       <span class="count-pill">${rows.length} of ${list.length}</span>
     </div>
-    ${rows.length?`<div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>#</th><th>Date</th><th>Trader</th><th>Product</th><th>Amount</th><th>Provider</th><th>Status</th><th>Account</th><th></th></tr></thead>
+    ${rows.length?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="admin.orders">
+      <thead><tr><th>#</th><th>Date</th><th>Trader</th><th>Product</th><th>Amount</th><th>Provider</th><th>Status</th><th>Account</th><th class="no-sort"></th></tr></thead>
       <tbody>${rows.map(o=>`<tr>
-        <td class="num">${o.id}</td><td class="muted">${dstr(o.created_at)}</td>
+        <td class="num">${o.id}</td><td class="muted" data-sort="${esc(o.created_at||'')}">${dstr(o.created_at)}</td>
         <td>${esc(o.trader_email||'—')}</td><td>${esc(o.product_key)}</td>
         <td class="num">$${fmt(o.amount_usd)}${o.coupon?` <span class="up" style="font-size:11px">(${esc(o.coupon)})</span>`:''}</td>
         <td class="muted">${esc(o.provider)}</td>
@@ -612,7 +615,16 @@ async function openAccount(id){
       ${a.bot_enabled?`<span class="status ${a.bot_paused?'pending':'funded'}" style="text-transform:none">${a.bot_paused?'⏸ Trade BOT paused':'🤖 Trade BOT'}</span>`:''}
     </div>
     ${a.breach_reason?`<div class="breach-item">Breached: ${esc(a.breach_reason)}</div>`:''}
-    <div class="panel"><div style="height:170px;position:relative"><canvas id="o-chart"></canvas></div></div>
+    <div class="panel">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+        <div class="seg-mini"><span>Objective lines</span>
+          <span class="sw">
+            <button data-on="1" class="${objLinesOn()?'on':''}" onclick="setObjLinesAdmin(true)">On</button>
+            <button data-on="0" class="${objLinesOn()?'':'on'}" onclick="setObjLinesAdmin(false)">Off</button>
+          </span></div>
+      </div>
+      <div style="height:220px;position:relative"><canvas id="o-chart"></canvas></div>
+    </div>
     <div class="sec-card" style="margin:0">
       <h3 style="font-size:15px;margin-bottom:10px">Objectives</h3>
       <div class="progress-list">
@@ -731,9 +743,31 @@ async function openAccount(id){
   renderCerts(a.id);
   renderPayouts(a.id);
   renderHistory(a.id);
-  const c=a.equity_curve||[];
+  window._oAcc=a;
+  drawAdminChart();
+}
+
+/* ---------- objective lines on the slide-over chart (same as the portal) ---------- */
+function objLinesOn(){try{return localStorage.getItem('pf_obj_lines')!=='off'}catch(e){return true}}
+function setObjLinesAdmin(on){
+  try{localStorage.setItem('pf_obj_lines',on?'on':'off')}catch(e){}
+  document.querySelectorAll('.seg-mini button').forEach(b=>b.classList.toggle('on',(b.dataset.on==='1')===on));
+  drawAdminChart();
+}
+function adminDetailLines(){
+  const a=window._oAcc; if(!a)return [];
+  const m=a.metrics||{},th=chartTheme(),L=[];
+  if(m.target_equity)L.push({y:m.target_equity,label:'Target',color:th.green});
+  if(m.daily_floor)L.push({y:m.daily_floor,label:'Daily loss limit',color:th.gold});
+  if(m.overall_floor)L.push({y:m.overall_floor,label:'Max loss',color:th.red});
+  L.push({y:a.initial_balance,label:'Account size',color:th.dim});
+  return L;
+}
+function drawAdminChart(){
+  const a=window._oAcc,c=(a&&a.equity_curve)||[];
   if(window._oChart){window._oChart.destroy();window._oChart=null}
-  if(c.length>1)window._oChart=new Chart($('o-chart'),equityChartConfig(c));
+  if(!document.getElementById('o-chart')||c.length<2)return;
+  window._oChart=new Chart($('o-chart'),equityChartConfig(c,{lines:objLinesOn()?adminDetailLines():[]}));
 }
 function bar(label,pct,danger,suffix){const p=Math.min(100,Math.max(0,pct||0));
   const cls=danger?(p>=100?'bad':p>=70?'warn':'mid'):'ok';
@@ -791,10 +825,53 @@ async function makeAchievementCert(id,kind){
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
+/* ---------- shared reason picker ----------
+   Every admin action that needs a trader-facing reason goes through this modal:
+   pick a preset from the list or choose Custom… and type your own.
+   Resolves with the reason string, or null when the admin cancels. */
+function askReason(opts){
+  return new Promise(resolve=>{
+    const box=document.createElement('div');
+    box.id='reason-modal';box.className='modal-wrap';
+    const done=v=>{box.remove();resolve(v)};
+    box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-head"><h3>${opts.title}</h3>
+        <button class="icon-btn" id="rs-x" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+      ${opts.hint?`<p class="muted" style="font-size:12.5px;margin-bottom:14px">${opts.hint}</p>`:''}
+      <div class="stack">
+        <div><label class="muted" style="font-size:12px">Reason (shown to the trader)</label>
+          <select id="rs-sel" class="inp">
+            ${opts.presets.map(p=>`<option>${p}</option>`).join('')}
+            <option value="__custom__">Custom…</option></select></div>
+        <textarea id="rs-txt" class="inp hidden" rows="3" maxlength="200"
+          placeholder="Write your own reason"></textarea>
+        <button class="btn-p lg" style="width:100%${opts.danger?';background:var(--red)':''}"
+          id="rs-go">${opts.confirmLabel||'Confirm'}</button>
+      </div></div>`;
+    box.onclick=()=>done(null);
+    box.querySelector('#rs-x').onclick=()=>done(null);
+    const sel=box.querySelector('#rs-sel'),txt=box.querySelector('#rs-txt');
+    sel.onchange=()=>{const c=sel.value==='__custom__';
+      txt.classList.toggle('hidden',!c); if(c)txt.focus()};
+    box.querySelector('#rs-go').onclick=()=>{
+      const custom=sel.value==='__custom__';
+      const v=custom?(txt.value||'').trim():sel.value;
+      if(custom&&!v){txt.focus();return}
+      done(v)};
+    document.body.appendChild(box);
+  });
+}
+
 /* ---------- payouts + certificates ---------- */
 async function breachAccount(id){
-  const breachReason=prompt('Breach this account?\n\nReason shown to the trader (optional):','');
-  if(breachReason===null)return;   // Cancel — while an empty string is allowed
+  const breachReason=await askReason({
+    title:'Breach this account',danger:true,confirmLabel:'Breach account',
+    hint:'The account is closed as <b>failed</b> and the reason below is shown to the trader in the portal and by e-mail.',
+    presets:['Daily loss limit exceeded','Maximum drawdown exceeded',
+      'Prohibited trading strategy','Copy trading between accounts',
+      'News trading violation','Account sharing','Closed by the risk desk']});
+  if(breachReason===null)return;   // Cancel
   try{const r=await api(`/api/admin/accounts/${id}/breach`,{method:'POST',
       body:JSON.stringify({reason:breachReason})});
     toast(`Account closed: ${r.reason}`,'ok',8000); openAccount(id);
@@ -918,8 +995,13 @@ async function deleteTrader(tid,who){
 
 /* ---------- actions ---------- */
 async function rejectPayout(id){
-  const reason=prompt('Reject this payout request?\n\nReason shown to the trader (optional):','');
-  if(reason===null)return;   // Cancel — an empty reason is allowed
+  const reason=await askReason({
+    title:'Reject this payout request',danger:true,confirmLabel:'Reject request',
+    hint:'The trader sees the reason under the request status and gets it by e-mail.',
+    presets:['Profit target not met','Minimum trading days not met',
+      'Open positions at the time of the request','Trading activity under review',
+      'KYC verification incomplete']});
+  if(reason===null)return;   // Cancel
   try{await api(`/api/admin/payout-requests/${id}/reject`,{method:'POST',
       body:JSON.stringify({reason})});
     toast('Request rejected.','ok');go('payouts')}
@@ -937,8 +1019,14 @@ async function approveKyc(tid){
   catch(e){toast('Error: '+e.message,'err')}
 }
 async function rejectKyc(tid){
-  if(!confirm('Reject this verification?\n\nThe trader will be asked to submit their KYC again.'))return;
-  try{await api(`/api/admin/kyc/${tid}/reject`,{method:'POST'});toast('KYC rejected.','ok');go('kyc')}
+  const reason=await askReason({
+    title:'Reject this verification',danger:true,confirmLabel:'Reject KYC',
+    hint:'The trader is asked to submit their KYC again — the reason shows in their portal and in the e-mail.',
+    presets:['Document unreadable or blurry','Document expired',
+      'Name does not match the account','Incomplete documents']});
+  if(reason===null)return;   // Cancel
+  try{await api(`/api/admin/kyc/${tid}/reject`,{method:'POST',
+      body:JSON.stringify({reason})});toast('KYC rejected.','ok');go('kyc')}
   catch(e){toast('Error: '+e.message,'err')}
 }
 async function revertKyc(tid){

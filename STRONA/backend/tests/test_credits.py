@@ -29,8 +29,10 @@ LICZNIK = iter(range(1000))
 def _trader(credits: float = 0.0) -> int:
     email = f"credits{next(LICZNIK)}@test.pl"
     s = SessionLocal()
+    # referral_code z pełnego prefiksu maila — obcięcie do 8 znaków kolidowało
+    # przy 10+ traderach w pliku (credits1 vs credits12 -> "CREDITS1")
     tr = Trader(email=email, password_hash=auth.hash_password("haslo12345"),
-                full_name="Credit Tester", referral_code=email[:8].upper(),
+                full_name="Credit Tester", referral_code=email.split("@")[0].upper(),
                 credits_usd=credits)
     s.add(tr); s.commit(); tid = tr.id; s.close()
     return tid
@@ -166,6 +168,85 @@ def test_korekta_w_dol_bez_powiadomienia(monkeypatch):
     assert (s.query(Notification)
             .filter(Notification.trader_id == tid).count()) == 0
     s.close()
+
+
+def test_preview_liczy_tak_samo_jak_checkout():
+    """GET /api/checkout/preview = dokładnie ta sama matematyka co realny
+    checkout (kupon -> weekend -> kredyty na końcu)."""
+    tid = _trader(credits=100)
+    token = auth.make_token(tid)
+    r = client.get("/api/checkout/preview?product_key=2step-25k&coupon=WELCOME10"
+                   "&weekend=1&use_credits=1",
+                   headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200
+    q = r.json()
+    # 249 * 0.9 = 224.1; +199 weekend = 423.1; -100 kredytu = 323.1
+    assert q["plan_price_usd"] == 249 and q["discount_usd"] == 24.9
+    assert q["weekend_fee_usd"] == 199 and q["credits_used"] == 100
+    assert q["total_due_usd"] == 323.1
+    s = SessionLocal()
+    tr = s.get(Trader, tid)
+    res = billing.create_checkout(s, tr, "2step-25k", "WELCOME10", weekend_trading=True)
+    order = s.get(Order, res["order_id"])
+    assert order.amount_usd == q["total_due_usd"] and order.credits_used == 100
+    s.close()
+
+
+def test_use_credits_false_zostawia_saldo():
+    """Trader może zostawić kredyty na później — checkout ich wtedy nie tyka."""
+    tid = _trader(credits=100)
+    token = auth.make_token(tid)
+    q = client.get("/api/checkout/preview?product_key=2step-25k&use_credits=0",
+                   headers={"Authorization": f"Bearer {token}"}).json()
+    assert q["credits_used"] == 0 and q["total_due_usd"] == 249
+    s = SessionLocal()
+    tr = s.get(Trader, tid)
+    res = billing.create_checkout(s, tr, "2step-25k", None, use_credits=False)
+    order_id = res["order_id"]
+    order = s.get(Order, order_id)
+    assert order.amount_usd == 249 and order.credits_used == 0
+    billing.mock_complete(s, order_id, tid)
+    s.close()
+    assert _saldo(tid) == 100          # saldo nietknięte po domknięciu płatności
+    s = SessionLocal()
+    assert (s.query(CreditLedger)
+            .filter(CreditLedger.trader_id == tid, CreditLedger.amount < 0).count()) == 0
+    s.close()
+
+
+def test_preview_guard_minimum_stripe():
+    """Resztówka poniżej $0.50 zostaje na saldzie zamiast wywracać Stripe."""
+    tid = _trader(credits=98.8)
+    token = auth.make_token(tid)
+    q = client.get("/api/checkout/preview?product_key=2step-10k",   # $99
+                   headers={"Authorization": f"Bearer {token}"}).json()
+    assert q["credits_used"] == 98.5 and q["total_due_usd"] == 0.5
+
+
+def test_api_me_credits_saldo_i_historia():
+    tid = _trader()
+    token = auth.make_token(tid)
+    client.post(f"/api/admin/traders/{tid}/credits", headers=ADMIN_H,
+                json={"amount": 150, "note": "Contest prize"})
+    s = SessionLocal()
+    tr = s.get(Trader, tid)
+    res = billing.create_checkout(s, tr, "2step-10k", None)   # $99, w pełni pokryte
+    assert res.get("free") is True
+    s.close()
+    r = client.get("/api/me/credits", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["balance_usd"] == 51
+    kwoty = [w["amount"] for w in d["ledger"]]
+    assert kwoty == [-99, 150]                       # najnowsze pierwsze
+    assert d["ledger"][1]["note"] == "Contest prize"
+    assert d["ledger"][0]["order_id"] == res["order_id"]
+    # cudzy ledger niewidoczny, bez tokenu 401
+    obcy = _trader()
+    obcy_token = auth.make_token(obcy)
+    assert client.get("/api/me/credits",
+                      headers={"Authorization": f"Bearer {obcy_token}"}).json()["ledger"] == []
+    assert client.get("/api/me/credits").status_code == 401
 
 
 def test_pref_updates_off_wycisza_kanal(monkeypatch):

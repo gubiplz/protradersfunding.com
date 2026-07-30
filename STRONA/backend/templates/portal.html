@@ -20,6 +20,7 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
 <script src="/static/lib/chart.umd.min.js"></script>
 <script src="/static/lib/gsap.min.js"></script>
 <script src="/static/js/equity-chart.js?v={{ asset_v }}"></script>
+<script src="/static/js/sortable.js?v={{ asset_v }}"></script>
 <script src="/static/js/reward-fx.js?v={{ asset_v }}"></script>
 </head>
 <body>
@@ -1013,7 +1014,7 @@ const VIEWS={
         <div><div class="lbl">Updates</div><div class="val" style="font-size:17px">Live</div><div class="sub">all-time ranking</div></div></div>
     </div>
     <div class="podium">${podium}</div>
-    ${b.length>3?`<div class="tbl-wrap"><table class="tbl">
+    ${b.length>3?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="portal.board">
       <thead><tr><th style="width:52px">#</th><th>Trader</th><th>Account</th><th>Stage</th><th style="text-align:right">Profit</th></tr></thead>
       <tbody>`+b.slice(3).map((r,i)=>`<tr>
         <td class="num muted">${String(i+4).padStart(2,'0')}</td>
@@ -1284,10 +1285,10 @@ const VIEWS={
       ${funded.map(a=>{const av=Math.max(0,(a.balance-a.initial_balance)*(a.profit_split_pct||80)/100);
         return `<button class="btn-o sm" onclick="openPayoutModal(${a.id},${av.toFixed(2)})">${esc(a.login)} · $${fmt(av)} available</button>`}).join('')}
     </div>`:''}
-    ${data.requests.length?`<div class="tbl-wrap"><table class="tbl">
+    ${data.requests.length?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="portal.payout-req">
       <thead><tr><th>Date</th><th>Account</th><th>Profit</th><th>Requested</th><th>Method</th><th>Status</th></tr></thead>
       <tbody>`+data.requests.map(r=>`<tr>
-        <td class="muted">${dstr(r.ts)}</td><td class="num">${esc(r.account)}</td>
+        <td class="muted" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td><td class="num">${esc(r.account)}</td>
         <td class="num">$${fmt(r.profit_amount)}</td><td class="num">$${fmt(r.trader_share)}</td>
         <td class="muted">${esc(payoutMethodLabel(r.method))}</td>
         <td><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending':'failed'}"><span class="dot"></span>${esc(r.status)}</span>
@@ -1298,10 +1299,10 @@ const VIEWS={
     ${(data.history||[]).length?`<div class="sec-card" style="margin-top:18px">
       <h3>Payout history</h3>
       <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Rewards already paid out to you.</p>
-      <div class="tbl-wrap"><table class="tbl">
-        <thead><tr><th>Date</th><th>Account</th><th>Account profit</th><th>Paid to you</th><th>Method</th><th></th></tr></thead>
+      <div class="tbl-wrap"><table class="tbl sortable" data-tkey="portal.payout-hist">
+        <thead><tr><th>Date</th><th>Account</th><th>Account profit</th><th>Paid to you</th><th>Method</th><th class="no-sort"></th></tr></thead>
         <tbody>${data.history.map(h=>`<tr>
-          <td class="muted">${dstr(h.ts)}</td>
+          <td class="muted" data-sort="${esc(h.ts||'')}">${dstr(h.ts)}</td>
           <td class="num">${esc(h.account)}</td>
           <td class="num">$${fmt(h.profit_amount)}</td>
           <td class="num up">+$${fmt(h.trader_share)}</td>
@@ -1314,10 +1315,25 @@ const VIEWS={
  },
 
  async orders(){
-  const os=await api('/api/orders');
+  const [os,cr]=await Promise.all([api('/api/orders'),api('/api/me/credits').catch(()=>null)]);
   window._orders=os;
-  $('view').innerHTML=`<div class="tbl-wrap"><table class="tbl">
-    <thead><tr><th>#</th><th>Product</th><th>Amount</th><th>Status</th><th>Account</th><th></th></tr></thead>
+  /* Store credits card shows up only once the trader has any history — a
+     zero-balance wall of empty ledger would just be noise. */
+  const credits=(cr&&(cr.balance_usd>0||(cr.ledger||[]).length))?`
+    <div class="sec-card" style="margin-top:18px">
+      <h3>Store credits</h3>
+      <p class="muted" style="font-size:12.5px;margin:4px 0 12px">1 credit = $1 — applied to your
+        next challenge at checkout. Current balance: <b class="mono">$${fmt(cr.balance_usd)}</b></p>
+      <div class="tbl-wrap"><table class="tbl sortable" data-tkey="portal.credits">
+        <thead><tr><th>Date</th><th>Amount</th><th>Note</th><th>Order</th></tr></thead>
+        <tbody>${cr.ledger.map(l=>`<tr>
+          <td class="muted" data-sort="${esc(l.ts||'')}">${dstr(l.ts)}</td>
+          <td class="num ${l.amount>=0?'up':'down'}">${l.amount>=0?'+':'−'}$${fmt(Math.abs(l.amount))}</td>
+          <td class="muted">${esc(l.note||(l.amount<0?'Used at checkout':'Credit granted'))}</td>
+          <td class="num">${l.order_id?'#'+l.order_id:'—'}</td></tr>`).join('')}</tbody></table></div>
+    </div>`:'';
+  $('view').innerHTML=`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="portal.orders">
+    <thead><tr><th>#</th><th>Product</th><th>Amount</th><th>Status</th><th>Account</th><th class="no-sort"></th></tr></thead>
     <tbody>`+(os.map(o=>`<tr>
       <td class="num">${o.id}</td><td>${esc(o.product_label||o.product_key)}</td>
       <td class="num">$${fmt(orderAmount(o))}${o.coupon?` <span class="up" style="font-size:11px">(${esc(o.coupon)})</span>`:''}</td>
@@ -1326,9 +1342,9 @@ const VIEWS={
       <td style="text-align:right;white-space:nowrap">
         ${o.account?`<button class="btn-o sm" id="cbtn-${o.id}" onclick="toggleOrderCreds(${o.id})">${ICO.key} Show credentials</button> `:''}
         ${o.status==='paid'?`<button class="btn-o sm" onclick="openInvoice(${o.id})">${ICO.print} Invoice</button>`:''}</td></tr>
-      ${o.account?`<tr class="hidden" id="crow-${o.id}"><td colspan="6" class="sub-row">${credsBlock(o.account,true)}</td></tr>`:''}`)
+      ${o.account?`<tr class="hidden tr-sub" id="crow-${o.id}"><td colspan="6" class="sub-row">${credsBlock(o.account,true)}</td></tr>`:''}`)
       .join('')||'<tr><td colspan="6" class="muted" style="padding:26px 18px">No orders yet</td></tr>')+`
-    </tbody></table></div>`;
+    </tbody></table></div>`+credits;
  },
 
  async kyc(){
@@ -1348,6 +1364,7 @@ const VIEWS={
   $('view').innerHTML=`
     ${s==='rejected'?`<div class="panel" style="max-width:760px;margin-bottom:14px;border-color:var(--red-line);background:var(--red-bg)">
       <b style="font-size:13.5px">Your previous verification was declined.</b>
+      ${ME.kyc_reject_reason?`<p style="font-size:12.5px;margin-top:4px"><b>Reason:</b> ${esc(ME.kyc_reject_reason)}</p>`:''}
       <p class="muted" style="font-size:12.5px;margin-top:4px">Please double-check your details and documents, then submit again. Reach out via Support if you need help.</p>
     </div>`:''}
     <div class="sec-card" style="max-width:760px">
@@ -1798,13 +1815,11 @@ function openBuy(key){
         <button class="icon-btn" onclick="closeBuy()" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
       </div>
       <div class="plan-line">
-        <b class="mono" id="buy-total" style="color:var(--txt);font-size:16px">$${fmt0(p.price_usd+(new URLSearchParams(location.search).get('wt')==='1'?199:0))}</b>
-        · simulated capital <span id="buy-cap">$${fmt0(pfPromo()&&p.promo_upgrade_size?p.promo_upgrade_size:p.account_size)}</span> · split ${p.profit_split_pct}%
+        Simulated capital <span id="buy-cap">$${fmt0(pfPromo()&&p.promo_upgrade_size?p.promo_upgrade_size:p.account_size)}</span> · split ${p.profit_split_pct}%
       </div>
       ${p.promo_upgrade_size?`<div class="plan-promo" id="buy-promo" ${pfPromo()?'':'hidden'}><b>Upgrade Your Size</b> — you pay for the
         $${fmt0(p.account_size)} plan and we create a <b>$${fmt0(p.promo_upgrade_size)}</b> account.</div>`:''}
-      ${ME.credits_usd>0?`<div class="plan-promo"><b>Store credit</b> — $${fmt(Math.min(ME.credits_usd,p.price_usd))} of
-        your $${fmt(ME.credits_usd)} balance is deducted at checkout.</div>`:''}
+      <div class="quote-box" id="buy-quote"></div>
       <div class="note">Your MT5 demo account is registered with MetaQuotes <b>under these details</b> —
         they must be real; your credentials are delivered to them.</div>
       <div class="stack">
@@ -1815,15 +1830,20 @@ function openBuy(key){
         <input id="c-phone" placeholder="Phone, e.g. +14155551234" class="inp" value="${esc(ME.phone||'')}">
         <input id="c-email" class="inp" value="${esc(ME.email)}" disabled>
         <input id="c-coupon" placeholder="Coupon code (optional)" class="inp"
-          value="${esc(new URLSearchParams(location.search).get('coupon')||'')}">
+          value="${esc(new URLSearchParams(location.search).get('coupon')||'')}" oninput="quoteRefresh()">
         ${p.promo_upgrade_size?`<input id="c-promo" placeholder="Promo code (optional)" class="inp"
           value="${esc(pfPromo())}" onchange="promoCheck('${esc(p.key)}')">`:''}
         <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
-          <input type="checkbox" id="c-weekend" onchange="buyTotal(${p.price_usd})"
+          <input type="checkbox" id="c-weekend" onchange="quoteRefresh(true)"
             ${new URLSearchParams(location.search).get('wt')==='1'?'checked':''}
             style="width:15px;height:15px;accent-color:var(--acc)">
           <span><b>Weekend Trading</b> — 2 extra trading days/week <b>+$199</b></span>
         </label>
+        ${ME.credits_usd>0?`<label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
+          <input type="checkbox" id="c-usecr" checked onchange="quoteRefresh(true)"
+            style="width:15px;height:15px;accent-color:var(--acc)">
+          <span><b>Use my store credit</b> — $${fmt(ME.credits_usd)} available, 1 credit = $1</span>
+        </label>`:''}
         <p id="buy-err" class="form-err hidden"></p>
         <button id="buy-go" onclick="buy('${esc(p.key)}')" class="btn-p lg" style="width:100%">Buy &amp; create my account</button>
         <p class="hint">One-time payment · fee refunded with your first payout</p>
@@ -1831,11 +1851,41 @@ function openBuy(key){
     </div>`;
   box.onclick=closeBuy;
   document.body.appendChild(box);
+  window._buyKey=key;
+  quoteRefresh(true);
   setTimeout(()=>$('c-first').focus(),50);
 }
 
-function buyTotal(base){
-  const t=$('buy-total'); if(t)t.textContent='$'+fmt0(base+($('c-weekend').checked?199:0));
+/* Price breakdown in the buy modal, fed by /api/checkout/preview — the exact
+   math the real checkout will run (coupon -> weekend add-on -> store credit).
+   Display only: the server recomputes everything again at POST /api/checkout. */
+let _quoteT=null;
+function quoteRefresh(now){clearTimeout(_quoteT);_quoteT=setTimeout(quoteNow,now===true?0:400)}
+async function quoteNow(){
+  const p=PRODUCTS.find(x=>x.key===window._buyKey),box=$('buy-quote');
+  if(!p||!box)return;
+  const wk=!!($('c-weekend')&&$('c-weekend').checked);
+  const uc=!$('c-usecr')||$('c-usecr').checked;
+  let q=null;
+  try{
+    q=await api('/api/checkout/preview?product_key='+encodeURIComponent(p.key)
+      +'&coupon='+encodeURIComponent(($('c-coupon')?.value||'').trim())
+      +'&promo_code='+encodeURIComponent((($('c-promo')||{}).value||'').trim())
+      +'&weekend='+(wk?'1':'0')+'&use_credits='+(uc?'1':'0'));
+  }catch(e){
+    /* The preview must never block buying — fall back to the catalog price. */
+    if(e&&e.message&&/coupon/i.test(e.message))buyErr(e.message);
+    q={plan_price_usd:p.price_usd,discount_pct:0,discount_usd:0,
+       weekend_fee_usd:wk?199:0,credits_used:0,
+       total_due_usd:Math.round((p.price_usd+(wk?199:0))*100)/100};
+  }
+  const row=(l,v,cls)=>`<div class="q-row${cls?' '+cls:''}"><span>${l}</span><b class="mono">${v}</b></div>`;
+  let h=row('Plan fee','$'+fmt(q.plan_price_usd));
+  if(q.discount_usd>0)h+=row(`Coupon (−${q.discount_pct}%)`,'−$'+fmt(q.discount_usd),'good');
+  if(q.weekend_fee_usd>0)h+=row('Weekend Trading','+$'+fmt(q.weekend_fee_usd));
+  if(q.credits_used>0)h+=row('Store credit','−$'+fmt(q.credits_used),'good');
+  h+=`<div class="q-row total"><span>Total due</span><b class="mono" id="buy-total">$${fmt(q.total_due_usd)}</b></div>`;
+  box.innerHTML=h;
 }
 function closeBuy(){document.getElementById('buy-modal')?.remove()}
 
@@ -1878,7 +1928,8 @@ async function buy(key){
   try{
     const res=await api('/api/checkout',{method:'POST',
       body:JSON.stringify({product_key:key,coupon,promo_code:promo,first_name:first,last_name:last,phone,
-        weekend_trading:!!($('c-weekend')&&$('c-weekend').checked)})});
+        weekend_trading:!!($('c-weekend')&&$('c-weekend').checked),
+        use_credits:!$('c-usecr')||$('c-usecr').checked})});
     if(res.checkout_url && !res.mock){window.location=res.checkout_url;return;}  // real Stripe
     let prov=res;
     if(res.mock){prov=await api(`/api/checkout/${res.order_id}/mock-complete`,{method:'POST'});}
@@ -1993,11 +2044,11 @@ async function openAcc(id){
 
     ${pos.length?`<div class="sec-card">
       <h3 class="ot-title"><span class="live-dot"></span> Open trades</h3>
-      <div class="tbl-wrap" style="box-shadow:none;border:0;border-radius:0"><table class="tbl" style="min-width:520px">
+      <div class="tbl-wrap" style="box-shadow:none;border:0;border-radius:0"><table class="tbl sortable" data-tkey="portal.positions" style="min-width:520px">
         <thead><tr><th>Ticket</th><th>Open</th><th>Side</th><th>Volume</th><th>Symbol</th><th>P&amp;L</th></tr></thead>
         <tbody>${pos.map(t=>`<tr>
           <td class="num">${t.ticket}</td>
-          <td class="num">${t.opened_at?dstr(t.opened_at):'—'}</td>
+          <td class="num" data-sort="${esc(t.opened_at||'')}">${t.opened_at?dstr(t.opened_at):'—'}</td>
           <td><span class="tside ${t.side==='buy'?'buy':'sell'}">${esc(t.side)}</span></td>
           <td class="num">${(t.lots??0).toFixed(2)}</td>
           <td class="num">${esc(t.symbol)}</td>
@@ -2151,17 +2202,17 @@ function txTable(a,act){
   if(!rows.length)
     return '<p class="muted" style="font-size:13px">Nothing here yet — close a trade and it will show up.</p>';
   const bal=v=>v==null?'—':'$'+fmt(v);
-  return `<div class="scroll-x"><table class="tbl" style="min-width:560px">
+  return `<div class="scroll-x"><table class="tbl sortable" data-tkey="portal.history" style="min-width:560px">
     <thead><tr><th>Date</th><th>Instrument</th><th>Side</th><th style="text-align:right">Lots</th>
       <th style="text-align:right">P&amp;L</th><th style="text-align:right">Balance</th></tr></thead>
     <tbody>${rows.map(r=>r.kind==='payout'?`<tr>
-      <td class="muted">${dday(r.day)}</td>
+      <td class="muted" data-sort="${esc(r.day||'')}">${dday(r.day)}</td>
       <td style="font-weight:600">Payout<span class="muted" style="font-weight:400"> · $${fmt(r.trader_share)} to you</span></td>
       <td><span class="tside payout">out</span></td>
       <td class="num muted" style="text-align:right">—</td>
       <td class="num down" style="text-align:right">${money(r.pnl)}</td>
       <td class="num" style="text-align:right">${bal(r.balance)}</td></tr>`:`<tr>
-      <td class="muted">${dday(r.day)}</td>
+      <td class="muted" data-sort="${esc(r.day||'')}">${dday(r.day)}</td>
       <td class="num" style="font-weight:600">${esc(r.symbol)}</td>
       <td><span class="tside ${esc(r.side)}">${esc(r.side)}</span></td>
       <td class="num" style="text-align:right">${(r.lots||0).toFixed(2)}</td>

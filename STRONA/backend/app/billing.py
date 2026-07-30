@@ -61,8 +61,16 @@ def _lucky_active(trader: Trader, code: str) -> bool:
     return datetime.now(timezone.utc) <= datetime.fromisoformat(expires)
 
 
-def create_checkout(session, trader: Trader, product_key: str, coupon: str | None,
-                    promo_code: str | None = None, weekend_trading: bool = False) -> dict:
+def compute_price(session, trader: Trader, product_key: str, coupon: str | None,
+                  promo_code: str | None = None, weekend_trading: bool = False,
+                  use_credits: bool = True) -> dict:
+    """Jedyne miejsce, w ktorym liczy sie cena checkoutu.
+
+    Kolejnosc jest czescia kontraktu: kupon -> add-on Weekend -> kredyty
+    sklepowe na samym koncu. Z tej funkcji zyje zarowno create_checkout(), jak
+    i podglad GET /api/checkout/preview — dzieki temu modal zakupu nigdy nie
+    pokaze innej kwoty niz ta, ktora policzy realny checkout.
+    """
     product = session.query(Product).filter(Product.key == product_key, Product.active == True).first()  # noqa: E712
     if not product:
         raise HTTPException(404, "Product not found")
@@ -71,6 +79,7 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
     if code in catalog.LUCKY_CODES and not _lucky_active(trader, code):
         raise HTTPException(400, "This coupon is personal and no longer active")
     price, discount_pct = catalog.apply_coupon(product.price_usd, coupon)
+    plan_po_kuponie = price
     # Add-on Weekend Trading: stala kwota, POZA rabatem kuponu (kupon dotyczy planu).
     if weekend_trading:
         price = round(price + catalog.WEEKEND_ADDON_USD, 2)
@@ -81,24 +90,46 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
     # pola). `bogo_paid_key` mowi calej reszcie systemu, za co klient faktycznie
     # zaplacil — z tego zyja mail „we upgraded your allocation", baner i faktura.
     upgrade = catalog.upgrade_target(session, product) if catalog.promo_code_ok(promo_code) else None
-    prowizjonowany = upgrade or product
 
-    # Kredyty sklepowe (nadane przez admina): schodza z ceny NA KONCU — po
-    # kuponie i add-onie. Saldo tradera NIE jest tu ruszane; odejmuje je dopiero
+    # Kredyty sklepowe (nadane przez admina, 1 kredyt = 1 USD): schodza z ceny
+    # NA KONCU — po kuponie i add-onie. Trader moze je zostawic na pozniej
+    # (use_credits=False). Saldo NIE jest tu ruszane; odejmuje je dopiero
     # domkniecie platnosci (provisioning), wiec porzucony checkout nic nie pali.
-    kredyt = min(round(float(trader.credits_usd or 0), 2), price)
-    if kredyt > 0:
-        reszta = round(price - kredyt, 2)
-        # Stripe nie przyjmie kwoty ponizej $0.50 — resztowke zostawiamy na
-        # saldzie tradera zamiast wywracac checkout.
-        if 0 < reszta < 0.5:
-            kredyt = round(price - 0.5, 2)
-        price = round(price - kredyt, 2)
+    kredyt = 0.0
+    if use_credits:
+        kredyt = min(round(float(trader.credits_usd or 0), 2), price)
+        if kredyt > 0:
+            reszta = round(price - kredyt, 2)
+            # Stripe nie przyjmie kwoty ponizej $0.50 — resztowke zostawiamy na
+            # saldzie tradera zamiast wywracac checkout.
+            if 0 < reszta < 0.5:
+                kredyt = round(price - 0.5, 2)
+            price = round(price - kredyt, 2)
+
+    return {"product": product, "upgrade": upgrade,
+            "plan_price_usd": product.price_usd,
+            "discount_pct": discount_pct,
+            "discount_usd": round(product.price_usd - plan_po_kuponie, 2),
+            "weekend_fee_usd": (catalog.WEEKEND_ADDON_USD if weekend_trading else 0.0),
+            "credits_used": (kredyt if kredyt > 0 else 0.0),
+            "total_due_usd": price,
+            "bogo_paid_key": (product.key if upgrade else None)}
+
+
+def create_checkout(session, trader: Trader, product_key: str, coupon: str | None,
+                    promo_code: str | None = None, weekend_trading: bool = False,
+                    use_credits: bool = True) -> dict:
+    quote = compute_price(session, trader, product_key, coupon,
+                          promo_code=promo_code, weekend_trading=weekend_trading,
+                          use_credits=use_credits)
+    product, upgrade = quote["product"], quote["upgrade"]
+    prowizjonowany = upgrade or product
+    price, discount_pct, kredyt = quote["total_due_usd"], quote["discount_pct"], quote["credits_used"]
 
     order = Order(trader_id=trader.id, product_key=prowizjonowany.key, amount_usd=price,
                   coupon=(coupon or None), weekend_trading=bool(weekend_trading),
-                  credits_used=(kredyt if kredyt > 0 else 0.0),
-                  bogo_paid_key=(product.key if upgrade else None),
+                  credits_used=kredyt,
+                  bogo_paid_key=quote["bogo_paid_key"],
                   provider="stripe" if settings.stripe_enabled else "mock")
     session.add(order)
     session.flush()

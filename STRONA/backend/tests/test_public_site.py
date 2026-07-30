@@ -188,6 +188,16 @@ def test_portal_ma_domyslny_jasny_motyw_i_przelacznik():
     assert "pf_theme" in html
 
 
+def test_portal_laduje_sortowanie_tabel():
+    """Kolumny tabel sortuja sie po kliknieciu w naglowek (sortable.js);
+    skrypt jest podpiety w portalu i serwowany ze statykow."""
+    with TestClient(app) as c:
+        html = c.get("/portal").text
+        assert "/static/js/sortable.js" in html
+        js = c.get("/static/js/sortable.js")
+        assert js.status_code == 200 and "data-tkey" in js.text
+
+
 def test_panel_admina_nie_jest_strona_publiczna():
     """Gosc nie moze nawet stwierdzic, ze panel istnieje — stad 404."""
     with TestClient(app) as c:

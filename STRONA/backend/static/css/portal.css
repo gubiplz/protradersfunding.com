@@ -278,6 +278,12 @@ table.tbl td{padding:13px 18px;border-top:1px solid var(--line)}
 table.tbl tr:hover td{background:var(--hover)}
 table.tbl .num{font-family:var(--mono)}
 table.tbl td.sub-row{background:var(--panel2)}
+/* sortable headers (sortable.js): click cycles asc -> desc -> original order */
+table.sortable th:not(.no-sort){cursor:pointer;user-select:none}
+table.sortable th:not(.no-sort):hover{color:var(--txt)}
+table.sortable th[data-dir]{color:var(--acc)}
+table.sortable th[data-dir]::after{content:'▲';font-size:8px;margin-left:5px}
+table.sortable th[data-dir=desc]::after{content:'▼'}
 
 /* empty / skeleton */
 .empty{background:var(--panel);border:1px dashed var(--line2);border-radius:var(--r);padding:52px 24px;
@@ -349,6 +355,16 @@ table.tbl td.sub-row{background:var(--panel2)}
 .modal-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:4px}
 .modal-head h3{font-size:18px}
 .modal .plan-line{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-bottom:14px}
+/* price breakdown in the buy modal (fed by /api/checkout/preview) */
+.quote-box{border:1px solid var(--line);border-radius:10px;padding:4px 12px;margin-bottom:14px;background:var(--bg2)}
+.q-row{display:flex;justify-content:space-between;gap:14px;font-size:13px;color:var(--muted);padding:6px 0;
+  border-bottom:1px dashed var(--line)}
+.q-row:last-child{border-bottom:0}
+.q-row b{font-weight:600}
+.q-row.good b{color:var(--green)}
+.q-row.total{font-size:14px}
+.q-row.total span{color:var(--txt);font-weight:600}
+.q-row.total b{color:var(--txt);font-size:16px}
 .modal .note{font-size:12px;color:var(--muted);background:var(--acc-bg);border:1px solid var(--acc-line);
   border-radius:10px;padding:10px 12px;margin-bottom:16px}
 .modal .stack{display:flex;flex-direction:column;gap:10px}
