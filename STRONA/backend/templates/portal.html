@@ -1829,10 +1829,10 @@ function openBuy(key){
         </div>
         <input id="c-phone" placeholder="Phone, e.g. +14155551234" class="inp" value="${esc(ME.phone||'')}">
         <input id="c-email" class="inp" value="${esc(ME.email)}" disabled>
-        <input id="c-coupon" placeholder="Coupon code (optional)" class="inp"
-          value="${esc(new URLSearchParams(location.search).get('coupon')||'')}" oninput="quoteRefresh()">
-        ${p.promo_upgrade_size?`<input id="c-promo" placeholder="Promo code (optional)" class="inp"
-          value="${esc(pfPromo())}" onchange="promoCheck('${esc(p.key)}')">`:''}
+        <input id="c-code" placeholder="Discount / promo code (optional)" class="inp"
+          autocomplete="off" spellcheck="false"
+          value="${esc(new URLSearchParams(location.search).get('coupon')||(p.promo_upgrade_size?pfPromo():''))}"
+          oninput="codeInput()">
         <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
           <input type="checkbox" id="c-weekend" onchange="quoteRefresh(true)"
             ${new URLSearchParams(location.search).get('wt')==='1'?'checked':''}
@@ -1852,7 +1852,8 @@ function openBuy(key){
   box.onclick=closeBuy;
   document.body.appendChild(box);
   window._buyKey=key;
-  quoteRefresh(true);
+  window._buyCode={coupon:null,promo:null};
+  codeCheck();
   setTimeout(()=>$('c-first').focus(),50);
 }
 
@@ -1866,19 +1867,25 @@ async function quoteNow(){
   if(!p||!box)return;
   const wk=!!($('c-weekend')&&$('c-weekend').checked);
   const uc=!$('c-usecr')||$('c-usecr').checked;
-  let q=null;
+  const bc=window._buyCode||{};
+  let q=null,previewFailed=false;
   try{
     q=await api('/api/checkout/preview?product_key='+encodeURIComponent(p.key)
-      +'&coupon='+encodeURIComponent(($('c-coupon')?.value||'').trim())
-      +'&promo_code='+encodeURIComponent((($('c-promo')||{}).value||'').trim())
+      +'&coupon='+encodeURIComponent(bc.coupon||'')
+      +'&promo_code='+encodeURIComponent(bc.promo||'')
       +'&weekend='+(wk?'1':'0')+'&use_credits='+(uc?'1':'0'));
   }catch(e){
     /* The preview must never block buying — fall back to the catalog price. */
+    previewFailed=true;
     if(e&&e.message&&/coupon/i.test(e.message))buyErr(e.message);
     q={plan_price_usd:p.price_usd,discount_pct:0,discount_usd:0,
        weekend_fee_usd:wk?199:0,credits_used:0,
        total_due_usd:Math.round((p.price_usd+(wk?199:0))*100)/100};
   }
+  /* A coupon the server does not recognize changes nothing — say so instead
+     of quietly showing the full price (promo codes are confirmed separately). */
+  if(!previewFailed&&bc.coupon&&!(q.discount_usd>0)){buyErr('This code is not valid right now — you can still buy without it.')}
+  else if(!previewFailed){const e=$('buy-err'); if(e)e.classList.add('hidden')}
   const row=(l,v,cls)=>`<div class="q-row${cls?' '+cls:''}"><span>${l}</span><b class="mono">${v}</b></div>`;
   let h=row('Plan fee','$'+fmt(q.plan_price_usd));
   if(q.discount_usd>0)h+=row(`Coupon (−${q.discount_pct}%)`,'−$'+fmt(q.discount_usd),'good');
@@ -1889,27 +1896,29 @@ async function quoteNow(){
 }
 function closeBuy(){document.getElementById('buy-modal')?.remove()}
 
-/* Live check of the "Upgrade Your Size" code typed in the buy modal: a valid
-   code is remembered (same key as the landing bar), the capital line and the
-   promo disclosure follow. The server validates AGAIN at checkout — this is
-   display only. */
-async function promoCheck(key){
-  const p=PRODUCTS.find(x=>x.key===key), inp=$('c-promo');
+/* ONE field for every kind of code. A code recognized by /api/promo is the
+   "Upgrade Your Size" promo (bigger account, same fee) — anything else goes
+   to the server as a discount coupon. The server validates AGAIN at checkout,
+   this is display only. Classification lands in window._buyCode. */
+let _codeT=null;
+function codeInput(){clearTimeout(_codeT);_codeT=setTimeout(codeCheck,400)}
+async function codeCheck(){
+  const p=PRODUCTS.find(x=>x.key===window._buyKey), inp=$('c-code');
   if(!p||!inp)return;
   const code=(inp.value||'').trim().toUpperCase();
   inp.value=code;
-  let ok=false;
-  if(code){try{ok=(await api('/api/promo?code='+encodeURIComponent(code))).valid}catch(e){}}
+  let promo=false;
+  if(code&&p.promo_upgrade_size){
+    try{promo=(await api('/api/promo?code='+encodeURIComponent(code))).valid}catch(e){}
+  }
+  window._buyCode=promo?{coupon:null,promo:code}:{coupon:code||null,promo:null};
   try{
-    if(ok)localStorage.setItem('pf_promo_code',code);
+    if(promo)localStorage.setItem('pf_promo_code',code);
     else if(!code)localStorage.removeItem('pf_promo_code');
   }catch(e){}
-  const on=ok&&p.promo_upgrade_size;
-  const cap=$('buy-cap'); if(cap)cap.textContent='$'+fmt0(on?p.promo_upgrade_size:p.account_size);
-  const line=$('buy-promo'); if(line)line.hidden=!on;
-  inp.style.borderColor=(code&&!ok)?'#dc2626':'';
-  if(code&&!ok){buyErr('That promo code is not valid right now — you can still buy without it.')}
-  else{const e=$('buy-err'); if(e)e.classList.add('hidden')}
+  const cap=$('buy-cap'); if(cap)cap.textContent='$'+fmt0(promo?p.promo_upgrade_size:p.account_size);
+  const line=$('buy-promo'); if(line)line.hidden=!promo;
+  quoteRefresh(true);
 }
 
 function buyErr(msg){
@@ -1919,8 +1928,9 @@ function buyErr(msg){
 }
 
 async function buy(key){
-  const coupon=($('c-coupon').value||'').trim()||null;
-  const promo=(($('c-promo')||{}).value||'').trim()||null;
+  await codeCheck();   /* fresh code classification, even if the debounce is still pending */
+  const bc=window._buyCode||{};
+  const coupon=bc.coupon||null, promo=bc.promo||null;
   const first=($('c-first').value||'').trim(), last=($('c-last').value||'').trim(), phone=($('c-phone').value||'').trim();
   if(!first||!last||!phone){buyErr('Fill in your first name, last name and phone — the MT5 account is registered under these details.');return}
   if(!/^\+?\d[\d\s-]{6,}$/.test(phone)){buyErr('Phone looks invalid — include the country code, e.g. +14155551234.');return}
