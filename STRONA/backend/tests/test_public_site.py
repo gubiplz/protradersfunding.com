@@ -177,6 +177,16 @@ def test_link_afiliacyjny_bierze_host_z_zadania():
     assert "localhost" not in html and "127.0.0.1" not in html
 
 
+def test_portal_ma_domyslny_ciemny_motyw_i_przelacznik():
+    """Dashboard renderuje sie w dark (atrybut na <html> przed pierwszym paintem),
+    ma przycisk przelacznika w topbarze i pre-paintowy odczyt pf_theme."""
+    with TestClient(app) as c:
+        html = c.get("/portal").text
+    assert 'data-theme="dark"' in html
+    assert 'id="theme-btn"' in html
+    assert "pf_theme" in html
+
+
 def test_panel_admina_nie_jest_strona_publiczna():
     """Gosc nie moze nawet stwierdzic, ze panel istnieje — stad 404."""
     with TestClient(app) as c:

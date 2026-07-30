@@ -1,4 +1,4 @@
-/* Admin panel — additions on top of portal.css (same light design system). */
+/* Admin panel — additions on top of portal.css (same themable design system). */
 
 /* The pill must stay inside the 248px sidebar — at the portal font size the
    full site name plus the ADMIN tag overflowed past its right edge. When space
@@ -15,7 +15,7 @@
 
 /* system status bar */
 .sysbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
-.sys{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);
+.sys{display:inline-flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);
   border-radius:999px;padding:7px 14px;font-size:12.5px;color:var(--muted);box-shadow:var(--shadow)}
 .sys b{color:var(--txt);font-family:var(--mono);font-weight:600}
 .sys .dot{width:7px;height:7px;border-radius:50%;background:var(--green2)}
@@ -24,7 +24,7 @@
 /* filters above the table */
 .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
 .toolbar .inp{max-width:280px}
-.seg{display:inline-flex;gap:4px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:3px;
+.seg{display:inline-flex;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:3px;
   box-shadow:var(--shadow)}
 .seg button{padding:7px 13px;border-radius:8px;font-size:12.5px;font-weight:600;color:var(--muted);transition:.15s}
 .seg button.on{background:var(--grad);color:#fff}
@@ -38,7 +38,7 @@ tr.clickable{cursor:pointer}
 
 /* action items on the overview */
 .todo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-bottom:18px}
-.todo{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;box-shadow:var(--shadow);
+.todo{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;box-shadow:var(--shadow);
   display:flex;align-items:center;gap:14px;cursor:pointer;transition:.16s}
 .todo:hover{border-color:var(--acc);transform:translateY(-2px)}
 .todo .n{font-family:var(--mono);font-size:24px;font-weight:800;line-height:1}
@@ -49,14 +49,14 @@ tr.clickable{cursor:pointer}
 /* slide-over (account details / ticket) */
 .over{position:fixed;inset:0;z-index:60;display:none}
 .over.open{display:block}
-.over-bg{position:absolute;inset:0;background:rgba(15,23,42,.4);backdrop-filter:blur(3px)}
+.over-bg{position:absolute;inset:0;background:var(--scrim);backdrop-filter:blur(3px)}
 .over-panel{position:absolute;top:0;right:0;bottom:0;width:min(560px,100%);background:var(--bg);
   border-left:1px solid var(--line);display:flex;flex-direction:column;
   transform:translateX(100%);transition:transform .28s cubic-bezier(.22,1,.36,1);
   box-shadow:-30px 0 80px -30px rgba(15,23,42,.35)}
 .over.open .over-panel{transform:none}
 .over-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;
-  border-bottom:1px solid var(--line);background:#fff;flex:0 0 auto}
+  border-bottom:1px solid var(--line);background:var(--panel);flex:0 0 auto}
 .over-head h2{font-size:16.5px}
 .over-body{padding:18px 20px 34px;overflow-y:auto;display:flex;flex-direction:column;gap:14px;
   overscroll-behavior:contain}
@@ -65,7 +65,7 @@ tr.clickable{cursor:pointer}
 .kv:last-child{border-bottom:0}
 .kv span{color:var(--muted)} .kv b{font-family:var(--mono);font-weight:600}
 
-.breach-item{font-size:12.5px;color:var(--red);background:var(--red-bg);border:1px solid #f5c6c6;
+.breach-item{font-size:12.5px;color:var(--red);background:var(--red-bg);border:1px solid var(--red-line);
   border-radius:10px;padding:9px 12px}
 
 /* pool form */
@@ -89,8 +89,8 @@ tr.clickable{cursor:pointer}
   .seg button{flex:1 0 auto}
 }
 
-/* Chipy w slide-overze — .chip-row nie byl nigdzie ostylowany, a .chip zyje
-   tylko w site.css, ktorego dashboard nie laduje. */
+/* Chips in the slide-over — .chip-row had no styles anywhere, and .chip lives
+   only in site.css, which the dashboard does not load. */
 .chip-row{display:flex;gap:8px;flex-wrap:wrap}
 .chip{font-size:12px;font-family:var(--mono);color:var(--muted);border:1px solid var(--line);
   background:var(--panel2);border-radius:8px;padding:5px 10px}
@@ -98,13 +98,13 @@ tr.clickable{cursor:pointer}
 
 /* ---------------- mobile ---------------- */
 @media(max-width:960px){
-  /* tabele i tak przewijaja sie w .tbl-wrap — komorki nie lamia "2step-100k"
-     w srodku tokenu; dluzsze teksty w divach (payout details, powod odrzucenia)
-     zawijaja sie dalej */
+  /* tables scroll inside .tbl-wrap anyway — cells must not break "2step-100k"
+     mid-token; longer texts inside divs (payout details, rejection reason)
+     still wrap */
   table.tbl td{white-space:nowrap}
   table.tbl td div{white-space:normal}
-  /* admin.css laduje sie PO portal.css i jego max-width:100% wygrywalo —
-     pill musi zostawic miejsce na X szuflady takze w adminie */
+  /* admin.css loads AFTER portal.css and its max-width:100% used to win —
+     the pill must leave room for the drawer close button in the admin too */
   .side-head .brand-pill{max-width:calc(100% - 44px)}
 }
 @media(max-width:640px){

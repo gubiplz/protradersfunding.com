@@ -834,6 +834,37 @@ def test_kyc_reject_i_historia_decyzji():
         assert wpis["status"] == "approved"
 
 
+def test_otwarte_pozycje_konta_widzi_tylko_wlasciciel():
+    """GET /api/me/accounts/{id}/positions — tabela "Open trades" w portalu.
+
+    Zwraca wylacznie wiersze Trade ze status='open' (dzis pisze je bot);
+    zamkniete transakcje maja swoja historie w /activity. Cudze konto = 404,
+    bez tokenu = 401 — endpoint nie moze wyciekac pozycji innych traderow.
+    """
+    tid, h = _trader("pozycje@test.pl", "Otwarte Pozycje")
+    aid = _konto(tid, "880011")
+    s = SessionLocal()
+    s.add(Trade(account_id=aid, symbol="XAUUSD", side="buy", lots=0.5,
+                open_price=2400.0, pnl=37.5, status="open", source="bot"))
+    s.add(Trade(account_id=aid, symbol="EURUSD", side="sell", lots=1.0,
+                open_price=1.09, close_price=1.08, pnl=100.0, status="closed",
+                closed_at=datetime.now(timezone.utc), source="bot"))
+    s.commit(); s.close()
+    _, h_obcy = _trader("pozycje-obcy@test.pl", "Obcy Trader")
+    with TestClient(app) as c:
+        moje = c.get(f"/api/me/accounts/{aid}/positions", headers=h)
+        cudze = c.get(f"/api/me/accounts/{aid}/positions", headers=h_obcy)
+        anonim = c.get(f"/api/me/accounts/{aid}/positions")
+    assert moje.status_code == 200
+    rows = moje.json()
+    assert len(rows) == 1, "zamknieta transakcja nie moze trafic do Open trades"
+    p = rows[0]
+    assert p["symbol"] == "XAUUSD" and p["side"] == "buy" and p["lots"] == 0.5
+    assert p["pnl"] == 37.5 and p["ticket"] and p["opened_at"]
+    assert cudze.status_code == 404
+    assert anonim.status_code == 401
+
+
 # ---------------- weryfikacja adresu e-mail ----------------
 def test_signup_wysyla_kod_i_weryfikacja_kodem_dziala():
     with TestClient(app) as c:

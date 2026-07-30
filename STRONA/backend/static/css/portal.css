@@ -1,6 +1,7 @@
 /* ============================================================
-   Trader Portal — LIGHT dashboard (OneTraders-style)
-   Consistent with the public site.css: same tokens and fonts.
+   Trader Portal — themable dashboard (dark default + light).
+   Light values live in :root; html[data-theme=dark] re-maps every
+   token at the END of this file. Shared by the admin panel too.
    ============================================================ */
 
 @font-face{font-family:'Inter';src:url('/static/fonts/inter.woff2') format('woff2');font-weight:100 900;font-display:swap}
@@ -19,6 +20,11 @@
   --gold:#d97706; --gold-bg:#fdf3e3;
   --blue:#0284c7; --blue-bg:#e8f4fd;
   --purple:#7c3aed; --purple-bg:#f1ecfe;
+  --green-line:#bbe7d4; --red-line:#f5c6c6; --gold-line:#f3ddb5;
+  --blue-line:#cfe8f8; --purple-line:#e2d8fb;
+  --gold-ink:#92610a; --gold-tint:#fffdf6; --bronze:#b45309; --bronze-bg:#f8ece2;
+  --hover:#fafbff; --glass:rgba(255,255,255,.9); --scrim:rgba(15,23,42,.42);
+  --panel-t:rgba(255,255,255,0); --edge:rgba(15,23,42,.16);
   --r:16px;
   --shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px -14px rgba(15,23,42,.1);
   --shadow-lg:0 24px 60px -24px rgba(79,70,229,.16),0 2px 6px rgba(15,23,42,.05);
@@ -48,7 +54,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 /* ---------------- APP LAYOUT ---------------- */
 .app{display:flex;min-height:100vh}
 
-.side{width:var(--sbw);flex:0 0 var(--sbw);background:#fff;border-right:1px solid var(--line);
+.side{width:var(--sbw);flex:0 0 var(--sbw);background:var(--panel);border-right:1px solid var(--line);
   display:flex;flex-direction:column;position:fixed;top:0;bottom:0;left:0;z-index:40;
   transition:transform .25s cubic-bezier(.22,1,.36,1)}
 .side-head{display:flex;align-items:center;padding:20px 18px 16px}
@@ -61,7 +67,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .side-sec{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);
   padding:16px 12px 8px;font-weight:700}
 .sb-link{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:11px;
-  color:#475569;font-size:14px;font-weight:500;transition:.15s;width:100%;text-align:left;border:1px solid transparent}
+  color:var(--muted);font-size:14px;font-weight:500;transition:.15s;width:100%;text-align:left;border:1px solid transparent}
 .sb-link svg{width:18px;height:18px;flex:0 0 18px;opacity:.8}
 .sb-link:hover{color:var(--txt);background:var(--bg)}
 .sb-link.on{color:var(--acc);background:var(--acc-bg);border-color:var(--acc-line);font-weight:600}
@@ -84,16 +90,16 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 
 .main{flex:1;margin-left:var(--sbw);display:flex;flex-direction:column;min-width:0}
 .topbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:16px;
-  padding:13px 28px;background:rgba(255,255,255,.85);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  padding:13px 28px;background:var(--glass);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
   border-bottom:1px solid var(--line)}
 .topbar h1{font-size:19px;font-weight:700}
 .topbar .crumb{font-size:12px;color:var(--dim);margin-top:1px}
 .top-right{margin-left:auto;display:flex;align-items:center;gap:10px}
 .kyc-chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;border-radius:999px;
-  padding:5px 12px;border:1px solid var(--line2);color:var(--muted);background:#fff}
+  padding:5px 12px;border:1px solid var(--line2);color:var(--muted);background:var(--panel)}
 .kyc-chip .dot{width:6px;height:6px;border-radius:50%}
-.kyc-chip.ok{color:var(--green);border-color:#bbe7d4;background:var(--green-bg)} .kyc-chip.ok .dot{background:var(--green2)}
-.kyc-chip.warn{color:var(--gold);border-color:#f3ddb5;background:var(--gold-bg)} .kyc-chip.warn .dot{background:#f59e0b}
+.kyc-chip.ok{color:var(--green);border-color:var(--green-line);background:var(--green-bg)} .kyc-chip.ok .dot{background:var(--green2)}
+.kyc-chip.warn{color:var(--gold);border-color:var(--gold-line);background:var(--gold-bg)} .kyc-chip.warn .dot{background:#f59e0b}
 .burger{display:none}
 
 .content{padding:24px 28px 60px;max-width:1240px;width:100%}
@@ -107,18 +113,18 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .btn-p.lg{padding:12px 24px;font-size:15px}
 .btn-o{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-weight:600;font-size:14px;
   padding:10px 18px;border-radius:11px;border:1px solid var(--line2);color:var(--txt);transition:.16s;
-  background:#fff;white-space:nowrap}
+  background:var(--panel);white-space:nowrap}
 .btn-o:hover{border-color:var(--acc);color:var(--acc);background:var(--acc-bg)}
 .btn-o.sm,.btn-p.sm{padding:8px 13px;font-size:13px;border-radius:9px}
 .btn-o svg{width:15px;height:15px}
 
-.inp{background:#fff;border:1px solid var(--line2);border-radius:10px;padding:11px 13px;
+.inp{background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:11px 13px;
   font-size:14px;width:100%;color:var(--txt);font-family:var(--body);transition:.15s}
 .inp:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(99,102,241,.12)}
 .inp:disabled{background:var(--panel2);color:var(--muted)}
 .inp::placeholder{color:var(--dim)}
 
-.panel{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:22px;box-shadow:var(--shadow)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:22px;box-shadow:var(--shadow)}
 .panel h3{font-size:17px}
 
 .status{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;border-radius:999px;
@@ -148,7 +154,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 
 /* stat tiles with a pastel icon */
 .stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:14px;margin-bottom:20px}
-.stat-tile{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;
+.stat-tile{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;
   display:flex;align-items:center;gap:14px;box-shadow:var(--shadow)}
 .tile-ic{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:0 0 44px}
 .tile-ic svg{width:20px;height:20px}
@@ -162,14 +168,14 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .stat-tile .sub{font-size:11.5px;color:var(--dim);margin-top:1px}
 
 /* account list — horizontal rows with a gradient edge */
-.acct-list{background:#fff;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;
+.acct-list{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;
   box-shadow:var(--shadow);position:relative}
 .acct-list::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;
   background:linear-gradient(90deg,#2563eb,#6366f1,#a855f7);z-index:1}
 .acct-row{display:flex;align-items:center;gap:16px;padding:18px 20px;border-top:1px solid var(--line);
   transition:.15s;flex-wrap:wrap}
 .acct-row:first-child{border-top:0}
-.acct-row:hover{background:#fafbff}
+.acct-row:hover{background:var(--hover)}
 .acct-ava{width:42px;height:42px;border-radius:50%;background:var(--panel2);border:1px solid var(--line);
   display:flex;align-items:center;justify-content:center;flex:0 0 42px;overflow:hidden}
 .acct-ava img{width:30px;height:30px;object-fit:contain}
@@ -190,18 +196,18 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .detail-head h2{font-family:var(--mono);font-size:24px;letter-spacing:-.01em}
 .detail-head .chips{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}
 
-.wide-card{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;
+.wide-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;
   box-shadow:var(--shadow);display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:14px}
 .wide-card .lbl{font-size:12.5px;color:var(--muted);margin-bottom:2px}
 .wide-card .val{font-family:var(--mono);font-size:22px;font-weight:700}
 .wide-card .sub{font-size:12px;color:var(--dim);margin-top:2px}
 
-.sec-card{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:24px;
+.sec-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:24px;
   box-shadow:var(--shadow);margin-bottom:14px}
 .sec-card>h3{font-size:18px;margin-bottom:16px}
 
-.warn-box{background:var(--gold-bg);border:1px solid #f3ddb5;border-radius:12px;padding:14px 16px;
-  font-size:13.5px;color:#92610a;margin-bottom:18px;display:flex;gap:10px}
+.warn-box{background:var(--gold-bg);border:1px solid var(--gold-line);border-radius:12px;padding:14px 16px;
+  font-size:13.5px;color:var(--gold-ink);margin-bottom:18px;display:flex;gap:10px}
 .warn-box svg{width:17px;height:17px;flex:0 0 17px;color:var(--gold);margin-top:1px}
 .warn-box b{display:block;color:var(--gold);margin-bottom:2px}
 
@@ -235,23 +241,23 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .cred-row .k{color:var(--dim);flex:0 0 auto;font-size:12px}
 .cred-row .v{display:flex;align-items:center;gap:4px;min-width:0}
 .cred-row code{font-family:var(--mono);font-size:12.5px;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.creds-wait{background:var(--purple-bg);border:1px solid #e2d8fb;border-radius:12px;padding:13px 14px;
+.creds-wait{background:var(--purple-bg);border:1px solid var(--purple-line);border-radius:12px;padding:13px 14px;
   font-size:13px;color:var(--purple);display:flex;gap:10px;align-items:flex-start}
-.spin{width:15px;height:15px;border:2px solid #d8c9f8;border-top-color:var(--purple);
+.spin{width:15px;height:15px;border:2px solid var(--purple-line);border-top-color:var(--purple);
   border-radius:50%;animation:spin 1s linear infinite;flex:0 0 15px;margin-top:2px}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* shop */
-.shop-tabs{display:inline-flex;gap:5px;background:#fff;border:1px solid var(--line);border-radius:11px;
+.shop-tabs{display:inline-flex;gap:5px;background:var(--panel);border:1px solid var(--line);border-radius:11px;
   padding:4px;margin-bottom:20px;box-shadow:var(--shadow)}
 .shop-tab{padding:8px 17px;border-radius:8px;font-size:13.5px;font-weight:600;color:var(--muted);transition:.15s}
 .shop-tab:hover{color:var(--txt)}
 .shop-tab.on{background:var(--grad);color:#fff}
 .plan-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:16px}
-.plan-card{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:22px;
+.plan-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:22px;
   display:flex;flex-direction:column;transition:.18s;position:relative;box-shadow:var(--shadow)}
 .plan-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg)}
-.plan-card.hl{border-color:transparent;background:linear-gradient(#fff,#fff) padding-box,var(--grad) border-box;
+.plan-card.hl{border-color:transparent;background:linear-gradient(var(--panel),var(--panel)) padding-box,var(--grad) border-box;
   box-shadow:var(--shadow-lg)}
 .plan-size{font-family:var(--display);font-size:23px;font-weight:700}
 .plan-kind{font-size:12px;color:var(--muted);margin-bottom:14px}
@@ -263,23 +269,23 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .plan-card .btn-p{margin-top:auto;width:100%}
 
 /* tables */
-.tbl-wrap{background:#fff;border:1px solid var(--line);border-radius:var(--r);overflow-x:auto;box-shadow:var(--shadow);
+.tbl-wrap{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow-x:auto;box-shadow:var(--shadow);
   overscroll-behavior-x:contain}
 table.tbl{width:100%;border-collapse:collapse;font-size:13.5px;min-width:560px}
 table.tbl th{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);text-align:left;
   padding:13px 18px;background:var(--panel2);white-space:nowrap}
 table.tbl td{padding:13px 18px;border-top:1px solid var(--line)}
-table.tbl tr:hover td{background:#fafbff}
+table.tbl tr:hover td{background:var(--hover)}
 table.tbl .num{font-family:var(--mono)}
 table.tbl td.sub-row{background:var(--panel2)}
 
 /* empty / skeleton */
-.empty{background:#fff;border:1px dashed var(--line2);border-radius:var(--r);padding:52px 24px;
+.empty{background:var(--panel);border:1px dashed var(--line2);border-radius:var(--r);padding:52px 24px;
   text-align:center;color:var(--muted)}
 .empty svg{width:38px;height:38px;color:var(--dim);margin:0 auto 14px;display:block}
 .empty h3{color:var(--txt);font-size:17px;margin-bottom:6px}
 .empty p{font-size:13.5px;margin-bottom:18px}
-.skel{border-radius:var(--r);background:linear-gradient(100deg,#eef0f7 40%,#f7f8fc 50%,#eef0f7 60%);
+.skel{border-radius:var(--r);background:linear-gradient(100deg,var(--bg3) 40%,var(--panel2) 50%,var(--bg3) 60%);
   background-size:200% 100%;animation:sk 1.2s infinite linear;border:1px solid var(--line)}
 @keyframes sk{to{background-position:-200% 0}}
 
@@ -288,7 +294,7 @@ table.tbl td.sub-row{background:var(--panel2)}
 .auth-brand{position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:space-between;
   padding:44px 52px;border-right:1px solid var(--line);background:
   radial-gradient(70% 60% at 20% 0%,rgba(99,102,241,.12),transparent 65%),
-  radial-gradient(50% 50% at 90% 100%,rgba(168,85,247,.1),transparent 70%),#fff}
+  radial-gradient(50% 50% at 90% 100%,rgba(168,85,247,.1),transparent 70%),var(--panel)}
 .auth-brand .logo{display:flex;align-items:center;gap:11px;font-family:var(--display);font-weight:700;font-size:19px}
 .auth-brand .logo img{width:32px;height:32px}
 .auth-pitch h2{font-size:clamp(26px,3vw,38px);line-height:1.12;margin-bottom:14px}
@@ -298,7 +304,7 @@ table.tbl td.sub-row{background:var(--panel2)}
 .auth-points svg{width:15px;height:15px;color:var(--green2);flex:0 0 15px}
 .auth-foot{font-size:11.5px;color:var(--dim);max-width:430px}
 .auth-form{display:flex;align-items:center;justify-content:center;padding:40px 24px;background:var(--bg)}
-.auth-card{width:100%;max-width:390px;background:#fff;border:1px solid var(--line);border-radius:18px;
+.auth-card{width:100%;max-width:390px;background:var(--panel);border:1px solid var(--line);border-radius:18px;
   padding:28px;box-shadow:var(--shadow-lg)}
 .auth-card h3{font-size:22px;margin-bottom:4px}
 .auth-card .sub{font-size:13.5px;color:var(--muted);margin-bottom:22px}
@@ -335,9 +341,9 @@ table.tbl td.sub-row{background:var(--panel2)}
 .modal-wrap{position:fixed;inset:0;z-index:70;display:flex;align-items:flex-start;justify-content:center;
   padding:18px;overflow-y:auto;overscroll-behavior:contain}
 .modal-wrap::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
-  background:rgba(15,23,42,.4);backdrop-filter:blur(4px)}
+  background:var(--scrim);backdrop-filter:blur(4px)}
 .modal-wrap>*{margin-top:auto;margin-bottom:auto}
-.modal{background:#fff;border:1px solid var(--line);border-radius:18px;width:100%;max-width:430px;
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:18px;width:100%;max-width:430px;
   padding:24px;box-shadow:0 40px 100px -30px rgba(15,23,42,.35);animation:pop .22s cubic-bezier(.22,1,.36,1)}
 @keyframes pop{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:none}}
 .modal-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:4px}
@@ -352,7 +358,7 @@ table.tbl td.sub-row{background:var(--panel2)}
 
 /* ---------------- TOASTS ---------------- */
 #toasts{position:fixed;right:18px;bottom:18px;z-index:90;display:flex;flex-direction:column;gap:10px;max-width:370px}
-.toast{background:#fff;border:1px solid var(--line2);border-left:3px solid var(--acc);border-radius:12px;
+.toast{background:var(--panel);border:1px solid var(--line2);border-left:3px solid var(--acc);border-radius:12px;
   padding:13px 16px;font-size:13.5px;box-shadow:0 16px 44px -16px rgba(15,23,42,.3);
   animation:toast-in .25s cubic-bezier(.22,1,.36,1);white-space:pre-line}
 .toast.ok{border-left-color:var(--green2)}
@@ -418,7 +424,7 @@ table.tbl td.sub-row{background:var(--panel2)}
 }
 
 /* --- phase progress --- */
-.phase-card{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:22px;
+.phase-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:22px;
   box-shadow:var(--shadow);margin-bottom:14px}
 .phase-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
 .phase-top h3{font-size:17px;margin-bottom:2px}
@@ -443,24 +449,24 @@ table.tbl td.sub-row{background:var(--panel2)}
 .cal-day.blank{border-color:transparent;background:transparent}
 .cal-day .d{font-family:var(--mono);font-weight:600}
 .cal-day .pnl{font-family:var(--mono);font-size:11px;font-weight:700;margin-top:auto}
-.cal-day.profit{background:var(--green-bg);border-color:#bbe7d4;color:var(--green)}
-.cal-day.loss{background:var(--red-bg);border-color:#f5c6c6;color:var(--red)}
-.cal-day.flat{background:var(--blue-bg);border-color:#cfe8f8;color:var(--blue)}
+.cal-day.profit{background:var(--green-bg);border-color:var(--green-line);color:var(--green)}
+.cal-day.loss{background:var(--red-bg);border-color:var(--red-line);color:var(--red)}
+.cal-day.flat{background:var(--blue-bg);border-color:var(--blue-line);color:var(--blue)}
 .cal-legend{display:flex;gap:16px;margin-top:12px;font-size:12px;color:var(--muted);flex-wrap:wrap}
 .cal-legend span{display:flex;align-items:center;gap:6px}
 .cal-legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
 
 /* --- leaderboard: podium --- */
 .podium{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px}
-.pod-card{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:20px;
+.pod-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:20px;
   box-shadow:var(--shadow);text-align:center;position:relative}
-.pod-card.first{border-color:#f3ddb5;background:linear-gradient(180deg,#fffdf6,#fff)}
+.pod-card.first{border-color:var(--gold-line);background:linear-gradient(180deg,var(--gold-tint),var(--panel))}
 .pod-rank{position:absolute;top:12px;left:14px;font-family:var(--mono);font-size:12px;font-weight:800;color:var(--dim)}
 .pod-medal{width:46px;height:46px;border-radius:50%;margin:0 auto 10px;display:flex;align-items:center;justify-content:center}
 .pod-medal svg{width:22px;height:22px}
 .pod-medal.gold{background:var(--gold-bg);color:var(--gold)}
 .pod-medal.silver{background:var(--bg3);color:#64748b}
-.pod-medal.bronze{background:#f8ece2;color:#b45309}
+.pod-medal.bronze{background:var(--bronze-bg);color:var(--bronze)}
 .pod-name{font-weight:700;font-size:15px}
 .pod-ret{font-family:var(--mono);font-size:24px;font-weight:800;color:var(--green);margin:6px 0 2px}
 .pod-usd{font-size:12.5px;color:var(--muted);margin-bottom:14px}
@@ -471,7 +477,7 @@ table.tbl td.sub-row{background:var(--panel2)}
 
 /* --- achievements --- */
 .badge-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
-.badge-card{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:20px;
+.badge-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:20px;
   box-shadow:var(--shadow);display:flex;gap:14px;align-items:flex-start}
 .badge-card.locked{opacity:.55;filter:grayscale(.6)}
 .badge-ic{width:44px;height:44px;border-radius:50%;background:var(--acc-bg);color:var(--acc);
@@ -485,9 +491,9 @@ table.tbl td.sub-row{background:var(--panel2)}
 
 /* --- loyalty --- */
 .tier-track{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:18px}
-.tier-card{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:20px;
+.tier-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:20px;
   box-shadow:var(--shadow);position:relative}
-.tier-card.on{border-color:transparent;background:linear-gradient(#fff,#fff) padding-box,var(--grad) border-box}
+.tier-card.on{border-color:transparent;background:linear-gradient(var(--panel),var(--panel)) padding-box,var(--grad) border-box}
 .tier-card .nm{font-family:var(--display);font-weight:700;font-size:16px;display:flex;align-items:center;gap:8px}
 .tier-card .req{font-size:11.5px;color:var(--dim);margin-bottom:10px}
 .tier-card .ben{font-size:13px;color:var(--muted)}
@@ -513,7 +519,7 @@ table.tbl td.sub-row{background:var(--panel2)}
 .ticket-row{display:flex;align-items:center;gap:14px;padding:16px 20px;border-top:1px solid var(--line);
   cursor:pointer;transition:.15s}
 .ticket-row:first-child{border-top:0}
-.ticket-row:hover{background:#fafbff}
+.ticket-row:hover{background:var(--hover)}
 .ticket-row .sub{flex:1;min-width:0}
 .ticket-row .sub b{font-size:14.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ticket-row .sub span{font-size:12px;color:var(--dim)}
@@ -530,7 +536,7 @@ table.tbl td.sub-row{background:var(--panel2)}
 .file-row .fl b{font-size:13.5px}
 .file-row .fl p{font-size:11.5px;color:var(--dim)}
 .file-row input[type=file]{font-size:12.5px;color:var(--muted);max-width:230px}
-.file-row input[type=file]::file-selector-button{background:#fff;border:1px solid var(--line2);border-radius:8px;
+.file-row input[type=file]::file-selector-button{background:var(--panel);border:1px solid var(--line2);border-radius:8px;
   padding:7px 12px;font-size:12.5px;font-weight:600;color:var(--txt);cursor:pointer;margin-right:10px}
 
 /* --- invoice (printable) --- */
@@ -558,8 +564,8 @@ table.tbl td.sub-row{background:var(--panel2)}
    and the collision breaks the whole left panel. */
 .tside{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
   border-radius:6px;padding:3px 8px;border:1px solid transparent}
-.tside.buy{color:var(--green);background:var(--green-bg);border-color:#bbe7d4}
-.tside.sell{color:var(--red);background:var(--red-bg);border-color:#f5c6c6}
+.tside.buy{color:var(--green);background:var(--green-bg);border-color:var(--green-line)}
+.tside.sell{color:var(--red);background:var(--red-bg);border-color:var(--red-line)}
 
 /* --- Analytics: per-instrument breakdown --- */
 .sym-list{display:flex;flex-direction:column;gap:12px}
@@ -577,7 +583,7 @@ table.tbl td.sub-row{background:var(--panel2)}
 }
 
 /* payout row in the account ledger */
-.tside.payout{color:var(--acc);background:#eef0ff;border-color:#d5d9ff}
+.tside.payout{color:var(--acc);background:var(--acc-bg);border-color:var(--acc-line)}
 
 /* --- Certificates tab --- */
 .cert-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
@@ -588,7 +594,7 @@ table.tbl td.sub-row{background:var(--panel2)}
 .cert-row b{display:block;font-size:14px}
 .cert-row span{display:block;font-size:12px;color:var(--muted);margin-top:2px}
 .cert-row .acts{display:flex;gap:8px;flex-wrap:wrap;flex:0 0 auto}
-.cert-row.done{background:#fff;border-color:var(--acc-line)}
+.cert-row.done{background:var(--panel);border-color:var(--acc-line)}
 .cert-row.lock{opacity:.6}
 @media(max-width:560px){
   .cert-row{flex-direction:column;align-items:flex-start;gap:10px}
@@ -602,44 +608,44 @@ table.tbl td.sub-row{background:var(--panel2)}
      lets the buttons escape the container and stretches the page by dozens of px */
 .topbar .crumb{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-/* ---------------- mobile (dopisane na koncu — wygrywa kolejnoscia w pliku;
-   sluzy OBU panelom: portal + admin) ---------------- */
+/* ---------------- mobile (appended at the end — wins by file order;
+   serves BOTH panels: portal + admin) ---------------- */
 .scroll-x{overflow-x:auto;overscroll-behavior-x:contain}
 
 @media(max-width:960px){
-  /* scrim pod otwarta szuflada (.side z-index:40, topbar 30) + blokada scrolla */
+  /* scrim under the open drawer (.side z-index:40, topbar 30) + scroll lock */
   body.nav-open::before{content:"";position:fixed;inset:0;z-index:39;
-    background:rgba(15,23,42,.45);backdrop-filter:blur(2px);animation:scrim-in .2s ease}
+    background:var(--scrim);backdrop-filter:blur(2px);animation:scrim-in .2s ease}
   body.nav-open{overflow:hidden}
-  /* pill marki nie nachodzi na przycisk X szuflady */
+  /* brand pill must not overlap the drawer close button */
   .side-head{min-width:0}
   .side-head .brand-pill{max-width:calc(100% - 44px);overflow:hidden}
   .side-head .brand-txt{overflow:hidden;text-overflow:ellipsis}
-  /* tytul strony w topbarze: jedna linia z elipsa zamiast lamania na dwie */
+  /* topbar page title: one ellipsized line instead of wrapping to two */
   .topbar h1{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  /* affordance przewijania tabel: cien na krawedzi znika, gdy dojedziesz do konca */
+  /* table scroll affordance: the edge shadow fades once you reach the end */
   .tbl-wrap,.scroll-x{background:
-    linear-gradient(90deg,#fff 30%,rgba(255,255,255,0)) left/44px 100% no-repeat local,
-    linear-gradient(270deg,#fff 30%,rgba(255,255,255,0)) right/44px 100% no-repeat local,
-    radial-gradient(farthest-side at 0 50%,rgba(15,23,42,.16),transparent) left/16px 100% no-repeat scroll,
-    radial-gradient(farthest-side at 100% 50%,rgba(15,23,42,.16),transparent) right/16px 100% no-repeat scroll,
-    #fff}
+    linear-gradient(90deg,var(--panel) 30%,var(--panel-t)) left/44px 100% no-repeat local,
+    linear-gradient(270deg,var(--panel) 30%,var(--panel-t)) right/44px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%,var(--edge),transparent) left/16px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%,var(--edge),transparent) right/16px 100% no-repeat scroll,
+    var(--panel)}
 }
 @keyframes scrim-in{from{opacity:0}}
 
 @media(max-width:640px){
-  .inp{font-size:16px}                              /* iOS zoomuje przy fokusie <16px */
+  .inp{font-size:16px}                              /* iOS zooms on focus below 16px */
   .icon-btn{width:44px;height:44px;flex:0 0 44px}
   .btn-o.sm,.btn-p.sm{min-height:40px;padding:9px 14px}
   .copy{position:relative}
-  .copy::after{content:"";position:absolute;inset:-9px}   /* hit-area 44px bez zmiany layoutu */
+  .copy::after{content:"";position:absolute;inset:-9px}   /* 44px hit-area without layout shift */
   .auth-tab{min-height:44px}
   #a-forgot{padding:10px}
   #toasts{left:12px;right:12px;bottom:12px;max-width:none}
-  /* siatki, ktore nie miescily sie w 3 kolumnach na telefonie */
+  /* grids that did not fit in 3 columns on a phone */
   .podium{grid-template-columns:1fr}
   .tier-track{grid-template-columns:1fr}
-  /* kalendarz zostaje tygodniowy (7 kolumn) — kompaktowe komorki */
+  /* the calendar keeps 7 weekday columns — compact cells */
   .cal-grid{gap:3px}
   .cal-day{min-height:44px;padding:4px 3px;border-radius:7px;overflow:hidden}
   .cal-day .d{font-size:10.5px}
@@ -649,14 +655,14 @@ table.tbl td.sub-row{background:var(--panel2)}
   .stat-tile .val{font-size:clamp(14px,4.3vw,16.5px)}
 }
 @media(max-width:480px){
-  .grid2{grid-template-columns:1fr}      /* imie/nazwisko w modalu zakupu, pola KYC */
+  .grid2{grid-template-columns:1fr}      /* first/last name in the buy modal, KYC fields */
 }
 @media(max-width:400px){
   .cal-day{padding:4px 2px}
   .cal-day .pnl{font-size:9px}
 }
 @media(max-width:360px){
-  .stats-row{grid-template-columns:1fr}   /* dopiero naprawde waskie ekrany; 390px trzyma 2 kolumny */
+  .stats-row{grid-template-columns:1fr}   /* only truly narrow screens; 390px keeps 2 columns */
 }
 
 @media(hover:none){
@@ -671,7 +677,7 @@ table.tbl td.sub-row{background:var(--panel2)}
 .plan-badge{display:inline-block;margin:2px 0 8px;font-size:11px;font-weight:700;letter-spacing:.02em;
   color:#fff;background:var(--grad);border-radius:999px;padding:3px 9px}
 .plan-promo{margin:-4px 0 4px;font-size:12.5px;line-height:1.55;color:var(--muted);
-  background:var(--acc-bg);border:1px solid #dfe3ff;border-radius:10px;padding:9px 12px}
+  background:var(--acc-bg);border:1px solid var(--acc-line);border-radius:10px;padding:9px 12px}
 .plan-promo b{color:var(--acc)}
 
 /* ---------------- mobile bottom nav (ADMIN panel) ----------------
@@ -682,7 +688,7 @@ table.tbl td.sub-row{background:var(--panel2)}
    lifted above the bar below. Requires viewport-fit=cover for the safe area.
    Offsets are scoped to body.has-botnav so the portal is not double-padded. */
 .botnav{position:fixed;left:0;right:0;bottom:0;z-index:35;display:none;
-  background:rgba(255,255,255,.96);backdrop-filter:blur(12px);
+  background:var(--glass);backdrop-filter:blur(12px);
   border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
 .botnav-btn{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;
   justify-content:center;gap:3px;min-height:56px;padding:6px 2px 7px;background:none;
@@ -700,12 +706,12 @@ table.tbl td.sub-row{background:var(--panel2)}
 /* ---------------- challenge cards (portal Challenges view) ---------------- */
 .chal-grid{display:grid;grid-template-columns:1fr;gap:14px}
 @media(min-width:720px){.chal-grid{grid-template-columns:repeat(auto-fill,minmax(340px,1fr))}}
-.chal-card{background:#fff;border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);
+.chal-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);
   padding:16px 18px 18px;display:flex;flex-direction:column;gap:13px;position:relative;overflow:hidden}
 .chal-card::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;
   background:linear-gradient(90deg,#2563eb,#6366f1,#a855f7)}
 .chal-card.dead{opacity:.92}
-.chal-card.dead::before{background:#e2e8f0}
+.chal-card.dead::before{background:var(--line2)}
 .chal-head{display:flex;align-items:center;gap:12px;min-width:0}
 .chal-id{min-width:0;flex:1}
 .chal-id .login{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;
@@ -715,7 +721,7 @@ table.tbl td.sub-row{background:var(--panel2)}
   text-transform:uppercase;color:var(--acc);background:var(--acc-bg);border-radius:999px;padding:4px 10px}
 .chal-card.dead .phase-chip{color:var(--muted);background:var(--panel2)}
 .chal-bars{display:flex;flex-direction:column;gap:10px}
-.chal-breach{font-size:12.5px;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;
+.chal-breach{font-size:12.5px;color:var(--red);background:var(--red-bg);border:1px solid var(--red-line);
   border-radius:10px;padding:8px 12px}
 .chal-stats{display:flex;gap:16px}
 .chal-stat{flex:1;min-width:0}
@@ -738,7 +744,7 @@ table.tbl td.sub-row{background:var(--panel2)}
   background:#dc2626;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;
   justify-content:center;padding:0 4px;line-height:1}
 .notif-panel{position:fixed;top:64px;right:16px;width:min(360px,calc(100vw - 24px));
-  max-height:min(440px,70vh);overflow-y:auto;overscroll-behavior:contain;background:#fff;
+  max-height:min(440px,70vh);overflow-y:auto;overscroll-behavior:contain;background:var(--panel);
   border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 40px rgba(15,23,42,.16);
   z-index:65;padding:6px}
 .notif-head{display:flex;align-items:center;justify-content:space-between;gap:10px;
@@ -771,7 +777,7 @@ table.tbl td.sub-row{background:var(--panel2)}
 .tabbar{display:none;position:fixed;left:0;right:0;bottom:0;z-index:50;
   height:calc(58px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);
   padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);
-  background:rgba(255,255,255,.92);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  background:var(--glass);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   border-top:1px solid var(--line)}
 .tab-item{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
   gap:3px;min-width:44px;min-height:44px;color:var(--muted);transition:color .15s}
@@ -784,8 +790,8 @@ table.tbl td.sub-row{background:var(--panel2)}
   width:28px;height:3px;border-radius:99px;background:var(--grad)}
 
 /* --- "More" bottom sheet --- */
-.sheet-veil{position:fixed;inset:0;z-index:60;background:rgba(15,23,42,.4)}
-.sheet{position:fixed;left:0;right:0;bottom:0;z-index:61;background:#fff;
+.sheet-veil{position:fixed;inset:0;z-index:60;background:var(--scrim)}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:61;background:var(--panel);
   border:1px solid var(--line);border-bottom:0;border-radius:20px 20px 0 0;
   padding:8px 14px calc(14px + env(safe-area-inset-bottom));max-height:70vh;overflow-y:auto;
   overscroll-behavior:contain;box-shadow:0 -24px 60px -24px rgba(15,23,42,.35);
@@ -833,7 +839,7 @@ html.pwa .topbar{padding-top:calc(13px + env(safe-area-inset-top))}  /* status b
 
 /* --- streak chip (topbar) --- */
 .streak-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;
-  border:1px solid #f3ddb5;background:var(--gold-bg);color:var(--gold);font-weight:700;font-size:13px;
+  border:1px solid var(--gold-line);background:var(--gold-bg);color:var(--gold);font-weight:700;font-size:13px;
   transition:.15s;white-space:nowrap}
 .streak-chip svg{width:15px;height:15px;flex:0 0 15px}
 .streak-chip b{font-family:var(--mono);font-weight:800;line-height:1}
@@ -895,19 +901,122 @@ html.pwa .topbar{padding-top:calc(13px + env(safe-area-inset-top))}  /* status b
 
 /* --- leaderboard movers --- */
 .rank-up,.rank-down{font-family:var(--mono);font-size:10.5px;font-weight:700;margin-left:4px;white-space:nowrap}
-.rank-up{color:#059669}
-.rank-down{color:#dc2626}
+.rank-up{color:var(--green)}
+.rank-down{color:var(--red)}
 
 /* --- pull-to-refresh (mobile PWA) --- */
-/* contain tylko POZA standalone: blokuje natywny pull-to-refresh Chrome'a na
-   Androidzie; w PWA wystarcza html.pwa body{overscroll-behavior-y:none} wyżej,
-   a contain na html psuł na iOS pozycję fixed pasków przy dobiciu do dołu. */
+/* contain only OUTSIDE standalone: it blocks Chrome's native pull-to-refresh
+   on Android; in the PWA html.pwa body{overscroll-behavior-y:none} above is
+   enough, and contain on html broke fixed bars' position on iOS at the bottom. */
 html:not(.pwa){overscroll-behavior-y:contain}
-/* własna warstwa kompozycji: bez niej iOS potrafi „zawiesić" fixed pasek
-   z backdrop-filter w połowie ekranu przy szybkim scrollu / rubber-bandzie */
+/* own compositing layer: without it iOS can "freeze" a fixed bar with
+   backdrop-filter mid-screen on fast scroll / rubber-banding */
 .tabbar,.botnav{transform:translateZ(0)}
 .ptr-spin{position:fixed;top:14px;left:50%;width:30px;height:30px;margin-left:-15px;z-index:96;
   border-radius:50%;border:3px solid var(--line);border-top-color:var(--acc,#6366f1);
-  background:#fff;box-shadow:0 6px 18px -6px rgba(15,23,42,.3);
+  background:var(--panel);box-shadow:0 6px 18px -6px rgba(15,23,42,.3);
   animation:ptr-rot .7s linear infinite}
 @keyframes ptr-rot{to{transform:rotate(360deg)}}
+
+/* ---------------- account detail v3 (FTMO-style layout) ----------------
+   Sidebar CTA on top, action-chip row, "Current Results" card with the
+   objective-lines chart and a right-hand account info card. */
+.side-cta{padding:2px 14px 8px}
+.side-new{width:100%;justify-content:center}
+.side.collapsed .side-cta{display:none}
+.sb-link{position:relative}
+.sb-link.on::before{content:"";position:absolute;left:-12px;top:8px;bottom:8px;width:3px;
+  border-radius:0 99px 99px 0;background:var(--acc)}
+.side.collapsed .sb-link.on::before{left:0}
+
+.acts-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.act-chip{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;
+  border:1px solid var(--line2);border-radius:999px;padding:7px 14px;color:var(--muted);
+  transition:.15s;background:var(--panel);text-decoration:none}
+.act-chip:hover{color:var(--acc);border-color:var(--acc)}
+.act-chip svg{width:14px;height:14px}
+.act-chip.live{color:var(--green);border-color:var(--green-line)}
+.act-chip.live:hover{color:var(--green);border-color:var(--green-line)}
+
+.detail-grid{display:grid;grid-template-columns:1fr;gap:14px;margin-bottom:14px}
+@media(min-width:1100px){.detail-grid{grid-template-columns:minmax(0,1fr) 320px;align-items:start}}
+.res-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.res-head h3{margin:0}
+.seg-mini{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.seg-mini .sw{display:inline-flex;background:var(--bg3);border:1px solid var(--line);border-radius:999px;padding:2px}
+.seg-mini button{padding:4px 12px;border-radius:999px;font-size:11.5px;font-weight:700;color:var(--muted);min-height:0}
+.seg-mini button.on{background:var(--acc);color:#fff}
+.res-stats{display:flex;gap:28px;flex-wrap:wrap;margin-bottom:14px}
+.res-stat .l{font-size:11.5px;color:var(--dim)}
+.res-stat .v{font-family:var(--mono);font-weight:700;font-size:20px;letter-spacing:-.02em;margin-top:2px}
+.res-stat .v.up{color:var(--green)} .res-stat .v.down{color:var(--red)}
+.chart-box.tall{height:320px}
+.info-card .kv2{display:flex;justify-content:space-between;align-items:center;gap:12px;
+  padding:11px 0;border-bottom:1px solid var(--line);font-size:13px}
+.info-card .kv2:last-child{border-bottom:0}
+.info-card .kv2 .k{color:var(--muted)}
+.info-card .kv2 .v{font-family:var(--mono);font-weight:600;text-align:right}
+.split-under{display:block;height:3px;border-radius:99px;background:var(--bg3);margin-top:4px;
+  overflow:hidden;width:64px;margin-left:auto}
+.split-under i{display:block;height:100%;background:var(--acc)}
+.auth-stats{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px}
+.as-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:118px}
+.as-card b{font-family:var(--mono);font-size:18px;display:block;letter-spacing:-.01em}
+.as-card span{font-size:11.5px;color:var(--muted)}
+.ot-title{display:flex;align-items:center;gap:9px;margin-bottom:6px}
+.pnl-pill{display:inline-block;font-family:var(--mono);font-weight:700;font-size:12.5px;
+  border-radius:8px;padding:4px 10px;background:var(--bg3)}
+.pnl-pill.up{color:var(--green)} .pnl-pill.down{color:var(--red)}
+@media(max-width:640px){
+  .chart-box.tall{height:240px}
+  .res-stats{gap:18px}
+  .res-stat .v{font-size:17px}
+}
+
+/* ============================================================
+   THEME — dark. Light values live in :root at the top; this block
+   re-maps every token for html[data-theme=dark]. Kept at the very
+   END so it wins the cascade over every component block above.
+   Elevation on dark comes from borders, not drop shadows.
+   ============================================================ */
+html[data-theme=dark]{
+  color-scheme:dark;
+  --bg:#0b0d12; --bg2:#0e1117; --bg3:#161b26;
+  --panel:#12151c; --panel2:#171b24;
+  --line:rgba(255,255,255,.07); --line2:rgba(255,255,255,.13);
+  --txt:#e8ecf5; --muted:#99a3b8; --dim:#6b7488;
+  --acc:#7d87f8; --acc2:#a78bfa; --acc-bg:rgba(99,102,241,.16); --acc-line:rgba(125,135,248,.38);
+  --green:#34d399; --green2:#34d399; --green-bg:rgba(16,185,129,.13);
+  --red:#f87171; --red-bg:rgba(239,68,68,.13);
+  --gold:#fbbf24; --gold-bg:rgba(217,119,6,.15);
+  --blue:#38bdf8; --blue-bg:rgba(14,165,233,.14);
+  --purple:#a78bfa; --purple-bg:rgba(139,92,246,.16);
+  --green-line:rgba(52,211,153,.35); --red-line:rgba(248,113,113,.35); --gold-line:rgba(251,191,36,.35);
+  --blue-line:rgba(56,189,248,.35); --purple-line:rgba(167,139,250,.35);
+  --gold-ink:#e6b566; --gold-tint:rgba(217,119,6,.08); --bronze:#e2a06b; --bronze-bg:rgba(180,83,9,.2);
+  --hover:rgba(255,255,255,.035); --glass:rgba(13,16,23,.85); --scrim:rgba(0,0,0,.62);
+  --panel-t:rgba(18,21,28,0); --edge:rgba(0,0,0,.5);
+  --shadow:0 1px 2px rgba(0,0,0,.35),0 10px 30px -18px rgba(0,0,0,.55);
+  --shadow-lg:0 30px 70px -30px rgba(0,0,0,.7),0 2px 6px rgba(0,0,0,.35);
+}
+html[data-theme=dark] ::selection{background:rgba(125,135,248,.35)}
+/* Native widgets follow color-scheme; WebKit thumbs need an explicit tint. */
+html[data-theme=dark] ::-webkit-scrollbar{width:10px;height:10px}
+html[data-theme=dark] ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:99px;
+  border:2px solid transparent;background-clip:padding-box}
+html[data-theme=dark] ::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.22)}
+html[data-theme=dark] ::-webkit-scrollbar-track{background:transparent}
+html[data-theme=dark] ::-webkit-scrollbar-corner{background:transparent}
+/* Soft indigo glows read as mud on dark surfaces — flatten them. */
+html[data-theme=dark] .brand-pill{box-shadow:none}
+html[data-theme=dark] .btn-p{box-shadow:0 8px 18px -10px rgba(0,0,0,.6)}
+html[data-theme=dark] .side.open{box-shadow:30px 0 80px -30px rgba(0,0,0,.6)}
+html[data-theme=dark] .toast{box-shadow:0 16px 44px -16px rgba(0,0,0,.7)}
+html[data-theme=dark] .notif-panel{box-shadow:0 18px 40px rgba(0,0,0,.55)}
+html[data-theme=dark] .sheet{box-shadow:0 -24px 60px -24px rgba(0,0,0,.7)}
+html[data-theme=dark] .modal{box-shadow:0 40px 100px -30px rgba(0,0,0,.75)}
+html[data-theme=dark] .gradient-banner{box-shadow:0 14px 34px -14px rgba(0,0,0,.55)}
+html[data-theme=dark] .reveal-card{box-shadow:0 18px 44px -18px rgba(0,0,0,.6)}
+html[data-theme=dark] .switch i::after{background:#e8ecf5;box-shadow:0 1px 3px rgba(0,0,0,.5)}
+/* The printable invoice stays a light document in both themes. */
+html[data-theme=dark] .inv-print{border:1px solid var(--line2)}

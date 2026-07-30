@@ -1,7 +1,7 @@
-/* Minimalny service worker: wymagany, by Chrome/Samsung Internet traktowały
-   stronę jako instalowalną PWA i fundament pod przyszłe web push (iOS 16.4+).
-   Celowo NIE cache'uje nic — portal pokazuje dane finansowe na żywo, a stale
-   saldo z cache byłoby gorsze niż brak offline'u. */
+/* Minimal service worker: required for Chrome/Samsung Internet to treat the
+   page as an installable PWA and the base for web push (iOS 16.4+). It caches
+   NOTHING on purpose — the portal shows live financial data and a stale
+   balance from cache would be worse than no offline mode at all. */
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch', () => {});
@@ -23,11 +23,9 @@ self.addEventListener('notificationclick', (e) => {
   e.notification.close();
   const url = (e.notification.data && e.notification.data.url) || '/portal';
   e.waitUntil((async () => {
-    /* Cel kliku ląduje też w Cache Storage (jeden wpis nawigacyjny, nie cache
-       HTTP): iOS gubi postMessage do zawieszonej/przeładowanej strony — portal
-       czyta wpis przy starcie i przy visibilitychange (TTL 30 s). Zapis NIE
-       jest awaitowany przed focus/openWindow: Safari odrzuca je, gdy minie
-       zbyt dużo czasu od gestu użytkownika. */
+    /* The click target also lands in Cache Storage (a single navigation entry,
+       not an asset cache): iOS can drop the postMessage to a suspended page,
+       so the page re-reads this entry on every return to the foreground. */
     const save = caches.open('pf-nav')
       .then((c) => c.put('/__pending-nav', new Response(JSON.stringify({ url, ts: Date.now() }))))
       .catch(() => {});
@@ -35,8 +33,8 @@ self.addEventListener('notificationclick', (e) => {
     let act = null;
     for (const w of ws) {
       if (w.url.includes('/portal') && 'focus' in w) {
-        /* postMessage zamiast navigate(): SPA przełącza widok bez reloadu
-           (navigate() gubi stan i bywa zawodny w iOS PWA) */
+        /* postMessage instead of navigate(): the SPA switches the view without a
+           reload (navigate() would drop the logged-in state mid-flow). */
         w.postMessage({ type: 'navigate', url });
         act = w.focus();
         break;

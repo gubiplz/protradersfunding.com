@@ -39,16 +39,36 @@ def verify_password(password: str, stored: str) -> bool:
 
 
 # --- tokeny ---
-def make_token(trader_id: int) -> str:
-    return _serializer.dumps({"tid": trader_id})
+def _pw_fp(password_hash: str) -> str:
+    """Odcisk aktualnego hasha hasła wszywany do tokenów.
+
+    Zmiana/reset hasła zmienia odcisk, więc: (a) stare tokeny sesji przestają
+    działać, (b) link resetu jest de facto jednorazowy — po użyciu hash się
+    zmienia i ten sam link ma już nieaktualny odcisk. Tokeny bez pola "pwf"
+    (sprzed wdrożenia) są honorowane do naturalnego wygaśnięcia.
+    """
+    return hashlib.sha256((password_hash or "").encode()).hexdigest()[:12]
+
+
+def make_token(trader_id: int, password_hash: str | None = None) -> str:
+    payload: dict = {"tid": trader_id}
+    if password_hash:
+        payload["pwf"] = _pw_fp(password_hash)
+    return _serializer.dumps(payload)
+
+
+def _parse_session(token: str) -> dict | None:
+    try:
+        data = _serializer.loads(token, max_age=TOKEN_MAX_AGE)
+        int(data["tid"])
+        return data
+    except (BadSignature, Exception):
+        return None
 
 
 def parse_token(token: str) -> int | None:
-    try:
-        data = _serializer.loads(token, max_age=TOKEN_MAX_AGE)
-        return int(data["tid"])
-    except (BadSignature, Exception):
-        return None
+    data = _parse_session(token)
+    return int(data["tid"]) if data else None
 
 
 # Osobna sol: token resetu nie moze dzialac jako token sesji (i odwrotnie).
@@ -56,13 +76,18 @@ _reset_serializer = URLSafeTimedSerializer(settings.secret_key, salt="pw-reset")
 RESET_MAX_AGE = 60 * 60  # godzina
 
 
-def make_reset_token(trader_id: int) -> str:
-    return _reset_serializer.dumps({"tid": trader_id})
+def make_reset_token(trader_id: int, password_hash: str | None = None) -> str:
+    payload: dict = {"tid": trader_id}
+    if password_hash:
+        payload["pwf"] = _pw_fp(password_hash)
+    return _reset_serializer.dumps(payload)
 
 
-def parse_reset_token(token: str) -> int | None:
+def parse_reset_token(token: str) -> tuple[int, str | None] | None:
+    """Zwraca (trader_id, odcisk_hasla_z_tokenu|None) albo None gdy nieważny."""
     try:
-        return int(_reset_serializer.loads(token, max_age=RESET_MAX_AGE)["tid"])
+        data = _reset_serializer.loads(token, max_age=RESET_MAX_AGE)
+        return int(data["tid"]), data.get("pwf")
     except (BadSignature, Exception):
         return None
 
@@ -86,16 +111,20 @@ def parse_verify_token(token: str) -> int | None:
 def current_trader(authorization: str | None = Header(default=None)) -> Trader:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(401, "Missing token (sign in)")
-    tid = parse_token(authorization.split(" ", 1)[1].strip())
-    if tid is None:
+    data = _parse_session(authorization.split(" ", 1)[1].strip())
+    if data is None:
         raise HTTPException(401, "Invalid or expired token")
     session = SessionLocal()
     try:
-        trader = session.get(Trader, tid)
+        trader = session.get(Trader, int(data["tid"]))
         # Konto usunięte (Danger Zone) jest zanonimizowane, ale wiersz zostaje —
         # stary token nie może dalej działać.
         if not trader or trader.email.endswith("@removed.invalid"):
             raise HTTPException(401, "Trader not found")
+        # Token z odciskiem hasła: reset/zmiana hasła uniewaznia stare sesje.
+        pwf = data.get("pwf")
+        if pwf and pwf != _pw_fp(trader.password_hash):
+            raise HTTPException(401, "Invalid or expired token")
         session.expunge(trader)
         return trader
     finally:

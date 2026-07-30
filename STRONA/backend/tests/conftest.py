@@ -39,6 +39,11 @@ os.environ.setdefault("ADMIN_TOKEN", "tajny-token")
 os.environ.setdefault("FEED", "sim")
 os.environ.setdefault("AUTO_SEED", "false")
 
+# Rate-limit endpointów auth trzyma licznik per PROCES, a TestClient zawsze
+# przychodzi z tego samego "IP" — cała suita szybko wpadłaby w 429. Test
+# rate-limitu włącza go sam (monkeypatch main._RL_DISABLED + czysty licznik).
+os.environ["RATE_LIMIT_OFF"] = "true"
+
 # Promocja „Upgrade Your Size" jest domyślnie WŁĄCZONA w produkcji, ale w
 # testach musi być wyłączona: upgrade wymaga wprawdzie kodu promo, ale sama
 # aktywna promocja renderuje pasek na stronach publicznych i pola

@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -354,6 +355,30 @@ class LoginIn(BaseModel):
 
 SESSION_COOKIE = "pf_session"
 
+# Prosty rate-limit per proces (endpointy auth: credential stuffing, mail-bombing
+# przez /forgot i masowe zakladanie kont). Na serverless chroni per-instancje —
+# swiadome minimum bez zewnetrznego magazynu; okno przesuwne 60 s.
+_RL_HITS: dict[tuple[str, str], list[float]] = {}
+_RL_DISABLED = os.getenv("RATE_LIMIT_OFF", "false").lower() == "true"
+_EMAIL_RX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _rate_limit(request: Request, bucket: str, limit: int, window: int = 60) -> None:
+    if _RL_DISABLED:
+        return
+    ip = (request.headers.get("x-forwarded-for")
+          or (request.client.host if request.client else "?")).split(",")[0].strip()
+    now = time.time()
+    key = (bucket, ip)
+    hits = [t for t in _RL_HITS.get(key, []) if now - t < window]
+    if len(hits) >= limit:
+        raise HTTPException(429, "Too many attempts — try again in a minute.")
+    hits.append(now)
+    _RL_HITS[key] = hits
+    if len(_RL_HITS) > 10_000:                      # GC starych wpisow
+        for k in [k for k, v in _RL_HITS.items() if not v or now - v[-1] > window]:
+            _RL_HITS.pop(k, None)
+
 
 def _ustaw_ciasteczko_sesji(response: Response, token: str) -> None:
     """Zapisuje sesje w ciasteczku, zeby SERWER mogl bramkowac strone /admin.
@@ -385,11 +410,14 @@ class ResetIn(BaseModel):
 @app.post("/api/auth/forgot")
 def forgot_password(payload: ForgotIn, request: Request):
     """Zawsze 200 — odpowiedź nie może zdradzać, czy e-mail istnieje w bazie."""
+    _rate_limit(request, "forgot", 5)
     session = SessionLocal()
     try:
         tr = session.query(Trader).filter(Trader.email == payload.email.strip().lower()).first()
         if tr:
-            token = auth.make_reset_token(tr.id)
+            # Odcisk hasła w tokenie = link jednorazowy (po resecie hash sie
+            # zmienia i ten sam link juz nie przejdzie walidacji).
+            token = auth.make_reset_token(tr.id, tr.password_hash)
             reset_url = f"{_public_base(request)}/portal?reset={token}"
             notify.send("password_reset", tr.email,
                         {"name": tr.full_name or tr.email, "reset_url": reset_url})
@@ -399,10 +427,11 @@ def forgot_password(payload: ForgotIn, request: Request):
 
 
 @app.post("/api/auth/reset")
-def reset_password(payload: ResetIn):
-    tid = auth.parse_reset_token(payload.token)
-    if tid is None:
+def reset_password(payload: ResetIn, response: Response):
+    parsed = auth.parse_reset_token(payload.token)
+    if parsed is None:
         raise HTTPException(400, "This reset link is invalid or has expired — request a new one")
+    tid, pwf = parsed
     if len(payload.password) < 8:
         raise HTTPException(400, "The password must be at least 8 characters long")
     session = SessionLocal()
@@ -410,9 +439,19 @@ def reset_password(payload: ResetIn):
         tr = session.get(Trader, tid)
         if not tr:
             raise HTTPException(400, "This reset link is invalid or has expired — request a new one")
+        if pwf and pwf != auth._pw_fp(tr.password_hash):
+            # Hash już inny niż przy wysyłce linku — link zużyty albo hasło
+            # zmienione w międzyczasie. (Tokeny bez pwf: krotkie okno przejsciowe.)
+            raise HTTPException(400, "This reset link has already been used — request a new one")
         tr.password_hash = auth.hash_password(payload.password)
         session.commit()
-        return {"ok": True}
+        # Auto-login po udanym resecie — nowy token jest zwiazany z nowym haslem,
+        # wszystkie starsze sesje wlasnie umarly.
+        token = auth.make_token(tr.id, tr.password_hash)
+        _ustaw_ciasteczko_sesji(response, token)
+        return {"ok": True, "token": token,
+                "trader": {"id": tr.id, "email": tr.email, "full_name": tr.full_name,
+                           "is_admin": tr.is_admin, "referral_code": tr.referral_code}}
     finally:
         session.close()
 
@@ -485,23 +524,44 @@ def resend_verify_email(request: Request, trader: Trader = Depends(auth.current_
 
 
 @app.post("/api/auth/signup")
-def signup(payload: SignupIn, response: Response, request: Request):
+def signup(payload: SignupIn, request: Request, response: Response):
+    _rate_limit(request, "signup", 5)
+    email = payload.email.strip().lower()
+    if not _EMAIL_RX.fullmatch(email):
+        raise HTTPException(400, "Enter a valid e-mail address")
+    # Login/zmiana hasla wymagaja >=8 — signup nie moze byc jedyna furtka
+    # do zalozenia konta ze slabszym haslem.
+    if len(payload.password) < 8:
+        raise HTTPException(400, "The password must be at least 8 characters long")
     session = SessionLocal()
     try:
-        if session.query(Trader).filter(Trader.email == payload.email.lower()).first():
+        if session.query(Trader).filter(Trader.email == email).first():
             raise HTTPException(400, "An account with this e-mail already exists")
+        # Kod polecajacy tylko istniejacy — literowka nie moze cicho przypisac
+        # prowizji do nikogo (ani zostac w bazie jako smiec).
+        referred_by = None
+        if payload.referral:
+            ref = payload.referral.strip().upper()
+            if session.query(Trader).filter(Trader.referral_code == ref).first():
+                referred_by = ref
+        # token_hex(3) to 16.7 mln kombinacji — kolizja rzadka, ale UNIQUE
+        # na kolumnie zamienialby ja w 500; kilka prob zamyka temat.
+        for _ in range(5):
+            code = _gen_ref_code()
+            if not session.query(Trader).filter(Trader.referral_code == code).first():
+                break
         tr = Trader(
-            email=payload.email.lower(), password_hash=auth.hash_password(payload.password),
-            full_name=payload.full_name, referral_code=_gen_ref_code(),
-            referred_by=(payload.referral or None),
+            email=email, password_hash=auth.hash_password(payload.password),
+            full_name=payload.full_name.strip(), referral_code=code,
+            referred_by=referred_by,
             email_verified=False, email_verify_code=f"{secrets.randbelow(1_000_000):06d}",
         )
         session.add(tr)
         session.commit()
         # welcome idzie dopiero po potwierdzeniu adresu — najpierw sam kod
         _wyslij_mail_weryfikacyjny(request, tr)
-        telemetry.track("signup", tr.id, referred=bool(payload.referral))
-        token = auth.make_token(tr.id)
+        telemetry.track("signup", tr.id, referred=bool(referred_by))
+        token = auth.make_token(tr.id, tr.password_hash)
         _ustaw_ciasteczko_sesji(response, token)
         return {"token": token, "trader": {"id": tr.id, "email": tr.email,
                 "full_name": tr.full_name, "referral_code": tr.referral_code}}
@@ -510,14 +570,15 @@ def signup(payload: SignupIn, response: Response, request: Request):
 
 
 @app.post("/api/auth/login")
-def login(payload: LoginIn, response: Response):
+def login(payload: LoginIn, request: Request, response: Response):
+    _rate_limit(request, "login", 10)
     session = SessionLocal()
     try:
-        tr = session.query(Trader).filter(Trader.email == payload.email.lower()).first()
+        tr = session.query(Trader).filter(Trader.email == payload.email.strip().lower()).first()
         if not tr or not auth.verify_password(payload.password, tr.password_hash):
             raise HTTPException(401, "Wrong e-mail or password")
         telemetry.track("login", tr.id)
-        token = auth.make_token(tr.id)
+        token = auth.make_token(tr.id, tr.password_hash)
         _ustaw_ciasteczko_sesji(response, token)
         return {"token": token, "trader": {"id": tr.id, "email": tr.email,
                 "full_name": tr.full_name, "is_admin": tr.is_admin, "referral_code": tr.referral_code}}
@@ -774,6 +835,36 @@ def my_account_detail(account_id: int, trader: Trader = Depends(auth.current_tra
             raise HTTPException(404, "Account not found")
         _ensure_cert_token(session, acc)
         return _account_detail(session, acc)
+    finally:
+        session.close()
+
+
+@app.get("/api/me/accounts/{account_id}/positions")
+def my_account_positions(account_id: int, trader: Trader = Depends(auth.current_trader)):
+    """Otwarte pozycje konta — tabela "Open trades" w portalu.
+
+    Wiersze istnieją tylko tam, gdzie ktoś je zapisuje (dziś: trade bot).
+    Realny feed MT5 zwraca wyłącznie zagregowany open_pnl, więc dla kont
+    bez wierszy portal pokazuje pojedynczą kartę z floating P&L — ŻADNEGO
+    fabrykowania ticketów po stronie API.
+    """
+    session = SessionLocal()
+    try:
+        acc = session.get(Account, account_id)
+        if not acc or acc.trader_id != trader.id:
+            raise HTTPException(404, "Account not found")
+        rows = (session.query(Trade)
+                .filter(Trade.account_id == acc.id, Trade.status == "open")
+                .order_by(Trade.opened_at.desc()).limit(50).all())
+        return [{
+            "ticket": t.id,
+            "symbol": t.symbol,
+            "side": t.side,
+            "lots": t.lots,
+            "open_price": t.open_price,
+            "pnl": t.pnl,
+            "opened_at": t.opened_at.isoformat() if t.opened_at else None,
+        } for t in rows]
     finally:
         session.close()
 
@@ -1368,7 +1459,9 @@ def me_password(payload: PasswordIn, trader: Trader = Depends(auth.current_trade
             raise HTTPException(400, "Your current password is wrong")
         tr.password_hash = auth.hash_password(payload.new_password)
         session.commit()
-        return {"ok": True}
+        # Zmiana hasla uniewaznia wszystkie starsze sesje (odcisk hasla w
+        # tokenie) — swiezy token pozwala TEJ sesji dzialac dalej bez wylogowania.
+        return {"ok": True, "token": auth.make_token(tr.id, tr.password_hash)}
     finally:
         session.close()
 

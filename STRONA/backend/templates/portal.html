@@ -1,16 +1,20 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Trader Portal — {{ site_name }}</title>
 <link rel="icon" href="/static/img/favicon.png" type="image/png">
 <link rel="manifest" href="/static/manifest.json">
-<meta name="theme-color" content="#f6f7fb">
+<meta name="theme-color" content="#0b0d12">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ProTraders">
 <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png">
 <script>if(matchMedia('(display-mode: standalone)').matches||navigator.standalone)document.documentElement.classList.add('pwa');
+/* Pre-paint theme pick: dark is the server-rendered default, a stored "light"
+   flips the attribute before first paint so there is no flash of the wrong theme. */
+try{if(localStorage.getItem('pf_theme')==='light'){document.documentElement.dataset.theme='light';
+document.querySelector('meta[name="theme-color"]').setAttribute('content','#f6f7fb')}}catch(e){}
 if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('/sw.js'))</script>
 <link rel="stylesheet" href="/static/css/portal.css?v={{ asset_v }}">
 <script src="/static/lib/chart.umd.min.js"></script>
@@ -32,6 +36,8 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
         <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> Automated risk engine — same rules for everyone</span>
         <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> Performance rewards with up to 90% profit split</span>
       </div>
+      <!-- Real platform numbers only (see /api/public/stats) — never invented. -->
+      <div class="auth-stats hidden" id="auth-stats"></div>
     </div>
     <div class="auth-foot">All accounts are demo accounts with virtual funds in a simulated environment.
       Rewards are performance-based and discretionary.</div>
@@ -45,16 +51,16 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
         <button id="tab-login" class="auth-tab on" onclick="authTab('login')">Log in</button>
         <button id="tab-signup" class="auth-tab" onclick="authTab('signup')">Create account</button>
       </div>
-      <div class="stack">
-        <input id="a-name" placeholder="Full name" class="inp hidden">
-        <input id="a-email" placeholder="E-mail" class="inp" autocomplete="email">
+      <form class="stack" id="a-form" onsubmit="doAuth();return false">
+        <input id="a-name" placeholder="Full name" class="inp hidden" autocomplete="name">
+        <input id="a-email" type="email" placeholder="E-mail" class="inp" autocomplete="email">
         <input id="a-pass" type="password" placeholder="Password" class="inp" autocomplete="current-password">
         <input id="a-pass2" type="password" placeholder="Repeat new password" class="inp hidden" autocomplete="new-password">
-        <input id="a-ref" placeholder="Referral code (optional)" class="inp hidden">
-        <button id="a-submit" onclick="doAuth()" class="btn-p lg" style="width:100%">Log in</button>
-        <button id="a-forgot" onclick="authTab('forgot')" style="font-size:12.5px;color:var(--muted);text-decoration:underline;background:none;border:0;cursor:pointer">Forgot password?</button>
-        <button id="a-back" onclick="authTab('login')" class="hidden" style="font-size:13px;color:var(--muted);background:none;border:0;cursor:pointer">‹ Back to log in</button>
-      </div>
+        <input id="a-ref" placeholder="Referral code (optional)" class="inp hidden" autocomplete="off">
+        <button id="a-submit" type="submit" class="btn-p lg" style="width:100%">Log in</button>
+        <button id="a-forgot" type="button" onclick="authTab('forgot')" style="font-size:12.5px;color:var(--muted);text-decoration:underline;background:none;border:0;cursor:pointer">Forgot password?</button>
+        <button id="a-back" type="button" onclick="authTab('login')" class="hidden" style="font-size:13px;color:var(--muted);background:none;border:0;cursor:pointer">‹ Back to log in</button>
+      </form>
     </div>
   </div>
 </div>
@@ -68,6 +74,7 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
       </button>
     </div>
+    <div class="side-cta"><button class="btn-p side-new" onclick="go('store')">+ New challenge</button></div>
     <nav class="side-nav" id="side-nav"></nav>
     <div class="side-bottom">
       <a class="sb-link" id="admin-link" href="/admin" style="display:none" title="Admin panel">
@@ -98,6 +105,7 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
           <span class="bell-badge hidden" id="bell-badge"></span>
         </button>
+        <button class="icon-btn" id="theme-btn" onclick="toggleTheme()" aria-label="Toggle light/dark theme"></button>
         <button class="btn-p sm" onclick="go('store')">+ New challenge</button>
       </div>
     </div>
@@ -134,7 +142,7 @@ const dstr=iso=>new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric
 // Date only — trade history has no time component. `YYYY-MM-DD` is read as
 // UTC so the browser timezone does not shift the day back by one.
 const dday=d=>new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'});
-let TOKEN=localStorage.getItem('pf_token'), ME=null, AUTHMODE='login', chart=null;
+let TOKEN=localStorage.getItem('pf_token'), ME=null, AUTHMODE='login', chart=null, CURV=null;
 const H=()=>TOKEN?{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'}:{'Content-Type':'application/json'};
 async function api(path,opts={}){const r=await fetch(path,{headers:H(),...opts});if(!r.ok){throw new Error((await r.json().catch(()=>({}))).detail||r.status)}return r.json()}
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -142,10 +150,31 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
    modal). Shared key with the landing page — one applied state everywhere. */
 function pfPromo(){try{return localStorage.getItem('pf_promo_code')||''}catch(e){return ''}}
 
-/* ---------- live refresh + deep-linki z pusha ---------- */
-/* Świeże ME (kredyty, streak) + badge dzwonka bez reloadu strony. Re-render
-   bieżącego widoku tylko na żądanie (pull-to-refresh / nawigacja z pusha)
-   albo gdy zmieniło się saldo kredytów — żeby nie migać ekranem co minutę. */
+/* ---------- theme (dark by default; "light" persisted in pf_theme) ---------- */
+const THEME_SUN='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.4M12 19.6V22M2 12h2.4M19.6 12H22M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M19.1 4.9l-1.7 1.7M6.6 17.4l-1.7 1.7"/></svg>';
+const THEME_MOON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.4 14.2A8.5 8.5 0 0 1 9.8 3.6 8.5 8.5 0 1 0 20.4 14.2z"/></svg>';
+function themeNow(){return document.documentElement.dataset.theme==='light'?'light':'dark'}
+function paintTheme(){
+  const t=themeNow(),b=$('theme-btn');
+  if(b){b.innerHTML=t==='dark'?THEME_SUN:THEME_MOON;
+    b.title=t==='dark'?'Switch to light mode':'Switch to dark mode'}
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',t==='dark'?'#0b0d12':'#f6f7fb');
+}
+function toggleTheme(){
+  const next=themeNow()==='dark'?'light':'dark';
+  document.documentElement.dataset.theme=next;
+  try{localStorage.setItem('pf_theme',next)}catch(e){}
+  paintTheme();
+  /* Charts snapshot token colors at render time — repaint what is on screen
+     (the account detail is not a VIEWS entry, so it re-opens itself). */
+  if(ME){if(window._onDetail&&window._accId)openAcc(window._accId);else if(CURV)go(CURV)}
+}
+paintTheme();
+
+/* ---------- live refresh + push deep links ---------- */
+/* Fresh ME (credits, streak) + bell badge without a page reload. Re-render of
+   the current view only on demand (pull-to-refresh / push navigation) or when
+   the credit balance changed — no screen flashing every minute. */
 async function refreshLive(rerender=false){
   if(!TOKEN||!ME)return;
   refreshNotif();
@@ -156,9 +185,9 @@ async function refreshLive(rerender=false){
   }catch(e){}
   if(rerender&&window._view&&VIEWS[window._view])go(window._view);
 }
-/* Cel kliku w push zapisany przez sw.js w Cache Storage: czytamy go przy
-   starcie ORAZ przy każdym powrocie do apki — iOS potrafi zgubić postMessage
-   do zawieszonej strony, więc to jest jedyna niezawodna ścieżka. */
+/* Push-click target stored by sw.js in Cache Storage: read on startup AND on
+   every return to the app — iOS can drop a postMessage to a suspended page,
+   so this is the only reliable path. */
 async function pendingNavView(){
   let v=window._pendingView;window._pendingView=null;
   try{
@@ -171,12 +200,12 @@ async function pendingNavView(){
 async function applyPendingNav(){
   const v=await pendingNavView();
   if(!v||!VIEWS[v])return;
-  if(ME){go(v);refreshLive()}else window._pendingView=v; /* boot() dokończy */
+  if(ME){go(v);refreshLive()}else window._pendingView=v; /* boot() finishes it */
 }
 document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState!=='visible')return;
   refreshLive();
-  applyPendingNav();setTimeout(applyPendingNav,600); /* retry: zapis SW mógł jeszcze trwać */
+  applyPendingNav();setTimeout(applyPendingNav,600); /* retry: the SW write may still be in flight */
 });
 setInterval(()=>{if(document.visibilityState==='visible')refreshLive()},60000);
 
@@ -186,10 +215,10 @@ function track(name,props){try{
 }catch(e){}}
 addEventListener('appinstalled',()=>track('pwa_install'));
 
-/* Klik w push przy otwartym portalu: sw.js robi postMessage zamiast navigate()
-   (reload gubi stan SPA). Listener na top-levelu + startMessages() — bez niego
-   spec KOLEJKUJE wiadomości z SW w nieskończoność (addEventListener sam nie
-   odblokowuje kolejki; robi to tylko setter onmessage albo startMessages). */
+/* Push click with the portal open: sw.js does postMessage instead of
+   navigate() (a reload loses SPA state). Top-level listener + startMessages()
+   — without it the spec QUEUES SW messages forever (addEventListener alone
+   does not unblock the queue; only the onmessage setter or startMessages). */
 if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',e=>{
     const d=e.data||{};
@@ -198,13 +227,13 @@ if('serviceWorker' in navigator){
     let v=null;
     try{v=new URL(d.url,location.origin).searchParams.get('view')}catch(_){}
     if(!v||!VIEWS[v])return;
-    /* ME jeszcze się ładuje (iOS wybudza PWA) => boot() dokończy nawigację */
+    /* ME is still loading (iOS waking the PWA) => boot() finishes the navigation */
     if(ME){go(v);refreshLive()}else window._pendingView=v;
   });
   navigator.serviceWorker.startMessages?.();
 }
 
-/* Pull-to-refresh (mobile PWA): przeciągnięcie >70px przy scrollu 0. */
+/* Pull-to-refresh (mobile PWA): a >70px drag while scrolled to the top. */
 (function(){
   let y0=null,pulled=false;
   const top=()=>((document.scrollingElement||document.documentElement).scrollTop||0)<=0;
@@ -268,7 +297,7 @@ const NAV=[
   {v:'support',label:'Support',ico:'help'},
   {v:'settings',label:'Settings',ico:'gear'},
 ];
-$('side-nav').innerHTML=NAV.map(n=>
+$('side-nav').innerHTML='<div class="side-sec sb-txt">Main menu</div>'+NAV.map(n=>
   `<button class="sb-link" data-v="${n.v}" onclick="go('${n.v}')" title="${n.label}">${ICO[n.ico]}<span class="sb-txt">${n.label}</span></button>`).join('');
 
 /* ---------- mobile tab bar + "More" sheet ---------- */
@@ -311,7 +340,10 @@ function authTab(m){AUTHMODE=m;
   $('a-forgot').classList.toggle('hidden',!login);
   $('a-back').classList.toggle('hidden',!(forgot||reset));
   document.querySelector('.auth-tabs').classList.toggle('hidden',forgot||reset);
-  $('a-pass').placeholder=reset?'New password (min. 8 characters)':'Password';
+  $('a-pass').placeholder=reset?'New password (min. 8 characters)':signup?'Password (min. 8 characters)':'Password';
+  /* Password managers must OFFER a generated password in signup/reset and the
+     saved one only in login — the wrong hint makes them autofill the old one. */
+  $('a-pass').setAttribute('autocomplete',(signup||reset)?'new-password':'current-password');
   if(signup&&!$('a-ref').value){$('a-ref').value=localStorage.getItem('pf_ref')||''}
   $('a-submit').textContent=login?'Log in':signup?'Create account':forgot?'Send reset link':'Set new password';
   $('auth-title').textContent=login?'Welcome back':signup?'Create your account':forgot?'Reset your password':'Choose a new password';
@@ -321,21 +353,29 @@ function authTab(m){AUTHMODE=m;
     :'Set a new password for your account.';
 }
 async function doAuth(){
+  const btn=$('a-submit');
+  if(btn.disabled)return;                    /* double submit = double POST */
+  const label=btn.textContent;
+  btn.disabled=true;btn.textContent='Please wait…';
+  const unlock=()=>{btn.disabled=false;btn.textContent=label};
   if(AUTHMODE==='forgot'){
     try{const r=await api('/api/auth/forgot',{method:'POST',body:JSON.stringify({email:$('a-email').value})});
       toast(r.message||'Reset link sent — check your inbox.','ok',8000);authTab('login');
     }catch(e){toast('Error: '+e.message,'err')}
-    return;
+    unlock();return;
   }
   if(AUTHMODE==='reset'){
     const p1=$('a-pass').value,p2=$('a-pass2').value;
-    if(p1!==p2){toast('Passwords do not match.','err');return}
-    try{await api('/api/auth/reset',{method:'POST',body:JSON.stringify({token:window._resetToken,password:p1})});
-      toast('Password changed — log in with your new password.','ok',8000);
+    if(p1!==p2){toast('Passwords do not match.','err');unlock();return}
+    try{const r=await api('/api/auth/reset',{method:'POST',body:JSON.stringify({token:window._resetToken,password:p1})});
       window._resetToken=null;history.replaceState(null,'','/portal');
-      $('a-pass').value='';$('a-pass2').value='';authTab('login');
+      $('a-pass').value='';$('a-pass2').value='';
+      /* The reset response signs the user straight in — no re-typing. */
+      if(r.token){TOKEN=r.token;localStorage.setItem('pf_token',TOKEN);
+        toast('Password changed — welcome back!','ok',7000);unlock();await boot();return}
+      toast('Password changed — log in with your new password.','ok',8000);authTab('login');
     }catch(e){toast('Error: '+e.message,'err')}
-    return;
+    unlock();return;
   }
   const body={email:$('a-email').value,password:$('a-pass').value};
   try{let res;
@@ -346,8 +386,8 @@ async function doAuth(){
     // after signing in we go exactly back there instead of losing the user here.
     const nextUrl=new URLSearchParams(location.search).get('next');
     if(nextUrl && nextUrl.startsWith('/') && !nextUrl.startsWith('//')){location.href=nextUrl;return}
-    await boot();
-  }catch(e){toast('Error: '+e.message,'err')}
+    unlock();await boot();
+  }catch(e){toast('Error: '+e.message,'err');unlock()}
 }
 async function verifyEmailCode(){
   const c=$('vb-code').value.trim();
@@ -368,6 +408,22 @@ function logout(){
   fetch('/api/auth/logout',{method:'POST'}).finally(()=>{
     TOKEN=null;localStorage.removeItem('pf_token');location.reload()});
 }
+/* Benefit numbers on the login screen — REAL platform stats only; each card
+   renders only past an honesty threshold, an empty strip simply stays hidden. */
+async function loadAuthStats(){
+  try{
+    const s=await api('/api/public/stats');
+    const items=[];
+    if(s.traders_total>=25)items.push([fmt0(s.traders_total),'Traders on board']);
+    if(s.funded_accounts>=5)items.push([fmt0(s.funded_accounts),'Funded accounts']);
+    if(s.payouts_total_usd>=1000)items.push(['$'+fmt0(s.payouts_total_usd),'Paid in rewards']);
+    if(s.countries_count>=5)items.push([fmt0(s.countries_count),'Countries']);
+    if(!items.length)return;
+    const el=$('auth-stats');
+    el.innerHTML=items.slice(0,3).map(([v,l])=>`<div class="as-card"><b>${v}</b><span>${l}</span></div>`).join('');
+    el.classList.remove('hidden');
+  }catch(e){}
+}
 
 /* ---------- return from payment ---------- */
 async function handlePaymentReturn(){
@@ -386,7 +442,7 @@ async function handlePaymentReturn(){
 /* ---------- boot / navigation ---------- */
 async function boot(){
   const q0=new URLSearchParams(location.search);
-  /* Deep-link weryfikacji e-maila: dziala tez bez logowania (token z maila). */
+  /* E-mail verification deep link: works without logging in (token from mail). */
   const vt=q0.get('verify');
   if(vt){
     try{await api('/api/auth/verify-email',{method:'POST',body:JSON.stringify({token:vt})});
@@ -396,8 +452,8 @@ async function boot(){
   }
   const rt=q0.get('reset');
   if(rt){window._resetToken=rt;
-    $('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('reset');return}
-  if(!TOKEN){$('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('login');return}
+    $('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('reset');loadAuthStats();return}
+  if(!TOKEN){$('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('login');loadAuthStats();return}
   try{ME=await api('/api/auth/me')}catch(e){logout();return}
   $('auth').classList.add('hidden');$('app').classList.remove('hidden');
   const nm=(ME.full_name||ME.email).trim();
@@ -411,9 +467,9 @@ async function boot(){
   initEngagement();
   if(await handlePaymentReturn())return;
   const q=new URLSearchParams(location.search);
-  /* Deep-linki z powiadomien: _pendingView / swiezy wpis sw.js z Cache Storage
-     (wygrywa ze STARYM ?view= zostalym w adresie po poprzednim deep-linku),
-     na koncu ?view= z URL (zimny start przez openWindow). */
+  /* Deep links from notifications: _pendingView / fresh sw.js entry in Cache
+     Storage (wins over a STALE ?view= left in the address after a previous
+     deep link), finally ?view= from the URL (cold start via openWindow). */
   const widok=(await pendingNavView())||q.get('view');
   go(q.get('buy')?'store':(widok&&VIEWS[widok]?widok:'accounts'));
   refreshNotif();
@@ -437,7 +493,7 @@ const TITLES={
   settings:['Settings','Manage your account settings and preferences'],
 };
 function go(v){
-  window._view=v;
+  CURV=v; window._view=v; window._onDetail=false;
   document.querySelectorAll('.sb-link[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const tv={store:'accounts',achievements:'rewards',loyalty:'rewards'}[v]||v;
   const tabs=[...document.querySelectorAll('.tab-item[data-v]')];
@@ -454,11 +510,11 @@ function toggleSide(open){
   $('side').classList.toggle('open',open);
   document.body.classList.toggle('nav-open',open);
 }
-/* scrim + Escape zamykaja szuflade (tylko mobile — scrim zyje w MQ <=960) */
+/* scrim + Escape close the drawer (mobile only — the scrim lives in the <=960 MQ) */
 document.addEventListener('click',e=>{
   if(!document.body.classList.contains('nav-open'))return;
-  /* .botnav: przycisk "More" wlasnie otworzyl szuflade tym samym klikiem —
-     bez wyjatku bablujacy event natychmiast by ja zamknal */
+  /* .botnav: the "More" button has just opened the drawer with this same click —
+     without the exception the bubbling event would close it immediately */
   if(e.target.closest('#side')||e.target.closest('.burger')||e.target.closest('.botnav'))return;
   toggleSide(false);
 });
@@ -727,8 +783,8 @@ function toggleNotif(){
   p.classList.remove('hidden');
   if(r.unread)readNotif(false);
 }
-/* Wiersz dzwonka: przełącz widok w SPA zamiast pełnej nawigacji; przy braku
-   znanego widoku href zadziała normalnie (fallback). */
+/* Bell row: switch the SPA view instead of a full navigation; with no
+   matching view fall back to the row's URL. */
 function notifGo(a){
   let v=null;
   try{v=new URL(a.getAttribute('href'),location.origin).searchParams.get('view')}catch(_){}
@@ -1050,13 +1106,14 @@ const VIEWS={
         :'<p class="muted" style="font-size:13px">No daily data yet — the chart appears after the first risk-engine readings.</p>'}
     </div>`;
   if(chart){chart.destroy();chart=null}
+  const th=chartTheme();
   if(days.length)chart=new Chart($('an-chart'),{type:'bar',
     data:{labels:days.map(d=>d.day),datasets:[{data:days.map(d=>d.pnl),
       backgroundColor:days.map(d=>d.pnl>=0?'rgba(16,185,129,.75)':'rgba(239,68,68,.75)'),borderRadius:5}]},
     options:{maintainAspectRatio:false,plugins:{legend:{display:false}},
-      scales:{x:{ticks:{color:'#94a3b8',font:{size:10},autoSkip:true,maxRotation:0,
+      scales:{x:{ticks:{color:th.dim,font:{size:10},autoSkip:true,maxRotation:0,
           maxTicksLimit:matchMedia('(max-width:640px)').matches?6:undefined},grid:{display:false}},
-        y:{ticks:{color:'#94a3b8',font:{size:10},callback:v=>'$'+v},grid:{color:'#eef0f6'}}}}});
+        y:{ticks:{color:th.dim,font:{size:10},callback:v=>'$'+v},grid:{color:th.line}}}}});
  },
 
  async certificates(){
@@ -1232,7 +1289,7 @@ const VIEWS={
     return;
   }
   $('view').innerHTML=`
-    ${s==='rejected'?`<div class="panel" style="max-width:760px;margin-bottom:14px;border-color:#f5c6c6;background:#fdf3f3">
+    ${s==='rejected'?`<div class="panel" style="max-width:760px;margin-bottom:14px;border-color:var(--red-line);background:var(--red-bg)">
       <b style="font-size:13.5px">Your previous verification was declined.</b>
       <p class="muted" style="font-size:12.5px;margin-top:4px">Please double-check your details and documents, then submit again. Reach out via Support if you need help.</p>
     </div>`:''}
@@ -1347,6 +1404,13 @@ const VIEWS={
         <button class="btn-p" style="align-self:flex-start" onclick="savePassword()">Change Password</button>
       </div></div>
 
+    <div class="sec-card" style="max-width:640px"><h3>Appearance</h3>
+      <div class="switch-row" style="border-bottom:0"><div><h4>Dark Mode</h4>
+        <p>Dark is the default. Your choice is saved on this device.</p></div>
+        <label class="switch"><input type="checkbox" id="s-theme" ${themeNow()==='dark'?'checked':''}
+          onchange="if((this.checked?'dark':'light')!==themeNow())toggleTheme()"><i></i></label></div>
+    </div>
+
     <div class="sec-card" style="max-width:640px"><h3>Notification Preferences</h3>
       <div style="margin-top:6px">
         ${sw('updates','Email Updates','Account creation, credentials and verification e-mails.')}
@@ -1361,12 +1425,12 @@ const VIEWS={
         <a class="btn-o sm" id="pushInstallLink" href="/install" target="_blank" style="display:none;margin-top:8px">How to install the app</a>
       </div></div>
 
-    <div class="sec-card" style="max-width:640px;border-color:#f5c6c6"><h3 style="color:var(--red)">Danger Zone</h3>
+    <div class="sec-card" style="max-width:640px;border-color:var(--red-line)"><h3 style="color:var(--red)">Danger Zone</h3>
       <p class="muted" style="font-size:13px;margin:8px 0 14px">Deleting your account anonymizes your personal data and permanently disables login.
         Trading records are retained for accounting. This cannot be undone.</p>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <input id="s-delpass" type="password" class="inp" placeholder="Confirm with your password" style="max-width:280px">
-        <button class="btn-o" style="border-color:#f5c6c6;color:var(--red)" onclick="deleteAccount()">Delete Account</button>
+        <button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteAccount()">Delete Account</button>
       </div></div>`;
   initPushUI();
  },
@@ -1429,8 +1493,11 @@ async function saveProfile(){
 }
 async function savePassword(){
   if($('s-new').value!==$('s-new2').value){toast('Passwords do not match.','err');return}
-  try{await api('/api/me/password',{method:'POST',body:JSON.stringify({
+  try{const r=await api('/api/me/password',{method:'POST',body:JSON.stringify({
     current_password:$('s-cur').value,new_password:$('s-new').value})});
+    /* Older sessions just died (password fingerprint in the token) — swap in
+       the fresh token so THIS session survives the change. */
+    if(r.token){TOKEN=r.token;localStorage.setItem('pf_token',TOKEN)}
     toast('Password changed.','ok');go('settings');
   }catch(e){toast('Error: '+e.message,'err')}
 }
@@ -1449,7 +1516,7 @@ async function initPushUI(){
   const st=$('pushStatus'),btn=$('pushBtn'),lnk=$('pushInstallLink');
   if(!st)return;
   const ios=/iPhone|iPad|iPod/.test(navigator.userAgent);
-  /* iOS odslania PushManager dopiero w PWA zainstalowanej na ekranie glownym */
+  /* iOS exposes PushManager only inside a PWA installed on the home screen */
   if(!('serviceWorker' in navigator)||!('PushManager' in window)||!('Notification' in window)){
     st.textContent=ios?'On iPhone: install the app to your home screen first, then enable push here.'
                       :'Push is not supported in this browser.';
@@ -1697,7 +1764,7 @@ function openBuy(key){
         <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
           <input type="checkbox" id="c-weekend" onchange="buyTotal(${p.price_usd})"
             ${new URLSearchParams(location.search).get('wt')==='1'?'checked':''}
-            style="width:15px;height:15px;accent-color:#6366f1">
+            style="width:15px;height:15px;accent-color:var(--acc)">
           <span><b>Weekend Trading</b> — 2 extra trading days/week <b>+$199</b></span>
         </label>
         <p id="buy-err" class="form-err hidden"></p>
@@ -1777,16 +1844,20 @@ const COUNTRIES='Afghanistan|Albania|Algeria|Andorra|Angola|Antigua and Barbuda|
 const PHASE_LABEL={eval_1:'Phase 1',eval_2:'Phase 2',funded:'Funded'};
 
 async function openAcc(id){
-  $('pg-title').textContent='Account Dashboard'; $('pg-crumb').textContent='Objectives, credentials and performance';
+  $('pg-title').textContent='Account Dashboard'; $('pg-crumb').textContent='Trader / Client Area / '+id;
   $('view').innerHTML='<div class="skel" style="height:110px;margin-bottom:16px"></div><div class="skel" style="height:300px"></div>';
-  const [a,act]=await Promise.all([api('/api/me/accounts/'+id),api(`/api/me/accounts/${id}/activity`)]);
+  const [a,act,pos]=await Promise.all([
+    api('/api/me/accounts/'+id),
+    api(`/api/me/accounts/${id}/activity`),
+    api(`/api/me/accounts/${id}/positions`).catch(()=>[]),
+  ]);
   const m=a.metrics||{};
-  window._act=act; window._accId=id;
+  window._act=act; window._accId=id; window._acc=a; window._onDetail=true;
+  $('pg-crumb').textContent='Trader / Client Area / '+(a.login||id);
   const latest=act.days.length?act.days[act.days.length-1].day:null;
   const base=latest?new Date(latest+'T00:00:00Z'):new Date();
   window._calM=[base.getUTCFullYear(),base.getUTCMonth()];
   const profitPct=m.profit_pct||0;
-  const profitUsd=a.balance-a.initial_balance;
   const targetPct=m.profit_target_pct||0;
   const targetUsd=a.initial_balance*targetPct/100;
   const reach=targetPct?Math.min(100,Math.max(0,profitPct/targetPct*100)):100;
@@ -1795,6 +1866,10 @@ async function openAcc(id){
   const dlPct=(m.daily_loss_used_pct||0)/100*(m.max_daily_loss_pct||0);
   const dlUsd=a.initial_balance*dlPct/100, dlLimUsd=a.initial_balance*(m.max_daily_loss_pct||0)/100;
   const curve=a.equity_curve||[];
+  const openPnl=a.open_pnl||0;
+  const started=a.created_at?new Date(a.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'—';
+  const split=a.profit_split_pct??90;
+  const objOn=objLinesOn();
   $('view').innerHTML=`
     <button class="backlink" onclick="go('accounts')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
@@ -1807,41 +1882,77 @@ async function openAcc(id){
       <h2>${a.status==='provisioning'?'MT5 account pending…':esc(a.login)}</h2>
       <span class="status passed" style="text-transform:none">${PHASE_LABEL[a.phase]||esc(a.phase)}</span>
       <span class="status ${esc(a.status)}"><span class="dot"></span>${a.status==='active'?'evaluation':esc(a.status)}</span>
-      <div class="chips">
-        <span class="kyc-chip">${planKind(a.steps)} · $${fmt0(a.initial_balance)}</span>
-        <button class="btn-o sm" id="creds-btn" onclick="toggleCreds()">${ICO.key} Show Credentials</button>
+    </div>
+    <div class="acts-row">
+      <button class="act-chip" id="creds-btn" onclick="toggleCreds()">${ICO.key} Credentials</button>
+      <button class="act-chip" onclick="openAcc(${id})">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.3M21 3v6h-6"/></svg>
+        Refresh</button>
+      ${a.cert_token?`<a class="act-chip" href="/certificate/${esc(a.cert_token)}" target="_blank">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="9" r="5.5"/><path d="m8.6 13.5-1.8 7 5.2-2.6 5.2 2.6-1.8-7"/></svg>
+        Share certificate</a>`:''}
+      ${openPnl!==0?`<span class="act-chip live"><span class="live-dot"></span> Live position</span>`:''}
+      <span class="act-chip" style="cursor:default">${planKind(a.steps)} · $${fmt0(a.initial_balance)}</span>
+    </div>
+
+    <div class="detail-grid">
+      <div class="sec-card" style="margin-bottom:0">
+        <div class="res-head"><h3>Current Results</h3>
+          <div class="seg-mini"><span>Objective lines</span>
+            <span class="sw">
+              <button data-on="1" class="${objOn?'on':''}" onclick="setObjLines(true)">On</button>
+              <button data-on="0" class="${objOn?'':'on'}" onclick="setObjLines(false)">Off</button>
+            </span></div>
+        </div>
+        <div class="res-stats">
+          <div class="res-stat"><div class="l">Balance</div><div class="v">$${fmt(a.balance)}</div></div>
+          <div class="res-stat"><div class="l">Equity</div>
+            <div class="v ${a.equity>=a.initial_balance?'up':'down'}">$${fmt(a.equity)}</div></div>
+          <div class="res-stat"><div class="l">Open P&amp;L</div>
+            <div class="v ${openPnl>0?'up':openPnl<0?'down':''}">${openPnl>=0?'+':'-'}$${fmt(Math.abs(openPnl))}</div></div>
+          ${targetPct?`<div class="res-stat"><div class="l">Progress to target</div>
+            <div class="v ${profitPct>=0?'up':'down'}">${reach.toFixed(1)}%</div></div>`:''}
+        </div>
+        ${curve.length>1
+          ?'<div class="chart-box tall"><canvas id="d-chart"></canvas></div>'
+          :'<p class="muted" style="font-size:13px">The equity chart appears after the first risk-engine readings of this account.</p>'}
+      </div>
+
+      <div class="sec-card info-card" style="margin-bottom:0">
+        <h3 style="margin-bottom:6px">${planKind(a.steps)} Account</h3>
+        <div class="kv2"><span class="k">Status</span>
+          <span class="status ${esc(a.status)}"><span class="dot"></span>${a.status==='active'?'evaluation':esc(a.status)}</span></div>
+        <div class="kv2"><span class="k">Account Number</span><span class="v">${esc(a.login)}</span></div>
+        <div class="kv2"><span class="k">Start</span><span class="v">${started}</span></div>
+        <div class="kv2"><span class="k">Account Size</span><span class="v">$${fmt0(a.initial_balance)}</span></div>
+        <div class="kv2"><span class="k">Profit Split</span>
+          <span class="v">${split}:${100-split}<span class="split-under"><i style="width:${split}%"></i></span></span></div>
+        <div class="kv2"><span class="k">Account Type</span><span class="v">${planKind(a.steps)} · ${PHASE_LABEL[a.phase]||esc(a.phase)}</span></div>
+        <div class="kv2"><span class="k">Trading Days</span><span class="v">${m.trading_days??0} / ${m.min_trading_days??0} min</span></div>
+        <div class="kv2"><span class="k">Platform (MT5)</span>
+          <button class="linklike" onclick="toggleCreds()">Credentials</button></div>
       </div>
     </div>
 
-    <div class="phase-card">
-      <div class="phase-top">
-        <div><h3>${PHASE_LABEL[a.phase]||a.phase}</h3>
-          <div class="t">${targetPct?`Target: ${targetPct}% profit ($${fmt(targetUsd)})`:'Funded account — no profit target. Trade and request payouts.'}</div></div>
-        <div class="phase-big"><div class="pct ${profitPct>=0?'up':'down'}">${profitPct>=0?'+':''}${profitPct.toFixed(2)}%</div>
-          <div class="usd">${profitUsd>=0?'+':''}$${fmt(profitUsd)}</div></div>
-      </div>
-      <div class="phase-bar"><i style="width:${reach}%"></i></div>
-      ${targetPct?`<div class="phase-sub">${reach.toFixed(1)}% of target reached</div>`:''}
-    </div>
-
-    <div class="stats-row">
-      <div class="stat-tile"><div class="tile-ic purple">${ICO.dollar}</div>
-        <div><div class="lbl">Balance</div><div class="val">$${fmt(a.balance)}</div></div></div>
-      <div class="stat-tile"><div class="tile-ic green">${ICO.trend}</div>
-        <div><div class="lbl">P&amp;L</div><div class="val ${profitPct>=0?'up':'down'}">${profitPct>=0?'+':''}${profitPct.toFixed(2)}%</div></div></div>
-      <div class="stat-tile"><div class="tile-ic orange">${ICO.alert}</div>
-        <div><div class="lbl">Max Drawdown</div><div class="val">${ddPct.toFixed(2)}% / ${m.max_overall_loss_pct}%</div>
-        <div class="sub">$${fmt(ddUsd)} / $${fmt(ddLimUsd)}</div></div></div>
-      <div class="stat-tile"><div class="tile-ic blue">${ICO.target}</div>
-        <div><div class="lbl">Max Daily Loss</div><div class="val">${dlPct.toFixed(2)}% / ${m.max_daily_loss_pct}%</div>
-        <div class="sub">$${fmt(dlUsd)} / $${fmt(dlLimUsd)} limit</div></div></div>
-    </div>
-
-    <div class="wide-card">
-      <div><div class="lbl">Trading Days</div><div class="val">${m.trading_days??0}</div>
-        <div class="sub">minimum required: ${m.min_trading_days??0}</div></div>
-      <div class="tile-ic orange">${ICO.cal}</div>
-    </div>
+    ${pos.length?`<div class="sec-card">
+      <h3 class="ot-title"><span class="live-dot"></span> Open trades</h3>
+      <div class="tbl-wrap" style="box-shadow:none;border:0;border-radius:0"><table class="tbl" style="min-width:520px">
+        <thead><tr><th>Ticket</th><th>Open</th><th>Side</th><th>Volume</th><th>Symbol</th><th>P&amp;L</th></tr></thead>
+        <tbody>${pos.map(t=>`<tr>
+          <td class="num">${t.ticket}</td>
+          <td class="num">${t.opened_at?dstr(t.opened_at):'—'}</td>
+          <td><span class="tside ${t.side==='buy'?'buy':'sell'}">${esc(t.side)}</span></td>
+          <td class="num">${(t.lots??0).toFixed(2)}</td>
+          <td class="num">${esc(t.symbol)}</td>
+          <td><span class="pnl-pill ${t.pnl>=0?'up':'down'}">${t.pnl>=0?'+':'-'}$${fmt(Math.abs(t.pnl))}</span></td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+    </div>`
+    :openPnl!==0?`<div class="sec-card">
+      <h3 class="ot-title"><span class="live-dot"></span> Open position</h3>
+      <p class="muted" style="font-size:13px;margin-top:8px">Floating P&amp;L right now:
+        <span class="pnl-pill ${openPnl>=0?'up':'down'}" style="margin-left:6px">${openPnl>=0?'+':'-'}$${fmt(Math.abs(openPnl))}</span></p>
+    </div>`:''}
 
     <div class="sec-card hidden" id="creds-card">
       <h3>Trading Credentials</h3>
@@ -1862,19 +1973,13 @@ async function openAcc(id){
     <div class="sec-card">
       <h3>Objectives</h3>
       <div class="progress-list">
-        ${prog('Profit target',targetPct?(profitPct/targetPct*100):0,false,`${profitPct.toFixed(1)}% / ${targetPct}%`)}
-        ${prog('Daily loss used',m.daily_loss_used_pct,true,`${dlPct.toFixed(2)}% / ${m.max_daily_loss_pct}%`)}
-        ${prog('Max drawdown used',m.overall_dd_used_pct,true,`${ddPct.toFixed(2)}% / ${m.max_overall_loss_pct}%`)}
+        ${prog('Profit target',targetPct?(profitPct/targetPct*100):0,false,
+          targetPct?`${profitPct.toFixed(1)}% / ${targetPct}% ($${fmt0(targetUsd)})`:'funded — no target')}
+        ${prog('Daily loss used',m.daily_loss_used_pct,true,`${dlPct.toFixed(2)}% / ${m.max_daily_loss_pct}% ($${fmt0(dlUsd)} / $${fmt0(dlLimUsd)})`)}
+        ${prog('Max drawdown used',m.overall_dd_used_pct,true,`${ddPct.toFixed(2)}% / ${m.max_overall_loss_pct}% ($${fmt0(ddUsd)} / $${fmt0(ddLimUsd)})`)}
         ${a.max_lots?`<div><div class="prog-top"><span>Open volume limit (all positions combined)</span><b>max ${a.max_lots} lots</b></div></div>`:''}
       </div>
-      ${a.breach_reason?`<div class="warn-box" style="margin:16px 0 0;background:var(--red-bg);border-color:#f5c6c6;color:#a33">${ICO.alert}<div><b style="color:var(--red)">Rule breached</b>${esc(a.breach_reason)}</div></div>`:''}
-    </div>
-
-    <div class="sec-card">
-      <h3>Performance Overview</h3>
-      ${curve.length>1
-        ?'<div class="chart-box"><canvas id="d-chart"></canvas></div>'
-        :'<p class="muted" style="font-size:13px">The equity chart appears after the first risk-engine readings of this account.</p>'}
+      ${a.breach_reason?`<div class="warn-box" style="margin:16px 0 0;background:var(--red-bg);border-color:var(--red-line);color:var(--red)">${ICO.alert}<div><b style="color:var(--red)">Rule breached</b>${esc(a.breach_reason)}</div></div>`:''}
     </div>
 
     <div class="sec-card" id="cal-card"></div>
@@ -1886,11 +1991,34 @@ async function openAcc(id){
 
     ${(a.payout_requests||[]).length?`<p class="muted" style="font-size:12.5px;margin-top:12px">Payout requests: ${a.payout_requests.map(r=>`${r.status} ($${fmt(r.trader_share)})`).join(', ')}</p>`:''}`;
   calRender();
-  if(chart){chart.destroy();chart=null}
-  if(curve.length>1)chart=new Chart($('d-chart'),equityChartConfig(curve));
+  drawDetailChart();
   rollStats();
   checkMilestone(id,a,m);
 }
+
+/* ---------- objective lines on the detail chart (FTMO-style) ---------- */
+function objLinesOn(){try{return localStorage.getItem('pf_obj_lines')!=='off'}catch(e){return true}}
+function setObjLines(on){
+  try{localStorage.setItem('pf_obj_lines',on?'on':'off')}catch(e){}
+  document.querySelectorAll('.seg-mini button').forEach(b=>b.classList.toggle('on',(b.dataset.on==='1')===on));
+  drawDetailChart();
+}
+function detailLines(){
+  const a=window._acc; if(!a)return [];
+  const m=a.metrics||{},th=chartTheme(),L=[];
+  if(m.target_equity)L.push({y:m.target_equity,label:'Target',color:th.green});
+  if(m.daily_floor)L.push({y:m.daily_floor,label:'Daily loss limit',color:th.gold});
+  if(m.overall_floor)L.push({y:m.overall_floor,label:'Max loss',color:th.red});
+  L.push({y:a.initial_balance,label:'Account size',color:th.dim});
+  return L;
+}
+function drawDetailChart(){
+  const a=window._acc,curve=(a&&a.equity_curve)||[];
+  if(chart){chart.destroy();chart=null}
+  if(!$('d-chart')||curve.length<2)return;
+  chart=new Chart($('d-chart'),equityChartConfig(curve,{lines:objLinesOn()?detailLines():[]}));
+}
+
 function toggleCreds(){
   const card=$('creds-card'),btn=$('creds-btn');
   const show=card.classList.toggle('hidden');
@@ -1939,7 +2067,7 @@ function calRender(){
     </div>
     <div class="cal-legend">
       <span><i style="background:var(--green2)"></i> Profit Day</span>
-      <span><i style="background:#ef4444"></i> Loss Day</span>
+      <span><i style="background:var(--red)"></i> Loss Day</span>
       <span><i style="background:var(--line2)"></i> No Trading</span>
     </div>`;
 }
