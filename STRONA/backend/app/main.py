@@ -27,13 +27,12 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import func
 
-from . import auth, billing, catalog, metaquotes_web, notify, poller, provisioning, push, rules, telemetry, tradebot
+from . import auth, billing, catalog, metaquotes_web, notify, poller, provisioning, push, rules, tradebot
 from .config import get_settings
 from .db import SessionLocal, init_db
 from .models import (Account, AppSetting, Breach, Certificate, CreditLedger, EquitySnapshot,
-                     JournalEntry, KycFile, Notification, Order, Payout, PayoutRequest,
-                     PoolAccount, Product, PushSubscription, SupportTicket, TelemetryEvent,
-                     TicketMessage, Trade, Trader)
+                     JournalEntry, Notification, Order, Payout, PayoutRequest, PoolAccount,
+                     Product, PushSubscription, SupportTicket, TicketMessage, Trade, Trader)
 
 settings = get_settings()
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
@@ -316,9 +315,6 @@ def _account_detail(session, acc: Account, admin_view: bool = False) -> dict:
     payouts = session.query(Payout).filter(Payout.account_id == acc.id).all()
     preqs = session.query(PayoutRequest).filter(PayoutRequest.account_id == acc.id).all()
     d = _account_dict(acc, with_credentials=True, admin_view=admin_view)
-    if admin_view and acc.trader_id:
-        tr = session.get(Trader, acc.trader_id)
-        d["trader_email"] = tr.email if tr else None
     d["equity_curve"] = _equity_curve(session, acc)
     d["breaches"] = [{"ts": b.ts.isoformat(), "type": b.type, "detail": b.detail} for b in breaches]
     d["payouts"] = [{"ts": p.ts.isoformat(), "profit_amount": p.profit_amount,
@@ -417,75 +413,8 @@ def reset_password(payload: ResetIn):
         session.close()
 
 
-def _wyslij_mail_weryfikacyjny(request: Request, tr: Trader) -> None:
-    verify_url = f"{_public_base(request)}/portal?verify={auth.make_verify_token(tr.id)}"
-    notify.send("verify_email", tr.email,
-                {"name": tr.full_name or tr.email, "code": tr.email_verify_code,
-                 "verify_url": verify_url})
-
-
-def _potwierdz_email(session, tr: Trader) -> None:
-    if tr.email_verified:
-        return
-    tr.email_verified = True
-    tr.email_verify_code = None
-    session.commit()
-    notify.send("welcome", tr.email, {"name": tr.full_name or tr.email})
-
-
-class VerifyTokenIn(BaseModel):
-    token: str
-
-
-@app.post("/api/auth/verify-email")
-def verify_email(payload: VerifyTokenIn):
-    """Weryfikacja linkiem z maila — działa również bez zalogowania."""
-    tid = auth.parse_verify_token(payload.token)
-    session = SessionLocal()
-    try:
-        tr = session.get(Trader, tid) if tid else None
-        if not tr:
-            raise HTTPException(400, "This verification link is invalid or has expired — request a new one")
-        _potwierdz_email(session, tr)
-        return {"ok": True}
-    finally:
-        session.close()
-
-
-class VerifyCodeIn(BaseModel):
-    code: str
-
-
-@app.post("/api/me/verify-email")
-def verify_email_code(payload: VerifyCodeIn, trader: Trader = Depends(auth.current_trader)):
-    session = SessionLocal()
-    try:
-        tr = session.get(Trader, trader.id)
-        if not tr.email_verified:
-            if not tr.email_verify_code or payload.code.strip() != tr.email_verify_code:
-                raise HTTPException(400, "Wrong code — check the e-mail we sent you")
-            _potwierdz_email(session, tr)
-        return {"ok": True}
-    finally:
-        session.close()
-
-
-@app.post("/api/me/verify-email/resend")
-def resend_verify_email(request: Request, trader: Trader = Depends(auth.current_trader)):
-    session = SessionLocal()
-    try:
-        tr = session.get(Trader, trader.id)
-        if not tr.email_verified:
-            tr.email_verify_code = f"{secrets.randbelow(1_000_000):06d}"
-            session.commit()
-            _wyslij_mail_weryfikacyjny(request, tr)
-        return {"ok": True}
-    finally:
-        session.close()
-
-
 @app.post("/api/auth/signup")
-def signup(payload: SignupIn, response: Response, request: Request):
+def signup(payload: SignupIn, response: Response):
     session = SessionLocal()
     try:
         if session.query(Trader).filter(Trader.email == payload.email.lower()).first():
@@ -494,13 +423,10 @@ def signup(payload: SignupIn, response: Response, request: Request):
             email=payload.email.lower(), password_hash=auth.hash_password(payload.password),
             full_name=payload.full_name, referral_code=_gen_ref_code(),
             referred_by=(payload.referral or None),
-            email_verified=False, email_verify_code=f"{secrets.randbelow(1_000_000):06d}",
         )
         session.add(tr)
         session.commit()
-        # welcome idzie dopiero po potwierdzeniu adresu — najpierw sam kod
-        _wyslij_mail_weryfikacyjny(request, tr)
-        telemetry.track("signup", tr.id, referred=bool(payload.referral))
+        notify.send("welcome", tr.email, {"name": tr.full_name or tr.email})
         token = auth.make_token(tr.id)
         _ustaw_ciasteczko_sesji(response, token)
         return {"token": token, "trader": {"id": tr.id, "email": tr.email,
@@ -516,7 +442,6 @@ def login(payload: LoginIn, response: Response):
         tr = session.query(Trader).filter(Trader.email == payload.email.lower()).first()
         if not tr or not auth.verify_password(payload.password, tr.password_hash):
             raise HTTPException(401, "Wrong e-mail or password")
-        telemetry.track("login", tr.id)
         token = auth.make_token(tr.id)
         _ustaw_ciasteczko_sesji(response, token)
         return {"token": token, "trader": {"id": tr.id, "email": tr.email,
@@ -536,7 +461,6 @@ def me(trader: Trader = Depends(auth.current_trader)):
         commission = round(sum(o.amount_usd for o in paid_orders) * catalog.AFFILIATE_COMMISSION_PCT / 100.0, 2)
         return {"id": trader.id, "email": trader.email, "full_name": trader.full_name,
                 "is_admin": trader.is_admin, "kyc_status": trader.kyc_status,
-                "email_verified": trader.email_verified is not False,
                 # potrzebne, żeby formularz KYC podświetlił zapisany kraj na liście
                 "kyc_country": trader.kyc_country,
                 "first_name": trader.first_name, "last_name": trader.last_name, "phone": trader.phone,
@@ -793,9 +717,6 @@ def submit_kyc(payload: KycIn, trader: Trader = Depends(auth.current_trader)):
         tr.kyc_doc_ref = payload.doc_ref or payload.id_number or ""
         tr.kyc_submitted_at = datetime.now(timezone.utc)
         session.commit()
-        telemetry.track("kyc_submitted", trader.id)
-        notify.notify_admins("admin_kyc", "New KYC submission",
-                             tr.kyc_fullname or tr.email)
         return {"kyc_status": tr.kyc_status}
     finally:
         session.close()
@@ -832,7 +753,6 @@ def request_payout(account_id: int, payload: PayoutReqIn, trader: Trader = Depen
         session.commit()
         notify.send("payout_requested", tr.email, {"name": tr.full_name or tr.email,
                     "login": acc.login, "profit_amount": profit, "trader_share": share})
-        notify.notify_admins("admin_payout", f"Payout request ${share:,.2f}", tr.email)
         return {"id": pr.id, "profit_amount": profit, "trader_share": share, "status": "pending"}
     finally:
         session.close()
@@ -1223,7 +1143,6 @@ def ticket_create(payload: TicketIn, trader: Trader = Depends(auth.current_trade
         session.flush()
         session.add(TicketMessage(ticket_id=t.id, author="trader", body=message[:20000]))
         session.commit()
-        notify.notify_admins("admin_ticket", f"New ticket: {subject[:80]}", trader.email)
         return {"id": t.id, "status": t.status}
     finally:
         session.close()
@@ -1267,7 +1186,6 @@ def ticket_reply(ticket_id: int, payload: TicketReplyIn, trader: Trader = Depend
         session.add(TicketMessage(ticket_id=t.id, author="trader", body=body[:20000]))
         t.status = "open"
         session.commit()
-        notify.notify_admins("admin_ticket", f"Ticket reply: {t.subject[:80]}", trader.email)
         return _ticket_dict(session, t, with_thread=True)
     finally:
         session.close()
@@ -1440,7 +1358,6 @@ def me_checkin(trader: Trader = Depends(auth.current_trader)):
             tr.bonus_points = (tr.bonus_points or 0) + bonus
             reward = {"type": "points", "amount": bonus}
         session.commit()
-        telemetry.track("checkin", trader.id, streak=tr.checkin_streak)
         return {"streak": tr.checkin_streak, "already": False, "reward": reward,
                 "freeze_used": freeze_used, "freezes": tr.streak_freezes or 0}
     finally:
@@ -1484,7 +1401,6 @@ def me_daily_reveal(trader: Trader = Depends(auth.current_trader)):
         tr.reveal_last = today
         tr.reveal_payload = json.dumps(wynik)
         session.commit()
-        telemetry.track("reveal", trader.id, kind=wynik.get("type"))
         return {**wynik, "already": False}
     finally:
         session.close()
@@ -1526,7 +1442,6 @@ def push_subscribe(payload: PushSubscribeIn, trader: Trader = Depends(auth.curre
             session.add(PushSubscription(trader_id=trader.id, endpoint=payload.endpoint,
                                          p256dh=p256dh, auth=auth_key))
         session.commit()
-        telemetry.track("push_subscribed", trader.id)
         return {"ok": True}
     finally:
         session.close()
@@ -1542,68 +1457,6 @@ def push_unsubscribe(payload: PushUnsubscribeIn, trader: Trader = Depends(auth.c
          .delete(synchronize_session=False))
         session.commit()
         return {"ok": True}
-    finally:
-        session.close()
-
-
-# --- Telemetria -------------------------------------------------------------
-class TelemetryIn(BaseModel):
-    name: str
-    props: dict | None = None
-
-
-# Whitelist zdarzeń klienckich: endpoint wymaga logowania, ale i tak nie
-# pozwalamy klientowi wstrzykiwać dowolnych nazw do statystyk admina.
-# Ruch marketingowy (strona publiczna) łapie GA4 — tu tylko produkt.
-_TELEMETRY_CLIENT_EVENTS = {"view_open", "pwa_install"}
-
-
-@app.post("/api/telemetry")
-def telemetry_ingest(payload: TelemetryIn, trader: Trader = Depends(auth.current_trader)):
-    if payload.name not in _TELEMETRY_CLIENT_EVENTS:
-        raise HTTPException(400, "Unknown event")
-    props = {str(k)[:32]: str(v)[:80] for k, v in (payload.props or {}).items()}
-    telemetry.track(payload.name, trader.id, **props)
-    return {"ok": True}
-
-
-@app.get("/api/admin/telemetry", dependencies=[Depends(auth.require_admin)])
-def admin_telemetry():
-    """Agregacja per dzień × zdarzenie z ostatnich 14 dni (UTC)."""
-    session = SessionLocal()
-    try:
-        od = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=14)
-        dzien = func.date(TelemetryEvent.created_at)
-        rows = (session.query(dzien, TelemetryEvent.name,
-                              func.count(TelemetryEvent.id),
-                              func.count(func.distinct(TelemetryEvent.trader_id)))
-                .filter(TelemetryEvent.created_at >= od)
-                .group_by(dzien, TelemetryEvent.name)
-                .order_by(dzien.desc(), TelemetryEvent.name).all())
-        return {"items": [{"day": str(d), "name": n, "count": c, "traders": t}
-                          for d, n, c, t in rows]}
-    finally:
-        session.close()
-
-
-@app.get("/api/admin/telemetry/events", dependencies=[Depends(auth.require_admin)])
-def admin_telemetry_events(name: str | None = None, day: str | None = None,
-                           trader_id: int | None = None):
-    """Drill-down agregatów: pojedyncze zdarzenia, filtr po nazwie/dniu/traderze."""
-    session = SessionLocal()
-    try:
-        q = (session.query(TelemetryEvent, Trader.email)
-             .outerjoin(Trader, Trader.id == TelemetryEvent.trader_id))
-        if name:
-            q = q.filter(TelemetryEvent.name == name)
-        if day:
-            q = q.filter(func.date(TelemetryEvent.created_at) == day)
-        if trader_id is not None:
-            q = q.filter(TelemetryEvent.trader_id == trader_id)
-        rows = q.order_by(TelemetryEvent.id.desc()).limit(300).all()
-        return {"items": [{"id": e.id, "ts": e.created_at.isoformat(), "name": e.name,
-                           "props": e.props, "trader_id": e.trader_id, "email": em}
-                          for e, em in rows]}
     finally:
         session.close()
 
@@ -1631,19 +1484,14 @@ async def kyc_upload_docs(trader: Trader = Depends(auth.current_trader),
                 continue
             ext = _KYC_MIME.get(up.content_type)
             if not ext:
-                raise HTTPException(
-                    400, f"{kind}: allowed formats are JPG, PNG and PDF "
-                         f"(got {up.content_type or 'unknown'})")
+                raise HTTPException(400, f"{kind}: allowed formats are JPG, PNG and PDF")
             data = await up.read()
             if len(data) > _KYC_MAX_BYTES:
                 raise HTTPException(400, f"{kind}: the file is larger than 5 MB")
-            # Plik do bazy, nie na dysk — na Vercelu filesystem jest read-only.
+            dirp = UPLOADS / "kyc" / str(tr.id)
+            dirp.mkdir(parents=True, exist_ok=True)
             fname = f"{kind}-{secrets.token_hex(6)}{ext}"
-            (session.query(KycFile)
-             .filter(KycFile.trader_id == tr.id, KycFile.kind == kind)
-             .delete(synchronize_session=False))
-            session.add(KycFile(trader_id=tr.id, kind=kind, filename=fname,
-                                mime=up.content_type, data=data))
+            (dirp / fname).write_bytes(data)
             setattr(tr, _KYC_KINDS[kind], fname)
             saved.append(kind)
         session.commit()
@@ -1658,13 +1506,6 @@ def admin_kyc_doc(trader_id: int, kind: str):
         raise HTTPException(404, "Unknown document type")
     session = SessionLocal()
     try:
-        row = (session.query(KycFile)
-               .filter(KycFile.trader_id == trader_id, KycFile.kind == kind)
-               .first())
-        if row:
-            return Response(content=row.data, media_type=row.mime,
-                            headers={"Content-Disposition": f'inline; filename="{row.filename}"'})
-        # Stare uploady sprzed przejścia na bazę (tylko dev z zapisem na dysku)
         tr = session.get(Trader, trader_id)
         fname = getattr(tr, _KYC_KINDS[kind], None) if tr else None
         if not fname:
@@ -1925,14 +1766,7 @@ def admin_add_credits(trader_id: int, payload: CreditsIn):
         session.add(CreditLedger(trader_id=tr.id, amount=kwota,
                                  note=(payload.note or "").strip()[:160] or None))
         session.commit()
-        email, imie = tr.email, (tr.full_name or tr.email)
-        session.close()
-        # Po committcie i poza sesją: mail + push + wpis w dzwonku jedną bramką.
-        # Korekty w dół (kwota ujemna) po cichu — nie chwalimy się zabieraniem.
-        if kwota > 0:
-            notify.send("credits_granted", email,
-                        {"name": imie, "amount": kwota, "balance": nowe})
-        return {"trader_id": trader_id, "email": email, "credits_usd": nowe}
+        return {"trader_id": tr.id, "email": tr.email, "credits_usd": nowe}
     finally:
         session.close()
 
@@ -2267,27 +2101,6 @@ def admin_reject_kyc(trader_id: int):
         session.close()
 
 
-@app.post("/api/admin/kyc/{trader_id}/reset", dependencies=[Depends(auth.require_admin)])
-def admin_reset_kyc(trader_id: int):
-    """Cofa decyzję approve/reject — wniosek wraca do kolejki pending.
-
-    Celowo bez maila/pusha do tradera: to korekta po stronie admina, nie nowa
-    decyzja; trader zobaczy status "pending" w portalu."""
-    session = SessionLocal()
-    try:
-        tr = session.get(Trader, trader_id)
-        if not tr:
-            raise HTTPException(404, "Trader not found")
-        if tr.kyc_status not in ("approved", "rejected"):
-            raise HTTPException(400, "There is no KYC decision to revert")
-        tr.kyc_status = "pending"
-        tr.kyc_reviewed_at = None
-        session.commit()
-        return {"reset": trader_id}
-    finally:
-        session.close()
-
-
 @app.get("/api/admin/orders", dependencies=[Depends(auth.require_admin)])
 def admin_orders():
     session = SessionLocal()
@@ -2299,97 +2112,8 @@ def admin_orders():
             out.append({"id": o.id, "trader_email": tr.email if tr else None,
                         "product_key": o.product_key, "amount_usd": o.amount_usd,
                         "status": o.status, "provider": o.provider, "coupon": o.coupon,
-                        "flag": o.flag,
-                        "paid_at": o.paid_at.isoformat() if o.paid_at else None,
                         "account_id": o.account_id, "created_at": o.created_at.isoformat()})
         return out
-    finally:
-        session.close()
-
-
-class OrderFlagIn(BaseModel):
-    flag: str = ""
-
-
-@app.post("/api/admin/orders/{order_id}/flag", dependencies=[Depends(auth.require_admin)])
-def admin_flag_order(order_id: int, payload: OrderFlagIn):
-    """Ręczna flaga płatności — np. „czekam na przelew crypto"."""
-    if payload.flag not in ("", "awaiting_crypto"):
-        raise HTTPException(400, "Unknown flag")
-    session = SessionLocal()
-    try:
-        o = session.get(Order, order_id)
-        if not o:
-            raise HTTPException(404, "Order not found")
-        o.flag = payload.flag or None
-        session.commit()
-        return {"id": o.id, "flag": o.flag}
-    finally:
-        session.close()
-
-
-@app.post("/api/admin/orders/{order_id}/mark-paid", dependencies=[Depends(auth.require_admin)])
-def admin_mark_order_paid(order_id: int):
-    """Ręczne domknięcie płatności (crypto/przelew poza Stripe).
-
-    Ta sama ścieżka co webhook Stripe i mock — provisioning tworzy konto,
-    ustawia status/paid_at, zdejmuje kredyty i wysyła traderowi poświadczenia."""
-    session = SessionLocal()
-    try:
-        o = session.get(Order, order_id)
-        if not o:
-            raise HTTPException(404, "Order not found")
-        if o.status == "paid":
-            return {"already": True, "account_id": o.account_id}
-        acc = provisioning.create_account_from_order(session, o, notify_admin=False)
-        o.flag = None
-        session.commit()
-        return {"paid": o.id, "account_id": acc.id}
-    finally:
-        session.close()
-
-
-@app.get("/api/admin/inbox", dependencies=[Depends(auth.require_admin)])
-def admin_inbox():
-    """Dzwonek w panelu: ostatnie „coś przyszło" ze wszystkich kolejek.
-
-    Agregacja z istniejących tabel (bez osobnej tabeli powiadomień admina);
-    co jest „nieprzeczytane" rozstrzyga frontend po localStorage."""
-    session = SessionLocal()
-    try:
-        emails: dict[int, str] = {}
-
-        def email_of(tid: int) -> str:
-            if tid not in emails:
-                t = session.get(Trader, tid)
-                emails[tid] = t.email if t else "?"
-            return emails[tid]
-
-        items = []
-        for o in session.query(Order).order_by(Order.id.desc()).limit(15).all():
-            items.append({"type": "order", "ts": (o.paid_at or o.created_at).isoformat(),
-                          "title": f"Order #{o.id} · {o.product_key} · {o.status}",
-                          "body": email_of(o.trader_id), "view": "orders"})
-        for t in (session.query(Trader).filter(Trader.kyc_status == "pending")
-                  .order_by(Trader.kyc_submitted_at.desc().nullslast()).limit(10).all()):
-            if t.kyc_submitted_at:
-                items.append({"type": "kyc", "ts": t.kyc_submitted_at.isoformat(),
-                              "title": f"KYC pending · {t.kyc_fullname or t.email}",
-                              "body": t.email, "view": "kyc"})
-        for pr in (session.query(PayoutRequest).filter(PayoutRequest.status == "pending")
-                   .order_by(PayoutRequest.id.desc()).limit(10).all()):
-            items.append({"type": "payout", "ts": pr.ts.isoformat(),
-                          "title": f"Payout request ${pr.trader_share:,.2f}",
-                          "body": email_of(pr.trader_id), "view": "payouts"})
-        for m, t in (session.query(TicketMessage, SupportTicket)
-                     .join(SupportTicket, SupportTicket.id == TicketMessage.ticket_id)
-                     .filter(TicketMessage.author == "trader")
-                     .order_by(TicketMessage.id.desc()).limit(10).all()):
-            items.append({"type": "ticket", "ts": m.ts.isoformat(),
-                          "title": f"Ticket #{t.id}: {t.subject}",
-                          "body": email_of(t.trader_id), "view": "tickets"})
-        items.sort(key=lambda i: i["ts"], reverse=True)
-        return {"items": items[:30]}
     finally:
         session.close()
 
@@ -2686,59 +2410,8 @@ def admin_pool_delete(pool_id: int):
 def list_accounts():
     session = SessionLocal()
     try:
-        # Data płatności do kolumny "Paid" — jedno zapytanie zamiast N per konto.
-        zaplacone = dict(session.query(Order.account_id, func.max(Order.paid_at))
-                         .filter(Order.account_id.isnot(None), Order.paid_at.isnot(None))
-                         .group_by(Order.account_id).all())
-        emaile = dict(session.query(Trader.id, Trader.email).all())
-        out = []
-        for a in session.query(Account).order_by(Account.id).all():
-            d = _account_dict(a, with_credentials=True, admin_view=True)
-            p = zaplacone.get(a.id)
-            d["paid_at"] = p.isoformat() if p else None
-            d["trader_email"] = emaile.get(a.trader_id)
-            out.append(d)
-        return out
-    finally:
-        session.close()
-
-
-@app.get("/api/accounts/{account_id}/history", dependencies=[Depends(auth.require_admin)])
-def account_history(account_id: int):
-    """Timeline konta składany z istniejących wierszy (zamówienie, płatność,
-    start, breach, payouty) — bez osobnej tabeli event-logu."""
-    session = SessionLocal()
-    try:
-        acc = session.get(Account, account_id)
-        if not acc:
-            raise HTTPException(404, "Account not found")
-        items: list[dict] = []
-
-        def add(ts, label, kind):
-            if ts:
-                items.append({"ts": ts.isoformat(), "label": label, "kind": kind})
-
-        add(acc.created_at, "Account created", "account")
-        if acc.started_at and acc.started_at != acc.created_at:
-            add(acc.started_at, "Trading started", "account")
-        for o in session.query(Order).filter(Order.account_id == acc.id).all():
-            add(o.created_at,
-                f"Order #{o.id} created — {o.product_key}, ${o.amount_usd:,.2f} ({o.status})",
-                "order")
-            add(o.paid_at, f"Order #{o.id} paid — ${o.amount_usd:,.2f} via {o.provider}",
-                "payment")
-        for b in session.query(Breach).filter(Breach.account_id == acc.id).all():
-            add(b.ts, f"Breach: {b.type} — {b.detail}", "breach")
-        for pr in (session.query(PayoutRequest)
-                   .filter(PayoutRequest.account_id == acc.id).all()):
-            add(pr.ts, f"Payout request ${pr.trader_share:,.2f} ({pr.status})", "payout")
-        for p in session.query(Payout).filter(Payout.account_id == acc.id).all():
-            add(p.ts, f"Payout ${p.trader_share:,.2f}" + (" — paid" if p.paid else ""),
-                "payout")
-        if acc.closed_at:
-            add(acc.closed_at, f"Account closed ({acc.status})", "account")
-        items.sort(key=lambda i: i["ts"], reverse=True)
-        return {"items": items}
+        return [_account_dict(a, with_credentials=True, admin_view=True)
+                for a in session.query(Account).order_by(Account.id).all()]
     finally:
         session.close()
 
@@ -3254,8 +2927,10 @@ def public_stats():
             "funded_accounts": session.query(Account).filter(Account.status == "funded").count(),
             "traders_total": session.query(Trader).filter(Trader.is_admin == False).count(),  # noqa: E712
             "payouts_count": len(payouts),
-            "payouts_total_usd": round(sum(p.trader_share for p in payouts), 2),
-            "largest_payout_usd": round(max((p.trader_share for p in payouts), default=0.0), 2),
+            # Pelne dolary, bez centow: to marketingowe liczby na kaflach LP —
+            # ".96" przy szesciocyfrowej kwocie to szum, ktory tylko poszerza kafel.
+            "payouts_total_usd": int(round(sum(p.trader_share for p in payouts))),
+            "largest_payout_usd": int(round(max((p.trader_share for p in payouts), default=0.0))),
             "countries_count": len(countries),
         }
         _PUBLIC_STATS_CACHE.update(ts=now, data=data)
@@ -3301,7 +2976,7 @@ def _promo_ctx() -> dict | None:
 def _page(request: Request, template: str, **extra):
     ctx = {"site_name": settings.site_name, "support_email": settings.support_email,
            "base_url": _public_base(request), "asset_v": ASSET_V,
-           "ga_id": settings.ga_measurement_id, "promo": _promo_ctx(), **extra}
+           "promo": _promo_ctx(), **extra}
     return jinja.TemplateResponse(request, template, ctx)
 
 

@@ -38,7 +38,6 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
   </div>
   <div class="auth-form">
     <div class="auth-card">
-      <a class="auth-logo-m" href="/"><img src="/static/img/logo.png" alt=""><span>{{ site_name }}</span></a>
       <h3 id="auth-title">Welcome back</h3>
       <div class="sub" id="auth-sub">Log in to your trader dashboard.</div>
       <div class="auth-tabs">
@@ -53,7 +52,6 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
         <input id="a-ref" placeholder="Referral code (optional)" class="inp hidden">
         <button id="a-submit" onclick="doAuth()" class="btn-p lg" style="width:100%">Log in</button>
         <button id="a-forgot" onclick="authTab('forgot')" style="font-size:12.5px;color:var(--muted);text-decoration:underline;background:none;border:0;cursor:pointer">Forgot password?</button>
-        <button id="a-back" onclick="authTab('login')" class="hidden" style="font-size:13px;color:var(--muted);background:none;border:0;cursor:pointer">‹ Back to log in</button>
       </div>
     </div>
   </div>
@@ -101,14 +99,6 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
         <button class="btn-p sm" onclick="go('store')">+ New challenge</button>
       </div>
     </div>
-    <div class="verify-bar hidden" id="verify-bar">
-      <span class="vb-txt"><b>Confirm your e-mail.</b> We sent a 6-digit code to your inbox — enter it here or tap the link in the e-mail.</span>
-      <span class="vb-act">
-        <input id="vb-code" class="vb-inp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="Code">
-        <button class="vb-btn" onclick="verifyEmailCode()">Verify</button>
-        <button class="vb-link" onclick="resendVerify()">Resend</button>
-      </span>
-    </div>
     <div class="content" id="view"></div>
   </div>
 
@@ -141,87 +131,6 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 /* "Upgrade Your Size" promo code applied on the public site (or typed in the buy
    modal). Shared key with the landing page — one applied state everywhere. */
 function pfPromo(){try{return localStorage.getItem('pf_promo_code')||''}catch(e){return ''}}
-
-/* ---------- live refresh + deep-linki z pusha ---------- */
-/* Świeże ME (kredyty, streak) + badge dzwonka bez reloadu strony. Re-render
-   bieżącego widoku tylko na żądanie (pull-to-refresh / nawigacja z pusha)
-   albo gdy zmieniło się saldo kredytów — żeby nie migać ekranem co minutę. */
-async function refreshLive(rerender=false){
-  if(!TOKEN||!ME)return;
-  refreshNotif();
-  try{
-    const stare=ME.credits_usd;
-    ME=await api('/api/auth/me');
-    if(!rerender&&ME.credits_usd!==stare)rerender=true;
-  }catch(e){}
-  if(rerender&&window._view&&VIEWS[window._view])go(window._view);
-}
-/* Cel kliku w push zapisany przez sw.js w Cache Storage: czytamy go przy
-   starcie ORAZ przy każdym powrocie do apki — iOS potrafi zgubić postMessage
-   do zawieszonej strony, więc to jest jedyna niezawodna ścieżka. */
-async function pendingNavView(){
-  let v=window._pendingView;window._pendingView=null;
-  try{
-    const c=await caches.open('pf-nav');const r=await c.match('/__pending-nav');
-    if(r){const d=await r.json();await c.delete('/__pending-nav');
-      if(!v&&Date.now()-d.ts<30000)v=new URL(d.url,location.origin).searchParams.get('view')}
-  }catch(_){}
-  return v||null;
-}
-async function applyPendingNav(){
-  const v=await pendingNavView();
-  if(!v||!VIEWS[v])return;
-  if(ME){go(v);refreshLive()}else window._pendingView=v; /* boot() dokończy */
-}
-document.addEventListener('visibilitychange',()=>{
-  if(document.visibilityState!=='visible')return;
-  refreshLive();
-  applyPendingNav();setTimeout(applyPendingNav,600); /* retry: zapis SW mógł jeszcze trwać */
-});
-setInterval(()=>{if(document.visibilityState==='visible')refreshLive()},60000);
-
-/* Telemetria produktowa (fire-and-forget): otwarcie portalu + instalacja PWA. */
-function track(name,props){try{
-  if(TOKEN)api('/api/telemetry',{method:'POST',body:JSON.stringify({name,props:props||{}})}).catch(()=>{})
-}catch(e){}}
-addEventListener('appinstalled',()=>track('pwa_install'));
-
-/* Klik w push przy otwartym portalu: sw.js robi postMessage zamiast navigate()
-   (reload gubi stan SPA). Listener na top-levelu + startMessages() — bez niego
-   spec KOLEJKUJE wiadomości z SW w nieskończoność (addEventListener sam nie
-   odblokowuje kolejki; robi to tylko setter onmessage albo startMessages). */
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.addEventListener('message',e=>{
-    const d=e.data||{};
-    if(d.type!=='navigate')return;
-    try{caches.open('pf-nav').then(c=>c.delete('/__pending-nav'))}catch(_){}
-    let v=null;
-    try{v=new URL(d.url,location.origin).searchParams.get('view')}catch(_){}
-    if(!v||!VIEWS[v])return;
-    /* ME jeszcze się ładuje (iOS wybudza PWA) => boot() dokończy nawigację */
-    if(ME){go(v);refreshLive()}else window._pendingView=v;
-  });
-  navigator.serviceWorker.startMessages?.();
-}
-
-/* Pull-to-refresh (mobile PWA): przeciągnięcie >70px przy scrollu 0. */
-(function(){
-  let y0=null,pulled=false;
-  const top=()=>((document.scrollingElement||document.documentElement).scrollTop||0)<=0;
-  document.addEventListener('touchstart',e=>{
-    y0=(ME&&top()&&e.touches.length===1)?e.touches[0].clientY:null;pulled=false;
-  },{passive:true});
-  document.addEventListener('touchmove',e=>{
-    if(y0===null||pulled)return;
-    if(e.touches[0].clientY-y0>70&&top()){
-      pulled=true;
-      const s=document.createElement('div');s.className='ptr-spin';s.id='ptr-spin';
-      document.body.appendChild(s);
-      Promise.resolve(refreshLive(true)).finally(()=>setTimeout(()=>$('ptr-spin')?.remove(),400));
-    }
-  },{passive:true});
-  document.addEventListener('touchend',()=>{y0=null},{passive:true});
-})();
 
 const ICO={
   copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>',
@@ -309,8 +218,6 @@ function authTab(m){AUTHMODE=m;
   $('a-pass2').classList.toggle('hidden',!reset);
   $('a-email').classList.toggle('hidden',reset);
   $('a-forgot').classList.toggle('hidden',!login);
-  $('a-back').classList.toggle('hidden',!(forgot||reset));
-  document.querySelector('.auth-tabs').classList.toggle('hidden',forgot||reset);
   $('a-pass').placeholder=reset?'New password (min. 8 characters)':'Password';
   if(signup&&!$('a-ref').value){$('a-ref').value=localStorage.getItem('pf_ref')||''}
   $('a-submit').textContent=login?'Log in':signup?'Create account':forgot?'Send reset link':'Set new password';
@@ -349,19 +256,6 @@ async function doAuth(){
     await boot();
   }catch(e){toast('Error: '+e.message,'err')}
 }
-async function verifyEmailCode(){
-  const c=$('vb-code').value.trim();
-  if(c.length!==6){toast('Enter the 6-digit code from the e-mail.','err');return}
-  try{await api('/api/me/verify-email',{method:'POST',body:JSON.stringify({code:c})});
-    ME.email_verified=true;$('verify-bar').classList.add('hidden');
-    toast('E-mail confirmed ✅','ok',8000);
-  }catch(e){toast('Error: '+e.message,'err')}
-}
-async function resendVerify(){
-  try{await api('/api/me/verify-email/resend',{method:'POST'});
-    toast('New code sent — check your inbox.','ok',8000);
-  }catch(e){toast('Error: '+e.message,'err')}
-}
 function logout(){
   // The session cookie is held by the server (it gates /admin), so clearing
   // localStorage alone would not be enough.
@@ -385,16 +279,7 @@ async function handlePaymentReturn(){
 
 /* ---------- boot / navigation ---------- */
 async function boot(){
-  const q0=new URLSearchParams(location.search);
-  /* Deep-link weryfikacji e-maila: dziala tez bez logowania (token z maila). */
-  const vt=q0.get('verify');
-  if(vt){
-    try{await api('/api/auth/verify-email',{method:'POST',body:JSON.stringify({token:vt})});
-      toast('E-mail confirmed ✅','ok',8000)}
-    catch(e){toast('Verification failed: '+e.message,'err',8000)}
-    history.replaceState(null,'','/portal');
-  }
-  const rt=q0.get('reset');
+  const rt=new URLSearchParams(location.search).get('reset');
   if(rt){window._resetToken=rt;
     $('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('reset');return}
   if(!TOKEN){$('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('login');return}
@@ -406,18 +291,13 @@ async function boot(){
   $('who-mail').textContent=ME.email;
   $('admin-link').style.display=ME.is_admin?'':'none';
   $('admin-link-sheet').style.display=ME.is_admin?'':'none';
-  $('verify-bar').classList.toggle('hidden',ME.email_verified!==false);
   if(localStorage.getItem('pf_side_collapsed')==='1')$('side').classList.add('collapsed');
   initEngagement();
   if(await handlePaymentReturn())return;
   const q=new URLSearchParams(location.search);
-  /* Deep-linki z powiadomien: _pendingView / swiezy wpis sw.js z Cache Storage
-     (wygrywa ze STARYM ?view= zostalym w adresie po poprzednim deep-linku),
-     na koncu ?view= z URL (zimny start przez openWindow). */
-  const widok=(await pendingNavView())||q.get('view');
+  const widok=q.get('view');           /* deep-linki z powiadomien: /portal?view=payouts */
   go(q.get('buy')?'store':(widok&&VIEWS[widok]?widok:'accounts'));
   refreshNotif();
-  track('view_open',{view:window._view,pwa:document.documentElement.classList.contains('pwa')?'1':'0'});
 }
 
 const TITLES={
@@ -437,7 +317,6 @@ const TITLES={
   settings:['Settings','Manage your account settings and preferences'],
 };
 function go(v){
-  window._view=v;
   document.querySelectorAll('.sb-link[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const tv={store:'accounts',achievements:'rewards',loyalty:'rewards'}[v]||v;
   const tabs=[...document.querySelectorAll('.tab-item[data-v]')];
@@ -720,20 +599,12 @@ function toggleNotif(){
     +((r.items&&r.items.length)?r.items.map(n=>{
       const kiedy=n.created_at?new Date(n.created_at+(n.created_at.endsWith('Z')?'':'Z'))
         .toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
-      return `<a class="notif-row${n.read?'':' unread'}" href="${esc(n.url||'/portal')}" onclick="return notifGo(this)">
+      return `<a class="notif-row${n.read?'':' unread'}" href="${esc(n.url||'/portal')}">
         <div class="t">${esc(n.title)}</div>${n.body?`<div class="b">${esc(n.body)}</div>`:''}
         <div class="d">${kiedy}</div></a>`}).join('')
       :'<div class="notif-empty">Nothing yet — pass a phase and it lands here.</div>');
   p.classList.remove('hidden');
   if(r.unread)readNotif(false);
-}
-/* Wiersz dzwonka: przełącz widok w SPA zamiast pełnej nawigacji; przy braku
-   znanego widoku href zadziała normalnie (fallback). */
-function notifGo(a){
-  let v=null;
-  try{v=new URL(a.getAttribute('href'),location.origin).searchParams.get('view')}catch(_){}
-  if(v&&VIEWS[v]){go(v);return false}
-  return true;
 }
 async function readNotif(rerender=true){
   try{await api('/api/me/notifications/read',{method:'POST'});await refreshNotif()}catch(e){}

@@ -33,7 +33,6 @@ _EVENT_VIEW = {
     "kyc_approved": "kyc", "kyc_rejected": "kyc",
     "ticket_reply": "support",
     "daily_recap": "analytics",
-    "credits_granted": "store",
 }
 
 # Krótkie treści pod tytułem (tytuł = temat maila, liczony w notify._render).
@@ -41,7 +40,6 @@ _EVENT_VIEW = {
 # ląduje w systemowej historii powiadomień urządzenia.
 _BODY: dict[str, str] = {
     "welcome": "Your trader portal is ready.",
-    "verify_email": "Confirm your e-mail address — enter the code from the e-mail.",
     "credentials": "Your MT5 credentials are ready — log in and start trading.",
     "challenge_granted": "A challenge account was added to your portal.",
     "phase_passed": "Objective complete — your next phase account is on the way.",
@@ -53,7 +51,6 @@ _BODY: dict[str, str] = {
     "kyc_approved": "Identity verified — you're cleared for payouts.",
     "kyc_rejected": "Your verification needs another look.",
     "ticket_reply": "Support replied to your ticket.",
-    "credits_granted": "Store credit added — it applies automatically at your next checkout.",
 }
 
 

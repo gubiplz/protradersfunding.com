@@ -65,19 +65,5 @@
   <span>·</span><a href="{{ verify_url }}">Verify this certificate</a>
 </div>
 
-{# W zainstalowanej PWA linki w scope otwierają się w TYM SAMYM oknie bez
-   żadnego paska przeglądarki — bez tego przycisku nie ma jak wrócić. #}
-<a class="cert-back noprint" href="/portal?view=certificates"
-   onclick="if(history.length>1){history.back();return false}">‹ Back</a>
-<style>
-.cert-back{display:none;position:fixed;top:calc(10px + env(safe-area-inset-top));left:12px;z-index:9;
-  background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.25);
-  border-radius:999px;padding:10px 18px;text-decoration:none;
-  font:600 14px/1 -apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;
-  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
-@media(display-mode:standalone){.cert-back{display:inline-block}}
-@media print{.cert-back{display:none!important}}
-</style>
-
 </body>
 </html>

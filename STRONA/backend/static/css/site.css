@@ -602,3 +602,10 @@ html.promo-applied .promo-tag{background:rgba(255,255,255,.92);color:#4f46e5}
   .promo-bar.promo-open .promo-txt{display:none}
   .promo-inp{width:112px}
 }
+
+/* ---------------- stats band: long figures ----------------
+   A 9-digit "Paid in rewards" must shrink, not clip at the tile edge. */
+.stat{min-width:0}
+.stat-num{white-space:nowrap}
+.stat-num-l{font-size:clamp(20px,2.2vw,30px)}
+@media(max-width:960px){.stat-num-l{font-size:clamp(17px,4.6vw,24px)}}

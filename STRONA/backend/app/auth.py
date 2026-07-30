@@ -67,21 +67,6 @@ def parse_reset_token(token: str) -> int | None:
         return None
 
 
-_verify_serializer = URLSafeTimedSerializer(settings.secret_key, salt="email-verify")
-VERIFY_MAX_AGE = 60 * 60 * 24
-
-
-def make_verify_token(trader_id: int) -> str:
-    return _verify_serializer.dumps({"tid": trader_id})
-
-
-def parse_verify_token(token: str) -> int | None:
-    try:
-        return int(_verify_serializer.loads(token, max_age=VERIFY_MAX_AGE)["tid"])
-    except (BadSignature, Exception):
-        return None
-
-
 # --- FastAPI dependencies ---
 def current_trader(authorization: str | None = Header(default=None)) -> Trader:
     if not authorization or not authorization.lower().startswith("bearer "):

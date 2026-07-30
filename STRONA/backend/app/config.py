@@ -119,9 +119,6 @@ class Settings:
     cert_signatory: str = os.getenv("CERT_SIGNATORY", "Matthew Harrison")
     cert_signatory_label: str = os.getenv("CERT_SIGNATORY_LABEL", "Chief Executive Officer")
     support_email: str = os.getenv("SUPPORT_EMAIL", "support@protradersfunding.com")
-    # Google Analytics 4 (Measurement ID typu G-XXXXXXX). Puste = brak snippetu
-    # gtag na stronach publicznych — zero requestów do Google.
-    ga_measurement_id: str = os.getenv("GA_MEASUREMENT_ID", "")
 
     # --- Promocja „Upgrade Your Size" ---
     # Klient wpisuje kod promocyjny i zakup provisionuje NASTĘPNY plan w górę
