@@ -1,12 +1,18 @@
-"""Web push (VAPID) + centrum powiadomień w portalu + dzienny recap.
+"""Web push (PWA) + centrum powiadomień w portalu + dzienny recap.
 
-Kanał jest best-effort jak e-mail w notify.py: każdy błąd łykamy i logujemy,
-żeby nigdy nie wywrócić requestu, który powiadomienie tylko „dosyła".
-Wpis w centrum powiadomień powstaje zawsze (tania historia dla tradera);
-sam push wychodzi wyłącznie, gdy PUSH_ENABLED i klucze VAPID są ustawione,
-a trader ma subskrypcje przeglądarkowe. Bramka preferencji jest TA SAMA co
-dla maili (_PREF_BY_EVENT w notify.py) — jedno wyłączenie ucisza kategorię
-na wszystkich kanałach.
+Subskrypcje urządzeń trzyma tabela push_subscriptions; wysyłka przez pywebpush
+z podpisem VAPID. Brak kluczy w env => push cicho wyłączony (tryb dev, 0 zł),
+ale wpisy w centrum powiadomień (dzwonek w portalu) powstają zawsze — to tania
+historia dla tradera niezależna od zgody przeglądarki.
+
+Push idzie tą samą bramką preferencji co maile (notify._PREF_BY_EVENT), więc
+jeden przełącznik w ustawieniach wyłącza kategorię wszędzie naraz.
+
+Zasada produktu: push NIGDY nie komentuje wyników tradingu w czasie rzeczywistym
+— tylko zdarzenia konta (poświadczenia, payout, KYC), przypomnienie o serii
+i dzienny recap ZAMKNIĘTEGO dnia.
+
+Generowanie kluczy (raz, wynik do env):  python -m app.push
 """
 from __future__ import annotations
 
@@ -17,7 +23,8 @@ from .config import get_settings
 
 settings = get_settings()
 
-# Zdarzenia, ktore NIE trafiaja do centrum/pusha (akcje bezpieczenstwa; mail only).
+# Zdarzenia, ktore NIE trafiaja do centrum ani pusha (akcje bezpieczenstwa —
+# wylacznie mail; link resetu hasla nie ma czego szukac w historii powiadomien).
 _SKIP = {"password_reset"}
 
 # Do jakiego widoku portalu prowadzi klik w powiadomienie (reszta -> Challenges).
@@ -28,106 +35,120 @@ _EVENT_VIEW = {
     "daily_recap": "analytics",
 }
 
-# Krotka tresc do pusha/centrum. NIGDY nie bierzemy tresci maila — mail
-# `credentials` zawiera haslo MT5, a push laduje w systemowej historii
-# powiadomien urzadzenia.
-_SHORT = {
-    "welcome": "Your account is ready — pick a challenge and get started.",
-    "credentials": "Your MT5 credentials are ready. Open your dashboard to see them.",
-    "challenge_granted": "A challenge has been added to your account.",
-    "phase_passed": "Congratulations — open the dashboard to see your next phase.",
-    "account_funded": "You are funded! Complete KYC and you can request payouts.",
-    "breached": "A challenge account hit a rule limit. Review the details.",
-    "payout_requested": "We received your payout request — status: under review.",
-    "payout_approved": "Your payout is approved. Funds are on the way.",
-    "payout_rejected": "Your payout request was declined — see the reason.",
-    "kyc_approved": "Identity verified — payouts are unlocked.",
-    "kyc_rejected": "We could not verify your identity — please resubmit.",
+# Krótkie treści pod tytułem (tytuł = temat maila, liczony w notify._render).
+# NIGDY nie bierzemy treści maila — `credentials` zawiera hasło MT5, a push
+# ląduje w systemowej historii powiadomień urządzenia.
+_BODY: dict[str, str] = {
+    "welcome": "Your trader portal is ready.",
+    "credentials": "Your MT5 credentials are ready — log in and start trading.",
+    "challenge_granted": "A challenge account was added to your portal.",
+    "phase_passed": "Objective complete — your next phase account is on the way.",
+    "account_funded": "Your funded account is live. Welcome to the payout side.",
+    "breached": "A trading rule was breached on your account. See details.",
+    "payout_requested": "We received your payout request — it's under review.",
+    "payout_approved": "Your payout was approved.",
+    "payout_rejected": "Your payout request needs attention.",
+    "kyc_approved": "Identity verified — you're cleared for payouts.",
+    "kyc_rejected": "Your verification needs another look.",
     "ticket_reply": "Support replied to your ticket.",
 }
 
 
-def push_enabled() -> bool:
-    return bool(settings.push_enabled and settings.vapid_public_key and settings.vapid_private_key)
+def is_enabled() -> bool:
+    return settings.push_enabled
 
 
-def _webpush_send(subscription_info: dict, data: str) -> None:
-    """Cienki wrapper — testy podmieniaja te funkcje zamiast calego pywebpush."""
-    from pywebpush import webpush
-    webpush(subscription_info=subscription_info, data=data,
-            vapid_private_key=settings.vapid_private_key,
-            vapid_claims={"sub": settings.vapid_sub or f"mailto:{settings.support_email}"},
-            timeout=6)
+def event_url(event: str) -> str:
+    return f"/portal?view={_EVENT_VIEW.get(event, 'accounts')}"
 
 
-def deliver(event: str, to_email: str | None, subject: str) -> None:
-    """Wpis do centrum powiadomień + fan-out web push (best-effort)."""
-    if not to_email or event in _SKIP:
-        return
-    try:
-        _deliver(event, to_email, subject)
-    except Exception as e:  # pragma: no cover
-        print(f"[push] błąd dostarczania '{event}': {e}")
+def _deliver(sub_info: dict, payload: str) -> None:
+    """Jedna wysyłka do push service'u przeglądarki. Wydzielone dla testów."""
+    from pywebpush import webpush  # lazy: pakiet zbędny, gdy push wyłączony
+
+    webpush(
+        subscription_info=sub_info,
+        data=payload,
+        vapid_private_key=settings.vapid_private_key,
+        vapid_claims={"sub": settings.vapid_sub or f"mailto:{settings.support_email}"},
+    )
 
 
-def _deliver(event: str, to_email: str, subject: str) -> None:
+def _center_row(session, trader_id: int, event: str, title: str, body: str, url: str) -> None:
+    """Wpis w centrum powiadomień + retencja (najnowsze 50 na tradera)."""
+    from .models import Notification
+    session.add(Notification(trader_id=trader_id, event=event[:32],
+                             title=title[:200], body=body[:400], url=url[:200]))
+    stare = (session.query(Notification).filter(Notification.trader_id == trader_id)
+             .order_by(Notification.id.desc()).offset(50).all())
+    for n in stare:
+        session.delete(n)
+
+
+def send_to_trader(trader_id: int, title: str, body: str = "",
+                   url: str = "/portal", tag: str | None = None) -> int:
+    """Wysyła push na wszystkie urządzenia tradera; zwraca liczbę dostarczeń.
+
+    Martwe subskrypcje (410/404 z push service'u — użytkownik odwołał zgodę
+    albo odinstalował PWA) są przy okazji kasowane, żeby nie słać w próżnię."""
+    if not is_enabled():
+        return 0
     from .db import SessionLocal
-    from .models import Trader
-    from .notify import _PREF_BY_EVENT
+    from .models import PushSubscription
+
+    payload = json.dumps({"title": title, "body": body, "url": url, "tag": tag})
     session = SessionLocal()
+    sent = 0
     try:
-        tr = session.query(Trader).filter(Trader.email == to_email).first()
-        if not tr:
-            return
-        pref = _PREF_BY_EVENT.get(event)
-        if pref:
-            val = getattr(tr, pref, True)
-            if val is not None and not bool(val):
-                return
-        _row_and_push(session, tr, event, subject,
-                      _SHORT.get(event, "Open your dashboard for details."))
+        subs = session.query(PushSubscription).filter(
+            PushSubscription.trader_id == trader_id).all()
+        for sub in subs:
+            info = {"endpoint": sub.endpoint,
+                    "keys": {"p256dh": sub.p256dh, "auth": sub.auth}}
+            try:
+                _deliver(info, payload)
+                sent += 1
+            except Exception as e:
+                status = getattr(getattr(e, "response", None), "status_code", None)
+                if status in (404, 410):
+                    session.delete(sub)
+                else:
+                    print(f"[push] błąd wysyłki do tradera {trader_id}: {e}")
+        session.commit()
+        return sent
     finally:
         session.close()
 
 
-def _row_and_push(session, trader, event: str, title: str, body: str) -> None:
-    """Wspólna końcówka: wiersz w centrum + push na wszystkie subskrypcje.
+def send_event(event: str, to_email: str | None, title: str, ctx: dict | None = None) -> int:
+    """Zdarzenie z notify.send: wpis w centrum powiadomień + push.
 
-    Wywołujący dba o preferencje; tu tylko zapis i wysyłka. Commit na końcu
-    obejmuje też kasację martwych subskrypcji (404/410 z push-serwisu).
-    """
-    from .models import Notification, PushSubscription
-    url = f"/portal?view={_EVENT_VIEW.get(event, 'accounts')}"
-    session.add(Notification(trader_id=trader.id, event=event[:32],
-                             title=title[:200], body=body[:400], url=url))
-    stare = (session.query(Notification).filter(Notification.trader_id == trader.id)
-             .order_by(Notification.id.desc()).offset(50).all())
-    for n in stare:
-        session.delete(n)
-    session.commit()
+    Ta sama kategoria preferencji co mail; wpis w centrum powstaje także przy
+    wyłączonym pushu — dzwonek w portalu działa bez zgody przeglądarki."""
+    if not to_email or event in _SKIP:
+        return 0
+    from .db import SessionLocal
+    from .models import Trader
+    from .notify import _PREF_BY_EVENT
 
-    if not push_enabled():
-        return
-    subs = (session.query(PushSubscription)
-            .filter(PushSubscription.trader_id == trader.id).all())
-    if not subs:
-        return
-    payload = json.dumps({"title": title, "body": body, "url": url, "tag": event})
-    for sub in subs:
-        try:
-            _webpush_send({"endpoint": sub.endpoint,
-                           "keys": {"p256dh": sub.p256dh, "auth": sub.auth}}, payload)
-            sub.fail_count = 0
-        except Exception as e:
-            code = getattr(getattr(e, "response", None), "status_code", None)
-            if code in (404, 410):
-                session.delete(sub)          # przegladarka uniewaznila subskrypcje
-            else:
-                sub.fail_count = (sub.fail_count or 0) + 1
-                if sub.fail_count >= 8:      # chroniczny blad = tez do kosza
-                    session.delete(sub)
-            print(f"[push] webpush {code or e}")
-    session.commit()
+    session = SessionLocal()
+    try:
+        tr = session.query(Trader).filter(Trader.email == to_email).first()
+        if tr is None:
+            return 0
+        pref = _PREF_BY_EVENT.get(event)
+        if pref:
+            val = getattr(tr, pref, True)
+            if val is not None and not bool(val):
+                return 0
+        trader_id = tr.id
+        _center_row(session, trader_id, event, title,
+                    _BODY.get(event, ""), event_url(event))
+        session.commit()
+    finally:
+        session.close()
+    return send_to_trader(trader_id, title, _BODY.get(event, ""),
+                          url=event_url(event), tag=event)
 
 
 # --------------------------------------------------------------------------- #
@@ -137,8 +158,8 @@ def daily_recap() -> dict:
     """Recap wczorajszego handlu: wynik z transakcji + dystans do celu fazy.
 
     Zasady: raz na dobę (guard w AppSetting), BRAK transakcji = CISZA (żadnego
-    pustego pingu), kategoria notify_marketing (w Settings jako
-    „Daily Recap & Offers").
+    pustego pingu), kategoria notify_marketing („Daily Recap & Offers").
+    Komentuje wyłącznie ZAMKNIĘTY dzień — nigdy otwarte pozycje.
     """
     try:
         return _daily_recap()
@@ -203,8 +224,33 @@ def _daily_recap() -> dict:
             tresc = (f"{len(ts)} trade{'s' if len(ts) != 1 else ''} across "
                      f"{len(konta)} account{'s' if len(konta) != 1 else ''}."
                      + (f" ${dystans:,.0f} to your phase target." if dystans else ""))
-            _row_and_push(session, tr, "daily_recap", tytul, tresc)
+            _center_row(session, tid, "daily_recap", tytul, tresc, event_url("daily_recap"))
+            session.commit()
+            send_to_trader(tid, tytul, tresc, url=event_url("daily_recap"), tag="daily_recap")
             wyslane += 1
         return {"sent": wyslane}
     finally:
         session.close()
+
+
+def generate_vapid_keys() -> tuple[str, str]:
+    """Zwraca (private, public) w base64url — public idzie też do przeglądarki
+    jako applicationServerKey, więc format musi być surowym punktem EC P-256."""
+    from cryptography.hazmat.primitives import serialization
+    from py_vapid import Vapid02, b64urlencode
+
+    v = Vapid02()
+    v.generate_keys()
+    priv = b64urlencode(
+        v.private_key.private_numbers().private_value.to_bytes(32, "big"))
+    pub = b64urlencode(v.public_key.public_bytes(
+        serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint))
+    return priv, pub
+
+
+if __name__ == "__main__":
+    priv, pub = generate_vapid_keys()
+    print("Wklej do env (Vercel: Settings -> Environment Variables):\n")
+    print(f"VAPID_PRIVATE_KEY={priv}")
+    print(f"VAPID_PUBLIC_KEY={pub}")
+    print("VAPID_SUB=mailto:support@protradersfunding.com")

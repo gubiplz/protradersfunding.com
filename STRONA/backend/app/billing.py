@@ -46,12 +46,30 @@ def save_customer_details(session, trader: Trader, *, first_name: str | None,
     return trader
 
 
+def _lucky_active(trader: Trader, code: str) -> bool:
+    """Kody LUCKY sa osobiste (z daily reveal) i wazne 48h — wyciekniety kod
+    nie zadziala u nikogo, kto go faktycznie nie wylosowal."""
+    try:
+        payload = json.loads(trader.reveal_payload or "null")
+    except ValueError:
+        return False
+    if not payload or payload.get("type") != "coupon" or payload.get("code") != code:
+        return False
+    expires = payload.get("expires_at")
+    if not expires:
+        return False
+    return datetime.now(timezone.utc) <= datetime.fromisoformat(expires)
+
+
 def create_checkout(session, trader: Trader, product_key: str, coupon: str | None,
                     promo_code: str | None = None, weekend_trading: bool = False) -> dict:
     product = session.query(Product).filter(Product.key == product_key, Product.active == True).first()  # noqa: E712
     if not product:
         raise HTTPException(404, "Product not found")
 
+    code = (coupon or "").strip().upper()
+    if code in catalog.LUCKY_CODES and not _lucky_active(trader, code):
+        raise HTTPException(400, "This coupon is personal and no longer active")
     price, discount_pct = catalog.apply_coupon(product.price_usd, coupon)
     # Add-on Weekend Trading: stala kwota, POZA rabatem kuponu (kupon dotyczy planu).
     if weekend_trading:

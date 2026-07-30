@@ -54,6 +54,10 @@
     promoForm.hidden = false;
     scrollTo({ top: 0, behavior: 'smooth' });
     promoInp.focus();
+    /* The code ships pre-filled — one click on "Apply promo" shows it landing
+       in the input and redeems it by itself; typing stays possible if the
+       auto-submit ever fails. */
+    if (promoInp.value.trim()) setTimeout(() => promoForm.requestSubmit(), 400);
   }
   const promoApplyBtn = $('#promoApply');
   if (promoApplyBtn) promoApplyBtn.addEventListener('click', openPromoInput);
@@ -325,6 +329,7 @@
       promo.hidden = !anyPromo;
       if (anyPromo) {
         promo.classList.toggle('is-max', applied && !big);
+        promo.classList.toggle('applied', applied && !!big);
         if (!applied) {
           $('#cfg-promo-badge').textContent = 'Upgrade your size';
           $('#cfg-promo-val').innerHTML = 'Have a promo code? Get the <b>next size up — same fee</b>.';
@@ -333,11 +338,10 @@
           const open = $('#cfg-promo-open');
           if (open) open.addEventListener('click', openPromoInput);
         } else if (big) {
-          $('#cfg-promo-badge').textContent = 'Promo applied ✓';
-          $('#cfg-promo-val').innerHTML =
-            `Pay for ${sizeLabel(p.account_size)} — trade <b>$${fmt(big)}</b>`;
-          $('#cfg-promo-sub').textContent =
-            'Your account is created one size up at checkout.';
+          $('#cfg-promo-badge').textContent = '✓ Promo applied';
+          $('#cfg-promo-val').textContent = 'Code redeemed successfully!';
+          $('#cfg-promo-sub').innerHTML =
+            `Pay for ${sizeLabel(p.account_size)} — your account is created at <b>$${fmt(big)}</b>.`;
         } else {
           $('#cfg-promo-badge').textContent = 'Largest size';
           $('#cfg-promo-val').innerHTML = `${sizeLabel(p.account_size)} is our biggest account`;

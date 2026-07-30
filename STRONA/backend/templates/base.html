@@ -39,7 +39,7 @@ if(localStorage.getItem('pf_promo_code'))document.documentElement.classList.add(
       challenge, get the <b>next size up — same fee</b>.{% if promo.ends %} Ends {{ promo.ends }}.{% endif %}</span>
     <form class="promo-form" id="promoForm" hidden>
       <input class="promo-inp" id="promoInp" placeholder="Promo code" autocomplete="off"
-        spellcheck="false" aria-label="Promo code">
+        spellcheck="false" aria-label="Promo code" value="{{ promo.code }}">
       <button class="promo-go" type="submit">Apply</button>
     </form>
     <button class="promo-cta promo-apply" id="promoApply" type="button">Apply promo</button>
@@ -95,6 +95,7 @@ if(localStorage.getItem('pf_promo_code'))document.documentElement.classList.add(
         <a href="/#objectives">Trading Objectives</a>
         <a href="/#pricing">Pricing</a>
         <a href="/#scaling">Scaling Plan</a>
+        <a href="/install">Install the App</a>
         <a href="/faq">FAQ</a>
       </div>
       <div class="foot-col">

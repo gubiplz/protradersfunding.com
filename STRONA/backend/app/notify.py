@@ -332,10 +332,14 @@ def send(event: str, to_email: str | None, ctx: dict | None = None) -> None:
         except Exception as e:  # pragma: no cover
             print(f"[notify] webhook błąd: {e}")
 
-    # 3) centrum powiadomien w portalu + web push — ta sama bramka preferencji
-    #    (tresc pushy NIE pochodzi z maila; patrz push._SHORT)
-    try:
-        from . import push
-        push.deliver(event, adres, subject)
-    except Exception as e:  # pragma: no cover
-        print(f"[notify] push błąd: {e}")
+    # 3) web push + centrum powiadomien w portalu — tytuł = temat maila, treść
+    # z push._BODY (nigdy z maila: credentials zawiera hasło MT5). `to_email`
+    # jest już po bramce preferencji, więc wyłączona kategoria blokuje mail,
+    # push i wpis w centrum jednym przełącznikiem; awaria pusha nie może
+    # wywrócić requestu, który zdarzenie wywołał (np. approve payoutu).
+    if to_email:
+        try:
+            from . import push
+            push.send_event(event, to_email, subject, ctx)
+        except Exception as e:  # pragma: no cover
+            print(f"[notify] push błąd: {e}")

@@ -172,6 +172,8 @@ def test_wylacznik_gasi_takze_tresc_na_stronie(monkeypatch):
     monkeypatch.setattr(catalog.settings, "promo_upgrade_ends", "")
     html = client.get("/").text
     assert "promo-bar" in html and "has-promo" in html
-    # belka ma przycisk aktywacji kodu i input — bez nich promocji nie da sie wlaczyc
+    # belka ma przycisk aktywacji kodu i input PRE-FILLOWANY kodem — „Apply
+    # promo" aplikuje promocje jednym klikiem, bez wpisywania
     assert 'id="promoApply"' in html and 'id="promoInp"' in html
+    assert 'value="UPGRADE"' in html
     assert "next size up" in html and "double" not in html.lower()

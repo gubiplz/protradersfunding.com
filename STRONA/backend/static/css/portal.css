@@ -652,11 +652,13 @@ table.tbl td.sub-row{background:var(--panel2)}
   background:var(--acc-bg);border:1px solid #dfe3ff;border-radius:10px;padding:9px 12px}
 .plan-promo b{color:var(--acc)}
 
-/* ---------------- mobile bottom nav (both panels) ----------------
-   Rendered by JS from the same NAV list as the drawer; "More" opens the drawer
-   with the full section list. z-index 35: under the drawer scrim (39) and the
+/* ---------------- mobile bottom nav (ADMIN panel) ----------------
+   The trader portal has its own tab bar (PHASE 1 block below); the admin uses
+   this simpler bar rendered from its NAV list — "More" opens the drawer with
+   the full section list. z-index 35: under the drawer scrim (39) and the
    drawer itself (40), under slide-over (60) and modals (70); #toasts (90) is
-   lifted above the bar below. Requires viewport-fit=cover for the safe area. */
+   lifted above the bar below. Requires viewport-fit=cover for the safe area.
+   Offsets are scoped to body.has-botnav so the portal is not double-padded. */
 .botnav{position:fixed;left:0;right:0;bottom:0;z-index:35;display:none;
   background:rgba(255,255,255,.96);backdrop-filter:blur(12px);
   border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
@@ -669,8 +671,8 @@ table.tbl td.sub-row{background:var(--panel2)}
 @media(max-width:960px){
   .botnav{display:flex}
   /* content and toasts must never slide under the fixed bar */
-  .content{padding-bottom:calc(50px + 56px + env(safe-area-inset-bottom))}
-  #toasts{bottom:calc(12px + 56px + env(safe-area-inset-bottom))}
+  .has-botnav .content{padding-bottom:calc(50px + 56px + env(safe-area-inset-bottom))}
+  .has-botnav #toasts{bottom:calc(12px + 56px + env(safe-area-inset-bottom))}
 }
 
 /* ---------------- challenge cards (portal Challenges view) ---------------- */
@@ -737,3 +739,139 @@ table.tbl td.sub-row{background:var(--panel2)}
   background:hsl(calc(var(--i)*47),85%,60%);opacity:.95;
   animation:confetti-fall 1.9s cubic-bezier(.2,.5,.6,1) forwards}
 @keyframes confetti-fall{to{transform:translateY(105vh) rotate(560deg);opacity:.7}}
+/* ============================================================
+   PHASE 1 — PWA + mobile tab bar / "More" sheet
+   Appended at the END on purpose: it must win the cascade over
+   the responsive blocks above. Do not move or fold in.
+   ============================================================ */
+
+/* --- bottom tab bar (mobile only, <=700px) --- */
+.tabbar{display:none;position:fixed;left:0;right:0;bottom:0;z-index:50;
+  height:calc(58px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);
+  padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);
+  background:rgba(255,255,255,.92);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border-top:1px solid var(--line)}
+.tab-item{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:3px;min-width:44px;min-height:44px;color:var(--muted);transition:color .15s}
+.tab-ic{position:relative;display:flex;width:22px;height:22px}
+.tab-ic svg{width:22px;height:22px}
+.tab-lbl{font-size:10px;font-weight:600;line-height:1}
+.tab-dot{position:absolute;top:-2px;right:-4px;width:8px;height:8px;border-radius:50%;background:#ef4444}
+.tab-item.on{color:var(--acc)}
+.tab-item.on::before{content:"";position:absolute;top:0;left:50%;transform:translateX(-50%);
+  width:28px;height:3px;border-radius:99px;background:var(--grad)}
+
+/* --- "More" bottom sheet --- */
+.sheet-veil{position:fixed;inset:0;z-index:60;background:rgba(15,23,42,.4)}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:61;background:#fff;
+  border:1px solid var(--line);border-bottom:0;border-radius:20px 20px 0 0;
+  padding:8px 14px calc(14px + env(safe-area-inset-bottom));max-height:70vh;overflow-y:auto;
+  overscroll-behavior:contain;box-shadow:0 -24px 60px -24px rgba(15,23,42,.35);
+  transform:translateY(100%);visibility:hidden;
+  /* prefers-reduced-motion: the global *{transition-duration:.01ms!important}
+     block above already neutralizes this transition */
+  transition:transform .3s cubic-bezier(.22,1,.36,1),visibility .3s}
+.sheet.open{transform:none;visibility:visible}
+.sheet-grab{width:40px;height:4px;border-radius:99px;background:var(--line2);margin:6px auto 10px}
+.sheet-nav{display:flex;flex-direction:column;gap:2px}
+.sheet .sb-link{min-height:48px}
+.sheet-div{height:1px;background:var(--line);margin:8px 0}
+.sheet-signout{color:var(--red)}
+.sheet-signout:hover{color:var(--red);background:var(--red-bg)}
+
+/* --- touch polish --- */
+button,a{-webkit-tap-highlight-color:transparent}
+.tab-item,.sb-link,.btn-p{touch-action:manipulation}
+
+@media(max-width:700px){
+  .tabbar{display:flex}
+  .burger{display:none}
+  .content{padding-bottom:calc(74px + env(safe-area-inset-bottom))}  /* clear the bar */
+  .inp{font-size:16px}                                /* iOS zooms on focus below 16px */
+  .icon-btn{width:44px;height:44px;flex:0 0 44px}
+  #toasts{bottom:calc(70px + env(safe-area-inset-bottom))}           /* toasts above the bar */
+}
+
+/* --- standalone mode (iOS Add to Home Screen) --- */
+html.pwa body{overscroll-behavior-y:none}
+html.pwa .topbar{padding-top:calc(13px + env(safe-area-inset-top))}  /* status bar overlays */
+@media(max-width:960px){
+  html.pwa .topbar{padding-top:calc(12px + env(safe-area-inset-top))}
+  html.pwa .side{display:none}     /* tab bar + sheet own navigation in standalone */
+  html.pwa .burger{display:none}
+}
+
+/* ============================================================
+   PHASE 2 — intermittent reinforcement layer
+   Streak chip, daily reveal card, celebration overlay, near-miss
+   shimmer, leaderboard movers. JS effects are gated by RFX.reduced;
+   the keyframes below are neutralized by the global
+   prefers-reduced-motion *{animation-duration:.01ms} block above.
+   ============================================================ */
+
+/* --- streak chip (topbar) --- */
+.streak-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;
+  border:1px solid #f3ddb5;background:var(--gold-bg);color:var(--gold);font-weight:700;font-size:13px;
+  transition:.15s;white-space:nowrap}
+.streak-chip svg{width:15px;height:15px;flex:0 0 15px}
+.streak-chip b{font-family:var(--mono);font-weight:800;line-height:1}
+.streak-chip:hover{filter:brightness(.97)}
+@media(max-width:380px){.streak-chip{padding:6px 9px;gap:4px}}
+
+/* --- daily reveal card --- */
+.reveal-wrap{perspective:1000px;max-width:420px;margin-bottom:16px}
+.reveal-card{aspect-ratio:16/9;border-radius:var(--r);cursor:pointer;position:relative;overflow:hidden;
+  background:var(--grad);color:#fff;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:7px;padding:18px;text-align:center;
+  box-shadow:0 18px 44px -18px rgba(99,102,241,.55);
+  transform-style:preserve-3d;will-change:transform;-webkit-tap-highlight-color:transparent}
+.reveal-card.face-up{cursor:default}
+.reveal-logo{position:absolute;right:-24px;bottom:-24px;width:150px;opacity:.1;pointer-events:none}
+.reveal-tag{font-size:10.5px;font-weight:800;letter-spacing:.18em;text-transform:uppercase;opacity:.85}
+.reveal-t{font-size:13px;opacity:.92;max-width:310px}
+.reveal-hint{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  border:1px solid rgba(255,255,255,.45);border-radius:999px;padding:5px 13px;margin-top:4px}
+.reveal-quote{font-family:var(--display);font-size:15.5px;line-height:1.45;font-weight:600;max-width:330px}
+.reveal-quote::before{content:'\201C'}
+.reveal-quote::after{content:'\201D'}
+.reveal-big{font-size:44px;font-weight:800;line-height:1;letter-spacing:-.02em}
+.reveal-ic-big{display:flex;align-items:center;justify-content:center;color:#fff}
+.reveal-ic-big svg{width:42px;height:42px}
+.reveal-rare{background:linear-gradient(135deg,#f59e0b,#fbbf24);
+  box-shadow:0 18px 48px -14px rgba(245,158,11,.65)}
+.reveal-code{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.16);
+  border:1px dashed rgba(255,255,255,.55);border-radius:12px;padding:9px 14px}
+.reveal-code code{font-family:var(--mono);font-size:20px;font-weight:800;letter-spacing:.06em}
+.reveal-code .copy{color:#fff}
+.reveal-code .copy:hover{color:#fff;background:rgba(255,255,255,.2)}
+
+/* --- celebration overlay (RFX.celebrate) --- */
+.celebrate-veil{position:fixed;inset:0;z-index:95;background:rgba(15,23,42,.55);
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  display:flex;align-items:center;justify-content:center;padding:24px;cursor:pointer}
+.celebrate-box{text-align:center;max-width:340px}
+.celebrate-badge{position:relative;width:118px;height:118px;margin:0 auto 20px}
+.celebrate-ring{position:absolute;inset:-11px;border-radius:50%;
+  background:conic-gradient(#f59e0b,#fde68a,#fbbf24,#f59e0b);
+  -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 7px),#000 calc(100% - 6px));
+  mask:radial-gradient(farthest-side,transparent calc(100% - 7px),#000 calc(100% - 6px));
+  animation:rfx-spin 3.2s linear infinite}
+.celebrate-ic{position:absolute;inset:0;border-radius:50%;background:var(--grad);color:#fff;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 22px 50px -16px rgba(99,102,241,.7)}
+.celebrate-ic svg{width:48px;height:48px}
+.celebrate-sub{font-size:11px;font-weight:800;letter-spacing:.24em;text-transform:uppercase;color:#fbbf24}
+.celebrate-title{font-size:26px;color:#fff;margin:7px 0 20px}
+@keyframes rfx-spin{to{transform:rotate(360deg)}}
+
+/* --- loyalty near-miss shimmer --- */
+.phase-bar.near-miss{position:relative}
+.phase-bar.near-miss::after{content:"";position:absolute;inset:0;
+  background:linear-gradient(105deg,transparent 32%,rgba(255,255,255,.75) 50%,transparent 68%);
+  animation:rfx-shimmer 1.9s ease-in-out infinite}
+@keyframes rfx-shimmer{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+
+/* --- leaderboard movers --- */
+.rank-up,.rank-down{font-family:var(--mono);font-size:10.5px;font-weight:700;margin-left:4px;white-space:nowrap}
+.rank-up{color:#059669}
+.rank-down{color:#dc2626}

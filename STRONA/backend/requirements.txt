@@ -13,6 +13,9 @@ pywebpush>=2.0             # web push (VAPID) — klucze w env VAPID_*
 # Płatności (realny Stripe; w trybie MOCK niewymagane)
 stripe>=7.0
 
+# Web push (PWA) — podpis VAPID + wysyłka powiadomień
+pywebpush>=2.0
+
 # Postgres / Supabase (produkcja — DATABASE_URL wskazuje na Postgres)
 psycopg[binary]>=3.1
 

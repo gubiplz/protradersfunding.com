@@ -591,6 +591,11 @@ html.promo-applied .promo-tag{background:rgba(255,255,255,.92);color:#4f46e5}
 /* Teaser link inside the hero promo block ("Apply your code") */
 .cfg-promo-link{appearance:none;border:0;background:none;padding:0;color:inherit;
   font:inherit;font-weight:700;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+/* Redeemed state: the hero block flips to green — the promise became a fact. */
+.cfg-promo.applied{background:#f0fdf4;border-color:#bbf7d0}
+.cfg-promo.applied .cfg-promo-badge{background:#16a34a;color:#fff}
+.cfg-promo.applied .cfg-promo-val{color:#15803d}
+.cfg-promo.applied .cfg-promo-sub b{color:#15803d}
 @media(max-width:640px){
   /* The input needs the room the copy occupies — while typing, the promise
      text yields (it comes right back after Apply/blur). */

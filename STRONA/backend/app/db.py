@@ -71,6 +71,12 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "notify_payouts": "BOOLEAN DEFAULT TRUE",
         "notify_marketing": "BOOLEAN DEFAULT TRUE",
         "credits_usd": "FLOAT DEFAULT 0",
+        "checkin_streak": "INTEGER DEFAULT 0",
+        "checkin_last": "VARCHAR(10)",
+        "bonus_points": "INTEGER DEFAULT 0",
+        "reveal_last": "VARCHAR(10)",
+        "reveal_payload": "VARCHAR(240)",
+        "streak_freezes": "INTEGER DEFAULT 1",
     },
     "products": {
         "max_lots": "FLOAT DEFAULT 6.0",

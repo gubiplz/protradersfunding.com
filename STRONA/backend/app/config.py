@@ -133,14 +133,6 @@ class Settings:
     # Kod aktywujący promocję (case-insensitive; to marketing go rozdaje).
     promo_upgrade_code: str = os.getenv("PROMO_UPGRADE_CODE", "UPGRADE").strip()
 
-    # --- Web push (VAPID) ---
-    # Brak kluczy = kanał po cichu wyłączony (portal chowa opcję powiadomień).
-    # Klucze generuje `vapid --gen` (py_vapid) i trzyma je env, nie repo.
-    push_enabled: bool = os.getenv("PUSH_ENABLED", "true").lower() == "true"
-    vapid_public_key: str = os.getenv("VAPID_PUBLIC_KEY", "").strip()
-    vapid_private_key: str = os.getenv("VAPID_PRIVATE_KEY", "").strip()
-    vapid_sub: str = os.getenv("VAPID_SUB", "").strip()   # np. mailto:support@…
-
     # --- Aplikacja / bezpieczeństwo ---
     app_base_url: str = os.getenv("APP_BASE_URL", "http://localhost:8000")
     secret_key: str = os.getenv("SECRET_KEY", "dev-secret-change-me")
@@ -173,6 +165,22 @@ class Settings:
 
     # --- Webhook powiadomień (np. Make/Telegram) — opcjonalny ---
     notify_webhook_url: str = os.getenv("NOTIFY_WEBHOOK_URL", "")
+
+    # --- Web push (PWA). Brak kluczy => push wyłączony ---
+    # Klucze VAPID (base64url): wygeneruj raz przez
+    #   python -m app.push  (wypisze parę do wklejenia w env)
+    # i NIE zmieniaj na produkcji — nowe klucze unieważniają wszystkie subskrypcje.
+    vapid_private_key: str = os.getenv("VAPID_PRIVATE_KEY", "")
+    vapid_public_key: str = os.getenv("VAPID_PUBLIC_KEY", "")
+    vapid_sub: str = os.getenv("VAPID_SUB", "")   # kontakt dla push service, np. mailto:...
+
+    @property
+    def push_enabled(self) -> bool:
+        # PUSH_ENABLED=false to awaryjny wylacznik (testy, incydent) — normalnie
+        # o wszystkim decyduje obecnosc kluczy.
+        if os.getenv("PUSH_ENABLED", "true").lower() != "true":
+            return False
+        return bool(self.vapid_private_key and self.vapid_public_key)
 
 
 @lru_cache

@@ -20,8 +20,10 @@ os.environ["SMTP_HOST"] = ""             # maile na konsolę, bez wysyłki
 os.environ["NOTIFY_WEBHOOK_URL"] = ""
 # Poller nie moze chodzic w tle testow — przestawialby salda kont.
 os.environ["POLLER_ENABLED"] = "false"
-# Web push: zaden test nie strzela do endpointow push-serwisow przegladarek.
-os.environ["PUSH_ENABLED"] = "false"
+# Web push: puste klucze VAPID = push wylaczony (settings.push_enabled to
+# property liczone z kluczy). Testy pusha wlaczaja go same monkeypatchem
+# kluczy na singletonie settings — dlatego NIE ustawiamy tu PUSH_ENABLED=false,
+# ktore jest awaryjnym wylacznikiem silniejszym niz klucze.
 os.environ["VAPID_PUBLIC_KEY"] = ""
 os.environ["VAPID_PRIVATE_KEY"] = ""
 
