@@ -553,3 +553,47 @@ table.lb{min-width:560px}
   .promo-tag{display:none}          /* na telefonie liczy sie sama obietnica */
   .promo-cta{font-size:12px}
 }
+
+/* ---------------- promo bar: Apply-promo code flow ----------------
+   The bar has three states driven by classes on <html> / #promoBar:
+   default (Apply promo button) -> .promo-open (inline code input) ->
+   html.promo-applied (code accepted; persisted in localStorage). */
+.promo-apply{appearance:none;border:1px solid rgba(255,255,255,.55);border-radius:999px;
+  background:rgba(255,255,255,.12);padding:4px 11px;text-decoration:none;cursor:pointer;
+  transition:background .15s}
+.promo-apply:hover{background:rgba(255,255,255,.24)}
+.promo-form{flex:none;display:flex;align-items:center;gap:6px;height:26px}
+.promo-inp{width:118px;height:26px;border:1px solid rgba(255,255,255,.55);border-radius:8px;
+  background:rgba(255,255,255,.14);color:#fff;font:600 12px/1 var(--body,inherit);
+  padding:0 9px;letter-spacing:.06em;text-transform:uppercase;outline:none}
+.promo-inp::placeholder{color:rgba(255,255,255,.65);letter-spacing:.02em;text-transform:none}
+.promo-inp:focus{border-color:#fff;background:rgba(255,255,255,.22)}
+.promo-go{appearance:none;border:0;border-radius:8px;height:26px;padding:0 11px;cursor:pointer;
+  background:#fff;color:#4f46e5;font-weight:800;font-size:12px}
+.promo-bar.promo-open .promo-apply{display:none}
+html.promo-applied .promo-apply,html.promo-applied .promo-form{display:none}
+/* Applied: the pill turns into a checkmark badge, the copy switches (JS swaps
+   the text; CSS keeps the state stable on reload before JS runs). */
+html.promo-applied .promo-tag{background:rgba(255,255,255,.92);color:#4f46e5}
+/* Success animation: one bright sweep across the bar + a soft pop of the text. */
+@keyframes promoSweep{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+@keyframes promoPop{0%{transform:scale(.96);opacity:.4}55%{transform:scale(1.03)}100%{transform:scale(1);opacity:1}}
+.promo-bar{overflow:hidden}
+.promo-bar.promo-flash::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(105deg,transparent 30%,rgba(255,255,255,.55) 50%,transparent 70%);
+  animation:promoSweep .9s ease-out 2}
+.promo-bar.promo-flash .promo-txt{animation:promoPop .5s ease-out}
+/* Wrong code: quick head-shake on the form. */
+@keyframes promoShake{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}
+  50%{transform:translateX(4px)}75%{transform:translateX(-2px)}}
+.promo-form.promo-bad{animation:promoShake .3s ease}
+.promo-form.promo-bad .promo-inp{border-color:#fecaca;background:rgba(220,38,38,.35)}
+/* Teaser link inside the hero promo block ("Apply your code") */
+.cfg-promo-link{appearance:none;border:0;background:none;padding:0;color:inherit;
+  font:inherit;font-weight:700;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+@media(max-width:640px){
+  /* The input needs the room the copy occupies — while typing, the promise
+     text yields (it comes right back after Apply/blur). */
+  .promo-bar.promo-open .promo-txt{display:none}
+  .promo-inp{width:112px}
+}

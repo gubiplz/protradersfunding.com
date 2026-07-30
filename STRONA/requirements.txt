@@ -18,4 +18,3 @@ itsdangerous>=2.1
 segno>=1.6
 stripe>=7.0
 psycopg[binary]>=3.1
-pywebpush>=2.0

@@ -70,12 +70,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "notify_trading": "BOOLEAN DEFAULT TRUE",
         "notify_payouts": "BOOLEAN DEFAULT TRUE",
         "notify_marketing": "BOOLEAN DEFAULT TRUE",
-        "checkin_streak": "INTEGER DEFAULT 0",
-        "checkin_last": "VARCHAR(10)",
-        "bonus_points": "INTEGER DEFAULT 0",
-        "reveal_last": "VARCHAR(10)",
-        "reveal_payload": "VARCHAR(240)",
-        "streak_freezes": "INTEGER DEFAULT 1",
+        "credits_usd": "FLOAT DEFAULT 0",
     },
     "products": {
         "max_lots": "FLOAT DEFAULT 6.0",
@@ -83,6 +78,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
     "orders": {
         "bogo_paid_key": "VARCHAR(48)",
         "weekend_trading": "BOOLEAN DEFAULT FALSE",
+        "credits_used": "FLOAT DEFAULT 0",
     },
     "pool_accounts": {
         "claimed_by_trader_id": "INTEGER",

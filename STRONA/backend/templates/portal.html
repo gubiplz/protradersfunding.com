@@ -4,19 +4,14 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Trader Portal — {{ site_name }}</title>
 <link rel="icon" href="/static/img/favicon.png" type="image/png">
-<link rel="manifest" href="/static/manifest.json">
-<meta name="theme-color" content="#f6f7fb">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="ProTraders">
+<link rel="manifest" href="/manifest.json">
 <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png">
-<script>if(matchMedia('(display-mode: standalone)').matches||navigator.standalone)document.documentElement.classList.add('pwa');
-if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('/sw.js'))</script>
+<meta name="theme-color" content="#6366f1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="{{ site_name }}">
 <link rel="stylesheet" href="/static/css/portal.css?v={{ asset_v }}">
 <script src="/static/lib/chart.umd.min.js"></script>
-<script src="/static/lib/gsap.min.js"></script>
 <script src="/static/js/equity-chart.js?v={{ asset_v }}"></script>
-<script src="/static/js/reward-fx.js?v={{ asset_v }}"></script>
 </head>
 <body>
 
@@ -91,20 +86,17 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
       </button>
       <div><h1 id="pg-title">Challenges</h1><div class="crumb" id="pg-crumb"></div></div>
       <div class="top-right">
-        <button class="streak-chip hidden" id="streakChip" onclick="go('loyalty')" title="Daily check-in streak"><b id="streakN">0</b></button>
+        <button class="icon-btn" id="bell-btn" onclick="toggleNotif()" aria-label="Notifications">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+          <span class="bell-badge hidden" id="bell-badge"></span>
+        </button>
         <button class="btn-p sm" onclick="go('store')">+ New challenge</button>
       </div>
     </div>
     <div class="content" id="view"></div>
   </div>
-
-  <!-- mobile bottom tab bar + "More" sheet (items rendered by JS below) -->
-  <nav class="tabbar" id="tabbar"></nav>
-  <div class="sheet-veil hidden" id="sheetVeil" onclick="closeSheet()"></div>
-  <div class="sheet" id="sheet">
-    <div class="sheet-grab"></div>
-    <nav class="sheet-nav" id="sheet-nav"></nav>
-  </div>
+  <nav class="botnav" id="botnav" aria-label="Sections"></nav>
+  <div class="notif-panel hidden" id="notif-panel"></div>
 </div>
 
 <div id="toasts"></div>
@@ -123,6 +115,9 @@ let TOKEN=localStorage.getItem('pf_token'), ME=null, AUTHMODE='login', chart=nul
 const H=()=>TOKEN?{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'}:{'Content-Type':'application/json'};
 async function api(path,opts={}){const r=await fetch(path,{headers:H(),...opts});if(!r.ok){throw new Error((await r.json().catch(()=>({}))).detail||r.status)}return r.json()}
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+/* "Upgrade Your Size" promo code applied on the public site (or typed in the buy
+   modal). Shared key with the landing page — one applied state everywhere. */
+function pfPromo(){try{return localStorage.getItem('pf_promo_code')||''}catch(e){return ''}}
 
 const ICO={
   copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>',
@@ -150,8 +145,6 @@ const ICO={
   medal:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="14.5" r="5.5"/><path d="m8.5 10 -3-7M15.5 10l3-7M9.5 3h5"/><path d="m12 12 .9 1.8 2 .3-1.4 1.4.3 2-1.8-1-1.8 1 .3-2-1.4-1.4 2-.3z"/></svg>',
   chat:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12a8 8 0 0 1-8 8H4l2.3-2.8A8 8 0 1 1 21 12z"/><path d="M8.5 11h.01M12 11h.01M15.5 11h.01"/></svg>',
   print:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 9V3h12v6M6 17H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="7"/></svg>',
-  grid:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="7" r="2.5"/><circle cx="7" cy="17" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg>',
-  flame:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 22c4.4 0 7-2.9 7-6.5 0-2.5-1.3-4.5-2.8-6.1-.4 1-1 1.9-1.9 2.5.2-2.9-1.1-6.4-4.3-7.9.3 2.9-1.1 4.5-2.6 6.1C6 11.6 5 13.4 5 15.5 5 19.1 7.6 22 12 22z"/><path d="M12 22c1.9 0 3.2-1.3 3.2-3 0-1.4-.9-2.3-1.6-3.3-1 1-3.6 1.8-3.6 3.5 0 1.5 1.1 2.8 3 2.8z"/></svg>',
 };
 
 const NAV=[
@@ -172,24 +165,13 @@ const NAV=[
 $('side-nav').innerHTML=NAV.map(n=>
   `<button class="sb-link" data-v="${n.v}" onclick="go('${n.v}')" title="${n.label}">${ICO[n.ico]}<span class="sb-txt">${n.label}</span></button>`).join('');
 
-/* ---------- mobile tab bar + "More" sheet ---------- */
-const TABS=[
-  {v:'accounts',label:'Home',ico:'trend'},
-  {v:'board',label:'Board',ico:'trophy'},
-  {v:'rewards',label:'Rewards',ico:'gift'},
-  {v:'payouts',label:'Payouts',ico:'payout'},
-];
-$('tabbar').innerHTML=TABS.map(t=>
-  `<button class="tab-item" data-v="${t.v}" onclick="go('${t.v}')"><span class="tab-ic">${ICO[t.ico]}${t.v==='rewards'?'<span class="tab-dot hidden"></span>':''}</span><span class="tab-lbl">${t.label}</span></button>`).join('')+
-  `<button class="tab-item" data-v="more" onclick="openSheet()"><span class="tab-ic">${ICO.grid}</span><span class="tab-lbl">More</span></button>`;
-$('sheet-nav').innerHTML=NAV.filter(n=>!TABS.some(t=>t.v===n.v)).map(n=>
-  `<button class="sb-link" data-v="${n.v}" onclick="go('${n.v}');closeSheet()">${ICO[n.ico]}<span class="sb-txt">${n.label}</span></button>`).join('')+
-  `<div class="sheet-div"></div>
-   <a class="sb-link" id="admin-link-sheet" href="/admin" style="display:none">${ICO.gear}<span class="sb-txt">Admin panel</span></a>
-   <button class="sb-link sheet-signout" onclick="logout()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H3"/></svg><span class="sb-txt">Sign Out</span></button>`;
-function openSheet(){$('sheetVeil').classList.remove('hidden');$('sheet').classList.add('open')}
-function closeSheet(){$('sheetVeil').classList.add('hidden');$('sheet').classList.remove('open')}
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closeSheet()});
+/* Mobile bottom bar: the 4 most-used sections; "More" opens the drawer with
+   the full list. Same go()/NAV as the sidebar — one source of truth. */
+const MORE_ICO='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>';
+$('botnav').innerHTML=['accounts','analytics','payouts','support'].map(v=>{
+  const n=NAV.find(x=>x.v===v);
+  return `<button class="botnav-btn" data-v="${n.v}" onclick="go('${n.v}')">${ICO[n.ico]}<span>${n.label}</span></button>`;
+}).join('')+`<button class="botnav-btn" onclick="toggleSide(true)" aria-label="All sections">${MORE_ICO}<span>More</span></button>`;
 
 /* ---------- toasts ---------- */
 function toast(msg,kind='ok',ms=6000){
@@ -282,11 +264,13 @@ async function boot(){
   $('who-name').textContent=ME.full_name||'Trader';
   $('who-mail').textContent=ME.email;
   $('admin-link').style.display=ME.is_admin?'':'none';
-  $('admin-link-sheet').style.display=ME.is_admin?'':'none';
   if(localStorage.getItem('pf_side_collapsed')==='1')$('side').classList.add('collapsed');
-  initEngagement();
   if(await handlePaymentReturn())return;
-  go(new URLSearchParams(location.search).get('buy')?'store':'accounts');
+  const q=new URLSearchParams(location.search);
+  const widok=q.get('view');           /* deep-linki z powiadomien: /portal?view=payouts */
+  go(q.get('buy')?'store':(widok&&VIEWS[widok]?widok:'accounts'));
+  refreshNotif();
+  badgeCelebrate();
 }
 
 const TITLES={
@@ -306,14 +290,11 @@ const TITLES={
   settings:['Settings','Manage your account settings and preferences'],
 };
 function go(v){
-  document.querySelectorAll('.sb-link[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
-  const tv={store:'accounts',achievements:'rewards',loyalty:'rewards'}[v]||v;
-  const tabs=[...document.querySelectorAll('.tab-item[data-v]')];
-  const hit=tabs.some(b=>b.dataset.v===tv);
-  tabs.forEach(b=>b.classList.toggle('on',b.dataset.v===(hit?tv:'more')));
+  document.querySelectorAll('.sb-link[data-v],.botnav-btn[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const t=TITLES[v]||['',''];
   $('pg-title').textContent=t[0]; $('pg-crumb').textContent=t[1];
   toggleSide(false);
+  $('notif-panel')?.classList.add('hidden');
   $('view').innerHTML='<div class="skel" style="height:110px;margin-bottom:16px"></div><div class="skel" style="height:240px"></div>';
   VIEWS[v]();
 }
@@ -324,7 +305,9 @@ function toggleSide(open){
 /* scrim + Escape zamykaja szuflade (tylko mobile — scrim zyje w MQ <=960) */
 document.addEventListener('click',e=>{
   if(!document.body.classList.contains('nav-open'))return;
-  if(e.target.closest('#side')||e.target.closest('.burger'))return;
+  /* .botnav: przycisk "More" wlasnie otworzyl szuflade tym samym klikiem —
+     bez wyjatku bablujacy event natychmiast by ja zamknal */
+  if(e.target.closest('#side')||e.target.closest('.burger')||e.target.closest('.botnav'))return;
   toggleSide(false);
 });
 document.addEventListener('keydown',e=>{
@@ -346,175 +329,177 @@ function highlightPlanFromUrl(){
   openBuy(key);
 }
 
-/* ================= PHASE 2 — engagement layer =================
-   Hooks run only after ME loads; every network call is wrapped so a
-   failing engagement endpoint never blocks boot. Nothing here reacts
-   to trade events — only open / check-in / milestone renders. */
-window.RFX=window.RFX||{reduced:true,confetti(){},burstFrom(){},pop(){},celebrate(){},GOLD:[],
-  rollUp(el,v,o){if(el)el.textContent=((o||{}).prefix||'')+(((o||{}).formatter)?o.formatter(v):v)},
-  flip(el,swap){if(swap)swap();return Promise.resolve()}};
-
-const utcToday=()=>new Date().toISOString().slice(0,10);
-function revealDot(show){document.querySelectorAll('.tab-dot').forEach(d=>d.classList.toggle('hidden',!show))}
-
-async function initEngagement(){
-  try{
-    const chip=$('streakChip');
-    chip.innerHTML=ICO.flame+`<b id="streakN">${ME.checkin_streak||0}</b>`;
-    chip.classList.remove('hidden');
-    revealDot(ME.reveal_last!==utcToday());
-    try{
-      const r=await api('/api/me/checkin',{method:'POST'});
-      if(!r.already){
-        ME.checkin_streak=r.streak; ME.checkin_last=utcToday(); ME.streak_freezes=r.freezes;
-        $('streakN').textContent=r.streak;
-        RFX.pop(chip);
-        if(r.freeze_used)toast('Streak freeze used — your '+r.streak+'-day streak survived');
-        if(r.reward&&r.reward.type==='points'){
-          ME.bonus_points=(ME.bonus_points||0)+r.reward.amount;
-          RFX.burstFrom(chip,{count:30});
-          toast('Streak bonus: +'+r.reward.amount+' loyalty points');
-        }
-      }
-    }catch(e){}
-    checkNewAchievements();
-  }catch(e){}
+/* ---------- web push + notification center + celebrations ---------- */
+function pushSupported(){return 'serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window}
+function iosNeedsInstall(){
+  const ios=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  const standalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone;
+  return ios&&!standalone&&!pushSupported();
 }
-
-/* dramatic reveal of achievements unlocked since the last visit */
-async function checkNewAchievements(){
-  try{
-    const list=await api('/api/me/achievements');
-    const key=b=>String(b.id??b.key??b.name);
-    const unlocked=list.filter(b=>b.unlocked).map(key);
-    const seenRaw=localStorage.getItem('pf_ach_seen');
-    if(!seenRaw){localStorage.setItem('pf_ach_seen',JSON.stringify(unlocked));return}  // first run: seed silently
-    const seen=JSON.parse(seenRaw);
-    const fresh=list.filter(b=>b.unlocked&&!seen.includes(key(b)));
-    fresh.forEach(b=>RFX.celebrate({icon:ICO[b.icon]||ICO.medal,title:b.name,sub:'ACHIEVEMENT UNLOCKED',toastFn:toast}));
-    if(fresh.length)localStorage.setItem('pf_ach_seen',JSON.stringify(unlocked));
-  }catch(e){}
+function b64ToU8(b){const p='='.repeat((4-b.length%4)%4);
+  const r=atob((b+p).replace(/-/g,'+').replace(/_/g,'/'));
+  return Uint8Array.from(r,c=>c.charCodeAt(0))}
+async function pushKey(){
+  if(window._pushKey===undefined){
+    try{window._pushKey=(await api('/api/push/key')).key}catch(e){window._pushKey=null}
+  }
+  return window._pushKey;
 }
-
-/* roll-up on plain money stats only (e.g. "$1,234.56", "+$80.00") */
-function rollStats(){
-  document.querySelectorAll('#view .stat-tile .val,#view .wide-card .val').forEach((el,i)=>{
-    const m=el.textContent.trim().match(/^([+-]?)\$([\d,]+(?:\.\d+)?)$/);
-    if(!m)return;
-    const v=parseFloat(m[2].replace(/,/g,''));
-    setTimeout(()=>RFX.rollUp(el,v,{prefix:(m[1]||'')+'$',formatter:m[2].includes('.')?fmt:fmt0}),i*80);
-  });
+async function pushSubscribe(){
+  const key=await pushKey();
+  if(!key)throw new Error('Push is not configured on the server yet');
+  const reg=await navigator.serviceWorker.register('/sw.js');
+  await navigator.serviceWorker.ready;
+  if(await Notification.requestPermission()!=='granted')throw new Error('Permission was not granted');
+  const sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64ToU8(key)});
+  const j=sub.toJSON();
+  await api('/api/me/push-subscriptions',{method:'POST',
+    body:JSON.stringify({endpoint:j.endpoint,keys:j.keys,ua:navigator.userAgent.slice(0,150)})});
+  try{localStorage.setItem('pf_push_on','1')}catch(e){}
 }
-
-/* discipline milestones: celebrate LOGGED TRADING DAYS, never P&L progress —
-   day count can't be accelerated by trading bigger, so the reward reinforces
-   consistency, not risk appetite. Max one per render, keyed per account+phase. */
-function checkMilestone(id,a,m){
-  const days=m.trading_days||0, min=m.min_trading_days||0;
-  if(!min)return;
-  const key=`pf_days_${id}_${a.phase||''}`;
-  const prevRaw=localStorage.getItem(key);
-  localStorage.setItem(key,String(days));
-  if(prevRaw===null)return;                     // first look at this phase: seed silently
-  const prev=parseInt(prevRaw,10);
-  if(days<=prev)return;
-  if(prev<min&&days>=min){
-    RFX.celebrate({icon:ICO.cal,title:'Days requirement complete',sub:'DISCIPLINE MILESTONE',toastFn:toast});
-  }else if(days<min){
-    RFX.burstFrom(document.querySelector('.wide-card .tile-ic.orange'),{count:40});
-    RFX.pop(document.querySelector('.wide-card .val'));
-    toast(`Trading day ${days} of ${min} logged — consistency wins`);
+async function pushUnsubscribe(){
+  try{localStorage.removeItem('pf_push_on')}catch(e){}
+  if(!pushSupported())return;
+  const reg=await navigator.serviceWorker.getRegistration();
+  const sub=reg&&await reg.pushManager.getSubscription();
+  if(sub){
+    try{await api('/api/me/push-subscriptions',{method:'DELETE',body:JSON.stringify({endpoint:sub.endpoint})})}catch(e){}
+    await sub.unsubscribe();
   }
 }
-
-/* ---------- daily reveal ---------- */
-const TIPS=[
-  'Risk a fixed fraction — 0.5-1% per trade. Survival first, profits second.',
-  'No setup, no trade. Boredom is not a signal.',
-  'Journal every trade. The pattern you refuse to see is the one costing you money.',
-  'Two losses in a row? Step away for an hour. The market will still be there.',
-  'Size down after a losing week — earn the right to size back up.',
-  'Skip the first 15 minutes after a red-folder news release.',
-  'Your daily loss limit is a hard stop, not a suggestion.',
-  'Trade the session you can actually watch. London open is useless if you are asleep.',
-  'One good trade a day compounds faster than ten forced ones.',
-  'Revenge trading turns one loss into three. Close the platform, not the gap.',
-  'Define the invalidation before entry — if you cannot, you have no trade.',
-  'Move stops to protect capital, never to give a loser more room.',
-  'Drawdown is tuition. Review the losers weekly and stop repeating the lesson.',
-  'Pass the challenge at marathon pace: small consistent days beat one hero day.',
-  'Correlated pairs are one trade in disguise. Count exposure, not tickets.',
-  'Plan the trade when the market is closed. Execute when it is open. Never invert.',
-  'If the lot size makes your heart race, it is too big — halve it.',
-  'Win rate means nothing without average R. Track both.',
-  'Cut losers at plan, let winners hit target. Discipline is symmetric.',
-  'Near your drawdown limit, A+ setups only — protect the account first.',
-  'Three green days do not make you invincible. Same size, same rules.',
-  'Spreads widen around news — a perfect entry with a 5-pip spread is not perfect.',
-  'Weekend gaps ignore stops. Flatten swing risk before Friday close.',
-  'Consistency passes challenges. Intensity blows them up.',
-];
-function revealBack(){
-  return `<img class="reveal-logo" src="/static/img/logo.png" alt="">
-    <div class="reveal-tag">Daily reveal</div>
-    <div class="reveal-t">Trading tips, bonus points or a rare coupon — one flip per day</div>
-    <div class="reveal-hint">Tap to flip</div>`;
-}
-function revealFace(p){
-  if(p.type==='tip')return `<div class="reveal-tag">Today's edge</div>
-    <blockquote class="reveal-quote">${esc(TIPS[(p.index||0)%TIPS.length])}</blockquote>
-    <div class="reveal-hint">New reveal tomorrow</div>`;
-  if(p.type==='points')return `<div class="reveal-tag">Bonus drop</div>
-    <div class="reveal-big mono">+${p.amount}</div>
-    <div class="reveal-t">loyalty points added to your account</div>
-    <div class="reveal-hint">New reveal tomorrow</div>`;
-  if(p.type==='freeze')return `<div class="reveal-tag">Streak insurance</div>
-    <div class="reveal-ic-big">${ICO.shield}</div>
-    <div class="reveal-t"><b>+1 Streak Freeze</b> — if you miss a day, your streak survives automatically</div>
-    <div class="reveal-hint">New reveal tomorrow</div>`;
-  return `<div class="reveal-tag">Rare drop · -${p.pct}% next challenge</div>
-    <div class="reveal-code"><code>${esc(p.code)}</code>
-      <button class="copy" onclick="event.stopPropagation();copyVal(this,'${esc(p.code)}')" title="Copy">${ICO.copy}</button></div>
-    <div class="reveal-t">valid 48h — personal, works only on your account</div>`;
-}
-function paintReveal(p){
-  const c=$('revealCard'); if(!c)return;
-  c.classList.add('face-up');
-  c.classList.toggle('reveal-rare',p.type==='coupon');
-  c.onclick=null; c.removeAttribute('role'); c.style.cursor='default';
-  c.innerHTML=revealFace(p);
-}
-async function doReveal(){
-  const c=$('revealCard');
-  if(!c||c.classList.contains('face-up')||c.dataset.busy)return;
-  c.dataset.busy='1';
+/* Opt-in banner on dashboard entry: only when the server has keys, permission
+   was never asked, and the trader didn't dismiss it in the last 14 days. */
+function pushBannerHtml(){
   try{
-    const p=await api('/api/me/daily-reveal',{method:'POST'});
-    localStorage.setItem('pf_reveal_cache',JSON.stringify({date:utcToday(),payload:p}));
-    ME.reveal_last=utcToday(); revealDot(false);
-    await RFX.flip(c,()=>paintReveal(p),600);
-    if(!p.already){
-      if(p.type==='points'){ME.bonus_points=(ME.bonus_points||0)+p.amount;RFX.burstFrom(c,{count:50})}
-      if(p.type==='freeze'){ME.streak_freezes=(ME.streak_freezes||0)+1;RFX.burstFrom(c,{count:40})}
-      if(p.type==='coupon')RFX.burstFrom(c,{count:80,palette:RFX.GOLD});
-    }
-  }catch(e){toast('Error: '+e.message,'err')}
-  finally{delete c.dataset.busy}
+    if(!window._pushKey)return '';
+    if(Date.now()-parseInt(localStorage.getItem('pf_push_ask_ts')||'0')<14*864e5)return '';
+    if(iosNeedsInstall())return `<div class="gradient-banner" id="push-banner">
+      <span class="gb-tag">🔔 Notifications</span><span class="gb-sep"></span>
+      <span class="gb-txt">On iPhone/iPad: add this app to your Home Screen (Share → <b>Add to Home
+        Screen</b>), then enable notifications in Settings.</span>
+      <button class="gb-x" onclick="dismissPush()" aria-label="Not now">✕</button></div>`;
+    if(!pushSupported()||Notification.permission!=='default')return '';
+    return `<div class="gradient-banner" id="push-banner">
+      <span class="gb-tag">🔔 Notifications</span><span class="gb-sep"></span>
+      <span class="gb-txt">Know the moment you <b>pass a phase</b> or a <b>payout lands</b> —
+        max one scheduled message a day.</span>
+      <button class="gb-btn" onclick="enablePush(this)">Enable ›</button>
+      <button class="gb-x" onclick="dismissPush()" aria-label="Not now">✕</button></div>`;
+  }catch(e){return ''}
 }
-function initRevealCard(){
-  if(ME.reveal_last!==utcToday())return;       // stays face-down until claimed
-  let p=null;
-  try{const j=JSON.parse(localStorage.getItem('pf_reveal_cache')||'null');if(j&&j.date===utcToday())p=j.payload}catch(e){}
-  if(p){paintReveal(p);return}
-  api('/api/me/daily-reveal',{method:'POST'}).then(r=>{  // same-day call replays the cached payload
-    localStorage.setItem('pf_reveal_cache',JSON.stringify({date:utcToday(),payload:r}));
-    paintReveal(r);
-  }).catch(()=>{});
+async function enablePush(btn){
+  if(btn){btn.disabled=true;btn.textContent='Enabling…'}
+  try{
+    await pushSubscribe();
+    document.getElementById('push-banner')?.remove();
+    toast('🔔 Notifications enabled on this device.','ok');
+  }catch(e){
+    toast('Could not enable notifications: '+e.message,'err');
+    if(btn){btn.disabled=false;btn.textContent='Enable ›'}
+  }
+}
+function dismissPush(){
+  try{localStorage.setItem('pf_push_ask_ts',String(Date.now()))}catch(e){}
+  document.getElementById('push-banner')?.remove();
+}
+/* Settings row: current push state + one Enable/Disable button. */
+async function renderPushRow(){
+  const st=$('push-state'),btn=$('push-btn');
+  if(!st)return;
+  const key=await pushKey();
+  if(!key){st.textContent='Not configured on the server yet.';return}
+  if(!pushSupported()){
+    st.textContent=iosNeedsInstall()
+      ?'On iPhone/iPad: add this app to your Home Screen first (Share → Add to Home Screen).'
+      :'Not supported in this browser.';
+    return;
+  }
+  if(Notification.permission==='denied'){st.textContent='Blocked in your browser settings.';return}
+  const on=Notification.permission==='granted'&&localStorage.getItem('pf_push_on')==='1';
+  st.textContent=on?'Enabled on this device.':'Off — you will only get e-mails.';
+  btn.classList.remove('hidden');
+  btn.textContent=on?'Disable':'Enable';
+  btn.dataset.on=on?'1':'';
+}
+async function pushSettingsToggle(btn){
+  btn.disabled=true;
+  try{
+    if(btn.dataset.on){await pushUnsubscribe();toast('Push disabled on this device.','ok')}
+    else{await pushSubscribe();toast('🔔 Push notifications enabled.','ok')}
+  }catch(e){toast('Error: '+e.message,'err')}
+  btn.disabled=false;
+  renderPushRow();
+}
+
+async function refreshNotif(){
+  try{
+    window._notif=await api('/api/me/notifications?limit=20');
+    const b=$('bell-badge'); if(!b)return;
+    const n=window._notif.unread||0;
+    b.textContent=n>9?'9+':n;
+    b.classList.toggle('hidden',!n);
+  }catch(e){}
+}
+function toggleNotif(){
+  const p=$('notif-panel'); if(!p)return;
+  if(!p.classList.contains('hidden')){p.classList.add('hidden');return}
+  const r=window._notif||{items:[],unread:0};
+  p.innerHTML=`<div class="notif-head"><b>Notifications</b>
+      ${r.unread?`<button class="linklike" onclick="readNotif()">Mark all read</button>`:''}</div>`
+    +((r.items&&r.items.length)?r.items.map(n=>{
+      const kiedy=n.created_at?new Date(n.created_at+(n.created_at.endsWith('Z')?'':'Z'))
+        .toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+      return `<a class="notif-row${n.read?'':' unread'}" href="${esc(n.url||'/portal')}">
+        <div class="t">${esc(n.title)}</div>${n.body?`<div class="b">${esc(n.body)}</div>`:''}
+        <div class="d">${kiedy}</div></a>`}).join('')
+      :'<div class="notif-empty">Nothing yet — pass a phase and it lands here.</div>');
+  p.classList.remove('hidden');
+  if(r.unread)readNotif(false);
+}
+async function readNotif(rerender=true){
+  try{await api('/api/me/notifications/read',{method:'POST'});await refreshNotif()}catch(e){}
+  if(rerender)$('notif-panel')?.classList.add('hidden');
+}
+document.addEventListener('click',e=>{
+  const p=document.getElementById('notif-panel');
+  if(!p||p.classList.contains('hidden'))return;
+  if(e.target.closest('#notif-panel')||e.target.closest('#bell-btn'))return;
+  p.classList.add('hidden');
+});
+
+/* Badge unlocks: compare against the set seen on the previous visit — a fresh
+   unlock gets a toast + a confetti burst. First visit only records the state. */
+async function badgeCelebrate(){
+  try{
+    const badges=await api('/api/me/achievements');
+    const teraz=badges.filter(b=>b.unlocked).map(b=>b.key).sort();
+    const stare=JSON.parse(localStorage.getItem('pf_badges_seen')||'null');
+    localStorage.setItem('pf_badges_seen',JSON.stringify(teraz));
+    if(!stare)return;
+    const nowe=badges.filter(b=>teraz.includes(b.key)&&!stare.includes(b.key));
+    if(!nowe.length)return;
+    confetti();
+    toast(`🏅 Achievement unlocked: ${nowe.map(b=>b.name).join(', ')}!\nSee it under Achievements.`,'ok',9000);
+  }catch(e){}
+}
+function confetti(){
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  const c=document.createElement('div');c.className='confetti';
+  for(let i=0;i<26;i++){
+    const p=document.createElement('i');
+    p.style.setProperty('--i',i);
+    p.style.left=(3+Math.random()*94)+'%';
+    p.style.animationDelay=(Math.random()*0.35)+'s';
+    c.appendChild(p);
+  }
+  document.body.appendChild(c);
+  setTimeout(()=>c.remove(),2400);
 }
 
 /* ============================ VIEWS ============================ */
 const VIEWS={
  async accounts(){
+  await pushKey();                 /* the opt-in banner needs to know if the server has keys */
   const accs=await api('/api/me/accounts');
   const live=accs.filter(a=>['active','funded','passed'].includes(a.status));
   const balance=live.reduce((s,a)=>s+a.balance,0);
@@ -544,25 +529,53 @@ const VIEWS={
       <button class="btn-p" onclick="go('store')">Browse challenges</button></div>`;
     return;
   }
-  $('view').innerHTML=banner+stats+`<div class="acct-list">`+accs.map(a=>{
+  /* Challenge cards: each answers at a glance "how close am I to passing" and
+     "how much daily-loss headroom is left" — both bars reuse prog() from the
+     detail view, so the colors mean the same thing everywhere. One banner per
+     visit: the push opt-in (when eligible) beats refer&earn. */
+  const pushB=pushBannerHtml();
+  $('view').innerHTML=(pushB||banner)+stats+`<div class="chal-grid">`+accs.map(a=>{
     const m=a.metrics||{};
-    return `<div class="acct-row">
-      <div class="acct-ava"><img src="/static/img/mt5.png" alt="MT5"></div>
-      <div class="acct-id">
-        <div class="login">${a.status==='provisioning'?'<span class="muted">MT5 account pending…</span>':esc(a.login)}
-          <span class="status ${esc(a.status)}"><span class="dot"></span>${a.status==='active'?'evaluation':esc(a.status)}</span>
-</div>
-        <div class="sub">${planKind(a.steps)} · $${fmt(a.initial_balance)} Account${
-          a.status==='provisioning'?' · creating on MetaQuotes-Demo':(a.platform_server?' · '+esc(a.platform_server):'')}</div>
+    const funded=a.phase==='funded'&&!['breached','failed'].includes(a.status);
+    const dead=['breached','failed'].includes(a.status);
+    const reach=m.profit_target_pct?Math.max(0,(m.profit_pct||0)/m.profit_target_pct*100):0;
+    const openPnl=+(a.open_pnl||0);
+    const dayLeft=(m.daily_floor!=null&&a.equity!=null)?Math.max(0,a.equity-m.daily_floor):null;
+    const bars=dead?'':`<div class="chal-bars">
+        ${funded
+          ?prog('Max drawdown used',m.overall_dd_used_pct,true,
+             `${(m.overall_dd_used_pct||0).toFixed(1)}% / ${m.max_overall_loss_pct}%`)
+          :prog('Progress to target',reach,false,
+             `${(m.profit_pct||0).toFixed(1)}% / ${m.profit_target_pct||0}%`)}
+        ${prog('Daily loss used',m.daily_loss_used_pct,true,
+           dayLeft!=null?`$${fmt(dayLeft)} left today`:`${(m.daily_loss_used_pct||0).toFixed(1)}% / ${m.max_daily_loss_pct}%`)}
+      </div>`;
+    return `<div class="chal-card${dead?' dead':''}">
+      <div class="chal-head">
+        <div class="acct-ava"><img src="/static/img/mt5.png" alt="MT5"></div>
+        <div class="chal-id">
+          <div class="login">${a.status==='provisioning'?'<span class="muted">MT5 account pending…</span>':esc(a.login)}
+            <span class="status ${esc(a.status)}"><span class="dot"></span>${a.status==='active'?'evaluation':esc(a.status)}</span></div>
+          <div class="sub">${planKind(a.steps)} · $${fmt0(a.initial_balance)} · split ${a.profit_split_pct}%${
+            a.status==='provisioning'?' · creating on MetaQuotes-Demo':''}</div>
+        </div>
+        <span class="phase-chip">${PHASE_LABEL[a.phase]||esc(a.phase)}</span>
       </div>
-      <div class="acct-cols">
-        <div class="acct-col"><div class="l">Balance</div><div class="v">$${fmt(a.balance)}</div></div>
-        <div class="acct-col"><div class="l">Equity</div><div class="v">$${fmt(a.equity)}</div></div>
-        <div class="acct-col"><div class="l">Trading Days</div><div class="v">${m.trading_days??0}</div></div>
-        <button class="btn-o sm" onclick="openAcc(${a.id})">${ICO.eye} Dashboard</button>
+      ${dead?`<div class="chal-breach">Challenge ended${a.breach_reason?' — '+esc(a.breach_reason):''}</div>`:''}
+      ${bars}
+      <div class="chal-stats">
+        <div class="chal-stat"><div class="l">Balance</div><div class="v">$${fmt(a.balance)}</div></div>
+        <div class="chal-stat"><div class="l">Equity${openPnl?' <i class="live-dot" title="Open position"></i>':''}</div>
+          <div class="v">$${fmt(a.equity)}${openPnl?` <small class="${openPnl>=0?'up':'down'}">${money(openPnl)}</small>`:''}</div></div>
+        ${funded
+          ?`<div class="chal-stat"><div class="l">Paid out</div><div class="v">$${fmt(a.paid_out||0)}</div></div>`
+          :`<div class="chal-stat"><div class="l">Trading days</div><div class="v">${m.trading_days??0}<small>/${m.min_trading_days??0}</small></div></div>`}
       </div>
+      ${dead
+        ?`<div class="chal-actions"><button class="btn-o sm" onclick="openAcc(${a.id})">${ICO.eye} Review</button>
+           <button class="btn-p sm" onclick="go('store')">Restart challenge</button></div>`
+        :`<button class="btn-o sm chal-cta" onclick="openAcc(${a.id})">${ICO.eye} Dashboard</button>`}
     </div>`}).join('')+`</div>`;
-  rollStats();
  },
 
  async store(){
@@ -580,10 +593,11 @@ const VIEWS={
   const items=ps.filter(g.match).sort((a,b)=>a.account_size-b.account_size);
   $('view').innerHTML=`
     <div class="shop-tabs">${groups.map(x=>`<button class="shop-tab${x.id===g.id?' on':''}" onclick="window._shopTab='${x.id}';VIEWS.store()">${x.name}</button>`).join('')}</div>
+    ${ME.credits_usd>0?`<div class="note" style="margin-bottom:14px"><b>Store credit: $${fmt(ME.credits_usd)}</b> — applied to your total automatically at checkout.</div>`:''}
     <div class="plan-grid">`+items.map(p=>`
     <div class="plan-card" data-plan="${esc(p.key)}">
       <div class="plan-size">$${fmt0(p.account_size)}</div>
-      ${p.promo_upgrade_size?`<div class="plan-badge">→ trade $${fmt0(p.promo_upgrade_size)} free</div>`:''}
+      ${p.promo_upgrade_size&&pfPromo()?`<div class="plan-badge">→ trade $${fmt0(p.promo_upgrade_size)} with your promo</div>`:''}
       <div class="plan-kind">${p.steps===0?'Instant Funding — no evaluation':'2-Step Evaluation'}</div>
       <div class="plan-price">$${fmt0(p.price_usd)} <small>one-time</small></div>
       <div class="plan-refund">✓ Refunded with your first payout</div>
@@ -597,7 +611,7 @@ const VIEWS={
       </ul>
       <button onclick="openBuy('${esc(p.key)}')" class="btn-p">Start Challenge</button>
     </div>`).join('')+`</div>
-    <p class="muted" style="font-size:12px;margin-top:16px">Coupon codes accepted at checkout.</p>`;
+    <p class="muted" style="font-size:12px;margin-top:16px">Coupon and promo codes accepted at checkout.</p>`;
   highlightPlanFromUrl();
  },
 
@@ -607,14 +621,11 @@ const VIEWS={
   const totalEquity=b.reduce((s,r)=>s+(r.equity||0),0);
   const best=b[0];
   const medal=['gold','silver','bronze'];
-  let prevRanks=null;try{prevRanks=JSON.parse(localStorage.getItem('pf_board_prev')||'null')}catch(e){}
-  const mv=(r,rank)=>{if(!prevRanks||prevRanks[r.trader]==null)return'';const d=prevRanks[r.trader]-rank;
-    return d>0?` <span class="rank-up">▲${d}</span>`:d<0?` <span class="rank-down">▼${-d}</span>`:''};
   const podium=b.slice(0,3).map((r,i)=>`
     <div class="pod-card${i===0?' first':''}">
       <div class="pod-rank">Rank #${i+1}</div>
       <div class="pod-medal ${medal[i]}">${ICO.trophy}</div>
-      <div class="pod-name">${esc(r.trader)}${mv(r,i+1)}${r.country?` <span class="muted" style="font-size:11px">· ${esc(r.country)}</span>`:''}</div>
+      <div class="pod-name">${esc(r.trader)}${r.country?` <span class="muted" style="font-size:11px">· ${esc(r.country)}</span>`:''}</div>
       <div style="margin:6px 0 2px"><span class="status ${r.status==='funded'?'funded':'active'}"><span class="dot"></span>${r.status==='funded'?'Funded':'Evaluation'}</span></div>
       <div class="pod-ret">${r.profit_pct>=0?'+':''}${r.profit_pct.toFixed(2)}%</div>
       <div class="pod-usd">$${fmt(r.equity||0)} current equity</div>
@@ -639,13 +650,12 @@ const VIEWS={
       <thead><tr><th style="width:52px">#</th><th>Trader</th><th>Account</th><th>Stage</th><th style="text-align:right">Profit</th></tr></thead>
       <tbody>`+b.slice(3).map((r,i)=>`<tr>
         <td class="num muted">${String(i+4).padStart(2,'0')}</td>
-        <td>${esc(r.trader)}${mv(r,i+4)}${r.country?` <span class="muted" style="font-size:11.5px">· ${esc(r.country)}</span>`:''}</td>
+        <td>${esc(r.trader)}${r.country?` <span class="muted" style="font-size:11.5px">· ${esc(r.country)}</span>`:''}</td>
         <td class="num muted">$${fmt0(r.account_size)}</td>
         <td><span class="status ${r.status==='funded'?'funded':'active'}"><span class="dot"></span>${r.status==='funded'?'Funded':'Evaluation'}</span></td>
         <td class="num ${r.profit_pct>=0?'up':'down'}" style="text-align:right">${r.profit_pct>=0?'+':''}${r.profit_pct.toFixed(2)}%</td></tr>`).join('')+`
       </tbody></table></div>`:''}
     <p class="muted" style="font-size:11.5px;margin-top:12px">Funded accounts only, ranked by current equity. Names are masked for privacy.</p>`;
-  localStorage.setItem('pf_board_prev',JSON.stringify(Object.fromEntries(b.map((r,i)=>[r.trader,i+1]))));
  },
 
  async achievements(){
@@ -664,12 +674,11 @@ const VIEWS={
         <div><h4>${esc(b.name)}</h4><p>${esc(b.desc)}</p>
           <div class="badge-state ${b.unlocked?'on':'off'}">${b.unlocked?'✓ UNLOCKED':'LOCKED'}</div></div>
       </div>`).join('')+`</div>`;
-  document.querySelectorAll('.badge-card:not(.locked) .badge-ic').forEach((el,i)=>setTimeout(()=>RFX.pop(el),150+i*60));
  },
 
  async loyalty(){
   const orders=await api('/api/orders');
-  const points=Math.round(orders.filter(o=>o.status==='paid').reduce((s,o)=>s+o.amount_usd,0))+(ME.bonus_points||0);
+  const points=Math.round(orders.filter(o=>o.status==='paid').reduce((s,o)=>s+o.amount_usd,0));
   const TIERS=[
     {name:'Bronze',min:0,code:'WELCOME10',ben:'10% off any challenge'},
     {name:'Silver',min:500,code:'VIP20',ben:'20% off any challenge'},
@@ -678,7 +687,6 @@ const VIEWS={
   const tier=[...TIERS].reverse().find(t=>points>=t.min)||TIERS[0];
   const next=TIERS.find(t=>t.min>points);
   const prog=next?Math.min(100,points/next.min*100):100;
-  const nearMiss=!!next&&prog>=80;
   $('view').innerHTML=`
     <div class="panel" style="margin-bottom:4px">
       <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
@@ -686,11 +694,10 @@ const VIEWS={
         <div style="flex:1;min-width:220px">
           <h3>${tier.name} tier · ${fmt0(points)} points</h3>
           <p class="muted" style="font-size:13px">You earn 1 point for every $1 spent on challenges (computed from your real orders).</p>
-          ${(ME.bonus_points||0)>0?`<p class="muted" style="font-size:11.5px;margin-top:2px">includes <b class="mono" style="color:var(--gold)">+${fmt0(ME.bonus_points)}</b> engagement bonus from check-ins &amp; reveals</p>`:''}
         </div>
         <div style="min-width:220px;flex:1">
-          <div class="prog-top"><span>${next?(nearMiss?`Only ${fmt0(next.min-points)} points to ${next.name} — unlock ${next.ben}`:`Progress to ${next.name}`):'Top tier reached'}</span><b>${next?fmt0(points)+' / '+fmt0(next.min):'MAX'}</b></div>
-          <div class="phase-bar${nearMiss?' near-miss':''}"><i style="width:${prog}%"></i></div>
+          <div class="prog-top"><span>${next?`Progress to ${next.name}`:'Top tier reached'}</span><b>${next?fmt0(points)+' / '+fmt0(next.min):'MAX'}</b></div>
+          <div class="phase-bar"><i style="width:${prog}%"></i></div>
         </div>
       </div>
     </div>
@@ -846,7 +853,6 @@ const VIEWS={
 
  async rewards(){
   const aff=ME.affiliate||{};
-  const revealHtml=`<div class="reveal-wrap"><div class="reveal-card" id="revealCard" role="button" tabindex="0" onclick="doReveal()">${revealBack()}</div></div>`;
   const link=location.origin+'/?ref='+ME.referral_code;
   const affPanel=`
     <div class="panel" style="margin-bottom:16px">
@@ -872,7 +878,7 @@ const VIEWS={
     {ic:'spark',cls:'blue',badge:'10% recurring',name:'Affiliate Program',desc:'Share your referral link and earn 10% of every challenge purchased by traders you refer — for life, not just the first order.',cond:['Share your link','Friend buys a challenge','Commission tracked live']},
     {ic:'crown',cls:'orange',badge:'Spend-based',name:'Loyalty Tiers',desc:'Every $1 spent earns a loyalty point. Reach Silver and Gold to unlock bigger discount codes for future challenges.',cond:['Bronze: from first purchase','Silver: 500 points','Gold: 1,500 points']},
   ];
-  $('view').innerHTML=revealHtml+affPanel+`<div class="badge-grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">`+cards.map(c=>`
+  $('view').innerHTML=affPanel+`<div class="badge-grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">`+cards.map(c=>`
     <div class="panel">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
         <div class="tile-ic ${c.cls}">${ICO[c.ic]}</div>
@@ -885,7 +891,6 @@ const VIEWS={
       </div>
     </div>`).join('')+`</div>
   <p class="muted" style="font-size:12px;margin-top:14px">Every program above is a real platform mechanism — nothing here requires manual approval games.</p>`;
-  initRevealCard();
  },
 
  async payouts(){
@@ -1087,13 +1092,9 @@ const VIEWS={
         ${sw('updates','Email Updates','Account creation, credentials and verification e-mails.')}
         ${sw('trading','Trading Alerts','Phase passed, funded status and rule-breach notifications.')}
         ${sw('payouts','Payout Notifications','Updates about your payout requests.')}
-        ${sw('marketing','Marketing Emails','Occasional product news. We send very few of these.')}
-      </div>
-      <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
-        <div class="switch-row"><div><h4>Push Notifications</h4>
-          <p id="pushStatus">Checking this device…</p></div>
-          <button class="btn-p sm" id="pushBtn" onclick="togglePush()" style="display:none"></button></div>
-        <a class="btn-o sm" id="pushInstallLink" href="/install" target="_blank" style="display:none;margin-top:8px">How to install the app</a>
+        ${sw('marketing','Daily Recap & Offers','A short recap of the previous trading day (only when you traded) and occasional product news.')}
+        <div class="switch-row"><div><h4>Browser Push</h4><p id="push-state">Checking…</p></div>
+          <button class="btn-o sm hidden" id="push-btn" onclick="pushSettingsToggle(this)"></button></div>
       </div></div>
 
     <div class="sec-card" style="max-width:640px;border-color:#f5c6c6"><h3 style="color:var(--red)">Danger Zone</h3>
@@ -1103,7 +1104,7 @@ const VIEWS={
         <input id="s-delpass" type="password" class="inp" placeholder="Confirm with your password" style="max-width:280px">
         <button class="btn-o" style="border-color:#f5c6c6;color:var(--red)" onclick="deleteAccount()">Delete Account</button>
       </div></div>`;
-  initPushUI();
+  renderPushRow();
  },
 };
 
@@ -1173,56 +1174,6 @@ async function patchPref(key,val){
   try{const r=await api('/api/me',{method:'PATCH',body:JSON.stringify({['notify_'+key]:val})});
     ME.notify=r.notify;
   }catch(e){toast('Error: '+e.message,'err')}
-}
-
-/* ---------- web push (PWA) ---------- */
-const b64ToU8=b64=>{const p='='.repeat((4-b64.length%4)%4);
-  const raw=atob((b64+p).replace(/-/g,'+').replace(/_/g,'/'));
-  return Uint8Array.from(raw,c=>c.charCodeAt(0))};
-
-async function initPushUI(){
-  const st=$('pushStatus'),btn=$('pushBtn'),lnk=$('pushInstallLink');
-  if(!st)return;
-  const ios=/iPhone|iPad|iPod/.test(navigator.userAgent);
-  /* iOS odslania PushManager dopiero w PWA zainstalowanej na ekranie glownym */
-  if(!('serviceWorker' in navigator)||!('PushManager' in window)||!('Notification' in window)){
-    st.textContent=ios?'On iPhone: install the app to your home screen first, then enable push here.'
-                      :'Push is not supported in this browser.';
-    if(ios)lnk.style.display='inline-flex';
-    return;
-  }
-  let cfg;try{cfg=await api('/api/push/public-key')}catch(_){cfg={enabled:false}}
-  if(!cfg.enabled){st.textContent='Push is not configured on the server yet.';return}
-  window._pushKey=cfg.key;
-  if(Notification.permission==='denied'){
-    st.textContent='Notifications are blocked for this site in your browser settings.';return}
-  const reg=await navigator.serviceWorker.ready;
-  const sub=await reg.pushManager.getSubscription();
-  btn.style.display='inline-flex';
-  if(sub){st.textContent='Enabled on this device.';btn.textContent='Disable';}
-  else{st.textContent='Payout updates, MT5 credentials and streak reminders — straight to this device.';
-       btn.textContent='Enable';}
-}
-
-async function togglePush(){
-  const btn=$('pushBtn');btn.disabled=true;
-  try{
-    const reg=await navigator.serviceWorker.ready;
-    let sub=await reg.pushManager.getSubscription();
-    if(sub){
-      await api('/api/me/push/unsubscribe',{method:'POST',body:JSON.stringify({endpoint:sub.endpoint})});
-      await sub.unsubscribe();
-      toast('Push notifications disabled on this device.');
-    }else{
-      const perm=await Notification.requestPermission();
-      if(perm!=='granted'){toast('Notifications were not allowed.','err');return}
-      sub=await reg.pushManager.subscribe({userVisibleOnly:true,
-        applicationServerKey:b64ToU8(window._pushKey)});
-      await api('/api/me/push/subscribe',{method:'POST',body:JSON.stringify(sub.toJSON())});
-      toast('Push notifications enabled.','ok');
-    }
-  }catch(e){toast('Push setup failed: '+e.message,'err')}
-  finally{btn.disabled=false;initPushUI()}
 }
 async function deleteAccount(){
   const pass=$('s-delpass').value;
@@ -1303,7 +1254,7 @@ async function submitKyc(){
    Grants store 0 USD in the database, but an invoice with a zero looks like a
    free product — so we fall back to the CATALOG price. When a paid tier was
    set on the grant (BOGO), `amount_usd` already holds it and it wins. */
-function orderAmount(o){return o.amount_usd>0?o.amount_usd:(o.list_price||0)}
+function orderAmount(o){return (o.amount_usd>0||o.credits_used>0)?o.amount_usd:(o.list_price||0)}
 
 /* Invoice line items. On an upgraded order the invoice names the tier the client
    ACTUALLY paid for, plus a line describing the upgrade — and the rows always
@@ -1311,7 +1262,11 @@ function orderAmount(o){return o.amount_usd>0?o.amount_usd:(o.list_price||0)}
 function invRows(o){
   const amountCell=v=>`<td style="text-align:right;font-family:var(--mono)">${v}</td>`;
   const wk=o.weekend_trading?`<tr><td>Weekend Trading add-on — 2 extra trading days/week</td>${amountCell('$'+fmt(199))}</tr>`:'';
-  const plan=Math.max(0,orderAmount(o)-(o.weekend_trading?199:0));
+  /* Store credit is a negative row, so the rows still add up to the charged
+     total; the plan row shows the PRE-credit price. */
+  const kredyt=o.credits_used>0?o.credits_used:0;
+  const cr=kredyt?`<tr><td style="color:#64748b">Store credit applied</td>${amountCell('−$'+fmt(kredyt))}</tr>`:'';
+  const plan=Math.max(0,orderAmount(o)+kredyt-(o.weekend_trading?199:0));
   const coupon=o.coupon?` (${esc(o.coupon)})`:'';
   const upgraded=o.bogo_paid_label&&o.bogo_paid_size&&o.account_size&&o.bogo_paid_size<o.account_size;
   if(upgraded){
@@ -1321,11 +1276,11 @@ function invRows(o){
         ${amountCell('$'+fmt(plan))}</tr>
       <tr><td style="color:#64748b">Free size upgrade — ${k(o.bogo_paid_size)} →
         <b style="color:#0f172a">${k(o.account_size)}</b> allocation</td>
-        ${amountCell('included')}</tr>`+wk;
+        ${amountCell('included')}</tr>`+wk+cr;
   }
   return `<tr>
     <td>Evaluation program access — ${esc(o.product_label||o.product_key)}${coupon}</td>
-    ${amountCell('$'+fmt(plan))}</tr>`+wk;
+    ${amountCell('$'+fmt(plan))}</tr>`+wk+cr;
 }
 
 function openInvoice(orderId){
@@ -1406,10 +1361,12 @@ function openBuy(key){
       </div>
       <div class="plan-line">
         <b class="mono" id="buy-total" style="color:var(--txt);font-size:16px">$${fmt0(p.price_usd+(new URLSearchParams(location.search).get('wt')==='1'?199:0))}</b>
-        · simulated capital $${fmt0(p.promo_upgrade_size||p.account_size)} · split ${p.profit_split_pct}%
+        · simulated capital <span id="buy-cap">$${fmt0(pfPromo()&&p.promo_upgrade_size?p.promo_upgrade_size:p.account_size)}</span> · split ${p.profit_split_pct}%
       </div>
-      ${p.promo_upgrade_size?`<div class="plan-promo"><b>Double your size</b> — you pay for the
+      ${p.promo_upgrade_size?`<div class="plan-promo" id="buy-promo" ${pfPromo()?'':'hidden'}><b>Upgrade Your Size</b> — you pay for the
         $${fmt0(p.account_size)} plan and we create a <b>$${fmt0(p.promo_upgrade_size)}</b> account.</div>`:''}
+      ${ME.credits_usd>0?`<div class="plan-promo"><b>Store credit</b> — $${fmt(Math.min(ME.credits_usd,p.price_usd))} of
+        your $${fmt(ME.credits_usd)} balance is deducted at checkout.</div>`:''}
       <div class="note">Your MT5 demo account is registered with MetaQuotes <b>under these details</b> —
         they must be real; your credentials are delivered to them.</div>
       <div class="stack">
@@ -1421,6 +1378,8 @@ function openBuy(key){
         <input id="c-email" class="inp" value="${esc(ME.email)}" disabled>
         <input id="c-coupon" placeholder="Coupon code (optional)" class="inp"
           value="${esc(new URLSearchParams(location.search).get('coupon')||'')}">
+        ${p.promo_upgrade_size?`<input id="c-promo" placeholder="Promo code (optional)" class="inp"
+          value="${esc(pfPromo())}" onchange="promoCheck('${esc(p.key)}')">`:''}
         <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
           <input type="checkbox" id="c-weekend" onchange="buyTotal(${p.price_usd})"
             ${new URLSearchParams(location.search).get('wt')==='1'?'checked':''}
@@ -1442,6 +1401,29 @@ function buyTotal(base){
 }
 function closeBuy(){document.getElementById('buy-modal')?.remove()}
 
+/* Live check of the "Upgrade Your Size" code typed in the buy modal: a valid
+   code is remembered (same key as the landing bar), the capital line and the
+   promo disclosure follow. The server validates AGAIN at checkout — this is
+   display only. */
+async function promoCheck(key){
+  const p=PRODUCTS.find(x=>x.key===key), inp=$('c-promo');
+  if(!p||!inp)return;
+  const code=(inp.value||'').trim().toUpperCase();
+  inp.value=code;
+  let ok=false;
+  if(code){try{ok=(await api('/api/promo?code='+encodeURIComponent(code))).valid}catch(e){}}
+  try{
+    if(ok)localStorage.setItem('pf_promo_code',code);
+    else if(!code)localStorage.removeItem('pf_promo_code');
+  }catch(e){}
+  const on=ok&&p.promo_upgrade_size;
+  const cap=$('buy-cap'); if(cap)cap.textContent='$'+fmt0(on?p.promo_upgrade_size:p.account_size);
+  const line=$('buy-promo'); if(line)line.hidden=!on;
+  inp.style.borderColor=(code&&!ok)?'#dc2626':'';
+  if(code&&!ok){buyErr('That promo code is not valid right now — you can still buy without it.')}
+  else{const e=$('buy-err'); if(e)e.classList.add('hidden')}
+}
+
 function buyErr(msg){
   const el=$('buy-err');
   if(!el){toast(msg,'err');return}
@@ -1450,13 +1432,14 @@ function buyErr(msg){
 
 async function buy(key){
   const coupon=($('c-coupon').value||'').trim()||null;
+  const promo=(($('c-promo')||{}).value||'').trim()||null;
   const first=($('c-first').value||'').trim(), last=($('c-last').value||'').trim(), phone=($('c-phone').value||'').trim();
   if(!first||!last||!phone){buyErr('Fill in your first name, last name and phone — the MT5 account is registered under these details.');return}
   if(!/^\+?\d[\d\s-]{6,}$/.test(phone)){buyErr('Phone looks invalid — include the country code, e.g. +14155551234.');return}
   const btn=$('buy-go'); if(btn){btn.disabled=true; btn.textContent='Processing…'}
   try{
     const res=await api('/api/checkout',{method:'POST',
-      body:JSON.stringify({product_key:key,coupon,first_name:first,last_name:last,phone,
+      body:JSON.stringify({product_key:key,coupon,promo_code:promo,first_name:first,last_name:last,phone,
         weekend_trading:!!($('c-weekend')&&$('c-weekend').checked)})});
     if(res.checkout_url && !res.mock){window.location=res.checkout_url;return;}  // real Stripe
     let prov=res;
@@ -1568,8 +1551,7 @@ async function openAcc(id){
         ${prog('Profit target',targetPct?(profitPct/targetPct*100):0,false,`${profitPct.toFixed(1)}% / ${targetPct}%`)}
         ${prog('Daily loss used',m.daily_loss_used_pct,true,`${dlPct.toFixed(2)}% / ${m.max_daily_loss_pct}%`)}
         ${prog('Max drawdown used',m.overall_dd_used_pct,true,`${ddPct.toFixed(2)}% / ${m.max_overall_loss_pct}%`)}
-        ${m.max_lots?prog('Open volume',(m.open_lots!=null?m.open_lots/m.max_lots*100:0),true,
-          `${m.open_lots!=null?m.open_lots.toFixed(2):'—'} / ${m.max_lots} lots`):''}
+        ${a.max_lots?`<div><div class="prog-top"><span>Open volume limit (all positions combined)</span><b>max ${a.max_lots} lots</b></div></div>`:''}
       </div>
       ${a.breach_reason?`<div class="warn-box" style="margin:16px 0 0;background:var(--red-bg);border-color:#f5c6c6;color:#a33">${ICO.alert}<div><b style="color:var(--red)">Rule breached</b>${esc(a.breach_reason)}</div></div>`:''}
     </div>
@@ -1592,8 +1574,6 @@ async function openAcc(id){
   calRender();
   if(chart){chart.destroy();chart=null}
   if(curve.length>1)chart=new Chart($('d-chart'),equityChartConfig(curve));
-  rollStats();
-  checkMilestone(id,a,m);
 }
 function toggleCreds(){
   const card=$('creds-card'),btn=$('creds-btn');

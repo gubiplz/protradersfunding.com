@@ -33,7 +33,7 @@ from time import monotonic
 
 from . import metaapi_provisioning, metaquotes_web, notify
 from .config import get_settings
-from .models import Account, AppSetting, Order, PoolAccount, Product, Trader
+from .models import Account, AppSetting, CreditLedger, Order, PoolAccount, Product, Trader
 
 PLATFORM_SERVER = "MetaQuotes-Demo"
 
@@ -99,6 +99,16 @@ def create_account_from_order(session, order: Order) -> Account:
     order.status = "paid"
     order.account_id = acc.id
     order.paid_at = now
+    # Kredyty sklepowe schodza z salda dopiero TERAZ — platnosc jest domknieta.
+    # Ponowny min() na wypadek rownoleglego zakupu, ktory zdazyl zuzyc saldo;
+    # zamowienia nie wywracamy (klient juz zaplacil pomniejszona kwote).
+    zuzycie = min(round(float(getattr(order, "credits_used", 0) or 0), 2),
+                  round(float(trader.credits_usd or 0), 2))
+    if zuzycie > 0:
+        trader.credits_usd = round(float(trader.credits_usd) - zuzycie, 2)
+        order.credits_used = zuzycie
+        session.add(CreditLedger(trader_id=trader.id, amount=-zuzycie,
+                                 note=f"Applied to order #{order.id}", order_id=order.id))
     session.commit()
 
     if not real_mode:

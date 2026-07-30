@@ -46,52 +46,51 @@ def save_customer_details(session, trader: Trader, *, first_name: str | None,
     return trader
 
 
-def _lucky_active(trader: Trader, code: str) -> bool:
-    """Kody LUCKY sa osobiste (z daily reveal) i wazne 48h — wyciekniety kod
-    nie zadziala u nikogo, kto go faktycznie nie wylosowal."""
-    try:
-        payload = json.loads(trader.reveal_payload or "null")
-    except ValueError:
-        return False
-    if not payload or payload.get("type") != "coupon" or payload.get("code") != code:
-        return False
-    expires = payload.get("expires_at")
-    if not expires:
-        return False
-    return datetime.now(timezone.utc) <= datetime.fromisoformat(expires)
-
-
 def create_checkout(session, trader: Trader, product_key: str, coupon: str | None,
-                    weekend_trading: bool = False) -> dict:
+                    promo_code: str | None = None, weekend_trading: bool = False) -> dict:
     product = session.query(Product).filter(Product.key == product_key, Product.active == True).first()  # noqa: E712
     if not product:
         raise HTTPException(404, "Product not found")
 
-    code = (coupon or "").strip().upper()
-    if code in catalog.LUCKY_CODES and not _lucky_active(trader, code):
-        raise HTTPException(400, "This coupon is personal and no longer active")
     price, discount_pct = catalog.apply_coupon(product.price_usd, coupon)
     # Add-on Weekend Trading: stala kwota, POZA rabatem kuponu (kupon dotyczy planu).
     if weekend_trading:
         price = round(price + catalog.WEEKEND_ADDON_USD, 2)
 
-    # Promocja „Double your challenge size": zamowienie idzie na WIEKSZY plan,
-    # ale kwota zostaje z planu WYBRANEGO (`price` wyliczone wyzej z `product`).
-    # `bogo_paid_key` mowi calej resztze systemu, za co klient faktycznie zaplacil —
-    # z tego pola zyja mail „we upgraded your allocation", baner w portalu i faktura.
-    upgrade = catalog.upgrade_target(session, product)
+    # Promocja „Upgrade Your Size": TYLKO z poprawnym kodem promo zamowienie
+    # idzie na NASTEPNY plan w gore, a kwota zostaje z planu WYBRANEGO (`price`
+    # wyliczone wyzej z `product`). Kod sumuje sie z kuponem rabatowym (osobne
+    # pola). `bogo_paid_key` mowi calej reszcie systemu, za co klient faktycznie
+    # zaplacil — z tego zyja mail „we upgraded your allocation", baner i faktura.
+    upgrade = catalog.upgrade_target(session, product) if catalog.promo_code_ok(promo_code) else None
     prowizjonowany = upgrade or product
+
+    # Kredyty sklepowe (nadane przez admina): schodza z ceny NA KONCU — po
+    # kuponie i add-onie. Saldo tradera NIE jest tu ruszane; odejmuje je dopiero
+    # domkniecie platnosci (provisioning), wiec porzucony checkout nic nie pali.
+    kredyt = min(round(float(trader.credits_usd or 0), 2), price)
+    if kredyt > 0:
+        reszta = round(price - kredyt, 2)
+        # Stripe nie przyjmie kwoty ponizej $0.50 — resztowke zostawiamy na
+        # saldzie tradera zamiast wywracac checkout.
+        if 0 < reszta < 0.5:
+            kredyt = round(price - 0.5, 2)
+        price = round(price - kredyt, 2)
+
     order = Order(trader_id=trader.id, product_key=prowizjonowany.key, amount_usd=price,
                   coupon=(coupon or None), weekend_trading=bool(weekend_trading),
+                  credits_used=(kredyt if kredyt > 0 else 0.0),
                   bogo_paid_key=(product.key if upgrade else None),
                   provider="stripe" if settings.stripe_enabled else "mock")
     session.add(order)
     session.flush()
 
-    # Darmowy trial -> provisioning od ręki
+    # Cena 0 (darmowy plan albo zakup w calosci pokryty kredytami) ->
+    # provisioning od reki, bez Stripe'a.
     if price <= 0:
         acc = provisioning.create_account_from_order(session, order)
-        return {"free": True, "order_id": order.id, "account_id": acc.id, **_account_view(acc)}
+        return {"free": True, "order_id": order.id, "account_id": acc.id,
+                "credits_used": kredyt, **_account_view(acc)}
 
     if settings.stripe_enabled:
         stripe = _stripe()
@@ -114,11 +113,13 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
         )
         order.stripe_session_id = cs.id
         session.commit()
-        return {"checkout_url": cs.url, "order_id": order.id, "amount": price, "discount_pct": discount_pct}
+        return {"checkout_url": cs.url, "order_id": order.id, "amount": price,
+                "discount_pct": discount_pct, "credits_used": kredyt}
 
     # MOCK: zwróć link do naszej stronki symulującej płatność
     session.commit()
     return {"mock": True, "order_id": order.id, "amount": price, "discount_pct": discount_pct,
+            "credits_used": kredyt,
             "checkout_url": f"{settings.app_base_url}/portal?mock_order={order.id}"}
 
 

@@ -31,14 +31,55 @@
     addEventListener('resize', () => { if (innerWidth > 960) menuSet(false); }, { passive: true });
   }
 
-  /* ---------- promo bar ---------- */
-  /* The class goes on <html>: it zeroes --promo-h, so every top offset on the
-     site (nav, hero, anchors) snaps back in one step. The same flag is read by
-     an inline script in <head>, so a dismissed bar never flashes on reload. */
+  /* ---------- promo bar: dismiss + Apply-promo code flow ---------- */
+  /* Dismiss class goes on <html>: it zeroes --promo-h, so every top offset on
+     the site (nav, hero, anchors) snaps back in one step. Both flags (dismissed,
+     applied) are read by an inline script in <head>, so neither state flashes
+     on reload. The accepted code lives in localStorage.pf_promo_code — checkout
+     sends it, so the bar and the purchase can never tell two different stories. */
+  const promoBar = $('#promoBar'), promoTxt = $('#promoTxt'),
+        promoForm = $('#promoForm'), promoInp = $('#promoInp');
+  const promoApplied = () => { try { return localStorage.getItem('pf_promo_code') || ''; } catch (e) { return ''; } };
   const promoX = $('#promoX');
   if (promoX) promoX.addEventListener('click', () => {
     document.documentElement.classList.add('promo-off');
     try { localStorage.setItem('promoOff', '1'); } catch (e) {}
+  });
+  if (promoTxt && promoApplied()) promoTxt.textContent = promoTxt.dataset.applied;
+  function openPromoInput() {
+    if (!promoBar || promoApplied()) return;
+    document.documentElement.classList.remove('promo-off');
+    try { localStorage.removeItem('promoOff'); } catch (e) {}
+    promoBar.classList.add('promo-open');
+    promoForm.hidden = false;
+    scrollTo({ top: 0, behavior: 'smooth' });
+    promoInp.focus();
+  }
+  const promoApplyBtn = $('#promoApply');
+  if (promoApplyBtn) promoApplyBtn.addEventListener('click', openPromoInput);
+  if (promoForm) promoForm.addEventListener('submit', async e => {
+    e.preventDefault();
+    const code = (promoInp.value || '').trim().toUpperCase();
+    if (!code) { promoInp.focus(); return; }
+    let ok = false;
+    try { ok = (await (await fetch('/api/promo?code=' + encodeURIComponent(code))).json()).valid; } catch (err) {}
+    if (!ok) {
+      promoForm.classList.remove('promo-bad'); void promoForm.offsetWidth;  /* restart the shake */
+      promoForm.classList.add('promo-bad');
+      promoInp.value = ''; promoInp.placeholder = 'Invalid code';
+      promoInp.focus();
+      return;
+    }
+    try { localStorage.setItem('pf_promo_code', code); } catch (err) {}
+    promoBar.classList.remove('promo-open'); promoForm.hidden = true;
+    document.documentElement.classList.add('promo-applied');
+    promoTxt.textContent = 'Upgrade your challenge promo applied!';
+    promoBar.classList.add('promo-flash');
+    setTimeout(() => {
+      promoBar.classList.remove('promo-flash');
+      promoTxt.textContent = promoTxt.dataset.applied;
+    }, 2600);
+    renderConfigurator();
   });
 
   /* ---------- ?ref= capture (partner code attaches at signup) ---------- */
@@ -273,32 +314,41 @@
     $('#cfg-split').textContent = p.profit_split_pct + '%';
 
     /* Promo block: the size the account is actually created with. The API sends
-       promo_upgrade_size only while the promo is live, so the block and the
-       checkout can never tell two different stories. */
+       promo_upgrade_size only while the promo is live, and the upgrade itself
+       fires only with the applied code — so the block, the bar and the checkout
+       can never tell three different stories. */
     const promo = $('#cfg-promo'), fine = $('#cfg-fine');
     const big = p.promo_upgrade_size;
     const anyPromo = PRODUCTS.some(x => x.promo_upgrade_size);
+    const applied = !!promoApplied();
     if (promo) {
       promo.hidden = !anyPromo;
       if (anyPromo) {
-        promo.classList.toggle('is-max', !big);
-        if (big) {
-          $('#cfg-promo-badge').textContent = 'Double your size';
+        promo.classList.toggle('is-max', applied && !big);
+        if (!applied) {
+          $('#cfg-promo-badge').textContent = 'Upgrade your size';
+          $('#cfg-promo-val').innerHTML = 'Have a promo code? Get the <b>next size up — same fee</b>.';
+          $('#cfg-promo-sub').innerHTML =
+            '<button type="button" class="cfg-promo-link" id="cfg-promo-open">Apply your code</button> — the account is created one size up at checkout.';
+          const open = $('#cfg-promo-open');
+          if (open) open.addEventListener('click', openPromoInput);
+        } else if (big) {
+          $('#cfg-promo-badge').textContent = 'Promo applied ✓';
           $('#cfg-promo-val').innerHTML =
             `Pay for ${sizeLabel(p.account_size)} — trade <b>$${fmt(big)}</b>`;
           $('#cfg-promo-sub').textContent =
-            'Your account is created one size up, automatically at checkout.';
+            'Your account is created one size up at checkout.';
         } else {
           $('#cfg-promo-badge').textContent = 'Largest size';
           $('#cfg-promo-val').innerHTML = `${sizeLabel(p.account_size)} is our biggest account`;
           $('#cfg-promo-sub').textContent =
-            'The free size upgrade applies to every smaller plan — pick one to double it.';
+            'The size upgrade applies to every smaller plan.';
         }
       }
     }
     if (fine) {
-      fine.textContent = anyPromo
-        ? '*You pay the price of the size you pick; we create the account one size up while the promo runs. Fee still refunded with your first payout.'
+      fine.textContent = anyPromo && applied
+        ? '*You pay the price of the size you pick; with the promo applied we create the account one size up. Fee still refunded with your first payout.'
         : "*One-time fee, refunded with your first payout. Rewards depend on your trading.";
     }
     const cta = $('#cfg-cta');

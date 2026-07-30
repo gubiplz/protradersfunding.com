@@ -120,15 +120,26 @@ class Settings:
     cert_signatory_label: str = os.getenv("CERT_SIGNATORY_LABEL", "Chief Executive Officer")
     support_email: str = os.getenv("SUPPORT_EMAIL", "support@protradersfunding.com")
 
-    # --- Promocja „Double your challenge size" ---
-    # Zakup provisionuje konto co najmniej DWA RAZY większe niż opłacony tier
-    # (mnożnik: catalog.PROMO_UPGRADE_X). Klient płaci cenę wybranego planu.
-    # Ta jedna flaga rządzi WSZYSTKIM: paskiem na stronie, blokiem w hero i samą
+    # --- Promocja „Upgrade Your Size" ---
+    # Klient wpisuje kod promocyjny i zakup provisionuje NASTĘPNY plan w górę
+    # (2M, największy tier, bez upgrade'u). Płaci cenę wybranego planu. Bez kodu
+    # zakup działa klasycznie — promocja wymaga świadomej aktywacji.
+    # Ta jedna flaga rządzi WSZYSTKIM: paskiem na stronie, walidacją kodu i samą
     # mechaniką w checkoucie — inaczej dałoby się reklamować coś, czego kasa nie
     # realizuje (albo odwrotnie: rozdawać upgrade'y po zakończeniu promocji).
     promo_upgrade: bool = os.getenv("PROMO_UPGRADE", "true").lower() == "true"
     # Data ostatniego dnia promocji (YYYY-MM-DD, UTC, włącznie). Puste = bez końca.
     promo_upgrade_ends: str = os.getenv("PROMO_UPGRADE_ENDS", "").strip()
+    # Kod aktywujący promocję (case-insensitive; to marketing go rozdaje).
+    promo_upgrade_code: str = os.getenv("PROMO_UPGRADE_CODE", "UPGRADE").strip()
+
+    # --- Web push (VAPID) ---
+    # Brak kluczy = kanał po cichu wyłączony (portal chowa opcję powiadomień).
+    # Klucze generuje `vapid --gen` (py_vapid) i trzyma je env, nie repo.
+    push_enabled: bool = os.getenv("PUSH_ENABLED", "true").lower() == "true"
+    vapid_public_key: str = os.getenv("VAPID_PUBLIC_KEY", "").strip()
+    vapid_private_key: str = os.getenv("VAPID_PRIVATE_KEY", "").strip()
+    vapid_sub: str = os.getenv("VAPID_SUB", "").strip()   # np. mailto:support@…
 
     # --- Aplikacja / bezpieczeństwo ---
     app_base_url: str = os.getenv("APP_BASE_URL", "http://localhost:8000")
@@ -162,18 +173,6 @@ class Settings:
 
     # --- Webhook powiadomień (np. Make/Telegram) — opcjonalny ---
     notify_webhook_url: str = os.getenv("NOTIFY_WEBHOOK_URL", "")
-
-    # --- Web push (PWA). Brak kluczy => push wyłączony ---
-    # Klucze VAPID (base64url): wygeneruj raz przez
-    #   python -m app.push  (wypisze parę do wklejenia w env)
-    # i NIE zmieniaj na produkcji — nowe klucze unieważniają wszystkie subskrypcje.
-    vapid_private_key: str = os.getenv("VAPID_PRIVATE_KEY", "")
-    vapid_public_key: str = os.getenv("VAPID_PUBLIC_KEY", "")
-    vapid_sub: str = os.getenv("VAPID_SUB", "")   # kontakt dla push service, np. mailto:...
-
-    @property
-    def push_enabled(self) -> bool:
-        return bool(self.vapid_private_key and self.vapid_public_key)
 
 
 @lru_cache

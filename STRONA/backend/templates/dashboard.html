@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Admin — {{ site_name }}</title>
   <meta name="robots" content="noindex">
   <link rel="icon" href="/static/img/favicon.png" type="image/png">
@@ -47,12 +47,14 @@
       </button>
       <div><h1 id="pg-title">Overview</h1><div class="crumb" id="pg-crumb"></div></div>
       <div class="top-right">
-        <button class="btn-o sm" onclick="openCreate()">+ Manual account</button>
-        <button class="btn-p sm" onclick="openGrant()">🎁 Grant challenge</button>
+        <button class="btn-o sm" onclick="openCreate()" title="Manual account" aria-label="Manual account"><span class="bt-ico">+</span><span class="bt-label">Manual account</span></button>
+        <button class="btn-o sm" onclick="openCredits()" title="Add credits" aria-label="Add credits"><span class="bt-ico">💳</span><span class="bt-label">Add credits</span></button>
+        <button class="btn-p sm" onclick="openGrant()" title="Grant challenge" aria-label="Grant challenge"><span class="bt-ico">🎁</span><span class="bt-label">Grant challenge</span></button>
       </div>
     </div>
     <div class="content" id="view"></div>
   </div>
+  <nav class="botnav" id="botnav" aria-label="Sections"></nav>
 </div>
 
 <div class="over" id="over">
@@ -130,6 +132,14 @@ const NAV=[
 $('side-nav').innerHTML=NAV.map(n=>
   `<button class="sb-link" data-v="${n.v}" onclick="go('${n.v}')" title="${n.label}">${ICO[n.ico]}<span class="sb-txt">${n.label}</span></button>`).join('');
 
+/* Mobile bottom bar: the 4 most-used sections; "More" opens the drawer with
+   the full list. Same go()/NAV as the sidebar — one source of truth. */
+const MORE_ICO='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>';
+$('botnav').innerHTML=['overview','accounts','payouts','kyc'].map(v=>{
+  const n=NAV.find(x=>x.v===v);
+  return `<button class="botnav-btn" data-v="${n.v}" onclick="go('${n.v}')">${ICO[n.ico]}<span>${n.label}</span></button>`;
+}).join('')+`<button class="botnav-btn" onclick="toggleSide(true)" aria-label="All sections">${MORE_ICO}<span>More</span></button>`;
+
 const TITLES={
   overview:['Overview','Platform health and items waiting for you'],
   accounts:['Accounts','All challenge accounts and their live risk metrics'],
@@ -143,7 +153,7 @@ const TITLES={
 let VIEW='overview';
 function go(v){
   VIEW=v;
-  document.querySelectorAll('.sb-link[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  document.querySelectorAll('.sb-link[data-v],.botnav-btn[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const t=TITLES[v]||['',''];
   $('pg-title').textContent=t[0]; $('pg-crumb').textContent=t[1];
   toggleSide(false);
@@ -157,7 +167,9 @@ function toggleSide(open){
 /* scrim + Escape zamykaja szuflade (tylko mobile — scrim zyje w MQ <=960) */
 document.addEventListener('click',e=>{
   if(!document.body.classList.contains('nav-open'))return;
-  if(e.target.closest('#side')||e.target.closest('.burger'))return;
+  /* .botnav: "More" otwiera szuflade tym samym klikiem — bez wyjatku event
+     bablujacy do dokumentu natychmiast by ja zamknal */
+  if(e.target.closest('#side')||e.target.closest('.burger')||e.target.closest('.botnav'))return;
   toggleSide(false);
 });
 document.addEventListener('keydown',e=>{
@@ -930,6 +942,50 @@ async function submitGrant(){
       ?'MT5 account is being created — credentials e-mailed within a minute.'
       :'Credentials e-mailed to the trader.'}`,'ok',9000);
     go('accounts');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+
+/* ---------- modal: store credits ---------- */
+async function openCredits(traderId){
+  let traders=[];
+  try{traders=await api('/api/admin/traders')}catch(e){toast('Error: '+e.message,'err');return}
+  if(!traders.length){toast('No registered traders yet.','err');return}
+  const box=document.createElement('div');
+  box.id='credits-modal';box.className='modal-wrap';
+  box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>Add store credits</h3>
+      <button class="icon-btn" onclick="document.getElementById('credits-modal').remove()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <p class="muted" style="font-size:12.5px;margin-bottom:14px">Credits are a USD store balance:
+      they reduce the price of the trader's next challenge automatically at checkout.
+      Use a negative amount to correct a mistake.</p>
+    <div class="stack">
+      <div><label class="muted" style="font-size:12px">Trader</label>
+        <select id="cr-trader" class="inp" onchange="creditsBalance()">${traders.map(t=>
+          `<option value="${t.id}" data-credits="${t.credits_usd||0}"${traderId===t.id?' selected':''}>${esc(t.email)}${t.full_name?' — '+esc(t.full_name):''}</option>`).join('')}</select></div>
+      <div class="muted" id="cr-balance" style="font-size:12.5px"></div>
+      <input id="cr-amount" class="inp" type="number" step="1" placeholder="Amount in USD, e.g. 100">
+      <input id="cr-note" class="inp" placeholder="Note for the ledger, e.g. Contest prize">
+      <button class="btn-p lg" style="width:100%" onclick="submitCredits()">Add credits</button>
+      <p class="hint">The balance is spent automatically on the trader's next purchase.</p>
+    </div></div>`;
+  box.onclick=()=>box.remove();
+  document.body.appendChild(box);
+  creditsBalance();
+}
+function creditsBalance(){
+  const sel=$('cr-trader'),el=$('cr-balance');
+  const v=sel&&sel.selectedOptions[0]?parseFloat(sel.selectedOptions[0].dataset.credits||'0'):0;
+  if(el)el.textContent='Current balance: $'+fmt(v);
+}
+async function submitCredits(){
+  const amount=parseFloat($('cr-amount').value);
+  if(!amount){toast('Enter a non-zero amount.','err');return}
+  try{
+    const r=await api(`/api/admin/traders/${$('cr-trader').value}/credits`,{method:'POST',
+      body:JSON.stringify({amount,note:($('cr-note').value||'').trim()||null})});
+    document.getElementById('credits-modal')?.remove();
+    toast(`💳 ${r.email} now has $${fmt(r.credits_usd)} in store credits.`,'ok',7000);
   }catch(e){toast('Error: '+e.message,'err')}
 }
 

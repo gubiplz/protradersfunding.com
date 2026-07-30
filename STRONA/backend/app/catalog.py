@@ -21,13 +21,7 @@ COUPONS: dict[str, float] = {
     "WELCOME10": 10.0,
     "BLACKFRIDAY": 30.0,
     "VIP20": 20.0,
-    # nagrody z daily reveal (POST /api/me/daily-reveal) — osobiste i czasowe,
-    # billing.create_checkout wymaga aktywnego losowania u KONKRETNEGO tradera
-    "LUCKY10": 10.0,
-    "LUCKY15": 15.0,
 }
-
-LUCKY_CODES = {"LUCKY10", "LUCKY15"}
 
 # Limit ŁĄCZNEJ ekspozycji (suma wolumenu wszystkich otwartych pozycji).
 # Bez niego trader stawia cały depozyt na jedną świecę i „przechodzi” challenge
@@ -132,14 +126,21 @@ def apply_coupon(price: float, coupon: str | None) -> tuple[float, float]:
 
 
 # --------------------------------------------------------------------------- #
-#  Promocja „Double your challenge size"                                      #
+#  Promocja „Upgrade Your Size" (aktywowana kodem)                            #
 # --------------------------------------------------------------------------- #
-# Ile razy większe konto dostaje klient. 2.0 = „co najmniej dwa razy większe",
-# więc hasło „double" jest prawdą także tam, gdzie drabinka katalogu nie skacze
-# dokładnie ×2 (10k→25k, 200k→400k, 300k→800k). Ustawienie 1.0 daje zwykłe
-# „następny rozmiar w górę".
-PROMO_UPGRADE_X = 2.0
-PROMO_NAME = "Double Your Size"
+PROMO_NAME = "Upgrade Your Size"
+
+
+def promo_code_ok(code: str | None) -> bool:
+    """Czy podany kod aktywuje promocję (case-insensitive, bez białych znaków).
+
+    Sam kod nie wystarcza — o tym, czy promocja W OGÓLE trwa, decyduje
+    `promo_active()`. Rozdzielenie pozwala trzymać kod w marketingu na stałe,
+    a promocję włączać/wyłączać jedną flagą.
+    """
+    if not code or not settings.promo_upgrade_code:
+        return False
+    return code.strip().upper() == settings.promo_upgrade_code.upper()
 
 
 def promo_active(now: datetime | None = None) -> bool:
@@ -162,19 +163,19 @@ def promo_active(now: datetime | None = None) -> bool:
 
 
 def upgrade_target(session, product: Product) -> Product | None:
-    """Plan, który klient FAKTYCZNIE dostanie, kupując `product`.
+    """Plan, który klient FAKTYCZNIE dostanie, kupując `product` z kodem promo.
 
-    Najmniejszy aktywny plan tej samej rodziny (`steps`) o rozmiarze co najmniej
-    PROMO_UPGRADE_X × opłacony. Rodziny nie mieszamy — Instant Funding ma inne
-    limity i split niż ewaluacja. None = brak promocji albo brak większego planu
-    (największy tier w ofercie).
+    NASTĘPNY rozmiar w górę: najmniejszy aktywny plan tej samej rodziny
+    (`steps`) o rozmiarze większym niż opłacony. Rodziny nie mieszamy — Instant
+    Funding ma inne limity i split niż ewaluacja. None = brak promocji albo brak
+    większego planu (2M, największy tier w ofercie).
     """
     if not promo_active() or product.price_usd <= 0:
         return None
     return (session.query(Product)
             .filter(Product.active == True,                                   # noqa: E712
                     Product.steps == product.steps,
-                    Product.account_size >= product.account_size * PROMO_UPGRADE_X)
+                    Product.account_size > product.account_size)
             .order_by(Product.account_size)
             .first())
 
@@ -189,7 +190,7 @@ def upgrade_map(products: list[Product]) -> dict[str, Product]:
                             key=lambda p: p.account_size)
         for p in w_rodzinie:
             cel = next((x for x in w_rodzinie
-                        if x.account_size >= p.account_size * PROMO_UPGRADE_X), None)
+                        if x.account_size > p.account_size), None)
             if cel:
                 wynik[p.key] = cel
     return wynik

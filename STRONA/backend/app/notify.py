@@ -257,6 +257,8 @@ _PREF_BY_EVENT = {
     "breached": "notify_trading",
     "payout_requested": "notify_payouts", "payout_approved": "notify_payouts",
     "payout_rejected": "notify_payouts",
+    # recap idzie tylko przez push/centrum (push.daily_recap), nie mailem
+    "daily_recap": "notify_marketing",
 }
 
 
@@ -284,6 +286,7 @@ def _email_allowed(event: str, to_email: str) -> bool:
 def send(event: str, to_email: str | None, ctx: dict | None = None) -> None:
     ctx = ctx or {}
     subject, body = _render(event, ctx)
+    adres = to_email          # oryginal dla kanalu push/centrum (pref sprawdza sam)
 
     # 1) e-mail
     if to_email and not _email_allowed(event, to_email):
@@ -329,13 +332,10 @@ def send(event: str, to_email: str | None, ctx: dict | None = None) -> None:
         except Exception as e:  # pragma: no cover
             print(f"[notify] webhook błąd: {e}")
 
-    # 3) web push (PWA) — tytuł = temat maila; awaria pusha nie może wywrócić
-    # requestu, który wywołał zdarzenie (np. approve payoutu w adminie).
-    # `to_email` jest już po bramce preferencji, więc wyłączona kategoria
-    # blokuje mail i push jednym przełącznikiem.
-    if to_email:
-        try:
-            from . import push
-            push.send_event(event, to_email, subject, ctx)
-        except Exception as e:  # pragma: no cover
-            print(f"[notify] push błąd: {e}")
+    # 3) centrum powiadomien w portalu + web push — ta sama bramka preferencji
+    #    (tresc pushy NIE pochodzi z maila; patrz push._SHORT)
+    try:
+        from . import push
+        push.deliver(event, adres, subject)
+    except Exception as e:  # pragma: no cover
+        print(f"[notify] push błąd: {e}")

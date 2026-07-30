@@ -20,6 +20,10 @@ os.environ["SMTP_HOST"] = ""             # maile na konsolę, bez wysyłki
 os.environ["NOTIFY_WEBHOOK_URL"] = ""
 # Poller nie moze chodzic w tle testow — przestawialby salda kont.
 os.environ["POLLER_ENABLED"] = "false"
+# Web push: zaden test nie strzela do endpointow push-serwisow przegladarek.
+os.environ["PUSH_ENABLED"] = "false"
+os.environ["VAPID_PUBLIC_KEY"] = ""
+os.environ["VAPID_PRIVATE_KEY"] = ""
 
 # Sekrety musza byc znane JUZ TERAZ: `get_settings()` jest cache'owane, wiec
 # obiekt ustawien powstaje przy pierwszym imporcie `app.config` — czyli w tym
@@ -33,8 +37,10 @@ os.environ.setdefault("ADMIN_TOKEN", "tajny-token")
 os.environ.setdefault("FEED", "sim")
 os.environ.setdefault("AUTO_SEED", "false")
 
-# Promocja „Double your challenge size" jest domyślnie WŁĄCZONA w produkcji, ale
-# w testach musi być wyłączona: inaczej każdy zakup provisionowałby konto
-# większego tieru i asercje o rozmiarach kont zależałyby od tego, czy promocja
-# trwa. Testy promocji włączają ją same (monkeypatch na catalog.settings).
+# Promocja „Upgrade Your Size" jest domyślnie WŁĄCZONA w produkcji, ale w
+# testach musi być wyłączona: upgrade wymaga wprawdzie kodu promo, ale sama
+# aktywna promocja renderuje pasek na stronach publicznych i pola
+# promo_upgrade_* w /api/products — asercje o treści strony przestałyby być
+# deterministyczne. Testy promocji włączają ją same (monkeypatch na
+# catalog.settings).
 os.environ["PROMO_UPGRADE"] = "false"
