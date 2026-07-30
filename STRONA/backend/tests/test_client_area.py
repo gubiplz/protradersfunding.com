@@ -18,8 +18,8 @@ from app import auth, catalog, notify  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import (Account, EquitySnapshot, Order, Payout, PayoutRequest,  # noqa: E402
-                        Trade, Trader)
+from app.models import (Account, Breach, Certificate, EquitySnapshot, Order,  # noqa: E402
+                        Payout, PayoutRequest, Trade, Trader)
 
 init_db()
 _s = SessionLocal()
@@ -739,13 +739,22 @@ def test_usuniecie_konta_nie_lamie_kluczy_obcych():
         s = SessionLocal()
         s.add(Trade(account_id=aid, symbol="XAUUSD", side="buy", lots=0.1,
                     open_price=2385.0, close_price=2390.0, pnl=50.0, status="closed"))
+        # kazda z tych tabel ma FK na accounts.id — jeden pozostawiony wiersz
+        # i DELETE konta konczyl sie 500 (ForeignKeyViolation)
+        s.add(EquitySnapshot(account_id=aid, equity=10_050, balance=10_050))
+        s.add(Breach(account_id=aid, type="daily_dd", detail="test", equity_at_breach=9_400))
+        s.add(Certificate(account_id=aid, kind="phase_1", cert_token="DELFK1TOKEN"))
+        s.add(Payout(account_id=aid, profit_amount=500, trader_share=400, paid=True))
+        s.add(PayoutRequest(account_id=aid, trader_id=tid, profit_amount=500,
+                            trader_share=400, status="paid"))
         s.commit(); s.close()
 
         assert c.delete(f"/api/accounts/{aid}", headers=ADMIN_H).status_code == 200
 
     s = SessionLocal()
     assert s.get(Account, aid) is None
-    assert s.query(Trade).filter(Trade.account_id == aid).count() == 0
+    for model in (Trade, EquitySnapshot, Breach, Certificate, Payout, PayoutRequest):
+        assert s.query(model).filter(model.account_id == aid).count() == 0
     # zamówienie to dokument płatności — przeżywa konto, tylko traci powiązanie
     zam = s.query(Order).filter(Order.trader_id == tid).all()
     assert zam and all(o.account_id is None for o in zam)

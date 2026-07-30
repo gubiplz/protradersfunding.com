@@ -2845,8 +2845,11 @@ def delete_account(account_id: int):
         # kasować, inaczej Postgres blokuje usunięcie (orders.account_id ma FK).
         (session.query(Order).filter(Order.account_id == acc.id)
          .update({Order.account_id: None}, synchronize_session=False))
-        # Transakcje bez konta nie znaczą nic — lecą razem z nim.
-        session.query(Trade).filter(Trade.account_id == acc.id).delete(synchronize_session=False)
+        # Transakcje, snapshoty, breachy, certyfikaty i wypłaty bez konta nie
+        # znaczą nic — lecą razem z nim. Każda z tych tabel ma FK na accounts.id,
+        # więc pozostawiona choć jedna blokuje DELETE (ForeignKeyViolation → 500).
+        for model in (Trade, EquitySnapshot, Breach, Certificate, Payout, PayoutRequest):
+            session.query(model).filter(model.account_id == acc.id).delete(synchronize_session=False)
         # Rachunek MT5 z puli NIE wraca do obiegu. Był już w rękach tradera: ma
         # historię transakcji, saldo dawno nie startowe, a poświadczenia zna
         # poprzedni właściciel. Przydzielenie go komuś innemu pokazałoby nowemu
