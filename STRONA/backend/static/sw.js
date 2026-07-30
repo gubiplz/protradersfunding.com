@@ -22,7 +22,15 @@ self.addEventListener('push', (e) => {
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
   const url = (e.notification.data && e.notification.data.url) || '/portal';
-  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((ws) => {
+  e.waitUntil((async () => {
+    /* Cel kliku ląduje też w Cache Storage (jeden wpis nawigacyjny, nie cache
+       HTTP): iOS przy wznowieniu potrafi przeładować stronę PWA i postMessage
+       trafia wtedy do martwego klienta — boot() czyta wpis (TTL 30 s). */
+    try {
+      const c = await caches.open('pf-nav');
+      await c.put('/__pending-nav', new Response(JSON.stringify({ url, ts: Date.now() })));
+    } catch (_) {}
+    const ws = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const w of ws) {
       if (w.url.includes('/portal') && 'focus' in w) {
         /* postMessage zamiast navigate(): SPA przełącza widok bez reloadu
@@ -32,5 +40,5 @@ self.addEventListener('notificationclick', (e) => {
       }
     }
     return self.clients.openWindow(url);
-  }));
+  })());
 });

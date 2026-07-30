@@ -158,15 +158,22 @@ function track(name,props){try{
 addEventListener('appinstalled',()=>track('pwa_install'));
 
 /* Klik w push przy otwartym portalu: sw.js robi postMessage zamiast navigate()
-   (reload gubi stan SPA). Listener na top-levelu — iOS potrafi zgubić
-   wiadomości, gdy rejestracja przyjdzie później. */
-if('serviceWorker' in navigator)navigator.serviceWorker.addEventListener('message',e=>{
-  const d=e.data||{};
-  if(d.type!=='navigate')return;
-  let v=null;
-  try{v=new URL(d.url,location.origin).searchParams.get('view')}catch(_){}
-  if(ME&&v&&VIEWS[v]){go(v);refreshLive()}
-});
+   (reload gubi stan SPA). Listener na top-levelu + startMessages() — bez niego
+   spec KOLEJKUJE wiadomości z SW w nieskończoność (addEventListener sam nie
+   odblokowuje kolejki; robi to tylko setter onmessage albo startMessages). */
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.addEventListener('message',e=>{
+    const d=e.data||{};
+    if(d.type!=='navigate')return;
+    try{caches.open('pf-nav').then(c=>c.delete('/__pending-nav'))}catch(_){}
+    let v=null;
+    try{v=new URL(d.url,location.origin).searchParams.get('view')}catch(_){}
+    if(!v||!VIEWS[v])return;
+    /* ME jeszcze się ładuje (iOS wybudza PWA) => boot() dokończy nawigację */
+    if(ME){go(v);refreshLive()}else window._pendingView=v;
+  });
+  navigator.serviceWorker.startMessages?.();
+}
 
 /* Pull-to-refresh (mobile PWA): przeciągnięcie >70px przy scrollu 0. */
 (function(){
@@ -350,7 +357,18 @@ async function boot(){
   initEngagement();
   if(await handlePaymentReturn())return;
   const q=new URLSearchParams(location.search);
-  const widok=q.get('view');           /* deep-linki z powiadomien: /portal?view=payouts */
+  /* Deep-linki z powiadomien, w kolejnosci: postMessage odebrany przed ME
+     (_pendingView) -> swiezy wpis sw.js w Cache Storage (przezywa reload przy
+     wznowieniu iOS PWA, TTL 30 s; wygrywa ze STARYM ?view= zostalym w adresie
+     po poprzednim deep-linku) -> ?view= z URL (zimny start openWindow). */
+  let widok=window._pendingView||null;window._pendingView=null;
+  try{
+    const c=await caches.open('pf-nav');const r=await c.match('/__pending-nav');
+    if(r){const d=await r.json();await c.delete('/__pending-nav');
+      if(!widok&&Date.now()-d.ts<30000){
+        widok=new URL(d.url,location.origin).searchParams.get('view')}}
+  }catch(_){}
+  widok=widok||q.get('view');
   go(q.get('buy')?'store':(widok&&VIEWS[widok]?widok:'accounts'));
   refreshNotif();
   track('view_open',{view:window._view,pwa:document.documentElement.classList.contains('pwa')?'1':'0'});
