@@ -3257,8 +3257,9 @@ def public_stats():
             "funded_accounts": session.query(Account).filter(Account.status == "funded").count(),
             "traders_total": session.query(Trader).filter(Trader.is_admin == False).count(),  # noqa: E712
             "payouts_count": len(payouts),
-            "payouts_total_usd": round(sum(p.trader_share for p in payouts), 2),
-            "largest_payout_usd": round(max((p.trader_share for p in payouts), default=0.0), 2),
+            # Pełne dolary: ".96" przy sześciocyfrowej kwocie poszerzał kafel LP aż do obcięcia.
+            "payouts_total_usd": int(round(sum(p.trader_share for p in payouts))),
+            "largest_payout_usd": int(round(max((p.trader_share for p in payouts), default=0.0))),
             "countries_count": len(countries),
         }
         _PUBLIC_STATS_CACHE.update(ts=now, data=data)

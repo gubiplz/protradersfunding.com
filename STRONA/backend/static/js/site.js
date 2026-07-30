@@ -136,9 +136,13 @@
         { v: s.countries_count, label: 'Countries' },
       ].filter(d => d.v > 0).slice(0, 4);
       if (defs.length < 2) { band.remove(); return; }   // fresh install: fake nothing
-      $('#statsGrid').innerHTML = defs.map(d =>
-        `<div class="stat"><div class="stat-num grad-text" data-count="${d.v}"${d.prefix ? ` data-prefix="${d.prefix}"` : ''}></div>
-         <div class="stat-label">${d.label}</div></div>`).join('');
+      $('#statsGrid').innerHTML = defs.map(d => {
+        /* Long figures (9+ digits incl. separators) get a smaller size class —
+           the tile must never clip the number. */
+        const dl = fmt(Math.round(d.v)).length + (d.prefix ? 1 : 0);
+        return `<div class="stat"><div class="stat-num grad-text${dl > 9 ? ' stat-num-l' : ''}" data-count="${Math.round(d.v)}"${d.prefix ? ` data-prefix="${d.prefix}"` : ''}></div>
+         <div class="stat-label">${d.label}</div></div>`;
+      }).join('');
       $$('.stat-num', band).forEach(countUp);
     } catch (e) { band.remove(); }
   }

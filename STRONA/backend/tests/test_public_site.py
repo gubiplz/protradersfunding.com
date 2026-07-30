@@ -71,6 +71,10 @@ def test_public_stats_bez_internali():
     for zakazane in ("feed", "stripe", "pool_free", "orders_paid", "provisioning"):
         assert zakazane not in data, f"public stats ujawnia internal: {zakazane}"
     assert data["traders_total"] >= 1
+    # Kwoty na kaflach LP w pelnych dolarach — ".96" przy szesciocyfrowej
+    # liczbie to szum, ktory poszerzal kafel az do obciecia tekstu.
+    assert isinstance(data["payouts_total_usd"], int)
+    assert isinstance(data["largest_payout_usd"], int)
 
 
 def test_operacyjne_stats_tylko_dla_admina():
