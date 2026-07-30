@@ -12,8 +12,12 @@
 <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png">
 <script>if(matchMedia('(display-mode: standalone)').matches||navigator.standalone)document.documentElement.classList.add('pwa');
 /* Pre-paint theme pick: light is the default, a stored "dark" flips the
-   attribute before first paint so there is no flash of the wrong theme. */
-try{if(localStorage.getItem('pf_theme')==='dark'){document.documentElement.dataset.theme='dark';
+   attribute before first paint so there is no flash of the wrong theme.
+   Dark applies ONLY with a session on board — the login screen is always
+   light. Key bumped pf_theme -> pf_theme2: one-time reset of everyone back
+   to the white default. */
+try{if(localStorage.getItem('pf_theme2')==='dark'&&localStorage.getItem('pf_token')){
+document.documentElement.dataset.theme='dark';
 document.querySelector('meta[name="theme-color"]').setAttribute('content','#0b0d12')}}catch(e){}
 if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('/sw.js'))</script>
 <link rel="stylesheet" href="/static/css/portal.css?v={{ asset_v }}">
@@ -187,8 +191,10 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 /* "Upgrade Your Size" promo code applied on the public site (or typed in the buy
    modal). Shared key with the landing page — one applied state everywhere. */
 function pfPromo(){try{return localStorage.getItem('pf_promo_code')||''}catch(e){return ''}}
+/* Discount coupon applied on the landing promo bar — prefills the buy modal. */
+function pfCoupon(){try{return localStorage.getItem('pf_coupon_code')||''}catch(e){return ''}}
 
-/* ---------- theme (light by default; "dark" persisted in pf_theme) ---------- */
+/* ---------- theme (light by default; "dark" persisted in pf_theme2) ---------- */
 const THEME_SUN='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.4M12 19.6V22M2 12h2.4M19.6 12H22M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M19.1 4.9l-1.7 1.7M6.6 17.4l-1.7 1.7"/></svg>';
 const THEME_MOON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.4 14.2A8.5 8.5 0 0 1 9.8 3.6 8.5 8.5 0 1 0 20.4 14.2z"/></svg>';
 function themeNow(){return document.documentElement.dataset.theme==='dark'?'dark':'light'}
@@ -206,13 +212,21 @@ function paintTheme(){
 function toggleTheme(){
   const next=themeNow()==='dark'?'light':'dark';
   document.documentElement.dataset.theme=next;
-  try{localStorage.setItem('pf_theme',next)}catch(e){}
+  try{localStorage.setItem('pf_theme2',next)}catch(e){}
   paintTheme();
   /* Charts snapshot token colors at render time — repaint what is on screen
      (the account detail is not a VIEWS entry, so it re-opens itself). */
   if(ME){if(window._onDetail&&window._accId)openAcc(window._accId);else if(CURV)go(CURV)}
 }
 paintTheme();
+/* The auth screen is ALWAYS light — the stored dark theme kicks in only once
+   a session reaches the dashboard (boot) and dies with it (logout reloads). */
+function applyStoredTheme(){
+  let dark=false;try{dark=localStorage.getItem('pf_theme2')==='dark'}catch(e){}
+  if(dark)document.documentElement.dataset.theme='dark';
+  else delete document.documentElement.dataset.theme;
+  paintTheme();
+}
 
 /* ---------- cookie notice (essential cookies only; shared key with the site) ---------- */
 function cookieOk(v){try{localStorage.setItem('pf_cookie_ok',v?'1':'0')}catch(e){}
@@ -521,9 +535,12 @@ async function boot(){
   }
   const rt=q0.get('reset');
   if(rt){window._resetToken=rt;
+    /* a logged-in visitor opening a reset link still gets the light auth */
+    delete document.documentElement.dataset.theme;paintTheme();
     $('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('reset');loadAuthStats();return}
   if(!TOKEN){$('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('login');loadAuthStats();return}
   try{ME=await api('/api/auth/me')}catch(e){logout();return}
+  applyStoredTheme();
   /* Hard gate: an unconfirmed address never reaches the dashboard. */
   if(ME.email_verified===false){
     $('auth').classList.add('hidden');$('app').classList.add('hidden');
@@ -1850,7 +1867,7 @@ function openBuy(key){
         <input id="c-email" class="inp" value="${esc(ME.email)}" disabled>
         <input id="c-code" placeholder="Discount / promo code (optional)" class="inp"
           autocomplete="off" spellcheck="false"
-          value="${esc(new URLSearchParams(location.search).get('coupon')||(p.promo_upgrade_size?pfPromo():''))}"
+          value="${esc(new URLSearchParams(location.search).get('coupon')||pfCoupon()||(p.promo_upgrade_size?pfPromo():''))}"
           oninput="codeInput()">
         <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
           <input type="checkbox" id="c-weekend" onchange="quoteRefresh(true)"

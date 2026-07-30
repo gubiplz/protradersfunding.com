@@ -40,12 +40,18 @@
   const promoBar = $('#promoBar'), promoTxt = $('#promoTxt'),
         promoForm = $('#promoForm'), promoInp = $('#promoInp');
   const promoApplied = () => { try { return localStorage.getItem('pf_promo_code') || ''; } catch (e) { return ''; } };
+  const couponApplied = () => { try { return localStorage.getItem('pf_coupon_code') || ''; } catch (e) { return ''; } };
+  const couponMsg = () => {
+    let pct = ''; try { pct = localStorage.getItem('pf_coupon_pct') || ''; } catch (e) {}
+    return couponApplied() + ' applied — ' + (pct ? pct + '% off' : 'discount') + ' your challenge fee at checkout.';
+  };
   const promoX = $('#promoX');
   if (promoX) promoX.addEventListener('click', () => {
     document.documentElement.classList.add('promo-off');
     try { localStorage.setItem('promoOff', '1'); } catch (e) {}
   });
   if (promoTxt && promoApplied()) promoTxt.textContent = promoTxt.dataset.applied;
+  else if (promoTxt && couponApplied()) promoTxt.textContent = couponMsg();
   function openPromoInput() {
     if (!promoBar || promoApplied()) return;
     document.documentElement.classList.remove('promo-off');
@@ -65,23 +71,42 @@
     e.preventDefault();
     const code = (promoInp.value || '').trim().toUpperCase();
     if (!code) { promoInp.focus(); return; }
-    let ok = false;
-    try { ok = (await (await fetch('/api/promo?code=' + encodeURIComponent(code))).json()).valid; } catch (err) {}
-    if (!ok) {
+    /* The input takes EVERY kind of code: the "Upgrade Your Size" code
+       activates the promo, anything else is checked as a discount coupon
+       (WELCOME10 -> -10%). Last applied code wins — they don't stack here. */
+    let promo = false, pct = 0;
+    try { promo = (await (await fetch('/api/promo?code=' + encodeURIComponent(code))).json()).valid; } catch (err) {}
+    if (!promo) {
+      try {
+        const r = await fetch('/api/coupon/' + encodeURIComponent(code));
+        if (r.ok) pct = (await r.json()).pct || 0;
+      } catch (err) {}
+    }
+    if (!promo && !pct) {
       promoForm.classList.remove('promo-bad'); void promoForm.offsetWidth;  /* restart the shake */
       promoForm.classList.add('promo-bad');
       promoInp.value = ''; promoInp.placeholder = 'Invalid code';
       promoInp.focus();
       return;
     }
-    try { localStorage.setItem('pf_promo_code', code); } catch (err) {}
+    try {
+      if (promo) {
+        localStorage.setItem('pf_promo_code', code);
+        localStorage.removeItem('pf_coupon_code'); localStorage.removeItem('pf_coupon_pct');
+      } else {
+        localStorage.setItem('pf_coupon_code', code);
+        localStorage.setItem('pf_coupon_pct', String(pct));
+        localStorage.removeItem('pf_promo_code');
+      }
+    } catch (err) {}
     promoBar.classList.remove('promo-open'); promoForm.hidden = true;
     document.documentElement.classList.add('promo-applied');
-    promoTxt.textContent = 'Upgrade your challenge promo applied!';
+    promoTxt.textContent = promo ? 'Upgrade your challenge promo applied!'
+                                 : code + ' applied — ' + pct + '% off!';
     promoBar.classList.add('promo-flash');
     setTimeout(() => {
       promoBar.classList.remove('promo-flash');
-      promoTxt.textContent = promoTxt.dataset.applied;
+      promoTxt.textContent = promo ? promoTxt.dataset.applied : couponMsg();
     }, 2600);
     renderConfigurator();
   });

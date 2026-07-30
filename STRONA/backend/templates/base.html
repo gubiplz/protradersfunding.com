@@ -27,7 +27,7 @@ gtag('js',new Date());gtag('config','{{ ga_id }}');</script>{% endif %}
    default copy on reload. */
 try{
 if(localStorage.getItem('promoOff')==='1')document.documentElement.classList.add('promo-off');
-if(localStorage.getItem('pf_promo_code'))document.documentElement.classList.add('promo-applied');
+if(localStorage.getItem('pf_promo_code')||localStorage.getItem('pf_coupon_code'))document.documentElement.classList.add('promo-applied');
 }catch(e){}
 </script>{% endif %}
 </head>
