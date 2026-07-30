@@ -133,10 +133,16 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
   <div class="notif-panel hidden" id="notif-panel"></div>
 </div>
 
-<div class="cookie-note hidden" id="cookie-note">
-  <span>We use only essential cookies — they keep you signed in. No ad tracking.
-    <a href="/privacy" target="_blank">Privacy Policy</a></span>
-  <button class="btn-p sm" onclick="cookieOk()">Got it</button>
+<div class="cookie-note hidden" id="cookie-note" role="dialog" aria-label="Cookie notice">
+  <div class="ck-txt">
+    <b>🍪 Cookie Notice</b>
+    <p>We use cookies to enhance your experience. By continuing to visit this site,
+      you agree to our use of cookies. <a href="/privacy" target="_blank">Learn more</a></p>
+  </div>
+  <div class="ck-actions">
+    <button class="ck-decline" onclick="cookieOk(0)">Decline</button>
+    <button class="btn-p sm" onclick="cookieOk(1)">Accept All</button>
+  </div>
 </div>
 
 <div id="toasts"></div>
@@ -186,9 +192,9 @@ function toggleTheme(){
 paintTheme();
 
 /* ---------- cookie notice (essential cookies only; shared key with the site) ---------- */
-function cookieOk(){try{localStorage.setItem('pf_cookie_ok','1')}catch(e){}
+function cookieOk(v){try{localStorage.setItem('pf_cookie_ok',v?'1':'0')}catch(e){}
   $('cookie-note').classList.add('hidden')}
-try{if(!localStorage.getItem('pf_cookie_ok'))$('cookie-note').classList.remove('hidden')}catch(e){}
+try{if(localStorage.getItem('pf_cookie_ok')===null)$('cookie-note').classList.remove('hidden')}catch(e){}
 
 /* ---------- live refresh + push deep links ---------- */
 /* Fresh ME (credits, streak) + bell badge without a page reload. Re-render of
@@ -357,7 +363,8 @@ function authTab(m){AUTHMODE=m;
   $('a-ref').classList.toggle('hidden',!signup);
   $('a-terms-row').classList.toggle('hidden',!signup);
   $('a-pass').classList.toggle('hidden',forgot);
-  $('a-pass2').classList.toggle('hidden',!reset);
+  $('a-pass2').classList.toggle('hidden',!(reset||signup));
+  $('a-pass2').placeholder=signup?'Repeat password':'Repeat new password';
   $('a-email').classList.toggle('hidden',reset);
   $('a-forgot').classList.toggle('hidden',!login);
   $('a-back').classList.toggle('hidden',!(forgot||reset));
@@ -399,6 +406,8 @@ async function doAuth(){
     }catch(e){toast('Error: '+e.message,'err')}
     unlock();return;
   }
+  if(AUTHMODE==='signup'&&$('a-pass').value!==$('a-pass2').value){
+    toast('Passwords do not match.','err');unlock();return}
   if(AUTHMODE==='signup'&&!$('a-terms').checked){
     toast('Please accept the Terms of Service and Privacy Policy.','err');unlock();return}
   const body={email:$('a-email').value,password:$('a-pass').value};
