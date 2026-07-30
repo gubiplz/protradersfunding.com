@@ -53,6 +53,10 @@
   }
   function asNumber(v) {
     if (v === '') return null;
+    /* ISO dates ("2026-07-27T15:43") must NOT go through parseFloat — it
+       reads just the year, every same-year date compares equal and the sort
+       becomes a no-op. Lexicographic compare orders ISO strings correctly. */
+    if (/^\d{4}-\d{2}-\d{2}/.test(String(v))) return null;
     const n = parseFloat(String(v).replace(/−/g, '-').replace(/[$,%+\s]/g, ''));
     return isNaN(n) ? null : n;
   }
