@@ -152,6 +152,48 @@ def test_admin_inbox_agreguje_kolejki():
     assert any(i["type"] == "ticket" and "Inbox test" in i["title"] for i in items)
 
 
+def test_admin_delete_trader_zwalnia_email(monkeypatch):
+    from app import push
+    monkeypatch.setattr(push, "send_to_trader", lambda *a, **k: 0)
+    _product()
+    tid, email = _trader()
+    oid = _order(tid)
+    client.post(f"/api/admin/orders/{oid}/mark-paid", headers=ADMIN)  # konto + telemetria
+    s = SessionLocal()
+    tr = s.get(Trader, tid)
+    tr.kyc_status = "pending"
+    t = SupportTicket(trader_id=tid, subject="Do usuniecia")
+    s.add(t); s.flush()
+    s.add(TicketMessage(ticket_id=t.id, author="trader", body="czesc"))
+    s.add(Notification(trader_id=tid, event="x", title="x"))
+    s.commit(); s.close()
+
+    r = client.delete(f"/api/admin/traders/{tid}", headers=ADMIN)
+    assert r.status_code == 200
+    assert r.json()["email"] == email and r.json()["accounts_removed"] == 1
+
+    s = SessionLocal()
+    assert s.get(Trader, tid) is None
+    assert s.query(Account).filter(Account.trader_id == tid).count() == 0
+    assert s.query(Order).filter(Order.trader_id == tid).count() == 0
+    assert s.query(Notification).filter(Notification.trader_id == tid).count() == 0
+    assert s.query(SupportTicket).filter(SupportTicket.trader_id == tid).count() == 0
+    # e-mail wolny: nowy klient rejestruje sie na ten sam adres
+    s.add(Trader(email=email, password_hash=auth.hash_password("haslo1234"),
+                 full_name="Nowy Klient", referral_code=auth.secrets.token_hex(3)))
+    s.commit(); s.close()
+
+    assert client.delete(f"/api/admin/traders/999999", headers=ADMIN).status_code == 404
+
+
+def test_admin_delete_trader_nie_rusza_admina():
+    tid, _ = _trader(is_admin=True)
+    assert client.delete(f"/api/admin/traders/{tid}", headers=ADMIN).status_code == 400
+    s = SessionLocal()
+    assert s.get(Trader, tid) is not None
+    s.close()
+
+
 def test_notify_admins_tworzy_wpis_dla_admina(monkeypatch):
     from app import notify, push
     admin_tid, _ = _trader(is_admin=True)

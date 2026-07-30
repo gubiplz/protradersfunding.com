@@ -2865,6 +2865,54 @@ def delete_account(account_id: int):
         session.close()
 
 
+@app.delete("/api/admin/traders/{trader_id}", dependencies=[Depends(auth.require_admin)])
+def admin_delete_trader(trader_id: int):
+    """Twarde usunięcie klienta z bazy — wszystko znika, e-mail wraca do puli
+    i klient może zarejestrować się od nowa. Nieodwracalne."""
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader_id)
+        if not tr:
+            raise HTTPException(404, "Trader not found")
+        if tr.is_admin:
+            raise HTTPException(400, "Administrator accounts cannot be deleted here")
+
+        acc_ids = [a.id for a in session.query(Account.id)
+                   .filter(Account.trader_id == trader_id).all()]
+        if acc_ids:
+            for model in (Trade, EquitySnapshot, Breach, Certificate, Payout, PayoutRequest):
+                (session.query(model).filter(model.account_id.in_(acc_ids))
+                 .delete(synchronize_session=False))
+            # Rachunki MT5 z puli nie wracają do obiegu — patrz delete_account.
+            (session.query(PoolAccount)
+             .filter(PoolAccount.claimed_by_account_id.in_(acc_ids))
+             .update({PoolAccount.retired_reason: "account deleted"}, synchronize_session=False))
+
+        # Zamówienia przed kontami: orders.account_id ma FK na accounts.id.
+        for model in (Order, Notification, CreditLedger, PayoutRequest,
+                      JournalEntry, PushSubscription, KycFile, TelemetryEvent):
+            (session.query(model).filter(model.trader_id == trader_id)
+             .delete(synchronize_session=False))
+        ticket_ids = [t.id for t in session.query(SupportTicket.id)
+                      .filter(SupportTicket.trader_id == trader_id).all()]
+        if ticket_ids:
+            (session.query(TicketMessage).filter(TicketMessage.ticket_id.in_(ticket_ids))
+             .delete(synchronize_session=False))
+            (session.query(SupportTicket).filter(SupportTicket.id.in_(ticket_ids))
+             .delete(synchronize_session=False))
+        if acc_ids:
+            (session.query(Account).filter(Account.id.in_(acc_ids))
+             .delete(synchronize_session=False))
+
+        email = tr.email
+        session.delete(tr)
+        session.commit()
+        return {"deleted": trader_id, "email": email,
+                "accounts_removed": len(acc_ids)}
+    finally:
+        session.close()
+
+
 @app.get("/api/leaderboard")
 def leaderboard():
     """Publiczny ranking — realne konta, ale nazwiska MASKOWANE (RODO/prywatność).

@@ -695,7 +695,11 @@ async function openAccount(id){
         balance back to the real account. Realistic pace follows market hours;
         Active and Fast demo trade continuously.</p>
     </div>
-    <button class="btn-o" style="border-color:#f5c6c6;color:var(--red)" onclick="deleteAccount(${a.id},'${esc(a.login)}')">Delete account</button>`);
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn-o" style="border-color:#f5c6c6;color:var(--red)" onclick="deleteAccount(${a.id},'${esc(a.login)}')">Delete account</button>
+      ${a.trader_id?`<button class="btn-o" style="border-color:#f5c6c6;color:var(--red)" onclick="deleteTrader(${a.trader_id},'${esc(a.trader_email||a.trader_name||'')}')"
+        title="Removes the client and ALL their data — frees the e-mail for a fresh signup">Delete client &amp; all data</button>`:''}
+    </div>`);
   renderCerts(a.id);
   renderPayouts(a.id);
   renderHistory(a.id);
@@ -872,6 +876,16 @@ async function deleteAccount(id,login){
   if(!confirm(`Delete account ${login}? This removes it from the platform permanently.`))return;
   try{await api('/api/accounts/'+id,{method:'DELETE'});closeOver();toast('Account deleted.','ok');go('accounts')}
   catch(e){toast('Error: '+e.message,'err')}
+}
+async function deleteTrader(tid,who){
+  if(!confirm(`Delete client ${who} and ALL their data?\n\nThis permanently removes their profile, every challenge account, orders, KYC documents, payouts, tickets and notifications.\n\nThe e-mail address becomes free again, so the client can sign up from scratch.\n\nThis cannot be undone.`))return;
+  const typed=prompt(`Type DELETE to confirm wiping ${who}:`);
+  if(typed!=='DELETE'){toast('Cancelled — nothing was deleted.','err');return}
+  try{
+    const r=await api('/api/admin/traders/'+tid,{method:'DELETE'});
+    closeOver();toast(`Client ${r.email} deleted (${r.accounts_removed} account${r.accounts_removed===1?'':'s'}). E-mail is free again.`,'ok',8000);
+    go('accounts');
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 
 /* ---------- actions ---------- */
