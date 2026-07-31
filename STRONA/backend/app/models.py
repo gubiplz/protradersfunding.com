@@ -147,6 +147,8 @@ class Order(Base):
     credits_used: Mapped[float] = mapped_column(Float, default=0.0)
     # Reczna flaga admina dla nieoplaconych zamowien: NULL | awaiting_crypto
     flag: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    # Powod recznego oznaczenia jako failed — widoczny w panelu przy statusie.
+    fail_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
     account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

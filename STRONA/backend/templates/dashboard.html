@@ -641,12 +641,14 @@ function renderOrders(){
         <td>${esc(o.trader_email||'—')}</td><td>${esc(o.product_key)}</td>
         <td class="num">$${fmt(o.amount_usd)}${o.coupon?` <span class="up" style="font-size:11px">(${esc(o.coupon)})</span>`:''}</td>
         <td class="muted">${esc(o.provider)}</td>
-        <td><span class="status ${o.status==='paid'?'paid':'pending'}"><span class="dot"></span>${esc(o.status)}</span>
-          ${o.status!=='paid'&&o.flag==='awaiting_crypto'?'<div class="muted" style="font-size:11px;white-space:nowrap">⏳ awaiting crypto</div>':''}</td>
+        <td><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span>
+          ${o.status==='pending'&&o.flag==='awaiting_crypto'?'<div class="muted" style="font-size:11px;white-space:nowrap">⏳ awaiting crypto</div>':''}
+          ${o.status==='failed'&&o.fail_reason?`<div class="muted" style="font-size:11px;max-width:200px">${esc(o.fail_reason)}</div>`:''}</td>
         <td class="num">${o.account_id||'—'}</td>
         <td style="white-space:nowrap">${o.status==='paid'?'':`
-          <button class="btn-o sm" onclick="flagOrder(${o.id},'${o.flag==='awaiting_crypto'?'':'awaiting_crypto'}')"
+          ${o.status==='pending'?`<button class="btn-o sm" onclick="flagOrder(${o.id},'${o.flag==='awaiting_crypto'?'':'awaiting_crypto'}')"
             title="${o.flag==='awaiting_crypto'?'Clear the awaiting-crypto flag':'Mark as awaiting crypto payment'}">${o.flag==='awaiting_crypto'?'Clear flag':'Crypto?'}</button>
+          <button class="btn-o sm" onclick="markOrderFailed(${o.id})" title="Payment is not coming — close the order with a reason">Mark failed</button>`:''}
           <button class="btn-p sm" onclick="markOrderPaid(${o.id})" title="Confirm the payment arrived — creates the account">Mark paid</button>`}</td></tr>`).join('')}
       </tbody></table></div>`
       :`<div class="empty"><h3>${list.length?'No orders match':'No orders yet'}</h3>${list.length?'<p>Try a different search or filter.</p>':''}</div>`}`;
@@ -655,6 +657,19 @@ async function flagOrder(id,flag){
   try{await api(`/api/admin/orders/${id}/flag`,{method:'POST',body:JSON.stringify({flag})});
     const o=(window._orders||[]).find(x=>x.id===id);if(o)o.flag=flag||null;
     toast(flag?'Marked as awaiting crypto payment.':'Flag cleared.','ok');renderOrders()}
+  catch(e){toast('Error: '+e.message,'err')}
+}
+async function markOrderFailed(id){
+  const reason=await askReason({
+    title:`Mark order #${id} as failed`,
+    hint:'The reason stays on the order in this panel — the trader is not e-mailed.',
+    label:'Reason (kept in this panel)',
+    presets:['Payment never arrived','Payment declined by the provider','Duplicate order',
+             'Cancelled by the customer','Suspected fraud'],
+    confirmLabel:'Mark failed',danger:true});
+  if(reason===null)return;
+  try{await api(`/api/admin/orders/${id}/mark-failed`,{method:'POST',body:JSON.stringify({reason})});
+    toast('Order marked as failed.','ok');go('orders')}
   catch(e){toast('Error: '+e.message,'err')}
 }
 async function markOrderPaid(id){
@@ -905,7 +920,7 @@ function askReason(opts){
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
       ${opts.hint?`<p class="muted" style="font-size:12.5px;margin-bottom:14px">${opts.hint}</p>`:''}
       <div class="stack">
-        <div><label class="muted" style="font-size:12px">Reason (shown to the trader)</label>
+        <div><label class="muted" style="font-size:12px">${opts.label||'Reason (shown to the trader)'}</label>
           <select id="rs-sel" class="inp">
             ${opts.presets.map(p=>`<option>${p}</option>`).join('')}
             <option value="__custom__">Custom…</option></select></div>

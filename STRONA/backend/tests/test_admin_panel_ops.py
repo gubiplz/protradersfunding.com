@@ -112,6 +112,39 @@ def test_order_flag_i_mark_paid():
                        headers=ADMIN).status_code == 404
 
 
+def test_order_mark_failed_z_powodem():
+    """Mark failed ubija nieopłacone zamówienie z powodem; opłaconych nie
+    rusza, a Mark paid po failed czyści powód (recovery)."""
+    _product()
+    tid, _ = _trader()
+    oid = _order(tid)
+
+    # flaga crypto znika razem z oznaczeniem failed
+    client.post(f"/api/admin/orders/{oid}/flag",
+                json={"flag": "awaiting_crypto"}, headers=ADMIN)
+    r = client.post(f"/api/admin/orders/{oid}/mark-failed",
+                    json={"reason": "Payment never arrived"}, headers=ADMIN)
+    assert r.status_code == 200 and r.json()["status"] == "failed"
+    mine = next(o for o in client.get("/api/admin/orders", headers=ADMIN).json()
+                if o["id"] == oid)
+    assert mine["status"] == "failed" and mine["fail_reason"] == "Payment never arrived"
+    assert mine["flag"] is None
+
+    # recovery: płatność jednak doszła — powód znika
+    r2 = client.post(f"/api/admin/orders/{oid}/mark-paid", headers=ADMIN)
+    assert r2.status_code == 200 and r2.json()["account_id"]
+    s = SessionLocal()
+    o = s.get(Order, oid)
+    assert o.status == "paid" and o.fail_reason is None
+    s.close()
+
+    # opłaconego nie da się ubić
+    assert client.post(f"/api/admin/orders/{oid}/mark-failed",
+                       json={"reason": "x"}, headers=ADMIN).status_code == 400
+    assert client.post("/api/admin/orders/999999/mark-failed",
+                       json={"reason": "x"}, headers=ADMIN).status_code == 404
+
+
 def test_kyc_reset_cofa_decyzje():
     tid, _ = _trader()
     s = SessionLocal()

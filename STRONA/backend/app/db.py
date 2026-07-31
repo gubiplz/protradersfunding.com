@@ -97,6 +97,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "weekend_trading": "BOOLEAN DEFAULT FALSE",
         "credits_used": "FLOAT DEFAULT 0",
         "flag": "VARCHAR(24)",
+        "fail_reason": "VARCHAR(200)",
     },
     "pool_accounts": {
         "claimed_by_trader_id": "INTEGER",

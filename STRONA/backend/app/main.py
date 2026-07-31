@@ -2634,7 +2634,7 @@ def admin_orders():
             out.append({"id": o.id, "trader_email": tr.email if tr else None,
                         "product_key": o.product_key, "amount_usd": o.amount_usd,
                         "status": o.status, "provider": o.provider, "coupon": o.coupon,
-                        "flag": o.flag,
+                        "flag": o.flag, "fail_reason": o.fail_reason,
                         "paid_at": o.paid_at.isoformat() if o.paid_at else None,
                         "account_id": o.account_id, "created_at": o.created_at.isoformat()})
         return out
@@ -2678,8 +2678,36 @@ def admin_mark_order_paid(order_id: int):
             return {"already": True, "account_id": o.account_id}
         acc = provisioning.create_account_from_order(session, o, notify_admin=False)
         o.flag = None
+        o.fail_reason = None      # recovery: płatność jednak doszła
         session.commit()
         return {"paid": o.id, "account_id": acc.id}
+    finally:
+        session.close()
+
+
+class OrderFailIn(BaseModel):
+    reason: str | None = None
+
+
+@app.post("/api/admin/orders/{order_id}/mark-failed", dependencies=[Depends(auth.require_admin)])
+def admin_mark_order_failed(order_id: int, payload: OrderFailIn):
+    """Ręczne ubicie nieopłaconego zamówienia (przelew nie doszedł, duplikat…).
+
+    Zapłaconych nie ruszamy — mają już konto; odwrót w drugą stronę robi
+    Mark paid, które czyści powód. Powód zostaje w panelu przy statusie,
+    trader nie dostaje maila."""
+    session = SessionLocal()
+    try:
+        o = session.get(Order, order_id)
+        if not o:
+            raise HTTPException(404, "Order not found")
+        if o.status == "paid":
+            raise HTTPException(400, "Paid orders cannot be marked as failed")
+        o.status = "failed"
+        o.fail_reason = (payload.reason or "").strip()[:200] or None
+        o.flag = None
+        session.commit()
+        return {"id": o.id, "status": o.status, "fail_reason": o.fail_reason}
     finally:
         session.close()
 
