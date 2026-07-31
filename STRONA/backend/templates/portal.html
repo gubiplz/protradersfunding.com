@@ -514,7 +514,9 @@ function renderGoogleBtn(){
   google.accounts.id.renderButton(holder,{
     theme:document.documentElement.dataset.theme==='dark'?'filled_black':'outline',
     size:'large',shape:'pill',width:Math.min(holder.offsetWidth||320,380),
-    /* the label follows the active tab — one button serves both flows */
+    /* the label follows the active tab — one button serves both flows;
+       locale pinned: the whole site is English, GIS must not localize */
+    locale:'en',
     text:AUTHMODE==='signup'?'signup_with':'signin_with'});
 }
 async function onGoogleCred(resp){
@@ -2544,7 +2546,9 @@ async function submitPayout(id){
 boot();
 </script>
 {% if google_client_id %}
-<script src="https://accounts.google.com/gsi/client" async defer onload="initGoogle()"></script>
+{# hl=en: the button label comes from this script's bundled strings and would
+   otherwise follow the visitor's browser language — the site is English-only #}
+<script src="https://accounts.google.com/gsi/client?hl=en" async defer onload="initGoogle()"></script>
 {% endif %}
 </body>
 </html>
