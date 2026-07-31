@@ -106,6 +106,28 @@ def test_admin_dostaje_strone_po_zalogowaniu():
     assert strona.status_code == 200 and "MT5 Pool" in strona.text
 
 
+def test_docs_zamkniete_jak_admin():
+    """Swagger i schemat OpenAPI to mapa calego API — 404 dla kazdego poza
+    zalogowanym adminem (ta sama bramka ciasteczkowa co /admin)."""
+    anon = TestClient(app)
+    assert anon.get("/docs").status_code == 404
+    assert anon.get("/openapi.json").status_code == 404
+    assert anon.get("/redoc").status_code == 404
+
+    _trader("docsuser@firma.pl", "tajne123", admin=False)
+    zwykly = TestClient(app)
+    zwykly.post("/api/auth/login", json={"email": "docsuser@firma.pl", "password": "tajne123"})
+    assert zwykly.get("/docs").status_code == 404
+    assert zwykly.get("/openapi.json").status_code == 404
+
+    _trader("docsadmin@firma.pl", "tajne123", admin=True)
+    admin = TestClient(app)
+    admin.post("/api/auth/login", json={"email": "docsadmin@firma.pl", "password": "tajne123"})
+    assert admin.get("/docs").status_code == 200
+    assert admin.get("/openapi.json").status_code == 200
+    assert "/api/checkout" in admin.get("/openapi.json").text
+
+
 def test_wylogowanie_zamyka_strone_admina():
     _trader("wyloguj@firma.pl", "tajne123", admin=True)
     c = TestClient(app)

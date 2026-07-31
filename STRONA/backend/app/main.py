@@ -160,7 +160,10 @@ async def lifespan(app: FastAPI):
     await poller.stop()
 
 
-app = FastAPI(title=f"{settings.site_name} API", version="0.7.0", lifespan=lifespan)
+# Swagger/OpenAPI schowane za bramka admina (routy nizej) — publiczne /docs
+# wystawialoby cala mape API kazdemu.
+app = FastAPI(title=f"{settings.site_name} API", version="0.7.0", lifespan=lifespan,
+              docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 
 
@@ -3725,6 +3728,27 @@ def dashboard(request: Request):
     # Render przez Jinja (nie FileResponse), żeby nazwa marki szła z SITE_NAME
     # zamiast być wpisana na sztywno w dwóch dodatkowych miejscach.
     return _page(request, "dashboard.html")
+
+
+@app.get("/docs", include_in_schema=False)
+def api_docs(request: Request):
+    """Swagger tylko dla admina — ta sama bramka i ten sam 404 co /admin.
+
+    Publiczne /docs to darmowa mapa całego API (łącznie z endpointami
+    administracyjnymi) dla każdego ciekawskiego.
+    """
+    if _admin_z_ciasteczka(request) is None:
+        raise HTTPException(404, "Not Found")
+    from fastapi.openapi.docs import get_swagger_ui_html
+    return get_swagger_ui_html(openapi_url="/openapi.json",
+                               title=f"{settings.site_name} API")
+
+
+@app.get("/openapi.json", include_in_schema=False)
+def api_openapi(request: Request):
+    if _admin_z_ciasteczka(request) is None:
+        raise HTTPException(404, "Not Found")
+    return app.openapi()
 
 
 @app.get("/portal")
