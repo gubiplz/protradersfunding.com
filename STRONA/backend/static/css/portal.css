@@ -1031,7 +1031,12 @@ html:not(.pwa){overscroll-behavior-y:contain}
 .auth-or{display:flex;align-items:center;gap:10px;color:var(--dim);font-size:11.5px;
   text-transform:uppercase;letter-spacing:.1em;margin-bottom:13px}
 .auth-or s{flex:1;height:1px;background:var(--line);text-decoration:none}
-#g-btn{display:flex;justify-content:center;min-height:44px}
+#g-btn{display:flex;justify-content:center;min-height:44px;
+  /* The GIS iframe has light-scheme content; under the page's color-scheme:dark
+     the browser paints an opaque WHITE canvas behind the transparent iframe
+     (scheme mismatch) — a white box framed the pill. Matching schemes here
+     keeps the iframe transparent. */
+  color-scheme:light}
 .g-terms{font-size:11px;color:var(--dim);margin-top:11px;text-align:center;line-height:1.5}
 .g-terms a{color:var(--muted);text-decoration:underline}
 
