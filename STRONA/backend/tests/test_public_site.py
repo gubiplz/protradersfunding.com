@@ -245,6 +245,11 @@ def test_landing_ma_katalog_wstrzykniety_w_html():
         wpis = next(p for p in dane if p["key"] == "2step-100k")
         assert wpis["price_usd"] == 777.0
         assert any(p["steps"] == 0 for p in dane)   # oba modele obecne
+        # konfigurator hero jest WYRENDEROWANY serwerowo (nie czeka na JS):
+        # domyślny wybór to 2step-100k, więc cena z bazy stoi w pierwszym HTML
+        assert 'data-v="777"' in html and "$777" in html
+        assert 'data-key="2step-100k"' in html
+        assert "2-Step Evaluation" in html and "Start with $100K" in html
     finally:
         s = SessionLocal()
         prod = s.query(main_mod.Product).filter(main_mod.Product.key == "2step-100k").first()

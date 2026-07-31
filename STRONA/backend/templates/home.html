@@ -32,21 +32,27 @@
           <span class="cfg-sub">Real plans, live from our catalog</span></div>
         <span class="mock-live"><span class="dot"></span> INSTANT DELIVERY</span>
       </div>
-      <div class="cfg-tabs" id="cfg-tabs"></div>
-      <div class="cfg-sizes" id="cfg-sizes"></div>
+      {# Server-rendered default state — the panel is complete in the FIRST
+         paint; renderConfigurator() re-renders the same values on boot and
+         only then takes over interactions. Keep markup identical to the JS. #}
+      <div class="cfg-tabs" id="cfg-tabs">{% if cfg %}{% for t in cfg.tabs
+        %}<button class="cfg-tab{% if t.on %} on{% endif %}" data-step="{{ t.id }}">{{ t.name }}<small>from ${{ t.from_usd }}</small></button>{% endfor %}{% endif %}</div>
+      <div class="cfg-sizes" id="cfg-sizes">{% if cfg %}{% for s in cfg.sizes
+        %}<button class="cfg-size{% if s.on %} on{% endif %}" data-key="{{ s.key }}">{{ s.label }}</button>{% endfor %}{% endif %}</div>
       <div class="cfg-rows">
-        <div class="cfg-row"><span>One-time fee</span><b><span id="cfg-fee">—</span> <em>refunded with 1st payout</em></b></div>
-        <div class="cfg-row"><span id="cfg-target-label">Profit target — Phase 1</span><b id="cfg-target">—</b></div>
-        <div class="cfg-row"><span>Your profit split</span><b id="cfg-split">—</b></div>
+        <div class="cfg-row"><span>One-time fee</span><b><span id="cfg-fee"{% if cfg %} data-v="{{ cfg.fee_raw }}"{% endif %}>{% if cfg %}${{ cfg.fee }}{% else %}—{% endif %}</span> <em>refunded with 1st payout</em></b></div>
+        <div class="cfg-row"><span id="cfg-target-label">{% if cfg and cfg.instant %}Profit target{% else %}Profit target — Phase 1{% endif %}</span><b id="cfg-target">{% if cfg %}{% if cfg.instant %}None — funded from day one{% else %}+{{ cfg.target_pct }}% = $<span id="cfg-tusd" data-v="{{ cfg.target_usd_raw }}">{{ cfg.target_usd }}</span>{% endif %}{% else %}—{% endif %}</b></div>
+        <div class="cfg-row"><span>Your profit split</span><b id="cfg-split">{% if cfg %}{{ cfg.split }}%{% else %}—{% endif %}</b></div>
       </div>
-      {# Filled by renderConfigurator(); hidden entirely when the promo is off. #}
-      <div class="cfg-promo" id="cfg-promo" hidden>
+      {# Default (not-applied) promo copy pre-rendered too — the box popping in
+         after script load read as another flash. JS adjusts for applied codes. #}
+      <div class="cfg-promo" id="cfg-promo"{% if not (cfg and cfg.promo_any) %} hidden{% endif %}>
         <div class="cfg-promo-badge" id="cfg-promo-badge">Upgrade your size</div>
-        <div class="cfg-promo-val" id="cfg-promo-val"></div>
-        <div class="cfg-promo-sub" id="cfg-promo-sub"></div>
+        <div class="cfg-promo-val" id="cfg-promo-val">{% if cfg and cfg.promo_any %}Have a promo code? Get the <b>next size up — same fee</b>.{% endif %}</div>
+        <div class="cfg-promo-sub" id="cfg-promo-sub">{% if cfg and cfg.promo_any %}<button type="button" class="cfg-promo-link" id="cfg-promo-open">Apply your code</button> — the account is created one size up at checkout.{% endif %}</div>
       </div>
-      <a class="btn btn-lg" id="cfg-cta" href="/portal" style="width:100%">Start this challenge →</a>
-      <div class="cfg-fine" id="cfg-fine">*Illustrative math based on this plan's real split — not a promise. Rewards depend on your trading.</div>
+      <a class="btn btn-lg" id="cfg-cta" href="{% if cfg %}/portal?buy={{ cfg.cta_key }}{% else %}/portal{% endif %}" style="width:100%">{% if cfg %}{{ cfg.cta_label }}{% else %}Start this challenge →{% endif %}</a>
+      <div class="cfg-fine" id="cfg-fine">{% if cfg %}*One-time fee, refunded with your first payout. Rewards depend on your trading.{% else %}*Illustrative math based on this plan's real split — not a promise. Rewards depend on your trading.{% endif %}</div>
     </div>
   </div>
 </section>

@@ -3744,13 +3744,57 @@ def _page(request: Request, template: str, **extra):
     return jinja.TemplateResponse(request, template, ctx)
 
 
+def _size_label(v: float) -> str:
+    """Odbicie sizeLabel z site.js — serwerowy render musi dawać ten sam tekst."""
+    return f"${v / 1e6:g}M" if v >= 1_000_000 else f"${round(v / 1000)}K"
+
+
+def _cfg_ctx(prods: list[dict]) -> dict | None:
+    """Domyślny stan konfiguratora hero renderowany SERWEROWO.
+
+    Inline'owe dane (#pf-products) zdjęły czekanie na API, ale render dalej
+    robił site.js ładowany po gsap na końcu body — pierwszy paint łapał puste
+    "—". Serwer maluje panel od razu; site.js po starcie robi idempotentny
+    re-render (identyczne wartości), więc nic nie mruga. Logika wyboru 1:1
+    z renderConfigurator(): rodzina 2-step, rozmiar 100k albo największy.
+    """
+    g2 = sorted((p for p in prods if p["steps"] == 2 and p["price_usd"] > 0),
+                key=lambda p: p["account_size"])
+    gi = sorted((p for p in prods if p["steps"] == 0 and p["price_usd"] > 0),
+                key=lambda p: p["account_size"])
+    items = g2 or gi
+    if not items:
+        return None
+    sel = next((p for p in items if p["account_size"] == 100_000), items[-1])
+    tabs = []
+    for grupa, gid, nazwa in ((g2, "2step", "2-Step Evaluation"), (gi, "instant", "Instant Funding")):
+        if grupa:
+            tabs.append({"id": gid, "name": nazwa, "on": grupa is items,
+                         "from_usd": f"{min(p['price_usd'] for p in grupa):,.0f}"})
+    instant = sel["steps"] == 0
+    return {
+        "tabs": tabs,
+        "sizes": [{"key": p["key"], "label": _size_label(p["account_size"]),
+                   "on": p["key"] == sel["key"]} for p in items],
+        "fee": f"{round(sel['price_usd']):,}", "fee_raw": round(sel["price_usd"]),
+        "instant": instant,
+        "target_pct": f"{sel['profit_target_p1']:g}",
+        "target_usd": f"{round(sel['account_size'] * sel['profit_target_p1'] / 100):,}",
+        "target_usd_raw": round(sel["account_size"] * sel["profit_target_p1"] / 100),
+        "split": f"{sel['profit_split_pct']:g}",
+        "cta_key": sel["key"],
+        "cta_label": f"Start with {_size_label(sel['account_size'])} → ${round(sel['price_usd']):,}",
+        "promo_any": any(p["promo_upgrade_size"] for p in prods),
+    }
+
+
 @app.get("/")
 def home(request: Request):
     """Publiczna strona sprzedażowa (cennik/objectives z /api/products)."""
     # QR w podglądzie certyfikatu prowadzi na REALNĄ stronę weryfikacji —
     # atrapa kodu na landingu byłaby obietnicą bez pokrycia.
-    # Katalog wstrzyknięty w HTML: konfigurator w hero renderuje się w tym
-    # samym paincie co reszta strony, bez pół sekundy pustych "—".
+    # Katalog wstrzyknięty w HTML + konfigurator hero renderowany serwerowo:
+    # panel jest kompletny w pierwszym paincie, bez błysku pustych "—".
     session = SessionLocal()
     try:
         prods = _products_payload(session)
@@ -3758,7 +3802,7 @@ def home(request: Request):
         session.close()
     return _page(request, "home.html",
                  sample_qr=_qr_svg(f"{_public_base(request)}/verify"),
-                 products=prods)
+                 products=prods, cfg=_cfg_ctx(prods))
 
 
 @app.get("/faq")
