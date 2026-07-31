@@ -81,7 +81,17 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
         "welcome": (
             f"Welcome to {brand} 🎉",
             f"Hi {name}!\n\nYour {brand} account is ready. Pick a challenge in the portal "
-            f"and start your path to a funded account.",
+            f"and start your path to a funded account.\n\n"
+            f"📱 Get the mobile app\n"
+            f"The portal installs as an app straight from your browser — no app store:\n"
+            f"  iPhone / iPad:  open {settings.app_base_url}/portal in Safari → Share → Add to Home Screen\n"
+            f"  Android:        open the portal in Chrome → menu ⋮ → Install app\n"
+            f"Step-by-step guide: {settings.app_base_url}/install\n\n"
+            f"🔔 Turn on notifications\n"
+            f"Open the dashboard and tap “Enable” on the notifications banner (or go to "
+            f"Settings → Notification Preferences) to get instant alerts about your MT5 "
+            f"credentials, phase passes and payouts. On iPhone, install the app first — "
+            f"Safari alone cannot receive push notifications.",
         ),
         "credentials": (
             f"Your challenge account {login} is ready ⚡",
@@ -316,11 +326,31 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                        "The credentials above are only for the MetaTrader 5 platform."),
         ]
     elif event == "welcome":
+        mobile = f"""
+   <tr><td align="center" style="padding:40px 44px 0">
+     <div style="border-top:1px solid {_HAIR};padding-top:34px">
+       <div style="display:inline-block;background:{_GOLD_BG};color:{_GOLD};border-radius:999px;
+         padding:8px 15px;font:600 11px/1 {_FONT};letter-spacing:.14em;text-transform:uppercase;
+         margin:0 0 16px">Mobile app</div>
+       <h2 style="font:600 20px/1.3 {_FONT};letter-spacing:-.2px;color:{_INK};margin:0 0 10px">
+         Install {brand} on your phone</h2>
+       <p style="font:400 14px/1.8 {_FONT};color:{_MUTE};margin:0">
+         The portal installs as an app straight from your browser — no app store.<br>
+         <b style="color:{_INK}">iPhone / iPad:</b> Safari → Share → Add to Home Screen<br>
+         <b style="color:{_INK}">Android:</b> Chrome → menu ⋮ → Install app</p>
+     </div>
+   </td></tr>"""
         parts = [
             _head_html("Welcome", f"Welcome to {brand}",
                        f"Hi {name}, your account is ready. Pick a challenge in the portal "
                        f"and start your path to a funded account."),
             _button_html("Open the Portal", f"{portal}?view=store"),
+            mobile,
+            _button_html("Open the Install Guide", f"{settings.app_base_url}/install"),
+            _note_html("🔔 Turn on notifications: open the dashboard and tap “Enable” on the "
+                       "notifications banner to get instant alerts about your MT5 credentials, "
+                       "phase passes and payouts. On iPhone, notifications only work from the "
+                       "installed app."),
         ]
     elif event == "phase_passed":
         parts = [

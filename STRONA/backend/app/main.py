@@ -551,6 +551,38 @@ def resend_verify_email(request: Request, trader: Trader = Depends(auth.current_
         session.close()
 
 
+class ChangeEmailIn(BaseModel):
+    email: str
+
+
+@app.post("/api/me/verify-email/change-address")
+def change_unverified_email(payload: ChangeEmailIn, request: Request,
+                            trader: Trader = Depends(auth.current_trader)):
+    """Poprawka literówki w adresie PRZED weryfikacją. Po potwierdzeniu adres
+    jest tożsamością konta (login, faktury, poświadczenia MT5) — zmienia go
+    już tylko support."""
+    _rate_limit(request, "verify_change", 5)
+    email = payload.email.strip().lower()
+    if not _EMAIL_RX.fullmatch(email):
+        raise HTTPException(400, "Enter a valid e-mail address")
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader.id)
+        if tr.email_verified:
+            raise HTTPException(400, "Your e-mail is already verified — contact support to change it")
+        if email == tr.email:
+            raise HTTPException(400, "This is already the address on your account")
+        if session.query(Trader).filter(Trader.email == email).first():
+            raise HTTPException(409, "An account with this e-mail already exists")
+        tr.email = email
+        tr.email_verify_code = f"{secrets.randbelow(1_000_000):06d}"
+        session.commit()
+        _wyslij_mail_weryfikacyjny(request, tr)
+        return {"ok": True, "email": tr.email}
+    finally:
+        session.close()
+
+
 @app.post("/api/auth/signup")
 def signup(payload: SignupIn, request: Request, response: Response):
     _rate_limit(request, "signup", 5)

@@ -103,7 +103,13 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
         <button type="button" class="linklike" onclick="resendVerify()">Resend code</button>
         <button type="button" class="linklike" onclick="logout()" style="color:var(--muted)">Sign out</button>
       </form>
-      <div class="auth-hint">Wrong address? Sign out and create the account again.</div>
+      <div class="auth-hint">Typo in the address?
+        <button type="button" class="linklike" onclick="vgToggleChange(true)">Fix the e-mail</button></div>
+      <form class="stack hidden" id="vg-change" onsubmit="changeVerifyEmail();return false" style="margin-top:12px">
+        <input id="vg-new-mail" class="inp" type="email" autocomplete="email" placeholder="correct@address.com">
+        <button type="submit" class="btn-p" style="width:100%">Update &amp; resend code</button>
+        <button type="button" class="linklike" onclick="vgToggleChange(false)" style="color:var(--muted)">Cancel</button>
+      </form>
     </div>
   </div>
 </div>
@@ -479,6 +485,20 @@ async function verifyEmailCode(){
 async function resendVerify(){
   try{await api('/api/me/verify-email/resend',{method:'POST'});
     toast('New code sent — check your inbox.','ok',8000);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+function vgToggleChange(on){
+  $('vg-change').classList.toggle('hidden',!on);
+  if(on)$('vg-new-mail').focus();
+}
+async function changeVerifyEmail(){
+  const em=$('vg-new-mail').value.trim();
+  if(!em){toast('Enter the correct e-mail address.','err');return}
+  try{
+    const r=await api('/api/me/verify-email/change-address',{method:'POST',body:JSON.stringify({email:em})});
+    ME.email=r.email;$('vg-mail').textContent=r.email;
+    $('vg-new-mail').value='';vgToggleChange(false);
+    toast('Address updated — a new code is on its way to '+r.email,'ok',8000);
   }catch(e){toast('Error: '+e.message,'err')}
 }
 function logout(){
