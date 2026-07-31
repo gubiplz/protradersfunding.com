@@ -60,6 +60,10 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
       <a class="auth-logo-m" href="/"><img src="/static/img/logo.png" alt=""><span>{{ site_name }}</span></a>
       <h3 id="auth-title">Welcome back</h3>
       <div class="sub" id="auth-sub">Log in to your trader dashboard.</div>
+      <div class="note hidden" id="auth-buynote" style="text-align:left;margin:0 0 14px">
+        Your selected challenge is saved — after this step you go <b>straight to checkout</b>.
+        New here? <b>Create your free account</b>. Already registered? Switch to <b>Log in</b>.
+      </div>
       <div class="auth-tabs">
         <button id="tab-login" class="auth-tab on" onclick="authTab('login')">Log in</button>
         <button id="tab-signup" class="auth-tab" onclick="authTab('signup')">Create account</button>
@@ -528,7 +532,13 @@ async function boot(){
   const rt=q0.get('reset');
   if(rt){window._resetToken=rt;
     $('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('reset');loadAuthStats();return}
-  if(!TOKEN){$('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('login');loadAuthStats();return}
+  if(!TOKEN){
+    $('auth').classList.remove('hidden');$('app').classList.add('hidden');
+    /* Wejscie z cennika (?buy=) to najczesciej NOWY klient — startujemy od
+       rejestracji i mowimy wprost, ze zamowienie czeka tuz za tym krokiem. */
+    authTab(q0.get('buy')?'signup':'login');
+    if(q0.get('buy'))$('auth-buynote').classList.remove('hidden');
+    loadAuthStats();return}
   try{ME=await api('/api/auth/me')}catch(e){logout();return}
   /* Hard gate: an unconfirmed address never reaches the dashboard. */
   if(ME.email_verified===false){
@@ -1853,7 +1863,10 @@ function openBuy(key){
           <input id="c-last" placeholder="Last name" class="inp" value="${esc(ME.last_name||nm.slice(1).join(' ')||'')}">
         </div>
         <input id="c-phone" placeholder="Phone, e.g. +14155551234" class="inp" value="${esc(ME.phone||'')}">
-        <input id="c-email" class="inp" value="${esc(ME.email)}" disabled>
+        <input id="c-email" class="inp" value="${esc(ME.email)}" disabled aria-label="Account e-mail">
+        <p class="hint" style="text-align:left;margin:-6px 0 0">Purchases are tied to your <b>account e-mail</b> — credentials
+          and the invoice are delivered there. Different address?
+          <button type="button" class="linklike" onclick="closeBuy();logout()">Log out</button> and register with it.</p>
         <input id="c-code" placeholder="Discount / promo code (optional)" class="inp"
           autocomplete="off" spellcheck="false"
           value="${esc(new URLSearchParams(location.search).get('coupon')||pfCoupon()||(p.promo_upgrade_size?pfPromo():''))}"

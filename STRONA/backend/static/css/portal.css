@@ -320,6 +320,9 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 .auth-tab.on{background:var(--grad);color:#fff}
 .auth-card .stack{display:flex;flex-direction:column;gap:11px}
 .auth-hint{font-size:11.5px;color:var(--dim);text-align:center;margin-top:14px}
+/* baner „zamówienie czeka za tym krokiem" przy wejściu z cennika (?buy=) */
+.auth-card .note{font-size:12px;color:var(--muted);background:var(--acc-bg);border:1px solid var(--acc-line);
+  border-radius:10px;padding:10px 12px}
 /* logo w karcie — widoczne tylko na mobile, gdzie lewy panel brandu znika */
 .auth-logo-m{display:none;align-items:center;justify-content:center;gap:10px;margin:2px 0 20px;
   font-family:var(--display);font-weight:700;font-size:17px;color:inherit;text-decoration:none}
