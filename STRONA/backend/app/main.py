@@ -3671,6 +3671,7 @@ def public_recent_certificates():
                 "kind": cert.kind,
                 "kind_label": CERT_KINDS.get(cert.kind, (cert.kind,))[0],
                 "account_size": acc.initial_balance,
+                "program": ("2-Step" if acc.steps == 2 else "Instant Funding"),
                 "trader": _mask_name(tr.full_name),
                 "issued_at": cert.issued_at.isoformat() if cert.issued_at else None,
             })

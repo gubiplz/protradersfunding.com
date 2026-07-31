@@ -447,25 +447,57 @@
   }
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  /* ---------- recently issued certificates (real data, masked names) ---------- */
+  /* ---------- recently issued certificates (real data, masked names) ----------
+     Each entry is the REAL certificate artwork (cert.css classes, same as the
+     document itself) rendered full-size and scaled down — the strip shows the
+     graphic people actually share, not an info tile. No tokens are published:
+     the QR is the generic /verify code, the token line is omitted. */
+  const CS_SCALE = 280 / 620;                 // mini width / .cert-card design width
   async function certsStrip() {
     const box = $('#certsStrip'); if (!box) return;
     try {
       const rows = await (await fetch('/api/public/certificates/recent')).json();
       if (!Array.isArray(rows) || !rows.length) return;   // no data -> no strip
+      /* Brand bits are cloned from the server-rendered sample card, so the
+         minis can never drift from the real template. */
+      const qr = ($('#pv-qr') && $('#pv-qr').innerHTML) || '';
+      const brand = (document.querySelector('#pv-card .cert-logo span') || {}).textContent || '';
+      const signer = (document.querySelector('#pv-card .sig') || {}).textContent || '';
       $('#certsStripRow').innerHTML = rows.map(r => {
         const payout = r.kind === 'payout';
         const when = r.issued_at
           ? new Date(r.issued_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
           : '';
-        return `<div class="cs-card${payout ? ' payout' : ''}">
-          <span class="cs-kind">${esc(r.kind_label)}</span>
-          <b class="cs-amount">$${fmt(payout ? r.amount_usd : r.account_size)}</b>
-          <span class="cs-sub">${payout ? 'reward paid out' : 'account size'}</span>
-          <div class="cs-who">${esc(r.trader)}${when ? `<span>${when}</span>` : ''}</div>
-        </div>`;
+        const meta = payout
+          ? `<div><b>${when}</b><span>Date</span></div><div><b>$${fmt(r.account_size)}</b><span>Account size</span></div>`
+          : `<div><b>${when}</b><span>Date</span></div>${r.program ? `<div><b>${esc(r.program)}</b><span>Program</span></div>` : ''}`;
+        return `<div class="cs-mini"><div class="cert-card${payout ? ' cert-variant-payout' : ''}">
+          <div class="cert-inner">
+            <div class="cert-logo"><img src="/static/img/logo.png" alt=""><span>${esc(brand)}</span></div>
+            <div class="cert-eyebrow"><s></s>${payout ? 'Payout' : esc(r.kind_label)}<s></s></div>
+            <h3 class="cert-title">Certificate</h3>
+            <div class="cert-amountlabel">${payout ? 'for the amount of' : 'Account size'}</div>
+            <div class="cert-amount">$${fmt(payout ? r.amount_usd : r.account_size)}</div>
+            <div class="cert-presented">presented to</div>
+            <div class="cert-person">${esc(r.trader)}</div>
+            <div class="cert-meta">${meta}</div>
+            <div class="cert-foot">
+              <div class="cert-signblock"><b class="sig">${esc(signer)}</b><i class="sig-line"></i><span>Chief Executive Officer</span></div>
+              <div class="cert-qr"><div class="qr-box">${qr}</div><span>Scan to verify</span></div>
+            </div>
+          </div>
+        </div></div>`;
       }).join('');
-      box.hidden = false;
+      /* transform:scale() keeps the 620px layout box — each wrapper gets the
+         SCALED height of its card. Unhide FIRST: inside [hidden] everything
+         measures 0 and the whole strip would collapse. Same frame = no flash. */
+      requestAnimationFrame(() => {
+        box.hidden = false;
+        $$('#certsStripRow .cs-mini').forEach(m => {
+          const c = m.firstElementChild;
+          if (c) m.style.height = Math.round(c.offsetHeight * CS_SCALE) + 'px';
+        });
+      });
     } catch (e) { /* optional social proof — the section simply stays hidden */ }
   }
 

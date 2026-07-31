@@ -325,18 +325,16 @@ table.lb .up{color:var(--green)} table.lb .down{color:var(--red)}
   padding:12px 14px;font-family:var(--mono);font-size:14px;outline:none;transition:.15s}
 .verify-box input:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(99,102,241,.12)}
 
-/* recently issued certificates — horizontal strip, hidden until real data lands */
+/* recently issued certificates — the REAL certificate artwork (cert.css),
+   rendered full-size (620px) and scaled into 280px tiles. transform does not
+   shrink the layout box, hence overflow:hidden + JS-set wrapper height. */
 .certs-strip{margin-top:44px}
 .cs-head{font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:14px}
-.cs-row{display:flex;gap:14px;overflow-x:auto;padding-bottom:8px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}
-.cs-card{flex:0 0 190px;scroll-snap-align:start;background:var(--panel);border:1px solid var(--line);
-  border-radius:14px;padding:16px 16px 14px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:2px}
-.cs-kind{font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--acc);margin-bottom:6px}
-.cs-card.payout .cs-kind{color:#0e9f6e}
-.cs-amount{font-family:var(--mono);font-size:22px;font-weight:800}
-.cs-sub{font-size:11.5px;color:var(--muted)}
-.cs-who{margin-top:10px;font-size:12.5px;font-weight:600;border-top:1px solid var(--line);padding-top:9px}
-.cs-who span{display:block;font-weight:500;font-size:11px;color:var(--muted);margin-top:1px}
+.cs-row{display:flex;gap:16px;overflow-x:auto;padding:4px 4px 14px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}
+.cs-mini{flex:0 0 280px;scroll-snap-align:start;overflow:hidden;border-radius:10px;
+  box-shadow:0 14px 30px -16px rgba(27,75,216,.45)}
+.cs-mini .cert-card{width:620px;transform:scale(.4516);transform-origin:top left;
+  pointer-events:none;box-shadow:none}
 
 /* affiliate band */
 .aff-band{background:linear-gradient(120deg,#eef0ff,#f6f0ff);border:1px solid #dfe3ff;
