@@ -727,13 +727,18 @@ def google_login(payload: GoogleAuthIn, request: Request, response: Response):
                 full_name=str(claims.get("name") or "").strip()[:120],
                 referral_code=code, referred_by=referred_by,
                 google_sub=sub or None,
+                # False tylko na moment: _potwierdz_email niżej przestawia flagę
+                # i wysyła welcome — tą samą ścieżką co klik w link z maila.
+                email_verified=False,
                 # Klauzula pod przyciskiem: kontynuacja przez Google = zgoda.
                 terms_accepted_at=datetime.now(timezone.utc),
             )
             session.add(tr)
-        # Google ręczy za adres — bramka weryfikacyjna nie ma już czego pilnować.
-        tr.email_verified = True
-        session.commit()
+        # Google ręczy za adres — potwierdzenie + mail powitalny idą wspólną
+        # ścieżką weryfikacji (idempotentne: zweryfikowani nic nie dostają,
+        # więc zwykłe logowanie Google nie spamuje welcome'em).
+        _potwierdz_email(session, tr)
+        session.commit()   # domyka linkowanie google_sub u już zweryfikowanych
         telemetry.track("signup" if nowy else "login", tr.id, google=True)
         token = auth.make_token(tr.id, tr.password_hash)
         _ustaw_ciasteczko_sesji(response, token)

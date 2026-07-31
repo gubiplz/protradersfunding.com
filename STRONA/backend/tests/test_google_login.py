@@ -119,6 +119,47 @@ def test_google_signup_honoruje_kod_polecajacy(monkeypatch):
     s.close()
 
 
+def test_google_signup_wysyla_welcome_a_login_nie_spamuje(monkeypatch):
+    """Konto z Google omija bramkę kodu, więc welcome idzie od razu przy
+    rejestracji (wspólna ścieżka _potwierdz_email). Kolejne logowania nie
+    wysyłają nic — flaga email_verified czyni ścieżkę idempotentną."""
+    wyslane = []
+    monkeypatch.setattr(main_mod.notify, "send",
+                        lambda ev, to, ctx=None: wyslane.append((ev, to)))
+    _wlacz(monkeypatch, _claims(email="welcome-g@gmail.com", sub="sub-welcome-1"))
+    with TestClient(app) as c:
+        assert c.post("/api/auth/google", json={"credential": "stub"}).status_code == 200
+    assert ("welcome", "welcome-g@gmail.com") in wyslane
+    assert not any(ev == "verify_email" for ev, _ in wyslane), \
+        "kod weryfikacyjny nie ma sensu — adres potwierdził Google"
+    wyslane.clear()
+    with TestClient(app) as c:
+        assert c.post("/api/auth/google", json={"credential": "stub"}).status_code == 200
+    assert wyslane == [], "zwykłe logowanie Google nie może słać maili"
+
+
+def test_google_link_niezweryfikowanego_konta_dosyla_welcome(monkeypatch):
+    """Trader zarejestrowany hasłem, który nigdy nie kliknął w link, po wejściu
+    przez Google dostaje welcome (weryfikację załatwił Google), a kod znika."""
+    s = SessionLocal()
+    s.add(Trader(email="niezweryfikowany@gmail.com",
+                 password_hash=auth.hash_password("haslo12345"),
+                 full_name="Bez Weryfikacji", referral_code="BEZWER1",
+                 email_verified=False, email_verify_code="123456"))
+    s.commit(); s.close()
+    wyslane = []
+    monkeypatch.setattr(main_mod.notify, "send",
+                        lambda ev, to, ctx=None: wyslane.append((ev, to)))
+    _wlacz(monkeypatch, _claims(email="niezweryfikowany@gmail.com", sub="sub-niezw"))
+    with TestClient(app) as c:
+        assert c.post("/api/auth/google", json={"credential": "stub"}).status_code == 200
+    assert ("welcome", "niezweryfikowany@gmail.com") in wyslane
+    s = SessionLocal()
+    tr = s.query(Trader).filter(Trader.email == "niezweryfikowany@gmail.com").first()
+    assert tr.email_verified is True and tr.email_verify_code is None
+    s.close()
+
+
 def test_przycisk_google_tylko_z_konfiguracja(monkeypatch):
     with TestClient(app) as c:
         assert "accounts.google.com/gsi/client" not in c.get("/portal").text
