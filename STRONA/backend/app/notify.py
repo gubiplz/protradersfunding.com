@@ -453,11 +453,12 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
 
 
 # Kategoria preferencji per zdarzenie (Settings -> Notification Preferences).
+# Zdarzenia TRANSAKCYJNE (welcome, credentials/challenge_granted z poświadczeniami
+# MT5 za opłacony produkt, verify_email, password_reset) celowo NIE mają wpisu —
+# muszą dojść zawsze, niezależnie od preferencji.
 _PREF_BY_EVENT = {
-    "welcome": "notify_updates", "credentials": "notify_updates",
     "kyc_approved": "notify_updates", "kyc_rejected": "notify_updates",
     "ticket_reply": "notify_updates",
-    "challenge_granted": "notify_updates",
     "credits_granted": "notify_updates",
     "phase_passed": "notify_trading", "account_funded": "notify_trading",
     "breached": "notify_trading",

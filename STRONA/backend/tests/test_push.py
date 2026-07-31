@@ -194,8 +194,12 @@ def test_notify_send_wysyla_push_z_tematem_maila(monkeypatch):
 
     # wyłączona kategoria blokuje mail i push jednym przełącznikiem
     _ustaw(tid, notify_updates=False)
-    notify.send("welcome", "push-notify@test.pl", {"name": "Push"})
+    notify.send("credits_granted", "push-notify@test.pl", {"amount": 10, "balance": 10})
     assert len(dostarczone) == 1
+    # ...ale zdarzenia TRANSAKCYJNE (welcome, credentials) nie podlegają
+    # preferencjom i dochodzą zawsze
+    notify.send("welcome", "push-notify@test.pl", {"name": "Push"})
+    assert len(dostarczone) == 2
 
 
 # ---------------- cron: przypomnienie o serii ----------------

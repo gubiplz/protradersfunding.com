@@ -524,7 +524,10 @@ class VerifyCodeIn(BaseModel):
 
 
 @app.post("/api/me/verify-email")
-def verify_email_code(payload: VerifyCodeIn, trader: Trader = Depends(auth.current_trader)):
+def verify_email_code(payload: VerifyCodeIn, request: Request,
+                      trader: Trader = Depends(auth.current_trader)):
+    # 6-cyfrowy kod bez limitu prób dałoby się brute-force'ować (1M kombinacji).
+    _rate_limit(request, "verify_code", 5)
     session = SessionLocal()
     try:
         tr = session.get(Trader, trader.id)
@@ -539,6 +542,8 @@ def verify_email_code(payload: VerifyCodeIn, trader: Trader = Depends(auth.curre
 
 @app.post("/api/me/verify-email/resend")
 def resend_verify_email(request: Request, trader: Trader = Depends(auth.current_trader)):
+    # Bez limitu = mail-bombing wpisanego adresu i palenie kwoty SMTP.
+    _rate_limit(request, "verify_resend", 3)
     session = SessionLocal()
     try:
         tr = session.get(Trader, trader.id)
@@ -662,9 +667,12 @@ def me(trader: Trader = Depends(auth.current_trader)):
     session = SessionLocal()
     try:
         referred = session.query(Trader).filter(Trader.referred_by == trader.referral_code).count()
+        # Granty (BOGO) niosą amount_usd opłaconego tieru dla faktury, ale to
+        # NIE jest druga płatność — bez tego filtra prowizja liczyłaby się 2×.
         paid_orders = (session.query(Order)
                        .join(Trader, Trader.id == Order.trader_id)
-                       .filter(Trader.referred_by == trader.referral_code, Order.status == "paid").all())
+                       .filter(Trader.referred_by == trader.referral_code, Order.status == "paid",
+                               Order.provider != "grant").all())
         commission = round(sum(o.amount_usd for o in paid_orders) * catalog.AFFILIATE_COMMISSION_PCT / 100.0, 2)
         return {"id": trader.id, "email": trader.email, "full_name": trader.full_name,
                 "is_admin": trader.is_admin, "kyc_status": trader.kyc_status,

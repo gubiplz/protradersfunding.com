@@ -214,29 +214,51 @@ def mock_complete(session, order_id: int, trader_id: int):
         raise HTTPException(404, "Order not found")
     if order.status == "paid":
         return {"order_id": order.id, "account_id": order.account_id, "already": True}
+    # Mock domyka WYŁĄCZNIE zamówienia mockowe. Order Stripe'owy „opłaca" tylko
+    # webhook — bez tego guardu trader mógłby sprovisionować własne pending
+    # zamówienie bez płacenia (order_id dostaje w odpowiedzi checkoutu).
+    if order.provider != "mock":
+        raise HTTPException(400, "This order is completed by the payment provider")
     acc = provisioning.create_account_from_order(session, order)
     return {"order_id": order.id, "account_id": acc.id, **_account_view(acc)}
 
 
 def handle_webhook(session, payload: bytes, sig_header: str | None) -> dict:
-    if settings.stripe_webhook_secret:
-        stripe = _stripe()
-        try:
-            stripe.Webhook.construct_event(payload, sig_header, settings.stripe_webhook_secret)
-        except Exception as e:
-            raise HTTPException(400, f"Invalid webhook signature: {e}")
+    # Fail CLOSED: bez sekretu nie przetwarzamy niczego — niesygnowany POST
+    # z gotowym JSON-em mógłby sprovisionować konto za darmo.
+    if not settings.stripe_webhook_secret:
+        raise HTTPException(503, "Stripe webhook secret not configured")
+    stripe = _stripe()
+    try:
+        stripe.Webhook.construct_event(payload, sig_header, settings.stripe_webhook_secret)
+    except Exception as e:
+        raise HTTPException(400, f"Invalid webhook signature: {e}")
     # Po weryfikacji podpisu czytamy surowy JSON — obiekt Event z SDK zmienia
     # interfejs między wersjami (v15 nie jest już dict-em), a payload jest stały.
     event = json.loads(payload.decode() or "{}")
 
     if event.get("type") == "checkout.session.completed":
         obj = event["data"]["object"]
-        order_id = (obj.get("metadata") or {}).get("order_id") or obj.get("client_reference_id")
-        if order_id:
-            order = session.get(Order, int(order_id))
-            if order and order.status != "paid":
-                provisioning.create_account_from_order(session, order)
-                return {"provisioned": True, "order_id": order.id}
+        raw = (obj.get("metadata") or {}).get("order_id") or obj.get("client_reference_id")
+        try:
+            order = session.get(Order, int(raw))
+        except (TypeError, ValueError):
+            return {"received": True}
+        if not order or order.status == "paid":
+            return {"received": True}
+        # Zamówienie domyka wyłącznie TA sesja checkout, którą sami stworzyliśmy,
+        # faktycznie opłacona i na pełną kwotę. Sandbox jest współdzielony z devem
+        # (stripe trigger broadcastuje eventy wszędzie), a metadata w evencie może
+        # spreparować każdy, kto ma klucz testowy — samo order_id niczego nie dowodzi.
+        if obj.get("id") != order.stripe_session_id:
+            return {"received": True, "ignored": "session mismatch"}
+        if obj.get("payment_status") != "paid":
+            return {"received": True, "ignored": "not paid"}
+        if (obj.get("amount_total") != int(round(order.amount_usd * 100))
+                or obj.get("currency") != settings.currency):
+            return {"received": True, "ignored": "amount mismatch"}
+        provisioning.create_account_from_order(session, order)
+        return {"provisioned": True, "order_id": order.id}
     return {"received": True}
 
 

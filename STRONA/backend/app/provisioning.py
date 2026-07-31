@@ -31,6 +31,8 @@ import secrets
 from datetime import datetime, timezone
 from time import monotonic
 
+from fastapi import HTTPException
+
 from . import metaapi_provisioning, metaquotes_web, notify, telemetry
 from .config import get_settings
 from .models import Account, AppSetting, CreditLedger, Order, PoolAccount, Product, Trader
@@ -55,6 +57,17 @@ def create_account_from_order(session, order: Order, notify_admin: bool = True) 
 
     `notify_admin=False` gdy płatność domyka sam admin z panelu (mark-paid) —
     nie ma sensu wysyłać mu pusha o jego własnym kliknięciu."""
+    # Atomowe przejęcie zamówienia: UPDATE ... WHERE status != 'paid' wygrywa
+    # dokładnie raz. Wszyscy wołający (webhook, mock, mark-paid, free) robią
+    # wcześniej "sprawdź status i provisionuj" — na serverless dwa równoległe
+    # requesty przechodzą ten check jednocześnie i bez tego guardu powstałyby
+    # dwa konta z podwójnym zbiciem kredytów.
+    claimed = (session.query(Order)
+               .filter(Order.id == order.id, Order.status != "paid")
+               .update({Order.status: "paid"}, synchronize_session=False))
+    if not claimed:
+        session.rollback()
+        raise HTTPException(409, "Order already processed")
     product = session.query(Product).filter(Product.key == order.product_key).first()
     trader = session.get(Trader, order.trader_id)
     now = datetime.now(timezone.utc)

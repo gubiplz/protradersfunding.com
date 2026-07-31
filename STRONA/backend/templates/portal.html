@@ -100,7 +100,7 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
           maxlength="6" placeholder="6-digit code"
           style="text-align:center;letter-spacing:.3em;font-family:var(--mono);font-size:18px">
         <button type="submit" class="btn-p lg" style="width:100%">Verify</button>
-        <button type="button" class="linklike" onclick="resendVerify()">Resend code</button>
+        <button type="button" class="linklike" id="vg-resend" onclick="resendVerify(this)">Resend code</button>
         <button type="button" class="linklike" onclick="logout()" style="color:var(--muted)">Sign out</button>
       </form>
       <div class="auth-hint">Typo in the address?
@@ -482,9 +482,15 @@ async function verifyEmailCode(){
     await boot();
   }catch(e){toast('Error: '+e.message,'err')}
 }
-async function resendVerify(){
+async function resendVerify(btn){
+  if(btn&&btn.disabled)return;
   try{await api('/api/me/verify-email/resend',{method:'POST'});
     toast('New code sent — check your inbox.','ok',8000);
+    if(btn){/* cooldown — serwer i tak limituje, ale nie kuśmy klikaniem */
+      btn.disabled=true;let s=30;const t0=btn.textContent;
+      const iv=setInterval(()=>{s--;btn.textContent=s>0?`Resend code (${s}s)`:t0;
+        if(s<=0){clearInterval(iv);btn.disabled=false}},1000);
+      btn.textContent=`Resend code (${s}s)`}
   }catch(e){toast('Error: '+e.message,'err')}
 }
 function vgToggleChange(on){
@@ -1542,7 +1548,7 @@ const VIEWS={
 
     <div class="sec-card" style="max-width:640px"><h3>Notification Preferences</h3>
       <div style="margin-top:6px">
-        ${sw('updates','Email Updates','Account creation, credentials and verification e-mails.')}
+        ${sw('updates','Email Updates','KYC results, support replies and store-credit e-mails. Essential e-mails (verification, MT5 credentials) always arrive.')}
         ${sw('trading','Trading Alerts','Phase passed, funded status and rule-breach notifications.')}
         ${sw('payouts','Payout Notifications','Updates about your payout requests.')}
         ${sw('marketing','Daily Recap & Offers','A short recap of the previous trading day (only when you traded) and occasional product news.')}
