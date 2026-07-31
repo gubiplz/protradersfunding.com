@@ -38,7 +38,9 @@
 /* html gets the app background — the macOS rubber-band bounce reveals the root
    canvas past the page edge, and a bare one flashed white instead of the page color. */
 html,body{height:100%}
-html{background:var(--bg)}
+/* App-like touch: no double-tap-to-zoom (viewport meta covers iOS, this covers
+   Android/Chrome). Panning and pinch stay available where the OS allows. */
+html{background:var(--bg);touch-action:manipulation}
 body{background:var(--bg);color:var(--txt);font-family:var(--body);font-size:15px;line-height:1.55;
   -webkit-font-smoothing:antialiased}
 ::selection{background:rgba(99,102,241,.18)}
