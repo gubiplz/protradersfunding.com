@@ -9,7 +9,8 @@
  {"@type":"Question","name":"Are these live trading accounts?","acceptedAnswer":{"@type":"Answer","text":"No. All accounts are demo accounts with virtual funds in a simulated environment on real MetaTrader 5 servers. Rewards are performance-based."}},
  {"@type":"Question","name":"How fast do I get my account?","acceptedAnswer":{"@type":"Answer","text":"Provisioning is automated — MT5 credentials usually arrive within a minute of checkout."}},
  {"@type":"Question","name":"How do payouts work?","acceptedAnswer":{"@type":"Answer","text":"On a funded account you request a payout of your share of simulated profits — 90% on evaluation plans, 70% on Instant Funding; after KYC each request is reviewed and paid, with the challenge fee refunded on the first payout."}},
- {"@type":"Question","name":"Is news trading allowed?","acceptedAnswer":{"@type":"Answer","text":"Yes — there are no news blackouts, weekend-flat requirements or banned strategies."}}
+ {"@type":"Question","name":"Is news trading allowed?","acceptedAnswer":{"@type":"Answer","text":"Yes — there are no news blackouts, weekend-flat requirements or banned strategies."}},
+ {"@type":"Question","name":"Can someone else trade my account?","acceptedAnswer":{"@type":"Answer","text":"Yes, with our written approval before trading starts. The account stays registered to you, you remain responsible for the trading objectives, and rewards are paid only to the verified account holder. Sharing credentials without an approved arrangement is prohibited."}}
 ]}</script>
 {% endblock %}
 
@@ -84,6 +85,16 @@
         <div class="a">Yes to all three. There are no news blackouts, no weekend-flat requirement and no
         strategy bans. The only rules are the published loss limits, profit targets and minimum trading
         days.</div>
+      </details>
+      <details>
+        <summary>Can someone else trade my account?</summary>
+        <div class="a">Yes, with our approval. Account management is allowed once we have approved the
+        arrangement in writing, before any trading on your behalf starts — write to
+        <a href="mailto:{{ support_email }}">{{ support_email }}</a> from your registered address and name
+        who will be trading. The account stays yours and so does responsibility for the rules: a limit
+        breached by your manager is still a breach of your account, and rewards are paid only to you
+        after KYC. Handing over credentials <b>without</b> an approved arrangement is prohibited and can
+        trigger an account review. Full wording in Section 7 of the <a href="/terms">Terms</a>.</div>
       </details>
       <details>
         <summary>What counts as a trading day?</summary>
