@@ -573,6 +573,11 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 .file-row .fl b{font-size:13.5px}
 .file-row .fl p{font-size:11.5px;color:var(--dim)}
 .file-row input[type=file]{font-size:12.5px;color:var(--muted);max-width:230px}
+/* Custom English file picker — the native control is browser-localized. */
+.file-pick{display:flex;align-items:center;gap:10px;min-width:0}
+.file-row .file-pick input[type=file]{display:none}
+.fp-name{font-size:12.5px;color:var(--dim);max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fp-name.has{color:var(--txt);font-weight:600}
 .file-row input[type=file]::file-selector-button{background:var(--panel);border:1px solid var(--line2);border-radius:8px;
   padding:7px 12px;font-size:12.5px;font-weight:600;color:var(--txt);cursor:pointer;margin-right:10px}
 

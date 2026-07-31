@@ -1590,7 +1590,9 @@ const VIEWS={
       <p class="muted" style="font-size:13px;margin-bottom:18px">Required once, before your first payout. Data is used only for verification.</p>
       <div class="grid2" style="margin-bottom:10px">
         <div><label class="muted" style="font-size:12px">Full Name (as on ID)</label><input id="k-name" class="inp" placeholder="John Smith"></div>
-        <div><label class="muted" style="font-size:12px">Date of Birth</label><input id="k-dob" type="date" class="inp"></div>
+        <div><label class="muted" style="font-size:12px">Date of Birth</label>
+          <input id="k-dob" class="inp" placeholder="MM/DD/YYYY" inputmode="numeric" maxlength="10"
+            autocomplete="bday" oninput="dobMask(this)"></div>
         <div><label class="muted" style="font-size:12px">Country</label>
           <select id="k-country" class="inp">
             <option value="">Select a country…</option>
@@ -1605,12 +1607,16 @@ const VIEWS={
         <input id="k-idnum" class="inp" placeholder="Document number"></div>
 
       <h3 style="font-size:15px;margin-bottom:6px">Document Uploads</h3>
-      <div class="file-row"><div class="fl"><b>ID Front *</b><p>JPG, PNG or PDF, max 5 MB</p></div>
-        <input type="file" id="f-front" accept=".jpg,.jpeg,.png,.pdf"></div>
-      <div class="file-row"><div class="fl"><b>ID Back (optional)</b><p>JPG, PNG or PDF, max 5 MB</p></div>
-        <input type="file" id="f-back" accept=".jpg,.jpeg,.png,.pdf"></div>
-      <div class="file-row"><div class="fl"><b>Proof of Residence *</b><p>Utility bill or bank statement, max 3 months old</p></div>
-        <input type="file" id="f-res" accept=".jpg,.jpeg,.png,.pdf"></div>
+      ${[['f-front','ID Front *','JPG, PNG or PDF, max 5 MB'],
+         ['f-back','ID Back (optional)','JPG, PNG or PDF, max 5 MB'],
+         ['f-res','Proof of Residence *','Utility bill or bank statement, max 3 months old']]
+        .map(([id,label,hint])=>`
+      <div class="file-row"><div class="fl"><b>${label}</b><p>${hint}</p></div>
+        <div class="file-pick">
+          <input type="file" id="${id}" accept=".jpg,.jpeg,.png,.pdf" onchange="filePicked(this)">
+          <button type="button" class="btn-o sm" onclick="this.closest('.file-pick').querySelector('input').click()">Choose file</button>
+          <span class="fp-name">No file chosen</span>
+        </div></div>`).join('')}
       <p id="kyc-err" class="form-err hidden" style="margin-top:10px"></p>
       <button class="btn-p lg" style="margin-top:16px" onclick="submitKyc()">Submit KYC</button>
     </div>`;
@@ -1893,17 +1899,39 @@ async function uploadDocument(fieldName,fileObj){
       : r.status));
   }
 }
+/* Native file inputs speak the BROWSER's language ("Wybierz plik" for Polish
+   visitors) — the site is English-only, so the control is ours. */
+function filePicked(inp){
+  const n=inp.closest('.file-pick').querySelector('.fp-name');
+  const f=inp.files&&inp.files[0];
+  n.textContent=f?f.name:'No file chosen';
+  n.classList.toggle('has',!!f);
+}
+/* US date entry (MM/DD/YYYY) — digits auto-slash while typing. */
+function dobMask(i){
+  let v=i.value.replace(/\D/g,'').slice(0,8);
+  if(v.length>=5)v=v.slice(0,2)+'/'+v.slice(2,4)+'/'+v.slice(4);
+  else if(v.length>=3)v=v.slice(0,2)+'/'+v.slice(2);
+  i.value=v;
+}
 async function submitKyc(){
   const err=m=>{const el=$('kyc-err');el.textContent=m;el.classList.remove('hidden')};
   const name=$('k-name').value.trim(),country=$('k-country').value.trim();
   if(!name||!country){err('Full name and country are required.');return}
+  const dob=$('k-dob').value.trim();
+  if(dob){
+    const m=dob.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    const ok=m&&+m[1]>=1&&+m[1]<=12&&+m[2]>=1&&+m[2]<=31
+      &&+m[3]>=1900&&+m[3]<=new Date().getFullYear();
+    if(!ok){err('Date of birth must be MM/DD/YYYY.');return}
+  }
   const front=$('f-front').files[0],back=$('f-back').files[0],res=$('f-res').files[0];
   if(!front||!res){err('ID Front and Proof of Residence are required.');return}
   const btn=document.querySelector("button[onclick='submitKyc()']");
   if(btn){btn.disabled=true;btn.textContent='Uploading…'}
   try{
     await api('/api/me/kyc',{method:'POST',body:JSON.stringify({
-      full_name:name,country,dob:$('k-dob').value||null,address:$('k-address').value||null,
+      full_name:name,country,dob:dob||null,address:$('k-address').value||null,
       id_type:$('k-idtype').value,id_number:$('k-idnum').value||null})});
     // One request per document — even large PDFs never add up to the limit then.
     for(const [fieldName,fileObj] of [['id_front',front],['id_back',back],['residence',res]]){
