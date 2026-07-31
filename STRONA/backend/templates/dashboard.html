@@ -281,32 +281,20 @@ const VIEWS={
  },
 
  async payouts(){
-  const rows=await api('/api/admin/payout-requests');
-  $('view').innerHTML=rows.length?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="admin.payouts">
-    <thead><tr><th>Date</th><th>Account</th><th>Trader</th><th>Profit</th><th>Trader share</th><th>Method</th><th>Status</th><th class="no-sort"></th></tr></thead>
-    <tbody>${rows.map(r=>`<tr>
-      <td class="muted" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td><td class="num">${esc(r.account_login||'—')}</td>
-      <td>${esc(r.trader_email||'—')}</td>
-      <td class="num">$${fmt(r.profit_amount)}</td><td class="num up">$${fmt(r.trader_share)}</td>
-      <td>${(()=>{const d=r.details||{};
-        const label=r.method==='usdt'?'USDT':r.method==='wise'?'Wise':'Bank';
-        const info=r.method==='usdt'?[d.network,d.address].filter(Boolean).join(' · ')
-          :r.method==='wise'?(d.email||'')
-          :[d.holder,d.iban,d.swift,d.bank_name].filter(Boolean).join(' · ');
-        return `${esc(label)}${info?`<div class="muted mono" style="font-size:11px;max-width:260px;word-break:break-all">${esc(info)}</div>`:''}`})()}</td>
-      <td><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending':'failed'}"><span class="dot"></span>${esc(r.status)}</span>
-        ${r.status==='rejected'&&r.reject_reason?`<div class="muted" style="font-size:11px;max-width:200px">${esc(r.reject_reason)}</div>`:''}</td>
-      <td style="text-align:right;white-space:nowrap">${r.status==='pending'
-        ?`<button class="btn-p sm" onclick="approvePayout(${r.id})">Approve &amp; pay</button>
-          <button class="btn-o sm" onclick="rejectPayout(${r.id})">Reject</button>`:''}</td></tr>`).join('')}
-    </tbody></table></div>
-    <p class="muted" style="font-size:11.5px;margin-top:10px">Approving pays the trader share and refunds the challenge fee on the first payout for that account.</p>`
-    :`<div class="empty"><h3>No payout requests</h3><p>Requests from funded traders will appear here.</p></div>`;
+  window._payReqs=await api('/api/admin/payout-requests');
+  renderPayoutsView();
  },
 
  async kyc(){
-  const d=await api('/api/admin/kyc');
-  const pending=d.pending||[], hist=d.history||[];
+  window._kycData=await api('/api/admin/kyc');
+  renderKyc();
+ },
+
+ _kycRender(){
+  const d=window._kycData||{};
+  const pending=d.pending||[], histAll=d.history||[];
+  const kf=window._kycFilter||'all';
+  const hist=histAll.filter(t=>kf==='all'||t.status===kf);
   const cards=pending.length?`<div class="badge-grid" style="grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr))">`+
     pending.map(t=>`<div class="panel">
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
@@ -331,10 +319,15 @@ const VIEWS={
       </div>
     </div>`).join('')+`</div>`
     :`<div class="empty"><h3>Nothing to verify</h3><p>KYC submissions from traders show up here.</p></div>`;
-  const histTbl=hist.length?`<div class="sec-card" style="margin-top:18px">
+  const histTbl=histAll.length?`<div class="sec-card" style="margin-top:18px">
     <h3>History</h3>
     <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Past verification decisions.</p>
-    <div class="tbl-wrap"><table class="tbl sortable" data-tkey="admin.kyc">
+    <div class="toolbar" style="margin-bottom:10px">
+      <div class="seg">${[['all','All'],['approved','Approved'],['rejected','Rejected']]
+        .map(([k,l])=>`<button class="${kf===k?'on':''}" onclick="window._kycFilter='${k}';renderKyc()">${l}</button>`).join('')}</div>
+      <span class="count-pill">${hist.length} of ${histAll.length}</span>
+    </div>
+    ${hist.length?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="admin.kyc">
       <thead><tr><th>Reviewed</th><th>Trader</th><th>Country</th><th>Document</th><th>Status</th><th class="no-sort">Documents</th><th class="no-sort"></th></tr></thead>
       <tbody>${hist.map(t=>`<tr>
         <td class="muted" data-sort="${esc(t.reviewed_at||'')}">${t.reviewed_at?dstr(t.reviewed_at):'—'}</td>
@@ -344,7 +337,7 @@ const VIEWS={
         <td><span class="status ${t.status==='approved'?'funded':'failed'}"><span class="dot"></span>${esc(t.status)}</span></td>
         <td>${(t.docs||[]).map(k=>`<button class="btn-o sm" onclick="viewDoc(${t.trader_id},'${k}')">${esc(k.replace('_',' '))}</button>`).join(' ')||'<span class="muted">—</span>'}</td>
         <td><button class="btn-o sm" onclick="revertKyc(${t.trader_id})" title="Undo this decision — back to the pending queue">Revert</button></td></tr>`).join('')}
-      </tbody></table></div></div>`:'';
+      </tbody></table></div>`:`<p class="muted" style="font-size:13px">No ${esc(kf)} decisions.</p>`}</div>`:'';
   $('view').innerHTML=cards+histTbl;
  },
 
@@ -381,6 +374,7 @@ const VIEWS={
   waiting.forEach(w=>{missingBySize[w.account_size]=(missingBySize[w.account_size]||0)+1});
   // sizes from the catalog — the pool only makes sense for sizes someone can buy
   const sizeList=poolData.sizes||[];
+  window._pool=rows; window._poolSizes=sizeList;
   const sizeOptions=(chosenSize)=>sizeList.map(r=>
     `<option value="${r}"${Number(chosenSize)===r?' selected':''}>$${fmt0(r)}</option>`).join('');
   $('view').innerHTML=`
@@ -434,33 +428,7 @@ const VIEWS={
       <div class="stat-tile"><div class="tile-ic blue">${ICO.layers}</div>
         <div><div class="lbl">Total in pool</div><div class="val">${rows.length}</div></div></div>
     </div>
-    ${rows.length?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="admin.pool">
-      <thead><tr><th>#</th><th>Login</th><th class="no-sort">Password</th><th>Server</th><th>Size</th><th>State</th><th>Assigned to</th><th>When</th><th class="no-sort"></th></tr></thead>
-      <tbody>${rows.map(p=>`<tr>
-        <td class="num">${p.id}</td><td class="num">${esc(p.platform_login)}${p.simulated?'<div class="muted" style="font-size:10.5px;letter-spacing:.06em">SIMULATED</div>':''}</td>
-        <td>${p.platform_password?`<span class="mono" style="cursor:pointer" title="Click to reveal"
-          onclick="this.textContent=this.textContent==='••••••••'?this.dataset.p:'••••••••'" data-p="${esc(p.platform_password)}">••••••••</span>`:'<span class="muted">—</span>'}</td>
-        <td class="muted">${esc(p.platform_server)}</td><td class="num">$${fmt0(p.account_size)}</td>
-        <td>${p.retired_reason?`<span class="status failed"><span class="dot"></span>retired</span>`
-          :p.claimed?`<span class="status pending"><span class="dot"></span>assigned</span>`
-          :'<span class="status funded"><span class="dot"></span>free</span>'}</td>
-        <td>${p.claimed?`${esc(p.trader_email||'—')}<div class="muted" style="font-size:11.5px">${p.retired_reason?esc(p.retired_reason)+' — not reusable':`account #${p.claimed_by_account_id}${p.account_status?' · '+esc(p.account_status):''}`}</div>`:'<span class="muted">—</span>'}</td>
-        <td class="muted" data-sort="${esc(p.claimed_at||'')}">${p.claimed_at?dstr(p.claimed_at):'—'}</td>
-        <td style="white-space:nowrap">
-          <button class="btn-o sm" onclick="editPool(${p.id})">Edit</button>
-          ${p.claimed?'':` <button class="btn-o sm" onclick="delPool(${p.id},'${esc(p.platform_login)}')">Remove</button>`}</td></tr>
-        <tr id="pool-edit-${p.id}" class="tr-sub" style="display:none"><td colspan="9" style="background:var(--bg)">
-          <div class="pool-form" style="margin:6px 0">
-            <input id="ed-login-${p.id}" class="inp" value="${esc(p.platform_login)}" placeholder="MT5 login">
-            <input id="ed-pass-${p.id}" class="inp" placeholder="New password (leave empty to keep)">
-            <input id="ed-server-${p.id}" class="inp" value="${esc(p.platform_server)}" placeholder="Server">
-            ${p.claimed?'':`<select id="ed-size-${p.id}" class="inp">${sizeOptions(p.account_size)}</select>`}
-          </div>
-          <button class="btn-p sm" onclick="savePool(${p.id},${p.claimed})">Save</button>
-          <button class="btn-o sm" onclick="editPool(${p.id})">Cancel</button>
-          ${p.claimed?`<span class="muted" style="font-size:12px;margin-left:10px">Assigned — new credentials also go to the trader's account; size is locked.</span>`:''}
-        </td></tr>`).join('')}
-      </tbody></table></div>`:`<div class="empty"><h3>Pool is empty</h3><p>Add the MT5 accounts you created at your broker — provisioning takes credentials only from here.</p></div>`}`;
+    <div id="pool-list">${poolListHtml()}</div>`;
  },
 
  async settings(){
@@ -546,13 +514,107 @@ function renderAccounts(){
       :`<div class="empty"><h3>No accounts match</h3><p>Try a different search or filter.</p></div>`}`;
 }
 
+/* ---------- kyc: seg buttons need a global to call ---------- */
+function renderKyc(){VIEWS._kycRender()}
+
+/* ---------- pool: search + state filter (list only — the forms above keep
+   whatever the admin typed, so only #pool-list re-renders) ---------- */
+function poolSizeOptions(chosen){
+  return (window._poolSizes||[]).map(r=>`<option value="${r}"${Number(chosen)===r?' selected':''}>$${fmt0(r)}</option>`).join('');
+}
+function poolState(p){return p.retired_reason?'retired':p.claimed?'assigned':'free'}
+function poolListHtml(){
+  const rows=window._pool||[];
+  if(!rows.length)return `<div class="empty"><h3>Pool is empty</h3><p>Add the MT5 accounts you created at your broker — provisioning takes credentials only from here.</p></div>`;
+  const q=(window._poolQ||'').toLowerCase();
+  const f=window._poolFilter||'all';
+  const list=rows.filter(p=>(f==='all'||poolState(p)===f)&&
+    (!q||String(p.platform_login||'').toLowerCase().includes(q)
+      ||(p.platform_server||'').toLowerCase().includes(q)
+      ||(p.trader_email||'').toLowerCase().includes(q)));
+  return `<div class="toolbar">
+      <input class="inp" id="pool-q" placeholder="Search login, server or trader…" value="${esc(window._poolQ||'')}"
+        oninput="window._poolQ=this.value;renderPoolList();document.getElementById('pool-q').focus()">
+      <div class="seg">${[['all','All'],['free','Free'],['assigned','Assigned'],['retired','Retired']]
+        .map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._poolFilter='${k}';renderPoolList()">${l}</button>`).join('')}</div>
+      <span class="count-pill">${list.length} of ${rows.length}</span>
+    </div>`
+    +(list.length?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="admin.pool">
+      <thead><tr><th>#</th><th>Login</th><th class="no-sort">Password</th><th>Server</th><th>Size</th><th>State</th><th>Assigned to</th><th>When</th><th class="no-sort"></th></tr></thead>
+      <tbody>${list.map(p=>`<tr>
+        <td class="num">${p.id}</td><td class="num">${esc(p.platform_login)}${p.simulated?'<div class="muted" style="font-size:10.5px;letter-spacing:.06em">SIMULATED</div>':''}</td>
+        <td>${p.platform_password?`<span class="mono" style="cursor:pointer" title="Click to reveal"
+          onclick="this.textContent=this.textContent==='••••••••'?this.dataset.p:'••••••••'" data-p="${esc(p.platform_password)}">••••••••</span>`:'<span class="muted">—</span>'}</td>
+        <td class="muted">${esc(p.platform_server)}</td><td class="num">$${fmt0(p.account_size)}</td>
+        <td>${p.retired_reason?`<span class="status failed"><span class="dot"></span>retired</span>`
+          :p.claimed?`<span class="status pending"><span class="dot"></span>assigned</span>`
+          :'<span class="status funded"><span class="dot"></span>free</span>'}</td>
+        <td>${p.claimed?`${esc(p.trader_email||'—')}<div class="muted" style="font-size:11.5px">${p.retired_reason?esc(p.retired_reason)+' — not reusable':`account #${p.claimed_by_account_id}${p.account_status?' · '+esc(p.account_status):''}`}</div>`:'<span class="muted">—</span>'}</td>
+        <td class="muted" data-sort="${esc(p.claimed_at||'')}">${p.claimed_at?dstr(p.claimed_at):'—'}</td>
+        <td style="white-space:nowrap">
+          <button class="btn-o sm" onclick="editPool(${p.id})">Edit</button>
+          ${p.claimed?'':` <button class="btn-o sm" onclick="delPool(${p.id},'${esc(p.platform_login)}')">Remove</button>`}</td></tr>
+        <tr id="pool-edit-${p.id}" class="tr-sub" style="display:none"><td colspan="9" style="background:var(--bg)">
+          <div class="pool-form" style="margin:6px 0">
+            <input id="ed-login-${p.id}" class="inp" value="${esc(p.platform_login)}" placeholder="MT5 login">
+            <input id="ed-pass-${p.id}" class="inp" placeholder="New password (leave empty to keep)">
+            <input id="ed-server-${p.id}" class="inp" value="${esc(p.platform_server)}" placeholder="Server">
+            ${p.claimed?'':`<select id="ed-size-${p.id}" class="inp">${poolSizeOptions(p.account_size)}</select>`}
+          </div>
+          <button class="btn-p sm" onclick="savePool(${p.id},${p.claimed})">Save</button>
+          <button class="btn-o sm" onclick="editPool(${p.id})">Cancel</button>
+          ${p.claimed?`<span class="muted" style="font-size:12px;margin-left:10px">Assigned — new credentials also go to the trader's account; size is locked.</span>`:''}
+        </td></tr>`).join('')}
+      </tbody></table></div>`
+      :`<div class="empty"><h3>No accounts match</h3><p>Try a different search or filter.</p></div>`);
+}
+function renderPoolList(){const el=document.getElementById('pool-list');if(el)el.innerHTML=poolListHtml()}
+
+/* ---------- payouts: status filter + table ----------
+   NB: renderPayouts(id) already exists (the slide-over payout card),
+   hence the -View suffix — a second declaration would shadow it. */
+function renderPayoutsView(){
+  const list=window._payReqs||[];
+  const f=window._payFilter||'all';
+  const rows=list.filter(r=>f==='all'||r.status===f);
+  const seg=[['all','All'],['pending','Pending'],['approved','Approved'],['paid','Paid'],['rejected','Rejected']];
+  $('view').innerHTML=(list.length?`
+    <div class="toolbar">
+      <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._payFilter='${k}';renderPayoutsView()">${l}</button>`).join('')}</div>
+      <span class="count-pill">${rows.length} of ${list.length}</span>
+    </div>`:'')+(rows.length?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="admin.payouts">
+    <thead><tr><th>Date</th><th>Account</th><th>Trader</th><th>Profit</th><th>Trader share</th><th>Method</th><th>Status</th><th class="no-sort"></th></tr></thead>
+    <tbody>${rows.map(r=>`<tr>
+      <td class="muted" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td><td class="num">${esc(r.account_login||'—')}</td>
+      <td>${esc(r.trader_email||'—')}</td>
+      <td class="num">$${fmt(r.profit_amount)}</td><td class="num up">$${fmt(r.trader_share)}</td>
+      <td>${(()=>{const d=r.details||{};
+        const label=r.method==='usdt'?'USDT':r.method==='wise'?'Wise':'Bank';
+        const info=r.method==='usdt'?[d.network,d.address].filter(Boolean).join(' · ')
+          :r.method==='wise'?(d.email||'')
+          :[d.holder,d.iban,d.swift,d.bank_name].filter(Boolean).join(' · ');
+        return `${esc(label)}${info?`<div class="muted mono" style="font-size:11px;max-width:260px;word-break:break-all">${esc(info)}</div>`:''}`})()}</td>
+      <td><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending':'failed'}"><span class="dot"></span>${esc(r.status)}</span>
+        ${r.status==='rejected'&&r.reject_reason?`<div class="muted" style="font-size:11px;max-width:200px">${esc(r.reject_reason)}</div>`:''}</td>
+      <td style="text-align:right;white-space:nowrap">${r.status==='pending'
+        ?`<button class="btn-p sm" onclick="approvePayout(${r.id})">Approve &amp; pay</button>
+          <button class="btn-o sm" onclick="rejectPayout(${r.id})">Reject</button>`:''}</td></tr>`).join('')}
+    </tbody></table></div>
+    <p class="muted" style="font-size:11.5px;margin-top:10px">Approving pays the trader share and refunds the challenge fee on the first payout for that account.</p>`
+    :list.length?`<div class="empty"><h3>No ${esc(f)} requests</h3><p>Try a different filter.</p></div>`
+    :`<div class="empty"><h3>No payout requests</h3><p>Requests from funded traders will appear here.</p></div>`);
+}
+
 /* ---------- orders: search + payment flags ---------- */
 function renderOrders(){
   const list=window._orders||[];
   const q=(window._ordQ||'').toLowerCase();
-  const rows=list.filter(o=>!q||(o.trader_email||'').toLowerCase().includes(q)
+  const f=window._ordFilter||'all';
+  const rows=list.filter(o=>
+    (f==='all'||(f==='awaiting'?o.flag==='awaiting_crypto':o.status===f))&&
+    (!q||(o.trader_email||'').toLowerCase().includes(q)
     ||(o.product_key||'').includes(q)||(o.status||'').includes(q)
-    ||(o.flag||'').includes(q)||String(o.id)===q);
+    ||(o.flag||'').includes(q)||String(o.id)===q));
   const paid=list.filter(o=>o.status==='paid');
   const revenue=paid.reduce((s,o)=>s+o.amount_usd,0);
   const avg=paid.length?revenue/paid.length:0;
@@ -568,6 +630,8 @@ function renderOrders(){
     <div class="toolbar">
       <input class="inp" id="ord-q" placeholder="Search email, product, status…" value="${esc(window._ordQ||'')}"
         oninput="window._ordQ=this.value;renderOrders();document.getElementById('ord-q').focus()">
+      <div class="seg">${[['all','All'],['paid','Paid'],['pending','Pending'],['awaiting','Awaiting crypto'],['failed','Failed']]
+        .map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._ordFilter='${k}';renderOrders()">${l}</button>`).join('')}</div>
       <span class="count-pill">${rows.length} of ${list.length}</span>
     </div>
     ${rows.length?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="admin.orders">
@@ -585,7 +649,7 @@ function renderOrders(){
             title="${o.flag==='awaiting_crypto'?'Clear the awaiting-crypto flag':'Mark as awaiting crypto payment'}">${o.flag==='awaiting_crypto'?'Clear flag':'Crypto?'}</button>
           <button class="btn-p sm" onclick="markOrderPaid(${o.id})" title="Confirm the payment arrived — creates the account">Mark paid</button>`}</td></tr>`).join('')}
       </tbody></table></div>`
-      :`<div class="empty"><h3>${list.length?'No orders match':'No orders yet'}</h3>${list.length?'<p>Try a different search.</p>':''}</div>`}`;
+      :`<div class="empty"><h3>${list.length?'No orders match':'No orders yet'}</h3>${list.length?'<p>Try a different search or filter.</p>':''}</div>`}`;
 }
 async function flagOrder(id,flag){
   try{await api(`/api/admin/orders/${id}/flag`,{method:'POST',body:JSON.stringify({flag})});

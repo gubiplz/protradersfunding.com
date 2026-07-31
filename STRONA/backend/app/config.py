@@ -123,6 +123,17 @@ class Settings:
     # gtag na stronach publicznych — zero requestów do Google.
     ga_measurement_id: str = os.getenv("GA_MEASUREMENT_ID", "")
 
+    # --- „Sign in with Google" (Google Identity Services) ---
+    # OAuth Client ID typu Web z Google Cloud Console. Puste = przycisk w ogóle
+    # się nie renderuje, a endpoint /api/auth/google zwraca 404. Client secret
+    # NIE jest potrzebny: GIS oddaje podpisany id_token, który weryfikujemy
+    # przez oficjalny endpoint tokeninfo.
+    google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+
+    @property
+    def google_login_enabled(self) -> bool:
+        return bool(self.google_client_id)
+
     # --- Promocja „Upgrade Your Size" ---
     # Klient wpisuje kod promocyjny i zakup provisionuje NASTĘPNY plan w górę
     # (2M, największy tier, bez upgrade'u). Płaci cenę wybranego planu. Bez kodu

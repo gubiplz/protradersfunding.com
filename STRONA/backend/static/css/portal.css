@@ -739,6 +739,29 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 }
 
 /* ---------------- challenge cards (portal Challenges view) ---------------- */
+/* "Scale your progress" upsell strip (real math from the best live account) */
+.upsell{margin-bottom:18px}
+.upsell-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px}
+.upsell-head h3{font-size:16.5px;margin:2px 0 4px}
+.up-eyebrow{font-size:10.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--acc)}
+.up-based{font-size:12.5px;color:var(--muted)}
+.upsell-row{display:flex;gap:12px;overflow-x:auto;padding-bottom:6px;-webkit-overflow-scrolling:touch}
+.upsell-card{flex:0 0 176px;background:var(--bg3,var(--bg));border:1px solid var(--line);border-radius:12px;
+  padding:13px 14px;display:flex;flex-direction:column;gap:2px}
+.uc-top{display:flex;justify-content:space-between;align-items:center}
+.uc-if{font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+.uc-pct{font-size:10.5px;font-weight:700;color:var(--acc);background:color-mix(in srgb,var(--acc) 12%,transparent);
+  border-radius:999px;padding:2px 7px}
+.uc-size{font-family:var(--mono);font-size:21px;font-weight:800;margin-top:3px}
+.uc-sub{font-size:11px;color:var(--muted)}
+.uc-earn{font-family:var(--mono);font-size:15.5px;font-weight:800;color:var(--ok,#16a34a);margin:1px 0 9px}
+.upsell-card .btn-o.sm{margin-top:auto;justify-content:center}
+.uc-fine{font-size:11px;color:var(--dim);margin-top:10px}
+@media(max-width:700px){.upsell-head{flex-direction:column}.upsell-head .btn-p{align-self:stretch}}
+
+.chal-filter{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:2px 0 16px}
+.chal-count{margin-left:auto;font-size:12px;color:var(--dim)}
+.chal-nomatch{text-align:center;color:var(--muted);font-size:13.5px;padding:30px 16px}
 .chal-grid{display:grid;grid-template-columns:1fr;gap:14px}
 @media(min-width:720px){.chal-grid{grid-template-columns:repeat(auto-fill,minmax(340px,1fr))}}
 .chal-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);
@@ -1002,6 +1025,15 @@ html:not(.pwa){overscroll-behavior-y:contain}
   cursor:pointer;line-height:1.5}
 .terms-row input{margin-top:2px;width:15px;height:15px;flex:none;accent-color:var(--acc)}
 .terms-row a{color:var(--acc);text-decoration:underline}
+
+/* "Sign in with Google" block under the auth form (rendered only with a client id) */
+#g-auth{margin-top:16px}
+.auth-or{display:flex;align-items:center;gap:10px;color:var(--dim);font-size:11.5px;
+  text-transform:uppercase;letter-spacing:.1em;margin-bottom:13px}
+.auth-or s{flex:1;height:1px;background:var(--line);text-decoration:none}
+#g-btn{display:flex;justify-content:center;min-height:44px}
+.g-terms{font-size:11px;color:var(--dim);margin-top:11px;text-align:center;line-height:1.5}
+.g-terms a{color:var(--muted);text-decoration:underline}
 
 /* Cookie notice: full-width banner above the mobile tab bar (50), below toasts (90). */
 .cookie-note{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));

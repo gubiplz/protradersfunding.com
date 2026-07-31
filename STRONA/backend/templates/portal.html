@@ -75,13 +75,25 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
         <input id="a-pass2" type="password" placeholder="Repeat new password" class="inp hidden" autocomplete="new-password">
         <input id="a-ref" placeholder="Referral code (optional)" class="inp hidden" autocomplete="off">
         <label class="terms-row hidden" id="a-terms-row"><input type="checkbox" id="a-terms">
-          <span>I agree to the <a href="/terms" target="_blank">Terms of Service</a> and the
-          <a href="/privacy" target="_blank">Privacy Policy</a>, and I understand all accounts
+          <span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms of Service</a> and the
+          <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>, and I understand all accounts
           are simulated with virtual funds.</span></label>
         <button id="a-submit" type="submit" class="btn-p lg" style="width:100%">Log in</button>
         <button id="a-forgot" type="button" onclick="authTab('forgot')" style="font-size:12.5px;color:var(--muted);text-decoration:underline;background:none;border:0;cursor:pointer">Forgot password?</button>
         <button id="a-back" type="button" onclick="authTab('login')" class="hidden" style="font-size:13px;color:var(--muted);background:none;border:0;cursor:pointer">‹ Back to log in</button>
       </form>
+      {% if google_client_id %}
+      <!-- Sign in with Google — shown on BOTH tabs (log in and sign up),
+           hidden in the forgot/reset modes by authTab(). One button does both:
+           the server matches the account or creates one. -->
+      <div id="g-auth">
+        <div class="auth-or"><s></s><span>or</span><s></s></div>
+        <div id="g-btn"></div>
+        <p class="g-terms">By continuing with Google you agree to the
+          <a href="/terms" target="_blank" rel="noopener">Terms of Service</a> and the
+          <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</p>
+      </div>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -174,7 +186,7 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
   <div class="ck-txt">
     <b>🍪 Cookie Notice</b>
     <p>We use cookies to enhance your experience. By continuing to visit this site,
-      you agree to our use of cookies. <a href="/privacy" target="_blank">Learn more</a></p>
+      you agree to our use of cookies. <a href="/privacy" target="_blank" rel="noopener">Learn more</a></p>
   </div>
   <div class="ck-actions">
     <button class="ck-decline" onclick="cookieOk(0)">Decline</button>
@@ -195,6 +207,7 @@ const dstr=iso=>new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric
 // UTC so the browser timezone does not shift the day back by one.
 const dday=d=>new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'});
 let TOKEN=localStorage.getItem('pf_token'), ME=null, AUTHMODE='login', chart=null, CURV=null;
+const GOOGLE_CLIENT_ID={{ google_client_id|tojson }};
 const H=()=>TOKEN?{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'}:{'Content-Type':'application/json'};
 async function api(path,opts={}){const r=await fetch(path,{headers:H(),...opts});if(!r.ok){throw new Error((await r.json().catch(()=>({}))).detail||r.status)}return r.json()}
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -203,6 +216,18 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 function pfPromo(){try{return localStorage.getItem('pf_promo_code')||''}catch(e){return ''}}
 /* Discount coupon applied on the landing promo bar — prefills the buy modal. */
 function pfCoupon(){try{return localStorage.getItem('pf_coupon_code')||''}catch(e){return ''}}
+/* Referral code captured from a ?ref= visit. Prefills signup ONLY when the
+   visit was recent (90 days) — entries without a timestamp (legacy) are
+   dropped, a months-old partner code kept resurfacing in the form. */
+function pfRef(){
+  try{
+    const c=localStorage.getItem('pf_ref'),ts=+localStorage.getItem('pf_ref_ts')||0;
+    if(!c)return '';
+    if(!ts||Date.now()-ts>90*864e5){localStorage.removeItem('pf_ref');localStorage.removeItem('pf_ref_ts');return ''}
+    return c;
+  }catch(e){return ''}
+}
+function clearRef(){try{localStorage.removeItem('pf_ref');localStorage.removeItem('pf_ref_ts')}catch(e){}}
 
 /* ---------- theme (light by default; "dark" persisted in pf_theme2) ---------- */
 const THEME_SUN='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.4M12 19.6V22M2 12h2.4M19.6 12H22M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M19.1 4.9l-1.7 1.7M6.6 17.4l-1.7 1.7"/></svg>';
@@ -419,11 +444,13 @@ function authTab(m){AUTHMODE=m;
   $('a-forgot').classList.toggle('hidden',!login);
   $('a-back').classList.toggle('hidden',!(forgot||reset));
   document.querySelector('.auth-tabs').classList.toggle('hidden',forgot||reset);
+  const gAuth=document.getElementById('g-auth');
+  if(gAuth){gAuth.classList.toggle('hidden',forgot||reset);if(!(forgot||reset))renderGoogleBtn()}
   $('a-pass').placeholder=reset?'New password (min. 8 characters)':signup?'Password (min. 8 characters)':'Password';
   /* Password managers must OFFER a generated password in signup/reset and the
      saved one only in login — the wrong hint makes them autofill the old one. */
   $('a-pass').setAttribute('autocomplete',(signup||reset)?'new-password':'current-password');
-  if(signup&&!$('a-ref').value){$('a-ref').value=localStorage.getItem('pf_ref')||''}
+  if(signup&&!$('a-ref').value){$('a-ref').value=pfRef()}
   $('a-submit').textContent=login?'Log in':signup?'Create account':forgot?'Send reset link':'Set new password';
   $('auth-title').textContent=login?'Welcome back':signup?'Create your account':forgot?'Reset your password':'Choose a new password';
   $('auth-sub').textContent=login?'Log in to your trader dashboard.'
@@ -463,7 +490,8 @@ async function doAuth(){
   const body={email:$('a-email').value,password:$('a-pass').value};
   try{let res;
     if(AUTHMODE==='signup'){body.full_name=$('a-name').value;body.referral=$('a-ref').value||null;
-      body.terms_accepted=$('a-terms').checked;res=await api('/api/auth/signup',{method:'POST',body:JSON.stringify(body)});}
+      body.terms_accepted=$('a-terms').checked;res=await api('/api/auth/signup',{method:'POST',body:JSON.stringify(body)});
+      clearRef();  /* attribution consumed — the code must not resurface later */}
     else res=await api('/api/auth/login',{method:'POST',body:JSON.stringify(body)});
     TOKEN=res.token;localStorage.setItem('pf_token',TOKEN);
     // There is ONE login — the admin panel redirects here with ?next=/admin and
@@ -473,6 +501,34 @@ async function doAuth(){
     unlock();await boot();
   }catch(e){toast('Error: '+e.message,'err');unlock()}
 }
+/* ---------- Sign in with Google (GIS; only when the server has a client id) ---------- */
+function initGoogle(){
+  if(!GOOGLE_CLIENT_ID||!window.google||!google.accounts)return;
+  google.accounts.id.initialize({client_id:GOOGLE_CLIENT_ID,callback:onGoogleCred});
+  renderGoogleBtn();
+}
+function renderGoogleBtn(){
+  const holder=document.getElementById('g-btn');
+  if(!holder||!window.google||!google.accounts)return;
+  holder.innerHTML='';
+  google.accounts.id.renderButton(holder,{
+    theme:document.documentElement.dataset.theme==='dark'?'filled_black':'outline',
+    size:'large',shape:'pill',width:Math.min(holder.offsetWidth||320,380),
+    /* the label follows the active tab — one button serves both flows */
+    text:AUTHMODE==='signup'?'signup_with':'signin_with'});
+}
+async function onGoogleCred(resp){
+  try{
+    const res=await api('/api/auth/google',{method:'POST',
+      body:JSON.stringify({credential:resp.credential,referral:pfRef()||null})});
+    clearRef();
+    TOKEN=res.token;localStorage.setItem('pf_token',TOKEN);
+    const nextUrl=new URLSearchParams(location.search).get('next');
+    if(nextUrl&&nextUrl.startsWith('/')&&!nextUrl.startsWith('//')){location.href=nextUrl;return}
+    await boot();
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+
 async function verifyEmailCode(){
   const c=$('vg-code').value.trim();
   if(c.length!==6){toast('Enter the 6-digit code from the e-mail.','err');return}
@@ -921,11 +977,55 @@ document.addEventListener('click',e=>{
   p.classList.add('hidden');
 });
 
+/* Installed app (standalone): the PWA scope is /portal — everything else
+   (landing, /verify, certificates, legal pages) is the WEBSITE. A plain
+   navigation would swallow it inside the app window with no browser UI, so
+   any link leaving /portal (or /admin, which is the other app screen) is
+   routed through window.open and the OS hands it to the browser. */
+document.addEventListener('click',e=>{
+  if(e.defaultPrevented)return;                    /* in-app handlers won */
+  if(!document.documentElement.classList.contains('pwa'))return;
+  const a=e.target.closest&&e.target.closest('a[href]');
+  if(!a)return;
+  if((a.getAttribute('href')||'').startsWith('#')||a.protocol==='javascript:')return;
+  const inApp=a.origin===location.origin&&/^\/(portal|admin)(\/|$)/.test(a.pathname);
+  if(inApp)return;
+  e.preventDefault();
+  window.open(a.href,'_blank','noopener');
+});
+
+/* UI preferences live on the account (ME.ui_prefs). Always mutate the SAME
+   object sortable.js uses — PATCH /api/me replaces the whole blob, so a copy
+   would clobber saved table sorts (and vice versa). */
+let _prefT=null;
+function setUiPref(key,val){
+  if(!ME)return;
+  ME.ui_prefs=ME.ui_prefs||{};
+  if(val==null)delete ME.ui_prefs[key];else ME.ui_prefs[key]=val;
+  clearTimeout(_prefT);
+  _prefT=setTimeout(()=>{api('/api/me',{method:'PATCH',body:JSON.stringify({ui_prefs:ME.ui_prefs})}).catch(()=>{})},800);
+}
+function chalFilter(f){setUiPref('chalFilter',f==='all'?null:f);VIEWS.accounts()}
+
+/* Same-level-upgrade banner: applies the live Upgrade code (one promo state
+   shared with the landing — coupons cleared) and opens the buy modal. */
+async function upgradeNow(key){
+  try{
+    const d=await api('/api/promo');
+    if(d&&d.code){localStorage.setItem('pf_promo_code',d.code);
+      localStorage.removeItem('pf_coupon_code');localStorage.removeItem('pf_coupon_pct')}
+  }catch(e){}
+  openBuy(key);
+}
+
 /* ============================ VIEWS ============================ */
 const VIEWS={
  async accounts(){
   await pushCfg();                 /* the opt-in banner needs to know if the server has keys */
   const accs=await api('/api/me/accounts');
+  /* The upsell strip needs the catalog and openBuy() needs PRODUCTS — the
+     Store view is not always visited first, so load it here once. */
+  if(!PRODUCTS.length){try{PRODUCTS=await api('/api/products')}catch(e){}}
   const live=accs.filter(a=>['active','funded','passed'].includes(a.status));
   const balance=live.reduce((s,a)=>s+a.balance,0);
   const profit=live.reduce((s,a)=>s+(a.balance-a.initial_balance),0);
@@ -959,7 +1059,59 @@ const VIEWS={
      detail view, so the colors mean the same thing everywhere. One banner per
      visit: the push opt-in (when eligible) beats refer&earn. */
   const pushB=pushBannerHtml();
-  $('view').innerHTML=(pushB||banner)+stats+`<div class="chal-grid">`+accs.map(a=>{
+  /* Status filter — the choice is saved on the account (ui_prefs.chalFilter).
+     "Active" is the evaluation side (incl. provisioning), "Funded" follows the
+     card's own funded flag, "Failed" collects ended challenges. */
+  const cf=(ME&&ME.ui_prefs&&ME.ui_prefs.chalFilter)||'all';
+  const isFunded=a=>a.phase==='funded'&&!['breached','failed'].includes(a.status);
+  const isDead=a=>['breached','failed'].includes(a.status);
+  /* "Scale your progress": real math only — the best live account with a
+     positive return drives the strip; nothing renders without one. */
+  const up=(()=>{
+    const cands=accs.filter(a=>!isDead(a)&&a.metrics&&(a.metrics.profit_pct||0)>0);
+    if(!cands.length||!PRODUCTS.length)return {html:'',banner:''};
+    const ref=cands.reduce((b,a)=>a.metrics.profit_pct>b.metrics.profit_pct?a:b);
+    const pct=ref.metrics.profit_pct;
+    const fam=PRODUCTS.filter(p=>p.steps===ref.steps&&p.price_usd>0&&p.account_size>ref.initial_balance)
+      .sort((a,b)=>a.account_size-b.account_size);
+    if(!fam.length)return {html:'',banner:''};
+    const who=ref.status==='provisioning'?'your account':esc(ref.login);
+    const html=`<div class="upsell sec-card">
+      <div class="upsell-head">
+        <div>
+          <div class="up-eyebrow">Scale your progress</div>
+          <h3>Here's how much you could have earned with a larger account</h3>
+          <div class="up-based">Based on your <b class="up">+${pct.toFixed(2)}%</b> from ${who}</div>
+        </div>
+        <button class="btn-p" onclick="go('store')">Upgrade →</button>
+      </div>
+      <div class="upsell-row">${fam.map(p=>`<div class="upsell-card">
+        <div class="uc-top"><span class="uc-if">If you had</span><span class="uc-pct">+${pct.toFixed(1)}%</span></div>
+        <div class="uc-size">$${fmt0(p.account_size)}</div>
+        <div class="uc-sub">you could have earned</div>
+        <div class="uc-earn">+$${fmt(p.account_size*pct/100)}</div>
+        <button class="btn-o sm" onclick="openBuy('${p.key}')">Upgrade →</button>
+      </div>`).join('')}</div>
+      <p class="uc-fine">Illustrative math based on your current return — not a promise. Rewards depend on your trading.</p>
+    </div>`;
+    /* Same-level banner rides the Upgrade promo: pay your current size, the
+       account is created one size up. Only while the promo is live. */
+    const samePlan=PRODUCTS.find(p=>p.steps===ref.steps&&p.account_size===ref.initial_balance&&p.promo_upgrade_size);
+    const banner=samePlan?`<div class="gradient-banner">
+        <span class="gb-tag">${ICO.spark} Same level upgrade</span><span class="gb-sep"></span>
+        <span class="gb-txt">Keep your <b>+${pct.toFixed(2)}%</b> momentum from ${who} — pay for $${fmt0(samePlan.account_size)}, trade <b>$${fmt0(samePlan.promo_upgrade_size)}</b>.</span>
+        <button class="gb-btn" onclick="upgradeNow('${samePlan.key}')">Upgrade now ›</button>
+      </div>`:'';
+    return {html,banner};
+  })();
+  const shown=accs.filter(a=>cf==='funded'?isFunded(a):cf==='failed'?isDead(a)
+    :cf==='active'?(!isFunded(a)&&!isDead(a)):true);
+  const filterBar=`<div class="chal-filter">
+    <div class="shop-tabs">${[['all','All'],['active','Active'],['funded','Funded'],['failed','Failed']]
+      .map(([k,l])=>`<button class="shop-tab${cf===k?' on':''}" onclick="chalFilter('${k}')">${l}</button>`).join('')}</div>
+    <span class="chal-count">${shown.length} of ${accs.length}</span>
+  </div>`;
+  $('view').innerHTML=(pushB||up.banner||banner)+stats+up.html+filterBar+(shown.length?`<div class="chal-grid">`+shown.map(a=>{
     const m=a.metrics||{};
     const funded=a.phase==='funded'&&!['breached','failed'].includes(a.status);
     const dead=['breached','failed'].includes(a.status);
@@ -1000,7 +1152,8 @@ const VIEWS={
         ?`<div class="chal-actions"><button class="btn-o sm" onclick="openAcc(${a.id})">${ICO.eye} Review</button>
            <button class="btn-p sm" onclick="go('store')">Restart challenge</button></div>`
         :`<button class="btn-o sm chal-cta" onclick="openAcc(${a.id})">${ICO.eye} Dashboard</button>`}
-    </div>`}).join('')+`</div>`;
+    </div>`}).join('')+`</div>`
+    :`<div class="sec-card chal-nomatch">No ${cf==='all'?'':cf+' '}accounts to show.</div>`);
   rollStats();
  },
 
@@ -1245,7 +1398,7 @@ const VIEWS={
     if(it.url) return `<div class="cert-row done">
       <div><b>${esc(it.label)}</b><span>Issued · verifiable by its ID</span></div>
       <div class="acts">
-        <a class="btn-p sm" href="${it.url}" target="_blank">Open</a>
+        <a class="btn-p sm" href="${it.url}" target="_blank" rel="noopener">Open</a>
         <button class="btn-o sm" onclick="copyLink('${location.origin}${it.url}')">Copy link</button>
       </div></div>`;
     if(it.available) return `<div class="cert-row">
@@ -1273,7 +1426,7 @@ const VIEWS={
         <div class="cert-row ${p.url?'done':''}">
           <div><b>$${fmt(p.amount)} payout</b><span>${esc(p.account)} · ${p.ts?dday(p.ts.slice(0,10)):'—'}</span></div>
           <div class="acts">${p.url
-            ? `<a class="btn-p sm" href="${p.url}" target="_blank">Open</a>
+            ? `<a class="btn-p sm" href="${p.url}" target="_blank" rel="noopener">Open</a>
                <button class="btn-o sm" onclick="copyLink('${location.origin}${p.url}')">Copy link</button>`
             : `<button class="btn-p sm" onclick="issuePayoutCert(${p.id})">Get certificate</button>`}
           </div></div>`).join('')}</div>`
@@ -1281,7 +1434,7 @@ const VIEWS={
     </div>
 
     <p class="muted" style="font-size:12px">Every document carries a unique ID and a QR code.
-      Anyone can check it at <a href="/verify" target="_blank" style="color:var(--acc)">/verify</a> —
+      Anyone can check it at <a href="/verify" target="_blank" rel="noopener" style="color:var(--acc)">/verify</a> —
       recruiters, communities, or you in two years.</p>`;
  },
 
@@ -1368,7 +1521,7 @@ const VIEWS={
           <td class="num">$${fmt(h.profit_amount)}</td>
           <td class="num up">+$${fmt(h.trader_share)}</td>
           <td class="muted">${esc(h.method||'—')}</td>
-          <td>${h.cert_token?`<a class="btn-o sm" href="/payout/${esc(h.cert_token)}" target="_blank">Certificate</a>`
+          <td>${h.cert_token?`<a class="btn-o sm" href="/payout/${esc(h.cert_token)}" target="_blank" rel="noopener">Certificate</a>`
                             :`<button class="btn-o sm" onclick="makePayoutCert(${h.id})">Get certificate</button>`}</td>
         </tr>`).join('')}</tbody></table></div>
       <p class="muted" style="font-size:12.5px;margin-top:12px">Total paid out: <b>$${fmt(data.summary.total_paid)}</b></p>
@@ -1557,7 +1710,7 @@ const VIEWS={
         <div class="switch-row"><div><h4>Push Notifications</h4>
           <p id="pushStatus">Checking this device…</p></div>
           <button class="btn-p sm" id="pushBtn" onclick="togglePush()" style="display:none"></button></div>
-        <a class="btn-o sm" id="pushInstallLink" href="/install" target="_blank" style="display:none;margin-top:8px">How to install the app</a>
+        <a class="btn-o sm" id="pushInstallLink" href="/install" target="_blank" rel="noopener" style="display:none;margin-top:8px">How to install the app</a>
       </div></div>
 
     <div class="sec-card" style="max-width:640px;border-color:var(--red-line)"><h3 style="color:var(--red)">Danger Zone</h3>
@@ -2070,7 +2223,7 @@ async function openAcc(id){
       <button class="act-chip" onclick="openAcc(${id})">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.3M21 3v6h-6"/></svg>
         Refresh</button>
-      ${a.cert_token?`<a class="act-chip" href="/certificate/${esc(a.cert_token)}" target="_blank">
+      ${a.cert_token?`<a class="act-chip" href="/certificate/${esc(a.cert_token)}" target="_blank" rel="noopener">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="9" r="5.5"/><path d="m8.6 13.5-1.8 7 5.2-2.6 5.2 2.6-1.8-7"/></svg>
         Share certificate</a>`:''}
       ${openPnl!==0?`<span class="act-chip live"><span class="live-dot"></span> Live position</span>`:''}
@@ -2299,12 +2452,12 @@ function txTable(a,act){
 async function issueCert(accId,kind){
   try{const r=await api('/api/me/certificates',{method:'POST',
       body:JSON.stringify({account_id:accId,kind})});
-    toast('Certificate ready.','ok'); window.open(r.url,'_blank'); go('certificates');
+    toast('Certificate ready.','ok'); window.open(r.url,'_blank','noopener'); go('certificates');
   }catch(e){toast('Error: '+e.message,'err')}
 }
 async function issuePayoutCert(id){
   try{const r=await api(`/api/me/payouts/${id}/certificate`,{method:'POST'});
-    toast('Certificate ready.','ok'); window.open(r.url,'_blank'); go('certificates');
+    toast('Certificate ready.','ok'); window.open(r.url,'_blank','noopener'); go('certificates');
   }catch(e){toast('Error: '+e.message,'err')}
 }
 /* MT5 credentials start HIDDEN and are revealed per account.
@@ -2333,7 +2486,7 @@ function prog(label,pct,danger,suffix){const p=Math.min(100,Math.max(0,pct||0));
 async function makePayoutCert(id){
   // Older payouts predate certificates — the token is minted on demand.
   try{const r=await api(`/api/me/payouts/${id}/certificate`,{method:'POST'});
-    window.open(r.url,'_blank'); go('payouts');
+    window.open(r.url,'_blank','noopener'); go('payouts');
   }catch(e){toast('Error: '+e.message,'err')}
 }
 /* Payout request: amount + method + the details that method requires.
@@ -2390,5 +2543,8 @@ async function submitPayout(id){
 
 boot();
 </script>
+{% if google_client_id %}
+<script src="https://accounts.google.com/gsi/client" async defer onload="initGoogle()"></script>
+{% endif %}
 </body>
 </html>

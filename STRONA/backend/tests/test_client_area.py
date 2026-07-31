@@ -840,11 +840,14 @@ def test_ui_prefs_zapisywane_na_koncie():
     tid, h = _trader("uiprefs@test.pl", "Prefs Tester")
     with TestClient(app) as c:
         assert c.get("/api/auth/me", headers=h).json()["ui_prefs"] == {}
+        # sortowanie tabel i filtr zakładki Challenges żyją w JEDNYM blobie —
+        # zapis jednego klucza nie może zgubić drugiego
         r = c.patch("/api/me", headers=h,
-                    json={"ui_prefs": {"sort": {"portal.orders": [2, -1]}}})
+                    json={"ui_prefs": {"sort": {"portal.orders": [2, -1]},
+                                       "chalFilter": "funded"}})
         assert r.status_code == 200
         assert (c.get("/api/auth/me", headers=h).json()["ui_prefs"]
-                == {"sort": {"portal.orders": [2, -1]}})
+                == {"sort": {"portal.orders": [2, -1]}, "chalFilter": "funded"})
         # cap 2000 znaków — zbyt duży blob odrzucamy zamiast ucinać
         za_duzo = {"sort": {f"tabela-{i}": [i, 1] for i in range(300)}}
         assert c.patch("/api/me", headers=h,
@@ -852,7 +855,7 @@ def test_ui_prefs_zapisywane_na_koncie():
         # PATCH bez ui_prefs nie kasuje zapisanych preferencji
         c.patch("/api/me", headers=h, json={"full_name": "Prefs Tester"})
         assert (c.get("/api/auth/me", headers=h).json()["ui_prefs"]
-                == {"sort": {"portal.orders": [2, -1]}})
+                == {"sort": {"portal.orders": [2, -1]}, "chalFilter": "funded"})
         # izolacja: preferencje nie przeciekają między traderami
         _tid2, h2 = _trader("uiprefs2@test.pl", "Prefs Dwa")
         assert c.get("/api/auth/me", headers=h2).json()["ui_prefs"] == {}

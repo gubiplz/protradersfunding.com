@@ -112,8 +112,13 @@
   });
 
   /* ---------- ?ref= capture (partner code attaches at signup) ---------- */
+  /* Timestamped: the signup form only prefills codes from a recent visit —
+     a partner code stored forever kept resurfacing months later. */
   const ref = new URLSearchParams(location.search).get('ref');
-  if (ref) try { localStorage.setItem('pf_ref', ref); } catch (e) {}
+  if (ref) try {
+    localStorage.setItem('pf_ref', ref);
+    localStorage.setItem('pf_ref_ts', String(Date.now()));
+  } catch (e) {}
 
   const yearEl = $('#year'); if (yearEl) yearEl.textContent = new Date().getFullYear();
 
@@ -296,11 +301,14 @@
   const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
 
   /* ---------- hero: challenge configurator ---------- */
+  /* First paint uses server-inlined data — numbers are written directly, the
+     0 -> value ramp would look like the panel loading twice. */
+  let instantRender = false;
   function tweenNum(el, to, fmtFn) {
     if (!el) return;
     const from = parseFloat(el.dataset.v || '0');
     el.dataset.v = to;
-    if (reduced) { el.textContent = fmtFn(to); return; }
+    if (reduced || instantRender) { el.textContent = fmtFn(to); return; }
     const t0 = performance.now(), D = 340;
     (function step(t) {
       const k = Math.min(1, (t - t0) / D), e = 1 - Math.pow(1 - k, 3);
@@ -391,12 +399,32 @@
 
   async function products() {
     if (!$('#pcfg') && !$('#cfg')) return;
-    try {
-      PRODUCTS = await (await fetch('/api/products')).json();
-      renderPricing(); renderObjectives(); renderConfigurator();
+    const wire = () => {
       const ap = $('#pcfg-apply'); if (ap) ap.addEventListener('click', applyPricingCoupon);
       const ci = $('#pcfg-coupon'); if (ci) ci.addEventListener('keydown', e => { if (e.key === 'Enter') applyPricingCoupon(); });
       const wt = $('#pcfg-wt'); if (wt) wt.addEventListener('click', () => { cfgWt = !cfgWt; renderPricing(); });
+    };
+    /* The server inlines the live catalog into the page (#pf-products) so the
+       hero configurator paints together with the rest of the document; the
+       fetch below is only a fallback for documents without the node. */
+    const inline = document.getElementById('pf-products');
+    if (inline) {
+      try {
+        const data = JSON.parse(inline.textContent);
+        if (Array.isArray(data) && data.length) {
+          PRODUCTS = data;
+          instantRender = true;
+          try { renderPricing(); renderObjectives(); renderConfigurator(); }
+          finally { instantRender = false; }
+          wire();
+          return;
+        }
+      } catch (e) { /* malformed inline data — fall back to the API */ }
+    }
+    try {
+      PRODUCTS = await (await fetch('/api/products')).json();
+      renderPricing(); renderObjectives(); renderConfigurator();
+      wire();
     } catch (e) {
       if ($('#pcfg')) $('#pcfg').innerHTML = '<p class="muted">Could not load plans — please refresh.</p>';
     }
@@ -418,6 +446,28 @@
     } catch (e) { sec.remove(); }
   }
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  /* ---------- recently issued certificates (real data, masked names) ---------- */
+  async function certsStrip() {
+    const box = $('#certsStrip'); if (!box) return;
+    try {
+      const rows = await (await fetch('/api/public/certificates/recent')).json();
+      if (!Array.isArray(rows) || !rows.length) return;   // no data -> no strip
+      $('#certsStripRow').innerHTML = rows.map(r => {
+        const payout = r.kind === 'payout';
+        const when = r.issued_at
+          ? new Date(r.issued_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+          : '';
+        return `<div class="cs-card${payout ? ' payout' : ''}">
+          <span class="cs-kind">${esc(r.kind_label)}</span>
+          <b class="cs-amount">$${fmt(payout ? r.amount_usd : r.account_size)}</b>
+          <span class="cs-sub">${payout ? 'reward paid out' : 'account size'}</span>
+          <div class="cs-who">${esc(r.trader)}${when ? `<span>${when}</span>` : ''}</div>
+        </div>`;
+      }).join('');
+      box.hidden = false;
+    } catch (e) { /* optional social proof — the section simply stays hidden */ }
+  }
 
   /* ---------- verify quick lookup ---------- */
   /* Verify on the landing morphs the sample certificate into the REAL one —
@@ -455,5 +505,5 @@
   /* ---------- init ---------- */
   revealize(document);
   $$('.stat-num[data-count]').forEach(countUp);
-  stats(); products(); board();
+  stats(); products(); board(); certsStrip();
 })();

@@ -198,6 +198,61 @@ def test_portal_laduje_sortowanie_tabel():
         assert js.status_code == 200 and "data-tkey" in js.text
 
 
+def test_publiczny_pas_certyfikatow_maskuje_i_nie_ujawnia_tokenow():
+    """Landing pokazuje pas OSTATNIO wystawionych certyfikatów: nazwisko
+    zamaskowane jak w rankingu, zero tokenów i ID — link do certyfikatu
+    publikuje jego właściciel, nie my."""
+    from app.models import Certificate
+
+    tid, _ = _trader("certstrip@test.pl", "Certowy Pasek")
+    aid = _konto(tid, "Certowy Pasek", "770100", status="funded", phase="funded")
+    s = SessionLocal()
+    s.add(Certificate(account_id=aid, kind="funded", cert_token="pas-sekret-token-1"))
+    s.add(Payout(account_id=aid, profit_amount=1000.0, trader_share=900.0, paid=True,
+                 cert_token="pas-sekret-token-2"))
+    s.commit(); s.close()
+    main_mod._PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
+    with TestClient(app) as c:
+        r = c.get("/api/public/certificates/recent")
+    assert r.status_code == 200
+    dane = r.json()
+    assert any(x["kind"] == "funded" and x["trader"] == "Certowy P." for x in dane)
+    assert any(x["kind"] == "payout" and x["amount_usd"] == 900 for x in dane)
+    assert "pas-sekret-token" not in r.text, "token certyfikatu wyciekł do publicznej listy"
+    assert "Pasek" not in r.text, "pełne nazwisko wyciekło do publicznej listy"
+    for x in dane:
+        for zakazane in ("cert_token", "id", "account_id", "trader_id"):
+            assert zakazane not in x
+
+
+def test_landing_ma_katalog_wstrzykniety_w_html():
+    """Konfigurator w hero nie moze mrugac pustymi "—" przez pol sekundy —
+    serwer wstrzykuje caly katalog w HTML (#pf-products), a ceny ida z BAZY
+    (admin mogl je zmienic), nie z literalow w catalog.py."""
+    import json as _json
+
+    s = SessionLocal()
+    prod = s.query(main_mod.Product).filter(main_mod.Product.key == "2step-100k").first()
+    prod.price_usd = 777.0          # cena spoza katalogu — musi trafic do HTML
+    s.commit()
+    s.close()
+    try:
+        with TestClient(app) as c:
+            html = c.get("/").text
+        assert 'id="pf-products"' in html
+        surowy = html.split('id="pf-products" type="application/json">', 1)[1].split("</script>", 1)[0]
+        dane = _json.loads(surowy)
+        wpis = next(p for p in dane if p["key"] == "2step-100k")
+        assert wpis["price_usd"] == 777.0
+        assert any(p["steps"] == 0 for p in dane)   # oba modele obecne
+    finally:
+        s = SessionLocal()
+        prod = s.query(main_mod.Product).filter(main_mod.Product.key == "2step-100k").first()
+        prod.price_usd = 549.0
+        s.commit()
+        s.close()
+
+
 def test_panel_admina_nie_jest_strona_publiczna():
     """Gosc nie moze nawet stwierdzic, ze panel istnieje — stad 404."""
     with TestClient(app) as c:

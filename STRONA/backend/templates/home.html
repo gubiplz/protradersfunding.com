@@ -374,6 +374,14 @@
       </div>
     </div>
   </div>
+  <!-- Real, recently issued certificates — masked names, no links. The strip
+       stays hidden until the API returns at least one entry (no fake proof). -->
+  <div class="wrap">
+    <div class="certs-strip" id="certsStrip" hidden>
+      <div class="cs-head">Recently issued</div>
+      <div class="cs-row" id="certsStripRow"></div>
+    </div>
+  </div>
 </section>
 
 <!-- ============================ AFFILIATE ============================ -->
@@ -490,6 +498,9 @@
   </div>
 </section>
 
+<!-- Live catalog inlined by the server: the hero configurator, pricing and
+     objectives render instantly instead of waiting for /api/products. -->
+<script id="pf-products" type="application/json">{{ products|tojson }}</script>
 {% endblock %}
 
 {% block scripts %}{% endblock %}

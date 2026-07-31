@@ -87,6 +87,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "email_verified": "BOOLEAN DEFAULT TRUE",
         "email_verify_code": "VARCHAR(6)",
         "terms_accepted_at": "TIMESTAMP",
+        "google_sub": "VARCHAR(64)",
     },
     "products": {
         "max_lots": "FLOAT DEFAULT 6.0",

@@ -70,6 +70,11 @@ class Trader(Base):
     # (checkbox jest wymagany; konta sprzed wdrożenia mają NULL).
     terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # Stabilny identyfikator Google (claim `sub` z id_tokenu) — konto założone
+    # lub podpięte przez „Sign in with Google". E-mail może się u Google
+    # zmienić, sub nigdy.
+    google_sub: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     # Kredyty sklepowe (USD) — nadaje admin, automatycznie odliczane od ceny
     # nastepnego zakupu w checkoucie. Pelna historia w tabeli credit_ledger.
     credits_usd: Mapped[float] = mapped_column(Float, default=0.0)

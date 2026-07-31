@@ -654,6 +654,96 @@ def login(payload: LoginIn, request: Request, response: Response):
         session.close()
 
 
+def _google_tokeninfo(credential: str) -> dict:
+    """Weryfikacja id_tokenu Google przez oficjalny endpoint tokeninfo.
+
+    Stdlib zamiast biblioteki JWT: wolumen logowań jest mały, a tokeninfo
+    sprawdza podpis i wygaśnięcie po stronie Google (błędny/wygasły token
+    to odpowiedź 4xx -> ValueError). Funkcja modułowa, żeby testy mogły ją
+    podmienić bez sieci.
+    """
+    import urllib.parse
+    import urllib.request
+    url = "https://oauth2.googleapis.com/tokeninfo?" + urllib.parse.urlencode(
+        {"id_token": credential})
+    try:
+        with urllib.request.urlopen(url, timeout=6) as r:  # noqa: S310
+            return json.loads(r.read().decode("utf-8"))
+    except Exception as e:  # HTTPError/URLError/timeout/JSON — jedna ścieżka: odmowa
+        raise ValueError(f"tokeninfo failed: {e}")
+
+
+class GoogleAuthIn(BaseModel):
+    credential: str                 # id_token z przycisku GIS
+    referral: str | None = None     # kod polecający z ?ref= (jak w signup)
+
+
+@app.post("/api/auth/google")
+def google_login(payload: GoogleAuthIn, request: Request, response: Response):
+    """„Sign in with Google": jedno wejście dla logowania i rejestracji.
+
+    Konto dobierane po `sub`, potem po e-mailu (podpięcie istniejącego);
+    brak konta = rejestracja z nieużywalnym hasłem (reset e-mailem działa)
+    i adresem uznanym za zweryfikowany — potwierdził go Google.
+    """
+    if not settings.google_login_enabled:
+        # Wzorzec jak /admin: niewłączona funkcja nie istnieje.
+        raise HTTPException(404, "Not Found")
+    _rate_limit(request, "google", 10)
+    try:
+        claims = _google_tokeninfo(payload.credential)
+    except ValueError:
+        raise HTTPException(401, "Google sign-in failed — please try again")
+    if (claims.get("aud") != settings.google_client_id
+            or claims.get("iss") not in ("accounts.google.com", "https://accounts.google.com")
+            or claims.get("email_verified") not in (True, "true")
+            or not claims.get("email")):
+        raise HTTPException(401, "Google sign-in failed — please try again")
+    email = str(claims["email"]).strip().lower()
+    sub = str(claims.get("sub") or "")[:64]
+    session = SessionLocal()
+    try:
+        tr = session.query(Trader).filter(Trader.google_sub == sub).first() if sub else None
+        if tr is None:
+            tr = session.query(Trader).filter(Trader.email == email).first()
+            if tr is not None and sub and not tr.google_sub:
+                tr.google_sub = sub                       # podpięcie istniejącego konta
+        nowy = tr is None
+        if nowy:
+            referred_by = None
+            if payload.referral:
+                ref = payload.referral.strip().upper()
+                if session.query(Trader).filter(Trader.referral_code == ref).first():
+                    referred_by = ref
+            for _ in range(5):
+                code = _gen_ref_code()
+                if not session.query(Trader).filter(Trader.referral_code == code).first():
+                    break
+            tr = Trader(
+                email=email,
+                # Konto Google nie ma hasła — losowy, nieużywalny hash blokuje
+                # logowanie hasłem, a "forgot password" pozwala je nadać.
+                password_hash=auth.hash_password(secrets.token_urlsafe(24)),
+                full_name=str(claims.get("name") or "").strip()[:120],
+                referral_code=code, referred_by=referred_by,
+                google_sub=sub or None,
+                # Klauzula pod przyciskiem: kontynuacja przez Google = zgoda.
+                terms_accepted_at=datetime.now(timezone.utc),
+            )
+            session.add(tr)
+        # Google ręczy za adres — bramka weryfikacyjna nie ma już czego pilnować.
+        tr.email_verified = True
+        session.commit()
+        telemetry.track("signup" if nowy else "login", tr.id, google=True)
+        token = auth.make_token(tr.id, tr.password_hash)
+        _ustaw_ciasteczko_sesji(response, token)
+        return {"token": token, "trader": {"id": tr.id, "email": tr.email,
+                "full_name": tr.full_name, "is_admin": tr.is_admin,
+                "referral_code": tr.referral_code}}
+    finally:
+        session.close()
+
+
 def _ui_prefs_dict(trader: Trader) -> dict:
     """ui_prefs to string JSON w bazie — do klienta zawsze idzie obiekt."""
     try:
@@ -730,26 +820,35 @@ def promo_check(code: str = ""):
     Celowo bez 404: belka rozróżnia zły kod od wygasłej promocji jednym polem
     `valid`, a treść komunikatu zostaje po stronie frontu.
     """
+    # `code` jest jawne, póki promocja trwa — landing i tak drukuje je każdemu
+    # w pasku promo; baner upsellu w portalu aplikuje je jednym klikiem.
     return {"valid": bool(catalog.promo_active() and catalog.promo_code_ok(code)),
-            "name": catalog.PROMO_NAME, "upgrade": "next size up"}
+            "name": catalog.PROMO_NAME, "upgrade": "next size up",
+            "code": settings.promo_upgrade_code if catalog.promo_active() else None}
+
+
+def _products_payload(session) -> list[dict]:
+    """Katalog planów w kształcie /api/products — używany też do wstrzyknięcia
+    danych w HTML landingu, żeby konfigurator nie czekał na fetch."""
+    prods = session.query(Product).filter(Product.active == True).order_by(Product.steps, Product.account_size).all()  # noqa: E712
+    # Cel promocji dołączony do każdego planu: landing i portal pokazują
+    # DOKŁADNIE to, co zrobi checkout (jedno źródło prawdy).
+    upgrades = catalog.upgrade_map(prods)
+    out = []
+    for p in prods:
+        d = _product_dict(p)
+        cel = upgrades.get(p.key)
+        d["promo_upgrade_size"] = cel.account_size if cel else None
+        d["promo_upgrade_label"] = cel.label if cel else None
+        out.append(d)
+    return out
 
 
 @app.get("/api/products")
 def list_products():
     session = SessionLocal()
     try:
-        prods = session.query(Product).filter(Product.active == True).order_by(Product.steps, Product.account_size).all()  # noqa: E712
-        # Cel promocji dołączony do każdego planu: landing i portal pokazują
-        # DOKŁADNIE to, co zrobi checkout (jedno źródło prawdy).
-        upgrades = catalog.upgrade_map(prods)
-        out = []
-        for p in prods:
-            d = _product_dict(p)
-            cel = upgrades.get(p.key)
-            d["promo_upgrade_size"] = cel.account_size if cel else None
-            d["promo_upgrade_label"] = cel.label if cel else None
-            out.append(d)
-        return out
+        return _products_payload(session)
     finally:
         session.close()
 
@@ -3547,6 +3646,56 @@ def public_stats():
         session.close()
 
 
+_PUBLIC_CERTS_CACHE: dict = {"ts": 0.0, "data": None}
+
+
+@app.get("/api/public/certificates/recent")
+def public_recent_certificates():
+    """Pas "Recently issued" na landingu: PRAWDZIWE certyfikaty.
+
+    Nazwiska maskowane jak w rankingu, ZERO tokenów i ID — publikacja linku do
+    cudzego certyfikatu to decyzja właściciela, nie nasza. Pusta baza -> [].
+    """
+    now = monotonic()
+    if _PUBLIC_CERTS_CACHE["data"] is not None and now - _PUBLIC_CERTS_CACHE["ts"] < 60:
+        return _PUBLIC_CERTS_CACHE["data"]
+    session = SessionLocal()
+    try:
+        out = []
+        rows = (session.query(Certificate, Account, Trader)
+                .join(Account, Certificate.account_id == Account.id)
+                .join(Trader, Account.trader_id == Trader.id)
+                .order_by(Certificate.issued_at.desc()).limit(12).all())
+        for cert, acc, tr in rows:
+            out.append({
+                "kind": cert.kind,
+                "kind_label": CERT_KINDS.get(cert.kind, (cert.kind,))[0],
+                "account_size": acc.initial_balance,
+                "trader": _mask_name(tr.full_name),
+                "issued_at": cert.issued_at.isoformat() if cert.issued_at else None,
+            })
+        pays = (session.query(Payout, Account, Trader)
+                .join(Account, Payout.account_id == Account.id)
+                .join(Trader, Account.trader_id == Trader.id)
+                .filter(Payout.cert_token != None, Payout.paid == True)  # noqa: E711,E712
+                .order_by(Payout.ts.desc()).limit(12).all())
+        for pay, acc, tr in pays:
+            out.append({
+                "kind": "payout",
+                "kind_label": "Payout certificate",
+                "account_size": acc.initial_balance,
+                "amount_usd": int(round(pay.trader_share)),
+                "trader": _mask_name(tr.full_name),
+                "issued_at": pay.ts.isoformat() if pay.ts else None,
+            })
+        out.sort(key=lambda r: r["issued_at"] or "", reverse=True)
+        data = out[:12]
+        _PUBLIC_CERTS_CACHE.update(ts=now, data=data)
+        return data
+    finally:
+        session.close()
+
+
 # --------------------------------------------------------------------------- #
 #  Strony                                                                      #
 # --------------------------------------------------------------------------- #
@@ -3584,7 +3733,8 @@ def _promo_ctx() -> dict | None:
 def _page(request: Request, template: str, **extra):
     ctx = {"site_name": settings.site_name, "support_email": settings.support_email,
            "base_url": _public_base(request), "asset_v": ASSET_V,
-           "ga_id": settings.ga_measurement_id, "promo": _promo_ctx(), **extra}
+           "ga_id": settings.ga_measurement_id, "promo": _promo_ctx(),
+           "google_client_id": settings.google_client_id, **extra}
     return jinja.TemplateResponse(request, template, ctx)
 
 
@@ -3593,8 +3743,16 @@ def home(request: Request):
     """Publiczna strona sprzedażowa (cennik/objectives z /api/products)."""
     # QR w podglądzie certyfikatu prowadzi na REALNĄ stronę weryfikacji —
     # atrapa kodu na landingu byłaby obietnicą bez pokrycia.
+    # Katalog wstrzyknięty w HTML: konfigurator w hero renderuje się w tym
+    # samym paincie co reszta strony, bez pół sekundy pustych "—".
+    session = SessionLocal()
+    try:
+        prods = _products_payload(session)
+    finally:
+        session.close()
     return _page(request, "home.html",
-                 sample_qr=_qr_svg(f"{_public_base(request)}/verify"))
+                 sample_qr=_qr_svg(f"{_public_base(request)}/verify"),
+                 products=prods)
 
 
 @app.get("/faq")
