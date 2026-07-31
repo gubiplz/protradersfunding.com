@@ -222,11 +222,12 @@ def handle_webhook(session, payload: bytes, sig_header: str | None) -> dict:
     if settings.stripe_webhook_secret:
         stripe = _stripe()
         try:
-            event = stripe.Webhook.construct_event(payload, sig_header, settings.stripe_webhook_secret)
+            stripe.Webhook.construct_event(payload, sig_header, settings.stripe_webhook_secret)
         except Exception as e:
             raise HTTPException(400, f"Invalid webhook signature: {e}")
-    else:
-        event = json.loads(payload.decode() or "{}")  # dev: bez weryfikacji podpisu
+    # Po weryfikacji podpisu czytamy surowy JSON — obiekt Event z SDK zmienia
+    # interfejs między wersjami (v15 nie jest już dict-em), a payload jest stały.
+    event = json.loads(payload.decode() or "{}")
 
     if event.get("type") == "checkout.session.completed":
         obj = event["data"]["object"]
