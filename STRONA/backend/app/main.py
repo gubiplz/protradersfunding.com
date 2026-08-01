@@ -3581,9 +3581,13 @@ async def api_tick():
     # Dzienny recap jedzie na tym samym cronie (Vercel Hobby = 1 strzał/dobę);
     # push.daily_recap() sam pilnuje guardu raz-na-dobę i ciszy bez transakcji.
     recap = push.daily_recap()
+    # „Scale your progress" raz w tygodniu (poniedzialek) — na tym samym cronie
+    # z tego samego powodu co recap. Wlasny odstep 21 dni w `_upsell_nudge`
+    # sprawia, ze recznie odpalony endpoint i ten przebieg sie nie dubluja.
+    nudge = _upsell_nudge() if datetime.now(timezone.utc).weekday() == 0 else {"sent": 0}
     if isinstance(wynik, dict):
-        return {**wynik, "daily_recap": recap}
-    return {"tick": wynik, "daily_recap": recap}
+        return {**wynik, "daily_recap": recap, "upsell_nudge": nudge.get("sent", 0)}
+    return {"tick": wynik, "daily_recap": recap, "upsell_nudge": nudge.get("sent", 0)}
 
 
 @app.api_route("/api/cron/streak-reminder", methods=["GET", "POST"],
@@ -3621,6 +3625,11 @@ def cron_streak_reminder():
 @app.api_route("/api/cron/upsell-nudge", methods=["GET", "POST"],
                dependencies=[Depends(_require_cron)])
 def cron_upsell_nudge(min_days: int = 21):
+    """Recznie/cronem — cala robota siedzi w `_upsell_nudge`."""
+    return _upsell_nudge(min_days)
+
+
+def _upsell_nudge(min_days: int = 21) -> dict:
     """Cykliczne „Scale your progress" — dzwonek + push z PRAWDZIWA matematyka.
 
     Ta sama regula co panel w portalu: bierzemy najlepsze zywe konto z dodatnim

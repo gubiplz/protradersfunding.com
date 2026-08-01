@@ -11,7 +11,6 @@
   ],
   "crons": [
     { "path": "/api/tick", "schedule": "0 3 * * *" },
-    { "path": "/api/cron/streak-reminder", "schedule": "0 17 * * *" },
-    { "path": "/api/cron/upsell-nudge", "schedule": "0 15 * * 1" }
+    { "path": "/api/cron/streak-reminder", "schedule": "0 17 * * *" }
   ]
 }
