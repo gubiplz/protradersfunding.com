@@ -330,7 +330,21 @@ table.lb .up{color:var(--green)} table.lb .down{color:var(--red)}
    shrink the layout box, hence overflow:hidden + JS-set wrapper height. */
 .certs-strip{margin-top:44px}
 .cs-head{font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:14px}
-.cs-row{display:flex;gap:16px;overflow-x:auto;padding:4px 4px 14px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}
+/* Karuzela: dwa rzedy jada same w przeciwne strony, zamiast paska, ktory trzeba
+   ciagnac recznie. Petla jest bezszwowa, bo JS powiela zawartosc parzysta liczbe
+   razy, a animacja przesuwa dokladnie o polowe szerokosci. */
+.cs-marquee{display:flex;flex-direction:column;gap:16px;overflow:hidden;padding:4px 0 8px;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 5%,#000 95%,transparent);
+          mask-image:linear-gradient(90deg,transparent,#000 5%,#000 95%,transparent)}
+.cs-row{display:flex;gap:16px;width:max-content;animation:cs-slide 70s linear infinite}
+.cs-row-b{animation-duration:88s;animation-direction:reverse}
+.cs-marquee:hover .cs-row{animation-play-state:paused}
+@keyframes cs-slide{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+@media(prefers-reduced-motion:reduce){
+  /* bez ruchu wracamy do przewijania palcem/myszka */
+  .cs-marquee{overflow-x:auto;overscroll-behavior-x:contain;mask-image:none;-webkit-mask-image:none}
+  .cs-row{animation:none}
+}
 .cs-mini{flex:0 0 280px;scroll-snap-align:start;overflow:hidden;border-radius:10px;
   box-shadow:0 14px 30px -16px rgba(27,75,216,.45)}
 .cs-mini .cert-card{width:620px;transform:scale(.4516);transform-origin:top left;

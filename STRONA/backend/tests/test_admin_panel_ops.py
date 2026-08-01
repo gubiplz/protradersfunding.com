@@ -241,3 +241,59 @@ def test_notify_admins_tworzy_wpis_dla_admina(monkeypatch):
     s.close()
     assert admin_tid in trafily_do and zwykly_tid not in trafily_do
     assert all(n.url == "/admin" for n in rows)
+
+
+def test_cron_upsell_nudge(monkeypatch):
+    """Cykliczne „Scale your progress": jedno powiadomienie na tradera z zyskiem,
+    z prawdziwa matematyka, i cisza az minie okno min_days."""
+    from app import push
+    wyslane = []
+    monkeypatch.setattr(push, "send_to_trader",
+                        lambda tid, title, body="", url="/portal", tag=None: wyslane.append((tid, title, url)) or 1)
+    _product()
+    tid, _ = _trader()
+    s = SessionLocal()
+    # wiekszy rozmiar w tej samej rodzinie (2 kroki) — to on wchodzi do tresci
+    if not s.query(Product).filter(Product.key == "ops-100k").first():
+        s.add(Product(key="ops-100k", label="Ops 100K", account_size=100_000,
+                      steps=2, price_usd=549, profit_target_p1=8, profit_target_p2=5,
+                      max_daily_loss_pct=5, max_overall_loss_pct=10, drawdown_type="static",
+                      min_trading_days=3, profit_split_pct=80, max_lots=6, active=True))
+    s.add(Account(login="upsell-1", trader_id=tid, product_key="ops-25k", preset="ops-25k",
+                  initial_balance=25_000, steps=2, profit_target_p1=8, profit_target_p2=5,
+                  max_daily_loss_pct=5, max_overall_loss_pct=10, min_trading_days=3,
+                  drawdown_type="static", profit_split_pct=80, phase="eval_1", status="active",
+                  balance=26_000, equity=26_000, peak_equity=26_000))
+    s.commit(); s.close()
+
+    r = client.post("/api/cron/upsell-nudge", headers=ADMIN)
+    assert r.status_code == 200 and r.json()["sent"] >= 1
+
+    s = SessionLocal()
+    n = (s.query(Notification).filter(Notification.trader_id == tid,
+                                      Notification.event == "upsell_scale").first())
+    assert n is not None
+    # kwota liczona z NAJWIEKSZEGO aktywnego rozmiaru w rodzinie (pelna suita
+    # dzieli baze miedzy plikami, wiec katalog bywa bogatszy niz w tym tescie)
+    najwiekszy = max(p.account_size for p in s.query(Product)
+                     .filter(Product.steps == 2, Product.active == True).all()  # noqa: E712
+                     if p.account_size > 25_000)
+    assert f"${najwiekszy * 0.04:,.0f}" in n.title        # konto +4% -> tyle na wiekszym
+    assert n.url == "/portal?view=accounts&upsell=1"
+    s.close()
+    assert any(t[0] == tid for t in wyslane)              # poszedl tez push
+
+    # drugi przebieg w oknie min_days nie dubluje wpisu
+    assert client.post("/api/cron/upsell-nudge", headers=ADMIN).json()["sent"] == 0
+    s = SessionLocal()
+    assert s.query(Notification).filter(Notification.trader_id == tid,
+                                        Notification.event == "upsell_scale").count() == 1
+    s.close()
+
+    # wylaczona kategoria marketingowa = cisza
+    s = SessionLocal()
+    tr = s.get(Trader, tid); tr.notify_marketing = False
+    s.query(Notification).filter(Notification.trader_id == tid,
+                                 Notification.event == "upsell_scale").delete()
+    s.commit(); s.close()
+    assert client.post("/api/cron/upsell-nudge", headers=ADMIN).json()["sent"] == 0

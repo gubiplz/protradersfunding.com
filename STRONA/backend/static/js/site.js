@@ -463,7 +463,7 @@
       const qr = ($('#pv-qr') && $('#pv-qr').innerHTML) || '';
       const brand = (document.querySelector('#pv-card .cert-logo span') || {}).textContent || '';
       const signer = (document.querySelector('#pv-card .sig') || {}).textContent || '';
-      $('#certsStripRow').innerHTML = rows.map(r => {
+      const card = r => {
         const payout = r.kind === 'payout';
         const when = r.issued_at
           ? new Date(r.issued_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
@@ -487,13 +487,36 @@
             </div>
           </div>
         </div></div>`;
-      }).join('');
+      };
+      /* Dwa rzedy: co druga karta idzie do dolnego, wiec oba jada innym zestawem.
+         Kazdy rzad dostaje PARZYSTA liczbe kopii — animacja przesuwa o -50%,
+         wiec po polowie cyklu klatka jest identyczna i petla nie skacze.
+         Przy trzech certyfikatach jedna kopia nie wypelnilaby ekranu, dlatego
+         liczba kopii wynika z pomiaru: szerokosc rzedu >= 2x szerokosc pasa. */
+      const topRow = rows.filter((_, i) => i % 2 === 0);
+      const botRow = rows.filter((_, i) => i % 2 === 1);
+      /* Unhide FIRST: w [hidden] KAZDY pomiar to zero — a poniewaz liczba kopii
+         wynika z pomiaru, zero oznaczaloby tysiace kart i zawieszona strone.
+         Stad tez twardy sufit na liczbe kopii. */
+      box.hidden = false;
+      const fill = (el, items) => {
+        if (!el) return;
+        if (!items.length) { el.innerHTML = ''; el.hidden = true; return; }
+        const one = items.map(card).join('');
+        el.innerHTML = one + one;
+        const oneW = el.scrollWidth / 2;
+        const target = (box.clientWidth || 1200) * 2;
+        if (oneW > 0 && oneW * 2 < target) {
+          const need = Math.min(8, 2 * Math.ceil(target / (oneW * 2)));
+          el.innerHTML = one.repeat(need);
+        }
+      };
+      fill($('#certsStripRow'), topRow);
+      fill($('#certsStripRow2'), botRow);
       /* transform:scale() keeps the 620px layout box — each wrapper gets the
-         SCALED height of its card. Unhide FIRST: inside [hidden] everything
-         measures 0 and the whole strip would collapse. Same frame = no flash. */
+         SCALED height of its card. */
       requestAnimationFrame(() => {
-        box.hidden = false;
-        $$('#certsStripRow .cs-mini').forEach(m => {
+        $$('.cs-mini').forEach(m => {
           const c = m.firstElementChild;
           if (c) m.style.height = Math.round(c.offsetHeight * CS_SCALE) + 'px';
         });

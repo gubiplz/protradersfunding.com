@@ -3618,6 +3618,69 @@ def cron_streak_reminder():
         session.close()
 
 
+@app.api_route("/api/cron/upsell-nudge", methods=["GET", "POST"],
+               dependencies=[Depends(_require_cron)])
+def cron_upsell_nudge(min_days: int = 21):
+    """Cykliczne „Scale your progress" — dzwonek + push z PRAWDZIWA matematyka.
+
+    Ta sama regula co panel w portalu: bierzemy najlepsze zywe konto z dodatnim
+    wynikiem i pokazujemy, ile ten sam procent dalby na najwiekszym rozmiarze w
+    tej rodzinie. Zero obietnic — to przeliczenie wlasnego wyniku tradera.
+
+    Bramki: kategoria „Daily Recap & Offers" (notify_marketing) oraz odstep
+    min_days od poprzedniego takiego powiadomienia — to promocja, wiec nie moze
+    wracac co dobe. Klikniecie prowadzi do zakladki Challenges z parametrem
+    `upsell=1`, ktory przewija do panelu i go podswietla.
+    """
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=min_days)
+    session = SessionLocal()
+    try:
+        prods = session.query(Product).filter(Product.active == True).all()  # noqa: E712
+        traders = (session.query(Trader)
+                   .filter(Trader.is_admin == False,                          # noqa: E712
+                           Trader.notify_marketing != False)                  # noqa: E712
+                   .all())
+        sent = 0
+        for tr in traders:
+            last = (session.query(Notification)
+                    .filter(Notification.trader_id == tr.id,
+                            Notification.event == "upsell_scale")
+                    .order_by(Notification.id.desc()).first())
+            if last is not None and last.created_at is not None:
+                widziane = last.created_at
+                if widziane.tzinfo is None:
+                    widziane = widziane.replace(tzinfo=timezone.utc)
+                if widziane > cutoff:
+                    continue
+            best, best_pct = None, 0.0
+            for a in session.query(Account).filter(Account.trader_id == tr.id).all():
+                if a.status in ("breached", "failed") or not a.initial_balance:
+                    continue
+                pct = float(_metrics_for(a).get("profit_pct") or 0)
+                if pct > best_pct:
+                    best, best_pct = a, pct
+            if best is None:
+                continue
+            wieksze = [p for p in prods
+                       if p.steps == best.steps and p.account_size > best.initial_balance]
+            if not wieksze:
+                continue
+            top = max(wieksze, key=lambda p: p.account_size)
+            zysk = top.account_size * best_pct / 100
+            title = f"You'd have earned ${zysk:,.0f} on a {_size_label(top.account_size)} account"
+            body = (f"Your +{best_pct:.2f}% on {best.login} — see what a larger "
+                    f"account would have paid.")
+            url = "/portal?view=accounts&upsell=1"
+            push._center_row(session, tr.id, "upsell_scale", title, body, url)
+            session.commit()
+            push.send_to_trader(tr.id, title, body, url=url, tag="upsell_scale")
+            sent += 1
+        return {"sent": sent, "eligible": len(traders), "min_days": min_days}
+    finally:
+        session.close()
+
+
 @app.get("/api/stats", dependencies=[Depends(auth.require_admin)])
 def stats():
     """Statystyki OPERACYJNE (feed, tryb Stripe, pula) — tylko admin.
@@ -3698,7 +3761,7 @@ def public_recent_certificates():
         rows = (session.query(Certificate, Account, Trader)
                 .join(Account, Certificate.account_id == Account.id)
                 .join(Trader, Account.trader_id == Trader.id)
-                .order_by(Certificate.issued_at.desc()).limit(12).all())
+                .order_by(Certificate.issued_at.desc()).limit(24).all())
         for cert, acc, tr in rows:
             out.append({
                 "kind": cert.kind,
@@ -3712,7 +3775,7 @@ def public_recent_certificates():
                 .join(Account, Payout.account_id == Account.id)
                 .join(Trader, Account.trader_id == Trader.id)
                 .filter(Payout.cert_token != None, Payout.paid == True)  # noqa: E711,E712
-                .order_by(Payout.ts.desc()).limit(12).all())
+                .order_by(Payout.ts.desc()).limit(24).all())
         for pay, acc, tr in pays:
             out.append({
                 "kind": "payout",
@@ -3723,7 +3786,7 @@ def public_recent_certificates():
                 "issued_at": pay.ts.isoformat() if pay.ts else None,
             })
         out.sort(key=lambda r: r["issued_at"] or "", reverse=True)
-        data = out[:12]
+        data = out[:24]
         _PUBLIC_CERTS_CACHE.update(ts=now, data=data)
         return data
     finally:

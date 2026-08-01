@@ -648,6 +648,7 @@ async function boot(){
      Storage (wins over a STALE ?view= left in the address after a previous
      deep link), finally ?view= from the URL (cold start via openWindow). */
   const widok=(await pendingNavView())||q.get('view');
+  if(q.get('upsell')==='1')window._upsellJump=true;
   go(q.get('buy')?'store':(widok&&VIEWS[widok]?widok:'accounts'));
   refreshNotif();
   track('view_open',{view:window._view,pwa:document.documentElement.classList.contains('pwa')?'1':'0'});
@@ -963,10 +964,22 @@ function toggleNotif(){
 /* Bell row: switch the SPA view instead of a full navigation; with no
    matching view fall back to the row's URL. */
 function notifGo(a){
-  let v=null;
-  try{v=new URL(a.getAttribute('href'),location.origin).searchParams.get('view')}catch(_){}
-  if(v&&VIEWS[v]){go(v);return false}
+  let v=null,up=false;
+  try{const u=new URL(a.getAttribute('href'),location.origin);
+    v=u.searchParams.get('view'); up=u.searchParams.get('upsell')==='1'}catch(_){}
+  if(v&&VIEWS[v]){if(up)window._upsellJump=true;go(v);return false}
   return true;
+}
+/* Deep link z powiadomienia „Scale your progress": po wejsciu w Challenges
+   przewijamy do panelu i podswietlamy go na moment — inaczej user laduje na
+   gorze listy i nie wie, po co go tu przenieslismy. Gdy panelu nie ma (wynik
+   przestal byc dodatni), zostaje po prostu na liscie kont. */
+function flashUpsell(){
+  const el=document.querySelector('.upsell');
+  if(!el)return;
+  el.scrollIntoView({behavior:'smooth',block:'center'});
+  el.classList.remove('flash');void el.offsetWidth;el.classList.add('flash');
+  setTimeout(()=>el.classList.remove('flash'),2800);
 }
 async function readNotif(rerender=true){
   try{await api('/api/me/notifications/read',{method:'POST'});await refreshNotif()}catch(e){}
@@ -1122,12 +1135,15 @@ const VIEWS={
     const dayLeft=(m.daily_floor!=null&&a.equity!=null)?Math.max(0,a.equity-m.daily_floor):null;
     const bars=dead
       ?`<div class="chal-breach">Challenge ended${a.breach_reason?' — '+esc(a.breach_reason):''}</div>`
+      /* Etykiety krotsze niz w widoku szczegolow: w wierszu listy kolumna paskow
+         dzieli miejsce z kwotami, a przy koncie na $2,000,000 "Progress to target"
+         lamalo sie na dwie linie. */
       :`${funded
-          ?prog('Max drawdown used',m.overall_dd_used_pct,true,
+          ?prog('Max drawdown',m.overall_dd_used_pct,true,
              `${(m.overall_dd_used_pct||0).toFixed(1)}% / ${m.max_overall_loss_pct}%`)
-          :prog('Progress to target',reach,false,
+          :prog('Target',reach,false,
              `${(m.profit_pct||0).toFixed(1)}% / ${m.profit_target_pct||0}%`)}
-        ${prog('Daily loss used',m.daily_loss_used_pct,true,
+        ${prog('Daily loss',m.daily_loss_used_pct,true,
            dayLeft!=null?`$${fmt(dayLeft)} left today`:`${(m.daily_loss_used_pct||0).toFixed(1)}% / ${m.max_daily_loss_pct}%`)}`;
     /* Caly wiersz otwiera konto; przyciski w srodku musza zatrzymac bubbling,
        bo "Restart challenge" prowadzi gdzie indziej niz klikniecie w wiersz. */
@@ -1164,6 +1180,7 @@ const VIEWS={
      i 971px (telefon), czyli ponizej pierwszego ekranu. */
   $('view').innerHTML=(pushB||up.banner||banner)+stats+filterBar+list+up.html;
   rollStats();
+  if(window._upsellJump){window._upsellJump=false;setTimeout(flashUpsell,60)}
  },
 
  async store(){

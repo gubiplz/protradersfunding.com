@@ -788,6 +788,12 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 /* ---------------- challenge cards (portal Challenges view) ---------------- */
 /* "Scale your progress" upsell strip (real math from the best live account) */
 .upsell{margin-bottom:18px}
+/* Podswietlenie po wejsciu z powiadomienia (parametr upsell=1) */
+.upsell.flash{animation:upFlash 2.6s ease-out}
+@keyframes upFlash{
+  0%{border-color:var(--acc);box-shadow:0 0 0 0 color-mix(in srgb,var(--acc) 45%,transparent)}
+  60%{border-color:var(--acc);box-shadow:0 0 0 12px color-mix(in srgb,var(--acc) 0%,transparent)}
+  100%{box-shadow:var(--shadow)}}
 .upsell-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px}
 .upsell-head h3{font-size:16.5px;margin:2px 0 4px}
 .up-eyebrow{font-size:10.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--acc)}
@@ -827,14 +833,6 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 @media(min-width:700px){
   .chal-row{grid-template-columns:1fr auto;grid-template-areas:"id go" "prog prog" "nums nums"}
 }
-@media(min-width:1260px){
-  /* Jeden wiersz = jedna linia dopiero gdy naprawde jest miejsce: 210+180+320+190
-     + odstepy to 948px samej tresci (czyli okno >=1260px). Kolumny liczb i akcji
-     maja STALA szerokosc, zeby staly w jednej linii pionowej w kazdym wierszu —
-     przy `auto` wiersz z dwoma przyciskami przesuwal kwoty o 58px wzgledem reszty. */
-  .chal-row{grid-template-columns:minmax(230px,1.6fr) minmax(160px,1fr) 320px 190px;
-    grid-template-areas:"id prog nums go"}
-}
 .cr-id{grid-area:id;display:flex;align-items:center;gap:12px;min-width:0}
 .cr-txt{min-width:0}
 .cr-txt .login{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14.5px;
@@ -856,6 +854,26 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 .cr-num .v small{font-weight:600;font-size:11px}
 .cr-go{grid-area:go;display:flex;gap:8px;justify-self:end}
 .cr-go .btn-o,.cr-go .btn-p{white-space:nowrap}
+@media(min-width:1260px){
+  /* Jedna linia dopiero gdy jest na nia miejsce (~950px samej tresci).
+     Tory definiuje LISTA, a wiersze dziedzicza je przez `subgrid` — dzieki temu
+     kolumna Balance jest tak szeroka, jak najszersza kwota w CALEJ liscie
+     ($2,000,000.00 nie wchodzi na sasiada), a Trading days zabiera tylko tyle,
+     ile potrzebuje. Przy stalych szerokosciach albo kwoty sie zderzaly, albo
+     zostawaly dziury. Skrajne tory 18px to poziomy padding wiersza — padding na
+     samym wierszu rozjechalby go wzgledem torow rodzica. */
+  .chal-list{display:grid;align-items:center;
+    grid-template-columns:18px minmax(230px,1.6fr) minmax(160px,1fr) auto auto auto auto 18px}
+  .chal-row{grid-column:1/-1;display:grid;grid-template-columns:subgrid;
+    grid-template-areas:none;padding-left:0;padding-right:0;column-gap:24px}
+  /* `grid-area:auto` MUSI byc przed `grid-column`: bazowe `grid-area:id` ustawia
+     tez wiersz, wiec bez resetu komorki ladowaly jedna pod druga */
+  .cr-id{grid-area:auto;grid-column:2}
+  .cr-prog{grid-area:auto;grid-column:3}
+  .cr-nums{grid-area:auto;grid-column:4/7;display:grid;grid-template-columns:subgrid;gap:0 24px}
+  .cr-num{flex:none}
+  .cr-go{grid-area:auto;grid-column:7;justify-self:end}
+}
 @media(max-width:699px){
   /* na telefonie przyciski biora cala szerokosc wiersza — wiersz i tak jest klikalny */
   .cr-go{justify-self:stretch}
@@ -1197,16 +1215,24 @@ html[data-theme=dark] .inv-print{border:1px solid var(--line2)}
 
 /* Karty ustawien (i inne waskie panele) ukladaja sie w kolumny zamiast stac
    jedna pod druga z 1500px pustki obok. */
+/* Karty o roznej wysokosci ukladamy w KOLUMNY (multi-column), nie w siatke:
+   w siatce kazdy rzad rownal sie do najwyzszej karty, wiec pod krotkimi
+   zostawaly dziury, a po zmianie liczby kolumn (zoom) uklad rozjezdzal sie
+   zupelnie. Multi-column samo balansuje kolumny i nie zostawia pustych pol. */
 .card-cols{display:flex;flex-direction:column;gap:14px}
 .card-cols>.sec-card,.card-cols>.panel{margin-bottom:0}
-@media(min-width:1300px){
-  .card-cols{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));align-items:start}
+@media(min-width:1100px){
+  .card-cols{display:block;columns:400px;column-gap:14px}
+  .card-cols>.sec-card,.card-cols>.panel{break-inside:avoid;margin-bottom:14px;width:100%}
 }
 
-@media(min-width:1300px){
-  /* na desktopie pas upsellu miesci sie w wierszach — poziomy scroll zostaje
-     karuzela tylko tam, gdzie jest potrzebny (telefon) */
-  .upsell-row{flex-wrap:wrap}
+@media(min-width:700px){
+  /* Od tabletu w gore pas upsellu przestaje byc karuzela: karty wchodza w siatke
+     i rozkladaja sie rowno na cala szerokosc panelu (przy dziewieciu rozmiarach
+     karuzela znaczyla przewijanie w bok albo dwa niepelne rzedy). */
+  .upsell-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));
+    gap:12px;overflow:visible;padding-bottom:0}
+  .upsell-card{flex:none}
 }
 @media(min-width:1500px){
   /* kafelki KPI trzymaja rozmiar zamiast puchnac do ~600px przy czterech sztukach */
@@ -1229,5 +1255,6 @@ html[data-theme=dark] .inv-print{border:1px solid var(--line2)}
      pustka na tle strony. Wartosci = limit tabeli + padding karty. */
   .sec-card.card-sm{max-width:1030px}
   .sec-card.card-md{max-width:1450px}
-  .upsell{max-width:900px}
+  /* upsell trzyma sie szerokosci listy kont nad nim */
+  .upsell{max-width:1560px}
 }
