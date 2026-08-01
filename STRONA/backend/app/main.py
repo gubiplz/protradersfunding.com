@@ -3756,7 +3756,12 @@ _PUBLIC_CERTS_CACHE: dict = {"ts": 0.0, "data": None}
 
 @app.get("/api/public/certificates/recent")
 def public_recent_certificates():
-    """Pas "Recently issued" na landingu: PRAWDZIWE certyfikaty.
+    """Pas "Recently issued" na landingu: PRAWDZIWE certyfikaty WYPŁAT.
+
+    Wyłącznie wypłaty — certyfikaty za zaliczony etap 1/2 i za funded na pas nie
+    idą. Zaliczony etap mówi, że ktoś przeszedł ewaluację; realnym dowodem, po
+    który ludzie tu przychodzą, jest przelew, a mieszanie jednego z drugim
+    rozwadnia pas i podbija licznik osiągnięciami, które nikogo nie przekonują.
 
     Nazwiska maskowane jak w rankingu, ZERO tokenów i ID — publikacja linku do
     cudzego certyfikatu to decyzja właściciela, nie nasza. Pusta baza -> [].
@@ -3767,19 +3772,6 @@ def public_recent_certificates():
     session = SessionLocal()
     try:
         out = []
-        rows = (session.query(Certificate, Account, Trader)
-                .join(Account, Certificate.account_id == Account.id)
-                .join(Trader, Account.trader_id == Trader.id)
-                .order_by(Certificate.issued_at.desc()).limit(24).all())
-        for cert, acc, tr in rows:
-            out.append({
-                "kind": cert.kind,
-                "kind_label": CERT_KINDS.get(cert.kind, (cert.kind,))[0],
-                "account_size": acc.initial_balance,
-                "program": ("2-Step" if acc.steps == 2 else "Instant Funding"),
-                "trader": _mask_name(tr.full_name),
-                "issued_at": cert.issued_at.isoformat() if cert.issued_at else None,
-            })
         pays = (session.query(Payout, Account, Trader)
                 .join(Account, Payout.account_id == Account.id)
                 .join(Trader, Account.trader_id == Trader.id)

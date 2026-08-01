@@ -199,9 +199,12 @@ def test_portal_laduje_sortowanie_tabel():
 
 
 def test_publiczny_pas_certyfikatow_maskuje_i_nie_ujawnia_tokenow():
-    """Landing pokazuje pas OSTATNIO wystawionych certyfikatów: nazwisko
+    """Landing pokazuje pas OSTATNIO wystawionych certyfikatów WYPŁAT: nazwisko
     zamaskowane jak w rankingu, zero tokenów i ID — link do certyfikatu
-    publikuje jego właściciel, nie my."""
+    publikuje jego właściciel, nie my.
+
+    Certyfikaty za zaliczony etap i za funded na pas NIE idą — dowodem jest
+    przelew, a nie zaliczona ewaluacja."""
     from app.models import Certificate
 
     tid, _ = _trader("certstrip@test.pl", "Certowy Pasek")
@@ -216,8 +219,9 @@ def test_publiczny_pas_certyfikatow_maskuje_i_nie_ujawnia_tokenow():
         r = c.get("/api/public/certificates/recent")
     assert r.status_code == 200
     dane = r.json()
-    assert any(x["kind"] == "funded" and x["trader"] == "Certowy P." for x in dane)
     assert any(x["kind"] == "payout" and x["amount_usd"] == 900 for x in dane)
+    assert all(x["kind"] == "payout" for x in dane), \
+        "na pas trafil certyfikat inny niz wyplata"
     assert "pas-sekret-token" not in r.text, "token certyfikatu wyciekł do publicznej listy"
     assert "Pasek" not in r.text, "pełne nazwisko wyciekło do publicznej listy"
     for x in dane:

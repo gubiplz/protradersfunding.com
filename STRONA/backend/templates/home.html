@@ -380,11 +380,13 @@
       </div>
     </div>
   </div>
-  <!-- Real, recently issued certificates — masked names, no links. The strip
-       stays hidden until the API returns at least one entry (no fake proof). -->
+  <!-- Real payout certificates only — masked names, no links. Passed-stage and
+       funded certificates are deliberately left out: the proof people come here
+       for is a transfer, not a cleared evaluation. The strip stays hidden until
+       the API returns at least one entry (no fake proof). -->
   <div class="wrap">
     <div class="certs-strip" id="certsStrip" hidden>
-      <div class="cs-head">Recently issued</div>
+      <div class="cs-head">Recent payout certificates</div>
       <div class="cs-marquee">
         <div class="cs-row" id="certsStripRow"></div>
         <div class="cs-row cs-row-b" id="certsStripRow2"></div>
