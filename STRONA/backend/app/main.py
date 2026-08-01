@@ -2029,6 +2029,68 @@ def admin_payout_requests():
         session.close()
 
 
+@app.get("/api/admin/payouts", dependencies=[Depends(auth.require_admin)])
+def admin_payouts_all():
+    """Pełna lista wypłat do widoku Payouts: zaksięgowane wypłaty + otwarte wnioski.
+
+    Widok pokazywał wyłącznie wnioski traderów, więc wypłaty wystawione ręcznie
+    przez admina (POST /api/admin/accounts/{id}/payout) nie pojawiały się nigdzie
+    poza kartą konta — lista w panelu nie zgadzała się z tym, ile realnie wyszło
+    pieniędzy. Tutaj źródłem prawdy jest tabela `payouts`, a wnioski dokładamy
+    tylko te, które nie stały się jeszcze wypłatą (pending/rejected); wniosek ze
+    statusem `paid` ma już swój wiersz w `payouts` i dublowałby kwotę.
+
+    `kind` rozdziela jedno od drugiego: "payout" ma certyfikat i można go wycofać,
+    "request" ma przyciski Approve/Reject.
+    """
+    session = SessionLocal()
+    try:
+        out = []
+        rows = (session.query(Payout, Account, Trader)
+                .join(Account, Payout.account_id == Account.id)
+                .outerjoin(Trader, Account.trader_id == Trader.id)
+                .order_by(Payout.ts.desc()).all())
+        for p, acc, tr in rows:
+            out.append({
+                "kind": "payout", "id": p.id,
+                "ts": p.ts.isoformat() if p.ts else None,
+                "account_login": acc.login if acc else None,
+                "trader_email": tr.email if tr else None,
+                "profit_amount": round(p.profit_amount, 2),
+                "trader_share": round(p.trader_share, 2),
+                "method": p.method or "bank", "details": {},
+                "status": "paid" if p.paid else "pending",
+                "reject_reason": None, "note": p.note,
+                "cert_url": f"/payout/{p.cert_token}" if p.cert_token else None,
+            })
+
+        reqs = (session.query(PayoutRequest)
+                .filter(PayoutRequest.status != "paid")
+                .order_by(PayoutRequest.id.desc()).all())
+        for r in reqs:
+            acc = session.get(Account, r.account_id)
+            tr = session.get(Trader, r.trader_id)
+            try:
+                details = json.loads(r.details) if r.details else {}
+            except ValueError:
+                details = {}
+            out.append({
+                "kind": "request", "id": r.id,
+                "ts": r.ts.isoformat() if r.ts else None,
+                "account_login": acc.login if acc else None,
+                "trader_email": tr.email if tr else None,
+                "profit_amount": r.profit_amount, "trader_share": r.trader_share,
+                "method": r.method, "details": details,
+                "status": r.status, "reject_reason": r.reject_reason,
+                "note": None, "cert_url": None,
+            })
+
+        out.sort(key=lambda r: r["ts"] or "", reverse=True)
+        return out
+    finally:
+        session.close()
+
+
 @app.post("/api/admin/payout-requests/{req_id}/approve", dependencies=[Depends(auth.require_admin)])
 def admin_approve_payout(req_id: int):
     session = SessionLocal()
@@ -2201,6 +2263,33 @@ def admin_payout_certificate(payout_id: int):
         if not p.cert_token:
             p.cert_token = secrets.token_urlsafe(16)[:32]
             session.commit()
+            # Pas na landingu ma minutowy cache — bez tego świeży certyfikat
+            # pojawiłby się dopiero przy następnym odświeżeniu.
+            _PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
+        return _payout_dict(p, session.get(Account, p.account_id))
+    finally:
+        session.close()
+
+
+@app.delete("/api/admin/payouts/{payout_id}/certificate", dependencies=[Depends(auth.require_admin)])
+def admin_payout_certificate_revoke(payout_id: int):
+    """Wycofuje certyfikat wypłaty: kasuje token i zdejmuje wpis z landingu.
+
+    Potrzebne, bo do tej pory wystawienie certyfikatu było nieodwracalne —
+    a na pas potrafiły trafić dane testowe albo wypłata wystawiona pomyłkowo.
+    Po wycofaniu publiczny link /payout/{token} przestaje istnieć, wpis znika z
+    /api/public/certificates/recent, a sama WYPŁATA zostaje w bazie (rekord
+    księgowy się nie zmienia — znika tylko dokument).
+    """
+    session = SessionLocal()
+    try:
+        p = session.get(Payout, payout_id)
+        if not p:
+            raise HTTPException(404, "Payout not found")
+        if p.cert_token:
+            p.cert_token = None
+            session.commit()
+            _PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
         return _payout_dict(p, session.get(Account, p.account_id))
     finally:
         session.close()

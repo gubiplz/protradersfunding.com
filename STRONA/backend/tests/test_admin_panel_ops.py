@@ -297,3 +297,86 @@ def test_cron_upsell_nudge(monkeypatch):
                                  Notification.event == "upsell_scale").delete()
     s.commit(); s.close()
     assert client.post("/api/cron/upsell-nudge", headers=ADMIN).json()["sent"] == 0
+
+
+def _konto_funded(tid, login):
+    """Konto funded z zyskiem — gotowe pod wystawienie wypłaty przez admina."""
+    s = SessionLocal()
+    acc = Account(login=login, trader_id=tid, trader_name="Ops Tester",
+                  platform_login=login, product_key="ops-25k",
+                  initial_balance=25_000.0, balance=27_000.0, equity=27_000.0,
+                  peak_equity=27_000.0, day_start_equity=27_000.0,
+                  day_start_balance=27_000.0, steps=2, profit_split_pct=80,
+                  status="funded", phase="funded")
+    s.add(acc); s.commit()
+    aid = acc.id
+    s.close()
+    return aid
+
+
+def test_widok_payouts_pokazuje_wyplaty_admina_nie_tylko_wnioski():
+    """Wypłata wystawiona ręcznie przez admina nie tworzy wniosku, więc do tej
+    pory nie było jej w widoku Payouts — lista kłamała o tym, ile wyszło."""
+    from app.models import Payout, PayoutRequest
+
+    _product()
+    tid, _ = _trader()
+    aid = _konto_funded(tid, "OPS90001")
+
+    r = client.post(f"/api/admin/accounts/{aid}/payout", headers=ADMIN,
+                    json={"amount": 900, "method": "bank", "reset_balance": False})
+    assert r.status_code == 200, r.text
+    pid = r.json()["id"]
+
+    # wniosek juz rozliczony (status paid) ma swoj wiersz w payouts — nie moze
+    # pojawic sie drugi raz jako wniosek
+    s = SessionLocal()
+    s.add(PayoutRequest(account_id=aid, trader_id=tid, profit_amount=100.0,
+                        trader_share=80.0, method="bank", status="paid"))
+    s.add(PayoutRequest(account_id=aid, trader_id=tid, profit_amount=200.0,
+                        trader_share=160.0, method="bank", status="pending"))
+    s.commit(); s.close()
+
+    dane = client.get("/api/admin/payouts", headers=ADMIN).json()
+    moje = [x for x in dane if x["account_login"] == "OPS90001"]
+    assert len(moje) == 2, f"oczekiwano wyplaty + otwartego wniosku, jest {moje}"
+    wyplata = next(x for x in moje if x["kind"] == "payout")
+    assert wyplata["id"] == pid and wyplata["trader_share"] == 900
+    assert wyplata["cert_url"], "wyplata admina powinna miec od razu certyfikat"
+    assert [x["status"] for x in moje if x["kind"] == "request"] == ["pending"]
+
+    s = SessionLocal()
+    assert s.query(Payout).filter(Payout.account_id == aid).count() == 1
+    s.close()
+
+
+def test_wycofanie_certyfikatu_zdejmuje_wpis_z_landingu():
+    """Do tej pory wystawienie certyfikatu było nieodwracalne — na pas na LP
+    mogły trafić dane testowe bez żadnej drogi odwrotu."""
+    from app import main as main_mod
+    from app.models import Payout
+
+    _product()
+    tid, _ = _trader()
+    aid = _konto_funded(tid, "OPS90002")
+    pid = client.post(f"/api/admin/accounts/{aid}/payout", headers=ADMIN,
+                      json={"amount": 700, "method": "bank", "reset_balance": False}).json()["id"]
+
+    main_mod._PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
+    pas = client.get("/api/public/certificates/recent").json()
+    assert any(x["amount_usd"] == 700 for x in pas), "wyplata nie weszla na pas"
+
+    r = client.delete(f"/api/admin/payouts/{pid}/certificate", headers=ADMIN)
+    assert r.status_code == 200 and r.json()["cert_url"] is None
+
+    pas2 = client.get("/api/public/certificates/recent").json()
+    assert not any(x["amount_usd"] == 700 for x in pas2), \
+        "wycofany certyfikat dalej wisi na landingu"
+
+    # sama wyplata zostaje — to rekord ksiegowy, znika tylko dokument
+    s = SessionLocal()
+    p = s.get(Payout, pid)
+    assert p is not None and p.paid and p.cert_token is None
+    s.close()
+
+    assert client.delete("/api/admin/payouts/999999/certificate", headers=ADMIN).status_code == 404
