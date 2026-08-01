@@ -1056,10 +1056,10 @@ const VIEWS={
       <button class="btn-p" onclick="go('store')">Browse challenges</button></div>`;
     return;
   }
-  /* Challenge cards: each answers at a glance "how close am I to passing" and
-     "how much daily-loss headroom is left" — both bars reuse prog() from the
-     detail view, so the colors mean the same thing everywhere. One banner per
-     visit: the push opt-in (when eligible) beats refer&earn. */
+  /* Challenge list: one row per account. Kazdy wiersz odpowiada od razu na
+     "ile mi brakuje do zdania" i "ile zostalo dziennego limitu" — oba paski
+     uzywaja prog() z widoku szczegolow, wiec kolory znacza wszedzie to samo.
+     One banner per visit: the push opt-in (when eligible) beats refer&earn. */
   const pushB=pushBannerHtml();
   /* Status filter — the choice is saved on the account (ui_prefs.chalFilter).
      "Active" is the evaluation side (incl. provisioning), "Funded" follows the
@@ -1113,49 +1113,56 @@ const VIEWS={
       .map(([k,l])=>`<button class="shop-tab${cf===k?' on':''}" onclick="chalFilter('${k}')">${l}</button>`).join('')}</div>
     <span class="chal-count">${shown.length} of ${accs.length}</span>
   </div>`;
-  $('view').innerHTML=(pushB||up.banner||banner)+stats+up.html+filterBar+(shown.length?`<div class="chal-grid">`+shown.map(a=>{
+  const list=shown.length?`<div class="chal-list">`+shown.map(a=>{
     const m=a.metrics||{};
     const funded=a.phase==='funded'&&!['breached','failed'].includes(a.status);
     const dead=['breached','failed'].includes(a.status);
     const reach=m.profit_target_pct?Math.max(0,(m.profit_pct||0)/m.profit_target_pct*100):0;
     const openPnl=+(a.open_pnl||0);
     const dayLeft=(m.daily_floor!=null&&a.equity!=null)?Math.max(0,a.equity-m.daily_floor):null;
-    const bars=dead?'':`<div class="chal-bars">
-        ${funded
+    const bars=dead
+      ?`<div class="chal-breach">Challenge ended${a.breach_reason?' — '+esc(a.breach_reason):''}</div>`
+      :`${funded
           ?prog('Max drawdown used',m.overall_dd_used_pct,true,
              `${(m.overall_dd_used_pct||0).toFixed(1)}% / ${m.max_overall_loss_pct}%`)
           :prog('Progress to target',reach,false,
              `${(m.profit_pct||0).toFixed(1)}% / ${m.profit_target_pct||0}%`)}
         ${prog('Daily loss used',m.daily_loss_used_pct,true,
-           dayLeft!=null?`$${fmt(dayLeft)} left today`:`${(m.daily_loss_used_pct||0).toFixed(1)}% / ${m.max_daily_loss_pct}%`)}
-      </div>`;
-    return `<div class="chal-card${dead?' dead':''}">
-      <div class="chal-head">
+           dayLeft!=null?`$${fmt(dayLeft)} left today`:`${(m.daily_loss_used_pct||0).toFixed(1)}% / ${m.max_daily_loss_pct}%`)}`;
+    /* Caly wiersz otwiera konto; przyciski w srodku musza zatrzymac bubbling,
+       bo "Restart challenge" prowadzi gdzie indziej niz klikniecie w wiersz. */
+    return `<div class="chal-row${dead?' dead':''}" role="button" tabindex="0" onclick="openAcc(${a.id})"
+        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openAcc(${a.id})}">
+      <div class="cr-id">
         <div class="acct-ava"><img src="/static/img/mt5.png" alt="MT5"></div>
-        <div class="chal-id">
+        <div class="cr-txt">
           <div class="login">${a.status==='provisioning'?'<span class="muted">MT5 account pending…</span>':esc(a.login)}
-            <span class="status ${esc(a.status)}"><span class="dot"></span>${a.status==='active'?'evaluation':esc(a.status)}</span></div>
+            <span class="status ${esc(a.status)}"><span class="dot"></span>${a.status==='active'?'evaluation':esc(a.status)}</span>
+            <span class="phase-chip">${PHASE_LABEL[a.phase]||esc(a.phase)}</span></div>
           <div class="sub">${planKind(a.steps)} · $${fmt0(a.initial_balance)} · split ${a.profit_split_pct}%${
             a.status==='provisioning'?' · creating on MetaQuotes-Demo':''}</div>
         </div>
-        <span class="phase-chip">${PHASE_LABEL[a.phase]||esc(a.phase)}</span>
       </div>
-      ${dead?`<div class="chal-breach">Challenge ended${a.breach_reason?' — '+esc(a.breach_reason):''}</div>`:''}
-      ${bars}
-      <div class="chal-stats">
-        <div class="chal-stat"><div class="l">Balance</div><div class="v">$${fmt(a.balance)}</div></div>
-        <div class="chal-stat"><div class="l">Equity${openPnl?' <i class="live-dot" title="Open position"></i>':''}</div>
+      <div class="cr-prog">${bars}</div>
+      <div class="cr-nums">
+        <div class="cr-num"><div class="l">Balance</div><div class="v">$${fmt(a.balance)}</div></div>
+        <div class="cr-num"><div class="l">Equity${openPnl?' <i class="live-dot" title="Open position"></i>':''}</div>
           <div class="v">$${fmt(a.equity)}${openPnl?` <small class="${openPnl>=0?'up':'down'}">${money(openPnl)}</small>`:''}</div></div>
         ${funded
-          ?`<div class="chal-stat"><div class="l">Paid out</div><div class="v">$${fmt(a.paid_out||0)}</div></div>`
-          :`<div class="chal-stat"><div class="l">Trading days</div><div class="v">${m.trading_days??0}<small>/${m.min_trading_days??0}</small></div></div>`}
+          ?`<div class="cr-num"><div class="l">Paid out</div><div class="v">$${fmt(a.paid_out||0)}</div></div>`
+          :`<div class="cr-num"><div class="l">Trading days</div><div class="v">${m.trading_days??0}<small>/${m.min_trading_days??0}</small></div></div>`}
       </div>
-      ${dead
-        ?`<div class="chal-actions"><button class="btn-o sm" onclick="openAcc(${a.id})">${ICO.eye} Review</button>
-           <button class="btn-p sm" onclick="go('store')">Restart challenge</button></div>`
-        :`<button class="btn-o sm chal-cta" onclick="openAcc(${a.id})">${ICO.eye} Dashboard</button>`}
+      <div class="cr-go">${dead
+        ?`<button class="btn-o sm" onclick="event.stopPropagation();openAcc(${a.id})">${ICO.eye} Review</button>
+          <button class="btn-o sm" onclick="event.stopPropagation();go('store')">Restart</button>`
+        :`<button class="btn-o sm" onclick="event.stopPropagation();openAcc(${a.id})">${ICO.eye} Dashboard</button>`}
+      </div>
     </div>`}).join('')+`</div>`
-    :`<div class="sec-card chal-nomatch">No ${cf==='all'?'':cf+' '}accounts to show.</div>`);
+    :`<div class="sec-card chal-nomatch">No ${cf==='all'?'':cf+' '}accounts to show.</div>`;
+  /* Upsell siedzi POD lista: zakladka ma najpierw pokazac konta, a nie blok
+     sprzedazowy — wczesniej pierwsza karta zaczynala sie na 720px (desktop)
+     i 971px (telefon), czyli ponizej pierwszego ekranu. */
+  $('view').innerHTML=(pushB||up.banner||banner)+stats+filterBar+list+up.html;
   rollStats();
  },
 

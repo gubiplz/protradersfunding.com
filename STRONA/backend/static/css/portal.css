@@ -751,7 +751,7 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
   .btn-p:hover{filter:none;transform:none}
   .gb-btn:hover{transform:none;box-shadow:none}
   .plan-card:hover{transform:none;box-shadow:var(--shadow)}
-  .acct-row:hover,.ticket-row:hover{background:transparent}
+  .acct-row:hover,.ticket-row:hover,.chal-row:hover{background:transparent}
   table.tbl tr:hover td{background:transparent}
 }
 
@@ -809,38 +809,62 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 .chal-filter{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:2px 0 16px}
 .chal-count{margin-left:auto;font-size:12px;color:var(--dim)}
 .chal-nomatch{text-align:center;color:var(--muted);font-size:13.5px;padding:30px 16px}
-.chal-grid{display:grid;grid-template-columns:1fr;gap:14px}
-@media(min-width:720px){.chal-grid{grid-template-columns:repeat(auto-fill,minmax(340px,1fr))}}
-.chal-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);
-  padding:16px 18px 18px;display:flex;flex-direction:column;gap:13px;position:relative;overflow:hidden}
-.chal-card::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;
+/* Lista kont zamiast siatki kart 340px: karta zajmowala ~260px wysokosci, wiec
+   przy osmiu kontach lista wypadala ponizej pierwszego ekranu. Wiersz ma te
+   same dane w ~64px. Cala lista to jeden panel z gradientowa krawedzia. */
+.chal-list{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  box-shadow:var(--shadow);overflow:hidden;position:relative;max-width:1560px}
+.chal-list::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;z-index:1;
   background:linear-gradient(90deg,#2563eb,#6366f1,#a855f7)}
-.chal-card.dead{opacity:.92}
-.chal-card.dead::before{background:var(--line2)}
-.chal-head{display:flex;align-items:center;gap:12px;min-width:0}
-.chal-id{min-width:0;flex:1}
-.chal-id .login{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;
+.chal-row{display:grid;gap:10px 16px;align-items:center;padding:14px 18px;
+  border-top:1px solid var(--line);cursor:pointer;transition:background .15s;
+  grid-template-columns:1fr;
+  grid-template-areas:"id" "prog" "nums" "go"}
+.chal-row:first-child{border-top:0}
+.chal-row:hover{background:var(--hover)}
+.chal-row.dead{opacity:.92}
+.chal-row:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+@media(min-width:700px){
+  .chal-row{grid-template-columns:1fr auto;grid-template-areas:"id go" "prog prog" "nums nums"}
+}
+@media(min-width:1260px){
+  /* Jeden wiersz = jedna linia dopiero gdy naprawde jest miejsce: 210+180+320+190
+     + odstepy to 948px samej tresci (czyli okno >=1260px). Kolumny liczb i akcji
+     maja STALA szerokosc, zeby staly w jednej linii pionowej w kazdym wierszu —
+     przy `auto` wiersz z dwoma przyciskami przesuwal kwoty o 58px wzgledem reszty. */
+  .chal-row{grid-template-columns:minmax(230px,1.6fr) minmax(160px,1fr) 320px 190px;
+    grid-template-areas:"id prog nums go"}
+}
+.cr-id{grid-area:id;display:flex;align-items:center;gap:12px;min-width:0}
+.cr-txt{min-width:0}
+.cr-txt .login{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14.5px;
   font-family:var(--mono);flex-wrap:wrap}
-.chal-id .sub{font-size:12.5px;color:var(--muted);margin-top:2px}
-.phase-chip{flex:none;align-self:flex-start;font-size:10.5px;font-weight:700;letter-spacing:.05em;
-  text-transform:uppercase;color:var(--acc);background:var(--acc-bg);border-radius:999px;padding:4px 10px}
-.chal-card.dead .phase-chip{color:var(--muted);background:var(--panel2)}
-.chal-bars{display:flex;flex-direction:column;gap:10px}
-.chal-breach{font-size:12.5px;color:var(--red);background:var(--red-bg);border:1px solid var(--red-line);
-  border-radius:10px;padding:8px 12px}
-.chal-stats{display:flex;gap:16px}
-.chal-stat{flex:1;min-width:0}
-.chal-stat .l{font-size:11.5px;color:var(--dim);display:flex;align-items:center;gap:5px;white-space:nowrap}
-.chal-stat .v{font-family:var(--mono);font-weight:600;font-size:14.5px;margin-top:2px;
+.cr-txt .sub{font-size:12px;color:var(--muted);margin-top:2px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.chal-stat .v small{font-weight:600;font-size:11px}
+.phase-chip{flex:none;font-size:10.5px;font-weight:700;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--acc);background:var(--acc-bg);border-radius:999px;padding:3px 9px}
+.chal-row.dead .phase-chip{color:var(--muted);background:var(--panel2)}
+.cr-prog{grid-area:prog;display:flex;flex-direction:column;gap:8px;min-width:0}
+.cr-prog .prog-bar{height:5px}
+.cr-prog .prog-top{font-size:11px;margin-bottom:4px}
+.chal-breach{font-size:12.5px;color:var(--red);background:var(--red-bg);border:1px solid var(--red-line);
+  border-radius:10px;padding:7px 11px}
+.cr-nums{grid-area:nums;display:flex;gap:20px;min-width:0}
+.cr-num{min-width:0;flex:1}
+.cr-num .l{font-size:11px;color:var(--dim);display:flex;align-items:center;gap:5px;white-space:nowrap}
+.cr-num .v{font-family:var(--mono);font-weight:600;font-size:14px;margin-top:1px;white-space:nowrap}
+.cr-num .v small{font-weight:600;font-size:11px}
+.cr-go{grid-area:go;display:flex;gap:8px;justify-self:end}
+.cr-go .btn-o,.cr-go .btn-p{white-space:nowrap}
+@media(max-width:699px){
+  /* na telefonie przyciski biora cala szerokosc wiersza — wiersz i tak jest klikalny */
+  .cr-go{justify-self:stretch}
+  .cr-go .btn-o,.cr-go .btn-p{flex:1;justify-content:center}
+}
 .live-dot{width:7px;height:7px;border-radius:50%;background:#22c55e;display:inline-block;
   animation:livePulse 1.6s ease-out infinite}
 @keyframes livePulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.45)}70%{box-shadow:0 0 0 6px rgba(34,197,94,0)}
   100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
-.chal-cta{width:100%;justify-content:center}
-.chal-actions{display:flex;gap:10px}
-.chal-actions .btn-o,.chal-actions .btn-p{flex:1;justify-content:center}
 @media(prefers-reduced-motion:reduce){.live-dot{animation:none}}
 
 /* ---------------- bell + notification center + celebrations ---------------- */
