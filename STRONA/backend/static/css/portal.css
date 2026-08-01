@@ -104,7 +104,12 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .kyc-chip.warn{color:var(--gold);border-color:var(--gold-line);background:var(--gold-bg)} .kyc-chip.warn .dot{background:#f59e0b}
 .burger{display:none}
 
-.content{padding:24px 28px 60px;max-width:1240px;width:100%}
+/* Panel jedzie na szerokosc okna. Limit 1240px zostawial na duzym monitorze
+   ~1000px martwej przestrzeni po prawej, a tabela accounts (12 kolumn, ~1390px)
+   nie miescila sie w tym, co zostawalo — i dostawala poziomy suwak. Topbar i tak
+   nigdy nie mial limitu, wiec pelna szerokosc dodatkowo rownia obie krawedzie. */
+.content{padding:24px 28px 60px;width:100%}
+@media(min-width:1600px){.content{padding-left:34px;padding-right:34px}}
 
 /* ---------------- ELEMENTS ---------------- */
 .btn-p{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--grad);color:#fff;
@@ -270,9 +275,20 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .plan-feats b{color:var(--txt);font-family:var(--mono);font-weight:600}
 .plan-card .btn-p{margin-top:auto;width:100%}
 
-/* tables */
+/* tables
+   Trzy szerokosci, bo `.content` nie ma juz limitu: domyslnie tabela zostaje
+   czytelna, tabele 8+ kolumn (admin) biora cala dostepna szerokosc, a te o
+   czterech kolumnach nie rozjezdzaja sie na dziury miedzy wartosciami. */
 .tbl-wrap{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow-x:auto;box-shadow:var(--shadow);
-  overscroll-behavior-x:contain}
+  overscroll-behavior-x:contain;max-width:1400px}
+.tbl-wrap.tw-wide{max-width:none}
+.tbl-wrap.tw-sm{max-width:980px}
+.tbl-wrap.tw-wide table.tbl th,.tbl-wrap.tw-wide table.tbl td{padding-left:13px;padding-right:13px}
+/* laptop: 12 kolumn accounts nadal nie miesci sie w ~1150px, wiec sciskamy je
+   jeszcze mocniej — kazde odzyskane 6px na kolumne to 72px mniej przewijania */
+@media(max-width:1500px){
+  .tbl-wrap.tw-wide table.tbl th,.tbl-wrap.tw-wide table.tbl td{padding-left:10px;padding-right:10px}
+}
 table.tbl{width:100%;border-collapse:collapse;font-size:13.5px;min-width:560px}
 table.tbl th{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);text-align:left;
   padding:13px 18px;background:var(--panel2);white-space:nowrap}
@@ -674,6 +690,17 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
    serves BOTH panels: portal + admin) ---------------- */
 .scroll-x{overflow-x:auto;overscroll-behavior-x:contain}
 
+/* Table scroll affordance: the edge shadow shows ONLY while there is something
+   left to scroll (background-attachment:local). Kiedys siedzialo w <=960px, ale
+   od kiedy panel jest plynny, tabela moze wystawac takze na laptopie — a tam
+   podpowiedz byla potrzebna najbardziej. Na szerokim ekranie nic nie rysuje. */
+.tbl-wrap,.scroll-x{background:
+  linear-gradient(90deg,var(--panel) 30%,var(--panel-t)) left/44px 100% no-repeat local,
+  linear-gradient(270deg,var(--panel) 30%,var(--panel-t)) right/44px 100% no-repeat local,
+  radial-gradient(farthest-side at 0 50%,var(--edge),transparent) left/16px 100% no-repeat scroll,
+  radial-gradient(farthest-side at 100% 50%,var(--edge),transparent) right/16px 100% no-repeat scroll,
+  var(--panel)}
+
 @media(max-width:960px){
   /* scrim under the open drawer (.side z-index:40, topbar 30) + scroll lock */
   body.nav-open::before{content:"";position:fixed;inset:0;z-index:39;
@@ -685,13 +712,6 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
   .side-head .brand-txt{overflow:hidden;text-overflow:ellipsis}
   /* topbar page title: one ellipsized line instead of wrapping to two */
   .topbar h1{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  /* table scroll affordance: the edge shadow fades once you reach the end */
-  .tbl-wrap,.scroll-x{background:
-    linear-gradient(90deg,var(--panel) 30%,var(--panel-t)) left/44px 100% no-repeat local,
-    linear-gradient(270deg,var(--panel) 30%,var(--panel-t)) right/44px 100% no-repeat local,
-    radial-gradient(farthest-side at 0 50%,var(--edge),transparent) left/16px 100% no-repeat scroll,
-    radial-gradient(farthest-side at 100% 50%,var(--edge),transparent) right/16px 100% no-repeat scroll,
-    var(--panel)}
 }
 @keyframes scrim-in{from{opacity:0}}
 
@@ -1145,3 +1165,45 @@ html[data-theme=dark] .reveal-card{box-shadow:0 18px 44px -18px rgba(0,0,0,.6)}
 html[data-theme=dark] .switch i::after{background:#e8ecf5;box-shadow:0 1px 3px rgba(0,0,0,.5)}
 /* The printable invoice stays a light document in both themes. */
 html[data-theme=dark] .inv-print{border:1px solid var(--line2)}
+
+/* ---------------- duze ekrany ----------------
+   `.content` nie ma juz limitu szerokosci, wiec od tego miejsca pilnujemy tylko
+   tego, zeby elementy, ktore na 2000px+ wygladaja pusto, nie rozjechaly sie.
+   Wszystko za `min-width` — ponizej 1300px wyglad zostaje bez zmian. */
+
+/* Karty ustawien (i inne waskie panele) ukladaja sie w kolumny zamiast stac
+   jedna pod druga z 1500px pustki obok. */
+.card-cols{display:flex;flex-direction:column;gap:14px}
+.card-cols>.sec-card,.card-cols>.panel{margin-bottom:0}
+@media(min-width:1300px){
+  .card-cols{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));align-items:start}
+}
+
+@media(min-width:1300px){
+  /* na desktopie pas upsellu miesci sie w wierszach — poziomy scroll zostaje
+     karuzela tylko tam, gdzie jest potrzebny (telefon) */
+  .upsell-row{flex-wrap:wrap}
+}
+@media(min-width:1500px){
+  /* kafelki KPI trzymaja rozmiar zamiast puchnac do ~600px przy czterech sztukach */
+  .stats-row{grid-template-columns:repeat(auto-fit,minmax(215px,340px))}
+}
+@media(min-width:1700px){
+  .detail-grid{grid-template-columns:minmax(0,1fr) 380px}
+}
+
+@media(min-width:1300px){
+  /* dlugosc linii: opis w karcie nie ciagnie sie przez caly ekran */
+  .sec-card>p,.panel>p{max-width:92ch}
+  /* pusty stan to dwie linijki tekstu — nie potrzebuje 2000px prostokata */
+  .empty{max-width:820px}
+}
+
+@media(min-width:1300px){
+  /* Karta, w ktorej siedzi tylko waska tabela, nie rozciaga sie na cala
+     szerokosc — bialy prostokat z pustka w srodku wyglada gorzej niz ta sama
+     pustka na tle strony. Wartosci = limit tabeli + padding karty. */
+  .sec-card.card-sm{max-width:1030px}
+  .sec-card.card-md{max-width:1450px}
+  .upsell{max-width:900px}
+}

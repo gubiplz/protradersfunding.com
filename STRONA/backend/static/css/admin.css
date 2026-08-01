@@ -114,3 +114,25 @@ tr.clickable{cursor:pointer}
 @media(max-width:640px){
   .over-body{padding-bottom:calc(34px + env(safe-area-inset-bottom))}
 }
+
+/* ---------------- duze ekrany ----------------
+   Reguly musza siedziec TUTAJ, nie w portal.css: admin.css laduje sie pozniej,
+   a media query nie podnosi specyficznosci — `.todo-grid` z portal.css
+   przegralby z definicja powyzej. */
+@media(min-width:1500px){
+  /* kafelki zadan trzymaja rozmiar zamiast rozciagac sie na cala szerokosc */
+  .todo-grid{grid-template-columns:repeat(auto-fit,minmax(260px,380px))}
+}
+@media(max-width:1500px){
+  /* paski Daily / Max DD oddaja szerokosc, zeby tabela accounts zmiescila sie
+     na laptopie — na szerokim ekranie zostaja pelne 78px */
+  .tw-wide .mini{min-width:56px}
+}
+@media(min-width:1600px){
+  /* szczegoly konta w slide-overze: wiecej miejsca na pary klucz-wartosc */
+  .over-panel{width:min(720px,100%)}
+}
+@media(min-width:1500px){
+  /* pola formularza puli nie rozciagaja sie na pol ekranu */
+  .pool-form{grid-template-columns:repeat(auto-fit,minmax(160px,300px))}
+}

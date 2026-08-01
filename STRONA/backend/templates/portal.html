@@ -1512,7 +1512,7 @@ const VIEWS={
       </tbody></table></div>`
       :`<div class="empty"><h3>No payout requests yet</h3><p>Pass a challenge, get funded and request your first performance reward. Your challenge fee comes back with it.</p></div>`}
 
-    ${(data.history||[]).length?`<div class="sec-card" style="margin-top:18px">
+    ${(data.history||[]).length?`<div class="sec-card card-md" style="margin-top:18px">
       <h3>Payout history</h3>
       <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Rewards already paid out to you.</p>
       <div class="tbl-wrap"><table class="tbl sortable" data-tkey="portal.payout-hist">
@@ -1536,7 +1536,7 @@ const VIEWS={
   /* Store credits card shows up only once the trader has any history — a
      zero-balance wall of empty ledger would just be noise. */
   const credits=(cr&&(cr.balance_usd>0||(cr.ledger||[]).length))?`
-    <div class="sec-card" style="margin-top:18px">
+    <div class="sec-card card-md" style="margin-top:18px">
       <h3>Store credits</h3>
       <p class="muted" style="font-size:12.5px;margin:4px 0 12px">1 credit = $1 — applied to your
         next challenge at checkout. Current balance: <b class="mono">$${fmt(cr.balance_usd)}</b></p>
@@ -1688,6 +1688,7 @@ const VIEWS={
       <label class="switch"><input type="checkbox" ${n[key]?'checked':''}
         onchange="patchPref('${key}',this.checked)"><i></i></label></div>`;
   $('view').innerHTML=`
+    <div class="card-cols">
     <div class="sec-card" style="max-width:640px"><h3>Profile Information</h3>
       <div style="display:flex;flex-direction:column;gap:11px;margin-top:12px">
         <div><label class="muted" style="font-size:12px">Full Name</label>
@@ -1733,7 +1734,8 @@ const VIEWS={
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <input id="s-delpass" type="password" class="inp" placeholder="Confirm with your password" style="max-width:280px">
         <button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteAccount()">Delete Account</button>
-      </div></div>`;
+      </div></div>
+    </div>`;
   initPushUI();
  },
 };
