@@ -12,7 +12,7 @@
 <link rel="stylesheet" href="/static/css/cert.css?v={{ asset_v }}">
 <meta name="robots" content="noindex">
 </head>
-<body class="cert-page cert-variant-{{ variant or 'pass' }}">
+<body class="cert-page cert-variant-{{ variant or 'pass' }}" data-cert-token="{{ cert_token }}">
 
 <div class="cert-card">
   <div class="cert-inner">
@@ -66,25 +66,10 @@
   <span>·</span><a href="{{ verify_url }}">Verify this certificate</a>
 </div>
 
-<script src="/static/lib/html2canvas.min.js?v={{ asset_v }}"></script>
-<script>
-/* The JPG is rendered from the REAL certificate DOM — same CSS, fonts and QR
-   as this page, so the image can never drift from the document. */
-async function certJpg(btn){
-  if(btn.dataset.busy)return;
-  btn.dataset.busy='1';const was=btn.textContent;btn.textContent='Rendering…';
-  try{
-    if(document.fonts&&document.fonts.ready)await document.fonts.ready;
-    const card=document.querySelector('.cert-card');
-    const canvas=await html2canvas(card,{scale:2,useCORS:true,backgroundColor:'#050914'});
-    const a=document.createElement('a');
-    a.download='certificate-{{ cert_token }}.jpg';
-    a.href=canvas.toDataURL('image/jpeg',0.94);
-    document.body.appendChild(a);a.click();a.remove();
-  }catch(e){alert('Could not render the image — please use Print / save as PDF.')}
-  btn.textContent=was;delete btn.dataset.busy;
-}
-</script>
+{# The JPG is a real browser paint of the card (SVG foreignObject), so it cannot
+   drift from the document. html2canvas is no longer loaded up front — it stays
+   as a fallback and is fetched only if the foreign object fails to rasterise. #}
+<script src="/static/js/cert-jpg.js?v={{ asset_v }}" defer></script>
 
 {# W zainstalowanej PWA linki w scope otwierają się w TYM SAMYM oknie bez
    żadnego paska przeglądarki — bez tego przycisku nie ma jak wrócić. #}
