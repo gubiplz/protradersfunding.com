@@ -229,7 +229,7 @@ class Account(Base):
     bot_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     bot_seed: Mapped[int | None] = mapped_column(Integer, nullable=True)
     bot_style: Mapped[str | None] = mapped_column(String(16), nullable=True)   # scalper|balanced|swing
-    bot_pace: Mapped[str | None] = mapped_column(String(16), nullable=True)    # realistic|active|demo
+    bot_pace: Mapped[str | None] = mapped_column(String(16), nullable=True)    # light|steady|busy
     bot_target_pct: Mapped[float] = mapped_column(Float, default=0.0)          # 0 = bez limitu
     # Pauza: bot NIE otwiera nowych pozycji, ale konto zostaje pod jego kontrolą
     # (saldo nie resynchronizuje sie do feedu, jak przy pelnym Stopie).

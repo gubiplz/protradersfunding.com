@@ -11,6 +11,8 @@ Trzy zasady, ktore trzymaja to w ryzach:
 1. **Kazdy bot jest inny.** Persona wyprowadzana jest deterministycznie z konta
    (`bot_seed`): wlasny koszyk instrumentow, win rate, wielkosc pozycji, dzienny
    cel, szansa na dzien stratny. Dwa konta nie moga wygenerowac tej samej serii.
+   Admin wybiera tylko styl i TEMPO, czyli ile transakcji dziennie ma robic bot
+   (`PACE_TRADES`) — cala reszta rytmu dnia wynika z tej jednej liczby.
 
 2. **Liczby sie zgadzaja.** Wolumen wynika z ryzyka i dystansu stopa, a cena
    zamkniecia jest policzona WSTECZ z P&L:
@@ -45,7 +47,7 @@ settings = get_settings()
 
 MIN_LOT = 0.01
 STYLES = ("scalper", "balanced", "swing")
-PACES = ("realistic", "active", "demo")
+PACES = ("light", "steady", "busy")
 
 
 # --------------------------------------------------------------------------- #
@@ -114,33 +116,68 @@ class Persona:
     trades_per_day: int
     symbols: tuple[str, ...]
     weights: tuple[float, ...]
-    session_start_h: int
-    session_end_h: int
 
 
-# hold/gap w sekundach: (hold_min, hold_max, gap_min, gap_max)
-PACE_TIMING: dict[str, tuple[int, int, int, int]] = {
-    "realistic": (45 * 60, 120 * 60, 20 * 60, 70 * 60),
-    "active": (6 * 60, 15 * 60, 3 * 60, 8 * 60),
-    # „Fast demo" ma zapelniac historie na oczach admina — pelny cykl ~45 s.
-    "demo": (20, 45, 8, 20),
+# Tempo mowi, ILE TRANSAKCJI DZIENNIE robi bot — i nic wiecej. Reszta (czas
+# trzymania pozycji, dlugosc przerwy) wynika z tej liczby, patrz `_cykl_sek`.
+# Wczesniej tempo bylo ustawiane „co ile sekund": najszybszy tryb otwieral
+# pozycje co 45 s, czyli grubo ponad tysiac dziennie, i historia konta wygladala
+# jak spam bota, a nie dzien tradera.
+PACE_TRADES: dict[str, tuple[int, int]] = {
+    "light": (1, 2),
+    "steady": (4, 8),
+    # Widelki o oczko wyzsze niz etykieta „okolo 20" w panelu: dzien konczy sie
+    # takze na osiagnietym dziennym celu, wiec czesc zaplanowanych wejsc nie
+    # dochodzi do skutku i realnie wychodzi ~85% planu.
+    "busy": (18, 24),
 }
 
-# Tempo zmienia nie tylko czas trzymania pozycji, ale i intensywnosc dnia:
-# (mnoznik dziennego celu, mnoznik liczby transakcji). Liczba transakcji rosnie
-# szybciej niz cel — „Fast demo" ma zapelnic historie, a nie wystrzelic krzywa.
-PACE_ACTIVITY: dict[str, tuple[float, float]] = {
-    "realistic": (1.0, 1.0),
-    "active": (1.6, 2.5),
-    "demo": (3.0, 10.0),
+# Nazwy sprzed przejscia na „transakcje dziennie". Konta z wlaczonym botem maja
+# stara wartosc zapisana w kolumnie `bot_pace`, wiec musi sie dalej rozwiazywac —
+# po kolejnosci: najwolniejsze na najwolniejsze.
+PACE_ALIASY: dict[str, str] = {"realistic": "light", "active": "steady", "demo": "busy"}
+
+DZIEN_SEK = 24 * 3600
+# Ile z cyklu zajmuje trzymanie pozycji (reszta to przerwa miedzy wejsciami).
+HOLD_UDZIAL = (0.30, 0.50)
+# Sufit i podloga trzymania: przy 1 transakcji dziennie 40% doby to 10 godzin
+# w rynku, a przy 20 — kilkanascie minut. Jedno i drugie wyglada nienaturalnie.
+HOLD_MAX_SEK = 6 * 3600
+HOLD_MIN_SEK = 12 * 60
+
+# Mnozniki stylu: (win_rate, avg_r, risk_pct). Liczby transakcji tu NIE MA —
+# ustala ja tempo, styl tylko przesuwa ja w obrebie widelek (`_STYLE_UDZIAL`).
+_STYLE_TUNING: dict[str, tuple[tuple[float, float], tuple[float, float], tuple[float, float]]] = {
+    "scalper": ((0.66, 0.78), (1.1, 1.7), (0.12, 0.28)),
+    "balanced": ((0.60, 0.72), (1.5, 2.2), (0.18, 0.38)),
+    "swing": ((0.52, 0.64), (2.1, 3.2), (0.25, 0.50)),
 }
 
-# Mnozniki stylu: (win_rate, avg_r, risk_pct, trades_per_day)
-_STYLE_TUNING: dict[str, tuple[tuple[float, float], tuple[float, float], tuple[float, float], tuple[int, int]]] = {
-    "scalper": ((0.66, 0.78), (1.1, 1.7), (0.12, 0.28), (5, 9)),
-    "balanced": ((0.60, 0.72), (1.5, 2.2), (0.18, 0.38), (3, 6)),
-    "swing": ((0.52, 0.64), (2.1, 3.2), (0.25, 0.50), (2, 4)),
+# Gdzie w widelkach tempa siada dany styl: scalper przy gornej granicy,
+# swing przy dolnej. Zakresy zachodza na siebie, zeby dwa konta z tym samym
+# tempem i stylem nie musialy miec identycznej liczby wejsc.
+_STYLE_UDZIAL: dict[str, tuple[float, float]] = {
+    "scalper": (0.55, 1.00),
+    "balanced": (0.25, 0.75),
+    "swing": (0.00, 0.45),
 }
+
+
+def normalize_pace(value: str | None) -> str:
+    """Nazwa tempa sprowadzona do obowiazujacej — z obsluga starych wartosci."""
+    v = (value or "").strip().lower()
+    v = PACE_ALIASY.get(v, v)
+    return v if v in PACES else "steady"
+
+
+def _cykl_sek(p: Persona) -> float:
+    """Ile sekund przypada na jedna transakcje: trzymanie + przerwa po niej.
+
+    Doba podzielona przez zadana liczbe wejsc. Dzieki temu „4-8 transakcji
+    dziennie" jest obietnica, ktora naprawde da sie policzyc w historii konta,
+    a nie luznym opisem trybu.
+    """
+    return DZIEN_SEK / max(1, p.trades_per_day)
 
 
 def seed_for(acc: Account) -> int:
@@ -161,8 +198,8 @@ def persona_for(acc: Account) -> Persona:
     zamieni sie w liste klonow z identycznymi transakcjami."""
     rng = random.Random(acc.bot_seed if acc.bot_seed is not None else seed_for(acc))
     style = acc.bot_style if acc.bot_style in STYLES else "balanced"
-    pace = acc.bot_pace if acc.bot_pace in PACES else "active"
-    wr, ar, rp, tpd = _STYLE_TUNING[style]
+    pace = normalize_pace(acc.bot_pace)
+    wr, ar, rp = _STYLE_TUNING[style]
 
     pool = list(INSTRUMENTS)
     rng.shuffle(pool)
@@ -170,20 +207,22 @@ def persona_for(acc: Account) -> Persona:
     # Wagi: jeden-dwa instrumenty „ulubione", reszta rzadziej — jak u ludzi.
     weights = tuple(rng.uniform(0.5, 3.0) for _ in symbols)
 
-    goal_mult, count_mult = PACE_ACTIVITY[pace]
+    dolna, gorna = PACE_TRADES[pace]
+    udzial = rng.uniform(*_STYLE_UDZIAL[style])
     return Persona(
         style=style,
         pace=pace,
         win_rate=rng.uniform(*wr),
         avg_r=rng.uniform(*ar),
         risk_pct=rng.uniform(*rp),
-        daily_target_pct=rng.uniform(0.25, 1.10) * goal_mult,
+        # Dzienny cel NIE zalezy od tempa: ile trader zarabia dziennie to co
+        # innego niz w ilu wejsciach to robi. Wczesniej szybsze tempo mnozylo
+        # tez cel, wiec „wiecej transakcji" po cichu znaczylo „szybsza krzywa".
+        daily_target_pct=rng.uniform(0.25, 1.10),
         red_day_odds=rng.uniform(0.08, 0.20),
-        trades_per_day=max(2, round(rng.randint(*tpd) * count_mult)),
+        trades_per_day=max(1, round(dolna + (gorna - dolna) * udzial)),
         symbols=symbols,
         weights=weights,
-        session_start_h=rng.choice([7, 8, 9, 13, 14]),
-        session_end_h=rng.choice([17, 18, 20, 21]),
     )
 
 
@@ -251,11 +290,11 @@ def _tradable(p: Persona, weekend: bool) -> tuple[tuple[str, ...], tuple[float, 
 # --------------------------------------------------------------------------- #
 #  Sterowanie botem                                                            #
 # --------------------------------------------------------------------------- #
-def start(session, acc: Account, *, style: str = "balanced", pace: str = "active",
+def start(session, acc: Account, *, style: str = "balanced", pace: str = "steady",
           target_pct: float = 0.0) -> None:
     acc.bot_enabled = True
     acc.bot_style = style if style in STYLES else "balanced"
-    acc.bot_pace = pace if pace in PACES else "active"
+    acc.bot_pace = normalize_pace(pace)
     acc.bot_target_pct = max(0.0, float(target_pct or 0.0))
     acc.bot_paused = False
     if acc.bot_seed is None:
@@ -325,6 +364,12 @@ def tick(session, acc: Account, now: datetime | None = None) -> MarketSnapshot:
             # o kilka groszy z krzywa balansu.
             _close_trade(open_tr, open_tr.plan_pnl, now)
             balance = round(balance + open_tr.pnl, 2)
+            # Sesja ma autoflush=False, a `_should_open` pyta BAZE o ostatnia
+            # zamknieta transakcje. Bez tego flusha zamkniecie sprzed chwili jest
+            # dla niej niewidoczne, odstep liczy sie od poprzedniej pozycji i co
+            # druga otwiera sie natychmiast — dzien wychodzil o polowe gestszy,
+            # niz mowi tempo.
+            session.flush()
             open_tr = None
         else:
             floating = _floating_pnl(open_tr, now)
@@ -414,9 +459,14 @@ def _should_open(session, acc: Account, p: Persona, balance: float, now: datetim
             .filter(Trade.account_id == acc.id, Trade.status == "closed")
             .order_by(Trade.id.desc()).first())
     if last is not None and last.closed_at is not None:
-        _, _, gap_min, gap_max = PACE_TIMING[p.pace]
-        gap = random.Random((last.id or 0) * 31 + 7).uniform(gap_min, gap_max)
-        if (_naive(now) - _naive(last.closed_at)).total_seconds() < gap:
+        # Przerwa to reszta cyklu po odjeciu czasu, ktory pozycja FAKTYCZNIE
+        # przesiedziala w rynku. Dzieki temu dluzsze trzymanie skraca postoj,
+        # a dzienna liczba wejsc trzyma sie zadanej niezaleznie od tego, jak
+        # potoczyla sie poprzednia transakcja.
+        trwanie = max(0.0, (_naive(last.closed_at) - _naive(last.opened_at)).total_seconds())
+        rng = random.Random((last.id or 0) * 31 + 7)
+        przerwa = max(60.0, _cykl_sek(p) - trwanie) * rng.uniform(0.75, 1.25)
+        if (_naive(now) - _naive(last.closed_at)).total_seconds() < przerwa:
             return False
 
     # 4) rynek zamkniety -> ZERO wejsc, niezaleznie od tempa. To kalendarz gieldy,
@@ -425,12 +475,9 @@ def _should_open(session, acc: Account, p: Persona, balance: float, now: datetim
     if market_closed_for(acc, now):
         return False
 
-    # 5) godziny handlu — tylko tempo „realistic" udaje sesje rynkowa.
-    #    Active/demo maja jechac od razu po wcisnieciu Start.
-    if p.pace == "realistic":
-        srv = _server_now(now)
-        if not (p.session_start_h <= srv.hour < p.session_end_h):
-            return False
+    # Godzin sesji NIE ma celowo: forex, zloto i indeksy chodza w dzien roboczy
+    # praktycznie na okraglo, wiec wejscie o 04:00 jest tak samo prawdziwe jak
+    # o 14:00. Jedyna przerwa, ktora naprawde istnieje, to weekend (punkt 4).
     return True
 
 
@@ -478,8 +525,7 @@ def _open_new(session, acc: Account, p: Persona, balance: float, now: datetime) 
     if target > 0 and plan_pnl > 0:
         plan_pnl = min(plan_pnl, max(target - realized, target * 0.15))
 
-    hold_min, hold_max, _, _ = PACE_TIMING[p.pace]
-    hold = rng.uniform(hold_min, hold_max)
+    hold = min(HOLD_MAX_SEK, max(HOLD_MIN_SEK, _cykl_sek(p) * rng.uniform(*HOLD_UDZIAL)))
     close_at = now + timedelta(seconds=hold)
     if not weekend and symbol not in CRYPTO_SYMBOLS:
         # Wejscie z piatkowego wieczoru nie moze miec daty zamkniecia „w sobote" —

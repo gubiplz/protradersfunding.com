@@ -231,7 +231,10 @@ def _account_dict(acc: Account, with_metrics: bool = True, with_credentials: boo
         d["bot_enabled"] = bool(getattr(acc, "bot_enabled", False))
         d["bot_paused"] = bool(getattr(acc, "bot_paused", False))
         d["bot_style"] = getattr(acc, "bot_style", None)
-        d["bot_pace"] = getattr(acc, "bot_pace", None)
+        # Przez `normalize_pace`, bo konta włączone przed przejściem na tempa
+        # liczone w transakcjach na dzień mają w bazie starą nazwę.
+        d["bot_pace"] = (tradebot.normalize_pace(acc.bot_pace)
+                         if getattr(acc, "bot_pace", None) else None)
         d["bot_target_pct"] = getattr(acc, "bot_target_pct", 0.0) or 0.0
         # Weekend liczony w czasie serwera MT5, a nie w przeglądarce admina —
         # inaczej panel pokazywałby inny stan rynku niż ten, którym kieruje się bot.
@@ -2616,7 +2619,7 @@ def admin_breach_account(account_id: int, payload: BreachIn):
 
 class BotIn(BaseModel):
     style: str = "balanced"      # scalper | balanced | swing
-    pace: str = "active"         # realistic | active | demo
+    pace: str = "steady"         # light (1-2/dzień) | steady (4-8) | busy (~20)
     target_pct: float = 0.0      # 0 = bez limitu zysku
 
 

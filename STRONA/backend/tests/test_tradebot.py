@@ -27,12 +27,13 @@ from app.rules import EquityTick  # noqa: E402
 init_db()
 ADMIN_H = {"X-Admin-Token": get_settings().admin_token}
 
-# poniedziałek 09:00 UTC — w środku sesji także dla tempa „realistic"
+# poniedziałek 09:00 UTC — początek tygodnia handlowego, żeby długie biegi
+# zaczynały się od otwartego rynku, a nie w środku weekendowej przerwy
 START = datetime(2026, 7, 6, 9, 0, tzinfo=timezone.utc)
 
 
 def _account(login: str, *, size=100_000.0, max_lots=6.0, style="balanced",
-             pace="active", target_pct=0.0, weekend_trading=False) -> int:
+             pace="steady", target_pct=0.0, weekend_trading=False) -> int:
     s = SessionLocal()
     acc = Account(login=login, trader_name="Bot Tester", product_key="2step-100k",
                   initial_balance=size, steps=2, max_lots=max_lots,
@@ -53,8 +54,12 @@ def _account(login: str, *, size=100_000.0, max_lots=6.0, style="balanced",
     return aid
 
 
-def _drive(account_id: int, ticks: int, step_sec: int = 45):
+def _drive(account_id: int, ticks: int, step_sec: int = 600):
     """Przepuszcza bota przez PRAWDZIWY silnik reguł — tak samo jak poller.
+
+    Krok 10 minut, bo tempo liczy się w transakcjach NA DZIEŃ: przy „steady"
+    (4–8 dziennie) jeden pełny cykl to 3–6 godzin, więc test musi przejechać
+    kilka dni, a nie kilka godzin.
 
     Zwraca (konto, lista snapshotów) po zamknięciu sesji.
     """
@@ -244,17 +249,84 @@ def test_stop_domyka_otwarta_pozycje():
 
 
 def test_start_nadaje_seed_i_ustawienia():
-    aid = _account("bot-start-1", style="swing", pace="realistic", target_pct=7.5)
+    aid = _account("bot-start-1", style="swing", pace="light", target_pct=7.5)
     s = SessionLocal()
     acc = s.get(Account, aid)
     assert acc.bot_enabled is True and acc.bot_seed is not None
-    assert acc.bot_style == "swing" and acc.bot_pace == "realistic"
+    assert acc.bot_style == "swing" and acc.bot_pace == "light"
     assert acc.bot_target_pct == 7.5
     s.close()
 
 
+# --------------------------------------------------------------------------- #
+#  Tempo = ile transakcji dziennie                                             #
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("pace,dolna,gorna", [("light", 1, 2), ("steady", 4, 8),
+                                              ("busy", 18, 24)])
+def test_tempo_trzyma_sie_swoich_widelek(pace, dolna, gorna):
+    """Kontrakt trybu: ŻADEN styl nie może wypchnąć persony poza widełki tempa."""
+    for styl in tradebot.STYLES:
+        for i in range(6):
+            aid = _account(f"bot-tpd-{pace}-{styl}-{i}", pace=pace, style=styl)
+            s = SessionLocal()
+            p = tradebot.persona_for(s.get(Account, aid))
+            s.close()
+            assert p.pace == pace
+            assert dolna <= p.trades_per_day <= gorna, \
+                f"{styl}/{pace}: {p.trades_per_day} poza {dolna}-{gorna}"
+
+
+def test_stare_nazwy_temp_dalej_dzialaja():
+    """Konta włączone przed zmianą mają w bazie realistic/active/demo — po
+    wdrożeniu muszą trafić na odpowiednik, a nie na domyślne tempo."""
+    assert tradebot.normalize_pace("realistic") == "light"
+    assert tradebot.normalize_pace("active") == "steady"
+    assert tradebot.normalize_pace("demo") == "busy"
+    assert tradebot.normalize_pace(None) == "steady"
+    assert tradebot.normalize_pace("bzdura") == "steady"
+
+    aid = _account("bot-alias-1")
+    s = SessionLocal()
+    acc = s.get(Account, aid)
+    acc.bot_pace = "demo"          # zapis sprzed zmiany, prosto w kolumnie
+    s.commit()
+    assert tradebot.persona_for(acc).pace == "busy"
+    s.close()
+
+
+def test_tempa_roznia_sie_realna_liczba_transakcji():
+    """Nie sama deklaracja: po pięciu dobach jazdy „busy" musi mieć wyraźnie
+    więcej zamkniętych pozycji niż „steady", a „steady" niż „light"."""
+    dni, tick_sek = 5, 600
+    licz = {}
+    for pace in ("light", "steady", "busy"):
+        aid = _account(f"bot-tempo-{pace}", pace=pace)
+        _drive(aid, dni * 24 * 3600 // tick_sek, step_sec=tick_sek)
+        licz[pace] = len(_trades(aid))
+
+    assert licz["light"] < licz["steady"] < licz["busy"], licz
+    # Widełki luźne z rozmysłem: dzień kończy się też na osiągnięciu dziennego
+    # celu, więc realna liczba bywa niższa od zaplanowanej. Chodzi o RZĄD
+    # WIELKOŚCI — że „busy" to kilkanaście-dwadzieścia wejść dziennie, a nie 2000.
+    assert 3 <= licz["light"] <= 12, licz
+    assert 15 <= licz["steady"] <= 45, licz
+    assert 50 <= licz["busy"] <= 125, licz
+
+
+def test_pozycja_nie_wisi_dluzej_niz_szesc_godzin():
+    """Sufit trzymania: przy 1 transakcji dziennie 40% doby to prawie 10 h
+    w rynku — day trader tyle nie siedzi w jednym wejściu."""
+    aid = _account("bot-hold-1", pace="light")
+    _drive(aid, 4 * 24 * 6)
+    trejdy = _trades(aid)
+    assert trejdy
+    for t in trejdy:
+        trwanie = (t.closed_at - t.opened_at).total_seconds()
+        assert trwanie <= tradebot.HOLD_MAX_SEK + 601, f"{trwanie / 3600:.1f} h"
+
+
 def test_tempo_realistic_nie_handluje_w_weekend():
-    aid = _account("bot-weekend-1", pace="realistic")
+    aid = _account("bot-weekend-1", pace="light")
     s = SessionLocal()
     acc = s.get(Account, aid)
     sobota = datetime(2026, 7, 11, 12, 0, tzinfo=timezone.utc)
@@ -272,7 +344,7 @@ def test_tempo_realistic_nie_handluje_w_weekend():
 SOBOTA = datetime(2026, 7, 11, 12, 0, tzinfo=timezone.utc)
 
 
-@pytest.mark.parametrize("pace", ["active", "demo"])
+@pytest.mark.parametrize("pace", ["steady", "busy"])
 def test_bot_stoi_w_weekend_bez_dodatku(pace):
     """Rynek jest zamknięty, więc żadne tempo nie ma prawa wejść w pozycję."""
     aid = _account(f"bot-wk-off-{pace}", pace=pace)
@@ -285,7 +357,7 @@ def test_bot_stoi_w_weekend_bez_dodatku(pace):
     s.close()
 
 
-@pytest.mark.parametrize("pace", ["active", "demo", "realistic"])
+@pytest.mark.parametrize("pace", ["light", "steady", "busy"])
 def test_bot_z_dodatkiem_handluje_w_weekend_samym_kryptem(pace):
     """Weekend Trading kupuje dostęp do jedynego czynnego rynku — krypto."""
     aid = _account(f"bot-wk-on-{pace}", pace=pace, weekend_trading=True)
@@ -365,7 +437,7 @@ def test_endpointy_bota_wymagaja_admina():
 def test_start_i_stop_przez_api():
     _, aid, _ = _trader_z_kontem("bot-api@x.pl")
     r = client.post(f"/api/admin/accounts/{aid}/bot",
-                    json={"style": "scalper", "pace": "demo", "target_pct": 4}, headers=ADMIN_H)
+                    json={"style": "scalper", "pace": "busy", "target_pct": 4}, headers=ADMIN_H)
     assert r.status_code == 200 and r.json()["bot_enabled"] is True
     assert client.get(f"/api/accounts/{aid}", headers=ADMIN_H).json()["bot_enabled"] is True
 
@@ -376,7 +448,7 @@ def test_start_i_stop_przez_api():
 
 def test_pauza_wstrzymuje_nowe_wejscia_ale_nie_oddaje_konta():
     """Pauza ≠ Stop: konto zostaje pod botem, saldo trzyma, brak nowych pozycji."""
-    aid = _account("bot-pause-1", pace="demo")
+    aid = _account("bot-pause-1", pace="busy")
     _drive(aid, 200, step_sec=30)
 
     s = SessionLocal()
@@ -414,7 +486,7 @@ def test_pauza_wstrzymuje_nowe_wejscia_ale_nie_oddaje_konta():
 
 def test_pauza_przez_api_i_wznowienie():
     _, aid, _ = _trader_z_kontem("bot-pause-api@x.pl")
-    client.post(f"/api/admin/accounts/{aid}/bot", json={"pace": "demo"}, headers=ADMIN_H)
+    client.post(f"/api/admin/accounts/{aid}/bot", json={"pace": "busy"}, headers=ADMIN_H)
 
     r = client.patch(f"/api/admin/accounts/{aid}/bot", json={"paused": True}, headers=ADMIN_H)
     assert r.status_code == 200 and r.json()["bot_paused"] is True
@@ -468,7 +540,7 @@ def test_activity_oddaje_trady_wlascicielowi():
     _, aid, h = _trader_z_kontem("bot-act@x.pl")
     s = SessionLocal()
     acc = s.get(Account, aid)
-    tradebot.start(s, acc, style="scalper", pace="demo")
+    tradebot.start(s, acc, style="scalper", pace="busy")
     s.close()
     _drive(aid, 300, step_sec=30)
 
@@ -485,7 +557,7 @@ def test_activity_nie_zdradza_godziny_ani_poziomow():
     Ukrywanie poziomów w tabeli przy zostawieniu ich w JSON-ie nie miałoby sensu."""
     _, aid, h = _trader_z_kontem("bot-noprice@x.pl")
     s = SessionLocal()
-    tradebot.start(s, s.get(Account, aid), style="scalper", pace="demo")
+    tradebot.start(s, s.get(Account, aid), style="scalper", pace="busy")
     s.close()
     _drive(aid, 300, step_sec=30)
 
