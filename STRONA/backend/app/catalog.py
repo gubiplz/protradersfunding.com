@@ -1,8 +1,8 @@
 """Katalog produktów (planów challenge'a), kupony i parametry afiliacji.
 
-Rozmiary i ceny wzorowane na FTMO / Alpha Capital Group (2026): 10k–2M,
-modele 2-Step i Instant Funding (bez darmowego triala). Seed trafia do tabeli
-`products`, więc admin może je później edytować w bazie.
+Rozmiary i ceny wzorowane na FTMO / Alpha Capital Group (2026): 25k–2M,
+modele 2-Step i Instant Funding (bez darmowego triala). Seed synchronizuje
+tabelę `products`, z której czyta sklep — TEN plik jest źródłem prawdy.
 """
 from __future__ import annotations
 
@@ -42,11 +42,12 @@ def max_lots_for(account_size: float) -> float:
 WEEKEND_ADDON_USD = 199.0
 
 # (key, label, size, steps, price, p1, p2, daily, maxdd, dd_type, min_days, split)
-# Oferta 2026-07-29: dwa modele (2-Step i Instant Funding), rozmiary 10k–2M.
+# Oferta 2026-08-02: dwa modele (2-Step i Instant Funding), rozmiary 25k–2M.
+# 10k wypadło z oferty — wejściowym rozmiarem jest 25k. Konta już kupione żyją
+# dalej; plany znikają tylko ze sklepu (patrz `seed_products`).
 _CATALOG = [
     # --- 2-STEP (klasyczna ewaluacja: P1 10% / P2 5%, DD 5/10, split do 90%) ---
-    ("2step-10k",  "2-Step 10K",  10_000,    2, 99,   10, 5, 5, 10, "static", 5, 90),
-    ("2step-25k",  "2-Step 25K",  25_000,    2, 249,  10, 5, 5, 10, "static", 5, 90),
+    ("2step-25k",  "2-Step 25K",  25_000,    2, 299,  10, 5, 5, 10, "static", 5, 90),
     ("2step-50k",  "2-Step 50K",  50_000,    2, 349,  10, 5, 5, 10, "static", 5, 90),
     ("2step-100k", "2-Step 100K", 100_000,   2, 549,  10, 5, 5, 10, "static", 5, 90),
     ("2step-200k", "2-Step 200K", 200_000,   2, 1049, 10, 5, 5, 10, "static", 5, 90),
@@ -57,7 +58,6 @@ _CATALOG = [
     ("2step-2m",   "2-Step 2M",   2_000_000, 2, 5999, 10, 5, 5, 10, "static", 5, 90),
     # --- INSTANT FUNDING (bez ewaluacji: od razu funded; DD 5/8, split 70%,
     #     min. 30 dni handlu przed pierwszą wypłatą) ---
-    ("instant-10k",  "Instant 10K",  10_000,    0, 119,  0, 0, 5, 8, "static", 30, 70),
     ("instant-25k",  "Instant 25K",  25_000,    0, 309,  0, 0, 5, 8, "static", 30, 70),
     ("instant-50k",  "Instant 50K",  50_000,    0, 439,  0, 0, 5, 8, "static", 30, 70),
     ("instant-100k", "Instant 100K", 100_000,   0, 689,  0, 0, 5, 8, "static", 30, 70),
@@ -73,15 +73,19 @@ _CATALOG = [
 def seed_products(session) -> None:
     """Synchronizuje katalog w bazie z `_CATALOG` (źródłem prawdy w kodzie).
 
-    Zasada: dodajemy brakujące plany, wycofujemy usunięte z oferty i aktualizujemy
-    REGUŁY RYZYKA (limit wolumenu). Cen i nazw NIE nadpisujemy — te admin może
-    zmieniać w bazie i zmiany mają przetrwać restart.
+    Dodajemy brakujące plany, wycofujemy usunięte z oferty, aktualizujemy REGUŁY
+    RYZYKA (limit wolumenu) i CENY. Cena jedzie z kodu, bo panel admina nie ma
+    edytora cennika — gdyby seed jej nie nadpisywał, podwyżka wdrożona w kodzie
+    nigdy nie dotarłaby do tabeli `products`, z której czyta sklep, i strona
+    dalej sprzedawałaby po starych stawkach.
+
+    Historii to nie rusza: `Order.amount_usd` trzyma kwotę z chwili zakupu.
     """
     catalog_keys = {row[0] for row in _CATALOG}
     changed = False
 
-    # 1. Wycofane z oferty (free trial, 5k) — znikają ze sklepu, ale zostają w bazie
-    #    dla kont, które już je kupiły.
+    # 1. Wycofane z oferty (free trial, 5k, 10k) — znikają ze sklepu, ale zostają
+    #    w bazie dla kont, które już je kupiły.
     retired = (session.query(Product)
                .filter(Product.active == True, Product.key.notin_(catalog_keys))  # noqa: E712
                .update({Product.active: False}, synchronize_session=False))
@@ -98,7 +102,16 @@ def seed_products(session) -> None:
             prod.max_lots = want
             changed = True
 
-    # 3. Nowe plany z katalogu
+    # 3. Cennik z kodu (tylko plany BĘDĄCE w ofercie — wycofanym zostawiamy
+    #    ostatnią cenę, po jakiej realnie się sprzedawały).
+    for (key, _label, _size, _steps, price, *_rest) in _CATALOG:
+        prod = existing.get(key)
+        if prod is not None and abs((prod.price_usd or 0) - price) > 1e-9:
+            print(f"[seed] cena {key}: {prod.price_usd} -> {price}")
+            prod.price_usd = price
+            changed = True
+
+    # 4. Nowe plany z katalogu
     added = 0
     for (key, label, size, steps, price, p1, p2, daily, maxdd, dd, mind, split) in _CATALOG:
         if key in existing:

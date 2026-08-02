@@ -285,7 +285,7 @@ def test_zakup_daje_konto_aktywne_z_lokalnymi_poswiadczeniami():
     tid = _new_trader("lokalny-zakup@test.pl")
     s = SessionLocal()
     tr = s.get(Trader, tid)
-    done = billing.mock_complete(s, billing.create_checkout(s, tr, "2step-10k", None)["order_id"], tid)
+    done = billing.mock_complete(s, billing.create_checkout(s, tr, "2step-25k", None)["order_id"], tid)
     acc = s.get(Account, done["account_id"])
 
     assert acc.status == "active"          # żadnego czekania w 'provisioning'
@@ -323,7 +323,7 @@ def test_null_feed_nie_rusza_konta():
     tid = _new_trader("nullfeed@test.pl")
     s = SessionLocal()
     tr = s.get(Trader, tid)
-    done = billing.mock_complete(s, billing.create_checkout(s, tr, "2step-10k", None)["order_id"], tid)
+    done = billing.mock_complete(s, billing.create_checkout(s, tr, "2step-25k", None)["order_id"], tid)
     acc = s.get(Account, done["account_id"])
     przed = (acc.balance, acc.equity, acc.trading_days_count)
 
@@ -340,7 +340,7 @@ def test_konto_bez_realnego_mt5_nie_trafia_do_feedu_metaquotes():
     tid = _new_trader("nomt5@test.pl")
     s = SessionLocal()
     tr = s.get(Trader, tid)
-    done = billing.mock_complete(s, billing.create_checkout(s, tr, "2step-10k", None)["order_id"], tid)
+    done = billing.mock_complete(s, billing.create_checkout(s, tr, "2step-25k", None)["order_id"], tid)
     acc = s.get(Account, done["account_id"])
 
     class SpyFeed(Feed):

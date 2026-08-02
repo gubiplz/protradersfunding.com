@@ -31,7 +31,7 @@ def _kupione_konto():
                 full_name="History Tester", referral_code=auth.secrets.token_hex(3))
     s.add(tr); s.commit()
     tid = tr.id
-    res = billing.create_checkout(s, tr, "2step-10k", None)
+    res = billing.create_checkout(s, tr, "2step-25k", None)
     done = billing.mock_complete(s, res["order_id"], tid)
     s.close()
     return done["account_id"], res["order_id"]

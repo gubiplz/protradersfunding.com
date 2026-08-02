@@ -43,7 +43,7 @@ def _konto(tid, login, *, status="passed", balance=10_000.0, initial=10_000.0):
     s = SessionLocal()
     acc = Account(login=login, trader_id=tid, trader_name="Client Area",
                   platform_login=login, platform_password="x", platform_server="MetaQuotes-Demo",
-                  product_key="2step-10k", initial_balance=initial, balance=balance, equity=balance,
+                  product_key="2step-25k", initial_balance=initial, balance=balance, equity=balance,
                   peak_equity=initial, day_start_equity=initial, day_start_balance=initial,
                   status=status, phase="eval_1")
     s.add(acc); s.commit()
@@ -172,7 +172,7 @@ def test_achievements_odblokowuja_sie_z_realnych_zdarzen():
         przed = {b["key"]: b["unlocked"] for b in c.get("/api/me/achievements", headers=h).json()}
         assert przed["first_challenge"] is False
         s = SessionLocal()
-        s.add(Order(trader_id=tid, product_key="2step-10k", amount_usd=89, status="paid"))
+        s.add(Order(trader_id=tid, product_key="2step-25k", amount_usd=89, status="paid"))
         s.commit(); s.close()
         po = {b["key"]: b["unlocked"] for b in c.get("/api/me/achievements", headers=h).json()}
     assert po["first_challenge"] is True and po["funded"] is False
@@ -246,17 +246,17 @@ def test_admin_grant_tworzy_konto_bez_platnosci():
         assert c.get("/api/admin/traders").status_code in (401, 403)
 
         r = c.post("/api/admin/grant", headers=ADMIN_H,
-                   json={"trader_id": tid, "product_key": "2step-10k", "note": "BOGO promotion"})
+                   json={"trader_id": tid, "product_key": "2step-25k", "note": "BOGO promotion"})
         assert r.status_code == 200 and r.json()["granted"] is True
 
         accs = c.get("/api/me/accounts", headers=h).json()
-        acc = next(a for a in accs if a["product_key"] == "2step-10k")
+        acc = next(a for a in accs if a["product_key"] == "2step-25k")
         assert acc["source"] == "grant"
         assert acc["grant_note"] == "BOGO promotion"
-        assert acc["initial_balance"] == 10_000
+        assert acc["initial_balance"] == 25_000
 
         orders = c.get("/api/orders", headers=h).json()
-        o = next(o for o in orders if o["product_key"] == "2step-10k")
+        o = next(o for o in orders if o["product_key"] == "2step-25k")
         assert o["amount_usd"] == 0 and o["provider"] == "grant" and o["status"] == "paid"
 
 
@@ -264,9 +264,9 @@ def test_grant_wymaga_admina_i_istniejacego_tradera():
     tid, h = _trader("grant-auth@test.pl")
     with TestClient(app) as c:
         assert c.post("/api/admin/grant", headers=h,
-                      json={"trader_id": tid, "product_key": "2step-10k"}).status_code in (401, 403)
+                      json={"trader_id": tid, "product_key": "2step-25k"}).status_code in (401, 403)
         assert c.post("/api/admin/grant", headers=ADMIN_H,
-                      json={"trader_id": 999999, "product_key": "2step-10k"}).status_code == 404
+                      json={"trader_id": 999999, "product_key": "2step-25k"}).status_code == 404
         assert c.post("/api/admin/grant", headers=ADMIN_H,
                       json={"trader_id": tid, "product_key": "nie-ma"}).status_code == 404
 
@@ -733,7 +733,7 @@ def test_usuniecie_konta_nie_lamie_kluczy_obcych():
     tid, h = _trader("delete-fk@test.pl", "Do Skasowania")
     with TestClient(app) as c:
         r = c.post("/api/admin/grant", headers=ADMIN_H,
-                   json={"trader_id": tid, "product_key": "2step-10k", "note": "BOGO promotion"})
+                   json={"trader_id": tid, "product_key": "2step-25k", "note": "BOGO promotion"})
         aid = r.json()["account_id"]
 
         s = SessionLocal()
@@ -765,7 +765,7 @@ def test_usuniecie_konta_NIE_zwalnia_slotu_w_puli():
     from app.models import PoolAccount
     tid, _ = _trader("delete-pool@test.pl")
     s = SessionLocal()
-    acc = Account(login="900001", trader_id=tid, trader_name="Pool", product_key="2step-10k",
+    acc = Account(login="900001", trader_id=tid, trader_name="Pool", product_key="2step-25k",
                   initial_balance=10_000, balance=10_000, equity=10_000, peak_equity=10_000,
                   day_start_equity=10_000, day_start_balance=10_000, status="active")
     s.add(acc); s.commit(); aid = acc.id

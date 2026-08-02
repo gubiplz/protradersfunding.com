@@ -1,4 +1,4 @@
-"""Oferta 2026-07-29 (2-Step + Instant, 10k–2M), add-on Weekend Trading
+"""Oferta 2026-08-02 (2-Step + Instant, 25k–2M), add-on Weekend Trading
 i system resetu hasla."""
 import os
 import tempfile
@@ -27,13 +27,14 @@ def _trader(email):
     return tid
 
 
-def test_oferta_2step_i_instant_10k_do_2m_bez_1step():
+def test_oferta_2step_i_instant_25k_do_2m_bez_1step():
     ps = client.get("/api/products").json()
     active = {p["key"]: p for p in ps if p["price_usd"] > 0}
-    assert active["2step-10k"]["price_usd"] == 99
+    assert active["2step-25k"]["price_usd"] == 299
+    assert active["2step-25k"]["account_size"] == 25_000
     assert active["2step-2m"]["price_usd"] == 5999
     assert active["2step-2m"]["account_size"] == 2_000_000
-    assert active["instant-10k"]["price_usd"] == 119
+    assert active["instant-25k"]["price_usd"] == 309
     assert active["instant-2m"]["price_usd"] == 7499
     assert active["2step-50k"]["profit_target_p1"] == 10
     assert active["2step-50k"]["profit_split_pct"] == 90
@@ -42,15 +43,20 @@ def test_oferta_2step_i_instant_10k_do_2m_bez_1step():
     # test_business dodaje wlasny produkt test-1step-* (mechanika silnika) — nie liczy sie do oferty
     assert not any(p["steps"] == 1 and not p["key"].startswith("test-")
                    for p in ps if p["price_usd"] > 0), "1-step znikl z oferty"
+    # 10k wypadlo z oferty: ani 2-Step, ani Instant nie da sie juz kupic, a
+    # najtansze wejscie to 25k za 299 — landing nie ma prawa pokazac nizszej ceny.
+    assert "2step-10k" not in active and "instant-10k" not in active
+    assert min(p["price_usd"] for p in ps
+               if p["price_usd"] > 0 and not p["key"].startswith("test-")) == 299
 
 
 def test_weekend_addon_dolicza_199_i_laduje_na_koncie():
     tid = _trader("weekend@test.pl")
     s = SessionLocal()
     tr = s.get(Trader, tid)
-    res = billing.create_checkout(s, tr, "2step-10k", None, weekend_trading=True)
+    res = billing.create_checkout(s, tr, "2step-25k", None, weekend_trading=True)
     order = s.get(Order, res["order_id"])
-    assert order.amount_usd == 99 + 199
+    assert order.amount_usd == 299 + 199
     assert order.weekend_trading is True
     done = billing.mock_complete(s, order.id, tid)
     acc = s.get(Account, done["account_id"])

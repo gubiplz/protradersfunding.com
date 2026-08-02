@@ -44,13 +44,27 @@ UPLOADS = Path(__file__).resolve().parent.parent / "uploads"
 
 
 # --------------------------------------------------------------------------- #
-#  Seed demo (admin, produkty, traderzy + konta)                              #
+#  Oferta (zawsze) + seed demo (admin, traderzy, konta — tylko z AUTO_SEED)    #
 # --------------------------------------------------------------------------- #
-def seed_demo() -> None:
+def sync_catalog() -> None:
+    """Wgrywa ofertę z `catalog._CATALOG` do bazy przy KAŻDYM starcie.
+
+    Świadomie POZA flagą `auto_seed`: ta flaga wyłącza dane DEMO (konto admina,
+    testowi traderzy), a nie cennik. Produkcja chodzi z AUTO_SEED=false — gdyby
+    katalog dalej siedział pod tą flagą, sklep sprzedawałby po cenach z dnia
+    założenia bazy i żadna zmiana w kodzie (podwyżka, wycofanie rozmiaru) nigdy
+    by tam nie dotarła.
+    """
     session = SessionLocal()
     try:
         catalog.seed_products(session)
+    finally:
+        session.close()
 
+
+def seed_demo() -> None:
+    session = SessionLocal()
+    try:
         if not session.query(Trader).filter(Trader.is_admin == True).first():  # noqa: E712
             admin = Trader(email="admin@local", password_hash=auth.hash_password("admin123"),
                            full_name="Administrator", is_admin=True,
@@ -64,7 +78,7 @@ def seed_demo() -> None:
             demo = [
                 ("john@demo.test", "John Carter", "2step-100k", "static"),
                 ("anna@demo.test", "Anna Novak", "2step-100k", "trailing"),
-                ("peter@demo.test", "Peter Wagner", "2step-10k", "static"),
+                ("peter@demo.test", "Peter Wagner", "2step-25k", "static"),
                 ("maria@demo.test", "Maria Lopez", "2step-100k", "static"),
                 ("thomas@demo.test", "Thomas Green", "instant-100k", "static"),
             ]
@@ -152,8 +166,9 @@ def _warn_if_placeholder_provisioning() -> None:
 async def lifespan(app: FastAPI):
     init_db()
     _migruj_login_admina()
+    sync_catalog()    # oferta i cennik z kodu — niezależnie od trybu
     if settings.auto_seed:
-        seed_demo()   # produkty + admin zawsze; konta demo tylko w trybie sim
+        seed_demo()   # admin zawsze; konta demo tylko w trybie sim
     _warn_if_placeholder_provisioning()
     if settings.poller_enabled:
         poller.start()

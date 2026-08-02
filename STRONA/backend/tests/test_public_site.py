@@ -231,35 +231,36 @@ def test_publiczny_pas_certyfikatow_maskuje_i_nie_ujawnia_tokenow():
 
 def test_landing_ma_katalog_wstrzykniety_w_html():
     """Konfigurator w hero nie moze mrugac pustymi "—" przez pol sekundy —
-    serwer wstrzykuje caly katalog w HTML (#pf-products), a ceny ida z BAZY
-    (admin mogl je zmienic), nie z literalow w catalog.py."""
+    serwer wstrzykuje caly katalog w HTML (#pf-products), a liczby ida z BAZY.
+
+    Bazę trzyma w ryzach kod: przy starcie `sync_catalog()` wgrywa cennik z
+    `catalog._CATALOG`, wiec recznie podmieniona cena w bazie wraca do wartosci
+    z katalogu. Inaczej podwyzka wdrozona w kodzie nigdy nie dotarlaby na
+    produkcje, gdzie AUTO_SEED jest wylaczony."""
     import json as _json
 
     s = SessionLocal()
     prod = s.query(main_mod.Product).filter(main_mod.Product.key == "2step-100k").first()
-    prod.price_usd = 777.0          # cena spoza katalogu — musi trafic do HTML
+    prod.price_usd = 777.0          # recznie rozjechana cena...
     s.commit()
     s.close()
-    try:
-        with TestClient(app) as c:
-            html = c.get("/").text
-        assert 'id="pf-products"' in html
-        surowy = html.split('id="pf-products" type="application/json">', 1)[1].split("</script>", 1)[0]
-        dane = _json.loads(surowy)
-        wpis = next(p for p in dane if p["key"] == "2step-100k")
-        assert wpis["price_usd"] == 777.0
-        assert any(p["steps"] == 0 for p in dane)   # oba modele obecne
-        # konfigurator hero jest WYRENDEROWANY serwerowo (nie czeka na JS):
-        # domyślny wybór to 2step-100k, więc cena z bazy stoi w pierwszym HTML
-        assert 'data-v="777"' in html and "$777" in html
-        assert 'data-key="2step-100k"' in html
-        assert "2-Step Evaluation" in html and "Start with $100K" in html
-    finally:
-        s = SessionLocal()
-        prod = s.query(main_mod.Product).filter(main_mod.Product.key == "2step-100k").first()
-        prod.price_usd = 549.0
-        s.commit()
-        s.close()
+
+    with TestClient(app) as c:      # ...start aplikacji przywraca ja z katalogu
+        html = c.get("/").text
+    assert 'id="pf-products"' in html
+    surowy = html.split('id="pf-products" type="application/json">', 1)[1].split("</script>", 1)[0]
+    dane = _json.loads(surowy)
+    wpis = next(p for p in dane if p["key"] == "2step-100k")
+    assert wpis["price_usd"] == 549.0
+    assert any(p["steps"] == 0 for p in dane)   # oba modele obecne
+    # wejsciem do oferty jest 25k za 299 — 10k wypadlo calkowicie
+    assert next(p for p in dane if p["key"] == "2step-25k")["price_usd"] == 299.0
+    assert not any(p["key"].endswith("-10k") for p in dane)
+    # konfigurator hero jest WYRENDEROWANY serwerowo (nie czeka na JS):
+    # domyślny wybór to 2step-100k, więc cena z bazy stoi w pierwszym HTML
+    assert 'data-v="549"' in html and "$549" in html
+    assert 'data-key="2step-100k"' in html
+    assert "2-Step Evaluation" in html and "Start with $100K" in html
 
 
 def test_panel_admina_nie_jest_strona_publiczna():

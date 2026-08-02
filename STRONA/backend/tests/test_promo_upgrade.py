@@ -138,7 +138,7 @@ def test_api_promo_waliduje_kod_dla_belki(promo):
 def test_api_products_podaje_nastepny_rozmiar_dla_landingu(promo):
     ps = {p["key"]: p for p in client.get("/api/products").json()}
     # nastepny plan w gore, nie ×2 — 2M (najwiekszy) bez celu
-    assert ps["2step-10k"]["promo_upgrade_size"] == 25_000
+    assert ps["2step-25k"]["promo_upgrade_size"] == 50_000
     assert ps["2step-50k"]["promo_upgrade_size"] == 100_000
     assert ps["2step-50k"]["promo_upgrade_label"] == "2-Step 100K"
     assert ps["2step-200k"]["promo_upgrade_size"] == 300_000

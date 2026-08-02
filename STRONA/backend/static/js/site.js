@@ -521,6 +521,119 @@
   }
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+  /* ---------- the certificate strip drifts, and you can grab it ----------
+     Each row moves under rAF instead of @keyframes, because a CSS animation
+     cannot be nudged: the old strip could only be watched. A row keeps its
+     offset in pixels, wrapped by the length of ONE content copy, so the loop
+     stays seamless no matter how far it is dragged or flung. Mouse, finger and
+     a horizontal trackpad swipe all push the same offset. */
+  function stripMotion(box) {
+    const track = $('.cs-marquee', box);
+    if (!track) return;
+    const rows = $$('.cs-row', track).filter(el => el.children.length);
+    if (!rows.length) return;
+    /* Resting speed in px/s — opposite directions, slightly out of step, so the
+       two rows never line up into one moving block. Zero when the visitor asked
+       for less motion; dragging still works. */
+    const lanes = rows.map((el, i) => ({
+      el, x: 0, v: 0, period: 0, drift: reduced ? 0 : (i % 2 ? -13 : 16),
+    }));
+
+    /* One copy is half the row PLUS one gap: the seam between the two halves
+       needs the gap that the browser does not draw after the last card. */
+    const gap = parseFloat(getComputedStyle(lanes[0].el).columnGap) || 0;
+    const measure = () => lanes.forEach(l => { l.period = (l.el.scrollWidth + gap) / 2; });
+    measure();
+    addEventListener('resize', measure, { passive: true });
+
+    let hover = false, dragging = false, onScreen = true, prev = 0, raf = 0;
+    const wrap = (x, p) => ((x % p) + p) % p;
+    const paint = () => lanes.forEach(l => {
+      if (l.period > 0) l.el.style.transform = `translate3d(${-wrap(l.x, l.period)}px,0,0)`;
+    });
+    /* Read live rather than trusting enter/leave: pointer capture can swallow a
+       leave event, and a strip stuck in "paused" would never move again. Only
+       real pointers pause it — a phone keeps :hover on the last tapped element,
+       which would freeze the strip for good after one swipe. */
+    const canHover = matchMedia('(hover: hover)').matches;
+    const target = l => (hover || dragging ? 0 : l.drift);
+    const busy = () => dragging || lanes.some(l => l.v || target(l));
+
+    const frame = now => {
+      const dt = Math.min(.05, prev ? (now - prev) / 1000 : 0);
+      prev = now;
+      hover = canHover && track.matches(':hover');
+      if (!dragging) for (const l of lanes) {
+        /* A fling decays into the resting drift — or into a full stop while the
+           pointer rests on the strip, so a card can be read. The rate matches
+           what browsers use for their own flings, so it feels borrowed. */
+        l.v += (target(l) - l.v) * Math.min(1, dt * 3);
+        if (Math.abs(l.v - target(l)) < .05) l.v = target(l);
+        l.x += l.v * dt;
+      }
+      paint();
+      if (onScreen && !document.hidden && busy()) raf = requestAnimationFrame(frame);
+      else { raf = 0; prev = 0; }
+    };
+    /* Every wake-up goes through here, and the first frame runs with dt = 0 —
+       a strip that was paused for a minute must not jump a minute forward. */
+    const kick = () => {
+      if (!raf && onScreen && !document.hidden) { prev = 0; raf = requestAnimationFrame(frame); }
+    };
+
+    let pid = null, lastX = 0, lastT = 0, fling = 0;
+    track.addEventListener('pointerdown', e => {
+      if (e.button > 0) return;                       // left button, finger or pen
+      pid = e.pointerId; dragging = true; fling = 0;
+      lastX = e.clientX; lastT = e.timeStamp;
+      track.classList.add('is-drag');
+      try { track.setPointerCapture(pid); } catch (err) {}
+      kick();
+    });
+    track.addEventListener('pointermove', e => {
+      if (!dragging || e.pointerId !== pid) return;
+      const dx = e.clientX - lastX, dt = Math.max(1, e.timeStamp - lastT);
+      lastX = e.clientX; lastT = e.timeStamp;
+      for (const l of lanes) l.x -= dx;               // the cards follow the hand
+      /* Smoothed, so one twitchy sample at the end cannot launch the strip. */
+      fling = fling * .7 + (-dx / dt * 1000) * .3;
+    });
+    const release = e => {
+      if (!dragging || (e && e.pointerId !== pid)) return;
+      dragging = false;
+      track.classList.remove('is-drag');
+      try { track.releasePointerCapture(pid); } catch (err) {}
+      pid = null;
+      const v = Math.max(-2600, Math.min(2600, fling));
+      for (const l of lanes) l.v = v;
+      kick();
+    };
+    track.addEventListener('pointerup', release);
+    track.addEventListener('pointercancel', release);
+    track.addEventListener('pointerenter', kick);
+    track.addEventListener('pointerleave', kick);
+    track.addEventListener('dragstart', e => e.preventDefault());
+
+    track.addEventListener('wheel', e => {
+      /* Only a clearly sideways gesture is ours — vertical scrolling belongs to
+         the page. preventDefault also stops a trackpad swipe from being read as
+         "go back" by the browser. */
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      const step = e.deltaMode === 1 ? e.deltaX * 16 : e.deltaX;
+      for (const l of lanes) { l.x += step; l.v = 0; }
+      paint();
+      kick();
+    }, { passive: false });
+
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(es => { onScreen = es.some(x => x.isIntersecting); kick(); },
+        { rootMargin: '150px 0px' }).observe(track);
+    }
+    document.addEventListener('visibilitychange', kick);
+    kick();
+  }
+
   /* ---------- recently issued certificates (real data, masked names) ----------
      Each entry is the REAL certificate artwork (cert.css classes, same as the
      document itself) rendered full-size and scaled down — the strip shows the
@@ -562,11 +675,11 @@
           </div>
         </div></div>`;
       };
-      /* Dwa rzedy: co druga karta idzie do dolnego, wiec oba jada innym zestawem.
-         Kazdy rzad dostaje PARZYSTA liczbe kopii — animacja przesuwa o -50%,
-         wiec po polowie cyklu klatka jest identyczna i petla nie skacze.
-         Przy trzech certyfikatach jedna kopia nie wypelnilaby ekranu, dlatego
-         liczba kopii wynika z pomiaru: szerokosc rzedu >= 2x szerokosc pasa. */
+      /* Two rows, every other card in the lower one, so they never show the
+         same set. Each row gets an EVEN number of copies: the loop wraps at
+         half the row, so after half a cycle the frame is identical and nothing
+         jumps. Three certificates would not fill a wide screen with one copy,
+         hence the count comes from a measurement: row width >= 2x the strip. */
       const topRow = rows.filter((_, i) => i % 2 === 0);
       const botRow = rows.filter((_, i) => i % 2 === 1);
       /* Unhide FIRST: w [hidden] KAZDY pomiar to zero — a poniewaz liczba kopii
@@ -594,6 +707,7 @@
           const c = m.firstElementChild;
           if (c) m.style.height = Math.round(c.offsetHeight * CS_SCALE) + 'px';
         });
+        stripMotion(box);       // rows are final and measurable — start moving
       });
     } catch (e) { /* optional social proof — the section simply stays hidden */ }
   }
