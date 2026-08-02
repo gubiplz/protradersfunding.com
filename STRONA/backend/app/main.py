@@ -2316,6 +2316,53 @@ def admin_payout_certificate_revoke(payout_id: int):
         session.close()
 
 
+@app.delete("/api/admin/payouts/{payout_id}", dependencies=[Depends(auth.require_admin)])
+def admin_payout_delete(payout_id: int):
+    """Kasuje wiersz wypłaty z ewidencji — pomyłkowy wpis albo cofnięcie importu.
+
+    Znika sam zapis; SALDO KONTA zostaje takie, jakie jest. Wypłata wystawiona
+    z `reset_balance` zdjęła kiedyś zysk z konta i nie odkręcamy tego
+    automatycznie: przy żywym koncie nadpisalibyśmy bieżący stan equity danymi
+    sprzed wielu dni. Wpisy z importu mają `balance_reset=False`, więc tam nie
+    ma czego przywracać.
+    """
+    session = SessionLocal()
+    try:
+        p = session.get(Payout, payout_id)
+        if not p:
+            raise HTTPException(404, "Payout not found")
+        mial_certyfikat = bool(p.cert_token)
+        session.delete(p)
+        session.commit()
+        if mial_certyfikat:
+            _PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
+        return {"deleted": payout_id, "had_certificate": mial_certyfikat}
+    finally:
+        session.close()
+
+
+@app.delete("/api/admin/payout-requests/{req_id}", dependencies=[Depends(auth.require_admin)])
+def admin_payout_request_delete(req_id: int):
+    """Kasuje wniosek o wypłatę, którego nie ma po co trzymać (spam, duplikat).
+
+    Wniosku CZEKAJĄCEGO nie da się skasować — najpierw decyzja (approve/reject),
+    żeby cicha kasacja nie zastąpiła odpowiedzi dla tradera.
+    """
+    session = SessionLocal()
+    try:
+        r = session.get(PayoutRequest, req_id)
+        if not r:
+            raise HTTPException(404, "Payout request not found")
+        if r.status == "pending":
+            raise HTTPException(400, "Approve or reject this request first — a trader is "
+                                     "waiting for an answer, deleting it in silence is not one")
+        session.delete(r)
+        session.commit()
+        return {"deleted": req_id}
+    finally:
+        session.close()
+
+
 @app.get("/api/admin/traders", dependencies=[Depends(auth.require_admin)])
 def admin_traders(q: str | None = None):
     """Lista klientów (do wyszukiwarki przy przyznawaniu challenge'u)."""

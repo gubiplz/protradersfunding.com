@@ -610,7 +610,8 @@ function renderPayoutsView(){
           :`<button class="btn-o sm" onclick="makeCert(${r.id})">Generate</button>`}</td>
       <td style="text-align:right;white-space:nowrap">${r.kind==='request'&&r.status==='pending'
         ?`<button class="btn-p sm" onclick="approvePayout(${r.id})">Approve &amp; pay</button>
-          <button class="btn-o sm" onclick="rejectPayout(${r.id})">Reject</button>`:''}</td></tr>`).join('')}
+          <button class="btn-o sm" onclick="rejectPayout(${r.id})">Reject</button>`
+        :`<button class="btn-o sm danger" onclick="deletePayoutRow('${r.kind}',${r.id},${r.trader_share},'${esc(r.account_login||'')}')">Delete</button>`}</td></tr>`).join('')}
     </tbody></table></div>
     <p class="muted" style="font-size:11.5px;margin-top:10px">Approving pays the trader share and refunds the challenge fee on the first payout for that account.</p>`
     :list.length?`<div class="empty"><h3>No ${esc(f)} payouts</h3><p>Try a different filter.</p></div>`
@@ -1295,6 +1296,22 @@ async function submitGrant(){
       ?'MT5 account is being created — credentials e-mailed within a minute.'
       :'Credentials e-mailed to the trader.'}`,'ok',9000);
     go('accounts');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+
+/* Removes the whole row from the ledger — a mistyped payout, a duplicate, an
+   import to undo. The account balance is NOT rewound: a payout booked with a
+   balance reset took the profit off the account days ago and replaying that on
+   a live account would overwrite its current equity. */
+async function deletePayoutRow(kind,id,amount,login){
+  const co=kind==='payout'?`the $${fmt(amount)} payout on account ${login}`:'this payout request';
+  if(!confirm(`Delete ${co}?\n\nThe record disappears from the ledger and from every total. `
+    +`The account balance stays as it is now. This cannot be undone.`))return;
+  const url=kind==='payout'?`/api/admin/payouts/${id}`:`/api/admin/payout-requests/${id}`;
+  try{const r=await api(url,{method:'DELETE'});
+    toast(r.had_certificate?'Deleted. Its certificate is gone from the landing page too.'
+      :'Deleted.','ok');
+    VIEWS.payouts();
   }catch(e){toast('Error: '+e.message,'err')}
 }
 

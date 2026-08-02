@@ -123,6 +123,9 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
   background:var(--panel);white-space:nowrap}
 .btn-o:hover{border-color:var(--acc);color:var(--acc);background:var(--acc-bg)}
 .btn-o.sm,.btn-p.sm{padding:8px 13px;font-size:13px;border-radius:9px}
+/* Nieodwracalne akcje (kasowanie wiersza) — czerwone dopiero na hover, zeby
+   nie krzyczaly z kazdego wiersza tabeli, ale nie dalo sie ich kliknac na slepo. */
+.btn-o.danger:hover{border-color:var(--red);color:var(--red);background:var(--red-bg)}
 .btn-o svg{width:15px;height:15px}
 
 .inp{background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:11px 13px;
@@ -852,6 +855,16 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 .cr-num .l{font-size:11px;color:var(--dim);display:flex;align-items:center;gap:5px;white-space:nowrap}
 .cr-num .v{font-family:var(--mono);font-weight:600;font-size:14px;margin-top:1px;white-space:nowrap}
 .cr-num .v small{font-weight:600;font-size:11px}
+@media(max-width:1259px){
+  /* Ponizej ukladu jednoliniowego komorki dzielily miejsce po rowno (flex:1)
+     i mogly sie skurczyc ponizej swojej tresci (min-width:0). Kwota z otwartym
+     P&L ("$10,375.08 -$4.54") jest najszersza, ma nowrap, wiec wychodzila poza
+     komorke i wchodzila na "Trading days". Teraz zadna komorka nie schodzi
+     ponizej swojej tresci, a gdy caly rzad sie nie miesci — przenosi sie do
+     nastepnej linii zamiast nachodzic. */
+  .cr-nums{flex-wrap:wrap;gap:10px 20px}
+  .cr-num{flex:1 1 auto;min-width:max-content}
+}
 .cr-go{grid-area:go;display:flex;gap:8px;justify-self:end}
 .cr-go .btn-o,.cr-go .btn-p{white-space:nowrap}
 @media(min-width:1260px){

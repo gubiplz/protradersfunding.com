@@ -445,3 +445,45 @@ def test_import_wyplat_zglasza_bledy_zamiast_zgadywac():
     brak = client.post("/api/admin/payouts/import", headers=ADMIN,
                        json={"csv": "kolumna\n1\n"}).json()
     assert brak["ok"] is False
+
+
+def test_usuwanie_wiersza_wyplaty_i_wniosku():
+    """Wiersz da sie skasowac calkiem (pomylka, cofniecie importu), ale wniosek
+    CZEKAJACY nie — trader dostaje decyzje, nie cisze."""
+    from app import main as main_mod
+    from app.models import Payout, PayoutRequest
+
+    _product()
+    tid, _ = _trader()
+    aid = _konto_funded(tid, "OPS90003")
+    pid = client.post(f"/api/admin/accounts/{aid}/payout", headers=ADMIN,
+                      json={"amount": 600, "method": "bank", "reset_balance": False}).json()["id"]
+
+    main_mod._PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
+    assert any(x["amount_usd"] == 600 for x in
+               client.get("/api/public/certificates/recent").json())
+
+    r = client.delete(f"/api/admin/payouts/{pid}", headers=ADMIN)
+    assert r.status_code == 200 and r.json()["had_certificate"] is True
+    s = SessionLocal()
+    assert s.get(Payout, pid) is None
+    s.close()
+    assert not any(x["amount_usd"] == 600 for x in
+                   client.get("/api/public/certificates/recent").json())
+    assert client.delete(f"/api/admin/payouts/{pid}", headers=ADMIN).status_code == 404
+
+    s = SessionLocal()
+    czeka = PayoutRequest(account_id=aid, trader_id=tid, profit_amount=100.0,
+                          trader_share=80.0, method="bank", status="pending")
+    odrzucony = PayoutRequest(account_id=aid, trader_id=tid, profit_amount=50.0,
+                              trader_share=40.0, method="bank", status="rejected")
+    s.add(czeka); s.add(odrzucony); s.commit()
+    czeka_id, odrzucony_id = czeka.id, odrzucony.id
+    s.close()
+
+    assert client.delete(f"/api/admin/payout-requests/{czeka_id}", headers=ADMIN).status_code == 400
+    assert client.delete(f"/api/admin/payout-requests/{odrzucony_id}", headers=ADMIN).status_code == 200
+    s = SessionLocal()
+    assert s.get(PayoutRequest, czeka_id) is not None
+    assert s.get(PayoutRequest, odrzucony_id) is None
+    s.close()

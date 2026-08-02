@@ -182,7 +182,11 @@
 
   /* Pricing configurator: type toggle + size grid + add-on + coupon on the
      left, live program rules on the right. Data comes from /api/products. */
-  let cfgType = '2step', cfgSize = null, cfgWt = false, cfgCoupon = null, cfgPct = 0;
+  /* cfgPromo holds the "Upgrade Your Size" code. It is NOT a coupon: the fee
+     stays the same and the account size moves one tier up, so it can never be
+     mixed into cfgPct. The field below takes both kinds of code. */
+  let cfgType = '2step', cfgSize = null, cfgWt = false, cfgCoupon = null, cfgPct = 0,
+      cfgPromo = (() => { try { return localStorage.getItem('pf_promo_code') || null; } catch (e) { return null; } })();
   const typeItems = t => PRODUCTS
     .filter(p => (t === 'instant' ? p.steps === 0 : p.steps === 2) && p.price_usd > 0)
     .sort((a, b) => a.account_size - b.account_size);
@@ -211,10 +215,15 @@
     wt.textContent = cfgWt ? '✓ Added' : 'Add $199';
     wt.classList.toggle('on', cfgWt);
 
+    /* The upgrade promo does not touch the fee — it moves the account one tier
+       up, so the size has to be stated where the price is, or the offer reads
+       like nothing happened. */
+    const upSize = cfgPromo && p.promo_upgrade_size ? p.promo_upgrade_size : null;
     const fee = Math.round((p.price_usd * (1 - cfgPct / 100) + (cfgWt ? 199 : 0)) * 100) / 100;
     $('#pcfg-fee').textContent = '$' + fee.toLocaleString('en-US',
       { minimumFractionDigits: fee % 1 ? 2 : 0, maximumFractionDigits: 2 });
     $('#pcfg-feesub').textContent = (cfgPct ? `${cfgPct}% coupon applied · ` : '')
+      + (upSize ? `${cfgPromo} applied — you trade ${sizeLabel(upSize)} for the price of ${sizeLabel(p.account_size)} · ` : '')
       + (cfgType === 'instant' ? 'one-time fee — funded from day one'
          : 'one-time fee for evaluation access, refunded with your first payout');
 
@@ -250,19 +259,43 @@
       ['News trading', '<span class="ok">✓ Allowed</span>'],
       ['Leverage', 'Up to 1:100'],
     ];
+    if (upSize) rows.unshift(['Account size',
+      `<span class="ok">${sizeLabel(upSize)} — upgraded from ${sizeLabel(p.account_size)}</span>`]);
     $('#prules-rows').innerHTML = rows.map(([l, v]) =>
       `<div class="prule"><span>${l}</span><b>${v}</b></div>`).join('');
   }
 
+  /* The field takes EVERY kind of code, exactly like the promo bar and the
+     portal checkout: the "Upgrade Your Size" code first, anything else as a
+     discount coupon. Checking only coupons here was the bug — the upgrade code
+     is not in the coupon table, so a perfectly valid code came back red. */
   async function applyPricingCoupon() {
-    const inp = $('#pcfg-coupon'), code = (inp.value || '').trim();
+    const inp = $('#pcfg-coupon'), code = (inp.value || '').trim().toUpperCase();
     inp.classList.remove('bad');
-    if (!code) { cfgCoupon = null; cfgPct = 0; renderPricing(); return; }
+    if (code) inp.value = code;
+    if (!code) {
+      cfgCoupon = null; cfgPct = 0; cfgPromo = null;
+      try { localStorage.removeItem('pf_promo_code'); } catch (e) {}
+      renderPricing(); return;
+    }
+    let promo = false;
+    try { promo = (await (await fetch('/api/promo?code=' + encodeURIComponent(code))).json()).valid; } catch (e) {}
+    if (promo) {
+      cfgPromo = code; cfgCoupon = null; cfgPct = 0;
+      /* Checkout reads the code from here, so the configurator and the purchase
+         can never tell two different stories. */
+      try {
+        localStorage.setItem('pf_promo_code', code);
+        localStorage.removeItem('pf_coupon_code'); localStorage.removeItem('pf_coupon_pct');
+      } catch (e) {}
+      renderPricing(); return;
+    }
     try {
       const r = await fetch('/api/coupon/' + encodeURIComponent(code));
       if (!r.ok) throw new Error();
       const d = await r.json();
-      cfgCoupon = d.code; cfgPct = d.pct;
+      cfgCoupon = d.code; cfgPct = d.pct; cfgPromo = null;
+      try { localStorage.removeItem('pf_promo_code'); } catch (e) {}
     } catch (e) { cfgCoupon = null; cfgPct = 0; inp.classList.add('bad'); }
     renderPricing();
   }
@@ -401,7 +434,13 @@
     if (!$('#pcfg') && !$('#cfg')) return;
     const wire = () => {
       const ap = $('#pcfg-apply'); if (ap) ap.addEventListener('click', applyPricingCoupon);
-      const ci = $('#pcfg-coupon'); if (ci) ci.addEventListener('keydown', e => { if (e.key === 'Enter') applyPricingCoupon(); });
+      const ci = $('#pcfg-coupon');
+      if (ci) {
+        ci.addEventListener('keydown', e => { if (e.key === 'Enter') applyPricingCoupon(); });
+        /* A code redeemed in the promo bar has to show up here too — otherwise
+           the configurator quotes a plain account while checkout upgrades it. */
+        if (cfgPromo && !ci.value) ci.value = cfgPromo;
+      }
       const wt = $('#pcfg-wt'); if (wt) wt.addEventListener('click', () => { cfgWt = !cfgWt; renderPricing(); });
     };
     /* The server inlines the live catalog into the page (#pf-products) so the
