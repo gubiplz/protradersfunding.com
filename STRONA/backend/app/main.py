@@ -624,8 +624,20 @@ def signup(payload: SignupIn, request: Request, response: Response):
         raise HTTPException(400, "You must accept the Terms of Service and Privacy Policy")
     session = SessionLocal()
     try:
-        if session.query(Trader).filter(Trader.email == email).first():
-            raise HTTPException(400, "An account with this e-mail already exists")
+        istnieje = session.query(Trader).filter(Trader.email == email).first()
+        if istnieje:
+            # Samo „konto już istnieje" brzmi jak pomyłka serwera, gdy człowiek
+            # zakładał je przez Google (wtedy hasła NIE MA i logowanie hasłem
+            # nigdy nie zadziała) albo urwał rejestrację na kodzie z maila.
+            # Odpowiedź mówi, którędy wejść — bez tego jedyną drogą jest support.
+            if istnieje.google_sub:
+                raise HTTPException(400, "This e-mail is already signed up with Google — "
+                                         "use the “Continue with Google” button below")
+            if not istnieje.email_verified:
+                raise HTTPException(400, "This e-mail is already registered but not confirmed yet — "
+                                         "log in and we will send you a new confirmation code")
+            raise HTTPException(400, "An account with this e-mail already exists — "
+                                     "log in instead, or use “Forgot password?”")
         # Kod polecajacy tylko istniejacy — literowka nie moze cicho przypisac
         # prowizji do nikogo (ani zostac w bazie jako smiec).
         referred_by = None

@@ -143,10 +143,21 @@ if(localStorage.getItem('pf_promo_code')||localStorage.getItem('pf_coupon_code')
   </div>
 </div>
 <script>/* Cookie notice; the pf_cookie_ok choice is shared with the portal.
-   Only essential cookies exist either way — Decline just records the choice. */
+   Only essential cookies exist either way — Decline just records the choice.
+
+   The banner is fixed to the bottom, so the page has to give back the space it
+   covers — on a phone it stacks into three lines and parks on top of whatever
+   ends the page. --ck-h is that reserved strip; site.css turns it into padding. */
+function ckSpace(){
+  const el=document.getElementById('cookie-note');
+  const open=el&&!el.classList.contains('hidden');
+  document.documentElement.style.setProperty('--ck-h',
+    open?Math.ceil(innerHeight-el.getBoundingClientRect().top)+'px':'0px');
+}
 function cookieOk(v){try{localStorage.setItem('pf_cookie_ok',v?'1':'0')}catch(e){}
-  document.getElementById('cookie-note').classList.add('hidden')}
-try{if(localStorage.getItem('pf_cookie_ok')===null)document.getElementById('cookie-note').classList.remove('hidden')}catch(e){}</script>
+  document.getElementById('cookie-note').classList.add('hidden');ckSpace()}
+try{if(localStorage.getItem('pf_cookie_ok')===null)document.getElementById('cookie-note').classList.remove('hidden')}catch(e){}
+ckSpace();addEventListener('resize',ckSpace);addEventListener('load',ckSpace);</script>
 
 <script src="/static/lib/gsap.min.js"></script>
 <script src="/static/lib/ScrollTrigger.min.js"></script>

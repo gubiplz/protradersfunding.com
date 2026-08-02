@@ -36,7 +36,10 @@ html.promo-off .promo-bar{display:none}
 *{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth;scroll-padding-top:calc(84px + var(--promo-h));background:var(--bg)}
 body{background:var(--bg);color:var(--txt);font-family:var(--body);font-size:16px;line-height:1.65;
-  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+  -webkit-font-smoothing:antialiased;overflow-x:hidden;
+  /* Room for the fixed cookie notice while it is on screen (base.html sets it,
+     0 once dismissed) — otherwise the banner parks on the last screenful. */
+  padding-bottom:var(--ck-h,0px)}
 ::selection{background:rgba(99,102,241,.18)}
 a{color:inherit;text-decoration:none}
 img{max-width:100%;display:block}
@@ -657,6 +660,9 @@ html.promo-applied .promo-tag{background:rgba(255,255,255,.92);color:#4f46e5}
 .ck-decline:hover{color:var(--txt)}
 .cookie-note.hidden{display:none}
 @media(max-width:640px){
-  .cookie-note{flex-direction:column;align-items:flex-start;gap:12px}
+  /* Stacked, this banner ate a third of a phone screen — and the strip the page
+     has to reserve for it grew just as much. */
+  .cookie-note{flex-direction:column;align-items:flex-start;gap:10px;padding:13px 15px}
+  .cookie-note .ck-txt p{font-size:12.5px;line-height:1.45}
   .ck-actions{width:100%;justify-content:flex-end}
 }

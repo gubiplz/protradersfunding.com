@@ -108,7 +108,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
    ~1000px martwej przestrzeni po prawej, a tabela accounts (12 kolumn, ~1390px)
    nie miescila sie w tym, co zostawalo — i dostawala poziomy suwak. Topbar i tak
    nigdy nie mial limitu, wiec pelna szerokosc dodatkowo rownia obie krawedzie. */
-.content{padding:24px 28px 60px;width:100%}
+.content{padding:24px 28px calc(60px + var(--ck-h,0px));width:100%}
 @media(min-width:1600px){.content{padding-left:34px;padding-right:34px}}
 
 /* ---------------- ELEMENTS ---------------- */
@@ -323,7 +323,13 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 @keyframes sk{to{background-position:-200% 0}}
 
 /* ---------------- AUTH (split screen) ---------------- */
-.auth-wrap{min-height:100vh;display:grid;grid-template-columns:1.1fr 1fr}
+/* --ck-h to pasek zajety przez baner cookie (ustawia go portal.html). Bez tej
+   rezerwacji baner siedzi na koncu formularza rejestracji — na telefonie
+   dokladnie na zgodzie i przycisku „Create account" — i tapniecie trafia w
+   baner. Na body tego dac nie mozna: html,body maja height:100%, wiec przy
+   border-box padding schowalby sie w srodku zamiast wydluzyc strone. */
+.auth-wrap{min-height:100vh;display:grid;grid-template-columns:1.1fr 1fr;
+  padding-bottom:var(--ck-h,0px)}
 .auth-brand{position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:space-between;
   padding:44px 52px;border-right:1px solid var(--line);background:
   radial-gradient(70% 60% at 20% 0%,rgba(99,102,241,.12),transparent 65%),
@@ -1145,6 +1151,11 @@ html:not(.pwa){overscroll-behavior-y:contain}
      (scheme mismatch) — a white box framed the pill. Matching schemes here
      keeps the iframe transparent. */
   color-scheme:light}
+/* Why the Google button will not work here — shown only in in-app browsers.
+   Gold tokens, so the dark theme re-maps it like every other warning. */
+.g-inapp{font-size:12px;line-height:1.5;color:var(--gold-ink);background:var(--gold-bg);
+  border:1px solid var(--gold-line);border-radius:10px;padding:10px 12px;margin-bottom:11px}
+.g-inapp b{font-weight:600}
 .g-terms{font-size:11px;color:var(--dim);margin-top:11px;text-align:center;line-height:1.5}
 .g-terms a{color:var(--muted);text-decoration:underline}
 
@@ -1160,8 +1171,11 @@ html:not(.pwa){overscroll-behavior-y:contain}
 .ck-decline{font-size:14px;font-weight:600;color:var(--muted);padding:9px 6px}
 .ck-decline:hover{color:var(--txt)}
 @media(max-width:700px){
+  /* Tighter on a phone: stacked, this banner was 175px tall — a third of the
+     screen — and the reserved strip below it grew just as much. */
   .cookie-note{bottom:calc(70px + env(safe-area-inset-bottom));flex-direction:column;
-    align-items:flex-start;gap:12px}
+    align-items:flex-start;gap:10px;padding:13px 15px}
+  .cookie-note .ck-txt p{font-size:12.5px;line-height:1.45}
   .ck-actions{width:100%;justify-content:flex-end}
 }
 
