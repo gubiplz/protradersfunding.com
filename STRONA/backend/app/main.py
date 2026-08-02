@@ -28,7 +28,8 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import func
 
-from . import auth, billing, catalog, metaquotes_web, notify, poller, provisioning, push, rules, telemetry, tradebot
+from . import (auth, billing, catalog, metaquotes_web, notify, payout_import, poller,
+               provisioning, push, rules, telemetry, tradebot)
 from .config import get_settings
 from .db import SessionLocal, init_db
 from .models import (Account, AppSetting, Breach, Certificate, CreditLedger, EquitySnapshot,
@@ -2025,6 +2026,26 @@ def admin_payout_requests():
                         "status": r.status, "reject_reason": r.reject_reason,
                         "ts": r.ts.isoformat()})
         return out
+    finally:
+        session.close()
+
+
+class PayoutImportIn(BaseModel):
+    csv: str = ""
+    commit: bool = False
+
+
+@app.post("/api/admin/payouts/import", dependencies=[Depends(auth.require_admin)])
+def admin_import_payouts(payload: PayoutImportIn):
+    """Wgrywa historyczne wypłaty z CSV (ewidencja sprzed panelu).
+
+    Bez `commit` zwraca sam podgląd — baza zostaje nietknięta. Wypłaty powstają
+    jako rekordy wewnętrzne, BEZ publicznych certyfikatów; certyfikat wystawia
+    się osobno, pod potwierdzoną wypłatę. Szczegóły: app/payout_import.py.
+    """
+    session = SessionLocal()
+    try:
+        return payout_import.uruchom(session, payload.csv, commit=payload.commit)
     finally:
         session.close()
 

@@ -281,8 +281,8 @@ const VIEWS={
  },
 
  async payouts(){
-  /* Pelna lista: zaksiegowane wyplaty (takze wystawione recznie przez admina)
-     + wnioski, ktore nie staly sie jeszcze wyplata. */
+  /* Full list: every booked payout (including ones issued by hand from the
+     account card) plus requests that have not become a payout yet. */
   window._payReqs=await api('/api/admin/payouts');
   renderPayoutsView();
  },
@@ -582,11 +582,12 @@ function renderPayoutsView(){
   const f=window._payFilter||'all';
   const rows=list.filter(r=>f==='all'||r.status===f);
   const seg=[['all','All'],['pending','Pending'],['approved','Approved'],['paid','Paid'],['rejected','Rejected']];
-  $('view').innerHTML=(list.length?`
+  $('view').innerHTML=`
     <div class="toolbar">
-      <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._payFilter='${k}';renderPayoutsView()">${l}</button>`).join('')}</div>
-      <span class="count-pill">${rows.length} of ${list.length}</span>
-    </div>`:'')+(rows.length?`<div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.payouts">
+      ${list.length?`<div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._payFilter='${k}';renderPayoutsView()">${l}</button>`).join('')}</div>`:''}
+      <button class="btn-o sm" onclick="openPayoutImport()">Import history</button>
+      ${list.length?`<span class="count-pill">${rows.length} of ${list.length}</span>`:''}
+    </div>`+(rows.length?`<div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.payouts">
     <thead><tr><th>Date</th><th>Account</th><th>Trader</th><th>Profit</th><th>Trader share</th><th>Method</th><th>Status</th><th class="no-sort">Certificate</th><th class="no-sort"></th></tr></thead>
     <tbody>${rows.map(r=>`<tr>
       <td class="muted" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td><td class="num">${esc(r.account_login||'—')}</td>
@@ -1030,16 +1031,16 @@ async function issuePayout(id){
     openAccount(id);
   }catch(e){toast('Error: '+e.message,'err')}
 }
-/* accId podaje karta konta w slide-overze; widok Payouts wola bez niego
-   i wtedy przeladowujemy cala liste. */
+/* accId comes from the account slide-over; the Payouts view calls these
+   without it and then the whole list is reloaded instead. */
 async function makeCert(pid,accId){
   try{await api(`/api/admin/payouts/${pid}/certificate`,{method:'POST'});
     toast('Certificate generated. It appears on the landing page within a minute.','ok');
     accId?renderPayouts(accId):VIEWS.payouts();
   }catch(e){toast('Error: '+e.message,'err')}
 }
-/* Wycofanie certyfikatu — jedyna droga zdjecia wpisu z pasa na landingu.
-   Wyplata zostaje, znika tylko dokument i jego publiczny link. */
+/* Revoking is the only way to take an entry off the landing page strip.
+   The payout stays on the account — only the document and its link go. */
 async function revokeCert(pid,accId){
   if(!confirm('Revoke this certificate?\n\nThe public link stops working and the entry '
     +'disappears from the landing page. The payout itself stays on the account.'))return;
@@ -1295,6 +1296,67 @@ async function submitGrant(){
       :'Credentials e-mailed to the trader.'}`,'ok',9000);
     go('accounts');
   }catch(e){toast('Error: '+e.message,'err')}
+}
+
+/* ---------- modal: import historical payouts ----------
+   For payouts settled before this panel existed (bank transfer, spreadsheet,
+   notebook). They land as internal records so the totals stop lying; the public
+   certificate is a separate, deliberate click per payout. */
+const PI_HEAD='full_name,amount_usd,date,account_size,program,email,note';
+function openPayoutImport(){
+  const box=document.createElement('div');
+  box.id='payimp-modal';box.className='modal-wrap';
+  box.innerHTML=`<div class="modal" onclick="event.stopPropagation()" style="max-width:760px">
+    <div class="modal-head"><h3>Import historical payouts</h3>
+      <button class="icon-btn" onclick="document.getElementById('payimp-modal').remove()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <p class="muted" style="font-size:12.5px;margin-bottom:14px">Paste one payout per line, CSV,
+      starting with the header row. Missing traders and funded accounts are created for you.
+      <b>No public certificates are issued</b> — the entries stay internal until you press
+      Generate on a payout you can back with a transfer confirmation.</p>
+    <div class="stack">
+      <textarea id="pi-csv" class="inp" rows="9" spellcheck="false"
+        style="font-family:var(--mono,ui-monospace,monospace);font-size:12px;line-height:1.6"
+        placeholder="${PI_HEAD}&#10;Jane Example,2480,2026-07-03,50000,2step,jane@example.com,">${PI_HEAD}
+</textarea>
+      <div id="pi-out"></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn-o lg" style="flex:1" onclick="payoutImport(false)">Preview</button>
+        <button class="btn-p lg" style="flex:1" onclick="payoutImport(true)">Import</button>
+      </div>
+      <p class="hint">Preview changes nothing. Re-importing the same file is safe — the same
+        person, amount and day is never added twice.</p>
+    </div></div>`;
+  box.onclick=()=>box.remove();
+  document.body.appendChild(box);
+}
+async function payoutImport(commit){
+  const csv=($('pi-csv').value||'').trim();
+  if(!csv){toast('Paste the CSV first.','err');return}
+  const out=$('pi-out');
+  out.innerHTML='<p class="muted" style="font-size:12.5px">Working…</p>';
+  let r;
+  try{r=await api('/api/admin/payouts/import',{method:'POST',body:JSON.stringify({csv,commit})})}
+  catch(e){out.innerHTML=`<p class="muted" style="font-size:12.5px;color:var(--red)">Error: ${esc(e.message)}</p>`;return}
+  if(!r.ok){
+    out.innerHTML=`<div class="sec-card" style="padding:12px"><b style="font-size:12.5px">Fix these lines first</b>
+      ${r.errors.map(x=>`<div class="muted" style="font-size:12px;margin-top:4px">${esc(x)}</div>`).join('')}</div>`;
+    return;
+  }
+  out.innerHTML=`<div class="tbl-wrap" style="max-height:260px;overflow:auto"><table class="tbl">
+    <thead><tr><th>Name</th><th>Amount</th><th>Date</th><th>Account</th><th>Status</th></tr></thead>
+    <tbody>${r.rows.map(w=>`<tr>
+      <td>${esc(w.full_name)}</td><td class="num up">$${fmt(w.amount_usd)}</td>
+      <td class="muted">${esc(w.date)}</td>
+      <td class="muted">${esc(w.program)} $${fmt0(w.account_size)}</td>
+      <td>${w.duplicate?'<span class="muted">already in the database</span>'
+        :commit?'<span class="up">imported</span>':'<span class="muted">will be added</span>'}</td>
+    </tr>`).join('')}</tbody></table></div>`;
+  if(commit){
+    toast(`✅ ${r.added} payout(s) imported${r.skipped?`, ${r.skipped} skipped as duplicates`:''}. `
+      +'They are internal records — no certificates were issued.','ok',9000);
+    VIEWS.payouts();
+  }
 }
 
 /* ---------- modal: store credits ---------- */

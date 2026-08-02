@@ -380,3 +380,68 @@ def test_wycofanie_certyfikatu_zdejmuje_wpis_z_landingu():
     s.close()
 
     assert client.delete("/api/admin/payouts/999999/certificate", headers=ADMIN).status_code == 404
+
+
+def test_import_historycznych_wyplat_bez_certyfikatow():
+    """Wypłaty rozliczone przed wdrożeniem panelu trzeba dało się wprowadzić,
+    ale NIE mogą same z siebie wystawiać publicznych certyfikatów."""
+    from app import main as main_mod
+    from app.models import Payout
+
+    csv = ("full_name,amount_usd,date,account_size,program,email,note\n"
+           "Importowy Jeden,2480,2026-07-03,50000,2step,,\n"
+           "Importowy Dwa,3125,2026-07-07,100000,2step,,pierwsza wyplata\n")
+
+    # podglad niczego nie zapisuje
+    r = client.post("/api/admin/payouts/import", headers=ADMIN, json={"csv": csv})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["ok"] and d["added"] == 2 and d["committed"] is False
+    assert [w["duplicate"] for w in d["rows"]] == [False, False]
+    s = SessionLocal()
+    assert s.query(Trader).filter(Trader.email == "importowy.jeden@imported.local").count() == 0
+    s.close()
+
+    d2 = client.post("/api/admin/payouts/import", headers=ADMIN,
+                     json={"csv": csv, "commit": True}).json()
+    assert d2["added"] == 2 and d2["committed"] is True
+
+    s = SessionLocal()
+    tr = s.query(Trader).filter(Trader.email == "importowy.jeden@imported.local").first()
+    assert tr is not None
+    acc = s.query(Account).filter(Account.trader_id == tr.id).first()
+    assert acc.status == "funded" and acc.mt5_backed is False
+    p = s.query(Payout).filter(Payout.account_id == acc.id).one()
+    assert p.trader_share == 2480 and p.paid
+    assert p.cert_token is None, "import nie ma prawa wystawiac publicznego certyfikatu"
+    s.close()
+
+    # wpisy nie moga trafic na pas na landingu
+    main_mod._PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
+    pas = client.get("/api/public/certificates/recent").json()
+    assert not any(x["amount_usd"] in (2480, 3125) for x in pas)
+
+    # powtorka tego samego pliku niczego nie dubluje
+    d3 = client.post("/api/admin/payouts/import", headers=ADMIN,
+                     json={"csv": csv, "commit": True}).json()
+    assert d3["added"] == 0 and d3["skipped"] == 2
+
+    # widok Payouts pokazuje je jako zwykle wyplaty, bez certyfikatu
+    lista = client.get("/api/admin/payouts", headers=ADMIN).json()
+    moje = [x for x in lista if x["trader_email"] == "importowy.jeden@imported.local"]
+    assert len(moje) == 1 and moje[0]["kind"] == "payout" and moje[0]["cert_url"] is None
+
+
+def test_import_wyplat_zglasza_bledy_zamiast_zgadywac():
+    zly = ("full_name,amount_usd,date,account_size,program,email,note\n"
+           "Bez Daty,1000,,50000,2step,,\n"
+           "Zly Plan,1000,2026-07-03,777,2step,,\n")
+    d = client.post("/api/admin/payouts/import", headers=ADMIN,
+                    json={"csv": zly, "commit": True}).json()
+    assert d["ok"] is False and len(d["errors"]) == 2 and d["added"] == 0
+    assert any("YYYY-MM-DD" in b for b in d["errors"])
+    assert any("nie ma planu" in b for b in d["errors"])
+
+    brak = client.post("/api/admin/payouts/import", headers=ADMIN,
+                       json={"csv": "kolumna\n1\n"}).json()
+    assert brak["ok"] is False
