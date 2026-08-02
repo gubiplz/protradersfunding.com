@@ -85,26 +85,21 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
       {% if google_client_id %}
       <!-- Sign in with Google — shown on BOTH tabs (log in and sign up),
            hidden in the forgot/reset modes by authTab(). One button does both:
-           the server matches the account or creates one. -->
+           the server matches the account or creates one.
+           Hidden entirely inside in-app browsers (Telegram, Instagram): Google
+           refuses to sign anyone in there, so the button could only be a dead end. -->
       <div id="g-auth">
         <div class="auth-or"><s></s><span>or</span><s></s></div>
-        <!-- Shown only inside in-app browsers (Telegram, Instagram, Messenger):
-             Google refuses to sign anyone in there, and without a word about it
-             the button is a dead end. -->
-        <div class="g-inapp hidden" id="g-inapp">
-          <p>You opened this from an app, and Google refuses to sign anyone in inside an
-            app's built-in browser. One tap fixes it — or use the e-mail form above,
-            that works right here.</p>
-          <div class="g-inapp-row">
-            <button type="button" class="btn-p sm" id="g-escape" onclick="openInBrowser()">Open in browser</button>
-            <button type="button" class="g-copy" onclick="copyPortalLink(this)">Copy link</button>
-          </div>
-        </div>
         <div id="g-btn"></div>
         <p class="g-terms">By continuing with Google you agree to the
           <a href="/terms" target="_blank" rel="noopener">Terms of Service</a> and the
           <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</p>
       </div>
+      <!-- What replaces that block in an in-app browser. Deliberately a quiet
+           footnote and not an offer: whoever signed up with Google has NO
+           password here, so without a way out they could not log in at all. -->
+      <p class="g-inapp hidden" id="g-inapp">Google sign-in doesn't work in this app's browser —
+        <button type="button" id="g-escape" onclick="openInBrowser()">open in Safari</button></p>
       {% endif %}
     </div>
   </div>
@@ -468,7 +463,14 @@ function authTab(m){AUTHMODE=m;
   $('a-back').classList.toggle('hidden',!(forgot||reset));
   document.querySelector('.auth-tabs').classList.toggle('hidden',forgot||reset);
   const gAuth=document.getElementById('g-auth');
-  if(gAuth){gAuth.classList.toggle('hidden',forgot||reset);if(!(forgot||reset))renderGoogleBtn()}
+  /* In an app's built-in browser the whole Google block stays away — Google
+     will not sign anyone in there, so offering it is offering a dead end.
+     Its place is taken by the one-line way out (#g-inapp). */
+  const wApce=inAppBrowser();
+  if(gAuth){gAuth.classList.toggle('hidden',forgot||reset||wApce);
+    if(!(forgot||reset||wApce))renderGoogleBtn()}
+  const wyjscie=document.getElementById('g-inapp');
+  if(wyjscie)wyjscie.classList.toggle('hidden',!wApce||forgot||reset);
   $('a-pass').placeholder=reset?'New password (min. 8 characters)':signup?'Password (min. 8 characters)':'Password';
   /* Password managers must OFFER a generated password in signup/reset and the
      saved one only in login — the wrong hint makes them autofill the old one. */
@@ -540,10 +542,9 @@ function inAppBrowser(){
 /* Independent of GIS loading at all — inside those browsers Google's script is
    often blocked too, and then nothing would ever explain the empty spot. */
 const IOS=/iPhone|iPad|iPod/.test(navigator.userAgent);
-if(inAppBrowser()&&$('g-inapp')){
-  $('g-inapp').classList.remove('hidden');
-  $('g-escape').textContent=IOS?'Open in Safari':'Open in browser';
-}
+/* authTab() decides WHETHER the line shows; here we only word it for the phone
+   in hand. Runs before the first authTab() call, which happens inside boot(). */
+if(inAppBrowser()&&$('g-escape'))$('g-escape').textContent=IOS?'open in Safari':'open in your browser';
 /* The only way to reach Google from here is to LEAVE this browser, so hand the
    address to the operating system: iOS answers x-safari-https:// with Safari,
    Android answers intent:// with whatever it uses for https. No package is

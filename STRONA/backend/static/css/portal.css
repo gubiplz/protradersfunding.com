@@ -1151,15 +1151,12 @@ html:not(.pwa){overscroll-behavior-y:contain}
      (scheme mismatch) — a white box framed the pill. Matching schemes here
      keeps the iframe transparent. */
   color-scheme:light}
-/* Google cannot sign anyone in here — the way out, shown only in in-app
-   browsers. Gold tokens, so the dark theme re-maps it like every warning. */
-.g-inapp{font-size:12.5px;line-height:1.5;color:var(--gold-ink);background:var(--gold-bg);
-  border:1px solid var(--gold-line);border-radius:12px;padding:12px 13px;margin-bottom:11px}
-.g-inapp b{font-weight:600}
-.g-inapp-row{display:flex;align-items:center;gap:10px;margin-top:10px}
-.g-inapp-row .btn-p{flex:1;justify-content:center}
-.g-copy{font-size:12.5px;font-weight:600;color:var(--gold-ink);background:none;border:0;
-  padding:9px 4px;cursor:pointer;font-family:inherit;text-decoration:underline;flex:none}
+/* Stands in for the Google block inside in-app browsers. A footnote on purpose:
+   it is a way out for accounts that have no password, not a second offer. */
+.g-inapp{font-size:11.5px;line-height:1.6;color:var(--dim);text-align:center;margin-top:18px}
+.g-inapp button{font:inherit;font-weight:600;color:var(--muted);background:none;border:0;
+  padding:6px 0;cursor:pointer;text-decoration:underline}
+.g-inapp button:hover{color:var(--txt)}
 .g-terms{font-size:11px;color:var(--dim);margin-top:11px;text-align:center;line-height:1.5}
 .g-terms a{color:var(--muted);text-decoration:underline}
 
