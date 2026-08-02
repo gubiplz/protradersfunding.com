@@ -91,9 +91,15 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
         <!-- Shown only inside in-app browsers (Telegram, Instagram, Messenger):
              Google refuses to sign anyone in there, and without a word about it
              the button is a dead end. -->
-        <p class="g-inapp hidden" id="g-inapp">Opened from an app? Google blocks sign-in
-          inside in-app browsers. Open <b>protradersfunding.com</b> in Safari or Chrome to
-          use it — or just create your account with an e-mail above.</p>
+        <div class="g-inapp hidden" id="g-inapp">
+          <p>You opened this from an app, and Google refuses to sign anyone in inside an
+            app's built-in browser. One tap fixes it — or use the e-mail form above,
+            that works right here.</p>
+          <div class="g-inapp-row">
+            <button type="button" class="btn-p sm" id="g-escape" onclick="openInBrowser()">Open in browser</button>
+            <button type="button" class="g-copy" onclick="copyPortalLink(this)">Copy link</button>
+          </div>
+        </div>
         <div id="g-btn"></div>
         <p class="g-terms">By continuing with Google you agree to the
           <a href="/terms" target="_blank" rel="noopener">Terms of Service</a> and the
@@ -533,7 +539,48 @@ function inAppBrowser(){
 }
 /* Independent of GIS loading at all — inside those browsers Google's script is
    often blocked too, and then nothing would ever explain the empty spot. */
-if(inAppBrowser()&&$('g-inapp'))$('g-inapp').classList.remove('hidden');
+const IOS=/iPhone|iPad|iPod/.test(navigator.userAgent);
+if(inAppBrowser()&&$('g-inapp')){
+  $('g-inapp').classList.remove('hidden');
+  $('g-escape').textContent=IOS?'Open in Safari':'Open in browser';
+}
+/* The only way to reach Google from here is to LEAVE this browser, so hand the
+   address to the operating system: iOS answers x-safari-https:// with Safari,
+   Android answers intent:// with whatever it uses for https. No package is
+   pinned — not everyone has Chrome — and browser_fallback_url means a phone
+   that cannot resolve the intent at least reloads the page instead of erroring. */
+function browserEscapeUrl(){
+  const url=location.href;
+  if(IOS)return'x-safari-'+url;
+  return'intent://'+url.replace(/^https?:\/\//,'')
+    +'#Intent;scheme=https;S.browser_fallback_url='+encodeURIComponent(url)+';end';
+}
+/* Neither scheme is guaranteed — an app may swallow it — so if we are still
+   here a moment later, the button turns into the copy fallback. */
+function openInBrowser(){
+  const btn=$('g-escape');
+  location.href=browserEscapeUrl();
+  setTimeout(()=>{
+    if(document.hidden||!btn)return;
+    btn.textContent='Did not open? Copy the link';
+    btn.onclick=()=>copyPortalLink(btn);
+  },1500);
+}
+async function copyPortalLink(btn){
+  const url=location.href;
+  try{await navigator.clipboard.writeText(url);toast('Link copied — paste it in Safari or Chrome.','ok',7000)}
+  catch(e){
+    /* Bez uprawnien do schowka zostaje stara droga: zaznaczony tekst do recznego
+       skopiowania. Lepsze to niz komunikat „nie udalo sie". */
+    const pole=document.createElement('input');
+    pole.value=url;pole.setAttribute('readonly','');
+    pole.style.cssText='position:fixed;left:12px;right:12px;width:auto;z-index:95;font-size:16px;padding:10px';
+    document.body.appendChild(pole);pole.select();pole.setSelectionRange(0,url.length);
+    try{document.execCommand('copy');toast('Link copied — paste it in Safari or Chrome.','ok',7000)}
+    catch(e2){toast('Copy the address from the bar above and open it in Safari.','err',8000)}
+    setTimeout(()=>pole.remove(),400);
+  }
+}
 function initGoogle(){
   if(!GOOGLE_CLIENT_ID||!window.google||!google.accounts)return;
   google.accounts.id.initialize({client_id:GOOGLE_CLIENT_ID,callback:onGoogleCred});
