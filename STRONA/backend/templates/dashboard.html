@@ -791,6 +791,12 @@ async function openAccount(id){
             <b style="display:block">Target reached — the bot stopped opening positions</b>
             It is still running at +${(m.profit_pct||0).toFixed(2)}%, just idle. Raise the target below to continue from here.
           </div>`:''}
+        ${a.market_closed?`
+          <div class="warn-box" style="margin:0 0 12px;background:var(--gold-bg);border:1px solid var(--gold-line);color:var(--gold-ink)">
+            <b style="display:block">Market closed — the bot takes no positions until Monday</b>
+            This challenge has no Weekend Trading add-on, so there is nothing it could trade right now.
+            It stays on and picks up on its own when the week opens.
+          </div>`:''}
         <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
           <div><label class="muted" style="font-size:12px">Target profit</label>
             <input id="bot-newtarget" class="inp" type="number" step="0.1" min="0"
@@ -809,6 +815,12 @@ async function openAccount(id){
           stays on bot data and the balance is kept. <b>Stop</b> ends the bot for good and
           resyncs the balance to the live feed.</p>`
       :`
+        ${a.market_closed?`
+          <div class="warn-box" style="margin:0 0 12px;background:var(--gold-bg);border:1px solid var(--gold-line);color:var(--gold-ink)">
+            <b style="display:block">Market closed — nothing will happen until Monday</b>
+            You can start the bot now, but with no Weekend Trading add-on on this challenge it
+            stays flat over the weekend and opens its first position when the week opens.
+          </div>`:''}
         <div class="pool-form">
           <div><label class="muted" style="font-size:12px">Style</label>
             <select id="bot-style" class="inp">
@@ -831,8 +843,10 @@ async function openAccount(id){
         equity curve, always inside the account's own risk rules.
         <b>While the bot runs, this account is not read from MT5</b>, so the portal will
         diverge from the trader's MetaTrader terminal — and stopping the bot resyncs the
-        balance back to the real account. Realistic pace follows market hours;
-        Active and Fast demo trade continuously.</p>
+        balance back to the real account. Realistic pace also follows session hours;
+        Active and Fast demo trade around the clock.
+        <b>No pace trades over the weekend</b> unless the challenge has the Weekend Trading
+        add-on — and then the bot only touches crypto, the one market open on Saturday.</p>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteAccount(${a.id},'${esc(a.login)}')">Delete account</button>

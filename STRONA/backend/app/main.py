@@ -233,6 +233,9 @@ def _account_dict(acc: Account, with_metrics: bool = True, with_credentials: boo
         d["bot_style"] = getattr(acc, "bot_style", None)
         d["bot_pace"] = getattr(acc, "bot_pace", None)
         d["bot_target_pct"] = getattr(acc, "bot_target_pct", 0.0) or 0.0
+        # Weekend liczony w czasie serwera MT5, a nie w przeglądarce admina —
+        # inaczej panel pokazywałby inny stan rynku niż ten, którym kieruje się bot.
+        d["market_closed"] = tradebot.market_closed_for(acc)
     if with_credentials:
         d["platform_password"] = acc.platform_password
     if with_metrics:

@@ -21,6 +21,11 @@ Trzy zasady, ktore trzymaja to w ryzach:
    jest przycinany do `max_lots`, a wychylenie floatingu ma twardy sufit. To nie
    jest „mam nadzieje, ze sie zmiesci" — to ograniczenia przy planowaniu pozycji.
 
+4. **Bot handluje tylko wtedy, gdy rynek jest otwarty.** Forex, indeksy i towary
+   stoja przez caly weekend, wiec konto BEZ dodatku Weekend Trading nie dostaje
+   w sobote i niedziele ani jednego wejscia. Konto Z dodatkiem handluje dalej,
+   ale wylacznie krypto — bo tylko ono chodzi 24/7.
+
 Pozycja otwarta zyje w tabeli `trades` (`status='open'`), nie w pamieci procesu,
 wiec restart serwera nie gubi transakcji ani ciaglosci krzywej.
 """
@@ -76,6 +81,10 @@ INSTRUMENTS: dict[str, Instrument] = {i.symbol: i for i in [
     Instrument("BTCUSD", 68500.0, 0.1, 1, 520.0),
     Instrument("ETHUSD", 3550.00, 0.01, 10, 34.0),
 ]}
+
+# Jedyne instrumenty czynne 24/7. Cala reszta stoi od piatkowej polnocy czasu
+# serwera do poniedzialku, wiec w weekend moze pojawic sie WYLACZNIE to.
+CRYPTO_SYMBOLS: frozenset[str] = frozenset({"BTCUSD", "ETHUSD"})
 
 
 def _point_value(inst: Instrument, price: float) -> float:
@@ -195,6 +204,48 @@ def _day_key(now: datetime | None = None) -> str:
 def _naive(dt: datetime) -> datetime:
     """Baza trzyma daty bez strefy — porownania musza byc na wspolnym typie."""
     return dt.replace(tzinfo=None) if dt.tzinfo else dt
+
+
+# --------------------------------------------------------------------------- #
+#  Kalendarz rynku                                                             #
+# --------------------------------------------------------------------------- #
+def is_weekend(now: datetime | None = None) -> bool:
+    """Czy rynek stoi (poza krypto). Liczone w czasie SERWERA MT5 (domyslnie
+    UTC+2) — akurat w tej strefie tydzien handlowy zaczyna sie w poniedzialek
+    o 00:00 i konczy w piatek o 23:59, wiec sama nazwa dnia wystarcza za
+    kalendarz sesji i niedzielne otwarcie wychodzi samo z siebie."""
+    return _server_now(now).weekday() >= 5
+
+
+def market_closed_for(acc: Account, now: datetime | None = None) -> bool:
+    """Czy dla TEGO konta rynek jest teraz zamkniety.
+
+    Weekend Trading to platny dodatek do challenge'u (`Account.weekend_trading`).
+    Bez niego bot w sobote i niedziele nie ma czego handlowac i musi stac.
+    """
+    return is_weekend(now) and not bool(getattr(acc, "weekend_trading", False))
+
+
+def _week_close(now: datetime) -> datetime:
+    """Najblizsze zamkniecie tygodnia (sobota 00:00 czasu serwera), zwrocone
+    w tej samej strefie co `now` — do przyciecia pozycji z piatku."""
+    srv = _server_now(now)
+    sobota = (srv + timedelta(days=5 - srv.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0)
+    return sobota - timedelta(hours=settings.server_utc_offset_hours)
+
+
+def _tradable(p: Persona, weekend: bool) -> tuple[tuple[str, ...], tuple[float, ...]]:
+    """Koszyk instrumentow na teraz. W weekend zostaje samo krypto — a persona,
+    ktora nie ma go w koszyku, dostaje je na ten czas z listy, bo inaczej konto
+    z dodatkiem Weekend Trading sterczaloby bezczynnie mimo otwartego rynku."""
+    if not weekend:
+        return p.symbols, p.weights
+    pary = [(s, w) for s, w in zip(p.symbols, p.weights) if s in CRYPTO_SYMBOLS]
+    if not pary:
+        krypto = tuple(sorted(CRYPTO_SYMBOLS))
+        return krypto, tuple(1.0 for _ in krypto)
+    return tuple(s for s, _ in pary), tuple(w for _, w in pary)
 
 
 # --------------------------------------------------------------------------- #
@@ -368,11 +419,17 @@ def _should_open(session, acc: Account, p: Persona, balance: float, now: datetim
         if (_naive(now) - _naive(last.closed_at)).total_seconds() < gap:
             return False
 
-    # 4) godziny handlu — tylko tempo „realistic" udaje sesje rynkowa.
-    #    Active/demo maja jechac od razu po wcisnieciu Start, tez w weekend.
+    # 4) rynek zamkniety -> ZERO wejsc, niezaleznie od tempa. To kalendarz gieldy,
+    #    a nie styl gry: w weekend broker takiego zlecenia by nie przyjal. Konto
+    #    z dodatkiem Weekend Trading handluje dalej, ale samym krypto (_tradable).
+    if market_closed_for(acc, now):
+        return False
+
+    # 5) godziny handlu — tylko tempo „realistic" udaje sesje rynkowa.
+    #    Active/demo maja jechac od razu po wcisnieciu Start.
     if p.pace == "realistic":
         srv = _server_now(now)
-        if srv.weekday() >= 5 or not (p.session_start_h <= srv.hour < p.session_end_h):
+        if not (p.session_start_h <= srv.hour < p.session_end_h):
             return False
     return True
 
@@ -382,15 +439,17 @@ def _open_new(session, acc: Account, p: Persona, balance: float, now: datetime) 
     n = session.query(Trade).filter(Trade.account_id == acc.id).count()
     rng = random.Random(f"{acc.bot_seed}:{n}")
 
-    symbol = rng.choices(p.symbols, weights=p.weights, k=1)[0]
+    weekend = is_weekend(now)
+    symbols, weights = _tradable(p, weekend)
+    symbol = rng.choices(symbols, weights=weights, k=1)[0]
     # Bez tego wagi potrafia wygenerowac cztery wejscia z rzedu w ten sam symbol,
     # a mial byc widoczny KOSZYK instrumentow. Jedno przelosowanie wystarczy.
-    if len(p.symbols) > 1:
+    if len(symbols) > 1:
         prev = (session.query(Trade.symbol)
                 .filter(Trade.account_id == acc.id)
                 .order_by(Trade.id.desc()).limit(1).scalar())
         if prev == symbol:
-            symbol = rng.choices(p.symbols, weights=p.weights, k=1)[0]
+            symbol = rng.choices(symbols, weights=weights, k=1)[0]
     inst = INSTRUMENTS[symbol]
     side = "buy" if rng.random() < 0.5 else "sell"
     sign = 1 if side == "buy" else -1
@@ -421,12 +480,19 @@ def _open_new(session, acc: Account, p: Persona, balance: float, now: datetime) 
 
     hold_min, hold_max, _, _ = PACE_TIMING[p.pace]
     hold = rng.uniform(hold_min, hold_max)
+    close_at = now + timedelta(seconds=hold)
+    if not weekend and symbol not in CRYPTO_SYMBOLS:
+        # Wejscie z piatkowego wieczoru nie moze miec daty zamkniecia „w sobote" —
+        # poza krypto rynku wtedy nie ma. Pozycja idzie flat na zamknieciu tygodnia.
+        koniec = _week_close(now)
+        if _naive(close_at) > _naive(koniec):
+            close_at = koniec
 
     tr = Trade(
         account_id=acc.id, symbol=symbol, side=side, lots=lots,
         open_price=open_price, pnl=0.0, opened_at=now, status="open", source="bot",
         plan_pnl=round(plan_pnl, 2),
-        plan_close_at=now + timedelta(seconds=hold),
+        plan_close_at=close_at,
     )
     session.add(tr)
     session.flush()   # nadaje tr.id — potrzebne fazie szumu floatingu

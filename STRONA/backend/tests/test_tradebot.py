@@ -8,6 +8,8 @@ import os
 import tempfile
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{tempfile.NamedTemporaryFile(suffix='.db', delete=False).name}")
 os.environ.setdefault("FEED", "sim")
 os.environ.setdefault("AUTO_SEED", "false")
@@ -30,12 +32,13 @@ START = datetime(2026, 7, 6, 9, 0, tzinfo=timezone.utc)
 
 
 def _account(login: str, *, size=100_000.0, max_lots=6.0, style="balanced",
-             pace="active", target_pct=0.0) -> int:
+             pace="active", target_pct=0.0, weekend_trading=False) -> int:
     s = SessionLocal()
     acc = Account(login=login, trader_name="Bot Tester", product_key="2step-100k",
                   initial_balance=size, steps=2, max_lots=max_lots,
                   balance=size, equity=size, peak_equity=size,
                   day_start_equity=size, day_start_balance=size,
+                  weekend_trading=weekend_trading,
                   started_at=START.replace(tzinfo=None))
     s.add(acc); s.commit()
     tradebot.start(s, acc, style=style, pace=pace, target_pct=target_pct)
@@ -259,6 +262,76 @@ def test_tempo_realistic_nie_handluje_w_weekend():
         tradebot.tick(s, acc, now=sobota + timedelta(minutes=5 * i))
     s.commit()
     assert s.query(Trade).filter(Trade.account_id == aid).count() == 0
+    s.close()
+
+
+# --------------------------------------------------------------------------- #
+#  Kalendarz rynku                                                             #
+# --------------------------------------------------------------------------- #
+# Weekend liczony w czasie serwera (UTC+2): sobota zaczyna się 2026-07-10 22:00 UTC.
+SOBOTA = datetime(2026, 7, 11, 12, 0, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize("pace", ["active", "demo"])
+def test_bot_stoi_w_weekend_bez_dodatku(pace):
+    """Rynek jest zamknięty, więc żadne tempo nie ma prawa wejść w pozycję."""
+    aid = _account(f"bot-wk-off-{pace}", pace=pace)
+    s = SessionLocal()
+    acc = s.get(Account, aid)
+    for i in range(60):
+        tradebot.tick(s, acc, now=SOBOTA + timedelta(minutes=5 * i))
+    s.commit()
+    assert s.query(Trade).filter(Trade.account_id == aid).count() == 0
+    s.close()
+
+
+@pytest.mark.parametrize("pace", ["active", "demo", "realistic"])
+def test_bot_z_dodatkiem_handluje_w_weekend_samym_kryptem(pace):
+    """Weekend Trading kupuje dostęp do jedynego czynnego rynku — krypto."""
+    aid = _account(f"bot-wk-on-{pace}", pace=pace, weekend_trading=True)
+    s = SessionLocal()
+    acc = s.get(Account, aid)
+    for i in range(60):
+        tradebot.tick(s, acc, now=SOBOTA + timedelta(minutes=5 * i))
+    s.commit()
+    symbole = {t.symbol for t in s.query(Trade).filter(Trade.account_id == aid).all()}
+    assert symbole, "konto z dodatkiem musi handlować w weekend"
+    assert symbole <= tradebot.CRYPTO_SYMBOLS, f"poza krypto w weekend: {symbole}"
+    s.close()
+
+
+def test_pozycja_z_piatku_nie_zamyka_sie_w_weekend():
+    """Wejście na 5 minut przed zamknięciem tygodnia idzie flat na zamknięciu,
+    a nie „w sobotę" — poza krypto nie ma wtedy czego domykać."""
+    piatek = datetime(2026, 7, 10, 21, 55, tzinfo=timezone.utc)      # 23:55 serwera
+    zamkniecie = datetime(2026, 7, 10, 22, 0, tzinfo=timezone.utc)   # sobota 00:00 serwera
+    sprawdzone = 0
+    for i in range(10):
+        aid = _account(f"bot-friday-{i}")
+        s = SessionLocal()
+        acc = s.get(Account, aid)
+        tradebot.tick(s, acc, now=piatek)
+        s.commit()
+        tr = (s.query(Trade).filter(Trade.account_id == aid)
+              .order_by(Trade.id.desc()).first())
+        if tr is not None and tr.symbol not in tradebot.CRYPTO_SYMBOLS:
+            assert tradebot._naive(tr.plan_close_at) <= tradebot._naive(zamkniecie), \
+                f"{tr.symbol} zamyka się po zamknięciu tygodnia"
+            sprawdzone += 1
+        s.close()
+    assert sprawdzone, "żadne konto nie otworzyło pozycji poza krypto — test nic nie sprawdził"
+
+
+def test_poniedzialek_wraca_do_pelnego_koszyka():
+    """Blokada dotyczy WYŁĄCZNIE weekendu — w tygodniu bot handluje jak wcześniej."""
+    aid = _account("bot-monday-1")
+    s = SessionLocal()
+    acc = s.get(Account, aid)
+    for i in range(60):
+        tradebot.tick(s, acc, now=START + timedelta(minutes=5 * i))
+    s.commit()
+    symbole = {t.symbol for t in s.query(Trade).filter(Trade.account_id == aid).all()}
+    assert symbole and not symbole <= tradebot.CRYPTO_SYMBOLS
     s.close()
 
 
