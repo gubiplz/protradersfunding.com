@@ -262,7 +262,7 @@ def test_start_nadaje_seed_i_ustawienia():
 #  Tempo = ile transakcji dziennie                                             #
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("pace,dolna,gorna", [("light", 1, 2), ("steady", 4, 8),
-                                              ("busy", 18, 24)])
+                                              ("busy", 20, 26)])
 def test_tempo_trzyma_sie_swoich_widelek(pace, dolna, gorna):
     """Kontrakt trybu: ŻADEN styl nie może wypchnąć persony poza widełki tempa."""
     for styl in tradebot.STYLES:

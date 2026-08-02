@@ -126,10 +126,10 @@ class Persona:
 PACE_TRADES: dict[str, tuple[int, int]] = {
     "light": (1, 2),
     "steady": (4, 8),
-    # Widelki o oczko wyzsze niz etykieta „okolo 20" w panelu: dzien konczy sie
-    # takze na osiagnietym dziennym celu, wiec czesc zaplanowanych wejsc nie
-    # dochodzi do skutku i realnie wychodzi ~85% planu.
-    "busy": (18, 24),
+    # Widelki wyzsze niz etykieta „okolo 20" w panelu, bo dzien konczy sie takze
+    # na osiagnietym dziennym celu: czesc zaplanowanych wejsc nie dochodzi do
+    # skutku i realnie wychodzi ~85% planu. Zmierzone na 5 dobach: 17-22 dziennie.
+    "busy": (20, 26),
 }
 
 # Nazwy sprzed przejscia na „transakcje dziennie". Konta z wlaczonym botem maja
