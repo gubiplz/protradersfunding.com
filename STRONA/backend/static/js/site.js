@@ -259,6 +259,15 @@
       ['News trading', '<span class="ok">✓ Allowed</span>'],
       ['Leverage', 'Up to 1:100'],
     ];
+    /* The promo message is rebuilt on every render, because it depends on the
+       size picked: the largest tier has nothing above it to upgrade to. */
+    if (cfgPromo) {
+      codeMsg('ok', upSize
+        ? `<b>${cfgPromo}</b> applied — you pay for ${sizeLabel(p.account_size)} and trade `
+          + `<b>${sizeLabel(upSize)}</b>. Pick any size, the upgrade follows.`
+        : `<b>${cfgPromo}</b> applied, but ${sizeLabel(p.account_size)} is our largest account — `
+          + `there is nothing above it. Pick a smaller size to trade one tier up.`);
+    }
     if (upSize) rows.unshift(['Account size',
       `<span class="ok">${sizeLabel(upSize)} — upgraded from ${sizeLabel(p.account_size)}</span>`]);
     $('#prules-rows').innerHTML = rows.map(([l, v]) =>
@@ -269,6 +278,19 @@
      portal checkout: the "Upgrade Your Size" code first, anything else as a
      discount coupon. Checking only coupons here was the bug — the upgrade code
      is not in the coupon table, so a perfectly valid code came back red. */
+  /* The applied code confirms itself right under the input. Without it the
+     upgrade code looked dead: it does not move the price, and the only hint sat
+     in small grey type further down the card. */
+  function codeMsg(kind, html) {
+    const el = $('#pcfg-codemsg'), inp = $('#pcfg-coupon');
+    if (inp) { inp.classList.remove('ok', 'bad'); if (kind) inp.classList.add(kind); }
+    if (!el) return;
+    if (!kind) { el.hidden = true; el.innerHTML = ''; return; }
+    el.hidden = false;
+    el.className = 'pcfg-codemsg ' + kind;
+    el.innerHTML = `<span>${kind === 'ok' ? '✓' : '✕'}</span><span>${html}</span>`;
+  }
+
   async function applyPricingCoupon() {
     const inp = $('#pcfg-coupon'), code = (inp.value || '').trim().toUpperCase();
     inp.classList.remove('bad');
@@ -276,6 +298,7 @@
     if (!code) {
       cfgCoupon = null; cfgPct = 0; cfgPromo = null;
       try { localStorage.removeItem('pf_promo_code'); } catch (e) {}
+      codeMsg(null);
       renderPricing(); return;
     }
     let promo = false;
@@ -288,7 +311,8 @@
         localStorage.setItem('pf_promo_code', code);
         localStorage.removeItem('pf_coupon_code'); localStorage.removeItem('pf_coupon_pct');
       } catch (e) {}
-      renderPricing(); return;
+      renderPricing();      /* writes the confirmation — it depends on the size picked */
+      return;
     }
     try {
       const r = await fetch('/api/coupon/' + encodeURIComponent(code));
@@ -296,7 +320,18 @@
       const d = await r.json();
       cfgCoupon = d.code; cfgPct = d.pct; cfgPromo = null;
       try { localStorage.removeItem('pf_promo_code'); } catch (e) {}
-    } catch (e) { cfgCoupon = null; cfgPct = 0; inp.classList.add('bad'); }
+      codeMsg('ok', `<b>${d.code}</b> applied — <b>${d.pct}% off</b> your challenge fee.`);
+    } catch (e) {
+      /* A rejected code also drops whatever was applied before: the field holds
+         one code at a time, so leaving "UPGRADE applied" under an invalid entry
+         would have the card claim something the input contradicts. */
+      cfgCoupon = null; cfgPct = 0; cfgPromo = null;
+      try { localStorage.removeItem('pf_promo_code'); } catch (err) {}
+      renderPricing();
+      inp.classList.add('bad');
+      codeMsg('bad', `<b>${code}</b> is not a valid code.`);
+      return;
+    }
     renderPricing();
   }
 

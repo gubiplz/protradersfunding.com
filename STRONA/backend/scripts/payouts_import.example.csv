@@ -1,3 +1,3 @@
-full_name,amount_usd,date,account_size,program,email,note
-Jane Example,2480,2026-07-03,50000,2step,jane@example.com,paid by bank transfer
-John Example,3125,2026-07-07,100000,instant,,
+full_name,amount_usd,date,account_size,program,email,note,kyc
+Jane Example,2480,2026-07-03,50000,2step,jane@example.com,paid by bank transfer,approved
+John Example,3125,2026-07-07,100000,instant,,,none

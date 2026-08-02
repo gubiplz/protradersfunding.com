@@ -254,6 +254,16 @@ table.obj tr:hover td{background:#fafbff}
 .pcfg-inp{flex:1;border:1px solid var(--line);border-radius:11px;padding:11px 13px;font-size:14px;
   background:var(--bg);color:var(--txt)}
 .pcfg-inp.bad{border-color:var(--red);color:var(--red)}
+.pcfg-inp.ok{border-color:var(--green);color:var(--green);font-weight:600}
+/* Potwierdzenie kodu tuz pod polem. Kod upgrade NIE zmienia ceny, wiec bez tego
+   komunikatu strona wygladala, jakby klikniecie "Apply" nic nie zrobilo. */
+.pcfg-codemsg{margin-top:9px;font-size:12.5px;line-height:1.5;border-radius:10px;
+  padding:9px 11px;display:flex;gap:8px;align-items:flex-start}
+.pcfg-codemsg.ok{background:color-mix(in srgb,var(--green) 9%,transparent);
+  color:var(--green);border:1px solid color-mix(in srgb,var(--green) 38%,transparent)}
+.pcfg-codemsg.bad{background:color-mix(in srgb,var(--red) 9%,transparent);
+  color:var(--red);border:1px solid color-mix(in srgb,var(--red) 38%,transparent)}
+.pcfg-codemsg b{font-weight:700}
 .pcfg-apply{padding:0 18px;border-radius:11px;border:1px solid var(--line);font-weight:600;
   font-size:14px;background:var(--panel);transition:.15s}
 .pcfg-apply:hover{border-color:var(--acc);color:var(--acc)}

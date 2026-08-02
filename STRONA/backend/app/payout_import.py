@@ -17,11 +17,14 @@ potwierdzoną wypłatę — osobnym kliknięciem w panelu (Payouts → Generate)
 
 FORMAT CSV
 ----------
-    full_name,amount_usd,date,account_size,program,email,note
+    full_name,amount_usd,date,account_size,program,email,note,kyc
 
 `program` to `2step` (domyślne) albo `instant`, `date` w formacie YYYY-MM-DD.
 Bez `email` powstaje adres techniczny `imie.nazwisko@imported.local` z losowym
-hasłem — klient wchodzi na konto dopiero po resecie hasła.
+hasłem — klient wchodzi na konto dopiero po resecie hasła. `kyc` to `none`
+(domyślne), `pending`, `approved` albo `rejected` — dla klientów sprawdzonych
+przed wdrożeniem panelu wpisuje się `approved` i wiersz od razu jest w historii
+KYC z datą wypłaty.
 """
 from __future__ import annotations
 
@@ -34,7 +37,14 @@ from . import auth, catalog
 from .models import Account, Payout, Product, Trader
 
 PROGRAMY = {"2step": 2, "instant": 0}
-KOLUMNY = ("full_name", "amount_usd", "date", "account_size", "program", "email", "note")
+# Znacznik pochodzenia wiersza — WYŁĄCZNIE do ewidencji w panelu. Certyfikat go
+# nie drukuje (main.py przy budowaniu dokumentu), bo klientowi nic nie mówi.
+IMPORT_NOTE = "imported from records"
+# Status KYC ustawiany z pliku. Domyślnie "none" — importu nikt nie weryfikował,
+# a wpisanie "approved" z automatu twierdziłoby, że widzieliśmy dokumenty, których
+# nie było. Kto ma klientów sprawdzonych wcześniej, wpisuje to w kolumnie.
+KYC_STATUSY = ("none", "pending", "approved", "rejected")
+KOLUMNY = ("full_name", "amount_usd", "date", "account_size", "program", "email", "note", "kyc")
 
 
 def _liczba(wartosc: str) -> float:
@@ -97,6 +107,11 @@ def parsuj(session, tekst: str) -> tuple[list[dict], list[str]]:
             bledy.append(f"wiersz {nr}: program to '2step' albo 'instant' ({program!r})")
             continue
 
+        kyc = (r.get("kyc") or "").strip().lower() or "none"
+        if kyc not in KYC_STATUSY:
+            bledy.append(f"wiersz {nr}: kyc to jedno z: {', '.join(KYC_STATUSY)} ({kyc!r})")
+            continue
+
         prod = (session.query(Product)
                 .filter(Product.account_size == rozmiar, Product.steps == PROGRAMY[program])
                 .first())
@@ -115,7 +130,7 @@ def parsuj(session, tekst: str) -> tuple[list[dict], list[str]]:
             "account_size": prod.account_size, "steps": prod.steps,
             "program": "2-Step" if prod.steps == 2 else "Instant Funding",
             "split_pct": podzial, "profit_amount": round(kwota * 100.0 / podzial, 2),
-            "note": (r.get("note") or "").strip() or None,
+            "note": (r.get("note") or "").strip() or None, "kyc": kyc,
         })
     return wiersze, bledy
 
@@ -160,10 +175,16 @@ def uruchom(session, tekst: str, commit: bool = False) -> dict:
                 # Hasła nie znamy i nie wymyślamy — klient wchodzi przez reset hasła.
                 password_hash=auth.hash_password(secrets.token_urlsafe(24)),
                 full_name=w["full_name"], referral_code=secrets.token_hex(4).upper(),
-                kyc_status="approved", created_at=w["date"],
+                created_at=w["date"],
             )
             session.add(trader)
             session.flush()
+        # Status KYC bierze się WYŁĄCZNIE z pliku (domyślnie "none"), także dla
+        # tradera, który już był w bazie — kolumna jest po to, żeby go ustawić.
+        trader.kyc_status = w["kyc"]
+        if w["kyc"] in ("approved", "rejected"):
+            trader.kyc_reviewed_at = w["date"]
+        trader.kyc_submitted_at = w["date"] if w["kyc"] != "none" else None
 
         prod = session.query(Product).filter(Product.key == w["product_key"]).first()
         konto = (session.query(Account)

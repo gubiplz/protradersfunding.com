@@ -2717,6 +2717,47 @@ def admin_kyc():
         session.close()
 
 
+@app.delete("/api/admin/kyc/{trader_id}", dependencies=[Depends(auth.require_admin)])
+def admin_kyc_delete(trader_id: int):
+    """Kasuje weryfikację: dane KYC i WGRANE DOKUMENTY znikają z dysku.
+
+    Wiersz wypada z historii, bo lista pokazuje traderów ze statusem
+    approved/rejected — po wyczyszczeniu status wraca do "none" i trader może
+    złożyć KYC od nowa. To także jedyny sposób usunięcia skanu dowodu z serwera,
+    więc kasujemy pliki, a nie tylko odnośniki do nich.
+
+    Nie mylić z Revert (POST .../revert), który tylko cofa decyzję do kolejki i
+    zostawia komplet danych.
+    """
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader_id)
+        if not tr:
+            raise HTTPException(404, "Trader not found")
+        katalog = UPLOADS / "kyc" / str(trader_id)
+        usuniete = 0
+        for nazwa in (tr.kyc_doc_front, tr.kyc_doc_back, tr.kyc_doc_residence):
+            if not nazwa:
+                continue
+            plik = katalog / nazwa
+            try:
+                if plik.is_file():
+                    plik.unlink()
+                    usuniete += 1
+            except OSError:                       # brak pliku nie blokuje czyszczenia bazy
+                pass
+        tr.kyc_fullname = tr.kyc_country = tr.kyc_doc_ref = None
+        tr.kyc_dob = tr.kyc_address = tr.kyc_id_type = tr.kyc_id_number = None
+        tr.kyc_doc_front = tr.kyc_doc_back = tr.kyc_doc_residence = None
+        tr.kyc_status = "none"
+        tr.kyc_submitted_at = tr.kyc_reviewed_at = None
+        tr.kyc_reject_reason = None
+        session.commit()
+        return {"deleted": trader_id, "files_removed": usuniete}
+    finally:
+        session.close()
+
+
 @app.post("/api/admin/kyc/{trader_id}/approve", dependencies=[Depends(auth.require_admin)])
 def admin_approve_kyc(trader_id: int):
     session = SessionLocal()
@@ -2795,6 +2836,26 @@ def admin_orders():
                         "paid_at": o.paid_at.isoformat() if o.paid_at else None,
                         "account_id": o.account_id, "created_at": o.created_at.isoformat()})
         return out
+    finally:
+        session.close()
+
+
+@app.delete("/api/admin/orders/{order_id}", dependencies=[Depends(auth.require_admin)])
+def admin_order_delete(order_id: int):
+    """Kasuje zamówienie z listy — porzucony koszyk, test, duplikat.
+
+    Konto założone z tego zamówienia ZOSTAJE: żyje własnym życiem (trader na nim
+    handluje) i kasowanie go razem z paragonem byłoby niespodzianką. Zamówienie
+    opłacone znika też z przychodu w Overview, bo ten liczy się z tej listy.
+    """
+    session = SessionLocal()
+    try:
+        o = session.get(Order, order_id)
+        if not o:
+            raise HTTPException(404, "Order not found")
+        session.delete(o)
+        session.commit()
+        return {"deleted": order_id}
     finally:
         session.close()
 
@@ -3659,7 +3720,11 @@ def payout_certificate(request: Request, cert_token: str):
                    "released in full."),
             meta=[("Date", when),
                   ("Account size", f"${(acc.initial_balance if acc else 0):,.0f}")],
-            note=p.note, cert_token=cert_token, seal="Paid", variant="payout",
+            # Notatka księgowa jest dla nas, nie dla klienta — znacznik importu
+            # („imported from records") nie ma prawa wyjść na dokument.
+            note=(None if (p.note or "").strip().lower() == payout_import.IMPORT_NOTE
+                  else p.note),
+            cert_token=cert_token, seal="Paid", variant="payout",
         )
         return jinja.TemplateResponse(request, "certificate.html", ctx)
     finally:

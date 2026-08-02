@@ -487,3 +487,110 @@ def test_usuwanie_wiersza_wyplaty_i_wniosku():
     assert s.get(PayoutRequest, czeka_id) is not None
     assert s.get(PayoutRequest, odrzucony_id) is None
     s.close()
+
+
+def test_kasowanie_zamowienia_zostawia_konto():
+    """Paragon mozna skasowac (porzucony koszyk, test), ale konto zalozone z
+    tego zamowienia zyje wlasnym zyciem i zostaje."""
+    from app.models import Order
+
+    _product()
+    tid, _ = _trader()
+    aid = _konto_funded(tid, "OPS90010")
+    s = SessionLocal()
+    o = Order(trader_id=tid, product_key="ops-25k", amount_usd=249, status="paid", account_id=aid)
+    s.add(o); s.commit()
+    oid = o.id
+    s.close()
+
+    assert client.delete(f"/api/admin/orders/{oid}", headers=ADMIN).status_code == 200
+    s = SessionLocal()
+    assert s.get(Order, oid) is None
+    assert s.get(Account, aid) is not None, "konto nie moze zniknac razem z paragonem"
+    s.close()
+    assert client.delete(f"/api/admin/orders/{oid}", headers=ADMIN).status_code == 404
+
+
+def test_kasowanie_kyc_czysci_dane_i_pliki():
+    """Usuniecie wiersza KYC kasuje dane ORAZ wgrane skany z dysku — to jedyna
+    droga wyczyszczenia dowodu z serwera. Revert (cofniecie decyzji) zostaje."""
+    from app.main import UPLOADS
+
+    tid, email = _trader()
+    katalog = UPLOADS / "kyc" / str(tid)
+    katalog.mkdir(parents=True, exist_ok=True)
+    (katalog / "front.jpg").write_bytes(b"skan")
+    s = SessionLocal()
+    tr = s.get(Trader, tid)
+    tr.kyc_status = "approved"; tr.kyc_country = "PL"; tr.kyc_id_number = "ABC123"
+    tr.kyc_doc_front = "front.jpg"
+    tr.kyc_submitted_at = datetime.now(timezone.utc)
+    tr.kyc_reviewed_at = datetime.now(timezone.utc)
+    s.commit(); s.close()
+
+    assert any(t["email"] == email for t in client.get("/api/admin/kyc", headers=ADMIN).json()["history"])
+
+    r = client.delete(f"/api/admin/kyc/{tid}", headers=ADMIN)
+    assert r.status_code == 200 and r.json()["files_removed"] == 1
+    assert not (katalog / "front.jpg").exists(), "skan dowodu zostal na dysku"
+
+    s = SessionLocal()
+    tr = s.get(Trader, tid)
+    assert tr.kyc_status == "none" and tr.kyc_country is None and tr.kyc_id_number is None
+    assert tr.kyc_doc_front is None and tr.kyc_reviewed_at is None
+    s.close()
+    assert not any(t["email"] == email for t in client.get("/api/admin/kyc", headers=ADMIN).json()["history"])
+    assert client.delete("/api/admin/kyc/999999", headers=ADMIN).status_code == 404
+
+
+def test_certyfikat_nie_drukuje_notatki_z_importu():
+    """Notatka "imported from records" jest dla nas — na dokumencie klienta nie
+    ma po niej sladu."""
+    from app import payout_import
+    from app.models import Payout
+
+    _product()
+    tid, _ = _trader()
+    aid = _konto_funded(tid, "OPS90011")
+    s = SessionLocal()
+    p = Payout(account_id=aid, profit_amount=1000.0, trader_share=800.0, paid=True,
+               note=payout_import.IMPORT_NOTE, cert_token="notka-token-1")
+    s.add(p); s.commit(); s.close()
+
+    html = client.get("/payout/notka-token-1").text
+    assert html.count("$800") >= 1, "certyfikat sie nie wyrenderowal"
+    assert payout_import.IMPORT_NOTE not in html
+
+    s = SessionLocal()
+    s.query(Payout).filter(Payout.cert_token == "notka-token-1").update({Payout.note: "1st payout"})
+    s.commit(); s.close()
+    assert "1st payout" in client.get("/payout/notka-token-1").text, \
+        "prawdziwa notatka nadal ma sie drukowac"
+
+
+def test_import_ustawia_kyc_z_kolumny():
+    """Kolumna `kyc` decyduje o statusie weryfikacji — bez niej trader zostaje
+    z "none", bo importu nikt nie sprawdzal."""
+    csv = ("full_name,amount_usd,date,account_size,program,email,note,kyc\n"
+           "Kyc Zatwierdzony,1500,2026-07-04,50000,2step,kyc.ok@test.pl,,approved\n"
+           "Kyc Domyslny,1600,2026-07-05,50000,2step,kyc.brak@test.pl,,\n")
+    d = client.post("/api/admin/payouts/import", headers=ADMIN,
+                    json={"csv": csv, "commit": True}).json()
+    assert d["ok"] and d["added"] == 2
+
+    s = SessionLocal()
+    ok = s.query(Trader).filter(Trader.email == "kyc.ok@test.pl").first()
+    brak = s.query(Trader).filter(Trader.email == "kyc.brak@test.pl").first()
+    assert ok.kyc_status == "approved" and ok.kyc_reviewed_at is not None
+    assert brak.kyc_status == "none" and brak.kyc_reviewed_at is None
+    s.close()
+
+    hist = client.get("/api/admin/kyc", headers=ADMIN).json()["history"]
+    maile = {t["email"] for t in hist}
+    assert "kyc.ok@test.pl" in maile and "kyc.brak@test.pl" not in maile
+
+    zly = ("full_name,amount_usd,date,account_size,program,email,note,kyc\n"
+           "Zly Status,100,2026-07-04,50000,2step,,,zweryfikowany\n")
+    r = client.post("/api/admin/payouts/import", headers=ADMIN,
+                    json={"csv": zly, "commit": True}).json()
+    assert r["ok"] is False and any("kyc" in b for b in r["errors"])

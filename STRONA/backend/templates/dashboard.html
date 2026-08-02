@@ -338,7 +338,9 @@ const VIEWS={
         <td class="muted">${esc(t.id_type||'—')} ${esc(t.id_number||t.doc_ref||'')}</td>
         <td><span class="status ${t.status==='approved'?'funded':'failed'}"><span class="dot"></span>${esc(t.status)}</span></td>
         <td>${(t.docs||[]).map(k=>`<button class="btn-o sm" onclick="viewDoc(${t.trader_id},'${k}')">${esc(k.replace('_',' '))}</button>`).join(' ')||'<span class="muted">—</span>'}</td>
-        <td><button class="btn-o sm" onclick="revertKyc(${t.trader_id})" title="Undo this decision — back to the pending queue">Revert</button></td></tr>`).join('')}
+        <td style="white-space:nowrap"><button class="btn-o sm" onclick="revertKyc(${t.trader_id})"
+          title="Undo this decision — back to the pending queue">Revert</button>
+          ${XBTN(`deleteKycRow(${t.trader_id},'${esc(t.email)}')`,'Delete KYC record and uploaded documents')}</td></tr>`).join('')}
       </tbody></table></div>`:`<p class="muted" style="font-size:13px">No ${esc(kf)} decisions.</p>`}</div>`:'';
   $('view').innerHTML=cards+histTbl;
  },
@@ -499,7 +501,7 @@ function renderAccounts(){
     ${rows.length?`<div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.accounts">
       <thead><tr><th>Login</th><th>Trader</th><th>Plan</th><th>Phase</th><th>Status</th>
         <th style="text-align:right">Balance</th><th style="text-align:right">Equity</th><th style="text-align:right">P&amp;L</th>
-        <th>Daily</th><th>Max DD</th><th>Created</th><th>Paid</th></tr></thead>
+        <th>Daily</th><th>Max DD</th><th>Created</th><th>Paid</th><th class="no-sort"></th></tr></thead>
       <tbody>${rows.map(a=>{const m=a.metrics||{};
         return `<tr class="clickable" onclick="openAccount(${a.id})">
           <td class="num" style="font-weight:600">${a.status==='provisioning'?'<span class="muted">pending…</span>':esc(a.login)}${a.bot_enabled?(a.bot_paused?' <span title="Trade BOT paused">⏸</span>':' <span title="Trade BOT running">🤖</span>'):''}</td>
@@ -513,7 +515,9 @@ function renderAccounts(){
           <td data-sort="${(m.daily_loss_used_pct||0).toFixed(2)}">${mini(m.daily_loss_used_pct)}</td>
           <td data-sort="${(m.overall_dd_used_pct||0).toFixed(2)}">${mini(m.overall_dd_used_pct)}</td>
           <td class="muted" style="white-space:nowrap" data-sort="${esc(a.created_at||'')}">${a.created_at?dstr(a.created_at):'—'}</td>
-          <td class="muted" style="white-space:nowrap" data-sort="${esc(a.paid_at||'')}">${a.paid_at?dstr(a.paid_at):'—'}</td></tr>`}).join('')}
+          <td class="muted" style="white-space:nowrap" data-sort="${esc(a.paid_at||'')}">${a.paid_at?dstr(a.paid_at):'—'}</td>
+          <td style="text-align:right" onclick="event.stopPropagation()">${
+            XBTN(`deleteAccountRow(${a.id},'${esc(a.login)}','${esc(a.trader_name||'')}')`,'Delete account')}</td></tr>`}).join('')}
       </tbody></table></div>`
       :`<div class="empty"><h3>No accounts match</h3><p>Try a different search or filter.</p></div>`}`;
 }
@@ -557,7 +561,7 @@ function poolListHtml(){
         <td class="muted" data-sort="${esc(p.claimed_at||'')}">${p.claimed_at?dstr(p.claimed_at):'—'}</td>
         <td style="white-space:nowrap">
           <button class="btn-o sm" onclick="editPool(${p.id})">Edit</button>
-          ${p.claimed?'':` <button class="btn-o sm" onclick="delPool(${p.id},'${esc(p.platform_login)}')">Remove</button>`}</td></tr>
+          ${p.claimed?'':' '+XBTN(`delPool(${p.id},'${esc(p.platform_login)}')`,'Remove from pool')}</td></tr>
         <tr id="pool-edit-${p.id}" class="tr-sub" style="display:none"><td colspan="9" style="background:var(--bg)">
           <div class="pool-form" style="margin:6px 0">
             <input id="ed-login-${p.id}" class="inp" value="${esc(p.platform_login)}" placeholder="MT5 login">
@@ -611,7 +615,8 @@ function renderPayoutsView(){
       <td style="text-align:right;white-space:nowrap">${r.kind==='request'&&r.status==='pending'
         ?`<button class="btn-p sm" onclick="approvePayout(${r.id})">Approve &amp; pay</button>
           <button class="btn-o sm" onclick="rejectPayout(${r.id})">Reject</button>`
-        :`<button class="btn-o sm danger" onclick="deletePayoutRow('${r.kind}',${r.id},${r.trader_share},'${esc(r.account_login||'')}')">Delete</button>`}</td></tr>`).join('')}
+        :XBTN(`deletePayoutRow('${r.kind}',${r.id},${r.trader_share},'${esc(r.account_login||'')}')`,
+              r.kind==='payout'?'Delete payout':'Delete request')}</td></tr>`).join('')}
     </tbody></table></div>
     <p class="muted" style="font-size:11.5px;margin-top:10px">Approving pays the trader share and refunds the challenge fee on the first payout for that account.</p>`
     :list.length?`<div class="empty"><h3>No ${esc(f)} payouts</h3><p>Try a different filter.</p></div>`
@@ -662,7 +667,8 @@ function renderOrders(){
           ${o.status==='pending'?`<button class="btn-o sm" onclick="flagOrder(${o.id},'${o.flag==='awaiting_crypto'?'':'awaiting_crypto'}')"
             title="${o.flag==='awaiting_crypto'?'Clear the awaiting-crypto flag':'Mark as awaiting crypto payment'}">${o.flag==='awaiting_crypto'?'Clear flag':'Crypto?'}</button>
           <button class="btn-o sm" onclick="markOrderFailed(${o.id})" title="Payment is not coming — close the order with a reason">Mark failed</button>`:''}
-          <button class="btn-p sm" onclick="markOrderPaid(${o.id})" title="Confirm the payment arrived — creates the account">Mark paid</button>`}</td></tr>`).join('')}
+          <button class="btn-p sm" onclick="markOrderPaid(${o.id})" title="Confirm the payment arrived — creates the account">Mark paid</button>`}
+          ${XBTN(`deleteOrderRow(${o.id},'${esc(o.trader_email||'')}',${o.amount_usd},${o.account_id||0})`,'Delete order')}</td></tr>`).join('')}
       </tbody></table></div>`
       :`<div class="empty"><h3>${list.length?'No orders match':'No orders yet'}</h3>${list.length?'<p>Try a different search or filter.</p>':''}</div>`}`;
 }
@@ -1239,10 +1245,11 @@ async function savePool(id,claimed){
     go('pool');
   }catch(e){toast('Error: '+e.message,'err')}
 }
-async function delPool(id,login){
-  if(!confirm(`Remove ${login} from the pool? Only free accounts can be removed.`))return;
-  try{await api('/api/admin/pool/'+id,{method:'DELETE'});toast('Removed from pool.','ok');go('pool')}
-  catch(e){toast('Error: '+e.message,'err')}
+function delPool(id,login){
+  xdel(`/api/admin/pool/${id}`,
+    `Remove ${login} from the pool?\n\nOnly free accounts can be removed — one already handed `
+    +`to a trader stays. This cannot be undone.`,
+    ()=>go('pool'),'Removed from the pool.');
 }
 
 /* ---------- modal: grant a challenge ---------- */
@@ -1299,27 +1306,65 @@ async function submitGrant(){
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
+/* ---------- one delete control for the whole panel ----------
+   Every table deletes through the same small red X, so "Delete" vs "Remove"
+   never means two different things again. Undo-style actions (Revert on a KYC
+   decision, Revoke on a certificate) keep their own labelled buttons — they are
+   reversible and must not read as destruction. */
+const XBTN=(call,tip)=>`<button class="btn-x" title="${esc(tip)}" aria-label="${esc(tip)}" onclick="${call}">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+    stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>`;
+
+async function xdel(url,question,after,okMsg){
+  if(!confirm(question))return;
+  try{const r=await api(url,{method:'DELETE'});
+    toast(typeof okMsg==='function'?okMsg(r):(okMsg||'Deleted.'),'ok');
+    if(typeof after==='function')after(r);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+
 /* Removes the whole row from the ledger — a mistyped payout, a duplicate, an
    import to undo. The account balance is NOT rewound: a payout booked with a
    balance reset took the profit off the account days ago and replaying that on
    a live account would overwrite its current equity. */
-async function deletePayoutRow(kind,id,amount,login){
+function deletePayoutRow(kind,id,amount,login){
   const co=kind==='payout'?`the $${fmt(amount)} payout on account ${login}`:'this payout request';
-  if(!confirm(`Delete ${co}?\n\nThe record disappears from the ledger and from every total. `
-    +`The account balance stays as it is now. This cannot be undone.`))return;
-  const url=kind==='payout'?`/api/admin/payouts/${id}`:`/api/admin/payout-requests/${id}`;
-  try{const r=await api(url,{method:'DELETE'});
-    toast(r.had_certificate?'Deleted. Its certificate is gone from the landing page too.'
-      :'Deleted.','ok');
-    VIEWS.payouts();
-  }catch(e){toast('Error: '+e.message,'err')}
+  xdel(kind==='payout'?`/api/admin/payouts/${id}`:`/api/admin/payout-requests/${id}`,
+    `Delete ${co}?\n\nThe record disappears from the ledger and from every total. `
+    +`The account balance stays as it is now. This cannot be undone.`,
+    ()=>VIEWS.payouts(),
+    r=>r.had_certificate?'Deleted. Its certificate is gone from the landing page too.':'Deleted.');
+}
+
+function deleteAccountRow(id,login,trader){
+  xdel(`/api/accounts/${id}`,
+    `Delete account ${login}${trader?` (${trader})`:''}?\n\nIts trades, snapshots, payouts and `
+    +`certificates go with it. This cannot be undone.`,
+    ()=>go('accounts'));
+}
+
+function deleteOrderRow(id,email,amount,accId){
+  xdel(`/api/admin/orders/${id}`,
+    `Delete order #${id} — $${fmt(amount)}${email?` from ${email}`:''}?\n\n`
+    +(accId?`Account ${accId} created from it STAYS.\n`:'')
+    +`A paid order also leaves the revenue figure in Overview. This cannot be undone.`,
+    ()=>go('orders'));
+}
+
+function deleteKycRow(tid,email){
+  xdel(`/api/admin/kyc/${tid}`,
+    `Delete the KYC record for ${email}?\n\nThe submitted data and the uploaded ID scans are `
+    +`erased from the server, and the trader can start verification from scratch. `
+    +`To only undo your decision, use Revert instead.`,
+    ()=>go('kyc'),
+    r=>r.files_removed?`Deleted — ${r.files_removed} file(s) erased from the server.`:'Deleted.');
 }
 
 /* ---------- modal: import historical payouts ----------
    For payouts settled before this panel existed (bank transfer, spreadsheet,
    notebook). They land as internal records so the totals stop lying; the public
    certificate is a separate, deliberate click per payout. */
-const PI_HEAD='full_name,amount_usd,date,account_size,program,email,note';
+const PI_HEAD='full_name,amount_usd,date,account_size,program,email,note,kyc';
 function openPayoutImport(){
   const box=document.createElement('div');
   box.id='payimp-modal';box.className='modal-wrap';
@@ -1329,12 +1374,15 @@ function openPayoutImport(){
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
     <p class="muted" style="font-size:12.5px;margin-bottom:14px">Paste one payout per line, CSV,
       starting with the header row. Missing traders and funded accounts are created for you.
+      <code>program</code> is <code>2step</code> or <code>instant</code>, <code>kyc</code> is
+      <code>none</code> (default), <code>pending</code>, <code>approved</code> or
+      <code>rejected</code>.<br>
       <b>No public certificates are issued</b> — the entries stay internal until you press
       Generate on a payout you can back with a transfer confirmation.</p>
     <div class="stack">
       <textarea id="pi-csv" class="inp" rows="9" spellcheck="false"
         style="font-family:var(--mono,ui-monospace,monospace);font-size:12px;line-height:1.6"
-        placeholder="${PI_HEAD}&#10;Jane Example,2480,2026-07-03,50000,2step,jane@example.com,">${PI_HEAD}
+        placeholder="${PI_HEAD}&#10;Jane Example,2480,2026-07-03,50000,2step,jane@example.com,,approved">${PI_HEAD}
 </textarea>
       <div id="pi-out"></div>
       <div style="display:flex;gap:8px">

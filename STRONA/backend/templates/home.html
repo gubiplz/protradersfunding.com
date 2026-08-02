@@ -186,6 +186,10 @@
           <input id="pcfg-coupon" class="pcfg-inp" placeholder="e.g. WELCOME10" autocomplete="off">
           <button class="pcfg-apply" id="pcfg-apply" type="button">Apply</button>
         </div>
+        {# The applied code has to confirm itself right here. The fee line sits
+           further down and the upgrade does not change the price at all, so
+           without this the page looked like nothing happened. #}
+        <div class="pcfg-codemsg" id="pcfg-codemsg" hidden></div>
         <div class="pcfg-feerow">
           <div class="pcfg-feelabel">Total due</div>
           <div class="pcfg-fee" id="pcfg-fee">$—</div>

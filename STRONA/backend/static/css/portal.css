@@ -123,9 +123,15 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
   background:var(--panel);white-space:nowrap}
 .btn-o:hover{border-color:var(--acc);color:var(--acc);background:var(--acc-bg)}
 .btn-o.sm,.btn-p.sm{padding:8px 13px;font-size:13px;border-radius:9px}
-/* Nieodwracalne akcje (kasowanie wiersza) — czerwone dopiero na hover, zeby
-   nie krzyczaly z kazdego wiersza tabeli, ale nie dalo sie ich kliknac na slepo. */
-.btn-o.danger:hover{border-color:var(--red);color:var(--red);background:var(--red-bg)}
+/* Jeden przycisk kasowania w calym panelu: male czerwone "X". Wyglada tak samo
+   w kontach, wyplatach, zamowieniach, puli MT5 i KYC, wiec nie trzeba zgadywac,
+   ktory napis ("Delete"/"Remove") co robi. Stonowany do momentu najechania —
+   nie krzyczy z kazdego wiersza, ale nie da sie go kliknac na slepo. */
+.btn-x{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;
+  border-radius:8px;border:1px solid var(--line2);background:var(--panel);color:var(--dim);
+  transition:.15s;flex:none;vertical-align:middle}
+.btn-x:hover{border-color:var(--red);color:var(--red);background:var(--red-bg)}
+.btn-x svg{width:13px;height:13px}
 .btn-o svg{width:15px;height:15px}
 
 .inp{background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:11px 13px;
