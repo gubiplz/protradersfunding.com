@@ -28,14 +28,14 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import func
 
-from . import (auth, billing, catalog, metaquotes_web, notify, payout_import, poller,
-               provisioning, push, rules, telemetry, tradebot)
+from . import (auth, billing, catalog, loyalty, metaquotes_web, notify, payout_import,
+               poller, provisioning, push, rules, telemetry, tradebot)
 from .config import get_settings
 from .db import SessionLocal, init_db
 from .models import (Account, AppSetting, Breach, Certificate, CreditLedger, EquitySnapshot,
                      JournalEntry, KycFile, Notification, Order, Payout, PayoutRequest,
-                     PoolAccount, Product, PushSubscription, SupportTicket, TelemetryEvent,
-                     TicketMessage, Trade, Trader)
+                     PoolAccount, Product, PushSubscription, RewardCode, SupportTicket,
+                     TelemetryEvent, TicketMessage, Trade, Trader)
 
 settings = get_settings()
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
@@ -851,11 +851,25 @@ class CheckoutIn(BaseModel):
 
 @app.get("/api/coupon/{code}")
 def coupon_preview(code: str):
-    """Podgląd rabatu dla konfiguratora na landingu — sam procent, bez listy kodów."""
-    pct = catalog.COUPONS.get(code.strip().upper())
+    """Podgląd rabatu dla konfiguratora na landingu — sam procent, bez listy kodów.
+
+    Kody kupione za punkty też tu odpowiadają, inaczej trader dostawałby
+    „nieprawidłowy kod" na własny, świeżo wymieniony kod. Oddajemy WYŁĄCZNIE
+    procent: bez właściciela, bez statusu, bez terminu. Prawo do użycia i tak
+    sprawdza checkout, który zna zalogowanego tradera.
+    """
+    kod = code.strip().upper()
+    pct = catalog.COUPONS.get(kod)
+    if not pct and kod.startswith(loyalty.CODE_PREFIX):
+        session = SessionLocal()
+        try:
+            k = session.query(RewardCode).filter(RewardCode.code == kod).first()
+            pct = k.pct if k else None
+        finally:
+            session.close()
     if not pct:
         raise HTTPException(404, "Unknown coupon code")
-    return {"code": code.strip().upper(), "pct": pct}
+    return {"code": kod, "pct": pct}
 
 
 @app.get("/api/promo")
@@ -1906,6 +1920,62 @@ def me_daily_reveal(trader: Trader = Depends(auth.current_trader)):
         session.commit()
         telemetry.track("reveal", trader.id, kind=wynik.get("type"))
         return {**wynik, "already": False}
+    finally:
+        session.close()
+
+
+# --- Program lojalnościowy: punkty -> własny kod rabatowy --------------------
+class RedeemIn(BaseModel):
+    reward: str      # klucz nagrody z loyalty.REWARDS
+
+
+def _loyalty_payload(session, trader: Trader) -> dict:
+    stan = loyalty.balance(session, trader)
+    kody = (session.query(RewardCode)
+            .filter(RewardCode.trader_id == trader.id)
+            .order_by(RewardCode.id.desc()).limit(30).all())
+    return {
+        **stan,
+        "tiers": [{"name": n, "min": p} for n, p in loyalty.TIERS],
+        "rewards": [{**r, "affordable": stan["points_available"] >= r["cost"]}
+                    for r in loyalty.REWARDS],
+        "code_ttl_days": loyalty.CODE_TTL_DAYS,
+        "codes": [loyalty.code_dict(k) for k in kody],
+    }
+
+
+@app.get("/api/me/loyalty")
+def me_loyalty(trader: Trader = Depends(auth.current_trader)):
+    """Stan programu: punkty, status, sklepik nagród i wydane kody.
+
+    Punkty liczy SERWER. Wcześniej sumowała je przeglądarka z listy zamówień —
+    do wyświetlenia to wystarczało, ale przy wymianie oznaczałoby, że trader
+    sam sobie ustala, na co go stać.
+    """
+    session = SessionLocal()
+    try:
+        return _loyalty_payload(session, session.get(Trader, trader.id))
+    finally:
+        session.close()
+
+
+@app.post("/api/me/loyalty/redeem")
+def me_loyalty_redeem(payload: RedeemIn, trader: Trader = Depends(auth.current_trader)):
+    """Wymienia punkty na własny kod jednorazowy i od razu je odejmuje."""
+    session = SessionLocal()
+    try:
+        # FOR UPDATE jak przy check-inie: dwa równoległe kliknięcia nie mogą
+        # kupić dwóch kodów za te same punkty.
+        tr = session.query(Trader).filter(Trader.id == trader.id).with_for_update().one()
+        try:
+            kod = loyalty.redeem(session, tr, payload.reward)
+        except ValueError:
+            raise HTTPException(404, "Unknown reward")
+        except LookupError as brakuje:
+            raise HTTPException(400, f"You need {brakuje} more points for this reward")
+        session.commit()
+        telemetry.track("loyalty_redeem", trader.id, reward=payload.reward, pct=kod.pct)
+        return {"code": loyalty.code_dict(kod), **_loyalty_payload(session, tr)}
     finally:
         session.close()
 

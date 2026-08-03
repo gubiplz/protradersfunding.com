@@ -88,6 +88,10 @@ class Trader(Base):
     checkin_streak: Mapped[int] = mapped_column(Integer, default=0)
     checkin_last: Mapped[str | None] = mapped_column(String(10), nullable=True)     # UTC "YYYY-MM-DD"
     bonus_points: Mapped[int] = mapped_column(Integer, default=0)
+    # Punkty juz wymienione na kody rabatowe. Saldo do wydania to
+    # (wydane na challenge'e + bonus_points) - points_spent. TIER liczy sie z
+    # sumy DOZYWOTNIEJ, wiec skorzystanie z nagrody nie cofa nikogo ze statusu.
+    points_spent: Mapped[int] = mapped_column(Integer, default=0)
     reveal_last: Mapped[str | None] = mapped_column(String(10), nullable=True)
     reveal_payload: Mapped[str | None] = mapped_column(String(240), nullable=True)  # JSON dzisiejszego wyniku
     streak_freezes: Mapped[int] = mapped_column(Integer, default=1)                 # ratuje serię po 1 dniu przerwy
@@ -187,6 +191,34 @@ class CreditLedger(Base):
     note: Mapped[str | None] = mapped_column(String(160), nullable=True)
     order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+# --------------------------------------------------------------------------- #
+#  RewardCode — kod rabatowy KUPIONY za punkty lojalnosciowe                  #
+# --------------------------------------------------------------------------- #
+class RewardCode(Base):
+    """Osobisty kod jednorazowy, wymieniony przez tradera za punkty.
+
+    Osobny byt, bo zadna z istniejacych rzeczy tego nie unosi: `catalog.COUPONS`
+    to zaszyty slownik kodow GLOBALNYCH (kazdy zna, kazdy uzyje, bez konca), a
+    `Trader.reveal_payload` trzyma JEDEN slot nadpisywany kazdego dnia — kod
+    kupiony za punkty zginalby traderowi przy nastepnym losowaniu.
+
+    Jednorazowosc pilnuje `used_at`: kod schodzi dopiero przy DOMKNIECIU
+    platnosci (provisioning), tak samo jak kredyty sklepowe, wiec porzucony
+    checkout go nie pali.
+    """
+    __tablename__ = "reward_codes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    trader_id: Mapped[int] = mapped_column(ForeignKey("traders.id"), index=True)
+    code: Mapped[str] = mapped_column(String(24), unique=True, index=True)
+    pct: Mapped[float] = mapped_column(Float)              # procent znizki
+    points_spent: Mapped[int] = mapped_column(Integer)     # ile punktow kosztowal
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"), nullable=True)
 
 
 # --------------------------------------------------------------------------- #

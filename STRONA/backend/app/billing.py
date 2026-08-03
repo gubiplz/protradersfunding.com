@@ -12,9 +12,9 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
-from . import catalog, provisioning, telemetry
+from . import catalog, loyalty, provisioning, telemetry
 from .config import get_settings
-from .models import Order, Product, Trader
+from .models import Order, Product, RewardCode, Trader
 
 settings = get_settings()
 
@@ -61,6 +61,16 @@ def _lucky_active(trader: Trader, code: str) -> bool:
     return datetime.now(timezone.utc) <= datetime.fromisoformat(expires)
 
 
+def _powod_odmowy(session, trader: Trader, code: str) -> str:
+    """Konkretny komunikat dla kodu nagrody, ktorego nie da sie uzyc."""
+    k = session.query(RewardCode).filter(RewardCode.code == code).first()
+    if k is None or k.trader_id != trader.id:
+        raise HTTPException(400, "This coupon is personal and belongs to another account")
+    if k.used_at is not None:
+        return "This coupon has already been used"
+    return "This coupon has expired"
+
+
 def compute_price(session, trader: Trader, product_key: str, coupon: str | None,
                   promo_code: str | None = None, weekend_trading: bool = False,
                   use_credits: bool = True) -> dict:
@@ -78,7 +88,25 @@ def compute_price(session, trader: Trader, product_key: str, coupon: str | None,
     code = (coupon or "").strip().upper()
     if code in catalog.LUCKY_CODES and not _lucky_active(trader, code):
         raise HTTPException(400, "This coupon is personal and no longer active")
-    price, discount_pct = catalog.apply_coupon(product.price_usd, coupon)
+
+    # Kod wymieniony za punkty lojalnosciowe. Musi byc rozwiazany TUTAJ, bo
+    # `catalog.apply_coupon` zna wylacznie zaszyty slownik kodow globalnych i
+    # dla wygenerowanego kodu oddalby po cichu 0% — trader zaplacilby pelna cene
+    # kodem, za ktory wlasnie oddal punkty.
+    kod_nagrody = None
+    if code.startswith(loyalty.CODE_PREFIX):
+        kod_nagrody = loyalty.find_usable(session, trader, code)
+        if kod_nagrody is None:
+            # Rozdzielamy powody, bo „nie twoj" i „juz zuzyty" to dla tradera
+            # dwie zupelnie inne wiadomosci. Slowo "coupon" w tresci jest
+            # potrzebne: modal zakupu po nim rozpoznaje, ze ma to pokazac.
+            raise HTTPException(400, _powod_odmowy(session, trader, code))
+
+    if kod_nagrody is not None:
+        discount_pct = kod_nagrody.pct
+        price = round(product.price_usd * (1 - discount_pct / 100.0), 2)
+    else:
+        price, discount_pct = catalog.apply_coupon(product.price_usd, coupon)
     plan_po_kuponie = price
     # Add-on Weekend Trading: stala kwota, POZA rabatem kuponu (kupon dotyczy planu).
     if weekend_trading:

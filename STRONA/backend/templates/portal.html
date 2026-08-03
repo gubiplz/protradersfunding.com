@@ -214,6 +214,8 @@ const dstr=iso=>new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric
 // UTC so the browser timezone does not shift the day back by one.
 const dday=d=>new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'});
 let TOKEN=localStorage.getItem('pf_token'), ME=null, AUTHMODE='login', chart=null, CURV=null;
+/* Ostatni stan programu lojalnosciowego z /api/me/loyalty (punkty, nagrody). */
+let LOY=null;
 const GOOGLE_CLIENT_ID={{ google_client_id|tojson }};
 const H=()=>TOKEN?{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'}:{'Content-Type':'application/json'};
 async function api(path,opts={}){const r=await fetch(path,{headers:H(),...opts});if(!r.ok){throw new Error((await r.json().catch(()=>({}))).detail||r.status)}return r.json()}
@@ -739,7 +741,7 @@ const TITLES={
   store:['New Challenge','One-time fee · refunded with your first payout'],
   board:['Leaderboard','Top traders across the platform, all time, live data'],
   achievements:['Achievements','Milestones earned from your real activity'],
-  loyalty:['Loyalty','Spend-based tiers with unlockable discounts'],
+  loyalty:['Loyalty','Trade your points for a discount code'],
   journal:['Journal','Your private trading notes'],
   analytics:['Analytics','Daily P&L computed from your account history'],
   rewards:['Rewards','Programs built into the platform'],
@@ -1367,41 +1369,58 @@ const VIEWS={
  },
 
  async loyalty(){
-  const orders=await api('/api/orders');
-  const points=Math.round(orders.filter(o=>o.status==='paid').reduce((s,o)=>s+o.amount_usd,0))+(ME.bonus_points||0);
-  const TIERS=[
-    {name:'Bronze',min:0,code:'WELCOME10',ben:'10% off any challenge'},
-    {name:'Silver',min:500,code:'VIP20',ben:'20% off any challenge'},
-    {name:'Gold',min:1500,code:'BLACKFRIDAY',ben:'30% off any challenge'},
-  ];
-  const tier=[...TIERS].reverse().find(t=>points>=t.min)||TIERS[0];
-  const next=TIERS.find(t=>t.min>points);
-  const prog=next?Math.min(100,points/next.min*100):100;
+  /* Wszystko liczy serwer (/api/me/loyalty). Wczesniej punkty sumowala ta
+     funkcja z listy zamowien — przy wymianie oznaczaloby to, ze trader sam
+     sobie ustala, na co go stac. */
+  const d=await api('/api/me/loyalty');
+  LOY=d;
+  const next=d.next_tier_at, prog=next?Math.min(100,d.points_lifetime/next*100):100;
   const nearMiss=!!next&&prog>=80;
+  const tierIdx=d.tiers.findIndex(t=>t.name===d.tier);
+  const kody=d.codes.filter(c=>c.status==='active');
+  const zuzyte=d.codes.filter(c=>c.status!=='active');
   $('view').innerHTML=`
     <div class="panel" style="margin-bottom:4px">
       <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
         <div class="tile-ic orange">${ICO.crown}</div>
         <div style="flex:1;min-width:220px">
-          <h3>${tier.name} tier · ${fmt0(points)} points</h3>
-          <p class="muted" style="font-size:13px">You earn 1 point for every $1 spent on challenges (computed from your real orders).</p>
-          ${(ME.bonus_points||0)>0?`<p class="muted" style="font-size:11.5px;margin-top:2px">includes <b class="mono" style="color:var(--gold)">+${fmt0(ME.bonus_points)}</b> engagement bonus from check-ins &amp; reveals</p>`:''}
+          <h3>${fmt0(d.points_available)} points to spend</h3>
+          <p class="muted" style="font-size:13px">You earn 1 point for every $1 spent on challenges, plus bonuses from check-ins and daily reveals. Trade them for a discount code below.</p>
+          ${d.points_spent>0?`<p class="muted" style="font-size:11.5px;margin-top:2px">${fmt0(d.points_lifetime)} earned all-time, <b class="mono">${fmt0(d.points_spent)}</b> already redeemed</p>`:''}
         </div>
         <div style="min-width:220px;flex:1">
-          <div class="prog-top"><span>${next?(nearMiss?`Only ${fmt0(next.min-points)} points to ${next.name}, unlocking ${next.ben}`:`Progress to ${next.name}`):'Top tier reached'}</span><b>${next?fmt0(points)+' / '+fmt0(next.min):'MAX'}</b></div>
+          <div class="prog-top"><span>${next?(nearMiss?`Only ${fmt0(next-d.points_lifetime)} points to ${d.next_tier}`:`Progress to ${d.next_tier}`):'Top tier reached'}</span><b>${next?fmt0(d.points_lifetime)+' / '+fmt0(next):d.tier+' · MAX'}</b></div>
           <div class="phase-bar${nearMiss?' near-miss':''}"><i style="width:${prog}%"></i></div>
+          <p class="muted" style="font-size:11px;margin-top:6px">Your ${d.tier} status comes from what you have earned all-time, so spending points never takes it away.</p>
         </div>
       </div>
     </div>
-    <div class="tier-track">`+TIERS.map(t=>{
-      const unlocked=points>=t.min;
-      return `<div class="tier-card${t.name===tier.name?' on':''}${unlocked?'':' locked'}">
-        <div class="nm">${ICO.crown.replace('stroke-width="1.8"','stroke-width="1.8" width="18" height="18"')} ${t.name}</div>
-        <div class="req">${t.min===0?'from your first purchase':`from ${fmt0(t.min)} points`}</div>
-        <div class="ben">${t.ben}</div>
-        <div class="code">${unlocked?t.code:'🔒 locked'}</div>
-      </div>`}).join('')+`</div>
-    <p class="muted" style="font-size:12px;margin-top:14px">Use the unlocked code at checkout. Tiers are recalculated automatically from paid orders.</p>`;
+
+    <h3 style="font-size:15px;margin:22px 0 2px">Trade your points</h3>
+    <p class="muted" style="font-size:12.5px;margin-bottom:4px">Each code is yours alone, works once and is valid for ${d.code_ttl_days} days.</p>
+    <div class="tier-track">`+d.rewards.map(r=>`
+      <div class="tier-card${r.affordable?' on':' locked'}">
+        <div class="nm">${ICO.crown.replace('stroke-width="1.8"','stroke-width="1.8" width="18" height="18"')} ${r.pct}% off</div>
+        <div class="req">${fmt0(r.cost)} points</div>
+        <div class="ben">One-time code for any challenge, on top of the plan price.</div>
+        <button class="btn-p sm rw-go" ${r.affordable?'':'disabled'} onclick="redeemReward('${r.key}',this)">
+          ${r.affordable?`Redeem for ${fmt0(r.cost)} pts`:`Need ${fmt0(r.cost-d.points_available)} more`}</button>
+      </div>`).join('')+`</div>
+
+    <h3 style="font-size:15px;margin:24px 0 2px">Your codes</h3>
+    ${kody.length||zuzyte.length?`<div class="rw-codes">`+[...kody,...zuzyte].map(c=>`
+      <div class="rw-code${c.status==='active'?'':' spent'}">
+        <div>
+          <b class="mono">${esc(c.code)}</b>
+          <span class="muted" style="font-size:11.5px;display:block;margin-top:2px">
+            ${c.pct}% off · ${fmt0(c.points_spent)} pts${c.status==='active'?` · expires ${dstr(c.expires_at)}`:c.status==='used'?` · used ${dstr(c.used_at)}`:' · expired'}</span>
+        </div>
+        ${c.status==='active'
+          ?`<button class="btn-o sm" onclick="copyVal(this,'${esc(c.code)}')">Copy</button>`
+          :`<span class="status ${c.status==='used'?'paid':'failed'}"><span class="dot"></span>${c.status}</span>`}
+      </div>`).join('')+`</div>`
+      :`<p class="muted" style="font-size:12.5px">No codes yet. Redeem your points above and the code shows up here.</p>`}
+    <p class="muted" style="font-size:12px;margin-top:14px">Paste the code in the checkout box when you buy a challenge. Points come off the moment you redeem, the code itself is used up on your next purchase.</p>`;
  },
 
  async journal(){
@@ -1570,7 +1589,7 @@ const VIEWS={
     {ic:'wallet',cls:'green',badge:'Active',name:'Refundable Fee',desc:'Your one-time challenge fee is refunded in full, automatically added to your first payout from a funded account.',cond:['Pass the evaluation','Complete KYC','Request your first payout']},
     {ic:'trend',cls:'purple',badge:'Your call',name:'Scaling Plan',desc:'Grow a funded account by +15% and you choose: take the payout, or move up to the next plan in our pricing. Repeatable, no applications.',cond:['Funded account','+15% growth','You pick payout or a bigger plan']},
     {ic:'spark',cls:'blue',badge:'10% recurring',name:'Affiliate Program',desc:'Share your referral link and earn 10% of every challenge purchased by traders you refer — for life, not just the first order.',cond:['Share your link','Friend buys a challenge','Commission tracked live']},
-    {ic:'crown',cls:'orange',badge:'Spend-based',name:'Loyalty Tiers',desc:'Every $1 spent earns a loyalty point. Reach Silver and Gold to unlock bigger discount codes for future challenges.',cond:['Bronze: from first purchase','Silver: 500 points','Gold: 1,500 points']},
+    {ic:'crown',cls:'orange',badge:'Spend-based',name:'Loyalty Points',desc:'Every $1 spent earns a loyalty point, and check-ins add more. Trade the points for your own one-time discount code on the Loyalty page.',cond:['500 points: 10% off','1,000 points: 15% off','2,000 points: 20% off']},
   ];
   $('view').innerHTML=revealHtml+affPanel+`<div class="badge-grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">`+cards.map(c=>`
     <div class="panel">
@@ -2215,6 +2234,27 @@ function copyVal(btn, val){
     const old=btn.innerHTML; btn.innerHTML=ICO.check; btn.style.color='var(--green)';
     setTimeout(()=>{btn.innerHTML=old;btn.style.color=''},1200);
   });
+}
+
+/* Wymiana punktow na wlasny kod. Serwer jest jedynym miejscem, ktore liczy
+   saldo i odejmuje punkty — tu tylko blokujemy podwojny klik i odswiezamy widok. */
+async function redeemReward(key,btn){
+  const r=(LOY&&LOY.rewards||[]).find(x=>x.key===key);
+  if(!r)return;
+  if(!confirm(`Trade ${fmt0(r.cost)} points for a one-time ${r.pct}% discount code?\n\n`
+    +`The points come off your balance straight away. The code is yours alone and `
+    +`works on one challenge.`))return;
+  if(btn)btn.disabled=true;
+  try{
+    const d=await api('/api/me/loyalty/redeem',{method:'POST',body:JSON.stringify({reward:key})});
+    await VIEWS.loyalty();
+    toast(`🎟️ Your code ${d.code.code} is ready — ${d.code.pct}% off your next challenge.`,'ok',10000);
+    const el=document.querySelector('.rw-code');
+    if(el&&window.RFX&&RFX.burstFrom)RFX.burstFrom(el,{count:60,palette:RFX.GOLD});
+  }catch(e){
+    if(btn)btn.disabled=false;
+    toast('Error: '+e.message,'err');
+  }
 }
 
 /* ---------- purchase modal ---------- */

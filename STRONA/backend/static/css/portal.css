@@ -580,6 +580,16 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 .tier-card .code{font-family:var(--mono);font-weight:700;color:var(--acc);background:var(--acc-bg);
   border:1px dashed var(--acc-line);border-radius:8px;padding:6px 10px;display:inline-block;margin-top:8px;font-size:13px}
 .tier-card.locked .code{color:var(--dim);background:var(--bg3);border-color:var(--line2)}
+/* Sklepik nagrod: karta nagrody uzywa .tier-card, dokladamy tylko przycisk. */
+.tier-card .rw-go{margin-top:12px;width:100%}
+.tier-card .rw-go[disabled]{opacity:.5;cursor:not-allowed}
+/* Kody wymienione za punkty */
+.rw-codes{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.rw-code{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:12px 16px}
+.rw-code b{font-size:15px;letter-spacing:.04em}
+.rw-code.spent{opacity:.6}
+.rw-code.spent b{text-decoration:line-through}
 
 /* --- toggle switch --- */
 .switch-row{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:14px 0;
