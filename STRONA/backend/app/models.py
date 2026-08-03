@@ -33,6 +33,10 @@ class Trader(Base):
     first_name: Mapped[str | None] = mapped_column(String(60), nullable=True)
     last_name: Mapped[str | None] = mapped_column(String(60), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # ISO2 kraju wybranego przy numerze. Dopuszczalna długość numeru zależy od
+    # kraju, a z samego „+1" nie da się odtworzyć, czy to USA, Kanada, czy
+    # któraś z wysp karaibskich — dlatego wybór trzymamy osobno.
+    phone_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
 
     # program afiliacyjny / referral
     referral_code: Mapped[str | None] = mapped_column(String(16), unique=True, index=True, nullable=True)

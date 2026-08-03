@@ -26,7 +26,8 @@ def _stripe():
 
 
 def save_customer_details(session, trader: Trader, *, first_name: str | None,
-                          last_name: str | None, phone: str | None) -> Trader:
+                          last_name: str | None, phone: str | None,
+                          phone_country: str | None = None) -> Trader:
     """Zapisuje dane z kroku płatności na profilu tradera.
 
     Na te dane zakładane jest potem konto demo MT5, więc nie nadpisujemy
@@ -40,6 +41,8 @@ def save_customer_details(session, trader: Trader, *, first_name: str | None,
         trader.last_name = last_name.strip()[:60]
     if phone and phone.strip():
         trader.phone = phone.strip()[:32]
+    if phone_country and phone_country.strip():
+        trader.phone_country = phone_country.strip().upper()[:2]
     if (trader.first_name or trader.last_name) and not (trader.full_name or "").strip():
         trader.full_name = " ".join(x for x in (trader.first_name, trader.last_name) if x)
     session.commit()

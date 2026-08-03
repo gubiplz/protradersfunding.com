@@ -41,6 +41,11 @@ def max_lots_for(account_size: float) -> float:
 # kwota niezależnie od rozmiaru konta.
 WEEKEND_ADDON_USD = 199.0
 
+# Rozmiar oznaczany w sklepie jako „Most popular". Etykieta marketingowa,
+# nie zmierzona statystyka — stala, nie zapytanie o sprzedaz. Gdyby miala byc
+# prawda z danych, wystarczy policzyc oplacone zamowienia per `product_key`.
+POPULAR_SIZE = 100_000
+
 # (key, label, size, steps, price, p1, p2, daily, maxdd, dd_type, min_days, split)
 # Oferta 2026-08-02: dwa modele (2-Step i Instant Funding), rozmiary 25k–2M.
 # 10k wypadło z oferty — wejściowym rozmiarem jest 25k. Konta już kupione żyją

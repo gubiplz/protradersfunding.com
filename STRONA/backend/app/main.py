@@ -28,7 +28,8 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import func
 
-from . import (auth, billing, catalog, loyalty, metaquotes_web, notify, payout_import,
+from . import (auth, billing, catalog, countries, fields, loyalty, metaquotes_web, notify,
+               payout_import,
                poller, provisioning, push, rules, telemetry, tradebot)
 from .config import get_settings
 from .db import SessionLocal, init_db
@@ -386,6 +387,7 @@ def _account_detail(session, acc: Account, admin_view: bool = False) -> dict:
 
 def _product_dict(p: Product) -> dict:
     return {"key": p.key, "label": p.label, "account_size": p.account_size, "steps": p.steps,
+            "popular": p.account_size == catalog.POPULAR_SIZE,
             "price_usd": p.price_usd, "profit_target_p1": p.profit_target_p1,
             "profit_target_p2": p.profit_target_p2, "max_daily_loss_pct": p.max_daily_loss_pct,
             "max_overall_loss_pct": p.max_overall_loss_pct, "drawdown_type": p.drawdown_type,
@@ -416,7 +418,8 @@ SESSION_COOKIE = "pf_session"
 # swiadome minimum bez zewnetrznego magazynu; okno przesuwne 60 s.
 _RL_HITS: dict[tuple[str, str], list[float]] = {}
 _RL_DISABLED = os.getenv("RATE_LIMIT_OFF", "false").lower() == "true"
-_EMAIL_RX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# Wzorzec mieszka teraz w `fields`, zeby serwer i formularze mialy jedna regule.
+_EMAIL_RX = fields.EMAIL_RX
 
 
 def _rate_limit(request: Request, bucket: str, limit: int, window: int = 60) -> None:
@@ -628,6 +631,14 @@ def signup(payload: SignupIn, request: Request, response: Response):
         raise HTTPException(400, "The password must be at least 8 characters long")
     if not payload.terms_accepted:
         raise HTTPException(400, "You must accept the Terms of Service and Privacy Policy")
+    # Pole bywa ukryte (rejestracja przez Google), wiec puste zostaje dozwolone —
+    # ale jesli cos wpisano, ma to byc imie i nazwisko, a nie „Dawid53".
+    nazwa = (payload.full_name or "").strip()
+    if nazwa:
+        try:
+            nazwa = fields.person_name(nazwa, "Full name")
+        except ValueError as e:
+            raise HTTPException(400, str(e))
     session = SessionLocal()
     try:
         istnieje = session.query(Trader).filter(Trader.email == email).first()
@@ -659,7 +670,7 @@ def signup(payload: SignupIn, request: Request, response: Response):
                 break
         tr = Trader(
             email=email, password_hash=auth.hash_password(payload.password),
-            full_name=payload.full_name.strip(), referral_code=code,
+            full_name=nazwa, referral_code=code,
             referred_by=referred_by,
             email_verified=False, email_verify_code=f"{secrets.randbelow(1_000_000):06d}",
             terms_accepted_at=datetime.now(timezone.utc),
@@ -817,6 +828,7 @@ def me(trader: Trader = Depends(auth.current_trader)):
                 "kyc_reject_reason": trader.kyc_reject_reason,
                 "ui_prefs": _ui_prefs_dict(trader),
                 "first_name": trader.first_name, "last_name": trader.last_name, "phone": trader.phone,
+                "phone_country": trader.phone_country,
                 "referral_code": trader.referral_code,
                 "credits_usd": round(float(trader.credits_usd or 0), 2),
                 # engagement: streak i punkty bonusowe dla portalu mobilnego
@@ -847,6 +859,7 @@ class CheckoutIn(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     phone: str | None = None
+    phone_country: str | None = None   # ISO2 z listy krajów; dlugosc numeru zalezy od kraju
 
 
 @app.get("/api/coupon/{code}")
@@ -912,13 +925,39 @@ def list_products():
         session.close()
 
 
+def _dane_klienta(payload: CheckoutIn, trader: Trader) -> tuple[str, str, str, str]:
+    """Sprawdza dane do rejestracji konta MT5 i zwraca je w formie do zapisu.
+
+    Pusty formularz oznacza „zostaw to, co juz jest na profilu" — ale tylko gdy
+    profil ma komplet. Bez tego warunku walidacje omijaloby sie, wysylajac
+    zadanie bez tych pol.
+    """
+    puste = not any([(payload.first_name or "").strip(), (payload.last_name or "").strip(),
+                     (payload.phone or "").strip()])
+    komplet = all([(trader.first_name or "").strip(), (trader.last_name or "").strip(),
+                   (trader.phone or "").strip()])
+    if puste and komplet:
+        return trader.first_name, trader.last_name, trader.phone, trader.phone_country or ""
+    try:
+        imie = fields.person_name(payload.first_name, "First name")
+        nazwisko = fields.person_name(payload.last_name, "Last name")
+        tel, kraj = fields.phone(payload.phone_country, payload.phone)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return imie, nazwisko, tel, kraj
+
+
 @app.post("/api/checkout")
 def checkout(payload: CheckoutIn, trader: Trader = Depends(auth.current_trader)):
     session = SessionLocal()
     try:
+        # Te trzy pola ida prosto do formularza rejestracji konta demo u brokera,
+        # wiec smiec = nieudany provisioning po pobraniu platnosci. Walidujemy
+        # PRZED zapisem i przed utworzeniem zamowienia.
+        imie, nazwisko, tel, kraj = _dane_klienta(payload, trader)
         billing.save_customer_details(
             session, trader,
-            first_name=payload.first_name, last_name=payload.last_name, phone=payload.phone,
+            first_name=imie, last_name=nazwisko, phone=tel, phone_country=kraj,
         )
         return billing.create_checkout(session, trader, payload.product_key, payload.coupon,
                                        promo_code=payload.promo_code,
@@ -1154,9 +1193,14 @@ def submit_kyc(payload: KycIn, trader: Trader = Depends(auth.current_trader)):
     session = SessionLocal()
     try:
         tr = session.get(Trader, trader.id)
+        try:
+            nazwa = fields.person_name(payload.full_name, "Full name")
+            kraj = fields.country_name(payload.country)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
         tr.kyc_status = "pending"
-        tr.kyc_fullname = payload.full_name
-        tr.kyc_country = payload.country
+        tr.kyc_fullname = nazwa
+        tr.kyc_country = kraj
         tr.kyc_dob = payload.dob
         tr.kyc_address = payload.address
         tr.kyc_id_type = payload.id_type
@@ -1766,7 +1810,10 @@ def me_patch(payload: MePatch, trader: Trader = Depends(auth.current_trader)):
     try:
         tr = session.get(Trader, trader.id)
         if payload.full_name is not None:
-            tr.full_name = payload.full_name.strip()[:120]
+            try:
+                tr.full_name = fields.person_name(payload.full_name, "Full name")
+            except ValueError as e:
+                raise HTTPException(400, str(e))
         for field in ("notify_updates", "notify_trading", "notify_payouts", "notify_marketing"):
             v = getattr(payload, field)
             if v is not None:
@@ -4546,4 +4593,6 @@ def api_openapi(request: Request):
 
 @app.get("/portal")
 def portal(request: Request):
-    return _page(request, "portal.html")
+    # Lista krajów jedzie w HTML-u zamiast osobnym zapytaniem: jest statyczna,
+    # a okno zakupu potrzebuje jej od razu przy pierwszym otwarciu.
+    return _page(request, "portal.html", countries=countries.payload())

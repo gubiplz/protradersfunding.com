@@ -194,11 +194,18 @@ def test_reveal_kupon_lucky15_przy_najrzadszym_losie(monkeypatch):
 
 
 # ---------------- kupony LUCKY sa osobiste ----------------
+# Kasa wymaga danych do rejestracji konta demo MT5 (imie, nazwisko, telefon
+# z kierunkowym kraju) — dokladnie to, co wysyla okno zakupu. Testy ponizej
+# sprawdzaja kupony, wiec dane osobowe podaja poprawne i nie zmieniaja ich.
+_DANE_MT5 = {"first_name": "Anna", "last_name": "Kowalska",
+             "phone": "512345678", "phone_country": "PL"}
+
+
 def test_checkout_lucky_bez_wygranego_losowania_odrzucony():
     _, h = _trader("lucky-obcy@test.pl")
     with TestClient(app) as c:
         r = c.post("/api/checkout", headers=h,
-                   json={"product_key": "2step-25k", "coupon": "LUCKY10"})
+                   json={**_DANE_MT5, "product_key": "2step-25k", "coupon": "LUCKY10"})
     assert r.status_code == 400
     assert "personal" in r.json()["detail"]
 
@@ -208,7 +215,7 @@ def test_checkout_lucky_dziala_u_zwyciezcy_w_48h():
     _ustaw(tid, reveal_payload=_lucky_payload("LUCKY10", 10, godzin=24))
     with TestClient(app) as c:
         r = c.post("/api/checkout", headers=h,
-                   json={"product_key": "2step-25k", "coupon": "LUCKY10"})
+                   json={**_DANE_MT5, "product_key": "2step-25k", "coupon": "LUCKY10"})
     assert r.status_code == 200
     d = r.json()
     assert d["discount_pct"] == 10.0 and d["amount"] == 269.1    # 299 - 10%
@@ -219,7 +226,7 @@ def test_checkout_lucky_wygasly_odrzucony():
     _ustaw(tid, reveal_payload=_lucky_payload("LUCKY15", 15, godzin=-1))
     with TestClient(app) as c:
         r = c.post("/api/checkout", headers=h,
-                   json={"product_key": "2step-25k", "coupon": "LUCKY15"})
+                   json={**_DANE_MT5, "product_key": "2step-25k", "coupon": "LUCKY15"})
     assert r.status_code == 400
 
 
@@ -227,7 +234,7 @@ def test_checkout_zwykly_kupon_nie_wymaga_losowania():
     _, h = _trader("kupon-zwykly@test.pl")
     with TestClient(app) as c:
         r = c.post("/api/checkout", headers=h,
-                   json={"product_key": "2step-25k", "coupon": "WELCOME10"})
+                   json={**_DANE_MT5, "product_key": "2step-25k", "coupon": "WELCOME10"})
     assert r.status_code == 200 and r.json()["discount_pct"] == 10.0
 
 

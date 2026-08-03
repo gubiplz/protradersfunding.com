@@ -26,6 +26,9 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
 <script src="/static/js/equity-chart.js?v={{ asset_v }}"></script>
 <script src="/static/js/sortable.js?v={{ asset_v }}"></script>
 <script src="/static/js/reward-fx.js?v={{ asset_v }}"></script>
+<!-- Dial codes and per-country phone lengths. Same table the server validates
+     against, so the buy modal and /api/checkout can never disagree. -->
+<script id="pf-countries" type="application/json">{{ countries|tojson }}</script>
 </head>
 <body>
 
@@ -69,8 +72,12 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
         <button id="tab-signup" class="auth-tab" onclick="authTab('signup')">Create account</button>
       </div>
       <form class="stack" id="a-form" onsubmit="doAuth();return false">
-        <input id="a-name" placeholder="Full name" class="inp hidden" autocomplete="name">
-        <input id="a-email" type="email" placeholder="E-mail" class="inp" autocomplete="email">
+        <input id="a-name" placeholder="Full name" class="inp hidden" autocomplete="name"
+          oninput="clearFieldErr('a-name')">
+        <p class="field-err hidden" id="a-name-err"></p>
+        <input id="a-email" type="email" placeholder="E-mail" class="inp" autocomplete="email"
+          oninput="clearFieldErr('a-email')">
+        <p class="field-err hidden" id="a-email-err"></p>
         <input id="a-pass" type="password" placeholder="Password" class="inp" autocomplete="current-password">
         <input id="a-pass2" type="password" placeholder="Repeat new password" class="inp hidden" autocomplete="new-password">
         <input id="a-ref" placeholder="Referral code (optional)" class="inp hidden" autocomplete="off">
@@ -509,6 +516,19 @@ async function doAuth(){
       toast('Password changed. Log in with your new password.','ok',8000);authTab('login');
     }catch(e){toast('Error: '+e.message,'err')}
     unlock();return;
+  }
+  /* Checked here so the customer sees it next to the field instead of getting
+     a bare error toast back from the server. */
+  ['a-name','a-email'].forEach(clearFieldErr);
+  if(AUTHMODE==='signup'){
+    /* Signup only. Refusing to even TRY a login because the address looks odd
+       to us would lock out anyone whose account predates this rule. */
+    const mail=emailCheck($('a-email').value);
+    if(!mail.ok){fieldErr('a-email',mail.msg);unlock();return}
+  }
+  if(AUTHMODE==='signup'&&($('a-name').value||'').trim()){
+    const nazwa=nameCheck($('a-name').value,'Full name');
+    if(!nazwa.ok){fieldErr('a-name',nazwa.msg);unlock();return}
   }
   if(AUTHMODE==='signup'&&$('a-pass').value!==$('a-pass2').value){
     toast('Passwords do not match.','err');unlock();return}
@@ -1282,7 +1302,8 @@ const VIEWS={
     <div class="shop-tabs">${groups.map(x=>`<button class="shop-tab${x.id===g.id?' on':''}" onclick="window._shopTab='${x.id}';VIEWS.store()">${x.name}</button>`).join('')}</div>
     ${ME.credits_usd>0?`<div class="note" style="margin-bottom:14px"><b>Store credit: $${fmt(ME.credits_usd)}</b>, applied to your total automatically at checkout.</div>`:''}
     <div class="plan-grid">`+items.map(p=>`
-    <div class="plan-card" data-plan="${esc(p.key)}">
+    <div class="plan-card${p.popular?' pop':''}" data-plan="${esc(p.key)}">
+      ${p.popular?'<span class="plan-ribbon">Most popular</span>':''}
       <div class="plan-size">$${fmt0(p.account_size)}</div>
       ${p.promo_upgrade_size&&pfPromo()?`<div class="plan-badge">→ trade $${fmt0(p.promo_upgrade_size)} with your promo</div>`:''}
       <div class="plan-kind">${p.steps===0?'Instant Funding, no evaluation':'2-Step Evaluation'}</div>
@@ -1649,7 +1670,7 @@ const VIEWS={
       </tbody></table></div>`
       :`<div class="empty"><h3>No payout requests yet</h3><p>Pass a challenge, get funded and request your first performance reward. Your challenge fee comes back with it.</p></div>`}
 
-    ${(data.history||[]).length?`<div class="sec-card card-md" style="margin-top:18px">
+    ${(data.history||[]).length?`<div class="sec-card" style="margin-top:18px">
       <h3>Payout history</h3>
       <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Rewards already paid out to you.</p>
       <div class="tbl-wrap"><table class="tbl sortable" data-tkey="portal.payout-hist">
@@ -1673,7 +1694,7 @@ const VIEWS={
   /* Store credits card shows up only once the trader has any history — a
      zero-balance wall of empty ledger would just be noise. */
   const credits=(cr&&(cr.balance_usd>0||(cr.ledger||[]).length))?`
-    <div class="sec-card card-md" style="margin-top:18px">
+    <div class="sec-card" style="margin-top:18px">
       <h3>Store credits</h3>
       <p class="muted" style="font-size:12.5px;margin:4px 0 12px">1 credit = $1, applied to your
         next challenge at checkout. Current balance: <b class="mono">$${fmt(cr.balance_usd)}</b></p>
@@ -1703,24 +1724,24 @@ const VIEWS={
  async kyc(){
   const s=ME.kyc_status;
   if(s==='approved'){
-    $('view').innerHTML=`<div class="panel" style="max-width:560px;display:flex;gap:14px;align-items:center">
+    $('view').innerHTML=`<div class="panel" style="display:flex;gap:14px;align-items:center">
       <div class="tile-ic green">${ICO.shield}</div>
       <div><h3>Identity verified</h3><p class="muted" style="font-size:13.5px">Your KYC is approved. You can request payouts on funded accounts.</p></div></div>`;
     return;
   }
   if(s==='pending'){
-    $('view').innerHTML=`<div class="panel" style="max-width:560px;display:flex;gap:14px;align-items:center">
+    $('view').innerHTML=`<div class="panel" style="display:flex;gap:14px;align-items:center">
       <div class="tile-ic orange">${ICO.shield}</div>
       <div><h3>Documents under review</h3><p class="muted" style="font-size:13.5px">Our team is reviewing your submission. You'll get an e-mail once it's approved.</p></div></div>`;
     return;
   }
   $('view').innerHTML=`
-    ${s==='rejected'?`<div class="panel" style="max-width:760px;margin-bottom:14px;border-color:var(--red-line);background:var(--red-bg)">
+    ${s==='rejected'?`<div class="panel" style="margin-bottom:14px;border-color:var(--red-line);background:var(--red-bg)">
       <b style="font-size:13.5px">Your previous verification was declined.</b>
       ${ME.kyc_reject_reason?`<p style="font-size:12.5px;margin-top:4px"><b>Reason:</b> ${esc(ME.kyc_reject_reason)}</p>`:''}
       <p class="muted" style="font-size:12.5px;margin-top:4px">Please double-check your details and documents, then submit again. Reach out via Support if you need help.</p>
     </div>`:''}
-    <div class="sec-card" style="max-width:760px">
+    <div class="sec-card">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
         <div class="tile-ic blue">${ICO.shield}</div><h3 style="margin:0">Submit KYC Documents</h3>
       </div>
@@ -1739,7 +1760,7 @@ const VIEWS={
         <div><label class="muted" style="font-size:12px">Country</label>
           <select id="k-country" class="inp">
             <option value="">Select a country…</option>
-            ${COUNTRIES.map(k=>`<option${ME.kyc_country===k?' selected':''}>${k}</option>`).join('')}
+            ${COUNTRY_NAMES.map(k=>`<option${ME.kyc_country===k?' selected':''}>${esc(k)}</option>`).join('')}
           </select></div>
         <div><label class="muted" style="font-size:12px">ID Type</label>
           <select id="k-idtype" class="inp"><option>Passport</option><option>National ID</option><option>Driver's License</option></select></div>
@@ -1771,7 +1792,7 @@ const VIEWS={
     $('view').innerHTML=`
       <button class="backlink" onclick="window._ticketView=null;go('support')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg> Back to Tickets</button>
-      <div class="sec-card" style="max-width:640px"><h3>Create New Ticket</h3>
+      <div class="sec-card"><h3>Create New Ticket</h3>
         <div style="display:flex;flex-direction:column;gap:11px;margin-top:12px">
           <input id="t-subject" class="inp" placeholder="Subject">
           <textarea id="t-msg" class="inp" rows="6" placeholder="Describe your issue…"></textarea>
@@ -1784,7 +1805,7 @@ const VIEWS={
     $('view').innerHTML=`
       <button class="backlink" onclick="window._ticketView=null;go('support')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg> Back to Tickets</button>
-      <div class="sec-card" style="max-width:720px">
+      <div class="sec-card">
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:14px">
           <h3 style="margin:0">${esc(t.subject)}</h3>
           <span class="status ${t.status==='closed'?'failed':t.status==='answered'?'paid':'pending'}"><span class="dot"></span>${t.status}</span>
@@ -1928,7 +1949,9 @@ async function replyTicket(id){
 }
 
 async function saveProfile(){
-  try{await api('/api/me',{method:'PATCH',body:JSON.stringify({full_name:$('s-name').value})});
+  const nazwa=nameCheck($('s-name').value,'Full name');
+  if(!nazwa.ok){toast(nazwa.msg,'err');return}
+  try{await api('/api/me',{method:'PATCH',body:JSON.stringify({full_name:nazwa.value})});
     ME=await api('/api/auth/me');boot();toast('Profile saved.','ok');go('settings');
   }catch(e){toast('Error: '+e.message,'err')}
 }
@@ -2112,6 +2135,8 @@ async function submitKyc(){
   const err=m=>{const el=$('kyc-err');el.textContent=m;el.classList.remove('hidden')};
   const name=$('k-name').value.trim(),country=$('k-country').value.trim();
   if(!name||!country){err('Full name and country are required.');return}
+  const kycNazwa=nameCheck(name,'Full name');
+  if(!kycNazwa.ok){err(kycNazwa.msg);return}
   const dob=$('k-dob').value.trim();
   if(dob){
     const m=dob.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
@@ -2323,10 +2348,30 @@ function openBuy(key){
         they must be real; your credentials are delivered to them.</div>
       <div class="stack">
         <div class="grid2">
-          <input id="c-first" placeholder="First name" class="inp" value="${esc(ME.first_name||nm[0]||'')}">
-          <input id="c-last" placeholder="Last name" class="inp" value="${esc(ME.last_name||nm.slice(1).join(' ')||'')}">
+          <div><input id="c-first" placeholder="First name" class="inp" autocomplete="given-name"
+            oninput="clearFieldErr('c-first')" value="${esc(ME.first_name||nm[0]||'')}">
+            <p class="field-err hidden" id="c-first-err"></p></div>
+          <div><input id="c-last" placeholder="Last name" class="inp" autocomplete="family-name"
+            oninput="clearFieldErr('c-last')" value="${esc(ME.last_name||nm.slice(1).join(' ')||'')}">
+            <p class="field-err hidden" id="c-last-err"></p></div>
         </div>
-        <input id="c-phone" placeholder="Phone, e.g. +14155551234" class="inp" value="${esc(ME.phone||'')}">
+        <div>
+          <div class="tel-wrap">
+            <button type="button" class="tel-cc" id="c-cc" onclick="ccToggle(event)"
+              aria-haspopup="listbox" aria-expanded="false" aria-label="Country calling code">
+              <span class="fl" id="c-cc-flag"></span><span id="c-cc-dial">+1</span>
+              <svg class="tel-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            <input id="c-phone" class="inp" inputmode="tel" autocomplete="tel-national"
+              placeholder="Phone number" oninput="clearFieldErr('c-phone')" value="${esc(phoneNational(ME.phone,ME.phone_country))}">
+            <div id="ccpop" class="ccpop hidden">
+              <input id="cc-search" class="inp" placeholder="Search country or code"
+                autocomplete="off" spellcheck="false" oninput="ccRender()">
+              <div class="cc-list" id="cc-list" role="listbox"></div>
+            </div>
+          </div>
+          <p class="field-err hidden" id="c-phone-err"></p>
+        </div>
         <input id="c-email" class="inp" value="${esc(ME.email)}" disabled aria-label="Account e-mail">
         <p class="hint" style="text-align:left;margin:-6px 0 0">Purchases are tied to your <b>account e-mail</b>, and credentials
           and the invoice are delivered there. Different address?
@@ -2355,6 +2400,7 @@ function openBuy(key){
   document.body.appendChild(box);
   window._buyKey=key;
   window._buyCode={coupon:null,promo:null};
+  ccSet(guessCountry(), false);
   codeCheck();
   setTimeout(()=>$('c-first').focus(),50);
 }
@@ -2429,17 +2475,175 @@ function buyErr(msg){
   el.textContent=msg; el.classList.remove('hidden');
 }
 
+/* ---------- field validation ----------
+   Deliberately a mirror of app/fields.py and app/countries.py, not a second
+   opinion: the browser check exists so the customer sees the problem while
+   typing, and the server check is the one that actually protects the data.
+   If you change a rule here, change it there in the same commit. */
+const NAME_OK_EXTRA=" -'’.";
+function nameCheck(value,label){
+  const t=String(value||'').trim().replace(/\s+/g,' ');
+  if(!t)return{ok:false,msg:`${label} is required.`};
+  if(t.length>60)return{ok:false,msg:`${label} is too long (max 60 characters).`};
+  if(/\d/.test(t))return{ok:false,msg:`${label} cannot contain digits.`};
+  for(const c of t){
+    if(!(/\p{L}/u.test(c)||NAME_OK_EXTRA.includes(c)))
+      return{ok:false,msg:`${label} contains an invalid character: “${c}”.`};
+  }
+  if([...t].filter(c=>/\p{L}/u.test(c)).length<2)return{ok:false,msg:`Enter your real ${label.toLowerCase()}.`};
+  return{ok:true,value:t};
+}
+function emailCheck(value){
+  const t=String(value||'').trim().toLowerCase();
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(t))
+    return{ok:false,msg:'Enter a valid e-mail address, for example name@example.com.'};
+  return{ok:true,value:t};
+}
+function phoneCheck(iso,value){
+  const c=COUNTRY_BY_ISO[String(iso||'').toUpperCase()];
+  if(!c)return{ok:false,msg:'Pick your country from the list.'};
+  const text=String(value||'').trim();
+  let d=text.replace(/\D/g,'');
+  if(!d)return{ok:false,msg:'Enter your phone number.'};
+  const intl=text.startsWith('+')||d.startsWith('00');
+  if(d.startsWith('00'))d=d.slice(2);
+  if(intl){
+    if(!d.startsWith(c.d)){
+      const other=COUNTRIES.slice().sort((a,b)=>b.d.length-a.d.length).find(x=>d.startsWith(x.d));
+      return{ok:false,msg:other?`That number starts with +${other.d}, not +${c.d} (${c.n}). Pick the matching country.`
+                             :`That does not look like a ${c.n} number (+${c.d}).`};
+    }
+    d=d.slice(c.d.length);
+    if(!d)return{ok:false,msg:'Enter your phone number.'};
+  }
+  const fits=n=>n.length>=c.mn&&n.length<=c.mx;
+  /* Leading zero is stripped ONLY as a repair. In Italy, for one, the zero is
+     part of the national number and dropping it would break valid input. */
+  if(!fits(d)&&d.startsWith('0')&&fits(d.slice(1)))d=d.slice(1);
+  if(!fits(d)){
+    const many=c.mn===c.mx?`${c.mn}`:`${c.mn}–${c.mx}`;
+    return{ok:false,msg:`A phone number in ${c.n} has ${many} digits after +${c.d} — you entered ${d.length}.`};
+  }
+  if(c.d.length+d.length>15)return{ok:false,msg:'That phone number is too long.'};
+  return{ok:true,value:'+'+c.d+d,national:d};
+}
+/* Splits a stored E.164 number back into the national part, so re-opening the
+   modal shows "512345678" next to the +48 button instead of the whole string. */
+function phoneNational(stored,iso){
+  const c=COUNTRY_BY_ISO[String(iso||'').toUpperCase()];
+  const d=String(stored||'').replace(/\D/g,'');
+  if(!d)return'';
+  if(c&&d.startsWith(c.d))return d.slice(c.d.length);
+  return stored&&stored.startsWith('+')?d:String(stored||'');
+}
+function fieldErr(id,msg){
+  const inp=$(id); if(inp)inp.classList.add('bad');
+  const el=$(id+'-err'); if(el){el.textContent=msg;el.classList.remove('hidden')}
+  if(inp&&inp.focus)inp.focus();
+}
+function clearFieldErr(id){
+  const inp=$(id); if(inp)inp.classList.remove('bad');
+  const el=$(id+'-err'); if(el)el.classList.add('hidden');
+}
+
+/* ---------- country calling code picker ----------
+   Same shape as the date-of-birth calendar above: a button next to the input
+   opens a panel, and a document-level click closes it. */
+let CC='US';
+function guessCountry(){
+  if(ME&&ME.phone_country&&COUNTRY_BY_ISO[ME.phone_country])return ME.phone_country;
+  const langs=navigator.languages&&navigator.languages.length?navigator.languages:[navigator.language||''];
+  for(const l of langs){
+    const m=/[-_]([A-Za-z]{2})$/.exec(l||'');
+    if(m&&COUNTRY_BY_ISO[m[1].toUpperCase()])return m[1].toUpperCase();
+  }
+  return COUNTRY_BY_ISO['US']?'US':(COUNTRIES[0]||{i:''}).i;
+}
+/* ~110 KB of inlined flag images: pulled in the first time the list opens, so
+   it never slows down the page itself. */
+function flagsCss(){
+  if(document.getElementById('pf-flags'))return;
+  const l=document.createElement('link');
+  l.id='pf-flags';l.rel='stylesheet';l.href='/static/css/flags.css?v={{ asset_v }}';
+  document.head.appendChild(l);
+}
+function ccSet(iso,revalidate){
+  const c=COUNTRY_BY_ISO[iso]; if(!c)return;
+  CC=c.i;
+  const f=$('c-cc-flag'),d=$('c-cc-dial');
+  if(f)f.className='fl fl-'+c.i.toLowerCase();
+  if(d)d.textContent='+'+c.d;
+  const btn=$('c-cc'); if(btn)btn.title=c.n;
+  if(revalidate!==false)clearFieldErr('c-phone');
+}
+function ccToggle(e){
+  e.stopPropagation();
+  const pop=$('ccpop'); if(!pop)return;
+  const open=pop.classList.contains('hidden');
+  if(open){flagsCss();ccRender();$('cc-search').value='';ccRender();}
+  pop.classList.toggle('hidden',!open);
+  const btn=$('c-cc'); if(btn)btn.setAttribute('aria-expanded',String(open));
+  if(open)setTimeout(()=>{const s=$('cc-search');if(s)s.focus()},30);
+}
+function ccRender(){
+  const box=$('cc-list'); if(!box)return;
+  const q=(($('cc-search')||{}).value||'').trim().toLowerCase().replace(/^\+/,'');
+  /* Ranked, not just filtered: plain alphabetical order answers "pol" with
+     French Polynesia before Poland, and the first row is the one people hit. */
+  const rank=c=>{
+    const n=c.n.toLowerCase();
+    if(c.i.toLowerCase()===q)return 0;
+    if(n===q)return 1;
+    if(n.startsWith(q))return 2;
+    if(c.d===q)return 3;
+    if(n.split(/[\s-]+/).some(w=>w.startsWith(q)))return 4;
+    if(c.d.startsWith(q))return 5;
+    if(n.includes(q))return 6;
+    return 99;
+  };
+  const hit=q?COUNTRIES.map(c=>[rank(c),c]).filter(([r])=>r<99)
+               .sort((a,b)=>a[0]-b[0]||a[1].n.localeCompare(b[1].n)).map(([,c])=>c)
+             :COUNTRIES;
+  box.innerHTML=hit.length?hit.map(c=>
+    `<button type="button" class="cc-item${c.i===CC?' on':''}" role="option" aria-selected="${c.i===CC}"
+       onclick="ccPick('${c.i}')"><span class="fl fl-${c.i.toLowerCase()}"></span>
+       <span class="cc-n">${esc(c.n)}</span><span class="cc-d">+${c.d}</span></button>`).join('')
+    :'<p class="cc-none">No country matches that.</p>';
+}
+function ccPick(iso){
+  ccSet(iso);
+  const pop=$('ccpop'); if(pop)pop.classList.add('hidden');
+  const btn=$('c-cc'); if(btn)btn.setAttribute('aria-expanded','false');
+  const inp=$('c-phone'); if(inp)inp.focus();
+}
+document.addEventListener('click',e=>{
+  const pop=document.getElementById('ccpop');
+  if(pop&&!pop.classList.contains('hidden')&&!e.target.closest('.tel-wrap'))pop.classList.add('hidden');
+});
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape')return;
+  const pop=document.getElementById('ccpop');
+  if(pop&&!pop.classList.contains('hidden')){pop.classList.add('hidden');e.stopPropagation()}
+});
+
 async function buy(key){
   await codeCheck();   /* fresh code classification, even if the debounce is still pending */
   const bc=window._buyCode||{};
   const coupon=bc.coupon||null, promo=bc.promo||null;
-  const first=($('c-first').value||'').trim(), last=($('c-last').value||'').trim(), phone=($('c-phone').value||'').trim();
-  if(!first||!last||!phone){buyErr('Fill in your first name, last name and phone. The MT5 account is registered under these details.');return}
-  if(!/^\+?\d[\d\s-]{6,}$/.test(phone)){buyErr('Phone looks invalid. Include the country code, e.g. +14155551234.');return}
+  /* The MT5 demo account is registered with the broker under exactly these
+     details, so a typo here means a paid order that cannot be provisioned. */
+  ['c-first','c-last','c-phone'].forEach(clearFieldErr);
+  const imie=nameCheck($('c-first').value,'First name');
+  if(!imie.ok){fieldErr('c-first',imie.msg);return}
+  const nazwisko=nameCheck($('c-last').value,'Last name');
+  if(!nazwisko.ok){fieldErr('c-last',nazwisko.msg);return}
+  const tel=phoneCheck(CC,$('c-phone').value);
+  if(!tel.ok){fieldErr('c-phone',tel.msg);return}
+  const first=imie.value, last=nazwisko.value, phone=tel.value;
   const btn=$('buy-go'); if(btn){btn.disabled=true; btn.textContent='Processing…'}
   try{
     const res=await api('/api/checkout',{method:'POST',
-      body:JSON.stringify({product_key:key,coupon,promo_code:promo,first_name:first,last_name:last,phone,
+      body:JSON.stringify({product_key:key,coupon,promo_code:promo,first_name:first,last_name:last,phone,phone_country:CC,
         weekend_trading:!!($('c-weekend')&&$('c-weekend').checked),
         use_credits:!$('c-usecr')||$('c-usecr').checked})});
     if(res.checkout_url && !res.mock){window.location=res.checkout_url;return;}  // real Stripe
@@ -2460,7 +2664,11 @@ async function buy(key){
 }
 
 /* ---------- ACCOUNT DETAIL ---------- */
-const COUNTRIES='Afghanistan|Albania|Algeria|Andorra|Angola|Antigua and Barbuda|Argentina|Armenia|Australia|Austria|Azerbaijan|Bahamas|Bahrain|Bangladesh|Barbados|Belarus|Belgium|Belize|Benin|Bhutan|Bolivia|Bosnia and Herzegovina|Botswana|Brazil|Brunei|Bulgaria|Burkina Faso|Burundi|Cambodia|Cameroon|Canada|Cape Verde|Central African Republic|Chad|Chile|China|Colombia|Comoros|Congo|Costa Rica|Croatia|Cuba|Cyprus|Czechia|Denmark|Djibouti|Dominica|Dominican Republic|Ecuador|Egypt|El Salvador|Equatorial Guinea|Eritrea|Estonia|Eswatini|Ethiopia|Fiji|Finland|France|Gabon|Gambia|Georgia|Germany|Ghana|Greece|Grenada|Guatemala|Guinea|Guinea-Bissau|Guyana|Haiti|Honduras|Hong Kong|Hungary|Iceland|India|Indonesia|Iran|Iraq|Ireland|Israel|Italy|Ivory Coast|Jamaica|Japan|Jordan|Kazakhstan|Kenya|Kiribati|Kosovo|Kuwait|Kyrgyzstan|Laos|Latvia|Lebanon|Lesotho|Liberia|Libya|Liechtenstein|Lithuania|Luxembourg|Macau|Madagascar|Malawi|Malaysia|Maldives|Mali|Malta|Marshall Islands|Mauritania|Mauritius|Mexico|Micronesia|Moldova|Monaco|Mongolia|Montenegro|Morocco|Mozambique|Myanmar|Namibia|Nauru|Nepal|Netherlands|New Zealand|Nicaragua|Niger|Nigeria|North Korea|North Macedonia|Norway|Oman|Pakistan|Palau|Palestine|Panama|Papua New Guinea|Paraguay|Peru|Philippines|Poland|Portugal|Qatar|Romania|Russia|Rwanda|Saint Kitts and Nevis|Saint Lucia|Saint Vincent and the Grenadines|Samoa|San Marino|Sao Tome and Principe|Saudi Arabia|Senegal|Serbia|Seychelles|Sierra Leone|Singapore|Slovakia|Slovenia|Solomon Islands|Somalia|South Africa|South Korea|South Sudan|Spain|Sri Lanka|Sudan|Suriname|Sweden|Switzerland|Syria|Taiwan|Tajikistan|Tanzania|Thailand|Timor-Leste|Togo|Tonga|Trinidad and Tobago|Tunisia|Turkey|Turkmenistan|Tuvalu|Uganda|Ukraine|United Arab Emirates|United Kingdom|United States|Uruguay|Uzbekistan|Vanuatu|Vatican City|Venezuela|Vietnam|Yemen|Zambia|Zimbabwe'.split('|');
+/* Countries come from the server (app/countries.py) so the dial codes, the
+   allowed phone lengths and the KYC list all read from ONE table. */
+const COUNTRIES=(()=>{try{return JSON.parse(document.getElementById('pf-countries').textContent||'[]')}catch(e){return[]}})();
+const COUNTRY_BY_ISO=Object.fromEntries(COUNTRIES.map(c=>[c.i,c]));
+const COUNTRY_NAMES=COUNTRIES.map(c=>c.n);
 const PHASE_LABEL={eval_1:'Phase 1',eval_2:'Phase 2',funded:'Funded'};
 
 async function openAcc(id){

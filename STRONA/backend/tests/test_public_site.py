@@ -330,3 +330,46 @@ def test_konto_w_trakcie_eval1_nie_ma_certyfikatu():
     with TestClient(app) as c:
         lista = c.get("/api/me/accounts", headers={"Authorization": f"Bearer {token}"}).json()
     assert all(not a["cert_token"] for a in lista if a["trader_name"] == "Bez Certa")
+
+
+# ---------------- „Most popular" ----------------
+def test_dokladnie_jeden_rozmiar_oznaczony_w_kazdej_rodzinie():
+    """Plakietka ma wskazywać JEDEN plan, a nie kilka albo żaden."""
+    with TestClient(app) as c:
+        r = c.get("/api/products")
+    assert r.status_code == 200
+    prods = r.json()
+    assert prods, "katalog nie moze byc pusty"
+    oznaczone = [p for p in prods if p.get("popular")]
+    assert {p["account_size"] for p in oznaczone} == {100_000.0}
+    # po jednym w 2-Step i w Instant Funding — w sklepie widac jedna rodzine naraz
+    assert sorted(p["steps"] for p in oznaczone) == [0, 2]
+    assert all("popular" in p for p in prods), "pole musi byc na kazdym planie"
+
+
+def test_landing_oznacza_ten_sam_plan_co_sklep():
+    """Kanarek na dwie sprzeczne obietnice.
+
+    Plakietka na landingu byla przybita do NAJWIEKSZEGO planu (`maxSize`), wiec
+    strona chwalila $2M, a sklep miałby chwalić $100k. Obie muszą czytać z tego
+    samego pola.
+    """
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "static" / "js" / "site.js").read_text()
+    assert "x.popular ? ' hot'" in js, "plakietka musi isc za polem z API"
+    assert "maxSize" not in js, "stary wybor (najwiekszy plan) musi zniknac"
+
+    html = (Path(__file__).resolve().parents[1] / "templates" / "portal.html").read_text()
+    assert "plan-ribbon" in html and "p.popular?' pop'" in html
+
+
+def test_karty_planow_maja_widoczna_krawedz():
+    """W ciemnym motywie karta miala obramowanie `--line` (7% bieli), cien
+    czernia na prawie czarnym tle i tlo rozne od strony o dwa punkty jasnosci —
+    dwie karty obok siebie zlewaly sie w jeden prostokat."""
+    from pathlib import Path
+    css = (Path(__file__).resolve().parents[1] / "static" / "css" / "portal.css").read_text()
+    assert "border:1px solid var(--line2);border-radius:var(--r);padding:22px;\n  display:flex" in css, \
+        "karta planu musi uzywac mocniejszej linii niz --line"
+    assert "minmax(270px,1fr));gap:20px" in css
+    assert ".plan-card.pop" in css and ".plan-ribbon" in css

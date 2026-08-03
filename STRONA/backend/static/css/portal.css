@@ -26,6 +26,12 @@
   --hover:#fafbff; --glass:rgba(255,255,255,.9); --scrim:rgba(15,23,42,.42);
   --panel-t:rgba(255,255,255,0); --edge:rgba(15,23,42,.16);
   --r:16px;
+  /* Jedna miara szerokosci dla pudelek najwyzszego poziomu w widoku. Wczesniej
+     na JEDNEJ zakladce sasiadowaly ze soba: rzad kafelkow (pelna szerokosc),
+     tabela 1400px, karta 1450px, lista kont 1560px i pusty stan 820px — przez
+     co „No payout requests yet" konczylo sie w 72% szerokosci obszaru tresci,
+     a kafelki nad nim siegaly krawedzi. */
+  --wrap:1560px;
   --shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px -14px rgba(15,23,42,.1);
   --shadow-lg:0 24px 60px -24px rgba(79,70,229,.16),0 2px 6px rgba(15,23,42,.05);
   --display:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;
@@ -147,6 +153,39 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .inp:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(99,102,241,.12)}
 .inp:disabled{background:var(--panel2);color:var(--muted)}
 .inp::placeholder{color:var(--dim)}
+/* Bledne pole zaznaczamy PRZY POLU, nie jednym komunikatem pod formularzem —
+   przy czterech polach obok siebie klient inaczej nie wie, ktore poprawic.
+   Wzorzec przeniesiony z landingu (.code-inp.ok/.bad w site.css). */
+.inp.bad{border-color:var(--red);box-shadow:0 0 0 3px rgba(220,38,38,.10)}
+.inp.bad:focus{border-color:var(--red)}
+.field-err{font-size:12px;line-height:1.45;color:var(--red);margin:5px 2px 0}
+
+/* ---- numer kierunkowy z flaga (okno zakupu) ----
+   Uklad jak przy kalendarzu daty urodzenia: przycisk obok pola otwiera panel,
+   klik poza panelem go zamyka. */
+.tel-wrap{position:relative;display:flex;gap:8px}
+.tel-wrap .inp{flex:1;min-width:0}
+.tel-cc{display:flex;align-items:center;gap:7px;flex:0 0 auto;padding:0 11px;
+  background:var(--panel);border:1px solid var(--line2);border-radius:10px;
+  color:var(--txt);font-family:var(--mono);font-size:14px;transition:.15s;cursor:pointer}
+.tel-cc:hover{border-color:var(--acc)}
+.tel-cc:focus-visible{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(99,102,241,.12)}
+.tel-caret{width:12px;height:12px;opacity:.5}
+.ccpop{position:absolute;z-index:60;top:calc(100% + 6px);left:0;right:0;
+  background:var(--panel);border:1px solid var(--line2);border-radius:12px;
+  box-shadow:var(--shadow-lg);padding:8px;display:flex;flex-direction:column;gap:8px}
+.cc-list{max-height:264px;overflow-y:auto;overscroll-behavior:contain;
+  display:flex;flex-direction:column;gap:1px}
+.cc-item{display:flex;align-items:center;gap:10px;padding:8px 9px;border-radius:8px;
+  font-size:13.5px;color:var(--txt);text-align:left;cursor:pointer;transition:.12s}
+.cc-item:hover{background:var(--bg3)}
+.cc-item.on{background:var(--acc-bg);color:var(--acc)}
+.cc-item .cc-n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cc-item .cc-d{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+.cc-item.on .cc-d{color:var(--acc)}
+.cc-none{padding:16px;text-align:center;color:var(--muted);font-size:13px}
+/* Zanim doladuje sie flags.css, kratka trzyma szerokosc — lista nie skacze. */
+.fl{width:20px;height:15px;flex:0 0 20px;border-radius:2px;background:var(--bg3)}
 
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:22px;box-shadow:var(--shadow)}
 .panel h3{font-size:17px}
@@ -289,10 +328,27 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .shop-tab{padding:8px 17px;border-radius:8px;font-size:13.5px;font-weight:600;color:var(--muted);transition:.15s}
 .shop-tab:hover{color:var(--txt)}
 .shop-tab.on{background:var(--grad);color:#fff}
-.plan-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:16px}
-.plan-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:22px;
+.plan-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:20px}
+/* Karta ma WIDOCZNA krawedz. Wczesniej w ciemnym motywie obramowanie mialo
+   `--line`, czyli 7% bieli, cien byl czernia na prawie czarnym tle, a tlo
+   karty roznilo sie od tla strony o dwa punkty jasnosci — dwie karty obok
+   siebie zlewaly sie w jeden prostokat. Jedynym dzialajacym rozroznieniem byl
+   `:hover`, wylaczony na dotyku. */
+.plan-card{background:var(--panel);border:1px solid var(--line2);border-radius:var(--r);padding:22px;
   display:flex;flex-direction:column;transition:.18s;position:relative;box-shadow:var(--shadow)}
 .plan-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg)}
+
+/* „Most popular" — wyglad przeniesiony z plakietki HOT na landingu
+   (.psize.hot / .psize i w site.css), zeby strona i sklep mowily jednym
+   jezykiem. Bursztyn, a nie gradient, bo gradientowa ramka znaczy juz co
+   innego: `.hl` to karta, na ktora klient wszedl z linku ?buy=… i obie moga
+   wypasc na tej samej karcie. */
+.plan-card.pop{border-color:#f0b95c;
+  box-shadow:0 0 0 1px #f0b95c,0 14px 34px -20px rgba(240,165,60,.55)}
+.plan-card.pop:hover{box-shadow:0 0 0 1px #f0b95c,var(--shadow-lg)}
+.plan-ribbon{position:absolute;top:-9px;right:14px;font-size:9.5px;font-weight:800;
+  letter-spacing:.08em;background:#f0a53c;color:#fff;border-radius:6px;padding:3px 8px;
+  text-transform:uppercase;white-space:nowrap}
 .plan-card.hl{border-color:transparent;background:linear-gradient(var(--panel),var(--panel)) padding-box,var(--grad) border-box;
   box-shadow:var(--shadow-lg)}
 .plan-size{font-family:var(--display);font-size:23px;font-weight:700}
@@ -309,7 +365,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
    czytelna, tabele 8+ kolumn (admin) biora cala dostepna szerokosc, a te o
    czterech kolumnach nie rozjezdzaja sie na dziury miedzy wartosciami. */
 .tbl-wrap{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow-x:auto;box-shadow:var(--shadow);
-  overscroll-behavior-x:contain;max-width:1400px}
+  overscroll-behavior-x:contain;max-width:var(--wrap)}
 .tbl-wrap.tw-wide{max-width:none}
 .tbl-wrap.tw-sm{max-width:980px}
 .tbl-wrap.tw-wide table.tbl th,.tbl-wrap.tw-wide table.tbl td{padding-left:13px;padding-right:13px}
@@ -333,6 +389,17 @@ table.sortable th[data-dir]::after{content:'▲';font-size:8px;margin-left:5px}
 table.sortable th[data-dir=desc]::after{content:'▼'}
 
 /* empty / skeleton */
+/* Miara obowiazuje KAZDE pudelko najwyzszego poziomu w widoku, nie wyliczona
+   liste klas — inaczej bezklasowy <div> z naglowkiem zakladki albo akapit pod
+   siatka planow zostaja poza nia i rozjazd wraca innymi drzwiami.
+
+   `:where()` zeruje specyficznosc selektora, wiec caly zapis wazy tyle co samo
+   `.content` (0,1,0). Dzieki temu wyjatki zapisane dwiema klasami — np.
+   `.tbl-wrap.tw-wide` w panelu admina, celowo na pelna szerokosc, czy waska
+   `.sec-card.card-sm` — dalej wygrywaja. Uzycie `#view` zamiast `.content`
+   podbiloby zapis do (1,0,0) i po cichu skasowaloby oba te wyjatki. */
+.content>:where(*){max-width:var(--wrap)}
+
 .empty{background:var(--panel);border:1px dashed var(--line2);border-radius:var(--r);padding:52px 24px;
   text-align:center;color:var(--muted)}
 .empty svg{width:38px;height:38px;color:var(--dim);margin:0 auto 14px;display:block}
@@ -761,7 +828,7 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 @keyframes scrim-in{from{opacity:0}}
 
 @media(max-width:640px){
-  .inp{font-size:16px}                              /* iOS zooms on focus below 16px */
+  .inp,.tel-cc{font-size:16px}                      /* iOS zooms on focus below 16px */
   .icon-btn{width:44px;height:44px;flex:0 0 44px}
   .btn-o.sm,.btn-p.sm{min-height:40px;padding:9px 14px}
   .copy{position:relative}
@@ -864,7 +931,7 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
    przy osmiu kontach lista wypadala ponizej pierwszego ekranu. Wiersz ma te
    same dane w ~64px. Cala lista to jeden panel z gradientowa krawedzia. */
 .chal-list{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
-  box-shadow:var(--shadow);overflow:hidden;position:relative;max-width:1560px}
+  box-shadow:var(--shadow);overflow:hidden;position:relative;max-width:var(--wrap)}
 .chal-list::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;z-index:1;
   background:linear-gradient(90deg,#2563eb,#6366f1,#a855f7)}
 .chal-row{display:grid;gap:10px 16px;align-items:center;padding:14px 18px;
@@ -1017,7 +1084,7 @@ button,a{-webkit-tap-highlight-color:transparent}
   .tabbar{display:flex}
   .burger{display:none}
   .content{padding-bottom:calc(74px + env(safe-area-inset-bottom))}  /* clear the bar */
-  .inp{font-size:16px}                                /* iOS zooms on focus below 16px */
+  .inp,.tel-cc{font-size:16px}                        /* iOS zooms on focus below 16px */
   .icon-btn{width:44px;height:44px;flex:0 0 44px}
   #toasts{bottom:calc(70px + env(safe-area-inset-bottom))}           /* toasts above the bar */
 }
@@ -1299,8 +1366,10 @@ html[data-theme=dark] .inv-print{border:1px solid var(--line2)}
   .upsell-card{flex:none}
 }
 @media(min-width:1500px){
-  /* kafelki KPI trzymaja rozmiar zamiast puchnac do ~600px przy czterech sztukach */
-  .stats-row{grid-template-columns:repeat(auto-fit,minmax(215px,340px))}
+  /* Kafelki wypelniaja --wrap zamiast konczyc sie w polowie rzedu. Poprzedni
+     limit 340px na kafelek dawal na szerokim monitorze odwrotny rozjazd:
+     tabela pod spodem byla szersza niz rzad kafelkow nad nia. */
+  .stats-row{grid-template-columns:repeat(auto-fit,minmax(215px,1fr))}
 }
 @media(min-width:1700px){
   .detail-grid{grid-template-columns:minmax(0,1fr) 380px}
@@ -1309,8 +1378,9 @@ html[data-theme=dark] .inv-print{border:1px solid var(--line2)}
 @media(min-width:1300px){
   /* dlugosc linii: opis w karcie nie ciagnie sie przez caly ekran */
   .sec-card>p,.panel>p{max-width:92ch}
-  /* pusty stan to dwie linijki tekstu — nie potrzebuje 2000px prostokata */
-  .empty{max-width:820px}
+  /* Pudelko idzie do tej samej krawedzi co reszta widoku, a dlugosc linii
+     trzyma sam tekst — inaczej pusty stan wygladal jak niedokonczony layout. */
+  .empty p{max-width:64ch;margin-inline:auto}
 }
 
 @media(min-width:1300px){
@@ -1318,7 +1388,4 @@ html[data-theme=dark] .inv-print{border:1px solid var(--line2)}
      szerokosc — bialy prostokat z pustka w srodku wyglada gorzej niz ta sama
      pustka na tle strony. Wartosci = limit tabeli + padding karty. */
   .sec-card.card-sm{max-width:1030px}
-  .sec-card.card-md{max-width:1450px}
-  /* upsell trzyma sie szerokosci listy kont nad nim */
-  .upsell{max-width:1560px}
 }

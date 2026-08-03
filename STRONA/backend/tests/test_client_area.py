@@ -1134,3 +1134,45 @@ def test_mail_account_scaled_ma_szablon():
     assert "separate email" in tresc[1]
     html = notify._render_html("account_scaled", ctx, "s")
     assert html and "25,000" in html and "view=accounts" in html
+
+
+# ---------------- szerokość pudełek w portalu ----------------
+def test_pudelka_w_widoku_maja_jedna_miare_szerokosci():
+    """Kanarek na rozjazd, którego z serwera nie widać.
+
+    Na jednej zakładce sąsiadowały ze sobą: rząd kafelków (pełna szerokość),
+    tabela 1400px, karta 1450px, lista kont 1560px i pusty stan 820px. Efekt:
+    „No payout requests yet" kończyło się w ~72% szerokości obszaru treści,
+    podczas gdy kafelki nad nim dochodziły do krawędzi.
+    """
+    from pathlib import Path
+    css = (Path(__file__).resolve().parents[1] / "static" / "css" / "portal.css").read_text()
+
+    assert "--wrap:" in css, "jedna miara szerokosci dla widokow"
+    assert ".content>:where(*){max-width:var(--wrap)}" in css, (
+        "miara musi obejmowac KAZDE pudelko najwyzszego poziomu — wyliczona lista "
+        "klas zostawia poza nia bezklasowe <div>-y naglowkow zakladek")
+    # Zapis przez `.content`, nie `#view`: identyfikator podbilby specyficznosc
+    # do (1,0,0) i skasowal wyjatki zapisane dwiema klasami.
+    assert "#view>:where(*)" not in css
+    for wyjatek in (".tbl-wrap.tw-wide{max-width:none}", ".sec-card.card-sm{max-width:1030px}"):
+        assert wyjatek in css, f"celowy wyjatek musi przezyc: {wyjatek}"
+
+    assert "max-width:820px" not in css, "stary limit pustego stanu"
+    assert "minmax(215px,340px)" not in css, (
+        "cap na kafelku dawal odwrotny rozjazd: tabela szersza niz rzad nad nia")
+
+
+def test_kyc_i_support_nie_trzymaja_szerokosci_inline():
+    """Inline `style="max-width:…"` bije każdą regułę arkusza — te sześć
+    atrybutów było jedynym powodem, dla którego KYC i Support nie dochodziły
+    do krawędzi, i żadna zmiana w CSS by ich nie ruszyła."""
+    from pathlib import Path
+    html = (Path(__file__).resolve().parents[1] / "templates" / "portal.html").read_text()
+    for szer in ("max-width:560px", "max-width:760px", "max-width:720px"):
+        assert szer not in html, f"pozostal inline limit {szer}"
+    # 640px zostaje WYŁĄCZNIE w ustawieniach — te karty siedzą w układzie
+    # wielokolumnowym (.card-cols), gdzie wąska kolumna jest zamierzona.
+    # Prefiks bez cudzysłowu, bo „Danger Zone" dokłada w tym samym atrybucie
+    # jeszcze kolor obramowania.
+    assert html.count('style="max-width:640px') == 5

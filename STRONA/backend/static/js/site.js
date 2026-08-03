@@ -234,7 +234,6 @@
     if (!items.length) { box.closest('.pcfg-grid')?.remove(); return; }
     if (!items.some(x => x.account_size === cfgSize)) cfgSize = items[0].account_size;
     const p = items.find(x => x.account_size === cfgSize);
-    const maxSize = Math.max(...items.map(x => x.account_size));
 
     $('#pcfg-title').textContent = cfgType === 'instant' ? 'Instant Funding' : '2-Step Evaluation';
     $('#pcfg-toggle').innerHTML = [['2step', '2-Step Evaluation'], ['instant', 'Instant Funding']]
@@ -243,7 +242,7 @@
     $$('#pcfg-toggle .ptog').forEach(b => b.addEventListener('click', () => { cfgType = b.dataset.t; renderPricing(); }));
 
     $('#pcfg-sizes').innerHTML = items.map(x =>
-      `<button class="psize${x.account_size === cfgSize ? ' on' : ''}${x.account_size === maxSize ? ' hot' : ''}" data-s="${x.account_size}">${x.account_size === maxSize ? '<i>HOT</i>' : ''}${sizeLabel(x.account_size)}</button>`).join('');
+      `<button class="psize${x.account_size === cfgSize ? ' on' : ''}${x.popular ? ' hot' : ''}" data-s="${x.account_size}">${x.popular ? '<i>POPULAR</i>' : ''}${sizeLabel(x.account_size)}</button>`).join('');
     $$('#pcfg-sizes .psize').forEach(b => b.addEventListener('click', () => { cfgSize = +b.dataset.s; renderPricing(); }));
 
     const wt = $('#pcfg-wt');

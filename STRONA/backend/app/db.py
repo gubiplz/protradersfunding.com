@@ -58,6 +58,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "first_name": "VARCHAR(60)",
         "last_name": "VARCHAR(60)",
         "phone": "VARCHAR(32)",
+        "phone_country": "VARCHAR(2)",
         "kyc_status": "VARCHAR(16) DEFAULT 'none'",
         "kyc_fullname": "VARCHAR(120)",
         "kyc_country": "VARCHAR(64)",
