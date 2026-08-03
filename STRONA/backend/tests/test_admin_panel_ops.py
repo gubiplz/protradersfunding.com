@@ -594,3 +594,29 @@ def test_import_ustawia_kyc_z_kolumny():
     r = client.post("/api/admin/payouts/import", headers=ADMIN,
                     json={"csv": zly, "commit": True}).json()
     assert r["ok"] is False and any("kyc" in b for b in r["errors"])
+
+
+def test_lista_traderow_do_grantu_bez_limitu_i_bez_usunietych():
+    """Lista pod „Grant a challenge": wszyscy realni klienci, zero ślepych uliczek.
+
+    Cichy limit ukrywał starszych klientów (nie dało się im nic przyznać),
+    a konta po /api/me/delete są zanonimizowane: nie zalogują się, mail na
+    @removed.invalid się odbija.
+    """
+    s = SessionLocal()
+    ilu_przed = len(client.get("/api/admin/traders", headers=ADMIN).json())
+    for i in range(60):
+        s.add(Trader(email=f"masa{i}@test.pl", password_hash="x",
+                     full_name=f"Masa {i}", referral_code=f"m{i:04d}"))
+    s.add(Trader(email="deleted-777@removed.invalid", password_hash="x",
+                 full_name="Deleted User", referral_code="del777"))
+    s.commit(); s.close()
+
+    lista = client.get("/api/admin/traders", headers=ADMIN).json()
+    maile = {t["email"] for t in lista}
+    assert len(lista) == ilu_przed + 60, "lista musi obejmować wszystkich, bez limitu"
+    assert "masa0@test.pl" in maile, "najstarszy z dodanych nie może wypaść z listy"
+    assert not any(m.endswith("@removed.invalid") for m in maile)
+
+    szukaj = client.get("/api/admin/traders?q=masa4", headers=ADMIN).json()
+    assert {t["email"] for t in szukaj} == {f"masa4{i}@test.pl" for i in range(10)} | {"masa4@test.pl"}

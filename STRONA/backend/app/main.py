@@ -2441,15 +2441,23 @@ def admin_payout_request_delete(req_id: int):
 
 @app.get("/api/admin/traders", dependencies=[Depends(auth.require_admin)])
 def admin_traders(q: str | None = None):
-    """Lista klientów (do wyszukiwarki przy przyznawaniu challenge'u)."""
+    """Lista klientów (do wyszukiwarki przy przyznawaniu challenge'u).
+
+    Bez `q` zwraca WSZYSTKICH — panel buduje z tego listę wyboru, a cichy limit
+    ukrywałby starszych klientów i uniemożliwiał przyznanie im czegokolwiek.
+    """
     session = SessionLocal()
     try:
         query = session.query(Trader).filter(Trader.is_admin == False)  # noqa: E712
+        # Konta zanonimizowane przez /api/me/delete odpadają: logowanie mają
+        # zablokowane (auth.current_trader), powiadomienia wyłączone, a mail na
+        # @removed.invalid się odbija. Przyznanie im czegokolwiek to ślepa uliczka.
+        query = query.filter(Trader.email.notlike("%@removed.invalid"))
         if q:
             like = f"%{q.strip().lower()}%"
             query = query.filter(func.lower(Trader.email).like(like) |
                                  func.lower(Trader.full_name).like(like))
-        rows = query.order_by(Trader.id.desc()).limit(50).all()
+        rows = query.order_by(Trader.id.desc()).all()
         counts = dict(session.query(Account.trader_id, func.count(Account.id))
                       .group_by(Account.trader_id).all())
         return [{"id": t.id, "email": t.email, "full_name": t.full_name,

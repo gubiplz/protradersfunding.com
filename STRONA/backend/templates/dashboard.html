@@ -1274,11 +1274,38 @@ function delPool(id,login){
 /* ---------- modal: grant a challenge ---------- */
 const GRANT_REASONS=['BOGO promotion','Free upgrade','Compensation','Partner deal','Contest prize','Marketing campaign'];
 
+const grantOpt=(t,chosen)=>`<option value="${t.id}"${chosen===t.id?' selected':''}>`
+  +`${esc(t.email)}${t.full_name?' — '+esc(t.full_name):''} (${t.accounts} acc.)</option>`;
+
+function grantFilter(){
+  const all=window._grantTraders||[],q=($('g-search').value||'').trim().toLowerCase();
+  const sel=$('g-trader'),chosen=parseInt(sel.value);
+  const hit=q?all.filter(t=>(t.email+' '+(t.full_name||'')).toLowerCase().includes(q)):all;
+  sel.innerHTML=hit.map(t=>grantOpt(t,chosen)).join('');
+  // Filtering can drop the selected trader out of the list; without this the
+  // select ends up with nothing chosen and the grant would post NaN as the id.
+  if(sel.selectedIndex<0&&hit.length)sel.selectedIndex=0;
+  $('g-count').textContent=`· ${hit.length} of ${all.length}`;
+  grantPick();
+}
+
+/* Safari paints the selection in an unfocused listbox a barely visible grey,
+   so tapping a trader looks like it did nothing. Spell out who gets the grant. */
+function grantPick(){
+  const t=$('g-trader').selectedOptions[0];
+  $('g-picked').innerHTML=t?`Granting to <b>${esc(t.textContent.split(' (')[0])}</b>`
+                          :'<b>No trader selected</b>';
+}
+
 async function openGrant(traderId){
   let products=[],traders=[];
   try{[products,traders]=await Promise.all([
     (await fetch('/api/products')).json(), api('/api/admin/traders')])}catch(e){toast('Error: '+e.message,'err');return}
   if(!traders.length){toast('No registered traders yet.','err');return}
+  window._grantTraders=traders;
+  /* Reopening stacks a second #grant-modal, and submitGrant() reads the FIRST
+     match by id — the hidden one, still on its default trader. */
+  document.getElementById('grant-modal')?.remove();
   const box=document.createElement('div');
   box.id='grant-modal';box.className='modal-wrap';
   box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
@@ -1287,9 +1314,10 @@ async function openGrant(traderId){
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
     <p class="muted" style="font-size:12.5px;margin-bottom:14px">Creates a real MT5 account for the trader without payment and e-mails them the credentials. The account behaves exactly like a purchased one.</p>
     <div class="stack">
-      <div><label class="muted" style="font-size:12px">Trader</label>
-        <select id="g-trader" class="inp">${traders.map(t=>
-          `<option value="${t.id}"${traderId===t.id?' selected':''}>${esc(t.email)}${t.full_name?' — '+esc(t.full_name):''} (${t.accounts} acc.)</option>`).join('')}</select></div>
+      <div><label class="muted" style="font-size:12px">Trader <span class="muted" id="g-count" style="opacity:.65"></span></label>
+        <input id="g-search" class="inp" style="margin-bottom:7px" placeholder="Search by e-mail or name" oninput="grantFilter()">
+        <select id="g-trader" class="inp" size="6" onchange="grantPick()">${traders.map(t=>grantOpt(t,traderId)).join('')}</select>
+        <div class="muted" id="g-picked" style="font-size:12.5px;margin-top:6px"></div></div>
       <div><label class="muted" style="font-size:12px">Challenge</label>
         <select id="g-product" class="inp">${products.map(p=>
           `<option value="${esc(p.key)}">${esc(p.label)} — $${fmt0(p.account_size)} · normally $${fmt0(p.price_usd)}</option>`).join('')}</select></div>
@@ -1309,9 +1337,15 @@ async function openGrant(traderId){
     </div></div>`;
   box.onclick=()=>box.remove();
   document.body.appendChild(box);
+  grantFilter();
+  // The list scrolls, so a preselected trader can sit off-screen and look as
+  // if the modal never picked them up.
+  $('g-trader').selectedOptions[0]?.scrollIntoView({block:'nearest'});
 }
 async function submitGrant(){
-  const body={trader_id:parseInt($('g-trader').value),product_key:$('g-product').value,
+  const wybrany=parseInt($('g-trader').value);
+  if(!wybrany){toast('Pick a trader first.','err');return}
+  const body={trader_id:wybrany,product_key:$('g-product').value,
     note:($('g-note').value||'').trim()||null,
     bogo_paid_key:$('g-paid').value||null,
     funded:$('g-funded').checked};
@@ -1448,6 +1482,7 @@ async function openCredits(traderId){
   let traders=[];
   try{traders=await api('/api/admin/traders')}catch(e){toast('Error: '+e.message,'err');return}
   if(!traders.length){toast('No registered traders yet.','err');return}
+  document.getElementById('credits-modal')?.remove();
   const box=document.createElement('div');
   box.id='credits-modal';box.className='modal-wrap';
   box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
@@ -1491,6 +1526,7 @@ async function submitCredits(){
 async function openCreate(){
   let products=[];
   try{products=await (await fetch('/api/products')).json()}catch(e){}
+  document.getElementById('create-modal')?.remove();
   const box=document.createElement('div');
   box.id='create-modal';box.className='modal-wrap';
   box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
