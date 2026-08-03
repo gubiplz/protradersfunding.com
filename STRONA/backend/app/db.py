@@ -114,6 +114,9 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "note": "VARCHAR(160)",
         "cert_token": "VARCHAR(32)",
         "balance_reset": "BOOLEAN DEFAULT TRUE",
+        # DEFAULT TRUE robi za backfill: wypłaty wystawione przed tą zmianą
+        # zostają na pasie na landingu, nic nie znika ze strony po deployu.
+        "show_on_lp": "BOOLEAN DEFAULT TRUE",
     },
     "accounts": {
         "platform_investor_password": "VARCHAR(64)",
@@ -131,6 +134,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "bot_target_pct": "FLOAT DEFAULT 0",
         "bot_paused": "BOOLEAN DEFAULT FALSE",
         "bot_started_at": "TIMESTAMP",
+        "scale_count": "INTEGER DEFAULT 0",
     },
 }
 

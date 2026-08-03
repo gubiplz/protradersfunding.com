@@ -1568,7 +1568,7 @@ const VIEWS={
     </div>`;
   const cards=[
     {ic:'wallet',cls:'green',badge:'Active',name:'Refundable Fee',desc:'Your one-time challenge fee is refunded in full, automatically added to your first payout from a funded account.',cond:['Pass the evaluation','Complete KYC','Request your first payout']},
-    {ic:'trend',cls:'purple',badge:'Automatic',name:'Scaling Plan',desc:'Grow a funded account by +10% and the platform scales its balance by +25%. Repeatable, coded into the engine — no applications.',cond:['Funded account','+10% growth','Applied instantly']},
+    {ic:'trend',cls:'purple',badge:'Your call',name:'Scaling Plan',desc:'Grow a funded account by +15% and you choose: take the payout, or move up to the next plan in our pricing. Repeatable, no applications.',cond:['Funded account','+15% growth','You pick payout or a bigger plan']},
     {ic:'spark',cls:'blue',badge:'10% recurring',name:'Affiliate Program',desc:'Share your referral link and earn 10% of every challenge purchased by traders you refer — for life, not just the first order.',cond:['Share your link','Friend buys a challenge','Commission tracked live']},
     {ic:'crown',cls:'orange',badge:'Spend-based',name:'Loyalty Tiers',desc:'Every $1 spent earns a loyalty point. Reach Silver and Gold to unlock bigger discount codes for future challenges.',cond:['Bronze: from first purchase','Silver: 500 points','Gold: 1,500 points']},
   ];
@@ -1605,12 +1605,13 @@ const VIEWS={
       return `<div class="scale-offer">
         <div class="so-txt">
           <b>${esc(a.login)} is up ${a.scale_trigger_pct}%. Now you choose.</b>
-          <span>Take the profit as a payout, or turn it into a bigger account. One or the other:
-            scaling puts the profit back in as capital, so there is nothing left to pay out.</span>
+          <span>Take the profit as a payout, or move up to the $${fmt0(a.scale_up_to)} plan. One or
+            the other: moving up puts the profit back in as capital, so there is nothing left to
+            pay out.</span>
         </div>
         <div class="so-act">
           <button class="btn-o sm" onclick="openPayoutModal(${a.id},${av.toFixed(2)})">Take $${fmt(av)} payout</button>
-          <button class="btn-p sm" onclick="openScaleModal(${a.id},${a.initial_balance},${a.scale_up_to})">Scale up to $${fmt0(a.scale_up_to)}</button>
+          <button class="btn-p sm" onclick="openScaleModal(${a.id},${a.initial_balance},${a.scale_up_to})">Move up to $${fmt0(a.scale_up_to)}</button>
         </div>
       </div>`}).join('')}
     ${funded.length?`<div class="panel" style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
@@ -2733,19 +2734,20 @@ function poFields(){
   else F.innerHTML=L('Wise account email')+`<input id="po-email" class="inp" type="email" placeholder="you@example.com">`;
 }
 /* Skalowanie to decyzja ZAMIAST wypłaty, więc modal mówi wprost, co trader
-   oddaje. Wcześniej platforma robiła to sama, bez pytania. */
+   oddaje — i że dostaje NOWY rachunek, bo starego nie da się powiększyć: saldo
+   siedzi u brokera, a nie w naszej bazie. */
 function openScaleModal(id,from,to){
   const w=document.createElement('div'); w.id='sc-modal'; w.className='modal-wrap';
   w.onclick=e=>{if(e.target===w)w.remove()};
   w.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
-    <div class="modal-head"><h3>Scale the account up</h3></div>
+    <div class="modal-head"><h3>Move up to the $${fmt0(to)} plan</h3></div>
     <p class="muted" style="font-size:12.5px;margin:2px 0 14px">
-      Your account grows from <b>$${fmt0(from)}</b> to <b>$${fmt0(to)}</b> and the balance
-      starts from the new size. The profit you made becomes part of the account, so there is
-      no payout this time. Loss limits are recalculated from the new size, and your profit
-      split does not change.</p>
+      You leave the <b>$${fmt0(from)}</b> account behind and we set up a fresh
+      <b>$${fmt0(to)}</b> account, funded from day one, with that plan's limits. The profit you
+      made pays for the upgrade, so there is no payout this time. Your new login and password
+      arrive by email, usually within minutes.</p>
     <div style="display:flex;gap:10px">
-      <button class="btn-p" onclick="scaleUp(${id})" id="sc-go">Scale up to $${fmt0(to)}</button>
+      <button class="btn-p" onclick="scaleUp(${id})" id="sc-go">Move up to $${fmt0(to)}</button>
       <button class="btn-o" onclick="$('sc-modal').remove()">Cancel</button>
     </div></div>`;
   document.body.appendChild(w);
@@ -2754,8 +2756,9 @@ async function scaleUp(id){
   const btn=$('sc-go'); btn.disabled=true;
   try{const r=await api(`/api/accounts/${id}/scale-up`,{method:'POST'});
     $('sc-modal').remove();
-    toast(`📈 Account scaled up to $${fmt0(r.new_size)}. Trade it from the new balance.`,'ok',9000);
-    go('payouts');
+    toast(`📈 You are moving up to a $${fmt0(r.new_size)} account. We are setting it up now — `
+      +`your credentials arrive by email.`,'ok',9000);
+    go('accounts');
   }catch(e){btn.disabled=false;toast('Error: '+e.message,'err')}
 }
 async function submitPayout(id){

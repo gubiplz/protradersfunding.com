@@ -240,11 +240,12 @@ def _account_dict(acc: Account, with_metrics: bool = True, with_credentials: boo
         "source": acc.source, "grant_note": acc.grant_note,
         "bogo_paid_size": getattr(acc, "bogo_paid_size", None),
         "created_at": acc.created_at.isoformat() if acc.created_at else None,
-        # Rozmiar po skalowaniu ALBO None. Portal rysuje z tego wybór „wypłata
-        # czy większe konto", więc liczy to jedno miejsce w kodzie.
+        # Rozmiar następnego planu ALBO None (konto poniżej progu albo już na
+        # szczycie drabiny). Portal rysuje z tego wybór „wypłata czy wyższy
+        # plan", więc liczy to jedno miejsce w kodzie.
         "scale_up_to": poller.scale_offer(acc),
-        "scale_step_pct": poller.SCALE_STEP_PCT,
         "scale_trigger_pct": poller.SCALE_TRIGGER_PCT,
+        "scale_count": int(getattr(acc, "scale_count", 0) or 0),
     }
     if admin_view:
         d["mt5_backed"] = bool(getattr(acc, "mt5_backed", True))
@@ -1206,11 +1207,15 @@ def _own_account(session, trader: Trader, account_id: int) -> Account:
 
 @app.post("/api/accounts/{account_id}/scale-up")
 def scale_up_account(account_id: int, trader: Trader = Depends(auth.current_trader)):
-    """Trader wybiera POWIĘKSZENIE konta zamiast wypłaty.
+    """Trader wybiera WYŻSZY PLAN zamiast wypłaty.
 
     Wcześniej skalowanie odpalał poller sam z siebie i trader nie miał tu nic do
     powiedzenia. Teraz to jego decyzja, bo obie ścieżki wykluczają się nawzajem:
     ten sam zysk albo idzie na wypłatę, albo zamienia się w większy rachunek.
+
+    Konto wychodzi stąd w stanie `provisioning` — dostaje NOWY rachunek MT5 o
+    rozmiarze wyższego planu (patrz `poller.apply_scale_up`), a poświadczenia
+    dowozi `provisioning.provision_pending` razem z mailem.
     """
     session = SessionLocal()
     try:
@@ -1218,6 +1223,10 @@ def scale_up_account(account_id: int, trader: Trader = Depends(auth.current_trad
         if acc.status != "funded":
             raise HTTPException(400, "Scaling is available on funded accounts only")
         if poller.scale_offer(acc) is None:
+            # Dwa różne powody odmowy, dwa różne komunikaty: „nie masz jeszcze
+            # progu" i „jesteś na największym planie" to nie to samo.
+            if catalog.next_size_up(acc.steps, acc.initial_balance) is None:
+                raise HTTPException(400, "This is already the largest account size we offer")
             raise HTTPException(
                 400, f"Scaling unlocks once the account is up {poller.SCALE_TRIGGER_PCT:.0f}%")
         # Otwarta pozycja przeżyłaby reset salda jako czysty prezent albo strata:
@@ -1225,19 +1234,19 @@ def scale_up_account(account_id: int, trader: Trader = Depends(auth.current_trad
         if abs(acc.open_pnl or 0.0) > 0.005:
             raise HTTPException(400, "Close your open positions before scaling the account up")
         poprzedni = acc.initial_balance
-        nowy = poller.apply_scale_up(acc)
+        nowy = poller.apply_scale_up(session, acc)
         session.commit()
         try:
             notify.send("account_scaled", trader.email,
                         {"name": trader.full_name or trader.email, "login": acc.login,
                          "previous_size": poprzedni, "new_size": nowy})
-            push.send_to_trader(trader.id, "Account scaled up",
-                                f"{acc.login} is now a ${nowy:,.0f} account.",
+            push.send_to_trader(trader.id, "Moving up to a bigger account",
+                                f"Your new ${nowy:,.0f} account is being set up.",
                                 url="/portal?view=accounts", tag="account_scaled")
         except Exception as e:  # pragma: no cover
             print(f"[scale-up] powiadomienie nie poszlo: {e}")
         return {"account_id": acc.id, "previous_size": poprzedni, "new_size": nowy,
-                "balance": acc.balance}
+                "balance": acc.balance, "status": acc.status, "product_key": acc.product_key}
     finally:
         session.close()
 
@@ -1337,9 +1346,11 @@ def my_achievements(trader: Trader = Depends(auth.current_trader)):
         payout = bool(acc_ids) and session.query(Payout).filter(
             Payout.account_id.in_(acc_ids)).first() is not None
         referred = session.query(Trader).filter(Trader.referred_by == trader.referral_code).count()
-        prod_sizes = {p.key: p.account_size for p in session.query(Product).all()}
-        scaled = any(a.status == "funded" and a.initial_balance > prod_sizes.get(a.product_key, a.initial_balance)
-                     for a in accs)
+        # Licznik, nie porównanie z cennikiem: po skalowaniu konto siedzi
+        # DOKŁADNIE na rozmiarze swojego nowego planu, więc dawny warunek
+        # `initial_balance > Product.account_size` nie odróżniał go już od
+        # świeżo kupionego.
+        scaled = any((getattr(a, "scale_count", 0) or 0) > 0 for a in accs)
         badges = [
             ("first_challenge", "First Challenge", "Purchase your first evaluation", paid_order),
             ("phase_passed", "Phase Passed", "Advance past Phase 1 of any challenge",
@@ -1349,7 +1360,7 @@ def my_achievements(trader: Trader = Depends(auth.current_trader)):
             ("first_payout", "First Payout", "Receive your first performance reward", payout),
             ("days_5", "Consistent Trader", "Log 5 trading days on one account",
              any(a.trading_days_count >= 5 for a in accs)),
-            ("scaled", "Scaled Up", "Trigger the +25% scaling plan on a funded account", scaled),
+            ("scaled", "Scaled Up", "Move a funded account up to the next plan", scaled),
             ("referrer", "Ambassador", "Refer your first trader", referred >= 1),
             ("kyc", "Verified", "Complete identity verification", trader.kyc_status == "approved"),
         ]
@@ -1475,7 +1486,12 @@ def my_certificate_issue(payload: MyCertIn, trader: Trader = Depends(auth.curren
 
 @app.post("/api/me/payouts/{payout_id}/certificate")
 def my_payout_certificate(payout_id: int, trader: Trader = Depends(auth.current_trader)):
-    """Dorobienie certyfikatu do WLASNEJ wyplaty (starsze wyplaty nie maja tokenu)."""
+    """Dorobienie certyfikatu do WLASNEJ wyplaty (starsze wyplaty nie maja tokenu).
+
+    Certyfikat wystawiony samoobsługowo NIE trafia na pas na landingu: o tym,
+    co jest na stronie, decyduje admin (panel → Payouts). Trader dostaje pełny
+    dokument z QR i weryfikacją, więc niczego mu to nie odbiera.
+    """
     session = SessionLocal()
     try:
         pay = session.get(Payout, payout_id)
@@ -1484,6 +1500,7 @@ def my_payout_certificate(payout_id: int, trader: Trader = Depends(auth.current_
         _own_account(session, trader, pay.account_id)   # rzuca 404 gdy nie jego
         if not pay.cert_token:
             pay.cert_token = secrets.token_urlsafe(16)[:32]
+            pay.show_on_lp = False
             session.commit()
         return {"url": f"/payout/{pay.cert_token}"}
     finally:
@@ -2159,6 +2176,7 @@ def admin_payouts_all():
                 "status": "paid" if p.paid else "pending",
                 "reject_reason": None, "note": p.note,
                 "cert_url": f"/payout/{p.cert_token}" if p.cert_token else None,
+                "show_on_lp": bool(getattr(p, "show_on_lp", True)),
             })
 
         reqs = (session.query(PayoutRequest)
@@ -2267,6 +2285,17 @@ class IssuePayoutIn(BaseModel):
     method: str = "bank"
     note: str | None = None
     reset_balance: bool = True        # jak przy zatwierdzeniu wniosku: zysk wypłacony
+    # Czy wpis pokazuje się na pasie na landingu. Dokument, QR i weryfikacja
+    # powstają NIEZALEŻNIE od tego — to decyzja o publikacji, nie o certyfikacie.
+    show_on_lp: bool = True
+
+
+class CertLpIn(BaseModel):
+    show_on_lp: bool = True
+
+
+class LpVisibilityIn(BaseModel):
+    show: bool
 
 
 def _payout_dict(p: Payout, acc: Account | None = None) -> dict:
@@ -2275,6 +2304,7 @@ def _payout_dict(p: Payout, acc: Account | None = None) -> dict:
             "trader_share": round(p.trader_share, 2), "paid": p.paid,
             "method": p.method, "note": p.note, "cert_token": p.cert_token,
             "cert_url": f"/payout/{p.cert_token}" if p.cert_token else None,
+            "show_on_lp": bool(getattr(p, "show_on_lp", True)),
             "account": acc.login if acc else None}
 
 
@@ -2305,6 +2335,7 @@ def admin_issue_payout(request: Request, account_id: int, payload: IssuePayoutIn
         p = Payout(account_id=acc.id, profit_amount=profit, trader_share=share, paid=True,
                    method=payload.method, note=(payload.note or None),
                    cert_token=secrets.token_urlsafe(16)[:32],
+                   show_on_lp=bool(payload.show_on_lp),
                    balance_reset=bool(payload.reset_balance and profit > 0))
         session.add(p)
 
@@ -2350,19 +2381,49 @@ def admin_account_payouts(account_id: int):
 
 
 @app.post("/api/admin/payouts/{payout_id}/certificate", dependencies=[Depends(auth.require_admin)])
-def admin_payout_certificate(payout_id: int):
-    """Dorabia certyfikat do wypłaty, która powstała wcześniej (np. z wniosku)."""
+def admin_payout_certificate(payout_id: int, payload: CertLpIn | None = None):
+    """Dorabia certyfikat do wypłaty, która powstała wcześniej (np. z wniosku).
+
+    `show_on_lp` decyduje WYŁĄCZNIE o pasie na landingu. Dokument, jego QR i
+    weryfikacja pod /payout/{token} powstają zawsze — trader dostaje ten sam
+    certyfikat niezależnie od tego, czy zgodził się na publikację.
+    """
     session = SessionLocal()
     try:
         p = session.get(Payout, payout_id)
         if not p:
             raise HTTPException(404, "Payout not found")
+        widoczny = True if payload is None else bool(payload.show_on_lp)
         if not p.cert_token:
             p.cert_token = secrets.token_urlsafe(16)[:32]
-            session.commit()
-            # Pas na landingu ma minutowy cache — bez tego świeży certyfikat
-            # pojawiłby się dopiero przy następnym odświeżeniu.
-            _PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
+        p.show_on_lp = widoczny
+        session.commit()
+        # Pas na landingu ma minutowy cache — bez tego świeży certyfikat
+        # pojawiłby się dopiero przy następnym odświeżeniu.
+        _PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
+        return _payout_dict(p, session.get(Account, p.account_id))
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/payouts/{payout_id}/lp", dependencies=[Depends(auth.require_admin)])
+def admin_payout_lp_visibility(payout_id: int, payload: LpVisibilityIn):
+    """Wpuszcza wypłatę na pas na landingu albo ją z niego zdejmuje.
+
+    Do tej pory jedynym sposobem zdjęcia wpisu ze strony było wycofanie
+    certyfikatu, które zabijało też publiczny link tradera — czyli za decyzję
+    „nie chcę tego na stronie" płacił dokumentem.
+    """
+    session = SessionLocal()
+    try:
+        p = session.get(Payout, payout_id)
+        if not p:
+            raise HTTPException(404, "Payout not found")
+        if not p.cert_token and payload.show:
+            raise HTTPException(400, "Issue the certificate first")
+        p.show_on_lp = bool(payload.show)
+        session.commit()
+        _PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
         return _payout_dict(p, session.get(Account, p.account_id))
     finally:
         session.close()
@@ -4081,7 +4142,8 @@ def public_recent_certificates():
         pays = (session.query(Payout, Account, Trader)
                 .join(Account, Payout.account_id == Account.id)
                 .join(Trader, Account.trader_id == Trader.id)
-                .filter(Payout.cert_token != None, Payout.paid == True)  # noqa: E711,E712
+                .filter(Payout.cert_token != None, Payout.paid == True,   # noqa: E711,E712
+                        Payout.show_on_lp == True)                        # noqa: E712
                 .order_by(Payout.ts.desc()).limit(24).all())
         for pay, acc, tr in pays:
             out.append({
@@ -4217,6 +4279,21 @@ def affiliate_page(request: Request):
 def install_page(request: Request):
     """Instrukcja instalacji PWA (iOS: Dodaj do ekranu, Android: beforeinstallprompt)."""
     return _page(request, "install.html")
+
+
+@app.get("/objectives")
+def objectives_page(request: Request):
+    """Tabela zasad, wcześniej sekcja na landingu.
+
+    Katalog wstrzyknięty w HTML tak samo jak na `/`: tabelę wypełnia
+    `renderObjectives()` z site.js, więc liczby nie mogą rozjechać się z tym,
+    co sprzedaje sklep.
+    """
+    session = SessionLocal()
+    try:
+        return _page(request, "objectives.html", products=_products_payload(session))
+    finally:
+        session.close()
 
 
 @app.get("/terms")

@@ -180,8 +180,8 @@ def test_achievements_odblokowuja_sie_z_realnych_zdarzen():
 
 def test_payouts_podsumowanie():
     tid, h = _trader("payouty@test.pl")
-    # +5% zysku — poniżej progu skalowania (+10%), żeby poller z sim feedem
-    # nie podbił initial_balance w trakcie testu (_maybe_scale)
+    # +5% zysku, czyli poniżej progu skalowania (+15%). Skalowanie jest dziś
+    # decyzją tradera, więc nic samo nie ruszy konta w trakcie testu.
     aid = _konto(tid, "880002", status="funded", balance=10_500, initial=10_000)
     s = SessionLocal()
     s.add(Payout(account_id=aid, profit_amount=500, trader_share=400, paid=True))
@@ -969,52 +969,111 @@ def test_mail_credits_granted_ma_szablon_html():
 
 # ---------------- plan skalowania: wybor zamiast automatu ----------------
 def test_skalowanie_ofertowane_dopiero_od_progu_i_tylko_na_funded():
-    """`scale_offer` to jedyne miejsce liczace, czy powiekszenie przysluguje."""
+    """`scale_offer` to jedyne miejsce liczace, czy wyzszy plan przysluguje."""
     from app import poller
 
     class _Acc:
-        def __init__(self, status, initial, balance):
+        def __init__(self, status, initial, balance, steps=2):
             self.status, self.initial_balance, self.balance = status, initial, balance
+            self.steps = steps
 
-    assert poller.scale_offer(_Acc("funded", 100_000, 109_999.99)) is None
-    # DOKLADNIE na progu: 100000 * 1.1 to w floatach 110000.00000000001, wiec bez
+    assert poller.scale_offer(_Acc("funded", 100_000, 114_999.99)) is None
+    # DOKLADNIE na progu: 100000 * 1.15 to w floatach 114999.99999999999, wiec bez
     # zaokraglenia obu stron konto na progu nie dostawaloby oferty.
-    assert poller.scale_offer(_Acc("funded", 100_000, 110_000)) == 150_000
+    assert poller.scale_offer(_Acc("funded", 100_000, 115_000)) == 200_000
+    # Krok to nastepny tier z CENNIKA, a nie procent — dlatego 300k, nie 450k.
+    assert poller.scale_offer(_Acc("funded", 200_000, 500_000)) == 300_000
+    # Instant ma wlasna drabine tej samej dlugosci, ale rodzin nie mieszamy.
+    assert poller.scale_offer(_Acc("funded", 25_000, 99_000, steps=0)) == 50_000
+    # Konta wyskalowane starym mechanizmem siedza na rozmiarach spoza katalogu.
+    assert poller.scale_offer(_Acc("funded", 150_000, 200_000)) == 200_000
+    # Szczyt drabiny: 2M nie ma dokad rosnac.
+    assert poller.scale_offer(_Acc("funded", 2_000_000, 3_000_000)) is None
     assert poller.scale_offer(_Acc("active", 100_000, 200_000)) is None
     assert poller.scale_offer(_Acc("breached", 100_000, 200_000)) is None
 
 
-def test_skalowanie_dosuwa_saldo_wiec_konto_nie_wpada_od_razu_w_breach():
-    """REGRESJA: wczesniej skalowanie podnosilo sam rozmiar i zabijalo konto.
+def test_skalowanie_wgrywa_caly_nastepny_plan_a_nie_sam_rozmiar():
+    """Konto po skalowaniu ma byc ZWYKLYM planem z cennika.
 
-    Prog max DD liczy sie od initial_balance, wiec rozmiar 150k przy saldzie
-    110k oznacza prog 135k ponad saldem — risk engine ubijal konto na nastepnym
-    ticku. Po zmianie saldo idzie w gore razem z rozmiarem.
+    Stara wersja podnosila samo `initial_balance` o 50%, zostawiajac
+    `product_key` i `max_lots` z poprzedniego tieru — konto 150k handlowalo z
+    limitem wolumenu konta 100k i nie odpowiadalo zadnej pozycji w ofercie.
     """
-    from app import poller, rules
-    from app.rules import AccountRuntime, ChallengeConfig, DrawdownType, EquityTick, Phase, Status
+    from app import poller
+    from app.models import Product
 
-    class _Acc:
-        status, initial_balance, balance, equity, open_pnl = "funded", 100_000.0, 110_000.0, 110_000.0, 0.0
-        peak_equity = day_start_equity = day_start_balance = 110_000.0
-        best_day_profit = 0.0
+    tid, _ = _trader("skalowanie-plan@test.pl")
+    aid = _konto(tid, "990105", status="funded", balance=115_000, initial=100_000)
+    with TestClient(app) as c:      # lifespan zasiewa katalog produktow
+        c.get("/api/products")
+        s = SessionLocal()
+        acc = s.get(Account, aid)
+        stary_login = acc.login
+        nowy = poller.apply_scale_up(s, acc)
+        s.commit()
 
-    acc = _Acc()
-    nowy = poller.apply_scale_up(acc)
-    assert nowy == 150_000 and acc.balance == 150_000 and acc.peak_equity == 150_000
+        cel = s.query(Product).filter(Product.key == "2step-200k").first()
+        assert nowy == 200_000 and acc.initial_balance == 200_000
+        assert acc.product_key == "2step-200k" and acc.preset == "2step-200k"
+        assert acc.max_lots == cel.max_lots, "limit wolumenu musi isc za rozmiarem"
+        assert acc.profit_split_pct == cel.profit_split_pct
+        assert acc.max_overall_loss_pct == cel.max_overall_loss_pct
+        # od zera, ale od razu funded
+        assert acc.phase == "funded" and acc.balance == 200_000
+        assert acc.peak_equity == 200_000 and acc.day_start_equity == 200_000
+        assert acc.trading_days_count == 0 and acc.best_day_profit == 0.0
+        # nowy rachunek MT5: stary numer trzyma stare saldo u brokera
+        assert acc.login != stary_login
+        assert acc.platform_login is None and acc.platform_password is None
+        assert acc.status == "provisioning" and acc.scale_count == 1
+        s.close()
 
-    cfg = ChallengeConfig(initial_balance=acc.initial_balance, profit_target_pct=0,
-                          max_daily_loss_pct=5, max_overall_loss_pct=10,
-                          drawdown_type=DrawdownType.STATIC)
-    rt = AccountRuntime(phase=Phase.FUNDED, status=Status.FUNDED, balance=acc.balance,
-                        equity=acc.equity, peak_equity=acc.peak_equity, day_key="2026-08-03",
-                        day_start_equity=acc.day_start_equity,
-                        day_start_balance=acc.day_start_balance)
-    res = rules.evaluate(cfg, rt, EquityTick(equity=acc.equity, balance=acc.balance,
-                                             open_pnl=0.0, day_key="2026-08-03"))
-    assert not res.breaches and not res.failed
-    # kolejne powiekszenie dopiero po nastepnych +10%, nie od razu
-    assert poller.scale_offer(acc) is None
+
+def test_skalowanie_nie_wpada_w_breach_gdy_feed_poda_saldo_konta():
+    """REGRESJA na to, co realnie zabijalo konta po skalowaniu.
+
+    Saldo nie nalezy do nas — feed czyta je z brokera (a SimulatedFeed trzyma
+    wlasny stan PER LOGIN). Stara wersja podnosila `initial_balance` w bazie i
+    zostawiala ten sam login, wiec na nastepnym ticku wracalo stare saldo, a
+    prog max DD liczony od nowego rozmiaru stal juz nad nim: konto szlo w breach
+    zamiast urosnac. Tu przechodzimy pelna sciezke — skalowanie, provisioning,
+    kilka tickow — i konto ma zyc.
+    """
+    import asyncio
+
+    from app import poller, provisioning
+    from app.feed import SimulatedFeed
+
+    feed = SimulatedFeed()
+    tid, _ = _trader("skalowanie-feed@test.pl")
+    aid = _konto(tid, "990106", status="funded", balance=100_000, initial=100_000)
+    with TestClient(app) as c:
+        c.get("/api/products")
+        s = SessionLocal()
+        acc = s.get(Account, aid)
+        acc.phase = "funded"
+        s.commit()
+        # feed poznaje konto pod STARYM loginem i zapamietuje jego stan
+        asyncio.run(poller.process_account(s, acc, feed))
+        acc.balance = 115_000.0
+        acc.equity = 115_000.0
+        acc.open_pnl = 0.0
+        s.commit()
+
+        poller.apply_scale_up(s, acc)
+        s.commit()
+        asyncio.run(provisioning.provision_pending(SessionLocal, feed))
+        s.refresh(acc)
+        assert acc.status == "funded", "po provisioningu konto ma byc handlowalne"
+        assert acc.platform_login and acc.platform_password
+
+        for _ in range(5):
+            asyncio.run(poller.process_account(s, acc, feed))
+            s.refresh(acc)
+        assert acc.status == "funded" and not acc.breach_reason
+        assert acc.balance > 150_000, "feed musi podawac saldo NOWEGO konta, nie starego"
+        s.close()
 
 
 def test_endpoint_scale_up_wymaga_progu_i_konta_funded():
@@ -1022,31 +1081,56 @@ def test_endpoint_scale_up_wymaga_progu_i_konta_funded():
     maly = _konto(tid, "990101", status="funded", balance=10_200, initial=10_000)
     obcy_tid, _ = _trader("skalowanie-obcy@test.pl")
     obce = _konto(obcy_tid, "990102", status="funded", balance=20_000, initial=10_000)
+    najwiekszy = _konto(tid, "990107", status="funded", balance=3_000_000, initial=2_000_000)
     with TestClient(app) as c:
         r = c.post(f"/api/accounts/{maly}/scale-up", headers=h)
         assert r.status_code == 400 and "unlocks" in r.json()["detail"]
         assert c.post(f"/api/accounts/{obce}/scale-up", headers=h).status_code == 404
+        # szczyt drabiny dostaje INNY komunikat: to nie jest brak progu
+        r = c.post(f"/api/accounts/{najwiekszy}/scale-up", headers=h)
+        assert r.status_code == 400 and "largest" in r.json()["detail"]
 
 
-def test_endpoint_scale_up_powieksza_konto_i_widac_to_w_api():
+def test_endpoint_scale_up_wgrywa_wyzszy_plan_i_widac_to_w_api():
     tid, h = _trader("skalowanie-ok@test.pl")
-    aid = _konto(tid, "990103", status="funded", balance=11_000, initial=10_000)
+    aid = _konto(tid, "990103", status="funded", balance=11_500, initial=10_000)
     with TestClient(app) as c:
         konta = {a["id"]: a for a in c.get("/api/me/accounts", headers=h).json()}
-        assert konta[aid]["scale_up_to"] == 15_000, "oferta musi byc widoczna w payloadzie"
+        # 10k nie ma juz w ofercie, wiec kolejny szczebel to najmniejszy plan: 25k
+        assert konta[aid]["scale_up_to"] == 25_000, "oferta musi byc widoczna w payloadzie"
+        assert konta[aid]["scale_trigger_pct"] == 15.0
         r = c.post(f"/api/accounts/{aid}/scale-up", headers=h)
         assert r.status_code == 200, r.text
         d = r.json()
-        assert d["previous_size"] == 10_000 and d["new_size"] == 15_000
-        assert d["balance"] == 15_000, "saldo startuje od nowego rozmiaru"
+        assert d["previous_size"] == 10_000 and d["new_size"] == 25_000
+        assert d["balance"] == 25_000, "saldo startuje od rozmiaru nowego planu"
+        assert d["product_key"] == "2step-25k" and d["status"] == "provisioning"
         # druga proba pod rzad nie ma prawa przejsc: konto jest dopiero na starcie
         assert c.post(f"/api/accounts/{aid}/scale-up", headers=h).status_code == 400
+        # odznaka rozpoznaje skalowanie po liczniku, nie po rozmiarze konta
+        odznaki = {b["key"]: b for b in c.get("/api/me/achievements", headers=h).json()}
+        assert odznaki["scaled"]["unlocked"] is True
+
+
+def test_otwarta_pozycja_blokuje_skalowanie():
+    """Zysk otwartej pozycji rozliczylby sie juz wobec NOWEGO konta."""
+    tid, h = _trader("skalowanie-pozycja@test.pl")
+    aid = _konto(tid, "990108", status="funded", balance=115_000, initial=100_000)
+    s = SessionLocal()
+    acc = s.get(Account, aid)
+    acc.open_pnl = 240.0
+    s.commit()
+    s.close()
+    with TestClient(app) as c:
+        r = c.post(f"/api/accounts/{aid}/scale-up", headers=h)
+        assert r.status_code == 400 and "Close your open positions" in r.json()["detail"]
 
 
 def test_mail_account_scaled_ma_szablon():
-    tresc = notify._render("account_scaled", {"name": "x", "login": "990104",
-                                              "previous_size": 10_000, "new_size": 15_000})
-    assert "15,000" in tresc[0] and "15,000" in tresc[1]
-    html = notify._render_html("account_scaled", {"name": "x", "login": "990104",
-                                                 "previous_size": 10_000, "new_size": 15_000}, "s")
-    assert html and "15,000" in html and "view=accounts" in html
+    ctx = {"name": "x", "login": "990104", "previous_size": 10_000, "new_size": 25_000}
+    tresc = notify._render("account_scaled", ctx)
+    assert "25,000" in tresc[0] and "25,000" in tresc[1]
+    # mail NIE moze zapraszac do handlu: konto czeka na poswiadczenia
+    assert "separate email" in tresc[1]
+    html = notify._render_html("account_scaled", ctx, "s")
+    assert html and "25,000" in html and "view=accounts" in html

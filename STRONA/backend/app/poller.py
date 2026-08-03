@@ -15,15 +15,16 @@ from .config import get_settings
 from .db import SessionLocal
 from .feed import Feed, make_feed
 from .models import Account, Breach, EquitySnapshot
-from . import notify, provisioning, rules, tradebot
+from . import catalog, notify, provisioning, rules, tradebot
 from .rules import AccountRuntime, EquityTick, Phase, Status
 
 # Plan skalowania kont funded: po +SCALE_TRIGGER% trader WYBIERA — wypłata albo
-# powiększenie konta o SCALE_STEP%. Skalowanie nie dzieje się już samo (patrz
-# `scale_offer` / `apply_scale_up`): jedno wyklucza drugie, bo zysk albo idzie
-# do kieszeni, albo zamienia się w kapitał.
-SCALE_TRIGGER_PCT = 10.0
-SCALE_STEP_PCT = 50.0
+# wyższy plan z cennika. Skalowanie nie dzieje się samo (patrz `scale_offer` /
+# `apply_scale_up`): jedno wyklucza drugie, bo zysk albo idzie do kieszeni, albo
+# zamienia się w kapitał. Krok to NASTĘPNY tier z katalogu, nie procent — konto
+# po skalowaniu ma być zwykłym planem z cennika, a nie rozmiarem, którego nigdzie
+# nie ma w ofercie (poprzednia wersja robiła 150k/225k/337k).
+SCALE_TRIGGER_PCT = 15.0
 
 settings = get_settings()
 _feed: Feed | None = None
@@ -98,44 +99,83 @@ def _advance_phase(acc: Account, rt: AccountRuntime) -> None:
 def scale_offer(acc: Account) -> float | None:
     """Rozmiar, na jaki urośnie konto, jeśli trader wybierze skalowanie.
 
-    None = oferta jeszcze nie przysługuje. Warunek liczymy w locie z salda,
-    więc nie ma osobnej kolumny „należy się", która mogłaby rozjechać się ze
-    stanem konta po wypłacie albo po breachu.
+    None = oferta jeszcze nie przysługuje albo konto jest już na szczycie
+    drabiny (2M). Warunek liczymy w locie z salda, więc nie ma osobnej kolumny
+    „należy się", która mogłaby rozjechać się ze stanem konta po wypłacie albo
+    po breachu.
     """
     if acc.status != Status.FUNDED.value:
         return None
-    # Zaokrąglenie obu stron jest konieczne: 100000 * 1.1 to w floatach
-    # 110000.00000000001, więc konto DOKŁADNIE na progu nie dostawało oferty.
+    # Zaokrąglenie obu stron jest konieczne: 100000 * 1.15 to w floatach
+    # 114999.99999999999, więc konto DOKŁADNIE na progu nie dostawało oferty.
     prog = round(acc.initial_balance * (1 + SCALE_TRIGGER_PCT / 100.0), 2)
     if round(acc.balance, 2) < prog:
         return None
-    return round(acc.initial_balance * (1 + SCALE_STEP_PCT / 100.0), 2)
+    return catalog.next_size_up(acc.steps, acc.initial_balance)
 
 
-def apply_scale_up(acc: Account) -> float:
-    """Zamienia wypracowany zysk na WIĘKSZE konto (wybór zamiast wypłaty).
+def apply_scale_up(session, acc: Account) -> float:
+    """Wgrywa traderowi NASTĘPNY plan z cennika: od zera, ale od razu funded.
 
-    Saldo jedzie w górę razem z rozmiarem i to nie jest hojność, tylko warunek
-    poprawności. Próg max DD liczy się od `initial_balance` (rules._overall_floor),
-    więc samo podniesienie rozmiaru przy nietkniętym saldzie stawia konto OD RAZU
-    pod progiem i risk engine ubija je na następnym ticku: przy kroku 50% próg
-    wynosi 135k, a saldo dalej 110k. Poprzednia wersja robiła dokładnie to (krok
-    25%: próg 112,5k vs saldo 110k), więc reklamowany plan skalowania kończył
-    konto zamiast je powiększać.
+    Konta nie da się powiększyć w miejscu i to nie jest kwestia gustu. Saldo nie
+    należy do nas: MetaApiFeed czyta je z brokera, MetaQuotesWebFeed z terminala,
+    a SimulatedFeed trzyma własny stan per login. Samo podbicie `initial_balance`
+    w bazie żyje więc do pierwszego ticku pollera — potem saldo wraca do realnego,
+    a próg max DD (rules._overall_floor liczy go od `initial_balance`) stoi już
+    wysoko nad nim i risk engine ubija konto. Dlatego skalowanie wydaje NOWY
+    rachunek o docelowym rozmiarze, zamiast udawać, że stary urósł.
 
-    Trader oddaje zysk, dostaje kapitał: dzień i szczyt equity startują od nowa
-    z nowego rozmiaru, żeby limit dzienny nie liczył się od starego salda.
+    Trader oddaje zysk, dostaje kapitał: konto startuje od salda nowego planu,
+    z jego limitami i limitem wolumenu (stary mechanizm zostawiał `max_lots` ze
+    starego rozmiaru, więc konto 150k dalej miało cap 100k).
     """
-    nowy = round(acc.initial_balance * (1 + SCALE_STEP_PCT / 100.0), 2)
-    acc.initial_balance = nowy
-    acc.balance = nowy
-    acc.equity = nowy
+    prod = catalog.next_product(session, acc.steps, acc.initial_balance)
+    if prod is None:
+        raise ValueError("no larger plan available")
+
+    # Cały plan z katalogu, nie tylko rozmiar — inaczej konto zostaje z regułami
+    # poprzedniego tieru i przestaje odpowiadać czemukolwiek z cennika.
+    acc.product_key = prod.key
+    acc.preset = prod.key
+    acc.initial_balance = prod.account_size
+    acc.profit_target_p1 = prod.profit_target_p1
+    acc.profit_target_p2 = prod.profit_target_p2
+    acc.max_daily_loss_pct = prod.max_daily_loss_pct
+    acc.max_overall_loss_pct = prod.max_overall_loss_pct
+    acc.min_trading_days = prod.min_trading_days
+    acc.drawdown_type = prod.drawdown_type
+    acc.profit_split_pct = prod.profit_split_pct
+    acc.max_lots = getattr(prod, "max_lots", 0.0) or 0.0
+
+    # Runtime od zera, na nowym rozmiarze.
+    bal = prod.account_size
+    acc.phase = Phase.FUNDED.value
+    acc.balance = bal
+    acc.equity = bal
+    acc.peak_equity = bal
+    acc.day_start_equity = bal
+    acc.day_start_balance = bal
     acc.open_pnl = 0.0
-    acc.peak_equity = nowy
-    acc.day_start_equity = nowy
-    acc.day_start_balance = nowy
     acc.best_day_profit = 0.0
-    return nowy
+    acc.trading_days_count = 0
+    acc.last_counted_trading_day = ""
+    acc.breach_reason = None
+    acc.started_at = datetime.now(timezone.utc)
+    acc.closed_at = None
+
+    # Nowy rachunek MT5. Login MUSI się zmienić: SimulatedFeed cache'uje stan po
+    # loginie, więc pod starym numerem wróciłoby stare saldo i konto poszłoby w
+    # breach na pierwszym ticku. Poświadczenia zdejmujemy, bo stary rachunek ma
+    # na sobie stary kapitał — resztę dokończy provisioning.provision_pending,
+    # który dobiera z puli rachunek o pasującym rozmiarze i wysyła maila.
+    acc.login = provisioning._gen_login()
+    acc.platform_login = None
+    acc.platform_password = None
+    acc.platform_server = None
+    acc.metaapi_account_id = None
+    acc.status = "provisioning"
+    acc.scale_count = (acc.scale_count or 0) + 1
+    return float(bal)
 
 
 def _notify(acc: Account, event: str, extra: dict | None = None) -> None:
@@ -222,8 +262,8 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
         if acc.status == Status.FUNDED.value:
             _notify(acc, "account_funded")
     else:
-        # Skalowanie NIE dzieje się tu samo: przy +10% trader wybiera w portalu
-        # między wypłatą a powiększeniem konta (POST /api/accounts/{id}/scale-up).
+        # Skalowanie NIE dzieje się tu samo: przy +15% trader wybiera w portalu
+        # między wypłatą a wyższym planem (POST /api/accounts/{id}/scale-up).
         session.commit()
 
 

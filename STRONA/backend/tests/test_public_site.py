@@ -160,12 +160,52 @@ def test_certyfikat_po_tokenie_a_nie_po_id():
 
 def test_wszystkie_strony_publiczne_odpowiadaja():
     # /admin celowo NIE ma tu byc — panel jest zamkniety i dla goscia nie istnieje.
-    strony = ["/", "/faq", "/affiliate", "/terms", "/privacy", "/risk-disclosure",
+    strony = ["/", "/faq", "/affiliate", "/objectives", "/terms", "/privacy", "/risk-disclosure",
               "/refund-policy", "/verify", "/portal", "/robots.txt"]
     with TestClient(app) as c:
         for path in strony:
             r = c.get(path)
             assert r.status_code == 200, f"{path} -> {r.status_code}"
+
+
+def test_tabela_zasad_ma_wlasna_strone_a_landing_juz_jej_nie_ma():
+    """Tabela objectives zjechala z landingu na /objectives.
+
+    Wiersze rysuje site.js, wiec serwer musi oddac DWIE rzeczy: pusta tabele do
+    wypelnienia i wstrzykniety katalog. Bez tego drugiego strona pokazywalaby
+    same „—", bo `renderObjectives()` liczy z PRODUCTS.
+    """
+    with TestClient(app) as c:
+        strona = c.get("/objectives").text
+        lp = c.get("/").text
+    assert 'id="objBody"' in strona and 'id="pf-products"' in strona
+    assert '"2step-25k"' in strona and '"instant-25k"' in strona, "katalog musi byc w HTML"
+    assert 'id="objBody"' not in lp, "sekcja zniknela z landingu"
+    # martwa kotwica to najgorszy wynik tej zmiany: linki maja prowadzic na strone
+    assert 'href="/#objectives"' not in lp and 'href="#objectives"' not in lp
+    assert 'href="/objectives"' in lp, "menu i hero prowadza na nowa strone"
+
+
+def test_site_js_wypelnia_tabele_na_stronie_bez_konfiguratora():
+    """Kanarek na cichy błąd: strona wraca 200 z PUSTĄ tabelą.
+
+    `products()` w site.js wychodzi wcześniej, gdy na stronie nie ma
+    konfiguratora — a /objectives ma samą tabelę. Serwerowo tego nie widać,
+    bo wiersze dorabia dopiero JS.
+    """
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1] / "static" / "js" / "site.js").read_text()
+    guard = next(l for l in js.splitlines() if "if (!$('#pcfg')" in l)
+    assert "#objBody" in guard, "products() musi uznawać stronę z samą tabelą"
+
+
+def test_stopka_bez_plakietek_ale_z_pelnym_disclaimerem():
+    """Plakietki wypadly; obowiazek informacyjny zostaje przy pelnym tekscie."""
+    with TestClient(app) as c:
+        html = c.get("/").text
+    assert "foot-tags" not in html
+    assert "Risk Disclaimer:" in html and "demo accounts with virtual funds" in html
 
 
 def test_link_afiliacyjny_bierze_host_z_zadania():

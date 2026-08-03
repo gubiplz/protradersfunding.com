@@ -46,7 +46,7 @@ _BODY: dict[str, str] = {
     "challenge_granted": "A challenge account was added to your portal.",
     "phase_passed": "Objective complete — your next phase account is on the way.",
     "account_funded": "Your funded account is live. Welcome to the payout side.",
-    "account_scaled": "Your account was scaled up. The new size is live.",
+    "account_scaled": "You moved up a plan. The new account is being set up.",
     "breached": "A trading rule was breached on your account. See details.",
     "payout_requested": "We received your payout request. It's under review.",
     "payout_approved": "Your payout was approved.",

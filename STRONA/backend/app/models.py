@@ -270,6 +270,11 @@ class Account(Base):
     trading_days_count: Mapped[int] = mapped_column(Integer, default=0)
     last_counted_trading_day: Mapped[str] = mapped_column(String(16), default="")
     breach_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Ile razy konto poszlo o szczebel w gore planem skalowania. Po skalowaniu
+    # rozmiar znow rowna sie rozmiarowi planu z cennika, wiec porownanie
+    # `initial_balance > Product.account_size` przestalo odrozniac konto
+    # wyskalowane od swiezo kupionego — odznaka potrzebuje wlasnego licznika.
+    scale_count: Mapped[int] = mapped_column(Integer, default=0)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
@@ -372,6 +377,11 @@ class Payout(Base):
     # equity musi wiedziec, w ktorym miejscu balans spadl — inaczej ostatni punkt
     # wykresu nie zgadzalby sie z realnym saldem konta.
     balance_reset: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Czy wpis pokazuje sie na pasie certyfikatow na landingu. Dotyczy WYLACZNIE
+    # publikacji: dokument, jego QR i weryfikacja pod /payout/{token} powstaja
+    # zawsze. Wczesniej jedynym sposobem zdjecia wyplaty ze strony bylo cofniecie
+    # certyfikatu, ktore zabijalo tez publiczny link tradera.
+    show_on_lp: Mapped[bool] = mapped_column(Boolean, default=True)
 
     account: Mapped[Account] = relationship(back_populates="payouts")
 

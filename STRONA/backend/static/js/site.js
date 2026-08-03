@@ -499,7 +499,9 @@
   }
 
   async function products() {
-    if (!$('#pcfg') && !$('#cfg')) return;
+    /* #objBody counts too: /objectives is a page with the rules table and no
+       configurator at all, and without it here the table stayed empty. */
+    if (!$('#pcfg') && !$('#cfg') && !$('#objBody')) return;
     const wire = () => {
       const ci = $('#pcfg-coupon');
       const send = () => ci && submitCodeField(ci, codeMsg);

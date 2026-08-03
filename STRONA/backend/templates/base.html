@@ -59,7 +59,7 @@ if(localStorage.getItem('pf_promo_code')||localStorage.getItem('pf_coupon_code')
     <a class="logo" href="/"><img src="/static/img/logo.png" alt=""> <span class="logo-txt">{{ site_name }}</span></a>
     <nav class="nav-links">
       <a href="/#how">How it works</a>
-      <a href="/#objectives">Objectives</a>
+      <a href="/objectives">Objectives</a>
       <a href="/#pricing">Pricing</a>
       <a href="/#certs">Payouts</a>
       <a href="/faq">FAQ</a>
@@ -74,7 +74,7 @@ if(localStorage.getItem('pf_promo_code')||localStorage.getItem('pf_coupon_code')
 </header>
 <div class="mobile-menu" id="mobileMenu">
   <a href="/#how">How it works</a>
-  <a href="/#objectives">Trading Objectives</a>
+  <a href="/objectives">Trading Objectives</a>
   <a href="/#pricing">Pricing</a>
   <a href="/#certs">Payouts</a>
   <a href="/faq">FAQ</a>
@@ -95,7 +95,7 @@ if(localStorage.getItem('pf_promo_code')||localStorage.getItem('pf_coupon_code')
       <div class="foot-col">
         <h4>Product</h4>
         <a href="/#how">How it works</a>
-        <a href="/#objectives">Trading Objectives</a>
+        <a href="/objectives">Trading Objectives</a>
         <a href="/#pricing">Pricing</a>
         <a href="/#scaling">Scaling Plan</a>
         <a href="/install">Install the App</a>
@@ -121,13 +121,11 @@ if(localStorage.getItem('pf_promo_code')||localStorage.getItem('pf_coupon_code')
       <p>Trading foreign exchange and CFDs carries a high level of risk and may not be suitable for all investors. The content of this website is provided for informational purposes only and does not constitute investment advice, financial advice, or a solicitation to trade. {{ site_name }} does not provide investment services, brokerage services, or real trading accounts, and nothing on this website is an offer of employment or a promise of income.</p>
       <p>By accessing this website or purchasing an evaluation you agree to our <a href="/terms">Terms of Service</a> and <a href="/privacy">Privacy Policy</a>. Please read the full <a href="/risk-disclosure">Risk Disclosure</a> and <a href="/refund-policy">Refund Policy</a> before you buy.</p>
     </div>
+    {# The "Demo accounts / Virtual funds / Simulated environment" chips used to
+       sit here. The Risk Disclaimer right above says all three in full
+       sentences, so they were saying the same thing twice. #}
     <div class="foot-bottom">
       <span>© <span id="year"></span> {{ site_name }}. All rights reserved.</span>
-      <div class="foot-tags">
-        <span class="chip">Demo accounts</span>
-        <span class="chip">Virtual funds</span>
-        <span class="chip">Simulated environment</span>
-      </div>
     </div>
   </div>
 </footer>

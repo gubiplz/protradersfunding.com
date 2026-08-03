@@ -610,8 +610,10 @@ function renderPayoutsView(){
         :r.cert_url
           ?`<a class="btn-o sm" href="${r.cert_url}" target="_blank">Open</a>
             <button class="btn-o sm" onclick="copyCert('${location.origin}${r.cert_url}')">Copy link</button>
+            <button class="btn-o sm" onclick="setCertLp(${r.id},${r.show_on_lp?'false':'true'})">
+              ${r.show_on_lp?'On LP ✓':'Not on LP'}</button>
             <button class="btn-o sm" onclick="revokeCert(${r.id})">Revoke</button>`
-          :`<button class="btn-o sm" onclick="makeCert(${r.id})">Generate</button>`}</td>
+          :`<button class="btn-o sm" onclick="askCertLp(${r.id})">Generate</button>`}</td>
       <td style="text-align:right;white-space:nowrap">${r.kind==='request'&&r.status==='pending'
         ?`<button class="btn-p sm" onclick="approvePayout(${r.id})">Approve &amp; pay</button>
           <button class="btn-o sm" onclick="rejectPayout(${r.id})">Reject</button>`
@@ -1016,10 +1018,14 @@ async function renderPayouts(id){
       <span style="display:flex;align-items:center;gap:8px">
         <b class="up">$${fmt(p.trader_share)}</b>
         ${p.cert_url
-          ? `<a class="btn-o sm" href="${p.cert_url}" target="_blank">Certificate</a>
+          ? `<span class="status ${p.show_on_lp?'paid':'pending'}" title="Landing page strip">
+               <span class="dot"></span>${p.show_on_lp?'On landing page':'Not published'}</span>
+             <a class="btn-o sm" href="${p.cert_url}" target="_blank">Certificate</a>
              <button class="btn-o sm" onclick="copyCert('${location.origin}${p.cert_url}')">Copy link</button>
+             <button class="btn-o sm" onclick="setCertLp(${p.id},${p.show_on_lp?'false':'true'},${id})">
+               ${p.show_on_lp?'Take off the LP':'Put on the LP'}</button>
              <button class="btn-o sm" onclick="revokeCert(${p.id},${id})">Revoke</button>`
-          : `<button class="btn-o sm" onclick="makeCert(${p.id},${id})">Generate</button>`}
+          : `<button class="btn-o sm" onclick="askCertLp(${p.id},${id})">Generate</button>`}
       </span>
     </div>`).join('')
     : '<p class="muted" style="font-size:12.5px">No payouts on this account yet.</p>';
@@ -1039,6 +1045,12 @@ async function renderPayouts(id){
       <div><label class="muted" style="font-size:12px">Note (optional)</label>
         <input id="po-note" class="inp" placeholder="e.g. 1st payout"></div>
     </div>
+    <label style="display:flex;align-items:center;gap:8px;margin:12px 0;font-size:12.5px">
+      <input type="checkbox" id="po-lp" checked>
+      <span>Show this payout on the landing page strip
+        <span class="muted">(the certificate, its QR and the verification link are created either
+        way — this only decides whether the trader's payout is shown publicly)</span></span>
+    </label>
     <button class="btn-p" onclick="issuePayout(${id})">Issue payout + certificate</button>`}
     <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
       Current profit <b>$${fmt(d.profit)}</b> · split <b>${d.split_pct}%</b> → suggested
@@ -1051,25 +1063,60 @@ async function issuePayout(id){
   if(!(amount>0)){toast('Enter a payout amount greater than 0.','err');return}
   if(!confirm(`Issue a payout of $${amount.toFixed(2)}?\n\nIt is booked as paid and the account `
     +`balance resets to its starting capital.`))return;
+  const naLp=$('po-lp')?$('po-lp').checked:true;
   try{const p=await api(`/api/admin/accounts/${id}/payout`,{method:'POST',
-      body:JSON.stringify({amount,method:$('po-method').value,note:($('po-note').value||'').trim()||null})});
-    toast(`✅ Payout $${fmt(p.trader_share)} issued. Certificate: ${location.origin}${p.cert_url}`,'ok',10000);
+      body:JSON.stringify({amount,method:$('po-method').value,note:($('po-note').value||'').trim()||null,
+        show_on_lp:naLp})});
+    toast(`✅ Payout $${fmt(p.trader_share)} issued${naLp?' and published on the landing page':''}. `
+      +`Certificate: ${location.origin}${p.cert_url}`,'ok',10000);
     openAccount(id);
   }catch(e){toast('Error: '+e.message,'err')}
 }
+/* Publishing on the landing page is a separate decision from issuing the
+   document, so it gets a real dialog instead of confirm(): in a native confirm
+   "Cancel" cannot tell "do not publish" apart from "do not issue at all". */
+function askCertLp(pid,accId){
+  const w=document.createElement('div'); w.id='lp-modal'; w.className='modal-wrap';
+  w.onclick=e=>{if(e.target===w)w.remove()};
+  w.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>Publish this payout on the landing page?</h3></div>
+    <p class="muted" style="font-size:12.5px;margin:2px 0 14px">
+      The certificate is created either way, with its QR code and a working
+      <b>/verify</b> link the trader can share. This only decides whether the payout also shows up
+      on the public strip on the landing page, with the name masked.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn-p" onclick="makeCert(${pid},${accId||'null'},true)">Yes, show it on the landing page</button>
+      <button class="btn-o" onclick="makeCert(${pid},${accId||'null'},false)">No, keep it private</button>
+      <button class="btn-o" onclick="$('lp-modal').remove()">Cancel</button>
+    </div></div>`;
+  document.body.appendChild(w);
+}
 /* accId comes from the account slide-over; the Payouts view calls these
    without it and then the whole list is reloaded instead. */
-async function makeCert(pid,accId){
-  try{await api(`/api/admin/payouts/${pid}/certificate`,{method:'POST'});
-    toast('Certificate generated. It appears on the landing page within a minute.','ok');
+async function makeCert(pid,accId,onLp){
+  const m=$('lp-modal'); if(m)m.remove();
+  try{await api(`/api/admin/payouts/${pid}/certificate`,{method:'POST',
+      body:JSON.stringify({show_on_lp:onLp!==false})});
+    toast(onLp===false
+      ? 'Certificate generated. It stays off the landing page.'
+      : 'Certificate generated and published on the landing page.','ok');
     accId?renderPayouts(accId):VIEWS.payouts();
   }catch(e){toast('Error: '+e.message,'err')}
 }
-/* Revoking is the only way to take an entry off the landing page strip.
-   The payout stays on the account — only the document and its link go. */
+/* Publikacja i sam dokument to dwie rozne rzeczy: zdjecie wpisu z pasa NIE
+   zabiera traderowi certyfikatu ani linku do weryfikacji. */
+async function setCertLp(pid,show,accId){
+  try{await api(`/api/admin/payouts/${pid}/lp`,{method:'POST',body:JSON.stringify({show})});
+    toast(show?'Published on the landing page.':'Taken off the landing page. The certificate still works.','ok');
+    accId?renderPayouts(accId):VIEWS.payouts();
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+/* Revoking kills the DOCUMENT — the public link stops working. To only take an
+   entry off the strip use setCertLp(). The payout row stays either way. */
 async function revokeCert(pid,accId){
   if(!confirm('Revoke this certificate?\n\nThe public link stops working and the entry '
-    +'disappears from the landing page. The payout itself stays on the account.'))return;
+    +'disappears from the landing page. The payout itself stays on the account.\n\n'
+    +'To only hide it from the landing page, use "Take off the LP" instead.'))return;
   try{await api(`/api/admin/payouts/${pid}/certificate`,{method:'DELETE'});
     toast('Certificate revoked. Removed from the landing page.','ok');
     accId?renderPayouts(accId):VIEWS.payouts();
