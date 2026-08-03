@@ -694,7 +694,9 @@ async function markOrderFailed(id){
   catch(e){toast('Error: '+e.message,'err')}
 }
 async function markOrderPaid(id){
-  if(!confirm('Mark this order as PAID?\n\nThis creates the challenge account and sends the trader their credentials — exactly like a completed card payment.'))return;
+  if(!await askConfirm({title:'Mark this order as paid?',
+    body:'This creates the challenge account and sends the trader their credentials, exactly like a completed card payment.',
+    ok:'Mark as paid'}))return;
   try{const d=await api(`/api/admin/orders/${id}/mark-paid`,{method:'POST'});
     toast(d.already?'This order was already paid.':`✅ Paid. Account #${d.account_id} created.`,'ok');go('orders')}
   catch(e){toast('Error: '+e.message,'err')}
@@ -945,6 +947,54 @@ async function makeAchievementCert(id,kind){
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
+/* ---------- shared confirmation ----------
+   Pytanie w oknie PANELU, nie przegladarki. Natywny confirm() przedstawial sie
+   jako "Komunikat ze strony protradersfunding.com", mial przyciski w jezyku
+   systemu i wygladal identycznie dla skasowania klienta i dla zatrzymania bota
+   — czyli nie niosl zadnej informacji o wadze decyzji.
+
+   `requireText` zastepuje osobny prompt(): przy operacjach nieodwracalnych
+   admin wpisuje slowo w TYM SAMYM oknie, zamiast odpowiadac na dwa systemowe
+   monity pod rzad. Zwraca Promise<bool>. */
+function askConfirm({title,body,ok='Confirm',cancel='Cancel',danger=false,requireText=null}){
+  return new Promise(resolve=>{
+    const w=document.createElement('div');
+    w.className='modal-wrap'; w.id='ask-modal';
+    let zamkniete=false;
+    const koniec=v=>{
+      if(zamkniete)return; zamkniete=true;
+      document.removeEventListener('keydown',klawisz);
+      w.remove(); resolve(v);
+    };
+    const klawisz=e=>{if(e.key==='Escape')koniec(false)};
+    w.onclick=e=>{if(e.target===w)koniec(false)};
+    w.innerHTML=`<div class="modal" onclick="event.stopPropagation()" role="dialog" aria-modal="true">
+      <div class="modal-head"><h3>${esc(title)}</h3>
+        <button class="icon-btn" id="ask-x" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+      <p class="muted" style="font-size:12.5px;line-height:1.6;margin:2px 0 14px">${body}</p>
+      ${requireText?`<input class="inp" id="ask-txt" autocomplete="off" spellcheck="false"
+        placeholder="Type ${esc(requireText)} to confirm" style="margin-bottom:14px">`:''}
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="${danger?'btn-danger':'btn-p'}" id="ask-ok"${requireText?' disabled':''}>${esc(ok)}</button>
+        <button class="btn-o" id="ask-no">${esc(cancel)}</button>
+      </div></div>`;
+    document.body.appendChild(w);
+    const bOk=w.querySelector('#ask-ok');
+    bOk.onclick=()=>koniec(true);
+    w.querySelector('#ask-no').onclick=()=>koniec(false);
+    w.querySelector('#ask-x').onclick=()=>koniec(false);
+    if(requireText){
+      const inp=w.querySelector('#ask-txt');
+      inp.oninput=()=>{bOk.disabled=inp.value.trim().toUpperCase()!==requireText.toUpperCase()};
+      inp.onkeydown=e=>{if(e.key==='Enter'&&!bOk.disabled)koniec(true)};
+      inp.focus();
+    }else{
+      bOk.focus();
+    }
+  });
+}
+
 /* ---------- shared reason picker ----------
    Every admin action that needs a trader-facing reason goes through this modal:
    pick a preset from the list or choose Custom… and type your own.
@@ -1000,8 +1050,9 @@ async function breachAccount(id){
 
 async function setPhase(id,phase){
   const phaseNames={eval_1:'Phase 1',eval_2:'Phase 2',funded:'Funded'};
-  if(!confirm(`Move this account to ${phaseNames[phase]}?\n\nBalance, drawdown and the trading-day `
-    +`counter reset, same as an automatic promotion.`))return;
+  if(!await askConfirm({title:`Move this account to ${phaseNames[phase]}?`,
+    body:'Balance, drawdown and the trading-day counter reset, same as an automatic promotion.',
+    ok:`Move to ${phaseNames[phase]}`}))return;
   try{await api(`/api/admin/accounts/${id}/phase`,{method:'POST',body:JSON.stringify({phase})});
     toast(`Account moved to ${phaseNames[phase]}.`,'ok'); openAccount(id);
   }catch(e){toast('Error: '+e.message,'err')}
@@ -1061,9 +1112,12 @@ async function renderPayouts(id){
 async function issuePayout(id){
   const amount=parseFloat($('po-amount').value||'0');
   if(!(amount>0)){toast('Enter a payout amount greater than 0.','err');return}
-  if(!confirm(`Issue a payout of $${amount.toFixed(2)}?\n\nIt is booked as paid and the account `
-    +`balance resets to its starting capital.`))return;
   const naLp=$('po-lp')?$('po-lp').checked:true;
+  if(!await askConfirm({title:`Issue a payout of $${amount.toFixed(2)}?`,
+    body:'It is booked as paid and the account balance resets to its starting capital. '
+      +(naLp?'The certificate will also show on the landing page.'
+            :'The certificate stays off the landing page.'),
+    ok:'Issue payout',danger:true}))return;
   try{const p=await api(`/api/admin/accounts/${id}/payout`,{method:'POST',
       body:JSON.stringify({amount,method:$('po-method').value,note:($('po-note').value||'').trim()||null,
         show_on_lp:naLp})});
@@ -1114,9 +1168,11 @@ async function setCertLp(pid,show,accId){
 /* Revoking kills the DOCUMENT — the public link stops working. To only take an
    entry off the strip use setCertLp(). The payout row stays either way. */
 async function revokeCert(pid,accId){
-  if(!confirm('Revoke this certificate?\n\nThe public link stops working and the entry '
-    +'disappears from the landing page. The payout itself stays on the account.\n\n'
-    +'To only hide it from the landing page, use "Take off the LP" instead.'))return;
+  if(!await askConfirm({title:'Revoke this certificate?',
+    body:'The public link stops working and the entry disappears from the landing page. The payout '
+      +'itself stays on the account.<br><br>To only hide it from the landing page, use '
+      +'<b>Take off the LP</b> instead.',
+    ok:'Revoke certificate',danger:true}))return;
   try{await api(`/api/admin/payouts/${pid}/certificate`,{method:'DELETE'});
     toast('Certificate revoked. Removed from the landing page.','ok');
     accId?renderPayouts(accId):VIEWS.payouts();
@@ -1147,9 +1203,10 @@ async function stopBot(id){
   // After stopping, the account returns to the real feed and resyncs to the
   // MT5 account state — generated profit vanishes from the dashboard. The admin
   // must know that BEFORE clicking: from outside it looks like data loss.
-  if(!confirm('Stop the Trade BOT?\n\nThe account goes back to the live MT5 feed, so its balance '
-    +'and equity curve resync to the real account. The generated profit disappears from the dashboard. '
-    +'The trade history stays.'))return;
+  if(!await askConfirm({title:'Stop the Trade BOT?',
+    body:'The account goes back to the live MT5 feed, so its balance and equity curve resync to the '
+      +'real account. <b>The generated profit disappears from the dashboard.</b> The trade history stays.',
+    ok:'Stop the bot',danger:true}))return;
   try{const r=await api(`/api/admin/accounts/${id}/bot`,{method:'DELETE'});
     toast(`Bot stopped. Balance $${fmt(r.balance)}, and the account goes back to the live MT5 feed.`,'ok',8000);
     openAccount(id);
@@ -1157,14 +1214,22 @@ async function stopBot(id){
 }
 
 async function deleteAccount(id,login){
-  if(!confirm(`Delete account ${login}? This removes it from the platform permanently.`))return;
+  if(!await askConfirm({title:`Delete account ${esc(login)}?`,
+    body:'This removes it from the platform permanently, together with its snapshots, breaches and '
+      +'certificates.',
+    ok:'Delete account',danger:true}))return;
   try{await api('/api/accounts/'+id,{method:'DELETE'});closeOver();toast('Account deleted.','ok');go('accounts')}
   catch(e){toast('Error: '+e.message,'err')}
 }
 async function deleteTrader(tid,who){
-  if(!confirm(`Delete client ${who} and ALL their data?\n\nThis permanently removes their profile, every challenge account, orders, KYC documents, payouts, tickets and notifications.\n\nThe e-mail address becomes free again, so the client can sign up from scratch.\n\nThis cannot be undone.`))return;
-  const typed=prompt(`Type DELETE to confirm wiping ${who}:`);
-  if(typed!=='DELETE'){toast('Cancelled. Nothing was deleted.','err');return}
+  /* Jedno okno zamiast dwoch: wczesniej admin odpowiadal na confirm(), a zaraz
+     potem na prompt() o wpisanie DELETE — dwa systemowe monity pod rzad pod
+     najgrozniejsza operacja w panelu. Teraz pytanie i potwierdzenie sa razem. */
+  if(!await askConfirm({title:`Delete ${esc(who)} and ALL their data?`,
+    body:'This permanently removes their profile, every challenge account, orders, KYC documents, '
+      +'payouts, tickets and notifications.<br><br>The e-mail address becomes free again, so the '
+      +'client can sign up from scratch. <b>This cannot be undone.</b>',
+    ok:'Delete everything',danger:true,requireText:'DELETE'}))return;
   try{
     const r=await api('/api/admin/traders/'+tid,{method:'DELETE'});
     closeOver();toast(`Client ${r.email} deleted (${r.accounts_removed} account${r.accounts_removed===1?'':'s'}). E-mail is free again.`,'ok',8000);
@@ -1187,7 +1252,9 @@ async function rejectPayout(id){
   catch(e){toast('Error: '+e.message,'err')}
 }
 async function approvePayout(id){
-  if(!confirm('Approve & pay this payout request?\n\nThis pays the trader share (plus the fee refund on a first payout) and cannot be undone.'))return;
+  if(!await askConfirm({title:'Approve and pay this request?',
+    body:'This pays the trader share, plus the fee refund on a first payout. <b>It cannot be undone.</b>',
+    ok:'Approve & pay',danger:true}))return;
   try{const d=await api(`/api/admin/payout-requests/${id}/approve`,{method:'POST'});
     toast(`✅ Paid $${fmt(d.total_paid)}${d.fee_refund?` (incl. $${fmt(d.fee_refund)} fee refund)`:''}`,'ok');
     go('payouts');
@@ -1209,7 +1276,9 @@ async function rejectKyc(tid){
   catch(e){toast('Error: '+e.message,'err')}
 }
 async function revertKyc(tid){
-  if(!confirm('Revert this KYC decision?\n\nThe application goes back to the pending queue. The trader is NOT notified.'))return;
+  if(!await askConfirm({title:'Revert this KYC decision?',
+    body:'The application goes back to the pending queue. The trader is <b>not</b> notified.',
+    ok:'Revert decision'}))return;
   try{await api(`/api/admin/kyc/${tid}/reset`,{method:'POST'});toast('Decision reverted. Back in the pending queue.','ok');go('kyc')}
   catch(e){toast('Error: '+e.message,'err')}
 }
@@ -1415,8 +1484,16 @@ const XBTN=(call,tip)=>`<button class="btn-x" title="${esc(tip)}" aria-label="${
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
     stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>`;
 
+/* Jedno okno dla wszystkich piatki przyciskow X. Wolajacy podaja tekst w tym
+   samym ksztalcie co dawniej ("pytanie\n\nskutki"), wiec pierwszy akapit staje
+   sie tytulem, reszta trescia — zaden call site nie wymagal zmiany.
+   esc() jest tu OBOWIAZKOWE: te teksty niosa login, e-mail i nazwisko klienta,
+   ktore w natywnym confirm() byly zwyklym tekstem, a tutaj trafiaja do HTML-a. */
 async function xdel(url,question,after,okMsg){
-  if(!confirm(question))return;
+  const [tytul,...reszta]=String(question).split('\n\n');
+  if(!await askConfirm({title:tytul.trim(),
+    body:esc(reszta.join('\n').trim()).replace(/\n/g,'<br>'),
+    ok:'Delete',danger:true}))return;
   try{const r=await api(url,{method:'DELETE'});
     toast(typeof okMsg==='function'?okMsg(r):(okMsg||'Deleted.'),'ok');
     if(typeof after==='function')after(r);

@@ -2254,7 +2254,9 @@ function askConfirm({title,body,ok='Confirm',cancel='Cancel',danger=false}){
     const klawisz=e=>{if(e.key==='Escape')koniec(false)};
     w.onclick=e=>{if(e.target===w)koniec(false)};
     w.innerHTML=`<div class="modal" onclick="event.stopPropagation()" role="dialog" aria-modal="true">
-      <div class="modal-head"><h3>${esc(title)}</h3></div>
+      <div class="modal-head"><h3>${esc(title)}</h3>
+        <button class="icon-btn" id="ask-x" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
       <p class="muted" style="font-size:13px;line-height:1.6;margin:2px 0 16px">${body}</p>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button class="${danger?'btn-danger':'btn-p'}" id="ask-ok">${esc(ok)}</button>
@@ -2263,6 +2265,7 @@ function askConfirm({title,body,ok='Confirm',cancel='Cancel',danger=false}){
     document.body.appendChild(w);
     w.querySelector('#ask-ok').onclick=()=>koniec(true);
     w.querySelector('#ask-no').onclick=()=>koniec(false);
+    w.querySelector('#ask-x').onclick=()=>koniec(false);
     document.addEventListener('keydown',klawisz);
     w.querySelector('#ask-ok').focus();
   });
