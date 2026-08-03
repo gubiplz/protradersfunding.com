@@ -34,7 +34,20 @@ html.has-promo.promo-off{--promo-h:0px}
 html.promo-off .promo-bar{display:none}
 
 *{box-sizing:border-box;margin:0;padding:0}
+/* `display` z klasy przebija regule przegladarki dla atrybutu `hidden`, wiec
+   kazdy element z wlasnym `display:flex/grid` zostawal na ekranie mimo `hidden`.
+   Kosztowalo to pasek promocyjny: ukryty formularz kodu (input z kodem +
+   przycisk "Apply") zajmowal 175px i wypychal krzyzyk zamkniecia poza ekran
+   telefonu — przy 390px nie dalo sie paska zamknac. Regula globalna, zeby nie
+   naprawiac tego osobno przy kazdym nowym elemencie. */
+[hidden]{display:none!important}
 html{scroll-behavior:smooth;scroll-padding-top:calc(84px + var(--promo-h));background:var(--bg)}
+/* Zabezpieczenie, nie naprawa: gdyby kiedys cokolwiek znow wystawalo w bok,
+   strona ma sie obciac, a nie rozjechac szerzej niz ekran — w przegladarkach
+   wbudowanych (Telegram, Instagram) konczy sie to urwana prawa krawedzia
+   tresci. `clip`, a nie `hidden`, bo `hidden` zrobilby z <html> kontener
+   przewijania i zabil `position:sticky`. */
+html{overflow-x:clip}
 body{background:var(--bg);color:var(--txt);font-family:var(--body);font-size:16px;line-height:1.65;
   -webkit-font-smoothing:antialiased;overflow-x:hidden;
   /* Room for the fixed cookie notice while it is on screen (base.html sets it,
@@ -109,6 +122,10 @@ h1,h2,h3,.display{font-family:var(--display);letter-spacing:-.02em}
     radial-gradient(55% 45% at 20% 0%,rgba(99,102,241,.12),transparent 65%),
     radial-gradient(40% 35% at 88% 20%,rgba(139,92,246,.1),transparent 70%)}
 .hero-grid{position:relative;display:grid;grid-template-columns:1.05fr .95fr;gap:56px;align-items:center}
+/* Element gridu ma domyslnie `min-width:auto`, wiec karta konfiguratora nie
+   schodzila ponizej szerokosci swojej najszerszej tresci — przy oknie 360px
+   miala 391px i `.hero{overflow:hidden}` obcinal jej prawa krawedz. */
+.hero-grid>*{min-width:0}
 .hero h1{font-size:clamp(38px,5.2vw,62px);line-height:1.06;font-weight:700;margin:22px 0 20px}
 .hero-sub{font-size:18px;color:var(--muted);max-width:540px;margin-bottom:16px}
 .hero .disc{max-width:540px;margin-bottom:26px}   /* same column as .hero-sub */
@@ -253,9 +270,13 @@ table.obj tr:hover td{background:#fafbff}
 .psize{position:relative;padding:11px 6px;border-radius:11px;font-family:var(--mono);font-size:14px;
   font-weight:600;background:var(--bg3);color:var(--txt);transition:.15s}
 .psize.on{background:var(--grad);color:#fff;box-shadow:0 6px 16px -6px rgba(99,102,241,.5)}
-.psize.hot:not(.on){box-shadow:inset 0 0 0 1.5px #f0b95c}
+/* „Best value" — ten sam jezyk co w portalu (.plan-card.pop / .upsell-card.pop
+   w portal.css): bursztynowa pigulka i cieply nalot z gory. */
+.psize.hot:not(.on){box-shadow:inset 0 0 0 1.5px #f0b95c;
+  background:linear-gradient(180deg,rgba(240,165,60,.18),rgba(240,165,60,0)),var(--bg3)}
 .psize i{position:absolute;top:-8px;right:-4px;font-style:normal;font-size:9px;font-weight:800;
-  letter-spacing:.08em;background:#f0a53c;color:#fff;border-radius:6px;padding:2px 6px}
+  letter-spacing:.02em;background:linear-gradient(180deg,#fbbf4e,#f2860f);color:#fff;
+  border-radius:999px;padding:2px 8px;box-shadow:0 3px 9px -4px rgba(242,134,15,.8)}
 .pcfg-platform{padding:11px;border-radius:11px;background:var(--grad);color:#fff;text-align:center;
   font-weight:600;font-size:14.5px}
 .pcfg-addon{display:flex;align-items:center;justify-content:space-between;gap:12px;
@@ -270,8 +291,8 @@ table.obj tr:hover td{background:#fafbff}
 /* Pole na kod: JEDEN komponent dla kreatora w hero i dla cennika, bo oba maja
    wygladac tak samo i pokazywac to samo potwierdzenie. */
 .code-row{display:flex;gap:8px}
-/* display z klasy przebija regule przegladarki dla [hidden], wiec bez tego
-   pole zostawalo na ekranie takze po zastosowaniu kodu. */
+/* Regula globalna wyzej (`[hidden]`) zalatwia to dla kazdego elementu; te dwa
+   selektory zostaja jako slad, ze problem juz raz tu wystapil. */
 .code-row[hidden],.code-msg[hidden]{display:none}
 .code-inp{flex:1;min-width:0;border:1px solid var(--line);border-radius:11px;padding:11px 13px;
   font-size:14px;background:var(--bg);color:var(--txt)}

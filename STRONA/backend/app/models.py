@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text
+from sqlalchemy import (Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text,
+                        UniqueConstraint)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -223,6 +224,29 @@ class RewardCode(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"), nullable=True)
+
+
+# --------------------------------------------------------------------------- #
+#  AchievementReward — nagroda za prog odznak (3/8, 5/8, 8/8)                 #
+# --------------------------------------------------------------------------- #
+class AchievementReward(Base):
+    """Slad odebrania nagrody za prog odznak. Jeden wiersz = jeden odbior.
+
+    Osobna tabela, a nie flaga na traderze, bo jednorazowosc ma pilnowac BAZA:
+    `UniqueConstraint(trader_id, tier)` zamyka wyscig dwoch rownoleglych klikniec
+    „Claim" mocniej niz jakikolwiek `if` w kodzie. Sama nagroda mieszka tam,
+    gdzie jej miejsce — kod rabatowy w `reward_codes`, przyznane konto w
+    `accounts` — a tutaj zostaje tylko wskaznik.
+    """
+    __tablename__ = "achievement_rewards"
+    __table_args__ = (UniqueConstraint("trader_id", "tier", name="uq_ach_reward_trader_tier"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    trader_id: Mapped[int] = mapped_column(ForeignKey("traders.id"), index=True)
+    tier: Mapped[int] = mapped_column(Integer)             # ile odznak: 3, 5, 8
+    code: Mapped[str | None] = mapped_column(String(24), nullable=True)      # nagroda = kod rabatowy
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"), nullable=True)  # nagroda = konto
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
 # --------------------------------------------------------------------------- #

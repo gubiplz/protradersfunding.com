@@ -127,6 +127,39 @@ def test_leaderboard_pokazuje_tylko_konta_funded():
     assert all(r["status"] == "funded" for r in rows)
 
 
+def test_leaderboard_pomija_konta_bez_zysku():
+    """Ranking ma pokazywać tych, którzy ZARABIAJĄ. Konto funded na zerze albo
+    pod kreską nie jest wynikiem — wypełniało tablicę zerami i minusami.
+
+    Próg jest OSTRY i liczony na wartości zaokrąglonej, więc nic, co
+    wyświetliłoby się jako „0.00%", nie wchodzi.
+    """
+    tid, _ = _trader("rank-zero@test.pl", "Dokladnie Zero")
+    _konto(tid, "Dokladnie Zero", "770020", status="funded", phase="funded",
+           balance=10_000, initial=10_000)
+    tid2, _ = _trader("rank-minus@test.pl", "Pod Kreska")
+    _konto(tid2, "Pod Kreska", "770021", status="funded", phase="funded",
+           balance=9_400, initial=10_000)
+    # +0,004% zaokragla sie do 0.00 — tez odpada, inaczej w tabeli byloby „0.00%"
+    tid3, _ = _trader("rank-grosz@test.pl", "Ulamek Grosza")
+    _konto(tid3, "Ulamek Grosza", "770022", status="funded", phase="funded",
+           balance=10_000.4, initial=10_000)
+    tid4, _ = _trader("rank-plus@test.pl", "Realny Zysk")
+    _konto(tid4, "Realny Zysk", "770023", status="funded", phase="funded",
+           balance=10_150, initial=10_000)
+    with TestClient(app) as c:
+        rows = c.get("/api/leaderboard").json()
+    imiona = {r["trader"] for r in rows}
+    assert "Dokladnie Z." not in imiona
+    assert "Pod K." not in imiona
+    assert "Ulamek G." not in imiona
+    assert all(r["profit_pct"] > 0 for r in rows), "zero i minus nie moga wejsc"
+    # konto z realnym zyskiem wchodzi (TOP 20 zasilaja konta ze wszystkich plikow,
+    # wiec sprawdzamy wprost odpowiedz endpointu bez limitu miejsca)
+    from app.main import leaderboard
+    assert any(r["trader"] == "Realny Z." for r in leaderboard())
+
+
 def test_wlasciciel_widzi_szczegoly_konta_a_obcy_nie():
     tid, token = _trader("detal@test.pl", "Detal Owner")
     aid = _konto(tid, "Detal Owner", "770003")
@@ -332,7 +365,7 @@ def test_konto_w_trakcie_eval1_nie_ma_certyfikatu():
     assert all(not a["cert_token"] for a in lista if a["trader_name"] == "Bez Certa")
 
 
-# ---------------- „Most popular" ----------------
+# ---------------- „Best value" ----------------
 def test_dokladnie_jeden_rozmiar_oznaczony_w_kazdej_rodzinie():
     """Plakietka ma wskazywać JEDEN plan, a nie kilka albo żaden."""
     with TestClient(app) as c:
@@ -363,6 +396,50 @@ def test_landing_oznacza_ten_sam_plan_co_sklep():
     assert "plan-ribbon" in html and "p.popular?' pop'" in html
 
 
+def test_wyroznienie_planu_mowi_jednym_glosem_w_trzech_miejscach():
+    """Plakietka pojawia się w sklepie (New challenge), w pasie „Scale your
+    progress" i na landingu. Trzy kopie łatwo się rozjeżdżają — w treści i w
+    wyglądzie.
+
+    Sama bursztynowa ramka była za słabym sygnałem: karta różniła się od
+    sąsiadek jedną linią. Doszła pigułka na górnej krawędzi i ciepły nalot
+    schodzący z góry karty, więc wyróżnienie widać przed przeczytaniem napisu.
+    """
+    from pathlib import Path
+    baza = Path(__file__).resolve().parents[1]
+    html = (baza / "templates" / "portal.html").read_text()
+    pcss = (baza / "static" / "css" / "portal.css").read_text()
+    scss = (baza / "static" / "css" / "site.css").read_text()
+    js = (baza / "static" / "js" / "site.js").read_text()
+
+    # jedna tresc we wszystkich trzech miejscach
+    assert '<span class="plan-ribbon">Best value</span>' in html
+    assert '<span class="uc-ribbon">Best value</span>' in html
+    assert "<i>Best value</i>" in js
+    for plik, nazwa in ((html, "portal.html"), (js, "site.js")):
+        assert "Most popular" not in plik, f"stara tresc zostala w {nazwa}"
+        assert "<i>POPULAR</i>" not in plik, f"stara tresc zostala w {nazwa}"
+
+    # jeden wyglad: gradientowa pigulka zamiast plaskiego prostokata
+    assert pcss.count("linear-gradient(180deg,#fbbf4e,#f2860f)") == 2, \
+        "sklep i upsell musza uzywac tej samej pigulki"
+    assert "linear-gradient(180deg,#fbbf4e,#f2860f)" in scss
+    assert "#f0a53c" not in pcss and "#f0a53c" not in scss, "stary plaski bursztyn"
+
+    # pigulka na srodku gornej krawedzi karty (w portalu), nie w rogu
+    assert ".plan-ribbon{position:absolute;top:-13px;left:50%;transform:translateX(-50%)" in pcss
+    assert ".uc-ribbon{position:absolute;top:-11px;left:50%;transform:translateX(-50%)" in pcss
+
+    # cieply nalot z gory na wyroznionej karcie — w kazdym z trzech miejsc
+    assert "background:linear-gradient(180deg,rgba(240,165,60,.13),rgba(240,165,60,0) 170px),var(--panel)" in pcss
+    assert "background:linear-gradient(180deg,rgba(240,165,60,.14),rgba(240,165,60,0) 70px),var(--bg3,var(--bg))" in pcss
+    assert "linear-gradient(180deg,rgba(240,165,60,.18),rgba(240,165,60,0)),var(--bg3)" in scss
+
+    # wejscie z linku ?buy=… nakłada `.hl`, ktore przejmuje tlo pod gradientowa
+    # ramke — bez tej reguly gasilo nalot na karcie polecanej
+    assert ".plan-card.pop.hl{background:" in pcss
+
+
 def test_karty_planow_maja_widoczna_krawedz():
     """W ciemnym motywie karta miala obramowanie `--line` (7% bieli), cien
     czernia na prawie czarnym tle i tlo rozne od strony o dwa punkty jasnosci —
@@ -391,3 +468,38 @@ def test_kafelki_fork_maja_rowna_wysokosc():
     # `padding-top`, nie `margin-top` — automatyczny margines zjadłby odstęp
     # w karcie, która akurat jest tą wyższą.
     assert ".fork-steps{list-style:none;margin-top:auto;padding-top:14px" in css
+
+
+def test_landing_nie_wystaje_poza_ekran_telefonu():
+    """Wejście z linku w Telegramie pokazywało stronę przyciętą po prawej.
+
+    Dwie przyczyny, obie zmierzone w WebKit (silnik Safari i przeglądarek
+    wbudowanych) przy 360/390/430px:
+
+    1. `<form class="promo-form" hidden>` ma własne `display:flex`, które BIJE
+       regułę przeglądarki dla atrybutu `hidden` — ukryte pole z kodem i
+       przycisk „Apply" zajmowały 175px i wypychały krzyżyk zamknięcia poza
+       ekran (prawa krawędź 401px przy oknie 390px), więc paska nie dało się
+       zamknąć na telefonie.
+    2. `.cfg` jest elementem gridu, a te mają `min-width:auto`, więc karta
+       konfiguratora nie schodziła poniżej szerokości swojej treści: 391px
+       przy oknie 360px.
+    """
+    from pathlib import Path
+    baza = Path(__file__).resolve().parents[1]
+    css = (baza / "static" / "css" / "site.css").read_text()
+    base_html = (baza / "templates" / "base.html").read_text()
+
+    # 1. atrybut `hidden` musi wygrywac z kazdym `display` z klasy
+    assert "[hidden]{display:none!important}" in css
+    assert 'class="promo-form" id="promoForm" hidden' in base_html, (
+        "formularz kodu w pasku ma byc domyslnie ukryty")
+
+    # 2. element gridu moze sie zwezic
+    assert ".hero-grid>*{min-width:0}" in css
+
+    # 3. zabezpieczenie: nic nie rozepchnie strony szerzej niz ekran.
+    #    `clip`, nie `hidden` — `hidden` zrobilby z <html> kontener przewijania
+    #    i zabil `position:sticky`.
+    assert "html{overflow-x:clip}" in css
+    assert "html{overflow-x:hidden}" not in css

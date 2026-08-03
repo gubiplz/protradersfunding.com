@@ -219,6 +219,7 @@ const planKind=s=>s===0?'Instant':s===1?'1-Step':'2-Step';
 const dstr=iso=>new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
 // Date only — trade history has no time component. `YYYY-MM-DD` is read as
 // UTC so the browser timezone does not shift the day back by one.
+
 const dday=d=>new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'});
 let TOKEN=localStorage.getItem('pf_token'), ME=null, AUTHMODE='login', chart=null, CURV=null;
 /* Ostatni stan programu lojalnosciowego z /api/me/loyalty (punkty, nagrody). */
@@ -396,6 +397,15 @@ const ICO={
   print:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 9V3h12v6M6 17H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="7"/></svg>',
   grid:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="7" r="2.5"/><circle cx="7" cy="17" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg>',
   flame:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 22c4.4 0 7-2.9 7-6.5 0-2.5-1.3-4.5-2.8-6.1-.4 1-1 1.9-1.9 2.5.2-2.9-1.1-6.4-4.3-7.9.3 2.9-1.1 4.5-2.6 6.1C6 11.6 5 13.4 5 15.5 5 19.1 7.6 22 12 22z"/><path d="M12 22c1.9 0 3.2-1.3 3.2-3 0-1.4-.9-2.3-1.6-3.3-1 1-3.6 1.8-3.6 3.5 0 1.5 1.1 2.8 3 2.8z"/></svg>',
+};
+
+/* Kazda odznaka ma WLASNA ikone — wczesniej osiem kart pokazywalo ten sam medal,
+   wiec roznily sie wylacznie tekstem. Mapa siedzi w widoku, bo ikona to sprawa
+   prezentacji: serwer oddaje `key`, a nie SVG. */
+const BADGE_ICO={
+  first_challenge:ICO.dollar, phase_passed:ICO.target, funded:ICO.crown,
+  first_payout:ICO.payout,    days_5:ICO.cal,         scaled:ICO.trend,
+  referrer:ICO.chat,          kyc:ICO.shield,
 };
 
 const NAV=[
@@ -1215,7 +1225,7 @@ const VIEWS={
       <div class="upsell-row" style="--up-cols:${kolumn};--up-max:${rzadMax}px">${fam.map(p=>`<div class="upsell-card${p.popular?' pop':''}"
         role="button" tabindex="0" onclick="openBuy('${p.key}')"
         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openBuy('${p.key}')}">
-        ${p.popular?'<span class="uc-ribbon">Most popular</span>':''}
+        ${p.popular?'<span class="uc-ribbon">Best value</span>':''}
         <div class="uc-if">If you had</div>
         <div class="uc-size">$${fmt0(p.account_size)}</div>
         <div class="uc-sub">you could have earned</div>
@@ -1316,7 +1326,7 @@ const VIEWS={
     ${ME.credits_usd>0?`<div class="note" style="margin-bottom:14px"><b>Store credit: $${fmt(ME.credits_usd)}</b>, applied to your total automatically at checkout.</div>`:''}
     <div class="plan-grid">`+items.map(p=>`
     <div class="plan-card${p.popular?' pop':''}" data-plan="${esc(p.key)}">
-      ${p.popular?'<span class="plan-ribbon">Most popular</span>':''}
+      ${p.popular?'<span class="plan-ribbon">Best value</span>':''}
       <div class="plan-size">$${fmt0(p.account_size)}</div>
       ${p.promo_upgrade_size&&pfPromo()?`<div class="plan-badge">→ trade $${fmt0(p.promo_upgrade_size)} with your promo</div>`:''}
       <div class="plan-kind">${p.steps===0?'Instant Funding, no evaluation':'2-Step Evaluation'}</div>
@@ -1384,18 +1394,40 @@ const VIEWS={
  },
 
  async achievements(){
-  const list=await api('/api/me/achievements');
-  const done=list.filter(b=>b.unlocked).length;
+  const d=await api('/api/me/achievements');
+  const list=d.badges, done=d.unlocked;
+  /* Wlasny prefiks klas (mrw-), bo `.rw-code` nalezy juz do kodow wymienianych
+     za punkty w Loyalty — dwie rozne rzeczy pod jedna nazwa to prosta droga do
+     tego, co zrobila klasa `.fl` etykietom w KYC. */
+  const nagroda=r=>{
+    const ikona=r.plan?ICO.crown:ICO.gift;
+    const stan=r.status==='claimed'
+      ?(r.code?`<div class="mrw-code"><b>${esc(r.code)}</b>
+           <button class="icon-btn" aria-label="Copy code"
+             onclick="copyVal(this,'${esc(r.code)}')">${ICO.copy}</button></div>`
+          :`<div class="badge-state on">✓ Account created</div>`)
+      :r.status==='ready'
+        ?`<button class="btn-p sm mrw-go" onclick="claimReward(${r.tier},this)">Claim reward</button>`
+        :`<div class="mrw-need">${r.remaining} more to unlock</div>`;
+    return `<div class="mrw-card ${r.status}">
+      <div class="mrw-top"><div class="mrw-ic">${ikona}</div><b>${r.tier} / ${d.total}</b></div>
+      <div class="mrw-label">${esc(r.label)}</div>${stan}</div>`;
+  };
   $('view').innerHTML=`
     <div class="panel" style="margin-bottom:16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
       <div class="tile-ic purple">${ICO.medal}</div>
-      <div style="flex:1"><h3>${done} / ${list.length} unlocked</h3>
+      <div style="flex:1"><h3>${done} / ${d.total} unlocked</h3>
         <p class="muted" style="font-size:13px">Milestones are earned automatically from your real activity on the platform.</p></div>
-      <div class="phase-bar" style="width:180px"><i style="width:${list.length?done/list.length*100:0}%"></i></div>
+      <div class="phase-bar" style="width:180px"><i style="width:${d.total?done/d.total*100:0}%"></i></div>
+    </div>
+    <div class="sec-card">
+      <h3>Milestone rewards</h3>
+      <p class="muted" style="font-size:13px;margin:-8px 0 14px">Each reward is issued once and belongs to your account only.</p>
+      <div class="mrw-grid">${d.rewards.map(nagroda).join('')}</div>
     </div>
     <div class="badge-grid">`+list.map(b=>`
       <div class="badge-card${b.unlocked?'':' locked'}">
-        <div class="badge-ic">${ICO.medal}</div>
+        <div class="badge-ic">${BADGE_ICO[b.key]||ICO.medal}</div>
         <div><h4>${esc(b.name)}</h4><p>${esc(b.desc)}</p>
           <div class="badge-state ${b.unlocked?'on':'off'}">${b.unlocked?'✓ UNLOCKED':'LOCKED'}</div></div>
       </div>`).join('')+`</div>`;
@@ -2267,6 +2299,22 @@ function credsBlock(a, compact){
     </div>`;
 }
 
+/* Odbior nagrody za prog odznak. Przycisk gasnie NA CZAS zadania, zeby dwuklik
+   nie wyslal dwoch prosb — poza tym baza i tak trzyma UNIQUE (trader, prog),
+   wiec drugie zadanie dostanie 409 zamiast drugiej nagrody. */
+async function claimReward(tier, btn){
+  if(btn){btn.disabled=true; btn.textContent='Claiming…';}
+  try{
+    const r=await api('/api/me/achievements/claim',{method:'POST',body:JSON.stringify({tier})});
+    toast(r.account?'Your free challenge is being set up.':'Reward code added to your account.','ok');
+    go('achievements');
+    if(r.account)setTimeout(()=>go('accounts'),1400);
+  }catch(e){
+    toast('Error: '+e.message,'err');
+    if(btn){btn.disabled=false; btn.textContent='Claim reward';}
+  }
+}
+
 function copyVal(btn, val){
   navigator.clipboard.writeText(val).then(()=>{
     const old=btn.innerHTML; btn.innerHTML=ICO.check; btn.style.color='var(--green)';
@@ -2375,7 +2423,7 @@ function openBuy(key){
           <div class="tel-wrap">
             <button type="button" class="tel-cc" id="c-cc" onclick="ccToggle(event)"
               aria-haspopup="listbox" aria-expanded="false" aria-label="Country calling code">
-              <span class="fl" id="c-cc-flag"></span><span id="c-cc-dial">+1</span>
+              <span class="flag" id="c-cc-flag"></span><span id="c-cc-dial">+1</span>
               <svg class="tel-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m6 9 6 6 6-6"/></svg>
             </button>
             <input id="c-phone" class="inp" inputmode="tel" autocomplete="tel-national"
@@ -2611,7 +2659,7 @@ function ccSet(iso,revalidate){
   const c=COUNTRY_BY_ISO[iso]; if(!c)return;
   CC=c.i;
   const f=$('c-cc-flag'),d=$('c-cc-dial');
-  if(f)f.className='fl fl-'+c.i.toLowerCase();
+  if(f)f.className="flag flag-"+c.i.toLowerCase();
   if(d)d.textContent='+'+c.d;
   const btn=$('c-cc'); if(btn)btn.title=c.n;
   if(revalidate!==false)clearFieldErr('c-phone');
@@ -2646,7 +2694,7 @@ function ccRender(){
              :COUNTRIES;
   box.innerHTML=hit.length?hit.map(c=>
     `<button type="button" class="cc-item${c.i===CC?' on':''}" role="option" aria-selected="${c.i===CC}"
-       onclick="ccPick('${c.i}')"><span class="fl fl-${c.i.toLowerCase()}"></span>
+       onclick="ccPick('${c.i}')"><span class="flag flag-${c.i.toLowerCase()}"></span>
        <span class="cc-n">${esc(c.n)}</span><span class="cc-d">+${c.d}</span></button>`).join('')
     :'<p class="cc-none">No country matches that.</p>';
 }
@@ -2725,6 +2773,8 @@ async function openAcc(id){
   const latest=act.days.length?act.days[act.days.length-1].day:null;
   const base=latest?new Date(latest+'T00:00:00Z'):new Date();
   window._calM=[base.getUTCFullYear(),base.getUTCMonth()];
+  /* Wybrany dzien nie moze przejsc na inne konto — historia jest per konto. */
+  window._calSel=null;
   const profitPct=m.profit_pct||0;
   const targetPct=m.profit_target_pct||0;
   const targetUsd=a.initial_balance*targetPct/100;
@@ -2854,8 +2904,9 @@ async function openAcc(id){
 
     <div class="sec-card" id="cal-card"></div>
 
-    <div class="sec-card">
+    <div class="sec-card" id="tx-card">
       <h3>Transaction History</h3>
+      <div id="tx-filter" class="tx-filter"></div>
       ${txTable(a,act)}
     </div>
 
@@ -2898,6 +2949,17 @@ function toggleCreds(){
 }
 function calShift(d){const [y,m]=window._calM;const nd=new Date(Date.UTC(y,m+d,1));
   window._calM=[nd.getUTCFullYear(),nd.getUTCMonth()];calRender()}
+/* Klikniecie w dzien z obrotem zawęża Transaction History do tego dnia.
+   Drugie klikniecie w ten sam dzien zdejmuje filtr — komorka jest przelacznikiem,
+   nie jednokierunkowym przejsciem. */
+function calPick(day){
+  window._calSel=(window._calSel===day)?null:day;
+  calRender();
+  txPage(1);
+  const tbl=$('tx-tbl');
+  if(tbl&&window._calSel)tbl.closest('.sec-card').scrollIntoView({behavior:'smooth',block:'start'});
+}
+function calClear(){window._calSel=null;calRender();txPage(1)}
 function calRender(){
   const el=$('cal-card'); if(!el||!window._act)return;
   const [y,m]=window._calM;
@@ -2912,9 +2974,15 @@ function calRender(){
   for(let d=1;d<=dim;d++){
     const key=`${y}-${pad(m+1)}-${pad(d)}`;
     const pnl=map[key];
-    let cls='',txt='';
+    let cls='',txt='',atryb='';
     if(pnl!==undefined){
       cls=pnl>0?'profit':pnl<0?'loss':'flat';
+      /* Klikalne sa WYLACZNIE dni z obrotem — pusta komorka nie ma czego
+         pokazac na liscie ponizej. */
+      cls+=' has'+(key===window._calSel?' sel':'');
+      atryb=` role="button" tabindex="0" aria-pressed="${key===window._calSel}"`
+        +` onclick="calPick('${key}')"`
+        +` onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();calPick('${key}')}"`;
       if(matchMedia('(max-width:640px)').matches){
         // waskie komorki: sama wielkosc (12345 -> 12.3k) — znak niesie kolor komorki
         const a=Math.abs(pnl);
@@ -2923,7 +2991,7 @@ function calRender(){
         txt=`<div class="pnl">${pnl>0?'+':''}$${fmt0(pnl)}</div>`;
       }
     }
-    cells+=`<div class="cal-day ${cls}"><div class="d">${d}</div>${txt}</div>`;
+    cells+=`<div class="cal-day ${cls}"${atryb}><div class="d">${d}</div>${txt}</div>`;
   }
   el.innerHTML=`
     <div class="cal-head"><h3 style="margin:0">Trading Calendar</h3>
@@ -2988,16 +3056,31 @@ function txPager(ile,strona){
 }
 function txPage(n){
   const tbl=$('tx-tbl'); if(!tbl||!tbl.tBodies[0])return;
-  const rows=[...tbl.tBodies[0].rows];
+  const wszystkie=[...tbl.tBodies[0].rows];
+  const dzien=window._calSel;
+  /* Data siedzi w `data-sort` pierwszej komorki (to samo pole, po ktorym
+     sortuje sortable.js), wiec filtr nie zalezy od formatu wyswietlania. */
+  const rows=dzien?wszystkie.filter(tr=>tr.cells[0]&&tr.cells[0].dataset.sort===dzien):wszystkie;
   const stron=Math.max(1,Math.ceil(rows.length/TX_PER_PAGE));
   n=Math.min(Math.max(1,n),stron);
   const od=(n-1)*TX_PER_PAGE;
-  rows.forEach((tr,i)=>{tr.style.display=(i>=od&&i<od+TX_PER_PAGE)?'':'none'});
+  /* Najpierw chowamy wszystko, potem odslaniamy strone z przefiltrowanych —
+     inaczej wiersze spoza dnia zostalyby widoczne z poprzedniego przebiegu. */
+  wszystkie.forEach(tr=>{tr.style.display='none'});
+  rows.forEach((tr,i)=>{if(i>=od&&i<od+TX_PER_PAGE)tr.style.display=''});
   const pager=$('tx-pager'); if(pager)pager.innerHTML=txPager(rows.length,n);
+  const chip=$('tx-filter');
+  if(chip)chip.innerHTML=dzien
+    ? `<span class="tx-chip">${dday(dzien)}<button type="button" class="tx-chip-x"
+        onclick="calClear()" aria-label="Show all days">×</button></span>
+       <span class="tx-chip-hint">Showing this day only — click the day again, or ×, for the full history.</span>`
+    : '';
   const info=$('tx-info');
-  if(info)info.textContent=rows.length<=TX_PER_PAGE
-    ? `${rows.length} entr${rows.length===1?'y':'ies'}.`
-    : `Showing ${od+1}–${Math.min(od+TX_PER_PAGE,rows.length)} of ${rows.length} entries.`;
+  if(!info)return;
+  if(dzien&&!rows.length)info.textContent=`No entries for ${dday(dzien)} in the loaded history.`;
+  else info.textContent=rows.length<=TX_PER_PAGE
+    ? `${rows.length} entr${rows.length===1?'y':'ies'}${dzien?' on '+dday(dzien):''}.`
+    : `Showing ${od+1}–${Math.min(od+TX_PER_PAGE,rows.length)} of ${rows.length} entries${dzien?' on '+dday(dzien):''}.`;
 }
 function txInit(){
   const tbl=$('tx-tbl'); if(!tbl||!tbl.tBodies[0])return;

@@ -185,7 +185,9 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .cc-item.on .cc-d{color:var(--acc)}
 .cc-none{padding:16px;text-align:center;color:var(--muted);font-size:13px}
 /* Zanim doladuje sie flags.css, kratka trzyma szerokosc — lista nie skacze. */
-.fl{width:20px;height:15px;flex:0 0 20px;border-radius:2px;background:var(--bg3)}
+/* Klasa musi byc opisowa, nie dwuliterowa: `.fl` zderzalo sie z etykieta pola
+   pliku w KYC (`.file-row .fl`), ktora ta regula zgniatala do 20x15px. */
+.flag{width:20px;height:15px;flex:0 0 20px;border-radius:2px;background:var(--bg3)}
 
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:22px;box-shadow:var(--shadow)}
 .panel h3{font-size:17px}
@@ -338,19 +340,31 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
   display:flex;flex-direction:column;transition:.18s;position:relative;box-shadow:var(--shadow)}
 .plan-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg)}
 
-/* „Most popular" — wyglad przeniesiony z plakietki HOT na landingu
-   (.psize.hot / .psize i w site.css), zeby strona i sklep mowily jednym
-   jezykiem. Bursztyn, a nie gradient, bo gradientowa ramka znaczy juz co
+/* „Best value" — jeden wyglad w sklepie, w pasie upsellu i na landingu
+   (.psize.hot / .psize i w site.css), zeby trzy miejsca nie mowily trzema
+   stylami. Bursztyn, a nie gradient, bo gradientowa ramka znaczy juz co
    innego: `.hl` to karta, na ktora klient wszedl z linku ?buy=… i obie moga
-   wypasc na tej samej karcie. */
+   wypasc na tej samej karcie.
+   Sama ramka byla za slabym sygnalem: pigulka siedzi na gornej krawedzi, a
+   cieply nalot schodzi z gory karty, wiec wyroznienie widac zanim sie przeczyta
+   plakietke. */
 .plan-card.pop{border-color:#f0b95c;
+  background:linear-gradient(180deg,rgba(240,165,60,.13),rgba(240,165,60,0) 170px),var(--panel);
   box-shadow:0 0 0 1px #f0b95c,0 14px 34px -20px rgba(240,165,60,.55)}
 .plan-card.pop:hover{box-shadow:0 0 0 1px #f0b95c,var(--shadow-lg)}
-.plan-ribbon{position:absolute;top:-9px;right:14px;font-size:9.5px;font-weight:800;
-  letter-spacing:.08em;background:#f0a53c;color:#fff;border-radius:6px;padding:3px 8px;
-  text-transform:uppercase;white-space:nowrap}
+.plan-ribbon{position:absolute;top:-13px;left:50%;transform:translateX(-50%);
+  font-size:11.5px;font-weight:800;letter-spacing:.01em;
+  background:linear-gradient(180deg,#fbbf4e,#f2860f);color:#fff;
+  border-radius:999px;padding:5px 15px;white-space:nowrap;
+  box-shadow:0 5px 14px -5px rgba(242,134,15,.7)}
 .plan-card.hl{border-color:transparent;background:linear-gradient(var(--panel),var(--panel)) padding-box,var(--grad) border-box;
   box-shadow:var(--shadow-lg)}
+/* Karta moze byc naraz polecana i wskazana linkiem ?buy=…. `.hl` przejmuje tlo
+   pod gradientowa ramke, wiec nalot trzeba dolozyc jawnie — inaczej wejscie
+   z linku gasi wyroznienie. */
+.plan-card.pop.hl{background:
+  linear-gradient(180deg,rgba(240,165,60,.13),rgba(240,165,60,0) 170px) padding-box,
+  linear-gradient(var(--panel),var(--panel)) padding-box,var(--grad) border-box}
 .plan-size{font-family:var(--display);font-size:23px;font-weight:700}
 .plan-kind{font-size:12px;color:var(--muted);margin-bottom:14px}
 .plan-price{font-family:var(--mono);font-size:28px;font-weight:700}
@@ -607,6 +621,21 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 .cal-day.profit{background:var(--green-bg);border-color:var(--green-line);color:var(--green)}
 .cal-day.loss{background:var(--red-bg);border-color:var(--red-line);color:var(--red)}
 .cal-day.flat{background:var(--blue-bg);border-color:var(--blue-line);color:var(--blue)}
+/* Dzien z obrotem jest przelacznikiem filtra historii ponizej. */
+.cal-day.has{cursor:pointer;transition:box-shadow .15s,transform .15s}
+.cal-day.has:hover{transform:translateY(-1px);box-shadow:0 6px 16px -10px rgba(0,0,0,.45)}
+.cal-day.has:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.cal-day.sel{box-shadow:0 0 0 2px var(--acc)}
+/* Przewijanie po wyborze dnia nie moze wsunac naglowka karty pod pasek gorny. */
+#tx-card{scroll-margin-top:92px}
+.tx-filter:empty{display:none}
+.tx-filter{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:-6px 0 14px}
+.tx-chip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;
+  font-family:var(--mono);background:var(--acc-bg);color:var(--acc);
+  border-radius:999px;padding:4px 6px 4px 12px}
+.tx-chip-x{width:18px;height:18px;border-radius:50%;background:var(--acc);color:#fff;
+  font-size:13px;line-height:1;cursor:pointer;display:grid;place-items:center}
+.tx-chip-hint{font-size:12px;color:var(--dim)}
 .cal-legend{display:flex;gap:16px;margin-top:12px;font-size:12px;color:var(--muted);flex-wrap:wrap}
 .cal-legend span{display:flex;align-items:center;gap:6px}
 .cal-legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
@@ -658,6 +687,26 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 /* Sklepik nagrod: karta nagrody uzywa .tier-card, dokladamy tylko przycisk. */
 .tier-card .rw-go{margin-top:12px;width:100%}
 .tier-card .rw-go[disabled]{opacity:.5;cursor:not-allowed}
+/* Nagrody za progi odznak (3/8, 5/8, 8/8). Wlasny prefiks `mrw-`, bo `.rw-code`
+   nalezy juz do kodow wymienianych za punkty w Loyalty. */
+.mrw-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.mrw-card{background:var(--bg3,var(--bg));border:1px solid var(--line);border-radius:12px;
+  padding:14px 15px;display:flex;flex-direction:column;gap:8px}
+.mrw-card.ready{border-color:#f0b95c;
+  background:linear-gradient(180deg,rgba(240,165,60,.13),rgba(240,165,60,0) 90px),var(--bg3,var(--bg))}
+.mrw-card.locked{opacity:.62}
+.mrw-top{display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+.mrw-ic{width:30px;height:30px;flex:none;border-radius:50%;background:var(--acc-bg);color:var(--acc);
+  display:grid;place-items:center}
+.mrw-ic svg{width:15px;height:15px}
+.mrw-card.ready .mrw-ic{background:rgba(240,165,60,.18);color:#c2790a}
+.mrw-label{font-size:14px;font-weight:700}
+.mrw-need{font-size:12px;color:var(--dim);margin-top:auto}
+.mrw-go{margin-top:auto;width:100%;justify-content:center}
+.mrw-code{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:8px;
+  background:var(--panel);border:1px dashed var(--line2);border-radius:9px;padding:7px 8px 7px 11px}
+.mrw-code b{font-family:var(--mono);font-size:13px;letter-spacing:.03em}
+
 /* Kody wymienione za punkty */
 .rw-codes{display:flex;flex-direction:column;gap:8px;margin-top:10px}
 .rw-code{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
@@ -924,9 +973,13 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 .upsell-card:hover{border-color:var(--acc);transform:translateY(-2px)}
 /* Ten sam bursztyn co plakietka w sklepie i na landingu — jeden jezyk dla
    „najczesciej wybierany", zeby trzy miejsca nie mowily trzema stylami. */
-.upsell-card.pop{border-color:#f0b95c;box-shadow:0 0 0 1px #f0b95c}
-.uc-ribbon{position:absolute;top:-9px;right:10px;font-size:9px;font-weight:800;letter-spacing:.07em;
-  text-transform:uppercase;background:#f0a53c;color:#fff;border-radius:6px;padding:2px 7px;white-space:nowrap}
+.upsell-card.pop{border-color:#f0b95c;box-shadow:0 0 0 1px #f0b95c;
+  background:linear-gradient(180deg,rgba(240,165,60,.14),rgba(240,165,60,0) 70px),var(--bg3,var(--bg))}
+.uc-ribbon{position:absolute;top:-11px;left:50%;transform:translateX(-50%);
+  font-size:10px;font-weight:800;letter-spacing:.01em;
+  background:linear-gradient(180deg,#fbbf4e,#f2860f);color:#fff;
+  border-radius:999px;padding:4px 12px;white-space:nowrap;
+  box-shadow:0 4px 12px -5px rgba(242,134,15,.7)}
 .uc-if{font-size:9.5px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);line-height:1.3}
 .uc-size{font-family:var(--mono);font-size:18px;font-weight:800;margin-top:2px;line-height:1.2}
 .uc-sub{font-size:10.5px;color:var(--muted);line-height:1.35}

@@ -242,7 +242,7 @@
     $$('#pcfg-toggle .ptog').forEach(b => b.addEventListener('click', () => { cfgType = b.dataset.t; renderPricing(); }));
 
     $('#pcfg-sizes').innerHTML = items.map(x =>
-      `<button class="psize${x.account_size === cfgSize ? ' on' : ''}${x.popular ? ' hot' : ''}" data-s="${x.account_size}">${x.popular ? '<i>POPULAR</i>' : ''}${sizeLabel(x.account_size)}</button>`).join('');
+      `<button class="psize${x.account_size === cfgSize ? ' on' : ''}${x.popular ? ' hot' : ''}" data-s="${x.account_size}">${x.popular ? '<i>Best value</i>' : ''}${sizeLabel(x.account_size)}</button>`).join('');
     $$('#pcfg-sizes .psize').forEach(b => b.addEventListener('click', () => { cfgSize = +b.dataset.s; renderPricing(); }));
 
     const wt = $('#pcfg-wt');

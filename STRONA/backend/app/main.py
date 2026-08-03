@@ -28,7 +28,8 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import func
 
-from . import (auth, billing, catalog, countries, fields, loyalty, metaquotes_web, notify,
+from . import (achievements, auth, billing, catalog, countries, fields, loyalty, metaquotes_web,
+               notify,
                payout_import,
                poller, provisioning, push, rules, telemetry, tradebot)
 from .config import get_settings
@@ -1400,37 +1401,57 @@ def account_activity(account_id: int, trader: Trader = Depends(auth.current_trad
         session.close()
 
 
+def _achievements_payload(session, trader: Trader) -> dict:
+    odznaki = achievements.badges(session, trader)
+    ile = sum(1 for b in odznaki if b["unlocked"])
+    return {"badges": odznaki, "unlocked": ile, "total": len(odznaki),
+            "rewards": achievements.state(session, trader, ile)}
+
+
 @app.get("/api/me/achievements")
 def my_achievements(trader: Trader = Depends(auth.current_trader)):
-    """Odznaki liczone z REALNYCH zdarzeń na platformie — zero generowania."""
+    """Odznaki liczone z REALNYCH zdarzeń na platformie — zero generowania,
+    plus stan trzech nagród za progi 3/8, 5/8 i 8/8."""
     session = SessionLocal()
     try:
-        accs = session.query(Account).filter(Account.trader_id == trader.id).all()
-        acc_ids = [a.id for a in accs]
-        paid_order = session.query(Order).filter(Order.trader_id == trader.id,
-                                                 Order.status == "paid").first() is not None
-        payout = bool(acc_ids) and session.query(Payout).filter(
-            Payout.account_id.in_(acc_ids)).first() is not None
-        referred = session.query(Trader).filter(Trader.referred_by == trader.referral_code).count()
-        # Licznik, nie porównanie z cennikiem: po skalowaniu konto siedzi
-        # DOKŁADNIE na rozmiarze swojego nowego planu, więc dawny warunek
-        # `initial_balance > Product.account_size` nie odróżniał go już od
-        # świeżo kupionego.
-        scaled = any((getattr(a, "scale_count", 0) or 0) > 0 for a in accs)
-        badges = [
-            ("first_challenge", "First Challenge", "Purchase your first evaluation", paid_order),
-            ("phase_passed", "Phase Passed", "Advance past Phase 1 of any challenge",
-             any(a.phase in ("eval_2", "funded") or a.status in ("passed", "funded") for a in accs)),
-            ("funded", "Funded Trader", "Get any account to funded status",
-             any(a.status == "funded" for a in accs)),
-            ("first_payout", "First Payout", "Receive your first performance reward", payout),
-            ("days_5", "Consistent Trader", "Log 5 trading days on one account",
-             any(a.trading_days_count >= 5 for a in accs)),
-            ("scaled", "Scaled Up", "Move a funded account up to the next plan", scaled),
-            ("referrer", "Ambassador", "Refer your first trader", referred >= 1),
-            ("kyc", "Verified", "Complete identity verification", trader.kyc_status == "approved"),
-        ]
-        return [{"key": k, "name": n, "desc": d, "unlocked": bool(u)} for (k, n, d, u) in badges]
+        return _achievements_payload(session, session.get(Trader, trader.id))
+    finally:
+        session.close()
+
+
+class ClaimIn(BaseModel):
+    tier: int
+
+
+@app.post("/api/me/achievements/claim")
+def my_achievements_claim(payload: ClaimIn, trader: Trader = Depends(auth.current_trader)):
+    """Odbiera nagrodę za próg odznak: kod rabatowy (3/8, 5/8) albo konto (8/8).
+
+    Liczba odznak liczona jest TUTAJ, na serwerze — przeglądarka podaje wyłącznie
+    próg, o który prosi. Inaczej wystarczyłoby jedno żądanie z `tier: 8`, żeby
+    dostać darmowe konto bez ani jednej odznaki.
+    """
+    session = SessionLocal()
+    try:
+        # FOR UPDATE jak przy wymianie punktów: dwa równoległe kliknięcia
+        # „Claim" nie mogą odebrać tej samej nagrody dwa razy.
+        tr = session.query(Trader).filter(Trader.id == trader.id).with_for_update().one()
+        ile = sum(1 for b in achievements.badges(session, tr) if b["unlocked"])
+        try:
+            nagroda, konto = achievements.claim(session, tr, payload.tier, ile)
+        except ValueError:
+            raise HTTPException(404, "Unknown reward tier")
+        except LookupError as brakuje:
+            raise HTTPException(400, f"You need {brakuje} more achievement(s) for this reward")
+        except RuntimeError:
+            raise HTTPException(409, "This reward has already been claimed")
+        session.commit()
+        telemetry.track("achievement_reward", trader.id, tier=payload.tier)
+        # Bez maila: nie ma szablonu na przyznane konto, a wysylanie nieznanego
+        # zdarzenia znikneloby po cichu. Portal pokazuje wynik od razu, a konto
+        # pojawia sie na liscie challenge'ow.
+        return {"claimed": payload.tier, "code": nagroda.code, "account": konto,
+                **_achievements_payload(session, tr)}
     finally:
         session.close()
 
@@ -3771,6 +3792,11 @@ def leaderboard():
     Ranking liczony WPROST z bieżącego equity (balance) kont FUNDED — bez
     doliczania wypłaconych zysków i bez kont w ewaluacji. Po wypłacie trader
     świadomie schodzi w rankingu: pokazujemy stan konta, nie życiorys.
+
+    Wchodzą wyłącznie konta z zyskiem OSTRO powyżej zera. Ranking ma pokazywać
+    tych, którzy zarabiają — konto na zerze albo pod kreską nie jest wynikiem,
+    a przy pustej tablicy wypełniało listę zerami. Próg liczony na wartości
+    zaokrąglonej, więc nic, co wyświetlałoby się jako „0.00%", nie przechodzi.
     """
     session = SessionLocal()
     try:
@@ -3779,6 +3805,8 @@ def leaderboard():
         for a in accs:
             equity_now = round(a.balance, 2)
             profit_pct = round((equity_now - a.initial_balance) / a.initial_balance * 100, 2)
+            if profit_pct <= 0:
+                continue
             tr = session.get(Trader, a.trader_id) if a.trader_id else None
             country = tr.kyc_country if (tr and tr.kyc_status == "approved" and tr.kyc_country) else None
             rows.append({"trader": _mask_name(a.trader_name or (tr.full_name if tr else "")),
