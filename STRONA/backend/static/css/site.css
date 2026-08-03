@@ -313,9 +313,12 @@ table.obj tr:hover td{background:#fafbff}
 /* Rozwidlenie po +10%: wyplata albo wieksze konto. Dwie rownorzedne karty
    zamiast dwoch pelnowymiarowych sekcji jedna pod druga — ta sama tresc
    zajmuje mniej wiecej polowe dawnej wysokosci. */
-.fork{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+/* Oba kafelki tej samej wysokosci. Karta B ma pod tekstem drabinke o stalej
+   wysokosci, wiec byla wyzsza od A o kilkadziesiat pikseli i dolne krawedzie
+   sie nie schodzily. */
+.fork{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:stretch}
 .fork-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
-  padding:22px 24px;box-shadow:var(--shadow)}
+  padding:22px 24px;box-shadow:var(--shadow);display:flex;flex-direction:column}
 .fork-h{display:flex;align-items:center;gap:10px;margin-bottom:10px}
 .fork-h h3{font-size:19px;margin-right:auto}
 .fork-n{width:26px;height:26px;flex:none;border-radius:8px;background:var(--acc-bg);
@@ -323,7 +326,11 @@ table.obj tr:hover td{background:#fafbff}
   display:flex;align-items:center;justify-content:center}
 .fork-tag{font-family:var(--mono);font-size:20px;font-weight:800;letter-spacing:-.02em}
 .fork-card>p{font-size:14px;color:var(--muted)}
-.fork-steps{list-style:none;margin-top:14px;display:flex;flex-direction:column}
+/* Nadmiar wysokosci idzie POD akapit, nie pod liste: kroki dociagaja sie do
+   dolu karty, tak jak drabinka w karcie obok, zamiast zostawiac pusty pas przy
+   dolnej krawedzi. `padding-top` zamiast `margin-top`, bo automatyczny margines
+   zjadlby odstep w karcie, ktora akurat jest ta wyzsza. */
+.fork-steps{list-style:none;margin-top:auto;padding-top:14px;display:flex;flex-direction:column}
 .fork-steps li{font-size:13.5px;color:var(--muted);padding:10px 0;border-bottom:1px solid var(--line)}
 .fork-steps li:last-child{border-bottom:0;padding-bottom:0}
 .fork-steps b{color:var(--txt)}

@@ -373,3 +373,21 @@ def test_karty_planow_maja_widoczna_krawedz():
         "karta planu musi uzywac mocniejszej linii niz --line"
     assert "minmax(270px,1fr));gap:20px" in css
     assert ".plan-card.pop" in css and ".plan-ribbon" in css
+
+
+def test_kafelki_fork_maja_rowna_wysokosc():
+    """Karta B ma pod tekstem drabinkę o stałej wysokości, więc była wyższa od
+    karty A (334 vs 291 px przy 1440) i dolne krawędzie się nie schodziły.
+
+    Nadmiar wysokości idzie POD akapit, nie pod listę: kroki dociągają się do
+    dołu karty tak jak drabinka obok, zamiast zostawiać pusty pas nad krawędzią.
+    """
+    from pathlib import Path
+    css = (Path(__file__).resolve().parents[1] / "static" / "css" / "site.css").read_text()
+
+    assert ".fork{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:stretch}" in css
+    assert "align-items:start}" not in css.split(".fork{")[1].split("\n")[0]
+    assert "box-shadow:var(--shadow);display:flex;flex-direction:column}" in css
+    # `padding-top`, nie `margin-top` — automatyczny margines zjadłby odstęp
+    # w karcie, która akurat jest tą wyższą.
+    assert ".fork-steps{list-style:none;margin-top:auto;padding-top:14px" in css
