@@ -52,6 +52,20 @@ h1,h2,h3,.display{font-family:var(--display);letter-spacing:-.02em}
 .grad-text{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
 .muted{color:var(--muted)}
 
+/* ---------------- disclaimers ----------------
+   The simulated-trading small print, repeated in context: a line right where
+   the page makes a claim about capital, prices, rewards or certificates,
+   instead of the footer alone. One component everywhere, so the wording can
+   never drift between sections. */
+.disc{max-width:600px;font-size:12px;line-height:1.55;color:var(--dim)}
+.disc a{color:inherit;text-decoration:underline;text-underline-offset:2px}
+.disc a:hover{color:var(--muted)}
+.disc-c{max-width:680px;margin:26px auto 0;text-align:center}
+/* Only the variant with the warning icon is a flex row — and its text has to
+   stay in ONE item, otherwise every link inside becomes a column of its own. */
+.disc-ico{display:flex;gap:8px;align-items:flex-start}
+.disc-ico svg{flex:none;margin-top:2px}
+
 /* ---------------- NAV ---------------- */
 .nav{position:fixed;top:var(--promo-h);left:0;right:0;z-index:50;border-bottom:1px solid transparent;transition:.25s}
 .nav.on{background:rgba(255,255,255,.85);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
@@ -96,7 +110,8 @@ h1,h2,h3,.display{font-family:var(--display);letter-spacing:-.02em}
     radial-gradient(40% 35% at 88% 20%,rgba(139,92,246,.1),transparent 70%)}
 .hero-grid{position:relative;display:grid;grid-template-columns:1.05fr .95fr;gap:56px;align-items:center}
 .hero h1{font-size:clamp(38px,5.2vw,62px);line-height:1.06;font-weight:700;margin:22px 0 20px}
-.hero-sub{font-size:18px;color:var(--muted);max-width:540px;margin-bottom:30px}
+.hero-sub{font-size:18px;color:var(--muted);max-width:540px;margin-bottom:16px}
+.hero .disc{max-width:540px;margin-bottom:26px}   /* same column as .hero-sub */
 .hero-ctas{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:22px}
 .hero-note{display:flex;gap:18px;flex-wrap:wrap;font-size:13.5px;color:var(--muted)}
 .hero-note span{display:flex;align-items:center;gap:7px}
@@ -396,6 +411,9 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
 .foot-col a:hover{color:var(--acc)}
 .foot-legal{border-top:1px solid var(--line);padding-top:26px;color:var(--dim);font-size:12px;line-height:1.7}
 .foot-legal p{margin-bottom:10px}
+.foot-legal b{color:var(--muted)}
+.foot-legal a{text-decoration:underline;text-underline-offset:2px}
+.foot-legal a:hover{color:var(--acc)}
 .foot-bottom{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;
   border-top:1px solid var(--line);margin-top:26px;padding-top:22px;color:var(--dim);font-size:12.5px}
 .foot-tags{display:flex;gap:8px;flex-wrap:wrap}

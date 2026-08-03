@@ -214,6 +214,13 @@
 .cert-actions a{color:var(--k-jasny);text-decoration:none;font-weight:600}
 .cert-actions a:hover{text-decoration:underline}
 
+/* What the document says in plain words. It sits BELOW the card on purpose:
+   the card is what the JPG and the printout are made of, and it has to stay
+   the document itself, unchanged. */
+.cert-disc{max-width:min(620px,100%);margin-top:22px;text-align:center;
+  font-size:11.5px;line-height:1.6;color:var(--k-cichy);opacity:.85}
+.cert-disc a{color:inherit;text-decoration:underline;text-underline-offset:2px}
+
 /* On narrow screens the square gets too tight and content overflowed the card. */
 @media (max-width:520px){
   .cert-inner{aspect-ratio:auto;padding-top:22px;padding-bottom:22px}

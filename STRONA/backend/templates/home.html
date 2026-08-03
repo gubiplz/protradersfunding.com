@@ -16,6 +16,15 @@
       <p class="hero-sub">Pass an evaluation on a real MetaTrader&nbsp;5 account, get funded and earn
         performance-based rewards on simulated capital up to $2,000,000. Clear rules, an automated
         risk engine and credentials delivered in minutes.</p>
+      {# Right under the claim it qualifies and above the button, so nobody
+         reaches checkout without having read it. The full wording lives in the
+         footer of every page; this is the short form. #}
+      <p class="disc disc-ico">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.6 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
+        <span>This platform offers simulated trading evaluations. All accounts are demo accounts
+          funded with virtual money — no real money is ever deposited or traded. Performance
+          rewards are not guaranteed. See our <a href="/terms">Terms</a> for details.</span>
+      </p>
       <div class="hero-ctas">
         <a class="btn btn-lg" href="#pricing">Start a Challenge</a>
         <a class="btn-ghost btn-lg" href="#objectives">View Trading Objectives</a>
@@ -61,7 +70,9 @@
 <section class="stats-band" id="statsBand">
   <div class="wrap">
     <div class="stats-grid" id="statsGrid"></div>
-    <div class="stats-note">Live numbers pulled straight from our platform — nothing curated by hand.</div>
+    <div class="stats-note">Live numbers pulled straight from our platform — nothing curated by hand.
+      All of them come from simulated accounts trading virtual funds: they describe activity on the
+      platform, not guaranteed outcomes.</div>
   </div>
 </section>
 
@@ -202,7 +213,8 @@
         <h3>Program Rules</h3>
         <div id="prules-rows"></div>
         <p class="prules-fine">All trading takes place in a simulated environment on virtual funds.
-          Performance rewards depend on your trading. See <a href="/terms">Terms of Service</a>.</p>
+          Performance rewards are discretionary and not guaranteed. See
+          <a href="/terms">Terms of Service</a>.</p>
       </div>
     </div>
     <div class="pricing-note" data-rv>
@@ -210,6 +222,10 @@
       <span>⚡ Account delivered automatically</span>
       <span>🏷️ Coupon codes accepted</span>
     </div>
+    <p class="disc disc-c" data-rv>*The fee buys access to a trading evaluation on a simulated
+      account. No real money is deposited or traded at any point. Performance rewards, including
+      the refund of the fee, are discretionary and depend on meeting the objectives published
+      above. See our <a href="/terms">Terms of Service</a>.</p>
   </div>
 </section>
 
@@ -258,6 +274,10 @@
         </div>
       </div>
     </div>
+    <p class="disc disc-c" data-rv>*Payouts are performance-based rewards for results achieved on
+      simulated accounts with virtual funds, not profits from real market transactions. Every
+      request is subject to identity verification and to the payout rules in our
+      <a href="/terms">Terms of Service</a>. Past payouts do not guarantee future ones.</p>
   </div>
 </section>
 
@@ -324,7 +344,8 @@
           <tbody id="lbBody"></tbody>
         </table>
       </div>
-      <div class="lb-note">Real accounts, real-time data. Simulated capital — see the disclaimer below.</div>
+      <div class="lb-note">Real accounts, real-time data. Every balance here is simulated capital
+        on a demo account — no real money is being traded.</div>
     </div>
   </div>
 </section>
@@ -396,6 +417,12 @@
         <div class="cs-row cs-row-b" id="certsStripRow2"></div>
       </div>
     </div>
+    {# Outside #certsStrip on purpose: the strip hides itself when the API has
+       nothing to show, and this line has to stand next to the sample document
+       above it either way. #}
+    <p class="disc disc-c" data-rv>*A certificate records a performance-based reward paid for
+      results achieved on a simulated account. The amounts are rewards for demonstrated trading
+      skill, not profits from real market transactions.</p>
   </div>
 </section>
 
