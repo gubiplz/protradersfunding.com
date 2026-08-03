@@ -339,7 +339,7 @@ const VIEWS={
         <td><span class="status ${t.status==='approved'?'funded':'failed'}"><span class="dot"></span>${esc(t.status)}</span></td>
         <td>${(t.docs||[]).map(k=>`<button class="btn-o sm" onclick="viewDoc(${t.trader_id},'${k}')">${esc(k.replace('_',' '))}</button>`).join(' ')||'<span class="muted">—</span>'}</td>
         <td style="white-space:nowrap"><button class="btn-o sm" onclick="revertKyc(${t.trader_id})"
-          title="Undo this decision — back to the pending queue">Revert</button>
+          title="Undo this decision, back to the pending queue">Revert</button>
           ${XBTN(`deleteKycRow(${t.trader_id},'${esc(t.email)}')`,'Delete KYC record and uploaded documents')}</td></tr>`).join('')}
       </tbody></table></div>`:`<p class="muted" style="font-size:13px">No ${esc(kf)} decisions.</p>`}</div>`:'';
   $('view').innerHTML=cards+histTbl;
@@ -360,7 +360,7 @@ const VIEWS={
       :`<div class="empty"><h3>No open tickets</h3><p>Support conversations started by traders appear here.</p></div>`)
     +(closed.length?`<div class="sec-card" style="margin-top:18px">
       <h3>History</h3>
-      <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Closed tickets — click to review the conversation.</p>
+      <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Closed tickets. Click to review the conversation.</p>
       <div class="tbl-wrap">`+closed.map(row).join('')+`</div></div>`:'');
  },
 
@@ -384,7 +384,7 @@ const VIEWS={
   $('view').innerHTML=`
     ${waiting.length?`<div class="sec-card card-sm" style="border-color:var(--gold-line);background:var(--gold-bg)">
       <h3>${waiting.length} paid ${waiting.length===1?'order is':'orders are'} waiting for an MT5 account</h3>
-      <p class="muted" style="font-size:12.5px;margin:6px 0 12px">These challenges are paid for but not tradable yet — the pool has no free account of that size. Add one below and it is assigned automatically.</p>
+      <p class="muted" style="font-size:12.5px;margin:6px 0 12px">These challenges are paid for but not tradable yet: the pool has no free account of that size. Add one below and it is assigned automatically.</p>
       <div class="tbl-wrap tw-sm"><table class="tbl sortable" data-tkey="admin.pool-waiting">
         <thead><tr><th>Account</th><th>Trader</th><th>Needs size</th><th>Waiting since</th></tr></thead>
         <tbody>${waiting.map(w=>`<tr>
@@ -398,7 +398,7 @@ const VIEWS={
 
     <div class="sec-card card-md">
       <h3>Simulated accounts</h3>
-      <p class="muted" style="font-size:12.5px;margin-bottom:14px">Generates MT5-style credentials locally — no real server behind them. Accounts provisioned from these entries are driven by the Trade BOT, not a live feed.</p>
+      <p class="muted" style="font-size:12.5px;margin-bottom:14px">Generates MT5-style credentials locally, with no real server behind them. Accounts provisioned from these entries are driven by the Trade BOT, not a live feed.</p>
       <div class="pool-form">
         <div><label class="muted" style="font-size:12px">Account size</label>
           <select id="sim-size" class="inp">${sizeOptions(50000)}</select></div>
@@ -415,7 +415,7 @@ const VIEWS={
 
     <div class="sec-card card-md">
       <h3>Add account manually</h3>
-      <p class="muted" style="font-size:12.5px;margin-bottom:14px">Accounts you created at your broker. Paste the credentials here — provisioning assigns the first free account of a matching size when a challenge is purchased.</p>
+      <p class="muted" style="font-size:12.5px;margin-bottom:14px">Accounts you created at your broker. Paste the credentials here. Provisioning assigns the first free account of a matching size when a challenge is purchased.</p>
       <div class="pool-form">
         <input id="pl-login" class="inp" placeholder="MT5 login">
         <input id="pl-pass" class="inp" placeholder="Password">
@@ -452,7 +452,7 @@ const VIEWS={
         <div class="kv"><span>Accounts provisioning</span><b>${s.provisioning??0}</b></div>
         <div class="kv"><span>Free pool accounts</span><b>${s.pool_free??0}</b></div>
       </div>
-      <p class="muted" style="font-size:12px;margin-top:12px">Runtime values come from the server's environment — change them in <span class="mono">.env</span> and restart.</p></div>
+      <p class="muted" style="font-size:12px;margin-top:12px">Runtime values come from the server's environment. Change them in <span class="mono">.env</span> and restart.</p></div>
 
     <div class="sec-card" style="max-width:560px"><h3>Links</h3>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
@@ -533,7 +533,7 @@ function poolSizeOptions(chosen){
 function poolState(p){return p.retired_reason?'retired':p.claimed?'assigned':'free'}
 function poolListHtml(){
   const rows=window._pool||[];
-  if(!rows.length)return `<div class="empty"><h3>Pool is empty</h3><p>Add the MT5 accounts you created at your broker — provisioning takes credentials only from here.</p></div>`;
+  if(!rows.length)return `<div class="empty"><h3>Pool is empty</h3><p>Add the MT5 accounts you created at your broker. Provisioning takes credentials only from here.</p></div>`;
   const q=(window._poolQ||'').toLowerCase();
   const f=window._poolFilter||'all';
   const list=rows.filter(p=>(f==='all'||poolState(p)===f)&&
@@ -666,8 +666,8 @@ function renderOrders(){
         <td style="white-space:nowrap">${o.status==='paid'?'':`
           ${o.status==='pending'?`<button class="btn-o sm" onclick="flagOrder(${o.id},'${o.flag==='awaiting_crypto'?'':'awaiting_crypto'}')"
             title="${o.flag==='awaiting_crypto'?'Clear the awaiting-crypto flag':'Mark as awaiting crypto payment'}">${o.flag==='awaiting_crypto'?'Clear flag':'Crypto?'}</button>
-          <button class="btn-o sm" onclick="markOrderFailed(${o.id})" title="Payment is not coming — close the order with a reason">Mark failed</button>`:''}
-          <button class="btn-p sm" onclick="markOrderPaid(${o.id})" title="Confirm the payment arrived — creates the account">Mark paid</button>`}
+          <button class="btn-o sm" onclick="markOrderFailed(${o.id})" title="Payment is not coming, close the order with a reason">Mark failed</button>`:''}
+          <button class="btn-p sm" onclick="markOrderPaid(${o.id})" title="Confirm the payment arrived, creates the account">Mark paid</button>`}
           ${XBTN(`deleteOrderRow(${o.id},'${esc(o.trader_email||'')}',${o.amount_usd},${o.account_id||0})`,'Delete order')}</td></tr>`).join('')}
       </tbody></table></div>`
       :`<div class="empty"><h3>${list.length?'No orders match':'No orders yet'}</h3>${list.length?'<p>Try a different search or filter.</p>':''}</div>`}`;
@@ -681,7 +681,7 @@ async function flagOrder(id,flag){
 async function markOrderFailed(id){
   const reason=await askReason({
     title:`Mark order #${id} as failed`,
-    hint:'The reason stays on the order in this panel — the trader is not e-mailed.',
+    hint:'The reason stays on the order in this panel. The trader is not e-mailed.',
     label:'Reason (kept in this panel)',
     presets:['Payment never arrived','Payment declined by the provider','Duplicate order',
              'Cancelled by the customer','Suspected fraud'],
@@ -694,7 +694,7 @@ async function markOrderFailed(id){
 async function markOrderPaid(id){
   if(!confirm('Mark this order as PAID?\n\nThis creates the challenge account and sends the trader their credentials — exactly like a completed card payment.'))return;
   try{const d=await api(`/api/admin/orders/${id}/mark-paid`,{method:'POST'});
-    toast(d.already?'This order was already paid.':`✅ Paid — account #${d.account_id} created.`,'ok');go('orders')}
+    toast(d.already?'This order was already paid.':`✅ Paid. Account #${d.account_id} created.`,'ok');go('orders')}
   catch(e){toast('Error: '+e.message,'err')}
 }
 
@@ -742,7 +742,7 @@ async function openAccount(id){
       <h3 style="font-size:15px;margin-bottom:10px">MT5 credentials</h3>
       ${cred('Server',a.platform_server)}${cred('Login',a.platform_login)}
       ${cred('Password',a.platform_password)}
-      ${a.mt5_backed===false?'<div class="kv"><span>Backed by MT5</span><b>no — generated locally</b></div>':''}
+      ${a.mt5_backed===false?'<div class="kv"><span>Backed by MT5</span><b>no, generated locally</b></div>':''}
       ${!a.platform_password?'<p class="muted" style="font-size:12.5px">Not provisioned yet.</p>':''}
     </div>
     <div class="sec-card" style="margin:0">
@@ -759,7 +759,7 @@ async function openAccount(id){
       </div>
       <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
         The risk engine promotes accounts automatically once the profit target and minimum
-        trading days are met — but only while something feeds the account. With the live feed
+        trading days are met, but only while something feeds the account. With the live feed
         off, this is the way to move a trader forward. Changing the phase <b>resets balance,
         drawdown and the trading-day counter</b>, exactly like an automatic promotion.</p>
     </div>
@@ -796,7 +796,7 @@ async function openAccount(id){
           </div>`:''}
         ${a.market_closed?`
           <div class="warn-box" style="margin:0 0 12px;background:var(--gold-bg);border:1px solid var(--gold-line);color:var(--gold-ink)">
-            <b style="display:block">Market closed — the bot takes no positions until Monday</b>
+            <b style="display:block">Market closed. The bot takes no positions until Monday</b>
             This challenge has no Weekend Trading add-on, so there is nothing it could trade right now.
             It stays on and picks up on its own when the week opens.
           </div>`:''}
@@ -811,7 +811,7 @@ async function openAccount(id){
           <button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="stopBot(${a.id})">Stop bot</button>
         </div>
         <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
-          <b>Target</b> is the account profit at which the bot stops trading — raise it in 0.1% steps
+          <b>Target</b> is the account profit at which the bot stops trading. Raise it in 0.1% steps
           to let it keep going, or set <b>0</b> for no limit. Changing it never resyncs the balance,
           so the equity curve continues without a jump.
           <b>Pause</b> only stops new entries — an open position runs to its close, the account
@@ -820,7 +820,7 @@ async function openAccount(id){
       :`
         ${a.market_closed?`
           <div class="warn-box" style="margin:0 0 12px;background:var(--gold-bg);border:1px solid var(--gold-line);color:var(--gold-ink)">
-            <b style="display:block">Market closed — nothing will happen until Monday</b>
+            <b style="display:block">Market closed. Nothing will happen until Monday</b>
             You can start the bot now, but with no Weekend Trading add-on on this challenge it
             stays flat over the weekend and opens its first position when the week opens.
           </div>`:''}
@@ -842,21 +842,21 @@ async function openAccount(id){
         </div>
         <button class="btn-p" onclick="startBot(${a.id})">Start Trade BOT</button>`}
       <p class="muted" style="font-size:12px;margin-top:12px;line-height:1.55">
-        Fills this account's dashboard with trading activity — varied instruments, a positive
+        Fills this account's dashboard with trading activity: varied instruments, a positive
         equity curve, always inside the account's own risk rules.
         <b>While the bot runs, this account is not read from MT5</b>, so the portal will
-        diverge from the trader's MetaTrader terminal — and stopping the bot resyncs the
-        balance back to the real account. <b>Pace is how many trades a day</b> the bot takes —
+        diverge from the trader's MetaTrader terminal, and stopping the bot resyncs the
+        balance back to the real account. <b>Pace is how many trades a day</b> the bot takes:
         it spreads them across the day and holds each position for a matching stretch, so
         Busy is around one trade an hour, not one a minute. Style shades that count: a
         scalper sits at the top of the range, a swing trader at the bottom.
         <b>No pace trades over the weekend</b> unless the challenge has the Weekend Trading
-        add-on — and then the bot only touches crypto, the one market open on Saturday.</p>
+        add-on, and then the bot only touches crypto, the one market open on Saturday.</p>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteAccount(${a.id},'${esc(a.login)}')">Delete account</button>
       ${a.trader_id?`<button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteTrader(${a.trader_id},'${esc(a.trader_email||a.trader_name||'')}')"
-        title="Removes the client and ALL their data — frees the e-mail for a fresh signup">Delete client &amp; all data</button>`:''}
+        title="Removes the client and ALL their data, freeing the e-mail for a fresh signup">Delete client &amp; all data</button>`:''}
     </div>`);
   renderCerts(a.id);
   renderPayouts(a.id);
@@ -896,7 +896,7 @@ async function startBot(id){
   const body={style:$('bot-style').value,pace:$('bot-pace').value,
     target_pct:parseFloat($('bot-target').value||'0')||0};
   try{await api(`/api/admin/accounts/${id}/bot`,{method:'POST',body:JSON.stringify(body)});
-    toast('🤖 Trade BOT started — the dashboard starts filling on the next poller tick.','ok',8000);
+    toast('🤖 Trade BOT started. The dashboard starts filling on the next poller tick.','ok',8000);
     openAccount(id);
   }catch(e){toast('Error: '+e.message,'err')}
 }
@@ -935,7 +935,7 @@ async function renderCerts(id){
       </span></div>`).join('')}
     <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
       Each stage gets its own document with its own verifiable number. A certificate can only be
-      issued for a stage the account actually reached — move the phase first if you need it earlier.</p>`;
+      issued for a stage the account actually reached. Move the phase first if you need it earlier.</p>`;
 }
 async function makeAchievementCert(id,kind){
   try{const r=await api(`/api/admin/accounts/${id}/certificate`,{method:'POST',body:JSON.stringify({kind})});
@@ -999,7 +999,7 @@ async function breachAccount(id){
 async function setPhase(id,phase){
   const phaseNames={eval_1:'Phase 1',eval_2:'Phase 2',funded:'Funded'};
   if(!confirm(`Move this account to ${phaseNames[phase]}?\n\nBalance, drawdown and the trading-day `
-    +`counter reset — same as an automatic promotion.`))return;
+    +`counter reset, same as an automatic promotion.`))return;
   try{await api(`/api/admin/accounts/${id}/phase`,{method:'POST',body:JSON.stringify({phase})});
     toast(`Account moved to ${phaseNames[phase]}.`,'ok'); openAccount(id);
   }catch(e){toast('Error: '+e.message,'err')}
@@ -1026,7 +1026,7 @@ async function renderPayouts(id){
   el.innerHTML=`<h3 style="font-size:15px;margin-bottom:10px">Payouts &amp; certificates</h3>
     ${lista}
     ${d.status!=='funded'?`<p class="muted" style="font-size:12.5px;margin-top:12px">
-        Payouts can only be issued on a <b>funded</b> account — this one is
+        Payouts can only be issued on a <b>funded</b> account. This one is
         <b>${esc(d.status)}</b>. Move the phase to Funded first.</p>`:`
     <div class="pool-form" style="margin-top:14px">
       <div><label class="muted" style="font-size:12px">Trader payout ($)</label>
@@ -1044,7 +1044,7 @@ async function renderPayouts(id){
       Current profit <b>$${fmt(d.profit)}</b> · split <b>${d.split_pct}%</b> → suggested
       <b>$${fmt(d.suggested_share)}</b>. Issuing a payout books it and
       <b>resets the account balance to its starting capital</b>, exactly like approving
-      a trader's request — the paid-out profit stops counting toward the next one.</p>`;
+      a trader's request. The paid-out profit stops counting toward the next one.</p>`;
 }
 async function issuePayout(id){
   const amount=parseFloat($('po-amount').value||'0');
@@ -1080,7 +1080,7 @@ function copyCert(url){navigator.clipboard.writeText(url)
 
 async function pauseBot(id,paused){
   try{await api(`/api/admin/accounts/${id}/bot`,{method:'PATCH',body:JSON.stringify({paused})});
-    toast(paused?'⏸ Bot paused — no new entries, the account keeps its balance.'
+    toast(paused?'⏸ Bot paused. No new entries, the account keeps its balance.'
                 :'▶️ Bot resumed.','ok');
     openAccount(id);
   }catch(e){toast('Error: '+e.message,'err')}
@@ -1091,8 +1091,8 @@ async function setBotTarget(id){
   try{
     const r=await api(`/api/admin/accounts/${id}/bot`,{method:'PATCH',
       body:JSON.stringify({target_pct:cel})});
-    toast(r.bot_target_pct?`🎯 Target set to +${r.bot_target_pct}% — the bot continues from here.`
-                          :'🎯 Target removed — the bot trades with no profit limit.','ok');
+    toast(r.bot_target_pct?`🎯 Target set to +${r.bot_target_pct}%. The bot continues from here.`
+                          :'🎯 Target removed. The bot trades with no profit limit.','ok');
     openAccount(id);
   }catch(e){toast('Error: '+e.message,'err')}
 }
@@ -1101,10 +1101,10 @@ async function stopBot(id){
   // MT5 account state — generated profit vanishes from the dashboard. The admin
   // must know that BEFORE clicking: from outside it looks like data loss.
   if(!confirm('Stop the Trade BOT?\n\nThe account goes back to the live MT5 feed, so its balance '
-    +'and equity curve resync to the real account — the generated profit disappears from the dashboard. '
+    +'and equity curve resync to the real account. The generated profit disappears from the dashboard. '
     +'The trade history stays.'))return;
   try{const r=await api(`/api/admin/accounts/${id}/bot`,{method:'DELETE'});
-    toast(`Bot stopped. Balance $${fmt(r.balance)} — the account goes back to the live MT5 feed.`,'ok',8000);
+    toast(`Bot stopped. Balance $${fmt(r.balance)}, and the account goes back to the live MT5 feed.`,'ok',8000);
     openAccount(id);
   }catch(e){toast('Error: '+e.message,'err')}
 }
@@ -1117,7 +1117,7 @@ async function deleteAccount(id,login){
 async function deleteTrader(tid,who){
   if(!confirm(`Delete client ${who} and ALL their data?\n\nThis permanently removes their profile, every challenge account, orders, KYC documents, payouts, tickets and notifications.\n\nThe e-mail address becomes free again, so the client can sign up from scratch.\n\nThis cannot be undone.`))return;
   const typed=prompt(`Type DELETE to confirm wiping ${who}:`);
-  if(typed!=='DELETE'){toast('Cancelled — nothing was deleted.','err');return}
+  if(typed!=='DELETE'){toast('Cancelled. Nothing was deleted.','err');return}
   try{
     const r=await api('/api/admin/traders/'+tid,{method:'DELETE'});
     closeOver();toast(`Client ${r.email} deleted (${r.accounts_removed} account${r.accounts_removed===1?'':'s'}). E-mail is free again.`,'ok',8000);
@@ -1153,7 +1153,7 @@ async function approveKyc(tid){
 async function rejectKyc(tid){
   const reason=await askReason({
     title:'Reject this verification',danger:true,confirmLabel:'Reject KYC',
-    hint:'The trader is asked to submit their KYC again — the reason shows in their portal and in the e-mail.',
+    hint:'The trader is asked to submit their KYC again. The reason shows in their portal and in the e-mail.',
     presets:['Document unreadable or blurry','Document expired',
       'Name does not match the account','Incomplete documents']});
   if(reason===null)return;   // Cancel
@@ -1163,7 +1163,7 @@ async function rejectKyc(tid){
 }
 async function revertKyc(tid){
   if(!confirm('Revert this KYC decision?\n\nThe application goes back to the pending queue. The trader is NOT notified.'))return;
-  try{await api(`/api/admin/kyc/${tid}/reset`,{method:'POST'});toast('Decision reverted — back in the pending queue.','ok');go('kyc')}
+  try{await api(`/api/admin/kyc/${tid}/reset`,{method:'POST'});toast('Decision reverted. Back in the pending queue.','ok');go('kyc')}
   catch(e){toast('Error: '+e.message,'err')}
 }
 async function viewDoc(tid,kind){
@@ -1222,7 +1222,7 @@ async function replyTicket(id,close){
   const el=$('tk-reply');const msg=el?el.value.trim():'';
   if(!msg&&!close){toast('Write a reply first.','err');return}
   try{await api(`/api/admin/tickets/${id}/reply`,{method:'POST',body:JSON.stringify({message:msg,close:!!close})});
-    closeOver();toast(close?'Ticket closed.':'Reply sent — trader notified by e-mail.','ok');go('tickets');
+    closeOver();toast(close?'Ticket closed.':'Reply sent. Trader notified by e-mail.','ok');go('tickets');
   }catch(e){toast('Error: '+e.message,'err')}
 }
 async function addPool(){
@@ -1259,7 +1259,7 @@ async function savePool(id,claimed){
   if(!body.platform_login||!body.platform_server){toast('Login and server cannot be empty.','err');return}
   try{
     const r=await api('/api/admin/pool/'+id,{method:'PATCH',body:JSON.stringify(body)});
-    toast(r.propagated_to_account?`Saved — credentials also updated on account #${r.propagated_to_account}.`
+    toast(r.propagated_to_account?`Saved. Credentials also updated on account #${r.propagated_to_account}.`
                                  :'Pool entry saved.','ok');
     go('pool');
   }catch(e){toast('Error: '+e.message,'err')}
@@ -1293,7 +1293,7 @@ async function openGrant(traderId){
       <div><label class="muted" style="font-size:12px">Challenge</label>
         <select id="g-product" class="inp">${products.map(p=>
           `<option value="${esc(p.key)}">${esc(p.label)} — $${fmt0(p.account_size)} · normally $${fmt0(p.price_usd)}</option>`).join('')}</select></div>
-      <div><label class="muted" style="font-size:12px">Customer paid for <span style="opacity:.65">(optional — BOGO upgrade)</span></label>
+      <div><label class="muted" style="font-size:12px">Customer paid for <span style="opacity:.65">(optional, BOGO upgrade)</span></label>
         <select id="g-paid" class="inp">
           <option value="">— not a paid upgrade —</option>
           ${products.map(p=>`<option value="${esc(p.key)}">${esc(p.label)} — $${fmt0(p.account_size)}</option>`).join('')}</select></div>
@@ -1303,7 +1303,7 @@ async function openGrant(traderId){
       <input id="g-note" class="inp" value="${GRANT_REASONS[0]}" placeholder="Label on the e-mail badge">
       <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
         <input type="checkbox" id="g-funded" style="width:16px;height:16px;accent-color:var(--acc)">
-        Start as <b>funded</b> — skip the evaluation entirely</label>
+        Start as <b>funded</b>, skipping the evaluation entirely</label>
       <button class="btn-p lg" style="width:100%" onclick="submitGrant()">Grant &amp; create account</button>
       <p class="hint">Trader gets an e-mail with the allocation and MT5 credentials.</p>
     </div></div>`;
@@ -1319,7 +1319,7 @@ async function submitGrant(){
     const r=await api('/api/admin/grant',{method:'POST',body:JSON.stringify(body)});
     document.getElementById('grant-modal')?.remove();
     toast(`🎁 Granted ${r.product_key} to ${r.trader_email}.\n${r.status==='provisioning'
-      ?'MT5 account is being created — credentials e-mailed within a minute.'
+      ?'MT5 account is being created. Credentials e-mailed within a minute.'
       :'Credentials e-mailed to the trader.'}`,'ok',9000);
     go('accounts');
   }catch(e){toast('Error: '+e.message,'err')}
@@ -1376,7 +1376,7 @@ function deleteKycRow(tid,email){
     +`erased from the server, and the trader can start verification from scratch. `
     +`To only undo your decision, use Revert instead.`,
     ()=>go('kyc'),
-    r=>r.files_removed?`Deleted — ${r.files_removed} file(s) erased from the server.`:'Deleted.');
+    r=>r.files_removed?`Deleted. ${r.files_removed} file(s) erased from the server.`:'Deleted.');
 }
 
 /* ---------- modal: import historical payouts ----------
@@ -1408,7 +1408,7 @@ function openPayoutImport(){
         <button class="btn-o lg" style="flex:1" onclick="payoutImport(false)">Preview</button>
         <button class="btn-p lg" style="flex:1" onclick="payoutImport(true)">Import</button>
       </div>
-      <p class="hint">Preview changes nothing. Re-importing the same file is safe — the same
+      <p class="hint">Preview changes nothing. Re-importing the same file is safe, because the same
         person, amount and day is never added twice.</p>
     </div></div>`;
   box.onclick=()=>box.remove();
@@ -1438,7 +1438,7 @@ async function payoutImport(commit){
     </tr>`).join('')}</tbody></table></div>`;
   if(commit){
     toast(`✅ ${r.added} payout(s) imported${r.skipped?`, ${r.skipped} skipped as duplicates`:''}. `
-      +'They are internal records — no certificates were issued.','ok',9000);
+      +'They are internal records. No certificates were issued.','ok',9000);
     VIEWS.payouts();
   }
 }
@@ -1507,12 +1507,12 @@ async function openCreate(){
       <div><label class="muted" style="font-size:12px">Challenge</label>
         <select id="c-product" class="inp">${products.map(p=>
           `<option value="${esc(p.key)}">${esc(p.label)} — $${fmt0(p.account_size)} · normally $${fmt0(p.price_usd)}</option>`).join('')}</select></div>
-      <div><label class="muted" style="font-size:12px">Promotion <span style="opacity:.65">(optional — shown to the trader)</span></label>
+      <div><label class="muted" style="font-size:12px">Promotion <span style="opacity:.65">(optional, shown to the trader)</span></label>
         <select id="c-reason" class="inp" onchange="document.getElementById('c-note').value=this.value">
           <option value="">— no promotion —</option>
           ${GRANT_REASONS.map(r=>`<option>${r}</option>`).join('')}</select></div>
       <input id="c-note" class="inp" placeholder="Label on the e-mail badge">
-      <div><label class="muted" style="font-size:12px">Customer paid for <span style="opacity:.65">(optional — BOGO upgrade)</span></label>
+      <div><label class="muted" style="font-size:12px">Customer paid for <span style="opacity:.65">(optional, BOGO upgrade)</span></label>
         <select id="c-paid" class="inp">
           <option value="">— not a paid upgrade —</option>
           ${products.map(p=>`<option value="${esc(p.key)}">${esc(p.label)} — $${fmt0(p.account_size)}</option>`).join('')}</select></div>
@@ -1534,7 +1534,7 @@ async function submitCreate(){
   if(!body.login){toast('MT5 login is required.','err');return}
   try{const r=await api('/api/accounts',{method:'POST',body:JSON.stringify(body)});
     document.getElementById('create-modal')?.remove();
-    toast(r.email_unknown?'Account created, but no trader with that e-mail — it has no owner yet.'
+    toast(r.email_unknown?'Account created, but no trader with that e-mail, so it has no owner yet.'
           :r.linked_trader?`Account created for ${r.linked_trader}.`:'Account created.',
           r.email_unknown?'err':'ok');
     go('accounts');

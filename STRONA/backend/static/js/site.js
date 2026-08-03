@@ -39,11 +39,68 @@
      sends it, so the bar and the purchase can never tell two different stories. */
   const promoBar = $('#promoBar'), promoTxt = $('#promoTxt'),
         promoForm = $('#promoForm'), promoInp = $('#promoInp');
-  const promoApplied = () => { try { return localStorage.getItem('pf_promo_code') || ''; } catch (e) { return ''; } };
-  const couponApplied = () => { try { return localStorage.getItem('pf_coupon_code') || ''; } catch (e) { return ''; } };
+
+  /* ---------- ONE state for the applied code ----------
+     There used to be three: localStorage (the bar), a boot-time snapshot (the
+     pricing card) and in-memory variables (the coupon). A code entered in one
+     place therefore did not exist for the other two — the pricing card needed
+     a page reload to notice the bar, and a percentage coupon never reached it
+     at all. Everything below reads and writes through these five functions. */
+  const readCode = () => {
+    try {
+      return { promo: localStorage.getItem('pf_promo_code') || null,
+               coupon: localStorage.getItem('pf_coupon_code') || null,
+               pct: +(localStorage.getItem('pf_coupon_pct') || 0) || 0 };
+    } catch (e) { return { promo: null, coupon: null, pct: 0 }; }
+  };
+  const writeCode = ({ promo = null, coupon = null, pct = 0 }) => {
+    try {
+      /* The two kinds never stack: the upgrade code keeps the fee and moves the
+         size, a coupon cuts the fee. The last code entered wins. */
+      if (promo) { localStorage.setItem('pf_promo_code', promo); }
+      else { localStorage.removeItem('pf_promo_code'); }
+      if (coupon) { localStorage.setItem('pf_coupon_code', coupon);
+                    localStorage.setItem('pf_coupon_pct', String(pct)); }
+      else { localStorage.removeItem('pf_coupon_code'); localStorage.removeItem('pf_coupon_pct'); }
+    } catch (e) {}
+  };
+  /** Sprawdza kod w API. Zwraca null, gdy nie jest ani promocją, ani kuponem. */
+  async function validateCode(code) {
+    try {
+      if ((await (await fetch('/api/promo?code=' + encodeURIComponent(code))).json()).valid) {
+        return { promo: code, coupon: null, pct: 0 };
+      }
+    } catch (e) {}
+    try {
+      const r = await fetch('/api/coupon/' + encodeURIComponent(code));
+      if (r.ok) {
+        const d = await r.json();
+        if (d.pct) return { promo: null, coupon: d.code, pct: d.pct };
+      }
+    } catch (e) {}
+    return null;
+  }
+  /** Zapisuje wynik walidacji i odświeża WSZYSTKIE trzy miejsca naraz. */
+  function applyCode(state) { writeCode(state || {}); syncCode(); }
+  function syncCode() {
+    renderConfigurator();
+    renderPricing();
+    paintPromoBar();
+  }
+  function paintPromoBar() {
+    if (!promoTxt) return;
+    const { promo, coupon } = readCode();
+    document.documentElement.classList.toggle('promo-applied', !!(promo || coupon));
+    if (promoBar) { promoBar.classList.remove('promo-open'); if (promoForm) promoForm.hidden = true; }
+    promoTxt.textContent = promo ? promoTxt.dataset.applied
+                         : coupon ? couponMsg()
+                         : promoTxt.dataset.default || promoTxt.textContent;
+  }
+  const promoApplied = () => readCode().promo || '';
+  const couponApplied = () => readCode().coupon || '';
   const couponMsg = () => {
-    let pct = ''; try { pct = localStorage.getItem('pf_coupon_pct') || ''; } catch (e) {}
-    return couponApplied() + ' applied — ' + (pct ? pct + '% off' : 'discount') + ' your challenge fee at checkout.';
+    const { coupon, pct } = readCode();
+    return coupon + ' applied: ' + (pct ? pct + '% off' : 'discount') + ' your challenge fee at checkout.';
   };
   const promoX = $('#promoX');
   if (promoX) promoX.addEventListener('click', () => {
@@ -71,44 +128,22 @@
     e.preventDefault();
     const code = (promoInp.value || '').trim().toUpperCase();
     if (!code) { promoInp.focus(); return; }
-    /* The input takes EVERY kind of code: the "Upgrade Your Size" code
-       activates the promo, anything else is checked as a discount coupon
-       (WELCOME10 -> -10%). Last applied code wins — they don't stack here. */
-    let promo = false, pct = 0;
-    try { promo = (await (await fetch('/api/promo?code=' + encodeURIComponent(code))).json()).valid; } catch (err) {}
-    if (!promo) {
-      try {
-        const r = await fetch('/api/coupon/' + encodeURIComponent(code));
-        if (r.ok) pct = (await r.json()).pct || 0;
-      } catch (err) {}
-    }
-    if (!promo && !pct) {
+    /* The field takes EVERY kind of code and the shared validator decides which
+       one it is, so the bar, the hero and the pricing card can never disagree
+       about what a code means. */
+    const state = await validateCode(code);
+    if (!state) {
       promoForm.classList.remove('promo-bad'); void promoForm.offsetWidth;  /* restart the shake */
       promoForm.classList.add('promo-bad');
       promoInp.value = ''; promoInp.placeholder = 'Invalid code';
       promoInp.focus();
       return;
     }
-    try {
-      if (promo) {
-        localStorage.setItem('pf_promo_code', code);
-        localStorage.removeItem('pf_coupon_code'); localStorage.removeItem('pf_coupon_pct');
-      } else {
-        localStorage.setItem('pf_coupon_code', code);
-        localStorage.setItem('pf_coupon_pct', String(pct));
-        localStorage.removeItem('pf_promo_code');
-      }
-    } catch (err) {}
-    promoBar.classList.remove('promo-open'); promoForm.hidden = true;
-    document.documentElement.classList.add('promo-applied');
-    promoTxt.textContent = promo ? 'Upgrade your challenge promo applied!'
-                                 : code + ' applied — ' + pct + '% off!';
+    applyCode(state);
+    promoTxt.textContent = state.promo ? 'Upgrade your challenge promo applied!'
+                                       : code + ' applied: ' + state.pct + '% off!';
     promoBar.classList.add('promo-flash');
-    setTimeout(() => {
-      promoBar.classList.remove('promo-flash');
-      promoTxt.textContent = promo ? promoTxt.dataset.applied : couponMsg();
-    }, 2600);
-    renderConfigurator();
+    setTimeout(() => { promoBar.classList.remove('promo-flash'); paintPromoBar(); }, 2600);
   });
 
   /* ---------- ?ref= capture (partner code attaches at signup) ---------- */
@@ -182,11 +217,10 @@
 
   /* Pricing configurator: type toggle + size grid + add-on + coupon on the
      left, live program rules on the right. Data comes from /api/products. */
-  /* cfgPromo holds the "Upgrade Your Size" code. It is NOT a coupon: the fee
-     stays the same and the account size moves one tier up, so it can never be
-     mixed into cfgPct. The field below takes both kinds of code. */
-  let cfgType = '2step', cfgSize = null, cfgWt = false, cfgCoupon = null, cfgPct = 0,
-      cfgPromo = (() => { try { return localStorage.getItem('pf_promo_code') || null; } catch (e) { return null; } })();
+  /* The applied code is NOT kept here any more — it lives in readCode(). It used
+     to be a snapshot taken once at boot, so a code entered in the bar or in the
+     hero stayed invisible to this card until the page was reloaded. */
+  let cfgType = '2step', cfgSize = null, cfgWt = false;
   const typeItems = t => PRODUCTS
     .filter(p => (t === 'instant' ? p.steps === 0 : p.steps === 2) && p.price_usd > 0)
     .sort((a, b) => a.account_size - b.account_size);
@@ -194,6 +228,7 @@
 
   function renderPricing() {
     const box = $('#pcfg'); if (!box) return;
+    const { promo: cfgPromo, coupon: cfgCoupon, pct: cfgPct } = readCode();
     let items = typeItems(cfgType);
     if (!items.length) { cfgType = cfgType === '2step' ? 'instant' : '2step'; items = typeItems(cfgType); }
     if (!items.length) { box.closest('.pcfg-grid')?.remove(); return; }
@@ -223,8 +258,8 @@
     $('#pcfg-fee').textContent = '$' + fee.toLocaleString('en-US',
       { minimumFractionDigits: fee % 1 ? 2 : 0, maximumFractionDigits: 2 });
     $('#pcfg-feesub').textContent = (cfgPct ? `${cfgPct}% coupon applied · ` : '')
-      + (upSize ? `${cfgPromo} applied — you trade ${sizeLabel(upSize)} for the price of ${sizeLabel(p.account_size)} · ` : '')
-      + (cfgType === 'instant' ? 'one-time fee — funded from day one'
+      + (upSize ? `${cfgPromo} applied: you trade ${sizeLabel(upSize)} for the price of ${sizeLabel(p.account_size)} · ` : '')
+      + (cfgType === 'instant' ? 'one-time fee, funded from day one'
          : 'one-time fee for evaluation access, refunded with your first payout');
 
     const q = new URLSearchParams({ buy: p.key });
@@ -234,7 +269,7 @@
 
     const wkVal = cfgWt ? '<span class="ok">✓ Added to your order</span>' : '$199 bonus add-on';
     const rows = cfgType === 'instant' ? [
-      ['Profit target', 'None — funded from day one'],
+      ['Profit target', 'None. Funded from day one'],
       ['Maximum daily drawdown', p.max_daily_loss_pct + '%'],
       ['Maximum total drawdown', p.max_overall_loss_pct + '%'],
       ['Drawdown type', 'Balance-based'],
@@ -244,7 +279,7 @@
       ['Max open volume', p.max_lots + ' lots'],
       ['Weekend trading', wkVal],
       ['News trading', '<span class="ok">✓ Allowed</span>'],
-      ['Leverage', 'Up to 1:50'],
+      ['Leverage', 'Up to 1:100'],
     ] : [
       ['Profit target', `Phase 1: ${p.profit_target_p1}% | Phase 2: ${p.profit_target_p2}%`],
       ['Maximum daily drawdown', p.max_daily_loss_pct + '%'],
@@ -263,11 +298,17 @@
        size picked: the largest tier has nothing above it to upgrade to. */
     if (cfgPromo) {
       codeMsg('ok', upSize
-        ? `<b>${cfgPromo}</b> applied — you pay for ${sizeLabel(p.account_size)} and trade `
+        ? `<b>${cfgPromo}</b> applied: you pay for ${sizeLabel(p.account_size)} and trade `
           + `<b>${sizeLabel(upSize)}</b>. Pick any size, the upgrade follows.`
         : `<b>${cfgPromo}</b> applied, but ${sizeLabel(p.account_size)} is our largest account — `
           + `there is nothing above it. Pick a smaller size to trade one tier up.`);
+    } else if (cfgCoupon) {
+      codeMsg('ok', `<b>${cfgCoupon}</b> applied: <b>${cfgPct}% off</b> your challenge fee.`);
+    } else {
+      codeMsg(null);
     }
+    const pinp = $('#pcfg-coupon');
+    if (pinp && document.activeElement !== pinp) pinp.value = cfgPromo || cfgCoupon || '';
     if (upSize) rows.unshift(['Account size',
       `<span class="ok">${sizeLabel(upSize)} — upgraded from ${sizeLabel(p.account_size)}</span>`]);
     $('#prules-rows').innerHTML = rows.map(([l, v]) =>
@@ -281,58 +322,30 @@
   /* The applied code confirms itself right under the input. Without it the
      upgrade code looked dead: it does not move the price, and the only hint sat
      in small grey type further down the card. */
-  function codeMsg(kind, html) {
-    const el = $('#pcfg-codemsg'), inp = $('#pcfg-coupon');
+  /* Jedno pudelko potwierdzenia, dwa miejsca. Komunikaty sa OSOBNE, bo kazdy
+     kreator ma wlasny wybrany rozmiar, a tresc mowi wprost o rozmiarze. */
+  function codeBox(msgSel, inpSel, kind, html) {
+    const el = $(msgSel), inp = $(inpSel);
     if (inp) { inp.classList.remove('ok', 'bad'); if (kind) inp.classList.add(kind); }
     if (!el) return;
     if (!kind) { el.hidden = true; el.innerHTML = ''; return; }
     el.hidden = false;
-    el.className = 'pcfg-codemsg ' + kind;
+    el.className = 'code-msg ' + kind;
     el.innerHTML = `<span>${kind === 'ok' ? '✓' : '✕'}</span><span>${html}</span>`;
   }
+  const codeMsg = (kind, html) => codeBox('#pcfg-codemsg', '#pcfg-coupon', kind, html);
+  const heroMsg = (kind, html) => codeBox('#cfg-codemsg', '#cfg-code', kind, html);
 
-  async function applyPricingCoupon() {
-    const inp = $('#pcfg-coupon'), code = (inp.value || '').trim().toUpperCase();
-    inp.classList.remove('bad');
+  /** Wspolna obsluga pola z kodem: hero i cennik roznia sie tylko pudelkiem. */
+  async function submitCodeField(inp, msg) {
+    const code = (inp.value || '').trim().toUpperCase();
     if (code) inp.value = code;
-    if (!code) {
-      cfgCoupon = null; cfgPct = 0; cfgPromo = null;
-      try { localStorage.removeItem('pf_promo_code'); } catch (e) {}
-      codeMsg(null);
-      renderPricing(); return;
-    }
-    let promo = false;
-    try { promo = (await (await fetch('/api/promo?code=' + encodeURIComponent(code))).json()).valid; } catch (e) {}
-    if (promo) {
-      cfgPromo = code; cfgCoupon = null; cfgPct = 0;
-      /* Checkout reads the code from here, so the configurator and the purchase
-         can never tell two different stories. */
-      try {
-        localStorage.setItem('pf_promo_code', code);
-        localStorage.removeItem('pf_coupon_code'); localStorage.removeItem('pf_coupon_pct');
-      } catch (e) {}
-      renderPricing();      /* writes the confirmation — it depends on the size picked */
-      return;
-    }
-    try {
-      const r = await fetch('/api/coupon/' + encodeURIComponent(code));
-      if (!r.ok) throw new Error();
-      const d = await r.json();
-      cfgCoupon = d.code; cfgPct = d.pct; cfgPromo = null;
-      try { localStorage.removeItem('pf_promo_code'); } catch (e) {}
-      codeMsg('ok', `<b>${d.code}</b> applied — <b>${d.pct}% off</b> your challenge fee.`);
-    } catch (e) {
-      /* A rejected code also drops whatever was applied before: the field holds
-         one code at a time, so leaving "UPGRADE applied" under an invalid entry
-         would have the card claim something the input contradicts. */
-      cfgCoupon = null; cfgPct = 0; cfgPromo = null;
-      try { localStorage.removeItem('pf_promo_code'); } catch (err) {}
-      renderPricing();
-      inp.classList.add('bad');
-      codeMsg('bad', `<b>${code}</b> is not a valid code.`);
-      return;
-    }
-    renderPricing();
+    if (!code) { applyCode(null); return; }      /* puste pole czysci stan wszedzie */
+    const state = await validateCode(code);
+    /* Odrzucony kod kasuje takze to, co bylo zastosowane wczesniej: pole trzyma
+       jeden kod naraz, wiec „UPGRADE applied" pod bledna wartoscia klamaloby. */
+    applyCode(state);
+    if (!state) { inp.classList.add('bad'); msg('bad', `<b>${code}</b> is not a valid code.`); }
   }
 
   function renderObjectives() {
@@ -352,7 +365,10 @@
       ['Reward frequency', 'Bi-weekly', ...col('Every 7 days')],
       ['News trading', '<span class="ok">✓ Allowed</span>', ...col('<span class="ok">✓ Allowed</span>')],
       ['Weekend trading', '$199 add-on', ...col('$199 add-on')],
-      ['Leverage', 'Up to 1:100', ...col('Up to 1:50')],
+      /* Oba modele dostaja 1:100, bo z taka dzwignia provisioning ZAKLADA konta
+         (config: METAAPI_DEMO_LEVERAGE / METAQUOTES_WEB_LEVERAGE = 100). Kolumna
+         Instant mowila 1:50 i klamala wobec tego, co trader dostawal w MT5. */
+      ['Leverage', 'Up to 1:100', ...col('Up to 1:100')],
       ['Profit split', 'up to ' + Math.max(...g2.map(p => p.profit_split_pct)) + '%', ...col(ri && ri.profit_split_pct + '%')],
       /* The engine refunds the fee on the FIRST payout for every plan
          (main.py:1342) — Instant Funding included. */
@@ -410,12 +426,16 @@
 
     const p = items.find(x => x.key === cfgKey);
     const instant = p.steps === 0;
-    tweenNum($('#cfg-fee'), p.price_usd, v => '$' + fmt(Math.round(v)));
+    const { promo: kodPromo, coupon: kodKupon, pct: kodPct } = readCode();
+    /* Rabat musi byc widoczny TU, a nie dopiero w cenniku nizej: pole na kod
+       stoi w tej karcie, wiec bez tego wpisanie WELCOME10 nie robilo nic. */
+    const oplata = Math.round(p.price_usd * (1 - kodPct / 100) * 100) / 100;
+    tweenNum($('#cfg-fee'), oplata, v => '$' + fmt(Math.round(v)));
     /* Instant Funding has no phases — the row says so instead of printing
        a "+0% = $0" target. */
     $('#cfg-target-label').textContent = instant ? 'Profit target' : 'Profit target — Phase 1';
     if (instant) {
-      $('#cfg-target').textContent = 'None — funded from day one';
+      $('#cfg-target').textContent = 'None. Funded from day one';
     } else {
       $('#cfg-target').innerHTML = `+${p.profit_target_p1}% = $<span id="cfg-tusd"></span>`;
       tweenNum($('#cfg-tusd'), p.account_size * p.profit_target_p1 / 100, v => fmt(Math.round(v)));
@@ -429,30 +449,41 @@
     const promo = $('#cfg-promo'), fine = $('#cfg-fine');
     const big = p.promo_upgrade_size;
     const anyPromo = PRODUCTS.some(x => x.promo_upgrade_size);
-    const applied = !!promoApplied();
+    const applied = !!(kodPromo || kodKupon);
     if (promo) {
-      promo.hidden = !anyPromo;
-      if (anyPromo) {
-        promo.classList.toggle('is-max', applied && !big);
-        promo.classList.toggle('applied', applied && !!big);
-        if (!applied) {
-          $('#cfg-promo-badge').textContent = 'Upgrade your size';
-          $('#cfg-promo-val').innerHTML = 'Have a promo code? Get the <b>next size up — same fee</b>.';
-          $('#cfg-promo-sub').innerHTML =
-            '<button type="button" class="cfg-promo-link" id="cfg-promo-open">Apply your code</button> — the account is created one size up at checkout.';
-          const open = $('#cfg-promo-open');
-          if (open) open.addEventListener('click', openPromoInput);
-        } else if (big) {
-          $('#cfg-promo-badge').textContent = '✓ Promo applied';
-          $('#cfg-promo-val').textContent = 'Code redeemed successfully!';
-          $('#cfg-promo-sub').innerHTML =
-            `Pay for ${sizeLabel(p.account_size)} — your account is created at <b>$${fmt(big)}</b>.`;
-        } else {
-          $('#cfg-promo-badge').textContent = 'Largest size';
-          $('#cfg-promo-val').innerHTML = `${sizeLabel(p.account_size)} is our biggest account`;
-          $('#cfg-promo-sub').textContent =
-            'The size upgrade applies to every smaller plan.';
-        }
+      /* Blok zostaje takze bez trwajacej promocji: pole na kod ma byc zawsze
+         pod reka, bo kupony procentowe dzialaja niezaleznie od niej. */
+      promo.hidden = false;
+      promo.classList.toggle('is-max', !!kodPromo && anyPromo && !big);
+      promo.classList.toggle('applied', applied);
+      const inp = $('#cfg-code');
+      if (inp && document.activeElement !== inp) inp.value = kodPromo || kodKupon || '';
+      const row = $('#cfg-code-row');
+      if (row) row.hidden = applied;
+      const hint = $('#cfg-promo-val');
+      if (hint) {
+        hint.hidden = applied;
+        hint.innerHTML = anyPromo
+          ? 'Have a promo code? Get the <b>next size up for the same fee</b>.'
+          : 'Have a promo or coupon code?';
+      }
+      if (kodPromo && big) {
+        heroMsg('ok', `<b>${kodPromo}</b> applied successfully. You pay for `
+          + `${sizeLabel(p.account_size)} and trade <b>${sizeLabel(big)}</b>.`);
+      } else if (kodPromo && anyPromo) {
+        heroMsg('ok', `<b>${kodPromo}</b> applied successfully, but ${sizeLabel(p.account_size)} `
+          + 'is our largest account. Pick a smaller size to trade one tier up.');
+      } else if (kodPromo) {
+        heroMsg('ok', `<b>${kodPromo}</b> applied successfully.`);
+      } else if (kodKupon) {
+        heroMsg('ok', `<b>${kodKupon}</b> applied successfully: <b>${kodPct}% off</b> this fee.`);
+      } else {
+        heroMsg(null);
+      }
+      const zmien = $('#cfg-code-change');
+      if (zmien) {
+        zmien.hidden = !applied;
+        zmien.onclick = () => { applyCode(null); const i = $('#cfg-code'); if (i) i.focus(); };
       }
     }
     if (fine) {
@@ -461,21 +492,23 @@
         : "*One-time fee, refunded with your first payout. Rewards depend on your trading.";
     }
     const cta = $('#cfg-cta');
-    cta.href = '/portal?buy=' + encodeURIComponent(p.key);
-    cta.textContent = `Start with ${sizeLabel(p.account_size)} → $${fmt(Math.round(p.price_usd))}`;
+    const q = new URLSearchParams({ buy: p.key });
+    if (kodKupon) q.set('coupon', kodKupon);   /* bez tego rabat ginal po klikniciu */
+    cta.href = '/portal?' + q.toString();
+    cta.textContent = `Start with ${sizeLabel(p.account_size)} → $${fmt(Math.round(oplata))}`;
   }
 
   async function products() {
     if (!$('#pcfg') && !$('#cfg')) return;
     const wire = () => {
-      const ap = $('#pcfg-apply'); if (ap) ap.addEventListener('click', applyPricingCoupon);
       const ci = $('#pcfg-coupon');
-      if (ci) {
-        ci.addEventListener('keydown', e => { if (e.key === 'Enter') applyPricingCoupon(); });
-        /* A code redeemed in the promo bar has to show up here too — otherwise
-           the configurator quotes a plain account while checkout upgrades it. */
-        if (cfgPromo && !ci.value) ci.value = cfgPromo;
-      }
+      const send = () => ci && submitCodeField(ci, codeMsg);
+      const ap = $('#pcfg-apply'); if (ap) ap.addEventListener('click', send);
+      if (ci) ci.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); send(); } });
+      const hi = $('#cfg-code');
+      const hsend = () => hi && submitCodeField(hi, heroMsg);
+      const hb = $('#cfg-code-apply'); if (hb) hb.addEventListener('click', hsend);
+      if (hi) hi.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); hsend(); } });
       const wt = $('#pcfg-wt'); if (wt) wt.addEventListener('click', () => { cfgWt = !cfgWt; renderPricing(); });
     };
     /* The server inlines the live catalog into the page (#pf-products) so the
@@ -500,25 +533,11 @@
       renderPricing(); renderObjectives(); renderConfigurator();
       wire();
     } catch (e) {
-      if ($('#pcfg')) $('#pcfg').innerHTML = '<p class="muted">Could not load plans — please refresh.</p>';
+      if ($('#pcfg')) $('#pcfg').innerHTML = '<p class="muted">Could not load plans. Please refresh.</p>';
     }
   }
 
   /* ---------- /api/leaderboard — the section hides when there is no data ---------- */
-  async function board() {
-    const sec = $('#lbSec'); if (!sec) return;
-    try {
-      const rows = (await (await fetch('/api/leaderboard')).json()).slice(0, 5);
-      if (!rows.length) { sec.remove(); return; }
-      $('#lbBody').innerHTML = rows.map((r, i) => `<tr>
-        <td class="rank">${String(i + 1).padStart(2, '0')}</td>
-        <td>${esc(r.trader)}${r.country ? ` <span class="muted" style="font-size:12px">· ${esc(r.country)}</span>` : ''}</td>
-        <td class="mono muted">$${fmt(r.account_size)}</td>
-        <td class="muted">${r.status === 'funded' ? 'Funded' : 'Evaluation'}</td>
-        <td class="pl ${r.profit_pct >= 0 ? 'up' : 'down'}">${r.profit_pct >= 0 ? '+' : ''}${r.profit_pct.toFixed(2)}%</td>
-      </tr>`).join('');
-    } catch (e) { sec.remove(); }
-  }
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   /* ---------- the certificate strip drifts, and you can grab it ----------
@@ -748,5 +767,5 @@
   /* ---------- init ---------- */
   revealize(document);
   $$('.stat-num[data-count]').forEach(countUp);
-  stats(); products(); board(); certsStrip();
+  stats(); products(); certsStrip();
 })();

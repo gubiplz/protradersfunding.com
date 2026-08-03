@@ -67,7 +67,7 @@ def _bogo_intro(ctx: dict) -> str:
     # Zdanie zaczyna sie od „Your", bo wersja HTML doklada powitanie i zamienia
     # pierwsza litere na mala — „buy one, get one free" nie moze wtedy wypasc
     # na poczatku, bo wygladaloby jak polecenie zamiast nazwy promocji.
-    return ("Your bonus challenge is live — buy one, get one free. "
+    return ("Your bonus challenge is live: buy one, get one free. "
             "Same rules and the same profit split as a purchased account.")
 
 
@@ -83,7 +83,7 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"Hi {name}!\n\nYour {brand} account is ready. Pick a challenge in the portal "
             f"and start your path to a funded account.\n\n"
             f"📱 Get the mobile app\n"
-            f"The portal installs as an app straight from your browser — no app store:\n"
+            f"The portal installs as an app straight from your browser, no app store needed:\n"
             f"  iPhone / iPad:  open {settings.app_base_url}/portal in Safari → Share → Add to Home Screen\n"
             f"  Android:        open the portal in Chrome → menu ⋮ → Install app\n"
             f"Step-by-step guide: {settings.app_base_url}/install\n\n"
@@ -107,7 +107,7 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"  Server:     {ctx.get('platform_server')}\n"
             f"  Capital:    {ctx.get('initial_balance')}\n\n"
             f"Log in with MetaTrader 5 (desktop, mobile or web) using the server above.\n"
-            f"Good luck — track your progress in the dashboard.",
+            f"Good luck. Track your progress in the dashboard.",
         ),
         "phase_passed": (
             f"Congratulations — phase passed! ✅ ({login})",
@@ -118,6 +118,12 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"Your account is FUNDED 💰 ({login})",
             f"{name}, your account {login} is now funded! "
             f"Profit split: {ctx.get('split')}%. Complete KYC and you can request payouts.",
+        ),
+        "account_scaled": (
+            f"Account scaled up to ${_num(ctx.get('new_size'))} 📈 ({login})",
+            f"{name}, you chose to grow account {login} instead of taking the payout. "
+            f"Its size is now ${_num(ctx.get('new_size'))} and the balance starts from there. "
+            f"Same rules, same profit split.",
         ),
         "breached": (
             f"Account {login} — rule breached ⛔",
@@ -166,7 +172,7 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
         "credits_granted": (
             f"Store credit added: ${_num(ctx.get('amount'))} 🎁",
             f"{name}, we've just added ${_num(ctx.get('amount'))} of store credit to your "
-            f"account. Your balance is now ${_num(ctx.get('balance'))} — it will be applied "
+            f"account. Your balance is now ${_num(ctx.get('balance'))} and it is applied "
             f"automatically at your next checkout.",
         ),
         "challenge_granted": (
@@ -305,7 +311,7 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
         if granted:
             intro = f"Hi {name}, {lead[0].lower()}{lead[1:]}"
         elif upgraded:
-            intro = (f"Hi {name}, your account is ready — and your {_promo_name()} "
+            intro = (f"Hi {name}, your account is ready, and your {_promo_name()} "
                      f"promotion is applied: you paid for the {_tier(ctx.get('bogo_paid_size'))} tier "
                      f"and we created the account at ${_num(ctx.get('initial_balance'))}.")
         else:
@@ -335,7 +341,7 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
        <h2 style="font:600 20px/1.3 {_FONT};letter-spacing:-.2px;color:{_INK};margin:0 0 10px">
          Install {brand} on your phone</h2>
        <p style="font:400 14px/1.8 {_FONT};color:{_MUTE};margin:0">
-         The portal installs as an app straight from your browser — no app store.<br>
+         The portal installs as an app straight from your browser, no app store needed.<br>
          <b style="color:{_INK}">iPhone / iPad:</b> Safari → Share → Add to Home Screen<br>
          <b style="color:{_INK}">Android:</b> Chrome → menu ⋮ → Install app</p>
      </div>
@@ -355,7 +361,7 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
     elif event == "phase_passed":
         parts = [
             _head_html("Milestone", "Phase passed",
-                       f"Great job {name} — account {login} moved from "
+                       f"Great job {name}. Account {login} moved from "
                        f"{ctx.get('from_phase')} to {ctx.get('to_phase')}."),
             _button_html("View Progress", f"{portal}?view=accounts"),
         ]
@@ -365,6 +371,15 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                        f"{name}, account {login} is now funded. "
                        f"Complete KYC and you can request payouts."),
             _stat_html("Profit split", f"{ctx.get('split')}%", f"Account {login}"),
+            _button_html("View Dashboard", f"{portal}?view=accounts"),
+        ]
+    elif event == "account_scaled":
+        parts = [
+            _head_html("Scaled up", "Your account just got bigger",
+                       f"{name}, you chose to grow account {login} instead of taking the payout. "
+                       f"The balance starts from the new size, with the same rules."),
+            _stat_html("New account size", f"${_num(ctx.get('new_size'))}",
+                       f"was ${_num(ctx.get('previous_size'))}"),
             _button_html("View Dashboard", f"{portal}?view=accounts"),
         ]
     elif event == "breached":
@@ -387,7 +402,7 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
         parts = [
             _head_html("Payout", "Payout approved",
                        f"{name}, your payout has been approved"
-                       f"{' — including your challenge fee refund' if ctx.get('fee_refund') else ''}. "
+                       f"{', including your challenge fee refund' if ctx.get('fee_refund') else ''}. "
                        f"Funds are on the way."),
             _stat_html("Your payout", str(ctx.get("trader_share") or "—")),
             _button_html("View Dashboard", f"{portal}?view=payouts"),
@@ -431,8 +446,8 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
     elif event == "credits_granted":
         parts = [
             _head_html("Store credit", "Credit added to your account",
-                       f"{name}, we've just added store credit to your account — "
-                       f"it is applied automatically at your next checkout."),
+                       f"{name}, we've just added store credit to your account. "
+                       f"It is applied automatically at your next checkout."),
             _stat_html("Credit added", f"${_num(ctx.get('amount'))}",
                        f"Current balance ${_num(ctx.get('balance'))}"),
             _button_html("Browse Challenges", f"{portal}?view=store"),
@@ -440,8 +455,8 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
     elif event == "verify_email":
         parts = [
             _head_html("Verify", "Confirm your e-mail",
-                       f"Hi {name}, enter this code in the portal — or tap the "
-                       f"button below — to confirm your e-mail address."),
+                       f"Hi {name}, enter this code in the portal, or tap the "
+                       f"button below, to confirm your e-mail address."),
             _stat_html("Verification code", str(ctx.get("code") or "")),
             _button_html("Verify E-mail", ctx.get("verify_url") or portal),
             _note_html("The code and link are valid for 24 hours. If you didn't "
@@ -461,6 +476,7 @@ _PREF_BY_EVENT = {
     "ticket_reply": "notify_updates",
     "credits_granted": "notify_updates",
     "phase_passed": "notify_trading", "account_funded": "notify_trading",
+    "account_scaled": "notify_trading",
     "breached": "notify_trading",
     "payout_requested": "notify_payouts", "payout_approved": "notify_payouts",
     "payout_rejected": "notify_payouts",

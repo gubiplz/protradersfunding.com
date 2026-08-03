@@ -240,6 +240,11 @@ def _account_dict(acc: Account, with_metrics: bool = True, with_credentials: boo
         "source": acc.source, "grant_note": acc.grant_note,
         "bogo_paid_size": getattr(acc, "bogo_paid_size", None),
         "created_at": acc.created_at.isoformat() if acc.created_at else None,
+        # Rozmiar po skalowaniu ALBO None. Portal rysuje z tego wybór „wypłata
+        # czy większe konto", więc liczy to jedno miejsce w kodzie.
+        "scale_up_to": poller.scale_offer(acc),
+        "scale_step_pct": poller.SCALE_STEP_PCT,
+        "scale_trigger_pct": poller.SCALE_TRIGGER_PCT,
     }
     if admin_view:
         d["mt5_backed"] = bool(getattr(acc, "mt5_backed", True))
@@ -422,7 +427,7 @@ def _rate_limit(request: Request, bucket: str, limit: int, window: int = 60) -> 
     key = (bucket, ip)
     hits = [t for t in _RL_HITS.get(key, []) if now - t < window]
     if len(hits) >= limit:
-        raise HTTPException(429, "Too many attempts — try again in a minute.")
+        raise HTTPException(429, "Too many attempts. Try again in a minute.")
     hits.append(now)
     _RL_HITS[key] = hits
     if len(_RL_HITS) > 10_000:                      # GC starych wpisow
@@ -480,7 +485,7 @@ def forgot_password(payload: ForgotIn, request: Request):
 def reset_password(payload: ResetIn, response: Response):
     parsed = auth.parse_reset_token(payload.token)
     if parsed is None:
-        raise HTTPException(400, "This reset link is invalid or has expired — request a new one")
+        raise HTTPException(400, "This reset link is invalid or has expired. Request a new one")
     tid, pwf = parsed
     if len(payload.password) < 8:
         raise HTTPException(400, "The password must be at least 8 characters long")
@@ -488,11 +493,11 @@ def reset_password(payload: ResetIn, response: Response):
     try:
         tr = session.get(Trader, tid)
         if not tr:
-            raise HTTPException(400, "This reset link is invalid or has expired — request a new one")
+            raise HTTPException(400, "This reset link is invalid or has expired. Request a new one")
         if pwf and pwf != auth._pw_fp(tr.password_hash):
             # Hash już inny niż przy wysyłce linku — link zużyty albo hasło
             # zmienione w międzyczasie. (Tokeny bez pwf: krotkie okno przejsciowe.)
-            raise HTTPException(400, "This reset link has already been used — request a new one")
+            raise HTTPException(400, "This reset link has already been used. Request a new one")
         tr.password_hash = auth.hash_password(payload.password)
         session.commit()
         # Auto-login po udanym resecie — nowy token jest zwiazany z nowym haslem,
@@ -534,7 +539,7 @@ def verify_email(payload: VerifyTokenIn):
     try:
         tr = session.get(Trader, tid) if tid else None
         if not tr:
-            raise HTTPException(400, "This verification link is invalid or has expired — request a new one")
+            raise HTTPException(400, "This verification link is invalid or has expired. Request a new one")
         _potwierdz_email(session, tr)
         return {"ok": True}
     finally:
@@ -555,7 +560,7 @@ def verify_email_code(payload: VerifyCodeIn, request: Request,
         tr = session.get(Trader, trader.id)
         if not tr.email_verified:
             if not tr.email_verify_code or payload.code.strip() != tr.email_verify_code:
-                raise HTTPException(400, "Wrong code — check the e-mail we sent you")
+                raise HTTPException(400, "Wrong code. Check the e-mail we sent you")
             _potwierdz_email(session, tr)
         return {"ok": True}
     finally:
@@ -596,7 +601,7 @@ def change_unverified_email(payload: ChangeEmailIn, request: Request,
     try:
         tr = session.get(Trader, trader.id)
         if tr.email_verified:
-            raise HTTPException(400, "Your e-mail is already verified — contact support to change it")
+            raise HTTPException(400, "Your e-mail is already verified. Contact support to change it")
         if email == tr.email:
             raise HTTPException(400, "This is already the address on your account")
         if session.query(Trader).filter(Trader.email == email).first():
@@ -634,10 +639,10 @@ def signup(payload: SignupIn, request: Request, response: Response):
                 raise HTTPException(400, "This e-mail is already signed up with Google — "
                                          "use the “Continue with Google” button below")
             if not istnieje.email_verified:
-                raise HTTPException(400, "This e-mail is already registered but not confirmed yet — "
-                                         "log in and we will send you a new confirmation code")
-            raise HTTPException(400, "An account with this e-mail already exists — "
-                                     "log in instead, or use “Forgot password?”")
+                raise HTTPException(400, "This e-mail is already registered but not confirmed yet. "
+                                         "Log in and we will send you a new confirmation code")
+            raise HTTPException(400, "An account with this e-mail already exists. "
+                                     "Log in instead, or use “Forgot password?”")
         # Kod polecajacy tylko istniejacy — literowka nie moze cicho przypisac
         # prowizji do nikogo (ani zostac w bazie jako smiec).
         referred_by = None
@@ -727,12 +732,12 @@ def google_login(payload: GoogleAuthIn, request: Request, response: Response):
     try:
         claims = _google_tokeninfo(payload.credential)
     except ValueError:
-        raise HTTPException(401, "Google sign-in failed — please try again")
+        raise HTTPException(401, "Google sign-in failed. Please try again")
     if (claims.get("aud") != settings.google_client_id
             or claims.get("iss") not in ("accounts.google.com", "https://accounts.google.com")
             or claims.get("email_verified") not in (True, "true")
             or not claims.get("email")):
-        raise HTTPException(401, "Google sign-in failed — please try again")
+        raise HTTPException(401, "Google sign-in failed. Please try again")
     email = str(claims["email"]).strip().lower()
     sub = str(claims.get("sub") or "")[:64]
     session = SessionLocal()
@@ -1037,7 +1042,7 @@ _USDT_NETWORKS = {"TRC20", "BEP20", "POLYGON"}
 def _payout_details_json(method: str, details: dict) -> str:
     """Waliduje dane wypłaty i zwraca je jako JSON do zapisania przy wniosku."""
     if method not in _PAYOUT_FIELDS:
-        raise HTTPException(400, "Unknown payout method — use usdt, bank or wise")
+        raise HTTPException(400, "Unknown payout method. Use usdt, bank or wise")
     clean: dict[str, str] = {}
     for f in _PAYOUT_FIELDS[method]:
         v = str((details or {}).get(f) or "").strip()
@@ -1050,7 +1055,7 @@ def _payout_details_json(method: str, details: dict) -> str:
     if method == "usdt":
         clean["network"] = clean["network"].upper().replace("-", "")
         if clean["network"] not in _USDT_NETWORKS:
-            raise HTTPException(400, "Unsupported USDT network — use TRC-20, BEP-20 or Polygon")
+            raise HTTPException(400, "Unsupported USDT network. Use TRC-20, BEP-20 or Polygon")
         if len(clean["address"]) < 15:
             raise HTTPException(400, "The wallet address looks too short")
     if method == "bank":
@@ -1197,6 +1202,44 @@ def _own_account(session, trader: Trader, account_id: int) -> Account:
     if not acc or acc.trader_id != trader.id:
         raise HTTPException(404, "Account not found")
     return acc
+
+
+@app.post("/api/accounts/{account_id}/scale-up")
+def scale_up_account(account_id: int, trader: Trader = Depends(auth.current_trader)):
+    """Trader wybiera POWIĘKSZENIE konta zamiast wypłaty.
+
+    Wcześniej skalowanie odpalał poller sam z siebie i trader nie miał tu nic do
+    powiedzenia. Teraz to jego decyzja, bo obie ścieżki wykluczają się nawzajem:
+    ten sam zysk albo idzie na wypłatę, albo zamienia się w większy rachunek.
+    """
+    session = SessionLocal()
+    try:
+        acc = _own_account(session, trader, account_id)
+        if acc.status != "funded":
+            raise HTTPException(400, "Scaling is available on funded accounts only")
+        if poller.scale_offer(acc) is None:
+            raise HTTPException(
+                400, f"Scaling unlocks once the account is up {poller.SCALE_TRIGGER_PCT:.0f}%")
+        # Otwarta pozycja przeżyłaby reset salda jako czysty prezent albo strata:
+        # jej PnL rozliczyłby się już wobec NOWEGO rozmiaru.
+        if abs(acc.open_pnl or 0.0) > 0.005:
+            raise HTTPException(400, "Close your open positions before scaling the account up")
+        poprzedni = acc.initial_balance
+        nowy = poller.apply_scale_up(acc)
+        session.commit()
+        try:
+            notify.send("account_scaled", trader.email,
+                        {"name": trader.full_name or trader.email, "login": acc.login,
+                         "previous_size": poprzedni, "new_size": nowy})
+            push.send_to_trader(trader.id, "Account scaled up",
+                                f"{acc.login} is now a ${nowy:,.0f} account.",
+                                url="/portal?view=accounts", tag="account_scaled")
+        except Exception as e:  # pragma: no cover
+            print(f"[scale-up] powiadomienie nie poszlo: {e}")
+        return {"account_id": acc.id, "previous_size": poprzedni, "new_size": nowy,
+                "balance": acc.balance}
+    finally:
+        session.close()
 
 
 @app.get("/api/me/accounts/{account_id}/activity")
@@ -2663,7 +2706,7 @@ def admin_bot_start(account_id: int, payload: BotIn):
         if not acc:
             raise HTTPException(404, "Account not found")
         if acc.status not in ("active", "funded"):
-            raise HTTPException(400, f"Account status is '{acc.status}' — the bot only runs "
+            raise HTTPException(400, f"Account status is '{acc.status}'. The bot only runs "
                                      f"on active and funded accounts")
         tradebot.start(session, acc, style=payload.style, pace=payload.pace,
                        target_pct=payload.target_pct)
@@ -3250,7 +3293,7 @@ def admin_pool_edit(pool_id: int, payload: PoolPatchIn):
             raise HTTPException(404, "No such entry in the pool")
         if payload.account_size is not None:
             if p.claimed:
-                raise HTTPException(400, "This account is assigned — its size cannot be changed")
+                raise HTTPException(400, "This account is assigned, so its size cannot be changed")
             if payload.account_size <= 0:
                 raise HTTPException(400, "Account size must be greater than zero")
             p.account_size = payload.account_size
@@ -3337,9 +3380,9 @@ def account_history(account_id: int):
             add(acc.started_at, "Trading started", "account")
         for o in session.query(Order).filter(Order.account_id == acc.id).all():
             add(o.created_at,
-                f"Order #{o.id} created — {o.product_key}, ${o.amount_usd:,.2f} ({o.status})",
+                f"Order #{o.id} created: {o.product_key}, ${o.amount_usd:,.2f} ({o.status})",
                 "order")
-            add(o.paid_at, f"Order #{o.id} paid — ${o.amount_usd:,.2f} via {o.provider}",
+            add(o.paid_at, f"Order #{o.id} paid: ${o.amount_usd:,.2f} via {o.provider}",
                 "payment")
         for b in session.query(Breach).filter(Breach.account_id == acc.id).all():
             add(b.ts, f"Breach: {b.type} — {b.detail}", "breach")
@@ -3933,7 +3976,7 @@ def _upsell_nudge(min_days: int = 21) -> dict:
             top = max(wieksze, key=lambda p: p.account_size)
             zysk = top.account_size * best_pct / 100
             title = f"You'd have earned ${zysk:,.0f} on a {_size_label(top.account_size)} account"
-            body = (f"Your +{best_pct:.2f}% on {best.login} — see what a larger "
+            body = (f"Your +{best_pct:.2f}% on {best.login}. See what a larger "
                     f"account would have paid.")
             url = "/portal?view=accounts&upsell=1"
             push._center_row(session, tr.id, "upsell_scale", title, body, url)

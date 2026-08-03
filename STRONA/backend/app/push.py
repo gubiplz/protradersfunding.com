@@ -41,19 +41,20 @@ _EVENT_VIEW = {
 # ląduje w systemowej historii powiadomień urządzenia.
 _BODY: dict[str, str] = {
     "welcome": "Your trader portal is ready.",
-    "verify_email": "Confirm your e-mail address — enter the code from the e-mail.",
-    "credentials": "Your MT5 credentials are ready — log in and start trading.",
+    "verify_email": "Confirm your e-mail address. The code is in the e-mail.",
+    "credentials": "Your MT5 credentials are ready. Log in and start trading.",
     "challenge_granted": "A challenge account was added to your portal.",
     "phase_passed": "Objective complete — your next phase account is on the way.",
     "account_funded": "Your funded account is live. Welcome to the payout side.",
+    "account_scaled": "Your account was scaled up. The new size is live.",
     "breached": "A trading rule was breached on your account. See details.",
-    "payout_requested": "We received your payout request — it's under review.",
+    "payout_requested": "We received your payout request. It's under review.",
     "payout_approved": "Your payout was approved.",
     "payout_rejected": "Your payout request needs attention.",
-    "kyc_approved": "Identity verified — you're cleared for payouts.",
+    "kyc_approved": "Identity verified. You're cleared for payouts.",
     "kyc_rejected": "Your verification needs another look.",
     "ticket_reply": "Support replied to your ticket.",
-    "credits_granted": "Store credit added — it applies automatically at your next checkout.",
+    "credits_granted": "Store credit added. It applies automatically at your next checkout.",
 }
 
 

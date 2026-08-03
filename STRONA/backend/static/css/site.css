@@ -142,20 +142,19 @@ h1,h2,h3,.display{font-family:var(--display);letter-spacing:-.02em}
 .cfg-row span{color:var(--muted)}
 .cfg-row b{font-family:var(--mono);font-weight:600}
 .cfg-row em{font-style:normal;font-size:11px;color:var(--green);font-family:var(--body);font-weight:500}
-/* promo slot in the hero configurator (replaced the illustrative payout) */
-.cfg-promo{position:relative;overflow:hidden;border-radius:14px;padding:16px 18px;text-align:center;
-  background:linear-gradient(120deg,#eef0ff,#f5f0ff 55%,#eef7ff);border:1px solid #dcd8ff}
-.cfg-promo::after{content:"";position:absolute;inset:-40% -10% auto auto;width:180px;height:180px;
-  background:radial-gradient(circle,rgba(124,58,237,.14),transparent 70%);pointer-events:none}
-.cfg-promo-badge{display:inline-block;font-family:var(--display);font-size:10.5px;font-weight:700;
-  letter-spacing:.1em;text-transform:uppercase;color:#fff;background:var(--grad);
-  border-radius:999px;padding:5px 11px}
-.cfg-promo-val{font-size:clamp(17px,2vw,21px);font-weight:700;font-family:var(--display);
-  letter-spacing:-.02em;margin:9px 0 3px;color:var(--txt)}
-.cfg-promo-val b{font-family:var(--mono);font-weight:800;color:var(--acc2)}
-.cfg-promo-sub{font-size:12px;color:var(--muted)}
-.cfg-promo.is-max{background:linear-gradient(120deg,#f4f6fb,#eef0f7)}
-.cfg-promo.is-max .cfg-promo-badge{background:var(--line2);color:var(--muted)}
+/* Kod promocyjny w karcie hero. Wczesniej: trojstopniowy gradient, swiecaca
+   poswiata ::after i napis 21px w foncie ozdobnym — najglosniejszy element
+   karty, w ktorej wszystko inne ma 12-14px. Teraz plaski panel w jezyku
+   sasiednich wierszy, z polem na kod na miejscu. */
+.cfg-promo{border-radius:12px;padding:13px 14px;background:var(--bg3);border:1px solid var(--line)}
+.cfg-promo-val{font-size:13px;color:var(--muted);margin-bottom:9px}
+.cfg-promo-val b{color:var(--txt);font-weight:600}
+.cfg-promo.applied{background:color-mix(in srgb,var(--green) 6%,var(--bg3));
+  border-color:color-mix(in srgb,var(--green) 26%,transparent)}
+.cfg-promo.applied .code-msg{margin-top:0;background:none;border:0;padding:0}
+/* Najwiekszy rozmiar: kod dziala, ale nie ma nad czym go uzyc — bez zieleni. */
+.cfg-promo.is-max{background:var(--bg3);border-color:var(--line)}
+.cfg-promo.is-max .code-msg{color:var(--muted)}
 .cfg-fine{font-size:10.5px;color:var(--dim);text-align:center}
 
 /* dashboard mockup — light product card */
@@ -268,23 +267,31 @@ table.obj tr:hover td{background:#fafbff}
 .pcfg-addbtn{flex:0 0 auto;padding:8px 14px;border-radius:9px;font-size:13px;font-weight:700;
   color:var(--acc);background:var(--acc-bg);border:1px solid #dfe3ff;transition:.15s}
 .pcfg-addbtn.on{background:var(--green);border-color:var(--green);color:#fff}
-.pcfg-coupon{display:flex;gap:8px}
-.pcfg-inp{flex:1;border:1px solid var(--line);border-radius:11px;padding:11px 13px;font-size:14px;
-  background:var(--bg);color:var(--txt)}
-.pcfg-inp.bad{border-color:var(--red);color:var(--red)}
-.pcfg-inp.ok{border-color:var(--green);color:var(--green);font-weight:600}
-/* Potwierdzenie kodu tuz pod polem. Kod upgrade NIE zmienia ceny, wiec bez tego
-   komunikatu strona wygladala, jakby klikniecie "Apply" nic nie zrobilo. */
-.pcfg-codemsg{margin-top:9px;font-size:12.5px;line-height:1.5;border-radius:10px;
-  padding:9px 11px;display:flex;gap:8px;align-items:flex-start}
-.pcfg-codemsg.ok{background:color-mix(in srgb,var(--green) 9%,transparent);
-  color:var(--green);border:1px solid color-mix(in srgb,var(--green) 38%,transparent)}
-.pcfg-codemsg.bad{background:color-mix(in srgb,var(--red) 9%,transparent);
-  color:var(--red);border:1px solid color-mix(in srgb,var(--red) 38%,transparent)}
-.pcfg-codemsg b{font-weight:700}
-.pcfg-apply{padding:0 18px;border-radius:11px;border:1px solid var(--line);font-weight:600;
+/* Pole na kod: JEDEN komponent dla kreatora w hero i dla cennika, bo oba maja
+   wygladac tak samo i pokazywac to samo potwierdzenie. */
+.code-row{display:flex;gap:8px}
+/* display z klasy przebija regule przegladarki dla [hidden], wiec bez tego
+   pole zostawalo na ekranie takze po zastosowaniu kodu. */
+.code-row[hidden],.code-msg[hidden]{display:none}
+.code-inp{flex:1;min-width:0;border:1px solid var(--line);border-radius:11px;padding:11px 13px;
+  font-size:14px;background:var(--bg);color:var(--txt)}
+.code-inp.bad{border-color:var(--red);color:var(--red)}
+.code-inp.ok{border-color:var(--green);color:var(--green);font-weight:600}
+.code-btn{padding:0 18px;border-radius:11px;border:1px solid var(--line);font-weight:600;
   font-size:14px;background:var(--panel);transition:.15s}
-.pcfg-apply:hover{border-color:var(--acc);color:var(--acc)}
+.code-btn:hover{border-color:var(--acc);color:var(--acc)}
+/* Potwierdzenie tuz pod polem. Kod upgrade NIE zmienia ceny, wiec bez tego
+   komunikatu strona wygladala, jakby klikniecie "Apply" nic nie zrobilo. */
+.code-msg{margin-top:9px;font-size:12.5px;line-height:1.5;border-radius:10px;
+  padding:9px 11px;display:flex;gap:8px;align-items:flex-start;text-align:left}
+.code-msg.ok{background:color-mix(in srgb,var(--green) 9%,transparent);
+  color:var(--green);border:1px solid color-mix(in srgb,var(--green) 38%,transparent)}
+.code-msg.bad{background:color-mix(in srgb,var(--red) 9%,transparent);
+  color:var(--red);border:1px solid color-mix(in srgb,var(--red) 38%,transparent)}
+.code-msg b{font-weight:700}
+.code-change{margin-top:8px;font-size:11.5px;color:var(--muted);text-decoration:underline;
+  text-underline-offset:3px}
+.code-change:hover{color:var(--txt)}
 .pcfg-feerow{margin:18px 0 14px;padding-top:14px;border-top:1px solid var(--line)}
 .pcfg-feelabel{font-size:12px;color:var(--muted)}
 .pcfg-fee{font-family:var(--mono);font-size:38px;font-weight:700;color:var(--acc);line-height:1.15}
@@ -303,7 +310,24 @@ table.obj tr:hover td{background:#fafbff}
 .pricing-note span{display:flex;align-items:center;gap:7px}
 
 /* scaling ladder */
-.ladder{display:flex;align-items:stretch;gap:14px;height:250px;margin-top:10px}
+/* Rozwidlenie po +10%: wyplata albo wieksze konto. Dwie rownorzedne karty
+   zamiast dwoch pelnowymiarowych sekcji jedna pod druga — ta sama tresc
+   zajmuje mniej wiecej polowe dawnej wysokosci. */
+.fork{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+.fork-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:22px 24px;box-shadow:var(--shadow)}
+.fork-h{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.fork-h h3{font-size:19px;margin-right:auto}
+.fork-n{width:26px;height:26px;flex:none;border-radius:8px;background:var(--acc-bg);
+  border:1px solid #dfe3ff;color:var(--acc);font-family:var(--mono);font-weight:700;font-size:13px;
+  display:flex;align-items:center;justify-content:center}
+.fork-tag{font-family:var(--mono);font-size:20px;font-weight:800;letter-spacing:-.02em}
+.fork-card>p{font-size:14px;color:var(--muted)}
+.fork-steps{list-style:none;margin-top:14px;display:flex;flex-direction:column}
+.fork-steps li{font-size:13.5px;color:var(--muted);padding:10px 0;border-bottom:1px solid var(--line)}
+.fork-steps li:last-child{border-bottom:0;padding-bottom:0}
+.fork-steps b{color:var(--txt)}
+.ladder{display:flex;align-items:stretch;gap:12px;height:160px;margin-top:16px}
 .rung{flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:10px;text-align:center}
 .rung-bar{border-radius:12px 12px 4px 4px;background:linear-gradient(180deg,rgba(99,102,241,.75),rgba(99,102,241,.12));
   border:1px solid rgba(99,102,241,.25);min-height:34px;transition:height 1s cubic-bezier(.22,1,.36,1)}
@@ -313,15 +337,6 @@ table.obj tr:hover td{background:#fafbff}
 
 /* payouts */
 .split-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:stretch}
-.payout-steps{display:flex;flex-direction:column;gap:0}
-.pstep{display:flex;gap:18px;padding:18px 0;border-bottom:1px solid var(--line)}
-.pstep:last-child{border-bottom:0}
-.pstep-n{width:34px;height:34px;flex:0 0 34px;border-radius:10px;background:var(--acc-bg);
-  border:1px solid #dfe3ff;color:var(--acc);font-family:var(--mono);font-weight:700;
-  display:flex;align-items:center;justify-content:center;font-size:14px}
-.pstep h4{font-size:15.5px;margin-bottom:3px}
-.pstep p{font-size:13.5px;color:var(--muted)}
-.big-split{font-family:var(--mono);font-size:clamp(54px,6vw,84px);font-weight:800;line-height:1}
 
 /* why us grid */
 .grid6{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
@@ -332,15 +347,6 @@ table.obj tr:hover td{background:#fafbff}
 .why p{font-size:14px;color:var(--muted)}
 
 /* leaderboard */
-.board{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--panel);box-shadow:var(--shadow)}
-table.lb{width:100%;border-collapse:collapse;font-size:14.5px}
-table.lb th{font-size:11.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);text-align:left;
-  padding:14px 20px;background:var(--panel2)}
-table.lb td{padding:14px 20px;border-top:1px solid var(--line)}
-table.lb .rank{font-family:var(--mono);color:var(--dim);width:46px}
-table.lb .pl{font-family:var(--mono);font-weight:600;text-align:right}
-table.lb .up{color:var(--green)} table.lb .down{color:var(--red)}
-.lb-note{font-size:12px;color:var(--dim);padding:12px 20px;border-top:1px solid var(--line)}
 
 /* certificate */
 .cert-wrap{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:center}
@@ -464,7 +470,7 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
   .hero-sub{max-width:none}
   .grid6{grid-template-columns:repeat(2,1fr)}
   .cert-wrap{grid-template-columns:1fr;gap:28px}
-  .split-grid{grid-template-columns:1fr}
+  .split-grid,.fork{grid-template-columns:1fr}
   .pcfg-grid{grid-template-columns:1fr}
 }
 @media(max-width:520px){
@@ -500,8 +506,6 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
 
 /* ---------------- mobile (dopisane na koncu — wygrywa kolejnoscia w pliku;
    szersze bloki przed wezszymi, hover:none na samym koncu) ---------------- */
-.lb-scroll{overflow-x:auto;overscroll-behavior-x:contain}
-table.lb{min-width:560px}
 
 @media(max-width:960px){
   /* burger przejmuje nawigacje juz od 960 px — miedzy 821 a 960 linki sie nie miescily */
@@ -521,9 +525,9 @@ table.lb{min-width:560px}
   .burger.open span:nth-child(3){transform:translateY(-7px) rotate(-45deg)}
   /* konfigurator: itemy gridow/flexow musza umiec sie kurczyc — bez min-width:0
      min-content .pcfg (333px) rozpychal layout viewport na waskich telefonach */
-  .pcfg,.prules,.ptog,.psize,.pcfg-inp,.pcfg-addon div{min-width:0}
+  .pcfg,.prules,.ptog,.psize,.code-inp,.pcfg-addon div{min-width:0}
   /* affordance przewijania tabel — cien na krawedzi znika na koncu zakresu */
-  .obj-scroll,.lb-scroll{background:
+  .obj-scroll{background:
     linear-gradient(90deg,#fff 30%,rgba(255,255,255,0)) left/44px 100% no-repeat local,
     linear-gradient(270deg,#fff 30%,rgba(255,255,255,0)) right/44px 100% no-repeat local,
     radial-gradient(farthest-side at 0 50%,rgba(15,23,42,.16),transparent) left/16px 100% no-repeat scroll,
@@ -531,7 +535,7 @@ table.lb{min-width:560px}
     #fff}
 }
 @media(max-width:640px){
-  .verify-box input,.pcfg-inp{font-size:16px}   /* iOS zoomuje przy fokusie <16px */
+  .verify-box input,.code-inp{font-size:16px}   /* iOS zoomuje przy fokusie <16px */
   .foot-col a{padding:10px 0}
   .pcfg-addbtn{min-height:44px}
   /* pas statystyk: 7-cyfrowe kwoty musza zmiescic sie w 2 kolumnach */
@@ -643,14 +647,6 @@ html.promo-applied .promo-tag{background:rgba(255,255,255,.92);color:#4f46e5}
   50%{transform:translateX(4px)}75%{transform:translateX(-2px)}}
 .promo-form.promo-bad{animation:promoShake .3s ease}
 .promo-form.promo-bad .promo-inp{border-color:#fecaca;background:rgba(220,38,38,.35)}
-/* Teaser link inside the hero promo block ("Apply your code") */
-.cfg-promo-link{appearance:none;border:0;background:none;padding:0;color:inherit;
-  font:inherit;font-weight:700;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
-/* Redeemed state: the hero block flips to green — the promise became a fact. */
-.cfg-promo.applied{background:#f0fdf4;border-color:#bbf7d0}
-.cfg-promo.applied .cfg-promo-badge{background:#16a34a;color:#fff}
-.cfg-promo.applied .cfg-promo-val{color:#15803d}
-.cfg-promo.applied .cfg-promo-sub b{color:#15803d}
 @media(max-width:640px){
   /* The input needs the room the copy occupies — while typing, the promise
      text yields (it comes right back after Apply/blur). */

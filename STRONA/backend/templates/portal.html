@@ -61,7 +61,7 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
       <h3 id="auth-title">Welcome back</h3>
       <div class="sub" id="auth-sub">Log in to your trader dashboard.</div>
       <div class="note hidden" id="auth-buynote" style="text-align:left;margin:0 0 14px">
-        Your selected challenge is saved — after this step you go <b>straight to checkout</b>.
+        Your selected challenge is saved, and after this step you go <b>straight to checkout</b>.
         New here? <b>Create your free account</b>. Already registered? Switch to <b>Log in</b>.
       </div>
       <div class="auth-tabs">
@@ -480,7 +480,7 @@ function authTab(m){AUTHMODE=m;
   $('auth-title').textContent=login?'Welcome back':signup?'Create your account':forgot?'Reset your password':'Choose a new password';
   $('auth-sub').textContent=login?'Log in to your trader dashboard.'
     :signup?'One account for challenges, payouts and the affiliate program.'
-    :forgot?'Enter your account e-mail — we will send you a reset link.'
+    :forgot?'Enter your account e-mail. We will send you a reset link.'
     :'Set a new password for your account.';
 }
 async function doAuth(){
@@ -491,7 +491,7 @@ async function doAuth(){
   const unlock=()=>{btn.disabled=false;btn.textContent=label};
   if(AUTHMODE==='forgot'){
     try{const r=await api('/api/auth/forgot',{method:'POST',body:JSON.stringify({email:$('a-email').value})});
-      toast(r.message||'Reset link sent — check your inbox.','ok',8000);authTab('login');
+      toast(r.message||'Reset link sent. Check your inbox.','ok',8000);authTab('login');
     }catch(e){toast('Error: '+e.message,'err')}
     unlock();return;
   }
@@ -503,8 +503,8 @@ async function doAuth(){
       $('a-pass').value='';$('a-pass2').value='';
       /* The reset response signs the user straight in — no re-typing. */
       if(r.token){TOKEN=r.token;localStorage.setItem('pf_token',TOKEN);
-        toast('Password changed — welcome back!','ok',7000);unlock();await boot();return}
-      toast('Password changed — log in with your new password.','ok',8000);authTab('login');
+        toast('Password changed. Welcome back!','ok',7000);unlock();await boot();return}
+      toast('Password changed. Log in with your new password.','ok',8000);authTab('login');
     }catch(e){toast('Error: '+e.message,'err')}
     unlock();return;
   }
@@ -569,7 +569,7 @@ function openInBrowser(){
 }
 async function copyPortalLink(btn){
   const url=location.href;
-  try{await navigator.clipboard.writeText(url);toast('Link copied — paste it in Safari or Chrome.','ok',7000)}
+  try{await navigator.clipboard.writeText(url);toast('Link copied. Paste it in Safari or Chrome.','ok',7000)}
   catch(e){
     /* Bez uprawnien do schowka zostaje stara droga: zaznaczony tekst do recznego
        skopiowania. Lepsze to niz komunikat „nie udalo sie". */
@@ -577,7 +577,7 @@ async function copyPortalLink(btn){
     pole.value=url;pole.setAttribute('readonly','');
     pole.style.cssText='position:fixed;left:12px;right:12px;width:auto;z-index:95;font-size:16px;padding:10px';
     document.body.appendChild(pole);pole.select();pole.setSelectionRange(0,url.length);
-    try{document.execCommand('copy');toast('Link copied — paste it in Safari or Chrome.','ok',7000)}
+    try{document.execCommand('copy');toast('Link copied. Paste it in Safari or Chrome.','ok',7000)}
     catch(e2){toast('Copy the address from the bar above and open it in Safari.','err',8000)}
     setTimeout(()=>pole.remove(),400);
   }
@@ -623,7 +623,7 @@ async function verifyEmailCode(){
 async function resendVerify(btn){
   if(btn&&btn.disabled)return;
   try{await api('/api/me/verify-email/resend',{method:'POST'});
-    toast('New code sent — check your inbox.','ok',8000);
+    toast('New code sent. Check your inbox.','ok',8000);
     if(btn){/* cooldown — serwer i tak limituje, ale nie kuśmy klikaniem */
       btn.disabled=true;let s=30;const t0=btn.textContent;
       const iv=setInterval(()=>{s--;btn.textContent=s>0?`Resend code (${s}s)`:t0;
@@ -642,7 +642,7 @@ async function changeVerifyEmail(){
     const r=await api('/api/me/verify-email/change-address',{method:'POST',body:JSON.stringify({email:em})});
     ME.email=r.email;$('vg-mail').textContent=r.email;
     $('vg-new-mail').value='';vgToggleChange(false);
-    toast('Address updated — a new code is on its way to '+r.email,'ok',8000);
+    toast('Address updated. A new code is on its way to '+r.email,'ok',8000);
   }catch(e){toast('Error: '+e.message,'err')}
 }
 function logout(){
@@ -671,12 +671,12 @@ async function loadAuthStats(){
 /* ---------- return from payment ---------- */
 async function handlePaymentReturn(){
   const q=new URLSearchParams(location.search);
-  if(q.get('paid')){toast('✅ Payment received. Your MT5 account is being created — credentials will appear under Challenges and in your inbox.','ok',9000);go('accounts');return true}
-  if(q.get('canceled')){toast('Payment canceled — nothing was charged.','err');return false}
+  if(q.get('paid')){toast('✅ Payment received. Your MT5 account is being created. Credentials will appear under Challenges and in your inbox.','ok',9000);go('accounts');return true}
+  if(q.get('canceled')){toast('Payment canceled. Nothing was charged.','err');return false}
   const mo=q.get('mock_order');
   if(mo){try{
     const prov=await api(`/api/checkout/${mo}/mock-complete`,{method:'POST'});
-    toast(prov.provisioning?'✅ Payment received. Your MT5 account is being created (up to a minute).':'✅ Account created — credentials under Challenges.','ok',9000);
+    toast(prov.provisioning?'✅ Payment received. Your MT5 account is being created (up to a minute).':'✅ Account created. Credentials under Challenges.','ok',9000);
     go('accounts');return true
   }catch(e){toast('Error: '+e.message,'err')}}
   return false;
@@ -737,16 +737,16 @@ async function boot(){
 const TITLES={
   accounts:['Challenges','Live overview of your challenge accounts'],
   store:['New Challenge','One-time fee · refunded with your first payout'],
-  board:['Leaderboard','Top traders across the platform — all time, live data'],
+  board:['Leaderboard','Top traders across the platform, all time, live data'],
   achievements:['Achievements','Milestones earned from your real activity'],
   loyalty:['Loyalty','Spend-based tiers with unlockable discounts'],
   journal:['Journal','Your private trading notes'],
   analytics:['Analytics','Daily P&L computed from your account history'],
   rewards:['Rewards','Programs built into the platform'],
   payouts:['Payouts','Performance rewards across all your accounts'],
-  certificates:['Certificates','Your verifiable documents — evaluation stages and payouts'],
+  certificates:['Certificates','Your verifiable documents: evaluation stages and payouts'],
   orders:['Invoice','Payment history, delivered accounts and invoices'],
-  kyc:['KYC','Identity verification — required once, before your first payout'],
+  kyc:['KYC','Identity verification, required once before your first payout'],
   support:['Support','Get help from our team'],
   settings:['Settings','Manage your account settings and preferences'],
 };
@@ -818,7 +818,7 @@ async function initEngagement(){
         ME.checkin_streak=r.streak; ME.checkin_last=utcToday(); ME.streak_freezes=r.freezes;
         $('streakN').textContent=r.streak;
         RFX.pop(chip);
-        if(r.freeze_used)toast('Streak freeze used — your '+r.streak+'-day streak survived');
+        if(r.freeze_used)toast('Streak freeze used. Your '+r.streak+'-day streak survived');
         if(r.reward&&r.reward.type==='points'){
           ME.bonus_points=(ME.bonus_points||0)+r.reward.amount;
           RFX.burstFrom(chip,{count:30});
@@ -872,13 +872,13 @@ function checkMilestone(id,a,m){
   }else if(days<min){
     RFX.burstFrom(document.querySelector('.wide-card .tile-ic.orange'),{count:40});
     RFX.pop(document.querySelector('.wide-card .val'));
-    toast(`Trading day ${days} of ${min} logged — consistency wins`);
+    toast(`Trading day ${days} of ${min} logged. Consistency wins`);
   }
 }
 
 /* ---------- daily reveal ---------- */
 const TIPS=[
-  'Risk a fixed fraction — 0.5-1% per trade. Survival first, profits second.',
+  'Risk a fixed fraction, 0.5-1% per trade. Survival first, profits second.',
   'No setup, no trade. Boredom is not a signal.',
   'Journal every trade. The pattern you refuse to see is the one costing you money.',
   'Two losses in a row? Step away for an hour. The market will still be there.',
@@ -888,7 +888,7 @@ const TIPS=[
   'Trade the session you can actually watch. London open is useless if you are asleep.',
   'One good trade a day compounds faster than ten forced ones.',
   'Revenge trading turns one loss into three. Close the platform, not the gap.',
-  'Define the invalidation before entry — if you cannot, you have no trade.',
+  'Define the invalidation before entry. If you cannot, you have no trade.',
   'Move stops to protect capital, never to give a loser more room.',
   'Drawdown is tuition. Review the losers weekly and stop repeating the lesson.',
   'Pass the challenge at marathon pace: small consistent days beat one hero day.',
@@ -897,16 +897,16 @@ const TIPS=[
   'If the lot size makes your heart race, it is too big — halve it.',
   'Win rate means nothing without average R. Track both.',
   'Cut losers at plan, let winners hit target. Discipline is symmetric.',
-  'Near your drawdown limit, A+ setups only — protect the account first.',
+  'Near your drawdown limit, A+ setups only. Protect the account first.',
   'Three green days do not make you invincible. Same size, same rules.',
-  'Spreads widen around news — a perfect entry with a 5-pip spread is not perfect.',
+  'Spreads widen around news. A perfect entry with a 5-pip spread is not perfect.',
   'Weekend gaps ignore stops. Flatten swing risk before Friday close.',
   'Consistency passes challenges. Intensity blows them up.',
 ];
 function revealBack(){
   return `<img class="reveal-logo" src="/static/img/logo.png" alt="">
     <div class="reveal-tag">Daily reveal</div>
-    <div class="reveal-t">Trading tips, bonus points or a rare coupon — one flip per day</div>
+    <div class="reveal-t">Trading tips, bonus points or a rare coupon. One flip per day</div>
     <div class="reveal-hint">Tap to flip</div>`;
 }
 function revealFace(p){
@@ -924,7 +924,7 @@ function revealFace(p){
   return `<div class="reveal-tag">Rare drop · -${p.pct}% next challenge</div>
     <div class="reveal-code"><code>${esc(p.code)}</code>
       <button class="copy" onclick="event.stopPropagation();copyVal(this,'${esc(p.code)}')" title="Copy">${ICO.copy}</button></div>
-    <div class="reveal-t">valid 48h — personal, works only on your account</div>`;
+    <div class="reveal-t">valid 48h, personal, works only on your account</div>`;
 }
 function paintReveal(p){
   const c=$('revealCard'); if(!c)return;
@@ -988,7 +988,7 @@ function pushBannerHtml(){
     if(!pushSupported()||Notification.permission!=='default')return '';
     return `<div class="gradient-banner" id="push-banner">
       <span class="gb-tag">🔔 Notifications</span><span class="gb-sep"></span>
-      <span class="gb-txt">Know the moment you <b>pass a phase</b> or a <b>payout lands</b> —
+      <span class="gb-txt">Know the moment you <b>pass a phase</b> or a <b>payout lands</b>,
         max one scheduled message a day.</span>
       <button class="gb-btn" onclick="enablePush(this)">Enable ›</button>
       <button class="gb-x" onclick="dismissPush()" aria-label="Not now">✕</button></div>`;
@@ -1037,7 +1037,7 @@ function toggleNotif(){
       return `<a class="notif-row${n.read?'':' unread'}" href="${esc(n.url||'/portal')}" onclick="return notifGo(this)">
         <div class="t">${esc(n.title)}</div>${n.body?`<div class="b">${esc(n.body)}</div>`:''}
         <div class="d">${kiedy}</div></a>`}).join('')
-      :'<div class="notif-empty">Nothing yet — pass a phase and it lands here.</div>');
+      :'<div class="notif-empty">Nothing yet. Pass a phase and it lands here.</div>');
   p.classList.remove('hidden');
   if(r.unread)readNotif(false);
 }
@@ -1187,7 +1187,7 @@ const VIEWS={
         <div class="uc-earn">+$${fmt(p.account_size*pct/100)}</div>
         <button class="btn-o sm" onclick="openBuy('${p.key}')">Upgrade →</button>
       </div>`).join('')}</div>
-      <p class="uc-fine">Illustrative math based on your current return — not a promise. Rewards depend on your trading.</p>
+      <p class="uc-fine">Illustrative math based on your current return, not a promise. Rewards depend on your trading.</p>
     </div>`;
     /* Same-level banner rides the Upgrade promo: pay your current size, the
        account is created one size up. Only while the promo is live. */
@@ -1214,7 +1214,7 @@ const VIEWS={
     const openPnl=+(a.open_pnl||0);
     const dayLeft=(m.daily_floor!=null&&a.equity!=null)?Math.max(0,a.equity-m.daily_floor):null;
     const bars=dead
-      ?`<div class="chal-breach">Challenge ended${a.breach_reason?' — '+esc(a.breach_reason):''}</div>`
+      ?`<div class="chal-breach">Challenge ended${a.breach_reason?': '+esc(a.breach_reason):''}</div>`
       /* Etykiety krotsze niz w widoku szczegolow: w wierszu listy kolumna paskow
          dzieli miejsce z kwotami, a przy koncie na $2,000,000 "Progress to target"
          lamalo sie na dwie linie. */
@@ -1278,16 +1278,16 @@ const VIEWS={
   const items=ps.filter(g.match).sort((a,b)=>a.account_size-b.account_size);
   $('view').innerHTML=`
     <div class="shop-tabs">${groups.map(x=>`<button class="shop-tab${x.id===g.id?' on':''}" onclick="window._shopTab='${x.id}';VIEWS.store()">${x.name}</button>`).join('')}</div>
-    ${ME.credits_usd>0?`<div class="note" style="margin-bottom:14px"><b>Store credit: $${fmt(ME.credits_usd)}</b> — applied to your total automatically at checkout.</div>`:''}
+    ${ME.credits_usd>0?`<div class="note" style="margin-bottom:14px"><b>Store credit: $${fmt(ME.credits_usd)}</b>, applied to your total automatically at checkout.</div>`:''}
     <div class="plan-grid">`+items.map(p=>`
     <div class="plan-card" data-plan="${esc(p.key)}">
       <div class="plan-size">$${fmt0(p.account_size)}</div>
       ${p.promo_upgrade_size&&pfPromo()?`<div class="plan-badge">→ trade $${fmt0(p.promo_upgrade_size)} with your promo</div>`:''}
-      <div class="plan-kind">${p.steps===0?'Instant Funding — no evaluation':'2-Step Evaluation'}</div>
+      <div class="plan-kind">${p.steps===0?'Instant Funding, no evaluation':'2-Step Evaluation'}</div>
       <div class="plan-price">$${fmt0(p.price_usd)} <small>one-time</small></div>
       <div class="plan-refund">✓ Refunded with your first payout</div>
       <ul class="plan-feats">
-        <li>${p.steps===0?'Funded from day one — <b>no profit target</b>'
+        <li>${p.steps===0?'Funded from day one, <b>no profit target</b>'
           :`Profit target <b>${p.profit_target_p1}%${p.steps>1?' / '+p.profit_target_p2+'%':''}</b>`}</li>
         <li>Max daily loss <b>${p.max_daily_loss_pct}%</b></li>
         <li>Max overall loss <b>${p.max_overall_loss_pct}% ${p.drawdown_type}</b></li>
@@ -1388,7 +1388,7 @@ const VIEWS={
           ${(ME.bonus_points||0)>0?`<p class="muted" style="font-size:11.5px;margin-top:2px">includes <b class="mono" style="color:var(--gold)">+${fmt0(ME.bonus_points)}</b> engagement bonus from check-ins &amp; reveals</p>`:''}
         </div>
         <div style="min-width:220px;flex:1">
-          <div class="prog-top"><span>${next?(nearMiss?`Only ${fmt0(next.min-points)} points to ${next.name} — unlock ${next.ben}`:`Progress to ${next.name}`):'Top tier reached'}</span><b>${next?fmt0(points)+' / '+fmt0(next.min):'MAX'}</b></div>
+          <div class="prog-top"><span>${next?(nearMiss?`Only ${fmt0(next.min-points)} points to ${next.name}, unlocking ${next.ben}`:`Progress to ${next.name}`):'Top tier reached'}</span><b>${next?fmt0(points)+' / '+fmt0(next.min):'MAX'}</b></div>
           <div class="phase-bar${nearMiss?' near-miss':''}"><i style="width:${prog}%"></i></div>
         </div>
       </div>
@@ -1481,7 +1481,7 @@ const VIEWS={
     </div>`:''}
     <div class="sec-card"><h3>Daily P&amp;L</h3>
       ${days.length?'<div class="chart-box"><canvas id="an-chart"></canvas></div>'
-        :'<p class="muted" style="font-size:13px">No daily data yet — the chart appears after the first risk-engine readings.</p>'}
+        :'<p class="muted" style="font-size:13px">No daily data yet. The chart appears after the first risk-engine readings.</p>'}
     </div>`;
   if(chart){chart.destroy();chart=null}
   const th=chartTheme();
@@ -1508,7 +1508,7 @@ const VIEWS={
         <button class="btn-o sm" onclick="copyLink('${location.origin}${it.url}')">Copy link</button>
       </div></div>`;
     if(it.available) return `<div class="cert-row">
-      <div><b>${esc(it.label)}</b><span>Achieved — ready to issue</span></div>
+      <div><b>${esc(it.label)}</b><span>Achieved, ready to issue</span></div>
       <div class="acts"><button class="btn-p sm" onclick="issueCert(${accId},'${it.kind}')">Get certificate</button></div>
     </div>`;
     return `<div class="cert-row lock">
@@ -1536,7 +1536,7 @@ const VIEWS={
                <button class="btn-o sm" onclick="copyLink('${location.origin}${p.url}')">Copy link</button>`
             : `<button class="btn-p sm" onclick="issuePayoutCert(${p.id})">Get certificate</button>`}
           </div></div>`).join('')}</div>`
-        :'<p class="muted" style="font-size:13px">No payouts yet — request one from a funded account.</p>'}
+        :'<p class="muted" style="font-size:13px">No payouts yet. Request one from a funded account.</p>'}
     </div>
 
     <p class="muted" style="font-size:12px">Every document carries a unique ID and a QR code.
@@ -1584,7 +1584,7 @@ const VIEWS={
         ${c.cond.map(x=>`<div style="font-size:12px;color:var(--muted);padding:3px 0">· ${x}</div>`).join('')}
       </div>
     </div>`).join('')+`</div>
-  <p class="muted" style="font-size:12px;margin-top:14px">Every program above is a real platform mechanism — nothing here requires manual approval games.</p>`;
+  <p class="muted" style="font-size:12px;margin-top:14px">Every program above is a real platform mechanism. Nothing here requires manual approval games.</p>`;
   initRevealCard();
  },
 
@@ -1600,6 +1600,19 @@ const VIEWS={
       <div class="stat-tile"><div class="tile-ic purple">${ICO.dollar}</div>
         <div><div class="lbl">Available to request</div><div class="val">$${fmt(data.summary.available)}</div><div class="sub">your split of current profits</div></div></div>
     </div>
+    ${funded.filter(a=>a.scale_up_to).map(a=>{
+      const av=Math.max(0,(a.balance-a.initial_balance)*(a.profit_split_pct||80)/100);
+      return `<div class="scale-offer">
+        <div class="so-txt">
+          <b>${esc(a.login)} is up ${a.scale_trigger_pct}%. Now you choose.</b>
+          <span>Take the profit as a payout, or turn it into a bigger account. One or the other:
+            scaling puts the profit back in as capital, so there is nothing left to pay out.</span>
+        </div>
+        <div class="so-act">
+          <button class="btn-o sm" onclick="openPayoutModal(${a.id},${av.toFixed(2)})">Take $${fmt(av)} payout</button>
+          <button class="btn-p sm" onclick="openScaleModal(${a.id},${a.initial_balance},${a.scale_up_to})">Scale up to $${fmt0(a.scale_up_to)}</button>
+        </div>
+      </div>`}).join('')}
     ${funded.length?`<div class="panel" style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <span class="muted" style="font-size:13px;margin-right:6px">Request a payout:</span>
       ${funded.map(a=>{const av=Math.max(0,(a.balance-a.initial_balance)*(a.profit_split_pct||80)/100);
@@ -1642,7 +1655,7 @@ const VIEWS={
   const credits=(cr&&(cr.balance_usd>0||(cr.ledger||[]).length))?`
     <div class="sec-card card-md" style="margin-top:18px">
       <h3>Store credits</h3>
-      <p class="muted" style="font-size:12.5px;margin:4px 0 12px">1 credit = $1 — applied to your
+      <p class="muted" style="font-size:12.5px;margin:4px 0 12px">1 credit = $1, applied to your
         next challenge at checkout. Current balance: <b class="mono">$${fmt(cr.balance_usd)}</b></p>
       <div class="tbl-wrap"><table class="tbl sortable" data-tkey="portal.credits">
         <thead><tr><th>Date</th><th>Amount</th><th>Note</th><th>Order</th></tr></thead>
@@ -1672,13 +1685,13 @@ const VIEWS={
   if(s==='approved'){
     $('view').innerHTML=`<div class="panel" style="max-width:560px;display:flex;gap:14px;align-items:center">
       <div class="tile-ic green">${ICO.shield}</div>
-      <div><h3>Identity verified</h3><p class="muted" style="font-size:13.5px">Your KYC is approved — you can request payouts on funded accounts.</p></div></div>`;
+      <div><h3>Identity verified</h3><p class="muted" style="font-size:13.5px">Your KYC is approved. You can request payouts on funded accounts.</p></div></div>`;
     return;
   }
   if(s==='pending'){
     $('view').innerHTML=`<div class="panel" style="max-width:560px;display:flex;gap:14px;align-items:center">
       <div class="tile-ic orange">${ICO.shield}</div>
-      <div><h3>Documents under review</h3><p class="muted" style="font-size:13.5px">Our team is reviewing your submission — you'll get an e-mail once it's approved.</p></div></div>`;
+      <div><h3>Documents under review</h3><p class="muted" style="font-size:13.5px">Our team is reviewing your submission. You'll get an e-mail once it's approved.</p></div></div>`;
     return;
   }
   $('view').innerHTML=`
@@ -1884,7 +1897,7 @@ async function submitTicket(){
   try{
     await api('/api/me/tickets',{method:'POST',body:JSON.stringify({
       subject:$('t-subject').value,message:$('t-msg').value})});
-    window._ticketView=null;toast('Ticket created — we usually reply within one business day.','ok');go('support');
+    window._ticketView=null;toast('Ticket created. We usually reply within one business day.','ok');go('support');
   }catch(e){toast('Error: '+e.message,'err')}
 }
 async function replyTicket(id){
@@ -1940,7 +1953,7 @@ async function initPushUI(){
   const sub=await reg.pushManager.getSubscription();
   btn.style.display='inline-flex';
   if(sub){st.textContent='Enabled on this device.';btn.textContent='Disable';}
-  else{st.textContent='Payout updates, MT5 credentials and streak reminders — straight to this device.';
+  else{st.textContent='Payout updates, MT5 credentials and streak reminders, straight to this device.';
        btn.textContent='Enable';}
 }
 
@@ -2099,12 +2112,12 @@ async function submitKyc(){
       if(!fileObj)continue;
       const prepared=await shrinkImage(fileObj);
       if(prepared.size>MAX_BYTES){
-        throw new Error(`${fileObj.name} is ${(prepared.size/1024/1024).toFixed(1)} MB — the limit is 4 MB. Please use a smaller file.`);
+        throw new Error(`${fileObj.name} is ${(prepared.size/1024/1024).toFixed(1)} MB. The limit is 4 MB, please use a smaller file.`);
       }
       await uploadDocument(fieldName,prepared);
     }
     ME=await api('/api/auth/me');boot();
-    toast('KYC submitted — documents are under review.','ok');go('kyc');
+    toast('KYC submitted. Documents are under review.','ok');go('kyc');
   }catch(e){err('Error: '+e.message)}
   finally{if(btn){btn.disabled=false;btn.textContent='Submit KYC'}}
 }
@@ -2177,7 +2190,7 @@ function credsBlock(a, compact){
   if(!a) return '';
   if(a.status==='provisioning' || !a.platform_password){
     return `<div class="creds-wait" onclick="event.stopPropagation()"><span class="spin"></span>
-      Opening your account on <b>MetaQuotes-Demo</b> — credentials appear here and in your inbox within a minute.</div>`;
+      Opening your account on <b>MetaQuotes-Demo</b>. Credentials appear here and in your inbox within a minute.</div>`;
   }
   const row=(label,val)=>`
     <div class="cred-row">
@@ -2192,7 +2205,7 @@ function credsBlock(a, compact){
       ${row('Server', a.platform_server||'—')}
       ${row('Login', a.platform_login||'—')}
       ${row('Password', a.platform_password)}
-      ${compact?'':'<p style="font-size:11px;color:var(--dim);margin-top:6px">Works in MetaTrader 5 desktop, mobile and web — pick this server name.</p>'}
+      ${compact?'':'<p style="font-size:11px;color:var(--dim);margin-top:6px">Works in MetaTrader 5 desktop, mobile and web, so pick this server name.</p>'}
     </div>`;
 }
 
@@ -2225,7 +2238,7 @@ function openBuy(key){
       ${p.promo_upgrade_size?`<div class="plan-promo" id="buy-promo" ${pfPromo()?'':'hidden'}><b>Upgrade Your Size</b> — you pay for the
         $${fmt0(p.account_size)} plan and we create a <b>$${fmt0(p.promo_upgrade_size)}</b> account.</div>`:''}
       <div class="quote-box" id="buy-quote"></div>
-      <div class="note">Your MT5 demo account is registered with MetaQuotes <b>under these details</b> —
+      <div class="note">Your MT5 demo account is registered with MetaQuotes <b>under these details</b>,
         they must be real; your credentials are delivered to them.</div>
       <div class="stack">
         <div class="grid2">
@@ -2234,7 +2247,7 @@ function openBuy(key){
         </div>
         <input id="c-phone" placeholder="Phone, e.g. +14155551234" class="inp" value="${esc(ME.phone||'')}">
         <input id="c-email" class="inp" value="${esc(ME.email)}" disabled aria-label="Account e-mail">
-        <p class="hint" style="text-align:left;margin:-6px 0 0">Purchases are tied to your <b>account e-mail</b> — credentials
+        <p class="hint" style="text-align:left;margin:-6px 0 0">Purchases are tied to your <b>account e-mail</b>, and credentials
           and the invoice are delivered there. Different address?
           <button type="button" class="linklike" onclick="closeBuy();logout()">Log out</button> and register with it.</p>
         <input id="c-code" placeholder="Discount / promo code (optional)" class="inp"
@@ -2292,7 +2305,7 @@ async function quoteNow(){
   }
   /* A coupon the server does not recognize changes nothing — say so instead
      of quietly showing the full price (promo codes are confirmed separately). */
-  if(!previewFailed&&bc.coupon&&!(q.discount_usd>0)){buyErr('This code is not valid right now — you can still buy without it.')}
+  if(!previewFailed&&bc.coupon&&!(q.discount_usd>0)){buyErr('This code is not valid right now. You can still buy without it.')}
   else if(!previewFailed){const e=$('buy-err'); if(e)e.classList.add('hidden')}
   const row=(l,v,cls)=>`<div class="q-row${cls?' '+cls:''}"><span>${l}</span><b class="mono">${v}</b></div>`;
   let h=row('Plan fee','$'+fmt(q.plan_price_usd));
@@ -2340,8 +2353,8 @@ async function buy(key){
   const bc=window._buyCode||{};
   const coupon=bc.coupon||null, promo=bc.promo||null;
   const first=($('c-first').value||'').trim(), last=($('c-last').value||'').trim(), phone=($('c-phone').value||'').trim();
-  if(!first||!last||!phone){buyErr('Fill in your first name, last name and phone — the MT5 account is registered under these details.');return}
-  if(!/^\+?\d[\d\s-]{6,}$/.test(phone)){buyErr('Phone looks invalid — include the country code, e.g. +14155551234.');return}
+  if(!first||!last||!phone){buyErr('Fill in your first name, last name and phone. The MT5 account is registered under these details.');return}
+  if(!/^\+?\d[\d\s-]{6,}$/.test(phone)){buyErr('Phone looks invalid. Include the country code, e.g. +14155551234.');return}
   const btn=$('buy-go'); if(btn){btn.disabled=true; btn.textContent='Processing…'}
   try{
     const res=await api('/api/checkout',{method:'POST',
@@ -2354,7 +2367,7 @@ async function buy(key){
     ME=await api('/api/auth/me');
     closeBuy();
     if(prov.provisioning){
-      toast('✅ Payment received.\nYour MT5 demo account is being created — up to a minute.\nCredentials arrive by e-mail and under Challenges.','ok',9000);
+      toast('✅ Payment received.\nYour MT5 demo account is being created, up to a minute.\nCredentials arrive by e-mail and under Challenges.','ok',9000);
     }else{
       toast(`✅ Account created!\nServer: ${prov.platform_server||'—'}\nLogin: ${prov.platform_login}\nPassword: ${prov.platform_password}\n(also sent by e-mail)`,'ok',12000);
     }
@@ -2485,7 +2498,7 @@ async function openAcc(id){
       <div class="warn-box">${ICO.alert}
         <div><b>MT5 access is limited to one device per account</b>
         Do not log in from multiple devices at the same time. Passing these credentials to someone
-        else requires an approved management arrangement — see Section 7 of the
+        else requires an approved management arrangement. See Section 7 of the
         <a href="/terms">Terms</a>; undisclosed sharing can trigger an account review.</div>
       </div>
       <div class="creds-grid"${a.platform_password?'':' style="display:none"'}>
@@ -2495,14 +2508,14 @@ async function openAcc(id){
         ${a.platform_password?credCell('Password',a.platform_password):''}
         <div class="cred-cell"><div class="l">Leverage</div><div class="v">1:100</div></div>
       </div>
-      ${(!a.platform_password)?'<div class="creds-wait"><span class="spin"></span> Setting up your trading account — server, login and password appear here in a moment.</div>':''}
+      ${(!a.platform_password)?'<div class="creds-wait"><span class="spin"></span> Setting up your trading account: server, login and password appear here in a moment.</div>':''}
     </div>
 
     <div class="sec-card">
       <h3>Objectives</h3>
       <div class="progress-list">
         ${prog('Profit target',targetPct?(profitPct/targetPct*100):0,false,
-          targetPct?`${profitPct.toFixed(1)}% / ${targetPct}% ($${fmt0(targetUsd)})`:'funded — no target')}
+          targetPct?`${profitPct.toFixed(1)}% / ${targetPct}% ($${fmt0(targetUsd)})`:'funded, no target')}
         ${prog('Daily loss used',m.daily_loss_used_pct,true,`${dlPct.toFixed(2)}% / ${m.max_daily_loss_pct}% ($${fmt0(dlUsd)} / $${fmt0(dlLimUsd)})`)}
         ${prog('Max drawdown used',m.overall_dd_used_pct,true,`${ddPct.toFixed(2)}% / ${m.max_overall_loss_pct}% ($${fmt0(ddUsd)} / $${fmt0(ddLimUsd)})`)}
         ${a.max_lots?`<div><div class="prog-top"><span>Open volume limit (all positions combined)</span><b>max ${a.max_lots} lots</b></div></div>`:''}
@@ -2606,10 +2619,10 @@ function tier(v){return v>=1000?'$'+Math.round(v/1000)+'K':'$'+fmt0(v)}
 function money(v){return (v<0?'-$':'+$')+fmt(Math.abs(v))}
 function bogoText(a){
   if(a.bogo_paid_size&&a.bogo_paid_size<a.initial_balance)
-    return `Your promotion has been applied — you paid for the <b>${tier(a.bogo_paid_size)} tier</b>
+    return `Your promotion has been applied: you paid for the <b>${tier(a.bogo_paid_size)} tier</b>
       and we upgraded your allocation to <b>$${fmt0(a.initial_balance)}</b>.
       Same rules and the same profit split as a standard account.`;
-  return `<b>Buy one, get one free</b> — this bonus challenge is live on your account.
+  return `<b>Buy one, get one free.</b> This bonus challenge is live on your account.
     Same rules and the same profit split as a purchased account.`;
 }
 
@@ -2620,7 +2633,7 @@ function bogoText(a){
 function txTable(a,act){
   const rows=act.ledger||[];
   if(!rows.length)
-    return '<p class="muted" style="font-size:13px">Nothing here yet — close a trade and it will show up.</p>';
+    return '<p class="muted" style="font-size:13px">Nothing here yet. Close a trade and it will show up.</p>';
   const bal=v=>v==null?'—':'$'+fmt(v);
   return `<div class="scroll-x"><table class="tbl sortable" data-tkey="portal.history" style="min-width:560px">
     <thead><tr><th>Date</th><th>Instrument</th><th>Side</th><th style="text-align:right">Lots</th>
@@ -2640,7 +2653,7 @@ function txTable(a,act){
       <td class="num" style="text-align:right">${bal(r.balance)}</td></tr>`).join('')}
     </tbody></table></div>
     <p class="muted" style="font-size:11px;margin-top:10px">Last ${rows.length} entr${rows.length===1?'y':'ies'}.
-      A payout removes the earned profit from the account — your share is paid out to you.</p>`;
+      A payout removes the earned profit from the account, and your share is paid out to you.</p>`;
 }
 async function issueCert(accId,kind){
   try{const r=await api('/api/me/certificates',{method:'POST',
@@ -2690,7 +2703,7 @@ function openPayoutModal(id,avail){
   w.onclick=e=>{if(e.target===w)w.remove()};
   w.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
     <div class="modal-head"><h3>Request a payout</h3></div>
-    <p class="muted" style="font-size:12.5px;margin:2px 0 12px">Available on this account: <b>$${fmt(avail)}</b> — your split of current profit. You can request part of it.</p>
+    <p class="muted" style="font-size:12.5px;margin:2px 0 12px">Available on this account: <b>$${fmt(avail)}</b>, your split of current profit. You can request part of it.</p>
     <label class="muted" style="font-size:12px">Amount (USD)</label>
     <input id="po-amount" class="inp" type="number" min="1" max="${avail}" step="0.01" value="${avail}" style="margin-bottom:10px">
     <label class="muted" style="font-size:12px">Payout method</label>
@@ -2718,6 +2731,32 @@ function poFields(){
     +L('SWIFT / BIC')+`<input id="po-swift" class="inp" style="margin-bottom:10px">`
     +L('Bank name (optional)')+`<input id="po-bank" class="inp">`;
   else F.innerHTML=L('Wise account email')+`<input id="po-email" class="inp" type="email" placeholder="you@example.com">`;
+}
+/* Skalowanie to decyzja ZAMIAST wypłaty, więc modal mówi wprost, co trader
+   oddaje. Wcześniej platforma robiła to sama, bez pytania. */
+function openScaleModal(id,from,to){
+  const w=document.createElement('div'); w.id='sc-modal'; w.className='modal-wrap';
+  w.onclick=e=>{if(e.target===w)w.remove()};
+  w.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>Scale the account up</h3></div>
+    <p class="muted" style="font-size:12.5px;margin:2px 0 14px">
+      Your account grows from <b>$${fmt0(from)}</b> to <b>$${fmt0(to)}</b> and the balance
+      starts from the new size. The profit you made becomes part of the account, so there is
+      no payout this time. Loss limits are recalculated from the new size, and your profit
+      split does not change.</p>
+    <div style="display:flex;gap:10px">
+      <button class="btn-p" onclick="scaleUp(${id})" id="sc-go">Scale up to $${fmt0(to)}</button>
+      <button class="btn-o" onclick="$('sc-modal').remove()">Cancel</button>
+    </div></div>`;
+  document.body.appendChild(w);
+}
+async function scaleUp(id){
+  const btn=$('sc-go'); btn.disabled=true;
+  try{const r=await api(`/api/accounts/${id}/scale-up`,{method:'POST'});
+    $('sc-modal').remove();
+    toast(`📈 Account scaled up to $${fmt0(r.new_size)}. Trade it from the new balance.`,'ok',9000);
+    go('payouts');
+  }catch(e){btn.disabled=false;toast('Error: '+e.message,'err')}
 }
 async function submitPayout(id){
   const m=$('po-method').value, amount=parseFloat($('po-amount').value||'0');

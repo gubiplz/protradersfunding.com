@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Install the App — {{ site_name }}{% endblock %}
-{% block description %}Install {{ site_name }} on your phone straight from the browser — no App Store needed. Full-screen trader portal with a home-screen icon on iPhone, Android and desktop.{% endblock %}
+{% block description %}Install {{ site_name }} on your phone straight from the browser, with no App Store needed. Full-screen trader portal with a home-screen icon on iPhone, Android and desktop.{% endblock %}
 {% block og_title %}Install the {{ site_name }} App{% endblock %}
 
 {% block head_extra %}
@@ -64,7 +64,7 @@
 
     <div id="instInstalled" class="inst-ok hidden">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6 9 17l-5-5"/></svg>
-      <span>The app is already installed — open it from your home screen and <a href="/portal" style="color:inherit">log in to the portal</a>.</span>
+      <span>The app is already installed. Open it from your home screen and <a href="/portal" style="color:inherit">log in to the portal</a>.</span>
     </div>
 
     <div id="instCta" class="inst-cta hidden">
@@ -106,15 +106,15 @@
       <div class="inst-step"><span class="inst-n">2</span><div>
         <b>Tap the Share icon
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v13"/><path d="m8 6 4-4 4 4"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/></svg></b>
-        <p>The square with an arrow pointing up — at the bottom of the screen on iPhone, top-right on iPad.</p>
+        <p>The square with an arrow pointing up, at the bottom of the screen on iPhone, top-right on iPad.</p>
       </div></div>
       <div class="inst-step"><span class="inst-n">3</span><div>
         <b>Choose <kbd><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8m-4-4h8"/></svg> Add to Home Screen</kbd></b>
         <p>Scroll down the share menu until you see it. You can keep or edit the app name.</p>
       </div></div>
       <div class="inst-step"><span class="inst-n">4</span><div>
-        <b>Tap "Add" — done</b>
-        <p>The ProTraders icon appears on your home screen. Launch the app from there — it opens full
+        <b>Tap "Add" to finish</b>
+        <p>The ProTraders icon appears on your home screen. Launch the app from there. It opens full
            screen, without any browser bars, just like a native app.</p>
       </div></div>
     </div>
@@ -123,7 +123,7 @@
     <div id="tab-android" class="hidden">
       <div class="inst-step"><span class="inst-n">1</span><div>
         <b>See a blue "Install now" button above?</b>
-        <p>Just tap it and confirm — that's the whole installation. If the button isn't showing, follow
+        <p>Just tap it and confirm. That's the whole installation. If the button isn't showing, follow
            the steps below.</p>
       </div></div>
       <div class="inst-step"><span class="inst-n">2</span><div>
@@ -132,10 +132,10 @@
       </div></div>
       <div class="inst-step"><span class="inst-n">3</span><div>
         <b>Choose <kbd>Install app</kbd></b>
-        <p>Sometimes the option is called "Add to Home screen" — it's the same thing.</p>
+        <p>Sometimes the option is called "Add to Home screen", which is the same thing.</p>
       </div></div>
       <div class="inst-step"><span class="inst-n">4</span><div>
-        <b>Confirm "Install" — done</b>
+        <b>Confirm "Install" to finish</b>
         <p>The ProTraders icon lands on your home screen and in the app drawer, and opens full screen.</p>
       </div></div>
     </div>
@@ -144,7 +144,7 @@
     <div id="tab-desktop" class="hidden">
       <div class="inst-step"><span class="inst-n">1</span><div>
         <b>See an "Install now" button above?</b>
-        <p>Click it and confirm — done. Otherwise:</p>
+        <p>Click it and confirm. Otherwise:</p>
       </div></div>
       <div class="inst-step"><span class="inst-n">2</span><div>
         <b>Look at the address bar</b>
@@ -171,7 +171,7 @@
       </div>
       <div class="inst-perk">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-        <b>10-second setup</b>No App Store, no updates to manage — always the latest version.
+        <b>10-second setup</b>No App Store, no updates to manage, always the latest version.
       </div>
     </div>
 
@@ -202,7 +202,7 @@
 
   window.instCopy=function(btn){
     navigator.clipboard.writeText(location.origin+'/install')
-      .then(()=>{btn.textContent='Copied — now paste it in Safari';setTimeout(()=>btn.textContent='Copy link',2500)});
+      .then(()=>{btn.textContent='Copied, now paste it in Safari';setTimeout(()=>btn.textContent='Copy link',2500)});
   };
 
   /* Android/desktop Chrome: przechwycony beforeinstallprompt => realny przycisk instalacji */

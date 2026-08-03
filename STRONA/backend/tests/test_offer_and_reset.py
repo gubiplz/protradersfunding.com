@@ -34,8 +34,11 @@ def test_oferta_2step_i_instant_25k_do_2m_bez_1step():
     assert active["2step-25k"]["account_size"] == 25_000
     assert active["2step-2m"]["price_usd"] == 5999
     assert active["2step-2m"]["account_size"] == 2_000_000
-    assert active["instant-25k"]["price_usd"] == 309
-    assert active["instant-2m"]["price_usd"] == 7499
+    # Instant kosztuje ~20% wiecej niz przed podwyzka 2026-08-03 i trzyma
+    # premie nad 2-Step (369 vs 299), zamiast siedziec 10 dolarow obok niego.
+    assert active["instant-25k"]["price_usd"] == 369
+    assert active["instant-2m"]["price_usd"] == 8999
+    assert active["instant-25k"]["price_usd"] > active["2step-25k"]["price_usd"] * 1.15
     assert active["2step-50k"]["profit_target_p1"] == 10
     assert active["2step-50k"]["profit_split_pct"] == 90
     assert active["instant-50k"]["max_overall_loss_pct"] == 8

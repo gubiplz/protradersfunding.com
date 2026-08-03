@@ -22,7 +22,7 @@
       <p class="disc disc-ico">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.6 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
         <span>This platform offers simulated trading evaluations. All accounts are demo accounts
-          funded with virtual money — no real money is ever deposited or traded. Performance
+          funded with virtual money, and no real money is ever deposited or traded. Performance
           rewards are not guaranteed. See our <a href="/terms">Terms</a> for details.</span>
       </p>
       <div class="hero-ctas">
@@ -50,18 +50,26 @@
         %}<button class="cfg-size{% if s.on %} on{% endif %}" data-key="{{ s.key }}">{{ s.label }}</button>{% endfor %}{% endif %}</div>
       <div class="cfg-rows">
         <div class="cfg-row"><span>One-time fee</span><b><span id="cfg-fee"{% if cfg %} data-v="{{ cfg.fee_raw }}"{% endif %}>{% if cfg %}${{ cfg.fee }}{% else %}—{% endif %}</span> <em>refunded with 1st payout</em></b></div>
-        <div class="cfg-row"><span id="cfg-target-label">{% if cfg and cfg.instant %}Profit target{% else %}Profit target — Phase 1{% endif %}</span><b id="cfg-target">{% if cfg %}{% if cfg.instant %}None — funded from day one{% else %}+{{ cfg.target_pct }}% = $<span id="cfg-tusd" data-v="{{ cfg.target_usd_raw }}">{{ cfg.target_usd }}</span>{% endif %}{% else %}—{% endif %}</b></div>
+        <div class="cfg-row"><span id="cfg-target-label">{% if cfg and cfg.instant %}Profit target{% else %}Profit target — Phase 1{% endif %}</span><b id="cfg-target">{% if cfg %}{% if cfg.instant %}None. Funded from day one{% else %}+{{ cfg.target_pct }}% = $<span id="cfg-tusd" data-v="{{ cfg.target_usd_raw }}">{{ cfg.target_usd }}</span>{% endif %}{% else %}—{% endif %}</b></div>
         <div class="cfg-row"><span>Your profit split</span><b id="cfg-split">{% if cfg %}{{ cfg.split }}%{% else %}—{% endif %}</b></div>
       </div>
       {# Default (not-applied) promo copy pre-rendered too — the box popping in
          after script load read as another flash. JS adjusts for applied codes. #}
-      <div class="cfg-promo" id="cfg-promo"{% if not (cfg and cfg.promo_any) %} hidden{% endif %}>
-        <div class="cfg-promo-badge" id="cfg-promo-badge">Upgrade your size</div>
-        <div class="cfg-promo-val" id="cfg-promo-val">{% if cfg and cfg.promo_any %}Have a promo code? Get the <b>next size up — same fee</b>.{% endif %}</div>
-        <div class="cfg-promo-sub" id="cfg-promo-sub">{% if cfg and cfg.promo_any %}<button type="button" class="cfg-promo-link" id="cfg-promo-open">Apply your code</button> — the account is created one size up at checkout.{% endif %}</div>
+      {# The code is entered right here now. The old block only held a link that
+         scrolled the whole page up to the bar, which read as "go find it
+         yourself". Keep this markup in step with renderConfigurator(). #}
+      <div class="cfg-promo" id="cfg-promo">
+        <div class="cfg-promo-val" id="cfg-promo-val">{% if cfg and cfg.promo_any %}Have a promo code? Get the <b>next size up for the same fee</b>.{% else %}Have a promo or coupon code?{% endif %}</div>
+        <div class="code-row" id="cfg-code-row">
+          <input class="code-inp" id="cfg-code" placeholder="Promo or coupon code" autocomplete="off"
+            spellcheck="false" aria-label="Promo or coupon code">
+          <button class="code-btn" id="cfg-code-apply" type="button">Apply</button>
+        </div>
+        <div class="code-msg" id="cfg-codemsg" hidden></div>
+        <button class="code-change" id="cfg-code-change" type="button" hidden>Use a different code</button>
       </div>
       <a class="btn btn-lg" id="cfg-cta" href="{% if cfg %}/portal?buy={{ cfg.cta_key }}{% else %}/portal{% endif %}" style="width:100%">{% if cfg %}{{ cfg.cta_label }}{% else %}Start this challenge →{% endif %}</a>
-      <div class="cfg-fine" id="cfg-fine">{% if cfg %}*One-time fee, refunded with your first payout. Rewards depend on your trading.{% else %}*Illustrative math based on this plan's real split — not a promise. Rewards depend on your trading.{% endif %}</div>
+      <div class="cfg-fine" id="cfg-fine">{% if cfg %}*One-time fee, refunded with your first payout. Rewards depend on your trading.{% else %}*Illustrative math based on this plan's real split, not a promise. Rewards depend on your trading.{% endif %}</div>
     </div>
   </div>
 </section>
@@ -70,7 +78,7 @@
 <section class="stats-band" id="statsBand">
   <div class="wrap">
     <div class="stats-grid" id="statsGrid"></div>
-    <div class="stats-note">Live numbers pulled straight from our platform — nothing curated by hand.
+    <div class="stats-note">Live numbers pulled straight from our platform, nothing curated by hand.
       All of them come from simulated accounts trading virtual funds: they describe activity on the
       platform, not guaranteed outcomes.</div>
   </div>
@@ -99,7 +107,7 @@
     <div class="sec-head center" data-rv>
       <span class="pill">Evaluation process</span>
       <h2>Three steps to a funded account</h2>
-      <p>From checkout to MT5 credentials in minutes — the whole pipeline is automated.</p>
+      <p>From checkout to MT5 credentials in minutes. The whole pipeline is automated.</p>
     </div>
     <div class="steps">
       <div class="card step" data-rv>
@@ -128,7 +136,7 @@
         </svg>
         <h3>Get MT5 credentials in minutes</h3>
         <p>We open a real MetaTrader&nbsp;5 account for you automatically. Server, login and
-           password land in your dashboard and inbox — usually within a minute of payment.</p>
+           password land in your dashboard and inbox, usually within a minute of payment.</p>
       </div>
       <div class="card step" data-rv>
         <div class="step-num">03</div>
@@ -140,7 +148,7 @@
         </svg>
         <h3>Trade, pass, get funded</h3>
         <p>Hit the profit target while respecting the loss limits. Pass verification, get funded
-           and request payouts of your share of the simulated profits — up to 90%.</p>
+           and request payouts of your share of the simulated profits, up to 90%.</p>
       </div>
     </div>
   </div>
@@ -193,14 +201,14 @@
           <span class="ok">✓ Included</span>
         </div>
         <div class="pcfg-label">Coupon code</div>
-        <div class="pcfg-coupon">
-          <input id="pcfg-coupon" class="pcfg-inp" placeholder="e.g. WELCOME10" autocomplete="off">
-          <button class="pcfg-apply" id="pcfg-apply" type="button">Apply</button>
+        <div class="code-row">
+          <input id="pcfg-coupon" class="code-inp" placeholder="e.g. WELCOME10" autocomplete="off">
+          <button class="code-btn" id="pcfg-apply" type="button">Apply</button>
         </div>
         {# The applied code has to confirm itself right here. The fee line sits
            further down and the upgrade does not change the price at all, so
            without this the page looked like nothing happened. #}
-        <div class="pcfg-codemsg" id="pcfg-codemsg" hidden></div>
+        <div class="code-msg" id="pcfg-codemsg" hidden></div>
         <div class="pcfg-feerow">
           <div class="pcfg-feelabel">Total due</div>
           <div class="pcfg-fee" id="pcfg-fee">$—</div>
@@ -229,48 +237,42 @@
   </div>
 </section>
 
-<!-- ============================ SCALING ============================ -->
+<!-- ============ AFTER FUNDING: PAYOUT OR A BIGGER ACCOUNT ============ -->
+<!-- Scaling and payouts used to be two full-height sections stacked on top of
+     each other. They are one decision, so they are one section now: at +10% the
+     trader either cashes out or grows the account. Both anchors stay alive
+     (#scaling in the footer, #payouts in old links). -->
 <section class="sec sec-tight" id="scaling">
   <div class="wrap">
-    <div class="split-grid">
-      <div class="sec-head" style="margin-bottom:0" data-rv>
-        <span class="pill">Scaling plan</span>
-        <h2>Grow the account. We scale it.</h2>
-        <p>Every time a funded account grows by <b class="mono" style="color:var(--txt)">+10%</b>,
-           we increase its balance by <b class="mono" style="color:var(--txt)">+25%</b>. The rule is
-           coded into the platform and applies automatically — no emails, no requests, no committees.</p>
-        <p style="margin-top:12px">Start at $100,000 and three scale-ups later you are managing
-           over $195,000 of simulated capital, with the same profit split.</p>
-      </div>
-      <div class="ladder" data-rv aria-hidden="true">
-        <div class="rung"><div class="rung-bar" style="height:34%"></div><div class="rung-cap">$100k</div><div class="rung-sub">start</div></div>
-        <div class="rung"><div class="rung-bar" style="height:52%"></div><div class="rung-cap">$125k</div><div class="rung-sub">after +10%</div></div>
-        <div class="rung"><div class="rung-bar" style="height:74%"></div><div class="rung-cap">$156k</div><div class="rung-sub">after +10%</div></div>
-        <div class="rung"><div class="rung-bar" style="height:100%"></div><div class="rung-cap">$195k</div><div class="rung-sub">after +10%</div></div>
-      </div>
+    <div class="sec-head center" data-rv style="margin-bottom:26px">
+      <span class="pill">After you get funded</span>
+      <h2>Every +10% is your decision</h2>
+      <p>Grow a funded account by 10% and you choose what happens to that profit: take it out,
+         or turn it into a bigger account. Both paths are coded into the platform.</p>
     </div>
-  </div>
-</section>
-
-<!-- ============================ PAYOUTS ============================ -->
-<section class="sec" id="payouts">
-  <div class="wrap">
-    <div class="split-grid">
-      <div class="card" data-rv style="display:flex;flex-direction:column;justify-content:center;align-items:flex-start;gap:10px">
-        <span class="pill">Performance rewards</span>
-        <div class="big-split grad-text">90%</div>
-        <p class="muted">profit split on every funded evaluation account (70% on Instant Funding).
-          Your challenge fee comes back in full with the first payout.</p>
+    <div class="fork">
+      <div class="fork-card" id="payouts" data-rv>
+        <div class="fork-h"><span class="fork-n">A</span><h3>Take the payout</h3>
+          <span class="fork-tag grad-text">up to 90%</span></div>
+        <p>Request your share of the profit from the dashboard, 90% on evaluation accounts and
+           70% on Instant Funding. The challenge fee comes back in full with the first payout.</p>
+        <ol class="fork-steps">
+          <li><b>Request</b> any profit sitting on a funded account.</li>
+          <li><b>Verify once.</b> KYC is one-time, then our team reviews each request.</li>
+          <li><b>Get paid</b> and receive a verifiable payout certificate.</li>
+        </ol>
       </div>
-      <div class="card" data-rv>
-        <div class="payout-steps">
-          <div class="pstep"><div class="pstep-n">1</div><div><h4>Request a payout</h4>
-            <p>Any profit on a funded account can be requested from your dashboard.</p></div></div>
-          <div class="pstep"><div class="pstep-n">2</div><div><h4>KYC &amp; review</h4>
-            <p>One-time identity verification, then each request is reviewed by our team.</p></div></div>
-          <div class="pstep"><div class="pstep-n">3</div><div><h4>Get paid + certificate</h4>
-            <p>Receive your share of the simulated profits and a shareable, verifiable payout certificate.
-               First payout includes your challenge fee refund.</p></div></div>
+      <div class="fork-card" data-rv>
+        <div class="fork-h"><span class="fork-n">B</span><h3>Scale the account</h3>
+          <span class="fork-tag grad-text">+50%</span></div>
+        <p>Skip the payout and we raise the balance by half instead. Same profit split, same
+           rules, limits recalculated from the new size. Three decisions take $100,000 past
+           a third of a million.</p>
+        <div class="ladder" aria-hidden="true">
+          <div class="rung"><div class="rung-bar" style="height:30%"></div><div class="rung-cap">$100k</div><div class="rung-sub">start</div></div>
+          <div class="rung"><div class="rung-bar" style="height:45%"></div><div class="rung-cap">$150k</div><div class="rung-sub">after +10%</div></div>
+          <div class="rung"><div class="rung-bar" style="height:67%"></div><div class="rung-cap">$225k</div><div class="rung-sub">after +10%</div></div>
+          <div class="rung"><div class="rung-bar" style="height:100%"></div><div class="rung-cap">$337k</div><div class="rung-sub">after +10%</div></div>
         </div>
       </div>
     </div>
@@ -299,7 +301,7 @@
       <div class="card why" data-rv>
         <div class="why-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2 4 6v6c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V6z"/><path d="m9 12 2 2 4-4"/></svg></div>
         <h3>Automated risk engine</h3>
-        <p>Equity is monitored continuously. Daily loss and max drawdown are enforced by code —
+        <p>Equity is monitored continuously. Daily loss and max drawdown are enforced by code,
            the same way for every trader, every time.</p>
       </div>
       <div class="card why" data-rv>
@@ -311,7 +313,7 @@
       <div class="card why" data-rv>
         <div class="why-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg></div>
         <h3>Credentials in minutes</h3>
-        <p>Provisioning is fully automated — server, login and password are generated and delivered
+        <p>Provisioning is fully automated: server, login and password are generated and delivered
            right after checkout.</p>
       </div>
       <div class="card why" data-rv>
@@ -329,27 +331,6 @@
   </div>
 </section>
 
-<!-- ============================ LEADERBOARD ============================ -->
-<section class="sec sec-tight" id="lbSec">
-  <div class="wrap">
-    <div class="sec-head" data-rv>
-      <span class="pill">Leaderboard</span>
-      <h2>Top traders right now</h2>
-      <p>Live from the platform — funded accounts, current equity. Names are masked for privacy.</p>
-    </div>
-    <div class="board" data-rv>
-      <div class="lb-scroll">
-        <table class="lb">
-          <thead><tr><th>#</th><th>Trader</th><th>Account</th><th>Stage</th><th style="text-align:right">Profit</th></tr></thead>
-          <tbody id="lbBody"></tbody>
-        </table>
-      </div>
-      <div class="lb-note">Real accounts, real-time data. Every balance here is simulated capital
-        on a demo account — no real money is being traded.</div>
-    </div>
-  </div>
-</section>
-
 <!-- ============================ CERTIFICATES ============================ -->
 <section class="sec" id="certs">
   <div class="wrap cert-wrap">
@@ -358,7 +339,7 @@
         <span class="pill">Certificates</span>
         <h2>Verifiable, not just shareable</h2>
         <p>Every passed evaluation and funded account gets a certificate with a unique ID.
-           Anyone can verify it against our database — recruiters, communities, or you in two years.</p>
+           Anyone can verify it against our database: recruiters, communities, or you in two years.</p>
       </div>
       <form class="verify-box" id="verifyForm" data-rv>
         <input id="verifyInput" placeholder="Paste a certificate ID…" aria-label="Certificate ID">
@@ -434,7 +415,7 @@
         <span class="pill">Affiliate program</span>
         <h2 style="margin-top:12px">Refer traders, earn on every challenge</h2>
         <p>Share your personal link and earn commission on each purchase made by traders you refer.
-           Tracking is built into the platform — see your referrals and earnings live in the portal.</p>
+           Tracking is built into the platform, so your referrals and earnings show up live in the portal.</p>
         <div style="margin-top:22px"><a class="btn" href="/affiliate">Become an Affiliate</a></div>
       </div>
       <div style="text-align:center">
@@ -456,7 +437,7 @@
       <details>
         <summary>Are these live trading accounts?</summary>
         <div class="a">No. All accounts are demo accounts with virtual funds running in a simulated
-        environment on real MetaTrader 5 servers. You are never trading real money — you earn
+        environment on real MetaTrader 5 servers. You are never trading real money. You earn
         performance-based rewards for passing objectives and trading profitably.</div>
       </details>
       <details>
@@ -472,7 +453,7 @@
       </details>
       <details>
         <summary>What is the difference between static and trailing drawdown?</summary>
-        <div class="a">Static drawdown is a fixed floor below your starting balance — 10% on 2-Step
+        <div class="a">Static drawdown is a fixed floor below your starting balance: 10% on 2-Step
         plans, 8% on Instant Funding. Trailing drawdown instead follows your equity high-water mark;
         we do not use it on any plan, so your loss limit never moves up with your profits.</div>
       </details>
@@ -483,14 +464,14 @@
       </details>
       <details>
         <summary>Is there a limit on position size?</summary>
-        <div class="a">Yes — every account has a cap on the <b>total volume of open positions</b>
+        <div class="a">Yes. Every account has a cap on the <b>total volume of open positions</b>
         (6 lots on a $100,000 account, scaled proportionally to account size). It exists so the
         challenge measures skill rather than one all-in trade. Exceeding it breaches the account,
         the same as a loss limit.</div>
       </details>
       <details>
         <summary>What is Instant Funding?</summary>
-        <div class="a">A funded account without an evaluation — you skip the phases and can request
+        <div class="a">A funded account without an evaluation. You skip the phases and can request
         payouts from day one. In exchange the fee is higher, the risk limits are tighter (5% daily,
         8% overall) and the profit split is 70% instead of 90%.</div>
       </details>
@@ -508,17 +489,17 @@
       </details>
       <details>
         <summary>Is the fee really one-time? Any hidden costs?</summary>
-        <div class="a">One-time, per challenge. No subscriptions, no data fees, no platform fees — and
+        <div class="a">One-time, per challenge. No subscriptions, no data fees, no platform fees, and
         the fee is refunded in full with your first payout.</div>
       </details>
       <details>
         <summary>Which platform and instruments can I trade?</summary>
-        <div class="a">MetaTrader 5 — desktop, mobile and web terminal, with the same credentials. You
+        <div class="a">MetaTrader 5: desktop, mobile and web terminal, with the same credentials. You
         can trade whatever the MT5 server offers: forex pairs, indices, gold and metals, and crypto CFDs.</div>
       </details>
       <details>
         <summary>Can I have multiple accounts?</summary>
-        <div class="a">Yes, you can run multiple challenges in parallel — each account is evaluated
+        <div class="a">Yes, you can run multiple challenges in parallel. Each account is evaluated
         independently against its own objectives.</div>
       </details>
     </div>

@@ -58,15 +58,15 @@ _CATALOG = [
     ("2step-2m",   "2-Step 2M",   2_000_000, 2, 5999, 10, 5, 5, 10, "static", 5, 90),
     # --- INSTANT FUNDING (bez ewaluacji: od razu funded; DD 5/8, split 70%,
     #     min. 30 dni handlu przed pierwszą wypłatą) ---
-    ("instant-25k",  "Instant 25K",  25_000,    0, 309,  0, 0, 5, 8, "static", 30, 70),
-    ("instant-50k",  "Instant 50K",  50_000,    0, 439,  0, 0, 5, 8, "static", 30, 70),
-    ("instant-100k", "Instant 100K", 100_000,   0, 689,  0, 0, 5, 8, "static", 30, 70),
-    ("instant-200k", "Instant 200K", 200_000,   0, 1309, 0, 0, 5, 8, "static", 30, 70),
-    ("instant-300k", "Instant 300K", 300_000,   0, 1869, 0, 0, 5, 8, "static", 30, 70),
-    ("instant-400k", "Instant 400K", 400_000,   0, 2499, 0, 0, 5, 8, "static", 30, 70),
-    ("instant-800k", "Instant 800K", 800_000,   0, 3749, 0, 0, 5, 8, "static", 30, 70),
-    ("instant-1m",   "Instant 1M",   1_000_000, 0, 4369, 0, 0, 5, 8, "static", 30, 70),
-    ("instant-2m",   "Instant 2M",   2_000_000, 0, 7499, 0, 0, 5, 8, "static", 30, 70),
+    ("instant-25k",  "Instant 25K",  25_000,    0, 369,  0, 0, 5, 8, "static", 30, 70),
+    ("instant-50k",  "Instant 50K",  50_000,    0, 529,  0, 0, 5, 8, "static", 30, 70),
+    ("instant-100k", "Instant 100K", 100_000,   0, 829,  0, 0, 5, 8, "static", 30, 70),
+    ("instant-200k", "Instant 200K", 200_000,   0, 1569, 0, 0, 5, 8, "static", 30, 70),
+    ("instant-300k", "Instant 300K", 300_000,   0, 2249, 0, 0, 5, 8, "static", 30, 70),
+    ("instant-400k", "Instant 400K", 400_000,   0, 2999, 0, 0, 5, 8, "static", 30, 70),
+    ("instant-800k", "Instant 800K", 800_000,   0, 4499, 0, 0, 5, 8, "static", 30, 70),
+    ("instant-1m",   "Instant 1M",   1_000_000, 0, 5249, 0, 0, 5, 8, "static", 30, 70),
+    ("instant-2m",   "Instant 2M",   2_000_000, 0, 8999, 0, 0, 5, 8, "static", 30, 70),
 ]
 
 

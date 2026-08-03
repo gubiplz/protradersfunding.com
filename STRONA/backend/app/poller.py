@@ -18,9 +18,12 @@ from .models import Account, Breach, EquitySnapshot
 from . import notify, provisioning, rules, tradebot
 from .rules import AccountRuntime, EquityTick, Phase, Status
 
-# Plan skalowania kont funded: przy +SCALE_TRIGGER% rośnie rozmiar o SCALE_STEP%
+# Plan skalowania kont funded: po +SCALE_TRIGGER% trader WYBIERA — wypłata albo
+# powiększenie konta o SCALE_STEP%. Skalowanie nie dzieje się już samo (patrz
+# `scale_offer` / `apply_scale_up`): jedno wyklucza drugie, bo zysk albo idzie
+# do kieszeni, albo zamienia się w kapitał.
 SCALE_TRIGGER_PCT = 10.0
-SCALE_STEP_PCT = 25.0
+SCALE_STEP_PCT = 50.0
 
 settings = get_settings()
 _feed: Feed | None = None
@@ -92,16 +95,47 @@ def _advance_phase(acc: Account, rt: AccountRuntime) -> None:
     acc.breach_reason = None
 
 
-def _maybe_scale(acc: Account) -> bool:
-    """Plan skalowania: gdy konto funded urośnie o SCALE_TRIGGER% ponad swój
-    rozmiar, powiększ rozmiar o SCALE_STEP% (jak FTMO/ACG). Zwraca True gdy skalowano."""
+def scale_offer(acc: Account) -> float | None:
+    """Rozmiar, na jaki urośnie konto, jeśli trader wybierze skalowanie.
+
+    None = oferta jeszcze nie przysługuje. Warunek liczymy w locie z salda,
+    więc nie ma osobnej kolumny „należy się", która mogłaby rozjechać się ze
+    stanem konta po wypłacie albo po breachu.
+    """
     if acc.status != Status.FUNDED.value:
-        return False
-    if acc.balance >= acc.initial_balance * (1 + SCALE_TRIGGER_PCT / 100.0):
-        acc.initial_balance = round(acc.initial_balance * (1 + SCALE_STEP_PCT / 100.0), 2)
-        acc.peak_equity = max(acc.peak_equity, acc.balance)
-        return True
-    return False
+        return None
+    # Zaokrąglenie obu stron jest konieczne: 100000 * 1.1 to w floatach
+    # 110000.00000000001, więc konto DOKŁADNIE na progu nie dostawało oferty.
+    prog = round(acc.initial_balance * (1 + SCALE_TRIGGER_PCT / 100.0), 2)
+    if round(acc.balance, 2) < prog:
+        return None
+    return round(acc.initial_balance * (1 + SCALE_STEP_PCT / 100.0), 2)
+
+
+def apply_scale_up(acc: Account) -> float:
+    """Zamienia wypracowany zysk na WIĘKSZE konto (wybór zamiast wypłaty).
+
+    Saldo jedzie w górę razem z rozmiarem i to nie jest hojność, tylko warunek
+    poprawności. Próg max DD liczy się od `initial_balance` (rules._overall_floor),
+    więc samo podniesienie rozmiaru przy nietkniętym saldzie stawia konto OD RAZU
+    pod progiem i risk engine ubija je na następnym ticku: przy kroku 50% próg
+    wynosi 135k, a saldo dalej 110k. Poprzednia wersja robiła dokładnie to (krok
+    25%: próg 112,5k vs saldo 110k), więc reklamowany plan skalowania kończył
+    konto zamiast je powiększać.
+
+    Trader oddaje zysk, dostaje kapitał: dzień i szczyt equity startują od nowa
+    z nowego rozmiaru, żeby limit dzienny nie liczył się od starego salda.
+    """
+    nowy = round(acc.initial_balance * (1 + SCALE_STEP_PCT / 100.0), 2)
+    acc.initial_balance = nowy
+    acc.balance = nowy
+    acc.equity = nowy
+    acc.open_pnl = 0.0
+    acc.peak_equity = nowy
+    acc.day_start_equity = nowy
+    acc.day_start_balance = nowy
+    acc.best_day_profit = 0.0
+    return nowy
 
 
 def _notify(acc: Account, event: str, extra: dict | None = None) -> None:
@@ -188,11 +222,9 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
         if acc.status == Status.FUNDED.value:
             _notify(acc, "account_funded")
     else:
-        if _maybe_scale(acc):
-            session.commit()
-            _notify(acc, "account_funded", {"scaled": True})
-        else:
-            session.commit()
+        # Skalowanie NIE dzieje się tu samo: przy +10% trader wybiera w portalu
+        # między wypłatą a powiększeniem konta (POST /api/accounts/{id}/scale-up).
+        session.commit()
 
 
 def _active_query(session):

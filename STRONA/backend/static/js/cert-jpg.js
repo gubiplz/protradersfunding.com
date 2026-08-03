@@ -165,7 +165,7 @@
       a.href = canvas.toDataURL('image/jpeg', 0.94);
       document.body.appendChild(a); a.click(); a.remove();
     } catch (e) {
-      alert('Could not render the image — please use Print / save as PDF.');
+      alert('Could not render the image. Please use Print / save as PDF.');
     }
     btn.textContent = was;
     delete btn.dataset.busy;

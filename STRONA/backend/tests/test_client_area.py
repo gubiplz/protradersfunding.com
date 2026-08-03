@@ -965,3 +965,88 @@ def test_mail_verify_email_ma_szablon_html_z_kodem():
 def test_mail_credits_granted_ma_szablon_html():
     html = notify._render_html("credits_granted", {"name": "x", "amount": 50, "balance": 75}, "s")
     assert html and "logo.png" in html and "view=store" in html
+
+
+# ---------------- plan skalowania: wybor zamiast automatu ----------------
+def test_skalowanie_ofertowane_dopiero_od_progu_i_tylko_na_funded():
+    """`scale_offer` to jedyne miejsce liczace, czy powiekszenie przysluguje."""
+    from app import poller
+
+    class _Acc:
+        def __init__(self, status, initial, balance):
+            self.status, self.initial_balance, self.balance = status, initial, balance
+
+    assert poller.scale_offer(_Acc("funded", 100_000, 109_999.99)) is None
+    # DOKLADNIE na progu: 100000 * 1.1 to w floatach 110000.00000000001, wiec bez
+    # zaokraglenia obu stron konto na progu nie dostawaloby oferty.
+    assert poller.scale_offer(_Acc("funded", 100_000, 110_000)) == 150_000
+    assert poller.scale_offer(_Acc("active", 100_000, 200_000)) is None
+    assert poller.scale_offer(_Acc("breached", 100_000, 200_000)) is None
+
+
+def test_skalowanie_dosuwa_saldo_wiec_konto_nie_wpada_od_razu_w_breach():
+    """REGRESJA: wczesniej skalowanie podnosilo sam rozmiar i zabijalo konto.
+
+    Prog max DD liczy sie od initial_balance, wiec rozmiar 150k przy saldzie
+    110k oznacza prog 135k ponad saldem — risk engine ubijal konto na nastepnym
+    ticku. Po zmianie saldo idzie w gore razem z rozmiarem.
+    """
+    from app import poller, rules
+    from app.rules import AccountRuntime, ChallengeConfig, DrawdownType, EquityTick, Phase, Status
+
+    class _Acc:
+        status, initial_balance, balance, equity, open_pnl = "funded", 100_000.0, 110_000.0, 110_000.0, 0.0
+        peak_equity = day_start_equity = day_start_balance = 110_000.0
+        best_day_profit = 0.0
+
+    acc = _Acc()
+    nowy = poller.apply_scale_up(acc)
+    assert nowy == 150_000 and acc.balance == 150_000 and acc.peak_equity == 150_000
+
+    cfg = ChallengeConfig(initial_balance=acc.initial_balance, profit_target_pct=0,
+                          max_daily_loss_pct=5, max_overall_loss_pct=10,
+                          drawdown_type=DrawdownType.STATIC)
+    rt = AccountRuntime(phase=Phase.FUNDED, status=Status.FUNDED, balance=acc.balance,
+                        equity=acc.equity, peak_equity=acc.peak_equity, day_key="2026-08-03",
+                        day_start_equity=acc.day_start_equity,
+                        day_start_balance=acc.day_start_balance)
+    res = rules.evaluate(cfg, rt, EquityTick(equity=acc.equity, balance=acc.balance,
+                                             open_pnl=0.0, day_key="2026-08-03"))
+    assert not res.breaches and not res.failed
+    # kolejne powiekszenie dopiero po nastepnych +10%, nie od razu
+    assert poller.scale_offer(acc) is None
+
+
+def test_endpoint_scale_up_wymaga_progu_i_konta_funded():
+    tid, h = _trader("skalowanie@test.pl")
+    maly = _konto(tid, "990101", status="funded", balance=10_200, initial=10_000)
+    obcy_tid, _ = _trader("skalowanie-obcy@test.pl")
+    obce = _konto(obcy_tid, "990102", status="funded", balance=20_000, initial=10_000)
+    with TestClient(app) as c:
+        r = c.post(f"/api/accounts/{maly}/scale-up", headers=h)
+        assert r.status_code == 400 and "unlocks" in r.json()["detail"]
+        assert c.post(f"/api/accounts/{obce}/scale-up", headers=h).status_code == 404
+
+
+def test_endpoint_scale_up_powieksza_konto_i_widac_to_w_api():
+    tid, h = _trader("skalowanie-ok@test.pl")
+    aid = _konto(tid, "990103", status="funded", balance=11_000, initial=10_000)
+    with TestClient(app) as c:
+        konta = {a["id"]: a for a in c.get("/api/me/accounts", headers=h).json()}
+        assert konta[aid]["scale_up_to"] == 15_000, "oferta musi byc widoczna w payloadzie"
+        r = c.post(f"/api/accounts/{aid}/scale-up", headers=h)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["previous_size"] == 10_000 and d["new_size"] == 15_000
+        assert d["balance"] == 15_000, "saldo startuje od nowego rozmiaru"
+        # druga proba pod rzad nie ma prawa przejsc: konto jest dopiero na starcie
+        assert c.post(f"/api/accounts/{aid}/scale-up", headers=h).status_code == 400
+
+
+def test_mail_account_scaled_ma_szablon():
+    tresc = notify._render("account_scaled", {"name": "x", "login": "990104",
+                                              "previous_size": 10_000, "new_size": 15_000})
+    assert "15,000" in tresc[0] and "15,000" in tresc[1]
+    html = notify._render_html("account_scaled", {"name": "x", "login": "990104",
+                                                 "previous_size": 10_000, "new_size": 15_000}, "s")
+    assert html and "15,000" in html and "view=accounts" in html

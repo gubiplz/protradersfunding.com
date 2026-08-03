@@ -8,8 +8,8 @@
 {"@context":"https://schema.org","@type":"FAQPage","mainEntity":[
  {"@type":"Question","name":"Are these live trading accounts?","acceptedAnswer":{"@type":"Answer","text":"No. All accounts are demo accounts with virtual funds in a simulated environment on real MetaTrader 5 servers. Rewards are performance-based."}},
  {"@type":"Question","name":"How fast do I get my account?","acceptedAnswer":{"@type":"Answer","text":"Provisioning is automated — MT5 credentials usually arrive within a minute of checkout."}},
- {"@type":"Question","name":"How do payouts work?","acceptedAnswer":{"@type":"Answer","text":"On a funded account you request a payout of your share of simulated profits — 90% on evaluation plans, 70% on Instant Funding; after KYC each request is reviewed and paid, with the challenge fee refunded on the first payout."}},
- {"@type":"Question","name":"Is news trading allowed?","acceptedAnswer":{"@type":"Answer","text":"Yes — there are no news blackouts, weekend-flat requirements or banned strategies."}},
+ {"@type":"Question","name":"How do payouts work?","acceptedAnswer":{"@type":"Answer","text":"On a funded account you request a payout of your share of simulated profits: 90% on evaluation plans, 70% on Instant Funding; after KYC each request is reviewed and paid, with the challenge fee refunded on the first payout."}},
+ {"@type":"Question","name":"Is news trading allowed?","acceptedAnswer":{"@type":"Answer","text":"Yes. There are no news blackouts, weekend-flat requirements or banned strategies."}},
  {"@type":"Question","name":"Can someone else trade my account?","acceptedAnswer":{"@type":"Answer","text":"Yes, with our written approval before trading starts. The account stays registered to you, you remain responsible for the trading objectives, and rewards are paid only to the verified account holder. Sharing credentials without an approved arrangement is prohibited."}}
 ]}</script>
 {% endblock %}
@@ -37,13 +37,13 @@
       </details>
       <details>
         <summary>How fast do I get my MT5 account?</summary>
-        <div class="a">Usually within a minute. Provisioning is fully automated — no human on our side
+        <div class="a">Usually within a minute. Provisioning is fully automated, and no human on our side
         needs to click anything. If anything delays it, your dashboard shows the live status and the
         credentials follow by email.</div>
       </details>
       <details>
         <summary>Is there a free trial?</summary>
-        <div class="a">No — challenges start at $39 for a $5,000 account, and the fee is a one-time
+        <div class="a">No. Challenges start at $299 for a $25,000 account, and the fee is a one-time
         payment refunded in full with your first payout. Coupon codes are accepted at checkout.</div>
       </details>
       <details>
@@ -55,7 +55,7 @@
       <details>
         <summary>Can I use my own MT5 app?</summary>
         <div class="a">Yes. The credentials work in MetaTrader 5 on desktop, mobile and in the web
-        terminal — log in with the server, login and password from your dashboard.</div>
+        terminal. Log in with the server, login and password from your dashboard.</div>
       </details>
     </div>
 
@@ -69,7 +69,7 @@
       </details>
       <details>
         <summary>Static vs trailing drawdown — what's the difference?</summary>
-        <div class="a">Static drawdown is a fixed floor below the starting balance — e.g. $90,000 on a
+        <div class="a">Static drawdown is a fixed floor below the starting balance, e.g. $90,000 on a
         $100,000 account with a 10% limit, forever. Trailing drawdown instead follows your equity
         high-water mark, so the floor climbs as you profit. Every plan we sell uses static drawdown
         (10% on 2-Step, 8% on Instant Funding); we do not use trailing drawdown at all.</div>
@@ -89,7 +89,7 @@
       <details>
         <summary>Can someone else trade my account?</summary>
         <div class="a">Yes, with our approval. Account management is allowed once we have approved the
-        arrangement in writing, before any trading on your behalf starts — write to
+        arrangement in writing, before any trading on your behalf starts. Write to
         <a href="mailto:{{ support_email }}">{{ support_email }}</a> from your registered address and name
         who will be trading. The account stays yours and so does responsibility for the rules: a limit
         breached by your manager is still a breach of your account, and rewards are paid only to you
@@ -99,11 +99,11 @@
       <details>
         <summary>What counts as a trading day?</summary>
         <div class="a">Any calendar day (server time) on which you executed at least one trade. Minimum
-        trading days per phase are listed on each plan card — typically 3–4.</div>
+        trading days per phase are listed on each plan card, typically 3–4.</div>
       </details>
       <details>
         <summary>Is there a time limit on the evaluation?</summary>
-        <div class="a">No. Take as long as you need — the account stays active as long as you respect
+        <div class="a">No. Take as long as you need. The account stays active as long as you respect
         the loss limits.</div>
       </details>
     </div>
@@ -127,7 +127,7 @@
       </details>
       <details>
         <summary>Do I get a certificate?</summary>
-        <div class="a">Yes — every passed evaluation and funded account gets a certificate with a unique
+        <div class="a">Yes. Every passed evaluation and funded account gets a certificate with a unique
         ID that anyone can check on the <a href="/verify">verification page</a>.</div>
       </details>
     </div>
@@ -136,12 +136,12 @@
     <div class="faq">
       <details>
         <summary>Is the fee one-time or recurring?</summary>
-        <div class="a">One-time, per challenge. No subscriptions or hidden costs — and it's refunded with
+        <div class="a">One-time, per challenge. No subscriptions or hidden costs, and it's refunded with
         your first payout. See the <a href="/refund-policy">refund policy</a> for details.</div>
       </details>
       <details>
         <summary>Do you accept coupon codes?</summary>
-        <div class="a">Yes — enter the code at checkout and the discount is applied instantly.</div>
+        <div class="a">Yes. Enter the code at checkout and the discount is applied instantly.</div>
       </details>
       <details>
         <summary>Can I run multiple challenges?</summary>
@@ -149,7 +149,7 @@
       </details>
       <details>
         <summary>What if I fail — can I try again?</summary>
-        <div class="a">Always. Failing a challenge has no consequences beyond that account ending — you
+        <div class="a">Always. Failing a challenge has no consequences beyond that account ending, and you
         can start a new challenge at any time.</div>
       </details>
     </div>
