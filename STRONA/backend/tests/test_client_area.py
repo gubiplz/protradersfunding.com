@@ -1191,8 +1191,13 @@ def test_pas_upsellu_dzieli_sie_rowno_na_dwa_rzedy():
 
     assert "const kolumn=fam.length<=4?fam.length:Math.ceil(fam.length/2)" in html, (
         "liczbe kolumn liczy widok — 9 -> 5+4, 8 -> 4+4, 7 -> 4+3, <=4 -> jeden rzad")
-    assert 'style="--up-cols:${kolumn}"' in html
-    assert ".upsell-row{grid-template-columns:repeat(var(--up-cols,4),minmax(0,1fr))}" in css
+    assert 'style="--up-cols:${kolumn};--up-max:${rzadMax}px"' in html
+    assert ".upsell-row{grid-template-columns:repeat(var(--up-cols,4),minmax(0,1fr));max-width:var(--up-max,none)}" in css
+
+    # Konto blisko szczytu oferty ma jeden albo dwa wieksze plany. Bez gornego
+    # limitu szerokosci rzedu grid rozrzucal je po calej szerokosci panelu
+    # (jeden kafelek na 1510px), bo kolumny sa `1fr`.
+    assert "const rzadMax=kolumn*300" in html
 
     # ten sam bursztyn co w sklepie i na landingu — jeden jezyk dla „najczesciej wybierany"
     assert ".upsell-card.pop" in css and ".uc-ribbon" in css
@@ -1201,7 +1206,38 @@ def test_pas_upsellu_dzieli_sie_rowno_na_dwa_rzedy():
 
     # odstepy: 12px bylo za ciasno, kafelki zlewaly sie w pas
     assert "gap:12px;overflow-x:auto" not in css
-    assert ".upsell-row{display:flex;gap:18px" in css
+    assert ".upsell-row{display:flex;gap:26px" in css
+
+
+def test_kafelki_upsellu_sa_zwarte_i_odsuniete_od_listy_kont():
+    """Pas upsellu byl wyzszy od samej listy kont (539px kontra 90px) i stykal
+    sie z nia bez zadnego odstepu.
+
+    Ubytek wysokosci bierze sie z usunietego powtorzenia, nie ze zmniejszonego
+    tekstu: obramowany przycisk „Upgrade" w kazdym z dziewieciu kafelkow i
+    plakietka „+5,2%", identyczna wszedzie i podana juz w podtytule panelu.
+    """
+    from pathlib import Path
+    html = (Path(__file__).resolve().parents[1] / "templates" / "portal.html").read_text()
+    css = (Path(__file__).resolve().parents[1] / "static" / "css" / "portal.css").read_text()
+
+    # odstep od listy kont wiekszy niz zwykly odstep miedzy kartami (14px)
+    assert ".upsell{margin-top:34px;margin-bottom:18px}" in css
+
+    # caly kafelek klikalny — takze z klawiatury
+    assert 'role="button" tabindex="0" onclick="openBuy(' in html
+    assert "event.key==='Enter'||event.key===' '" in html
+    assert '<button class="btn-o sm" onclick="openBuy(' not in html, (
+        "przycisk w kazdym kafelku odpowiadal za wiekszosc jego wysokosci")
+
+    # zdjeta plakietka procentu — ta sama liczba na wszystkich kafelkach
+    assert "uc-pct" not in html and "uc-pct" not in css
+    assert 'Based on your <b class="up">+${pct.toFixed(2)}%</b>' in html, (
+        "procent musi zostac w podtytule, skoro znika z kafelkow")
+
+    # kolumna moze byc szeroka, kafelek nie — nadmiar idzie w odstep
+    assert ".upsell-card{flex:none;width:100%;max-width:260px}" in css
+    assert "justify-items:center" in css
 
 
 def test_historia_transakcji_idzie_stronami():

@@ -1198,6 +1198,11 @@ const VIEWS={
        zaokraglona w gore (9 -> 5+4, 8 -> 4+4, 7 -> 4+3). Do czterech kafelkow
        drugi rzad nie ma sensu — zostaje jeden. */
     const kolumn=fam.length<=4?fam.length:Math.ceil(fam.length/2);
+    /* Gorny limit szerokosci rzedu (~300px na kolumne). Bez niego konto blisko
+       szczytu oferty — gdzie wiekszych planow zostaja dwa albo jeden — rozrzucalo
+       kafelki po calej szerokosci panelu. Przy dziewieciu planach limit jest
+       wiekszy niz panel, wiec nic nie zmienia. */
+    const rzadMax=kolumn*300;
     const html=`<div class="upsell sec-card">
       <div class="upsell-head">
         <div>
@@ -1207,13 +1212,15 @@ const VIEWS={
         </div>
         <button class="btn-p" onclick="go('store')">Upgrade →</button>
       </div>
-      <div class="upsell-row" style="--up-cols:${kolumn}">${fam.map(p=>`<div class="upsell-card${p.popular?' pop':''}">
+      <div class="upsell-row" style="--up-cols:${kolumn};--up-max:${rzadMax}px">${fam.map(p=>`<div class="upsell-card${p.popular?' pop':''}"
+        role="button" tabindex="0" onclick="openBuy('${p.key}')"
+        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openBuy('${p.key}')}">
         ${p.popular?'<span class="uc-ribbon">Most popular</span>':''}
-        <div class="uc-top"><span class="uc-if">If you had</span><span class="uc-pct">+${pct.toFixed(1)}%</span></div>
+        <div class="uc-if">If you had</div>
         <div class="uc-size">$${fmt0(p.account_size)}</div>
         <div class="uc-sub">you could have earned</div>
         <div class="uc-earn">+$${fmt(p.account_size*pct/100)}</div>
-        <button class="btn-o sm" onclick="openBuy('${p.key}')">Upgrade →</button>
+        <div class="uc-go">Upgrade →</div>
       </div>`).join('')}</div>
       <p class="uc-fine">Illustrative math based on your current return, not a promise. Rewards depend on your trading.</p>
     </div>`;

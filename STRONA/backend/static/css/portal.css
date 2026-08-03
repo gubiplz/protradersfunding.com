@@ -899,7 +899,10 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 
 /* ---------------- challenge cards (portal Challenges view) ---------------- */
 /* "Scale your progress" upsell strip (real math from the best live account) */
-.upsell{margin-bottom:18px}
+/* Odstep od listy kont jest wiekszy niz zwykly odstep miedzy kartami (14px):
+   to nie kolejna karta w stosie, tylko inny rodzaj tresci — konta usera kontra
+   blok sprzedazowy. Wczesniej oba panele stykaly sie krawedziami (0px). */
+.upsell{margin-top:34px;margin-bottom:18px}
 /* Podswietlenie po wejsciu z powiadomienia (parametr upsell=1) */
 .upsell.flash{animation:upFlash 2.6s ease-out}
 @keyframes upFlash{
@@ -910,22 +913,25 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 .upsell-head h3{font-size:16.5px;margin:2px 0 4px}
 .up-eyebrow{font-size:10.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--acc)}
 .up-based{font-size:12.5px;color:var(--muted)}
-.upsell-row{display:flex;gap:18px;overflow-x:auto;padding:9px 0 6px;-webkit-overflow-scrolling:touch}
-.upsell-card{flex:0 0 176px;background:var(--bg3,var(--bg));border:1px solid var(--line);border-radius:12px;
-  padding:13px 14px;display:flex;flex-direction:column;gap:2px;position:relative}
+.upsell-row{display:flex;gap:26px;overflow-x:auto;padding:9px 0 6px;-webkit-overflow-scrolling:touch}
+/* Kafelek jest w calosci klikalny, wiec obramowana kratka „Upgrade" w kazdym
+   z dziewieciu zeszla do zwyklego napisu — to ona odpowiadala za wiekszosc
+   wysokosci. Reszta ubytku to zdjeta plakietka „+5,2%", identyczna na wszystkich
+   kafelkach i podana juz w podtytule panelu. */
+.upsell-card{flex:0 0 156px;background:var(--bg3,var(--bg));border:1px solid var(--line);border-radius:12px;
+  padding:11px 13px;display:flex;flex-direction:column;gap:1px;position:relative;
+  cursor:pointer;transition:border-color .15s,transform .15s}
+.upsell-card:hover{border-color:var(--acc);transform:translateY(-2px)}
 /* Ten sam bursztyn co plakietka w sklepie i na landingu — jeden jezyk dla
    „najczesciej wybierany", zeby trzy miejsca nie mowily trzema stylami. */
 .upsell-card.pop{border-color:#f0b95c;box-shadow:0 0 0 1px #f0b95c}
 .uc-ribbon{position:absolute;top:-9px;right:10px;font-size:9px;font-weight:800;letter-spacing:.07em;
   text-transform:uppercase;background:#f0a53c;color:#fff;border-radius:6px;padding:2px 7px;white-space:nowrap}
-.uc-top{display:flex;justify-content:space-between;align-items:center}
-.uc-if{font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
-.uc-pct{font-size:10.5px;font-weight:700;color:var(--acc);background:color-mix(in srgb,var(--acc) 12%,transparent);
-  border-radius:999px;padding:2px 7px}
-.uc-size{font-family:var(--mono);font-size:21px;font-weight:800;margin-top:3px}
-.uc-sub{font-size:11px;color:var(--muted)}
-.uc-earn{font-family:var(--mono);font-size:15.5px;font-weight:800;color:var(--ok,#16a34a);margin:1px 0 9px}
-.upsell-card .btn-o.sm{margin-top:auto;justify-content:center}
+.uc-if{font-size:9.5px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);line-height:1.3}
+.uc-size{font-family:var(--mono);font-size:18px;font-weight:800;margin-top:2px;line-height:1.2}
+.uc-sub{font-size:10.5px;color:var(--muted);line-height:1.35}
+.uc-earn{font-family:var(--mono);font-size:14.5px;font-weight:800;color:var(--ok,#16a34a);margin:1px 0 0;line-height:1.25}
+.uc-go{margin-top:auto;padding-top:6px;font-size:11px;font-weight:700;color:var(--acc);line-height:1.2}
 .uc-fine{font-size:11px;color:var(--dim);margin-top:10px}
 
 /* Stronicowanie dlugich list (historia transakcji konta). */
@@ -1378,9 +1384,11 @@ html[data-theme=dark] .inv-print{border:1px solid var(--line2)}
   /* Od tabletu w gore pas upsellu przestaje byc karuzela: karty wchodza w siatke
      i rozkladaja sie rowno na cala szerokosc panelu (przy dziewieciu rozmiarach
      karuzela znaczyla przewijanie w bok albo dwa niepelne rzedy). */
-  .upsell-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));
-    gap:18px;overflow:visible;padding:9px 0 0}
-  .upsell-card{flex:none}
+  .upsell-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+    gap:26px;overflow:visible;padding:9px 0 0;justify-items:center}
+  /* Kolumna moze byc szeroka (na 1920px wychodzi ~280px), ale kafelek nie ma
+     sie rozciagac — nadmiar idzie w odstep miedzy kafelkami. */
+  .upsell-card{flex:none;width:100%;max-width:260px}
 }
 @media(min-width:1250px){
   /* Rowny podzial na dwa rzedy. `auto-fill` upychal tyle kafelkow, ile wejdzie
@@ -1388,7 +1396,7 @@ html[data-theme=dark] .inv-print{border:1px solid var(--line2)}
      kafelkow zaokraglona w gore. Nizej zostaje `auto-fill`, bo przy pieciu
      kolumnach kafelek zszedlby ponizej szerokosci, w ktorej miesci sie
      „$1,000,000". */
-  .upsell-row{grid-template-columns:repeat(var(--up-cols,4),minmax(0,1fr))}
+  .upsell-row{grid-template-columns:repeat(var(--up-cols,4),minmax(0,1fr));max-width:var(--up-max,none)}
 }
 @media(min-width:1500px){
   /* Kafelki wypelniaja --wrap zamiast konczyc sie w polowie rzedu. Poprzedni
