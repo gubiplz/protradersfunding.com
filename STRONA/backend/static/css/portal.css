@@ -123,6 +123,14 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
   background:var(--panel);white-space:nowrap}
 .btn-o:hover{border-color:var(--acc);color:var(--acc);background:var(--acc-bg)}
 .btn-o.sm,.btn-p.sm{padding:8px 13px;font-size:13px;border-radius:9px}
+/* Potwierdzenie akcji NIEODWRACALNEJ w oknie portalu (askConfirm z danger:true).
+   Czerwien niesie tu ostrzezenie, ktore w natywnym confirm() brala na siebie
+   ramka przegladarki. */
+.btn-danger{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-weight:600;
+  font-size:14px;padding:10px 18px;border-radius:11px;background:var(--red);color:#fff;
+  transition:.16s;white-space:nowrap;box-shadow:0 8px 18px -8px rgba(220,38,38,.5)}
+.btn-danger:hover{filter:brightness(1.06);transform:translateY(-1px)}
+.btn-danger:disabled{opacity:.55;transform:none;cursor:default}
 /* Jeden przycisk kasowania w calym panelu: male czerwone "X". Wyglada tak samo
    w kontach, wyplatach, zamowieniach, puli MT5 i KYC, wiec nie trzeba zgadywac,
    ktory napis ("Delete"/"Remove") co robi. Stonowany do momentu najechania —

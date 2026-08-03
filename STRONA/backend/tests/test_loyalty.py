@@ -63,10 +63,10 @@ def test_punkty_licza_sie_z_oplaconych_zamowien_i_bonusow():
 
 def test_wymiana_zdejmuje_punkty_i_wydaje_kod():
     tid, h = _trader(punkty=1200)
-    r = client.post("/api/me/loyalty/redeem", headers=h, json={"reward": "off10"})
+    r = client.post("/api/me/loyalty/redeem", headers=h, json={"reward": "off15"})
     assert r.status_code == 200, r.text
     d = r.json()
-    assert d["code"]["pct"] == 10.0 and d["code"]["status"] == "active"
+    assert d["code"]["pct"] == 15.0 and d["code"]["status"] == "active"
     assert d["code"]["code"].startswith("PF-")
     assert d["points_spent"] == 500
     assert d["points_available"] == 700, "saldo maleje o koszt nagrody"
@@ -85,7 +85,7 @@ def test_tier_nie_spada_po_wymianie_punktow():
     tid, h = _trader(punkty=2100)
     assert client.get("/api/me/loyalty", headers=h).json()["tier"] == "Gold"
     assert client.post("/api/me/loyalty/redeem", headers=h,
-                       json={"reward": "off20"}).status_code == 200
+                       json={"reward": "off35"}).status_code == 200
     d = client.get("/api/me/loyalty", headers=h).json()
     assert d["points_available"] == 100 and d["points_spent"] == 2000
     assert d["tier"] == "Gold" and d["points_lifetime"] == 2100
@@ -93,7 +93,7 @@ def test_tier_nie_spada_po_wymianie_punktow():
 
 def test_za_malo_punktow_to_odmowa_a_nie_ujemne_saldo():
     tid, h = _trader(punkty=100)
-    r = client.post("/api/me/loyalty/redeem", headers=h, json={"reward": "off10"})
+    r = client.post("/api/me/loyalty/redeem", headers=h, json={"reward": "off15"})
     assert r.status_code == 400 and "400 more points" in r.json()["detail"]
     d = client.get("/api/me/loyalty", headers=h).json()
     assert d["points_spent"] == 0 and d["points_available"] == 100
@@ -104,8 +104,8 @@ def test_nie_da_sie_wydac_tych_samych_punktow_dwa_razy():
     """Za 600 punktow jest JEDEN kod za 500, nie dwa."""
     tid, h = _trader(punkty=600)
     assert client.post("/api/me/loyalty/redeem", headers=h,
-                       json={"reward": "off10"}).status_code == 200
-    druga = client.post("/api/me/loyalty/redeem", headers=h, json={"reward": "off10"})
+                       json={"reward": "off15"}).status_code == 200
+    druga = client.post("/api/me/loyalty/redeem", headers=h, json={"reward": "off15"})
     assert druga.status_code == 400, "drugi kod poszedlby za punkty, ktorych juz nie ma"
     s = SessionLocal()
     assert s.query(RewardCode).filter(RewardCode.trader_id == tid).count() == 1
@@ -120,7 +120,7 @@ def test_nieznana_nagroda_odrzucona():
 
 def test_loyalty_wymaga_logowania():
     assert client.get("/api/me/loyalty").status_code in (401, 403)
-    assert client.post("/api/me/loyalty/redeem", json={"reward": "off10"}).status_code in (401, 403)
+    assert client.post("/api/me/loyalty/redeem", json={"reward": "off15"}).status_code in (401, 403)
 
 
 # ---------------- kod w checkoucie ----------------

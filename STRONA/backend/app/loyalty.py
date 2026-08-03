@@ -30,9 +30,9 @@ TIERS = [
 # Sklepik nagród: koszt w punktach -> procent zniżki. Punkt bierze się z
 # jednego dolara wydanego na challenge, więc 500 punktów to realne $500 obrotu.
 REWARDS = [
-    {"key": "off10", "pct": 10.0, "cost": 500},
-    {"key": "off15", "pct": 15.0, "cost": 1000},
-    {"key": "off20", "pct": 20.0, "cost": 2000},
+    {"key": "off15", "pct": 15.0, "cost": 500},
+    {"key": "off25", "pct": 25.0, "cost": 1000},
+    {"key": "off35", "pct": 35.0, "cost": 2000},
 ]
 
 # Ile kod żyje od wymiany. Bez terminu firma nosi zobowiązanie bez końca, a

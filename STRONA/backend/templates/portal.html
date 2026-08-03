@@ -1589,7 +1589,7 @@ const VIEWS={
     {ic:'wallet',cls:'green',badge:'Active',name:'Refundable Fee',desc:'Your one-time challenge fee is refunded in full, automatically added to your first payout from a funded account.',cond:['Pass the evaluation','Complete KYC','Request your first payout']},
     {ic:'trend',cls:'purple',badge:'Your call',name:'Scaling Plan',desc:'Grow a funded account by +15% and you choose: take the payout, or move up to the next plan in our pricing. Repeatable, no applications.',cond:['Funded account','+15% growth','You pick payout or a bigger plan']},
     {ic:'spark',cls:'blue',badge:'10% recurring',name:'Affiliate Program',desc:'Share your referral link and earn 10% of every challenge purchased by traders you refer — for life, not just the first order.',cond:['Share your link','Friend buys a challenge','Commission tracked live']},
-    {ic:'crown',cls:'orange',badge:'Spend-based',name:'Loyalty Points',desc:'Every $1 spent earns a loyalty point, and check-ins add more. Trade the points for your own one-time discount code on the Loyalty page.',cond:['500 points: 10% off','1,000 points: 15% off','2,000 points: 20% off']},
+    {ic:'crown',cls:'orange',badge:'Spend-based',name:'Loyalty Points',desc:'Every $1 spent earns a loyalty point, and check-ins add more. Trade the points for your own one-time discount code on the Loyalty page.',cond:['500 points: 15% off','1,000 points: 25% off','2,000 points: 35% off']},
   ];
   $('view').innerHTML=revealHtml+affPanel+`<div class="badge-grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">`+cards.map(c=>`
     <div class="panel">
@@ -2236,14 +2236,51 @@ function copyVal(btn, val){
   });
 }
 
+/* Pytanie w oknie PORTALU, nie przegladarki. Natywny confirm() przedstawia sie
+   jako "Komunikat ze strony protradersfunding.com", ma przyciski w jezyku
+   systemu i wyglada jak ostrzezenie o zagrozeniu — czyli dokladnie odwrotnie
+   niz zaproszenie do odebrania nagrody. Zwraca Promise<bool>, wiec podmiana
+   `confirm(x)` na `await askConfirm({...})` jest jeden do jednego. */
+function askConfirm({title,body,ok='Confirm',cancel='Cancel',danger=false}){
+  return new Promise(resolve=>{
+    const w=document.createElement('div');
+    w.className='modal-wrap'; w.id='ask-modal';
+    let zamkniete=false;
+    const koniec=v=>{
+      if(zamkniete)return; zamkniete=true;
+      document.removeEventListener('keydown',klawisz);
+      w.remove(); resolve(v);
+    };
+    const klawisz=e=>{if(e.key==='Escape')koniec(false)};
+    w.onclick=e=>{if(e.target===w)koniec(false)};
+    w.innerHTML=`<div class="modal" onclick="event.stopPropagation()" role="dialog" aria-modal="true">
+      <div class="modal-head"><h3>${esc(title)}</h3></div>
+      <p class="muted" style="font-size:13px;line-height:1.6;margin:2px 0 16px">${body}</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="${danger?'btn-danger':'btn-p'}" id="ask-ok">${esc(ok)}</button>
+        <button class="btn-o" id="ask-no">${esc(cancel)}</button>
+      </div></div>`;
+    document.body.appendChild(w);
+    w.querySelector('#ask-ok').onclick=()=>koniec(true);
+    w.querySelector('#ask-no').onclick=()=>koniec(false);
+    document.addEventListener('keydown',klawisz);
+    w.querySelector('#ask-ok').focus();
+  });
+}
+
 /* Wymiana punktow na wlasny kod. Serwer jest jedynym miejscem, ktore liczy
    saldo i odejmuje punkty — tu tylko blokujemy podwojny klik i odswiezamy widok. */
 async function redeemReward(key,btn){
   const r=(LOY&&LOY.rewards||[]).find(x=>x.key===key);
   if(!r)return;
-  if(!confirm(`Trade ${fmt0(r.cost)} points for a one-time ${r.pct}% discount code?\n\n`
-    +`The points come off your balance straight away. The code is yours alone and `
-    +`works on one challenge.`))return;
+  const zgoda=await askConfirm({
+    title:`Trade ${fmt0(r.cost)} points for ${r.pct}% off?`,
+    body:`You get a one-time code worth <b>${r.pct}% off</b> any challenge. The points come off `
+      +`your balance straight away, and the code is yours alone.`,
+    ok:`Redeem for ${fmt0(r.cost)} pts`,
+    cancel:'Not yet',
+  });
+  if(!zgoda)return;
   if(btn)btn.disabled=true;
   try{
     const d=await api('/api/me/loyalty/redeem',{method:'POST',body:JSON.stringify({reward:key})});
