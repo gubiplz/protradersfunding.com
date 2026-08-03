@@ -1309,6 +1309,9 @@ def scale_up_account(account_id: int, trader: Trader = Depends(auth.current_trad
         session.close()
 
 
+LEDGER_MAX = 300
+
+
 @app.get("/api/me/accounts/{account_id}/activity")
 def account_activity(account_id: int, trader: Trader = Depends(auth.current_trader)):
     """Kalendarz dzienny + księga operacji na koncie (transakcje i wypłaty).
@@ -1386,7 +1389,12 @@ def account_activity(account_id: int, trader: Trader = Depends(auth.current_trad
 
         return {
             "days": [{"day": d, "pnl": v} for d, v in sorted(days.items())],
-            "ledger": [{k: v for k, v in r.items() if k != "ts"} for r in ledger[:100]],
+            # Sufit historii oddawanej portalowi. Dopoki lista w widoku konta
+            # byla nieskonczona, limit 100 byl niewidoczny — przy stronicowaniu
+            # staje sie realnym koncem historii, wiec idzie w gore. Wyzej niz
+            # tutaj nie ma sensu bez stronicowania po stronie serwera: caly
+            # ledger jedzie w jednej odpowiedzi razem z krzywa kapitalu.
+            "ledger": [{k: v for k, v in r.items() if k != "ts"} for r in ledger[:LEDGER_MAX]],
         }
     finally:
         session.close()

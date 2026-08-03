@@ -910,9 +910,14 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 .upsell-head h3{font-size:16.5px;margin:2px 0 4px}
 .up-eyebrow{font-size:10.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--acc)}
 .up-based{font-size:12.5px;color:var(--muted)}
-.upsell-row{display:flex;gap:12px;overflow-x:auto;padding-bottom:6px;-webkit-overflow-scrolling:touch}
+.upsell-row{display:flex;gap:18px;overflow-x:auto;padding:9px 0 6px;-webkit-overflow-scrolling:touch}
 .upsell-card{flex:0 0 176px;background:var(--bg3,var(--bg));border:1px solid var(--line);border-radius:12px;
-  padding:13px 14px;display:flex;flex-direction:column;gap:2px}
+  padding:13px 14px;display:flex;flex-direction:column;gap:2px;position:relative}
+/* Ten sam bursztyn co plakietka w sklepie i na landingu — jeden jezyk dla
+   „najczesciej wybierany", zeby trzy miejsca nie mowily trzema stylami. */
+.upsell-card.pop{border-color:#f0b95c;box-shadow:0 0 0 1px #f0b95c}
+.uc-ribbon{position:absolute;top:-9px;right:10px;font-size:9px;font-weight:800;letter-spacing:.07em;
+  text-transform:uppercase;background:#f0a53c;color:#fff;border-radius:6px;padding:2px 7px;white-space:nowrap}
 .uc-top{display:flex;justify-content:space-between;align-items:center}
 .uc-if{font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
 .uc-pct{font-size:10.5px;font-weight:700;color:var(--acc);background:color-mix(in srgb,var(--acc) 12%,transparent);
@@ -922,6 +927,18 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 .uc-earn{font-family:var(--mono);font-size:15.5px;font-weight:800;color:var(--ok,#16a34a);margin:1px 0 9px}
 .upsell-card .btn-o.sm{margin-top:auto;justify-content:center}
 .uc-fine{font-size:11px;color:var(--dim);margin-top:10px}
+
+/* Stronicowanie dlugich list (historia transakcji konta). */
+.pager{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:12px}
+.pager:empty{display:none}
+.pg-btn{min-width:32px;height:32px;padding:0 9px;border-radius:8px;border:1px solid var(--line);
+  background:var(--panel);color:var(--muted);font-size:13px;font-weight:600;
+  font-family:var(--mono);transition:.15s;cursor:pointer}
+.pg-btn:hover:not(:disabled):not(.on){border-color:var(--line2);color:var(--txt)}
+.pg-btn.on{background:var(--grad);border-color:transparent;color:#fff}
+.pg-btn:disabled{opacity:.35;cursor:default}
+.pg-nav{font-size:16px;line-height:1}
+.pg-dots{color:var(--dim);padding:0 2px;user-select:none}
 @media(max-width:700px){.upsell-head{flex-direction:column}.upsell-head .btn-p{align-self:stretch}}
 
 .chal-filter{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:2px 0 16px}
@@ -1362,8 +1379,16 @@ html[data-theme=dark] .inv-print{border:1px solid var(--line2)}
      i rozkladaja sie rowno na cala szerokosc panelu (przy dziewieciu rozmiarach
      karuzela znaczyla przewijanie w bok albo dwa niepelne rzedy). */
   .upsell-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));
-    gap:12px;overflow:visible;padding-bottom:0}
+    gap:18px;overflow:visible;padding:9px 0 0}
   .upsell-card{flex:none}
+}
+@media(min-width:1250px){
+  /* Rowny podzial na dwa rzedy. `auto-fill` upychal tyle kafelkow, ile wejdzie
+     (przy dziewieciu planach 6+3), wiec liczbe kolumn podaje widok — polowa
+     kafelkow zaokraglona w gore. Nizej zostaje `auto-fill`, bo przy pieciu
+     kolumnach kafelek zszedlby ponizej szerokosci, w ktorej miesci sie
+     „$1,000,000". */
+  .upsell-row{grid-template-columns:repeat(var(--up-cols,4),minmax(0,1fr))}
 }
 @media(min-width:1500px){
   /* Kafelki wypelniaja --wrap zamiast konczyc sie w polowie rzedu. Poprzedni

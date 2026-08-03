@@ -1176,3 +1176,62 @@ def test_kyc_i_support_nie_trzymaja_szerokosci_inline():
     # Prefiks bez cudzysłowu, bo „Danger Zone" dokłada w tym samym atrybucie
     # jeszcze kolor obramowania.
     assert html.count('style="max-width:640px') == 5
+
+
+def test_pas_upsellu_dzieli_sie_rowno_na_dwa_rzedy():
+    """`auto-fill` upychał tyle kafelków, ile weszło — przy dziewięciu planach
+    dawało to 6+3, czyli pełny pierwszy rząd i ogon w drugim.
+
+    Liczba kafelków zależy od konta (to plany WIĘKSZE od obecnego rozmiaru),
+    więc podział musi wychodzić równo dla dowolnej liczby, nie tylko dziewięciu.
+    """
+    from pathlib import Path
+    html = (Path(__file__).resolve().parents[1] / "templates" / "portal.html").read_text()
+    css = (Path(__file__).resolve().parents[1] / "static" / "css" / "portal.css").read_text()
+
+    assert "const kolumn=fam.length<=4?fam.length:Math.ceil(fam.length/2)" in html, (
+        "liczbe kolumn liczy widok — 9 -> 5+4, 8 -> 4+4, 7 -> 4+3, <=4 -> jeden rzad")
+    assert 'style="--up-cols:${kolumn}"' in html
+    assert ".upsell-row{grid-template-columns:repeat(var(--up-cols,4),minmax(0,1fr))}" in css
+
+    # ten sam bursztyn co w sklepie i na landingu — jeden jezyk dla „najczesciej wybierany"
+    assert ".upsell-card.pop" in css and ".uc-ribbon" in css
+    assert "#f0b95c" in css and "#f0a53c" in css
+    assert "uc-ribbon" in html and "p.popular?' pop'" in html
+
+    # odstepy: 12px bylo za ciasno, kafelki zlewaly sie w pas
+    assert "gap:12px;overflow-x:auto" not in css
+    assert ".upsell-row{display:flex;gap:18px" in css
+
+
+def test_historia_transakcji_idzie_stronami():
+    """Lista rosła bez końca — po kilkudziesięciu trejdach podgląd konta był
+    jedną długą tabelą.
+
+    Kluczowa rzecz do utrzymania: wiersze zostają W CAŁOŚCI w DOM i są tylko
+    ukrywane. Sortowanie kolumn (sortable.js) przestawia wiersze tabeli, więc
+    gdyby renderowana była jedna strona, kliknięcie nagłówka posortowałoby
+    wyłącznie te kilkanaście widocznych wierszy zamiast całej historii.
+    """
+    from pathlib import Path
+    html = (Path(__file__).resolve().parents[1] / "templates" / "portal.html").read_text()
+    css = (Path(__file__).resolve().parents[1] / "static" / "css" / "portal.css").read_text()
+
+    assert "const TX_PER_PAGE=15" in html
+    assert "function txPage(" in html and "function txPager(" in html and "function txInit(" in html
+    assert 'id="tx-tbl"' in html and 'id="tx-pager"' in html
+    # cala historia w DOM, strony robione widocznoscia wierszy
+    assert "rows.forEach((tr,i)=>{tr.style.display=" in html
+    # po sortowaniu „pierwsza strona" znaczy co innego — wracamy na nia
+    assert "tbl._txObs=new MutationObserver(()=>txPage(1))" in html
+    # tabela zostaje sortowalna
+    assert 'id="tx-tbl" class="tbl sortable" data-tkey="portal.history"' in html
+    for regula in (".pager{", ".pg-btn{", ".pg-btn.on{", ".pg-dots{"):
+        assert regula in css, f"brak stylu {regula}"
+
+
+def test_serwer_oddaje_wiecej_niz_sto_wpisow_historii():
+    """Limit 100 był niewidoczny, dopóki lista była nieskończona — przy
+    stronicowaniu stałby się realnym końcem historii konta."""
+    from app.main import LEDGER_MAX
+    assert LEDGER_MAX >= 300

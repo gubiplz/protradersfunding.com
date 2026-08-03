@@ -1193,6 +1193,11 @@ const VIEWS={
       .sort((a,b)=>a.account_size-b.account_size);
     if(!fam.length)return {html:'',banner:''};
     const who=ref.status==='provisioning'?'your account':esc(ref.login);
+    /* Dwa rowne rzedy zamiast pelnego pierwszego i ogona w drugim. Przy 9
+       planach `auto-fill` dawal 6+3; teraz liczba kolumn to polowa kafelkow
+       zaokraglona w gore (9 -> 5+4, 8 -> 4+4, 7 -> 4+3). Do czterech kafelkow
+       drugi rzad nie ma sensu — zostaje jeden. */
+    const kolumn=fam.length<=4?fam.length:Math.ceil(fam.length/2);
     const html=`<div class="upsell sec-card">
       <div class="upsell-head">
         <div>
@@ -1202,7 +1207,8 @@ const VIEWS={
         </div>
         <button class="btn-p" onclick="go('store')">Upgrade →</button>
       </div>
-      <div class="upsell-row">${fam.map(p=>`<div class="upsell-card">
+      <div class="upsell-row" style="--up-cols:${kolumn}">${fam.map(p=>`<div class="upsell-card${p.popular?' pop':''}">
+        ${p.popular?'<span class="uc-ribbon">Most popular</span>':''}
         <div class="uc-top"><span class="uc-if">If you had</span><span class="uc-pct">+${pct.toFixed(1)}%</span></div>
         <div class="uc-size">$${fmt0(p.account_size)}</div>
         <div class="uc-sub">you could have earned</div>
@@ -2850,6 +2856,7 @@ async function openAcc(id){
   calRender();
   drawDetailChart();
   rollStats();
+  txInit();
   checkMilestone(id,a,m);
 }
 
@@ -2946,12 +2953,60 @@ function bogoText(a){
    The balance comes from the server (a snapshot taken at the event). Do NOT
    recompute it backwards from the current balance: a payout or a stage
    promotion resets the balance, shifting the whole history by that amount. */
+const TX_PER_PAGE=15;
+/* Historia rosnie z kazdym zamknietym trejdem, wiec idzie stronami.
+   Wiersze zostaja W CALOSCI w DOM i sa tylko ukrywane, bo sortowanie kolumn
+   (sortable.js) przestawia wiersze TABELI — gdyby renderowana byla jedna
+   strona, klikniecie naglowka posortowaloby wylacznie te pietnascie
+   widocznych wierszy zamiast calej historii. */
+function txPager(ile,strona){
+  const stron=Math.ceil(ile/TX_PER_PAGE);
+  if(stron<2)return '';
+  /* Zawsze pierwsza, ostatnia i sasiedztwo biezacej; reszta pod wielokropkiem,
+     zeby przy kilkudziesieciu stronach pasek nie zajal calej szerokosci. */
+  const okno=new Set([1,stron,strona,strona-1,strona+1]);
+  if(strona<=3)[2,3,4].forEach(n=>okno.add(n));
+  if(strona>=stron-2)[stron-1,stron-2,stron-3].forEach(n=>okno.add(n));
+  const lista=[...okno].filter(n=>n>=1&&n<=stron).sort((a,b)=>a-b);
+  let srodek='',poprzednia=0;
+  for(const n of lista){
+    if(n-poprzednia>1)srodek+='<span class="pg-dots">…</span>';
+    srodek+=`<button class="pg-btn${n===strona?' on':''}" onclick="txPage(${n})"
+      ${n===strona?'aria-current="page"':''}>${n}</button>`;
+    poprzednia=n;
+  }
+  return `<button class="pg-btn pg-nav" onclick="txPage(${strona-1})" ${strona===1?'disabled':''}
+      aria-label="Previous page">‹</button>${srodek}<button class="pg-btn pg-nav"
+      onclick="txPage(${strona+1})" ${strona===stron?'disabled':''} aria-label="Next page">›</button>`;
+}
+function txPage(n){
+  const tbl=$('tx-tbl'); if(!tbl||!tbl.tBodies[0])return;
+  const rows=[...tbl.tBodies[0].rows];
+  const stron=Math.max(1,Math.ceil(rows.length/TX_PER_PAGE));
+  n=Math.min(Math.max(1,n),stron);
+  const od=(n-1)*TX_PER_PAGE;
+  rows.forEach((tr,i)=>{tr.style.display=(i>=od&&i<od+TX_PER_PAGE)?'':'none'});
+  const pager=$('tx-pager'); if(pager)pager.innerHTML=txPager(rows.length,n);
+  const info=$('tx-info');
+  if(info)info.textContent=rows.length<=TX_PER_PAGE
+    ? `${rows.length} entr${rows.length===1?'y':'ies'}.`
+    : `Showing ${od+1}–${Math.min(od+TX_PER_PAGE,rows.length)} of ${rows.length} entries.`;
+}
+function txInit(){
+  const tbl=$('tx-tbl'); if(!tbl||!tbl.tBodies[0])return;
+  txPage(1);
+  /* Sortowanie kolumny przestawia wiersze, wiec po nim „pierwsza strona"
+     znaczy co innego — wracamy na nia i przeliczamy widocznosc. */
+  if(tbl._txObs)tbl._txObs.disconnect();
+  tbl._txObs=new MutationObserver(()=>txPage(1));
+  tbl._txObs.observe(tbl.tBodies[0],{childList:true});
+}
 function txTable(a,act){
   const rows=act.ledger||[];
   if(!rows.length)
     return '<p class="muted" style="font-size:13px">Nothing here yet. Close a trade and it will show up.</p>';
   const bal=v=>v==null?'—':'$'+fmt(v);
-  return `<div class="scroll-x"><table class="tbl sortable" data-tkey="portal.history" style="min-width:560px">
+  return `<div class="scroll-x"><table id="tx-tbl" class="tbl sortable" data-tkey="portal.history" style="min-width:560px">
     <thead><tr><th>Date</th><th>Instrument</th><th>Side</th><th style="text-align:right">Lots</th>
       <th style="text-align:right">P&amp;L</th><th style="text-align:right">Balance</th></tr></thead>
     <tbody>${rows.map(r=>r.kind==='payout'?`<tr>
@@ -2968,7 +3023,8 @@ function txTable(a,act){
       <td class="num ${r.pnl>=0?'up':'down'}" style="text-align:right">${money(r.pnl)}</td>
       <td class="num" style="text-align:right">${bal(r.balance)}</td></tr>`).join('')}
     </tbody></table></div>
-    <p class="muted" style="font-size:11px;margin-top:10px">Last ${rows.length} entr${rows.length===1?'y':'ies'}.
+    <div class="pager" id="tx-pager"></div>
+    <p class="muted" style="font-size:11px;margin-top:10px"><span id="tx-info"></span>
       A payout removes the earned profit from the account, and your share is paid out to you.</p>`;
 }
 async function issueCert(accId,kind){
