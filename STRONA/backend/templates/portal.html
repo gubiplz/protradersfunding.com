@@ -754,6 +754,7 @@ async function boot(){
   $('admin-link-sheet').style.display=ME.is_admin?'':'none';
   if(localStorage.getItem('pf_side_collapsed')==='1')$('side').classList.add('collapsed');
   initEngagement();
+  flagsWarm();
   if(await handlePaymentReturn())return;
   const q=new URLSearchParams(location.search);
   /* Deep links from notifications: _pendingView / fresh sw.js entry in Cache
@@ -2647,16 +2648,25 @@ function guessCountry(){
   }
   return localeCountry()||(COUNTRY_BY_ISO['US']?'US':(COUNTRIES[0]||{i:''}).i);
 }
-/* ~110 KB of inlined flag images: pulled in the first time the list opens, so
-   it never slows down the page itself. */
+/* ~110 KB obrazkow flag w jednym pliku: nie wchodzi w krytyczna sciezke strony,
+   tylko dogrywa sie osobno. Wolane z KAZDEGO miejsca, ktore nadaje klase flagi —
+   wczesniej tylko z otwarcia listy krajow, wiec flaga przy numerze kierunkowym
+   w kasie zostawala szarym prostokatem az do klikniecia w liste. */
 function flagsCss(){
   if(document.getElementById('pf-flags'))return;
   const l=document.createElement('link');
   l.id='pf-flags';l.rel='stylesheet';l.href='/static/css/flags.css?v={{ asset_v }}';
   document.head.appendChild(l);
 }
+/* Rozgrzewka w bezczynnosci po zalogowaniu: plik i tak bedzie potrzebny przy
+   pierwszym otwarciu kasy, a pobrany zawczasu jest juz w cache, wiec flaga
+   pojawia sie razem z okienkiem, a nie dogania je z opoznieniem. */
+function flagsWarm(){
+  (window.requestIdleCallback||(f=>setTimeout(f,1500)))(()=>flagsCss(),{timeout:5000});
+}
 function ccSet(iso,revalidate){
   const c=COUNTRY_BY_ISO[iso]; if(!c)return;
+  flagsCss();
   CC=c.i;
   const f=$('c-cc-flag'),d=$('c-cc-dial');
   if(f)f.className="flag flag-"+c.i.toLowerCase();

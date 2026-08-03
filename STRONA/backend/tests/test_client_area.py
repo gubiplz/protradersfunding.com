@@ -1455,3 +1455,26 @@ def test_komplet_odznak_daje_darmowy_challenge_50k():
     # drugi komplet nie da drugiego konta
     with TestClient(app) as c:
         assert c.post("/api/me/achievements/claim", json={"tier": 8}, headers=h).status_code == 409
+
+
+def test_flaga_przy_numerze_kierunkowym_jest_od_razu():
+    """Plik z flagami (~110 KB) dogrywał się DOPIERO przy otwarciu listy krajów,
+    a przycisk z flagą widać od razu po otwarciu kasy — więc do pierwszego
+    kliknięcia w listę zamiast flagi stał szary prostokąt.
+
+    Dwa niezależne zabezpieczenia: plik ładuje każde nadanie klasy flagi
+    (`ccSet`) oraz rozgrzewka w bezczynności zaraz po zalogowaniu.
+    """
+    from pathlib import Path
+    html = (Path(__file__).resolve().parents[1] / "templates" / "portal.html").read_text()
+
+    # 1. kazde ustawienie kraju dociaga plik — to pokrywa otwarcie kasy
+    assert "function ccSet(iso,revalidate){\n  const c=COUNTRY_BY_ISO[iso]; if(!c)return;\n  flagsCss();" in html
+
+    # 2. rozgrzewka w bezczynnosci po zalogowaniu, zeby plik byl juz w cache
+    assert "function flagsWarm(){" in html
+    assert "window.requestIdleCallback||(f=>setTimeout(f,1500))" in html
+    assert "\n  flagsWarm();\n" in html, "rozgrzewka musi byc wolana z bootu"
+
+    # 3. otwarcie listy dalej dociaga plik (siatka bezpieczenstwa)
+    assert "if(open){flagsCss();ccRender()" in html
