@@ -132,12 +132,29 @@ def test_nieznany_kraj_odrzucony():
 
 def test_tablica_krajow_jest_kompletna():
     assert len(countries.COUNTRIES) > 200
-    for iso2, nazwa, kierunkowy, mn, mx in countries.COUNTRIES:
+    for iso2, nazwa, kierunkowy, mn, mx, glowny in countries.COUNTRIES:
         assert len(iso2) == 2 and iso2.isupper(), iso2
         assert nazwa and kierunkowy.isdigit()
         assert 1 <= mn <= mx <= countries.E164_MAX, (iso2, mn, mx)
     assert countries.BY_ISO["PL"][2] == "48"
     assert countries.BY_ISO["US"][2] == "1"
+
+
+def test_kierunkowy_dzielony_wskazuje_kraj_glowny():
+    """+44 nosi Wielka Brytania, Guernsey, Jersey i Wyspa Man, a +1 ponad
+    dwadziescia krajow. Bez wskazania kraju glownego numer klienta sprzed
+    zmiany trafial pod pierwsza alfabetycznie flage — o innych dopuszczalnych
+    dlugosciach numeru — i przestawal przechodzic walidacje."""
+    assert countries.MAIN_BY_DIAL["44"] == "GB"
+    assert countries.MAIN_BY_DIAL["1"] == "US"
+    assert countries.BY_ISO["GG"][5] is False, "Guernsey nie jest glowny dla +44"
+    assert countries.BY_ISO["GB"][5] is True
+    # kazdy kierunkowy dzielony przez kilka krajow ma dokladnie jednego glownego
+    from collections import Counter
+    ile = Counter(k[2] for k in countries.COUNTRIES)
+    for dial, n in ile.items():
+        if n > 1:
+            assert dial in countries.MAIN_BY_DIAL, f"+{dial} bez kraju glownego"
 
 
 # ---------------- kraj ----------------

@@ -2329,6 +2329,9 @@ function openBuy(key){
   const p=PRODUCTS.find(x=>x.key===key);
   if(!p)return;
   const nm=(ME.full_name||'').trim().split(/\s+/);
+  /* Kraj MUSI byc znany, zanim powstanie pole numeru: `phoneNational`
+     odcina nim kierunkowy z zapisanego numeru. */
+  const kraj=guessCountry();
   const box=document.createElement('div');
   box.id='buy-modal';
   box.className='modal-wrap';
@@ -2363,7 +2366,7 @@ function openBuy(key){
               <svg class="tel-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m6 9 6 6 6-6"/></svg>
             </button>
             <input id="c-phone" class="inp" inputmode="tel" autocomplete="tel-national"
-              placeholder="Phone number" oninput="clearFieldErr('c-phone')" value="${esc(phoneNational(ME.phone,ME.phone_country))}">
+              placeholder="Phone number" oninput="clearFieldErr('c-phone')" value="${esc(phoneNational(ME.phone,kraj))}">
             <div id="ccpop" class="ccpop hidden">
               <input id="cc-search" class="inp" placeholder="Search country or code"
                 autocomplete="off" spellcheck="false" oninput="ccRender()">
@@ -2400,7 +2403,7 @@ function openBuy(key){
   document.body.appendChild(box);
   window._buyKey=key;
   window._buyCode={coupon:null,promo:null};
-  ccSet(guessCountry(), false);
+  ccSet(kraj, false);
   codeCheck();
   setTimeout(()=>$('c-first').focus(),50);
 }
@@ -2550,14 +2553,38 @@ function clearFieldErr(id){
    Same shape as the date-of-birth calendar above: a button next to the input
    opens a panel, and a document-level click closes it. */
 let CC='US';
-function guessCountry(){
-  if(ME&&ME.phone_country&&COUNTRY_BY_ISO[ME.phone_country])return ME.phone_country;
+function localeCountry(){
   const langs=navigator.languages&&navigator.languages.length?navigator.languages:[navigator.language||''];
   for(const l of langs){
     const m=/[-_]([A-Za-z]{2})$/.exec(l||'');
     if(m&&COUNTRY_BY_ISO[m[1].toUpperCase()])return m[1].toUpperCase();
   }
-  return COUNTRY_BY_ISO['US']?'US':(COUNTRIES[0]||{i:''}).i;
+  return null;
+}
+function guessCountry(){
+  if(ME&&ME.phone_country&&COUNTRY_BY_ISO[ME.phone_country])return ME.phone_country;
+  /* Customers who bought before the picker existed have a phone but no saved
+     country. Reading the country back out of their own number beats guessing
+     from the browser locale, which would show them a mismatched flag and a
+     validation error on a number that was fine all along. */
+  const zapisany=String((ME&&ME.phone)||'').trim();
+  if(zapisany.startsWith('+')){
+    const d=zapisany.replace(/\D/g,'');
+    const pasuje=COUNTRIES.slice().sort((a,b)=>b.d.length-a.d.length)
+      .filter(c=>d.startsWith(c.d)&&d.length-c.d.length>=c.mn&&d.length-c.d.length<=c.mx);
+    if(pasuje.length){
+      /* +44 is the UK, Guernsey, Jersey and the Isle of Man; +1 is the US,
+         Canada and a dozen more. Alphabetical order would answer "Guernsey",
+         whose allowed length differs from the UK's — so the customer's own,
+         perfectly valid number would stop validating. Order of preference:
+         the browser's region, then the country libphonenumber marks as the
+         main one for that code. */
+      const lokalny=localeCountry();
+      if(lokalny&&pasuje.some(c=>c.i===lokalny))return lokalny;
+      return (pasuje.find(c=>c.m)||pasuje[0]).i;
+    }
+  }
+  return localeCountry()||(COUNTRY_BY_ISO['US']?'US':(COUNTRIES[0]||{i:''}).i);
 }
 /* ~110 KB of inlined flag images: pulled in the first time the list opens, so
    it never slows down the page itself. */
