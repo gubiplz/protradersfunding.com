@@ -320,6 +320,29 @@ def test_assety_maja_dlugi_cache_a_html_nie():
     assert sw.headers["cache-control"] == "no-cache"
 
 
+def test_portal_serwuje_kod_z_pliku_a_nie_w_html():
+    """HTML jest `no-cache`, więc kod wklejony w stronę leci przy KAŻDYM wejściu.
+
+    Portal miał 155 kB JS w dokumencie (47 kB po kompresji) — tyle szło po
+    łączu za każdym razem, mimo że między deployami nie zmienia się ani bajt.
+    W pliku z `?v=<sha>` idzie raz. W szkielecie zostają tylko dwie wartości
+    z serwera, bez których skrypt nie ruszy.
+    """
+    with TestClient(app) as c:
+        html = c.get("/portal").text
+        bundle = c.get("/static/js/portal-app.js")
+
+    assert 'src="/static/js/portal-app.js?v=' in html
+    assert len(html) < 30_000, f"szkielet portalu spuchł do {len(html)} B — kod wrócił do HTML-a"
+    assert "GOOGLE_CLIENT_ID" in html and "SITE_NAME" in html
+
+    assert bundle.status_code == 200
+    assert "function doAuth(" in bundle.text, "bundle nie zawiera logiki logowania"
+    # Jinja renderuje tylko szablony — znacznik, który tu przeciekł, poszedłby
+    # do przeglądarki dosłownie i wysypał parser.
+    assert "{{" not in bundle.text and "{%" not in bundle.text
+
+
 def test_assety_z_pierwszego_wejscia_miesza_sie_w_budzecie():
     """Budżet wagowy na pliki, które ciągnie KAŻDE pierwsze wejście na stronę.
 

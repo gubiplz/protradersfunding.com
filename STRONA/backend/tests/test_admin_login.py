@@ -103,7 +103,13 @@ def test_admin_dostaje_strone_po_zalogowaniu():
     assert c.cookies.get("pf_session"), "logowanie ma zalozyc ciasteczko sesji"
 
     strona = c.get("/admin")
-    assert strona.status_code == 200 and "MT5 Pool" in strona.text
+    assert strona.status_code == 200
+    # Sam panel to juz osobny plik JS (HTML to tylko szkielet), wiec „dostal
+    # strone" znaczy: szkielet + dowiazany skrypt, ktory faktycznie sie serwuje.
+    # Bez tej drugiej asercji zepsuty link do bundla przeszedlby niezauwazony.
+    assert 'src="/static/js/admin-panel.js' in strona.text
+    bundle = c.get("/static/js/admin-panel.js")
+    assert bundle.status_code == 200 and "MT5 Pool" in bundle.text
 
 
 def test_docs_zamkniete_jak_admin():

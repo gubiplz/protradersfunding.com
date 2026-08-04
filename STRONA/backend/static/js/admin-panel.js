@@ -1,0 +1,1539 @@
+const $=id=>document.getElementById(id);
+const fmt=n=>(n??0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmt0=n=>(n??0).toLocaleString('en-US',{maximumFractionDigits:0});
+const dstr=iso=>new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* The panel is opened by an administrator ACCOUNT, not a shared token. The
+   session is the same as the trader portal (`pf_token`), so a signed-in admin
+   moves between the panel and the portal without a second login. */
+let TOKEN=localStorage.getItem('pf_token')||null, ME=null;
+const adminH=()=>{const h={'Content-Type':'application/json'};
+  if(TOKEN)h['Authorization']='Bearer '+TOKEN; return h};
+async function api(path,opts={}){
+  const r=await fetch(path,{headers:adminH(),...opts});
+  if(r.status===401||r.status===403){signInForm();throw new Error('Access denied')}
+  if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||r.status);
+  return r.json();
+}
+function signInForm(){
+  // The panel has no login of its own and shows NOTHING: there is one entry,
+  // the same as for traders. `replace` instead of `href` so the browser
+  // back button does not land on an empty panel.
+  ME=null;
+  location.replace('/portal?next=/admin');
+}
+
+function signOut(){
+  fetch('/api/auth/logout',{method:'POST'}).finally(()=>{
+    TOKEN=null;ME=null;localStorage.removeItem('pf_token');location.replace('/portal')});
+}
+
+const ICO={
+  layers:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 2 9 5-9 5-9-5z"/><path d="m3 12 9 5 9-5M3 17l9 5 9-5"/></svg>',
+  grid:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
+  wallet:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="6" width="20" height="14" rx="3"/><path d="M2 10h20M16 15h2"/></svg>',
+  shield:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2 4 6v6c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V6z"/><path d="m9 12 2 2 4-4"/></svg>',
+  chat:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12a8 8 0 0 1-8 8H4l2.3-2.8A8 8 0 1 1 21 12z"/><path d="M8.5 11h.01M12 11h.01M15.5 11h.01"/></svg>',
+  file:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></svg>',
+  bank:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 9 9-6 9 6"/><path d="M5 9v11M19 9v11M9 9v11M15 9v11M3 20h18"/></svg>',
+  gear:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10.3 4.3a2 2 0 0 1 3.4 0l.6 1a2 2 0 0 0 1.7 1h1.2a2 2 0 0 1 1.7 3l-.6 1a2 2 0 0 0 0 2l.6 1a2 2 0 0 1-1.7 3h-1.2a2 2 0 0 0-1.7 1l-.6 1a2 2 0 0 1-3.4 0l-.6-1a2 2 0 0 0-1.7-1H6.8a2 2 0 0 1-1.7-3l.6-1a2 2 0 0 0 0-2l-.6-1a2 2 0 0 1 1.7-3H8a2 2 0 0 0 1.7-1z"/><circle cx="12" cy="12" r="2.6"/></svg>',
+  users:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c.8-3.2 2.9-4.8 5.5-4.8s4.7 1.6 5.5 4.8"/><circle cx="17.5" cy="9.5" r="2.4"/><path d="M15.8 15.6c2.7-.4 4.4 1 5 4.4"/></svg>',
+  dollar:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v20M17 6.5c0-2-2.2-3-5-3s-5 1-5 3 2 2.8 5 3.4 5 1.6 5 3.6-2.2 3-5 3-5-1-5-3"/></svg>',
+  alert:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 2 20h20z"/><path d="M12 9.5V14M12 17h.01"/></svg>',
+  trend:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>',
+  arrow:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><path d="M9 6l6 6-6 6"/></svg>',
+  copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>',
+};
+
+const NAV=[
+  {v:'overview',label:'Overview',ico:'grid'},
+  {v:'accounts',label:'Accounts',ico:'layers'},
+  {v:'payouts',label:'Payouts',ico:'wallet'},
+  {v:'kyc',label:'KYC',ico:'shield'},
+  {v:'tickets',label:'Tickets',ico:'chat'},
+  {v:'orders',label:'Orders',ico:'file'},
+  {v:'pool',label:'MT5 Pool',ico:'bank'},
+  {v:'telemetry',label:'Telemetry',ico:'trend'},
+  {v:'settings',label:'Settings',ico:'gear'},
+];
+$('side-nav').innerHTML=NAV.map(n=>
+  `<button class="sb-link" data-v="${n.v}" onclick="go('${n.v}')" title="${n.label}">${ICO[n.ico]}<span class="sb-txt">${n.label}</span></button>`).join('');
+
+/* Mobile bottom bar: the 4 most-used sections; "More" opens the drawer with
+   the full list. Same go()/NAV as the sidebar — one source of truth. */
+const MORE_ICO='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>';
+$('botnav').innerHTML=['overview','accounts','payouts','kyc'].map(v=>{
+  const n=NAV.find(x=>x.v===v);
+  return `<button class="botnav-btn" data-v="${n.v}" onclick="go('${n.v}')">${ICO[n.ico]}<span>${n.label}</span></button>`;
+}).join('')+`<button class="botnav-btn" onclick="toggleSide(true)" aria-label="All sections">${MORE_ICO}<span>More</span></button>`;
+
+const TITLES={
+  overview:['Overview','Platform health and items waiting for you'],
+  accounts:['Accounts','All challenge accounts and their live risk metrics'],
+  payouts:['Payouts','Every payout booked so far, plus requests waiting for review'],
+  kyc:['KYC','Identity verifications awaiting review'],
+  tickets:['Tickets','Support conversations with traders'],
+  orders:['Orders','Purchases and revenue'],
+  pool:['MT5 Pool','Pre-provisioned accounts ready to assign'],
+  telemetry:['Telemetry','Product events from the last 14 days'],
+  settings:['Settings','Admin access and runtime configuration'],
+};
+/* ---------- theme (shared pf_theme2 key with the trader portal) ---------- */
+const THEME_SUN='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.4M12 19.6V22M2 12h2.4M19.6 12H22M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M19.1 4.9l-1.7 1.7M6.6 17.4l-1.7 1.7"/></svg>';
+const THEME_MOON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.4 14.2A8.5 8.5 0 0 1 9.8 3.6 8.5 8.5 0 1 0 20.4 14.2z"/></svg>';
+function themeNow(){return document.documentElement.dataset.theme==='dark'?'dark':'light'}
+function paintTheme(){
+  const t=themeNow();
+  document.querySelectorAll('.theme-toggle').forEach(b=>{
+    b.innerHTML=(t==='dark'?THEME_SUN:THEME_MOON)
+      +'<span class="sb-txt">'+(t==='dark'?'Light mode':'Dark mode')+'</span>';
+    b.title=t==='dark'?'Switch to light mode':'Switch to dark mode';
+  });
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',t==='dark'?'#0b0d12':'#f6f7fb');
+}
+function toggleTheme(){
+  const next=themeNow()==='dark'?'light':'dark';
+  document.documentElement.dataset.theme=next;
+  try{localStorage.setItem('pf_theme2',next)}catch(e){}
+  paintTheme();
+  /* Charts snapshot token colors at render time — repaint the active view. */
+  if(typeof VIEW!=='undefined')go(VIEW);
+  /* The account slide-over lives outside #view — redraw its chart too. */
+  if(window._oAcc&&document.getElementById('o-chart'))drawAdminChart();
+}
+paintTheme();
+
+let VIEW='overview';
+function go(v){
+  VIEW=v;
+  document.querySelectorAll('.sb-link[data-v],.botnav-btn[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  const t=TITLES[v]||['',''];
+  $('pg-title').textContent=t[0]; $('pg-crumb').textContent=t[1];
+  toggleSide(false);
+  $('view').innerHTML='<div class="skel" style="height:110px;margin-bottom:16px"></div><div class="skel" style="height:260px"></div>';
+  VIEWS[v]().catch(e=>{if(!String(e.message).includes('token'))toast('Error: '+e.message,'err')});
+}
+function toggleSide(open){
+  $('side').classList.toggle('open',open);
+  document.body.classList.toggle('nav-open',open);
+}
+/* scrim + Escape close the drawer (mobile only — the scrim lives in the <=960 MQ) */
+document.addEventListener('click',e=>{
+  if(!document.body.classList.contains('nav-open'))return;
+  /* .botnav: "More" opens the drawer with this same click — without the
+     exception the event bubbling to the document would close it immediately */
+  if(e.target.closest('#side')||e.target.closest('.burger')||e.target.closest('.botnav'))return;
+  toggleSide(false);
+});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&document.body.classList.contains('nav-open'))toggleSide(false);
+});
+function toggleCollapse(){const c=$('side').classList.toggle('collapsed');
+  localStorage.setItem('pf_admin_collapsed',c?'1':'0')}
+function toast(msg,kind='ok',ms=6000){
+  const t=document.createElement('div');t.className='toast '+kind;t.textContent=msg;
+  $('toasts').appendChild(t);
+  setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),350)},ms);
+}
+function closeOver(){$('over').classList.remove('open')}
+function openOver(title,html){$('o-title').textContent=title;$('o-body').innerHTML=html;$('over').classList.add('open')}
+
+const STATUS_LBL={active:'evaluation',funded:'funded',failed:'failed',passed:'passed',provisioning:'provisioning'};
+const PHASE_LBL={eval_1:'Phase 1',eval_2:'Phase 2',funded:'Funded'};
+function mini(pct){const p=Math.min(100,Math.max(0,pct||0));
+  const c=p>=100?'bad':p>=70?'warn':'ok';
+  return `<div class="mini"><i class="${c}" style="width:${p}%"></i></div>`}
+
+/* ============================ VIEWS ============================ */
+const VIEWS={
+ async overview(){
+  const [s,pay,kyc,tick,orders]=await Promise.all([
+    api('/api/stats'),api('/api/admin/payout-requests'),api('/api/admin/kyc'),
+    api('/api/admin/tickets'),api('/api/admin/orders')]);
+  const revenue=orders.filter(o=>o.status==='paid').reduce((x,o)=>x+o.amount_usd,0);
+  const pendingPay=pay.filter(r=>r.status==='pending').length;
+  const openTick=tick.filter(t=>t.status==='open').length;
+  const tile=(cls,ico,lbl,val,sub)=>`<div class="stat-tile"><div class="tile-ic ${cls}">${ICO[ico]}</div>
+    <div><div class="lbl">${lbl}</div><div class="val">${val}</div>${sub?`<div class="sub">${sub}</div>`:''}</div></div>`;
+  const todo=(n,label,view,ico)=>`<div class="todo ${n?'has':''}" onclick="go('${view}')">
+    <div class="tile-ic ${n?'orange':'blue'}">${ICO[ico]}</div>
+    <div><div class="n">${n}</div><div class="l">${label}</div></div><span class="go">${ICO.arrow}</span></div>`;
+  $('view').innerHTML=`
+    <div class="sysbar">
+      <span class="sys ${s.stripe==='mock'?'warn':''}"><span class="dot"></span>Payments: <b>${esc(s.stripe)}</b></span>
+      <span class="sys"><span class="dot"></span>Provisioning queue: <b>${s.provisioning??0}</b></span>
+      <span class="sys"><span class="dot"></span>Pool free: <b>${s.pool_free??0}</b></span>
+    </div>
+    <div class="todo-grid">
+      ${todo(pendingPay,'payout requests to review','payouts','wallet')}
+      ${todo((kyc.pending||[]).length,'KYC submissions pending','kyc','shield')}
+      ${todo(openTick,'support tickets open','tickets','chat')}
+    </div>
+    <div class="stats-row">
+      ${tile('purple','layers','Accounts',s.total,`${s.active} active · ${s.provisioning??0} provisioning`)}
+      ${tile('green','trend','Funded',s.funded,`${s.failed} failed`)}
+      ${tile('blue','users','Traders',s.traders,`${s.orders_paid} paid orders`)}
+      ${tile('orange','dollar','Revenue','$'+fmt0(revenue),'all paid orders')}
+    </div>
+    <div class="sec-card card-sm">
+      <h3>Recent orders</h3>
+      ${orders.length?`<div class="tbl-wrap tw-sm" style="border:0;box-shadow:none;border-radius:0"><table class="tbl"><thead><tr>
+        <th>#</th><th>Trader</th><th>Product</th><th>Amount</th><th>Status</th><th>Account</th></tr></thead>
+        <tbody>${orders.slice(0,8).map(o=>`<tr>
+          <td class="num">${o.id}</td><td>${esc(o.trader_email||'—')}</td><td>${esc(o.product_key)}</td>
+          <td class="num">$${fmt(o.amount_usd)}</td>
+          <td><span class="status ${o.status==='paid'?'paid':'pending'}"><span class="dot"></span>${esc(o.status)}</span></td>
+          <td class="num">${o.account_id||'—'}</td></tr>`).join('')}</tbody></table></div>`
+        :'<p class="muted" style="font-size:13px">No orders yet.</p>'}
+    </div>`;
+ },
+
+ async accounts(){
+  const list=await api('/api/accounts');
+  window._accs=list;
+  window._accFilter=window._accFilter||'all';
+  renderAccounts();
+ },
+
+ async payouts(){
+  /* Full list: every booked payout (including ones issued by hand from the
+     account card) plus requests that have not become a payout yet. */
+  window._payReqs=await api('/api/admin/payouts');
+  renderPayoutsView();
+ },
+
+ async kyc(){
+  window._kycData=await api('/api/admin/kyc');
+  renderKyc();
+ },
+
+ _kycRender(){
+  const d=window._kycData||{};
+  const pending=d.pending||[], histAll=d.history||[];
+  const kf=window._kycFilter||'all';
+  const hist=histAll.filter(t=>kf==='all'||t.status===kf);
+  const cards=pending.length?`<div class="badge-grid" style="grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr))">`+
+    pending.map(t=>`<div class="panel">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+        <div><h3 style="font-size:15.5px">${esc(t.full_name||t.email)}</h3>
+          <div class="muted" style="font-size:12px">${esc(t.email)}</div></div>
+        <span class="status pending"><span class="dot"></span>pending</span>
+      </div>
+      <div style="margin:12px 0">
+        <div class="kv"><span>Country</span><b>${esc(t.country||'—')}</b></div>
+        <div class="kv"><span>Date of birth</span><b>${esc(t.dob||'—')}</b></div>
+        <div class="kv"><span>Document</span><b>${esc(t.id_type||'—')} ${esc(t.id_number||t.doc_ref||'')}</b></div>
+        <div class="kv"><span>Address</span><b style="font-family:var(--body);font-weight:500;text-align:right">${esc(t.address||'—')}</b></div>
+        <div class="kv"><span>Submitted</span><b>${t.submitted_at?dstr(t.submitted_at):'—'}</b></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        ${(t.docs||[]).length?t.docs.map(k=>`<button class="btn-o sm" onclick="viewDoc(${t.trader_id},'${k}')">${esc(k.replace('_',' '))}</button>`).join('')
+          :'<span class="muted" style="font-size:12px">No documents uploaded</span>'}
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn-p" style="flex:1" onclick="approveKyc(${t.trader_id})">Approve</button>
+        <button class="btn-o" onclick="rejectKyc(${t.trader_id})">Reject</button>
+      </div>
+    </div>`).join('')+`</div>`
+    :`<div class="empty"><h3>Nothing to verify</h3><p>KYC submissions from traders show up here.</p></div>`;
+  const histTbl=histAll.length?`<div class="sec-card card-md" style="margin-top:18px">
+    <h3>History</h3>
+    <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Past verification decisions.</p>
+    <div class="toolbar" style="margin-bottom:10px">
+      <div class="seg">${[['all','All'],['approved','Approved'],['rejected','Rejected']]
+        .map(([k,l])=>`<button class="${kf===k?'on':''}" onclick="window._kycFilter='${k}';renderKyc()">${l}</button>`).join('')}</div>
+      <span class="count-pill">${hist.length} of ${histAll.length}</span>
+    </div>
+    ${hist.length?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="admin.kyc">
+      <thead><tr><th>Reviewed</th><th>Trader</th><th>Country</th><th>Document</th><th>Status</th><th class="no-sort">Documents</th><th class="no-sort"></th></tr></thead>
+      <tbody>${hist.map(t=>`<tr>
+        <td class="muted" data-sort="${esc(t.reviewed_at||'')}">${t.reviewed_at?dstr(t.reviewed_at):'—'}</td>
+        <td>${esc(t.full_name||'—')}<div class="muted" style="font-size:11.5px">${esc(t.email)}</div></td>
+        <td class="muted">${esc(t.country||'—')}</td>
+        <td class="muted">${esc(t.id_type||'—')} ${esc(t.id_number||t.doc_ref||'')}</td>
+        <td><span class="status ${t.status==='approved'?'funded':'failed'}"><span class="dot"></span>${esc(t.status)}</span></td>
+        <td>${(t.docs||[]).map(k=>`<button class="btn-o sm" onclick="viewDoc(${t.trader_id},'${k}')">${esc(k.replace('_',' '))}</button>`).join(' ')||'<span class="muted">—</span>'}</td>
+        <td style="white-space:nowrap"><button class="btn-o sm" onclick="revertKyc(${t.trader_id})"
+          title="Undo this decision, back to the pending queue">Revert</button>
+          ${XBTN(`deleteKycRow(${t.trader_id},'${esc(t.email)}')`,'Delete KYC record and uploaded documents')}</td></tr>`).join('')}
+      </tbody></table></div>`:`<p class="muted" style="font-size:13px">No ${esc(kf)} decisions.</p>`}</div>`:'';
+  $('view').innerHTML=cards+histTbl;
+ },
+
+ async tickets(){
+  const rows=await api('/api/admin/tickets');
+  window._tickets=rows;
+  const row=t=>`
+    <div class="ticket-row" onclick="openTicket(${t.id})">
+      <div class="tile-ic ${t.status==='open'?'orange':t.status==='answered'?'green':'blue'}" style="width:36px;height:36px;flex:0 0 36px">${ICO.chat}</div>
+      <div class="sub"><b>${esc(t.subject)}</b>
+        <span>#${t.id} · ${esc(t.trader_email||'—')} · ${t.messages} message${t.messages>1?'s':''} · ${dstr(t.last_ts)}</span></div>
+      <span class="status ${t.status==='closed'?'failed':t.status==='answered'?'paid':'pending'}"><span class="dot"></span>${esc(t.status)}</span>
+    </div>`;
+  const active=rows.filter(t=>t.status!=='closed'), closed=rows.filter(t=>t.status==='closed');
+  $('view').innerHTML=(active.length?`<div class="tbl-wrap">`+active.map(row).join('')+`</div>`
+      :`<div class="empty"><h3>No open tickets</h3><p>Support conversations started by traders appear here.</p></div>`)
+    +(closed.length?`<div class="sec-card" style="margin-top:18px">
+      <h3>History</h3>
+      <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Closed tickets. Click to review the conversation.</p>
+      <div class="tbl-wrap">`+closed.map(row).join('')+`</div></div>`:'');
+ },
+
+ async orders(){
+  window._orders=await api('/api/admin/orders');
+  renderOrders();
+ },
+
+ async pool(){
+  const poolData=await api('/api/admin/pool');
+  const rows=poolData.pool||[], waiting=poolData.waiting||[];
+  const free=rows.filter(p=>!p.claimed).length;
+  // how many accounts are missing per size — the admin should know WHAT to add
+  const missingBySize={};
+  waiting.forEach(w=>{missingBySize[w.account_size]=(missingBySize[w.account_size]||0)+1});
+  // sizes from the catalog — the pool only makes sense for sizes someone can buy
+  const sizeList=poolData.sizes||[];
+  window._pool=rows; window._poolSizes=sizeList;
+  const sizeOptions=(chosenSize)=>sizeList.map(r=>
+    `<option value="${r}"${Number(chosenSize)===r?' selected':''}>$${fmt0(r)}</option>`).join('');
+  $('view').innerHTML=`
+    ${waiting.length?`<div class="sec-card card-sm" style="border-color:var(--gold-line);background:var(--gold-bg)">
+      <h3>${waiting.length} paid ${waiting.length===1?'order is':'orders are'} waiting for an MT5 account</h3>
+      <p class="muted" style="font-size:12.5px;margin:6px 0 12px">These challenges are paid for but not tradable yet: the pool has no free account of that size. Add one below and it is assigned automatically.</p>
+      <div class="tbl-wrap tw-sm"><table class="tbl sortable" data-tkey="admin.pool-waiting">
+        <thead><tr><th>Account</th><th>Trader</th><th>Needs size</th><th>Waiting since</th></tr></thead>
+        <tbody>${waiting.map(w=>`<tr>
+          <td class="num">#${w.account_id}</td>
+          <td>${esc(w.trader_email||'—')}</td>
+          <td class="num"><b>$${fmt0(w.account_size)}</b></td>
+          <td class="muted" data-sort="${esc(w.created_at||'')}">${w.created_at?dstr(w.created_at):'—'}</td></tr>`).join('')}
+        </tbody></table></div>
+      <p class="muted" style="font-size:12.5px;margin-top:10px">Missing: ${Object.entries(missingBySize).map(([sizeKey,cnt])=>`<b>${cnt}×</b> $${fmt0(Number(sizeKey))}`).join(', ')}</p>
+    </div>`:''}
+
+    <div class="sec-card card-md">
+      <h3>Simulated accounts</h3>
+      <p class="muted" style="font-size:12.5px;margin-bottom:14px">Generates MT5-style credentials locally, with no real server behind them. Accounts provisioned from these entries are driven by the Trade BOT, not a live feed.</p>
+      <div class="pool-form">
+        <div><label class="muted" style="font-size:12px">Account size</label>
+          <select id="sim-size" class="inp">${sizeOptions(50000)}</select></div>
+        <div><label class="muted" style="font-size:12px">How many</label>
+          <input id="sim-count" class="inp" type="number" min="1" max="50" value="5"></div>
+      </div>
+      <button class="btn-p" onclick="genSim()">Generate simulated accounts</button>
+      <label style="display:flex;align-items:center;gap:9px;margin-top:14px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="sim-fb" ${poolData.sim_fallback?'checked':''} onchange="setSimFallback(this.checked)" style="width:16px;height:16px;accent-color:var(--acc)">
+        Auto-provision simulated credentials when the pool has no matching account
+      </label>
+      <p class="muted" style="font-size:12px;margin-top:6px">With this on, a paid challenge never waits: if no free account of the right size is in the pool, the platform generates simulated credentials and activates the account right away.</p>
+    </div>
+
+    <div class="sec-card card-md">
+      <h3>Add account manually</h3>
+      <p class="muted" style="font-size:12.5px;margin-bottom:14px">Accounts you created at your broker. Paste the credentials here. Provisioning assigns the first free account of a matching size when a challenge is purchased.</p>
+      <div class="pool-form">
+        <input id="pl-login" class="inp" placeholder="MT5 login">
+        <input id="pl-pass" class="inp" placeholder="Password">
+        <input id="pl-server" class="inp" placeholder="Server">
+        <select id="pl-size" class="inp">${sizeOptions(null)}</select>
+      </div>
+      <button class="btn-p" onclick="addPool()">+ Add to pool</button>
+    </div>
+    <div class="stats-row">
+      <div class="stat-tile"><div class="tile-ic green">${ICO.bank}</div>
+        <div><div class="lbl">Free accounts</div><div class="val">${free}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic purple">${ICO.users}</div>
+        <div><div class="lbl">Assigned</div><div class="val">${rows.length-free}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic blue">${ICO.layers}</div>
+        <div><div class="lbl">Total in pool</div><div class="val">${rows.length}</div></div></div>
+    </div>
+    <div id="pool-list">${poolListHtml()}</div>`;
+ },
+
+ async settings(){
+  const s=await api('/api/stats');
+  $('view').innerHTML=`
+    <div class="card-cols">
+    <div class="sec-card" style="max-width:560px"><h3>Admin access</h3>
+      <p class="muted" style="font-size:13px;margin:6px 0 12px">You are signed in with an administrator account. Access is granted by the <span class="mono">is_admin</span> flag on the account, not by a shared token.</p>
+      <div class="kv"><span>Signed in as</span><b>${esc(ME?.email||'—')}</b></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+        <button class="btn-o" onclick="signOut()">Sign out</button>
+      </div></div>
+
+    <div class="sec-card" style="max-width:560px"><h3>Runtime</h3>
+      <div style="margin-top:8px">
+        <div class="kv"><span>Payments</span><b>${esc(s.stripe)}</b></div>
+        <div class="kv"><span>Accounts provisioning</span><b>${s.provisioning??0}</b></div>
+        <div class="kv"><span>Free pool accounts</span><b>${s.pool_free??0}</b></div>
+      </div>
+      <p class="muted" style="font-size:12px;margin-top:12px">Runtime values come from the server's environment. Change them in <span class="mono">.env</span> and restart.</p></div>
+
+    <div class="sec-card" style="max-width:560px"><h3>Links</h3>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+        <a class="btn-o sm" href="/" target="_blank">Public website</a>
+        <a class="btn-o sm" href="/portal" target="_blank">Trader portal</a>
+        <a class="btn-o sm" href="/docs" target="_blank">API docs</a>
+      </div></div>
+    </div>`;
+ },
+
+ async telemetry(){
+  const d=await api('/api/admin/telemetry');
+  const items=d.items||[];
+  $('view').innerHTML=items.length?`
+    <p class="muted" style="font-size:12.5px;margin-bottom:10px">Click a row to see the individual events; click a trader email inside to see everything that user did.</p>
+    <div class="tbl-wrap tw-sm"><table class="tbl sortable" data-tkey="admin.telemetry">
+    <thead><tr><th>Day</th><th>Event</th><th style="text-align:right">Count</th>
+      <th style="text-align:right">Unique traders</th></tr></thead>
+    <tbody>${items.map(i=>`<tr class="clickable" onclick="openTelemetryDetail('${esc(i.day)}','${esc(i.name)}')">
+      <td class="num">${esc(i.day)}</td><td>${esc(i.name)}</td>
+      <td class="num" style="text-align:right">${i.count}</td>
+      <td class="num" style="text-align:right">${i.traders}</td></tr>`).join('')}
+    </tbody></table></div>`
+    :`<div class="empty"><h3>No events yet</h3>
+      <p>Product events (signups, logins, orders, check-ins) land here as traders use the platform.</p></div>`;
+ },
+};
+
+
+/* ---------- accounts: filters + table ---------- */
+function renderAccounts(){
+  const list=window._accs||[];
+  const q=(window._accQ||'').toLowerCase();
+  const f=window._accFilter;
+  const rows=list.filter(a=>(f==='all'||a.status===f)&&
+    (!q||String(a.login).includes(q)||(a.trader_name||'').toLowerCase().includes(q)
+      ||(a.trader_email||'').toLowerCase().includes(q)||(a.product_key||'').includes(q)));
+  const seg=[['all','All'],['active','Evaluation'],['funded','Funded'],['failed','Failed'],['provisioning','Provisioning']];
+  $('view').innerHTML=`
+    <div class="toolbar">
+      <input class="inp" id="acc-q" placeholder="Search login, trader, email or plan…" value="${esc(window._accQ||'')}"
+        oninput="window._accQ=this.value;renderAccounts();document.getElementById('acc-q').focus()">
+      <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._accFilter='${k}';renderAccounts()">${l}</button>`).join('')}</div>
+      <span class="count-pill">${rows.length} of ${list.length}</span>
+    </div>
+    ${rows.length?`<div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.accounts">
+      <thead><tr><th>Login</th><th>Trader</th><th>Plan</th><th>Phase</th><th>Status</th>
+        <th style="text-align:right">Balance</th><th style="text-align:right">Equity</th><th style="text-align:right">P&amp;L</th>
+        <th>Daily</th><th>Max DD</th><th>Created</th><th>Paid</th><th class="no-sort"></th></tr></thead>
+      <tbody>${rows.map(a=>{const m=a.metrics||{};
+        return `<tr class="clickable" onclick="openAccount(${a.id})">
+          <td class="num" style="font-weight:600">${a.status==='provisioning'?'<span class="muted">pending…</span>':esc(a.login)}${a.bot_enabled?(a.bot_paused?' <span title="Trade BOT paused">⏸</span>':' <span title="Trade BOT running">🤖</span>'):''}</td>
+          <td>${esc(a.trader_name||'—')}${a.trader_email?`<div class="muted" style="font-size:11px">${esc(a.trader_email)}</div>`:''}</td>
+          <td class="muted">${esc(a.product_key)}</td>
+          <td class="muted">${PHASE_LBL[a.phase]||esc(a.phase)}</td>
+          <td><span class="status ${esc(a.status)}"><span class="dot"></span>${STATUS_LBL[a.status]||esc(a.status)}</span></td>
+          <td class="num" style="text-align:right">$${fmt(a.balance)}</td>
+          <td class="num" style="text-align:right">$${fmt(a.equity)}</td>
+          <td class="num ${(m.profit_pct||0)>=0?'up':'down'}" style="text-align:right">${(m.profit_pct||0)>=0?'+':''}${(m.profit_pct||0).toFixed(2)}%</td>
+          <td data-sort="${(m.daily_loss_used_pct||0).toFixed(2)}">${mini(m.daily_loss_used_pct)}</td>
+          <td data-sort="${(m.overall_dd_used_pct||0).toFixed(2)}">${mini(m.overall_dd_used_pct)}</td>
+          <td class="muted" style="white-space:nowrap" data-sort="${esc(a.created_at||'')}">${a.created_at?dstr(a.created_at):'—'}</td>
+          <td class="muted" style="white-space:nowrap" data-sort="${esc(a.paid_at||'')}">${a.paid_at?dstr(a.paid_at):'—'}</td>
+          <td style="text-align:right" onclick="event.stopPropagation()">${
+            XBTN(`deleteAccountRow(${a.id},'${esc(a.login)}','${esc(a.trader_name||'')}')`,'Delete account')}</td></tr>`}).join('')}
+      </tbody></table></div>`
+      :`<div class="empty"><h3>No accounts match</h3><p>Try a different search or filter.</p></div>`}`;
+}
+
+/* ---------- kyc: seg buttons need a global to call ---------- */
+function renderKyc(){VIEWS._kycRender()}
+
+/* ---------- pool: search + state filter (list only — the forms above keep
+   whatever the admin typed, so only #pool-list re-renders) ---------- */
+function poolSizeOptions(chosen){
+  return (window._poolSizes||[]).map(r=>`<option value="${r}"${Number(chosen)===r?' selected':''}>$${fmt0(r)}</option>`).join('');
+}
+function poolState(p){return p.retired_reason?'retired':p.claimed?'assigned':'free'}
+function poolListHtml(){
+  const rows=window._pool||[];
+  if(!rows.length)return `<div class="empty"><h3>Pool is empty</h3><p>Add the MT5 accounts you created at your broker. Provisioning takes credentials only from here.</p></div>`;
+  const q=(window._poolQ||'').toLowerCase();
+  const f=window._poolFilter||'all';
+  const list=rows.filter(p=>(f==='all'||poolState(p)===f)&&
+    (!q||String(p.platform_login||'').toLowerCase().includes(q)
+      ||(p.platform_server||'').toLowerCase().includes(q)
+      ||(p.trader_email||'').toLowerCase().includes(q)));
+  return `<div class="toolbar">
+      <input class="inp" id="pool-q" placeholder="Search login, server or trader…" value="${esc(window._poolQ||'')}"
+        oninput="window._poolQ=this.value;renderPoolList();document.getElementById('pool-q').focus()">
+      <div class="seg">${[['all','All'],['free','Free'],['assigned','Assigned'],['retired','Retired']]
+        .map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._poolFilter='${k}';renderPoolList()">${l}</button>`).join('')}</div>
+      <span class="count-pill">${list.length} of ${rows.length}</span>
+    </div>`
+    +(list.length?`<div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.pool">
+      <thead><tr><th>#</th><th>Login</th><th class="no-sort">Password</th><th>Server</th><th>Size</th><th>State</th><th>Assigned to</th><th>When</th><th class="no-sort"></th></tr></thead>
+      <tbody>${list.map(p=>`<tr>
+        <td class="num">${p.id}</td><td class="num">${esc(p.platform_login)}${p.simulated?'<div class="muted" style="font-size:10.5px;letter-spacing:.06em">SIMULATED</div>':''}</td>
+        <td>${p.platform_password?`<span class="mono" style="cursor:pointer" title="Click to reveal"
+          onclick="this.textContent=this.textContent==='••••••••'?this.dataset.p:'••••••••'" data-p="${esc(p.platform_password)}">••••••••</span>`:'<span class="muted">—</span>'}</td>
+        <td class="muted">${esc(p.platform_server)}</td><td class="num">$${fmt0(p.account_size)}</td>
+        <td>${p.retired_reason?`<span class="status failed"><span class="dot"></span>retired</span>`
+          :p.claimed?`<span class="status pending"><span class="dot"></span>assigned</span>`
+          :'<span class="status funded"><span class="dot"></span>free</span>'}</td>
+        <td>${p.claimed?`${esc(p.trader_email||'—')}<div class="muted" style="font-size:11.5px">${p.retired_reason?esc(p.retired_reason)+' — not reusable':`account #${p.claimed_by_account_id}${p.account_status?' · '+esc(p.account_status):''}`}</div>`:'<span class="muted">—</span>'}</td>
+        <td class="muted" data-sort="${esc(p.claimed_at||'')}">${p.claimed_at?dstr(p.claimed_at):'—'}</td>
+        <td style="white-space:nowrap">
+          <button class="btn-o sm" onclick="editPool(${p.id})">Edit</button>
+          ${p.claimed?'':' '+XBTN(`delPool(${p.id},'${esc(p.platform_login)}')`,'Remove from pool')}</td></tr>
+        <tr id="pool-edit-${p.id}" class="tr-sub" style="display:none"><td colspan="9" style="background:var(--bg)">
+          <div class="pool-form" style="margin:6px 0">
+            <input id="ed-login-${p.id}" class="inp" value="${esc(p.platform_login)}" placeholder="MT5 login">
+            <input id="ed-pass-${p.id}" class="inp" placeholder="New password (leave empty to keep)">
+            <input id="ed-server-${p.id}" class="inp" value="${esc(p.platform_server)}" placeholder="Server">
+            ${p.claimed?'':`<select id="ed-size-${p.id}" class="inp">${poolSizeOptions(p.account_size)}</select>`}
+          </div>
+          <button class="btn-p sm" onclick="savePool(${p.id},${p.claimed})">Save</button>
+          <button class="btn-o sm" onclick="editPool(${p.id})">Cancel</button>
+          ${p.claimed?`<span class="muted" style="font-size:12px;margin-left:10px">Assigned — new credentials also go to the trader's account; size is locked.</span>`:''}
+        </td></tr>`).join('')}
+      </tbody></table></div>`
+      :`<div class="empty"><h3>No accounts match</h3><p>Try a different search or filter.</p></div>`);
+}
+function renderPoolList(){const el=document.getElementById('pool-list');if(el)el.innerHTML=poolListHtml()}
+
+/* ---------- payouts: status filter + table ----------
+   NB: renderPayouts(id) already exists (the slide-over payout card),
+   hence the -View suffix — a second declaration would shadow it. */
+function renderPayoutsView(){
+  const list=window._payReqs||[];
+  const f=window._payFilter||'all';
+  const rows=list.filter(r=>f==='all'||r.status===f);
+  const seg=[['all','All'],['pending','Pending'],['approved','Approved'],['paid','Paid'],['rejected','Rejected']];
+  $('view').innerHTML=`
+    <div class="toolbar">
+      ${list.length?`<div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._payFilter='${k}';renderPayoutsView()">${l}</button>`).join('')}</div>`:''}
+      <button class="btn-o sm" onclick="openPayoutImport()">Import history</button>
+      ${list.length?`<span class="count-pill">${rows.length} of ${list.length}</span>`:''}
+    </div>`+(rows.length?`<div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.payouts">
+    <thead><tr><th>Date</th><th>Account</th><th>Trader</th><th>Profit</th><th>Trader share</th><th>Method</th><th>Status</th><th class="no-sort">Certificate</th><th class="no-sort"></th></tr></thead>
+    <tbody>${rows.map(r=>`<tr>
+      <td class="muted" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td><td class="num">${esc(r.account_login||'—')}</td>
+      <td>${esc(r.trader_email||'—')}</td>
+      <td class="num">$${fmt(r.profit_amount)}</td><td class="num up">$${fmt(r.trader_share)}</td>
+      <td>${(()=>{const d=r.details||{};
+        const label=r.method==='usdt'?'USDT':r.method==='wise'?'Wise':'Bank';
+        const info=r.method==='usdt'?[d.network,d.address].filter(Boolean).join(' · ')
+          :r.method==='wise'?(d.email||'')
+          :[d.holder,d.iban,d.swift,d.bank_name].filter(Boolean).join(' · ');
+        return `${esc(label)}${info?`<div class="muted mono" style="font-size:11px;max-width:260px;word-break:break-all">${esc(info)}</div>`:''}`})()}</td>
+      <td><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending'
+        :r.status==='approved'?'active':'failed'}"><span class="dot"></span>${esc(r.status)}</span>
+        ${r.status==='rejected'&&r.reject_reason?`<div class="muted" style="font-size:11px;max-width:200px">${esc(r.reject_reason)}</div>`:''}</td>
+      <td style="white-space:nowrap">${r.kind!=='payout'?'<span class="muted">—</span>'
+        :r.cert_url
+          ?`<a class="btn-o sm" href="${r.cert_url}" target="_blank">Open</a>
+            <button class="btn-o sm" onclick="copyCert('${location.origin}${r.cert_url}')">Copy link</button>
+            <button class="btn-o sm" onclick="revokeCert(${r.id})">Revoke</button>`
+          :`<button class="btn-o sm" onclick="makeCert(${r.id})">Generate</button>`}</td>
+      <td style="text-align:right;white-space:nowrap">${r.kind==='request'&&r.status==='pending'
+        ?`<button class="btn-p sm" onclick="approvePayout(${r.id})">Approve &amp; pay</button>
+          <button class="btn-o sm" onclick="rejectPayout(${r.id})">Reject</button>`
+        :XBTN(`deletePayoutRow('${r.kind}',${r.id},${r.trader_share},'${esc(r.account_login||'')}')`,
+              r.kind==='payout'?'Delete payout':'Delete request')}</td></tr>`).join('')}
+    </tbody></table></div>
+    <p class="muted" style="font-size:11.5px;margin-top:10px">Approving pays the trader share and refunds the challenge fee on the first payout for that account.</p>`
+    :list.length?`<div class="empty"><h3>No ${esc(f)} payouts</h3><p>Try a different filter.</p></div>`
+    :`<div class="empty"><h3>No payouts yet</h3><p>Payouts you issue and requests from funded traders both land here.</p></div>`);
+}
+
+/* ---------- orders: search + payment flags ---------- */
+function renderOrders(){
+  const list=window._orders||[];
+  const q=(window._ordQ||'').toLowerCase();
+  const f=window._ordFilter||'all';
+  const rows=list.filter(o=>
+    (f==='all'||(f==='awaiting'?o.flag==='awaiting_crypto':o.status===f))&&
+    (!q||(o.trader_email||'').toLowerCase().includes(q)
+    ||(o.product_key||'').includes(q)||(o.status||'').includes(q)
+    ||(o.flag||'').includes(q)||String(o.id)===q));
+  const paid=list.filter(o=>o.status==='paid');
+  const revenue=paid.reduce((s,o)=>s+o.amount_usd,0);
+  const avg=paid.length?revenue/paid.length:0;
+  $('view').innerHTML=`
+    <div class="stats-row">
+      <div class="stat-tile"><div class="tile-ic green">${ICO.dollar}</div>
+        <div><div class="lbl">Revenue</div><div class="val">$${fmt0(revenue)}</div><div class="sub">${paid.length} paid orders</div></div></div>
+      <div class="stat-tile"><div class="tile-ic blue">${ICO.file}</div>
+        <div><div class="lbl">Orders total</div><div class="val">${list.length}</div><div class="sub">${list.length-paid.length} unpaid</div></div></div>
+      <div class="stat-tile"><div class="tile-ic purple">${ICO.trend}</div>
+        <div><div class="lbl">Average order</div><div class="val">$${fmt0(avg)}</div></div></div>
+    </div>
+    <div class="toolbar">
+      <input class="inp" id="ord-q" placeholder="Search email, product, status…" value="${esc(window._ordQ||'')}"
+        oninput="window._ordQ=this.value;renderOrders();document.getElementById('ord-q').focus()">
+      <div class="seg">${[['all','All'],['paid','Paid'],['pending','Pending'],['awaiting','Awaiting crypto'],['failed','Failed']]
+        .map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._ordFilter='${k}';renderOrders()">${l}</button>`).join('')}</div>
+      <span class="count-pill">${rows.length} of ${list.length}</span>
+    </div>
+    ${rows.length?`<div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.orders">
+      <thead><tr><th>#</th><th>Date</th><th>Trader</th><th>Product</th><th>Amount</th><th>Provider</th><th>Status</th><th>Account</th><th class="no-sort"></th></tr></thead>
+      <tbody>${rows.map(o=>`<tr>
+        <td class="num">${o.id}</td><td class="muted" data-sort="${esc(o.created_at||'')}">${dstr(o.created_at)}</td>
+        <td>${esc(o.trader_email||'—')}</td><td>${esc(o.product_key)}</td>
+        <td class="num">$${fmt(o.amount_usd)}${o.coupon?` <span class="up" style="font-size:11px">(${esc(o.coupon)})</span>`:''}</td>
+        <td class="muted">${esc(o.provider)}</td>
+        <td><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span>
+          ${o.status==='pending'&&o.flag==='awaiting_crypto'?'<div class="muted" style="font-size:11px;white-space:nowrap">⏳ awaiting crypto</div>':''}
+          ${o.status==='failed'&&o.fail_reason?`<div class="muted" style="font-size:11px;max-width:200px">${esc(o.fail_reason)}</div>`:''}</td>
+        <td class="num">${o.account_id||'—'}</td>
+        <td style="white-space:nowrap">${o.status==='paid'?'':`
+          ${o.status==='pending'?`<button class="btn-o sm" onclick="flagOrder(${o.id},'${o.flag==='awaiting_crypto'?'':'awaiting_crypto'}')"
+            title="${o.flag==='awaiting_crypto'?'Clear the awaiting-crypto flag':'Mark as awaiting crypto payment'}">${o.flag==='awaiting_crypto'?'Clear flag':'Crypto?'}</button>
+          <button class="btn-o sm" onclick="markOrderFailed(${o.id})" title="Payment is not coming, close the order with a reason">Mark failed</button>`:''}
+          <button class="btn-p sm" onclick="markOrderPaid(${o.id})" title="Confirm the payment arrived, creates the account">Mark paid</button>`}
+          ${XBTN(`deleteOrderRow(${o.id},'${esc(o.trader_email||'')}',${o.amount_usd},${o.account_id||0})`,'Delete order')}</td></tr>`).join('')}
+      </tbody></table></div>`
+      :`<div class="empty"><h3>${list.length?'No orders match':'No orders yet'}</h3>${list.length?'<p>Try a different search or filter.</p>':''}</div>`}`;
+}
+async function flagOrder(id,flag){
+  try{await api(`/api/admin/orders/${id}/flag`,{method:'POST',body:JSON.stringify({flag})});
+    const o=(window._orders||[]).find(x=>x.id===id);if(o)o.flag=flag||null;
+    toast(flag?'Marked as awaiting crypto payment.':'Flag cleared.','ok');renderOrders()}
+  catch(e){toast('Error: '+e.message,'err')}
+}
+async function markOrderFailed(id){
+  const reason=await askReason({
+    title:`Mark order #${id} as failed`,
+    hint:'The reason stays on the order in this panel. The trader is not e-mailed.',
+    label:'Reason (kept in this panel)',
+    presets:['Payment never arrived','Payment declined by the provider','Duplicate order',
+             'Cancelled by the customer','Suspected fraud'],
+    confirmLabel:'Mark failed',danger:true});
+  if(reason===null)return;
+  try{await api(`/api/admin/orders/${id}/mark-failed`,{method:'POST',body:JSON.stringify({reason})});
+    toast('Order marked as failed.','ok');go('orders')}
+  catch(e){toast('Error: '+e.message,'err')}
+}
+async function markOrderPaid(id){
+  if(!confirm('Mark this order as PAID?\n\nThis creates the challenge account and sends the trader their credentials — exactly like a completed card payment.'))return;
+  try{const d=await api(`/api/admin/orders/${id}/mark-paid`,{method:'POST'});
+    toast(d.already?'This order was already paid.':`✅ Paid. Account #${d.account_id} created.`,'ok');go('orders')}
+  catch(e){toast('Error: '+e.message,'err')}
+}
+
+/* Bot pace is stored as a short key; the chip shows what it actually means. */
+const PACE_TXT={light:'1–2 trades/day',steady:'4–8 trades/day',busy:'~20 trades/day'};
+
+async function openAccount(id){
+  const a=await api('/api/accounts/'+id);
+  const m=a.metrics||{};
+  const cred=(l,v)=>v?`<div class="kv"><span>${l}</span><b>${esc(v)}</b></div>`:'';
+  openOver(`${a.login} · ${a.trader_name||'—'}`,`
+    <div class="chip-row">
+      <span class="status ${esc(a.status)}"><span class="dot"></span>${STATUS_LBL[a.status]||esc(a.status)}</span>
+      ${a.trader_email?`<span class="chip">${esc(a.trader_email)}</span>`:''}
+      <span class="chip">${PHASE_LBL[a.phase]||esc(a.phase)}</span>
+      <span class="chip">${esc(a.product_key)}</span>
+      <span class="chip">DD <b>${esc(a.drawdown_type)}</b></span>
+      <span class="chip">split <b>${a.profit_split_pct}%</b></span>
+      ${a.source==='grant'?`<span class="status passed" style="text-transform:none">🎁 granted${a.grant_note?' · '+esc(a.grant_note):''}</span>`:''}
+      ${a.bot_enabled?`<span class="status ${a.bot_paused?'pending':'funded'}" style="text-transform:none">${a.bot_paused?'⏸ Trade BOT paused':'🤖 Trade BOT'}</span>`:''}
+    </div>
+    ${a.breach_reason?`<div class="breach-item">Breached: ${esc(a.breach_reason)}</div>`:''}
+    <div class="panel">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+        <div class="seg-mini"><span>Objective lines</span>
+          <span class="sw">
+            <button data-on="1" class="${objLinesOn()?'on':''}" onclick="setObjLinesAdmin(true)">On</button>
+            <button data-on="0" class="${objLinesOn()?'':'on'}" onclick="setObjLinesAdmin(false)">Off</button>
+          </span></div>
+      </div>
+      <div style="height:220px;position:relative"><canvas id="o-chart"></canvas></div>
+    </div>
+    <div class="sec-card" style="margin:0">
+      <h3 style="font-size:15px;margin-bottom:10px">Objectives</h3>
+      <div class="progress-list">
+        ${m.profit_target_pct?bar('Profit target',(m.profit_pct/m.profit_target_pct*100),false,`${(m.profit_pct||0).toFixed(2)}% / ${m.profit_target_pct}%`):''}
+        ${bar('Daily loss used',m.daily_loss_used_pct,true,`floor $${fmt(m.daily_floor)}`)}
+        ${bar('Max drawdown used',m.overall_dd_used_pct,true,`floor $${fmt(m.overall_floor)}`)}
+      </div>
+      <div class="kv" style="margin-top:12px"><span>Trading days</span><b>${m.trading_days}/${m.min_trading_days}</b></div>
+      <div class="kv"><span>Initial balance</span><b>$${fmt(a.initial_balance)}</b></div>
+      <div class="kv"><span>Created</span><b>${a.created_at?dstr(a.created_at):'—'}</b></div>
+    </div>
+    <div class="sec-card" style="margin:0">
+      <h3 style="font-size:15px;margin-bottom:10px">MT5 credentials</h3>
+      ${cred('Server',a.platform_server)}${cred('Login',a.platform_login)}
+      ${cred('Password',a.platform_password)}
+      ${a.mt5_backed===false?'<div class="kv"><span>Backed by MT5</span><b>no, generated locally</b></div>':''}
+      ${!a.platform_password?'<p class="muted" style="font-size:12.5px">Not provisioned yet.</p>':''}
+    </div>
+    <div class="sec-card" style="margin:0">
+      <h3 style="font-size:15px;margin-bottom:10px">Phase</h3>
+      <div class="chip-row" style="margin-bottom:10px">
+        <span class="chip">now <b>${PHASE_LBL[a.phase]||esc(a.phase)}</b></span>
+        <span class="status ${esc(a.status)}"><span class="dot"></span>${STATUS_LBL[a.status]||esc(a.status)}</span>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${a.phase!=='eval_1'?`<button class="btn-o sm" onclick="setPhase(${a.id},'eval_1')">Back to Phase 1</button>`:''}
+        ${(a.steps>=2&&a.phase!=='eval_2')?`<button class="btn-o sm" onclick="setPhase(${a.id},'eval_2')">Move to Phase 2</button>`:''}
+        ${a.phase!=='funded'?`<button class="btn-p sm" onclick="setPhase(${a.id},'funded')">Make funded</button>`:''}
+        ${a.status!=='failed'?`<button class="btn-o sm" style="border-color:var(--red-line);color:var(--red)" onclick="breachAccount(${a.id})">Breach account</button>`:''}
+      </div>
+      <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
+        The risk engine promotes accounts automatically once the profit target and minimum
+        trading days are met, but only while something feeds the account. With the live feed
+        off, this is the way to move a trader forward. Changing the phase <b>resets balance,
+        drawdown and the trading-day counter</b>, exactly like an automatic promotion.</p>
+    </div>
+    <div class="sec-card" style="margin:0" id="cert-card">
+      <h3 style="font-size:15px;margin-bottom:10px">Certificates</h3>
+      <div class="muted" style="font-size:12.5px">Loading…</div>
+    </div>
+    <div class="sec-card" style="margin:0" id="payout-card">
+      <h3 style="font-size:15px;margin-bottom:10px">Payouts &amp; certificates</h3>
+      <div class="muted" style="font-size:12.5px">Loading…</div>
+    </div>
+    <div class="sec-card" style="margin:0">
+      <h3 style="font-size:15px;margin-bottom:10px">Rule breaches</h3>
+      ${(a.breaches||[]).length?a.breaches.map(b=>`<div class="breach-item" style="margin-bottom:8px">${dstr(b.ts)} · [${esc(b.type)}] ${esc(b.detail)}</div>`).join('')
+        :'<p class="muted" style="font-size:12.5px">None recorded.</p>'}
+    </div>
+    <div class="sec-card" style="margin:0" id="hist-card">
+      <h3 style="font-size:15px;margin-bottom:10px">History</h3>
+      <div class="muted" style="font-size:12.5px">Loading…</div>
+    </div>
+    <div class="sec-card" style="margin:0">
+      <h3 style="font-size:15px;margin-bottom:10px">Trade BOT</h3>
+      ${a.bot_enabled?`
+        <div class="chip-row" style="margin-bottom:12px">
+          <span class="status ${a.bot_paused?'pending':'funded'}"><span class="dot"></span>${a.bot_paused?'paused':'running'}</span>
+          <span class="chip">style <b>${esc(a.bot_style||'balanced')}</b></span>
+          <span class="chip">pace <b>${esc(PACE_TXT[a.bot_pace]||a.bot_pace||'steady')}</b></span>
+          ${a.bot_target_pct?`<span class="chip">stops at <b>+${a.bot_target_pct}%</b></span>`:''}
+        </div>
+        ${(a.bot_target_pct && (m.profit_pct||0) >= a.bot_target_pct)?`
+          <div class="warn-box" style="margin:0 0 12px;background:var(--gold-bg);border:1px solid var(--gold-line);color:var(--gold-ink)">
+            <b style="display:block">Target reached — the bot stopped opening positions</b>
+            It is still running at +${(m.profit_pct||0).toFixed(2)}%, just idle. Raise the target below to continue from here.
+          </div>`:''}
+        ${a.market_closed?`
+          <div class="warn-box" style="margin:0 0 12px;background:var(--gold-bg);border:1px solid var(--gold-line);color:var(--gold-ink)">
+            <b style="display:block">Market closed. The bot takes no positions until Monday</b>
+            This challenge has no Weekend Trading add-on, so there is nothing it could trade right now.
+            It stays on and picks up on its own when the week opens.
+          </div>`:''}
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+          <div><label class="muted" style="font-size:12px">Target profit</label>
+            <input id="bot-newtarget" class="inp" type="number" step="0.1" min="0"
+                   style="max-width:130px" value="${(a.bot_target_pct||0).toFixed(1)}"></div>
+          <button class="btn-o" onclick="setBotTarget(${a.id})">Update target</button>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn-p" onclick="pauseBot(${a.id},${a.bot_paused?'false':'true'})">${a.bot_paused?'Resume bot':'Pause bot'}</button>
+          <button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="stopBot(${a.id})">Stop bot</button>
+        </div>
+        <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
+          <b>Target</b> is the account profit at which the bot stops trading. Raise it in 0.1% steps
+          to let it keep going, or set <b>0</b> for no limit. Changing it never resyncs the balance,
+          so the equity curve continues without a jump.
+          <b>Pause</b> only stops new entries — an open position runs to its close, the account
+          stays on bot data and the balance is kept. <b>Stop</b> ends the bot for good and
+          resyncs the balance to the live feed.</p>`
+      :`
+        ${a.market_closed?`
+          <div class="warn-box" style="margin:0 0 12px;background:var(--gold-bg);border:1px solid var(--gold-line);color:var(--gold-ink)">
+            <b style="display:block">Market closed. Nothing will happen until Monday</b>
+            You can start the bot now, but with no Weekend Trading add-on on this challenge it
+            stays flat over the weekend and opens its first position when the week opens.
+          </div>`:''}
+        <div class="pool-form">
+          <div><label class="muted" style="font-size:12px">Style</label>
+            <select id="bot-style" class="inp">
+              <option value="scalper">Scalper — many small trades</option>
+              <option value="balanced" selected>Balanced — day trader</option>
+              <option value="swing">Swing — fewer, larger trades</option>
+            </select></div>
+          <div><label class="muted" style="font-size:12px">Pace</label>
+            <select id="bot-pace" class="inp">
+              <option value="light">Light — 1–2 trades a day</option>
+              <option value="steady" selected>Steady — 4–8 trades a day</option>
+              <option value="busy">Busy — around 20 trades a day</option>
+            </select></div>
+          <div><label class="muted" style="font-size:12px">Stop at profit %</label>
+            <input id="bot-target" class="inp" type="number" step="0.5" min="0" value="0" placeholder="0 = no limit"></div>
+        </div>
+        <button class="btn-p" onclick="startBot(${a.id})">Start Trade BOT</button>`}
+      <p class="muted" style="font-size:12px;margin-top:12px;line-height:1.55">
+        Fills this account's dashboard with trading activity: varied instruments, a positive
+        equity curve, always inside the account's own risk rules.
+        <b>While the bot runs, this account is not read from MT5</b>, so the portal will
+        diverge from the trader's MetaTrader terminal, and stopping the bot resyncs the
+        balance back to the real account. <b>Pace is how many trades a day</b> the bot takes:
+        it spreads them across the day and holds each position for a matching stretch, so
+        Busy is around one trade an hour, not one a minute. Style shades that count: a
+        scalper sits at the top of the range, a swing trader at the bottom.
+        <b>No pace trades over the weekend</b> unless the challenge has the Weekend Trading
+        add-on, and then the bot only touches crypto, the one market open on Saturday.</p>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteAccount(${a.id},'${esc(a.login)}')">Delete account</button>
+      ${a.trader_id?`<button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteTrader(${a.trader_id},'${esc(a.trader_email||a.trader_name||'')}')"
+        title="Removes the client and ALL their data, freeing the e-mail for a fresh signup">Delete client &amp; all data</button>`:''}
+    </div>`);
+  renderCerts(a.id);
+  renderPayouts(a.id);
+  renderHistory(a.id);
+  window._oAcc=a;
+  drawAdminChart();
+}
+
+/* ---------- objective lines on the slide-over chart (same as the portal) ---------- */
+function objLinesOn(){try{return localStorage.getItem('pf_obj_lines')!=='off'}catch(e){return true}}
+function setObjLinesAdmin(on){
+  try{localStorage.setItem('pf_obj_lines',on?'on':'off')}catch(e){}
+  document.querySelectorAll('.seg-mini button').forEach(b=>b.classList.toggle('on',(b.dataset.on==='1')===on));
+  drawAdminChart();
+}
+function adminDetailLines(){
+  const a=window._oAcc; if(!a)return [];
+  const m=a.metrics||{},th=chartTheme(),L=[];
+  if(m.target_equity)L.push({y:m.target_equity,label:'Target',color:th.green});
+  if(m.daily_floor)L.push({y:m.daily_floor,label:'Daily loss limit',color:th.gold});
+  if(m.overall_floor)L.push({y:m.overall_floor,label:'Max loss',color:th.red});
+  L.push({y:a.initial_balance,label:'Account size',color:th.dim});
+  return L;
+}
+function drawAdminChart(){
+  const a=window._oAcc,c=(a&&a.equity_curve)||[];
+  if(window._oChart){window._oChart.destroy();window._oChart=null}
+  if(!document.getElementById('o-chart')||c.length<2)return;
+  window._oChart=new Chart($('o-chart'),equityChartConfig(c,{lines:objLinesOn()?adminDetailLines():[]}));
+}
+function bar(label,pct,danger,suffix){const p=Math.min(100,Math.max(0,pct||0));
+  const cls=danger?(p>=100?'bad':p>=70?'warn':'mid'):'ok';
+  return `<div><div class="prog-top"><span>${label}</span><b>${suffix||''} · ${(pct||0).toFixed(1)}%</b></div>
+    <div class="prog-bar"><i class="${cls}" style="width:${p}%"></i></div></div>`}
+
+async function startBot(id){
+  const body={style:$('bot-style').value,pace:$('bot-pace').value,
+    target_pct:parseFloat($('bot-target').value||'0')||0};
+  try{await api(`/api/admin/accounts/${id}/bot`,{method:'POST',body:JSON.stringify(body)});
+    toast('🤖 Trade BOT started. The dashboard starts filling on the next poller tick.','ok',8000);
+    openAccount(id);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+/* ---------- account timeline (orders, payments, breaches, payouts) ---------- */
+async function renderHistory(id){
+  const el=$('hist-card'); if(!el)return;
+  let d; try{d=await api(`/api/accounts/${id}/history`)}catch(e){
+    el.innerHTML='<h3 style="font-size:15px">History</h3>'
+      +`<p class="muted" style="font-size:12.5px">Could not load: ${esc(e.message)}</p>`;return}
+  const ic={order:'🧾',payment:'💳',breach:'⛔',payout:'💸',account:'🏁'};
+  el.innerHTML=`<h3 style="font-size:15px;margin-bottom:10px">History</h3>`
+    +((d.items||[]).length?d.items.map(i=>`
+      <div class="kv" style="align-items:flex-start">
+        <span style="white-space:nowrap" class="muted">${dstr(i.ts)}</span>
+        <b style="text-align:right;font-weight:500">${ic[i.kind]||'·'} ${esc(i.label)}</b>
+      </div>`).join('')
+      :'<p class="muted" style="font-size:12.5px">Nothing recorded yet.</p>');
+}
+
+/* ---------- achievement certificates ---------- */
+async function renderCerts(id){
+  const el=$('cert-card'); if(!el)return;
+  let list; try{list=await api(`/api/admin/accounts/${id}/certificates`)}catch(e){
+    el.innerHTML='<h3 style="font-size:15px">Certificates</h3>'
+      +`<p class="muted" style="font-size:12.5px">Could not load: ${esc(e.message)}</p>`;return}
+  el.innerHTML=`<h3 style="font-size:15px;margin-bottom:10px">Certificates</h3>
+    ${list.map(c=>`<div class="kv" style="align-items:center">
+      <span>${esc(c.label)}</span>
+      <span style="display:flex;align-items:center;gap:8px">
+        ${c.url
+          ? `<a class="btn-o sm" href="${c.url}" target="_blank">Open</a>
+             <button class="btn-o sm" onclick="copyCert('${location.origin}${c.url}')">Copy link</button>`
+          : c.available
+            ? `<button class="btn-p sm" onclick="makeAchievementCert(${id},'${c.kind}')">Issue</button>`
+            : `<span class="muted" style="font-size:12px">not reached yet</span>`}
+      </span></div>`).join('')}
+    <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
+      Each stage gets its own document with its own verifiable number. A certificate can only be
+      issued for a stage the account actually reached. Move the phase first if you need it earlier.</p>`;
+}
+async function makeAchievementCert(id,kind){
+  try{const r=await api(`/api/admin/accounts/${id}/certificate`,{method:'POST',body:JSON.stringify({kind})});
+    toast(`Certificate issued: ${location.origin}${r.url}`,'ok',9000); renderCerts(id);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+
+/* ---------- shared reason picker ----------
+   Every admin action that needs a trader-facing reason goes through this modal:
+   pick a preset from the list or choose Custom… and type your own.
+   Resolves with the reason string, or null when the admin cancels. */
+function askReason(opts){
+  return new Promise(resolve=>{
+    const box=document.createElement('div');
+    box.id='reason-modal';box.className='modal-wrap';
+    const done=v=>{box.remove();resolve(v)};
+    box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-head"><h3>${opts.title}</h3>
+        <button class="icon-btn" id="rs-x" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+      ${opts.hint?`<p class="muted" style="font-size:12.5px;margin-bottom:14px">${opts.hint}</p>`:''}
+      <div class="stack">
+        <div><label class="muted" style="font-size:12px">${opts.label||'Reason (shown to the trader)'}</label>
+          <select id="rs-sel" class="inp">
+            ${opts.presets.map(p=>`<option>${p}</option>`).join('')}
+            <option value="__custom__">Custom…</option></select></div>
+        <textarea id="rs-txt" class="inp hidden" rows="3" maxlength="200"
+          placeholder="Write your own reason"></textarea>
+        <button class="btn-p lg" style="width:100%${opts.danger?';background:var(--red)':''}"
+          id="rs-go">${opts.confirmLabel||'Confirm'}</button>
+      </div></div>`;
+    box.onclick=()=>done(null);
+    box.querySelector('#rs-x').onclick=()=>done(null);
+    const sel=box.querySelector('#rs-sel'),txt=box.querySelector('#rs-txt');
+    sel.onchange=()=>{const c=sel.value==='__custom__';
+      txt.classList.toggle('hidden',!c); if(c)txt.focus()};
+    box.querySelector('#rs-go').onclick=()=>{
+      const custom=sel.value==='__custom__';
+      const v=custom?(txt.value||'').trim():sel.value;
+      if(custom&&!v){txt.focus();return}
+      done(v)};
+    document.body.appendChild(box);
+  });
+}
+
+/* ---------- payouts + certificates ---------- */
+async function breachAccount(id){
+  const breachReason=await askReason({
+    title:'Breach this account',danger:true,confirmLabel:'Breach account',
+    hint:'The account is closed as <b>failed</b> and the reason below is shown to the trader in the portal and by e-mail.',
+    presets:['Daily loss limit exceeded','Maximum drawdown exceeded',
+      'Prohibited trading strategy','Copy trading between accounts',
+      'News trading violation','Account sharing','Closed by the risk desk']});
+  if(breachReason===null)return;   // Cancel
+  try{const r=await api(`/api/admin/accounts/${id}/breach`,{method:'POST',
+      body:JSON.stringify({reason:breachReason})});
+    toast(`Account closed: ${r.reason}`,'ok',8000); openAccount(id);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+
+async function setPhase(id,phase){
+  const phaseNames={eval_1:'Phase 1',eval_2:'Phase 2',funded:'Funded'};
+  if(!confirm(`Move this account to ${phaseNames[phase]}?\n\nBalance, drawdown and the trading-day `
+    +`counter reset, same as an automatic promotion.`))return;
+  try{await api(`/api/admin/accounts/${id}/phase`,{method:'POST',body:JSON.stringify({phase})});
+    toast(`Account moved to ${phaseNames[phase]}.`,'ok'); openAccount(id);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+
+async function renderPayouts(id){
+  const el=$('payout-card'); if(!el)return;
+  let d; try{d=await api(`/api/admin/accounts/${id}/payouts`)}catch(e){
+    el.innerHTML='<h3 style="font-size:15px">Payouts &amp; certificates</h3>'
+      +`<p class="muted" style="font-size:12.5px">Could not load: ${esc(e.message)}</p>`;return}
+  const lista=d.payouts.length?d.payouts.map(p=>`
+    <div class="kv" style="align-items:center">
+      <span>${dstr(p.ts)} · profit $${fmt(p.profit_amount)}${p.note?' · '+esc(p.note):''}</span>
+      <span style="display:flex;align-items:center;gap:8px">
+        <b class="up">$${fmt(p.trader_share)}</b>
+        ${p.cert_url
+          ? `<a class="btn-o sm" href="${p.cert_url}" target="_blank">Certificate</a>
+             <button class="btn-o sm" onclick="copyCert('${location.origin}${p.cert_url}')">Copy link</button>
+             <button class="btn-o sm" onclick="revokeCert(${p.id},${id})">Revoke</button>`
+          : `<button class="btn-o sm" onclick="makeCert(${p.id},${id})">Generate</button>`}
+      </span>
+    </div>`).join('')
+    : '<p class="muted" style="font-size:12.5px">No payouts on this account yet.</p>';
+  el.innerHTML=`<h3 style="font-size:15px;margin-bottom:10px">Payouts &amp; certificates</h3>
+    ${lista}
+    ${d.status!=='funded'?`<p class="muted" style="font-size:12.5px;margin-top:12px">
+        Payouts can only be issued on a <b>funded</b> account. This one is
+        <b>${esc(d.status)}</b>. Move the phase to Funded first.</p>`:`
+    <div class="pool-form" style="margin-top:14px">
+      <div><label class="muted" style="font-size:12px">Trader payout ($)</label>
+        <input id="po-amount" class="inp" type="number" step="0.01" min="0.01" value="${d.suggested_share||''}"
+          placeholder="${d.suggested_share?'':'enter an amount'}"></div>
+      <div><label class="muted" style="font-size:12px">Method</label>
+        <select id="po-method" class="inp">
+          <option value="bank">Bank transfer</option><option value="crypto">Crypto (USDT)</option>
+          <option value="wise">Wise</option><option value="rise">Rise</option></select></div>
+      <div><label class="muted" style="font-size:12px">Note (optional)</label>
+        <input id="po-note" class="inp" placeholder="e.g. 1st payout"></div>
+    </div>
+    <button class="btn-p" onclick="issuePayout(${id})">Issue payout + certificate</button>`}
+    <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
+      Current profit <b>$${fmt(d.profit)}</b> · split <b>${d.split_pct}%</b> → suggested
+      <b>$${fmt(d.suggested_share)}</b>. Issuing a payout books it and
+      <b>resets the account balance to its starting capital</b>, exactly like approving
+      a trader's request. The paid-out profit stops counting toward the next one.</p>`;
+}
+async function issuePayout(id){
+  const amount=parseFloat($('po-amount').value||'0');
+  if(!(amount>0)){toast('Enter a payout amount greater than 0.','err');return}
+  if(!confirm(`Issue a payout of $${amount.toFixed(2)}?\n\nIt is booked as paid and the account `
+    +`balance resets to its starting capital.`))return;
+  try{const p=await api(`/api/admin/accounts/${id}/payout`,{method:'POST',
+      body:JSON.stringify({amount,method:$('po-method').value,note:($('po-note').value||'').trim()||null})});
+    toast(`✅ Payout $${fmt(p.trader_share)} issued. Certificate: ${location.origin}${p.cert_url}`,'ok',10000);
+    openAccount(id);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+/* accId comes from the account slide-over; the Payouts view calls these
+   without it and then the whole list is reloaded instead. */
+async function makeCert(pid,accId){
+  try{await api(`/api/admin/payouts/${pid}/certificate`,{method:'POST'});
+    toast('Certificate generated. It appears on the landing page within a minute.','ok');
+    accId?renderPayouts(accId):VIEWS.payouts();
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+/* Revoking is the only way to take an entry off the landing page strip.
+   The payout stays on the account — only the document and its link go. */
+async function revokeCert(pid,accId){
+  if(!confirm('Revoke this certificate?\n\nThe public link stops working and the entry '
+    +'disappears from the landing page. The payout itself stays on the account.'))return;
+  try{await api(`/api/admin/payouts/${pid}/certificate`,{method:'DELETE'});
+    toast('Certificate revoked. Removed from the landing page.','ok');
+    accId?renderPayouts(accId):VIEWS.payouts();
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+function copyCert(url){navigator.clipboard.writeText(url)
+  .then(()=>toast('Certificate link copied.','ok'),()=>toast('Could not copy.','err'))}
+
+async function pauseBot(id,paused){
+  try{await api(`/api/admin/accounts/${id}/bot`,{method:'PATCH',body:JSON.stringify({paused})});
+    toast(paused?'⏸ Bot paused. No new entries, the account keeps its balance.'
+                :'▶️ Bot resumed.','ok');
+    openAccount(id);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function setBotTarget(id){
+  const cel=parseFloat($('bot-newtarget').value);
+  if(isNaN(cel)||cel<0){toast('Enter a target of 0% or more.','err');return}
+  try{
+    const r=await api(`/api/admin/accounts/${id}/bot`,{method:'PATCH',
+      body:JSON.stringify({target_pct:cel})});
+    toast(r.bot_target_pct?`🎯 Target set to +${r.bot_target_pct}%. The bot continues from here.`
+                          :'🎯 Target removed. The bot trades with no profit limit.','ok');
+    openAccount(id);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function stopBot(id){
+  // After stopping, the account returns to the real feed and resyncs to the
+  // MT5 account state — generated profit vanishes from the dashboard. The admin
+  // must know that BEFORE clicking: from outside it looks like data loss.
+  if(!confirm('Stop the Trade BOT?\n\nThe account goes back to the live MT5 feed, so its balance '
+    +'and equity curve resync to the real account. The generated profit disappears from the dashboard. '
+    +'The trade history stays.'))return;
+  try{const r=await api(`/api/admin/accounts/${id}/bot`,{method:'DELETE'});
+    toast(`Bot stopped. Balance $${fmt(r.balance)}, and the account goes back to the live MT5 feed.`,'ok',8000);
+    openAccount(id);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+
+async function deleteAccount(id,login){
+  if(!confirm(`Delete account ${login}? This removes it from the platform permanently.`))return;
+  try{await api('/api/accounts/'+id,{method:'DELETE'});closeOver();toast('Account deleted.','ok');go('accounts')}
+  catch(e){toast('Error: '+e.message,'err')}
+}
+async function deleteTrader(tid,who){
+  if(!confirm(`Delete client ${who} and ALL their data?\n\nThis permanently removes their profile, every challenge account, orders, KYC documents, payouts, tickets and notifications.\n\nThe e-mail address becomes free again, so the client can sign up from scratch.\n\nThis cannot be undone.`))return;
+  const typed=prompt(`Type DELETE to confirm wiping ${who}:`);
+  if(typed!=='DELETE'){toast('Cancelled. Nothing was deleted.','err');return}
+  try{
+    const r=await api('/api/admin/traders/'+tid,{method:'DELETE'});
+    closeOver();toast(`Client ${r.email} deleted (${r.accounts_removed} account${r.accounts_removed===1?'':'s'}). E-mail is free again.`,'ok',8000);
+    go('accounts');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+
+/* ---------- actions ---------- */
+async function rejectPayout(id){
+  const reason=await askReason({
+    title:'Reject this payout request',danger:true,confirmLabel:'Reject request',
+    hint:'The trader sees the reason under the request status and gets it by e-mail.',
+    presets:['Profit target not met','Minimum trading days not met',
+      'Open positions at the time of the request','Trading activity under review',
+      'KYC verification incomplete']});
+  if(reason===null)return;   // Cancel
+  try{await api(`/api/admin/payout-requests/${id}/reject`,{method:'POST',
+      body:JSON.stringify({reason})});
+    toast('Request rejected.','ok');go('payouts')}
+  catch(e){toast('Error: '+e.message,'err')}
+}
+async function approvePayout(id){
+  if(!confirm('Approve & pay this payout request?\n\nThis pays the trader share (plus the fee refund on a first payout) and cannot be undone.'))return;
+  try{const d=await api(`/api/admin/payout-requests/${id}/approve`,{method:'POST'});
+    toast(`✅ Paid $${fmt(d.total_paid)}${d.fee_refund?` (incl. $${fmt(d.fee_refund)} fee refund)`:''}`,'ok');
+    go('payouts');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function approveKyc(tid){
+  try{await api(`/api/admin/kyc/${tid}/approve`,{method:'POST'});toast('KYC approved.','ok');go('kyc')}
+  catch(e){toast('Error: '+e.message,'err')}
+}
+async function rejectKyc(tid){
+  const reason=await askReason({
+    title:'Reject this verification',danger:true,confirmLabel:'Reject KYC',
+    hint:'The trader is asked to submit their KYC again. The reason shows in their portal and in the e-mail.',
+    presets:['Document unreadable or blurry','Document expired',
+      'Name does not match the account','Incomplete documents']});
+  if(reason===null)return;   // Cancel
+  try{await api(`/api/admin/kyc/${tid}/reject`,{method:'POST',
+      body:JSON.stringify({reason})});toast('KYC rejected.','ok');go('kyc')}
+  catch(e){toast('Error: '+e.message,'err')}
+}
+async function revertKyc(tid){
+  if(!confirm('Revert this KYC decision?\n\nThe application goes back to the pending queue. The trader is NOT notified.'))return;
+  try{await api(`/api/admin/kyc/${tid}/reset`,{method:'POST'});toast('Decision reverted. Back in the pending queue.','ok');go('kyc')}
+  catch(e){toast('Error: '+e.message,'err')}
+}
+async function viewDoc(tid,kind){
+  const r=await fetch(`/api/admin/kyc/${tid}/doc/${kind}`,{headers:adminH()});
+  if(!r.ok){toast('Could not load the document.','err');return}
+  window.open(URL.createObjectURL(await r.blob()),'_blank');
+}
+
+/* ---------- telemetry drill-down ---------- */
+function telemetryRows(items){
+  return `<div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th>Time</th><th>Event</th><th>Trader</th><th>Details</th></tr></thead>
+    <tbody>${items.map(e=>{
+      let props='';
+      try{props=Object.entries(JSON.parse(e.props||'{}')).map(([k,v])=>`${esc(k)}: ${esc(v)}`).join(' · ')}
+      catch(_){props=esc(e.props||'')}
+      return `<tr><td class="muted" style="white-space:nowrap">${dstr(e.ts)}</td><td>${esc(e.name)}</td>
+        <td>${e.trader_id?`<a href="#" onclick="openTraderActivity(${e.trader_id},'${esc(e.email||'')}');return false">${esc(e.email||('#'+e.trader_id))}</a>`:'<span class="muted">—</span>'}</td>
+        <td class="muted" style="font-size:11.5px">${props||'—'}</td></tr>`}).join('')}
+    </tbody></table></div>`;
+}
+async function openTelemetryDetail(day,name){
+  try{const d=await api(`/api/admin/telemetry/events?day=${encodeURIComponent(day)}&name=${encodeURIComponent(name)}`);
+    const items=d.items||[];
+    openOver(`${name} · ${day}`,items.length?telemetryRows(items)
+      :'<div class="empty"><h3>No events</h3></div>')}
+  catch(e){toast('Error: '+e.message,'err')}
+}
+async function openTraderActivity(tid,email){
+  try{const d=await api(`/api/admin/telemetry/events?trader_id=${tid}`);
+    const items=d.items||[];
+    openOver(`Activity · ${email||('trader #'+tid)}`,
+      `<p class="muted" style="font-size:12.5px;margin-bottom:10px">Everything this user did, newest first (last ${items.length} events).</p>`
+      +(items.length?telemetryRows(items):'<div class="empty"><h3>No events</h3></div>'))}
+  catch(e){toast('Error: '+e.message,'err')}
+}
+async function openTicket(id){
+  const t=await api('/api/admin/tickets/'+id);
+  openOver(`#${t.id} · ${t.subject}`,`
+    <div class="chip-row">
+      <span class="status ${t.status==='closed'?'failed':t.status==='answered'?'paid':'pending'}"><span class="dot"></span>${esc(t.status)}</span>
+      <span class="chip">${esc(t.trader_email||'—')}</span>
+      <span class="chip">opened ${dstr(t.created_at)}</span>
+    </div>
+    <div class="thread">${t.thread.map(m=>`
+      <div class="msg ${m.author==='admin'?'trader':'admin'}">
+        <div class="who">${m.author==='admin'?'You (support)':'Trader'} · ${dstr(m.ts)}</div>${esc(m.body)}</div>`).join('')}</div>
+    ${t.status!=='closed'?`
+      <textarea id="tk-reply" class="inp" rows="4" placeholder="Write a reply…"></textarea>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn-p" onclick="replyTicket(${t.id},false)">Send reply</button>
+        <button class="btn-o" onclick="replyTicket(${t.id},true)">Reply &amp; close</button>
+      </div>`:'<p class="muted" style="font-size:12.5px">This ticket is closed.</p>'}`);
+}
+async function replyTicket(id,close){
+  const el=$('tk-reply');const msg=el?el.value.trim():'';
+  if(!msg&&!close){toast('Write a reply first.','err');return}
+  try{await api(`/api/admin/tickets/${id}/reply`,{method:'POST',body:JSON.stringify({message:msg,close:!!close})});
+    closeOver();toast(close?'Ticket closed.':'Reply sent. Trader notified by e-mail.','ok');go('tickets');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function addPool(){
+  const body={platform_login:$('pl-login').value.trim(),platform_password:$('pl-pass').value.trim(),
+    platform_server:$('pl-server').value.trim(),
+    account_size:parseFloat($('pl-size').value||'0')};
+  if(!body.platform_login||!body.platform_password||!body.platform_server||!body.account_size){
+    toast('Login, password, server and account size are all required.','err');return}
+  try{await api('/api/admin/pool',{method:'POST',body:JSON.stringify(body)});toast('Added to pool.','ok');go('pool')}
+  catch(e){toast('Error: '+e.message,'err')}
+}
+async function genSim(){
+  const size=parseFloat($('sim-size').value||'0'), cnt=parseInt($('sim-count').value||'1',10);
+  try{const r=await api('/api/admin/pool/generate-simulated',{method:'POST',
+      body:JSON.stringify({account_size:size,count:cnt})});
+    toast(`${r.created.length} simulated account${r.created.length===1?'':'s'} added to the pool.`,'ok');
+    go('pool');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function setSimFallback(on){
+  try{await api('/api/admin/pool/sim-fallback',{method:'POST',body:JSON.stringify({enabled:on})});
+    toast(on?'Auto-provisioning of simulated credentials is ON.':'Auto-provisioning turned off.','ok');
+  }catch(e){toast('Error: '+e.message,'err');go('pool')}
+}
+function editPool(id){
+  const w=$('pool-edit-'+id); w.style.display=(w.style.display==='none'?'table-row':'none');
+}
+async function savePool(id,claimed){
+  const body={platform_login:$('ed-login-'+id).value.trim(),
+              platform_server:$('ed-server-'+id).value.trim()};
+  const newPass=$('ed-pass-'+id).value.trim();
+  if(newPass)body.platform_password=newPass;
+  if(!claimed){const s=parseFloat($('ed-size-'+id).value||'0'); if(s>0)body.account_size=s}
+  if(!body.platform_login||!body.platform_server){toast('Login and server cannot be empty.','err');return}
+  try{
+    const r=await api('/api/admin/pool/'+id,{method:'PATCH',body:JSON.stringify(body)});
+    toast(r.propagated_to_account?`Saved. Credentials also updated on account #${r.propagated_to_account}.`
+                                 :'Pool entry saved.','ok');
+    go('pool');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+function delPool(id,login){
+  xdel(`/api/admin/pool/${id}`,
+    `Remove ${login} from the pool?\n\nOnly free accounts can be removed — one already handed `
+    +`to a trader stays. This cannot be undone.`,
+    ()=>go('pool'),'Removed from the pool.');
+}
+
+/* ---------- modal: grant a challenge ---------- */
+const GRANT_REASONS=['BOGO promotion','Free upgrade','Compensation','Partner deal','Contest prize','Marketing campaign'];
+
+const grantOpt=(t,chosen)=>`<option value="${t.id}"${chosen===t.id?' selected':''}>`
+  +`${esc(t.email)}${t.full_name?' — '+esc(t.full_name):''} (${t.accounts} acc.)</option>`;
+
+function grantFilter(){
+  const all=window._grantTraders||[],q=($('g-search').value||'').trim().toLowerCase();
+  const sel=$('g-trader'),chosen=parseInt(sel.value);
+  const hit=q?all.filter(t=>(t.email+' '+(t.full_name||'')).toLowerCase().includes(q)):all;
+  sel.innerHTML=hit.map(t=>grantOpt(t,chosen)).join('');
+  // Filtering can drop the selected trader out of the list; without this the
+  // select ends up with nothing chosen and the grant would post NaN as the id.
+  if(sel.selectedIndex<0&&hit.length)sel.selectedIndex=0;
+  $('g-count').textContent=`· ${hit.length} of ${all.length}`;
+  grantPick();
+}
+
+/* Safari paints the selection in an unfocused listbox a barely visible grey,
+   so tapping a trader looks like it did nothing. Spell out who gets the grant. */
+function grantPick(){
+  const t=$('g-trader').selectedOptions[0];
+  $('g-picked').innerHTML=t?`Granting to <b>${esc(t.textContent.split(' (')[0])}</b>`
+                          :'<b>No trader selected</b>';
+}
+
+async function openGrant(traderId){
+  let products=[],traders=[];
+  try{[products,traders]=await Promise.all([
+    (await fetch('/api/products')).json(), api('/api/admin/traders')])}catch(e){toast('Error: '+e.message,'err');return}
+  if(!traders.length){toast('No registered traders yet.','err');return}
+  window._grantTraders=traders;
+  /* Reopening stacks a second #grant-modal, and submitGrant() reads the FIRST
+     match by id — the hidden one, still on its default trader. */
+  document.getElementById('grant-modal')?.remove();
+  const box=document.createElement('div');
+  box.id='grant-modal';box.className='modal-wrap';
+  box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>Grant a challenge</h3>
+      <button class="icon-btn" onclick="document.getElementById('grant-modal').remove()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <p class="muted" style="font-size:12.5px;margin-bottom:14px">Creates a real MT5 account for the trader without payment and e-mails them the credentials. The account behaves exactly like a purchased one.</p>
+    <div class="stack">
+      <div><label class="muted" style="font-size:12px">Trader <span class="muted" id="g-count" style="opacity:.65"></span></label>
+        <input id="g-search" class="inp" style="margin-bottom:7px" placeholder="Search by e-mail or name" oninput="grantFilter()">
+        <select id="g-trader" class="inp" size="6" onchange="grantPick()">${traders.map(t=>grantOpt(t,traderId)).join('')}</select>
+        <div class="muted" id="g-picked" style="font-size:12.5px;margin-top:6px"></div></div>
+      <div><label class="muted" style="font-size:12px">Challenge</label>
+        <select id="g-product" class="inp">${products.map(p=>
+          `<option value="${esc(p.key)}">${esc(p.label)} — $${fmt0(p.account_size)} · normally $${fmt0(p.price_usd)}</option>`).join('')}</select></div>
+      <div><label class="muted" style="font-size:12px">Customer paid for <span style="opacity:.65">(optional, BOGO upgrade)</span></label>
+        <select id="g-paid" class="inp">
+          <option value="">— not a paid upgrade —</option>
+          ${products.map(p=>`<option value="${esc(p.key)}">${esc(p.label)} — $${fmt0(p.account_size)}</option>`).join('')}</select></div>
+      <div><label class="muted" style="font-size:12px">Reason (shown to the trader)</label>
+        <select id="g-reason" class="inp" onchange="document.getElementById('g-note').value=this.value">
+          ${GRANT_REASONS.map(r=>`<option>${r}</option>`).join('')}</select></div>
+      <input id="g-note" class="inp" value="${GRANT_REASONS[0]}" placeholder="Label on the e-mail badge">
+      <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="g-funded" style="width:16px;height:16px;accent-color:var(--acc)">
+        Start as <b>funded</b>, skipping the evaluation entirely</label>
+      <button class="btn-p lg" style="width:100%" onclick="submitGrant()">Grant &amp; create account</button>
+      <p class="hint">Trader gets an e-mail with the allocation and MT5 credentials.</p>
+    </div></div>`;
+  box.onclick=()=>box.remove();
+  document.body.appendChild(box);
+  grantFilter();
+  // The list scrolls, so a preselected trader can sit off-screen and look as
+  // if the modal never picked them up.
+  $('g-trader').selectedOptions[0]?.scrollIntoView({block:'nearest'});
+}
+async function submitGrant(){
+  const wybrany=parseInt($('g-trader').value);
+  if(!wybrany){toast('Pick a trader first.','err');return}
+  const body={trader_id:wybrany,product_key:$('g-product').value,
+    note:($('g-note').value||'').trim()||null,
+    bogo_paid_key:$('g-paid').value||null,
+    funded:$('g-funded').checked};
+  try{
+    const r=await api('/api/admin/grant',{method:'POST',body:JSON.stringify(body)});
+    document.getElementById('grant-modal')?.remove();
+    toast(`🎁 Granted ${r.product_key} to ${r.trader_email}.\n${r.status==='provisioning'
+      ?'MT5 account is being created. Credentials e-mailed within a minute.'
+      :'Credentials e-mailed to the trader.'}`,'ok',9000);
+    go('accounts');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+
+/* ---------- one delete control for the whole panel ----------
+   Every table deletes through the same small red X, so "Delete" vs "Remove"
+   never means two different things again. Undo-style actions (Revert on a KYC
+   decision, Revoke on a certificate) keep their own labelled buttons — they are
+   reversible and must not read as destruction. */
+const XBTN=(call,tip)=>`<button class="btn-x" title="${esc(tip)}" aria-label="${esc(tip)}" onclick="${call}">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+    stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>`;
+
+async function xdel(url,question,after,okMsg){
+  if(!confirm(question))return;
+  try{const r=await api(url,{method:'DELETE'});
+    toast(typeof okMsg==='function'?okMsg(r):(okMsg||'Deleted.'),'ok');
+    if(typeof after==='function')after(r);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+
+/* Removes the whole row from the ledger — a mistyped payout, a duplicate, an
+   import to undo. The account balance is NOT rewound: a payout booked with a
+   balance reset took the profit off the account days ago and replaying that on
+   a live account would overwrite its current equity. */
+function deletePayoutRow(kind,id,amount,login){
+  const co=kind==='payout'?`the $${fmt(amount)} payout on account ${login}`:'this payout request';
+  xdel(kind==='payout'?`/api/admin/payouts/${id}`:`/api/admin/payout-requests/${id}`,
+    `Delete ${co}?\n\nThe record disappears from the ledger and from every total. `
+    +`The account balance stays as it is now. This cannot be undone.`,
+    ()=>VIEWS.payouts(),
+    r=>r.had_certificate?'Deleted. Its certificate is gone from the landing page too.':'Deleted.');
+}
+
+function deleteAccountRow(id,login,trader){
+  xdel(`/api/accounts/${id}`,
+    `Delete account ${login}${trader?` (${trader})`:''}?\n\nIts trades, snapshots, payouts and `
+    +`certificates go with it. This cannot be undone.`,
+    ()=>go('accounts'));
+}
+
+function deleteOrderRow(id,email,amount,accId){
+  xdel(`/api/admin/orders/${id}`,
+    `Delete order #${id} — $${fmt(amount)}${email?` from ${email}`:''}?\n\n`
+    +(accId?`Account ${accId} created from it STAYS.\n`:'')
+    +`A paid order also leaves the revenue figure in Overview. This cannot be undone.`,
+    ()=>go('orders'));
+}
+
+function deleteKycRow(tid,email){
+  xdel(`/api/admin/kyc/${tid}`,
+    `Delete the KYC record for ${email}?\n\nThe submitted data and the uploaded ID scans are `
+    +`erased from the server, and the trader can start verification from scratch. `
+    +`To only undo your decision, use Revert instead.`,
+    ()=>go('kyc'),
+    r=>r.files_removed?`Deleted. ${r.files_removed} file(s) erased from the server.`:'Deleted.');
+}
+
+/* ---------- modal: import historical payouts ----------
+   For payouts settled before this panel existed (bank transfer, spreadsheet,
+   notebook). They land as internal records so the totals stop lying; the public
+   certificate is a separate, deliberate click per payout. */
+const PI_HEAD='full_name,amount_usd,date,account_size,program,email,note,kyc';
+function openPayoutImport(){
+  const box=document.createElement('div');
+  box.id='payimp-modal';box.className='modal-wrap';
+  box.innerHTML=`<div class="modal" onclick="event.stopPropagation()" style="max-width:760px">
+    <div class="modal-head"><h3>Import historical payouts</h3>
+      <button class="icon-btn" onclick="document.getElementById('payimp-modal').remove()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <p class="muted" style="font-size:12.5px;margin-bottom:14px">Paste one payout per line, CSV,
+      starting with the header row. Missing traders and funded accounts are created for you.
+      <code>program</code> is <code>2step</code> or <code>instant</code>, <code>kyc</code> is
+      <code>none</code> (default), <code>pending</code>, <code>approved</code> or
+      <code>rejected</code>.<br>
+      <b>No public certificates are issued</b> — the entries stay internal until you press
+      Generate on a payout you can back with a transfer confirmation.</p>
+    <div class="stack">
+      <textarea id="pi-csv" class="inp" rows="9" spellcheck="false"
+        style="font-family:var(--mono,ui-monospace,monospace);font-size:12px;line-height:1.6"
+        placeholder="${PI_HEAD}&#10;Jane Example,2480,2026-07-03,50000,2step,jane@example.com,,approved">${PI_HEAD}
+</textarea>
+      <div id="pi-out"></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn-o lg" style="flex:1" onclick="payoutImport(false)">Preview</button>
+        <button class="btn-p lg" style="flex:1" onclick="payoutImport(true)">Import</button>
+      </div>
+      <p class="hint">Preview changes nothing. Re-importing the same file is safe, because the same
+        person, amount and day is never added twice.</p>
+    </div></div>`;
+  box.onclick=()=>box.remove();
+  document.body.appendChild(box);
+}
+async function payoutImport(commit){
+  const csv=($('pi-csv').value||'').trim();
+  if(!csv){toast('Paste the CSV first.','err');return}
+  const out=$('pi-out');
+  out.innerHTML='<p class="muted" style="font-size:12.5px">Working…</p>';
+  let r;
+  try{r=await api('/api/admin/payouts/import',{method:'POST',body:JSON.stringify({csv,commit})})}
+  catch(e){out.innerHTML=`<p class="muted" style="font-size:12.5px;color:var(--red)">Error: ${esc(e.message)}</p>`;return}
+  if(!r.ok){
+    out.innerHTML=`<div class="sec-card" style="padding:12px"><b style="font-size:12.5px">Fix these lines first</b>
+      ${r.errors.map(x=>`<div class="muted" style="font-size:12px;margin-top:4px">${esc(x)}</div>`).join('')}</div>`;
+    return;
+  }
+  out.innerHTML=`<div class="tbl-wrap" style="max-height:260px;overflow:auto"><table class="tbl">
+    <thead><tr><th>Name</th><th>Amount</th><th>Date</th><th>Account</th><th>Status</th></tr></thead>
+    <tbody>${r.rows.map(w=>`<tr>
+      <td>${esc(w.full_name)}</td><td class="num up">$${fmt(w.amount_usd)}</td>
+      <td class="muted">${esc(w.date)}</td>
+      <td class="muted">${esc(w.program)} $${fmt0(w.account_size)}</td>
+      <td>${w.duplicate?'<span class="muted">already in the database</span>'
+        :commit?'<span class="up">imported</span>':'<span class="muted">will be added</span>'}</td>
+    </tr>`).join('')}</tbody></table></div>`;
+  if(commit){
+    toast(`✅ ${r.added} payout(s) imported${r.skipped?`, ${r.skipped} skipped as duplicates`:''}. `
+      +'They are internal records. No certificates were issued.','ok',9000);
+    VIEWS.payouts();
+  }
+}
+
+/* ---------- modal: store credits ---------- */
+async function openCredits(traderId){
+  let traders=[];
+  try{traders=await api('/api/admin/traders')}catch(e){toast('Error: '+e.message,'err');return}
+  if(!traders.length){toast('No registered traders yet.','err');return}
+  document.getElementById('credits-modal')?.remove();
+  const box=document.createElement('div');
+  box.id='credits-modal';box.className='modal-wrap';
+  box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>Add store credits</h3>
+      <button class="icon-btn" onclick="document.getElementById('credits-modal').remove()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <p class="muted" style="font-size:12.5px;margin-bottom:14px">Credits are a USD store balance:
+      they reduce the price of the trader's next challenge automatically at checkout.
+      Use a negative amount to correct a mistake.</p>
+    <div class="stack">
+      <div><label class="muted" style="font-size:12px">Trader</label>
+        <select id="cr-trader" class="inp" onchange="creditsBalance()">${traders.map(t=>
+          `<option value="${t.id}" data-credits="${t.credits_usd||0}"${traderId===t.id?' selected':''}>${esc(t.email)}${t.full_name?' — '+esc(t.full_name):''}</option>`).join('')}</select></div>
+      <div class="muted" id="cr-balance" style="font-size:12.5px"></div>
+      <input id="cr-amount" class="inp" type="number" step="1" placeholder="Amount in USD, e.g. 100">
+      <input id="cr-note" class="inp" placeholder="Note for the ledger, e.g. Contest prize">
+      <button class="btn-p lg" style="width:100%" onclick="submitCredits()">Add credits</button>
+      <p class="hint">The balance is spent automatically on the trader's next purchase.</p>
+    </div></div>`;
+  box.onclick=()=>box.remove();
+  document.body.appendChild(box);
+  creditsBalance();
+}
+function creditsBalance(){
+  const sel=$('cr-trader'),el=$('cr-balance');
+  const v=sel&&sel.selectedOptions[0]?parseFloat(sel.selectedOptions[0].dataset.credits||'0'):0;
+  if(el)el.textContent='Current balance: $'+fmt(v);
+}
+async function submitCredits(){
+  const amount=parseFloat($('cr-amount').value);
+  if(!amount){toast('Enter a non-zero amount.','err');return}
+  try{
+    const r=await api(`/api/admin/traders/${$('cr-trader').value}/credits`,{method:'POST',
+      body:JSON.stringify({amount,note:($('cr-note').value||'').trim()||null})});
+    document.getElementById('credits-modal')?.remove();
+    toast(`💳 ${r.email} now has $${fmt(r.credits_usd)} in store credits.`,'ok',7000);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+
+/* ---------- modal: new account ---------- */
+async function openCreate(){
+  let products=[];
+  try{products=await (await fetch('/api/products')).json()}catch(e){}
+  document.getElementById('create-modal')?.remove();
+  const box=document.createElement('div');
+  box.id='create-modal';box.className='modal-wrap';
+  box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>New challenge account</h3>
+      <button class="icon-btn" onclick="document.getElementById('create-modal').remove()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <p class="muted" style="font-size:12.5px;margin-bottom:14px">Everything typed by hand, from an MT5 account outside the pool — nothing is taken from MT5 Pool and its state stays untouched. Drawdown type comes from the plan you pick.</p>
+    <div class="stack">
+      <input id="c-login" class="inp" placeholder="MT5 login (e.g. 100099)">
+      <input id="c-pass" class="inp" placeholder="MT5 password">
+      <input id="c-server" class="inp" placeholder="MT5 server (e.g. MetaQuotes-Demo)">
+      <input id="c-name" class="inp" placeholder="Trader name">
+      <input id="c-email" class="inp" placeholder="Trader e-mail (links the account to their portal)">
+      <div><label class="muted" style="font-size:12px">Challenge</label>
+        <select id="c-product" class="inp">${products.map(p=>
+          `<option value="${esc(p.key)}">${esc(p.label)} — $${fmt0(p.account_size)} · normally $${fmt0(p.price_usd)}</option>`).join('')}</select></div>
+      <div><label class="muted" style="font-size:12px">Promotion <span style="opacity:.65">(optional, shown to the trader)</span></label>
+        <select id="c-reason" class="inp" onchange="document.getElementById('c-note').value=this.value">
+          <option value="">— no promotion —</option>
+          ${GRANT_REASONS.map(r=>`<option>${r}</option>`).join('')}</select></div>
+      <input id="c-note" class="inp" placeholder="Label on the e-mail badge">
+      <div><label class="muted" style="font-size:12px">Customer paid for <span style="opacity:.65">(optional, BOGO upgrade)</span></label>
+        <select id="c-paid" class="inp">
+          <option value="">— not a paid upgrade —</option>
+          ${products.map(p=>`<option value="${esc(p.key)}">${esc(p.label)} — $${fmt0(p.account_size)}</option>`).join('')}</select></div>
+      <button class="btn-p lg" style="width:100%" onclick="submitCreate()">Create account</button>
+      <p class="hint">If the e-mail matches a registered trader, the account shows up in their portal and they get the credentials by e-mail.</p>
+    </div></div>`;
+  box.onclick=()=>box.remove();
+  document.body.appendChild(box);
+}
+async function submitCreate(){
+  const body={login:$('c-login').value.trim(),
+    platform_password:$('c-pass').value.trim()||null,
+    platform_server:$('c-server').value.trim()||null,
+    trader_name:$('c-name').value.trim(),
+    trader_email:$('c-email').value.trim()||null,
+    product_key:$('c-product').value,
+    note:($('c-note').value||'').trim()||null,
+    bogo_paid_key:$('c-paid').value||null};
+  if(!body.login){toast('MT5 login is required.','err');return}
+  try{const r=await api('/api/accounts',{method:'POST',body:JSON.stringify(body)});
+    document.getElementById('create-modal')?.remove();
+    toast(r.email_unknown?'Account created, but no trader with that e-mail, so it has no owner yet.'
+          :r.linked_trader?`Account created for ${r.linked_trader}.`:'Account created.',
+          r.email_unknown?'err':'ok');
+    go('accounts');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+
+/* ---------- admin inbox (bell) ---------- */
+let INBOX=[];
+async function loadInbox(){
+  try{
+    const d=await api('/api/admin/inbox');INBOX=d.items||[];
+    const seen=localStorage.getItem('pf_admin_inbox_seen')||'';
+    const n=INBOX.filter(i=>i.ts>seen).length;
+    const dot=$('bell-dot');
+    if(n){dot.textContent=n>9?'9+':n;dot.style.display='block'}else dot.style.display='none';
+  }catch(_){}
+}
+function openInbox(){
+  const seen=localStorage.getItem('pf_admin_inbox_seen')||'';
+  const TYPE_ICO={order:'file',kyc:'shield',payout:'wallet',ticket:'chat'};
+  openOver('Notifications',INBOX.length?`<div class="tbl-wrap">`+INBOX.map(i=>`
+    <div class="ticket-row" onclick="closeOver();go('${esc(i.view)}')">
+      <div class="tile-ic ${i.ts>seen?'orange':'blue'}" style="width:36px;height:36px;flex:0 0 36px">${ICO[TYPE_ICO[i.type]]||ICO.file}</div>
+      <div class="sub"><b>${esc(i.title)}</b>
+        <span>${esc(i.body||'')} · ${dstr(i.ts)}</span></div>
+      ${i.ts>seen?'<span class="status pending"><span class="dot"></span>new</span>':''}
+    </div>`).join('')+`</div>`
+    :'<div class="empty"><h3>Nothing new</h3><p>New orders, KYC submissions, payout requests and ticket messages show up here.</p></div>');
+  localStorage.setItem('pf_admin_inbox_seen',new Date().toISOString());
+  loadInbox();
+}
+
+/* ---------- start + auto-refresh ---------- */
+if(localStorage.getItem('pf_admin_collapsed')==='1')$('side').classList.add('collapsed');
+(async()=>{
+  if(!TOKEN)return signInForm();
+  try{
+    const m=await api('/api/auth/me');
+    if(!m.is_admin)return signInForm();
+    ME=m; $('tok-state').textContent=m.email;
+    $('app-shell').style.visibility='visible';   // only now reveal the panel
+    go('overview');
+    loadInbox();
+  }catch(e){/* api() already redirected to login */}
+})();
+setInterval(()=>{
+  if(document.hidden)return;
+  if(VIEW==='overview'||VIEW==='accounts')VIEWS[VIEW]().catch(()=>{});
+},12000);
+setInterval(()=>{if(!document.hidden&&ME)loadInbox()},60000);
