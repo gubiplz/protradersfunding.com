@@ -248,9 +248,13 @@ def wygeneruj(session, now: datetime | None = None) -> Payout:
     split = prod.profit_split_pct or 90.0
     brutto = prod.account_size * rng.uniform(cfg["gross_min_pct"],
                                              cfg["gross_max_pct"]) / 100.0
-    udzial = round(brutto * split / 100.0, 2)
+    # PEŁNE DOLARY, bez groszy. Przy wypłatach rzędu kilku tysięcy końcówka „,24"
+    # nic nie wnosi, a na certyfikacie zabiera miejsce największej liczbie na
+    # dokumencie i rozbija ją wizualnie. `kwota_txt` i tak drukuje grosze, gdy
+    # kwota nie jest okrągła — zostaje dla wierszy wgranych ręcznie z ewidencji.
+    udzial = float(max(1, round(brutto * split / 100.0)))
     # Zysk brutto liczony WSTECZ z udziału — dokładnie jak w imporcie CSV, żeby
-    # kwoty w panelu zgadzały się ze splitem planu co do centa.
+    # kwoty w panelu zgadzały się ze splitem planu.
     brutto = round(udzial * 100.0 / split, 2)
 
     nazwa, email = _wolne_nazwisko(session, rng)
@@ -281,14 +285,21 @@ def opublikuj(wyplata: Payout, nazwa: str, *, base_url: str | None = None,
     """Zrzut certyfikatu + wpis na kanale. Best-effort, nigdy nie rzuca."""
     baza = (base_url or settings.app_base_url or "").rstrip("/")
     link = f"{baza}/payout/{wyplata.cert_token}"
+    weryfikacja = f"{baza}/verify/{wyplata.cert_token}"
     tekst = podpis((nazwa or "").split(" ")[0] or "A trader", wyplata.trader_share)
+    # Adres weryfikacji W PODPISIE, nie tylko na grafice. Telegram przepuszcza
+    # zdjęcia przez własną kompresję i skalowanie (zmierzone: 1220 px na wejściu,
+    # 1280 px na wyjściu), więc drobny druk pod kodem QR rozmywa się na tyle, że
+    # nie da się go przepisać. W podpisie link jest zwykłym tekstem: klikalnym,
+    # zaznaczalnym i odpornym na to, co Telegram zrobi z obrazkiem.
+    podpis_pelny = f"{tekst}\n{weryfikacja}"
 
     if not telegram.is_enabled():
         return {"posted": False, "photo": False, "reason": "telegram off"}
 
     png = certshot.render(f"{link}?bare=1", transport=transport_shot)
     if png:
-        ok, powod = telegram.send_photo(png, tekst, transport=transport_tg)
+        ok, powod = telegram.send_photo(png, podpis_pelny, transport=transport_tg)
         if ok:
             return {"posted": True, "photo": True}
         # Powód prosto od Telegrama („bot is not a member of the channel chat",
@@ -298,7 +309,7 @@ def opublikuj(wyplata: Payout, nazwa: str, *, base_url: str | None = None,
 
     # Bez grafiki idzie sam podpis z linkiem — cisza na kanale byłaby myląca,
     # skoro wypłata i jej publiczny certyfikat już istnieją.
-    ok, powod = telegram.send_message(f"{tekst}\n{link}", transport=transport_tg)
+    ok, powod = telegram.send_message(f"{podpis_pelny}\n{link}", transport=transport_tg)
     return {"posted": ok, "photo": False, "reason": "" if ok else powod}
 
 

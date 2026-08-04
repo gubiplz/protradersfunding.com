@@ -439,3 +439,49 @@ def test_przycinanie_nie_rusza_tego_co_juz_dobre():
     jpeg = b"\xff\xd8\xff" + b"cokolwiek"
     assert certshot.przytnij_do_kwadratu(jpeg) is jpeg
     assert certshot.przytnij_do_kwadratu(b"to nie jest obrazek") == b"to nie jest obrazek"
+
+
+def test_kwoty_bez_groszy():
+    """Wlasciciel: „nie chce juz nigdy zeby payouty mialy w sobie eurocenty".
+    Koncowka „,24" nic nie wnosi przy tej skali, a na certyfikacie rozbija
+    najwieksza liczbe na dokumencie."""
+    s = SessionLocal()
+    payoutbot.zapisz_ustawienia(s, enabled=True, hour=0)
+    kwoty = []
+    for _ in range(12):
+        w = payoutbot.wygeneruj(s)
+        s.commit()
+        kwoty.append(w.trader_share)
+    s.close()
+
+    z_groszami = [k for k in kwoty if float(k) != float(int(k))]
+    assert not z_groszami, f"kwoty z groszami: {z_groszami}"
+    assert all(k >= 1 for k in kwoty)
+    # Podpis i certyfikat drukuja to samo — bez ".00" na koncu.
+    assert all("." not in payoutbot.kwota_txt(k) for k in kwoty)
+
+
+def test_podpis_niesie_link_weryfikacji():
+    """Telegram skaluje i kompresuje zdjecia, wiec drobny druk pod kodem QR bywa
+    nie do przepisania. Adres w podpisie jest tekstem: klikalnym i kopiowalnym."""
+    s = SessionLocal()
+    payoutbot.zapisz_ustawienia(s, enabled=True, hour=0)
+    w = payoutbot.wygeneruj(s)
+    s.commit()
+    token = w.cert_token
+    nazwa = w.account.trader_name if w.account else "Ktos"
+    s.close()
+
+    wyslane = {}
+
+    def tg(url, body, ctype):
+        wyslane["body"] = body
+        return 200, b'{"ok":true}'
+
+    with _kanal():
+        wynik = payoutbot.opublikuj(w, nazwa, base_url="https://protradersfunding.com",
+                                    transport_shot=_shot_ok, transport_tg=tg)
+    assert wynik["posted"] is True and wynik["photo"] is True
+    tresc = wyslane["body"].decode("utf-8", "replace")
+    assert f"https://protradersfunding.com/verify/{token}" in tresc, \
+        "adres weryfikacji musi byc W PODPISIE, nie tylko na grafice"
