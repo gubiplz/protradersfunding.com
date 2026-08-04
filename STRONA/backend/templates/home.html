@@ -27,7 +27,7 @@
       </p>
       <div class="hero-ctas">
         <a class="btn btn-lg" href="#pricing">Start a Challenge</a>
-        <a class="btn-ghost btn-lg" href="#objectives">View Trading Objectives</a>
+        <a class="btn-ghost btn-lg" href="/objectives">View Trading Objectives</a>
       </div>
       <div class="hero-note">
         <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> One-time fee</span>
@@ -154,24 +154,9 @@
   </div>
 </section>
 
-<!-- ============================ OBJECTIVES ============================ -->
-<section class="sec sec-tight" id="objectives">
-  <div class="wrap">
-    <div class="sec-head" data-rv>
-      <span class="pill">Trading objectives</span>
-      <h2>The rules we publish are the rules we enforce</h2>
-      <p>Every limit below is checked automatically by our risk engine — the same way, for everyone,
-         on every account, including the cap on total open volume. No fine print, no hidden
-         consistency traps.</p>
-    </div>
-    <div class="obj-scroll" data-rv>
-      <table class="obj">
-        <thead><tr><th>Objective</th><th>2-Step Evaluation</th><th>Instant Funding</th></tr></thead>
-        <tbody id="objBody"></tbody>
-      </table>
-    </div>
-  </div>
-</section>
+{# The objectives table moved to its own page (/objectives). On the landing page
+   it duplicated the Program Rules panel in the configurator, which shows the same
+   limits for the plan the visitor is actually looking at. #}
 
 <!-- ============================ PRICING ============================ -->
 <section class="sec" id="pricing">
@@ -239,16 +224,16 @@
 
 <!-- ============ AFTER FUNDING: PAYOUT OR A BIGGER ACCOUNT ============ -->
 <!-- Scaling and payouts used to be two full-height sections stacked on top of
-     each other. They are one decision, so they are one section now: at +10% the
-     trader either cashes out or grows the account. Both anchors stay alive
+     each other. They are one decision, so they are one section now: at +15% the
+     trader either cashes out or moves up a plan. Both anchors stay alive
      (#scaling in the footer, #payouts in old links). -->
 <section class="sec sec-tight" id="scaling">
   <div class="wrap">
     <div class="sec-head center" data-rv style="margin-bottom:26px">
       <span class="pill">After you get funded</span>
-      <h2>Every +10% is your decision</h2>
-      <p>Grow a funded account by 10% and you choose what happens to that profit: take it out,
-         or turn it into a bigger account. Both paths are coded into the platform.</p>
+      <h2>Every +15% is your decision</h2>
+      <p>Grow a funded account by 15% and you choose what happens to that profit: take it out,
+         or move up to the next account size. Both paths are coded into the platform.</p>
     </div>
     <div class="fork">
       <div class="fork-card" id="payouts" data-rv>
@@ -263,16 +248,17 @@
         </ol>
       </div>
       <div class="fork-card" data-rv>
-        <div class="fork-h"><span class="fork-n">B</span><h3>Scale the account</h3>
-          <span class="fork-tag grad-text">+50%</span></div>
-        <p>Skip the payout and we raise the balance by half instead. Same profit split, same
-           rules, limits recalculated from the new size. Three decisions take $100,000 past
-           a third of a million.</p>
+        <div class="fork-h"><span class="fork-n">B</span><h3>Move up a plan</h3>
+          <span class="fork-tag grad-text">next size</span></div>
+        <p>Skip the payout and the profit buys you the next account size from our pricing instead.
+           You get a fresh account at that size, funded from day one, with its limits and its
+           profit split. Four decisions take $100,000 to $800,000.</p>
         <div class="ladder" aria-hidden="true">
           <div class="rung"><div class="rung-bar" style="height:30%"></div><div class="rung-cap">$100k</div><div class="rung-sub">start</div></div>
-          <div class="rung"><div class="rung-bar" style="height:45%"></div><div class="rung-cap">$150k</div><div class="rung-sub">after +10%</div></div>
-          <div class="rung"><div class="rung-bar" style="height:67%"></div><div class="rung-cap">$225k</div><div class="rung-sub">after +10%</div></div>
-          <div class="rung"><div class="rung-bar" style="height:100%"></div><div class="rung-cap">$337k</div><div class="rung-sub">after +10%</div></div>
+          <div class="rung"><div class="rung-bar" style="height:48%"></div><div class="rung-cap">$200k</div><div class="rung-sub">after +15%</div></div>
+          <div class="rung"><div class="rung-bar" style="height:66%"></div><div class="rung-cap">$300k</div><div class="rung-sub">after +15%</div></div>
+          <div class="rung"><div class="rung-bar" style="height:84%"></div><div class="rung-cap">$400k</div><div class="rung-sub">after +15%</div></div>
+          <div class="rung"><div class="rung-bar" style="height:100%"></div><div class="rung-cap">$800k</div><div class="rung-sub">after +15%</div></div>
         </div>
       </div>
     </div>

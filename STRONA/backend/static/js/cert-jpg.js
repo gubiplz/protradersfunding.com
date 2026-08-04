@@ -165,9 +165,31 @@
       a.href = canvas.toDataURL('image/jpeg', 0.94);
       document.body.appendChild(a); a.click(); a.remove();
     } catch (e) {
-      alert('Could not render the image. Please use Print / save as PDF.');
+      notice('Could not build the image here. Use <b>Print / save as PDF</b> instead — it produces '
+        + 'the same document.');
     }
     btn.textContent = was;
     delete btn.dataset.busy;
   };
+
+  /* Komunikat W DOKUMENCIE, nie w oknie przegladarki. Natywny alert() na
+     publicznej stronie certyfikatu przedstawial sie jako "Komunikat ze strony
+     protradersfunding.com" i wygladal jak ostrzezenie o zagrozeniu — na stronie,
+     ktora trader wysyla dalej jako dowod wyplaty. Ta strona nie ma portal.css,
+     wiec styl jest inline i bierze kolory z tokenow cert.css. */
+  function notice(html) {
+    const stary = document.getElementById('cert-note');
+    if (stary) stary.remove();
+    const bar = document.querySelector('.cert-actions');
+    if (!bar) return;
+    const p = document.createElement('p');
+    p.id = 'cert-note';
+    p.className = 'noprint';
+    p.setAttribute('role', 'status');
+    p.style.cssText = 'max-width:min(620px,100%);margin:14px 0 0;padding:11px 14px;border-radius:10px;'
+      + 'font-size:13px;line-height:1.55;text-align:center;'
+      + 'color:var(--k-jasny);background:rgba(220,38,38,.10);border:1px solid rgba(220,38,38,.35)';
+    p.innerHTML = html;
+    bar.insertAdjacentElement('afterend', p);
+  }
 })();

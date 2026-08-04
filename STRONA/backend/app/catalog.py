@@ -41,6 +41,11 @@ def max_lots_for(account_size: float) -> float:
 # kwota niezależnie od rozmiaru konta.
 WEEKEND_ADDON_USD = 199.0
 
+# Rozmiar oznaczany w sklepie jako „Best value". Etykieta marketingowa,
+# nie zmierzona statystyka — stala, nie zapytanie o sprzedaz. Gdyby miala byc
+# prawda z danych, wystarczy policzyc oplacone zamowienia per `product_key`.
+POPULAR_SIZE = 100_000
+
 # (key, label, size, steps, price, p1, p2, daily, maxdd, dd_type, min_days, split)
 # Oferta 2026-08-02: dwa modele (2-Step i Instant Funding), rozmiary 25k–2M.
 # 10k wypadło z oferty — wejściowym rozmiarem jest 25k. Konta już kupione żyją
@@ -181,22 +186,47 @@ def promo_active(now: datetime | None = None) -> bool:
     return dzis <= ostatni
 
 
+def next_product(session, steps: int, size: float) -> Product | None:
+    """Najmniejszy aktywny plan tej samej rodziny większy niż `size`.
+
+    Jedno miejsce dla dwóch mechanik, które pytają dokładnie o to samo: promocja
+    „next size up for the same fee" i plan skalowania konta funded. Rodziny nie
+    mieszamy (`steps`) — Instant Funding ma inne limity i split niż ewaluacja.
+    None = to już największy tier w ofercie.
+
+    Porównanie po ROZMIARZE, nie po kluczu planu: konta wyskalowane starym
+    mechanizmem siedzą na 150k/225k, czyli rozmiarach, których w katalogu nie
+    ma, i po kluczu nie dałoby się znaleźć dla nich kolejnego szczebla.
+    """
+    return (session.query(Product)
+            .filter(Product.active == True,                                   # noqa: E712
+                    Product.steps == steps,
+                    Product.account_size > size)
+            .order_by(Product.account_size)
+            .first())
+
+
+def next_size_up(steps: int, size: float) -> float | None:
+    """To samo co `next_product`, ale bez bazy — sam rozmiar prosto z katalogu.
+
+    Potrzebne w `_account_dict`, które nie dostaje sesji, a leci po całej liście
+    kont tradera: zapytanie per konto byłoby N+1. Do zapisu i tak używamy
+    `next_product` (autorytatywna jest tabela `products`, bo plan może być
+    wycofany ze sklepu), ta funkcja tylko rysuje ofertę.
+    """
+    wieksze = sorted(row[2] for row in _CATALOG if row[3] == steps and row[2] > size)
+    return float(wieksze[0]) if wieksze else None
+
+
 def upgrade_target(session, product: Product) -> Product | None:
     """Plan, który klient FAKTYCZNIE dostanie, kupując `product` z kodem promo.
 
-    NASTĘPNY rozmiar w górę: najmniejszy aktywny plan tej samej rodziny
-    (`steps`) o rozmiarze większym niż opłacony. Rodziny nie mieszamy — Instant
-    Funding ma inne limity i split niż ewaluacja. None = brak promocji albo brak
+    NASTĘPNY rozmiar w górę, o ile promocja trwa. None = brak promocji albo brak
     większego planu (2M, największy tier w ofercie).
     """
     if not promo_active() or product.price_usd <= 0:
         return None
-    return (session.query(Product)
-            .filter(Product.active == True,                                   # noqa: E712
-                    Product.steps == product.steps,
-                    Product.account_size > product.account_size)
-            .order_by(Product.account_size)
-            .first())
+    return next_product(session, product.steps, product.account_size)
 
 
 def upgrade_map(products: list[Product]) -> dict[str, Product]:

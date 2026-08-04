@@ -122,10 +122,11 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"Profit split: {ctx.get('split')}%. Complete KYC and you can request payouts.",
         ),
         "account_scaled": (
-            f"Account scaled up to ${_num(ctx.get('new_size'))} 📈 ({login})",
-            f"{name}, you chose to grow account {login} instead of taking the payout. "
-            f"Its size is now ${_num(ctx.get('new_size'))} and the balance starts from there. "
-            f"Same rules, same profit split.",
+            f"Moving up to a ${_num(ctx.get('new_size'))} account 📈",
+            f"{name}, you chose the bigger account instead of the payout. "
+            f"We are setting up a new ${_num(ctx.get('new_size'))} account for you, funded from "
+            f"day one, with the limits of that plan. Your login and password arrive in a "
+            f"separate email as soon as it is ready.",
         ),
         "breached": (
             f"Account {login} — rule breached ⛔",
@@ -377,9 +378,10 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
         ]
     elif event == "account_scaled":
         parts = [
-            _head_html("Scaled up", "Your account just got bigger",
-                       f"{name}, you chose to grow account {login} instead of taking the payout. "
-                       f"The balance starts from the new size, with the same rules."),
+            _head_html("Moving up", "You picked the bigger account",
+                       f"{name}, instead of taking the payout you moved up a plan. We are setting "
+                       f"up a new account at the higher size, funded from day one. Your login and "
+                       f"password arrive in a separate email as soon as it is ready."),
             _stat_html("New account size", f"${_num(ctx.get('new_size'))}",
                        f"was ${_num(ctx.get('previous_size'))}"),
             _button_html("View Dashboard", f"{portal}?view=accounts"),

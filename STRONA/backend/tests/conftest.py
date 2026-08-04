@@ -51,3 +51,17 @@ os.environ["RATE_LIMIT_OFF"] = "true"
 # deterministyczne. Testy promocji włączają ją same (monkeypatch na
 # catalog.settings).
 os.environ["PROMO_UPGRADE"] = "false"
+
+
+def zrodlo_portalu() -> str:
+    """Szkielet portalu RAZEM z jego kodem — logika siedzi w bundlu, nie w HTML-u.
+
+    Kod portalu wyjechał z `portal.html` do `static/js/portal-app.js` (HTML leci
+    z `no-cache`, więc wklejony w stronę szedł po łączu przy każdym wejściu).
+    Testy pilnujące treści widoku muszą patrzeć w oba pliki naraz, inaczej
+    zaczęłyby przechodzić przez samo przeniesienie kodu, a nie przez jego stan.
+    """
+    from pathlib import Path
+    baza = Path(__file__).resolve().parents[1]
+    return ((baza / "templates" / "portal.html").read_text()
+            + (baza / "static" / "js" / "portal-app.js").read_text())

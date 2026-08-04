@@ -26,6 +26,8 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
 <script src="/static/js/equity-chart.js?v={{ asset_v }}"></script>
 <script src="/static/js/sortable.js?v={{ asset_v }}"></script>
 <script src="/static/js/reward-fx.js?v={{ asset_v }}"></script>
+<!-- Dial codes and per-country phone lengths. Same table the server validates
+     against, so the buy modal and /api/checkout can never disagree. -->
 </head>
 <body>
 
@@ -69,8 +71,12 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
         <button id="tab-signup" class="auth-tab" onclick="authTab('signup')">Create account</button>
       </div>
       <form class="stack" id="a-form" onsubmit="doAuth();return false">
-        <input id="a-name" placeholder="Full name" class="inp hidden" autocomplete="name">
-        <input id="a-email" type="email" placeholder="E-mail" class="inp" autocomplete="email">
+        <input id="a-name" placeholder="Full name" class="inp hidden" autocomplete="name"
+          oninput="clearFieldErr('a-name')">
+        <p class="field-err hidden" id="a-name-err"></p>
+        <input id="a-email" type="email" placeholder="E-mail" class="inp" autocomplete="email"
+          oninput="clearFieldErr('a-email')">
+        <p class="field-err hidden" id="a-email-err"></p>
         <input id="a-pass" type="password" placeholder="Password" class="inp" autocomplete="current-password">
         <input id="a-pass2" type="password" placeholder="Repeat new password" class="inp hidden" autocomplete="new-password">
         <input id="a-ref" placeholder="Referral code (optional)" class="inp hidden" autocomplete="off">
@@ -206,7 +212,9 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
 <script>
 const GOOGLE_CLIENT_ID={{ google_client_id|tojson }};
 const SITE_NAME={{ site_name|tojson }};
+const ASSET_V={{ asset_v|tojson }};
 </script>
+<script src="/countries.js?v={{ asset_v }}"></script>
 <script src="/static/js/portal-app.js?v={{ asset_v }}"></script>
 {% if google_client_id %}
 {# hl=en: the button label comes from this script's bundled strings and would

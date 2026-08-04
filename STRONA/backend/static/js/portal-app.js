@@ -6,8 +6,11 @@ const planKind=s=>s===0?'Instant':s===1?'1-Step':'2-Step';
 const dstr=iso=>new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
 // Date only — trade history has no time component. `YYYY-MM-DD` is read as
 // UTC so the browser timezone does not shift the day back by one.
+
 const dday=d=>new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'});
 let TOKEN=localStorage.getItem('pf_token'), ME=null, AUTHMODE='login', chart=null, CURV=null;
+/* Ostatni stan programu lojalnosciowego z /api/me/loyalty (punkty, nagrody). */
+let LOY=null;
 const H=()=>TOKEN?{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'}:{'Content-Type':'application/json'};
 async function api(path,opts={}){const r=await fetch(path,{headers:H(),...opts});if(!r.ok){throw new Error((await r.json().catch(()=>({}))).detail||r.status)}return r.json()}
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -182,6 +185,15 @@ const ICO={
   flame:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 22c4.4 0 7-2.9 7-6.5 0-2.5-1.3-4.5-2.8-6.1-.4 1-1 1.9-1.9 2.5.2-2.9-1.1-6.4-4.3-7.9.3 2.9-1.1 4.5-2.6 6.1C6 11.6 5 13.4 5 15.5 5 19.1 7.6 22 12 22z"/><path d="M12 22c1.9 0 3.2-1.3 3.2-3 0-1.4-.9-2.3-1.6-3.3-1 1-3.6 1.8-3.6 3.5 0 1.5 1.1 2.8 3 2.8z"/></svg>',
 };
 
+/* Kazda odznaka ma WLASNA ikone — wczesniej osiem kart pokazywalo ten sam medal,
+   wiec roznily sie wylacznie tekstem. Mapa siedzi w widoku, bo ikona to sprawa
+   prezentacji: serwer oddaje `key`, a nie SVG. */
+const BADGE_ICO={
+  first_challenge:ICO.dollar, phase_passed:ICO.target, funded:ICO.crown,
+  first_payout:ICO.payout,    days_5:ICO.cal,         scaled:ICO.trend,
+  referrer:ICO.chat,          kyc:ICO.shield,
+};
+
 const NAV=[
   {v:'accounts',label:'Challenges',ico:'trend'},
   {v:'board',label:'Leaderboard',ico:'trophy'},
@@ -300,6 +312,19 @@ async function doAuth(){
       toast('Password changed. Log in with your new password.','ok',8000);authTab('login');
     }catch(e){toast('Error: '+e.message,'err')}
     unlock();return;
+  }
+  /* Checked here so the customer sees it next to the field instead of getting
+     a bare error toast back from the server. */
+  ['a-name','a-email'].forEach(clearFieldErr);
+  if(AUTHMODE==='signup'){
+    /* Signup only. Refusing to even TRY a login because the address looks odd
+       to us would lock out anyone whose account predates this rule. */
+    const mail=emailCheck($('a-email').value);
+    if(!mail.ok){fieldErr('a-email',mail.msg);unlock();return}
+  }
+  if(AUTHMODE==='signup'&&($('a-name').value||'').trim()){
+    const nazwa=nameCheck($('a-name').value,'Full name');
+    if(!nazwa.ok){fieldErr('a-name',nazwa.msg);unlock();return}
   }
   if(AUTHMODE==='signup'&&$('a-pass').value!==$('a-pass2').value){
     toast('Passwords do not match.','err');unlock();return}
@@ -515,6 +540,7 @@ async function boot(){
   $('admin-link-sheet').style.display=ME.is_admin?'':'none';
   if(localStorage.getItem('pf_side_collapsed')==='1')$('side').classList.add('collapsed');
   initEngagement();
+  flagsWarm();
   if(await handlePaymentReturn())return;
   const q=new URLSearchParams(location.search);
   /* Deep links from notifications: _pendingView / fresh sw.js entry in Cache
@@ -532,7 +558,7 @@ const TITLES={
   store:['New Challenge','One-time fee · refunded with your first payout'],
   board:['Leaderboard','Top traders across the platform, all time, live data'],
   achievements:['Achievements','Milestones earned from your real activity'],
-  loyalty:['Loyalty','Spend-based tiers with unlockable discounts'],
+  loyalty:['Loyalty','Trade your points for a discount code'],
   journal:['Journal','Your private trading notes'],
   analytics:['Analytics','Daily P&L computed from your account history'],
   rewards:['Rewards','Programs built into the platform'],
@@ -964,6 +990,16 @@ const VIEWS={
       .sort((a,b)=>a.account_size-b.account_size);
     if(!fam.length)return {html:'',banner:''};
     const who=ref.status==='provisioning'?'your account':esc(ref.login);
+    /* Dwa rowne rzedy zamiast pelnego pierwszego i ogona w drugim. Przy 9
+       planach `auto-fill` dawal 6+3; teraz liczba kolumn to polowa kafelkow
+       zaokraglona w gore (9 -> 5+4, 8 -> 4+4, 7 -> 4+3). Do czterech kafelkow
+       drugi rzad nie ma sensu — zostaje jeden. */
+    const kolumn=fam.length<=4?fam.length:Math.ceil(fam.length/2);
+    /* Gorny limit szerokosci rzedu (~300px na kolumne). Bez niego konto blisko
+       szczytu oferty — gdzie wiekszych planow zostaja dwa albo jeden — rozrzucalo
+       kafelki po calej szerokosci panelu. Przy dziewieciu planach limit jest
+       wiekszy niz panel, wiec nic nie zmienia. */
+    const rzadMax=kolumn*300;
     const html=`<div class="upsell sec-card">
       <div class="upsell-head">
         <div>
@@ -973,12 +1009,15 @@ const VIEWS={
         </div>
         <button class="btn-p" onclick="go('store')">Upgrade →</button>
       </div>
-      <div class="upsell-row">${fam.map(p=>`<div class="upsell-card">
-        <div class="uc-top"><span class="uc-if">If you had</span><span class="uc-pct">+${pct.toFixed(1)}%</span></div>
+      <div class="upsell-row" style="--up-cols:${kolumn};--up-max:${rzadMax}px">${fam.map(p=>`<div class="upsell-card${p.popular?' pop':''}"
+        role="button" tabindex="0" onclick="openBuy('${p.key}')"
+        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openBuy('${p.key}')}">
+        ${p.popular?'<span class="uc-ribbon">Best value</span>':''}
+        <div class="uc-if">If you had</div>
         <div class="uc-size">$${fmt0(p.account_size)}</div>
         <div class="uc-sub">you could have earned</div>
         <div class="uc-earn">+$${fmt(p.account_size*pct/100)}</div>
-        <button class="btn-o sm" onclick="openBuy('${p.key}')">Upgrade →</button>
+        <div class="uc-go">Upgrade →</div>
       </div>`).join('')}</div>
       <p class="uc-fine">Illustrative math based on your current return, not a promise. Rewards depend on your trading.</p>
     </div>`;
@@ -1073,7 +1112,8 @@ const VIEWS={
     <div class="shop-tabs">${groups.map(x=>`<button class="shop-tab${x.id===g.id?' on':''}" onclick="window._shopTab='${x.id}';VIEWS.store()">${x.name}</button>`).join('')}</div>
     ${ME.credits_usd>0?`<div class="note" style="margin-bottom:14px"><b>Store credit: $${fmt(ME.credits_usd)}</b>, applied to your total automatically at checkout.</div>`:''}
     <div class="plan-grid">`+items.map(p=>`
-    <div class="plan-card" data-plan="${esc(p.key)}">
+    <div class="plan-card${p.popular?' pop':''}" data-plan="${esc(p.key)}">
+      ${p.popular?'<span class="plan-ribbon">Best value</span>':''}
       <div class="plan-size">$${fmt0(p.account_size)}</div>
       ${p.promo_upgrade_size&&pfPromo()?`<div class="plan-badge">→ trade $${fmt0(p.promo_upgrade_size)} with your promo</div>`:''}
       <div class="plan-kind">${p.steps===0?'Instant Funding, no evaluation':'2-Step Evaluation'}</div>
@@ -1141,18 +1181,40 @@ const VIEWS={
  },
 
  async achievements(){
-  const list=await api('/api/me/achievements');
-  const done=list.filter(b=>b.unlocked).length;
+  const d=await api('/api/me/achievements');
+  const list=d.badges, done=d.unlocked;
+  /* Wlasny prefiks klas (mrw-), bo `.rw-code` nalezy juz do kodow wymienianych
+     za punkty w Loyalty — dwie rozne rzeczy pod jedna nazwa to prosta droga do
+     tego, co zrobila klasa `.fl` etykietom w KYC. */
+  const nagroda=r=>{
+    const ikona=r.plan?ICO.crown:ICO.gift;
+    const stan=r.status==='claimed'
+      ?(r.code?`<div class="mrw-code"><b>${esc(r.code)}</b>
+           <button class="icon-btn" aria-label="Copy code"
+             onclick="copyVal(this,'${esc(r.code)}')">${ICO.copy}</button></div>`
+          :`<div class="badge-state on">✓ Account created</div>`)
+      :r.status==='ready'
+        ?`<button class="btn-p sm mrw-go" onclick="claimReward(${r.tier},this)">Claim reward</button>`
+        :`<div class="mrw-need">${r.remaining} more to unlock</div>`;
+    return `<div class="mrw-card ${r.status}">
+      <div class="mrw-top"><div class="mrw-ic">${ikona}</div><b>${r.tier} / ${d.total}</b></div>
+      <div class="mrw-label">${esc(r.label)}</div>${stan}</div>`;
+  };
   $('view').innerHTML=`
     <div class="panel" style="margin-bottom:16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
       <div class="tile-ic purple">${ICO.medal}</div>
-      <div style="flex:1"><h3>${done} / ${list.length} unlocked</h3>
+      <div style="flex:1"><h3>${done} / ${d.total} unlocked</h3>
         <p class="muted" style="font-size:13px">Milestones are earned automatically from your real activity on the platform.</p></div>
-      <div class="phase-bar" style="width:180px"><i style="width:${list.length?done/list.length*100:0}%"></i></div>
+      <div class="phase-bar" style="width:180px"><i style="width:${d.total?done/d.total*100:0}%"></i></div>
+    </div>
+    <div class="sec-card">
+      <h3>Milestone rewards</h3>
+      <p class="muted" style="font-size:13px;margin:-8px 0 14px">Each reward is issued once and belongs to your account only.</p>
+      <div class="mrw-grid">${d.rewards.map(nagroda).join('')}</div>
     </div>
     <div class="badge-grid">`+list.map(b=>`
       <div class="badge-card${b.unlocked?'':' locked'}">
-        <div class="badge-ic">${ICO.medal}</div>
+        <div class="badge-ic">${BADGE_ICO[b.key]||ICO.medal}</div>
         <div><h4>${esc(b.name)}</h4><p>${esc(b.desc)}</p>
           <div class="badge-state ${b.unlocked?'on':'off'}">${b.unlocked?'✓ UNLOCKED':'LOCKED'}</div></div>
       </div>`).join('')+`</div>`;
@@ -1160,41 +1222,58 @@ const VIEWS={
  },
 
  async loyalty(){
-  const orders=await api('/api/orders');
-  const points=Math.round(orders.filter(o=>o.status==='paid').reduce((s,o)=>s+o.amount_usd,0))+(ME.bonus_points||0);
-  const TIERS=[
-    {name:'Bronze',min:0,code:'WELCOME10',ben:'10% off any challenge'},
-    {name:'Silver',min:500,code:'VIP20',ben:'20% off any challenge'},
-    {name:'Gold',min:1500,code:'BLACKFRIDAY',ben:'30% off any challenge'},
-  ];
-  const tier=[...TIERS].reverse().find(t=>points>=t.min)||TIERS[0];
-  const next=TIERS.find(t=>t.min>points);
-  const prog=next?Math.min(100,points/next.min*100):100;
+  /* Wszystko liczy serwer (/api/me/loyalty). Wczesniej punkty sumowala ta
+     funkcja z listy zamowien — przy wymianie oznaczaloby to, ze trader sam
+     sobie ustala, na co go stac. */
+  const d=await api('/api/me/loyalty');
+  LOY=d;
+  const next=d.next_tier_at, prog=next?Math.min(100,d.points_lifetime/next*100):100;
   const nearMiss=!!next&&prog>=80;
+  const tierIdx=d.tiers.findIndex(t=>t.name===d.tier);
+  const kody=d.codes.filter(c=>c.status==='active');
+  const zuzyte=d.codes.filter(c=>c.status!=='active');
   $('view').innerHTML=`
     <div class="panel" style="margin-bottom:4px">
       <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
         <div class="tile-ic orange">${ICO.crown}</div>
         <div style="flex:1;min-width:220px">
-          <h3>${tier.name} tier · ${fmt0(points)} points</h3>
-          <p class="muted" style="font-size:13px">You earn 1 point for every $1 spent on challenges (computed from your real orders).</p>
-          ${(ME.bonus_points||0)>0?`<p class="muted" style="font-size:11.5px;margin-top:2px">includes <b class="mono" style="color:var(--gold)">+${fmt0(ME.bonus_points)}</b> engagement bonus from check-ins &amp; reveals</p>`:''}
+          <h3>${fmt0(d.points_available)} points to spend</h3>
+          <p class="muted" style="font-size:13px">You earn 1 point for every $1 spent on challenges, plus bonuses from check-ins and daily reveals. Trade them for a discount code below.</p>
+          ${d.points_spent>0?`<p class="muted" style="font-size:11.5px;margin-top:2px">${fmt0(d.points_lifetime)} earned all-time, <b class="mono">${fmt0(d.points_spent)}</b> already redeemed</p>`:''}
         </div>
         <div style="min-width:220px;flex:1">
-          <div class="prog-top"><span>${next?(nearMiss?`Only ${fmt0(next.min-points)} points to ${next.name}, unlocking ${next.ben}`:`Progress to ${next.name}`):'Top tier reached'}</span><b>${next?fmt0(points)+' / '+fmt0(next.min):'MAX'}</b></div>
+          <div class="prog-top"><span>${next?(nearMiss?`Only ${fmt0(next-d.points_lifetime)} points to ${d.next_tier}`:`Progress to ${d.next_tier}`):'Top tier reached'}</span><b>${next?fmt0(d.points_lifetime)+' / '+fmt0(next):d.tier+' · MAX'}</b></div>
           <div class="phase-bar${nearMiss?' near-miss':''}"><i style="width:${prog}%"></i></div>
+          <p class="muted" style="font-size:11px;margin-top:6px">Your ${d.tier} status comes from what you have earned all-time, so spending points never takes it away.</p>
         </div>
       </div>
     </div>
-    <div class="tier-track">`+TIERS.map(t=>{
-      const unlocked=points>=t.min;
-      return `<div class="tier-card${t.name===tier.name?' on':''}${unlocked?'':' locked'}">
-        <div class="nm">${ICO.crown.replace('stroke-width="1.8"','stroke-width="1.8" width="18" height="18"')} ${t.name}</div>
-        <div class="req">${t.min===0?'from your first purchase':`from ${fmt0(t.min)} points`}</div>
-        <div class="ben">${t.ben}</div>
-        <div class="code">${unlocked?t.code:'🔒 locked'}</div>
-      </div>`}).join('')+`</div>
-    <p class="muted" style="font-size:12px;margin-top:14px">Use the unlocked code at checkout. Tiers are recalculated automatically from paid orders.</p>`;
+
+    <h3 style="font-size:15px;margin:22px 0 2px">Trade your points</h3>
+    <p class="muted" style="font-size:12.5px;margin-bottom:4px">Each code is yours alone, works once and is valid for ${d.code_ttl_days} days.</p>
+    <div class="tier-track">`+d.rewards.map(r=>`
+      <div class="tier-card${r.affordable?' on':' locked'}">
+        <div class="nm">${ICO.crown.replace('stroke-width="1.8"','stroke-width="1.8" width="18" height="18"')} ${r.pct}% off</div>
+        <div class="req">${fmt0(r.cost)} points</div>
+        <div class="ben">One-time code for any challenge, on top of the plan price.</div>
+        <button class="btn-p sm rw-go" ${r.affordable?'':'disabled'} onclick="redeemReward('${r.key}',this)">
+          ${r.affordable?`Redeem for ${fmt0(r.cost)} pts`:`Need ${fmt0(r.cost-d.points_available)} more`}</button>
+      </div>`).join('')+`</div>
+
+    <h3 style="font-size:15px;margin:24px 0 2px">Your codes</h3>
+    ${kody.length||zuzyte.length?`<div class="rw-codes">`+[...kody,...zuzyte].map(c=>`
+      <div class="rw-code${c.status==='active'?'':' spent'}">
+        <div>
+          <b class="mono">${esc(c.code)}</b>
+          <span class="muted" style="font-size:11.5px;display:block;margin-top:2px">
+            ${c.pct}% off · ${fmt0(c.points_spent)} pts${c.status==='active'?` · expires ${dstr(c.expires_at)}`:c.status==='used'?` · used ${dstr(c.used_at)}`:' · expired'}</span>
+        </div>
+        ${c.status==='active'
+          ?`<button class="btn-o sm" onclick="copyVal(this,'${esc(c.code)}')">Copy</button>`
+          :`<span class="status ${c.status==='used'?'paid':'failed'}"><span class="dot"></span>${c.status}</span>`}
+      </div>`).join('')+`</div>`
+      :`<p class="muted" style="font-size:12.5px">No codes yet. Redeem your points above and the code shows up here.</p>`}
+    <p class="muted" style="font-size:12px;margin-top:14px">Paste the code in the checkout box when you buy a challenge. Points come off the moment you redeem, the code itself is used up on your next purchase.</p>`;
  },
 
  async journal(){
@@ -1361,9 +1440,9 @@ const VIEWS={
     </div>`;
   const cards=[
     {ic:'wallet',cls:'green',badge:'Active',name:'Refundable Fee',desc:'Your one-time challenge fee is refunded in full, automatically added to your first payout from a funded account.',cond:['Pass the evaluation','Complete KYC','Request your first payout']},
-    {ic:'trend',cls:'purple',badge:'Automatic',name:'Scaling Plan',desc:'Grow a funded account by +10% and the platform scales its balance by +25%. Repeatable, coded into the engine — no applications.',cond:['Funded account','+10% growth','Applied instantly']},
+    {ic:'trend',cls:'purple',badge:'Your call',name:'Scaling Plan',desc:'Grow a funded account by +15% and you choose: take the payout, or move up to the next plan in our pricing. Repeatable, no applications.',cond:['Funded account','+15% growth','You pick payout or a bigger plan']},
     {ic:'spark',cls:'blue',badge:'10% recurring',name:'Affiliate Program',desc:'Share your referral link and earn 10% of every challenge purchased by traders you refer — for life, not just the first order.',cond:['Share your link','Friend buys a challenge','Commission tracked live']},
-    {ic:'crown',cls:'orange',badge:'Spend-based',name:'Loyalty Tiers',desc:'Every $1 spent earns a loyalty point. Reach Silver and Gold to unlock bigger discount codes for future challenges.',cond:['Bronze: from first purchase','Silver: 500 points','Gold: 1,500 points']},
+    {ic:'crown',cls:'orange',badge:'Spend-based',name:'Loyalty Points',desc:'Every $1 spent earns a loyalty point, and check-ins add more. Trade the points for your own one-time discount code on the Loyalty page.',cond:['500 points: 15% off','1,000 points: 25% off','2,000 points: 35% off']},
   ];
   $('view').innerHTML=revealHtml+affPanel+`<div class="badge-grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">`+cards.map(c=>`
     <div class="panel">
@@ -1398,12 +1477,13 @@ const VIEWS={
       return `<div class="scale-offer">
         <div class="so-txt">
           <b>${esc(a.login)} is up ${a.scale_trigger_pct}%. Now you choose.</b>
-          <span>Take the profit as a payout, or turn it into a bigger account. One or the other:
-            scaling puts the profit back in as capital, so there is nothing left to pay out.</span>
+          <span>Take the profit as a payout, or move up to the $${fmt0(a.scale_up_to)} plan. One or
+            the other: moving up puts the profit back in as capital, so there is nothing left to
+            pay out.</span>
         </div>
         <div class="so-act">
           <button class="btn-o sm" onclick="openPayoutModal(${a.id},${av.toFixed(2)})">Take $${fmt(av)} payout</button>
-          <button class="btn-p sm" onclick="openScaleModal(${a.id},${a.initial_balance},${a.scale_up_to})">Scale up to $${fmt0(a.scale_up_to)}</button>
+          <button class="btn-p sm" onclick="openScaleModal(${a.id},${a.initial_balance},${a.scale_up_to})">Move up to $${fmt0(a.scale_up_to)}</button>
         </div>
       </div>`}).join('')}
     ${funded.length?`<div class="panel" style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
@@ -1422,7 +1502,7 @@ const VIEWS={
       </tbody></table></div>`
       :`<div class="empty"><h3>No payout requests yet</h3><p>Pass a challenge, get funded and request your first performance reward. Your challenge fee comes back with it.</p></div>`}
 
-    ${(data.history||[]).length?`<div class="sec-card card-md" style="margin-top:18px">
+    ${(data.history||[]).length?`<div class="sec-card" style="margin-top:18px">
       <h3>Payout history</h3>
       <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Rewards already paid out to you.</p>
       <div class="tbl-wrap"><table class="tbl sortable" data-tkey="portal.payout-hist">
@@ -1446,7 +1526,7 @@ const VIEWS={
   /* Store credits card shows up only once the trader has any history — a
      zero-balance wall of empty ledger would just be noise. */
   const credits=(cr&&(cr.balance_usd>0||(cr.ledger||[]).length))?`
-    <div class="sec-card card-md" style="margin-top:18px">
+    <div class="sec-card" style="margin-top:18px">
       <h3>Store credits</h3>
       <p class="muted" style="font-size:12.5px;margin:4px 0 12px">1 credit = $1, applied to your
         next challenge at checkout. Current balance: <b class="mono">$${fmt(cr.balance_usd)}</b></p>
@@ -1476,24 +1556,24 @@ const VIEWS={
  async kyc(){
   const s=ME.kyc_status;
   if(s==='approved'){
-    $('view').innerHTML=`<div class="panel" style="max-width:560px;display:flex;gap:14px;align-items:center">
+    $('view').innerHTML=`<div class="panel" style="display:flex;gap:14px;align-items:center">
       <div class="tile-ic green">${ICO.shield}</div>
       <div><h3>Identity verified</h3><p class="muted" style="font-size:13.5px">Your KYC is approved. You can request payouts on funded accounts.</p></div></div>`;
     return;
   }
   if(s==='pending'){
-    $('view').innerHTML=`<div class="panel" style="max-width:560px;display:flex;gap:14px;align-items:center">
+    $('view').innerHTML=`<div class="panel" style="display:flex;gap:14px;align-items:center">
       <div class="tile-ic orange">${ICO.shield}</div>
       <div><h3>Documents under review</h3><p class="muted" style="font-size:13.5px">Our team is reviewing your submission. You'll get an e-mail once it's approved.</p></div></div>`;
     return;
   }
   $('view').innerHTML=`
-    ${s==='rejected'?`<div class="panel" style="max-width:760px;margin-bottom:14px;border-color:var(--red-line);background:var(--red-bg)">
+    ${s==='rejected'?`<div class="panel" style="margin-bottom:14px;border-color:var(--red-line);background:var(--red-bg)">
       <b style="font-size:13.5px">Your previous verification was declined.</b>
       ${ME.kyc_reject_reason?`<p style="font-size:12.5px;margin-top:4px"><b>Reason:</b> ${esc(ME.kyc_reject_reason)}</p>`:''}
       <p class="muted" style="font-size:12.5px;margin-top:4px">Please double-check your details and documents, then submit again. Reach out via Support if you need help.</p>
     </div>`:''}
-    <div class="sec-card" style="max-width:760px">
+    <div class="sec-card">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
         <div class="tile-ic blue">${ICO.shield}</div><h3 style="margin:0">Submit KYC Documents</h3>
       </div>
@@ -1512,7 +1592,7 @@ const VIEWS={
         <div><label class="muted" style="font-size:12px">Country</label>
           <select id="k-country" class="inp">
             <option value="">Select a country…</option>
-            ${COUNTRIES.map(k=>`<option${ME.kyc_country===k?' selected':''}>${k}</option>`).join('')}
+            ${COUNTRY_NAMES.map(k=>`<option${ME.kyc_country===k?' selected':''}>${esc(k)}</option>`).join('')}
           </select></div>
         <div><label class="muted" style="font-size:12px">ID Type</label>
           <select id="k-idtype" class="inp"><option>Passport</option><option>National ID</option><option>Driver's License</option></select></div>
@@ -1544,7 +1624,7 @@ const VIEWS={
     $('view').innerHTML=`
       <button class="backlink" onclick="window._ticketView=null;go('support')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg> Back to Tickets</button>
-      <div class="sec-card" style="max-width:640px"><h3>Create New Ticket</h3>
+      <div class="sec-card"><h3>Create New Ticket</h3>
         <div style="display:flex;flex-direction:column;gap:11px;margin-top:12px">
           <input id="t-subject" class="inp" placeholder="Subject">
           <textarea id="t-msg" class="inp" rows="6" placeholder="Describe your issue…"></textarea>
@@ -1557,7 +1637,7 @@ const VIEWS={
     $('view').innerHTML=`
       <button class="backlink" onclick="window._ticketView=null;go('support')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg> Back to Tickets</button>
-      <div class="sec-card" style="max-width:720px">
+      <div class="sec-card">
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:14px">
           <h3 style="margin:0">${esc(t.subject)}</h3>
           <span class="status ${t.status==='closed'?'failed':t.status==='answered'?'paid':'pending'}"><span class="dot"></span>${t.status}</span>
@@ -1701,7 +1781,9 @@ async function replyTicket(id){
 }
 
 async function saveProfile(){
-  try{await api('/api/me',{method:'PATCH',body:JSON.stringify({full_name:$('s-name').value})});
+  const nazwa=nameCheck($('s-name').value,'Full name');
+  if(!nazwa.ok){toast(nazwa.msg,'err');return}
+  try{await api('/api/me',{method:'PATCH',body:JSON.stringify({full_name:nazwa.value})});
     ME=await api('/api/auth/me');boot();toast('Profile saved.','ok');go('settings');
   }catch(e){toast('Error: '+e.message,'err')}
 }
@@ -1885,6 +1967,8 @@ async function submitKyc(){
   const err=m=>{const el=$('kyc-err');el.textContent=m;el.classList.remove('hidden')};
   const name=$('k-name').value.trim(),country=$('k-country').value.trim();
   if(!name||!country){err('Full name and country are required.');return}
+  const kycNazwa=nameCheck(name,'Full name');
+  if(!kycNazwa.ok){err(kycNazwa.msg);return}
   const dob=$('k-dob').value.trim();
   if(dob){
     const m=dob.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
@@ -2002,11 +2086,88 @@ function credsBlock(a, compact){
     </div>`;
 }
 
+/* Odbior nagrody za prog odznak. Przycisk gasnie NA CZAS zadania, zeby dwuklik
+   nie wyslal dwoch prosb — poza tym baza i tak trzyma UNIQUE (trader, prog),
+   wiec drugie zadanie dostanie 409 zamiast drugiej nagrody. */
+async function claimReward(tier, btn){
+  if(btn){btn.disabled=true; btn.textContent='Claiming…';}
+  try{
+    const r=await api('/api/me/achievements/claim',{method:'POST',body:JSON.stringify({tier})});
+    toast(r.account?'Your free challenge is being set up.':'Reward code added to your account.','ok');
+    go('achievements');
+    if(r.account)setTimeout(()=>go('accounts'),1400);
+  }catch(e){
+    toast('Error: '+e.message,'err');
+    if(btn){btn.disabled=false; btn.textContent='Claim reward';}
+  }
+}
+
 function copyVal(btn, val){
   navigator.clipboard.writeText(val).then(()=>{
     const old=btn.innerHTML; btn.innerHTML=ICO.check; btn.style.color='var(--green)';
     setTimeout(()=>{btn.innerHTML=old;btn.style.color=''},1200);
   });
+}
+
+/* Pytanie w oknie PORTALU, nie przegladarki. Natywny confirm() przedstawia sie
+   jako "Komunikat ze strony protradersfunding.com", ma przyciski w jezyku
+   systemu i wyglada jak ostrzezenie o zagrozeniu — czyli dokladnie odwrotnie
+   niz zaproszenie do odebrania nagrody. Zwraca Promise<bool>, wiec podmiana
+   `confirm(x)` na `await askConfirm({...})` jest jeden do jednego. */
+function askConfirm({title,body,ok='Confirm',cancel='Cancel',danger=false}){
+  return new Promise(resolve=>{
+    const w=document.createElement('div');
+    w.className='modal-wrap'; w.id='ask-modal';
+    let zamkniete=false;
+    const koniec=v=>{
+      if(zamkniete)return; zamkniete=true;
+      document.removeEventListener('keydown',klawisz);
+      w.remove(); resolve(v);
+    };
+    const klawisz=e=>{if(e.key==='Escape')koniec(false)};
+    w.onclick=e=>{if(e.target===w)koniec(false)};
+    w.innerHTML=`<div class="modal" onclick="event.stopPropagation()" role="dialog" aria-modal="true">
+      <div class="modal-head"><h3>${esc(title)}</h3>
+        <button class="icon-btn" id="ask-x" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+      <p class="muted" style="font-size:13px;line-height:1.6;margin:2px 0 16px">${body}</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="${danger?'btn-danger':'btn-p'}" id="ask-ok">${esc(ok)}</button>
+        <button class="btn-o" id="ask-no">${esc(cancel)}</button>
+      </div></div>`;
+    document.body.appendChild(w);
+    w.querySelector('#ask-ok').onclick=()=>koniec(true);
+    w.querySelector('#ask-no').onclick=()=>koniec(false);
+    w.querySelector('#ask-x').onclick=()=>koniec(false);
+    document.addEventListener('keydown',klawisz);
+    w.querySelector('#ask-ok').focus();
+  });
+}
+
+/* Wymiana punktow na wlasny kod. Serwer jest jedynym miejscem, ktore liczy
+   saldo i odejmuje punkty — tu tylko blokujemy podwojny klik i odswiezamy widok. */
+async function redeemReward(key,btn){
+  const r=(LOY&&LOY.rewards||[]).find(x=>x.key===key);
+  if(!r)return;
+  const zgoda=await askConfirm({
+    title:`Trade ${fmt0(r.cost)} points for ${r.pct}% off?`,
+    body:`You get a one-time code worth <b>${r.pct}% off</b> any challenge. The points come off `
+      +`your balance straight away, and the code is yours alone.`,
+    ok:`Redeem for ${fmt0(r.cost)} pts`,
+    cancel:'Not yet',
+  });
+  if(!zgoda)return;
+  if(btn)btn.disabled=true;
+  try{
+    const d=await api('/api/me/loyalty/redeem',{method:'POST',body:JSON.stringify({reward:key})});
+    await VIEWS.loyalty();
+    toast(`🎟️ Your code ${d.code.code} is ready — ${d.code.pct}% off your next challenge.`,'ok',10000);
+    const el=document.querySelector('.rw-code');
+    if(el&&window.RFX&&RFX.burstFrom)RFX.burstFrom(el,{count:60,palette:RFX.GOLD});
+  }catch(e){
+    if(btn)btn.disabled=false;
+    toast('Error: '+e.message,'err');
+  }
 }
 
 /* ---------- purchase modal ---------- */
@@ -2016,6 +2177,9 @@ function openBuy(key){
   const p=PRODUCTS.find(x=>x.key===key);
   if(!p)return;
   const nm=(ME.full_name||'').trim().split(/\s+/);
+  /* Kraj MUSI byc znany, zanim powstanie pole numeru: `phoneNational`
+     odcina nim kierunkowy z zapisanego numeru. */
+  const kraj=guessCountry();
   const box=document.createElement('div');
   box.id='buy-modal';
   box.className='modal-wrap';
@@ -2035,10 +2199,30 @@ function openBuy(key){
         they must be real; your credentials are delivered to them.</div>
       <div class="stack">
         <div class="grid2">
-          <input id="c-first" placeholder="First name" class="inp" value="${esc(ME.first_name||nm[0]||'')}">
-          <input id="c-last" placeholder="Last name" class="inp" value="${esc(ME.last_name||nm.slice(1).join(' ')||'')}">
+          <div><input id="c-first" placeholder="First name" class="inp" autocomplete="given-name"
+            oninput="clearFieldErr('c-first')" value="${esc(ME.first_name||nm[0]||'')}">
+            <p class="field-err hidden" id="c-first-err"></p></div>
+          <div><input id="c-last" placeholder="Last name" class="inp" autocomplete="family-name"
+            oninput="clearFieldErr('c-last')" value="${esc(ME.last_name||nm.slice(1).join(' ')||'')}">
+            <p class="field-err hidden" id="c-last-err"></p></div>
         </div>
-        <input id="c-phone" placeholder="Phone, e.g. +14155551234" class="inp" value="${esc(ME.phone||'')}">
+        <div>
+          <div class="tel-wrap">
+            <button type="button" class="tel-cc" id="c-cc" onclick="ccToggle(event)"
+              aria-haspopup="listbox" aria-expanded="false" aria-label="Country calling code">
+              <span class="flag" id="c-cc-flag"></span><span id="c-cc-dial">+1</span>
+              <svg class="tel-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            <input id="c-phone" class="inp" inputmode="tel" autocomplete="tel-national"
+              placeholder="Phone number" oninput="clearFieldErr('c-phone')" value="${esc(phoneNational(ME.phone,kraj))}">
+            <div id="ccpop" class="ccpop hidden">
+              <input id="cc-search" class="inp" placeholder="Search country or code"
+                autocomplete="off" spellcheck="false" oninput="ccRender()">
+              <div class="cc-list" id="cc-list" role="listbox"></div>
+            </div>
+          </div>
+          <p class="field-err hidden" id="c-phone-err"></p>
+        </div>
         <input id="c-email" class="inp" value="${esc(ME.email)}" disabled aria-label="Account e-mail">
         <p class="hint" style="text-align:left;margin:-6px 0 0">Purchases are tied to your <b>account e-mail</b>, and credentials
           and the invoice are delivered there. Different address?
@@ -2067,6 +2251,7 @@ function openBuy(key){
   document.body.appendChild(box);
   window._buyKey=key;
   window._buyCode={coupon:null,promo:null};
+  ccSet(kraj, false);
   codeCheck();
   setTimeout(()=>$('c-first').focus(),50);
 }
@@ -2141,17 +2326,225 @@ function buyErr(msg){
   el.textContent=msg; el.classList.remove('hidden');
 }
 
+/* ---------- field validation ----------
+   Deliberately a mirror of app/fields.py and app/countries.py, not a second
+   opinion: the browser check exists so the customer sees the problem while
+   typing, and the server check is the one that actually protects the data.
+   If you change a rule here, change it there in the same commit. */
+const NAME_OK_EXTRA=" -'’.";
+function nameCheck(value,label){
+  const t=String(value||'').trim().replace(/\s+/g,' ');
+  if(!t)return{ok:false,msg:`${label} is required.`};
+  if(t.length>60)return{ok:false,msg:`${label} is too long (max 60 characters).`};
+  if(/\d/.test(t))return{ok:false,msg:`${label} cannot contain digits.`};
+  for(const c of t){
+    if(!(/\p{L}/u.test(c)||NAME_OK_EXTRA.includes(c)))
+      return{ok:false,msg:`${label} contains an invalid character: “${c}”.`};
+  }
+  if([...t].filter(c=>/\p{L}/u.test(c)).length<2)return{ok:false,msg:`Enter your real ${label.toLowerCase()}.`};
+  return{ok:true,value:t};
+}
+function emailCheck(value){
+  const t=String(value||'').trim().toLowerCase();
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(t))
+    return{ok:false,msg:'Enter a valid e-mail address, for example name@example.com.'};
+  return{ok:true,value:t};
+}
+function phoneCheck(iso,value){
+  const c=COUNTRY_BY_ISO[String(iso||'').toUpperCase()];
+  if(!c)return{ok:false,msg:'Pick your country from the list.'};
+  const text=String(value||'').trim();
+  let d=text.replace(/\D/g,'');
+  if(!d)return{ok:false,msg:'Enter your phone number.'};
+  const intl=text.startsWith('+')||d.startsWith('00');
+  if(d.startsWith('00'))d=d.slice(2);
+  if(intl){
+    if(!d.startsWith(c.d)){
+      const other=COUNTRIES.slice().sort((a,b)=>b.d.length-a.d.length).find(x=>d.startsWith(x.d));
+      return{ok:false,msg:other?`That number starts with +${other.d}, not +${c.d} (${c.n}). Pick the matching country.`
+                             :`That does not look like a ${c.n} number (+${c.d}).`};
+    }
+    d=d.slice(c.d.length);
+    if(!d)return{ok:false,msg:'Enter your phone number.'};
+  }
+  const fits=n=>n.length>=c.mn&&n.length<=c.mx;
+  /* Leading zero is stripped ONLY as a repair. In Italy, for one, the zero is
+     part of the national number and dropping it would break valid input. */
+  if(!fits(d)&&d.startsWith('0')&&fits(d.slice(1)))d=d.slice(1);
+  if(!fits(d)){
+    const many=c.mn===c.mx?`${c.mn}`:`${c.mn}–${c.mx}`;
+    return{ok:false,msg:`A phone number in ${c.n} has ${many} digits after +${c.d} — you entered ${d.length}.`};
+  }
+  if(c.d.length+d.length>15)return{ok:false,msg:'That phone number is too long.'};
+  return{ok:true,value:'+'+c.d+d,national:d};
+}
+/* Splits a stored E.164 number back into the national part, so re-opening the
+   modal shows "512345678" next to the +48 button instead of the whole string. */
+function phoneNational(stored,iso){
+  const c=COUNTRY_BY_ISO[String(iso||'').toUpperCase()];
+  const d=String(stored||'').replace(/\D/g,'');
+  if(!d)return'';
+  if(c&&d.startsWith(c.d))return d.slice(c.d.length);
+  return stored&&stored.startsWith('+')?d:String(stored||'');
+}
+function fieldErr(id,msg){
+  const inp=$(id); if(inp)inp.classList.add('bad');
+  const el=$(id+'-err'); if(el){el.textContent=msg;el.classList.remove('hidden')}
+  if(inp&&inp.focus)inp.focus();
+}
+function clearFieldErr(id){
+  const inp=$(id); if(inp)inp.classList.remove('bad');
+  const el=$(id+'-err'); if(el)el.classList.add('hidden');
+}
+
+/* ---------- country calling code picker ----------
+   Same shape as the date-of-birth calendar above: a button next to the input
+   opens a panel, and a document-level click closes it. */
+let CC='US';
+function localeCountry(){
+  const langs=navigator.languages&&navigator.languages.length?navigator.languages:[navigator.language||''];
+  for(const l of langs){
+    const m=/[-_]([A-Za-z]{2})$/.exec(l||'');
+    if(m&&COUNTRY_BY_ISO[m[1].toUpperCase()])return m[1].toUpperCase();
+  }
+  return null;
+}
+/* Strefa czasowa urzadzenia -> kraj. Lepszy pierwszy strzal niz jezyk: ktos w
+   Nowym Jorku z polskim interfejsem ma `pl-PL`, ale `America/New_York`. */
+function tzCountry(){
+  try{
+    const z=Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const iso=z&&TZ_COUNTRY[z];
+    return (iso&&COUNTRY_BY_ISO[iso])?iso:null;
+  }catch(e){return null}
+}
+/* Kraj, gdy nie mamy o kliencie NICZEGO: strefa czasowa, potem jezyk, a na
+   koncu Stany. Fallback jest twardo +1 i nie moze byc krajem, ktory akurat
+   wypadl pierwszy w tablicy. */
+function defaultCountry(){
+  return tzCountry()||localeCountry()||(COUNTRY_BY_ISO['US']?'US':null)
+    ||(COUNTRIES.find(c=>c.d==='1')||COUNTRIES[0]||{i:''}).i;
+}
+function guessCountry(){
+  if(ME&&ME.phone_country&&COUNTRY_BY_ISO[ME.phone_country])return ME.phone_country;
+  /* Customers who bought before the picker existed have a phone but no saved
+     country. Reading the country back out of their own number beats guessing
+     from the browser locale, which would show them a mismatched flag and a
+     validation error on a number that was fine all along. */
+  const zapisany=String((ME&&ME.phone)||'').trim();
+  if(zapisany.startsWith('+')){
+    const d=zapisany.replace(/\D/g,'');
+    const pasuje=COUNTRIES.slice().sort((a,b)=>b.d.length-a.d.length)
+      .filter(c=>d.startsWith(c.d)&&d.length-c.d.length>=c.mn&&d.length-c.d.length<=c.mx);
+    if(pasuje.length){
+      /* +44 is the UK, Guernsey, Jersey and the Isle of Man; +1 is the US,
+         Canada and a dozen more. Alphabetical order would answer "Guernsey",
+         whose allowed length differs from the UK's — so the customer's own,
+         perfectly valid number would stop validating. Order of preference:
+         the browser's region, then the country libphonenumber marks as the
+         main one for that code. */
+      for(const skad of [tzCountry(),localeCountry()]){
+        if(skad&&pasuje.some(c=>c.i===skad))return skad;
+      }
+      return (pasuje.find(c=>c.m)||pasuje[0]).i;
+    }
+  }
+  return defaultCountry();
+}
+/* ~110 KB obrazkow flag w jednym pliku: nie wchodzi w krytyczna sciezke strony,
+   tylko dogrywa sie osobno. Wolane z KAZDEGO miejsca, ktore nadaje klase flagi —
+   wczesniej tylko z otwarcia listy krajow, wiec flaga przy numerze kierunkowym
+   w kasie zostawala szarym prostokatem az do klikniecia w liste. */
+function flagsCss(){
+  if(document.getElementById('pf-flags'))return;
+  const l=document.createElement('link');
+  l.id='pf-flags';l.rel='stylesheet';l.href='/static/css/flags.css?v='+ASSET_V;
+  document.head.appendChild(l);
+}
+/* Rozgrzewka w bezczynnosci po zalogowaniu: plik i tak bedzie potrzebny przy
+   pierwszym otwarciu kasy, a pobrany zawczasu jest juz w cache, wiec flaga
+   pojawia sie razem z okienkiem, a nie dogania je z opoznieniem. */
+function flagsWarm(){
+  (window.requestIdleCallback||(f=>setTimeout(f,1500)))(()=>flagsCss(),{timeout:5000});
+}
+function ccSet(iso,revalidate){
+  const c=COUNTRY_BY_ISO[iso]; if(!c)return;
+  flagsCss();
+  CC=c.i;
+  const f=$('c-cc-flag'),d=$('c-cc-dial');
+  if(f)f.className="flag flag-"+c.i.toLowerCase();
+  if(d)d.textContent='+'+c.d;
+  const btn=$('c-cc'); if(btn)btn.title=c.n;
+  if(revalidate!==false)clearFieldErr('c-phone');
+}
+function ccToggle(e){
+  e.stopPropagation();
+  const pop=$('ccpop'); if(!pop)return;
+  const open=pop.classList.contains('hidden');
+  if(open){flagsCss();ccRender();$('cc-search').value='';ccRender();}
+  pop.classList.toggle('hidden',!open);
+  const btn=$('c-cc'); if(btn)btn.setAttribute('aria-expanded',String(open));
+  if(open)setTimeout(()=>{const s=$('cc-search');if(s)s.focus()},30);
+}
+function ccRender(){
+  const box=$('cc-list'); if(!box)return;
+  const q=(($('cc-search')||{}).value||'').trim().toLowerCase().replace(/^\+/,'');
+  /* Ranked, not just filtered: plain alphabetical order answers "pol" with
+     French Polynesia before Poland, and the first row is the one people hit. */
+  const rank=c=>{
+    const n=c.n.toLowerCase();
+    if(c.i.toLowerCase()===q)return 0;
+    if(n===q)return 1;
+    if(n.startsWith(q))return 2;
+    if(c.d===q)return 3;
+    if(n.split(/[\s-]+/).some(w=>w.startsWith(q)))return 4;
+    if(c.d.startsWith(q))return 5;
+    if(n.includes(q))return 6;
+    return 99;
+  };
+  const hit=q?COUNTRIES.map(c=>[rank(c),c]).filter(([r])=>r<99)
+               .sort((a,b)=>a[0]-b[0]||a[1].n.localeCompare(b[1].n)).map(([,c])=>c)
+             :COUNTRIES;
+  box.innerHTML=hit.length?hit.map(c=>
+    `<button type="button" class="cc-item${c.i===CC?' on':''}" role="option" aria-selected="${c.i===CC}"
+       onclick="ccPick('${c.i}')"><span class="flag flag-${c.i.toLowerCase()}"></span>
+       <span class="cc-n">${esc(c.n)}</span><span class="cc-d">+${c.d}</span></button>`).join('')
+    :'<p class="cc-none">No country matches that.</p>';
+}
+function ccPick(iso){
+  ccSet(iso);
+  const pop=$('ccpop'); if(pop)pop.classList.add('hidden');
+  const btn=$('c-cc'); if(btn)btn.setAttribute('aria-expanded','false');
+  const inp=$('c-phone'); if(inp)inp.focus();
+}
+document.addEventListener('click',e=>{
+  const pop=document.getElementById('ccpop');
+  if(pop&&!pop.classList.contains('hidden')&&!e.target.closest('.tel-wrap'))pop.classList.add('hidden');
+});
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape')return;
+  const pop=document.getElementById('ccpop');
+  if(pop&&!pop.classList.contains('hidden')){pop.classList.add('hidden');e.stopPropagation()}
+});
+
 async function buy(key){
   await codeCheck();   /* fresh code classification, even if the debounce is still pending */
   const bc=window._buyCode||{};
   const coupon=bc.coupon||null, promo=bc.promo||null;
-  const first=($('c-first').value||'').trim(), last=($('c-last').value||'').trim(), phone=($('c-phone').value||'').trim();
-  if(!first||!last||!phone){buyErr('Fill in your first name, last name and phone. The MT5 account is registered under these details.');return}
-  if(!/^\+?\d[\d\s-]{6,}$/.test(phone)){buyErr('Phone looks invalid. Include the country code, e.g. +14155551234.');return}
+  /* The MT5 demo account is registered with the broker under exactly these
+     details, so a typo here means a paid order that cannot be provisioned. */
+  ['c-first','c-last','c-phone'].forEach(clearFieldErr);
+  const imie=nameCheck($('c-first').value,'First name');
+  if(!imie.ok){fieldErr('c-first',imie.msg);return}
+  const nazwisko=nameCheck($('c-last').value,'Last name');
+  if(!nazwisko.ok){fieldErr('c-last',nazwisko.msg);return}
+  const tel=phoneCheck(CC,$('c-phone').value);
+  if(!tel.ok){fieldErr('c-phone',tel.msg);return}
+  const first=imie.value, last=nazwisko.value, phone=tel.value;
   const btn=$('buy-go'); if(btn){btn.disabled=true; btn.textContent='Processing…'}
   try{
     const res=await api('/api/checkout',{method:'POST',
-      body:JSON.stringify({product_key:key,coupon,promo_code:promo,first_name:first,last_name:last,phone,
+      body:JSON.stringify({product_key:key,coupon,promo_code:promo,first_name:first,last_name:last,phone,phone_country:CC,
         weekend_trading:!!($('c-weekend')&&$('c-weekend').checked),
         use_credits:!$('c-usecr')||$('c-usecr').checked})});
     if(res.checkout_url && !res.mock){window.location=res.checkout_url;return;}  // real Stripe
@@ -2172,7 +2565,16 @@ async function buy(key){
 }
 
 /* ---------- ACCOUNT DETAIL ---------- */
-const COUNTRIES='Afghanistan|Albania|Algeria|Andorra|Angola|Antigua and Barbuda|Argentina|Armenia|Australia|Austria|Azerbaijan|Bahamas|Bahrain|Bangladesh|Barbados|Belarus|Belgium|Belize|Benin|Bhutan|Bolivia|Bosnia and Herzegovina|Botswana|Brazil|Brunei|Bulgaria|Burkina Faso|Burundi|Cambodia|Cameroon|Canada|Cape Verde|Central African Republic|Chad|Chile|China|Colombia|Comoros|Congo|Costa Rica|Croatia|Cuba|Cyprus|Czechia|Denmark|Djibouti|Dominica|Dominican Republic|Ecuador|Egypt|El Salvador|Equatorial Guinea|Eritrea|Estonia|Eswatini|Ethiopia|Fiji|Finland|France|Gabon|Gambia|Georgia|Germany|Ghana|Greece|Grenada|Guatemala|Guinea|Guinea-Bissau|Guyana|Haiti|Honduras|Hong Kong|Hungary|Iceland|India|Indonesia|Iran|Iraq|Ireland|Israel|Italy|Ivory Coast|Jamaica|Japan|Jordan|Kazakhstan|Kenya|Kiribati|Kosovo|Kuwait|Kyrgyzstan|Laos|Latvia|Lebanon|Lesotho|Liberia|Libya|Liechtenstein|Lithuania|Luxembourg|Macau|Madagascar|Malawi|Malaysia|Maldives|Mali|Malta|Marshall Islands|Mauritania|Mauritius|Mexico|Micronesia|Moldova|Monaco|Mongolia|Montenegro|Morocco|Mozambique|Myanmar|Namibia|Nauru|Nepal|Netherlands|New Zealand|Nicaragua|Niger|Nigeria|North Korea|North Macedonia|Norway|Oman|Pakistan|Palau|Palestine|Panama|Papua New Guinea|Paraguay|Peru|Philippines|Poland|Portugal|Qatar|Romania|Russia|Rwanda|Saint Kitts and Nevis|Saint Lucia|Saint Vincent and the Grenadines|Samoa|San Marino|Sao Tome and Principe|Saudi Arabia|Senegal|Serbia|Seychelles|Sierra Leone|Singapore|Slovakia|Slovenia|Solomon Islands|Somalia|South Africa|South Korea|South Sudan|Spain|Sri Lanka|Sudan|Suriname|Sweden|Switzerland|Syria|Taiwan|Tajikistan|Tanzania|Thailand|Timor-Leste|Togo|Tonga|Trinidad and Tobago|Tunisia|Turkey|Turkmenistan|Tuvalu|Uganda|Ukraine|United Arab Emirates|United Kingdom|United States|Uruguay|Uzbekistan|Vanuatu|Vatican City|Venezuela|Vietnam|Yemen|Zambia|Zimbabwe'.split('|');
+/* Countries come from the server (app/countries.py) so the dial codes, the
+   allowed phone lengths and the KYC list all read from ONE table. */
+const PF_GEO=window.PF_GEO||{};
+const COUNTRIES=PF_GEO.c||[];
+/* Strefa czasowa -> kraj (IANA). Mowi, GDZIE ktos jest; jezyk przegladarki
+   tylko, jak woli czytac — dlatego przy numerze kierunkowym strefa idzie
+   pierwsza. */
+const TZ_COUNTRY=PF_GEO.tz||{};
+const COUNTRY_BY_ISO=Object.fromEntries(COUNTRIES.map(c=>[c.i,c]));
+const COUNTRY_NAMES=COUNTRIES.map(c=>c.n);
 const PHASE_LABEL={eval_1:'Phase 1',eval_2:'Phase 2',funded:'Funded'};
 
 async function openAcc(id){
@@ -2189,6 +2591,8 @@ async function openAcc(id){
   const latest=act.days.length?act.days[act.days.length-1].day:null;
   const base=latest?new Date(latest+'T00:00:00Z'):new Date();
   window._calM=[base.getUTCFullYear(),base.getUTCMonth()];
+  /* Wybrany dzien nie moze przejsc na inne konto — historia jest per konto. */
+  window._calSel=null;
   const profitPct=m.profit_pct||0;
   const targetPct=m.profit_target_pct||0;
   const targetUsd=a.initial_balance*targetPct/100;
@@ -2318,8 +2722,9 @@ async function openAcc(id){
 
     <div class="sec-card" id="cal-card"></div>
 
-    <div class="sec-card">
+    <div class="sec-card" id="tx-card">
       <h3>Transaction History</h3>
+      <div id="tx-filter" class="tx-filter"></div>
       ${txTable(a,act)}
     </div>
 
@@ -2327,6 +2732,7 @@ async function openAcc(id){
   calRender();
   drawDetailChart();
   rollStats();
+  txInit();
   checkMilestone(id,a,m);
 }
 
@@ -2361,6 +2767,17 @@ function toggleCreds(){
 }
 function calShift(d){const [y,m]=window._calM;const nd=new Date(Date.UTC(y,m+d,1));
   window._calM=[nd.getUTCFullYear(),nd.getUTCMonth()];calRender()}
+/* Klikniecie w dzien z obrotem zawęża Transaction History do tego dnia.
+   Drugie klikniecie w ten sam dzien zdejmuje filtr — komorka jest przelacznikiem,
+   nie jednokierunkowym przejsciem. */
+function calPick(day){
+  window._calSel=(window._calSel===day)?null:day;
+  calRender();
+  txPage(1);
+  const tbl=$('tx-tbl');
+  if(tbl&&window._calSel)tbl.closest('.sec-card').scrollIntoView({behavior:'smooth',block:'start'});
+}
+function calClear(){window._calSel=null;calRender();txPage(1)}
 function calRender(){
   const el=$('cal-card'); if(!el||!window._act)return;
   const [y,m]=window._calM;
@@ -2375,9 +2792,15 @@ function calRender(){
   for(let d=1;d<=dim;d++){
     const key=`${y}-${pad(m+1)}-${pad(d)}`;
     const pnl=map[key];
-    let cls='',txt='';
+    let cls='',txt='',atryb='';
     if(pnl!==undefined){
       cls=pnl>0?'profit':pnl<0?'loss':'flat';
+      /* Klikalne sa WYLACZNIE dni z obrotem — pusta komorka nie ma czego
+         pokazac na liscie ponizej. */
+      cls+=' has'+(key===window._calSel?' sel':'');
+      atryb=` role="button" tabindex="0" aria-pressed="${key===window._calSel}"`
+        +` onclick="calPick('${key}')"`
+        +` onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();calPick('${key}')}"`;
       if(matchMedia('(max-width:640px)').matches){
         // waskie komorki: sama wielkosc (12345 -> 12.3k) — znak niesie kolor komorki
         const a=Math.abs(pnl);
@@ -2386,7 +2809,7 @@ function calRender(){
         txt=`<div class="pnl">${pnl>0?'+':''}$${fmt0(pnl)}</div>`;
       }
     }
-    cells+=`<div class="cal-day ${cls}"><div class="d">${d}</div>${txt}</div>`;
+    cells+=`<div class="cal-day ${cls}"${atryb}><div class="d">${d}</div>${txt}</div>`;
   }
   el.innerHTML=`
     <div class="cal-head"><h3 style="margin:0">Trading Calendar</h3>
@@ -2423,12 +2846,75 @@ function bogoText(a){
    The balance comes from the server (a snapshot taken at the event). Do NOT
    recompute it backwards from the current balance: a payout or a stage
    promotion resets the balance, shifting the whole history by that amount. */
+const TX_PER_PAGE=15;
+/* Historia rosnie z kazdym zamknietym trejdem, wiec idzie stronami.
+   Wiersze zostaja W CALOSCI w DOM i sa tylko ukrywane, bo sortowanie kolumn
+   (sortable.js) przestawia wiersze TABELI — gdyby renderowana byla jedna
+   strona, klikniecie naglowka posortowaloby wylacznie te pietnascie
+   widocznych wierszy zamiast calej historii. */
+function txPager(ile,strona){
+  const stron=Math.ceil(ile/TX_PER_PAGE);
+  if(stron<2)return '';
+  /* Zawsze pierwsza, ostatnia i sasiedztwo biezacej; reszta pod wielokropkiem,
+     zeby przy kilkudziesieciu stronach pasek nie zajal calej szerokosci. */
+  const okno=new Set([1,stron,strona,strona-1,strona+1]);
+  if(strona<=3)[2,3,4].forEach(n=>okno.add(n));
+  if(strona>=stron-2)[stron-1,stron-2,stron-3].forEach(n=>okno.add(n));
+  const lista=[...okno].filter(n=>n>=1&&n<=stron).sort((a,b)=>a-b);
+  let srodek='',poprzednia=0;
+  for(const n of lista){
+    if(n-poprzednia>1)srodek+='<span class="pg-dots">…</span>';
+    srodek+=`<button class="pg-btn${n===strona?' on':''}" onclick="txPage(${n})"
+      ${n===strona?'aria-current="page"':''}>${n}</button>`;
+    poprzednia=n;
+  }
+  return `<button class="pg-btn pg-nav" onclick="txPage(${strona-1})" ${strona===1?'disabled':''}
+      aria-label="Previous page">‹</button>${srodek}<button class="pg-btn pg-nav"
+      onclick="txPage(${strona+1})" ${strona===stron?'disabled':''} aria-label="Next page">›</button>`;
+}
+function txPage(n){
+  const tbl=$('tx-tbl'); if(!tbl||!tbl.tBodies[0])return;
+  const wszystkie=[...tbl.tBodies[0].rows];
+  const dzien=window._calSel;
+  /* Data siedzi w `data-sort` pierwszej komorki (to samo pole, po ktorym
+     sortuje sortable.js), wiec filtr nie zalezy od formatu wyswietlania. */
+  const rows=dzien?wszystkie.filter(tr=>tr.cells[0]&&tr.cells[0].dataset.sort===dzien):wszystkie;
+  const stron=Math.max(1,Math.ceil(rows.length/TX_PER_PAGE));
+  n=Math.min(Math.max(1,n),stron);
+  const od=(n-1)*TX_PER_PAGE;
+  /* Najpierw chowamy wszystko, potem odslaniamy strone z przefiltrowanych —
+     inaczej wiersze spoza dnia zostalyby widoczne z poprzedniego przebiegu. */
+  wszystkie.forEach(tr=>{tr.style.display='none'});
+  rows.forEach((tr,i)=>{if(i>=od&&i<od+TX_PER_PAGE)tr.style.display=''});
+  const pager=$('tx-pager'); if(pager)pager.innerHTML=txPager(rows.length,n);
+  const chip=$('tx-filter');
+  if(chip)chip.innerHTML=dzien
+    ? `<span class="tx-chip">${dday(dzien)}<button type="button" class="tx-chip-x"
+        onclick="calClear()" aria-label="Show all days">×</button></span>
+       <span class="tx-chip-hint">Showing this day only — click the day again, or ×, for the full history.</span>`
+    : '';
+  const info=$('tx-info');
+  if(!info)return;
+  if(dzien&&!rows.length)info.textContent=`No entries for ${dday(dzien)} in the loaded history.`;
+  else info.textContent=rows.length<=TX_PER_PAGE
+    ? `${rows.length} entr${rows.length===1?'y':'ies'}${dzien?' on '+dday(dzien):''}.`
+    : `Showing ${od+1}–${Math.min(od+TX_PER_PAGE,rows.length)} of ${rows.length} entries${dzien?' on '+dday(dzien):''}.`;
+}
+function txInit(){
+  const tbl=$('tx-tbl'); if(!tbl||!tbl.tBodies[0])return;
+  txPage(1);
+  /* Sortowanie kolumny przestawia wiersze, wiec po nim „pierwsza strona"
+     znaczy co innego — wracamy na nia i przeliczamy widocznosc. */
+  if(tbl._txObs)tbl._txObs.disconnect();
+  tbl._txObs=new MutationObserver(()=>txPage(1));
+  tbl._txObs.observe(tbl.tBodies[0],{childList:true});
+}
 function txTable(a,act){
   const rows=act.ledger||[];
   if(!rows.length)
     return '<p class="muted" style="font-size:13px">Nothing here yet. Close a trade and it will show up.</p>';
   const bal=v=>v==null?'—':'$'+fmt(v);
-  return `<div class="scroll-x"><table class="tbl sortable" data-tkey="portal.history" style="min-width:560px">
+  return `<div class="scroll-x"><table id="tx-tbl" class="tbl sortable" data-tkey="portal.history" style="min-width:560px">
     <thead><tr><th>Date</th><th>Instrument</th><th>Side</th><th style="text-align:right">Lots</th>
       <th style="text-align:right">P&amp;L</th><th style="text-align:right">Balance</th></tr></thead>
     <tbody>${rows.map(r=>r.kind==='payout'?`<tr>
@@ -2445,7 +2931,8 @@ function txTable(a,act){
       <td class="num ${r.pnl>=0?'up':'down'}" style="text-align:right">${money(r.pnl)}</td>
       <td class="num" style="text-align:right">${bal(r.balance)}</td></tr>`).join('')}
     </tbody></table></div>
-    <p class="muted" style="font-size:11px;margin-top:10px">Last ${rows.length} entr${rows.length===1?'y':'ies'}.
+    <div class="pager" id="tx-pager"></div>
+    <p class="muted" style="font-size:11px;margin-top:10px"><span id="tx-info"></span>
       A payout removes the earned profit from the account, and your share is paid out to you.</p>`;
 }
 async function issueCert(accId,kind){
@@ -2526,19 +3013,20 @@ function poFields(){
   else F.innerHTML=L('Wise account email')+`<input id="po-email" class="inp" type="email" placeholder="you@example.com">`;
 }
 /* Skalowanie to decyzja ZAMIAST wypłaty, więc modal mówi wprost, co trader
-   oddaje. Wcześniej platforma robiła to sama, bez pytania. */
+   oddaje — i że dostaje NOWY rachunek, bo starego nie da się powiększyć: saldo
+   siedzi u brokera, a nie w naszej bazie. */
 function openScaleModal(id,from,to){
   const w=document.createElement('div'); w.id='sc-modal'; w.className='modal-wrap';
   w.onclick=e=>{if(e.target===w)w.remove()};
   w.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
-    <div class="modal-head"><h3>Scale the account up</h3></div>
+    <div class="modal-head"><h3>Move up to the $${fmt0(to)} plan</h3></div>
     <p class="muted" style="font-size:12.5px;margin:2px 0 14px">
-      Your account grows from <b>$${fmt0(from)}</b> to <b>$${fmt0(to)}</b> and the balance
-      starts from the new size. The profit you made becomes part of the account, so there is
-      no payout this time. Loss limits are recalculated from the new size, and your profit
-      split does not change.</p>
+      You leave the <b>$${fmt0(from)}</b> account behind and we set up a fresh
+      <b>$${fmt0(to)}</b> account, funded from day one, with that plan's limits. The profit you
+      made pays for the upgrade, so there is no payout this time. Your new login and password
+      arrive by email, usually within minutes.</p>
     <div style="display:flex;gap:10px">
-      <button class="btn-p" onclick="scaleUp(${id})" id="sc-go">Scale up to $${fmt0(to)}</button>
+      <button class="btn-p" onclick="scaleUp(${id})" id="sc-go">Move up to $${fmt0(to)}</button>
       <button class="btn-o" onclick="$('sc-modal').remove()">Cancel</button>
     </div></div>`;
   document.body.appendChild(w);
@@ -2547,8 +3035,9 @@ async function scaleUp(id){
   const btn=$('sc-go'); btn.disabled=true;
   try{const r=await api(`/api/accounts/${id}/scale-up`,{method:'POST'});
     $('sc-modal').remove();
-    toast(`📈 Account scaled up to $${fmt0(r.new_size)}. Trade it from the new balance.`,'ok',9000);
-    go('payouts');
+    toast(`📈 You are moving up to a $${fmt0(r.new_size)} account. We are setting it up now — `
+      +`your credentials arrive by email.`,'ok',9000);
+    go('accounts');
   }catch(e){btn.disabled=false;toast('Error: '+e.message,'err')}
 }
 async function submitPayout(id){

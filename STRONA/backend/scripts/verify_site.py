@@ -14,7 +14,7 @@ BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8010"
 OUT = Path(__file__).resolve().parent.parent / "verify-out"
 OUT.mkdir(exist_ok=True)
 
-PAGES = ["/", "/faq", "/affiliate", "/terms", "/privacy", "/risk-disclosure",
+PAGES = ["/", "/faq", "/affiliate", "/objectives", "/terms", "/privacy", "/risk-disclosure",
          "/refund-policy", "/verify", "/portal"]
 # /admin celowo poza lista: panel jest zamkniety i bez sesji administratora
 # zwraca 404, wiec sprawdzanie go tutaj zawsze konczyloby sie bledem.

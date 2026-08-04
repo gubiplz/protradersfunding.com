@@ -91,6 +91,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "first_name": "VARCHAR(60)",
         "last_name": "VARCHAR(60)",
         "phone": "VARCHAR(32)",
+        "phone_country": "VARCHAR(2)",
         "kyc_status": "VARCHAR(16) DEFAULT 'none'",
         "kyc_fullname": "VARCHAR(120)",
         "kyc_country": "VARCHAR(64)",
@@ -114,6 +115,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "checkin_streak": "INTEGER DEFAULT 0",
         "checkin_last": "VARCHAR(10)",
         "bonus_points": "INTEGER DEFAULT 0",
+        "points_spent": "INTEGER DEFAULT 0",
         "reveal_last": "VARCHAR(10)",
         "reveal_payload": "VARCHAR(240)",
         "streak_freezes": "INTEGER DEFAULT 1",
@@ -147,6 +149,9 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "note": "VARCHAR(160)",
         "cert_token": "VARCHAR(32)",
         "balance_reset": "BOOLEAN DEFAULT TRUE",
+        # DEFAULT TRUE robi za backfill: wypłaty wystawione przed tą zmianą
+        # zostają na pasie na landingu, nic nie znika ze strony po deployu.
+        "show_on_lp": "BOOLEAN DEFAULT TRUE",
     },
     "accounts": {
         "platform_investor_password": "VARCHAR(64)",
@@ -164,6 +169,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "bot_target_pct": "FLOAT DEFAULT 0",
         "bot_paused": "BOOLEAN DEFAULT FALSE",
         "bot_started_at": "TIMESTAMP",
+        "scale_count": "INTEGER DEFAULT 0",
     },
 }
 

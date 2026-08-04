@@ -382,6 +382,95 @@ def test_wycofanie_certyfikatu_zdejmuje_wpis_z_landingu():
     assert client.delete("/api/admin/payouts/999999/certificate", headers=ADMIN).status_code == 404
 
 
+def test_wyplata_bez_zgody_na_publikacje_ma_certyfikat_ale_nie_ma_jej_na_landingu():
+    """Publikacja i dokument to dwie rozne decyzje.
+
+    Wczesniej jedynym sposobem trzymania wyplaty z dala od landingu bylo
+    wycofanie certyfikatu — czyli trader placil za to swoim dokumentem. Teraz
+    admin odznacza publikacje, a QR i weryfikacja dzialaja tak samo.
+    """
+    from app import main as main_mod
+
+    _product()
+    tid, _ = _trader()
+    aid = _konto_funded(tid, "OPS90010")
+    p = client.post(f"/api/admin/accounts/{aid}/payout", headers=ADMIN,
+                    json={"amount": 1234, "method": "bank", "reset_balance": False,
+                          "show_on_lp": False}).json()
+    assert p["show_on_lp"] is False and p["cert_url"], "dokument powstaje mimo braku zgody"
+
+    main_mod._PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
+    pas = client.get("/api/public/certificates/recent").json()
+    assert not any(x["amount_usd"] == 1234 for x in pas), "niepublikowana wyplata trafila na pas"
+
+    # dokument i weryfikacja maja dzialac tak samo jak dla opublikowanej
+    assert client.get(p["cert_url"]).status_code == 200
+    assert client.get(f"/api/verify/{p['cert_token']}").status_code == 200
+
+    # przelacznik wpuszcza wpis na pas bez ruszania certyfikatu
+    r = client.post(f"/api/admin/payouts/{p['id']}/lp", headers=ADMIN, json={"show": True})
+    assert r.status_code == 200 and r.json()["show_on_lp"] is True
+    assert r.json()["cert_token"] == p["cert_token"], "token nie ma prawa sie zmienic"
+    assert any(x["amount_usd"] == 1234 for x in client.get("/api/public/certificates/recent").json())
+
+    # i zdejmuje go z powrotem, dalej nie ruszajac dokumentu
+    client.post(f"/api/admin/payouts/{p['id']}/lp", headers=ADMIN, json={"show": False})
+    assert not any(x["amount_usd"] == 1234 for x in client.get("/api/public/certificates/recent").json())
+    assert client.get(p["cert_url"]).status_code == 200
+    assert client.post("/api/admin/payouts/999999/lp", headers=ADMIN,
+                       json={"show": True}).status_code == 404
+
+
+def test_generate_certyfikatu_przyjmuje_decyzje_o_landingu():
+    """Panel pyta przy „Generate", wiec endpoint musi to przyjac."""
+    from app import main as main_mod
+    from app.models import Payout
+
+    _product()
+    tid, _ = _trader()
+    aid = _konto_funded(tid, "OPS90011")
+    pid = client.post(f"/api/admin/accounts/{aid}/payout", headers=ADMIN,
+                      json={"amount": 4321, "method": "bank", "reset_balance": False}).json()["id"]
+    # zdejmujemy token, zeby odtworzyc wyplate bez certyfikatu (np. z importu)
+    s = SessionLocal()
+    p = s.get(Payout, pid)
+    p.cert_token = None
+    s.commit(); s.close()
+
+    r = client.post(f"/api/admin/payouts/{pid}/certificate", headers=ADMIN,
+                    json={"show_on_lp": False})
+    assert r.status_code == 200 and r.json()["cert_url"] and r.json()["show_on_lp"] is False
+    main_mod._PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
+    assert not any(x["amount_usd"] == 4321 for x in client.get("/api/public/certificates/recent").json())
+
+    # brak body = publikujemy (domyslka zgodna z dotychczasowym zachowaniem)
+    r2 = client.post(f"/api/admin/payouts/{pid}/certificate", headers=ADMIN)
+    assert r2.status_code == 200 and r2.json()["show_on_lp"] is True
+    assert any(x["amount_usd"] == 4321 for x in client.get("/api/public/certificates/recent").json())
+
+
+def test_trader_sam_sobie_nie_wrzuca_wyplaty_na_landing():
+    """O tym, co wisi na stronie, decyduje admin — nie samoobsluga w portalu."""
+    from app import main as main_mod
+    from app.models import Payout
+
+    _product()
+    tid, _ = _trader()
+    h = {"Authorization": f"Bearer {auth.make_token(tid)}"}
+    aid = _konto_funded(tid, "OPS90012")
+    pid = client.post(f"/api/admin/accounts/{aid}/payout", headers=ADMIN,
+                      json={"amount": 5678, "method": "bank", "reset_balance": False}).json()["id"]
+    s = SessionLocal()
+    p = s.get(Payout, pid)
+    p.cert_token = None
+    s.commit(); s.close()
+
+    r = client.post(f"/api/me/payouts/{pid}/certificate", headers=h)
+    assert r.status_code == 200 and r.json()["url"], "trader dostaje swoj dokument"
+    main_mod._PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
+    assert not any(x["amount_usd"] == 5678 for x in client.get("/api/public/certificates/recent").json())
+
+
 def test_import_historycznych_wyplat_bez_certyfikatow():
     """Wypłaty rozliczone przed wdrożeniem panelu trzeba dało się wprowadzić,
     ale NIE mogą same z siebie wystawiać publicznych certyfikatów."""

@@ -5,6 +5,7 @@ UWAGA: pytest współdzieli moduły między plikami testów — env ustawia pier
 zaimportowany plik, a baza jest wspólna. Dlatego: unikalne e-maile/nazwiska,
 asercje odporne na cudze wiersze i reset cache przed każdym odczytem statystyk.
 """
+from conftest import zrodlo_portalu
 import os
 import tempfile
 from pathlib import Path
@@ -128,6 +129,39 @@ def test_leaderboard_pokazuje_tylko_konta_funded():
     assert all(r["status"] == "funded" for r in rows)
 
 
+def test_leaderboard_pomija_konta_bez_zysku():
+    """Ranking ma pokazywać tych, którzy ZARABIAJĄ. Konto funded na zerze albo
+    pod kreską nie jest wynikiem — wypełniało tablicę zerami i minusami.
+
+    Próg jest OSTRY i liczony na wartości zaokrąglonej, więc nic, co
+    wyświetliłoby się jako „0.00%", nie wchodzi.
+    """
+    tid, _ = _trader("rank-zero@test.pl", "Dokladnie Zero")
+    _konto(tid, "Dokladnie Zero", "770020", status="funded", phase="funded",
+           balance=10_000, initial=10_000)
+    tid2, _ = _trader("rank-minus@test.pl", "Pod Kreska")
+    _konto(tid2, "Pod Kreska", "770021", status="funded", phase="funded",
+           balance=9_400, initial=10_000)
+    # +0,004% zaokragla sie do 0.00 — tez odpada, inaczej w tabeli byloby „0.00%"
+    tid3, _ = _trader("rank-grosz@test.pl", "Ulamek Grosza")
+    _konto(tid3, "Ulamek Grosza", "770022", status="funded", phase="funded",
+           balance=10_000.4, initial=10_000)
+    tid4, _ = _trader("rank-plus@test.pl", "Realny Zysk")
+    _konto(tid4, "Realny Zysk", "770023", status="funded", phase="funded",
+           balance=10_150, initial=10_000)
+    with TestClient(app) as c:
+        rows = c.get("/api/leaderboard").json()
+    imiona = {r["trader"] for r in rows}
+    assert "Dokladnie Z." not in imiona
+    assert "Pod K." not in imiona
+    assert "Ulamek G." not in imiona
+    assert all(r["profit_pct"] > 0 for r in rows), "zero i minus nie moga wejsc"
+    # konto z realnym zyskiem wchodzi (TOP 20 zasilaja konta ze wszystkich plikow,
+    # wiec sprawdzamy wprost odpowiedz endpointu bez limitu miejsca)
+    from app.main import leaderboard
+    assert any(r["trader"] == "Realny Z." for r in leaderboard())
+
+
 def test_wlasciciel_widzi_szczegoly_konta_a_obcy_nie():
     tid, token = _trader("detal@test.pl", "Detal Owner")
     aid = _konto(tid, "Detal Owner", "770003")
@@ -161,12 +195,52 @@ def test_certyfikat_po_tokenie_a_nie_po_id():
 
 def test_wszystkie_strony_publiczne_odpowiadaja():
     # /admin celowo NIE ma tu byc — panel jest zamkniety i dla goscia nie istnieje.
-    strony = ["/", "/faq", "/affiliate", "/terms", "/privacy", "/risk-disclosure",
+    strony = ["/", "/faq", "/affiliate", "/objectives", "/terms", "/privacy", "/risk-disclosure",
               "/refund-policy", "/verify", "/portal", "/robots.txt"]
     with TestClient(app) as c:
         for path in strony:
             r = c.get(path)
             assert r.status_code == 200, f"{path} -> {r.status_code}"
+
+
+def test_tabela_zasad_ma_wlasna_strone_a_landing_juz_jej_nie_ma():
+    """Tabela objectives zjechala z landingu na /objectives.
+
+    Wiersze rysuje site.js, wiec serwer musi oddac DWIE rzeczy: pusta tabele do
+    wypelnienia i wstrzykniety katalog. Bez tego drugiego strona pokazywalaby
+    same „—", bo `renderObjectives()` liczy z PRODUCTS.
+    """
+    with TestClient(app) as c:
+        strona = c.get("/objectives").text
+        lp = c.get("/").text
+    assert 'id="objBody"' in strona and 'id="pf-products"' in strona
+    assert '"2step-25k"' in strona and '"instant-25k"' in strona, "katalog musi byc w HTML"
+    assert 'id="objBody"' not in lp, "sekcja zniknela z landingu"
+    # martwa kotwica to najgorszy wynik tej zmiany: linki maja prowadzic na strone
+    assert 'href="/#objectives"' not in lp and 'href="#objectives"' not in lp
+    assert 'href="/objectives"' in lp, "menu i hero prowadza na nowa strone"
+
+
+def test_site_js_wypelnia_tabele_na_stronie_bez_konfiguratora():
+    """Kanarek na cichy błąd: strona wraca 200 z PUSTĄ tabelą.
+
+    `products()` w site.js wychodzi wcześniej, gdy na stronie nie ma
+    konfiguratora — a /objectives ma samą tabelę. Serwerowo tego nie widać,
+    bo wiersze dorabia dopiero JS.
+    """
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1] / "static" / "js" / "site.js").read_text()
+    guard = next(l for l in js.splitlines() if "if (!$('#pcfg')" in l)
+    assert "#objBody" in guard, "products() musi uznawać stronę z samą tabelą"
+
+
+def test_stopka_bez_plakietek_ale_z_pelnym_disclaimerem():
+    """Plakietki wypadly; obowiazek informacyjny zostaje przy pelnym tekscie."""
+    with TestClient(app) as c:
+        html = c.get("/").text
+    assert "foot-tags" not in html
+    assert "Risk Disclaimer:" in html and "demo accounts with virtual funds" in html
 
 
 def test_link_afiliacyjny_bierze_host_z_zadania():
@@ -361,3 +435,143 @@ def test_assety_z_pierwszego_wejscia_miesza_sie_w_budzecie():
     za_ciezkie = {p: (korzen / p).stat().st_size for p, limit in budzet.items()
                   if (korzen / p).stat().st_size > limit}
     assert not za_ciezkie, f"assety poza budżetem (limity: {budzet}): {za_ciezkie}"
+
+
+# ---------------- „Best value" ----------------
+def test_dokladnie_jeden_rozmiar_oznaczony_w_kazdej_rodzinie():
+    """Plakietka ma wskazywać JEDEN plan, a nie kilka albo żaden."""
+    with TestClient(app) as c:
+        r = c.get("/api/products")
+    assert r.status_code == 200
+    prods = r.json()
+    assert prods, "katalog nie moze byc pusty"
+    oznaczone = [p for p in prods if p.get("popular")]
+    assert {p["account_size"] for p in oznaczone} == {100_000.0}
+    # po jednym w 2-Step i w Instant Funding — w sklepie widac jedna rodzine naraz
+    assert sorted(p["steps"] for p in oznaczone) == [0, 2]
+    assert all("popular" in p for p in prods), "pole musi byc na kazdym planie"
+
+
+def test_landing_oznacza_ten_sam_plan_co_sklep():
+    """Kanarek na dwie sprzeczne obietnice.
+
+    Plakietka na landingu byla przybita do NAJWIEKSZEGO planu (`maxSize`), wiec
+    strona chwalila $2M, a sklep miałby chwalić $100k. Obie muszą czytać z tego
+    samego pola.
+    """
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "static" / "js" / "site.js").read_text()
+    assert "x.popular ? ' hot'" in js, "plakietka musi isc za polem z API"
+    assert "maxSize" not in js, "stary wybor (najwiekszy plan) musi zniknac"
+
+    html = zrodlo_portalu()
+    assert "plan-ribbon" in html and "p.popular?' pop'" in html
+
+
+def test_wyroznienie_planu_mowi_jednym_glosem_w_trzech_miejscach():
+    """Plakietka pojawia się w sklepie (New challenge), w pasie „Scale your
+    progress" i na landingu. Trzy kopie łatwo się rozjeżdżają — w treści i w
+    wyglądzie.
+
+    Sama bursztynowa ramka była za słabym sygnałem: karta różniła się od
+    sąsiadek jedną linią. Doszła pigułka na górnej krawędzi i ciepły nalot
+    schodzący z góry karty, więc wyróżnienie widać przed przeczytaniem napisu.
+    """
+    from pathlib import Path
+    baza = Path(__file__).resolve().parents[1]
+    html = zrodlo_portalu()
+    pcss = (baza / "static" / "css" / "portal.css").read_text()
+    scss = (baza / "static" / "css" / "site.css").read_text()
+    js = (baza / "static" / "js" / "site.js").read_text()
+
+    # jedna tresc we wszystkich trzech miejscach
+    assert '<span class="plan-ribbon">Best value</span>' in html
+    assert '<span class="uc-ribbon">Best value</span>' in html
+    assert "<i>Best value</i>" in js
+    for plik, nazwa in ((html, "portal.html"), (js, "site.js")):
+        assert "Most popular" not in plik, f"stara tresc zostala w {nazwa}"
+        assert "<i>POPULAR</i>" not in plik, f"stara tresc zostala w {nazwa}"
+
+    # jeden wyglad: gradientowa pigulka zamiast plaskiego prostokata
+    assert pcss.count("linear-gradient(180deg,#fbbf4e,#f2860f)") == 2, \
+        "sklep i upsell musza uzywac tej samej pigulki"
+    assert "linear-gradient(180deg,#fbbf4e,#f2860f)" in scss
+    assert "#f0a53c" not in pcss and "#f0a53c" not in scss, "stary plaski bursztyn"
+
+    # pigulka na srodku gornej krawedzi karty (w portalu), nie w rogu
+    assert ".plan-ribbon{position:absolute;top:-13px;left:50%;transform:translateX(-50%)" in pcss
+    assert ".uc-ribbon{position:absolute;top:-11px;left:50%;transform:translateX(-50%)" in pcss
+
+    # cieply nalot z gory na wyroznionej karcie — w kazdym z trzech miejsc
+    assert "background:linear-gradient(180deg,rgba(240,165,60,.13),rgba(240,165,60,0) 170px),var(--panel)" in pcss
+    assert "background:linear-gradient(180deg,rgba(240,165,60,.14),rgba(240,165,60,0) 70px),var(--bg3,var(--bg))" in pcss
+    assert "linear-gradient(180deg,rgba(240,165,60,.18),rgba(240,165,60,0)),var(--bg3)" in scss
+
+    # wejscie z linku ?buy=… nakłada `.hl`, ktore przejmuje tlo pod gradientowa
+    # ramke — bez tej reguly gasilo nalot na karcie polecanej
+    assert ".plan-card.pop.hl{background:" in pcss
+
+
+def test_karty_planow_maja_widoczna_krawedz():
+    """W ciemnym motywie karta miala obramowanie `--line` (7% bieli), cien
+    czernia na prawie czarnym tle i tlo rozne od strony o dwa punkty jasnosci —
+    dwie karty obok siebie zlewaly sie w jeden prostokat."""
+    from pathlib import Path
+    css = (Path(__file__).resolve().parents[1] / "static" / "css" / "portal.css").read_text()
+    assert "border:1px solid var(--line2);border-radius:var(--r);padding:22px;\n  display:flex" in css, \
+        "karta planu musi uzywac mocniejszej linii niz --line"
+    assert "minmax(270px,1fr));gap:20px" in css
+    assert ".plan-card.pop" in css and ".plan-ribbon" in css
+
+
+def test_kafelki_fork_maja_rowna_wysokosc():
+    """Karta B ma pod tekstem drabinkę o stałej wysokości, więc była wyższa od
+    karty A (334 vs 291 px przy 1440) i dolne krawędzie się nie schodziły.
+
+    Nadmiar wysokości idzie POD akapit, nie pod listę: kroki dociągają się do
+    dołu karty tak jak drabinka obok, zamiast zostawiać pusty pas nad krawędzią.
+    """
+    from pathlib import Path
+    css = (Path(__file__).resolve().parents[1] / "static" / "css" / "site.css").read_text()
+
+    assert ".fork{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:stretch}" in css
+    assert "align-items:start}" not in css.split(".fork{")[1].split("\n")[0]
+    assert "box-shadow:var(--shadow);display:flex;flex-direction:column}" in css
+    # `padding-top`, nie `margin-top` — automatyczny margines zjadłby odstęp
+    # w karcie, która akurat jest tą wyższą.
+    assert ".fork-steps{list-style:none;margin-top:auto;padding-top:14px" in css
+
+
+def test_landing_nie_wystaje_poza_ekran_telefonu():
+    """Wejście z linku w Telegramie pokazywało stronę przyciętą po prawej.
+
+    Dwie przyczyny, obie zmierzone w WebKit (silnik Safari i przeglądarek
+    wbudowanych) przy 360/390/430px:
+
+    1. `<form class="promo-form" hidden>` ma własne `display:flex`, które BIJE
+       regułę przeglądarki dla atrybutu `hidden` — ukryte pole z kodem i
+       przycisk „Apply" zajmowały 175px i wypychały krzyżyk zamknięcia poza
+       ekran (prawa krawędź 401px przy oknie 390px), więc paska nie dało się
+       zamknąć na telefonie.
+    2. `.cfg` jest elementem gridu, a te mają `min-width:auto`, więc karta
+       konfiguratora nie schodziła poniżej szerokości swojej treści: 391px
+       przy oknie 360px.
+    """
+    from pathlib import Path
+    baza = Path(__file__).resolve().parents[1]
+    css = (baza / "static" / "css" / "site.css").read_text()
+    base_html = (baza / "templates" / "base.html").read_text()
+
+    # 1. atrybut `hidden` musi wygrywac z kazdym `display` z klasy
+    assert "[hidden]{display:none!important}" in css
+    assert 'class="promo-form" id="promoForm" hidden' in base_html, (
+        "formularz kodu w pasku ma byc domyslnie ukryty")
+
+    # 2. element gridu moze sie zwezic
+    assert ".hero-grid>*{min-width:0}" in css
+
+    # 3. zabezpieczenie: nic nie rozepchnie strony szerzej niz ekran.
+    #    `clip`, nie `hidden` — `hidden` zrobilby z <html> kontener przewijania
+    #    i zabil `position:sticky`.
+    assert "html{overflow-x:clip}" in css
+    assert "html{overflow-x:hidden}" not in css

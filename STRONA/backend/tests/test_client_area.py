@@ -3,6 +3,7 @@
 Jak w pozostałych plikach: pytest współdzieli moduły/bazę — unikalne e-maile,
 asercje odporne na cudze wiersze.
 """
+from conftest import zrodlo_portalu
 import os
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -169,19 +170,19 @@ def test_activity_liczy_dni_i_transakcje_ze_snapshotow():
 def test_achievements_odblokowuja_sie_z_realnych_zdarzen():
     tid, h = _trader("badges@test.pl")
     with TestClient(app) as c:
-        przed = {b["key"]: b["unlocked"] for b in c.get("/api/me/achievements", headers=h).json()}
+        przed = {b["key"]: b["unlocked"] for b in c.get("/api/me/achievements", headers=h).json()["badges"]}
         assert przed["first_challenge"] is False
         s = SessionLocal()
         s.add(Order(trader_id=tid, product_key="2step-25k", amount_usd=89, status="paid"))
         s.commit(); s.close()
-        po = {b["key"]: b["unlocked"] for b in c.get("/api/me/achievements", headers=h).json()}
+        po = {b["key"]: b["unlocked"] for b in c.get("/api/me/achievements", headers=h).json()["badges"]}
     assert po["first_challenge"] is True and po["funded"] is False
 
 
 def test_payouts_podsumowanie():
     tid, h = _trader("payouty@test.pl")
-    # +5% zysku — poniżej progu skalowania (+10%), żeby poller z sim feedem
-    # nie podbił initial_balance w trakcie testu (_maybe_scale)
+    # +5% zysku, czyli poniżej progu skalowania (+15%). Skalowanie jest dziś
+    # decyzją tradera, więc nic samo nie ruszy konta w trakcie testu.
     aid = _konto(tid, "880002", status="funded", balance=10_500, initial=10_000)
     s = SessionLocal()
     s.add(Payout(account_id=aid, profit_amount=500, trader_share=400, paid=True))
@@ -969,52 +970,111 @@ def test_mail_credits_granted_ma_szablon_html():
 
 # ---------------- plan skalowania: wybor zamiast automatu ----------------
 def test_skalowanie_ofertowane_dopiero_od_progu_i_tylko_na_funded():
-    """`scale_offer` to jedyne miejsce liczace, czy powiekszenie przysluguje."""
+    """`scale_offer` to jedyne miejsce liczace, czy wyzszy plan przysluguje."""
     from app import poller
 
     class _Acc:
-        def __init__(self, status, initial, balance):
+        def __init__(self, status, initial, balance, steps=2):
             self.status, self.initial_balance, self.balance = status, initial, balance
+            self.steps = steps
 
-    assert poller.scale_offer(_Acc("funded", 100_000, 109_999.99)) is None
-    # DOKLADNIE na progu: 100000 * 1.1 to w floatach 110000.00000000001, wiec bez
+    assert poller.scale_offer(_Acc("funded", 100_000, 114_999.99)) is None
+    # DOKLADNIE na progu: 100000 * 1.15 to w floatach 114999.99999999999, wiec bez
     # zaokraglenia obu stron konto na progu nie dostawaloby oferty.
-    assert poller.scale_offer(_Acc("funded", 100_000, 110_000)) == 150_000
+    assert poller.scale_offer(_Acc("funded", 100_000, 115_000)) == 200_000
+    # Krok to nastepny tier z CENNIKA, a nie procent — dlatego 300k, nie 450k.
+    assert poller.scale_offer(_Acc("funded", 200_000, 500_000)) == 300_000
+    # Instant ma wlasna drabine tej samej dlugosci, ale rodzin nie mieszamy.
+    assert poller.scale_offer(_Acc("funded", 25_000, 99_000, steps=0)) == 50_000
+    # Konta wyskalowane starym mechanizmem siedza na rozmiarach spoza katalogu.
+    assert poller.scale_offer(_Acc("funded", 150_000, 200_000)) == 200_000
+    # Szczyt drabiny: 2M nie ma dokad rosnac.
+    assert poller.scale_offer(_Acc("funded", 2_000_000, 3_000_000)) is None
     assert poller.scale_offer(_Acc("active", 100_000, 200_000)) is None
     assert poller.scale_offer(_Acc("breached", 100_000, 200_000)) is None
 
 
-def test_skalowanie_dosuwa_saldo_wiec_konto_nie_wpada_od_razu_w_breach():
-    """REGRESJA: wczesniej skalowanie podnosilo sam rozmiar i zabijalo konto.
+def test_skalowanie_wgrywa_caly_nastepny_plan_a_nie_sam_rozmiar():
+    """Konto po skalowaniu ma byc ZWYKLYM planem z cennika.
 
-    Prog max DD liczy sie od initial_balance, wiec rozmiar 150k przy saldzie
-    110k oznacza prog 135k ponad saldem — risk engine ubijal konto na nastepnym
-    ticku. Po zmianie saldo idzie w gore razem z rozmiarem.
+    Stara wersja podnosila samo `initial_balance` o 50%, zostawiajac
+    `product_key` i `max_lots` z poprzedniego tieru — konto 150k handlowalo z
+    limitem wolumenu konta 100k i nie odpowiadalo zadnej pozycji w ofercie.
     """
-    from app import poller, rules
-    from app.rules import AccountRuntime, ChallengeConfig, DrawdownType, EquityTick, Phase, Status
+    from app import poller
+    from app.models import Product
 
-    class _Acc:
-        status, initial_balance, balance, equity, open_pnl = "funded", 100_000.0, 110_000.0, 110_000.0, 0.0
-        peak_equity = day_start_equity = day_start_balance = 110_000.0
-        best_day_profit = 0.0
+    tid, _ = _trader("skalowanie-plan@test.pl")
+    aid = _konto(tid, "990105", status="funded", balance=115_000, initial=100_000)
+    with TestClient(app) as c:      # lifespan zasiewa katalog produktow
+        c.get("/api/products")
+        s = SessionLocal()
+        acc = s.get(Account, aid)
+        stary_login = acc.login
+        nowy = poller.apply_scale_up(s, acc)
+        s.commit()
 
-    acc = _Acc()
-    nowy = poller.apply_scale_up(acc)
-    assert nowy == 150_000 and acc.balance == 150_000 and acc.peak_equity == 150_000
+        cel = s.query(Product).filter(Product.key == "2step-200k").first()
+        assert nowy == 200_000 and acc.initial_balance == 200_000
+        assert acc.product_key == "2step-200k" and acc.preset == "2step-200k"
+        assert acc.max_lots == cel.max_lots, "limit wolumenu musi isc za rozmiarem"
+        assert acc.profit_split_pct == cel.profit_split_pct
+        assert acc.max_overall_loss_pct == cel.max_overall_loss_pct
+        # od zera, ale od razu funded
+        assert acc.phase == "funded" and acc.balance == 200_000
+        assert acc.peak_equity == 200_000 and acc.day_start_equity == 200_000
+        assert acc.trading_days_count == 0 and acc.best_day_profit == 0.0
+        # nowy rachunek MT5: stary numer trzyma stare saldo u brokera
+        assert acc.login != stary_login
+        assert acc.platform_login is None and acc.platform_password is None
+        assert acc.status == "provisioning" and acc.scale_count == 1
+        s.close()
 
-    cfg = ChallengeConfig(initial_balance=acc.initial_balance, profit_target_pct=0,
-                          max_daily_loss_pct=5, max_overall_loss_pct=10,
-                          drawdown_type=DrawdownType.STATIC)
-    rt = AccountRuntime(phase=Phase.FUNDED, status=Status.FUNDED, balance=acc.balance,
-                        equity=acc.equity, peak_equity=acc.peak_equity, day_key="2026-08-03",
-                        day_start_equity=acc.day_start_equity,
-                        day_start_balance=acc.day_start_balance)
-    res = rules.evaluate(cfg, rt, EquityTick(equity=acc.equity, balance=acc.balance,
-                                             open_pnl=0.0, day_key="2026-08-03"))
-    assert not res.breaches and not res.failed
-    # kolejne powiekszenie dopiero po nastepnych +10%, nie od razu
-    assert poller.scale_offer(acc) is None
+
+def test_skalowanie_nie_wpada_w_breach_gdy_feed_poda_saldo_konta():
+    """REGRESJA na to, co realnie zabijalo konta po skalowaniu.
+
+    Saldo nie nalezy do nas — feed czyta je z brokera (a SimulatedFeed trzyma
+    wlasny stan PER LOGIN). Stara wersja podnosila `initial_balance` w bazie i
+    zostawiala ten sam login, wiec na nastepnym ticku wracalo stare saldo, a
+    prog max DD liczony od nowego rozmiaru stal juz nad nim: konto szlo w breach
+    zamiast urosnac. Tu przechodzimy pelna sciezke — skalowanie, provisioning,
+    kilka tickow — i konto ma zyc.
+    """
+    import asyncio
+
+    from app import poller, provisioning
+    from app.feed import SimulatedFeed
+
+    feed = SimulatedFeed()
+    tid, _ = _trader("skalowanie-feed@test.pl")
+    aid = _konto(tid, "990106", status="funded", balance=100_000, initial=100_000)
+    with TestClient(app) as c:
+        c.get("/api/products")
+        s = SessionLocal()
+        acc = s.get(Account, aid)
+        acc.phase = "funded"
+        s.commit()
+        # feed poznaje konto pod STARYM loginem i zapamietuje jego stan
+        asyncio.run(poller.process_account(s, acc, feed))
+        acc.balance = 115_000.0
+        acc.equity = 115_000.0
+        acc.open_pnl = 0.0
+        s.commit()
+
+        poller.apply_scale_up(s, acc)
+        s.commit()
+        asyncio.run(provisioning.provision_pending(SessionLocal, feed))
+        s.refresh(acc)
+        assert acc.status == "funded", "po provisioningu konto ma byc handlowalne"
+        assert acc.platform_login and acc.platform_password
+
+        for _ in range(5):
+            asyncio.run(poller.process_account(s, acc, feed))
+            s.refresh(acc)
+        assert acc.status == "funded" and not acc.breach_reason
+        assert acc.balance > 150_000, "feed musi podawac saldo NOWEGO konta, nie starego"
+        s.close()
 
 
 def test_endpoint_scale_up_wymaga_progu_i_konta_funded():
@@ -1022,31 +1082,400 @@ def test_endpoint_scale_up_wymaga_progu_i_konta_funded():
     maly = _konto(tid, "990101", status="funded", balance=10_200, initial=10_000)
     obcy_tid, _ = _trader("skalowanie-obcy@test.pl")
     obce = _konto(obcy_tid, "990102", status="funded", balance=20_000, initial=10_000)
+    najwiekszy = _konto(tid, "990107", status="funded", balance=3_000_000, initial=2_000_000)
     with TestClient(app) as c:
         r = c.post(f"/api/accounts/{maly}/scale-up", headers=h)
         assert r.status_code == 400 and "unlocks" in r.json()["detail"]
         assert c.post(f"/api/accounts/{obce}/scale-up", headers=h).status_code == 404
+        # szczyt drabiny dostaje INNY komunikat: to nie jest brak progu
+        r = c.post(f"/api/accounts/{najwiekszy}/scale-up", headers=h)
+        assert r.status_code == 400 and "largest" in r.json()["detail"]
 
 
-def test_endpoint_scale_up_powieksza_konto_i_widac_to_w_api():
+def test_endpoint_scale_up_wgrywa_wyzszy_plan_i_widac_to_w_api():
     tid, h = _trader("skalowanie-ok@test.pl")
-    aid = _konto(tid, "990103", status="funded", balance=11_000, initial=10_000)
+    aid = _konto(tid, "990103", status="funded", balance=11_500, initial=10_000)
     with TestClient(app) as c:
         konta = {a["id"]: a for a in c.get("/api/me/accounts", headers=h).json()}
-        assert konta[aid]["scale_up_to"] == 15_000, "oferta musi byc widoczna w payloadzie"
+        # 10k nie ma juz w ofercie, wiec kolejny szczebel to najmniejszy plan: 25k
+        assert konta[aid]["scale_up_to"] == 25_000, "oferta musi byc widoczna w payloadzie"
+        assert konta[aid]["scale_trigger_pct"] == 15.0
         r = c.post(f"/api/accounts/{aid}/scale-up", headers=h)
         assert r.status_code == 200, r.text
         d = r.json()
-        assert d["previous_size"] == 10_000 and d["new_size"] == 15_000
-        assert d["balance"] == 15_000, "saldo startuje od nowego rozmiaru"
+        assert d["previous_size"] == 10_000 and d["new_size"] == 25_000
+        assert d["balance"] == 25_000, "saldo startuje od rozmiaru nowego planu"
+        assert d["product_key"] == "2step-25k" and d["status"] == "provisioning"
         # druga proba pod rzad nie ma prawa przejsc: konto jest dopiero na starcie
         assert c.post(f"/api/accounts/{aid}/scale-up", headers=h).status_code == 400
+        # odznaka rozpoznaje skalowanie po liczniku, nie po rozmiarze konta
+        odznaki = {b["key"]: b for b in c.get("/api/me/achievements", headers=h).json()["badges"]}
+        assert odznaki["scaled"]["unlocked"] is True
+
+
+def test_otwarta_pozycja_blokuje_skalowanie():
+    """Zysk otwartej pozycji rozliczylby sie juz wobec NOWEGO konta."""
+    tid, h = _trader("skalowanie-pozycja@test.pl")
+    aid = _konto(tid, "990108", status="funded", balance=115_000, initial=100_000)
+    s = SessionLocal()
+    acc = s.get(Account, aid)
+    acc.open_pnl = 240.0
+    s.commit()
+    s.close()
+    with TestClient(app) as c:
+        r = c.post(f"/api/accounts/{aid}/scale-up", headers=h)
+        assert r.status_code == 400 and "Close your open positions" in r.json()["detail"]
 
 
 def test_mail_account_scaled_ma_szablon():
-    tresc = notify._render("account_scaled", {"name": "x", "login": "990104",
-                                              "previous_size": 10_000, "new_size": 15_000})
-    assert "15,000" in tresc[0] and "15,000" in tresc[1]
-    html = notify._render_html("account_scaled", {"name": "x", "login": "990104",
-                                                 "previous_size": 10_000, "new_size": 15_000}, "s")
-    assert html and "15,000" in html and "view=accounts" in html
+    ctx = {"name": "x", "login": "990104", "previous_size": 10_000, "new_size": 25_000}
+    tresc = notify._render("account_scaled", ctx)
+    assert "25,000" in tresc[0] and "25,000" in tresc[1]
+    # mail NIE moze zapraszac do handlu: konto czeka na poswiadczenia
+    assert "separate email" in tresc[1]
+    html = notify._render_html("account_scaled", ctx, "s")
+    assert html and "25,000" in html and "view=accounts" in html
+
+
+# ---------------- szerokość pudełek w portalu ----------------
+def test_pudelka_w_widoku_maja_jedna_miare_szerokosci():
+    """Kanarek na rozjazd, którego z serwera nie widać.
+
+    Na jednej zakładce sąsiadowały ze sobą: rząd kafelków (pełna szerokość),
+    tabela 1400px, karta 1450px, lista kont 1560px i pusty stan 820px. Efekt:
+    „No payout requests yet" kończyło się w ~72% szerokości obszaru treści,
+    podczas gdy kafelki nad nim dochodziły do krawędzi.
+    """
+    from pathlib import Path
+    css = (Path(__file__).resolve().parents[1] / "static" / "css" / "portal.css").read_text()
+
+    assert "--wrap:" in css, "jedna miara szerokosci dla widokow"
+    assert ".content>:where(*){max-width:var(--wrap)}" in css, (
+        "miara musi obejmowac KAZDE pudelko najwyzszego poziomu — wyliczona lista "
+        "klas zostawia poza nia bezklasowe <div>-y naglowkow zakladek")
+    # Zapis przez `.content`, nie `#view`: identyfikator podbilby specyficznosc
+    # do (1,0,0) i skasowal wyjatki zapisane dwiema klasami.
+    assert "#view>:where(*)" not in css
+    for wyjatek in (".tbl-wrap.tw-wide{max-width:none}", ".sec-card.card-sm{max-width:1030px}"):
+        assert wyjatek in css, f"celowy wyjatek musi przezyc: {wyjatek}"
+
+    assert "max-width:820px" not in css, "stary limit pustego stanu"
+    assert "minmax(215px,340px)" not in css, (
+        "cap na kafelku dawal odwrotny rozjazd: tabela szersza niz rzad nad nia")
+
+
+def test_kyc_i_support_nie_trzymaja_szerokosci_inline():
+    """Inline `style="max-width:…"` bije każdą regułę arkusza — te sześć
+    atrybutów było jedynym powodem, dla którego KYC i Support nie dochodziły
+    do krawędzi, i żadna zmiana w CSS by ich nie ruszyła."""
+    from pathlib import Path
+    html = zrodlo_portalu()
+    for szer in ("max-width:560px", "max-width:760px", "max-width:720px"):
+        assert szer not in html, f"pozostal inline limit {szer}"
+    # 640px zostaje WYŁĄCZNIE w ustawieniach — te karty siedzą w układzie
+    # wielokolumnowym (.card-cols), gdzie wąska kolumna jest zamierzona.
+    # Prefiks bez cudzysłowu, bo „Danger Zone" dokłada w tym samym atrybucie
+    # jeszcze kolor obramowania.
+    assert html.count('style="max-width:640px') == 5
+
+
+def test_pas_upsellu_dzieli_sie_rowno_na_dwa_rzedy():
+    """`auto-fill` upychał tyle kafelków, ile weszło — przy dziewięciu planach
+    dawało to 6+3, czyli pełny pierwszy rząd i ogon w drugim.
+
+    Liczba kafelków zależy od konta (to plany WIĘKSZE od obecnego rozmiaru),
+    więc podział musi wychodzić równo dla dowolnej liczby, nie tylko dziewięciu.
+    """
+    from pathlib import Path
+    html = zrodlo_portalu()
+    css = (Path(__file__).resolve().parents[1] / "static" / "css" / "portal.css").read_text()
+
+    assert "const kolumn=fam.length<=4?fam.length:Math.ceil(fam.length/2)" in html, (
+        "liczbe kolumn liczy widok — 9 -> 5+4, 8 -> 4+4, 7 -> 4+3, <=4 -> jeden rzad")
+    assert 'style="--up-cols:${kolumn};--up-max:${rzadMax}px"' in html
+    assert ".upsell-row{grid-template-columns:repeat(var(--up-cols,4),minmax(0,1fr));max-width:var(--up-max,none)}" in css
+
+    # Konto blisko szczytu oferty ma jeden albo dwa wieksze plany. Bez gornego
+    # limitu szerokosci rzedu grid rozrzucal je po calej szerokosci panelu
+    # (jeden kafelek na 1510px), bo kolumny sa `1fr`.
+    assert "const rzadMax=kolumn*300" in html
+
+    # ten sam bursztyn co w sklepie i na landingu — jeden jezyk dla „Best value"
+    assert ".upsell-card.pop" in css and ".uc-ribbon" in css
+    assert "#f0b95c" in css and "#fbbf4e,#f2860f" in css
+    assert "uc-ribbon" in html and "p.popular?' pop'" in html
+
+    # odstepy: 12px bylo za ciasno, kafelki zlewaly sie w pas
+    assert "gap:12px;overflow-x:auto" not in css
+    assert ".upsell-row{display:flex;gap:26px" in css
+
+
+def test_kafelki_upsellu_sa_zwarte_i_odsuniete_od_listy_kont():
+    """Pas upsellu byl wyzszy od samej listy kont (539px kontra 90px) i stykal
+    sie z nia bez zadnego odstepu.
+
+    Ubytek wysokosci bierze sie z usunietego powtorzenia, nie ze zmniejszonego
+    tekstu: obramowany przycisk „Upgrade" w kazdym z dziewieciu kafelkow i
+    plakietka „+5,2%", identyczna wszedzie i podana juz w podtytule panelu.
+    """
+    from pathlib import Path
+    html = zrodlo_portalu()
+    css = (Path(__file__).resolve().parents[1] / "static" / "css" / "portal.css").read_text()
+
+    # odstep od listy kont wiekszy niz zwykly odstep miedzy kartami (14px)
+    assert ".upsell{margin-top:34px;margin-bottom:18px}" in css
+
+    # caly kafelek klikalny — takze z klawiatury
+    assert 'role="button" tabindex="0" onclick="openBuy(' in html
+    assert "event.key==='Enter'||event.key===' '" in html
+    assert '<button class="btn-o sm" onclick="openBuy(' not in html, (
+        "przycisk w kazdym kafelku odpowiadal za wiekszosc jego wysokosci")
+
+    # zdjeta plakietka procentu — ta sama liczba na wszystkich kafelkach
+    assert "uc-pct" not in html and "uc-pct" not in css
+    assert 'Based on your <b class="up">+${pct.toFixed(2)}%</b>' in html, (
+        "procent musi zostac w podtytule, skoro znika z kafelkow")
+
+    # kolumna moze byc szeroka, kafelek nie — nadmiar idzie w odstep
+    assert ".upsell-card{flex:none;width:100%;max-width:260px}" in css
+    assert "justify-items:center" in css
+
+
+def test_historia_transakcji_idzie_stronami():
+    """Lista rosła bez końca — po kilkudziesięciu trejdach podgląd konta był
+    jedną długą tabelą.
+
+    Kluczowa rzecz do utrzymania: wiersze zostają W CAŁOŚCI w DOM i są tylko
+    ukrywane. Sortowanie kolumn (sortable.js) przestawia wiersze tabeli, więc
+    gdyby renderowana była jedna strona, kliknięcie nagłówka posortowałoby
+    wyłącznie te kilkanaście widocznych wierszy zamiast całej historii.
+    """
+    from pathlib import Path
+    html = zrodlo_portalu()
+    css = (Path(__file__).resolve().parents[1] / "static" / "css" / "portal.css").read_text()
+
+    assert "const TX_PER_PAGE=15" in html
+    assert "function txPage(" in html and "function txPager(" in html and "function txInit(" in html
+    assert 'id="tx-tbl"' in html and 'id="tx-pager"' in html
+    # cala historia w DOM, strony robione widocznoscia wierszy. Od czasu filtra
+    # dnia z kalendarza najpierw chowamy WSZYSTKIE wiersze, potem odslaniamy
+    # strone z tych, ktore przeszly filtr.
+    assert "wszystkie.forEach(tr=>{tr.style.display='none'})" in html
+    assert "rows.forEach((tr,i)=>{if(i>=od&&i<od+TX_PER_PAGE)tr.style.display=''})" in html
+    # po sortowaniu „pierwsza strona" znaczy co innego — wracamy na nia
+    assert "tbl._txObs=new MutationObserver(()=>txPage(1))" in html
+    # tabela zostaje sortowalna
+    assert 'id="tx-tbl" class="tbl sortable" data-tkey="portal.history"' in html
+    for regula in (".pager{", ".pg-btn{", ".pg-btn.on{", ".pg-dots{"):
+        assert regula in css, f"brak stylu {regula}"
+
+
+def test_serwer_oddaje_wiecej_niz_sto_wpisow_historii():
+    """Limit 100 był niewidoczny, dopóki lista była nieskończona — przy
+    stronicowaniu stałby się realnym końcem historii konta."""
+    from app.main import LEDGER_MAX
+    assert LEDGER_MAX >= 300
+
+
+def test_klasa_flagi_nie_zderza_sie_z_etykieta_pliku_w_kyc():
+    """Picker numeru kierunkowego wprowadził globalną klasę `.fl` (kafelek flagi
+    20x15px). KYC od dawna używał `class="fl"` na etykiecie pola pliku
+    (`.file-row .fl`), więc reguła flagi zgniatała etykiety do 20x15px — tekst
+    łamał się po jednym słowie i wylatywał poza kartę.
+
+    Klasa flagi musi być opisowa, żeby kolizja nie wróciła.
+    """
+    from pathlib import Path
+    baza = Path(__file__).resolve().parents[1]
+    html = zrodlo_portalu()
+    pcss = (baza / "static" / "css" / "portal.css").read_text()
+    fcss = (baza / "static" / "css" / "flags.css").read_text()
+    gen = (baza.parent / "scripts" / "gen_countries.py").read_text()
+
+    # zadnej dwuliterowej reguly globalnej
+    assert "\n.fl{" not in pcss and "\n.fl{" not in fcss, "globalne `.fl` znow istnieje"
+    assert "\n.fl-" not in fcss, "flagi krajow musza uzywac dlugiej nazwy"
+
+    # picker uzywa nowej nazwy w kazdym z trzech miejsc
+    assert '<span class="flag" id="c-cc-flag"></span>' in html
+    assert 'f.className="flag flag-"+c.i.toLowerCase()' in html
+    assert '<span class="flag flag-${c.i.toLowerCase()}"></span>' in html
+    assert "\n.flag{" in pcss and "\n.flag{" in fcss
+    assert fcss.count("\n.flag-") >= 200, "flagi krajow musza byc w pliku"
+
+    # generator ma emitowac to samo, inaczej nastepne odswiezenie cofnie zmiane
+    assert ".flag-{iso2.lower()}" in gen and '".flag{width:20px' in gen
+
+    # etykieta w KYC dalej ma swoja klase i swoje reguly
+    assert '<div class="file-row"><div class="fl">' in html
+    assert ".file-row .fl b" in pcss and ".file-row .fl p" in pcss
+
+
+def test_klikniety_dzien_kalendarza_filtruje_historie_transakcji():
+    """Kalendarz pokazywał wynik dnia, ale nie dawało się zobaczyć, z czego on
+    wyszedł — lista pod spodem szła całą historią niezależnie od kliknięcia.
+
+    Filtr musi wchodzić w to samo miejsce co stronicowanie, inaczej licznik
+    stron liczyłby wiersze spoza wybranego dnia.
+    """
+    from pathlib import Path
+    baza = Path(__file__).resolve().parents[1]
+    html = zrodlo_portalu()
+    css = (baza / "static" / "css" / "portal.css").read_text()
+
+    # klikalne WYLACZNIE dni z obrotem
+    assert "cls+=' has'+(key===window._calSel?' sel':'')" in html
+    assert 'onclick="calPick(\'${key}\')"' in html
+    assert "event.key==='Enter'||event.key===' '" in html
+
+    # przelacznik, nie przejscie w jedna strone
+    assert "window._calSel=(window._calSel===day)?null:day" in html
+    assert "function calClear(){window._calSel=null;calRender();txPage(1)}" in html
+
+    # filtr po `data-sort`, czyli po tym samym polu, po ktorym sortuje tabela
+    assert "wszystkie.filter(tr=>tr.cells[0]&&tr.cells[0].dataset.sort===dzien)" in html
+    # stronicowanie liczy PRZEFILTROWANE wiersze
+    assert "const stron=Math.max(1,Math.ceil(rows.length/TX_PER_PAGE));" in html
+    # najpierw chowamy wszystko — inaczej zostalyby wiersze z poprzedniego dnia
+    assert "wszystkie.forEach(tr=>{tr.style.display='none'})" in html
+
+    # wybrany dzien nie przechodzi na inne konto
+    assert "window._calSel=null;\n" in html
+
+    # widoczny znacznik filtra i wyjscie z niego
+    assert '<div id="tx-filter" class="tx-filter"></div>' in html
+    assert 'onclick="calClear()"' in html
+    assert ".cal-day.sel" in css and ".cal-day.has{cursor:pointer" in css
+    assert "#tx-card{scroll-margin-top:92px}" in css
+
+
+# ---------------- nagrody za progi odznak (3/8, 5/8, 8/8) ----------------
+def _odblokuj(tid: int, ile: int) -> None:
+    """Odblokowuje `ile` odznak najtańszymi realnymi zdarzeniami.
+
+    Kolejność jest ta sama co w `achievements.badges`, więc test nie zgaduje —
+    idzie po tych samych warunkach, które liczy serwer.
+    """
+    s = SessionLocal()
+    tr = s.get(Trader, tid)
+    if ile >= 1:  # first_challenge
+        s.add(Order(trader_id=tid, product_key="2step-25k", amount_usd=299, status="paid"))
+    if ile >= 8:  # kyc
+        tr.kyc_status = "approved"
+    if ile >= 7:  # referrer
+        s.add(Trader(email=f"polecony-{tid}@test.pl", password_hash="x",
+                     referred_by=tr.referral_code, referral_code=auth.secrets.token_hex(3)))
+    acc = None
+    if ile >= 2:  # phase_passed + funded + days_5 + scaled na jednym koncie
+        acc = Account(login=f"ach-{tid}", trader_id=tid, trader_name="Ach Test",
+                      product_key="2step-10k", initial_balance=10_000, balance=10_000,
+                      equity=10_000, peak_equity=10_000, day_start_equity=10_000,
+                      day_start_balance=10_000, status="passed", phase="eval_2")
+        if ile >= 3:
+            acc.status, acc.phase = "funded", "funded"
+        if ile >= 5:
+            acc.trading_days_count = 5
+        if ile >= 6:
+            acc.scale_count = 1
+        s.add(acc)
+    s.commit()
+    aid = acc.id if acc is not None else None
+    s.close()
+    if ile >= 4 and aid:  # first_payout
+        s = SessionLocal()
+        s.add(Payout(account_id=aid, profit_amount=500.0, trader_share=400.0, paid=True))
+        s.commit(); s.close()
+
+
+def test_nagroda_za_prog_odznak_wymaga_progu_i_idzie_raz():
+    tid, h = _trader("ach-prog@test.pl")
+    _odblokuj(tid, 3)
+    with TestClient(app) as c:
+        stan = c.get("/api/me/achievements", headers=h).json()
+        assert stan["unlocked"] == 3, stan["badges"]
+        progi = {r["tier"]: r for r in stan["rewards"]}
+        assert progi[3]["status"] == "ready"
+        assert progi[5]["status"] == "locked" and progi[5]["remaining"] == 2
+        assert progi[8]["status"] == "locked" and progi[8]["remaining"] == 5
+
+        # prog wyzszy niz zdobyte odznaki — serwer liczy sam, nie wierzy przegladarce
+        za_wysoko = c.post("/api/me/achievements/claim", json={"tier": 8}, headers=h)
+        assert za_wysoko.status_code == 400
+
+        r = c.post("/api/me/achievements/claim", json={"tier": 3}, headers=h)
+        assert r.status_code == 200
+        kod = r.json()["code"]
+        assert kod and kod.startswith("PF-")
+
+        # drugi raz ta sama nagroda — odbita
+        znow = c.post("/api/me/achievements/claim", json={"tier": 3}, headers=h)
+        assert znow.status_code == 409
+
+        po = c.get("/api/me/achievements", headers=h).json()
+        odebrana = next(x for x in po["rewards"] if x["tier"] == 3)
+        assert odebrana["status"] == "claimed" and odebrana["code"] == kod
+
+
+def test_kody_z_odznak_maja_wlasciwy_procent_i_sa_unikalne():
+    from app.models import RewardCode
+    kody = []
+    for i, (prog, pct) in enumerate(((3, 20.0), (5, 25.0))):
+        tid, h = _trader(f"ach-pct{prog}@test.pl")
+        _odblokuj(tid, prog)
+        with TestClient(app) as c:
+            r = c.post("/api/me/achievements/claim", json={"tier": prog}, headers=h)
+        assert r.status_code == 200, r.text
+        s = SessionLocal()
+        k = s.query(RewardCode).filter(RewardCode.code == r.json()["code"]).one()
+        assert k.pct == pct
+        assert k.trader_id == tid, "kod musi byc wystawiony na tego tradera"
+        assert k.points_spent == 0, "nagroda z odznak nie kosztuje punktow"
+        assert k.used_at is None
+        kody.append(k.code)
+        s.close()
+    assert len(set(kody)) == 2, "kody musza byc rozne"
+
+
+def test_komplet_odznak_daje_darmowy_challenge_50k():
+    tid, h = _trader("ach-komplet@test.pl")
+    _odblokuj(tid, 8)
+    with TestClient(app) as c:
+        stan = c.get("/api/me/achievements", headers=h).json()
+        assert stan["unlocked"] == 8, stan["badges"]
+        r = c.post("/api/me/achievements/claim", json={"tier": 8}, headers=h)
+        assert r.status_code == 200, r.text
+        konto = r.json()["account"]
+    assert konto and konto["account_size"] == 50_000
+    assert r.json()["code"] is None, "za komplet idzie konto, nie kod"
+    s = SessionLocal()
+    acc = s.get(Account, konto["account_id"])
+    zam = s.get(Order, konto["order_id"])
+    assert acc.trader_id == tid
+    assert zam.provider == "grant" and zam.amount_usd == 0.0, "darmowy challenge to grant na $0"
+    s.close()
+    # drugi komplet nie da drugiego konta
+    with TestClient(app) as c:
+        assert c.post("/api/me/achievements/claim", json={"tier": 8}, headers=h).status_code == 409
+
+
+def test_flaga_przy_numerze_kierunkowym_jest_od_razu():
+    """Plik z flagami (~110 KB) dogrywał się DOPIERO przy otwarciu listy krajów,
+    a przycisk z flagą widać od razu po otwarciu kasy — więc do pierwszego
+    kliknięcia w listę zamiast flagi stał szary prostokąt.
+
+    Dwa niezależne zabezpieczenia: plik ładuje każde nadanie klasy flagi
+    (`ccSet`) oraz rozgrzewka w bezczynności zaraz po zalogowaniu.
+    """
+    from pathlib import Path
+    html = zrodlo_portalu()
+
+    # 1. kazde ustawienie kraju dociaga plik — to pokrywa otwarcie kasy
+    assert "function ccSet(iso,revalidate){\n  const c=COUNTRY_BY_ISO[iso]; if(!c)return;\n  flagsCss();" in html
+
+    # 2. rozgrzewka w bezczynnosci po zalogowaniu, zeby plik byl juz w cache
+    assert "function flagsWarm(){" in html
+    assert "window.requestIdleCallback||(f=>setTimeout(f,1500))" in html
+    assert "\n  flagsWarm();\n" in html, "rozgrzewka musi byc wolana z bootu"
+
+    # 3. otwarcie listy dalej dociaga plik (siatka bezpieczenstwa)
+    assert "if(open){flagsCss();ccRender()" in html

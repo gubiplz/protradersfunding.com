@@ -33,9 +33,10 @@ from time import monotonic
 
 from fastapi import HTTPException
 
-from . import metaapi_provisioning, metaquotes_web, notify, telemetry
+from . import loyalty, metaapi_provisioning, metaquotes_web, notify, telemetry
 from .config import get_settings
-from .models import Account, AppSetting, CreditLedger, Order, PoolAccount, Product, Trader
+from .models import (Account, AppSetting, CreditLedger, Order, PoolAccount, Product,
+                     RewardCode, Trader)
 
 PLATFORM_SERVER = "MetaQuotes-Demo"
 
@@ -125,6 +126,18 @@ def create_account_from_order(session, order: Order, notify_admin: bool = True) 
         order.credits_used = zuzycie
         session.add(CreditLedger(trader_id=trader.id, amount=-zuzycie,
                                  note=f"Applied to order #{order.id}", order_id=order.id))
+    # Kod kupiony za punkty jest JEDNORAZOWY i schodzi w tym samym momencie co
+    # kredyty: przy domknietej platnosci. Znacznik ustawiamy warunkowym UPDATE-em,
+    # wiec dwa rownolegle zamowienia z tym samym kodem zaliczy tylko jedno.
+    kod = (order.coupon or "").strip().upper()
+    if kod.startswith(loyalty.CODE_PREFIX):
+        zajete = (session.query(RewardCode)
+                  .filter(RewardCode.code == kod, RewardCode.trader_id == trader.id,
+                          RewardCode.used_at == None)                       # noqa: E711
+                  .update({RewardCode.used_at: now, RewardCode.order_id: order.id},
+                          synchronize_session=False))
+        if not zajete:
+            print(f"[provisioning] kod {kod} byl juz zuzyty przy zamowieniu #{order.id}", flush=True)
     session.commit()
     telemetry.track("order_paid", trader.id, order=order.id, product=order.product_key,
                     amount=order.amount_usd, provider=order.provider)

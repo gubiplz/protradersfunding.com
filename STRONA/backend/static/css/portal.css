@@ -26,6 +26,12 @@
   --hover:#fafbff; --glass:rgba(255,255,255,.9); --scrim:rgba(15,23,42,.42);
   --panel-t:rgba(255,255,255,0); --edge:rgba(15,23,42,.16);
   --r:16px;
+  /* Jedna miara szerokosci dla pudelek najwyzszego poziomu w widoku. Wczesniej
+     na JEDNEJ zakladce sasiadowaly ze soba: rzad kafelkow (pelna szerokosc),
+     tabela 1400px, karta 1450px, lista kont 1560px i pusty stan 820px — przez
+     co „No payout requests yet" konczylo sie w 72% szerokosci obszaru tresci,
+     a kafelki nad nim siegaly krawedzi. */
+  --wrap:1560px;
   --shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px -14px rgba(15,23,42,.1);
   --shadow-lg:0 24px 60px -24px rgba(79,70,229,.16),0 2px 6px rgba(15,23,42,.05);
   --display:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;
@@ -123,6 +129,14 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
   background:var(--panel);white-space:nowrap}
 .btn-o:hover{border-color:var(--acc);color:var(--acc);background:var(--acc-bg)}
 .btn-o.sm,.btn-p.sm{padding:8px 13px;font-size:13px;border-radius:9px}
+/* Potwierdzenie akcji NIEODWRACALNEJ w oknie portalu (askConfirm z danger:true).
+   Czerwien niesie tu ostrzezenie, ktore w natywnym confirm() brala na siebie
+   ramka przegladarki. */
+.btn-danger{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-weight:600;
+  font-size:14px;padding:10px 18px;border-radius:11px;background:var(--red);color:#fff;
+  transition:.16s;white-space:nowrap;box-shadow:0 8px 18px -8px rgba(220,38,38,.5)}
+.btn-danger:hover{filter:brightness(1.06);transform:translateY(-1px)}
+.btn-danger:disabled{opacity:.55;transform:none;cursor:default}
 /* Jeden przycisk kasowania w calym panelu: male czerwone "X". Wyglada tak samo
    w kontach, wyplatach, zamowieniach, puli MT5 i KYC, wiec nie trzeba zgadywac,
    ktory napis ("Delete"/"Remove") co robi. Stonowany do momentu najechania —
@@ -139,6 +153,41 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .inp:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(99,102,241,.12)}
 .inp:disabled{background:var(--panel2);color:var(--muted)}
 .inp::placeholder{color:var(--dim)}
+/* Bledne pole zaznaczamy PRZY POLU, nie jednym komunikatem pod formularzem —
+   przy czterech polach obok siebie klient inaczej nie wie, ktore poprawic.
+   Wzorzec przeniesiony z landingu (.code-inp.ok/.bad w site.css). */
+.inp.bad{border-color:var(--red);box-shadow:0 0 0 3px rgba(220,38,38,.10)}
+.inp.bad:focus{border-color:var(--red)}
+.field-err{font-size:12px;line-height:1.45;color:var(--red);margin:5px 2px 0}
+
+/* ---- numer kierunkowy z flaga (okno zakupu) ----
+   Uklad jak przy kalendarzu daty urodzenia: przycisk obok pola otwiera panel,
+   klik poza panelem go zamyka. */
+.tel-wrap{position:relative;display:flex;gap:8px}
+.tel-wrap .inp{flex:1;min-width:0}
+.tel-cc{display:flex;align-items:center;gap:7px;flex:0 0 auto;padding:0 11px;
+  background:var(--panel);border:1px solid var(--line2);border-radius:10px;
+  color:var(--txt);font-family:var(--mono);font-size:14px;transition:.15s;cursor:pointer}
+.tel-cc:hover{border-color:var(--acc)}
+.tel-cc:focus-visible{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(99,102,241,.12)}
+.tel-caret{width:12px;height:12px;opacity:.5}
+.ccpop{position:absolute;z-index:60;top:calc(100% + 6px);left:0;right:0;
+  background:var(--panel);border:1px solid var(--line2);border-radius:12px;
+  box-shadow:var(--shadow-lg);padding:8px;display:flex;flex-direction:column;gap:8px}
+.cc-list{max-height:264px;overflow-y:auto;overscroll-behavior:contain;
+  display:flex;flex-direction:column;gap:1px}
+.cc-item{display:flex;align-items:center;gap:10px;padding:8px 9px;border-radius:8px;
+  font-size:13.5px;color:var(--txt);text-align:left;cursor:pointer;transition:.12s}
+.cc-item:hover{background:var(--bg3)}
+.cc-item.on{background:var(--acc-bg);color:var(--acc)}
+.cc-item .cc-n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cc-item .cc-d{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+.cc-item.on .cc-d{color:var(--acc)}
+.cc-none{padding:16px;text-align:center;color:var(--muted);font-size:13px}
+/* Zanim doladuje sie flags.css, kratka trzyma szerokosc — lista nie skacze. */
+/* Klasa musi byc opisowa, nie dwuliterowa: `.fl` zderzalo sie z etykieta pola
+   pliku w KYC (`.file-row .fl`), ktora ta regula zgniatala do 20x15px. */
+.flag{width:20px;height:15px;flex:0 0 20px;border-radius:2px;background:var(--bg3)}
 
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:22px;box-shadow:var(--shadow)}
 .panel h3{font-size:17px}
@@ -281,12 +330,41 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .shop-tab{padding:8px 17px;border-radius:8px;font-size:13.5px;font-weight:600;color:var(--muted);transition:.15s}
 .shop-tab:hover{color:var(--txt)}
 .shop-tab.on{background:var(--grad);color:#fff}
-.plan-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:16px}
-.plan-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:22px;
+.plan-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:20px}
+/* Karta ma WIDOCZNA krawedz. Wczesniej w ciemnym motywie obramowanie mialo
+   `--line`, czyli 7% bieli, cien byl czernia na prawie czarnym tle, a tlo
+   karty roznilo sie od tla strony o dwa punkty jasnosci — dwie karty obok
+   siebie zlewaly sie w jeden prostokat. Jedynym dzialajacym rozroznieniem byl
+   `:hover`, wylaczony na dotyku. */
+.plan-card{background:var(--panel);border:1px solid var(--line2);border-radius:var(--r);padding:22px;
   display:flex;flex-direction:column;transition:.18s;position:relative;box-shadow:var(--shadow)}
 .plan-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg)}
+
+/* „Best value" — jeden wyglad w sklepie, w pasie upsellu i na landingu
+   (.psize.hot / .psize i w site.css), zeby trzy miejsca nie mowily trzema
+   stylami. Bursztyn, a nie gradient, bo gradientowa ramka znaczy juz co
+   innego: `.hl` to karta, na ktora klient wszedl z linku ?buy=… i obie moga
+   wypasc na tej samej karcie.
+   Sama ramka byla za slabym sygnalem: pigulka siedzi na gornej krawedzi, a
+   cieply nalot schodzi z gory karty, wiec wyroznienie widac zanim sie przeczyta
+   plakietke. */
+.plan-card.pop{border-color:#f0b95c;
+  background:linear-gradient(180deg,rgba(240,165,60,.13),rgba(240,165,60,0) 170px),var(--panel);
+  box-shadow:0 0 0 1px #f0b95c,0 14px 34px -20px rgba(240,165,60,.55)}
+.plan-card.pop:hover{box-shadow:0 0 0 1px #f0b95c,var(--shadow-lg)}
+.plan-ribbon{position:absolute;top:-13px;left:50%;transform:translateX(-50%);
+  font-size:11.5px;font-weight:800;letter-spacing:.01em;
+  background:linear-gradient(180deg,#fbbf4e,#f2860f);color:#fff;
+  border-radius:999px;padding:5px 15px;white-space:nowrap;
+  box-shadow:0 5px 14px -5px rgba(242,134,15,.7)}
 .plan-card.hl{border-color:transparent;background:linear-gradient(var(--panel),var(--panel)) padding-box,var(--grad) border-box;
   box-shadow:var(--shadow-lg)}
+/* Karta moze byc naraz polecana i wskazana linkiem ?buy=…. `.hl` przejmuje tlo
+   pod gradientowa ramke, wiec nalot trzeba dolozyc jawnie — inaczej wejscie
+   z linku gasi wyroznienie. */
+.plan-card.pop.hl{background:
+  linear-gradient(180deg,rgba(240,165,60,.13),rgba(240,165,60,0) 170px) padding-box,
+  linear-gradient(var(--panel),var(--panel)) padding-box,var(--grad) border-box}
 .plan-size{font-family:var(--display);font-size:23px;font-weight:700}
 .plan-kind{font-size:12px;color:var(--muted);margin-bottom:14px}
 .plan-price{font-family:var(--mono);font-size:28px;font-weight:700}
@@ -301,7 +379,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
    czytelna, tabele 8+ kolumn (admin) biora cala dostepna szerokosc, a te o
    czterech kolumnach nie rozjezdzaja sie na dziury miedzy wartosciami. */
 .tbl-wrap{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow-x:auto;box-shadow:var(--shadow);
-  overscroll-behavior-x:contain;max-width:1400px}
+  overscroll-behavior-x:contain;max-width:var(--wrap)}
 .tbl-wrap.tw-wide{max-width:none}
 .tbl-wrap.tw-sm{max-width:980px}
 .tbl-wrap.tw-wide table.tbl th,.tbl-wrap.tw-wide table.tbl td{padding-left:13px;padding-right:13px}
@@ -325,6 +403,17 @@ table.sortable th[data-dir]::after{content:'▲';font-size:8px;margin-left:5px}
 table.sortable th[data-dir=desc]::after{content:'▼'}
 
 /* empty / skeleton */
+/* Miara obowiazuje KAZDE pudelko najwyzszego poziomu w widoku, nie wyliczona
+   liste klas — inaczej bezklasowy <div> z naglowkiem zakladki albo akapit pod
+   siatka planow zostaja poza nia i rozjazd wraca innymi drzwiami.
+
+   `:where()` zeruje specyficznosc selektora, wiec caly zapis wazy tyle co samo
+   `.content` (0,1,0). Dzieki temu wyjatki zapisane dwiema klasami — np.
+   `.tbl-wrap.tw-wide` w panelu admina, celowo na pelna szerokosc, czy waska
+   `.sec-card.card-sm` — dalej wygrywaja. Uzycie `#view` zamiast `.content`
+   podbiloby zapis do (1,0,0) i po cichu skasowaloby oba te wyjatki. */
+.content>:where(*){max-width:var(--wrap)}
+
 .empty{background:var(--panel);border:1px dashed var(--line2);border-radius:var(--r);padding:52px 24px;
   text-align:center;color:var(--muted)}
 .empty svg{width:38px;height:38px;color:var(--dim);margin:0 auto 14px;display:block}
@@ -532,6 +621,21 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 .cal-day.profit{background:var(--green-bg);border-color:var(--green-line);color:var(--green)}
 .cal-day.loss{background:var(--red-bg);border-color:var(--red-line);color:var(--red)}
 .cal-day.flat{background:var(--blue-bg);border-color:var(--blue-line);color:var(--blue)}
+/* Dzien z obrotem jest przelacznikiem filtra historii ponizej. */
+.cal-day.has{cursor:pointer;transition:box-shadow .15s,transform .15s}
+.cal-day.has:hover{transform:translateY(-1px);box-shadow:0 6px 16px -10px rgba(0,0,0,.45)}
+.cal-day.has:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.cal-day.sel{box-shadow:0 0 0 2px var(--acc)}
+/* Przewijanie po wyborze dnia nie moze wsunac naglowka karty pod pasek gorny. */
+#tx-card{scroll-margin-top:92px}
+.tx-filter:empty{display:none}
+.tx-filter{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:-6px 0 14px}
+.tx-chip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;
+  font-family:var(--mono);background:var(--acc-bg);color:var(--acc);
+  border-radius:999px;padding:4px 6px 4px 12px}
+.tx-chip-x{width:18px;height:18px;border-radius:50%;background:var(--acc);color:#fff;
+  font-size:13px;line-height:1;cursor:pointer;display:grid;place-items:center}
+.tx-chip-hint{font-size:12px;color:var(--dim)}
 .cal-legend{display:flex;gap:16px;margin-top:12px;font-size:12px;color:var(--muted);flex-wrap:wrap}
 .cal-legend span{display:flex;align-items:center;gap:6px}
 .cal-legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
@@ -580,6 +684,36 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 .tier-card .code{font-family:var(--mono);font-weight:700;color:var(--acc);background:var(--acc-bg);
   border:1px dashed var(--acc-line);border-radius:8px;padding:6px 10px;display:inline-block;margin-top:8px;font-size:13px}
 .tier-card.locked .code{color:var(--dim);background:var(--bg3);border-color:var(--line2)}
+/* Sklepik nagrod: karta nagrody uzywa .tier-card, dokladamy tylko przycisk. */
+.tier-card .rw-go{margin-top:12px;width:100%}
+.tier-card .rw-go[disabled]{opacity:.5;cursor:not-allowed}
+/* Nagrody za progi odznak (3/8, 5/8, 8/8). Wlasny prefiks `mrw-`, bo `.rw-code`
+   nalezy juz do kodow wymienianych za punkty w Loyalty. */
+.mrw-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.mrw-card{background:var(--bg3,var(--bg));border:1px solid var(--line);border-radius:12px;
+  padding:14px 15px;display:flex;flex-direction:column;gap:8px}
+.mrw-card.ready{border-color:#f0b95c;
+  background:linear-gradient(180deg,rgba(240,165,60,.13),rgba(240,165,60,0) 90px),var(--bg3,var(--bg))}
+.mrw-card.locked{opacity:.62}
+.mrw-top{display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+.mrw-ic{width:30px;height:30px;flex:none;border-radius:50%;background:var(--acc-bg);color:var(--acc);
+  display:grid;place-items:center}
+.mrw-ic svg{width:15px;height:15px}
+.mrw-card.ready .mrw-ic{background:rgba(240,165,60,.18);color:#c2790a}
+.mrw-label{font-size:14px;font-weight:700}
+.mrw-need{font-size:12px;color:var(--dim);margin-top:auto}
+.mrw-go{margin-top:auto;width:100%;justify-content:center}
+.mrw-code{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:8px;
+  background:var(--panel);border:1px dashed var(--line2);border-radius:9px;padding:7px 8px 7px 11px}
+.mrw-code b{font-family:var(--mono);font-size:13px;letter-spacing:.03em}
+
+/* Kody wymienione za punkty */
+.rw-codes{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.rw-code{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:12px 16px}
+.rw-code b{font-size:15px;letter-spacing:.04em}
+.rw-code.spent{opacity:.6}
+.rw-code.spent b{text-decoration:line-through}
 
 /* --- toggle switch --- */
 .switch-row{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:14px 0;
@@ -743,7 +877,7 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 @keyframes scrim-in{from{opacity:0}}
 
 @media(max-width:640px){
-  .inp{font-size:16px}                              /* iOS zooms on focus below 16px */
+  .inp,.tel-cc{font-size:16px}                      /* iOS zooms on focus below 16px */
   .icon-btn{width:44px;height:44px;flex:0 0 44px}
   .btn-o.sm,.btn-p.sm{min-height:40px;padding:9px 14px}
   .copy{position:relative}
@@ -814,7 +948,10 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 
 /* ---------------- challenge cards (portal Challenges view) ---------------- */
 /* "Scale your progress" upsell strip (real math from the best live account) */
-.upsell{margin-bottom:18px}
+/* Odstep od listy kont jest wiekszy niz zwykly odstep miedzy kartami (14px):
+   to nie kolejna karta w stosie, tylko inny rodzaj tresci — konta usera kontra
+   blok sprzedazowy. Wczesniej oba panele stykaly sie krawedziami (0px). */
+.upsell{margin-top:34px;margin-bottom:18px}
 /* Podswietlenie po wejsciu z powiadomienia (parametr upsell=1) */
 .upsell.flash{animation:upFlash 2.6s ease-out}
 @keyframes upFlash{
@@ -825,18 +962,42 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 .upsell-head h3{font-size:16.5px;margin:2px 0 4px}
 .up-eyebrow{font-size:10.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--acc)}
 .up-based{font-size:12.5px;color:var(--muted)}
-.upsell-row{display:flex;gap:12px;overflow-x:auto;padding-bottom:6px;-webkit-overflow-scrolling:touch}
-.upsell-card{flex:0 0 176px;background:var(--bg3,var(--bg));border:1px solid var(--line);border-radius:12px;
-  padding:13px 14px;display:flex;flex-direction:column;gap:2px}
-.uc-top{display:flex;justify-content:space-between;align-items:center}
-.uc-if{font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
-.uc-pct{font-size:10.5px;font-weight:700;color:var(--acc);background:color-mix(in srgb,var(--acc) 12%,transparent);
-  border-radius:999px;padding:2px 7px}
-.uc-size{font-family:var(--mono);font-size:21px;font-weight:800;margin-top:3px}
-.uc-sub{font-size:11px;color:var(--muted)}
-.uc-earn{font-family:var(--mono);font-size:15.5px;font-weight:800;color:var(--ok,#16a34a);margin:1px 0 9px}
-.upsell-card .btn-o.sm{margin-top:auto;justify-content:center}
+.upsell-row{display:flex;gap:26px;overflow-x:auto;padding:9px 0 6px;-webkit-overflow-scrolling:touch}
+/* Kafelek jest w calosci klikalny, wiec obramowana kratka „Upgrade" w kazdym
+   z dziewieciu zeszla do zwyklego napisu — to ona odpowiadala za wiekszosc
+   wysokosci. Reszta ubytku to zdjeta plakietka „+5,2%", identyczna na wszystkich
+   kafelkach i podana juz w podtytule panelu. */
+.upsell-card{flex:0 0 156px;background:var(--bg3,var(--bg));border:1px solid var(--line);border-radius:12px;
+  padding:11px 13px;display:flex;flex-direction:column;gap:1px;position:relative;
+  cursor:pointer;transition:border-color .15s,transform .15s}
+.upsell-card:hover{border-color:var(--acc);transform:translateY(-2px)}
+/* Ten sam bursztyn co plakietka w sklepie i na landingu — jeden jezyk dla
+   „najczesciej wybierany", zeby trzy miejsca nie mowily trzema stylami. */
+.upsell-card.pop{border-color:#f0b95c;box-shadow:0 0 0 1px #f0b95c;
+  background:linear-gradient(180deg,rgba(240,165,60,.14),rgba(240,165,60,0) 70px),var(--bg3,var(--bg))}
+.uc-ribbon{position:absolute;top:-11px;left:50%;transform:translateX(-50%);
+  font-size:10px;font-weight:800;letter-spacing:.01em;
+  background:linear-gradient(180deg,#fbbf4e,#f2860f);color:#fff;
+  border-radius:999px;padding:4px 12px;white-space:nowrap;
+  box-shadow:0 4px 12px -5px rgba(242,134,15,.7)}
+.uc-if{font-size:9.5px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);line-height:1.3}
+.uc-size{font-family:var(--mono);font-size:18px;font-weight:800;margin-top:2px;line-height:1.2}
+.uc-sub{font-size:10.5px;color:var(--muted);line-height:1.35}
+.uc-earn{font-family:var(--mono);font-size:14.5px;font-weight:800;color:var(--ok,#16a34a);margin:1px 0 0;line-height:1.25}
+.uc-go{margin-top:auto;padding-top:6px;font-size:11px;font-weight:700;color:var(--acc);line-height:1.2}
 .uc-fine{font-size:11px;color:var(--dim);margin-top:10px}
+
+/* Stronicowanie dlugich list (historia transakcji konta). */
+.pager{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:12px}
+.pager:empty{display:none}
+.pg-btn{min-width:32px;height:32px;padding:0 9px;border-radius:8px;border:1px solid var(--line);
+  background:var(--panel);color:var(--muted);font-size:13px;font-weight:600;
+  font-family:var(--mono);transition:.15s;cursor:pointer}
+.pg-btn:hover:not(:disabled):not(.on){border-color:var(--line2);color:var(--txt)}
+.pg-btn.on{background:var(--grad);border-color:transparent;color:#fff}
+.pg-btn:disabled{opacity:.35;cursor:default}
+.pg-nav{font-size:16px;line-height:1}
+.pg-dots{color:var(--dim);padding:0 2px;user-select:none}
 @media(max-width:700px){.upsell-head{flex-direction:column}.upsell-head .btn-p{align-self:stretch}}
 
 .chal-filter{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:2px 0 16px}
@@ -846,7 +1007,7 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
    przy osmiu kontach lista wypadala ponizej pierwszego ekranu. Wiersz ma te
    same dane w ~64px. Cala lista to jeden panel z gradientowa krawedzia. */
 .chal-list{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
-  box-shadow:var(--shadow);overflow:hidden;position:relative;max-width:1560px}
+  box-shadow:var(--shadow);overflow:hidden;position:relative;max-width:var(--wrap)}
 .chal-list::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;z-index:1;
   background:linear-gradient(90deg,#2563eb,#6366f1,#a855f7)}
 .chal-row{display:grid;gap:10px 16px;align-items:center;padding:14px 18px;
@@ -999,7 +1160,7 @@ button,a{-webkit-tap-highlight-color:transparent}
   .tabbar{display:flex}
   .burger{display:none}
   .content{padding-bottom:calc(74px + env(safe-area-inset-bottom))}  /* clear the bar */
-  .inp{font-size:16px}                                /* iOS zooms on focus below 16px */
+  .inp,.tel-cc{font-size:16px}                        /* iOS zooms on focus below 16px */
   .icon-btn{width:44px;height:44px;flex:0 0 44px}
   #toasts{bottom:calc(70px + env(safe-area-inset-bottom))}           /* toasts above the bar */
 }
@@ -1276,13 +1437,25 @@ html[data-theme=dark] .inv-print{border:1px solid var(--line2)}
   /* Od tabletu w gore pas upsellu przestaje byc karuzela: karty wchodza w siatke
      i rozkladaja sie rowno na cala szerokosc panelu (przy dziewieciu rozmiarach
      karuzela znaczyla przewijanie w bok albo dwa niepelne rzedy). */
-  .upsell-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));
-    gap:12px;overflow:visible;padding-bottom:0}
-  .upsell-card{flex:none}
+  .upsell-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+    gap:26px;overflow:visible;padding:9px 0 0;justify-items:center}
+  /* Kolumna moze byc szeroka (na 1920px wychodzi ~280px), ale kafelek nie ma
+     sie rozciagac — nadmiar idzie w odstep miedzy kafelkami. */
+  .upsell-card{flex:none;width:100%;max-width:260px}
+}
+@media(min-width:1250px){
+  /* Rowny podzial na dwa rzedy. `auto-fill` upychal tyle kafelkow, ile wejdzie
+     (przy dziewieciu planach 6+3), wiec liczbe kolumn podaje widok — polowa
+     kafelkow zaokraglona w gore. Nizej zostaje `auto-fill`, bo przy pieciu
+     kolumnach kafelek zszedlby ponizej szerokosci, w ktorej miesci sie
+     „$1,000,000". */
+  .upsell-row{grid-template-columns:repeat(var(--up-cols,4),minmax(0,1fr));max-width:var(--up-max,none)}
 }
 @media(min-width:1500px){
-  /* kafelki KPI trzymaja rozmiar zamiast puchnac do ~600px przy czterech sztukach */
-  .stats-row{grid-template-columns:repeat(auto-fit,minmax(215px,340px))}
+  /* Kafelki wypelniaja --wrap zamiast konczyc sie w polowie rzedu. Poprzedni
+     limit 340px na kafelek dawal na szerokim monitorze odwrotny rozjazd:
+     tabela pod spodem byla szersza niz rzad kafelkow nad nia. */
+  .stats-row{grid-template-columns:repeat(auto-fit,minmax(215px,1fr))}
 }
 @media(min-width:1700px){
   .detail-grid{grid-template-columns:minmax(0,1fr) 380px}
@@ -1291,8 +1464,9 @@ html[data-theme=dark] .inv-print{border:1px solid var(--line2)}
 @media(min-width:1300px){
   /* dlugosc linii: opis w karcie nie ciagnie sie przez caly ekran */
   .sec-card>p,.panel>p{max-width:92ch}
-  /* pusty stan to dwie linijki tekstu — nie potrzebuje 2000px prostokata */
-  .empty{max-width:820px}
+  /* Pudelko idzie do tej samej krawedzi co reszta widoku, a dlugosc linii
+     trzyma sam tekst — inaczej pusty stan wygladal jak niedokonczony layout. */
+  .empty p{max-width:64ch;margin-inline:auto}
 }
 
 @media(min-width:1300px){
@@ -1300,7 +1474,4 @@ html[data-theme=dark] .inv-print{border:1px solid var(--line2)}
      szerokosc — bialy prostokat z pustka w srodku wyglada gorzej niz ta sama
      pustka na tle strony. Wartosci = limit tabeli + padding karty. */
   .sec-card.card-sm{max-width:1030px}
-  .sec-card.card-md{max-width:1450px}
-  /* upsell trzyma sie szerokosci listy kont nad nim */
-  .upsell{max-width:1560px}
 }

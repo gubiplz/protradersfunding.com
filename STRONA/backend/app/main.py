@@ -30,14 +30,16 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel
 from sqlalchemy import func
 
-from . import (auth, billing, catalog, metaquotes_web, notify, payout_import, poller,
-               provisioning, push, rules, telemetry, tradebot)
+from . import (achievements, auth, billing, catalog, countries, fields, loyalty, metaquotes_web,
+               notify,
+               payout_import,
+               poller, provisioning, push, rules, telemetry, tradebot)
 from .config import get_settings
 from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint
 from .models import (Account, AppSetting, Breach, Certificate, CreditLedger, EquitySnapshot,
                      JournalEntry, KycFile, Notification, Order, Payout, PayoutRequest,
-                     PoolAccount, Product, PushSubscription, SupportTicket, TelemetryEvent,
-                     TicketMessage, Trade, Trader)
+                     PoolAccount, Product, PushSubscription, RewardCode, SupportTicket,
+                     TelemetryEvent, TicketMessage, Trade, Trader)
 
 settings = get_settings()
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
@@ -246,6 +248,23 @@ def favicon():
     return FileResponse(str(STATIC / "img" / "favicon.png"), media_type="image/png")
 
 
+@app.get("/countries.js", include_in_schema=False)
+def countries_js():
+    """Spis krajów osobnym plikiem, nie wklejony w stronę.
+
+    Kierunkowe i strefy czasowe to 31 kB, a HTML musi lecieć `no-cache` — szły
+    więc po łączu przy KAŻDYM wejściu na portal. Treść zmienia się wyłącznie
+    z deployem, więc pod adresem z `?v=<sha>` może wisieć w cache rok.
+
+    Zwykły `<script>`, nie `fetch`: skrypty klasyczne wykonują się w kolejności
+    dokumentu, więc dane są na miejscu, zanim ruszy kod portalu — flaga przy
+    numerze kierunkowym rysuje się od razu, bez doczytywania.
+    """
+    return Response(f"window.PF_GEO={json.dumps(countries.payload(), separators=(',', ':'))};",
+                    media_type="application/javascript",
+                    headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
 @app.get("/sw.js", include_in_schema=False)
 def service_worker():
     # Serwowany z korzenia (nie /static/), bo scope service workera nie może
@@ -293,11 +312,12 @@ def _account_dict(acc: Account, with_metrics: bool = True, with_credentials: boo
         "source": acc.source, "grant_note": acc.grant_note,
         "bogo_paid_size": getattr(acc, "bogo_paid_size", None),
         "created_at": acc.created_at.isoformat() if acc.created_at else None,
-        # Rozmiar po skalowaniu ALBO None. Portal rysuje z tego wybór „wypłata
-        # czy większe konto", więc liczy to jedno miejsce w kodzie.
+        # Rozmiar następnego planu ALBO None (konto poniżej progu albo już na
+        # szczycie drabiny). Portal rysuje z tego wybór „wypłata czy wyższy
+        # plan", więc liczy to jedno miejsce w kodzie.
         "scale_up_to": poller.scale_offer(acc),
-        "scale_step_pct": poller.SCALE_STEP_PCT,
         "scale_trigger_pct": poller.SCALE_TRIGGER_PCT,
+        "scale_count": int(getattr(acc, "scale_count", 0) or 0),
     }
     if admin_view:
         d["mt5_backed"] = bool(getattr(acc, "mt5_backed", True))
@@ -438,6 +458,7 @@ def _account_detail(session, acc: Account, admin_view: bool = False) -> dict:
 
 def _product_dict(p: Product) -> dict:
     return {"key": p.key, "label": p.label, "account_size": p.account_size, "steps": p.steps,
+            "popular": p.account_size == catalog.POPULAR_SIZE,
             "price_usd": p.price_usd, "profit_target_p1": p.profit_target_p1,
             "profit_target_p2": p.profit_target_p2, "max_daily_loss_pct": p.max_daily_loss_pct,
             "max_overall_loss_pct": p.max_overall_loss_pct, "drawdown_type": p.drawdown_type,
@@ -484,7 +505,8 @@ SESSION_COOKIE = "pf_session"
 # swiadome minimum bez zewnetrznego magazynu; okno przesuwne 60 s.
 _RL_HITS: dict[tuple[str, str], list[float]] = {}
 _RL_DISABLED = os.getenv("RATE_LIMIT_OFF", "false").lower() == "true"
-_EMAIL_RX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# Wzorzec mieszka teraz w `fields`, zeby serwer i formularze mialy jedna regule.
+_EMAIL_RX = fields.EMAIL_RX
 
 
 def _rate_limit(request: Request, bucket: str, limit: int, window: int = 60) -> None:
@@ -696,6 +718,14 @@ def signup(payload: SignupIn, request: Request, response: Response):
         raise HTTPException(400, "The password must be at least 8 characters long")
     if not payload.terms_accepted:
         raise HTTPException(400, "You must accept the Terms of Service and Privacy Policy")
+    # Pole bywa ukryte (rejestracja przez Google), wiec puste zostaje dozwolone —
+    # ale jesli cos wpisano, ma to byc imie i nazwisko, a nie „Dawid53".
+    nazwa = (payload.full_name or "").strip()
+    if nazwa:
+        try:
+            nazwa = fields.person_name(nazwa, "Full name")
+        except ValueError as e:
+            raise HTTPException(400, str(e))
     session = SessionLocal()
     try:
         istnieje = session.query(Trader).filter(Trader.email == email).first()
@@ -727,7 +757,7 @@ def signup(payload: SignupIn, request: Request, response: Response):
                 break
         tr = Trader(
             email=email, password_hash=auth.hash_password(payload.password),
-            full_name=payload.full_name.strip(), referral_code=code,
+            full_name=nazwa, referral_code=code,
             referred_by=referred_by,
             email_verified=False, email_verify_code=f"{secrets.randbelow(1_000_000):06d}",
             terms_accepted_at=datetime.now(timezone.utc),
@@ -885,6 +915,7 @@ def me(trader: Trader = Depends(auth.current_trader)):
                 "kyc_reject_reason": trader.kyc_reject_reason,
                 "ui_prefs": _ui_prefs_dict(trader),
                 "first_name": trader.first_name, "last_name": trader.last_name, "phone": trader.phone,
+                "phone_country": trader.phone_country,
                 "referral_code": trader.referral_code,
                 "credits_usd": round(float(trader.credits_usd or 0), 2),
                 # engagement: streak i punkty bonusowe dla portalu mobilnego
@@ -915,15 +946,30 @@ class CheckoutIn(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     phone: str | None = None
+    phone_country: str | None = None   # ISO2 z listy krajów; dlugosc numeru zalezy od kraju
 
 
 @app.get("/api/coupon/{code}")
 def coupon_preview(code: str):
-    """Podgląd rabatu dla konfiguratora na landingu — sam procent, bez listy kodów."""
-    pct = catalog.COUPONS.get(code.strip().upper())
+    """Podgląd rabatu dla konfiguratora na landingu — sam procent, bez listy kodów.
+
+    Kody kupione za punkty też tu odpowiadają, inaczej trader dostawałby
+    „nieprawidłowy kod" na własny, świeżo wymieniony kod. Oddajemy WYŁĄCZNIE
+    procent: bez właściciela, bez statusu, bez terminu. Prawo do użycia i tak
+    sprawdza checkout, który zna zalogowanego tradera.
+    """
+    kod = code.strip().upper()
+    pct = catalog.COUPONS.get(kod)
+    if not pct and kod.startswith(loyalty.CODE_PREFIX):
+        session = SessionLocal()
+        try:
+            k = session.query(RewardCode).filter(RewardCode.code == kod).first()
+            pct = k.pct if k else None
+        finally:
+            session.close()
     if not pct:
         raise HTTPException(404, "Unknown coupon code")
-    return {"code": code.strip().upper(), "pct": pct}
+    return {"code": kod, "pct": pct}
 
 
 @app.get("/api/promo")
@@ -966,13 +1012,39 @@ def list_products():
         session.close()
 
 
+def _dane_klienta(payload: CheckoutIn, trader: Trader) -> tuple[str, str, str, str]:
+    """Sprawdza dane do rejestracji konta MT5 i zwraca je w formie do zapisu.
+
+    Pusty formularz oznacza „zostaw to, co juz jest na profilu" — ale tylko gdy
+    profil ma komplet. Bez tego warunku walidacje omijaloby sie, wysylajac
+    zadanie bez tych pol.
+    """
+    puste = not any([(payload.first_name or "").strip(), (payload.last_name or "").strip(),
+                     (payload.phone or "").strip()])
+    komplet = all([(trader.first_name or "").strip(), (trader.last_name or "").strip(),
+                   (trader.phone or "").strip()])
+    if puste and komplet:
+        return trader.first_name, trader.last_name, trader.phone, trader.phone_country or ""
+    try:
+        imie = fields.person_name(payload.first_name, "First name")
+        nazwisko = fields.person_name(payload.last_name, "Last name")
+        tel, kraj = fields.phone(payload.phone_country, payload.phone)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return imie, nazwisko, tel, kraj
+
+
 @app.post("/api/checkout")
 def checkout(payload: CheckoutIn, trader: Trader = Depends(auth.current_trader)):
     session = SessionLocal()
     try:
+        # Te trzy pola ida prosto do formularza rejestracji konta demo u brokera,
+        # wiec smiec = nieudany provisioning po pobraniu platnosci. Walidujemy
+        # PRZED zapisem i przed utworzeniem zamowienia.
+        imie, nazwisko, tel, kraj = _dane_klienta(payload, trader)
         billing.save_customer_details(
             session, trader,
-            first_name=payload.first_name, last_name=payload.last_name, phone=payload.phone,
+            first_name=imie, last_name=nazwisko, phone=tel, phone_country=kraj,
         )
         return billing.create_checkout(session, trader, payload.product_key, payload.coupon,
                                        promo_code=payload.promo_code,
@@ -1209,9 +1281,14 @@ def submit_kyc(payload: KycIn, trader: Trader = Depends(auth.current_trader)):
     session = SessionLocal()
     try:
         tr = session.get(Trader, trader.id)
+        try:
+            nazwa = fields.person_name(payload.full_name, "Full name")
+            kraj = fields.country_name(payload.country)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
         tr.kyc_status = "pending"
-        tr.kyc_fullname = payload.full_name
-        tr.kyc_country = payload.country
+        tr.kyc_fullname = nazwa
+        tr.kyc_country = kraj
         tr.kyc_dob = payload.dob
         tr.kyc_address = payload.address
         tr.kyc_id_type = payload.id_type
@@ -1276,11 +1353,15 @@ def _own_account(session, trader: Trader, account_id: int) -> Account:
 
 @app.post("/api/accounts/{account_id}/scale-up")
 def scale_up_account(account_id: int, trader: Trader = Depends(auth.current_trader)):
-    """Trader wybiera POWIĘKSZENIE konta zamiast wypłaty.
+    """Trader wybiera WYŻSZY PLAN zamiast wypłaty.
 
     Wcześniej skalowanie odpalał poller sam z siebie i trader nie miał tu nic do
     powiedzenia. Teraz to jego decyzja, bo obie ścieżki wykluczają się nawzajem:
     ten sam zysk albo idzie na wypłatę, albo zamienia się w większy rachunek.
+
+    Konto wychodzi stąd w stanie `provisioning` — dostaje NOWY rachunek MT5 o
+    rozmiarze wyższego planu (patrz `poller.apply_scale_up`), a poświadczenia
+    dowozi `provisioning.provision_pending` razem z mailem.
     """
     session = SessionLocal()
     try:
@@ -1288,6 +1369,10 @@ def scale_up_account(account_id: int, trader: Trader = Depends(auth.current_trad
         if acc.status != "funded":
             raise HTTPException(400, "Scaling is available on funded accounts only")
         if poller.scale_offer(acc) is None:
+            # Dwa różne powody odmowy, dwa różne komunikaty: „nie masz jeszcze
+            # progu" i „jesteś na największym planie" to nie to samo.
+            if catalog.next_size_up(acc.steps, acc.initial_balance) is None:
+                raise HTTPException(400, "This is already the largest account size we offer")
             raise HTTPException(
                 400, f"Scaling unlocks once the account is up {poller.SCALE_TRIGGER_PCT:.0f}%")
         # Otwarta pozycja przeżyłaby reset salda jako czysty prezent albo strata:
@@ -1295,21 +1380,24 @@ def scale_up_account(account_id: int, trader: Trader = Depends(auth.current_trad
         if abs(acc.open_pnl or 0.0) > 0.005:
             raise HTTPException(400, "Close your open positions before scaling the account up")
         poprzedni = acc.initial_balance
-        nowy = poller.apply_scale_up(acc)
+        nowy = poller.apply_scale_up(session, acc)
         session.commit()
         try:
             notify.send("account_scaled", trader.email,
                         {"name": trader.full_name or trader.email, "login": acc.login,
                          "previous_size": poprzedni, "new_size": nowy})
-            push.send_to_trader(trader.id, "Account scaled up",
-                                f"{acc.login} is now a ${nowy:,.0f} account.",
+            push.send_to_trader(trader.id, "Moving up to a bigger account",
+                                f"Your new ${nowy:,.0f} account is being set up.",
                                 url="/portal?view=accounts", tag="account_scaled")
         except Exception as e:  # pragma: no cover
             print(f"[scale-up] powiadomienie nie poszlo: {e}")
         return {"account_id": acc.id, "previous_size": poprzedni, "new_size": nowy,
-                "balance": acc.balance}
+                "balance": acc.balance, "status": acc.status, "product_key": acc.product_key}
     finally:
         session.close()
+
+
+LEDGER_MAX = 300
 
 
 @app.get("/api/me/accounts/{account_id}/activity")
@@ -1389,41 +1477,68 @@ def account_activity(account_id: int, trader: Trader = Depends(auth.current_trad
 
         return {
             "days": [{"day": d, "pnl": v} for d, v in sorted(days.items())],
-            "ledger": [{k: v for k, v in r.items() if k != "ts"} for r in ledger[:100]],
+            # Sufit historii oddawanej portalowi. Dopoki lista w widoku konta
+            # byla nieskonczona, limit 100 byl niewidoczny — przy stronicowaniu
+            # staje sie realnym koncem historii, wiec idzie w gore. Wyzej niz
+            # tutaj nie ma sensu bez stronicowania po stronie serwera: caly
+            # ledger jedzie w jednej odpowiedzi razem z krzywa kapitalu.
+            "ledger": [{k: v for k, v in r.items() if k != "ts"} for r in ledger[:LEDGER_MAX]],
         }
     finally:
         session.close()
 
 
+def _achievements_payload(session, trader: Trader) -> dict:
+    odznaki = achievements.badges(session, trader)
+    ile = sum(1 for b in odznaki if b["unlocked"])
+    return {"badges": odznaki, "unlocked": ile, "total": len(odznaki),
+            "rewards": achievements.state(session, trader, ile)}
+
+
 @app.get("/api/me/achievements")
 def my_achievements(trader: Trader = Depends(auth.current_trader)):
-    """Odznaki liczone z REALNYCH zdarzeń na platformie — zero generowania."""
+    """Odznaki liczone z REALNYCH zdarzeń na platformie — zero generowania,
+    plus stan trzech nagród za progi 3/8, 5/8 i 8/8."""
     session = SessionLocal()
     try:
-        accs = session.query(Account).filter(Account.trader_id == trader.id).all()
-        acc_ids = [a.id for a in accs]
-        paid_order = session.query(Order).filter(Order.trader_id == trader.id,
-                                                 Order.status == "paid").first() is not None
-        payout = bool(acc_ids) and session.query(Payout).filter(
-            Payout.account_id.in_(acc_ids)).first() is not None
-        referred = session.query(Trader).filter(Trader.referred_by == trader.referral_code).count()
-        prod_sizes = {p.key: p.account_size for p in session.query(Product).all()}
-        scaled = any(a.status == "funded" and a.initial_balance > prod_sizes.get(a.product_key, a.initial_balance)
-                     for a in accs)
-        badges = [
-            ("first_challenge", "First Challenge", "Purchase your first evaluation", paid_order),
-            ("phase_passed", "Phase Passed", "Advance past Phase 1 of any challenge",
-             any(a.phase in ("eval_2", "funded") or a.status in ("passed", "funded") for a in accs)),
-            ("funded", "Funded Trader", "Get any account to funded status",
-             any(a.status == "funded" for a in accs)),
-            ("first_payout", "First Payout", "Receive your first performance reward", payout),
-            ("days_5", "Consistent Trader", "Log 5 trading days on one account",
-             any(a.trading_days_count >= 5 for a in accs)),
-            ("scaled", "Scaled Up", "Trigger the +25% scaling plan on a funded account", scaled),
-            ("referrer", "Ambassador", "Refer your first trader", referred >= 1),
-            ("kyc", "Verified", "Complete identity verification", trader.kyc_status == "approved"),
-        ]
-        return [{"key": k, "name": n, "desc": d, "unlocked": bool(u)} for (k, n, d, u) in badges]
+        return _achievements_payload(session, session.get(Trader, trader.id))
+    finally:
+        session.close()
+
+
+class ClaimIn(BaseModel):
+    tier: int
+
+
+@app.post("/api/me/achievements/claim")
+def my_achievements_claim(payload: ClaimIn, trader: Trader = Depends(auth.current_trader)):
+    """Odbiera nagrodę za próg odznak: kod rabatowy (3/8, 5/8) albo konto (8/8).
+
+    Liczba odznak liczona jest TUTAJ, na serwerze — przeglądarka podaje wyłącznie
+    próg, o który prosi. Inaczej wystarczyłoby jedno żądanie z `tier: 8`, żeby
+    dostać darmowe konto bez ani jednej odznaki.
+    """
+    session = SessionLocal()
+    try:
+        # FOR UPDATE jak przy wymianie punktów: dwa równoległe kliknięcia
+        # „Claim" nie mogą odebrać tej samej nagrody dwa razy.
+        tr = session.query(Trader).filter(Trader.id == trader.id).with_for_update().one()
+        ile = sum(1 for b in achievements.badges(session, tr) if b["unlocked"])
+        try:
+            nagroda, konto = achievements.claim(session, tr, payload.tier, ile)
+        except ValueError:
+            raise HTTPException(404, "Unknown reward tier")
+        except LookupError as brakuje:
+            raise HTTPException(400, f"You need {brakuje} more achievement(s) for this reward")
+        except RuntimeError:
+            raise HTTPException(409, "This reward has already been claimed")
+        session.commit()
+        telemetry.track("achievement_reward", trader.id, tier=payload.tier)
+        # Bez maila: nie ma szablonu na przyznane konto, a wysylanie nieznanego
+        # zdarzenia znikneloby po cichu. Portal pokazuje wynik od razu, a konto
+        # pojawia sie na liscie challenge'ow.
+        return {"claimed": payload.tier, "code": nagroda.code, "account": konto,
+                **_achievements_payload(session, tr)}
     finally:
         session.close()
 
@@ -1545,7 +1660,12 @@ def my_certificate_issue(payload: MyCertIn, trader: Trader = Depends(auth.curren
 
 @app.post("/api/me/payouts/{payout_id}/certificate")
 def my_payout_certificate(payout_id: int, trader: Trader = Depends(auth.current_trader)):
-    """Dorobienie certyfikatu do WLASNEJ wyplaty (starsze wyplaty nie maja tokenu)."""
+    """Dorobienie certyfikatu do WLASNEJ wyplaty (starsze wyplaty nie maja tokenu).
+
+    Certyfikat wystawiony samoobsługowo NIE trafia na pas na landingu: o tym,
+    co jest na stronie, decyduje admin (panel → Payouts). Trader dostaje pełny
+    dokument z QR i weryfikacją, więc niczego mu to nie odbiera.
+    """
     session = SessionLocal()
     try:
         pay = session.get(Payout, payout_id)
@@ -1554,6 +1674,7 @@ def my_payout_certificate(payout_id: int, trader: Trader = Depends(auth.current_
         _own_account(session, trader, pay.account_id)   # rzuca 404 gdy nie jego
         if not pay.cert_token:
             pay.cert_token = secrets.token_urlsafe(16)[:32]
+            pay.show_on_lp = False
             session.commit()
         return {"url": f"/payout/{pay.cert_token}"}
     finally:
@@ -1821,7 +1942,10 @@ def me_patch(payload: MePatch, trader: Trader = Depends(auth.current_trader)):
     try:
         tr = session.get(Trader, trader.id)
         if payload.full_name is not None:
-            tr.full_name = payload.full_name.strip()[:120]
+            try:
+                tr.full_name = fields.person_name(payload.full_name, "Full name")
+            except ValueError as e:
+                raise HTTPException(400, str(e))
         for field in ("notify_updates", "notify_trading", "notify_payouts", "notify_marketing"):
             v = getattr(payload, field)
             if v is not None:
@@ -1975,6 +2099,62 @@ def me_daily_reveal(trader: Trader = Depends(auth.current_trader)):
         session.commit()
         telemetry.track("reveal", trader.id, kind=wynik.get("type"))
         return {**wynik, "already": False}
+    finally:
+        session.close()
+
+
+# --- Program lojalnościowy: punkty -> własny kod rabatowy --------------------
+class RedeemIn(BaseModel):
+    reward: str      # klucz nagrody z loyalty.REWARDS
+
+
+def _loyalty_payload(session, trader: Trader) -> dict:
+    stan = loyalty.balance(session, trader)
+    kody = (session.query(RewardCode)
+            .filter(RewardCode.trader_id == trader.id)
+            .order_by(RewardCode.id.desc()).limit(30).all())
+    return {
+        **stan,
+        "tiers": [{"name": n, "min": p} for n, p in loyalty.TIERS],
+        "rewards": [{**r, "affordable": stan["points_available"] >= r["cost"]}
+                    for r in loyalty.REWARDS],
+        "code_ttl_days": loyalty.CODE_TTL_DAYS,
+        "codes": [loyalty.code_dict(k) for k in kody],
+    }
+
+
+@app.get("/api/me/loyalty")
+def me_loyalty(trader: Trader = Depends(auth.current_trader)):
+    """Stan programu: punkty, status, sklepik nagród i wydane kody.
+
+    Punkty liczy SERWER. Wcześniej sumowała je przeglądarka z listy zamówień —
+    do wyświetlenia to wystarczało, ale przy wymianie oznaczałoby, że trader
+    sam sobie ustala, na co go stać.
+    """
+    session = SessionLocal()
+    try:
+        return _loyalty_payload(session, session.get(Trader, trader.id))
+    finally:
+        session.close()
+
+
+@app.post("/api/me/loyalty/redeem")
+def me_loyalty_redeem(payload: RedeemIn, trader: Trader = Depends(auth.current_trader)):
+    """Wymienia punkty na własny kod jednorazowy i od razu je odejmuje."""
+    session = SessionLocal()
+    try:
+        # FOR UPDATE jak przy check-inie: dwa równoległe kliknięcia nie mogą
+        # kupić dwóch kodów za te same punkty.
+        tr = session.query(Trader).filter(Trader.id == trader.id).with_for_update().one()
+        try:
+            kod = loyalty.redeem(session, tr, payload.reward)
+        except ValueError:
+            raise HTTPException(404, "Unknown reward")
+        except LookupError as brakuje:
+            raise HTTPException(400, f"You need {brakuje} more points for this reward")
+        session.commit()
+        telemetry.track("loyalty_redeem", trader.id, reward=payload.reward, pct=kod.pct)
+        return {"code": loyalty.code_dict(kod), **_loyalty_payload(session, tr)}
     finally:
         session.close()
 
@@ -2249,6 +2429,7 @@ def admin_payouts_all():
                 "status": "paid" if p.paid else "pending",
                 "reject_reason": None, "note": p.note,
                 "cert_url": f"/payout/{p.cert_token}" if p.cert_token else None,
+                "show_on_lp": bool(getattr(p, "show_on_lp", True)),
             })
 
         reqs = (session.query(PayoutRequest)
@@ -2359,6 +2540,17 @@ class IssuePayoutIn(BaseModel):
     method: str = "bank"
     note: str | None = None
     reset_balance: bool = True        # jak przy zatwierdzeniu wniosku: zysk wypłacony
+    # Czy wpis pokazuje się na pasie na landingu. Dokument, QR i weryfikacja
+    # powstają NIEZALEŻNIE od tego — to decyzja o publikacji, nie o certyfikacie.
+    show_on_lp: bool = True
+
+
+class CertLpIn(BaseModel):
+    show_on_lp: bool = True
+
+
+class LpVisibilityIn(BaseModel):
+    show: bool
 
 
 def _payout_dict(p: Payout, acc: Account | None = None) -> dict:
@@ -2367,6 +2559,7 @@ def _payout_dict(p: Payout, acc: Account | None = None) -> dict:
             "trader_share": round(p.trader_share, 2), "paid": p.paid,
             "method": p.method, "note": p.note, "cert_token": p.cert_token,
             "cert_url": f"/payout/{p.cert_token}" if p.cert_token else None,
+            "show_on_lp": bool(getattr(p, "show_on_lp", True)),
             "account": acc.login if acc else None}
 
 
@@ -2397,6 +2590,7 @@ def admin_issue_payout(request: Request, account_id: int, payload: IssuePayoutIn
         p = Payout(account_id=acc.id, profit_amount=profit, trader_share=share, paid=True,
                    method=payload.method, note=(payload.note or None),
                    cert_token=secrets.token_urlsafe(16)[:32],
+                   show_on_lp=bool(payload.show_on_lp),
                    balance_reset=bool(payload.reset_balance and profit > 0))
         session.add(p)
 
@@ -2442,19 +2636,49 @@ def admin_account_payouts(account_id: int):
 
 
 @app.post("/api/admin/payouts/{payout_id}/certificate", dependencies=[Depends(auth.require_admin)])
-def admin_payout_certificate(payout_id: int):
-    """Dorabia certyfikat do wypłaty, która powstała wcześniej (np. z wniosku)."""
+def admin_payout_certificate(payout_id: int, payload: CertLpIn | None = None):
+    """Dorabia certyfikat do wypłaty, która powstała wcześniej (np. z wniosku).
+
+    `show_on_lp` decyduje WYŁĄCZNIE o pasie na landingu. Dokument, jego QR i
+    weryfikacja pod /payout/{token} powstają zawsze — trader dostaje ten sam
+    certyfikat niezależnie od tego, czy zgodził się na publikację.
+    """
     session = SessionLocal()
     try:
         p = session.get(Payout, payout_id)
         if not p:
             raise HTTPException(404, "Payout not found")
+        widoczny = True if payload is None else bool(payload.show_on_lp)
         if not p.cert_token:
             p.cert_token = secrets.token_urlsafe(16)[:32]
-            session.commit()
-            # Pas na landingu ma minutowy cache — bez tego świeży certyfikat
-            # pojawiłby się dopiero przy następnym odświeżeniu.
-            _PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
+        p.show_on_lp = widoczny
+        session.commit()
+        # Pas na landingu ma minutowy cache — bez tego świeży certyfikat
+        # pojawiłby się dopiero przy następnym odświeżeniu.
+        _PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
+        return _payout_dict(p, session.get(Account, p.account_id))
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/payouts/{payout_id}/lp", dependencies=[Depends(auth.require_admin)])
+def admin_payout_lp_visibility(payout_id: int, payload: LpVisibilityIn):
+    """Wpuszcza wypłatę na pas na landingu albo ją z niego zdejmuje.
+
+    Do tej pory jedynym sposobem zdjęcia wpisu ze strony było wycofanie
+    certyfikatu, które zabijało też publiczny link tradera — czyli za decyzję
+    „nie chcę tego na stronie" płacił dokumentem.
+    """
+    session = SessionLocal()
+    try:
+        p = session.get(Payout, payout_id)
+        if not p:
+            raise HTTPException(404, "Payout not found")
+        if not p.cert_token and payload.show:
+            raise HTTPException(400, "Issue the certificate first")
+        p.show_on_lp = bool(payload.show)
+        session.commit()
+        _PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
         return _payout_dict(p, session.get(Account, p.account_id))
     finally:
         session.close()
@@ -3684,6 +3908,11 @@ def leaderboard():
     Ranking liczony WPROST z bieżącego equity (balance) kont FUNDED — bez
     doliczania wypłaconych zysków i bez kont w ewaluacji. Po wypłacie trader
     świadomie schodzi w rankingu: pokazujemy stan konta, nie życiorys.
+
+    Wchodzą wyłącznie konta z zyskiem OSTRO powyżej zera. Ranking ma pokazywać
+    tych, którzy zarabiają — konto na zerze albo pod kreską nie jest wynikiem,
+    a przy pustej tablicy wypełniało listę zerami. Próg liczony na wartości
+    zaokrąglonej, więc nic, co wyświetlałoby się jako „0.00%", nie przechodzi.
     """
     session = SessionLocal()
     try:
@@ -3698,6 +3927,8 @@ def leaderboard():
         for a in accs:
             equity_now = round(a.balance, 2)
             profit_pct = round((equity_now - a.initial_balance) / a.initial_balance * 100, 2)
+            if profit_pct <= 0:
+                continue
             tr = traderzy.get(a.trader_id)
             country = tr.kyc_country if (tr and tr.kyc_status == "approved" and tr.kyc_country) else None
             rows.append({"trader": _mask_name(a.trader_name or (tr.full_name if tr else "")),
@@ -4212,7 +4443,8 @@ def public_recent_certificates():
         pays = (session.query(Payout, Account, Trader)
                 .join(Account, Payout.account_id == Account.id)
                 .join(Trader, Account.trader_id == Trader.id)
-                .filter(Payout.cert_token != None, Payout.paid == True)  # noqa: E711,E712
+                .filter(Payout.cert_token != None, Payout.paid == True,   # noqa: E711,E712
+                        Payout.show_on_lp == True)                        # noqa: E712
                 .order_by(Payout.ts.desc()).limit(24).all())
         for pay, acc, tr in pays:
             out.append({
@@ -4348,6 +4580,21 @@ def affiliate_page(request: Request):
 def install_page(request: Request):
     """Instrukcja instalacji PWA (iOS: Dodaj do ekranu, Android: beforeinstallprompt)."""
     return _page(request, "install.html")
+
+
+@app.get("/objectives")
+def objectives_page(request: Request):
+    """Tabela zasad, wcześniej sekcja na landingu.
+
+    Katalog wstrzyknięty w HTML tak samo jak na `/`: tabelę wypełnia
+    `renderObjectives()` z site.js, więc liczby nie mogą rozjechać się z tym,
+    co sprzedaje sklep.
+    """
+    session = SessionLocal()
+    try:
+        return _page(request, "objectives.html", products=_products_payload(session))
+    finally:
+        session.close()
 
 
 @app.get("/terms")

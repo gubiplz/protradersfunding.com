@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text
+from sqlalchemy import (Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text,
+                        UniqueConstraint)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -33,6 +34,10 @@ class Trader(Base):
     first_name: Mapped[str | None] = mapped_column(String(60), nullable=True)
     last_name: Mapped[str | None] = mapped_column(String(60), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # ISO2 kraju wybranego przy numerze. Dopuszczalna długość numeru zależy od
+    # kraju, a z samego „+1" nie da się odtworzyć, czy to USA, Kanada, czy
+    # któraś z wysp karaibskich — dlatego wybór trzymamy osobno.
+    phone_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
 
     # program afiliacyjny / referral
     referral_code: Mapped[str | None] = mapped_column(String(16), unique=True, index=True, nullable=True)
@@ -90,6 +95,10 @@ class Trader(Base):
     checkin_streak: Mapped[int] = mapped_column(Integer, default=0)
     checkin_last: Mapped[str | None] = mapped_column(String(10), nullable=True)     # UTC "YYYY-MM-DD"
     bonus_points: Mapped[int] = mapped_column(Integer, default=0)
+    # Punkty juz wymienione na kody rabatowe. Saldo do wydania to
+    # (wydane na challenge'e + bonus_points) - points_spent. TIER liczy sie z
+    # sumy DOZYWOTNIEJ, wiec skorzystanie z nagrody nie cofa nikogo ze statusu.
+    points_spent: Mapped[int] = mapped_column(Integer, default=0)
     reveal_last: Mapped[str | None] = mapped_column(String(10), nullable=True)
     reveal_payload: Mapped[str | None] = mapped_column(String(240), nullable=True)  # JSON dzisiejszego wyniku
     streak_freezes: Mapped[int] = mapped_column(Integer, default=1)                 # ratuje serię po 1 dniu przerwy
@@ -194,6 +203,57 @@ class CreditLedger(Base):
 
 
 # --------------------------------------------------------------------------- #
+#  RewardCode — kod rabatowy KUPIONY za punkty lojalnosciowe                  #
+# --------------------------------------------------------------------------- #
+class RewardCode(Base):
+    """Osobisty kod jednorazowy, wymieniony przez tradera za punkty.
+
+    Osobny byt, bo zadna z istniejacych rzeczy tego nie unosi: `catalog.COUPONS`
+    to zaszyty slownik kodow GLOBALNYCH (kazdy zna, kazdy uzyje, bez konca), a
+    `Trader.reveal_payload` trzyma JEDEN slot nadpisywany kazdego dnia — kod
+    kupiony za punkty zginalby traderowi przy nastepnym losowaniu.
+
+    Jednorazowosc pilnuje `used_at`: kod schodzi dopiero przy DOMKNIECIU
+    platnosci (provisioning), tak samo jak kredyty sklepowe, wiec porzucony
+    checkout go nie pali.
+    """
+    __tablename__ = "reward_codes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    trader_id: Mapped[int] = mapped_column(ForeignKey("traders.id"), index=True)
+    code: Mapped[str] = mapped_column(String(24), unique=True, index=True)
+    pct: Mapped[float] = mapped_column(Float)              # procent znizki
+    points_spent: Mapped[int] = mapped_column(Integer)     # ile punktow kosztowal
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"), nullable=True)
+
+
+# --------------------------------------------------------------------------- #
+#  AchievementReward — nagroda za prog odznak (3/8, 5/8, 8/8)                 #
+# --------------------------------------------------------------------------- #
+class AchievementReward(Base):
+    """Slad odebrania nagrody za prog odznak. Jeden wiersz = jeden odbior.
+
+    Osobna tabela, a nie flaga na traderze, bo jednorazowosc ma pilnowac BAZA:
+    `UniqueConstraint(trader_id, tier)` zamyka wyscig dwoch rownoleglych klikniec
+    „Claim" mocniej niz jakikolwiek `if` w kodzie. Sama nagroda mieszka tam,
+    gdzie jej miejsce — kod rabatowy w `reward_codes`, przyznane konto w
+    `accounts` — a tutaj zostaje tylko wskaznik.
+    """
+    __tablename__ = "achievement_rewards"
+    __table_args__ = (UniqueConstraint("trader_id", "tier", name="uq_ach_reward_trader_tier"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    trader_id: Mapped[int] = mapped_column(ForeignKey("traders.id"), index=True)
+    tier: Mapped[int] = mapped_column(Integer)             # ile odznak: 3, 5, 8
+    code: Mapped[str | None] = mapped_column(String(24), nullable=True)      # nagroda = kod rabatowy
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"), nullable=True)  # nagroda = konto
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+# --------------------------------------------------------------------------- #
 #  Account — konto challenge / funded                                         #
 # --------------------------------------------------------------------------- #
 class Account(Base):
@@ -274,6 +334,11 @@ class Account(Base):
     trading_days_count: Mapped[int] = mapped_column(Integer, default=0)
     last_counted_trading_day: Mapped[str] = mapped_column(String(16), default="")
     breach_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Ile razy konto poszlo o szczebel w gore planem skalowania. Po skalowaniu
+    # rozmiar znow rowna sie rozmiarowi planu z cennika, wiec porownanie
+    # `initial_balance > Product.account_size` przestalo odrozniac konto
+    # wyskalowane od swiezo kupionego — odznaka potrzebuje wlasnego licznika.
+    scale_count: Mapped[int] = mapped_column(Integer, default=0)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
@@ -376,6 +441,11 @@ class Payout(Base):
     # equity musi wiedziec, w ktorym miejscu balans spadl — inaczej ostatni punkt
     # wykresu nie zgadzalby sie z realnym saldem konta.
     balance_reset: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Czy wpis pokazuje sie na pasie certyfikatow na landingu. Dotyczy WYLACZNIE
+    # publikacji: dokument, jego QR i weryfikacja pod /payout/{token} powstaja
+    # zawsze. Wczesniej jedynym sposobem zdjecia wyplaty ze strony bylo cofniecie
+    # certyfikatu, ktore zabijalo tez publiczny link tradera.
+    show_on_lp: Mapped[bool] = mapped_column(Boolean, default=True)
 
     account: Mapped[Account] = relationship(back_populates="payouts")
 

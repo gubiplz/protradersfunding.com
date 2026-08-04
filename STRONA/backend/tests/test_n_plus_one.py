@@ -56,11 +56,13 @@ def _dosyp(ile: int) -> None:
                     referral_code=f"NP{i}{s.query(Trader).count()}")
         s.add(tr)
         s.flush()
-        # Konta musza byc `funded` (tylko takie liczy ranking), ale POD KRESKA:
-        # cala suita dzieli jedna baze, a ranking oddaje 20 najlepszych — konta na
-        # plusie wypchnelyby z niego wiersze, na ktorych opieraja sie inne testy.
+        # Konta musza byc `funded` i NA PLUSIE, bo ranking pomija reszte — na
+        # stratnych petla by sie nie wykonala i N+1 byloby tu niewidoczne.
+        # Zysk symboliczny (+0,01%): cala suita dzieli jedna baze, a ranking
+        # oddaje 20 najlepszych, wiec te konta musza siedziec na jego koncu i
+        # nie wypychac wierszy, na ktorych opieraja sie inne testy.
         acc = Account(trader_id=tr.id, login=f"9{tr.id}", product_key="eval-10k",
-                      initial_balance=10000, balance=9000, equity=9000,
+                      initial_balance=10000, balance=10001, equity=10001,
                       status="funded", phase="funded")
         s.add(acc)
         s.flush()
@@ -78,7 +80,7 @@ def _dosyp(ile: int) -> None:
         # `session.get` w petli trafialby w identity map SQLAlchemy i N+1 w widoku
         # Payouts byloby dla testu niewidoczne.
         drugie = Account(trader_id=tr.id, login=f"8{tr.id}", product_key="eval-10k",
-                         initial_balance=10000, balance=9000, equity=9000,
+                         initial_balance=10000, balance=10001, equity=10001,
                          status="funded", phase="funded")
         s.add(drugie)
         s.flush()

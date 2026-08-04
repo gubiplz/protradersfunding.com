@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Trading Objectives — {{ site_name }}{% endblock %}
+{% block description %}Every rule we enforce on a {{ site_name }} account: profit targets, daily and overall loss limits, minimum trading days, leverage, profit split and fees. Same numbers for 2-Step Evaluation and Instant Funding, side by side.{% endblock %}
+{% block og_title %}Trading Objectives — {{ site_name }}{% endblock %}
+{% block og_description %}The rules we publish are the rules we enforce. Every limit, checked automatically by our risk engine.{% endblock %}
+
+{% block content %}
+<section class="page-head"><div class="wrap">
+  <span class="pill">Trading objectives</span>
+  <h1>The rules we publish are the rules we enforce</h1>
+  <p class="lede">Every limit below is checked automatically by our risk engine, the same way, for
+    everyone, on every account, including the cap on total open volume. No fine print, no hidden
+    consistency traps.</p>
+</div></section>
+
+<section class="sec sec-tight">
+  <div class="wrap">
+    <div class="obj-scroll" data-rv>
+      <table class="obj">
+        <thead><tr><th>Objective</th><th>2-Step Evaluation</th><th>Instant Funding</th></tr></thead>
+        <tbody id="objBody"></tbody>
+      </table>
+    </div>
+    <p class="disc" style="margin-top:22px">*All accounts are demo accounts funded with virtual money.
+      Figures describe limits inside the simulation and payouts are performance-based rewards, not
+      profits from real market transactions. The objectives that apply to your account are the ones
+      shown on its plan at the time of purchase. See our <a href="/terms">Terms of Service</a> and
+      <a href="/risk-disclosure">Risk Disclosure</a>.</p>
+    <div class="hero-ctas" style="margin-top:26px">
+      <a class="btn btn-lg" href="/#pricing">Start a Challenge</a>
+      <a class="btn-ghost btn-lg" href="/faq">Read the FAQ</a>
+    </div>
+  </div>
+</section>
+
+{# Same inline catalog as the landing page: renderObjectives() in site.js fills the
+   table from it, so the numbers here can never drift from the ones in the shop. #}
+<script id="pf-products" type="application/json">{{ products|tojson }}</script>
+{% endblock %}
