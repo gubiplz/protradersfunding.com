@@ -43,6 +43,7 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 
 from .config import get_settings
 
@@ -86,6 +87,69 @@ def _urllib_transport(url: str, body: bytes | None,
         return e.code, e.read()
 
 
+def przytnij_do_kwadratu(png: bytes) -> bytes:
+    """Ucina z PNG wszystko poniżej kwadratu. Zwraca oryginał, gdy się nie da.
+
+    Usługi zrzutu mają różne okna, a przy `full_page` wysokość obrazka to WIĘKSZA
+    z dwóch: treści i okna. Przy oknie pionowym pod certyfikatem zostawało czarne
+    pole. Nie da się temu zapobiec parametrami — każdy dostawca nazywa je inaczej
+    i część je ignoruje — więc przycinamy u siebie i przestajemy od nich zależeć.
+
+    Karta ZAWSZE wypełnia szerokość (skaluje ją `zoom` w `certificate.html`)
+    i jest kwadratowa, więc nadmiar może być wyłącznie na dole. To upraszcza
+    rzecz zasadniczo: wystarczy zostawić pierwsze `szerokość` wierszy obrazu.
+
+    Dzięki temu nie dekodujemy pikseli. Filtry PNG odwołują się do wiersza
+    POPRZEDNIEGO, więc obcięcie od dołu nie psuje tych, które zostają — bajty
+    zachowanych wierszy przechodzą bez zmiany.
+    """
+    if not png.startswith(b"\x89PNG\r\n\x1a\n"):
+        return png                      # JPEG albo coś innego — nie ruszamy
+    try:
+        kanaly = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
+        pozycja, ihdr, idat = 8, None, bytearray()
+        while pozycja < len(png):
+            dlugosc = int.from_bytes(png[pozycja:pozycja + 4], "big")
+            typ = png[pozycja + 4:pozycja + 8]
+            dane = png[pozycja + 8:pozycja + 8 + dlugosc]
+            if typ == b"IHDR":
+                ihdr = dane
+            elif typ == b"IDAT":
+                idat += dane
+            elif typ == b"IEND":
+                break
+            pozycja += 12 + dlugosc     # dlugosc + typ + dane + CRC
+
+        if ihdr is None or len(ihdr) < 13:
+            return png
+        szer = int.from_bytes(ihdr[0:4], "big")
+        wys = int.from_bytes(ihdr[4:8], "big")
+        glebia, typ_koloru, interlace = ihdr[8], ihdr[9], ihdr[12]
+        if wys <= szer or interlace != 0 or typ_koloru not in kanaly:
+            return png                  # już kwadrat albo format nie do cięcia
+
+        bity = glebia * kanaly[typ_koloru]
+        bajty_wiersza = 1 + (szer * bity + 7) // 8
+        surowe = zlib.decompress(bytes(idat))
+        if len(surowe) < bajty_wiersza * wys:
+            return png
+        obciete = surowe[:bajty_wiersza * szer]
+
+        nowy_ihdr = ihdr[0:4] + szer.to_bytes(4, "big") + ihdr[8:]
+        return (png[:8]
+                + _chunk(b"IHDR", nowy_ihdr)
+                + _chunk(b"IDAT", zlib.compress(obciete, 6))
+                + _chunk(b"IEND", b""))
+    except Exception as e:
+        print(f"[certshot] nie udało się przyciąć obrazka: {e}")
+        return png
+
+
+def _chunk(typ: bytes, dane: bytes) -> bytes:
+    return (len(dane).to_bytes(4, "big") + typ + dane
+            + zlib.crc32(typ + dane).to_bytes(4, "big"))
+
+
 def _zadanie(cel: str) -> tuple[str, bytes | None, str | None]:
     """Buduje żądanie zgodnie z trybem wynikającym z `SHOT_API_URL`."""
     wzor = settings.shot_api_url
@@ -127,4 +191,6 @@ def render(cel_url: str, *, transport=None) -> bytes | None:
         print(f"[certshot] odpowiedź nie jest obrazkiem: "
               f"{(dane or b'')[:200].decode('utf-8', 'replace')}")
         return None
-    return dane
+    # Nadmiar pod certyfikatem obcinamy SAMI — okno usługi bywa pionowe, a jej
+    # parametry nie sa wspolne dla dostawcow. Patrz `przytnij_do_kwadratu`.
+    return przytnij_do_kwadratu(dane)

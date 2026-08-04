@@ -396,3 +396,46 @@ def test_run_teraz_omija_guard_godziny_i_dnia():
     finally:
         s.close()
     client.post("/api/admin/payout-engine", headers=ADMIN, json={"enabled": False})
+
+
+def _png(szer: int, wys: int) -> bytes:
+    """Najprostszy poprawny PNG (RGBA, bez filtrow) o zadanych wymiarach."""
+    import struct
+    import zlib
+
+    def chunk(typ, dane):
+        return (struct.pack(">I", len(dane)) + typ + dane
+                + struct.pack(">I", zlib.crc32(typ + dane)))
+
+    ihdr = struct.pack(">IIBBBBB", szer, wys, 8, 6, 0, 0, 0)
+    surowe = b"".join(b"\x00" + bytes([i % 256, 0, 0, 255]) * szer for i in range(wys))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", zlib.compress(surowe)) + chunk(b"IEND", b""))
+
+
+def _wymiary(png: bytes) -> tuple[int, int]:
+    return (int.from_bytes(png[16:20], "big"), int.from_bytes(png[20:24], "big"))
+
+
+def test_przycinanie_obrazka_do_kwadratu():
+    """Uslugi zrzutu maja rozne okna: przy pionowym pod certyfikatem zostawalo
+    czarne pole, bo zrzut calej strony ma wysokosc WIEKSZA z dwoch — tresci
+    i okna. Parametrami sie tego nie zalatwi (kazdy dostawca nazywa je inaczej),
+    wiec obcinamy u siebie."""
+    wysoki = _png(40, 100)
+    assert _wymiary(wysoki) == (40, 100)
+    przyciety = certshot.przytnij_do_kwadratu(wysoki)
+    assert _wymiary(przyciety) == (40, 40)
+    # Obrazek MUSI zostac dekodowalny — obcinamy wiersze, nie psujemy strumienia.
+    assert przyciety.startswith(b"\x89PNG\r\n\x1a\n") and przyciety.endswith(b"IEND\xae\x42\x60\x82")
+
+
+def test_przycinanie_nie_rusza_tego_co_juz_dobre():
+    kwadrat = _png(30, 30)
+    assert certshot.przytnij_do_kwadratu(kwadrat) is kwadrat
+    szeroki = _png(60, 20)                       # nadmiar moze byc tylko na dole
+    assert certshot.przytnij_do_kwadratu(szeroki) is szeroki
+    # Nie-PNG (np. JPEG od innej uslugi) przechodzi bez zmian, zamiast wybuchac.
+    jpeg = b"\xff\xd8\xff" + b"cokolwiek"
+    assert certshot.przytnij_do_kwadratu(jpeg) is jpeg
+    assert certshot.przytnij_do_kwadratu(b"to nie jest obrazek") == b"to nie jest obrazek"

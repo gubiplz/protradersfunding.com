@@ -151,14 +151,31 @@ const UNDO_ICO='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strok
   +'<path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>';
 const _czekajace=new Set();
 
-function withUndo(opis,wykonaj){
+/* Ostatnio klikniety przycisk — stad bierzemy WIERSZ do schowania. Faza
+   przechwytywania, zeby zadzialalo tez dla przyciskow z inline onclick. */
+let _ostatniPrzycisk=null;
+addEventListener('click',e=>{
+  const b=e.target&&e.target.closest&&e.target.closest('button');
+  if(b)_ostatniPrzycisk=b;
+},true);
+
+function withUndo(opis,wykonaj,wiersz){
+  /* Wiersz znika OD RAZU, tak jak przy zwyklym usuwaniu — zadanie na serwer
+     idzie dopiero po 5 s. Cofniecie w tym oknie przywraca wiersz i nic nie
+     wysyla, wiec przywrocenie jest zawsze wierne: nie odtwarzamy rekordu,
+     tylko go nie kasujemy. Odtwarzanie bylo alternatywa gorsza — certyfikat ma
+     numer wdrukowany w kod QR, ktory klient ma juz u siebie, wiec wiersz
+     odtworzony "taki sam" mialby inny numer. */
+  const schowaj=wiersz&&wiersz.style?wiersz.style.display:null;
+  if(wiersz&&wiersz.style)wiersz.style.display='none';
+
   const t=document.createElement('div');
   t.className='toast undo';
   t.innerHTML='<span class="undo-txt"></span>'
-    +`<button class="undo-btn" type="button" aria-label="Undo">${UNDO_ICO}Undo</button>`;
+    +`<button class="undo-btn" type="button" aria-label="Restore">${UNDO_ICO}Undo</button>`;
   const txt=t.querySelector('.undo-txt');
   let zostalo=Math.round(UNDO_MS/1000);
-  const rysuj=()=>{txt.textContent=`${opis} — in ${zostalo}s`};
+  const rysuj=()=>{txt.textContent=`${opis} — undo within ${zostalo}s`};
   rysuj();
   $('toasts').appendChild(t);
 
@@ -166,17 +183,21 @@ function withUndo(opis,wykonaj){
   const sprzatnij=()=>{clearTimeout(zadanie.zegar);clearInterval(zadanie.tik);
     _czekajace.delete(zadanie);t.remove()};
   zadanie.anuluj=sprzatnij;
+  zadanie.domknij=()=>{sprzatnij();wykonaj()};
   zadanie.tik=setInterval(()=>{zostalo--;if(zostalo>0)rysuj()},1000);
-  zadanie.zegar=setTimeout(()=>{sprzatnij();wykonaj()},UNDO_MS);
-  t.querySelector('.undo-btn').onclick=()=>{sprzatnij();
-    toast('Undone — nothing was deleted.','ok',3500)};
+  zadanie.zegar=setTimeout(zadanie.domknij,UNDO_MS);
+  t.querySelector('.undo-btn').onclick=()=>{
+    sprzatnij();
+    if(wiersz&&wiersz.style)wiersz.style.display=schowaj||'';
+    toast('Restored — nothing was deleted.','ok',3500);
+  };
   _czekajace.add(zadanie);
 }
 
-/* Wyjscie ze strony ANULUJE to, co czeka. Odpalenie zadania w tym momencie
-   bywa przerwane w polowie, a "nic sie nie stalo" to jedyny stan, ktory przy
-   nieodwracalnym usuwaniu zawsze da sie bezpiecznie powtorzyc. */
-addEventListener('beforeunload',()=>{[..._czekajace].forEach(z=>z.anuluj())});
+/* Wyjscie ze strony DOMYKA to, co czeka: admin widzial, ze wiersz zniknal, wiec
+   zamkniecie karty nie moze go po cichu przywrocic. `keepalive` na zadaniu
+   pozwala mu doleciec juz po zamknieciu strony. */
+addEventListener('beforeunload',()=>{[..._czekajace].forEach(z=>z.domknij())});
 
 function closeOver(){$('over').classList.remove('open')}
 function openOver(title,html){$('o-title').textContent=title;$('o-body').innerHTML=html;$('over').classList.add('open')}
@@ -1530,12 +1551,18 @@ async function xdel(url,question,after,okMsg){
   if(!await askConfirm({title:tytul.trim(),
     body:esc(reszta.join('\n').trim()).replace(/\n/g,'<br>'),
     ok:'Delete',danger:true}))return;
+  /* Wiersz znika od razu; zadanie leci po oknie na cofniecie. Szukamy go po
+     ostatnio klknietym przycisku, bo `xdel` wolaja inline'owe onclicki. */
+  const wiersz=_ostatniPrzycisk&&_ostatniPrzycisk.closest('tr');
   withUndo(tytul.trim().replace(/\?+$/,''),async()=>{
-    try{const r=await api(url,{method:'DELETE'});
+    try{const r=await api(url,{method:'DELETE',keepalive:true});
       toast(typeof okMsg==='function'?okMsg(r):(okMsg||'Deleted.'),'ok');
       if(typeof after==='function')after(r);
-    }catch(e){toast('Error: '+e.message,'err')}
-  });
+    }catch(e){
+      toast('Error: '+e.message,'err');
+      if(wiersz&&wiersz.style)wiersz.style.display='';   // nie udalo sie — wroc
+    }
+  },wiersz);
 }
 
 /* Removes the whole row from the ledger — a mistyped payout, a duplicate, an
