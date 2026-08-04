@@ -48,6 +48,7 @@ def init_db() -> None:
     from . import models  # noqa: F401  (rejestracja tabel)
     Base.metadata.create_all(bind=engine)
     _add_missing_columns()
+    _add_missing_indexes()
     _relax_not_null()
 
 
@@ -167,6 +168,19 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
 }
 
 
+# Indeksy dolozone po tym, jak ktos juz mial baze. Kazdy ma za soba zmierzony
+# pelny skan tabeli (EXPLAIN QUERY PLAN: "SCAN"), a nie przeczucie:
+#   traders.referred_by  — /api/auth/me liczy poleconych i prowizje, dwa skany
+#                          tabeli traderow przy kazdym wejsciu do portalu,
+#   orders.account_id    — zamowienia konta czytane w petli po kontach.
+# Kolumny statusowe (orders.status, accounts.status, traders.kyc_status) tu NIE
+# trafiaja: maja po 3-4 rozne wartosci, wiec planista i tak woli skan.
+_NEW_INDEXES: list[tuple[str, str]] = [
+    ("traders", "referred_by"),
+    ("orders", "account_id"),
+]
+
+
 # Kolumny, ktore PRZESTALY byc wymagane. `create_all` nie rusza istniejacych
 # tabel, wiec stara baza dalej ma na nich NOT NULL i INSERT bez tego pola leci
 # bledem — dokladnie tak wysypalo sie dodawanie wpisu do puli MT5 po tym, jak
@@ -193,6 +207,30 @@ def _relax_not_null() -> None:
                 if nullable.get(name) is False:
                     conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {name} DROP NOT NULL"))
                     print(f"[db] {table}.{name} nie jest już wymagane")
+
+
+def _add_missing_indexes() -> None:
+    """`create_all` NIE dodaje indeksow do tabeli, ktora juz istnieje.
+
+    Doklejenie `index=True` w modelu zalatwia sprawe tylko dla swiezych baz —
+    produkcja stoi od miesiecy, wiec bez tego jedyna baza, na ktorej naprawde
+    zalezy, nigdy by tych indeksow nie zobaczyla. Nazwy sa te same, co
+    generowane przez SQLAlchemy, wiec swieza baza dostaje je z `create_all`
+    i to `IF NOT EXISTS` po prostu nic nie robi.
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    for table, column in _NEW_INDEXES:
+        if table not in existing_tables:
+            continue
+        nazwa = f"ix_{table}_{column}"
+        if any(i["name"] == nazwa for i in inspector.get_indexes(table)):
+            continue
+        with engine.begin() as conn:
+            conn.execute(text(f"CREATE INDEX IF NOT EXISTS {nazwa} ON {table} ({column})"))
+        print(f"[db] dodano indeks {nazwa}")
 
 
 def _add_missing_columns() -> None:

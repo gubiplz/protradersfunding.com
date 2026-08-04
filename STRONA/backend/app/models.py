@@ -36,7 +36,9 @@ class Trader(Base):
 
     # program afiliacyjny / referral
     referral_code: Mapped[str | None] = mapped_column(String(16), unique=True, index=True, nullable=True)
-    referred_by: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Indeks: /api/auth/me liczy poleconych i prowizje przy KAZDYM wejsciu do
+    # portalu, a bez niego oba zapytania skanuja cala tabele traderow.
+    referred_by: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
 
     # KYC
     kyc_status: Mapped[str] = mapped_column(String(16), default="none")  # none|pending|approved|rejected
@@ -149,7 +151,9 @@ class Order(Base):
     flag: Mapped[str | None] = mapped_column(String(24), nullable=True)
     # Powod recznego oznaczenia jako failed — widoczny w panelu przy statusie.
     fail_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"), nullable=True)
+    # Indeks: zamowienia konta czyta sie w petli po kontach (lista kont,
+    # ranking, faktury) — bez niego kazdy obrot skanuje cala tabele zamowien.
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

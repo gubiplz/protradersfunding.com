@@ -16,8 +16,10 @@ import tempfile
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{tempfile.NamedTemporaryFile(suffix='.db', delete=False).name}")
 os.environ.setdefault("AUTO_SEED", "false")
 
+from sqlalchemy import inspect, text  # noqa: E402
+
 from app import main as main_mod  # noqa: E402
-from app.db import SessionLocal, init_db  # noqa: E402
+from app.db import SessionLocal, engine, init_db  # noqa: E402
 from app.models import AppSetting  # noqa: E402
 
 init_db()   # odcisk ladujemy do `app_settings`, wiec tabela musi istniec
@@ -75,3 +77,29 @@ def test_bez_odcisku_deployu_pelna_sciezka_idzie_zawsze(monkeypatch):
     zapisany = s.query(AppSetting).filter(AppSetting.key == "schema_fingerprint").first()
     s.close()
     assert zapisany is None, "bez odcisku nie ma czego zapisywac"
+
+
+def test_indeksy_dokladaja_sie_do_istniejacej_tabeli():
+    """`create_all` pomija tabele, ktora juz istnieje — razem z jej indeksami.
+
+    Sam `index=True` w modelu obsluguje wiec tylko swieze bazy. Produkcja stoi
+    od miesiecy, wiec bez osobnej migracji jedyna baza, na ktorej zalezy, nigdy
+    by tych indeksow nie zobaczyla. Test kasuje indeks (udajac stara baze) i
+    sprawdza, ze start aplikacji go odtwarza — i ze drugi przebieg nie wybucha.
+    """
+    from app.db import _add_missing_indexes, _NEW_INDEXES
+
+    for tabela, kolumna in _NEW_INDEXES:
+        nazwa = f"ix_{tabela}_{kolumna}"
+        with engine.begin() as conn:
+            conn.execute(text(f"DROP INDEX IF EXISTS {nazwa}"))
+        assert nazwa not in [i["name"] for i in inspect(engine).get_indexes(tabela)]
+
+    init_db()
+
+    for tabela, kolumna in _NEW_INDEXES:
+        nazwa = f"ix_{tabela}_{kolumna}"
+        assert nazwa in [i["name"] for i in inspect(engine).get_indexes(tabela)], \
+            f"{nazwa} nie wrocil — stara baza zostalaby ze skanem calej tabeli"
+
+    _add_missing_indexes()   # idempotencja: kazdy zimny start to powtarza
