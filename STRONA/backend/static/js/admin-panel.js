@@ -352,9 +352,47 @@ const VIEWS={
  },
 
  async settings(){
-  const s=await api('/api/stats');
+  const [s,pb]=await Promise.all([api('/api/stats'),api('/api/admin/payout-engine')]);
+  const brakuje=[!pb.telegram_ready?'Telegram channel':null,!pb.renderer_ready?'certificate renderer':null].filter(Boolean);
   $('view').innerHTML=`
     <div class="card-cols">
+    <div class="sec-card" style="max-width:560px"><h3>Payout BOT</h3>
+      <div class="chip-row" style="margin-bottom:12px">
+        <span class="status ${pb.enabled?'funded':'pending'}"><span class="dot"></span>${pb.enabled?'running':'off'}</span>
+        <span class="chip">posts at <b>${String(pb.hour).padStart(2,'0')}:00</b></span>
+        <span class="chip">on landing <b>${pb.lp_pct}%</b></span>
+        <span class="chip">last run <b>${esc(pb.last_day||'never')}</b></span>
+      </div>
+      ${brakuje.length?`<div class="warn-box" style="margin:0 0 12px">
+        <div><b>Not configured yet: ${brakuje.join(' and ')}</b>
+        The payout and its certificate are still created, but nothing is published.
+        Set <span class="mono">TELEGRAM_BOT_TOKEN</span>, <span class="mono">TELEGRAM_CHAT_ID</span>
+        and <span class="mono">SHOT_API_URL</span> in the environment.</div></div>`:''}
+      <div class="pool-form">
+        <div><label class="muted" style="font-size:12px">Post at (server hour)</label>
+          <input id="pb-hour" class="inp" type="number" min="0" max="23" step="1" value="${pb.hour}"></div>
+        <div><label class="muted" style="font-size:12px">Chance of landing page %</label>
+          <input id="pb-lp" class="inp" type="number" min="0" max="100" step="1" value="${pb.lp_pct}"></div>
+        <div><label class="muted" style="font-size:12px">Profit min %</label>
+          <input id="pb-min" class="inp" type="number" min="0.5" max="40" step="0.1" value="${pb.gross_min_pct}"></div>
+        <div><label class="muted" style="font-size:12px">Profit max %</label>
+          <input id="pb-max" class="inp" type="number" min="0.5" max="40" step="0.1" value="${pb.gross_max_pct}"></div>
+      </div>
+      <div style="margin-bottom:12px"><label class="muted" style="font-size:12px">Account sizes</label>
+        <input id="pb-sizes" class="inp" value="${pb.sizes.map(n=>n.toFixed(0)).join(',')}" placeholder="50000,100000,200000"></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn-p" onclick="savePayoutBot()">Save settings</button>
+        <button class="btn-o" onclick="togglePayoutBot(${pb.enabled?'false':'true'})">${pb.enabled?'Turn off':'Turn on'}</button>
+        <button class="btn-o" onclick="runPayoutBot()">Run once now</button>
+      </div>
+      <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
+        Creates <b>one payout a day</b> with today's date and a funded archive account behind it.
+        It rides the same cron as the risk engine, so with no traffic on the site the run can slip
+        to the next scheduled tick. <b>Every payout gets a public certificate</b> and is posted to
+        the channel; only the share above lands on the certificate strip on the landing page, so it
+        does not fill up with the same entries.
+        <b>Run once now</b> replaces today's automatic run rather than adding to it.</p></div>
+
     <div class="sec-card" style="max-width:560px"><h3>Admin access</h3>
       <p class="muted" style="font-size:13px;margin:6px 0 12px">You are signed in with an administrator account. Access is granted by the <span class="mono">is_admin</span> flag on the account, not by a shared token.</p>
       <div class="kv"><span>Signed in as</span><b>${esc(ME?.email||'—')}</b></div>
@@ -1274,6 +1312,44 @@ async function genSim(){
     go('pool');
   }catch(e){toast('Error: '+e.message,'err')}
 }
+/* ---------- Payout BOT ---------- */
+async function savePayoutBot(){
+  const body={
+    hour:parseInt($('pb-hour').value,10),
+    lp_pct:parseFloat($('pb-lp').value),
+    gross_min_pct:parseFloat($('pb-min').value),
+    gross_max_pct:parseFloat($('pb-max').value),
+    sizes:($('pb-sizes').value||'').split(',').map(x=>parseFloat(x.trim())).filter(x=>x>0),
+  };
+  if(Object.values(body).some(v=>typeof v==='number'&&isNaN(v))){
+    toast('Fill every field with a number.','err');return}
+  try{await api('/api/admin/payout-engine',{method:'POST',body:JSON.stringify(body)});
+    toast('Payout BOT settings saved.','ok'); go('settings');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function togglePayoutBot(on){
+  try{await api('/api/admin/payout-engine',{method:'POST',body:JSON.stringify({enabled:on})});
+    toast(on?'Payout BOT is on. The next run happens at the hour you set.'
+            :'Payout BOT is off. No new payouts are generated.','ok');
+    go('settings');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function runPayoutBot(){
+  /* Ten przebieg ZASTEPUJE dzisiejszy automatyczny i od razu publikuje na kanale,
+     wiec admin musi wiedziec, na co klika — stad dialog, a nie samo klikniecie. */
+  if(!await askConfirm({title:'Run the Payout BOT now?',
+    body:'It creates one payout dated today, issues its public certificate and posts it to the '
+      +'Telegram channel straight away. <b>This replaces today\'s scheduled run.</b>',
+    ok:'Run it now'}))return;
+  try{const r=await api('/api/admin/payout-engine/run',{method:'POST'});
+    if(!r.created){toast('Nothing was created: '+(r.skipped||r.error||'unknown reason'),'err',8000)}
+    else toast(`Payout created: ${r.trader} · $${fmt(r.amount_usd)}`
+      +(r.posted?(r.photo?' · posted with the certificate image.':' · posted as text only.')
+                :' · not posted: '+(r.reason||'channel off')),'ok',9000);
+    go('settings');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+
 async function setSimFallback(on){
   try{await api('/api/admin/pool/sim-fallback',{method:'POST',body:JSON.stringify({enabled:on})});
     toast(on?'Auto-provisioning of simulated credentials is ON.':'Auto-provisioning turned off.','ok');

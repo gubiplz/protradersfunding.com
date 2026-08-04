@@ -27,6 +27,13 @@
   background:radial-gradient(70% 55% at 50% 0%,#0d1a3a 0%,var(--k-tlo) 72%);
 }
 
+/* Sama karta, bez przyciskow i stopki (`/payout/{token}?bare=1`). Widok dla
+   zewnetrznej przegladarki robiacej zrzut na Telegrama: strona ma dokladnie
+   wysokosc karty, wiec ZWYKLY zrzut calej strony jest juz gotowa grafika i nie
+   trzeba liczyc na to, ze dana usluga umie kadrowac po selektorze. */
+.cert-bare{min-height:0;justify-content:flex-start;gap:0;padding:20px}
+.cert-bare .noprint{display:none!important}
+
 /* Frame: a bright glowing edge — it is what reads "premium" on the dark bg */
 .cert-card{
   container-type:inline-size;
