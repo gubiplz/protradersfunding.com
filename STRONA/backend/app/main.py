@@ -443,6 +443,22 @@ def _product_dict(p: Product) -> dict:
             "max_lots": getattr(p, "max_lots", 0.0) or 0.0}
 
 
+def _maile_traderow(session, trader_ids) -> dict[int, str]:
+    """Maile wielu traderów jednym zapytaniem — listy w panelu pokazują je przy
+    każdym wierszu, a `session.get` w pętli to tyle round-tripów, ile wierszy."""
+    ids = {i for i in trader_ids if i}
+    if not ids:
+        return {}
+    return dict(session.query(Trader.id, Trader.email).filter(Trader.id.in_(ids)).all())
+
+
+def _konta_po_id(session, account_ids) -> dict[int, Account]:
+    ids = {i for i in account_ids if i}
+    if not ids:
+        return {}
+    return {a.id: a for a in session.query(Account).filter(Account.id.in_(ids)).all()}
+
+
 # --------------------------------------------------------------------------- #
 #  AUTH / onboarding                                                          #
 # --------------------------------------------------------------------------- #
@@ -1010,6 +1026,7 @@ def my_orders(trader: Trader = Depends(auth.current_trader)):
     try:
         orders = session.query(Order).filter(Order.trader_id == trader.id).order_by(Order.id.desc()).all()
         produkty = {p.key: p for p in session.query(Product).all()}
+        konta = _konta_po_id(session, (o.account_id for o in orders))
         out = []
         for o in orders:
             prod = produkty.get(o.product_key)
@@ -1029,7 +1046,7 @@ def my_orders(trader: Trader = Depends(auth.current_trader)):
                    "bogo_paid_price": oplacony.price_usd if oplacony else None,
                    "bogo_paid_size": oplacony.account_size if oplacony else None}
             # Poświadczenia MT5 kupionego konta — trader widzi je też przy zamówieniu.
-            acc = session.get(Account, o.account_id) if o.account_id else None
+            acc = konta.get(o.account_id) if o.account_id else None
             if acc and acc.trader_id == trader.id:
                 row["account"] = {
                     "status": acc.status,
@@ -1644,9 +1661,21 @@ class AdminTicketReplyIn(BaseModel):
     close: bool = False
 
 
-def _ticket_dict(session, t: SupportTicket, with_thread: bool = False) -> dict:
-    msgs = (session.query(TicketMessage).filter(TicketMessage.ticket_id == t.id)
-            .order_by(TicketMessage.id).all())
+def _wiadomosci_biletow(session, ticket_ids) -> dict[int, list[TicketMessage]]:
+    """Wiadomości wielu biletów jednym zapytaniem — do list, nie do pojedynczego wątku."""
+    if not ticket_ids:
+        return {}
+    out: dict[int, list[TicketMessage]] = {i: [] for i in ticket_ids}
+    for m in (session.query(TicketMessage).filter(TicketMessage.ticket_id.in_(ticket_ids))
+              .order_by(TicketMessage.id).all()):
+        out[m.ticket_id].append(m)
+    return out
+
+
+def _ticket_dict(session, t: SupportTicket, with_thread: bool = False, msgs=None) -> dict:
+    if msgs is None:
+        msgs = (session.query(TicketMessage).filter(TicketMessage.ticket_id == t.id)
+                .order_by(TicketMessage.id).all())
     d = {"id": t.id, "subject": t.subject, "status": t.status,
          "created_at": t.created_at.isoformat(),
          "last_ts": msgs[-1].ts.isoformat() if msgs else t.created_at.isoformat(),
@@ -1680,7 +1709,8 @@ def ticket_list(trader: Trader = Depends(auth.current_trader)):
     try:
         rows = (session.query(SupportTicket).filter(SupportTicket.trader_id == trader.id)
                 .order_by(SupportTicket.id.desc()).all())
-        return [_ticket_dict(session, t) for t in rows]
+        wiadomosci = _wiadomosci_biletow(session, [t.id for t in rows])
+        return [_ticket_dict(session, t, msgs=wiadomosci[t.id]) for t in rows]
     finally:
         session.close()
 
@@ -1723,11 +1753,14 @@ def admin_tickets():
     session = SessionLocal()
     try:
         rows = session.query(SupportTicket).order_by(SupportTicket.id.desc()).limit(200).all()
+        # Maile i wiadomosci hurtem: osobne zapytanie na kazdy bilet to bylo 400
+        # round-tripow do bazy, a baza stoi za oceanem.
+        wiadomosci = _wiadomosci_biletow(session, [t.id for t in rows])
+        maile = _maile_traderow(session, {t.trader_id for t in rows})
         out = []
         for t in rows:
-            tr = session.get(Trader, t.trader_id)
-            d = _ticket_dict(session, t)
-            d["trader_email"] = tr.email if tr else None
+            d = _ticket_dict(session, t, msgs=wiadomosci[t.id])
+            d["trader_email"] = maile.get(t.trader_id)
             out.append(d)
         return out
     finally:
@@ -2139,16 +2172,20 @@ def admin_payout_requests():
     session = SessionLocal()
     try:
         rows = session.query(PayoutRequest).order_by(PayoutRequest.id.desc()).all()
+        # Konta i maile hurtem: dwa `session.get` na wniosek to bylo 600 round-tripow
+        # przy 300 wnioskach, a lista nie ma LIMIT-u i rosnie z kazdym miesiacem.
+        konta = _konta_po_id(session, (r.account_id for r in rows))
+        maile = _maile_traderow(session, (r.trader_id for r in rows))
         out = []
         for r in rows:
-            acc = session.get(Account, r.account_id)
-            tr = session.get(Trader, r.trader_id)
+            acc = konta.get(r.account_id)
+            tr_email = maile.get(r.trader_id)
             try:
                 details = json.loads(r.details) if r.details else {}
             except ValueError:
                 details = {}
             out.append({"id": r.id, "account_login": acc.login if acc else None,
-                        "trader_email": tr.email if tr else None, "profit_amount": r.profit_amount,
+                        "trader_email": tr_email, "profit_amount": r.profit_amount,
                         "trader_share": r.trader_share, "method": r.method, "details": details,
                         "status": r.status, "reject_reason": r.reject_reason,
                         "ts": r.ts.isoformat()})
@@ -2215,9 +2252,11 @@ def admin_payouts_all():
         reqs = (session.query(PayoutRequest)
                 .filter(PayoutRequest.status != "paid")
                 .order_by(PayoutRequest.id.desc()).all())
+        konta = _konta_po_id(session, (r.account_id for r in reqs))
+        maile = _maile_traderow(session, (r.trader_id for r in reqs))
         for r in reqs:
-            acc = session.get(Account, r.account_id)
-            tr = session.get(Trader, r.trader_id)
+            acc = konta.get(r.account_id)
+            tr_email = maile.get(r.trader_id)
             try:
                 details = json.loads(r.details) if r.details else {}
             except ValueError:
@@ -2226,7 +2265,7 @@ def admin_payouts_all():
                 "kind": "request", "id": r.id,
                 "ts": r.ts.isoformat() if r.ts else None,
                 "account_login": acc.login if acc else None,
-                "trader_email": tr.email if tr else None,
+                "trader_email": tr_email,
                 "profit_amount": r.profit_amount, "trader_share": r.trader_share,
                 "method": r.method, "details": details,
                 "status": r.status, "reject_reason": r.reject_reason,
@@ -2961,10 +3000,12 @@ def admin_orders():
     session = SessionLocal()
     try:
         rows = session.query(Order).order_by(Order.id.desc()).limit(100).all()
+        # Maile jednym zapytaniem zamiast osobnego na kazde zamowienie: przy 100
+        # pozycjach to bylo 101 round-tripow do bazy, a baza stoi za oceanem.
+        maile = _maile_traderow(session, (o.trader_id for o in rows))
         out = []
         for o in rows:
-            tr = session.get(Trader, o.trader_id)
-            out.append({"id": o.id, "trader_email": tr.email if tr else None,
+            out.append({"id": o.id, "trader_email": maile.get(o.trader_id),
                         "product_key": o.product_key, "amount_usd": o.amount_usd,
                         "status": o.status, "provider": o.provider, "coupon": o.coupon,
                         "flag": o.flag, "fail_reason": o.fail_reason,
@@ -3073,34 +3114,39 @@ def admin_inbox():
     co jest „nieprzeczytane" rozstrzyga frontend po localStorage."""
     session = SessionLocal()
     try:
-        emails: dict[int, str] = {}
+        zamowienia = session.query(Order).order_by(Order.id.desc()).limit(15).all()
+        kyc = (session.query(Trader).filter(Trader.kyc_status == "pending")
+               .order_by(Trader.kyc_submitted_at.desc().nullslast()).limit(10).all())
+        wnioski = (session.query(PayoutRequest).filter(PayoutRequest.status == "pending")
+                   .order_by(PayoutRequest.id.desc()).limit(10).all())
+        bilety = (session.query(TicketMessage, SupportTicket)
+                  .join(SupportTicket, SupportTicket.id == TicketMessage.ticket_id)
+                  .filter(TicketMessage.author == "trader")
+                  .order_by(TicketMessage.id.desc()).limit(10).all())
+        # Dzwonek odpytuje panel cyklicznie, wiec maile bierzemy jednym zapytaniem
+        # po wszystkich kolejkach naraz zamiast dokladac round-trip na wiersz.
+        maile = _maile_traderow(session, [o.trader_id for o in zamowienia]
+                                + [r.trader_id for r in wnioski]
+                                + [t.trader_id for _, t in bilety])
 
         def email_of(tid: int) -> str:
-            if tid not in emails:
-                t = session.get(Trader, tid)
-                emails[tid] = t.email if t else "?"
-            return emails[tid]
+            return maile.get(tid) or "?"
 
         items = []
-        for o in session.query(Order).order_by(Order.id.desc()).limit(15).all():
+        for o in zamowienia:
             items.append({"type": "order", "ts": (o.paid_at or o.created_at).isoformat(),
                           "title": f"Order #{o.id} · {o.product_key} · {o.status}",
                           "body": email_of(o.trader_id), "view": "orders"})
-        for t in (session.query(Trader).filter(Trader.kyc_status == "pending")
-                  .order_by(Trader.kyc_submitted_at.desc().nullslast()).limit(10).all()):
+        for t in kyc:
             if t.kyc_submitted_at:
                 items.append({"type": "kyc", "ts": t.kyc_submitted_at.isoformat(),
                               "title": f"KYC pending · {t.kyc_fullname or t.email}",
                               "body": t.email, "view": "kyc"})
-        for pr in (session.query(PayoutRequest).filter(PayoutRequest.status == "pending")
-                   .order_by(PayoutRequest.id.desc()).limit(10).all()):
+        for pr in wnioski:
             items.append({"type": "payout", "ts": pr.ts.isoformat(),
                           "title": f"Payout request ${pr.trader_share:,.2f}",
                           "body": email_of(pr.trader_id), "view": "payouts"})
-        for m, t in (session.query(TicketMessage, SupportTicket)
-                     .join(SupportTicket, SupportTicket.id == TicketMessage.ticket_id)
-                     .filter(TicketMessage.author == "trader")
-                     .order_by(TicketMessage.id.desc()).limit(10).all()):
+        for m, t in bilety:
             items.append({"type": "ticket", "ts": m.ts.isoformat(),
                           "title": f"Ticket #{t.id}: {t.subject}",
                           "body": email_of(t.trader_id), "view": "tickets"})
@@ -3640,11 +3686,17 @@ def leaderboard():
     session = SessionLocal()
     try:
         accs = session.query(Account).filter(Account.status == "funded").all()
+        # Kraj i nazwisko bierzemy z tradera — ale JEDNYM zapytaniem po wszystkich
+        # naraz. Osobny `session.get` na konto oznaczal tyle round-tripow, ile jest
+        # kont funded (zmierzone: 1998 zapytan i 181 ms przy 2000 kont).
+        tr_ids = {a.trader_id for a in accs if a.trader_id}
+        traderzy = {t.id: t for t in session.query(Trader)
+                    .filter(Trader.id.in_(tr_ids)).all()} if tr_ids else {}
         rows = []
         for a in accs:
             equity_now = round(a.balance, 2)
             profit_pct = round((equity_now - a.initial_balance) / a.initial_balance * 100, 2)
-            tr = session.get(Trader, a.trader_id) if a.trader_id else None
+            tr = traderzy.get(a.trader_id)
             country = tr.kyc_country if (tr and tr.kyc_status == "approved" and tr.kyc_country) else None
             rows.append({"trader": _mask_name(a.trader_name or (tr.full_name if tr else "")),
                          "country": country, "phase": a.phase, "status": a.status,
