@@ -18,6 +18,12 @@ os.environ["METAAPI_PROVISIONING_PROFILE_ID"] = ""
 os.environ["STRIPE_SECRET_KEY"] = ""     # checkout w trybie MOCK
 os.environ["SMTP_HOST"] = ""             # maile na konsolę, bez wysyłki
 os.environ["NOTIFY_WEBHOOK_URL"] = ""
+# Kanał Telegram i usługa zrzutu certyfikatu — puste, żeby żaden test nie wyszedł
+# do sieci ani nie opublikował niczego na prawdziwym kanale. Test Payout BOT-a
+# włącza je sobie sam, podstawiając transport.
+os.environ["TELEGRAM_BOT_TOKEN"] = ""
+os.environ["TELEGRAM_CHAT_ID"] = ""
+os.environ["SHOT_API_URL"] = ""
 # Poller nie moze chodzic w tle testow — przestawialby salda kont.
 os.environ["POLLER_ENABLED"] = "false"
 # Web push: puste klucze VAPID = push wylaczony (settings.push_enabled to

@@ -146,6 +146,77 @@ def _duplikat(session, trader: Trader | None, kwota: float, data) -> bool:
     return any(p.ts and p.ts.date() == data.date() for p in istnieje)
 
 
+def zapisz(session, w: dict, login_seq: int) -> tuple[Payout, int]:
+    """Zapisuje JEDEN wiersz: trader + konto archiwalne + wypłata.
+
+    Zwraca `(wypłata, następny wolny login)`. Wydzielone z `uruchom`, bo tą samą
+    ścieżką idzie Payout BOT (`payoutbot.py`) — silnik ma tworzyć komplet
+    dokładnie tak samo jak import z ewidencji, żeby nie powstała druga,
+    rozjeżdżająca się wersja zakładania konta archiwalnego. Nic nie commituje.
+    """
+    trader = session.query(Trader).filter(Trader.email == w["email"]).first()
+    if trader is None:
+        trader = Trader(
+            email=w["email"],
+            # Hasła nie znamy i nie wymyślamy — klient wchodzi przez reset hasła.
+            password_hash=auth.hash_password(secrets.token_urlsafe(24)),
+            full_name=w["full_name"], referral_code=secrets.token_hex(4).upper(),
+            created_at=w["date"],
+        )
+        session.add(trader)
+        session.flush()
+    # Status KYC bierze się WYŁĄCZNIE z pliku (domyślnie "none"), także dla
+    # tradera, który już był w bazie — kolumna jest po to, żeby go ustawić.
+    trader.kyc_status = w["kyc"]
+    if w["kyc"] in ("approved", "rejected"):
+        trader.kyc_reviewed_at = w["date"]
+    trader.kyc_submitted_at = w["date"] if w["kyc"] != "none" else None
+
+    prod = session.query(Product).filter(Product.key == w["product_key"]).first()
+    konto = (session.query(Account)
+             .filter(Account.trader_id == trader.id,
+                     Account.initial_balance == w["account_size"],
+                     Account.steps == w["steps"])
+             .first())
+    if konto is None:
+        konto = Account(
+            login=str(login_seq), trader_name=w["full_name"], trader_id=trader.id,
+            platform_login=str(login_seq), platform_server="PropFunding-ARCHIVE",
+            # Za tym kontem nie stoi żywy rachunek MT5 — feed musi je pominąć,
+            # inaczej próbowałby logować się loginem, którego u brokera nie ma.
+            mt5_backed=False,
+            source="grant", grant_note="imported from records",
+            product_key=prod.key, preset=prod.key,
+            initial_balance=prod.account_size, steps=prod.steps,
+            profit_target_p1=prod.profit_target_p1, profit_target_p2=prod.profit_target_p2,
+            max_daily_loss_pct=prod.max_daily_loss_pct,
+            max_overall_loss_pct=prod.max_overall_loss_pct,
+            min_trading_days=prod.min_trading_days, drawdown_type=prod.drawdown_type,
+            profit_split_pct=w["split_pct"], max_lots=prod.max_lots,
+            phase="funded", status="funded",
+            # Stan po wypłacie: zysk zszedł z konta, saldo wraca do bazowego.
+            balance=prod.account_size, equity=prod.account_size,
+            peak_equity=prod.account_size, day_start_equity=prod.account_size,
+            day_start_balance=prod.account_size, day_key=w["date"].strftime("%Y-%m-%d"),
+            created_at=w["date"], started_at=w["date"],
+        )
+        session.add(konto)
+        session.flush()
+        login_seq += 1
+
+    wyplata = Payout(
+        account_id=konto.id, ts=w["date"], profit_amount=w["profit_amount"],
+        trader_share=w["amount_usd"], paid=True, method="bank transfer",
+        note=w["note"] or "imported from records",
+        # BEZ cert_tokenu: certyfikat publiczny wystawia się osobno, pod
+        # potwierdzoną wypłatę (Payouts -> Generate). Payout BOT dokłada go sam
+        # zaraz po zapisie — to jedyne miejsce, gdzie te dwie ścieżki się różnią.
+        cert_token=None, balance_reset=False,
+    )
+    session.add(wyplata)
+    return wyplata, login_seq
+
+
 def uruchom(session, tekst: str, commit: bool = False) -> dict:
     """Import CSV. Bez `commit` tylko podgląd — baza zostaje nietknięta."""
     catalog.seed_products(session)
@@ -168,64 +239,7 @@ def uruchom(session, tekst: str, commit: bool = False) -> dict:
         dodane += 1
         if not commit:
             continue
-
-        if trader is None:
-            trader = Trader(
-                email=w["email"],
-                # Hasła nie znamy i nie wymyślamy — klient wchodzi przez reset hasła.
-                password_hash=auth.hash_password(secrets.token_urlsafe(24)),
-                full_name=w["full_name"], referral_code=secrets.token_hex(4).upper(),
-                created_at=w["date"],
-            )
-            session.add(trader)
-            session.flush()
-        # Status KYC bierze się WYŁĄCZNIE z pliku (domyślnie "none"), także dla
-        # tradera, który już był w bazie — kolumna jest po to, żeby go ustawić.
-        trader.kyc_status = w["kyc"]
-        if w["kyc"] in ("approved", "rejected"):
-            trader.kyc_reviewed_at = w["date"]
-        trader.kyc_submitted_at = w["date"] if w["kyc"] != "none" else None
-
-        prod = session.query(Product).filter(Product.key == w["product_key"]).first()
-        konto = (session.query(Account)
-                 .filter(Account.trader_id == trader.id,
-                         Account.initial_balance == w["account_size"],
-                         Account.steps == w["steps"])
-                 .first())
-        if konto is None:
-            konto = Account(
-                login=str(login_seq), trader_name=w["full_name"], trader_id=trader.id,
-                platform_login=str(login_seq), platform_server="PropFunding-ARCHIVE",
-                # Za tym kontem nie stoi żywy rachunek MT5 — feed musi je pominąć,
-                # inaczej próbowałby logować się loginem, którego u brokera nie ma.
-                mt5_backed=False,
-                source="grant", grant_note="imported from records",
-                product_key=prod.key, preset=prod.key,
-                initial_balance=prod.account_size, steps=prod.steps,
-                profit_target_p1=prod.profit_target_p1, profit_target_p2=prod.profit_target_p2,
-                max_daily_loss_pct=prod.max_daily_loss_pct,
-                max_overall_loss_pct=prod.max_overall_loss_pct,
-                min_trading_days=prod.min_trading_days, drawdown_type=prod.drawdown_type,
-                profit_split_pct=w["split_pct"], max_lots=prod.max_lots,
-                phase="funded", status="funded",
-                # Stan po wypłacie: zysk zszedł z konta, saldo wraca do bazowego.
-                balance=prod.account_size, equity=prod.account_size,
-                peak_equity=prod.account_size, day_start_equity=prod.account_size,
-                day_start_balance=prod.account_size, day_key=w["date"].strftime("%Y-%m-%d"),
-                created_at=w["date"], started_at=w["date"],
-            )
-            session.add(konto)
-            session.flush()
-            login_seq += 1
-
-        session.add(Payout(
-            account_id=konto.id, ts=w["date"], profit_amount=w["profit_amount"],
-            trader_share=w["amount_usd"], paid=True, method="bank transfer",
-            note=w["note"] or "imported from records",
-            # BEZ cert_tokenu: certyfikat publiczny wystawia się osobno, pod
-            # potwierdzoną wypłatę (Payouts -> Generate).
-            cert_token=None, balance_reset=False,
-        ))
+        _, login_seq = zapisz(session, w, login_seq)
 
     if commit:
         session.commit()

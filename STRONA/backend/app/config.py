@@ -180,6 +180,28 @@ class Settings:
     # --- Webhook powiadomień (np. Make/Telegram) — opcjonalny ---
     notify_webhook_url: str = os.getenv("NOTIFY_WEBHOOK_URL", "")
 
+    # --- Kanał Telegram z wypłatami. Brak tokenu albo kanału => kanał wyłączony ---
+    # Bot musi być ADMINISTRATOREM kanału z prawem publikowania. Post i tak wychodzi
+    # z nazwą kanału, nie bota. Token TYLKO w zmiennych hostingu — repozytorium,
+    # z którego deployuje Vercel, jest publiczne (scripts/sync-vercel-repo.sh).
+    telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")     # @kanal albo -100...
+
+    @property
+    def telegram_enabled(self) -> bool:
+        # TELEGRAM_ENABLED=false to awaryjny wylacznik — normalnie o wszystkim
+        # decyduje obecnosc tokenu i kanalu (tak samo jak przy push).
+        if os.getenv("TELEGRAM_ENABLED", "true").lower() != "true":
+            return False
+        return bool(self.telegram_bot_token and self.telegram_chat_id)
+
+    # --- Zrzut certyfikatu do obrazka (zewnętrzna przeglądarka po HTTP) ---
+    # Serwer nie ma czym zrobić rastra: JPG w portalu powstaje w przeglądarce
+    # klienta, a Chromium (~150 MB) nie wejdzie w bundel funkcji. Dlatego zrzut
+    # robi usługa zewnętrzna — hostowana albo `browserless/chrome` na własnym VPS.
+    shot_api_url: str = os.getenv("SHOT_API_URL", "")
+    shot_api_token: str = os.getenv("SHOT_API_TOKEN", "")
+
     # --- Web push (PWA). Brak kluczy => push wyłączony ---
     # Klucze VAPID (base64url): wygeneruj raz przez
     #   python -m app.push  (wypisze parę do wklejenia w env)

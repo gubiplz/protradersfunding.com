@@ -28,10 +28,10 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import func
 
-from . import (achievements, auth, billing, catalog, countries, fields, loyalty, metaquotes_web,
-               notify,
-               payout_import,
-               poller, provisioning, push, rules, telemetry, tradebot)
+from . import (achievements, auth, billing, catalog, certshot, countries, fields, loyalty,
+               metaquotes_web, notify,
+               payout_import, payoutbot,
+               poller, provisioning, push, rules, telegram, telemetry, tradebot)
 from .config import get_settings
 from .db import SessionLocal, init_db
 from .models import (Account, AppSetting, Breach, Certificate, CreditLedger, EquitySnapshot,
@@ -3366,6 +3366,62 @@ def admin_pool_generate_simulated(payload: SimGenerateIn):
         session.close()
 
 
+class PayoutEngineIn(BaseModel):
+    """Ustawienia Payout BOT-a. Wszystkie pola opcjonalne — panel zapisuje kartę
+    w całości, ale przełącznik on/off woła ten sam endpoint z samym `enabled`."""
+    enabled: bool | None = None
+    hour: int | None = None
+    lp_pct: float | None = None
+    sizes: list[float] | None = None
+    gross_min_pct: float | None = None
+    gross_max_pct: float | None = None
+
+
+@app.get("/api/admin/payout-engine", dependencies=[Depends(auth.require_admin)])
+def admin_payout_engine():
+    session = SessionLocal()
+    try:
+        cfg = payoutbot.ustawienia(session)
+        czy, powod = payoutbot.nalezy_odpalic(session)
+        return {**cfg, "due": czy, "blocked_by": powod,
+                # Panel ma pokazać wprost, czego brakuje do publikacji — inaczej
+                # admin włącza silnik i przez dobę nie wie, czemu kanał milczy.
+                "telegram_ready": telegram.is_enabled(),
+                "renderer_ready": certshot.is_enabled()}
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/payout-engine", dependencies=[Depends(auth.require_admin)])
+def admin_payout_engine_save(payload: PayoutEngineIn):
+    session = SessionLocal()
+    try:
+        try:
+            return payoutbot.zapisz_ustawienia(session, **payload.model_dump())
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/payout-engine/run", dependencies=[Depends(auth.require_admin)])
+def admin_payout_engine_run(request: Request):
+    """Odpala silnik NATYCHMIAST, z pominięciem guardu godziny i dnia.
+
+    Bez tego sprawdzenie konfiguracji (token bota, usługa zrzutu, wygląd posta)
+    trwałoby dobę. Guard dnia i tak zostaje przestawiony, więc ręczny przebieg
+    zastępuje dzisiejszy automatyczny, a nie dokłada się do niego.
+    """
+    session = SessionLocal()
+    try:
+        wynik = payoutbot.uruchom(session, force=True, base_url=_public_base(request))
+        # Świeży certyfikat ma się pojawić na pasie od razu, a nie po minucie.
+        _PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
+        return wynik
+    finally:
+        session.close()
+
+
 class SimFallbackIn(BaseModel):
     enabled: bool
 
@@ -3855,12 +3911,22 @@ def _public_base(request: Request) -> str:
     return settings.app_base_url.rstrip("/")
 
 
+# Znaczniki pochodzenia wiersza — wyłącznie do ewidencji w panelu. Certyfikat
+# jest dokumentem dla klienta i żaden z nich nie ma prawa się na nim wydrukować.
+_NOTATKI_WEWNETRZNE = {payout_import.IMPORT_NOTE, payoutbot.NOTATKA}
+
+
 def _cert_ctx(request, *, headline_plain, eyebrow, trader_name, amount_label, amount,
-              blurb, meta, cert_token, seal, note=None, variant="pass") -> dict:
+              blurb, meta, cert_token, seal, note=None, variant="pass", bare=False) -> dict:
     """Wspólny kontekst obu certyfikatów — jeden szablon, dwa warianty.
 
     Świadomie BEZ numeru rachunku MT5: dokument idzie na zewnątrz, a numer konta
     nikomu tam nie służy. Weryfikację zapewnia ID certyfikatu i kod QR.
+
+    `bare` zdejmuje ze strony wszystko poza samą kartą (przyciski, stopkę, marginesy
+    na całą wysokość okna). Dzięki temu ZWYKŁY zrzut całej strony jest już gotową
+    grafiką certyfikatu i nie zależy od tego, czy zewnętrzna przeglądarka umie
+    kadrować po selektorze — patrz `certshot.py`.
     """
     weryfikacja = f"{_public_base(request)}/verify/{cert_token}"
     return {
@@ -3869,7 +3935,7 @@ def _cert_ctx(request, *, headline_plain, eyebrow, trader_name, amount_label, am
         "eyebrow": eyebrow,
         "trader_name": trader_name or "—",
         "amount_label": amount_label, "amount": amount, "blurb": blurb,
-        "meta": meta, "note": note,
+        "meta": meta, "note": note, "bare": bool(bare),
         "cert_token": cert_token, "seal": seal, "variant": variant,
         "verify_url": f"/verify/{cert_token}",
         "verify_full_url": weryfikacja,
@@ -3990,11 +4056,14 @@ def certificate(request: Request, cert_token: str):
 
 
 @app.get("/payout/{cert_token}", response_class=HTMLResponse)
-def payout_certificate(request: Request, cert_token: str):
+def payout_certificate(request: Request, cert_token: str, bare: int = 0):
     """Certyfikat wypłaty — publiczny link po nieodgadywalnym tokenie.
 
     Bez rozbicia na zysk/split/metodę: to są dane wewnętrzne rachunku, a dokument
     ma potwierdzać JEDNO — że wypłata w tej kwocie została zrealizowana.
+
+    `?bare=1` zwraca samą kartę, bez przycisków i stopki — to jest widok, który
+    zrzuca `certshot.py` przed wysłaniem grafiki na Telegrama.
     """
     session = SessionLocal()
     try:
@@ -4004,9 +4073,9 @@ def payout_certificate(request: Request, cert_token: str):
         acc = session.get(Account, p.account_id)
         when = (p.ts or datetime.now(timezone.utc)).strftime("%d %b %Y")
         # Kwota bez groszy, gdy okrągła — „$9,070" czyta się lepiej niż „$9,070.00",
-        # ale przy 1 049,78 nie wolno zgubić reszty.
-        kwota = (f"${p.trader_share:,.0f}" if float(p.trader_share).is_integer()
-                 else f"${p.trader_share:,.2f}")
+        # ale przy 1 049,78 nie wolno zgubić reszty. Ta sama funkcja składa podpis
+        # posta na Telegramie: rozjazd między dokumentem a podpisem byłby widoczny.
+        kwota = payoutbot.kwota_txt(p.trader_share)
         ctx = _cert_ctx(
             request,
             headline_plain="Payout certificate",
@@ -4018,11 +4087,11 @@ def payout_certificate(request: Request, cert_token: str):
                    "released in full."),
             meta=[("Date", when),
                   ("Account size", f"${(acc.initial_balance if acc else 0):,.0f}")],
-            # Notatka księgowa jest dla nas, nie dla klienta — znacznik importu
-            # („imported from records") nie ma prawa wyjść na dokument.
-            note=(None if (p.note or "").strip().lower() == payout_import.IMPORT_NOTE
+            # Notatka księgowa jest dla nas, nie dla klienta — znaczniki pochodzenia
+            # („imported from records", „payout bot") nie mają prawa wyjść na dokument.
+            note=(None if (p.note or "").strip().lower() in _NOTATKI_WEWNETRZNE
                   else p.note),
-            cert_token=cert_token, seal="Paid", variant="payout",
+            cert_token=cert_token, seal="Paid", variant="payout", bare=bool(bare),
         )
         return jinja.TemplateResponse(request, "certificate.html", ctx)
     finally:
@@ -4105,9 +4174,30 @@ async def api_tick():
     # z tego samego powodu co recap. Wlasny odstep 21 dni w `_upsell_nudge`
     # sprawia, ze recznie odpalony endpoint i ten przebieg sie nie dubluja.
     nudge = _upsell_nudge() if datetime.now(timezone.utc).weekday() == 0 else {"sent": 0}
+    # Payout BOT jedzie tym samym cronem — na Hobby nie ma jak dodać trzeciego
+    # wpisu w `vercel.json`, a silnik i tak pilnuje sam godziny i guardu dnia.
+    payout = _payout_bot_tick()
     if isinstance(wynik, dict):
-        return {**wynik, "daily_recap": recap, "upsell_nudge": nudge.get("sent", 0)}
-    return {"tick": wynik, "daily_recap": recap, "upsell_nudge": nudge.get("sent", 0)}
+        return {**wynik, "daily_recap": recap, "upsell_nudge": nudge.get("sent", 0),
+                "payout_bot": payout}
+    return {"tick": wynik, "daily_recap": recap, "upsell_nudge": nudge.get("sent", 0),
+            "payout_bot": payout}
+
+
+def _payout_bot_tick() -> dict:
+    """Przebieg Payout BOT-a wpięty w `/api/tick`. NIGDY nie wywraca ticka —
+    silnik ryzyka jest ważniejszy niż post na kanale."""
+    session = SessionLocal()
+    try:
+        wynik = payoutbot.uruchom(session)
+        if wynik.get("created"):
+            _PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
+        return wynik
+    except Exception as e:  # pragma: no cover
+        print(f"[payoutbot] przebieg nieudany: {e}")
+        return {"created": 0, "error": str(e)}
+    finally:
+        session.close()
 
 
 @app.api_route("/api/cron/streak-reminder", methods=["GET", "POST"],

@@ -12,7 +12,7 @@
 <link rel="stylesheet" href="/static/css/cert.css?v={{ asset_v }}">
 <meta name="robots" content="noindex">
 </head>
-<body class="cert-page cert-variant-{{ variant or 'pass' }}" data-cert-token="{{ cert_token }}">
+<body class="cert-page{% if bare %} cert-bare{% endif %} cert-variant-{{ variant or 'pass' }}" data-cert-token="{{ cert_token }}">
 
 <div class="cert-card">
   <div class="cert-inner">
