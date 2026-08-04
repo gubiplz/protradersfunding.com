@@ -262,3 +262,68 @@ def test_portal_dostaje_liste_krajow_w_html():
     html = client.get("/portal").text
     assert 'id="pf-countries"' in html
     assert '"PL"' in html and '"48"' in html
+
+
+# ---------------- domyslny kraj: strefa czasowa, potem jezyk, na koncu +1 ----
+def test_mapa_stref_czasowych_pokrywa_glowne_rynki():
+    """Domyślny numer kierunkowy ma iść z LOKALIZACJI urządzenia, a nie z języka
+    przeglądarki: ktoś w Nowym Jorku z polskim interfejsem ma `pl-PL`, ale
+    strefę `America/New_York`.
+
+    Mapa jest generowana z IANA tzdata razem ze starymi nazwami stref, bo część
+    przeglądarek wciąż zwraca je zamiast kanonicznych.
+    """
+    tz = countries.TZ_COUNTRY
+    assert len(tz) > 300, "mapa stref wyglada na obcieta"
+    for strefa, iso2 in (("Europe/Warsaw", "PL"), ("America/New_York", "US"),
+                         ("Europe/London", "GB"), ("America/Sao_Paulo", "BR"),
+                         ("Australia/Sydney", "AU"), ("Asia/Tokyo", "JP"),
+                         ("Europe/Kyiv", "UA"), ("Asia/Dubai", "AE")):
+        assert tz.get(strefa) == iso2, f"{strefa} -> {tz.get(strefa)}, oczekiwane {iso2}"
+    # stare nazwy stref (plik `backward`) — bez nich starsze Safari dostaje pudlo
+    assert tz.get("Asia/Calcutta") == "IN"
+    assert tz.get("Europe/Kiev") == "UA"
+    # kazda strefa wskazuje kraj, ktory FAKTYCZNIE jest w tablicy kierunkowych
+    assert all(iso2 in countries.BY_ISO for iso2 in tz.values())
+
+
+def test_payload_niesie_kraje_i_strefy():
+    p = countries.payload()
+    assert set(p) == {"c", "tz"}
+    assert len(p["c"]) == len(countries.COUNTRIES)
+    assert p["tz"]["Europe/Warsaw"] == "PL"
+
+
+def test_kolejnosc_wykrywania_kraju_konczy_sie_na_plus_jeden():
+    """Fallback musi być twardo +1. Wcześniej ostatnią deską ratunku był
+    `COUNTRIES[0]`, czyli kraj, który akurat wypadł pierwszy alfabetycznie.
+    """
+    from pathlib import Path
+    html = (Path(__file__).resolve().parents[1] / "templates" / "portal.html").read_text()
+
+    assert "function tzCountry(){" in html
+    assert "Intl.DateTimeFormat().resolvedOptions().timeZone" in html
+    # kolejnosc: strefa -> jezyk -> US
+    assert "return tzCountry()||localeCountry()||(COUNTRY_BY_ISO['US']?'US':null)" in html
+    # ostatnia deska ratunku to kraj z kierunkowym 1, nie pierwszy z brzegu
+    assert "COUNTRIES.find(c=>c.d==='1')" in html
+    # przy kierunkowym dzielonym przez kilka krajow strefa tez idzie przed jezykiem
+    assert "for(const skad of [tzCountry(),localeCountry()])" in html
+    # stary fallback zniknal
+    assert "return localeCountry()||(COUNTRY_BY_ISO['US']?'US':(COUNTRIES[0]||{i:''}).i);" not in html
+
+
+def test_flagi_wektorowe_tam_gdzie_sa_lzejsze():
+    """SVG dla WSZYSTKICH flag to 3,6 MB — kilkanaście z nich niesie herb w
+    krzywych (Salwador 249 KB). Generator koduje każdą flagę obiema drogami i
+    zostawia mniejszą, więc wektory wchodzą tam, gdzie nic nie kosztują.
+    """
+    from pathlib import Path
+    css = (Path(__file__).resolve().parents[1] / "static" / "css" / "flags.css").read_text()
+    svg = css.count("data:image/svg+xml,")
+    png = css.count("data:image/png;base64,")
+    assert svg + png == len(countries.COUNTRIES), "kazdy kraj musi miec flage"
+    assert svg >= 20, "wektory mialy wejsc tam, gdzie sa lzejsze"
+    assert len(css) < 130_000, "plik z flagami nie moze urosnac przez SVG z herbami"
+    # `#` w SVG niesie kolory i musi byc zakodowany, inaczej urywa data: URI
+    assert "%23" in css and 'url("data:image/svg+xml,#' not in css

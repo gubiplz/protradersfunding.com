@@ -2623,6 +2623,22 @@ function localeCountry(){
   }
   return null;
 }
+/* Strefa czasowa urzadzenia -> kraj. Lepszy pierwszy strzal niz jezyk: ktos w
+   Nowym Jorku z polskim interfejsem ma `pl-PL`, ale `America/New_York`. */
+function tzCountry(){
+  try{
+    const z=Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const iso=z&&TZ_COUNTRY[z];
+    return (iso&&COUNTRY_BY_ISO[iso])?iso:null;
+  }catch(e){return null}
+}
+/* Kraj, gdy nie mamy o kliencie NICZEGO: strefa czasowa, potem jezyk, a na
+   koncu Stany. Fallback jest twardo +1 i nie moze byc krajem, ktory akurat
+   wypadl pierwszy w tablicy. */
+function defaultCountry(){
+  return tzCountry()||localeCountry()||(COUNTRY_BY_ISO['US']?'US':null)
+    ||(COUNTRIES.find(c=>c.d==='1')||COUNTRIES[0]||{i:''}).i;
+}
 function guessCountry(){
   if(ME&&ME.phone_country&&COUNTRY_BY_ISO[ME.phone_country])return ME.phone_country;
   /* Customers who bought before the picker existed have a phone but no saved
@@ -2641,12 +2657,13 @@ function guessCountry(){
          perfectly valid number would stop validating. Order of preference:
          the browser's region, then the country libphonenumber marks as the
          main one for that code. */
-      const lokalny=localeCountry();
-      if(lokalny&&pasuje.some(c=>c.i===lokalny))return lokalny;
+      for(const skad of [tzCountry(),localeCountry()]){
+        if(skad&&pasuje.some(c=>c.i===skad))return skad;
+      }
       return (pasuje.find(c=>c.m)||pasuje[0]).i;
     }
   }
-  return localeCountry()||(COUNTRY_BY_ISO['US']?'US':(COUNTRIES[0]||{i:''}).i);
+  return defaultCountry();
 }
 /* ~110 KB obrazkow flag w jednym pliku: nie wchodzi w krytyczna sciezke strony,
    tylko dogrywa sie osobno. Wolane z KAZDEGO miejsca, ktore nadaje klase flagi —
@@ -2764,7 +2781,12 @@ async function buy(key){
 /* ---------- ACCOUNT DETAIL ---------- */
 /* Countries come from the server (app/countries.py) so the dial codes, the
    allowed phone lengths and the KYC list all read from ONE table. */
-const COUNTRIES=(()=>{try{return JSON.parse(document.getElementById('pf-countries').textContent||'[]')}catch(e){return[]}})();
+const PF_GEO=(()=>{try{return JSON.parse(document.getElementById('pf-countries').textContent||'{}')}catch(e){return{}}})();
+const COUNTRIES=PF_GEO.c||[];
+/* Strefa czasowa -> kraj (IANA). Mowi, GDZIE ktos jest; jezyk przegladarki
+   tylko, jak woli czytac — dlatego przy numerze kierunkowym strefa idzie
+   pierwsza. */
+const TZ_COUNTRY=PF_GEO.tz||{};
 const COUNTRY_BY_ISO=Object.fromEntries(COUNTRIES.map(c=>[c.i,c]));
 const COUNTRY_NAMES=COUNTRIES.map(c=>c.n);
 const PHASE_LABEL={eval_1:'Phase 1',eval_2:'Phase 2',funded:'Funded'};
