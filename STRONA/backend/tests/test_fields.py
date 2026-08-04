@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app import auth, catalog, countries, fields  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Trader  # noqa: E402
+from app.models import Account, Trader  # noqa: E402
 
 init_db()
 _s = SessionLocal()
@@ -248,7 +248,16 @@ def test_profil_odrzuca_nazwe_z_cyframi():
 
 
 def test_kyc_odrzuca_wymyslony_kraj():
-    _, h = _trader()
+    tid, h = _trader()
+    # Weryfikacja otwiera sie dopiero po ewaluacji (`main.kyc_dostepne`) — bez
+    # konta funded ten test sprawdzalby bramke zamiast walidacji kraju.
+    s = SessionLocal()
+    s.add(Account(login=f"96{tid:05d}", trader_id=tid, trader_name="Pola Kyc",
+                  product_key="2step-25k", preset="2step-25k", initial_balance=25_000.0,
+                  steps=2, phase="funded", status="funded", balance=25_000.0,
+                  equity=25_000.0, peak_equity=25_000.0, day_start_equity=25_000.0,
+                  day_start_balance=25_000.0))
+    s.commit(); s.close()
     zly = client.post("/api/me/kyc", headers=h,
                       json={"full_name": "Dawid Mazur", "country": "Wakanda"})
     assert zly.status_code == 400

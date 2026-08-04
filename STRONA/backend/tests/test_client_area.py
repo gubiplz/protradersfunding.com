@@ -40,17 +40,28 @@ def _trader(email, full_name="Client Area", **extra):
     return tid, {"Authorization": f"Bearer {auth.make_token(tid)}"}
 
 
-def _konto(tid, login, *, status="passed", balance=10_000.0, initial=10_000.0):
+def _konto(tid, login, *, status="passed", balance=10_000.0, initial=10_000.0,
+           phase="eval_1"):
     s = SessionLocal()
     acc = Account(login=login, trader_id=tid, trader_name="Client Area",
                   platform_login=login, platform_password="x", platform_server="MetaQuotes-Demo",
                   product_key="2step-25k", initial_balance=initial, balance=balance, equity=balance,
                   peak_equity=initial, day_start_equity=initial, day_start_balance=initial,
-                  status=status, phase="eval_1")
+                  status=status, phase=phase)
     s.add(acc); s.commit()
     aid = acc.id
     s.close()
     return aid
+
+
+_KYC_LOGIN = iter(range(910000, 919999))
+
+
+def _kyc_ready(tid):
+    """Konto funded, bez ktorego weryfikacja jest zamknieta (`main.kyc_dostepne`).
+    Testy KYC sprawdzaja formularz i dokumenty, a nie sama bramke — ta ma wlasne
+    testy w test_kyc_upload.py."""
+    return _konto(tid, str(next(_KYC_LOGIN)), status="funded", phase="funded")
 
 
 # ---------------- journal ----------------
@@ -107,6 +118,44 @@ def test_cudzy_ticket_niewidoczny():
         tid = c.post("/api/me/tickets", headers=h1,
                      json={"subject": "prywatne", "message": "sekret"}).json()["id"]
         assert c.get(f"/api/me/tickets/{tid}", headers=h2).status_code == 404
+
+
+def test_admin_kasuje_ticket_z_cala_rozmowa():
+    """Zamkniecie zostawialo zgloszenie w „History" na zawsze — takze wpisy testowe
+    i spam. Kasowanie musi zabrac ze soba wiadomosci: `ticket_messages.ticket_id`
+    wskazuje na `support_tickets.id`, wiec osierocone wiersze lamia klucz obcy."""
+    _, h = _trader("ticket-del@test.pl")
+    with TestClient(app) as c:
+        tid = c.post("/api/me/tickets", headers=h,
+                     json={"subject": "do skasowania", "message": "pierwsza"}).json()["id"]
+        c.post(f"/api/admin/tickets/{tid}/reply", headers=ADMIN_H, json={"message": "druga"})
+
+        r = c.delete(f"/api/admin/tickets/{tid}", headers=ADMIN_H)
+        assert r.status_code == 200 and r.json()["messages_removed"] == 2
+
+        assert c.get(f"/api/admin/tickets/{tid}", headers=ADMIN_H).status_code == 404
+        assert c.get(f"/api/me/tickets/{tid}", headers=h).status_code == 404
+        assert not any(x["id"] == tid for x in c.get("/api/admin/tickets", headers=ADMIN_H).json())
+        # Wiadomosci nie moga zostac w bazie — na Postgresie to blad klucza obcego.
+        from app.db import SessionLocal
+        from app.models import TicketMessage
+        s = SessionLocal()
+        assert s.query(TicketMessage).filter(TicketMessage.ticket_id == tid).count() == 0
+        s.close()
+
+
+def test_kasowanie_nieistniejacego_ticketu_to_404():
+    with TestClient(app) as c:
+        assert c.delete("/api/admin/tickets/999999", headers=ADMIN_H).status_code == 404
+
+
+def test_ticket_kasuje_tylko_admin():
+    _, h = _trader("ticket-perm@test.pl")
+    with TestClient(app) as c:
+        tid = c.post("/api/me/tickets", headers=h,
+                     json={"subject": "cudzy", "message": "tresc"}).json()["id"]
+        assert c.delete(f"/api/admin/tickets/{tid}", headers=h).status_code in (401, 403)
+        assert c.get(f"/api/me/tickets/{tid}", headers=h).status_code == 200
 
 
 # ---------------- settings ----------------
@@ -205,6 +254,7 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 64
 
 def test_kyc_upload_i_podglad_admina():
     tid, h = _trader("kycdocs@test.pl")
+    _kyc_ready(tid)
     with TestClient(app) as c:
         anon = c.post("/api/me/kyc/docs", files={"id_front": ("f.png", PNG, "image/png")})
         assert anon.status_code == 401
@@ -225,6 +275,7 @@ def test_kyc_upload_i_podglad_admina():
 
 def test_kyc_rozszerzony_formularz():
     tid, h = _trader("kycform@test.pl")
+    _kyc_ready(tid)
     with TestClient(app) as c:
         r = c.post("/api/me/kyc", headers=h, json={
             "full_name": "Kyc Formularz", "country": "Poland", "dob": "1990-05-01",
@@ -443,7 +494,8 @@ def test_admin_nadaje_konto_od_razu_funded():
 
 def test_kyc_zapisuje_kraj_i_oddaje_go_do_formularza():
     """Kraj jest wybierany z listy — formularz musi umiec podswietlic zapisany."""
-    _, h = _trader("kyc-kraj@test.pl")
+    tid, h = _trader("kyc-kraj@test.pl")
+    _kyc_ready(tid)
     with TestClient(app) as c:
         assert c.get("/api/auth/me", headers=h).json()["kyc_country"] is None
         c.post("/api/me/kyc", headers=h,
@@ -810,6 +862,7 @@ def test_kyc_reject_i_historia_decyzji():
     """Admin widzi pending + historię (approved/rejected); reject pozwala
     traderowi wysłać wniosek ponownie."""
     tid, h = _trader("kyc-hist@test.pl", "Historia Kyc")
+    _kyc_ready(tid)
     with TestClient(app) as c:
         c.post("/api/me/kyc", headers=h, json={"full_name": "Historia Kyc",
                                                "country": "PL", "id_type": "passport"})

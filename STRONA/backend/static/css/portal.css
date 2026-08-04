@@ -423,6 +423,23 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
   background-size:200% 100%;animation:sk 1.2s infinite linear;border:1px solid var(--line)}
 @keyframes sk{to{background-position:-200% 0}}
 
+/* Ekran przejscia miedzy widokami. Same paski `.skel` na ciemnym motywie leza
+   miedzy --bg3 a --panel2, czyli dwoma niemal identycznymi ciemnymi tonami —
+   z boku wyglada to jak pusty ekran, a nie jak ladowanie. Kolko w kolorze
+   akcentu mowi to wprost, a paski zostaja, bo trzymaja wysokosc widoku i strona
+   nie podskakuje w chwili wstawienia danych. */
+.view-load{position:relative;min-height:220px}
+.view-load .vl-mid{position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:11px;pointer-events:none}
+.vl-ring{width:30px;height:30px;border-radius:50%;border:2.5px solid var(--acc-line);
+  border-top-color:var(--acc);animation:spin .7s linear infinite}
+.vl-txt{font-size:12.5px;color:var(--muted);letter-spacing:.01em}
+@media(prefers-reduced-motion:reduce){
+  /* Bez ruchu zostaje sam pierscien — statyczny, ale dalej widoczny. */
+  .vl-ring{animation:none}
+  .view-load .skel{animation:none}
+}
+
 /* ---------------- AUTH (split screen) ---------------- */
 /* --ck-h to pasek zajety przez baner cookie (ustawia go portal.html). Bez tej
    rezerwacji baner siedzi na koncu formularza rejestracji — na telefonie

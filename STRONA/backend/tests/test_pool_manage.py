@@ -345,3 +345,48 @@ def test_promocja_zapisuje_sie_jak_przy_grancie():
     assert acc.bogo_paid_size == maly.account_size
     assert acc.source == "grant"
     s.close()
+
+
+# --------------------------------------------------------------------------- #
+#  Kasowanie wpisow z puli                                                     #
+# --------------------------------------------------------------------------- #
+def test_wolny_wpis_da_sie_skasowac():
+    pid = _wpis("8800001")
+    r = client.delete(f"/api/admin/pool/{pid}", headers=ADMIN_H)
+    assert r.status_code == 200 and r.json()["was_retired"] is False
+
+    s = SessionLocal()
+    assert s.get(PoolAccount, pid) is None
+    s.close()
+
+
+def test_zywy_przydzielony_wpis_zostaje():
+    """Za takim rachunkiem stoi konto tradera — skasowanie zabiera mu poswiadczenia."""
+    aid = _konto("8800002")
+    pid = _wpis("8800002", przydzielony_do=aid)
+
+    r = client.delete(f"/api/admin/pool/{pid}", headers=ADMIN_H)
+    assert r.status_code == 400, "przydzielonego w uzyciu nie wolno skasowac"
+
+    s = SessionLocal()
+    assert s.get(PoolAccount, pid) is not None
+    s.close()
+
+
+def test_wycofany_wpis_da_sie_skasowac():
+    """Wpisy `retired` zostawaly w tabeli na zawsze: byly `claimed`, wiec blokada
+    obejmowala tez je, mimo ze konto tradera juz nie istnieje."""
+    aid = _konto("8800003")
+    pid = _wpis("8800003", przydzielony_do=aid)
+    client.delete(f"/api/accounts/{aid}", headers=ADMIN_H)      # ustawia retired_reason
+
+    s = SessionLocal()
+    assert s.get(PoolAccount, pid).retired_reason, "warunek testu: wpis ma byc wycofany"
+    s.close()
+
+    r = client.delete(f"/api/admin/pool/{pid}", headers=ADMIN_H)
+    assert r.status_code == 200 and r.json()["was_retired"] is True
+
+    s = SessionLocal()
+    assert s.get(PoolAccount, pid) is None
+    s.close()

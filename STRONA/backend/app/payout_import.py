@@ -46,6 +46,11 @@ IMPORT_NOTE = "imported from records"
 KYC_STATUSY = ("none", "pending", "approved", "rejected")
 KOLUMNY = ("full_name", "amount_usd", "date", "account_size", "program", "email", "note", "kyc")
 
+# Domena adresów, które WYMYŚLAMY sami — import z ewidencji i Payout BOT. Za takim
+# wierszem nie stoi żaden klient, więc panel odlicza je od liczby traderów
+# (`/api/stats`). Trzymamy to jako stałą, żeby filtr nie był literałem w drugim pliku.
+TECHNICZNA_DOMENA = "@imported.local"
+
 
 def _liczba(wartosc: str) -> float:
     return float(str(wartosc or "").replace(",", "").replace("$", "").strip())
@@ -53,7 +58,7 @@ def _liczba(wartosc: str) -> float:
 
 def _email_techniczny(nazwa: str) -> str:
     czesci = [c for c in nazwa.lower().replace(".", " ").split() if c]
-    return (".".join(czesci) or "trader") + "@imported.local"
+    return (".".join(czesci) or "trader") + TECHNICZNA_DOMENA
 
 
 def _nastepny_login(session) -> int:

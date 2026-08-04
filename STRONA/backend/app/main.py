@@ -909,6 +909,9 @@ def me(trader: Trader = Depends(auth.current_trader)):
         commission = round(sum(o.amount_usd for o in paid_orders) * catalog.AFFILIATE_COMMISSION_PCT / 100.0, 2)
         return {"id": trader.id, "email": trader.email, "full_name": trader.full_name,
                 "is_admin": trader.is_admin, "kyc_status": trader.kyc_status,
+                # Czy weryfikacja jest w ogóle otwarta (patrz `kyc_dostepne`) —
+                # portal ma pokazać powód zamiast formularza, który i tak dostanie 403.
+                "kyc_available": kyc_dostepne(session, trader.id),
                 "email_verified": trader.email_verified is not False,
                 # potrzebne, żeby formularz KYC podświetlił zapisany kraj na liście
                 "kyc_country": trader.kyc_country,
@@ -1276,11 +1279,38 @@ def my_account_positions(account_id: int, trader: Trader = Depends(auth.current_
         session.close()
 
 
+# Komunikat w JEDNYM miejscu — wychodzi z formularza i z wysyłki plików, a dwa
+# różne brzmienia tej samej odmowy czytałyby się jak dwa różne powody.
+KYC_WYMAGA_FUNDED = ("Verification opens once one of your accounts is funded. "
+                     "Pass an evaluation first — we only collect identity documents "
+                     "from traders who have a payout to claim.")
+
+
+def kyc_dostepne(session, trader_id: int) -> bool:
+    """Czy trader przeszedł już ewaluację — warunek wstępny weryfikacji.
+
+    Sprawdzamy FAZĘ, nie status. Konto, które zdobyło funded, a potem złamało
+    regułę, ma `phase="funded"` i `status="breached"` — i taki trader wciąż może
+    mieć nierozliczoną wypłatę, więc odcięcie go od KYC zablokowałoby mu pieniądze,
+    które już zarobił. `phase` odpowiada na pytanie „czy przeszedł ewaluację",
+    a tylko o to tu chodzi.
+
+    Sens tej bramki jest podwójny: mniej pustych zgłoszeń do przejrzenia i mniej
+    zebranych dokumentów tożsamości — nie zbieramy skanów od kogoś, kto nie ma
+    jeszcze po co ich podawać.
+    """
+    return (session.query(Account.id)
+            .filter(Account.trader_id == trader_id,
+                    Account.phase == "funded").first()) is not None
+
+
 @app.post("/api/me/kyc")
 def submit_kyc(payload: KycIn, trader: Trader = Depends(auth.current_trader)):
     session = SessionLocal()
     try:
         tr = session.get(Trader, trader.id)
+        if not kyc_dostepne(session, trader.id):
+            raise HTTPException(403, KYC_WYMAGA_FUNDED)
         try:
             nazwa = fields.person_name(payload.full_name, "Full name")
             kraj = fields.country_name(payload.country)
@@ -1925,6 +1955,34 @@ def admin_ticket_reply(ticket_id: int, payload: AdminTicketReplyIn):
         session.close()
 
 
+@app.delete("/api/admin/tickets/{ticket_id}", dependencies=[Depends(auth.require_admin)])
+def admin_ticket_delete(ticket_id: int):
+    """Kasuje zgłoszenie razem z całą rozmową. Nieodwracalne.
+
+    Zamknięcie ticketu zostawiało go w „History" na zawsze — a trafiają tam też
+    wpisy testowe i spam, których nie ma po co trzymać. Zamknięty i skasowany to
+    dwie różne decyzje: pierwsza kończy sprawę, druga usuwa ślad.
+
+    Wiadomości lecą PRZED zgłoszeniem, bo `ticket_messages.ticket_id` wskazuje na
+    `support_tickets.id` i Postgres tego pilnuje (SQLite lokalnie też — patrz
+    `db.py`). Odwrotna kolejność to 500 wyłącznie na produkcji. Ta sama sekwencja
+    co w `admin_delete_trader`.
+    """
+    session = SessionLocal()
+    try:
+        t = session.get(SupportTicket, ticket_id)
+        if not t:
+            raise HTTPException(404, "Ticket not found")
+        ile = (session.query(TicketMessage)
+               .filter(TicketMessage.ticket_id == ticket_id)
+               .delete(synchronize_session=False))
+        session.delete(t)
+        session.commit()
+        return {"deleted": ticket_id, "messages_removed": ile}
+    finally:
+        session.close()
+
+
 # --- Settings ---------------------------------------------------------------
 class MePatch(BaseModel):
     full_name: str | None = None
@@ -2304,6 +2362,11 @@ async def kyc_upload_docs(trader: Trader = Depends(auth.current_trader),
     session = SessionLocal()
     try:
         tr = session.get(Trader, trader.id)
+        # Ta sama bramka co na formularzu. Bez niej dokumenty tożsamości dałoby się
+        # wgrać z pominięciem `POST /api/me/kyc` — a to właśnie ich zbieranie
+        # bramka ma ograniczyć.
+        if not kyc_dostepne(session, trader.id):
+            raise HTTPException(403, KYC_WYMAGA_FUNDED)
         saved = []
         for kind, up in files.items():
             if up is None:
@@ -3746,17 +3809,27 @@ def admin_pool_edit(pool_id: int, payload: PoolPatchIn):
 
 @app.delete("/api/admin/pool/{pool_id}", dependencies=[Depends(auth.require_admin)])
 def admin_pool_delete(pool_id: int):
-    """Usuwa WOLNY wpis z puli. Przydzielonego nie ruszamy — stoi za nim konto tradera."""
+    """Usuwa wpis WOLNY albo WYCOFANY. Blokujemy tylko rachunek w żywym użyciu.
+
+    Blokada obejmowała wcześniej wszystko, co `claimed` — a to zamykało panel na
+    wpisy wycofane (`retired_reason`), czyli takie, których konto tradera już nie
+    istnieje. Zostawały w tabeli na zawsze, bez żadnego przycisku.
+
+    Wycofany wpis nie trzyma niczego przy życiu: na `pool_accounts.id` nie wskazuje
+    ŻADEN klucz obcy, a powiązanie idzie w drugą stronę (`claimed_by_account_id`).
+    Traci się jedną rzecz i panel mówi o tym wprost w pytaniu: ślad, że ten login
+    u brokera był już komuś wydany, więc nie wolno go wpisać do puli ponownie.
+    """
     session = SessionLocal()
     try:
         p = session.get(PoolAccount, pool_id)
         if not p:
             raise HTTPException(404, "No such entry in the pool")
-        if p.claimed:
+        if p.claimed and not p.retired_reason:
             raise HTTPException(400, "This account is assigned to a trader and cannot be removed")
         session.delete(p)
         session.commit()
-        return {"deleted": pool_id}
+        return {"deleted": pool_id, "was_retired": bool(p.retired_reason)}
     finally:
         session.close()
 
@@ -4510,11 +4583,23 @@ def stats():
         by_status: dict[str, int] = {}
         for a in accs:
             by_status[a.status] = by_status.get(a.status, 0) + 1
+        # Licznik traderów brał WSZYSTKIE nieadministracyjne wiersze, a każda
+        # wypłata z Payout BOT-a i z importu CSV zakłada własnego tradera —
+        # przy jednej wypłacie dziennie ten kafelek rósł sam z siebie i nie
+        # odpowiadał już na pytanie „ilu mam klientów". Rekordy techniczne mają
+        # adres `…@imported.local` (patrz `payout_import._email_techniczny`),
+        # więc rozdzielenie jest jednoznaczne, a nie zgadywane.
+        klienci = (session.query(Trader)
+                   .filter(Trader.is_admin == False,                       # noqa: E712
+                           ~Trader.email.like(f"%{payout_import.TECHNICZNA_DOMENA}")).count())
+        wewnetrzni = (session.query(Trader)
+                      .filter(Trader.is_admin == False,                    # noqa: E712
+                              Trader.email.like(f"%{payout_import.TECHNICZNA_DOMENA}")).count())
         return {"total": len(accs), "by_status": by_status,
                 "funded": by_status.get("funded", 0), "active": by_status.get("active", 0),
                 "failed": by_status.get("failed", 0), "feed": settings.feed,
                 "stripe": "live" if settings.stripe_enabled else "mock",
-                "traders": session.query(Trader).filter(Trader.is_admin == False).count(),  # noqa: E712
+                "traders": klienci, "traders_internal": wewnetrzni,
                 "orders_paid": session.query(Order).filter(Order.status == "paid").count(),
                 "pool_free": session.query(PoolAccount).filter(PoolAccount.claimed == False).count(),  # noqa: E712
                 "provisioning": by_status.get("provisioning", 0)}

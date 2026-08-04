@@ -105,14 +105,32 @@ function toggleTheme(){
 paintTheme();
 
 let VIEW='overview';
+/* Ekran przejscia: paski trzymaja wysokosc widoku, kolko w kolorze akcentu mowi,
+   ze cos sie dzieje. Same paski na ciemnym motywie czytaly sie jako pusty ekran. */
+const LOADING_HTML=(h=260)=>`<div class="view-load">
+  <div class="skel" style="height:110px;margin-bottom:16px"></div>
+  <div class="skel" style="height:${h}px"></div>
+  <div class="vl-mid"><span class="vl-ring"></span><span class="vl-txt">Loading…</span></div>
+</div>`;
+
+/* Numer przelaczenia. Widoki pisza do #view dopiero po powrocie z API, wiec
+   wolniejszy POPRZEDNI widok potrafil skonczyc sie PO zmianie zakladki i nadpisac
+   nowy — na ekranie zostawal naglowek "Payouts" nad tabela kont. Zlapane przy
+   sprawdzaniu wskaznika ladowania. Gdy przebieg okaze sie nieaktualny, przerysowujemy
+   biezacy widok; to rzadka sciezka, wiec dodatkowe zapytanie nic nie kosztuje. */
+let PRZEJSCIE = 0;
+
 function go(v){
   VIEW=v;
   document.querySelectorAll('.sb-link[data-v],.botnav-btn[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const t=TITLES[v]||['',''];
   $('pg-title').textContent=t[0]; $('pg-crumb').textContent=t[1];
   toggleSide(false);
-  $('view').innerHTML='<div class="skel" style="height:110px;margin-bottom:16px"></div><div class="skel" style="height:260px"></div>';
-  VIEWS[v]().catch(e=>{if(!String(e.message).includes('token'))toast('Error: '+e.message,'err')});
+  const moj=++PRZEJSCIE;
+  $('view').innerHTML=LOADING_HTML(260);
+  VIEWS[v]()
+    .then(()=>{if(moj!==PRZEJSCIE&&VIEWS[VIEW])VIEWS[VIEW]()})
+    .catch(e=>{if(!String(e.message).includes('token'))toast('Error: '+e.message,'err')});
 }
 function toggleSide(open){
   $('side').classList.toggle('open',open);
@@ -236,7 +254,8 @@ const VIEWS={
     <div class="stats-row">
       ${tile('purple','layers','Accounts',s.total,`${s.active} active · ${s.provisioning??0} provisioning`)}
       ${tile('green','trend','Funded',s.funded,`${s.failed} failed`)}
-      ${tile('blue','users','Traders',s.traders,`${s.orders_paid} paid orders`)}
+      ${tile('blue','users','Traders',s.traders,`${s.orders_paid} paid orders`
+        +(s.traders_internal?` · ${s.traders_internal} internal hidden`:''))}
       ${tile('orange','dollar','Revenue','$'+fmt0(revenue),'all paid orders')}
     </div>
     <div class="sec-card card-sm">
@@ -327,12 +346,17 @@ const VIEWS={
  async tickets(){
   const rows=await api('/api/admin/tickets');
   window._tickets=rows;
+  /* X siedzi W wierszu, ktory sam otwiera rozmowe, wiec musi zatrzymac klikniecie —
+     inaczej kazde usuniecie otwieraloby przy okazji watek. Do `delTicket` idzie
+     samo id: temat bywa z apostrofem ("Can't log in"), a wstrzykniety w inline
+     onclick rozwalilby ten atrybut. */
   const row=t=>`
     <div class="ticket-row" onclick="openTicket(${t.id})">
       <div class="tile-ic ${t.status==='open'?'orange':t.status==='answered'?'green':'blue'}" style="width:36px;height:36px;flex:0 0 36px">${ICO.chat}</div>
       <div class="sub"><b>${esc(t.subject)}</b>
         <span>#${t.id} · ${esc(t.trader_email||'—')} · ${t.messages} message${t.messages>1?'s':''} · ${dstr(t.last_ts)}</span></div>
       <span class="status ${t.status==='closed'?'failed':t.status==='answered'?'paid':'pending'}"><span class="dot"></span>${esc(t.status)}</span>
+      ${XBTN(`event.stopPropagation();delTicket(${t.id})`,'Delete this ticket and its conversation')}
     </div>`;
   const active=rows.filter(t=>t.status!=='closed'), closed=rows.filter(t=>t.status==='closed');
   $('view').innerHTML=(active.length?`<div class="tbl-wrap">`+active.map(row).join('')+`</div>`
@@ -578,7 +602,9 @@ function poolListHtml(){
         <td class="muted" data-sort="${esc(p.claimed_at||'')}">${p.claimed_at?dstr(p.claimed_at):'—'}</td>
         <td style="white-space:nowrap">
           <button class="btn-o sm" onclick="editPool(${p.id})">Edit</button>
-          ${p.claimed?'':' '+XBTN(`delPool(${p.id},'${esc(p.platform_login)}')`,'Remove from pool')}</td></tr>
+          ${p.claimed&&!p.retired_reason?''
+            :' '+XBTN(`delPool(${p.id},'${esc(p.platform_login)}',${p.retired_reason?1:0})`,
+                      p.retired_reason?'Delete this retired entry':'Remove from pool')}</td></tr>
         <tr id="pool-edit-${p.id}" class="tr-sub" style="display:none"><td colspan="9" style="background:var(--bg)">
           <div class="pool-form" style="margin:6px 0">
             <input id="ed-login-${p.id}" class="inp" value="${esc(p.platform_login)}" placeholder="MT5 login">
@@ -652,17 +678,23 @@ function renderOrders(){
     (!q||(o.trader_email||'').toLowerCase().includes(q)
     ||(o.product_key||'').includes(q)||(o.status||'').includes(q)
     ||(o.flag||'').includes(q)||String(o.id)===q));
-  const paid=list.filter(o=>o.status==='paid');
+  /* Kafelki opisuja TO, CO WIDAC pod nimi — czyli zbior po filtrze i szukajce.
+     Wczesniej liczyly sie z calej listy, wiec przelaczenie na "Failed" zostawialo
+     nad pusta tabela pelny przychod. Ten sam blad byl w portalu na Challenges. */
+  const paid=rows.filter(o=>o.status==='paid');
   const revenue=paid.reduce((s,o)=>s+o.amount_usd,0);
   const avg=paid.length?revenue/paid.length:0;
+  const zawezone=rows.length!==list.length;
+  const podpis=zawezone?`<div class="sub">of ${list.length} total</div>`:'';
   $('view').innerHTML=`
     <div class="stats-row">
       <div class="stat-tile"><div class="tile-ic green">${ICO.dollar}</div>
         <div><div class="lbl">Revenue</div><div class="val">$${fmt0(revenue)}</div><div class="sub">${paid.length} paid orders</div></div></div>
       <div class="stat-tile"><div class="tile-ic blue">${ICO.file}</div>
-        <div><div class="lbl">Orders total</div><div class="val">${list.length}</div><div class="sub">${list.length-paid.length} unpaid</div></div></div>
+        <div><div class="lbl">Orders ${zawezone?'shown':'total'}</div><div class="val">${rows.length}</div>
+          <div class="sub">${rows.length-paid.length} unpaid</div></div></div>
       <div class="stat-tile"><div class="tile-ic purple">${ICO.trend}</div>
-        <div><div class="lbl">Average order</div><div class="val">$${fmt0(avg)}</div></div></div>
+        <div><div class="lbl">Average order</div><div class="val">$${fmt0(avg)}</div>${podpis}</div></div>
     </div>
     <div class="toolbar">
       <input class="inp" id="ord-q" placeholder="Search email, product, status…" value="${esc(window._ordQ||'')}"
@@ -1437,11 +1469,18 @@ async function savePool(id,claimed){
     go('pool');
   }catch(e){toast('Error: '+e.message,'err')}
 }
-function delPool(id,login){
+function delPool(id,login,retired){
+  /* Wycofany wpis to jedyny slad, ze ten login u brokera juz komus wyszedl —
+     pytanie musi to powiedziec wprost, bo po skasowaniu nic nie powstrzyma
+     wpisania go do puli po raz drugi. */
   xdel(`/api/admin/pool/${id}`,
-    `Remove ${login} from the pool?\n\nOnly free accounts can be removed — one already handed `
-    +`to a trader stays. This cannot be undone.`,
-    ()=>go('pool'),'Removed from the pool.');
+    retired
+      ? `Delete the retired entry ${login}?\n\nThe trader account behind it is gone, so nothing `
+        +`breaks. You do lose the record that this login was already handed out — nothing will `
+        +`stop it from being added to the pool again. This cannot be undone.`
+      : `Remove ${login} from the pool?\n\nAn account currently assigned to a trader stays. `
+        +`This cannot be undone.`,
+    ()=>go('pool'),retired?'Retired entry deleted.':'Removed from the pool.');
 }
 
 /* ---------- modal: grant a challenge ---------- */
@@ -1547,13 +1586,18 @@ const XBTN=(call,tip)=>`<button class="btn-x" title="${esc(tip)}" aria-label="${
    esc() jest tu OBOWIAZKOWE: te teksty niosa login, e-mail i nazwisko klienta,
    ktore w natywnym confirm() byly zwyklym tekstem, a tutaj trafiaja do HTML-a. */
 async function xdel(url,question,after,okMsg){
+  /* Wiersz ustalamy PRZED oknem potwierdzenia. Szukamy go po ostatnio klknietym
+     przycisku (bo `xdel` wolaja inline'owe onclicki), a klikniecie "Delete"
+     w oknie jest KOLEJNYM klknieciem w <button> — po nim `_ostatniPrzycisk`
+     wskazuje juz przycisk modala i `closest` nie znajduje niczego. Wiersz nie
+     znikal wiec wcale: zostawal na ekranie az do przeladowania widoku, a odliczanie
+     do cofniecia sugerowalo, ze cos sie stalo. Dotyczylo to wszystkich piatki X-ow.
+     `.ticket-row` obok `tr`, bo zgloszenia nie sa tabela, tylko kaflami. */
+  const wiersz=_ostatniPrzycisk&&_ostatniPrzycisk.closest('tr, .ticket-row');
   const [tytul,...reszta]=String(question).split('\n\n');
   if(!await askConfirm({title:tytul.trim(),
     body:esc(reszta.join('\n').trim()).replace(/\n/g,'<br>'),
     ok:'Delete',danger:true}))return;
-  /* Wiersz znika od razu; zadanie leci po oknie na cofniecie. Szukamy go po
-     ostatnio klknietym przycisku, bo `xdel` wolaja inline'owe onclicki. */
-  const wiersz=_ostatniPrzycisk&&_ostatniPrzycisk.closest('tr');
   withUndo(tytul.trim().replace(/\?+$/,''),async()=>{
     try{const r=await api(url,{method:'DELETE',keepalive:true});
       toast(typeof okMsg==='function'?okMsg(r):(okMsg||'Deleted.'),'ok');
@@ -1591,6 +1635,19 @@ function deleteOrderRow(id,email,amount,accId){
     +(accId?`Account ${accId} created from it STAYS.\n`:'')
     +`A paid order also leaves the revenue figure in Overview. This cannot be undone.`,
     ()=>go('orders'));
+}
+
+/* Temat bierzemy z ostatnio pobranej listy, a nie z atrybutu HTML — patrz komentarz
+   przy `row` w widoku Tickets. Gdy go nie ma, pytanie i tak jest jednoznaczne
+   dzieki numerowi zgloszenia. */
+function delTicket(id){
+  const t=(window._tickets||[]).find(x=>x.id===id);
+  xdel(`/api/admin/tickets/${id}`,
+    `Delete ticket #${id}${t?` — ${t.subject}`:''}?\n\n`
+    +`The whole conversation${t&&t.messages?` (${t.messages} message${t.messages>1?'s':''})`:''} `
+    +`goes with it and the trader loses it from their portal too. Closing a ticket only ends it; `
+    +`this erases it. This cannot be undone.`,
+    ()=>go('tickets'),'Ticket deleted.');
 }
 
 function deleteKycRow(tid,email){

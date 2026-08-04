@@ -569,6 +569,17 @@ const TITLES={
   support:['Support','Get help from our team'],
   settings:['Settings','Manage your account settings and preferences'],
 };
+/* Ten sam ekran przejscia co w panelu admina — patrz `.view-load` w portal.css. */
+const LOADING_HTML=(h=240)=>`<div class="view-load">
+  <div class="skel" style="height:110px;margin-bottom:16px"></div>
+  <div class="skel" style="height:${h}px"></div>
+  <div class="vl-mid"><span class="vl-ring"></span><span class="vl-txt">Loading…</span></div>
+</div>`;
+
+/* Numer przelaczenia — patrz ten sam mechanizm w admin-panel.js. Wolniejszy
+   POPRZEDNI widok potrafi skonczyc sie po zmianie zakladki i nadpisac nowy. */
+let PRZEJSCIE = 0;
+
 function go(v){
   CURV=v; window._view=v; window._onDetail=false;
   document.querySelectorAll('.sb-link[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
@@ -580,8 +591,12 @@ function go(v){
   $('pg-title').textContent=t[0]; $('pg-crumb').textContent=t[1];
   toggleSide(false);
   $('notif-panel')?.classList.add('hidden');
-  $('view').innerHTML='<div class="skel" style="height:110px;margin-bottom:16px"></div><div class="skel" style="height:240px"></div>';
-  VIEWS[v]();
+  const moj=++PRZEJSCIE;
+  $('view').innerHTML=LOADING_HTML();
+  /* Bez `catch` — tak samo jak dotad. Blad widoku ma byc widoczny w konsoli,
+     a nie polkniety przez opakowanie dodane dla numeru przelaczenia. */
+  Promise.resolve(VIEWS[v]())
+    .then(()=>{if(moj!==PRZEJSCIE&&VIEWS[CURV])VIEWS[CURV]()});
 }
 function toggleSide(open){
   $('side').classList.toggle('open',open);
@@ -935,15 +950,20 @@ async function upgradeNow(key){
 /* ============================ VIEWS ============================ */
 const VIEWS={
  async accounts(){
-  await pushCfg();                 /* the opt-in banner needs to know if the server has keys */
-  const accs=await api('/api/me/accounts');
-  /* The upsell strip needs the catalog and openBuy() needs PRODUCTS — the
-     Store view is not always visited first, so load it here once. */
-  if(!PRODUCTS.length){try{PRODUCTS=await api('/api/products')}catch(e){}}
-  const live=accs.filter(a=>['active','funded','passed'].includes(a.status));
-  const balance=live.reduce((s,a)=>s+a.balance,0);
-  const profit=live.reduce((s,a)=>s+(a.balance-a.initial_balance),0);
-  const payouts=accs.reduce((s,a)=>s+(a.paid_out||0),0);
+  /* Trzy niezalezne zapytania szly SZEREGOWO — kazde czekalo na zakonczenie
+     poprzedniego, wiec wejscie w Challenges kosztowalo trzy pelne obiegi do
+     serwera (a baza stoi za oceanem) zamiast jednego. Zadne z nich nie potrzebuje
+     wyniku pozostalych:
+       pushCfg()          — baner opt-in musi wiedziec, czy serwer ma klucze push,
+       /api/me/accounts   — dane widoku,
+       /api/products      — katalog dla pasa upsellu i dla openBuy(); pobierany raz.
+     Katalog swiadomie NIE blokuje widoku przy bledzie: pas upsellu jest dodatkiem,
+     lista kont ma sie pokazac tak czy tak. */
+  const [,accs]=await Promise.all([
+    pushCfg(),
+    api('/api/me/accounts'),
+    PRODUCTS.length?null:api('/api/products').then(p=>{PRODUCTS=p}).catch(()=>{}),
+  ]);
   const banner=accs.length
     ?`<div class="gradient-banner">
         <span class="gb-tag">${ICO.spark} Refer &amp; earn</span><span class="gb-sep"></span>
@@ -951,16 +971,6 @@ const VIEWS={
         <button class="gb-btn" onclick="goAffiliate()">Get your link ›</button>
       </div>`
     :'';
-  const stats=`<div class="stats-row">
-    <div class="stat-tile"><div class="tile-ic purple">${ICO.dollar}</div>
-      <div><div class="lbl">Total Balance</div><div class="val">$${fmt(balance)}</div></div></div>
-    <div class="stat-tile"><div class="tile-ic green">${ICO.trend}</div>
-      <div><div class="lbl">Total Profit</div><div class="val ${profit>=0?'up':'down'}">${profit>=0?'+':''}$${fmt(profit)}</div></div></div>
-    <div class="stat-tile"><div class="tile-ic blue">${ICO.layers}</div>
-      <div><div class="lbl">Total Accounts</div><div class="val">${accs.length} <small>${live.length} live</small></div></div></div>
-    <div class="stat-tile"><div class="tile-ic orange">${ICO.wallet}</div>
-      <div><div class="lbl">Total Payouts</div><div class="val">$${fmt(payouts)}</div></div></div>
-  </div>`;
   if(!accs.length){
     $('view').innerHTML=`<div class="empty">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>
@@ -990,6 +1000,14 @@ const VIEWS={
       .sort((a,b)=>a.account_size-b.account_size);
     if(!fam.length)return {html:'',banner:''};
     const who=ref.status==='provisioning'?'your account':esc(ref.login);
+    /* Wstazka "Best value" wisiala na planie oznaczonym w katalogu jako popularny
+       (POPULAR_SIZE = 100k). Pas pokazuje WYLACZNIE plany wieksze od konta tradera,
+       wiec od 100k w gore popularnego w nim nie ma i zaden kafelek nie byl
+       wyrozniony — a to wlasnie ten klient, ktoremu podpowiedz przydaje sie
+       najbardziej. Gdy popularnego brak, bierzemy DRUGI plan w gore: pierwszy jest
+       oczywistym nastepnym krokiem i wybiera sie sam, a najwieksze sa poza
+       zasiegiem. Przy jednym wiekszym planie wstazke dostaje ten jeden. */
+    const wyroznik=(fam.find(p=>p.popular)||fam[Math.min(1,fam.length-1)]).key;
     /* Dwa rowne rzedy zamiast pelnego pierwszego i ogona w drugim. Przy 9
        planach `auto-fill` dawal 6+3; teraz liczba kolumn to polowa kafelkow
        zaokraglona w gore (9 -> 5+4, 8 -> 4+4, 7 -> 4+3). Do czterech kafelkow
@@ -1009,10 +1027,10 @@ const VIEWS={
         </div>
         <button class="btn-p" onclick="go('store')">Upgrade →</button>
       </div>
-      <div class="upsell-row" style="--up-cols:${kolumn};--up-max:${rzadMax}px">${fam.map(p=>`<div class="upsell-card${p.popular?' pop':''}"
+      <div class="upsell-row" style="--up-cols:${kolumn};--up-max:${rzadMax}px">${fam.map(p=>`<div class="upsell-card${p.key===wyroznik?' pop':''}"
         role="button" tabindex="0" onclick="openBuy('${p.key}')"
         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openBuy('${p.key}')}">
-        ${p.popular?'<span class="uc-ribbon">Best value</span>':''}
+        ${p.key===wyroznik?'<span class="uc-ribbon">Best value</span>':''}
         <div class="uc-if">If you had</div>
         <div class="uc-size">$${fmt0(p.account_size)}</div>
         <div class="uc-sub">you could have earned</div>
@@ -1033,6 +1051,30 @@ const VIEWS={
   })();
   const shown=accs.filter(a=>cf==='funded'?isFunded(a):cf==='failed'?isDead(a)
     :cf==='active'?(!isFunded(a)&&!isDead(a)):true);
+  /* Podsumowania licza SIE Z FILTRU, nie z calego zbioru. Wczesniej staly nad
+     lista jako stale: po wybraniu "Failed" lista mowila "0 of 1" i "No failed
+     accounts", a kafelki dalej pokazywaly +$375 zysku z konta, ktorego w tym
+     widoku nie bylo. Kazda liczba nad lista ma opisywac to, co pod nia widac.
+     Salda i zysk dalej licza tylko konta ZYWE (prowizjonowane nie maja jeszcze
+     rachunku, a zamkniete nie sa juz kapitalem) — filtr zaweza zbior, nie zmienia
+     definicji. */
+  const zywe=a=>['active','funded','passed'].includes(a.status);
+  const live=shown.filter(zywe);
+  const balance=live.reduce((s,a)=>s+a.balance,0);
+  const profit=live.reduce((s,a)=>s+(a.balance-a.initial_balance),0);
+  const payouts=shown.reduce((s,a)=>s+(a.paid_out||0),0);
+  const zakres=cf==='all'?'':{active:'Evaluation only',funded:'Funded only',failed:'Ended only'}[cf];
+  const podpis=zakres?`<div class="sub">${zakres}</div>`:'';
+  const stats=`<div class="stats-row">
+    <div class="stat-tile"><div class="tile-ic purple">${ICO.dollar}</div>
+      <div><div class="lbl">Total Balance</div><div class="val">$${fmt(balance)}</div>${podpis}</div></div>
+    <div class="stat-tile"><div class="tile-ic green">${ICO.trend}</div>
+      <div><div class="lbl">Total Profit</div><div class="val ${profit>=0?'up':'down'}">${profit>=0?'+':''}$${fmt(profit)}</div>${podpis}</div></div>
+    <div class="stat-tile"><div class="tile-ic blue">${ICO.layers}</div>
+      <div><div class="lbl">Total Accounts</div><div class="val">${shown.length} <small>${live.length} live</small></div>${podpis}</div></div>
+    <div class="stat-tile"><div class="tile-ic orange">${ICO.wallet}</div>
+      <div><div class="lbl">Total Payouts</div><div class="val">$${fmt(payouts)}</div>${podpis}</div></div>
+  </div>`;
   const filterBar=`<div class="chal-filter">
     <div class="shop-tabs">${[['all','All'],['active','Active'],['funded','Funded'],['failed','Failed']]
       .map(([k,l])=>`<button class="shop-tab${cf===k?' on':''}" onclick="chalFilter('${k}')">${l}</button>`).join('')}</div>
@@ -1136,7 +1178,12 @@ const VIEWS={
  async board(){
   const b=await api('/api/leaderboard');
   if(!b.length){$('view').innerHTML='<div class="empty"><h3>No ranked accounts yet</h3><p>The leaderboard fills up as traders make progress.</p></div>';return}
-  const totalEquity=b.reduce((s,r)=>s+(r.equity||0),0);
+  /* Kafelek pokazywal SUME EQUITY kont funded, czyli w ogromnej wiekszosci nasz
+     wlasny kapital: konto $200k z zyskiem $14k liczylo sie jako "$214,311". Ranking
+     jest o wynikach traderow, wiec sumujemy to, co faktycznie wypracowali —
+     equity ponad saldo startowe. Ujemne wyniki wchodza normalnie: to ma byc
+     dorobek grupy, a nie sama smietanka. */
+  const totalProfit=b.reduce((s,r)=>s+((r.equity||0)-(r.account_size||0)),0);
   const best=b[0];
   const medal=['gold','silver','bronze'];
   let prevRanks=null;try{prevRanks=JSON.parse(localStorage.getItem('pf_board_prev')||'null')}catch(e){}
@@ -1160,7 +1207,8 @@ const VIEWS={
       <div class="stat-tile"><div class="tile-ic blue">${ICO.layers}</div>
         <div><div class="lbl">Traders ranked</div><div class="val">${b.length}</div></div></div>
       <div class="stat-tile"><div class="tile-ic green">${ICO.trend}</div>
-        <div><div class="lbl">Funded equity</div><div class="val up">$${fmt0(totalEquity)}</div></div></div>
+        <div><div class="lbl">Profit earned</div><div class="val ${totalProfit>=0?'up':'down'}">${totalProfit<0?'−':'+'}$${fmt0(Math.abs(totalProfit))}</div>
+          <div class="sub">by ranked traders</div></div></div>
       <div class="stat-tile"><div class="tile-ic purple">${ICO.trophy}</div>
         <div><div class="lbl">Best return</div><div class="val up">+${best.profit_pct.toFixed(2)}%</div></div></div>
       <div class="stat-tile"><div class="tile-ic orange">${ICO.cal}</div>
@@ -1555,6 +1603,20 @@ const VIEWS={
 
  async kyc(){
   const s=ME.kyc_status;
+  /* Weryfikacja otwiera sie dopiero po przejsciu ewaluacji. Pokazujemy powod
+     zamiast formularza — wypelnienie go i tak skonczyloby sie odmowa z serwera,
+     a tak trader od razu wie, czego brakuje. Zlozone juz zgloszenia (pending /
+     approved / rejected) obslugujemy dalej normalnie: bramka dotyczy SKLADANIA,
+     a nie ogladania wlasnego statusu. */
+  if(ME.kyc_available===false&&(!s||s==='none')){
+    $('view').innerHTML=`<div class="empty">
+      ${ICO.shield}
+      <h3>Verification opens after your first funded account</h3>
+      <p>Pass an evaluation and this page unlocks. We only ask for identity documents
+         from traders who have a payout to claim — there is nothing to do here yet.</p>
+      <button class="btn-p" onclick="go('accounts')">View my challenges</button></div>`;
+    return;
+  }
   if(s==='approved'){
     $('view').innerHTML=`<div class="panel" style="display:flex;gap:14px;align-items:center">
       <div class="tile-ic green">${ICO.shield}</div>

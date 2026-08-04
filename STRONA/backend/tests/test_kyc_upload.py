@@ -15,7 +15,7 @@ from app import auth  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import KycFile, Trader  # noqa: E402
+from app.models import Account, KycFile, Trader  # noqa: E402
 
 init_db()
 client = TestClient(app)
@@ -27,15 +27,29 @@ JPEG = b"\xff\xd8\xff\xe0" + b"x" * 40          # nagłówek JPEG + śmieci
 PDF = b"%PDF-1.4 test"
 
 
-def _trader():
+def _trader(funded: bool = True):
+    """Trader z kontem funded — weryfikacja otwiera sie dopiero po ewaluacji
+    (`main.kyc_dostepne`), wiec bez konta kazdy tutejszy test dostalby 403."""
     email = f"kycup{next(LICZNIK)}@test.pl"
     s = SessionLocal()
     tr = Trader(email=email, password_hash=auth.hash_password("haslo1234"),
                 full_name="Kyc Uploader", referral_code=auth.secrets.token_hex(3))
-    s.add(tr); s.commit()
+    s.add(tr); s.flush()
     tid = tr.id
+    if funded:
+        s.add(_konto_funded(tid))
+    s.commit()
     s.close()
     return tid, {"Authorization": f"Bearer {auth.make_token(tid)}"}
+
+
+def _konto_funded(trader_id: int) -> Account:
+    login = f"77{next(LICZNIK):05d}"
+    return Account(login=login, trader_id=trader_id, trader_name="Kyc Uploader",
+                   product_key="2step-50k", preset="2step-50k", initial_balance=50_000.0,
+                   steps=2, phase="funded", status="funded", balance=50_000.0,
+                   equity=50_000.0, peak_equity=50_000.0, day_start_equity=50_000.0,
+                   day_start_balance=50_000.0)
 
 
 def test_upload_jpeg_i_pdf_laduje_w_bazie():
@@ -106,3 +120,41 @@ def test_formularz_do_pending_i_kolejki_admina():
     assert r.status_code == 200 and r.json()["kyc_status"] == "pending"
     kolejka = client.get("/api/admin/kyc", headers=ADMIN).json()
     assert any(t["trader_id"] == tid for t in kolejka["pending"])
+
+
+def test_bez_konta_funded_weryfikacja_zamknieta():
+    """Weryfikacja otwiera sie po przejsciu ewaluacji: mniej pustych zgloszen do
+    przejrzenia i mniej zebranych dokumentow tozsamosci. Bramka musi stac na OBU
+    wejsciach — formularz i wysylka plikow — inaczej skany wchodza bokiem."""
+    _, h = _trader(funded=False)
+
+    r = client.post("/api/me/kyc", headers=h, json={
+        "full_name": "Bez Konta", "country": "Poland", "dob": "01/01/1990",
+        "address": "ul. Testowa 1", "id_type": "passport", "id_number": "X1"})
+    assert r.status_code == 403
+
+    d = client.post("/api/me/kyc/docs", headers=h,
+                    files={"id_front": ("f.jpg", JPEG, "image/jpeg")})
+    assert d.status_code == 403, "skanow nie wolno przyjac z pominieciem formularza"
+
+    s = SessionLocal()
+    assert s.query(KycFile).count() >= 0            # nic nie wybuchlo
+    s.close()
+    assert client.get("/api/auth/me", headers=h).json()["kyc_available"] is False
+
+
+def test_konto_po_breachu_dalej_otwiera_weryfikacje():
+    """Konto, ktore zdobylo funded i potem zlamalo regule, ma phase='funded'
+    i status='breached'. Taki trader moze miec nierozliczona wyplate, wiec
+    odciecie go od KYC zablokowaloby mu wlasne pieniadze."""
+    tid, h = _trader(funded=False)
+    s = SessionLocal()
+    acc = _konto_funded(tid)
+    acc.status = "breached"
+    s.add(acc); s.commit(); s.close()
+
+    assert client.get("/api/auth/me", headers=h).json()["kyc_available"] is True
+    r = client.post("/api/me/kyc", headers=h, json={
+        "full_name": "Po Breachu", "country": "Poland", "dob": "01/01/1990",
+        "address": "ul. Testowa 2", "id_type": "passport", "id_number": "X2"})
+    assert r.status_code == 200
