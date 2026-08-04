@@ -51,6 +51,38 @@ def init_db() -> None:
     _relax_not_null()
 
 
+# Odcisk wersji kodu, dla ktorej schemat jest juz doprowadzony do porzadku.
+# Siedzi w `app_settings` (istniejaca tabela klucz-wartosc), zeby nie zakladac
+# osobnej tabeli tylko na jeden wiersz.
+_KLUCZ_SCHEMATU = "schema_fingerprint"
+
+
+def schema_fingerprint() -> str | None:
+    """Wersja kodu, dla której schemat i cennik są już zsynchronizowane.
+
+    Jeden round-trip; brak tabeli (świeża baza) to nie błąd, tylko odpowiedź
+    „jeszcze nic nie zrobiono".
+    """
+    from sqlalchemy import text
+
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(text("SELECT value FROM app_settings WHERE key = :k"),
+                               {"k": _KLUCZ_SCHEMATU}).first()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
+def mark_schema_current(fingerprint: str) -> None:
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM app_settings WHERE key = :k"), {"k": _KLUCZ_SCHEMATU})
+        conn.execute(text("INSERT INTO app_settings (key, value) VALUES (:k, :v)"),
+                     {"k": _KLUCZ_SCHEMATU, "v": fingerprint})
+
+
 # Kolumny dodane po tym, jak ktoś już miał bazę. `create_all` NIE robi ALTER-ów,
 # więc bez tego stara baza wywala się na SELECT-cie z nowym polem.
 _NEW_COLUMNS: dict[str, dict[str, str]] = {

@@ -7,6 +7,7 @@ asercje odporne na cudze wiersze i reset cache przed każdym odczytem statystyk.
 """
 import os
 import tempfile
+from pathlib import Path
 
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{tempfile.NamedTemporaryFile(suffix='.db', delete=False).name}")
 os.environ.setdefault("FEED", "sim")
@@ -290,3 +291,50 @@ def test_konto_w_trakcie_eval1_nie_ma_certyfikatu():
     with TestClient(app) as c:
         lista = c.get("/api/me/accounts", headers={"Authorization": f"Bearer {token}"}).json()
     assert all(not a["cert_token"] for a in lista if a["trader_name"] == "Bez Certa")
+
+
+def test_assety_maja_dlugi_cache_a_html_nie():
+    """Bez tego przeglądarka odpytuje o KAŻDY plik przy każdej nawigacji.
+
+    Linki z szablonów mają ?v=<sha deployu>, więc treść pod danym adresem nigdy
+    się nie zmienia — stąd `immutable`. HTML musi zostać świeży, inaczej po
+    deployu zostałby ze starymi linkami ?v=.
+    """
+    with TestClient(app) as c:
+        wersjonowany = c.get("/static/css/site.css?v=deadbeef")
+        goly = c.get("/static/css/site.css")          # bez ?v= treść może się zmienić
+        font = c.get("/static/fonts/inter.woff2")
+        strona = c.get("/")
+        sw = c.get("/sw.js")
+
+    assert wersjonowany.status_code == 200
+    assert "immutable" in wersjonowany.headers["cache-control"]
+    assert "max-age=31536000" in wersjonowany.headers["cache-control"]
+
+    assert "immutable" not in goly.headers["cache-control"]
+    assert "max-age=86400" in goly.headers["cache-control"]
+
+    assert "max-age=2592000" in font.headers["cache-control"]
+
+    assert strona.headers["cache-control"] == "no-cache"
+    assert sw.headers["cache-control"] == "no-cache"
+
+
+def test_assety_z_pierwszego_wejscia_miesza_sie_w_budzecie():
+    """Budżet wagowy na pliki, które ciągnie KAŻDE pierwsze wejście na stronę.
+
+    Logo trafiło tu z 90 kB — było zapisane jako pełne RGBA, choć to płaski
+    dwukolorowy znak; sam szum ±2 na kanale ważył dziesięć razy więcej niż
+    kształt. Limity są luźne (ok. 1,5× obecnego stanu), więc łapią wrzucenie
+    nieprzetworzonego eksportu, a nie normalną edycję.
+    """
+    budzet = {
+        "static/img/logo.png": 20_000,
+        "static/img/favicon.png": 10_000,
+        "static/css/site.css": 70_000,
+        "static/js/site.js": 70_000,
+    }
+    korzen = Path(__file__).resolve().parent.parent
+    za_ciezkie = {p: (korzen / p).stat().st_size for p, limit in budzet.items()
+                  if (korzen / p).stat().st_size > limit}
+    assert not za_ciezkie, f"assety poza budżetem (limity: {budzet}): {za_ciezkie}"

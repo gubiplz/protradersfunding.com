@@ -31,7 +31,7 @@ from sqlalchemy import func
 from . import (auth, billing, catalog, metaquotes_web, notify, payout_import, poller,
                provisioning, push, rules, telemetry, tradebot)
 from .config import get_settings
-from .db import SessionLocal, init_db
+from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint
 from .models import (Account, AppSetting, Breach, Certificate, CreditLedger, EquitySnapshot,
                      JournalEntry, KycFile, Notification, Order, Payout, PayoutRequest,
                      PoolAccount, Product, PushSubscription, SupportTicket, TelemetryEvent,
@@ -162,13 +162,35 @@ def _warn_if_placeholder_provisioning() -> None:
         print("[start] feed: LOCAL — equity nie jest czytane z zewnątrz; ruch daje Trade BOT.")
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+def _przygotuj_baze() -> None:
+    """Migracje schematu i cennik: raz na deploy, nie przy każdym zimnym starcie.
+
+    Na serverless proces wstaje od nowa co kilka minut, a ta ścieżka to 33
+    round-tripy do bazy (reflekcja schematu, ALTER-y, upsert oferty). Przy
+    Postgresie po drugiej stronie łącza doklejają się w całości do PIERWSZEGO
+    żądania użytkownika. Wynik zależy wyłącznie od wersji kodu, więc odkładamy
+    odcisk deployu w bazie i kolejne starty tej samej wersji sprawdzają go
+    jednym SELECT-em.
+
+    Bez `VERCEL_GIT_COMMIT_SHA` (lokalnie, testy) odcisk jest pusty i pełna
+    ścieżka idzie zawsze — tam modele zmieniają się między restartami bez
+    żadnego commita, a baza jest tuż obok i nic to nie kosztuje.
+    """
+    odcisk = os.environ.get("VERCEL_GIT_COMMIT_SHA", "")
+    if odcisk and schema_fingerprint() == odcisk:
+        return
     init_db()
     _migruj_login_admina()
     sync_catalog()    # oferta i cennik z kodu — niezależnie od trybu
     if settings.auto_seed:
         seed_demo()   # admin zawsze; konta demo tylko w trybie sim
+    if odcisk:
+        mark_schema_current(odcisk)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _przygotuj_baze()
     _warn_if_placeholder_provisioning()
     if settings.poller_enabled:
         poller.start()
@@ -180,7 +202,36 @@ async def lifespan(app: FastAPI):
 # wystawialoby cala mape API kazdemu.
 app = FastAPI(title=f"{settings.site_name} API", version="0.7.0", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
-app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
+class _CachedStatic(StaticFiles):
+    """StaticFiles z sensownym Cache-Control.
+
+    Domyślnie Vercel odsyła assety z `max-age=0, must-revalidate`, więc
+    przeglądarka pyta o KAŻDY plik przy każdej nawigacji (zmierzone: 14 zapytań
+    na wejście, ~0,5 s zmarnowane), a CDN nic nie trzyma — fonty i obrazki
+    generuje funkcja Pythona po drugiej stronie Atlantyku.
+
+    Linki do CSS/JS z szablonów mają `?v=<sha deployu>`, więc pod tym samym
+    adresem treść nigdy się nie zmienia — mogą wisieć rok jako `immutable`.
+    Reszta idzie po ryzyku podmiany: fonty i biblioteki nie zmieniają się nigdy,
+    obrazki potrafią (podmiana logo ma zejść na dół w ciągu doby, nie miesiąca).
+    """
+
+    def _cache_control(self, path: str, query: bytes) -> str:
+        if b"v=" in query:
+            return "public, max-age=31536000, immutable"
+        if path.startswith(("fonts/", "lib/")):
+            return "public, max-age=2592000"
+        return "public, max-age=86400"
+
+    async def get_response(self, path, scope):
+        resp = await super().get_response(path, scope)
+        if resp.status_code in (200, 304):
+            resp.headers["Cache-Control"] = self._cache_control(
+                path, scope.get("query_string", b""))
+        return resp
+
+
+app.mount("/static", _CachedStatic(directory=str(STATIC)), name="static")
 
 
 @app.get("/robots.txt", include_in_schema=False)
