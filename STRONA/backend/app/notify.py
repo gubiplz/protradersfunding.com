@@ -13,6 +13,8 @@ import json
 import smtplib
 import tempfile
 import urllib.request
+from contextlib import contextmanager
+from contextvars import ContextVar
 from email.message import EmailMessage
 from pathlib import Path
 
@@ -506,7 +508,41 @@ def _email_allowed(event: str, to_email: str) -> bool:
         return True
 
 
+# Wysyłka jest sieciowa i wolna: sam SMTP to kilkanaście round-tripów do Brevo,
+# a każde `send()` siedzi w środku POST-a, na który ktoś patrzy (rejestracja
+# zmierzona: 706 ms, z czego ~700 ms to SMTP). Gdy trwa request, zlecenia lądują
+# w tej kolejce, a `main` odpala je jako BackgroundTask — czyli PO odesłaniu
+# odpowiedzi. Poza requestem (cron, poller, testy wołające notify wprost)
+# kolejki nie ma i wysyłka idzie od razu, tak jak dotąd.
+_kolejka: ContextVar[list | None] = ContextVar("notify_kolejka", default=None)
+
+
+@contextmanager
+def kolejkuj():
+    """Na czas bloku zbiera wysyłki zamiast je wykonywać; oddaje listę zadań."""
+    zadania: list = []
+    token = _kolejka.set(zadania)
+    try:
+        yield zadania
+    finally:
+        _kolejka.reset(token)
+
+
+def _odloz(fn, *args) -> bool:
+    zadania = _kolejka.get()
+    if zadania is None:
+        return False
+    zadania.append((fn, args))
+    return True
+
+
 def send(event: str, to_email: str | None, ctx: dict | None = None) -> None:
+    if _odloz(_send_teraz, event, to_email, ctx):
+        return
+    _send_teraz(event, to_email, ctx)
+
+
+def _send_teraz(event: str, to_email: str | None, ctx: dict | None = None) -> None:
     ctx = ctx or {}
     subject, body = _render(event, ctx)
     adres = to_email          # oryginal dla kanalu push/centrum (pref sprawdza sam)
@@ -574,6 +610,12 @@ def notify_admins(event: str, title: str, body: str = "") -> None:
     Osobna ścieżka od send(): bez maila i bez bramki preferencji tradera —
     to sygnał operacyjny „coś przyszło". NIGDY nie rzuca: zdarzenie admina
     nie może wywrócić requestu tradera, który je wywołał."""
+    if _odloz(_notify_admins_teraz, event, title, body):
+        return
+    _notify_admins_teraz(event, title, body)
+
+
+def _notify_admins_teraz(event: str, title: str, body: str = "") -> None:
     try:
         from . import push
         from .db import SessionLocal

@@ -22,9 +22,11 @@ from pathlib import Path
 from time import monotonic
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Response, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.background import BackgroundTask
 from pydantic import BaseModel
 from sqlalchemy import func
 
@@ -3958,6 +3960,32 @@ async def _lazy_tick_middleware(request: Request, call_next):
     if settings.lazy_tick_sec > 0 and request.url.path in _LAZY_TICK_PATHS:
         await _lazy_tick()
     return await call_next(request)
+
+
+@app.middleware("http")
+async def _powiadomienia_po_odpowiedzi(request: Request, call_next):
+    """Maile i powiadomienia lecą PO odesłaniu odpowiedzi, nie w jej trakcie.
+
+    SMTP to kilkanaście round-tripów do Brevo, a `notify.send` siedzi w środku
+    POST-a, na który ktoś patrzy — sama rejestracja czekała przez to 706 ms.
+    Runtime Pythona na Vercelu strumieniuje odpowiedź, a wywołanie funkcji żyje
+    aż BackgroundTask się skończy: klient dostaje odpowiedź od razu, a mail i
+    tak wychodzi w tym samym wywołaniu, więc nic nie przepada.
+
+    Gdy handler rzuci wyjątkiem, zadania giną razem z nim — i o to chodzi:
+    powiadomienie o operacji, która się nie udała, nie ma prawa wyjść.
+    """
+    with notify.kolejkuj() as zadania:
+        response = await call_next(request)
+    if zadania:
+        wczesniejsze = response.background
+        async def _wyslij() -> None:
+            if wczesniejsze is not None:
+                await wczesniejsze()
+            for fn, args in zadania:
+                await run_in_threadpool(fn, *args)
+        response.background = BackgroundTask(_wyslij)
+    return response
 
 
 def _require_cron(x_admin_token: str | None = Header(default=None),
