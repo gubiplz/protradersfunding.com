@@ -446,6 +446,13 @@ class Payout(Base):
     # zawsze. Wczesniej jedynym sposobem zdjecia wyplaty ze strony bylo cofniecie
     # certyfikatu, ktore zabijalo tez publiczny link tradera.
     show_on_lp: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Czy trader zgodzil sie na opublikowanie PELNEGO certyfikatu: imie i
+    # nazwisko, kwota co do centa i token, ktorym kazdy moze zweryfikowac
+    # dokument. To jest osobna decyzja niz `show_on_lp`, ktore odpowiada tylko za
+    # zamaskowany wpis na pasie ("Imogen I.", kwota w pelnych dolarach, bez
+    # linku). Domyslnie False: pas dziala jak dotad, a pelny dokument wychodzi na
+    # zewnatrz dopiero wtedy, gdy ktos swiadomie go tam wypuscil.
+    cert_public: Mapped[bool] = mapped_column(Boolean, default=False)
 
     account: Mapped[Account] = relationship(back_populates="payouts")
 

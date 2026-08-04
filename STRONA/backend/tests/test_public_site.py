@@ -304,6 +304,69 @@ def test_publiczny_pas_certyfikatow_maskuje_i_nie_ujawnia_tokenow():
             assert zakazane not in x
 
 
+def test_pas_oddaje_pelny_certyfikat_dopiero_po_zgodzie():
+    """`cert_public` to jedyna droga, zeby z pasa wyszlo nazwisko i token.
+
+    Zamaskowany wpis mowi "Zgodna P., $900" i nie da sie go z niczym zestawic.
+    Wpis ze zgoda mowi "Zgodna Pelna, $900.42" i niesie token, wiec kazdy otworzy
+    dokument — czyli publikujemy dochod wskazywalnej osoby. Test pilnuje obu
+    stron tej granicy naraz: ze sama obecnosc kolumny niczego nie odslania i ze
+    po jej wlaczeniu kwota schodzi do centa, a nie zostaje zaokraglona.
+    """
+    tid, _ = _trader("zgoda@test.pl", "Zgodna Pelna")
+    aid = _konto(tid, "Zgodna Pelna", "770200", status="funded", phase="funded")
+    s = SessionLocal()
+    s.add(Payout(account_id=aid, profit_amount=1000.47, trader_share=900.42, paid=True,
+                 cert_token="zgoda-token-jawny"))
+    s.commit(); s.close()
+
+    main_mod._PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
+    with TestClient(app) as c:
+        r = c.get("/api/public/certificates/recent")
+    assert "zgoda-token-jawny" not in r.text, "token wyszedl bez zgody"
+    assert "Zgodna Pelna" not in r.text, "pelne nazwisko wyszlo bez zgody"
+    zamaskowany = [x for x in r.json() if x["trader"] == "Zgodna P."]
+    assert zamaskowany and zamaskowany[0]["amount_usd"] == 900, \
+        "bez zgody kwota ma byc w pelnych dolarach"
+
+    s = SessionLocal()
+    p = s.query(Payout).filter(Payout.cert_token == "zgoda-token-jawny").one()
+    p.cert_public = True
+    s.commit(); s.close()
+
+    main_mod._PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
+    with TestClient(app) as c:
+        r = c.get("/api/public/certificates/recent")
+    jawny = [x for x in r.json() if x.get("cert_token") == "zgoda-token-jawny"]
+    assert jawny, "po zgodzie token nie wyszedl"
+    assert jawny[0]["trader"] == "Zgodna Pelna"
+    assert jawny[0]["amount_usd"] == 900.42, "kwota po zgodzie ma isc co do centa"
+    assert jawny[0]["verify_url"] == "/verify/zgoda-token-jawny"
+
+
+def test_zdjecie_z_pasa_cofa_zgode_na_pelny_certyfikat():
+    """Wypłata zdjeta z pasa traci tez `cert_public`.
+
+    Bez tego flaga przelezalaby wlaczona i wypłata wrocilaby kiedys na pas od
+    razu z nazwiskiem i tokenem — czyli zgoda z zeszlego miesiaca zadzialalaby
+    na publikacje, o ktorej nikt juz nie pamieta.
+    """
+    tid, _ = _trader("cofniecie@test.pl", "Cofnieta Zgoda")
+    aid = _konto(tid, "Cofnieta Zgoda", "770300", status="funded", phase="funded")
+    s = SessionLocal()
+    s.add(Payout(account_id=aid, profit_amount=500.0, trader_share=450.0, paid=True,
+                 cert_token="cofniecie-token", cert_public=True))
+    s.commit()
+    pid = s.query(Payout).filter(Payout.cert_token == "cofniecie-token").one().id
+    s.close()
+
+    with TestClient(app) as c:
+        r = c.post(f"/api/admin/payouts/{pid}/lp", json={"show": False},
+                   headers={"X-Admin-Token": get_settings().admin_token})
+    assert r.status_code == 200, r.text
+    assert r.json()["cert_public"] is False, "zgoda przezyla zdjecie z pasa"
+
+
 def test_landing_ma_katalog_wstrzykniety_w_html():
     """Konfigurator w hero nie moze mrugac pustymi "—" przez pol sekundy —
     serwer wstrzykuje caly katalog w HTML (#pf-products), a liczby ida z BAZY.

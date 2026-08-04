@@ -655,6 +655,9 @@ function renderPayoutsView(){
             <button class="btn-o sm" onclick="copyCert('${location.origin}${r.cert_url}')">Copy link</button>
             <button class="btn-o sm" onclick="setCertLp(${r.id},${r.show_on_lp?'false':'true'})">
               ${r.show_on_lp?'On LP ✓':'Not on LP'}</button>
+            <button class="btn-o sm" onclick="setCertPublic(${r.id},${r.cert_public?'false':'true'})"
+              ${r.show_on_lp?'':'disabled title="Put it on the landing page first"'}>
+              ${r.cert_public?'Full cert ✓':'Masked'}</button>
             <button class="btn-o sm" onclick="revokeCert(${r.id})">Revoke</button>`
           :`<button class="btn-o sm" onclick="askCertLp(${r.id})">Generate</button>`}</td>
       <td style="text-align:right;white-space:nowrap">${r.kind==='request'&&r.status==='pending'
@@ -1211,6 +1214,21 @@ async function makeCert(pid,accId,onLp){
 async function setCertLp(pid,show,accId){
   try{await api(`/api/admin/payouts/${pid}/lp`,{method:'POST',body:JSON.stringify({show})});
     toast(show?'Published on the landing page.':'Taken off the landing page. The certificate still works.','ok');
+    accId?renderPayouts(accId):VIEWS.payouts();
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+/* "Masked" -> "Full cert" swaps WHAT a stranger sees on the strip: from
+   "Imogen I., $6,219" with no link, to "Imogen Ingram, $6,219.24" plus a token
+   anyone can verify. That publishes a named person's income, so it is its own
+   click and its own decision — turn it on only for traders who agreed to it. */
+async function setCertPublic(pid,show,accId){
+  if(show&&!await askConfirm({title:'Publish the full certificate?',
+    body:'The strip will show the trader\'s <b>full name</b>, the amount <b>to the cent</b> and a '
+      +'<b>verification link</b> anyone can open.<br><br>Only do this if the trader agreed to it. '
+      +'Masked entries stay as they are.',
+    ok:'Yes, publish it in full'}))return;
+  try{await api(`/api/admin/payouts/${pid}/public-cert`,{method:'POST',body:JSON.stringify({show})});
+    toast(show?'Full certificate published.':'Back to a masked entry.','ok');
     accId?renderPayouts(accId):VIEWS.payouts();
   }catch(e){toast('Error: '+e.message,'err')}
 }

@@ -2641,6 +2641,7 @@ def _payout_dict(p: Payout, acc: Account | None = None) -> dict:
             "method": p.method, "note": p.note, "cert_token": p.cert_token,
             "cert_url": f"/payout/{p.cert_token}" if p.cert_token else None,
             "show_on_lp": bool(getattr(p, "show_on_lp", True)),
+            "cert_public": bool(getattr(p, "cert_public", False)),
             "account": acc.login if acc else None}
 
 
@@ -2771,6 +2772,43 @@ def admin_payout_lp_visibility(payout_id: int, payload: LpVisibilityIn):
         if not p.cert_token and payload.show:
             raise HTTPException(400, "Issue the certificate first")
         p.show_on_lp = bool(payload.show)
+        # Zdjęcie z pasa zabiera też zgodę na pełny dokument. Inaczej wypłata
+        # wróciłaby kiedyś na pas od razu z nazwiskiem i tokenem, bo flaga
+        # przeleżałaby włączona od poprzedniego razu.
+        if not p.show_on_lp:
+            p.cert_public = False
+        session.commit()
+        _PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
+        return _payout_dict(p, session.get(Account, p.account_id))
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/payouts/{payout_id}/public-cert", dependencies=[Depends(auth.require_admin)])
+def admin_payout_public_cert(payout_id: int, payload: LpVisibilityIn):
+    """Wypuszcza na pas PEŁNY certyfikat tej wypłaty albo go z powrotem maskuje.
+
+    Różnica wobec `/lp` jest w tym, co widzi obcy człowiek. Wpis na pasie mówi
+    „Imogen I., $6,219" i nie da się go z niczym zestawić. Wpis z tą flagą mówi
+    „Imogen Ingram, $6,219.24" i niesie token, więc każdy może otworzyć dokument
+    i go zweryfikować — a to znaczy, że publikujemy dochód konkretnej, dającej
+    się wskazać osoby. Dlatego jest to osobne kliknięcie i osobna decyzja:
+    włączamy TYLKO wtedy, gdy trader się na to zgodził.
+
+    Wymaga wystawionego certyfikatu i wejścia na pas — bez tokenu nie ma czego
+    weryfikować, a poza pasem nie ma gdzie tego pokazać.
+    """
+    session = SessionLocal()
+    try:
+        p = session.get(Payout, payout_id)
+        if not p:
+            raise HTTPException(404, "Payout not found")
+        if payload.show:
+            if not p.cert_token:
+                raise HTTPException(400, "Issue the certificate first")
+            if not p.show_on_lp:
+                raise HTTPException(400, "Put the payout on the landing page first")
+        p.cert_public = bool(payload.show)
         session.commit()
         _PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
         return _payout_dict(p, session.get(Account, p.account_id))
@@ -4658,6 +4696,12 @@ def public_recent_certificates():
 
     Nazwiska maskowane jak w rankingu, ZERO tokenów i ID — publikacja linku do
     cudzego certyfikatu to decyzja właściciela, nie nasza. Pusta baza -> [].
+
+    Wyjątkiem jest wypłata z `cert_public`: trader zgodził się wtedy na pełny
+    dokument, więc lecą pełne imię i nazwisko, kwota co do centa oraz token, i
+    dopiero taka pozycja daje się zweryfikować z zewnątrz. Reszta zostaje
+    zamaskowana dokładnie jak dotąd — te dwa kształty stoją obok siebie w jednej
+    odpowiedzi, bo zgoda jest per wypłata, nie per pas.
     """
     now = monotonic()
     if _PUBLIC_CERTS_CACHE["data"] is not None and now - _PUBLIC_CERTS_CACHE["ts"] < 60:
@@ -4672,14 +4716,24 @@ def public_recent_certificates():
                         Payout.show_on_lp == True)                        # noqa: E712
                 .order_by(Payout.ts.desc()).limit(24).all())
         for pay, acc, tr in pays:
-            out.append({
+            jawny = bool(getattr(pay, "cert_public", False))
+            wpis = {
                 "kind": "payout",
                 "kind_label": "Payout certificate",
                 "account_size": acc.initial_balance,
-                "amount_usd": int(round(pay.trader_share)),
-                "trader": _mask_name(tr.full_name),
+                # Pełne dolary wystarczają, dopóki wpis jest anonimowy. Przy
+                # zgodzie idzie kwota z dokumentu co do centa — inaczej strona
+                # partnera pokazywałaby $6,219 pod certyfikatem na $6,219.24.
+                "amount_usd": pay.trader_share if jawny else int(round(pay.trader_share)),
+                "trader": tr.full_name if jawny else _mask_name(tr.full_name),
                 "issued_at": pay.ts.isoformat() if pay.ts else None,
-            })
+            }
+            if jawny:
+                # Token wychodzi TYLKO tutaj. Kto go ma, ten otwiera dokument i
+                # weryfikację — dlatego nie ma go w gałęzi zamaskowanej.
+                wpis["cert_token"] = pay.cert_token
+                wpis["verify_url"] = f"/verify/{pay.cert_token}"
+            out.append(wpis)
         out.sort(key=lambda r: r["issued_at"] or "", reverse=True)
         data = out[:24]
         _PUBLIC_CERTS_CACHE.update(ts=now, data=data)
