@@ -575,3 +575,38 @@ def test_landing_nie_wystaje_poza_ekran_telefonu():
     #    i zabil `position:sticky`.
     assert "html{overflow-x:clip}" in css
     assert "html{overflow-x:hidden}" not in css
+
+
+def test_ga4_na_kazdej_stronie_odwiedzajacego_i_poza_panelem(monkeypatch):
+    """Pomiar ruchu ma obejmować KAŻDĄ stronę, którą widzi odwiedzający.
+
+    Strony sprzedażowe dziedziczą po `base.html` i dostawały znacznik za darmo,
+    ale portal i certyfikaty to osobne dokumenty — stały poza pomiarem, a tego
+    nie widać, bo brak danych wygląda dokładnie jak brak ruchu.
+
+    Dwa miejsca są poza pomiarem CELOWO i test tego pilnuje, żeby nikt ich nie
+    „naprawił": panel admina (to nasze własne sesje, nie ruch klientów) oraz
+    `?bare=1`, czyli render dla bota robiącego grafikę certyfikatu.
+    """
+    from app.models import Certificate
+
+    monkeypatch.setattr(main_mod.settings, "ga_measurement_id", "G-TESTOWY")
+    tid, _ = _trader("ga4@test.pl", "Ga Czwarty")
+    aid = _konto(tid, "Ga Czwarty", "770400", status="funded", phase="funded")
+    s = SessionLocal()
+    s.add(Certificate(account_id=aid, kind="funded", cert_token="ga4-cert-token"))
+    s.add(Payout(account_id=aid, profit_amount=1000.0, trader_share=900.0, paid=True,
+                 cert_token="ga4-payout-token"))
+    s.commit(); s.close()
+
+    z_pomiarem = ["/", "/faq", "/objectives", "/affiliate", "/install", "/terms",
+                  "/privacy", "/refund-policy", "/risk-disclosure", "/portal",
+                  "/certificate/ga4-cert-token", "/payout/ga4-payout-token"]
+    with TestClient(app) as c:
+        for sciezka in z_pomiarem:
+            r = c.get(sciezka)
+            assert r.status_code == 200, f"{sciezka} -> {r.status_code}"
+            assert "G-TESTOWY" in r.text, f"{sciezka} stoi poza pomiarem ruchu"
+        bez = c.get("/payout/ga4-payout-token?bare=1")
+        assert bez.status_code == 200 and "G-TESTOWY" not in bez.text, \
+            "zrzut dla bota podbija statystyki"

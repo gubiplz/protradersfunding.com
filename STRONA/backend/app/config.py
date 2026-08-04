@@ -120,8 +120,17 @@ class Settings:
     cert_signatory_label: str = os.getenv("CERT_SIGNATORY_LABEL", "Chief Executive Officer")
     support_email: str = os.getenv("SUPPORT_EMAIL", "support@protradersfunding.com")
     # Google Analytics 4 (Measurement ID typu G-XXXXXXX). Puste = brak snippetu
-    # gtag na stronach publicznych — zero requestów do Google.
-    ga_measurement_id: str = os.getenv("GA_MEASUREMENT_ID", "")
+    # gtag na stronach — zero requestów do Google.
+    #
+    # Domyślnie włączone TYLKO na produkcyjnym deployu Vercela. Measurement ID
+    # nie jest sekretem (i tak jedzie w HTML-u do każdego odwiedzającego), więc
+    # trzymanie go w kodzie oszczędza zmienną, o której łatwo zapomnieć. Ale
+    # gdyby wchodził wszędzie, localhost, testy i podglądy z gałęzi lądowałyby
+    # w tej samej usłudze co realny ruch i statystyki przestałyby cokolwiek
+    # znaczyć. GA_MEASUREMENT_ID nadal nadpisuje — również pustą wartością.
+    ga_measurement_id: str = os.getenv(
+        "GA_MEASUREMENT_ID",
+        "G-GPXYJPLH1G" if os.getenv("VERCEL_ENV") == "production" else "")
 
     # --- „Sign in with Google" (Google Identity Services) ---
     # OAuth Client ID typu Web z Google Cloud Console. Puste = przycisk w ogóle
