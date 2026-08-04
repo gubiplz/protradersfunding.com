@@ -7,15 +7,17 @@ os.environ.setdefault("DATABASE_URL", f"sqlite:///{tempfile.NamedTemporaryFile(s
 os.environ.setdefault("FEED", "sim")
 os.environ.setdefault("AUTO_SEED", "false")
 
-from datetime import datetime, timezone  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy import event  # noqa: E402
 
 from app import auth, telemetry  # noqa: E402
 from app.config import get_settings  # noqa: E402
-from app.db import SessionLocal, init_db  # noqa: E402
+from app.db import SessionLocal, engine, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import (Account, Notification, Order, Product, SupportTicket,  # noqa: E402
+from app.models import (Account, AchievementReward, CreditLedger, Notification,  # noqa: E402
+                        Order, Product, RewardCode, SupportTicket, TelemetryEvent,
                         TicketMessage, Trader)
 
 init_db()
@@ -72,6 +74,46 @@ def test_telemetry_events_drilldown_filtry():
     r2 = client.get(f"/api/admin/telemetry/events?trader_id={tid}", headers=ADMIN)
     names = {i["name"] for i in r2.json()["items"]}
     assert {"ops_klik", "ops_inne"} <= names
+
+
+def test_drilldown_po_dniu_nie_zawija_kolumny_w_funkcje_daty():
+    """Kliknięcie wiersza w Telemetry filtruje dobę PRZEDZIAŁEM, nie `date(kolumna)`.
+
+    Ta suita chodzi na SQLite, gdzie `date(created_at) = '2026-08-04'` przechodzi.
+    Na Postgresie (produkcja) to samo zapytanie wywracało całe okno błędem
+    `operator does not exist: date = character varying` — psycopg wysyła napis
+    jako `text`, a porównania `date` z `text` Postgres nie zna. Różnicy dialektów
+    stąd nie odtworzę, więc test pilnuje tego, co widać z każdej bazy: KSZTAŁTU
+    zapytania. Przy okazji przedział wchodzi na indeks, którego `date(...)` nie tyka.
+    """
+    tid, _ = _trader()
+    dzis = datetime.now(timezone.utc).replace(tzinfo=None, hour=12, minute=0,
+                                              second=0, microsecond=0)
+    s = SessionLocal()
+    s.add(TelemetryEvent(trader_id=tid, name="ops_doba", created_at=dzis))
+    s.add(TelemetryEvent(trader_id=tid, name="ops_doba", created_at=dzis - timedelta(days=1)))
+    s.commit(); s.close()
+
+    zapytania = []
+
+    def zapisz(_conn, _cur, stmt, *_a):
+        zapytania.append(stmt)
+
+    event.listen(engine, "before_cursor_execute", zapisz)
+    try:
+        r = client.get(f"/api/admin/telemetry/events?day={dzis:%Y-%m-%d}&name=ops_doba",
+                       headers=ADMIN)
+    finally:
+        event.remove(engine, "before_cursor_execute", zapisz)
+
+    assert r.status_code == 200
+    assert len(r.json()["items"]) == 1, "przeszedł wiersz z sąsiedniej doby"
+
+    sql = next(q for q in zapytania if "telemetry_events" in q and q.lstrip().upper().startswith("SELECT"))
+    assert "date(telemetry_events" not in sql.lower(), f"kolumna zawinięta w funkcję daty: {sql}"
+
+    assert client.get("/api/admin/telemetry/events?day=wczoraj",
+                      headers=ADMIN).status_code == 400
 
     day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     r3 = client.get(f"/api/admin/telemetry/events?day={day}&name=ops_inne", headers=ADMIN)
@@ -217,6 +259,100 @@ def test_admin_delete_trader_zwalnia_email(monkeypatch):
     s.commit(); s.close()
 
     assert client.delete(f"/api/admin/traders/999999", headers=ADMIN).status_code == 404
+
+
+def test_kasowanie_klienta_z_kompletem_powiazan(monkeypatch):
+    """Klient, który zdążył pożyć: kod za punkty, nagroda za odznaki, kredyt.
+
+    Te trzy tabele wskazują kluczami obcymi na zamówienia i konta, a doszły do
+    schematu PÓŹNIEJ niż ścieżka kasowania — nikt ich w niej nie wpiął. Na
+    produkcji „Delete client & all data" kończyło się przez to 500, a klient
+    zostawał w bazie razem z zajętym adresem e-mail.
+
+    Test daje KOMPLET powiązań, bo wywracała się dopiero ich obecność: sama
+    kolejność kasowania jest tu warunkiem poprawności (kody i księga przed
+    zamówieniami, zamówienia i nagrody przed kontami), a bez tych wierszy
+    kolejność niczego nie zmienia i wszystko przechodzi.
+    """
+    from app import push
+    monkeypatch.setattr(push, "send_to_trader", lambda *a, **k: 0)
+    _product()
+    tid, _ = _trader()
+    oid = _order(tid)
+    client.post(f"/api/admin/orders/{oid}/mark-paid", headers=ADMIN)
+    s = SessionLocal()
+    acc_id = s.query(Account.id).filter(Account.trader_id == tid).scalar()
+    s.add(RewardCode(trader_id=tid, code=f"OPS{tid}", pct=10, points_spent=100, order_id=oid))
+    s.add(AchievementReward(trader_id=tid, tier=3, code=f"OPS{tid}", account_id=acc_id))
+    s.add(CreditLedger(trader_id=tid, amount=25, note="zwrot", order_id=oid))
+    s.commit(); s.close()
+
+    r = client.delete(f"/api/admin/traders/{tid}", headers=ADMIN)
+    assert r.status_code == 200, f"panel dostaje {r.status_code} zamiast usunac klienta"
+
+    s = SessionLocal()
+    try:
+        assert s.get(Trader, tid) is None
+        for model in (RewardCode, AchievementReward, CreditLedger, Order, Account):
+            assert s.query(model).filter(model.trader_id == tid).count() == 0, \
+                f"po kliencie zostal wiersz w {model.__tablename__}"
+    finally:
+        s.close()
+
+
+def test_kasowanie_konta_zostawia_slad_odbioru_nagrody():
+    """Konto przyznane za odznaki znika, ale ślad ODBIORU progu zostaje.
+
+    Gdyby leciał razem z kontem, trader odebrałby ten sam próg drugi raz —
+    jednorazowości pilnuje `UniqueConstraint(trader_id, tier)` na tym wierszu.
+    Zostaje więc wpis bez wskaźnika na konto (kolumna ma klucz obcy, więc
+    zostawiona wartość blokowałaby DELETE i dawała 500).
+    """
+    _product()
+    tid, _ = _trader()
+    oid = _order(tid)
+    client.post(f"/api/admin/orders/{oid}/mark-paid", headers=ADMIN)
+    s = SessionLocal()
+    acc_id = s.query(Account.id).filter(Account.trader_id == tid).scalar()
+    s.add(AchievementReward(trader_id=tid, tier=5, code=None, account_id=acc_id))
+    s.commit(); s.close()
+
+    assert client.delete(f"/api/accounts/{acc_id}", headers=ADMIN).status_code == 200
+
+    s = SessionLocal()
+    try:
+        nagroda = s.query(AchievementReward).filter(AchievementReward.trader_id == tid).one()
+        assert nagroda.tier == 5 and nagroda.account_id is None
+    finally:
+        s.close()
+
+
+def test_kasowanie_zamowienia_nie_pali_kodu_ani_kredytu():
+    """Paragon znika, ale kod za punkty zostaje ZUŻYTY, a kredyt na koncie klienta.
+
+    Oba wiersze wskazują kluczem obcym na zamówienie. Skasowanie ich razem z nim
+    oddałoby klientowi jednorazowy kod do ponownego użycia i wyparowałoby
+    pieniądze z księgi — więc tylko odpinamy wskaźnik.
+    """
+    _product()
+    tid, _ = _trader()
+    oid = _order(tid)
+    s = SessionLocal()
+    s.add(RewardCode(trader_id=tid, code=f"OPZ{tid}", pct=15, points_spent=200,
+                     order_id=oid, used_at=datetime.now(timezone.utc).replace(tzinfo=None)))
+    s.add(CreditLedger(trader_id=tid, amount=-249, note="zaplata", order_id=oid))
+    s.commit(); s.close()
+
+    assert client.delete(f"/api/admin/orders/{oid}", headers=ADMIN).status_code == 200
+
+    s = SessionLocal()
+    try:
+        kod = s.query(RewardCode).filter(RewardCode.trader_id == tid).one()
+        assert kod.used_at is not None and kod.order_id is None, "kod wrocil do obiegu"
+        wpis = s.query(CreditLedger).filter(CreditLedger.trader_id == tid).one()
+        assert wpis.amount == -249 and wpis.order_id is None
+    finally:
+        s.close()
 
 
 def test_admin_delete_trader_nie_rusza_admina():

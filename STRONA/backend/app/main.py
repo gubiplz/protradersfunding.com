@@ -36,10 +36,10 @@ from . import (achievements, auth, billing, catalog, certshot, countries, fields
                poller, provisioning, push, rules, telegram, telemetry, tradebot)
 from .config import get_settings
 from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint
-from .models import (Account, AppSetting, Breach, Certificate, CreditLedger, EquitySnapshot,
-                     JournalEntry, KycFile, Notification, Order, Payout, PayoutRequest,
-                     PoolAccount, Product, PushSubscription, RewardCode, SupportTicket,
-                     TelemetryEvent, TicketMessage, Trade, Trader)
+from .models import (Account, AchievementReward, AppSetting, Breach, Certificate, CreditLedger,
+                     EquitySnapshot, JournalEntry, KycFile, Notification, Order, Payout,
+                     PayoutRequest, PoolAccount, Product, PushSubscription, RewardCode,
+                     SupportTicket, TelemetryEvent, TicketMessage, Trade, Trader)
 
 settings = get_settings()
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
@@ -2266,7 +2266,17 @@ def admin_telemetry_events(name: str | None = None, day: str | None = None,
         if name:
             q = q.filter(TelemetryEvent.name == name)
         if day:
-            q = q.filter(func.date(TelemetryEvent.created_at) == day)
+            # Doba jako PRZEDZIAŁ na kolumnie, nie `date(created_at) == '2026-08-04'`.
+            # Tamto przechodziło na SQLite, a Postgres odbijał całe okno błędem
+            # `operator does not exist: date = character varying` — psycopg wysyła
+            # napis jako `text`, a takiego porównania z `date` Postgres nie zna.
+            # Przy okazji przedział wchodzi na indeks, którego `date(...)` nie tyka.
+            try:
+                od_dnia = datetime.strptime(day, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(400, "day must be YYYY-MM-DD")
+            q = q.filter(TelemetryEvent.created_at >= od_dnia,
+                         TelemetryEvent.created_at < od_dnia + timedelta(days=1))
         if trader_id is not None:
             q = q.filter(TelemetryEvent.trader_id == trader_id)
         rows = q.order_by(TelemetryEvent.id.desc()).limit(300).all()
@@ -3255,6 +3265,13 @@ def admin_order_delete(order_id: int):
         o = session.get(Order, order_id)
         if not o:
             raise HTTPException(404, "Order not found")
+        # Kod za punkty i wpis w księdze kredytów wskazują na zamówienie (FK na
+        # orders.id) i zostają — odpinamy je zamiast kasować. Kod ma dalej być
+        # zużyty: `used_at` trzyma jednorazowość, a skasowanie paragonu nie może
+        # go palić drugi raz. Kredyt to pieniądze klienta, nie paragon.
+        for model in (RewardCode, CreditLedger):
+            (session.query(model).filter(model.order_id == o.id)
+             .update({model.order_id: None}, synchronize_session=False))
         session.delete(o)
         session.commit()
         return {"deleted": order_id}
@@ -3889,6 +3906,11 @@ def delete_account(account_id: int):
         # kasować, inaczej Postgres blokuje usunięcie (orders.account_id ma FK).
         (session.query(Order).filter(Order.account_id == acc.id)
          .update({Order.account_id: None}, synchronize_session=False))
+        # Ślad odebrania nagrody za odznaki też przeżywa konto — i ma przeżyć:
+        # gdyby znikał razem z nim, trader odebrałby ten sam próg drugi raz.
+        # Zostaje wpis bez wskaźnika (achievement_rewards.account_id ma FK).
+        (session.query(AchievementReward).filter(AchievementReward.account_id == acc.id)
+         .update({AchievementReward.account_id: None}, synchronize_session=False))
         # Transakcje, snapshoty, breachy, certyfikaty i wypłaty bez konta nie
         # znaczą nic — lecą razem z nim. Każda z tych tabel ma FK na accounts.id,
         # więc pozostawiona choć jedna blokuje DELETE (ForeignKeyViolation → 500).
@@ -3932,9 +3954,15 @@ def admin_delete_trader(trader_id: int):
              .filter(PoolAccount.claimed_by_account_id.in_(acc_ids))
              .update({PoolAccount.retired_reason: "account deleted"}, synchronize_session=False))
 
-        # Zamówienia przed kontami: orders.account_id ma FK na accounts.id.
-        for model in (Order, Notification, CreditLedger, PayoutRequest,
-                      JournalEntry, PushSubscription, KycFile, TelemetryEvent):
+        # KOLEJNOŚĆ JEST WARUNKIEM, nie stylem — Postgres pilnuje kluczy obcych
+        # (SQLite lokalnie też, patrz db.py). Co na co wskazuje:
+        #   reward_codes.order_id, credit_ledger.order_id -> orders.id
+        #   achievement_rewards.account_id, orders.account_id -> accounts.id
+        # Stąd: kody i księga przed zamówieniami, zamówienia i nagrody przed
+        # kontami (te lecą na końcu). Dołożenie tabeli w złym miejscu tej listy
+        # to 500 na „Delete client & all data" — i tylko na produkcji.
+        for model in (RewardCode, CreditLedger, AchievementReward, Order, Notification,
+                      PayoutRequest, JournalEntry, PushSubscription, KycFile, TelemetryEvent):
             (session.query(model).filter(model.trader_id == trader_id)
              .delete(synchronize_session=False))
         ticket_ids = [t.id for t in session.query(SupportTicket.id)
@@ -4053,6 +4081,7 @@ def _cert_ctx(request, *, headline_plain, eyebrow, trader_name, amount_label, am
     weryfikacja = f"{_public_base(request)}/verify/{cert_token}"
     return {
         "site_name": settings.site_name,
+        "ga_id": settings.ga_measurement_id,
         "headline_plain": headline_plain,
         "eyebrow": eyebrow,
         "trader_name": trader_name or "—",
