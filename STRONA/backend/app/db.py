@@ -152,10 +152,11 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         # DEFAULT TRUE robi za backfill: wypłaty wystawione przed tą zmianą
         # zostają na pasie na landingu, nic nie znika ze strony po deployu.
         "show_on_lp": "BOOLEAN DEFAULT TRUE",
-        # Tu DEFAULT FALSE, odwrotnie niz wyzej, i to jest celowe: dolozenie
-        # kolumny nie moze samo z siebie wypchnac niczyjego nazwiska i kwoty co
-        # do centa na cudza strone. Zgoda jest czynnoscia, nie stanem domyslnym.
-        "cert_public": "BOOLEAN DEFAULT FALSE",
+        # DEFAULT TRUE robi za backfill, tak samo jak przy show_on_lp: zgoda na
+        # publikacje certyfikatu jest brana przy zakladaniu konta, wiec wyplaty
+        # sprzed tej zmiany tez ja maja. Wylaczenie jest czynnoscia — na wniosek
+        # tradera, ktory chce zejsc ze strony.
+        "cert_public": "BOOLEAN DEFAULT TRUE",
     },
     "accounts": {
         "platform_investor_password": "VARCHAR(64)",

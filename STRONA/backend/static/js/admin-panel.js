@@ -1217,18 +1217,18 @@ async function setCertLp(pid,show,accId){
     accId?renderPayouts(accId):VIEWS.payouts();
   }catch(e){toast('Error: '+e.message,'err')}
 }
-/* "Masked" -> "Full cert" swaps WHAT a stranger sees on the strip: from
-   "Imogen I., $6,219" with no link, to "Imogen Ingram, $6,219.24" plus a token
-   anyone can verify. That publishes a named person's income, so it is its own
-   click and its own decision — turn it on only for traders who agreed to it. */
+/* The strip shows the full document by default — traders agree to that when they
+   open the account. This is the off-switch for the opposite request: "take my
+   name down". Masking drops the entry back to "Imogen I., $6,219" with no link;
+   the payout stays on the strip and the trader's own link keeps working.
+   To remove the entry entirely use setCertLp(), to kill the document revokeCert(). */
 async function setCertPublic(pid,show,accId){
-  if(show&&!await askConfirm({title:'Publish the full certificate?',
-    body:'The strip will show the trader\'s <b>full name</b>, the amount <b>to the cent</b> and a '
-      +'<b>verification link</b> anyone can open.<br><br>Only do this if the trader agreed to it. '
-      +'Masked entries stay as they are.',
-    ok:'Yes, publish it in full'}))return;
+  if(!show&&!await askConfirm({title:'Mask this entry?',
+    body:'The strip will drop back to a shortened name, whole dollars and no verification link. '
+      +'The payout stays on the strip and the trader\'s own certificate link keeps working.',
+    ok:'Mask it'}))return;
   try{await api(`/api/admin/payouts/${pid}/public-cert`,{method:'POST',body:JSON.stringify({show})});
-    toast(show?'Full certificate published.':'Back to a masked entry.','ok');
+    toast(show?'Full certificate published.':'Masked — name and link are off the strip.','ok');
     accId?renderPayouts(accId):VIEWS.payouts();
   }catch(e){toast('Error: '+e.message,'err')}
 }

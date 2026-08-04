@@ -446,13 +446,16 @@ class Payout(Base):
     # zawsze. Wczesniej jedynym sposobem zdjecia wyplaty ze strony bylo cofniecie
     # certyfikatu, ktore zabijalo tez publiczny link tradera.
     show_on_lp: Mapped[bool] = mapped_column(Boolean, default=True)
-    # Czy trader zgodzil sie na opublikowanie PELNEGO certyfikatu: imie i
-    # nazwisko, kwota co do centa i token, ktorym kazdy moze zweryfikowac
-    # dokument. To jest osobna decyzja niz `show_on_lp`, ktore odpowiada tylko za
-    # zamaskowany wpis na pasie ("Imogen I.", kwota w pelnych dolarach, bez
-    # linku). Domyslnie False: pas dziala jak dotad, a pelny dokument wychodzi na
-    # zewnatrz dopiero wtedy, gdy ktos swiadomie go tam wypuscil.
-    cert_public: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Czy pas oddaje PELNY certyfikat: imie i nazwisko, kwota co do centa i
+    # token, ktorym kazdy moze zweryfikowac dokument. Domyslnie True, bo trader
+    # zgadza sie na publikacje przy zakladaniu konta.
+    #
+    # Zostaje jako WYLACZNIK, per wyplata. Zgoda dana przy rejestracji da sie
+    # cofnac i wtedy musi byc gdzie to klikniac — bez tego jedynym sposobem
+    # zdjecia nazwiska ze strony byloby wycofanie certyfikatu, ktore zabija tez
+    # prywatny link tradera. Wylaczona flaga wraca do wpisu zamaskowanego
+    # ("Imogen I.", kwota w pelnych dolarach, bez linku), a nie usuwa wpisu.
+    cert_public: Mapped[bool] = mapped_column(Boolean, default=True)
 
     account: Mapped[Account] = relationship(back_populates="payouts")
 

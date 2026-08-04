@@ -2771,12 +2771,11 @@ def admin_payout_lp_visibility(payout_id: int, payload: LpVisibilityIn):
             raise HTTPException(404, "Payout not found")
         if not p.cert_token and payload.show:
             raise HTTPException(400, "Issue the certificate first")
+        # `cert_public` zostaje nietknięte. Zdjęcie z pasa i zamaskowanie to dwie
+        # różne prośby: pierwsza zdejmuje wpis, druga zdejmuje samo nazwisko.
+        # Kasowanie zgody przy okazji sprawiłoby, że wypłata zdjęta na tydzień i
+        # przywrócona wracałaby zamaskowana, choć nikt o to nie prosił.
         p.show_on_lp = bool(payload.show)
-        # Zdjęcie z pasa zabiera też zgodę na pełny dokument. Inaczej wypłata
-        # wróciłaby kiedyś na pas od razu z nazwiskiem i tokenem, bo flaga
-        # przeleżałaby włączona od poprzedniego razu.
-        if not p.show_on_lp:
-            p.cert_public = False
         session.commit()
         _PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
         return _payout_dict(p, session.get(Account, p.account_id))
@@ -2786,17 +2785,19 @@ def admin_payout_lp_visibility(payout_id: int, payload: LpVisibilityIn):
 
 @app.post("/api/admin/payouts/{payout_id}/public-cert", dependencies=[Depends(auth.require_admin)])
 def admin_payout_public_cert(payout_id: int, payload: LpVisibilityIn):
-    """Wypuszcza na pas PEŁNY certyfikat tej wypłaty albo go z powrotem maskuje.
+    """Maskuje pełny certyfikat tej wypłaty na pasie albo go z powrotem odsłania.
 
-    Różnica wobec `/lp` jest w tym, co widzi obcy człowiek. Wpis na pasie mówi
-    „Imogen I., $6,219" i nie da się go z niczym zestawić. Wpis z tą flagą mówi
-    „Imogen Ingram, $6,219.24" i niesie token, więc każdy może otworzyć dokument
-    i go zweryfikować — a to znaczy, że publikujemy dochód konkretnej, dającej
-    się wskazać osoby. Dlatego jest to osobne kliknięcie i osobna decyzja:
-    włączamy TYLKO wtedy, gdy trader się na to zgodził.
+    Domyślnie pas oddaje pełny dokument, bo zgodę na publikację trader daje przy
+    zakładaniu konta. Ten przełącznik istnieje dla przypadku odwrotnego: ktoś
+    prosi, żeby zdjąć jego nazwisko. Wyłączenie cofa wpis do wersji zamaskowanej
+    („Imogen I.", kwota w pełnych dolarach, bez tokenu), NIE usuwa wypłaty z pasa
+    i NIE rusza samego certyfikatu — prywatny link tradera działa dalej.
 
-    Wymaga wystawionego certyfikatu i wejścia na pas — bez tokenu nie ma czego
-    weryfikować, a poza pasem nie ma gdzie tego pokazać.
+    Do zdjęcia całego wpisu ze strony służy `/lp`, a do skasowania dokumentu
+    `DELETE …/certificate`. Trzy różne prośby, trzy różne przyciski.
+
+    Odsłonięcie wymaga wystawionego certyfikatu i wejścia na pas — bez tokenu nie
+    ma czego weryfikować, a poza pasem nie ma gdzie tego pokazać.
     """
     session = SessionLocal()
     try:
@@ -4198,6 +4199,23 @@ def _public_base(request: Request) -> str:
 _NOTATKI_WEWNETRZNE = {payout_import.IMPORT_NOTE, payoutbot.NOTATKA}
 
 
+def _nazwisko_na_dokument(session, acc) -> str:
+    """Kogo wpisać jako odbiorcę certyfikatu.
+
+    `Account.trader_name` bywa puste — konto zakładane skryptem albo importem nie
+    zawsze je dostaje. Dokument wypisywał wtedy „—" zamiast nazwiska i szedł tak
+    do klienta oraz na Telegrama. Ranking miał ten zapas od dawna
+    (`a.trader_name or tr.full_name`); certyfikaty go nie miały, i to jest cała
+    różnica między dokumentem z nazwiskiem a dokumentem z kreską.
+    """
+    if acc is None:
+        return ""
+    if (acc.trader_name or "").strip():
+        return acc.trader_name.strip()
+    tr = session.get(Trader, acc.trader_id) if acc.trader_id else None
+    return ((tr.full_name if tr else "") or "").strip()
+
+
 def _cert_ctx(request, *, headline_plain, eyebrow, trader_name, amount_label, amount,
               blurb, meta, cert_token, seal, note=None, variant="pass", bare=False) -> dict:
     """Wspólny kontekst obu certyfikatów — jeden szablon, dwa warianty.
@@ -4264,7 +4282,7 @@ def verify_api(request: Request, cert_token: str):
             data = (when or datetime.now(timezone.utc)).strftime("%d %b %Y")
             return {"found": True, "variant": "pass", "eyebrow": eyebrow,
                     "amount_label": "Account size", "amount": f"${acc.initial_balance:,.0f}",
-                    "trader_name": acc.trader_name or "—",
+                    "trader_name": _nazwisko_na_dokument(session, acc) or "—",
                     "meta": [{"value": data, "label": "Date"},
                              {"value": f"{acc.steps}-Step" if acc.steps else "Instant funding",
                               "label": "Program"}],
@@ -4278,7 +4296,7 @@ def verify_api(request: Request, cert_token: str):
             data = (payout.ts or datetime.now(timezone.utc)).strftime("%d %b %Y")
             return {"found": True, "variant": "payout", "eyebrow": "Payout",
                     "amount_label": "For the amount of", "amount": kwota,
-                    "trader_name": (pacc.trader_name if pacc else None) or "—",
+                    "trader_name": _nazwisko_na_dokument(session, pacc) or "—",
                     "meta": [{"value": data, "label": "Date"},
                              {"value": f"${(pacc.initial_balance if pacc else 0):,.0f}",
                               "label": "Account size"}],
@@ -4326,7 +4344,7 @@ def certificate(request: Request, cert_token: str):
         }.get(kind, "This trader has passed the evaluation.")
         ctx = _cert_ctx(
             request, headline_plain="Certificate", eyebrow=eyebrow,
-            trader_name=acc.trader_name,
+            trader_name=_nazwisko_na_dokument(session, acc),
             amount_label="Account size", amount=f"${acc.initial_balance:,.0f}",
             blurb=blurb,
             meta=[("Date", data),
@@ -4363,7 +4381,7 @@ def payout_certificate(request: Request, cert_token: str, bare: int = 0):
             request,
             headline_plain="Payout certificate",
             eyebrow="Payout",
-            trader_name=(acc.trader_name if acc else None),
+            trader_name=_nazwisko_na_dokument(session, acc),
             amount_label="For the amount of", amount=kwota,
             blurb=("This trader has earned a payout, reflecting the discipline and risk "
                    "management required to trade a funded account. Their profit share has been "
@@ -4694,14 +4712,17 @@ def public_recent_certificates():
     który ludzie tu przychodzą, jest przelew, a mieszanie jednego z drugim
     rozwadnia pas i podbija licznik osiągnięciami, które nikogo nie przekonują.
 
-    Nazwiska maskowane jak w rankingu, ZERO tokenów i ID — publikacja linku do
-    cudzego certyfikatu to decyzja właściciela, nie nasza. Pusta baza -> [].
+    Domyślnie leci PEŁNY dokument: imię i nazwisko, kwota co do centa i token,
+    czyli pozycja, którą da się zweryfikować z zewnątrz. Zgodę na publikację
+    trader daje przy zakładaniu konta. Pusta baza -> [].
 
-    Wyjątkiem jest wypłata z `cert_public`: trader zgodził się wtedy na pełny
-    dokument, więc lecą pełne imię i nazwisko, kwota co do centa oraz token, i
-    dopiero taka pozycja daje się zweryfikować z zewnątrz. Reszta zostaje
-    zamaskowana dokładnie jak dotąd — te dwa kształty stoją obok siebie w jednej
-    odpowiedzi, bo zgoda jest per wypłata, nie per pas.
+    Wypłata z wyłączonym `cert_public` wraca do wersji zamaskowanej — nazwisko
+    skrócone jak w rankingu, kwota w pełnych dolarach, zero tokenów i ID. To jest
+    obsługa wniosku „zdejmijcie moje nazwisko"; oba kształty stoją wtedy obok
+    siebie w jednej odpowiedzi, bo decyzja jest per wypłata, nie per pas.
+
+    ID rekordów nie wychodzi nigdy, w żadnym z tych dwóch kształtów: token jest
+    losowy, więc nie da się po nim enumerować cudzych wypłat, a `payout.id` tak.
     """
     now = monotonic()
     if _PUBLIC_CERTS_CACHE["data"] is not None and now - _PUBLIC_CERTS_CACHE["ts"] < 60:

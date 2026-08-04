@@ -273,13 +273,19 @@ def test_portal_laduje_sortowanie_tabel():
         assert js.status_code == 200 and "data-tkey" in js.text
 
 
-def test_publiczny_pas_certyfikatow_maskuje_i_nie_ujawnia_tokenow():
-    """Landing pokazuje pas OSTATNIO wystawionych certyfikatów WYPŁAT: nazwisko
-    zamaskowane jak w rankingu, zero tokenów i ID — link do certyfikatu
-    publikuje jego właściciel, nie my.
+def test_publiczny_pas_certyfikatow_pokazuje_wyplaty_i_nie_ujawnia_id():
+    """Landing pokazuje pas OSTATNIO wystawionych certyfikatów WYPŁAT.
+
+    Pas oddaje pełny dokument razem z tokenem — zgodę na publikację trader daje
+    przy zakładaniu konta, a bez tokenu certyfikat jest nieweryfikowalny, czyli
+    nie jest dowodem. Wcześniej ten test pilnował czegoś odwrotnego („zero
+    tokenów"), bo nie było wtedy zgody, na której można się oprzeć.
+
+    Co zostaje nienaruszalne: ID rekordów nie wychodzi NIGDY. Token jest losowy,
+    więc nie da się po nim wejść na cudzą wypłatę, a `payout.id` tak.
 
     Certyfikaty za zaliczony etap i za funded na pas NIE idą — dowodem jest
-    przelew, a nie zaliczona ewaluacja."""
+    przelew, a nie zaliczona ewaluacja. Ich tokeny tym samym też nie wychodzą."""
     from app.models import Certificate
 
     tid, _ = _trader("certstrip@test.pl", "Certowy Pasek")
@@ -297,74 +303,114 @@ def test_publiczny_pas_certyfikatow_maskuje_i_nie_ujawnia_tokenow():
     assert any(x["kind"] == "payout" and x["amount_usd"] == 900 for x in dane)
     assert all(x["kind"] == "payout" for x in dane), \
         "na pas trafil certyfikat inny niz wyplata"
-    assert "pas-sekret-token" not in r.text, "token certyfikatu wyciekł do publicznej listy"
-    assert "Pasek" not in r.text, "pełne nazwisko wyciekło do publicznej listy"
+    wpis = next(x for x in dane if x["trader"] == "Certowy Pasek")
+    assert wpis["cert_token"] == "pas-sekret-token-2"
+    assert wpis["verify_url"] == "/verify/pas-sekret-token-2"
+    assert "pas-sekret-token-1" not in r.text, \
+        "token certyfikatu za etap wyciekl — na pas ida tylko wyplaty"
     for x in dane:
-        for zakazane in ("cert_token", "id", "account_id", "trader_id"):
-            assert zakazane not in x
+        for zakazane in ("id", "account_id", "trader_id"):
+            assert zakazane not in x, f"ID rekordu wyszlo na zewnatrz: {zakazane}"
 
 
-def test_pas_oddaje_pelny_certyfikat_dopiero_po_zgodzie():
-    """`cert_public` to jedyna droga, zeby z pasa wyszlo nazwisko i token.
+def test_pas_domyslnie_oddaje_pelny_dokument_z_groszami():
+    """Swiezo wystawiona wyplata idzie na pas w calosci, bez zadnego klikania.
 
-    Zamaskowany wpis mowi "Zgodna P., $900" i nie da sie go z niczym zestawic.
-    Wpis ze zgoda mowi "Zgodna Pelna, $900.42" i niesie token, wiec kazdy otworzy
-    dokument — czyli publikujemy dochod wskazywalnej osoby. Test pilnuje obu
-    stron tej granicy naraz: ze sama obecnosc kolumny niczego nie odslania i ze
-    po jej wlaczeniu kwota schodzi do centa, a nie zostaje zaokraglona.
+    Kwota MUSI schodzic do centa. Zaokraglenie do pelnych dolarow bylo cala
+    przyczyna tego, ze karta na stronie partnera mowila "$900" pod dokumentem
+    wystawionym na "$900.42" — czyli strona przeczyla certyfikatowi, do ktorego
+    sama odsylala.
     """
-    tid, _ = _trader("zgoda@test.pl", "Zgodna Pelna")
-    aid = _konto(tid, "Zgodna Pelna", "770200", status="funded", phase="funded")
+    tid, _ = _trader("domyslna@test.pl", "Domyslna Pelna")
+    aid = _konto(tid, "Domyslna Pelna", "770200", status="funded", phase="funded")
     s = SessionLocal()
     s.add(Payout(account_id=aid, profit_amount=1000.47, trader_share=900.42, paid=True,
-                 cert_token="zgoda-token-jawny"))
+                 cert_token="domyslny-token"))
     s.commit(); s.close()
 
     main_mod._PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
     with TestClient(app) as c:
         r = c.get("/api/public/certificates/recent")
-    assert "zgoda-token-jawny" not in r.text, "token wyszedl bez zgody"
-    assert "Zgodna Pelna" not in r.text, "pelne nazwisko wyszlo bez zgody"
-    zamaskowany = [x for x in r.json() if x["trader"] == "Zgodna P."]
-    assert zamaskowany and zamaskowany[0]["amount_usd"] == 900, \
-        "bez zgody kwota ma byc w pelnych dolarach"
-
-    s = SessionLocal()
-    p = s.query(Payout).filter(Payout.cert_token == "zgoda-token-jawny").one()
-    p.cert_public = True
-    s.commit(); s.close()
-
-    main_mod._PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
-    with TestClient(app) as c:
-        r = c.get("/api/public/certificates/recent")
-    jawny = [x for x in r.json() if x.get("cert_token") == "zgoda-token-jawny"]
-    assert jawny, "po zgodzie token nie wyszedl"
-    assert jawny[0]["trader"] == "Zgodna Pelna"
-    assert jawny[0]["amount_usd"] == 900.42, "kwota po zgodzie ma isc co do centa"
-    assert jawny[0]["verify_url"] == "/verify/zgoda-token-jawny"
+    wpis = next(x for x in r.json() if x.get("cert_token") == "domyslny-token")
+    assert wpis["trader"] == "Domyslna Pelna"
+    assert wpis["amount_usd"] == 900.42, "kwota ma isc co do centa, nie zaokraglona"
+    assert wpis["verify_url"] == "/verify/domyslny-token"
 
 
-def test_zdjecie_z_pasa_cofa_zgode_na_pelny_certyfikat():
-    """Wypłata zdjeta z pasa traci tez `cert_public`.
+def test_certyfikat_bierze_nazwisko_z_tradera_gdy_konto_go_nie_ma():
+    """Konto bez `trader_name` nie moze dac dokumentu wystawionego na „—".
 
-    Bez tego flaga przelezalaby wlaczona i wypłata wrocilaby kiedys na pas od
-    razu z nazwiskiem i tokenem — czyli zgoda z zeszlego miesiaca zadzialalaby
-    na publikacje, o ktorej nikt juz nie pamieta.
+    Konta zakladane skryptem albo importem czesto nie maja tego pola. Ranking
+    mial zapas na `Trader.full_name` od dawna, certyfikaty go nie mialy, wiec
+    dokument szedl do klienta i na Telegrama z kreska zamiast nazwiska — a stad
+    trafialby wprost na pas certyfikatow na stronie partnera.
     """
-    tid, _ = _trader("cofniecie@test.pl", "Cofnieta Zgoda")
-    aid = _konto(tid, "Cofnieta Zgoda", "770300", status="funded", phase="funded")
+    tid, _ = _trader("bezimienia@test.pl", "Pelne Nazwisko")
+    aid = _konto(tid, "", "770500", status="funded", phase="funded")
     s = SessionLocal()
-    s.add(Payout(account_id=aid, profit_amount=500.0, trader_share=450.0, paid=True,
-                 cert_token="cofniecie-token", cert_public=True))
+    s.get(Account, aid).trader_name = ""      # konto po imporcie: pole puste
+    s.add(Payout(account_id=aid, profit_amount=300.0, trader_share=270.0, paid=True,
+                 cert_token="bezimienia-token"))
+    s.commit(); s.close()
+
+    with TestClient(app) as c:
+        html = c.get("/payout/bezimienia-token").text
+        api = c.get("/api/verify/bezimienia-token").json()
+    assert api["trader_name"] == "Pelne Nazwisko", f"dokument wystawiony na {api['trader_name']!r}"
+    assert "Pelne Nazwisko" in html
+
+
+def test_wylacznik_maskuje_wpis_ale_zostawia_go_na_pasie():
+    """Wniosek „zdejmijcie moje nazwisko" ma cofnac wpis do wersji zamaskowanej.
+
+    Nie usunac go z pasa i nie zabic certyfikatu — to sa dwie inne prosby i dwa
+    inne przyciski. Po wylaczeniu z odpowiedzi znika token i pelne nazwisko, a
+    kwota wraca do pelnych dolarow.
+    """
+    tid, _ = _trader("maska@test.pl", "Maskowana Osoba")
+    aid = _konto(tid, "Maskowana Osoba", "770300", status="funded", phase="funded")
+    s = SessionLocal()
+    s.add(Payout(account_id=aid, profit_amount=500.55, trader_share=450.55, paid=True,
+                 cert_token="maskowany-token"))
     s.commit()
-    pid = s.query(Payout).filter(Payout.cert_token == "cofniecie-token").one().id
+    pid = s.query(Payout).filter(Payout.cert_token == "maskowany-token").one().id
     s.close()
 
     with TestClient(app) as c:
-        r = c.post(f"/api/admin/payouts/{pid}/lp", json={"show": False},
+        r = c.post(f"/api/admin/payouts/{pid}/public-cert", json={"show": False},
                    headers={"X-Admin-Token": get_settings().admin_token})
-    assert r.status_code == 200, r.text
-    assert r.json()["cert_public"] is False, "zgoda przezyla zdjecie z pasa"
+        assert r.status_code == 200, r.text
+        assert r.json()["cert_public"] is False
+        main_mod._PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
+        pas = c.get("/api/public/certificates/recent")
+
+    assert "maskowany-token" not in pas.text, "token wyszedl mimo maskowania"
+    assert "Maskowana Osoba" not in pas.text, "pelne nazwisko wyszlo mimo maskowania"
+    wpis = next(x for x in pas.json() if x["trader"] == "Maskowana O.")
+    assert wpis["amount_usd"] == 451, "po zamaskowaniu kwota ma byc w pelnych dolarach"
+
+
+def test_zdjecie_z_pasa_nie_rusza_maskowania():
+    """`show_on_lp` i `cert_public` sa niezalezne.
+
+    Gdyby zdjecie z pasa kasowalo tez `cert_public`, wyplata zdjeta na tydzien i
+    przywrocona wracalaby zamaskowana, choc nikt o to nie prosil.
+    """
+    tid, _ = _trader("niezalezne@test.pl", "Niezalezne Flagi")
+    aid = _konto(tid, "Niezalezne Flagi", "770400", status="funded", phase="funded")
+    s = SessionLocal()
+    s.add(Payout(account_id=aid, profit_amount=500.0, trader_share=450.0, paid=True,
+                 cert_token="niezalezny-token"))
+    s.commit()
+    pid = s.query(Payout).filter(Payout.cert_token == "niezalezny-token").one().id
+    s.close()
+
+    naglowki = {"X-Admin-Token": get_settings().admin_token}
+    with TestClient(app) as c:
+        zdjete = c.post(f"/api/admin/payouts/{pid}/lp", json={"show": False}, headers=naglowki)
+        wrocone = c.post(f"/api/admin/payouts/{pid}/lp", json={"show": True}, headers=naglowki)
+    assert zdjete.json()["cert_public"] is True, "zdjecie z pasa zamaskowalo wpis"
+    assert wrocone.json()["cert_public"] is True, "wpis wrocil na pas zamaskowany"
 
 
 def test_landing_ma_katalog_wstrzykniety_w_html():
