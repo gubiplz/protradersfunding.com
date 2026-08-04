@@ -845,3 +845,52 @@ def test_lista_traderow_do_grantu_bez_limitu_i_bez_usunietych():
 
     szukaj = client.get("/api/admin/traders?q=masa4", headers=ADMIN).json()
     assert {t["email"] for t in szukaj} == {f"masa4{i}@test.pl" for i in range(10)} | {"masa4@test.pl"}
+
+
+def test_certyfikat_da_sie_odtworzyc_z_tym_samym_numerem():
+    """Po pomyłkowym wycofaniu musi wrócić DOKŁADNIE ten numer: stary siedzi
+    w kodzie QR na wydruku i w linkach, które już poszły w świat, więc nowy
+    zostawiłby je martwe."""
+    from app.models import Payout
+
+    _product()
+    tid, _ = _trader()
+    aid = _konto_funded(tid, f"OPS9{next(LICZNIK)}")
+    pid = client.post(f"/api/admin/accounts/{aid}/payout", headers=ADMIN,
+                      json={"amount": 3840, "method": "bank", "reset_balance": False}).json()["id"]
+    s = SessionLocal()
+    stary = s.get(Payout, pid).cert_token
+    s.close()
+    assert stary
+
+    assert client.delete(f"/api/admin/payouts/{pid}/certificate",
+                         headers=ADMIN).status_code == 200
+    assert client.get(f"/api/verify/{stary}").status_code == 404
+
+    r = client.post(f"/api/admin/payouts/{pid}/certificate", headers=ADMIN,
+                    json={"show_on_lp": False, "token": stary})
+    assert r.status_code == 200 and r.json()["cert_token"] == stary
+    assert client.get(f"/payout/{stary}").status_code == 200
+
+
+def test_odtworzenie_numeru_pilnuje_formatu_i_zajetosci():
+    from app.models import Payout
+
+    _product()
+    tid, _ = _trader()
+    a1 = _konto_funded(tid, f"OPS9{next(LICZNIK)}")
+    a2 = _konto_funded(tid, f"OPS9{next(LICZNIK)}")
+    p1 = client.post(f"/api/admin/accounts/{a1}/payout", headers=ADMIN,
+                     json={"amount": 100, "method": "bank", "reset_balance": False}).json()["id"]
+    p2 = client.post(f"/api/admin/accounts/{a2}/payout", headers=ADMIN,
+                     json={"amount": 200, "method": "bank", "reset_balance": False}).json()["id"]
+    s = SessionLocal()
+    zajety = s.get(Payout, p1).cert_token
+    s.close()
+
+    # Cudzy numer = 409, a nie ciche przepiecie certyfikatu na inna wyplate.
+    assert client.post(f"/api/admin/payouts/{p2}/certificate", headers=ADMIN,
+                       json={"token": zajety}).status_code == 409
+    for zly in ("krotki", "ma spacje w srodku", "za" + "x" * 40, "zly/znak+tu"):
+        assert client.post(f"/api/admin/payouts/{p2}/certificate", headers=ADMIN,
+                           json={"token": zly}).status_code == 400, zly

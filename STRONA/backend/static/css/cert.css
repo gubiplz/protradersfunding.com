@@ -28,10 +28,22 @@
 }
 
 /* Sama karta, bez przyciskow i stopki (`/payout/{token}?bare=1`). Widok dla
-   zewnetrznej przegladarki robiacej zrzut na Telegrama: strona ma dokladnie
-   wysokosc karty, wiec ZWYKLY zrzut calej strony jest juz gotowa grafika i nie
-   trzeba liczyc na to, ze dana usluga umie kadrowac po selektorze. */
-.cert-bare{min-height:0;justify-content:flex-start;gap:0;padding:20px}
+   zewnetrznej przegladarki robiacej zrzut na Telegrama.
+
+   Zrzut calej strony ma wysokosc WIEKSZA z dwoch — tresci i okna — wiec karta
+   mniejsza od okna zostawiala pod soba puste pole. Podanie wymiarow okna
+   w adresie uslugi nie pomaga: kazdy dostawca nazywa te parametry inaczej,
+   a czesc je ignoruje. Dlatego skrypt w `certificate.html` ustawia `zoom` tak,
+   zeby karta wypelnila szerokosc okna, jakiekolwiek by ono nie bylo.
+
+   Marginesu NIE ma z rozmyslem: przycisk „Download JPG" oddaje SAMA karte
+   (620x620 przy dwukrotnej skali, czyli 1240x1240), wiec zrzut z ramka nie
+   bylby juz tym samym obrazkiem co plik, ktory klient dostaje do reki.
+
+   Pasek przewijania jest ukryty, bo zabieral szerokosc: karta wychodzila 588
+   zamiast 620 i strona przestawala byc kwadratem. */
+.cert-bare{min-height:0;justify-content:flex-start;gap:0;padding:0}
+.cert-bare::-webkit-scrollbar{display:none}
 .cert-bare .noprint{display:none!important}
 
 /* Frame: a bright glowing edge — it is what reads "premium" on the dark bg */

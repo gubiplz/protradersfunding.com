@@ -232,7 +232,13 @@ def wygeneruj(session, now: datetime | None = None) -> Payout:
     """Tworzy komplet trader + konto + wypłata z certyfikatem. Bez commita."""
     cfg = ustawienia(session)
     kiedy = now or datetime.now(timezone.utc)
-    rng = random.Random(f"payoutbot:{_dzien(kiedy)}")
+    # Seed z dnia ORAZ liczby dotychczasowych wypłat silnika. Sam dzień nie
+    # wystarcza: „Run once now" pomija guard, więc kilka przebiegów tej samej
+    # doby losowało IDENTYCZNIE — ten sam rozmiar konta i tę samą kwotę, zmieniało
+    # się tylko nazwisko (zajęte są pomijane). Licznik rośnie dopiero po UDANYM
+    # zapisie, więc powtórka po nieudanym dalej odtwarza tę samą wypłatę.
+    dotad = session.query(Payout).filter(Payout.note == NOTATKA).count()
+    rng = random.Random(f"payoutbot:{_dzien(kiedy)}:{dotad}")
 
     rozmiar = rng.choice(cfg["sizes"])
     prod = _plan(session, rng, rozmiar)
@@ -282,14 +288,18 @@ def opublikuj(wyplata: Payout, nazwa: str, *, base_url: str | None = None,
 
     png = certshot.render(f"{link}?bare=1", transport=transport_shot)
     if png:
-        if telegram.send_photo(png, tekst, transport=transport_tg):
+        ok, powod = telegram.send_photo(png, tekst, transport=transport_tg)
+        if ok:
             return {"posted": True, "photo": True}
-        return {"posted": False, "photo": True, "reason": "telegram rejected the photo"}
+        # Powód prosto od Telegrama („bot is not a member of the channel chat",
+        # „not enough rights to send photos"). Bez niego admin widzi samo
+        # „odrzucone" i musi szukać przyczyny w logach hostingu.
+        return {"posted": False, "photo": True, "reason": powod}
 
     # Bez grafiki idzie sam podpis z linkiem — cisza na kanale byłaby myląca,
     # skoro wypłata i jej publiczny certyfikat już istnieją.
-    ok = telegram.send_message(f"{tekst}\n{link}", transport=transport_tg)
-    return {"posted": ok, "photo": False, "reason": "" if ok else "no image, no post"}
+    ok, powod = telegram.send_message(f"{tekst}\n{link}", transport=transport_tg)
+    return {"posted": ok, "photo": False, "reason": "" if ok else powod}
 
 
 def uruchom(session, now: datetime | None = None, *, force: bool = False,

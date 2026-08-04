@@ -93,6 +93,17 @@ tr.clickable{cursor:pointer}
   .seg button{flex:1 0 auto}
 }
 
+/* Toast z cofnieciem: usuwanie czeka 5 s, zanim poleci na serwer.
+   Obramowanie bursztynowe, bo to nie jest ani sukces, ani blad — to odliczanie,
+   w ktorym admin ma jeszcze cos do zrobienia. */
+.toast.undo{display:flex;align-items:center;gap:12px;border-left-color:var(--gold)}
+.toast.undo .undo-txt{flex:1;min-width:0}
+.undo-btn{display:inline-flex;align-items:center;gap:6px;flex:none;
+  font-size:12.5px;font-weight:700;color:var(--gold);background:var(--gold-bg);
+  border:1px solid var(--gold-line);border-radius:999px;padding:6px 12px;cursor:pointer}
+.undo-btn:hover{filter:brightness(1.08)}
+.undo-btn svg{width:14px;height:14px}
+
 /* Chips in the slide-over — .chip-row had no styles anywhere, and .chip lives
    only in site.css, which the dashboard does not load. */
 .chip-row{display:flex;gap:8px;flex-wrap:wrap}

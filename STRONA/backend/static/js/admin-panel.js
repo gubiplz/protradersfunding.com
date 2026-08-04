@@ -136,6 +136,48 @@ function toast(msg,kind='ok',ms=6000){
   $('toasts').appendChild(t);
   setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),350)},ms);
 }
+/* ---------- trwale usuwanie z oknem na cofniecie ----------
+   Klikniete usuwanie NIE leci od razu: przez 5 s czeka w kolejce, a admin widzi
+   toast z przyciskiem cofniecia i odliczaniem. Dopiero po tym czasie idzie
+   zadanie na serwer. Dzieki temu "cofnij" nie musi NICZEGO odtwarzac -- po
+   prostu nic sie nie stalo. Odtwarzanie skasowanego wiersza bylo alternatywa
+   gorsza: certyfikat ma numer wdrukowany w kod QR, ktory klient ma juz u siebie,
+   wiec wiersz odtworzony "taki sam" mialby inny numer i stare odwolania i tak
+   zostalyby martwe. Wiersz zostaje widoczny na liscie przez cale odliczanie,
+   wiec nie ma falszywego wrazenia, ze juz zniknal. */
+const UNDO_MS=5000;
+const UNDO_ICO='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"'
+  +' stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/>'
+  +'<path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>';
+const _czekajace=new Set();
+
+function withUndo(opis,wykonaj){
+  const t=document.createElement('div');
+  t.className='toast undo';
+  t.innerHTML='<span class="undo-txt"></span>'
+    +`<button class="undo-btn" type="button" aria-label="Undo">${UNDO_ICO}Undo</button>`;
+  const txt=t.querySelector('.undo-txt');
+  let zostalo=Math.round(UNDO_MS/1000);
+  const rysuj=()=>{txt.textContent=`${opis} — in ${zostalo}s`};
+  rysuj();
+  $('toasts').appendChild(t);
+
+  const zadanie={wykonaj};
+  const sprzatnij=()=>{clearTimeout(zadanie.zegar);clearInterval(zadanie.tik);
+    _czekajace.delete(zadanie);t.remove()};
+  zadanie.anuluj=sprzatnij;
+  zadanie.tik=setInterval(()=>{zostalo--;if(zostalo>0)rysuj()},1000);
+  zadanie.zegar=setTimeout(()=>{sprzatnij();wykonaj()},UNDO_MS);
+  t.querySelector('.undo-btn').onclick=()=>{sprzatnij();
+    toast('Undone — nothing was deleted.','ok',3500)};
+  _czekajace.add(zadanie);
+}
+
+/* Wyjscie ze strony ANULUJE to, co czeka. Odpalenie zadania w tym momencie
+   bywa przerwane w polowie, a "nic sie nie stalo" to jedyny stan, ktory przy
+   nieodwracalnym usuwaniu zawsze da sie bezpiecznie powtorzyc. */
+addEventListener('beforeunload',()=>{[..._czekajace].forEach(z=>z.anuluj())});
+
 function closeOver(){$('over').classList.remove('open')}
 function openOver(title,html){$('o-title').textContent=title;$('o-body').innerHTML=html;$('over').classList.add('open')}
 
@@ -1127,10 +1169,12 @@ async function revokeCert(pid,accId){
       +'itself stays on the account.<br><br>To only hide it from the landing page, use '
       +'<b>Take off the LP</b> instead.',
     ok:'Revoke certificate',danger:true}))return;
-  try{await api(`/api/admin/payouts/${pid}/certificate`,{method:'DELETE'});
-    toast('Certificate revoked. Removed from the landing page.','ok');
-    accId?renderPayouts(accId):VIEWS.payouts();
-  }catch(e){toast('Error: '+e.message,'err')}
+  withUndo('Revoking the certificate',async()=>{
+    try{await api(`/api/admin/payouts/${pid}/certificate`,{method:'DELETE'});
+      toast('Certificate revoked. Removed from the landing page.','ok');
+      accId?renderPayouts(accId):VIEWS.payouts();
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
 }
 function copyCert(url){navigator.clipboard.writeText(url)
   .then(()=>toast('Certificate link copied.','ok'),()=>toast('Could not copy.','err'))}
@@ -1486,10 +1530,12 @@ async function xdel(url,question,after,okMsg){
   if(!await askConfirm({title:tytul.trim(),
     body:esc(reszta.join('\n').trim()).replace(/\n/g,'<br>'),
     ok:'Delete',danger:true}))return;
-  try{const r=await api(url,{method:'DELETE'});
-    toast(typeof okMsg==='function'?okMsg(r):(okMsg||'Deleted.'),'ok');
-    if(typeof after==='function')after(r);
-  }catch(e){toast('Error: '+e.message,'err')}
+  withUndo(tytul.trim().replace(/\?+$/,''),async()=>{
+    try{const r=await api(url,{method:'DELETE'});
+      toast(typeof okMsg==='function'?okMsg(r):(okMsg||'Deleted.'),'ok');
+      if(typeof after==='function')after(r);
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
 }
 
 /* Removes the whole row from the ledger — a mistyped payout, a duplicate, an

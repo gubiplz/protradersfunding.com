@@ -75,6 +75,29 @@
   demonstrated trading skill, not profit from real market transactions.
   See our <a href="/terms">Terms of Service</a>.</p>
 
+{% if bare %}
+{# Widok pod zrzut: karta ma wypelnic okno, jakiekolwiek by ono nie bylo.
+   Zrzut calej strony ma wysokosc wieksza z dwoch — tresci i okna — wiec karta
+   mniejsza od okna zostawialaby pod soba puste pole, a uslugi zrzutu roznie
+   nazywaja parametry okna i czesc je ignoruje.
+
+   `zoom`, a nie rozciagniecie karty na 100% szerokosci: rozmiary tekstu maja
+   gorne ograniczenia (`clamp`), wiec przy szerokiej karcie tekst przestaje
+   rosnac, kwadratowy kontener rosnie dalej i w srodku robi sie pusta dziura.
+   `zoom` skaluje projekt JEDNOLICIE i wplywa na uklad, wiec wysokosc dokumentu
+   sama podaza za karta. #}
+<script>
+(function(){
+  var SZER=620;            // szerokosc projektu karty, bez marginesu (.cert-bare)
+  function dopasuj(){
+    document.body.style.zoom=(innerWidth/SZER).toFixed(4);
+  }
+  dopasuj();
+  addEventListener('resize',dopasuj);
+})();
+</script>
+{% endif %}
+
 {# The JPG is a real browser paint of the card (SVG foreignObject), so it cannot
    drift from the document. html2canvas is no longer loaded up front — it stays
    as a fallback and is fetched only if the foreign object fails to rasterise. #}

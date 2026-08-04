@@ -114,6 +114,26 @@ def test_czeka_na_zadana_godzine():
         s.close()
 
 
+def test_kolejne_przebiegi_nie_powtarzaja_tej_samej_kwoty():
+    """„Run once now" pomija guard, wiec admin odpala silnik kilka razy dziennie.
+    Losowanie po samym dniu dawalo za kazdym razem TE SAMA kwote i ten sam
+    rozmiar konta — na kanale wygladalo to jak zaciety generator."""
+    s = _sesja()
+    _wyczysc(s)
+    try:
+        payoutbot.zapisz_ustawienia(s, enabled=True, hour=0)
+        kiedy = datetime(2026, 8, 12, 18, 0, tzinfo=timezone.utc)
+        kwoty, rozmiary = [], []
+        for _ in range(5):
+            r = payoutbot.uruchom(s, kiedy, force=True)
+            kwoty.append(r["amount_usd"])
+            rozmiary.append(s.get(Payout, r["payout_id"]).account.initial_balance)
+        assert len(set(kwoty)) >= 4, kwoty
+        assert len(set(rozmiary)) >= 2, rozmiary
+    finally:
+        s.close()
+
+
 def test_ten_sam_dzien_daje_ten_sam_wynik():
     """Losowość jest zaseedowana dniem, więc powtórka po nieudanym zapisie
     odtwarza tę samą wypłatę, a nie wymyśla nowej osoby i kwoty."""
@@ -213,6 +233,8 @@ def test_bare_zdejmuje_wszystko_poza_karta():
     goly = client.get(f"/payout/{r['cert_token']}?bare=1").text
     assert "cert-bare" not in zwykly and "cert-bare" in goly
     assert "cert-card" in goly and r["cert_token"] in goly
+    # Skalowanie pod zrzut nie ma prawa dzialac na stronie, ktora oglada klient.
+    assert "style.zoom" in goly and "style.zoom" not in zwykly
 
 
 def test_znacznik_pochodzenia_nie_drukuje_sie_na_certyfikacie():
@@ -250,7 +272,7 @@ def test_telegram_sklada_poprawny_multipart():
         return 200, b'{"ok":true}'
 
     with _kanal():
-        assert telegram.send_photo(PNG, "Podpis", transport=transport) is True
+        assert telegram.send_photo(PNG, "Podpis", transport=transport) == (True, "")
     granica = zebrane["ct"].split("boundary=")[1]
     assert zebrane["url"].endswith("/sendPhoto")
     assert granica.encode() in zebrane["body"]
@@ -264,14 +286,16 @@ def test_telegram_wylaczony_nie_strzela():
     def transport(url, body, ct):  # pragma: no cover - nie ma prawa się wykonać
         raise AssertionError("nie wolno wysyłać przy wyłączonym kanale")
 
-    assert telegram.send_photo(PNG, "x", transport=transport) is False
+    assert telegram.send_photo(PNG, "x", transport=transport)[0] is False
 
 
 def test_telegram_zwraca_false_gdy_odrzucone():
     with _kanal():
+        # Powod MUSI wrocic do wywolujacego, zeby panel mogl go pokazac.
         assert telegram.send_photo(
             PNG, "x",
-            transport=lambda u, b, c: (400, b'{"description":"chat not found"}')) is False
+            transport=lambda u, b, c: (400, b'{"description":"chat not found"}')
+        ) == (False, "chat not found")
 
 
 def test_renderer_odrzuca_odpowiedz_ktora_nie_jest_obrazkiem():

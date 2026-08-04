@@ -2557,6 +2557,14 @@ class IssuePayoutIn(BaseModel):
 
 class CertLpIn(BaseModel):
     show_on_lp: bool = True
+    # Numer certyfikatu do ODTWORZENIA. Normalnie losujemy nowy, ale po pomyłkowym
+    # wycofaniu trzeba wrócić DOKŁADNIE ten sam: stary numer siedzi w kodzie QR na
+    # wydrukach i we wpisach, które już poszły w świat, więc nowy zostawiłby te
+    # odwołania martwe.
+    token: str | None = None
+
+
+_TOKEN_RX = re.compile(r"^[A-Za-z0-9_-]{8,32}$")
 
 
 class LpVisibilityIn(BaseModel):
@@ -2659,7 +2667,20 @@ def admin_payout_certificate(payout_id: int, payload: CertLpIn | None = None):
         if not p:
             raise HTTPException(404, "Payout not found")
         widoczny = True if payload is None else bool(payload.show_on_lp)
-        if not p.cert_token:
+        zadany = (payload.token or "").strip() if payload else ""
+        if zadany:
+            # Odtworzenie numeru po pomyłkowym wycofaniu. Nadpisujemy nawet gdy
+            # certyfikat już jest — inaczej po wystawieniu nowego nie dałoby się
+            # wrócić do numeru, który klient ma na wydruku i w kodzie QR.
+            if not _TOKEN_RX.match(zadany):
+                raise HTTPException(400, "A certificate number is 8-32 characters: "
+                                         "letters, digits, '-' and '_'")
+            zajety = (session.query(Payout)
+                      .filter(Payout.cert_token == zadany, Payout.id != p.id).first())
+            if zajety:
+                raise HTTPException(409, "That certificate number belongs to another payout")
+            p.cert_token = zadany
+        elif not p.cert_token:
             p.cert_token = secrets.token_urlsafe(16)[:32]
         p.show_on_lp = widoczny
         session.commit()

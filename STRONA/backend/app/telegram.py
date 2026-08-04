@@ -78,30 +78,36 @@ def _urllib_transport(url: str, body: bytes, content_type: str) -> tuple[int, by
 
 
 def _strzal(metoda: str, pola: dict[str, str],
-            plik: tuple[str, str, bytes] | None, transport) -> bool:
+            plik: tuple[str, str, bytes] | None, transport) -> tuple[bool, str]:
+    """`(czy poszło, powód odmowy)`.
+
+    Powód wraca WYŻEJ, a nie tylko do logu: bez niego panel mówi „Telegram
+    odrzucił zdjęcie", a admin musi grzebać w logach hostingu, żeby dowiedzieć
+    się, że bot po prostu nie jest administratorem kanału.
+    """
     if not is_enabled():
-        print("[telegram] pominięto: brak TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID")
-        return False
+        return False, "no bot token or channel"
     body, content_type = _multipart(pola, plik)
     url = f"{API}/bot{settings.telegram_bot_token}/{metoda}"
     try:
         status, tresc = (transport or _urllib_transport)(url, body, content_type)
     except Exception as e:  # pragma: no cover - sieć
         print(f"[telegram] {metoda} błąd sieci: {e}")
-        return False
+        return False, f"network error: {e}"
     if status == 200:
-        return True
-    # Token NIGDY nie może trafić do logu — jest w URL-u, więc logujemy samą metodę.
-    opis = ""
+        return True, ""
+    # Token NIGDY nie może trafić do logu ani do panelu — jest w URL-u, więc
+    # przekazujemy dalej sam opis z odpowiedzi, nigdy adresu żądania.
     try:
         opis = (json.loads(tresc or b"{}") or {}).get("description", "")
     except Exception:
         opis = (tresc or b"")[:200].decode("utf-8", "replace")
+    opis = opis or f"HTTP {status}"
     print(f"[telegram] {metoda} odrzucone ({status}): {opis}")
-    return False
+    return False, opis
 
 
-def send_photo(png: bytes, caption: str, *, transport=None) -> bool:
+def send_photo(png: bytes, caption: str, *, transport=None) -> tuple[bool, str]:
     """Grafika + podpis pod nią. `caption` w HTML-u (limit Telegrama: 1024 znaki)."""
     return _strzal("sendPhoto",
                    {"chat_id": settings.telegram_chat_id, "caption": caption[:1024],
@@ -109,7 +115,7 @@ def send_photo(png: bytes, caption: str, *, transport=None) -> bool:
                    ("photo", "certificate.png", png), transport)
 
 
-def send_message(text: str, *, transport=None) -> bool:
+def send_message(text: str, *, transport=None) -> tuple[bool, str]:
     """Sam tekst — awaryjnie, gdy nie udało się zrobić grafiki.
 
     Lepiej opublikować wpis bez obrazka niż nie opublikować nic: wypłata już
