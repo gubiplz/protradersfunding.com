@@ -49,16 +49,10 @@ from .config import get_settings
 
 settings = get_settings()
 
-# DOCELOWA szerokość obrazka: 1280 px, i to nie jest liczba wzięta z sufitu.
-# Telegram normalizuje zdjęcia do 1280 px na dłuższym boku. Zmierzone na realnym
-# poście: wysłaliśmy 1220 px, na kanale wylądowało 1280 px — czyli PRZESKALOWANE
-# w górę o ~3%. Skalowanie o taki ułamek to najgorszy przypadek dla drobnego
-# druku: każda litera dostaje rozmytą krawędź i numer certyfikatu przestaje się
-# dać przepisać. Przy 1280 px na wejściu Telegramowi zostaje sama rekompresja,
-# bez ruszania geometrii.
-DOCELOWA_SZEROKOSC = 1280
+# Karta ma `width:min(620px,100%)`, a `.cert-bare` dokłada 20 px marginesu
+# z każdej strony — 660 px to dokładnie kadr ze zrzutu, bez pasków po bokach.
+SZEROKOSC = 660
 SKALA = 2                  # jak `SCALE` w cert-jpg.js — obrazek ma być ostry
-SZEROKOSC = DOCELOWA_SZEROKOSC // SKALA     # okno przeglądarki w px CSS
 TIMEOUT_SEK = 45           # zimny start przeglądarki potrafi trwać
 
 # Sygnatury formatów, które Telegram przyjmie jako zdjęcie. Sprawdzamy je, bo
@@ -199,23 +193,4 @@ def render(cel_url: str, *, transport=None) -> bytes | None:
         return None
     # Nadmiar pod certyfikatem obcinamy SAMI — okno usługi bywa pionowe, a jej
     # parametry nie sa wspolne dla dostawcow. Patrz `przytnij_do_kwadratu`.
-    gotowe = przytnij_do_kwadratu(dane)
-    _ostrzez_o_szerokosci(gotowe)
-    return gotowe
-
-
-def _ostrzez_o_szerokosci(png: bytes) -> None:
-    """Mówi do logu, gdy obrazek nie ma 1280 px — bo wtedy Telegram go przeskaluje.
-
-    Szerokość dyktuje okno zewnętrznej usługi, a w trybie `{url}` siedzi ono
-    w `SHOT_API_URL`, poza zasięgiem tego kodu. Bez tej linijki rozjazd byłby
-    niewidoczny: obrazek dochodzi, wygląda „prawie dobrze", a drobny druk cichaczem
-    się rozmywa. Patrz `DOCELOWA_SZEROKOSC`.
-    """
-    if not png.startswith(b"\x89PNG\r\n\x1a\n") or len(png) < 24:
-        return
-    szer = int.from_bytes(png[16:20], "big")
-    if szer != DOCELOWA_SZEROKOSC:
-        print(f"[certshot] obrazek ma {szer} px zamiast {DOCELOWA_SZEROKOSC} px — "
-              f"Telegram go przeskaluje i drobny druk się rozmyje; "
-              f"ustaw szerokość okna w SHOT_API_URL")
+    return przytnij_do_kwadratu(dane)

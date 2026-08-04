@@ -459,29 +459,3 @@ def test_kwoty_bez_groszy():
     assert all(k >= 1 for k in kwoty)
     # Podpis i certyfikat drukuja to samo — bez ".00" na koncu.
     assert all("." not in payoutbot.kwota_txt(k) for k in kwoty)
-
-
-def test_podpis_niesie_link_weryfikacji():
-    """Telegram skaluje i kompresuje zdjecia, wiec drobny druk pod kodem QR bywa
-    nie do przepisania. Adres w podpisie jest tekstem: klikalnym i kopiowalnym."""
-    s = SessionLocal()
-    payoutbot.zapisz_ustawienia(s, enabled=True, hour=0)
-    w = payoutbot.wygeneruj(s)
-    s.commit()
-    token = w.cert_token
-    nazwa = w.account.trader_name if w.account else "Ktos"
-    s.close()
-
-    wyslane = {}
-
-    def tg(url, body, ctype):
-        wyslane["body"] = body
-        return 200, b'{"ok":true}'
-
-    with _kanal():
-        wynik = payoutbot.opublikuj(w, nazwa, base_url="https://protradersfunding.com",
-                                    transport_shot=_shot_ok, transport_tg=tg)
-    assert wynik["posted"] is True and wynik["photo"] is True
-    tresc = wyslane["body"].decode("utf-8", "replace")
-    assert f"https://protradersfunding.com/verify/{token}" in tresc, \
-        "adres weryfikacji musi byc W PODPISIE, nie tylko na grafice"

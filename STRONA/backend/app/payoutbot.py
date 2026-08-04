@@ -285,21 +285,14 @@ def opublikuj(wyplata: Payout, nazwa: str, *, base_url: str | None = None,
     """Zrzut certyfikatu + wpis na kanale. Best-effort, nigdy nie rzuca."""
     baza = (base_url or settings.app_base_url or "").rstrip("/")
     link = f"{baza}/payout/{wyplata.cert_token}"
-    weryfikacja = f"{baza}/verify/{wyplata.cert_token}"
     tekst = podpis((nazwa or "").split(" ")[0] or "A trader", wyplata.trader_share)
-    # Adres weryfikacji W PODPISIE, nie tylko na grafice. Telegram przepuszcza
-    # zdjęcia przez własną kompresję i skalowanie (zmierzone: 1220 px na wejściu,
-    # 1280 px na wyjściu), więc drobny druk pod kodem QR rozmywa się na tyle, że
-    # nie da się go przepisać. W podpisie link jest zwykłym tekstem: klikalnym,
-    # zaznaczalnym i odpornym na to, co Telegram zrobi z obrazkiem.
-    podpis_pelny = f"{tekst}\n{weryfikacja}"
 
     if not telegram.is_enabled():
         return {"posted": False, "photo": False, "reason": "telegram off"}
 
     png = certshot.render(f"{link}?bare=1", transport=transport_shot)
     if png:
-        ok, powod = telegram.send_photo(png, podpis_pelny, transport=transport_tg)
+        ok, powod = telegram.send_photo(png, tekst, transport=transport_tg)
         if ok:
             return {"posted": True, "photo": True}
         # Powód prosto od Telegrama („bot is not a member of the channel chat",
@@ -309,7 +302,7 @@ def opublikuj(wyplata: Payout, nazwa: str, *, base_url: str | None = None,
 
     # Bez grafiki idzie sam podpis z linkiem — cisza na kanale byłaby myląca,
     # skoro wypłata i jej publiczny certyfikat już istnieją.
-    ok, powod = telegram.send_message(f"{podpis_pelny}\n{link}", transport=transport_tg)
+    ok, powod = telegram.send_message(f"{tekst}\n{link}", transport=transport_tg)
     return {"posted": ok, "photo": False, "reason": "" if ok else powod}
 
 
