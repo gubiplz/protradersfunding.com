@@ -1198,7 +1198,7 @@ const VIEWS={
       <div class="pod-name">${esc(r.trader)}${mv(r,i+1)}</div>
       <div style="margin:6px 0 2px"><span class="status ${r.status==='funded'?'funded':'active'}"><span class="dot"></span>${r.status==='funded'?'Funded':'Evaluation'}</span></div>
       <div class="pod-ret">${r.profit_pct>=0?'+':''}${r.profit_pct.toFixed(2)}%</div>
-      <div class="pod-profit ${pu>=0?'up':'down'}">${pu>=0?'+':'−'}$${fmt(Math.abs(pu))} profit</div>
+      <div class="pod-profit ${pu>=0?'up':'down'}">${pu>=0?'+':'−'}$${fmt0(Math.abs(pu))} profit</div>
       <div class="pod-mini">
         <div><div class="l">Account</div><div class="v">$${fmt0(r.account_size)}</div></div>
         <div><div class="l">Stage</div><div class="v">${r.status==='funded'?'Funded':'Eval'}</div></div>
@@ -1227,7 +1227,7 @@ const VIEWS={
         <td class="num muted">$${fmt0(r.account_size)}</td>
         <td><span class="status ${r.status==='funded'?'funded':'active'}"><span class="dot"></span>${r.status==='funded'?'Funded':'Evaluation'}</span></td>
         <td class="num ${r.profit_pct>=0?'up':'down'}" style="text-align:right" data-sort="${r.profit_pct}">${r.profit_pct>=0?'+':''}${r.profit_pct.toFixed(2)}%
-          <div style="font-size:11px;opacity:.78">${pu>=0?'+':'−'}$${fmt(Math.abs(pu))}</div></td></tr>`}).join('')+`
+          <div style="font-size:11px;opacity:.78">${pu>=0?'+':'−'}$${fmt0(Math.abs(pu))}</div></td></tr>`}).join('')+`
       </tbody></table></div>`:''}
     <p class="muted" style="font-size:11.5px;margin-top:12px">Funded accounts only, ranked by profit. Names are masked for privacy.</p>`;
   localStorage.setItem('pf_board_prev',JSON.stringify(Object.fromEntries(b.map((r,i)=>[r.trader,i+1]))));
