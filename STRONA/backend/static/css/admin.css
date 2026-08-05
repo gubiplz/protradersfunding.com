@@ -147,3 +147,16 @@ tr.clickable{cursor:pointer}
   /* pola formularza puli nie rozciagaja sie na pol ekranu */
   .pool-form{grid-template-columns:repeat(auto-fit,minmax(160px,300px))}
 }
+
+/* Wyszukiwarki (Accounts/Pool/Orders): wrapper przejmuje slot inputa w
+   toolbarze, a "x" do czyszczenia siedzi WEWNATRZ pola przy prawej krawedzi.
+   padding-right robi mu miejsce, zeby nie zaslanial wpisanego tekstu. */
+.toolbar .q-wrap{position:relative;display:flex;max-width:280px;flex:1 1 220px;min-width:0}
+.toolbar .q-wrap .inp{max-width:none;width:100%;padding-right:36px}
+.q-x{position:absolute;right:5px;top:50%;transform:translateY(-50%);width:26px;height:26px;
+  border:0;background:transparent;color:var(--muted);font-size:17px;line-height:1;
+  cursor:pointer;border-radius:8px;padding:0}
+.q-x:hover{background:var(--hover);color:var(--txt)}
+@media(max-width:640px){
+  .toolbar .q-wrap{max-width:none;width:100%;flex-basis:100%}
+}

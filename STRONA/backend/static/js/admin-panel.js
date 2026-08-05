@@ -529,6 +529,25 @@ const VIEWS={
 
 
 /* ---------- accounts: filters + table ---------- */
+/* Search boxes re-render the whole view on every keystroke, so the input is
+   torn down and rebuilt and a bare focus() lands with the caret at position 0
+   — typing came out reversed ("ale" -> "ela"). Focus AND restore the caret. */
+function qFocus(id,pos){
+  const el=document.getElementById(id); if(!el)return;
+  el.focus();
+  const p=(pos==null?el.value.length:Math.min(pos,el.value.length));
+  try{el.setSelectionRange(p,p)}catch(e){}
+}
+/* One search box, one behaviour: caret survives the re-render and a clear "x"
+   sits inside the field on the right whenever there is anything to clear. */
+function searchBox(id,stateKey,render,ph){
+  const val=window[stateKey]||'';
+  return `<span class="q-wrap"><input class="inp" id="${id}" placeholder="${ph}" value="${esc(val)}"
+      oninput="window.${stateKey}=this.value;const p=this.selectionStart;${render}();qFocus('${id}',p)">
+    ${val?`<button class="q-x" type="button" aria-label="Clear search" title="Clear"
+      onclick="window.${stateKey}='';${render}();qFocus('${id}')">&times;</button>`:''}</span>`;
+}
+
 function renderAccounts(){
   const list=window._accs||[];
   const q=(window._accQ||'').toLowerCase();
@@ -539,8 +558,7 @@ function renderAccounts(){
   const seg=[['all','All'],['active','Evaluation'],['funded','Funded'],['failed','Failed'],['provisioning','Provisioning']];
   $('view').innerHTML=`
     <div class="toolbar">
-      <input class="inp" id="acc-q" placeholder="Search login, trader, email or plan…" value="${esc(window._accQ||'')}"
-        oninput="window._accQ=this.value;renderAccounts();document.getElementById('acc-q').focus()">
+      ${searchBox('acc-q','_accQ','renderAccounts','Search login, trader, email or plan…')}
       <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._accFilter='${k}';renderAccounts()">${l}</button>`).join('')}</div>
       <span class="count-pill">${rows.length} of ${list.length}</span>
     </div>
@@ -589,8 +607,7 @@ function poolListHtml(){
       ||(p.platform_server||'').toLowerCase().includes(q)
       ||(p.trader_email||'').toLowerCase().includes(q)));
   return `<div class="toolbar">
-      <input class="inp" id="pool-q" placeholder="Search login, server or trader…" value="${esc(window._poolQ||'')}"
-        oninput="window._poolQ=this.value;renderPoolList();document.getElementById('pool-q').focus()">
+      ${searchBox('pool-q','_poolQ','renderPoolList','Search login, server or trader…')}
       <div class="seg">${[['all','All'],['free','Free'],['assigned','Assigned'],['retired','Retired']]
         .map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._poolFilter='${k}';renderPoolList()">${l}</button>`).join('')}</div>
       <span class="count-pill">${list.length} of ${rows.length}</span>
@@ -704,8 +721,7 @@ function renderOrders(){
         <div><div class="lbl">Average order</div><div class="val">$${fmt0(avg)}</div>${podpis}</div></div>
     </div>
     <div class="toolbar">
-      <input class="inp" id="ord-q" placeholder="Search email, product, status…" value="${esc(window._ordQ||'')}"
-        oninput="window._ordQ=this.value;renderOrders();document.getElementById('ord-q').focus()">
+      ${searchBox('ord-q','_ordQ','renderOrders','Search email, product, status…')}
       <div class="seg">${[['all','All'],['paid','Paid'],['pending','Pending'],['awaiting','Awaiting crypto'],['failed','Failed']]
         .map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._ordFilter='${k}';renderOrders()">${l}</button>`).join('')}</div>
       <span class="count-pill">${rows.length} of ${list.length}</span>
