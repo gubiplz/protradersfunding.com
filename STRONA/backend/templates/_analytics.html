@@ -9,11 +9,17 @@
 <script async src="https://www.googletagmanager.com/gtag/js?id={{ ga_id }}"></script>
 <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}
 gtag('js',new Date());gtag('config','{{ ga_id }}');</script>{% endif %}
-{# Clarity dopiero po `load`: jego bootstrap (~0,5 s CPU na słabszym telefonie)
-   konkurował z renderem hero i kosztował ~10 pkt Lighthouse na LCP. Stub
-   kolejkuje wywołania `clarity()` od razu, więc API nie znika, a nagraniu
-   sesji brakuje najwyżej pierwszych ~2 s. #}
+{# Clarity dopiero przy pierwszej interakcji (lub 4 s po `load`): jego bootstrap
+   (~0,5 s CPU na słabszym telefonie) konkurował z renderem hero i kosztował
+   ~10 pkt Lighthouse na LCP. Samo „po load" nie wystarczało — przy ciepłym
+   cache load odpala się PRZED pierwszym paintem i koszt wracał. Stub kolejkuje
+   wywołania `clarity()` od razu, więc API nie znika; nagraniu brakuje tylko
+   biernego początku sesji, a te i tak zaczynają być ciekawe od interakcji. #}
 {% if clarity_id %}<link rel="preconnect" href="https://www.clarity.ms">
 <script>window.clarity=window.clarity||function(){(window.clarity.q=window.clarity.q||[]).push(arguments)};
-addEventListener("load",function(){var t=document.createElement("script");t.async=1;
-t.src="https://www.clarity.ms/tag/{{ clarity_id }}";document.head.appendChild(t)});</script>{% endif %}
+(function(){var d=0,ev=["pointerdown","keydown","scroll"];function go(){if(d)return;d=1;
+ev.forEach(function(e){removeEventListener(e,go)});
+var t=document.createElement("script");t.async=1;
+t.src="https://www.clarity.ms/tag/{{ clarity_id }}";document.head.appendChild(t)}
+ev.forEach(function(e){addEventListener(e,go,{passive:true})});
+addEventListener("load",function(){setTimeout(go,4000)})})();</script>{% endif %}
