@@ -4134,9 +4134,11 @@ def _leaderboard_rows():
             if profit_pct <= 0:
                 continue
             tr = traderzy.get(a.trader_id)
+            # Bez pola equity: wlasciciel nie chce pokazywac biezacego stanu
+            # konta przy userach — publikujemy zysk (%, $) i rozmiar konta.
             rows.append({"trader": _mask_name(a.trader_name or (tr.full_name if tr else "")),
                          "phase": a.phase, "status": a.status,
-                         "equity": equity_now, "profit_pct": profit_pct,
+                         "profit_pct": profit_pct,
                          "profit_usd": round(equity_now - a.initial_balance, 2),
                          "account_size": a.initial_balance})
         rows.sort(key=lambda r: r["profit_pct"], reverse=True)

@@ -1183,7 +1183,7 @@ const VIEWS={
      jest o wynikach traderow, wiec sumujemy to, co faktycznie wypracowali —
      equity ponad saldo startowe. Ujemne wyniki wchodza normalnie: to ma byc
      dorobek grupy, a nie sama smietanka. */
-  const totalProfit=b.reduce((s,r)=>s+((r.equity||0)-(r.account_size||0)),0);
+  const totalProfit=b.reduce((s,r)=>s+(r.profit_usd!=null?r.profit_usd:((r.equity||0)-(r.account_size||0))),0);
   const best=b[0];
   const medal=['gold','silver','bronze'];
   let prevRanks=null;try{prevRanks=JSON.parse(localStorage.getItem('pf_board_prev')||'null')}catch(e){}
@@ -1199,7 +1199,6 @@ const VIEWS={
       <div style="margin:6px 0 2px"><span class="status ${r.status==='funded'?'funded':'active'}"><span class="dot"></span>${r.status==='funded'?'Funded':'Evaluation'}</span></div>
       <div class="pod-ret">${r.profit_pct>=0?'+':''}${r.profit_pct.toFixed(2)}%</div>
       <div class="pod-profit ${pu>=0?'up':'down'}">${pu>=0?'+':'−'}$${fmt(Math.abs(pu))} profit</div>
-      <div class="pod-usd">$${fmt(r.equity||0)} current equity</div>
       <div class="pod-mini">
         <div><div class="l">Account</div><div class="v">$${fmt0(r.account_size)}</div></div>
         <div><div class="l">Stage</div><div class="v">${r.status==='funded'?'Funded':'Eval'}</div></div>
@@ -1230,7 +1229,7 @@ const VIEWS={
         <td class="num ${r.profit_pct>=0?'up':'down'}" style="text-align:right" data-sort="${r.profit_pct}">${r.profit_pct>=0?'+':''}${r.profit_pct.toFixed(2)}%
           <div style="font-size:11px;opacity:.78">${pu>=0?'+':'−'}$${fmt(Math.abs(pu))}</div></td></tr>`}).join('')+`
       </tbody></table></div>`:''}
-    <p class="muted" style="font-size:11.5px;margin-top:12px">Funded accounts only, ranked by current equity. Names are masked for privacy.</p>`;
+    <p class="muted" style="font-size:11.5px;margin-top:12px">Funded accounts only, ranked by profit. Names are masked for privacy.</p>`;
   localStorage.setItem('pf_board_prev',JSON.stringify(Object.fromEntries(b.map((r,i)=>[r.trader,i+1]))));
  },
 

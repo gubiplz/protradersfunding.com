@@ -134,7 +134,9 @@ def test_leaderboard_liczy_z_biezacego_equity_bez_doliczania_wyplat():
     from app.main import _leaderboard_rows
     row = next(row for row in _leaderboard_rows() if row["trader"] == "Wyplacony Z.")
     assert row["profit_pct"] == 4.0, "wypłacony zysk nie może wracać do rankingu"
-    assert row["equity"] == 10_400.0
+    # 400 = biezacy stan minus initial; z doliczona wyplata byloby 1040.
+    assert row["profit_usd"] == 400.0
+    assert "equity" not in row, "biezacego equity nie publikujemy przy userach"
 
 
 def test_leaderboard_pokazuje_tylko_konta_funded():

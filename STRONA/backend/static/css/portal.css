@@ -671,9 +671,9 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 .pod-name{font-weight:700;font-size:15px}
 .pod-ret{font-family:var(--mono);font-size:24px;font-weight:800;color:var(--green);margin:6px 0 2px}
 /* Zysk w dolarach pod procentem — mniejszy stopien tej samej rodziny mono,
-   kolor dziedziczy z .up/.down (zielony/czerwony jak procent nad nim). */
-.pod-profit{font-family:var(--mono);font-size:13px;font-weight:700;margin:0 0 3px}
-.pod-usd{font-size:12.5px;color:var(--muted);margin-bottom:14px}
+   kolor dziedziczy z .up/.down (zielony/czerwony jak procent nad nim).
+   Margines dolny domyka blok wyniku (linii current equity juz nie ma). */
+.pod-profit{font-family:var(--mono);font-size:13px;font-weight:700;margin:0 0 14px}
 .pod-mini{display:flex;border-top:1px solid var(--line);padding-top:12px}
 .pod-mini div{flex:1}
 .pod-mini .l{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
