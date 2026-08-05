@@ -221,11 +221,14 @@ class _CachedStatic(StaticFiles):
     """
 
     def _cache_control(self, path: str, query: bytes) -> str:
+        # `s-maxage` jest konieczne osobno: edge Vercela ignoruje samo `max-age`
+        # przy odpowiedziach z funkcji, więc bez niego każdy asset schodzi z
+        # lambdy (zmierzone: 18 kB ScrollTriggera potrafiło iść 2,8 s).
         if b"v=" in query:
-            return "public, max-age=31536000, immutable"
+            return "public, max-age=31536000, s-maxage=31536000, immutable"
         if path.startswith(("fonts/", "lib/")):
-            return "public, max-age=2592000"
-        return "public, max-age=86400"
+            return "public, max-age=2592000, s-maxage=2592000"
+        return "public, max-age=86400, s-maxage=86400"
 
     async def get_response(self, path, scope):
         resp = await super().get_response(path, scope)
@@ -241,6 +244,19 @@ app.mount("/static", _CachedStatic(directory=str(STATIC)), name="static")
 @app.get("/robots.txt", include_in_schema=False)
 def robots():
     return FileResponse(str(STATIC / "robots.txt"), media_type="text/plain")
+
+
+@app.get("/sitemap.xml", include_in_schema=False)
+def sitemap(request: Request):
+    base = _public_base(request)
+    paths = ["/", "/objectives", "/faq", "/affiliate", "/install", "/verify",
+             "/terms", "/privacy", "/risk-disclosure", "/refund-policy"]
+    urls = "".join(f"<url><loc>{base}{p}</loc></url>" for p in paths)
+    return Response('<?xml version="1.0" encoding="UTF-8"?>'
+                    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                    f"{urls}</urlset>",
+                    media_type="application/xml",
+                    headers={"Cache-Control": "public, max-age=86400, s-maxage=86400"})
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -262,7 +278,7 @@ def countries_js():
     """
     return Response(f"window.PF_GEO={json.dumps(countries.payload(), separators=(',', ':'))};",
                     media_type="application/javascript",
-                    headers={"Cache-Control": "public, max-age=31536000, immutable"})
+                    headers={"Cache-Control": "public, max-age=31536000, s-maxage=31536000, immutable"})
 
 
 @app.get("/sw.js", include_in_schema=False)
@@ -4176,6 +4192,7 @@ def _cert_ctx(request, *, headline_plain, eyebrow, trader_name, amount_label, am
     return {
         "site_name": settings.site_name,
         "ga_id": settings.ga_measurement_id,
+        "clarity_id": settings.clarity_project_id,
         "headline_plain": headline_plain,
         "eyebrow": eyebrow,
         "trader_name": trader_name or "—",
@@ -4725,7 +4742,8 @@ def _promo_ctx() -> dict | None:
 def _page(request: Request, template: str, **extra):
     ctx = {"site_name": settings.site_name, "support_email": settings.support_email,
            "base_url": _public_base(request), "asset_v": ASSET_V,
-           "ga_id": settings.ga_measurement_id, "promo": _promo_ctx(),
+           "ga_id": settings.ga_measurement_id,
+           "clarity_id": settings.clarity_project_id, "promo": _promo_ctx(),
            "google_client_id": settings.google_client_id, **extra}
     return jinja.TemplateResponse(request, template, ctx)
 

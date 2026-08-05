@@ -13,10 +13,12 @@
 <meta property="og:site_name" content="{{ site_name }}">
 <meta property="og:title" content="{% block og_title %}{{ site_name }} — Get Funded to Trade{% endblock %}">
 <meta property="og:description" content="{% block og_description %}Prop trading challenges on real MT5 infrastructure, up to $2,000,000 in simulated capital. Keep up to 90% of the rewards.{% endblock %}">
-<meta property="og:image" content="/static/img/og.png">
+<meta property="og:image" content="{{ base_url }}/static/img/og.png">
+<meta property="og:url" content="{{ base_url }}{{ request.url.path }}">
+<link rel="canonical" href="{{ base_url }}{{ request.url.path }}">
 <meta name="twitter:card" content="summary_large_image">
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"{{ site_name }}","logo":"/static/img/logo.png","email":"{{ support_email }}"}</script>
-{% include "_ga.html" %}
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"{{ site_name }}","logo":"{{ base_url }}/static/img/logo.png","email":"{{ support_email }}"}</script>
+{% include "_analytics.html" %}
 {% block head_extra %}{% endblock %}
 {% if promo %}<script>
 /* Runs BEFORE the first paint: a dismissed bar must never flash in and push the
@@ -91,7 +93,7 @@ if(localStorage.getItem('pf_promo_code')||localStorage.getItem('pf_coupon_code')
         <p>A technology-driven trading skills evaluation platform. Real MetaTrader 5 infrastructure, automated risk engine, transparent rules.</p>
       </div>
       <div class="foot-col">
-        <h4>Product</h4>
+        <h3>Product</h3>
         <a href="/#how">How it works</a>
         <a href="/objectives">Trading Objectives</a>
         <a href="/#pricing">Pricing</a>
@@ -100,14 +102,14 @@ if(localStorage.getItem('pf_promo_code')||localStorage.getItem('pf_coupon_code')
         <a href="/faq">FAQ</a>
       </div>
       <div class="foot-col">
-        <h4>Company</h4>
+        <h3>Company</h3>
         <a href="/affiliate">Affiliate Program</a>
         <a href="/verify">Verify a Certificate</a>
         <a href="/portal">Trader Portal</a>
         <a href="mailto:{{ support_email }}">Support</a>
       </div>
       <div class="foot-col">
-        <h4>Legal</h4>
+        <h3>Legal</h3>
         <a href="/terms">Terms of Service</a>
         <a href="/privacy">Privacy Policy</a>
         <a href="/risk-disclosure">Risk Disclosure</a>
@@ -132,7 +134,7 @@ if(localStorage.getItem('pf_promo_code')||localStorage.getItem('pf_coupon_code')
   <div class="ck-txt">
     <b>🍪 Cookie Notice</b>
     <p>We use cookies to enhance your experience. By continuing to visit this site,
-      you agree to our use of cookies. <a href="/privacy">Learn more</a></p>
+      you agree to our use of cookies. <a href="/privacy">Learn more in our Privacy Policy</a></p>
   </div>
   <div class="ck-actions">
     <button class="ck-decline" onclick="cookieOk(0)">Decline</button>
@@ -156,9 +158,9 @@ function cookieOk(v){try{localStorage.setItem('pf_cookie_ok',v?'1':'0')}catch(e)
 try{if(localStorage.getItem('pf_cookie_ok')===null)document.getElementById('cookie-note').classList.remove('hidden')}catch(e){}
 ckSpace();addEventListener('resize',ckSpace);addEventListener('load',ckSpace);</script>
 
-<script src="/static/lib/gsap.min.js"></script>
-<script src="/static/lib/ScrollTrigger.min.js"></script>
-<script src="/static/js/site.js?v={{ asset_v }}"></script>
+<script src="/static/lib/gsap.min.js" defer></script>
+<script src="/static/lib/ScrollTrigger.min.js" defer></script>
+<script src="/static/js/site.js?v={{ asset_v }}" defer></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -132,6 +132,14 @@ class Settings:
         "GA_MEASUREMENT_ID",
         "G-GPXYJPLH1G" if os.getenv("VERCEL_ENV") == "production" else "")
 
+    # Microsoft Clarity — nagrania sesji i heatmapy. Ta sama zasada co przy GA4:
+    # tylko produkcja, bo nagrania z localhosta i podglądów gałęzi zaśmiecają
+    # panel tak samo jak fałszywy ruch. CLARITY_PROJECT_ID nadpisuje, również
+    # pustą wartością (czyli da się wyłączyć bez ruszania kodu).
+    clarity_project_id: str = os.getenv(
+        "CLARITY_PROJECT_ID",
+        "xxneptaebw" if os.getenv("VERCEL_ENV") == "production" else "")
+
     # --- „Sign in with Google" (Google Identity Services) ---
     # OAuth Client ID typu Web z Google Cloud Console. Puste = przycisk w ogóle
     # się nie renderuje, a endpoint /api/auth/google zwraca 404. Client secret

@@ -3,3 +3,5 @@ Allow: /
 Disallow: /portal
 Disallow: /admin
 Disallow: /api/
+
+Sitemap: https://protradersfunding.com/sitemap.xml

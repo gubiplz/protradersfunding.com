@@ -1,0 +1,15 @@
+{# Analityka: GA4 (liczby) + Microsoft Clarity (nagrania sesji, heatmapy).
+   Jeden plik na trzy szablony — snippet powielony w każdym z osobna rozjeżdżał
+   się przy pierwszej zmianie, a wtedy część ruchu cicho przestaje się liczyć.
+   Puste id = znacznik w ogóle nie wychodzi, więc lokalnie i w testach nie leci
+   ani jeden request na zewnątrz. Panel admina (dashboard.html) celowo tego pliku
+   nie dołącza — nie nagrywamy cudzych danych w widoku operatora. #}
+{% if ga_id %}<link rel="preconnect" href="https://www.googletagmanager.com">
+<link rel="preconnect" href="https://region1.google-analytics.com">
+<script async src="https://www.googletagmanager.com/gtag/js?id={{ ga_id }}"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}
+gtag('js',new Date());gtag('config','{{ ga_id }}');</script>{% endif %}
+{% if clarity_id %}<link rel="preconnect" href="https://www.clarity.ms">
+<script>(function(c,l,a,r,i,t,y){c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
+y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y)})(window,document,"clarity","script","{{ clarity_id }}");</script>{% endif %}

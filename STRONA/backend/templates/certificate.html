@@ -8,7 +8,7 @@
 <title>{{ headline_plain }} — {{ site_name }}</title>
 {# `?bare=1` to wyłącznie zrzut do obrazka (certshot.py) — bot robiący grafikę
    certyfikatu nie jest odwiedzającym i nie ma prawa podbijać statystyk. #}
-{% if not bare %}{% include "_ga.html" %}{% endif %}
+{% if not bare %}{% include "_analytics.html" %}{% endif %}
 <link rel="icon" href="/static/img/favicon.png" type="image/png">
 <link rel="preload" href="/static/fonts/signature.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/css/site.css?v={{ asset_v }}">
