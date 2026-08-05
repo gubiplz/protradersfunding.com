@@ -670,6 +670,9 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 .pod-medal.bronze{background:var(--bronze-bg);color:var(--bronze)}
 .pod-name{font-weight:700;font-size:15px}
 .pod-ret{font-family:var(--mono);font-size:24px;font-weight:800;color:var(--green);margin:6px 0 2px}
+/* Zysk w dolarach pod procentem — mniejszy stopien tej samej rodziny mono,
+   kolor dziedziczy z .up/.down (zielony/czerwony jak procent nad nim). */
+.pod-profit{font-family:var(--mono);font-size:13px;font-weight:700;margin:0 0 3px}
 .pod-usd{font-size:12.5px;color:var(--muted);margin-bottom:14px}
 .pod-mini{display:flex;border-top:1px solid var(--line);padding-top:12px}
 .pod-mini div{flex:1}

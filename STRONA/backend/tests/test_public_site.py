@@ -90,7 +90,7 @@ def test_operacyjne_stats_tylko_dla_admina():
 def test_leaderboard_maskuje_nazwiska():
     tid, _ = _trader("rank@test.pl", "Ranking Maskowany")
     # Ranking pokazuje wylacznie konta FUNDED. Zysk na tyle duzy, zeby miejsce
-    # w TOP 20 bylo pewne: ranking zasilaja konta ze WSZYSTKICH plikow testow.
+    # w TOP 10 bylo pewne: ranking zasilaja konta ze WSZYSTKICH plikow testow.
     _konto(tid, "Ranking Maskowany", "770001", status="funded", balance=95_000)
     with TestClient(app) as c:
         r = c.get("/api/leaderboard")
@@ -98,6 +98,26 @@ def test_leaderboard_maskuje_nazwiska():
     assert "Maskowany" not in r.text, "pełne nazwisko wyciekło do publicznego rankingu"
     assert "login" not in (r.json()[0] if r.json() else {}), "ranking nie może ujawniać loginów MT5"
     assert any(row["trader"] == "Ranking M." for row in r.json())
+
+
+def test_leaderboard_bez_kraju_i_z_profitem_usd():
+    """Kraju NIE podajemy nawet po zatwierdzonym KYC — para „inicjały + kraj"
+    potrafi zawęzić osobę na tyle, że maska nazwiska przestaje chronić. W zamian
+    każdy wiersz niesie profit_usd (portal pokazuje kwotę pod procentem)."""
+    tid, _ = _trader("kraj-ukryty@test.pl", "Kraj Ukryty")
+    s = SessionLocal()
+    tr = s.get(Trader, tid)
+    tr.kyc_status, tr.kyc_country = "approved", "Belgium"
+    s.commit(); s.close()
+    # Zysk +1000% = pewne miejsce w TOP 10 niezaleznie od kont z innych plikow.
+    _konto(tid, "Kraj Ukryty", "770077", status="funded", phase="funded",
+           balance=550_000, initial=50_000.0)
+    with TestClient(app) as c:
+        r = c.get("/api/leaderboard")
+    wiersz = next(row for row in r.json() if row["trader"] == "Kraj U.")
+    assert "country" not in wiersz and "Belgium" not in r.text
+    assert wiersz["profit_usd"] == 500_000.0
+    assert all("country" not in row for row in r.json())
 
 
 def test_leaderboard_liczy_z_biezacego_equity_bez_doliczania_wyplat():
@@ -109,9 +129,10 @@ def test_leaderboard_liczy_z_biezacego_equity_bez_doliczania_wyplat():
     s = SessionLocal()
     s.add(Payout(account_id=aid, profit_amount=800.0, trader_share=640.0, paid=True))
     s.commit(); s.close()
-    with TestClient(app) as c:
-        r = c.get("/api/leaderboard")
-    row = next(row for row in r.json() if row["trader"] == "Wyplacony Z.")
+    # Pelna lista zamiast endpointu: +4% nie ma szans na TOP 10, gdy baze
+    # zasilaja konta ze wszystkich plikow testowych.
+    from app.main import _leaderboard_rows
+    row = next(row for row in _leaderboard_rows() if row["trader"] == "Wyplacony Z.")
     assert row["profit_pct"] == 4.0, "wypłacony zysk nie może wracać do rankingu"
     assert row["equity"] == 10_400.0
 
@@ -156,10 +177,27 @@ def test_leaderboard_pomija_konta_bez_zysku():
     assert "Pod K." not in imiona
     assert "Ulamek G." not in imiona
     assert all(r["profit_pct"] > 0 for r in rows), "zero i minus nie moga wejsc"
-    # konto z realnym zyskiem wchodzi (TOP 20 zasilaja konta ze wszystkich plikow,
-    # wiec sprawdzamy wprost odpowiedz endpointu bez limitu miejsca)
-    from app.main import leaderboard
-    assert any(r["trader"] == "Realny Z." for r in leaderboard())
+    # konto z realnym zyskiem wchodzi do rankingu — sprawdzane na PELNEJ liscie,
+    # bo endpoint tnie do TOP 10, a baze zasilaja konta ze wszystkich plikow
+    from app.main import _leaderboard_rows
+    assert any(r["trader"] == "Realny Z." for r in _leaderboard_rows())
+
+
+def test_leaderboard_pokazuje_najwyzej_10_pozycji():
+    """Decyzja wlasciciela: publiczny ranking pokazuje naraz najwyzej 10 osob.
+    Dosiewamy 12 kwalifikujacych sie kont — endpoint MUSI uciac do 10, i to
+    zostawiajac najlepszych (ostatni widoczny >= kazdy odciety)."""
+    for i in range(12):
+        tid, _ = _trader(f"top10-{i}@test.pl", f"Dziesiatka Nr{i}")
+        _konto(tid, f"Dziesiatka Nr{i}", f"7791{i:02d}", status="funded", phase="funded",
+               balance=200_000 + i * 1_000, initial=10_000.0)
+    with TestClient(app) as c:
+        rows = c.get("/api/leaderboard").json()
+    assert len(rows) == 10
+    from app.main import _leaderboard_rows
+    pelna = _leaderboard_rows()
+    assert len(pelna) >= 12
+    assert rows[-1]["profit_pct"] >= pelna[10]["profit_pct"]
 
 
 def test_wlasciciel_widzi_szczegoly_konta_a_obcy_nie():

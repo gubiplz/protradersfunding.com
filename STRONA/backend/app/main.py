@@ -4099,9 +4099,8 @@ def admin_delete_trader(trader_id: int):
         session.close()
 
 
-@app.get("/api/leaderboard")
-def leaderboard():
-    """Publiczny ranking — realne konta, ale nazwiska MASKOWANE (RODO/prywatność).
+def _leaderboard_rows():
+    """Pełna lista rankingu — realne konta, ale nazwiska MASKOWANE (RODO/prywatność).
 
     Ranking liczony WPROST z bieżącego equity (balance) kont FUNDED — bez
     doliczania wypłaconych zysków i bez kont w ewaluacji. Po wypłacie trader
@@ -4111,13 +4110,20 @@ def leaderboard():
     tych, którzy zarabiają — konto na zerze albo pod kreską nie jest wynikiem,
     a przy pustej tablicy wypełniało listę zerami. Próg liczony na wartości
     zaokrąglonej, więc nic, co wyświetlałoby się jako „0.00%", nie przechodzi.
+
+    Limit miejsc nakłada dopiero endpoint — testy obecności „czy konto W OGÓLE
+    wchodzi do rankingu" korzystają z tej funkcji, żeby nie zależeć od sąsiadów
+    z innych plików testowych.
     """
     session = SessionLocal()
     try:
         accs = session.query(Account).filter(Account.status == "funded").all()
-        # Kraj i nazwisko bierzemy z tradera — ale JEDNYM zapytaniem po wszystkich
+        # Nazwisko bierzemy z tradera — ale JEDNYM zapytaniem po wszystkich
         # naraz. Osobny `session.get` na konto oznaczal tyle round-tripow, ile jest
         # kont funded (zmierzone: 1998 zapytan i 181 ms przy 2000 kont).
+        # Kraju NIE podajemy wcale: nazwisko jest maskowane, a para
+        # „inicjaly + kraj" potrafi zawezic osobe na tyle, ze maska przestaje
+        # cokolwiek chronic. Publiczny ranking pokazuje stan konta, nie osobe.
         tr_ids = {a.trader_id for a in accs if a.trader_id}
         traderzy = {t.id: t for t in session.query(Trader)
                     .filter(Trader.id.in_(tr_ids)).all()} if tr_ids else {}
@@ -4128,15 +4134,25 @@ def leaderboard():
             if profit_pct <= 0:
                 continue
             tr = traderzy.get(a.trader_id)
-            country = tr.kyc_country if (tr and tr.kyc_status == "approved" and tr.kyc_country) else None
             rows.append({"trader": _mask_name(a.trader_name or (tr.full_name if tr else "")),
-                         "country": country, "phase": a.phase, "status": a.status,
+                         "phase": a.phase, "status": a.status,
                          "equity": equity_now, "profit_pct": profit_pct,
+                         "profit_usd": round(equity_now - a.initial_balance, 2),
                          "account_size": a.initial_balance})
         rows.sort(key=lambda r: r["profit_pct"], reverse=True)
-        return rows[:20]
+        return rows
     finally:
         session.close()
+
+
+# Decyzja wlasciciela: publiczny ranking pokazuje NARAZ najwyzej 10 osob.
+LEADERBOARD_LIMIT = 10
+
+
+@app.get("/api/leaderboard")
+def leaderboard():
+    """Publiczny ranking — czubek pelnej listy z `_leaderboard_rows`."""
+    return _leaderboard_rows()[:LEADERBOARD_LIMIT]
 
 def _qr_svg(url: str) -> str:
     """Kod QR do weryfikacji — inline SVG, żeby dokument był samowystarczalny
@@ -4367,6 +4383,11 @@ def payout_certificate(request: Request, cert_token: str, bare: int = 0):
 # Odczyty, przy ktorych warto dogonic silnik: lista kont tradera (portal),
 # lista kont admina i ranking. Reszta API zostaje szybka.
 _LAZY_TICK_PATHS = {"/api/me/accounts", "/api/accounts", "/api/leaderboard"}
+# Payout BOT dostaje do tego ANONIMOWY ruch z landingu: strona publiczna pobiera
+# /api/public/stats przy kazdym wejsciu (site.js), a /api/leaderboard woła juz
+# tylko zalogowany portal. Ciezki lazy-tick equity zostaje na starym zbiorze —
+# guard payoutu to dwa male odczyty app_settings, wiec moze jechac szerzej.
+_PAYOUT_TICK_PATHS = _LAZY_TICK_PATHS | {"/api/public/stats"}
 
 
 async def _lazy_tick() -> None:
@@ -4401,11 +4422,11 @@ async def _lazy_tick() -> None:
 
 @app.middleware("http")
 async def _lazy_tick_middleware(request: Request, call_next):
-    if request.url.path in _LAZY_TICK_PATHS:
-        if settings.lazy_tick_sec > 0:
+    if request.url.path in _PAYOUT_TICK_PATHS:
+        if settings.lazy_tick_sec > 0 and request.url.path in _LAZY_TICK_PATHS:
             await _lazy_tick()
         # Payout BOT łapie swój dzienny slot na ruchu strony — landing pobiera
-        # /api/leaderboard, więc każde wejście z reklamy to szansa na publikację
+        # /api/public/stats przy każdym wejściu, więc ruch z reklam publikuje
         # o WYLOSOWANEJ minucie, a nie o godzinie crona. Guard to dwa małe
         # odczyty app_settings; realny przebieg zdarza się raz na dobę. Celowo
         # NIEZALEŻNIE od LAZY_TICK_SEC: post nie może wisieć na włączeniu

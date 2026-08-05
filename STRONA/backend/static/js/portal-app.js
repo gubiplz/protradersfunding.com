@@ -1189,19 +1189,22 @@ const VIEWS={
   let prevRanks=null;try{prevRanks=JSON.parse(localStorage.getItem('pf_board_prev')||'null')}catch(e){}
   const mv=(r,rank)=>{if(!prevRanks||prevRanks[r.trader]==null)return'';const d=prevRanks[r.trader]-rank;
     return d>0?` <span class="rank-up">▲${d}</span>`:d<0?` <span class="rank-down">▼${-d}</span>`:''};
-  const podium=b.slice(0,3).map((r,i)=>`
+  const podium=b.slice(0,3).map((r,i)=>{
+    const pu=r.profit_usd!=null?r.profit_usd:(r.equity||0)-(r.account_size||0);
+    return `
     <div class="pod-card${i===0?' first':''}">
       <div class="pod-rank">Rank #${i+1}</div>
       <div class="pod-medal ${medal[i]}">${ICO.trophy}</div>
-      <div class="pod-name">${esc(r.trader)}${mv(r,i+1)}${r.country?` <span class="muted" style="font-size:11px">· ${esc(r.country)}</span>`:''}</div>
+      <div class="pod-name">${esc(r.trader)}${mv(r,i+1)}</div>
       <div style="margin:6px 0 2px"><span class="status ${r.status==='funded'?'funded':'active'}"><span class="dot"></span>${r.status==='funded'?'Funded':'Evaluation'}</span></div>
       <div class="pod-ret">${r.profit_pct>=0?'+':''}${r.profit_pct.toFixed(2)}%</div>
+      <div class="pod-profit ${pu>=0?'up':'down'}">${pu>=0?'+':'−'}$${fmt(Math.abs(pu))} profit</div>
       <div class="pod-usd">$${fmt(r.equity||0)} current equity</div>
       <div class="pod-mini">
         <div><div class="l">Account</div><div class="v">$${fmt0(r.account_size)}</div></div>
         <div><div class="l">Stage</div><div class="v">${r.status==='funded'?'Funded':'Eval'}</div></div>
       </div>
-    </div>`).join('');
+    </div>`}).join('');
   $('view').innerHTML=`
     <div class="stats-row">
       <div class="stat-tile"><div class="tile-ic blue">${ICO.layers}</div>
@@ -1217,12 +1220,15 @@ const VIEWS={
     <div class="podium">${podium}</div>
     ${b.length>3?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="portal.board">
       <thead><tr><th style="width:52px">#</th><th>Trader</th><th>Account</th><th>Stage</th><th style="text-align:right">Profit</th></tr></thead>
-      <tbody>`+b.slice(3).map((r,i)=>`<tr>
+      <tbody>`+b.slice(3).map((r,i)=>{
+        const pu=r.profit_usd!=null?r.profit_usd:(r.equity||0)-(r.account_size||0);
+        return `<tr>
         <td class="num muted">${String(i+4).padStart(2,'0')}</td>
-        <td>${esc(r.trader)}${mv(r,i+4)}${r.country?` <span class="muted" style="font-size:11.5px">· ${esc(r.country)}</span>`:''}</td>
+        <td>${esc(r.trader)}${mv(r,i+4)}</td>
         <td class="num muted">$${fmt0(r.account_size)}</td>
         <td><span class="status ${r.status==='funded'?'funded':'active'}"><span class="dot"></span>${r.status==='funded'?'Funded':'Evaluation'}</span></td>
-        <td class="num ${r.profit_pct>=0?'up':'down'}" style="text-align:right">${r.profit_pct>=0?'+':''}${r.profit_pct.toFixed(2)}%</td></tr>`).join('')+`
+        <td class="num ${r.profit_pct>=0?'up':'down'}" style="text-align:right" data-sort="${r.profit_pct}">${r.profit_pct>=0?'+':''}${r.profit_pct.toFixed(2)}%
+          <div style="font-size:11px;opacity:.78">${pu>=0?'+':'−'}$${fmt(Math.abs(pu))}</div></td></tr>`}).join('')+`
       </tbody></table></div>`:''}
     <p class="muted" style="font-size:11.5px;margin-top:12px">Funded accounts only, ranked by current equity. Names are masked for privacy.</p>`;
   localStorage.setItem('pf_board_prev',JSON.stringify(Object.fromEntries(b.map((r,i)=>[r.trader,i+1]))));
