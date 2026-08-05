@@ -26,5 +26,8 @@ psycopg[binary]>=3.1
 # wymaga tez: playwright install chromium
 playwright>=1.40
 
+# Baza stref czasowych dla zoneinfo (Payout BOT: okno w America/New_York)
+tzdata>=2024.1
+
 # Testy
 pytest>=8.0

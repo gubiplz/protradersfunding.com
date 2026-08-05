@@ -55,6 +55,9 @@ def test_cron_wyzwala_tick_sekretem():
     r = client.get("/api/tick", headers={"Authorization": f"Bearer {USTAWIENIA.cron_secret}"})
     assert r.status_code == 200
     assert r.json()["accounts"] >= 1
+    # Payout BOT jedzie na tym samym ticku (jako backstop) — odpowiedź musi
+    # raportować jego przebieg, żeby log crona pokazywał, czemu (nie) postował.
+    assert "payout_bot" in r.json()
 
     # przebieg naprawdę policzył konto: powstał snapshot equity
     s = SessionLocal()

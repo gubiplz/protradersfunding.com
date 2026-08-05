@@ -446,7 +446,8 @@ const VIEWS={
     <div class="sec-card" style="max-width:560px"><h3>Payout BOT</h3>
       <div class="chip-row" style="margin-bottom:12px">
         <span class="status ${pb.enabled?'funded':'pending'}"><span class="dot"></span>${pb.enabled?'running':'off'}</span>
-        <span class="chip">posts at <b>${String(pb.hour).padStart(2,'0')}:00</b></span>
+        <span class="chip">window <b>${String(pb.win_from).padStart(2,'0')}:00&ndash;${String(pb.win_to).padStart(2,'0')}:00 ET</b></span>
+        <span class="chip">today's slot <b>${esc(pb.today_slot_et||'--:--')} ET</b></span>
         <span class="chip">on landing <b>${pb.lp_pct}%</b></span>
         <span class="chip">last run <b>${esc(pb.last_day||'never')}</b></span>
       </div>
@@ -456,8 +457,10 @@ const VIEWS={
         Set <span class="mono">TELEGRAM_BOT_TOKEN</span>, <span class="mono">TELEGRAM_CHAT_ID</span>
         and <span class="mono">SHOT_API_URL</span> in the environment.</div></div>`:''}
       <div class="pool-form">
-        <div><label class="muted" style="font-size:12px">Post at (server hour)</label>
-          <input id="pb-hour" class="inp" type="number" min="0" max="23" step="1" value="${pb.hour}"></div>
+        <div><label class="muted" style="font-size:12px">Window from (ET hour)</label>
+          <input id="pb-from" class="inp" type="number" min="0" max="23" step="1" value="${pb.win_from}"></div>
+        <div><label class="muted" style="font-size:12px">Window to (ET hour)</label>
+          <input id="pb-to" class="inp" type="number" min="0" max="23" step="1" value="${pb.win_to}"></div>
         <div><label class="muted" style="font-size:12px">Chance of landing page %</label>
           <input id="pb-lp" class="inp" type="number" min="0" max="100" step="1" value="${pb.lp_pct}"></div>
         <div><label class="muted" style="font-size:12px">Profit min %</label>
@@ -474,8 +477,10 @@ const VIEWS={
       </div>
       <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
         Creates <b>one payout a day</b> with today's date and a funded archive account behind it.
-        It rides the same cron as the risk engine, so with no traffic on the site the run can slip
-        to the next scheduled tick. <b>Every payout gets a public certificate</b> and is posted to
+        The posting minute is <b>drawn fresh every day</b> inside your window (US Eastern,
+        DST-aware), so posts never land at the same time twice. Site traffic releases the post at
+        that exact minute; with zero traffic it falls back to the daily tick, which fires from the
+        start of the window. <b>Every payout gets a public certificate</b> and is posted to
         the channel; only the share above lands on the certificate strip on the landing page, so it
         does not fill up with the same entries.
         <b>Run once now</b> replaces today's automatic run rather than adding to it.</p></div>
@@ -539,24 +544,26 @@ function renderAccounts(){
       <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._accFilter='${k}';renderAccounts()">${l}</button>`).join('')}</div>
       <span class="count-pill">${rows.length} of ${list.length}</span>
     </div>
-    ${rows.length?`<div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.accounts">
-      <thead><tr><th>Login</th><th>Trader</th><th>Plan</th><th>Phase</th><th>Status</th>
+    ${rows.length?`<div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.accounts.v2">
+      <thead><tr><th>Created</th><th>Paid</th><th>Login</th><th>Trader</th><th>Plan</th><th>Phase</th><th>Status</th>
+        <th title="Trade BOT">Bot</th>
         <th style="text-align:right">Balance</th><th style="text-align:right">Equity</th><th style="text-align:right">P&amp;L</th>
-        <th>Daily</th><th>Max DD</th><th>Created</th><th>Paid</th><th class="no-sort"></th></tr></thead>
+        <th>Daily</th><th>Max DD</th><th class="no-sort"></th></tr></thead>
       <tbody>${rows.map(a=>{const m=a.metrics||{};
         return `<tr class="clickable" onclick="openAccount(${a.id})">
-          <td class="num" style="font-weight:600">${a.status==='provisioning'?'<span class="muted">pending…</span>':esc(a.login)}${a.bot_enabled?(a.bot_paused?' <span title="Trade BOT paused">⏸</span>':' <span title="Trade BOT running">🤖</span>'):''}</td>
+          <td class="muted" style="white-space:nowrap" data-sort="${esc(a.created_at||'')}">${a.created_at?dstr(a.created_at):'—'}</td>
+          <td class="muted" style="white-space:nowrap" data-sort="${esc(a.paid_at||'')}">${a.paid_at?dstr(a.paid_at):'—'}</td>
+          <td class="num" style="font-weight:600">${a.status==='provisioning'?'<span class="muted">pending…</span>':esc(a.login)}</td>
           <td>${esc(a.trader_name||'—')}${a.trader_email?`<div class="muted" style="font-size:11px">${esc(a.trader_email)}</div>`:''}</td>
           <td class="muted">${esc(a.product_key)}</td>
           <td class="muted">${PHASE_LBL[a.phase]||esc(a.phase)}</td>
           <td><span class="status ${esc(a.status)}"><span class="dot"></span>${STATUS_LBL[a.status]||esc(a.status)}</span></td>
+          <td data-sort="${a.bot_enabled?(a.bot_paused?1:2):0}" title="${a.bot_enabled?(a.bot_paused?'Trade BOT paused':'Trade BOT running'):'Trade BOT off'}">${a.bot_enabled?(a.bot_paused?'🟡':'🟢'):'🔴'}</td>
           <td class="num" style="text-align:right">$${fmt(a.balance)}</td>
           <td class="num" style="text-align:right">$${fmt(a.equity)}</td>
           <td class="num ${(m.profit_pct||0)>=0?'up':'down'}" style="text-align:right">${(m.profit_pct||0)>=0?'+':''}${(m.profit_pct||0).toFixed(2)}%</td>
           <td data-sort="${(m.daily_loss_used_pct||0).toFixed(2)}">${mini(m.daily_loss_used_pct)}</td>
           <td data-sort="${(m.overall_dd_used_pct||0).toFixed(2)}">${mini(m.overall_dd_used_pct)}</td>
-          <td class="muted" style="white-space:nowrap" data-sort="${esc(a.created_at||'')}">${a.created_at?dstr(a.created_at):'—'}</td>
-          <td class="muted" style="white-space:nowrap" data-sort="${esc(a.paid_at||'')}">${a.paid_at?dstr(a.paid_at):'—'}</td>
           <td style="text-align:right" onclick="event.stopPropagation()">${
             XBTN(`deleteAccountRow(${a.id},'${esc(a.login)}','${esc(a.trader_name||'')}')`,'Delete account')}</td></tr>`}).join('')}
       </tbody></table></div>`
@@ -976,9 +983,9 @@ async function renderCerts(id){
     el.innerHTML='<h3 style="font-size:15px">Certificates</h3>'
       +`<p class="muted" style="font-size:12.5px">Could not load: ${esc(e.message)}</p>`;return}
   el.innerHTML=`<h3 style="font-size:15px;margin-bottom:10px">Certificates</h3>
-    ${list.map(c=>`<div class="kv" style="align-items:center">
+    ${list.map(c=>`<div class="kv" style="align-items:center;flex-wrap:wrap;row-gap:6px">
       <span>${esc(c.label)}</span>
-      <span style="display:flex;align-items:center;gap:8px">
+      <span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;row-gap:6px">
         ${c.url
           ? `<a class="btn-o sm" href="${c.url}" target="_blank">Open</a>
              <button class="btn-o sm" onclick="copyCert('${location.origin}${c.url}')">Copy link</button>`
@@ -1113,9 +1120,9 @@ async function renderPayouts(id){
     el.innerHTML='<h3 style="font-size:15px">Payouts &amp; certificates</h3>'
       +`<p class="muted" style="font-size:12.5px">Could not load: ${esc(e.message)}</p>`;return}
   const lista=d.payouts.length?d.payouts.map(p=>`
-    <div class="kv" style="align-items:center">
+    <div class="kv" style="align-items:center;flex-wrap:wrap;row-gap:6px">
       <span>${dstr(p.ts)} · profit $${fmt(p.profit_amount)}${p.note?' · '+esc(p.note):''}</span>
-      <span style="display:flex;align-items:center;gap:8px">
+      <span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;row-gap:6px">
         <b class="up">$${fmt(p.trader_share)}</b>
         ${p.cert_url
           ? `<span class="status ${p.show_on_lp?'paid':'pending'}" title="Landing page strip">
@@ -1412,7 +1419,8 @@ async function genSim(){
 /* ---------- Payout BOT ---------- */
 async function savePayoutBot(){
   const body={
-    hour:parseInt($('pb-hour').value,10),
+    win_from:parseInt($('pb-from').value,10),
+    win_to:parseInt($('pb-to').value,10),
     lp_pct:parseFloat($('pb-lp').value),
     gross_min_pct:parseFloat($('pb-min').value),
     gross_max_pct:parseFloat($('pb-max').value),
@@ -1426,7 +1434,7 @@ async function savePayoutBot(){
 }
 async function togglePayoutBot(on){
   try{await api('/api/admin/payout-engine',{method:'POST',body:JSON.stringify({enabled:on})});
-    toast(on?'Payout BOT is on. The next run happens at the hour you set.'
+    toast(on?'Payout BOT is on. It posts once a day at a random minute inside your window.'
             :'Payout BOT is off. No new payouts are generated.','ok');
     go('settings');
   }catch(e){toast('Error: '+e.message,'err')}

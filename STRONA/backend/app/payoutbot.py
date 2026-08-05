@@ -4,6 +4,17 @@ Admin włącza go raz w panelu (Settings -> Payout BOT), a od tego momentu raz n
 dobę powstaje wypłata z aktualną datą: konto archiwalne, publiczny certyfikat
 i post na kanale Telegrama z grafiką tego certyfikatu.
 
+Odbiorcy kanału to Amerykanie i Brytyjczycy, więc CAŁY czas silnika liczy się
+w strefie US Eastern (America/New_York, z automatycznym DST) — nie w czasie
+serwera MT5. Publikacja nie ma sztywnej godziny: admin ustawia OKNO (od–do,
+pełne godziny ET), a silnik losuje na każdy dzień inną minutę w tym oknie
+(`slot_dnia`). Post o równej godzinie co dobę wyglądałby jak automat.
+
+Kto dostarcza ticki: na Vercelu ruch na stronie (middleware w `main.py` odpala
+przebieg przy publicznych odczytach — landing pobiera `/api/leaderboard`), a raz
+na dobę cron `/api/tick` jako BACKSTOP: cron nie zna slotu z przyszłości, więc
+publikuje od początku okna, byle jeden post dziennie wyszedł nawet bez ruchu.
+
 Cztery zasady, na których to stoi:
 
 1. **Jedna ścieżka zapisu.** Trader, konto i wypłata powstają przez
@@ -11,10 +22,10 @@ Cztery zasady, na których to stoi:
    z ewidencji. Gdyby silnik tworzył konto po swojemu, po pierwszej zmianie
    w imporcie obie ścieżki zaczęłyby się rozjeżdżać.
 
-2. **Dzień determinuje wynik.** Losowość idzie z `random.Random("...:{dzien}")`,
-   więc dwa przebiegi tego samego dnia dają ten sam wynik. Razem z guardem
-   `payoutbot_last_day` znaczy to, że nawet zdublowany cron nie zrobi drugiej,
-   innej wypłaty.
+2. **Dzień determinuje wynik.** Losowość idzie z `random.Random("...:{dzien}")`
+   (dzień w ET), więc dwa przebiegi tego samego dnia dają ten sam wynik. Razem
+   z guardem `payoutbot_last_day` znaczy to, że nawet zdublowany tick nie zrobi
+   drugiej, innej wypłaty.
 
 3. **Certyfikat zawsze, landing czasem.** `cert_token` dostaje KAŻDA wypłata —
    bez niego nie ma czego zrzucić na Telegrama. Na pas certyfikatów na landingu
@@ -33,13 +44,18 @@ from __future__ import annotations
 
 import random
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from . import certshot, payout_import, telegram
 from .config import get_settings
 from .models import AppSetting, Payout, Product, Trader
 
 settings = get_settings()
+
+# Strefa odbiorców kanału. `tzdata` w requirements gwarantuje bazę stref także
+# na odchudzonych obrazach Linuksa (zoneinfo bierze ją wtedy z pakietu).
+ET = ZoneInfo("America/New_York")
 
 # --------------------------------------------------------------------------- #
 #  Ustawienia                                                                  #
@@ -49,7 +65,8 @@ KLUCZ_DZIEN = PREFIKS + "last_day"
 
 DOMYSLNE: dict[str, str] = {
     "enabled": "0",
-    "hour": "15",                                    # godzina serwera
+    "win_from": "9",                                 # okno publikacji, godziny ET
+    "win_to": "11",
     "lp_pct": "30",                                  # szansa na pas na landingu
     "sizes": "50000,100000,200000,300000,400000",
     "gross_min_pct": "9",                            # zysk brutto jako % konta
@@ -60,7 +77,8 @@ DOMYSLNE: dict[str, str] = {
 # wypłata rzędu 40% rozmiaru konta w jeden cykl nie wygląda jak wynik tradera,
 # tylko jak pomyłka w formularzu.
 LIMITY: dict[str, tuple[float, float]] = {
-    "hour": (0, 23),
+    "win_from": (0, 23),
+    "win_to": (0, 23),
     "lp_pct": (0, 100),
     "gross_min_pct": (0.5, 40),
     "gross_max_pct": (0.5, 40),
@@ -104,7 +122,8 @@ def ustawienia(session) -> dict:
         out[klucz] = (row.value if row and row.value != "" else domyslne)
     return {
         "enabled": out["enabled"] == "1",
-        "hour": int(float(out["hour"])),
+        "win_from": int(float(out["win_from"])),
+        "win_to": int(float(out["win_to"])),
         "lp_pct": float(out["lp_pct"]),
         "sizes": [float(x) for x in out["sizes"].split(",") if x.strip()],
         "gross_min_pct": float(out["gross_min_pct"]),
@@ -126,7 +145,7 @@ def zapisz_ustawienia(session, **pola) -> dict:
     if "enabled" in pola and pola["enabled"] is not None:
         _ustaw(session, "enabled", "1" if pola["enabled"] else "0")
 
-    for klucz in ("hour", "lp_pct", "gross_min_pct", "gross_max_pct"):
+    for klucz in ("win_from", "win_to", "lp_pct", "gross_min_pct", "gross_max_pct"):
         wartosc = pola.get(klucz)
         if wartosc is None:
             continue
@@ -150,34 +169,64 @@ def zapisz_ustawienia(session, **pola) -> dict:
     cfg = ustawienia(session)
     if cfg["gross_min_pct"] > cfg["gross_max_pct"]:
         raise ValueError("Minimum profit cannot be higher than the maximum")
+    if cfg["win_from"] > cfg["win_to"]:
+        raise ValueError("The posting window cannot start after it ends")
     session.commit()
     return cfg
 
 
 # --------------------------------------------------------------------------- #
-#  Czas serwera (ta sama strefa co tradebot/poller, bez importu -> brak cyklu)  #
+#  Czas wschodni USA i dzienny slot publikacji                                  #
 # --------------------------------------------------------------------------- #
-def _czas_serwera(now: datetime | None = None) -> datetime:
+def _czas_et(now: datetime | None = None) -> datetime:
     base = now or datetime.now(timezone.utc)
     if base.tzinfo is None:
         base = base.replace(tzinfo=timezone.utc)
-    return base + timedelta(hours=settings.server_utc_offset_hours)
+    return base.astimezone(ET)
 
 
 def _dzien(now: datetime | None = None) -> str:
-    return _czas_serwera(now).strftime("%Y-%m-%d")
+    return _czas_et(now).strftime("%Y-%m-%d")
 
 
-def nalezy_odpalic(session, now: datetime | None = None) -> tuple[bool, str]:
-    """`(czy odpalać, powód odmowy)`. Powód wraca do panelu i do logu crona."""
+def slot_dnia(cfg: dict, now: datetime | None = None) -> datetime:
+    """Wylosowana NA DZIŚ minuta publikacji wewnątrz okna, jako czas ET.
+
+    Seed z samej daty — slot nie może się przesuwać między tickami tej samej
+    doby, inaczej pierwszy tick po północy „przelosowałby" godzinę w nieskończoność.
+    Górny kres `win_to*60` oznacza: ostatni możliwy slot to RÓWNO koniec okna.
+    Godzina i minuta idą przez `replace` (czas ścienny), nie przez dodawanie
+    timedelty do północy — w dni zmiany DST arytmetyka absolutna przesuwałaby
+    okno o godzinę.
+    """
+    et = _czas_et(now)
+    rng = random.Random(f"payoutbot-slot:{et.strftime('%Y-%m-%d')}")
+    minuta = rng.randint(int(cfg["win_from"]) * 60, int(cfg["win_to"]) * 60)
+    return et.replace(hour=min(minuta // 60, 23), minute=minuta % 60,
+                      second=0, microsecond=0)
+
+
+def nalezy_odpalic(session, now: datetime | None = None, *,
+                   backstop: bool = False) -> tuple[bool, str]:
+    """`(czy odpalać, powód odmowy)`. Powód wraca do panelu i do logu crona.
+
+    `backstop=True` to dobowy cron: przychodzi raz i nie może „poczekać" na slot,
+    więc publikuje od początku okna. Ticki z ruchu (backstop=False) czekają na
+    wylosowaną minutę — to one dają kanałowi inną godzinę każdego dnia.
+    """
     cfg = ustawienia(session)
     if not cfg["enabled"]:
         return False, "engine off"
-    srv = _czas_serwera(now)
-    if cfg["last_day"] == srv.strftime("%Y-%m-%d"):
+    et = _czas_et(now)
+    if cfg["last_day"] == et.strftime("%Y-%m-%d"):
         return False, "already ran today"
-    if srv.hour < cfg["hour"]:
-        return False, f"waiting for {cfg['hour']:02d}:00 server time"
+    if backstop:
+        if et.hour < cfg["win_from"]:
+            return False, f"waiting for the {cfg['win_from']:02d}:00 ET window"
+        return True, ""
+    slot = slot_dnia(cfg, now)
+    if et < slot:
+        return False, f"waiting for today's slot {slot.strftime('%H:%M')} ET"
     return True, ""
 
 
@@ -307,10 +356,10 @@ def opublikuj(wyplata: Payout, nazwa: str, *, base_url: str | None = None,
 
 
 def uruchom(session, now: datetime | None = None, *, force: bool = False,
-            base_url: str | None = None, transport_shot=None,
-            transport_tg=None) -> dict:
+            backstop: bool = False, base_url: str | None = None,
+            transport_shot=None, transport_tg=None) -> dict:
     """Jeden przebieg silnika. Zwraca liczniki, jak pozostałe zadania crona."""
-    czy, powod = nalezy_odpalic(session, now)
+    czy, powod = nalezy_odpalic(session, now, backstop=backstop)
     if not czy and not force:
         return {"created": 0, "skipped": powod}
 

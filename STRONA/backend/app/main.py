@@ -3603,7 +3603,8 @@ class PayoutEngineIn(BaseModel):
     """Ustawienia Payout BOT-a. Wszystkie pola opcjonalne — panel zapisuje kartę
     w całości, ale przełącznik on/off woła ten sam endpoint z samym `enabled`."""
     enabled: bool | None = None
-    hour: int | None = None
+    win_from: int | None = None      # okno publikacji w godzinach US Eastern
+    win_to: int | None = None
     lp_pct: float | None = None
     sizes: list[float] | None = None
     gross_min_pct: float | None = None
@@ -3617,6 +3618,9 @@ def admin_payout_engine():
         cfg = payoutbot.ustawienia(session)
         czy, powod = payoutbot.nalezy_odpalic(session)
         return {**cfg, "due": czy, "blocked_by": powod,
+                # Wylosowana na dziś minuta publikacji — admin ma widzieć, na
+                # którą godzinę silnik jest „uzbrojony", zamiast zgadywać.
+                "today_slot_et": payoutbot.slot_dnia(cfg).strftime("%H:%M"),
                 # Panel ma pokazać wprost, czego brakuje do publikacji — inaczej
                 # admin włącza silnik i przez dobę nie wie, czemu kanał milczy.
                 "telegram_ready": telegram.is_enabled(),
@@ -4397,8 +4401,19 @@ async def _lazy_tick() -> None:
 
 @app.middleware("http")
 async def _lazy_tick_middleware(request: Request, call_next):
-    if settings.lazy_tick_sec > 0 and request.url.path in _LAZY_TICK_PATHS:
-        await _lazy_tick()
+    if request.url.path in _LAZY_TICK_PATHS:
+        if settings.lazy_tick_sec > 0:
+            await _lazy_tick()
+        # Payout BOT łapie swój dzienny slot na ruchu strony — landing pobiera
+        # /api/leaderboard, więc każde wejście z reklamy to szansa na publikację
+        # o WYLOSOWANEJ minucie, a nie o godzinie crona. Guard to dwa małe
+        # odczyty app_settings; realny przebieg zdarza się raz na dobę. Celowo
+        # NIEZALEŻNIE od LAZY_TICK_SEC: post nie może wisieć na włączeniu
+        # doganiania silnika ryzyka. `PAYOUTBOT_ON_TRAFFIC=false` to wyłącznik
+        # awaryjny (i furtka dla testów, które biją w te ścieżki bez intencji
+        # tworzenia wypłat).
+        if settings.payoutbot_on_traffic:
+            await run_in_threadpool(_payout_bot_tick, _public_base(request))
     return await call_next(request)
 
 
@@ -4445,7 +4460,7 @@ def _require_cron(x_admin_token: str | None = Header(default=None),
 
 
 @app.api_route("/api/tick", methods=["GET", "POST"], dependencies=[Depends(_require_cron)])
-async def api_tick():
+async def api_tick(request: Request):
     """Jeden przebieg silnika ryzyka — dla hostingu bez procesu w tle.
 
     Na zwykłym serwerze poller kręci się sam co `POLL_INTERVAL_SEC` i ten
@@ -4454,6 +4469,11 @@ async def api_tick():
     życiu — wtedy ustaw POLLER_ENABLED=false i wal tu cronem. GET jest
     obsłużony, bo Vercel Cron uderza właśnie metodą GET.
     """
+    # Payout BOT idzie PIERWSZY: poller przy wielu kontach potrafi zjeść cały
+    # `maxDuration` funkcji i post nigdy by nie wyszedł. Dla payoutów cron jest
+    # BACKSTOPEM (raz na dobę, po Hobby potrafi się spóźnić do godziny) —
+    # publikuje od początku okna; wylosowany slot łapią ticki z ruchu strony.
+    payout = _payout_bot_tick(_public_base(request), backstop=True)
     wynik = await poller.tick_once()
     # Dzienny recap jedzie na tym samym cronie (Vercel Hobby = 1 strzał/dobę);
     # push.daily_recap() sam pilnuje guardu raz-na-dobę i ciszy bez transakcji.
@@ -4462,9 +4482,6 @@ async def api_tick():
     # z tego samego powodu co recap. Wlasny odstep 21 dni w `_upsell_nudge`
     # sprawia, ze recznie odpalony endpoint i ten przebieg sie nie dubluja.
     nudge = _upsell_nudge() if datetime.now(timezone.utc).weekday() == 0 else {"sent": 0}
-    # Payout BOT jedzie tym samym cronem — na Hobby nie ma jak dodać trzeciego
-    # wpisu w `vercel.json`, a silnik i tak pilnuje sam godziny i guardu dnia.
-    payout = _payout_bot_tick()
     if isinstance(wynik, dict):
         return {**wynik, "daily_recap": recap, "upsell_nudge": nudge.get("sent", 0),
                 "payout_bot": payout}
@@ -4472,12 +4489,14 @@ async def api_tick():
             "payout_bot": payout}
 
 
-def _payout_bot_tick() -> dict:
-    """Przebieg Payout BOT-a wpięty w `/api/tick`. NIGDY nie wywraca ticka —
-    silnik ryzyka jest ważniejszy niż post na kanale."""
+def _payout_bot_tick(base_url: str | None = None, *,
+                     backstop: bool = False) -> dict:
+    """Przebieg Payout BOT-a — z crona (`backstop=True`) i z ruchu strony.
+    NIGDY nie wywraca wywołującego — silnik ryzyka i odpowiedź dla klienta są
+    ważniejsze niż post na kanale."""
     session = SessionLocal()
     try:
-        wynik = payoutbot.uruchom(session)
+        wynik = payoutbot.uruchom(session, backstop=backstop, base_url=base_url)
         if wynik.get("created"):
             _PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
         return wynik

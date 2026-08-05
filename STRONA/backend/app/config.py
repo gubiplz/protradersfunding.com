@@ -204,6 +204,12 @@ class Settings:
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")     # @kanal albo -100...
 
+    # Payout BOT łapie swój dzienny slot także na ruchu strony (middleware w
+    # main.py). To wyłącznik awaryjny tej ścieżki — cron /api/tick zostaje wtedy
+    # jedynym wyzwalaczem. Testy ustawiają false, żeby zwykłe odczyty dashboardu
+    # nie tworzyły wypłat przy okazji.
+    payoutbot_on_traffic: bool = os.getenv("PAYOUTBOT_ON_TRAFFIC", "true").lower() == "true"
+
     @property
     def telegram_enabled(self) -> bool:
         # TELEGRAM_ENABLED=false to awaryjny wylacznik — normalnie o wszystkim

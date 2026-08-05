@@ -19,3 +19,6 @@ segno>=1.6
 stripe>=7.0
 psycopg[binary]>=3.1
 pywebpush>=2.0
+# Baza stref czasowych dla zoneinfo (Payout BOT liczy okno w America/New_York);
+# na odchudzonym obrazie funkcji /usr/share/zoneinfo może nie istnieć.
+tzdata>=2024.1

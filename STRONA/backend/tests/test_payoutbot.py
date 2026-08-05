@@ -85,7 +85,7 @@ def test_jedna_wyplata_na_dobe():
     s = _sesja()
     _wyczysc(s)
     try:
-        payoutbot.zapisz_ustawienia(s, enabled=True, hour=0)
+        payoutbot.zapisz_ustawienia(s, enabled=True, win_from=0, win_to=0)
         kiedy = datetime(2026, 8, 4, 18, 0, tzinfo=timezone.utc)
         with _kanal():
             pierwszy = payoutbot.uruchom(s, kiedy, transport_shot=_shot_ok, transport_tg=_tg_ok)
@@ -99,17 +99,82 @@ def test_jedna_wyplata_na_dobe():
         s.close()
 
 
-def test_czeka_na_zadana_godzine():
+def test_czeka_na_slot_w_oknie_et():
+    """Okno liczy się w czasie wschodnim USA, a publikacja czeka na wylosowany
+    slot — nie na początek okna."""
     s = _sesja()
     _wyczysc(s)
     try:
-        payoutbot.zapisz_ustawienia(s, enabled=True, hour=15)
-        # 06:00 UTC to 08:00 czasu serwera (UTC+2) — jeszcze za wcześnie.
+        payoutbot.zapisz_ustawienia(s, enabled=True, win_from=15, win_to=17)
+        # 06:00 UTC to 02:00 ET — długo przed oknem.
         wczesnie = datetime(2026, 8, 4, 6, 0, tzinfo=timezone.utc)
         czy, powod = payoutbot.nalezy_odpalic(s, wczesnie)
-        assert czy is False and "15:00" in powod
-        czy2, _ = payoutbot.nalezy_odpalic(s, datetime(2026, 8, 4, 19, 0, tzinfo=timezone.utc))
+        assert czy is False and "ET" in powod
+        # 22:30 UTC = 18:30 EDT — po końcu okna, więc KAŻDY możliwy slot minął.
+        czy2, _ = payoutbot.nalezy_odpalic(s, datetime(2026, 8, 4, 22, 30, tzinfo=timezone.utc))
         assert czy2 is True
+    finally:
+        s.close()
+
+
+def test_slot_jest_staly_w_ciagu_dnia_i_siedzi_w_oknie():
+    """Seed z daty: slot nie może się przelosowywać między tickami tej samej
+    doby, a wynik musi mieścić się w zadanym oknie."""
+    s = _sesja()
+    _wyczysc(s)
+    try:
+        payoutbot.zapisz_ustawienia(s, enabled=True, win_from=9, win_to=11)
+        cfg = payoutbot.ustawienia(s)
+    finally:
+        s.close()
+    rano = datetime(2026, 8, 4, 6, 0, tzinfo=timezone.utc)
+    po_poludniu = datetime(2026, 8, 4, 20, 0, tzinfo=timezone.utc)
+    a, b = payoutbot.slot_dnia(cfg, rano), payoutbot.slot_dnia(cfg, po_poludniu)
+    assert a == b
+    assert 9 * 60 <= a.hour * 60 + a.minute <= 11 * 60
+    assert a.strftime("%Y-%m-%d") == "2026-08-04"
+    # Między dniami slot MA się zmieniać — o to chodzi, żeby kanał nie dostawał
+    # posta co dzień o tej samej minucie. 10 losowań z ~120 minut: kolizja
+    # wszystkich naraz jest astronomicznie nieprawdopodobna.
+    sloty = {payoutbot.slot_dnia(cfg, datetime(2026, 9, d, 15, 0, tzinfo=timezone.utc))
+             .strftime("%H:%M") for d in range(1, 11)}
+    assert len(sloty) >= 3, sloty
+
+
+def test_okno_liczone_w_czasie_wschodnim_z_dst():
+    """Ta sama chwila UTC jest w oknie latem (EDT, UTC-4), a zimą (EST, UTC-5)
+    jeszcze przed nim — strefa musi być liczona z DST, nie stałym offsetem."""
+    s = _sesja()
+    _wyczysc(s)
+    try:
+        payoutbot.zapisz_ustawienia(s, enabled=True, win_from=9, win_to=11)
+        lato = datetime(2026, 8, 4, 13, 30, tzinfo=timezone.utc)      # 09:30 EDT
+        zima = datetime(2026, 1, 15, 13, 30, tzinfo=timezone.utc)     # 08:30 EST
+        assert payoutbot.nalezy_odpalic(s, lato, backstop=True)[0] is True
+        czy, powod = payoutbot.nalezy_odpalic(s, zima, backstop=True)
+        assert czy is False and "09:00 ET" in powod
+    finally:
+        s.close()
+
+
+def test_backstop_crona_publikuje_od_poczatku_okna():
+    """Dobowy cron nie może czekać na slot (przychodzi raz), więc z flagą
+    backstop odpala od początku okna; zwykły tick o tej samej porze czeka."""
+    s = _sesja()
+    _wyczysc(s)
+    try:
+        payoutbot.zapisz_ustawienia(s, enabled=True, win_from=9, win_to=11)
+        cfg = payoutbot.ustawienia(s)
+        # Znajdź dzień, którego slot wypada PO 09:00 — przy seedzie z daty to
+        # deterministyczne, a dni ze slotem idealnie na 9:00 pomijamy.
+        dzien = next(d for d in range(10, 28)
+                     if payoutbot.slot_dnia(
+                         cfg, datetime(2026, 8, d, 15, 0, tzinfo=timezone.utc))
+                     .strftime("%H:%M") != "09:00")
+        start_okna = datetime(2026, 8, dzien, 13, 0, tzinfo=timezone.utc)  # 09:00 EDT
+        czy, powod = payoutbot.nalezy_odpalic(s, start_okna)
+        assert czy is False and "slot" in powod
+        assert payoutbot.nalezy_odpalic(s, start_okna, backstop=True)[0] is True
     finally:
         s.close()
 
@@ -121,7 +186,7 @@ def test_kolejne_przebiegi_nie_powtarzaja_tej_samej_kwoty():
     s = _sesja()
     _wyczysc(s)
     try:
-        payoutbot.zapisz_ustawienia(s, enabled=True, hour=0)
+        payoutbot.zapisz_ustawienia(s, enabled=True, win_from=0, win_to=0)
         kiedy = datetime(2026, 8, 12, 18, 0, tzinfo=timezone.utc)
         kwoty, rozmiary = [], []
         for _ in range(5):
@@ -160,7 +225,7 @@ def test_kwota_zgadza_sie_ze_splitem_i_widelkami():
     s = _sesja()
     _wyczysc(s)
     try:
-        payoutbot.zapisz_ustawienia(s, enabled=True, hour=0, gross_min_pct=9,
+        payoutbot.zapisz_ustawienia(s, enabled=True, win_from=0, win_to=0, gross_min_pct=9,
                                     gross_max_pct=11.5,
                                     sizes=[50_000, 100_000, 200_000, 300_000, 400_000])
         for dzien in range(4, 14):
@@ -194,7 +259,7 @@ def test_certyfikat_dostaje_kazda_wyplata():
     s = _sesja()
     _wyczysc(s)
     try:
-        payoutbot.zapisz_ustawienia(s, enabled=True, hour=0, lp_pct=0)
+        payoutbot.zapisz_ustawienia(s, enabled=True, win_from=0, win_to=0, lp_pct=0)
         r = payoutbot.uruchom(s, datetime(2026, 8, 6, 18, 0, tzinfo=timezone.utc))
         assert r["created"] == 1 and r["cert_token"]
         assert r["on_lp"] is False
@@ -207,10 +272,10 @@ def test_lp_zero_i_sto_procent():
     s = _sesja()
     try:
         _wyczysc(s)
-        payoutbot.zapisz_ustawienia(s, enabled=True, hour=0, lp_pct=0)
+        payoutbot.zapisz_ustawienia(s, enabled=True, win_from=0, win_to=0, lp_pct=0)
         bez = payoutbot.uruchom(s, datetime(2026, 8, 7, 18, 0, tzinfo=timezone.utc))
         _wyczysc(s)
-        payoutbot.zapisz_ustawienia(s, enabled=True, hour=0, lp_pct=100)
+        payoutbot.zapisz_ustawienia(s, enabled=True, win_from=0, win_to=0, lp_pct=100)
         z_lp = payoutbot.uruchom(s, datetime(2026, 8, 7, 18, 0, tzinfo=timezone.utc))
         assert bez["on_lp"] is False and z_lp["on_lp"] is True
         assert s.get(Payout, bez["payout_id"]).show_on_lp is False
@@ -225,7 +290,7 @@ def test_bare_zdejmuje_wszystko_poza_karta():
     s = _sesja()
     _wyczysc(s)
     try:
-        payoutbot.zapisz_ustawienia(s, enabled=True, hour=0)
+        payoutbot.zapisz_ustawienia(s, enabled=True, win_from=0, win_to=0)
         r = payoutbot.uruchom(s, datetime(2026, 8, 8, 18, 0, tzinfo=timezone.utc))
     finally:
         s.close()
@@ -243,7 +308,7 @@ def test_znacznik_pochodzenia_nie_drukuje_sie_na_certyfikacie():
     s = _sesja()
     _wyczysc(s)
     try:
-        payoutbot.zapisz_ustawienia(s, enabled=True, hour=0)
+        payoutbot.zapisz_ustawienia(s, enabled=True, win_from=0, win_to=0)
         r = payoutbot.uruchom(s, datetime(2026, 8, 9, 18, 0, tzinfo=timezone.utc))
         assert s.get(Payout, r["payout_id"]).note == payoutbot.NOTATKA
     finally:
@@ -336,7 +401,7 @@ def test_bez_grafiki_idzie_sam_podpis_z_linkiem():
     _wyczysc(s)
     wyslane = {}
     try:
-        payoutbot.zapisz_ustawienia(s, enabled=True, hour=0)
+        payoutbot.zapisz_ustawienia(s, enabled=True, win_from=0, win_to=0)
         with _kanal():
             r = payoutbot.uruchom(
                 s, datetime(2026, 8, 11, 18, 0, tzinfo=timezone.utc),
@@ -362,20 +427,26 @@ def test_endpointy_wymagaja_admina():
 
 def test_zapis_ustawien_z_panelu():
     r = client.post("/api/admin/payout-engine", headers=ADMIN,
-                    json={"enabled": True, "hour": 9, "lp_pct": 25,
+                    json={"enabled": True, "win_from": 9, "win_to": 11, "lp_pct": 25,
                           "gross_min_pct": 8, "gross_max_pct": 12,
                           "sizes": [50_000, 100_000]})
     assert r.status_code == 200
     d = client.get("/api/admin/payout-engine", headers=ADMIN).json()
-    assert d["enabled"] is True and d["hour"] == 9 and d["lp_pct"] == 25
+    assert d["enabled"] is True and d["win_from"] == 9 and d["win_to"] == 11
+    assert d["lp_pct"] == 25
     assert d["sizes"] == [50_000, 100_000]
+    # Panel pokazuje wylosowaną na dziś minutę — format HH:MM, wewnątrz okna.
+    godz, minuta = map(int, d["today_slot_et"].split(":"))
+    assert 9 * 60 <= godz * 60 + minuta <= 11 * 60
     assert d["telegram_ready"] is False and d["renderer_ready"] is False
     client.post("/api/admin/payout-engine", headers=ADMIN, json={"enabled": False})
 
 
 def test_zapis_odrzuca_bzdury():
-    for zle in ({"hour": 30}, {"lp_pct": 140}, {"gross_min_pct": 90},
-                {"sizes": [12_345]}, {"gross_min_pct": 20, "gross_max_pct": 5}):
+    for zle in ({"win_from": 30}, {"win_to": -1}, {"lp_pct": 140},
+                {"gross_min_pct": 90}, {"sizes": [12_345]},
+                {"gross_min_pct": 20, "gross_max_pct": 5},
+                {"win_from": 12, "win_to": 9}):
         r = client.post("/api/admin/payout-engine", headers=ADMIN, json=zle)
         assert r.status_code == 400, (zle, r.status_code)
 
@@ -384,7 +455,7 @@ def test_run_teraz_omija_guard_godziny_i_dnia():
     s = _sesja()
     _wyczysc(s)
     try:
-        payoutbot.zapisz_ustawienia(s, enabled=True, hour=23)
+        payoutbot.zapisz_ustawienia(s, enabled=True, win_from=23, win_to=23)
     finally:
         s.close()
     r = client.post("/api/admin/payout-engine/run", headers=ADMIN)
@@ -396,6 +467,34 @@ def test_run_teraz_omija_guard_godziny_i_dnia():
     finally:
         s.close()
     client.post("/api/admin/payout-engine", headers=ADMIN, json={"enabled": False})
+
+
+def test_ruch_na_stronie_wyzwala_payout(monkeypatch):
+    """Landing pobiera /api/leaderboard, a middleware lazy-tick ma przy okazji
+    odpalić Payout BOT-a — to ta ścieżka trafia wylosowany slot, nie cron.
+    W conftest wyłącznik PAYOUTBOT_ON_TRAFFIC stoi na false; tu włączamy go
+    monkeypatchem na singletonie ustawień."""
+    monkeypatch.setattr(get_settings(), "payoutbot_on_traffic", True)
+    s = _sesja()
+    _wyczysc(s)
+    try:
+        # Okno 0–23 ze slotem gdziekolwiek — realny zegar testu zawsze jest
+        # za JAKIMŚ slotem tylko przy oknie zaczynającym się o północy ET.
+        payoutbot.zapisz_ustawienia(s, enabled=True, win_from=0, win_to=0)
+        przed = s.query(Payout).filter(Payout.note == payoutbot.NOTATKA).count()
+    finally:
+        s.close()
+    assert client.get("/api/leaderboard").status_code == 200
+    s = SessionLocal()
+    try:
+        po = s.query(Payout).filter(Payout.note == payoutbot.NOTATKA).count()
+        assert po == przed + 1
+        # Guard dnia ustawiony — drugi request już nie dubluje.
+        assert payoutbot.nalezy_odpalic(s)[0] is False
+        payoutbot.zapisz_ustawienia(s, enabled=False)
+    finally:
+        s.close()
+    assert client.get("/api/leaderboard").status_code == 200
 
 
 def _png(szer: int, wys: int) -> bytes:
@@ -446,7 +545,7 @@ def test_kwoty_bez_groszy():
     Koncowka „,24" nic nie wnosi przy tej skali, a na certyfikacie rozbija
     najwieksza liczbe na dokumencie."""
     s = SessionLocal()
-    payoutbot.zapisz_ustawienia(s, enabled=True, hour=0)
+    payoutbot.zapisz_ustawienia(s, enabled=True, win_from=0, win_to=0)
     kwoty = []
     for _ in range(12):
         w = payoutbot.wygeneruj(s)

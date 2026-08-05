@@ -26,6 +26,11 @@ os.environ["TELEGRAM_CHAT_ID"] = ""
 os.environ["SHOT_API_URL"] = ""
 # Poller nie moze chodzic w tle testow — przestawialby salda kont.
 os.environ["POLLER_ENABLED"] = "false"
+# Payout BOT nie moze publikowac „przy okazji" zwyklych odczytow dashboardu:
+# middleware lazy-tick odpala go na ruchu, a testy bija w te sciezki o roznych
+# porach zegara — wypłaty pojawialyby sie niedeterministycznie. Test piggybacku
+# wlacza go sam monkeypatchem na singletonie settings.
+os.environ["PAYOUTBOT_ON_TRAFFIC"] = "false"
 # Web push: puste klucze VAPID = push wylaczony (settings.push_enabled to
 # property liczone z kluczy). Testy pusha wlaczaja go same monkeypatchem
 # kluczy na singletonie settings — dlatego NIE ustawiamy tu PUSH_ENABLED=false,
