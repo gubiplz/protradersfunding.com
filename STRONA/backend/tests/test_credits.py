@@ -215,12 +215,47 @@ def test_use_credits_false_zostawia_saldo():
 
 
 def test_preview_guard_minimum_stripe():
-    """Resztówka poniżej $0.50 zostaje na saldzie zamiast wywracać Stripe."""
+    """Resztówka poniżej progu Stripe'a zostaje na saldzie zamiast wywracać checkout.
+
+    Próg jest w `settings.stripe_min_charge`, NIE zaszyty na $0.50. Stripe pilnuje
+    minimum w walucie ROZLICZENIA konta, a to konto rozlicza się w PLN — próg to
+    200 groszy (~$0.54 przy 3,7 PLN/USD), nie $0.50 z dokumentacji dla USD.
+    Zaszyte 0.50 wywaliło produkcyjną płatność 500-tką (amount_too_small).
+    """
     tid = _trader(credits=298.8)
     token = auth.make_token(tid)
     q = client.get("/api/checkout/preview?product_key=2step-25k",   # $299
                    headers={"Authorization": f"Bearer {token}"}).json()
-    assert q["credits_used"] == 298.5 and q["total_due_usd"] == 0.5
+    minimum = get_settings().stripe_min_charge
+    assert q["total_due_usd"] == minimum, "do zapłaty zostało mniej niż minimum Stripe'a"
+    assert q["credits_used"] == round(299 - minimum, 2)
+
+
+def test_domyslny_prog_ma_zapas_na_kurs_pln():
+    """Domyślny próg musi z zapasem przechodzić minimum 200 groszy.
+
+    Sama zależność od ustawienia nie wystarczy — zły default nadal wywala
+    płatność. 200 gr / $1.00 = 2,0 PLN/USD; złoty nigdy nie był tak mocny,
+    więc $1.00 daje realny zapas na wahania kursu. Ten test pilnuje, żeby
+    nikt nie zjechał z powrotem do „$0.50 bo tak pisze w docsach Stripe'a".
+    """
+    assert get_settings().stripe_min_charge >= 0.75
+
+
+def test_kredyty_nie_podnosza_ceny_gdy_plan_tanszy_niz_prog(monkeypatch):
+    """Gdy sama cena jest poniżej progu, kredyty nie mogą zejść poniżej zera.
+
+    Bez `max(0, ...)` w billing.compute_price wychodził UJEMNY kredyt: doładowywał
+    saldo i podnosił kwotę do zapłaty ponad cenę planu. Czyli klient płaci więcej,
+    niż kosztuje produkt — najgorszy możliwy błąd w ścieżce pieniędzy.
+    """
+    monkeypatch.setattr(billing.settings, "stripe_min_charge", 400.0)   # > cena planu
+    tid = _trader(credits=10.0)
+    s = SessionLocal()
+    q = billing.compute_price(s, s.get(Trader, tid), "2step-25k", None)   # $299
+    s.close()
+    assert q["credits_used"] >= 0, "ujemny kredyt — doładowanie salda zamiast rabatu"
+    assert q["total_due_usd"] <= 299, "do zapłaty więcej niż cena planu"
 
 
 def test_api_me_credits_saldo_i_historia():

@@ -131,10 +131,17 @@ def compute_price(session, trader: Trader, product_key: str, coupon: str | None,
         kredyt = min(round(float(trader.credits_usd or 0), 2), price)
         if kredyt > 0:
             reszta = round(price - kredyt, 2)
-            # Stripe nie przyjmie kwoty ponizej $0.50 — resztowke zostawiamy na
-            # saldzie tradera zamiast wywracac checkout.
-            if 0 < reszta < 0.5:
-                kredyt = round(price - 0.5, 2)
+            # Stripe nie przyjmie kwoty ponizej progu (`stripe_min_charge`, patrz
+            # config) — resztowke zostawiamy na saldzie tradera zamiast wywracac
+            # checkout. Prog bierzemy z ustawien, bo zalezy od waluty rozliczenia
+            # konta: zaszyte tu wczesniej 0.5 bylo prawdziwe tylko dla konta
+            # rozliczanego w USD i wywalalo platnosc 500-tka na koncie w PLN.
+            minimum = settings.stripe_min_charge
+            if 0 < reszta < minimum:
+                # `max(0, ...)` na wypadek ceny juz ponizej progu (mocny kupon):
+                # bez tego kredyt wychodzi UJEMNY, czyli doladowuje saldo i
+                # podnosi kwote do zaplaty ponad cene planu.
+                kredyt = max(0.0, round(price - minimum, 2))
             price = round(price - kredyt, 2)
 
     return {"product": product, "upgrade": upgrade,
@@ -163,7 +170,12 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
                   bogo_paid_key=quote["bogo_paid_key"],
                   provider="stripe" if settings.stripe_enabled else "mock")
     session.add(order)
-    session.flush()
+    # `commit`, nie `flush`: `telemetry.track` otwiera WLASNA sesje, a wolane na
+    # otwartej transakcji zapisu potrafi zablokowac sie na wlasnym zamowieniu.
+    # Na SQLicie (dev) to bylo 5,2 s czekania na busy-timeout przy KAZDYM
+    # checkoucie. Zamkniecie transakcji przed telemetria kosztuje jeden SELECT
+    # (odswiezenie `order` po commicie) i usuwa cala klase tego problemu.
+    session.commit()
     telemetry.track("order_created", trader.id, order=order.id,
                     product=order.product_key, amount=price)
 
@@ -176,23 +188,35 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
 
     if settings.stripe_enabled:
         stripe = _stripe()
-        cs = stripe.checkout.Session.create(
-            mode="payment",
-            line_items=[{
-                "price_data": {
-                    "currency": settings.currency,
-                    "product_data": {"name": f"{prowizjonowany.label} challenge"
-                                     + (f" ({catalog.PROMO_NAME} promo)" if upgrade else "")
-                                     + (" + Weekend Trading" if weekend_trading else "")},
-                    "unit_amount": int(round(price * 100)),
-                },
-                "quantity": 1,
-            }],
-            success_url=f"{settings.app_base_url}/portal?paid=1",
-            cancel_url=f"{settings.app_base_url}/portal?canceled=1",
-            metadata={"order_id": str(order.id)},
-            client_reference_id=str(order.id),
-        )
+        try:
+            cs = stripe.checkout.Session.create(
+                mode="payment",
+                line_items=[{
+                    "price_data": {
+                        "currency": settings.currency,
+                        "product_data": {"name": f"{prowizjonowany.label} challenge"
+                                         + (f" ({catalog.PROMO_NAME} promo)" if upgrade else "")
+                                         + (" + Weekend Trading" if weekend_trading else "")},
+                        "unit_amount": int(round(price * 100)),
+                    },
+                    "quantity": 1,
+                }],
+                success_url=f"{settings.app_base_url}/portal?paid=1",
+                cancel_url=f"{settings.app_base_url}/portal?canceled=1",
+                metadata={"order_id": str(order.id)},
+                client_reference_id=str(order.id),
+            )
+        except stripe.error.StripeError as e:
+            # Bez tego kazdy blad Stripe'a leci do klienta jako gole HTTP 500
+            # („Server error", zero informacji) — tak wygladal na produkcji
+            # amount_too_small. Zamowienie zostaje `pending`: nikt za nie nie
+            # zaplacil, a slad jest potrzebny do odtworzenia sprawy.
+            session.commit()
+            telemetry.track("checkout_failed", trader.id, order=order.id,
+                            product=order.product_key, amount=price,
+                            code=(getattr(e, "code", None) or "stripe_error"))
+            raise HTTPException(400, "We could not open the payment page. "
+                                     "Please try again or contact support.") from e
         order.stripe_session_id = cs.id
         session.commit()
         return {"checkout_url": cs.url, "order_id": order.id, "amount": price,

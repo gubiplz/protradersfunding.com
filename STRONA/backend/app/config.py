@@ -182,6 +182,13 @@ class Settings:
     stripe_secret_key: str = os.getenv("STRIPE_SECRET_KEY", "")
     stripe_webhook_secret: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
     currency: str = os.getenv("CURRENCY", "usd")
+    # Najmniejsza kwota, jaką Stripe przyjmie — w walucie OBCIĄŻENIA (`currency`).
+    # Uwaga: Stripe pilnuje minimum w walucie ROZLICZENIA konta, nie obciążenia.
+    # To konto rozlicza się w PLN, więc próg to 200 groszy, a nie „$0.50" z
+    # dokumentacji dla USD; przy kursie ~3,7 PLN/USD wychodzi ok. $0.54 i zmienia
+    # się z kursem. Stąd domyślne $1.00 — zapas, żeby wahania FX nie wywracały
+    # checkoutu 500-tką (dokładnie to zdarzyło się na produkcji: amount_too_small).
+    stripe_min_charge: float = float(os.getenv("STRIPE_MIN_CHARGE", "1.00"))
 
     @property
     def stripe_enabled(self) -> bool:
