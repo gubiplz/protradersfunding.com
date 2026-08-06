@@ -4505,11 +4505,14 @@ async def api_tick(request: Request):
     # z tego samego powodu co recap. Wlasny odstep 21 dni w `_upsell_nudge`
     # sprawia, ze recznie odpalony endpoint i ten przebieg sie nie dubluja.
     nudge = _upsell_nudge() if datetime.now(timezone.utc).weekday() == 0 else {"sent": 0}
+    # Porzucone koszyki — tu samo zamowienie niesie znacznik `recovery_sent_at`,
+    # wiec deduplikacja nie zalezy od tego, jak czesto ten cron chodzi.
+    recovery = _checkout_recovery()
     if isinstance(wynik, dict):
         return {**wynik, "daily_recap": recap, "upsell_nudge": nudge.get("sent", 0),
-                "payout_bot": payout}
+                "checkout_recovery": recovery.get("sent", 0), "payout_bot": payout}
     return {"tick": wynik, "daily_recap": recap, "upsell_nudge": nudge.get("sent", 0),
-            "payout_bot": payout}
+            "checkout_recovery": recovery.get("sent", 0), "payout_bot": payout}
 
 
 def _payout_bot_tick(base_url: str | None = None, *,
@@ -4558,6 +4561,65 @@ def cron_streak_reminder():
                 tr.id, f"Your {n}-day streak is on the line",
                 "Check in before midnight UTC to keep it alive.", tag="streak")
         return {"sent": sent, "eligible": len(traders)}
+    finally:
+        session.close()
+
+
+@app.api_route("/api/cron/checkout-recovery", methods=["GET", "POST"],
+               dependencies=[Depends(_require_cron)])
+def cron_checkout_recovery(min_minutes: int = 60, max_hours: int = 72):
+    """Recznie/cronem — cala robota siedzi w `_checkout_recovery`."""
+    return _checkout_recovery(min_minutes, max_hours)
+
+
+def _checkout_recovery(min_minutes: int = 60, max_hours: int = 72) -> dict:
+    """Mail do ludzi, ktorym platnosc NIE doszla do skutku.
+
+    Jedno sito na wszystkie warianty porzuconego zakupu, bo kazdy zostawia
+    dokladnie ten sam slad — zamowienie `pending`, ktore nigdy nie stalo sie
+    `paid`: karta odrzucona, zamknieta strona Stripe'a, wreszcie blad przy
+    zakladaniu sesji (od poprawki w `billing` zamowienie zostaje wtedy w bazie
+    wlasnie po to).
+
+    Dolne okno `min_minutes` chroni przed mailem do kogos, kto wlasnie wpisuje
+    numer karty. Gorne `max_hours` — przed odkopaniem przy pierwszym przebiegu
+    na produkcji zamowien sprzed tygodni; tam takich rekordow leza setki i
+    poszedlby z tego jeden wielki spam.
+    """
+    now = datetime.now(timezone.utc)
+    session = SessionLocal()
+    try:
+        kandydaci = (session.query(Order)
+                     .filter(Order.status == "pending",
+                             Order.recovery_sent_at.is_(None),
+                             Order.created_at <= now - timedelta(minutes=min_minutes),
+                             Order.created_at >= now - timedelta(hours=max_hours),
+                             # Zamowienie czekajace na przelew krypto nie jest
+                             # porzucone — klient placi, tylko poza Stripe'em.
+                             Order.flag.is_(None))
+                     .all())
+        etykiety = {p.key: p.label for p in session.query(Product).all()}
+        sent = 0
+        for zam in kandydaci:
+            zam.recovery_sent_at = now
+            # Kupil pozniej cokolwiek innego — sprawa sama sie rozwiazala
+            # i przypominanie o starym koszyku wyszloby glupio.
+            if (session.query(Order)
+                    .filter(Order.trader_id == zam.trader_id, Order.status == "paid",
+                            Order.created_at >= zam.created_at).first()):
+                continue
+            tr = session.get(Trader, zam.trader_id)
+            if tr is None or not tr.email:
+                continue
+            notify.send("checkout_recovery", tr.email, {
+                "name": tr.first_name or tr.full_name or "trader",
+                "product_label": etykiety.get(zam.product_key, zam.product_key),
+                "amount": zam.amount_usd,
+                "credits_used": zam.credits_used or 0,
+            })
+            sent += 1
+        session.commit()
+        return {"sent": sent, "candidates": len(kandydaci)}
     finally:
         session.close()
 

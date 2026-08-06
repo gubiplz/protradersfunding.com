@@ -133,6 +133,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "credits_used": "FLOAT DEFAULT 0",
         "flag": "VARCHAR(24)",
         "fail_reason": "VARCHAR(200)",
+        "recovery_sent_at": "TIMESTAMP",
     },
     "pool_accounts": {
         "claimed_by_trader_id": "INTEGER",

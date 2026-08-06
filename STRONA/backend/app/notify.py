@@ -195,6 +195,24 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"The code and link are valid for 24 hours. If you didn't create an "
             f"account, you can safely ignore this e-mail.",
         ),
+        "checkout_recovery": (
+            "Your challenge is still waiting",
+            f"Hi {name},\n\nyou started checkout for the {ctx.get('product_label')} "
+            f"challenge but the payment never came through — the card may have been "
+            f"declined, or the page was simply closed.\n\n"
+            f"  Challenge: {ctx.get('product_label')}\n"
+            f"  Amount:    ${_num(ctx.get('amount'))}\n\n"
+            # Najczestsze pytanie po porzuconym koszyku: „czy zjadlo mi kredyty".
+            # Nie zjadlo (schodza dopiero przy domknieciu platnosci) i mail musi
+            # to powiedziec sam, zanim klient napisze do supportu.
+            + (f"Your ${_num(ctx.get('credits_used'))} of store credit was NOT used — "
+               f"it is still on your balance and will be applied when you complete "
+               f"the purchase.\n\n" if (ctx.get("credits_used") or 0) > 0 else "")
+            + f"Nothing was charged. Pick up where you left off:\n"
+            f"{settings.app_base_url}/portal?view=store\n\n"
+            f"If you ran into an error on the payment page, reply to this e-mail "
+            f"and we'll sort it out.",
+        ),
     }
     subject, body = T.get(event, (f"Notification: {event}", json.dumps(ctx, ensure_ascii=False)))
     return subject, body + footer
@@ -466,6 +484,23 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
             _note_html("The code and link are valid for 24 hours. If you didn't "
                        "create an account, you can safely ignore this e-mail."),
         ]
+    elif event == "checkout_recovery":
+        kredyt = float(ctx.get("credits_used") or 0)
+        parts = [
+            _head_html("Unfinished checkout", "Your challenge is still waiting",
+                       f"Hi {name}, you started checkout but the payment never went "
+                       f"through — the card may have been declined, or the page was "
+                       f"simply closed. Nothing was charged."),
+            _stat_html("Challenge", str(ctx.get("product_label") or ""),
+                       f"${_num(ctx.get('amount'))}"),
+            _button_html("Complete Your Purchase", f"{portal}?view=store"),
+            _note_html(
+                (f"Your ${_num(kredyt)} of store credit was not used — it is still "
+                 f"on your balance and applies automatically when you complete the "
+                 f"purchase. " if kredyt > 0 else "")
+                + "Ran into an error on the payment page? Reply to this e-mail and "
+                  "we'll sort it out."),
+        ]
     else:
         return None
     return _shell(parts)
@@ -486,6 +521,10 @@ _PREF_BY_EVENT = {
     "payout_rejected": "notify_payouts",
     # recap idzie tylko przez push/centrum (push.daily_recap), nie mailem
     "daily_recap": "notify_marketing",
+    # Przypomnienie o porzuconym koszyku dotyczy wlasnego zakupu klienta, ale
+    # jest zachęta do kupna — wiec pod marketingiem, jak recap. Kto wypisal sie
+    # z ofert, nie dostaje tez tego.
+    "checkout_recovery": "notify_marketing",
 }
 
 

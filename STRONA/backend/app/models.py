@@ -160,6 +160,10 @@ class Order(Base):
     flag: Mapped[str | None] = mapped_column(String(24), nullable=True)
     # Powod recznego oznaczenia jako failed — widoczny w panelu przy statusie.
     fail_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Znacznik wyslanego maila „platnosc nie doszla do skutku". Siedzi PRZY
+    # ZAMOWIENIU, nie przy traderze, bo tylko to daje jeden mail na jedna
+    # porzucona probe — ta sama osoba moze porzucic checkout kilka razy.
+    recovery_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Indeks: zamowienia konta czyta sie w petli po kontach (lista kont,
     # ranking, faktury) — bez niego kazdy obrot skanuje cala tabele zamowien.
     account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"), nullable=True, index=True)
