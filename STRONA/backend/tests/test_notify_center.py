@@ -77,9 +77,10 @@ def test_preferencja_ucisza_takze_wpis_w_centrum():
     assert [w[0] for w in _wpisy(tid)] == ["payout_approved"]
 
 
-def _konto_z_trejdem(tid, *, pnl, login):
-    wczoraj_poludnie = (datetime.now(timezone.utc).replace(tzinfo=None, hour=12, minute=0)
-                        - timedelta(days=1))
+def _konto_z_trejdem(tid, *, pnl, login, closed_at=None):
+    wczoraj_poludnie = closed_at or (
+        datetime.now(timezone.utc).replace(tzinfo=None, hour=12, minute=0)
+        - timedelta(days=1))
     s = SessionLocal()
     acc = Account(login=login, trader_id=tid, trader_name="Center Tester",
                   platform_login=login, platform_password="x", platform_server="MQ-Demo",
@@ -100,7 +101,11 @@ def test_daily_recap_raz_na_dobe_i_tylko_dla_handlujacych():
     tid_c, _, _ = _trader(notify_marketing=False)  # wylaczyl recap
     _konto_z_trejdem(tid_a, pnl=120.0, login="880001")
     _konto_z_trejdem(tid_c, pnl=50.0, login="880002")
-    wynik = push.daily_recap()
+    # Stale `now` w poludnie UTC: ta sama doba co realny zegar (guard i okno
+    # "wczoraj" bez zmian), ale test nie zalezy od pory odpalenia suity.
+    poludnie = datetime.now(timezone.utc).replace(hour=12, minute=0,
+                                                  second=0, microsecond=0)
+    wynik = push.daily_recap(now=poludnie)
     assert wynik["sent"] == 1
     wpisy = _wpisy(tid_a)
     assert len(wpisy) == 1 and wpisy[0][0] == "daily_recap"
@@ -108,4 +113,42 @@ def test_daily_recap_raz_na_dobe_i_tylko_dla_handlujacych():
     assert wpisy[0][2] == "/portal?view=analytics"
     assert _wpisy(tid_b) == [] and _wpisy(tid_c) == []
     # guard: drugi przebieg tego samego dnia nic nie wysyla
-    assert push.daily_recap()["sent"] == 0
+    assert push.daily_recap(now=poludnie)["sent"] == 0
+
+
+def test_recap_czeka_do_szostej_rano_polskiego_czasu():
+    tid, _, _ = _trader()
+    dzis_poludnie = datetime.now(timezone.utc).replace(tzinfo=None, hour=12,
+                                                       minute=0, second=0,
+                                                       microsecond=0)
+    _konto_z_trejdem(tid, pnl=75.0, login="880003", closed_at=dzis_poludnie)
+    # Jutro 02:30 UTC = 03:30 (CET) albo 04:30 (CEST) w Warszawie — za
+    # wczesnie. Nocne sprawdzenie NIE moze zuzyc dziennego guardu.
+    noc = (datetime.now(timezone.utc).replace(hour=2, minute=30, second=0,
+                                              microsecond=0)
+           + timedelta(days=1))
+    wynik = push.daily_recap(now=noc)
+    assert wynik == {"sent": 0, "skipped": "before 06:00 Europe/Warsaw"}
+    assert _wpisy(tid) == []
+    # Jutro w poludnie UTC (dawno po 06:00 w Warszawie) recap wychodzi, a jego
+    # okno "wczoraj" obejmuje dzisiejszy trejd. Guard jutrzejszej doby nie
+    # koliduje z testem wyzej, ktory zuzywa dzisiejsza.
+    rano = noc.replace(hour=12)
+    assert push.daily_recap(now=rano)["sent"] >= 1
+    assert [w[0] for w in _wpisy(tid)] == ["daily_recap"]
+
+
+def test_ruch_na_stronie_wyzwala_recap(monkeypatch):
+    """Okablowanie middleware: request na sciezce lazy-ticku ma wolac
+    push.daily_recap, gdy RECAP_ON_TRAFFIC wlaczone (w testach domyslnie nie
+    jest). Godzine i guard testuja przypadki wyzej, wiec wystarczy stub —
+    bez niego test zalezalby od pory odpalenia suity."""
+    wywolania = []
+    monkeypatch.setattr(push, "daily_recap",
+                        lambda now=None: wywolania.append(1) or {"sent": 0})
+    assert client.get("/api/public/stats").status_code == 200
+    assert wywolania == []  # flaga zgaszona w conftest = zero wywolan
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "recap_on_traffic", True)
+    assert client.get("/api/public/stats").status_code == 200
+    assert wywolania == [1]

@@ -4562,6 +4562,12 @@ async def _lazy_tick_middleware(request: Request, call_next):
         # tworzenia wypłat).
         if settings.payoutbot_on_traffic:
             await run_in_threadpool(_payout_bot_tick, _public_base(request))
+        # Dzienny recap analogicznie z ruchu: pierwszy request po 06:00 czasu
+        # polskiego go wysyła (godziny i guardu raz-na-dobę pilnuje
+        # push.daily_recap), cron /api/tick o 15:00 UTC tylko dosyła w dni bez
+        # wejść. Przed 06:00 to czysty test zegara — zero zapytań do bazy.
+        if settings.recap_on_traffic:
+            await run_in_threadpool(push.daily_recap)
     return await call_next(request)
 
 
@@ -4623,8 +4629,10 @@ async def api_tick(request: Request):
     # publikuje od początku okna; wylosowany slot łapią ticki z ruchu strony.
     payout = _payout_bot_tick(_public_base(request), backstop=True)
     wynik = await poller.tick_once()
-    # Dzienny recap jedzie na tym samym cronie (Vercel Hobby = 1 strzał/dobę);
-    # push.daily_recap() sam pilnuje guardu raz-na-dobę i ciszy bez transakcji.
+    # Dzienny recap normalnie wychodzi z ruchu strony od 06:00 czasu polskiego
+    # (middleware wyżej) — tu jest tylko zapasem na dzień bez wejść;
+    # push.daily_recap() sam pilnuje godziny, guardu raz-na-dobę i ciszy bez
+    # transakcji.
     recap = push.daily_recap()
     # „Scale your progress" raz w tygodniu (poniedzialek) — na tym samym cronie
     # z tego samego powodu co recap. Wlasny odstep 21 dni w `_upsell_nudge`

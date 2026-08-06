@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from .config import get_settings
 
@@ -156,29 +157,44 @@ def send_event(event: str, to_email: str | None, title: str, ctx: dict | None = 
 
 
 # --------------------------------------------------------------------------- #
-#  Dzienny recap (dopięty do crona /api/tick, raz na dobę)                    #
+#  Dzienny recap (ruch strony od 06:00 czasu polskiego; cron /api/tick to     #
+#  tylko zapas na dzień bez wejść)                                            #
 # --------------------------------------------------------------------------- #
-def daily_recap() -> dict:
+WARSZAWA = ZoneInfo("Europe/Warsaw")
+# Recap to poranna prasówka ZAMKNIĘTEGO dnia, więc nie może wychodzić o
+# godzinie crona w środku dnia. 06:00 w Warszawie ≈ północ w Nowym Jorku
+# (różnica 6 h trzyma się prawie cały rok mimo DST) — trader w USA dostaje go
+# na szczyt skrzynki na rano, właściciel ma go przy kawie.
+RECAP_OD_GODZINY = 6
+
+
+def daily_recap(now: datetime | None = None) -> dict:
     """Recap wczorajszego handlu: wynik z transakcji + dystans do celu fazy.
 
-    Zasady: raz na dobę (guard w AppSetting), BRAK transakcji = CISZA (żadnego
-    pustego pingu), kategoria notify_marketing („Daily Recap & Offers").
-    Komentuje wyłącznie ZAMKNIĘTY dzień — nigdy otwarte pozycje.
+    Zasady: nie wcześniej niż 06:00 czasu polskiego, raz na dobę (guard w
+    AppSetting), BRAK transakcji = CISZA (żadnego pustego pingu), kategoria
+    notify_marketing („Daily Recap & Offers"). Komentuje wyłącznie ZAMKNIĘTY
+    dzień — nigdy otwarte pozycje. `now` wstrzykują testy.
     """
     try:
-        return _daily_recap()
+        return _daily_recap(now)
     except Exception as e:  # pragma: no cover
         print(f"[push] recap błąd: {e}")
         return {"sent": 0, "error": str(e)}
 
 
-def _daily_recap() -> dict:
+def _daily_recap(now: datetime | None = None) -> dict:
     from . import rules
     from .db import SessionLocal
     from .models import Account, AppSetting, Trade, Trader
+    teraz = now or datetime.now(timezone.utc)
+    # Sprawdzenie godziny idzie PRZED guardem: nocny request nie może zużyć
+    # dziennego wpisu, bo wtedy poranna wysyłka by nie wyszła.
+    if teraz.astimezone(WARSZAWA).hour < RECAP_OD_GODZINY:
+        return {"sent": 0, "skipped": "before 06:00 Europe/Warsaw"}
     session = SessionLocal()
     try:
-        dzis = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        dzis = teraz.strftime("%Y-%m-%d")
         guard = session.get(AppSetting, "last_recap_day")
         if guard and guard.value == dzis:
             return {"sent": 0, "skipped": "already ran today"}

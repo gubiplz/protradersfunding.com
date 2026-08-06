@@ -31,6 +31,10 @@ os.environ["POLLER_ENABLED"] = "false"
 # porach zegara — wypłaty pojawialyby sie niedeterministycznie. Test piggybacku
 # wlacza go sam monkeypatchem na singletonie settings.
 os.environ["PAYOUTBOT_ON_TRAFFIC"] = "false"
+# Ten sam powod dla dziennego recapu: request na sciezkach lazy-ticku po 06:00
+# polskiego czasu zuzylby dzienny guard i pchnal wpisy do centrum powiadomien
+# w srodku niezwiazanych testow. Testy recapu wolaja push.daily_recap wprost.
+os.environ["RECAP_ON_TRAFFIC"] = "false"
 # Web push: puste klucze VAPID = push wylaczony (settings.push_enabled to
 # property liczone z kluczy). Testy pusha wlaczaja go same monkeypatchem
 # kluczy na singletonie settings — dlatego NIE ustawiamy tu PUSH_ENABLED=false,

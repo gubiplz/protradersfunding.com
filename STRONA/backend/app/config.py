@@ -227,6 +227,12 @@ class Settings:
     # nie tworzyły wypłat przy okazji.
     payoutbot_on_traffic: bool = os.getenv("PAYOUTBOT_ON_TRAFFIC", "true").lower() == "true"
 
+    # Dzienny recap wychodzi z ruchu strony od 06:00 czasu polskiego (ten sam
+    # middleware); cron /api/tick o 15:00 UTC tylko dosyła w dni bez wejść.
+    # Wyłącznik awaryjny jak wyżej — testy ustawiają false, żeby zwykłe odczyty
+    # nie zużywały dziennego guardu recapu.
+    recap_on_traffic: bool = os.getenv("RECAP_ON_TRAFFIC", "true").lower() == "true"
+
     @property
     def telegram_enabled(self) -> bool:
         # TELEGRAM_ENABLED=false to awaryjny wylacznik — normalnie o wszystkim
