@@ -30,6 +30,17 @@ def _num(v) -> str:
         return str(v or "—")
 
 
+def _kwota(v) -> str:
+    """Kwota DO ZAPŁATY — z groszami.
+
+    `_num` zaokrągla do pełnych dolarów, a w instrukcji przelewu to znaczy, że
+    klient wyśle inną kwotę, niż jest winien: 199,50 wychodziło jako „$200"."""
+    try:
+        return f"{float(v):,.2f}"
+    except (TypeError, ValueError):
+        return str(v or "—")
+
+
 def _tier(value) -> str:
     """„$25K" / „$250K" — skrót używany w komunikacji promocji."""
     try:
@@ -43,6 +54,28 @@ def _promo_name() -> str:
     """Nazwa promocji z katalogu — mail i strona mówią to samo."""
     from . import catalog
     return catalog.PROMO_NAME
+
+
+def _payment_lines(ctx: dict | None = None) -> list[tuple[str, str]]:
+    """Dane do wpłaty spoza Stripe'a: adres z ZAMÓWIENIA, a gdy go nie ma —
+    stały z konfiguracji (CRYPTO_WALLET).
+
+    Adresy są rotowane i admin wpisuje je ręcznie przy zamówieniu, więc to
+    zamówienie jest źródłem prawdy. Pusta lista = nikt adresu nie podał; mail
+    go wtedy NIE zmyśla (klient wysłałby pieniądze w nicość), tylko zapowiada,
+    że dane przyjdą osobno."""
+    ctx = ctx or {}
+    adres = (ctx.get("wallet") or settings.crypto_wallet or "").strip()
+    if not adres:
+        return []
+    siec = (ctx.get("network") or settings.crypto_network or "").strip()
+    wiersze = []
+    if siec:
+        wiersze.append(("Network", siec))
+    wiersze.append(("Wallet address", adres))
+    if settings.crypto_memo:
+        wiersze.append(("Memo / tag", settings.crypto_memo))
+    return wiersze
 
 
 def _bogo_upgrade(ctx: dict) -> bool:
@@ -213,6 +246,24 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"If you ran into an error on the payment page, reply to this e-mail "
             f"and we'll sort it out.",
         ),
+        "order_awaiting_payment": (
+            f"Awaiting your payment — {ctx.get('product_label')}",
+            f"Hi {name},\n\nwe've put your {ctx.get('product_label')} challenge on hold "
+            f"and we're waiting for the payment to arrive.\n\n"
+            f"  Challenge:  {ctx.get('product_label')}\n"
+            f"  Amount due: ${_kwota(ctx.get('amount'))}\n"
+            f"  Reference:  {ctx.get('reference')}\n\n"
+            + ("Send the amount above to:\n"
+               + "".join(f"  {k}: {v}\n" for k, v in _payment_lines(ctx))
+               + "\nWhen it's on its way, reply to this e-mail with the transaction "
+                 "hash and the reference above — that is the fastest way for us to "
+                 "match it.\n\n"
+               if _payment_lines(ctx) else
+               "We'll send you the payment details in a separate message shortly.\n\n")
+            + f"The moment we confirm the payment your account is created "
+            f"automatically and the MT5 credentials land in your inbox.\n\n"
+            f"Questions, or changed your mind? Just reply to this e-mail.",
+        ),
     }
     subject, body = T.get(event, (f"Notification: {event}", json.dumps(ctx, ensure_ascii=False)))
     return subject, body + footer
@@ -255,8 +306,11 @@ def _rows_html(pairs: list[tuple[str, object]]) -> str:
     rows = "".join(
         f'<tr><td style="padding:13px 0;border-top:1px solid {_HAIR};'
         f'font:400 12px/1.4 {_FONT};letter-spacing:.08em;color:{_FAINT};text-transform:uppercase">{k}</td>'
+        # break-all, bo adres portfela to 34-44 znaki bez spacji: bez tego
+        # rozpychał maila na 591 px i na telefonie trzeba było go przewijać
+        # w bok, żeby zobaczyć koniec adresu.
         f'<td align="right" style="padding:13px 0;border-top:1px solid {_HAIR};'
-        f'font:500 15px/1.4 {_MONO};color:{_INK}">{v}</td></tr>'
+        f'font:500 15px/1.4 {_MONO};color:{_INK};word-break:break-all">{v}</td></tr>'
         for k, v in pairs if v)
     if not rows:
         return ""
@@ -501,6 +555,26 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                 + "Ran into an error on the payment page? Reply to this e-mail and "
                   "we'll sort it out."),
         ]
+    elif event == "order_awaiting_payment":
+        dane = _payment_lines(ctx)
+        parts = [
+            _head_html("Awaiting payment", "Your challenge is on hold",
+                       f"Hi {name}, your order is in and we're waiting for the payment "
+                       f"to arrive. Nothing has been charged — send it over and we'll "
+                       f"take it from there."),
+            _stat_html("Challenge", str(ctx.get("product_label") or ""),
+                       f"Amount due ${_kwota(ctx.get('amount'))}"),
+            _rows_html([("Reference", ctx.get("reference") or ""), *dane]),
+            _note_html(
+                "When the payment is on its way, reply to this e-mail with the "
+                "transaction hash and the reference above — that is the fastest way "
+                "for us to match it. "
+                if dane else
+                "We'll send you the payment details in a separate message shortly. "),
+            _note_html("Your account is created automatically the moment we confirm "
+                       "the payment, and the MT5 credentials go straight to this "
+                       "inbox."),
+        ]
     else:
         return None
     return _shell(parts)
@@ -508,7 +582,8 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
 
 # Kategoria preferencji per zdarzenie (Settings -> Notification Preferences).
 # Zdarzenia TRANSAKCYJNE (welcome, credentials/challenge_granted z poświadczeniami
-# MT5 za opłacony produkt, verify_email, password_reset) celowo NIE mają wpisu —
+# MT5 za opłacony produkt, verify_email, password_reset, order_awaiting_payment
+# z instrukcją wpłaty do WŁASNEGO zamówienia klienta) celowo NIE mają wpisu —
 # muszą dojść zawsze, niezależnie od preferencji.
 _PREF_BY_EVENT = {
     "kyc_approved": "notify_updates", "kyc_rejected": "notify_updates",

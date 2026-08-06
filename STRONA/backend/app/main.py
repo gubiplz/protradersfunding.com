@@ -3345,6 +3345,8 @@ def admin_orders():
                         "product_key": o.product_key, "amount_usd": o.amount_usd,
                         "status": o.status, "provider": o.provider, "coupon": o.coupon,
                         "flag": o.flag, "fail_reason": o.fail_reason,
+                        "payment_address": o.payment_address,
+                        "payment_network": o.payment_network,
                         "paid_at": o.paid_at.isoformat() if o.paid_at else None,
                         "account_id": o.account_id, "created_at": o.created_at.isoformat()})
         return out
@@ -3379,8 +3381,96 @@ def admin_order_delete(order_id: int):
         session.close()
 
 
+class ManualOrderIn(BaseModel):
+    trader_id: int
+    product_key: str
+    amount_usd: float | None = None
+    flag: str = "awaiting_crypto"
+    notify_trader: bool = True
+    payment_address: str | None = None
+    payment_network: str | None = None
+
+
+def _zapisz_adres_wplaty(o: Order, adres: str | None, siec: str | None) -> None:
+    """Adres wpłaty podany przez admina. Pusty NIE kasuje zapisanego — klient
+    dostał go już mailem i musi zostać w zamówieniu jako ślad, dokąd te
+    pieniądze miały pójść."""
+    if adres and adres.strip():
+        o.payment_address = adres.strip()[:200]
+    if siec and siec.strip():
+        o.payment_network = siec.strip()[:40]
+
+
+def _mail_oczekujemy_na_platnosc(session, o: Order) -> bool:
+    """Mail „czekamy na Twoją wpłatę" — wspólny dla ręcznego zamówienia i flagi.
+
+    Adres bierzemy z ZAMÓWIENIA (admin wpisuje go ręcznie, bo adresy są
+    rotowane); gdy go tam nie ma, szablon sięga po stały z konfiguracji."""
+    tr = session.get(Trader, o.trader_id)
+    if tr is None or not tr.email:
+        return False
+    produkt = session.query(Product).filter(Product.key == o.product_key).first()
+    notify.send("order_awaiting_payment", tr.email, {
+        "name": tr.first_name or tr.full_name or "trader",
+        "product_label": produkt.label if produkt else o.product_key,
+        "amount": o.amount_usd,
+        # Numer zamówienia w formie, którą klient wkleja w odpowiedzi — przelew
+        # krypto nie niesie tytułu, więc to jedyne, co go łączy z zamówieniem.
+        "reference": f"PTF-{o.id}",
+        "wallet": o.payment_address or "",
+        "network": o.payment_network or "",
+    })
+    return True
+
+
+@app.post("/api/admin/orders", dependencies=[Depends(auth.require_admin)])
+def admin_order_create(payload: ManualOrderIn):
+    """Ręcznie wystawione zamówienie — klient płaci poza Stripe'em (crypto, przelew).
+
+    Zamówienie startuje jako `pending`: konto powstaje dopiero z Mark paid, tą
+    samą drogą co po webhooku Stripe'a. Kwota to DOKŁADNIE ta podana (domyślnie
+    cena z cennika) — kuponów i kredytów sklepowych tu nie liczymy, bo robi to
+    checkout; przy ręcznym zamówieniu cenę ustala admin i nic nie schodzi
+    z salda klienta przed wpłatą.
+    """
+    if payload.flag not in ("", "awaiting_crypto"):
+        raise HTTPException(400, "Unknown flag")
+    session = SessionLocal()
+    try:
+        trader = session.get(Trader, payload.trader_id)
+        if not trader or trader.is_admin:
+            raise HTTPException(404, "Trader not found")
+        produkt = (session.query(Product)
+                   .filter(Product.key == payload.product_key, Product.active == True)  # noqa: E712
+                   .first())
+        if not produkt:
+            raise HTTPException(404, "Product not found")
+        kwota = round(float(produkt.price_usd if payload.amount_usd is None
+                            else payload.amount_usd), 2)
+        if kwota < 0:
+            raise HTTPException(400, "Amount cannot be negative")
+        o = Order(trader_id=trader.id, product_key=produkt.key, amount_usd=kwota,
+                  status="pending", provider="manual", flag=payload.flag or None,
+                  credits_used=0.0,
+                  created_at=datetime.now(timezone.utc).replace(tzinfo=None))
+        _zapisz_adres_wplaty(o, payload.payment_address, payload.payment_network)
+        session.add(o)
+        session.commit()
+        wyslany = _mail_oczekujemy_na_platnosc(session, o) if payload.notify_trader else False
+        return {"id": o.id, "trader_email": trader.email, "product_key": o.product_key,
+                "amount_usd": o.amount_usd, "status": o.status, "flag": o.flag,
+                "emailed": wyslany,
+                # Panel ma powiedzieć adminowi, że mail poszedł BEZ adresu portfela,
+                # zamiast zostawiać go w przekonaniu, że klient wie, gdzie zapłacić.
+                "payment_details": bool(o.payment_address or settings.crypto_wallet)}
+    finally:
+        session.close()
+
+
 class OrderFlagIn(BaseModel):
     flag: str = ""
+    payment_address: str | None = None
+    payment_network: str | None = None
 
 
 @app.post("/api/admin/orders/{order_id}/flag", dependencies=[Depends(auth.require_admin)])
@@ -3393,9 +3483,19 @@ def admin_flag_order(order_id: int, payload: OrderFlagIn):
         o = session.get(Order, order_id)
         if not o:
             raise HTTPException(404, "Order not found")
+        poprzednia = o.flag
         o.flag = payload.flag or None
+        _zapisz_adres_wplaty(o, payload.payment_address, payload.payment_network)
         session.commit()
-        return {"id": o.id, "flag": o.flag}
+        # Instrukcja wpłaty leci przy WEJŚCIU we flagę, nie przy każdym zapisie:
+        # drugie kliknięcie tego samego przycisku nie ma wysyłać klientowi
+        # drugiego maila o tej samej należności. Opłaconego zamówienia to nie
+        # dotyczy — tam nie ma na co czekać.
+        mail = bool(o.flag == "awaiting_crypto" and poprzednia != "awaiting_crypto"
+                    and o.status == "pending"
+                    and _mail_oczekujemy_na_platnosc(session, o))
+        return {"id": o.id, "flag": o.flag, "emailed": mail,
+                "payment_details": bool(o.payment_address or settings.crypto_wallet)}
     finally:
         session.close()
 
@@ -4596,7 +4696,12 @@ def _checkout_recovery(min_minutes: int = 60, max_hours: int = 72) -> dict:
                              Order.created_at >= now - timedelta(hours=max_hours),
                              # Zamowienie czekajace na przelew krypto nie jest
                              # porzucone — klient placi, tylko poza Stripe'em.
-                             Order.flag.is_(None))
+                             Order.flag.is_(None),
+                             # Zamowieniem wystawionym recznie zarzadza admin.
+                             # Mail o porzuconym koszyku mowi „karta mogla zostac
+                             # odrzucona" — o platnosci, ktorej klient nigdy nie
+                             # zaczynal. To nieprawda i brzmi jak pomylka.
+                             Order.provider != "manual")
                      .all())
         etykiety = {p.key: p.label for p in session.query(Product).all()}
         sent = 0

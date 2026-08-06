@@ -160,6 +160,12 @@ class Order(Base):
     flag: Mapped[str | None] = mapped_column(String(24), nullable=True)
     # Powod recznego oznaczenia jako failed — widoczny w panelu przy statusie.
     fail_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Adres, na ktory klient ma wyslac wplate przy platnosci poza Stripe'em.
+    # Wpisywany RECZNIE przy zamowieniu i trzymany PRZY NIM, bo adresy sa
+    # rotowane: mail ma pokazac dokladnie ten, ktory admin podal dla tej wplaty,
+    # a po miesiacach da sie odtworzyc, gdzie te pieniadze mialy trafic.
+    payment_address: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    payment_network: Mapped[str | None] = mapped_column(String(40), nullable=True)
     # Znacznik wyslanego maila „platnosc nie doszla do skutku". Siedzi PRZY
     # ZAMOWIENIU, nie przy traderze, bo tylko to daje jeden mail na jedna
     # porzucona probe — ta sama osoba moze porzucic checkout kilka razy.

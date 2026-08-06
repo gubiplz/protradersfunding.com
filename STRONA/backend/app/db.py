@@ -134,6 +134,8 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "flag": "VARCHAR(24)",
         "fail_reason": "VARCHAR(200)",
         "recovery_sent_at": "TIMESTAMP",
+        "payment_address": "VARCHAR(200)",
+        "payment_network": "VARCHAR(40)",
     },
     "pool_accounts": {
         "claimed_by_trader_id": "INTEGER",

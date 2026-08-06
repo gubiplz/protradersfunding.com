@@ -194,6 +194,16 @@ class Settings:
     def stripe_enabled(self) -> bool:
         return bool(self.stripe_secret_key)
 
+    # --- Płatność poza Stripe'em (crypto/przelew), wystawiana ręcznie z panelu ---
+    # ZAPASOWY adres: normalnie admin wpisuje go przy zamówieniu (adresy są
+    # rotowane) i tamten wygrywa. Wartości domyślnej tu być nie może i nigdy nie
+    # będzie — zmyślony adres w mailu to pieniądze klienta wysłane w nicość. Gdy
+    # jedno i drugie puste, mail „czekamy na wpłatę" wychodzi bez bloku z adresem
+    # (zapowiada, że dane przyjdą osobno), a panel mówi adminowi, że tego brakuje.
+    crypto_wallet: str = os.getenv("CRYPTO_WALLET", "")
+    crypto_network: str = os.getenv("CRYPTO_NETWORK", "")   # np. "USDT · TRC20"
+    crypto_memo: str = os.getenv("CRYPTO_MEMO", "")         # tag/memo, gdy sieć wymaga
+
     # --- E-mail (SMTP). Brak hosta => maile na konsolę ---
     smtp_host: str = os.getenv("SMTP_HOST", "")
     smtp_port: int = int(os.getenv("SMTP_PORT", "587"))

@@ -725,6 +725,8 @@ function renderOrders(){
       <div class="seg">${[['all','All'],['paid','Paid'],['pending','Pending'],['awaiting','Awaiting crypto'],['failed','Failed']]
         .map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._ordFilter='${k}';renderOrders()">${l}</button>`).join('')}</div>
       <span class="count-pill">${rows.length} of ${list.length}</span>
+      <button class="btn-p sm" onclick="openManualOrder()"
+        title="Record an order the customer pays outside Stripe (crypto, transfer)">+ New order</button>
     </div>
     ${rows.length?`<div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.orders">
       <thead><tr><th>#</th><th>Date</th><th>Trader</th><th>Product</th><th>Amount</th><th>Provider</th><th>Status</th><th>Account</th><th class="no-sort"></th></tr></thead>
@@ -735,6 +737,8 @@ function renderOrders(){
         <td class="muted">${esc(o.provider)}</td>
         <td><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span>
           ${o.status==='pending'&&o.flag==='awaiting_crypto'?'<div class="muted" style="font-size:11px;white-space:nowrap">⏳ awaiting crypto</div>':''}
+          ${o.status!=='paid'&&o.payment_address?`<div class="muted" title="${esc((o.payment_network?o.payment_network+' · ':'')+o.payment_address)}"
+            style="font-size:11px;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(o.payment_network?o.payment_network+' · ':'')}${esc(o.payment_address)}</div>`:''}
           ${o.status==='failed'&&o.fail_reason?`<div class="muted" style="font-size:11px;max-width:200px">${esc(o.fail_reason)}</div>`:''}</td>
         <td class="num">${o.account_id||'—'}</td>
         <td style="white-space:nowrap">${o.status==='paid'?'':`
@@ -746,10 +750,68 @@ function renderOrders(){
       </tbody></table></div>`
       :`<div class="empty"><h3>${list.length?'No orders match':'No orders yet'}</h3>${list.length?'<p>Try a different search or filter.</p>':''}</div>`}`;
 }
+/* Jedno zdanie o mailu z instrukcją wpłaty. Brak adresu portfela MUSI krzyczeć:
+   klient dostaje wtedy prośbę o zapłatę bez informacji, gdzie zapłacić, a admin
+   nie ma jak tego zauważyć po swojej stronie. */
+function mailInfo(d){
+  if(!d.emailed)return['No e-mail sent.','ok'];
+  return d.payment_details?['Payment instructions e-mailed.','ok']
+    :['E-mail sent WITHOUT payment details — send the customer the wallet address yourself.','err'];
+}
+/* Ostatnio użyty adres. Adresy są rotowane i wpisywane ręcznie, więc panel go
+   PODPOWIADA, ale nigdy nie wysyła bez pokazania adminowi — jedna literówka
+   znaczy, że pieniądze klienta trafiają do kogoś obcego. */
+function lastWallet(){try{return JSON.parse(localStorage.getItem('pf_wallet')||'{}')}catch(e){return{}}}
+function saveWallet(address,network){
+  try{localStorage.setItem('pf_wallet',JSON.stringify({address,network}))}catch(e){}}
+
+function askWallet(opts={}){
+  return new Promise(resolve=>{
+    const ost=lastWallet();
+    const box=document.createElement('div');
+    box.className='modal-wrap';
+    const done=v=>{box.remove();resolve(v)};
+    box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-head"><h3>${opts.title||'Payment address'}</h3>
+        <button class="icon-btn" id="wa-x" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+      <p class="muted" style="font-size:12.5px;margin-bottom:14px">This goes straight into the customer's e-mail.
+        Paste it, don't retype it — a wrong address means the money is gone for good.</p>
+      <div class="stack">
+        <div><label class="muted" style="font-size:12px">Network</label>
+          <input id="wa-net" class="inp" placeholder="e.g. USDT · TRC20" value="${esc(opts.network||ost.network||'')}"></div>
+        <div><label class="muted" style="font-size:12px">Wallet address</label>
+          <input id="wa-addr" class="inp" spellcheck="false" placeholder="Paste the wallet address" value="${esc(opts.address||ost.address||'')}"></div>
+        <button class="btn-p lg" style="width:100%" id="wa-go">${opts.confirmLabel||'Send instructions'}</button>
+        <p class="hint">Leave both empty to send the e-mail without payment details — it then tells the customer the address will follow.</p>
+      </div></div>`;
+    box.onclick=()=>done(null);
+    box.querySelector('#wa-x').onclick=()=>done(null);
+    box.querySelector('#wa-go').onclick=()=>{
+      const address=(box.querySelector('#wa-addr').value||'').trim();
+      const network=(box.querySelector('#wa-net').value||'').trim();
+      if(address)saveWallet(address,network);
+      done({address,network})};
+    document.body.appendChild(box);
+    box.querySelector('#wa-addr').focus();
+  });
+}
+
 async function flagOrder(id,flag){
-  try{await api(`/api/admin/orders/${id}/flag`,{method:'POST',body:JSON.stringify({flag})});
-    const o=(window._orders||[]).find(x=>x.id===id);if(o)o.flag=flag||null;
-    toast(flag?'Marked as awaiting crypto payment.':'Flag cleared.','ok');renderOrders()}
+  const o=(window._orders||[]).find(x=>x.id===id);
+  let dane={};
+  if(flag){
+    dane=await askWallet({title:`Awaiting crypto payment — order #${id}`,
+      address:o&&o.payment_address,network:o&&o.payment_network});
+    if(dane===null)return;
+  }
+  try{const d=await api(`/api/admin/orders/${id}/flag`,{method:'POST',body:JSON.stringify({
+      flag,payment_address:dane.address||null,payment_network:dane.network||null})});
+    if(o){o.flag=flag||null;
+      if(dane.address){o.payment_address=dane.address;o.payment_network=dane.network||null}}
+    const [txt,kind]=mailInfo(d);
+    toast(flag?`Marked as awaiting crypto payment. ${txt}`:'Flag cleared.',flag?kind:'ok',7000);
+    renderOrders()}
   catch(e){toast('Error: '+e.message,'err')}
 }
 async function markOrderFailed(id){
@@ -1745,6 +1807,87 @@ async function payoutImport(commit){
       +'They are internal records. No certificates were issued.','ok',9000);
     VIEWS.payouts();
   }
+}
+
+/* ---------- modal: order paid outside Stripe (crypto, transfer) ---------- */
+async function openManualOrder(traderId){
+  let products=[],traders=[];
+  try{[products,traders]=await Promise.all([
+    (await fetch('/api/products')).json(),api('/api/admin/traders')])}
+  catch(e){toast('Error: '+e.message,'err');return}
+  if(!traders.length){toast('No registered traders yet.','err');return}
+  window._moTraders=traders;
+  document.getElementById('order-modal')?.remove();
+  const box=document.createElement('div');
+  box.id='order-modal';box.className='modal-wrap';
+  box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>New order</h3>
+      <button class="icon-btn" onclick="document.getElementById('order-modal').remove()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <p class="muted" style="font-size:12.5px;margin-bottom:14px">For a customer paying outside Stripe — crypto or a transfer.
+      The order lands as <b>unpaid</b>; the account is created only when you hit <b>Mark paid</b>, exactly like a card payment.</p>
+    <div class="stack">
+      <div><label class="muted" style="font-size:12px">Customer</label>
+        <input id="mo-search" class="inp" style="margin-bottom:7px" placeholder="Search by e-mail or name" oninput="moFilter()">
+        <select id="mo-trader" class="inp" size="5"></select></div>
+      <div><label class="muted" style="font-size:12px">Challenge</label>
+        <select id="mo-product" class="inp" onchange="moPrice()">${products.map(p=>
+          `<option value="${esc(p.key)}" data-price="${p.price_usd}">${esc(p.label)} — $${fmt0(p.account_size)} · $${fmt(p.price_usd)}</option>`).join('')}</select></div>
+      <div><label class="muted" style="font-size:12px">Amount to collect (USD)</label>
+        <input id="mo-amount" class="inp" type="number" step="0.01" min="0"></div>
+      <div><label class="muted" style="font-size:12px">Network</label>
+        <input id="mo-network" class="inp" placeholder="e.g. USDT · TRC20" value="${esc(lastWallet().network||'')}"></div>
+      <div><label class="muted" style="font-size:12px">Wallet address <span style="opacity:.65">(goes into the e-mail)</span></label>
+        <input id="mo-address" class="inp" spellcheck="false" placeholder="Paste the wallet address" value="${esc(lastWallet().address||'')}"></div>
+      <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="mo-awaiting" checked style="width:16px;height:16px;accent-color:var(--acc)">
+        Mark as <b>awaiting crypto payment</b></label>
+      <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="mo-mail" checked style="width:16px;height:16px;accent-color:var(--acc)">
+        E-mail the customer the payment instructions</label>
+      <button class="btn-p lg" style="width:100%" onclick="submitManualOrder()">Create order</button>
+      <p class="hint">The amount is exactly what you type — coupons and store credits are not applied,
+        and nothing leaves the customer's balance until the payment is confirmed.</p>
+    </div></div>`;
+  box.onclick=()=>box.remove();
+  document.body.appendChild(box);
+  moFilter(traderId);
+  moPrice();
+}
+function moFilter(preselect){
+  const q=($('mo-search').value||'').toLowerCase();
+  const all=window._moTraders||[];
+  const hit=q?all.filter(t=>(t.email||'').toLowerCase().includes(q)
+                          ||(t.full_name||'').toLowerCase().includes(q)):all;
+  const sel=$('mo-trader');
+  sel.innerHTML=hit.map(t=>`<option value="${t.id}"${preselect===t.id?' selected':''}>${esc(t.email)}${t.full_name?' — '+esc(t.full_name):''}</option>`).join('');
+  // Szukajka potrafi wyrzucić zaznaczonego z listy — bez tego POST poszedłby
+  // z NaN zamiast id klienta.
+  if(sel.selectedIndex<0&&hit.length)sel.selectedIndex=0;
+  sel.selectedOptions[0]?.scrollIntoView({block:'nearest'});
+}
+function moPrice(){
+  const o=$('mo-product').selectedOptions[0];
+  if(o)$('mo-amount').value=o.dataset.price;
+}
+async function submitManualOrder(){
+  const tid=parseInt($('mo-trader').value);
+  if(!tid){toast('Pick a customer first.','err');return}
+  const amount=parseFloat($('mo-amount').value);
+  if(!(amount>=0)){toast('Enter the amount to collect.','err');return}
+  const addr=($('mo-address').value||'').trim(),net=($('mo-network').value||'').trim();
+  if(addr)saveWallet(addr,net);
+  try{
+    const r=await api('/api/admin/orders',{method:'POST',body:JSON.stringify({
+      trader_id:tid,product_key:$('mo-product').value,amount_usd:amount,
+      flag:$('mo-awaiting').checked?'awaiting_crypto':'',
+      payment_address:addr,payment_network:net,
+      notify_trader:$('mo-mail').checked})});
+    document.getElementById('order-modal')?.remove();
+    const [txt,kind]=mailInfo(r);
+    toast(`🧾 Order #${r.id} for ${r.trader_email} — $${fmt(r.amount_usd)}. ${txt}`,kind,9000);
+    go('orders');
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 
 /* ---------- modal: store credits ---------- */
