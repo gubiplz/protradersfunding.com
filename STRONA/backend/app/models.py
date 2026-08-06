@@ -166,6 +166,11 @@ class Order(Base):
     # a po miesiacach da sie odtworzyc, gdzie te pieniadze mialy trafic.
     payment_address: Mapped[str | None] = mapped_column(String(200), nullable=True)
     payment_network: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Token linku /pay/<token> — strona platnosci wystawiona recznie z panelu
+    # (klient pisze na Telegramie, dostaje jeden link). Nieodgadywalny, bo strona
+    # jest publiczna; sesje Stripe'a zaklada dopiero klikniecie, wiec link nie
+    # wygasa i `stripe_session_id` dalej pilnuje webhooka.
+    pay_token: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     # Znacznik wyslanego maila „platnosc nie doszla do skutku". Siedzi PRZY
     # ZAMOWIENIU, nie przy traderze, bo tylko to daje jeden mail na jedna
     # porzucona probe — ta sama osoba moze porzucic checkout kilka razy.

@@ -3467,6 +3467,31 @@ def admin_order_create(payload: ManualOrderIn):
         session.close()
 
 
+@app.post("/api/admin/orders/{order_id}/pay-link", dependencies=[Depends(auth.require_admin)])
+def admin_order_pay_link(order_id: int, request: Request):
+    """Link do zapłaty kartą za konkretne zamówienie — do wysłania na Telegramie.
+
+    Prowadzi na NASZĄ stronę (/pay/<token>), nie na goły adres Stripe'a: sesja
+    kasy powstaje dopiero po kliknięciu, więc link nie wygasa po 24 h, klient
+    widzi markę i kwotę przed zapłatą, a `stripe_session_id` przy zamówieniu
+    dalej pilnuje webhooka. Token jest stały — ten sam przycisk daje ten sam
+    adres, więc wysłanie go drugi raz niczego nie unieważnia.
+    """
+    session = SessionLocal()
+    try:
+        o = session.get(Order, order_id)
+        if not o:
+            raise HTTPException(404, "Order not found")
+        if o.status == "paid":
+            raise HTTPException(400, "This order is already paid")
+        if not o.pay_token:
+            o.pay_token = secrets.token_urlsafe(16)[:32]
+            session.commit()
+        return {"id": o.id, "url": f"{_public_base(request)}/pay/{o.pay_token}"}
+    finally:
+        session.close()
+
+
 class OrderFlagIn(BaseModel):
     flag: str = ""
     payment_address: str | None = None
@@ -5067,6 +5092,77 @@ def risk_page(request: Request):
 @app.get("/refund-policy")
 def refund_page(request: Request):
     return _page(request, "legal/refund-policy.html")
+
+
+def _zamowienie_po_tokenie(session, token: str) -> Order:
+    o = (session.query(Order).filter(Order.pay_token == token).first()
+         if token else None)
+    if not o:
+        raise HTTPException(404, "Payment link not found")
+    return o
+
+
+def _pozycja_zamowienia(session, o: Order) -> str:
+    """Nazwa pozycji na paragonie Stripe'a i na stronie płatności."""
+    produkt = session.query(Product).filter(Product.key == o.product_key).first()
+    return f"{produkt.label if produkt else o.product_key} challenge"
+
+
+@app.get("/pay/{token}")
+def pay_page(request: Request, token: str):
+    """Strona płatności za konkretne zamówienie, wystawiona ręcznie z panelu.
+
+    Trafia tu klient, który dogadał zakup poza sklepem (np. na Telegramie).
+    ZERO danych osobowych na stronie — link bywa przeklejany, a jedyne, co ma
+    pokazywać, to za co i ile. Kasę Stripe'a otwiera dopiero przycisk, więc
+    strona nie wygasa i można ją wysłać raz na zawsze.
+    """
+    session = SessionLocal()
+    try:
+        o = (session.query(Order).filter(Order.pay_token == token).first()
+             if token else None)
+        if not o:
+            # Strona, nie goły JSON: pod tym adresem stoi KLIENT, a zamówienie
+            # mogło zostać skasowane w panelu po wysłaniu mu linku.
+            odp = _page(request, "pay.html", status="missing", promo=None,
+                        item="", amount="", reference="", pay_token=token)
+            odp.status_code = 404
+            return odp
+        return _page(request, "pay.html",
+                     item=_pozycja_zamowienia(session, o),
+                     amount=f"{o.amount_usd:,.2f}".removesuffix(".00"),
+                     reference=f"PTF-{o.id}", status=o.status, pay_token=token,
+                     # Belka „kup challenge, dostaniesz rozmiar wyżej" obiecuje
+                     # mechanikę checkoutu, której to zamówienie NIE dostanie —
+                     # kwota jest ustalona ręcznie. Na tej stronie jej nie ma.
+                     promo=None)
+    finally:
+        session.close()
+
+
+@app.post("/api/pay/{token}/start")
+def pay_start(token: str):
+    """Otwiera kasę dla linku /pay/<token>. Bez logowania — token JEST wstępem.
+
+    Zamówienie ma już właściciela (admin wystawił je konkretnemu traderowi),
+    więc płatność i tak wyląduje na jego koncie; wymaganie tu sesji zamieniłoby
+    jeden klik w „najpierw się zaloguj" i psuło cały sens linku.
+    """
+    session = SessionLocal()
+    try:
+        o = _zamowienie_po_tokenie(session, token)
+        if o.status == "paid":
+            raise HTTPException(400, "This order has already been paid.")
+        if o.status != "pending":
+            raise HTTPException(400, "This payment link is no longer active.")
+        if not settings.stripe_enabled:
+            # Dev/mock: domknięcie robi portal (wymaga zalogowania), tak samo
+            # jak przy zwykłym checkoucie bez kluczy Stripe'a.
+            return {"checkout_url": f"{settings.app_base_url}/portal?mock_order={o.id}"}
+        return {"checkout_url": billing.open_stripe_session(
+            session, o, _pozycja_zamowienia(session, o))}
+    finally:
+        session.close()
 
 
 def _cert_preview(request, cert_token: str, trader_masked: str, acc: Account | None, *,

@@ -742,7 +742,9 @@ function renderOrders(){
           ${o.status==='failed'&&o.fail_reason?`<div class="muted" style="font-size:11px;max-width:200px">${esc(o.fail_reason)}</div>`:''}</td>
         <td class="num">${o.account_id||'—'}</td>
         <td style="white-space:nowrap">${o.status==='paid'?'':`
-          ${o.status==='pending'?`<button class="btn-o sm" onclick="flagOrder(${o.id},'${o.flag==='awaiting_crypto'?'':'awaiting_crypto'}')"
+          ${o.status==='pending'?`<button class="btn-o sm" onclick="payLink(${o.id})"
+            title="Copy a card-payment link for this order — send it to the customer">Pay link</button>
+          <button class="btn-o sm" onclick="flagOrder(${o.id},'${o.flag==='awaiting_crypto'?'':'awaiting_crypto'}')"
             title="${o.flag==='awaiting_crypto'?'Clear the awaiting-crypto flag':'Mark as awaiting crypto payment'}">${o.flag==='awaiting_crypto'?'Clear flag':'Crypto?'}</button>
           <button class="btn-o sm" onclick="markOrderFailed(${o.id})" title="Payment is not coming, close the order with a reason">Mark failed</button>`:''}
           <button class="btn-p sm" onclick="markOrderPaid(${o.id})" title="Confirm the payment arrived, creates the account">Mark paid</button>`}
@@ -813,6 +815,27 @@ async function flagOrder(id,flag){
     toast(flag?`Marked as awaiting crypto payment. ${txt}`:'Flag cleared.',flag?kind:'ok',7000);
     renderOrders()}
   catch(e){toast('Error: '+e.message,'err')}
+}
+/* Link do zapłaty kartą za KONKRETNE zamówienie — do wklejenia klientowi na
+   Telegramie. Token jest stały, więc drugie kliknięcie daje ten sam adres i nie
+   unieważnia linku, którego klient już używa. */
+async function payLink(id,prefix){
+  let url;
+  try{url=(await api(`/api/admin/orders/${id}/pay-link`,{method:'POST'})).url}
+  catch(e){toast('Error: '+e.message,'err');return}
+  try{await navigator.clipboard.writeText(url);
+    toast(`🔗 ${prefix?prefix+' ':''}Payment link copied — paste it to the customer.`,'ok',9000)}
+  catch(e){showPayLink(url)}   /* Safari bez gestu / http: kopiowanie odpada, a link musi być widoczny */
+}
+function showPayLink(url){
+  const box=document.createElement('div');box.className='modal-wrap';
+  box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>Payment link</h3></div>
+    <p class="muted" style="font-size:12.5px;margin-bottom:12px">This browser blocked the copy — select it and copy by hand.</p>
+    <input class="inp" readonly value="${esc(url)}"></div>`;
+  box.onclick=()=>box.remove();
+  document.body.appendChild(box);
+  const i=box.querySelector('input');i.focus();i.select();
 }
 async function markOrderFailed(id){
   const reason=await askReason({
@@ -1809,7 +1832,7 @@ async function payoutImport(commit){
   }
 }
 
-/* ---------- modal: order paid outside Stripe (crypto, transfer) ---------- */
+/* ---------- modal: order paid outside Stripe (card link, crypto, transfer) ---------- */
 async function openManualOrder(traderId){
   let products=[],traders=[];
   try{[products,traders]=await Promise.all([
@@ -1824,9 +1847,13 @@ async function openManualOrder(traderId){
     <div class="modal-head"><h3>New order</h3>
       <button class="icon-btn" onclick="document.getElementById('order-modal').remove()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
-    <p class="muted" style="font-size:12.5px;margin-bottom:14px">For a customer paying outside Stripe — crypto or a transfer.
+    <p class="muted" style="font-size:12.5px;margin-bottom:14px" id="mo-lead">For a customer paying outside Stripe — crypto or a transfer.
       The order lands as <b>unpaid</b>; the account is created only when you hit <b>Mark paid</b>, exactly like a card payment.</p>
     <div class="stack">
+      <div class="seg" id="mo-method" style="width:100%">
+        <button type="button" class="on" onclick="moMethod('crypto')">Crypto / transfer</button>
+        <button type="button" onclick="moMethod('link')">Card payment link</button>
+      </div>
       <div><label class="muted" style="font-size:12px">Customer</label>
         <input id="mo-search" class="inp" style="margin-bottom:7px" placeholder="Search by e-mail or name" oninput="moFilter()">
         <select id="mo-trader" class="inp" size="5"></select></div>
@@ -1835,24 +1862,42 @@ async function openManualOrder(traderId){
           `<option value="${esc(p.key)}" data-price="${p.price_usd}">${esc(p.label)} — $${fmt0(p.account_size)} · $${fmt(p.price_usd)}</option>`).join('')}</select></div>
       <div><label class="muted" style="font-size:12px">Amount to collect (USD)</label>
         <input id="mo-amount" class="inp" type="number" step="0.01" min="0"></div>
-      <div><label class="muted" style="font-size:12px">Network</label>
-        <input id="mo-network" class="inp" placeholder="e.g. USDT · TRC20" value="${esc(lastWallet().network||'')}"></div>
-      <div><label class="muted" style="font-size:12px">Wallet address <span style="opacity:.65">(goes into the e-mail)</span></label>
-        <input id="mo-address" class="inp" spellcheck="false" placeholder="Paste the wallet address" value="${esc(lastWallet().address||'')}"></div>
-      <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="mo-awaiting" checked style="width:16px;height:16px;accent-color:var(--acc)">
-        Mark as <b>awaiting crypto payment</b></label>
-      <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="mo-mail" checked style="width:16px;height:16px;accent-color:var(--acc)">
-        E-mail the customer the payment instructions</label>
-      <button class="btn-p lg" style="width:100%" onclick="submitManualOrder()">Create order</button>
+      <div class="stack" id="mo-crypto">
+        <div><label class="muted" style="font-size:12px">Network</label>
+          <input id="mo-network" class="inp" placeholder="e.g. USDT · TRC20" value="${esc(lastWallet().network||'')}"></div>
+        <div><label class="muted" style="font-size:12px">Wallet address <span style="opacity:.65">(goes into the e-mail)</span></label>
+          <input id="mo-address" class="inp" spellcheck="false" placeholder="Paste the wallet address" value="${esc(lastWallet().address||'')}"></div>
+        <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="mo-awaiting" checked style="width:16px;height:16px;accent-color:var(--acc)">
+          Mark as <b>awaiting crypto payment</b></label>
+        <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="mo-mail" checked style="width:16px;height:16px;accent-color:var(--acc)">
+          E-mail the customer the payment instructions</label>
+      </div>
+      <button class="btn-p lg" style="width:100%" id="mo-go" onclick="submitManualOrder()">Create order</button>
       <p class="hint">The amount is exactly what you type — coupons and store credits are not applied,
         and nothing leaves the customer's balance until the payment is confirmed.</p>
     </div></div>`;
   box.onclick=()=>box.remove();
   document.body.appendChild(box);
+  moMethod(window._moMethod||'crypto');
   moFilter(traderId);
   moPrice();
+}
+/* Jak klient płaci. Link kartą nie ma nic wspólnego z portfelem, więc pola
+   crypto znikają — inaczej admin wysyłałby maila z adresem USDT komuś, kogo
+   właśnie kieruje do kasy Stripe'a. */
+function moMethod(m){
+  window._moMethod=m;
+  const link=m==='link';
+  $('mo-method').querySelectorAll('button').forEach((b,i)=>b.classList.toggle('on',(i===1)===link));
+  $('mo-crypto').style.display=link?'none':'';
+  $('mo-go').textContent=link?'Create order & copy payment link':'Create order';
+  $('mo-lead').innerHTML=link
+    ?`The order lands as <b>unpaid</b> and you get a link to our payment page — send it to the customer
+      (Telegram, chat, e-mail). They pay by card, the account is created automatically. The link never expires.`
+    :`For a customer paying outside Stripe — crypto or a transfer.
+      The order lands as <b>unpaid</b>; the account is created only when you hit <b>Mark paid</b>, exactly like a card payment.`;
 }
 function moFilter(preselect){
   const q=($('mo-search').value||'').toLowerCase();
@@ -1875,17 +1920,20 @@ async function submitManualOrder(){
   if(!tid){toast('Pick a customer first.','err');return}
   const amount=parseFloat($('mo-amount').value);
   if(!(amount>=0)){toast('Enter the amount to collect.','err');return}
-  const addr=($('mo-address').value||'').trim(),net=($('mo-network').value||'').trim();
+  const link=window._moMethod==='link';
+  const addr=link?'':($('mo-address').value||'').trim();
+  const net=link?'':($('mo-network').value||'').trim();
   if(addr)saveWallet(addr,net);
   try{
     const r=await api('/api/admin/orders',{method:'POST',body:JSON.stringify({
       trader_id:tid,product_key:$('mo-product').value,amount_usd:amount,
-      flag:$('mo-awaiting').checked?'awaiting_crypto':'',
+      flag:(!link&&$('mo-awaiting').checked)?'awaiting_crypto':'',
       payment_address:addr,payment_network:net,
-      notify_trader:$('mo-mail').checked})});
+      notify_trader:!link&&$('mo-mail').checked})});
     document.getElementById('order-modal')?.remove();
-    const [txt,kind]=mailInfo(r);
-    toast(`🧾 Order #${r.id} for ${r.trader_email} — $${fmt(r.amount_usd)}. ${txt}`,kind,9000);
+    if(link){await payLink(r.id,`Order #${r.id} for ${r.trader_email} — $${fmt(r.amount_usd)}.`)}
+    else{const [txt,kind]=mailInfo(r);
+      toast(`🧾 Order #${r.id} for ${r.trader_email} — $${fmt(r.amount_usd)}. ${txt}`,kind,9000)}
     go('orders');
   }catch(e){toast('Error: '+e.message,'err')}
 }

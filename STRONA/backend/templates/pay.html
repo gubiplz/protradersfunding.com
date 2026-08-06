@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Complete your payment — {{ site_name }}{% endblock %}
+{% block description %}Secure payment page for your {{ site_name }} challenge order.{% endblock %}
+
+{# The link is sent one-to-one to a customer, so it has no business showing up
+   in search results — and there is nothing here worth indexing anyway. #}
+{% block head_extra %}<meta name="robots" content="noindex,nofollow">{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="wrap" style="max-width:640px">
+    <span class="pill">Secure checkout</span>
+    <h1>Complete your payment</h1>
+  </div>
+</section>
+
+<section class="sec-tight sec" style="padding-top:24px">
+  <div class="wrap" style="max-width:640px">
+    {% if status == 'pending' %}
+    <div class="verify-result">
+      <div class="rows">
+        <div><span>Order</span><span>{{ reference }}</span></div>
+        <div><span>Item</span><span>{{ item }}</span></div>
+        <div><span>Amount due</span><span>${{ amount }}</span></div>
+      </div>
+      <div style="margin-top:22px">
+        <button class="btn" id="payBtn" type="button">Pay ${{ amount }} by card</button>
+      </div>
+      <p class="muted" style="font-size:13.5px;margin-top:16px">
+        Payments are processed by Stripe — we never see your card details. Once the payment
+        clears, your MT5 login is created automatically and sent to the e-mail address on your
+        {{ site_name }} account.
+      </p>
+    </div>
+    {% elif status == 'paid' %}
+    <div class="verify-result ok">
+      <h3>✓ Already paid</h3>
+      <p class="muted" style="font-size:14px">Order {{ reference }} has been paid — nothing else
+        to do here. Your account details are in the
+        <a href="/portal" style="color:var(--acc-soft)">trader portal</a> and in your inbox.</p>
+    </div>
+    {% elif status == 'missing' %}
+    <div class="verify-result bad">
+      <h3>This payment link is not valid</h3>
+      <p class="muted" style="font-size:14px">We have no order behind this address — it may have been
+        cancelled, or the link got cut when it was copied. Ask us for a fresh one at
+        <a href="mailto:{{ support_email }}" style="color:var(--acc-soft)">{{ support_email }}</a>.</p>
+    </div>
+    {% else %}
+    <div class="verify-result bad">
+      <h3>This payment link is no longer active</h3>
+      <p class="muted" style="font-size:14px">Order {{ reference }} was cancelled. If that is not
+        what you expected, write to
+        <a href="mailto:{{ support_email }}" style="color:var(--acc-soft)">{{ support_email }}</a>
+        and quote the order number.</p>
+    </div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+{% if status == 'pending' %}
+<script>
+/* The Stripe session is created on click, not when the link is generated —
+   that is what keeps this link from expiring after 24 h. */
+document.getElementById('payBtn').addEventListener('click', async function(){
+  const b=this; b.disabled=true; const t=b.textContent; b.textContent='Opening checkout…';
+  try{
+    const r=await fetch('/api/pay/{{ pay_token }}/start',{method:'POST'});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.checkout_url)throw new Error(d.detail||'Could not open the payment page.');
+    location.href=d.checkout_url;
+  }catch(e){
+    b.disabled=false; b.textContent=t;
+    alert(e.message+' Please try again or contact {{ support_email }}.');
+  }
+});
+</script>
+{% endif %}
+{% endblock %}

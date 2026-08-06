@@ -154,6 +154,48 @@ def compute_price(session, trader: Trader, product_key: str, coupon: str | None,
             "bogo_paid_key": (product.key if upgrade else None)}
 
 
+def open_stripe_session(session, order: Order, item_name: str) -> str:
+    """Sesja Stripe Checkout dla ISTNIEJĄCEGO zamówienia; zwraca adres kasy.
+
+    Jedyne miejsce, w którym powstaje sesja płatności — dlatego linki wystawiane
+    ręcznie z panelu (/pay/<token>) idą tędy, a nie przez Payment Link Stripe'a.
+    Webhook domyka zamówienie tylko wtedy, gdy `stripe_session_id` zgadza się co
+    do znaku, więc sesja MUSI powstać u nas i MUSI zostać zapisana przy
+    zamówieniu — inaczej opłacona płatność zostaje zignorowana.
+    """
+    stripe = _stripe()
+    try:
+        cs = stripe.checkout.Session.create(
+            mode="payment",
+            line_items=[{
+                "price_data": {
+                    "currency": settings.currency,
+                    "product_data": {"name": item_name},
+                    "unit_amount": int(round(order.amount_usd * 100)),
+                },
+                "quantity": 1,
+            }],
+            success_url=f"{settings.app_base_url}/portal?paid=1",
+            cancel_url=f"{settings.app_base_url}/portal?canceled=1",
+            metadata={"order_id": str(order.id)},
+            client_reference_id=str(order.id),
+        )
+    except stripe.error.StripeError as e:
+        # Bez tego kazdy blad Stripe'a leci do klienta jako gole HTTP 500
+        # („Server error", zero informacji) — tak wygladal na produkcji
+        # amount_too_small. Zamowienie zostaje `pending`: nikt za nie nie
+        # zaplacil, a slad jest potrzebny do odtworzenia sprawy.
+        session.commit()
+        telemetry.track("checkout_failed", order.trader_id, order=order.id,
+                        product=order.product_key, amount=order.amount_usd,
+                        code=(getattr(e, "code", None) or "stripe_error"))
+        raise HTTPException(400, "We could not open the payment page. "
+                                 "Please try again or contact support.") from e
+    order.stripe_session_id = cs.id
+    session.commit()
+    return cs.url
+
+
 def create_checkout(session, trader: Trader, product_key: str, coupon: str | None,
                     promo_code: str | None = None, weekend_trading: bool = False,
                     use_credits: bool = True) -> dict:
@@ -187,39 +229,11 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
                 "credits_used": kredyt, **_account_view(acc)}
 
     if settings.stripe_enabled:
-        stripe = _stripe()
-        try:
-            cs = stripe.checkout.Session.create(
-                mode="payment",
-                line_items=[{
-                    "price_data": {
-                        "currency": settings.currency,
-                        "product_data": {"name": f"{prowizjonowany.label} challenge"
-                                         + (f" ({catalog.PROMO_NAME} promo)" if upgrade else "")
-                                         + (" + Weekend Trading" if weekend_trading else "")},
-                        "unit_amount": int(round(price * 100)),
-                    },
-                    "quantity": 1,
-                }],
-                success_url=f"{settings.app_base_url}/portal?paid=1",
-                cancel_url=f"{settings.app_base_url}/portal?canceled=1",
-                metadata={"order_id": str(order.id)},
-                client_reference_id=str(order.id),
-            )
-        except stripe.error.StripeError as e:
-            # Bez tego kazdy blad Stripe'a leci do klienta jako gole HTTP 500
-            # („Server error", zero informacji) — tak wygladal na produkcji
-            # amount_too_small. Zamowienie zostaje `pending`: nikt za nie nie
-            # zaplacil, a slad jest potrzebny do odtworzenia sprawy.
-            session.commit()
-            telemetry.track("checkout_failed", trader.id, order=order.id,
-                            product=order.product_key, amount=price,
-                            code=(getattr(e, "code", None) or "stripe_error"))
-            raise HTTPException(400, "We could not open the payment page. "
-                                     "Please try again or contact support.") from e
-        order.stripe_session_id = cs.id
-        session.commit()
-        return {"checkout_url": cs.url, "order_id": order.id, "amount": price,
+        nazwa = (f"{prowizjonowany.label} challenge"
+                 + (f" ({catalog.PROMO_NAME} promo)" if upgrade else "")
+                 + (" + Weekend Trading" if weekend_trading else ""))
+        url = open_stripe_session(session, order, nazwa)
+        return {"checkout_url": url, "order_id": order.id, "amount": price,
                 "discount_pct": discount_pct, "credits_used": kredyt}
 
     # MOCK: zwróć link do naszej stronki symulującej płatność
