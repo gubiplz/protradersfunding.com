@@ -5012,67 +5012,92 @@ def _tekst_alertu(lead: Lead, dane: dict) -> str:
     post na kanale jest kartą leada, a nie powiadomieniem sprzed tygodnia.
     Dlatego niesie też to, co dopisała moderacja: kto go wziął, na czym stanęło
     i co ostatnio powiedział.
+
+    Układ jest ten sam, którym landing publikował własne alerty. Do niedawna
+    kanał dostawał o jednym człowieku dwie wiadomości: czytelną kartę bez
+    przycisków stamtąd i tę, z przyciskami. Landing przestał pisać, a jego układ
+    został tutaj — bo to jego dział czytał.
+
+    Nagłówek, ocena i hashtag biorą się z `quality` przysłanego w zgłoszeniu, a
+    nie z drugiej takiej mapy po tej stronie: skala mieszka na landingu i jej
+    kopia rozjechałaby się przy pierwszej zmianie progów.
     """
     e = html.escape
-    emoji = {"high": "🔥", "warm": "🟡", "cold": "⚪️"}.get(lead.tier or "", "•")
-    naglowek = f"{emoji} <b>{e(lead.name or lead.email)}</b>"
-    if lead.tier:
-        naglowek += f" — {e(lead.tier.upper())} {lead.score}"
-    if lead.outcome == "not_qualified":
-        naglowek += " (odpadł w ankiecie)"
+    ocena = dane.get("quality") or {}
+    odrzucony = lead.outcome == "not_qualified"
 
-    linie = [naglowek, f"✉️ {e(lead.email)}"]
-    if lead.phone:
-        kraj = f" ({e(lead.phone_iso)})" if lead.phone_iso else ""
-        linie.append(f"📞 {e(lead.phone)}{kraj}")
-    if lead.telegram:
-        linie.append(f"💬 {e(lead.telegram)}")
-    zrodlo = " / ".join(x for x in (lead.source, lead.ref) if x)
-    if zrodlo:
-        linie.append(f"🔗 {e(zrodlo)}")
-    if lead.applications > 1:
-        linie.append(f"↻ zgłasza się {lead.applications}. raz")
+    if odrzucony:
+        linie = ["🔴 <b>Not qualified</b>"]
+    else:
+        emoji = ocena.get("emoji") or {"high": "🔥", "warm": "🟡", "cold": "⚪️"}.get(lead.tier or "", "•")
+        etykieta = ocena.get("label") or (lead.tier or "lead").upper()
+        # Skala z landingu, gdy przyszła („8/9"). Bez niej sam wynik, bo goła
+        # liczba bez maksimum i tak mówi więcej niż nic.
+        maks = ocena.get("max")
+        punkty = (f" · {lead.score}/{maks}" if isinstance(maks, int)
+                  else f" · {lead.score}" if lead.score else "")
+        linie = [f"{e(str(emoji))} <b>{e(str(etykieta))}</b>{punkty}", "🟢 Qualified"]
 
-    # Stan moderacji NAD odpowiedziami z ankiety: przy przewijaniu kanału to
-    # jedyne, czego się szuka („czy ktoś to już wziął"), a ankieta to kontekst
-    # do przeczytania dopiero wtedy, gdy się bierze.
+    # Stan moderacji zaraz pod nagłówkiem, NAD danymi kontaktowymi: przy
+    # przewijaniu kanału to jedyne, czego się szuka („czy ktoś to już wziął"),
+    # a ankieta jest kontekstem do przeczytania dopiero wtedy, gdy się bierze.
+    # Po polsku, w odróżnieniu od reszty — to nie są dane od człowieka z
+    # formularza, tylko dopiski działu, i mają się od nich odcinać.
+    stan = []
     if lead.owner:
-        linie.append(f"👤 Zajmuje się: <b>{e(lead.owner)}</b>")
+        stan.append(f"👤 Zajmuje się: <b>{e(lead.owner)}</b>")
     if lead.status != "new":
-        linie.append(f"📌 {_ETYKIETY_STATUSU.get(lead.status, lead.status)}")
+        stan.append(f"📌 {_ETYKIETY_STATUSU.get(lead.status, lead.status)}")
+    if lead.applications > 1:
+        stan.append(f"↻ Zgłasza się {lead.applications}. raz")
     if lead.note:
         # Ostatnia notatka, nie wszystkie: wiadomość ma limit 4096 znaków, a
         # notatki dopisują się jedna pod drugą przez cały czas życia leada.
         ostatnia = lead.note.strip().split("\n")[-1]
-        linie.append(f"📝 {e(ostatnia[:300])}")
+        stan.append(f"📝 {e(ostatnia[:300])}")
+    if stan:
+        linie += ["", *stan]
+
+    kraj = f" ({lead.phone_iso})" if lead.phone and lead.phone_iso else ""
+    wiersze = (("Name", lead.name), ("Email", lead.email), ("Telegram", lead.telegram),
+               ("Phone", f"{lead.phone}{kraj}" if lead.phone else ""),
+               ("Source", " / ".join(x for x in (lead.source, lead.ref) if x)))
+    linie += ["", *(f"<b>{k}:</b> {e(v)}" for k, v in wiersze if v)]
 
     # Uzasadnienie oceny. Bez tego przy nazwisku stoi goła liczba, której nie ma
-    # jak sprawdzić — a to ona decyduje, kto dzwoni pierwszy.
-    ocena = dane.get("quality") or {}
-
+    # jak sprawdzić — a to ona decyduje, do kogo pisze się pierwszego.
     def _powody(klucz: str) -> str:
         wartosc = ocena.get(klucz)
         if not isinstance(wartosc, list) or not wartosc:
             return ""
         return " · ".join(str(x) for x in wartosc)[:300]
 
+    jakosc = []
     if plusy := _powody("reasons"):
-        linie.append(f"✅ {e(plusy)}")
+        jakosc.append(f"<b>Why:</b> {e(plusy)}")
     if braki := _powody("gaps"):
-        linie.append(f"➖ {e(braki)}")
+        jakosc.append(f"<b>Gaps:</b> {e(braki)}")
     if flagi := _powody("penalties"):
         # Własna linijka i ostrzeżenie, bo to jedyne miejsce mówiące, że formularz
         # coś przyjął, ale nikt nie powinien brać tego za dobrą monetę. Decyduje,
-        # czy pod ten numer w ogóle warto dzwonić.
-        linie.append(f"⚠️ {e(flagi)}")
+        # czy pod ten numer w ogóle warto pisać.
+        jakosc.append(f"⚠️ <b>Check:</b> {e(flagi)}")
+    if jakosc:
+        linie += ["", *jakosc]
 
     odpowiedzi = dane.get("answers") or {}
-    if isinstance(odpowiedzi, dict):
+    if isinstance(odpowiedzi, dict) and odpowiedzi:
         # Cała ankieta, nie pierwsze cztery pytania: dział czyta kanał zamiast
-        # panelu, a odpowiedź ucięta w połowie zestawu to ta, o którą się dzwoni
+        # panelu, a odpowiedź ucięta w połowie zestawu to ta, o którą pyta się
         # drugi raz. Dziesięć z zapasem starcza na ankietę mającą ich osiem.
+        linie += ["", "<b>Answers</b>"]
         for pytanie, odp in list(odpowiedzi.items())[:10]:
-            linie.append(f"• {e(str(pytanie)[:80])} — <b>{e(str(odp)[:60])}</b>")
+            linie.append(f"• {e(str(pytanie)[:80])}\n   → <b>{e(str(odp)[:60])}</b>")
+
+    # Klikalny w Telegramie: wyszukuje w kanale wszystko z tą samą oceną i to
+    # najtańszy sposób, żeby wyciągnąć same gorące leady bez CRM-a.
+    if tag := ("#lead_out" if odrzucony else ocena.get("tag")):
+        linie += ["", e(str(tag))]
     return "\n".join(linie)
 
 
@@ -5384,6 +5409,37 @@ def admin_lead_update(lead_id: int, payload: LeadStatusIn):
         session.close()
 
 
+@app.delete("/api/admin/leads/{lead_id}", dependencies=[Depends(auth.require_admin)])
+def admin_lead_delete(lead_id: int):
+    """Skasowanie leada razem z jego historią i przypomnieniami.
+
+    Kasujemy naprawdę, bez kolumny „ukryty". Powód jest ten sam, dla którego ta
+    funkcja w ogóle powstała: w tabeli siedzą zgłoszenia testowe i pomyłki, a
+    ukryty wiersz dalej blokowałby mail — `leads.email` jest unikalny, więc
+    człowiek, którego adresem ktoś testował formularz, nie mógłby się zapisać.
+
+    Zamówienia i konto zostają nietknięte. To są osobne tabele powiązane mailem,
+    nie kluczem, i tak ma być: kasujemy notatkę działu o człowieku, a nie jego
+    historię płatności.
+    """
+    session = SessionLocal()
+    try:
+        lead = session.get(Lead, lead_id)
+        if not lead:
+            raise HTTPException(404, "Lead not found")
+        mail = lead.email
+        # Dzieci najpierw — `lead_events.lead_id` i `lead_reminders.lead_id` to
+        # klucze obce, więc Postgres odrzuciłby skasowanie rodzica.
+        session.query(LeadReminder).filter(LeadReminder.lead_id == lead_id).delete()
+        session.query(LeadEvent).filter(LeadEvent.lead_id == lead_id).delete()
+        session.delete(lead)
+        session.commit()
+        print(f"[leads] usunieto lead #{lead_id} ({mail})")
+        return {"ok": True, "id": lead_id}
+    finally:
+        session.close()
+
+
 class LeadReminderIn(BaseModel):
     text: str
     # Termin idzie albo w dniach od teraz (tak działają szablony w panelu),
@@ -5494,14 +5550,17 @@ def _wykonaj_akcje(session, lead: Lead, akcja: str, kto: str) -> tuple[str, bool
     if akcja == "claim":
         if lead.owner == kto:
             return "Już to masz", False
-        if lead.owner:
-            # Leada nie odbiera się z ręki jednym kliknięciem. Dwie osoby
-            # dzwoniące do jednego człowieka to dokładnie to, przed czym ten
-            # przycisk ma chronić — odbicie idzie przez „Oddaję" właściciela.
-            return f"Zajmuje się już {lead.owner}", False
+        # Przejęcie przechodzi zawsze, także spod kogoś. Kanał czyta wyłącznie
+        # zespół, więc nie ma tu przed kim bronić leada — a blokada kosztowała
+        # dokładnie tyle, ile trwało czekanie, aż nieobecny właściciel kliknie
+        # „oddaję". Kto go miał, zostaje w historii, więc przejęcie nie jest
+        # ciche, tylko po prostu nie wymaga niczyjej zgody.
+        poprzedni = lead.owner
         lead.owner, lead.owner_at, lead.updated_at = kto, teraz, teraz
-        _zdarzenie(session, lead.id, "claim", f"taken by {kto}", actor=f"telegram:{kto}")
-        return "Twój — dzwoń", True
+        _zdarzenie(session, lead.id, "claim",
+                   f"taken by {kto}" + (f" from {poprzedni}" if poprzedni else ""),
+                   actor=f"telegram:{kto}")
+        return (f"Przejęte od {poprzedni}" if poprzedni else "Twój — pisz"), True
 
     if akcja == "release":
         if not lead.owner:
@@ -5668,14 +5727,16 @@ def _tekst_przypomnienia(lead: Lead, powod: str, paid: float, dni: int) -> str:
     stopka = {
         "bought": "Zapłacone zamówienie na ten mail. Przestań traktować jak leada.",
         "no_contact": f"Zgłosił się {dni} dni temu i nikt nie ruszył statusu.",
-        "stalled": f"Telefon {dni} dni temu, od tego czasu nic.",
+        "stalled": f"Pierwszy kontakt {dni} dni temu, od tego czasu nic.",
     }.get(powod, "")
 
+    # Telegram nad telefonem, bo tamtędy idzie kontakt — numer jest tu zapasem
+    # na wypadek, gdyby ktoś nie zostawił handle'a.
     linie = [naglowek, f"✉️ {e(lead.email)}"]
-    if lead.phone:
-        linie.append(f"📞 {e(lead.phone)}")
     if lead.telegram:
         linie.append(f"💬 {e(lead.telegram)}")
+    if lead.phone:
+        linie.append(f"📞 {e(lead.phone)}")
     if lead.note:
         linie.append(f"📝 {e(lead.note)[:200]}")
     if stopka:
@@ -5780,13 +5841,16 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
         for l in leady:
             paid = float(zaplacone.get(traderzy.get(l.email), 0) or 0)
             wiek = (now - (_utc(l.created_at) or now)).days
-            od_telefonu = (now - (_utc(l.contacted_at) or now)).days
+            od_kontaktu = (now - (_utc(l.contacted_at) or now)).days
             if paid > 0:
                 powod, dni = "bought", wiek
             elif l.status == "new" and wiek >= no_contact_days:
                 powod, dni = "no_contact", wiek
-            elif l.status == "called" and l.contacted_at and od_telefonu >= stalled_days:
-                powod, dni = "stalled", od_telefonu
+            # Oba stany rozmowy w toku: „napisaliśmy i cisza" tak samo jak
+            # „odpisał i utknęło". `no_reply` i `rejected` są zamknięte — tam
+            # przypominanie byłoby nagabywaniem, nie pilnowaniem tematu.
+            elif l.status in ("messaged", "replied") and l.contacted_at and od_kontaktu >= stalled_days:
+                powod, dni = "stalled", od_kontaktu
             else:
                 continue
             if (l.id, powod) in juz:

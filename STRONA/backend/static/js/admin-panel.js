@@ -762,13 +762,18 @@ function renderOrders(){
 
 /* ---------- Leads ----------
    Applications from the landing page. Two kinds of column live side by side and
-   the difference matters: `status` is typed by a human after a phone call, while
-   "Bought" is derived from orders at read time and cannot be edited here. Nobody
-   marks a lead as a customer — paying is what makes them one. */
-const LEAD_STATUSES=[['new','New'],['called','Called'],['no_answer','No answer'],['rejected','Rejected']];
+   the difference matters: `status` is set by hand as the conversation moves,
+   while "Bought" is derived from orders at read time and cannot be edited here.
+   Nobody marks a lead as a customer — paying is what makes them one.
+
+   The statuses read as one line: we wrote → they answered → it went quiet, or
+   they are out. Contact goes through Telegram, so "we wrote" is a state that
+   lasts, not a call that either connected or did not. */
+const LEAD_STATUSES=[['new','New'],['messaged','Messaged'],['replied','Replied'],
+  ['no_reply','No reply'],['rejected','Rejected']];
 const leadLabel=s=>(LEAD_STATUSES.find(([k])=>k===s)||[,s])[1];
 /* The questionnaire answers are what the grade is made of, and they are the first
-   thing you want in front of you on the phone. Hover rather than a column: four
+   thing you want in front of you when writing. Hover rather than a column: four
    free-text answers would push the rest of the row off the screen. */
 const leadAnswers=a=>Object.entries(a||{}).map(([q,v])=>`${q} → ${v}`).join('\n');
 
@@ -798,9 +803,9 @@ function renderLeads(){
       <div class="stat-tile ${due?'clickable':''}" ${due?`onclick="window._leadFilter='due';renderLeads()"`:''}>
         <div class="tile-ic ${due?'orange':'blue'}">${ICO.alert}</div>
         <div><div class="lbl">Follow-ups due</div><div class="val">${due}</div>
-          <div class="sub">${due?'someone is waiting for a call':'nothing scheduled for today'}</div></div></div>
+          <div class="sub">${due?'someone is waiting to hear back':'nothing scheduled for today'}</div></div></div>
       <div class="stat-tile"><div class="tile-ic ${waiting?'orange':'blue'}">${ICO.alert}</div>
-        <div><div class="lbl">Not contacted</div><div class="val">${waiting}</div>
+        <div><div class="lbl">Nobody wrote yet</div><div class="val">${waiting}</div>
           <div class="sub">of ${rows.length} shown</div></div></div>
       <div class="stat-tile"><div class="tile-ic green">${ICO.dollar}</div>
         <div><div class="lbl">Revenue from leads</div><div class="val">$${fmt0(revenue)}</div>
@@ -816,28 +821,28 @@ function renderLeads(){
         .map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._leadFilter='${k}';renderLeads()">${l}</button>`).join('')}</div>
       <span class="count-pill">${rows.length} of ${list.length}</span>
     </div>
-    ${rows.length?`<p class="muted" style="font-size:12.5px;margin-bottom:10px">Click a row for the full history: every application with the answers given at the time, status changes and who made them.</p>
-    <div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.leads">
+    ${rows.length?`<p class="muted" style="font-size:12.5px;margin-bottom:10px">Tap a row for the full history: every application with the answers given at the time, status changes and who made them — and the button that deletes it.</p>
+    <div class="tbl-wrap tw-wide lead-wrap"><table class="tbl sortable lead-tbl" data-tkey="admin.leads">
       <thead><tr><th>Date</th><th>Lead</th><th>Contact</th><th>Grade</th><th>Source</th>
         <th>Status</th><th>Bought</th><th>Note</th></tr></thead>
       <tbody>${rows.map(l=>`<tr class="clickable" onclick="openLead(${l.id})">
-        <td class="muted" data-sort="${esc(l.created_at||'')}">${dstr(l.created_at)}</td>
-        <td><b>${esc(l.name||'—')}</b>
+        <td class="muted" data-l="Date" data-sort="${esc(l.created_at||'')}">${dstr(l.created_at)}</td>
+        <td data-l="Lead"><b>${esc(l.name||'—')}</b>
           ${l.owner?`<div style="font-size:11px" title="Taken by">👤 ${esc(l.owner)}</div>`
             :'<div class="muted" style="font-size:11px">nobody took it</div>'}
           ${l.applications>1?`<div class="muted" style="font-size:11px" title="Filled the form more than once">↻ applied ${l.applications}×</div>`:''}
           ${l.outcome==='not_qualified'?'<div class="muted" style="font-size:11px">failed the questionnaire</div>':''}</td>
-        <td><a href="mailto:${esc(l.email)}">${esc(l.email)}</a>
-          ${l.phone?`<div><a href="tel:${esc(l.phone)}">${esc(l.phone)}</a>${l.phone_iso?` <span class="muted">${esc(l.phone_iso)}</span>`:''}</div>`:''}
-          ${l.telegram?`<div class="muted" style="font-size:11px">${esc(l.telegram)}</div>`:''}</td>
-        <td data-sort="${l.score||0}" title="${esc(leadAnswers(l.answers))}">${l.tier?`<span class="status ${l.tier==='high'?'paid':l.tier==='warm'?'pending':'failed'}"><span class="dot"></span>${esc(l.tier)} ${l.score}</span>`:'<span class="muted">—</span>'}</td>
-        <td class="muted">${esc(l.source||'—')}${l.ref?`<div style="font-size:11px">via ${esc(l.ref)}</div>`:''}</td>
-        <td onclick="event.stopPropagation()"><select class="inp sm" style="min-width:116px" onchange="setLeadStatus(${l.id},this.value)">${
+        <td data-l="Contact"><a href="mailto:${esc(l.email)}">${esc(l.email)}</a>
+          ${l.telegram?`<div><a href="https://t.me/${esc((l.telegram||'').replace(/^@/,''))}" target="_blank" rel="noopener">${esc(l.telegram)}</a></div>`:''}
+          ${l.phone?`<div class="muted" style="font-size:11px"><a href="tel:${esc(l.phone)}">${esc(l.phone)}</a>${l.phone_iso?` ${esc(l.phone_iso)}`:''}</div>`:''}</td>
+        <td data-l="Grade" data-sort="${l.score||0}" title="${esc(leadAnswers(l.answers))}">${l.tier?`<span class="status ${l.tier==='high'?'paid':l.tier==='warm'?'pending':'failed'}"><span class="dot"></span>${esc(l.tier)} ${l.score}</span>`:'<span class="muted">—</span>'}</td>
+        <td class="muted" data-l="Source">${esc(l.source||'—')}${l.ref?`<div style="font-size:11px">via ${esc(l.ref)}</div>`:''}</td>
+        <td data-l="Status" onclick="event.stopPropagation()"><select class="inp sm st-${esc(l.status)}" style="min-width:116px" onchange="setLeadStatus(${l.id},this.value)">${
           LEAD_STATUSES.map(([k,lab])=>`<option value="${k}"${l.status===k?' selected':''}>${lab}</option>`).join('')}</select>
           ${l.next_due?`<div class="due ${dueDays(l.next_due)<=0?'now':''}">⏰ ${dueLabel(l.next_due)}</div>`
             :l.contacted_at?`<div class="muted" style="font-size:11px">${dstr(l.contacted_at)}</div>`:''}</td>
-        <td class="num">${l.paid_usd>0?`<span class="status paid"><span class="dot"></span>$${fmt0(l.paid_usd)}</span>`:'<span class="muted">—</span>'}</td>
-        <td onclick="event.stopPropagation()"><input class="inp sm" style="min-width:170px" value="${esc(l.note||'')}"
+        <td class="num" data-l="Bought">${l.paid_usd>0?`<span class="status paid"><span class="dot"></span>$${fmt0(l.paid_usd)}</span>`:'<span class="muted">—</span>'}</td>
+        <td data-l="Note" onclick="event.stopPropagation()"><input class="inp sm" style="min-width:170px" value="${esc(l.note||'')}"
           placeholder="Add a note…" onchange="setLeadNote(${l.id},this.value)"></td></tr>`).join('')}
       </tbody></table></div>`
       :`<div class="empty"><h3>${list.length?'No leads match':'No leads yet'}</h3>
@@ -895,7 +900,26 @@ async function patchLead(id,patch,msg){
 function claimLead(id){
   const who=deskWho();
   if(!who){toast('Enter your name first','err');return}
-  patchLead(id,{owner:who},'Yours — call them');
+  patchLead(id,{owner:who},'Yours — write to them');
+}
+
+/* Kasowanie leada. Jedyne miejsce w tej zakładce, które nie da się cofnąć,
+   więc siedzi na dole karty i pyta. Wiersze testowe i pomyłki muszą znikać
+   naprawdę: `leads.email` jest unikalny, a ukryty wiersz blokowałby adres. */
+async function deleteLead(id){
+  const l=(window._leads||[]).find(x=>x.id===id)||{};
+  const kto=l.name||l.email||('#'+id);
+  if(!await askConfirm({title:`Delete ${esc(kto)}?`,
+    body:'This removes the lead, its history and its follow-ups for good. '
+      +'Orders and the trader account on the same e-mail stay untouched.<br><br>'
+      +'The address becomes free again, so the same person can apply from scratch.',
+    ok:'Delete lead',danger:true}))return;
+  try{
+    await api('/api/admin/leads/'+id,{method:'DELETE'});
+    window._leads=(window._leads||[]).filter(x=>x.id!==id);
+    closeOver();toast('Lead deleted','ok');
+    renderLeads();
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 
 /* ---------- one lead: the history behind the row ----------
@@ -903,13 +927,14 @@ function claimLead(id){
    there". The list cannot show it: one person is one row on purpose, so a second
    application overwrites the first and only the counter survives. Every write
    also lands in lead_events, and that is what gets read back here. */
-const LEAD_STATUS_CLS={new:'pending',called:'paid',no_answer:'pending',rejected:'failed'};
+const LEAD_STATUS_CLS={new:'pending',messaged:'pending',replied:'paid',
+  no_reply:'failed',rejected:'failed'};
 const LEAD_EVENT_LBL={applied:'Applied',status:'Status',note:'Note',reminder:'Reminder',
   claim:'Owner',tier:'Grade'};
 /* Reminders are sent to US, never to the lead — the landing they applied through
    is a separate brand. The wording says who is being nudged. */
-const LEAD_REMINDER_LBL={no_contact:'Nobody called back yet',bought:'Bought — stop treating as a lead',
-  stalled:'Call led nowhere'};
+const LEAD_REMINDER_LBL={no_contact:'Nobody wrote to them yet',bought:'Bought — stop treating as a lead',
+  stalled:'Conversation led nowhere'};
 
 function leadEventDetail(e){
   if(e.kind==='reminder')return LEAD_REMINDER_LBL[e.detail]||e.detail.replace(/^planned: /,'');
@@ -924,13 +949,13 @@ const dueDays=iso=>{const a=new Date(iso),b=new Date();
 const dueLabel=iso=>{const d=dueDays(iso);
   return d<0?`${-d}d overdue`:d===0?'due today':d===1?'tomorrow':`in ${d}d`};
 
-/* Ready-made follow-ups. These are the calls that actually happen after a first
-   conversation — the point is that scheduling one costs a single click, because
-   a reminder nobody sets is a lead nobody calls back.
+/* Ready-made follow-ups. These are the messages that actually get sent after a
+   first exchange — the point is that scheduling one costs a single click,
+   because a reminder nobody sets is a lead nobody writes back to.
    [label, days from now, repeat every N days (0 = once), what to do] */
 const REMINDER_PRESETS=[
-  ['No answer',2,0,'Second call attempt — try a different time of day than last time.'],
-  ['Call me back',1,0,'Asked to be called back — call at the time you agreed on.'],
+  ['No reply',2,0,'Write again — a different time of day than last time.'],
+  ['Asked to wait',1,0,'Asked us to write later — at the time you agreed on.'],
   ['Thinking about it',5,0,'Wanted to think it over. Ask what is still open.'],
   ['Too expensive',7,0,'Hesitated on price — bring up the smaller account or the current promo.'],
   ['No money yet',14,0,'Had no funds at the time. Ask whether anything changed.'],
@@ -939,25 +964,47 @@ const REMINDER_PRESETS=[
   ['Bought — weekly',7,7,'Account update: how the challenge is going, whether the rules are clear, how far from the loss limit.'],
 ];
 
-/* Who is on it and how good they turned out to be. Both are moderation, not
-   data from the landing page: several people work the same Telegram channel, so
-   "nobody took it" and "the questionnaire got this one wrong" are the two things
-   that have to be fixable from here as well as from the phone. */
+/* Where this lead stands, in the order the work happens: who has it, how far the
+   conversation got, how good they turned out to be. All three are moderation,
+   not data from the landing page — several people work the same Telegram
+   channel, so these are the things that have to be fixable from here as well as
+   from the channel buttons. */
 function leadModCard(l){
   const grades=[['high','🔥 High'],['warm','🟡 Warm'],['cold','⚪️ Cold']];
+  const ja=deskWho(false);
   return `<div class="lead-card sec-card">
     <div class="mod-row">
       <div><div class="lbl">Handled by</div>
         <div class="mod-who">${l.owner?esc(l.owner):'<span class="muted">nobody took it yet</span>'}</div></div>
-      ${l.owner
-        ?`<button class="btn-o" onclick="patchLead(${l.id},{owner:''},'Released — back in the pool')">Release</button>`
-        :`<button class="btn-p" onclick="claimLead(${l.id})">Take it</button>`}
+      <div class="mod-btns">${l.owner
+        ?`${l.owner===ja?'':`<button class="btn-p" onclick="claimLead(${l.id})">Take over</button>`}
+          <button class="btn-o" onclick="patchLead(${l.id},{owner:''},'Released — back in the pool')">Release</button>`
+        :`<button class="btn-p" onclick="claimLead(${l.id})">Take it</button>`}</div>
+    </div>
+    <div class="mod-row">
+      <div><div class="lbl">Where it stands</div>
+        <div class="muted" style="font-size:11.5px">we wrote → they answered → it went quiet, or they are out</div></div>
+      <div class="seg wrap">${LEAD_STATUSES.map(([k,lab])=>
+        `<button class="${l.status===k?'on':''}" onclick="patchLead(${l.id},{status:'${k}'},'Marked as ${lab}')">${lab}</button>`).join('')}</div>
     </div>
     <div class="mod-row">
       <div><div class="lbl">Grade</div>
-        <div class="muted" style="font-size:11.5px">scored from the form — correct it after the call</div></div>
-      <div class="seg">${grades.map(([k,lab])=>
+        <div class="muted" style="font-size:11.5px">scored from the form — correct it once you have talked</div></div>
+      <div class="seg wrap">${grades.map(([k,lab])=>
         `<button class="${l.tier===k?'on':''}" onclick="patchLead(${l.id},{tier:'${k}'},'Grade set to ${k}')">${lab}</button>`).join('')}</div>
+    </div>
+  </div>`;
+}
+
+/* Osobna karta na dole, nie przycisk obok „Release": to jedyna operacja w tej
+   zakładce, której nie da się cofnąć, i ma być trudniej ją kliknąć przez pomyłkę
+   niż zmienić status. */
+function leadDangerCard(l){
+  return `<div class="lead-card sec-card danger-zone">
+    <div class="mod-row">
+      <div><div class="lbl">Delete</div>
+        <div class="muted" style="font-size:11.5px">For test entries and duplicates. History and follow-ups go with it.</div></div>
+      <button class="btn-danger" onclick="deleteLead(${l.id})">Delete lead</button>
     </div>
   </div>`;
 }
@@ -1042,9 +1089,9 @@ async function openLead(id){
       ${l.outcome==='not_qualified'?'<span class="chip">failed the questionnaire</span>':''}
     </div>
     <div class="chip-row">
+      ${l.telegram?`<span class="chip"><a href="https://t.me/${esc((l.telegram||'').replace(/^@/,''))}" target="_blank" rel="noopener">${esc(l.telegram)}</a></span>`:''}
       <span class="chip"><a href="mailto:${esc(l.email)}">${esc(l.email)}</a></span>
       ${l.phone?`<span class="chip"><a href="tel:${esc(l.phone)}">${esc(l.phone)}</a></span>`:''}
-      ${l.telegram?`<span class="chip">${esc(l.telegram)}</span>`:''}
       ${l.country?`<span class="chip">${esc(l.country)}</span>`:''}
       ${l.source?`<span class="chip">${esc(l.source)}${l.ref?' via '+esc(l.ref):''}</span>`:''}
     </div>
@@ -1073,7 +1120,8 @@ async function openLead(id){
             Object.entries(e.answers).map(([q,v])=>`${esc(q)} → <b>${esc(v)}</b>`).join('<br>')}</div>`:''}</td></tr>`).join('')}
       </tbody></table></div>`
       :`<div class="empty"><h3>Nothing recorded yet</h3>
-        <p>History starts at the first change made after this feature went live.</p></div>`}`);
+        <p>History starts at the first change made after this feature went live.</p></div>`}
+    ${leadDangerCard(l)}`);
 }
 /* Jedno zdanie o mailu z instrukcją wpłaty. Brak adresu portfela MUSI krzyczeć:
    klient dostaje wtedy prośbę o zapłatę bez informacji, gdzie zapłacić, a admin

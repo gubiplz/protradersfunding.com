@@ -155,10 +155,15 @@ def send_message(text: str, *, transport=None) -> tuple[bool, str]:
 # danych na oczach klientów, więc czat jest osobną zmienną, nie parametrem
 # z wartością domyślną.
 
-# Przyciski pod alertem. Opisy odpowiadają temu, co dzieje się po telefonie,
-# a nie nazwom w bazie — klikający ma na ekranie telefon, nie schemat tabeli.
-LEAD_BUTTONS = (("✅ Odebrał", "called"),
-                ("📵 Nie odbiera", "no_answer"),
+# Przyciski pod alertem. Opisy mówią, co się przed chwilą zrobiło, a nie jak
+# nazywa się kolumna — klikający ma przed sobą rozmowę, nie schemat tabeli.
+#
+# Kontakt idzie na Telegram, więc „napisałem" i „odpisał" to dwa różne stany:
+# pierwszy jest po naszej stronie i wygasa dopiero po czasie, drugi jest
+# odpowiedzią człowieka. Telefon rozstrzygał to jednym kliknięciem, wiadomość nie.
+LEAD_BUTTONS = (("✍️ Napisałem", "messaged"),
+                ("💬 Odpisał", "replied"),
+                ("🔇 Nie odpisuje", "no_reply"),
                 ("❌ Odpada", "rejected"))
 
 # Poprawka oceny z ankiety. Formularz punktuje deklaracje, a te po telefonie
@@ -170,6 +175,9 @@ TIER_BUTTONS = (("🔥 High", "tier_high"),
                 ("⚪️ Cold", "tier_cold"))
 
 CLAIM_BUTTON = ("🙋 Biorę tego", "claim")
+# Ten sam `claim`, inny opis: pod kartą z właścicielem to nie jest wzięcie
+# niczyjego leada, tylko odebranie go koledze, i przycisk ma to mówić wprost.
+TAKEOVER_BUTTON = ("🤝 Przejmuję", "claim")
 RELEASE_BUTTON = ("↩️ Oddaję", "release")
 
 
@@ -182,14 +190,17 @@ def lead_keyboard(lead_id: int, *, owner: str | None = None,
     """Klawiatura pod alertem — DWA etapy i to jest cały sens tej konstrukcji.
 
     Dopóki leada nikt nie wziął, jest jeden przycisk: „biorę". Statusy i ocena
-    pojawiają się dopiero potem. Kanał moderuje kilka osób i trzy przyciski
-    statusu pod świeżym zgłoszeniem kończyły się dwoma telefonami do tej samej
-    osoby w ciągu godziny.
+    pojawiają się dopiero potem. Kanał czyta kilka osób i cztery przyciski
+    statusu pod świeżym zgłoszeniem kończyły się dwiema wiadomościami do tej
+    samej osoby w ciągu godziny.
 
     Wybrany stan zostaje oznaczony kropką i NIE znika po kliknięciu: wiadomość
     przewija się w kanale razem z resztą i po godzinie nie da się inaczej
     powiedzieć, czy ktoś już coś kliknął, czy tylko przeczytał. Przy okazji
     pomyłkę da się poprawić, zamiast szukać leada w panelu.
+
+    Statusy idą po dwa w rzędzie, bo cztery obok siebie Telegram na telefonie
+    ściska do samych emoji.
     """
     def guzik(opis: str, akcja: str, wybrany: bool = False) -> dict:
         return {"text": ("• " + opis) if wybrany else opis,
@@ -197,10 +208,13 @@ def lead_keyboard(lead_id: int, *, owner: str | None = None,
 
     if not owner:
         return {"inline_keyboard": [[guzik(*CLAIM_BUTTON)]]}
+    statusy = [guzik(o, s, s == status) for o, s in LEAD_BUTTONS]
     return {"inline_keyboard": [
-        [guzik(o, s, s == status) for o, s in LEAD_BUTTONS],
+        *[statusy[i:i + 2] for i in range(0, len(statusy), 2)],
         [guzik(o, a, a == f"tier_{tier or ''}") for o, a in TIER_BUTTONS],
-        [guzik(*RELEASE_BUTTON)],
+        # Przejęcie stoi pod kartą, która ma już właściciela, i to jest celowe:
+        # lead nie czeka, aż ktoś zdąży kliknąć „oddaję".
+        [guzik(*TAKEOVER_BUTTON), guzik(*RELEASE_BUTTON)],
     ]}
 
 

@@ -165,6 +165,16 @@ tr.clickable{cursor:pointer}
 .mod-row+.mod-row{margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)}
 .mod-row .lbl{font-size:12px;color:var(--muted)}
 .mod-who{font-size:14px;font-weight:600;margin-top:2px}
+.mod-btns{display:flex;gap:8px;flex-wrap:wrap}
+/* Pięć statusów obok siebie nie mieści się w 560px slide-overa. Zawijają się
+   zamiast ściskać do nieczytelnych skrótów — kolejność czyta się jak zdanie
+   („napisaliśmy → odpisał → cisza"), więc łamanie linii jej nie psuje. */
+.seg.wrap{flex-wrap:wrap}
+
+/* Kasowanie leada. Osobna karta na dole i czerwona ramka, bo to jedyna rzecz
+   w tej zakładce, której nie da się cofnąć. */
+.danger-zone{border-color:var(--red-line)}
+.danger-zone .lbl{color:var(--red)}
 /* Kafelek „Follow-ups due" prowadzi do filtra — kursor musi to zapowiadać,
    bo tr.clickable wyżej dotyczy wyłącznie wierszy tabeli. */
 .stat-tile.clickable{cursor:pointer}
@@ -194,6 +204,46 @@ tr.clickable{cursor:pointer}
    karty — czyli wtedy, gdy i tak się o nim pamiętało. */
 .due{font-size:11px;color:var(--muted);margin-top:3px}
 .due.now{color:var(--gold);font-weight:600}
+
+/* Status w wierszu jest polem wyboru, więc nie da się mu dać kropki jak
+   `.status`. Kolor tekstu robi to samo: listę trzydziestu leadów przegląda się
+   wzrokiem, szukając tych, do których nikt jeszcze nie napisał. */
+.lead-tbl select{font-weight:600}
+.lead-tbl select.st-new{color:var(--gold)}
+.lead-tbl select.st-messaged{color:var(--blue)}
+.lead-tbl select.st-replied{color:var(--green)}
+.lead-tbl select.st-no_reply,.lead-tbl select.st-rejected{color:var(--muted)}
+
+/* ---- lista leadów na telefonie ----
+   Osiem kolumn z `white-space:nowrap` to na telefonie poziome przewijanie, w
+   którym imię ucieka spod statusu, a status spod notatki. Wiersz rozkłada się
+   więc na kartę: nagłówki tabeli znikają, a ich rolę przejmuje `data-l` przy
+   każdej komórce. Jedna prawda w markupie, drugi układ tylko w CSS. */
+@media(max-width:860px){
+  .lead-wrap{background:transparent;border:0;box-shadow:none;overflow-x:visible;max-width:none}
+  table.lead-tbl{min-width:0}
+  table.lead-tbl thead{display:none}
+  table.lead-tbl,table.lead-tbl tbody,table.lead-tbl tr,table.lead-tbl td{display:block;width:auto}
+  table.lead-tbl tr{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+    box-shadow:var(--shadow);padding:4px 2px 8px;margin-bottom:10px}
+  table.lead-tbl tr:hover td{background:transparent}
+  table.lead-tbl td{border-top:0;padding:5px 14px;white-space:normal;
+    display:flex;gap:12px;align-items:flex-start;justify-content:space-between;text-align:right}
+  table.lead-tbl td::before{content:attr(data-l);flex:0 0 66px;text-align:left;color:var(--dim);
+    font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;line-height:2}
+  /* Nazwisko zachowuje się jak nagłówek karty, a nie jak kolejna para
+     etykieta-wartość: to po nim szuka się właściwego wiersza. */
+  table.lead-tbl td[data-l="Lead"]{display:block;text-align:left;padding:10px 14px;
+    border-bottom:1px solid var(--line);margin-bottom:5px}
+  table.lead-tbl td[data-l="Lead"]::before{display:none}
+  table.lead-tbl td[data-l="Lead"] b{font-size:15px}
+  /* Pola do klikania biorą całą szerokość — pełny cel dotyku zamiast selecta
+     wciśniętego w prawy margines. */
+  table.lead-tbl td[data-l="Status"],table.lead-tbl td[data-l="Note"]{flex-wrap:wrap}
+  table.lead-tbl td[data-l="Status"] select,table.lead-tbl td[data-l="Note"] input{
+    flex:1 1 100%;min-width:0;min-height:40px;font-size:14px}
+  table.lead-tbl td[data-l="Status"] .due{flex:1 1 100%;text-align:left}
+}
 
 /* Wyszukiwarki (Accounts/Pool/Orders): wrapper przejmuje slot inputa w
    toolbarze, a "x" do czyszczenia siedzi WEWNATRZ pola przy prawej krawedzi.

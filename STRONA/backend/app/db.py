@@ -50,6 +50,7 @@ def init_db() -> None:
     _add_missing_columns()
     _add_missing_indexes()
     _relax_not_null()
+    _przemianuj_statusy_leadow()
 
 
 # Odcisk wersji kodu, dla ktorej schemat jest juz doprowadzony do porzadku.
@@ -253,6 +254,30 @@ def _add_missing_indexes() -> None:
         with engine.begin() as conn:
             conn.execute(text(f"CREATE INDEX IF NOT EXISTS {nazwa} ON {table} ({column})"))
         print(f"[db] dodano indeks {nazwa}")
+
+
+# Statusy z czasow, gdy dzial dzwonil zamiast pisac na Telegramie. Wartosci w
+# bazie zmienily sie razem z przyciskami, ale wiersze zapisane wczesniej trzymaja
+# stare — a tych panel nie ma juz na liscie, wiec pokazywalby lead ze statusem,
+# ktorego nie da sie ani odczytac, ani zmienic. Przepisanie, nie kasowanie:
+# „odebral" to dzisiejsze „odpisal", „nie odbiera" to „nie odpisuje".
+#
+# `lead_events` zostaje nietkniete. Historia ma mowic, co kliknieto wtedy.
+_STARE_STATUSY_LEADA = {"called": "replied", "no_answer": "no_reply"}
+
+
+def _przemianuj_statusy_leadow() -> None:
+    from sqlalchemy import inspect, text
+
+    if "leads" not in set(inspect(engine).get_table_names()):
+        return
+    with engine.begin() as conn:
+        for stary, nowy in _STARE_STATUSY_LEADA.items():
+            zmienione = conn.execute(
+                text("UPDATE leads SET status = :nowy WHERE status = :stary"),
+                {"nowy": nowy, "stary": stary}).rowcount
+            if zmienione:
+                print(f"[db] leads.status {stary} -> {nowy}: {zmienione}")
 
 
 def _add_missing_columns() -> None:

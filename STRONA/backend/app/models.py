@@ -666,9 +666,14 @@ class Lead(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
-# Krótka lista celowo: status ma odpowiadać na jedno pytanie — czy dodzwoniliśmy
-# się do tej osoby. Czy kupiła, wynika z zamówień, więc nie ma tu „won".
-LEAD_STATUSES = ("new", "called", "no_answer", "rejected")
+# Krótka lista celowo: status ma odpowiadać na jedno pytanie — na czym stoi
+# kontakt z tą osobą. Czy kupiła, wynika z zamówień, więc nie ma tu „won".
+#
+# Piszemy na Telegramie, nie dzwonimy, i stąd rozdział na „napisaliśmy" i
+# „odpisał". Przy telefonie jedna próba rozstrzygała od razu — odebrał albo nie.
+# Wiadomość zostaje bez odpowiedzi godzinami, nie znacząc jeszcze niczego, więc
+# `messaged` to stan oczekiwania i to jego pilnują przypomnienia.
+LEAD_STATUSES = ("new", "messaged", "replied", "no_reply", "rejected")
 
 
 class LeadEvent(Base):

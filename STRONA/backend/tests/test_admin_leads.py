@@ -152,13 +152,13 @@ def test_ponowne_zgloszenie_nie_kasuje_pracy_dzialu():
     dane = _zgloszenie()
     lead_id = _wyslij(dane).json()["id"]
     client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN,
-                json={"status": "called", "note": "oddzwonić we wtorek"})
+                json={"status": "replied", "note": "odpisze we wtorek"})
 
     _wyslij(dane)
 
     lead = _lead(lead_id)
-    assert lead.status == "called"
-    assert lead.note == "oddzwonić we wtorek"
+    assert lead.status == "replied"
+    assert lead.note == "odpisze we wtorek"
     assert lead.contacted_at is not None
 
 
@@ -207,13 +207,13 @@ def test_lead_ktory_kupil_dostaje_kwote_po_mailu():
 # --------------------------------------------------------------------------- #
 def test_contacted_at_zapisuje_pierwszy_kontakt_a_nie_ostatni():
     lead_id = _wyslij(_zgloszenie()).json()["id"]
-    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"status": "no_answer"})
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"status": "messaged"})
     pierwszy = _lead(lead_id).contacted_at
     assert pierwszy is not None
 
-    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"status": "called"})
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"status": "replied"})
     lead = _lead(lead_id)
-    assert lead.status == "called" and lead.contacted_at == pierwszy
+    assert lead.status == "replied" and lead.contacted_at == pierwszy
 
 
 def test_nieznany_status_odrzucony():
@@ -225,10 +225,10 @@ def test_nieznany_status_odrzucony():
 
 def test_sama_notatka_nie_rusza_statusu():
     lead_id = _wyslij(_zgloszenie()).json()["id"]
-    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"status": "called"})
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"status": "replied"})
     client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"note": "prosi o telefon po 18"})
     lead = _lead(lead_id)
-    assert lead.status == "called" and lead.note == "prosi o telefon po 18"
+    assert lead.status == "replied" and lead.note == "prosi o telefon po 18"
 
 
 def test_filtr_po_statusie():
@@ -256,21 +256,21 @@ def test_webhook_bez_sekretu_odmawia():
     """Adres webhooka nie jest tajny, więc to jedyna kontrola — bez niej
     status leada mógłby zmienić każdy, kto go zgadnie."""
     lead_id = _wyslij(_zgloszenie()).json()["id"]
-    assert _callback(lead_id, "called", sekret=None).status_code == 401
-    assert _callback(lead_id, "called", sekret="nie-ten").status_code == 401
+    assert _callback(lead_id, "replied", sekret=None).status_code == 401
+    assert _callback(lead_id, "replied", sekret="nie-ten").status_code == 401
     assert _lead(lead_id).status == "new"
 
 
 def test_przycisk_zmienia_status_i_przepisuje_wiadomosc(_srodowisko):
     lead_id = _wyslij(_zgloszenie()).json()["id"]
-    odp = _callback(lead_id, "no_answer")
+    odp = _callback(lead_id, "no_reply")
 
     assert odp.status_code == 200
-    assert _lead(lead_id).status == "no_answer"
-    assert "Nie odbiera" in _srodowisko["answer"][-1]
+    assert _lead(lead_id).status == "no_reply"
+    assert "Nie odpisuje" in _srodowisko["answer"][-1]
     czat, mid, tekst = _srodowisko["edit"][-1]
     assert (czat, mid) == ("-100123", 55)
-    assert "Nie odbiera" in tekst and "Hubert" in tekst
+    assert "Nie odpisuje" in tekst and "Hubert" in tekst
 
 
 def test_webhook_przepuszcza_nieswoje_update(_srodowisko):
@@ -292,9 +292,13 @@ def test_alert_escapuje_dane_z_formularza(_srodowisko):
 
 
 def test_alert_niesie_kontakt_i_ocene(_srodowisko):
+    """Nagłówek bierze etykietę i emoji z landingu, żeby ta sama osoba wyglądała
+    tak samo w obu kanałach — dopisujemy tylko wynik, bo landing wysyła go osobno."""
     _wyslij(_zgloszenie())
     _, tekst = _srodowisko["alert"][-1]
-    assert "+48111222333" in tekst and "HIGH 42" in tekst
+    assert "+48111222333 (PL)" in tekst and "@jasiu" in tekst
+    assert "<b>HIGH QUALITY LEAD</b> · 42" in tekst
+    assert "Qualified" in tekst
 
 
 def test_alert_niesie_uzasadnienie_oceny(_srodowisko):
@@ -318,8 +322,9 @@ def test_alert_bez_oceny_nie_dokleja_pustych_linijek(_srodowisko):
     Brak oceny ma znaczyć brak wierszy, a nie wiersze z niczym."""
     _wyslij(_zgloszenie(outcome="not_qualified", quality=None))
     _, tekst = _srodowisko["alert"][-1]
-    assert "✅" not in tekst and "➖" not in tekst and "⚠️" not in tekst
-    assert "odpadł w ankiecie" in tekst
+    assert "Why:" not in tekst and "Gaps:" not in tekst and "⚠️" not in tekst
+    assert "Not qualified" in tekst and "#lead_out" in tekst
+    assert "\n\n\n" not in tekst
 
 
 def test_alert_niesie_cala_ankiete(_srodowisko):
@@ -343,7 +348,7 @@ def test_klikniecie_przycisku_nie_gubi_ankiety_z_karty(_srodowisko):
                  "penalties": ["numer bez kierunkowego"]},
     ))
     lead_id = odp.json()["id"]
-    _callback(lead_id, "called", kto="Bartek")
+    _callback(lead_id, "replied", kto="Bartek")
 
     _, _, tekst = _srodowisko["edit"][-1]
     assert "Kiedy chcesz kupić?" in tekst and "W tym tygodniu" in tekst
@@ -396,19 +401,19 @@ def test_historia_pamieta_odpowiedzi_z_kazdego_zgloszenia():
 
 def test_historia_zapisuje_kto_zmienil_status(_srodowisko):
     lead_id = _wyslij(_zgloszenie()).json()["id"]
-    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"status": "called"})
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"status": "messaged"})
     _callback(lead_id, "rejected")
 
     assert [(z.detail, z.actor) for z in _zdarzenia(lead_id, "status")] == [
-        ("new → called", "panel"), ("called → rejected", "telegram:Hubert")]
+        ("new → messaged", "panel"), ("messaged → rejected", "telegram:Hubert")]
 
 
 def test_ten_sam_status_drugi_raz_nie_zasmieca_historii():
     """Przycisk zostaje pod wiadomością w Telegramie i klika się go odruchowo.
     Historia ma pokazywać zmiany, nie kliknięcia."""
     lead_id = _wyslij(_zgloszenie()).json()["id"]
-    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"status": "called"})
-    _callback(lead_id, "called")
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"status": "messaged"})
+    _callback(lead_id, "messaged")
     assert len(_zdarzenia(lead_id, "status")) == 1
 
 
@@ -450,9 +455,75 @@ def test_szczegoly_niosa_zamowienia_i_historie():
 
 
 # --------------------------------------------------------------------------- #
+#  Kasowanie                                                                   #
+# --------------------------------------------------------------------------- #
+def test_kasowanie_wymaga_admina():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    assert client.delete(f"/api/admin/leads/{lead_id}").status_code in (401, 403)
+    assert _lead(lead_id) is not None
+
+
+def test_kasowanie_zabiera_historie_i_przypomnienia():
+    """Zdarzenia i przypomnienia trzymają `lead_id` kluczem obcym, więc bez
+    posprzątania dzieci Postgres odrzuciłby skasowanie wiersza."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    client.post(f"/api/admin/leads/{lead_id}/reminders", headers=ADMIN,
+                json={"text": "dopytać", "due_in_days": 3})
+
+    assert client.delete(f"/api/admin/leads/{lead_id}", headers=ADMIN).status_code == 200
+
+    assert _lead(lead_id) is None
+    assert _zdarzenia(lead_id) == []
+    s = SessionLocal()
+    try:
+        assert s.query(LeadReminder).filter(LeadReminder.lead_id == lead_id).count() == 0
+    finally:
+        s.close()
+
+
+def test_po_skasowaniu_ten_sam_mail_wraca_jako_nowy():
+    """Sedno tego, po co kasowanie w ogóle jest. `leads.email` jest unikalny,
+    więc gdyby wiersz tylko chował się w panelu, człowiek, którego adresem ktoś
+    testował formularz, do końca świata wracałby jako „zgłasza się 2. raz"."""
+    dane = _zgloszenie()
+    lead_id = _wyslij(dane).json()["id"]
+    client.delete(f"/api/admin/leads/{lead_id}", headers=ADMIN)
+
+    odp = _wyslij(dane).json()
+    assert odp["new"] is True
+    lead = _lead(odp["id"])
+    assert lead.applications == 1 and lead.status == "new"
+
+
+def test_kasowanie_nie_rusza_zamowien():
+    """Kasujemy notatkę działu o człowieku, nie jego historię płatności."""
+    dane = _zgloszenie()
+    lead_id = _wyslij(dane).json()["id"]
+    s = SessionLocal()
+    tr = Trader(email=dane["email"], password_hash=auth.hash_password("haslo1234"),
+                full_name="Jan Kowalski", referral_code=auth.secrets.token_hex(3))
+    s.add(tr); s.commit()
+    s.add(Order(trader_id=tr.id, product_key="eval-100k", amount_usd=549.0, status="paid"))
+    s.commit(); trader_id = tr.id; s.close()
+
+    client.delete(f"/api/admin/leads/{lead_id}", headers=ADMIN)
+
+    s = SessionLocal()
+    try:
+        assert s.get(Trader, trader_id) is not None
+        assert s.query(Order).filter(Order.trader_id == trader_id).count() == 1
+    finally:
+        s.close()
+
+
+def test_kasowanie_nieznanego_leada_to_404():
+    assert client.delete("/api/admin/leads/99999999", headers=ADMIN).status_code == 404
+
+
+# --------------------------------------------------------------------------- #
 #  Przypomnienia (cron)                                                        #
 # --------------------------------------------------------------------------- #
-def _cofnij(lead_id, *, od_zgloszenia=None, od_telefonu=None):
+def _cofnij(lead_id, *, od_zgloszenia=None, od_kontaktu=None):
     """Postarza lead, żeby test nie musiał czekać trzech dni."""
     s = SessionLocal()
     try:
@@ -460,8 +531,8 @@ def _cofnij(lead_id, *, od_zgloszenia=None, od_telefonu=None):
         teraz = datetime.now(timezone.utc)
         if od_zgloszenia is not None:
             lead.created_at = teraz - timedelta(days=od_zgloszenia)
-        if od_telefonu is not None:
-            lead.contacted_at = teraz - timedelta(days=od_telefonu)
+        if od_kontaktu is not None:
+            lead.contacted_at = teraz - timedelta(days=od_kontaktu)
         s.commit()
     finally:
         s.close()
@@ -516,13 +587,26 @@ def test_kupujacy_ma_pierwszenstwo_przed_statusem(_srodowisko):
     assert "549" in tekst
 
 
-def test_przypomnienie_o_rozmowie_bez_ciagu_dalszego():
+def test_przypomnienie_o_wiadomosci_bez_ciagu_dalszego():
+    """Napisaliśmy i cisza. To najczęstszy stan przy kontakcie przez Telegram —
+    i jedyny, w którym samo mijanie czasu jest powodem, żeby wrócić do tematu."""
     lead_id = _wyslij(_zgloszenie()).json()["id"]
-    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"status": "called"})
-    _cofnij(lead_id, od_zgloszenia=30, od_telefonu=14)
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"status": "messaged"})
+    _cofnij(lead_id, od_zgloszenia=30, od_kontaktu=14)
 
     _cron()
     assert [z.detail for z in _zdarzenia(lead_id, "reminder")] == ["stalled"]
+
+
+def test_zamkniety_lead_nie_wraca_w_przypomnieniach():
+    """`no_reply` to decyzja, że przestajemy pisać. Przypomnienie o takim leadzie
+    kazałoby napisać jeszcze raz do kogoś, kto już dwa razy nie odpowiedział."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"status": "no_reply"})
+    _cofnij(lead_id, od_zgloszenia=30, od_kontaktu=14)
+
+    _cron()
+    assert _zdarzenia(lead_id, "reminder") == []
 
 
 # --------------------------------------------------------------------------- #
@@ -538,18 +622,32 @@ def test_przycisk_bierze_leada():
         ("taken by Hubert", "telegram:Hubert")]
 
 
-def test_drugi_nie_przejmuje_cudzego_leada(_srodowisko):
-    """Sedno tej kolumny: kanał moderuje kilka osób i posty są anonimowe, więc
-    bez tego dwie osoby dzwoniły tego samego dnia do jednego człowieka."""
+def test_przejecie_leada_nie_wymaga_zgody_wlasciciela(_srodowisko):
+    """Kanał czyta wyłącznie zespół, więc nie ma tu przed kim bronić leada.
+    Blokada kosztowała dokładnie tyle, ile trwało czekanie, aż nieobecny
+    właściciel kliknie „oddaję" — a historia i tak zapisuje, spod kogo poszedł."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _callback(lead_id, "claim", kto="Hubert")
+
+    _callback(lead_id, "claim", kto="Bartek")
+
+    assert _lead(lead_id).owner == "Bartek"
+    assert _srodowisko["answer"][-1] == "Przejęte od Hubert"
+    # Karta musi się przepisać, inaczej pod alertem dalej stoi poprzednie imię.
+    assert "Bartek" in _srodowisko["edit"][-1][2]
+    assert [z.detail for z in _zdarzenia(lead_id, "claim")] == [
+        "taken by Hubert", "taken by Bartek from Hubert"]
+
+
+def test_wlasciciel_klikajacy_biore_drugi_raz_nie_zasmieca_historii(_srodowisko):
     lead_id = _wyslij(_zgloszenie()).json()["id"]
     _callback(lead_id, "claim", kto="Hubert")
     ile_przepisan = len(_srodowisko["edit"])
 
-    _callback(lead_id, "claim", kto="Bartek")
+    _callback(lead_id, "claim", kto="Hubert")
 
-    assert _lead(lead_id).owner == "Hubert"
-    assert _srodowisko["answer"][-1] == "Zajmuje się już Hubert"
-    # Odmowa nie rusza wiadomości — nie ma czego przepisywać.
+    assert _srodowisko["answer"][-1] == "Już to masz"
+    # Nic się nie zmieniło — nie ma czego przepisywać.
     assert len(_srodowisko["edit"]) == ile_przepisan
     assert len(_zdarzenia(lead_id, "claim")) == 1
 
@@ -573,39 +671,47 @@ def test_klikniecie_statusu_bierze_niczyjego_leada():
     """Alerty sprzed tej zmiany mają pod sobą same statusy, bez „Biorę".
     Bez tego zostawałyby na zawsze bez właściciela."""
     lead_id = _wyslij(_zgloszenie()).json()["id"]
-    _callback(lead_id, "called", kto="Bartek")
+    _callback(lead_id, "messaged", kto="Bartek")
 
     lead = _lead(lead_id)
-    assert (lead.owner, lead.status) == ("Bartek", "called")
+    assert (lead.owner, lead.status) == ("Bartek", "messaged")
 
 
 def test_status_nie_podbiera_cudzego_leada():
+    """Przejęcie jest osobnym, świadomym kliknięciem. Odklikanie statusu pod
+    cudzą kartą to co innego niż zabranie leada i nie ma go zabierać."""
     lead_id = _wyslij(_zgloszenie()).json()["id"]
     _callback(lead_id, "claim", kto="Hubert")
-    _callback(lead_id, "no_answer", kto="Bartek")
+    _callback(lead_id, "no_reply", kto="Bartek")
 
     lead = _lead(lead_id)
-    assert lead.owner == "Hubert" and lead.status == "no_answer"
+    assert lead.owner == "Hubert" and lead.status == "no_reply"
 
 
 def test_klawiatura_pokazuje_statusy_dopiero_po_wzieciu():
     """Dwa etapy: dopóki leada nikt nie ma, jedyne sensowne kliknięcie to
-    „biorę". Statusy pod niczyim leadem nie mówią, kto dzwonił."""
+    „biorę". Statusy pod niczyim leadem nie mówią, kto pisał."""
     from app import telegram as tg
 
     przed = tg.lead_keyboard(1)
     assert len(przed["inline_keyboard"]) == 1
     assert przed["inline_keyboard"][0][0]["callback_data"] == "lead:1:claim"
 
-    po = tg.lead_keyboard(1, owner="Hubert", status="called", tier="high")
+    po = tg.lead_keyboard(1, owner="Hubert", status="messaged", tier="high")
     wiersze = po["inline_keyboard"]
-    assert len(wiersze) == 3
+    # Statusy po dwa w rzędzie, potem ocena, potem przejęcie i oddanie.
+    assert len(wiersze) == 4
+    assert [g["callback_data"] for g in wiersze[0]] == [
+        "lead:1:messaged", "lead:1:replied"]
     assert [g["callback_data"] for g in wiersze[1]] == [
+        "lead:1:no_reply", "lead:1:rejected"]
+    assert [g["callback_data"] for g in wiersze[2]] == [
         "lead:1:tier_high", "lead:1:tier_warm", "lead:1:tier_cold"]
+    assert [g["callback_data"] for g in wiersze[3]] == ["lead:1:claim", "lead:1:release"]
     # Kropka pokazuje, co jest ustawione teraz — inaczej po przepisaniu
     # wiadomości nie widać, czy status w ogóle się zapisał.
-    assert [g["text"].startswith("• ") for g in wiersze[0]] == [True, False, False]
-    assert wiersze[1][0]["text"].startswith("• ")
+    assert [g["text"].startswith("• ") for g in wiersze[0]] == [True, False]
+    assert wiersze[2][0]["text"].startswith("• ")
 
 
 def test_alert_niesie_kto_sie_zajal(_srodowisko):
