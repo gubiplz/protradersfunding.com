@@ -175,6 +175,15 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "bot_started_at": "TIMESTAMP",
         "scale_count": "INTEGER DEFAULT 0",
     },
+    # Karta leada na kanale. Tabela `leads` stoi na produkcji od pierwszego
+    # zgloszenia, wiec `create_all` ja pomija — bez tych trzech wpisow kazdy
+    # SELECT z modelu Lead pyta o kolumny, ktorych w bazie nie ma, i panel
+    # oddaje 500 na samej liscie leadow.
+    "leads": {
+        "owner": "VARCHAR(60)",
+        "owner_at": "TIMESTAMP",
+        "tg_message_id": "INTEGER",
+    },
 }
 
 
@@ -188,6 +197,9 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
 _NEW_INDEXES: list[tuple[str, str]] = [
     ("traders", "referred_by"),
     ("orders", "account_id"),
+    # Odpowiedz na kanale niesie wylacznie numer wiadomosci, wiec kazda notatka
+    # z Telegrama szuka leada po tej kolumnie.
+    ("leads", "tg_message_id"),
 ]
 
 

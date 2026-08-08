@@ -103,3 +103,45 @@ def test_indeksy_dokladaja_sie_do_istniejacej_tabeli():
             f"{nazwa} nie wrocil — stara baza zostalaby ze skanem calej tabeli"
 
     _add_missing_indexes()   # idempotencja: kazdy zimny start to powtarza
+
+
+def test_stara_baza_dostaje_kolumny_karty_leada():
+    """`create_all` NIE robi ALTER-ow, wiec kolumna dolozona do modelu nie
+    pojawia sie w tabeli, ktora juz istnieje.
+
+    Panel oddawal przez to 500 na samej liscie leadow: model pytal o `owner`,
+    `owner_at` i `tg_message_id`, a produkcyjna tabela `leads` — zalozona przy
+    pierwszym zgloszeniu z landingu — nigdy ich nie dostala. Nowa tabela
+    (`lead_reminders`) powstala normalnie, wiec z zewnatrz wygladalo to na
+    udana migracje.
+
+    Test zabiera te kolumny z gotowej tabeli i sprawdza, ze start aplikacji je
+    oddaje, a SELECT z modelu — ten, na ktorym wywracal sie panel — przechodzi.
+    """
+    from app.db import _add_missing_columns, _NEW_COLUMNS
+    from app.models import Lead
+
+    nowe = {"owner", "owner_at", "tg_message_id"}
+    assert nowe <= set(_NEW_COLUMNS.get("leads", {})), \
+        "kolumny karty leada musza byc zadeklarowane w _NEW_COLUMNS"
+
+    with engine.begin() as conn:
+        conn.execute(text("DROP INDEX IF EXISTS ix_leads_tg_message_id"))
+        for kolumna in nowe:
+            conn.execute(text(f"ALTER TABLE leads DROP COLUMN {kolumna}"))
+
+    assert not (nowe & {c["name"] for c in inspect(engine).get_columns("leads")}), \
+        "test nie mierzy niczego, jesli kolumny zostaly w tabeli"
+
+    init_db()
+
+    maja = {c["name"] for c in inspect(engine).get_columns("leads")}
+    assert nowe <= maja, f"init_db nie oddal kolumn karty leada: {nowe - maja}"
+
+    s = SessionLocal()
+    try:
+        s.query(Lead).all()
+    finally:
+        s.close()
+
+    _add_missing_columns()   # idempotencja: kazdy zimny start to powtarza
