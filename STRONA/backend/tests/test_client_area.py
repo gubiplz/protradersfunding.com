@@ -1343,7 +1343,12 @@ def test_klasa_flagi_nie_zderza_sie_z_etykieta_pliku_w_kyc():
     html = zrodlo_portalu()
     pcss = (baza / "static" / "css" / "portal.css").read_text()
     fcss = (baza / "static" / "css" / "flags.css").read_text()
-    gen = (baza.parent / "scripts" / "gen_countries.py").read_text()
+
+    # Był tu jeszcze warunek na scripts/gen_countries.py — generator flags.css
+    # miał emitować te same nazwy klas. Tego pliku nie ma w repozytorium i nigdy
+    # nie było, więc read_text() wywracał CAŁY test i żadne ze sprawdzeń poniżej
+    # się nie wykonywało: kolizja, przed którą to miało bronić, wróciłaby
+    # niezauważona. Jeśli generator kiedyś tu trafi, warunek wraca razem z nim.
 
     # zadnej dwuliterowej reguly globalnej
     assert "\n.fl{" not in pcss and "\n.fl{" not in fcss, "globalne `.fl` znow istnieje"
@@ -1355,9 +1360,6 @@ def test_klasa_flagi_nie_zderza_sie_z_etykieta_pliku_w_kyc():
     assert '<span class="flag flag-${c.i.toLowerCase()}"></span>' in html
     assert "\n.flag{" in pcss and "\n.flag{" in fcss
     assert fcss.count("\n.flag-") >= 200, "flagi krajow musza byc w pliku"
-
-    # generator ma emitowac to samo, inaczej nastepne odswiezenie cofnie zmiane
-    assert ".flag-{iso2.lower()}" in gen and '".flag{width:20px' in gen
 
     # etykieta w KYC dalej ma swoja klase i swoje reguly
     assert '<div class="file-row"><div class="fl">' in html
