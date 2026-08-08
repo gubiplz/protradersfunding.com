@@ -250,3 +250,24 @@ def test_pusty_admin_token_wylacza_tor_tokenowy(monkeypatch):
     monkeypatch.setattr(get_settings(), "admin_token", "")
     assert client.get("/api/accounts", headers={"X-Admin-Token": ""}).status_code == 403
     assert client.get("/api/accounts", headers={"X-Admin-Token": "admin"}).status_code == 403
+
+
+def test_pwa_admina_dostaje_goly_shell_a_reszta_dalej_404():
+    """Zainstalowana PWA startuje z /admin?pwa=1 w pustym slojiku ciasteczek
+    (iOS) — bez tej furtki zimny start to martwy 404 bez paska adresu. Furtka
+    oddaje wylacznie niewidoczny szkielet, ktory sam odbija na logowanie;
+    /admin bez parametru zostaje niebytem jak dotad."""
+    # Swiezy klient: wspolny `client` nosi ciasteczko sesji admina z testow
+    # wyzej, a tu sprawdzamy dokladnie przypadek BEZ sesji.
+    goly = TestClient(app)
+    assert goly.get("/admin").status_code == 404
+    odp = goly.get("/admin?pwa=1")
+    assert odp.status_code == 200
+    assert 'visibility:hidden' in odp.text          # shell renderuje sie slepy
+    assert 'manifest-admin.json' in odp.text        # panel jest instalowalny
+    # Wspolny service worker rozroznia aplikacje po URL-u payloadu i trzyma
+    # osobny klucz deep-linkow admina.
+    sw = goly.get("/sw.js").text
+    assert "/__pending-nav-admin" in sw and "startsWith('/admin')" in sw
+    manifest = goly.get("/static/manifest-admin.json").json()
+    assert manifest["scope"] == "/admin" and manifest["start_url"] == "/admin?pwa=1"

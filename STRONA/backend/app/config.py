@@ -254,6 +254,12 @@ class Settings:
     # nie zużywały dziennego guardu recapu.
     recap_on_traffic: bool = os.getenv("RECAP_ON_TRAFFIC", "true").lower() == "true"
 
+    # Follow-upy leadów jeżdżą na tym samym ruchu (guard w app_settings ogranicza
+    # przebieg do raz na ~10 minut) — cron Hobby chodzi raz na dobę, a „nikt nie
+    # wziął leada od 30 minut" o 15:00 następnego dnia nikogo już nie ratuje.
+    # Wyłącznik awaryjny jak wyżej; testy ustawiają false z tego samego powodu.
+    leads_on_traffic: bool = os.getenv("LEADS_ON_TRAFFIC", "true").lower() == "true"
+
     @property
     def telegram_enabled(self) -> bool:
         # TELEGRAM_ENABLED=false to awaryjny wylacznik — normalnie o wszystkim

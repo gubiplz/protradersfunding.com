@@ -7,10 +7,20 @@
   <meta name="robots" content="noindex">
   <meta name="theme-color" content="#f6f7fb">
   <link rel="icon" href="/static/img/favicon.png" type="image/png">
+  <!-- Osobna PWA od portalu (scope /admin, wlasne id): dzial instaluje panel
+       na telefonie i dopiero taka instalacja moze na iOS dostawac web push
+       o leadach. Ten sam /sw.js co portal — payload URL decyduje, ktora
+       aplikacje klik w powiadomienie ma otworzyc. -->
+  <link rel="manifest" href="/static/manifest-admin.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="PTF Admin">
+  <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png">
   <script>/* Pre-paint theme pick (shared pf_theme2 key with the trader portal; light default —
      the key was bumped from pf_theme to reset everyone back to white once). */
   try{if(localStorage.getItem('pf_theme2')==='dark'){document.documentElement.dataset.theme='dark';
-  document.querySelector('meta[name="theme-color"]').setAttribute('content','#0b0d12')}}catch(e){}</script>
+  document.querySelector('meta[name="theme-color"]').setAttribute('content','#0b0d12')}}catch(e){}
+  if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('/sw.js'))</script>
   <link rel="stylesheet" href="/static/css/portal.css?v={{ asset_v }}">
   <link rel="stylesheet" href="/static/css/admin.css?v={{ asset_v }}">
   <script src="/static/lib/chart.umd.min.js"></script>

@@ -4647,6 +4647,11 @@ async def _lazy_tick_middleware(request: Request, call_next):
         # wejść. Przed 06:00 to czysty test zegara — zero zapytań do bazy.
         if settings.recap_on_traffic:
             await run_in_threadpool(push.daily_recap)
+        # Follow-upy leadów na tym samym ruchu: przypomnienia z terminem i nudge
+        # „nikt nie wziął od 30 minut" liczą się w minutach, a cron Hobby chodzi
+        # raz na dobę. Guard raz-na-LEADS_SWEEP_MIN siedzi w _lead_sweep_z_ruchu.
+        if settings.leads_on_traffic:
+            await run_in_threadpool(_lead_sweep_z_ruchu)
     return await call_next(request)
 
 
@@ -5252,6 +5257,17 @@ def _zapisz_status(session, lead: Lead, status: str, actor: str) -> None:
     _zdarzenie(session, lead.id, "status", f"{poprzedni} → {status}", actor)
 
 
+def _lead_push(lead_id: int, title: str, body: str = "") -> None:
+    """Web push + dzwonek panelu do wszystkich adminów o TYM leadzie.
+
+    Deep-link prowadzi prosto w kartę leada (panel czyta `?lead=` przy
+    starcie), a tag skleja serię zdarzeń jednego leada w jedno powiadomienie
+    na ekranie telefonu. notify_admins nigdy nie rzuca, a w trakcie requestu
+    odkłada wysyłkę na po odpowiedzi — wolno to wołać zewsząd."""
+    notify.notify_admins("lead", title, body,
+                         url=f"/admin?lead={lead_id}", tag=f"lead-{lead_id}")
+
+
 @app.post("/api/leads/ingest")
 def leads_ingest(payload: LeadIn,
                  x_lead_token: str | None = Header(default=None)):
@@ -5280,8 +5296,20 @@ def leads_ingest(payload: LeadIn,
             lead.applications = (lead.applications or 1) + 1
 
         lead.name = (payload.name or "")[:120]
-        lead.phone = (payload.phone or None)
-        lead.phone_iso = (payload.phoneIso or None)
+        # Telefon w E.164 bez spacji, a ISO uzupełnione/poprawione z prefiksu.
+        # Landing przysyła „+48 601 234 567" i osobno ISO zgadnięte ze strefy
+        # czasowej urządzenia — gdy się kłócą, prawdę mówi prefiks, bo to jego
+        # ktoś wybierze numerem. Numer bez prefiksu zostaje jak przyszedł:
+        # nie zgadujemy kraju, którego numer sam nie deklaruje.
+        telefon = (payload.phone or "").strip()
+        cyfry_tel = "".join(c for c in telefon if c.isdigit())
+        if telefon.startswith("+") or cyfry_tel.startswith("00"):
+            lead.phone = ("+" + (cyfry_tel[2:] if cyfry_tel.startswith("00")
+                                 else cyfry_tel))[:40]
+        else:
+            lead.phone = telefon[:40] or None
+        iso_landing = (payload.phoneIso or "").strip().upper()[:2] or None
+        lead.phone_iso = countries.iso_from_e164(telefon) or iso_landing
         lead.telegram = (payload.telegram or None)
         lead.country = (payload.country or None)
         lead.source = (payload.source or "")[:40]
@@ -5307,11 +5335,23 @@ def leads_ingest(payload: LeadIn,
 
         session.commit()
         lead_id, tekst = lead.id, _tekst_alertu(lead, dane)
+        # Atrybuty do pusha czytane PRZED close(): potem instancja jest odpięta.
+        kto = lead.name or lead.email
+        if lead.outcome == "not_qualified":
+            opis = "safe page lead — warm up" if lead.source == "safe" \
+                else "failed the questionnaire"
+        else:
+            opis = f"{lead.tier or '—'} {lead.score or 0}/9 · {lead.source or '—'}"
+        if lead.applications and lead.applications > 1:
+            opis += f" · applied {lead.applications}×"
     finally:
         session.close()
 
     # Po commicie i best-effort: lead jest już zapisany, więc padnięty Telegram
     # nie ma prawa zwrócić landingowi błędu i kazać człowiekowi klikać drugi raz.
+    # Push do adminów tak samo — telefon działu ma zabrzęczeć, ale landing nie
+    # może czekać na push service ani oglądać jego błędów.
+    _lead_push(lead_id, f"New lead: {kto}", opis)
     _, _, message_id = telegram.send_lead_alert(lead_id, tekst)
     if message_id:
         # Osobny, króciutki zapis po wysyłce. Nie da się tego zrobić w tamtej
@@ -5461,10 +5501,17 @@ def admin_lead_update(lead_id: int, payload: LeadStatusIn):
         lead = session.get(Lead, lead_id)
         if not lead:
             raise HTTPException(404, "Lead not found")
+        # Push idzie tylko o statusie i właścicielu — to jest „co robimy z tym
+        # leadem". Notatka i ocena zmieniają się przy pisaniu na bieżąco i jako
+        # push byłyby szumem, który uczy ignorować powiadomienia.
+        zmiany: list[str] = []
         if payload.status is not None:
+            przed = lead.status
             # actor „panel", bez nazwiska: do panelu wchodzi się stałym tokenem
             # (auth.require_admin), więc nie ma tu tożsamości do zapisania.
             _zapisz_status(session, lead, payload.status, actor="panel")
+            if lead.status != przed:
+                zmiany.append(f"marked {lead.status}")
         if payload.note is not None:
             nowa = payload.note[:4000] or None
             if nowa != lead.note:
@@ -5479,6 +5526,7 @@ def admin_lead_update(lead_id: int, payload: LeadStatusIn):
                 lead.updated_at = datetime.now(timezone.utc)
                 _zdarzenie(session, lead.id, "claim",
                            f"taken by {nowy}" if nowy else "released", actor="panel")
+                zmiany.append(f"taken by {nowy}" if nowy else "released")
         if payload.tier is not None:
             if payload.tier not in ("high", "warm", "cold"):
                 raise HTTPException(400, f"Unknown tier: {payload.tier}")
@@ -5488,11 +5536,15 @@ def admin_lead_update(lead_id: int, payload: LeadStatusIn):
                 lead.tier = payload.tier
                 lead.updated_at = datetime.now(timezone.utc)
         session.commit()
-        return {"id": lead.id, "status": lead.status, "note": lead.note,
-                "owner": lead.owner, "tier": lead.tier,
-                "contacted_at": lead.contacted_at.isoformat() if lead.contacted_at else None}
+        kto = lead.name or lead.email
+        wynik = {"id": lead.id, "status": lead.status, "note": lead.note,
+                 "owner": lead.owner, "tier": lead.tier,
+                 "contacted_at": lead.contacted_at.isoformat() if lead.contacted_at else None}
     finally:
         session.close()
+    if zmiany:
+        _lead_push(lead_id, f"Panel: {', '.join(zmiany)}", kto)
+    return wynik
 
 
 @app.delete("/api/admin/leads/{lead_id}", dependencies=[Depends(auth.require_admin)])
@@ -5705,6 +5757,7 @@ def _telegram_przycisk(cb: dict) -> dict:
         if zmiana:
             session.commit()
         tekst, klawiatura = _stan_wiadomosci(lead)
+        lead_id, kogo = lead.id, (lead.name or lead.email)
     finally:
         session.close()
 
@@ -5715,6 +5768,13 @@ def _telegram_przycisk(cb: dict) -> dict:
     czat = str((wiadomosc.get("chat") or {}).get("id") or "")
     if czat and wiadomosc.get("message_id"):
         telegram.edit_lead_message(czat, wiadomosc["message_id"], tekst, keyboard=klawiatura)
+    # Reszta zespołu dowiaduje się z telefonu, kto co zrobił z leadem. Klikający
+    # też to dostanie (imię z Telegrama nie mapuje się na konto w panelu, więc
+    # nie ma go jak wykluczyć) — tag `lead-<id>` skleja to w jedno powiadomienie.
+    opisy = {"claim": "took the lead", "release": "released the lead"}
+    opis = opisy.get(akcja) or (f"grade → {akcja[len('tier_'):]}"
+                                if akcja.startswith("tier_") else f"marked {akcja}")
+    _lead_push(lead_id, f"{kto}: {opis}", kogo)
     return {"ok": True}
 
 
@@ -5786,7 +5846,7 @@ def _telegram_notatka(wiadomosc: dict) -> dict:
 # Deduplikacja przez BRAK zdarzenia `reminder` z danym powodem — bez nowych
 # kolumn-znaczników i przy okazji widoczna w historii leada („przypomniano").
 
-LEAD_REMINDERS = ("no_contact", "bought", "stalled")
+LEAD_REMINDERS = ("no_contact", "bought", "stalled", "unclaimed")
 
 # Co ile dni dopominać się o kontakt z kimś, kto już kupił challenge. Cykl,
 # nie jednorazówka: człowiek z opłaconym kontem jest w połowie drogi do drugiego
@@ -5856,7 +5916,7 @@ def cron_lead_followups(no_contact_days: int = 3, stalled_days: int = 7):
     return _lead_followups(no_contact_days, stalled_days)
 
 
-def _wyslij_zaplanowane(session, now: datetime) -> list[str]:
+def _wyslij_zaplanowane(session, now: datetime) -> tuple[list[str], list[tuple[int, str, str]]]:
     """Przypomnienia z terminem, który już minął: ustawione ręcznie w panelu
     i cykle założone po zakupie.
 
@@ -5864,11 +5924,16 @@ def _wyslij_zaplanowane(session, now: datetime) -> list[str]:
     dopóki ktoś ich nie wyłączy w panelu. Jednorazowe zamykają się same, żeby
     nie trzeba było po nich sprzątać.
 
+    Zwraca dwie listy: teksty na czat działu i pushe `(lead_id, tytuł, treść)`
+    na telefony adminów — push jest czystym tekstem, bo HTML z Telegrama
+    wyświetliłby się w notyfikacji dosłownie, ze znacznikami.
+
     Filtr terminu jest po stronie Pythona, a nie w zapytaniu: SQLite oddaje daty
     bez strefy, więc porównanie kolumny z `now` ze strefą potrafi w tej samej
     bazie zwrócić coś innego niż w Postgresie.
     """
     teksty: list[str] = []
+    pushy: list[tuple[int, str, str]] = []
     for r in session.query(LeadReminder).filter(LeadReminder.active.is_(True)).all():
         if (_utc(r.due_at) or now) > now:
             continue
@@ -5877,6 +5942,7 @@ def _wyslij_zaplanowane(session, now: datetime) -> list[str]:
             r.active = False
             continue
         teksty.append(_tekst_zaplanowanego(lead, r))
+        pushy.append((lead.id, f"Reminder: {r.text[:80]}", lead.name or lead.email))
         r.sent_count = (r.sent_count or 0) + 1
         r.last_sent_at = now
         _zdarzenie(session, lead.id, "reminder", f"planned: {r.text}"[:200], actor="cron")
@@ -5884,7 +5950,7 @@ def _wyslij_zaplanowane(session, now: datetime) -> list[str]:
             r.due_at = now + timedelta(days=r.repeat_days)
         else:
             r.active = False
-    return teksty
+    return teksty, pushy
 
 
 def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
@@ -5906,7 +5972,7 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
     now = datetime.now(timezone.utc)
     session = SessionLocal()
     try:
-        do_wyslania: list[str] = _wyslij_zaplanowane(session, now)
+        do_wyslania, pushy = _wyslij_zaplanowane(session, now)
         leady = session.query(Lead).all()
 
         maile = [l.email for l in leady]
@@ -5928,6 +5994,17 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
             paid = float(zaplacone.get(traderzy.get(l.email), 0) or 0)
             wiek = (now - (_utc(l.created_at) or now)).days
             od_kontaktu = (now - (_utc(l.contacted_at) or now)).days
+            # Nudge „nikt nie wziął" — OSOBNO od łańcucha powodów niżej, bo
+            # tamten myśli w dniach i wybiera jeden powód, a ten w minutach
+            # i ma prawo zbiec się z każdym z nich. Sam push, bez wpisu na
+            # czacie: karta leada i tak wisi na kanale, brzęczeć ma telefon.
+            # Dedup tym samym zdarzeniem `reminder`, więc raz na lead.
+            wiek_min = (now - (_utc(l.created_at) or now)).total_seconds() / 60
+            if (l.owner is None and l.status == "new" and paid == 0
+                    and l.outcome != "not_qualified"
+                    and wiek_min >= 30 and (l.id, "unclaimed") not in juz):
+                _zdarzenie(session, l.id, "reminder", "unclaimed", actor="cron")
+                pushy.append((l.id, "Unclaimed lead (30 min+)", l.name or l.email))
             if paid > 0:
                 powod, dni = "bought", wiek
             elif l.status == "new" and wiek >= no_contact_days:
@@ -5943,6 +6020,12 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
                 continue
             _zdarzenie(session, l.id, "reminder", powod, actor="cron")
             do_wyslania.append(_tekst_przypomnienia(l, powod, paid, dni))
+            tytul = {
+                "bought": f"{l.name or l.email} bought — ${paid:,.0f}",
+                "no_contact": f"No contact yet: {l.name or l.email} ({dni}d)",
+                "stalled": f"Stalled: {l.name or l.email} ({dni}d quiet)",
+            }[powod]
+            pushy.append((l.id, tytul, l.email))
             if powod == "bought":
                 # Jednorazowe „ten człowiek kupił" załatwia moment, w którym
                 # trzeba przestać dzwonić jak do leada. Ale klient z opłaconym
@@ -5963,7 +6046,50 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
 
     for tekst in do_wyslania:
         telegram.send_lead_message(tekst)
-    return {"sent": len(do_wyslania), "checked": len(leady)}
+    # Po commicie, jak wysyłka na czat: padnięty push service nie cofnie zapisu,
+    # a dedup wyżej gwarantuje, że kolejny przebieg nie wyśle tego drugi raz.
+    for lead_id, tytul, tresc in pushy:
+        _lead_push(lead_id, tytul, tresc)
+    return {"sent": len(do_wyslania), "checked": len(leady), "pushed": len(pushy)}
+
+
+# Ruch strony przebiega follow-upy najwyżej co tyle minut. Wartość z sufitu
+# świadomie: częściej = szybszy nudge „nikt nie wziął", ale każdy przebieg to
+# pełny przegląd tabeli leadów.
+LEADS_SWEEP_MIN = 10
+
+
+def _lead_sweep_z_ruchu() -> None:
+    """Przebieg follow-upów z ruchu strony — cron Hobby chodzi raz na dobę,
+    a przypomnienie ustawione „za 2 dni o czasie" i nudge liczony w minutach
+    potrzebują czegoś częstszego niż doba.
+
+    Guard jak w payout bocie: jeden odczyt app_settings na request, realny
+    przebieg kilka razy dziennie. Znacznik commitowany PRZED robotą, żeby dwa
+    równoległe requesty nie zrobiły dwóch przebiegów. NIGDY nie rzuca —
+    odpowiedź dla klienta jest ważniejsza niż przypomnienie."""
+    try:
+        now = datetime.now(timezone.utc)
+        session = SessionLocal()
+        try:
+            row = session.get(AppSetting, "leadbot_last_sweep")
+            if row and row.value:
+                try:
+                    ostatni = _utc(datetime.fromisoformat(row.value))
+                    if ostatni and (now - ostatni).total_seconds() < LEADS_SWEEP_MIN * 60:
+                        return
+                except ValueError:
+                    pass
+            if row is None:
+                row = AppSetting(key="leadbot_last_sweep", value="")
+                session.add(row)
+            row.value = now.isoformat()
+            session.commit()
+        finally:
+            session.close()
+        _lead_followups()
+    except Exception as e:  # pragma: no cover
+        print(f"[leadbot] sweep z ruchu: {e}")
 
 
 # --------------------------------------------------------------------------- #
@@ -6321,8 +6447,18 @@ def dashboard(request: Request):
     potwierdzalaby, ze pod tym adresem cos jest. Przy 404 osoba bez sesji
     administratora nie dowie sie nawet, ze panel istnieje, ani jak wyglada jego
     nawigacja.
+
+    Wyjatek `?pwa=1`: zainstalowana na telefonie PWA admina startuje z
+    `/admin?pwa=1` (manifest-admin.json), a na iOS instalacja ma WLASNY,
+    pusty slojik ciasteczek — zimny start bez tej furtki to martwy ekran 404
+    bez paska adresu. Furtka oddaje wylacznie goly szkielet: renderuje sie
+    niewidoczny (`visibility:hidden`) i admin-panel.js bez waznego tokenu
+    natychmiast odbija na /portal?next=/admin. Struktura panelu i tak jest
+    jawna w /static/js/admin-panel.js, wiec 404 chroni fakt istnienia adresu,
+    nie tresc — a adres z `?pwa=1` zna tylko ten, kto zna panel.
     """
-    if _admin_z_ciasteczka(request) is None:
+    if _admin_z_ciasteczka(request) is None \
+            and request.query_params.get("pwa") != "1":
         raise HTTPException(404, "Not Found")
     # Render przez Jinja (nie FileResponse), żeby nazwa marki szła z SITE_NAME
     # zamiast być wpisana na sztywno w dwóch dodatkowych miejscach.

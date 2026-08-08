@@ -780,6 +780,51 @@ const leadLabel=s=>(LEAD_STATUSES.find(([k])=>k===s)||[,s])[1];
    free-text answers would push the rest of the row off the screen. */
 const leadAnswers=a=>Object.entries(a||{}).map(([q,v])=>`${q} → ${v}`).join('\n');
 
+/* ---------- click-to-message ----------
+   The desk writes the same first message every time, so it lives here once.
+   t.me by phone number cannot prefill a draft, which is why every phone action
+   ALSO drops the opener on the clipboard; t.me by handle and WhatsApp prefill
+   it themselves. Edit the text below to change what the team opens with. */
+const leadOpener=l=>{const first=(l.name||'').trim().split(/\s+/)[0]||'there';
+  return `Hey ${first}, this is the Forex Passing desk — your application just landed with me. `
+    +`Ready to walk you through the next step when you are.`};
+function copyOpener(id){
+  const l=(window._leads||[]).find(x=>x.id===id)
+    ||(window._leadOpen&&window._leadOpen.id===id?window._leadOpen:null);
+  if(!l)return;
+  const txt=leadOpener(l);
+  (navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject())
+    .then(()=>toast('Opener copied — paste it in the chat'))
+    .catch(()=>{prompt('Copy the opener:',txt)});
+}
+/* Same shape the landing validates against. A handle that fails it ("gubi
+   please") renders as plain text: a dead t.me link looks like contact and
+   is not, and the desk should see the typo, not chase it. */
+const TG_HANDLE_RE=/^@?[A-Za-z][A-Za-z0-9_]{4,31}$/;
+function leadTgLink(l){
+  const h=String(l.telegram||'').replace(/^@/,'');
+  if(!h)return'';
+  return TG_HANDLE_RE.test(h)
+    ?`<a href="https://t.me/${esc(h)}?text=${encodeURIComponent(leadOpener(l))}" target="_blank" rel="noopener">@${esc(h)}</a>`
+    :`<span class="muted" title="Not a valid Telegram handle — ask for the right one">${esc(l.telegram)}</span>`;
+}
+/* TG/WA need the full international number, so they only show when the stored
+   phone declares one (E.164 with +). SMS and Copy work with anything. */
+function leadPhoneActs(l){
+  if(!l.phone)return'';
+  const digits=String(l.phone).replace(/\D/g,'');
+  const intl=String(l.phone).trim().startsWith('+')&&digits.length>=8;
+  const opener=encodeURIComponent(leadOpener(l));
+  return `<span class="lead-acts">${intl
+    ?`<a class="act-btn" title="Open a Telegram chat with this number (opener goes to the clipboard)"
+        href="https://t.me/+${digits}" target="_blank" rel="noopener" onclick="copyOpener(${l.id})">TG</a>
+      <a class="act-btn" title="WhatsApp with the opener prefilled"
+        href="https://wa.me/${digits}?text=${opener}" target="_blank" rel="noopener">WA</a>`:''}
+    <a class="act-btn" title="Text message with the opener prefilled"
+      href="sms:${intl?'+'+digits:esc(l.phone)}?&body=${opener}">SMS</a>
+    <button class="act-btn" type="button" title="Copy the opener" onclick="copyOpener(${l.id})">Copy</button></span>`;
+}
+
 function renderLeads(){
   const list=window._leads||[];
   const q=(window._leadQ||'').toLowerCase();
@@ -834,10 +879,12 @@ function renderLeads(){
           ${l.owner?`<div style="font-size:11px" title="Taken by">👤 ${esc(l.owner)}</div>`
             :'<div class="muted" style="font-size:11px">nobody took it</div>'}
           ${l.applications>1?`<div class="muted" style="font-size:11px" title="Filled the form more than once">↻ applied ${l.applications}×</div>`:''}
-          ${l.outcome==='not_qualified'?'<div class="muted" style="font-size:11px">failed the questionnaire</div>':''}</td>
-        <td data-l="Contact"><a href="mailto:${esc(l.email)}">${esc(l.email)}</a>
-          ${l.telegram?`<div><a href="https://t.me/${esc((l.telegram||'').replace(/^@/,''))}" target="_blank" rel="noopener">${esc(l.telegram)}</a></div>`:''}
-          ${l.phone?`<div class="muted" style="font-size:11px"><a href="tel:${esc(l.phone)}">${esc(l.phone)}</a>${l.phone_iso?` ${esc(l.phone_iso)}`:''}</div>`:''}</td>
+          ${l.outcome==='not_qualified'?`<div class="muted" style="font-size:11px">${
+            l.source==='safe'?'safe page lead — warm up':'failed the questionnaire'}</div>`:''}</td>
+        <td data-l="Contact" onclick="event.stopPropagation()"><a href="mailto:${esc(l.email)}">${esc(l.email)}</a>
+          ${l.telegram?`<div>${leadTgLink(l)}</div>`:''}
+          ${l.phone?`<div class="muted lead-ph"><a href="tel:${esc(l.phone)}">${esc(l.phone)}</a>${
+            l.phone_iso?` ${esc(l.phone_iso)}`:''} ${leadPhoneActs(l)}</div>`:''}</td>
         <td data-l="Grade" data-sort="${l.score||0}" title="${esc(leadAnswers(l.answers))}">${l.tier?`<span class="status ${l.tier==='high'?'paid':l.tier==='warm'?'pending':'failed'}"><span class="dot"></span>${esc(l.tier)} ${l.score}</span>`:'<span class="muted">—</span>'}</td>
         <td class="muted" data-l="Source">${esc(l.source||'—')}${l.ref?`<div style="font-size:11px">via ${esc(l.ref)}</div>`:''}</td>
         <td data-l="Status" onclick="event.stopPropagation()"><select class="inp sm st-${esc(l.status)}" style="min-width:116px" onchange="setLeadStatus(${l.id},this.value)">${
@@ -1082,6 +1129,9 @@ async function openLead(id){
   const row=(window._leads||[]).find(x=>x.id===id);
   if(row)Object.assign(row,{owner:l.owner,tier:l.tier,status:l.status,note:l.note,
     next_due:l.next_due,contacted_at:l.contacted_at});
+  /* copyOpener sięga tu, gdy wiersza nie ma w liście (deep-link z pusha,
+     zanim tabela się dociągnie). */
+  window._leadOpen=l;
   const ev=l.events||[],ords=l.orders||[];
   openOver(l.name||l.email,`
     <div class="chip-row">
@@ -1089,15 +1139,19 @@ async function openLead(id){
       ${l.tier?`<span class="chip">${esc(l.tier)} ${l.score}</span>`:''}
       ${l.paid_usd>0?`<span class="status paid"><span class="dot"></span>paid $${fmt0(l.paid_usd)}</span>`:''}
       ${l.applications>1?`<span class="chip">applied ${l.applications}×</span>`:''}
-      ${l.outcome==='not_qualified'?'<span class="chip">failed the questionnaire</span>':''}
+      ${l.outcome==='not_qualified'?`<span class="chip">${l.source==='safe'?'safe page lead':'failed the questionnaire'}</span>`:''}
     </div>
     <div class="chip-row">
-      ${l.telegram?`<span class="chip"><a href="https://t.me/${esc((l.telegram||'').replace(/^@/,''))}" target="_blank" rel="noopener">${esc(l.telegram)}</a></span>`:''}
+      ${l.telegram?`<span class="chip">${leadTgLink(l)}</span>`:''}
       <span class="chip"><a href="mailto:${esc(l.email)}">${esc(l.email)}</a></span>
       ${l.phone?`<span class="chip"><a href="tel:${esc(l.phone)}">${esc(l.phone)}</a></span>`:''}
       ${l.country?`<span class="chip">${esc(l.country)}</span>`:''}
       ${l.source?`<span class="chip">${esc(l.source)}${l.ref?' via '+esc(l.ref):''}</span>`:''}
     </div>
+    ${l.phone||l.telegram?`<div class="chip-row" style="margin-top:2px">${leadPhoneActs(l)}</div>`:''}
+    ${Object.keys(l.answers||{}).length?`<div class="lead-card sec-card"><h4>Answers</h4>
+      ${Object.entries(l.answers).map(([q,v])=>`<div class="note-line"><span class="muted">${esc(q)}</span><br><b>${esc(v)}</b></div>`).join('')}
+      <p class="muted" style="font-size:11.5px;margin-top:8px">From the latest application — earlier ones sit in the history below.</p></div>`:''}
     ${leadModCard(l)}
     ${leadReminderCard(l)}
     ${l.note?`<div class="lead-card sec-card"><h4>Notes</h4>
@@ -2426,17 +2480,111 @@ async function loadInbox(){
 function openInbox(){
   const seen=localStorage.getItem('pf_admin_inbox_seen')||'';
   const TYPE_ICO={order:'file',kyc:'shield',payout:'wallet',ticket:'chat'};
-  openOver('Notifications',INBOX.length?`<div class="tbl-wrap">`+INBOX.map(i=>`
+  openOver('Notifications',pushCardHtml()+(INBOX.length?`<div class="tbl-wrap">`+INBOX.map(i=>`
     <div class="ticket-row" onclick="closeOver();go('${esc(i.view)}')">
       <div class="tile-ic ${i.ts>seen?'orange':'blue'}" style="width:36px;height:36px;flex:0 0 36px">${ICO[TYPE_ICO[i.type]]||ICO.file}</div>
       <div class="sub"><b>${esc(i.title)}</b>
         <span>${esc(i.body||'')} · ${dstr(i.ts)}</span></div>
       ${i.ts>seen?'<span class="status pending"><span class="dot"></span>new</span>':''}
     </div>`).join('')+`</div>`
-    :'<div class="empty"><h3>Nothing new</h3><p>New orders, KYC submissions, payout requests and ticket messages show up here.</p></div>');
+    :'<div class="empty"><h3>Nothing new</h3><p>New orders, KYC submissions, payout requests and ticket messages show up here.</p></div>'));
+  paintPushCard();
   localStorage.setItem('pf_admin_inbox_seen',new Date().toISOString());
   loadInbox();
 }
+
+/* ---------- web push na telefon działu ----------
+   Ta sama infrastruktura co w portalu tradera (/api/push/*, wspólny /sw.js):
+   konto admina to Trader z is_admin, więc subskrypcja idzie tym samym
+   endpointem. Na iOS push działa wyłącznie w PWA z ekranu głównego —
+   stąd podpowiedź o instalacji zamiast martwego przycisku. */
+const b64ToU8=b64=>{const p='='.repeat((4-b64.length%4)%4);
+  const raw=atob((b64+p).replace(/-/g,'+').replace(/_/g,'/'));
+  return Uint8Array.from(raw,c=>c.charCodeAt(0))};
+function pushCardHtml(){
+  const ios=/iPhone|iPad|iPod/.test(navigator.userAgent);
+  const ok='serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window;
+  if(!ok)return `<div class="lead-card sec-card" style="margin-bottom:12px"><div class="mod-row">
+    <div><div class="lbl">Push to this device</div><div class="muted" style="font-size:11.5px">${
+      ios?'Install the panel first: open /admin in Safari → Share → Add to Home Screen, then come back here.'
+         :'This browser does not support web push.'}</div></div></div></div>`;
+  return `<div class="lead-card sec-card" style="margin-bottom:12px"><div class="mod-row">
+    <div><div class="lbl">Push to this device</div>
+      <div class="muted" style="font-size:11.5px" id="push-state">New leads, claims and follow-ups — straight to this device.</div></div>
+    <button class="btn-p" id="push-btn" onclick="toggleAdminPush()">Enable</button>
+  </div></div>`;
+}
+async function paintPushCard(){
+  const btn=$('push-btn'),st=$('push-state');
+  if(!btn)return;
+  try{
+    let cfg;try{cfg=await api('/api/push/public-key')}catch(_){cfg={enabled:false}}
+    if(!cfg.enabled){st.textContent='Push is not configured on the server.';btn.style.display='none';return}
+    window._pushKey=cfg.key;
+    if(Notification.permission==='denied'){
+      st.textContent='Notifications are blocked for this site in the browser settings.';
+      btn.style.display='none';return}
+    const reg=await navigator.serviceWorker.ready;
+    const sub=await reg.pushManager.getSubscription();
+    if(sub){st.textContent='Enabled on this device.';btn.textContent='Disable'}
+    else btn.textContent='Enable';
+  }catch(_){}
+}
+async function toggleAdminPush(){
+  const btn=$('push-btn');if(btn)btn.disabled=true;
+  try{
+    const reg=await navigator.serviceWorker.ready;
+    let sub=await reg.pushManager.getSubscription();
+    if(sub){
+      await api('/api/me/push/unsubscribe',{method:'POST',body:JSON.stringify({endpoint:sub.endpoint})});
+      await sub.unsubscribe();
+      toast('Push disabled on this device.');
+    }else{
+      const perm=await Notification.requestPermission();
+      if(perm!=='granted'){toast('Notifications were not allowed.','err');return}
+      sub=await reg.pushManager.subscribe({userVisibleOnly:true,
+        applicationServerKey:b64ToU8(window._pushKey)});
+      await api('/api/me/push/subscribe',{method:'POST',body:JSON.stringify(sub.toJSON())});
+      toast('🔔 Push enabled on this device.','ok');
+    }
+  }catch(e){toast('Push setup failed: '+e.message,'err')}
+  finally{if(btn)btn.disabled=false;paintPushCard()}
+}
+
+/* ---------- deep-link z powiadomienia ----------
+   Push niesie url `/admin?lead=<id>`. Trzy drogi, którymi może przyjść:
+   zimny start (parametr w adresie — boot niżej), klik przy otwartym panelu
+   (postMessage z sw.js) i powrót uśpionej PWA na iOS, gdzie postMessage
+   przepada — stąd wpis w Cache Storage czytany przy każdym powrocie.
+   Osobny klucz od portalu, żeby na wspólnym profilu desktop żadna z aplikacji
+   nie zjadała cudzych kliknięć. */
+function openLeadFromUrl(url){
+  let lead=null;
+  try{lead=new URL(url,location.origin).searchParams.get('lead')}catch(_){}
+  if(!lead||!ME)return;
+  go('leads');openLead(+lead);
+}
+async function applyPendingLead(){
+  try{
+    const c=await caches.open('pf-nav');const r=await c.match('/__pending-nav-admin');
+    if(!r)return;
+    const d=await r.json();await c.delete('/__pending-nav-admin');
+    if(Date.now()-d.ts<30000)openLeadFromUrl(d.url);
+  }catch(_){}
+}
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.addEventListener('message',e=>{
+    const d=e.data||{};
+    if(d.type!=='navigate')return;
+    try{caches.open('pf-nav').then(c=>c.delete('/__pending-nav-admin'))}catch(_){}
+    openLeadFromUrl(d.url);
+  });
+  navigator.serviceWorker.startMessages?.();
+}
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState!=='visible')return;
+  applyPendingLead();setTimeout(applyPendingLead,600); /* zapis SW bywa jeszcze w locie */
+});
 
 /* ---------- start + auto-refresh ---------- */
 if(localStorage.getItem('pf_admin_collapsed')==='1')$('side').classList.add('collapsed');
@@ -2447,7 +2595,14 @@ if(localStorage.getItem('pf_admin_collapsed')==='1')$('side').classList.add('col
     if(!m.is_admin)return signInForm();
     ME=m; $('tok-state').textContent=m.email;
     $('app-shell').style.visibility='visible';   // only now reveal the panel
-    go('overview');
+    /* Deep-link z pusha (zimny start): /admin?lead=<id> otwiera kartę leada.
+       Adres od razu wraca na czyste /admin — razem z `?pwa=1` z manifestu,
+       żeby odświeżenie strony nie powtarzało nawigacji. */
+    const lead=new URLSearchParams(location.search).get('lead');
+    if(location.search)history.replaceState(null,'','/admin');
+    if(lead){go('leads');openLead(+lead)}
+    else go('overview');
+    applyPendingLead();
     loadInbox();
   }catch(e){/* api() already redirected to login */}
 })();

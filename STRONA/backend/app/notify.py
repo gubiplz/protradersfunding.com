@@ -720,18 +720,25 @@ def _send_teraz(event: str, to_email: str | None, ctx: dict | None = None) -> No
             print(f"[notify] push błąd: {e}")
 
 
-def notify_admins(event: str, title: str, body: str = "") -> None:
+def notify_admins(event: str, title: str, body: str = "",
+                  url: str = "/admin", tag: str | None = None) -> None:
     """Dzwonek + web push do wszystkich kont is_admin (url -> panel /admin).
 
     Osobna ścieżka od send(): bez maila i bez bramki preferencji tradera —
     to sygnał operacyjny „coś przyszło". NIGDY nie rzuca: zdarzenie admina
-    nie może wywrócić requestu tradera, który je wywołał."""
-    if _odloz(_notify_admins_teraz, event, title, body):
+    nie może wywrócić requestu tradera, który je wywołał.
+
+    `url` pozwala zdarzeniu wskazać konkretne miejsce w panelu (deep-link
+    `/admin?lead=…`), a `tag` skleić serię powiadomień o tym samym obiekcie
+    w jedno na ekranie telefonu — przeglądarka podmienia notyfikację o tym
+    samym tagu zamiast układać stos."""
+    if _odloz(_notify_admins_teraz, event, title, body, url, tag):
         return
-    _notify_admins_teraz(event, title, body)
+    _notify_admins_teraz(event, title, body, url, tag)
 
 
-def _notify_admins_teraz(event: str, title: str, body: str = "") -> None:
+def _notify_admins_teraz(event: str, title: str, body: str = "",
+                         url: str = "/admin", tag: str | None = None) -> None:
     try:
         from . import push
         from .db import SessionLocal
@@ -742,11 +749,11 @@ def _notify_admins_teraz(event: str, title: str, body: str = "") -> None:
             admin_ids = [t.id for t in
                          session.query(Trader).filter(Trader.is_admin.is_(True)).all()]
             for tid in admin_ids:
-                push._center_row(session, tid, event, title, body, "/admin")
+                push._center_row(session, tid, event, title, body, url)
             session.commit()
         finally:
             session.close()
         for tid in admin_ids:
-            push.send_to_trader(tid, title, body, url="/admin", tag=event)
+            push.send_to_trader(tid, title, body, url=url, tag=tag or event)
     except Exception as e:  # pragma: no cover
         print(f"[notify] admin błąd: {e}")

@@ -205,6 +205,17 @@ tr.clickable{cursor:pointer}
 .due{font-size:11px;color:var(--muted);margin-top:3px}
 .due.now{color:var(--gold);font-weight:600}
 
+/* Klik-to-message przy telefonie: przyciski zamiast linków 11px — na desktopie
+   dyskretne, na telefonie rosną do pełnych celów dotyku (media query niżej).
+   TG/WA pokazują się tylko przy numerze w E.164, bo bez kodu kraju te linki
+   prowadzą donikąd. */
+.lead-acts{display:inline-flex;gap:4px;vertical-align:middle;margin-left:4px;flex-wrap:wrap}
+.act-btn{display:inline-flex;align-items:center;justify-content:center;min-width:34px;
+  height:24px;padding:0 8px;border:1px solid var(--line);border-radius:7px;
+  font-size:11px;font-weight:700;color:var(--muted);background:var(--panel2);
+  cursor:pointer;text-decoration:none;transition:.15s}
+.act-btn:hover{border-color:var(--acc);color:var(--acc)}
+
 /* Status w wierszu jest polem wyboru, więc nie da się mu dać kropki jak
    `.status`. Kolor tekstu robi to samo: listę trzydziestu leadów przegląda się
    wzrokiem, szukając tych, do których nikt jeszcze nie napisał. */
@@ -243,6 +254,13 @@ tr.clickable{cursor:pointer}
   table.lead-tbl td[data-l="Status"] select,table.lead-tbl td[data-l="Note"] input{
     flex:1 1 100%;min-width:0;min-height:40px;font-size:14px}
   table.lead-tbl td[data-l="Status"] .due{flex:1 1 100%;text-align:left}
+  /* Kontakt na telefonie: linki w rozmiarze palca, a przyciski TG/WA/SMS/Copy
+     w pełnym celu dotyku pod numerem, nie ściśnięte obok niego. */
+  table.lead-tbl td[data-l="Contact"]{flex-wrap:wrap}
+  table.lead-tbl td[data-l="Contact"] a{font-size:14px;line-height:1.9;word-break:break-all}
+  table.lead-tbl td[data-l="Contact"] .lead-ph{flex:1 1 100%;text-align:right}
+  .lead-acts{gap:8px;margin:6px 0 0}
+  .act-btn{min-width:56px;height:40px;font-size:13px}
 }
 
 /* Wyszukiwarki (Accounts/Pool/Orders): wrapper przejmuje slot inputa w

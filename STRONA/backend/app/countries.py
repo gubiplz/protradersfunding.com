@@ -880,3 +880,27 @@ def check_phone(iso2: str, national: str) -> str:
     if len(kierunkowy) + len(cyfry) > E164_MAX:
         raise ValueError("That phone number is too long.")
     return f"+{kierunkowy}{cyfry}"
+
+
+def iso_from_e164(numer: str) -> str | None:
+    """Kraj z kierunkowego numeru zapisanego międzynarodowo (`+` albo `00`).
+
+    Najdłuższy pasujący kierunkowy wygrywa (inaczej +355 przegrywałoby z +35…),
+    a przy kodzie dzielonym przez kilka krajów (+1, +7, +44…) rozstrzyga kolumna
+    „primary" tabeli — ta sama, którą check_phone pokazuje przy błędnym kraju.
+    Numer bez zadeklarowanego kierunkowego to None: nie zgadujemy, bo landing
+    przysyła phone_iso osobno i brak prefiksu nie jest dowodem na żaden kraj.
+    """
+    tekst = (numer or "").strip()
+    cyfry = "".join(c for c in tekst if c.isdigit())
+    if not (tekst.startswith("+") or cyfry.startswith("00")):
+        return None
+    if cyfry.startswith("00"):
+        cyfry = cyfry[2:]
+    najlepszy: tuple[int, bool, str] | None = None
+    for iso, _nazwa, kierunkowy, _mn, _mx, glowny in COUNTRIES:
+        if not cyfry.startswith(kierunkowy):
+            continue
+        if najlepszy is None or (len(kierunkowy), glowny) > najlepszy[:2]:
+            najlepszy = (len(kierunkowy), glowny, iso)
+    return najlepszy[2] if najlepszy else None

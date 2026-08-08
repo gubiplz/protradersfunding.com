@@ -35,6 +35,10 @@ os.environ["PAYOUTBOT_ON_TRAFFIC"] = "false"
 # polskiego czasu zuzylby dzienny guard i pchnal wpisy do centrum powiadomien
 # w srodku niezwiazanych testow. Testy recapu wolaja push.daily_recap wprost.
 os.environ["RECAP_ON_TRAFFIC"] = "false"
+# I dla follow-upow leadow: sweep z ruchu zuzylby jednorazowe przypomnienia
+# (dedup po lead_events) w srodku niezwiazanych testow. Test sweepa wlacza go
+# sam monkeypatchem na singletonie settings.
+os.environ["LEADS_ON_TRAFFIC"] = "false"
 # Web push: puste klucze VAPID = push wylaczony (settings.push_enabled to
 # property liczone z kluczy). Testy pusha wlaczaja go same monkeypatchem
 # kluczy na singletonie settings — dlatego NIE ustawiamy tu PUSH_ENABLED=false,

@@ -12,7 +12,7 @@ os.environ.setdefault("AUTO_SEED", "false")
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import auth, telegram  # noqa: E402
+from app import auth, notify, telegram  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
@@ -548,7 +548,10 @@ def test_przypomnienie_gdy_nikt_nie_oddzwonil(_srodowisko):
     _cofnij(lead_id, od_zgloszenia=5)
 
     assert _cron().status_code == 200
-    assert [z.detail for z in _zdarzenia(lead_id, "reminder")] == ["no_contact"]
+    # Stary lead bez właściciela łapie DWA sygnały: nudge „nikt nie wziął"
+    # (skala minut, sam push) i dzienny powód no_contact (czat + push).
+    assert [z.detail for z in _zdarzenia(lead_id, "reminder")] == [
+        "unclaimed", "no_contact"]
     assert any(dane["email"] in t for t in _srodowisko["przypomnienie"])
 
 
@@ -564,7 +567,8 @@ def test_przypomnienie_nie_wraca_przy_kazdym_przebiegu():
     lead_id = _wyslij(_zgloszenie()).json()["id"]
     _cofnij(lead_id, od_zgloszenia=5)
     _cron(); _cron(); _cron()
-    assert len(_zdarzenia(lead_id, "reminder")) == 1
+    # Po jednym wpisie na powód (unclaimed + no_contact), nie po jednym na przebieg.
+    assert len(_zdarzenia(lead_id, "reminder")) == 2
 
 
 def test_kupujacy_ma_pierwszenstwo_przed_statusem(_srodowisko):
@@ -1023,3 +1027,169 @@ def test_szczegoly_niosa_przypomnienia_a_lista_najblizszy_termin():
     assert d["next_due"][:10] == _z_listy(lead_id)["next_due"][:10]
     kiedy = _utc(datetime.fromisoformat(d["next_due"]))
     assert 1 <= (kiedy - datetime.now(timezone.utc)).days <= 2
+
+
+# --------------------------------------------------------------------------- #
+#  Push o leadach na telefony działu                                           #
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def _pushy(monkeypatch):
+    """Łapie notify.notify_admins zamiast słać web push. Pushe leadowe idą
+    wyłącznie tą bramką (main._lead_push), więc lista niesie dokładnie to,
+    co dostałby telefon — razem z deep-linkiem i tagiem."""
+    zlapane: list[dict] = []
+    monkeypatch.setattr(notify, "notify_admins",
+                        lambda event, title, body="", url="/admin", tag=None:
+                        zlapane.append({"event": event, "title": title, "body": body,
+                                        "url": url, "tag": tag}))
+    return zlapane
+
+
+def test_nowy_lead_pushuje_do_adminow(_pushy):
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    p = next(p for p in _pushy if p["url"] == f"/admin?lead={lead_id}")
+    assert p["title"] == "New lead: Jan Kowalski"
+    assert p["tag"] == f"lead-{lead_id}"
+    assert "high" in p["body"] and "questionnaire" in p["body"]
+
+
+def test_push_niekwalifikowanego_mowi_skad_i_dlaczego(_pushy):
+    a = _wyslij(_zgloszenie(outcome="not_qualified", quality=None)).json()["id"]
+    assert next(p for p in _pushy if p["url"] == f"/admin?lead={a}")["body"] \
+        == "failed the questionnaire"
+    _pushy.clear()
+    b = _wyslij(_zgloszenie(outcome="not_qualified", source="safe",
+                            quality=None)).json()["id"]
+    assert next(p for p in _pushy if p["url"] == f"/admin?lead={b}")["body"] \
+        == "safe page lead — warm up"
+
+
+def test_przycisk_telegrama_pushuje_kto_co_zrobil(_pushy):
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _pushy.clear()
+    _callback(lead_id, "claim")
+    assert any(p["title"] == "Hubert: took the lead" for p in _pushy)
+    _pushy.clear()
+    _callback(lead_id, "messaged")
+    assert any(p["title"] == "Hubert: marked messaged" for p in _pushy)
+    # Kliknięcie w to samo drugi raz nic nie zmienia — i nie brzęczy.
+    _pushy.clear()
+    _callback(lead_id, "messaged")
+    assert _pushy == []
+
+
+def test_panel_pushuje_status_ale_nie_notatke(_pushy):
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _pushy.clear()
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"note": "notatka"})
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"tier": "cold"})
+    assert _pushy == []          # notatka i ocena to szum, nie sygnał
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"status": "messaged"})
+    assert any("marked messaged" in p["title"] for p in _pushy)
+
+
+def _postarz_o_minuty(lead_id, minuty):
+    s = SessionLocal()
+    try:
+        s.get(Lead, lead_id).created_at = \
+            datetime.now(timezone.utc) - timedelta(minutes=minuty)
+        s.commit()
+    finally:
+        s.close()
+
+
+def test_nudge_o_niewzietym_leadzie_dokladnie_raz(_pushy, _srodowisko):
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _postarz_o_minuty(lead_id, 45)
+    _pushy.clear()
+
+    _cron(); _cron()
+
+    nudge = [p for p in _pushy if p["title"].startswith("Unclaimed lead")]
+    assert len(nudge) == 1 and nudge[0]["url"] == f"/admin?lead={lead_id}"
+    assert [z.detail for z in _zdarzenia(lead_id, "reminder")] == ["unclaimed"]
+    # Sam push, bez wpisu na czacie — karta leada i tak wisi na kanale.
+    assert _srodowisko["przypomnienie"] == []
+
+
+def test_nudge_omija_wzietych_swiezych_i_niekwalifikowanych(_pushy):
+    wziety = _wyslij(_zgloszenie()).json()["id"]
+    _callback(wziety, "claim")
+    _postarz_o_minuty(wziety, 45)
+    swiezy = _wyslij(_zgloszenie()).json()["id"]
+    odpad = _wyslij(_zgloszenie(outcome="not_qualified", quality=None)).json()["id"]
+    _postarz_o_minuty(odpad, 45)
+    _pushy.clear()
+
+    _cron()
+
+    assert not any(p["title"].startswith("Unclaimed") for p in _pushy)
+    for lid in (wziety, swiezy, odpad):
+        assert "unclaimed" not in [z.detail for z in _zdarzenia(lid, "reminder")]
+
+
+def test_zaplanowane_przypomnienie_pushuje(_pushy):
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    rid = _zaplanuj(lead_id, text="oddzwonić po weekendzie", due_in_days=1).json()["id"]
+    _przesun_termin(rid, 1)
+    _pushy.clear()
+
+    _cron()
+
+    p = next(p for p in _pushy if p["title"].startswith("Reminder:"))
+    assert "oddzwonić po weekendzie" in p["title"]
+    assert p["url"] == f"/admin?lead={lead_id}" and p["body"] == "Jan Kowalski"
+
+
+def test_sweep_z_ruchu_chodzi_raz_na_okno(monkeypatch):
+    """Middleware ruchu przebiega follow-upy najwyżej co LEADS_SWEEP_MIN minut:
+    znacznik w app_settings commitowany PRZED robotą, więc drugi request w tym
+    samym oknie wychodzi bez przebiegu."""
+    from app import main as app_main
+    from app.models import AppSetting
+
+    u = get_settings()
+    monkeypatch.setattr(u, "leads_on_traffic", True, raising=False)
+    ile = {"n": 0}
+    monkeypatch.setattr(app_main, "_lead_followups",
+                        lambda *a, **k: ile.__setitem__("n", ile["n"] + 1))
+    s = SessionLocal()
+    try:
+        row = s.get(AppSetting, "leadbot_last_sweep")
+        if row:
+            s.delete(row)
+        s.commit()
+    finally:
+        s.close()
+
+    client.get("/api/public/stats")
+    client.get("/api/public/stats")
+    assert ile["n"] == 1
+
+
+# --------------------------------------------------------------------------- #
+#  Normalizacja telefonu przy przyjęciu                                        #
+# --------------------------------------------------------------------------- #
+def test_ingest_sklada_e164_i_prostuje_iso_z_prefiksu():
+    """Landing przysyła „+48 601 234 567" i osobno ISO zgadnięte ze strefy
+    czasowej urządzenia. Gdy się kłócą, prawdę mówi prefiks."""
+    lead = _lead(_wyslij(_zgloszenie(phone="+48 601 234 567",
+                                     phoneIso="US")).json()["id"])
+    assert lead.phone == "+48601234567" and lead.phone_iso == "PL"
+
+
+def test_ingest_00_to_tez_prefiks_a_bez_prefiksu_nie_zgadujemy():
+    a = _lead(_wyslij(_zgloszenie(phone="0048 601 234 567", phoneIso="")).json()["id"])
+    assert a.phone == "+48601234567" and a.phone_iso == "PL"
+    b = _lead(_wyslij(_zgloszenie(phone="601 234 567", phoneIso="PL")).json()["id"])
+    assert b.phone == "601 234 567" and b.phone_iso == "PL"
+
+
+def test_iso_from_e164_dzielone_kody_i_najdluzsze_dopasowanie():
+    from app.countries import iso_from_e164
+    assert iso_from_e164("+48 601 234 567") == "PL"
+    assert iso_from_e164("+12025550123") == "US"      # +1 dzielony: wygrywa primary
+    assert iso_from_e164("+79161234567") == "RU"      # +7 dzielony: wygrywa primary
+    assert iso_from_e164("+35561234567") == "AL"      # +355, nie krótsze dopasowania
+    assert iso_from_e164("0044 7911 123456") == "GB"
+    assert iso_from_e164("601234567") is None         # brak prefiksu = nie zgadujemy

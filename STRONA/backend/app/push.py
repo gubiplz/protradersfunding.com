@@ -76,6 +76,10 @@ def _deliver(sub_info: dict, payload: str) -> None:
         data=payload,
         vapid_private_key=settings.vapid_private_key,
         vapid_claims={"sub": settings.vapid_sub or f"mailto:{settings.support_email}"},
+        # Bez limitu wiszący push service trzymałby wywołanie funkcji aż do
+        # maxDuration Vercela — a wysyłamy po odpowiedzi, więc nikt by nawet
+        # nie widział, że coś stoi. 5 s na urządzenie ogranicza pech do sekund.
+        timeout=5,
     )
 
 
