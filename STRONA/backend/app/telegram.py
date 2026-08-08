@@ -170,6 +170,21 @@ def send_lead_alert(lead_id: int, text: str, *, transport=None) -> tuple[bool, s
                    None, transport)
 
 
+def send_lead_message(text: str, *, transport=None) -> tuple[bool, str]:
+    """Wiadomość na czat z leadami BEZ przycisków — przypomnienia z crona.
+
+    Osobna funkcja od `send_message`, bo tamta celuje w publiczny kanał z
+    wypłatami. Przypomnienie niesie imię i mail człowieka, więc pomyłka w czacie
+    jest wyciekiem, a nie literówką; jedno wywołanie mniej do pomylenia.
+    """
+    if not leads_enabled():
+        return False, "no bot token or leads chat"
+    return _strzal("sendMessage",
+                   {"chat_id": settings.telegram_leads_chat_id, "text": text[:4096],
+                    "parse_mode": "HTML", "disable_web_page_preview": "true"},
+                   None, transport)
+
+
 def answer_callback(callback_id: str, text: str, *, transport=None) -> tuple[bool, str]:
     """Zdejmuje „zegarek" z przycisku. Bez tej odpowiedzi Telegram kręci kółkiem
     przez minutę i klikający nie wie, czy cokolwiek się stało."""

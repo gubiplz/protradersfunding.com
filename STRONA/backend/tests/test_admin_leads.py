@@ -1,7 +1,9 @@
 """Leady z landingu: przyjęcie, deduplikacja po mailu, doliczenie zakupu
-i zmiana statusu — z panelu oraz przyciskiem z Telegrama."""
+i zmiana statusu — z panelu oraz przyciskiem z Telegrama. Dalej historia
+zdarzeń i przypomnienia z crona."""
 import os
 import tempfile
+from datetime import datetime, timedelta, timezone
 
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{tempfile.NamedTemporaryFile(suffix='.db', delete=False).name}")
 os.environ.setdefault("FEED", "sim")
@@ -14,7 +16,7 @@ from app import auth, telegram  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Lead, Order, Trader  # noqa: E402
+from app.models import Lead, LeadEvent, Order, Trader  # noqa: E402
 
 init_db()
 client = TestClient(app)
@@ -35,9 +37,11 @@ def _srodowisko(monkeypatch):
     u = get_settings()
     monkeypatch.setattr(u, "lead_ingest_token", TOKEN_LANDINGU, raising=False)
     monkeypatch.setattr(u, "telegram_webhook_secret", SEKRET_WEBHOOKA, raising=False)
-    wyslane: dict[str, list] = {"alert": [], "answer": [], "edit": []}
+    wyslane: dict[str, list] = {"alert": [], "answer": [], "edit": [], "przypomnienie": []}
     monkeypatch.setattr(telegram, "send_lead_alert",
                         lambda lead_id, tekst, **kw: (wyslane["alert"].append((lead_id, tekst)), (True, ""))[1])
+    monkeypatch.setattr(telegram, "send_lead_message",
+                        lambda tekst, **kw: (wyslane["przypomnienie"].append(tekst), (True, ""))[1])
     monkeypatch.setattr(telegram, "answer_callback",
                         lambda cb, tekst, **kw: (wyslane["answer"].append(tekst), (True, ""))[1])
     monkeypatch.setattr(telegram, "edit_lead_message",
@@ -283,3 +287,167 @@ def test_alert_niesie_kontakt_i_ocene(_srodowisko):
     _wyslij(_zgloszenie())
     _, tekst = _srodowisko["alert"][-1]
     assert "+48111222333" in tekst and "HIGH 42" in tekst
+
+
+# --------------------------------------------------------------------------- #
+#  Historia                                                                    #
+# --------------------------------------------------------------------------- #
+def _zdarzenia(lead_id, kind=None):
+    s = SessionLocal()
+    try:
+        q = s.query(LeadEvent).filter(LeadEvent.lead_id == lead_id)
+        if kind:
+            q = q.filter(LeadEvent.kind == kind)
+        return q.order_by(LeadEvent.id).all()
+    finally:
+        s.close()
+
+
+def test_historia_pamieta_odpowiedzi_z_kazdego_zgloszenia():
+    """Sedno tej tabeli. `leads` trzyma ostatnią wersję zgłoszenia, więc po
+    drugim wypełnieniu formularza zostawał sam licznik i nie dało się
+    powiedzieć, czy człowiek zmienił zdanie, czy kliknął dwa razy."""
+    dane = _zgloszenie()
+    lead_id = _wyslij(dane).json()["id"]
+    _wyslij({**dane, "answers": {"When do you want to buy?": "In three months"}})
+
+    zgloszenia = _zdarzenia(lead_id, "applied")
+    assert len(zgloszenia) == 2
+    assert "Do you buy the evaluation yourself?" in zgloszenia[0].payload_json
+    assert "In three months" in zgloszenia[1].payload_json
+    assert zgloszenia[1].detail == "application #2 — qualified, high 42"
+    assert [z.actor for z in zgloszenia] == ["landing", "landing"]
+
+    # Wiersz leada zna już tylko ostatnią wersję — dlatego historia jest osobno.
+    assert "Do you buy the evaluation yourself?" not in _lead(lead_id).payload_json
+
+
+def test_historia_zapisuje_kto_zmienil_status(_srodowisko):
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"status": "called"})
+    _callback(lead_id, "rejected")
+
+    assert [(z.detail, z.actor) for z in _zdarzenia(lead_id, "status")] == [
+        ("new → called", "panel"), ("called → rejected", "telegram:Hubert")]
+
+
+def test_ten_sam_status_drugi_raz_nie_zasmieca_historii():
+    """Przycisk zostaje pod wiadomością w Telegramie i klika się go odruchowo.
+    Historia ma pokazywać zmiany, nie kliknięcia."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"status": "called"})
+    _callback(lead_id, "called")
+    assert len(_zdarzenia(lead_id, "status")) == 1
+
+
+def test_historia_zapisuje_notatke():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"note": "prosi o telefon po 18"})
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"note": "prosi o telefon po 18"})
+
+    assert [(z.detail, z.actor) for z in _zdarzenia(lead_id, "note")] == [
+        ("prosi o telefon po 18", "panel")]
+
+
+def test_szczegoly_wymagaja_admina():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    assert client.get(f"/api/admin/leads/{lead_id}").status_code in (401, 403)
+
+
+def test_szczegoly_nieznanego_leada_to_404():
+    assert client.get("/api/admin/leads/99999999", headers=ADMIN).status_code == 404
+
+
+def test_szczegoly_niosa_zamowienia_i_historie():
+    dane = _zgloszenie()
+    lead_id = _wyslij(dane).json()["id"]
+
+    s = SessionLocal()
+    tr = Trader(email=dane["email"], password_hash=auth.hash_password("haslo1234"),
+                full_name="Jan Kowalski", referral_code=auth.secrets.token_hex(3))
+    s.add(tr); s.commit()
+    s.add(Order(trader_id=tr.id, product_key="eval-100k", amount_usd=549.0, status="paid"))
+    s.add(Order(trader_id=tr.id, product_key="eval-25k", amount_usd=199.0, status="pending"))
+    s.commit(); s.close()
+
+    d = client.get(f"/api/admin/leads/{lead_id}", headers=ADMIN).json()
+    assert d["paid_usd"] == 549.0                      # nieopłacone się nie liczy
+    assert {o["status"] for o in d["orders"]} == {"paid", "pending"}
+    assert d["events"][0]["kind"] == "applied"
+    assert d["events"][0]["answers"] == dane["answers"]
+
+
+# --------------------------------------------------------------------------- #
+#  Przypomnienia (cron)                                                        #
+# --------------------------------------------------------------------------- #
+def _cofnij(lead_id, *, od_zgloszenia=None, od_telefonu=None):
+    """Postarza lead, żeby test nie musiał czekać trzech dni."""
+    s = SessionLocal()
+    try:
+        lead = s.get(Lead, lead_id)
+        teraz = datetime.now(timezone.utc)
+        if od_zgloszenia is not None:
+            lead.created_at = teraz - timedelta(days=od_zgloszenia)
+        if od_telefonu is not None:
+            lead.contacted_at = teraz - timedelta(days=od_telefonu)
+        s.commit()
+    finally:
+        s.close()
+
+
+def _cron():
+    return client.post("/api/cron/lead-followups", headers=ADMIN)
+
+
+def test_przypomnienie_gdy_nikt_nie_oddzwonil(_srodowisko):
+    dane = _zgloszenie()
+    lead_id = _wyslij(dane).json()["id"]
+    _cofnij(lead_id, od_zgloszenia=5)
+
+    assert _cron().status_code == 200
+    assert [z.detail for z in _zdarzenia(lead_id, "reminder")] == ["no_contact"]
+    assert any(dane["email"] in t for t in _srodowisko["przypomnienie"])
+
+
+def test_swiezy_lead_nie_wywoluje_przypomnienia():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _cron()
+    assert _zdarzenia(lead_id, "reminder") == []
+
+
+def test_przypomnienie_nie_wraca_przy_kazdym_przebiegu():
+    """Dedup po historii, nie po nowej kolumnie-znaczniku: cron chodzi co kilka
+    minut, a dział ma dostać jedną wiadomość o jednym człowieku."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _cofnij(lead_id, od_zgloszenia=5)
+    _cron(); _cron(); _cron()
+    assert len(_zdarzenia(lead_id, "reminder")) == 1
+
+
+def test_kupujacy_ma_pierwszenstwo_przed_statusem(_srodowisko):
+    """Status przy takim leadzie potrafi miesiącami stać na „new", bo nikt go
+    nie odklikał. Zapłacone zamówienie jest ważniejsze niż to, co w panelu."""
+    dane = _zgloszenie()
+    lead_id = _wyslij(dane).json()["id"]
+    _cofnij(lead_id, od_zgloszenia=5)
+
+    s = SessionLocal()
+    tr = Trader(email=dane["email"], password_hash=auth.hash_password("haslo1234"),
+                full_name="Jan Kowalski", referral_code=auth.secrets.token_hex(3))
+    s.add(tr); s.commit()
+    s.add(Order(trader_id=tr.id, product_key="eval-100k", amount_usd=549.0, status="paid"))
+    s.commit(); s.close()
+
+    _cron()
+    assert [z.detail for z in _zdarzenia(lead_id, "reminder")] == ["bought"]
+    tekst = next(t for t in _srodowisko["przypomnienie"] if dane["email"] in t)
+    assert "549" in tekst
+
+
+def test_przypomnienie_o_rozmowie_bez_ciagu_dalszego():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"status": "called"})
+    _cofnij(lead_id, od_zgloszenia=30, od_telefonu=14)
+
+    _cron()
+    assert [z.detail for z in _zdarzenia(lead_id, "reminder")] == ["stalled"]

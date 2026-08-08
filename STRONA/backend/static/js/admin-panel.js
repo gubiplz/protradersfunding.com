@@ -804,10 +804,11 @@ function renderLeads(){
         .map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._leadFilter='${k}';renderLeads()">${l}</button>`).join('')}</div>
       <span class="count-pill">${rows.length} of ${list.length}</span>
     </div>
-    ${rows.length?`<div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.leads">
+    ${rows.length?`<p class="muted" style="font-size:12.5px;margin-bottom:10px">Click a row for the full history: every application with the answers given at the time, status changes and who made them.</p>
+    <div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.leads">
       <thead><tr><th>Date</th><th>Lead</th><th>Contact</th><th>Grade</th><th>Source</th>
         <th>Status</th><th>Bought</th><th>Note</th></tr></thead>
-      <tbody>${rows.map(l=>`<tr>
+      <tbody>${rows.map(l=>`<tr class="clickable" onclick="openLead(${l.id})">
         <td class="muted" data-sort="${esc(l.created_at||'')}">${dstr(l.created_at)}</td>
         <td><b>${esc(l.name||'—')}</b>
           ${l.applications>1?`<div class="muted" style="font-size:11px" title="Filled the form more than once">↻ applied ${l.applications}×</div>`:''}
@@ -817,11 +818,11 @@ function renderLeads(){
           ${l.telegram?`<div class="muted" style="font-size:11px">${esc(l.telegram)}</div>`:''}</td>
         <td data-sort="${l.score||0}" title="${esc(leadAnswers(l.answers))}">${l.tier?`<span class="status ${l.tier==='high'?'paid':l.tier==='warm'?'pending':'failed'}"><span class="dot"></span>${esc(l.tier)} ${l.score}</span>`:'<span class="muted">—</span>'}</td>
         <td class="muted">${esc(l.source||'—')}${l.ref?`<div style="font-size:11px">via ${esc(l.ref)}</div>`:''}</td>
-        <td><select class="inp sm" style="min-width:116px" onchange="setLeadStatus(${l.id},this.value)">${
+        <td onclick="event.stopPropagation()"><select class="inp sm" style="min-width:116px" onchange="setLeadStatus(${l.id},this.value)">${
           LEAD_STATUSES.map(([k,lab])=>`<option value="${k}"${l.status===k?' selected':''}>${lab}</option>`).join('')}</select>
           ${l.contacted_at?`<div class="muted" style="font-size:11px">${dstr(l.contacted_at)}</div>`:''}</td>
         <td class="num">${l.paid_usd>0?`<span class="status paid"><span class="dot"></span>$${fmt0(l.paid_usd)}</span>`:'<span class="muted">—</span>'}</td>
-        <td><input class="inp sm" style="min-width:170px" value="${esc(l.note||'')}"
+        <td onclick="event.stopPropagation()"><input class="inp sm" style="min-width:170px" value="${esc(l.note||'')}"
           placeholder="Add a note…" onchange="setLeadNote(${l.id},this.value)"></td></tr>`).join('')}
       </tbody></table></div>`
       :`<div class="empty"><h3>${list.length?'No leads match':'No leads yet'}</h3>
@@ -848,6 +849,68 @@ async function setLeadNote(id,note){
     if(row)row.note=note;
     toast('Note saved');
   }catch(e){toast('Error: '+e.message,'err')}
+}
+
+/* ---------- one lead: the history behind the row ----------
+   The table answers "where does this lead stand"; this answers "how did it get
+   there". The list cannot show it: one person is one row on purpose, so a second
+   application overwrites the first and only the counter survives. Every write
+   also lands in lead_events, and that is what gets read back here. */
+const LEAD_STATUS_CLS={new:'pending',called:'paid',no_answer:'pending',rejected:'failed'};
+const LEAD_EVENT_LBL={applied:'Applied',status:'Status',note:'Note',reminder:'Reminder'};
+/* Reminders are sent to US, never to the lead — the landing they applied through
+   is a separate brand. The wording says who is being nudged. */
+const LEAD_REMINDER_LBL={no_contact:'Nobody called back yet',bought:'Bought — stop treating as a lead',
+  stalled:'Call led nowhere'};
+
+function leadEventDetail(e){
+  if(e.kind==='reminder')return LEAD_REMINDER_LBL[e.detail]||e.detail;
+  if(e.kind==='status')return e.detail.split('→').map(s=>leadLabel(s.trim())).join(' → ');
+  return e.detail;
+}
+
+async function openLead(id){
+  let l;
+  try{l=await api('/api/admin/leads/'+id)}
+  catch(e){toast('Error: '+e.message,'err');return}
+  const ev=l.events||[],ords=l.orders||[];
+  openOver(l.name||l.email,`
+    <div class="chip-row">
+      <span class="status ${LEAD_STATUS_CLS[l.status]||'pending'}"><span class="dot"></span>${esc(leadLabel(l.status))}</span>
+      ${l.tier?`<span class="chip">${esc(l.tier)} ${l.score}</span>`:''}
+      ${l.paid_usd>0?`<span class="status paid"><span class="dot"></span>paid $${fmt0(l.paid_usd)}</span>`:''}
+      ${l.applications>1?`<span class="chip">applied ${l.applications}×</span>`:''}
+      ${l.outcome==='not_qualified'?'<span class="chip">failed the questionnaire</span>':''}
+    </div>
+    <div class="chip-row">
+      <span class="chip"><a href="mailto:${esc(l.email)}">${esc(l.email)}</a></span>
+      ${l.phone?`<span class="chip"><a href="tel:${esc(l.phone)}">${esc(l.phone)}</a></span>`:''}
+      ${l.telegram?`<span class="chip">${esc(l.telegram)}</span>`:''}
+      ${l.country?`<span class="chip">${esc(l.country)}</span>`:''}
+      ${l.source?`<span class="chip">${esc(l.source)}${l.ref?' via '+esc(l.ref):''}</span>`:''}
+    </div>
+    ${l.note?`<p style="font-size:12.5px">📝 ${esc(l.note)}</p>`:''}
+    ${ords.length?`<h4 style="margin:16px 0 6px">Orders</h4>
+      <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Date</th><th>Product</th><th>Amount</th><th>Status</th></tr></thead>
+      <tbody>${ords.map(o=>`<tr><td class="muted" style="white-space:nowrap">${dstr(o.created_at)}</td>
+        <td>${esc(o.product_key)}</td><td class="num">$${fmt0(o.amount_usd)}</td>
+        <td><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span></td></tr>`).join('')}
+      </tbody></table></div>`
+      :'<p class="muted" style="font-size:12.5px;margin-top:14px">No orders on this e-mail address.</p>'}
+    <h4 style="margin:16px 0 6px">History</h4>
+    ${ev.length?`<div class="tbl-wrap"><table class="tbl" style="table-layout:fixed">
+      <thead><tr><th style="width:104px">When</th><th style="width:96px">What</th><th>Details</th></tr></thead>
+      <tbody>${ev.map(e=>`<tr>
+        <td class="muted" style="white-space:nowrap">${dstr(e.created_at)}</td>
+        <td>${esc(LEAD_EVENT_LBL[e.kind]||e.kind)}
+          <div class="muted" style="font-size:11px">${esc(e.actor||'—')}</div></td>
+        <td><div style="font-size:12px">${esc(leadEventDetail(e))}</div>
+          ${Object.keys(e.answers||{}).length?`<div class="muted" style="font-size:11.5px;margin-top:4px">${
+            Object.entries(e.answers).map(([q,v])=>`${esc(q)} → <b>${esc(v)}</b>`).join('<br>')}</div>`:''}</td></tr>`).join('')}
+      </tbody></table></div>`
+      :`<div class="empty"><h3>Nothing recorded yet</h3>
+        <p>History starts at the first change made after this feature went live.</p></div>`}`);
 }
 /* Jedno zdanie o mailu z instrukcją wpłaty. Brak adresu portfela MUSI krzyczeć:
    klient dostaje wtedy prośbę o zapłatę bez informacji, gdzie zapłacić, a admin

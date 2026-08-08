@@ -114,6 +114,11 @@ tr.clickable{cursor:pointer}
   background:var(--panel2);border-radius:8px;padding:5px 10px}
 .chip b{color:var(--txt);font-weight:600}
 
+/* Tables in the slide-over. portal.css gives .tbl min-width:560px for the main
+   content area; the drawer is 43px narrower, so the last column sat behind its
+   edge and had to be scrolled to sideways. */
+#o-body table.tbl{min-width:0}
+
 /* ---------------- mobile ---------------- */
 @media(max-width:960px){
   /* tables scroll inside .tbl-wrap anyway — cells must not break "2step-100k"

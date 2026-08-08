@@ -38,7 +38,8 @@ from . import (achievements, auth, billing, catalog, certshot, countries, fields
 from .config import get_settings
 from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint
 from .models import (LEAD_STATUSES, Account, AchievementReward, AppSetting, Breach, Certificate,
-                     CreditLedger, EquitySnapshot, JournalEntry, KycFile, Lead, Notification,
+                     CreditLedger, EquitySnapshot, JournalEntry, KycFile, Lead, LeadEvent,
+                     Notification,
                      Order, Payout, PayoutRequest, PoolAccount, Product, PushSubscription,
                      RewardCode, SupportTicket, TelemetryEvent, TicketMessage, Trade, Trader)
 
@@ -4642,11 +4643,16 @@ async def api_tick(request: Request):
     # Porzucone koszyki — tu samo zamowienie niesie znacznik `recovery_sent_at`,
     # wiec deduplikacja nie zalezy od tego, jak czesto ten cron chodzi.
     recovery = _checkout_recovery()
+    # Przypomnienia o leadach — na czat dzialu, nie do klienta. Wlasna
+    # deduplikacja po historii leada, wiec czestotliwosc crona nie ma znaczenia.
+    leady = _lead_followups()
     if isinstance(wynik, dict):
         return {**wynik, "daily_recap": recap, "upsell_nudge": nudge.get("sent", 0),
-                "checkout_recovery": recovery.get("sent", 0), "payout_bot": payout}
+                "checkout_recovery": recovery.get("sent", 0), "payout_bot": payout,
+                "lead_followups": leady.get("sent", 0)}
     return {"tick": wynik, "daily_recap": recap, "upsell_nudge": nudge.get("sent", 0),
-            "checkout_recovery": recovery.get("sent", 0), "payout_bot": payout}
+            "checkout_recovery": recovery.get("sent", 0), "payout_bot": payout,
+            "lead_followups": leady.get("sent", 0)}
 
 
 def _payout_bot_tick(base_url: str | None = None, *,
@@ -5022,18 +5028,67 @@ def _tekst_alertu(lead: Lead, dane: dict) -> str:
     return "\n".join(linie)
 
 
-def _zapisz_status(lead: Lead, status: str) -> None:
+def _answers_z_payloadu(surowy: str | None) -> dict:
+    """Odpowiedzi z ankiety wyjęte z JSON-a zgłoszenia. Zły JSON to pusty słownik,
+    a nie 500 — panel ma pokazać resztę leada nawet gdy jedno pole jest śmieciem."""
+    try:
+        dane = json.loads(surowy or "{}")
+    except ValueError:
+        return {}
+    odp = dane.get("answers")
+    return odp if isinstance(odp, dict) else {}
+
+
+def _lead_json(lead: Lead, trader_id: int | None, paid_usd: float) -> dict:
+    """Lead dla panelu. Wspólne dla listy i karty szczegółów, żeby karta nie
+    zaczęła nazywać pól inaczej niż tabela, z której się ją otwiera."""
+    return {
+        "id": lead.id, "email": lead.email, "name": lead.name,
+        "phone": lead.phone, "phone_iso": lead.phone_iso, "telegram": lead.telegram,
+        "country": lead.country, "source": lead.source, "ref": lead.ref,
+        "outcome": lead.outcome, "tier": lead.tier, "score": lead.score,
+        "status": lead.status, "note": lead.note,
+        "applications": lead.applications,
+        "answers": _answers_z_payloadu(lead.payload_json),
+        "contacted_at": lead.contacted_at.isoformat() if lead.contacted_at else None,
+        "created_at": lead.created_at.isoformat() if lead.created_at else None,
+        # Wyliczane, nie przechowywane — patrz komentarz nad sekcją.
+        "trader_id": trader_id,
+        "paid_usd": round(float(paid_usd or 0), 2),
+    }
+
+
+def _zdarzenie(session, lead_id: int, kind: str, detail: str = "",
+               actor: str = "", payload: str | None = None) -> None:
+    """Dopisek do historii leada — bez commita.
+
+    Zdarzenie wchodzi tą samą transakcją co zmiana, którą opisuje, więc nie da
+    się mieć w historii czegoś, co się nie stało (ani odwrotnie).
+    """
+    session.add(LeadEvent(lead_id=lead_id, kind=kind, detail=(detail or "")[:200],
+                          actor=(actor or "")[:60], payload_json=payload))
+
+
+def _zapisz_status(session, lead: Lead, status: str, actor: str) -> None:
     """Jedno miejsce zmiany statusu — woła to i panel, i przycisk z Telegrama.
 
     `contacted_at` ustawia się raz, przy pierwszym ruszeniu z „new": to moment
     pierwszego kontaktu, a nie ostatniego, więc kolejne kliknięcia go nie ruszają.
+
+    Ustawienie tego samego statusu drugi raz nie zapisuje niczego — w Telegramie
+    przycisk zostaje pod wiadomością i klika się go odruchowo, a historia ma
+    pokazywać zmiany, nie kliknięcia.
     """
     if status not in LEAD_STATUSES:
         raise HTTPException(400, f"Unknown status: {status}")
+    if status == lead.status:
+        return
+    poprzedni = lead.status
     if status != "new" and lead.contacted_at is None:
         lead.contacted_at = datetime.now(timezone.utc)
     lead.status = status
     lead.updated_at = datetime.now(timezone.utc)
+    _zdarzenie(session, lead.id, "status", f"{poprzedni} → {status}", actor)
 
 
 @app.post("/api/leads/ingest")
@@ -5075,6 +5130,19 @@ def leads_ingest(payload: LeadIn,
         lead.score = int(ocena.get("score") or 0)
         lead.payload_json = json.dumps(dane, ensure_ascii=False)[:20000]
         lead.updated_at = datetime.now(timezone.utc)
+
+        # flush, bo nowy lead dostaje `id` dopiero z bazy, a zdarzenie musi je znać.
+        session.flush()
+        # Migawka TEGO zgłoszenia. `lead.payload_json` za chwilę nadpisze kolejne
+        # i bez tej kopii nie dałoby się porównać, co człowiek odpowiadał wtedy,
+        # a co teraz — a to jest cała treść tego, że zgłosił się drugi raz.
+        # Opis po angielsku, bo `detail` idzie wprost na ekran panelu, a panel
+        # jest po angielsku. Pozostałe rodzaje zdarzeń niosą klucze („new →
+        # called", „bought") i to panel tłumaczy je na słowa.
+        _zdarzenie(session, lead.id, "applied",
+                   f"application #{lead.applications} — {lead.outcome}"
+                   + (f", {lead.tier} {lead.score}" if lead.tier else ""),
+                   actor="landing", payload=lead.payload_json)
 
         session.commit()
         lead_id, tekst = lead.id, _tekst_alertu(lead, dane)
@@ -5122,25 +5190,55 @@ def admin_leads(status: str | None = None, q: str | None = None):
         wynik = []
         for l in leady:
             trader_id = traderzy.get(l.email)
-            try:
-                dane = json.loads(l.payload_json or "{}")
-            except ValueError:
-                dane = {}
-            wynik.append({
-                "id": l.id, "email": l.email, "name": l.name,
-                "phone": l.phone, "phone_iso": l.phone_iso, "telegram": l.telegram,
-                "country": l.country, "source": l.source, "ref": l.ref,
-                "outcome": l.outcome, "tier": l.tier, "score": l.score,
-                "status": l.status, "note": l.note,
-                "applications": l.applications,
-                "answers": dane.get("answers") or {},
-                "contacted_at": l.contacted_at.isoformat() if l.contacted_at else None,
-                "created_at": l.created_at.isoformat() if l.created_at else None,
-                # Wyliczane, nie przechowywane — patrz komentarz nad sekcją.
-                "trader_id": trader_id,
-                "paid_usd": round(float(zaplacone.get(trader_id, 0) or 0), 2),
-            })
+            wynik.append(_lead_json(l, trader_id, zaplacone.get(trader_id, 0) or 0))
         return wynik
+    finally:
+        session.close()
+
+
+@app.get("/api/admin/leads/{lead_id}", dependencies=[Depends(auth.require_admin)])
+def admin_lead_detail(lead_id: int):
+    """Jeden lead z całą historią — to, czego lista pokazać nie może.
+
+    Lista mówi, jak jest teraz. Tutaj widać, jak do tego doszło: kolejne
+    zgłoszenia z odpowiedziami z tamtej chwili, zmiany statusu z podpisem, kto
+    je klikał, notatki i przypomnienia wysłane działowi.
+    """
+    session = SessionLocal()
+    try:
+        lead = session.get(Lead, lead_id)
+        if not lead:
+            raise HTTPException(404, "Lead not found")
+
+        trader = (session.query(Trader)
+                  .filter(func.lower(Trader.email) == lead.email.lower()).one_or_none())
+        zamowienia = []
+        zaplacone = 0.0
+        if trader:
+            for o in (session.query(Order).filter(Order.trader_id == trader.id)
+                      .order_by(Order.created_at.desc()).all()):
+                if o.status == "paid":
+                    zaplacone += float(o.amount_usd or 0)
+                zamowienia.append({
+                    "id": o.id, "product_key": o.product_key,
+                    "amount_usd": round(float(o.amount_usd or 0), 2), "status": o.status,
+                    "created_at": o.created_at.isoformat() if o.created_at else None,
+                    "paid_at": o.paid_at.isoformat() if o.paid_at else None,
+                })
+
+        zdarzenia = (session.query(LeadEvent).filter(LeadEvent.lead_id == lead.id)
+                     .order_by(LeadEvent.created_at.desc(), LeadEvent.id.desc()).all())
+
+        dane = _lead_json(lead, trader.id if trader else None, zaplacone)
+        dane["orders"] = zamowienia
+        dane["events"] = [{
+            "id": z.id, "kind": z.kind, "detail": z.detail, "actor": z.actor,
+            # Migawka zgłoszenia jest w bazie jednym stringiem; panel dostaje
+            # gotowe pary pytanie/odpowiedź, bo tylko to z niej czyta.
+            "answers": _answers_z_payloadu(z.payload_json),
+            "created_at": z.created_at.isoformat() if z.created_at else None,
+        } for z in zdarzenia]
+        return dane
     finally:
         session.close()
 
@@ -5160,10 +5258,15 @@ def admin_lead_update(lead_id: int, payload: LeadStatusIn):
         if not lead:
             raise HTTPException(404, "Lead not found")
         if payload.status is not None:
-            _zapisz_status(lead, payload.status)
+            # actor „panel", bez nazwiska: do panelu wchodzi się stałym tokenem
+            # (auth.require_admin), więc nie ma tu tożsamości do zapisania.
+            _zapisz_status(session, lead, payload.status, actor="panel")
         if payload.note is not None:
-            lead.note = payload.note[:4000] or None
-            lead.updated_at = datetime.now(timezone.utc)
+            nowa = payload.note[:4000] or None
+            if nowa != lead.note:
+                lead.note = nowa
+                lead.updated_at = datetime.now(timezone.utc)
+                _zdarzenie(session, lead.id, "note", nowa or "(skasowano)", actor="panel")
         session.commit()
         return {"id": lead.id, "status": lead.status, "note": lead.note,
                 "contacted_at": lead.contacted_at.isoformat() if lead.contacted_at else None}
@@ -5199,13 +5302,15 @@ async def telegram_webhook(request: Request,
         return {"ok": True}
     _, surowe_id, status = czesci
 
+    kto = (cb.get("from") or {}).get("first_name") or "?"
+
     session = SessionLocal()
     try:
         lead = session.get(Lead, int(surowe_id)) if surowe_id.isdigit() else None
         if not lead or status not in LEAD_STATUSES:
             telegram.answer_callback(cb.get("id", ""), "Nie znaleziono leada")
             return {"ok": True}
-        _zapisz_status(lead, status)
+        _zapisz_status(session, lead, status, actor=f"telegram:{kto}")
         session.commit()
         try:
             dane = json.loads(lead.payload_json or "{}")
@@ -5220,10 +5325,127 @@ async def telegram_webhook(request: Request,
     wiadomosc = cb.get("message") or {}
     czat = str((wiadomosc.get("chat") or {}).get("id") or "")
     if czat and wiadomosc.get("message_id"):
-        kto = (cb.get("from") or {}).get("first_name") or "?"
         telegram.edit_lead_message(czat, wiadomosc["message_id"],
                                    f"{tekst}\n\n<b>{opis}</b> — {html.escape(str(kto))}")
     return {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
+#  Przypomnienia o leadach (cron)                                             #
+# --------------------------------------------------------------------------- #
+# Wszystkie trzy idą DO DZIAŁU, na czat z leadami — żadne nie jest wiadomością
+# do klienta. Lead zgłosił się przez landing, który zna pod inną marką; mail
+# „przypominamy o rozmowie" wysłany stąd powiedziałby mu, że to jedna firma.
+# Do człowieka odzywa się człowiek i tym kanałem, którym ten człowiek przyszedł.
+#
+# Deduplikacja przez BRAK zdarzenia `reminder` z danym powodem — bez nowych
+# kolumn-znaczników i przy okazji widoczna w historii leada („przypomniano").
+
+LEAD_REMINDERS = ("no_contact", "bought", "stalled")
+
+
+def _utc(d: datetime | None) -> datetime | None:
+    """SQLite oddaje daty bez strefy, Postgres ze strefą. Porównanie jednego
+    z drugim wywraca się na TypeError, więc wszystko schodzi do UTC."""
+    if d is None:
+        return None
+    return d if d.tzinfo is not None else d.replace(tzinfo=timezone.utc)
+
+
+def _tekst_przypomnienia(lead: Lead, powod: str, paid: float, dni: int) -> str:
+    e = html.escape
+    kto = f"<b>{e(lead.name or lead.email)}</b>"
+    naglowek = {
+        "bought": f"💸 {kto} KUPIŁ — ${paid:,.0f}",
+        "no_contact": f"⏰ {kto} czeka bez kontaktu",
+        "stalled": f"🕐 {kto} — rozmowa bez ciągu dalszego",
+    }.get(powod, kto)
+    stopka = {
+        "bought": "Zapłacone zamówienie na ten mail. Przestań traktować jak leada.",
+        "no_contact": f"Zgłosił się {dni} dni temu i nikt nie ruszył statusu.",
+        "stalled": f"Telefon {dni} dni temu, od tego czasu nic.",
+    }.get(powod, "")
+
+    linie = [naglowek, f"✉️ {e(lead.email)}"]
+    if lead.phone:
+        linie.append(f"📞 {e(lead.phone)}")
+    if lead.telegram:
+        linie.append(f"💬 {e(lead.telegram)}")
+    if lead.note:
+        linie.append(f"📝 {e(lead.note)[:200]}")
+    if stopka:
+        linie.append(stopka)
+    return "\n".join(linie)
+
+
+@app.api_route("/api/cron/lead-followups", methods=["GET", "POST"],
+               dependencies=[Depends(_require_cron)])
+def cron_lead_followups(no_contact_days: int = 3, stalled_days: int = 7):
+    """Ręcznie/cronem — cała robota siedzi w `_lead_followups`."""
+    return _lead_followups(no_contact_days, stalled_days)
+
+
+def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
+    """Przypomnienia dla działu o leadach, o których zrobiło się cicho.
+
+    Trzy powody, w tej kolejności — pierwszy pasujący wygrywa, bo o jednym
+    człowieku ma przyjść jedna wiadomość, a nie trzy:
+
+    * `bought`   — na maila leada jest zapłacone zamówienie. To jedyny powód
+                   ważniejszy od statusu w panelu: dział ma przestać dzwonić do
+                   kogoś, kto już zapłacił, a status przy takim leadzie potrafi
+                   miesiącami stać na „new", bo nikt go nie odklikał.
+    * `no_contact` — wisi na „new" dłużej niż `no_contact_days`.
+    * `stalled`  — odebrał telefon, minęło `stalled_days` i nic z tego nie ma.
+    """
+    now = datetime.now(timezone.utc)
+    session = SessionLocal()
+    try:
+        leady = session.query(Lead).all()
+        if not leady:
+            return {"sent": 0, "checked": 0}
+
+        maile = [l.email for l in leady]
+        traderzy = {e.lower(): i for i, e in
+                    session.query(Trader.id, Trader.email)
+                    .filter(func.lower(Trader.email).in_(maile)).all()}
+        zaplacone: dict[int, float] = {}
+        if traderzy:
+            zaplacone = dict(session.query(Order.trader_id, func.sum(Order.amount_usd))
+                             .filter(Order.trader_id.in_(list(traderzy.values())),
+                                     Order.status == "paid")
+                             .group_by(Order.trader_id).all())
+        juz = {(i, d) for i, d in session.query(LeadEvent.lead_id, LeadEvent.detail)
+               .filter(LeadEvent.kind == "reminder").all()}
+
+        do_wyslania: list[str] = []
+        for l in leady:
+            paid = float(zaplacone.get(traderzy.get(l.email), 0) or 0)
+            wiek = (now - (_utc(l.created_at) or now)).days
+            od_telefonu = (now - (_utc(l.contacted_at) or now)).days
+            if paid > 0:
+                powod, dni = "bought", wiek
+            elif l.status == "new" and wiek >= no_contact_days:
+                powod, dni = "no_contact", wiek
+            elif l.status == "called" and l.contacted_at and od_telefonu >= stalled_days:
+                powod, dni = "stalled", od_telefonu
+            else:
+                continue
+            if (l.id, powod) in juz:
+                continue
+            _zdarzenie(session, l.id, "reminder", powod, actor="cron")
+            do_wyslania.append(_tekst_przypomnienia(l, powod, paid, dni))
+        # Commit PRZED wysyłką, jak przy porzuconych koszykach: jak Telegram
+        # padnie, przypomnienie przepada. Gdyby zapis szedł po wysyłce, padnięta
+        # wysyłka wracałaby przy każdym przebiegu crona i dział dostałby to samo
+        # przypomnienie dziesięć razy — a to jest gorsze niż jedno utracone.
+        session.commit()
+    finally:
+        session.close()
+
+    for tekst in do_wyslania:
+        telegram.send_lead_message(tekst)
+    return {"sent": len(do_wyslania), "checked": len(leady)}
 
 
 # --------------------------------------------------------------------------- #

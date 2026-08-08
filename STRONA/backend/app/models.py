@@ -645,8 +645,10 @@ class Lead(Base):
 
     status: Mapped[str] = mapped_column(String(16), default="new", index=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Kiedy status pierwszy raz ruszył z „new" — jedyny fakt czasowy, którego
-    # nie da się później odtworzyć z niczego innego.
+    # Kiedy status pierwszy raz ruszył z „new". Da się to wyliczyć z `lead_events`,
+    # ale kolumna zostaje: lista leadów pokazuje tę datę w każdym wierszu, a
+    # dokładanie do niej podzapytania po historii kosztowałoby więcej niż jedno
+    # pole, które i tak zapisuje się raz w życiu wiersza.
     contacted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     applications: Mapped[int] = mapped_column(Integer, default=1)
@@ -657,3 +659,33 @@ class Lead(Base):
 # Krótka lista celowo: status ma odpowiadać na jedno pytanie — czy dodzwoniliśmy
 # się do tej osoby. Czy kupiła, wynika z zamówień, więc nie ma tu „won".
 LEAD_STATUSES = ("new", "called", "no_answer", "rejected")
+
+
+class LeadEvent(Base):
+    """Jedno zdarzenie w życiu leada. Dopisywane, nigdy nie zmieniane.
+
+    `leads` trzyma stan BIEŻĄCY: ostatnie odpowiedzi z ankiety, dzisiejszy
+    status, aktualną notatkę. Wcześniejsze wersje ginęły — ponowne zgłoszenie
+    nadpisuje `payload_json`, a po `applications = 2` nie dało się powiedzieć,
+    czy człowiek zmienił zdanie co do terminu zakupu, czy tylko kliknął dwa razy.
+    Tu leży to, czego tamta tabela z definicji nie pamięta.
+
+    `payload_json` wypełnia się TYLKO przy `applied` — to migawka zgłoszenia z
+    tamtej chwili. Przy zmianie statusu byłaby kopią wiersza obok.
+
+    `actor` mówi, KTO to zrobił, i dlatego jest tekstem, a nie kluczem obcym:
+    autorem bywa landing, przycisk w Telegramie albo cron, nie tylko człowiek
+    z kontem w panelu.
+    """
+    __tablename__ = "lead_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(16), index=True)
+    detail: Mapped[str] = mapped_column(String(200), default="")
+    actor: Mapped[str] = mapped_column(String(60), default="")
+    payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+
+
+LEAD_EVENTS = ("applied", "status", "note", "reminder")
