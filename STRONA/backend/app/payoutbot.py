@@ -62,6 +62,11 @@ ET = ZoneInfo("America/New_York")
 # --------------------------------------------------------------------------- #
 PREFIKS = "payoutbot_"
 KLUCZ_DZIEN = PREFIKS + "last_day"
+# Wynik OSTATNIEJ publikacji na kanale. Samo "last run" mowi tylko, ze wyplata
+# powstala w bazie (guard i wyplata ida w jednej transakcji PRZED postem) —
+# cicha porazka Telegrama wygladala w panelu jak "bot zadzialal", a kanal
+# milczal. Panel pokazuje ten wpis obok daty.
+KLUCZ_WYNIK = PREFIKS + "last_result"
 
 DOMYSLNE: dict[str, str] = {
     "enabled": "0",
@@ -220,9 +225,15 @@ def nalezy_odpalic(session, now: datetime | None = None, *,
     et = _czas_et(now)
     if cfg["last_day"] == et.strftime("%Y-%m-%d"):
         return False, "already ran today"
-    if backstop:
-        if et.hour < cfg["win_from"]:
-            return False, f"waiting for the {cfg['win_from']:02d}:00 ET window"
+    if backstop and et.hour < cfg["win_from"]:
+        return False, f"waiting for the {cfg['win_from']:02d}:00 ET window"
+    # Backstop dosyla BEZWARUNKOWO dopiero PO koncu okna (dzien calkiem bez
+    # ruchu). W srodku okna czeka na slot jak kazdy tick: geometria zalezy od
+    # panelu (okno 11-15 ET + cron 15:00 UTC = poczatek okna) i publikacja od
+    # progu okna oznaczalaby post codziennie o stalej godzinie crona — czyli
+    # dokladnie ten "typowy bot", ktorego slot ma unikac. Tak wyszla wpadka
+    # z 2026-08-08: cron z dryfem trafil 11:29 ET, przed slotem 11:48.
+    if backstop and et.hour >= cfg["win_to"]:
         return True, ""
     slot = slot_dnia(cfg, now)
     if et < slot:
@@ -378,6 +389,17 @@ def uruchom(session, now: datetime | None = None, *, force: bool = False,
 
     wynik = opublikuj(wyplata, nazwa, base_url=base_url,
                       transport_shot=transport_shot, transport_tg=transport_tg)
+    # Wynik publikacji laduje w panelu obok "last run" — patrz KLUCZ_WYNIK.
+    # Osobna, best-effortowa transakcja: wyplata i guard juz sa zapisane.
+    try:
+        if wynik.get("posted"):
+            opis = f"{_dzien(kiedy)} OK ({'photo' if wynik.get('photo') else 'text'})"
+        else:
+            opis = f"{_dzien(kiedy)} FAILED: {wynik.get('reason') or 'unknown'}"
+        _ustaw(session, "last_result", opis[:200])
+        session.commit()
+    except Exception:  # pragma: no cover
+        session.rollback()
     return {"created": 1, "payout_id": wyplata.id, "trader": nazwa,
             "amount_usd": wyplata.trader_share, "on_lp": bool(wyplata.show_on_lp),
             "cert_token": wyplata.cert_token, **wynik}

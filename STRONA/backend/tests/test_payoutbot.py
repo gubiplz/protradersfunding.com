@@ -99,6 +99,34 @@ def test_jedna_wyplata_na_dobe():
         s.close()
 
 
+def test_wynik_publikacji_widoczny_w_panelu():
+    """Guard dnia commit-uje sie PRZED postem, wiec „last run" z dzisiejsza data
+    nie znaczy, ze post wyszedl (wpadka 2026-08-08: kanal milczal, panel
+    wygladal na „zadzialal"). Wynik ostatniej publikacji laduje w AppSetting
+    i endpoint panelu go zwraca."""
+    s = _sesja()
+    _wyczysc(s)
+    try:
+        payoutbot.zapisz_ustawienia(s, enabled=True, win_from=0, win_to=0)
+        kiedy = datetime(2026, 8, 4, 18, 0, tzinfo=timezone.utc)
+        with _kanal():
+            payoutbot.uruchom(s, kiedy, transport_shot=_shot_ok, transport_tg=_tg_ok)
+        wpis = s.get(AppSetting, payoutbot.KLUCZ_WYNIK)
+        assert wpis is not None and wpis.value == "2026-08-04 OK (photo)"
+
+        # Porazka Telegrama: wyplata i guard zostaja, a panel dostaje powod.
+        def _tg_pad(url, body, ct):
+            return 403, b'{"ok":false,"description":"bot is not a member"}'
+        with _kanal():
+            wynik = payoutbot.uruchom(s, kiedy + timedelta(days=1),
+                                      transport_shot=_shot_ok, transport_tg=_tg_pad)
+        assert wynik["created"] == 1 and wynik["posted"] is False
+        wpis = s.get(AppSetting, payoutbot.KLUCZ_WYNIK)
+        assert wpis.value.startswith("2026-08-05 FAILED:")
+    finally:
+        s.close()
+
+
 def test_czeka_na_slot_w_oknie_et():
     """Okno liczy się w czasie wschodnim USA, a publikacja czeka na wylosowany
     slot — nie na początek okna."""
@@ -150,31 +178,45 @@ def test_okno_liczone_w_czasie_wschodnim_z_dst():
         payoutbot.zapisz_ustawienia(s, enabled=True, win_from=9, win_to=11)
         lato = datetime(2026, 8, 4, 13, 30, tzinfo=timezone.utc)      # 09:30 EDT
         zima = datetime(2026, 1, 15, 13, 30, tzinfo=timezone.utc)     # 08:30 EST
-        assert payoutbot.nalezy_odpalic(s, lato, backstop=True)[0] is True
+        # Latem 13:30 UTC jest JUZ w oknie: backstop albo publikuje (slot minal),
+        # albo czeka na slot — nigdy nie czeka na poczatek okna.
+        czy_lato, powod_lato = payoutbot.nalezy_odpalic(s, lato, backstop=True)
+        assert czy_lato or "slot" in powod_lato
         czy, powod = payoutbot.nalezy_odpalic(s, zima, backstop=True)
         assert czy is False and "09:00 ET" in powod
     finally:
         s.close()
 
 
-def test_backstop_crona_publikuje_od_poczatku_okna():
-    """Dobowy cron nie może czekać na slot (przychodzi raz), więc z flagą
-    backstop odpala od początku okna; zwykły tick o tej samej porze czeka."""
+def test_backstop_w_srodku_okna_czeka_na_slot_a_po_oknie_dosyla():
+    """Backstop publikuje BEZWARUNKOWO dopiero po koncu okna; w srodku okna
+    czeka na slot jak zwykly tick. Geometria okna jest w rekach panelu (okno
+    11-15 ET + cron 15:00 UTC = poczatek okna) i stara zasada „od poczatku
+    okna" oznaczala post codziennie o stalej godzinie crona — wpadka
+    z 2026-08-08: cron z dryfem trafil 11:29 ET i wyprzedzil slot 11:48."""
     s = _sesja()
     _wyczysc(s)
     try:
         payoutbot.zapisz_ustawienia(s, enabled=True, win_from=9, win_to=11)
         cfg = payoutbot.ustawienia(s)
-        # Znajdź dzień, którego slot wypada PO 09:00 — przy seedzie z daty to
-        # deterministyczne, a dni ze slotem idealnie na 9:00 pomijamy.
+        # Dzien, ktorego slot wypada PO 09:00 (seed z daty = deterministyczne).
         dzien = next(d for d in range(10, 28)
                      if payoutbot.slot_dnia(
                          cfg, datetime(2026, 8, d, 15, 0, tzinfo=timezone.utc))
                      .strftime("%H:%M") != "09:00")
         start_okna = datetime(2026, 8, dzien, 13, 0, tzinfo=timezone.utc)  # 09:00 EDT
+        # Przed slotem czekaja OBA tryby — takze cron.
         czy, powod = payoutbot.nalezy_odpalic(s, start_okna)
         assert czy is False and "slot" in powod
-        assert payoutbot.nalezy_odpalic(s, start_okna, backstop=True)[0] is True
+        czy_b, powod_b = payoutbot.nalezy_odpalic(s, start_okna, backstop=True)
+        assert czy_b is False and "slot" in powod_b
+        # Od wylosowanej minuty backstop publikuje...
+        slot = payoutbot.slot_dnia(cfg, start_okna)
+        w_slocie = slot.astimezone(timezone.utc)
+        assert payoutbot.nalezy_odpalic(s, w_slocie, backstop=True)[0] is True
+        # ...a po koncu okna dosyla bezwarunkowo (dzien bez ruchu strony).
+        po_oknie = datetime(2026, 8, dzien, 15, 30, tzinfo=timezone.utc)  # 11:30 EDT
+        assert payoutbot.nalezy_odpalic(s, po_oknie, backstop=True)[0] is True
     finally:
         s.close()
 

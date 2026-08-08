@@ -460,6 +460,7 @@ const VIEWS={
         <span class="chip">today's slot <b>${esc(pb.today_slot_et||'--:--')} ET</b></span>
         <span class="chip">on landing <b>${pb.lp_pct}%</b></span>
         <span class="chip">last run <b>${esc(pb.last_day||'never')}</b></span>
+        ${pb.last_result?`<span class="chip" ${/FAILED/.test(pb.last_result)?'style="border-color:var(--red-line);color:var(--red)"':''}>last post <b>${esc(pb.last_result)}</b></span>`:''}
       </div>
       ${brakuje.length?`<div class="warn-box" style="margin:0 0 12px">
         <div><b>Not configured yet: ${brakuje.join(' and ')}</b>

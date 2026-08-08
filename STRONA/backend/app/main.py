@@ -3816,6 +3816,7 @@ def admin_payout_engine():
     try:
         cfg = payoutbot.ustawienia(session)
         czy, powod = payoutbot.nalezy_odpalic(session)
+        wynik_row = session.get(AppSetting, payoutbot.KLUCZ_WYNIK)
         return {**cfg, "due": czy, "blocked_by": powod,
                 # Wylosowana na dziś minuta publikacji — admin ma widzieć, na
                 # którą godzinę silnik jest „uzbrojony", zamiast zgadywać.
@@ -3823,7 +3824,11 @@ def admin_payout_engine():
                 # Panel ma pokazać wprost, czego brakuje do publikacji — inaczej
                 # admin włącza silnik i przez dobę nie wie, czemu kanał milczy.
                 "telegram_ready": telegram.is_enabled(),
-                "renderer_ready": certshot.is_enabled()}
+                "renderer_ready": certshot.is_enabled(),
+                # Wynik OSTATNIEGO posta: "last run" bez tego mówi tylko, że
+                # wypłata powstała — cicha porażka Telegrama wyglądała jak
+                # „bot nie zadziałał" (kanał milczy, data się zgadza).
+                "last_result": wynik_row.value if wynik_row else None}
     finally:
         session.close()
 

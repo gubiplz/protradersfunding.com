@@ -191,7 +191,8 @@ def test_panel_bez_wejscia_do_portalu_i_z_sign_out():
     c.post("/api/auth/login", json={"email": "panelui@firma.pl", "password": "tajne123"})
     html = c.get("/admin").text
     assert "Trader portal" not in html
-    assert 'onclick="signOut()"' in html
+    # klasa .signout z portal.css = ten sam czerwony przycisk co w portalu
+    assert '<button class="signout" onclick="signOut()"' in html
     bundle = c.get("/static/js/admin-panel.js").text
     assert "Trader portal" not in bundle
 
