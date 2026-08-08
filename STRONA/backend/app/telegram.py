@@ -133,6 +133,31 @@ def send_photo(png: bytes, caption: str, *, transport=None) -> tuple[bool, str]:
                    ("photo", "certificate.png", png), transport)
 
 
+_BOT_USERNAME: str | None = None
+
+
+def bot_username() -> str:
+    """Nazwa bota (bez @) — do instrukcji parowania w panelu.
+
+    getMe raz na proces (nazwa bota nie zmienia się między requestami);
+    brak tokenu albo padnięta sieć = pusty string, panel pisze wtedy
+    „the desk bot" zamiast linka."""
+    global _BOT_USERNAME
+    if _BOT_USERNAME is not None:
+        return _BOT_USERNAME
+    if not settings.telegram_bot_token:
+        return ""
+    try:
+        with urllib.request.urlopen(
+                f"{API}/bot{settings.telegram_bot_token}/getMe", timeout=5) as r:
+            dane = json.loads(r.read() or b"{}")
+        _BOT_USERNAME = str((dane.get("result") or {}).get("username") or "")
+    except Exception as e:  # pragma: no cover - sieć
+        print(f"[telegram] getMe błąd: {e}")
+        return ""
+    return _BOT_USERNAME
+
+
 def delete_lead_card(message_id: int, *, transport=None) -> tuple[bool, str]:
     """Zdejmuje kartę leada z czatu działu — wołane przy kasowaniu leada.
 

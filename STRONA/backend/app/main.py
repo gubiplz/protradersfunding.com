@@ -1010,6 +1010,7 @@ def me(trader: Trader = Depends(auth.current_trader)):
                 # Panel: czy konto jest sparowane z Telegramem (podpis akcji na
                 # kanale LEADS). Dla zwyklych traderow zawsze False i nieuzywane.
                 "telegram_linked": bool(trader.telegram_user_id),
+                "telegram_username": trader.telegram_username,
                 "first_name": trader.first_name, "last_name": trader.last_name, "phone": trader.phone,
                 "phone_country": trader.phone_country,
                 "referral_code": trader.referral_code,
@@ -2366,6 +2367,16 @@ def push_unsubscribe(payload: PushUnsubscribeIn, trader: Trader = Depends(auth.c
         session.close()
 
 
+@app.get("/api/me/telegram-link")
+def telegram_link_status(trader: Trader = Depends(auth.current_trader)):
+    """Stan parowania — panel odpytuje to po wydaniu kodu, żeby pokazać
+    „Connected" w chwili, gdy `/start` dojdzie, bez przeładowania strony."""
+    if not trader.is_admin:
+        raise HTTPException(404, "Not Found")
+    return {"linked": bool(trader.telegram_user_id),
+            "username": trader.telegram_username}
+
+
 @app.post("/api/me/telegram-link")
 def telegram_link_code(trader: Trader = Depends(auth.current_trader)):
     """Kod parowania konta admina z Telegramem (Settings → Notifications).
@@ -2382,9 +2393,30 @@ def telegram_link_code(trader: Trader = Depends(auth.current_trader)):
         kod = secrets.token_hex(3).upper()
         tr.telegram_link_code = kod
         session.commit()
-        return {"code": kod, "linked": bool(tr.telegram_user_id)}
+        # Nazwa bota robi z instrukcji klikalny link t.me/<bot> — bez niej
+        # „napisz do bota działu" wymaga wiedzy, który to bot.
+        return {"code": kod, "linked": bool(tr.telegram_user_id),
+                "bot": telegram.bot_username()}
     finally:
         session.close()
+
+
+@app.post("/api/me/telegram-link/test")
+def telegram_link_test(trader: Trader = Depends(auth.current_trader)):
+    """Testowy DM na sparowane konto — dowód, że połączenie bot→admin działa
+    (a nie tylko, że kod został skonsumowany)."""
+    if not trader.is_admin:
+        raise HTTPException(404, "Not Found")
+    if not trader.telegram_user_id:
+        raise HTTPException(400, "Telegram is not linked yet")
+    # W prywatnym czacie chat_id == id użytkownika, więc uid wystarcza.
+    ok, powod = telegram.send_dm(
+        trader.telegram_user_id,
+        f"Test from the panel — this connection works. "
+        f"Your clicks on the LEADS channel sign as {trader.email}.")
+    if not ok:
+        raise HTTPException(502, f"Telegram refused: {powod or 'unknown'}")
+    return {"ok": True}
 
 
 # --- Telemetria -------------------------------------------------------------
@@ -5752,7 +5784,12 @@ def _telegram_start(wiadomosc: dict) -> dict:
             return {"ok": True}
         for inny in session.query(Trader).filter(Trader.telegram_user_id == uid).all():
             inny.telegram_user_id = None
+            inny.telegram_username = None
         tr.telegram_user_id = uid
+        # Nick do panelu: po nim widać, KTÓRE konto Telegram się podpięło.
+        nadawca = wiadomosc.get("from") or {}
+        tr.telegram_username = (("@" + nadawca["username"]) if nadawca.get("username")
+                                else (nadawca.get("first_name") or ""))[:40] or None
         tr.telegram_link_code = None
         session.commit()
         email = tr.email

@@ -74,6 +74,9 @@ class Trader(Base):
     # jednorazowy — wydaje go panel, konsumuje `/start <kod>` w DM z botem.
     telegram_user_id: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
     telegram_link_code: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    # Nick (@username albo imię) złapany przy /start — panel pokazuje po nim,
+    # KTÓRE konto Telegram jest podpięte, nie tylko że „jakieś" jest.
+    telegram_username: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
     # Weryfikacja adresu e-mail: nowi traderzy dostają 6-cyfrowy kod przy
     # rejestracji; istniejące konta są uznane za zweryfikowane (DEFAULT TRUE).

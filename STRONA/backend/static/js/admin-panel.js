@@ -507,14 +507,7 @@ const VIEWS={
         <div id="push-cats" class="chip-row" style="margin-top:8px">${pushCatsHtml()}</div>
         <p class="muted" style="font-size:11.5px;margin-top:8px">Muted categories still land in the bell — they just stop buzzing.</p>
       </div>
-      <div class="mod-row" style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)">
-        <div><div class="lbl">Telegram identity</div>
-          <div class="muted" style="font-size:11.5px" id="tg-link-state">${ME&&ME.telegram_linked
-            ?`Linked — your clicks on the LEADS channel sign as <b>${esc(ME.email)}</b>`
-            :'Not linked — channel clicks sign with your Telegram first name'}</div></div>
-        <button class="btn-o" onclick="tgLinkCode()">${ME&&ME.telegram_linked?'Re-link':'Link Telegram'}</button>
-      </div>
-      <p class="muted" id="tg-link-code" style="font-size:12px;margin-top:8px"></p></div>
+      <div id="tg-identity">${tgIdentityHtml()}</div></div>
 
     <div class="sec-card" style="max-width:560px"><h3>Admin access</h3>
       <p class="muted" style="font-size:13px;margin:6px 0 12px">You are signed in with an administrator account. Access is granted by the <span class="mono">is_admin</span> flag on the account, not by a shared token.</p>
@@ -2574,13 +2567,63 @@ async function setPushCat(k,on){
     toast(on?'Will buzz again':'Muted — stays in the bell');
   }catch(e){toast('Error: '+e.message,'err')}
 }
+/* Tożsamość Telegrama z ŻYWYM statusem: po wydaniu kodu panel odpytuje
+   GET /api/me/telegram-link co 3 s i sam przełącza się na „Connected as @nick"
+   w chwili, gdy /start dojdzie — bez przeładowania. „Send test message" to
+   dowód działania połączenia w drugą stronę: bot pisze do admina DM. */
+function tgIdentityHtml(){
+  const linked=ME&&ME.telegram_linked;
+  return `<div class="mod-row" style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)">
+    <div><div class="lbl">Telegram identity</div>
+      <div class="muted" style="font-size:11.5px" id="tg-link-state">${linked
+        ?`<span style="color:var(--green)">●</span> Connected${ME.telegram_username?' as <b>'+esc(ME.telegram_username)+'</b>':''}
+           — channel clicks sign as <b>${esc(meMail())}</b>`
+        :'Not linked — channel clicks sign with your Telegram first name'}</div></div>
+    <div class="mod-btns">
+      ${linked?`<button class="btn-o" onclick="tgLinkTest(this)">Send test message</button>`:''}
+      <button class="btn-o" onclick="tgLinkCode()">${linked?'Re-link':'Link Telegram'}</button>
+    </div>
+  </div>
+  <p class="muted" id="tg-link-code" style="font-size:12px;margin-top:8px"></p>`;
+}
 async function tgLinkCode(){
   try{
     const d=await api('/api/me/telegram-link',{method:'POST'});
-    $('tg-link-code').innerHTML=`Open a <b>private chat with the desk bot</b> on Telegram and send:
-      <span class="mono" style="user-select:all">/start ${esc(d.code)}</span> — from then on your
-      clicks on the LEADS channel sign as <b>${esc(meMail())}</b>.`;
+    const bot=d.bot?`<a href="https://t.me/${esc(d.bot)}" target="_blank" rel="noopener"><b>@${esc(d.bot)}</b></a>`
+                   :'the <b>desk bot</b>';
+    $('tg-link-code').innerHTML=`Open a private chat with ${bot} on Telegram and send:
+      <span class="mono" style="user-select:all">/start ${esc(d.code)}</span>
+      <span id="tg-wait">— waiting for your message…</span>`;
+    tgPollLink(40);
   }catch(e){toast('Error: '+e.message,'err')}
+}
+let _tgPoll=0;
+async function tgPollLink(pozostalo){
+  clearTimeout(_tgPoll);
+  if(pozostalo<=0){
+    const w=$('tg-wait');
+    if(w)w.textContent='— nothing arrived in 2 minutes; send the code and reopen Settings.';
+    return;
+  }
+  try{
+    const st=await api('/api/me/telegram-link');
+    if(st.linked){
+      ME.telegram_linked=true;ME.telegram_username=st.username;
+      const box=$('tg-identity');
+      if(box)box.innerHTML=tgIdentityHtml();
+      toast('✅ Telegram connected'+(st.username?' as '+st.username:''),'ok');
+      return;
+    }
+  }catch(_){/* chwilowy błąd sieci — następna próba za 3 s */}
+  _tgPoll=setTimeout(()=>tgPollLink(pozostalo-1),3000);
+}
+async function tgLinkTest(btn){
+  btn.disabled=true;btn.textContent='Sending…';
+  try{
+    await api('/api/me/telegram-link/test',{method:'POST'});
+    toast('📨 Test sent — check your Telegram','ok');
+  }catch(e){toast('Test failed: '+e.message,'err')}
+  btn.disabled=false;btn.textContent='Send test message';
 }
 async function paintPushCard(){
   const btn=$('push-btn'),st=$('push-state');

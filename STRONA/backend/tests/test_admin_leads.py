@@ -1222,12 +1222,16 @@ def _admin_z_tokenem(prefix="desk"):
 
 def test_sparowany_admin_podpisuje_sie_mailem(_srodowisko):
     email, tid, naglowki = _admin_z_tokenem()
+    # Przed sparowaniem status mówi wprost: nie połączono.
+    assert client.get("/api/me/telegram-link", headers=naglowki).json() == {
+        "linked": False, "username": None}
     kod = client.post("/api/me/telegram-link", headers=naglowki).json()["code"]
 
     odp = client.post("/api/telegram/webhook",
                       headers={"X-Telegram-Bot-Api-Secret-Token": SEKRET_WEBHOOKA},
                       json={"message": {"chat": {"id": 777, "type": "private"},
-                                        "from": {"id": 424242},
+                                        "from": {"id": 424242, "username": "gubi_desk",
+                                                 "first_name": "Hubert"},
                                         "text": f"/start {kod.lower()}"}})
     assert odp.status_code == 200
     assert any("Linked as" in t for _c, t in _srodowisko["dm"])
@@ -1235,14 +1239,31 @@ def test_sparowany_admin_podpisuje_sie_mailem(_srodowisko):
     try:
         tr = s.get(Trader, tid)
         assert (tr.telegram_user_id, tr.telegram_link_code) == ("424242", None)
+        assert tr.telegram_username == "@gubi_desk"
     finally:
         s.close()
+    # Panel odpytuje ten status po wydaniu kodu — „Connected as @…" na żywo.
+    assert client.get("/api/me/telegram-link", headers=naglowki).json() == {
+        "linked": True, "username": "@gubi_desk"}
 
     lead_id = _wyslij(_zgloszenie()).json()["id"]
     _callback(lead_id, "claim", kto="Bartek", uid=424242)
     lead = _lead(lead_id)
     assert lead.owner == email
     assert [z.actor for z in _zdarzenia(lead_id, "claim")] == [f"telegram:{email}"]
+
+    # Testowy DM = dowód, że połączenie bot→admin działa.
+    _srodowisko["dm"].clear()
+    assert client.post("/api/me/telegram-link/test",
+                       headers=naglowki).json() == {"ok": True}
+    assert _srodowisko["dm"] and _srodowisko["dm"][0][0] == "424242"
+    assert email in _srodowisko["dm"][0][1]
+
+
+def test_test_dm_bez_sparowania_to_400():
+    _email, _tid, naglowki = _admin_z_tokenem()
+    assert client.post("/api/me/telegram-link/test",
+                       headers=naglowki).status_code == 400
 
 
 def test_niesparowany_zostaje_przy_imieniu_a_zly_kod_nie_paruje(_srodowisko):

@@ -126,6 +126,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "google_sub": "VARCHAR(64)",
         "telegram_user_id": "VARCHAR(20)",
         "telegram_link_code": "VARCHAR(12)",
+        "telegram_username": "VARCHAR(40)",
     },
     "products": {
         "max_lots": "FLOAT DEFAULT 6.0",
