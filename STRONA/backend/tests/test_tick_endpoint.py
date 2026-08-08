@@ -66,6 +66,40 @@ def test_cron_wyzwala_tick_sekretem():
     assert ile >= 1
 
 
+def _baza_widziana_przez_bota(monkeypatch) -> str:
+    """Adres, z którego Payout BOT zbuduje link do certyfikatu w tym przebiegu."""
+    from app import main
+
+    widziane: list[str] = []
+    monkeypatch.setattr(main, "_payout_bot_tick",
+                        lambda base, **kw: widziane.append(base) or {})
+    r = client.get("/api/tick", headers={"Authorization": f"Bearer {USTAWIENIA.cron_secret}"})
+    assert r.status_code == 200
+    return widziane[0]
+
+
+def test_link_certyfikatu_nie_bierze_hosta_z_crona(monkeypatch):
+    """Cron Vercela puka pod adres wdrożenia (`*.vercel.app`), a ten stoi za
+    ochroną deploymentu. Sam cron wchodzi sekretem, ale przeglądarka usługi
+    robiącej zrzut już nie — i na publiczny kanał poszedł certyfikat będący
+    zdjęciem ekranu logowania Vercela. Ten link jako jedyny nie wraca do
+    nikogo, kto ogląda odpowiedź, więc host z żądania jest tu złym źródłem."""
+    from app import main
+
+    monkeypatch.setattr(main.settings, "app_base_url", "https://protradersfunding.com")
+    assert _baza_widziana_przez_bota(monkeypatch) == "https://protradersfunding.com"
+
+
+def test_bez_publicznego_app_base_url_zostaje_host_zadania(monkeypatch):
+    """Na localhoście APP_BASE_URL wskazuje na `http://localhost:8000`, więc
+    trzymanie się go dałoby link do cudzej maszyny. Wtedy host z żądania jest
+    jedynym adresem, który cokolwiek znaczy — i tak było tu od zawsze."""
+    from app import main
+
+    monkeypatch.setattr(main.settings, "app_base_url", "http://localhost:8000")
+    assert _baza_widziana_przez_bota(monkeypatch) == "http://testserver"
+
+
 def test_admin_tez_moze_szturchnac_silnik():
     _konto("tick-admin")
     r = client.post("/api/tick", headers={"X-Admin-Token": USTAWIENIA.admin_token})

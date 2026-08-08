@@ -4629,7 +4629,15 @@ async def api_tick(request: Request):
     # `maxDuration` funkcji i post nigdy by nie wyszedł. Dla payoutów cron jest
     # BACKSTOPEM (raz na dobę, po Hobby potrafi się spóźnić do godziny) —
     # publikuje od początku okna; wylosowany slot łapią ticki z ruchu strony.
-    payout = _payout_bot_tick(_public_base(request), backstop=True)
+    # Adres certyfikatu bierzemy z APP_BASE_URL, a NIE z hosta żądania — i tylko
+    # tutaj. Ten link nie wraca do nikogo, kto ogląda odpowiedź: idzie do usługi
+    # robiącej zrzut i stamtąd na publiczny kanał. Vercel woła crona pod adresem
+    # wdrożenia (`*.vercel.app`), a ten jest za ochroną deploymentu — cron ma
+    # własny sekret i wchodzi, ale przeglądarka usługi już nie i sfotografowała
+    # ekran logowania Vercela. Taki „certyfikat" wyszedł na kanał 2026-08-08.
+    baza = settings.app_base_url.rstrip("/")
+    payout = _payout_bot_tick(baza if baza.startswith("https://") else _public_base(request),
+                              backstop=True)
     wynik = await poller.tick_once()
     # Dzienny recap normalnie wychodzi z ruchu strony od 06:00 czasu polskiego
     # (middleware wyżej) — tu jest tylko zapasem na dzień bez wejść;
