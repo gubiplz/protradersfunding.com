@@ -1091,6 +1091,24 @@ function leadModCard(l){
   </div>`;
 }
 
+/* Closing the sale, from the same screen as the conversation. The Orders tab
+   cannot do this one: it picks a customer from the list of accounts, and a lead
+   has none until somebody pays. */
+function leadSellCard(l){
+  return `<div class="lead-card sec-card">
+    <div class="mod-row">
+      <div><div class="lbl">Sell a challenge</div>
+        <div class="muted" style="font-size:11.5px">Opens an unpaid order and copies a card payment link to send them.</div></div>
+      <button class="btn-p" onclick="sellToLead()">Payment link</button>
+    </div>
+  </div>`;
+}
+function sellToLead(){
+  const l=window._leadOpen;
+  if(!l)return;
+  openManualOrder(null,{id:l.id,email:l.email,name:l.name});
+}
+
 /* Osobna karta na dole, nie przycisk obok „Release": to jedyna operacja w tej
    zakładce, której nie da się cofnąć, i ma być trudniej ją kliknąć przez pomyłkę
    niż zmienić status. */
@@ -1175,7 +1193,9 @@ async function openLead(id){
   if(row)Object.assign(row,{owner:l.owner,tier:l.tier,status:l.status,note:l.note,
     next_due:l.next_due,contacted_at:l.contacted_at});
   /* copyOpener sięga tu, gdy wiersza nie ma w liście (deep-link z pusha,
-     zanim tabela się dociągnie). */
+     zanim tabela się dociągnie). Przyciski w szufladzie czytają leada stąd
+     z drugiego powodu: mail i nazwisko podane przez inline onclick trzeba by
+     wcisnąć w atrybut HTML, a nazwiska bywają z apostrofem. */
   window._leadOpen=l;
   const ev=l.events||[],ords=l.orders||[];
   openOver(l.name||l.email,`
@@ -1199,6 +1219,7 @@ async function openLead(id){
       ${Object.entries(l.answers).map(([q,v])=>`<div class="note-line"><span class="muted">${esc(q)}</span><br><b>${esc(v)}</b></div>`).join('')}
       <p class="muted" style="font-size:11.5px;margin-top:8px">From the latest application — earlier ones sit in the history below.</p></div>`:''}
     ${leadModCard(l)}
+    ${leadSellCard(l)}
     ${leadReminderCard(l)}
     ${l.note?`<div class="lead-card sec-card"><h4>Notes</h4>
       ${l.note.split('\n').filter(Boolean).map(n=>`<div class="note-line">${esc(n)}</div>`).join('')}
@@ -2306,14 +2327,19 @@ async function payoutImport(commit){
   }
 }
 
-/* ---------- modal: order paid outside Stripe (card link, crypto, transfer) ---------- */
-async function openManualOrder(traderId){
+/* ---------- modal: order paid outside Stripe (card link, crypto, transfer) ----------
+   Opens two ways. From Orders you pick an existing customer. From a lead card you
+   pass `lead` ({id,email,name}) and there is nobody to pick — the lead has no
+   account and will not open one just to receive a payment link. The backend
+   creates it from the e-mail, which is also the only way this ever shows up as
+   "Bought": that column is derived from traders by e-mail, not stored. */
+async function openManualOrder(traderId,lead){
   let products=[],traders=[];
   try{[products,traders]=await Promise.all([
-    (await fetch('/api/products')).json(),api('/api/admin/traders')])}
+    (await fetch('/api/products')).json(),lead?[]:api('/api/admin/traders')])}
   catch(e){toast('Error: '+e.message,'err');return}
-  if(!traders.length){toast('No registered traders yet.','err');return}
-  window._moTraders=traders;
+  if(!lead&&!traders.length){toast('No registered traders yet.','err');return}
+  window._moTraders=traders;window._moLead=lead||null;
   document.getElementById('order-modal')?.remove();
   const box=document.createElement('div');
   box.id='order-modal';box.className='modal-wrap';
@@ -2328,9 +2354,13 @@ async function openManualOrder(traderId){
         <button type="button" class="on" onclick="moMethod('crypto')">Crypto / transfer</button>
         <button type="button" onclick="moMethod('link')">Card payment link</button>
       </div>
-      <div><label class="muted" style="font-size:12px">Customer</label>
+      ${lead?`<div><label class="muted" style="font-size:12px">Customer</label>
+        <div class="inp" style="display:flex;flex-direction:column;gap:2px">
+          <b>${esc(lead.name||lead.email)}</b>
+          <span class="muted" style="font-size:12px">${esc(lead.email)}</span></div></div>`
+      :`<div><label class="muted" style="font-size:12px">Customer</label>
         <input id="mo-search" class="inp" style="margin-bottom:7px" placeholder="Search by e-mail or name" oninput="moFilter()">
-        <select id="mo-trader" class="inp" size="5"></select></div>
+        <select id="mo-trader" class="inp" size="5"></select></div>`}
       <div><label class="muted" style="font-size:12px">Challenge</label>
         <select id="mo-product" class="inp" onchange="moPrice()">${products.map(p=>
           `<option value="${esc(p.key)}" data-price="${p.price_usd}">${esc(p.label)} — $${fmt0(p.account_size)} · $${fmt(p.price_usd)}</option>`).join('')}</select></div>
@@ -2354,24 +2384,34 @@ async function openManualOrder(traderId){
     </div></div>`;
   box.onclick=()=>box.remove();
   document.body.appendChild(box);
-  moMethod(window._moMethod||'crypto');
-  moFilter(traderId);
+  /* A lead is always here to be sent a link, so start there. */
+  moMethod(lead?'link':(window._moMethodPref||'crypto'));
+  if(!lead)moFilter(traderId);
   moPrice();
 }
 /* Jak klient płaci. Link kartą nie ma nic wspólnego z portfelem, więc pola
    crypto znikają — inaczej admin wysyłałby maila z adresem USDT komuś, kogo
-   właśnie kieruje do kasy Stripe'a. */
+   właśnie kieruje do kasy Stripe'a.
+
+   Dwie różne rzeczy trzymamy celowo osobno: `_moMethod` to stan TEGO okna i
+   z niego czyta `submitManualOrder`, a `_moMethodPref` to zapamiętany domyślny
+   wybór zakładki Orders. Lead zawsze startuje na linku i nie ma prawa tego
+   wyboru nadpisać następnym otwarciom. */
 function moMethod(m){
   window._moMethod=m;
+  if(!window._moLead)window._moMethodPref=m;
   const link=m==='link';
   $('mo-method').querySelectorAll('button').forEach((b,i)=>b.classList.toggle('on',(i===1)===link));
   $('mo-crypto').style.display=link?'none':'';
   $('mo-go').textContent=link?'Create order & copy payment link':'Create order';
-  $('mo-lead').innerHTML=link
+  $('mo-lead').innerHTML=(link
     ?`The order lands as <b>unpaid</b> and you get a link to our payment page — send it to the customer
       (Telegram, chat, e-mail). They pay by card, the account is created automatically. The link never expires.`
     :`For a customer paying outside Stripe — crypto or a transfer.
-      The order lands as <b>unpaid</b>; the account is created only when you hit <b>Mark paid</b>, exactly like a card payment.`;
+      The order lands as <b>unpaid</b>; the account is created only when you hit <b>Mark paid</b>, exactly like a card payment.`)
+    +(window._moLead?`<br><br>This lead has no account yet, so one is opened on their e-mail.
+      They have no password for it — they get in through <b>“Forgot password?”</b>. Once the
+      payment goes through, the lead shows up as <b>Bought</b> on its own.`:'');
 }
 function moFilter(preselect){
   const q=($('mo-search').value||'').toLowerCase();
@@ -2390,8 +2430,9 @@ function moPrice(){
   if(o)$('mo-amount').value=o.dataset.price;
 }
 async function submitManualOrder(){
-  const tid=parseInt($('mo-trader').value);
-  if(!tid){toast('Pick a customer first.','err');return}
+  const lead=window._moLead;
+  const tid=lead?0:parseInt($('mo-trader').value);
+  if(!lead&&!tid){toast('Pick a customer first.','err');return}
   const amount=parseFloat($('mo-amount').value);
   if(!(amount>=0)){toast('Enter the amount to collect.','err');return}
   const link=window._moMethod==='link';
@@ -2400,15 +2441,22 @@ async function submitManualOrder(){
   if(addr)saveWallet(addr,net);
   try{
     const r=await api('/api/admin/orders',{method:'POST',body:JSON.stringify({
-      trader_id:tid,product_key:$('mo-product').value,amount_usd:amount,
+      ...(lead?{email:lead.email}:{trader_id:tid}),
+      product_key:$('mo-product').value,amount_usd:amount,
       flag:(!link&&$('mo-awaiting').checked)?'awaiting_crypto':'',
       payment_address:addr,payment_network:net,
       notify_trader:!link&&$('mo-mail').checked})});
     document.getElementById('order-modal')?.remove();
-    if(link){await payLink(r.id,`Order #${r.id} for ${r.trader_email} — $${fmt(r.amount_usd)}.`)}
+    // Nowe konto trzeba powiedzieć wprost: klient go nie zakładał i nie zna
+    // hasła, więc dział musi wiedzieć, co odpowiedzieć na "nie mogę się zalogować".
+    const konto=r.trader_created?' New account opened — they log in via “Forgot password?”.':'';
+    if(link){await payLink(r.id,`Order #${r.id} for ${r.trader_email} — $${fmt(r.amount_usd)}.${konto}`)}
     else{const [txt,kind]=mailInfo(r);
-      toast(`🧾 Order #${r.id} for ${r.trader_email} — $${fmt(r.amount_usd)}. ${txt}`,kind,9000)}
-    go('orders');
+      toast(`🧾 Order #${r.id} for ${r.trader_email} — $${fmt(r.amount_usd)}. ${txt}${konto}`,kind,9000)}
+    // Z karty leada zostajemy przy leadzie: nowe zamówienie dopisuje się do
+    // jego tabeli Orders, a skok do zakładki Orders gubiłby miejsce w robocie.
+    if(lead){await openLead(lead.id);renderLeads()}
+    else go('orders');
   }catch(e){toast('Error: '+e.message,'err')}
 }
 

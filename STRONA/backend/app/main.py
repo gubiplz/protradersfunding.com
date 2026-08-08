@@ -3512,7 +3512,11 @@ def admin_order_delete(order_id: int):
 
 
 class ManualOrderIn(BaseModel):
-    trader_id: int
+    # Właściciel zamówienia przychodzi na jeden z dwóch sposobów: `trader_id` z
+    # listy klientów albo sam `email` — z karty leada, gdzie konta jeszcze nie
+    # ma i nie będzie, dopóki ktoś nie zapłaci.
+    trader_id: int | None = None
+    email: str | None = None
     product_key: str
     amount_usd: float | None = None
     flag: str = "awaiting_crypto"
@@ -3553,6 +3557,52 @@ def _mail_oczekujemy_na_platnosc(session, o: Order) -> bool:
     return True
 
 
+def _wlasciciel_zamowienia(session, payload: ManualOrderIn) -> tuple[Trader, bool]:
+    """Trader, na którego idzie ręczne zamówienie. Zwraca `(trader, świeżo założony)`.
+
+    Wariant po mailu istnieje dla leada bez konta. Sprzedaż dogaduje się na
+    Telegramie i nikt nie zakłada konta po to, żeby dostać link do zapłaty —
+    a bez konta zamówienia nie ma na czym powiesić. Konto powstaje więc tutaj,
+    dokładnie tak jak przy imporcie wypłat (`payout_import.zapisz`): hasła nie
+    znamy i nie wymyślamy, klient wchodzi przez „forgot password".
+
+    To jest zarazem jedyna droga, żeby panel leadów kiedykolwiek pokazał
+    „Bought". Ta kolumna nie jest zapisywana, tylko liczona przy odczycie —
+    lead → trader po mailu → suma zapłaconych zamówień. Bez konta pieniądze nie
+    miałyby jak wrócić na kartę leada, choćby wpłynęły.
+    """
+    if payload.trader_id is not None:
+        trader = session.get(Trader, payload.trader_id)
+        if not trader or trader.is_admin:
+            raise HTTPException(404, "Trader not found")
+        return trader, False
+
+    email = (payload.email or "").strip().lower()
+    if not _EMAIL_RX.fullmatch(email):
+        raise HTTPException(400, "Enter a valid e-mail address")
+    # Po `lower()`, bo maile w bazie bywają z wielkiej litery (import, Google) i
+    # dopasowanie 1:1 założyłoby drugie konto na ten sam adres.
+    trader = session.query(Trader).filter(func.lower(Trader.email) == email).first()
+    if trader:
+        if trader.is_admin:
+            raise HTTPException(404, "Trader not found")
+        return trader, False
+
+    # Nazwisko z leada, a nie puste: idzie stąd na konto MT5 i na certyfikaty.
+    lead = session.query(Lead).filter(func.lower(Lead.email) == email).first()
+    for _ in range(5):
+        code = _gen_ref_code()
+        if not session.query(Trader).filter(Trader.referral_code == code).first():
+            break
+    trader = Trader(email=email,
+                    password_hash=auth.hash_password(secrets.token_urlsafe(24)),
+                    full_name=((lead.name if lead else "") or "")[:120],
+                    referral_code=code)
+    session.add(trader)
+    session.flush()
+    return trader, True
+
+
 @app.post("/api/admin/orders", dependencies=[Depends(auth.require_admin)])
 def admin_order_create(payload: ManualOrderIn):
     """Ręcznie wystawione zamówienie — klient płaci poza Stripe'em (crypto, przelew).
@@ -3562,14 +3612,14 @@ def admin_order_create(payload: ManualOrderIn):
     cena z cennika) — kuponów i kredytów sklepowych tu nie liczymy, bo robi to
     checkout; przy ręcznym zamówieniu cenę ustala admin i nic nie schodzi
     z salda klienta przed wpłatą.
+
+    Klienta wskazuje `trader_id` albo `email` — patrz `_wlasciciel_zamowienia`.
     """
     if payload.flag not in ("", "awaiting_crypto"):
         raise HTTPException(400, "Unknown flag")
     session = SessionLocal()
     try:
-        trader = session.get(Trader, payload.trader_id)
-        if not trader or trader.is_admin:
-            raise HTTPException(404, "Trader not found")
+        trader, nowy_trader = _wlasciciel_zamowienia(session, payload)
         produkt = (session.query(Product)
                    .filter(Product.key == payload.product_key, Product.active == True)  # noqa: E712
                    .first())
@@ -3590,6 +3640,9 @@ def admin_order_create(payload: ManualOrderIn):
         return {"id": o.id, "trader_email": trader.email, "product_key": o.product_key,
                 "amount_usd": o.amount_usd, "status": o.status, "flag": o.flag,
                 "emailed": wyslany,
+                # Panel mówi wprost, że przy okazji powstało konto — inaczej
+                # nikt nie wie, że lead ma się logować przez „forgot password".
+                "trader_created": nowy_trader,
                 # Panel ma powiedzieć adminowi, że mail poszedł BEZ adresu portfela,
                 # zamiast zostawiać go w przekonaniu, że klient wie, gdzie zapłacić.
                 "payment_details": bool(o.payment_address or settings.crypto_wallet)}

@@ -18,12 +18,13 @@ os.environ.setdefault("AUTO_SEED", "false")
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy import func  # noqa: E402
 
 from app import auth, catalog, notify  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Order, Product, Trader  # noqa: E402
+from app.models import Lead, Order, Product, Trader  # noqa: E402
 
 init_db()
 s = SessionLocal(); catalog.seed_products(s); s.close()
@@ -65,6 +66,23 @@ def _trader(*, credits: float = 0.0, marketing: bool = True) -> tuple[int, str]:
 def _dodaj(tid: int, **kw):
     body = {"trader_id": tid, "product_key": "2step-25k", **kw}
     return client.post("/api/admin/orders", json=body, headers=ADMIN)
+
+
+def _dodaj_po_mailu(email: str, **kw):
+    """Zamówienie wystawione na sam adres — ścieżka z karty leada."""
+    body = {"email": email, "product_key": "2step-25k", "flag": "",
+            "notify_trader": False, **kw}
+    return client.post("/api/admin/orders", json=body, headers=ADMIN)
+
+
+def _mail_leada() -> str:
+    """Adres nietknięty przez inne pliki testów.
+
+    `DATABASE_URL` ustawia `setdefault`, więc cały pakiet dzieli JEDNĄ bazę,
+    a licznik jest osobny w każdym module — `lead1@test.pl` zajmuje już
+    `test_admin_leads.py` i kolizja wychodzi dopiero w pełnym przebiegu.
+    """
+    return f"lead{next(LICZNIK)}@manual-orders.test"
 
 
 def test_reczne_zamowienie_powstaje_jako_nieoplacone(maile):
@@ -308,6 +326,121 @@ def test_domkniecie_recznej_platnosci_tworzy_konto(maile):
     # Ręczne zamówienie to normalny przychód, nie grant — `provider` musi zostać.
     assert o.provider == "manual"
     s.close()
+
+
+def test_zamowienie_po_mailu_zaklada_konto(maile):
+    """Lead dogadany na Telegramie nie ma konta i nie założy go po to, żeby
+    dostać link do zapłaty. Konto powstaje przy wystawianiu zamówienia."""
+    email = _mail_leada()
+    d = _dodaj_po_mailu(email).json()
+    assert d["trader_created"] is True and d["trader_email"] == email
+    s = SessionLocal()
+    tr = s.query(Trader).filter(Trader.email == email).one()
+    # Hasła nie znamy i nie wymyślamy — klient wchodzi przez „forgot password".
+    # Gdyby dało się je zgadnąć, link do zapłaty rozdawałby cudze konta.
+    assert client.post("/api/auth/login",
+                       json={"email": email, "password": ""}).status_code >= 400
+    assert s.get(Order, d["id"]).trader_id == tr.id
+    s.close()
+
+
+def test_lead_wchodzi_na_swoje_konto_przez_reset_hasla(maile):
+    """Panel obiecuje leadowi wejście przez „Forgot password?" i to musi być prawda.
+
+    Konto zakłada mu dział, więc hasła nie zna nikt. Gdyby ta droga nie działała,
+    człowiek zapłaciłby za challenge i nie wszedłby po swoje konto MT5 — a jedyne,
+    co dostał, to link do zapłaty.
+    """
+    email = _mail_leada()
+    _dodaj_po_mailu(email)
+    assert client.post("/api/auth/forgot", json={"email": email}).status_code == 200
+    reset_url = [m for m in maile if m[1] == email][0][2]["reset_url"]
+    token = reset_url.split("reset=")[1]
+    assert client.post("/api/auth/reset",
+                       json={"token": token, "password": "noweHaslo123"}).status_code == 200
+    assert client.post("/api/auth/login",
+                       json={"email": email, "password": "noweHaslo123"}).status_code == 200
+
+
+def test_lead_nie_wpada_w_slepa_uliczke_przy_rejestracji(maile):
+    """Lead nie wie, że ma już konto — więc naturalnie spróbuje się zarejestrować.
+
+    Signup odpowiada niepotwierdzonym adresom „zaloguj się, wyślemy nowy kod"
+    (main.py:758). Dla kogoś, komu konto założył dział i kto hasła nie zna, to
+    ślepa uliczka kończąca się supportem. Trzyma nas domyślne `email_verified=True`
+    z modelu, którego nasz kod nigdzie nie ustawia jawnie — stąd ten test.
+    """
+    email = _mail_leada()
+    _dodaj_po_mailu(email)
+    r = client.post("/api/auth/signup", json={"email": email, "password": "haslo12345",
+                                              "full_name": "Jan Testowy", "terms_accepted": True})
+    assert r.status_code == 400
+    assert "Forgot password" in r.json()["detail"]
+
+
+def test_znany_mail_nie_zaklada_drugiego_konta(maile):
+    """Maile w bazie bywają z wielkiej litery (import, Google). Dopasowanie 1:1
+    zrobiłoby drugie konto na ten sam adres i rozbiło historię klienta na pół."""
+    tid, email = _trader()
+    d = _dodaj_po_mailu(email.upper()).json()
+    assert d["trader_created"] is False
+    s = SessionLocal()
+    assert s.query(Trader).filter(func.lower(Trader.email) == email.lower()).count() == 1
+    assert s.get(Order, d["id"]).trader_id == tid
+    s.close()
+
+
+def test_nowe_konto_bierze_nazwisko_z_leada(maile):
+    """Nazwisko idzie stąd na konto MT5 i na certyfikaty — puste zostawiłoby
+    rachunek bez właściciela, choć lead podał je w formularzu."""
+    email = _mail_leada()
+    s = SessionLocal()
+    s.add(Lead(email=email, name="Anna Nowak")); s.commit(); s.close()
+    _dodaj_po_mailu(email)
+    s = SessionLocal()
+    assert s.query(Trader).filter(Trader.email == email).one().full_name == "Anna Nowak"
+    s.close()
+
+
+def test_zaplacone_zamowienie_zapala_bought_na_karcie_leada(maile):
+    """Sedno całej ścieżki: lead → link do zapłaty → wpłata → „Bought" w panelu.
+
+    Kolumna nie jest zapisywana, tylko liczona z traderów po mailu, więc gdyby
+    zamówienie poszło na konto z innym adresem, dział widziałby leada jako
+    niekupującego mimo zaksięgowanej wpłaty.
+    """
+    email = _mail_leada()
+    s = SessionLocal()
+    s.add(Lead(email=email, name="Kupujacy Lead")); s.commit(); s.close()
+
+    d = _dodaj_po_mailu(email, amount_usd=349).json()
+    def karta():
+        return [l for l in client.get("/api/admin/leads", headers=ADMIN).json()
+                if l["email"] == email][0]
+
+    # Samo wystawienie linku to jeszcze nie sprzedaż — dopóki nie zapłacił,
+    # dział ma go dalej traktować jak leada.
+    assert karta()["paid_usd"] == 0
+    assert client.post(f"/api/admin/orders/{d['id']}/mark-paid",
+                       headers=ADMIN).status_code == 200
+    assert karta()["paid_usd"] == 349
+
+
+def test_link_do_zaplaty_dziala_dla_konta_zalozonego_z_maila(maile):
+    """Link jest jedyną rzeczą, którą lead dostaje. Strona /pay musi go przyjąć
+    bez logowania — konto istnieje, ale on nie zna do niego hasła."""
+    email = _mail_leada()
+    oid = _dodaj_po_mailu(email).json()["id"]
+    url = client.post(f"/api/admin/orders/{oid}/pay-link", headers=ADMIN).json()["url"]
+    assert client.get(url.split("testserver")[-1]).status_code == 200
+
+
+def test_zamowienie_bez_klienta_odrzucone(maile):
+    """Puste żądanie nie może cicho założyć konta na adres z literówki."""
+    for body in ({"product_key": "2step-25k"},
+                 {"email": "to-nie-jest-mail", "product_key": "2step-25k"},
+                 {"email": "", "product_key": "2step-25k"}):
+        assert client.post("/api/admin/orders", json=body, headers=ADMIN).status_code == 400
 
 
 def test_recznemu_zamowieniu_nie_dosyla_maila_o_porzuconym_koszyku(maile):
