@@ -85,7 +85,10 @@ def _strzal(metoda: str, pola: dict[str, str],
     odrzucił zdjęcie", a admin musi grzebać w logach hostingu, żeby dowiedzieć
     się, że bot po prostu nie jest administratorem kanału.
     """
-    if not is_enabled():
+    # Tu sprawdzamy WYŁĄCZNIE token, bo to on jest w URL-u. Czy cel wysyłki
+    # istnieje, wie tylko wywołujący: kanał z wypłatami i czat z leadami są
+    # niezależne i jeden ma prawo działać, gdy drugi jest nieskonfigurowany.
+    if not settings.telegram_bot_token:
         return False, "no bot token or channel"
     body, content_type = _multipart(pola, plik)
     url = f"{API}/bot{settings.telegram_bot_token}/{metoda}"
@@ -109,6 +112,8 @@ def _strzal(metoda: str, pola: dict[str, str],
 
 def send_photo(png: bytes, caption: str, *, transport=None) -> tuple[bool, str]:
     """Grafika + podpis pod nią. `caption` w HTML-u (limit Telegrama: 1024 znaki)."""
+    if not is_enabled():
+        return False, "no bot token or channel"
     return _strzal("sendPhoto",
                    {"chat_id": settings.telegram_chat_id, "caption": caption[:1024],
                     "parse_mode": "HTML"},
@@ -121,7 +126,67 @@ def send_message(text: str, *, transport=None) -> tuple[bool, str]:
     Lepiej opublikować wpis bez obrazka niż nie opublikować nic: wypłata już
     istnieje i ma publiczny certyfikat, więc cisza na kanale byłaby myląca.
     """
+    if not is_enabled():
+        return False, "no bot token or channel"
     return _strzal("sendMessage",
                    {"chat_id": settings.telegram_chat_id, "text": text[:4096],
                     "parse_mode": "HTML", "disable_web_page_preview": "false"},
+                   None, transport)
+
+
+# --------------------------------------------------------------------------- #
+#  Leady — prywatny czat, wiadomość z przyciskami                             #
+# --------------------------------------------------------------------------- #
+# Ten sam bot, ale INNY czat niż kanał z wypłatami: tamten jest publiczny,
+# a tu leci imię, mail i telefon człowieka. Pomyłka w tym miejscu to wyciek
+# danych na oczach klientów, więc czat jest osobną zmienną, nie parametrem
+# z wartością domyślną.
+
+# Przyciski pod alertem. Opisy odpowiadają temu, co dzieje się po telefonie,
+# a nie nazwom w bazie — klikający ma na ekranie telefon, nie schemat tabeli.
+LEAD_BUTTONS = (("✅ Odebrał", "called"),
+                ("📵 Nie odbiera", "no_answer"),
+                ("❌ Odpada", "rejected"))
+
+
+def leads_enabled() -> bool:
+    return settings.telegram_leads_enabled
+
+
+def send_lead_alert(lead_id: int, text: str, *, transport=None) -> tuple[bool, str]:
+    """Alert o nowym leadzie z trzema przyciskami statusu.
+
+    `callback_data` musi zmieścić się w 64 bajtach, stąd samo `lead:<id>:<status>`
+    zamiast czegokolwiek opisowego — resztę webhook dobiera z bazy po id.
+    """
+    if not leads_enabled():
+        return False, "no bot token or leads chat"
+    klawiatura = {"inline_keyboard": [[{"text": opis, "callback_data": f"lead:{lead_id}:{stan}"}]
+                                      for opis, stan in LEAD_BUTTONS]}
+    return _strzal("sendMessage",
+                   {"chat_id": settings.telegram_leads_chat_id, "text": text[:4096],
+                    "parse_mode": "HTML", "disable_web_page_preview": "true",
+                    "reply_markup": json.dumps(klawiatura)},
+                   None, transport)
+
+
+def answer_callback(callback_id: str, text: str, *, transport=None) -> tuple[bool, str]:
+    """Zdejmuje „zegarek" z przycisku. Bez tej odpowiedzi Telegram kręci kółkiem
+    przez minutę i klikający nie wie, czy cokolwiek się stało."""
+    return _strzal("answerCallbackQuery",
+                   {"callback_query_id": callback_id, "text": text[:200]},
+                   None, transport)
+
+
+def edit_lead_message(chat_id: str, message_id: int, text: str,
+                      *, transport=None) -> tuple[bool, str]:
+    """Przepisuje alert po kliknięciu i USUWA przyciski (brak `reply_markup`).
+
+    Wiadomość zostaje w historii jako zapis tego, co wybrano — inaczej czat
+    z leadami wygląda po tygodniu tak samo jak przed pierwszym telefonem.
+    """
+    return _strzal("editMessageText",
+                   {"chat_id": chat_id, "message_id": str(message_id),
+                    "text": text[:4096], "parse_mode": "HTML",
+                    "disable_web_page_preview": "true"},
                    None, transport)

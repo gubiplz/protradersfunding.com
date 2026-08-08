@@ -35,6 +35,9 @@
 .mini i{display:block;height:100%;border-radius:99px}
 .mini .ok{background:var(--green2)} .mini .warn{background:#f59e0b} .mini .bad{background:#ef4444}
 tr.clickable{cursor:pointer}
+/* editable fields inside a row: full-size .inp is 44px tall, which turns a list
+   of thirty leads into a page of boxes with the data lost between them */
+.tbl .inp.sm{padding:6px 9px;font-size:12.5px;border-radius:8px}
 
 /* action items on the overview */
 .todo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-bottom:18px}

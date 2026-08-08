@@ -10,6 +10,7 @@ Uruchomienie:  uvicorn app.main:app --reload  (z katalogu backend/)
 """
 from __future__ import annotations
 
+import html
 import json
 import os
 import random
@@ -36,10 +37,10 @@ from . import (achievements, auth, billing, catalog, certshot, countries, fields
                poller, provisioning, push, rules, telegram, telemetry, tradebot)
 from .config import get_settings
 from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint
-from .models import (Account, AchievementReward, AppSetting, Breach, Certificate, CreditLedger,
-                     EquitySnapshot, JournalEntry, KycFile, Notification, Order, Payout,
-                     PayoutRequest, PoolAccount, Product, PushSubscription, RewardCode,
-                     SupportTicket, TelemetryEvent, TicketMessage, Trade, Trader)
+from .models import (LEAD_STATUSES, Account, AchievementReward, AppSetting, Breach, Certificate,
+                     CreditLedger, EquitySnapshot, JournalEntry, KycFile, Lead, Notification,
+                     Order, Payout, PayoutRequest, PoolAccount, Product, PushSubscription,
+                     RewardCode, SupportTicket, TelemetryEvent, TicketMessage, Trade, Trader)
 
 settings = get_settings()
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
@@ -4945,6 +4946,284 @@ def public_recent_certificates():
         return data
     finally:
         session.close()
+
+
+# --------------------------------------------------------------------------- #
+#  Leady z landingu                                                            #
+# --------------------------------------------------------------------------- #
+# Landing zbierający zgłoszenia stoi na osobnym hostingu i osobnej domenie.
+# Wysyła tu leada POST-em i to cała integracja — nie ma dostępu do bazy, nie
+# loguje się do panelu, nie wie o niczym poza adresem tego endpointu i swoim
+# tokenem. Odwrotnie też: nic tutaj nie oddzwania na landing.
+#
+# Status „czy kupił" nie jest kolumną w `leads`, tylko wynikiem złączenia po
+# mailu z `traders`/`orders` przy odczycie. Kolumna dawałaby się rozjechać
+# z prawdą (ktoś kupuje w nocy, nikt nie odklika), a tak rozjechać się nie ma czym.
+
+
+def _lead_wymaga_tokenu(podany: str | None) -> None:
+    """Sekret landingu, celowo inny niż token admina.
+
+    Landing jest publiczną stroną na cudzym hostingu; gdy wycieknie mu ten
+    token, ktoś obcy może najwyżej dopisać leada. Gdyby to był ADMIN_TOKEN,
+    ten sam wyciek oddawałby panel z kontami i wypłatami.
+    """
+    oczekiwany = settings.lead_ingest_token
+    if not oczekiwany or not podany or not secrets.compare_digest(podany, oczekiwany):
+        raise HTTPException(401, "Unauthorized")
+
+
+class LeadIn(BaseModel):
+    # `extra="allow"`, bo landing przysyła więcej pól, niż wystawiamy w kolumnach
+    # (odpowiedzi z ankiety, uzasadnienie oceny, UA), a całość ląduje w
+    # `payload_json`. Zawężenie modelu po cichu obcięłoby to, co dział czyta.
+    model_config = {"extra": "allow"}
+
+    email: str
+    name: str = ""
+    phone: str | None = None
+    phoneIso: str | None = None
+    telegram: str | None = None
+    country: str | None = None
+    source: str = ""
+    ref: str | None = None
+    outcome: str = "qualified"
+    quality: dict | None = None
+
+
+def _tekst_alertu(lead: Lead, dane: dict) -> str:
+    """Treść wiadomości na Telegram. WSZYSTKO od użytkownika przez html.escape:
+    imię z formularza trafia do wiadomości z `parse_mode=HTML`, więc jeden
+    nawias kątowy w nazwisku potrafiłby rozsypać cały alert."""
+    e = html.escape
+    emoji = {"high": "🔥", "warm": "🟡", "cold": "⚪️"}.get(lead.tier or "", "•")
+    naglowek = f"{emoji} <b>{e(lead.name or lead.email)}</b>"
+    if lead.tier:
+        naglowek += f" — {e(lead.tier.upper())} {lead.score}"
+    if lead.outcome == "not_qualified":
+        naglowek += " (odpadł w ankiecie)"
+
+    linie = [naglowek, f"✉️ {e(lead.email)}"]
+    if lead.phone:
+        kraj = f" ({e(lead.phone_iso)})" if lead.phone_iso else ""
+        linie.append(f"📞 {e(lead.phone)}{kraj}")
+    if lead.telegram:
+        linie.append(f"💬 {e(lead.telegram)}")
+    zrodlo = " / ".join(x for x in (lead.source, lead.ref) if x)
+    if zrodlo:
+        linie.append(f"🔗 {e(zrodlo)}")
+    if lead.applications > 1:
+        linie.append(f"↻ zgłasza się {lead.applications}. raz")
+
+    odpowiedzi = dane.get("answers") or {}
+    if isinstance(odpowiedzi, dict):
+        for pytanie, odp in list(odpowiedzi.items())[:4]:
+            linie.append(f"• {e(str(pytanie))[:80]} — <b>{e(str(odp))[:60]}</b>")
+    return "\n".join(linie)
+
+
+def _zapisz_status(lead: Lead, status: str) -> None:
+    """Jedno miejsce zmiany statusu — woła to i panel, i przycisk z Telegrama.
+
+    `contacted_at` ustawia się raz, przy pierwszym ruszeniu z „new": to moment
+    pierwszego kontaktu, a nie ostatniego, więc kolejne kliknięcia go nie ruszają.
+    """
+    if status not in LEAD_STATUSES:
+        raise HTTPException(400, f"Unknown status: {status}")
+    if status != "new" and lead.contacted_at is None:
+        lead.contacted_at = datetime.now(timezone.utc)
+    lead.status = status
+    lead.updated_at = datetime.now(timezone.utc)
+
+
+@app.post("/api/leads/ingest")
+def leads_ingest(payload: LeadIn,
+                 x_lead_token: str | None = Header(default=None)):
+    """Przyjmuje zgłoszenie z landingu. Jeden wiersz na maila.
+
+    Ponowne zgłoszenie NADPISUJE dane kontaktowe i podbija licznik, ale nie
+    dotyka `status`, `note` ani `contacted_at` — to praca działu i formularz
+    wypełniony drugi raz nie ma prawa jej skasować.
+    """
+    _lead_wymaga_tokenu(x_lead_token)
+
+    dane = payload.model_dump()
+    email = (payload.email or "").strip().lower()
+    if "@" not in email:
+        raise HTTPException(400, "Invalid email")
+    ocena = payload.quality or {}
+
+    session = SessionLocal()
+    try:
+        lead = session.query(Lead).filter(Lead.email == email).one_or_none()
+        nowy = lead is None
+        if nowy:
+            lead = Lead(email=email)
+            session.add(lead)
+        else:
+            lead.applications = (lead.applications or 1) + 1
+
+        lead.name = (payload.name or "")[:120]
+        lead.phone = (payload.phone or None)
+        lead.phone_iso = (payload.phoneIso or None)
+        lead.telegram = (payload.telegram or None)
+        lead.country = (payload.country or None)
+        lead.source = (payload.source or "")[:40]
+        lead.ref = (payload.ref or None)
+        lead.outcome = "not_qualified" if payload.outcome == "not_qualified" else "qualified"
+        lead.tier = ocena.get("tier") or None
+        lead.score = int(ocena.get("score") or 0)
+        lead.payload_json = json.dumps(dane, ensure_ascii=False)[:20000]
+        lead.updated_at = datetime.now(timezone.utc)
+
+        session.commit()
+        lead_id, tekst = lead.id, _tekst_alertu(lead, dane)
+    finally:
+        session.close()
+
+    # Po commicie i best-effort: lead jest już zapisany, więc padnięty Telegram
+    # nie ma prawa zwrócić landingowi błędu i kazać człowiekowi klikać drugi raz.
+    telegram.send_lead_alert(lead_id, tekst)
+    return {"ok": True, "id": lead_id, "new": nowy}
+
+
+@app.get("/api/admin/leads", dependencies=[Depends(auth.require_admin)])
+def admin_leads(status: str | None = None, q: str | None = None):
+    """Lista leadów z doliczonym „czy kupił".
+
+    Trzy zapytania zamiast jednego na lead: leady, pasujący traderzy po mailu,
+    suma zapłaconych zamówień. Przy setce leadów pętla z osobnym SELECT-em na
+    każdego byłaby niezauważalna, przy tysiącu już nie.
+    """
+    session = SessionLocal()
+    try:
+        query = session.query(Lead)
+        if status:
+            query = query.filter(Lead.status == status)
+        if q:
+            like = f"%{q.strip().lower()}%"
+            query = query.filter(func.lower(Lead.email).like(like) |
+                                 func.lower(Lead.name).like(like))
+        leady = query.order_by(Lead.created_at.desc()).all()
+
+        maile = [l.email for l in leady]
+        traderzy: dict[str, int] = {}
+        zaplacone: dict[int, float] = {}
+        if maile:
+            traderzy = {e.lower(): i for i, e in
+                        session.query(Trader.id, Trader.email)
+                        .filter(func.lower(Trader.email).in_(maile)).all()}
+            if traderzy:
+                zaplacone = dict(session.query(Order.trader_id, func.sum(Order.amount_usd))
+                                 .filter(Order.trader_id.in_(list(traderzy.values())),
+                                         Order.status == "paid")
+                                 .group_by(Order.trader_id).all())
+
+        wynik = []
+        for l in leady:
+            trader_id = traderzy.get(l.email)
+            try:
+                dane = json.loads(l.payload_json or "{}")
+            except ValueError:
+                dane = {}
+            wynik.append({
+                "id": l.id, "email": l.email, "name": l.name,
+                "phone": l.phone, "phone_iso": l.phone_iso, "telegram": l.telegram,
+                "country": l.country, "source": l.source, "ref": l.ref,
+                "outcome": l.outcome, "tier": l.tier, "score": l.score,
+                "status": l.status, "note": l.note,
+                "applications": l.applications,
+                "answers": dane.get("answers") or {},
+                "contacted_at": l.contacted_at.isoformat() if l.contacted_at else None,
+                "created_at": l.created_at.isoformat() if l.created_at else None,
+                # Wyliczane, nie przechowywane — patrz komentarz nad sekcją.
+                "trader_id": trader_id,
+                "paid_usd": round(float(zaplacone.get(trader_id, 0) or 0), 2),
+            })
+        return wynik
+    finally:
+        session.close()
+
+
+class LeadStatusIn(BaseModel):
+    status: str | None = None
+    note: str | None = None
+
+
+@app.post("/api/admin/leads/{lead_id}", dependencies=[Depends(auth.require_admin)])
+def admin_lead_update(lead_id: int, payload: LeadStatusIn):
+    """Zmiana statusu i/lub notatki. Pominięte pole zostaje bez zmian —
+    zapis notatki nie ma prawa cofnąć statusu ustawionego z telefonu."""
+    session = SessionLocal()
+    try:
+        lead = session.get(Lead, lead_id)
+        if not lead:
+            raise HTTPException(404, "Lead not found")
+        if payload.status is not None:
+            _zapisz_status(lead, payload.status)
+        if payload.note is not None:
+            lead.note = payload.note[:4000] or None
+            lead.updated_at = datetime.now(timezone.utc)
+        session.commit()
+        return {"id": lead.id, "status": lead.status, "note": lead.note,
+                "contacted_at": lead.contacted_at.isoformat() if lead.contacted_at else None}
+    finally:
+        session.close()
+
+
+@app.post("/api/telegram/webhook")
+async def telegram_webhook(request: Request,
+                           x_telegram_bot_api_secret_token: str | None = Header(default=None)):
+    """Kliknięcie przycisku pod alertem o leadzie.
+
+    Adres webhooka zna każdy, kto podejrzy ruch bota, więc jedyną kontrolą jest
+    sekret, który Telegram odsyła w nagłówku przy każdym update (parametr
+    `secret_token` w setWebhook). Bez ustawionego sekretu endpoint nie działa
+    wcale — otwarty przyjmowałby zmiany statusów od kogokolwiek.
+
+    Zawsze odpowiada 200: przy błędzie Telegram ponawia update'y i zapętliłby
+    się na wiadomości, której i tak nie umiemy obsłużyć.
+    """
+    sekret = settings.telegram_webhook_secret
+    if not sekret or not x_telegram_bot_api_secret_token or \
+            not secrets.compare_digest(x_telegram_bot_api_secret_token, sekret):
+        raise HTTPException(401, "Unauthorized")
+
+    update = await request.json()
+    cb = (update or {}).get("callback_query")
+    if not cb:
+        return {"ok": True}          # zwykła wiadomość do bota — nie nasza sprawa
+
+    czesci = str(cb.get("data") or "").split(":")
+    if len(czesci) != 3 or czesci[0] != "lead":
+        return {"ok": True}
+    _, surowe_id, status = czesci
+
+    session = SessionLocal()
+    try:
+        lead = session.get(Lead, int(surowe_id)) if surowe_id.isdigit() else None
+        if not lead or status not in LEAD_STATUSES:
+            telegram.answer_callback(cb.get("id", ""), "Nie znaleziono leada")
+            return {"ok": True}
+        _zapisz_status(lead, status)
+        session.commit()
+        try:
+            dane = json.loads(lead.payload_json or "{}")
+        except ValueError:
+            dane = {}
+        tekst = _tekst_alertu(lead, dane)
+    finally:
+        session.close()
+
+    opis = dict(((s, o) for o, s in telegram.LEAD_BUTTONS)).get(status, status)
+    telegram.answer_callback(cb.get("id", ""), f"Zapisano: {opis}")
+    wiadomosc = cb.get("message") or {}
+    czat = str((wiadomosc.get("chat") or {}).get("id") or "")
+    if czat and wiadomosc.get("message_id"):
+        kto = (cb.get("from") or {}).get("first_name") or "?"
+        telegram.edit_lead_message(czat, wiadomosc["message_id"],
+                                   f"{tekst}\n\n<b>{opis}</b> — {html.escape(str(kto))}")
+    return {"ok": True}
 
 
 # --------------------------------------------------------------------------- #

@@ -221,6 +221,20 @@ class Settings:
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")     # @kanal albo -100...
 
+    # --- Leady z landingu ---
+    # Osobny czat, i to nie jest kosmetyka: TELEGRAM_CHAT_ID to PUBLICZNY kanał
+    # z certyfikatami wypłat, a alert o leadzie niesie imię, mail i telefon.
+    # Puste = alerty o leadach nie wychodzą wcale (lead i tak jest w bazie).
+    telegram_leads_chat_id: str = os.getenv("TELEGRAM_LEADS_CHAT_ID", "")
+    # Sekret, którym landing autoryzuje POST /api/leads/ingest. Osobny od
+    # ADMIN_TOKEN: landing stoi na cudzym hostingu i wycieka mu najwyżej prawo
+    # dopisania leada, nigdy panel. Puste = endpoint odmawia wszystkiego.
+    lead_ingest_token: str = os.getenv("LEAD_INGEST_TOKEN", "")
+    # Sekret, który Telegram odsyła w nagłówku X-Telegram-Bot-Api-Secret-Token
+    # przy każdym update. Bez niego /api/telegram/webhook przyjmowałby zmianę
+    # statusu od kogokolwiek, kto zna adres. Puste = webhook odmawia.
+    telegram_webhook_secret: str = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+
     # Payout BOT łapie swój dzienny slot także na ruchu strony (middleware w
     # main.py). To wyłącznik awaryjny tej ścieżki — cron /api/tick zostaje wtedy
     # jedynym wyzwalaczem. Testy ustawiają false, żeby zwykłe odczyty dashboardu
@@ -240,6 +254,14 @@ class Settings:
         if os.getenv("TELEGRAM_ENABLED", "true").lower() != "true":
             return False
         return bool(self.telegram_bot_token and self.telegram_chat_id)
+
+    @property
+    def telegram_leads_enabled(self) -> bool:
+        # Ten sam wyłącznik awaryjny, ale własny czat: alerty o leadach mogą
+        # działać, gdy kanał z wypłatami stoi, i odwrotnie.
+        if os.getenv("TELEGRAM_ENABLED", "true").lower() != "true":
+            return False
+        return bool(self.telegram_bot_token and self.telegram_leads_chat_id)
 
     # --- Zrzut certyfikatu do obrazka (zewnętrzna przeglądarka po HTTP) ---
     # Serwer nie ma czym zrobić rastra: JPG w portalu powstaje w przeglądarce

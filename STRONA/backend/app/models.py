@@ -604,3 +604,56 @@ class TelemetryEvent(Base):
     name: Mapped[str] = mapped_column(String(40), index=True)
     props: Mapped[str | None] = mapped_column(String(400), nullable=True)  # JSON
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+
+
+class Lead(Base):
+    """Zgłoszenie z landingu, zanim stanie się (albo nie stanie się) klientem.
+
+    Wpada tu POST-em z zewnętrznego landingu przez /api/leads/ingest — landing
+    nie ma dostępu do tej bazy i nie wie o niej nic poza adresem endpointu.
+
+    Jeden wiersz na osobę: `email` jest unikalny, a ponowne zgłoszenie nadpisuje
+    dane i podbija `applications`. Wcześniej leady szły do arkusza przez append,
+    więc ta sama osoba robiła dwa wiersze i status trzeba było oznaczać dwa razy.
+
+    Kolumny dzielą się na dwie grupy i to jest tu istotne rozróżnienie:
+    wszystko do `payload_json` włącznie **przychodzi z landingu** i jest
+    nadpisywane przy każdym zgłoszeniu; `status`, `note` i `contacted_at` to
+    **praca działu** i nigdy nie są ruszane przez ingest. Statusu „kupił" tu
+    nie ma celowo — to wynika z `traders`/`orders` po mailu i liczy się przy
+    odczycie, żeby nie dało się mieć wiersza mówiącego coś innego niż kasa.
+    """
+    __tablename__ = "leads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(120), default="")
+    phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    phone_iso: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    telegram: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+    source: Mapped[str] = mapped_column(String(40), default="")   # skąd formularz
+    ref: Mapped[str | None] = mapped_column(String(40), nullable=True)  # slug partnera
+    outcome: Mapped[str] = mapped_column(String(16), default="qualified")
+    tier: Mapped[str | None] = mapped_column(String(8), nullable=True)  # high|warm|cold
+    score: Mapped[int] = mapped_column(Integer, default=0)
+    # Całe zgłoszenie jako JSON: odpowiedzi z ankiety, uzasadnienie oceny, UA.
+    # Text, nie String(n) — ankieta ma do 30 par pytanie/odpowiedź i przycięcie
+    # w połowie zamieniłoby to w nieparsowalny śmieć.
+    payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    status: Mapped[str] = mapped_column(String(16), default="new", index=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Kiedy status pierwszy raz ruszył z „new" — jedyny fakt czasowy, którego
+    # nie da się później odtworzyć z niczego innego.
+    contacted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    applications: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+# Krótka lista celowo: status ma odpowiadać na jedno pytanie — czy dodzwoniliśmy
+# się do tej osoby. Czy kupiła, wynika z zamówień, więc nie ma tu „won".
+LEAD_STATUSES = ("new", "called", "no_answer", "rejected")

@@ -48,6 +48,7 @@ const ICO={
 
 const NAV=[
   {v:'overview',label:'Overview',ico:'grid'},
+  {v:'leads',label:'Leads',ico:'users'},
   {v:'accounts',label:'Accounts',ico:'layers'},
   {v:'payouts',label:'Payouts',ico:'wallet'},
   {v:'kyc',label:'KYC',ico:'shield'},
@@ -70,6 +71,7 @@ $('botnav').innerHTML=['overview','accounts','payouts','kyc'].map(v=>{
 
 const TITLES={
   overview:['Overview','Platform health and items waiting for you'],
+  leads:['Leads','Applications from the landing page, and who they turned into'],
   accounts:['Accounts','All challenge accounts and their live risk metrics'],
   payouts:['Payouts','Every payout booked so far, plus requests waiting for review'],
   kyc:['KYC','Identity verifications awaiting review'],
@@ -370,6 +372,11 @@ const VIEWS={
  async orders(){
   window._orders=await api('/api/admin/orders');
   renderOrders();
+ },
+
+ async leads(){
+  window._leads=await api('/api/admin/leads');
+  renderLeads();
  },
 
  async pool(){
@@ -751,6 +758,96 @@ function renderOrders(){
           ${XBTN(`deleteOrderRow(${o.id},'${esc(o.trader_email||'')}',${o.amount_usd},${o.account_id||0})`,'Delete order')}</td></tr>`).join('')}
       </tbody></table></div>`
       :`<div class="empty"><h3>${list.length?'No orders match':'No orders yet'}</h3>${list.length?'<p>Try a different search or filter.</p>':''}</div>`}`;
+}
+
+/* ---------- Leads ----------
+   Applications from the landing page. Two kinds of column live side by side and
+   the difference matters: `status` is typed by a human after a phone call, while
+   "Bought" is derived from orders at read time and cannot be edited here. Nobody
+   marks a lead as a customer — paying is what makes them one. */
+const LEAD_STATUSES=[['new','New'],['called','Called'],['no_answer','No answer'],['rejected','Rejected']];
+const leadLabel=s=>(LEAD_STATUSES.find(([k])=>k===s)||[,s])[1];
+/* The questionnaire answers are what the grade is made of, and they are the first
+   thing you want in front of you on the phone. Hover rather than a column: four
+   free-text answers would push the rest of the row off the screen. */
+const leadAnswers=a=>Object.entries(a||{}).map(([q,v])=>`${q} → ${v}`).join('\n');
+
+function renderLeads(){
+  const list=window._leads||[];
+  const q=(window._leadQ||'').toLowerCase();
+  const f=window._leadFilter||'all';
+  const rows=list.filter(l=>
+    (f==='all'||(f==='bought'?l.paid_usd>0:l.status===f))&&
+    (!q||(l.email||'').toLowerCase().includes(q)||(l.name||'').toLowerCase().includes(q)
+     ||(l.phone||'').includes(q)||(l.ref||'').toLowerCase().includes(q)));
+  /* Same rule as Orders: the tiles describe WHAT IS VISIBLE below them, so
+     switching to "Rejected" cannot leave the full revenue sitting on top. */
+  const bought=rows.filter(l=>l.paid_usd>0);
+  const revenue=bought.reduce((s,l)=>s+l.paid_usd,0);
+  const waiting=rows.filter(l=>l.status==='new').length;
+  const conv=rows.length?Math.round(bought.length/rows.length*100):0;
+  $('view').innerHTML=`
+    <div class="stats-row">
+      <div class="stat-tile"><div class="tile-ic ${waiting?'orange':'blue'}">${ICO.alert}</div>
+        <div><div class="lbl">Not contacted</div><div class="val">${waiting}</div>
+          <div class="sub">of ${rows.length} shown</div></div></div>
+      <div class="stat-tile"><div class="tile-ic green">${ICO.dollar}</div>
+        <div><div class="lbl">Revenue from leads</div><div class="val">$${fmt0(revenue)}</div>
+          <div class="sub">${bought.length} bought</div></div></div>
+      <div class="stat-tile"><div class="tile-ic purple">${ICO.trend}</div>
+        <div><div class="lbl">Conversion</div><div class="val">${conv}%</div>
+          <div class="sub">lead to paid order</div></div></div>
+    </div>
+    <div class="toolbar">
+      ${searchBox('lead-q','_leadQ','renderLeads','Search name, email, phone or partner…')}
+      <div class="seg">${[['all','All'],...LEAD_STATUSES,['bought','Bought']]
+        .map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._leadFilter='${k}';renderLeads()">${l}</button>`).join('')}</div>
+      <span class="count-pill">${rows.length} of ${list.length}</span>
+    </div>
+    ${rows.length?`<div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.leads">
+      <thead><tr><th>Date</th><th>Lead</th><th>Contact</th><th>Grade</th><th>Source</th>
+        <th>Status</th><th>Bought</th><th>Note</th></tr></thead>
+      <tbody>${rows.map(l=>`<tr>
+        <td class="muted" data-sort="${esc(l.created_at||'')}">${dstr(l.created_at)}</td>
+        <td><b>${esc(l.name||'—')}</b>
+          ${l.applications>1?`<div class="muted" style="font-size:11px" title="Filled the form more than once">↻ applied ${l.applications}×</div>`:''}
+          ${l.outcome==='not_qualified'?'<div class="muted" style="font-size:11px">failed the questionnaire</div>':''}</td>
+        <td><a href="mailto:${esc(l.email)}">${esc(l.email)}</a>
+          ${l.phone?`<div><a href="tel:${esc(l.phone)}">${esc(l.phone)}</a>${l.phone_iso?` <span class="muted">${esc(l.phone_iso)}</span>`:''}</div>`:''}
+          ${l.telegram?`<div class="muted" style="font-size:11px">${esc(l.telegram)}</div>`:''}</td>
+        <td data-sort="${l.score||0}" title="${esc(leadAnswers(l.answers))}">${l.tier?`<span class="status ${l.tier==='high'?'paid':l.tier==='warm'?'pending':'failed'}"><span class="dot"></span>${esc(l.tier)} ${l.score}</span>`:'<span class="muted">—</span>'}</td>
+        <td class="muted">${esc(l.source||'—')}${l.ref?`<div style="font-size:11px">via ${esc(l.ref)}</div>`:''}</td>
+        <td><select class="inp sm" style="min-width:116px" onchange="setLeadStatus(${l.id},this.value)">${
+          LEAD_STATUSES.map(([k,lab])=>`<option value="${k}"${l.status===k?' selected':''}>${lab}</option>`).join('')}</select>
+          ${l.contacted_at?`<div class="muted" style="font-size:11px">${dstr(l.contacted_at)}</div>`:''}</td>
+        <td class="num">${l.paid_usd>0?`<span class="status paid"><span class="dot"></span>$${fmt0(l.paid_usd)}</span>`:'<span class="muted">—</span>'}</td>
+        <td><input class="inp sm" style="min-width:170px" value="${esc(l.note||'')}"
+          placeholder="Add a note…" onchange="setLeadNote(${l.id},this.value)"></td></tr>`).join('')}
+      </tbody></table></div>`
+      :`<div class="empty"><h3>${list.length?'No leads match':'No leads yet'}</h3>
+        <p>${list.length?'Try a different search or filter.':'Applications from the landing page land here.'}</p></div>`}`;
+}
+
+/* Both writers patch the row in memory instead of refetching the list: the admin
+   is usually working down a long table and a full re-render would throw away
+   their scroll position and whatever they were typing in the next note. */
+async function setLeadStatus(id,status){
+  try{
+    const d=await api('/api/admin/leads/'+id,{method:'POST',body:JSON.stringify({status})});
+    const row=(window._leads||[]).find(l=>l.id===id);
+    if(row){row.status=d.status;row.contacted_at=d.contacted_at}
+    toast('Marked as '+leadLabel(status));
+    if(window._leadFilter&&window._leadFilter!=='all')renderLeads();
+  }catch(e){toast('Error: '+e.message,'err');VIEWS.leads()}
+}
+
+async function setLeadNote(id,note){
+  try{
+    await api('/api/admin/leads/'+id,{method:'POST',body:JSON.stringify({note})});
+    const row=(window._leads||[]).find(l=>l.id===id);
+    if(row)row.note=note;
+    toast('Note saved');
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 /* Jedno zdanie o mailu z instrukcją wpłaty. Brak adresu portfela MUSI krzyczeć:
    klient dostaje wtedy prośbę o zapłatę bez informacji, gdzie zapłacić, a admin
