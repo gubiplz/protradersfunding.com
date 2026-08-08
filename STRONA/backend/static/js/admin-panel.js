@@ -897,6 +897,8 @@ function renderLeads(){
         ...LEAD_STATUSES,['bought','Bought']]
         .map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._leadFilter='${k}';renderLeads()">${l}</button>`).join('')}</div>
       <span class="count-pill">${rows.length} of ${list.length}</span>
+      <button class="btn-p sm" onclick="openNewLead()"
+        title="Somebody who wrote to us without filling the form">+ Add lead</button>
     </div>
     ${rows.length?`<p class="muted" style="font-size:12.5px;margin-bottom:10px">Tap a row for the full history: every application with the answers given at the time, status changes and who made them — and the button that deletes it.</p>
     <div class="tbl-wrap tw-wide lead-wrap"><table class="tbl sortable lead-tbl" data-tkey="admin.leads">
@@ -1180,6 +1182,61 @@ async function cancelLeadReminder(id,rid){
     toast('Reminder cancelled');
     await openLead(id);renderLeads();
   }catch(e){toast('Error: '+e.message,'err')}
+}
+
+/* Leada wpisanego z ręki nie da się dziś dodać nigdzie indziej: kto napisał na
+   Telegramie prosto z reklamy, nie ma ani konta, ani wiersza w tabeli leadów. */
+function openNewLead(){
+  document.getElementById('lead-modal')?.remove();
+  const box=document.createElement('div');
+  box.id='lead-modal';box.className='modal-wrap';
+  box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>Add lead</h3>
+      <button class="icon-btn" onclick="document.getElementById('lead-modal').remove()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <p class="muted" style="font-size:12.5px;margin-bottom:14px">For somebody who reached us without the form — a reply to an ad, a message on Telegram.
+      They land in the same list as everyone else, with history, reminders and the card on the channel.</p>
+    <div class="stack">
+      <div><label class="muted" style="font-size:12px">E-mail</label>
+        <input id="nl-email" class="inp" type="email" inputmode="email" autocapitalize="off"
+          spellcheck="false" placeholder="name@example.com"></div>
+      <div><label class="muted" style="font-size:12px">Full name</label>
+        <input id="nl-name" class="inp" placeholder="Optional"></div>
+      <div><label class="muted" style="font-size:12px">Phone</label>
+        <input id="nl-phone" class="inp" type="tel" inputmode="tel" placeholder="+48 601 234 567"></div>
+      <div><label class="muted" style="font-size:12px">Telegram</label>
+        <input id="nl-telegram" class="inp" autocapitalize="off" spellcheck="false" placeholder="@handle"></div>
+      <div><label class="muted" style="font-size:12px">Country</label>
+        <input id="nl-country" class="inp" placeholder="Optional"></div>
+      <div><label class="muted" style="font-size:12px">First note</label>
+        <textarea id="nl-note" class="inp" rows="3" placeholder="What they wrote, what they want"></textarea></div>
+      <button class="btn-p lg" style="width:100%" id="nl-go" onclick="submitNewLead()">Add lead</button>
+      <p class="hint">Marked as <b>manual</b>, so the landing page conversion keeps counting only the people it actually brought in.</p>
+    </div></div>`;
+  box.onclick=()=>box.remove();
+  document.body.appendChild(box);
+  $('nl-email').focus();
+}
+
+async function submitNewLead(){
+  const email=$('nl-email').value.trim();
+  if(!email){toast('E-mail is required.','err');$('nl-email').focus();return}
+  const btn=$('nl-go');btn.disabled=true;
+  try{
+    const r=await api('/api/admin/leads',{method:'POST',body:JSON.stringify({
+      email,name:$('nl-name').value.trim(),phone:$('nl-phone').value.trim(),
+      telegram:$('nl-telegram').value.trim(),country:$('nl-country').value.trim(),
+      note:$('nl-note').value.trim()})});
+    document.getElementById('lead-modal')?.remove();
+    /* Ten mail już jest — otwieramy tamtą kartę zamiast udawać, że dodaliśmy
+       nowego. Kto go prowadzi, jest tu najważniejsze: bez tego dwie osoby piszą
+       do tego samego człowieka. */
+    if(r.existing)toast(r.owner?`Already in the list — ${r.owner} is on it.`
+      :'Already in the list, nobody took it yet.','warn',7000);
+    else toast('Lead added.');
+    await VIEWS.leads();
+    openLead(r.id);
+  }catch(e){toast('Error: '+e.message,'err');btn.disabled=false}
 }
 
 async function openLead(id){

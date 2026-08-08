@@ -5401,6 +5401,24 @@ def _lead_push(lead_id: int, title: str, body: str = "", *,
                          url=f"/admin?lead={lead_id}", tag=f"lead-{lead_id}")
 
 
+def _ustaw_telefon(lead: Lead, telefon: str, iso_landing: str | None) -> None:
+    """Telefon w E.164 bez spacji, a ISO uzupełnione/poprawione z prefiksu.
+
+    Landing przysyła „+48 601 234 567" i osobno ISO zgadnięte ze strefy czasowej
+    urządzenia — gdy się kłócą, prawdę mówi prefiks, bo to jego ktoś wybierze
+    numerem. Numer bez prefiksu zostaje jak przyszedł: nie zgadujemy kraju,
+    którego numer sam nie deklaruje.
+    """
+    telefon = (telefon or "").strip()
+    cyfry = "".join(c for c in telefon if c.isdigit())
+    if telefon.startswith("+") or cyfry.startswith("00"):
+        lead.phone = ("+" + (cyfry[2:] if cyfry.startswith("00") else cyfry))[:40]
+    else:
+        lead.phone = telefon[:40] or None
+    lead.phone_iso = countries.iso_from_e164(telefon) or (
+        (iso_landing or "").strip().upper()[:2] or None)
+
+
 @app.post("/api/leads/ingest")
 def leads_ingest(payload: LeadIn,
                  x_lead_token: str | None = Header(default=None)):
@@ -5429,20 +5447,7 @@ def leads_ingest(payload: LeadIn,
             lead.applications = (lead.applications or 1) + 1
 
         lead.name = (payload.name or "")[:120]
-        # Telefon w E.164 bez spacji, a ISO uzupełnione/poprawione z prefiksu.
-        # Landing przysyła „+48 601 234 567" i osobno ISO zgadnięte ze strefy
-        # czasowej urządzenia — gdy się kłócą, prawdę mówi prefiks, bo to jego
-        # ktoś wybierze numerem. Numer bez prefiksu zostaje jak przyszedł:
-        # nie zgadujemy kraju, którego numer sam nie deklaruje.
-        telefon = (payload.phone or "").strip()
-        cyfry_tel = "".join(c for c in telefon if c.isdigit())
-        if telefon.startswith("+") or cyfry_tel.startswith("00"):
-            lead.phone = ("+" + (cyfry_tel[2:] if cyfry_tel.startswith("00")
-                                 else cyfry_tel))[:40]
-        else:
-            lead.phone = telefon[:40] or None
-        iso_landing = (payload.phoneIso or "").strip().upper()[:2] or None
-        lead.phone_iso = countries.iso_from_e164(telefon) or iso_landing
+        _ustaw_telefon(lead, payload.phone or "", payload.phoneIso)
         lead.telegram = (payload.telegram or None)
         lead.country = (payload.country or None)
         lead.source = (payload.source or "")[:40]
@@ -5614,6 +5619,72 @@ def admin_lead_detail(lead_id: int):
         return dane
     finally:
         session.close()
+
+
+class LeadManualIn(BaseModel):
+    email: str
+    name: str = ""
+    phone: str | None = None
+    telegram: str | None = None
+    country: str | None = None
+    note: str | None = None
+
+
+@app.post("/api/admin/leads", dependencies=[Depends(auth.require_admin)])
+def admin_lead_create(payload: LeadManualIn):
+    """Lead wpisany z ręki — ktoś napisał na Telegramie prosto z reklamy.
+
+    Bez tego taki człowiek nie istniał nigdzie w panelu: zamówienie dało się
+    wystawić klientowi z listy kont albo leadowi z jego karty, a on nie był ani
+    jednym, ani drugim.
+
+    `source` to „manual" i to nie jest kosmetyka: gdyby ci ludzie mieli źródło
+    puste albo takie samo jak formularz, konwersja landingu zaczęłaby liczyć
+    zgłoszenia, których landing nigdy nie widział.
+
+    Ankiety nie ma, więc nie ma też oceny — `tier` i `score` zostają puste
+    zamiast dostać zmyśloną wartość. Karta na Telegramie idzie tak samo jak
+    przy zgłoszeniu z landingu: dział pracuje na kanale i lead bez karty byłby
+    jedynym, którego nie da się tam obsłużyć.
+    """
+    email = (payload.email or "").strip().lower()
+    if not _EMAIL_RX.fullmatch(email):
+        raise HTTPException(400, "Enter a valid e-mail address")
+
+    session = SessionLocal()
+    try:
+        # `leads.email` jest UNIQUE, więc druga próba i tak skończyłaby się
+        # błędem bazy. Zamiast tego oddajemy istniejącego leada — panel otworzy
+        # jego kartę. Nic tu nie nadpisujemy: wpisujący nie wie, co dział zdążył
+        # już ustalić, a jego trzy pola z formularza nie mają prawa zetrzeć
+        # notatki i statusu.
+        stary = session.query(Lead).filter(Lead.email == email).one_or_none()
+        if stary:
+            return {"id": stary.id, "existing": True, "owner": stary.owner,
+                    "status": stary.status, "name": stary.name}
+
+        lead = Lead(email=email, name=(payload.name or "")[:120],
+                    source="manual", outcome="qualified",
+                    note=(payload.note or "").strip()[:4000] or None)
+        _ustaw_telefon(lead, payload.phone or "", None)
+        lead.telegram = (payload.telegram or "").strip() or None
+        lead.country = (payload.country or "").strip() or None
+        session.add(lead)
+        session.flush()
+        _zdarzenie(session, lead.id, "applied", "added by hand", actor="panel")
+        session.commit()
+        lead_id, kto = lead.id, (lead.name or lead.email)
+        tekst = _tekst_alertu(lead, {})
+    finally:
+        session.close()
+
+    # Best-effort po commicie, dokładnie jak przy ingeście: padnięty Telegram
+    # nie może cofnąć zapisanego leada ani kazać wpisywać go drugi raz.
+    _lead_push(lead_id, f"New lead: {kto}", "added by hand", event="lead_new")
+    _, _, message_id = telegram.send_lead_alert(lead_id, tekst)
+    if message_id:
+        _zapamietaj_wiadomosc(lead_id, message_id)
+    return {"id": lead_id, "existing": False}
 
 
 class LeadStatusIn(BaseModel):

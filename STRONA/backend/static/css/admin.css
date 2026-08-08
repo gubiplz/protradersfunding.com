@@ -96,6 +96,12 @@ tr.clickable{cursor:pointer}
   .seg button{flex:1 0 auto}
 }
 
+/* Ostrzezenie: rzecz sie udala, ale nie tak, jak admin sie spodziewal — np.
+   dodawany lead juz byl na liscie. Zielone "ok" bylo klamstwem, czerwone "err"
+   kazaloby szukac awarii, ktorej nie ma. Regula musi zyc tutaj, a nie w
+   portal.css, ktory dzieli sie z portalem klienta. */
+.toast.warn{border-left-color:var(--gold)}
+
 /* Toast z cofnieciem: usuwanie czeka 5 s, zanim poleci na serwer.
    Obramowanie bursztynowe, bo to nie jest ani sukces, ani blad — to odliczanie,
    w ktorym admin ma jeszcze cos do zrobienia. */
