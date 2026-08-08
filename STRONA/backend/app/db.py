@@ -124,6 +124,8 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "email_verify_code": "VARCHAR(6)",
         "terms_accepted_at": "TIMESTAMP",
         "google_sub": "VARCHAR(64)",
+        "telegram_user_id": "VARCHAR(20)",
+        "telegram_link_code": "VARCHAR(12)",
     },
     "products": {
         "max_lots": "FLOAT DEFAULT 6.0",
@@ -184,6 +186,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "owner": "VARCHAR(60)",
         "owner_at": "TIMESTAMP",
         "tg_message_id": "INTEGER",
+        "bought": "BOOLEAN DEFAULT FALSE",
     },
 }
 
@@ -201,6 +204,8 @@ _NEW_INDEXES: list[tuple[str, str]] = [
     # Odpowiedz na kanale niesie wylacznie numer wiadomosci, wiec kazda notatka
     # z Telegrama szuka leada po tej kolumnie.
     ("leads", "tg_message_id"),
+    # Kazdy klik przycisku na kanale LEADS szuka admina po id konta Telegram.
+    ("traders", "telegram_user_id"),
 ]
 
 

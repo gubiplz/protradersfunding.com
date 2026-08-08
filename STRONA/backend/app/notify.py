@@ -746,14 +746,34 @@ def _notify_admins_teraz(event: str, title: str, body: str = "",
 
         session = SessionLocal()
         try:
-            admin_ids = [t.id for t in
-                         session.query(Trader).filter(Trader.is_admin.is_(True)).all()]
-            for tid in admin_ids:
+            admini = [(t.id, t.ui_prefs) for t in
+                      session.query(Trader).filter(Trader.is_admin.is_(True)).all()]
+            # Dzwonek w panelu dostaje wpis ZAWSZE — preferencje wyciszają
+            # brzęczenie telefonu, nie dostęp do informacji.
+            for tid, _prefs in admini:
                 push._center_row(session, tid, event, title, body, url)
             session.commit()
         finally:
             session.close()
-        for tid in admin_ids:
+        for tid in _chca_push(admini, event):
             push.send_to_trader(tid, title, body, url=url, tag=tag or event)
     except Exception as e:  # pragma: no cover
         print(f"[notify] admin błąd: {e}")
+
+
+def _chca_push(admini: list[tuple[int, str | None]], event: str) -> list[int]:
+    """Adminy, którzy NIE wyciszyli tej kategorii web pushy.
+
+    Preferencje siedzą w `ui_prefs.admin_push` (panel, Settings → Notifications)
+    jako mapa {kategoria: false} — brak wpisu znaczy „chcę", więc nowa kategoria
+    zdarzeń brzęczy u wszystkich, dopóki ktoś jej świadomie nie zgasi."""
+    wybrani: list[int] = []
+    for tid, prefs_json in admini:
+        try:
+            prefs = (json.loads(prefs_json or "{}") or {}).get("admin_push") or {}
+        except ValueError:
+            prefs = {}
+        if prefs.get(event) is False:
+            continue
+        wybrani.append(tid)
+    return wybrani

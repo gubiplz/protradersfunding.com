@@ -66,7 +66,14 @@ class Trader(Base):
     notify_marketing: Mapped[bool] = mapped_column(Boolean, default=True)   # nic nie wysylamy, ale pref istnieje
     # Preferencje UI (JSON jako string, np. {"sort": {...}}) — zapisywane z
     # portalu i panelu admina przez PATCH /api/me, trzymane na koncie.
+    # Dla adminów niesie też `admin_push` (wyciszone kategorie web pushy).
     ui_prefs: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+
+    # Parowanie z kontem Telegram (desk): od sparowania przyciski na kanale
+    # LEADS podpisują się mailem konta zamiast imieniem z Telegrama. Kod jest
+    # jednorazowy — wydaje go panel, konsumuje `/start <kod>` w DM z botem.
+    telegram_user_id: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    telegram_link_code: Mapped[str | None] = mapped_column(String(12), nullable=True)
 
     # Weryfikacja adresu e-mail: nowi traderzy dostają 6-cyfrowy kod przy
     # rejestracji; istniejące konta są uznane za zweryfikowane (DEFAULT TRUE).
@@ -645,6 +652,11 @@ class Lead(Base):
 
     status: Mapped[str] = mapped_column(String(16), default="new", index=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Ręczne „kupił" z panelu — dla zakupów poza sklepem (przelew, ustalenia na
+    # Telegramie). Zapłacone zamówienie na ten sam mail liczy się AUTOMATYCZNIE
+    # i osobno (paid_usd w serializerze); checkbox tego nie dubluje, tylko
+    # łata przypadki, których sklep nie widzi.
+    bought: Mapped[bool] = mapped_column(Boolean, default=False)
     # Kto z działu wziął tego człowieka na siebie. Kanał moderuje kilka osób,
     # a posty na kanale są anonimowe — bez tego dwie osoby dzwoniły do tej samej
     # osoby tego samego dnia. Imię z Telegrama, nie klucz obcy, z tego samego
@@ -703,7 +715,7 @@ class LeadEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
 
 
-LEAD_EVENTS = ("applied", "status", "note", "reminder", "claim", "tier")
+LEAD_EVENTS = ("applied", "status", "note", "reminder", "claim", "tier", "bought")
 
 
 class LeadReminder(Base):

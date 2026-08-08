@@ -41,7 +41,8 @@ def _srodowisko(monkeypatch):
     u = get_settings()
     monkeypatch.setattr(u, "lead_ingest_token", TOKEN_LANDINGU, raising=False)
     monkeypatch.setattr(u, "telegram_webhook_secret", SEKRET_WEBHOOKA, raising=False)
-    wyslane: dict[str, list] = {"alert": [], "answer": [], "edit": [], "przypomnienie": []}
+    wyslane: dict[str, list] = {"alert": [], "answer": [], "edit": [],
+                                "przypomnienie": [], "dm": [], "delete": []}
     # Alert oddaje `message_id` — po nim webhook dopasowuje odpowiedź na wiadomość
     # do leada, więc atrapa musi je zwracać, inaczej notatki z Telegrama nie mają
     # się o co zaczepić.
@@ -54,6 +55,10 @@ def _srodowisko(monkeypatch):
                         lambda cb, tekst, **kw: (wyslane["answer"].append(tekst), (True, ""))[1])
     monkeypatch.setattr(telegram, "edit_lead_message",
                         lambda czat, mid, tekst, **kw: (wyslane["edit"].append((czat, mid, tekst)), (True, ""))[1])
+    monkeypatch.setattr(telegram, "send_dm",
+                        lambda czat, tekst, **kw: (wyslane["dm"].append((czat, tekst)), (True, ""))[1])
+    monkeypatch.setattr(telegram, "delete_lead_card",
+                        lambda mid, **kw: (wyslane["delete"].append(mid), (True, ""))[1])
     return wyslane
 
 
@@ -242,12 +247,12 @@ def test_filtr_po_statusie():
 # --------------------------------------------------------------------------- #
 #  Telegram                                                                    #
 # --------------------------------------------------------------------------- #
-def _callback(lead_id, status, sekret=SEKRET_WEBHOOKA, kto="Hubert"):
+def _callback(lead_id, status, sekret=SEKRET_WEBHOOKA, kto="Hubert", uid=None):
     naglowki = {"X-Telegram-Bot-Api-Secret-Token": sekret} if sekret else {}
     return client.post("/api/telegram/webhook", headers=naglowki, json={
         "callback_query": {
             "id": "cb1", "data": f"lead:{lead_id}:{status}",
-            "from": {"first_name": kto},
+            "from": {"first_name": kto, **({"id": uid} if uid else {})},
             "message": {"message_id": 55, "chat": {"id": -100123}},
         }})
 
@@ -1193,3 +1198,148 @@ def test_iso_from_e164_dzielone_kody_i_najdluzsze_dopasowanie():
     assert iso_from_e164("+35561234567") == "AL"      # +355, nie krótsze dopasowania
     assert iso_from_e164("0044 7911 123456") == "GB"
     assert iso_from_e164("601234567") is None         # brak prefiksu = nie zgadujemy
+
+
+# --------------------------------------------------------------------------- #
+#  Tożsamość działu: parowanie Telegrama + preferencje pushy                   #
+# --------------------------------------------------------------------------- #
+def _admin_z_tokenem(prefix="desk"):
+    """Konto admina + Bearer — endpointy /api/me/* wymagają tożsamości,
+    a nagłówek X-Admin-Token jej nie niesie."""
+    s = SessionLocal()
+    tr = Trader(email=f"{prefix}{next(LICZNIK)}@k",
+                password_hash=auth.hash_password("haslo1234"),
+                full_name="Desk", referral_code=auth.secrets.token_hex(3),
+                is_admin=True)
+    s.add(tr)
+    s.commit()
+    email, tid = tr.email, tr.id
+    s.close()
+    tok = client.post("/api/auth/login",
+                      json={"email": email, "password": "haslo1234"}).json()["token"]
+    return email, tid, {"Authorization": f"Bearer {tok}"}
+
+
+def test_sparowany_admin_podpisuje_sie_mailem(_srodowisko):
+    email, tid, naglowki = _admin_z_tokenem()
+    kod = client.post("/api/me/telegram-link", headers=naglowki).json()["code"]
+
+    odp = client.post("/api/telegram/webhook",
+                      headers={"X-Telegram-Bot-Api-Secret-Token": SEKRET_WEBHOOKA},
+                      json={"message": {"chat": {"id": 777, "type": "private"},
+                                        "from": {"id": 424242},
+                                        "text": f"/start {kod.lower()}"}})
+    assert odp.status_code == 200
+    assert any("Linked as" in t for _c, t in _srodowisko["dm"])
+    s = SessionLocal()
+    try:
+        tr = s.get(Trader, tid)
+        assert (tr.telegram_user_id, tr.telegram_link_code) == ("424242", None)
+    finally:
+        s.close()
+
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _callback(lead_id, "claim", kto="Bartek", uid=424242)
+    lead = _lead(lead_id)
+    assert lead.owner == email
+    assert [z.actor for z in _zdarzenia(lead_id, "claim")] == [f"telegram:{email}"]
+
+
+def test_niesparowany_zostaje_przy_imieniu_a_zly_kod_nie_paruje(_srodowisko):
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _callback(lead_id, "claim", kto="Hubert", uid=999999)
+    assert _lead(lead_id).owner == "Hubert"
+
+    client.post("/api/telegram/webhook",
+                headers={"X-Telegram-Bot-Api-Secret-Token": SEKRET_WEBHOOKA},
+                json={"message": {"chat": {"id": 778, "type": "private"},
+                                  "from": {"id": 999999}, "text": "/start ZLYKOD"}})
+    assert any("Unknown" in t for _c, t in _srodowisko["dm"])
+
+
+def test_kod_parowania_tylko_dla_admina():
+    s = SessionLocal()
+    tr = Trader(email=f"user{next(LICZNIK)}@t",
+                password_hash=auth.hash_password("haslo1234"),
+                referral_code=auth.secrets.token_hex(3))
+    s.add(tr)
+    s.commit()
+    email = tr.email
+    s.close()
+    tok = client.post("/api/auth/login",
+                      json={"email": email, "password": "haslo1234"}).json()["token"]
+    assert client.post("/api/me/telegram-link",
+                       headers={"Authorization": f"Bearer {tok}"}).status_code == 404
+
+
+def test_kasowanie_leada_zdejmuje_karte_z_kanalu(_srodowisko):
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    mid = _lead(lead_id).tg_message_id
+    assert mid
+
+    client.delete(f"/api/admin/leads/{lead_id}", headers=ADMIN)
+
+    assert _srodowisko["delete"] == [mid]
+    assert _lead(lead_id) is None
+
+
+def test_reczne_bought_checkbox(_srodowisko):
+    """Deal zamknięty poza sklepem: checkbox w tabeli robi z leada klienta —
+    koniec dzwonienia jak do leada, start cyklu pilnowania jak przy zakupie."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    odp = client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN,
+                      json={"bought": True}).json()
+    assert odp["bought"] is True
+    assert _z_listy(lead_id)["bought"] is True
+    assert [z.detail for z in _zdarzenia(lead_id, "bought")] == ["marked bought"]
+
+    # Follow-upy traktują jak zakup (bez kwoty — sklep go nie widział),
+    # a nudge „nikt nie wziął" odpuszcza.
+    _cofnij(lead_id, od_zgloszenia=5)
+    _cron()
+    assert [z.detail for z in _zdarzenia(lead_id, "reminder")] == ["bought"]
+    tekst = next(t for t in _srodowisko["przypomnienie"] if "KUPIŁ" in t)
+    assert "$" not in tekst and "Oznaczone ręcznie" in tekst
+
+    # Odznaczenie wraca do zwykłego leada i zostaje w historii.
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"bought": False})
+    assert _z_listy(lead_id)["bought"] is False
+    assert [z.detail for z in _zdarzenia(lead_id, "bought")] == [
+        "marked bought", "unmarked bought"]
+
+
+def test_wyciszona_kategoria_nie_brzeczy_ale_dzwonek_zostaje(monkeypatch):
+    from app import push as push_mod
+    from app.models import Notification
+
+    s = SessionLocal()
+    cichy = Trader(email=f"adm{next(LICZNIK)}@k",
+                   password_hash=auth.hash_password("haslo1234"),
+                   referral_code=auth.secrets.token_hex(3), is_admin=True,
+                   ui_prefs='{"admin_push":{"lead_new":false}}')
+    glosny = Trader(email=f"adm{next(LICZNIK)}@s",
+                    password_hash=auth.hash_password("haslo1234"),
+                    referral_code=auth.secrets.token_hex(3), is_admin=True)
+    s.add_all([cichy, glosny])
+    s.commit()
+    cichy_id, glosny_id = cichy.id, glosny.id
+    s.close()
+
+    dostali: list[int] = []
+    monkeypatch.setattr(push_mod, "send_to_trader",
+                        lambda tid, *a, **k: (dostali.append(tid), 1)[1])
+
+    notify.notify_admins("lead_new", "New lead: X")
+    assert glosny_id in dostali and cichy_id not in dostali
+
+    # Inna kategoria brzęczy u obu — wyciszenie jest punktowe, nie globalne.
+    notify.notify_admins("lead_action", "Ktoś: took the lead")
+    assert cichy_id in dostali
+
+    # Dzwonek dostaje wpis niezależnie od wyciszenia.
+    s = SessionLocal()
+    try:
+        assert s.query(Notification).filter(Notification.trader_id == cichy_id,
+                                            Notification.event == "lead_new").count() == 1
+    finally:
+        s.close()

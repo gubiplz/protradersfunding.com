@@ -210,10 +210,11 @@ tr.clickable{cursor:pointer}
    TG/WA pokazują się tylko przy numerze w E.164, bo bez kodu kraju te linki
    prowadzą donikąd. */
 .lead-acts{display:inline-flex;gap:4px;vertical-align:middle;margin-left:4px;flex-wrap:wrap}
-.act-btn{display:inline-flex;align-items:center;justify-content:center;min-width:34px;
-  height:24px;padding:0 8px;border:1px solid var(--line);border-radius:7px;
-  font-size:11px;font-weight:700;color:var(--muted);background:var(--panel2);
+.act-btn{display:inline-flex;align-items:center;justify-content:center;width:26px;
+  height:24px;padding:0;border:1px solid var(--line);border-radius:7px;
+  color:var(--muted);background:var(--panel2);
   cursor:pointer;text-decoration:none;transition:.15s}
+.act-btn svg{width:14px;height:14px}
 .act-btn:hover{border-color:var(--acc);color:var(--acc)}
 
 /* Status w wierszu jest polem wyboru, więc nie da się mu dać kropki jak
@@ -260,7 +261,9 @@ tr.clickable{cursor:pointer}
   table.lead-tbl td[data-l="Contact"] a{font-size:14px;line-height:1.9;word-break:break-all}
   table.lead-tbl td[data-l="Contact"] .lead-ph{flex:1 1 100%;text-align:right}
   .lead-acts{gap:8px;margin:6px 0 0}
-  .act-btn{min-width:56px;height:40px;font-size:13px}
+  .act-btn{width:44px;height:40px}
+  .act-btn svg{width:17px;height:17px}
+  .bought-cb{width:22px;height:22px}
 }
 
 /* Wyszukiwarki (Accounts/Pool/Orders): wrapper przejmuje slot inputa w

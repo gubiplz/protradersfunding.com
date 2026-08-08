@@ -133,6 +133,27 @@ def send_photo(png: bytes, caption: str, *, transport=None) -> tuple[bool, str]:
                    ("photo", "certificate.png", png), transport)
 
 
+def delete_lead_card(message_id: int, *, transport=None) -> tuple[bool, str]:
+    """Zdejmuje kartę leada z czatu działu — wołane przy kasowaniu leada.
+
+    Bez tego wpis testowy znikał z bazy, a jego karta wisiała na kanale jak
+    sierota i dalej dawała się klikać — w lead, którego już nie było."""
+    if not leads_enabled():
+        return False, "leads chat not configured"
+    return _strzal("deleteMessage",
+                   {"chat_id": settings.telegram_leads_chat_id,
+                    "message_id": str(message_id)}, None, transport)
+
+
+def send_dm(chat_id: str | int, text: str, *, transport=None) -> tuple[bool, str]:
+    """Wiadomość w prywatnym czacie z botem (odpowiedź na `/start <kod>`).
+
+    Wymaga tylko tokenu bota — `chat_id` przychodzi z update'u, więc nie ma
+    znaczenia, który z kanałów (wypłaty/leady) jest skonfigurowany."""
+    return _strzal("sendMessage", {"chat_id": str(chat_id), "text": text[:4096]},
+                   None, transport)
+
+
 def send_message(text: str, *, transport=None) -> tuple[bool, str]:
     """Sam tekst — awaryjnie, gdy nie udało się zrobić grafiki.
 

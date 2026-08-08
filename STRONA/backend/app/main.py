@@ -1007,6 +1007,9 @@ def me(trader: Trader = Depends(auth.current_trader)):
                 "kyc_country": trader.kyc_country,
                 "kyc_reject_reason": trader.kyc_reject_reason,
                 "ui_prefs": _ui_prefs_dict(trader),
+                # Panel: czy konto jest sparowane z Telegramem (podpis akcji na
+                # kanale LEADS). Dla zwyklych traderow zawsze False i nieuzywane.
+                "telegram_linked": bool(trader.telegram_user_id),
                 "first_name": trader.first_name, "last_name": trader.last_name, "phone": trader.phone,
                 "phone_country": trader.phone_country,
                 "referral_code": trader.referral_code,
@@ -2359,6 +2362,27 @@ def push_unsubscribe(payload: PushUnsubscribeIn, trader: Trader = Depends(auth.c
          .delete(synchronize_session=False))
         session.commit()
         return {"ok": True}
+    finally:
+        session.close()
+
+
+@app.post("/api/me/telegram-link")
+def telegram_link_code(trader: Trader = Depends(auth.current_trader)):
+    """Kod parowania konta admina z Telegramem (Settings → Notifications).
+
+    Wyłącznie dla adminów — parowanie służy podpisywaniu akcji na kanale LEADS
+    mailem konta. 404 (nie 403) dla zwykłego tradera z tego samego powodu,
+    dla którego /admin oddaje 404: endpoint dla nich nie istnieje.
+    Nowy kod unieważnia poprzedni; sparowanie kodu nie kasuje."""
+    if not trader.is_admin:
+        raise HTTPException(404, "Not Found")
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader.id)
+        kod = secrets.token_hex(3).upper()
+        tr.telegram_link_code = kod
+        session.commit()
+        return {"code": kod, "linked": bool(tr.telegram_user_id)}
     finally:
         session.close()
 
@@ -5213,6 +5237,7 @@ def _lead_json(lead: Lead, trader_id: int | None, paid_usd: float,
         "country": lead.country, "source": lead.source, "ref": lead.ref,
         "outcome": lead.outcome, "tier": lead.tier, "score": lead.score,
         "status": lead.status, "note": lead.note, "owner": lead.owner,
+        "bought": bool(lead.bought),
         "next_due": next_due.isoformat() if next_due else None,
         "applications": lead.applications,
         "answers": _answers_z_payloadu(lead.payload_json),
@@ -5257,14 +5282,17 @@ def _zapisz_status(session, lead: Lead, status: str, actor: str) -> None:
     _zdarzenie(session, lead.id, "status", f"{poprzedni} → {status}", actor)
 
 
-def _lead_push(lead_id: int, title: str, body: str = "") -> None:
+def _lead_push(lead_id: int, title: str, body: str = "", *,
+               event: str = "lead_action") -> None:
     """Web push + dzwonek panelu do wszystkich adminów o TYM leadzie.
 
-    Deep-link prowadzi prosto w kartę leada (panel czyta `?lead=` przy
-    starcie), a tag skleja serię zdarzeń jednego leada w jedno powiadomienie
-    na ekranie telefonu. notify_admins nigdy nie rzuca, a w trakcie requestu
-    odkłada wysyłkę na po odpowiedzi — wolno to wołać zewsząd."""
-    notify.notify_admins("lead", title, body,
+    `event` to kategoria preferencji (lead_new / lead_action / lead_reminder) —
+    każdy admin wycisza kategorie w Settings → Notifications; wpis w dzwonku
+    zostaje zawsze. Deep-link prowadzi prosto w kartę leada (panel czyta
+    `?lead=` przy starcie), a tag skleja serię zdarzeń jednego leada w jedno
+    powiadomienie na ekranie telefonu. notify_admins nigdy nie rzuca, a w
+    trakcie requestu odkłada wysyłkę na po odpowiedzi — wolno to wołać zewsząd."""
+    notify.notify_admins(event, title, body,
                          url=f"/admin?lead={lead_id}", tag=f"lead-{lead_id}")
 
 
@@ -5351,7 +5379,7 @@ def leads_ingest(payload: LeadIn,
     # nie ma prawa zwrócić landingowi błędu i kazać człowiekowi klikać drugi raz.
     # Push do adminów tak samo — telefon działu ma zabrzęczeć, ale landing nie
     # może czekać na push service ani oglądać jego błędów.
-    _lead_push(lead_id, f"New lead: {kto}", opis)
+    _lead_push(lead_id, f"New lead: {kto}", opis, event="lead_new")
     _, _, message_id = telegram.send_lead_alert(lead_id, tekst)
     if message_id:
         # Osobny, króciutki zapis po wysyłce. Nie da się tego zrobić w tamtej
@@ -5490,6 +5518,8 @@ class LeadStatusIn(BaseModel):
     # samej notatki kasowałby to, kto się leadem zajmuje.
     owner: str | None = None
     tier: str | None = None
+    # Ręczne „kupił" (checkbox w tabeli) — zakupy zawarte poza sklepem.
+    bought: bool | None = None
 
 
 @app.post("/api/admin/leads/{lead_id}", dependencies=[Depends(auth.require_admin)])
@@ -5535,10 +5565,17 @@ def admin_lead_update(lead_id: int, payload: LeadStatusIn):
                            f"{lead.tier or '—'} → {payload.tier}", actor="panel")
                 lead.tier = payload.tier
                 lead.updated_at = datetime.now(timezone.utc)
+        if payload.bought is not None and bool(payload.bought) != bool(lead.bought):
+            lead.bought = bool(payload.bought)
+            lead.updated_at = datetime.now(timezone.utc)
+            _zdarzenie(session, lead.id, "bought",
+                       "marked bought" if lead.bought else "unmarked bought",
+                       actor="panel")
+            zmiany.append("marked bought" if lead.bought else "unmarked bought")
         session.commit()
         kto = lead.name or lead.email
         wynik = {"id": lead.id, "status": lead.status, "note": lead.note,
-                 "owner": lead.owner, "tier": lead.tier,
+                 "owner": lead.owner, "tier": lead.tier, "bought": bool(lead.bought),
                  "contacted_at": lead.contacted_at.isoformat() if lead.contacted_at else None}
     finally:
         session.close()
@@ -5565,17 +5602,23 @@ def admin_lead_delete(lead_id: int):
         lead = session.get(Lead, lead_id)
         if not lead:
             raise HTTPException(404, "Lead not found")
-        mail = lead.email
+        mail, karta_mid = lead.email, lead.tg_message_id
         # Dzieci najpierw — `lead_events.lead_id` i `lead_reminders.lead_id` to
         # klucze obce, więc Postgres odrzuciłby skasowanie rodzica.
         session.query(LeadReminder).filter(LeadReminder.lead_id == lead_id).delete()
         session.query(LeadEvent).filter(LeadEvent.lead_id == lead_id).delete()
         session.delete(lead)
         session.commit()
-        print(f"[leads] usunieto lead #{lead_id} ({mail})")
-        return {"ok": True, "id": lead_id}
     finally:
         session.close()
+    # Karta z kanału schodzi razem z leadem — best-effort PO commicie: wpis
+    # testowy znikał z bazy, a jego karta wisiała na czacie jak sierota i dalej
+    # dawała się klikać (w lead, którego już nie było). Padnięty Telegram nie
+    # cofa kasowania.
+    if karta_mid:
+        telegram.delete_lead_card(karta_mid)
+    print(f"[leads] usunieto lead #{lead_id} ({mail})")
+    return {"ok": True, "id": lead_id}
 
 
 class LeadReminderIn(BaseModel):
@@ -5669,10 +5712,54 @@ async def telegram_webhook(request: Request,
     if (update or {}).get("callback_query"):
         return _telegram_przycisk(update["callback_query"])
     # Kanał oddaje posty jako `channel_post`, prywatny czat jako `message`.
-    # Interesuje nas z nich jedno: odpowiedź na alert = notatka z rozmowy.
+    # Z prywatnego czatu interesuje nas parowanie konta (`/start <kod>`),
+    # z obu — odpowiedź na alert, czyli notatka z rozmowy.
     wiadomosc = (update or {}).get("channel_post") or (update or {}).get("message") or {}
+    if ((wiadomosc.get("chat") or {}).get("type") == "private"
+            and str(wiadomosc.get("text") or "").startswith("/start")):
+        return _telegram_start(wiadomosc)
     if wiadomosc.get("reply_to_message"):
         return _telegram_notatka(wiadomosc)
+    return {"ok": True}
+
+
+def _telegram_start(wiadomosc: dict) -> dict:
+    """`/start <kod>` w DM z botem — sparowanie konta admina z Telegramem.
+
+    Kod wydaje panel (POST /api/me/telegram-link). Od sparowania kliknięcia
+    przycisków na kanale LEADS podpisują się mailem konta („bartek@s")
+    zamiast imieniem z Telegrama, które bywa niejednoznaczne (dwóch Bartków).
+    Jedno konto Telegram wskazuje najwyżej jednego admina — ponowne parowanie
+    przepina, nie dokleja."""
+    czat = str((wiadomosc.get("chat") or {}).get("id") or "")
+    uid = str((wiadomosc.get("from") or {}).get("id") or "")
+    czesci = str(wiadomosc.get("text") or "").split(maxsplit=1)
+    kod = czesci[1].strip().upper() if len(czesci) > 1 else ""
+    if not (czat and uid and kod):
+        if czat:
+            telegram.send_dm(czat, "Send /start <code> — you will find the code "
+                                   "in the admin panel, under Settings → Notifications.")
+        return {"ok": True}
+    session = SessionLocal()
+    try:
+        tr = (session.query(Trader)
+              .filter(Trader.telegram_link_code == kod, Trader.is_admin.is_(True))
+              .one_or_none())
+        if not tr:
+            session.close()
+            telegram.send_dm(czat, "Unknown or already used code. "
+                                   "Generate a fresh one in the panel and try again.")
+            return {"ok": True}
+        for inny in session.query(Trader).filter(Trader.telegram_user_id == uid).all():
+            inny.telegram_user_id = None
+        tr.telegram_user_id = uid
+        tr.telegram_link_code = None
+        session.commit()
+        email = tr.email
+    finally:
+        session.close()
+    telegram.send_dm(czat, f"Linked as {email}. Your clicks on the LEADS channel "
+                           "now sign with this account.")
     return {"ok": True}
 
 
@@ -5745,10 +5832,19 @@ def _telegram_przycisk(cb: dict) -> dict:
     if len(czesci) != 3 or czesci[0] != "lead":
         return {"ok": True}
     _, surowe_id, akcja = czesci
-    kto = ((cb.get("from") or {}).get("first_name") or "?")[:60]
+    dane_od = cb.get("from") or {}
+    kto = (dane_od.get("first_name") or "?")[:60]
 
     session = SessionLocal()
     try:
+        # Sparowane konto podpisuje się mailem admina; niesparowane zostaje
+        # przy imieniu z Telegrama (fallback, nie błąd — parowanie jest opt-in).
+        uid = str(dane_od.get("id") or "")
+        if uid:
+            sparowany = (session.query(Trader.email)
+                         .filter(Trader.telegram_user_id == uid).first())
+            if sparowany:
+                kto = sparowany[0][:60]
         lead = session.get(Lead, int(surowe_id)) if surowe_id.isdigit() else None
         if not lead:
             telegram.answer_callback(cb.get("id", ""), "Nie znaleziono leada")
@@ -5866,12 +5962,15 @@ def _tekst_przypomnienia(lead: Lead, powod: str, paid: float, dni: int) -> str:
     e = html.escape
     kto = f"<b>{e(lead.name or lead.email)}</b>"
     naglowek = {
-        "bought": f"💸 {kto} KUPIŁ — ${paid:,.0f}",
+        # Ręczne „bought" z panelu nie niesie kwoty — sklep tego zakupu nie widział.
+        "bought": f"💸 {kto} KUPIŁ — ${paid:,.0f}" if paid > 0 else f"💸 {kto} KUPIŁ",
         "no_contact": f"⏰ {kto} czeka bez kontaktu",
         "stalled": f"🕐 {kto} — rozmowa bez ciągu dalszego",
     }.get(powod, kto)
     stopka = {
-        "bought": "Zapłacone zamówienie na ten mail. Przestań traktować jak leada.",
+        "bought": ("Zapłacone zamówienie na ten mail. Przestań traktować jak leada."
+                   if paid > 0 else
+                   "Oznaczone ręcznie jako kupione. Przestań traktować jak leada."),
         "no_contact": f"Zgłosił się {dni} dni temu i nikt nie ruszył statusu.",
         "stalled": f"Pierwszy kontakt {dni} dni temu, od tego czasu nic.",
     }.get(powod, "")
@@ -6001,11 +6100,13 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
             # Dedup tym samym zdarzeniem `reminder`, więc raz na lead.
             wiek_min = (now - (_utc(l.created_at) or now)).total_seconds() / 60
             if (l.owner is None and l.status == "new" and paid == 0
-                    and l.outcome != "not_qualified"
+                    and not l.bought and l.outcome != "not_qualified"
                     and wiek_min >= 30 and (l.id, "unclaimed") not in juz):
                 _zdarzenie(session, l.id, "reminder", "unclaimed", actor="cron")
                 pushy.append((l.id, "Unclaimed lead (30 min+)", l.name or l.email))
-            if paid > 0:
+            if paid > 0 or l.bought:
+                # Ręczny checkbox „bought" liczy się jak zapłacone zamówienie:
+                # przestań dzwonić jak do leada, zacznij pilnować jak klienta.
                 powod, dni = "bought", wiek
             elif l.status == "new" and wiek >= no_contact_days:
                 powod, dni = "no_contact", wiek
@@ -6049,7 +6150,7 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
     # Po commicie, jak wysyłka na czat: padnięty push service nie cofnie zapisu,
     # a dedup wyżej gwarantuje, że kolejny przebieg nie wyśle tego drugi raz.
     for lead_id, tytul, tresc in pushy:
-        _lead_push(lead_id, tytul, tresc)
+        _lead_push(lead_id, tytul, tresc, event="lead_reminder")
     return {"sent": len(do_wyslania), "checked": len(leady), "pushed": len(pushy)}
 
 

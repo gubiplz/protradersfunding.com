@@ -496,6 +496,26 @@ const VIEWS={
         does not fill up with the same entries.
         <b>Run once now</b> replaces today's automatic run rather than adding to it.</p></div>
 
+    <div class="sec-card" style="max-width:560px"><h3>Notifications</h3>
+      <div class="mod-row">
+        <div><div class="lbl">Push to this device</div>
+          <div class="muted" style="font-size:11.5px" id="push-state">New leads, claims and follow-ups — straight to this device.</div></div>
+        <button class="btn-p" id="push-btn" onclick="toggleAdminPush()">Enable</button>
+      </div>
+      <div style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)">
+        <div class="lbl" style="font-size:12px;color:var(--muted)">What buzzes your phone <span style="font-weight:400">(this account, every device)</span></div>
+        <div id="push-cats" class="chip-row" style="margin-top:8px">${pushCatsHtml()}</div>
+        <p class="muted" style="font-size:11.5px;margin-top:8px">Muted categories still land in the bell — they just stop buzzing.</p>
+      </div>
+      <div class="mod-row" style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)">
+        <div><div class="lbl">Telegram identity</div>
+          <div class="muted" style="font-size:11.5px" id="tg-link-state">${ME&&ME.telegram_linked
+            ?`Linked — your clicks on the LEADS channel sign as <b>${esc(ME.email)}</b>`
+            :'Not linked — channel clicks sign with your Telegram first name'}</div></div>
+        <button class="btn-o" onclick="tgLinkCode()">${ME&&ME.telegram_linked?'Re-link':'Link Telegram'}</button>
+      </div>
+      <p class="muted" id="tg-link-code" style="font-size:12px;margin-top:8px"></p></div>
+
     <div class="sec-card" style="max-width:560px"><h3>Admin access</h3>
       <p class="muted" style="font-size:13px;margin:6px 0 12px">You are signed in with an administrator account. Access is granted by the <span class="mono">is_admin</span> flag on the account, not by a shared token.</p>
       <div class="kv"><span>Signed in as</span><b>${esc(ME?.email||'—')}</b></div>
@@ -517,6 +537,7 @@ const VIEWS={
         <a class="btn-o sm" href="/docs" target="_blank">API docs</a>
       </div></div>
     </div>`;
+  paintPushCard();
  },
 
  async telemetry(){
@@ -808,21 +829,21 @@ function leadTgLink(l){
     ?`<a href="https://t.me/${esc(h)}?text=${encodeURIComponent(leadOpener(l))}" target="_blank" rel="noopener">@${esc(h)}</a>`
     :`<span class="muted" title="Not a valid Telegram handle — ask for the right one">${esc(l.telegram)}</span>`;
 }
-/* TG/WA need the full international number, so they only show when the stored
-   phone declares one (E.164 with +). SMS and Copy work with anything. */
+/* Two icon actions, nothing else (owner's call — SMS/WA went): Telegram chat
+   by number, and copy-the-opener. The Telegram one only shows when the stored
+   phone declares a country (E.164 with +) — without it t.me leads nowhere. */
+const ICO_TG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>';
+const ICO_COPY='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 function leadPhoneActs(l){
   if(!l.phone)return'';
   const digits=String(l.phone).replace(/\D/g,'');
   const intl=String(l.phone).trim().startsWith('+')&&digits.length>=8;
-  const opener=encodeURIComponent(leadOpener(l));
   return `<span class="lead-acts">${intl
     ?`<a class="act-btn" title="Open a Telegram chat with this number (opener goes to the clipboard)"
-        href="https://t.me/+${digits}" target="_blank" rel="noopener" onclick="copyOpener(${l.id})">TG</a>
-      <a class="act-btn" title="WhatsApp with the opener prefilled"
-        href="https://wa.me/${digits}?text=${opener}" target="_blank" rel="noopener">WA</a>`:''}
-    <a class="act-btn" title="Text message with the opener prefilled"
-      href="sms:${intl?'+'+digits:esc(l.phone)}?&body=${opener}">SMS</a>
-    <button class="act-btn" type="button" title="Copy the opener" onclick="copyOpener(${l.id})">Copy</button></span>`;
+        aria-label="Telegram" href="https://t.me/+${digits}" target="_blank" rel="noopener"
+        onclick="copyOpener(${l.id})">${ICO_TG}</a>`:''}
+    <button class="act-btn" type="button" title="Copy the opener"
+      aria-label="Copy the opener" onclick="copyOpener(${l.id})">${ICO_COPY}</button></span>`;
 }
 
 function renderLeads(){
@@ -830,17 +851,19 @@ function renderLeads(){
   const q=(window._leadQ||'').toLowerCase();
   const f=window._leadFilter||'all';
   const rows=list.filter(l=>
-    (f==='all'||(f==='bought'?l.paid_usd>0
+    (f==='all'||(f==='bought'?(l.paid_usd>0||l.bought)
       :f==='due'?(l.next_due&&dueDays(l.next_due)<=0)
-      :f==='mine'?l.owner===deskWho(false)
+      :f==='mine'?l.owner===meMail()
       :f==='free'?!l.owner
       :l.status===f))&&
     (!q||(l.email||'').toLowerCase().includes(q)||(l.name||'').toLowerCase().includes(q)
      ||(l.phone||'').includes(q)||(l.ref||'').toLowerCase().includes(q)));
   /* Same rule as Orders: the tiles describe WHAT IS VISIBLE below them, so
      switching to "Rejected" cannot leave the full revenue sitting on top. */
-  const bought=rows.filter(l=>l.paid_usd>0);
-  const revenue=bought.reduce((s,l)=>s+l.paid_usd,0);
+  /* „Bought" = zapłacone zamówienie ALBO ręczny checkbox (deal poza sklepem);
+     przychód sumuje tylko realne zamówienia — ręczne oznaczenie nie niesie kwoty. */
+  const bought=rows.filter(l=>l.paid_usd>0||l.bought);
+  const revenue=bought.reduce((s,l)=>s+(l.paid_usd||0),0);
   const waiting=rows.filter(l=>l.status==='new').length;
   const conv=rows.length?Math.round(bought.length/rows.length*100):0;
   /* Counted over the WHOLE list, not the filtered rows: a follow-up that came
@@ -891,7 +914,11 @@ function renderLeads(){
           LEAD_STATUSES.map(([k,lab])=>`<option value="${k}"${l.status===k?' selected':''}>${lab}</option>`).join('')}</select>
           ${l.next_due?`<div class="due ${dueDays(l.next_due)<=0?'now':''}">⏰ ${dueLabel(l.next_due)}</div>`
             :l.contacted_at?`<div class="muted" style="font-size:11px">${dstr(l.contacted_at)}</div>`:''}</td>
-        <td class="num" data-l="Bought">${l.paid_usd>0?`<span class="status paid"><span class="dot"></span>$${fmt0(l.paid_usd)}</span>`:'<span class="muted">—</span>'}</td>
+        <td class="num" data-l="Bought" data-sort="${l.paid_usd>0?l.paid_usd:l.bought?0.5:0}" onclick="event.stopPropagation()">${
+          l.paid_usd>0?`<span class="status paid"><span class="dot"></span>$${fmt0(l.paid_usd)}</span>`
+          :`<input type="checkbox" class="bought-cb" ${l.bought?'checked':''}
+              title="Mark as bought — deal closed outside the store" aria-label="Bought"
+              onchange="setLeadBought(${l.id},this.checked)">`}</td>
         <td data-l="Note" onclick="event.stopPropagation()"><input class="inp sm" style="min-width:170px" value="${esc(l.note||'')}"
           placeholder="Add a note…" onchange="setLeadNote(${l.id},this.value)"></td></tr>`).join('')}
       </tbody></table></div>`
@@ -921,18 +948,24 @@ async function setLeadNote(id,note){
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
-/* Who is sitting at the panel. The admin login is one shared token, so the app
-   has no idea — but "who took this lead" is the whole point of the owner field,
-   so we ask once and keep it in this browser. `ask=false` for code that only
-   wants to compare (the "Mine" filter must not pop a dialog on every render). */
-function deskWho(ask=true){
-  let who=localStorage.getItem('pf_desk_who')||'';
-  if(!who&&ask){
-    who=(prompt('Your name — shown on leads you take')||'').trim().slice(0,60);
-    if(who)localStorage.setItem('pf_desk_who',who);
-  }
-  return who;
+/* Ręczne „kupił" — dla deali zamkniętych poza sklepem (przelew, Telegram).
+   Zapłacone zamówienie na ten sam mail i tak liczy się samo i pokazuje kwotę;
+   checkbox istnieje dokładnie dla zakupów, których sklep nie widzi. */
+async function setLeadBought(id,on){
+  try{
+    await api('/api/admin/leads/'+id,{method:'POST',body:JSON.stringify({bought:on})});
+    const row=(window._leads||[]).find(l=>l.id===id);
+    if(row)row.bought=on;
+    toast(on?'Marked as bought':'Unmarked');
+    if(window._leadFilter==='bought')renderLeads();
+  }catch(e){toast('Error: '+e.message,'err');VIEWS.leads()}
 }
+
+/* Who is sitting at the panel = the signed-in admin account. Leads are owned
+   by the ADMIN EMAIL ("bartek@s"), the same identity the Telegram buttons sign
+   with once the account is paired (Settings → Notifications) — one name for
+   one person everywhere, no prompt() and no per-browser nickname. */
+const meMail=()=>(ME&&ME.email)||'';
 
 /* One writer for the small per-lead fields. The drawer re-renders from the
    server afterwards on purpose: owner, grade and reminders read off each other
@@ -948,8 +981,8 @@ async function patchLead(id,patch,msg){
 }
 
 function claimLead(id){
-  const who=deskWho();
-  if(!who){toast('Enter your name first','err');return}
+  const who=meMail();
+  if(!who){toast('Session expired — sign in again','err');return}
   patchLead(id,{owner:who},'Yours — write to them');
 }
 
@@ -980,7 +1013,7 @@ async function deleteLead(id){
 const LEAD_STATUS_CLS={new:'pending',messaged:'pending',replied:'paid',
   no_reply:'failed',rejected:'failed'};
 const LEAD_EVENT_LBL={applied:'Applied',status:'Status',note:'Note',reminder:'Reminder',
-  claim:'Owner',tier:'Grade'};
+  claim:'Owner',tier:'Grade',bought:'Bought'};
 /* Reminders are sent to US, never to the lead — the landing they applied through
    is a separate brand. The wording says who is being nudged. */
 const LEAD_REMINDER_LBL={no_contact:'Nobody wrote to them yet',bought:'Bought — stop treating as a lead',
@@ -1021,7 +1054,7 @@ const REMINDER_PRESETS=[
    from the channel buttons. */
 function leadModCard(l){
   const grades=[['high','🔥 High'],['warm','🟡 Warm'],['cold','⚪️ Cold']];
-  const ja=deskWho(false);
+  const ja=meMail();
   return `<div class="lead-card sec-card">
     <div class="mod-row">
       <div><div class="lbl">Handled by</div>
@@ -1137,7 +1170,8 @@ async function openLead(id){
     <div class="chip-row">
       <span class="status ${LEAD_STATUS_CLS[l.status]||'pending'}"><span class="dot"></span>${esc(leadLabel(l.status))}</span>
       ${l.tier?`<span class="chip">${esc(l.tier)} ${l.score}</span>`:''}
-      ${l.paid_usd>0?`<span class="status paid"><span class="dot"></span>paid $${fmt0(l.paid_usd)}</span>`:''}
+      ${l.paid_usd>0?`<span class="status paid"><span class="dot"></span>paid $${fmt0(l.paid_usd)}</span>`
+        :l.bought?'<span class="status paid"><span class="dot"></span>bought</span>':''}
       ${l.applications>1?`<span class="chip">applied ${l.applications}×</span>`:''}
       ${l.outcome==='not_qualified'?`<span class="chip">${l.source==='safe'?'safe page lead':'failed the questionnaire'}</span>`:''}
     </div>
@@ -2512,7 +2546,41 @@ function pushCardHtml(){
     <div><div class="lbl">Push to this device</div>
       <div class="muted" style="font-size:11.5px" id="push-state">New leads, claims and follow-ups — straight to this device.</div></div>
     <button class="btn-p" id="push-btn" onclick="toggleAdminPush()">Enable</button>
-  </div></div>`;
+  </div>
+  <p class="muted" style="font-size:11.5px;margin-top:8px">Pick which categories buzz — and pair
+    your Telegram — in <a href="#" onclick="closeOver();go('settings');return false">Settings</a>.</p></div>`;
+}
+
+/* Kategorie web pushy — wyciszane per KONTO (ui_prefs.admin_push), więc jedna
+   decyzja gasi brzęczenie na wszystkich urządzeniach admina naraz. Brak wpisu
+   = kategoria brzęczy; nowa kategoria zdarzeń dzwoni u wszystkich, dopóki
+   ktoś jej świadomie nie zgasi. */
+const PUSH_CATS=[['lead_new','New leads'],['lead_action','Lead activity'],
+  ['lead_reminder','Lead follow-ups'],['admin_kyc','KYC submissions'],
+  ['admin_payout','Payout requests'],['admin_ticket','Support tickets']];
+function pushCatsHtml(){
+  const cats=(ME&&ME.ui_prefs&&ME.ui_prefs.admin_push)||{};
+  return PUSH_CATS.map(([k,l])=>`<label class="chip" style="cursor:pointer;display:inline-flex;gap:6px;align-items:center">
+    <input type="checkbox" ${cats[k]===false?'':'checked'} onchange="setPushCat('${k}',this.checked)">${l}</label>`).join('');
+}
+async function setPushCat(k,on){
+  const prefs=(ME&&ME.ui_prefs&&typeof ME.ui_prefs==='object')?{...ME.ui_prefs}:{};
+  const cats={...(prefs.admin_push||{})};
+  if(on)delete cats[k];else cats[k]=false;
+  prefs.admin_push=cats;
+  try{
+    await api('/api/me',{method:'PATCH',body:JSON.stringify({ui_prefs:prefs})});
+    ME.ui_prefs=prefs;
+    toast(on?'Will buzz again':'Muted — stays in the bell');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function tgLinkCode(){
+  try{
+    const d=await api('/api/me/telegram-link',{method:'POST'});
+    $('tg-link-code').innerHTML=`Open a <b>private chat with the desk bot</b> on Telegram and send:
+      <span class="mono" style="user-select:all">/start ${esc(d.code)}</span> — from then on your
+      clicks on the LEADS channel sign as <b>${esc(meMail())}</b>.`;
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 async function paintPushCard(){
   const btn=$('push-btn'),st=$('push-state');
