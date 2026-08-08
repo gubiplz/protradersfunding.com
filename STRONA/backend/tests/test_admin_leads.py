@@ -332,6 +332,25 @@ def test_alert_niesie_cala_ankiete(_srodowisko):
         assert f"Pytanie {i}" in tekst and f"Odpowiedź {i}" in tekst
 
 
+def test_klikniecie_przycisku_nie_gubi_ankiety_z_karty(_srodowisko):
+    """Każde kliknięcie przepisuje wiadomość od zera z `payload_json`. Gdyby ta
+    ścieżka nie odczytała payloadu, karta traciłaby ankietę i uzasadnienie oceny
+    w momencie, w którym ktoś ją bierze — czyli dokładnie wtedy, gdy zaczyna być
+    potrzebna."""
+    odp = _wyslij(_zgloszenie(
+        answers={"Kiedy chcesz kupić?": "W tym tygodniu"},
+        quality={"tier": "high", "score": 42, "reasons": ["kupuje sam"],
+                 "penalties": ["numer bez kierunkowego"]},
+    ))
+    lead_id = odp.json()["id"]
+    _callback(lead_id, "called", kto="Bartek")
+
+    _, _, tekst = _srodowisko["edit"][-1]
+    assert "Kiedy chcesz kupić?" in tekst and "W tym tygodniu" in tekst
+    assert "kupuje sam" in tekst and "numer bez kierunkowego" in tekst
+    assert "Bartek" in tekst
+
+
 def test_alert_escapuje_po_ucieciu_a_nie_przed(_srodowisko):
     """Ucięcie PO ucieczce rozcina encję w pół: `&amp;` zostaje jako `&am`,
     czego Telegram nie parsuje i odrzuca CAŁY alert — czyli powiadomienie nie
