@@ -182,7 +182,7 @@ addEventListener('click',e=>{
   if(b)_ostatniPrzycisk=b;
 },true);
 
-function withUndo(opis,wykonaj,wiersz){
+function withUndo(opis,wykonaj,wiersz,onUndo){
   /* Wiersz znika OD RAZU, tak jak przy zwyklym usuwaniu — zadanie na serwer
      idzie dopiero po 5 s. Cofniecie w tym oknie przywraca wiersz i nic nie
      wysyla, wiec przywrocenie jest zawsze wierne: nie odtwarzamy rekordu,
@@ -212,6 +212,9 @@ function withUndo(opis,wykonaj,wiersz){
   t.querySelector('.undo-btn').onclick=()=>{
     sprzatnij();
     if(wiersz&&wiersz.style)wiersz.style.display=schowaj||'';
+    /* Widoki bez zywego elementu wiersza (leady renderuja z window._leads)
+       przywracaja swoj stan same. */
+    if(onUndo)onUndo();
     toast('Restored — nothing was deleted.','ok',3500);
   };
   _czekajace.add(zadanie);
@@ -990,23 +993,28 @@ function claimLead(id){
   patchLead(id,{owner:who},'Yours — write to them');
 }
 
-/* Kasowanie leada. Jedyne miejsce w tej zakładce, które nie da się cofnąć,
-   więc siedzi na dole karty i pyta. Wiersze testowe i pomyłki muszą znikać
-   naprawdę: `leads.email` jest unikalny, a ukryty wiersz blokowałby adres. */
-async function deleteLead(id){
-  const l=(window._leads||[]).find(x=>x.id===id)||{};
+/* Kasowanie leada — przez to samo 5-sekundowe okno undo co certyfikaty,
+   zamiast modala z pytaniem: wiersz znika od razu, DELETE idzie na serwer
+   dopiero po odliczaniu, a „Undo" po prostu niczego nie wysyła. Wiersze
+   testowe i pomyłki muszą znikać naprawdę: `leads.email` jest unikalny,
+   a ukryty wiersz blokowałby adres. */
+function deleteLead(id){
+  const lista=(window._leads||[]).slice();
+  const l=lista.find(x=>x.id===id)
+    ||(window._leadOpen&&window._leadOpen.id===id?window._leadOpen:{});
   const kto=l.name||l.email||('#'+id);
-  if(!await askConfirm({title:`Delete ${esc(kto)}?`,
-    body:'This removes the lead, its history and its follow-ups for good. '
-      +'Orders and the trader account on the same e-mail stay untouched.<br><br>'
-      +'The address becomes free again, so the same person can apply from scratch.',
-    ok:'Delete lead',danger:true}))return;
-  try{
-    await api('/api/admin/leads/'+id,{method:'DELETE'});
-    window._leads=(window._leads||[]).filter(x=>x.id!==id);
-    closeOver();toast('Lead deleted','ok');
-    renderLeads();
-  }catch(e){toast('Error: '+e.message,'err')}
+  closeOver();
+  window._leads=lista.filter(x=>x.id!==id);
+  if(VIEW==='leads')renderLeads();
+  const przywroc=()=>{window._leads=lista;if(VIEW==='leads')renderLeads()};
+  withUndo(`Deleting lead ${kto}`,async()=>{
+    try{
+      await api('/api/admin/leads/'+id,{method:'DELETE'});
+    }catch(e){
+      toast('Error: '+e.message,'err');
+      przywroc();
+    }
+  },null,przywroc);
 }
 
 /* ---------- one lead: the history behind the row ----------
@@ -1090,7 +1098,7 @@ function leadDangerCard(l){
   return `<div class="lead-card sec-card danger-zone">
     <div class="mod-row">
       <div><div class="lbl">Delete</div>
-        <div class="muted" style="font-size:11.5px">For test entries and duplicates. History and follow-ups go with it.</div></div>
+        <div class="muted" style="font-size:11.5px">For test entries and duplicates. History, follow-ups and the channel card go with it — you get 5 seconds to undo.</div></div>
       <button class="btn-danger" onclick="deleteLead(${l.id})">Delete lead</button>
     </div>
   </div>`;
@@ -2525,15 +2533,20 @@ function openInbox(){
         <span>${esc(i.body||'')} · ${dstr(i.ts)}</span></div>
       ${i.ts>seen?'<span class="status pending"><span class="dot"></span>new</span>':''}
     </div>`;
-  /* Ten sam podział co przełączniki w Settings: rura z landingu osobno od
-     platformy — dwie listy czyta się szybciej niż jedną przeplataną. */
+  /* Ten sam podział co przełączniki w Settings, ale jako FILTR na górze
+     (decyzja usera): dwa pola Leads/Prop, klik przełącza listę. Wybór
+     zapamiętany per przeglądarka. */
+  const tab=localStorage.getItem('pf_admin_inbox_tab')||'leads';
   const leady=INBOX.filter(i=>i.type==='lead'),prop=INBOX.filter(i=>i.type!=='lead');
-  const sekcja=(tytul,items)=>items.length
-    ?`<div class="lbl" style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px">${tytul}</div>
-      <div class="tbl-wrap">${items.map(wiersz).join('')}</div>`:'';
-  openOver('Notifications',pushCardHtml()+(INBOX.length
-    ?sekcja('Leads',leady)+sekcja('Prop',prop)
-    :'<div class="empty"><h3>Nothing new</h3><p>New leads, orders, KYC submissions, payout requests and ticket messages show up here.</p></div>'));
+  const items=tab==='prop'?prop:leady;
+  const segBtn=(k,l,n)=>`<button class="${tab===k?'on':''}"
+    onclick="localStorage.setItem('pf_admin_inbox_tab','${k}');openInbox()">${l}${n?` (${n})`:''}</button>`;
+  openOver('Notifications',pushCardHtml()
+    +`<div class="seg" style="margin-bottom:12px">${segBtn('leads','Leads',leady.length)}${segBtn('prop','Prop',prop.length)}</div>`
+    +(items.length?`<div class="tbl-wrap">${items.map(wiersz).join('')}</div>`
+      :`<div class="empty"><h3>Nothing here</h3><p>${tab==='prop'
+        ?'Orders, KYC submissions, payout requests and ticket messages show up here.'
+        :'New leads, claims, statuses and follow-ups show up here.'}</p></div>`));
   paintPushCard();
   localStorage.setItem('pf_admin_inbox_seen',new Date().toISOString());
   loadInbox();
