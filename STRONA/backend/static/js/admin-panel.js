@@ -21,7 +21,10 @@ function signInForm(){
   // the same as for traders. `replace` instead of `href` so the browser
   // back button does not land on an empty panel.
   ME=null;
-  location.replace('/portal?next=/admin');
+  // Drop the server-side session cookie first: /portal bounces any admin
+  // cookie straight back here, so an orphaned cookie (valid cookie, missing
+  // or expired local token) would otherwise loop between the two pages.
+  fetch('/api/auth/logout',{method:'POST'}).finally(()=>location.replace('/portal?next=/admin'));
 }
 
 function signOut(){
@@ -510,7 +513,6 @@ const VIEWS={
     <div class="sec-card" style="max-width:560px"><h3>Links</h3>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
         <a class="btn-o sm" href="/" target="_blank">Public website</a>
-        <a class="btn-o sm" href="/portal" target="_blank">Trader portal</a>
         <a class="btn-o sm" href="/docs" target="_blank">API docs</a>
       </div></div>
     </div>`;

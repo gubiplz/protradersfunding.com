@@ -24,7 +24,7 @@ from time import monotonic
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
@@ -6274,4 +6274,10 @@ def api_openapi(request: Request):
 
 @app.get("/portal")
 def portal(request: Request):
+    # Konto administratora ma WYLACZNIE panel admina — portal tradera dla niego
+    # nie istnieje, wiec zalogowany admin jest odsylany od progu. Bez sesji
+    # admina strona dziala normalnie: to tu jest jedyny ekran logowania,
+    # takze dla administratorow.
+    if _admin_z_ciasteczka(request) is not None:
+        return RedirectResponse("/admin", status_code=302)
     return _page(request, "portal.html")

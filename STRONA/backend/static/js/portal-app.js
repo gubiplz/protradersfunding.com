@@ -226,7 +226,6 @@ $('sheet-nav').innerHTML=NAV.filter(n=>!TABS.some(t=>t.v===n.v)).map(n=>
   `<button class="sb-link" data-v="${n.v}" onclick="go('${n.v}');closeSheet()">${ICO[n.ico]}<span class="sb-txt">${n.label}</span></button>`).join('')+
   `<div class="sheet-div"></div>
    <button class="sb-link theme-toggle" onclick="toggleTheme()"></button>
-   <a class="sb-link" id="admin-link-sheet" href="/admin" style="display:none">${ICO.gear}<span class="sb-txt">Admin panel</span></a>
    <button class="sb-link sheet-signout" onclick="logout()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H3"/></svg><span class="sb-txt">Sign Out</span></button>`;
 paintTheme();   /* the sheet's toggle was just rendered — give it its icon/label */
 function openSheet(){$('sheetVeil').classList.remove('hidden');$('sheet').classList.add('open')}
@@ -337,6 +336,9 @@ async function doAuth(){
       clearRef();  /* attribution consumed — the code must not resurface later */}
     else res=await api('/api/auth/login',{method:'POST',body:JSON.stringify(body)});
     TOKEN=res.token;localStorage.setItem('pf_token',TOKEN);
+    // An administrator account has ONLY the admin panel — the trader portal
+    // is never rendered for it, no matter how the login started.
+    if(res.trader&&res.trader.is_admin){location.replace('/admin');return}
     // There is ONE login — the admin panel redirects here with ?next=/admin and
     // after signing in we go exactly back there instead of losing the user here.
     const nextUrl=new URLSearchParams(location.search).get('next');
@@ -423,6 +425,7 @@ async function onGoogleCred(resp){
       body:JSON.stringify({credential:resp.credential,referral:pfRef()||null})});
     clearRef();
     TOKEN=res.token;localStorage.setItem('pf_token',TOKEN);
+    if(res.trader&&res.trader.is_admin){location.replace('/admin');return}
     const nextUrl=new URLSearchParams(location.search).get('next');
     if(nextUrl&&nextUrl.startsWith('/')&&!nextUrl.startsWith('//')){location.href=nextUrl;return}
     await boot();
@@ -522,6 +525,10 @@ async function boot(){
     if(q0.get('buy'))$('auth-buynote').classList.remove('hidden');
     loadAuthStats();return}
   try{ME=await api('/api/auth/me')}catch(e){logout();return}
+  /* Admin accounts live in /admin only. The server already bounces them off
+     /portal by the session cookie; this covers the leftover state where the
+     cookie is gone but the localStorage token still works. */
+  if(ME.is_admin){location.replace('/admin');return}
   /* Hard gate: an unconfirmed address never reaches the dashboard. */
   if(ME.email_verified===false){
     $('auth').classList.add('hidden');$('app').classList.add('hidden');
@@ -536,8 +543,6 @@ async function boot(){
   $('ava').textContent=nm[0].toUpperCase();
   $('who-name').textContent=ME.full_name||'Trader';
   $('who-mail').textContent=ME.email;
-  $('admin-link').style.display=ME.is_admin?'':'none';
-  $('admin-link-sheet').style.display=ME.is_admin?'':'none';
   if(localStorage.getItem('pf_side_collapsed')==='1')$('side').classList.add('collapsed');
   initEngagement();
   flagsWarm();

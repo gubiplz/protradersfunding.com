@@ -142,3 +142,41 @@ def test_wylogowanie_zamyka_strone_admina():
 
     c.post("/api/auth/logout")
     assert c.get("/admin").status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+#  Konto administratora ma WYLACZNIE panel admina — portal go odsyla           #
+# --------------------------------------------------------------------------- #
+def test_portal_odsyla_admina_do_panelu():
+    """Zalogowany admin nie dostaje portalu tradera, tylko przekierowanie."""
+    _trader("tylkopanel@firma.pl", "tajne123", admin=True)
+    c = TestClient(app)
+    assert c.post("/api/auth/login",
+                  json={"email": "tylkopanel@firma.pl", "password": "tajne123"}).status_code == 200
+    r = c.get("/portal", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == "/admin"
+    assert c.get("/admin").status_code == 200
+
+
+def test_portal_normalny_dla_tradera_i_bez_sesji():
+    """Redirect dotyczy tylko adminow: go/login-screen dla wszystkich innych.
+
+    /portal to jedyny ekran logowania (rowniez dla administratorow), wiec bez
+    sesji NIE wolno przekierowywac — admin nie mialby sie gdzie zalogowac.
+    """
+    c = TestClient(app)
+    assert c.get("/portal", follow_redirects=False).status_code == 200
+
+    _trader("portalowy@firma.pl", "tajne123", admin=False)
+    assert c.post("/api/auth/login",
+                  json={"email": "portalowy@firma.pl", "password": "tajne123"}).status_code == 200
+    assert c.get("/portal", follow_redirects=False).status_code == 200
+
+
+def test_portal_bez_linku_do_admina():
+    """Panel admina i portal tradera to rozlaczne swiaty — w portalu nie ma
+    juz linku "Admin panel" (byl widoczny dla kont z is_admin)."""
+    html = TestClient(app).get("/portal").text
+    assert "admin-link" not in html
+    bundle = TestClient(app).get("/static/js/portal-app.js").text
+    assert "admin-link" not in bundle and "Admin panel" not in bundle
