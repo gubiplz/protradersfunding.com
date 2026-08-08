@@ -531,6 +531,7 @@ const VIEWS={
       </div></div>
     </div>`;
   paintPushCard();
+  paintTgIdentity();
  },
 
  async telemetry(){
@@ -2585,6 +2586,19 @@ function tgIdentityHtml(){
     </div>
   </div>
   <p class="muted" id="tg-link-code" style="font-size:12px;margin-top:8px"></p>`;
+}
+/* Wejście w Settings dociąga świeży stan z serwera: ME z boota potrafi być
+   starsze niż parowanie (PWA wybudzona z uśpienia nie przeładowuje appki,
+   a /start dochodzi przecież z telefonu, obok panelu) — bez tego „Not linked"
+   wisiało mimo poprawnie zapisanego parowania. */
+async function paintTgIdentity(){
+  const box=$('tg-identity');
+  if(!box)return;
+  try{
+    const st=await api('/api/me/telegram-link');
+    if(ME){ME.telegram_linked=st.linked;ME.telegram_username=st.username}
+    box.innerHTML=tgIdentityHtml();
+  }catch(_){/* zostaje render z ME */}
 }
 async function tgLinkCode(){
   try{
