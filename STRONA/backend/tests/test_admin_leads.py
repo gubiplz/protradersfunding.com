@@ -16,7 +16,7 @@ from app import auth, telegram  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Lead, LeadEvent, Order, Trader  # noqa: E402
+from app.models import Lead, LeadEvent, LeadReminder, Order, Trader  # noqa: E402
 
 init_db()
 client = TestClient(app)
@@ -24,6 +24,10 @@ ADMIN = {"X-Admin-Token": get_settings().admin_token}
 TOKEN_LANDINGU = "sekret-landingu"
 SEKRET_WEBHOOKA = "sekret-webhooka"
 LICZNIK = iter(range(10_000))
+# Numery wiadomości muszą być unikalne w CAŁYM przebiegu, nie w jednym teście:
+# leady zostają w bazie między testami, a webhook szuka leada po `tg_message_id`
+# i przy duplikacie nie wie, do którego przypiąć notatkę.
+NUMERY_WIADOMOSCI = iter(range(900, 10_000))
 
 
 @pytest.fixture(autouse=True)
@@ -38,8 +42,12 @@ def _srodowisko(monkeypatch):
     monkeypatch.setattr(u, "lead_ingest_token", TOKEN_LANDINGU, raising=False)
     monkeypatch.setattr(u, "telegram_webhook_secret", SEKRET_WEBHOOKA, raising=False)
     wyslane: dict[str, list] = {"alert": [], "answer": [], "edit": [], "przypomnienie": []}
+    # Alert oddaje `message_id` — po nim webhook dopasowuje odpowiedź na wiadomość
+    # do leada, więc atrapa musi je zwracać, inaczej notatki z Telegrama nie mają
+    # się o co zaczepić.
     monkeypatch.setattr(telegram, "send_lead_alert",
-                        lambda lead_id, tekst, **kw: (wyslane["alert"].append((lead_id, tekst)), (True, ""))[1])
+                        lambda lead_id, tekst, **kw: (wyslane["alert"].append((lead_id, tekst)),
+                                                      (True, "", next(NUMERY_WIADOMOSCI)))[1])
     monkeypatch.setattr(telegram, "send_lead_message",
                         lambda tekst, **kw: (wyslane["przypomnienie"].append(tekst), (True, ""))[1])
     monkeypatch.setattr(telegram, "answer_callback",
@@ -234,12 +242,12 @@ def test_filtr_po_statusie():
 # --------------------------------------------------------------------------- #
 #  Telegram                                                                    #
 # --------------------------------------------------------------------------- #
-def _callback(lead_id, status, sekret=SEKRET_WEBHOOKA):
+def _callback(lead_id, status, sekret=SEKRET_WEBHOOKA, kto="Hubert"):
     naglowki = {"X-Telegram-Bot-Api-Secret-Token": sekret} if sekret else {}
     return client.post("/api/telegram/webhook", headers=naglowki, json={
         "callback_query": {
             "id": "cb1", "data": f"lead:{lead_id}:{status}",
-            "from": {"first_name": "Hubert"},
+            "from": {"first_name": kto},
             "message": {"message_id": 55, "chat": {"id": -100123}},
         }})
 
@@ -287,6 +295,51 @@ def test_alert_niesie_kontakt_i_ocene(_srodowisko):
     _wyslij(_zgloszenie())
     _, tekst = _srodowisko["alert"][-1]
     assert "+48111222333" in tekst and "HIGH 42" in tekst
+
+
+def test_alert_niesie_uzasadnienie_oceny(_srodowisko):
+    """Ocena bez uzasadnienia to goła liczba, której nikt nie ma jak sprawdzić.
+    Czerwone flagi mają własną linijkę, bo mówią coś innego niż braki: nie „mało
+    punktów", tylko „te dane kontaktowe mogą być nic niewarte"."""
+    _wyslij(_zgloszenie(quality={
+        "tier": "high", "score": 42,
+        "reasons": ["kupuje sam", "ma konto u brokera"],
+        "gaps": ["nie podał kraju"],
+        "penalties": ["numer bez kierunkowego"],
+    }))
+    _, tekst = _srodowisko["alert"][-1]
+    assert "kupuje sam · ma konto u brokera" in tekst
+    assert "nie podał kraju" in tekst
+    assert "⚠️" in tekst and "numer bez kierunkowego" in tekst
+
+
+def test_alert_bez_oceny_nie_dokleja_pustych_linijek(_srodowisko):
+    """Odrzuconego nikt nie punktuje, więc landing nie przysyła `quality`.
+    Brak oceny ma znaczyć brak wierszy, a nie wiersze z niczym."""
+    _wyslij(_zgloszenie(outcome="not_qualified", quality=None))
+    _, tekst = _srodowisko["alert"][-1]
+    assert "✅" not in tekst and "➖" not in tekst and "⚠️" not in tekst
+    assert "odpadł w ankiecie" in tekst
+
+
+def test_alert_niesie_cala_ankiete(_srodowisko):
+    """Dział czyta kanał zamiast panelu. Ankieta ucięta na czwartym pytaniu to
+    ta, o którą dzwoni się do człowieka drugi raz."""
+    ankieta = {f"Pytanie {i}": f"Odpowiedź {i}" for i in range(1, 9)}
+    _wyslij(_zgloszenie(answers=ankieta))
+    _, tekst = _srodowisko["alert"][-1]
+    for i in range(1, 9):
+        assert f"Pytanie {i}" in tekst and f"Odpowiedź {i}" in tekst
+
+
+def test_alert_escapuje_po_ucieciu_a_nie_przed(_srodowisko):
+    """Ucięcie PO ucieczce rozcina encję w pół: `&amp;` zostaje jako `&am`,
+    czego Telegram nie parsuje i odrzuca CAŁY alert — czyli powiadomienie nie
+    dochodzi w ogóle, a lead wygląda, jakby nigdy nie przyszedł."""
+    pytanie = "x" * 79 + "&" + "y" * 20
+    _wyslij(_zgloszenie(answers={pytanie: "tak"}))
+    _, tekst = _srodowisko["alert"][-1]
+    assert "x" * 79 + "&amp;" in tekst
 
 
 # --------------------------------------------------------------------------- #
@@ -451,3 +504,397 @@ def test_przypomnienie_o_rozmowie_bez_ciagu_dalszego():
 
     _cron()
     assert [z.detail for z in _zdarzenia(lead_id, "reminder")] == ["stalled"]
+
+
+# --------------------------------------------------------------------------- #
+#  Kto się zajął leadem                                                        #
+# --------------------------------------------------------------------------- #
+def test_przycisk_bierze_leada():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _callback(lead_id, "claim")
+
+    lead = _lead(lead_id)
+    assert lead.owner == "Hubert" and lead.owner_at is not None
+    assert [(z.detail, z.actor) for z in _zdarzenia(lead_id, "claim")] == [
+        ("taken by Hubert", "telegram:Hubert")]
+
+
+def test_drugi_nie_przejmuje_cudzego_leada(_srodowisko):
+    """Sedno tej kolumny: kanał moderuje kilka osób i posty są anonimowe, więc
+    bez tego dwie osoby dzwoniły tego samego dnia do jednego człowieka."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _callback(lead_id, "claim", kto="Hubert")
+    ile_przepisan = len(_srodowisko["edit"])
+
+    _callback(lead_id, "claim", kto="Bartek")
+
+    assert _lead(lead_id).owner == "Hubert"
+    assert _srodowisko["answer"][-1] == "Zajmuje się już Hubert"
+    # Odmowa nie rusza wiadomości — nie ma czego przepisywać.
+    assert len(_srodowisko["edit"]) == ile_przepisan
+    assert len(_zdarzenia(lead_id, "claim")) == 1
+
+
+def test_oddaje_tylko_wlasciciel(_srodowisko):
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _callback(lead_id, "claim", kto="Hubert")
+
+    _callback(lead_id, "release", kto="Bartek")
+    assert _lead(lead_id).owner == "Hubert"
+    assert "Hubert" in _srodowisko["answer"][-1]
+
+    _callback(lead_id, "release", kto="Hubert")
+    lead = _lead(lead_id)
+    assert lead.owner is None and lead.owner_at is None
+    assert [z.detail for z in _zdarzenia(lead_id, "claim")] == [
+        "taken by Hubert", "released by Hubert"]
+
+
+def test_klikniecie_statusu_bierze_niczyjego_leada():
+    """Alerty sprzed tej zmiany mają pod sobą same statusy, bez „Biorę".
+    Bez tego zostawałyby na zawsze bez właściciela."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _callback(lead_id, "called", kto="Bartek")
+
+    lead = _lead(lead_id)
+    assert (lead.owner, lead.status) == ("Bartek", "called")
+
+
+def test_status_nie_podbiera_cudzego_leada():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _callback(lead_id, "claim", kto="Hubert")
+    _callback(lead_id, "no_answer", kto="Bartek")
+
+    lead = _lead(lead_id)
+    assert lead.owner == "Hubert" and lead.status == "no_answer"
+
+
+def test_klawiatura_pokazuje_statusy_dopiero_po_wzieciu():
+    """Dwa etapy: dopóki leada nikt nie ma, jedyne sensowne kliknięcie to
+    „biorę". Statusy pod niczyim leadem nie mówią, kto dzwonił."""
+    from app import telegram as tg
+
+    przed = tg.lead_keyboard(1)
+    assert len(przed["inline_keyboard"]) == 1
+    assert przed["inline_keyboard"][0][0]["callback_data"] == "lead:1:claim"
+
+    po = tg.lead_keyboard(1, owner="Hubert", status="called", tier="high")
+    wiersze = po["inline_keyboard"]
+    assert len(wiersze) == 3
+    assert [g["callback_data"] for g in wiersze[1]] == [
+        "lead:1:tier_high", "lead:1:tier_warm", "lead:1:tier_cold"]
+    # Kropka pokazuje, co jest ustawione teraz — inaczej po przepisaniu
+    # wiadomości nie widać, czy status w ogóle się zapisał.
+    assert [g["text"].startswith("• ") for g in wiersze[0]] == [True, False, False]
+    assert wiersze[1][0]["text"].startswith("• ")
+
+
+def test_alert_niesie_kto_sie_zajal(_srodowisko):
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _callback(lead_id, "claim")
+    _, _, tekst = _srodowisko["edit"][-1]
+    assert "Zajmuje się" in tekst and "Hubert" in tekst
+
+
+# --------------------------------------------------------------------------- #
+#  Korekta oceny z formularza                                                  #
+# --------------------------------------------------------------------------- #
+def test_ocena_z_telefonu_nadpisuje_ocene_z_ankiety():
+    """Ankieta punktuje deklaracje sprzed telefonu. Historia trzyma jedno
+    i drugie, bo rozjazd jest informacją o formularzu, nie tylko o leadzie."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]     # ankieta dała „high"
+    _callback(lead_id, "tier_cold")
+
+    assert _lead(lead_id).tier == "cold"
+    assert [(z.detail, z.actor) for z in _zdarzenia(lead_id, "tier")] == [
+        ("high → cold", "telegram:Hubert")]
+
+
+def test_ta_sama_ocena_drugi_raz_nie_zasmieca_historii():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _callback(lead_id, "tier_high")
+    assert _zdarzenia(lead_id, "tier") == []
+
+
+def test_nieznana_ocena_z_przycisku_nic_nie_rusza(_srodowisko):
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _callback(lead_id, "tier_platinum")
+    assert _lead(lead_id).tier == "high"
+    assert _zdarzenia(lead_id, "tier") == []
+
+
+def test_panel_zapisuje_wlasciciela_i_ocene():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    odp = client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN,
+                      json={"owner": "Bartek", "tier": "warm"})
+
+    assert odp.json()["owner"] == "Bartek" and odp.json()["tier"] == "warm"
+    assert [z.actor for z in _zdarzenia(lead_id, "claim")] == ["panel"]
+    assert [z.detail for z in _zdarzenia(lead_id, "tier")] == ["high → warm"]
+
+
+def test_panel_pustym_wlascicielem_zdejmuje_leada():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"owner": "Bartek"})
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"owner": ""})
+    assert _lead(lead_id).owner is None
+
+
+def test_zapis_notatki_nie_zdejmuje_wlasciciela():
+    """`owner=None` znaczy „nie ruszaj". Gdyby znaczyło „skasuj", dopisanie
+    notatki z panelu odbierałoby leada temu, kto go wziął."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"owner": "Bartek"})
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"note": "oddzwonić"})
+    assert _lead(lead_id).owner == "Bartek"
+
+
+def test_panel_odrzuca_nieznana_ocene():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    odp = client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"tier": "platinum"})
+    assert odp.status_code == 400 and _lead(lead_id).tier == "high"
+
+
+# --------------------------------------------------------------------------- #
+#  Notatki z odpowiedzi na kanale                                              #
+# --------------------------------------------------------------------------- #
+def _odpowiedz(message_id, tekst, autor="Hubert", pole="author_signature"):
+    """Post na kanale będący odpowiedzią na alert o leadzie."""
+    wiadomosc = {"message_id": 7001, "chat": {"id": -100123}, "text": tekst,
+                 "reply_to_message": {"message_id": message_id}}
+    if pole == "author_signature":
+        wiadomosc["author_signature"] = autor
+    elif pole == "from":
+        wiadomosc["from"] = {"first_name": autor}
+    return client.post("/api/telegram/webhook",
+                       headers={"X-Telegram-Bot-Api-Secret-Token": SEKRET_WEBHOOKA},
+                       json={"channel_post": wiadomosc})
+
+
+def test_ingest_zapamietuje_message_id_alertu():
+    """Bez tego nie ma czego dopasować: odpowiedź niesie wyłącznie id
+    wiadomości, na którą odpowiedziano."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    assert _lead(lead_id).tg_message_id is not None
+
+
+def test_odpowiedz_na_kanale_zapisuje_notatke(_srodowisko):
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    mid = _lead(lead_id).tg_message_id
+
+    assert _odpowiedz(mid, "prosi o telefon po 18").status_code == 200
+
+    assert _lead(lead_id).note == "Hubert: prosi o telefon po 18"
+    assert [(z.detail, z.actor) for z in _zdarzenia(lead_id, "note")] == [
+        ("prosi o telefon po 18", "telegram:Hubert")]
+    # Notatka wchodzi do samego alertu — dział czyta kanał, nie panel.
+    assert "prosi o telefon po 18" in _srodowisko["edit"][-1][2]
+
+
+def test_druga_notatka_dopisuje_sie_pod_pierwsza():
+    """Na kanale odpowiada kilka osób; druga uwaga nie ma prawa skasować
+    pierwszej."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    mid = _lead(lead_id).tg_message_id
+    _odpowiedz(mid, "nie odbiera", autor="Hubert")
+    _odpowiedz(mid, "oddzwonił, chce 100k", autor="Bartek")
+
+    assert _lead(lead_id).note.split("\n") == [
+        "Hubert: nie odbiera", "Bartek: oddzwonił, chce 100k"]
+
+
+def test_notatka_bez_podpisu_ma_autora_zastepczego():
+    """Póki właściciel kanału nie włączy „Sign messages", posty są anonimowe."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _odpowiedz(_lead(lead_id).tg_message_id, "był kontakt", pole=None)
+    assert _lead(lead_id).note == "kanał: był kontakt"
+
+
+def test_odpowiedz_na_obca_wiadomosc_jest_pomijana(_srodowisko):
+    _wyslij(_zgloszenie())
+    ile = len(_srodowisko["edit"])
+    assert _odpowiedz(999_999, "rozmowa o czymś innym").status_code == 200
+    assert len(_srodowisko["edit"]) == ile
+
+
+def test_pusta_odpowiedz_nie_tworzy_notatki():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _odpowiedz(_lead(lead_id).tg_message_id, "   ")
+    assert _lead(lead_id).note is None
+
+
+def test_notatka_nie_rosnie_bez_konca():
+    """Wiadomość w Telegramie ma limit 4096 znaków. Przy przepełnieniu wypadają
+    całe najstarsze linie, a nie połowa zdania."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    mid = _lead(lead_id).tg_message_id
+    for i in range(12):
+        _odpowiedz(mid, f"{i:02d} " + "x" * 480)
+
+    notatka = _lead(lead_id).note
+    assert len(notatka) <= 4000
+    assert notatka.split("\n")[-1].startswith("Hubert: 11 ")
+    assert not notatka.startswith("Hubert: 00 ")     # najstarsze wypadły w całości
+
+
+# --------------------------------------------------------------------------- #
+#  Zaplanowane przypomnienia                                                   #
+# --------------------------------------------------------------------------- #
+def _utc(d):
+    """Kolumny dat są bez strefy, `datetime.now(timezone.utc)` ze strefą —
+    odjęcie jednego od drugiego wywraca się na TypeError."""
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
+def _zaplanuj(lead_id, **payload):
+    return client.post(f"/api/admin/leads/{lead_id}/reminders", headers=ADMIN,
+                       json={"text": "oddzwonić", **payload})
+
+
+def _przypomnienia(lead_id):
+    s = SessionLocal()
+    try:
+        return s.query(LeadReminder).filter(LeadReminder.lead_id == lead_id) \
+                .order_by(LeadReminder.id).all()
+    finally:
+        s.close()
+
+
+def _przesun_termin(reminder_id, dni):
+    s = SessionLocal()
+    try:
+        r = s.get(LeadReminder, reminder_id)
+        r.due_at = datetime.now(timezone.utc) - timedelta(days=dni)
+        s.commit()
+    finally:
+        s.close()
+
+
+def test_przypomnienie_wymaga_terminu_i_tresci():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    assert _zaplanuj(lead_id).status_code == 400                    # bez terminu
+    assert _zaplanuj(lead_id, text="  ", due_in_days=3).status_code == 400
+    assert _zaplanuj(lead_id, due_in_days=3, repeat_days=0).status_code == 400
+    assert _zaplanuj(999_999, due_in_days=3).status_code == 404
+
+
+def test_przypomnienie_wymaga_admina():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    odp = client.post(f"/api/admin/leads/{lead_id}/reminders",
+                      json={"text": "x", "due_in_days": 1})
+    assert odp.status_code in (401, 403)
+
+
+def test_termin_w_dniach_od_teraz():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    odp = _zaplanuj(lead_id, due_in_days=5).json()
+    kiedy = datetime.fromisoformat(odp["due_at"])
+    assert 4 <= (kiedy - datetime.now(timezone.utc)).days <= 5
+
+
+def test_zaplanowane_idzie_dopiero_po_terminie(_srodowisko):
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    rid = _zaplanuj(lead_id, text="zapytać o decyzję", due_in_days=5).json()["id"]
+
+    _cron()
+    assert _srodowisko["przypomnienie"] == []
+
+    _przesun_termin(rid, 1)
+    _cron()
+    assert "zapytać o decyzję" in _srodowisko["przypomnienie"][-1]
+    assert [z.detail for z in _zdarzenia(lead_id, "reminder")] == [
+        "planned: zapytać o decyzję"]
+
+
+def test_jednorazowe_gasnie_po_wyslaniu(_srodowisko):
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    rid = _zaplanuj(lead_id, text="jednorazowe", due_in_days=1).json()["id"]
+    _przesun_termin(rid, 1)
+
+    _cron(); _cron()
+
+    r = _przypomnienia(lead_id)[0]
+    assert (r.active, r.sent_count) == (False, 1)
+    assert sum("jednorazowe" in t for t in _srodowisko["przypomnienie"]) == 1
+
+
+def test_cykliczne_przesuwa_termin_zamiast_gasnac(_srodowisko):
+    """Cykl ma chodzić, dopóki ktoś go nie wyłączy — inaczej „update co tydzień"
+    byłby jednorazowym powiadomieniem."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    rid = _zaplanuj(lead_id, text="update konta", due_in_days=7, repeat_days=7).json()["id"]
+    _przesun_termin(rid, 1)
+
+    _cron()
+    r = _przypomnienia(lead_id)[0]
+    assert r.active is True and r.sent_count == 1
+    assert (_utc(r.due_at) - datetime.now(timezone.utc)).days >= 6
+
+    _cron()                                   # termin jest w przyszłości
+    assert _przypomnienia(lead_id)[0].sent_count == 1
+
+    _przesun_termin(rid, 1)
+    _cron()
+    assert _przypomnienia(lead_id)[0].sent_count == 2
+    assert "2. raz" in _srodowisko["przypomnienie"][-1]
+
+
+def test_wylaczone_przypomnienie_nie_wychodzi(_srodowisko):
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    rid = _zaplanuj(lead_id, text="nieaktualne", due_in_days=1).json()["id"]
+    _przesun_termin(rid, 1)
+
+    odp = client.post(f"/api/admin/leads/{lead_id}/reminders/{rid}/cancel", headers=ADMIN)
+    assert odp.status_code == 200
+    _cron()
+    assert not any("nieaktualne" in t for t in _srodowisko["przypomnienie"])
+    # Wiersz zostaje — przy cyklicznym widać potem, ile razy zdążył pójść.
+    assert len(_przypomnienia(lead_id)) == 1
+
+
+def test_cudze_przypomnienie_nie_da_sie_wylaczyc():
+    a = _wyslij(_zgloszenie()).json()["id"]
+    b = _wyslij(_zgloszenie()).json()["id"]
+    rid = _zaplanuj(a, due_in_days=1).json()["id"]
+
+    assert client.post(f"/api/admin/leads/{b}/reminders/{rid}/cancel",
+                       headers=ADMIN).status_code == 404
+    assert _przypomnienia(a)[0].active is True
+
+
+def test_zakup_zaklada_cykl_updatow(_srodowisko):
+    """Jednorazowe „kupił" załatwia moment, w którym trzeba przestać dzwonić
+    jak do leada. Klient z opłaconym kontem potrzebuje kontaktu w kółko."""
+    dane = _zgloszenie()
+    lead_id = _wyslij(dane).json()["id"]
+    _cofnij(lead_id, od_zgloszenia=5)
+
+    s = SessionLocal()
+    tr = Trader(email=dane["email"], password_hash=auth.hash_password("haslo1234"),
+                full_name="Jan Kowalski", referral_code=auth.secrets.token_hex(3))
+    s.add(tr); s.commit()
+    s.add(Order(trader_id=tr.id, product_key="eval-100k", amount_usd=549.0, status="paid"))
+    s.commit(); s.close()
+
+    _cron()
+    cykle = _przypomnienia(lead_id)
+    assert len(cykle) == 1
+    assert (cykle[0].kind, cykle[0].repeat_days, cykle[0].created_by) == ("bought", 7, "cron")
+
+    _przesun_termin(cykle[0].id, 1)
+    _cron()
+    assert any("Update konta" in t for t in _srodowisko["przypomnienie"])
+    assert _przypomnienia(lead_id)[0].active is True
+
+
+def test_szczegoly_niosa_przypomnienia_a_lista_najblizszy_termin():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _zaplanuj(lead_id, text="później", due_in_days=30)
+    _zaplanuj(lead_id, text="wcześniej", due_in_days=2)
+
+    d = client.get(f"/api/admin/leads/{lead_id}", headers=ADMIN).json()
+    assert {r["text"] for r in d["reminders"]} == {"później", "wcześniej"}
+    # Tabela pokazuje jeden termin, więc musi to być ten najbliższy.
+    assert d["next_due"][:10] == _z_listy(lead_id)["next_due"][:10]
+    kiedy = _utc(datetime.fromisoformat(d["next_due"]))
+    assert 1 <= (kiedy - datetime.now(timezone.utc)).days <= 2

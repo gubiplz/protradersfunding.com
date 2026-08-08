@@ -645,6 +645,16 @@ class Lead(Base):
 
     status: Mapped[str] = mapped_column(String(16), default="new", index=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Kto z działu wziął tego człowieka na siebie. Kanał moderuje kilka osób,
+    # a posty na kanale są anonimowe — bez tego dwie osoby dzwoniły do tej samej
+    # osoby tego samego dnia. Imię z Telegrama, nie klucz obcy, z tego samego
+    # powodu co `LeadEvent.actor`: klikający nie musi mieć konta w panelu.
+    owner: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    owner_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # `message_id` alertu na kanale. Odpowiedź na tę wiadomość zapisuje się jako
+    # notatka i to jedyne, po czym da się ją powiązać z leadem — w `reply` nie ma
+    # niczego poza id wiadomości, na którą odpowiedziano.
+    tg_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     # Kiedy status pierwszy raz ruszył z „new". Da się to wyliczyć z `lead_events`,
     # ale kolumna zostaje: lista leadów pokazuje tę datę w każdym wierszu, a
     # dokładanie do niej podzapytania po historii kosztowałoby więcej niż jedno
@@ -688,4 +698,37 @@ class LeadEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
 
 
-LEAD_EVENTS = ("applied", "status", "note", "reminder")
+LEAD_EVENTS = ("applied", "status", "note", "reminder", "claim", "tier")
+
+
+class LeadReminder(Base):
+    """Zaplanowane szturchnięcie DZIAŁU: „odezwij się do tego człowieka wtedy".
+
+    Osobna tabela, a nie kolejny rodzaj zdarzenia, bo ten wiersz ŻYJE: termin
+    się przesuwa, tekst da się poprawić, przypomnienie da się odwołać.
+    `lead_events` jest dopisywalne i ma takie zostać — plan na przyszłość i
+    zapis tego, co się wydarzyło, to dwie różne rzeczy.
+
+    `repeat_days` robi z jednorazówki cykl i po to głównie powstało: klient,
+    który kupił challenge, potrzebuje kontaktu co tydzień aż do końca, a nie
+    jednego telefonu z gratulacjami. Puste = odezwij się raz i zamknij temat.
+
+    Wiadomość leci na czat działu, nigdy do leada — landing, przez który
+    przyszedł, jest osobną marką.
+    """
+    __tablename__ = "lead_reminders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), index=True)
+    text: Mapped[str] = mapped_column(String(500), default="")
+    due_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    repeat_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # KTO to zaplanował: „manual" — człowiek w panelu, „bought" — cykl założony
+    # przez crona po zapłaconym zamówieniu. Bez tego cron zakładałby ten sam
+    # cykl przy każdym przebiegu, bo nie miałby po czym poznać swojego wpisu.
+    kind: Mapped[str] = mapped_column(String(16), default="manual", index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    sent_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_by: Mapped[str] = mapped_column(String(60), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

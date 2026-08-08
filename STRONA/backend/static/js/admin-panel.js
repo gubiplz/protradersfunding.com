@@ -777,7 +777,11 @@ function renderLeads(){
   const q=(window._leadQ||'').toLowerCase();
   const f=window._leadFilter||'all';
   const rows=list.filter(l=>
-    (f==='all'||(f==='bought'?l.paid_usd>0:l.status===f))&&
+    (f==='all'||(f==='bought'?l.paid_usd>0
+      :f==='due'?(l.next_due&&dueDays(l.next_due)<=0)
+      :f==='mine'?l.owner===deskWho(false)
+      :f==='free'?!l.owner
+      :l.status===f))&&
     (!q||(l.email||'').toLowerCase().includes(q)||(l.name||'').toLowerCase().includes(q)
      ||(l.phone||'').includes(q)||(l.ref||'').toLowerCase().includes(q)));
   /* Same rule as Orders: the tiles describe WHAT IS VISIBLE below them, so
@@ -786,8 +790,15 @@ function renderLeads(){
   const revenue=bought.reduce((s,l)=>s+l.paid_usd,0);
   const waiting=rows.filter(l=>l.status==='new').length;
   const conv=rows.length?Math.round(bought.length/rows.length*100):0;
+  /* Counted over the WHOLE list, not the filtered rows: a follow-up that came
+     due is the one thing that must not hide behind the filter you left on. */
+  const due=list.filter(l=>l.next_due&&dueDays(l.next_due)<=0).length;
   $('view').innerHTML=`
     <div class="stats-row">
+      <div class="stat-tile ${due?'clickable':''}" ${due?`onclick="window._leadFilter='due';renderLeads()"`:''}>
+        <div class="tile-ic ${due?'orange':'blue'}">${ICO.alert}</div>
+        <div><div class="lbl">Follow-ups due</div><div class="val">${due}</div>
+          <div class="sub">${due?'someone is waiting for a call':'nothing scheduled for today'}</div></div></div>
       <div class="stat-tile"><div class="tile-ic ${waiting?'orange':'blue'}">${ICO.alert}</div>
         <div><div class="lbl">Not contacted</div><div class="val">${waiting}</div>
           <div class="sub">of ${rows.length} shown</div></div></div>
@@ -800,7 +811,8 @@ function renderLeads(){
     </div>
     <div class="toolbar">
       ${searchBox('lead-q','_leadQ','renderLeads','Search name, email, phone or partner…')}
-      <div class="seg">${[['all','All'],...LEAD_STATUSES,['bought','Bought']]
+      <div class="seg">${[['all','All'],['due','Due'],['mine','Mine'],['free','Free'],
+        ...LEAD_STATUSES,['bought','Bought']]
         .map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._leadFilter='${k}';renderLeads()">${l}</button>`).join('')}</div>
       <span class="count-pill">${rows.length} of ${list.length}</span>
     </div>
@@ -811,6 +823,8 @@ function renderLeads(){
       <tbody>${rows.map(l=>`<tr class="clickable" onclick="openLead(${l.id})">
         <td class="muted" data-sort="${esc(l.created_at||'')}">${dstr(l.created_at)}</td>
         <td><b>${esc(l.name||'—')}</b>
+          ${l.owner?`<div style="font-size:11px" title="Taken by">👤 ${esc(l.owner)}</div>`
+            :'<div class="muted" style="font-size:11px">nobody took it</div>'}
           ${l.applications>1?`<div class="muted" style="font-size:11px" title="Filled the form more than once">↻ applied ${l.applications}×</div>`:''}
           ${l.outcome==='not_qualified'?'<div class="muted" style="font-size:11px">failed the questionnaire</div>':''}</td>
         <td><a href="mailto:${esc(l.email)}">${esc(l.email)}</a>
@@ -820,7 +834,8 @@ function renderLeads(){
         <td class="muted">${esc(l.source||'—')}${l.ref?`<div style="font-size:11px">via ${esc(l.ref)}</div>`:''}</td>
         <td onclick="event.stopPropagation()"><select class="inp sm" style="min-width:116px" onchange="setLeadStatus(${l.id},this.value)">${
           LEAD_STATUSES.map(([k,lab])=>`<option value="${k}"${l.status===k?' selected':''}>${lab}</option>`).join('')}</select>
-          ${l.contacted_at?`<div class="muted" style="font-size:11px">${dstr(l.contacted_at)}</div>`:''}</td>
+          ${l.next_due?`<div class="due ${dueDays(l.next_due)<=0?'now':''}">⏰ ${dueLabel(l.next_due)}</div>`
+            :l.contacted_at?`<div class="muted" style="font-size:11px">${dstr(l.contacted_at)}</div>`:''}</td>
         <td class="num">${l.paid_usd>0?`<span class="status paid"><span class="dot"></span>$${fmt0(l.paid_usd)}</span>`:'<span class="muted">—</span>'}</td>
         <td onclick="event.stopPropagation()"><input class="inp sm" style="min-width:170px" value="${esc(l.note||'')}"
           placeholder="Add a note…" onchange="setLeadNote(${l.id},this.value)"></td></tr>`).join('')}
@@ -851,28 +866,172 @@ async function setLeadNote(id,note){
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
+/* Who is sitting at the panel. The admin login is one shared token, so the app
+   has no idea — but "who took this lead" is the whole point of the owner field,
+   so we ask once and keep it in this browser. `ask=false` for code that only
+   wants to compare (the "Mine" filter must not pop a dialog on every render). */
+function deskWho(ask=true){
+  let who=localStorage.getItem('pf_desk_who')||'';
+  if(!who&&ask){
+    who=(prompt('Your name — shown on leads you take')||'').trim().slice(0,60);
+    if(who)localStorage.setItem('pf_desk_who',who);
+  }
+  return who;
+}
+
+/* One writer for the small per-lead fields. The drawer re-renders from the
+   server afterwards on purpose: owner, grade and reminders read off each other
+   (taking a lead changes which buttons make sense), and patching four spots by
+   hand is how they drift apart. */
+async function patchLead(id,patch,msg){
+  try{
+    await api('/api/admin/leads/'+id,{method:'POST',body:JSON.stringify(patch)});
+    toast(msg);
+    await openLead(id);      // re-reads the lead and syncs the row behind it
+    renderLeads();
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+
+function claimLead(id){
+  const who=deskWho();
+  if(!who){toast('Enter your name first','err');return}
+  patchLead(id,{owner:who},'Yours — call them');
+}
+
 /* ---------- one lead: the history behind the row ----------
    The table answers "where does this lead stand"; this answers "how did it get
    there". The list cannot show it: one person is one row on purpose, so a second
    application overwrites the first and only the counter survives. Every write
    also lands in lead_events, and that is what gets read back here. */
 const LEAD_STATUS_CLS={new:'pending',called:'paid',no_answer:'pending',rejected:'failed'};
-const LEAD_EVENT_LBL={applied:'Applied',status:'Status',note:'Note',reminder:'Reminder'};
+const LEAD_EVENT_LBL={applied:'Applied',status:'Status',note:'Note',reminder:'Reminder',
+  claim:'Owner',tier:'Grade'};
 /* Reminders are sent to US, never to the lead — the landing they applied through
    is a separate brand. The wording says who is being nudged. */
 const LEAD_REMINDER_LBL={no_contact:'Nobody called back yet',bought:'Bought — stop treating as a lead',
   stalled:'Call led nowhere'};
 
 function leadEventDetail(e){
-  if(e.kind==='reminder')return LEAD_REMINDER_LBL[e.detail]||e.detail;
+  if(e.kind==='reminder')return LEAD_REMINDER_LBL[e.detail]||e.detail.replace(/^planned: /,'');
   if(e.kind==='status')return e.detail.split('→').map(s=>leadLabel(s.trim())).join(' → ');
   return e.detail;
+}
+
+/* Whole days, not hours: a reminder set for Friday is "in 2 days" all Wednesday
+   long, and "3 hours overdue" is not a thing anyone acts on differently. */
+const dueDays=iso=>{const a=new Date(iso),b=new Date();
+  a.setHours(0,0,0,0);b.setHours(0,0,0,0);return Math.round((a-b)/86400000)};
+const dueLabel=iso=>{const d=dueDays(iso);
+  return d<0?`${-d}d overdue`:d===0?'due today':d===1?'tomorrow':`in ${d}d`};
+
+/* Ready-made follow-ups. These are the calls that actually happen after a first
+   conversation — the point is that scheduling one costs a single click, because
+   a reminder nobody sets is a lead nobody calls back.
+   [label, days from now, repeat every N days (0 = once), what to do] */
+const REMINDER_PRESETS=[
+  ['No answer',2,0,'Second call attempt — try a different time of day than last time.'],
+  ['Call me back',1,0,'Asked to be called back — call at the time you agreed on.'],
+  ['Thinking about it',5,0,'Wanted to think it over. Ask what is still open.'],
+  ['Too expensive',7,0,'Hesitated on price — bring up the smaller account or the current promo.'],
+  ['No money yet',14,0,'Had no funds at the time. Ask whether anything changed.'],
+  ['Promised to pay',1,0,'Said they would pay — check whether the order actually came through.'],
+  ['Not right now',30,0,'Said not right now. Check whether they are still trading and on what.'],
+  ['Bought — weekly',7,7,'Account update: how the challenge is going, whether the rules are clear, how far from the loss limit.'],
+];
+
+/* Who is on it and how good they turned out to be. Both are moderation, not
+   data from the landing page: several people work the same Telegram channel, so
+   "nobody took it" and "the questionnaire got this one wrong" are the two things
+   that have to be fixable from here as well as from the phone. */
+function leadModCard(l){
+  const grades=[['high','🔥 High'],['warm','🟡 Warm'],['cold','⚪️ Cold']];
+  return `<div class="lead-card sec-card">
+    <div class="mod-row">
+      <div><div class="lbl">Handled by</div>
+        <div class="mod-who">${l.owner?esc(l.owner):'<span class="muted">nobody took it yet</span>'}</div></div>
+      ${l.owner
+        ?`<button class="btn-o" onclick="patchLead(${l.id},{owner:''},'Released — back in the pool')">Release</button>`
+        :`<button class="btn-p" onclick="claimLead(${l.id})">Take it</button>`}
+    </div>
+    <div class="mod-row">
+      <div><div class="lbl">Grade</div>
+        <div class="muted" style="font-size:11.5px">scored from the form — correct it after the call</div></div>
+      <div class="seg">${grades.map(([k,lab])=>
+        `<button class="${l.tier===k?'on':''}" onclick="patchLead(${l.id},{tier:'${k}'},'Grade set to ${k}')">${lab}</button>`).join('')}</div>
+    </div>
+  </div>`;
+}
+
+/* Scheduling a call back. Everything here goes to OUR Telegram desk on the day
+   it is due — the lead never hears from this panel, because the landing they
+   applied through is a separate brand. */
+function leadReminderCard(l){
+  const rem=l.reminders||[];
+  const open=rem.filter(r=>r.active),closed=rem.filter(r=>!r.active);
+  return `<div class="lead-card sec-card">
+    <h4>Follow-up</h4>
+    ${open.length?`<div class="rem-list">${open.map(r=>`
+      <div class="rem ${dueDays(r.due_at)<=0?'now':''}">
+        <div class="rem-txt"><div>${esc(r.text)}</div>
+          <div class="muted">${dueLabel(r.due_at)}${r.repeat_days?` · repeats every ${r.repeat_days}d`:''}${
+            r.sent_count?` · sent ${r.sent_count}×`:''}${r.created_by==='cron'?' · automatic':''}</div></div>
+        ${XBTN(`cancelLeadReminder(${l.id},${r.id})`,'Cancel this reminder')}
+      </div>`).join('')}</div>`:'<p class="muted" style="font-size:12.5px">Nothing scheduled.</p>'}
+    <div class="chip-row rem-presets">${REMINDER_PRESETS.map(([lab],i)=>
+      `<button class="chip preset" onclick="pickPreset(${i})">${lab}</button>`).join('')}</div>
+    <input id="rem-text" class="inp sm" placeholder="What needs doing, in your own words…">
+    <div class="rem-when">
+      <label>in <input id="rem-days" class="inp sm" type="number" min="0" max="365" value="3"> days</label>
+      <label title="Keeps nudging on the same cycle until you cancel it">
+        <input id="rem-rep" type="checkbox"> and keep repeating</label>
+      <button class="btn-p" onclick="addLeadReminder(${l.id})">Schedule</button>
+    </div>
+    ${closed.length?`<details style="margin-top:10px"><summary class="muted" style="font-size:12px;cursor:pointer">${closed.length} closed</summary>
+      ${closed.map(r=>`<div class="rem off"><div class="rem-txt"><div>${esc(r.text)}</div>
+        <div class="muted">${r.sent_count?`sent ${r.sent_count}×`:'never sent'}${r.last_sent_at?` · last ${dstr(r.last_sent_at)}`:''}</div>
+      </div></div>`).join('')}</details>`:''}
+  </div>`;
+}
+
+function pickPreset(i){
+  const [,days,rep,text]=REMINDER_PRESETS[i];
+  $('rem-text').value=text;$('rem-days').value=days;$('rem-rep').checked=rep>0;
+}
+
+async function addLeadReminder(id){
+  const text=($('rem-text').value||'').trim();
+  const days=parseInt($('rem-days').value,10);
+  if(!text){toast('Write what needs doing','err');return}
+  if(!(days>=0)){toast('Set how many days from now','err');return}
+  /* One number does both jobs: "in 7 days" that repeats means every 7 days.
+     A second field for the cycle length was one more thing to get wrong. */
+  const repeat=$('rem-rep').checked?days||1:null;
+  try{
+    await api(`/api/admin/leads/${id}/reminders`,
+      {method:'POST',body:JSON.stringify({text,due_in_days:days,repeat_days:repeat})});
+    toast(repeat?`Scheduled — repeats every ${repeat}d`:'Reminder scheduled');
+    await openLead(id);renderLeads();
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+
+async function cancelLeadReminder(id,rid){
+  try{
+    await api(`/api/admin/leads/${id}/reminders/${rid}/cancel`,{method:'POST'});
+    toast('Reminder cancelled');
+    await openLead(id);renderLeads();
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 
 async function openLead(id){
   let l;
   try{l=await api('/api/admin/leads/'+id)}
   catch(e){toast('Error: '+e.message,'err');return}
+  /* The detail call is the freshest thing we have, so the row behind the drawer
+     is patched from it. Otherwise scheduling a reminder here leaves the table
+     still saying the lead has nothing due. */
+  const row=(window._leads||[]).find(x=>x.id===id);
+  if(row)Object.assign(row,{owner:l.owner,tier:l.tier,status:l.status,note:l.note,
+    next_due:l.next_due,contacted_at:l.contacted_at});
   const ev=l.events||[],ords=l.orders||[];
   openOver(l.name||l.email,`
     <div class="chip-row">
@@ -889,7 +1048,11 @@ async function openLead(id){
       ${l.country?`<span class="chip">${esc(l.country)}</span>`:''}
       ${l.source?`<span class="chip">${esc(l.source)}${l.ref?' via '+esc(l.ref):''}</span>`:''}
     </div>
-    ${l.note?`<p style="font-size:12.5px">📝 ${esc(l.note)}</p>`:''}
+    ${leadModCard(l)}
+    ${leadReminderCard(l)}
+    ${l.note?`<div class="lead-card sec-card"><h4>Notes</h4>
+      ${l.note.split('\n').filter(Boolean).map(n=>`<div class="note-line">${esc(n)}</div>`).join('')}
+      <p class="muted" style="font-size:11.5px;margin-top:8px">Reply to the lead's message on Telegram and it lands here.</p></div>`:''}
     ${ords.length?`<h4 style="margin:16px 0 6px">Orders</h4>
       <div class="tbl-wrap"><table class="tbl">
       <thead><tr><th>Date</th><th>Product</th><th>Amount</th><th>Status</th></tr></thead>

@@ -156,6 +156,45 @@ tr.clickable{cursor:pointer}
   .pool-form{grid-template-columns:repeat(auto-fit,minmax(160px,300px))}
 }
 
+/* ---------------- moderacja leadów ----------------
+   Karty w slide-overze są węższe niż te w treści strony, więc 24px paddingu
+   z .sec-card zjadałoby jedną trzecią szerokości panelu. */
+.lead-card{padding:14px 16px}
+.lead-card h4{font-size:13.5px;margin-bottom:10px}
+.mod-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.mod-row+.mod-row{margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)}
+.mod-row .lbl{font-size:12px;color:var(--muted)}
+.mod-who{font-size:14px;font-weight:600;margin-top:2px}
+/* Kafelek „Follow-ups due" prowadzi do filtra — kursor musi to zapowiadać,
+   bo tr.clickable wyżej dotyczy wyłącznie wierszy tabeli. */
+.stat-tile.clickable{cursor:pointer}
+
+.rem-list{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+.rem{display:flex;align-items:flex-start;gap:10px;background:var(--panel2);border:1px solid var(--line);
+  border-radius:10px;padding:9px 11px;font-size:12.5px}
+.rem .rem-txt{flex:1;min-width:0}
+.rem .muted{font-size:11px;margin-top:2px}
+/* Termin, który już minął, ma się wyróżniać kolorem, a nie samym tekstem:
+   dział przegląda listę wzrokiem, nie czyta jej zdanie po zdaniu. */
+.rem.now{border-color:var(--gold-line);background:var(--gold-bg)}
+.rem.off{opacity:.55}
+.rem-presets{margin-bottom:10px}
+.chip.preset{cursor:pointer;transition:.15s}
+.chip.preset:hover{border-color:var(--acc);color:var(--acc)}
+#rem-text{width:100%}
+.rem-when{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:12.5px}
+.rem-when label{display:inline-flex;align-items:center;gap:6px;color:var(--muted)}
+.rem-when .inp.sm{width:70px}
+.rem-when .btn-p{margin-left:auto;padding:8px 16px;font-size:13px}
+
+.note-line{font-size:12.5px;padding:5px 0;border-bottom:1px dashed var(--line)}
+.note-line:last-of-type{border-bottom:0}
+
+/* Termin w wierszu tabeli. Bez tego przypomnienie widać dopiero po otwarciu
+   karty — czyli wtedy, gdy i tak się o nim pamiętało. */
+.due{font-size:11px;color:var(--muted);margin-top:3px}
+.due.now{color:var(--gold);font-weight:600}
+
 /* Wyszukiwarki (Accounts/Pool/Orders): wrapper przejmuje slot inputa w
    toolbarze, a "x" do czyszczenia siedzi WEWNATRZ pola przy prawej krawedzi.
    padding-right robi mu miejsce, zeby nie zaslanial wpisanego tekstu. */

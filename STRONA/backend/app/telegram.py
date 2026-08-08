@@ -77,37 +77,50 @@ def _urllib_transport(url: str, body: bytes, content_type: str) -> tuple[int, by
         return e.code, e.read()
 
 
-def _strzal(metoda: str, pola: dict[str, str],
-            plik: tuple[str, str, bytes] | None, transport) -> tuple[bool, str]:
-    """`(czy poszło, powód odmowy)`.
+def _strzal_json(metoda: str, pola: dict[str, str],
+                 plik: tuple[str, str, bytes] | None, transport) -> tuple[bool, str, dict]:
+    """`(czy poszło, powód odmowy, `result` z odpowiedzi)`.
 
     Powód wraca WYŻEJ, a nie tylko do logu: bez niego panel mówi „Telegram
     odrzucił zdjęcie", a admin musi grzebać w logach hostingu, żeby dowiedzieć
     się, że bot po prostu nie jest administratorem kanału.
+
+    `result` potrzebuje z tego jeden wywołujący — alert o leadzie musi zapamiętać
+    `message_id`, bo notatki wpisuje się ODPOWIEDZIĄ na tę wiadomość, a Telegram
+    nie przekazuje w niej niczego innego, po czym dałoby się trafić do leada.
     """
     # Tu sprawdzamy WYŁĄCZNIE token, bo to on jest w URL-u. Czy cel wysyłki
     # istnieje, wie tylko wywołujący: kanał z wypłatami i czat z leadami są
     # niezależne i jeden ma prawo działać, gdy drugi jest nieskonfigurowany.
     if not settings.telegram_bot_token:
-        return False, "no bot token or channel"
+        return False, "no bot token or channel", {}
     body, content_type = _multipart(pola, plik)
     url = f"{API}/bot{settings.telegram_bot_token}/{metoda}"
     try:
         status, tresc = (transport or _urllib_transport)(url, body, content_type)
     except Exception as e:  # pragma: no cover - sieć
         print(f"[telegram] {metoda} błąd sieci: {e}")
-        return False, f"network error: {e}"
+        return False, f"network error: {e}", {}
+    try:
+        odp = json.loads(tresc or b"{}") or {}
+    except Exception:
+        odp = {}
     if status == 200:
-        return True, ""
+        wynik = odp.get("result")
+        return True, "", wynik if isinstance(wynik, dict) else {}
     # Token NIGDY nie może trafić do logu ani do panelu — jest w URL-u, więc
     # przekazujemy dalej sam opis z odpowiedzi, nigdy adresu żądania.
-    try:
-        opis = (json.loads(tresc or b"{}") or {}).get("description", "")
-    except Exception:
-        opis = (tresc or b"")[:200].decode("utf-8", "replace")
+    opis = odp.get("description") or (tresc or b"")[:200].decode("utf-8", "replace")
     opis = opis or f"HTTP {status}"
     print(f"[telegram] {metoda} odrzucone ({status}): {opis}")
-    return False, opis
+    return False, opis, {}
+
+
+def _strzal(metoda: str, pola: dict[str, str],
+            plik: tuple[str, str, bytes] | None, transport) -> tuple[bool, str]:
+    """`_strzal_json` dla wywołujących, których `message_id` nie interesuje."""
+    poszlo, powod, _ = _strzal_json(metoda, pola, plik, transport)
+    return poszlo, powod
 
 
 def send_photo(png: bytes, caption: str, *, transport=None) -> tuple[bool, str]:
@@ -148,26 +161,71 @@ LEAD_BUTTONS = (("✅ Odebrał", "called"),
                 ("📵 Nie odbiera", "no_answer"),
                 ("❌ Odpada", "rejected"))
 
+# Poprawka oceny z ankiety. Formularz punktuje deklaracje, a te po telefonie
+# potrafią wyglądać zupełnie inaczej — „high" z ankiety bywa człowiekiem bez
+# pieniędzy, a „cold" traderem, który po prostu zaznaczył ostrożnie. To nie jest
+# nowa skala, tylko możliwość poprawienia tej samej.
+TIER_BUTTONS = (("🔥 High", "tier_high"),
+                ("🟡 Warm", "tier_warm"),
+                ("⚪️ Cold", "tier_cold"))
+
+CLAIM_BUTTON = ("🙋 Biorę tego", "claim")
+RELEASE_BUTTON = ("↩️ Oddaję", "release")
+
 
 def leads_enabled() -> bool:
     return settings.telegram_leads_enabled
 
 
-def send_lead_alert(lead_id: int, text: str, *, transport=None) -> tuple[bool, str]:
-    """Alert o nowym leadzie z trzema przyciskami statusu.
+def lead_keyboard(lead_id: int, *, owner: str | None = None,
+                  status: str = "new", tier: str | None = None) -> dict:
+    """Klawiatura pod alertem — DWA etapy i to jest cały sens tej konstrukcji.
 
-    `callback_data` musi zmieścić się w 64 bajtach, stąd samo `lead:<id>:<status>`
+    Dopóki leada nikt nie wziął, jest jeden przycisk: „biorę". Statusy i ocena
+    pojawiają się dopiero potem. Kanał moderuje kilka osób i trzy przyciski
+    statusu pod świeżym zgłoszeniem kończyły się dwoma telefonami do tej samej
+    osoby w ciągu godziny.
+
+    Wybrany stan zostaje oznaczony kropką i NIE znika po kliknięciu: wiadomość
+    przewija się w kanale razem z resztą i po godzinie nie da się inaczej
+    powiedzieć, czy ktoś już coś kliknął, czy tylko przeczytał. Przy okazji
+    pomyłkę da się poprawić, zamiast szukać leada w panelu.
+    """
+    def guzik(opis: str, akcja: str, wybrany: bool = False) -> dict:
+        return {"text": ("• " + opis) if wybrany else opis,
+                "callback_data": f"lead:{lead_id}:{akcja}"}
+
+    if not owner:
+        return {"inline_keyboard": [[guzik(*CLAIM_BUTTON)]]}
+    return {"inline_keyboard": [
+        [guzik(o, s, s == status) for o, s in LEAD_BUTTONS],
+        [guzik(o, a, a == f"tier_{tier or ''}") for o, a in TIER_BUTTONS],
+        [guzik(*RELEASE_BUTTON)],
+    ]}
+
+
+def send_lead_alert(lead_id: int, text: str, *,
+                    keyboard: dict | None = None,
+                    transport=None) -> tuple[bool, str, int | None]:
+    """Alert o nowym leadzie. Zwraca też `message_id` wysłanej wiadomości.
+
+    `message_id` musi wrócić do bazy: notatki z rozmowy wpisuje się ODPOWIEDZIĄ
+    na ten post, a webhook nie ma innego sposobu, żeby dopasować odpowiedź do
+    leada. Bez zapisanego id notatka po prostu przepada.
+
+    `callback_data` musi zmieścić się w 64 bajtach, stąd samo `lead:<id>:<akcja>`
     zamiast czegokolwiek opisowego — resztę webhook dobiera z bazy po id.
     """
     if not leads_enabled():
-        return False, "no bot token or leads chat"
-    klawiatura = {"inline_keyboard": [[{"text": opis, "callback_data": f"lead:{lead_id}:{stan}"}]
-                                      for opis, stan in LEAD_BUTTONS]}
-    return _strzal("sendMessage",
-                   {"chat_id": settings.telegram_leads_chat_id, "text": text[:4096],
-                    "parse_mode": "HTML", "disable_web_page_preview": "true",
-                    "reply_markup": json.dumps(klawiatura)},
-                   None, transport)
+        return False, "no bot token or leads chat", None
+    poszlo, powod, wynik = _strzal_json(
+        "sendMessage",
+        {"chat_id": settings.telegram_leads_chat_id, "text": text[:4096],
+         "parse_mode": "HTML", "disable_web_page_preview": "true",
+         "reply_markup": json.dumps(keyboard or lead_keyboard(lead_id))},
+        None, transport)
+    mid = wynik.get("message_id")
+    return poszlo, powod, mid if isinstance(mid, int) else None
 
 
 def send_lead_message(text: str, *, transport=None) -> tuple[bool, str]:
@@ -194,14 +252,17 @@ def answer_callback(callback_id: str, text: str, *, transport=None) -> tuple[boo
 
 
 def edit_lead_message(chat_id: str, message_id: int, text: str,
-                      *, transport=None) -> tuple[bool, str]:
-    """Przepisuje alert po kliknięciu i USUWA przyciski (brak `reply_markup`).
+                      *, keyboard: dict | None = None,
+                      transport=None) -> tuple[bool, str]:
+    """Przepisuje alert po każdej zmianie: kto go wziął, jaki status, jaka notatka.
 
-    Wiadomość zostaje w historii jako zapis tego, co wybrano — inaczej czat
-    z leadami wygląda po tygodniu tak samo jak przed pierwszym telefonem.
+    Wiadomość jest kartą leada, nie powiadomieniem — dział pracuje na kanale,
+    nie w panelu, więc stan musi być tam, gdzie się klika. Bez `keyboard`
+    przyciski znikają; to zostawione dla wiadomości, które mają się domknąć.
     """
-    return _strzal("editMessageText",
-                   {"chat_id": chat_id, "message_id": str(message_id),
-                    "text": text[:4096], "parse_mode": "HTML",
-                    "disable_web_page_preview": "true"},
-                   None, transport)
+    pola = {"chat_id": chat_id, "message_id": str(message_id),
+            "text": text[:4096], "parse_mode": "HTML",
+            "disable_web_page_preview": "true"}
+    if keyboard is not None:
+        pola["reply_markup"] = json.dumps(keyboard)
+    return _strzal("editMessageText", pola, None, transport)
