@@ -3748,6 +3748,26 @@ def admin_inbox():
             items.append({"type": "ticket", "ts": m.ts.isoformat(),
                           "title": f"Ticket #{t.id}: {t.subject}",
                           "body": email_of(t.trader_id), "view": "tickets"})
+        # Leady tą samą listą co reszta kolejek: historia zdarzeń już istnieje
+        # (lead_events), więc dzwonek tylko ją czyta. `lead_id` pozwala frontowi
+        # otworzyć od razu kartę leada zamiast gołej zakładki.
+        zdarzenia_leadow = (session.query(LeadEvent, Lead)
+                            .join(Lead, Lead.id == LeadEvent.lead_id)
+                            .order_by(LeadEvent.id.desc()).limit(15).all())
+        for z, l in zdarzenia_leadow:
+            kto_lead = l.name or l.email
+            tytul = {
+                "applied": f"New lead: {kto_lead}",
+                "claim": f"Lead {kto_lead}",
+                "status": f"Lead {kto_lead}",
+                "tier": f"Lead {kto_lead}",
+                "bought": f"Lead {kto_lead}",
+                "reminder": f"Follow-up: {kto_lead}",
+            }.get(z.kind, f"Lead {kto_lead}")
+            items.append({"type": "lead", "ts": z.created_at.isoformat(),
+                          "title": tytul,
+                          "body": (z.detail or z.kind)[:120], "view": "leads",
+                          "lead_id": l.id})
         items.sort(key=lambda i: i["ts"], reverse=True)
         return {"items": items[:30]}
     finally:

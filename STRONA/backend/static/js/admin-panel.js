@@ -503,8 +503,8 @@ const VIEWS={
         <button class="btn-p" id="push-btn" onclick="toggleAdminPush()">Enable</button>
       </div>
       <div style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)">
-        <div class="lbl" style="font-size:12px;color:var(--muted)">What buzzes your phone <span style="font-weight:400">(this account, every device)</span></div>
-        <div id="push-cats" class="chip-row" style="margin-top:8px">${pushCatsHtml()}</div>
+        <div class="lbl" style="font-size:12px;color:var(--muted)">What buzzes your phone <span style="font-weight:400">(this account, every device — the full list of admin notifications)</span></div>
+        <div id="push-cats">${pushCatsHtml()}</div>
         <p class="muted" style="font-size:11.5px;margin-top:8px">Muted categories still land in the bell — they just stop buzzing.</p>
       </div>
       <div id="tg-identity">${tgIdentityHtml()}</div></div>
@@ -823,19 +823,28 @@ function leadTgLink(l){
     ?`<a href="https://t.me/${esc(h)}?text=${encodeURIComponent(leadOpener(l))}" target="_blank" rel="noopener">@${esc(h)}</a>`
     :`<span class="muted" title="Not a valid Telegram handle — ask for the right one">${esc(l.telegram)}</span>`;
 }
-/* Two icon actions, nothing else (owner's call — SMS/WA went): Telegram chat
-   by number, and copy-the-opener. The Telegram one only shows when the stored
-   phone declares a country (E.164 with +) — without it t.me leads nowhere. */
+/* Three icon actions (owner's spec): paper plane = write on Telegram by the
+   HANDLE the lead left (prefilled opener); phone = Telegram chat looked up by
+   the PHONE NUMBER (t.me cannot prefill there, so the click also drops the
+   opener on the clipboard); copy = just the opener. Each icon shows only when
+   its target actually exists — a dead t.me link looks like contact and is not. */
 const ICO_TG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>';
+const ICO_PHONE='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.6a2 2 0 0 1-.5 2.1L8 9.6a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.8.3 1.7.5 2.6.6a2 2 0 0 1 1.7 2z"/></svg>';
 const ICO_COPY='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 function leadPhoneActs(l){
-  if(!l.phone)return'';
-  const digits=String(l.phone).replace(/\D/g,'');
-  const intl=String(l.phone).trim().startsWith('+')&&digits.length>=8;
-  return `<span class="lead-acts">${intl
-    ?`<a class="act-btn" title="Open a Telegram chat with this number (opener goes to the clipboard)"
-        aria-label="Telegram" href="https://t.me/+${digits}" target="_blank" rel="noopener"
-        onclick="copyOpener(${l.id})">${ICO_TG}</a>`:''}
+  const h=String(l.telegram||'').replace(/^@/,'');
+  const handleOk=TG_HANDLE_RE.test(h);
+  const digits=String(l.phone||'').replace(/\D/g,'');
+  const intl=String(l.phone||'').trim().startsWith('+')&&digits.length>=8;
+  if(!handleOk&&!intl)return'';
+  const opener=encodeURIComponent(leadOpener(l));
+  return `<span class="lead-acts">${handleOk
+    ?`<a class="act-btn" title="Write on Telegram to @${esc(h)} — opener prefilled"
+        aria-label="Telegram by handle" href="https://t.me/${esc(h)}?text=${opener}"
+        target="_blank" rel="noopener">${ICO_TG}</a>`:''}${intl
+    ?`<a class="act-btn" title="Telegram chat found by the phone number (opener goes to the clipboard)"
+        aria-label="Telegram by phone" href="https://t.me/+${digits}"
+        target="_blank" rel="noopener" onclick="copyOpener(${l.id})">${ICO_PHONE}</a>`:''}
     <button class="act-btn" type="button" title="Copy the opener"
       aria-label="Copy the opener" onclick="copyOpener(${l.id})">${ICO_COPY}</button></span>`;
 }
@@ -901,7 +910,8 @@ function renderLeads(){
         <td data-l="Contact" onclick="event.stopPropagation()"><a href="mailto:${esc(l.email)}">${esc(l.email)}</a>
           ${l.telegram?`<div>${leadTgLink(l)}</div>`:''}
           ${l.phone?`<div class="muted lead-ph"><a href="tel:${esc(l.phone)}">${esc(l.phone)}</a>${
-            l.phone_iso?` ${esc(l.phone_iso)}`:''} ${leadPhoneActs(l)}</div>`:''}</td>
+            l.phone_iso?` ${esc(l.phone_iso)}`:''}</div>`:''}
+          ${l.phone||l.telegram?`<div class="lead-ph">${leadPhoneActs(l)}</div>`:''}</td>
         <td data-l="Grade" data-sort="${l.score||0}" title="${esc(leadAnswers(l.answers))}">${l.tier?`<span class="status ${l.tier==='high'?'paid':l.tier==='warm'?'pending':'failed'}"><span class="dot"></span>${esc(l.tier)} ${l.score}</span>`:'<span class="muted">—</span>'}</td>
         <td class="muted" data-l="Source">${esc(l.source||'—')}${l.ref?`<div style="font-size:11px">via ${esc(l.ref)}</div>`:''}</td>
         <td data-l="Status" onclick="event.stopPropagation()"><select class="inp sm st-${esc(l.status)}" style="min-width:116px" onchange="setLeadStatus(${l.id},this.value)">${
@@ -2507,15 +2517,23 @@ async function loadInbox(){
 }
 function openInbox(){
   const seen=localStorage.getItem('pf_admin_inbox_seen')||'';
-  const TYPE_ICO={order:'file',kyc:'shield',payout:'wallet',ticket:'chat'};
-  openOver('Notifications',pushCardHtml()+(INBOX.length?`<div class="tbl-wrap">`+INBOX.map(i=>`
-    <div class="ticket-row" onclick="closeOver();go('${esc(i.view)}')">
+  const TYPE_ICO={order:'file',kyc:'shield',payout:'wallet',ticket:'chat',lead:'alert'};
+  const wiersz=i=>`
+    <div class="ticket-row" onclick="closeOver();go('${esc(i.view)}')${i.lead_id?`;openLead(${i.lead_id})`:''}">
       <div class="tile-ic ${i.ts>seen?'orange':'blue'}" style="width:36px;height:36px;flex:0 0 36px">${ICO[TYPE_ICO[i.type]]||ICO.file}</div>
       <div class="sub"><b>${esc(i.title)}</b>
         <span>${esc(i.body||'')} · ${dstr(i.ts)}</span></div>
       ${i.ts>seen?'<span class="status pending"><span class="dot"></span>new</span>':''}
-    </div>`).join('')+`</div>`
-    :'<div class="empty"><h3>Nothing new</h3><p>New orders, KYC submissions, payout requests and ticket messages show up here.</p></div>'));
+    </div>`;
+  /* Ten sam podział co przełączniki w Settings: rura z landingu osobno od
+     platformy — dwie listy czyta się szybciej niż jedną przeplataną. */
+  const leady=INBOX.filter(i=>i.type==='lead'),prop=INBOX.filter(i=>i.type!=='lead');
+  const sekcja=(tytul,items)=>items.length
+    ?`<div class="lbl" style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px">${tytul}</div>
+      <div class="tbl-wrap">${items.map(wiersz).join('')}</div>`:'';
+  openOver('Notifications',pushCardHtml()+(INBOX.length
+    ?sekcja('Leads',leady)+sekcja('Prop',prop)
+    :'<div class="empty"><h3>Nothing new</h3><p>New leads, orders, KYC submissions, payout requests and ticket messages show up here.</p></div>'));
   paintPushCard();
   localStorage.setItem('pf_admin_inbox_seen',new Date().toISOString());
   loadInbox();
@@ -2545,17 +2563,23 @@ function pushCardHtml(){
     your Telegram — in <a href="#" onclick="closeOver();go('settings');return false">Settings</a>.</p></div>`;
 }
 
-/* Kategorie web pushy — wyciszane per KONTO (ui_prefs.admin_push), więc jedna
-   decyzja gasi brzęczenie na wszystkich urządzeniach admina naraz. Brak wpisu
-   = kategoria brzęczy; nowa kategoria zdarzeń dzwoni u wszystkich, dopóki
-   ktoś jej świadomie nie zgasi. */
-const PUSH_CATS=[['lead_new','New leads'],['lead_action','Lead activity'],
-  ['lead_reminder','Lead follow-ups'],['admin_kyc','KYC submissions'],
-  ['admin_payout','Payout requests'],['admin_ticket','Support tickets']];
+/* KOMPLETNA lista tego, co może brzęczeć u admina, w dwóch grupach: Leads
+   (rura z landingu) i Prop (platforma). Wyciszane per KONTO
+   (ui_prefs.admin_push) — jedna decyzja gasi wszystkie urządzenia admina.
+   Brak wpisu = kategoria brzęczy; nowa kategoria zdarzeń dzwoni u wszystkich,
+   dopóki ktoś jej świadomie nie zgasi. */
+const PUSH_GROUPS=[
+  ['Leads',[['lead_new','New leads'],['lead_action','Lead activity (claims & statuses)'],
+    ['lead_reminder','Follow-ups & nudges']]],
+  ['Prop',[['admin_order','Orders & payments'],['admin_kyc','KYC submissions'],
+    ['admin_payout','Payout requests'],['admin_ticket','Support tickets']]],
+];
 function pushCatsHtml(){
   const cats=(ME&&ME.ui_prefs&&ME.ui_prefs.admin_push)||{};
-  return PUSH_CATS.map(([k,l])=>`<label class="chip" style="cursor:pointer;display:inline-flex;gap:6px;align-items:center">
-    <input type="checkbox" ${cats[k]===false?'':'checked'} onchange="setPushCat('${k}',this.checked)">${l}</label>`).join('');
+  return PUSH_GROUPS.map(([grupa,katy])=>`
+    <div class="lbl" style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">${grupa}</div>
+    <div class="chip-row">${katy.map(([k,l])=>`<label class="chip" style="cursor:pointer;display:inline-flex;gap:6px;align-items:center">
+      <input type="checkbox" ${cats[k]===false?'':'checked'} onchange="setPushCat('${k}',this.checked)">${l}</label>`).join('')}</div>`).join('');
 }
 async function setPushCat(k,on){
   const prefs=(ME&&ME.ui_prefs&&typeof ME.ui_prefs==='object')?{...ME.ui_prefs}:{};

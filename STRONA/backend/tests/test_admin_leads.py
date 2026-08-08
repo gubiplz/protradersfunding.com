@@ -1329,6 +1329,19 @@ def test_reczne_bought_checkbox(_srodowisko):
         "marked bought", "unmarked bought"]
 
 
+def test_dzwonek_admina_niesie_zdarzenia_leadow():
+    """Lista pod dzwoneczkiem (admin/inbox) agreguje kolejki — leady wchodzą
+    do niej z historii lead_events, z lead_id do otwarcia karty jednym klikiem."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _callback(lead_id, "claim")
+
+    d = client.get("/api/admin/inbox", headers=ADMIN).json()
+    wpisy = [i for i in d["items"] if i.get("lead_id") == lead_id]
+    assert wpisy and all(i["type"] == "lead" and i["view"] == "leads" for i in wpisy)
+    assert any(i["title"].startswith("New lead:") for i in wpisy)
+    assert any("taken by" in i["body"] for i in wpisy)
+
+
 def test_wyciszona_kategoria_nie_brzeczy_ale_dzwonek_zostaje(monkeypatch):
     from app import push as push_mod
     from app.models import Notification

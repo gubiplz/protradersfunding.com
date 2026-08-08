@@ -222,7 +222,7 @@ def test_admin_inbox_agreguje_kolejki():
     items = client.get("/api/admin/inbox", headers=ADMIN).json()["items"]
     assert {"order", "kyc", "ticket"} <= {i["type"] for i in items}
     for i in items:
-        assert i["view"] in ("orders", "kyc", "payouts", "tickets")
+        assert i["view"] in ("orders", "kyc", "payouts", "tickets", "leads")
         assert i["ts"] and i["title"]
     assert any(i["type"] == "ticket" and "Inbox test" in i["title"] for i in items)
 
