@@ -180,3 +180,72 @@ def test_portal_bez_linku_do_admina():
     assert "admin-link" not in html
     bundle = TestClient(app).get("/static/js/portal-app.js").text
     assert "admin-link" not in bundle and "Admin panel" not in bundle
+
+
+def test_panel_bez_wejscia_do_portalu_i_z_sign_out():
+    """Z panelu admina nie da sie przejsc do portalu tradera (przycisk
+    'Trader portal' zniknal z sidebara i z Ustawien) — admin i tak zostalby
+    odbity z powrotem. W zamian sidebar ma wprost przycisk wylogowania."""
+    _trader("panelui@firma.pl", "tajne123", admin=True)
+    c = TestClient(app)
+    c.post("/api/auth/login", json={"email": "panelui@firma.pl", "password": "tajne123"})
+    html = c.get("/admin").text
+    assert "Trader portal" not in html
+    assert 'onclick="signOut()"' in html
+    bundle = c.get("/static/js/admin-panel.js").text
+    assert "Trader portal" not in bundle
+
+
+# --------------------------------------------------------------------------- #
+#  ADMIN_BOOTSTRAP — konta adminow z env, raz na deploy                        #
+# --------------------------------------------------------------------------- #
+from app.config import get_settings  # noqa: E402
+from app.main import _bootstrap_adminow  # noqa: E402
+
+
+def _admin(email):
+    s = SessionLocal()
+    tr = s.query(Trader).filter(Trader.email == email).first()
+    s.close()
+    return tr
+
+
+def test_bootstrap_zaklada_adminow_i_nie_rusza_hasha_bez_potrzeby(monkeypatch):
+    monkeypatch.setattr(
+        get_settings(), "admin_bootstrap",
+        "boot@k:przeworsk9:Bartek K;boot@s:przeworsk9;  ;zepsuty-wpis")
+    _bootstrap_adminow()
+    a, b = _admin("boot@k"), _admin("boot@s")
+    assert a.is_admin and b.is_admin
+    assert a.full_name == "Bartek K" and b.full_name == "Administrator"
+    # prefiks kodu polecajacego brany z e-maila jest identyczny (boot/boot),
+    # a kolumna ma UNIQUE — drugi admin musi dostac kod losowy, nie wyjatek
+    assert a.referral_code != b.referral_code
+    assert auth.verify_password("przeworsk9", a.password_hash)
+
+    # drugi przebieg z TYM SAMYM haslem nie przepisuje hasha: nowy hash to nowa
+    # sol, a odcisk hasla w tokenach wylogowalby admina przy kazdym deployu
+    stary = a.password_hash
+    _bootstrap_adminow()
+    assert _admin("boot@k").password_hash == stary
+
+    # logowanie dziala normalnie (a "zepsuty-wpis" nie zalozyl smiecia)
+    assert _zaloguj("boot@k", "przeworsk9").json()["trader"]["is_admin"] is True
+    assert _admin("zepsuty-wpis") is None
+
+
+def test_bootstrap_zmiana_hasla_w_env_nadpisuje(monkeypatch):
+    monkeypatch.setattr(get_settings(), "admin_bootstrap", "boot@n:stare-haslo")
+    _bootstrap_adminow()
+    monkeypatch.setattr(get_settings(), "admin_bootstrap", "boot@n:nowe-haslo")
+    _bootstrap_adminow()
+    assert _zaloguj("boot@n", "stare-haslo").status_code == 401
+    assert _zaloguj("boot@n", "nowe-haslo").status_code == 200
+
+
+def test_pusty_admin_token_wylacza_tor_tokenowy(monkeypatch):
+    """Dawne domyslne ADMIN_TOKEN="admin" w publicznym repo to backdoor;
+    puste ustawienie musi wylaczac wejscie naglowkiem, nie porownywac z ''."""
+    monkeypatch.setattr(get_settings(), "admin_token", "")
+    assert client.get("/api/accounts", headers={"X-Admin-Token": ""}).status_code == 403
+    assert client.get("/api/accounts", headers={"X-Admin-Token": "admin"}).status_code == 403

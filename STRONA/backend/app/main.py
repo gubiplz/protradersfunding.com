@@ -10,6 +10,7 @@ Uruchomienie:  uvicorn app.main:app --reload  (z katalogu backend/)
 """
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import os
@@ -148,6 +149,73 @@ def _migruj_login_admina() -> None:
         session.close()
 
 
+def _bootstrap_adminow() -> None:
+    """Konta administratorów z env `ADMIN_BOOTSTRAP` — bez dostępu do bazy z zewnątrz.
+
+    Format: `email:haslo:Imię Nazwisko` rozdzielane średnikami (imię opcjonalne;
+    hasło nie może zawierać dwukropka). Wołane przy każdym starcie procesu, ale
+    CELOWO poza bramką fingerprinta schematu: env dodany albo zmieniony między
+    deployami działa od następnego zimnego startu, bez redeployu. Koszt trzyma
+    w ryzach własny znacznik — bez env return za darmo, z envem jeden SELECT.
+    Env jest źródłem prawdy: zmiana hasła nadpisuje hasło w bazie. Hash jest
+    przepisywany TYLKO gdy hasło faktycznie się zmieniło — nowy hash to nowa
+    sól, a odcisk hasła w tokenach (pwf) wylogowałby wszystkie sesje konta.
+    """
+    if not settings.admin_bootstrap:
+        return
+    odcisk = hashlib.sha256(settings.admin_bootstrap.encode()).hexdigest()[:16]
+    session = SessionLocal()
+    try:
+        znacznik = session.get(AppSetting, "admin_bootstrap_fp")
+        if znacznik is not None and znacznik.value == odcisk:
+            return
+        for wpis in settings.admin_bootstrap.split(";"):
+            wpis = wpis.strip()
+            if not wpis:
+                continue
+            czesci = wpis.split(":", 2)
+            if len(czesci) < 2 or not czesci[0].strip() or not czesci[1]:
+                print(f"[bootstrap] pomijam niepoprawny wpis ADMIN_BOOTSTRAP: {wpis[:24]!r}…")
+                continue
+            email = czesci[0].strip().lower()
+            haslo = czesci[1]
+            imie = czesci[2].strip() if len(czesci) > 2 and czesci[2].strip() else "Administrator"
+            tr = session.query(Trader).filter(Trader.email == email).first()
+            if tr is None:
+                # referral_code ma UNIQUE, a prefiks bierzemy z e-maila — dwaj
+                # admini "bartek@…" nie mogą dostać tego samego kodu.
+                kod = f"ADM{email[:4].upper()}"
+                while session.query(Trader).filter(Trader.referral_code == kod).first():
+                    kod = "ADM" + secrets.token_hex(2).upper()
+                session.add(Trader(email=email, password_hash=auth.hash_password(haslo),
+                                   full_name=imie, referral_code=kod,
+                                   is_admin=True, kyc_status="approved"))
+                # flush: sesja nie ma autoflusha, a SELECT unikalnosci kodu w
+                # nastepnym obiegu musi widziec ten wiersz (dwaj "bartek@…").
+                session.flush()
+                print(f"[bootstrap] admin utworzony: {email}")
+            else:
+                if not auth.verify_password(haslo, tr.password_hash):
+                    tr.password_hash = auth.hash_password(haslo)
+                    print(f"[bootstrap] admin {email}: nowe haslo z env")
+                tr.is_admin = True
+                if not tr.full_name:
+                    tr.full_name = imie
+        if znacznik is None:
+            session.add(AppSetting(key="admin_bootstrap_fp", value=odcisk))
+        else:
+            znacznik.value = odcisk
+        session.commit()
+    except Exception as e:  # pragma: no cover
+        # Np. wyscig dwoch rownoleglych zimnych startow o UNIQUE(email) —
+        # przegrany przebieg odpuszcza (zwyciezca juz zalozyl konta); start
+        # procesu nie moze sie wywrocic przez bootstrap.
+        session.rollback()
+        print(f"[bootstrap] blad: {e}")
+    finally:
+        session.close()
+
+
 def _warn_if_placeholder_provisioning() -> None:
     """Log startowy: w którym trybie stoi provisioning i skąd biorą się poświadczenia."""
     if provisioning.real_provisioning_enabled(settings):
@@ -197,6 +265,10 @@ def _przygotuj_baze() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _przygotuj_baze()
+    # Poza _przygotuj_baze, bo tamta ścieżka biegnie raz na DEPLOY — a env
+    # ADMIN_BOOTSTRAP dodany między deployami ma działać od następnego zimnego
+    # startu. Funkcja sama pilnuje kosztu własnym znacznikiem w bazie.
+    _bootstrap_adminow()
     _warn_if_placeholder_provisioning()
     if settings.poller_enabled:
         poller.start()
@@ -4606,7 +4678,8 @@ def _require_cron(x_admin_token: str | None = Header(default=None),
     Osobno od `auth.require_admin`, bo tam nagłówek Bearer jest interpretowany
     jako token tradera — cron ma własny sekret i nie ma konta w systemie.
     """
-    if x_admin_token and secrets.compare_digest(x_admin_token, settings.admin_token):
+    if settings.admin_token and x_admin_token \
+            and secrets.compare_digest(x_admin_token, settings.admin_token):
         return
     sekret = settings.cron_secret
     if sekret and authorization and authorization.lower().startswith("bearer "):

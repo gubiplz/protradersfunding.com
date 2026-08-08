@@ -136,7 +136,10 @@ def require_admin(
     authorization: str | None = Header(default=None),
 ) -> None:
     """Admin przez stały token (panel) ALBO przez konto z is_admin."""
-    if x_admin_token and secrets.compare_digest(x_admin_token, settings.admin_token):
+    # Pusty ADMIN_TOKEN = tor tokenowy wyłączony; bez tego pierwszego warunku
+    # instalacja bez env porównywałaby z pustym stringiem / dawnym "admin".
+    if settings.admin_token and x_admin_token \
+            and secrets.compare_digest(x_admin_token, settings.admin_token):
         return
     if authorization and authorization.lower().startswith("bearer "):
         tid = parse_token(authorization.split(" ", 1)[1].strip())

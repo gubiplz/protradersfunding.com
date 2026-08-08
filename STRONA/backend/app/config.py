@@ -167,7 +167,14 @@ class Settings:
     # --- Aplikacja / bezpieczeństwo ---
     app_base_url: str = os.getenv("APP_BASE_URL", "http://localhost:8000")
     secret_key: str = os.getenv("SECRET_KEY", "dev-secret-change-me")
-    admin_token: str = os.getenv("ADMIN_TOKEN", "admin")     # nagłówek X-Admin-Token
+    # Nagłówek X-Admin-Token. Puste = wejście tokenem WYŁĄCZONE (zostają konta
+    # z is_admin). Domyślne było kiedyś "admin" — z publicznym repo deployowym
+    # to gotowy backdoor na każdej instalacji bez ustawionego env.
+    admin_token: str = os.getenv("ADMIN_TOKEN", "")
+    # Konta administratorów zakładane przy deployu, bez sięgania do bazy z
+    # zewnątrz: "email:haslo:Imię Nazwisko" rozdzielane średnikami. Env jest
+    # źródłem prawdy — zmiana hasła tutaj + redeploy nadpisuje hasło w bazie.
+    admin_bootstrap: str = os.getenv("ADMIN_BOOTSTRAP", "").strip()
     # Sekret dla crona wyzwalającego POST/GET /api/tick. Puste = endpoint
     # przyjmuje wyłącznie token admina. Vercel Cron sam wysyła ten sekret
     # w nagłówku `Authorization: Bearer …`, gdy CRON_SECRET jest ustawiony.
