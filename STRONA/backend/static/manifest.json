@@ -1,8 +1,9 @@
 {
   "name": "ProTradersFunding",
   "short_name": "ProTraders",
+  "id": "/portal",
   "start_url": "/portal",
-  "scope": "/portal",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#f6f7fb",
   "theme_color": "#f6f7fb",
