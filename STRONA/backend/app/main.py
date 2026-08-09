@@ -3659,6 +3659,12 @@ def admin_order_pay_link(order_id: int, request: Request):
     widzi markę i kwotę przed zapłatą, a `stripe_session_id` przy zamówieniu
     dalej pilnuje webhooka. Token jest stały — ten sam przycisk daje ten sam
     adres, więc wysłanie go drugi raz niczego nie unieważnia.
+
+    Gdy ustawione jest `PARTNER_PAY_BASE_URL`, wraca DODATKOWO ten sam token na
+    domenie partnera — panel każe wtedy wybrać, którą stroną klient ma iść.
+    Wyboru nie robimy za admina: to on wie, skąd ten człowiek przyszedł, a
+    wysłanie klientowi partnera linku z naszą marką jest właśnie tym błędem,
+    przed którym ten wybór ma chronić.
     """
     session = SessionLocal()
     try:
@@ -3670,7 +3676,10 @@ def admin_order_pay_link(order_id: int, request: Request):
         if not o.pay_token:
             o.pay_token = secrets.token_urlsafe(16)[:32]
             session.commit()
-        return {"id": o.id, "url": f"{_public_base(request)}/pay/{o.pay_token}"}
+        odp = {"id": o.id, "url": f"{_public_base(request)}/pay/{o.pay_token}"}
+        if baza := settings.partner_pay_base_url:
+            odp["partner_url"] = f"{baza}/pay/{o.pay_token}"
+        return odp
     finally:
         session.close()
 
@@ -6571,6 +6580,44 @@ def pay_page(request: Request, token: str):
                      # mechanikę checkoutu, której to zamówienie NIE dostanie —
                      # kwota jest ustalona ręcznie. Na tej stronie jej nie ma.
                      promo=None)
+    finally:
+        session.close()
+
+
+@app.get("/api/pay/{token}")
+def pay_order_public(request: Request, token: str,
+                     x_partner_token: str | None = Header(default=None)):
+    """To samo, co pokazuje `/pay/<token>`, tyle że w JSON — dla strony partnera.
+
+    Partner sprzedaje pod własną marką i jego klient nie ma powodu lądować na
+    naszej domenie w połowie zakupu. Jego serwer pyta tu o pozycję i kwotę,
+    rysuje to u siebie, a przycisk woła zwykły `/api/pay/<token>/start`.
+
+    Wychodzi dokładnie tyle, co ze strony płatności: pozycja, kwota, numer
+    i status. ŻADNYCH danych osobowych — po drugiej stronie stoi cudzy serwer,
+    a zamówienie zna mail i nazwisko kupującego.
+
+    Sekret w nagłówku, mimo że sam token już jest wstępem do strony: to jest
+    wejście dla jednej maszyny, nie dla przeglądarki. Bez nagłówka wyciekniony
+    link stawałby się od razu API, po którym da się skryptować. CORS-a nie ma
+    w całej aplikacji, więc przeglądarka i tak tu nie wejdzie.
+    """
+    oczekiwany = settings.partner_api_token
+    if not oczekiwany or not x_partner_token or not secrets.compare_digest(
+            x_partner_token, oczekiwany):
+        raise HTTPException(401, "Unauthorized")
+    # Limit na nieistniejące tokeny też przechodzi tędy — inaczej ktoś z ważnym
+    # sekretem mógłby przez nas przelecieć listę zgadywanych linków.
+    _rate_limit(request, "partner_pay", 60)
+
+    session = SessionLocal()
+    try:
+        o = _zamowienie_po_tokenie(session, token)
+        return {"item": _pozycja_zamowienia(session, o),
+                "amount_usd": round(float(o.amount_usd or 0), 2),
+                "currency": "USD",
+                "reference": f"PTF-{o.id}",
+                "status": o.status}
     finally:
         session.close()
 

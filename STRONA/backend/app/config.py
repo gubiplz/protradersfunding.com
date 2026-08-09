@@ -242,6 +242,19 @@ class Settings:
     # statusu od kogokolwiek, kto zna adres. Puste = webhook odmawia.
     telegram_webhook_secret: str = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
 
+    # --- Strona partnerska ---
+    # Firma partnerska prowadzi własny landing i chce, żeby jej klient płacił
+    # nie opuszczając jej domeny. Jej serwer czyta zamówienie przez
+    # GET /api/pay/<token>, więc potrzebuje własnego sekretu — znowu osobnego
+    # od ADMIN_TOKEN, bo stoi na cudzym hostingu. Puste = odczyt zamknięty.
+    partner_api_token: str = os.getenv("PARTNER_API_TOKEN", "")
+    # Adres, pod którym partner wystawia swoją stronę płatności; panel dokleja
+    # do niego `/pay/<token>`. Hosta partnera NIE MA w kodzie — oba repozytoria
+    # są publiczne, więc adres żyje wyłącznie tutaj, w zmiennej środowiskowej.
+    # Puste = panel oferuje tylko link na własnej domenie, czyli stan sprzed
+    # tej zmiany.
+    partner_pay_base_url: str = os.getenv("PARTNER_PAY_BASE_URL", "").rstrip("/")
+
     # Payout BOT łapie swój dzienny slot także na ruchu strony (middleware w
     # main.py). To wyłącznik awaryjny tej ścieżki — cron /api/tick zostaje wtedy
     # jedynym wyzwalaczem. Testy ustawiają false, żeby zwykłe odczyty dashboardu

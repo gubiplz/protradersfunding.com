@@ -1372,12 +1372,41 @@ async function flagOrder(id,flag){
    Telegramie. Token jest stały, więc drugie kliknięcie daje ten sam adres i nie
    unieważnia linku, którego klient już używa. */
 async function payLink(id,prefix){
-  let url;
-  try{url=(await api(`/api/admin/orders/${id}/pay-link`,{method:'POST'})).url}
+  let d;
+  try{d=await api(`/api/admin/orders/${id}/pay-link`,{method:'POST'})}
   catch(e){toast('Error: '+e.message,'err');return}
+  /* Ten sam token wisi pod dwiema markami. Który wysłać, wie admin, który przed
+     chwilą z tym człowiekiem rozmawiał — zamówienie nie wie, skąd on przyszedł,
+     więc zgadywanie za niego kończyłoby się linkiem z obcą marką. Bez
+     PARTNER_PAY_BASE_URL nie ma z czego wybierać i nic się nie zmienia. */
+  const url=d.partner_url?await askPayBrand(d.url,d.partner_url):d.url;
+  if(!url)return;
   try{await navigator.clipboard.writeText(url);
     toast(`🔗 ${prefix?prefix+' ':''}Payment link copied — paste it to the customer.`,'ok',9000)}
   catch(e){showPayLink(url)}   /* Safari bez gestu / http: kopiowanie odpada, a link musi być widoczny */
+}
+/* Nazwy marek biorą się z samych adresów, a nie z kodu: domena partnera żyje
+   w zmiennej środowiskowej serwera i nie ma prawa trafić do repozytorium. */
+function askPayBrand(ourUrl,partnerUrl){
+  const host=u=>{try{return new URL(u).hostname.replace(/^www\./,'')}catch(e){return u}};
+  return new Promise(resolve=>{
+    const box=document.createElement('div');box.className='modal-wrap';
+    const done=v=>{box.remove();resolve(v)};
+    box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-head"><h3>Which page should they land on?</h3>
+        <button class="icon-btn" id="pb-x" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+      <p class="muted" style="font-size:12.5px;margin-bottom:14px">Same order, same amount — only the page differs. Send the brand this customer came from.</p>
+      <div class="stack">
+        <button class="btn-p lg" style="width:100%" data-u="${esc(ourUrl)}">${esc(host(ourUrl))}</button>
+        <button class="btn-o lg" style="width:100%" data-u="${esc(partnerUrl)}">${esc(host(partnerUrl))}</button>
+        <p class="hint">Either way the card is charged by us — that is the name on the statement.</p>
+      </div></div>`;
+    box.onclick=()=>done(null);
+    box.querySelector('#pb-x').onclick=()=>done(null);
+    box.querySelectorAll('button[data-u]').forEach(b=>b.onclick=()=>done(b.dataset.u));
+    document.body.appendChild(box);
+  });
 }
 function showPayLink(url){
   const box=document.createElement('div');box.className='modal-wrap';

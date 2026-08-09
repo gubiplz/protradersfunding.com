@@ -1,0 +1,185 @@
+"""Płatność wystawiona przez stronę partnera.
+
+Partner sprzedaje pod własną marką i jego klient nie ma powodu lądować na naszej
+domenie w połowie zakupu. Jego serwer czyta zamówienie przez `GET /api/pay/<token>`,
+rysuje kwotę u siebie, a przycisk woła ten sam publiczny `start`, co nasza strona.
+
+Dwie rzeczy muszą tu trzymać, bo obchodzą nas mocniej niż wygoda partnera:
+1. Po drugiej stronie stoi CUDZY serwer — z zamówienia nie ma prawa wyjść mail
+   ani nazwisko kupującego.
+2. Adres partnera nie istnieje w kodzie. Oba repozytoria są publiczne, więc
+   domena żyje wyłącznie w zmiennej środowiskowej hostingu.
+"""
+import os
+import tempfile
+
+os.environ.setdefault("DATABASE_URL",
+                      "sqlite:///" + tempfile.NamedTemporaryFile(suffix=".db", delete=False).name)
+os.environ.setdefault("FEED", "sim")
+os.environ.setdefault("AUTO_SEED", "false")
+
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app import auth, catalog, main  # noqa: E402
+from app.config import get_settings  # noqa: E402
+from app.db import SessionLocal, init_db  # noqa: E402
+from app.main import app  # noqa: E402
+from app.models import Trader  # noqa: E402
+
+init_db()
+s = SessionLocal(); catalog.seed_products(s); s.close()
+client = TestClient(app)
+ADMIN = {"X-Admin-Token": get_settings().admin_token}
+SEKRET = "sekret-partnera"
+# Domena wymyślona na potrzeby testu. Prawdziwej nie ma ani tutaj, ani w kodzie —
+# to jest cała treść `test_domena_partnera_nie_siedzi_w_kodzie`.
+BAZA_PARTNERA = "https://partner.example"
+LICZNIK = iter(range(10_000))
+
+
+@pytest.fixture(autouse=True)
+def _partner_wlaczony(monkeypatch):
+    u = get_settings()
+    monkeypatch.setattr(u, "partner_api_token", SEKRET, raising=False)
+    monkeypatch.setattr(u, "partner_pay_base_url", BAZA_PARTNERA, raising=False)
+    return u
+
+
+def _zamowienie() -> int:
+    email = f"partner{next(LICZNIK)}@partner.test"
+    s = SessionLocal()
+    tr = Trader(email=email, password_hash=auth.hash_password("haslo12345"),
+                full_name="Anna Nowak", referral_code=auth.secrets.token_hex(3))
+    s.add(tr); s.commit(); tid = tr.id; s.close()
+    r = client.post("/api/admin/orders", headers=ADMIN, json={
+        "trader_id": tid, "product_key": "2step-25k", "flag": "", "notify_trader": False})
+    assert r.status_code == 200, r.text
+    return r.json()["id"]
+
+
+def _linki(order_id: int) -> dict:
+    r = client.post(f"/api/admin/orders/{order_id}/pay-link", headers=ADMIN)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _token(order_id: int) -> str:
+    return _linki(order_id)["url"].rsplit("/", 1)[1]
+
+
+# --------------------------------------------------------------------------- #
+#  Kto ma prawo czytać zamówienie                                              #
+# --------------------------------------------------------------------------- #
+def test_bez_naglowka_odmawia():
+    assert client.get(f"/api/pay/{_token(_zamowienie())}").status_code == 401
+
+
+def test_cudzy_sekret_odmawia():
+    odp = client.get(f"/api/pay/{_token(_zamowienie())}",
+                     headers={"X-Partner-Token": "nie-ten"})
+    assert odp.status_code == 401
+
+
+def test_nie_przyjmuje_tokenu_admina():
+    """Sekret partnera jest osobny od ADMIN_TOKEN-a, bo partner stoi na cudzym
+    hostingu. Gdy mu wycieknie, ma odsłonić kwoty linków — nigdy panel."""
+    odp = client.get(f"/api/pay/{_token(_zamowienie())}",
+                     headers={"X-Partner-Token": get_settings().admin_token})
+    assert odp.status_code == 401
+
+
+def test_pusty_sekret_zamyka_endpoint(monkeypatch):
+    """Domyślnie (bez PARTNER_API_TOKEN w env) odczyt jest zamknięty. Inaczej
+    świeże wdrożenie wystawiałoby zamówienia każdemu, kto zna adres."""
+    monkeypatch.setattr(get_settings(), "partner_api_token", "", raising=False)
+    token = "x" * 32
+    assert client.get(f"/api/pay/{token}").status_code == 401
+    assert client.get(f"/api/pay/{token}", headers={"X-Partner-Token": ""}).status_code == 401
+
+
+def test_nieznany_token_to_404():
+    odp = client.get("/api/pay/tego-tokenu-nie-ma", headers={"X-Partner-Token": SEKRET})
+    assert odp.status_code == 404
+
+
+def test_zgadywanie_tokenow_lapie_limit(monkeypatch):
+    """Sam sekret nie może wystarczyć do przelecenia listy zgadywanych linków —
+    partner czyta jeden link na klienta, nie tysiąc na minutę."""
+    monkeypatch.setattr(main, "_RL_DISABLED", False)
+    main._RL_HITS.clear()
+    kody = {client.get(f"/api/pay/zgaduje{i}", headers={"X-Partner-Token": SEKRET}).status_code
+            for i in range(70)}
+    main._RL_HITS.clear()
+    assert 429 in kody
+
+
+# --------------------------------------------------------------------------- #
+#  Co wychodzi na zewnątrz                                                     #
+# --------------------------------------------------------------------------- #
+def test_oddaje_pozycje_kwote_i_numer():
+    oid = _zamowienie()
+    odp = client.get(f"/api/pay/{_token(oid)}", headers={"X-Partner-Token": SEKRET})
+    assert odp.status_code == 200
+    d = odp.json()
+    assert d["reference"] == f"PTF-{oid}"
+    assert d["status"] == "pending"
+    assert d["currency"] == "USD"
+    assert d["amount_usd"] > 0
+    assert "challenge" in d["item"]
+
+
+def test_nie_wypuszcza_danych_osobowych():
+    """Po drugiej stronie jest cudzy serwer i cudze logi. Zamówienie zna mail
+    i nazwisko kupującego — tu nie ma prawa wyjść ani jedno, ani drugie."""
+    oid = _zamowienie()
+    s = SessionLocal()
+    from app.models import Order
+    zam = s.get(Order, oid)
+    mail = s.get(Trader, zam.trader_id).email
+    s.close()
+
+    tresc = client.get(f"/api/pay/{_token(oid)}",
+                       headers={"X-Partner-Token": SEKRET}).text
+    assert mail not in tresc
+    assert "Anna" not in tresc and "Nowak" not in tresc
+
+
+# --------------------------------------------------------------------------- #
+#  Wybór marki przy wystawianiu linku                                          #
+# --------------------------------------------------------------------------- #
+def test_panel_dostaje_oba_linki_z_tym_samym_tokenem():
+    """Ten sam token pod dwiema markami — to jedno zamówienie, nie dwa. Panel
+    daje adminowi wybrać, bo tylko on wie, skąd ten człowiek przyszedł."""
+    d = _linki(_zamowienie())
+    assert d["partner_url"].startswith(BAZA_PARTNERA + "/pay/")
+    assert d["partner_url"].rsplit("/", 1)[1] == d["url"].rsplit("/", 1)[1]
+
+
+def test_bez_zmiennej_srodowiskowej_nic_sie_nie_zmienia(monkeypatch):
+    """Wdrożenie bez PARTNER_PAY_BASE_URL zachowuje się jak przed tą zmianą:
+    jeden link, żadnego okna z wyborem."""
+    monkeypatch.setattr(get_settings(), "partner_pay_base_url", "", raising=False)
+    d = _linki(_zamowienie())
+    assert "partner_url" not in d
+    assert "/pay/" in d["url"]
+
+
+def test_domena_partnera_nie_siedzi_w_kodzie():
+    """Oba repozytoria są publiczne. Adres partnera ma jedno miejsce — zmienną
+    środowiskową hostingu — więc w kodzie i szablonach nie może go być nawet
+    jako wartość domyślna."""
+    korzen = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    podejrzane = []
+    for katalog, _, pliki in os.walk(korzen):
+        if any(x in katalog for x in (".venv", "__pycache__", ".git", "tests")):
+            continue
+        for nazwa in pliki:
+            if not nazwa.endswith((".py", ".js", ".html", ".css", ".json")):
+                continue
+            sciezka = os.path.join(katalog, nazwa)
+            with open(sciezka, encoding="utf-8", errors="ignore") as f:
+                tresc = f.read()
+            if "forexpassing" in tresc.lower():
+                podejrzane.append(sciezka)
+    assert not podejrzane, f"nazwa partnera w kodzie: {podejrzane}"
