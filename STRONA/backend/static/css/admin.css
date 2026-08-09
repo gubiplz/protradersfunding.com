@@ -1,11 +1,62 @@
 /* Admin panel — additions on top of portal.css (same themable design system). */
 
+/* ---------------- fundament ----------------
+   portal.css daje kolory, --r i dwa cienie; tutaj dochodzi skala odstępów,
+   skala typografii i POPRAWKA szarości. Te nadpisania :root są bezpieczne,
+   bo admin.css ładuje TYLKO dashboard.html — portal tradera ich nie widzi.
+
+   Szarości: --dim z portalu (#94a3b8) ma na białym kontrast ~2.9:1 — poniżej
+   WCAG AA (4.5:1) przy podpisach 10–12px, których w panelu jest najwięcej.
+   Panel czyta się w windzie i na słońcu, więc obie szarości schodzą niżej:
+   --muted ~6.2:1, --dim ~5.0:1 (na --bg i na --panel). Hierarchia zostaje. */
+:root{
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;
+  /* 4 rozmiary: podpis / tekst pomocniczy / treść / tytuł sekcji */
+  --fs-cap:11px;--fs-ui:12.5px;--fs-body:14px;--fs-title:17px;
+  /* 2 grubości: zwykła i mocna (600/700/800 z portalu sprowadzone do jednej) */
+  --fw-reg:400;--fw-bold:700;
+  --muted:#54617a;--dim:#60708a;
+  --ease-out:cubic-bezier(.22,1,.36,1);
+}
+html[data-theme=dark]{
+  /* ciemny --dim (#6b7488) na panelu #12151c ≈ 4.0:1 — też pod kreską AA */
+  --dim:#7e889c;
+}
+
+/* ---------------- dotyk ----------------
+   Jeden język ruchu dla wszystkiego, co klikalne: 160 ms ease-out i widoczny
+   stan wciśnięcia. transform zamiast koloru, bo działa też na elementach,
+   których tło jest już semantyczne (seg.on, btn-p). */
+.btn-p,.btn-o,.btn-danger,.icon-btn,.seg button,.act-btn,.undo-btn,.btn-x,.q-x,
+.todo,.stat-tile.clickable,.chip.preset,.botnav-btn,.sb-link{
+  transition:transform .16s var(--ease-out),opacity .16s var(--ease-out),
+    background .16s var(--ease-out),border-color .16s var(--ease-out),
+    color .16s var(--ease-out),box-shadow .16s var(--ease-out)}
+.btn-p:active,.btn-o:active,.btn-danger:active,.icon-btn:active,.seg button:active,
+.act-btn:active,.undo-btn:active,.btn-x:active,.q-x:active,.todo:active,
+.stat-tile.clickable:active,.chip.preset:active{transform:scale(.97)}
+.botnav-btn:active,.sb-link:active{opacity:.6}
+@media(pointer:coarse){
+  /* pełny cel dotyku 44 px — portal robi to już dla .icon-btn i .inp */
+  .btn-p,.btn-o,.btn-danger,.seg button{min-height:44px}
+  /* małe X-y nie mogą urosnąć bez rozsadzenia wiersza — rośnie im niewidoczne
+     pole trafienia, nie rysunek */
+  .btn-x,.q-x{position:relative}
+  .btn-x::after,.q-x::after{content:"";position:absolute;inset:-9px}
+  /* portal zeruje min-height na .seg-mini button pod mysz; w szufladzie konta
+     to jest przełącznik On/Off i przy 22 px trafia się w niego palcem na oślep */
+  .seg-mini .sw button{min-height:44px;min-width:44px}
+  /* gotowe follow-upy: cała ich wartość polega na tym, że przypomnienie kosztuje
+     jedno dotknięcie — przy 29 px kosztowało dwa, bo pierwsze trafiało w sąsiada */
+  .chip.preset{min-height:44px;display:inline-flex;align-items:center}
+}
+
 /* The pill must stay inside the 248px sidebar — at the portal font size the
    full site name plus the ADMIN tag overflowed past its right edge. When space
    still runs out, the NAME ellipsizes; the ADMIN tag never truncates. */
 .side-head{min-width:0;padding-left:12px;padding-right:12px}
 .side-head .brand-pill{background:linear-gradient(135deg,#0f172a,#334155);box-shadow:0 8px 18px -8px rgba(15,23,42,.45);
-  max-width:100%;min-width:0;overflow:hidden;font-size:12.5px;padding:8px 9px 8px 8px;gap:6px}
+  max-width:100%;min-width:0;overflow:hidden;font-size:var(--fs-ui);padding:8px 9px 8px 8px;gap:6px}
 .side-head .brand-pill img{width:18px;height:18px}
 .side-head .brand-txt{display:flex;align-items:center;gap:5px;min-width:0}
 .side-head .brand-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -16,8 +67,8 @@
 /* system status bar */
 .sysbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
 .sys{display:inline-flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);
-  border-radius:999px;padding:7px 14px;font-size:12.5px;color:var(--muted);box-shadow:var(--shadow)}
-.sys b{color:var(--txt);font-family:var(--mono);font-weight:600}
+  border-radius:999px;padding:7px 14px;font-size:var(--fs-ui);color:var(--muted);box-shadow:var(--shadow)}
+.sys b{color:var(--txt);font-family:var(--mono);font-weight:var(--fw-bold)}
 .sys .dot{width:7px;height:7px;border-radius:50%;background:var(--green2)}
 .sys.warn .dot{background:#f59e0b} .sys.warn b{color:var(--gold)}
 
@@ -26,9 +77,9 @@
 .toolbar .inp{max-width:280px}
 .seg{display:inline-flex;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:3px;
   box-shadow:var(--shadow)}
-.seg button{padding:7px 13px;border-radius:8px;font-size:12.5px;font-weight:600;color:var(--muted);transition:.15s}
+.seg button{padding:7px 13px;border-radius:8px;font-size:var(--fs-ui);font-weight:var(--fw-bold);color:var(--muted);transition:.15s}
 .seg button.on{background:var(--grad);color:#fff}
-.count-pill{margin-left:auto;font-size:12px;color:var(--dim)}
+.count-pill{margin-left:auto;font-size:var(--fs-ui);color:var(--dim)}
 
 /* mini bars inside table rows */
 .mini{height:5px;border-radius:99px;background:var(--bg3);overflow:hidden;min-width:78px}
@@ -37,15 +88,15 @@
 tr.clickable{cursor:pointer}
 /* editable fields inside a row: full-size .inp is 44px tall, which turns a list
    of thirty leads into a page of boxes with the data lost between them */
-.tbl .inp.sm{padding:6px 9px;font-size:12.5px;border-radius:8px}
+.tbl .inp.sm{padding:6px 9px;font-size:var(--fs-ui);border-radius:8px}
 
 /* action items on the overview */
 .todo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-bottom:18px}
 .todo{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;box-shadow:var(--shadow);
   display:flex;align-items:center;gap:14px;cursor:pointer;transition:.16s}
 .todo:hover{border-color:var(--acc);transform:translateY(-2px)}
-.todo .n{font-family:var(--mono);font-size:24px;font-weight:800;line-height:1}
-.todo .l{font-size:13px;color:var(--muted)}
+.todo .n{font-family:var(--mono);font-size:24px;font-weight:var(--fw-bold);line-height:1}
+.todo .l{font-size:var(--fs-ui);color:var(--muted)}
 .todo .go{margin-left:auto;color:var(--dim)}
 .todo.has .n{color:var(--acc)}
 
@@ -60,7 +111,7 @@ tr.clickable{cursor:pointer}
 .over.open .over-panel{transform:none}
 .over-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;
   border-bottom:1px solid var(--line);background:var(--panel);flex:0 0 auto}
-.over-head h2{font-size:16.5px}
+.over-head h2{font-size:var(--fs-title)}
 .over-body{padding:18px 20px 34px;overflow-y:auto;display:flex;flex-direction:column;gap:14px;
   overscroll-behavior:contain}
 /* Flex children must NEVER shrink to fit the panel: the <=640 rule below sets
@@ -68,11 +119,11 @@ tr.clickable{cursor:pointer}
    item — every card collapsed to ~50px on mobile and clipped its content. */
 .over-body>*{flex:0 0 auto}
 
-.kv{display:flex;justify-content:space-between;gap:14px;font-size:13px;padding:5px 0;border-bottom:1px dashed var(--line)}
+.kv{display:flex;justify-content:space-between;gap:14px;font-size:var(--fs-ui);padding:5px 0;border-bottom:1px dashed var(--line)}
 .kv:last-child{border-bottom:0}
-.kv span{color:var(--muted)} .kv b{font-family:var(--mono);font-weight:600}
+.kv span{color:var(--muted)} .kv b{font-family:var(--mono);font-weight:var(--fw-bold)}
 
-.breach-item{font-size:12.5px;color:var(--red);background:var(--red-bg);border:1px solid var(--red-line);
+.breach-item{font-size:var(--fs-ui);color:var(--red);background:var(--red-bg);border:1px solid var(--red-line);
   border-radius:10px;padding:9px 12px}
 
 /* pool form */
@@ -108,7 +159,7 @@ tr.clickable{cursor:pointer}
 .toast.undo{display:flex;align-items:center;gap:12px;border-left-color:var(--gold)}
 .toast.undo .undo-txt{flex:1;min-width:0}
 .undo-btn{display:inline-flex;align-items:center;gap:6px;flex:none;
-  font-size:12.5px;font-weight:700;color:var(--gold);background:var(--gold-bg);
+  font-size:var(--fs-ui);font-weight:var(--fw-bold);color:var(--gold);background:var(--gold-bg);
   border:1px solid var(--gold-line);border-radius:999px;padding:6px 12px;cursor:pointer}
 .undo-btn:hover{filter:brightness(1.08)}
 .undo-btn svg{width:14px;height:14px}
@@ -116,9 +167,9 @@ tr.clickable{cursor:pointer}
 /* Chips in the slide-over — .chip-row had no styles anywhere, and .chip lives
    only in site.css, which the dashboard does not load. */
 .chip-row{display:flex;gap:8px;flex-wrap:wrap}
-.chip{font-size:12px;font-family:var(--mono);color:var(--muted);border:1px solid var(--line);
+.chip{font-size:var(--fs-ui);font-family:var(--mono);color:var(--muted);border:1px solid var(--line);
   background:var(--panel2);border-radius:8px;padding:5px 10px}
-.chip b{color:var(--txt);font-weight:600}
+.chip b{color:var(--txt);font-weight:var(--fw-bold)}
 
 /* Tables in the slide-over. portal.css gives .tbl min-width:560px for the main
    content area; the drawer is 43px narrower, so the last column sat behind its
@@ -166,11 +217,11 @@ tr.clickable{cursor:pointer}
    Karty w slide-overze są węższe niż te w treści strony, więc 24px paddingu
    z .sec-card zjadałoby jedną trzecią szerokości panelu. */
 .lead-card{padding:14px 16px}
-.lead-card h4{font-size:13.5px;margin-bottom:10px}
+.lead-card h4{font-size:var(--fs-body);margin-bottom:10px}
 .mod-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .mod-row+.mod-row{margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)}
-.mod-row .lbl{font-size:12px;color:var(--muted)}
-.mod-who{font-size:14px;font-weight:600;margin-top:2px}
+.mod-row .lbl{font-size:var(--fs-ui);color:var(--muted)}
+.mod-who{font-size:var(--fs-body);font-weight:var(--fw-bold);margin-top:2px}
 .mod-btns{display:flex;gap:8px;flex-wrap:wrap}
 /* Pięć statusów obok siebie nie mieści się w 560px slide-overa. Zawijają się
    zamiast ściskać do nieczytelnych skrótów — kolejność czyta się jak zdanie
@@ -187,9 +238,9 @@ tr.clickable{cursor:pointer}
 
 .rem-list{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
 .rem{display:flex;align-items:flex-start;gap:10px;background:var(--panel2);border:1px solid var(--line);
-  border-radius:10px;padding:9px 11px;font-size:12.5px}
+  border-radius:10px;padding:9px 11px;font-size:var(--fs-ui)}
 .rem .rem-txt{flex:1;min-width:0}
-.rem .muted{font-size:11px;margin-top:2px}
+.rem .muted{font-size:var(--fs-cap);margin-top:2px}
 /* Termin, który już minął, ma się wyróżniać kolorem, a nie samym tekstem:
    dział przegląda listę wzrokiem, nie czyta jej zdanie po zdaniu. */
 .rem.now{border-color:var(--gold-line);background:var(--gold-bg)}
@@ -198,18 +249,18 @@ tr.clickable{cursor:pointer}
 .chip.preset{cursor:pointer;transition:.15s}
 .chip.preset:hover{border-color:var(--acc);color:var(--acc)}
 #rem-text{width:100%}
-.rem-when{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:12.5px}
+.rem-when{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:var(--fs-ui)}
 .rem-when label{display:inline-flex;align-items:center;gap:6px;color:var(--muted)}
 .rem-when .inp.sm{width:70px}
-.rem-when .btn-p{margin-left:auto;padding:8px 16px;font-size:13px}
+.rem-when .btn-p{margin-left:auto;padding:8px 16px;font-size:var(--fs-ui)}
 
-.note-line{font-size:12.5px;padding:5px 0;border-bottom:1px dashed var(--line)}
+.note-line{font-size:var(--fs-ui);padding:5px 0;border-bottom:1px dashed var(--line)}
 .note-line:last-of-type{border-bottom:0}
 
 /* Termin w wierszu tabeli. Bez tego przypomnienie widać dopiero po otwarciu
    karty — czyli wtedy, gdy i tak się o nim pamiętało. */
-.due{font-size:11px;color:var(--muted);margin-top:3px}
-.due.now{color:var(--gold);font-weight:600}
+.due{font-size:var(--fs-cap);color:var(--muted);margin-top:3px}
+.due.now{color:var(--gold);font-weight:var(--fw-bold)}
 
 /* Klik-to-message przy telefonie: przyciski zamiast linków 11px — na desktopie
    dyskretne, na telefonie rosną do pełnych celów dotyku (media query niżej).
@@ -226,45 +277,70 @@ tr.clickable{cursor:pointer}
 /* Status w wierszu jest polem wyboru, więc nie da się mu dać kropki jak
    `.status`. Kolor tekstu robi to samo: listę trzydziestu leadów przegląda się
    wzrokiem, szukając tych, do których nikt jeszcze nie napisał. */
-.lead-tbl select{font-weight:600}
+.lead-tbl select{font-weight:var(--fw-bold)}
 .lead-tbl select.st-new{color:var(--gold)}
 .lead-tbl select.st-messaged{color:var(--blue)}
 .lead-tbl select.st-replied{color:var(--green)}
 .lead-tbl select.st-no_reply,.lead-tbl select.st-rejected{color:var(--muted)}
 
-/* ---- lista leadów na telefonie ----
-   Osiem kolumn z `white-space:nowrap` to na telefonie poziome przewijanie, w
-   którym imię ucieka spod statusu, a status spod notatki. Wiersz rozkłada się
-   więc na kartę: nagłówki tabeli znikają, a ich rolę przejmuje `data-l` przy
-   każdej komórce. Jedna prawda w markupie, drugi układ tylko w CSS. */
+/* ---- tabele na telefonie: wzorzec kart (.rtbl) ----
+   Kilkanaście kolumn z `white-space:nowrap` to na telefonie poziome
+   przewijanie, w którym login ucieka spod statusu, a status spod notatki.
+   Wiersz rozkłada się więc na kartę: nagłówki tabeli znikają, a ich rolę
+   przejmuje `data-l` przy każdej komórce. Jedna prawda w markupie, drugi
+   układ tylko w CSS. Wzorzec urodził się na liście leadów; teraz nosi go
+   każda lista (accounts, payouts, orders, pool, KYC, telemetry).
+   Klasy nadawane w JS: .rtbl-wrap na kontenerze, .rtbl na tabeli,
+   .rt-main = nagłówek karty, .rt-acts = komórka z przyciskami,
+   .rt-hide = kolumna zbędna na telefonie (szczegóły i tak są w slide-overze). */
 @media(max-width:860px){
-  .lead-wrap{background:transparent;border:0;box-shadow:none;overflow-x:visible;max-width:none}
-  table.lead-tbl{min-width:0}
-  table.lead-tbl thead{display:none}
-  table.lead-tbl,table.lead-tbl tbody,table.lead-tbl tr,table.lead-tbl td{display:block;width:auto}
-  table.lead-tbl tr{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  .rtbl-wrap{background:transparent;border:0;box-shadow:none;overflow-x:visible;max-width:none}
+  table.rtbl{min-width:0}
+  table.rtbl thead{display:none}
+  table.rtbl,table.rtbl tbody,table.rtbl tr,table.rtbl td{display:block;width:auto}
+  /* tr jako kolumna flex: `order` wyciąga status POD nagłówek karty — statusu
+     szuka się wzrokiem najpierw, a w DOM-ie siedzi w środku wiersza */
+  /* user-select wylaczony: long-press otwiera arkusz akcji i nie moze
+     konkurowac z lupka zaznaczania na iOS; linki (mail, tel) dzialaja dalej */
+  table.rtbl tr{display:flex;flex-direction:column;background:var(--panel);
+    -webkit-user-select:none;user-select:none;
+    border:1px solid var(--line);border-radius:var(--r);
     box-shadow:var(--shadow);padding:4px 2px 8px;margin-bottom:10px}
-  table.lead-tbl tr:hover td{background:transparent}
-  table.lead-tbl td{border-top:0;padding:5px 14px;white-space:normal;
+  table.rtbl tr:hover td{background:transparent}
+  /* !important, bo część komórek ma inline `white-space:nowrap` pod układ
+     desktopowy — arkuszowe !important wygrywa ze stylem inline */
+  table.rtbl td{border-top:0;padding:5px 14px;white-space:normal!important;
     display:flex;gap:12px;align-items:flex-start;justify-content:space-between;text-align:right}
-  table.lead-tbl td::before{content:attr(data-l);flex:0 0 66px;text-align:left;color:var(--dim);
-    font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;line-height:2}
-  /* Nazwisko zachowuje się jak nagłówek karty, a nie jak kolejna para
+  table.rtbl td::before{content:attr(data-l);flex:0 0 72px;text-align:left;color:var(--dim);
+    font-size:var(--fs-cap);font-weight:var(--fw-bold);text-transform:uppercase;letter-spacing:.07em;line-height:2}
+  /* Nagłówek karty zachowuje się jak tytuł, a nie jak kolejna para
      etykieta-wartość: to po nim szuka się właściwego wiersza. */
-  table.lead-tbl td[data-l="Lead"]{display:block;text-align:left;padding:10px 14px;
+  table.rtbl td.rt-main{order:-2;display:block;text-align:left;padding:10px 14px;
     border-bottom:1px solid var(--line);margin-bottom:5px}
-  table.lead-tbl td[data-l="Lead"]::before{display:none}
-  table.lead-tbl td[data-l="Lead"] b{font-size:15px}
-  /* Pola do klikania biorą całą szerokość — pełny cel dotyku zamiast selecta
-     wciśniętego w prawy margines. */
+  table.rtbl td.rt-main::before{display:none}
+  table.rtbl td.rt-main b{font-size:15px}
+  /* Karta leada ma 625 px wysokości i 70% jej powierzchni to komórki z własnym
+     `stopPropagation` — otwiera ją wyłącznie tytuł. Bez kursora i hovera nie ma
+     tego jak zgadnąć, więc strzałka pokazuje palcowi jedyne czułe miejsce. */
+  table.rtbl tr.clickable td.rt-main{position:relative;padding-right:34px}
+  table.rtbl tr.clickable td.rt-main::after{content:"›";position:absolute;right:14px;top:50%;
+    transform:translateY(-50%);color:var(--dim);font-size:22px;line-height:1}
+  table.rtbl td[data-l="Status"]{order:-1}
+  table.rtbl td.rt-hide{display:none}
+  /* przyciski akcji zawijają się w pełnowymiarowe cele dotyku */
+  table.rtbl td.rt-acts{flex-wrap:wrap;justify-content:flex-end;gap:8px;align-items:center}
+  table.rtbl td.rt-acts .btn-o,table.rtbl td.rt-acts .btn-p{min-height:40px}
+  /* rozwijany wiersz edycji (pool) zostaje zwykłym blokiem, nie parą label-wartość */
+  table.rtbl tr.tr-sub td{display:block;text-align:left}
+  table.rtbl tr.tr-sub td::before{display:none}
+
+  /* ---- lead-tbl: pola edycji w wierszu (tylko lista leadów je ma) ---- */
   table.lead-tbl td[data-l="Status"],table.lead-tbl td[data-l="Note"]{flex-wrap:wrap}
   table.lead-tbl td[data-l="Status"] select,table.lead-tbl td[data-l="Note"] input{
-    flex:1 1 100%;min-width:0;min-height:40px;font-size:14px}
+    flex:1 1 100%;min-width:0;min-height:40px;font-size:var(--fs-body)}
   table.lead-tbl td[data-l="Status"] .due{flex:1 1 100%;text-align:left}
-  /* Kontakt na telefonie: linki w rozmiarze palca, a przyciski TG/WA/SMS/Copy
-     w pełnym celu dotyku pod numerem, nie ściśnięte obok niego. */
   table.lead-tbl td[data-l="Contact"]{flex-wrap:wrap}
-  table.lead-tbl td[data-l="Contact"] a{font-size:14px;line-height:1.9;word-break:break-all}
+  table.lead-tbl td[data-l="Contact"] a{font-size:var(--fs-body);line-height:1.9;word-break:break-all}
   table.lead-tbl td[data-l="Contact"] .lead-ph{flex:1 1 100%;text-align:right}
   .lead-acts{gap:8px;margin:6px 0 0}
   .act-btn{width:44px;height:40px}
@@ -281,6 +357,52 @@ tr.clickable{cursor:pointer}
   border:0;background:transparent;color:var(--muted);font-size:17px;line-height:1;
   cursor:pointer;border-radius:8px;padding:0}
 .q-x:hover{background:var(--hover);color:var(--txt)}
+/* .q-x zyje na translateY(-50%) — goly scale(.97) z bloku dotyku by go
+   teleportowal w dol pola. Stan wcisniecia sklada oba transformy. */
+.q-x:active{transform:translateY(-50%) scale(.9)}
 @media(max-width:640px){
   .toolbar .q-wrap{max-width:none;width:100%;flex-basis:100%}
 }
+
+/* ---------------- filtry ----------------
+   Aktywny chip nosi X: jedno dotkniecie zdejmuje filtr (wraca "All").
+   Sam kolor gradientu mowil "wybrany", ale nie mowil "kliknij, by zdjac". */
+.seg button.on::after{content:"✕";font-size:9px;margin-left:6px;opacity:.75}
+.seg button[data-all="1"].on::after{content:none}
+
+/* ---------------- offline ----------------
+   Panel to PWA otwierana w windzie: bez sieci pokazuje ostatnie dane, ale
+   zapisy przepadna. Pasek mowi to wprost, zamiast pozwolic klikac w prozni.
+   Stoi w ukladzie NAD paskiem gornym i spycha go w dol; na `fixed` zaslanialby
+   hamburger i przyciski akcji, czyli to, czego sie wtedy szuka. */
+.offline-bar{padding:calc(6px + env(safe-area-inset-top)) 14px 6px;text-align:center;
+  font-size:var(--fs-ui);font-weight:var(--fw-bold);color:var(--gold);
+  background:var(--gold-bg);border-bottom:1px solid var(--gold-line)}
+
+/* ---------------- modale na telefonie ----------------
+   Formularz staje sie dolnym arkuszem: jedna kolumna, przycisk zapisu
+   przyklejony do dolu ekranu (sticky) i nad gestem systemowym (safe area).
+   Na desktopie nic sie nie zmienia — portalowy .modal zostaje jak byl. */
+@media(max-width:640px){
+  .modal-wrap{align-items:flex-end;padding:0}
+  .modal-wrap>*{margin-top:auto;margin-bottom:0}
+  .modal{max-width:none;border-radius:20px 20px 0 0;border-bottom:0;
+    max-height:calc(100dvh - 40px);overflow-y:auto;overscroll-behavior:contain;
+    padding:var(--s4) var(--s4) calc(var(--s4) + env(safe-area-inset-bottom))}
+  /* glowny przycisk trzyma sie dolu podczas przewijania dlugiego formularza;
+     tlo i cien odcinaja go od tresci, ktora pod niego wjezdza */
+  .modal .stack>.btn-p{position:sticky;bottom:calc(-1 * var(--s4) - env(safe-area-inset-bottom));
+    z-index:2;box-shadow:0 -10px 18px -6px var(--panel),0 8px 18px -10px rgba(0,0,0,.35)}
+}
+
+/* ---------------- arkusz szybkich akcji (long-press na karcie) ----------------
+   Dlugie przytrzymanie karty na telefonie otwiera arkusz z akcjami tego
+   wiersza — sklonowanymi przyciskami, ktore normalnie mieszkaja na koncu
+   karty. Korzysta z portalowego .sheet (safe area i animacja juz sa). */
+#act-sheet .act-sheet-title{font-size:var(--fs-body);font-weight:var(--fw-bold);
+  padding:2px 6px 10px;border-bottom:1px solid var(--line);margin-bottom:10px}
+#act-sheet .act-sheet-list{display:flex;flex-direction:column;gap:8px;padding-bottom:4px}
+#act-sheet .act-sheet-list .btn-o,#act-sheet .act-sheet-list .btn-p,
+#act-sheet .act-sheet-list .btn-x,#act-sheet .act-sheet-list .act-btn{
+  width:100%;min-height:48px;justify-content:center;font-size:var(--fs-body)}
+#act-sheet .act-sheet-list .btn-x{height:auto;border-radius:11px}

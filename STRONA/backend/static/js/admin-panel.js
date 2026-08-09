@@ -135,7 +135,14 @@ function go(v){
   $('view').innerHTML=LOADING_HTML(260);
   VIEWS[v]()
     .then(()=>{if(moj!==PRZEJSCIE&&VIEWS[VIEW])VIEWS[VIEW]()})
-    .catch(e=>{if(!String(e.message).includes('token'))toast('Error: '+e.message,'err')});
+    .catch(e=>{
+      /* Blad zostaje W widoku z przyciskiem ponowienia. Sam toast znikal po
+         paru sekundach i na ekranie zostawal wieczny szkielet ladowania. */
+      if(moj!==PRZEJSCIE||String(e.message).includes('token'))return;
+      $('view').innerHTML=`<div class="empty"><h3>Couldn't load this view</h3>
+        <p>${esc(e.message)}</p>
+        <button class="btn-p" style="margin-top:14px" onclick="go('${v}')">Try again</button></div>`;
+    });
 }
 function toggleSide(open){
   $('side').classList.toggle('open',open);
@@ -225,6 +232,20 @@ function withUndo(opis,wykonaj,wiersz,onUndo){
    pozwala mu doleciec juz po zamknieciu strony. */
 addEventListener('beforeunload',()=>{[..._czekajace].forEach(z=>z.domknij())});
 
+/* Toast "zrobione + Cofnij" dla akcji, ktore JUZ poszly na serwer, ale maja
+   endpoint odwrotny (approve KYC -> reset). Inaczej niz withUndo: tam zadanie
+   czeka 5 s w kolejce, tutaj cofniecie to drugi, jawny request. */
+function undoToast(msg,onUndo,ms=8000){
+  const t=document.createElement('div');
+  t.className='toast undo';
+  t.innerHTML='<span class="undo-txt"></span>'
+    +`<button class="undo-btn" type="button" aria-label="Undo">${UNDO_ICO}Undo</button>`;
+  t.querySelector('.undo-txt').textContent=msg;
+  t.querySelector('.undo-btn').onclick=()=>{t.remove();onUndo()};
+  $('toasts').appendChild(t);
+  setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),350)},ms);
+}
+
 function closeOver(){$('over').classList.remove('open')}
 function openOver(title,html){$('o-title').textContent=title;$('o-body').innerHTML=html;$('over').classList.add('open')}
 
@@ -268,13 +289,13 @@ const VIEWS={
     </div>
     <div class="sec-card card-sm">
       <h3>Recent orders</h3>
-      ${orders.length?`<div class="tbl-wrap tw-sm" style="border:0;box-shadow:none;border-radius:0"><table class="tbl"><thead><tr>
+      ${orders.length?`<div class="tbl-wrap tw-sm rtbl-wrap" style="border:0;box-shadow:none;border-radius:0"><table class="tbl rtbl"><thead><tr>
         <th>#</th><th>Trader</th><th>Product</th><th>Amount</th><th>Status</th><th>Account</th></tr></thead>
         <tbody>${orders.slice(0,8).map(o=>`<tr>
-          <td class="num">${o.id}</td><td>${esc(o.trader_email||'—')}</td><td>${esc(o.product_key)}</td>
-          <td class="num">$${fmt(o.amount_usd)}</td>
-          <td><span class="status ${o.status==='paid'?'paid':'pending'}"><span class="dot"></span>${esc(o.status)}</span></td>
-          <td class="num">${o.account_id||'—'}</td></tr>`).join('')}</tbody></table></div>`
+          <td class="num rt-hide" data-l="#">${o.id}</td><td class="rt-main" data-l="Trader">${esc(o.trader_email||'—')}</td><td data-l="Product">${esc(o.product_key)}</td>
+          <td class="num" data-l="Amount">$${fmt(o.amount_usd)}</td>
+          <td data-l="Status"><span class="status ${o.status==='paid'?'paid':'pending'}"><span class="dot"></span>${esc(o.status)}</span></td>
+          <td class="num rt-hide" data-l="Account">${o.account_id||'—'}</td></tr>`).join('')}</tbody></table></div>`
         :'<p class="muted" style="font-size:13px">No orders yet.</p>'}
     </div>`;
  },
@@ -332,19 +353,19 @@ const VIEWS={
     <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Past verification decisions.</p>
     <div class="toolbar" style="margin-bottom:10px">
       <div class="seg">${[['all','All'],['approved','Approved'],['rejected','Rejected']]
-        .map(([k,l])=>`<button class="${kf===k?'on':''}" onclick="window._kycFilter='${k}';renderKyc()">${l}</button>`).join('')}</div>
+        .map(([k,l])=>`<button class="${kf===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._kycFilter='${kf===k?'all':k}';renderKyc()">${l}</button>`).join('')}</div>
       <span class="count-pill">${hist.length} of ${histAll.length}</span>
     </div>
-    ${hist.length?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="admin.kyc">
+    ${hist.length?`<div class="tbl-wrap rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.kyc">
       <thead><tr><th>Reviewed</th><th>Trader</th><th>Country</th><th>Document</th><th>Status</th><th class="no-sort">Documents</th><th class="no-sort"></th></tr></thead>
       <tbody>${hist.map(t=>`<tr>
-        <td class="muted" data-sort="${esc(t.reviewed_at||'')}">${t.reviewed_at?dstr(t.reviewed_at):'—'}</td>
-        <td>${esc(t.full_name||'—')}<div class="muted" style="font-size:11.5px">${esc(t.email)}</div></td>
-        <td class="muted">${esc(t.country||'—')}</td>
-        <td class="muted">${esc(t.id_type||'—')} ${esc(t.id_number||t.doc_ref||'')}</td>
-        <td><span class="status ${t.status==='approved'?'funded':'failed'}"><span class="dot"></span>${esc(t.status)}</span></td>
-        <td>${(t.docs||[]).map(k=>`<button class="btn-o sm" onclick="viewDoc(${t.trader_id},'${k}')">${esc(k.replace('_',' '))}</button>`).join(' ')||'<span class="muted">—</span>'}</td>
-        <td style="white-space:nowrap"><button class="btn-o sm" onclick="revertKyc(${t.trader_id})"
+        <td class="muted" data-l="Reviewed" data-sort="${esc(t.reviewed_at||'')}">${t.reviewed_at?dstr(t.reviewed_at):'—'}</td>
+        <td class="rt-main" data-l="Trader">${esc(t.full_name||'—')}<div class="muted" style="font-size:11.5px">${esc(t.email)}</div></td>
+        <td class="muted" data-l="Country">${esc(t.country||'—')}</td>
+        <td class="muted" data-l="Document">${esc(t.id_type||'—')} ${esc(t.id_number||t.doc_ref||'')}</td>
+        <td data-l="Status"><span class="status ${t.status==='approved'?'funded':'failed'}"><span class="dot"></span>${esc(t.status)}</span></td>
+        <td class="rt-acts">${(t.docs||[]).map(k=>`<button class="btn-o sm" onclick="viewDoc(${t.trader_id},'${k}')">${esc(k.replace('_',' '))}</button>`).join(' ')||'<span class="muted">—</span>'}</td>
+        <td class="rt-acts" style="white-space:nowrap"><button class="btn-o sm" onclick="revertKyc(${t.trader_id})"
           title="Undo this decision, back to the pending queue">Revert</button>
           ${XBTN(`deleteKycRow(${t.trader_id},'${esc(t.email)}')`,'Delete KYC record and uploaded documents')}</td></tr>`).join('')}
       </tbody></table></div>`:`<p class="muted" style="font-size:13px">No ${esc(kf)} decisions.</p>`}</div>`:'';
@@ -401,13 +422,13 @@ const VIEWS={
     ${waiting.length?`<div class="sec-card card-sm" style="border-color:var(--gold-line);background:var(--gold-bg)">
       <h3>${waiting.length} paid ${waiting.length===1?'order is':'orders are'} waiting for an MT5 account</h3>
       <p class="muted" style="font-size:12.5px;margin:6px 0 12px">These challenges are paid for but not tradable yet: the pool has no free account of that size. Add one below and it is assigned automatically.</p>
-      <div class="tbl-wrap tw-sm"><table class="tbl sortable" data-tkey="admin.pool-waiting">
+      <div class="tbl-wrap tw-sm rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.pool-waiting">
         <thead><tr><th>Account</th><th>Trader</th><th>Needs size</th><th>Waiting since</th></tr></thead>
         <tbody>${waiting.map(w=>`<tr>
-          <td class="num">#${w.account_id}</td>
-          <td>${esc(w.trader_email||'—')}</td>
-          <td class="num"><b>$${fmt0(w.account_size)}</b></td>
-          <td class="muted" data-sort="${esc(w.created_at||'')}">${w.created_at?dstr(w.created_at):'—'}</td></tr>`).join('')}
+          <td class="num" data-l="Account">#${w.account_id}</td>
+          <td class="rt-main" data-l="Trader">${esc(w.trader_email||'—')}</td>
+          <td class="num" data-l="Size"><b>$${fmt0(w.account_size)}</b></td>
+          <td class="muted" data-l="Since" data-sort="${esc(w.created_at||'')}">${w.created_at?dstr(w.created_at):'—'}</td></tr>`).join('')}
         </tbody></table></div>
       <p class="muted" style="font-size:12.5px;margin-top:10px">Missing: ${Object.entries(missingBySize).map(([sizeKey,cnt])=>`<b>${cnt}×</b> $${fmt0(Number(sizeKey))}`).join(', ')}</p>
     </div>`:''}
@@ -433,9 +454,9 @@ const VIEWS={
       <h3>Add account manually</h3>
       <p class="muted" style="font-size:12.5px;margin-bottom:14px">Accounts you created at your broker. Paste the credentials here. Provisioning assigns the first free account of a matching size when a challenge is purchased.</p>
       <div class="pool-form">
-        <input id="pl-login" class="inp" placeholder="MT5 login">
-        <input id="pl-pass" class="inp" placeholder="Password">
-        <input id="pl-server" class="inp" placeholder="Server">
+        <input id="pl-login" class="inp" inputmode="numeric" autocomplete="off" placeholder="MT5 login">
+        <input id="pl-pass" class="inp" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="Password">
+        <input id="pl-server" class="inp" spellcheck="false" autocapitalize="off" placeholder="Server">
         <select id="pl-size" class="inp">${sizeOptions(null)}</select>
       </div>
       <button class="btn-p" onclick="addPool()">+ Add to pool</button>
@@ -542,13 +563,13 @@ const VIEWS={
   const items=d.items||[];
   $('view').innerHTML=items.length?`
     <p class="muted" style="font-size:12.5px;margin-bottom:10px">Click a row to see the individual events; click a trader email inside to see everything that user did.</p>
-    <div class="tbl-wrap tw-sm"><table class="tbl sortable" data-tkey="admin.telemetry">
+    <div class="tbl-wrap tw-sm rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.telemetry">
     <thead><tr><th>Day</th><th>Event</th><th style="text-align:right">Count</th>
       <th style="text-align:right">Unique traders</th></tr></thead>
     <tbody>${items.map(i=>`<tr class="clickable" onclick="openTelemetryDetail('${esc(i.day)}','${esc(i.name)}')">
-      <td class="num">${esc(i.day)}</td><td>${esc(i.name)}</td>
-      <td class="num" style="text-align:right">${i.count}</td>
-      <td class="num" style="text-align:right">${i.traders}</td></tr>`).join('')}
+      <td class="num" data-l="Day">${esc(i.day)}</td><td class="rt-main" data-l="Event">${esc(i.name)}</td>
+      <td class="num" style="text-align:right" data-l="Count">${i.count}</td>
+      <td class="num" style="text-align:right" data-l="Traders">${i.traders}</td></tr>`).join('')}
     </tbody></table></div>`
     :`<div class="empty"><h3>No events yet</h3>
       <p>Product events (signups, logins, orders, check-ins) land here as traders use the platform.</p></div>`;
@@ -587,30 +608,30 @@ function renderAccounts(){
   $('view').innerHTML=`
     <div class="toolbar">
       ${searchBox('acc-q','_accQ','renderAccounts','Search login, trader, email or plan…')}
-      <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._accFilter='${k}';renderAccounts()">${l}</button>`).join('')}</div>
+      <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._accFilter='${f===k?'all':k}';renderAccounts()">${l}</button>`).join('')}</div>
       <span class="count-pill">${rows.length} of ${list.length}</span>
     </div>
-    ${rows.length?`<div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.accounts.v2">
+    ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.accounts.v2">
       <thead><tr><th>Created</th><th>Paid</th><th>Login</th><th>Trader</th><th>Plan</th><th>Phase</th><th>Status</th>
         <th title="Trade BOT">Bot</th>
         <th style="text-align:right">Balance</th><th style="text-align:right">Equity</th><th style="text-align:right">P&amp;L</th>
         <th>Daily</th><th>Max DD</th><th class="no-sort"></th></tr></thead>
       <tbody>${rows.map(a=>{const m=a.metrics||{};
         return `<tr class="clickable" onclick="openAccount(${a.id})">
-          <td class="muted" style="white-space:nowrap" data-sort="${esc(a.created_at||'')}">${a.created_at?dstr(a.created_at):'—'}</td>
-          <td class="muted" style="white-space:nowrap" data-sort="${esc(a.paid_at||'')}">${a.paid_at?dstr(a.paid_at):'—'}</td>
-          <td class="num" style="font-weight:600">${a.status==='provisioning'?'<span class="muted">pending…</span>':esc(a.login)}</td>
-          <td>${esc(a.trader_name||'—')}${a.trader_email?`<div class="muted" style="font-size:11px">${esc(a.trader_email)}</div>`:''}</td>
-          <td class="muted">${esc(a.product_key)}</td>
-          <td class="muted">${PHASE_LBL[a.phase]||esc(a.phase)}</td>
-          <td><span class="status ${esc(a.status)}"><span class="dot"></span>${STATUS_LBL[a.status]||esc(a.status)}</span></td>
-          <td data-sort="${a.bot_enabled?(a.bot_paused?1:2):0}" title="${a.bot_enabled?(a.bot_paused?'Trade BOT paused':'Trade BOT running'):'Trade BOT off'}">${a.bot_enabled?(a.bot_paused?'🟡':'🟢'):'🔴'}</td>
-          <td class="num" style="text-align:right">$${fmt(a.balance)}</td>
-          <td class="num" style="text-align:right">$${fmt(a.equity)}</td>
-          <td class="num ${(m.profit_pct||0)>=0?'up':'down'}" style="text-align:right">${(m.profit_pct||0)>=0?'+':''}${(m.profit_pct||0).toFixed(2)}%</td>
-          <td data-sort="${(m.daily_loss_used_pct||0).toFixed(2)}">${mini(m.daily_loss_used_pct)}</td>
-          <td data-sort="${(m.overall_dd_used_pct||0).toFixed(2)}">${mini(m.overall_dd_used_pct)}</td>
-          <td style="text-align:right" onclick="event.stopPropagation()">${
+          <td class="muted rt-hide" style="white-space:nowrap" data-l="Created" data-sort="${esc(a.created_at||'')}">${a.created_at?dstr(a.created_at):'—'}</td>
+          <td class="muted rt-hide" style="white-space:nowrap" data-l="Paid" data-sort="${esc(a.paid_at||'')}">${a.paid_at?dstr(a.paid_at):'—'}</td>
+          <td class="num rt-main" style="font-weight:600" data-l="Login">${a.status==='provisioning'?'<span class="muted">pending…</span>':esc(a.login)}</td>
+          <td data-l="Trader">${esc(a.trader_name||'—')}${a.trader_email?`<div class="muted" style="font-size:11px">${esc(a.trader_email)}</div>`:''}</td>
+          <td class="muted" data-l="Plan">${esc(a.product_key)}</td>
+          <td class="muted" data-l="Phase">${PHASE_LBL[a.phase]||esc(a.phase)}</td>
+          <td data-l="Status"><span class="status ${esc(a.status)}"><span class="dot"></span>${STATUS_LBL[a.status]||esc(a.status)}</span></td>
+          <td data-l="Bot" data-sort="${a.bot_enabled?(a.bot_paused?1:2):0}" title="${a.bot_enabled?(a.bot_paused?'Trade BOT paused':'Trade BOT running'):'Trade BOT off'}">${a.bot_enabled?(a.bot_paused?'🟡':'🟢'):'🔴'}</td>
+          <td class="num" style="text-align:right" data-l="Balance">$${fmt(a.balance)}</td>
+          <td class="num rt-hide" style="text-align:right" data-l="Equity">$${fmt(a.equity)}</td>
+          <td class="num ${(m.profit_pct||0)>=0?'up':'down'}" style="text-align:right" data-l="P&amp;L">${(m.profit_pct||0)>=0?'+':''}${(m.profit_pct||0).toFixed(2)}%</td>
+          <td data-l="Daily" data-sort="${(m.daily_loss_used_pct||0).toFixed(2)}">${mini(m.daily_loss_used_pct)}</td>
+          <td data-l="Max DD" data-sort="${(m.overall_dd_used_pct||0).toFixed(2)}">${mini(m.overall_dd_used_pct)}</td>
+          <td class="rt-acts" style="text-align:right" onclick="event.stopPropagation()">${
             XBTN(`deleteAccountRow(${a.id},'${esc(a.login)}','${esc(a.trader_name||'')}')`,'Delete account')}</td></tr>`}).join('')}
       </tbody></table></div>`
       :`<div class="empty"><h3>No accounts match</h3><p>Try a different search or filter.</p></div>`}`;
@@ -637,31 +658,31 @@ function poolListHtml(){
   return `<div class="toolbar">
       ${searchBox('pool-q','_poolQ','renderPoolList','Search login, server or trader…')}
       <div class="seg">${[['all','All'],['free','Free'],['assigned','Assigned'],['retired','Retired']]
-        .map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._poolFilter='${k}';renderPoolList()">${l}</button>`).join('')}</div>
+        .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._poolFilter='${f===k?'all':k}';renderPoolList()">${l}</button>`).join('')}</div>
       <span class="count-pill">${list.length} of ${rows.length}</span>
     </div>`
-    +(list.length?`<div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.pool">
+    +(list.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.pool">
       <thead><tr><th>#</th><th>Login</th><th class="no-sort">Password</th><th>Server</th><th>Size</th><th>State</th><th>Assigned to</th><th>When</th><th class="no-sort"></th></tr></thead>
       <tbody>${list.map(p=>`<tr>
-        <td class="num">${p.id}</td><td class="num">${esc(p.platform_login)}${p.simulated?'<div class="muted" style="font-size:10.5px;letter-spacing:.06em">SIMULATED</div>':''}</td>
-        <td>${p.platform_password?`<span class="mono" style="cursor:pointer" title="Click to reveal"
+        <td class="num rt-hide" data-l="#">${p.id}</td><td class="num rt-main" data-l="Login">${esc(p.platform_login)}${p.simulated?'<div class="muted" style="font-size:10.5px;letter-spacing:.06em">SIMULATED</div>':''}</td>
+        <td data-l="Password">${p.platform_password?`<span class="mono" style="cursor:pointer" title="Click to reveal"
           onclick="this.textContent=this.textContent==='••••••••'?this.dataset.p:'••••••••'" data-p="${esc(p.platform_password)}">••••••••</span>`:'<span class="muted">—</span>'}</td>
-        <td class="muted">${esc(p.platform_server)}</td><td class="num">$${fmt0(p.account_size)}</td>
-        <td>${p.retired_reason?`<span class="status failed"><span class="dot"></span>retired</span>`
+        <td class="muted" data-l="Server">${esc(p.platform_server)}</td><td class="num" data-l="Size">$${fmt0(p.account_size)}</td>
+        <td data-l="Status">${p.retired_reason?`<span class="status failed"><span class="dot"></span>retired</span>`
           :p.claimed?`<span class="status pending"><span class="dot"></span>assigned</span>`
           :'<span class="status funded"><span class="dot"></span>free</span>'}</td>
-        <td>${p.claimed?`${esc(p.trader_email||'—')}<div class="muted" style="font-size:11.5px">${p.retired_reason?esc(p.retired_reason)+' — not reusable':`account #${p.claimed_by_account_id}${p.account_status?' · '+esc(p.account_status):''}`}</div>`:'<span class="muted">—</span>'}</td>
-        <td class="muted" data-sort="${esc(p.claimed_at||'')}">${p.claimed_at?dstr(p.claimed_at):'—'}</td>
-        <td style="white-space:nowrap">
+        <td data-l="Assigned">${p.claimed?`${esc(p.trader_email||'—')}<div class="muted" style="font-size:11.5px">${p.retired_reason?esc(p.retired_reason)+' — not reusable':`account #${p.claimed_by_account_id}${p.account_status?' · '+esc(p.account_status):''}`}</div>`:'<span class="muted">—</span>'}</td>
+        <td class="muted" data-l="When" data-sort="${esc(p.claimed_at||'')}">${p.claimed_at?dstr(p.claimed_at):'—'}</td>
+        <td class="rt-acts" style="white-space:nowrap">
           <button class="btn-o sm" onclick="editPool(${p.id})">Edit</button>
           ${p.claimed&&!p.retired_reason?''
             :' '+XBTN(`delPool(${p.id},'${esc(p.platform_login)}',${p.retired_reason?1:0})`,
                       p.retired_reason?'Delete this retired entry':'Remove from pool')}</td></tr>
         <tr id="pool-edit-${p.id}" class="tr-sub" style="display:none"><td colspan="9" style="background:var(--bg)">
           <div class="pool-form" style="margin:6px 0">
-            <input id="ed-login-${p.id}" class="inp" value="${esc(p.platform_login)}" placeholder="MT5 login">
-            <input id="ed-pass-${p.id}" class="inp" placeholder="New password (leave empty to keep)">
-            <input id="ed-server-${p.id}" class="inp" value="${esc(p.platform_server)}" placeholder="Server">
+            <input id="ed-login-${p.id}" class="inp" inputmode="numeric" value="${esc(p.platform_login)}" placeholder="MT5 login">
+            <input id="ed-pass-${p.id}" class="inp" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="New password (leave empty to keep)">
+            <input id="ed-server-${p.id}" class="inp" spellcheck="false" autocapitalize="off" value="${esc(p.platform_server)}" placeholder="Server">
             ${p.claimed?'':`<select id="ed-size-${p.id}" class="inp">${poolSizeOptions(p.account_size)}</select>`}
           </div>
           <button class="btn-p sm" onclick="savePool(${p.id},${p.claimed})">Save</button>
@@ -679,29 +700,34 @@ function renderPoolList(){const el=document.getElementById('pool-list');if(el)el
 function renderPayoutsView(){
   const list=window._payReqs||[];
   const f=window._payFilter||'all';
-  const rows=list.filter(r=>f==='all'||r.status===f);
+  const q=(window._payQ||'').toLowerCase();
+  const rows=list.filter(r=>(f==='all'||r.status===f)&&
+    (!q||String(r.account_login||'').toLowerCase().includes(q)
+      ||(r.trader_email||'').toLowerCase().includes(q)
+      ||(r.method||'').toLowerCase().includes(q)||(r.status||'').includes(q)));
   const seg=[['all','All'],['pending','Pending'],['approved','Approved'],['paid','Paid'],['rejected','Rejected']];
   $('view').innerHTML=`
     <div class="toolbar">
-      ${list.length?`<div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._payFilter='${k}';renderPayoutsView()">${l}</button>`).join('')}</div>`:''}
+      ${list.length?`${searchBox('pay-q','_payQ','renderPayoutsView','Search account, trader or method…')}
+      <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._payFilter='${f===k?'all':k}';renderPayoutsView()">${l}</button>`).join('')}</div>`:''}
       <button class="btn-o sm" onclick="openPayoutImport()">Import history</button>
       ${list.length?`<span class="count-pill">${rows.length} of ${list.length}</span>`:''}
-    </div>`+(rows.length?`<div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.payouts">
+    </div>`+(rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.payouts">
     <thead><tr><th>Date</th><th>Account</th><th>Trader</th><th>Profit</th><th>Trader share</th><th>Method</th><th>Status</th><th class="no-sort">Certificate</th><th class="no-sort"></th></tr></thead>
     <tbody>${rows.map(r=>`<tr>
-      <td class="muted" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td><td class="num">${esc(r.account_login||'—')}</td>
-      <td>${esc(r.trader_email||'—')}</td>
-      <td class="num">$${fmt(r.profit_amount)}</td><td class="num up">$${fmt(r.trader_share)}</td>
-      <td>${(()=>{const d=r.details||{};
+      <td class="muted" data-l="Date" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td><td class="num rt-main" data-l="Account">${esc(r.account_login||'—')}</td>
+      <td data-l="Trader">${esc(r.trader_email||'—')}</td>
+      <td class="num" data-l="Profit">$${fmt(r.profit_amount)}</td><td class="num up" data-l="Share">$${fmt(r.trader_share)}</td>
+      <td data-l="Method">${(()=>{const d=r.details||{};
         const label=r.method==='usdt'?'USDT':r.method==='wise'?'Wise':'Bank';
         const info=r.method==='usdt'?[d.network,d.address].filter(Boolean).join(' · ')
           :r.method==='wise'?(d.email||'')
           :[d.holder,d.iban,d.swift,d.bank_name].filter(Boolean).join(' · ');
         return `${esc(label)}${info?`<div class="muted mono" style="font-size:11px;max-width:260px;word-break:break-all">${esc(info)}</div>`:''}`})()}</td>
-      <td><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending'
+      <td data-l="Status"><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending'
         :r.status==='approved'?'active':'failed'}"><span class="dot"></span>${esc(r.status)}</span>
         ${r.status==='rejected'&&r.reject_reason?`<div class="muted" style="font-size:11px;max-width:200px">${esc(r.reject_reason)}</div>`:''}</td>
-      <td style="white-space:nowrap">${r.kind!=='payout'?'<span class="muted">—</span>'
+      <td class="rt-acts" style="white-space:nowrap">${r.kind!=='payout'?'<span class="muted">—</span>'
         :r.cert_url
           ?`<a class="btn-o sm" href="${r.cert_url}" target="_blank">Open</a>
             <button class="btn-o sm" onclick="copyCert('${location.origin}${r.cert_url}')">Copy link</button>
@@ -709,14 +735,14 @@ function renderPayoutsView(){
               ${r.show_on_lp?'On LP ✓':'Not on LP'}</button>
             <button class="btn-o sm" onclick="revokeCert(${r.id})">Revoke</button>`
           :`<button class="btn-o sm" onclick="askCertLp(${r.id})">Generate</button>`}</td>
-      <td style="text-align:right;white-space:nowrap">${r.kind==='request'&&r.status==='pending'
+      <td class="rt-acts" style="text-align:right;white-space:nowrap">${r.kind==='request'&&r.status==='pending'
         ?`<button class="btn-p sm" onclick="approvePayout(${r.id})">Approve &amp; pay</button>
           <button class="btn-o sm" onclick="rejectPayout(${r.id})">Reject</button>`
         :XBTN(`deletePayoutRow('${r.kind}',${r.id},${r.trader_share},'${esc(r.account_login||'')}')`,
               r.kind==='payout'?'Delete payout':'Delete request')}</td></tr>`).join('')}
     </tbody></table></div>
     <p class="muted" style="font-size:11.5px;margin-top:10px">Approving pays the trader share and refunds the challenge fee on the first payout for that account.</p>`
-    :list.length?`<div class="empty"><h3>No ${esc(f)} payouts</h3><p>Try a different filter.</p></div>`
+    :list.length?`<div class="empty"><h3>No payouts match</h3><p>Try a different search or filter.</p></div>`
     :`<div class="empty"><h3>No payouts yet</h3><p>Payouts you issue and requests from funded traders both land here.</p></div>`);
 }
 
@@ -751,25 +777,25 @@ function renderOrders(){
     <div class="toolbar">
       ${searchBox('ord-q','_ordQ','renderOrders','Search email, product, status…')}
       <div class="seg">${[['all','All'],['paid','Paid'],['pending','Pending'],['awaiting','Awaiting crypto'],['failed','Failed']]
-        .map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._ordFilter='${k}';renderOrders()">${l}</button>`).join('')}</div>
+        .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._ordFilter='${f===k?'all':k}';renderOrders()">${l}</button>`).join('')}</div>
       <span class="count-pill">${rows.length} of ${list.length}</span>
       <button class="btn-p sm" onclick="openManualOrder()"
         title="Record an order the customer pays outside Stripe (crypto, transfer)">+ New order</button>
     </div>
-    ${rows.length?`<div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.orders">
+    ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.orders">
       <thead><tr><th>#</th><th>Date</th><th>Trader</th><th>Product</th><th>Amount</th><th>Provider</th><th>Status</th><th>Account</th><th class="no-sort"></th></tr></thead>
       <tbody>${rows.map(o=>`<tr>
-        <td class="num">${o.id}</td><td class="muted" data-sort="${esc(o.created_at||'')}">${dstr(o.created_at)}</td>
-        <td>${esc(o.trader_email||'—')}</td><td>${esc(o.product_key)}</td>
-        <td class="num">$${fmt(o.amount_usd)}${o.coupon?` <span class="up" style="font-size:11px">(${esc(o.coupon)})</span>`:''}</td>
-        <td class="muted">${esc(o.provider)}</td>
-        <td><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span>
+        <td class="num rt-hide" data-l="#">${o.id}</td><td class="muted" data-l="Date" data-sort="${esc(o.created_at||'')}">${dstr(o.created_at)}</td>
+        <td class="rt-main" data-l="Trader">${esc(o.trader_email||'—')}</td><td data-l="Product">${esc(o.product_key)}</td>
+        <td class="num" data-l="Amount">$${fmt(o.amount_usd)}${o.coupon?` <span class="up" style="font-size:11px">(${esc(o.coupon)})</span>`:''}</td>
+        <td class="muted rt-hide" data-l="Provider">${esc(o.provider)}</td>
+        <td data-l="Status"><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span>
           ${o.status==='pending'&&o.flag==='awaiting_crypto'?'<div class="muted" style="font-size:11px;white-space:nowrap">⏳ awaiting crypto</div>':''}
           ${o.status!=='paid'&&o.payment_address?`<div class="muted" title="${esc((o.payment_network?o.payment_network+' · ':'')+o.payment_address)}"
             style="font-size:11px;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(o.payment_network?o.payment_network+' · ':'')}${esc(o.payment_address)}</div>`:''}
           ${o.status==='failed'&&o.fail_reason?`<div class="muted" style="font-size:11px;max-width:200px">${esc(o.fail_reason)}</div>`:''}</td>
-        <td class="num">${o.account_id||'—'}</td>
-        <td style="white-space:nowrap">${o.status==='paid'?'':`
+        <td class="num" data-l="Account">${o.account_id||'—'}</td>
+        <td class="rt-acts" style="white-space:nowrap">${o.status==='paid'?'':`
           ${o.status==='pending'?`<button class="btn-o sm" onclick="payLink(${o.id})"
             title="Copy a card-payment link for this order — send it to the customer">Pay link</button>
           <button class="btn-o sm" onclick="flagOrder(${o.id},'${o.flag==='awaiting_crypto'?'':'awaiting_crypto'}')"
@@ -895,18 +921,18 @@ function renderLeads(){
       ${searchBox('lead-q','_leadQ','renderLeads','Search name, email, phone or partner…')}
       <div class="seg">${[['all','All'],['due','Due'],['mine','Mine'],['free','Free'],
         ...LEAD_STATUSES,['bought','Bought']]
-        .map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._leadFilter='${k}';renderLeads()">${l}</button>`).join('')}</div>
+        .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._leadFilter='${f===k?'all':k}';renderLeads()">${l}</button>`).join('')}</div>
       <span class="count-pill">${rows.length} of ${list.length}</span>
       <button class="btn-p sm" onclick="openNewLead()"
         title="Somebody who wrote to us without filling the form">+ Add lead</button>
     </div>
-    ${rows.length?`<p class="muted" style="font-size:12.5px;margin-bottom:10px">Tap a row for the full history: every application with the answers given at the time, status changes and who made them — and the button that deletes it.</p>
-    <div class="tbl-wrap tw-wide lead-wrap"><table class="tbl sortable lead-tbl" data-tkey="admin.leads">
+    ${rows.length?`<p class="muted" style="font-size:12.5px;margin-bottom:10px">Tap the name for the full history: every application with the answers given at the time, status changes and who made them — and the button that deletes it.</p>
+    <div class="tbl-wrap tw-wide lead-wrap rtbl-wrap"><table class="tbl sortable lead-tbl rtbl" data-tkey="admin.leads">
       <thead><tr><th>Date</th><th>Lead</th><th>Contact</th><th>Grade</th><th>Source</th>
         <th>Status</th><th>Bought</th><th>Note</th></tr></thead>
       <tbody>${rows.map(l=>`<tr class="clickable" onclick="openLead(${l.id})">
         <td class="muted" data-l="Date" data-sort="${esc(l.created_at||'')}">${dstr(l.created_at)}</td>
-        <td data-l="Lead"><b>${esc(l.name||'—')}</b>
+        <td data-l="Lead" class="rt-main"><b>${esc(l.name||'—')}</b>
           ${l.owner?`<div style="font-size:11px" title="Taken by">👤 ${esc(l.owner)}</div>`
             :'<div class="muted" style="font-size:11px">nobody took it</div>'}
           ${l.applications>1?`<div class="muted" style="font-size:11px" title="Filled the form more than once">↻ applied ${l.applications}×</div>`:''}
@@ -1906,11 +1932,9 @@ async function setCertLp(pid,show,accId){
 /* Revoking kills the DOCUMENT — the public link stops working. To only take an
    entry off the strip use setCertLp(). The payout row stays either way. */
 async function revokeCert(pid,accId){
-  if(!await askConfirm({title:'Revoke this certificate?',
-    body:'The public link stops working and the entry disappears from the landing page. The payout '
-      +'itself stays on the account.<br><br>To only hide it from the landing page, use '
-      +'<b>Take off the LP</b> instead.',
-    ok:'Revoke certificate',danger:true}))return;
+  /* Bez okna potwierdzenia: withUndo i tak trzyma zadanie 5 s z przyciskiem
+     cofniecia, a certyfikat da sie wygenerowac od nowa — podwojna zapora
+     (confirm + undo) tylko spowalniala moderacje na telefonie. */
   withUndo('Revoking the certificate',async()=>{
     try{await api(`/api/admin/payouts/${pid}/certificate`,{method:'DELETE'});
       toast('Certificate revoked. Removed from the landing page.','ok');
@@ -2001,8 +2025,16 @@ async function approvePayout(id){
   }catch(e){toast('Error: '+e.message,'err')}
 }
 async function approveKyc(tid){
-  try{await api(`/api/admin/kyc/${tid}/approve`,{method:'POST'});toast('KYC approved.','ok');go('kyc')}
-  catch(e){toast('Error: '+e.message,'err')}
+  /* Jeden tap, zero okien — pomylke cofa przycisk w toascie (istniejacy
+     endpoint /reset, ten sam co Revert w historii). */
+  try{
+    await api(`/api/admin/kyc/${tid}/approve`,{method:'POST'});go('kyc');
+    undoToast('KYC approved.',async()=>{
+      try{await api(`/api/admin/kyc/${tid}/reset`,{method:'POST'});
+        toast('Approval undone — back in the pending queue.','ok');go('kyc');
+      }catch(e){toast('Error: '+e.message,'err')}
+    });
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 async function rejectKyc(tid){
   const reason=await askReason({
@@ -2030,15 +2062,16 @@ async function viewDoc(tid,kind){
 
 /* ---------- telemetry drill-down ---------- */
 function telemetryRows(items){
-  return `<div class="tbl-wrap"><table class="tbl">
+  return `<div class="tbl-wrap rtbl-wrap"><table class="tbl rtbl">
     <thead><tr><th>Time</th><th>Event</th><th>Trader</th><th>Details</th></tr></thead>
     <tbody>${items.map(e=>{
       let props='';
       try{props=Object.entries(JSON.parse(e.props||'{}')).map(([k,v])=>`${esc(k)}: ${esc(v)}`).join(' · ')}
       catch(_){props=esc(e.props||'')}
-      return `<tr><td class="muted" style="white-space:nowrap">${dstr(e.ts)}</td><td>${esc(e.name)}</td>
-        <td>${e.trader_id?`<a href="#" onclick="openTraderActivity(${e.trader_id},'${esc(e.email||'')}');return false">${esc(e.email||('#'+e.trader_id))}</a>`:'<span class="muted">—</span>'}</td>
-        <td class="muted" style="font-size:11.5px">${props||'—'}</td></tr>`}).join('')}
+      return `<tr><td class="muted" style="white-space:nowrap" data-l="Time">${dstr(e.ts)}</td>
+        <td class="rt-main" data-l="Event">${esc(e.name)}</td>
+        <td data-l="Trader">${e.trader_id?`<a href="#" onclick="openTraderActivity(${e.trader_id},'${esc(e.email||'')}');return false">${esc(e.email||('#'+e.trader_id))}</a>`:'<span class="muted">—</span>'}</td>
+        <td class="muted" style="font-size:11.5px" data-l="Details">${props||'—'}</td></tr>`}).join('')}
     </tbody></table></div>`;
 }
 async function openTelemetryDetail(day,name){
@@ -2143,7 +2176,9 @@ async function setSimFallback(on){
   }catch(e){toast('Error: '+e.message,'err');go('pool')}
 }
 function editPool(id){
-  const w=$('pool-edit-'+id); w.style.display=(w.style.display==='none'?'table-row':'none');
+  /* '' zamiast 'table-row': na telefonie wiersz edycji jest kartą (display:flex
+     z .rtbl) i wpisany na sztywno table-row rozjechałby układ. */
+  const w=$('pool-edit-'+id); w.style.display=(w.style.display==='none'?'':'none');
 }
 async function savePool(id,claimed){
   const body={platform_login:$('ed-login-'+id).value.trim(),
@@ -2282,8 +2317,10 @@ async function xdel(url,question,after,okMsg){
      wskazuje juz przycisk modala i `closest` nie znajduje niczego. Wiersz nie
      znikal wiec wcale: zostawal na ekranie az do przeladowania widoku, a odliczanie
      do cofniecia sugerowalo, ze cos sie stalo. Dotyczylo to wszystkich piatki X-ow.
-     `.ticket-row` obok `tr`, bo zgloszenia nie sa tabela, tylko kaflami. */
-  const wiersz=_ostatniPrzycisk&&_ostatniPrzycisk.closest('tr, .ticket-row');
+     `.ticket-row` obok `tr`, bo zgloszenia nie sa tabela, tylko kaflami.
+     `_row` maja klony przyciskow w arkuszu long-press — klon zyje poza tabela,
+     wiec closest() nie znalazlby wiersza do schowania. */
+  const wiersz=_ostatniPrzycisk&&(_ostatniPrzycisk._row||_ostatniPrzycisk.closest('tr, .ticket-row'));
   const [tytul,...reszta]=String(question).split('\n\n');
   if(!await askConfirm({title:tytul.trim(),
     body:esc(reszta.join('\n').trim()).replace(/\n/g,'<br>'),
@@ -2445,18 +2482,18 @@ async function openManualOrder(traderId,lead){
           <b>${esc(lead.name||lead.email)}</b>
           <span class="muted" style="font-size:12px">${esc(lead.email)}</span></div></div>`
       :`<div><label class="muted" style="font-size:12px">Customer</label>
-        <input id="mo-search" class="inp" style="margin-bottom:7px" placeholder="Search by e-mail or name" oninput="moFilter()">
+        <input id="mo-search" class="inp" type="search" autocapitalize="off" style="margin-bottom:7px" placeholder="Search by e-mail or name" oninput="moFilter()">
         <select id="mo-trader" class="inp" size="5"></select></div>`}
       <div><label class="muted" style="font-size:12px">Challenge</label>
         <select id="mo-product" class="inp" onchange="moPrice()">${products.map(p=>
           `<option value="${esc(p.key)}" data-price="${p.price_usd}">${esc(p.label)} — $${fmt0(p.account_size)} · $${fmt(p.price_usd)}</option>`).join('')}</select></div>
       <div><label class="muted" style="font-size:12px">Amount to collect (USD)</label>
-        <input id="mo-amount" class="inp" type="number" step="0.01" min="0"></div>
+        <input id="mo-amount" class="inp" type="number" inputmode="decimal" step="0.01" min="0"></div>
       <div class="stack" id="mo-crypto">
         <div><label class="muted" style="font-size:12px">Network</label>
           <input id="mo-network" class="inp" placeholder="e.g. USDT · TRC20" value="${esc(lastWallet().network||'')}"></div>
         <div><label class="muted" style="font-size:12px">Wallet address <span style="opacity:.65">(goes into the e-mail)</span></label>
-          <input id="mo-address" class="inp" spellcheck="false" placeholder="Paste the wallet address" value="${esc(lastWallet().address||'')}"></div>
+          <input id="mo-address" class="inp" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="Paste the wallet address" value="${esc(lastWallet().address||'')}"></div>
         <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
           <input type="checkbox" id="mo-awaiting" checked style="width:16px;height:16px;accent-color:var(--acc)">
           Mark as <b>awaiting crypto payment</b></label>
@@ -2566,7 +2603,7 @@ async function openCredits(traderId){
         <select id="cr-trader" class="inp" onchange="creditsBalance()">${traders.map(t=>
           `<option value="${t.id}" data-credits="${t.credits_usd||0}"${traderId===t.id?' selected':''}>${esc(t.email)}${t.full_name?' — '+esc(t.full_name):''}</option>`).join('')}</select></div>
       <div class="muted" id="cr-balance" style="font-size:12.5px"></div>
-      <input id="cr-amount" class="inp" type="number" step="1" placeholder="Amount in USD, e.g. 100">
+      <input id="cr-amount" class="inp" type="number" inputmode="numeric" step="1" placeholder="Amount in USD, e.g. 100">
       <input id="cr-note" class="inp" placeholder="Note for the ledger, e.g. Contest prize">
       <button class="btn-p lg" style="width:100%" onclick="submitCredits()">Add credits</button>
       <p class="hint">The balance is spent automatically on the trader's next purchase.</p>
@@ -2604,11 +2641,16 @@ async function openCreate(){
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
     <p class="muted" style="font-size:12.5px;margin-bottom:14px">Everything typed by hand, from an MT5 account outside the pool — nothing is taken from MT5 Pool and its state stays untouched. Drawdown type comes from the plan you pick.</p>
     <div class="stack">
-      <input id="c-login" class="inp" placeholder="MT5 login (e.g. 100099)">
-      <input id="c-pass" class="inp" placeholder="MT5 password">
-      <input id="c-server" class="inp" placeholder="MT5 server (e.g. MetaQuotes-Demo)">
-      <input id="c-name" class="inp" placeholder="Trader name">
-      <input id="c-email" class="inp" placeholder="Trader e-mail (links the account to their portal)">
+      <div><label class="muted" style="font-size:12px" for="c-login">MT5 login</label>
+        <input id="c-login" class="inp" inputmode="numeric" autocomplete="off" placeholder="e.g. 100099"></div>
+      <div><label class="muted" style="font-size:12px" for="c-pass">MT5 password</label>
+        <input id="c-pass" class="inp" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="As set at the broker"></div>
+      <div><label class="muted" style="font-size:12px" for="c-server">MT5 server</label>
+        <input id="c-server" class="inp" spellcheck="false" autocapitalize="off" placeholder="e.g. MetaQuotes-Demo"></div>
+      <div><label class="muted" style="font-size:12px" for="c-name">Trader name</label>
+        <input id="c-name" class="inp" autocapitalize="words" placeholder="Shown in the portal and e-mails"></div>
+      <div><label class="muted" style="font-size:12px" for="c-email">Trader e-mail <span style="opacity:.65">(links the account to their portal)</span></label>
+        <input id="c-email" class="inp" type="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="trader@example.com"></div>
       <div><label class="muted" style="font-size:12px">Challenge</label>
         <select id="c-product" class="inp">${products.map(p=>
           `<option value="${esc(p.key)}">${esc(p.label)} — $${fmt0(p.account_size)} · normally $${fmt0(p.price_usd)}</option>`).join('')}</select></div>
@@ -2907,3 +2949,102 @@ setInterval(()=>{
   if(VIEW==='overview'||VIEW==='accounts')VIEWS[VIEW]().catch(()=>{});
 },12000);
 setInterval(()=>{if(!document.hidden&&ME)loadInbox()},60000);
+
+/* ---------------- offline ----------------
+   PWA otwarta w windzie pokazuje ostatnie dane, ale kazdy zapis przepadnie.
+   Pasek mowi to wprost, zamiast pozwalac klikac w proznie. */
+function paintOffline(){
+  const bar=document.querySelector('.offline-bar');
+  if(navigator.onLine){bar&&bar.remove();return}
+  if(bar)return;
+  const b=document.createElement('div');b.className='offline-bar';
+  b.textContent='Offline — showing the last loaded data, changes will not save.';
+  /* Nad paskiem gornym, w normalnym ukladzie. Przyklejony na fixed zaslanialby
+     hamburger i przyciski akcji — akurat wtedy, gdy trzeba przejsc do widoku,
+     ktory sie zdazyl zaladowac. */
+  const m=document.querySelector('.main');
+  m?m.prepend(b):document.body.prepend(b);
+}
+addEventListener('online',()=>{paintOffline();toast('Back online.','ok',3000)});
+addEventListener('offline',paintOffline);
+paintOffline();
+
+/* ---------------- walidacja przy wyjsciu z pola ----------------
+   Jedna delegacja dla wszystkich formularzy panelu: pole .inp z trescia,
+   ktore nie przechodzi checkValidity (type=email, required, min itd.),
+   dostaje czerwona ramke i komunikat przegladarki pod spodem — style .bad
+   i .field-err juz istnieja w portal.css. Puste pole nie krzyczy: wymagane
+   braki wylapuje i tak przycisk zapisu. */
+document.addEventListener('focusout',e=>{
+  const el=e.target;
+  if(!(el instanceof HTMLInputElement)||!el.classList.contains('inp'))return;
+  const nast=el.nextElementSibling;
+  const err=nast&&nast.classList&&nast.classList.contains('field-err')?nast:null;
+  if(el.value&&!el.checkValidity()){
+    el.classList.add('bad');
+    const box=err||el.insertAdjacentElement('afterend',
+      Object.assign(document.createElement('div'),{className:'field-err'}));
+    box.textContent=el.validationMessage;
+  }else{el.classList.remove('bad');err&&err.remove()}
+});
+
+/* ---------------- szybkie akcje: long-press na karcie (telefon) ----------------
+   Przyciski wiersza mieszkaja na dole karty .rtbl — przytrzymanie karty pol
+   sekundy otwiera dolny arkusz (portalowy .sheet) ze SKLONOWANYMI przyciskami.
+   cloneNode zachowuje inline onclick, wiec klony robia dokladnie to samo;
+   `_row` wskazuje zrodlowy wiersz, zeby undo po usunieciu schowalo wlasciwa
+   karte (patrz xdel). */
+function closeActSheet(){
+  const s=document.getElementById('act-sheet');
+  if(!s)return;
+  s.classList.remove('open');
+  setTimeout(()=>{s.remove();document.getElementById('act-veil')?.remove()},180);
+}
+function openActSheet(tr){
+  if(document.getElementById('act-sheet'))return;
+  const btns=[...tr.querySelectorAll('.rt-acts button,.rt-acts a,.lead-acts button,.lead-acts a')];
+  if(!btns.length)return;
+  const veil=document.createElement('div');veil.id='act-veil';veil.className='sheet-veil';
+  veil.onclick=closeActSheet;
+  const s=document.createElement('div');s.id='act-sheet';s.className='sheet';
+  s.innerHTML='<div class="sheet-grab"></div><div class="act-sheet-title"></div><div class="act-sheet-list"></div>';
+  const tytul=(tr.querySelector('.rt-main')?.innerText||'').trim().split('\n')[0];
+  s.querySelector('.act-sheet-title').textContent=tytul||'Actions';
+  const list=s.querySelector('.act-sheet-list');
+  btns.forEach(b=>{
+    const c=b.cloneNode(true);
+    c._row=tr;
+    /* przyciski-ikony (X, kopiowanie openera) dostaja w arkuszu podpis z title */
+    if(!c.textContent.trim()&&(b.title||b.getAttribute('aria-label')))
+      c.append(' '+(b.title||b.getAttribute('aria-label')));
+    c.addEventListener('click',closeActSheet);
+    list.appendChild(c);
+  });
+  document.body.append(veil,s);
+  requestAnimationFrame(()=>s.classList.add('open'));
+  try{navigator.vibrate&&navigator.vibrate(10)}catch(_){}
+}
+let _lpT=null,_lpXY=null,_lpFired=false;
+addEventListener('touchstart',e=>{
+  if(!matchMedia('(max-width:860px)').matches)return;
+  const tr=e.target.closest&&e.target.closest('table.rtbl tr');
+  if(!tr||tr.classList.contains('tr-sub'))return;
+  /* start na przycisku/polu = zwykla interakcja, nie long-press */
+  if(e.target.closest('button,a,input,select,textarea'))return;
+  _lpXY=[e.touches[0].clientX,e.touches[0].clientY];
+  _lpT=setTimeout(()=>{
+    _lpT=null;_lpFired=true;openActSheet(tr);
+    setTimeout(()=>{_lpFired=false},700);   // gdy click w ogole nie przyjdzie
+  },500);
+},{passive:true});
+addEventListener('touchmove',e=>{
+  if(!_lpT)return;
+  const dx=e.touches[0].clientX-_lpXY[0],dy=e.touches[0].clientY-_lpXY[1];
+  if(dx*dx+dy*dy>100){clearTimeout(_lpT);_lpT=null}   // to przewijanie, nie przytrzymanie
+},{passive:true});
+addEventListener('touchend',()=>{if(_lpT){clearTimeout(_lpT);_lpT=null}});
+addEventListener('touchcancel',()=>{if(_lpT){clearTimeout(_lpT);_lpT=null}});
+/* po otwarciu arkusza klik konczacy przytrzymanie nie moze otworzyc wiersza */
+addEventListener('click',e=>{
+  if(_lpFired){_lpFired=false;e.stopPropagation();e.preventDefault()}
+},true);
