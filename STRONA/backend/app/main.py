@@ -3523,6 +3523,9 @@ class ManualOrderIn(BaseModel):
     notify_trader: bool = True
     payment_address: str | None = None
     payment_network: str | None = None
+    # Czy to sprzedaż po cenie partnerskiej. Kwotę liczy panel (widać ją, zanim
+    # admin kliknie), tu zapada tylko decyzja, czy zamówienie ma nieść ślad umowy.
+    partner_discount: bool = False
 
 
 def _zapisz_adres_wplaty(o: Order, adres: str | None, siec: str | None) -> None:
@@ -3629,9 +3632,19 @@ def admin_order_create(payload: ManualOrderIn):
                             else payload.amount_usd), 2)
         if kwota < 0:
             raise HTTPException(400, "Amount cannot be negative")
+        # Cena partnerska zostaje na zamówieniu jako STEMPEL, nie jako przelicznik:
+        # kwotę i tak ustala admin (całe to zamówienie jest ręczne), a bez śladu
+        # w bazie rabat rozpływa się w kwocie i po miesiącu nikt nie policzy, ile
+        # kosztowała współpraca. Odmawiamy stempla bez umowy, żeby w raporcie nie
+        # pojawiła się zniżka, której nikomu nie obiecano.
+        znacznik = None
+        if payload.partner_discount:
+            if not settings.partner_discount_pct:
+                raise HTTPException(400, "No partner discount is configured")
+            znacznik = f"PARTNER{int(settings.partner_discount_pct)}"
         o = Order(trader_id=trader.id, product_key=produkt.key, amount_usd=kwota,
                   status="pending", provider="manual", flag=payload.flag or None,
-                  credits_used=0.0,
+                  credits_used=0.0, coupon=znacznik,
                   created_at=datetime.now(timezone.utc).replace(tzinfo=None))
         _zapisz_adres_wplaty(o, payload.payment_address, payload.payment_network)
         session.add(o)
@@ -3648,6 +3661,17 @@ def admin_order_create(payload: ManualOrderIn):
                 "payment_details": bool(o.payment_address or settings.crypto_wallet)}
     finally:
         session.close()
+
+
+@app.get("/api/admin/partner-terms", dependencies=[Depends(auth.require_admin)])
+def admin_partner_terms():
+    """Procent rabatu z umowy partnerskiej — jedyna rzecz, której panel nie wie.
+
+    Kwotę liczy sobie potem sam, żeby admin zobaczył cenę ZANIM kliknie „utwórz";
+    cena, która zmienia się po fakcie, to przy pieniądzach zła niespodzianka.
+    Zero znaczy „nie ma umowy" i okno zamówienia nie proponuje wtedy tej opcji.
+    """
+    return {"discount_pct": settings.partner_discount_pct}
 
 
 @app.post("/api/admin/orders/{order_id}/pay-link", dependencies=[Depends(auth.require_admin)])

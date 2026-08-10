@@ -2457,12 +2457,16 @@ async function payoutImport(commit){
    creates it from the e-mail, which is also the only way this ever shows up as
    "Bought": that column is derived from traders by e-mail, not stored. */
 async function openManualOrder(traderId,lead){
-  let products=[],traders=[];
-  try{[products,traders]=await Promise.all([
-    (await fetch('/api/products')).json(),lead?[]:api('/api/admin/traders')])}
+  let products=[],traders=[],pct=0;
+  /* Rabat partnerski jest miły, ale nie jest warunkiem sprzedaży: gdyby jego
+     odczyt wywrócił okno, admin nie wystawiłby ŻADNEGO zamówienia przez zniżkę,
+     której akurat nie ma. Brak odpowiedzi = zero = okno bez tej opcji. */
+  try{[products,traders,pct]=await Promise.all([
+    (await fetch('/api/products')).json(),lead?[]:api('/api/admin/traders'),
+    api('/api/admin/partner-terms').then(d=>d.discount_pct||0).catch(()=>0)])}
   catch(e){toast('Error: '+e.message,'err');return}
   if(!lead&&!traders.length){toast('No registered traders yet.','err');return}
-  window._moTraders=traders;window._moLead=lead||null;
+  window._moTraders=traders;window._moLead=lead||null;window._moPartnerPct=pct;
   document.getElementById('order-modal')?.remove();
   const box=document.createElement('div');
   box.id='order-modal';box.className='modal-wrap';
@@ -2489,6 +2493,10 @@ async function openManualOrder(traderId,lead){
           `<option value="${esc(p.key)}" data-price="${p.price_usd}">${esc(p.label)} — $${fmt0(p.account_size)} · $${fmt(p.price_usd)}</option>`).join('')}</select></div>
       <div><label class="muted" style="font-size:12px">Amount to collect (USD)</label>
         <input id="mo-amount" class="inp" type="number" inputmode="decimal" step="0.01" min="0"></div>
+      ${pct?`<label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="mo-partner"${lead?' checked':''} onchange="moPrice()" style="width:16px;height:16px;accent-color:var(--acc)">
+        <span>Partner price <b>−${pct}%</b>
+          <span class="muted">— the rate agreed for customers the partner brings in</span></span></label>`:''}
       <div class="stack" id="mo-crypto">
         <div><label class="muted" style="font-size:12px">Network</label>
           <input id="mo-network" class="inp" placeholder="e.g. USDT · TRC20" value="${esc(lastWallet().network||'')}"></div>
@@ -2548,9 +2556,14 @@ function moFilter(preselect){
   if(sel.selectedIndex<0&&hit.length)sel.selectedIndex=0;
   sel.selectedOptions[0]?.scrollIntoView({block:'nearest'});
 }
+/* Cenę partnerską liczy panel, a nie serwer, bo admin ma ją zobaczyć ZANIM
+   kliknie „utwórz" — kwota, która zmienia się po zatwierdzeniu, to przy
+   pieniądzach zła niespodzianka. Serwer odnotowuje tylko, że rabat był. */
 function moPrice(){
   const o=$('mo-product').selectedOptions[0];
-  if(o)$('mo-amount').value=o.dataset.price;
+  if(!o)return;
+  const pct=$('mo-partner')?.checked?(window._moPartnerPct||0):0;
+  $('mo-amount').value=(o.dataset.price*(1-pct/100)).toFixed(2);
 }
 async function submitManualOrder(){
   const lead=window._moLead;
@@ -2566,6 +2579,7 @@ async function submitManualOrder(){
     const r=await api('/api/admin/orders',{method:'POST',body:JSON.stringify({
       ...(lead?{email:lead.email}:{trader_id:tid}),
       product_key:$('mo-product').value,amount_usd:amount,
+      partner_discount:!!$('mo-partner')?.checked,
       flag:(!link&&$('mo-awaiting').checked)?'awaiting_crypto':'',
       payment_address:addr,payment_network:net,
       notify_trader:!link&&$('mo-mail').checked})});

@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import func  # noqa: E402
 
 from app import auth, catalog, notify  # noqa: E402
+from app import main as glowny  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
@@ -441,6 +442,43 @@ def test_zamowienie_bez_klienta_odrzucone(maile):
                  {"email": "to-nie-jest-mail", "product_key": "2step-25k"},
                  {"email": "", "product_key": "2step-25k"}):
         assert client.post("/api/admin/orders", json=body, headers=ADMIN).status_code == 400
+
+
+def test_panel_pyta_serwer_o_stawke_z_umowy(maile, monkeypatch):
+    """Procentu nie ma w kodzie panelu, bo repo jest publiczne, a to warunek
+    handlowy. Panel musi go skądś wziąć, żeby pokazać cenę PRZED kliknięciem."""
+    monkeypatch.setattr(glowny.settings, "partner_discount_pct", 20.0)
+    r = client.get("/api/admin/partner-terms", headers=ADMIN)
+    assert r.status_code == 200 and r.json()["discount_pct"] == 20.0
+    # Stawka z umowy nie jest publiczna — partner ani klient nie mają jej czytać.
+    assert client.get("/api/admin/partner-terms").status_code in (401, 403)
+
+
+def test_cena_partnerska_zostawia_slad_na_zamowieniu(maile, monkeypatch):
+    """Kwotę liczy panel, więc w bazie rabat rozpłynąłby się w liczbie i po
+    miesiącu nikt nie policzyłby, ile kosztowała ta współpraca. Stempel na
+    zamówieniu to jedyne, co odróżnia cenę partnerską od zwykłego upustu."""
+    monkeypatch.setattr(glowny.settings, "partner_discount_pct", 20.0)
+    tid, _ = _trader()
+    d = _dodaj(tid, amount_usd=239.2, partner_discount=True).json()
+    s = SessionLocal(); o = s.get(Order, d["id"]); s.close()
+    assert o.coupon == "PARTNER20" and o.amount_usd == 239.2
+
+
+def test_zwykle_zamowienie_nie_dostaje_stempla_partnera(maile, monkeypatch):
+    monkeypatch.setattr(glowny.settings, "partner_discount_pct", 20.0)
+    tid, _ = _trader()
+    d = _dodaj(tid).json()
+    s = SessionLocal(); assert s.get(Order, d["id"]).coupon is None; s.close()
+
+
+def test_bez_umowy_nie_da_sie_ostemplowac_rabatu(maile, monkeypatch):
+    """Zero znaczy „nie ma umowy". Gdyby przeszło, w raporcie pojawiłaby się
+    zniżka, której nikomu nie obiecano — i to na cudzy rachunek."""
+    monkeypatch.setattr(glowny.settings, "partner_discount_pct", 0.0)
+    tid, _ = _trader()
+    assert _dodaj(tid, partner_discount=True).status_code == 400
+    assert client.get("/api/admin/partner-terms", headers=ADMIN).json()["discount_pct"] == 0
 
 
 def test_recznemu_zamowieniu_nie_dosyla_maila_o_porzuconym_koszyku(maile):

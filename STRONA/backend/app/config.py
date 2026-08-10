@@ -254,6 +254,11 @@ class Settings:
     # Puste = panel oferuje tylko link na własnej domenie, czyli stan sprzed
     # tej zmiany.
     partner_pay_base_url: str = os.getenv("PARTNER_PAY_BASE_URL", "").rstrip("/")
+    # Rabat należny klientowi, którego przyprowadził partner. To warunek umowy,
+    # więc — tak samo jak adres wyżej — nie ma go w kodzie: repozytorium jest
+    # publiczne, a stawka potrafi się zmienić szybciej niż deploy. 0 = okno
+    # zamówienia w ogóle nie proponuje ceny partnerskiej.
+    partner_discount_pct: float = float(os.getenv("PARTNER_DISCOUNT_PCT", "0") or 0)
 
     # Payout BOT łapie swój dzienny slot także na ruchu strony (middleware w
     # main.py). To wyłącznik awaryjny tej ścieżki — cron /api/tick zostaje wtedy
