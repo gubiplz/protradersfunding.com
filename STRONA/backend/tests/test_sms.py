@@ -188,6 +188,24 @@ def test_admin_moze_wymusic_powtorke(twilio):
     assert len(twilio) == 2 and _zdarzenia(lid) == 2
 
 
+def test_wyslany_sms_liczy_sie_jako_kontakt(twilio):
+    """Lead bez śladu kontaktu to lead, do którego za tydzień ktoś napisze
+    drugi raz — a on dostał już wiadomość od „tej samej firmy"."""
+    lid = _lead()
+    assert client.post(f"/api/admin/leads/{lid}/sms",
+                       headers=ADMIN).json()["status"] == "messaged"
+    karta = client.get(f"/api/admin/leads/{lid}", headers=ADMIN).json()
+    assert (karta.get("lead") or karta)["status"] == "messaged"
+
+
+def test_sms_nie_cofa_dalszego_statusu(twilio):
+    """Cofnięcie „replied" do „napisano" byłoby cofaniem prawdy o rozmowie,
+    która już się odbyła — a lead wróciłby na listę „do napisania"."""
+    lid = _lead(status="replied")
+    r = client.post(f"/api/admin/leads/{lid}/sms", headers=ADMIN)
+    assert r.status_code == 200 and r.json()["status"] == "replied"
+
+
 def test_numer_bez_kierunkowego_konczy_sie_bledem_a_nie_wysylka(twilio):
     lid = _lead(phone="601234567")
     r = client.post(f"/api/admin/leads/{lid}/sms", headers=ADMIN)

@@ -5388,6 +5388,11 @@ def _lead_json(lead: Lead, trader_id: int | None, paid_usd: float,
         # konfiguracji Twilio, ani tego, że numer bez kierunkowego jest
         # bezużyteczny — a przycisk, który zawsze odmawia, uczy go nie klikać.
         "sms_ready": bool(sms.is_enabled() and sms.numer_e164(lead.phone)),
+        # Dokładnie ten tekst, który wyjdzie po kliknięciu — panel go POKAZUJE,
+        # a nie składa. Wysyłka jest płatna i nieodwracalna, więc admin ma prawo
+        # zobaczyć treść, zanim kliknie; gdyby panel składał ją u siebie, prędzej
+        # czy później pokazywałby co innego, niż faktycznie idzie w świat.
+        "sms_text": sms.tresc(lead.name, zakwalifikowany=lead.outcome != "not_qualified"),
     }
 
 
@@ -5869,6 +5874,12 @@ def admin_lead_sms(lead_id: int, force: bool = False):
 
     Odmowa wraca jako 400 z powodem wprost od Twilio. To jedyne miejsce, gdzie
     admin dowie się, że numer jest bez kierunkowego albo że konto nie ma środków.
+
+    Wysłany SMS to kontakt, więc lead przestaje być „new" TĄ SAMĄ transakcją —
+    nie osobnym strzałem z przeglądarki, który może nie dojść. Lead bez śladu
+    kontaktu to lead, do którego za tydzień ktoś napisze drugi raz. Dalsze
+    statusy zostają nietknięte: cofanie „replied" do „napisano" byłoby cofaniem
+    prawdy o rozmowie, która już się odbyła.
     """
     session = SessionLocal()
     try:
@@ -5878,8 +5889,10 @@ def admin_lead_sms(lead_id: int, force: bool = False):
         poszlo, powod = _sms_do_leada(session, lead, "panel", wymuszaj=force)
         if not poszlo:
             raise HTTPException(400, powod)
+        if lead.status == "new":
+            _zapisz_status(session, lead, "messaged", actor="panel")
         session.commit()
-        return {"ok": True, "id": lead_id}
+        return {"ok": True, "id": lead_id, "status": lead.status}
     finally:
         session.close()
 

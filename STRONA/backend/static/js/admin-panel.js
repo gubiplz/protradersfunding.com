@@ -841,6 +841,42 @@ function copyOpener(id){
     .then(()=>toast('Opener copied — paste it in the chat'))
     .catch(()=>{prompt('Copy the opener:',txt)});
 }
+/* Ostatnia droga do kogoś, komu Telegram nie dochodzi: SMS z linkiem z
+   powrotem na Telegram. Ta wysyłka KOSZTUJE i nie da się jej cofnąć, więc
+   inaczej niż reszta ikon nie leci od razu — pytanie pokazuje dokładną treść
+   (składa ją serwer, panel tylko wyświetla) i numer, na który pójdzie.
+
+   Odmowa „już poszedł" nie jest tu błędem, tylko drugim pytaniem: admin, który
+   klika ponownie, zwykle wie, że pierwszy nie doszedł. Dopiero jego świadome
+   „tak" wysyła powtórkę.
+
+   Statusu tu NIE ruszamy: robi to serwer, tą samą transakcją co wysyłkę.
+   Osobny strzał z przeglądarki mógłby nie dojść i zostawiłby leada z SMS-em
+   w świecie, a na liście „do napisania". */
+async function sendLeadSms(id){
+  const l=(window._leads||[]).find(x=>x.id===id)
+    ||(window._leadOpen&&window._leadOpen.id===id?window._leadOpen:null);
+  if(!l)return;
+  const pyt=(tytul,tresc,ok)=>askConfirm({title:tytul,body:tresc,ok:ok,cancel:'Not now'});
+  const podglad=`Goes to <b>${esc(l.phone||'')}</b> as a paid text message:<br><br>`
+    +`<span style="color:var(--txt)">${esc(l.sms_text||'')}</span>`;
+  if(!await pyt('Send this text?',podglad,'Send'))return;
+  const strzal=async force=>api('/api/admin/leads/'+id+'/sms'+(force?'?force=true':''),
+    {method:'POST'});
+  try{
+    await strzal(false);
+  }catch(e){
+    if(!/already went out/i.test(e.message)){toast('Not sent: '+e.message,'err');return}
+    if(!await pyt('Send it a second time?',
+      'This lead already had one text from us. Send another only if you know the '
+      +'first one did not arrive — from their side a repeat reads as pestering.',
+      'Send again'))return;
+    try{await strzal(true)}catch(e2){toast('Not sent: '+e2.message,'err');return}
+  }
+  toast('Text sent — it points them back to Telegram');
+  if(VIEW==='leads')await VIEWS.leads();
+  if(window._leadOpen&&window._leadOpen.id===id)openLead(id);
+}
 /* Same shape the landing validates against. A handle that fails it ("gubi
    please") renders as plain text: a dead t.me link looks like contact and
    is not, and the desk should see the typo, not chase it. */
@@ -860,12 +896,13 @@ function leadTgLink(l){
 const ICO_TG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>';
 const ICO_PHONE='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.6a2 2 0 0 1-.5 2.1L8 9.6a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.8.3 1.7.5 2.6.6a2 2 0 0 1 1.7 2z"/></svg>';
 const ICO_COPY='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+const ICO_SMS='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.5 9.5 9.5 0 0 1-2.8-.4L3 21l1.4-4.2A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5z"/></svg>';
 function leadPhoneActs(l){
   const h=String(l.telegram||'').replace(/^@/,'');
   const handleOk=TG_HANDLE_RE.test(h);
   const digits=String(l.phone||'').replace(/\D/g,'');
   const intl=String(l.phone||'').trim().startsWith('+')&&digits.length>=8;
-  if(!handleOk&&!intl)return'';
+  if(!handleOk&&!intl&&!l.sms_ready)return'';
   const opener=encodeURIComponent(leadOpener(l));
   return `<span class="lead-acts">${handleOk
     ?`<a class="act-btn" title="Write on Telegram to @${esc(h)} — opener prefilled"
@@ -873,7 +910,10 @@ function leadPhoneActs(l){
         target="_blank" rel="noopener">${ICO_TG}</a>`:''}${intl
     ?`<a class="act-btn" title="Telegram chat found by the phone number (opener goes to the clipboard)"
         aria-label="Telegram by phone" href="https://t.me/+${digits}"
-        target="_blank" rel="noopener" onclick="copyOpener(${l.id})">${ICO_PHONE}</a>`:''}
+        target="_blank" rel="noopener" onclick="copyOpener(${l.id})">${ICO_PHONE}</a>`:''}${l.sms_ready
+    ?`<button class="act-btn" type="button" aria-label="Send a text message"
+        title="Text them the Telegram link — for people the Telegram side never reaches"
+        onclick="sendLeadSms(${l.id})">${ICO_SMS}</button>`:''}
     <button class="act-btn" type="button" title="Copy the opener"
       aria-label="Copy the opener" onclick="copyOpener(${l.id})">${ICO_COPY}</button></span>`;
 }
@@ -1053,7 +1093,7 @@ function deleteLead(id){
 const LEAD_STATUS_CLS={new:'pending',messaged:'pending',replied:'paid',
   no_reply:'failed',rejected:'failed'};
 const LEAD_EVENT_LBL={applied:'Applied',status:'Status',note:'Note',reminder:'Reminder',
-  claim:'Owner',tier:'Grade',bought:'Bought'};
+  claim:'Owner',tier:'Grade',bought:'Bought',sms:'Text sent'};
 /* Reminders are sent to US, never to the lead — the landing they applied through
    is a separate brand. The wording says who is being nudged. */
 const LEAD_REMINDER_LBL={no_contact:'Nobody wrote to them yet',bought:'Bought — stop treating as a lead',
