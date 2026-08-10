@@ -146,6 +146,27 @@
     setTimeout(() => { promoBar.classList.remove('promo-flash'); paintPromoBar(); }, 2600);
   });
 
+  /* ---------- ?coupon= — rabat dogadany w rozmowie, wniesiony linkiem ------ */
+  /* Sprzedaż obiecuje zniżkę na Telegramie i wysyła adres. Do tej pory kod
+     trzeba było przepisać z ręki do paska, więc rabat, o którym klient już
+     usłyszał, gubił się między obietnicą a kasą. Idzie przez ten sam
+     `validateCode`, co pasek — link nie wnosi zniżki, której nie ma w cenniku.
+
+     Kodu, który klient już ma, link NIE odbiera: promocja na rozmiar konta
+     jest nieporównywalna z procentami, a słabszy kupon przegrywa z mocniejszym.
+     Inaczej wysłanie VIP20 komuś z BLACKFRIDAY po cichu podnosiłoby mu cenę. */
+  const kuponZLinku = new URLSearchParams(location.search).get('coupon');
+  if (kuponZLinku) validateCode(kuponZLinku.trim().toUpperCase()).then(stan => {
+    if (!stan) return;
+    const teraz = readCode();
+    if (teraz.promo || (stan.coupon && stan.pct <= teraz.pct)) return;
+    /* Pasek bywa zamknięty na stałe z poprzedniej wizyty, a to jedyne miejsce,
+       które potwierdza rabat — obietnica musi być widoczna, nie domyślna. */
+    document.documentElement.classList.remove('promo-off');
+    try { localStorage.removeItem('promoOff'); } catch (e) {}
+    applyCode(stan);
+  });
+
   /* ---------- ?ref= capture (partner code attaches at signup) ---------- */
   /* Timestamped: the signup form only prefills codes from a recent visit —
      a partner code stored forever kept resurfacing months later. */
