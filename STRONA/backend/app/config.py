@@ -242,6 +242,20 @@ class Settings:
     # statusu od kogokolwiek, kto zna adres. Puste = webhook odmawia.
     telegram_webhook_secret: str = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
 
+    # --- SMS (Twilio) ---
+    # Wyjście awaryjne do leada, któremu nie działa Telegram. Komplet trzech
+    # zmiennych albo nic: brak choćby jednej = panel nie proponuje wysyłki,
+    # zamiast dawać przycisk, który zawsze odmawia. `TWILIO_FROM` to numer
+    # nadawcy ALBO identyfikator Messaging Service (`MG…`) — patrz sms.py.
+    twilio_sid: str = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
+    twilio_token: str = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
+    twilio_from: str = os.getenv("TWILIO_FROM", "").strip()
+    # Dokąd SMS ma zaprowadzić człowieka. Cały sens tej wysyłki to wrócić do
+    # Telegrama, gdzie dział pracuje — SMS jest mostem, nie kanałem rozmowy.
+    # Adres w zmiennej, nie w kodzie: to handle marki partnerskiej, a repo jest
+    # publiczne. Puste = SMS-y nie wychodzą (most donikąd jest gorszy niż brak).
+    sms_telegram_url: str = os.getenv("SMS_TELEGRAM_URL", "").strip()
+
     # --- Strona partnerska ---
     # Firma partnerska prowadzi własny landing i chce, żeby jej klient płacił
     # nie opuszczając jej domeny. Jej serwer czyta zamówienie przez

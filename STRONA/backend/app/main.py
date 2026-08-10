@@ -35,7 +35,7 @@ from sqlalchemy import func
 from . import (achievements, auth, billing, catalog, certshot, countries, fields, loyalty,
                metaquotes_web, notify,
                payout_import, payoutbot,
-               poller, provisioning, push, rules, telegram, telemetry, tradebot)
+               poller, provisioning, push, rules, sms, telegram, telemetry, tradebot)
 from .config import get_settings
 from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint
 from .models import (LEAD_STATUSES, Account, AchievementReward, AppSetting, Breach, Certificate,
@@ -5384,6 +5384,10 @@ def _lead_json(lead: Lead, trader_id: int | None, paid_usd: float,
         # Wyliczane, nie przechowywane — patrz komentarz nad sekcją.
         "trader_id": trader_id,
         "paid_usd": round(float(paid_usd or 0), 2),
+        # Czy SMS ma do kogo pójść. Liczone tutaj, bo panel nie zna ani
+        # konfiguracji Twilio, ani tego, że numer bez kierunkowego jest
+        # bezużyteczny — a przycisk, który zawsze odmawia, uczy go nie klikać.
+        "sms_ready": bool(sms.is_enabled() and sms.numer_e164(lead.phone)),
     }
 
 
@@ -5418,6 +5422,30 @@ def _zapisz_status(session, lead: Lead, status: str, actor: str) -> None:
     lead.status = status
     lead.updated_at = datetime.now(timezone.utc)
     _zdarzenie(session, lead.id, "status", f"{poprzedni} → {status}", actor)
+
+
+def _sms_do_leada(session, lead: Lead, actor: str, *,
+                  wymuszaj: bool = False) -> tuple[bool, str]:
+    """Wyślij leadowi SMS-a i zapisz to w jego historii. `(czy poszło, powód)`.
+
+    Wysyłka kosztuje i jest nieodwracalna, więc domyślnie leci RAZ na leada.
+    Status potrafi chodzić tam i z powrotem („messaged" → „new" → „messaged"),
+    a każde takie odbicie bez tej blokady byłoby kolejnym SMS-em do tego samego
+    człowieka — z jego strony wyglądałoby to jak natręctwo, z naszej jak rachunek
+    bez powodu. `wymuszaj` to świadome kliknięcie admina, który wie, że pierwszy
+    nie doszedł.
+
+    Zdarzenie dopisujemy TYLKO po udanej wysyłce i tą samą transakcją co resztę
+    zmiany: historia leada ma mówić, co się stało, a nie co próbowaliśmy zrobić.
+    """
+    if not wymuszaj and session.query(LeadEvent).filter(
+            LeadEvent.lead_id == lead.id, LeadEvent.kind == "sms").first():
+        return False, "SMS already went out to this lead"
+    tresc = sms.tresc(lead.name, zakwalifikowany=lead.outcome != "not_qualified")
+    poszlo, powod = sms.wyslij(lead.phone, tresc)
+    if poszlo:
+        _zdarzenie(session, lead.id, "sms", tresc, actor)
+    return poszlo, powod
 
 
 def _lead_push(lead_id: int, title: str, body: str = "", *,
@@ -5830,6 +5858,32 @@ def admin_lead_delete(lead_id: int):
     return {"ok": True, "id": lead_id}
 
 
+@app.post("/api/admin/leads/{lead_id}/sms", dependencies=[Depends(auth.require_admin)])
+def admin_lead_sms(lead_id: int, force: bool = False):
+    """SMS do leada, z ręki — dla tych, do których Telegram nie dochodzi.
+
+    Treści nie przyjmujemy z panelu, choć byłoby wygodniej: ta sama wiadomość
+    wychodzi też automatem po kliknięciu statusu na kanale, a dwie kopie tekstu
+    rozjeżdżają się przy pierwszej poprawce. Wersję dla przyjętego i odrzutu
+    wybiera serwer z `outcome` — panel nie ma prawa się co do tego pomylić.
+
+    Odmowa wraca jako 400 z powodem wprost od Twilio. To jedyne miejsce, gdzie
+    admin dowie się, że numer jest bez kierunkowego albo że konto nie ma środków.
+    """
+    session = SessionLocal()
+    try:
+        lead = session.get(Lead, lead_id)
+        if not lead:
+            raise HTTPException(404, "Lead not found")
+        poszlo, powod = _sms_do_leada(session, lead, "panel", wymuszaj=force)
+        if not poszlo:
+            raise HTTPException(400, powod)
+        session.commit()
+        return {"ok": True, "id": lead_id}
+    finally:
+        session.close()
+
+
 class LeadReminderIn(BaseModel):
     text: str
     # Termin idzie albo w dniach od teraz (tak działają szablony w panelu),
@@ -6035,7 +6089,25 @@ def _wykonaj_akcje(session, lead: Lead, akcja: str, kto: str) -> tuple[str, bool
             wzieto = True
         poprzedni = lead.status
         _zapisz_status(session, lead, akcja, actor=f"telegram:{kto}")
-        return (f"Zapisano: {_ETYKIETY_STATUSU.get(akcja, akcja)}",
+        # „Napisaliśmy" do kogoś, kto nie podał handle'a, jest deklaracją bez
+        # pokrycia: nie ma dokąd napisać. Wtedy — i tylko wtedy — idzie SMS
+        # z linkiem z powrotem do Telegrama. Kto handle podał, dostaje
+        # wiadomość tam, a SMS zostaje pod ręcznym przyciskiem w panelu.
+        # Warunek brzmi „status WŁAŚNIE się zmienił", a nie „stoi na messaged",
+        # i to jest tu istotne: wywołujący commituje tylko przy zmianie, więc
+        # ponowny klik w ten sam przycisk wysłałby SMS-a, którego zapis o wysyłce
+        # nie miałby czym trafić do bazy — i tak w kółko, na koszt konta Twilio.
+        dopisek = ""
+        if (akcja == "messaged" and poprzedni != "messaged"
+                and lead.status == "messaged"
+                and not lead.telegram and sms.is_enabled()):
+            poszlo, powod = _sms_do_leada(session, lead, f"telegram:{kto}")
+            # Powód odmowy ląduje w DYMKU, nie w logu: klikający ma się dowiedzieć,
+            # że do tego człowieka nic nie poszło. Inaczej zostaje w przekonaniu,
+            # że kontakt nastąpił, i lead cicho umiera w „messaged".
+            dopisek = "SMS poszedł" if poszlo else powod
+        etykieta = _ETYKIETY_STATUSU.get(akcja, akcja)
+        return (f"Zapisano: {etykieta}" + (f" · {dopisek}" if dopisek else ""),
                 wzieto or lead.status != poprzedni)
 
     return "Nieznany przycisk", False
