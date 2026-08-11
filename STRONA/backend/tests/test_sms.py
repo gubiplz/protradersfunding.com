@@ -35,6 +35,24 @@ ADMIN = {"X-Admin-Token": get_settings().admin_token}
 LICZNIK = iter(range(10000))
 TG = "https://t.me/probe_desk"
 
+# Alfabet GSM 03.38. Wszystko poza nim przełącza CAŁĄ wiadomość na UCS-2, gdzie
+# segment ma 70 znaków zamiast 160 — czyli ten sam tekst kosztuje trzy razy tyle.
+GSM7 = set("@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?"
+           "¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà")
+GSM7_ROZSZERZONE = set("^{}\\[~]|€")  # są w alfabecie, ale zajmują dwa miejsca
+
+
+def _poza_gsm7(tekst: str) -> list[str]:
+    return sorted({z for z in tekst if z not in GSM7 and z not in GSM7_ROZSZERZONE})
+
+
+def _segmenty(tekst: str) -> int:
+    """Ile SMS-ów naprawdę wyjdzie — tyle razy jest pozycja na rachunku.
+    Zakłada GSM-7; przy obcych znakach liczba nie ma sensu i pilnuje tego
+    osobna asercja."""
+    miejsca = sum(2 if z in GSM7_ROZSZERZONE else 1 for z in tekst)
+    return 1 if miejsca <= 160 else -(-miejsca // 153)  # dłuższe idą po 153
+
 
 @pytest.fixture
 def twilio(monkeypatch):
@@ -150,6 +168,33 @@ def test_obie_wersje_prowadza_na_telegram(twilio):
 
 def test_lead_bez_imienia_dostaje_zdanie_bez_dziury(twilio):
     assert "Hi there," in sms.tresc("", zakwalifikowany=True)
+
+
+def test_tresc_miesci_sie_w_jednym_segmencie(twilio, monkeypatch):
+    """Najdroższa pomyłka w tym module niczego nie wywala: jedna półpauza czy
+    „ładny" apostrof przełącza wiadomość na UCS-2 i ten sam SMS kosztuje trzy
+    razy tyle — po cichu, bo Twilio wysyła bez mrugnięcia, a `MAX_ZNAKOW`
+    liczy znaki, nie segmenty.
+
+    Warunki są celowo gorsze niż zwykle (długie imię, dłuższy adres Telegrama),
+    bo inaczej próg przechodzi na krótkich danych, a rachunek rośnie dokładnie
+    tam, gdzie leady mają pełne imiona.
+    """
+    monkeypatch.setattr(sms.settings, "sms_telegram_url",
+                        "https://t.me/forexpassing_desk_team")  # 35 znaków
+    for zakwalifikowany in (True, False):
+        t = sms.tresc("Konstantinos", zakwalifikowany=zakwalifikowany)
+        assert _poza_gsm7(t) == [], f"znaki spoza GSM-7: {_poza_gsm7(t)}"
+        assert _segmenty(t) == 1, f"{_segmenty(t)} segmenty przy {len(t)} znakach"
+
+
+def test_tresc_mowi_kto_pisze_i_jak_przestac(twilio):
+    """Amerykański operator czyta to ręcznie, zanim dopuści numer do wysyłki:
+    wiadomość ma powiedzieć, kto pisze, i dać wyjście. Bez tego weryfikacja
+    toll-free pada i nie idzie ani jeden SMS — także do już czekających leadów."""
+    for zakwalifikowany in (True, False):
+        t = sms.tresc("Anna", zakwalifikowany=zakwalifikowany)
+        assert "Forex Passing" in t and "STOP" in t
 
 
 # --- panel: przycisk z ręki ---------------------------------------------------

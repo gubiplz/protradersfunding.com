@@ -67,15 +67,25 @@ def tresc(imie: str | None, *, zakwalifikowany: bool) -> str:
     Obie wersje kończą się tym samym: linkiem do Telegrama. Odmowa też, i to
     świadomie — „nie tym razem" bez drogi odpowiedzi zamyka temat na zawsze,
     a część odrzuconych wraca po miesiącu z innym budżetem.
+
+    Dwie rzeczy trzymają tę treść w ryzach i obie kosztują, gdy się je złamie:
+
+    1. **Tylko znaki z GSM-7.** Jedna półpauza, jeden „ładny" apostrof czy polski
+       ogonek przełącza CAŁĄ wiadomość na UCS-2, gdzie segment ma 70 znaków
+       zamiast 160. To nie jest błąd, tylko potrojony rachunek — po cichu, bo
+       Twilio wysyła bez mrugnięcia. Pilnuje tego `test_sms.py`.
+
+    2. **Marka i wyjście w treści.** Amerykański operator wymaga, by wiadomość
+       mówiła, kto pisze, i dawała „STOP". Bez tego numer wypada z weryfikacji
+       i przestaje dowozić cokolwiek. STOP obsługuje sam Twilio.
     """
     pierwsze = (imie or "").strip().split(" ")[0] or "there"
     link = settings.sms_telegram_url
     if zakwalifikowany:
-        return (f"Hi {pierwsze}, this is the Forex Passing desk — your application "
-                f"went through. Let's take it from here on Telegram: {link}")
-    return (f"Hi {pierwsze}, this is the Forex Passing desk. Your application did "
-            f"not go through as it stands, but it is worth one conversation — "
-            f"message me on Telegram: {link}")
+        return (f"Hi {pierwsze}, Forex Passing desk here - your application went "
+                f"through. Next step is Telegram: {link} Reply STOP to opt out.")
+    return (f"Hi {pierwsze}, Forex Passing desk here. Not a yes as it stands, but "
+            f"worth one conversation: {link} Reply STOP to opt out.")
 
 
 def numer_e164(surowy: str | None) -> str | None:
