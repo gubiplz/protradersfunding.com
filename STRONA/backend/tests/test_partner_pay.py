@@ -12,6 +12,7 @@ Dwie rzeczy muszą tu trzymać, bo obchodzą nas mocniej niż wygoda partnera:
 """
 import os
 import tempfile
+from types import SimpleNamespace
 
 os.environ.setdefault("DATABASE_URL",
                       "sqlite:///" + tempfile.NamedTemporaryFile(suffix=".db", delete=False).name)
@@ -19,13 +20,14 @@ os.environ.setdefault("FEED", "sim")
 os.environ.setdefault("AUTO_SEED", "false")
 
 import pytest  # noqa: E402
+import stripe as stripe_sdk  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import auth, catalog, main  # noqa: E402
+from app import auth, billing, catalog, main  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Trader  # noqa: E402
+from app.models import Product, Trader  # noqa: E402
 
 init_db()
 s = SessionLocal(); catalog.seed_products(s); s.close()
@@ -38,24 +40,68 @@ BAZA_PARTNERA = "https://partner.example"
 LICZNIK = iter(range(10_000))
 
 
+PRODUKT = "2step-25k"
+
+
 @pytest.fixture(autouse=True)
 def _partner_wlaczony(monkeypatch):
     u = get_settings()
     monkeypatch.setattr(u, "partner_api_token", SEKRET, raising=False)
     monkeypatch.setattr(u, "partner_pay_base_url", BAZA_PARTNERA, raising=False)
+    monkeypatch.setattr(u, "partner_discount_pct", 20.0, raising=False)
     return u
 
 
-def _zamowienie() -> int:
+class _StripeAtrapa:
+    """Podstawka pod `billing._stripe()`, która ZAPAMIĘTUJE, z czym poszła sesja.
+
+    Adresy powrotu są jedyną rzeczą, jakiej nie da się sprawdzić po odpowiedzi:
+    klient widzi je dopiero po zapłacie, na ekranie Stripe'a.
+    """
+    error = stripe_sdk.error
+    ostatnie: dict = {}
+
+    class checkout:
+        class Session:
+            @staticmethod
+            def create(**kw):
+                _StripeAtrapa.ostatnie = kw
+                return SimpleNamespace(id="cs_atrapa", url="https://checkout.stripe.test/sesja")
+
+
+@pytest.fixture
+def kasa(monkeypatch):
+    monkeypatch.setattr(billing.settings, "stripe_secret_key", "sk_test_atrapa")
+    monkeypatch.setattr(billing, "_stripe", lambda: _StripeAtrapa)
+    _StripeAtrapa.ostatnie = {}
+    return _StripeAtrapa
+
+
+def _cennik(key: str = PRODUKT) -> float:
+    s = SessionLocal()
+    try:
+        return round(float(s.query(Product).filter(Product.key == key).first().price_usd), 2)
+    finally:
+        s.close()
+
+
+def _zamowienie(**dodatkowe) -> int:
     email = f"partner{next(LICZNIK)}@partner.test"
     s = SessionLocal()
     tr = Trader(email=email, password_hash=auth.hash_password("haslo12345"),
                 full_name="Anna Nowak", referral_code=auth.secrets.token_hex(3))
     s.add(tr); s.commit(); tid = tr.id; s.close()
     r = client.post("/api/admin/orders", headers=ADMIN, json={
-        "trader_id": tid, "product_key": "2step-25k", "flag": "", "notify_trader": False})
+        "trader_id": tid, "product_key": PRODUKT, "flag": "", "notify_trader": False,
+        **dodatkowe})
     assert r.status_code == 200, r.text
     return r.json()["id"]
+
+
+def _czyta(order_id: int) -> dict:
+    odp = client.get(f"/api/pay/{_token(order_id)}", headers={"X-Partner-Token": SEKRET})
+    assert odp.status_code == 200, odp.text
+    return odp.json()
 
 
 def _linki(order_id: int) -> dict:
@@ -143,6 +189,99 @@ def test_nie_wypuszcza_danych_osobowych():
                        headers={"X-Partner-Token": SEKRET}).text
     assert mail not in tresc
     assert "Anna" not in tresc and "Nowak" not in tresc
+
+
+# --------------------------------------------------------------------------- #
+#  Rabat partnerski widoczny dla kupującego                                    #
+# --------------------------------------------------------------------------- #
+def test_strona_partnera_dostaje_cene_sprzed_rabatu():
+    """Klient partnera płaci mniej, niż stoi w cenniku, i ma prawo to zobaczyć.
+
+    Bez tych trzech pól rabat istnieje wyłącznie w rozmowie na Telegramie i w
+    naszym raporcie — czyli dla kupującego nie istnieje wcale.
+    """
+    katalog = _cennik()
+    d = _czyta(_zamowienie(amount_usd=round(katalog * 0.8, 2), partner_discount=True))
+    assert d["list_amount_usd"] == katalog
+    assert d["discount_pct"] == 20
+    assert d["discount_usd"] == round(katalog - d["amount_usd"], 2)
+
+
+def test_nizsza_kwota_bez_stempla_to_jeszcze_nie_rabat():
+    """Sama kwota niższa od cennika NIE znaczy rabatu — i to jest tu cała rzecz.
+
+    Admin wpisuje ją ręcznie: bywa zbiciem ceny jednemu klientowi, ale bywa też
+    zaliczką albo dopłatą do wcześniejszej wpłaty. Bez stempla umowy strona
+    ogłosiłaby wtedy komuś „oszczędzasz 199 $" na zamówieniu, na którym nikt
+    niczego nie obiecał. Przekreślona cena należy się wyłącznie tam, gdzie
+    naprawdę stoi za nią umowa.
+    """
+    d = _czyta(_zamowienie(amount_usd=round(_cennik() - 50, 2)))
+    assert "list_amount_usd" not in d and "discount_pct" not in d
+    # I to samo dla zamówienia po pełnej cenie — żeby ten test nie zaczął kiedyś
+    # przechodzić tylko dlatego, że kwota akurat równa się cennikowi.
+    assert "list_amount_usd" not in _czyta(_zamowienie())
+
+
+def test_kwota_wyzsza_od_cennika_nie_udaje_rabatu():
+    """Kwotę wpisuje ręcznie admin (dopłaty, kurs). Przekreślona cena NIŻSZA od
+    płaconej byłaby najgorszym możliwym komunikatem tuż przed wpisaniem karty."""
+    d = _czyta(_zamowienie(amount_usd=_cennik() + 50, partner_discount=True))
+    assert "list_amount_usd" not in d
+
+
+def test_procent_liczony_z_zamowienia_a_nie_z_dzisiejszej_stawki(monkeypatch):
+    """Stawka w env zmienia się szybciej, niż żyją wystawione linki. Strona ma
+    pokazać to, co dostał TEN klient, a nie to, co dziś stoi w konfiguracji."""
+    katalog = _cennik()
+    oid = _zamowienie(amount_usd=round(katalog * 0.8, 2), partner_discount=True)
+    monkeypatch.setattr(get_settings(), "partner_discount_pct", 50.0, raising=False)
+    assert _czyta(oid)["discount_pct"] == 20
+
+
+# --------------------------------------------------------------------------- #
+#  Dokąd Stripe odsyła po zapłacie                                             #
+# --------------------------------------------------------------------------- #
+def test_klient_partnera_wraca_na_domene_partnera(kasa):
+    """Kupował pod cudzą marką — po zapłacie ma wrócić tam, skąd wyszedł.
+
+    Nasz portal jest dla niego jednocześnie złą marką i ścianą: kazałby się
+    zalogować na konto, o którym pierwszy raz słyszy.
+    """
+    oid = _zamowienie()
+    tok = _token(oid)
+    r = client.post(f"/api/pay/{tok}/start", headers={"X-Partner-Token": SEKRET})
+    assert r.status_code == 200, r.text
+    assert kasa.ostatnie["success_url"] == f"{BAZA_PARTNERA}/pay/{tok}?paid=1"
+    assert kasa.ostatnie["cancel_url"] == f"{BAZA_PARTNERA}/pay/{tok}?canceled=1"
+
+
+def test_nasza_strona_platnosci_dalej_wraca_do_portalu(kasa):
+    """Ta sama funkcja obsługuje nasz własny /pay/<token>. Zmiana dla partnera
+    nie ma prawa przekierować NASZYCH klientów na cudzą domenę."""
+    r = client.post(f"/api/pay/{_token(_zamowienie())}/start")
+    assert r.status_code == 200, r.text
+    assert kasa.ostatnie["success_url"].endswith("/portal?paid=1")
+    assert BAZA_PARTNERA not in kasa.ostatnie["success_url"]
+
+
+def test_zly_sekret_nie_przestawia_adresu_powrotu(kasa):
+    """`start` jest publiczny (token JEST wstępem), więc nagłówek niczego nie
+    otwiera — ale nie może też po cichu przestawiać, dokąd trafi kupujący."""
+    r = client.post(f"/api/pay/{_token(_zamowienie())}/start",
+                    headers={"X-Partner-Token": "nie-ten"})
+    assert r.status_code == 200, r.text
+    assert BAZA_PARTNERA not in kasa.ostatnie["success_url"]
+
+
+def test_adres_powrotu_bierze_sie_z_konfiguracji(kasa, monkeypatch):
+    """Nawet ktoś z ważnym sekretem nie wskaże kasie, dokąd ma odesłać klienta:
+    adres czytamy z własnego env, a nie z czegokolwiek w żądaniu."""
+    monkeypatch.setattr(get_settings(), "partner_pay_base_url", "", raising=False)
+    r = client.post(f"/api/pay/{_token(_zamowienie())}/start",
+                    headers={"X-Partner-Token": SEKRET})
+    assert r.status_code == 200, r.text
+    assert kasa.ostatnie["success_url"].endswith("/portal?paid=1")
 
 
 # --------------------------------------------------------------------------- #

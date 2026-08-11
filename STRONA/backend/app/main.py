@@ -6693,6 +6693,32 @@ def pay_page(request: Request, token: str):
         session.close()
 
 
+def _rabat_partnera(session, o: Order) -> dict:
+    """Cena z cennika i to, co z niej zeszło — tylko dla zamówień ze stemplem partnera.
+
+    Rabat liczymy z LICZB tego zamówienia (cennik minus kwota), a nie z aktualnego
+    `PARTNER_DISCOUNT_PCT`. Procent w env zmienia się szybciej, niż żyją zamówienia,
+    a pokazanie dzisiejszej stawki na wczorajszym linku byłoby nieprawdą na stronie,
+    gdzie ktoś zaraz wpisze numer karty.
+
+    Pusty słownik, gdy nie ma czego pokazać: kwotę ustala ręcznie admin, więc może
+    wyjść równa cennikowi albo wyższa (dopłaty) — a przekreślona cena NIŻSZA od
+    płaconej to najgorszy możliwy komunikat na stronie płatności.
+    """
+    if not (o.coupon or "").strip().upper().startswith("PARTNER"):
+        return {}
+    prod = session.query(Product).filter(Product.key == o.product_key).first()
+    if not prod:
+        return {}
+    katalog = round(float(prod.price_usd or 0), 2)
+    kwota = round(float(o.amount_usd or 0), 2)
+    if katalog <= kwota:
+        return {}
+    return {"list_amount_usd": katalog,
+            "discount_usd": round(katalog - kwota, 2),
+            "discount_pct": round((katalog - kwota) / katalog * 100)}
+
+
 @app.get("/api/pay/{token}")
 def pay_order_public(request: Request, token: str,
                      x_partner_token: str | None = Header(default=None)):
@@ -6726,18 +6752,29 @@ def pay_order_public(request: Request, token: str,
                 "amount_usd": round(float(o.amount_usd or 0), 2),
                 "currency": "USD",
                 "reference": f"PTF-{o.id}",
-                "status": o.status}
+                "status": o.status,
+                # Klient partnera dostał cenę niższą od cennikowej i ma prawo to
+                # ZOBACZYĆ. Bez tego rabat istnieje wyłącznie w rozmowie na
+                # Telegramie i w naszym raporcie — czyli dla kupującego wcale.
+                **_rabat_partnera(session, o)}
     finally:
         session.close()
 
 
 @app.post("/api/pay/{token}/start")
-def pay_start(token: str):
+def pay_start(token: str, x_partner_token: str | None = Header(default=None)):
     """Otwiera kasę dla linku /pay/<token>. Bez logowania — token JEST wstępem.
 
     Zamówienie ma już właściciela (admin wystawił je konkretnemu traderowi),
     więc płatność i tak wyląduje na jego koncie; wymaganie tu sesji zamieniłoby
     jeden klik w „najpierw się zaloguj" i psuło cały sens linku.
+
+    Nagłówek z sekretem partnera jest OPCJONALNY i nie decyduje o dostępie —
+    mówi tylko, KTO kliknął: nasza strona płatności czy strona partnera. Od tego
+    zależy jedno, adres powrotu ze Stripe'a. Bez tego klient partnera po zapłacie
+    ląduje na naszej domenie, pod marką, o której nikt mu nie mówił. Adresu nie
+    bierzemy z żądania, tylko z własnej konfiguracji — inaczej ten nagłówek
+    byłby otwartym przekierowaniem z kasy.
     """
     session = SessionLocal()
     try:
@@ -6746,12 +6783,17 @@ def pay_start(token: str):
             raise HTTPException(400, "This order has already been paid.")
         if o.status != "pending":
             raise HTTPException(400, "This payment link is no longer active.")
+        sekret = settings.partner_api_token
+        od_partnera = bool(sekret and x_partner_token
+                           and secrets.compare_digest(x_partner_token, sekret))
+        powrot = (f"{settings.partner_pay_base_url}/pay/{o.pay_token}"
+                  if od_partnera and settings.partner_pay_base_url else None)
         if not settings.stripe_enabled:
             # Dev/mock: domknięcie robi portal (wymaga zalogowania), tak samo
             # jak przy zwykłym checkoucie bez kluczy Stripe'a.
             return {"checkout_url": f"{settings.app_base_url}/portal?mock_order={o.id}"}
         return {"checkout_url": billing.open_stripe_session(
-            session, o, _pozycja_zamowienia(session, o))}
+            session, o, _pozycja_zamowienia(session, o), powrot=powrot)}
     finally:
         session.close()
 

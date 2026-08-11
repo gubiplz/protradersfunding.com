@@ -154,7 +154,8 @@ def compute_price(session, trader: Trader, product_key: str, coupon: str | None,
             "bogo_paid_key": (product.key if upgrade else None)}
 
 
-def open_stripe_session(session, order: Order, item_name: str) -> str:
+def open_stripe_session(session, order: Order, item_name: str, *,
+                        powrot: str | None = None) -> str:
     """Sesja Stripe Checkout dla ISTNIEJĄCEGO zamówienia; zwraca adres kasy.
 
     Jedyne miejsce, w którym powstaje sesja płatności — dlatego linki wystawiane
@@ -162,8 +163,16 @@ def open_stripe_session(session, order: Order, item_name: str) -> str:
     Webhook domyka zamówienie tylko wtedy, gdy `stripe_session_id` zgadza się co
     do znaku, więc sesja MUSI powstać u nas i MUSI zostać zapisana przy
     zamówieniu — inaczej opłacona płatność zostaje zignorowana.
+
+    `powrot` to adres, na który Stripe odsyła po zapłacie i po rezygnacji —
+    domyślnie nasz portal. Podaje go płatność wystawiona przez partnera: jego
+    klient kupował pod cudzą marką i wyrzucenie go po zapłacie na NASZĄ stronę
+    logowania to jednocześnie zła marka i ściana („zaloguj się" kontem, o którym
+    nie wie). Dokleja się `?paid=1` / `?canceled=1`, więc adres musi być bez
+    znaku zapytania.
     """
     stripe = _stripe()
+    baza = powrot or f"{settings.app_base_url}/portal"
     try:
         cs = stripe.checkout.Session.create(
             mode="payment",
@@ -175,8 +184,8 @@ def open_stripe_session(session, order: Order, item_name: str) -> str:
                 },
                 "quantity": 1,
             }],
-            success_url=f"{settings.app_base_url}/portal?paid=1",
-            cancel_url=f"{settings.app_base_url}/portal?canceled=1",
+            success_url=f"{baza}?paid=1",
+            cancel_url=f"{baza}?canceled=1",
             metadata={"order_id": str(order.id)},
             client_reference_id=str(order.id),
         )
