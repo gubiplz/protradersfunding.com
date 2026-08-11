@@ -217,6 +217,13 @@ tr.clickable{cursor:pointer}
    Karty w slide-overze są węższe niż te w treści strony, więc 24px paddingu
    z .sec-card zjadałoby jedną trzecią szerokości panelu. */
 .lead-card{padding:14px 16px}
+/* Dokładna treść tego, co poszło do leada. `pre-wrap`, bo mail ma akapity i bez
+   nich zlewa się w ścianę; kreska z boku odróżnia NASZE słowa do niego od opisu
+   zdarzenia obok. Wysokość ograniczona, żeby jeden mail nie zajął całej
+   historii — reszta zostaje pod scrollem, nie znika. */
+.lead-sent{white-space:pre-wrap;font-size:11.5px;line-height:1.5;color:var(--muted);
+  margin-top:6px;padding:8px 10px;border-left:2px solid var(--line);
+  background:rgba(127,127,127,.06);border-radius:0 6px 6px 0;max-height:220px;overflow:auto}
 .lead-card h4{font-size:var(--fs-body);margin-bottom:10px}
 .mod-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .mod-row+.mod-row{margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)}

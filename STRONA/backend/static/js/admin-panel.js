@@ -877,6 +877,40 @@ async function sendLeadSms(id){
   if(VIEW==='leads')await VIEWS.leads();
   if(window._leadOpen&&window._leadOpen.id===id)openLead(id);
 }
+/* Dno drabiny kontaktu: adres jest jedynym polem, którego formularz nie puszcza
+   pustego, więc ten kanał zawsze ma dokąd pójść. Podgląd pokazuje CAŁY tekst,
+   nie zapowiedź — to jest mail podpisany marką landingu i wychodzi w czyimś
+   imieniu, więc klikający ma prawo zobaczyć go, zanim to się stanie.
+
+   Powtórka pyta drugi raz z innego powodu niż przy SMS-ie: mail nic nie
+   kosztuje, ale ten sam tekst drugi raz w tej samej skrzynce czyta się jak
+   automat i unieważnia jedyne zdanie, które ten mail ma do sprzedania — że
+   aplikację czytał człowiek. */
+async function sendLeadEmail(id){
+  const l=(window._leads||[]).find(x=>x.id===id)
+    ||(window._leadOpen&&window._leadOpen.id===id?window._leadOpen:null);
+  if(!l)return;
+  const pyt=(tytul,tresc,ok)=>askConfirm({title:tytul,body:tresc,ok:ok,cancel:'Not now'});
+  const podglad=`Goes to <b>${esc(l.email||'')}</b>, subject `
+    +`<b>${esc(l.mail_subject||'')}</b>:<br><br>`
+    +`<span style="color:var(--txt);white-space:pre-wrap">${esc(l.mail_text||'')}</span>`;
+  if(!await pyt('Send this e-mail?',podglad,'Send'))return;
+  const strzal=async force=>api('/api/admin/leads/'+id+'/email'+(force?'?force=true':''),
+    {method:'POST'});
+  try{
+    await strzal(false);
+  }catch(e){
+    if(!/already went out/i.test(e.message)){toast('Not sent: '+e.message,'err');return}
+    if(!await pyt('Send it a second time?',
+      'This lead already had this exact e-mail from us. The same text twice reads '
+      +'as an autoresponder — send again only if you know the first one never arrived.',
+      'Send again'))return;
+    try{await strzal(true)}catch(e2){toast('Not sent: '+e2.message,'err');return}
+  }
+  toast('E-mail sent — it points them back to Telegram');
+  if(VIEW==='leads')await VIEWS.leads();
+  if(window._leadOpen&&window._leadOpen.id===id)openLead(id);
+}
 /* Same shape the landing validates against. A handle that fails it ("gubi
    please") renders as plain text: a dead t.me link looks like contact and
    is not, and the desk should see the typo, not chase it. */
@@ -897,12 +931,13 @@ const ICO_TG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-
 const ICO_PHONE='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.6a2 2 0 0 1-.5 2.1L8 9.6a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.8.3 1.7.5 2.6.6a2 2 0 0 1 1.7 2z"/></svg>';
 const ICO_COPY='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 const ICO_SMS='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.5 9.5 9.5 0 0 1-2.8-.4L3 21l1.4-4.2A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5z"/></svg>';
+const ICO_MAIL='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m3 6 9 6.5L21 6"/></svg>';
 function leadPhoneActs(l){
   const h=String(l.telegram||'').replace(/^@/,'');
   const handleOk=TG_HANDLE_RE.test(h);
   const digits=String(l.phone||'').replace(/\D/g,'');
   const intl=String(l.phone||'').trim().startsWith('+')&&digits.length>=8;
-  if(!handleOk&&!intl&&!l.sms_ready)return'';
+  if(!handleOk&&!intl&&!l.sms_ready&&!l.mail_ready)return'';
   const opener=encodeURIComponent(leadOpener(l));
   return `<span class="lead-acts">${handleOk
     ?`<a class="act-btn" title="Write on Telegram to @${esc(h)} — opener prefilled"
@@ -913,7 +948,10 @@ function leadPhoneActs(l){
         target="_blank" rel="noopener" onclick="copyOpener(${l.id})">${ICO_PHONE}</a>`:''}${l.sms_ready
     ?`<button class="act-btn" type="button" aria-label="Send a text message"
         title="Text them the Telegram link — for people the Telegram side never reaches"
-        onclick="sendLeadSms(${l.id})">${ICO_SMS}</button>`:''}
+        onclick="sendLeadSms(${l.id})">${ICO_SMS}</button>`:''}${l.mail_ready
+    ?`<button class="act-btn" type="button" aria-label="Send the e-mail"
+        title="E-mail them the Telegram link — the only channel that always has somewhere to go"
+        onclick="sendLeadEmail(${l.id})">${ICO_MAIL}</button>`:''}
     <button class="act-btn" type="button" title="Copy the opener"
       aria-label="Copy the opener" onclick="copyOpener(${l.id})">${ICO_COPY}</button></span>`;
 }
@@ -1093,7 +1131,7 @@ function deleteLead(id){
 const LEAD_STATUS_CLS={new:'pending',messaged:'pending',replied:'paid',
   no_reply:'failed',rejected:'failed'};
 const LEAD_EVENT_LBL={applied:'Applied',status:'Status',note:'Note',reminder:'Reminder',
-  claim:'Owner',tier:'Grade',bought:'Bought',sms:'Text sent'};
+  claim:'Owner',tier:'Grade',bought:'Bought',sms:'Text sent',email:'E-mail sent'};
 /* Reminders are sent to US, never to the lead — the landing they applied through
    is a separate brand. The wording says who is being nudged. */
 const LEAD_REMINDER_LBL={no_contact:'Nobody wrote to them yet',bought:'Bought — stop treating as a lead',
@@ -1363,6 +1401,7 @@ async function openLead(id){
         <td>${esc(LEAD_EVENT_LBL[e.kind]||e.kind)}
           <div class="muted" style="font-size:11px">${esc(e.actor||'—')}</div></td>
         <td><div style="font-size:12px">${esc(leadEventDetail(e))}</div>
+          ${e.body?`<div class="lead-sent">${esc(e.body)}</div>`:''}
           ${Object.keys(e.answers||{}).length?`<div class="muted" style="font-size:11.5px;margin-top:4px">${
             Object.entries(e.answers).map(([q,v])=>`${esc(q)} → <b>${esc(v)}</b>`).join('<br>')}</div>`:''}</td></tr>`).join('')}
       </tbody></table></div>`

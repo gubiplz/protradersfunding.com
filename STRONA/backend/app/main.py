@@ -33,7 +33,7 @@ from pydantic import BaseModel
 from sqlalchemy import func
 
 from . import (achievements, auth, billing, catalog, certshot, countries, fields, loyalty,
-               metaquotes_web, notify,
+               lead_mail, metaquotes_web, notify,
                payout_import, payoutbot,
                poller, provisioning, push, rules, sms, telegram, telemetry, tradebot)
 from .config import get_settings
@@ -5370,10 +5370,24 @@ def _answers_z_payloadu(surowy: str | None) -> dict:
     return odp if isinstance(odp, dict) else {}
 
 
+def _tresc_z_payloadu(surowy: str | None) -> str:
+    """Treść wysłanej wiadomości z JSON-a zdarzenia. Zły JSON to pusty string,
+    a nie 500 — historia leada ma się otworzyć nawet, gdy jeden wpis jest
+    śmieciem."""
+    try:
+        dane = json.loads(surowy or "{}")
+    except ValueError:
+        return ""
+    return str(dane.get("body") or "") if isinstance(dane, dict) else ""
+
+
 def _lead_json(lead: Lead, trader_id: int | None, paid_usd: float,
                next_due: datetime | None = None) -> dict:
     """Lead dla panelu. Wspólne dla listy i karty szczegółów, żeby karta nie
     zaczęła nazywać pól inaczej niż tabela, z której się ją otwiera."""
+    zakwalifikowany = lead.outcome != "not_qualified"
+    mail_temat, mail_tekst = lead_mail.tresc(lead.name,
+                                             zakwalifikowany=zakwalifikowany)
     return {
         "id": lead.id, "email": lead.email, "name": lead.name,
         "phone": lead.phone, "phone_iso": lead.phone_iso, "telegram": lead.telegram,
@@ -5397,7 +5411,13 @@ def _lead_json(lead: Lead, trader_id: int | None, paid_usd: float,
         # a nie składa. Wysyłka jest płatna i nieodwracalna, więc admin ma prawo
         # zobaczyć treść, zanim kliknie; gdyby panel składał ją u siebie, prędzej
         # czy później pokazywałby co innego, niż faktycznie idzie w świat.
-        "sms_text": sms.tresc(lead.name, zakwalifikowany=lead.outcome != "not_qualified"),
+        "sms_text": sms.tresc(lead.name, zakwalifikowany=zakwalifikowany),
+        # Mail idzie tam, gdzie Telegram i SMS nie mają dokąd. Adres jest polem
+        # wymaganym formularza, więc „ready" prawie zawsze jest prawdą — prawie,
+        # bo część leadów dopisano z ręki i tam trafia się „brak".
+        "mail_ready": bool(lead_mail.is_enabled() and lead_mail.adres(lead.email)),
+        "mail_subject": mail_temat,
+        "mail_text": mail_tekst,
     }
 
 
@@ -5456,6 +5476,63 @@ def _sms_do_leada(session, lead: Lead, actor: str, *,
     if poszlo:
         _zdarzenie(session, lead.id, "sms", tresc, actor)
     return poszlo, powod
+
+
+def _mail_do_leada(session, lead: Lead, actor: str, *,
+                   wymuszaj: bool = False) -> tuple[bool, str]:
+    """Wyślij leadowi maila i zapisz w historii, CO poszło. `(czy poszło, powód)`.
+
+    Blokada „raz na leada" jest tu z innego powodu niż przy SMS-ie. Mail nie
+    kosztuje, więc nie chroni rachunku — chroni jedyną rzecz, którą ten mail ma
+    do sprzedania. Ten sam tekst drugi raz w tej samej skrzynce czyta się jak
+    automat i unieważnia zdanie o tym, że aplikację czytał człowiek.
+
+    W historii ląduje temat ORAZ pełna treść. `detail` jest ucięty do 200 znaków
+    i mail się w nim nie mieści, a dział po tygodniu musi móc odtworzyć, co
+    dokładnie ten człowiek przeczytał — inaczej odpowiedź „tak, jak pisaliście"
+    nie ma do czego się odnieść.
+    """
+    if not wymuszaj and session.query(LeadEvent).filter(
+            LeadEvent.lead_id == lead.id, LeadEvent.kind == "email").first():
+        return False, "E-mail already went out to this lead"
+    temat, tekst = lead_mail.tresc(
+        lead.name, zakwalifikowany=lead.outcome != "not_qualified")
+    poszlo, powod = lead_mail.wyslij(lead.email, temat, tekst)
+    if poszlo:
+        _zdarzenie(session, lead.id, "email", temat, actor,
+                   payload=json.dumps({"body": tekst}, ensure_ascii=False))
+    return poszlo, powod
+
+
+def _kontakt_zastepczy(session, lead: Lead, actor: str) -> str:
+    """Lead bez handle'a: SMS, a gdy nie ma czym — mail. Zwraca dopisek do dymka.
+
+    Kolejność wynika z tego, co realnie dowozi: SMS czyta się w minutę, mail
+    bywa otwarty wieczorem albo wcale. Ale mail ma dokąd pójść ZAWSZE — adres
+    jest polem wymaganym formularza, numer i handle nie są — więc to on stoi
+    między leadem a statusem „napisaliśmy", pod którym nikt nie napisał.
+
+    Cisza, gdy żaden kanał nie jest skonfigurowany: klikający nie ma wtedy
+    czego naprawić, a komunikat o brakującym kluczu przy każdym kliknięciu
+    uczy tylko tego, żeby przestać czytać dymki.
+
+    Numer, którego nie da się użyć, i tak przechodzi przez `_sms_do_leada` —
+    Twilio nie zobaczy go, bo `sms.wyslij` odrzuca go u siebie, a powód („brak
+    formy +…") wraca do klikającego. Pominięcie tej próby po cichu zabrałoby
+    jedyne miejsce, w którym ktokolwiek dowie się, że numer w bazie jest zepsuty.
+    """
+    powody = []
+    if sms.is_enabled() and (lead.phone or "").strip():
+        poszlo, powod = _sms_do_leada(session, lead, actor)
+        if poszlo:
+            return "SMS poszedł"
+        powody.append(powod)
+    if lead_mail.is_enabled():
+        poszlo, powod = _mail_do_leada(session, lead, actor)
+        if poszlo:
+            return "mail poszedł"
+        powody.append(powod)
+    return " · ".join(powody)
 
 
 def _lead_push(lead_id: int, title: str, body: str = "", *,
@@ -5685,6 +5762,10 @@ def admin_lead_detail(lead_id: int):
             # Migawka zgłoszenia jest w bazie jednym stringiem; panel dostaje
             # gotowe pary pytanie/odpowiedź, bo tylko to z niej czyta.
             "answers": _answers_z_payloadu(z.payload_json),
+            # Pełna treść wysłanego maila. `detail` niesie sam temat, bo jest
+            # ucięty do 200 znaków — a pytanie „co dokładnie do niego poszło"
+            # pada tydzień później i musi mieć odpowiedź.
+            "body": _tresc_z_payloadu(z.payload_json),
             "created_at": z.created_at.isoformat() if z.created_at else None,
         } for z in zdarzenia]
         return dane
@@ -5892,6 +5973,35 @@ def admin_lead_sms(lead_id: int, force: bool = False):
         if not lead:
             raise HTTPException(404, "Lead not found")
         poszlo, powod = _sms_do_leada(session, lead, "panel", wymuszaj=force)
+        if not poszlo:
+            raise HTTPException(400, powod)
+        if lead.status == "new":
+            _zapisz_status(session, lead, "messaged", actor="panel")
+        session.commit()
+        return {"ok": True, "id": lead_id, "status": lead.status}
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/leads/{lead_id}/email", dependencies=[Depends(auth.require_admin)])
+def admin_lead_email(lead_id: int, force: bool = False):
+    """Mail do leada, z ręki — dla tych, do których nie ma ani Telegrama, ani numeru.
+
+    Treści, tak jak przy SMS-ie, nie przyjmujemy z panelu: ta sama wiadomość
+    wychodzi automatem po kliknięciu statusu na kanale, a dwie kopie tekstu
+    rozjeżdżają się przy pierwszej poprawce. Wersję dla przyjętego i dla odrzutu
+    wybiera serwer z `outcome`.
+
+    Wysłany mail to kontakt, więc lead przestaje być „new" TĄ SAMĄ transakcją,
+    dokładnie jak przy SMS-ie. Dalsze statusy zostają nietknięte — cofanie
+    „replied" byłoby cofaniem prawdy o rozmowie, która już się odbyła.
+    """
+    session = SessionLocal()
+    try:
+        lead = session.get(Lead, lead_id)
+        if not lead:
+            raise HTTPException(404, "Lead not found")
+        poszlo, powod = _mail_do_leada(session, lead, "panel", wymuszaj=force)
         if not poszlo:
             raise HTTPException(400, powod)
         if lead.status == "new":
@@ -6115,15 +6225,13 @@ def _wykonaj_akcje(session, lead: Lead, akcja: str, kto: str) -> tuple[str, bool
         # i to jest tu istotne: wywołujący commituje tylko przy zmianie, więc
         # ponowny klik w ten sam przycisk wysłałby SMS-a, którego zapis o wysyłce
         # nie miałby czym trafić do bazy — i tak w kółko, na koszt konta Twilio.
+        # Powód odmowy ląduje w DYMKU, nie w logu: klikający ma się dowiedzieć,
+        # że do tego człowieka nic nie poszło. Inaczej zostaje w przekonaniu,
+        # że kontakt nastąpił, i lead cicho umiera w „messaged".
         dopisek = ""
         if (akcja == "messaged" and poprzedni != "messaged"
-                and lead.status == "messaged"
-                and not lead.telegram and sms.is_enabled()):
-            poszlo, powod = _sms_do_leada(session, lead, f"telegram:{kto}")
-            # Powód odmowy ląduje w DYMKU, nie w logu: klikający ma się dowiedzieć,
-            # że do tego człowieka nic nie poszło. Inaczej zostaje w przekonaniu,
-            # że kontakt nastąpił, i lead cicho umiera w „messaged".
-            dopisek = "SMS poszedł" if poszlo else powod
+                and lead.status == "messaged" and not lead.telegram):
+            dopisek = _kontakt_zastepczy(session, lead, f"telegram:{kto}")
         etykieta = _ETYKIETY_STATUSU.get(akcja, akcja)
         return (f"Zapisano: {etykieta}" + (f" · {dopisek}" if dopisek else ""),
                 wzieto or lead.status != poprzedni)

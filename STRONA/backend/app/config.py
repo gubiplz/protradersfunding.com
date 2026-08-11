@@ -256,6 +256,17 @@ class Settings:
     # publiczne. Puste = SMS-y nie wychodzą (most donikąd jest gorszy niż brak).
     sms_telegram_url: str = os.getenv("SMS_TELEGRAM_URL", "").strip()
 
+    # --- Mail do leada ---
+    # Trzeci kanał, po Telegramie i SMS-ie, i jedyny, który ZAWSZE ma dokąd
+    # pójść: adres jest polem wymaganym formularza, a handle'a i numeru bywa
+    # brak. Stąd nie jest kanałem masowym — jest dnem drabiny kontaktu.
+    #
+    # Nadawcą MUSI być adres marki, przez którą człowiek się zgłosił, a nie
+    # `MAIL_FROM`. Lead nie zna tej firmy; mail z jej domeny jest dla niego
+    # mailem od obcego i tak zostanie potraktowany. Puste = panel nie proponuje
+    # wysyłki, zamiast dawać przycisk, który wysyła spod złego szyldu.
+    lead_mail_from: str = os.getenv("LEAD_MAIL_FROM", "").strip()
+
     # --- Strona partnerska ---
     # Firma partnerska prowadzi własny landing i chce, żeby jej klient płacił
     # nie opuszczając jej domeny. Jej serwer czyta zamówienie przez
