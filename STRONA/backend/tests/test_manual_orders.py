@@ -363,6 +363,65 @@ def test_lead_wchodzi_na_swoje_konto_przez_reset_hasla(maile):
                        json={"email": email, "password": "noweHaslo123"}).status_code == 200
 
 
+def test_mail_po_zaplacie_daje_leadowi_haslo_do_portalu(maile):
+    """Mail z poświadczeniami MT5 mówił „zaloguj się do portalu" komuś, kto nie
+    ma czym — konto założył mu dział, a hasło jest losowe.
+
+    To jedyny mail, jaki taki człowiek dostaje po zapłacie, i pierwszy powód,
+    żeby wejść do portalu. Jeśli droga do środka nie jest właśnie w nim, każdy
+    taki klient kończy w supporcie.
+    """
+    email = _mail_leada()
+    oid = _dodaj_po_mailu(email).json()["id"]
+    assert client.post(f"/api/admin/orders/{oid}/mark-paid", headers=ADMIN).status_code == 200
+    creds = [m for m in maile if m[1] == email and m[0] == "credentials"]
+    assert creds, "po zapłacie nie poszedł mail z poświadczeniami"
+    url = creds[0][2].get("setup_url") or ""
+    assert "reset=" in url, "mail nie niesie drogi do ustawienia hasła"
+    assert client.post("/api/auth/reset", json={"token": url.split("reset=")[1],
+                                                "password": "zMailaHaslo1"}).status_code == 200
+    assert client.post("/api/auth/login",
+                       json={"email": email, "password": "zMailaHaslo1"}).status_code == 200
+
+
+def test_klient_z_wlasnym_haslem_nie_dostaje_linku_do_ustawienia(maile):
+    """Ten sam mail idzie do WSZYSTKICH kupujących. Kto zakładał konto sam, ma
+    zobaczyć „View Dashboard", a nie sugestię, że jego hasło nie istnieje."""
+    tid, email = _trader()
+    oid = _dodaj(tid).json()["id"]
+    client.post(f"/api/admin/orders/{oid}/mark-paid", headers=ADMIN)
+    creds = [m for m in maile if m[1] == email and m[0] == "credentials"]
+    assert creds and not creds[0][2].get("setup_url")
+
+
+def test_po_ustawieniu_hasla_mail_przestaje_je_proponowac(maile):
+    """Drugi challenge tego samego klienta to już zwykły zakup — hasło istnieje,
+    więc konto nie jest dłużej „założone za kogoś"."""
+    email = _mail_leada()
+    _dodaj_po_mailu(email)
+    client.post("/api/auth/forgot", json={"email": email})
+    reset_url = [m for m in maile if m[1] == email and m[0] == "password_reset"][0][2]["reset_url"]
+    client.post("/api/auth/reset", json={"token": reset_url.split("reset=")[1],
+                                         "password": "wlasneHaslo1"})
+    oid = _dodaj_po_mailu(email).json()["id"]
+    client.post(f"/api/admin/orders/{oid}/mark-paid", headers=ADMIN)
+    creds = [m for m in maile if m[1] == email and m[0] == "credentials"]
+    assert creds and not creds[-1][2].get("setup_url")
+
+
+def test_mail_html_prowadzi_pod_ustawienie_hasla_a_nie_pod_logowanie():
+    """Klient czyta wersję HTML, nie tekstową — przycisk w niej ma prowadzić
+    tam, gdzie da się wejść, a nie na ekran logowania bez klucza."""
+    ctx = {"name": "Anna", "platform_login": "123456789", "platform_password": "abc",
+           "platform_server": "MetaQuotes-Demo", "initial_balance": 25000, "steps": 2,
+           "setup_url": "https://ptf.test/portal?reset=ATRAPA"}
+    html = notify._render_html("credentials", ctx, "x")
+    assert "reset=ATRAPA" in html and "Set Your Password" in html
+    assert "?view=accounts" not in html
+    bez = notify._render_html("credentials", {**ctx, "setup_url": None}, "x")
+    assert "?view=accounts" in bez and "Set Your Password" not in bez
+
+
 def test_lead_nie_wpada_w_slepa_uliczke_przy_rejestracji(maile):
     """Lead nie wie, że ma już konto — więc naturalnie spróbuje się zarejestrować.
 

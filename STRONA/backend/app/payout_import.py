@@ -165,6 +165,7 @@ def zapisz(session, w: dict, login_seq: int) -> tuple[Payout, int]:
             email=w["email"],
             # Hasła nie znamy i nie wymyślamy — klient wchodzi przez reset hasła.
             password_hash=auth.hash_password(secrets.token_urlsafe(24)),
+            must_set_password=True,
             full_name=w["full_name"], referral_code=secrets.token_hex(4).upper(),
             created_at=w["date"],
         )

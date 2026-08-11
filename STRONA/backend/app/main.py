@@ -680,6 +680,8 @@ def reset_password(payload: ResetIn, response: Response):
             # zmienione w międzyczasie. (Tokeny bez pwf: krotkie okno przejsciowe.)
             raise HTTPException(400, "This reset link has already been used. Request a new one")
         tr.password_hash = auth.hash_password(payload.password)
+        # Hasło właśnie zaczęło istnieć — konto przestaje być „założone za kogoś".
+        tr.must_set_password = False
         session.commit()
         # Auto-login po udanym resecie — nowy token jest zwiazany z nowym haslem,
         # wszystkie starsze sesje wlasnie umarly.
@@ -3567,7 +3569,9 @@ def _wlasciciel_zamowienia(session, payload: ManualOrderIn) -> tuple[Trader, boo
     Telegramie i nikt nie zakłada konta po to, żeby dostać link do zapłaty —
     a bez konta zamówienia nie ma na czym powiesić. Konto powstaje więc tutaj,
     dokładnie tak jak przy imporcie wypłat (`payout_import.zapisz`): hasła nie
-    znamy i nie wymyślamy, klient wchodzi przez „forgot password".
+    znamy i nie wymyślamy. Stąd `must_set_password` — dzięki niemu mail
+    z poświadczeniami MT5 daje klientowi link do ustawienia hasła zamiast kazać
+    mu „zalogować się" na konto, o którym pierwszy raz słyszy.
 
     To jest zarazem jedyna droga, żeby panel leadów kiedykolwiek pokazał
     „Bought". Ta kolumna nie jest zapisywana, tylko liczona przy odczycie —
@@ -3599,6 +3603,7 @@ def _wlasciciel_zamowienia(session, payload: ManualOrderIn) -> tuple[Trader, boo
             break
     trader = Trader(email=email,
                     password_hash=auth.hash_password(secrets.token_urlsafe(24)),
+                    must_set_password=True,
                     full_name=((lead.name if lead else "") or "")[:120],
                     referral_code=code)
     session.add(trader)

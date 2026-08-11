@@ -142,7 +142,11 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"  Server:     {ctx.get('platform_server')}\n"
             f"  Capital:    {ctx.get('initial_balance')}\n\n"
             f"Log in with MetaTrader 5 (desktop, mobile or web) using the server above.\n"
-            f"Good luck. Track your progress in the dashboard.",
+            + (f"\nWe opened your portal account for you, so it has no password yet. "
+               f"Set one here (the link works for 1 hour; after that use \"Forgot password\" "
+               f"on the sign-in screen):\n{ctx.get('setup_url')}\n"
+               if ctx.get("setup_url") else "")
+            + f"Good luck. Track your progress in the dashboard.",
         ),
         "phase_passed": (
             f"Congratulations — phase passed! ✅ ({login})",
@@ -402,10 +406,23 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                 ("Leverage", "1:100"),
                 ("Profit split", f"{ctx.get('profit_split_pct')}%" if ctx.get("profit_split_pct") else None),
             ]),
-            _button_html("View Dashboard", f"{portal}?view=accounts"),
-            _note_html("Sign in to the portal with your e-mail address. "
-                       "The credentials above are only for the MetaTrader 5 platform."),
         ]
+        # Konto założone ZA klienta nie ma jeszcze hasła do portalu — „View
+        # Dashboard" byłby wtedy przyciskiem pod drzwi bez klucza.
+        if ctx.get("setup_url"):
+            parts += [
+                _button_html("Set Your Password", ctx["setup_url"]),
+                _note_html("We opened the portal account for you, so it has no password yet — "
+                           "the button above sets one (the link works for 1 hour; after that use "
+                           "“Forgot password” on the sign-in screen). The credentials above are "
+                           "only for the MetaTrader 5 platform."),
+            ]
+        else:
+            parts += [
+                _button_html("View Dashboard", f"{portal}?view=accounts"),
+                _note_html("Sign in to the portal with your e-mail address. "
+                           "The credentials above are only for the MetaTrader 5 platform."),
+            ]
     elif event == "welcome":
         mobile = f"""
    <tr><td align="center" style="padding:40px 44px 0">

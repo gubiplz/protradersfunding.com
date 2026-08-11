@@ -27,6 +27,10 @@ class Trader(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     email: Mapped[str] = mapped_column(String(180), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
+    # Konto założone ZA klienta (ręczne zamówienie, import wypłat): hasło jest
+    # losowe i nie zna go nikt, łącznie z nami. Bez tej flagi mail „gotowe,
+    # zaloguj się" wysyła człowieka pod drzwi, do których nie ma klucza.
+    must_set_password: Mapped[bool] = mapped_column(Boolean, default=False)
     full_name: Mapped[str] = mapped_column(String(120), default="")
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
 

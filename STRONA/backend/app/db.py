@@ -89,6 +89,10 @@ def mark_schema_current(fingerprint: str) -> None:
 # więc bez tego stara baza wywala się na SELECT-cie z nowym polem.
 _NEW_COLUMNS: dict[str, dict[str, str]] = {
     "traders": {
+        # FALSE dla wszystkich, którzy już są w bazie — hasło albo znają, albo
+        # przejdą zwykłym „forgot password". Flaga dotyczy kont zakładanych ZA
+        # klienta i tylko takie mają dostać w mailu link do ustawienia hasła.
+        "must_set_password": "BOOLEAN DEFAULT FALSE",
         "first_name": "VARCHAR(60)",
         "last_name": "VARCHAR(60)",
         "phone": "VARCHAR(32)",
