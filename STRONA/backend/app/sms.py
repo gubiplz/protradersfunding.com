@@ -55,8 +55,21 @@ def is_enabled() -> bool:
     Adres Telegrama liczy się na równi z kluczami: SMS bez niego byłby mostem
     donikąd, a człowiek dostałby wiadomość, na którą nie ma jak odpowiedzieć.
     """
-    return bool(settings.twilio_sid and settings.twilio_token
-                and settings.twilio_from and settings.sms_telegram_url)
+    return not czego_brakuje()
+
+
+def czego_brakuje() -> list[str]:
+    """Nazwy zmiennych, bez których kanał stoi — dla paska stanu w panelu.
+
+    Samo `is_enabled()` mówi tylko „nie", a skutkiem „nie" jest BRAK przycisku,
+    czyli nic. Kto ustawił trzy zmienne z czterech, nie ma jak zgadnąć, której
+    brakuje — sprawdza wszystkie po kolei albo uznaje, że funkcja nie działa.
+    """
+    return [nazwa for nazwa, wartosc in (
+        ("TWILIO_SID", settings.twilio_sid),
+        ("TWILIO_TOKEN", settings.twilio_token),
+        ("TWILIO_FROM", settings.twilio_from),
+        ("SMS_TELEGRAM_URL", settings.sms_telegram_url)) if not wartosc]
 
 
 def tresc(imie: str | None, *, zakwalifikowany: bool) -> str:

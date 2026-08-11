@@ -5123,6 +5123,12 @@ def stats():
                 "funded": by_status.get("funded", 0), "active": by_status.get("active", 0),
                 "failed": by_status.get("failed", 0), "feed": settings.feed,
                 "stripe": "live" if settings.stripe_enabled else "mock",
+                # Oba kanały do leada chowają swój przycisk, gdy nie mają czym
+                # wysłać — i to jest jedyne miejsce, w którym widać, DLACZEGO.
+                # Bez tego brak konfiguracji wygląda dokładnie tak samo jak
+                # zepsuta funkcja.
+                "lead_sms_missing": sms.czego_brakuje(),
+                "lead_mail_missing": lead_mail.czego_brakuje(),
                 "traders": klienci, "traders_internal": wewnetrzni,
                 "orders_paid": session.query(Order).filter(Order.status == "paid").count(),
                 "pool_free": session.query(PoolAccount).filter(PoolAccount.claimed == False).count(),  # noqa: E712

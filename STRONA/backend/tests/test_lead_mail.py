@@ -116,6 +116,31 @@ def test_bez_adresu_telegrama_mail_nie_wychodzi(poczta, monkeypatch):
     assert lead_mail.is_enabled() is False
 
 
+@pytest.mark.parametrize("pole,zmienna", [
+    ("smtp_host", "SMTP_HOST"), ("lead_mail_from", "LEAD_MAIL_FROM"),
+    ("sms_telegram_url", "SMS_TELEGRAM_URL")])
+def test_panel_mowi_ktorej_zmiennej_brakuje(poczta, monkeypatch, pole, zmienna):
+    """Skutkiem braku konfiguracji jest BRAK przycisku, czyli nic — a nic wygląda
+    tak samo jak zepsuta funkcja. Pasek stanu ma nazwać zmienną po imieniu,
+    inaczej ustawianie tego jest zgadywanką po jednej na deploy."""
+    monkeypatch.setattr(lead_mail.settings, pole, "")
+    assert lead_mail.czego_brakuje() == [zmienna]
+    dane = client.get("/api/stats", headers=ADMIN).json()
+    assert dane["lead_mail_missing"] == [zmienna]
+
+
+def test_komplet_konfiguracji_nie_ma_na_co_narzekac(poczta):
+    assert lead_mail.czego_brakuje() == []
+    assert client.get("/api/stats", headers=ADMIN).json()["lead_mail_missing"] == []
+
+
+def test_sms_tez_mowi_czego_mu_brakuje(poczta):
+    """Ta sama pułapka co przy mailu: `SMS_TELEGRAM_URL` brzmi jak ustawienie
+    SMS-a, a wyłącza oba kanały naraz."""
+    braki = client.get("/api/stats", headers=ADMIN).json()["lead_sms_missing"]
+    assert "TWILIO_SID" in braki and "SMS_TELEGRAM_URL" not in braki
+
+
 # --- nadawca: tu pomyłka zdradza, kto naprawdę pisze ---------------------------
 
 def test_mail_wychodzi_spod_marki_z_landingu(poczta):
@@ -301,6 +326,7 @@ def test_panel_ma_czym_wyslac_i_gdzie_pokazac_co_poszlo(poczta):
     assert "'/api/admin/leads/'+id+'/email'" in kod
     assert "email:'E-mail sent'" in kod
     assert "e.body" in kod and "lead-sent" in kod
+    assert "leadChannel('Lead e-mail',s.lead_mail_missing)" in kod
     assert "lead-sent{" in client.get("/static/css/admin.css").text
 
 

@@ -255,6 +255,19 @@ function mini(pct){const p=Math.min(100,Math.max(0,pct||0));
   const c=p>=100?'bad':p>=70?'warn':'ok';
   return `<div class="mini"><i class="${c}" style="width:${p}%"></i></div>`}
 
+/* Kanał do leada, który nie ma czym wysłać, CHOWA swój przycisk — i wtedy brak
+   konfiguracji wygląda dokładnie tak samo jak zepsuta funkcja. Ten pasek jest
+   jedynym miejscem, gdzie widać różnicę, więc mówi wprost, której zmiennej
+   brakuje, zamiast „off". Serwer zwraca `undefined` na starszym deployu:
+   wtedy nie ma o czym meldować i chip się nie pojawia. */
+function leadChannel(nazwa,brakuje){
+  if(!Array.isArray(brakuje))return'';
+  return brakuje.length
+    ?`<span class="sys warn" title="Set it in the hosting environment, then redeploy">
+        <span class="dot"></span>${nazwa}: <b>needs ${brakuje.map(esc).join(', ')}</b></span>`
+    :`<span class="sys"><span class="dot"></span>${nazwa}: <b>on</b></span>`;
+}
+
 /* ============================ VIEWS ============================ */
 const VIEWS={
  async overview(){
@@ -274,6 +287,8 @@ const VIEWS={
       <span class="sys ${s.stripe==='mock'?'warn':''}"><span class="dot"></span>Payments: <b>${esc(s.stripe)}</b></span>
       <span class="sys"><span class="dot"></span>Provisioning queue: <b>${s.provisioning??0}</b></span>
       <span class="sys"><span class="dot"></span>Pool free: <b>${s.pool_free??0}</b></span>
+      ${leadChannel('Lead e-mail',s.lead_mail_missing)}
+      ${leadChannel('Lead SMS',s.lead_sms_missing)}
     </div>
     <div class="todo-grid">
       ${todo(pendingPay,'payout requests to review','payouts','wallet')}

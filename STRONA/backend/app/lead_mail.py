@@ -63,8 +63,21 @@ def is_enabled() -> bool:
     zaproszeniem donikąd, a to gorsze niż brak maila — człowiek raz odpisze
     „gdzie?", drugi raz już nie.
     """
-    return bool(settings.smtp_host and settings.lead_mail_from
-                and settings.sms_telegram_url)
+    return not czego_brakuje()
+
+
+def czego_brakuje() -> list[str]:
+    """Nazwy zmiennych, bez których kanał stoi — dla paska stanu w panelu.
+
+    `SMS_TELEGRAM_URL` zaskakuje najbardziej: nazwa mówi o SMS-ie, a blokuje
+    też mail, bo to jedyne miejsce z linkiem, do którego oba kanały prowadzą.
+    Kto podpiął sam mail, nie ma prawa się tego domyślić — i bez tej listy widzi
+    wyłącznie brak przycisku.
+    """
+    return [nazwa for nazwa, wartosc in (
+        ("SMTP_HOST", settings.smtp_host),
+        ("LEAD_MAIL_FROM", settings.lead_mail_from),
+        ("SMS_TELEGRAM_URL", settings.sms_telegram_url)) if not wartosc]
 
 
 def adres(surowy: str | None) -> str | None:
