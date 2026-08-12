@@ -266,6 +266,12 @@ class Settings:
     # mailem od obcego i tak zostanie potraktowany. Puste = panel nie proponuje
     # wysyłki, zamiast dawać przycisk, który wysyła spod złego szyldu.
     lead_mail_from: str = os.getenv("LEAD_MAIL_FROM", "").strip()
+    # Logo do nagłówka tego maila. MUSI stać na domenie marki z landingu:
+    # obrazek zaciągany z domeny tej firmy zdradza w kliencie pocztowym
+    # dokładnie to, czego pilnuje `lead_mail_from`. W zmiennej z tego samego
+    # powodu co `SMS_TELEGRAM_URL` — repo jest publiczne. Puste = nagłówek
+    # pisany tekstem, mail wychodzi normalnie.
+    lead_mail_logo_url: str = os.getenv("LEAD_MAIL_LOGO_URL", "").strip()
 
     # --- Strona partnerska ---
     # Firma partnerska prowadzi własny landing i chce, żeby jej klient płacił

@@ -66,11 +66,18 @@ def _lead(*, email=None, telegram=None, outcome="qualified",
 
 
 def _tresc(msg) -> str:
-    """Treść maila taka, jaką zobaczy człowiek. Surowy payload nią NIE jest:
-    półpauza wymusza quoted-printable, więc w źródle stoi „=E2=80=94" i łamiące
-    „=" na końcach linii. Porównywanie tego z tekstem ze `tresc()` sprawdzałoby
-    kodowanie, a nie to, co ktoś przeczyta."""
-    return msg.get_payload(decode=True).decode("utf-8")
+    """Wersja TEKSTOWA maila, taka, jaką zobaczy człowiek. Surowy payload nią
+    NIE jest z dwóch powodów: od 2026-08-11 mail jest multipartem, więc
+    `get_payload` na całości zwraca listę części zamiast treści, a półpauza
+    wymusza quoted-printable, więc w źródle stoi „=E2=80=94" i łamiące „=" na
+    końcach linii. Porównywanie tego z tekstem ze `tresc()` sprawdzałoby
+    strukturę i kodowanie, a nie to, co ktoś przeczyta."""
+    return _czesc(msg, "plain")
+
+
+def _czesc(msg, rodzaj: str) -> str:
+    return msg.get_body(preferencelist=(rodzaj,)).get_payload(
+        decode=True).decode("utf-8")
 
 
 def _zdarzenia(lead_id, kind="email"):
@@ -156,13 +163,64 @@ def test_mail_wychodzi_spod_marki_z_landingu(poczta):
     assert msg["To"] == "ktos@example.com"
 
 
-def test_mail_idzie_czystym_tekstem(poczta):
-    """Bez HTML-a i to jest decyzja, nie brak: wyśrodkowana karta z logo mówi
-    „wysyłka masowa", zanim ktokolwiek przeczyta pierwsze zdanie — a ten mail ma
-    sprzedać dokładnie odwrotne wrażenie."""
+def test_mail_niesie_tekst_ORAZ_html(poczta):
+    """HTML doszedł 2026-08-11, na prośbę właściciela: lead widzi markę landingu
+    pierwszy raz od zgłoszenia i mail ma ją nieść. Wersja tekstowa ZOSTAJE i to
+    jest tu właściwa asercja — mail bez niej dostaje punkty karne od filtrów,
+    a w kliencie z wyłączoną grafiką bywa pusty."""
     lead_mail.wyslij("ktos@example.com", "temat", "treść")
-    assert poczta[0].get_content_type() == "text/plain"
-    assert _tresc(poczta[0]).strip() != ""
+    msg = poczta[0]
+    assert msg.get_content_type() == "multipart/alternative"
+    assert _tresc(msg).strip() == "treść"
+    assert "treść" in _czesc(msg, "html")
+
+
+def test_nadawca_dostaje_nazwe_marki_nawet_gdy_nie_ma_jej_w_konfiguracji(
+        poczta, monkeypatch):
+    """Gmail pokazuje nazwę wyświetlaną, a gdy jej nie ma — sam człon przed
+    małpą. `contact` w skrzynce nie mówi leadowi nic o marce, przez którą się
+    zgłosił, a to pierwsza rzecz, na którą patrzy, decydując, czy otworzyć."""
+    monkeypatch.setattr(lead_mail.settings, "lead_mail_from",
+                        "contact@forexpassing.test")
+    lead_mail.wyslij("ktos@example.com", "temat", "treść")
+    assert poczta[0]["From"] == "Forex Passing <contact@forexpassing.test>"
+
+
+def test_html_ma_dokladnie_jedno_wyjscie(poczta):
+    """Ta sama zasada co w tekście: drugie call-to-action zawsze zabiera
+    kliknięcia pierwszemu."""
+    _, tekst = lead_mail.tresc("Anna", zakwalifikowany=True)
+    kod = lead_mail._html_z_tekstu(tekst)
+    assert kod.count(f'href="{TG}"') == 1
+    # Surowy URL nie ma prawa zostać obok przycisku jako goły akapit.
+    assert f">{TG}<" not in kod
+
+
+def test_html_pokazuje_logo_marki_z_landingu(poczta, monkeypatch):
+    """Logo MUSI stać na domenie marki z landingu. Obrazek zaciągany z domeny
+    tej firmy zdradza w kliencie pocztowym dokładnie to, czego pilnuje
+    `lead_mail_from` — i to zanim lead przeczyta pierwsze zdanie."""
+    monkeypatch.setattr(lead_mail.settings, "lead_mail_logo_url",
+                        "https://forexpassing.test/logo-email.png")
+    kod = lead_mail._html_z_tekstu(lead_mail.tresc("Anna", zakwalifikowany=True)[1])
+    assert 'src="https://forexpassing.test/logo-email.png"' in kod
+
+
+def test_bez_logo_mail_i_tak_wychodzi(poczta, monkeypatch):
+    """Kanał, który staje przez kosmetykę, nie dowozi nic."""
+    monkeypatch.setattr(lead_mail.settings, "lead_mail_logo_url", "")
+    kod = lead_mail._html_z_tekstu(lead_mail.tresc("Anna", zakwalifikowany=True)[1])
+    assert "<img" not in kod and "Forex Passing" in kod
+    assert lead_mail.wyslij("ktos@example.com", "temat", "treść")[0] is True
+
+
+def test_imie_z_bazy_nie_wstrzykuje_html(poczta):
+    """Imię leada to pole z formularza, czyli tekst od obcego. W wersji HTML
+    trafia do dokumentu, więc musi być zescapowane — inaczej wystarczy wpisać
+    znacznik w formularz, żeby zmienić maila, którego wysyła dział."""
+    _, tekst = lead_mail.tresc("<b>Anna", zakwalifikowany=True)
+    kod = lead_mail._html_z_tekstu(tekst)
+    assert "<b>Anna" not in kod and "&lt;b&gt;Anna" in kod
 
 
 def test_pusta_tresc_nie_leci(poczta):
