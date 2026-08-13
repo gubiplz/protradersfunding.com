@@ -1,8 +1,17 @@
 {% extends "base.html" %}
-{% block title %}Trading Objectives — {{ site_name }}{% endblock %}
+{% block title %}Trading Objectives — Prop Firm Challenge Rules | {{ site_name }}{% endblock %}
 {% block description %}Every rule we enforce on a {{ site_name }} account: profit targets, daily and overall loss limits, minimum trading days, leverage, profit split and fees. Same numbers for 2-Step Evaluation and Instant Funding, side by side.{% endblock %}
 {% block og_title %}Trading Objectives — {{ site_name }}{% endblock %}
 {% block og_description %}The rules we publish are the rules we enforce. Every limit, checked automatically by our risk engine.{% endblock %}
+
+{% block head_extra %}
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[
+ {"@type":"ListItem","position":1,"name":"Home","item":"{{ base_url }}/"},
+ {"@type":"ListItem","position":2,"name":"Trading Objectives","item":"{{ base_url }}/objectives"}
+]}
+</script>
+{% endblock %}
 
 {% block content %}
 <section class="page-head"><div class="wrap">
