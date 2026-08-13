@@ -6087,6 +6087,84 @@ def admin_lead_reminder_cancel(lead_id: int, reminder_id: int):
         session.close()
 
 
+# Co z tego, co przysyła dostawca poczty, w ogóle zmienia wiedzę działu.
+# Otwarcia i kliknięcia świadomie POMINIĘTE: piksel śledzący kłamie w obie
+# strony (klient pocztowy pobiera go bez człowieka, a wyłączone obrazki chowają
+# tego, kto przeczytał), więc „otwarł" nie jest faktem, na którym można oprzeć
+# rozmowę. Tu ma być tylko to, co twarde: doszło albo nie doszło.
+_BREVO_ZDARZENIA = {
+    "delivered": "delivered",
+    "soft_bounce": "soft bounce",
+    "hard_bounce": "hard bounce",
+    "blocked": "blocked",
+    "invalid_email": "invalid address",
+    "spam": "marked as spam",
+    "error": "provider error",
+}
+
+
+@app.post("/api/brevo/webhook")
+async def brevo_webhook(request: Request, token: str = ""):
+    """Co dostawca poczty zrobił z mailem do leada — prosto do jego historii.
+
+    Bez tego panel pokazuje „E-mail sent" w chwili oddania listu do Brevo i nic
+    poza tym: mail odbity od nieistniejącej skrzynki wygląda w historii tak samo
+    jak doręczony, a dział czeka na odpowiedź, która nie ma prawa przyjść.
+
+    Sekret siedzi w ADRESIE, nie w nagłówku. To nie jest wygoda — Brevo nie
+    podpisuje wywołań (żadnego HMAC-a) i nie pozwala dopiąć własnego nagłówka,
+    więc nieodgadywalny adres jest jedyną kontrolą, jaka istnieje. Wchodzi za to
+    do logów dostępowych hostingu; przy rotacji sekretów traktować jak jawny.
+
+    Zawsze 200, tak jak przy Telegramie: na błąd Brevo ponawia, a zdarzenia,
+    którego nie umiemy przypiąć, nie umiemy przypiąć też za piątym razem.
+    """
+    sekret = settings.brevo_webhook_secret
+    if not sekret or not secrets.compare_digest(token, sekret):
+        raise HTTPException(401, "Unauthorized")
+
+    dane = await request.json() or {}
+    opis = _BREVO_ZDARZENIA.get(str(dane.get("event") or ""))
+    if not opis:
+        return {"ok": True}
+    powod = str(dane.get("reason") or "").strip()
+    # Ucięcie TU, a nie dopiero w `_zdarzenie`: niżej ten sam tekst służy za
+    # klucz deduplikacji, więc musi być dokładnie tym, co trafia do bazy.
+    opis = (f"{opis}: {powod}" if powod else opis)[:200]
+    adres = str(dane.get("email") or "").strip().lower()
+    temat = str(dane.get("subject") or "").strip()
+
+    session = SessionLocal()
+    try:
+        lead = session.query(Lead).filter(Lead.email == adres).one_or_none()
+        if lead is None:
+            return {"ok": True}
+        # Dopasowanie po TEMACIE, nie po samym adresie. Tym samym kontem Brevo
+        # wychodzą maile do traderów z `notify.py`, a jeden człowiek bywa
+        # jednocześnie leadem i traderem — bez tego warunku potwierdzenie
+        # zamówienia zapisałoby się jako doręczenie maila do leada. Temat
+        # porównujemy z tym, co ZAPISALIŚMY przy wysyłce, więc przepisanie
+        # treści maila niczego tu nie psuje; lista jest z definicji krótka,
+        # bo mail do leada idzie raz.
+        nasze = {z.detail for z in session.query(LeadEvent).filter(
+            LeadEvent.lead_id == lead.id, LeadEvent.kind == "email").all()}
+        if temat not in nasze:
+            return {"ok": True}
+        # Brevo ponawia wywołania i potrafi przysłać ten sam wynik kilka razy.
+        # Dedup po treści wpisu, nie po `id` zdarzenia: interesuje nas, CO się
+        # z tym mailem stało, a nie ile razy nam o tym powiedziano. Kolejny,
+        # INNY wynik (soft bounce, potem delivered) dopisze się normalnie.
+        if session.query(LeadEvent).filter(
+                LeadEvent.lead_id == lead.id, LeadEvent.kind == "delivery",
+                LeadEvent.detail == opis).first():
+            return {"ok": True}
+        _zdarzenie(session, lead.id, "delivery", opis, actor="brevo")
+        session.commit()
+    finally:
+        session.close()
+    return {"ok": True}
+
+
 @app.post("/api/telegram/webhook")
 async def telegram_webhook(request: Request,
                            x_telegram_bot_api_secret_token: str | None = Header(default=None)):
@@ -6367,6 +6445,13 @@ LEAD_REMINDERS = ("no_contact", "bought", "stalled", "unclaimed")
 # zakupu i o niego trzeba zahaczać co tydzień, a nie raz pogratulować.
 BOUGHT_UPDATE_DAYS = 7
 
+# Po ilu minutach ciszy mail do leada wychodzi SAM. Dłużej niż nudge „nikt nie
+# wziął" (30 min) i to jest cały sens tej wartości: pierwszy strzał należy do
+# człowieka, automat jest dopiero zabezpieczeniem na to, że nikt nie usiadł.
+# Skrócenie tego do minut zamieniłoby mail w autoresponder, a on sprzedaje
+# dokładnie jedno zdanie — że aplikację czytał ktoś żywy.
+LEAD_AUTO_MAIL_MIN = 60
+
 
 def _utc(d: datetime | None) -> datetime | None:
     """SQLite oddaje daty bez strefy, Postgres ze strefą. Porównanie jednego
@@ -6490,6 +6575,7 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
     session = SessionLocal()
     try:
         do_wyslania, pushy = _wyslij_zaplanowane(session, now)
+        do_maila: list[int] = []
         leady = session.query(Lead).all()
 
         maile = [l.email for l in leady]
@@ -6516,12 +6602,21 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
             # i ma prawo zbiec się z każdym z nich. Sam push, bez wpisu na
             # czacie: karta leada i tak wisi na kanale, brzęczeć ma telefon.
             # Dedup tym samym zdarzeniem `reminder`, więc raz na lead.
+            niczyj = (l.owner is None and l.status == "new" and paid == 0
+                      and not l.bought and l.outcome != "not_qualified")
             wiek_min = (now - (_utc(l.created_at) or now)).total_seconds() / 60
-            if (l.owner is None and l.status == "new" and paid == 0
-                    and not l.bought and l.outcome != "not_qualified"
-                    and wiek_min >= 30 and (l.id, "unclaimed") not in juz):
+            if niczyj and wiek_min >= 30 and (l.id, "unclaimed") not in juz:
                 _zdarzenie(session, l.id, "reminder", "unclaimed", actor="cron")
                 pushy.append((l.id, "Unclaimed lead (30 min+)", l.name or l.email))
+            # Ten sam stan godzinę później: skoro nikt nie usiadł, niech
+            # przynajmniej lead przestanie czekać w ciszy. Tylko do kogoś BEZ
+            # handle'a — kto go zostawił, ma dostać wiadomość tam, gdzie na nią
+            # czeka, i to zostaje robotą człowieka; ten sam podział pilnuje
+            # `_kontakt_zastepczy`. SMS-a automat nie rusza: kosztuje i jest
+            # zgodą, której nikt świadomie nie wydał, a mail nie kosztuje nic.
+            if (niczyj and wiek_min >= LEAD_AUTO_MAIL_MIN
+                    and not (l.telegram or "").strip() and lead_mail.is_enabled()):
+                do_maila.append(l.id)
             if paid > 0 or l.bought:
                 # Ręczny checkbox „bought" liczy się jak zapłacone zamówienie:
                 # przestań dzwonić jak do leada, zacznij pilnować jak klienta.
@@ -6560,6 +6655,18 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
         # wysyłka wracałaby przy każdym przebiegu crona i dział dostałby to samo
         # przypomnienie dziesięć razy — a to jest gorsze niż jedno utracone.
         session.commit()
+        # Maile POJEDYNCZO i każdy z własnym commitem — odwrotnie niż wpisy
+        # wyżej. Tam commit chronił dział przed powtórką na czacie; tu jedyną
+        # blokadą przed drugą kopią W SKRZYNCE człowieka jest wpis w historii,
+        # który `_mail_do_leada` sprawdza. Jeden commit na końcu rundy znaczyłby,
+        # że przerwany przebieg powtórzy WSZYSTKIE maile z tej rundy, a nie ten
+        # jeden, przy którym się wywrócił.
+        wyslane_maile = 0
+        for lead_id in do_maila:
+            lead = session.get(Lead, lead_id)
+            if lead and _mail_do_leada(session, lead, "cron:unclaimed")[0]:
+                session.commit()
+                wyslane_maile += 1
     finally:
         session.close()
 
@@ -6569,7 +6676,8 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
     # a dedup wyżej gwarantuje, że kolejny przebieg nie wyśle tego drugi raz.
     for lead_id, tytul, tresc in pushy:
         _lead_push(lead_id, tytul, tresc, event="lead_reminder")
-    return {"sent": len(do_wyslania), "checked": len(leady), "pushed": len(pushy)}
+    return {"sent": len(do_wyslania), "checked": len(leady), "pushed": len(pushy),
+            "mailed": wyslane_maile}
 
 
 # Ruch strony przebiega follow-upy najwyżej co tyle minut. Wartość z sufitu

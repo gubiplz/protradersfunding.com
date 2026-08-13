@@ -272,6 +272,11 @@ class Settings:
     # powodu co `SMS_TELEGRAM_URL` — repo jest publiczne. Puste = nagłówek
     # pisany tekstem, mail wychodzi normalnie.
     lead_mail_logo_url: str = os.getenv("LEAD_MAIL_LOGO_URL", "").strip()
+    # Sekret w ADRESIE webhooka od dostawcy poczty — nie w nagłówku, bo Brevo
+    # nie podpisuje wywołań i nie pozwala dodać własnego nagłówka; adres z
+    # tokenem w query to jedyna kontrola, jaka tam jest. Puste = webhook
+    # odmawia, czyli historia leada po prostu nie wie o doręczeniach.
+    brevo_webhook_secret: str = os.getenv("BREVO_WEBHOOK_SECRET", "").strip()
 
     # --- Strona partnerska ---
     # Firma partnerska prowadzi własny landing i chce, żeby jej klient płacił

@@ -12,7 +12,7 @@ os.environ.setdefault("AUTO_SEED", "false")
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import auth, notify, telegram  # noqa: E402
+from app import auth, lead_mail, notify, sms, telegram  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
@@ -528,14 +528,20 @@ def test_kasowanie_nieznanego_leada_to_404():
 # --------------------------------------------------------------------------- #
 #  Przypomnienia (cron)                                                        #
 # --------------------------------------------------------------------------- #
-def _cofnij(lead_id, *, od_zgloszenia=None, od_kontaktu=None):
-    """Postarza lead, żeby test nie musiał czekać trzech dni."""
+def _cofnij(lead_id, *, od_zgloszenia=None, od_kontaktu=None, minut=None):
+    """Postarza lead, żeby test nie musiał czekać trzech dni.
+
+    `minut` jest osobno od `od_zgloszenia`, bo automatyczny mail i nudge „nikt
+    nie wziął" liczą się w minutach, a powody z łańcucha reguł w dniach.
+    """
     s = SessionLocal()
     try:
         lead = s.get(Lead, lead_id)
         teraz = datetime.now(timezone.utc)
         if od_zgloszenia is not None:
             lead.created_at = teraz - timedelta(days=od_zgloszenia)
+        if minut is not None:
+            lead.created_at = teraz - timedelta(minutes=minut)
         if od_kontaktu is not None:
             lead.contacted_at = teraz - timedelta(days=od_kontaktu)
         s.commit()
@@ -616,6 +622,128 @@ def test_zamkniety_lead_nie_wraca_w_przypomnieniach():
 
     _cron()
     assert _zdarzenia(lead_id, "reminder") == []
+
+
+# --------------------------------------------------------------------------- #
+#  Mail, którego nikt nie kliknął (backstop crona)                             #
+# --------------------------------------------------------------------------- #
+# Lead zgłoszony w nocy czekał do rana, bo mail wychodził wyłącznie z ręki.
+# Automat jest ZABEZPIECZENIEM, nie kanałem: odzywa się dopiero, gdy przez
+# godzinę nikt nie usiadł do tematu, i tylko do kogoś, kto nie zostawił
+# handle'a — reszta ma dostać wiadomość tam, gdzie jej oczekuje.
+@pytest.fixture
+def poczta(monkeypatch):
+    """Włącza kanał mailowy i podstawia transport. Bez tej fikstury `is_enabled()`
+    jest fałszem, więc POZOSTAŁE testy w tym pliku automatu nie ruszają."""
+    for pole, wartosc in (("smtp_host", "smtp.probe.test"),
+                          ("lead_mail_from", "Forex Passing <desk@forexpassing.test>"),
+                          ("sms_telegram_url", "https://t.me/probe_desk")):
+        monkeypatch.setattr(lead_mail.settings, pole, wartosc)
+    poszly = []
+    monkeypatch.setattr(lead_mail, "_smtp_transport", poszly.append)
+    return poszly
+
+
+def _bez_handlea(**nadpisz):
+    return _wyslij(_zgloszenie(telegram=None, **nadpisz)).json()["id"]
+
+
+def test_lead_bez_handlea_dostaje_mail_sam(poczta):
+    lead_id = _bez_handlea()
+    _cofnij(lead_id, minut=90)
+
+    assert _cron().json()["mailed"] == 1
+    assert len(poczta) == 1
+    # Autor w historii mówi działowi, że to nie był człowiek — inaczej „E-mail
+    # sent" w karcie wygląda na czyjąś pracę i nikt do tego leada nie wraca.
+    assert [z.actor for z in _zdarzenia(lead_id, "email")] == ["cron:unclaimed"]
+
+
+def test_czlowiek_ma_pierwszy_strzal(poczta):
+    """Nudge na dział idzie po 30 minutach, mail dopiero po godzinie. Gdyby oba
+    padały naraz, automat odbierałby działowi szansę odezwania się pierwszym."""
+    lead_id = _bez_handlea()
+    _cofnij(lead_id, minut=35)
+
+    _cron()
+    assert [z.detail for z in _zdarzenia(lead_id, "reminder")] == ["unclaimed"]
+    assert poczta == []
+
+
+def test_lead_z_handlem_czeka_na_czlowieka(poczta):
+    """Kto zostawił handle, ma dostać wiadomość na Telegramie. Mail z prośbą
+    „napisz do nas" byłby odesłaniem go tam, gdzie sam już zostawił adres."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _cofnij(lead_id, minut=90)
+
+    _cron()
+    assert poczta == []
+
+
+def test_wziety_lead_nie_dostaje_automatu(poczta):
+    """Automat reaguje na CISZĘ, nie na czas. Ktoś, kto już wziął leada, może
+    właśnie z nim rozmawiać."""
+    lead_id = _bez_handlea()
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"owner": "bartek"})
+    _cofnij(lead_id, minut=90)
+
+    _cron()
+    assert poczta == []
+
+
+def test_odrzucony_nie_dostaje_automatu(poczta):
+    """Wersję dla odrzutu wysyła się świadomie, z ręki. Automat, który sam
+    zawiadamia o odmowie, to nie jest decyzja, którą chce się oddać cronowi."""
+    lead_id = _bez_handlea(outcome="not_qualified")
+    _cofnij(lead_id, minut=90)
+
+    _cron()
+    assert poczta == []
+
+
+def test_automat_nie_wysyla_drugi_raz(poczta):
+    """Cron chodzi co kilka minut, a ten sam tekst drugi raz w jednej skrzynce
+    czyta się jak autoresponder."""
+    lead_id = _bez_handlea()
+    _cofnij(lead_id, minut=90)
+
+    _cron(); _cron(); _cron()
+    assert len(poczta) == 1
+
+
+def test_automat_nie_udaje_ze_ktos_napisal(poczta):
+    """Status zostaje na „new". Przestawienie go na „messaged" zdjęłoby leada
+    z listy do obdzwonienia i uciszyło powód `no_contact` — a rozmowy z
+    człowiekiem dalej nie było."""
+    lead_id = _bez_handlea()
+    _cofnij(lead_id, minut=90)
+
+    _cron()
+    assert _lead(lead_id).status == "new"
+
+
+def test_automat_nie_siega_po_sms(poczta, monkeypatch):
+    """Mail nic nie kosztuje, SMS kosztuje i jest zgodą, której nikt świadomie
+    nie wydał — więc drabina `_kontakt_zastepczy` NIE obowiązuje w cronie,
+    mimo że lead ma numer w bazie."""
+    wyslane_sms = []
+    monkeypatch.setattr(sms, "wyslij", lambda *a, **kw: (wyslane_sms.append(a), (True, ""))[1])
+    lead_id = _bez_handlea()
+    _cofnij(lead_id, minut=90)
+
+    _cron()
+    assert len(poczta) == 1
+    assert wyslane_sms == []
+
+
+def test_bez_konfiguracji_automat_milczy():
+    """Bez fikstury `poczta` kanał jest wyłączony — cron ma wtedy przejść
+    obojętnie, a nie wywrócić się na leadzie bez handle'a."""
+    lead_id = _bez_handlea()
+    _cofnij(lead_id, minut=90)
+
+    assert _cron().status_code == 200
+    assert _zdarzenia(lead_id, "email") == []
 
 
 # --------------------------------------------------------------------------- #

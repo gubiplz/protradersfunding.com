@@ -464,3 +464,106 @@ def test_bez_zadnego_kanalu_dymek_milczy(poczta, monkeypatch):
     finally:
         s.close()
     assert poczta == []
+
+
+# --- webhook Brevo: czy list w ogóle doszedł ------------------------------------
+# Do tej pory historia leada kończyła się na „oddaliśmy do wysyłki". Mail odbity
+# od nieistniejącej skrzynki wyglądał w niej identycznie jak doręczony, więc
+# dział czekał na odpowiedź, która nie miała prawa przyjść.
+
+SEKRET_BREVO = "sekret-brevo"
+TEMAT_OBCY = "Your payout is on the way"
+
+
+@pytest.fixture
+def brevo(monkeypatch):
+    monkeypatch.setattr(lead_mail.settings, "brevo_webhook_secret", SEKRET_BREVO)
+
+
+def _wyslany():
+    """Lead, do którego mail już poszedł — punkt wyjścia dla każdego zdarzenia."""
+    adres = f"mail{next(LICZNIK)}@probe.test"
+    lid = _lead(email=adres)
+    client.post(f"/api/admin/leads/{lid}/email", headers=ADMIN)
+    return lid, adres, lead_mail.tresc("Anna Nowak", zakwalifikowany=True)[0]
+
+
+def _od_brevo(adres, temat, event="delivered", token=SEKRET_BREVO, **reszta):
+    return client.post(f"/api/brevo/webhook?token={token}",
+                       json={"event": event, "email": adres, "subject": temat, **reszta})
+
+
+def _detale(lead_id, kind="delivery"):
+    s = SessionLocal()
+    try:
+        return [z.detail for z in s.query(LeadEvent).filter(
+            LeadEvent.lead_id == lead_id, LeadEvent.kind == kind
+        ).order_by(LeadEvent.id).all()]
+    finally:
+        s.close()
+
+
+def test_bez_sekretu_webhook_nie_istnieje(poczta):
+    """Brevo nie podpisuje wywołań, więc nieustawiony sekret nie może znaczyć
+    „wpuszczaj wszystkich" — to byłby otwarty dopisywacz do historii leadów."""
+    _, adres, temat = _wyslany()
+    assert _od_brevo(adres, temat, token="cokolwiek").status_code == 401
+
+
+def test_cudzy_token_nie_wchodzi(poczta, brevo):
+    _, adres, temat = _wyslany()
+    assert _od_brevo(adres, temat, token="nie-ten").status_code == 401
+
+
+def test_doreczenie_wchodzi_do_historii(poczta, brevo):
+    lid, adres, temat = _wyslany()
+    assert _od_brevo(adres, temat).status_code == 200
+    assert _detale(lid) == ["delivered"]
+
+
+def test_odbicie_niesie_powod(poczta, brevo):
+    """Sam „hard bounce" mówi, że nie doszło. Dopiero powód mówi, czy adres jest
+    literówką, czy skrzynka nie istnieje — a to są dwie różne decyzje działu."""
+    lid, adres, temat = _wyslany()
+    _od_brevo(adres, temat, event="hard_bounce", reason="unknown recipient")
+    assert _detale(lid) == ["hard bounce: unknown recipient"]
+
+
+def test_ponowione_wywolanie_nie_dubluje(poczta, brevo):
+    """Brevo ponawia. Interesuje nas, CO się z listem stało, a nie ile razy nam
+    o tym powiedziano."""
+    lid, adres, temat = _wyslany()
+    _od_brevo(adres, temat); _od_brevo(adres, temat); _od_brevo(adres, temat)
+    assert _detale(lid) == ["delivered"]
+
+
+def test_kolejny_inny_wynik_dopisuje_sie(poczta, brevo):
+    """Skrzynka chwilowo pełna, a potem doręczone — to jedna historia w dwóch
+    krokach i oba są prawdziwe."""
+    lid, adres, temat = _wyslany()
+    _od_brevo(adres, temat, event="soft_bounce", reason="mailbox full")
+    _od_brevo(adres, temat)
+    assert _detale(lid) == ["soft bounce: mailbox full", "delivered"]
+
+
+def test_mail_do_tradera_nie_udaje_maila_do_leada(poczta, brevo):
+    """Tym samym kontem Brevo wychodzą maile z `notify.py`, a jeden człowiek
+    bywa naraz leadem i traderem. Bez dopasowania po temacie potwierdzenie
+    wypłaty zapisałoby się jako doręczenie maila do leada."""
+    lid, adres, _ = _wyslany()
+    assert _od_brevo(adres, TEMAT_OBCY).status_code == 200
+    assert _detale(lid) == []
+
+
+def test_otwarcie_nie_jest_faktem(poczta, brevo):
+    """Piksel śledzący kłamie w obie strony — klient pocztowy pobiera go bez
+    człowieka, a wyłączone obrazki chowają tego, kto naprawdę przeczytał."""
+    lid, adres, temat = _wyslany()
+    _od_brevo(adres, temat, event="opened")
+    assert _detale(lid) == []
+
+
+def test_zdarzenie_o_kims_kogo_nie_znamy_przechodzi_bez_szkody(brevo):
+    """Webhook jest kontem-wide: lecą przez niego wszystkie maile firmy, także
+    do ludzi, których w tabeli leadów nie ma."""
+    assert _od_brevo("nikt@obcy.test", "cokolwiek").status_code == 200
