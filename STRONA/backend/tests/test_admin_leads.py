@@ -723,6 +723,34 @@ def test_automat_nie_udaje_ze_ktos_napisal(poczta):
     assert _lead(lead_id).status == "new"
 
 
+def test_reczny_mail_zdejmuje_leada_automatowi(poczta):
+    """Najgorszy możliwy dublet: ktoś pisze z ręki, a godzinę później automat
+    dokłada to samo do tej samej skrzynki. Wtedy mail przestaje wyglądać na
+    czytany przez człowieka, czyli traci jedyne, co ma do powiedzenia."""
+    lead_id = _bez_handlea()
+    assert client.post(f"/api/admin/leads/{lead_id}/email",
+                       headers=ADMIN).status_code == 200
+    _cofnij(lead_id, minut=90)
+
+    _cron()
+    assert len(poczta) == 1
+    assert [z.actor for z in _zdarzenia(lead_id, "email")] == ["panel"]
+
+
+def test_cofniety_status_nie_odblokowuje_automatu(poczta):
+    """Drugi zamek, na wypadek gdyby pierwszy puścił. Status chodzi tam i z
+    powrotem („messaged" → „new", gdy ktoś uzna, że kontakt się nie liczy),
+    a sam warunek `niczyj` uznałby takiego leada za nietkniętego. Trzyma go
+    dopiero wpis w historii, którego cofnięcie statusu nie kasuje."""
+    lead_id = _bez_handlea()
+    client.post(f"/api/admin/leads/{lead_id}/email", headers=ADMIN)
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"status": "new"})
+    _cofnij(lead_id, minut=90)
+
+    _cron()
+    assert len(poczta) == 1
+
+
 def test_automat_nie_siega_po_sms(poczta, monkeypatch):
     """Mail nic nie kosztuje, SMS kosztuje i jest zgodą, której nikt świadomie
     nie wydał — więc drabina `_kontakt_zastepczy` NIE obowiązuje w cronie,
