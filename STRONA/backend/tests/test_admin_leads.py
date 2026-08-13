@@ -637,6 +637,7 @@ def poczta(monkeypatch):
     jest fałszem, więc POZOSTAŁE testy w tym pliku automatu nie ruszają."""
     for pole, wartosc in (("smtp_host", "smtp.probe.test"),
                           ("lead_mail_from", "Forex Passing <desk@forexpassing.test>"),
+                          ("lead_telegram_channel_url", "https://t.me/probe_channel"),
                           ("sms_telegram_url", "https://t.me/probe_desk")):
         monkeypatch.setattr(lead_mail.settings, pole, wartosc)
     poszly = []

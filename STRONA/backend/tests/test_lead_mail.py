@@ -22,6 +22,7 @@ os.environ.setdefault("FEED", "sim")
 os.environ.setdefault("AUTO_SEED", "false")
 
 import json  # noqa: E402
+from urllib.parse import unquote  # noqa: E402
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -38,6 +39,10 @@ client = TestClient(app)
 ADMIN = {"X-Admin-Token": get_settings().admin_token}
 LICZNIK = iter(range(10000))
 TG = "https://t.me/probe_desk"
+# Dwa RÓŻNE byty: do pierwszego się pisze, do drugiego dołącza. Testy trzymają
+# je osobno, bo pomylenie ich w kodzie nie wywraca niczego — po prostu wysyła
+# odrzuconego tam, gdzie nie ma pola do pisania.
+KANAL = "https://t.me/probe_channel"
 NADAWCA = "Forex Passing <desk@forexpassing.test>"
 
 
@@ -46,6 +51,7 @@ def poczta(monkeypatch):
     """Konfiguracja i transport-atrapa. Zwraca listę maili do obejrzenia."""
     for pole, wartosc in (("smtp_host", "smtp.probe.test"),
                           ("lead_mail_from", NADAWCA),
+                          ("lead_telegram_channel_url", KANAL),
                           ("sms_telegram_url", TG)):
         monkeypatch.setattr(lead_mail.settings, pole, wartosc)
     # SMS musi być wyłączony, inaczej drabina kontaktu wybierze jego, nie mail.
@@ -191,7 +197,7 @@ def test_html_ma_dokladnie_jedno_wyjscie(poczta):
     kliknięcia pierwszemu."""
     _, tekst = lead_mail.tresc("Anna", zakwalifikowany=True)
     kod = lead_mail._html_z_tekstu(tekst)
-    assert kod.count(f'href="{TG}"') == 1
+    assert kod.count(f'href="{TG}?text=') == 1
     # Surowy URL nie ma prawa zostać obok przycisku jako goły akapit.
     assert f">{TG}<" not in kod
 
@@ -248,13 +254,45 @@ def test_obie_wersje_prowadza_na_telegram(poczta):
     temat_nie, tekst_nie = lead_mail.tresc("Anna Nowak", zakwalifikowany=False)
     assert tekst_tak != tekst_nie and temat_tak != temat_nie
     for temat, tekst in ((temat_tak, tekst_tak), (temat_nie, tekst_nie)):
-        # Cały sens tej wysyłki to wrócić tam, gdzie dział pracuje.
-        assert TG in tekst
-        assert "Anna" in tekst and "Nowak" not in tekst
+        assert "https://t.me/" in tekst
+        # Nazwisko wolno nieść wyłącznie linkowi — w prozie „Hi Anna Nowak"
+        # czyta się jak korespondencja seryjna i przewraca jedyną rzecz, którą
+        # ten mail sprzedaje. W gotowej wiadomości do działu jest odwrotnie:
+        # tam lead PRZEDSTAWIA SIĘ obcemu i po nazwisku dział go dopasowuje.
+        proza = "\n".join(w for w in tekst.split("\n") if not w.startswith("http"))
+        assert "Anna" in proza and "Nowak" not in proza
         assert "Anna" in temat
         # Jedno wyjście, nie dwa: drugie call-to-action zawsze zabiera kliknięcia
         # pierwszemu.
-        assert tekst.count(TG) == 1
+        assert len([w for w in tekst.split("\n") if w.startswith("http")]) == 1
+
+
+def test_kazda_wersja_idzie_GDZIE_INDZIEJ(poczta):
+    """Zakwalifikowanemu obiecujemy rozmowę, więc musi wylądować tam, gdzie da
+    się napisać. Odrzuconemu nie obiecujemy jej wcale — jego link prowadzi na
+    kanał, gdzie pola do pisania nie ma. Zamiana tych dwóch adresów niczego nie
+    wywraca i dlatego jest najgroźniejsza: mail wychodzi, a połowa leadów
+    trafia w ścianę."""
+    _, tak = lead_mail.tresc("Anna Nowak", zakwalifikowany=True)
+    _, nie = lead_mail.tresc("Anna Nowak", zakwalifikowany=False)
+    assert TG in tak and KANAL not in tak
+    assert KANAL in nie and TG not in nie
+
+
+def test_odrzuconego_nikt_nie_prosi_o_wiadomosc(poczta):
+    """Na kanale nie ma czego wypełnić, więc `?text=` byłby tam martwy, a
+    zdanie o gotowej wiadomości — kłamstwem."""
+    _, nie = lead_mail.tresc("Anna Nowak", zakwalifikowany=False)
+    assert "?text=" not in nie
+    assert "conversation" not in nie and "already written" not in nie
+
+
+def test_przycisk_nazywa_to_co_jest_po_drugiej_stronie(poczta):
+    kod_tak = lead_mail._html_z_tekstu(lead_mail.tresc("Anna", zakwalifikowany=True)[1])
+    kod_nie = lead_mail._html_z_tekstu(lead_mail.tresc("Anna", zakwalifikowany=False)[1])
+    assert "Message the desk on Telegram" in kod_tak and "Join" not in kod_tak
+    assert "Join us on Telegram" in kod_nie
+    assert "Message the desk" not in kod_nie
 
 
 def test_odrzucony_nie_dostaje_gratulacji(poczta):
@@ -268,6 +306,50 @@ def test_odrzucony_nie_dostaje_gratulacji(poczta):
 def test_lead_bez_imienia_dostaje_zdanie_bez_dziury(poczta):
     temat, tekst = lead_mail.tresc("", zakwalifikowany=True)
     assert "Hi there," in tekst and "there" in temat
+
+
+# --- gotowa pierwsza wiadomość do działu ---------------------------------------
+
+def _prefill(imie):
+    return unquote(lead_mail._link_do_dzialu(imie).split("?text=", 1)[1])
+
+
+def test_lead_klika_i_ma_juz_co_wyslac(poczta):
+    assert _prefill("Anna Nowak") == ("Hi. This is Anna Nowak. "
+                                      "My application came back a yes.")
+
+
+def test_wiadomosc_niesie_nazwisko_bo_dzial_dostaje_ja_od_obcego(poczta):
+    """Handle nadawcy nic działowi nie mówi. Samo imię przy dwóch Annach
+    w tym samym tygodniu też nie."""
+    assert "Anna Nowak" in _prefill("Anna Nowak")
+
+
+def test_bez_imienia_wiadomosc_nie_ma_dziury(poczta):
+    assert _prefill("") == "Hi. My application came back a yes."
+    assert _prefill(None) == "Hi. My application came back a yes."
+
+
+def test_link_zostaje_jednym_slowem(poczta):
+    """`_html_z_tekstu` robi przycisk tylko z akapitu, który jest SAMYM adresem.
+    Spacja w `?text=` rozbiłaby ten warunek i lead dostałby goły URL w treści."""
+    link = lead_mail._link_do_dzialu("Anna Nowak")
+    assert " " not in link and "%20" in link
+    kod = lead_mail._html_z_tekstu(lead_mail.tresc("Anna Nowak",
+                                                   zakwalifikowany=True)[1])
+    assert kod.count("<a ") == 1 and f'href="{link}"' in kod
+
+
+def test_adres_dzialu_z_wlasnym_pytajnikiem_nie_peka(poczta, monkeypatch):
+    monkeypatch.setattr(lead_mail.settings, "sms_telegram_url",
+                        "https://t.me/probe_desk?start=lead")
+    assert "?start=lead&text=" in lead_mail._link_do_dzialu("Anna")
+
+
+def test_sms_zostaje_przy_gołym_adresie(poczta):
+    """Ten sam adres bierze `sms.py`, a tam każdy znak liczy się do segmentu.
+    Gotowa wiadomość rozbiłaby SMS-a na dwa i podniosła koszt każdej wysyłki."""
+    assert "?text=" not in sms.tresc("Anna Nowak", zakwalifikowany=True)
 
 
 def test_obie_wersje_mowia_jak_przestac(poczta):

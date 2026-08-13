@@ -272,6 +272,15 @@ class Settings:
     # powodu co `SMS_TELEGRAM_URL` — repo jest publiczne. Puste = nagłówek
     # pisany tekstem, mail wychodzi normalnie.
     lead_mail_logo_url: str = os.getenv("LEAD_MAIL_LOGO_URL", "").strip()
+    # Dokąd idzie ODRZUCONY. Kanał do subskrypcji, nie adres do pisania — i to
+    # jest CAŁA różnica wobec `SMS_TELEGRAM_URL`: tam się pisze, tu się dołącza.
+    # Pomylenie tych dwóch adresów kosztuje najwięcej po cichu: zakwalifikowany
+    # wysłany na kanał nie ma gdzie napisać, a odrzucony wysłany do działu
+    # zajmuje czas rozmowy, której ten mail mu nie obiecuje. W zmiennej z tego
+    # samego powodu co reszta — repo jest publiczne, a to handle marki
+    # partnerskiej. Puste = mail do leada nie wychodzi wcale (patrz
+    # `lead_mail.czego_brakuje`), bo połowa jego treści prowadziłaby donikąd.
+    lead_telegram_channel_url: str = os.getenv("LEAD_TELEGRAM_CHANNEL_URL", "").strip()
     # Sekret w ADRESIE webhooka od dostawcy poczty — nie w nagłówku, bo Brevo
     # nie podpisuje wywołań i nie pozwala dodać własnego nagłówka; adres z
     # tokenem w query to jedyna kontrola, jaka tam jest. Puste = webhook

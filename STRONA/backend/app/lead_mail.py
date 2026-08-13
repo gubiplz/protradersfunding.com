@@ -46,6 +46,7 @@ import smtplib
 from email.message import EmailMessage
 from email.utils import formataddr, parseaddr
 from html import escape
+from urllib.parse import quote
 
 from .config import get_settings
 
@@ -89,11 +90,19 @@ def czego_brakuje() -> list[str]:
     też mail, bo to jedyne miejsce z linkiem, do którego oba kanały prowadzą.
     Kto podpiął sam mail, nie ma prawa się tego domyślić — i bez tej listy widzi
     wyłącznie brak przycisku.
+
+    `LEAD_TELEGRAM_CHANNEL_URL` blokuje CAŁY kanał, choć potrzebuje go tylko
+    wersja odmowna. Wysyłka bez niego znaczyłaby maila do odrzuconego z pustym
+    miejscem tam, gdzie ma być jedyne wyjście — a odmowa bez drogi dalej jest
+    dokładnie tym, czego ten tekst unika. Lepiej, żeby dział zobaczył brakującą
+    zmienną, niż żeby połowa leadów dostała ślepy zaułek.
     """
     return [nazwa for nazwa, wartosc in (
         ("SMTP_HOST", settings.smtp_host),
         ("LEAD_MAIL_FROM", settings.lead_mail_from),
-        ("SMS_TELEGRAM_URL", settings.sms_telegram_url)) if not wartosc]
+        ("SMS_TELEGRAM_URL", settings.sms_telegram_url),
+        ("LEAD_TELEGRAM_CHANNEL_URL", settings.lead_telegram_channel_url))
+        if not wartosc]
 
 
 def adres(surowy: str | None) -> str | None:
@@ -102,13 +111,44 @@ def adres(surowy: str | None) -> str | None:
     return tekst if _ADRES.match(tekst) else None
 
 
+def _link_do_dzialu(imie: str | None) -> str:
+    """Adres działu z pierwszą wiadomością już wpisaną w pole tekstowe.
+
+    Tylko dla ZAKWALIFIKOWANEGO. Telegram czyta `?text=` także dla zwykłego
+    konta, nie tylko dla bota, i tylko WPISUJE treść — wysłać musi człowiek.
+    Landing tej marki niesie ten sam wzorzec (`watch.html`, `welcome.html`),
+    więc dział widzi takie otwarcia od dawna i nie weźmie ich za cudzy skrypt.
+
+    Treść mówi, kto pisze i z czym, bo dział dostaje ją od nieznanego handle'a
+    i bez tego pierwsza wymiana zawsze schodzi na „kto to?" — a to jest cała
+    minuta między człowiekiem gotowym rozmawiać a człowiekiem, który już
+    odłożył telefon.
+
+    Doklejane TU, a nie w `SMS_TELEGRAM_URL`, bo ten sam adres bierze `sms.py`,
+    a tam każdy znak jest liczony do segmentu i długi `?text=` rozbiłby SMS na
+    dwa. Wersja tekstowa maila zjada dłuższy link bez szkody.
+    """
+    kto = " ".join((imie or "").split())
+    przedstawienie = f"This is {kto}. " if kto else ""
+    wiadomosc = f"Hi. {przedstawienie}My application came back a yes."
+    link = settings.sms_telegram_url
+    return f"{link}{'&' if '?' in link else '?'}text={quote(wiadomosc)}"
+
+
 def tresc(imie: str | None, *, zakwalifikowany: bool) -> tuple[str, str]:
     """`(temat, treść)`. Jedyne miejsce z tym tekstem — woła je i przycisk
     w panelu, i podgląd, który panel pokazuje PRZED wysyłką.
 
-    Obie wersje kończą się tym samym: linkiem do Telegrama. Odmowa też, i to
-    świadomie — „nie tym razem" bez drogi odpowiedzi zamyka temat na zawsze,
-    a część odrzuconych wraca za kilka miesięcy z innym dorobkiem.
+    Obie wersje kończą się linkiem do Telegrama — odmowa też, i to świadomie:
+    „nie tym razem" bez żadnej drogi dalej zamyka temat na zawsze, a część
+    odrzuconych wraca za kilka miesięcy z innym dorobkiem.
+
+    Ale to NIE JEST ten sam link i na tym stoi cały podział. Zakwalifikowany
+    idzie do działu, z gotową pierwszą wiadomością, bo jego mail obiecuje
+    rozmowę. Odrzucony idzie na KANAŁ, gdzie się tylko dołącza i nie pisze
+    nic — obiecywanie mu rozmowy oznaczałoby albo kłamstwo, albo dział
+    tłumaczący każdemu odrzuconemu z osobna, czego zabrakło. Kanał trzyma
+    drzwi otwarte za darmo i bez niczyjego czasu.
 
     Co w tym tekście jest robotą, a nie ozdobą:
 
@@ -127,7 +167,6 @@ def tresc(imie: str | None, *, zakwalifikowany: bool) -> tuple[str, str]:
     formularz. Zdanie o wypisie stoi na końcu obu i jest prawdziwe.
     """
     pierwsze = (imie or "").strip().split(" ")[0] or "there"
-    link = settings.sms_telegram_url
     stopka = (f"\n\n--\n{MARKA}\n"
               f"You are getting this because you applied on our site. "
               f"Reply with \"stop\" and we will not write again.")
@@ -141,9 +180,9 @@ def tresc(imie: str | None, *, zakwalifikowany: bool) -> tuple[str, str]:
             f"to prepare, no documents to dig up.\n\n"
             f"We do it on Telegram because that is where our desk works, and it is "
             f"the difference between starting this week and waiting on e-mail:\n\n"
-            f"{link}\n\n"
-            f"The opening line does not matter. \"Hi\" is enough — we pick it up "
-            f"from your application.\n\n"
+            f"{_link_do_dzialu(imie)}\n\n"
+            f"The first message is already written for you. Send it as it is — "
+            f"we pick up the rest from your application.\n\n"
             f"One thing worth knowing: we work through applications in batches, and "
             f"the ones that go quiet get closed to make room. Yours is open now."
         ) + stopka)
@@ -152,11 +191,11 @@ def tresc(imie: str | None, *, zakwalifikowany: bool) -> tuple[str, str]:
         f"Straight answer: as it stands, this one is not a yes.\n\n"
         f"That is about the application, not about you, and it is not permanent. "
         f"What we look at changes as your record does, and the door stays open.\n\n"
-        f"Before you close this, though: one short conversation is the only way to "
-        f"learn what specifically was missing. We will tell you plainly, and it "
-        f"costs you five minutes:\n\n"
-        f"{link}\n\n"
-        f"If you would rather leave it, that is a fair call too — no hard feelings, "
+        f"Before you close this, though: the easiest way to keep that door in "
+        f"sight is our Telegram channel. Nothing to write and nobody to "
+        f"introduce yourself to — you join, and you read:\n\n"
+        f"{settings.lead_telegram_channel_url}\n\n"
+        f"When your record moves, apply again. Until then no hard feelings, "
         f"and nobody chasing you."
     ) + stopka)
 
@@ -210,6 +249,12 @@ def _html_z_tekstu(tekst: str) -> str:
         # Sam URL, nie „URL i jeszcze coś" — inaczej akapit zaczynający się od
         # adresu wylądowałby w `href` razem ze zdaniem, które po nim stoi.
         if akapit.startswith("http") and not akapit.split()[1:]:
+            # Napis idzie za ADRESEM, nie za gałęzią tekstu. „Message the desk"
+            # nad linkiem do kanału obiecywałby rozmowę, której tam nie ma —
+            # w kanale nie ma nawet pola do pisania.
+            napis = ("Join us on Telegram"
+                     if akapit == settings.lead_telegram_channel_url
+                     else "Message the desk on Telegram")
             blok.append(
                 f'<table role="presentation" cellpadding="0" cellspacing="0" '
                 f'style="margin:26px 0"><tr><td bgcolor="{_ZIELEN}" '
@@ -217,7 +262,7 @@ def _html_z_tekstu(tekst: str) -> str:
                 f'<a href="{escape(akapit, quote=True)}" '
                 f'style="display:inline-block;padding:14px 28px;font-size:16px;'
                 f'font-weight:600;color:#ffffff;text-decoration:none">'
-                f'Message the desk on Telegram</a></td></tr></table>')
+                f'{napis}</a></td></tr></table>')
         else:
             blok.append(
                 f'<p style="margin:0 0 18px;font-size:16px;line-height:1.65;'
