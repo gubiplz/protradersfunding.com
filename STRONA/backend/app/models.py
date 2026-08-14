@@ -697,7 +697,9 @@ class Lead(Base):
 # „odpisał". Przy telefonie jedna próba rozstrzygała od razu — odebrał albo nie.
 # Wiadomość zostaje bez odpowiedzi godzinami, nie znacząc jeszcze niczego, więc
 # `messaged` to stan oczekiwania i to jego pilnują przypomnienia.
-LEAD_STATUSES = ("new", "messaged", "replied", "no_reply", "rejected")
+# "burned" = kosz: lead spalony znika z listy roboczej, ale wiersz zostaje —
+# skasowanie na stałe to osobna, świadoma decyzja (Delete w szufladzie).
+LEAD_STATUSES = ("new", "messaged", "replied", "no_reply", "rejected", "burned")
 
 
 class LeadEvent(Base):

@@ -1143,6 +1143,22 @@ def test_wylaczone_przypomnienie_nie_wychodzi(_srodowisko):
     assert len(_przypomnienia(lead_id)) == 1
 
 
+def test_spalony_lead_laduje_w_koszu_i_gasi_przypomnienia(_srodowisko):
+    """Spalenie leada = kosz: status 'burned' przechodzi, a aktywne przypomnienia
+    gasną — cron nie ma prawa szturchać działu o człowieka, z którym koniec."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    rid = _zaplanuj(lead_id, text="dopytać spalonego", due_in_days=1).json()["id"]
+    _przesun_termin(rid, 1)
+
+    odp = client.post(f"/api/admin/leads/{lead_id}",
+                      json={"status": "burned"}, headers=ADMIN)
+    assert odp.status_code == 200 and odp.json()["status"] == "burned"
+
+    assert _przypomnienia(lead_id)[0].active is False
+    _cron()
+    assert not any("dopytać spalonego" in t for t in _srodowisko["przypomnienie"])
+
+
 def test_undo_przywraca_wylaczone_przypomnienie(_srodowisko):
     """Undo w panelu woła reactivate: wraca TEN SAM wiersz, z terminem
     i licznikiem — cancel niczego nie kasował."""

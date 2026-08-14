@@ -5562,6 +5562,12 @@ def _zapisz_status(session, lead: Lead, status: str, actor: str) -> None:
     lead.status = status
     lead.updated_at = datetime.now(timezone.utc)
     _zdarzenie(session, lead.id, "status", f"{poprzedni} → {status}", actor)
+    if status == "burned":
+        # Spalony lead ląduje w koszu — cron nie ma prawa szturchać działu
+        # o człowieka, z którym świadomie skończyliśmy.
+        (session.query(LeadReminder)
+         .filter(LeadReminder.lead_id == lead.id, LeadReminder.active.is_(True))
+         .update({"active": False}))
 
 
 def _sms_do_leada(session, lead: Lead, actor: str, *,

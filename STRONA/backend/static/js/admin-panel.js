@@ -904,8 +904,10 @@ function renderOrders(){
    The statuses read as one line: we wrote → they answered → it went quiet, or
    they are out. Contact goes through Telegram, so "we wrote" is a state that
    lasts, not a call that either connected or did not. */
+/* 'burned' is the trash can: the lead vanishes from the working list into the
+   Trash chip, but the row survives — permanent delete stays a separate call. */
 const LEAD_STATUSES=[['new','New'],['messaged','Messaged'],['replied','Replied'],
-  ['no_reply','No reply'],['rejected','Rejected']];
+  ['no_reply','No reply'],['rejected','Rejected'],['burned','Burned']];
 const leadLabel=s=>(LEAD_STATUSES.find(([k])=>k===s)||[,s])[1];
 /* The questionnaire answers are what the grade is made of, and they are the first
    thing you want in front of you when writing. Hover rather than a column: four
@@ -1084,8 +1086,13 @@ function renderLeads(){
   const list=window._leads||[];
   const q=(window._leadQ||'').toLowerCase();
   const f=window._leadFilter||'all';
-  const rows=list.filter(l=>
-    (f==='all'||(f==='bought'?(l.paid_usd>0||l.bought)
+  /* Burned leads live ONLY behind the Trash chip — every other filter works on
+     the living list, so a burned lead really is out of the way. */
+  const kosz=list.filter(l=>l.status==='burned');
+  const zywe=list.filter(l=>l.status!=='burned');
+  const baza=f==='burned'?kosz:zywe;
+  const rows=baza.filter(l=>
+    (f==='all'||f==='burned'||(f==='bought'?(l.paid_usd>0||l.bought)
       :f==='due'?(l.next_due&&dueDays(l.next_due)<=0)
       :f==='mine'?l.owner===meMail()
       :f==='free'?!l.owner
@@ -1111,21 +1118,25 @@ function renderLeads(){
   const waiting=rows.filter(l=>l.status==='new').length;
   /* Counted over the WHOLE list, not the filtered rows: a follow-up that came
      due is the one thing that must not hide behind the filter you left on. */
-  const due=list.filter(l=>l.next_due&&dueDays(l.next_due)<=0).length;
+  const due=zywe.filter(l=>l.next_due&&dueDays(l.next_due)<=0).length;
   /* Statusy i „Free" filtruje się rzadziej niż Due/Mine/Bought — mieszkają w
-     dolnym arkuszu pod jednym chipem, zamiast rozpychać toolbar do 11 chipów. */
-  const sheetActive=[...LEAD_STATUSES,['free','Free']].find(([k])=>k===f);
+     dolnym arkuszu pod jednym chipem, zamiast rozpychać toolbar do 11 chipów.
+     Kosz ma własny chip, więc w arkuszu statusów go nie ma. */
+  const sheetActive=[...LEAD_STATUSES.filter(([k])=>k!=='burned'),['free','Free']]
+    .find(([k])=>k===f);
   $('view').innerHTML=`
     ${due&&f!=='due'?`<button class="due-banner" onclick="window._leadFilter='due';renderLeads()">⏰ ${due} follow-up${due>1?'s':''} due — someone is waiting to hear back</button>`:''}
     <div class="toolbar lead-toolbar">
       ${searchBox('lead-q','_leadQ','renderLeads','Search name, email, phone or partner…')}
       <div class="seg">${[['all','All'],['due','Due'],['mine','Mine'],['bought','Bought']]
         .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._leadFilter='${f===k?'all':k}';renderLeads()">${l}</button>`).join('')}
-        <button class="${sheetActive?'on':''}" onclick="${sheetActive?`window._leadFilter='all';renderLeads()`:'openLeadStatusSheet()'}">${sheetActive?sheetActive[1]:'Status ▾'}</button></div>
+        <button class="${sheetActive?'on':''}" onclick="${sheetActive?`window._leadFilter='all';renderLeads()`:'openLeadStatusSheet()'}">${sheetActive?sheetActive[1]:'Status ▾'}</button>
+        ${kosz.length?`<button class="${f==='burned'?'on':''}" title="Burned leads"
+          onclick="window._leadFilter='${f==='burned'?'all':'burned'}';renderLeads()">🗑 ${kosz.length}</button>`:''}</div>
       <button class="btn-p sm" onclick="openNewLead()"
         title="Somebody who wrote to us without filling the form">+ Add lead</button>
     </div>
-    ${rows.length?`<p class="lead-statline">${rows.length}${rows.length!==list.length?` of ${list.length}`:''} lead${rows.length===1&&rows.length===list.length?'':'s'}${
+    ${rows.length?`<p class="lead-statline">${rows.length}${rows.length!==baza.length?` of ${baza.length}`:''} lead${rows.length===1&&rows.length===baza.length?'':'s'}${f==='burned'?' in the trash':''}${
         waiting?` · <span class="statlink" onclick="window._leadFilter='new';renderLeads()">${waiting} untouched</span>`:''} · ${bought.length} bought · $${fmt0(revenue)}</p>
     <div class="tbl-wrap tw-wide lead-wrap rtbl-wrap"><table class="tbl sortable lead-tbl rtbl" data-tkey="admin.leads.v3">
       <thead><tr><th>Date</th><th>Lead</th><th>Contact</th><th>Source</th>
@@ -1170,7 +1181,7 @@ function openLeadStatusSheet(){
   veil.onclick=closeActSheet;
   const s=document.createElement('div');s.id='act-sheet';s.className='sheet';
   s.innerHTML=`<div class="sheet-grab"></div><div class="act-sheet-title">Filter by status</div>
-    <div class="act-sheet-list">${[...LEAD_STATUSES,['free','Free — nobody took it']]
+    <div class="act-sheet-list">${[...LEAD_STATUSES.filter(([k])=>k!=='burned'),['free','Free — nobody took it']]
       .map(([k,lab])=>`<button class="btn-o" onclick="window._leadFilter='${k}';renderLeads();closeActSheet()">${lab}</button>`).join('')}</div>`;
   document.body.append(veil,s);
   requestAnimationFrame(()=>s.classList.add('open'));
@@ -1189,8 +1200,8 @@ function openLeadStatusFor(id){
   s.innerHTML=`<div class="sheet-grab"></div>
     <div class="act-sheet-title">${esc(l.name||l.email||'Lead')} — status</div>
     <div class="act-sheet-list">${LEAD_STATUSES.map(([k,lab])=>
-      `<button class="${l.status===k?'btn-p':'btn-o'}"
-        onclick="setLeadStatus(${id},'${k}');closeActSheet()">${lab}${l.status===k?' ✓':''}</button>`).join('')}</div>`;
+      `<button class="${l.status===k?'btn-p':k==='burned'?'btn-danger':'btn-o'}"
+        onclick="setLeadStatus(${id},'${k}');closeActSheet()">${k==='burned'?'🔥 Burned — to trash':lab}${l.status===k?' ✓':''}</button>`).join('')}</div>`;
   document.body.append(veil,s);
   requestAnimationFrame(()=>s.classList.add('open'));
 }
@@ -1201,10 +1212,13 @@ async function setLeadStatus(id,status){
   if(row&&row.status===status)return;
   try{
     await api('/api/admin/leads/'+id,{method:'POST',body:JSON.stringify({status})});
-    if(row)row.status=status;
+    if(row){row.status=status;
+      /* Backend gasi przypomnienia przy spaleniu — bez tego lokalna lista
+         pokazywalaby "⏰ in 7d" na leadzie lezacym w koszu az do refetchu. */
+      if(status==='burned')row.next_due=null}
     if(VIEW==='leads')renderLeads();
     if(window._leadOpen&&window._leadOpen.id===id)await openLead(id);
-    toast('Marked as '+leadLabel(status));
+    toast(status==='burned'?'Moved to trash':'Marked as '+leadLabel(status));
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
@@ -1265,7 +1279,7 @@ function deleteLead(id){
    application overwrites the first and only the counter survives. Every write
    also lands in lead_events, and that is what gets read back here. */
 const LEAD_STATUS_CLS={new:'pending',messaged:'pending',replied:'paid',
-  no_reply:'failed',rejected:'failed'};
+  no_reply:'failed',rejected:'failed',burned:'failed'};
 const LEAD_EVENT_LBL={applied:'Applied',status:'Status',note:'Note',reminder:'Reminder',
   claim:'Owner',tier:'Grade',bought:'Bought',sms:'Text sent',email:'E-mail sent'};
 /* Reminders are sent to US, never to the lead — the landing they applied through
