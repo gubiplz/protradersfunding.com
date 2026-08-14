@@ -150,6 +150,24 @@ def create_account_from_order(session, order: Order, notify_admin: bool = True) 
     if not real_mode:
         notify.send(_creds_event(acc), trader.email, _creds_ctx(trader, acc))
     # przy realnym provisioningu: konto zostaje 'provisioning' — poller je uzbroi i wyśle mail
+
+    # Buy 1 Get 1 Free: drugie konto tego samego rozmiaru jako grant ($0, ta sama
+    # ścieżka provisioningu, własny mail z poświadczeniami). Guard na `grant`
+    # przerywa rekurencję — grant_challenge wraca do tej funkcji ze swoim
+    # zamówieniem. Podwójnego grantu pilnuje atomowe przejęcie zamówienia wyżej:
+    # ten kod wykona się najwyżej raz na zamówienie. Import leniwy (billing
+    # importuje provisioning na poziomie modułu). Błąd grantu NIE wywraca
+    # opłaconego zamówienia — klient ma już pierwsze konto, admin dostaje alert
+    # i przyznaje drugie ręcznie z panelu.
+    if getattr(order, "bogo", False) and order.provider != "grant":
+        from . import billing
+        try:
+            billing.grant_challenge(session, trader, order.product_key, "Buy 1 Get 1 Free")
+        except Exception as e:
+            print(f"[provisioning] BOGO grant dla zamowienia #{order.id} nie wyszedl: {e}", flush=True)
+            notify.notify_admins("admin_order",
+                                 f"BOGO grant FAILED for order #{order.id} ({order.product_key}) — grant manually",
+                                 trader.email)
     return acc
 
 

@@ -14,9 +14,17 @@ from fastapi import HTTPException
 
 from . import catalog, loyalty, provisioning, telemetry
 from .config import get_settings
-from .models import Order, Product, RewardCode, Trader
+from .models import AppSetting, Order, Product, RewardCode, Trader
 
 settings = get_settings()
+
+# Buy 1 Get 1 Free — globalny wlacznik w AppSetting (przycisk w panelu admina).
+BOGO_KEY = "bogo_promo"
+
+
+def bogo_active(session) -> bool:
+    row = session.get(AppSetting, BOGO_KEY)
+    return bool(row and row.value == "1")
 
 
 def _stripe():
@@ -219,6 +227,7 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
                   coupon=(coupon or None), weekend_trading=bool(weekend_trading),
                   credits_used=kredyt,
                   bogo_paid_key=quote["bogo_paid_key"],
+                  bogo=bogo_active(session),
                   provider="stripe" if settings.stripe_enabled else "mock")
     session.add(order)
     # `commit`, nie `flush`: `telemetry.track` otwiera WLASNA sesje, a wolane na

@@ -137,6 +137,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
     },
     "orders": {
         "bogo_paid_key": "VARCHAR(48)",
+        "bogo": "BOOLEAN DEFAULT FALSE",
         "weekend_trading": "BOOLEAN DEFAULT FALSE",
         "credits_used": "FLOAT DEFAULT 0",
         "flag": "VARCHAR(24)",

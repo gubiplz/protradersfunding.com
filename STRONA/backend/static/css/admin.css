@@ -43,6 +43,9 @@ html[data-theme=dark]{
      pole trafienia, nie rysunek */
   .btn-x,.q-x{position:relative}
   .btn-x::after,.q-x::after{content:"";position:absolute;inset:-9px}
+  /* pigułka statusu na wierszu: ~24px rysunku, pełne 44px pola trafienia */
+  .status-tap{position:relative}
+  .status-tap::after{content:"";position:absolute;inset:-10px}
   /* portal zeruje min-height na .seg-mini button pod mysz; w szufladzie konta
      to jest przełącznik On/Off i przy 22 px trafia się w niego palcem na oślep */
   .seg-mini .sw button{min-height:44px;min-width:44px}
@@ -213,10 +216,50 @@ tr.clickable{cursor:pointer}
   .pool-form{grid-template-columns:repeat(auto-fit,minmax(160px,300px))}
 }
 
+/* ---------------- nagłówek zakładki leadów ----------------
+   Cztery kafle nad listą mówiły głównie o analityce; jedyny, który wołał
+   o działanie („Follow-ups due"), został sam jako złoty baner. Reszta liczb
+   zjeżdża do jednej wyciszonej linii pod paskiem narzędzi. */
+.due-banner{display:block;width:100%;text-align:left;cursor:pointer;
+  font:inherit;font-size:var(--fs-ui);font-weight:var(--fw-bold);color:var(--gold);
+  padding:12px 16px;margin-bottom:14px;border-radius:var(--r);
+  background:var(--gold-bg);border:1px solid var(--gold-line)}
+.lead-statline{font-size:var(--fs-cap);color:var(--muted);margin:0 0 10px}
+/* Pasek narzędzi jedzie ze scrollem: szukajka i filtry mają być pod ręką przy
+   setnym leadzie, nie na górze strony. top = zmierzona wysokość topbara
+   (--tb-h z JS — safe-area w PWA ją zmienia), z-index pod topbarem (30). */
+.lead-toolbar{position:sticky;top:var(--tb-h,58px);z-index:20;background:var(--bg);
+  padding:8px 0 10px;margin-bottom:0}
+/* Szkielet listy: wysokość ≈ docelowy wiersz (desktop) / karta (telefon),
+   żeby wstawienie danych nie podnosiło strony. */
+.lead-skel-row{height:52px;border-radius:10px;margin-bottom:8px}
+@media(max-width:860px){
+  .lead-skel-row{height:208px;border-radius:var(--r);margin-bottom:10px}
+}
+/* „untouched" w linii statystyk to jedyna liczba, za którą stoi filtr —
+   kropkowane podkreślenie zapowiada, że da się w nią stuknąć. */
+.statlink{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
+/* Ocena z formularza przy nazwisku — na obu układach; osobnej kolumny Grade
+   już nie ma, szczegóły (tier, score, odpowiedzi) niesie title. */
+.g-dot{margin-left:6px;font-size:13px;cursor:help}
+/* Data przy nazwisku żyje tylko na karcie telefonu — na desktopie jest
+   osobna, sortowalna kolumna Date. */
+.lead-when{display:none}
+/* Pigułka statusu jest przyciskiem (tap/klik → arkusz zmiany statusu, bez
+   wchodzenia w szufladę). Reset, bo .status z portalu pisano pod <span>. */
+button.status-tap{border:0;cursor:pointer;font-family:inherit}
+/* Notatka w wierszu to tylko podgląd pierwszej linii — edycja mieszka
+   w szufladzie, więc kolumna nie ma prawa rozpychać tabeli. */
+.lead-tbl .lead-note{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 /* ---------------- moderacja leadów ----------------
    Karty w slide-overze są węższe niż te w treści strony, więc 24px paddingu
    z .sec-card zjadałoby jedną trzecią szerokości panelu. */
 .lead-card{padding:14px 16px}
+.lead-card textarea.inp{width:100%}
+/* Historia w szufladzie zwinięta domyślnie: najdłuższy blok, potrzebny rzadko. */
+.lead-his{margin-top:16px}
+.lead-his summary{cursor:pointer;font-weight:var(--fw-bold);font-size:var(--fs-body);margin-bottom:6px}
 /* Dokładna treść tego, co poszło do leada. `pre-wrap`, bo mail ma akapity i bez
    nich zlewa się w ścianę; kreska z boku odróżnia NASZE słowa do niego od opisu
    zdarzenia obok. Wysokość ograniczona, żeby jeden mail nie zajął całej
@@ -281,15 +324,6 @@ tr.clickable{cursor:pointer}
 .act-btn svg{width:14px;height:14px}
 .act-btn:hover{border-color:var(--acc);color:var(--acc)}
 
-/* Status w wierszu jest polem wyboru, więc nie da się mu dać kropki jak
-   `.status`. Kolor tekstu robi to samo: listę trzydziestu leadów przegląda się
-   wzrokiem, szukając tych, do których nikt jeszcze nie napisał. */
-.lead-tbl select{font-weight:var(--fw-bold)}
-.lead-tbl select.st-new{color:var(--gold)}
-.lead-tbl select.st-messaged{color:var(--blue)}
-.lead-tbl select.st-replied{color:var(--green)}
-.lead-tbl select.st-no_reply,.lead-tbl select.st-rejected{color:var(--muted)}
-
 /* ---- tabele na telefonie: wzorzec kart (.rtbl) ----
    Kilkanaście kolumn z `white-space:nowrap` to na telefonie poziome
    przewijanie, w którym login ucieka spod statusu, a status spod notatki.
@@ -334,6 +368,8 @@ tr.clickable{cursor:pointer}
     transform:translateY(-50%);color:var(--dim);font-size:22px;line-height:1}
   table.rtbl td[data-l="Status"]{order:-1}
   table.rtbl td.rt-hide{display:none}
+  /* pusta komórka (np. brak notatki) nie pokazuje na karcie samej etykiety */
+  table.rtbl td:empty{display:none}
   /* przyciski akcji zawijają się w pełnowymiarowe cele dotyku */
   table.rtbl td.rt-acts{flex-wrap:wrap;justify-content:flex-end;gap:8px;align-items:center}
   table.rtbl td.rt-acts .btn-o,table.rtbl td.rt-acts .btn-p{min-height:40px}
@@ -341,18 +377,58 @@ tr.clickable{cursor:pointer}
   table.rtbl tr.tr-sub td{display:block;text-align:left}
   table.rtbl tr.tr-sub td::before{display:none}
 
-  /* ---- lead-tbl: pola edycji w wierszu (tylko lista leadów je ma) ---- */
-  table.lead-tbl td[data-l="Status"],table.lead-tbl td[data-l="Note"]{flex-wrap:wrap}
-  table.lead-tbl td[data-l="Status"] select,table.lead-tbl td[data-l="Note"] input{
-    flex:1 1 100%;min-width:0;min-height:40px;font-size:var(--fs-body)}
-  table.lead-tbl td[data-l="Status"] .due{flex:1 1 100%;text-align:left}
-  table.lead-tbl td[data-l="Contact"]{flex-wrap:wrap}
+  /* ---- karta leada: skomponowany układ zamiast par etykieta-wartość ----
+     Generyczny .rtbl dawał kartę ~625px: każde pole to wiersz z 72px etykietą
+     (DATE/CONTACT/NOTE), które tu tłumaczą się same. Etykiety znikają, pola
+     układają się w cztery strefy czytane kciukiem: nazwisko+data → status z
+     terminem → kontakt i akcje → meta (źródło · kwota · notatka). ~200px. */
+  table.lead-tbl tr{flex-direction:row;flex-wrap:wrap;align-items:center;padding:4px 2px 10px}
+  table.lead-tbl td{flex:1 1 100%}
+  table.lead-tbl td::before{display:none}
+  /* nagłówek: tytuł+grade po lewej, data dobija do prawej (przed strzałką ›);
+     order:-2 trzyma go NAD statusem, któremu generyczny .rtbl daje order:-1 */
+  table.lead-tbl td.rt-main{order:-2;display:flex;flex-wrap:wrap;align-items:baseline;column-gap:6px}
+  table.lead-tbl td.rt-main div{flex:1 1 100%}
+  table.lead-tbl .lead-when{display:inline;margin-left:auto;font-size:var(--fs-cap);
+    color:var(--dim);font-weight:var(--fw-reg)}
+  /* status dziedziczy order:-1 z .rtbl → druga strefa karty, zaraz pod
+     nazwiskiem (kto → na czym stoi → jak się skontaktować → meta) */
+  table.lead-tbl td[data-l="Status"]{display:flex;align-items:center;gap:10px;justify-content:flex-start}
+  table.lead-tbl td[data-l="Status"] .due{margin-left:auto;text-align:right;margin-top:0}
+  /* kontakt: telegram i telefon w jednej linii, akcje pod spodem dobite do
+     prawej — tam sięga kciuk przy obsłudze jedną ręką */
+  table.lead-tbl td[data-l="Contact"]{display:flex;flex-wrap:wrap;align-items:center;
+    column-gap:14px;justify-content:flex-start;text-align:left}
+  table.lead-tbl td[data-l="Contact"]>div{flex:0 1 auto}
   table.lead-tbl td[data-l="Contact"] a{font-size:var(--fs-body);line-height:1.9;word-break:break-all}
-  table.lead-tbl td[data-l="Contact"] .lead-ph{flex:1 1 100%;text-align:right}
-  .lead-acts{gap:8px;margin:6px 0 0}
+  table.lead-tbl .lead-act-row{flex:1 1 100%;display:flex;justify-content:flex-end}
+  .lead-acts{gap:8px;margin:2px 0 0}
   .act-btn{width:44px;height:40px}
   .act-btn svg{width:17px;height:17px}
-  .bought-cb{width:22px;height:22px}
+  /* meta: źródło i kwota obok siebie, notatka jedną uciętą linią pod nimi;
+     lead bez zakupu nie pokazuje pustego „—" (:has — panel to PWA na
+     własnym telefonie, stare przeglądarki dostaną po prostu kreskę) */
+  table.lead-tbl td[data-l="Source"],table.lead-tbl td[data-l="Bought"]{
+    display:inline-flex;flex:0 1 auto;align-items:center;font-size:var(--fs-ui)}
+  table.lead-tbl td[data-l="Bought"]:has(.no-buy){display:none}
+  table.lead-tbl td[data-l="Note"]{display:block;max-width:none;text-align:left;
+    font-size:var(--fs-cap);overflow:hidden;text-overflow:ellipsis;white-space:nowrap!important}
+}
+
+/* ---- desktop leadów: gęstość i hover ---- */
+@media(min-width:861px){
+  /* Contact w 2 liniach: telegram · telefon obok siebie, akcje pod spodem —
+     wiersz spada z 3-4 linii do 2, więcej leadów na ekran bez scrolla */
+  table.lead-tbl td[data-l="Contact"]>div{display:inline-block;vertical-align:middle}
+  table.lead-tbl td[data-l="Contact"]>div+div{margin-left:12px}
+  table.lead-tbl .lead-act-row{display:block;margin:4px 0 0;margin-left:0}
+  /* Przyciski akcji przygaszone do hovera wiersza (samo opacity — zero
+     reflow); nie znikają całkiem, żeby dało się je odkryć wzrokiem.
+     focus-within doświetla je też przy nawigacji klawiaturą. */
+  table.lead-tbl .lead-acts{opacity:.45;transition:opacity .16s var(--ease-out)}
+  table.lead-tbl tr:hover .lead-acts,table.lead-tbl tr:focus-within .lead-acts{opacity:1}
+  /* bazowe 13px pionowego paddingu z portal.css → 9px: gęsta lista robocza */
+  table.lead-tbl td{padding-top:9px;padding-bottom:9px}
 }
 
 /* Wyszukiwarki (Accounts/Pool/Orders): wrapper przejmuje slot inputa w
@@ -369,6 +445,14 @@ tr.clickable{cursor:pointer}
 .q-x:active{transform:translateY(-50%) scale(.9)}
 @media(max-width:640px){
   .toolbar .q-wrap{max-width:none;width:100%;flex-basis:100%}
+  /* Sticky toolbar leadów nie może być ścianą na pół ekranu telefonu:
+     szukajka dzieli wiersz z „+ Add lead", chipy jadą w bok zamiast się
+     zawijać — całość trzyma 2 wiersze. Reguły PO .toolbar .q-wrap wyżej,
+     bo przy równej specyficzności wygrywa późniejszy zapis. */
+  .lead-toolbar .q-wrap{flex-basis:0;flex:1 1 auto;width:auto;min-width:150px}
+  .lead-toolbar .seg{order:1;flex-wrap:nowrap;overflow-x:auto;
+    overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+  .lead-toolbar .seg button{flex:none;white-space:nowrap}
 }
 
 /* ---------------- filtry ----------------
@@ -413,3 +497,10 @@ tr.clickable{cursor:pointer}
 #act-sheet .act-sheet-list .btn-x,#act-sheet .act-sheet-list .act-btn{
   width:100%;min-height:48px;justify-content:center;font-size:var(--fs-body)}
 #act-sheet .act-sheet-list .btn-x{height:auto;border-radius:11px}
+/* Na desktopie arkusz nie rozciaga sie na cala szerokosc ekranu (portalowy
+   .sheet jest projektowany pod telefon) — filtr statusu otwiera go i tam. */
+@media(min-width:861px){
+  #act-sheet{left:50%;right:auto;width:min(420px,92vw);
+    transform:translate(-50%,100%)}
+  #act-sheet.open{transform:translate(-50%,0)}
+}

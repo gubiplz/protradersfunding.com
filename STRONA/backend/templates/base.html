@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"{% if promo %} class="has-promo"{% endif %}>
+<html lang="en"{% if promo or bogo_promo %} class="has-promo"{% endif %}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -20,7 +20,13 @@
 <script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"{{ site_name }}","logo":"{{ base_url }}/static/img/logo.png","email":"{{ support_email }}"}</script>
 {% include "_analytics.html" %}
 {% block head_extra %}{% endblock %}
-{% if promo %}<script>
+{% if bogo_promo %}<script>
+/* Runs BEFORE the first paint — same reason as the promo bar below. Own key
+   (bogoOff): dismissing last season's promo months ago must not hide THIS one. */
+try{
+if(localStorage.getItem('bogoOff')==='1')document.documentElement.classList.add('promo-off');
+}catch(e){}
+</script>{% elif promo %}<script>
 /* Runs BEFORE the first paint: a dismissed bar must never flash in and push the
    page down. The class drives --promo-h, so hiding it also restores every offset.
    promo-applied restores the "code accepted" state without a flash of the
@@ -33,7 +39,28 @@ if(localStorage.getItem('pf_promo_code')||localStorage.getItem('pf_coupon_code')
 </head>
 <body>
 
-{% if promo %}
+{% if bogo_promo %}
+{# BOGO wins over the code promo — one bar, one message. No form and no code:
+   the second account is added automatically after payment, nothing to apply. #}
+<div class="promo-bar" id="bogoBar">
+  <div class="wrap promo-in">
+    <span class="promo-tag">Buy 1 Get 1 Free</span>
+    {# Obietnica na POCZĄTKU zdania: na telefonie .promo-txt ucina się elipsą
+       (a .promo-tag znika), więc końcówka może przepaść — „free" nie może. #}
+    <span class="promo-txt"><b>Get a second account free</b> — same size, with any challenge.</span>
+    <a class="promo-cta promo-see" href="/#pricing">See plans</a>
+    <button class="promo-x" id="bogoX" aria-label="Dismiss">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+</div>
+<script>
+document.getElementById('bogoX').addEventListener('click',function(){
+  document.documentElement.classList.add('promo-off');
+  try{localStorage.setItem('bogoOff','1')}catch(e){}
+});
+</script>
+{% elif promo %}
 <div class="promo-bar" id="promoBar">
   <div class="wrap promo-in">
     <span class="promo-tag">{{ promo.name }}</span>

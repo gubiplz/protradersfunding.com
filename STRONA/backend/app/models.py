@@ -165,6 +165,11 @@ class Order(Base):
     stripe_session_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # BOGO: klucz produktu, za ktory klient zaplacil (gdy admin przyznaje wiekszy tier)
     bogo_paid_key: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    # Buy 1 Get 1 Free: po oplaceniu tego zamowienia provisioning dorzuca drugie
+    # konto tego samego rozmiaru jako grant. Stemplowane przy TWORZENIU zamowienia
+    # (globalna promocja albo decyzja admina per lead), nie przy platnosci — dzieki
+    # temu wylaczenie promocji nie zabiera BOGO klientom z linkiem juz w reku.
+    bogo: Mapped[bool] = mapped_column(Boolean, default=False)
     # Add-on Weekend Trading ($199): 2 dodatkowe dni handlu w tygodniu.
     weekend_trading: Mapped[bool] = mapped_column(Boolean, default=False)
     # Kredyty sklepowe odliczone od ceny tego zamowienia. Saldo tradera schodzi

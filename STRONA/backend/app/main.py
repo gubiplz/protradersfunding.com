@@ -3476,6 +3476,7 @@ def admin_orders():
             out.append({"id": o.id, "trader_email": maile.get(o.trader_id),
                         "product_key": o.product_key, "amount_usd": o.amount_usd,
                         "status": o.status, "provider": o.provider, "coupon": o.coupon,
+                        "bogo": bool(getattr(o, "bogo", False)),
                         "flag": o.flag, "fail_reason": o.fail_reason,
                         "payment_address": o.payment_address,
                         "payment_network": o.payment_network,
@@ -3528,6 +3529,10 @@ class ManualOrderIn(BaseModel):
     # Czy to sprzedaż po cenie partnerskiej. Kwotę liczy panel (widać ją, zanim
     # admin kliknie), tu zapada tylko decyzja, czy zamówienie ma nieść ślad umowy.
     partner_discount: bool = False
+    # Buy 1 Get 1 Free per zamówienie: po opłaceniu provisioning dorzuci drugie
+    # konto tego samego rozmiaru. Checkbox w panelu (pre-fill z globalnego
+    # przełącznika) — tu przychodzi już ostateczna decyzja admina dla tego leada.
+    bogo: bool = False
 
 
 def _zapisz_adres_wplaty(o: Order, adres: str | None, siec: str | None) -> None:
@@ -3649,7 +3654,7 @@ def admin_order_create(payload: ManualOrderIn):
             znacznik = f"PARTNER{int(settings.partner_discount_pct)}"
         o = Order(trader_id=trader.id, product_key=produkt.key, amount_usd=kwota,
                   status="pending", provider="manual", flag=payload.flag or None,
-                  credits_used=0.0, coupon=znacznik,
+                  credits_used=0.0, coupon=znacznik, bogo=bool(payload.bogo),
                   created_at=datetime.now(timezone.utc).replace(tzinfo=None))
         _zapisz_adres_wplaty(o, payload.payment_address, payload.payment_network)
         session.add(o)
@@ -3657,13 +3662,74 @@ def admin_order_create(payload: ManualOrderIn):
         wyslany = _mail_oczekujemy_na_platnosc(session, o) if payload.notify_trader else False
         return {"id": o.id, "trader_email": trader.email, "product_key": o.product_key,
                 "amount_usd": o.amount_usd, "status": o.status, "flag": o.flag,
-                "emailed": wyslany,
+                "bogo": bool(o.bogo), "emailed": wyslany,
                 # Panel mówi wprost, że przy okazji powstało konto — inaczej
                 # nikt nie wie, że lead ma się logować przez „forgot password".
                 "trader_created": nowy_trader,
                 # Panel ma powiedzieć adminowi, że mail poszedł BEZ adresu portfela,
                 # zamiast zostawiać go w przekonaniu, że klient wie, gdzie zapłacić.
                 "payment_details": bool(o.payment_address or settings.crypto_wallet)}
+    finally:
+        session.close()
+
+
+class BogoPromoIn(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/admin/bogo-promo", dependencies=[Depends(auth.require_admin)])
+def admin_bogo_promo_state():
+    session = SessionLocal()
+    try:
+        return {"enabled": billing.bogo_active(session)}
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/bogo-promo", dependencies=[Depends(auth.require_admin)])
+def admin_bogo_promo_set(payload: BogoPromoIn):
+    """Globalny włącznik Buy 1 Get 1 Free — przycisk w ustawieniach panelu.
+
+    Działa od TERAZ w przód: stempluje nowe checkouty (`Order.bogo`), pokazuje
+    pasek na stronach publicznych. Zamówień już wystawionych nie rusza w żadną
+    stronę — klient z linkiem w ręku zachowuje to, co mu obiecano, a wyłączenie
+    promocji niczego mu nie zabiera (patrz komentarz przy `Order.bogo`).
+    """
+    session = SessionLocal()
+    try:
+        row = session.get(AppSetting, billing.BOGO_KEY)
+        if row is None:
+            row = AppSetting(key=billing.BOGO_KEY)
+            session.add(row)
+        row.value = "1" if payload.enabled else "0"
+        session.commit()
+        _BOGO_BAR_CACHE["ts"] = 0.0
+        return {"enabled": payload.enabled}
+    finally:
+        session.close()
+
+
+class OrderBogoIn(BaseModel):
+    bogo: bool
+
+
+@app.post("/api/admin/orders/{order_id}/bogo", dependencies=[Depends(auth.require_admin)])
+def admin_order_bogo(order_id: int, payload: OrderBogoIn):
+    """Decyzja per zamówienie: czy po opłaceniu dorzucamy drugie konto (BOGO).
+
+    Tylko na nieopłaconych — opłacone przeszło już przez provisioning i ten
+    przełącznik niczego by nie zrobił, a w panelu wyglądałby, jakby robił.
+    """
+    session = SessionLocal()
+    try:
+        o = session.get(Order, order_id)
+        if not o:
+            raise HTTPException(404, "Order not found")
+        if o.status == "paid":
+            raise HTTPException(400, "Order is already paid — grant the second account manually")
+        o.bogo = payload.bogo
+        session.commit()
+        return {"id": o.id, "bogo": bool(o.bogo)}
     finally:
         session.close()
 
@@ -5741,6 +5807,7 @@ def admin_lead_detail(lead_id: int):
                 zamowienia.append({
                     "id": o.id, "product_key": o.product_key,
                     "amount_usd": round(float(o.amount_usd or 0), 2), "status": o.status,
+                    "bogo": bool(getattr(o, "bogo", False)),
                     "created_at": o.created_at.isoformat() if o.created_at else None,
                     "paid_at": o.paid_at.isoformat() if o.paid_at else None,
                 })
@@ -6753,11 +6820,30 @@ def _promo_ctx() -> dict | None:
             "code": settings.promo_upgrade_code}
 
 
+# Stan przełącznika BOGO dla stron publicznych. Krótki TTL zamiast zapytania
+# przy KAŻDYM renderze — baza stoi za oceanem. POST /api/admin/bogo-promo
+# zeruje ts, więc instancja obsługująca panel pokazuje zmianę od razu;
+# pozostałe dociągają ją najpóźniej po minucie.
+_BOGO_BAR_CACHE: dict = {"ts": 0.0, "val": False}
+
+
+def _bogo_promo_active() -> bool:
+    now = time.time()
+    if now - _BOGO_BAR_CACHE["ts"] > 60:
+        s = SessionLocal()
+        try:
+            _BOGO_BAR_CACHE.update(ts=now, val=billing.bogo_active(s))
+        finally:
+            s.close()
+    return _BOGO_BAR_CACHE["val"]
+
+
 def _page(request: Request, template: str, **extra):
     ctx = {"site_name": settings.site_name, "support_email": settings.support_email,
            "base_url": _public_base(request), "asset_v": ASSET_V,
            "ga_id": settings.ga_measurement_id,
            "clarity_id": settings.clarity_project_id, "promo": _promo_ctx(),
+           "bogo_promo": _bogo_promo_active(),
            "google_client_id": settings.google_client_id, **extra}
     return jinja.TemplateResponse(request, template, ctx)
 

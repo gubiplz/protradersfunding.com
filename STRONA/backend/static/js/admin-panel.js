@@ -109,12 +109,27 @@ function toggleTheme(){
 }
 paintTheme();
 
+/* Sticky toolbar w Leads przykleja sie POD topbarem, a topbar zmienia wysokosc
+   (safe-area w PWA, wesze okna) — mierzymy go zamiast zgadywac. */
+const measureTopbar=()=>document.documentElement.style
+  .setProperty('--tb-h',(document.querySelector('.topbar')?.offsetHeight||58)+'px');
+measureTopbar();
+addEventListener('resize',measureTopbar);
+
 let VIEW='overview';
 /* Ekran przejscia: paski trzymaja wysokosc widoku, kolko w kolorze akcentu mowi,
    ze cos sie dzieje. Same paski na ciemnym motywie czytaly sie jako pusty ekran. */
 const LOADING_HTML=(h=260)=>`<div class="view-load">
   <div class="skel" style="height:110px;margin-bottom:16px"></div>
   <div class="skel" style="height:${h}px"></div>
+  <div class="vl-mid"><span class="vl-ring"></span><span class="vl-txt">Loading…</span></div>
+</div>`;
+/* Szkielet w ksztalcie listy leadow: wysokosci ≈ docelowy wiersz/karta,
+   zeby wstawienie danych nie podnosilo strony. */
+const LEADS_SKEL=()=>`<div class="view-load">
+  <div class="skel" style="height:44px;margin-bottom:10px"></div>
+  <div class="skel" style="height:14px;width:40%;margin-bottom:10px"></div>
+  ${'<div class="skel lead-skel-row"></div>'.repeat(6)}
   <div class="vl-mid"><span class="vl-ring"></span><span class="vl-txt">Loading…</span></div>
 </div>`;
 
@@ -132,7 +147,7 @@ function go(v){
   $('pg-title').textContent=t[0]; $('pg-crumb').textContent=t[1];
   toggleSide(false);
   const moj=++PRZEJSCIE;
-  $('view').innerHTML=LOADING_HTML(260);
+  $('view').innerHTML=v==='leads'?LEADS_SKEL():LOADING_HTML(260);
   VIEWS[v]()
     .then(()=>{if(moj!==PRZEJSCIE&&VIEWS[VIEW])VIEWS[VIEW]()})
     .catch(e=>{
@@ -488,7 +503,8 @@ const VIEWS={
  },
 
  async settings(){
-  const [s,pb]=await Promise.all([api('/api/stats'),api('/api/admin/payout-engine')]);
+  const [s,pb,bg]=await Promise.all([api('/api/stats'),api('/api/admin/payout-engine'),
+    api('/api/admin/bogo-promo').catch(()=>({enabled:false}))]);
   const brakuje=[!pb.telegram_ready?'Telegram channel':null,!pb.renderer_ready?'certificate renderer':null].filter(Boolean);
   $('view').innerHTML=`
     <div class="card-cols">
@@ -534,6 +550,21 @@ const VIEWS={
         the channel; only the share above lands on the certificate strip on the landing page, so it
         does not fill up with the same entries.
         <b>Run once now</b> replaces today's automatic run rather than adding to it.</p></div>
+
+    <div class="sec-card" style="max-width:560px"><h3>Buy 1 Get 1 Free</h3>
+      <div class="chip-row" style="margin-bottom:12px">
+        <span class="status ${bg.enabled?'funded':'pending'}"><span class="dot"></span>${bg.enabled?'running':'off'}</span>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn-p" onclick="setBogoPromo(${bg.enabled?'false':'true'})">${bg.enabled?'Turn off':'Turn on'}</button>
+      </div>
+      <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
+        While it's on, a bar on the public site announces the promo and <b>every paid order
+        automatically gets a second account of the same size</b> — including checkout purchases,
+        not just manual orders. Orders are stamped when they are <b>created</b>: turning the promo
+        off later does not take BOGO away from a customer who already holds a payment link, and
+        turning it on does not add it to orders issued before. For a single lead you can always
+        override this with the checkbox in the New order window or on the order itself.</p></div>
 
     <div class="sec-card" style="max-width:560px"><h3>Notifications</h3>
       <div class="mod-row">
@@ -801,7 +832,8 @@ function renderOrders(){
       <thead><tr><th>#</th><th>Date</th><th>Trader</th><th>Product</th><th>Amount</th><th>Provider</th><th>Status</th><th>Account</th><th class="no-sort"></th></tr></thead>
       <tbody>${rows.map(o=>`<tr>
         <td class="num rt-hide" data-l="#">${o.id}</td><td class="muted" data-l="Date" data-sort="${esc(o.created_at||'')}">${dstr(o.created_at)}</td>
-        <td class="rt-main" data-l="Trader">${esc(o.trader_email||'—')}</td><td data-l="Product">${esc(o.product_key)}</td>
+        <td class="rt-main" data-l="Trader">${esc(o.trader_email||'—')}</td>
+        <td data-l="Product">${esc(o.product_key)}${o.bogo?` <span class="up" style="font-size:11px" title="Buy 1 Get 1 Free — paying this order also creates a free second account of the same size">+1 free</span>`:''}</td>
         <td class="num" data-l="Amount">$${fmt(o.amount_usd)}${o.coupon?` <span class="up" style="font-size:11px">(${esc(o.coupon)})</span>`:''}</td>
         <td class="muted rt-hide" data-l="Provider">${esc(o.provider)}</td>
         <td data-l="Status"><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span>
@@ -815,6 +847,8 @@ function renderOrders(){
             title="Copy a card-payment link for this order — send it to the customer">Pay link</button>
           <button class="btn-o sm" onclick="flagOrder(${o.id},'${o.flag==='awaiting_crypto'?'':'awaiting_crypto'}')"
             title="${o.flag==='awaiting_crypto'?'Clear the awaiting-crypto flag':'Mark as awaiting crypto payment'}">${o.flag==='awaiting_crypto'?'Clear flag':'Crypto?'}</button>
+          <button class="btn-o sm" onclick="toggleOrderBogo(${o.id},${o.bogo?'false':'true'})"
+            title="${o.bogo?'Remove the free second account from this order':'Buy 1 Get 1 Free — add a free second account of the same size when this order is paid'}">${o.bogo?'BOGO ✓':'BOGO'}</button>
           <button class="btn-o sm" onclick="markOrderFailed(${o.id})" title="Payment is not coming, close the order with a reason">Mark failed</button>`:''}
           <button class="btn-p sm" onclick="markOrderPaid(${o.id})" title="Confirm the payment arrived, creates the account">Mark paid</button>`}
           ${XBTN(`deleteOrderRow(${o.id},'${esc(o.trader_email||'')}',${o.amount_usd},${o.account_id||0})`,'Delete order')}</td></tr>`).join('')}
@@ -855,6 +889,42 @@ function copyOpener(id){
   (navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject())
     .then(()=>toast('Opener copied — paste it in the chat'))
     .catch(()=>{prompt('Copy the opener:',txt)});
+}
+/* Klik w telegramowy przycisk = pierwszy kontakt: status „new" sam przechodzi
+   w „messaged", a niczyj lead staje się TWÓJ — ten sam gest, który otwiera
+   czat, robi całą księgowość (przyciski na kanale TG robią to samo). Undo
+   cofa jedno i drugie, gdy chat otworzył się przez pomyłkę; każdy inny
+   status zostaje w spokoju — drugi klik niczego nie psuje. */
+async function markMessaged(id){
+  const row=(window._leads||[]).find(x=>x.id===id);
+  const l=row||(window._leadOpen&&window._leadOpen.id===id?window._leadOpen:null);
+  if(!l||l.status!=='new')return;
+  const przejmuje=!l.owner&&!!meMail();
+  const odswiez=()=>{
+    if(VIEW==='leads')renderLeads();
+    if(window._leadOpen&&window._leadOpen.id===id)openLead(id);
+  };
+  const ustaw=(status,owner)=>{
+    if(row){row.status=status;if(owner!==undefined)row.owner=owner}
+    if(window._leadOpen&&window._leadOpen.id===id){
+      window._leadOpen.status=status;
+      if(owner!==undefined)window._leadOpen.owner=owner;
+    }
+  };
+  try{
+    const d=await api('/api/admin/leads/'+id,{method:'POST',
+      body:JSON.stringify({status:'messaged',...(przejmuje?{owner:meMail()}:{})})});
+    ustaw(d.status,przejmuje?meMail():undefined);
+    if(row)row.contacted_at=d.contacted_at;
+    odswiez();
+    /* 30 s, nie 8: klik przełącza na Telegrama — undo musi doczekać powrotu */
+    undoToast(przejmuje?'Messaged — and it’s yours.':'Marked as messaged.',async()=>{
+      await api('/api/admin/leads/'+id,{method:'POST',
+        body:JSON.stringify({status:'new',...(przejmuje?{owner:''}:{})})});
+      ustaw('new',przejmuje?'':undefined);
+      odswiez();
+    },30000);
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 /* Ostatnia droga do kogoś, komu Telegram nie dochodzi: SMS z linkiem z
    powrotem na Telegram. Ta wysyłka KOSZTUJE i nie da się jej cofnąć, więc
@@ -934,7 +1004,7 @@ function leadTgLink(l){
   const h=String(l.telegram||'').replace(/^@/,'');
   if(!h)return'';
   return TG_HANDLE_RE.test(h)
-    ?`<a href="https://t.me/${esc(h)}?text=${encodeURIComponent(leadOpener(l))}" target="_blank" rel="noopener">@${esc(h)}</a>`
+    ?`<a href="https://t.me/${esc(h)}?text=${encodeURIComponent(leadOpener(l))}" target="_blank" rel="noopener" onclick="markMessaged(${l.id})">@${esc(h)}</a>`
     :`<span class="muted" title="Not a valid Telegram handle — ask for the right one">${esc(l.telegram)}</span>`;
 }
 /* Three icon actions (owner's spec): paper plane = write on Telegram by the
@@ -957,10 +1027,10 @@ function leadPhoneActs(l){
   return `<span class="lead-acts">${handleOk
     ?`<a class="act-btn" title="Write on Telegram to @${esc(h)} — opener prefilled"
         aria-label="Telegram by handle" href="https://t.me/${esc(h)}?text=${opener}"
-        target="_blank" rel="noopener">${ICO_TG}</a>`:''}${intl
+        target="_blank" rel="noopener" onclick="markMessaged(${l.id})">${ICO_TG}</a>`:''}${intl
     ?`<a class="act-btn" title="Telegram chat found by the phone number (opener goes to the clipboard)"
         aria-label="Telegram by phone" href="https://t.me/+${digits}"
-        target="_blank" rel="noopener" onclick="copyOpener(${l.id})">${ICO_PHONE}</a>`:''}${l.sms_ready
+        target="_blank" rel="noopener" onclick="copyOpener(${l.id});markMessaged(${l.id})">${ICO_PHONE}</a>`:''}${l.sms_ready
     ?`<button class="act-btn" type="button" aria-label="Send a text message"
         title="Text them the Telegram link — for people the Telegram side never reaches"
         onclick="sendLeadSms(${l.id})">${ICO_SMS}</button>`:''}${l.mail_ready
@@ -982,111 +1052,121 @@ function renderLeads(){
       :f==='free'?!l.owner
       :l.status===f))&&
     (!q||(l.email||'').toLowerCase().includes(q)||(l.name||'').toLowerCase().includes(q)
-     ||(l.phone||'').includes(q)||(l.ref||'').toLowerCase().includes(q)));
-  /* Same rule as Orders: the tiles describe WHAT IS VISIBLE below them, so
+     ||(l.phone||'').includes(q)||(l.ref||'').toLowerCase().includes(q)
+     ||('@'+String(l.telegram||'').replace(/^@/,'')).toLowerCase().includes(q)
+     ||(l.note||'').toLowerCase().includes(q)));
+  /* Kolejność pracy, nie kolejność wpłynięcia: najpierw zaległe follow-upy
+     (najstarszy dług na górze), potem nietknięci nowi, reszta od najnowszych.
+     Na telefonie nagłówki tabeli są schowane, więc to jedyny porządek, jaki
+     tam istnieje; na desktopie klik w nagłówek dalej sortuje po swojemu. */
+  const rank=l=>l.next_due&&dueDays(l.next_due)<=0?0:l.status==='new'?1:2;
+  rows.sort((a,b)=>rank(a)-rank(b)
+    ||(rank(a)===0?new Date(a.next_due)-new Date(b.next_due)
+      :String(b.created_at||'').localeCompare(String(a.created_at||''))));
+  /* Same rule as Orders: the numbers describe WHAT IS VISIBLE below them, so
      switching to "Rejected" cannot leave the full revenue sitting on top. */
-  /* „Bought" = zapłacone zamówienie ALBO ręczny checkbox (deal poza sklepem);
+  /* „Bought" = zapłacone zamówienie ALBO ręczny przełącznik (deal poza sklepem);
      przychód sumuje tylko realne zamówienia — ręczne oznaczenie nie niesie kwoty. */
   const bought=rows.filter(l=>l.paid_usd>0||l.bought);
   const revenue=bought.reduce((s,l)=>s+(l.paid_usd||0),0);
   const waiting=rows.filter(l=>l.status==='new').length;
-  const conv=rows.length?Math.round(bought.length/rows.length*100):0;
   /* Counted over the WHOLE list, not the filtered rows: a follow-up that came
      due is the one thing that must not hide behind the filter you left on. */
   const due=list.filter(l=>l.next_due&&dueDays(l.next_due)<=0).length;
+  /* Statusy i „Free" filtruje się rzadziej niż Due/Mine/Bought — mieszkają w
+     dolnym arkuszu pod jednym chipem, zamiast rozpychać toolbar do 11 chipów. */
+  const sheetActive=[...LEAD_STATUSES,['free','Free']].find(([k])=>k===f);
   $('view').innerHTML=`
-    <div class="stats-row">
-      <div class="stat-tile ${due?'clickable':''}" ${due?`onclick="window._leadFilter='due';renderLeads()"`:''}>
-        <div class="tile-ic ${due?'orange':'blue'}">${ICO.alert}</div>
-        <div><div class="lbl">Follow-ups due</div><div class="val">${due}</div>
-          <div class="sub">${due?'someone is waiting to hear back':'nothing scheduled for today'}</div></div></div>
-      <div class="stat-tile"><div class="tile-ic ${waiting?'orange':'blue'}">${ICO.alert}</div>
-        <div><div class="lbl">Nobody wrote yet</div><div class="val">${waiting}</div>
-          <div class="sub">of ${rows.length} shown</div></div></div>
-      <div class="stat-tile"><div class="tile-ic green">${ICO.dollar}</div>
-        <div><div class="lbl">Revenue from leads</div><div class="val">$${fmt0(revenue)}</div>
-          <div class="sub">${bought.length} bought</div></div></div>
-      <div class="stat-tile"><div class="tile-ic purple">${ICO.trend}</div>
-        <div><div class="lbl">Conversion</div><div class="val">${conv}%</div>
-          <div class="sub">lead to paid order</div></div></div>
-    </div>
-    <div class="toolbar">
+    ${due&&f!=='due'?`<button class="due-banner" onclick="window._leadFilter='due';renderLeads()">⏰ ${due} follow-up${due>1?'s':''} due — someone is waiting to hear back</button>`:''}
+    <div class="toolbar lead-toolbar">
       ${searchBox('lead-q','_leadQ','renderLeads','Search name, email, phone or partner…')}
-      <div class="seg">${[['all','All'],['due','Due'],['mine','Mine'],['free','Free'],
-        ...LEAD_STATUSES,['bought','Bought']]
-        .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._leadFilter='${f===k?'all':k}';renderLeads()">${l}</button>`).join('')}</div>
-      <span class="count-pill">${rows.length} of ${list.length}</span>
+      <div class="seg">${[['all','All'],['due','Due'],['mine','Mine'],['bought','Bought']]
+        .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._leadFilter='${f===k?'all':k}';renderLeads()">${l}</button>`).join('')}
+        <button class="${sheetActive?'on':''}" onclick="${sheetActive?`window._leadFilter='all';renderLeads()`:'openLeadStatusSheet()'}">${sheetActive?sheetActive[1]:'Status ▾'}</button></div>
       <button class="btn-p sm" onclick="openNewLead()"
         title="Somebody who wrote to us without filling the form">+ Add lead</button>
     </div>
-    ${rows.length?`<p class="muted" style="font-size:12.5px;margin-bottom:10px">Tap the name for the full history: every application with the answers given at the time, status changes and who made them — and the button that deletes it.</p>
-    <div class="tbl-wrap tw-wide lead-wrap rtbl-wrap"><table class="tbl sortable lead-tbl rtbl" data-tkey="admin.leads">
-      <thead><tr><th>Date</th><th>Lead</th><th>Contact</th><th>Grade</th><th>Source</th>
+    ${rows.length?`<p class="lead-statline">${rows.length}${rows.length!==list.length?` of ${list.length}`:''} leads${
+        waiting?` · <span class="statlink" onclick="window._leadFilter='new';renderLeads()">${waiting} untouched</span>`:''} · ${bought.length} bought · $${fmt0(revenue)}</p>
+    <div class="tbl-wrap tw-wide lead-wrap rtbl-wrap"><table class="tbl sortable lead-tbl rtbl" data-tkey="admin.leads.v3">
+      <thead><tr><th>Date</th><th>Lead</th><th>Contact</th><th>Source</th>
         <th>Status</th><th>Bought</th><th>Note</th></tr></thead>
-      <tbody>${rows.map(l=>`<tr class="clickable" onclick="openLead(${l.id})">
-        <td class="muted" data-l="Date" data-sort="${esc(l.created_at||'')}">${dstr(l.created_at)}</td>
-        <td data-l="Lead" class="rt-main"><b>${esc(l.name||'—')}</b>
-          ${l.owner?`<div style="font-size:11px" title="Taken by">👤 ${esc(l.owner)}</div>`
-            :'<div class="muted" style="font-size:11px">nobody took it</div>'}
+      <tbody>${rows.map(l=>`<tr class="clickable" onclick="if(event.target.closest('a,button,input,textarea,select'))return;openLead(${l.id})">
+        <td class="muted rt-hide" data-l="Date" data-sort="${esc(l.created_at||'')}">${dstr(l.created_at)}</td>
+        <td data-l="Lead" class="rt-main"><b>${esc(l.name||'—')}</b>${
+          l.tier?`<span class="g-dot" title="${esc(l.tier)} ${l.score}&#10;${esc(leadAnswers(l.answers))}">${l.tier==='high'?'🔥':l.tier==='warm'?'🟡':'⚪️'}</span>`:''}
+          <span class="lead-when">${dstr(l.created_at)}</span>
+          ${l.owner?`<div style="font-size:11px" title="Taken by">👤 ${esc(l.owner)}</div>`:''}
           ${l.applications>1?`<div class="muted" style="font-size:11px" title="Filled the form more than once">↻ applied ${l.applications}×</div>`:''}
           ${l.outcome==='not_qualified'?`<div class="muted" style="font-size:11px">${
             l.source==='safe'?'safe page lead — warm up':'failed the questionnaire'}</div>`:''}</td>
-        <td data-l="Contact" onclick="event.stopPropagation()"><a href="mailto:${esc(l.email)}">${esc(l.email)}</a>
-          ${l.telegram?`<div>${leadTgLink(l)}</div>`:''}
+        <td data-l="Contact">${l.telegram?`<div>${leadTgLink(l)}</div>`:''}
           ${l.phone?`<div class="muted lead-ph"><a href="tel:${esc(l.phone)}">${esc(l.phone)}</a>${
             l.phone_iso?` ${esc(l.phone_iso)}`:''}</div>`:''}
-          ${l.phone||l.telegram?`<div class="lead-ph">${leadPhoneActs(l)}</div>`:''}</td>
-        <td data-l="Grade" data-sort="${l.score||0}" title="${esc(leadAnswers(l.answers))}">${l.tier?`<span class="status ${l.tier==='high'?'paid':l.tier==='warm'?'pending':'failed'}"><span class="dot"></span>${esc(l.tier)} ${l.score}</span>`:'<span class="muted">—</span>'}</td>
+          ${l.phone||l.telegram?`<div class="lead-act-row">${leadPhoneActs(l)}</div>`:''}</td>
         <td class="muted" data-l="Source">${esc(l.source||'—')}${l.ref?`<div style="font-size:11px">via ${esc(l.ref)}</div>`:''}</td>
-        <td data-l="Status" onclick="event.stopPropagation()"><select class="inp sm st-${esc(l.status)}" style="min-width:116px" onchange="setLeadStatus(${l.id},this.value)">${
-          LEAD_STATUSES.map(([k,lab])=>`<option value="${k}"${l.status===k?' selected':''}>${lab}</option>`).join('')}</select>
+        <td data-l="Status"><button type="button" class="status status-tap ${LEAD_STATUS_CLS[l.status]||'pending'}"
+            aria-label="Change status" title="Change status"
+            onclick="openLeadStatusFor(${l.id})"><span class="dot"></span>${esc(leadLabel(l.status))}</button>
           ${l.next_due?`<div class="due ${dueDays(l.next_due)<=0?'now':''}">⏰ ${dueLabel(l.next_due)}</div>`
+            :l.owner&&(l.status==='messaged'||l.status==='replied')?'<div class="due now">no next step</div>'
             :l.contacted_at?`<div class="muted" style="font-size:11px">${dstr(l.contacted_at)}</div>`:''}</td>
-        <td class="num" data-l="Bought" data-sort="${l.paid_usd>0?l.paid_usd:l.bought?0.5:0}" onclick="event.stopPropagation()">${
+        <td class="num" data-l="Bought" data-sort="${l.paid_usd>0?l.paid_usd:l.bought?0.5:0}">${
           l.paid_usd>0?`<span class="status paid"><span class="dot"></span>$${fmt0(l.paid_usd)}</span>`
-          :`<input type="checkbox" class="bought-cb" ${l.bought?'checked':''}
-              title="Mark as bought — deal closed outside the store" aria-label="Bought"
-              onchange="setLeadBought(${l.id},this.checked)">`}</td>
-        <td data-l="Note" onclick="event.stopPropagation()"><input class="inp sm" style="min-width:170px" value="${esc(l.note||'')}"
-          placeholder="Add a note…" onchange="setLeadNote(${l.id},this.value)"></td></tr>`).join('')}
+          :l.bought?'<span class="status paid"><span class="dot"></span>bought</span>'
+          :'<span class="muted no-buy">—</span>'}</td>
+        <td data-l="Note" class="muted lead-note" title="${esc(l.note||'')}">${esc((l.note||'').split('\n')[0])}</td></tr>`).join('')}
       </tbody></table></div>`
       :`<div class="empty"><h3>${list.length?'No leads match':'No leads yet'}</h3>
         <p>${list.length?'Try a different search or filter.':'Applications from the landing page land here.'}</p></div>`}`;
 }
 
-/* Both writers patch the row in memory instead of refetching the list: the admin
-   is usually working down a long table and a full re-render would throw away
-   their scroll position and whatever they were typing in the next note. */
+/* Filtr po statusie w dolnym arkuszu (ten sam #act-sheet co long-press):
+   pięć statusów + „Free" rozpychało toolbar do jedenastu chipów, a filtruje
+   się nimi rzadziej niż Due/Mine/Bought. Wybrany wraca do toolbara jako
+   chip z ✕ w miejscu „Status ▾". */
+function openLeadStatusSheet(){
+  if(document.getElementById('act-sheet'))return;
+  const veil=document.createElement('div');veil.id='act-veil';veil.className='sheet-veil';
+  veil.onclick=closeActSheet;
+  const s=document.createElement('div');s.id='act-sheet';s.className='sheet';
+  s.innerHTML=`<div class="sheet-grab"></div><div class="act-sheet-title">Filter by status</div>
+    <div class="act-sheet-list">${[...LEAD_STATUSES,['free','Free — nobody took it']]
+      .map(([k,lab])=>`<button class="btn-o" onclick="window._leadFilter='${k}';renderLeads();closeActSheet()">${lab}</button>`).join('')}</div>`;
+  document.body.append(veil,s);
+  requestAnimationFrame(()=>s.classList.add('open'));
+}
+
+/* Tap w pigułkę statusu na wierszu: arkusz zmiany statusu TEGO leada.
+   Zmiana z listy była możliwa tylko przez szufladę albo long-press, którego
+   nie widać — pigułka jest na wierzchu i sama zapowiada, co się stanie. */
+function openLeadStatusFor(id){
+  if(document.getElementById('act-sheet'))return;
+  const l=(window._leads||[]).find(x=>x.id===id);
+  if(!l)return;
+  const veil=document.createElement('div');veil.id='act-veil';veil.className='sheet-veil';
+  veil.onclick=closeActSheet;
+  const s=document.createElement('div');s.id='act-sheet';s.className='sheet';
+  s.innerHTML=`<div class="sheet-grab"></div>
+    <div class="act-sheet-title">${esc(l.name||l.email||'Lead')} — status</div>
+    <div class="act-sheet-list">${LEAD_STATUSES.map(([k,lab])=>
+      `<button class="${l.status===k?'btn-p':'btn-o'}"
+        onclick="setLeadStatus(${id},'${k}');closeActSheet()">${lab}${l.status===k?' ✓':''}</button>`).join('')}</div>`;
+  document.body.append(veil,s);
+  requestAnimationFrame(()=>s.classList.add('open'));
+}
+/* Jak patchLead, ale bez otwierania szuflady — akcja z listy ma zostawić
+   admina na liście. Szuflada odświeża się tylko, gdy akurat wisi na tym leadzie. */
 async function setLeadStatus(id,status){
+  const row=(window._leads||[]).find(x=>x.id===id);
+  if(row&&row.status===status)return;
   try{
-    const d=await api('/api/admin/leads/'+id,{method:'POST',body:JSON.stringify({status})});
-    const row=(window._leads||[]).find(l=>l.id===id);
-    if(row){row.status=d.status;row.contacted_at=d.contacted_at}
+    await api('/api/admin/leads/'+id,{method:'POST',body:JSON.stringify({status})});
+    if(row)row.status=status;
+    if(VIEW==='leads')renderLeads();
+    if(window._leadOpen&&window._leadOpen.id===id)await openLead(id);
     toast('Marked as '+leadLabel(status));
-    if(window._leadFilter&&window._leadFilter!=='all')renderLeads();
-  }catch(e){toast('Error: '+e.message,'err');VIEWS.leads()}
-}
-
-async function setLeadNote(id,note){
-  try{
-    await api('/api/admin/leads/'+id,{method:'POST',body:JSON.stringify({note})});
-    const row=(window._leads||[]).find(l=>l.id===id);
-    if(row)row.note=note;
-    toast('Note saved');
   }catch(e){toast('Error: '+e.message,'err')}
-}
-
-/* Ręczne „kupił" — dla deali zamkniętych poza sklepem (przelew, Telegram).
-   Zapłacone zamówienie na ten sam mail i tak liczy się samo i pokazuje kwotę;
-   checkbox istnieje dokładnie dla zakupów, których sklep nie widzi. */
-async function setLeadBought(id,on){
-  try{
-    await api('/api/admin/leads/'+id,{method:'POST',body:JSON.stringify({bought:on})});
-    const row=(window._leads||[]).find(l=>l.id===id);
-    if(row)row.bought=on;
-    toast(on?'Marked as bought':'Unmarked');
-    if(window._leadFilter==='bought')renderLeads();
-  }catch(e){toast('Error: '+e.message,'err');VIEWS.leads()}
 }
 
 /* Who is sitting at the panel = the signed-in admin account. Leads are owned
@@ -1209,6 +1289,12 @@ function leadModCard(l){
       <div class="seg wrap">${grades.map(([k,lab])=>
         `<button class="${l.tier===k?'on':''}" onclick="patchLead(${l.id},{tier:'${k}'},'Grade set to ${k}')">${lab}</button>`).join('')}</div>
     </div>
+    ${l.paid_usd>0?'':`<div class="mod-row">
+      <div><div class="lbl">Bought</div>
+        <div class="muted" style="font-size:11.5px">deal closed outside the store — a paid order counts itself</div></div>
+      <div class="mod-btns"><button class="btn-o" onclick="patchLead(${l.id},{bought:${!l.bought}},'${
+        l.bought?'Unmarked':'Marked as bought'}')">${l.bought?'Bought ✓ — unmark':'Mark as bought'}</button></div>
+    </div>`}
   </div>`;
 }
 
@@ -1256,11 +1342,12 @@ function leadReminderCard(l){
         <div class="rem-txt"><div>${esc(r.text)}</div>
           <div class="muted">${dueLabel(r.due_at)}${r.repeat_days?` · repeats every ${r.repeat_days}d`:''}${
             r.sent_count?` · sent ${r.sent_count}×`:''}${r.created_by==='cron'?' · automatic':''}</div></div>
-        ${XBTN(`cancelLeadReminder(${l.id},${r.id})`,'Cancel this reminder')}
+        ${XBTN(`cancelLeadReminder(${l.id},${r.id})`,'Done — dismiss this follow-up')}
       </div>`).join('')}</div>`:'<p class="muted" style="font-size:12.5px">Nothing scheduled.</p>'}
-    <div class="chip-row rem-presets">${REMINDER_PRESETS.map(([lab],i)=>
-      `<button class="chip preset" onclick="pickPreset(${i})">${lab}</button>`).join('')}</div>
-    <input id="rem-text" class="inp sm" placeholder="What needs doing, in your own words…">
+    <div class="chip-row rem-presets">${REMINDER_PRESETS.map(([lab,days,,text],i)=>
+      `<button class="chip preset" title="${esc(text)} — in ${days}d"
+        onclick="schedulePreset(${l.id},${i})">${lab} · ${days}d</button>`).join('')}</div>
+    <input id="rem-text" class="inp sm" placeholder="Or in your own words…">
     <div class="rem-when">
       <label>in <input id="rem-days" class="inp sm" type="number" min="0" max="365" value="3"> days</label>
       <label title="Keeps nudging on the same cycle until you cancel it">
@@ -1274,9 +1361,20 @@ function leadReminderCard(l){
   </div>`;
 }
 
-function pickPreset(i){
-  const [,days,rep,text]=REMINDER_PRESETS[i];
-  $('rem-text').value=text;$('rem-days').value=days;$('rem-rep').checked=rep>0;
+/* Chip presetu od razu planuje: jeden dotyk zamiast „wypełnij → przewiń →
+   Schedule". POST zwraca id, więc Undo kasuje przez istniejący endpoint
+   cancel. Własny tekst i nietypowy termin dalej idą przez formularz niżej. */
+async function schedulePreset(id,i){
+  const [lab,days,rep,text]=REMINDER_PRESETS[i];
+  try{
+    const r=await api(`/api/admin/leads/${id}/reminders`,
+      {method:'POST',body:JSON.stringify({text,due_in_days:days,repeat_days:rep>0?rep:null})});
+    await openLead(id);renderLeads();
+    undoToast(`${lab} — in ${days}d${rep>0?`, repeats every ${rep}d`:''}.`,async()=>{
+      await api(`/api/admin/leads/${id}/reminders/${r.id}/cancel`,{method:'POST'});
+      await openLead(id);renderLeads();
+    });
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 
 async function addLeadReminder(id){
@@ -1374,7 +1472,11 @@ async function openLead(id){
      wcisnąć w atrybut HTML, a nazwiska bywają z apostrofem. */
   window._leadOpen=l;
   const ev=l.events||[],ords=l.orders||[];
+  /* Wejście z bannera „follow-ups due" ma od razu pokazywać CO jest do
+     zrobienia — bez przewijania do karty Follow-up w połowie szuflady. */
+  const zalegle=(l.reminders||[]).filter(r=>r.active&&dueDays(r.due_at)<=0);
   openOver(l.name||l.email,`
+    ${zalegle.length?`<div class="due-banner" style="cursor:default">⏰ ${dueLabel(zalegle[0].due_at)} — ${esc(zalegle[0].text)}</div>`:''}
     <div class="chip-row">
       <span class="status ${LEAD_STATUS_CLS[l.status]||'pending'}"><span class="dot"></span>${esc(leadLabel(l.status))}</span>
       ${l.tier?`<span class="chip">${esc(l.tier)} ${l.score}</span>`:''}
@@ -1395,21 +1497,28 @@ async function openLead(id){
       ${Object.entries(l.answers).map(([q,v])=>`<div class="note-line"><span class="muted">${esc(q)}</span><br><b>${esc(v)}</b></div>`).join('')}
       <p class="muted" style="font-size:11.5px;margin-top:8px">From the latest application — earlier ones sit in the history below.</p></div>`:''}
     ${leadModCard(l)}
-    ${leadSellCard(l)}
     ${leadReminderCard(l)}
-    ${l.note?`<div class="lead-card sec-card"><h4>Notes</h4>
-      ${l.note.split('\n').filter(Boolean).map(n=>`<div class="note-line">${esc(n)}</div>`).join('')}
-      <p class="muted" style="font-size:11.5px;margin-top:8px">Reply to the lead's message on Telegram and it lands here.</p></div>`:''}
+    ${leadSellCard(l)}
+    <div class="lead-card sec-card"><h4>Notes</h4>
+      <textarea class="inp" rows="${Math.min(6,(l.note||'').split('\n').length+1)}"
+        placeholder="What they wrote, what they want — one line per note"
+        onchange="patchLead(${l.id},{note:this.value.trim()},'Note saved')">${esc(l.note||'')}</textarea>
+      <p class="muted" style="font-size:11.5px;margin-top:8px">Reply to the lead's message on Telegram and it lands here too.</p></div>
     ${ords.length?`<h4 style="margin:16px 0 6px">Orders</h4>
       <div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>Date</th><th>Product</th><th>Amount</th><th>Status</th></tr></thead>
+      <thead><tr><th>Date</th><th>Product</th><th>Amount</th><th>Status</th>
+        <th title="Buy 1 Get 1 Free — paying the order also creates a free second account of the same size">BOGO</th></tr></thead>
       <tbody>${ords.map(o=>`<tr><td class="muted" style="white-space:nowrap">${dstr(o.created_at)}</td>
         <td>${esc(o.product_key)}</td><td class="num">$${fmt0(o.amount_usd)}</td>
-        <td><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span></td></tr>`).join('')}
+        <td><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span></td>
+        <td>${o.status==='paid'
+          ?(o.bogo?'<span class="up" style="font-size:11px">2 accounts</span>':'<span class="muted">—</span>')
+          :`<button class="btn-o sm" onclick="toggleOrderBogo(${o.id},${o.bogo?'false':'true'},${l.id})"
+             title="${o.bogo?'Remove the free second account from this order':'Add a free second account of the same size when this order is paid'}">${o.bogo?'On ✓':'Off'}</button>`}</td></tr>`).join('')}
       </tbody></table></div>`
       :'<p class="muted" style="font-size:12.5px;margin-top:14px">No orders on this e-mail address.</p>'}
-    <h4 style="margin:16px 0 6px">History</h4>
-    ${ev.length?`<div class="tbl-wrap"><table class="tbl" style="table-layout:fixed">
+    ${ev.length?`<details class="lead-his"><summary>History (${ev.length})</summary>
+      <div class="tbl-wrap"><table class="tbl" style="table-layout:fixed">
       <thead><tr><th style="width:104px">When</th><th style="width:96px">What</th><th>Details</th></tr></thead>
       <tbody>${ev.map(e=>`<tr>
         <td class="muted" style="white-space:nowrap">${dstr(e.created_at)}</td>
@@ -1419,9 +1528,8 @@ async function openLead(id){
           ${e.body?`<div class="lead-sent">${esc(e.body)}</div>`:''}
           ${Object.keys(e.answers||{}).length?`<div class="muted" style="font-size:11.5px;margin-top:4px">${
             Object.entries(e.answers).map(([q,v])=>`${esc(q)} → <b>${esc(v)}</b>`).join('<br>')}</div>`:''}</td></tr>`).join('')}
-      </tbody></table></div>`
-      :`<div class="empty"><h3>Nothing recorded yet</h3>
-        <p>History starts at the first change made after this feature went live.</p></div>`}
+      </tbody></table></div></details>`
+      :'<p class="muted" style="font-size:12.5px;margin-top:14px">No history yet — it starts with the first change.</p>'}
     ${leadDangerCard(l)}`);
 }
 /* Jedno zdanie o mailu z instrukcją wpłaty. Brak adresu portfela MUSI krzyczeć:
@@ -1487,6 +1595,17 @@ async function flagOrder(id,flag){
     toast(flag?`Marked as awaiting crypto payment. ${txt}`:'Flag cleared.',flag?kind:'ok',7000);
     renderOrders()}
   catch(e){toast('Error: '+e.message,'err')}
+}
+/* Decyzja BOGO per zamówienie. `leadId` przychodzi z szuflady leada — wtedy
+   odświeżamy szufladę; bez niego jesteśmy w zakładce Orders i wystarczy
+   podmienić wpis w lokalnej liście. */
+async function toggleOrderBogo(id,on,leadId){
+  try{await api(`/api/admin/orders/${id}/bogo`,{method:'POST',body:JSON.stringify({bogo:on})});
+    toast(on?'BOGO on — paying this order will also create a free second account of the same size.'
+            :'BOGO off — this order creates one account.','ok',7000);
+    const o=(window._orders||[]).find(x=>x.id===id); if(o)o.bogo=on;
+    if(leadId)await openLead(leadId); else renderOrders();
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 /* Link do zapłaty kartą za KONKRETNE zamówienie — do wklejenia klientowi na
    Telegramie. Token jest stały, więc drugie kliknięcie daje ten sam adres i nie
@@ -2264,6 +2383,13 @@ async function runPayoutBot(){
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
+async function setBogoPromo(on){
+  try{await api('/api/admin/bogo-promo',{method:'POST',body:JSON.stringify({enabled:on})});
+    toast(on?'Buy 1 Get 1 Free is ON — the site shows the promo bar and every new paid order gets a free second account.'
+            :'Buy 1 Get 1 Free is off. Orders created while it was on keep their free account.','ok',8000);
+    go('settings');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
 async function setSimFallback(on){
   try{await api('/api/admin/pool/sim-fallback',{method:'POST',body:JSON.stringify({enabled:on})});
     toast(on?'Auto-provisioning of simulated credentials is ON.':'Auto-provisioning turned off.','ok');
@@ -2555,9 +2681,13 @@ async function openManualOrder(traderId,lead){
   /* Rabat partnerski jest miły, ale nie jest warunkiem sprzedaży: gdyby jego
      odczyt wywrócił okno, admin nie wystawiłby ŻADNEGO zamówienia przez zniżkę,
      której akurat nie ma. Brak odpowiedzi = zero = okno bez tej opcji. */
-  try{[products,traders,pct]=await Promise.all([
+  let bogoOn=false;
+  try{[products,traders,pct,bogoOn]=await Promise.all([
     (await fetch('/api/products')).json(),lead?[]:api('/api/admin/traders'),
-    api('/api/admin/partner-terms').then(d=>d.discount_pct||0).catch(()=>0)])}
+    api('/api/admin/partner-terms').then(d=>d.discount_pct||0).catch(()=>0),
+    /* Pre-fill checkboxa BOGO stanem globalnej promocji — admin widzi domyślną
+       decyzję i może ją nadpisać dla tego jednego zamówienia. */
+    api('/api/admin/bogo-promo').then(d=>!!d.enabled).catch(()=>false)])}
   catch(e){toast('Error: '+e.message,'err');return}
   if(!lead&&!traders.length){toast('No registered traders yet.','err');return}
   window._moTraders=traders;window._moLead=lead||null;window._moPartnerPct=pct;
@@ -2591,6 +2721,10 @@ async function openManualOrder(traderId,lead){
         <input type="checkbox" id="mo-partner"${lead?' checked':''} onchange="moPrice()" style="width:16px;height:16px;accent-color:var(--acc)">
         <span>Partner price <b>−${pct}%</b>
           <span class="muted">— the rate agreed for customers the partner brings in</span></span></label>`:''}
+      <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="mo-bogo"${bogoOn?' checked':''} style="width:16px;height:16px;accent-color:var(--acc)">
+        <span><b>Buy 1 Get 1 Free</b>
+          <span class="muted">— a second account of the same size is created automatically once this order is paid</span></span></label>
       <div class="stack" id="mo-crypto">
         <div><label class="muted" style="font-size:12px">Network</label>
           <input id="mo-network" class="inp" placeholder="e.g. USDT · TRC20" value="${esc(lastWallet().network||'')}"></div>
@@ -2674,6 +2808,7 @@ async function submitManualOrder(){
       ...(lead?{email:lead.email}:{trader_id:tid}),
       product_key:$('mo-product').value,amount_usd:amount,
       partner_discount:!!$('mo-partner')?.checked,
+      bogo:!!$('mo-bogo')?.checked,
       flag:(!link&&$('mo-awaiting').checked)?'awaiting_crypto':'',
       payment_address:addr,payment_network:net,
       notify_trader:!link&&$('mo-mail').checked})});
