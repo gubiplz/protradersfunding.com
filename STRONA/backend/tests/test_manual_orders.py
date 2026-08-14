@@ -25,7 +25,7 @@ from app import main as glowny  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Lead, Order, Product, Trader  # noqa: E402
+from app.models import Account, Lead, Order, PoolAccount, Product, Trader  # noqa: E402
 
 init_db()
 s = SessionLocal(); catalog.seed_products(s); s.close()
@@ -327,6 +327,44 @@ def test_domkniecie_recznej_platnosci_tworzy_konto(maile):
     # Ręczne zamówienie to normalny przychód, nie grant — `provider` musi zostać.
     assert o.provider == "manual"
     s.close()
+
+
+def test_mark_paid_od_reki_uzbraja_konto_i_wysyla_poswiadczenia(maile, monkeypatch):
+    """Płatność crypto przy realnym MT5: mail z poświadczeniami ma wyjść OD RAZU
+    po Mark paid (rachunek z puli), a nie przy najbliższym dziennym cronie —
+    inaczej klient stoi z opłaconym zamówieniem i pustą skrzynką."""
+    tid, email = _trader()
+    oid = _dodaj(tid).json()["id"]
+
+    s = SessionLocal()
+    # Kickoff przetwarza WSZYSTKIE konta 'provisioning' po kolei, więc wpisów
+    # w puli musi starczyć też dla kont osieroconych przez sąsiednie testy.
+    czekajace = (s.query(Account).filter(Account.status == "provisioning",
+                                         Account.initial_balance == 25_000).count())
+    for i in range(czekajace + 1):
+        s.add(PoolAccount(platform_login=f"255{i:04d}", platform_password="Haslo123",
+                          platform_server="GOMarketsLtd-Demo", account_size=25_000))
+    s.commit(); s.close()
+
+    ust = get_settings()
+    monkeypatch.setattr(ust, "mt5_provisioning", True)
+    monkeypatch.setattr(ust, "provisioning_source", "pool")
+
+    r = client.post(f"/api/admin/orders/{oid}/mark-paid", headers=ADMIN)
+    assert r.status_code == 200
+    aid = r.json()["account_id"]
+
+    s = SessionLocal()
+    acc = s.get(Account, aid)
+    assert acc.status == "active"
+    assert acc.platform_login and acc.platform_login.startswith("2550")
+    assert acc.platform_server == "GOMarketsLtd-Demo"
+    # Sprzątamy wpisy puli po sobie — inne testy liczą pulę 25k globalnie.
+    s.query(PoolAccount).filter(PoolAccount.platform_login.like("2550%")) \
+        .delete(synchronize_session=False)
+    s.commit(); s.close()
+
+    assert any(e == "credentials" and to == email for (e, to, _c) in maile)
 
 
 def test_zamowienie_po_mailu_zaklada_konto(maile):

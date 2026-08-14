@@ -1188,9 +1188,16 @@ async def stripe_webhook(request: Request):
     sig = request.headers.get("stripe-signature")
     session = SessionLocal()
     try:
-        return billing.handle_webhook(session, payload, sig)
+        wynik = billing.handle_webhook(session, payload, sig)
     finally:
         session.close()
+    # Jak przy mark-paid: opłacone konto ma dostać rachunek z puli od ręki,
+    # a nie przy najbliższym dziennym cronie.
+    try:
+        await poller.provision_kickoff()
+    except Exception as e:  # najbliższy tick i tak dokończy
+        print(f"[webhook] natychmiastowy provisioning nie wyszedł: {e}")
+    return wynik
 
 
 @app.get("/api/orders")
@@ -3814,7 +3821,7 @@ def admin_flag_order(order_id: int, payload: OrderFlagIn):
 
 
 @app.post("/api/admin/orders/{order_id}/mark-paid", dependencies=[Depends(auth.require_admin)])
-def admin_mark_order_paid(order_id: int):
+async def admin_mark_order_paid(order_id: int):
     """Ręczne domknięcie płatności (crypto/przelew poza Stripe).
 
     Ta sama ścieżka co webhook Stripe i mock — provisioning tworzy konto,
@@ -3834,11 +3841,19 @@ def admin_mark_order_paid(order_id: int):
             o.flag = None
         o.fail_reason = None      # recovery: płatność jednak doszła
         session.commit()
-        return {"paid": o.id, "account_id": acc.id,
-                "bogo": bool(getattr(o, "bogo", False)),
-                "bogo_grant_ok": bool(getattr(o, "bogo", False)) and not grant_failed}
+        wynik = {"paid": o.id, "account_id": acc.id,
+                 "bogo": bool(getattr(o, "bogo", False)),
+                 "bogo_grant_ok": bool(getattr(o, "bogo", False)) and not grant_failed}
     finally:
         session.close()
+    # Przy realnym MT5 konto wychodzi stąd w 'provisioning', a mail z poświadczeniami
+    # dopiero przy przydziale rachunku — bez tego kopnięcia klient czekałby na dzienny
+    # cron i admin słusznie zgłaszał „oznaczyłem paid i nie przyszedł mail".
+    try:
+        await poller.provision_kickoff()
+    except Exception as e:  # najbliższy tick i tak dokończy
+        print(f"[mark-paid] natychmiastowy provisioning nie wyszedł: {e}")
+    return wynik
 
 
 class OrderFailIn(BaseModel):

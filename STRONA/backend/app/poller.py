@@ -293,6 +293,18 @@ async def tick_once() -> dict:
         session.close()
 
 
+async def provision_kickoff() -> None:
+    """Natychmiastowa próba uzbrojenia kont czekających w 'provisioning'.
+
+    Wołane zaraz po zaksięgowaniu płatności (mark-paid, webhook Stripe) — na
+    serverless najbliższy pełny tick może przyjść dopiero z dziennego crona,
+    a mail z poświadczeniami wychodzi dopiero przy przydziale rachunku."""
+    global _feed
+    if _feed is None:
+        _feed = make_feed()
+    await provisioning.provision_pending(SessionLocal, _feed)
+
+
 async def _loop() -> None:
     global _feed
     _feed = make_feed()
