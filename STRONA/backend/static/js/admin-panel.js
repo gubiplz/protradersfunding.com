@@ -3252,15 +3252,26 @@ if(localStorage.getItem('pf_admin_collapsed')==='1')$('side').classList.add('col
     ME=m; $('tok-state').textContent=m.email;
     $('app-shell').style.visibility='visible';   // only now reveal the panel
     /* Deep-link z pusha (zimny start): /admin?lead=<id> otwiera kartę leada.
-       Adres od razu wraca na czyste /admin — razem z `?pwa=1` z manifestu,
-       żeby odświeżenie strony nie powtarzało nawigacji. */
+       Adres wraca na /admin?pwa=1 — NIE na gołe /admin: bez `pwa=1` odświeżenie
+       strony po wygaśnięciu ciasteczka trafia w celowy 404 serwera i admin
+       "wylatuje z aplikacji", zamiast przejść przez furtkę i ekran logowania. */
     const lead=new URLSearchParams(location.search).get('lead');
-    if(location.search)history.replaceState(null,'','/admin');
+    if(location.search!=='?pwa=1')history.replaceState(null,'','/admin?pwa=1');
     if(lead){go('leads');openLead(+lead)}
     else go('overview');
     applyPendingLead();
     loadInbox();
-  }catch(e){/* api() already redirected to login */}
+  }catch(e){
+    if(e&&e.message==='Access denied')return; /* api() already redirected to login */
+    /* Blad sieci na zimnym starcie (PWA w windzie, słaby zasięg): bez tego
+       szkielet zostawał niewidoczny na zawsze — martwy bialy ekran. */
+    document.body.insertAdjacentHTML('beforeend',
+      `<div style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;background:var(--bg,#f6f7fb);z-index:99">
+        <div style="font-weight:700">No connection</div>
+        <div style="font-size:13px;color:#64748b">The panel could not load. Check your network and try again.</div>
+        <button class="btn-p" onclick="location.reload()">Retry</button>
+      </div>`);
+  }
 })();
 setInterval(()=>{
   if(document.hidden)return;
@@ -3370,3 +3381,80 @@ addEventListener('touchcancel',()=>{if(_lpT){clearTimeout(_lpT);_lpT=null}});
 addEventListener('click',e=>{
   if(_lpFired){_lpFired=false;e.stopPropagation();e.preventDefault()}
 },true);
+
+/* ---------------- pull-to-refresh (mobile / PWA) ----------------
+   Zainstalowana PWA nie ma przycisku ani gestu odswiezania — jedyna droga do
+   swiezych danych bylo przelaczenie zakladki. Pociagniecie w dol przy samej
+   gorze strony przeladowuje DANE biezacego widoku (nie cala strone: pelny
+   reload traci stan i na slabym zasiegu potrafi wywalic z panelu). */
+(function(){
+  if(!('ontouchstart' in window))return;
+  let startY=0,pull=0,armed=false,busy=false,el=null;
+  const THRESH=72;
+  function ind(){
+    if(el)return el;
+    el=document.createElement('div');el.id='ptr';
+    el.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>';
+    document.body.appendChild(el);return el;
+  }
+  /* Gest rusza tylko, gdy przewija sie sam dokument: wewnetrzne scrolle
+     (szuflada, arkusz, tabela) maja wlasna fizyke i nie moga odpalac odswiezania. */
+  function wewnetrznyScroll(n){
+    for(;n&&n!==document.body;n=n.parentElement){
+      if(n.nodeType!==1)continue;
+      const s=getComputedStyle(n);
+      if((s.overflowY==='auto'||s.overflowY==='scroll')&&n.scrollHeight>n.clientHeight+1)return true;
+    }
+    return false;
+  }
+  addEventListener('touchstart',e=>{
+    armed=false;pull=0;
+    if(busy||!ME||window.scrollY>0)return;
+    if($('over').classList.contains('open')||document.getElementById('act-sheet')
+       ||document.body.classList.contains('nav-open'))return;
+    const a=document.activeElement;
+    if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))return; /* klawiatura otwarta */
+    if(wewnetrznyScroll(e.target))return;
+    startY=e.touches[0].clientY;armed=true;
+  },{passive:true});
+  addEventListener('touchmove',e=>{
+    if(!armed||busy)return;
+    pull=e.touches[0].clientY-startY;
+    const i=ind();
+    if(pull<=8){i.classList.remove('show','ready');return}
+    const p=Math.min(pull,120);
+    i.classList.add('show');
+    i.style.transform=`translateX(-50%) translateY(${Math.round(p*0.55)}px) rotate(${Math.round(p*2)}deg)`;
+    i.classList.toggle('ready',pull>THRESH);
+  },{passive:true});
+  async function koniec(){
+    if(!armed)return;armed=false;
+    const i=ind(),odpal=pull>THRESH&&!busy;
+    pull=0;
+    if(!odpal){i.classList.remove('show','ready');i.style.transform='';return}
+    busy=true;i.classList.remove('ready');i.classList.add('show','spin');
+    i.style.transform='translateX(-50%) translateY(46px)';
+    /* Minimalne pol sekundy krecenia — blyskajacy na ulamek klatki wskaznik
+       wyglada jak usterka, nie jak potwierdzenie. */
+    const chwila=new Promise(r=>setTimeout(r,500));
+    try{await Promise.all([(VIEWS[VIEW]||(()=>Promise.resolve()))(),loadInbox(),chwila])}
+    catch(_){}
+    busy=false;i.classList.remove('show','spin');i.style.transform='';
+  }
+  addEventListener('touchend',koniec,{passive:true});
+  addEventListener('touchcancel',koniec,{passive:true});
+})();
+
+/* ---------------- klawiatura ekranowa vs dolny pasek ----------------
+   position:fixed na iOS nie wie nic o klawiaturze: pasek "przykleja sie" nad
+   nia albo zawisa w polowie ekranu. Na czas pisania pasek znika
+   (body.kb-open w portal.css), wraca po zamknieciu klawiatury. */
+addEventListener('focusin',e=>{
+  if(e.target.matches&&e.target.matches('input,textarea,select'))
+    document.body.classList.add('kb-open');
+});
+addEventListener('focusout',()=>setTimeout(()=>{
+  const a=document.activeElement;
+  if(!(a&&a.matches&&a.matches('input,textarea,select')))
+    document.body.classList.remove('kb-open');
+},80));

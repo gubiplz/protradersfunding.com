@@ -976,6 +976,23 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
      widoku" laduje pod fixed nawigacja i klik trafia w jej przyciski. */
   html{scroll-padding-bottom:calc(70px + env(safe-area-inset-bottom))}
 }
+/* Klawiatura ekranowa: position:fixed na iOS nie wie o niej nic i pasek
+   zawisa nad polem edycji w polowie ekranu — na czas pisania znika. */
+body.kb-open .botnav,body.kb-open .tabbar{display:none}
+
+/* Wskaznik pull-to-refresh (admin-panel.js): kolko z strzalka zjezdza z gory
+   proporcjonalnie do pociagniecia, po progu kreci sie do konca odswiezania. */
+#ptr{position:fixed;top:calc(6px + env(safe-area-inset-top));left:50%;
+  transform:translateX(-50%);z-index:80;width:38px;height:38px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--card,#fff);border:1px solid var(--line);
+  box-shadow:0 4px 14px rgba(15,23,42,.16);color:var(--muted);
+  opacity:0;pointer-events:none;transition:opacity .15s}
+#ptr svg{width:20px;height:20px}
+#ptr.show{opacity:1}
+#ptr.ready{color:var(--acc)}
+#ptr.spin svg{animation:ptr-spin .8s linear infinite}
+@keyframes ptr-spin{to{transform:rotate(360deg)}}
 
 /* ---------------- challenge cards (portal Challenges view) ---------------- */
 /* "Scale your progress" upsell strip (real math from the best live account) */

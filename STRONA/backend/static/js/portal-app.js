@@ -3127,4 +3127,17 @@ async function submitPayout(id){
   }catch(e){btn.disabled=false;toast('Error: '+e.message,'err')}
 }
 
+/* Klawiatura ekranowa vs dolny tabbar: position:fixed na iOS nie wie o niej
+   nic i pasek zawisa nad polem edycji w polowie ekranu — na czas pisania
+   znika (body.kb-open w portal.css), wraca po zamknieciu klawiatury. */
+addEventListener('focusin',e=>{
+  if(e.target.matches&&e.target.matches('input,textarea,select'))
+    document.body.classList.add('kb-open');
+});
+addEventListener('focusout',()=>setTimeout(()=>{
+  const a=document.activeElement;
+  if(!(a&&a.matches&&a.matches('input,textarea,select')))
+    document.body.classList.remove('kb-open');
+},80));
+
 boot();
