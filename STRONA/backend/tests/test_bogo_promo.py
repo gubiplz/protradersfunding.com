@@ -126,3 +126,41 @@ def test_reczne_zamowienie_z_karty_leada_i_decyzja_per_zamowienie():
     # Po opłaceniu decyzji nie da się już zmienić — provisioning był jednorazowy.
     r = client.post(f"/api/admin/orders/{oid}/bogo", json={"bogo": False}, headers=ADMIN)
     assert r.status_code == 400
+
+
+def test_strona_platnosci_i_json_partnera_mowia_o_bogo(monkeypatch):
+    """Obietnica z Telegramu musi stać przy kwocie: /pay/<token> i partnerski
+    JSON /api/pay/<token> niosą BOGO, a mail „awaiting payment" wymienia bonus."""
+    # Env nie wystarczy: get_settings() jest cache'owane i w pełnym suicie
+    # wcześniejszy moduł buduje Settings bez sekretu partnera.
+    monkeypatch.setattr(get_settings(), "partner_api_token", "partner-test-token", raising=False)
+    _product()
+    r = client.post("/api/admin/orders", headers=ADMIN, json={
+        "email": f"lead-pay{next(LICZNIK)}@test.pl", "product_key": "bogo-25k",
+        "bogo": True, "flag": "", "notify_trader": False})
+    assert r.status_code == 200 and r.json()["bogo"] is True
+    oid = r.json()["id"]
+
+    token = client.post(f"/api/admin/orders/{oid}/pay-link", headers=ADMIN
+                        ).json()["url"].rsplit("/", 1)[-1]
+
+    html = client.get(f"/pay/{token}").text
+    assert "Buy 1 Get 1 Free" in html and "second account of the same size" in html
+
+    d = client.get(f"/api/pay/{token}",
+                   headers={"X-Partner-Token": "partner-test-token"}).json()
+    assert d["bogo"] is True
+
+    from app import notify  # noqa: E402
+    subject, body = notify._render("order_awaiting_payment", {
+        "name": "T", "product_label": "Bogo 25K", "amount": 249,
+        "reference": f"PTF-{oid}", "bogo": True})
+    assert "second account of the same size" in body
+
+    # Zamówienie bez stempla nie obiecuje niczego.
+    r = client.post("/api/admin/orders", headers=ADMIN, json={
+        "email": f"lead-pay{next(LICZNIK)}@test.pl", "product_key": "bogo-25k",
+        "bogo": False, "flag": "", "notify_trader": False})
+    token2 = client.post(f"/api/admin/orders/{r.json()['id']}/pay-link", headers=ADMIN
+                         ).json()["url"].rsplit("/", 1)[-1]
+    assert "Buy 1 Get 1 Free" not in client.get(f"/pay/{token2}").text

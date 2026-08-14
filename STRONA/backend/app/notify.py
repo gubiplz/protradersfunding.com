@@ -256,7 +256,10 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"and we're waiting for the payment to arrive.\n\n"
             f"  Challenge:  {ctx.get('product_label')}\n"
             f"  Amount due: ${_kwota(ctx.get('amount'))}\n"
-            f"  Reference:  {ctx.get('reference')}\n\n"
+            f"  Reference:  {ctx.get('reference')}\n"
+            + ("  Included:   a second account of the same size — free (Buy 1 Get 1)\n"
+               if ctx.get("bogo") else "")
+            + "\n"
             + ("Send the amount above to:\n"
                + "".join(f"  {k}: {v}\n" for k, v in _payment_lines(ctx))
                + "\nWhen it's on its way, reply to this e-mail with the transaction "
@@ -264,9 +267,12 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
                  "match it.\n\n"
                if _payment_lines(ctx) else
                "We'll send you the payment details in a separate message shortly.\n\n")
-            + f"The moment we confirm the payment your account is created "
-            f"automatically and the MT5 credentials land in your inbox.\n\n"
-            f"Questions, or changed your mind? Just reply to this e-mail.",
+            + (f"The moment we confirm the payment both of your accounts are created "
+               f"automatically and two sets of MT5 credentials land in your inbox.\n\n"
+               if ctx.get("bogo") else
+               f"The moment we confirm the payment your account is created "
+               f"automatically and the MT5 credentials land in your inbox.\n\n")
+            + f"Questions, or changed your mind? Just reply to this e-mail.",
         ),
     }
     subject, body = T.get(event, (f"Notification: {event}", json.dumps(ctx, ensure_ascii=False)))
@@ -581,14 +587,22 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                        f"take it from there."),
             _stat_html("Challenge", str(ctx.get("product_label") or ""),
                        f"Amount due ${_kwota(ctx.get('amount'))}"),
-            _rows_html([("Reference", ctx.get("reference") or ""), *dane]),
+            _rows_html([("Reference", ctx.get("reference") or ""),
+                        *([("Included", "+ second account, same size — free (Buy 1 Get 1)")]
+                          if ctx.get("bogo") else []),
+                        *dane]),
             _note_html(
                 "When the payment is on its way, reply to this e-mail with the "
                 "transaction hash and the reference above — that is the fastest way "
                 "for us to match it. "
                 if dane else
                 "We'll send you the payment details in a separate message shortly. "),
-            _note_html("Your account is created automatically the moment we confirm "
+            _note_html("Both of your accounts are created automatically the moment we "
+                       "confirm the payment — this order includes a free second account "
+                       "of the same size — and the MT5 credentials go straight to this "
+                       "inbox."
+                       if ctx.get("bogo") else
+                       "Your account is created automatically the moment we confirm "
                        "the payment, and the MT5 credentials go straight to this "
                        "inbox."),
         ]

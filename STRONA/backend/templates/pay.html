@@ -21,15 +21,24 @@
       <div class="rows">
         <div><span>Order</span><span>{{ reference }}</span></div>
         <div><span>Item</span><span>{{ item }}</span></div>
+        {% if bogo %}<div><span>Included</span><span><b>+ second account, same size — free</b></span></div>{% endif %}
         <div><span>Amount due</span><span>${{ amount }}</span></div>
       </div>
+      {% if bogo %}
+      {# Obiecane na Telegramie drugie konto MUSI stać przy kwocie — inaczej
+         klient płaci, patrząc na podsumowanie, w którym obietnicy nie ma. #}
+      <p style="font-size:13.5px;margin-top:14px;line-height:1.55">
+        <b>Buy 1 Get 1 Free</b> — this order comes with a second account of the same size at
+        no extra cost. Both accounts are created automatically once the payment clears.
+      </p>
+      {% endif %}
       <div style="margin-top:22px">
         <button class="btn" id="payBtn" type="button">Pay ${{ amount }} by card</button>
       </div>
       <p class="muted" style="font-size:13.5px;margin-top:16px">
         Payments are processed by Stripe — we never see your card details. Once the payment
-        clears, your MT5 login is created automatically and sent to the e-mail address on your
-        {{ site_name }} account.
+        clears, your MT5 login{% if bogo %}s for both accounts are{% else %} is{% endif %} created
+        automatically and sent to the e-mail address on your {{ site_name }} account.
       </p>
     </div>
     {% elif status == 'paid' %}

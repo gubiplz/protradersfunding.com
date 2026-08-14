@@ -3563,6 +3563,7 @@ def _mail_oczekujemy_na_platnosc(session, o: Order) -> bool:
         "reference": f"PTF-{o.id}",
         "wallet": o.payment_address or "",
         "network": o.payment_network or "",
+        "bogo": bool(getattr(o, "bogo", False)),
     })
     return True
 
@@ -6998,6 +6999,7 @@ def pay_page(request: Request, token: str):
                      item=_pozycja_zamowienia(session, o),
                      amount=f"{o.amount_usd:,.2f}".removesuffix(".00"),
                      reference=f"PTF-{o.id}", status=o.status, pay_token=token,
+                     bogo=bool(getattr(o, "bogo", False)),
                      # Belka „kup challenge, dostaniesz rozmiar wyżej" obiecuje
                      # mechanikę checkoutu, której to zamówienie NIE dostanie —
                      # kwota jest ustalona ręcznie. Na tej stronie jej nie ma.
@@ -7066,6 +7068,9 @@ def pay_order_public(request: Request, token: str,
                 "currency": "USD",
                 "reference": f"PTF-{o.id}",
                 "status": o.status,
+                # Jak z rabatem niżej: obiecane drugie konto, którego nie widać
+                # na stronie płatności, istnieje tylko w rozmowie na Telegramie.
+                "bogo": bool(getattr(o, "bogo", False)),
                 # Klient partnera dostał cenę niższą od cennikowej i ma prawo to
                 # ZOBACZYĆ. Bez tego rabat istnieje wyłącznie w rozmowie na
                 # Telegramie i w naszym raporcie — czyli dla kupującego wcale.
