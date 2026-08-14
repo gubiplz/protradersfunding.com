@@ -128,6 +128,57 @@ def test_reczne_zamowienie_z_karty_leada_i_decyzja_per_zamowienie():
     assert r.status_code == 400
 
 
+def test_awaria_grantu_zostawia_trwaly_slad(monkeypatch):
+    """Padnięty grant BOGO nie może zniknąć bez śladu: zamówienie zostaje
+    opłacone (klient ma pierwsze konto), a flaga bogo_grant_failed świeci
+    w panelu, dopóki admin nie przyzna drugiego konta ręcznie."""
+    _product()
+    r = client.post("/api/admin/orders", headers=ADMIN, json={
+        "email": f"bogo-fail{next(LICZNIK)}@test.pl", "product_key": "bogo-25k",
+        "bogo": True, "flag": "", "notify_trader": False})
+    assert r.status_code == 200
+    oid = r.json()["id"]
+
+    def _pada(*a, **kw):
+        raise RuntimeError("pusta pula MT5")
+    monkeypatch.setattr(billing, "grant_challenge", _pada)
+
+    r = client.post(f"/api/admin/orders/{oid}/mark-paid", headers=ADMIN)
+    assert r.status_code == 200
+    d = r.json()
+    assert d["bogo"] is True and d["bogo_grant_ok"] is False and d["account_id"]
+
+    s = SessionLocal()
+    o = s.get(Order, oid)
+    assert o.status == "paid" and o.flag == "bogo_grant_failed"
+    assert s.query(Account).filter(Account.trader_id == o.trader_id).count() == 1
+    s.close()
+
+    wiersz = next(x for x in client.get("/api/admin/orders", headers=ADMIN).json()
+                  if x["id"] == oid)
+    assert wiersz["flag"] == "bogo_grant_failed"
+
+
+def test_stats_nie_licza_grantow_jako_sprzedazy():
+    """Grant $0 to nie sprzedaż: orders_paid w /api/stats liczy tylko płatne."""
+    _product()
+    tid = _trader()
+    _bogo(True)
+    try:
+        s = SessionLocal()
+        tr = s.get(Trader, tid)
+        oid = billing.create_checkout(s, tr, "bogo-25k", None)["order_id"]
+        billing.mock_complete(s, oid, tid)
+        paid_sale = s.query(Order).filter(Order.status == "paid",
+                                          Order.provider != "grant").count()
+        paid_all = s.query(Order).filter(Order.status == "paid").count()
+        s.close()
+    finally:
+        _bogo(False)
+    assert paid_all > paid_sale
+    assert client.get("/api/stats", headers=ADMIN).json()["orders_paid"] == paid_sale
+
+
 def test_strona_platnosci_i_json_partnera_mowia_o_bogo(monkeypatch):
     """Obietnica z Telegramu musi stać przy kwocie: /pay/<token> i partnerski
     JSON /api/pay/<token> niosą BOGO, a mail „awaiting payment" wymienia bonus."""

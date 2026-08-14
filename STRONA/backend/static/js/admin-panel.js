@@ -806,14 +806,17 @@ function renderOrders(){
      Wczesniej liczyly sie z calej listy, wiec przelaczenie na "Failed" zostawialo
      nad pusta tabela pelny przychod. Ten sam blad byl w portalu na Challenges. */
   const paid=rows.filter(o=>o.status==='paid');
-  const revenue=paid.reduce((s,o)=>s+o.amount_usd,0);
-  const avg=paid.length?revenue/paid.length:0;
+  /* Granty BOGO ($0, provider "grant") to nie sprzedaz: w liczniku i sredniej
+     zanizalyby srednia i zawyzaly liczbe oplaconych zamowien. */
+  const sold=paid.filter(o=>o.provider!=='grant');
+  const revenue=sold.reduce((s,o)=>s+o.amount_usd,0);
+  const avg=sold.length?revenue/sold.length:0;
   const zawezone=rows.length!==list.length;
   const podpis=zawezone?`<div class="sub">of ${list.length} total</div>`:'';
   $('view').innerHTML=`
     <div class="stats-row">
       <div class="stat-tile"><div class="tile-ic green">${ICO.dollar}</div>
-        <div><div class="lbl">Revenue</div><div class="val">$${fmt0(revenue)}</div><div class="sub">${paid.length} paid orders</div></div></div>
+        <div><div class="lbl">Revenue</div><div class="val">$${fmt0(revenue)}</div><div class="sub">${sold.length} paid orders</div></div></div>
       <div class="stat-tile"><div class="tile-ic blue">${ICO.file}</div>
         <div><div class="lbl">Orders ${zawezone?'shown':'total'}</div><div class="val">${rows.length}</div>
           <div class="sub">${rows.length-paid.length} unpaid</div></div></div>
@@ -838,6 +841,7 @@ function renderOrders(){
         <td class="muted rt-hide" data-l="Provider">${esc(o.provider)}</td>
         <td data-l="Status"><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span>
           ${o.status==='pending'&&o.flag==='awaiting_crypto'?'<div class="muted" style="font-size:11px;white-space:nowrap">⏳ awaiting crypto</div>':''}
+          ${o.flag==='bogo_grant_failed'?'<div style="font-size:11px;white-space:nowrap;color:var(--red)" title="The paid order promised a free second account, but creating it failed. Use Grant challenge to add it by hand.">⚠ BOGO grant failed — grant manually</div>':''}
           ${o.status!=='paid'&&o.payment_address?`<div class="muted" title="${esc((o.payment_network?o.payment_network+' · ':'')+o.payment_address)}"
             style="font-size:11px;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(o.payment_network?o.payment_network+' · ':'')}${esc(o.payment_address)}</div>`:''}
           ${o.status==='failed'&&o.fail_reason?`<div class="muted" style="font-size:11px;max-width:200px">${esc(o.fail_reason)}</div>`:''}</td>
@@ -1675,7 +1679,13 @@ async function markOrderPaid(id){
     body:'This creates the challenge account and sends the trader their credentials, exactly like a completed card payment.',
     ok:'Mark as paid'}))return;
   try{const d=await api(`/api/admin/orders/${id}/mark-paid`,{method:'POST'});
-    toast(d.already?'This order was already paid.':`✅ Paid. Account #${d.account_id} created.`,'ok');go('orders')}
+    /* Zamowienie BOGO tworzy DWA konta — toast musi to powiedziec, a gdy grant
+       nie wyszedl, admin ma sie dowiedziec od razu, nie z dzwonka po fakcie. */
+    toast(d.already?'This order was already paid.'
+      :d.bogo&&d.bogo_grant_ok?`✅ Paid. Account #${d.account_id} + free BOGO account created.`
+      :d.bogo?`⚠️ Paid, account #${d.account_id} created — but the BOGO grant FAILED. Grant the second account manually.`
+      :`✅ Paid. Account #${d.account_id} created.`,d.bogo&&!d.bogo_grant_ok?'err':'ok',d.bogo?9000:undefined);
+    go('orders')}
   catch(e){toast('Error: '+e.message,'err')}
 }
 
@@ -2489,7 +2499,7 @@ async function openGrant(traderId){
       <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
         <input type="checkbox" id="g-funded" style="width:16px;height:16px;accent-color:var(--acc)">
         Start as <b>funded</b>, skipping the evaluation entirely</label>
-      <button class="btn-p lg" style="width:100%" onclick="submitGrant()">Grant &amp; create account</button>
+      <button class="btn-p lg" style="width:100%" id="g-go" onclick="submitGrant()">Grant &amp; create account</button>
       <p class="hint">Trader gets an e-mail with the allocation and MT5 credentials.</p>
     </div></div>`;
   box.onclick=()=>box.remove();
@@ -2506,6 +2516,8 @@ async function submitGrant(){
     note:($('g-note').value||'').trim()||null,
     bogo_paid_key:$('g-paid').value||null,
     funded:$('g-funded').checked};
+  /* Drugi tap = drugie konto z mailem do tradera — blokada na czas requestu. */
+  const btn=$('g-go');btn.disabled=true;
   try{
     const r=await api('/api/admin/grant',{method:'POST',body:JSON.stringify(body)});
     document.getElementById('grant-modal')?.remove();
@@ -2513,7 +2525,7 @@ async function submitGrant(){
       ?'MT5 account is being created. Credentials e-mailed within a minute.'
       :'Credentials e-mailed to the trader.'}`,'ok',9000);
     go('accounts');
-  }catch(e){toast('Error: '+e.message,'err')}
+  }catch(e){toast('Error: '+e.message,'err');btn.disabled=false}
 }
 
 /* ---------- one delete control for the whole panel ----------
@@ -2803,6 +2815,9 @@ async function submitManualOrder(){
   const addr=link?'':($('mo-address').value||'').trim();
   const net=link?'':($('mo-network').value||'').trim();
   if(addr)saveWallet(addr,net);
+  /* Na wolnej sieci drugi tap przed odpowiedzia zalozylby DRUGIE zamowienie
+     (i konto leada) — blokada jak w submitNewLead. */
+  const btn=$('mo-go');btn.disabled=true;
   try{
     const r=await api('/api/admin/orders',{method:'POST',body:JSON.stringify({
       ...(lead?{email:lead.email}:{trader_id:tid}),
@@ -2823,7 +2838,7 @@ async function submitManualOrder(){
     // jego tabeli Orders, a skok do zakładki Orders gubiłby miejsce w robocie.
     if(lead){await openLead(lead.id);renderLeads()}
     else go('orders');
-  }catch(e){toast('Error: '+e.message,'err')}
+  }catch(e){toast('Error: '+e.message,'err');btn.disabled=false}
 }
 
 /* ---------- modal: store credits ---------- */
@@ -2848,7 +2863,7 @@ async function openCredits(traderId){
       <div class="muted" id="cr-balance" style="font-size:12.5px"></div>
       <input id="cr-amount" class="inp" type="number" inputmode="numeric" step="1" placeholder="Amount in USD, e.g. 100">
       <input id="cr-note" class="inp" placeholder="Note for the ledger, e.g. Contest prize">
-      <button class="btn-p lg" style="width:100%" onclick="submitCredits()">Add credits</button>
+      <button class="btn-p lg" style="width:100%" id="cr-go" onclick="submitCredits()">Add credits</button>
       <p class="hint">The balance is spent automatically on the trader's next purchase.</p>
     </div></div>`;
   box.onclick=()=>box.remove();
@@ -2863,12 +2878,14 @@ function creditsBalance(){
 async function submitCredits(){
   const amount=parseFloat($('cr-amount').value);
   if(!amount){toast('Enter a non-zero amount.','err');return}
+  /* Drugi tap = saldo doliczone dwa razy — blokada na czas requestu. */
+  const btn=$('cr-go');btn.disabled=true;
   try{
     const r=await api(`/api/admin/traders/${$('cr-trader').value}/credits`,{method:'POST',
       body:JSON.stringify({amount,note:($('cr-note').value||'').trim()||null})});
     document.getElementById('credits-modal')?.remove();
     toast(`💳 ${r.email} now has $${fmt(r.credits_usd)} in store credits.`,'ok',7000);
-  }catch(e){toast('Error: '+e.message,'err')}
+  }catch(e){toast('Error: '+e.message,'err');btn.disabled=false}
 }
 
 /* ---------- modal: new account ---------- */
@@ -2906,7 +2923,7 @@ async function openCreate(){
         <select id="c-paid" class="inp">
           <option value="">— not a paid upgrade —</option>
           ${products.map(p=>`<option value="${esc(p.key)}">${esc(p.label)} — $${fmt0(p.account_size)}</option>`).join('')}</select></div>
-      <button class="btn-p lg" style="width:100%" onclick="submitCreate()">Create account</button>
+      <button class="btn-p lg" style="width:100%" id="c-go" onclick="submitCreate()">Create account</button>
       <p class="hint">If the e-mail matches a registered trader, the account shows up in their portal and they get the credentials by e-mail.</p>
     </div></div>`;
   box.onclick=()=>box.remove();
@@ -2922,13 +2939,15 @@ async function submitCreate(){
     note:($('c-note').value||'').trim()||null,
     bogo_paid_key:$('c-paid').value||null};
   if(!body.login){toast('MT5 login is required.','err');return}
+  /* Drugi tap = drugie konto z tym samym loginem — blokada na czas requestu. */
+  const btn=$('c-go');btn.disabled=true;
   try{const r=await api('/api/accounts',{method:'POST',body:JSON.stringify(body)});
     document.getElementById('create-modal')?.remove();
     toast(r.email_unknown?'Account created, but no trader with that e-mail, so it has no owner yet.'
           :r.linked_trader?`Account created for ${r.linked_trader}.`:'Account created.',
           r.email_unknown?'err':'ok');
     go('accounts');
-  }catch(e){toast('Error: '+e.message,'err')}
+  }catch(e){toast('Error: '+e.message,'err');btn.disabled=false}
 }
 
 /* ---------- admin inbox (bell) ---------- */

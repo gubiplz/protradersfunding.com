@@ -165,6 +165,14 @@ def create_account_from_order(session, order: Order, notify_admin: bool = True) 
             billing.grant_challenge(session, trader, order.product_key, "Buy 1 Get 1 Free")
         except Exception as e:
             print(f"[provisioning] BOGO grant dla zamowienia #{order.id} nie wyszedl: {e}", flush=True)
+            # Sesja mogła zostać z na wpół dodanym grantem — bez rollbacku każdy
+            # kolejny commit w tym request-cie przepchnąłby te obiekty do bazy.
+            session.rollback()
+            # Dzwonek łatwo przegapić, a bez trwałego śladu opłacone zamówienie
+            # z obietnicą drugiego konta wygląda w panelu na obsłużone. Flaga
+            # trzyma się zamówienia, panel pokazuje ją przy statusie.
+            order.flag = "bogo_grant_failed"
+            session.commit()
             notify.notify_admins("admin_order",
                                  f"BOGO grant FAILED for order #{order.id} ({order.product_key}) — grant manually",
                                  trader.email)

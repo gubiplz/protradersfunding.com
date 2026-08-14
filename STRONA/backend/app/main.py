@@ -3827,10 +3827,16 @@ def admin_mark_order_paid(order_id: int):
         if o.status == "paid":
             return {"already": True, "account_id": o.account_id}
         acc = provisioning.create_account_from_order(session, o, notify_admin=False)
-        o.flag = None
+        # Provisioning mógł właśnie oflagować zamówienie (BOGO grant nie wyszedł)
+        # — tej flagi nie wolno tu zetrzeć, to jedyny trwały ślad dla admina.
+        grant_failed = o.flag == "bogo_grant_failed"
+        if not grant_failed:
+            o.flag = None
         o.fail_reason = None      # recovery: płatność jednak doszła
         session.commit()
-        return {"paid": o.id, "account_id": acc.id}
+        return {"paid": o.id, "account_id": acc.id,
+                "bogo": bool(getattr(o, "bogo", False)),
+                "bogo_grant_ok": bool(getattr(o, "bogo", False)) and not grant_failed}
     finally:
         session.close()
 
@@ -5197,7 +5203,10 @@ def stats():
                 "lead_sms_missing": sms.czego_brakuje(),
                 "lead_mail_missing": lead_mail.czego_brakuje(),
                 "traders": klienci, "traders_internal": wewnetrzni,
-                "orders_paid": session.query(Order).filter(Order.status == "paid").count(),
+                # Granty ($0, provider="grant") to nie sprzedaż — liczone tutaj
+                # zawyżałyby "paid orders" o darmowe konta z promocji BOGO.
+                "orders_paid": (session.query(Order)
+                                .filter(Order.status == "paid", Order.provider != "grant").count()),
                 "pool_free": session.query(PoolAccount).filter(PoolAccount.claimed == False).count(),  # noqa: E712
                 "provisioning": by_status.get("provisioning", 0)}
     finally:
