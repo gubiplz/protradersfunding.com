@@ -1143,6 +1143,29 @@ def test_wylaczone_przypomnienie_nie_wychodzi(_srodowisko):
     assert len(_przypomnienia(lead_id)) == 1
 
 
+def test_undo_przywraca_wylaczone_przypomnienie(_srodowisko):
+    """Undo w panelu woła reactivate: wraca TEN SAM wiersz, z terminem
+    i licznikiem — cancel niczego nie kasował."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    rid = _zaplanuj(lead_id, text="jednak dzwonić", due_in_days=1).json()["id"]
+    client.post(f"/api/admin/leads/{lead_id}/reminders/{rid}/cancel", headers=ADMIN)
+    assert _przypomnienia(lead_id)[0].active is False
+
+    odp = client.post(f"/api/admin/leads/{lead_id}/reminders/{rid}/reactivate",
+                      headers=ADMIN)
+    assert odp.status_code == 200 and odp.json() == {"id": rid, "active": True}
+    assert _przypomnienia(lead_id)[0].active is True
+
+    _przesun_termin(rid, 1)
+    _cron()
+    assert any("jednak dzwonić" in t for t in _srodowisko["przypomnienie"])
+
+    # Cudzego nie da się włączyć, tak samo jak wyłączyć.
+    obcy = _wyslij(_zgloszenie()).json()["id"]
+    assert client.post(f"/api/admin/leads/{obcy}/reminders/{rid}/reactivate",
+                       headers=ADMIN).status_code == 404
+
+
 def test_cudze_przypomnienie_nie_da_sie_wylaczyc():
     a = _wyslij(_zgloszenie()).json()["id"]
     b = _wyslij(_zgloszenie()).json()["id"]

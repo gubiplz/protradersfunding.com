@@ -6164,6 +6164,23 @@ def admin_lead_reminder_cancel(lead_id: int, reminder_id: int):
         session.close()
 
 
+@app.post("/api/admin/leads/{lead_id}/reminders/{reminder_id}/reactivate",
+          dependencies=[Depends(auth.require_admin)])
+def admin_lead_reminder_reactivate(lead_id: int, reminder_id: int):
+    """Odwrotność cancel — pod Undo w panelu. Cancel niczego nie kasuje, więc
+    wraca TEN SAM wiersz, z licznikiem wysyłek i terminem."""
+    session = SessionLocal()
+    try:
+        r = session.get(LeadReminder, reminder_id)
+        if not r or r.lead_id != lead_id:
+            raise HTTPException(404, "Reminder not found")
+        r.active = True
+        session.commit()
+        return {"id": r.id, "active": True}
+    finally:
+        session.close()
+
+
 # Co z tego, co przysyła dostawca poczty, w ogóle zmienia wiedzę działu.
 # Otwarcia i kliknięcia świadomie POMINIĘTE: piksel śledzący kłamie w obie
 # strony (klient pocztowy pobiera go bez człowieka, a wyłączone obrazki chowają
@@ -7004,11 +7021,20 @@ def pay_page(request: Request, token: str):
                         item="", amount="", reference="", pay_token=token)
             odp.status_code = 404
             return odp
+        # Rabat partnera widać na stronie partnera (JSON niżej), a na NASZEJ
+        # stronie płatności tego samego zamówienia nie było go wcale — klient
+        # z tym samym linkiem widział inną obietnicę zależnie od domeny.
+        rabat = _rabat_partnera(session, o)
         return _page(request, "pay.html",
                      item=_pozycja_zamowienia(session, o),
                      amount=f"{o.amount_usd:,.2f}".removesuffix(".00"),
                      reference=f"PTF-{o.id}", status=o.status, pay_token=token,
                      bogo=bool(getattr(o, "bogo", False)),
+                     rabat_list=(f"{rabat['list_amount_usd']:,.2f}".removesuffix(".00")
+                                 if rabat else None),
+                     rabat_usd=(f"{rabat['discount_usd']:,.2f}".removesuffix(".00")
+                                if rabat else None),
+                     rabat_pct=rabat.get("discount_pct"),
                      # Belka „kup challenge, dostaniesz rozmiar wyżej" obiecuje
                      # mechanikę checkoutu, której to zamówienie NIE dostanie —
                      # kwota jest ustalona ręcznie. Na tej stronie jej nie ma.
@@ -7038,9 +7064,13 @@ def _rabat_partnera(session, o: Order) -> dict:
     kwota = round(float(o.amount_usd or 0), 2)
     if katalog <= kwota:
         return {}
-    return {"list_amount_usd": katalog,
-            "discount_usd": round(katalog - kwota, 2),
-            "discount_pct": round((katalog - kwota) / katalog * 100)}
+    wynik = {"list_amount_usd": katalog, "discount_usd": round(katalog - kwota, 2)}
+    pct = round((katalog - kwota) / katalog * 100)
+    # Rabat drobniejszy niż pół procenta zaokrągla się do zera, a „−0%" przy
+    # kwocie wygląda jak błąd — wtedy zostaje sama kwota, procent pomijamy.
+    if pct >= 1:
+        wynik["discount_pct"] = pct
+    return wynik
 
 
 @app.get("/api/pay/{token}")
@@ -7089,7 +7119,8 @@ def pay_order_public(request: Request, token: str,
 
 
 @app.post("/api/pay/{token}/start")
-def pay_start(token: str, x_partner_token: str | None = Header(default=None)):
+def pay_start(request: Request, token: str,
+              x_partner_token: str | None = Header(default=None)):
     """Otwiera kasę dla linku /pay/<token>. Bez logowania — token JEST wstępem.
 
     Zamówienie ma już właściciela (admin wystawił je konkretnemu traderowi),
@@ -7103,6 +7134,10 @@ def pay_start(token: str, x_partner_token: str | None = Header(default=None)):
     bierzemy z żądania, tylko z własnej konfiguracji — inaczej ten nagłówek
     byłby otwartym przekierowaniem z kasy.
     """
+    # Publiczny POST bez logowania: bez limitu każdy z linkiem (albo zgadujący
+    # tokeny) mógłby taśmowo otwierać sesje Stripe. 10/min starcza człowiekowi
+    # z nawiązką, a spamera zatrzymuje.
+    _rate_limit(request, "pay_start", 10)
     session = SessionLocal()
     try:
         o = _zamowienie_po_tokenie(session, token)

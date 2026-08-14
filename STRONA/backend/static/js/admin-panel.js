@@ -3,6 +3,11 @@ const fmt=n=>(n??0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFract
 const fmt0=n=>(n??0).toLocaleString('en-US',{maximumFractionDigits:0});
 const dstr=iso=>new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+/* Do interpolacji w onclick="fn('...')". Samo esc() nie wystarcza: parser HTML
+   odwija &#39; z powrotem do apostrofu PRZED parsowaniem JS-a, wiec nazwisko
+   w rodzaju O'Brien uciety string i przycisk przestawal dzialac. Najpierw
+   escape JS-a, potem HTML calego wyniku. */
+const jsq=s=>esc(String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
 
 /* The panel is opened by an administrator ACCOUNT, not a shared token. The
    session is the same as the trader portal (`pf_token`), so a signed-in admin
@@ -65,9 +70,11 @@ $('side-nav').innerHTML=NAV.map(n=>
   `<button class="sb-link" data-v="${n.v}" onclick="go('${n.v}')" title="${n.label}">${ICO[n.ico]}<span class="sb-txt">${n.label}</span></button>`).join('');
 
 /* Mobile bottom bar: the 4 most-used sections; "More" opens the drawer with
-   the full list. Same go()/NAV as the sidebar — one source of truth. */
+   the full list. Same go()/NAV as the sidebar — one source of truth.
+   Leads i Orders to codzienna robota (Telegram -> zamowienie -> mark paid),
+   a siedzialy w szufladzie; Payouts/KYC sa od swieta i tam wracaja. */
 const MORE_ICO='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>';
-$('botnav').innerHTML=['overview','accounts','payouts','kyc'].map(v=>{
+$('botnav').innerHTML=['overview','leads','orders','accounts'].map(v=>{
   const n=NAV.find(x=>x.v===v);
   return `<button class="botnav-btn" data-v="${n.v}" onclick="go('${n.v}')">${ICO[n.ico]}<span>${n.label}</span></button>`;
 }).join('')+`<button class="botnav-btn" onclick="toggleSide(true)" aria-label="All sections">${MORE_ICO}<span>More</span></button>`;
@@ -141,15 +148,24 @@ const LEADS_SKEL=()=>`<div class="view-load">
 let PRZEJSCIE = 0;
 
 function go(v){
+  /* Re-render TEGO SAMEGO widoku (po akcji, undo, odswiezeniu) nie moze rzucac
+     admina na gore listy: stara tresc zostaje do przyjscia danych (bez szkieletu,
+     ktory skraca strone i ucina scroll), a po przerysowaniu wracamy w to samo
+     miejsce. Nowa zakladka dostaje szkielet jak dotad. */
+  const samWidok=v===VIEW&&!$('view').querySelector('.view-load');
+  const wrocDo=samWidok?scrollY:0;
   VIEW=v;
   document.querySelectorAll('.sb-link[data-v],.botnav-btn[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const t=TITLES[v]||['',''];
   $('pg-title').textContent=t[0]; $('pg-crumb').textContent=t[1];
   toggleSide(false);
   const moj=++PRZEJSCIE;
-  $('view').innerHTML=v==='leads'?LEADS_SKEL():LOADING_HTML(260);
+  if(!samWidok)$('view').innerHTML=v==='leads'?LEADS_SKEL():LOADING_HTML(260);
   VIEWS[v]()
-    .then(()=>{if(moj!==PRZEJSCIE&&VIEWS[VIEW])VIEWS[VIEW]()})
+    .then(()=>{
+      if(moj!==PRZEJSCIE){if(VIEWS[VIEW])VIEWS[VIEW]();return}
+      if(wrocDo)scrollTo(0,wrocDo);
+    })
     .catch(e=>{
       /* Blad zostaje W widoku z przyciskiem ponowienia. Sam toast znikal po
          paru sekundach i na ekranie zostawal wieczny szkielet ladowania. */
@@ -397,33 +413,14 @@ const VIEWS={
         <td class="rt-acts">${(t.docs||[]).map(k=>`<button class="btn-o sm" onclick="viewDoc(${t.trader_id},'${k}')">${esc(k.replace('_',' '))}</button>`).join(' ')||'<span class="muted">—</span>'}</td>
         <td class="rt-acts" style="white-space:nowrap"><button class="btn-o sm" onclick="revertKyc(${t.trader_id})"
           title="Undo this decision, back to the pending queue">Revert</button>
-          ${XBTN(`deleteKycRow(${t.trader_id},'${esc(t.email)}')`,'Delete KYC record and uploaded documents')}</td></tr>`).join('')}
+          ${XBTN(`deleteKycRow(${t.trader_id},'${jsq(t.email)}')`,'Delete KYC record and uploaded documents')}</td></tr>`).join('')}
       </tbody></table></div>`:`<p class="muted" style="font-size:13px">No ${esc(kf)} decisions.</p>`}</div>`:'';
   $('view').innerHTML=cards+histTbl;
  },
 
  async tickets(){
-  const rows=await api('/api/admin/tickets');
-  window._tickets=rows;
-  /* X siedzi W wierszu, ktory sam otwiera rozmowe, wiec musi zatrzymac klikniecie —
-     inaczej kazde usuniecie otwieraloby przy okazji watek. Do `delTicket` idzie
-     samo id: temat bywa z apostrofem ("Can't log in"), a wstrzykniety w inline
-     onclick rozwalilby ten atrybut. */
-  const row=t=>`
-    <div class="ticket-row" onclick="openTicket(${t.id})">
-      <div class="tile-ic ${t.status==='open'?'orange':t.status==='answered'?'green':'blue'}" style="width:36px;height:36px;flex:0 0 36px">${ICO.chat}</div>
-      <div class="sub"><b>${esc(t.subject)}</b>
-        <span>#${t.id} · ${esc(t.trader_email||'—')} · ${t.messages} message${t.messages>1?'s':''} · ${dstr(t.last_ts)}</span></div>
-      <span class="status ${t.status==='closed'?'failed':t.status==='answered'?'paid':'pending'}"><span class="dot"></span>${esc(t.status)}</span>
-      ${XBTN(`event.stopPropagation();delTicket(${t.id})`,'Delete this ticket and its conversation')}
-    </div>`;
-  const active=rows.filter(t=>t.status!=='closed'), closed=rows.filter(t=>t.status==='closed');
-  $('view').innerHTML=(active.length?`<div class="tbl-wrap">`+active.map(row).join('')+`</div>`
-      :`<div class="empty"><h3>No open tickets</h3><p>Support conversations started by traders appear here.</p></div>`)
-    +(closed.length?`<div class="sec-card" style="margin-top:18px">
-      <h3>History</h3>
-      <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Closed tickets. Click to review the conversation.</p>
-      <div class="tbl-wrap">`+closed.map(row).join('')+`</div></div>`:'');
+  window._tickets=await api('/api/admin/tickets');
+  renderTickets();
  },
 
  async orders(){
@@ -612,7 +609,7 @@ const VIEWS={
     <div class="tbl-wrap tw-sm rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.telemetry">
     <thead><tr><th>Day</th><th>Event</th><th style="text-align:right">Count</th>
       <th style="text-align:right">Unique traders</th></tr></thead>
-    <tbody>${items.map(i=>`<tr class="clickable" onclick="openTelemetryDetail('${esc(i.day)}','${esc(i.name)}')">
+    <tbody>${items.map(i=>`<tr class="clickable" onclick="openTelemetryDetail('${jsq(i.day)}','${jsq(i.name)}')">
       <td class="num" data-l="Day">${esc(i.day)}</td><td class="rt-main" data-l="Event">${esc(i.name)}</td>
       <td class="num" style="text-align:right" data-l="Count">${i.count}</td>
       <td class="num" style="text-align:right" data-l="Traders">${i.traders}</td></tr>`).join('')}
@@ -641,6 +638,44 @@ function searchBox(id,stateKey,render,ph){
       oninput="window.${stateKey}=this.value;const p=this.selectionStart;${render}();qFocus('${id}',p)">
     ${val?`<button class="q-x" type="button" aria-label="Clear search" title="Clear"
       onclick="window.${stateKey}='';${render}();qFocus('${id}')">&times;</button>`:''}</span>`;
+}
+
+/* ---------- tickets: search + filters + list ---------- */
+function renderTickets(){
+  const list=window._tickets||[];
+  window._tickFilter=window._tickFilter||'all';
+  const q=(window._tickQ||'').toLowerCase(), f=window._tickFilter;
+  const rows=list.filter(t=>(f==='all'||t.status===f)&&
+    (!q||String(t.id).includes(q)||(t.subject||'').toLowerCase().includes(q)
+      ||(t.trader_email||'').toLowerCase().includes(q)));
+  /* X siedzi W wierszu, ktory sam otwiera rozmowe, wiec musi zatrzymac klikniecie —
+     inaczej kazde usuniecie otwieraloby przy okazji watek. Do `delTicket` idzie
+     samo id: temat bywa z apostrofem ("Can't log in"), a wstrzykniety w inline
+     onclick rozwalilby ten atrybut. */
+  const row=t=>`
+    <div class="ticket-row" onclick="openTicket(${t.id})">
+      <div class="tile-ic ${t.status==='open'?'orange':t.status==='answered'?'green':'blue'}" style="width:36px;height:36px;flex:0 0 36px">${ICO.chat}</div>
+      <div class="sub"><b>${esc(t.subject)}</b>
+        <span>#${t.id} · ${esc(t.trader_email||'—')} · ${t.messages} message${t.messages>1?'s':''} · ${dstr(t.last_ts)}</span></div>
+      <span class="status ${t.status==='closed'?'failed':t.status==='answered'?'paid':'pending'}"><span class="dot"></span>${esc(t.status)}</span>
+      ${XBTN(`event.stopPropagation();delTicket(${t.id})`,'Delete this ticket and its conversation')}
+    </div>`;
+  const seg=[['all','All'],['open','Open'],['answered','Answered'],['closed','Closed']];
+  const active=rows.filter(t=>t.status!=='closed'), closed=rows.filter(t=>t.status==='closed');
+  $('view').innerHTML=`
+    <div class="toolbar">
+      ${searchBox('tick-q','_tickQ','renderTickets','Search subject, e-mail or #…')}
+      <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._tickFilter='${f===k?'all':k}';renderTickets()">${l}</button>`).join('')}</div>
+      <span class="count-pill">${rows.length} of ${list.length}</span>
+    </div>`
+    +(active.length?`<div class="tbl-wrap">`+active.map(row).join('')+`</div>`
+      :closed.length?'' // samo History: pusta sekcja "open" nic nie wnosi
+      :q||f!=='all'?`<div class="empty"><h3>No tickets match</h3><p>Try a different search or filter.</p></div>`
+      :`<div class="empty"><h3>No open tickets</h3><p>Support conversations started by traders appear here.</p></div>`)
+    +(closed.length?`<div class="sec-card" style="margin-top:18px">
+      <h3>History</h3>
+      <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Closed tickets. Click to review the conversation.</p>
+      <div class="tbl-wrap">`+closed.map(row).join('')+`</div></div>`:'');
 }
 
 function renderAccounts(){
@@ -678,7 +713,7 @@ function renderAccounts(){
           <td data-l="Daily" data-sort="${(m.daily_loss_used_pct||0).toFixed(2)}">${mini(m.daily_loss_used_pct)}</td>
           <td data-l="Max DD" data-sort="${(m.overall_dd_used_pct||0).toFixed(2)}">${mini(m.overall_dd_used_pct)}</td>
           <td class="rt-acts" style="text-align:right" onclick="event.stopPropagation()">${
-            XBTN(`deleteAccountRow(${a.id},'${esc(a.login)}','${esc(a.trader_name||'')}')`,'Delete account')}</td></tr>`}).join('')}
+            XBTN(`deleteAccountRow(${a.id},'${jsq(a.login)}','${jsq(a.trader_name||'')}')`,'Delete account')}</td></tr>`}).join('')}
       </tbody></table></div>`
       :`<div class="empty"><h3>No accounts match</h3><p>Try a different search or filter.</p></div>`}`;
 }
@@ -722,7 +757,7 @@ function poolListHtml(){
         <td class="rt-acts" style="white-space:nowrap">
           <button class="btn-o sm" onclick="editPool(${p.id})">Edit</button>
           ${p.claimed&&!p.retired_reason?''
-            :' '+XBTN(`delPool(${p.id},'${esc(p.platform_login)}',${p.retired_reason?1:0})`,
+            :' '+XBTN(`delPool(${p.id},'${jsq(p.platform_login)}',${p.retired_reason?1:0})`,
                       p.retired_reason?'Delete this retired entry':'Remove from pool')}</td></tr>
         <tr id="pool-edit-${p.id}" class="tr-sub" style="display:none"><td colspan="9" style="background:var(--bg)">
           <div class="pool-form" style="margin:6px 0">
@@ -784,7 +819,7 @@ function renderPayoutsView(){
       <td class="rt-acts" style="text-align:right;white-space:nowrap">${r.kind==='request'&&r.status==='pending'
         ?`<button class="btn-p sm" onclick="approvePayout(${r.id})">Approve &amp; pay</button>
           <button class="btn-o sm" onclick="rejectPayout(${r.id})">Reject</button>`
-        :XBTN(`deletePayoutRow('${r.kind}',${r.id},${r.trader_share},'${esc(r.account_login||'')}')`,
+        :XBTN(`deletePayoutRow('${r.kind}',${r.id},${r.trader_share},'${jsq(r.account_login||'')}')`,
               r.kind==='payout'?'Delete payout':'Delete request')}</td></tr>`).join('')}
     </tbody></table></div>
     <p class="muted" style="font-size:11.5px;margin-top:10px">Approving pays the trader share and refunds the challenge fee on the first payout for that account.</p>`
@@ -855,7 +890,7 @@ function renderOrders(){
             title="${o.bogo?'Remove the free second account from this order':'Buy 1 Get 1 Free — add a free second account of the same size when this order is paid'}">${o.bogo?'BOGO ✓':'BOGO'}</button>
           <button class="btn-o sm" onclick="markOrderFailed(${o.id})" title="Payment is not coming, close the order with a reason">Mark failed</button>`:''}
           <button class="btn-p sm" onclick="markOrderPaid(${o.id})" title="Confirm the payment arrived, creates the account">Mark paid</button>`}
-          ${XBTN(`deleteOrderRow(${o.id},'${esc(o.trader_email||'')}',${o.amount_usd},${o.account_id||0})`,'Delete order')}</td></tr>`).join('')}
+          ${XBTN(`deleteOrderRow(${o.id},'${jsq(o.trader_email||'')}',${o.amount_usd},${o.account_id||0})`,'Delete order')}</td></tr>`).join('')}
       </tbody></table></div>`
       :`<div class="empty"><h3>${list.length?'No orders match':'No orders yet'}</h3>${list.length?'<p>Try a different search or filter.</p>':''}</div>`}`;
 }
@@ -1090,7 +1125,7 @@ function renderLeads(){
       <button class="btn-p sm" onclick="openNewLead()"
         title="Somebody who wrote to us without filling the form">+ Add lead</button>
     </div>
-    ${rows.length?`<p class="lead-statline">${rows.length}${rows.length!==list.length?` of ${list.length}`:''} leads${
+    ${rows.length?`<p class="lead-statline">${rows.length}${rows.length!==list.length?` of ${list.length}`:''} lead${rows.length===1&&rows.length===list.length?'':'s'}${
         waiting?` · <span class="statlink" onclick="window._leadFilter='new';renderLeads()">${waiting} untouched</span>`:''} · ${bought.length} bought · $${fmt0(revenue)}</p>
     <div class="tbl-wrap tw-wide lead-wrap rtbl-wrap"><table class="tbl sortable lead-tbl rtbl" data-tkey="admin.leads.v3">
       <thead><tr><th>Date</th><th>Lead</th><th>Contact</th><th>Source</th>
@@ -1214,7 +1249,9 @@ function deleteLead(id){
   const przywroc=()=>{window._leads=lista;if(VIEW==='leads')renderLeads()};
   withUndo(`Deleting lead ${kto}`,async()=>{
     try{
-      await api('/api/admin/leads/'+id,{method:'DELETE'});
+      /* keepalive jak w xdel: DELETE idzie 5 s po kliknieciu — zamkniecie
+         karty w tym oknie nie moze zgubic zadania. */
+      await api('/api/admin/leads/'+id,{method:'DELETE',keepalive:true});
     }catch(e){
       toast('Error: '+e.message,'err');
       przywroc();
@@ -1400,8 +1437,13 @@ async function addLeadReminder(id){
 async function cancelLeadReminder(id,rid){
   try{
     await api(`/api/admin/leads/${id}/reminders/${rid}/cancel`,{method:'POST'});
-    toast('Reminder cancelled');
     await openLead(id);renderLeads();
+    /* Ten sam wzorzec co przy planowaniu presetem: cancel nie kasuje wiersza,
+       wiec Undo po prostu zapala go z powrotem — z licznikiem i terminem. */
+    undoToast('Reminder dismissed.',async()=>{
+      await api(`/api/admin/leads/${id}/reminders/${rid}/reactivate`,{method:'POST'});
+      await openLead(id);renderLeads();
+    });
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
@@ -1413,7 +1455,7 @@ function openNewLead(){
   box.id='lead-modal';box.className='modal-wrap';
   box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
     <div class="modal-head"><h3>Add lead</h3>
-      <button class="icon-btn" onclick="document.getElementById('lead-modal').remove()">
+      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('lead-modal').remove()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
     <p class="muted" style="font-size:12.5px;margin-bottom:14px">For somebody who reached us without the form — a reply to an ad, a message on Telegram.
       They land in the same list as everyone else, with history, reminders and the card on the channel.</p>
@@ -2477,7 +2519,7 @@ async function openGrant(traderId){
   box.id='grant-modal';box.className='modal-wrap';
   box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
     <div class="modal-head"><h3>Grant a challenge</h3>
-      <button class="icon-btn" onclick="document.getElementById('grant-modal').remove()">
+      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('grant-modal').remove()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
     <p class="muted" style="font-size:12.5px;margin-bottom:14px">Creates a real MT5 account for the trader without payment and e-mails them the credentials. The account behaves exactly like a purchased one.</p>
     <div class="stack">
@@ -2628,7 +2670,7 @@ function openPayoutImport(){
   box.id='payimp-modal';box.className='modal-wrap';
   box.innerHTML=`<div class="modal" onclick="event.stopPropagation()" style="max-width:760px">
     <div class="modal-head"><h3>Import historical payouts</h3>
-      <button class="icon-btn" onclick="document.getElementById('payimp-modal').remove()">
+      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('payimp-modal').remove()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
     <p class="muted" style="font-size:12.5px;margin-bottom:14px">Paste one payout per line, CSV,
       starting with the header row. Missing traders and funded accounts are created for you.
@@ -2708,7 +2750,7 @@ async function openManualOrder(traderId,lead){
   box.id='order-modal';box.className='modal-wrap';
   box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
     <div class="modal-head"><h3>New order</h3>
-      <button class="icon-btn" onclick="document.getElementById('order-modal').remove()">
+      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('order-modal').remove()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
     <p class="muted" style="font-size:12.5px;margin-bottom:14px" id="mo-lead">For a customer paying outside Stripe — crypto or a transfer.
       The order lands as <b>unpaid</b>; the account is created only when you hit <b>Mark paid</b>, exactly like a card payment.</p>
@@ -2851,7 +2893,7 @@ async function openCredits(traderId){
   box.id='credits-modal';box.className='modal-wrap';
   box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
     <div class="modal-head"><h3>Add store credits</h3>
-      <button class="icon-btn" onclick="document.getElementById('credits-modal').remove()">
+      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('credits-modal').remove()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
     <p class="muted" style="font-size:12.5px;margin-bottom:14px">Credits are a USD store balance:
       they reduce the price of the trader's next challenge automatically at checkout.
@@ -2897,7 +2939,7 @@ async function openCreate(){
   box.id='create-modal';box.className='modal-wrap';
   box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
     <div class="modal-head"><h3>New challenge account</h3>
-      <button class="icon-btn" onclick="document.getElementById('create-modal').remove()">
+      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('create-modal').remove()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
     <p class="muted" style="font-size:12.5px;margin-bottom:14px">Everything typed by hand, from an MT5 account outside the pool — nothing is taken from MT5 Pool and its state stays untouched. Drawdown type comes from the plan you pick.</p>
     <div class="stack">
@@ -3208,6 +3250,10 @@ if(localStorage.getItem('pf_admin_collapsed')==='1')$('side').classList.add('col
 })();
 setInterval(()=>{
   if(document.hidden)return;
+  /* Nie przerysowuj pod rekami: re-render zabija fokus i kursor w wyszukiwarce
+     albo w polu otwartego modala — tick poczeka na nastepny obrot. */
+  const a=document.activeElement;
+  if(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT'))return;
   if(VIEW==='overview'||VIEW==='accounts')VIEWS[VIEW]().catch(()=>{});
 },12000);
 setInterval(()=>{if(!document.hidden&&ME)loadInbox()},60000);

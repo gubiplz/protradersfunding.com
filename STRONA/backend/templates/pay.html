@@ -22,6 +22,10 @@
         <div><span>Order</span><span>{{ reference }}</span></div>
         <div><span>Item</span><span>{{ item }}</span></div>
         {% if bogo %}<div><span>Included</span><span><b>+ second account, same size — free</b></span></div>{% endif %}
+        {% if rabat_list %}
+        <div><span>List price</span><span style="text-decoration:line-through;opacity:.6">${{ rabat_list }}</span></div>
+        <div><span>Your discount</span><span><b>−${{ rabat_usd }}{% if rabat_pct %} ({{ rabat_pct }}%){% endif %}</b></span></div>
+        {% endif %}
         <div><span>Amount due</span><span>${{ amount }}</span></div>
       </div>
       {% if bogo %}
@@ -47,6 +51,14 @@
       <p class="muted" style="font-size:14px">Order {{ reference }} has been paid — nothing else
         to do here. Your account details are in the
         <a href="/portal" style="color:var(--acc-soft)">trader portal</a> and in your inbox.</p>
+      {% if bogo %}
+      {# Po zapłacie obietnica ma stać dalej: klient wraca na tę stronę
+         sprawdzić, czy drugie konto na pewno mu się należy. #}
+      <p style="font-size:13.5px;margin-top:12px;line-height:1.55">
+        <b>Buy 1 Get 1 Free</b> — this order came with a second account of the same size.
+        Credentials for both accounts were sent to your e-mail and are visible in the portal.
+      </p>
+      {% endif %}
     </div>
     {% elif status == 'missing' %}
     <div class="verify-result bad">

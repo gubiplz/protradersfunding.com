@@ -972,6 +972,9 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
   /* content and toasts must never slide under the fixed bar */
   .has-botnav .content{padding-bottom:calc(50px + 56px + env(safe-area-inset-bottom))}
   .has-botnav #toasts{bottom:calc(12px + 56px + env(safe-area-inset-bottom))}
+  /* scrollIntoView musi celowac NAD pasek: bez tego element przewiniety "do
+     widoku" laduje pod fixed nawigacja i klik trafia w jej przyciski. */
+  html{scroll-padding-bottom:calc(70px + env(safe-area-inset-bottom))}
 }
 
 /* ---------------- challenge cards (portal Challenges view) ---------------- */
