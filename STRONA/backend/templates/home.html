@@ -2,7 +2,8 @@
 
 {# The certificate preview in the #certs section uses the same stylesheet as
    the real document, so the landing never drifts from it on the next change. #}
-{% block head_extra %}<link rel="preload" href="/static/fonts/signature.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/static/css/cert.css?v={{ asset_v }}">{% endblock %}
+{% block head_extra %}<link rel="preload" href="/static/fonts/signature.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/static/css/cert.css?v={{ asset_v }}">
+<meta name="trustpilot-one-time-domain-verification-id" content="d0402851-50c0-4439-90f0-c738c350aa32"/>{% endblock %}
 
 {% block content %}
 
