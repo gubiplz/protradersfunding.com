@@ -111,6 +111,30 @@ def test_wpis_bez_metaapi_dziala_a_konto_nie_dostaje_zmyslonego_id():
     s.close()
 
 
+def test_dosypanie_puli_od_reki_uzbraja_czekajace_konto(monkeypatch):
+    """Admin dodaje rachunek do puli DLA konta, które już czeka — poświadczenia
+    i mail mają pójść od razu, nie przy najbliższym dziennym cronie."""
+    from app import notify
+    zebrane = []
+    monkeypatch.setattr(notify, "_send_teraz",
+                        lambda event, to, ctx=None: zebrane.append((event, to)))
+    ROZMIAR = 74_000
+    tid = _trader("dosypka@pool.pl")
+    aid = _konto_czekajace(tid, ROZMIAR)
+
+    with realny_provisioning():
+        r = client.post("/api/admin/pool", headers=ADMIN_H,
+                        json={"platform_login": "7400001", "platform_password": "Haslo123",
+                              "platform_server": "GOMarketsLtd-Demo", "account_size": ROZMIAR})
+        assert r.status_code == 200
+
+    s = SessionLocal()
+    acc = s.get(Account, aid)
+    assert acc.status == "active" and acc.platform_login == "7400001"
+    s.close()
+    assert ("credentials", "dosypka@pool.pl") in zebrane
+
+
 def test_bez_pasujacego_rozmiaru_konto_czeka():
     ROZMIAR = 73_000
     tid = _trader("czeka@pool.pl")

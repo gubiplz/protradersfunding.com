@@ -4028,7 +4028,7 @@ class SimGenerateIn(BaseModel):
 
 
 @app.post("/api/admin/pool/generate-simulated", dependencies=[Depends(auth.require_admin)])
-def admin_pool_generate_simulated(payload: SimGenerateIn):
+async def admin_pool_generate_simulated(payload: SimGenerateIn):
     """Dodaje do puli wpisy z wygenerowanymi u nas poświadczeniami w formacie
     MetaQuotes-Demo. Za takim wpisem nie stoi żaden serwer — konto, które go
     dostanie, ma mt5_backed=False i ruch generuje mu Trade BOT, nie realny feed."""
@@ -4048,9 +4048,15 @@ def admin_pool_generate_simulated(payload: SimGenerateIn):
             session.flush()
             created.append({"id": p.id, "platform_login": p.platform_login})
         session.commit()
-        return {"created": created}
     finally:
         session.close()
+    # Jak przy ręcznym dosypaniu puli: czekające konta mają dostać poświadczenia
+    # od razu, nie przy najbliższym cronie.
+    try:
+        await poller.provision_kickoff()
+    except Exception as e:  # najbliższy tick i tak dokończy
+        print(f"[pool] natychmiastowy provisioning nie wyszedł: {e}")
+    return {"created": created}
 
 
 class PayoutEngineIn(BaseModel):
@@ -4140,7 +4146,7 @@ def admin_pool_sim_fallback(payload: SimFallbackIn):
 
 
 @app.post("/api/admin/pool", dependencies=[Depends(auth.require_admin)])
-def admin_pool_add(payload: NewPoolAccount):
+async def admin_pool_add(payload: NewPoolAccount):
     session = SessionLocal()
     try:
         p = PoolAccount(
@@ -4151,9 +4157,16 @@ def admin_pool_add(payload: NewPoolAccount):
         )
         session.add(p)
         session.commit()
-        return {"id": p.id, "account_size": p.account_size}
+        wynik = {"id": p.id, "account_size": p.account_size}
     finally:
         session.close()
+    # Admin dosypuje pulę zwykle DLA konta, które już czeka — rachunek i mail
+    # z poświadczeniami mają pójść teraz, nie przy najbliższym cronie.
+    try:
+        await poller.provision_kickoff()
+    except Exception as e:  # najbliższy tick i tak dokończy
+        print(f"[pool] natychmiastowy provisioning nie wyszedł: {e}")
+    return wynik
 
 
 def _generator_status() -> tuple[bool, str]:
