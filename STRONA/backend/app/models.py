@@ -763,3 +763,22 @@ class LeadReminder(Base):
     last_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_by: Mapped[str] = mapped_column(String(60), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class MailLog(Base):
+    """Dziennik prób wysyłki maili — dowód doręczenia albo ślad awarii.
+
+    SMTP pada u nas po cichu: `notify` łapie wyjątek, żeby nie wywrócić
+    requestu, przez co „mail nie doszedł" wyglądał identycznie jak „mail
+    nigdy nie wyszedł". Ten dziennik rozstrzyga to jedno pytanie; panel
+    pokazuje stąd błędy, zanim zgłosi je klient.
+    """
+    __tablename__ = "mail_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    event: Mapped[str] = mapped_column(String(40), default="")
+    to_email: Mapped[str] = mapped_column(String(200), default="")
+    subject: Mapped[str] = mapped_column(String(200), default="")
+    ok: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)

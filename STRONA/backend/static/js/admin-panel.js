@@ -52,6 +52,7 @@ const ICO={
   trend:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>',
   arrow:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><path d="M9 6l6 6-6 6"/></svg>',
   copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>',
+  mail:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m3 6 9 6.5L21 6"/></svg>',
 };
 
 const NAV=[
@@ -63,6 +64,7 @@ const NAV=[
   {v:'tickets',label:'Tickets',ico:'chat'},
   {v:'orders',label:'Orders',ico:'file'},
   {v:'pool',label:'MT5 Pool',ico:'bank'},
+  {v:'mail',label:'Mail',ico:'mail'},
   {v:'telemetry',label:'Telemetry',ico:'trend'},
   {v:'settings',label:'Settings',ico:'gear'},
 ];
@@ -88,6 +90,7 @@ const TITLES={
   tickets:['Tickets','Support conversations with traders'],
   orders:['Orders','Purchases and revenue'],
   pool:['MT5 Pool','Pre-provisioned accounts ready to assign'],
+  mail:['Mail','Every e-mail the platform tried to send — and which ones failed'],
   telemetry:['Telemetry','Product events from the last 14 days'],
   settings:['Settings','Admin access and runtime configuration'],
 };
@@ -325,6 +328,7 @@ const VIEWS={
       ${todo(pendingPay,'payout requests to review','payouts','wallet')}
       ${todo((kyc.pending||[]).length,'KYC submissions pending','kyc','shield')}
       ${todo(openTick,'support tickets open','tickets','chat')}
+      ${s.mail_failed_7d?todo(s.mail_failed_7d,'e-mails failed to send (7 days)','mail','alert'):''}
     </div>
     <div class="stats-row">
       ${tile('purple','layers','Accounts',s.total,`${s.active} active · ${s.provisioning??0} provisioning`)}
@@ -416,6 +420,11 @@ const VIEWS={
           ${XBTN(`deleteKycRow(${t.trader_id},'${jsq(t.email)}')`,'Delete KYC record and uploaded documents')}</td></tr>`).join('')}
       </tbody></table></div>`:`<p class="muted" style="font-size:13px">No ${esc(kf)} decisions.</p>`}</div>`:'';
   $('view').innerHTML=cards+histTbl;
+ },
+
+ async mail(){
+  window._mailLog=await api('/api/admin/mail-log');
+  renderMailLog();
  },
 
  async tickets(){
@@ -638,6 +647,40 @@ function searchBox(id,stateKey,render,ph){
       oninput="window.${stateKey}=this.value;const p=this.selectionStart;${render}();qFocus('${id}',p)">
     ${val?`<button class="q-x" type="button" aria-label="Clear search" title="Clear"
       onclick="window.${stateKey}='';${render}();qFocus('${id}')">&times;</button>`:''}</span>`;
+}
+
+/* ---------- mail: dziennik doręczeń ----------
+   SMTP pada po cichu (notify łapie wyjątek, żeby nie wywrócić requestu) —
+   ta zakładka to jedyne miejsce, gdzie „mail nie wyszedł" widać, zanim
+   zgłosi to klient. Fallback jest już pod ręką: Copy link przy zaproszeniu
+   do portalu, Pay link przy zamówieniu, poświadczenia MT5 w karcie konta. */
+function renderMailLog(){
+  const d=window._mailLog||{};
+  const list=d.entries||[];
+  const q=(window._mailQ||'').toLowerCase(), f=window._mailFilter||'all';
+  const rows=list.filter(m=>(f==='all'||(f==='failed'?!m.ok:m.ok))&&
+    (!q||(m.to||'').toLowerCase().includes(q)||(m.event||'').toLowerCase().includes(q)
+      ||(m.subject||'').toLowerCase().includes(q)));
+  $('view').innerHTML=`
+    <div class="toolbar">
+      ${searchBox('mail-q','_mailQ','renderMailLog','Search recipient, subject or template…')}
+      <div class="seg">${[['all','All'],['sent','Sent'],['failed','Failed']]
+        .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._mailFilter='${f===k?'all':k}';renderMailLog()">${l}</button>`).join('')}</div>
+      <span class="count-pill">${rows.length} of ${list.length}</span>
+    </div>
+    ${d.failed_7d?`<p class="lead-statline" style="color:var(--gold)">⚠ ${d.failed_7d} e-mail${d.failed_7d>1?'s':''} failed in the last 7 days — deliver the content another way (copy the portal-invite link, the pay link or the MT5 credentials from the account card), then check the SMTP settings.</p>`:''}
+    ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.maillog">
+      <thead><tr><th>Date</th><th>To</th><th>Subject</th><th>Template</th><th>Status</th></tr></thead>
+      <tbody>${rows.map(m=>`<tr>
+        <td class="muted" data-l="Date" data-sort="${esc(m.ts||'')}">${dstr(m.ts)}</td>
+        <td class="rt-main" data-l="To">${esc(m.to||'—')}</td>
+        <td data-l="Subject">${esc(m.subject||'—')}</td>
+        <td class="muted" data-l="Template">${esc((m.event||'—').replace(/_/g,' '))}</td>
+        <td data-l="Status"><span class="status ${m.ok?'paid':'failed'}"><span class="dot"></span>${m.ok?'sent':'failed'}</span>
+          ${m.error?`<div class="muted" style="font-size:11px;max-width:260px;word-break:break-word">${esc(m.error)}</div>`:''}</td></tr>`).join('')}
+      </tbody></table></div>`
+    :list.length?`<div class="empty"><h3>No e-mails match</h3><p>Try a different search or filter.</p></div>`
+    :`<div class="empty"><h3>Nothing sent yet</h3><p>Every e-mail the platform sends will be listed here, including the ones that fail.</p></div>`}`;
 }
 
 /* ---------- tickets: search + filters + list ---------- */

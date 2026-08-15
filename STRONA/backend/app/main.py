@@ -40,7 +40,7 @@ from .config import get_settings
 from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint
 from .models import (LEAD_STATUSES, Account, AchievementReward, AppSetting, Breach, Certificate,
                      CreditLedger, EquitySnapshot, JournalEntry, KycFile, Lead, LeadEvent,
-                     LeadReminder, Notification,
+                     LeadReminder, MailLog, Notification,
                      Order, Payout, PayoutRequest, PoolAccount, Product, PushSubscription,
                      RewardCode, SupportTicket, TelemetryEvent, TicketMessage, Trade, Trader)
 
@@ -5205,6 +5205,33 @@ def _upsell_nudge(min_days: int = 21) -> dict:
         session.close()
 
 
+@app.get("/api/admin/mail-log", dependencies=[Depends(auth.require_admin)])
+def admin_mail_log():
+    """Dziennik prób wysyłki maili — ostatnie wpisy plus licznik porażek.
+
+    SMTP pada po cichu (notify łapie wyjątek, żeby nie wywrócić requestu),
+    więc to jedyne miejsce, w którym „mail nie wyszedł" jest widoczne,
+    zanim zgłosi to klient.
+    """
+    session = SessionLocal()
+    try:
+        wpisy = (session.query(MailLog)
+                 .order_by(MailLog.ts.desc()).limit(200).all())
+        tydzien = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)
+        porazki = (session.query(MailLog)
+                   .filter(MailLog.ok == False,                              # noqa: E712
+                           MailLog.ts >= tydzien).count())
+        return {"failed_7d": porazki,
+                "entries": [{"id": m.id,
+                             "ts": m.ts.isoformat() if m.ts else None,
+                             "event": m.event, "to": m.to_email,
+                             "subject": m.subject, "ok": bool(m.ok),
+                             "error": m.error}
+                            for m in wpisy]}
+    finally:
+        session.close()
+
+
 @app.get("/api/stats", dependencies=[Depends(auth.require_admin)])
 def stats():
     """Statystyki OPERACYJNE (feed, tryb Stripe, pula) — tylko admin.
@@ -5245,7 +5272,14 @@ def stats():
                 "orders_paid": (session.query(Order)
                                 .filter(Order.status == "paid", Order.provider != "grant").count()),
                 "pool_free": session.query(PoolAccount).filter(PoolAccount.claimed == False).count(),  # noqa: E712
-                "provisioning": by_status.get("provisioning", 0)}
+                "provisioning": by_status.get("provisioning", 0),
+                # Kafelek na Overview pokazuje się tylko przy porażkach —
+                # cicha awaria SMTP ma być widoczna bez wchodzenia w Mail.
+                "mail_failed_7d": (session.query(MailLog)
+                                   .filter(MailLog.ok == False,              # noqa: E712
+                                           MailLog.ts >= datetime.now(timezone.utc).replace(tzinfo=None)
+                                           - timedelta(days=7))
+                                   .count())}
     finally:
         session.close()
 

@@ -705,6 +705,25 @@ def _odloz(fn, *args) -> bool:
     return True
 
 
+def _zapisz_w_dzienniku(event: str, to_email: str, subject: str,
+                        blad: str | None) -> None:
+    """Ślad każdej próby wysyłki. Best-effort: dziennik nie ma prawa wywrócić
+    ani wysyłki, ani requestu, w którego tle leci — stąd goły `except`."""
+    try:
+        from .db import SessionLocal
+        from .models import MailLog
+        session = SessionLocal()
+        try:
+            session.add(MailLog(event=event, to_email=to_email,
+                                subject=(subject or "")[:200],
+                                ok=blad is None, error=blad))
+            session.commit()
+        finally:
+            session.close()
+    except Exception:  # pragma: no cover
+        pass
+
+
 def send(event: str, to_email: str | None, ctx: dict | None = None) -> None:
     if _odloz(_send_teraz, event, to_email, ctx):
         return
@@ -722,6 +741,7 @@ def _send_teraz(event: str, to_email: str | None, ctx: dict | None = None) -> No
         to_email = None
     if to_email:
         html = _render_html(event, ctx, subject)
+        blad = None
         if settings.smtp_host:
             try:
                 msg = EmailMessage()
@@ -738,6 +758,7 @@ def _send_teraz(event: str, to_email: str | None, ctx: dict | None = None) -> No
                     s.send_message(msg)
             except Exception as e:  # pragma: no cover
                 print(f"[notify] SMTP błąd: {e}")
+                blad = str(e)[:500]
         else:
             print(f"\n📧 [MAIL → {to_email}] {subject}\n{body}\n")
             if html:
@@ -748,6 +769,7 @@ def _send_teraz(event: str, to_email: str | None, ctx: dict | None = None) -> No
                     print(f"   ↳ HTML preview: {out}")
                 except Exception:  # pragma: no cover
                     pass
+        _zapisz_w_dzienniku(event, to_email, subject, blad)
 
     # 2) webhook (Make/Telegram itp.)
     if settings.notify_webhook_url:
