@@ -6,8 +6,11 @@ Sprawdzamy kontrakt SEO (200, ItemList w JSON-LD, wpis w sitemapie) i to,
 import os
 import tempfile
 
-os.environ["DATABASE_URL"] = "sqlite:///" + os.path.join(
-    tempfile.gettempdir(), "pf_test_academy.db")
+# NamedTemporaryFile, nie stała nazwa: ten moduł bywa alfabetycznie pierwszy,
+# więc jego baza staje się bazą CAŁEGO przebiegu — stały plik przeżywał między
+# przebiegami i drugi run padał na UNIQUE danych z pierwszego.
+os.environ.setdefault("DATABASE_URL", "sqlite:///" + tempfile.NamedTemporaryFile(
+    suffix=".db", delete=False).name)
 os.environ.setdefault("ADMIN_TOKEN", "tajny-token")
 os.environ.setdefault("FEED", "sim")
 os.environ.setdefault("AUTO_SEED", "false")

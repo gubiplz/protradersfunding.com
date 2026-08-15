@@ -8,8 +8,10 @@ import os
 import tempfile
 from datetime import datetime
 
-os.environ["DATABASE_URL"] = "sqlite:///" + os.path.join(
-    tempfile.gettempdir(), "pf_test_account_stats.db")
+# NamedTemporaryFile, nie stała nazwa: stały plik przeżywa między przebiegami
+# i drugi run pada na UNIQUE danych z pierwszego (patrz test_academy_page.py).
+os.environ.setdefault("DATABASE_URL", "sqlite:///" + tempfile.NamedTemporaryFile(
+    suffix=".db", delete=False).name)
 os.environ.setdefault("ADMIN_TOKEN", "tajny-token")
 os.environ.setdefault("FEED", "sim")
 os.environ.setdefault("AUTO_SEED", "false")

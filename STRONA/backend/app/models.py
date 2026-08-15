@@ -776,6 +776,27 @@ class LeadReminder(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
+class LeadMailTemplate(Base):
+    """Szablon maila pisanego z ręki w panelu — temat i treść do wielokrotnego użytku.
+
+    Osobno od `tresc()` w `lead_mail.py` i celowo NIE zamiast niej: tamten tekst
+    to automat przypięty do wyniku ankiety i ma jedną, kontrolowaną wersję.
+    Szablony są narzędziem działu — treść pisze człowiek, panel ją tylko
+    przechowuje, a wysyłka i tak przechodzi przez ten sam `lead_mail.wyslij`
+    (papier firmowy marki, wersja tekstowa jako źródło prawdy).
+
+    `name` jest kluczem podmiany: zapis pod istniejącą nazwą nadpisuje szablon,
+    bo „poprawiłem literówkę" nie ma prawa mnożyć wpisów na liście.
+    """
+    __tablename__ = "lead_mail_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    subject: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 class MailLog(Base):
     """Dziennik prób wysyłki maili — dowód doręczenia albo ślad awarii.
 

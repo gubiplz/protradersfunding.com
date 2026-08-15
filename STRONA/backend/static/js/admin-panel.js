@@ -1124,6 +1124,115 @@ async function sendLeadEmail(id){
   if(VIEW==='leads')await VIEWS.leads();
   if(window._leadOpen&&window._leadOpen.id===id)openLead(id);
 }
+/* Mail pisany z ręki: temat i treść wpisuje admin, serwer ubiera je w papier
+   firmowy marki z landingu (akapit będący samym linkiem -> zielony przycisk,
+   blok po „--" -> szara stopka). Szablony mieszkają na SERWERZE, nie w
+   localStorage: z panelu korzysta więcej niż jedno urządzenie i szablon
+   zapisany na laptopie musi istnieć na telefonie. {name} podmienia się na
+   imię PRZED podglądem — admin zatwierdza dokładnie to, co wyjdzie. */
+const mailFill=(t,l)=>String(t||'')
+  .replaceAll('{name}',String(l.name||'').trim().split(/\s+/)[0]||'there');
+async function openLeadMail(id){
+  const l=(window._leads||[]).find(x=>x.id===id)
+    ||(window._leadOpen&&window._leadOpen.id===id?window._leadOpen:null);
+  if(!l)return;
+  try{window._mailTpls=await api('/api/admin/email-templates')}
+  catch(e){window._mailTpls=[];toast('Templates: '+e.message,'err')}
+  document.getElementById('lead-mail-modal')?.remove();
+  const box=document.createElement('div');
+  box.id='lead-mail-modal';box.className='modal-wrap';
+  box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>E-mail to ${esc(l.name||l.email)}</h3>
+      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('lead-mail-modal').remove()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <p class="muted" style="font-size:12.5px;margin-bottom:14px">Goes to <b>${esc(l.email||'')}</b> on the brand letterhead.
+      A paragraph that is just a link becomes the green button, everything after a <b>--</b> line becomes the grey footer,
+      and <b>{name}</b> becomes their first name.</p>
+    <div class="stack">
+      <div><label class="muted" style="font-size:12px">Template</label>
+        <select id="lm-tpl" class="inp" onchange="fillMailTpl()"></select></div>
+      <div><label class="muted" style="font-size:12px">Subject</label>
+        <input id="lm-subject" class="inp" placeholder="Subject"></div>
+      <div><label class="muted" style="font-size:12px">Message</label>
+        <textarea id="lm-body" class="inp" rows="12" spellcheck="false"
+          placeholder="Hi {name},"></textarea></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="lm-name" class="inp" style="flex:1;min-width:0" placeholder="Template name">
+        <button class="btn-o sm" type="button" onclick="saveMailTpl()">Save template</button>
+        <button class="btn-o sm" type="button" id="lm-del" onclick="delMailTpl()"
+          style="display:none">Delete</button>
+      </div>
+      <button class="btn-p lg" style="width:100%" id="lm-send" onclick="sendCustomLeadMail(${l.id})">Send</button>
+    </div></div>`;
+  box.onclick=()=>box.remove();
+  document.body.appendChild(box);
+  paintMailTpls('');
+  $('lm-subject').focus();
+}
+function paintMailTpls(sel){
+  const s=$('lm-tpl');if(!s)return;
+  s.innerHTML='<option value="">— start from scratch —</option>'
+    +(window._mailTpls||[]).map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('');
+  s.value=String(sel||'');
+  /* Nie atrybut `hidden`: reguła klasy .btn-o ustawia display i wygrywa z
+     arkuszem przeglądarki, więc przycisk zostawał widoczny mimo atrybutu. */
+  $('lm-del').style.display=s.value?'':'none';
+}
+function fillMailTpl(){
+  const t=(window._mailTpls||[]).find(x=>String(x.id)===$('lm-tpl').value);
+  $('lm-del').style.display=t?'':'none';
+  if(!t)return;
+  $('lm-subject').value=t.subject;$('lm-body').value=t.body;$('lm-name').value=t.name;
+}
+async function saveMailTpl(){
+  const name=$('lm-name').value.trim(),subject=$('lm-subject').value.trim(),
+    body=$('lm-body').value.trim();
+  if(!name){toast('Give the template a name.','err');$('lm-name').focus();return}
+  if(!subject||!body){toast('Subject and message are both required.','err');return}
+  try{
+    const t=await api('/api/admin/email-templates',{method:'POST',
+      body:JSON.stringify({name,subject,body})});
+    window._mailTpls=await api('/api/admin/email-templates');
+    paintMailTpls(t.id);
+    toast('Template saved.');
+  }catch(e){toast('Not saved: '+e.message,'err')}
+}
+async function delMailTpl(){
+  const t=(window._mailTpls||[]).find(x=>String(x.id)===$('lm-tpl').value);
+  if(!t)return;
+  if(!await askConfirm({title:'Delete this template?',
+    body:`<b>${esc(t.name)}</b> disappears for everyone using the panel. E-mails already sent stay in each lead's history.`,
+    ok:'Delete',danger:true}))return;
+  try{
+    await api('/api/admin/email-templates/'+t.id,{method:'DELETE'});
+    window._mailTpls=(window._mailTpls||[]).filter(x=>x.id!==t.id);
+    paintMailTpls('');
+    toast('Template deleted.');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function sendCustomLeadMail(id){
+  const l=(window._leads||[]).find(x=>x.id===id)
+    ||(window._leadOpen&&window._leadOpen.id===id?window._leadOpen:null);
+  if(!l)return;
+  const subject=mailFill($('lm-subject').value.trim(),l);
+  const body=mailFill($('lm-body').value.trim(),l);
+  if(!subject||!body){toast('Subject and message are both required.','err');return}
+  /* Ten sam podgląd co przy automacie: wysyłka jest nieodwracalna i wychodzi
+     pod cudzą marką, więc klikający widzi CAŁY tekst po podmianie {name}. */
+  const podglad=`Goes to <b>${esc(l.email||'')}</b>, subject <b>${esc(subject)}</b>:<br><br>`
+    +`<span style="color:var(--txt);white-space:pre-wrap">${esc(body)}</span>`;
+  if(!await askConfirm({title:'Send this e-mail?',body:podglad,ok:'Send',cancel:'Not yet'}))return;
+  await busy($('lm-send'),'Sending…',async()=>{
+    try{
+      await api('/api/admin/leads/'+id+'/email-custom',{method:'POST',
+        body:JSON.stringify({subject,body})});
+      document.getElementById('lead-mail-modal')?.remove();
+      toast('E-mail sent.');
+      if(VIEW==='leads')await VIEWS.leads();
+      if(window._leadOpen&&window._leadOpen.id===id)openLead(id);
+    }catch(e){toast('Not sent: '+e.message,'err')}
+  });
+}
 /* Same shape the landing validates against. A handle that fails it ("gubi
    please") renders as plain text: a dead t.me link looks like contact and
    is not, and the desk should see the typo, not chase it. */
@@ -1149,6 +1258,7 @@ const ICO_PHONE='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stro
 const ICO_COPY='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 const ICO_SMS='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.5 9.5 9.5 0 0 1-2.8-.4L3 21l1.4-4.2A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5z"/></svg>';
 const ICO_MAIL='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m3 6 9 6.5L21 6"/></svg>';
+const ICO_PEN='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
 function leadPhoneActs(l){
   const h=String(l.telegram||'').replace(/^@/,'');
   const handleOk=TG_HANDLE_RE.test(h);
@@ -1168,7 +1278,10 @@ function leadPhoneActs(l){
         onclick="sendLeadSms(${l.id})">${ICO_SMS}</button>`:''}${l.mail_ready
     ?`<button class="act-btn" type="button" aria-label="Send the e-mail"
         title="E-mail them the Telegram link — the only channel that always has somewhere to go"
-        onclick="sendLeadEmail(${l.id})">${ICO_MAIL}</button>`:''}
+        onclick="sendLeadEmail(${l.id})">${ICO_MAIL}</button>`:''}${l.mail_ready
+    ?`<button class="act-btn" type="button" aria-label="Write an e-mail"
+        title="Write your own e-mail — subject and text are yours, templates included"
+        onclick="openLeadMail(${l.id})">${ICO_PEN}</button>`:''}
     <button class="act-btn" type="button" title="Copy the opener"
       aria-label="Copy the opener" onclick="copyOpener(${l.id})">${ICO_COPY}</button></span>`;
 }
@@ -1244,7 +1357,7 @@ function renderLeads(){
         <td data-l="Contact">${l.telegram?`<div>${leadTgLink(l)}</div>`:''}
           ${l.phone?`<div class="muted lead-ph"><a href="tel:${esc(l.phone)}">${esc(l.phone)}</a>${
             l.phone_iso?` ${esc(l.phone_iso)}`:''}</div>`:''}
-          ${l.phone||l.telegram?`<div class="lead-act-row">${leadPhoneActs(l)}</div>`:''}</td>
+          ${l.phone||l.telegram||l.mail_ready?`<div class="lead-act-row">${leadPhoneActs(l)}</div>`:''}</td>
         <td class="muted" data-l="Source">${esc(l.source||'—')}${l.ref?`<div style="font-size:11px">via ${esc(l.ref)}</div>`:''}</td>
         <td data-l="Status"><button type="button" class="status status-tap ${LEAD_STATUS_CLS[l.status]||'pending'}"
             aria-label="Change status" title="Change status"
@@ -1691,7 +1804,7 @@ async function openLead(id){
       ${l.country?`<span class="chip">${esc(l.country)}</span>`:''}
       ${l.source?`<span class="chip">${esc(l.source)}${l.ref?' via '+esc(l.ref):''}</span>`:''}
     </div>
-    ${l.phone||l.telegram?`<div class="chip-row" style="margin-top:2px">${leadPhoneActs(l)}</div>`:''}
+    ${l.phone||l.telegram||l.mail_ready?`<div class="chip-row" style="margin-top:2px">${leadPhoneActs(l)}</div>`:''}
     ${Object.keys(l.answers||{}).length?`<div class="lead-card sec-card"><h4>Answers</h4>
       ${Object.entries(l.answers).map(([q,v])=>`<div class="note-line"><span class="muted">${esc(q)}</span><br><b>${esc(v)}</b></div>`).join('')}
       <p class="muted" style="font-size:11.5px;margin-top:8px">From the latest application — earlier ones sit in the history below.</p></div>`:''}

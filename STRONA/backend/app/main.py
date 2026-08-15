@@ -40,7 +40,7 @@ from .config import get_settings
 from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint
 from .models import (LEAD_STATUSES, Account, AchievementReward, AppSetting, Breach, Certificate,
                      CreditLedger, EquitySnapshot, JournalEntry, KycFile, Lead, LeadEvent,
-                     LeadReminder, MailLog, Notification,
+                     LeadMailTemplate, LeadReminder, MailLog, Notification,
                      Order, Payout, PayoutRequest, PoolAccount, Product, PushSubscription,
                      RewardCode, SupportTicket, TelemetryEvent, TicketMessage, Trade, Trader)
 
@@ -6357,6 +6357,115 @@ def admin_lead_email(lead_id: int, force: bool = False):
             _zapisz_status(session, lead, "messaged", actor="panel")
         session.commit()
         return {"ok": True, "id": lead_id, "status": lead.status}
+    finally:
+        session.close()
+
+
+class LeadMailIn(BaseModel):
+    subject: str
+    body: str
+
+
+@app.post("/api/admin/leads/{lead_id}/email-custom",
+          dependencies=[Depends(auth.require_admin)])
+def admin_lead_email_custom(lead_id: int, dane: LeadMailIn):
+    """Mail do leada z treścią wpisaną w panelu — temat i tekst od człowieka.
+
+    Osobny endpoint, a nie parametr przy `/email`, bo tamta droga ma odwrotny
+    kontrakt: treść składa serwer z `outcome` i panel nie ma prawa jej podmienić.
+    Tu jest na odwrót — treść JEST wolą klikającego, serwer tylko ubiera ją
+    w papier firmowy marki (`_html_z_tekstu`) i pilnuje, żeby w historii leada
+    został dokładnie ten tekst, który wyszedł.
+
+    Bez blokady „raz na leada": tamta chroni przed DRUGĄ KOPIĄ tego samego
+    automatu, a tu każdy mail admin pisze (i widzi w podglądzie) sam — powtórka
+    jest jego świadomą decyzją, nie odbiciem statusu.
+
+    Temat trafia do `detail` zdarzenia, więc webhook Brevo dopasuje doręczenie
+    i odbicie tak samo jak przy automacie — po temacie zapisanym przy wysyłce.
+    """
+    temat = " ".join(dane.subject.split())
+    tekst = dane.body.strip()
+    if not temat or not tekst:
+        raise HTTPException(400, "Subject and message are both required")
+    session = SessionLocal()
+    try:
+        lead = session.get(Lead, lead_id)
+        if not lead:
+            raise HTTPException(404, "Lead not found")
+        poszlo, powod = lead_mail.wyslij(lead.email, temat, tekst)
+        if not poszlo:
+            raise HTTPException(400, powod)
+        _zdarzenie(session, lead.id, "email", temat, "panel",
+                   payload=json.dumps({"body": tekst}, ensure_ascii=False))
+        if lead.status == "new":
+            _zapisz_status(session, lead, "messaged", actor="panel")
+        session.commit()
+        return {"ok": True, "id": lead_id, "status": lead.status}
+    finally:
+        session.close()
+
+
+class MailTemplateIn(BaseModel):
+    name: str
+    subject: str
+    body: str
+
+
+def _szablon_json(t: LeadMailTemplate) -> dict:
+    return {"id": t.id, "name": t.name, "subject": t.subject, "body": t.body,
+            "updated_at": t.updated_at.isoformat() if t.updated_at else None}
+
+
+@app.get("/api/admin/email-templates", dependencies=[Depends(auth.require_admin)])
+def admin_email_templates():
+    session = SessionLocal()
+    try:
+        return [_szablon_json(t) for t in
+                session.query(LeadMailTemplate).order_by(LeadMailTemplate.name)]
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/email-templates", dependencies=[Depends(auth.require_admin)])
+def admin_email_template_save(dane: MailTemplateIn):
+    """Zapis szablonu; istniejąca nazwa nadpisuje.
+
+    Nadpisanie zamiast błędu „already exists": jedyny scenariusz, w którym ktoś
+    zapisuje pod starą nazwą, to poprawka treści — i ma wtedy dostać poprawiony
+    szablon, a nie listę z dwoma wpisami „follow-up" różniącymi się literówką.
+    """
+    nazwa = " ".join(dane.name.split())[:80]
+    temat = " ".join(dane.subject.split())[:200]
+    tekst = dane.body.strip()
+    if not nazwa or not temat or not tekst:
+        raise HTTPException(400, "Name, subject and message are all required")
+    session = SessionLocal()
+    try:
+        t = (session.query(LeadMailTemplate)
+             .filter(LeadMailTemplate.name == nazwa).one_or_none())
+        if t is None:
+            t = LeadMailTemplate(name=nazwa)
+            session.add(t)
+        t.subject, t.body = temat, tekst
+        t.updated_at = datetime.now(timezone.utc)
+        session.commit()
+        return _szablon_json(t)
+    finally:
+        session.close()
+
+
+@app.delete("/api/admin/email-templates/{tpl_id}",
+            dependencies=[Depends(auth.require_admin)])
+def admin_email_template_delete(tpl_id: int):
+    session = SessionLocal()
+    try:
+        t = session.get(LeadMailTemplate, tpl_id)
+        if not t:
+            raise HTTPException(404, "Template not found")
+        session.delete(t)
+        session.commit()
+        return {"ok": True, "id": tpl_id}
     finally:
         session.close()
 
