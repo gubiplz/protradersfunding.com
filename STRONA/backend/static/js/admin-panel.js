@@ -882,7 +882,7 @@ function renderPayoutsView(){
     </div>`+(rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.payouts">
     <thead><tr><th>Date</th><th>Account</th><th>Trader</th><th>Profit</th><th>Trader share</th><th>Method</th><th>Status</th><th class="no-sort">Certificate</th><th class="no-sort"></th></tr></thead>
     <tbody>${rows.map(r=>`<tr>
-      <td class="muted" data-l="Date" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td><td class="num rt-main" data-l="Account">${accLink(r.account_id,r.account_login)}</td>
+      <td class="muted" data-l="Date" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td><td class="num rt-main" data-l="Account">${accLink(r.account_id,r.account_login)}${r.express?' <span class="express-pill" title="Express Payout add-on — this request jumps the review queue">EXPRESS</span>':''}</td>
       <td data-l="Trader">${esc(r.trader_email||'—')}</td>
       <td class="num" data-l="Profit">$${fmt(r.profit_amount)}</td><td class="num up" data-l="Share">$${fmt(r.trader_share)}</td>
       <td data-l="Method">${(()=>{const d=r.details||{};
@@ -2644,7 +2644,8 @@ function delPool(id,login,retired){
 const GRANT_REASONS=['BOGO promotion','Free upgrade','Compensation','Partner deal','Contest prize','Marketing campaign'];
 
 const grantOpt=(t,chosen)=>`<option value="${t.id}"${chosen===t.id?' selected':''}>`
-  +`${esc(t.email)}${t.full_name?' — '+esc(t.full_name):''} (${t.accounts} acc.)</option>`;
+  +`${esc(t.email)}${t.full_name?' — '+esc(t.full_name):''} (${t.accounts} acc.`
+  +`${t.referred_count?` · ${t.referred_count} referred`:''})</option>`;
 
 function grantFilter(){
   const all=window._grantTraders||[],q=($('g-search').value||'').trim().toLowerCase();

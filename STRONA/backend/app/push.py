@@ -35,6 +35,7 @@ _EVENT_VIEW = {
     "ticket_reply": "support",
     "daily_recap": "analytics",
     "credits_granted": "store",
+    "limit_warning": "accounts",
 }
 
 # Krótkie treści pod tytułem (tytuł = temat maila, liczony w notify._render).
@@ -56,6 +57,9 @@ _BODY: dict[str, str] = {
     "kyc_rejected": "Your verification needs another look.",
     "ticket_reply": "Support replied to your ticket.",
     "credits_granted": "Store credit added. It applies automatically at your next checkout.",
+    # Wyjątek od zasady „push nie komentuje wyników na żywo": ostrzeżenie o
+    # limicie ISTNIEJE po to, żeby uratować konto — cisza tu kosztuje challenge.
+    "limit_warning": "You are close to a trading limit. Slow down and protect the account.",
 }
 
 

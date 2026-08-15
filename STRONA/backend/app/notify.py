@@ -645,6 +645,8 @@ _PREF_BY_EVENT = {
     "phase_passed": "notify_trading", "account_funded": "notify_trading",
     "account_scaled": "notify_trading",
     "breached": "notify_trading",
+    # tylko push+centrum (push.send_event z pollera) — maila do tego zdarzenia nie ma
+    "limit_warning": "notify_trading",
     "payout_requested": "notify_payouts", "payout_approved": "notify_payouts",
     "payout_rejected": "notify_payouts",
     # recap idzie tylko przez push/centrum (push.daily_recap), nie mailem

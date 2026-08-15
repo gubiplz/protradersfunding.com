@@ -84,6 +84,7 @@ def _powod_odmowy(session, trader: Trader, code: str) -> str:
 
 def compute_price(session, trader: Trader, product_key: str, coupon: str | None,
                   promo_code: str | None = None, weekend_trading: bool = False,
+                  split_boost: bool = False, express_payout: bool = False,
                   use_credits: bool = True) -> dict:
     """Jedyne miejsce, w ktorym liczy sie cena checkoutu.
 
@@ -122,6 +123,15 @@ def compute_price(session, trader: Trader, product_key: str, coupon: str | None,
     # Add-on Weekend Trading: stala kwota, POZA rabatem kuponu (kupon dotyczy planu).
     if weekend_trading:
         price = round(price + catalog.WEEKEND_ADDON_USD, 2)
+    # Split Boost tylko dla Instant Funding — walidacja TUTAJ, nie w UI: modal
+    # mozna obejsc golym POST-em, a boost na planie 2-Step (split 90%) dawalby
+    # 100% i firma pracowalaby za darmo.
+    if split_boost:
+        if product.steps != 0:
+            raise HTTPException(400, "The profit split boost is available on Instant Funding plans only")
+        price = round(price + catalog.SPLIT_BOOST_ADDON_USD, 2)
+    if express_payout:
+        price = round(price + catalog.EXPRESS_PAYOUT_ADDON_USD, 2)
 
     # Promocja „Upgrade Your Size": TYLKO z poprawnym kodem promo zamowienie
     # idzie na NASTEPNY plan w gore, a kwota zostaje z planu WYBRANEGO (`price`
@@ -157,6 +167,8 @@ def compute_price(session, trader: Trader, product_key: str, coupon: str | None,
             "discount_pct": discount_pct,
             "discount_usd": round(product.price_usd - plan_po_kuponie, 2),
             "weekend_fee_usd": (catalog.WEEKEND_ADDON_USD if weekend_trading else 0.0),
+            "split_boost_fee_usd": (catalog.SPLIT_BOOST_ADDON_USD if split_boost else 0.0),
+            "express_payout_fee_usd": (catalog.EXPRESS_PAYOUT_ADDON_USD if express_payout else 0.0),
             "credits_used": (kredyt if kredyt > 0 else 0.0),
             "total_due_usd": price,
             "bogo_paid_key": (product.key if upgrade else None)}
@@ -215,9 +227,11 @@ def open_stripe_session(session, order: Order, item_name: str, *,
 
 def create_checkout(session, trader: Trader, product_key: str, coupon: str | None,
                     promo_code: str | None = None, weekend_trading: bool = False,
+                    split_boost: bool = False, express_payout: bool = False,
                     use_credits: bool = True) -> dict:
     quote = compute_price(session, trader, product_key, coupon,
                           promo_code=promo_code, weekend_trading=weekend_trading,
+                          split_boost=split_boost, express_payout=express_payout,
                           use_credits=use_credits)
     product, upgrade = quote["product"], quote["upgrade"]
     prowizjonowany = upgrade or product
@@ -225,6 +239,8 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
 
     order = Order(trader_id=trader.id, product_key=prowizjonowany.key, amount_usd=price,
                   coupon=(coupon or None), weekend_trading=bool(weekend_trading),
+                  addon_split_boost=bool(split_boost),
+                  addon_express_payout=bool(express_payout),
                   credits_used=kredyt,
                   bogo_paid_key=quote["bogo_paid_key"],
                   bogo=bogo_active(session),
@@ -249,7 +265,9 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
     if settings.stripe_enabled:
         nazwa = (f"{prowizjonowany.label} challenge"
                  + (f" ({catalog.PROMO_NAME} promo)" if upgrade else "")
-                 + (" + Weekend Trading" if weekend_trading else ""))
+                 + (" + Weekend Trading" if weekend_trading else "")
+                 + (" + Split Boost" if split_boost else "")
+                 + (" + Express Payout" if express_payout else ""))
         url = open_stripe_session(session, order, nazwa)
         return {"checkout_url": url, "order_id": order.id, "amount": price,
                 "discount_pct": discount_pct, "credits_used": kredyt}

@@ -172,6 +172,10 @@ class Order(Base):
     bogo: Mapped[bool] = mapped_column(Boolean, default=False)
     # Add-on Weekend Trading ($199): 2 dodatkowe dni handlu w tygodniu.
     weekend_trading: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Add-on Split Boost: +10 pp do profit splitu (tylko Instant Funding).
+    addon_split_boost: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Add-on Express Payout: wnioski o wypłatę z tego konta ida na poczatek kolejki.
+    addon_express_payout: Mapped[bool] = mapped_column(Boolean, default=False)
     # Kredyty sklepowe odliczone od ceny tego zamowienia. Saldo tradera schodzi
     # dopiero przy DOMKNIECIU platnosci — porzucony checkout nie pali srodkow.
     credits_used: Mapped[float] = mapped_column(Float, default=0.0)
@@ -321,6 +325,9 @@ class Account(Base):
     # albo mail w ogole go nie zawiera.
     bogo_paid_size: Mapped[float | None] = mapped_column(Float, nullable=True)
     weekend_trading: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Add-on Express Payout kupiony przy checkoucie: wnioski o wypłatę z tego
+    # konta panel pokazuje na poczatku kolejki przegladu.
+    express_payout: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # --- Trade BOT (admin) ---
     # Gdy wlaczony, konto NIE jest czytane z MT5 — snapshoty generuje tradebot.py.
@@ -365,6 +372,10 @@ class Account(Base):
     day_start_equity: Mapped[float] = mapped_column(Float, default=0.0)
     day_start_balance: Mapped[float] = mapped_column(Float, default=0.0)
     best_day_profit: Mapped[float] = mapped_column(Float, default=0.0)
+    # Strażniki ostrzeżenia „80% limitu": dzień (YYYY-MM-DD), w którym push o
+    # zbliżaniu się do limitu już wyszedł — jedno ostrzeżenie na dobę na typ.
+    limit_warn_daily_day: Mapped[str] = mapped_column(String(10), default="")
+    limit_warn_dd_day: Mapped[str] = mapped_column(String(10), default="")
     trading_days_count: Mapped[int] = mapped_column(Integer, default=0)
     last_counted_trading_day: Mapped[str] = mapped_column(String(16), default="")
     breach_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)

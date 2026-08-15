@@ -83,6 +83,9 @@ html[data-theme=dark]{
 .seg button{padding:7px 13px;border-radius:8px;font-size:var(--fs-ui);font-weight:var(--fw-bold);color:var(--muted);transition:.15s}
 .seg button.on{background:var(--grad);color:#fff}
 .count-pill{margin-left:auto;font-size:var(--fs-ui);color:var(--dim)}
+/* Add-on Express Payout: wniosek opłacony $49 ma być widoczny w kolejce od progu */
+.express-pill{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.4px;color:#f59e0b;
+  border:1px solid #f59e0b;border-radius:6px;padding:1px 5px;vertical-align:1px}
 
 /* mini bars inside table rows */
 .mini{height:5px;border-radius:99px;background:var(--bg3);overflow:hidden;min-width:78px}

@@ -18,7 +18,7 @@ from .config import get_settings
 from .db import SessionLocal
 from .feed import Feed, make_feed
 from .models import Account, Breach, EquitySnapshot
-from . import catalog, notify, provisioning, rules, tradebot
+from . import catalog, notify, provisioning, push, rules, tradebot
 from .rules import AccountRuntime, EquityTick, Phase, Status
 
 # Plan skalowania kont funded: po +SCALE_TRIGGER% trader WYBIERA — wypłata albo
@@ -181,6 +181,30 @@ def apply_scale_up(session, acc: Account) -> float:
     return float(bal)
 
 
+# Próg ostrzeżenia „zbliżasz się do limitu" (procent WYKORZYSTANIA limitu,
+# nie procent straty) — jak u FTMO, zanim konto realnie pęknie.
+LIMIT_WARN_PCT = 80.0
+
+
+def _limit_warnings_due(acc: Account, metrics: dict, day_key: str) -> list[str]:
+    """Tytuły należnych ostrzeżeń o limitach; przy okazji stawia strażniki.
+
+    Raz dziennie na typ limitu (kolumny limit_warn_*_day). Na serverless tick
+    budzi się z ruchem albo dziennym cronem, więc ostrzeżenie może przyjść
+    z opóźnieniem — nadal lepsze niż cisza aż do breachu.
+    """
+    tytuly = []
+    daily = float(metrics.get("daily_loss_used_pct") or 0)
+    dd = float(metrics.get("overall_dd_used_pct") or 0)
+    if daily >= LIMIT_WARN_PCT and acc.limit_warn_daily_day != day_key:
+        acc.limit_warn_daily_day = day_key
+        tytuly.append(f"{acc.login}: {int(round(daily))}% of daily loss limit used")
+    if dd >= LIMIT_WARN_PCT and acc.limit_warn_dd_day != day_key:
+        acc.limit_warn_dd_day = day_key
+        tytuly.append(f"{acc.login}: {int(round(dd))}% of max drawdown used")
+    return tytuly
+
+
 def _notify(acc: Account, event: str, extra: dict | None = None) -> None:
     """Best-effort powiadomienie tradera (e-mail/webhook)."""
     try:
@@ -267,7 +291,16 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
     else:
         # Skalowanie NIE dzieje się tu samo: przy +15% trader wybiera w portalu
         # między wypłatą a wyższym planem (POST /api/accounts/{id}/scale-up).
+        ostrzezenia = _limit_warnings_due(acc, res.metrics, tick.day_key)
         session.commit()
+        # Push + centrum powiadomień, BEZ maila (jak daily_recap) — mail o
+        # „prawie stracie" o 3 nad ranem to panika, nie pomoc.
+        email = acc.trader.email if acc.trader else None
+        for tytul in ostrzezenia:
+            try:
+                push.send_event("limit_warning", email, tytul)
+            except Exception as e:  # pragma: no cover
+                print(f"[poller] limit warning: {e}", flush=True)
 
 
 def _active_query(session):

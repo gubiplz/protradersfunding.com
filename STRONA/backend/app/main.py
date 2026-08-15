@@ -994,18 +994,33 @@ def _ui_prefs_dict(trader: Trader) -> dict:
         return {}
 
 
+def _affiliate_earned(session, trader: Trader) -> float:
+    """Prowizja naliczona ŁĄCZNIE z opłaconych zamówień poleconych traderów."""
+    # Granty (BOGO) niosą amount_usd opłaconego tieru dla faktury, ale to
+    # NIE jest druga płatność — bez tego filtra prowizja liczyłaby się 2×.
+    paid_orders = (session.query(Order)
+                   .join(Trader, Trader.id == Order.trader_id)
+                   .filter(Trader.referred_by == trader.referral_code, Order.status == "paid",
+                           Order.provider != "grant").all())
+    return round(sum(o.amount_usd for o in paid_orders) * catalog.AFFILIATE_COMMISSION_PCT / 100.0, 2)
+
+
+def _affiliate_claimed(session, trader_id: int) -> float:
+    """Prowizja już zamieniona na kredyty sklepowe. Źródłem prawdy jest ledger
+    (nota `affiliate:claim`) — audyt i suma w jednym, bez osobnej kolumny."""
+    suma = (session.query(func.coalesce(func.sum(CreditLedger.amount), 0.0))
+            .filter(CreditLedger.trader_id == trader_id,
+                    CreditLedger.note == "affiliate:claim").scalar())
+    return round(float(suma or 0), 2)
+
+
 @app.get("/api/auth/me")
 def me(trader: Trader = Depends(auth.current_trader)):
     session = SessionLocal()
     try:
         referred = session.query(Trader).filter(Trader.referred_by == trader.referral_code).count()
-        # Granty (BOGO) niosą amount_usd opłaconego tieru dla faktury, ale to
-        # NIE jest druga płatność — bez tego filtra prowizja liczyłaby się 2×.
-        paid_orders = (session.query(Order)
-                       .join(Trader, Trader.id == Order.trader_id)
-                       .filter(Trader.referred_by == trader.referral_code, Order.status == "paid",
-                               Order.provider != "grant").all())
-        commission = round(sum(o.amount_usd for o in paid_orders) * catalog.AFFILIATE_COMMISSION_PCT / 100.0, 2)
+        commission = _affiliate_earned(session, trader)
+        claimed = _affiliate_claimed(session, trader.id)
         return {"id": trader.id, "email": trader.email, "full_name": trader.full_name,
                 "is_admin": trader.is_admin, "kyc_status": trader.kyc_status,
                 # Czy weryfikacja jest w ogóle otwarta (patrz `kyc_dostepne`) —
@@ -1033,7 +1048,42 @@ def me(trader: Trader = Depends(auth.current_trader)):
                 "notify": {"updates": bool(trader.notify_updates), "trading": bool(trader.notify_trading),
                            "payouts": bool(trader.notify_payouts), "marketing": bool(trader.notify_marketing)},
                 "affiliate": {"referred": referred, "commission_pct": catalog.AFFILIATE_COMMISSION_PCT,
-                              "commission_earned": commission}}
+                              "commission_earned": commission,
+                              "commission_claimed": claimed,
+                              "commission_unclaimed": round(max(0.0, commission - claimed), 2)}}
+    finally:
+        session.close()
+
+
+AFFILIATE_CLAIM_MIN_USD = 10.0
+
+
+@app.post("/api/me/affiliate/claim")
+def affiliate_claim(trader: Trader = Depends(auth.current_trader)):
+    """Zamiana naliczonej prowizji afiliacyjnej na kredyty sklepowe.
+
+    unclaimed = naliczone (opłacone zamówienia poleconych) − już wypłacone
+    (suma wpisów `affiliate:claim` w ledgerze). Blokada wiersza tradera +
+    clamp do zera zamykają wyścig dwóch równoległych claimów: drugi wylicza
+    unclaimed już PO wpisie pierwszego i dostaje 0."""
+    session = SessionLocal()
+    try:
+        tr = (session.query(Trader).filter(Trader.id == trader.id)
+              .with_for_update().first())
+        earned = _affiliate_earned(session, tr)
+        claimed = _affiliate_claimed(session, tr.id)
+        kwota = round(max(0.0, earned - claimed), 2)
+        if kwota < AFFILIATE_CLAIM_MIN_USD:
+            raise HTTPException(
+                400, f"You need at least ${AFFILIATE_CLAIM_MIN_USD:,.0f} in unclaimed "
+                     f"commission (you have ${kwota:,.2f})")
+        tr.credits_usd = round(float(tr.credits_usd or 0) + kwota, 2)
+        session.add(CreditLedger(trader_id=tr.id, amount=kwota, note="affiliate:claim"))
+        session.commit()
+        telemetry.track("affiliate_claim", tr.id, amount=kwota)
+        return {"claimed_usd": kwota, "credits_usd": tr.credits_usd,
+                "commission_claimed": round(claimed + kwota, 2),
+                "commission_unclaimed": 0.0}
     finally:
         session.close()
 
@@ -1046,6 +1096,8 @@ class CheckoutIn(BaseModel):
     coupon: str | None = None
     promo_code: str | None = None      # kod „Upgrade Your Size" (nie kupon rabatowy)
     weekend_trading: bool = False
+    split_boost: bool = False          # +10 pp splitu (tylko Instant; pilnuje billing)
+    express_payout: bool = False       # wnioski o wypłatę na początek kolejki
     use_credits: bool = True           # False = zostaw kredyty sklepowe na później
     # Dane potrzebne do założenia konta demo MT5 na nazwisko klienta.
     # Zbierane w kroku płatności; zapisywane na profilu tradera.
@@ -1155,6 +1207,8 @@ def checkout(payload: CheckoutIn, trader: Trader = Depends(auth.current_trader))
         return billing.create_checkout(session, trader, payload.product_key, payload.coupon,
                                        promo_code=payload.promo_code,
                                        weekend_trading=payload.weekend_trading,
+                                       split_boost=payload.split_boost,
+                                       express_payout=payload.express_payout,
                                        use_credits=payload.use_credits)
     finally:
         session.close()
@@ -1162,7 +1216,8 @@ def checkout(payload: CheckoutIn, trader: Trader = Depends(auth.current_trader))
 
 @app.get("/api/checkout/preview")
 def checkout_preview(product_key: str, coupon: str | None = None, promo_code: str | None = None,
-                     weekend: bool = False, use_credits: bool = True,
+                     weekend: bool = False, split_boost: bool = False, express: bool = False,
+                     use_credits: bool = True,
                      trader: Trader = Depends(auth.current_trader)):
     """Podgląd rozbicia ceny dla modala zakupu — dokładnie ta sama matematyka
     co realny checkout (billing.compute_price), tylko bez tworzenia zamówienia.
@@ -1171,9 +1226,12 @@ def checkout_preview(product_key: str, coupon: str | None = None, promo_code: st
     try:
         q = billing.compute_price(session, trader, product_key, coupon,
                                   promo_code=promo_code, weekend_trading=weekend,
+                                  split_boost=split_boost, express_payout=express,
                                   use_credits=use_credits)
         return {"plan_price_usd": q["plan_price_usd"], "discount_pct": q["discount_pct"],
                 "discount_usd": q["discount_usd"], "weekend_fee_usd": q["weekend_fee_usd"],
+                "split_boost_fee_usd": q["split_boost_fee_usd"],
+                "express_payout_fee_usd": q["express_payout_fee_usd"],
                 "credits_used": q["credits_used"], "total_due_usd": q["total_due_usd"],
                 "credits_balance": round(float(trader.credits_usd or 0), 2)}
     finally:
@@ -1456,6 +1514,14 @@ def request_payout(account_id: int, payload: PayoutReqIn, trader: Trader = Depen
         tr = session.get(Trader, trader.id)
         if tr.kyc_status != "approved":
             raise HTTPException(403, "Complete KYC verification first")
+        # Wypłaty on-demand: JEDEN otwarty wniosek na konto. Drugi „pending" to
+        # niemal zawsze dubel z niecierpliwości — przegląd trwa do 24 h i dubel
+        # tylko rozjeżdża księgowanie (dwa wnioski na ten sam zysk).
+        otwarty = (session.query(PayoutRequest)
+                   .filter(PayoutRequest.account_id == acc.id,
+                           PayoutRequest.status == "pending").first())
+        if otwarty:
+            raise HTTPException(400, "A payout request for this account is already under review")
         profit = round(acc.balance - acc.initial_balance, 2)
         if profit <= 0:
             raise HTTPException(400, "No profit available to pay out")
@@ -1838,11 +1904,17 @@ def my_payouts(trader: Trader = Depends(auth.current_trader)):
                 "total_paid": round(sum(p.trader_share for p in pays), 2),
                 "pending": sum(1 for r in reqs if r.status == "pending"),
                 "available": round(available, 2),
+                # Harmonogram wypłat = on-demand z przeglądem do 24 h; portal
+                # pisze to zdanie z tej liczby, nie z zaszytego stringa.
+                "review_hours": 24,
             },
             "requests": [{"id": r.id, "ts": r.ts.isoformat(),
                           "account": by_id[r.account_id].login if r.account_id in by_id else "?",
                           "profit_amount": r.profit_amount, "trader_share": r.trader_share,
                           "method": r.method, "status": r.status,
+                          "express": bool(by_id[r.account_id].express_payout) if r.account_id in by_id else False,
+                          "expected_by": ((r.ts + timedelta(hours=24)).isoformat()
+                                          if r.status == "pending" else None),
                           "reject_reason": r.reject_reason} for r in reqs],
             # Zrealizowane wyplaty — wniosek to dopiero prosba, a trader chce
             # widziec, co faktycznie do niego trafilo i miec do tego certyfikat.
@@ -2605,7 +2677,11 @@ def admin_payout_requests():
                         "trader_email": tr_email, "profit_amount": r.profit_amount,
                         "trader_share": r.trader_share, "method": r.method, "details": details,
                         "status": r.status, "reject_reason": r.reject_reason,
+                        "express": bool(acc.express_payout) if acc else False,
                         "ts": r.ts.isoformat()})
+        # Klient zapłacił $49 za przeskoczenie kolejki — pending z add-onem
+        # Express idą na górę listy, reszta zostaje w porządku „najnowsze pierwsze".
+        out.sort(key=lambda w: (0 if (w["express"] and w["status"] == "pending") else 1))
         return out
     finally:
         session.close()
@@ -2663,7 +2739,7 @@ def admin_payouts_all():
                 "trader_share": round(p.trader_share, 2),
                 "method": p.method or "bank", "details": {},
                 "status": "paid" if p.paid else "pending",
-                "reject_reason": None, "note": p.note,
+                "reject_reason": None, "note": p.note, "express": False,
                 "cert_url": f"/payout/{p.cert_token}" if p.cert_token else None,
                 "show_on_lp": bool(getattr(p, "show_on_lp", True)),
             })
@@ -2690,9 +2766,13 @@ def admin_payouts_all():
                 "method": r.method, "details": details,
                 "status": r.status, "reject_reason": r.reject_reason,
                 "note": None, "cert_url": None,
+                "express": bool(acc.express_payout) if acc else False,
             })
 
         out.sort(key=lambda r: r["ts"] or "", reverse=True)
+        # Express ($49) = przeskoczenie kolejki: pending z add-onem nad resztą,
+        # w obu grupach zostaje porządek „najnowsze pierwsze" (sort stabilny).
+        out.sort(key=lambda w: (0 if (w["express"] and w["status"] == "pending") else 1))
         return out
     finally:
         session.close()
@@ -3034,9 +3114,15 @@ def admin_traders(q: str | None = None):
         rows = query.order_by(Trader.id.desc()).all()
         counts = dict(session.query(Account.trader_id, func.count(Account.id))
                       .group_by(Account.trader_id).all())
+        # Ilu traderów przyszło z czyjego polecenia — jedno GROUP BY zamiast
+        # COUNT-a na wiersz (lista bez limitu, jak konta wyżej).
+        poleceni = dict(session.query(Trader.referred_by, func.count(Trader.id))
+                        .filter(Trader.referred_by.isnot(None))
+                        .group_by(Trader.referred_by).all())
         return [{"id": t.id, "email": t.email, "full_name": t.full_name,
                  "kyc_status": t.kyc_status, "accounts": counts.get(t.id, 0),
                  "credits_usd": round(float(t.credits_usd or 0), 2),
+                 "referred_count": poleceni.get(t.referral_code, 0),
                  "created_at": t.created_at.isoformat() if t.created_at else None} for t in rows]
     finally:
         session.close()

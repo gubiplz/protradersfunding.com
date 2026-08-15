@@ -146,6 +146,8 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "payment_address": "VARCHAR(200)",
         "payment_network": "VARCHAR(40)",
         "pay_token": "VARCHAR(32)",
+        "addon_split_boost": "BOOLEAN DEFAULT FALSE",
+        "addon_express_payout": "BOOLEAN DEFAULT FALSE",
     },
     "pool_accounts": {
         "claimed_by_trader_id": "INTEGER",
@@ -183,6 +185,9 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "bot_paused": "BOOLEAN DEFAULT FALSE",
         "bot_started_at": "TIMESTAMP",
         "scale_count": "INTEGER DEFAULT 0",
+        "express_payout": "BOOLEAN DEFAULT FALSE",
+        "limit_warn_daily_day": "VARCHAR(10) DEFAULT ''",
+        "limit_warn_dd_day": "VARCHAR(10) DEFAULT ''",
     },
     # Karta leada na kanale. Tabela `leads` stoi na produkcji od pierwszego
     # zgloszenia, wiec `create_all` ja pomija — bez tych trzech wpisow kazdy

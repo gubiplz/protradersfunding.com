@@ -33,7 +33,7 @@ from time import monotonic
 
 from fastapi import HTTPException
 
-from . import loyalty, metaapi_provisioning, metaquotes_web, notify, telemetry
+from . import catalog, loyalty, metaapi_provisioning, metaquotes_web, notify, telemetry
 from .config import get_settings
 from .models import (Account, AppSetting, CreditLedger, Order, PoolAccount, Product,
                      RewardCode, Trader)
@@ -95,7 +95,12 @@ def create_account_from_order(session, order: Order, notify_admin: bool = True) 
         profit_target_p1=product.profit_target_p1, profit_target_p2=product.profit_target_p2,
         max_daily_loss_pct=product.max_daily_loss_pct, max_overall_loss_pct=product.max_overall_loss_pct,
         min_trading_days=product.min_trading_days, drawdown_type=product.drawdown_type,
-        profit_split_pct=product.profit_split_pct,
+        # Split Boost: +10 pp do splitu planu (kupiony przy checkoucie; compute_price
+        # dopuszcza go wylacznie na Instant, wiec 70 -> 80).
+        profit_split_pct=(product.profit_split_pct
+                          + (catalog.SPLIT_BOOST_PP
+                             if getattr(order, "addon_split_boost", False) else 0)),
+        express_payout=bool(getattr(order, "addon_express_payout", False)),
         max_lots=getattr(product, "max_lots", 0.0) or 0.0,
         # Instant funding (steps=0) omija ewaluacje — konto od razu jest funded.
         phase=("funded" if product.steps == 0 else "eval_1"),

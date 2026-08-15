@@ -41,6 +41,14 @@ def max_lots_for(account_size: float) -> float:
 # kwota niezależnie od rozmiaru konta.
 WEEKEND_ADDON_USD = 199.0
 
+# Add-ony checkoutu (ceny ROBOCZE — właściciel może skorygować jednym słowem).
+# Split Boost: +10 pp do profit splitu, WYŁĄCZNIE Instant Funding — plany 2-Step
+# startują z 90% i boost wychodziłby ponad 100. Express Payout: wnioski o
+# wypłatę z tego konta panel pokazuje na początku kolejki przeglądu.
+SPLIT_BOOST_ADDON_USD = 149.0
+SPLIT_BOOST_PP = 10
+EXPRESS_PAYOUT_ADDON_USD = 49.0
+
 # Rozmiar oznaczany w sklepie jako „Best value". Etykieta marketingowa,
 # nie zmierzona statystyka — stala, nie zapytanie o sprzedaz. Gdyby miala byc
 # prawda z danych, wystarczy policzyc oplacone zamowienia per `product_key`.

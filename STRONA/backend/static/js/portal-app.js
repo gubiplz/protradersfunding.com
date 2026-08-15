@@ -843,6 +843,19 @@ async function doReveal(){
   }catch(e){toast('Error: '+e.message,'err')}
   finally{delete c.dataset.busy}
 }
+/* Prowizja afiliacyjna -> kredyty sklepowe (min $10, pilnuje serwer). */
+async function claimAffiliate(btn){
+  await busy(btn,'Claiming…',async()=>{
+    try{
+      const r=await api('/api/me/affiliate/claim',{method:'POST'});
+      ME=await api('/api/auth/me');
+      toast(`✅ $${fmt(r.claimed_usd)} added to your store credit.\nIt applies automatically at checkout.`,'ok',7000);
+      go('rewards');
+      return 'keep';
+    }catch(e){toast('Claim failed: '+e.message,'err',6000)}
+  });
+}
+
 function initRevealCard(){
   if(ME.reveal_last!==utcToday())return;       // stays face-down until claimed
   let p=null;
@@ -1545,7 +1558,10 @@ const VIEWS={
           <div><div class="muted" style="font-size:11px">Referred</div><div class="mono" style="font-weight:700;font-size:18px">${aff.referred??0}</div></div>
           <div><div class="muted" style="font-size:11px">Rate</div><div class="mono" style="font-weight:700;font-size:18px">${aff.commission_pct??10}%</div></div>
           <div><div class="muted" style="font-size:11px">Earned</div><div class="mono up" style="font-weight:700;font-size:18px">$${fmt(aff.commission_earned??0)}</div></div>
+          <div><div class="muted" style="font-size:11px">Unclaimed</div><div class="mono" style="font-weight:700;font-size:18px">$${fmt(aff.commission_unclaimed??0)}</div></div>
         </div>
+        ${(aff.commission_unclaimed??0)>=10?`<button class="btn-p sm" onclick="claimAffiliate(this)">Claim $${fmt(aff.commission_unclaimed)} as store credit</button>`
+          :(aff.commission_unclaimed??0)>0?`<span class="muted" style="font-size:12px">Claim unlocks at $10 unclaimed</span>`:''}
       </div>
     </div>`;
   const cards=[
@@ -1582,6 +1598,8 @@ const VIEWS={
       <div class="stat-tile"><div class="tile-ic purple">${ICO.dollar}</div>
         <div><div class="lbl">Available to request</div><div class="val">$${fmt(data.summary.available)}</div><div class="sub">your split of current profits</div></div></div>
     </div>
+    <p class="muted" style="font-size:13px;margin:-6px 0 14px">Payouts are <b>on demand</b> — request whenever
+      you are in profit. Every request is reviewed within <b>${data.summary.review_hours||24} hours</b>.</p>
     ${funded.filter(a=>a.scale_up_to).map(a=>{
       const av=Math.max(0,(a.balance-a.initial_balance)*(a.profit_split_pct||80)/100);
       return `<div class="scale-offer">
@@ -1604,10 +1622,12 @@ const VIEWS={
     ${data.requests.length?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="portal.payout-req">
       <thead><tr><th>Date</th><th>Account</th><th>Profit</th><th>Requested</th><th>Method</th><th>Status</th></tr></thead>
       <tbody>`+data.requests.map(r=>`<tr>
-        <td class="muted" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td><td class="num">${esc(r.account)}</td>
+        <td class="muted" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td>
+        <td class="num">${esc(r.account)}${r.express?' <span style="font-size:10px;font-weight:700;letter-spacing:.4px;color:var(--orange,#f59e0b);border:1px solid currentColor;border-radius:6px;padding:1px 5px;vertical-align:1px">EXPRESS</span>':''}</td>
         <td class="num">$${fmt(r.profit_amount)}</td><td class="num">$${fmt(r.trader_share)}</td>
         <td class="muted">${esc(payoutMethodLabel(r.method))}</td>
         <td><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending':'failed'}"><span class="dot"></span>${esc(r.status)}</span>
+          ${r.status==='pending'&&r.expected_by?`<div class="muted" style="font-size:11px">decision by ${dstr(r.expected_by)}</div>`:''}
           ${r.status==='rejected'&&r.reject_reason?`<div class="muted" style="font-size:11px;max-width:220px">${esc(r.reject_reason)}</div>`:''}</td></tr>`).join('')+`
       </tbody></table></div>`
       :`<div class="empty"><h3>No payout requests yet</h3><p>Pass a challenge, get funded and request your first performance reward. Your challenge fee comes back with it.</p></div>`}
@@ -2357,6 +2377,16 @@ function openBuy(key){
             style="width:15px;height:15px;accent-color:var(--acc)">
           <span><b>Weekend Trading</b> — 2 extra trading days/week <b>+$199</b></span>
         </label>
+        ${p.steps===0?`<label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
+          <input type="checkbox" id="c-boost" onchange="quoteRefresh(true)"
+            style="width:15px;height:15px;accent-color:var(--acc)">
+          <span><b>Profit Split Boost</b> — keep ${Math.min(100,(p.profit_split_pct||70)+10)}% instead of ${p.profit_split_pct||70}% <b>+$149</b></span>
+        </label>`:''}
+        <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
+          <input type="checkbox" id="c-express" onchange="quoteRefresh(true)"
+            style="width:15px;height:15px;accent-color:var(--acc)">
+          <span><b>Express Payout</b> — your payout requests jump the review queue <b>+$49</b></span>
+        </label>
         ${ME.credits_usd>0?`<label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
           <input type="checkbox" id="c-usecr" checked onchange="quoteRefresh(true)"
             style="width:15px;height:15px;accent-color:var(--acc)">
@@ -2385,6 +2415,8 @@ async function quoteNow(){
   const p=PRODUCTS.find(x=>x.key===window._buyKey),box=$('buy-quote');
   if(!p||!box)return;
   const wk=!!($('c-weekend')&&$('c-weekend').checked);
+  const sb=!!($('c-boost')&&$('c-boost').checked);
+  const ex=!!($('c-express')&&$('c-express').checked);
   const uc=!$('c-usecr')||$('c-usecr').checked;
   const bc=window._buyCode||{};
   let q=null,previewFailed=false;
@@ -2392,14 +2424,16 @@ async function quoteNow(){
     q=await api('/api/checkout/preview?product_key='+encodeURIComponent(p.key)
       +'&coupon='+encodeURIComponent(bc.coupon||'')
       +'&promo_code='+encodeURIComponent(bc.promo||'')
-      +'&weekend='+(wk?'1':'0')+'&use_credits='+(uc?'1':'0'));
+      +'&weekend='+(wk?'1':'0')+'&split_boost='+(sb?'1':'0')
+      +'&express='+(ex?'1':'0')+'&use_credits='+(uc?'1':'0'));
   }catch(e){
     /* The preview must never block buying — fall back to the catalog price. */
     previewFailed=true;
     if(e&&e.message&&/coupon/i.test(e.message))buyErr(e.message);
     q={plan_price_usd:p.price_usd,discount_pct:0,discount_usd:0,
-       weekend_fee_usd:wk?199:0,credits_used:0,
-       total_due_usd:Math.round((p.price_usd+(wk?199:0))*100)/100};
+       weekend_fee_usd:wk?199:0,split_boost_fee_usd:sb?149:0,
+       express_payout_fee_usd:ex?49:0,credits_used:0,
+       total_due_usd:Math.round((p.price_usd+(wk?199:0)+(sb?149:0)+(ex?49:0))*100)/100};
   }
   /* A coupon the server does not recognize changes nothing — say so instead
      of quietly showing the full price (promo codes are confirmed separately). */
@@ -2409,6 +2443,8 @@ async function quoteNow(){
   let h=row('Plan fee','$'+fmt(q.plan_price_usd));
   if(q.discount_usd>0)h+=row(`Coupon (−${q.discount_pct}%)`,'−$'+fmt(q.discount_usd),'good');
   if(q.weekend_fee_usd>0)h+=row('Weekend Trading','+$'+fmt(q.weekend_fee_usd));
+  if(q.split_boost_fee_usd>0)h+=row('Profit Split Boost','+$'+fmt(q.split_boost_fee_usd));
+  if(q.express_payout_fee_usd>0)h+=row('Express Payout','+$'+fmt(q.express_payout_fee_usd));
   if(q.credits_used>0)h+=row('Store credit','−$'+fmt(q.credits_used),'good');
   h+=`<div class="q-row total"><span>Total due</span><b class="mono" id="buy-total">$${fmt(q.total_due_usd)}</b></div>`;
   box.innerHTML=h;
@@ -2666,6 +2702,8 @@ async function buy(key){
       const res=await api('/api/checkout',{method:'POST',
         body:JSON.stringify({product_key:key,coupon,promo_code:promo,first_name:first,last_name:last,phone,phone_country:CC,
           weekend_trading:!!($('c-weekend')&&$('c-weekend').checked),
+          split_boost:!!($('c-boost')&&$('c-boost').checked),
+          express_payout:!!($('c-express')&&$('c-express').checked),
           use_credits:!$('c-usecr')||$('c-usecr').checked})});
       /* real Stripe: strona zaraz znika — przycisk ma zostać wyłączony */
       if(res.checkout_url && !res.mock){window.location=res.checkout_url;return 'keep'}
