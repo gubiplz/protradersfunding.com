@@ -112,3 +112,19 @@ def test_admin_agregacja_liczy_per_dzien():
     wiersz = next(i for i in r.json()["items"] if i["name"] == "agg_zdarzenie")
     assert wiersz["count"] == 3 and wiersz["traders"] == 2
     assert len(wiersz["day"]) == 10  # YYYY-MM-DD
+
+
+def test_zalew_telemetrii_lapie_limit(monkeypatch):
+    """view_open leci przy każdej nawigacji, więc limit jest hojny — ale skrypt
+    z ważnym tokenem nie może zalewać telemetry_events bez końca."""
+    import app.main as main_mod
+    monkeypatch.setattr(main_mod, "_RL_DISABLED", False)
+    main_mod._RL_HITS.clear()
+    _, _, h = _trader()
+    try:
+        kody = {client.post("/api/telemetry", headers=h,
+                            json={"name": "view_open", "props": {"view": "accounts"}}
+                            ).status_code for _ in range(130)}
+    finally:
+        main_mod._RL_HITS.clear()
+    assert 429 in kody and 200 in kody

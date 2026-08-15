@@ -3,7 +3,10 @@ const fmt=n=>(n??0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFract
 const fmt0=n=>(n??0).toLocaleString('en-US',{maximumFractionDigits:0});
 /* Catalog models: 0 = Instant Funding, 2 = 2-Step (1-Step is legacy, kept for old accounts). */
 const planKind=s=>s===0?'Instant':s===1?'1-Step':'2-Step';
-const dstr=iso=>new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
+/* Baza oddaje nagie UTC (bez "Z") — new Date() wziąłby to za czas lokalny.
+   Doklejamy "Z" i renderujemy w strefie przeglądarki: klient widzi SWÓJ czas. */
+const dutc=iso=>new Date(/[Zz]|[+-]\d\d:?\d\d$/.test(iso||'')?iso:iso+'Z');
+const dstr=iso=>dutc(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
 // Date only — trade history has no time component. `YYYY-MM-DD` is read as
 // UTC so the browser timezone does not shift the day back by one.
 
@@ -941,7 +944,7 @@ function toggleNotif(){
   p.innerHTML=`<div class="notif-head"><b>Notifications</b>
       ${r.unread?`<button class="linklike" onclick="readNotif()">Mark all read</button>`:''}</div>`
     +((r.items&&r.items.length)?r.items.map(n=>{
-      const kiedy=n.created_at?new Date(n.created_at+(n.created_at.endsWith('Z')?'':'Z'))
+      const kiedy=n.created_at?dutc(n.created_at)
         .toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
       return `<a class="notif-row${n.read?'':' unread'}" href="${esc(n.url||'/portal')}" onclick="return notifGo(this)">
         <div class="t">${esc(n.title)}</div>${n.body?`<div class="b">${esc(n.body)}</div>`:''}
@@ -2237,7 +2240,7 @@ function openInvoice(orderId){
   if(!o)return;
   const box=document.createElement('div');
   box.id='inv-modal'; box.className='modal-wrap';
-  const date=new Date(o.created_at).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+  const date=dutc(o.created_at).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
   box.innerHTML=`<div class="inv-print" onclick="event.stopPropagation()">
     <div class="inv-head">
       <div style="display:flex;align-items:center;gap:10px"><img src="/static/img/logo.png" alt="">
@@ -2815,7 +2818,7 @@ async function openAcc(id){
   const dlUsd=a.initial_balance*dlPct/100, dlLimUsd=a.initial_balance*(m.max_daily_loss_pct||0)/100;
   const curve=a.equity_curve||[];
   const openPnl=a.open_pnl||0;
-  const started=a.created_at?new Date(a.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'—';
+  const started=a.created_at?dutc(a.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'—';
   const split=a.profit_split_pct??90;
   const objOn=objLinesOn();
   $('view').innerHTML=`

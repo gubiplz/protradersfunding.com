@@ -1324,7 +1324,7 @@ function renderLeads(){
      tam istnieje; na desktopie klik w nagłówek dalej sortuje po swojemu. */
   const rank=l=>l.next_due&&dueDays(l.next_due)<=0?0:l.status==='new'?1:2;
   rows.sort((a,b)=>rank(a)-rank(b)
-    ||(rank(a)===0?new Date(a.next_due)-new Date(b.next_due)
+    ||(rank(a)===0?dutc(a.next_due)-dutc(b.next_due)
       :String(b.created_at||'').localeCompare(String(a.created_at||''))));
   /* Same rule as Orders: the numbers describe WHAT IS VISIBLE below them, so
      switching to "Rejected" cannot leave the full revenue sitting on top. */
@@ -1512,7 +1512,7 @@ function leadEventDetail(e){
 
 /* Whole days, not hours: a reminder set for Friday is "in 2 days" all Wednesday
    long, and "3 hours overdue" is not a thing anyone acts on differently. */
-const dueDays=iso=>{const a=new Date(iso),b=new Date();
+const dueDays=iso=>{const a=dutc(iso),b=new Date();
   a.setHours(0,0,0,0);b.setHours(0,0,0,0);return Math.round((a-b)/86400000)};
 const dueLabel=iso=>{const d=dueDays(iso);
   return d<0?`${-d}d overdue`:d===0?'due today':d===1?'tomorrow':`in ${d}d`};

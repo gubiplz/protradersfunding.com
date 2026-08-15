@@ -168,6 +168,21 @@ def test_wejscia_do_portalu_zwijane_per_dzien():
     assert labels.count("Opened the portal") == 1
 
 
+def test_powodz_view_open_nie_wypycha_loginu():
+    """view_open leci przy każdej nawigacji — aktywny klient nazbiera ich setki
+    i we wspólnym oknie zapytania wypchnąłby stare loginy z osi czasu."""
+    tid, _, _ = _trader()
+    dawno = datetime.utcnow() - timedelta(days=30)
+    s = SessionLocal()
+    s.add(TelemetryEvent(trader_id=tid, name="login", created_at=dawno))
+    for i in range(600):
+        s.add(TelemetryEvent(trader_id=tid, name="view_open",
+                             created_at=dawno + timedelta(minutes=i + 1)))
+    s.commit(); s.close()
+    labels = _labels(_journal(tid))
+    assert "Signed in" in labels
+
+
 # --- sklejanie zamówień, kont i wypłat -------------------------------------------
 
 def test_wyplata_i_konto_w_osi_czasu():

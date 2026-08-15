@@ -2621,7 +2621,11 @@ _TELEMETRY_CLIENT_EVENTS = {"view_open", "pwa_install", "js_error"}
 
 
 @app.post("/api/telemetry")
-def telemetry_ingest(payload: TelemetryIn, trader: Trader = Depends(auth.current_trader)):
+def telemetry_ingest(payload: TelemetryIn, request: Request,
+                     trader: Trader = Depends(auth.current_trader)):
+    # view_open leci przy każdej nawigacji, więc limit jest hojny — ale bez
+    # niego skrypt z ważnym tokenem zalałby telemetry_events bez ograniczeń.
+    _rate_limit(request, "telemetry", 120)
     if payload.name not in _TELEMETRY_CLIENT_EVENTS:
         raise HTTPException(400, "Unknown event")
     props = {str(k)[:32]: str(v)[:80] for k, v in (payload.props or {}).items()}
@@ -3317,14 +3321,20 @@ def admin_trader_journal(trader_id: int):
                 items.append({"ts": ts.isoformat(), "kind": kind, "label": label})
 
         add(tr.created_at, "account", "Portal account created")
+        # view_open osobnym zapytaniem: leci przy każdej nawigacji, więc we
+        # wspólnym oknie z limitem wypchnąłby po paru tygodniach loginy i claim.
         zdarzenia = (session.query(TelemetryEvent)
-                     .filter(TelemetryEvent.trader_id == trader_id)
-                     .order_by(TelemetryEvent.created_at.desc()).limit(1000).all())
+                     .filter(TelemetryEvent.trader_id == trader_id,
+                             TelemetryEvent.name != "view_open")
+                     .order_by(TelemetryEvent.created_at.desc()).limit(500).all())
+        wejscia = (session.query(TelemetryEvent)
+                   .filter(TelemetryEvent.trader_id == trader_id,
+                           TelemetryEvent.name == "view_open")
+                   .order_by(TelemetryEvent.created_at.desc()).limit(1000).all())
         otwarcia: dict[str, list] = {}
+        for e in wejscia:
+            otwarcia.setdefault(_dzien_po_warszawsku(e.created_at), []).append(e)
         for e in zdarzenia:
-            if e.name == "view_open":
-                otwarcia.setdefault(_dzien_po_warszawsku(e.created_at), []).append(e)
-                continue
             opis = _DZIENNIK_OPISY.get(e.name, e.name)
             try:
                 props = json.loads(e.props) if e.props else {}
