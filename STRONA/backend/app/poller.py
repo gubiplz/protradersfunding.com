@@ -9,7 +9,10 @@ Stan żyje w bazie (Account.*), więc restart procesu nie gubi postępu.
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import func, select
 
 from .config import get_settings
 from .db import SessionLocal
@@ -286,11 +289,56 @@ async def tick_once() -> dict:
     session = SessionLocal()
     try:
         accounts = _active_query(session).all()
+        bledy = 0
         for acc in accounts:
-            await process_account(session, acc, _feed)
-        return {"accounts": len(accounts), "feed": settings.feed}
+            # Awaria jednego konta (feed, broker, baza) nie może zatrzymać
+            # przetwarzania pozostałych — na serverless kolejna szansa jest
+            # dopiero za dobę. Rollback czyści sesję z niedokończonego stanu.
+            try:
+                await process_account(session, acc, _feed)
+            except Exception as e:
+                session.rollback()
+                bledy += 1
+                print(f"[poller] konto {acc.login}: przebieg nieudany: {e}", flush=True)
+        wynik = {"accounts": len(accounts), "feed": settings.feed}
+        if bledy:
+            wynik["errors"] = bledy
+        return wynik
     finally:
         session.close()
+
+
+def prune_equity_snapshots(session, dni_pelne: int = 30, partia: int = 500,
+                           budzet_s: float = 10.0) -> int:
+    """Retencja wykresu equity: dni starsze niż `dni_pelne` chudną do jednego
+    (ostatniego) snapshotu na (konto, dzień) — wykres dzienny tego nie widzi,
+    a tabela przestaje rosnąć bez końca.
+
+    Kasowanie idzie partiami z budżetem czasu i commitem po każdej partii:
+    na serverless (Vercel, limit 60 s) przerwany przebieg nie traci pracy,
+    resztę dokończy następny cron. Woła to handler /api/tick PO tick_once —
+    celowo nie sam tick_once, bo jego odpala też lazy-tick z ruchu strony.
+    """
+    # Naiwny UTC jak kolumna `ts` — aware vs naive wywraca porównanie na Postgresie.
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=dni_pelne)
+    keepers = (select(func.max(EquitySnapshot.id))
+               .where(EquitySnapshot.ts < cutoff)
+               .group_by(EquitySnapshot.account_id, EquitySnapshot.day_key))
+    start = time.monotonic()
+    usuniete = 0
+    while time.monotonic() - start < budzet_s:
+        ids = [i for (i,) in session.query(EquitySnapshot.id)
+               .filter(EquitySnapshot.ts < cutoff, EquitySnapshot.id.not_in(keepers))
+               .limit(partia).all()]
+        if not ids:
+            break
+        session.query(EquitySnapshot).filter(EquitySnapshot.id.in_(ids)) \
+            .delete(synchronize_session=False)
+        session.commit()
+        usuniete += len(ids)
+        if len(ids) < partia:
+            break
+    return usuniete
 
 
 async def provision_kickoff() -> None:

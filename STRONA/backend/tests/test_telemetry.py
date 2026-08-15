@@ -86,6 +86,20 @@ def test_endpoint_wymaga_auth_i_whitelisty():
     assert _wiersze("dowolna_nazwa") == []
 
 
+def test_js_error_przechodzi_whitelist():
+    """Globalny łapacz błędów w appkach raportuje przez /api/telemetry —
+    zdarzenie musi być na whiteliście, inaczej raporty odbijają się o 400."""
+    tid, _, h = _trader()
+    r = client.post("/api/telemetry", headers=h,
+                    json={"name": "js_error",
+                          "props": {"msg": "x is not a function", "src": "portal-app.js:12",
+                                    "view": "accounts"}})
+    assert r.status_code == 200
+    rows = _wiersze("js_error", tid)
+    assert len(rows) == 1
+    assert "x is not a function" in rows[0].props
+
+
 def test_admin_agregacja_liczy_per_dzien():
     tid1, _, _ = _trader()
     tid2, _, _ = _trader()

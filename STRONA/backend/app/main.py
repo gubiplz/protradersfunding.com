@@ -2444,7 +2444,7 @@ class TelemetryIn(BaseModel):
 # Whitelist zdarzeń klienckich: endpoint wymaga logowania, ale i tak nie
 # pozwalamy klientowi wstrzykiwać dowolnych nazw do statystyk admina.
 # Ruch marketingowy (strona publiczna) łapie GA4 — tu tylko produkt.
-_TELEMETRY_CLIENT_EVENTS = {"view_open", "pwa_install"}
+_TELEMETRY_CLIENT_EVENTS = {"view_open", "pwa_install", "js_error"}
 
 
 @app.post("/api/telemetry")
@@ -5002,6 +5002,16 @@ async def api_tick(request: Request):
     payout = _payout_bot_tick(baza if baza.startswith("https://") else _public_base(request),
                               backstop=True)
     wynik = await poller.tick_once()
+    # Retencja snapshotów equity — tylko z crona (raz na dobę wystarcza),
+    # nigdy z lazy-ticku, żeby ruch strony nie płacił za sprzątanie.
+    sesja_prune = SessionLocal()
+    try:
+        pruned = poller.prune_equity_snapshots(sesja_prune)
+    except Exception as e:  # pragma: no cover
+        print(f"[poller] pruning nieudany: {e}")
+        pruned = 0
+    finally:
+        sesja_prune.close()
     # Dzienny recap normalnie wychodzi z ruchu strony od 06:00 czasu polskiego
     # (middleware wyżej) — tu jest tylko zapasem na dzień bez wejść;
     # push.daily_recap() sam pilnuje godziny, guardu raz-na-dobę i ciszy bez
@@ -5020,10 +5030,10 @@ async def api_tick(request: Request):
     if isinstance(wynik, dict):
         return {**wynik, "daily_recap": recap, "upsell_nudge": nudge.get("sent", 0),
                 "checkout_recovery": recovery.get("sent", 0), "payout_bot": payout,
-                "lead_followups": leady.get("sent", 0)}
+                "lead_followups": leady.get("sent", 0), "snapshots_pruned": pruned}
     return {"tick": wynik, "daily_recap": recap, "upsell_nudge": nudge.get("sent", 0),
             "checkout_recovery": recovery.get("sent", 0), "payout_bot": payout,
-            "lead_followups": leady.get("sent", 0)}
+            "lead_followups": leady.get("sent", 0), "snapshots_pruned": pruned}
 
 
 def _payout_bot_tick(base_url: str | None = None, *,

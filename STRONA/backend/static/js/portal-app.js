@@ -12,8 +12,36 @@ let TOKEN=localStorage.getItem('pf_token'), ME=null, AUTHMODE='login', chart=nul
 /* Ostatni stan programu lojalnosciowego z /api/me/loyalty (punkty, nagrody). */
 let LOY=null;
 const H=()=>TOKEN?{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'}:{'Content-Type':'application/json'};
-async function api(path,opts={}){const r=await fetch(path,{headers:H(),...opts});if(!r.ok){throw new Error((await r.json().catch(()=>({}))).detail||r.status)}return r.json()}
+/* Sieć bywa mobilna: twardy timeout 15 s (AbortController) + JEDEN retry, ale
+   wyłącznie dla GET i wyłącznie po błędzie sieci/timeoucie. Odpowiedź HTTP —
+   nawet 500 — nigdy nie jest ponawiana: POST /checkout nie może się zdublować. */
+async function api(path,opts={},_retry){
+  const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),15000);
+  let r;
+  try{r=await fetch(path,{headers:H(),...opts,signal:ctl.signal})}
+  catch(e){
+    clearTimeout(tm);
+    if(!_retry&&(opts.method||'GET').toUpperCase()==='GET')return api(path,opts,1);
+    throw new Error(e&&e.name==='AbortError'?'Request timed out — check your connection':'Network error — check your connection');
+  }
+  clearTimeout(tm);
+  if(!r.ok){throw new Error((await r.json().catch(()=>({}))).detail||r.status)}
+  return r.json();
+}
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+/* Anty-zawieszka przycisków: gasnie na czas fn(), finally ZAWSZE przywraca —
+   restore tylko w catchu zostawiał martwy przycisk, gdy wywrócił się success
+   path. Drugi klik w trakcie = no-op. fn zwraca 'keep' => przycisk zostaje
+   wyłączony (np. redirect do Stripe, gdzie strona zaraz znika). */
+async function busy(btn,label,fn){
+  if(!btn)return fn();
+  if(btn.disabled)return;
+  const html=btn.innerHTML;
+  btn.disabled=true;if(label)btn.textContent=label;
+  let keep=false;
+  try{const w=await fn();keep=(w==='keep');return w}
+  finally{if(!keep&&btn.isConnected){btn.disabled=false;btn.innerHTML=html}}
+}
 /* "Upgrade Your Size" promo code applied on the public site (or typed in the buy
    modal). Shared key with the landing page — one applied state everywhere. */
 function pfPromo(){try{return localStorage.getItem('pf_promo_code')||''}catch(e){return ''}}
@@ -78,14 +106,17 @@ ckSpace();addEventListener('resize',ckSpace);addEventListener('load',ckSpace);
 /* Fresh ME (credits, streak) + bell badge without a page reload. Re-render of
    the current view only on demand (pull-to-refresh / push navigation) or when
    the credit balance changed — no screen flashing every minute. */
+let _refreshing=false; /* re-entrancy: minutowy interval + visibilitychange potrafią się nałożyć */
 async function refreshLive(rerender=false){
-  if(!TOKEN||!ME)return;
+  if(!TOKEN||!ME||_refreshing)return;
+  _refreshing=true;
   refreshNotif();
   try{
     const stare=ME.credits_usd;
     ME=await api('/api/auth/me');
     if(!rerender&&ME.credits_usd!==stare)rerender=true;
   }catch(e){}
+  finally{_refreshing=false}
   if(rerender&&window._view&&VIEWS[window._view])go(window._view);
 }
 /* Push-click target stored by sw.js in Cache Storage: read on startup AND on
@@ -117,6 +148,21 @@ function track(name,props){try{
   if(TOKEN)api('/api/telemetry',{method:'POST',body:JSON.stringify({name,props:props||{}})}).catch(()=>{})
 }catch(e){}}
 addEventListener('appinstalled',()=>track('pwa_install'));
+
+/* Globalny łapacz błędów JS → telemetria (drill-down w adminie). Dedupe po
+   treści + limit 5/sesję, fire-and-forget — raportowanie nie może samo
+   wywrócić appki ani zaspamować bazy pętlą błędów. */
+const _jsErrSeen=new Set();
+function reportJsError(msg,src){
+  try{
+    const key=String(msg||'unknown').slice(0,80);
+    if(!TOKEN||_jsErrSeen.has(key)||_jsErrSeen.size>=5)return;
+    _jsErrSeen.add(key);
+    track('js_error',{msg:key,src:String(src||'').slice(0,80),view:String(window._view||'')});
+  }catch(e){}
+}
+addEventListener('error',e=>reportJsError(e.message,(e.filename||'')+':'+(e.lineno||0)));
+addEventListener('unhandledrejection',e=>reportJsError(e.reason&&e.reason.message||e.reason,'promise'));
 
 /* Push click with the portal open: sw.js does postMessage instead of
    navigate() (a reload loses SPA state). Top-level listener + startMessages()
@@ -598,10 +644,18 @@ function go(v){
   $('notif-panel')?.classList.add('hidden');
   const moj=++PRZEJSCIE;
   $('view').innerHTML=LOADING_HTML();
-  /* Bez `catch` — tak samo jak dotad. Blad widoku ma byc widoczny w konsoli,
-     a nie polkniety przez opakowanie dodane dla numeru przelaczenia. */
   Promise.resolve(VIEWS[v]())
-    .then(()=>{if(moj!==PRZEJSCIE&&VIEWS[CURV])VIEWS[CURV]()});
+    .then(()=>{if(moj!==PRZEJSCIE&&VIEWS[CURV])VIEWS[CURV]()})
+    .catch(e=>{
+      /* Blad zostaje W widoku z przyciskiem ponowienia (wzor admina) — bez
+         catcha na ekranie wisial wieczny szkielet ladowania. Zgloszenie do
+         telemetrii, zeby blad nie zniknal razem z konsola uzytkownika. */
+      reportJsError(e&&e.message||e,'view:'+v);
+      if(moj!==PRZEJSCIE)return;
+      $('view').innerHTML=`<div class="empty"><h3>Couldn't load this view</h3>
+        <p>${esc(e&&e.message||'Something went wrong')}</p>
+        <button class="btn-p" style="margin-top:14px" onclick="go('${v}')">Try again</button></div>`;
+    });
 }
 function toggleSide(open){
   $('side').classList.toggle('open',open);
@@ -834,21 +888,19 @@ function pushBannerHtml(){
   }catch(e){return ''}
 }
 async function enablePush(btn){
-  if(btn){btn.disabled=true;btn.textContent='Enabling…'}
-  try{
-    const cfg=await pushCfg();
-    if(!cfg.enabled)throw new Error('push is not configured yet');
-    const reg=await navigator.serviceWorker.ready;
-    if(await Notification.requestPermission()!=='granted')throw new Error('permission was not granted');
-    const sub=await reg.pushManager.subscribe({userVisibleOnly:true,
-      applicationServerKey:b64ToU8(cfg.key)});
-    await api('/api/me/push/subscribe',{method:'POST',body:JSON.stringify(sub.toJSON())});
-    document.getElementById('push-banner')?.remove();
-    toast('🔔 Notifications enabled on this device.','ok');
-  }catch(e){
-    toast('Could not enable notifications: '+e.message,'err');
-    if(btn){btn.disabled=false;btn.textContent='Enable ›'}
-  }
+  await busy(btn,'Enabling…',async()=>{
+    try{
+      const cfg=await pushCfg();
+      if(!cfg.enabled)throw new Error('push is not configured yet');
+      const reg=await navigator.serviceWorker.ready;
+      if(await Notification.requestPermission()!=='granted')throw new Error('permission was not granted');
+      const sub=await reg.pushManager.subscribe({userVisibleOnly:true,
+        applicationServerKey:b64ToU8(cfg.key)});
+      await api('/api/me/push/subscribe',{method:'POST',body:JSON.stringify(sub.toJSON())});
+      document.getElementById('push-banner')?.remove();
+      toast('🔔 Notifications enabled on this device.','ok');
+    }catch(e){toast('Could not enable notifications: '+e.message,'err')}
+  });
 }
 function dismissPush(){
   try{localStorage.setItem('pf_push_ask_ts',String(Date.now()))}catch(e){}
@@ -2162,16 +2214,14 @@ function credsBlock(a, compact){
    nie wyslal dwoch prosb — poza tym baza i tak trzyma UNIQUE (trader, prog),
    wiec drugie zadanie dostanie 409 zamiast drugiej nagrody. */
 async function claimReward(tier, btn){
-  if(btn){btn.disabled=true; btn.textContent='Claiming…';}
-  try{
-    const r=await api('/api/me/achievements/claim',{method:'POST',body:JSON.stringify({tier})});
-    toast(r.account?'Your free challenge is being set up.':'Reward code added to your account.','ok');
-    go('achievements');
-    if(r.account)setTimeout(()=>go('accounts'),1400);
-  }catch(e){
-    toast('Error: '+e.message,'err');
-    if(btn){btn.disabled=false; btn.textContent='Claim reward';}
-  }
+  await busy(btn,'Claiming…',async()=>{
+    try{
+      const r=await api('/api/me/achievements/claim',{method:'POST',body:JSON.stringify({tier})});
+      toast(r.account?'Your free challenge is being set up.':'Reward code added to your account.','ok');
+      go('achievements');
+      if(r.account)setTimeout(()=>go('accounts'),1400);
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
 }
 
 function copyVal(btn, val){
@@ -2229,17 +2279,15 @@ async function redeemReward(key,btn){
     cancel:'Not yet',
   });
   if(!zgoda)return;
-  if(btn)btn.disabled=true;
-  try{
-    const d=await api('/api/me/loyalty/redeem',{method:'POST',body:JSON.stringify({reward:key})});
-    await VIEWS.loyalty();
-    toast(`🎟️ Your code ${d.code.code} is ready — ${d.code.pct}% off your next challenge.`,'ok',10000);
-    const el=document.querySelector('.rw-code');
-    if(el&&window.RFX&&RFX.burstFrom)RFX.burstFrom(el,{count:60,palette:RFX.GOLD});
-  }catch(e){
-    if(btn)btn.disabled=false;
-    toast('Error: '+e.message,'err');
-  }
+  await busy(btn,null,async()=>{
+    try{
+      const d=await api('/api/me/loyalty/redeem',{method:'POST',body:JSON.stringify({reward:key})});
+      await VIEWS.loyalty();
+      toast(`🎟️ Your code ${d.code.code} is ready — ${d.code.pct}% off your next challenge.`,'ok',10000);
+      const el=document.querySelector('.rw-code');
+      if(el&&window.RFX&&RFX.burstFrom)RFX.burstFrom(el,{count:60,palette:RFX.GOLD});
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
 }
 
 /* ---------- purchase modal ---------- */
@@ -2613,27 +2661,26 @@ async function buy(key){
   const tel=phoneCheck(CC,$('c-phone').value);
   if(!tel.ok){fieldErr('c-phone',tel.msg);return}
   const first=imie.value, last=nazwisko.value, phone=tel.value;
-  const btn=$('buy-go'); if(btn){btn.disabled=true; btn.textContent='Processing…'}
-  try{
-    const res=await api('/api/checkout',{method:'POST',
-      body:JSON.stringify({product_key:key,coupon,promo_code:promo,first_name:first,last_name:last,phone,phone_country:CC,
-        weekend_trading:!!($('c-weekend')&&$('c-weekend').checked),
-        use_credits:!$('c-usecr')||$('c-usecr').checked})});
-    if(res.checkout_url && !res.mock){window.location=res.checkout_url;return;}  // real Stripe
-    let prov=res;
-    if(res.mock){prov=await api(`/api/checkout/${res.order_id}/mock-complete`,{method:'POST'});}
-    ME=await api('/api/auth/me');
-    closeBuy();
-    if(prov.provisioning){
-      toast('✅ Payment received.\nYour MT5 demo account is being created, up to a minute.\nCredentials arrive by e-mail and under Challenges.','ok',9000);
-    }else{
-      toast(`✅ Account created!\nServer: ${prov.platform_server||'—'}\nLogin: ${prov.platform_login}\nPassword: ${prov.platform_password}\n(also sent by e-mail)`,'ok',12000);
-    }
-    go('accounts');
-  }catch(e){
-    buyErr('Error: '+e.message);
-    const btn=$('buy-go'); if(btn){btn.disabled=false; btn.textContent='Try again'}
-  }
+  await busy($('buy-go'),'Processing…',async()=>{
+    try{
+      const res=await api('/api/checkout',{method:'POST',
+        body:JSON.stringify({product_key:key,coupon,promo_code:promo,first_name:first,last_name:last,phone,phone_country:CC,
+          weekend_trading:!!($('c-weekend')&&$('c-weekend').checked),
+          use_credits:!$('c-usecr')||$('c-usecr').checked})});
+      /* real Stripe: strona zaraz znika — przycisk ma zostać wyłączony */
+      if(res.checkout_url && !res.mock){window.location=res.checkout_url;return 'keep'}
+      let prov=res;
+      if(res.mock){prov=await api(`/api/checkout/${res.order_id}/mock-complete`,{method:'POST'});}
+      ME=await api('/api/auth/me');
+      closeBuy();
+      if(prov.provisioning){
+        toast('✅ Payment received.\nYour MT5 demo account is being created, up to a minute.\nCredentials arrive by e-mail and under Challenges.','ok',9000);
+      }else{
+        toast(`✅ Account created!\nServer: ${prov.platform_server||'—'}\nLogin: ${prov.platform_login}\nPassword: ${prov.platform_password}\n(also sent by e-mail)`,'ok',12000);
+      }
+      go('accounts');
+    }catch(e){buyErr('Error: '+e.message)}
+  });
 }
 
 /* ---------- ACCOUNT DETAIL ---------- */
@@ -3104,13 +3151,14 @@ function openScaleModal(id,from,to){
   document.body.appendChild(w);
 }
 async function scaleUp(id){
-  const btn=$('sc-go'); btn.disabled=true;
-  try{const r=await api(`/api/accounts/${id}/scale-up`,{method:'POST'});
-    $('sc-modal').remove();
-    toast(`📈 You are moving up to a $${fmt0(r.new_size)} account. We are setting it up now — `
-      +`your credentials arrive by email.`,'ok',9000);
-    go('accounts');
-  }catch(e){btn.disabled=false;toast('Error: '+e.message,'err')}
+  await busy($('sc-go'),null,async()=>{
+    try{const r=await api(`/api/accounts/${id}/scale-up`,{method:'POST'});
+      $('sc-modal').remove();
+      toast(`📈 You are moving up to a $${fmt0(r.new_size)} account. We are setting it up now — `
+        +`your credentials arrive by email.`,'ok',9000);
+      go('accounts');
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
 }
 async function submitPayout(id){
   const m=$('po-method').value, amount=parseFloat($('po-amount').value||'0');
@@ -3118,13 +3166,14 @@ async function submitPayout(id){
     :m==='bank'?{holder:$('po-holder').value.trim(),iban:$('po-iban').value.trim(),
                  swift:$('po-swift').value.trim(),bank_name:$('po-bank').value.trim()}
     :{email:$('po-email').value.trim()};
-  const btn=$('po-send'); btn.disabled=true;
-  try{const r=await api(`/api/accounts/${id}/payout-request`,{method:'POST',
-      body:JSON.stringify({method:m,amount,details})});
-    $('po-modal').remove();
-    toast(`✅ Request submitted: $${fmt(r.trader_share)} via ${payoutMethodLabel(m)}. Awaiting review.`,'ok',8000);
-    go('payouts');
-  }catch(e){btn.disabled=false;toast('Error: '+e.message,'err')}
+  await busy($('po-send'),null,async()=>{
+    try{const r=await api(`/api/accounts/${id}/payout-request`,{method:'POST',
+        body:JSON.stringify({method:m,amount,details})});
+      $('po-modal').remove();
+      toast(`✅ Request submitted: $${fmt(r.trader_share)} via ${payoutMethodLabel(m)}. Awaiting review.`,'ok',8000);
+      go('payouts');
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
 }
 
 /* Klawiatura ekranowa vs dolny tabbar: position:fixed na iOS nie wie o niej
@@ -3140,4 +3189,24 @@ addEventListener('focusout',()=>setTimeout(()=>{
     document.body.classList.remove('kb-open');
 },80));
 
+/* ---------- offline ----------
+   PWA otwarta bez sieci pokazuje ostatnie dane, ale kazdy zapis przepadnie.
+   Pasek mowi to wprost (wzor z panelu admina) — w ukladzie nad naglowkiem,
+   nie na fixed, zeby nie zaslanial hamburgera i przyciskow. */
+function paintOffline(){
+  const bar=document.querySelector('.offline-bar');
+  if(navigator.onLine){bar&&bar.remove();return}
+  if(bar)return;
+  const b=document.createElement('div');b.className='offline-bar';
+  b.textContent='Offline — showing the last loaded data, changes will not save.';
+  const m=document.querySelector('.main');
+  m?m.prepend(b):document.body.prepend(b);
+}
+addEventListener('online',()=>{paintOffline();toast('Back online.','ok',3000)});
+addEventListener('offline',paintOffline);
+paintOffline();
+
+/* gsi (async) mogl zaladowac sie PRZED tym plikiem (defer) — wtedy jego
+   onload trafil w pustke i przycisk Google nikt by juz nie narysowal. */
+if(window.google)initGoogle();
 boot();

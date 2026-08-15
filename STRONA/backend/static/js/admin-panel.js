@@ -8,6 +8,17 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
    w rodzaju O'Brien uciety string i przycisk przestawal dzialac. Najpierw
    escape JS-a, potem HTML calego wyniku. */
 const jsq=s=>esc(String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
+/* Anty-zawieszka przycisków: gasnie na czas fn(), finally ZAWSZE przywraca.
+   Drugi klik w trakcie = no-op. fn zwraca 'keep' => zostaje wyłączony. */
+async function busy(btn,label,fn){
+  if(!btn)return fn();
+  if(btn.disabled)return;
+  const html=btn.innerHTML;
+  btn.disabled=true;if(label)btn.textContent=label;
+  let keep=false;
+  try{const w=await fn();keep=(w==='keep');return w}
+  finally{if(!keep&&btn.isConnected){btn.disabled=false;btn.innerHTML=html}}
+}
 
 /* The panel is opened by an administrator ACCOUNT, not a shared token. The
    session is the same as the trader portal (`pf_token`), so a signed-in admin
@@ -15,8 +26,18 @@ const jsq=s=>esc(String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
 let TOKEN=localStorage.getItem('pf_token')||null, ME=null;
 const adminH=()=>{const h={'Content-Type':'application/json'};
   if(TOKEN)h['Authorization']='Bearer '+TOKEN; return h};
-async function api(path,opts={}){
-  const r=await fetch(path,{headers:adminH(),...opts});
+/* Timeout 15 s + JEDEN retry tylko dla GET po błędzie sieci/timeoucie — HTTP
+   error (nawet 500) nigdy nie jest ponawiany, żeby mutacje się nie dublowały. */
+async function api(path,opts={},_retry){
+  const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),15000);
+  let r;
+  try{r=await fetch(path,{headers:adminH(),...opts,signal:ctl.signal})}
+  catch(e){
+    clearTimeout(tm);
+    if(!_retry&&(opts.method||'GET').toUpperCase()==='GET')return api(path,opts,1);
+    throw new Error(e&&e.name==='AbortError'?'Request timed out':'Network error');
+  }
+  clearTimeout(tm);
   if(r.status===401||r.status===403){signInForm();throw new Error('Access denied')}
   if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||r.status);
   return r.json();
@@ -36,6 +57,22 @@ function signOut(){
   fetch('/api/auth/logout',{method:'POST'}).finally(()=>{
     TOKEN=null;ME=null;localStorage.removeItem('pf_token');location.replace('/portal')});
 }
+
+/* Globalny łapacz błędów JS → telemetria. Dedupe + limit 5/sesję,
+   fire-and-forget: prosty fetch zamiast api(), żeby raportowanie nie weszło
+   w pętlę z signInForm() przy wygasłej sesji. */
+const _jsErrSeen=new Set();
+function reportJsError(msg,src){
+  try{
+    const key=String(msg||'unknown').slice(0,80);
+    if(!TOKEN||_jsErrSeen.has(key)||_jsErrSeen.size>=5)return;
+    _jsErrSeen.add(key);
+    fetch('/api/telemetry',{method:'POST',headers:adminH(),
+      body:JSON.stringify({name:'js_error',props:{msg:key,src:String(src||'').slice(0,80),view:'admin'}})}).catch(()=>{});
+  }catch(e){}
+}
+addEventListener('error',e=>reportJsError(e.message,(e.filename||'')+':'+(e.lineno||0)));
+addEventListener('unhandledrejection',e=>reportJsError(e.reason&&e.reason.message||e.reason,'promise'));
 
 const ICO={
   layers:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 2 9 5-9 5-9-5z"/><path d="m3 12 9 5 9-5M3 17l9 5 9-5"/></svg>',
@@ -3275,12 +3312,12 @@ async function tgPollLink(pozostalo){
   _tgPoll=setTimeout(()=>tgPollLink(pozostalo-1),3000);
 }
 async function tgLinkTest(btn){
-  btn.disabled=true;btn.textContent='Sending…';
-  try{
-    await api('/api/me/telegram-link/test',{method:'POST'});
-    toast('📨 Test sent — check your Telegram','ok');
-  }catch(e){toast('Test failed: '+e.message,'err')}
-  btn.disabled=false;btn.textContent='Send test message';
+  await busy(btn,'Sending…',async()=>{
+    try{
+      await api('/api/me/telegram-link/test',{method:'POST'});
+      toast('📨 Test sent — check your Telegram','ok');
+    }catch(e){toast('Test failed: '+e.message,'err')}
+  });
 }
 async function paintPushCard(){
   const btn=$('push-btn'),st=$('push-state');

@@ -270,14 +270,18 @@ def test_portal_ma_kierunkowe_zanim_ruszy_jego_kod():
     """Okno zakupu potrzebuje kierunkowych OD RAZU, a nie po doczytaniu.
 
     Lista jechała wklejona w stronę, ale to 31 kB przy każdym wejściu, bo HTML
-    musi być `no-cache`. Teraz idzie osobnym plikiem z rocznym cache — warunek
-    zostaje ten sam: zwykły `<script>` PRZED kodem portalu, bo skrypty klasyczne
-    wykonują się w kolejności dokumentu. `fetch` albo `defer`/`async` złamałyby
-    to i flaga przy numerze mrugnęłaby przy starcie.
+    musi być `no-cache`. Teraz idzie osobnym plikiem z rocznym cache — warunek:
+    countries.js wykonuje się PRZED kodem portalu. Kolejność dokumentu to
+    gwarantuje, ale tylko gdy oba skrypty mają TEN SAM tryb ładowania (dziś oba
+    `defer` — odroczone wykonują się po kolei; klasyczne też). `async` albo
+    `fetch` łamią kolejność i flaga przy numerze mrugnęłaby przy starcie.
     """
     html = client.get("/portal").text
-    tag = next(l for l in html.splitlines() if "/countries.js" in l)
-    assert "defer" not in tag and "async" not in tag, f"dane doczytywane za pozno: {tag}"
+    kraje = next(l for l in html.splitlines() if "/countries.js" in l)
+    bundle = next(l for l in html.splitlines() if "portal-app.js" in l)
+    assert "async" not in kraje, f"async gubi kolejnosc wykonania: {kraje}"
+    assert ("defer" in kraje) == ("defer" in bundle), \
+        "rozne tryby ladowania = kod portalu moze ruszyc przed danymi"
     assert html.index("/countries.js") < html.index("portal-app.js"), \
         "kod portalu ruszy przed danymi"
 

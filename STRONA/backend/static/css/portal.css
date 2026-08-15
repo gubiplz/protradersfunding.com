@@ -1523,3 +1523,10 @@ html[data-theme=dark] .inv-print{border:1px solid var(--line2)}
      pustka na tle strony. Wartosci = limit tabeli + padding karty. */
   .sec-card.card-sm{max-width:1030px}
 }
+
+/* ---------------- offline ----------------
+   Pasek nad naglowkiem (wzor z admin.css): PWA bez sieci pokazuje ostatnie
+   dane, zapisy przepadna. W ukladzie, nie na fixed — nie zaslania nawigacji. */
+.offline-bar{padding:calc(6px + env(safe-area-inset-top)) 14px 6px;text-align:center;
+  font-size:12.5px;font-weight:700;color:var(--gold);
+  background:var(--gold-bg);border-bottom:1px solid var(--gold-line)}
