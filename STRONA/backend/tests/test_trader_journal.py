@@ -20,6 +20,7 @@ os.environ.setdefault("AUTO_SEED", "false")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app import auth  # noqa: E402
+from app import db as db_mod  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
@@ -234,6 +235,81 @@ def test_przeglad_bez_kont_administratora():
 
 def test_przeglad_bez_tokenu_ani_kroku():
     assert client.get("/api/admin/journal").status_code in (401, 403)
+
+
+# --- samoleczenie zgubionych claimów ---------------------------------------------
+
+def test_zgubiony_claim_odtwarzany_z_aktywnosci():
+    """track() nigdy nie wywala żądania biznesowego, więc wiersz o claimie może
+    przepaść (okno deployu — przypadek Richmonda). Zgaszona flaga + aktywność
+    wymagająca zalogowania + zero zdarzeń auth = dowód; heal dopisuje claim
+    z datą pierwszego śladu, a etykieta nie zmyśla ścieżki odbioru."""
+    tid, _, _ = _trader()
+    pierwszy = datetime.utcnow().replace(microsecond=0) - timedelta(hours=3)
+    s = SessionLocal()
+    s.add(TelemetryEvent(trader_id=tid, name="checkin", created_at=pierwszy))
+    s.add(TelemetryEvent(trader_id=tid, name="view_open",
+                         created_at=pierwszy + timedelta(minutes=2)))
+    s.commit(); s.close()
+    db_mod._uzupelnij_zgubione_claimy()
+    s = SessionLocal()
+    claim = s.query(TelemetryEvent).filter(
+        TelemetryEvent.trader_id == tid,
+        TelemetryEvent.name == "account_claimed").one()
+    assert claim.created_at == pierwszy
+    s.close()
+    j = _journal(tid)
+    assert j["trader"]["claimed_at"]
+    assert j["trader"]["last_login_at"]
+    assert "Claimed the account — recovered from portal activity" in _labels(j)
+    # idempotencja — drugi przebieg nie dokłada drugiego claimu
+    db_mod._uzupelnij_zgubione_claimy()
+    s = SessionLocal()
+    assert s.query(TelemetryEvent).filter(
+        TelemetryEvent.trader_id == tid,
+        TelemetryEvent.name == "account_claimed").count() == 1
+    s.close()
+
+
+def _ile_claimow(tid):
+    s = SessionLocal()
+    ile = s.query(TelemetryEvent).filter(
+        TelemetryEvent.trader_id == tid,
+        TelemetryEvent.name == "account_claimed").count()
+    s.close()
+    return ile
+
+
+def test_heal_nie_dotyka_klienta_z_loginem():
+    tid, _, _ = _trader()
+    s = SessionLocal()
+    s.add(TelemetryEvent(trader_id=tid, name="login"))
+    s.add(TelemetryEvent(trader_id=tid, name="view_open"))
+    s.commit(); s.close()
+    db_mod._uzupelnij_zgubione_claimy()
+    assert _ile_claimow(tid) == 0
+
+
+def test_heal_nie_dotyka_konta_czekajacego_na_odbior():
+    """Flaga jeszcze świeci — heal nie może „odebrać" konta za klienta."""
+    tid, _, _ = _trader(must_set_password=True)
+    s = SessionLocal()
+    s.add(TelemetryEvent(trader_id=tid, name="view_open"))
+    s.commit(); s.close()
+    db_mod._uzupelnij_zgubione_claimy()
+    assert _ile_claimow(tid) == 0
+
+
+def test_heal_nie_dotyka_kont_sprzed_cezury():
+    """Konta sprzed narodzin must_set_password bywały aktywne, zanim logowania
+    w ogóle trafiały do telemetrii — pasują do wzorca niewinnie."""
+    tid, _, _ = _trader()
+    s = SessionLocal()
+    s.get(Trader, tid).created_at = datetime(2026, 8, 1, 10, 0)
+    s.add(TelemetryEvent(trader_id=tid, name="view_open"))
+    s.commit(); s.close()
+    db_mod._uzupelnij_zgubione_claimy()
+    assert _ile_claimow(tid) == 0
 
 
 # --- brzegi ----------------------------------------------------------------------

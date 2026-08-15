@@ -3365,6 +3365,11 @@ def admin_trader_journal(trader_id: int):
                 opis += " (Google)"
             if e.name == "account_claimed" and props.get("google"):
                 opis = "Claimed the account — signed in with Google"
+            if e.name == "account_claimed" and props.get("inferred"):
+                # Wiersz odtworzony przez _uzupelnij_zgubione_claimy() — nie
+                # wiemy, KTÓRĄ ścieżką klient odebrał konto, więc etykieta nie
+                # może twierdzić, że ustawił hasło z linku.
+                opis = "Claimed the account — recovered from portal activity"
             if e.name == "portal_invite" and props.get("sent") is False:
                 opis = "Portal invite link copied (sent by hand)"
             if e.name == "pay_link_opened" and props.get("order"):

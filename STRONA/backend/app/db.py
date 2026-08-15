@@ -52,6 +52,7 @@ def init_db() -> None:
     _relax_not_null()
     _przemianuj_statusy_leadow()
     _odbierz_konta_google()
+    _uzupelnij_zgubione_claimy()
 
 
 # Odcisk wersji kodu, dla ktorej schemat jest juz doprowadzony do porzadku.
@@ -328,6 +329,44 @@ def _odbierz_konta_google() -> None:
                 "UPDATE traders SET must_set_password = :f WHERE id = :t"),
                 {"f": False, "t": tid})
             print(f"[db] trader {tid}: konto odebrane wstecznie (Google)")
+
+
+# Zdarzenia, których nie da się wywołać bez zalogowania — ich obecność dowodzi,
+# że klient wszedł do portalu, choćby wiersz o samym wejściu przepadł.
+_SLADY_ZALOGOWANEGO = "('view_open', 'checkin', 'push_subscribed', 'pwa_install')"
+
+
+def _uzupelnij_zgubione_claimy() -> None:
+    """telemetry.track() z zasady nie wywala żądania biznesowego — gdy zapis
+    padnie (np. w oknie deployu), klient odbiera konto, a dziennik do końca
+    świata twierdzi „never". Zgaszona flaga must_set_password bez śladu
+    login/signup/claim, ale z aktywnością wymagającą zalogowania, oznacza
+    właśnie zgubiony wiersz. Cezura 2026-08-11 (narodziny must_set_password):
+    starsze konta bywały aktywne, zanim logowania trafiały do telemetrii,
+    więc pasowałyby do wzorca niewinnie. Claim dostaje datę pierwszego śladu."""
+    from sqlalchemy import inspect, text
+
+    if not {"traders", "telemetry_events"} <= set(inspect(engine).get_table_names()):
+        return
+    with engine.begin() as conn:
+        ofiary = conn.execute(text(
+            "SELECT id FROM traders "
+            "WHERE NOT must_set_password AND created_at >= :cezura "
+            "AND id NOT IN (SELECT trader_id FROM telemetry_events "
+            "               WHERE name IN ('login', 'signup', 'account_claimed')) "
+            "AND id IN (SELECT trader_id FROM telemetry_events "
+            f"              WHERE name IN {_SLADY_ZALOGOWANEGO})"),
+            {"cezura": "2026-08-11"}).scalars().all()
+        for tid in ofiary:
+            kiedy = conn.execute(text(
+                "SELECT MIN(created_at) FROM telemetry_events "
+                f"WHERE trader_id = :t AND name IN {_SLADY_ZALOGOWANEGO}"),
+                {"t": tid}).scalar()
+            conn.execute(text(
+                "INSERT INTO telemetry_events (trader_id, name, props, created_at) "
+                "VALUES (:t, 'account_claimed', :p, :c)"),
+                {"t": tid, "p": '{"inferred": true, "backfill": true}', "c": kiedy})
+            print(f"[db] trader {tid}: claim odtworzony z aktywności portalu")
 
 
 def _add_missing_columns() -> None:
