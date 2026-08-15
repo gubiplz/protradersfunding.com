@@ -323,7 +323,7 @@ def robots():
 @app.get("/sitemap.xml", include_in_schema=False)
 def sitemap(request: Request):
     base = _public_base(request)
-    paths = ["/", "/objectives", "/faq", "/affiliate", "/install", "/verify",
+    paths = ["/", "/objectives", "/faq", "/academy", "/affiliate", "/install", "/verify",
              "/terms", "/privacy", "/risk-disclosure", "/refund-policy"]
     urls = "".join(f"<url><loc>{base}{p}</loc></url>" for p in paths)
     return Response('<?xml version="1.0" encoding="UTF-8"?>'
@@ -1689,6 +1689,92 @@ def account_activity(account_id: int, trader: Trader = Depends(auth.current_trad
             # tutaj nie ma sensu bez stronicowania po stronie serwera: caly
             # ledger jedzie w jednej odpowiedzi razem z krzywa kapitalu.
             "ledger": [{k: v for k, v in r.items() if k != "ts"} for r in ledger[:LEDGER_MAX]],
+        }
+    finally:
+        session.close()
+
+
+@app.get("/api/me/accounts/{account_id}/stats")
+def account_stats(account_id: int, trader: Trader = Depends(auth.current_trader)):
+    """Statystyki WSZYSTKICH zamkniętych transakcji konta — bez sufitu LEDGER_MAX.
+
+    Księga w /activity jest przycięta, więc liczenie w przeglądarce kłamałoby
+    na kontach z dłuższą historią. Tu liczy serwer, z pełnej tabeli.
+    Kubełki godzinowe są w czasie serwera (UTC) — konto nie zna strefy tradera.
+    """
+    session = SessionLocal()
+    try:
+        _own_account(session, trader, account_id)
+        trades = (session.query(Trade)
+                  .filter(Trade.account_id == account_id, Trade.status == "closed")
+                  .order_by(Trade.closed_at).all())
+        n = len(trades)
+        if n == 0:
+            return {"trades": 0}
+
+        def _naive(dt):
+            return dt.replace(tzinfo=None) if dt and dt.tzinfo else dt
+
+        pnls = [t.pnl for t in trades]
+        wins = [p for p in pnls if p > 0]
+        losses = [p for p in pnls if p < 0]
+        gross_profit = sum(wins)
+        gross_loss = sum(losses)  # ujemna
+        net = sum(pnls)
+        durations = [(_naive(t.closed_at) - _naive(t.opened_at)).total_seconds()
+                     for t in trades if t.closed_at and t.opened_at]
+        best = max(trades, key=lambda t: t.pnl)
+        worst = min(trades, key=lambda t: t.pnl)
+
+        # Seria z końca historii: +n = n zysków z rzędu, -n = n strat; 0 przerywa.
+        streak = 0
+        for t in reversed(trades):
+            if t.pnl > 0 and streak >= 0:
+                streak += 1
+            elif t.pnl < 0 and streak <= 0:
+                streak -= 1
+            else:
+                break
+
+        def _bucket():
+            return {"trades": 0, "wins": 0, "pnl": 0.0}
+
+        by_symbol: dict[str, dict] = {}
+        by_weekday = [_bucket() for _ in range(7)]   # 0 = poniedziałek
+        by_hour = [_bucket() for _ in range(24)]
+        sides = {"long": _bucket(), "short": _bucket()}
+        for t in trades:
+            ts = _naive(t.closed_at or t.opened_at)
+            grupy = [by_symbol.setdefault(t.symbol, _bucket()),
+                     sides["long" if t.side == "buy" else "short"]]
+            if ts:
+                grupy += [by_weekday[ts.weekday()], by_hour[ts.hour]]
+            for g in grupy:
+                g["trades"] += 1
+                g["wins"] += 1 if t.pnl > 0 else 0
+                g["pnl"] = round(g["pnl"] + t.pnl, 2)
+        symbols = [{"symbol": s, **v, "win_rate": round(v["wins"] * 100.0 / v["trades"], 1)}
+                   for s, v in by_symbol.items()]
+        symbols.sort(key=lambda r: -r["pnl"])
+
+        return {
+            "trades": n, "wins": len(wins), "losses": len(losses),
+            "win_rate": round(len(wins) * 100.0 / n, 1),
+            "net_pnl": round(net, 2),
+            "gross_profit": round(gross_profit, 2),
+            "gross_loss": round(gross_loss, 2),
+            "profit_factor": round(gross_profit / -gross_loss, 2) if gross_loss < 0 else None,
+            "avg_win": round(gross_profit / len(wins), 2) if wins else None,
+            "avg_loss": round(gross_loss / len(losses), 2) if losses else None,
+            "expectancy": round(net / n, 2),
+            "avg_duration_sec": round(sum(durations) / len(durations)) if durations else None,
+            "best_trade": {"symbol": best.symbol, "pnl": round(best.pnl, 2)},
+            "worst_trade": {"symbol": worst.symbol, "pnl": round(worst.pnl, 2)},
+            "long": sides["long"], "short": sides["short"],
+            "streak": streak,
+            "by_symbol": symbols,
+            "by_weekday": by_weekday,
+            "by_hour": by_hour,
         }
     finally:
         session.close()
@@ -7171,6 +7257,11 @@ def home(request: Request):
 @app.get("/faq")
 def faq_page(request: Request):
     return _page(request, "faq.html")
+
+
+@app.get("/academy")
+def academy_page(request: Request):
+    return _page(request, "academy.html")
 
 
 @app.get("/affiliate")

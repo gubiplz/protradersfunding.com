@@ -8,7 +8,7 @@ const dstr=iso=>new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric
 // UTC so the browser timezone does not shift the day back by one.
 
 const dday=d=>new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'});
-let TOKEN=localStorage.getItem('pf_token'), ME=null, AUTHMODE='login', chart=null, CURV=null;
+let TOKEN=localStorage.getItem('pf_token'), ME=null, AUTHMODE='login', chart=null, anCharts=[], CURV=null;
 /* Ostatni stan programu lojalnosciowego z /api/me/loyalty (punkty, nagrody). */
 let LOY=null;
 const H=()=>TOKEN?{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'}:{'Content-Type':'application/json'};
@@ -256,7 +256,8 @@ const NAV=[
   {v:'settings',label:'Settings',ico:'gear'},
 ];
 $('side-nav').innerHTML='<div class="side-sec sb-txt">Main menu</div>'+NAV.map(n=>
-  `<button class="sb-link" data-v="${n.v}" onclick="go('${n.v}')" title="${n.label}">${ICO[n.ico]}<span class="sb-txt">${n.label}</span></button>`).join('');
+  `<button class="sb-link" data-v="${n.v}" onclick="go('${n.v}')" title="${n.label}">${ICO[n.ico]}<span class="sb-txt">${n.label}</span></button>`).join('')+
+  `<a class="sb-link" href="/academy" target="_blank" rel="noopener" title="Academy">${ICO.book}<span class="sb-txt">Academy</span></a>`;
 
 /* ---------- mobile tab bar + "More" sheet ---------- */
 const TABS=[
@@ -270,7 +271,8 @@ $('tabbar').innerHTML=TABS.map(t=>
   `<button class="tab-item" data-v="more" onclick="openSheet()"><span class="tab-ic">${ICO.grid}</span><span class="tab-lbl">More</span></button>`;
 $('sheet-nav').innerHTML=NAV.filter(n=>!TABS.some(t=>t.v===n.v)).map(n=>
   `<button class="sb-link" data-v="${n.v}" onclick="go('${n.v}');closeSheet()">${ICO[n.ico]}<span class="sb-txt">${n.label}</span></button>`).join('')+
-  `<div class="sheet-div"></div>
+  `<a class="sb-link" href="/academy" target="_blank" rel="noopener" onclick="closeSheet()">${ICO.book}<span class="sb-txt">Academy</span></a>
+   <div class="sheet-div"></div>
    <button class="sb-link theme-toggle" onclick="toggleTheme()"></button>
    <button class="sb-link sheet-signout" onclick="logout()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H3"/></svg><span class="sb-txt">Sign Out</span></button>`;
 paintTheme();   /* the sheet's toggle was just rendered — give it its icon/label */
@@ -1425,61 +1427,111 @@ const VIEWS={
  },
 
  async analytics(){
+  anCharts.forEach(c=>c.destroy());anCharts=[];
   const accs=await api('/api/me/accounts');
   if(!accs.length){$('view').innerHTML='<div class="empty"><h3>No accounts yet</h3><p>Analytics appear once you have a challenge account.</p></div>';return}
   window._anAcc=window._anAcc||accs[0].id;
   if(!accs.some(a=>a.id===window._anAcc))window._anAcc=accs[0].id;
-  const act=await api(`/api/me/accounts/${window._anAcc}/activity`);
+  const [act,st]=await Promise.all([
+    api(`/api/me/accounts/${window._anAcc}/activity`),
+    api(`/api/me/accounts/${window._anAcc}/stats`)]);
   const days=act.days;
   const total=days.reduce((s,d)=>s+d.pnl,0);
   const bestD=days.reduce((m,d)=>d.pnl>(m?.pnl??-1e18)?d:m,null);
   const worstD=days.reduce((m,d)=>d.pnl<(m?.pnl??1e18)?d:m,null);
   const green=days.filter(d=>d.pnl>0).length;
-  // Stats come from TRADES only — a payout is a cash movement, not a trade.
-  const trades=(act.ledger||[]).filter(r=>r.kind==='trade');
-  const wins=trades.filter(t=>t.pnl>0).length;
-  const winRate=trades.length?wins/trades.length*100:null;
-  // per-instrument breakdown — only when the account has recorded trades
-  const bySym={};
-  trades.forEach(t=>{const s=bySym[t.symbol]||(bySym[t.symbol]={pnl:0,n:0,w:0});
-    s.pnl+=t.pnl;s.n++;if(t.pnl>0)s.w++});
-  const syms=Object.entries(bySym).sort((x,y)=>y[1].pnl-x[1].pnl);
-  const maxAbs=Math.max(1,...syms.map(([,s])=>Math.abs(s.pnl)));
+  const has=st.trades>0;
+  const dur=s=>{if(s==null)return'—';const m=Math.round(s/60);
+    return m>=60?Math.floor(m/60)+'h '+String(m%60).padStart(2,'0')+'m':m+'m'};
+  const pct=b=>b.trades?Math.round(b.wins/b.trades*100):0;
+  const pf=has?(st.profit_factor===null?(st.wins?'∞':'—'):st.profit_factor.toFixed(2)):'—';
+  const maxSym=has?Math.max(1,...st.by_symbol.map(r=>Math.abs(r.pnl))):1;
+  const maxLS=has?Math.max(1,Math.abs(st.long.pnl),Math.abs(st.short.pnl)):1;
+  const lsRow=(label,b)=>`<div class="sym-row">
+    <b>${label}</b>
+    <span class="muted">${b.trades} trade${b.trades===1?'':'s'} · ${pct(b)}% won</span>
+    <div class="sym-bar"><i class="${b.pnl>=0?'ok':'bad'}" style="width:${Math.abs(b.pnl)/maxLS*100}%"></i></div>
+    <span class="num ${b.pnl>=0?'up':'down'}">${money(b.pnl)}</span>
+  </div>`;
   $('view').innerHTML=`
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
       <select id="an-sel" class="inp" style="max-width:260px" onchange="window._anAcc=parseInt(this.value);VIEWS.analytics()">
         ${accs.map(a=>`<option value="${a.id}"${a.id===window._anAcc?' selected':''}>${esc(a.login)} · ${esc(a.product_key)}</option>`).join('')}
       </select>
-      <span class="muted" style="font-size:12px">Computed from real equity snapshots of this account.</span>
+      <span class="muted" style="font-size:12px">Computed server-side from every closed trade on this account.</span>
     </div>
     <div class="stats-row">
       <div class="stat-tile"><div class="tile-ic ${total>=0?'green':'orange'}">${ICO.trend}</div>
         <div><div class="lbl">Total P&amp;L</div><div class="val ${total>=0?'up':'down'}">${total>=0?'+':''}$${fmt(total)}</div></div></div>
+      ${has?`
+      <div class="stat-tile"><div class="tile-ic purple">${ICO.target}</div>
+        <div><div class="lbl">Win rate</div><div class="val">${st.win_rate.toFixed(1)}%</div>
+        <div class="sub">${st.wins} of ${st.trades} trades</div></div></div>
+      <div class="stat-tile"><div class="tile-ic blue">${ICO.bars}</div>
+        <div><div class="lbl">Profit factor</div><div class="val">${pf}</div>
+        <div class="sub">$${fmt(st.gross_profit)} won / $${fmt(-st.gross_loss)} lost</div></div></div>
+      <div class="stat-tile"><div class="tile-ic green">${ICO.spark}</div>
+        <div><div class="lbl">Expectancy</div><div class="val ${st.expectancy>=0?'up':'down'}">${money(st.expectancy)}</div>
+        <div class="sub">per trade</div></div></div>
+      <div class="stat-tile"><div class="tile-ic green">${ICO.dollar}</div>
+        <div><div class="lbl">Avg win / loss</div>
+        <div class="val">${st.avg_win!==null?'+$'+fmt(st.avg_win):'—'} <span class="muted" style="font-weight:400">/</span> ${st.avg_loss!==null?'-$'+fmt(-st.avg_loss):'—'}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic blue">${ICO.eye}</div>
+        <div><div class="lbl">Avg duration</div><div class="val">${dur(st.avg_duration_sec)}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic ${st.streak>=0?'green':'orange'}">${ICO.flame}</div>
+        <div><div class="lbl">Streak</div><div class="val ${st.streak>0?'up':st.streak<0?'down':''}">${st.streak===0?'—':Math.abs(st.streak)+(st.streak>0?' wins':' losses')}</div>
+        <div class="sub">most recent trades</div></div></div>
+      <div class="stat-tile"><div class="tile-ic green">${ICO.trophy}</div>
+        <div><div class="lbl">Best trade</div><div class="val up">${money(st.best_trade.pnl)}</div>
+        <div class="sub">${esc(st.best_trade.symbol)}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic orange">${ICO.alert}</div>
+        <div><div class="lbl">Worst trade</div><div class="val ${st.worst_trade.pnl<0?'down':''}">${money(st.worst_trade.pnl)}</div>
+        <div class="sub">${esc(st.worst_trade.symbol)}</div></div></div>`:''}
       <div class="stat-tile"><div class="tile-ic green">${ICO.dollar}</div>
         <div><div class="lbl">Best day</div><div class="val up">${bestD?'+$'+fmt(Math.max(0,bestD.pnl)):'—'}</div><div class="sub">${bestD?bestD.day:''}</div></div></div>
       <div class="stat-tile"><div class="tile-ic orange">${ICO.alert}</div>
         <div><div class="lbl">Worst day</div><div class="val ${worstD&&worstD.pnl<0?'down':''}">${worstD?(worstD.pnl<0?'-$'+fmt(-worstD.pnl):'$'+fmt(worstD.pnl)):'—'}</div><div class="sub">${worstD?worstD.day:''}</div></div></div>
       <div class="stat-tile"><div class="tile-ic blue">${ICO.cal}</div>
         <div><div class="lbl">Profitable days</div><div class="val">${green} / ${days.length}</div></div></div>
-      ${winRate!==null?`<div class="stat-tile"><div class="tile-ic purple">${ICO.target}</div>
-        <div><div class="lbl">Win rate</div><div class="val">${winRate.toFixed(1)}%</div>
-        <div class="sub">${wins} of ${trades.length} positions</div></div></div>`:''}
     </div>
-    ${syms.length?`<div class="sec-card"><h3>Instruments</h3>
-      <div class="sym-list">${syms.map(([sym,s])=>`
+    ${has?`
+    <div class="card-cols">
+      <div class="sec-card"><h3>P&amp;L by weekday</h3>
+        <div class="chart-box"><canvas id="an-wd"></canvas></div></div>
+      <div class="sec-card"><h3>P&amp;L by hour <span class="muted" style="font-weight:400;font-size:12px">(UTC)</span></h3>
+        <div class="chart-box"><canvas id="an-hr"></canvas></div></div>
+    </div>
+    <div class="sec-card"><h3>Long vs short</h3>
+      <div class="sym-list">${lsRow('Long',st.long)}${lsRow('Short',st.short)}</div>
+    </div>
+    ${st.by_symbol.length?`<div class="sec-card"><h3>Instruments</h3>
+      <div class="sym-list">${st.by_symbol.map(r=>`
         <div class="sym-row">
-          <b>${esc(sym)}</b>
-          <span class="muted">${s.n} trade${s.n===1?'':'s'} · ${(s.w/s.n*100).toFixed(0)}% won</span>
-          <div class="sym-bar"><i class="${s.pnl>=0?'ok':'bad'}" style="width:${Math.abs(s.pnl)/maxAbs*100}%"></i></div>
-          <span class="num ${s.pnl>=0?'up':'down'}">${money(s.pnl)}</span>
+          <b>${esc(r.symbol)}</b>
+          <span class="muted">${r.trades} trade${r.trades===1?'':'s'} · ${r.win_rate.toFixed(0)}% won</span>
+          <div class="sym-bar"><i class="${r.pnl>=0?'ok':'bad'}" style="width:${Math.abs(r.pnl)/maxSym*100}%"></i></div>
+          <span class="num ${r.pnl>=0?'up':'down'}">${money(r.pnl)}</span>
         </div>`).join('')}</div>
-    </div>`:''}
+    </div>`:''}`
+    :`<div class="sec-card"><h3>Trade statistics</h3>
+      <p class="muted" style="font-size:13px">No closed trades on this account yet — win rate, profit factor and the breakdown charts appear after your first closed position.</p>
+    </div>`}
     <div class="sec-card"><h3>Daily P&amp;L</h3>
       ${days.length?'<div class="chart-box"><canvas id="an-chart"></canvas></div>'
         :'<p class="muted" style="font-size:13px">No daily data yet. The chart appears after the first risk-engine readings.</p>'}
     </div>`;
   if(chart){chart.destroy();chart=null}
   const th=chartTheme();
+  const bar=(el,labels,data,maxTicks)=>anCharts.push(new Chart($(el),{type:'bar',
+    data:{labels,datasets:[{data,backgroundColor:data.map(v=>v>=0?'rgba(16,185,129,.75)':'rgba(239,68,68,.75)'),borderRadius:5}]},
+    options:{maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{x:{ticks:{color:th.dim,font:{size:10},autoSkip:true,maxRotation:0,maxTicksLimit:maxTicks},grid:{display:false}},
+        y:{ticks:{color:th.dim,font:{size:10},callback:v=>'$'+v},grid:{color:th.line}}}}}));
+  if(has){
+    bar('an-wd',['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],st.by_weekday.map(b=>b.pnl));
+    bar('an-hr',st.by_hour.map((_,h)=>h+'h'),st.by_hour.map(b=>b.pnl),
+        matchMedia('(max-width:640px)').matches?8:12);
+  }
   if(days.length)chart=new Chart($('an-chart'),{type:'bar',
     data:{labels:days.map(d=>d.day),datasets:[{data:days.map(d=>d.pnl),
       backgroundColor:days.map(d=>d.pnl>=0?'rgba(16,185,129,.75)':'rgba(239,68,68,.75)'),borderRadius:5}]},

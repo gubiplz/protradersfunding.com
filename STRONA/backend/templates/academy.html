@@ -1,0 +1,442 @@
+{% extends "base.html" %}
+{% block title %}Trading Academy — Free Prop Trading Lessons | {{ site_name }}{% endblock %}
+{% block description %}Free lessons on prop trading: evaluations, risk management, drawdown, position sizing and trading psychology — written for challenge traders.{% endblock %}
+{% block og_title %}Trading Academy — {{ site_name }}{% endblock %}
+
+{% block head_extra %}
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"ItemList","name":"{{ site_name }} Trading Academy","itemListElement":[
+ {"@type":"ListItem","position":1,"name":"What prop trading actually is (and isn't)"},
+ {"@type":"ListItem","position":2,"name":"How a two-step evaluation works"},
+ {"@type":"ListItem","position":3,"name":"Balance, equity and floating P&L — the numbers that matter"},
+ {"@type":"ListItem","position":4,"name":"Setting up MetaTrader 5 the right way"},
+ {"@type":"ListItem","position":5,"name":"Choosing your account size"},
+ {"@type":"ListItem","position":6,"name":"Position sizing: the only formula you need"},
+ {"@type":"ListItem","position":7,"name":"Understanding the daily loss limit"},
+ {"@type":"ListItem","position":8,"name":"Static drawdown explained"},
+ {"@type":"ListItem","position":9,"name":"Stop losses: where to put them and why"},
+ {"@type":"ListItem","position":10,"name":"Risk-reward ratios that survive the math"},
+ {"@type":"ListItem","position":11,"name":"A trading plan that fits the rules"},
+ {"@type":"ListItem","position":12,"name":"How many trades a day? Fewer than you think"},
+ {"@type":"ListItem","position":13,"name":"Trading the news without blowing up"},
+ {"@type":"ListItem","position":14,"name":"Weekend holding and overnight risk"},
+ {"@type":"ListItem","position":15,"name":"When to stop trading for the day"},
+ {"@type":"ListItem","position":16,"name":"Why traders fail challenges — it's rarely the strategy"},
+ {"@type":"ListItem","position":17,"name":"Revenge trading: spotting it before it starts"},
+ {"@type":"ListItem","position":18,"name":"Handling a losing streak"},
+ {"@type":"ListItem","position":19,"name":"From evaluation to funded: keeping the same discipline"}
+]}</script>
+{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="wrap">
+    <span class="pill">Academy</span>
+    <h1>Trading Academy</h1>
+    <p class="lede">Short, practical lessons on passing an evaluation and keeping a funded account —
+       written around the exact rules you trade under here. No fluff, no paid course upsell.</p>
+  </div>
+</section>
+
+<section class="sec-tight sec">
+  <div class="wrap" style="max-width:830px">
+
+    <div class="faq-cat">Getting started</div>
+    <div class="faq">
+      <details>
+        <summary>What prop trading actually is (and isn't)</summary>
+        <div class="a">
+        <p>Proprietary trading firms give skilled traders access to large accounts in exchange for a
+        share of the profits. Modern online prop firms — including {{ site_name }} — run this as a
+        two-part deal: you first prove your skill in an evaluation on a simulated account, then trade
+        a funded account and keep most of what you make (90% on our evaluation plans, 70% on Instant
+        Funding).</p>
+        <p>What it is: a way to trade meaningful size without risking your own capital beyond a
+        one-time fee. Your maximum possible loss is the fee itself — the drawdown rules mean you can
+        never owe anything. For a disciplined trader with a small account, that is a dramatically
+        better risk profile than depositing $25,000 at a broker.</p>
+        <p>What it isn't: free money or a shortcut around learning to trade. All accounts are demo
+        accounts with virtual funds in a simulated environment; rewards are performance-based. The
+        firm profits when traders succeed long-term and payouts are covered by evaluation fees and
+        risk management — which is exactly why the rules exist and are enforced by software, not by
+        someone's mood. If you can follow rules and manage risk, prop trading is the cheapest leverage
+        on skill available to a retail trader. If you can't, no account size will fix that.</p>
+        </div>
+      </details>
+      <details>
+        <summary>How a two-step evaluation works</summary>
+        <div class="a">
+        <p>A two-step evaluation asks one question twice: can you make money without breaking risk
+        limits? Phase 1 sets a profit target (typically 8%) with a daily loss limit and an overall
+        drawdown cap. Phase 2 repeats the exercise with a smaller target (typically 5%) — proving the
+        first result wasn't luck. Pass both and you get a funded account on the same infrastructure.</p>
+        <p>The targets are deliberately reachable: 8% with a 10% static drawdown gives you real room
+        to work. What kills most attempts is not the target but the daily limit — traders size up
+        after losses, have one bad day, and the account fails automatically.</p>
+        <p>Two design details matter here. First, there is no time limit — you can take weeks or
+        months, so there is never a reason to force trades on a quiet market. Second, each phase has
+        minimum trading days (typically 3–4), so a single lucky trade can't carry you through. Plan
+        for a steady grind: a trader risking 0.5–1% per trade with a modest edge passes comfortably
+        within a few weeks. Treat the evaluation as an audition for how you'll trade the funded
+        account, because the rules there are the same.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Balance, equity and floating P&amp;L — the numbers that matter</summary>
+        <div class="a">
+        <p>Three numbers describe your account at any moment. <b>Balance</b> is the result of all
+        closed trades. <b>Floating P&amp;L</b> is the unrealized profit or loss on positions still
+        open. <b>Equity</b> is balance plus floating P&amp;L — what the account is actually worth
+        right now.</p>
+        <p>Every rule on this platform is checked against <b>equity</b>, not balance. This catches
+        traders out in one specific way: an open position that is deep underwater counts against your
+        limits even though you haven't closed it. "It's not a loss until I close it" is false here —
+        if floating losses drag your equity below the daily floor or the overall drawdown floor, the
+        account fails while the position is still open.</p>
+        <p>Your dashboard shows live equity, the day's floor, and how much of each limit you've used,
+        so there is never any mystery about where you stand. A good habit: before opening a trade,
+        know what equity level would represent your stop being hit, and check it leaves comfortable
+        distance to the daily floor. If one trade hitting its stop would take you near a breach, the
+        position is too big — full stop. The risk engine uses the same arithmetic for everyone; the
+        traders who last are the ones who run it on themselves first.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Setting up MetaTrader 5 the right way</summary>
+        <div class="a">
+        <p>Your credentials — server, login and password — appear in your dashboard within about a
+        minute of checkout and work in MetaTrader 5 on desktop, mobile and the web terminal. Log in
+        once, then spend ten minutes on setup that will save you real money later.</p>
+        <p>First, set your charts to show equity, not just balance, and add the account history tab to
+        your workspace — you want the same numbers the risk engine sees. Second, learn the one-click
+        trading settings and, more importantly, how to <i>disable</i> them if you fat-finger orders.
+        Third, configure default lot sizes conservatively; the default 1.00 lot has ended more
+        challenges than any news event.</p>
+        <p>If you use an EA or any automation, test it on a separate personal demo first — EAs are
+        allowed here, but an EA misconfigured for a $100,000 account can breach a daily limit in
+        minutes. Check the contract specifications for each symbol you trade (right-click →
+        Specification): tick value, spread behaviour and trading hours differ between forex pairs,
+        metals and indices, and position sizing depends on them. Finally, note the server time shown
+        in the Market Watch — the daily loss limit resets on server time, not your local midnight, and
+        knowing when your "trading day" starts removes a common surprise.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Choosing your account size</summary>
+        <div class="a">
+        <p>Bigger accounts have bigger absolute targets, but the percentages are identical — 8% is 8%
+        whether the account is $25,000 or $200,000. So the honest question is not "how much funding do
+        I want?" but "which fee am I comfortable treating as a full loss while I learn the rules?"</p>
+        <p>The strategy that fits your first attempt: start smaller than your ego suggests. A $25,000
+        account costs $299, and the skills that pass it are exactly the skills that pass a $200,000
+        account — the risk engine doesn't care about zeros. Passing a smaller evaluation first tells
+        you your process works before you put a larger fee on the line, and the fee comes back with
+        your first payout anyway.</p>
+        <p>Two more factors. Dollar targets feel different psychologically: a $2,000 target on
+        $25,000 feels like trading; a $16,000 target on $200,000 can push people into oversizing even
+        though the percentage is the same. And our scaling plan closes the gap from the other side —
+        every +15% on a funded account lets you move up to the next size, all the way to $2,000,000,
+        funded by the profit itself. You don't need to buy your final account size on day one; you
+        need to buy the one you can trade calmly.</p>
+        </div>
+      </details>
+    </div>
+
+    <div class="faq-cat">Risk management</div>
+    <div class="faq">
+      <details>
+        <summary>Position sizing: the only formula you need</summary>
+        <div class="a">
+        <p>One formula does almost all of the work: <b>lots = (account × risk%) ÷ (stop distance ×
+        value per point per lot)</b>. Decide what fraction of the account one losing trade may cost —
+        for challenge trading, 0.5% to 1% is the sensible range — and let the stop distance dictate
+        the size. Never the other way round.</p>
+        <p>Example on a $100,000 account risking 0.5% ($500): if your EURUSD stop is 25 pips away and
+        a pip on one lot is $10, size is 500 ÷ (25 × 10) = 2 lots. Same account, gold trade with a
+        $8 stop and $100 per dollar move per lot: 500 ÷ 800 = 0.62 lots. The risk is constant; the
+        lot number is whatever makes it constant.</p>
+        <p>Why this matters more in a challenge than anywhere else: with a 5% daily loss limit, risking
+        1% means five consecutive maximum losses in one day to fail — rare with any real edge. Risking
+        3% means two bad trades — routine. Position sizing is how you convert the platform's limits
+        from a threat into background scenery. Compute it before every trade, not just the first one:
+        stop distances change with every setup, and "the same lots as last time" silently drifts your
+        risk. A size calculator takes ten seconds; a breached account takes a new fee.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Understanding the daily loss limit</summary>
+        <div class="a">
+        <p>The daily loss limit is measured against your equity at the start of the trading day
+        (server time), including floating P&amp;L, and it is the rule that ends most challenges. On a
+        $100,000 account with a 5% limit, if your day starts at $102,000, your floor for that day is
+        $96,900. Touch it — with closed losses or floating ones — and the account fails
+        automatically.</p>
+        <p>Three practical consequences. First, the floor recalculates each day from that day's
+        starting equity, so yesterday's profit raises today's floor in dollar terms — check the exact
+        number in your dashboard each morning instead of assuming. Second, open positions count: a
+        trade sitting −$4,000 underwater has consumed most of a $5,000 daily budget even if you're
+        "waiting for it to come back." Third, the limit is per-day, which makes it a natural circuit
+        breaker: plan how much of the daily budget one trade may take (a third at most), and how many
+        losers in a row send you to the sofa.</p>
+        <p>Treat the daily limit as your own rule rather than the firm's and it stops being scary. A
+        trader who loses 2% and stops has 3% of margin for error left and a calm evening; a trader
+        who "wins it back" from −4% is one spread widening away from starting over.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Static drawdown explained</summary>
+        <div class="a">
+        <p>Every plan here uses <b>static</b> drawdown: the overall floor is a fixed equity level
+        below the starting balance and never moves. A $100,000 account with a 10% limit fails only if
+        equity ever touches $90,000 — forever, regardless of how high the account climbs first.</p>
+        <p>The alternative used by many firms is <b>trailing</b> drawdown, where the floor follows
+        your equity high-water mark upward. Under a 10% trailing rule, growing the account to
+        $105,000 drags the floor to $94,500 — profit shrinks your room for error, and after a good
+        run you can fail while still above your starting balance. We don't use trailing drawdown on
+        any plan (10% on 2-Step, 8% on Instant Funding), and it's worth understanding the difference
+        because it changes correct behaviour.</p>
+        <p>With a static floor, profit is genuine breathing room: at $108,000 you have $18,000 of
+        space, and a normal pullback threatens nothing. That rewards exactly the trading that passes
+        evaluations — steady gains, no panic about giving back a little. The floor still deserves
+        respect early on, though: at the start you have only the initial 10%, and a few oversized
+        trades can spend it. The daily limit will usually stop you first, but the overall floor is
+        the one with no reset tomorrow.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Stop losses: where to put them and why</summary>
+        <div class="a">
+        <p>A stop loss placed well answers one question: <i>at what price is my trade idea proven
+        wrong?</i> Put it there — beyond the swing low you're trading off, outside the range you
+        expect noise to explore — and then size the position so that being wrong costs your chosen
+        fraction of the account. Traders get this backwards: they pick a size, then place the stop
+        wherever that size can "afford," which is usually inside the noise and guarantees death by a
+        thousand small cuts.</p>
+        <p>On this platform a hard stop in the market is also cheap insurance for the rules. The risk
+        engine watches your equity continuously, but it enforces limits by failing the account — a
+        stop loss enforces your plan by merely closing a trade. One of those is recoverable tonight;
+        the other costs a new challenge. During fast markets a stop can slip a little, which is normal
+        and priced into sensible risk percentages; having no stop during the same move is how a 1%
+        idea becomes a 6% fact.</p>
+        <p>Mental stops fail exactly when they matter, because the moment they trigger is the moment
+        you least want to obey them. Put the order in the platform at entry. If you find yourself
+        moving stops away from price "to give it room," you are no longer trading a plan — you are
+        negotiating with one.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Risk-reward ratios that survive the math</summary>
+        <div class="a">
+        <p>Win rate and risk-reward only mean anything together. Risking $1 to make $2 (1:2) is
+        profitable above a 33% win rate; 1:1 needs better than 50%; risking $2 to make $1 needs 67%
+        just to break even. Most losing traders aren't bad at predicting direction — they run a
+        combination like 55% wins at 1:0.7 that loses money with perfect discipline.</p>
+        <p>The arithmetic that matters is expectancy: (win rate × average win) − (loss rate × average
+        loss). Positive expectancy per trade, times enough trades, passes a challenge; negative
+        expectancy fails it in an unlimited number of creative ways. Your Analytics tab in the portal
+        computes this from your real closed trades — no journaling spreadsheet required — and seeing
+        your true average win against your true average loss is often the single most sobering chart
+        in a trader's life.</p>
+        <p>Practical targets: aim for setups where the structural target (the next level, the measured
+        move) sits at least twice as far as the structural stop. Skip trades that only offer 1:1 —
+        with spreads and the occasional slip, "even money" setups quietly bleed. And resist the urge
+        to take profit early while letting losers run to the stop; that habit inverts your planned
+        ratio, and it does so invisibly, one reasonable-feeling click at a time.</p>
+        </div>
+      </details>
+    </div>
+
+    <div class="faq-cat">Trading the challenge</div>
+    <div class="faq">
+      <details>
+        <summary>A trading plan that fits the rules</summary>
+        <div class="a">
+        <p>A challenge trading plan is one page, not a manifesto. It needs five decisions made in
+        advance: what you trade (two or three symbols you actually know), when you trade (the
+        sessions where your setups appear), what a valid setup looks like (specific enough that a
+        screenshot could be graded), what you risk per trade (a fixed fraction, 0.5–1%), and when you
+        stop for the day (a loss level and a trade count).</p>
+        <p>Then align it with the rules you'll be graded on. With an 8% target, a 5% daily limit and
+        no deadline, the correct shape is obvious: many small, boring days. Risking 0.75% with a 1:2
+        ratio and a realistic 45% win rate earns roughly 0.5% per ten trades — a comfortable pass
+        inside a month, with the minimum trading days (3–4 per phase) satisfied along the way. There
+        is no bonus for finishing in a week, and no penalty for taking two months.</p>
+        <p>Write the plan down before the challenge starts, because you will not improve it mid-fight
+        — every mid-challenge "adjustment" in the direction of more risk is tilt wearing a lab coat.
+        The plan's real job is to make tomorrow identical to today: same size, same setups, same stop
+        time. Accounts pass on repetition, not inspiration.</p>
+        </div>
+      </details>
+      <details>
+        <summary>How many trades a day? Fewer than you think</summary>
+        <div class="a">
+        <p>There is no minimum trades per day and no reward for activity — a trading day only requires
+        one trade, and even that only on the handful of minimum trading days per phase. Yet
+        overtrading quietly ruins more challenges than any single bad trade, because it converts a
+        small edge into brokerage-grade noise.</p>
+        <p>The math is unforgiving. Every trade pays the spread. A trader with three genuine setups a
+        day who takes twelve trades has bought nine positions with no edge and paid the spread on all
+        of them; even at 1:2 those nine are a coin flip minus costs. Worse, trades taken from boredom
+        are systematically worse than planned ones — entered late, sized emotionally, exited early —
+        so the "extra" trades don't just dilute the edge, they run a negative one.</p>
+        <p>Useful heuristics: decide your maximum daily trade count in advance (for most discretionary
+        traders, three to five is plenty) and stop when you reach it, win or lose. If you've hit your
+        setups for the session and they're done, so are you — the market reopens tomorrow, and your
+        challenge has no expiry date. A practical tell: if you're widening what "counts" as your setup
+        as the session drags on, you've already stopped trading your plan and started paying rent to
+        the spread.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Trading the news without blowing up</summary>
+        <div class="a">
+        <p>News trading is fully allowed here — no blackout windows, no banned strategies. What the
+        rules permit and what your equity survives are separate questions, so treat news with respect
+        rather than fear.</p>
+        <p>What actually happens around a major release (CPI, NFP, rate decisions): spreads widen
+        sharply for seconds to minutes, price can gap through levels, and stop orders fill at the
+        next available price — sometimes noticeably beyond the stop. None of that is malfunction;
+        it's what an order book looks like when everyone repositions at once. The practical danger to
+        a challenge account is a position sized for a 20-pip stop that gets filled 60 pips out, or a
+        widened spread brushing a stop that price never really traded through.</p>
+        <p>Three disciplines cover most of it. Before scheduled releases, either flatten, or reduce
+        size so a triple-width fill still fits your per-trade risk. Check the calendar at the start of
+        each session — being surprised by a rate decision is a choice. And around the release itself,
+        remember the daily loss floor includes floating P&amp;L: a spike against an oversized position
+        can touch the floor and fail the account in the seconds before the move reverses. Holding
+        <i>through</i> news with sensible size is a strategy; being oversized into it is a lottery
+        ticket where you're the prize.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Weekend holding and overnight risk</summary>
+        <div class="a">
+        <p>You can hold positions overnight and over the weekend on every plan — there is no
+        flat-by-Friday rule. The trade-off is that time you can't manage a position is risk you can't
+        manage, and it should be priced like it.</p>
+        <p>The mechanics: between Friday's close and Sunday's open, news keeps happening while prices
+        don't move. Markets reopen wherever the accumulated news puts them, and that gap simply
+        skips over stops — a stop inside a gap fills at the open price, not the stop price. Metals
+        and indices gap more dramatically than major forex pairs, and a long weekend around
+        geopolitical events can gap several percent. Your drawdown floors don't pause for the
+        weekend: if Sunday's open puts your equity through a floor, the breach is real.</p>
+        <p>A sane framework: hold over the weekend only positions that are (a) comfortably in profit,
+        so a gap eats cushion rather than your daily budget, and (b) small enough that a worst-case
+        gap — say three times your stop distance — still fits inside your risk rules. Swing traders
+        who plan around this hold through weekends for years without drama; day traders who
+        accidentally hold because they "didn't want to take the loss on Friday" provide most of the
+        horror stories. Decide which trade you're in before the close does it for you.</p>
+        </div>
+      </details>
+      <details>
+        <summary>When to stop trading for the day</summary>
+        <div class="a">
+        <p>The platform stops you at the daily loss limit; a professional stops himself far earlier.
+        Set a personal daily stop at roughly half the platform's limit — 2 to 2.5% on a 5% account —
+        and treat touching it exactly like a stop loss on a trade: no appeal, no "one more."</p>
+        <p>The reason is what happens to decision quality after losses. Each loss adds pressure to
+        make it back <i>today</i>, and that pressure reliably produces bigger sizes, earlier entries
+        and wider stops — the exact recipe for turning a −2% day into a breach. Stopping at −2%
+        leaves the challenge fully intact: you need no heroics tomorrow, just your normal process.
+        The daily reset is a genuinely forgiving design — use it by arriving fresh, not by spending
+        the whole budget daily.</p>
+        <p>Two more stop conditions deserve equal rank. Stop on a trade count: after your planned
+        three to five trades, quality collapses whether you're up or down. And consider stopping on a
+        strong green day too — after banking 2%+, the remaining hours offer little upside against the
+        risk of giving it back, and "protecting the day" is how steady equity curves are built. Wins
+        feel like proof you should continue; statistically, they're just as good a moment to close
+        the terminal.</p>
+        </div>
+      </details>
+    </div>
+
+    <div class="faq-cat">Psychology</div>
+    <div class="faq">
+      <details>
+        <summary>Why traders fail challenges — it's rarely the strategy</summary>
+        <div class="a">
+        <p>Look at the breach reasons across failed evaluations and a pattern emerges: accounts
+        overwhelmingly die by daily loss limit, and the fatal day usually contains more trades, bigger
+        sizes and shorter hold times than the trader's average. The strategy didn't fail — it was
+        abandoned, mid-drawdown, by someone trying to fix a red morning before dinner.</p>
+        <p>This is worth internalizing because it changes what you practice. Most traders respond to a
+        failed challenge by searching for a better entry signal, when the entry signal was never the
+        problem. A mediocre strategy traded with 0.5% risk, a daily stop and no size changes will
+        outlast a brilliant strategy traded on emotion — the mediocre strategy simply needs more time,
+        and evaluations here have no time limit at all.</p>
+        <p>The uncomfortable, liberating conclusion: the difference between passing and failing is
+        mostly behaviour under mild stress, which is trainable. Fixed fractional sizing removes the
+        "how much" decision. A written plan removes the "should I" decision. A personal daily stop
+        removes the "win it back" decision. Every decision you remove from the heat of the moment is
+        a failure mode deleted. The traders who pass aren't calmer by nature — they've just arranged
+        things so that calm isn't required.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Revenge trading: spotting it before it starts</summary>
+        <div class="a">
+        <p>Revenge trading is re-entering the market to make a loss "give back" what it took — and it
+        is the single most expensive behaviour in trading. It has tells, and they appear in a reliable
+        order: re-entering the same symbol within minutes of a stop-out, doubling size "because the
+        setup is even better now," dropping to a faster chart to find a reason, and narrating at the
+        market ("it owes me," "this is ridiculous") instead of analysing it.</p>
+        <p>The mechanism is ordinary loss-aversion: a loss feels roughly twice as heavy as an equal
+        win feels good, so your brain prices "getting it back today" far above its true value. That's
+        why revenge trades are systematically worse than normal trades — they are selected for speed,
+        not quality, and sized for the size of the hole rather than the size of the edge.</p>
+        <p>Defence is mechanical, not motivational. Pre-commit to a cooling rule: after any stop-out,
+        no new order for fifteen minutes, away from the screen. After two consecutive losses, the
+        session is over — written in the plan, no discretion. The fifteen minutes isn't about the
+        chart changing; it's about your pricing of risk returning to normal. If, after the pause, the
+        same trade still qualifies under your written setup rules at normal size, it isn't revenge —
+        take it. If you need the fast chart to justify it, it never qualified.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Handling a losing streak</summary>
+        <div class="a">
+        <p>Losing streaks are a statistical certainty, not a verdict. A trader with a genuine 50% win
+        rate has a better-than-even chance of hitting five consecutive losses somewhere in a few
+        hundred trades; at 40%, streaks of six or seven are normal. If your risk per trade is 0.75%,
+        a six-loss streak costs about 4.4% — uncomfortable, survivable, and nowhere near a 10% static
+        floor. If your risk is 3%, the same ordinary streak is fatal. Sizing <i>is</i> streak
+        insurance.</p>
+        <p>During a streak, the only question that matters: are you losing according to plan, or
+        losing off-plan? Review the trades against your written setup rules. If they qualified and
+        simply lost, nothing is wrong — edges pay out lumpy, and the correct action is to keep taking
+        the same trades at the same size. Cutting size after planned losses feels prudent but just
+        means your wins, when the streak breaks, are smaller than the losses that preceded them.</p>
+        <p>If the trades were off-plan — chased entries, moved stops, boredom positions — the streak
+        is feedback, and the fix is behavioural: back to the plan, possibly after a day off. Either
+        way, never increase size to "recover faster"; that converts an ordinary streak into a breach.
+        The account has no deadline. Streaks end; accounts that gambled during them don't get to see
+        it.</p>
+        </div>
+      </details>
+      <details>
+        <summary>From evaluation to funded: keeping the same discipline</summary>
+        <div class="a">
+        <p>The strange truth about funded accounts: the rules are the same as the evaluation — same
+        daily limit, same static drawdown — yet trading them feels completely different, and traders
+        who cruised through two phases sometimes breach a funded account in a week. Two forces do the
+        damage: payday proximity ("real money now — push harder") and protectiveness so strong it
+        turns into hesitation and revenge-guarding of small losses. Both are size and process errors
+        wearing emotional costumes.</p>
+        <p>The cure is aggressively boring: change nothing. The process that passed the evaluation is
+        the process the funded account pays you for. Same symbols, same risk fraction, same daily
+        stop. You've already proven it works against these exact rules — the only new variable is
+        you.</p>
+        <p>Build a payout rhythm early. Payouts here are on demand with a 24-hour review, and your
+        first one also returns your challenge fee — so request one as soon as you have meaningful
+        profit rather than letting the account balloon into something psychologically heavy. Banked
+        profit can't be given back, and a trader who has been paid trades noticeably calmer than one
+        protecting a paper number. From there, the scaling plan turns +15% into the next account size
+        when you're ready. Funded is not the finish line; it's the same race, finally being paid
+        lap by lap.</p>
+        </div>
+      </details>
+    </div>
+
+  </div>
+</section>
+{% endblock %}
