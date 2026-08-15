@@ -20,6 +20,7 @@ import secrets
 import time
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from time import monotonic
 
@@ -3249,6 +3250,22 @@ _DZIENNIK_OPISY = {
     "js_error": "Hit an error in the portal",
 }
 _DZIENNIK_LOGOWANIA = ("login", "signup", "account_claimed")
+_WARSZAWA = ZoneInfo("Europe/Warsaw")
+
+
+def _dzis_po_warszawsku() -> datetime:
+    """Początek dzisiejszego dnia W WARSZAWIE, jako naiwny UTC (format bazy).
+
+    Dział czyta panel w polskim czasie — granica „logged in today" po północy
+    UTC kłamałaby jeszcze przez dwie godziny polskiej nocy."""
+    polnoc = datetime.now(_WARSZAWA).replace(hour=0, minute=0,
+                                             second=0, microsecond=0)
+    return polnoc.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _dzien_po_warszawsku(ts: datetime) -> str:
+    return (ts.replace(tzinfo=timezone.utc)
+            .astimezone(_WARSZAWA).strftime("%Y-%m-%d"))
 
 
 @app.get("/api/admin/traders/{trader_id}/journal",
@@ -3291,7 +3308,7 @@ def admin_trader_journal(trader_id: int):
         odebranie = (session.query(func.max(TelemetryEvent.created_at))
                      .filter(TelemetryEvent.trader_id == trader_id,
                              TelemetryEvent.name == "account_claimed").scalar())
-        dzis = teraz.replace(hour=0, minute=0, second=0, microsecond=0)
+        dzis = _dzis_po_warszawsku()
 
         items: list[dict] = []
 
@@ -3306,7 +3323,7 @@ def admin_trader_journal(trader_id: int):
         otwarcia: dict[str, list] = {}
         for e in zdarzenia:
             if e.name == "view_open":
-                otwarcia.setdefault(e.created_at.strftime("%Y-%m-%d"), []).append(e)
+                otwarcia.setdefault(_dzien_po_warszawsku(e.created_at), []).append(e)
                 continue
             opis = _DZIENNIK_OPISY.get(e.name, e.name)
             try:
@@ -3405,7 +3422,7 @@ def admin_journal_overview():
     session = SessionLocal()
     try:
         teraz = datetime.now(timezone.utc).replace(tzinfo=None)
-        dzis = teraz.replace(hour=0, minute=0, second=0, microsecond=0)
+        dzis = _dzis_po_warszawsku()
 
         def _mapa(nazwy=None, od=None, licz=False):
             q = session.query(TelemetryEvent.trader_id,

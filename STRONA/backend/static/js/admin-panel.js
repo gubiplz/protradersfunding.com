@@ -1,7 +1,11 @@
 const $=id=>document.getElementById(id);
 const fmt=n=>(n??0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmt0=n=>(n??0).toLocaleString('en-US',{maximumFractionDigits:0});
-const dstr=iso=>new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
+/* Baza zapisuje nagie UTC (bez "Z") — new Date() wziąłby to za czas lokalny.
+   Dokładamy "Z" i renderujemy w Europe/Warsaw: dział czyta panel po polsku. */
+const dutc=iso=>new Date(/[Zz]|[+-]\d\d:?\d\d$/.test(iso||'')?iso:iso+'Z');
+const dstr=iso=>dutc(iso).toLocaleString('en-US',{timeZone:'Europe/Warsaw',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
+const wawIso=iso=>dutc(iso).toLocaleString('sv-SE',{timeZone:'Europe/Warsaw'});
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 /* Do interpolacji w onclick="fn('...')". Samo esc() nie wystarcza: parser HTML
    odwija &#39; z powrotem do apostrofu PRZED parsowaniem JS-a, wiec nazwisko
@@ -2260,10 +2264,11 @@ function journalTimeline(items){
      gorzej niż dzień jako nagłówek i sama godzina przy wpisie. */
   let out='',dzien='';
   for(const i of items){
-    const d=(i.ts||'').slice(0,10);
+    const w=wawIso(i.ts||'');
+    const d=w.slice(0,10);
     if(d!==dzien){dzien=d;out+=`<div class="muted" style="font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;margin:14px 0 4px">${dstr(i.ts).split(',')[0]||d}</div>`}
     out+=`<div class="kv" style="align-items:flex-start">
-      <span style="white-space:nowrap" class="muted">${(i.ts||'').slice(11,16)}</span>
+      <span style="white-space:nowrap" class="muted">${w.slice(11,16)}</span>
       <b style="text-align:right;font-weight:500">${JRN_ICO[i.kind]||'·'} ${esc(i.label)}</b>
     </div>`;
   }
