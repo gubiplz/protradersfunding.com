@@ -4348,7 +4348,10 @@ def list_accounts():
                          .group_by(Order.account_id).all())
         emaile = dict(session.query(Trader.id, Trader.email).all())
         out = []
-        for a in session.query(Account).order_by(Account.id).all():
+        # Najnowsze konto na górze: panel czyta tę listę jak oś czasu,
+        # a świeżo otwarte konto to zwykle to, po które admin przyszedł.
+        for a in (session.query(Account)
+                  .order_by(Account.created_at.desc(), Account.id.desc()).all()):
             d = _account_dict(a, with_credentials=True, admin_view=True)
             p = zaplacone.get(a.id)
             d["paid_at"] = p.isoformat() if p else None

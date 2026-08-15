@@ -65,3 +65,15 @@ def test_history_wymaga_admina_i_404_dla_obcych():
     assert client.get(f"/api/accounts/{aid}/history").status_code in (401, 403)
     assert client.get("/api/accounts/999999/history",
                       headers=ADMIN).status_code == 404
+
+
+def test_lista_kont_idzie_od_najnowszego():
+    """Panel czyta Accounts jak oś czasu — świeżo otwarte konto ma być na górze,
+    a nie na końcu listy rosnącej po id."""
+    aid1, _ = _kupione_konto()
+    aid2, _ = _kupione_konto()
+    lista = client.get("/api/accounts", headers=ADMIN).json()
+    kolejnosc = [a["id"] for a in lista]
+    assert kolejnosc.index(aid2) < kolejnosc.index(aid1)
+    daty = [a["created_at"] for a in lista if a["created_at"]]
+    assert daty == sorted(daty, reverse=True)

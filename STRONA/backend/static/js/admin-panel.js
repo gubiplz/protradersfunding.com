@@ -371,9 +371,12 @@ const VIEWS={
 
  _kycRender(){
   const d=window._kycData||{};
-  const pending=d.pending||[], histAll=d.history||[];
+  const q=(window._kycQ||'').toLowerCase();
+  const pasuje=t=>!q||[t.full_name,t.email,t.country,t.id_type,t.id_number,t.doc_ref]
+    .some(x=>String(x||'').toLowerCase().includes(q));
+  const pending=(d.pending||[]).filter(pasuje), histAll=d.history||[];
   const kf=window._kycFilter||'all';
-  const hist=histAll.filter(t=>kf==='all'||t.status===kf);
+  const hist=histAll.filter(t=>(kf==='all'||t.status===kf)&&pasuje(t));
   const cards=pending.length?`<div class="badge-grid" style="grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr))">`+
     pending.map(t=>`<div class="panel">
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
@@ -397,7 +400,8 @@ const VIEWS={
         <button class="btn-o" onclick="rejectKyc(${t.trader_id})">Reject</button>
       </div>
     </div>`).join('')+`</div>`
-    :`<div class="empty"><h3>Nothing to verify</h3><p>KYC submissions from traders show up here.</p></div>`;
+    :`<div class="empty"><h3>${q?'No pending submissions match':'Nothing to verify'}</h3><p>${
+      q?'Check the history below or clear the search.':'KYC submissions from traders show up here.'}</p></div>`;
   const histTbl=histAll.length?`<div class="sec-card card-md" style="margin-top:18px">
     <h3>History</h3>
     <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Past verification decisions.</p>
@@ -418,8 +422,10 @@ const VIEWS={
         <td class="rt-acts" style="white-space:nowrap"><button class="btn-o sm" onclick="revertKyc(${t.trader_id})"
           title="Undo this decision, back to the pending queue">Revert</button>
           ${XBTN(`deleteKycRow(${t.trader_id},'${jsq(t.email)}')`,'Delete KYC record and uploaded documents')}</td></tr>`).join('')}
-      </tbody></table></div>`:`<p class="muted" style="font-size:13px">No ${esc(kf)} decisions.</p>`}</div>`:'';
-  $('view').innerHTML=cards+histTbl;
+      </tbody></table></div>`:`<p class="muted" style="font-size:13px">No ${esc(kf)} decisions${q?' match':''}.</p>`}</div>`:'';
+  const pasek=((d.pending||[]).length||histAll.length)
+    ?`<div class="toolbar">${searchBox('kyc-q','_kycQ','renderKyc','Search name, email, country or document…')}</div>`:'';
+  $('view').innerHTML=pasek+cards+histTbl;
  },
 
  async mail(){
@@ -697,7 +703,7 @@ function renderTickets(){
      onclick rozwalilby ten atrybut. */
   const row=t=>`
     <div class="ticket-row" onclick="openTicket(${t.id})">
-      <div class="tile-ic ${t.status==='open'?'orange':t.status==='answered'?'green':'blue'}" style="width:36px;height:36px;flex:0 0 36px">${ICO.chat}</div>
+      <div class="tile-ic ${t.status==='open'?'orange':t.status==='answered'?'green':'gray'}" style="width:36px;height:36px;flex:0 0 36px">${ICO.chat}</div>
       <div class="sub"><b>${esc(t.subject)}</b>
         <span>#${t.id} · ${esc(t.trader_email||'—')} · ${t.messages} message${t.messages>1?'s':''} · ${dstr(t.last_ts)}</span></div>
       <span class="status ${t.status==='closed'?'failed':t.status==='answered'?'paid':'pending'}"><span class="dot"></span>${esc(t.status)}</span>
@@ -877,7 +883,7 @@ function renderOrders(){
   const q=(window._ordQ||'').toLowerCase();
   const f=window._ordFilter||'all';
   const rows=list.filter(o=>
-    (f==='all'||(f==='awaiting'?o.flag==='awaiting_crypto':o.status===f))&&
+    (f==='all'||(f==='awaiting'?(o.flag==='awaiting_crypto'&&o.status==='pending'):o.status===f))&&
     (!q||(o.trader_email||'').toLowerCase().includes(q)
     ||(o.product_key||'').includes(q)||(o.status||'').includes(q)
     ||(o.flag||'').includes(q)||String(o.id)===q));
@@ -1088,8 +1094,12 @@ const TG_HANDLE_RE=/^@?[A-Za-z][A-Za-z0-9_]{4,31}$/;
 function leadTgLink(l){
   const h=String(l.telegram||'').replace(/^@/,'');
   if(!h)return'';
+  /* Sam podgląd profilu, bez księgowości: „napisz i oznacz jako messaged"
+     mieszka na ikonie samolotu niżej. Klik w dane kontaktowe nie może po
+     cichu zmieniać statusu leada ani przypisywać właściciela. */
   return TG_HANDLE_RE.test(h)
-    ?`<a href="https://t.me/${esc(h)}?text=${encodeURIComponent(leadOpener(l))}" target="_blank" rel="noopener" onclick="markMessaged(${l.id})">@${esc(h)}</a>`
+    ?`<a href="https://t.me/${esc(h)}" target="_blank" rel="noopener"
+        title="Open the Telegram profile — the paper plane below writes to them">@${esc(h)}</a>`
     :`<span class="muted" title="Not a valid Telegram handle — ask for the right one">${esc(l.telegram)}</span>`;
 }
 /* Three icon actions (owner's spec): paper plane = write on Telegram by the
@@ -3437,13 +3447,15 @@ function closeActSheet(){
 }
 function openActSheet(tr){
   if(document.getElementById('act-sheet'))return;
-  const btns=[...tr.querySelectorAll('.rt-acts button,.rt-acts a,.lead-acts button,.lead-acts a')];
+  /* `:scope>.btn-x` lapie X na kaflu ticketa — tam przycisk lezy prosto
+     w wierszu, nie w komorce .rt-acts. */
+  const btns=[...tr.querySelectorAll('.rt-acts button,.rt-acts a,.lead-acts button,.lead-acts a,:scope>.btn-x')];
   if(!btns.length)return;
   const veil=document.createElement('div');veil.id='act-veil';veil.className='sheet-veil';
   veil.onclick=closeActSheet;
   const s=document.createElement('div');s.id='act-sheet';s.className='sheet';
   s.innerHTML='<div class="sheet-grab"></div><div class="act-sheet-title"></div><div class="act-sheet-list"></div>';
-  const tytul=(tr.querySelector('.rt-main')?.innerText||'').trim().split('\n')[0];
+  const tytul=(tr.querySelector('.rt-main, .sub b')?.innerText||'').trim().split('\n')[0];
   s.querySelector('.act-sheet-title').textContent=tytul||'Actions';
   const list=s.querySelector('.act-sheet-list');
   btns.forEach(b=>{
@@ -3462,7 +3474,7 @@ function openActSheet(tr){
 let _lpT=null,_lpXY=null,_lpFired=false;
 addEventListener('touchstart',e=>{
   if(!matchMedia('(max-width:860px)').matches)return;
-  const tr=e.target.closest&&e.target.closest('table.rtbl tr');
+  const tr=e.target.closest&&e.target.closest('table.rtbl tr,.ticket-row');
   if(!tr||tr.classList.contains('tr-sub'))return;
   /* start na przycisku/polu = zwykla interakcja, nie long-press */
   if(e.target.closest('button,a,input,select,textarea'))return;

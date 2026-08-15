@@ -461,6 +461,10 @@ button.status-tap{border:0;cursor:pointer;font-family:inherit}
 .seg button.on::after{content:"✕";font-size:9px;margin-left:6px;opacity:.75}
 .seg button[data-all="1"].on::after{content:none}
 
+/* Portal zna tylko cztery kolory kafelkowych ikon; szary domyka zamknięte
+   tickety — niebieski czytał się jak „aktywne", choć wątek był skończony. */
+.tile-ic.gray{background:var(--bg3);color:var(--dim)}
+
 /* ---------------- offline ----------------
    Panel to PWA otwierana w windzie: bez sieci pokazuje ostatnie dane, ale
    zapisy przepadna. Pasek mowi to wprost, zamiast pozwolic klikac w prozni.
