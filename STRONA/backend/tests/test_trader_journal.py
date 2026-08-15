@@ -162,6 +162,39 @@ def test_wyplata_i_konto_w_osi_czasu():
     assert any(l.startswith("Account 900001 created") for l in labels)
 
 
+# --- przegląd zbiorczy (zakładka Activity) ---------------------------------------
+
+def _wiersz(j, tid):
+    return next((w for w in j["items"] if w["id"] == tid), None)
+
+
+def test_przeglad_widzi_zalogowanego_i_czekajacego():
+    tid_a, mail_a, _ = _trader()
+    assert client.post("/api/auth/login",
+                       json={"email": mail_a, "password": "haslo1234"}).status_code == 200
+    tid_b, _, _ = _trader(must_set_password=True)
+    j = client.get("/api/admin/journal", headers=ADMIN).json()
+    a, b = _wiersz(j, tid_a), _wiersz(j, tid_b)
+    assert a["logged_in_today"] is True and a["logins_7d"] == 1
+    assert b["awaiting_claim"] is True and b["last_login_at"] is None
+
+
+def test_przeglad_bez_kont_administratora():
+    """To lista KLIENTÓW — wiersz admina z setką logowań zaśmiecałby filtry."""
+    s = SessionLocal()
+    n = next(LICZNIK)
+    adm = Trader(email=f"admin{n}@probe.test", full_name="Admin",
+                 password_hash=auth.hash_password("haslo1234"),
+                 referral_code=f"ADMIN{n}", is_admin=True)
+    s.add(adm); s.commit(); aid = adm.id; s.close()
+    j = client.get("/api/admin/journal", headers=ADMIN).json()
+    assert _wiersz(j, aid) is None
+
+
+def test_przeglad_bez_tokenu_ani_kroku():
+    assert client.get("/api/admin/journal").status_code in (401, 403)
+
+
 # --- brzegi ----------------------------------------------------------------------
 
 def test_nieznany_trader_to_404():
@@ -184,3 +217,14 @@ def test_panel_ma_karte_klienta_i_dziennik():
     assert "openTraderJournal(" in kod
     assert "/journal" in kod
     assert 'id="client-card"' in kod
+
+
+def test_panel_ma_zakladke_activity():
+    """Filtry przeglądu odpowiadają na pytania działu bez klikania po kontach:
+    kto nie odebrał konta, kto nigdy nie wszedł, kto zamilkł."""
+    kod = client.get("/static/js/admin-panel.js").text
+    assert "renderActivity(" in kod
+    assert "'/api/admin/journal'" in kod
+    assert "v:'activity'" in kod
+    for filtr in ("Awaiting claim", "Never signed in", "Active today", "Quiet 7+ days"):
+        assert filtr in kod

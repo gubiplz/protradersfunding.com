@@ -90,12 +90,14 @@ const ICO={
   arrow:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><path d="M9 6l6 6-6 6"/></svg>',
   copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>',
   mail:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m3 6 9 6.5L21 6"/></svg>',
+  pulse:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l2.5-6 4 12L16 12h5"/></svg>',
 };
 
 const NAV=[
   {v:'overview',label:'Overview',ico:'grid'},
   {v:'leads',label:'Leads',ico:'users'},
   {v:'accounts',label:'Accounts',ico:'layers'},
+  {v:'activity',label:'Activity',ico:'pulse'},
   {v:'payouts',label:'Payouts',ico:'wallet'},
   {v:'kyc',label:'KYC',ico:'shield'},
   {v:'tickets',label:'Tickets',ico:'chat'},
@@ -122,6 +124,7 @@ const TITLES={
   overview:['Overview','Platform health and items waiting for you'],
   leads:['Leads','Applications from the landing page, and who they turned into'],
   accounts:['Accounts','All challenge accounts and their live risk metrics'],
+  activity:['Activity','Who claimed their account, who signs in, and what each client did'],
   payouts:['Payouts','Every payout booked so far, plus requests waiting for review'],
   kyc:['KYC','Identity verifications awaiting review'],
   tickets:['Tickets','Support conversations with traders'],
@@ -392,6 +395,12 @@ const VIEWS={
   window._accs=list;
   window._accFilter=window._accFilter||'all';
   renderAccounts();
+ },
+
+ async activity(){
+  window._jrn=(await api('/api/admin/journal')).items||[];
+  window._jrnFilter=window._jrnFilter||'all';
+  renderActivity();
  },
 
  async payouts(){
@@ -2279,6 +2288,53 @@ async function openTraderJournal(tid,email){
     journalChips(t)
     +`<p class="muted" style="font-size:12.5px;margin-bottom:2px">Everything this client did — sign-ins, portal visits, orders, payouts, tickets — newest first.</p>`
     +journalTimeline(d.items));
+}
+
+/* Zakladka Activity: te same dane co karta Client, ale dla WSZYSTKICH naraz —
+   filtry odpowiadaja na pytania dzialu („kto nie odebral konta?", „kto zamilkl?")
+   bez klikania po kolei w kazde konto. */
+const JRN_FILTERS=[
+  ['all','All',()=>true],
+  ['today','Active today',t=>t.logged_in_today],
+  ['awaiting','Awaiting claim',t=>t.awaiting_claim],
+  ['never','Never signed in',t=>!t.last_login_at],
+  ['quiet','Quiet 7+ days',t=>t.last_login_at&&!t.logins_7d],
+];
+function renderActivity(){
+  const all=window._jrn||[];
+  const f=window._jrnFilter||'all';
+  const q=(window._jrnQ||'').toLowerCase();
+  const test=(JRN_FILTERS.find(x=>x[0]===f)||JRN_FILTERS[0])[2];
+  const rows=all.filter(t=>test(t)&&(!q||[t.email,t.full_name]
+    .some(x=>String(x||'').toLowerCase().includes(q))));
+  const chip=t=>t.awaiting_claim
+    ?'<span class="status pending"><span class="dot"></span>awaiting claim</span>'
+    :(t.claimed_at?'<span class="status passed"><span class="dot"></span>claimed</span>'
+                  :'<span class="muted">—</span>');
+  const login=t=>t.logged_in_today
+    ?'<span class="status funded"><span class="dot"></span>today</span>'
+    :(t.last_login_at?dstr(t.last_login_at)
+      :'<span class="status failed"><span class="dot"></span>never</span>');
+  $('view').innerHTML=`<div class="toolbar">
+      ${searchBox('jrn-q','_jrnQ','renderActivity','Search name or email…')}
+      <div class="seg">${JRN_FILTERS.map(([k,l])=>
+        `<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''}
+          onclick="window._jrnFilter='${f===k?'all':k}';renderActivity()">${l}</button>`).join('')}</div>
+      <span class="count-pill">${rows.length} of ${all.length}</span>
+    </div>`
+    +(rows.length?`<div class="tbl-wrap rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.activity">
+      <thead><tr><th>Client</th><th>Claim</th><th>Last sign-in</th><th>7 days</th><th>Last seen</th><th>Accounts</th><th>KYC</th></tr></thead>
+      <tbody>${rows.map(t=>`<tr class="clickable" onclick="openTraderJournal(${t.id},'${jsq(t.email||'')}')">
+        <td class="rt-main" data-l="Client">${esc(t.full_name||'—')}<div class="muted" style="font-size:11.5px">${esc(t.email)}</div></td>
+        <td data-l="Claim" data-sort="${t.awaiting_claim?0:(t.claimed_at?2:1)}">${chip(t)}</td>
+        <td data-l="Last sign-in" data-sort="${esc(t.last_login_at||'')}">${login(t)}</td>
+        <td class="muted" data-l="7 days" data-sort="${t.logins_7d}">${t.logins_7d?t.logins_7d+'×':'—'}</td>
+        <td class="muted" data-l="Last seen" data-sort="${esc(t.last_seen_at||'')}">${t.last_seen_at?dstr(t.last_seen_at):'—'}</td>
+        <td class="muted" data-l="Accounts" data-sort="${t.accounts}">${t.accounts||'—'}</td>
+        <td class="muted" data-l="KYC">${esc(t.kyc_status||'—')}</td></tr>`).join('')}
+      </tbody></table></div>`
+    :`<div class="empty"><h3>${q||f!=='all'?'No clients match':'No clients yet'}</h3><p>${
+      q||f!=='all'?'Clear the search or pick another filter.':'Client accounts show up here as they appear.'}</p></div>`);
 }
 
 /* ---------- achievement certificates ---------- */

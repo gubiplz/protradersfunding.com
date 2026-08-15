@@ -3366,6 +3366,70 @@ def admin_trader_journal(trader_id: int):
         session.close()
 
 
+@app.get("/api/admin/journal", dependencies=[Depends(auth.require_admin)])
+def admin_journal_overview():
+    """Aktywność wszystkich klientów naraz — wejście do dziennika per trader.
+
+    Dziennik pojedynczego klienta odpowiada „co ON robił", ale pytanie działu
+    brzmi zwykle odwrotnie: „KTÓRZY klienci czekają z nieodebranym kontem,
+    którzy nigdy się nie zalogowali, kto był dziś?". Na to musi odpowiadać
+    lista z filtrami, nie klikanie po kolei w sto kont.
+
+    Agregaty liczone zapytaniami z GROUP BY po całej telemetrii, nie pętlą
+    per trader — przy stu klientach pętla to czterysta zapytań na odświeżenie.
+    """
+    session = SessionLocal()
+    try:
+        teraz = datetime.now(timezone.utc).replace(tzinfo=None)
+        dzis = teraz.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        def _mapa(nazwy=None, od=None, licz=False):
+            q = session.query(TelemetryEvent.trader_id,
+                              func.count(TelemetryEvent.id) if licz
+                              else func.max(TelemetryEvent.created_at))
+            if nazwy is not None:
+                q = q.filter(TelemetryEvent.name.in_(nazwy))
+            if od is not None:
+                q = q.filter(TelemetryEvent.created_at >= od)
+            return dict(q.filter(TelemetryEvent.trader_id.isnot(None))
+                        .group_by(TelemetryEvent.trader_id).all())
+
+        logowania = _mapa(nazwy=_DZIENNIK_LOGOWANIA)
+        logins7 = _mapa(nazwy=_DZIENNIK_LOGOWANIA,
+                        od=teraz - timedelta(days=7), licz=True)
+        widziani = _mapa()
+        zaproszenia = _mapa(nazwy=("portal_invite",))
+        odebrania = _mapa(nazwy=("account_claimed",))
+        konta = dict(session.query(Account.trader_id, func.count(Account.id))
+                     .filter(Account.trader_id.isnot(None))
+                     .group_by(Account.trader_id).all())
+
+        iso = lambda d: d.isoformat() if d else None  # noqa: E731
+        wiersze = []
+        # Bez kont administratorów: to lista KLIENTÓW, a wiersz admina z setką
+        # „logowań dziś" zaśmiecałby każdy filtr aktywności.
+        for tr in session.query(Trader).filter(Trader.is_admin.is_(False)).all():
+            login = logowania.get(tr.id)
+            wiersze.append({
+                "id": tr.id, "email": tr.email, "full_name": tr.full_name,
+                "created_at": iso(tr.created_at),
+                "kyc_status": tr.kyc_status,
+                "awaiting_claim": bool(tr.must_set_password),
+                "invited_at": iso(zaproszenia.get(tr.id)),
+                "claimed_at": iso(odebrania.get(tr.id)),
+                "last_login_at": iso(login),
+                "logged_in_today": bool(login and login >= dzis),
+                "logins_7d": int(logins7.get(tr.id) or 0),
+                "last_seen_at": iso(widziani.get(tr.id)),
+                "accounts": int(konta.get(tr.id) or 0),
+            })
+        wiersze.sort(key=lambda w: w["last_seen_at"] or w["created_at"] or "",
+                     reverse=True)
+        return {"items": wiersze}
+    finally:
+        session.close()
+
+
 class CreditsIn(BaseModel):
     amount: float                      # dodatni = zasilenie, ujemny = korekta
     note: str | None = None
@@ -6825,12 +6889,19 @@ async def brevo_webhook(request: Request, token: str = ""):
         if temat not in nasze:
             return {"ok": True}
         # Brevo ponawia wywołania i potrafi przysłać ten sam wynik kilka razy.
-        # Dedup po treści wpisu, nie po `id` zdarzenia: interesuje nas, CO się
-        # z tym mailem stało, a nie ile razy nam o tym powiedziano. Kolejny,
-        # INNY wynik (soft bounce, potem delivered) dopisze się normalnie.
+        # Dedup po treści wpisu, ALE tylko od ostatniej wysyłki: panel wysyła
+        # do leada kolejne maile, a „delivered: sent" brzmi za każdym razem
+        # identycznie — dedup po samej treści połykał wynik każdego maila poza
+        # pierwszym i historia wyglądała, jakby Brevo zamilkło. Retry Brevo
+        # zawsze przychodzi PO naszym wpisie z wysyłki, więc granica „nowszy
+        # niż ostatni kind=email" odsiewa retry, nie kolejne maile.
+        ostatnia_wysylka = (session.query(func.max(LeadEvent.created_at))
+                            .filter(LeadEvent.lead_id == lead.id,
+                                    LeadEvent.kind == "email").scalar())
         if session.query(LeadEvent).filter(
                 LeadEvent.lead_id == lead.id, LeadEvent.kind == "delivery",
-                LeadEvent.detail == opis).first():
+                LeadEvent.detail == opis,
+                LeadEvent.created_at >= ostatnia_wysylka).first():
             return {"ok": True}
         _zdarzenie(session, lead.id, "delivery", opis, actor="brevo")
         session.commit()

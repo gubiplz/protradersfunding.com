@@ -628,6 +628,20 @@ def test_kolejny_inny_wynik_dopisuje_sie(poczta, brevo):
     assert _detale(lid) == ["soft bounce: mailbox full", "delivered"]
 
 
+def test_drugi_mail_ma_wlasny_wynik_doreczenia(poczta, brevo):
+    """Dedup ma odsiewać RETRY Brevo, nie kolejne maile: „delivered: sent"
+    brzmi identycznie przy każdej wysyłce, a przez to wynik każdego maila poza
+    pierwszym ginął i historia wyglądała, jakby Brevo zamilkło w południe."""
+    lid, adres, temat = _wyslany()
+    _od_brevo(adres, temat)
+    assert client.post(f"/api/admin/leads/{lid}/email-custom", headers=ADMIN,
+                       json={"subject": "Quick follow-up",
+                             "body": "Still there?"}).status_code == 200
+    _od_brevo(adres, "Quick follow-up")
+    _od_brevo(adres, "Quick follow-up")  # retry Brevo — nadal bez dubla
+    assert _detale(lid) == ["delivered", "delivered"]
+
+
 def test_mail_do_tradera_nie_udaje_maila_do_leada(poczta, brevo):
     """Tym samym kontem Brevo wychodzą maile z `notify.py`, a jeden człowiek
     bywa naraz leadem i traderem. Bez dopasowania po temacie potwierdzenie
