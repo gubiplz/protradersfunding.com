@@ -2656,6 +2656,7 @@ def admin_payouts_all():
             out.append({
                 "kind": "payout", "id": p.id,
                 "ts": p.ts.isoformat() if p.ts else None,
+                "account_id": p.account_id,
                 "account_login": acc.login if acc else None,
                 "trader_email": tr.email if tr else None,
                 "profit_amount": round(p.profit_amount, 2),
@@ -2682,6 +2683,7 @@ def admin_payouts_all():
             out.append({
                 "kind": "request", "id": r.id,
                 "ts": r.ts.isoformat() if r.ts else None,
+                "account_id": acc.id if acc else None,
                 "account_login": acc.login if acc else None,
                 "trader_email": tr_email,
                 "profit_amount": r.profit_amount, "trader_share": r.trader_share,

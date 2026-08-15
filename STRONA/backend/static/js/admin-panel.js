@@ -340,8 +340,8 @@ const VIEWS={
         <tbody>${orders.slice(0,8).map(o=>`<tr>
           <td class="num rt-hide" data-l="#">${o.id}</td><td class="rt-main" data-l="Trader">${esc(o.trader_email||'—')}</td><td data-l="Product">${esc(o.product_key)}</td>
           <td class="num" data-l="Amount">$${fmt(o.amount_usd)}</td>
-          <td data-l="Status"><span class="status ${o.status==='paid'?'paid':'pending'}"><span class="dot"></span>${esc(o.status)}</span></td>
-          <td class="num rt-hide" data-l="Account">${o.account_id||'—'}</td></tr>`).join('')}</tbody></table></div>`
+          <td data-l="Status"><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span></td>
+          <td class="num rt-hide" data-l="Account">${accLink(o.account_id)}</td></tr>`).join('')}</tbody></table></div>`
         :'<p class="muted" style="font-size:13px">No orders yet.</p>'}
     </div>`;
  },
@@ -452,7 +452,7 @@ const VIEWS={
       <div class="tbl-wrap tw-sm rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.pool-waiting">
         <thead><tr><th>Account</th><th>Trader</th><th>Needs size</th><th>Waiting since</th></tr></thead>
         <tbody>${waiting.map(w=>`<tr>
-          <td class="num" data-l="Account">#${w.account_id}</td>
+          <td class="num" data-l="Account">${accLink(w.account_id)}</td>
           <td class="rt-main" data-l="Trader">${esc(w.trader_email||'—')}</td>
           <td class="num" data-l="Size"><b>$${fmt0(w.account_size)}</b></td>
           <td class="muted" data-l="Since" data-sort="${esc(w.created_at||'')}">${w.created_at?dstr(w.created_at):'—'}</td></tr>`).join('')}
@@ -752,7 +752,7 @@ function poolListHtml(){
         <td data-l="Status">${p.retired_reason?`<span class="status failed"><span class="dot"></span>retired</span>`
           :p.claimed?`<span class="status pending"><span class="dot"></span>assigned</span>`
           :'<span class="status funded"><span class="dot"></span>free</span>'}</td>
-        <td data-l="Assigned">${p.claimed?`${esc(p.trader_email||'—')}<div class="muted" style="font-size:11.5px">${p.retired_reason?esc(p.retired_reason)+' — not reusable':`account #${p.claimed_by_account_id}${p.account_status?' · '+esc(p.account_status):''}`}</div>`:'<span class="muted">—</span>'}</td>
+        <td data-l="Assigned">${p.claimed?`${esc(p.trader_email||'—')}<div class="muted" style="font-size:11.5px">${p.retired_reason?esc(p.retired_reason)+' — not reusable':`account ${accLink(p.claimed_by_account_id)}${p.account_status?' · '+esc(p.account_status):''}`}</div>`:'<span class="muted">—</span>'}</td>
         <td class="muted" data-l="When" data-sort="${esc(p.claimed_at||'')}">${p.claimed_at?dstr(p.claimed_at):'—'}</td>
         <td class="rt-acts" style="white-space:nowrap">
           <button class="btn-o sm" onclick="editPool(${p.id})">Edit</button>
@@ -796,7 +796,7 @@ function renderPayoutsView(){
     </div>`+(rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.payouts">
     <thead><tr><th>Date</th><th>Account</th><th>Trader</th><th>Profit</th><th>Trader share</th><th>Method</th><th>Status</th><th class="no-sort">Certificate</th><th class="no-sort"></th></tr></thead>
     <tbody>${rows.map(r=>`<tr>
-      <td class="muted" data-l="Date" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td><td class="num rt-main" data-l="Account">${esc(r.account_login||'—')}</td>
+      <td class="muted" data-l="Date" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td><td class="num rt-main" data-l="Account">${accLink(r.account_id,r.account_login)}</td>
       <td data-l="Trader">${esc(r.trader_email||'—')}</td>
       <td class="num" data-l="Profit">$${fmt(r.profit_amount)}</td><td class="num up" data-l="Share">$${fmt(r.trader_share)}</td>
       <td data-l="Method">${(()=>{const d=r.details||{};
@@ -812,8 +812,9 @@ function renderPayoutsView(){
         :r.cert_url
           ?`<a class="btn-o sm" href="${r.cert_url}" target="_blank">Open</a>
             <button class="btn-o sm" onclick="copyCert('${location.origin}${r.cert_url}')">Copy link</button>
-            <button class="btn-o sm" onclick="setCertLp(${r.id},${r.show_on_lp?'false':'true'})">
-              ${r.show_on_lp?'On LP ✓':'Not on LP'}</button>
+            <button class="btn-o sm" onclick="setCertLp(${r.id},${r.show_on_lp?'false':'true'})"
+              title="${r.show_on_lp?'Currently shown in the landing-page payout strip':'Currently not on the landing page'}">
+              ${r.show_on_lp?'Take off the LP':'Put on the LP'}</button>
             <button class="btn-o sm" onclick="revokeCert(${r.id})">Revoke</button>`
           :`<button class="btn-o sm" onclick="askCertLp(${r.id})">Generate</button>`}</td>
       <td class="rt-acts" style="text-align:right;white-space:nowrap">${r.kind==='request'&&r.status==='pending'
@@ -880,7 +881,7 @@ function renderOrders(){
           ${o.status!=='paid'&&o.payment_address?`<div class="muted" title="${esc((o.payment_network?o.payment_network+' · ':'')+o.payment_address)}"
             style="font-size:11px;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(o.payment_network?o.payment_network+' · ':'')}${esc(o.payment_address)}</div>`:''}
           ${o.status==='failed'&&o.fail_reason?`<div class="muted" style="font-size:11px;max-width:200px">${esc(o.fail_reason)}</div>`:''}</td>
-        <td class="num" data-l="Account">${o.account_id||'—'}</td>
+        <td class="num" data-l="Account">${accLink(o.account_id)}</td>
         <td class="rt-acts" style="white-space:nowrap">${o.status==='paid'?'':`
           ${o.status==='pending'?`<button class="btn-o sm" onclick="payLink(${o.id})"
             title="Copy a card-payment link for this order — send it to the customer">Pay link</button>
@@ -1797,6 +1798,13 @@ async function markOrderPaid(id){
 /* Bot pace is stored as a short key; the chip shows what it actually means. */
 const PACE_TXT={light:'1–2 trades/day',steady:'4–8 trades/day',busy:'~20 trades/day'};
 
+/* Numer konta w tabeli ma być drzwiami, nie ślepą liczbą — łańcuch
+   zamówienie→konto kończył się na ręcznym szukaniu w zakładce Accounts. */
+function accLink(id,label){
+  const txt=label!=null&&label!==''?esc(String(label)):id?'#'+id:'';
+  if(!id)return txt||'—';
+  return `<a href="#" onclick="openAccount(${id});return false" title="Open the account card">${txt}</a>`;
+}
 async function openAccount(id){
   const a=await api('/api/accounts/'+id);
   const m=a.metrics||{};
@@ -2306,13 +2314,11 @@ async function stopBot(id){
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
+/* Ta sama sciezka co X w tabeli: jedno pytanie, 5 s na cofniecie. Wczesniej
+   przycisk w slide-overze kasowal OD RAZU — jedyne usuwanie w panelu bez okna
+   na „jednak nie". Slide-over zamyka sie dopiero po potwierdzeniu. */
 async function deleteAccount(id,login){
-  if(!await askConfirm({title:`Delete account ${esc(login)}?`,
-    body:'This removes it from the platform permanently, together with its snapshots, breaches and '
-      +'certificates.',
-    ok:'Delete account',danger:true}))return;
-  try{await api('/api/accounts/'+id,{method:'DELETE'});closeOver();toast('Account deleted.','ok');go('accounts')}
-  catch(e){toast('Error: '+e.message,'err')}
+  if(await deleteAccountRow(id,login))closeOver();
 }
 async function deleteTrader(tid,who){
   /* Jedno okno zamiast dwoch: wczesniej admin odpowiadal na confirm(), a zaraz
@@ -2662,7 +2668,7 @@ async function xdel(url,question,after,okMsg){
   const [tytul,...reszta]=String(question).split('\n\n');
   if(!await askConfirm({title:tytul.trim(),
     body:esc(reszta.join('\n').trim()).replace(/\n/g,'<br>'),
-    ok:'Delete',danger:true}))return;
+    ok:'Delete',danger:true}))return false;
   withUndo(tytul.trim().replace(/\?+$/,''),async()=>{
     try{const r=await api(url,{method:'DELETE',keepalive:true});
       toast(typeof okMsg==='function'?okMsg(r):(okMsg||'Deleted.'),'ok');
@@ -2672,6 +2678,9 @@ async function xdel(url,question,after,okMsg){
       if(wiersz&&wiersz.style)wiersz.style.display='';   // nie udalo sie — wroc
     }
   },wiersz);
+  /* Prawda/falsz mowi wolajacemu, czy usuwanie POSZLO do kolejki — slide-over
+     konta zamyka sie tylko wtedy, nie przy „Cancel". */
+  return true;
 }
 
 /* Removes the whole row from the ledger — a mistyped payout, a duplicate, an
@@ -2688,7 +2697,7 @@ function deletePayoutRow(kind,id,amount,login){
 }
 
 function deleteAccountRow(id,login,trader){
-  xdel(`/api/accounts/${id}`,
+  return xdel(`/api/accounts/${id}`,
     `Delete account ${login}${trader?` (${trader})`:''}?\n\nIts trades, snapshots, payouts and `
     +`certificates go with it. This cannot be undone.`,
     ()=>go('accounts'));
