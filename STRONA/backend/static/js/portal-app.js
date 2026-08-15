@@ -601,9 +601,9 @@ async function boot(){
      deep link), finally ?view= from the URL (cold start via openWindow). */
   const widok=(await pendingNavView())||q.get('view');
   if(q.get('upsell')==='1')window._upsellJump=true;
+  /* view_open leci z go() — kazda nawigacja, nie tylko start appki */
   go(q.get('buy')?'store':(widok&&VIEWS[widok]?widok:'accounts'));
   refreshNotif();
-  track('view_open',{view:window._view,pwa:document.documentElement.classList.contains('pwa')?'1':'0'});
 }
 
 const TITLES={
@@ -635,6 +635,9 @@ let PRZEJSCIE = 0;
 
 function go(v){
   CURV=v; window._view=v; window._onDetail=false;
+  /* Nazwa widoku w propsach: dziennik w adminie rozpisuje z tego, co klient
+     faktycznie przegladal, nie tylko ze "otworzyl portal". */
+  track('view_open',{view:v,pwa:document.documentElement.classList.contains('pwa')?'1':'0'});
   document.querySelectorAll('.sb-link[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const tv={store:'accounts',achievements:'rewards',loyalty:'rewards'}[v]||v;
   const tabs=[...document.querySelectorAll('.tab-item[data-v]')];

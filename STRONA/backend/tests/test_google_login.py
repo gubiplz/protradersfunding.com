@@ -12,13 +12,16 @@ os.environ.setdefault("DATABASE_URL", f"sqlite:///{tempfile.NamedTemporaryFile(s
 os.environ.setdefault("FEED", "sim")
 os.environ.setdefault("AUTO_SEED", "false")
 
+from datetime import datetime  # noqa: E402
+
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app import auth  # noqa: E402
+from app import db as db_mod  # noqa: E402
 from app import main as main_mod  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Trader  # noqa: E402
+from app.models import TelemetryEvent, Trader  # noqa: E402
 
 init_db()
 
@@ -89,6 +92,61 @@ def test_google_podpina_sie_do_istniejacego_konta(monkeypatch):
     with TestClient(app) as c:
         assert c.post("/api/auth/login", json={"email": "stary@gmail.com",
                                                "password": "haslo12345"}).status_code == 200
+
+
+def test_google_odbiera_konto_zalozone_za_klienta(monkeypatch):
+    """Konto założone ZA klienta: wejście przez Google to odbiór konta —
+    Google ręczy za adres tak samo jak klik w link zaproszenia. Bez tego
+    klient korzystał z portalu, a panel wiecznie pokazywał „Awaiting Claim"."""
+    s = SessionLocal()
+    s.add(Trader(email="zalozone@gmail.com", password_hash=auth.hash_password("haslo12345"),
+                 full_name="Za Klienta", referral_code="ZALOZ1", must_set_password=True))
+    s.commit()
+    tid = s.query(Trader).filter(Trader.email == "zalozone@gmail.com").first().id
+    s.close()
+    _wlacz(monkeypatch, _claims(email="zalozone@gmail.com", sub="sub-zalozone"))
+    with TestClient(app) as c:
+        assert c.post("/api/auth/google", json={"credential": "stub"}).status_code == 200
+        # drugie wejście to już zwykłe logowanie, nie kolejny claim
+        assert c.post("/api/auth/google", json={"credential": "stub"}).status_code == 200
+    s = SessionLocal()
+    assert s.get(Trader, tid).must_set_password is False
+    claimy = s.query(TelemetryEvent).filter(
+        TelemetryEvent.trader_id == tid,
+        TelemetryEvent.name == "account_claimed").all()
+    assert len(claimy) == 1 and "google" in (claimy[0].props or "")
+    s.close()
+
+
+def test_migracja_odbiera_konta_google_wstecznie():
+    """Ofiary sprzed poprawki: google_sub ustawia tylko ścieżka Google, więc
+    (must_set_password, google_sub) wskazuje je jednoznacznie. Claim dostaje
+    datę pierwszego wejścia przez Google, nie datę naprawy."""
+    s = SessionLocal()
+    tr = Trader(email="wstecz@gmail.com", password_hash=auth.hash_password("haslo12345"),
+                full_name="Wstecz", referral_code="WSTECZ1",
+                must_set_password=True, google_sub="sub-wstecz")
+    s.add(tr); s.commit(); tid = tr.id
+    pierwsze = datetime(2026, 8, 1, 12, 0)
+    s.add(TelemetryEvent(trader_id=tid, name="login",
+                         props='{"google": true}', created_at=pierwsze))
+    s.commit(); s.close()
+    db_mod._odbierz_konta_google()
+    s = SessionLocal()
+    assert s.get(Trader, tid).must_set_password is False
+    claim = s.query(TelemetryEvent).filter(
+        TelemetryEvent.trader_id == tid,
+        TelemetryEvent.name == "account_claimed").one()
+    assert claim.created_at == pierwsze
+    assert "google" in (claim.props or "")
+    s.close()
+    # idempotencja — drugi przebieg nie dokłada drugiego claimu
+    db_mod._odbierz_konta_google()
+    s = SessionLocal()
+    assert s.query(TelemetryEvent).filter(
+        TelemetryEvent.trader_id == tid,
+        TelemetryEvent.name == "account_claimed").count() == 1
+    s.close()
 
 
 def test_zla_publicznosc_tokenu_odrzucona(monkeypatch):

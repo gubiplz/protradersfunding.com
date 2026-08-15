@@ -71,6 +71,19 @@ def test_claim_z_zaproszenia_widac_w_dzienniku():
     assert "Claimed the account — password set from the invite link" in _labels(j)
 
 
+def test_claim_przez_google_ma_wlasna_etykiete():
+    """Wejście przez Google też odbiera konto — etykieta nie może kłamać,
+    że klient ustawił hasło z linku."""
+    tid, _, _ = _trader()
+    s = SessionLocal()
+    s.add(TelemetryEvent(trader_id=tid, name="account_claimed",
+                         props='{"google": true}'))
+    s.commit(); s.close()
+    j = _journal(tid)
+    assert j["trader"]["claimed_at"]
+    assert "Claimed the account — signed in with Google" in _labels(j)
+
+
 def test_zwykly_reset_hasla_to_nie_claim():
     tid, _, pwh = _trader()
     token = auth.make_reset_token(tid, pwh)
@@ -128,6 +141,19 @@ def test_otwarcie_linku_platnosci():
 
 
 # --- zwijanie wejść do portalu ---------------------------------------------------
+
+def test_wejscia_do_portalu_rozpisane_na_widoki():
+    """„Co dokładnie sprawdzał w portalu" — nazwy widoków z propsów, zwinięte
+    per dzień, najczęstsze na przodzie."""
+    tid, _, _ = _trader()
+    s = SessionLocal()
+    for widok in ("accounts", "payouts", "accounts"):
+        s.add(TelemetryEvent(trader_id=tid, name="view_open",
+                             props=f'{{"view": "{widok}"}}'))
+    s.commit(); s.close()
+    labels = _labels(_journal(tid))
+    assert "Opened the portal (3×) — accounts ×2, payouts" in labels
+
 
 def test_wejscia_do_portalu_zwijane_per_dzien():
     tid, _, _ = _trader()

@@ -51,6 +51,7 @@ def init_db() -> None:
     _add_missing_indexes()
     _relax_not_null()
     _przemianuj_statusy_leadow()
+    _odbierz_konta_google()
 
 
 # Odcisk wersji kodu, dla ktorej schemat jest juz doprowadzony do porzadku.
@@ -294,6 +295,39 @@ def _przemianuj_statusy_leadow() -> None:
                 {"nowy": nowy, "stary": stary}).rowcount
             if zmienione:
                 print(f"[db] leads.status {stary} -> {nowy}: {zmienione}")
+
+
+def _odbierz_konta_google() -> None:
+    """Klienci z kontem założonym ZA nich, którzy weszli przez Google, zanim
+    logowanie Google liczyło się jako odbiór konta — flaga wisiała mimo że
+    klient normalnie korzystał z portalu. `google_sub` ustawia wyłącznie
+    ścieżka Google, więc para (must_set_password, google_sub) jednoznacznie
+    wskazuje ofiary. Claim w dzienniku dostaje datę pierwszego wejścia przez
+    Google, nie datę naprawy."""
+    from datetime import datetime
+
+    from sqlalchemy import inspect, text
+
+    if not {"traders", "telemetry_events"} <= set(inspect(engine).get_table_names()):
+        return
+    with engine.begin() as conn:
+        ofiary = conn.execute(text(
+            "SELECT id FROM traders "
+            "WHERE must_set_password AND google_sub IS NOT NULL")).scalars().all()
+        for tid in ofiary:
+            kiedy = conn.execute(text(
+                "SELECT MIN(created_at) FROM telemetry_events "
+                "WHERE trader_id = :t AND name IN ('login', 'signup') "
+                "AND props LIKE '%\"google\": true%'"), {"t": tid}).scalar()
+            conn.execute(text(
+                "INSERT INTO telemetry_events (trader_id, name, props, created_at) "
+                "VALUES (:t, 'account_claimed', :p, :c)"),
+                {"t": tid, "p": '{"google": true, "backfill": true}',
+                 "c": kiedy or datetime.utcnow()})
+            conn.execute(text(
+                "UPDATE traders SET must_set_password = :f WHERE id = :t"),
+                {"f": False, "t": tid})
+            print(f"[db] trader {tid}: konto odebrane wstecznie (Google)")
 
 
 def _add_missing_columns() -> None:

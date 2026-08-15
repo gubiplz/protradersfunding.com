@@ -951,6 +951,13 @@ def google_login(payload: GoogleAuthIn, request: Request, response: Response):
             if tr is not None and sub and not tr.google_sub:
                 tr.google_sub = sub                       # podpięcie istniejącego konta
         nowy = tr is None
+        # Konto założone ZA klienta czeka na odbiór. Google ręczy za adres tak
+        # samo jak klik w link zaproszenia, więc pierwsze wejście przez Google
+        # to claim — bez tego klient normalnie korzystał z portalu, a panel do
+        # końca świata pokazywał „Awaiting Claim".
+        odebral_konto = not nowy and bool(tr.must_set_password)
+        if odebral_konto:
+            tr.must_set_password = False
         if nowy:
             referred_by = None
             if payload.referral:
@@ -981,7 +988,8 @@ def google_login(payload: GoogleAuthIn, request: Request, response: Response):
         # więc zwykłe logowanie Google nie spamuje welcome'em).
         _potwierdz_email(session, tr)
         session.commit()   # domyka linkowanie google_sub u już zweryfikowanych
-        telemetry.track("signup" if nowy else "login", tr.id, google=True)
+        telemetry.track("account_claimed" if odebral_konto
+                        else ("signup" if nowy else "login"), tr.id, google=True)
         token = auth.make_token(tr.id, tr.password_hash)
         _ustaw_ciasteczko_sesji(response, token)
         return {"token": token, "trader": {"id": tr.id, "email": tr.email,
@@ -3307,6 +3315,8 @@ def admin_trader_journal(trader_id: int):
                 props = {}
             if e.name in ("login", "signup") and props.get("google"):
                 opis += " (Google)"
+            if e.name == "account_claimed" and props.get("google"):
+                opis = "Claimed the account — signed in with Google"
             if e.name == "portal_invite" and props.get("sent") is False:
                 opis = "Portal invite link copied (sent by hand)"
             if e.name == "pay_link_opened" and props.get("order"):
@@ -3317,8 +3327,22 @@ def admin_trader_journal(trader_id: int):
                 else "login", opis)
         for dzien, lista in otwarcia.items():
             ile = len(lista)
-            add(max(z.created_at for z in lista), "view",
-                f"Opened the portal ({ile}×)" if ile > 1 else "Opened the portal")
+            opis = f"Opened the portal ({ile}×)" if ile > 1 else "Opened the portal"
+            # Nazwy widoków z propsów — stare zdarzenia (tylko start appki) ich
+            # nie mają, więc dopisek pojawia się dopiero tam, gdzie są dane.
+            widoki: dict[str, int] = {}
+            for z in lista:
+                try:
+                    w = (json.loads(z.props) if z.props else {}).get("view")
+                except ValueError:
+                    w = None
+                if w:
+                    widoki[w] = widoki.get(w, 0) + 1
+            if widoki:
+                opis += " — " + ", ".join(
+                    f"{w} ×{n}" if n > 1 else w
+                    for w, n in sorted(widoki.items(), key=lambda p: (-p[1], p[0])))
+            add(max(z.created_at for z in lista), "view", opis)
 
         for o in (session.query(Order)
                   .filter(Order.trader_id == trader_id).all()):
