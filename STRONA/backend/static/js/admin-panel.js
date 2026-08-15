@@ -2053,6 +2053,10 @@ async function openAccount(id){
       ${!a.platform_password?'<p class="muted" style="font-size:12.5px">Not provisioned yet.</p>':''}
     </div>
     ${(a.trader_must_set_password&&a.trader_id)?`<div class="sec-card" style="margin:0">${inviteRow(a.trader_id,'acc')}</div>`:''}
+    ${a.trader_id?`<div class="sec-card" style="margin:0" id="client-card">
+      <h3 style="font-size:15px;margin-bottom:10px">Client</h3>
+      <div class="muted" style="font-size:12.5px">Loading…</div>
+    </div>`:''}
     <div class="sec-card" style="margin:0">
       <h3 style="font-size:15px;margin-bottom:10px">Phase</h3>
       <div class="chip-row" style="margin-bottom:10px">
@@ -2169,6 +2173,7 @@ async function openAccount(id){
   renderCerts(a.id);
   renderPayouts(a.id);
   renderHistory(a.id);
+  if(a.trader_id)renderClientCard(a.trader_id,a.trader_email||a.trader_name||'');
   window._oAcc=a;
   drawAdminChart();
 }
@@ -2222,6 +2227,58 @@ async function renderHistory(id){
         <b style="text-align:right;font-weight:500">${ic[i.kind]||'·'} ${esc(i.label)}</b>
       </div>`).join('')
       :'<p class="muted" style="font-size:12.5px">Nothing recorded yet.</p>');
+}
+
+/* ---------- dziennik klienta (kto, kiedy, co robił) ---------- */
+const JRN_ICO={login:'🔑',view:'👀',order:'🧾',payment:'💳',breach:'⛔',payout:'💸',
+  account:'🏁',ticket:'🎫',telemetry:'⚡'};
+function journalChips(t){
+  const chips=[];
+  if(t.awaiting_claim)chips.push('<span class="status pending"><span class="dot"></span>awaiting claim</span>');
+  else if(t.claimed_at)chips.push(`<span class="status passed"><span class="dot"></span>claimed ${dstr(t.claimed_at)}</span>`);
+  if(t.invited_at)chips.push(`<span class="chip">invite sent ${dstr(t.invited_at)}</span>`);
+  if(t.logged_in_today)chips.push('<span class="status funded"><span class="dot"></span>signed in today</span>');
+  else if(t.last_login_at)chips.push(`<span class="chip">last sign-in ${dstr(t.last_login_at)}</span>`);
+  else chips.push('<span class="status failed"><span class="dot"></span>never signed in</span>');
+  chips.push(`<span class="chip">${t.logins_7d||0} sign-in${t.logins_7d===1?'':'s'} in 7 days</span>`);
+  if(t.last_seen_at&&t.last_seen_at!==t.last_login_at)chips.push(`<span class="chip">last seen ${dstr(t.last_seen_at)}</span>`);
+  if(t.kyc_status)chips.push(`<span class="chip">KYC <b>${esc(t.kyc_status)}</b></span>`);
+  return `<div class="chip-row" style="margin-bottom:12px">${chips.join('')}</div>`;
+}
+function journalTimeline(items){
+  if(!(items||[]).length)return '<p class="muted" style="font-size:12.5px">Nothing recorded yet.</p>';
+  /* Data raz, nad grupą wpisów — sto wierszy z pełnym timestampem czyta się
+     gorzej niż dzień jako nagłówek i sama godzina przy wpisie. */
+  let out='',dzien='';
+  for(const i of items){
+    const d=(i.ts||'').slice(0,10);
+    if(d!==dzien){dzien=d;out+=`<div class="muted" style="font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;margin:14px 0 4px">${dstr(i.ts).split(',')[0]||d}</div>`}
+    out+=`<div class="kv" style="align-items:flex-start">
+      <span style="white-space:nowrap" class="muted">${(i.ts||'').slice(11,16)}</span>
+      <b style="text-align:right;font-weight:500">${JRN_ICO[i.kind]||'·'} ${esc(i.label)}</b>
+    </div>`;
+  }
+  return out;
+}
+async function renderClientCard(tid,email){
+  const el=$('client-card'); if(!el)return;
+  let d; try{d=await api(`/api/admin/traders/${tid}/journal`)}catch(e){
+    el.innerHTML='<h3 style="font-size:15px">Client</h3>'
+      +`<p class="muted" style="font-size:12.5px">Could not load: ${esc(e.message)}</p>`;return}
+  const t=d.trader||{};
+  el.innerHTML=`<h3 style="font-size:15px;margin-bottom:10px">Client</h3>
+    ${journalChips(t)}
+    <div class="kv"><span>E-mail</span><b>${esc(t.email||email||'—')}</b></div>
+    <div class="kv"><span>Signed up</span><b>${t.created_at?dstr(t.created_at):'—'}</b></div>
+    <button class="btn-o sm" style="margin-top:10px" onclick="openTraderJournal(${tid},'${esc(t.email||email||'')}')">Full activity journal</button>`;
+}
+async function openTraderJournal(tid,email){
+  let d; try{d=await api(`/api/admin/traders/${tid}/journal`)}catch(e){toast('Error: '+e.message,'err');return}
+  const t=d.trader||{};
+  openOver(`Journal · ${t.email||email||('trader #'+tid)}`,
+    journalChips(t)
+    +`<p class="muted" style="font-size:12.5px;margin-bottom:2px">Everything this client did — sign-ins, portal visits, orders, payouts, tickets — newest first.</p>`
+    +journalTimeline(d.items));
 }
 
 /* ---------- achievement certificates ---------- */
@@ -2608,7 +2665,7 @@ function telemetryRows(items){
       catch(_){props=esc(e.props||'')}
       return `<tr><td class="muted" style="white-space:nowrap" data-l="Time">${dstr(e.ts)}</td>
         <td class="rt-main" data-l="Event">${esc(e.name)}</td>
-        <td data-l="Trader">${e.trader_id?`<a href="#" onclick="openTraderActivity(${e.trader_id},'${esc(e.email||'')}');return false">${esc(e.email||('#'+e.trader_id))}</a>`:'<span class="muted">—</span>'}</td>
+        <td data-l="Trader">${e.trader_id?`<a href="#" onclick="openTraderJournal(${e.trader_id},'${esc(e.email||'')}');return false">${esc(e.email||('#'+e.trader_id))}</a>`:'<span class="muted">—</span>'}</td>
         <td class="muted" style="font-size:11.5px" data-l="Details">${props||'—'}</td></tr>`}).join('')}
     </tbody></table></div>`;
 }
@@ -2617,14 +2674,6 @@ async function openTelemetryDetail(day,name){
     const items=d.items||[];
     openOver(`${name} · ${day}`,items.length?telemetryRows(items)
       :'<div class="empty"><h3>No events</h3></div>')}
-  catch(e){toast('Error: '+e.message,'err')}
-}
-async function openTraderActivity(tid,email){
-  try{const d=await api(`/api/admin/telemetry/events?trader_id=${tid}`);
-    const items=d.items||[];
-    openOver(`Activity · ${email||('trader #'+tid)}`,
-      `<p class="muted" style="font-size:12.5px;margin-bottom:10px">Everything this user did, newest first (last ${items.length} events).</p>`
-      +(items.length?telemetryRows(items):'<div class="empty"><h3>No events</h3></div>'))}
   catch(e){toast('Error: '+e.message,'err')}
 }
 async function openTicket(id){

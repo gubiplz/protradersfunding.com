@@ -686,10 +686,15 @@ def reset_password(payload: ResetIn, response: Response):
             # Hash już inny niż przy wysyłce linku — link zużyty albo hasło
             # zmienione w międzyczasie. (Tokeny bez pwf: krotkie okno przejsciowe.)
             raise HTTPException(400, "This reset link has already been used. Request a new one")
+        # PRZED zapisem, bo za chwilę flaga znika: to jedyne miejsce, w którym
+        # widać różnicę między „klient odebrał konto z zaproszenia" (dziennik
+        # w panelu żyje z tego rozróżnienia) a zwykłym „zapomniałem hasła".
+        odebral_konto = bool(tr.must_set_password)
         tr.password_hash = auth.hash_password(payload.password)
         # Hasło właśnie zaczęło istnieć — konto przestaje być „założone za kogoś".
         tr.must_set_password = False
         session.commit()
+        telemetry.track("account_claimed" if odebral_konto else "password_reset", tr.id)
         # Auto-login po udanym resecie — nowy token jest zwiazany z nowym haslem,
         # wszystkie starsze sesje wlasnie umarly.
         token = auth.make_token(tr.id, tr.password_hash)
@@ -2305,6 +2310,7 @@ def me_password(payload: PasswordIn, trader: Trader = Depends(auth.current_trade
             raise HTTPException(400, "Your current password is wrong")
         tr.password_hash = auth.hash_password(payload.new_password)
         session.commit()
+        telemetry.track("password_changed", tr.id)
         # Zmiana hasla uniewaznia wszystkie starsze sesje (odcisk hasla w
         # tokenie) — swiezy token pozwala TEJ sesji dzialac dalej bez wylogowania.
         return {"ok": True, "token": auth.make_token(tr.id, tr.password_hash)}
@@ -3210,6 +3216,152 @@ def admin_traders(q: str | None = None):
                  "credits_usd": round(float(t.credits_usd or 0), 2),
                  "referred_count": poleceni.get(t.referral_code, 0),
                  "created_at": t.created_at.isoformat() if t.created_at else None} for t in rows]
+    finally:
+        session.close()
+
+
+# Nazwy zdarzeń telemetrii → opis w dzienniku klienta. Zdarzenie spoza mapy
+# dostaje surową nazwę zamiast zniknąć: dziennik ma mówić „coś się działo",
+# nawet gdy zapomnimy dopisać etykietę nowemu trackowi.
+_DZIENNIK_OPISY = {
+    "signup": "Signed up",
+    "login": "Signed in",
+    "account_claimed": "Claimed the account — password set from the invite link",
+    "password_reset": "Reset the password (forgot password)",
+    "password_changed": "Changed the password in the portal",
+    "portal_invite": "Portal invite generated",
+    "pay_link_opened": "Opened the payment link",
+    "kyc_submitted": "Submitted KYC documents",
+    "affiliate_claim": "Claimed affiliate commission",
+    "achievement_reward": "Claimed an achievement reward",
+    "checkin": "Daily check-in",
+    "loyalty_redeem": "Redeemed loyalty points",
+    "push_subscribed": "Enabled push notifications",
+    "pwa_install": "Installed the portal app (PWA)",
+    "js_error": "Hit an error in the portal",
+}
+_DZIENNIK_LOGOWANIA = ("login", "signup", "account_claimed")
+
+
+@app.get("/api/admin/traders/{trader_id}/journal",
+         dependencies=[Depends(auth.require_admin)])
+def admin_trader_journal(trader_id: int):
+    """Dziennik klienta: jedna oś czasu z odpowiedzią na „co on właściwie robił?".
+
+    Trzy pytania, na które panel dotąd nie odpowiadał wprost: czy klient
+    z kontem założonym za niego ODEBRAŁ je z linku, czy w ogóle się loguje
+    (i czy dziś), i co po kolei działo się na jego kontach. Składane
+    z istniejących wierszy (telemetria, zamówienia, wypłaty, konta, tickety) —
+    bez nowej tabeli, więc działa też wstecz dla wszystkiego, co już w bazie
+    siedzi. Otwarcia portalu (view_open) zwijane per dzień: godzinowa lista
+    stu wejść zagrzebałaby zdarzenia, o które naprawdę chodzi.
+    """
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader_id)
+        if not tr:
+            raise HTTPException(404, "Trader not found")
+        teraz = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        # Podsumowanie liczone osobnymi zapytaniami, nie z uciętej listy niżej:
+        # limit osi czasu nie ma prawa przekłamać „ostatniego logowania".
+        ostatni_login = (session.query(func.max(TelemetryEvent.created_at))
+                         .filter(TelemetryEvent.trader_id == trader_id,
+                                 TelemetryEvent.name.in_(_DZIENNIK_LOGOWANIA))
+                         .scalar())
+        logins_7d = (session.query(TelemetryEvent)
+                     .filter(TelemetryEvent.trader_id == trader_id,
+                             TelemetryEvent.name.in_(_DZIENNIK_LOGOWANIA),
+                             TelemetryEvent.created_at >= teraz - timedelta(days=7))
+                     .count())
+        ostatnio_widziany = (session.query(func.max(TelemetryEvent.created_at))
+                             .filter(TelemetryEvent.trader_id == trader_id)
+                             .scalar())
+        zaproszenie = (session.query(func.max(TelemetryEvent.created_at))
+                       .filter(TelemetryEvent.trader_id == trader_id,
+                               TelemetryEvent.name == "portal_invite").scalar())
+        odebranie = (session.query(func.max(TelemetryEvent.created_at))
+                     .filter(TelemetryEvent.trader_id == trader_id,
+                             TelemetryEvent.name == "account_claimed").scalar())
+        dzis = teraz.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        items: list[dict] = []
+
+        def add(ts, kind, label):
+            if ts:
+                items.append({"ts": ts.isoformat(), "kind": kind, "label": label})
+
+        add(tr.created_at, "account", "Portal account created")
+        zdarzenia = (session.query(TelemetryEvent)
+                     .filter(TelemetryEvent.trader_id == trader_id)
+                     .order_by(TelemetryEvent.created_at.desc()).limit(1000).all())
+        otwarcia: dict[str, list] = {}
+        for e in zdarzenia:
+            if e.name == "view_open":
+                otwarcia.setdefault(e.created_at.strftime("%Y-%m-%d"), []).append(e)
+                continue
+            opis = _DZIENNIK_OPISY.get(e.name, e.name)
+            try:
+                props = json.loads(e.props) if e.props else {}
+            except ValueError:
+                props = {}
+            if e.name in ("login", "signup") and props.get("google"):
+                opis += " (Google)"
+            if e.name == "portal_invite" and props.get("sent") is False:
+                opis = "Portal invite link copied (sent by hand)"
+            if e.name == "pay_link_opened" and props.get("order"):
+                opis += f" (order #{props['order']})"
+            if e.name == "js_error" and props.get("m"):
+                opis += f": {str(props['m'])[:80]}"
+            add(e.created_at, "telemetry" if e.name not in _DZIENNIK_LOGOWANIA
+                else "login", opis)
+        for dzien, lista in otwarcia.items():
+            ile = len(lista)
+            add(max(z.created_at for z in lista), "view",
+                f"Opened the portal ({ile}×)" if ile > 1 else "Opened the portal")
+
+        for o in (session.query(Order)
+                  .filter(Order.trader_id == trader_id).all()):
+            add(o.created_at, "order",
+                f"Order #{o.id}: {o.product_key}, ${o.amount_usd:,.2f} ({o.status})")
+            add(o.paid_at, "payment",
+                f"Order #{o.id} paid: ${o.amount_usd:,.2f} via {o.provider}")
+        konta = session.query(Account).filter(Account.trader_id == trader_id).all()
+        for a in konta:
+            add(a.created_at, "account", f"Account {a.platform_login or a.id} created "
+                                         f"({a.product_key})")
+            if a.closed_at:
+                add(a.closed_at, "account",
+                    f"Account {a.platform_login or a.id} closed ({a.status})")
+        ids_kont = [a.id for a in konta]
+        if ids_kont:
+            for b in (session.query(Breach)
+                      .filter(Breach.account_id.in_(ids_kont)).all()):
+                add(b.ts, "breach", f"Breach: {b.type} — {b.detail}")
+            for pr in (session.query(PayoutRequest)
+                       .filter(PayoutRequest.account_id.in_(ids_kont)).all()):
+                add(pr.ts, "payout", f"Payout requested: ${pr.trader_share:,.2f} "
+                                     f"({pr.status})")
+        for t in (session.query(SupportTicket)
+                  .filter(SupportTicket.trader_id == trader_id).all()):
+            add(t.created_at, "ticket", f"Support ticket #{t.id}: {t.subject} "
+                                        f"({t.status})")
+
+        items.sort(key=lambda i: i["ts"], reverse=True)
+        return {
+            "trader": {"id": tr.id, "email": tr.email, "full_name": tr.full_name,
+                       "created_at": tr.created_at.isoformat() if tr.created_at else None,
+                       "kyc_status": tr.kyc_status,
+                       "awaiting_claim": bool(tr.must_set_password),
+                       "invited_at": zaproszenie.isoformat() if zaproszenie else None,
+                       "claimed_at": odebranie.isoformat() if odebranie else None,
+                       "last_login_at": ostatni_login.isoformat() if ostatni_login else None,
+                       "logged_in_today": bool(ostatni_login and ostatni_login >= dzis),
+                       "logins_7d": logins_7d,
+                       "last_seen_at": (ostatnio_widziany.isoformat()
+                                        if ostatnio_widziany else None)},
+            "items": items[:400],
+        }
     finally:
         session.close()
 
@@ -6505,6 +6657,7 @@ def admin_trader_portal_invite(trader_id: int, send: bool = True):
             notify.send("portal_invite", tr.email,
                         {"name": tr.full_name or tr.email,
                          "setup_url": setup_url, "portal_url": f"{base}/portal"})
+        telemetry.track("portal_invite", tr.id, sent=bool(send))
         # Ślad w historii leada, o ile lead istnieje — „czy myśmy mu to
         # wysłali?" pada tydzień później i musi mieć odpowiedź. Kopiowanie
         # też się liczy: link poszedł innym kanałem, ale poszedł.
@@ -7453,6 +7606,10 @@ def pay_page(request: Request, token: str):
                         item="", amount="", reference="", pay_token=token)
             odp.status_code = 404
             return odp
+        # Otwarcie linku to jedyny sygnał między „wysłałem mu linka" a wpłatą —
+        # w dzienniku klienta odpowiada na „widział w ogóle tę stronę?".
+        if o.trader_id:
+            telemetry.track("pay_link_opened", o.trader_id, order=o.id)
         # Rabat partnera widać na stronie partnera (JSON niżej), a na NASZEJ
         # stronie płatności tego samego zamówienia nie było go wcale — klient
         # z tym samym linkiem widział inną obietnicę zależnie od domeny.
