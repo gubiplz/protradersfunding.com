@@ -1534,3 +1534,15 @@ def test_flaga_przy_numerze_kierunkowym_jest_od_razu():
 
     # 3. otwarcie listy dalej dociaga plik (siatka bezpieczenstwa)
     assert "if(open){flagsCss();ccRender()" in html
+
+
+# --- popup Trustpilot dla kont z kampanii free challenge -------------------------
+
+def test_review_nudge_tylko_dla_listy_trustpilot():
+    """Przypomnienie o opinii dostają wyłącznie konta z listy na serwerze —
+    portal dostaje gotową flagę, adresy klientów nie wyciekają do JS."""
+    _, h = _trader("okechukwuchidibere1@gmail.com")
+    _, h2 = _trader("zwykly-klient@probe.test")
+    with TestClient(app) as c:
+        assert c.get("/api/auth/me", headers=h).json()["review_nudge"] is True
+        assert c.get("/api/auth/me", headers=h2).json()["review_nudge"] is False

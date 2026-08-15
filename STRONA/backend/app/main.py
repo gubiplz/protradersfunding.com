@@ -1028,6 +1028,26 @@ def _affiliate_claimed(session, trader_id: int) -> float:
     return round(float(suma or 0), 2)
 
 
+# Konta z kampanii "free challenge" (założone ZA klienta): tym osobom portal
+# przypomina co kilka dni popupem o opinii na Trustpilot. Lista w kodzie, nie
+# w publicznym JS — inaczej wyciekłyby adresy klientów. Zmiana listy = deploy.
+_TRUSTPILOT_NUDGE = frozenset({
+    "richleewal@gmail.com",
+    "bighybenfx@gmail.com",
+    "ifedilimatthew19@gmail.com",
+    "okechukwuchidibere1@gmail.com",
+    "austin.ashford@imported.local",
+    "salisalih340@gmail.com",
+    "jrw31013@gmail.com",
+    "hpdtravel@gmail.com",
+    "saleeskb@gmail.com",
+    "shamsushehupocket@gmail.com",
+    "joyful4sure@gmail.com",
+    "scheeperslucrecia522@gmail.com",
+    "conerstonepearl@gmail.com",
+})
+
+
 @app.get("/api/auth/me")
 def me(trader: Trader = Depends(auth.current_trader)):
     session = SessionLocal()
@@ -1037,6 +1057,7 @@ def me(trader: Trader = Depends(auth.current_trader)):
         claimed = _affiliate_claimed(session, trader.id)
         return {"id": trader.id, "email": trader.email, "full_name": trader.full_name,
                 "is_admin": trader.is_admin, "kyc_status": trader.kyc_status,
+                "review_nudge": (trader.email or "").lower() in _TRUSTPILOT_NUDGE,
                 # Czy weryfikacja jest w ogóle otwarta (patrz `kyc_dostepne`) —
                 # portal ma pokazać powód zamiast formularza, który i tak dostanie 403.
                 "kyc_available": kyc_dostepne(session, trader.id),

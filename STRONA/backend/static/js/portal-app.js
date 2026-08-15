@@ -607,6 +607,29 @@ async function boot(){
   /* view_open leci z go() — kazda nawigacja, nie tylko start appki */
   go(q.get('buy')?'store':(widok&&VIEWS[widok]?widok:'accounts'));
   refreshNotif();
+  maybeReviewNudge();
+}
+
+/* Kampania "free challenge": wybrane konta (lista na serwerze — review_nudge
+   z /api/auth/me) dostają po zalogowaniu przypomnienie o opinii na Trustpilot.
+   Raz na 3 dni; znacznik w localStorage liczy się od pokazania, nie od kliku,
+   żeby zamknięcie tłem nie pokazywało popupu przy każdym wejściu. */
+function maybeReviewNudge(){
+  if(!ME||!ME.review_nudge)return;
+  const last=+localStorage.getItem('pf_tp_nudge')||0;
+  if(Date.now()-last<3*86400000)return;
+  localStorage.setItem('pf_tp_nudge',String(Date.now()));
+  const w=document.createElement('div'); w.id='tp-modal'; w.className='modal-wrap';
+  w.onclick=e=>{if(e.target===w)w.remove()};
+  w.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>Enjoying your funded account?</h3></div>
+    <p class="muted" style="font-size:13px;margin:2px 0 6px">Your challenge account was set up for you free of charge. If you like how it's going, a short Trustpilot review helps other traders find us — it takes a minute.</p>
+    <div style="font-size:20px;letter-spacing:3px;color:#00b67a;margin:4px 0 12px">★★★★★</div>
+    <div style="display:flex;gap:10px;margin-top:6px">
+      <button class="btn-p" onclick="window.open('https://www.trustpilot.com/review/protradersfunding.com','_blank','noopener');$('tp-modal').remove()">Leave a review</button>
+      <button class="btn-o" onclick="$('tp-modal').remove()">Maybe later</button>
+    </div></div>`;
+  document.body.appendChild(w);
 }
 
 const TITLES={
