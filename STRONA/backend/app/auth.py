@@ -92,6 +92,32 @@ def parse_reset_token(token: str) -> tuple[int, str | None] | None:
         return None
 
 
+# Zaproszenie do konta założonego ZA klienta (must_set_password): mechanika jak
+# przy resecie (odcisk hasła w tokenie = jednorazowość), ale ważność 7 dni.
+# Godzinny link umierał, zanim klient doczytał mail z poświadczeniami, i cała
+# furtka kończyła się na „forgot password". Ryzyko bez zmian: konto nie ma
+# hasła znanego komukolwiek, więc link wart jest dokładnie tyle, co dostęp do
+# skrzynki — jak każdy reset. Osobna sól, żeby godzinnego resetu i zaproszenia
+# nie dało się użyć zamiennie.
+_setup_serializer = URLSafeTimedSerializer(settings.secret_key, salt="pw-setup")
+SETUP_MAX_AGE = 60 * 60 * 24 * 7  # 7 dni
+
+
+def make_setup_token(trader_id: int, password_hash: str | None = None) -> str:
+    payload: dict = {"tid": trader_id}
+    if password_hash:
+        payload["pwf"] = _pw_fp(password_hash)
+    return _setup_serializer.dumps(payload)
+
+
+def parse_setup_token(token: str) -> tuple[int, str | None] | None:
+    try:
+        data = _setup_serializer.loads(token, max_age=SETUP_MAX_AGE)
+        return int(data["tid"]), data.get("pwf")
+    except (BadSignature, Exception):
+        return None
+
+
 _verify_serializer = URLSafeTimedSerializer(settings.secret_key, salt="email-verify")
 VERIFY_MAX_AGE = 60 * 60 * 24
 

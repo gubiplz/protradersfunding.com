@@ -209,13 +209,13 @@ def _creds_ctx(trader: Trader, acc: Account) -> dict:
     # którego nie zna nikt. Ten mail jest pierwszym powodem, żeby wejść do
     # portalu — więc to tutaj musi być droga do środka, inaczej człowiek czyta
     # „zaloguj się" i nie ma czym. Link jest jednorazowy (odcisk hasła siedzi
-    # w tokenie) i ważny godzinę; po wygaśnięciu zostaje „forgot password"
+    # w tokenie) i ważny 7 dni; po wygaśnięciu zostaje „forgot password"
     # i mail mówi o tym wprost.
     setup_url = None
     if getattr(trader, "must_set_password", False):
         from . import auth   # tutaj, nie u góry: auth ciągnie config i sesje
         setup_url = (f"{get_settings().app_base_url}/portal"
-                     f"?reset={auth.make_reset_token(trader.id, trader.password_hash)}")
+                     f"?reset={auth.make_setup_token(trader.id, trader.password_hash)}")
     return {
         "setup_url": setup_url,
         "name": trader.full_name or trader.email, "login": acc.platform_login,

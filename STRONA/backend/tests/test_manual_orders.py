@@ -488,6 +488,209 @@ def test_znany_mail_nie_zaklada_drugiego_konta(maile):
     s.close()
 
 
+# --- zaproszenie do portalu: link 7-dniowy zamiast godzinnego resetu ---
+
+def _token_sprzed(dni: float, fabryka, *args):
+    """Token podpisany datą wstecz — itsdangerous bierze czas z time.time()."""
+    import time as _t
+    prawdziwy = _t.time
+    _t.time = lambda: prawdziwy() - dni * 86400
+    try:
+        return fabryka(*args)
+    finally:
+        _t.time = prawdziwy
+
+
+def test_link_z_maila_zyje_siedem_dni_a_reset_godzine(maile):
+    """Klient z ręcznego zamówienia czyta mail po weekendzie — godzinny link
+    umierał, zanim w ogóle wszedł, i cała furtka kończyła się na supporcie.
+
+    Dwa tokeny na jednym ekranie: zaproszenie sprzed 3 dni MA działać,
+    zwykły reset sprzed 3 dni MA być martwy — inaczej test dowodziłby tylko
+    tego, że wydłużyliśmy wszystko jak leci.
+    """
+    email = _mail_leada()
+    _dodaj_po_mailu(email)
+    s = SessionLocal()
+    tr = s.query(Trader).filter(Trader.email == email).one()
+    tid, ph = tr.id, tr.password_hash
+    s.close()
+
+    stary_reset = _token_sprzed(3, auth.make_reset_token, tid, ph)
+    assert client.post("/api/auth/reset",
+                       json={"token": stary_reset,
+                             "password": "poWeekendzie1"}).status_code == 400
+
+    zaproszenie = _token_sprzed(3, auth.make_setup_token, tid, ph)
+    assert client.post("/api/auth/reset",
+                       json={"token": zaproszenie,
+                             "password": "poWeekendzie1"}).status_code == 200
+    assert client.post("/api/auth/login",
+                       json={"email": email, "password": "poWeekendzie1"}).status_code == 200
+
+    po_terminie = _token_sprzed(8, auth.make_setup_token, tid, ph)
+    assert client.post("/api/auth/reset",
+                       json={"token": po_terminie,
+                             "password": "zaPozno123"}).status_code == 400
+
+
+def test_zaproszenie_jest_jednorazowe(maile):
+    """Link krąży w skrzynce tygodniami — po ustawieniu hasła musi być śmieciem,
+    inaczej stary mail pozwala przejąć konto każdemu, kto go przeczyta."""
+    email = _mail_leada()
+    _dodaj_po_mailu(email)
+    s = SessionLocal()
+    tr = s.query(Trader).filter(Trader.email == email).one()
+    zaproszenie = auth.make_setup_token(tr.id, tr.password_hash)
+    s.close()
+    assert client.post("/api/auth/reset",
+                       json={"token": zaproszenie,
+                             "password": "pierwszeUzycie1"}).status_code == 200
+    r = client.post("/api/auth/reset",
+                    json={"token": zaproszenie, "password": "drugieUzycie1"})
+    assert r.status_code == 400
+    assert client.post("/api/auth/login",
+                       json={"email": email, "password": "pierwszeUzycie1"}).status_code == 200
+
+
+def test_zaproszenie_nie_dziala_jako_sesja(maile):
+    """Osobna sól nie jest kosmetyką: token z maila daje prawo ustawić hasło,
+    a nie prawo bycia zalogowanym przez 7 dni."""
+    email = _mail_leada()
+    _dodaj_po_mailu(email)
+    s = SessionLocal()
+    tr = s.query(Trader).filter(Trader.email == email).one()
+    zaproszenie = auth.make_setup_token(tr.id, tr.password_hash)
+    s.close()
+    assert client.get("/api/auth/me", headers={
+        "Authorization": f"Bearer {zaproszenie}"}).status_code == 401
+
+
+def _lead_z_kontem(maile) -> tuple[int, int, str]:
+    """Lead + konto założone ZA niego (ręczne zamówienie po mailu)."""
+    email = _mail_leada()
+    s = SessionLocal()
+    lead = Lead(email=email, name="Lead Zapraszany", source="test")
+    s.add(lead); s.commit()
+    lid = lead.id; s.close()
+    _dodaj_po_mailu(email)
+    s = SessionLocal()
+    tid = s.query(Trader).filter(func.lower(Trader.email) == email.lower()).one().id
+    s.close()
+    return lid, tid, email
+
+
+def test_panel_wysyla_swieze_zaproszenie(maile):
+    """Karta leada obiecuje „Send invite" — po kliknięciu klient ma dostać
+    działający link, a nie kolejną odsyłkę do „forgot password"."""
+    lid, tid, email = _lead_z_kontem(maile)
+    r = client.post(f"/api/admin/traders/{tid}/portal-invite", headers=ADMIN)
+    assert r.status_code == 200
+    zaproszenia = [m for m in maile if m[0] == "portal_invite" and m[1] == email]
+    assert zaproszenia, "panel nie wysłał maila z zaproszeniem"
+    url = zaproszenia[0][2].get("setup_url") or ""
+    assert "reset=" in url
+    assert client.post("/api/auth/reset",
+                       json={"token": url.split("reset=")[1],
+                             "password": "zZaproszenia1"}).status_code == 200
+    assert client.post("/api/auth/login",
+                       json={"email": email, "password": "zZaproszenia1"}).status_code == 200
+    # Zdarzenie w historii leada — „czy myśmy mu to wysłali?" pada tydzień później.
+    d = client.get(f"/api/admin/leads/{lid}", headers=ADMIN).json()
+    assert any(e["kind"] == "email" and "portal invite" in (e["detail"] or "")
+               for e in d["events"])
+
+
+def test_skopiowany_link_dziala_bez_wysylki_maila(maile):
+    """Fallback na „mail nie dochodzi": Copy link ma dać działający URL i NIC
+    nie wysyłać — a w historii leada zostawić ślad „note", nie „email",
+    żeby nikt za tydzień nie ufał doręczeniu, którego nie było."""
+    lid, tid, email = _lead_z_kontem(maile)
+    maile.clear()
+    r = client.post(f"/api/admin/traders/{tid}/portal-invite?send=false",
+                    headers=ADMIN)
+    assert r.status_code == 200
+    assert not [m for m in maile if m[0] == "portal_invite"]
+    url = r.json()["setup_url"]
+    assert client.post("/api/auth/reset",
+                       json={"token": url.split("reset=")[1],
+                             "password": "zTelegrama123"}).status_code == 200
+    d = client.get(f"/api/admin/leads/{lid}", headers=ADMIN).json()
+    assert any(e["kind"] == "note" and "link copied" in (e["detail"] or "")
+               for e in d["events"])
+    assert not any(e["kind"] == "email" and "portal invite" in (e["detail"] or "")
+                   for e in d["events"])
+
+
+def test_zaproszenie_dziala_bez_wiersza_leada(maile):
+    """Grant BOGO albo import wypłat zakłada konto BEZ leada w CRM — endpoint
+    per-trader nie ma prawa się wywrócić na braku wiersza do historii."""
+    tid, email = _trader()
+    s = SessionLocal()
+    s.get(Trader, tid).must_set_password = True
+    s.commit(); s.close()
+    r = client.post(f"/api/admin/traders/{tid}/portal-invite", headers=ADMIN)
+    assert r.status_code == 200
+    assert [m for m in maile if m[0] == "portal_invite" and m[1] == email]
+    url = r.json()["setup_url"]
+    assert client.post("/api/auth/reset",
+                       json={"token": url.split("reset=")[1],
+                             "password": "bezLeada1234"}).status_code == 200
+
+
+def test_zaproszenie_odmawia_gdy_haslo_juz_ustawione(maile):
+    """Klientowi z własnym hasłem panel nie ma prawa fundować „ustaw hasło od
+    nowa" — przycisk znika z karty, a endpoint odmawia wprost."""
+    lid, tid, email = _lead_z_kontem(maile)
+    d = client.get(f"/api/admin/leads/{lid}", headers=ADMIN).json()
+    assert d["must_set_password"] is True
+
+    assert client.post(f"/api/admin/traders/{tid}/portal-invite",
+                       headers=ADMIN).status_code == 200
+    url = [m for m in maile if m[0] == "portal_invite"][-1][2]["setup_url"]
+    client.post("/api/auth/reset", json={"token": url.split("reset=")[1],
+                                         "password": "wlasneJuz123"})
+    r = client.post(f"/api/admin/traders/{tid}/portal-invite", headers=ADMIN)
+    assert r.status_code == 400
+    assert "Forgot password" in r.json()["detail"]
+    assert client.get(f"/api/admin/leads/{lid}",
+                      headers=ADMIN).json()["must_set_password"] is False
+
+
+def test_lead_bez_konta_nie_dostaje_karty_zaproszenia(maile):
+    """Lead sprzed sprzedaży: konta nie ma, więc karta w szufladzie ma się nie
+    pokazać (brak trader_id), a strzał w nieistniejącego tradera to czyste 404."""
+    email = _mail_leada()
+    s = SessionLocal()
+    lead = Lead(email=email, name="Bez Konta", source="test")
+    s.add(lead); s.commit()
+    lid = lead.id; s.close()
+    d = client.get(f"/api/admin/leads/{lid}", headers=ADMIN).json()
+    assert d["trader_id"] is None and d["must_set_password"] is False
+    assert client.post("/api/admin/traders/999999/portal-invite",
+                       headers=ADMIN).status_code == 404
+    assert not [m for m in maile if m[0] == "portal_invite"]
+
+
+def test_payload_konta_niesie_flage_hasla(maile):
+    """Slide-over konta pokazuje akcje zaproszenia TYLKO, gdy klient hasła nie
+    ustawił — flaga musi jechać w payloadzie admina, bo trader z grantu czy
+    importu wypłat nie ma leada i to jedyne miejsce z przyciskiem."""
+    email = _mail_leada()
+    oid = _dodaj_po_mailu(email).json()["id"]
+    aid = client.post(f"/api/admin/orders/{oid}/mark-paid",
+                      headers=ADMIN).json()["account_id"]
+    d = client.get(f"/api/accounts/{aid}", headers=ADMIN).json()
+    assert d["trader_must_set_password"] is True
+
+    tid, _ = _trader()  # klient z własnym hasłem
+    oid2 = _dodaj(tid).json()["id"]
+    aid2 = client.post(f"/api/admin/orders/{oid2}/mark-paid",
+                       headers=ADMIN).json()["account_id"]
+    assert client.get(f"/api/accounts/{aid2}",
+                      headers=ADMIN).json()["trader_must_set_password"] is False
+
+
 def test_nowe_konto_bierze_nazwisko_z_leada(maile):
     """Nazwisko idzie stąd na konto MT5 i na certyfikaty — puste zostawiłoby
     rachunek bez właściciela, choć lead podał je w formularzu."""

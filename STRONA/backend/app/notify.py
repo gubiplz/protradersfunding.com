@@ -143,7 +143,7 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"  Capital:    {ctx.get('initial_balance')}\n\n"
             f"Log in with MetaTrader 5 (desktop, mobile or web) using the server above.\n"
             + (f"\nWe opened your portal account for you, so it has no password yet. "
-               f"Set one here (the link works for 1 hour; after that use \"Forgot password\" "
+               f"Set one here (the link works for 7 days; after that use \"Forgot password\" "
                f"on the sign-in screen):\n{ctx.get('setup_url')}\n"
                if ctx.get("setup_url") else "")
             + f"Good luck. Track your progress in the dashboard.",
@@ -198,6 +198,14 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"{ctx.get('reset_url')}\n\n"
             f"If you didn't request this, you can safely ignore this e-mail.",
         ),
+        "portal_invite": (
+            f"Your {brand} portal access",
+            f"{name}, your {brand} account is ready — we opened it for you, so it "
+            f"has no password yet.\n\nSet one here (the link works for 7 days):\n"
+            f"{ctx.get('setup_url')}\n\n"
+            f"After that you can sign in any time at {ctx.get('portal_url')} — "
+            f"if the link expires, use \"Forgot password\" on the sign-in screen.",
+        ),
         "kyc_rejected": (
             "Identity verification — action needed",
             f"{name}, we could not verify your identity with the documents provided."
@@ -222,7 +230,11 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"  MT5 login:  {ctx.get('platform_login')}\n"
             f"  Password:   {ctx.get('platform_password')}\n"
             f"  Server:     {ctx.get('platform_server')}\n"
-            f"\nLog in to the portal to see your objectives and progress.",
+            + (f"\nWe opened your portal account for you, so it has no password yet. "
+               f"Set one here (the link works for 7 days; after that use \"Forgot password\" "
+               f"on the sign-in screen):\n{ctx.get('setup_url')}\n"
+               if ctx.get("setup_url") else "")
+            + f"\nLog in to the portal to see your objectives and progress.",
         ),
         "verify_email": (
             f"{ctx.get('code')} is your {brand} verification code",
@@ -419,7 +431,7 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
             parts += [
                 _button_html("Set Your Password", ctx["setup_url"]),
                 _note_html("We opened the portal account for you, so it has no password yet — "
-                           "the button above sets one (the link works for 1 hour; after that use "
+                           "the button above sets one (the link works for 7 days; after that use "
                            "“Forgot password” on the sign-in screen). The credentials above are "
                            "only for the MetaTrader 5 platform."),
             ]
@@ -535,6 +547,16 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
             _button_html("Set a New Password", ctx.get("reset_url") or portal),
             _note_html("The link is valid for 1 hour. If you didn't request this, "
                        "you can safely ignore this e-mail."),
+        ]
+    elif event == "portal_invite":
+        parts = [
+            _head_html(None, "Your portal access is ready",
+                       f"{name}, your {brand} account is ready — we opened it for "
+                       f"you, so it has no password yet."),
+            _button_html("Set Your Password", ctx.get("setup_url") or portal),
+            _note_html("The link works for 7 days. If it expires, use "
+                       "“Forgot password” on the sign-in screen to get "
+                       "a fresh one."),
         ]
     elif event == "ticket_reply":
         parts = [

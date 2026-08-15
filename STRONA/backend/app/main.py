@@ -537,6 +537,9 @@ def _account_detail(session, acc: Account, admin_view: bool = False) -> dict:
     if admin_view and acc.trader_id:
         tr = session.get(Trader, acc.trader_id)
         d["trader_email"] = tr.email if tr else None
+        # Slide-over pokazuje akcje zaproszenia do portalu tylko klientom,
+        # których konto założono ZA nich i hasło wciąż nie istnieje.
+        d["trader_must_set_password"] = bool(tr.must_set_password) if tr else False
     d["equity_curve"] = _equity_curve(session, acc)
     d["breaches"] = [{"ts": b.ts.isoformat(), "type": b.type, "detail": b.detail} for b in breaches]
     d["payouts"] = [{"ts": p.ts.isoformat(), "profit_amount": p.profit_amount,
@@ -664,7 +667,11 @@ def forgot_password(payload: ForgotIn, request: Request):
 
 @app.post("/api/auth/reset")
 def reset_password(payload: ResetIn, response: Response):
-    parsed = auth.parse_reset_token(payload.token)
+    # Dwa rodzaje linków kończą się na tym samym ekranie: godzinny reset
+    # („forgot password") i 7-dniowe zaproszenie do konta założonego za
+    # klienta. Różnią się tylko solą i oknem ważności — walidacja odcisku
+    # hasła niżej jest wspólna, więc oba są jednorazowe.
+    parsed = auth.parse_reset_token(payload.token) or auth.parse_setup_token(payload.token)
     if parsed is None:
         raise HTTPException(400, "This reset link is invalid or has expired. Request a new one")
     tid, pwf = parsed
@@ -5866,6 +5873,10 @@ def admin_lead_detail(lead_id: int):
 
         dane = _lead_json(lead, trader.id if trader else None, zaplacone,
                           min(otwarte) if otwarte else None)
+        # Tylko w szczegółach (jak orders/events): szuflada pokazuje przycisk
+        # „wyślij zaproszenie do portalu" wyłącznie tam, gdzie ma to sens —
+        # konto założone ZA klienta, który hasła jeszcze nie ustawił.
+        dane["must_set_password"] = bool(trader.must_set_password) if trader else False
         dane["reminders"] = [{
             "id": r.id, "text": r.text, "kind": r.kind, "active": r.active,
             "repeat_days": r.repeat_days, "sent_count": r.sent_count,
@@ -6125,6 +6136,58 @@ def admin_lead_email(lead_id: int, force: bool = False):
             _zapisz_status(session, lead, "messaged", actor="panel")
         session.commit()
         return {"ok": True, "id": lead_id, "status": lead.status}
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/traders/{trader_id}/portal-invite",
+          dependencies=[Depends(auth.require_admin)])
+def admin_trader_portal_invite(trader_id: int, send: bool = True):
+    """Zaproszenie do portalu — dla konta założonego ZA klienta.
+
+    Pierwszy link do ustawienia hasła jedzie w mailu z poświadczeniami MT5, ale
+    bywa, że klient odezwie się po tygodniu, gdy link już wygasł. Tu powstaje
+    świeży 7-dniowy token; poprzedni i tak jest jednorazowy (odcisk hasła),
+    więc nic nie trzeba unieważniać.
+
+    Per trader, nie per lead: konto zakładają też granty i import wypłat,
+    a taki klient wiersza leada nie ma wcale. `send=false` zwraca sam link
+    BEZ maila — maile bywają w spamie albo giną (SMTP pada u nas po cichu),
+    a wtedy jedyną drogą jest wkleić link klientowi na Telegramie z ręki.
+
+    Celowo tylko dla `must_set_password`: klientowi, który już ustawił hasło,
+    nie mamy prawa fundować „ustaw hasło od nowa" z panelu — od tego jest
+    zwykły „forgot password" po jego stronie. Ta sama bramka broni linku:
+    panel nigdy nie wygeneruje wejściówki na konto z żyjącym hasłem.
+    """
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader_id)
+        if not tr:
+            raise HTTPException(404, "Trader not found")
+        if not tr.must_set_password:
+            raise HTTPException(400, "Client already set a password — "
+                                     "point them to “Forgot password”")
+        base = get_settings().app_base_url
+        setup_url = (f"{base}/portal"
+                     f"?reset={auth.make_setup_token(tr.id, tr.password_hash)}")
+        if send:
+            notify.send("portal_invite", tr.email,
+                        {"name": tr.full_name or tr.email,
+                         "setup_url": setup_url, "portal_url": f"{base}/portal"})
+        # Ślad w historii leada, o ile lead istnieje — „czy myśmy mu to
+        # wysłali?" pada tydzień później i musi mieć odpowiedź. Kopiowanie
+        # też się liczy: link poszedł innym kanałem, ale poszedł.
+        lead = (session.query(Lead)
+                .filter(func.lower(Lead.email) == tr.email.lower()).one_or_none())
+        if lead:
+            _zdarzenie(session, lead.id,
+                       "email" if send else "note",
+                       "portal invite (set password)" if send
+                       else "portal invite link copied",
+                       actor="panel")
+            session.commit()
+        return {"ok": True, "email": tr.email, "setup_url": setup_url}
     finally:
         session.close()
 

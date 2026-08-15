@@ -1371,6 +1371,54 @@ function sellToLead(){
   openManualOrder(null,{id:l.id,email:l.email,name:l.name});
 }
 
+/* Konto założone ZA klienta nie ma hasła znanego komukolwiek — pierwszy link
+   „ustaw hasło" jedzie w mailu z poświadczeniami, ale żyje 7 dni. Ta karta to
+   druga szansa: świeży link bez przepychania klienta przez „forgot password".
+   „Copy link" jest tu nie dla wygody, tylko na wypadek, gdy MAIL jest
+   problemem (spam, literówka w adresie, cicha awaria SMTP) — wtedy link
+   idzie klientowi na Telegramie z ręki. Karta znika, gdy klient hasło
+   ustawi — wtedy panel nie ma tu nic do roboty. */
+function inviteRow(tid,ctx){
+  return `<div class="mod-row">
+      <div><div class="lbl">Portal access</div>
+        <div class="muted" style="font-size:11.5px">We opened this account for them and no password has been set yet. Send a fresh “set your password” link (valid 7 days) — or copy it and deliver it yourself when e-mail is the problem.</div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+        <button class="btn-o" onclick="copyPortalInvite(${tid})"
+          title="Generates the link without sending anything — paste it to the client on Telegram or SMS">Copy link</button>
+        <button class="btn-p" onclick="sendPortalInvite(${tid},'${ctx}')">Send invite</button>
+      </div>
+    </div>`;
+}
+function leadInviteCard(l){
+  if(!l.must_set_password||!l.trader_id)return'';
+  return `<div class="lead-card sec-card">${inviteRow(l.trader_id,'lead')}</div>`;
+}
+async function sendPortalInvite(tid,ctx){
+  const email=ctx==='lead'&&window._leadOpen?window._leadOpen.email
+    :(window._oAcc&&window._oAcc.trader_email)||'';
+  if(!await askConfirm({title:'Send the portal invite?',
+    body:`Goes to <b>${esc(email)}</b> — a link to set their portal password, `
+      +`valid for 7 days. Earlier links keep working until they expire or the `
+      +`password is set.`,
+    ok:'Send',cancel:'Not now'}))return;
+  try{await api('/api/admin/traders/'+tid+'/portal-invite',{method:'POST'})}
+  catch(e){toast('Not sent: '+e.message,'err');return}
+  toast('Invite sent — the link works for 7 days');
+  if(ctx==='lead'&&window._leadOpen)openLead(window._leadOpen.id);
+}
+async function copyPortalInvite(tid){
+  let d;
+  try{d=await api('/api/admin/traders/'+tid+'/portal-invite?send=false',{method:'POST'})}
+  catch(e){toast('Error: '+e.message,'err');return}
+  try{await navigator.clipboard.writeText(d.setup_url);
+    toast('Link copied — valid 7 days, works once')}
+  catch(e){
+    /* iOS poza gestem albo http: schowek odmawia — link ma być widoczny,
+       skoro już powstał i został odnotowany w historii leada. */
+    await askConfirm({title:'Copy this link',body:`<span class="mono" style="word-break:break-all;font-size:12px">${esc(d.setup_url)}</span>`,ok:'Done'});
+  }
+}
+
 /* Osobna karta na dole, nie przycisk obok „Release": to jedyna operacja w tej
    zakładce, której nie da się cofnąć, i ma być trudniej ją kliknąć przez pomyłkę
    niż zmienić status. */
@@ -1559,6 +1607,7 @@ async function openLead(id){
     ${leadModCard(l)}
     ${leadReminderCard(l)}
     ${leadSellCard(l)}
+    ${leadInviteCard(l)}
     <div class="lead-card sec-card"><h4>Notes</h4>
       <textarea class="inp" rows="${Math.min(6,(l.note||'').split('\n').length+1)}"
         placeholder="What they wrote, what they want — one line per note"
@@ -1792,6 +1841,7 @@ async function openAccount(id){
       ${a.mt5_backed===false?'<div class="kv"><span>Backed by MT5</span><b>no, generated locally</b></div>':''}
       ${!a.platform_password?'<p class="muted" style="font-size:12.5px">Not provisioned yet.</p>':''}
     </div>
+    ${(a.trader_must_set_password&&a.trader_id)?`<div class="sec-card" style="margin:0">${inviteRow(a.trader_id,'acc')}</div>`:''}
     <div class="sec-card" style="margin:0">
       <h3 style="font-size:15px;margin-bottom:10px">Phase</h3>
       <div class="chip-row" style="margin-bottom:10px">
