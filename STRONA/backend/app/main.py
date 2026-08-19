@@ -2976,11 +2976,15 @@ def admin_approve_payout(req_id: int):
         acc = session.get(Account, r.account_id)
         tr = session.get(Trader, r.trader_id)
 
-        # zwrot opłaty za challenge przy PIERWSZEJ wypłacie (jak FTMO/The5ers)
+        # zwrot opłaty za challenge przy PIERWSZEJ wypłacie (jak FTMO/The5ers).
+        # Granty odpadają: zamówienie grantowe BOGO nosi cenę OPŁACONEGO tieru
+        # (dla faktury, patrz billing.grant_challenge) — zwrot z niego oddawałby
+        # tę samą opłatę drugi raz, bo konto kupione zwraca ją u siebie.
         first_payout = session.query(Payout).filter(Payout.account_id == acc.id).count() == 0
         fee_refund = 0.0
         if first_payout:
-            order = (session.query(Order).filter(Order.account_id == acc.id, Order.status == "paid")
+            order = (session.query(Order).filter(Order.account_id == acc.id, Order.status == "paid",
+                                                 Order.provider != "grant")
                      .order_by(Order.id).first())
             fee_refund = round(order.amount_usd, 2) if order else 0.0
 

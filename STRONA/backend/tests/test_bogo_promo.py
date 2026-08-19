@@ -13,7 +13,7 @@ from app import auth, billing  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Account, Order, Product, Trader  # noqa: E402
+from app.models import Account, Order, PayoutRequest, Product, Trader  # noqa: E402
 
 init_db()
 client = TestClient(app)
@@ -96,6 +96,35 @@ def test_wylaczona_promocja_nie_stempluje_i_daje_jedno_konto():
     billing.mock_complete(s, wynik["order_id"], tid)
     assert s.query(Account).filter(Account.trader_id == tid).count() == 1
     s.close()
+
+
+def test_grant_bogo_nie_zwraca_oplaty_drugi_raz():
+    """Zamówienie grantowe z `bogo_paid_key` nosi cenę OPŁACONEGO tieru (dla
+    faktury), więc pierwsza wypłata z konta grantowego nie może traktować jej
+    jak własnej opłaty — zwrot należy się raz, przy wypłacie z konta kupionego."""
+    _product()
+    tid = _trader()
+    r = client.post("/api/admin/grant", headers=ADMIN, json={
+        "trader_id": tid, "product_key": "bogo-25k",
+        "note": "BOGO promotion", "bogo_paid_key": "bogo-25k", "funded": True})
+    assert r.status_code == 200, r.text
+    aid = r.json()["account_id"]
+
+    s = SessionLocal()
+    gratis = s.query(Order).filter(Order.trader_id == tid, Order.provider == "grant").one()
+    assert gratis.amount_usd == 249 and gratis.status == "paid"
+    acc = s.get(Account, aid)
+    acc.balance = acc.equity = acc.initial_balance + 1_000
+    pr = PayoutRequest(account_id=aid, trader_id=tid, profit_amount=1_000.0,
+                       trader_share=800.0, method="wise", details="{}", status="pending")
+    s.add(pr); s.commit()
+    req_id = pr.id
+    s.close()
+
+    r = client.post(f"/api/admin/payout-requests/{req_id}/approve", headers=ADMIN)
+    assert r.status_code == 200, r.text
+    assert r.json()["fee_refund"] == 0.0
+    assert r.json()["total_paid"] == 800.0
 
 
 def test_reczne_zamowienie_z_karty_leada_i_decyzja_per_zamowienie():
