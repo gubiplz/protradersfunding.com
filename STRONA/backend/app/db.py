@@ -104,6 +104,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "kyc_country": "VARCHAR(64)",
         "kyc_doc_ref": "VARCHAR(120)",
         "kyc_requested_at": "TIMESTAMP",
+        "kyc_locked": "BOOLEAN DEFAULT FALSE",
         "kyc_submitted_at": "TIMESTAMP",
         "kyc_reject_reason": "VARCHAR(200)",
         "kyc_dob": "VARCHAR(16)",

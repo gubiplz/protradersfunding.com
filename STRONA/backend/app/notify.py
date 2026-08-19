@@ -244,9 +244,16 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             + "\n\nPlease review your details and submit the verification again from your dashboard.",
         ),
         "kyc_requested": (
-            "Verify your identity to unlock payouts",
-            f"{name}, identity verification is now open on your account — it is "
-            f"the step we need before we can send you a payout."
+            "Action needed: verify your identity"
+            if ctx.get("locked") else "Verify your identity to unlock payouts",
+            f"{name}, "
+            + ("we need to confirm who you are before you keep using the "
+               "portal. Your trading account keeps running as normal — the "
+               "dashboard is paused until we have checked your documents, and "
+               "we do that within one business day."
+               if ctx.get("locked") else
+               "identity verification is now open on your account — it is "
+               "the step we need before we can send you a payout.")
             + ("\n\nYour previous submission could not be verified, so please "
                "check the details and send it again."
                if ctx.get("again") else "")
@@ -593,16 +600,27 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
             _button_html("Retry Verification", f"{portal}?view=kyc"),
         ]
     elif event == "kyc_requested":
+        zablokowany = bool(ctx.get("locked"))
         parts = [
-            _head_html("Verification", "One step left before your payout",
-                       f"{name}, identity verification is now open on your account "
-                       f"— it is the last thing we need before sending you money."
+            _head_html("Verification",
+                       "Verify your identity to reopen your dashboard"
+                       if zablokowany else "One step left before your payout",
+                       (f"{name}, we need to confirm who you are before you keep "
+                        f"using the portal. Your trading account keeps running as "
+                        f"normal — only the dashboard is paused, and we review "
+                        f"documents within one business day."
+                        if zablokowany else
+                        f"{name}, identity verification is now open on your account "
+                        f"— it is the last thing we need before sending you money.")
                        + (" Your previous submission could not be verified, so "
                           "please check the details and send it again."
                           if ctx.get("again") else "")),
             _button_html("Verify Your Identity", f"{portal}?view=kyc"),
             _note_html("It takes a couple of minutes: your ID document and proof "
-                       "of address. Payout requests are released once it's done."),
+                       "of address."
+                       + (" Your dashboard opens as soon as it's approved."
+                          if zablokowany else
+                          " Payout requests are released once it's done.")),
         ]
     elif event == "password_reset":
         parts = [

@@ -103,6 +103,11 @@ class Trader(Base):
     # konta funded (patrz `main.kyc_dostepne`) — admin świadomie o dokumenty
     # poprosił, więc bramka od zbierania skanów „na zapas" już go nie dotyczy.
     kyc_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Portal wstrzymany do czasu akceptacji dokumentów (`auth.current_trader`).
+    # Darmowy challenge dostaje ktoś, kogo jeszcze nie znamy, a prezent ściąga
+    # dublerów — więc konto z kanału FREE żyje na MT5, ale portal otwiera się
+    # dopiero po weryfikacji. Approve zdejmuje flagę.
+    kyc_locked: Mapped[bool] = mapped_column(Boolean, default=False)
     kyc_submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     kyc_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Powód odrzucenia KYC — pokazywany traderowi w portalu i w mailu;

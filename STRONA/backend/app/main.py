@@ -1113,6 +1113,10 @@ def me(trader: Trader = Depends(auth.current_trader)):
                 # Czy weryfikacja jest w ogóle otwarta (patrz `kyc_dostepne`) —
                 # portal ma pokazać powód zamiast formularza, który i tak dostanie 403.
                 "kyc_available": kyc_dostepne(session, trader.id),
+                # Portal wstrzymany do czasu akceptacji dokumentów: reszta API
+                # odpowie 403 (`auth.portal_wstrzymany`), więc portal ma pokazać
+                # ścianę z formularzem KYC zamiast pustego panelu z błędami.
+                "kyc_locked": bool(trader.kyc_locked),
                 "email_verified": trader.email_verified is not False,
                 # potrzebne, żeby formularz KYC podświetlił zapisany kraj na liście
                 "kyc_country": trader.kyc_country,
@@ -3541,6 +3545,10 @@ def admin_trader_journal(trader_id: int):
                        # i zmienia napis na przycisku na „...again”.
                        "kyc_requested_at": (tr.kyc_requested_at.isoformat()
                                             if tr.kyc_requested_at else None),
+                       # Wstrzymany portal jest niewidoczny z zewnątrz, a to
+                       # pierwsza rzecz, o którą klient zapyta na supporcie —
+                       # dział musi ją mieć na karcie, nie w bazie.
+                       "kyc_locked": bool(tr.kyc_locked),
                        "awaiting_claim": bool(tr.must_set_password),
                        "invited_at": zaproszenie.isoformat() if zaproszenie else None,
                        "claimed_at": odebranie.isoformat() if odebranie else None,
@@ -3962,6 +3970,99 @@ def admin_kyc(imported: int = 0):
         session.close()
 
 
+# Ile próśb wychodzi z jednego kliknięcia. Maile lecą w tle TEGO wywołania
+# funkcji (`_powiadomienia_po_odpowiedzi`), a jeden SMTP to ~0,7 s — cała lista
+# w jednym strzale przekroczyłaby limit czasu funkcji i część maili przepadłaby
+# bez śladu. Panel woła endpoint w pętli, aż `left` spadnie do zera.
+KYC_PACZKA = 20
+
+
+def _kanal_free(session):
+    """Traderzy, którzy dostali darmowy challenge z kanału FREE.
+
+    Rozpoznajemy po notatce, którą wystawia przycisk „Free account"
+    (`notify.FREE_PROGRAM_NOTE`), a nie po samym `source="grant"`: tą samą
+    drogą powstaje drugie konto z promocji BOGO i wiersz archiwalny z ewidencji
+    wypłat, a to są klienci, którzy nam zapłacili.
+    """
+    return (session.query(Trader)
+            .join(Account, Account.trader_id == Trader.id)
+            .filter(Account.source == "grant",
+                    func.lower(func.coalesce(Account.grant_note, ""))
+                    == notify.FREE_PROGRAM_NOTE,
+                    _nie_import())
+            .order_by(Trader.id).distinct())
+
+
+def _czeka_na_prosbe(tr: Trader) -> bool:
+    """Czy tego tradera hurtowa wysyłka ma jeszcze dotknąć.
+
+    `kyc_requested_at` jest jednocześnie znacznikiem wysłanej prośby, więc
+    powtórne kliknięcie nie wyśle drugiego maila — a to jedyne zabezpieczenie,
+    jakie ta operacja może mieć: raz wysłanego maila nie da się cofnąć.
+    """
+    return (tr.kyc_status not in ("approved", "pending")
+            and not tr.kyc_requested_at)
+
+
+def _kanal_free_wiersz(tr: Trader) -> dict:
+    return {"id": tr.id, "email": tr.email, "name": tr.full_name or tr.email,
+            "kyc_status": tr.kyc_status, "kyc_locked": bool(tr.kyc_locked),
+            "kyc_requested_at": (tr.kyc_requested_at.isoformat()
+                                 if tr.kyc_requested_at else None)}
+
+
+# Obie trasy MUSZĄ stać przed `/api/admin/kyc/{trader_id}/…`: FastAPI dopasowuje
+# w kolejności rejestracji, więc niżej „free-channel" wpadałoby w `{trader_id}`
+# i kończyło się 422 (nie da się sparsować jako int).
+@app.get("/api/admin/kyc/free-channel", dependencies=[Depends(auth.require_admin)])
+def admin_free_channel_kyc():
+    """Podgląd przed wysyłką: kto z kanału FREE dostanie prośbę o weryfikację.
+
+    Hurtowa wysyłka maili jest nieodwracalna, więc panel pokazuje imienną listę
+    ZANIM cokolwiek wyjdzie. `done` jest równie ważne co `waiting`: bez niego
+    nie widać, że poprzednie kliknięcie zadziałało, i ta sama akcja odpalałaby
+    się drugi raz „na wszelki wypadek".
+    """
+    session = SessionLocal()
+    try:
+        wszyscy = _kanal_free(session).all()
+        czekaja = [t for t in wszyscy if _czeka_na_prosbe(t)]
+        return {"waiting": [_kanal_free_wiersz(t) for t in czekaja],
+                "done": [_kanal_free_wiersz(t) for t in wszyscy
+                         if not _czeka_na_prosbe(t)],
+                "batch": KYC_PACZKA}
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/kyc/free-channel/request",
+          dependencies=[Depends(auth.require_admin)])
+def admin_free_channel_kyc_request(limit: int = KYC_PACZKA):
+    """Prośba o weryfikację do całego kanału FREE — paczkami, idempotentnie.
+
+    Darmowy challenge dostaje ktoś, kogo jeszcze nie znamy, a prezent ściąga
+    dublerów: jedna osoba na trzech adresach. Dlatego prośba idzie w komplecie
+    ze wstrzymaniem portalu (`kyc_locked`) — konto na MT5 pracuje dalej, ale
+    panel otwiera się dopiero po akceptacji dokumentów.
+
+    Ktoś, kto ma już `pending` albo `approved`, wypada z listy: zrobił swoje.
+    Kto dostał prośbę wcześniej, też — znacznik `kyc_requested_at` jest po to,
+    żeby drugie kliknięcie nie wysłało drugiego maila.
+    """
+    limit = max(1, min(int(limit or KYC_PACZKA), KYC_PACZKA))
+    session = SessionLocal()
+    try:
+        czekaja = [t for t in _kanal_free(session).all() if _czeka_na_prosbe(t)]
+        paczka = czekaja[:limit]
+        for tr in paczka:
+            _popros_o_kyc(session, tr, wstrzymaj_portal=True)
+        return {"sent": [t.email for t in paczka],
+                "count": len(paczka), "left": len(czekaja) - len(paczka)}
+    finally:
+        session.close()
+
+
 @app.delete("/api/admin/kyc/{trader_id}", dependencies=[Depends(auth.require_admin)])
 def admin_kyc_delete(trader_id: int):
     """Kasuje weryfikację: dane KYC i WGRANE DOKUMENTY znikają z dysku.
@@ -4013,6 +4114,10 @@ def admin_approve_kyc(trader_id: int):
         tr.kyc_status = "approved"
         tr.kyc_reviewed_at = datetime.now(timezone.utc)
         tr.kyc_reject_reason = None
+        # Akceptacja to jedyne wyjście ze wstrzymanego portalu
+        # (`auth.portal_wstrzymany`) — musi je zdjąć to samo kliknięcie, którym
+        # admin zatwierdza dokumenty, bo osobnego przycisku „odblokuj" nie ma.
+        tr.kyc_locked = False
         session.commit()
         notify.send("kyc_approved", tr.email, {"name": tr.full_name or tr.email})
         return {"approved": trader_id}
@@ -4044,6 +4149,39 @@ def admin_reject_kyc(trader_id: int, payload: KycRejectIn | None = None):
         session.close()
 
 
+def _popros_o_kyc(session, tr: Trader, *, wstrzymaj_portal: bool) -> None:
+    """Środek prośby o weryfikację: otwarcie KYC, mail, ślad w historii leada.
+
+    Wspólny dla prośby z ręki, wysyłki hurtowej do kanału FREE i przyznania
+    darmowego konta — trzy wejścia, jedna treść i jeden komplet skutków.
+    Rozjazd między nimi znaczyłby, że klient dostaje inny mail w zależności od
+    tego, którym przyciskiem admin go dotknął.
+
+    `wstrzymaj_portal` zamyka panel do czasu akceptacji (`kyc_locked`). Włączamy
+    go tam, gdzie konto powstało jako prezent — tożsamości takiego klienta nikt
+    nie sprawdzał, a darmowy challenge ściąga dublerów.
+    """
+    tr.kyc_requested_at = datetime.now(timezone.utc)
+    if wstrzymaj_portal:
+        tr.kyc_locked = True
+    session.commit()
+    base = get_settings().app_base_url
+    notify.send("kyc_requested", tr.email,
+                {"name": tr.full_name or tr.email,
+                 "again": tr.kyc_status == "rejected",
+                 "locked": bool(tr.kyc_locked),
+                 "portal_url": f"{base}/portal"})
+    telemetry.track("kyc_requested", tr.id)
+    # Ślad w historii leada, jak przy portal invite — „czy myśmy go o to
+    # prosili?" pada tydzień później i musi mieć odpowiedź.
+    lead = (session.query(Lead)
+            .filter(func.lower(Lead.email) == tr.email.lower()).one_or_none())
+    if lead:
+        _zdarzenie(session, lead.id, "email", "KYC verification requested",
+                   actor="panel")
+        session.commit()
+
+
 @app.post("/api/admin/kyc/{trader_id}/request", dependencies=[Depends(auth.require_admin)])
 def admin_request_kyc(trader_id: int):
     """Prośba o weryfikację wysłana Z RĘKI — dla klienta, który nie złożył KYC.
@@ -4072,22 +4210,7 @@ def admin_request_kyc(trader_id: int):
         if tr.kyc_status == "pending":
             raise HTTPException(400, "Documents are already in — the application "
                                      "is waiting for review")
-        tr.kyc_requested_at = datetime.now(timezone.utc)
-        session.commit()
-        base = get_settings().app_base_url
-        notify.send("kyc_requested", tr.email,
-                    {"name": tr.full_name or tr.email,
-                     "again": tr.kyc_status == "rejected",
-                     "portal_url": f"{base}/portal"})
-        telemetry.track("kyc_requested", tr.id)
-        # Ślad w historii leada, jak przy portal invite — „czy myśmy go o to
-        # prosili?" pada tydzień później i musi mieć odpowiedź.
-        lead = (session.query(Lead)
-                .filter(func.lower(Lead.email) == tr.email.lower()).one_or_none())
-        if lead:
-            _zdarzenie(session, lead.id, "email", "KYC verification requested",
-                       actor="panel")
-            session.commit()
+        _popros_o_kyc(session, tr, wstrzymaj_portal=False)
         return {"ok": True, "email": tr.email, "kyc_status": tr.kyc_status}
     finally:
         session.close()
@@ -6899,6 +7022,11 @@ def admin_lead_free_account(lead_id: int):
         _zdarzenie(session, lead.id, "granted",
                    f"{FREE_CHALLENGE_KEY} — login {acc.login}", actor="panel")
         session.commit()
+        # Weryfikacja idzie w tym samym kliknięciu, co prezent: portal zostaje
+        # wstrzymany do akceptacji dokumentów. Inaczej ta sama zaległość rosłaby
+        # od nowa i za miesiąc znów trzeba by ją nadrabiać hurtem.
+        if _czeka_na_prosbe(trader):
+            _popros_o_kyc(session, trader, wstrzymaj_portal=True)
         return {"granted": True, "trader_created": nowy,
                 "login": acc.login, "account_id": acc.id}
     finally:

@@ -511,7 +511,11 @@ const VIEWS={
  },
 
  async kyc(){
-  window._kycData=await api('/api/admin/kyc'+impQ());
+  /* Lista kanalu FREE leci osobnym zapytaniem, ale rownolegle — to podglad
+     przed wysylka hurtowa, a nie czesc kolejki weryfikacji. */
+  const [d,free]=await Promise.all([api('/api/admin/kyc'+impQ()),
+                                    api('/api/admin/kyc/free-channel')]);
+  window._kycData=d; window._kycFree=free;
   renderKyc();
  },
 
@@ -571,7 +575,7 @@ const VIEWS={
       </tbody></table></div>`:`<p class="muted" style="font-size:13px">No ${esc(kf)} decisions${q?' match':''}.</p>`}</div>`:'';
   const pasek=((d.pending||[]).length||histAll.length)
     ?`<div class="toolbar">${searchBox('kyc-q','_kycQ','renderKyc','Search name, email, country or document…')}</div>`:'';
-  $('view').innerHTML=pasek+cards+histTbl;
+  $('view').innerHTML=pasek+freeChannelCard()+cards+histTbl;
  },
 
  async mail(){
@@ -917,6 +921,53 @@ function renderAccounts(){
 
 /* ---------- kyc: seg buttons need a global to call ---------- */
 function renderKyc(){VIEWS._kycRender()}
+
+/* Kanal FREE: darmowy challenge dostaje ktos, kogo jeszcze nie znamy, a prezent
+   sciaga dublerow — wiec przed dalszym korzystaniem z panelu ma sie zweryfikowac.
+   Wysylka jest hurtowa i NIEODWRACALNA, dlatego karta pokazuje imienna liste
+   przed klikiem, a nie sam licznik. */
+function freeChannelCard(){
+  const f=window._kycFree||{};
+  const czeka=f.waiting||[], gotowe=f.done||[];
+  if(!czeka.length&&!gotowe.length)return '';
+  const lista=czeka.slice(0,12).map(t=>`<span class="chip">${esc(t.email)}</span>`).join(' ')
+    +(czeka.length>12?`<span class="chip">+${czeka.length-12} more</span>`:'');
+  const wstrzymani=gotowe.filter(t=>t.kyc_locked&&t.kyc_status!=='approved').length;
+  return `<div class="sec-card card-md" style="margin-bottom:18px">
+    <h3>Free challenge — identity checks</h3>
+    <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Traders who were handed a free account.
+      Asking pauses their dashboard until you approve the documents — the MT5 account keeps trading either way.</p>
+    <div class="kv"><span>Waiting for a request</span><b>${czeka.length}</b></div>
+    <div class="kv"><span>Already asked</span><b>${gotowe.length}</b></div>
+    <div class="kv"><span>Dashboard paused now</span><b>${wstrzymani}</b></div>
+    ${czeka.length?`<div class="chip-row" style="margin:12px 0">${lista}</div>
+      <button class="btn-p" onclick="askFreeChannelKyc(this)">Ask all ${czeka.length} to verify</button>`
+    :'<p class="muted" style="font-size:12.5px;margin-top:10px">Everyone from the free channel has already been asked.</p>'}
+  </div>`;
+}
+/* Serwer wysyla paczkami (limit czasu funkcji), wiec petla chodzi do `left===0`.
+   Przerwana w polowie nie szkodzi: ponowne klikniecie zaczyna od tych, ktorzy
+   maila jeszcze nie dostali. */
+async function askFreeChannelKyc(btn){
+  const czeka=(window._kycFree||{}).waiting||[];
+  if(!czeka.length)return;
+  if(!await askConfirm({title:`Ask ${czeka.length} free-challenge trader${czeka.length===1?'':'s'} to verify?`,
+    body:'Each of them gets an e-mail with a link to the Verification tab, and their dashboard stays paused '
+      +'until you approve the documents. Their trading account keeps running. E-mails cannot be unsent.',
+    ok:'Send the requests',requireText:'SEND'}))return;
+  btn.disabled=true;
+  let wyslane=0;
+  try{
+    for(;;){
+      const r=await api('/api/admin/kyc/free-channel/request',{method:'POST'});
+      wyslane+=r.count||0;
+      btn.textContent=`Sending… ${wyslane}/${czeka.length}`;
+      if(!r.count||!r.left)break;
+    }
+    toast(`Verification requested from ${wyslane} trader${wyslane===1?'':'s'}.`,'ok');
+  }catch(e){toast(`Error after ${wyslane} sent: ${e.message}`,'err')}
+  go('kyc');
+}
 
 /* ---------- pool: search + state filter (list only — the forms above keep
    whatever the admin typed, so only #pool-list re-renders) ---------- */
@@ -2437,6 +2488,7 @@ function journalChips(t){
   if(t.last_seen_at&&t.last_seen_at!==t.last_login_at)chips.push(`<span class="chip">last seen ${dstr(t.last_seen_at)}</span>`);
   if(t.kyc_status)chips.push(`<span class="chip">KYC <b>${esc(t.kyc_status)}</b></span>`);
   if(t.kyc_requested_at)chips.push(`<span class="chip">KYC asked ${dstr(t.kyc_requested_at)}</span>`);
+  if(t.kyc_locked&&t.kyc_status!=='approved')chips.push('<span class="status failed"><span class="dot"></span>portal paused</span>');
   return `<div class="chip-row" style="margin-bottom:12px">${chips.join('')}</div>`;
 }
 /* Prosba o weryfikacje wysylana z reki. Klient, ktory przeszedl ewaluacje i nigdy

@@ -603,6 +603,12 @@ async function boot(){
   $('who-name').textContent=ME.full_name||'Trader';
   $('who-mail').textContent=ME.email;
   if(localStorage.getItem('pf_side_collapsed')==='1')$('side').classList.add('collapsed');
+  /* Portal wstrzymany do weryfikacji (kyc_locked): serwer odpowiada 403 na
+     wszystko poza KYC, supportem i wlasnym profilem, wiec pelny panel pokazalby
+     same bledy. Wychodzimy z boota przed warstwa engagementu — jej zapytania
+     tez sie odbija, a kartka z passa nie jest tym, co ten klient ma teraz
+     zobaczyc. */
+  if(ME.kyc_locked&&ME.kyc_status!=='approved'){wstrzymajPortal();go('kyc');return}
   initEngagement();
   flagsWarm();
   if(await handlePaymentReturn())return;
@@ -616,6 +622,20 @@ async function boot(){
   go(q.get('buy')?'store':(widok&&VIEWS[widok]?widok:'accounts'));
   refreshNotif();
   maybeReviewNudge();
+}
+
+/* Zostawiamy dokladnie dwie zakladki: te, ktora zdejmuje blokade (KYC), i te,
+   ktora pozwala o nia dopytac (Support). Pozycje nawigacji USUWAMY, zamiast je
+   wygaszac — link, ktory po kliknieciu oddaje blad, wyglada jak zepsuta appka,
+   a nie jak swiadoma pauza. */
+function wstrzymajPortal(){
+  const wolne=['kyc','support'];
+  document.querySelectorAll('#side-nav .sb-link[data-v],#sheet-nav .sb-link[data-v]')
+    .forEach(b=>{if(!wolne.includes(b.dataset.v))b.remove()});
+  $('tabbar').classList.add('hidden');
+  $('bell-btn')?.classList.add('hidden');
+  $('streakChip')?.classList.add('hidden');
+  document.querySelector('.top-right .btn-p')?.classList.add('hidden');
 }
 
 /* Kampania "free challenge": wybrane konta (lista na serwerze — review_nudge
@@ -1774,6 +1794,13 @@ const VIEWS={
 
  async kyc(){
   const s=ME.kyc_status;
+  /* Powod pauzy stoi NAD formularzem, nie w mailu: klient trafia tu takze
+     wprost z zakladki i musi wiedziec, czemu reszta panelu zniknela. */
+  const hold=ME.kyc_locked&&s!=='approved'?`<div class="panel" style="margin-bottom:14px;border-color:var(--red-line);background:var(--red-bg)">
+      <b style="font-size:13.5px">Your dashboard is paused until we verify your identity.</b>
+      <p class="muted" style="font-size:12.5px;margin-top:4px">Your trading account keeps running — nothing changes on the platform.
+         We review documents within one business day and the dashboard opens the moment it's approved.</p>
+    </div>`:'';
   /* Weryfikacja otwiera sie dopiero po przejsciu ewaluacji. Pokazujemy powod
      zamiast formularza — wypelnienie go i tak skonczyloby sie odmowa z serwera,
      a tak trader od razu wie, czego brakuje. Zlozone juz zgloszenia (pending /
@@ -1796,12 +1823,12 @@ const VIEWS={
     return;
   }
   if(s==='pending'){
-    $('view').innerHTML=`<div class="panel" style="display:flex;gap:14px;align-items:center">
+    $('view').innerHTML=hold+`<div class="panel" style="display:flex;gap:14px;align-items:center">
       <div class="tile-ic orange">${ICO.shield}</div>
       <div><h3>Documents under review</h3><p class="muted" style="font-size:13.5px">Our team is reviewing your submission. You'll get an e-mail once it's approved.</p></div></div>`;
     return;
   }
-  $('view').innerHTML=`
+  $('view').innerHTML=hold+`
     ${s==='rejected'?`<div class="panel" style="margin-bottom:14px;border-color:var(--red-line);background:var(--red-bg)">
       <b style="font-size:13.5px">Your previous verification was declined.</b>
       ${ME.kyc_reject_reason?`<p style="font-size:12.5px;margin-top:4px"><b>Reason:</b> ${esc(ME.kyc_reject_reason)}</p>`:''}

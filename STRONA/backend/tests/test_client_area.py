@@ -15,7 +15,7 @@ os.environ.setdefault("ADMIN_TOKEN", "tajny-token")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import auth, catalog, notify  # noqa: E402
+from app import auth, catalog, notify, payout_import  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
@@ -929,6 +929,90 @@ def test_prosba_o_kyc_z_panelu(monkeypatch):
 
         assert c.post("/api/admin/kyc/9999999/request", headers=ADMIN_H).status_code == 404
         assert c.post(f"/api/admin/kyc/{tid}/request").status_code in (401, 403)
+
+
+def _konto_grant(tid, notatka):
+    """Konto przyznane (nie kupione) — z notatką, która mówi, skąd się wzięło."""
+    s = SessionLocal()
+    acc = Account(login=str(next(_KYC_LOGIN)), trader_id=tid, trader_name="Free",
+                  platform_login="x", platform_password="x",
+                  platform_server="MetaQuotes-Demo", product_key="2step-25k",
+                  initial_balance=25_000, balance=25_000, equity=25_000,
+                  peak_equity=25_000, day_start_equity=25_000,
+                  day_start_balance=25_000, status="active", phase="eval_1",
+                  source="grant", grant_note=notatka)
+    s.add(acc); s.commit(); s.close()
+
+
+def test_kanal_free_prosba_hurtem_wstrzymuje_portal(monkeypatch):
+    """Darmowy challenge dostaje ktoś, kogo jeszcze nie znamy, a prezent ściąga
+    dublerów: jedna osoba na trzech adresach. Prośba o weryfikację idzie więc do
+    całego kanału FREE hurtem i w komplecie ze wstrzymaniem portalu — konto na
+    MT5 pracuje dalej, panel otwiera się dopiero po akceptacji dokumentów.
+
+    Test pilnuje trzech rzeczy naraz: że blokada faktycznie odcina portal, ale
+    NIE odcina drogi wyjścia (KYC, support, własny profil), że powtórne
+    kliknięcie nie wysyła drugiego maila i że approve jest wyjściem z blokady.
+    """
+    maile = []
+    monkeypatch.setattr(notify, "_send_teraz",
+                        lambda event, to, ctx=None: maile.append((event, to, ctx or {})))
+    tid, h = _trader("free-kyc@test.pl", "Free Kyc")
+    _konto_grant(tid, notify.FREE_PROGRAM_NOTE)
+    with TestClient(app) as c:
+        czekaja = c.get("/api/admin/kyc/free-channel", headers=ADMIN_H).json()
+        assert any(x["email"] == "free-kyc@test.pl" for x in czekaja["waiting"])
+
+        r = c.post("/api/admin/kyc/free-channel/request", headers=ADMIN_H).json()
+        assert "free-kyc@test.pl" in r["sent"]
+        assert maile[-1][0] == "kyc_requested"
+        assert maile[-1][2]["locked"] is True, "mail ma tłumaczyć, czemu panel stoi"
+
+        # Portal stoi, ale własny profil i droga wyjścia zostają otwarte.
+        me = c.get("/api/auth/me", headers=h).json()
+        assert me["kyc_locked"] is True and me["kyc_available"] is True
+        odbite = c.get("/api/me/journal", headers=h)
+        assert odbite.status_code == 403 and "verify" in odbite.json()["detail"].lower()
+        assert c.get("/api/me/tickets", headers=h).status_code == 200
+        assert c.post("/api/me/kyc", headers=h,
+                      json={"full_name": "Free Kyc", "country": "PL",
+                            "id_type": "passport"}).status_code == 200
+
+        # Drugie kliknięcie: żadnego drugiego maila do tej samej osoby.
+        ile = len(maile)
+        powtorka = c.post("/api/admin/kyc/free-channel/request", headers=ADMIN_H).json()
+        assert "free-kyc@test.pl" not in powtorka["sent"] and len(maile) == ile
+        stan = c.get("/api/admin/kyc/free-channel", headers=ADMIN_H).json()
+        assert any(x["email"] == "free-kyc@test.pl" and x["kyc_locked"]
+                   for x in stan["done"])
+
+        # Akceptacja to jedyne wyjście z blokady — i musi je otwierać w całości.
+        assert c.post(f"/api/admin/kyc/{tid}/approve", headers=ADMIN_H).status_code == 200
+        assert c.get("/api/auth/me", headers=h).json()["kyc_locked"] is False
+        assert c.get("/api/me/journal", headers=h).status_code == 200
+
+        assert c.post("/api/admin/kyc/free-channel/request").status_code in (401, 403)
+
+
+def test_hurtowa_prosba_omija_klientow_z_zakupu():
+    """Kupujący nie ma prawa wpaść w wysyłkę dla kanału FREE.
+
+    `source="grant"` samo w sobie nie znaczy „darmowy challenge": tak samo
+    powstaje drugie konto z promocji BOGO i wiersz archiwalny z ewidencji
+    wypłat. Wstrzymanie portalu komuś, kto nam zapłacił, byłoby awarią droższą
+    niż cała ta weryfikacja.
+    """
+    kupil, _ = _trader("free-nie-ja@test.pl", "Kupiec")
+    _konto(kupil, str(next(_KYC_LOGIN)))
+    bogo, _ = _trader("free-bogo@test.pl", "Bogo")
+    _konto_grant(bogo, "BOGO — second account")
+    z_ewidencji, _ = _trader("free-import@test.pl", "Import")
+    _konto_grant(z_ewidencji, payout_import.IMPORT_NOTE)
+    with TestClient(app) as c:
+        d = c.get("/api/admin/kyc/free-channel", headers=ADMIN_H).json()
+        maile = {x["email"] for x in d["waiting"] + d["done"]}
+        assert not maile & {"free-nie-ja@test.pl", "free-bogo@test.pl",
+                            "free-import@test.pl"}
 
 
 def test_ui_prefs_zapisywane_na_koncie():

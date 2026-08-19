@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 from .config import get_settings
@@ -133,8 +133,31 @@ def parse_verify_token(token: str) -> int | None:
         return None
 
 
+# Portal wstrzymany do czasu weryfikacji (`Trader.kyc_locked`) przepuszcza tylko
+# to, bez czego klient nie odblokuje się sam: własny profil, formularz KYC
+# z plikami, potwierdzenie adresu e-mail, support i wylogowanie. Lista jest
+# z definicji WĄSKA — endpoint dopisany za pół roku ma być domyślnie zamknięty,
+# bo bramka zapomniana przy nowej funkcji to bramka, której nie ma.
+# `/api/telemetry` jest tu mimo tej reguły: to jedyny ślad, że klient w ogóle
+# wszedł w zakładkę weryfikacji, a właśnie o to pyta support („czy on to
+# widział?"). Nic nie zmienia po stronie konta.
+BEZ_BLOKADY = ("/api/auth/me", "/api/auth/logout", "/api/me/kyc",
+               "/api/me/tickets", "/api/me/verify-email", "/api/telemetry")
+KYC_BLOKADA = ("Your portal access is paused until we verify your identity. "
+               "Upload your documents in the Verification tab — we review them "
+               "within one business day. Your trading account keeps running.")
+
+
+def portal_wstrzymany(trader: Trader, sciezka: str) -> bool:
+    """Czy to żądanie ma się odbić o wstrzymany portal."""
+    if not trader.kyc_locked or trader.kyc_status == "approved":
+        return False
+    return not any(sciezka == p or sciezka.startswith(p + "/") for p in BEZ_BLOKADY)
+
+
 # --- FastAPI dependencies ---
-def current_trader(authorization: str | None = Header(default=None)) -> Trader:
+def current_trader(request: Request,
+                   authorization: str | None = Header(default=None)) -> Trader:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(401, "Missing token (sign in)")
     data = _parse_session(authorization.split(" ", 1)[1].strip())
@@ -151,6 +174,8 @@ def current_trader(authorization: str | None = Header(default=None)) -> Trader:
         pwf = data.get("pwf")
         if pwf and pwf != _pw_fp(trader.password_hash):
             raise HTTPException(401, "Invalid or expired token")
+        if portal_wstrzymany(trader, request.url.path):
+            raise HTTPException(403, KYC_BLOKADA)
         session.expunge(trader)
         return trader
     finally:
