@@ -19,7 +19,7 @@ from app import auth  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Account, Trader  # noqa: E402
+from app.models import Account, Payout, Trader  # noqa: E402
 
 init_db()
 ADMIN_H = {"X-Admin-Token": get_settings().admin_token}
@@ -114,6 +114,49 @@ def test_reject_z_powodem_widocznym_dla_tradera():
         assert r.status_code == 404
     s = SessionLocal()
     assert s.get(Account, aid).balance == KAPITAL + ZYSK
+    s.close()
+
+
+def test_drugi_approve_tego_samego_wniosku_odpada():
+    """Podwójny klik (albo dwa równoległe requesty na serverless): księguje
+    tylko pierwszy approve — drugi dostaje 404 zamiast dublować wypłatę,
+    maila i zwrot opłaty."""
+    aid, h = _funded("po-dubel@test.pl")
+    with TestClient(app) as c:
+        r = c.post(f"/api/accounts/{aid}/payout-request", headers=h,
+                   json={"method": "wise", "amount": 200,
+                         "details": {"email": "trader@example.com"}})
+        req_id = r.json()["id"]
+        assert c.post(f"/api/admin/payout-requests/{req_id}/approve",
+                      headers=ADMIN_H).status_code == 200
+        assert c.post(f"/api/admin/payout-requests/{req_id}/approve",
+                      headers=ADMIN_H).status_code == 404
+    s = SessionLocal()
+    assert s.query(Payout).filter(Payout.account_id == aid).count() == 1
+    assert s.get(Account, aid).balance == KAPITAL + ZYSK - 250.0   # zysk zdjęty RAZ
+    s.close()
+
+
+def test_approve_po_spadku_zysku_odrzucony():
+    """Kwota wniosku jest zamrożona z chwili złożenia, a przegląd trwa do 24 h.
+    Jeśli trader w tym czasie zjechał zyskiem poniżej wnioskowanej działki,
+    approve ma odmówić — bez tego brakującą różnicę po cichu dopłacała firma."""
+    aid, h = _funded("po-strata@test.pl")
+    with TestClient(app) as c:
+        r = c.post(f"/api/accounts/{aid}/payout-request", headers=h,
+                   json={"method": "wise", "amount": 800,
+                         "details": {"email": "trader@example.com"}})
+        req_id = r.json()["id"]
+        s = SessionLocal()
+        acc = s.get(Account, aid)
+        acc.balance = acc.equity = KAPITAL + 100.0     # dostępna działka już tylko $80
+        s.commit(); s.close()
+
+        r = c.post(f"/api/admin/payout-requests/{req_id}/approve", headers=ADMIN_H)
+        assert r.status_code == 400
+        assert "no longer covers" in r.json()["detail"]
+    s = SessionLocal()
+    assert s.get(Account, aid).balance == KAPITAL + 100.0          # saldo nietknięte
     s.close()
 
 

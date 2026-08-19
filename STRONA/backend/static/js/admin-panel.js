@@ -1015,8 +1015,8 @@ function renderPayoutsView(){
             <button class="btn-o sm" onclick="revokeCert(${r.id})">Revoke</button>`
           :`<button class="btn-o sm" onclick="askCertLp(${r.id})">Generate</button>`}</td>
       <td class="rt-acts" style="text-align:right;white-space:nowrap">${r.kind==='request'&&r.status==='pending'
-        ?`<button class="btn-p sm" onclick="approvePayout(${r.id})">Approve &amp; pay</button>
-          <button class="btn-o sm" onclick="rejectPayout(${r.id})">Reject</button>`
+        ?`<button class="btn-p sm" onclick="approvePayout(${r.id},this)">Approve &amp; pay</button>
+          <button class="btn-o sm" onclick="rejectPayout(${r.id},this)">Reject</button>`
         :XBTN(`deletePayoutRow('${r.kind}',${r.id},${r.trader_share},'${jsq(r.account_login||'')}')`,
               r.kind==='payout'?'Delete payout':'Delete request')}</td></tr>`).join('')}
     </tbody></table></div>
@@ -2866,27 +2866,34 @@ async function deleteTrader(tid,who){
 }
 
 /* ---------- actions ---------- */
-async function rejectPayout(id){
-  const reason=await askReason({
-    title:'Reject this payout request',danger:true,confirmLabel:'Reject request',
-    hint:'The trader sees the reason under the request status and gets it by e-mail.',
-    presets:['Profit target not met','Minimum trading days not met',
-      'Open positions at the time of the request','Trading activity under review',
-      'KYC verification incomplete']});
-  if(reason===null)return;   // Cancel
-  try{await api(`/api/admin/payout-requests/${id}/reject`,{method:'POST',
-      body:JSON.stringify({reason})});
-    toast('Request rejected.','ok');go('payouts')}
-  catch(e){toast('Error: '+e.message,'err')}
+/* Obie akcje pod busy(): drugi klik w trakcie requestu to no-op. Serwer ma
+   własną blokadę (warunkowy UPDATE), ale bez tej dubel kończył się mylącym
+   „already handled" zamiast po prostu nie zadziałać. */
+async function rejectPayout(id,btn){
+  await busy(btn,null,async()=>{
+    const reason=await askReason({
+      title:'Reject this payout request',danger:true,confirmLabel:'Reject request',
+      hint:'The trader sees the reason under the request status and gets it by e-mail.',
+      presets:['Profit target not met','Minimum trading days not met',
+        'Open positions at the time of the request','Trading activity under review',
+        'KYC verification incomplete']});
+    if(reason===null)return;   // Cancel
+    try{await api(`/api/admin/payout-requests/${id}/reject`,{method:'POST',
+        body:JSON.stringify({reason})});
+      toast('Request rejected.','ok');go('payouts')}
+    catch(e){toast('Error: '+e.message,'err')}
+  });
 }
-async function approvePayout(id){
-  if(!await askConfirm({title:'Approve and pay this request?',
-    body:'This pays the trader share, plus the fee refund on a first payout. <b>It cannot be undone.</b>',
-    ok:'Approve & pay',danger:true}))return;
-  try{const d=await api(`/api/admin/payout-requests/${id}/approve`,{method:'POST'});
-    toast(`✅ Paid $${fmt(d.total_paid)}${d.fee_refund?` (incl. $${fmt(d.fee_refund)} fee refund)`:''}`,'ok');
-    go('payouts');
-  }catch(e){toast('Error: '+e.message,'err')}
+async function approvePayout(id,btn){
+  await busy(btn,null,async()=>{
+    if(!await askConfirm({title:'Approve and pay this request?',
+      body:'This pays the trader share, plus the fee refund on a first payout. <b>It cannot be undone.</b>',
+      ok:'Approve & pay',danger:true}))return;
+    try{const d=await api(`/api/admin/payout-requests/${id}/approve`,{method:'POST'});
+      toast(`✅ Paid $${fmt(d.total_paid)}${d.fee_refund?` (incl. $${fmt(d.fee_refund)} fee refund)`:''}`,'ok');
+      go('payouts');
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
 }
 async function approveKyc(tid){
   /* Jeden tap, zero okien — pomylke cofa przycisk w toascie (istniejacy

@@ -2976,6 +2976,27 @@ def admin_approve_payout(req_id: int):
         acc = session.get(Account, r.account_id)
         tr = session.get(Trader, r.trader_id)
 
+        # Kwota wniosku jest zamrożona z chwili złożenia, a przegląd trwa do
+        # 24 h — trader mógł w tym czasie zjechać zyskiem poniżej wnioskowanej
+        # działki. Bez tej kontroli brakującą różnicę po cichu dopłacałaby
+        # firma, bo clamp do salda startowego niżej maskuje brak pokrycia.
+        split = acc.profit_split_pct / 100.0 if acc.profit_split_pct else 1.0
+        available = round(round(acc.balance - acc.initial_balance, 2) * split, 2)
+        if r.trader_share > available:
+            raise HTTPException(400, f"The account no longer covers this payout "
+                                     f"(available share: ${available:,.2f}). Reject the "
+                                     f"request and ask the trader to submit a new one.")
+
+        # Przejęcie wniosku warunkowym UPDATE-em (ten sam wzorzec co przejęcie
+        # zamówienia w provisioning) — z dwóch równoległych approve zaksięguje
+        # tylko jedno, drugie dostaje 404 zamiast dublować wypłatę, mail
+        # i zwrot opłaty.
+        zajete = (session.query(PayoutRequest)
+                  .filter(PayoutRequest.id == req_id, PayoutRequest.status == "pending")
+                  .update({"status": "paid"}, synchronize_session=False))
+        if not zajete:
+            raise HTTPException(404, "The request does not exist or was already handled")
+
         # zwrot opłaty za challenge przy PIERWSZEJ wypłacie (jak FTMO/The5ers).
         # Granty odpadają: zamówienie grantowe BOGO nosi cenę OPŁACONEGO tieru
         # (dla faktury, patrz billing.grant_challenge) — zwrot z niego oddawałby
@@ -2991,11 +3012,9 @@ def admin_approve_payout(req_id: int):
         session.add(Payout(account_id=acc.id, profit_amount=r.profit_amount,
                            trader_share=round(r.trader_share + fee_refund, 2), paid=True,
                            balance_reset=True, method=r.method))
-        r.status = "paid"
         # Trader mógł poprosić o CZĘŚĆ dostępnej działki — z salda schodzi profit
         # proporcjonalny do wypłaconej kwoty (kwota / split). Pełna kwota sprowadza
         # konto dokładnie do salda startowego, jak dotychczasowy reset.
-        split = acc.profit_split_pct / 100.0 if acc.profit_split_pct else 1.0
         consumed = round(r.trader_share / split, 2)
         new_balance = max(acc.initial_balance, round(acc.balance - consumed, 2))
         acc.balance = new_balance
@@ -3029,8 +3048,15 @@ def admin_reject_payout(req_id: int, payload: PayoutRejectIn):
         r = session.get(PayoutRequest, req_id)
         if not r or r.status != "pending":
             raise HTTPException(404, "The request does not exist or was already handled")
-        r.status = "rejected"
-        r.reject_reason = (payload.reason or "").strip()[:200] or None
+        reason = (payload.reason or "").strip()[:200] or None
+        # Warunkowy UPDATE jak przy approve — równoległy approve i reject tego
+        # samego wniosku nie mogą przejść oba (wypłata + „odrzucono" naraz).
+        zajete = (session.query(PayoutRequest)
+                  .filter(PayoutRequest.id == req_id, PayoutRequest.status == "pending")
+                  .update({"status": "rejected", "reject_reason": reason},
+                          synchronize_session=False))
+        if not zajete:
+            raise HTTPException(404, "The request does not exist or was already handled")
         acc = session.get(Account, r.account_id)
         tr = session.get(Trader, r.trader_id)
         session.commit()
@@ -3038,8 +3064,8 @@ def admin_reject_payout(req_id: int, payload: PayoutRejectIn):
             notify.send("payout_rejected", tr.email, {
                 "name": tr.full_name or tr.email, "login": acc.login if acc else "",
                 "trader_share": r.trader_share,
-                "reason": r.reject_reason or "not specified"})
-        return {"rejected": req_id, "reason": r.reject_reason}
+                "reason": reason or "not specified"})
+        return {"rejected": req_id, "reason": reason}
     finally:
         session.close()
 
