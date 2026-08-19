@@ -99,6 +99,10 @@ class Trader(Base):
     # Kredyty sklepowe (USD) — nadaje admin, automatycznie odliczane od ceny
     # nastepnego zakupu w checkoucie. Pelna historia w tabeli credit_ledger.
     credits_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    # Prośba o weryfikację wysłana z panelu. Otwiera KYC temu traderowi nawet bez
+    # konta funded (patrz `main.kyc_dostepne`) — admin świadomie o dokumenty
+    # poprosił, więc bramka od zbierania skanów „na zapas" już go nie dotyczy.
+    kyc_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     kyc_submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     kyc_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Powód odrzucenia KYC — pokazywany traderowi w portalu i w mailu;

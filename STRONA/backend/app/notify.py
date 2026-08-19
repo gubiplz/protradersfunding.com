@@ -245,8 +245,8 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
         ),
         "kyc_requested": (
             "Verify your identity to unlock payouts",
-            f"{name}, your account is funded, so the last step before we can send "
-            f"you money is identity verification — we need it to pay out."
+            f"{name}, identity verification is now open on your account — it is "
+            f"the step we need before we can send you a payout."
             + ("\n\nYour previous submission could not be verified, so please "
                "check the details and send it again."
                if ctx.get("again") else "")
@@ -595,8 +595,8 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
     elif event == "kyc_requested":
         parts = [
             _head_html("Verification", "One step left before your payout",
-                       f"{name}, your account is funded — the last thing we need "
-                       f"before sending you money is identity verification."
+                       f"{name}, identity verification is now open on your account "
+                       f"— it is the last thing we need before sending you money."
                        + (" Your previous submission could not be verified, so "
                           "please check the details and send it again."
                           if ctx.get("again") else "")),

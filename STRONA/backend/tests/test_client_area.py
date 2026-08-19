@@ -889,32 +889,33 @@ def test_kyc_reject_i_historia_decyzji():
 
 
 def test_prosba_o_kyc_z_panelu(monkeypatch):
-    """Klient po ewaluacji, który nigdy nie wszedł w zakładkę weryfikacji, nie
-    dostaje od nas w tej sprawie ŻADNEGO maila — wychodzi to dopiero przy
-    wniosku o wypłatę, którym trzeba wtedy odmówić. Przycisk w panelu jest
-    jedynym sposobem, żeby go poprosić, więc jego bramki muszą się zgadzać
-    z tymi z `submit_kyc`: inaczej mail zaprasza na ekran, który odbija 403.
+    """Klient, który nigdy nie wszedł w zakładkę weryfikacji, nie dostaje od nas
+    w tej sprawie ŻADNEGO maila — wychodzi to dopiero przy wniosku o wypłatę,
+    którym trzeba wtedy odmówić. Przycisk w panelu jest jedynym sposobem, żeby go
+    poprosić, i musi działać także PRZED funded: prośba sama otwiera weryfikację,
+    bo inaczej mail zapraszałby na ekran, który odbija 403.
     """
     maile = []
     monkeypatch.setattr(notify, "_send_teraz",
                         lambda event, to, ctx=None: maile.append((event, to, ctx or {})))
     tid, h = _trader("kyc-prosba@test.pl", "Prosba Kyc")
     with TestClient(app) as c:
-        assert c.post(f"/api/admin/kyc/{tid}/request", headers=ADMIN_H).status_code == 400
-        assert not maile, "prośba bez konta funded prowadzi klienta do 403"
+        assert c.get("/api/auth/me", headers=h).json()["kyc_available"] is False
 
-        _kyc_ready(tid)
+        # Bez konta funded: prośba przechodzi i otwiera klientowi weryfikację.
         r = c.post(f"/api/admin/kyc/{tid}/request", headers=ADMIN_H)
         assert r.status_code == 200, r.text
         assert maile[-1][0] == "kyc_requested" and maile[-1][1] == "kyc-prosba@test.pl"
         assert maile[-1][2]["again"] is False
+        assert c.get("/api/auth/me", headers=h).json()["kyc_available"] is True
 
-        # Panel bierze stąd i widoczność przycisku, i ślad, że już prosiliśmy.
+        # Panel bierze stąd ślad, że już prosiliśmy (napis na przycisku i chip).
         t = c.get(f"/api/admin/traders/{tid}/journal", headers=ADMIN_H).json()["trader"]
-        assert t["kyc_available"] is True and t["kyc_requested_at"]
+        assert t["kyc_requested_at"]
 
-        c.post("/api/me/kyc", headers=h, json={"full_name": "Prosba Kyc",
-                                               "country": "PL", "id_type": "passport"})
+        r = c.post("/api/me/kyc", headers=h, json={"full_name": "Prosba Kyc",
+                                                   "country": "PL", "id_type": "passport"})
+        assert r.status_code == 200, "proszony klient składa dokumenty bez funded"
         assert c.post(f"/api/admin/kyc/{tid}/request",
                       headers=ADMIN_H).status_code == 400, "dokumenty już są"
         c.post(f"/api/admin/kyc/{tid}/approve", headers=ADMIN_H)

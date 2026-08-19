@@ -1784,7 +1784,8 @@ const VIEWS={
       ${ICO.shield}
       <h3>Verification opens after your first funded account</h3>
       <p>Pass an evaluation and this page unlocks. We only ask for identity documents
-         from traders who have a payout to claim — there is nothing to do here yet.</p>
+         from traders who have a payout to claim — if you would rather verify now,
+         write to support and we will open it for you.</p>
       <button class="btn-p" onclick="go('accounts')">View my challenges</button></div>`;
     return;
   }

@@ -2441,17 +2441,18 @@ function journalChips(t){
 /* Prosba o weryfikacje wysylana z reki. Klient, ktory przeszedl ewaluacje i nigdy
    nie wszedl w zakladke KYC, nie dostaje od nas w tej sprawie ZADNEGO maila —
    wychodzi to dopiero przy wniosku o wyplate, ktory trzeba wtedy odrzucic.
-   Przycisku nie ma tam, gdzie serwer i tak odmowi: bez konta funded
-   (`kyc_available`) oraz przy pending/approved, bo dokumenty juz sa. */
+   Dziala takze przed funded: prosba sama otwiera weryfikacje temu klientowi
+   (`kyc_requested_at` po stronie serwera). Przycisku nie ma tylko przy
+   pending/approved, bo dokumenty juz sa i nie ma o co prosic. */
 function kycAskBtn(t,gdzie){
-  if(!t||!t.kyc_available||t.kyc_status==='approved'||t.kyc_status==='pending')return '';
+  if(!t||t.kyc_status==='approved'||t.kyc_status==='pending')return '';
   return `<button class="btn-o sm" style="margin-top:10px" onclick="requestKyc(${t.id},'${jsq(t.email||'')}','${gdzie}')">`
     +`${t.kyc_requested_at?'Ask for verification again':'Ask for verification'}</button>`;
 }
 async function requestKyc(tid,email,gdzie){
   if(!await askConfirm({title:'Ask this client to verify their identity?',
-    body:'They get an e-mail with a link to the Verification tab. Nothing on the '
-      +'account changes — this only asks for the documents.',
+    body:'They get an e-mail with a link to the Verification tab, and it opens '
+      +'verification for them — also before their first funded account.',
     ok:'Send the request'}))return;
   try{await api(`/api/admin/kyc/${tid}/request`,{method:'POST'});
     toast('Verification request sent.','ok');

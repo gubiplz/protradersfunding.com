@@ -1538,22 +1538,27 @@ def my_account_positions(account_id: int, trader: Trader = Depends(auth.current_
 # różne brzmienia tej samej odmowy czytałyby się jak dwa różne powody.
 KYC_WYMAGA_FUNDED = ("Verification opens once one of your accounts is funded. "
                      "Pass an evaluation first — we only collect identity documents "
-                     "from traders who have a payout to claim.")
+                     "from traders who have a payout to claim. If you need to verify "
+                     "sooner, write to support and we will open it for you.")
 
 
 def kyc_dostepne(session, trader_id: int) -> bool:
-    """Czy trader przeszedł już ewaluację — warunek wstępny weryfikacji.
+    """Czy weryfikacja jest dla tego tradera otwarta.
 
-    Sprawdzamy FAZĘ, nie status. Konto, które zdobyło funded, a potem złamało
-    regułę, ma `phase="funded"` i `status="breached"` — i taki trader wciąż może
-    mieć nierozliczoną wypłatę, więc odcięcie go od KYC zablokowałoby mu pieniądze,
-    które już zarobił. `phase` odpowiada na pytanie „czy przeszedł ewaluację",
-    a tylko o to tu chodzi.
+    Dwie drogi. Pierwsza to przejście ewaluacji — sprawdzamy FAZĘ, nie status.
+    Konto, które zdobyło funded, a potem złamało regułę, ma `phase="funded"`
+    i `status="breached"`, a taki trader wciąż może mieć nierozliczoną wypłatę;
+    odcięcie go od KYC zablokowałoby mu pieniądze, które już zarobił.
 
-    Sens tej bramki jest podwójny: mniej pustych zgłoszeń do przejrzenia i mniej
-    zebranych dokumentów tożsamości — nie zbieramy skanów od kogoś, kto nie ma
-    jeszcze po co ich podawać.
+    Druga to prośba wysłana z panelu (`admin_request_kyc`). Domyślna bramka
+    istnieje po to, żeby nie zbierać skanów tożsamości od kogoś, kto nie ma po co
+    ich podawać — ale kiedy admin sam o dokumenty poprosił, ten argument znika,
+    a jego decyzja musi być silniejsza niż reguła, która ma go tylko wyręczać.
+    Dlatego chętny klient bez funded dostaje weryfikację po jednym kliknięciu
+    w panelu, zamiast czekać, aż przejdzie ewaluację.
     """
+    if session.get(Trader, trader_id).kyc_requested_at:
+        return True
     return (session.query(Account.id)
             .filter(Account.trader_id == trader_id,
                     Account.phase == "funded").first()) is not None
@@ -3401,9 +3406,6 @@ def admin_trader_journal(trader_id: int):
         odebranie = (session.query(func.max(TelemetryEvent.created_at))
                      .filter(TelemetryEvent.trader_id == trader_id,
                              TelemetryEvent.name == "account_claimed").scalar())
-        prosba_kyc = (session.query(func.max(TelemetryEvent.created_at))
-                      .filter(TelemetryEvent.trader_id == trader_id,
-                              TelemetryEvent.name == "kyc_requested").scalar())
         dzis = _dzis_po_warszawsku()
 
         items: list[dict] = []
@@ -3500,12 +3502,10 @@ def admin_trader_journal(trader_id: int):
             "trader": {"id": tr.id, "email": tr.email, "full_name": tr.full_name,
                        "created_at": tr.created_at.isoformat() if tr.created_at else None,
                        "kyc_status": tr.kyc_status,
-                       # Bramka z `submit_kyc`: bez konta funded prośba o KYC
-                       # wysłałaby klienta na ekran, który mu odmówi (403).
-                       # Panel chowa po tym przycisk, zamiast ładować w 400.
-                       "kyc_available": kyc_dostepne(session, trader_id),
-                       "kyc_requested_at": (prosba_kyc.isoformat()
-                                            if prosba_kyc else None),
+                       # Data prośby z panelu — panel pisze z niej „KYC asked ...”
+                       # i zmienia napis na przycisku na „...again”.
+                       "kyc_requested_at": (tr.kyc_requested_at.isoformat()
+                                            if tr.kyc_requested_at else None),
                        "awaiting_claim": bool(tr.must_set_password),
                        "invited_at": zaproszenie.isoformat() if zaproszenie else None,
                        "claimed_at": odebranie.isoformat() if odebranie else None,
@@ -4019,8 +4019,11 @@ def admin_request_kyc(trader_id: int):
     wypłacimy mu pieniędzy. Zwykle wychodzi to dopiero przy wniosku o wypłatę,
     którym trzeba wtedy odmówić.
 
-    Bramka `kyc_dostepne` jest tu ta sama co w `submit_kyc`: bez niej mail
-    zapraszałby na ekran, który klientowi odpowie 403 (`KYC_WYMAGA_FUNDED`).
+    Prośba OTWIERA weryfikację (`kyc_requested_at` → `kyc_dostepne`), więc działa
+    też dla klienta bez konta funded — a to najczęstszy przypadek, w którym ktoś
+    sam prosi o weryfikację i odbija się od domyślnej bramki. Bez tego mail
+    zapraszałby na ekran, który odpowie 403 (`KYC_WYMAGA_FUNDED`).
+
     `pending` i `approved` odpadają, bo nie ma o co prosić — dokumenty już są.
     Przy `rejected` prośba jest dozwolona: to ponaglenie do poprawki.
     """
@@ -4034,9 +4037,8 @@ def admin_request_kyc(trader_id: int):
         if tr.kyc_status == "pending":
             raise HTTPException(400, "Documents are already in — the application "
                                      "is waiting for review")
-        if not kyc_dostepne(session, trader_id):
-            raise HTTPException(400, "Verification opens only after an account is "
-                                     "funded — this client has none yet")
+        tr.kyc_requested_at = datetime.now(timezone.utc)
+        session.commit()
         base = get_settings().app_base_url
         notify.send("kyc_requested", tr.email,
                     {"name": tr.full_name or tr.email,
