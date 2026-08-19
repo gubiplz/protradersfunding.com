@@ -2843,9 +2843,14 @@ def admin_kyc_doc(trader_id: int, kind: str):
 def admin_payout_requests():
     session = SessionLocal()
     try:
-        rows = session.query(PayoutRequest).order_by(PayoutRequest.id.desc()).all()
+        # Tylko OTWARTE wnioski: jedyny konsument tej listy (licznik pendingów
+        # na Overview) zamkniętych nie ogląda, a te mają swoje wiersze w widoku
+        # Payouts (/api/admin/payouts). Bez filtra każde wejście na Overview
+        # ciągnęło całą tabelę, która rośnie z każdym miesiącem.
+        rows = (session.query(PayoutRequest).filter(PayoutRequest.status == "pending")
+                .order_by(PayoutRequest.id.desc()).all())
         # Konta i maile hurtem: dwa `session.get` na wniosek to bylo 600 round-tripow
-        # przy 300 wnioskach, a lista nie ma LIMIT-u i rosnie z kazdym miesiacem.
+        # przy 300 wnioskach.
         konta = _konta_po_id(session, (r.account_id for r in rows))
         maile = _maile_traderow(session, (r.trader_id for r in rows))
         out = []
@@ -5892,10 +5897,11 @@ def stats():
     """
     session = SessionLocal()
     try:
-        accs = session.query(Account).all()
-        by_status: dict[str, int] = {}
-        for a in accs:
-            by_status[a.status] = by_status.get(a.status, 0) + 1
+        # GROUP BY zamiast ciągnięcia wszystkich kont do Pythona: kafelki
+        # potrzebują tylko liczników per status, a tabela rośnie bez końca.
+        by_status: dict[str, int] = dict(
+            session.query(Account.status, func.count(Account.id))
+            .group_by(Account.status).all())
         # Licznik traderów brał WSZYSTKIE nieadministracyjne wiersze, a każda
         # wypłata z Payout BOT-a i z importu CSV zakłada własnego tradera —
         # przy jednej wypłacie dziennie ten kafelek rósł sam z siebie i nie
@@ -5908,7 +5914,7 @@ def stats():
         wewnetrzni = (session.query(Trader)
                       .filter(Trader.is_admin == False,                    # noqa: E712
                               Trader.email.like(f"%{payout_import.TECHNICZNA_DOMENA}")).count())
-        return {"total": len(accs), "by_status": by_status,
+        return {"total": sum(by_status.values()), "by_status": by_status,
                 "funded": by_status.get("funded", 0), "active": by_status.get("active", 0),
                 "failed": by_status.get("failed", 0), "feed": settings.feed,
                 "stripe": "live" if settings.stripe_enabled else "mock",
@@ -5956,20 +5962,29 @@ def public_stats():
         return _PUBLIC_STATS_CACHE["data"]
     session = SessionLocal()
     try:
-        payouts = session.query(Payout).filter(Payout.paid == True).all()  # noqa: E712
-        countries = {t.kyc_country.strip().lower() for t in
-                     session.query(Trader).filter(Trader.kyc_status == "approved").all()
-                     if t.kyc_country}
+        # Agregaty w SQL zamiast .all(): Payout rośnie codziennie (bot + import
+        # CSV), a to woła landing — każda zimna instancja płaciła pełny transfer
+        # tabeli z Supabase tylko po to, by policzyć sumę i maksimum w Pythonie.
+        pay_cnt, pay_sum, pay_max = (
+            session.query(func.count(Payout.id),
+                          func.coalesce(func.sum(Payout.trader_share), 0.0),
+                          func.coalesce(func.max(Payout.trader_share), 0.0))
+            .filter(Payout.paid == True).one())  # noqa: E712
+        countries_cnt = (
+            session.query(func.count(func.distinct(func.lower(func.trim(Trader.kyc_country)))))
+            .filter(Trader.kyc_status == "approved",
+                    Trader.kyc_country.isnot(None),
+                    func.trim(Trader.kyc_country) != "").scalar())
         data = {
             "accounts_total": session.query(Account).count(),
             "active_accounts": session.query(Account).filter(Account.status == "active").count(),
             "funded_accounts": session.query(Account).filter(Account.status == "funded").count(),
             "traders_total": session.query(Trader).filter(Trader.is_admin == False).count(),  # noqa: E712
-            "payouts_count": len(payouts),
+            "payouts_count": pay_cnt,
             # Pełne dolary: ".96" przy sześciocyfrowej kwocie poszerzał kafel LP aż do obcięcia.
-            "payouts_total_usd": int(round(sum(p.trader_share for p in payouts))),
-            "largest_payout_usd": int(round(max((p.trader_share for p in payouts), default=0.0))),
-            "countries_count": len(countries),
+            "payouts_total_usd": int(round(pay_sum)),
+            "largest_payout_usd": int(round(pay_max)),
+            "countries_count": countries_cnt,
         }
         _PUBLIC_STATS_CACHE.update(ts=now, data=data)
         return data
