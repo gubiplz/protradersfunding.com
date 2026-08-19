@@ -12,7 +12,7 @@ os.environ.setdefault("AUTO_SEED", "false")
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import auth, lead_mail, notify, sms, telegram  # noqa: E402
+from app import auth, lead_mail, notify, provisioning, sms, telegram  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
@@ -1833,6 +1833,84 @@ def test_stan_portalu_widac_na_karcie_leada():
         s.close()
     assert client.get(f"/api/admin/leads/{lead_id}",
                       headers=ADMIN).json()["portal_state"] == "password"
+
+
+@pytest.fixture
+def realny_provisioning(monkeypatch):
+    """Produkcja stoi na `MT5_PROVISIONING=true` — tu to samo, bez zmiany env."""
+    monkeypatch.setattr(provisioning, "real_provisioning_enabled", lambda s=None: True)
+
+
+def test_darmowe_konto_nie_czeka_na_rachunek_z_puli(realny_provisioning, maile):
+    """Przy realnym provisioningu konto z zakupu ląduje w `provisioning` i czeka,
+    aż poller weźmie dla niego rachunek z puli MT5; mail wychodzi dopiero wtedy.
+
+    Darmowy challenge nie ma prawa w tym utknąć i do 2026-08-19 utykał: pula na
+    $25k była pusta, więc lead z /freeaccount nie dostawał NICZEGO, a nigdzie
+    nie zapalało się światło, bo nikt nawet nie próbował wysłać maila. Za to
+    konto nikt nie zapłacił — rachunek z puli mu się nie należy.
+    """
+    _produkt_free()
+    dane = _zgloszenie(source="free-challenge")
+    lead_id = _wyslij(dane).json()["id"]
+
+    odp = client.post(f"/api/admin/leads/{lead_id}/free-account", headers=ADMIN)
+    assert odp.status_code == 200, odp.text
+
+    s = SessionLocal()
+    try:
+        tr = s.query(Trader).filter(Trader.email == dane["email"]).one()
+        konto = s.query(Account).filter(Account.trader_id == tr.id).one()
+        assert konto.status != "provisioning"
+        assert konto.platform_login and konto.platform_password and konto.platform_server
+        # Poświadczenia są zmyślone, więc feed nie ma się nimi nigdzie logować.
+        assert konto.mt5_backed is False
+        # Panel i dziennik dostają numer PO uzbrojeniu, nie ten sprzed niego.
+        assert odp.json()["login"] == konto.login
+    finally:
+        s.close()
+
+    ctx = [m for m in maile if m[0] == "challenge_granted" and m[1] == dane["email"]][-1][2]
+    assert "reset=" in (ctx.get("setup_url") or "")
+    assert ctx["platform_login"] and ctx["platform_password"]
+
+
+def test_darmowe_konto_rusza_z_wlaczonym_botem(realny_provisioning):
+    """Darmowe konto jest prezentem dla kogoś, kto nas nie zna — pusty wykres
+    przy pierwszym wejściu do portalu to zmarnowany pierwszy raz."""
+    _produkt_free()
+    dane = _zgloszenie(source="free-challenge")
+    lead_id = _wyslij(dane).json()["id"]
+    assert client.post(f"/api/admin/leads/{lead_id}/free-account",
+                       headers=ADMIN).status_code == 200
+
+    s = SessionLocal()
+    try:
+        tr = s.query(Trader).filter(Trader.email == dane["email"]).one()
+        konto = s.query(Account).filter(Account.trader_id == tr.id).one()
+        assert konto.bot_enabled is True and konto.bot_paused is False
+        assert konto.bot_started_at is not None and konto.bot_seed is not None
+    finally:
+        s.close()
+
+
+def test_mail_darmowego_konta_nie_obiecuje_promocji(maile):
+    """Ta sama treść obsługuje wszystkie granty, a domyślna mówi o „buy one,
+    get one free". Lead z /freeaccount niczego nie kupił, więc to zdanie byłoby
+    nieprawdą — i to nieprawdą o pieniądzach."""
+    _produkt_free()
+    dane = _zgloszenie(source="free-challenge")
+    lead_id = _wyslij(dane).json()["id"]
+    assert client.post(f"/api/admin/leads/{lead_id}/free-account",
+                       headers=ADMIN).status_code == 200
+
+    ctx = [m for m in maile if m[0] == "challenge_granted" and m[1] == dane["email"]][-1][2]
+    temat, tresc = notify._render("challenge_granted", ctx)
+    html = notify._render_html("challenge_granted", ctx, temat)
+    assert "free" in temat.lower()
+    for gdzie in (temat, tresc, html):
+        assert "bogo" not in gdzie.lower()
+        assert "buy one, get one free" not in gdzie.lower()
 
 
 def test_darmowe_konto_wymaga_admina():

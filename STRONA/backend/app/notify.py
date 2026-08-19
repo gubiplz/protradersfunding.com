@@ -87,7 +87,19 @@ def _bogo_upgrade(ctx: dict) -> bool:
         return False
 
 
+# Notatka, którą panel wpisuje grantowi z /freeaccount. Ta sama treść maila
+# obsługuje wszystkie granty, a domyślna mówi o promocji „buy one, get one
+# free" — do kogoś, kto niczego nie kupił, byłoby to po prostu nieprawdą.
+FREE_PROGRAM_NOTE = "free program"
+
+
+def _z_darmowego_programu(ctx: dict) -> bool:
+    return (ctx.get("grant_note") or "").strip().lower() == FREE_PROGRAM_NOTE
+
+
 def _bogo_subject(ctx: dict) -> str:
+    if _z_darmowego_programu(ctx):
+        return "Your free challenge account is open 🎉"
     return "Your upgraded challenge is live 🎁" if _bogo_upgrade(ctx) else "Your BOGO challenge is live 🎁"
 
 
@@ -95,6 +107,9 @@ def _bogo_intro(ctx: dict) -> str:
     """Konto przyznane przez admina opisujemy jako promocję BOGO, nigdy jako
     „aktywowane przez nasz zespół". Gdy znamy opłacony tier, mówimy o upgrade —
     to zdanie jest wtedy prawdziwe. Gdy go nie znamy, nie sugerujemy płatności."""
+    if _z_darmowego_programu(ctx):
+        return ("Your free challenge account is open and ready to trade. "
+                "Same rules and the same profit split as a purchased account.")
     if _bogo_upgrade(ctx):
         return (f"Your promotion has been applied. You paid for the "
                 f"{_tier(ctx.get('bogo_paid_size'))} tier and we upgraded your allocation to "
@@ -413,12 +428,15 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
         # Zakup z promocja tez jest upgrade'em — badge i tekst musza to powiedziec,
         # bo konto jest wieksze niz tier, ktory klient widzial w koszyku.
         upgraded = _bogo_upgrade(ctx)
-        badge = ((ctx.get("grant_note") or "BOGO activation complete") if granted
-                 else (f"{_promo_name()} applied" if upgraded else "Account ready"))
-        headline = (("Your upgraded challenge is live" if upgraded else "Your BOGO challenge is live")
-                    if granted else
-                    ("Your upgraded challenge account is ready" if upgraded
-                     else "Your challenge account is ready"))
+        if granted and _z_darmowego_programu(ctx):
+            badge, headline = "Free challenge", "Your free challenge account is open"
+        elif granted:
+            badge = ctx.get("grant_note") or "BOGO activation complete"
+            headline = "Your upgraded challenge is live" if upgraded else "Your BOGO challenge is live"
+        else:
+            badge = f"{_promo_name()} applied" if upgraded else "Account ready"
+            headline = ("Your upgraded challenge account is ready" if upgraded
+                        else "Your challenge account is ready")
         steps = ctx.get("steps")
         kind = f"{steps}-Step challenge on MT5" if steps else "Challenge on MT5"
         lead = _bogo_intro(ctx)

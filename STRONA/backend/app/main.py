@@ -6701,15 +6701,41 @@ def admin_lead_delete(lead_id: int):
 FREE_CHALLENGE_KEY = "2step-25k"
 
 
+def _darmowe_konto_od_reki(session, acc: Account, trader: Trader) -> None:
+    """Darmowe konto jest gotowe od kliknięcia — nie czeka na rachunek z puli.
+
+    Przy `MT5_PROVISIONING=true` konto z zakupu ląduje w statusie `provisioning`
+    i wisi tam, aż poller weźmie dla niego rachunek z puli MT5; dopiero wtedy
+    wychodzi mail z poświadczeniami (`provisioning.py`, gałęzie 2-4). Dla
+    darmowego challenge'a to była cisza w obie strony: lead nie dostawał nic,
+    a pusta pula zatrzymywała go tam na zawsze. Za to konto nikt nie zapłacił,
+    więc rachunek z puli mu się nie należy — dostaje poświadczenia wygenerowane
+    u nas i maila od razu, w tym samym kliknięciu.
+
+    Bot rusza WYŁĄCZNIE tutaj. Darmowe konto jest prezentem dla kogoś, kto nas
+    jeszcze nie zna: ma na nim być ruch od pierwszej minuty, a nie pusty wykres.
+    Konta kupione zostają przy decyzji właściciela.
+    """
+    if acc.status == "provisioning":
+        provisioning._apply_local_credentials(acc)
+        acc.status = "funded" if acc.phase == "funded" else "active"
+        session.commit()
+        notify.send(provisioning._creds_event(acc), trader.email,
+                    provisioning._creds_ctx(trader, acc))
+    tradebot.start(session, acc)
+
+
 @app.post("/api/admin/leads/{lead_id}/free-account",
           dependencies=[Depends(auth.require_admin)])
 def admin_lead_free_account(lead_id: int):
     """Darmowy challenge dla leada z /freeaccount — jednym kliknięciem z panelu.
 
-    Konto jest PRAWDZIWE: ta sama ścieżka co zakup (`billing.grant_challenge`
-    → `provisioning.create_account_from_order`), więc powstaje rachunek MT5,
-    a klient dostaje mail `challenge_granted` z linkiem do ustawienia hasła.
-    Trader zakłada się po drodze, jeśli leada jeszcze nie ma w bazie klientów.
+    Konto idzie tą samą ścieżką co zakup (`billing.grant_challenge` →
+    `provisioning.create_account_from_order`), a `_darmowe_konto_od_reki`
+    dokłada to, czym darmowy challenge różni się od kupionego: poświadczenia
+    od ręki zamiast kolejki po rachunek z puli, mail `challenge_granted`
+    z linkiem do ustawienia hasła i włączony bot. Trader zakłada się po drodze,
+    jeśli leada jeszcze nie ma w bazie klientów.
 
     Drugie kliknięcie odmawia (409). Panel wprawdzie chowa przycisk, gdy konto
     już jest, ale dwa kliknięcia w tę samą sekundę widzą jeszcze stary stan —
@@ -6726,12 +6752,17 @@ def admin_lead_free_account(lead_id: int):
                               Account.source == "grant").first())
         if istniejace:
             raise HTTPException(409, f"Already granted — account {istniejace.login}")
-        res = billing.grant_challenge(session, trader, FREE_CHALLENGE_KEY, "free program")
+        res = billing.grant_challenge(session, trader, FREE_CHALLENGE_KEY,
+                                      notify.FREE_PROGRAM_NOTE)
+        # Login czytamy z konta, nie z `res`: uzbrojenie nadaje świeży numer
+        # rachunku, więc numer sprzed niego trafiłby i do dziennika, i do panelu.
+        acc = session.get(Account, res["account_id"])
+        _darmowe_konto_od_reki(session, acc, trader)
         _zdarzenie(session, lead.id, "granted",
-                   f"{FREE_CHALLENGE_KEY} — login {res.get('login')}", actor="panel")
+                   f"{FREE_CHALLENGE_KEY} — login {acc.login}", actor="panel")
         session.commit()
         return {"granted": True, "trader_created": nowy,
-                "login": res.get("login"), "account_id": res.get("account_id")}
+                "login": acc.login, "account_id": acc.id}
     finally:
         session.close()
 
