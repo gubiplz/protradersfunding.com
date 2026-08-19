@@ -600,6 +600,27 @@ def _konto_nie_import(session):
     return or_(Account.trader_id.is_(None), ~Account.trader_id.in_(techniczni))
 
 
+def _konto_wreczone():
+    """Konto, które NAPRAWDĘ komuś wydaliśmy — bez wierszy archiwalnych.
+
+    Import ewidencji i Payout BOT zakładają konto pod wypłatę, która wydarzyła
+    się kiedyś indziej (`payout_import.zapisz`): `source="grant"`, więc dla
+    każdego guardu pytającego „czy ten człowiek już coś ode mnie dostał"
+    wygląda jak wręczony challenge. Adres tam bywa PRAWDZIWY (techniczny jest
+    tylko fallbackiem dla wierszy bez maila), więc filtr po `@imported.local`
+    tych wierszy nie łapie.
+
+    Skutek bez tego wyjątku: ktoś, komu kiedyś wypłaciliśmy pieniądze — czyli
+    najlepszy możliwy kandydat — jako jedyny nie mógł dostać darmowego
+    challenge'a, a panel twierdził, że konto już ma.
+
+    Gałąź na NULL jest konieczna: `!=` daje w SQL-u dla NULL-a wynik NULL, więc
+    bez niej wypadłyby wszystkie konta bez notatki, czyli kupione.
+    """
+    return or_(Account.grant_note.is_(None),
+               Account.grant_note != payout_import.IMPORT_NOTE)
+
+
 # --------------------------------------------------------------------------- #
 #  AUTH / onboarding                                                          #
 # --------------------------------------------------------------------------- #
@@ -3259,8 +3280,16 @@ def admin_payout_request_delete(req_id: int):
 def admin_traders(q: str | None = None, imported: int = 0):
     """Lista klientów (do wyszukiwarki przy przyznawaniu challenge'u).
 
-    Bez `q` zwraca WSZYSTKICH — panel buduje z tego listę wyboru, a cichy limit
-    ukrywałby starszych klientów i uniemożliwiał przyznanie im czegokolwiek.
+    Bez `q` zwraca wszystkich, do których da się cokolwiek wysłać — panel buduje
+    z tego listę wyboru, a cichy limit ukrywałby starszych klientów i
+    uniemożliwiał przyznanie im czegokolwiek.
+
+    Pomijani są dokładnie ci, dla których ta lista i tak jest ślepą uliczką:
+    zanonimizowani (`@removed.invalid`) i wiersze z ewidencji wypłat bez maila
+    (`@imported.local` — adres wymyślony przez nas, mail poleciałby w próżnię).
+    Ci drudzy wracają przy `?imported=1` i jest to JEDYNE wejście — panel do tego
+    endpointu przełącznika „imported" nie podpina, bo nie ma tu listy z
+    licznikiem, przy której mógłby usiąść.
     """
     session = SessionLocal()
     try:
@@ -6416,8 +6445,11 @@ def admin_leads(status: str | None = None, q: str | None = None):
                                  .filter(Order.trader_id.in_(idki),
                                          Order.status == "paid")
                                  .group_by(Order.trader_id).all())
+                # Tylko konta WRĘCZONE: panel gasi na tym przycisk „Free
+                # account", a wiersz z ewidencji wypłat nie jest niczym, co ten
+                # człowiek od nas dostał — jest tym, co my zapłaciliśmy jemu.
                 konta = dict(session.query(Account.trader_id, func.count(Account.id))
-                             .filter(Account.trader_id.in_(idki))
+                             .filter(Account.trader_id.in_(idki), _konto_wreczone())
                              .group_by(Account.trader_id).all())
 
         # Najbliższy otwarty termin per lead. Wiersz musi krzyczeć „na dziś",
@@ -6739,7 +6771,8 @@ def admin_lead_free_account(lead_id: int):
 
     Drugie kliknięcie odmawia (409). Panel wprawdzie chowa przycisk, gdy konto
     już jest, ale dwa kliknięcia w tę samą sekundę widzą jeszcze stary stan —
-    a to jest koszt, nie literówka.
+    a to jest koszt, nie literówka. Konta archiwalne z ewidencji wypłat guard
+    pomija (`_konto_wreczone`) — one nie są niczym, co ten człowiek dostał.
     """
     session = SessionLocal()
     try:
@@ -6749,7 +6782,7 @@ def admin_lead_free_account(lead_id: int):
         trader, nowy = _trader_po_mailu(session, lead.email)
         istniejace = (session.query(Account)
                       .filter(Account.trader_id == trader.id,
-                              Account.source == "grant").first())
+                              Account.source == "grant", _konto_wreczone()).first())
         if istniejace:
             raise HTTPException(409, f"Already granted — account {istniejace.login}")
         res = billing.grant_challenge(session, trader, FREE_CHALLENGE_KEY,

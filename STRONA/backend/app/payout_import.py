@@ -191,7 +191,7 @@ def zapisz(session, w: dict, login_seq: int) -> tuple[Payout, int]:
             # Za tym kontem nie stoi żywy rachunek MT5 — feed musi je pominąć,
             # inaczej próbowałby logować się loginem, którego u brokera nie ma.
             mt5_backed=False,
-            source="grant", grant_note="imported from records",
+            source="grant", grant_note=IMPORT_NOTE,
             product_key=prod.key, preset=prod.key,
             initial_balance=prod.account_size, steps=prod.steps,
             profit_target_p1=prod.profit_target_p1, profit_target_p2=prod.profit_target_p2,
@@ -213,7 +213,7 @@ def zapisz(session, w: dict, login_seq: int) -> tuple[Payout, int]:
     wyplata = Payout(
         account_id=konto.id, ts=w["date"], profit_amount=w["profit_amount"],
         trader_share=w["amount_usd"], paid=True, method="bank transfer",
-        note=w["note"] or "imported from records",
+        note=w["note"] or IMPORT_NOTE,
         # BEZ cert_tokenu: certyfikat publiczny wystawia się osobno, pod
         # potwierdzoną wypłatę (Payouts -> Generate). Payout BOT dokłada go sam
         # zaraz po zapisie — to jedyne miejsce, gdzie te dwie ścieżki się różnią.

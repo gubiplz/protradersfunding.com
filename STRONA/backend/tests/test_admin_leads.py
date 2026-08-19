@@ -1756,6 +1756,44 @@ def test_drugie_kliniecie_nie_daje_drugiego_konta():
     assert _z_listy(lead_id)["accounts"] == 1
 
 
+def test_stara_wyplata_nie_odbiera_prawa_do_darmowego_konta():
+    """Kto kiedyś dostał od nas wypłatę, jest najlepszym kandydatem — a był
+    jedynym, który nie mógł dostać darmowego challenge'a.
+
+    Import ewidencji zakłada pod archiwalną wypłatę konto `source="grant"`
+    (`payout_import.zapisz`), a adres bierze z CSV-ki, więc bywa PRAWDZIWY —
+    filtr po `@imported.local` takiego wiersza nie łapie. Guard 409 i licznik
+    `accounts`, po którym panel gasi przycisk, widziały w tym wręczony
+    challenge. Człowiek czytał „account opened", choć niczego nie dostał: to my
+    zapłaciliśmy jemu.
+    """
+    _produkt_free()
+    dane = _zgloszenie(source="free-challenge")
+    csv = ("full_name,amount_usd,date,account_size,program,email,note\n"
+           f"Jan Kowalski,1200,2026-05-04,25000,2step,{dane['email']},\n")
+    assert client.post("/api/admin/payouts/import", headers=ADMIN,
+                       json={"csv": csv, "commit": True}).json()["added"] == 1
+
+    lead_id = _wyslij(dane).json()["id"]
+    assert _z_listy(lead_id)["accounts"] == 0, "wiersz z ewidencji gasił przycisk w panelu"
+
+    odp = client.post(f"/api/admin/leads/{lead_id}/free-account", headers=ADMIN)
+    assert odp.status_code == 200, odp.text
+    # Konto archiwalne zostaje na miejscu: to zapis księgowy pod wypłatę, a nie
+    # duplikat do posprzątania. Od teraz liczy się tylko to wręczone.
+    assert _z_listy(lead_id)["accounts"] == 1
+    s = SessionLocal()
+    try:
+        tr = s.query(Trader).filter(Trader.email == dane["email"]).one()
+        assert s.query(Account).filter(Account.trader_id == tr.id).count() == 2
+    finally:
+        s.close()
+
+    # ...i drugi klik dalej odmawia — wyjątek dotyczy archiwum, nie guardu.
+    assert client.post(f"/api/admin/leads/{lead_id}/free-account",
+                       headers=ADMIN).status_code == 409
+
+
 @pytest.fixture
 def maile(monkeypatch):
     """Podstawka pod `send`, nie na nim — `send` w requeście tylko kolejkuje."""
