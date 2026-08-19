@@ -145,3 +145,42 @@ def test_stara_baza_dostaje_kolumny_karty_leada():
         s.close()
 
     _add_missing_columns()   # idempotencja: kazdy zimny start to powtarza
+
+
+def test_stara_baza_dostaje_kolumny_weryfikacji():
+    """To samo na `traders` — tabeli, ktora na produkcji stoi od pierwszej
+    rejestracji, wiec KAZDA kolumna dopisana do modelu musi trafic do
+    `_NEW_COLUMNS`.
+
+    Lokalnie brak wpisu nie boli, bo testowa baza powstaje w calosci z
+    `create_all` — model i tabela zawsze sie zgadzaja. Na produkcji ta sama
+    zmiana kladzie dowolny SELECT z traderow, czyli caly panel i portal naraz.
+    Kolumne `kyc_requested_at` (prosba o KYC otwiera weryfikacje) wypuscilismy
+    wlasnie tak i panel oddal 500.
+    """
+    from app.db import _add_missing_columns, _NEW_COLUMNS
+    from app.models import Trader
+
+    nowe = {"kyc_requested_at", "kyc_submitted_at", "kyc_reviewed_at"}
+    assert nowe <= set(_NEW_COLUMNS.get("traders", {})), \
+        "kolumny weryfikacji musza byc zadeklarowane w _NEW_COLUMNS"
+
+    with engine.begin() as conn:
+        for kolumna in nowe:
+            conn.execute(text(f"ALTER TABLE traders DROP COLUMN {kolumna}"))
+
+    assert not (nowe & {c["name"] for c in inspect(engine).get_columns("traders")}), \
+        "test nie mierzy niczego, jesli kolumny zostaly w tabeli"
+
+    init_db()
+
+    maja = {c["name"] for c in inspect(engine).get_columns("traders")}
+    assert nowe <= maja, f"init_db nie oddal kolumn weryfikacji: {nowe - maja}"
+
+    s = SessionLocal()
+    try:
+        s.query(Trader).all()
+    finally:
+        s.close()
+
+    _add_missing_columns()
