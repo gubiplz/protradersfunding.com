@@ -888,6 +888,48 @@ def test_kyc_reject_i_historia_decyzji():
         assert wpis["status"] == "approved"
 
 
+def test_prosba_o_kyc_z_panelu(monkeypatch):
+    """Klient po ewaluacji, który nigdy nie wszedł w zakładkę weryfikacji, nie
+    dostaje od nas w tej sprawie ŻADNEGO maila — wychodzi to dopiero przy
+    wniosku o wypłatę, którym trzeba wtedy odmówić. Przycisk w panelu jest
+    jedynym sposobem, żeby go poprosić, więc jego bramki muszą się zgadzać
+    z tymi z `submit_kyc`: inaczej mail zaprasza na ekran, który odbija 403.
+    """
+    maile = []
+    monkeypatch.setattr(notify, "_send_teraz",
+                        lambda event, to, ctx=None: maile.append((event, to, ctx or {})))
+    tid, h = _trader("kyc-prosba@test.pl", "Prosba Kyc")
+    with TestClient(app) as c:
+        assert c.post(f"/api/admin/kyc/{tid}/request", headers=ADMIN_H).status_code == 400
+        assert not maile, "prośba bez konta funded prowadzi klienta do 403"
+
+        _kyc_ready(tid)
+        r = c.post(f"/api/admin/kyc/{tid}/request", headers=ADMIN_H)
+        assert r.status_code == 200, r.text
+        assert maile[-1][0] == "kyc_requested" and maile[-1][1] == "kyc-prosba@test.pl"
+        assert maile[-1][2]["again"] is False
+
+        # Panel bierze stąd i widoczność przycisku, i ślad, że już prosiliśmy.
+        t = c.get(f"/api/admin/traders/{tid}/journal", headers=ADMIN_H).json()["trader"]
+        assert t["kyc_available"] is True and t["kyc_requested_at"]
+
+        c.post("/api/me/kyc", headers=h, json={"full_name": "Prosba Kyc",
+                                               "country": "PL", "id_type": "passport"})
+        assert c.post(f"/api/admin/kyc/{tid}/request",
+                      headers=ADMIN_H).status_code == 400, "dokumenty już są"
+        c.post(f"/api/admin/kyc/{tid}/approve", headers=ADMIN_H)
+        assert c.post(f"/api/admin/kyc/{tid}/request",
+                      headers=ADMIN_H).status_code == 400, "już zweryfikowany"
+
+        # Po odrzuceniu prośba znów wolna — to ponaglenie do poprawki.
+        c.post(f"/api/admin/kyc/{tid}/reject", headers=ADMIN_H)
+        assert c.post(f"/api/admin/kyc/{tid}/request", headers=ADMIN_H).status_code == 200
+        assert maile[-1][2]["again"] is True
+
+        assert c.post("/api/admin/kyc/9999999/request", headers=ADMIN_H).status_code == 404
+        assert c.post(f"/api/admin/kyc/{tid}/request").status_code in (401, 403)
+
+
 def test_ui_prefs_zapisywane_na_koncie():
     """PATCH /api/me przyjmuje ui_prefs (JSON, np. sortowanie tabel) i oddaje
     je w /api/auth/me — preferencja trzyma się konta, nie przeglądarki."""

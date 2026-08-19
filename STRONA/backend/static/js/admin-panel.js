@@ -2435,7 +2435,31 @@ function journalChips(t){
   chips.push(`<span class="chip">${t.logins_7d||0} sign-in${t.logins_7d===1?'':'s'} in 7 days</span>`);
   if(t.last_seen_at&&t.last_seen_at!==t.last_login_at)chips.push(`<span class="chip">last seen ${dstr(t.last_seen_at)}</span>`);
   if(t.kyc_status)chips.push(`<span class="chip">KYC <b>${esc(t.kyc_status)}</b></span>`);
+  if(t.kyc_requested_at)chips.push(`<span class="chip">KYC asked ${dstr(t.kyc_requested_at)}</span>`);
   return `<div class="chip-row" style="margin-bottom:12px">${chips.join('')}</div>`;
+}
+/* Prosba o weryfikacje wysylana z reki. Klient, ktory przeszedl ewaluacje i nigdy
+   nie wszedl w zakladke KYC, nie dostaje od nas w tej sprawie ZADNEGO maila —
+   wychodzi to dopiero przy wniosku o wyplate, ktory trzeba wtedy odrzucic.
+   Przycisku nie ma tam, gdzie serwer i tak odmowi: bez konta funded
+   (`kyc_available`) oraz przy pending/approved, bo dokumenty juz sa. */
+function kycAskBtn(t,gdzie){
+  if(!t||!t.kyc_available||t.kyc_status==='approved'||t.kyc_status==='pending')return '';
+  return `<button class="btn-o sm" style="margin-top:10px" onclick="requestKyc(${t.id},'${jsq(t.email||'')}','${gdzie}')">`
+    +`${t.kyc_requested_at?'Ask for verification again':'Ask for verification'}</button>`;
+}
+async function requestKyc(tid,email,gdzie){
+  if(!await askConfirm({title:'Ask this client to verify their identity?',
+    body:'They get an e-mail with a link to the Verification tab. Nothing on the '
+      +'account changes — this only asks for the documents.',
+    ok:'Send the request'}))return;
+  try{await api(`/api/admin/kyc/${tid}/request`,{method:'POST'});
+    toast('Verification request sent.','ok');
+    /* Odswiezamy TE szuflade, z ktorej padlo klikniecie: karta klienta i dziennik
+       renderuja sie do tego samego overlaya, wiec zgadywanie zamienialoby jedna
+       w druga. */
+    if(gdzie==='journal')openTraderJournal(tid,email); else renderClientCard(tid,email);
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 function journalTimeline(items){
   if(!(items||[]).length)return '<p class="muted" style="font-size:12.5px">Nothing recorded yet.</p>';
@@ -2463,14 +2487,18 @@ async function renderClientCard(tid,email){
     ${journalChips(t)}
     <div class="kv"><span>E-mail</span><b>${esc(t.email||email||'—')}</b></div>
     <div class="kv"><span>Signed up</span><b>${t.created_at?dstr(t.created_at):'—'}</b></div>
-    <button class="btn-o sm" style="margin-top:10px" onclick="openTraderJournal(${tid},'${esc(t.email||email||'')}')">Full activity journal</button>`;
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn-o sm" style="margin-top:10px" onclick="openTraderJournal(${tid},'${esc(t.email||email||'')}')">Full activity journal</button>
+      ${kycAskBtn(t,'card')}
+    </div>`;
 }
 async function openTraderJournal(tid,email){
   let d; try{d=await api(`/api/admin/traders/${tid}/journal`)}catch(e){toast('Error: '+e.message,'err');return}
   const t=d.trader||{};
   openOver(`Journal · ${t.email||email||('trader #'+tid)}`,
     journalChips(t)
-    +`<p class="muted" style="font-size:12.5px;margin-bottom:2px">Everything this client did — sign-ins, portal visits, orders, payouts, tickets — newest first.</p>`
+    +`<div style="display:flex">${kycAskBtn(t,'journal')}</div>`
+    +`<p class="muted" style="font-size:12.5px;margin:2px 0">Everything this client did — sign-ins, portal visits, orders, payouts, tickets — newest first.</p>`
     +journalTimeline(d.items));
 }
 

@@ -3333,6 +3333,7 @@ _DZIENNIK_OPISY = {
     "portal_invite": "Portal invite generated",
     "pay_link_opened": "Opened the payment link",
     "kyc_submitted": "Submitted KYC documents",
+    "kyc_requested": "Asked for identity verification (e-mail from the panel)",
     "affiliate_claim": "Claimed affiliate commission",
     "achievement_reward": "Claimed an achievement reward",
     "checkin": "Daily check-in",
@@ -3400,6 +3401,9 @@ def admin_trader_journal(trader_id: int):
         odebranie = (session.query(func.max(TelemetryEvent.created_at))
                      .filter(TelemetryEvent.trader_id == trader_id,
                              TelemetryEvent.name == "account_claimed").scalar())
+        prosba_kyc = (session.query(func.max(TelemetryEvent.created_at))
+                      .filter(TelemetryEvent.trader_id == trader_id,
+                              TelemetryEvent.name == "kyc_requested").scalar())
         dzis = _dzis_po_warszawsku()
 
         items: list[dict] = []
@@ -3496,6 +3500,12 @@ def admin_trader_journal(trader_id: int):
             "trader": {"id": tr.id, "email": tr.email, "full_name": tr.full_name,
                        "created_at": tr.created_at.isoformat() if tr.created_at else None,
                        "kyc_status": tr.kyc_status,
+                       # Bramka z `submit_kyc`: bez konta funded prośba o KYC
+                       # wysłałaby klienta na ekran, który mu odmówi (403).
+                       # Panel chowa po tym przycisk, zamiast ładować w 400.
+                       "kyc_available": kyc_dostepne(session, trader_id),
+                       "kyc_requested_at": (prosba_kyc.isoformat()
+                                            if prosba_kyc else None),
                        "awaiting_claim": bool(tr.must_set_password),
                        "invited_at": zaproszenie.isoformat() if zaproszenie else None,
                        "claimed_at": odebranie.isoformat() if odebranie else None,
@@ -3995,6 +4005,53 @@ def admin_reject_kyc(trader_id: int, payload: KycRejectIn | None = None):
         notify.send("kyc_rejected", tr.email,
                     {"name": tr.full_name or tr.email, "reason": powod})
         return {"rejected": trader_id, "reason": powod}
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/kyc/{trader_id}/request", dependencies=[Depends(auth.require_admin)])
+def admin_request_kyc(trader_id: int):
+    """Prośba o weryfikację wysłana Z RĘKI — dla klienta, który nie złożył KYC.
+
+    Sam z siebie panel o KYC nie przypomina: trader dostaje maila dopiero po
+    decyzji (approve/reject), więc ktoś, kto przeszedł ewaluację i nigdy nie
+    wszedł w zakładkę weryfikacji, siedzi cicho w nieskończoność — a bez KYC nie
+    wypłacimy mu pieniędzy. Zwykle wychodzi to dopiero przy wniosku o wypłatę,
+    którym trzeba wtedy odmówić.
+
+    Bramka `kyc_dostepne` jest tu ta sama co w `submit_kyc`: bez niej mail
+    zapraszałby na ekran, który klientowi odpowie 403 (`KYC_WYMAGA_FUNDED`).
+    `pending` i `approved` odpadają, bo nie ma o co prosić — dokumenty już są.
+    Przy `rejected` prośba jest dozwolona: to ponaglenie do poprawki.
+    """
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader_id)
+        if not tr:
+            raise HTTPException(404, "Trader not found")
+        if tr.kyc_status == "approved":
+            raise HTTPException(400, "This client is already verified")
+        if tr.kyc_status == "pending":
+            raise HTTPException(400, "Documents are already in — the application "
+                                     "is waiting for review")
+        if not kyc_dostepne(session, trader_id):
+            raise HTTPException(400, "Verification opens only after an account is "
+                                     "funded — this client has none yet")
+        base = get_settings().app_base_url
+        notify.send("kyc_requested", tr.email,
+                    {"name": tr.full_name or tr.email,
+                     "again": tr.kyc_status == "rejected",
+                     "portal_url": f"{base}/portal"})
+        telemetry.track("kyc_requested", tr.id)
+        # Ślad w historii leada, jak przy portal invite — „czy myśmy go o to
+        # prosili?" pada tydzień później i musi mieć odpowiedź.
+        lead = (session.query(Lead)
+                .filter(func.lower(Lead.email) == tr.email.lower()).one_or_none())
+        if lead:
+            _zdarzenie(session, lead.id, "email", "KYC verification requested",
+                       actor="panel")
+            session.commit()
+        return {"ok": True, "email": tr.email, "kyc_status": tr.kyc_status}
     finally:
         session.close()
 

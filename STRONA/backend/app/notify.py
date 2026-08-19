@@ -243,6 +243,17 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             + (f"\n\nReason: {ctx.get('reason')}" if ctx.get("reason") else "")
             + "\n\nPlease review your details and submit the verification again from your dashboard.",
         ),
+        "kyc_requested": (
+            "Verify your identity to unlock payouts",
+            f"{name}, your account is funded, so the last step before we can send "
+            f"you money is identity verification — we need it to pay out."
+            + ("\n\nYour previous submission could not be verified, so please "
+               "check the details and send it again."
+               if ctx.get("again") else "")
+            + f"\n\nOpen the Verification tab in your portal and upload your "
+              f"documents — it takes a couple of minutes:\n"
+              f"{ctx.get('portal_url')}?view=kyc",
+        ),
         "ticket_reply": (
             f"Support replied to your ticket #{ctx.get('ticket_id')} 💬",
             f"{name}, our support team replied to your ticket "
@@ -581,6 +592,18 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                        + " Please review your details and submit the verification again."),
             _button_html("Retry Verification", f"{portal}?view=kyc"),
         ]
+    elif event == "kyc_requested":
+        parts = [
+            _head_html("Verification", "One step left before your payout",
+                       f"{name}, your account is funded — the last thing we need "
+                       f"before sending you money is identity verification."
+                       + (" Your previous submission could not be verified, so "
+                          "please check the details and send it again."
+                          if ctx.get("again") else "")),
+            _button_html("Verify Your Identity", f"{portal}?view=kyc"),
+            _note_html("It takes a couple of minutes: your ID document and proof "
+                       "of address. Payout requests are released once it's done."),
+        ]
     elif event == "password_reset":
         parts = [
             _head_html(None, "Reset your password",
@@ -679,7 +702,10 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
 # Zdarzenia TRANSAKCYJNE (welcome, credentials/challenge_granted z poświadczeniami
 # MT5 za opłacony produkt, verify_email, password_reset, order_awaiting_payment
 # z instrukcją wpłaty do WŁASNEGO zamówienia klienta) celowo NIE mają wpisu —
-# muszą dojść zawsze, niezależnie od preferencji.
+# muszą dojść zawsze, niezależnie od preferencji. Tak samo `kyc_requested`:
+# wysyła je admin ręcznie, jednej osobie, żeby odblokować JEJ pieniądze —
+# zjedzenie tego przez przełącznik „updates" znaczyłoby, że klient czeka na
+# wypłatę, a my myślimy, że poprosiliśmy.
 _PREF_BY_EVENT = {
     "kyc_approved": "notify_updates", "kyc_rejected": "notify_updates",
     "ticket_reply": "notify_updates",
