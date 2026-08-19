@@ -154,6 +154,37 @@ def test_sms_tez_mowi_czego_mu_brakuje(poczta):
     assert "TWILIO_SID" in braki and "SMS_TELEGRAM_URL" not in braki
 
 
+def test_kanal_do_klienta_tez_ma_swoj_pasek(monkeypatch):
+    """Kanał leadowy miał wskaźnik braków od początku, a ten — którym idą
+    poświadczenia MT5, resety hasła i potwierdzenia wypłat — nie miał żadnego.
+    Jego awaria nie objawiała się NICZYM aż do „nie dostałem maila" od klienta.
+    """
+    from app import notify
+
+    monkeypatch.setattr(notify.settings, "smtp_host", "", raising=False)
+    monkeypatch.setattr(notify.settings, "mail_from", "", raising=False)
+    assert notify.czego_brakuje() == ["SMTP_HOST", "MAIL_FROM"]
+    assert client.get("/api/stats", headers=ADMIN).json()["notify_mail_missing"] \
+        == ["SMTP_HOST", "MAIL_FROM"]
+
+    monkeypatch.setattr(notify.settings, "smtp_host", "smtp.probe.test", raising=False)
+    monkeypatch.setattr(notify.settings, "mail_from", "no-reply@ptf.test", raising=False)
+    assert notify.czego_brakuje() == []
+
+
+def test_nadawca_w_domenie_local_liczy_sie_jako_brak(monkeypatch):
+    """Domyślne `no-reply@propfunding.local` wygląda w configu jak ustawiona
+    wartość, ale `.local` to domena, której żaden dostawca nie podpisze — każdy
+    mail spod niej wraca odrzucony. To brak konfiguracji w przebraniu i pasek ma
+    go pokazywać, zamiast świecić na zielono przy nadawcy nie do doręczenia."""
+    from app import notify
+
+    monkeypatch.setattr(notify.settings, "smtp_host", "smtp.probe.test", raising=False)
+    monkeypatch.setattr(notify.settings, "mail_from",
+                        "no-reply@propfunding.local", raising=False)
+    assert notify.czego_brakuje() == ["MAIL_FROM"]
+
+
 # --- nadawca: tu pomyłka zdradza, kto naprawdę pisze ---------------------------
 
 def test_mail_wychodzi_spod_marki_z_landingu(poczta):

@@ -171,6 +171,24 @@ measureTopbar();
 addEventListener('resize',measureTopbar);
 
 let VIEW='overview';
+
+/* ---------- wiersze z importu ewidencji wyplat ----------
+   Za adresem `…@imported.local` nie stoi klient, ktory sie zapisal, tylko wiersz
+   z CSV-ki. Sa potrzebne (prawdziwe wyplaty, prawdziwe certyfikaty), ale na
+   listach, po ktorych szuka sie LUDZI, topia prawdziwe konta. Domyslnie ukryte,
+   z jednym przelacznikiem na caly panel -- pytanie brzmi "czy dzis patrze takze
+   na archiwum", a nie "czy patrze na nie w tej jednej tabeli". */
+let IMPORTED=localStorage.getItem('pf_admin_imported')==='1';
+const impQ=(sep='?')=>IMPORTED?sep+'imported=1':'';
+const impPill=()=>` · <span class="statlink" onclick="toggleImported()"
+  title="Rows imported from the payout records: real payouts, but nobody signed up for them"
+  >imported ${IMPORTED?'shown':'hidden'}</span>`;
+function toggleImported(){
+  IMPORTED=!IMPORTED;
+  localStorage.setItem('pf_admin_imported',IMPORTED?'1':'0');
+  go(VIEW);   // filtr siedzi na serwerze, wiec samo przerysowanie nic nie zmieni
+}
+
 /* Ekran przejscia: paski trzymaja wysokosc widoku, kolko w kolorze akcentu mowi,
    ze cos sie dzieje. Same paski na ciemnym motywie czytaly sie jako pusty ekran. */
 const LOADING_HTML=(h=260)=>`<div class="view-load">
@@ -194,6 +212,76 @@ const LEADS_SKEL=()=>`<div class="view-load">
    biezacy widok; to rzadka sciezka, wiec dodatkowe zapytanie nic nie kosztuje. */
 let PRZEJSCIE = 0;
 
+/* ---------- adres pamieta, gdzie jestes ----------
+   F5 wyrzucalo na Overview i kazalo szukac swojego miejsca od nowa. Adres
+   `#widok:filtr?q=fraza` (np. `#leads:free?q=kowalski`) niesie caly stan listy:
+   `:filtr` znika przy `all`, `?q=` przy pustej frazie, wiec typowy adres zostaje
+   krotki i czytelny. Kodujemy tylko `q` — wartosci filtrow to `[a-z_]+`. */
+const STAN_POL={
+  accounts:['_accQ','_accFilter'], activity:['_jrnQ','_jrnFilter'],
+  kyc:['_kycQ','_kycFilter'],      leads:['_leadQ','_leadFilter'],
+  mail:['_mailQ','_mailFilter'],   orders:['_ordQ','_ordFilter'],
+  payouts:['_payQ','_payFilter'],  pool:['_poolQ','_poolFilter'],
+  tickets:['_tickQ','_tickFilter'],
+};
+let OSTATNI_HASZ='', ZAPIS_T=0, PIERWSZY_ZAPIS=true;
+
+const haszZe=st=>st.view+(st.filter&&st.filter!=='all'?':'+st.filter:'')
+                        +(st.q?'?q='+encodeURIComponent(st.q):'');
+
+function budujHasz(){
+  const [kluczQ,kluczF]=STAN_POL[VIEW]||[];
+  return haszZe({view:VIEW, filter:kluczF?(window[kluczF]||'all'):'all',
+                 q:kluczQ?(window[kluczQ]||''):''});
+}
+function czytajHasz(){
+  const h=location.hash.slice(1);
+  if(!h)return null;
+  const i=h.indexOf('?');
+  const lewa=i<0?h:h.slice(0,i);
+  const q=i<0?'':(new URLSearchParams(h.slice(i+1)).get('q')||'');
+  const j=lewa.indexOf(':');
+  const view=j<0?lewa:lewa.slice(0,j);
+  /* Biala lista na TITLES, nie na VIEWS: w VIEWS siedzi `_kycRender`, ktore NIE
+     jest async — `go('_kycRender')` rzucilby na `undefined.then(...)` i zostawil
+     bialy ekran. Nieznany hasz oddaje null i konczy sie cichym Overview. */
+  return TITLES[view]?{view, filter:j<0?'all':lewa.slice(j+1), q}:null;
+}
+function ustawStan(st){
+  const [kluczQ,kluczF]=STAN_POL[st.view]||[];
+  if(kluczF)window[kluczF]=st.filter;
+  if(kluczQ)window[kluczQ]=st.q;
+}
+function zapiszStan(push){
+  const nowy=budujHasz();
+  /* Pierwsze przejscie w sesji nie zostawia za soba wpisu: Wstecz ma wyjsc
+     z panelu, a nie wracac na adres bez hasza, ktory nic nie znaczy. Flaga
+     gasnie PRZED straznikiem — po F5 adres juz niesie wlasciwy hasz, wiec
+     startowe `go()` konczy sie na strazniku i flaga zostawalaby zapalona,
+     a nastepne przelaczenie zakladki nadpisywaloby wpis zamiast go dolozyc. */
+  const pierwszy=PIERWSZY_ZAPIS; PIERWSZY_ZAPIS=false;
+  /* Straznik robi z powtorek koszt zerowy — inaczej auto-odswiezanie co 12 s
+     waliloby w limit `history` w Safari, a pisanie w wyszukiwarce zrobiloby
+     jeden wpis w historii na znak. */
+  if(nowy===OSTATNI_HASZ)return;
+  OSTATNI_HASZ=nowy;
+  try{history[push&&!pierwszy?'pushState':'replaceState'](null,'','/admin?pwa=1#'+nowy)}catch(_){}
+}
+const zapiszPozniej=()=>{clearTimeout(ZAPIS_T);ZAPIS_T=setTimeout(()=>zapiszStan(false),250)};
+/* Filtry to kilkanascie wpisanych w HTML `onclick="window._xFilter=…;renderX()"`
+   i nie wszystkie siedza w `.seg` (banner terminow, statlink, arkusz akcji na
+   telefonie). Jeden listener na dokumencie lapie kazdy z nich bez dotykania
+   kilkunastu miejsc; `setTimeout(…,0)` czeka, az inline onclick ustawi globala. */
+document.addEventListener('click',()=>setTimeout(()=>zapiszStan(false),0));
+addEventListener('hashchange',()=>{
+  const h=location.hash.slice(1);
+  if(h===OSTATNI_HASZ)return;   // wlasny zapis, nie ruch Wstecz/Dalej
+  OSTATNI_HASZ=h;               // bzdurny hasz tez: go() nizej go nadpisze
+  const st=czytajHasz();
+  if(st)ustawStan(st);
+  go(st?st.view:'overview');
+});
+
 function go(v){
   /* Re-render TEGO SAMEGO widoku (po akcji, undo, odswiezeniu) nie moze rzucac
      admina na gore listy: stara tresc zostaje do przyjscia danych (bez szkieletu,
@@ -201,7 +289,9 @@ function go(v){
      miejsce. Nowa zakladka dostaje szkielet jak dotad. */
   const samWidok=v===VIEW&&!$('view').querySelector('.view-load');
   const wrocDo=samWidok?scrollY:0;
+  const innyWidok=v!==VIEW;
   VIEW=v;
+  zapiszStan(innyWidok);   // wpis w historii tylko na zmiane zakladki
   document.querySelectorAll('.sb-link[data-v],.botnav-btn[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const t=TITLES[v]||['',''];
   $('pg-title').textContent=t[0]; $('pg-crumb').textContent=t[1];
@@ -365,6 +455,7 @@ const VIEWS={
       <span class="sys ${s.stripe==='mock'?'warn':''}"><span class="dot"></span>Payments: <b>${esc(s.stripe)}</b></span>
       <span class="sys"><span class="dot"></span>Provisioning queue: <b>${s.provisioning??0}</b></span>
       <span class="sys"><span class="dot"></span>Pool free: <b>${s.pool_free??0}</b></span>
+      ${leadChannel('Client e-mail',s.notify_mail_missing)}
       ${leadChannel('Lead e-mail',s.lead_mail_missing)}
       ${leadChannel('Lead SMS',s.lead_sms_missing)}
     </div>
@@ -395,14 +486,14 @@ const VIEWS={
  },
 
  async accounts(){
-  const list=await api('/api/accounts');
+  const list=await api('/api/accounts'+impQ());
   window._accs=list;
   window._accFilter=window._accFilter||'all';
   renderAccounts();
  },
 
  async activity(){
-  window._jrn=(await api('/api/admin/journal')).items||[];
+  window._jrn=(await api('/api/admin/journal'+impQ())).items||[];
   window._jrnFilter=window._jrnFilter||'all';
   renderActivity();
  },
@@ -415,7 +506,7 @@ const VIEWS={
  },
 
  async kyc(){
-  window._kycData=await api('/api/admin/kyc');
+  window._kycData=await api('/api/admin/kyc'+impQ());
   renderKyc();
  },
 
@@ -458,7 +549,7 @@ const VIEWS={
     <div class="toolbar" style="margin-bottom:10px">
       <div class="seg">${[['all','All'],['approved','Approved'],['rejected','Rejected']]
         .map(([k,l])=>`<button class="${kf===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._kycFilter='${kf===k?'all':k}';renderKyc()">${l}</button>`).join('')}</div>
-      <span class="count-pill">${hist.length} of ${histAll.length}</span>
+      <span class="count-pill">${hist.length} of ${histAll.length}${impPill()}</span>
     </div>
     ${hist.length?`<div class="tbl-wrap rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.kyc">
       <thead><tr><th>Reviewed</th><th>Trader</th><th>Country</th><th>Document</th><th>Status</th><th class="no-sort">Documents</th><th class="no-sort"></th></tr></thead>
@@ -699,10 +790,12 @@ function qFocus(id,pos){
    sits inside the field on the right whenever there is anything to clear. */
 function searchBox(id,stateKey,render,ph){
   const val=window[stateKey]||'';
+  /* Jedyny generator pol wyszukiwania w panelu — dopisanie tu `zapiszPozniej()`
+     sprawia, ze wpisana fraza przezywa F5 we WSZYSTKICH widokach naraz. */
   return `<span class="q-wrap"><input class="inp" id="${id}" placeholder="${ph}" value="${esc(val)}"
-      oninput="window.${stateKey}=this.value;const p=this.selectionStart;${render}();qFocus('${id}',p)">
+      oninput="window.${stateKey}=this.value;const p=this.selectionStart;${render}();qFocus('${id}',p);zapiszPozniej()">
     ${val?`<button class="q-x" type="button" aria-label="Clear search" title="Clear"
-      onclick="window.${stateKey}='';${render}();qFocus('${id}')">&times;</button>`:''}</span>`;
+      onclick="window.${stateKey}='';${render}();qFocus('${id}');zapiszStan(false)">&times;</button>`:''}</span>`;
 }
 
 /* ---------- mail: dziennik doręczeń ----------
@@ -789,7 +882,7 @@ function renderAccounts(){
     <div class="toolbar">
       ${searchBox('acc-q','_accQ','renderAccounts','Search login, trader, email or plan…')}
       <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._accFilter='${f===k?'all':k}';renderAccounts()">${l}</button>`).join('')}</div>
-      <span class="count-pill">${rows.length} of ${list.length}</span>
+      <span class="count-pill">${rows.length} of ${list.length}${impPill()}</span>
     </div>
     ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.accounts.v2">
       <thead><tr><th>Created</th><th>Paid</th><th>Login</th><th>Trader</th><th>Plan</th><th>Phase</th><th>Status</th>
@@ -2406,7 +2499,7 @@ function renderActivity(){
       <div class="seg">${JRN_FILTERS.map(([k,l])=>
         `<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''}
           onclick="window._jrnFilter='${f===k?'all':k}';renderActivity()">${l}</button>`).join('')}</div>
-      <span class="count-pill">${rows.length} of ${all.length}</span>
+      <span class="count-pill">${rows.length} of ${all.length}${impPill()}</span>
     </div>`
     +(rows.length?`<div class="tbl-wrap rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.activity">
       <thead><tr><th>Client</th><th>Claim</th><th>Last sign-in</th><th>7 days</th><th>Last seen</th><th>Accounts</th><th>KYC</th></tr></thead>
@@ -3710,8 +3803,15 @@ if(localStorage.getItem('pf_admin_collapsed')==='1')$('side').classList.add('col
        strony po wygaśnięciu ciasteczka trafia w celowy 404 serwera i admin
        "wylatuje z aplikacji", zamiast przejść przez furtkę i ekran logowania. */
     const lead=new URLSearchParams(location.search).get('lead');
-    if(location.search!=='?pwa=1')history.replaceState(null,'','/admin?pwa=1');
-    if(lead){go('leads');openLead(+lead)}
+    /* Hasz trzeba odczytac PRZED przepisaniem adresu i dokleic z powrotem —
+       inaczej `replaceState` nizej skasowalby wlasnie odzyskany stan. */
+    const st=czytajHasz();
+    const hasz=st?'#'+haszZe(st):'';
+    if(location.search!=='?pwa=1'||location.hash!==hasz)
+      history.replaceState(null,'','/admin?pwa=1'+hasz);
+    OSTATNI_HASZ=hasz.slice(1);
+    if(lead){go('leads');openLead(+lead)}   // deep-link z pusha wygrywa z haszem
+    else if(st){ustawStan(st);go(st.view)}  // globale PRZED go(): widok czyta je od razu
     else go('overview');
     applyPendingLead();
     loadInbox();

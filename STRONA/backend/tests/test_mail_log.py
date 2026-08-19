@@ -28,7 +28,18 @@ CTX = {"name": "Jan Dziennik", "setup_url": "https://x.test/portal?reset=abc",
        "portal_url": "https://x.test/portal"}
 
 
-def test_udana_wysylka_trafia_do_dziennika():
+def test_udana_wysylka_trafia_do_dziennika(monkeypatch):
+    class _DzialajacySmtp:
+        def __init__(self, *a, **k): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def starttls(self): pass
+        def login(self, *a): pass
+        def send_message(self, msg): pass
+
+    monkeypatch.setattr(notify.settings, "smtp_host", "smtp.test", raising=False)
+    monkeypatch.setattr(notify.smtplib, "SMTP", _DzialajacySmtp)
+
     notify._send_teraz("portal_invite", "dziennik-ok@test.pl", CTX)
 
     d = client.get("/api/admin/mail-log", headers=ADMIN).json()
@@ -37,6 +48,22 @@ def test_udana_wysylka_trafia_do_dziennika():
     assert wpis["error"] is None
     assert wpis["event"] == "portal_invite"
     assert wpis["subject"]
+
+
+def test_brak_smtp_to_tez_porazka_a_nie_ciche_wyslane():
+    """Bez `SMTP_HOST` mail nie opuszcza serwera — dziennik ma o tym mówić.
+
+    Do 2026-08-19 ta gałąź drukowała maila na konsolę i zapisywała wpis bez
+    błędu, więc panel pokazywał zielone „wysłane" dla czegoś, czego nikt nigdy
+    nie dostał, a kafelek porażek stał na zerze. Dokładnie ta cisza sprawiła, że
+    „maile z platformy nie dochodzą" przeżyło na produkcji tygodnie.
+    """
+    notify._send_teraz("portal_invite", "dziennik-bez-smtp@test.pl", CTX)
+
+    d = client.get("/api/admin/mail-log", headers=ADMIN).json()
+    wpis = next(m for m in d["entries"] if m["to"] == "dziennik-bez-smtp@test.pl")
+    assert wpis["ok"] is False
+    assert "SMTP_HOST" in wpis["error"]
 
 
 def test_awaria_smtp_zostawia_slad(monkeypatch):

@@ -31,7 +31,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from . import (achievements, auth, billing, catalog, certshot, countries, fields, loyalty,
                lead_mail, metaquotes_web, notify,
@@ -574,6 +574,30 @@ def _konta_po_id(session, account_ids) -> dict[int, Account]:
     if not ids:
         return {}
     return {a.id: a for a in session.query(Account).filter(Account.id.in_(ids)).all()}
+
+
+# --- wiersze techniczne z importu ewidencji ---------------------------------
+# Za adresem `…@imported.local` nie stoi klient, tylko wiersz z CSV-ki wypłat
+# (`payout_import._email_techniczny`). W księdze pieniędzy są niezbędne, ale na
+# listach, po których admin szuka LUDZI, tonią prawdziwe wiersze. Filtr jest po
+# stronie serwera, bo to nazwiska prawdziwych osób — nie ma powodu wysyłać ich
+# do przeglądarki tylko po to, żeby JS je schował.
+
+def _nie_import():
+    return ~Trader.email.like(f"%{payout_import.TECHNICZNA_DOMENA}")
+
+
+def _konto_nie_import(session):
+    """To samo dla zapytań po `Account` — z jawną gałęzią na NULL.
+
+    `Account.trader_id` jest nullowalny (konta z puli nie mają właściciela), a
+    `NOT IN (…)` daje w SQL-u dla NULL-a wynik NULL, czyli „nie przechodzi".
+    Bez `is_(None)` obok, włączenie filtru po cichu zabierałoby z listy całą
+    pulę — awaria, która wygląda jak działający filtr.
+    """
+    techniczni = session.query(Trader.id).filter(
+        Trader.email.like(f"%{payout_import.TECHNICZNA_DOMENA}"))
+    return or_(Account.trader_id.is_(None), ~Account.trader_id.in_(techniczni))
 
 
 # --------------------------------------------------------------------------- #
@@ -2853,6 +2877,11 @@ def admin_payouts_all():
 
     `kind` rozdziela jedno od drugiego: "payout" ma certyfikat i można go wycofać,
     "request" ma przyciski Approve/Reject.
+
+    Wiersze `…@imported.local` zostają — inaczej niż na listach ludzi. To księga
+    pieniędzy: za każdym stoi wypłata, która naprawdę wyszła, a ten widok jest
+    jedyną drogą do wystawienia jej certyfikatu. Ukrycie ich zabiłoby sens
+    importu ewidencji.
     """
     session = SessionLocal()
     try:
@@ -3227,7 +3256,7 @@ def admin_payout_request_delete(req_id: int):
 
 
 @app.get("/api/admin/traders", dependencies=[Depends(auth.require_admin)])
-def admin_traders(q: str | None = None):
+def admin_traders(q: str | None = None, imported: int = 0):
     """Lista klientów (do wyszukiwarki przy przyznawaniu challenge'u).
 
     Bez `q` zwraca WSZYSTKICH — panel buduje z tego listę wyboru, a cichy limit
@@ -3240,6 +3269,8 @@ def admin_traders(q: str | None = None):
         # zablokowane (auth.current_trader), powiadomienia wyłączone, a mail na
         # @removed.invalid się odbija. Przyznanie im czegokolwiek to ślepa uliczka.
         query = query.filter(Trader.email.notlike("%@removed.invalid"))
+        if not imported:
+            query = query.filter(_nie_import())
         if q:
             like = f"%{q.strip().lower()}%"
             query = query.filter(func.lower(Trader.email).like(like) |
@@ -3451,7 +3482,7 @@ def admin_trader_journal(trader_id: int):
 
 
 @app.get("/api/admin/journal", dependencies=[Depends(auth.require_admin)])
-def admin_journal_overview():
+def admin_journal_overview(imported: int = 0):
     """Aktywność wszystkich klientów naraz — wejście do dziennika per trader.
 
     Dziennik pojedynczego klienta odpowiada „co ON robił", ale pytanie działu
@@ -3491,8 +3522,13 @@ def admin_journal_overview():
         iso = lambda d: d.isoformat() if d else None  # noqa: E731
         wiersze = []
         # Bez kont administratorów: to lista KLIENTÓW, a wiersz admina z setką
-        # „logowań dziś" zaśmiecałby każdy filtr aktywności.
-        for tr in session.query(Trader).filter(Trader.is_admin.is_(False)).all():
+        # „logowań dziś" zaśmiecałby każdy filtr aktywności. Wiersze z importu
+        # ewidencji odpadają tutaj i tylko tutaj — słowniki agregatów wyżej są
+        # kluczowane po `trader_id`, więc wpisów pominiętych nikt nie odczyta.
+        klienci = session.query(Trader).filter(Trader.is_admin.is_(False))
+        if not imported:
+            klienci = klienci.filter(_nie_import())
+        for tr in klienci.all():
             login = logowania.get(tr.id)
             wiersze.append({
                 "id": tr.id, "email": tr.email, "full_name": tr.full_name,
@@ -3832,13 +3868,18 @@ def _kyc_dict(t: Trader) -> dict:
 
 
 @app.get("/api/admin/kyc", dependencies=[Depends(auth.require_admin)])
-def admin_kyc():
+def admin_kyc(imported: int = 0):
     """Oczekujące wnioski + historia decyzji (approved/rejected) do przeglądania."""
     session = SessionLocal()
     try:
-        pending = session.query(Trader).filter(Trader.kyc_status == "pending").all()
+        pending = session.query(Trader).filter(Trader.kyc_status == "pending")
         history = (session.query(Trader)
-                   .filter(Trader.kyc_status.in_(("approved", "rejected")))
+                   .filter(Trader.kyc_status.in_(("approved", "rejected"))))
+        if not imported:
+            pending = pending.filter(_nie_import())
+            history = history.filter(_nie_import())
+        pending = pending.all()
+        history = (history
                    .order_by(Trader.kyc_reviewed_at.desc().nullslast(), Trader.id.desc())
                    .limit(200).all())
         return {"pending": [_kyc_dict(t) for t in pending],
@@ -4816,7 +4857,7 @@ def admin_pool_delete(pool_id: int):
 #  Publiczne: konta (admin read), leaderboard, certyfikat                      #
 # --------------------------------------------------------------------------- #
 @app.get("/api/accounts", dependencies=[Depends(auth.require_admin)])
-def list_accounts():
+def list_accounts(imported: int = 0):
     session = SessionLocal()
     try:
         # Data płatności do kolumny "Paid" — jedno zapytanie zamiast N per konto.
@@ -4827,8 +4868,10 @@ def list_accounts():
         out = []
         # Najnowsze konto na górze: panel czyta tę listę jak oś czasu,
         # a świeżo otwarte konto to zwykle to, po które admin przyszedł.
-        for a in (session.query(Account)
-                  .order_by(Account.created_at.desc(), Account.id.desc()).all()):
+        konta = session.query(Account)
+        if not imported:
+            konta = konta.filter(_konto_nie_import(session))
+        for a in konta.order_by(Account.created_at.desc(), Account.id.desc()).all():
             d = _account_dict(a, with_credentials=True, admin_view=True)
             p = zaplacone.get(a.id)
             d["paid_at"] = p.isoformat() if p else None
@@ -5756,6 +5799,10 @@ def stats():
                 # zepsuta funkcja.
                 "lead_sms_missing": sms.czego_brakuje(),
                 "lead_mail_missing": lead_mail.czego_brakuje(),
+                # Kanał do klienta (poświadczenia MT5, reset hasła, wypłaty) nie
+                # ma przycisku, który mógłby się schować — bez tej listy jego brak
+                # nie objawia się NICZYM aż do zgłoszenia „nie dostałem maila".
+                "notify_mail_missing": notify.czego_brakuje(),
                 "traders": klienci, "traders_internal": wewnetrzni,
                 # Granty ($0, provider="grant") to nie sprzedaż — liczone tutaj
                 # zawyżałyby "paid orders" o darmowe konta z promocji BOGO.

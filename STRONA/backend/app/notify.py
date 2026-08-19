@@ -750,6 +750,25 @@ def _zapisz_w_dzienniku(event: str, to_email: str, subject: str,
         pass
 
 
+def czego_brakuje() -> list[str]:
+    """Nazwy zmiennych, bez których kanał do KLIENTA stoi — dla paska w panelu.
+
+    Odpowiednik `lead_mail.czego_brakuje()`, tyle że dla wysyłki, którą idzie
+    wszystko, co klient dostaje od platformy: poświadczenia MT5, reset hasła,
+    potwierdzenie wypłaty. Kanał leadowy miał ten wskaźnik od początku, ten nie
+    — i dlatego „maile w ogóle nie dochodzą" dawało się przeoczyć tygodniami.
+
+    `MAIL_FROM` liczy się jako brak także wtedy, gdy zostało na domyślnym
+    `@propfunding.local`: żaden dostawca nie podpisze nadawcy w domenie `.local`,
+    więc taki adres nie jest konfiguracją, tylko jej brakiem w przebraniu.
+    """
+    nadawca = (settings.mail_from or "").strip()
+    return [nazwa for nazwa, wartosc in (
+        ("SMTP_HOST", settings.smtp_host),
+        ("MAIL_FROM", "" if nadawca.endswith(".local") else nadawca))
+        if not wartosc]
+
+
 def send(event: str, to_email: str | None, ctx: dict | None = None) -> None:
     if _odloz(_send_teraz, event, to_email, ctx):
         return
@@ -786,6 +805,11 @@ def _send_teraz(event: str, to_email: str | None, ctx: dict | None = None) -> No
                 print(f"[notify] SMTP błąd: {e}")
                 blad = str(e)[:500]
         else:
+            # Bez hosta mail NIGDZIE nie idzie — a do 2026-08-19 lądował w dzienniku
+            # jako `ok=True`, więc panel pokazywał zielone „wysłane" dla czegoś, co
+            # nie opuściło serwera, a kafelek porażek stał na zerze. Cisza ważniejsza
+            # od wygody deva: brak konfiguracji to porażka wysyłki i ma być widoczna.
+            blad = "SMTP_HOST nie ustawiony — mail nigdzie nie poszedł"
             print(f"\n📧 [MAIL → {to_email}] {subject}\n{body}\n")
             if html:
                 # dev: podglad wersji HTML w przegladarce, bez SMTP
