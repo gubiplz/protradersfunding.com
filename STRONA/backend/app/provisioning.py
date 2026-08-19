@@ -125,13 +125,23 @@ def create_account_from_order(session, order: Order, notify_admin: bool = True) 
     # Kredyty sklepowe schodza z salda dopiero TERAZ — platnosc jest domknieta.
     # Ponowny min() na wypadek rownoleglego zakupu, ktory zdazyl zuzyc saldo;
     # zamowienia nie wywracamy (klient juz zaplacil pomniejszona kwote).
-    zuzycie = min(round(float(getattr(order, "credits_used", 0) or 0), 2),
-                  round(float(trader.credits_usd or 0), 2))
+    przyznany = round(float(getattr(order, "credits_used", 0) or 0), 2)
+    zuzycie = min(przyznany, round(float(trader.credits_usd or 0), 2))
     if zuzycie > 0:
         trader.credits_usd = round(float(trader.credits_usd) - zuzycie, 2)
-        order.credits_used = zuzycie
         session.add(CreditLedger(trader_id=trader.id, amount=-zuzycie,
                                  note=f"Applied to order #{order.id}", order_id=order.id))
+    if przyznany > zuzycie:
+        # Rabat zszedl z ceny, ale pokrycia w saldzie juz nie ma — rownolegly
+        # checkout w drugiej karcie zdazyl zuzyc te same kredyty. Roznice
+        # doplaca firma, wiec musi zostac flaga i dzwonek; `credits_used`
+        # zostaje pelne, bo taki rabat NAPRAWDE poszedl (ledger trzyma tylko
+        # to, co realnie zeszlo z salda).
+        order.flag = "credits_shortfall"
+        notify.notify_admins("admin_order",
+                             f"Credits shortfall ${round(przyznany - zuzycie, 2):,.2f} "
+                             f"on order #{order.id} — discount granted without balance coverage",
+                             trader.email)
     # Kod kupiony za punkty jest JEDNORAZOWY i schodzi w tym samym momencie co
     # kredyty: przy domknietej platnosci. Znacznik ustawiamy warunkowym UPDATE-em,
     # wiec dwa rownolegle zamowienia z tym samym kodem zaliczy tylko jedno.

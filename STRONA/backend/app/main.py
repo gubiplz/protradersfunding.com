@@ -4479,10 +4479,11 @@ async def admin_mark_order_paid(order_id: int):
         if o.status == "paid":
             return {"already": True, "account_id": o.account_id}
         acc = provisioning.create_account_from_order(session, o, notify_admin=False)
-        # Provisioning mógł właśnie oflagować zamówienie (BOGO grant nie wyszedł)
-        # — tej flagi nie wolno tu zetrzeć, to jedyny trwały ślad dla admina.
+        # Provisioning mógł właśnie oflagować zamówienie (BOGO grant nie wyszedł,
+        # kredyty bez pokrycia) — tych flag nie wolno tu zetrzeć, to jedyny
+        # trwały ślad dla admina.
         grant_failed = o.flag == "bogo_grant_failed"
-        if not grant_failed:
+        if o.flag not in ("bogo_grant_failed", "credits_shortfall"):
             o.flag = None
         o.fail_reason = None      # recovery: płatność jednak doszła
         session.commit()

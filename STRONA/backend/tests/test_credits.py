@@ -97,6 +97,37 @@ def test_checkout_odlicza_kredyty_a_saldo_schodzi_przy_domknieciu():
     s.close()
 
 
+def test_rownolegly_checkout_nie_pali_kredytow_bez_sladu(monkeypatch):
+    """Dwie karty = dwa pendingi wycenione z tego SAMEGO salda. Pierwsze
+    domknięcie zdejmuje kredyty, drugie idzie z rabatem bez pokrycia — różnicę
+    dopłaca firma, więc zamówienie musi dostać flagę, a admin dzwonek. Bez tego
+    dubel (przypadkowy albo celowy) znikał bez żadnego śladu."""
+    from app import notify
+
+    alerty = []
+    monkeypatch.setattr(notify, "notify_admins",
+                        lambda event, title, *a, **kw: alerty.append(title))
+
+    tid = _trader(credits=100)
+    s = SessionLocal()
+    tr = s.get(Trader, tid)
+    o1 = billing.create_checkout(s, tr, "2step-25k", None)["order_id"]   # $299 - $100
+    o2 = billing.create_checkout(s, tr, "2step-25k", None)["order_id"]   # też $299 - $100
+    billing.mock_complete(s, o1, tid)
+    billing.mock_complete(s, o2, tid)
+    z1, z2 = s.get(Order, o1), s.get(Order, o2)
+    assert z1.flag is None and z1.credits_used == 100
+    assert z2.flag == "credits_shortfall"
+    assert z2.credits_used == 100      # rabat NAPRAWDĘ poszedł — faktura nie kłamie
+    s.close()
+    assert _saldo(tid) == 0            # saldo zeszło tylko RAZ
+    s = SessionLocal()
+    assert (s.query(CreditLedger)
+            .filter(CreditLedger.trader_id == tid, CreditLedger.amount < 0).count()) == 1
+    s.close()
+    assert any("shortfall" in t.lower() for t in alerty)
+
+
 def test_pelne_pokrycie_kredytami_omija_platnosc():
     tid = _trader(credits=500)
     s = SessionLocal()

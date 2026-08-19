@@ -1075,6 +1075,7 @@ function renderOrders(){
         <td data-l="Status"><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span>
           ${o.status==='pending'&&o.flag==='awaiting_crypto'?'<div class="muted" style="font-size:11px;white-space:nowrap">⏳ awaiting crypto</div>':''}
           ${o.flag==='bogo_grant_failed'?'<div style="font-size:11px;white-space:nowrap;color:var(--red)" title="The paid order promised a free second account, but creating it failed. Use Grant challenge to add it by hand.">⚠ BOGO grant failed — grant manually</div>':''}
+          ${o.flag==='credits_shortfall'?'<div style="font-size:11px;white-space:nowrap;color:var(--red)" title="The order was discounted with store credits, but a parallel checkout had already spent them — the company covered the difference.">⚠ credits shortfall — discount without coverage</div>':''}
           ${o.status!=='paid'&&o.payment_address?`<div class="muted" title="${esc((o.payment_network?o.payment_network+' · ':'')+o.payment_address)}"
             style="font-size:11px;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(o.payment_network?o.payment_network+' · ':'')}${esc(o.payment_address)}</div>`:''}
           ${o.status==='failed'&&o.fail_reason?`<div class="muted" style="font-size:11px;max-width:200px">${esc(o.fail_reason)}</div>`:''}</td>
