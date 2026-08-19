@@ -16,13 +16,16 @@ from app import auth, lead_mail, notify, sms, telegram  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Lead, LeadEvent, LeadReminder, Order, Trader  # noqa: E402
+from app.models import (Account, Lead, LeadEvent, LeadReminder, Order,  # noqa: E402
+                        Product, Trader)
 
 init_db()
 client = TestClient(app)
 ADMIN = {"X-Admin-Token": get_settings().admin_token}
 TOKEN_LANDINGU = "sekret-landingu"
 SEKRET_WEBHOOKA = "sekret-webhooka"
+CZAT_PLATNY = "-100111"
+CZAT_FREE = "-100222"
 LICZNIK = iter(range(10_000))
 # Numery wiadomości muszą być unikalne w CAŁYM przebiegu, nie w jednym teście:
 # leady zostają w bazie między testami, a webhook szuka leada po `tg_message_id`
@@ -41,16 +44,27 @@ def _srodowisko(monkeypatch):
     u = get_settings()
     monkeypatch.setattr(u, "lead_ingest_token", TOKEN_LANDINGU, raising=False)
     monkeypatch.setattr(u, "telegram_webhook_secret", SEKRET_WEBHOOKA, raising=False)
+    # Dwie grupy, bo leady free kosztują nas konto, a płatne nic — obsługują je
+    # inni ludzie. Ustawione na sztywno, żeby test mógł powiedzieć DOKĄD poszła
+    # karta, a nie tylko że poszła.
+    monkeypatch.setattr(u, "telegram_leads_chat_id", CZAT_PLATNY, raising=False)
+    monkeypatch.setattr(u, "telegram_free_leads_chat_id", CZAT_FREE, raising=False)
     wyslane: dict[str, list] = {"alert": [], "answer": [], "edit": [],
-                                "przypomnienie": [], "dm": [], "delete": []}
+                                "przypomnienie": [], "dm": [], "delete": [],
+                                # Czat OBOK treści, nie zamiast: krotki wyżej
+                                # rozpakowuje kilkanaście asercji w tym pliku.
+                                "alert_czat": [], "przypomnienie_czat": [], "delete_czat": []}
     # Alert oddaje `message_id` — po nim webhook dopasowuje odpowiedź na wiadomość
     # do leada, więc atrapa musi je zwracać, inaczej notatki z Telegrama nie mają
     # się o co zaczepić.
     monkeypatch.setattr(telegram, "send_lead_alert",
                         lambda lead_id, tekst, **kw: (wyslane["alert"].append((lead_id, tekst)),
-                                                      (True, "", next(NUMERY_WIADOMOSCI)))[1])
+                                                      wyslane["alert_czat"].append(kw.get("chat_id")),
+                                                      (True, "", next(NUMERY_WIADOMOSCI)))[2])
     monkeypatch.setattr(telegram, "send_lead_message",
-                        lambda tekst, **kw: (wyslane["przypomnienie"].append(tekst), (True, ""))[1])
+                        lambda tekst, **kw: (wyslane["przypomnienie"].append(tekst),
+                                             wyslane["przypomnienie_czat"].append(kw.get("chat_id")),
+                                             (True, ""))[2])
     monkeypatch.setattr(telegram, "answer_callback",
                         lambda cb, tekst, **kw: (wyslane["answer"].append(tekst), (True, ""))[1])
     monkeypatch.setattr(telegram, "edit_lead_message",
@@ -58,7 +72,9 @@ def _srodowisko(monkeypatch):
     monkeypatch.setattr(telegram, "send_dm",
                         lambda czat, tekst, **kw: (wyslane["dm"].append((czat, tekst)), (True, ""))[1])
     monkeypatch.setattr(telegram, "delete_lead_card",
-                        lambda mid, **kw: (wyslane["delete"].append(mid), (True, ""))[1])
+                        lambda mid, **kw: (wyslane["delete"].append(mid),
+                                           wyslane["delete_czat"].append(kw.get("chat_id")),
+                                           (True, ""))[2])
     return wyslane
 
 
@@ -949,9 +965,14 @@ def test_panel_odrzuca_nieznana_ocene():
 # --------------------------------------------------------------------------- #
 #  Notatki z odpowiedzi na kanale                                              #
 # --------------------------------------------------------------------------- #
-def _odpowiedz(message_id, tekst, autor="Hubert", pole="author_signature"):
-    """Post na kanale będący odpowiedzią na alert o leadzie."""
-    wiadomosc = {"message_id": 7001, "chat": {"id": -100123}, "text": tekst,
+def _odpowiedz(message_id, tekst, autor="Hubert", pole="author_signature",
+               czat=CZAT_PLATNY):
+    """Post na kanale będący odpowiedzią na alert o leadzie.
+
+    `czat` to grupa, w której wisi karta — dopasowanie leada idzie po parze
+    (message_id, czat), bo numer wiadomości jest unikalny w czacie, a nie u bota.
+    """
+    wiadomosc = {"message_id": 7001, "chat": {"id": int(czat)}, "text": tekst,
                  "reply_to_message": {"message_id": message_id}}
     if pole == "author_signature":
         wiadomosc["author_signature"] = autor
@@ -1573,3 +1594,185 @@ def test_wyciszona_kategoria_nie_brzeczy_ale_dzwonek_zostaje(monkeypatch):
                                             Notification.event == "lead_new").count() == 1
     finally:
         s.close()
+
+
+# --------------------------------------------------------------------------- #
+#  Leady free: własna grupa i konto jednym kliknięciem                         #
+# --------------------------------------------------------------------------- #
+# Free i płatny to inny koszt i inni ludzie do obsługi, więc karty rozjeżdżają
+# się na dwie grupy. Numer wiadomości jest unikalny W CZACIE, nie u bota —
+# `tg_chat_id` na leadzie istnieje po to, żeby odpowiedź i kasowanie karty
+# trafiały tam, gdzie ta karta naprawdę wisi.
+def _produkt_free():
+    s = SessionLocal()
+    try:
+        if not s.query(Product).filter(Product.key == "2step-25k").first():
+            s.add(Product(key="2step-25k", label="2-Step 25K", account_size=25_000,
+                          steps=2, price_usd=249, profit_target_p1=8, profit_target_p2=5,
+                          max_daily_loss_pct=5, max_overall_loss_pct=10,
+                          drawdown_type="trailing", min_trading_days=3,
+                          profit_split_pct=80, max_lots=6, active=True))
+            s.commit()
+    finally:
+        s.close()
+
+
+def test_karta_leada_free_idzie_do_grupy_free(_srodowisko):
+    """Landing obiecuje darmowe konto — te zgłoszenia obsługuje kto inny niż
+    płatne, więc nie mogą wpadać do tej samej grupy."""
+    lead_id = _wyslij(_zgloszenie(source="free-challenge")).json()["id"]
+
+    assert _srodowisko["alert_czat"][-1] == CZAT_FREE
+    assert _lead(lead_id).tg_chat_id == CZAT_FREE
+
+
+def test_karta_leada_platnego_zostaje_w_grupie_dzialu(_srodowisko):
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+
+    assert _srodowisko["alert_czat"][-1] == CZAT_PLATNY
+    assert _lead(lead_id).tg_chat_id == CZAT_PLATNY
+
+
+def test_notatka_trafia_do_leada_z_tej_grupy_co_odpowiedz():
+    """Sedno kolumny `tg_chat_id`. Telegram numeruje wiadomości osobno w każdym
+    czacie, więc karta free i karta działu potrafią mieć ten sam `message_id` —
+    bez filtra po czacie notatka z jednej grupy siadałaby na cudzym leadzie."""
+    platny = _wyslij(_zgloszenie()).json()["id"]
+    wolny = _wyslij(_zgloszenie(source="free-challenge")).json()["id"]
+    kolizja = 4242
+    s = SessionLocal()
+    try:
+        s.get(Lead, platny).tg_message_id = kolizja
+        s.get(Lead, wolny).tg_message_id = kolizja
+        s.commit()
+    finally:
+        s.close()
+
+    _odpowiedz(kolizja, "przyszedł z darmówki", czat=CZAT_FREE)
+
+    assert _lead(wolny).note == "Hubert: przyszedł z darmówki"
+    assert _lead(platny).note in (None, "")
+
+
+def test_notatka_do_karty_sprzed_kolumny_czatu_dalej_dziala():
+    """Karty wysłane, zanim `tg_chat_id` istniało, mają je puste i wiszą
+    w grupie działu. Odpowiedź na nie nie może przestać się zapisywać."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    s = SessionLocal()
+    try:
+        s.get(Lead, lead_id).tg_chat_id = None
+        s.commit()
+        mid = s.get(Lead, lead_id).tg_message_id
+    finally:
+        s.close()
+
+    _odpowiedz(mid, "stara karta, nowa notatka")
+
+    assert _lead(lead_id).note == "Hubert: stara karta, nowa notatka"
+
+
+def test_przycisk_dopisuje_czat_staremu_leadowi(_srodowisko):
+    """Callback niesie id leada, więc czat z kliknięcia jest pewny — to jedyne
+    miejsce, gdzie wolno uzupełnić brakującą kolumnę bez zgadywania."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    s = SessionLocal()
+    try:
+        s.get(Lead, lead_id).tg_chat_id = None
+        s.commit()
+    finally:
+        s.close()
+
+    assert _callback(lead_id, "replied").status_code == 200
+    assert _lead(lead_id).tg_chat_id == "-100123"
+
+
+def test_kasowanie_zdejmuje_karte_z_zapamietanej_grupy(_srodowisko):
+    """Kasowanie po samym `message_id` trafiłoby w grupę działu — kartę leada
+    free trzeba zdjąć tam, gdzie ją powieszono."""
+    lead_id = _wyslij(_zgloszenie(source="free-challenge")).json()["id"]
+    mid = _lead(lead_id).tg_message_id
+
+    client.delete(f"/api/admin/leads/{lead_id}", headers=ADMIN)
+
+    assert _srodowisko["delete"] == [mid]
+    assert _srodowisko["delete_czat"] == [CZAT_FREE]
+
+
+def test_przypomnienie_idzie_do_tej_grupy_co_karta(_srodowisko):
+    """Follow-upy chodzą do ludzi, a nie do leada — muszą trafiać do tej samej
+    grupy, w której ci ludzie oglądają kartę."""
+    wolny, platny = _zgloszenie(source="free-challenge"), _zgloszenie()
+    for dane in (wolny, platny):
+        _cofnij(_wyslij(dane).json()["id"], od_zgloszenia=5)
+
+    assert _cron().status_code == 200
+
+    # Baza żyje między testami, więc cron obsłuży też cudze zaległości — liczą
+    # się przypomnienia o TYCH dwóch, rozpoznawane po mailu w treści.
+    poszlo = list(zip(_srodowisko["przypomnienie"], _srodowisko["przypomnienie_czat"]))
+    assert {c for t, c in poszlo if wolny["email"] in t} == {CZAT_FREE}
+    assert {c for t, c in poszlo if platny["email"] in t} == {CZAT_PLATNY}
+
+
+def test_darmowe_konto_z_panelu_zaklada_prawdziwy_challenge():
+    """Ten przycisk nie rysuje niczego na próbę: powstaje trader, zamówienie
+    grantowe i realne konto — dokładnie ta sama ścieżka co zakup."""
+    _produkt_free()
+    dane = _zgloszenie(source="free-challenge")
+    lead_id = _wyslij(dane).json()["id"]
+
+    odp = client.post(f"/api/admin/leads/{lead_id}/free-account", headers=ADMIN)
+    assert odp.status_code == 200, odp.text
+    d = odp.json()
+    assert d["granted"] is True and d["trader_created"] is True and d["login"]
+
+    s = SessionLocal()
+    try:
+        tr = s.query(Trader).filter(Trader.email == dane["email"]).one()
+        konto = s.query(Account).filter(Account.trader_id == tr.id).one()
+        assert konto.id == d["account_id"] and konto.product_key == "2step-25k"
+        # Hasła nikt nie zna, więc mail z poświadczeniami niesie link do
+        # ustawienia go — inaczej klient dostaje konto, do którego nie wejdzie.
+        assert tr.must_set_password is True
+    finally:
+        s.close()
+
+    assert [z.detail for z in _zdarzenia(lead_id, "granted")] == [
+        f"2step-25k — login {d['login']}"]
+    assert _z_listy(lead_id)["accounts"] == 1
+
+
+def test_drugie_kliniecie_nie_daje_drugiego_konta():
+    """Podwójny klik to podwójny koszt. Panel chowa przycisk po `accounts`,
+    ale to serwer musi odmówić — panel bywa nieodświeżony."""
+    _produkt_free()
+    lead_id = _wyslij(_zgloszenie(source="free-challenge")).json()["id"]
+    assert client.post(f"/api/admin/leads/{lead_id}/free-account",
+                       headers=ADMIN).status_code == 200
+
+    odp = client.post(f"/api/admin/leads/{lead_id}/free-account", headers=ADMIN)
+    assert odp.status_code == 409
+    assert "Already granted" in odp.json()["detail"]
+    assert _z_listy(lead_id)["accounts"] == 1
+
+
+def test_darmowe_konto_wymaga_admina():
+    lead_id = _wyslij(_zgloszenie(source="free-challenge")).json()["id"]
+    assert client.post(f"/api/admin/leads/{lead_id}/free-account").status_code in (401, 403)
+
+
+def test_nick_telegrama_na_karcie_jest_linkiem(_srodowisko):
+    """Dział pracuje z karty, nie z panelu — nieklikalny nick znaczy
+    przepisywanie go z ekranu do wyszukiwarki Telegrama."""
+    _wyslij(_zgloszenie(telegram="@jasiu"))
+    _, tekst = _srodowisko["alert"][-1]
+    assert '<a href="https://t.me/jasiu">@jasiu</a>' in tekst
+
+
+def test_smieciowy_nick_zostaje_tekstem(_srodowisko):
+    """Martwy link t.me wygląda jak kontakt, a nim nie jest. Dział ma zobaczyć
+    literówkę, a nie gonić za nią."""
+    _wyslij(_zgloszenie(telegram="gubi please <b>"))
+    _, tekst = _srodowisko["alert"][-1]
+    assert "t.me" not in tekst
+    assert "gubi please &lt;b&gt;" in tekst

@@ -1299,6 +1299,21 @@ function leadPhoneActs(l){
       aria-label="Copy the opener" onclick="copyOpener(${l.id})">${ICO_COPY}</button></span>`;
 }
 
+/* Ten sam prefiks, po którym backend wybiera grupę na Telegramie
+   (`telegram.lead_chat_id`) — free-* to inny koszt i inni ludzie do obsługi,
+   więc jedno źródło prawdy decyduje i o czacie, i o zakładce. */
+const isFreeLead=l=>String(l.source||'').toLowerCase().startsWith('free');
+/* Konto rozdaje się z listy dopiero w zakładce Free — kliknięcie zakłada
+   PRAWDZIWE konto MT5 i wysyła maila, więc nie ma prawa wisieć obok każdego
+   płatnego leada. Gdy konto już jest, przycisk ustępuje miejsca stanowi:
+   drugi grant i tak dostałby 409, ale klikać nie ma po co. */
+function leadFreeBtn(l){
+  return l.accounts>0
+    ?'<span class="muted" style="font-size:11px" title="A challenge account has already been opened for this e-mail">🎁 account opened</span>'
+    :`<button class="btn-o sm" onclick="grantFreeAccount(${l.id})"
+        title="Open the free $25K challenge for them — real account, credentials by e-mail">🎁 Free account</button>`;
+}
+
 function renderLeads(){
   const list=window._leads||[];
   const q=(window._leadQ||'').toLowerCase();
@@ -1312,7 +1327,8 @@ function renderLeads(){
     (f==='all'||f==='burned'||(f==='bought'?(l.paid_usd>0||l.bought)
       :f==='due'?(l.next_due&&dueDays(l.next_due)<=0)
       :f==='mine'?l.owner===meMail()
-      :f==='free'?!l.owner
+      :f==='free'?isFreeLead(l)
+      :f==='unowned'?!l.owner
       :l.status===f))&&
     (!q||(l.email||'').toLowerCase().includes(q)||(l.name||'').toLowerCase().includes(q)
      ||(l.phone||'').includes(q)||(l.ref||'').toLowerCase().includes(q)
@@ -1336,16 +1352,16 @@ function renderLeads(){
   /* Counted over the WHOLE list, not the filtered rows: a follow-up that came
      due is the one thing that must not hide behind the filter you left on. */
   const due=zywe.filter(l=>l.next_due&&dueDays(l.next_due)<=0).length;
-  /* Statusy i „Free" filtruje się rzadziej niż Due/Mine/Bought — mieszkają w
-     dolnym arkuszu pod jednym chipem, zamiast rozpychać toolbar do 11 chipów.
-     Kosz ma własny chip, więc w arkuszu statusów go nie ma. */
-  const sheetActive=[...LEAD_STATUSES.filter(([k])=>k!=='burned'),['free','Free']]
+  /* Statusy i „Unclaimed" filtruje się rzadziej niż Due/Mine/Bought/Free —
+     mieszkają w dolnym arkuszu pod jednym chipem, zamiast rozpychać toolbar do
+     12 chipów. Kosz ma własny chip, więc w arkuszu statusów go nie ma. */
+  const sheetActive=[...LEAD_STATUSES.filter(([k])=>k!=='burned'),['unowned','Unclaimed']]
     .find(([k])=>k===f);
   $('view').innerHTML=`
     ${due&&f!=='due'?`<button class="due-banner" onclick="window._leadFilter='due';renderLeads()">⏰ ${due} follow-up${due>1?'s':''} due — someone is waiting to hear back</button>`:''}
     <div class="toolbar lead-toolbar">
       ${searchBox('lead-q','_leadQ','renderLeads','Search name, email, phone or partner…')}
-      <div class="seg">${[['all','All'],['due','Due'],['mine','Mine'],['bought','Bought']]
+      <div class="seg">${[['all','All'],['due','Due'],['mine','Mine'],['free','Free'],['bought','Bought']]
         .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._leadFilter='${f===k?'all':k}';renderLeads()">${l}</button>`).join('')}
         <button class="${sheetActive?'on':''}" onclick="${sheetActive?`window._leadFilter='all';renderLeads()`:'openLeadStatusSheet()'}">${sheetActive?sheetActive[1]:'Status ▾'}</button>
         ${kosz.length?`<button class="${f==='burned'?'on':''}" title="Burned leads"
@@ -1371,7 +1387,10 @@ function renderLeads(){
           ${l.phone?`<div class="muted lead-ph"><a href="tel:${esc(l.phone)}">${esc(l.phone)}</a>${
             l.phone_iso?` ${esc(l.phone_iso)}`:''}</div>`:''}
           ${l.phone||l.telegram||l.mail_ready?`<div class="lead-act-row">${leadPhoneActs(l)}</div>`:''}</td>
-        <td class="muted" data-l="Source">${esc(l.source||'—')}${l.ref?`<div style="font-size:11px">via ${esc(l.ref)}</div>`:''}</td>
+        <td class="muted" data-l="Source">${esc(l.source||'—')}${
+          isFreeLead(l)?' <span title="Free challenge funnel — no money changes hands">🆓</span>':''}${
+          l.ref?`<div style="font-size:11px">via ${esc(l.ref)}</div>`:''}${
+          f==='free'?`<div class="lead-act-row">${leadFreeBtn(l)}</div>`:''}</td>
         <td data-l="Status"><button type="button" class="status status-tap ${LEAD_STATUS_CLS[l.status]||'pending'}"
             aria-label="Change status" title="Change status"
             onclick="openLeadStatusFor(${l.id})"><span class="dot"></span>${esc(leadLabel(l.status))}</button>
@@ -1389,16 +1408,16 @@ function renderLeads(){
 }
 
 /* Filtr po statusie w dolnym arkuszu (ten sam #act-sheet co long-press):
-   pięć statusów + „Free" rozpychało toolbar do jedenastu chipów, a filtruje
-   się nimi rzadziej niż Due/Mine/Bought. Wybrany wraca do toolbara jako
-   chip z ✕ w miejscu „Status ▾". */
+   pięć statusów + „Unclaimed" rozpychało toolbar do jedenastu chipów, a
+   filtruje się nimi rzadziej niż Due/Mine/Bought/Free. Wybrany wraca do
+   toolbara jako chip z ✕ w miejscu „Status ▾". */
 function openLeadStatusSheet(){
   if(document.getElementById('act-sheet'))return;
   const veil=document.createElement('div');veil.id='act-veil';veil.className='sheet-veil';
   veil.onclick=closeActSheet;
   const s=document.createElement('div');s.id='act-sheet';s.className='sheet';
   s.innerHTML=`<div class="sheet-grab"></div><div class="act-sheet-title">Filter by status</div>
-    <div class="act-sheet-list">${[...LEAD_STATUSES.filter(([k])=>k!=='burned'),['free','Free — nobody took it']]
+    <div class="act-sheet-list">${[...LEAD_STATUSES.filter(([k])=>k!=='burned'),['unowned','Unclaimed — nobody took it']]
       .map(([k,lab])=>`<button class="btn-o" onclick="window._leadFilter='${k}';renderLeads();closeActSheet()">${lab}</button>`).join('')}</div>`;
   document.body.append(veil,s);
   requestAnimationFrame(()=>s.classList.add('open'));
@@ -1498,7 +1517,8 @@ function deleteLead(id){
 const LEAD_STATUS_CLS={new:'pending',messaged:'pending',replied:'paid',
   no_reply:'failed',rejected:'failed',burned:'failed'};
 const LEAD_EVENT_LBL={applied:'Applied',status:'Status',note:'Note',reminder:'Reminder',
-  claim:'Owner',tier:'Grade',bought:'Bought',sms:'Text sent',email:'E-mail sent'};
+  claim:'Owner',tier:'Grade',bought:'Bought',sms:'Text sent',email:'E-mail sent',
+  granted:'Free account'};
 /* Reminders are sent to US, never to the lead — the landing they applied through
    is a separate brand. The wording says who is being nudged. */
 const LEAD_REMINDER_LBL={no_contact:'Nobody wrote to them yet',bought:'Bought — stop treating as a lead',
@@ -1586,6 +1606,41 @@ function sellToLead(){
   const l=window._leadOpen;
   if(!l)return;
   openManualOrder(null,{id:l.id,email:l.email,name:l.name});
+}
+
+/* Druga strona tej samej szuflady: leadowi z free nic się nie sprzedaje, tylko
+   wydaje obiecane konto. Warunku nie sprawdza panel — obietnica z landingu bywa
+   rozliczana ręcznie w rozmowie, więc decyzję podejmuje człowiek, a ekran tylko
+   pilnuje, żeby wiedział, co klika. */
+function leadFreeCard(l){
+  if(!isFreeLead(l))return'';
+  const jest=l.accounts>0;
+  return `<div class="lead-card sec-card">
+    <div class="mod-row">
+      <div><div class="lbl">Free challenge</div>
+        <div class="muted" style="font-size:11.5px">${jest
+          ?'They already have a challenge account on this e-mail — nothing left to hand out here.'
+          :'Opens a real 2-step $25K account and e-mails the login with a link to set the password.'}</div></div>
+      ${jest?'<span class="status paid"><span class="dot"></span>account opened</span>'
+        :`<button class="btn-p" onclick="grantFreeAccount(${l.id})">🎁 Free account</button>`}
+    </div>
+  </div>`;
+}
+/* Nie ma cofnięcia: za oknem potwierdzenia jedzie konto MT5 z puli i mail do
+   klienta. Dlatego pytanie mówi wprost, na jaki adres to leci. */
+async function grantFreeAccount(id){
+  const l=(window._leads||[]).find(x=>x.id===id)
+    ||(window._leadOpen&&window._leadOpen.id===id?window._leadOpen:{});
+  if(!await askConfirm({title:'Open the free $25K account?',
+    body:`<b>${esc(l.email||'')}</b> gets a real 2-step $25K challenge account and an `
+      +`e-mail with the login and a “set your password” link. This is the same thing `
+      +`a paid order does — there is no undo from here.`,ok:'Open the account'}))return;
+  try{
+    const r=await api('/api/admin/leads/'+id+'/free-account',{method:'POST'});
+    toast(r.login?`Account ${r.login} is live — credentials e-mailed.`:'Account opened.');
+    if(VIEW==='leads')await VIEWS.leads();
+    openLead(id);
+  }catch(e){toast('Not opened: '+e.message,'err')}
 }
 
 /* Konto założone ZA klienta nie ma hasła znanego komukolwiek — pierwszy link
@@ -1823,6 +1878,7 @@ async function openLead(id){
       <p class="muted" style="font-size:11.5px;margin-top:8px">From the latest application — earlier ones sit in the history below.</p></div>`:''}
     ${leadModCard(l)}
     ${leadReminderCard(l)}
+    ${leadFreeCard(l)}
     ${leadSellCard(l)}
     ${leadInviteCard(l)}
     <div class="lead-card sec-card"><h4>Notes</h4>

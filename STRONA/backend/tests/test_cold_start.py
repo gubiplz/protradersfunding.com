@@ -121,7 +121,7 @@ def test_stara_baza_dostaje_kolumny_karty_leada():
     from app.db import _add_missing_columns, _NEW_COLUMNS
     from app.models import Lead
 
-    nowe = {"owner", "owner_at", "tg_message_id"}
+    nowe = {"owner", "owner_at", "tg_message_id", "tg_chat_id"}
     assert nowe <= set(_NEW_COLUMNS.get("leads", {})), \
         "kolumny karty leada musza byc zadeklarowane w _NEW_COLUMNS"
 

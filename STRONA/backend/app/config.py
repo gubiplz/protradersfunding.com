@@ -233,6 +233,10 @@ class Settings:
     # z certyfikatami wypłat, a alert o leadzie niesie imię, mail i telefon.
     # Puste = alerty o leadach nie wychodzą wcale (lead i tak jest w bazie).
     telegram_leads_chat_id: str = os.getenv("TELEGRAM_LEADS_CHAT_ID", "")
+    # Darmowy challenge to inny koszt i inni ludzie przy telefonie niż zakup,
+    # więc te leady mają własny czat. Puste = wpadają do czatu wyżej, razem
+    # z płatnymi — tak było, zanim ten podział powstał.
+    telegram_free_leads_chat_id: str = os.getenv("TELEGRAM_FREE_LEADS_CHAT_ID", "")
     # Sekret, którym landing autoryzuje POST /api/leads/ingest. Osobny od
     # ADMIN_TOKEN: landing stoi na cudzym hostingu i wycieka mu najwyżej prawo
     # dopisania leada, nigdy panel. Puste = endpoint odmawia wszystkiego.
@@ -324,20 +328,16 @@ class Settings:
     leads_on_traffic: bool = os.getenv("LEADS_ON_TRAFFIC", "true").lower() == "true"
 
     @property
-    def telegram_enabled(self) -> bool:
-        # TELEGRAM_ENABLED=false to awaryjny wylacznik — normalnie o wszystkim
-        # decyduje obecnosc tokenu i kanalu (tak samo jak przy push).
-        if os.getenv("TELEGRAM_ENABLED", "true").lower() != "true":
-            return False
-        return bool(self.telegram_bot_token and self.telegram_chat_id)
+    def telegram_on(self) -> bool:
+        # TELEGRAM_ENABLED=false to awaryjny wylacznik na CAŁEGO bota —
+        # normalnie o wszystkim decyduje obecnosc tokenu i kanalu (tak samo
+        # jak przy push). Czytany w jednym miejscu, bo każdy kanał ma własny
+        # warunek i tylko ten wyłącznik jest wspólny.
+        return os.getenv("TELEGRAM_ENABLED", "true").lower() == "true"
 
     @property
-    def telegram_leads_enabled(self) -> bool:
-        # Ten sam wyłącznik awaryjny, ale własny czat: alerty o leadach mogą
-        # działać, gdy kanał z wypłatami stoi, i odwrotnie.
-        if os.getenv("TELEGRAM_ENABLED", "true").lower() != "true":
-            return False
-        return bool(self.telegram_bot_token and self.telegram_leads_chat_id)
+    def telegram_enabled(self) -> bool:
+        return self.telegram_on and bool(self.telegram_bot_token and self.telegram_chat_id)
 
     # --- Zrzut certyfikatu do obrazka (zewnętrzna przeglądarka po HTTP) ---
     # Serwer nie ma czym zrobić rastra: JPG w portalu powstaje w przeglądarce

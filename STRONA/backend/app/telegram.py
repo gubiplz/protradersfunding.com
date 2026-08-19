@@ -158,16 +158,20 @@ def bot_username() -> str:
     return _BOT_USERNAME
 
 
-def delete_lead_card(message_id: int, *, transport=None) -> tuple[bool, str]:
-    """Zdejmuje kartę leada z czatu działu — wołane przy kasowaniu leada.
+def delete_lead_card(message_id: int, *, chat_id: str | None = None,
+                     transport=None) -> tuple[bool, str]:
+    """Zdejmuje kartę leada z czatu, w którym wisi — wołane przy kasowaniu leada.
 
     Bez tego wpis testowy znikał z bazy, a jego karta wisiała na kanale jak
-    sierota i dalej dawała się klikać — w lead, którego już nie było."""
-    if not leads_enabled():
+    sierota i dalej dawała się klikać — w lead, którego już nie było.
+
+    `message_id` jest unikalne w obrębie czatu, nie bota: bez `chat_id` z bazy
+    kasowanie karty free trafiłoby w cudzą wiadomość o tym samym numerze."""
+    czat, mozna = _lead_sendable(chat_id)
+    if not mozna:
         return False, "leads chat not configured"
     return _strzal("deleteMessage",
-                   {"chat_id": settings.telegram_leads_chat_id,
-                    "message_id": str(message_id)}, None, transport)
+                   {"chat_id": czat, "message_id": str(message_id)}, None, transport)
 
 
 def send_dm(chat_id: str | int, text: str, *, transport=None) -> tuple[bool, str]:
@@ -227,8 +231,29 @@ TAKEOVER_BUTTON = ("🤝 Przejmuję", "claim")
 RELEASE_BUTTON = ("↩️ Oddaję", "release")
 
 
-def leads_enabled() -> bool:
-    return settings.telegram_leads_enabled
+def lead_chat_id(source: str | None = None) -> str:
+    """Czat dla leada o takim `source` — free ma swój, reszta idzie do działu.
+
+    Zwykła funkcja, a nie property w ustawieniach, bo `get_settings()` jest
+    `lru_cache`'owane i testy podmieniają pola obiektu w miejscu.
+
+    Bez skonfigurowanego czatu free leady z darmowego challenge'u wracają do
+    czatu działu — mieszają się z płatnymi, ale nie giną.
+    """
+    if (source or "").strip().lower().startswith("free") and settings.telegram_free_leads_chat_id:
+        return settings.telegram_free_leads_chat_id
+    return settings.telegram_leads_chat_id
+
+
+def _lead_sendable(chat_id: str | None) -> tuple[str, bool]:
+    """Docelowy czat i czy da się do niego pisać.
+
+    Sprawdzamy TEN czat, a nie „czy leady w ogóle są skonfigurowane":
+    konfiguracja z samym TELEGRAM_FREE_LEADS_CHAT_ID gubiłaby po cichu
+    wszystkie karty free, bo tamten warunek patrzy tylko na czat działu.
+    """
+    czat = chat_id if chat_id is not None else settings.telegram_leads_chat_id
+    return czat, bool(settings.telegram_on and settings.telegram_bot_token and czat)
 
 
 def lead_keyboard(lead_id: int, *, owner: str | None = None,
@@ -266,6 +291,7 @@ def lead_keyboard(lead_id: int, *, owner: str | None = None,
 
 def send_lead_alert(lead_id: int, text: str, *,
                     keyboard: dict | None = None,
+                    chat_id: str | None = None,
                     transport=None) -> tuple[bool, str, int | None]:
     """Alert o nowym leadzie. Zwraca też `message_id` wysłanej wiadomości.
 
@@ -276,11 +302,12 @@ def send_lead_alert(lead_id: int, text: str, *,
     `callback_data` musi zmieścić się w 64 bajtach, stąd samo `lead:<id>:<akcja>`
     zamiast czegokolwiek opisowego — resztę webhook dobiera z bazy po id.
     """
-    if not leads_enabled():
+    czat, mozna = _lead_sendable(chat_id)
+    if not mozna:
         return False, "no bot token or leads chat", None
     poszlo, powod, wynik = _strzal_json(
         "sendMessage",
-        {"chat_id": settings.telegram_leads_chat_id, "text": text[:4096],
+        {"chat_id": czat, "text": text[:4096],
          "parse_mode": "HTML", "disable_web_page_preview": "true",
          "reply_markup": json.dumps(keyboard or lead_keyboard(lead_id))},
         None, transport)
@@ -288,17 +315,19 @@ def send_lead_alert(lead_id: int, text: str, *,
     return poszlo, powod, mid if isinstance(mid, int) else None
 
 
-def send_lead_message(text: str, *, transport=None) -> tuple[bool, str]:
+def send_lead_message(text: str, *, chat_id: str | None = None,
+                      transport=None) -> tuple[bool, str]:
     """Wiadomość na czat z leadami BEZ przycisków — przypomnienia z crona.
 
     Osobna funkcja od `send_message`, bo tamta celuje w publiczny kanał z
     wypłatami. Przypomnienie niesie imię i mail człowieka, więc pomyłka w czacie
     jest wyciekiem, a nie literówką; jedno wywołanie mniej do pomylenia.
     """
-    if not leads_enabled():
+    czat, mozna = _lead_sendable(chat_id)
+    if not mozna:
         return False, "no bot token or leads chat"
     return _strzal("sendMessage",
-                   {"chat_id": settings.telegram_leads_chat_id, "text": text[:4096],
+                   {"chat_id": czat, "text": text[:4096],
                     "parse_mode": "HTML", "disable_web_page_preview": "true"},
                    None, transport)
 

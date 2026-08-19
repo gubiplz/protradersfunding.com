@@ -690,6 +690,12 @@ class Lead(Base):
     # notatka i to jedyne, po czym da się ją powiązać z leadem — w `reply` nie ma
     # niczego poza id wiadomości, na którą odpowiedziano.
     tg_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    # Czat, w którym ta karta wisi (free ma swój). `message_id` jest unikalne
+    # w obrębie czatu, nie bota, więc bez tego edycja i kasowanie strzelałyby
+    # na oślep. Wyliczanie czatu z `source` nie wystarczy: ponowne zgłoszenie
+    # nadpisuje `tg_message_id`, więc lead z free, który wypełni płatny
+    # formularz, ma kartę w drugim czacie. NULL = wiersz sprzed tej kolumny.
+    tg_chat_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # Kiedy status pierwszy raz ruszył z „new". Da się to wyliczyć z `lead_events`,
     # ale kolumna zostaje: lista leadów pokazuje tę datę w każdym wierszu, a
     # dokładanie do niej podzapytania po historii kosztowałoby więcej niż jedno

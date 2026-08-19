@@ -4049,29 +4049,24 @@ def _mail_oczekujemy_na_platnosc(session, o: Order) -> bool:
     return True
 
 
-def _wlasciciel_zamowienia(session, payload: ManualOrderIn) -> tuple[Trader, bool]:
-    """Trader, na którego idzie ręczne zamówienie. Zwraca `(trader, świeżo założony)`.
+def _trader_po_mailu(session, email: str) -> tuple[Trader, bool]:
+    """Trader o tym mailu; nie ma takiego — powstaje. Zwraca `(trader, świeżo założony)`.
 
-    Wariant po mailu istnieje dla leada bez konta. Sprzedaż dogaduje się na
-    Telegramie i nikt nie zakłada konta po to, żeby dostać link do zapłaty —
-    a bez konta zamówienia nie ma na czym powiesić. Konto powstaje więc tutaj,
-    dokładnie tak jak przy imporcie wypłat (`payout_import.zapisz`): hasła nie
-    znamy i nie wymyślamy. Stąd `must_set_password` — dzięki niemu mail
-    z poświadczeniami MT5 daje klientowi link do ustawienia hasła zamiast kazać
-    mu „zalogować się" na konto, o którym pierwszy raz słyszy.
+    Istnieje dla leada bez konta. Sprzedaż dogaduje się na Telegramie i nikt
+    nie zakłada konta po to, żeby dostać link do zapłaty albo darmowy
+    challenge — a bez konta nie ma na czym powiesić ani zamówienia, ani
+    grantu. Konto powstaje więc tutaj, dokładnie tak jak przy imporcie wypłat
+    (`payout_import.zapisz`): hasła nie znamy i nie wymyślamy. Stąd
+    `must_set_password` — dzięki niemu mail z poświadczeniami MT5 daje
+    klientowi link do ustawienia hasła zamiast kazać mu „zalogować się" na
+    konto, o którym pierwszy raz słyszy.
 
     To jest zarazem jedyna droga, żeby panel leadów kiedykolwiek pokazał
     „Bought". Ta kolumna nie jest zapisywana, tylko liczona przy odczycie —
     lead → trader po mailu → suma zapłaconych zamówień. Bez konta pieniądze nie
     miałyby jak wrócić na kartę leada, choćby wpłynęły.
     """
-    if payload.trader_id is not None:
-        trader = session.get(Trader, payload.trader_id)
-        if not trader or trader.is_admin:
-            raise HTTPException(404, "Trader not found")
-        return trader, False
-
-    email = (payload.email or "").strip().lower()
+    email = (email or "").strip().lower()
     if not _EMAIL_RX.fullmatch(email):
         raise HTTPException(400, "Enter a valid e-mail address")
     # Po `lower()`, bo maile w bazie bywają z wielkiej litery (import, Google) i
@@ -4096,6 +4091,16 @@ def _wlasciciel_zamowienia(session, payload: ManualOrderIn) -> tuple[Trader, boo
     session.add(trader)
     session.flush()
     return trader, True
+
+
+def _wlasciciel_zamowienia(session, payload: ManualOrderIn) -> tuple[Trader, bool]:
+    """Trader, na którego idzie ręczne zamówienie. Zwraca `(trader, świeżo założony)`."""
+    if payload.trader_id is not None:
+        trader = session.get(Trader, payload.trader_id)
+        if not trader or trader.is_admin:
+            raise HTTPException(404, "Trader not found")
+        return trader, False
+    return _trader_po_mailu(session, payload.email or "")
 
 
 @app.post("/api/admin/orders", dependencies=[Depends(auth.require_admin)])
@@ -5892,10 +5897,28 @@ class LeadIn(BaseModel):
 _ETYKIETY_STATUSU = {stan: opis for opis, stan in telegram.LEAD_BUTTONS}
 
 
+# Ten sam kształt, który waliduje landing i panel (`leadTgLink`
+# w admin-panel.js). Nick spoza niego zostaje zwykłym tekstem: martwy link
+# t.me wygląda jak kontakt, a nim nie jest — dział ma zobaczyć literówkę,
+# a nie gonić za nią.
+_TG_HANDLE_RX = re.compile(r"@?[A-Za-z][A-Za-z0-9_]{4,31}")
+
+
+def _link_telegram(nick: str | None) -> str:
+    """Nick jako klikalny profil. Zwraca HTML, więc escape'uje sam."""
+    uchwyt = (nick or "").strip().lstrip("@")
+    if not uchwyt:
+        return ""
+    if not _TG_HANDLE_RX.fullmatch(uchwyt):
+        return html.escape(nick or "")
+    return f'<a href="https://t.me/{uchwyt}">@{uchwyt}</a>'
+
+
 def _tekst_alertu(lead: Lead, dane: dict) -> str:
     """Treść wiadomości na Telegram. WSZYSTKO od użytkownika przez html.escape:
     imię z formularza trafia do wiadomości z `parse_mode=HTML`, więc jeden
-    nawias kątowy w nazwisku potrafiłby rozsypać cały alert.
+    nawias kątowy w nazwisku potrafiłby rozsypać cały alert. Jedyny wyjątek to
+    nick Telegrama — `_link_telegram` robi z niego link i escape'uje po swojemu.
 
     Ta sama funkcja składa wiadomość przy zgłoszeniu i po każdym kliknięciu —
     post na kanale jest kartą leada, a nie powiadomieniem sprzed tygodnia.
@@ -5948,10 +5971,13 @@ def _tekst_alertu(lead: Lead, dane: dict) -> str:
         linie += ["", *stan]
 
     kraj = f" ({lead.phone_iso})" if lead.phone and lead.phone_iso else ""
-    wiersze = (("Name", lead.name), ("Email", lead.email), ("Telegram", lead.telegram),
-               ("Phone", f"{lead.phone}{kraj}" if lead.phone else ""),
-               ("Source", " / ".join(x for x in (lead.source, lead.ref) if x)))
-    linie += ["", *(f"<b>{k}:</b> {e(v)}" for k, v in wiersze if v)]
+    # Wartości wchodzą tu JUŻ jako HTML, bo nick jest linkiem — każda inna
+    # przechodzi przez `e()` w tym samym miejscu, w którym powstaje.
+    wiersze = (("Name", e(lead.name or "")), ("Email", e(lead.email or "")),
+               ("Telegram", _link_telegram(lead.telegram)),
+               ("Phone", e(f"{lead.phone}{kraj}") if lead.phone else ""),
+               ("Source", e(" / ".join(x for x in (lead.source, lead.ref) if x))))
+    linie += ["", *(f"<b>{k}:</b> {v}" for k, v in wiersze if v)]
 
     # Uzasadnienie oceny. Bez tego przy nazwisku stoi goła liczba, której nie ma
     # jak sprawdzić — a to ona decyduje, do kogo pisze się pierwszego.
@@ -6013,7 +6039,7 @@ def _tresc_z_payloadu(surowy: str | None) -> str:
 
 
 def _lead_json(lead: Lead, trader_id: int | None, paid_usd: float,
-               next_due: datetime | None = None) -> dict:
+               next_due: datetime | None = None, accounts: int = 0) -> dict:
     """Lead dla panelu. Wspólne dla listy i karty szczegółów, żeby karta nie
     zaczęła nazywać pól inaczej niż tabela, z której się ją otwiera."""
     zakwalifikowany = lead.outcome != "not_qualified"
@@ -6034,6 +6060,11 @@ def _lead_json(lead: Lead, trader_id: int | None, paid_usd: float,
         # Wyliczane, nie przechowywane — patrz komentarz nad sekcją.
         "trader_id": trader_id,
         "paid_usd": round(float(paid_usd or 0), 2),
+        # Ile kont ten człowiek już ma. Panel wyłącza po tym „darmowe konto":
+        # przycisk zakłada PRAWDZIWY challenge, więc drugie kliknięcie to drugi
+        # koszt. Serwer i tak sprawdza to jeszcze raz — panel ma tylko nie
+        # zapraszać do pomyłki.
+        "accounts": int(accounts or 0),
         # Czy SMS ma do kogo pójść. Liczone tutaj, bo panel nie zna ani
         # konfiguracji Twilio, ani tego, że numer bez kierunkowego jest
         # bezużyteczny — a przycisk, który zawsze odmawia, uczy go nie klikać.
@@ -6258,6 +6289,7 @@ def leads_ingest(payload: LeadIn,
 
         session.commit()
         lead_id, tekst = lead.id, _tekst_alertu(lead, dane)
+        czat = telegram.lead_chat_id(lead.source)
         # Atrybuty do pusha czytane PRZED close(): potem instancja jest odpięta.
         kto = lead.name or lead.email
         if lead.outcome == "not_qualified":
@@ -6275,21 +6307,23 @@ def leads_ingest(payload: LeadIn,
     # Push do adminów tak samo — telefon działu ma zabrzęczeć, ale landing nie
     # może czekać na push service ani oglądać jego błędów.
     _lead_push(lead_id, f"New lead: {kto}", opis, event="lead_new")
-    _, _, message_id = telegram.send_lead_alert(lead_id, tekst)
+    _, _, message_id = telegram.send_lead_alert(lead_id, tekst, chat_id=czat)
     if message_id:
         # Osobny, króciutki zapis po wysyłce. Nie da się tego zrobić w tamtej
         # transakcji, bo id wiadomości powstaje dopiero w Telegramie — a bez
         # niego odpowiedź na alert nie ma jak trafić do tego leada.
-        _zapamietaj_wiadomosc(lead_id, message_id)
+        _zapamietaj_wiadomosc(lead_id, message_id, czat or None)
     return {"ok": True, "id": lead_id, "new": nowy}
 
 
-def _zapamietaj_wiadomosc(lead_id: int, message_id: int) -> None:
+def _zapamietaj_wiadomosc(lead_id: int, message_id: int,
+                          chat_id: str | None) -> None:
     session = SessionLocal()
     try:
         lead = session.get(Lead, lead_id)
         if lead:
             lead.tg_message_id = message_id
+            lead.tg_chat_id = chat_id
             session.commit()
     finally:
         session.close()
@@ -6299,9 +6333,9 @@ def _zapamietaj_wiadomosc(lead_id: int, message_id: int) -> None:
 def admin_leads(status: str | None = None, q: str | None = None):
     """Lista leadów z doliczonym „czy kupił".
 
-    Trzy zapytania zamiast jednego na lead: leady, pasujący traderzy po mailu,
-    suma zapłaconych zamówień. Przy setce leadów pętla z osobnym SELECT-em na
-    każdego byłaby niezauważalna, przy tysiącu już nie.
+    Zapytania zbiorcze zamiast jednego na lead: leady, pasujący traderzy po
+    mailu, suma zapłaconych zamówień, liczba kont. Przy setce leadów pętla
+    z osobnym SELECT-em na każdego byłaby niezauważalna, przy tysiącu już nie.
     """
     session = SessionLocal()
     try:
@@ -6317,15 +6351,20 @@ def admin_leads(status: str | None = None, q: str | None = None):
         maile = [l.email for l in leady]
         traderzy: dict[str, int] = {}
         zaplacone: dict[int, float] = {}
+        konta: dict[int, int] = {}
         if maile:
             traderzy = {e.lower(): i for i, e in
                         session.query(Trader.id, Trader.email)
                         .filter(func.lower(Trader.email).in_(maile)).all()}
             if traderzy:
+                idki = list(traderzy.values())
                 zaplacone = dict(session.query(Order.trader_id, func.sum(Order.amount_usd))
-                                 .filter(Order.trader_id.in_(list(traderzy.values())),
+                                 .filter(Order.trader_id.in_(idki),
                                          Order.status == "paid")
                                  .group_by(Order.trader_id).all())
+                konta = dict(session.query(Account.trader_id, func.count(Account.id))
+                             .filter(Account.trader_id.in_(idki))
+                             .group_by(Account.trader_id).all())
 
         # Najbliższy otwarty termin per lead. Wiersz musi krzyczeć „na dziś",
         # bo inaczej przypomnienie widać dopiero po otwarciu karty — czyli
@@ -6340,7 +6379,7 @@ def admin_leads(status: str | None = None, q: str | None = None):
         for l in leady:
             trader_id = traderzy.get(l.email)
             wynik.append(_lead_json(l, trader_id, zaplacone.get(trader_id, 0) or 0,
-                                    terminy.get(l.id)))
+                                    terminy.get(l.id), konta.get(trader_id, 0)))
         return wynik
     finally:
         session.close()
@@ -6364,7 +6403,10 @@ def admin_lead_detail(lead_id: int):
                   .filter(func.lower(Trader.email) == lead.email.lower()).one_or_none())
         zamowienia = []
         zaplacone = 0.0
+        konta = 0
         if trader:
+            konta = (session.query(func.count(Account.id))
+                     .filter(Account.trader_id == trader.id).scalar() or 0)
             for o in (session.query(Order).filter(Order.trader_id == trader.id)
                       .order_by(Order.created_at.desc()).all()):
                 if o.status == "paid":
@@ -6386,7 +6428,7 @@ def admin_lead_detail(lead_id: int):
         otwarte = [r.due_at for r in przypomnienia if r.active]
 
         dane = _lead_json(lead, trader.id if trader else None, zaplacone,
-                          min(otwarte) if otwarte else None)
+                          min(otwarte) if otwarte else None, konta)
         # Tylko w szczegółach (jak orders/events): szuflada pokazuje przycisk
         # „wyślij zaproszenie do portalu" wyłącznie tam, gdzie ma to sens —
         # konto założone ZA klienta, który hasła jeszcze nie ustawił.
@@ -6469,15 +6511,16 @@ def admin_lead_create(payload: LeadManualIn):
         session.commit()
         lead_id, kto = lead.id, (lead.name or lead.email)
         tekst = _tekst_alertu(lead, {})
+        czat = telegram.lead_chat_id(lead.source)
     finally:
         session.close()
 
     # Best-effort po commicie, dokładnie jak przy ingeście: padnięty Telegram
     # nie może cofnąć zapisanego leada ani kazać wpisywać go drugi raz.
     _lead_push(lead_id, f"New lead: {kto}", "added by hand", event="lead_new")
-    _, _, message_id = telegram.send_lead_alert(lead_id, tekst)
+    _, _, message_id = telegram.send_lead_alert(lead_id, tekst, chat_id=czat)
     if message_id:
-        _zapamietaj_wiadomosc(lead_id, message_id)
+        _zapamietaj_wiadomosc(lead_id, message_id, czat or None)
     return {"id": lead_id, "existing": False}
 
 
@@ -6572,7 +6615,7 @@ def admin_lead_delete(lead_id: int):
         lead = session.get(Lead, lead_id)
         if not lead:
             raise HTTPException(404, "Lead not found")
-        mail, karta_mid = lead.email, lead.tg_message_id
+        mail, karta_mid, karta_czat = lead.email, lead.tg_message_id, lead.tg_chat_id
         # Dzieci najpierw — `lead_events.lead_id` i `lead_reminders.lead_id` to
         # klucze obce, więc Postgres odrzuciłby skasowanie rodzica.
         session.query(LeadReminder).filter(LeadReminder.lead_id == lead_id).delete()
@@ -6586,9 +6629,51 @@ def admin_lead_delete(lead_id: int):
     # dawała się klikać (w lead, którego już nie było). Padnięty Telegram nie
     # cofa kasowania.
     if karta_mid:
-        telegram.delete_lead_card(karta_mid)
+        telegram.delete_lead_card(karta_mid, chat_id=karta_czat)
     print(f"[leads] usunieto lead #{lead_id} ({mail})")
     return {"ok": True, "id": lead_id}
+
+
+# Tyle obiecuje landing na /freeaccount i tylko to wolno stąd przyznać.
+# Produkt NIE jest parametrem: ten przycisk jest po to, żeby dział nie musiał
+# niczego wybierać, a pole w żądaniu prędzej czy później rozdałoby stutysięczne
+# konta za darmo.
+FREE_CHALLENGE_KEY = "2step-25k"
+
+
+@app.post("/api/admin/leads/{lead_id}/free-account",
+          dependencies=[Depends(auth.require_admin)])
+def admin_lead_free_account(lead_id: int):
+    """Darmowy challenge dla leada z /freeaccount — jednym kliknięciem z panelu.
+
+    Konto jest PRAWDZIWE: ta sama ścieżka co zakup (`billing.grant_challenge`
+    → `provisioning.create_account_from_order`), więc powstaje rachunek MT5,
+    a klient dostaje mail `challenge_granted` z linkiem do ustawienia hasła.
+    Trader zakłada się po drodze, jeśli leada jeszcze nie ma w bazie klientów.
+
+    Drugie kliknięcie odmawia (409). Panel wprawdzie chowa przycisk, gdy konto
+    już jest, ale dwa kliknięcia w tę samą sekundę widzą jeszcze stary stan —
+    a to jest koszt, nie literówka.
+    """
+    session = SessionLocal()
+    try:
+        lead = session.get(Lead, lead_id)
+        if not lead:
+            raise HTTPException(404, "Lead not found")
+        trader, nowy = _trader_po_mailu(session, lead.email)
+        istniejace = (session.query(Account)
+                      .filter(Account.trader_id == trader.id,
+                              Account.source == "grant").first())
+        if istniejace:
+            raise HTTPException(409, f"Already granted — account {istniejace.login}")
+        res = billing.grant_challenge(session, trader, FREE_CHALLENGE_KEY, "free program")
+        _zdarzenie(session, lead.id, "granted",
+                   f"{FREE_CHALLENGE_KEY} — login {res.get('login')}", actor="panel")
+        session.commit()
+        return {"granted": True, "trader_created": nowy,
+                "login": res.get("login"), "account_id": res.get("account_id")}
+    finally:
+        session.close()
 
 
 @app.post("/api/admin/leads/{lead_id}/sms", dependencies=[Depends(auth.require_admin)])
@@ -7168,7 +7253,18 @@ def _telegram_przycisk(cb: dict) -> dict:
             telegram.answer_callback(cb.get("id", ""), "Nie znaleziono leada")
             return {"ok": True}
         dymek, zmiana = _wykonaj_akcje(session, lead, akcja, kto)
-        if zmiana:
+        # Karta sprzed kolumny `tg_chat_id` dopisuje sobie czat przy pierwszym
+        # kliknięciu. Tylko tutaj: callback niesie id leada, więc czat, w którym
+        # wisi jego karta, jest pewny — przy notatce byłby zgadywany po numerze
+        # wiadomości, a ten potrafi się powtórzyć między czatami.
+        czat_karty = str(((cb.get("message") or {}).get("chat") or {}).get("id") or "")
+        uzupelniono = bool(czat_karty) and not lead.tg_chat_id
+        if uzupelniono:
+            lead.tg_chat_id = czat_karty
+        # `zmiana` zostaje nietknięta: mówi, czy klikający coś zmienił, i to ona
+        # decyduje o przepisaniu karty i pushu do reszty. Dopisany czat nie jest
+        # niczyim kliknięciem i nie ma prawa wysłać powiadomienia.
+        if zmiana or uzupelniono:
             session.commit()
         tekst, klawiatura = _stan_wiadomosci(lead)
         lead_id, kogo = lead.id, (lead.name or lead.email)
@@ -7222,10 +7318,19 @@ def _telegram_notatka(wiadomosc: dict) -> dict:
         return {"ok": True}
     autor = (wiadomosc.get("author_signature")
              or (wiadomosc.get("from") or {}).get("first_name") or "kanał")[:60]
+    czat = str((wiadomosc.get("chat") or {}).get("id") or "")
 
     session = SessionLocal()
     try:
-        lead = session.query(Lead).filter(Lead.tg_message_id == odpowiedz_na).one_or_none()
+        # Numer wiadomości jest unikalny w czacie, nie u bota, więc karta z
+        # czatu free i karta z czatu działu potrafią mieć ten sam. Stąd filtr
+        # po czacie, a `first()` zamiast `one_or_none()`: kolizja rzuciłaby 500,
+        # a Telegram ponawia nieodebrany update w kółko.
+        # Furtka dla kart wysłanych, zanim `tg_chat_id` istniało — te wiszą
+        # w czacie działu i innego nie miały.
+        baza = session.query(Lead).filter(Lead.tg_message_id == odpowiedz_na)
+        lead = (baza.filter(Lead.tg_chat_id == czat).first()
+                or baza.filter(Lead.tg_chat_id.is_(None)).first())
         if not lead:
             return {"ok": True}      # odpowiedź na coś, co nie jest alertem o leadzie
         # Notatki DOPISUJĄ się, nie nadpisują: na kanale odpowiada kilka osób
@@ -7243,7 +7348,6 @@ def _telegram_notatka(wiadomosc: dict) -> dict:
     finally:
         session.close()
 
-    czat = str((wiadomosc.get("chat") or {}).get("id") or "")
     if czat and mid:
         telegram.edit_lead_message(czat, mid, tekst, keyboard=klawiatura)
     return {"ok": True}
@@ -7340,7 +7444,8 @@ def cron_lead_followups(no_contact_days: int = 3, stalled_days: int = 7):
     return _lead_followups(no_contact_days, stalled_days)
 
 
-def _wyslij_zaplanowane(session, now: datetime) -> tuple[list[str], list[tuple[int, str, str]]]:
+def _wyslij_zaplanowane(session, now: datetime
+                        ) -> tuple[list[tuple[str, str]], list[tuple[int, str, str]]]:
     """Przypomnienia z terminem, który już minął: ustawione ręcznie w panelu
     i cykle założone po zakupie.
 
@@ -7348,15 +7453,16 @@ def _wyslij_zaplanowane(session, now: datetime) -> tuple[list[str], list[tuple[i
     dopóki ktoś ich nie wyłączy w panelu. Jednorazowe zamykają się same, żeby
     nie trzeba było po nich sprzątać.
 
-    Zwraca dwie listy: teksty na czat działu i pushe `(lead_id, tytuł, treść)`
-    na telefony adminów — push jest czystym tekstem, bo HTML z Telegrama
-    wyświetliłby się w notyfikacji dosłownie, ze znacznikami.
+    Zwraca dwie listy: wiadomości `(czat, tekst)` — czat, bo leady free mają
+    własny i przypomnienie ma trafić tam, gdzie wisi karta — oraz pushe
+    `(lead_id, tytuł, treść)` na telefony adminów; push jest czystym tekstem,
+    bo HTML z Telegrama wyświetliłby się w notyfikacji dosłownie, ze znacznikami.
 
     Filtr terminu jest po stronie Pythona, a nie w zapytaniu: SQLite oddaje daty
     bez strefy, więc porównanie kolumny z `now` ze strefą potrafi w tej samej
     bazie zwrócić coś innego niż w Postgresie.
     """
-    teksty: list[str] = []
+    teksty: list[tuple[str, str]] = []
     pushy: list[tuple[int, str, str]] = []
     for r in session.query(LeadReminder).filter(LeadReminder.active.is_(True)).all():
         if (_utc(r.due_at) or now) > now:
@@ -7365,7 +7471,7 @@ def _wyslij_zaplanowane(session, now: datetime) -> tuple[list[str], list[tuple[i
         if not lead:
             r.active = False
             continue
-        teksty.append(_tekst_zaplanowanego(lead, r))
+        teksty.append((telegram.lead_chat_id(lead.source), _tekst_zaplanowanego(lead, r)))
         pushy.append((lead.id, f"Reminder: {r.text[:80]}", lead.name or lead.email))
         r.sent_count = (r.sent_count or 0) + 1
         r.last_sent_at = now
@@ -7455,7 +7561,8 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
             if (l.id, powod) in juz:
                 continue
             _zdarzenie(session, l.id, "reminder", powod, actor="cron")
-            do_wyslania.append(_tekst_przypomnienia(l, powod, paid, dni))
+            do_wyslania.append((telegram.lead_chat_id(l.source),
+                                _tekst_przypomnienia(l, powod, paid, dni)))
             tytul = {
                 "bought": f"{l.name or l.email} bought — ${paid:,.0f}",
                 "no_contact": f"No contact yet: {l.name or l.email} ({dni}d)",
@@ -7492,8 +7599,8 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
     finally:
         session.close()
 
-    for tekst in do_wyslania:
-        telegram.send_lead_message(tekst)
+    for czat, tekst in do_wyslania:
+        telegram.send_lead_message(tekst, chat_id=czat)
     # Po commicie, jak wysyłka na czat: padnięty push service nie cofnie zapisu,
     # a dedup wyżej gwarantuje, że kolejny przebieg nie wyśle tego drugi raz.
     for lead_id, tytul, tresc in pushy:
