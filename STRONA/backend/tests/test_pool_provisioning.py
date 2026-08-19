@@ -206,6 +206,30 @@ def test_api_puli_wystawia_zamowienia_czekajace_na_rachunek():
     assert czeka[0]["trader_email"] == "wkolejce@pool.pl"
 
 
+def test_czekajace_konto_widac_juz_na_overview():
+    """Kolejka po rachunek z puli musi być widoczna BEZ wchodzenia w MT5 Pool.
+
+    Konto z zakupu zostaje w `provisioning`, a mail z poświadczeniami wychodzi
+    dopiero przy uzbrojeniu — więc dopóki pula jest pusta, nikt nawet nie próbuje
+    go wysłać i kafelek „e-mails failed" stoi na zerze. Cała awaria polega na tym,
+    że nigdzie nic nie mruga: klient nie dostaje nic, a panel wygląda na zdrowy.
+
+    Licznik na Overview i lista w MT5 Pool muszą liczyć DOKŁADNIE ten sam zbiór —
+    wiersz obiecuje, że po kliknięciu zobaczy się te konta, więc rozjazd zamieniłby
+    alert w zagadkę.
+    """
+    tid = _trader("overview@pool.pl")
+    aid = _konto_czekajace(tid, 78_000)
+
+    ile = client.get("/api/stats", headers=ADMIN_H).json()["provisioning"]
+    czekaja = client.get("/api/admin/pool", headers=ADMIN_H).json()["waiting"]
+    assert aid in [w["account_id"] for w in czekaja]
+    assert ile == len(czekaja)
+
+    kod = client.get("/static/js/admin-panel.js").text
+    assert "s.provisioning?todo(s.provisioning," in kod and "'pool','bank'" in kod
+
+
 def test_wolny_wpis_mozna_usunac_a_przydzielonego_nie():
     s = SessionLocal()
     wolny = PoolAccount(platform_login="7700001", platform_password="x",

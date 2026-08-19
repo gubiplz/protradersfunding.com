@@ -450,6 +450,10 @@ const VIEWS={
   const todo=(n,label,view,ico)=>`<div class="todo ${n?'has':''}" onclick="go('${view}')">
     <div class="tile-ic ${n?'orange':'blue'}">${ICO[ico]}</div>
     <div><div class="n">${n}</div><div class="l">${label}</div></div><span class="go">${ICO.arrow}</span></div>`;
+  /* Konto z ZAKUPU czeka na rachunek z puli po cichu: mail z poświadczeniami
+     wychodzi dopiero przy uzbrojeniu, więc póki pula jest pusta, nikt nawet nie
+     próbuje wysyłać — i dziennik maili też milczy. Wiersz prowadzi do MT5 Pool,
+     bo tam widać, komu i jakiego rozmiaru rachunku brakuje. */
   $('view').innerHTML=`
     <div class="sysbar">
       <span class="sys ${s.stripe==='mock'?'warn':''}"><span class="dot"></span>Payments: <b>${esc(s.stripe)}</b></span>
@@ -464,6 +468,7 @@ const VIEWS={
       ${todo((kyc.pending||[]).length,'KYC submissions pending','kyc','shield')}
       ${todo(openTick,'support tickets open','tickets','chat')}
       ${s.mail_failed_7d?todo(s.mail_failed_7d,'e-mails failed to send (7 days)','mail','alert'):''}
+      ${s.provisioning?todo(s.provisioning,'accounts waiting for an MT5 account from the pool','pool','bank'):''}
     </div>
     <div class="stats-row">
       ${tile('purple','layers','Accounts',s.total,`${s.active} active · ${s.provisioning??0} provisioning`)}
