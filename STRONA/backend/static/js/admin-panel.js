@@ -1661,9 +1661,34 @@ function inviteRow(tid,ctx){
       </div>
     </div>`;
 }
+/* Przy stanie innym niz „awaiting" zaproszenia nie wygenerujemy — serwer nie da
+   wejsciowki na konto z zywym haslem (`portal-invite` odmawia) i slusznie. Ale pusta
+   szuflada kazala dzialowi zgadywac, czemu przycisku nie ma, wiec kazdy stan
+   mowi tu o sobie. Dla „password" zostaje droga bezpieczna: reset idzie
+   WYLACZNIE na adres klienta, panel linku nie oglada. */
 function leadInviteCard(l){
-  if(!l.must_set_password||!l.trader_id)return'';
-  return `<div class="lead-card sec-card">${inviteRow(l.trader_id,'lead')}</div>`;
+  if(!l.trader_id)return'';
+  const st=l.portal_state||(l.must_set_password?'awaiting':'password');
+  if(st==='awaiting')return`<div class="lead-card sec-card">${inviteRow(l.trader_id,'lead')}</div>`;
+  const opis=st==='google'
+    ?'Signs in with Google — no portal password needed.'
+    :'Portal password already set. If they cannot get in, send them a reset link.';
+  return `<div class="lead-card sec-card"><div class="mod-row">
+      <div><div class="lbl">Portal access</div>
+        <div class="muted" style="font-size:11.5px">${opis}</div></div>
+      ${st==='google'?'':`<div style="display:flex;justify-content:flex-end">
+        <button class="btn-o" onclick="sendLeadReset()">Send reset e-mail</button></div>`}
+    </div></div>`;
+}
+async function sendLeadReset(){
+  const l=window._leadOpen;if(!l)return;
+  if(!await askConfirm({title:'Send a password reset?',
+    body:`Goes to <b>${esc(l.email)}</b> — a link to choose a new portal password, `
+      +`valid for 1 hour. The link never passes through this panel.`,
+    ok:'Send',cancel:'Not now'}))return;
+  try{await api('/api/auth/forgot',{method:'POST',body:JSON.stringify({email:l.email})})}
+  catch(e){toast('Not sent: '+e.message,'err');return}
+  toast('Reset e-mail sent — the link works for 1 hour');
 }
 async function sendPortalInvite(tid,ctx){
   const email=ctx==='lead'&&window._leadOpen?window._leadOpen.email

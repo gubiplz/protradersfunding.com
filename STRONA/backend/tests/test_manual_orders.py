@@ -456,8 +456,14 @@ def test_mail_html_prowadzi_pod_ustawienie_hasla_a_nie_pod_logowanie():
     html = notify._render_html("credentials", ctx, "x")
     assert "reset=ATRAPA" in html and "Set Your Password" in html
     assert "?view=accounts" not in html
-    bez = notify._render_html("credentials", {**ctx, "setup_url": None}, "x")
+    bez = notify._render_html("credentials",
+                              {**ctx, "setup_url": None,
+                               "forgot_url": "https://ptf.test/portal?forgot=1&email=a%40b.c"}, "x")
     assert "?view=accounts" in bez and "Set Your Password" not in bez
+    # Brak wejściówki nie może znaczyć „ten mail nie prowadzi nigdzie": klienta
+    # bez hasła (konto starsze niż flaga, przejęte przez Google) zostawiłoby to
+    # przed ekranem logowania z samym hasłem do MT5.
+    assert "forgot=1" in bez and "&amp;email=" in bez
 
 
 def test_lead_nie_wpada_w_slepa_uliczke_przy_rejestracji(maile):

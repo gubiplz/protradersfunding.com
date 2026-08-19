@@ -649,11 +649,18 @@ class ResetIn(BaseModel):
 
 @app.post("/api/auth/forgot")
 def forgot_password(payload: ForgotIn, request: Request):
-    """Zawsze 200 — odpowiedź nie może zdradzać, czy e-mail istnieje w bazie."""
+    """Zawsze 200 — odpowiedź nie może zdradzać, czy e-mail istnieje w bazie.
+
+    Dopasowanie przez `lower()` po OBU stronach: adresy z importu wypłat i z
+    Google bywają w bazie z wielkiej litery, a porównanie 1:1 kończyło się dla
+    nich cichym „wysłaliśmy" bez maila. To akurat ci klienci, którzy hasła
+    nigdy nie ustawiali, więc reset jest ich jedyną drogą do portalu.
+    """
     _rate_limit(request, "forgot", 5)
     session = SessionLocal()
     try:
-        tr = session.query(Trader).filter(Trader.email == payload.email.strip().lower()).first()
+        tr = (session.query(Trader)
+              .filter(func.lower(Trader.email) == payload.email.strip().lower()).first())
         if tr:
             # Odcisk hasła w tokenie = link jednorazowy (po resecie hash sie
             # zmienia i ten sam link juz nie przejdzie walidacji).
@@ -6433,6 +6440,12 @@ def admin_lead_detail(lead_id: int):
         # „wyślij zaproszenie do portalu" wyłącznie tam, gdzie ma to sens —
         # konto założone ZA klienta, który hasła jeszcze nie ustawił.
         dane["must_set_password"] = bool(trader.must_set_password) if trader else False
+        # Przy pozostałych stanach przycisku nie ma i dział nie wiedział dlaczego
+        # („czemu nie mogę mu wysłać zaproszenia?"). Stan mówi to wprost.
+        dane["portal_state"] = ("none" if not trader
+                                else "awaiting" if trader.must_set_password
+                                else "google" if trader.google_sub
+                                else "password")
         dane["reminders"] = [{
             "id": r.id, "text": r.text, "kind": r.kind, "active": r.active,
             "repeat_days": r.repeat_days, "sent_count": r.sent_count,

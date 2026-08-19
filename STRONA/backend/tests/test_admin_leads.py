@@ -1756,6 +1756,85 @@ def test_drugie_kliniecie_nie_daje_drugiego_konta():
     assert _z_listy(lead_id)["accounts"] == 1
 
 
+@pytest.fixture
+def maile(monkeypatch):
+    """Podstawka pod `send`, nie na nim — `send` w requeście tylko kolejkuje."""
+    zebrane = []
+    monkeypatch.setattr(notify, "_send_teraz",
+                        lambda event, to, ctx=None: zebrane.append((event, to, ctx or {})))
+    return zebrane
+
+
+def test_darmowe_konto_dla_swiezego_leada_niesie_link_do_hasla(maile):
+    """Główna ścieżka: leada nie ma w bazie klientów, więc konto powstaje razem
+    z grantem i hasła nie zna nikt — mail musi je pozwolić ustawić."""
+    _produkt_free()
+    dane = _zgloszenie(source="free-challenge")
+    lead_id = _wyslij(dane).json()["id"]
+    assert client.post(f"/api/admin/leads/{lead_id}/free-account",
+                       headers=ADMIN).status_code == 200
+
+    ctx = [m for m in maile if m[0] == "challenge_granted" and m[1] == dane["email"]][-1][2]
+    assert "reset=" in (ctx.get("setup_url") or "")
+
+
+def test_darmowe_konto_dla_starego_klienta_tez_daje_wejscie_do_portalu(maile):
+    """Ten sam przycisk trafia na maile, które SĄ już w bazie klientów. Takiemu
+    wierszowi nie mintujemy 7-dniowej wejściówki (mógł mieć żywe hasło), ale
+    „zaloguj się" bez niczego to ślepa uliczka: `must_set_password` nie istnieje
+    na kontach starszych od siebie ani na przejętych przez Google, więc z samej
+    flagi nie wynika, że ten człowiek ma czym wejść.
+    """
+    _produkt_free()
+    dane = _zgloszenie(source="free-challenge")
+    lead_id = _wyslij(dane).json()["id"]
+    s = SessionLocal()
+    try:
+        s.add(Trader(email=dane["email"], password_hash=auth.hash_password("stareHaslo1"),
+                     must_set_password=False, full_name="Jan Kowalski"))
+        s.commit()
+    finally:
+        s.close()
+
+    assert client.post(f"/api/admin/leads/{lead_id}/free-account",
+                       headers=ADMIN).status_code == 200
+
+    ctx = [m for m in maile if m[0] == "challenge_granted" and m[1] == dane["email"]][-1][2]
+    assert not ctx.get("setup_url"), "konto z żywym hasłem nie dostaje wejściówki z panelu"
+    assert "forgot=1" in (ctx.get("forgot_url") or ""), "mail nie daje żadnej drogi do portalu"
+    # Link musi trafiać na wpisany adres, inaczej reset i tak wymaga przepisywania.
+    assert dane["email"].replace("@", "%40") in ctx["forgot_url"]
+
+
+def test_stan_portalu_widac_na_karcie_leada():
+    """Bez tego szuflada milczy: przycisku „send invite" nie ma, a dział nie wie,
+    czy klient ma hasło, czy wchodzi przez Google."""
+    dane = _zgloszenie()
+    lead_id = _wyslij(dane).json()["id"]
+    assert client.get(f"/api/admin/leads/{lead_id}",
+                      headers=ADMIN).json()["portal_state"] == "none"
+
+    s = SessionLocal()
+    try:
+        s.add(Trader(email=dane["email"], password_hash=auth.hash_password("x" * 12),
+                     must_set_password=True))
+        s.commit()
+    finally:
+        s.close()
+    assert client.get(f"/api/admin/leads/{lead_id}",
+                      headers=ADMIN).json()["portal_state"] == "awaiting"
+
+    s = SessionLocal()
+    try:
+        tr = s.query(Trader).filter(Trader.email == dane["email"]).one()
+        tr.must_set_password = False
+        s.commit()
+    finally:
+        s.close()
+    assert client.get(f"/api/admin/leads/{lead_id}",
+                      headers=ADMIN).json()["portal_state"] == "password"
+
+
 def test_darmowe_konto_wymaga_admina():
     lead_id = _wyslij(_zgloszenie(source="free-challenge")).json()["id"]
     assert client.post(f"/api/admin/leads/{lead_id}/free-account").status_code in (401, 403)

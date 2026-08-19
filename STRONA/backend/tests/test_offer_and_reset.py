@@ -96,6 +96,22 @@ def test_reset_hasla_dziala_a_stare_haslo_przestaje():
     assert r.status_code == 400
 
 
+def test_reset_znajduje_maila_zapisanego_z_wielkiej_litery(monkeypatch):
+    """Adresy z importu wypłat i z Google siedzą w bazie tak, jak je podano —
+    czasem z wielkiej litery. Dopasowanie 1:1 kwitowało je „wysłaliśmy" i nie
+    wysyłało nic, a to akurat konta założone ZA klienta: reset jest ich jedyną
+    drogą do portalu."""
+    from app import notify
+
+    _trader("Jan.Kowalski@Duze.PL")
+    poszlo = []
+    monkeypatch.setattr(notify, "_send_teraz",
+                        lambda event, to, ctx=None: poszlo.append((event, to)))
+    assert client.post("/api/auth/forgot",
+                       json={"email": "jan.kowalski@duze.pl"}).status_code == 200
+    assert [e for e, _ in poszlo] == ["password_reset"]
+
+
 def test_api_verify_zwraca_dane_certyfikatu_dla_podgladu():
     """Morph na LP: token dziala jak przepustka — API oddaje to, co widac
     na samym dokumencie (payout = wariant zielony)."""

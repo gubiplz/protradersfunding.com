@@ -30,6 +30,7 @@ from __future__ import annotations
 import secrets
 from datetime import datetime, timezone
 from time import monotonic
+from urllib.parse import quote
 
 from fastapi import HTTPException
 
@@ -216,13 +217,21 @@ def _creds_ctx(trader: Trader, acc: Account) -> dict:
     # „zaloguj się" i nie ma czym. Link jest jednorazowy (odcisk hasła siedzi
     # w tokenie) i ważny 7 dni; po wygaśnięciu zostaje „forgot password"
     # i mail mówi o tym wprost.
+    base = get_settings().app_base_url
     setup_url = None
     if getattr(trader, "must_set_password", False):
         from . import auth   # tutaj, nie u góry: auth ciągnie config i sesje
-        setup_url = (f"{get_settings().app_base_url}/portal"
+        setup_url = (f"{base}/portal"
                      f"?reset={auth.make_setup_token(trader.id, trader.password_hash)}")
     return {
         "setup_url": setup_url,
+        "portal_url": f"{base}/portal",
+        # Furtka dla drugiej strony tego `if`. Flaga mówi tylko tyle, że wiersz
+        # tradera założyliśmy my — konto starsze niż sama flaga (2026-08-11) albo
+        # przejęte przez Google ma ją zgaszoną, choć hasła nadal nie ma. Nie da
+        # się tego rozstrzygnąć z kolumn, więc mail nie zgaduje: pokazuje drogę,
+        # która jest nieszkodliwa też dla kogoś, kto hasło ma.
+        "forgot_url": f"{base}/portal?forgot=1&email={quote(trader.email)}",
         "name": trader.full_name or trader.email, "login": acc.platform_login,
         "platform_login": acc.platform_login, "platform_password": acc.platform_password,
         "platform_server": acc.platform_server, "initial_balance": acc.initial_balance,

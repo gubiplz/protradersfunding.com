@@ -568,6 +568,14 @@ async function boot(){
   const rt=q0.get('reset');
   if(rt){window._resetToken=rt;
     $('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('reset');loadAuthStats();return}
+  /* Z maila z poswiadczeniami MT5: klient, ktory nie ma hasla do portalu, ma
+     wejsc od razu na ekran resetu. Bez tego lezy na logowaniu i musi jeszcze
+     znalezc „Forgot password". Adres w ?email= to jego wlasny adres. */
+  if(q0.get('forgot')){
+    $('auth').classList.remove('hidden');$('app').classList.add('hidden');
+    authTab('forgot');
+    const em=q0.get('email');if(em)$('a-email').value=em;
+    loadAuthStats();return}
   if(!TOKEN){
     $('auth').classList.remove('hidden');$('app').classList.add('hidden');
     /* Wejscie z cennika (?buy=) to najczesciej NOWY klient — startujemy od

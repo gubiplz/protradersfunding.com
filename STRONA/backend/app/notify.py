@@ -106,6 +106,22 @@ def _bogo_intro(ctx: dict) -> str:
             "Same rules and the same profit split as a purchased account.")
 
 
+def _bez_hasla_txt(ctx: dict) -> str:
+    """Akapit dla klienta, któremu nie mintujemy linku do ustawienia hasła.
+
+    Ten mail bywa pierwszym powodem, żeby wejść do portalu, a `setup_url`
+    dostaje wyłącznie konto z flagą `must_set_password`. Bez tej furtki reszta
+    czyta „zaloguj się" i nie ma czym: flagi nie ma na koncie starszym niż ona
+    sama ani na przejętym przez Google, a hasło MT5 z tabelki wyżej do portalu
+    nie pasuje — to najczęstsza pomyłka w zgłoszeniach do supportu.
+    """
+    if not ctx.get("forgot_url"):
+        return ""
+    return (f"\nThe password above is for MetaTrader 5 only. If you have never set a "
+            f"password for the {settings.site_name} portal, get one here:\n"
+            f"{ctx['forgot_url']}\n")
+
+
 def _render(event: str, ctx: dict) -> tuple[str, str]:
     """Maile klienckie są po angielsku (produkt EN); brand z SITE_NAME."""
     brand = settings.site_name
@@ -145,7 +161,7 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             + (f"\nWe opened your portal account for you, so it has no password yet. "
                f"Set one here (the link works for 7 days; after that use \"Forgot password\" "
                f"on the sign-in screen):\n{ctx.get('setup_url')}\n"
-               if ctx.get("setup_url") else "")
+               if ctx.get("setup_url") else _bez_hasla_txt(ctx))
             + f"Good luck. Track your progress in the dashboard.",
         ),
         "phase_passed": (
@@ -233,8 +249,9 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             + (f"\nWe opened your portal account for you, so it has no password yet. "
                f"Set one here (the link works for 7 days; after that use \"Forgot password\" "
                f"on the sign-in screen):\n{ctx.get('setup_url')}\n"
-               if ctx.get("setup_url") else "")
-            + f"\nLog in to the portal to see your objectives and progress.",
+               if ctx.get("setup_url") else _bez_hasla_txt(ctx))
+            + f"\nLog in to the portal to see your objectives and progress."
+            + (f"\n{ctx.get('portal_url')}" if ctx.get("portal_url") else ""),
         ),
         "verify_email": (
             f"{ctx.get('code')} is your {brand} verification code",
@@ -436,10 +453,17 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                            "only for the MetaTrader 5 platform."),
             ]
         else:
+            # Brak `setup_url` nie znaczy „ten klient ma hasło" — znaczy tylko
+            # tyle, że nie mamy prawa mu go nadać (patrz `_bez_hasla_txt`).
+            # Dlatego obok przycisku musi stać druga droga, ta samoobsługowa.
+            zapomniane = (f" Never set one? <a href=\"{ctx['forgot_url'].replace('&', '&amp;')}\" "
+                          f"style=\"color:{_GOLD}\">Get a portal password</a> — "
+                          f"we will e-mail you a link." if ctx.get("forgot_url") else "")
             parts += [
                 _button_html("View Dashboard", f"{portal}?view=accounts"),
-                _note_html("Sign in to the portal with your e-mail address. "
-                           "The credentials above are only for the MetaTrader 5 platform."),
+                _note_html("Sign in to the portal with your e-mail address and portal "
+                           "password — the credentials above are only for the "
+                           "MetaTrader 5 platform." + zapomniane),
             ]
     elif event == "welcome":
         mobile = f"""
