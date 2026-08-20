@@ -33,12 +33,13 @@ const adminH=()=>{const h={'Content-Type':'application/json'};
 /* Timeout 15 s + JEDEN retry tylko dla GET po błędzie sieci/timeoucie — HTTP
    error (nawet 500) nigdy nie jest ponawiany, żeby mutacje się nie dublowały. */
 async function api(path,opts={},_retry){
-  const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),15000);
+  const ms=opts.timeoutMs||15000; delete opts.timeoutMs;
+  const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),ms);
   let r;
   try{r=await fetch(path,{headers:adminH(),...opts,signal:ctl.signal})}
   catch(e){
     clearTimeout(tm);
-    if(!_retry&&(opts.method||'GET').toUpperCase()==='GET')return api(path,opts,1);
+    if(!_retry&&(opts.method||'GET').toUpperCase()==='GET')return api(path,{...opts,timeoutMs:ms},1);
     throw new Error(e&&e.name==='AbortError'?'Request timed out':'Network error');
   }
   clearTimeout(tm);
@@ -3069,8 +3070,10 @@ async function genSim(){
 }
 async function genReal(){
   const size=parseFloat($('real-size').value||'0'), cnt=parseInt($('real-count').value||'1',10);
+  if(cnt>2){toast('Open at most 2 at a time — each takes ~40s and the server cuts off at 60s.','err',8000);return}
+  toast(`Opening ${cnt} real MT5 demo${cnt===1?'':'s'} via Browserless — usually ~40s each…`,'ok',12000);
   try{const r=await api('/api/admin/pool/generate',{method:'POST',
-      body:JSON.stringify({account_size:size,count:cnt})});
+      body:JSON.stringify({account_size:size,count:cnt}), timeoutMs:58000});
     const n=(r.created||[]).length;
     toast(`${n} real MT5 account${n===1?'':'s'} added to the pool.`
       +(r.errors&&r.errors.length?` (${r.errors.length} failed)`:''),'ok',8000);
@@ -3079,9 +3082,10 @@ async function genReal(){
 }
 async function provisionReal(accountId){
   if(!await askConfirm({title:'Open a real MT5 demo for this trader?',
-    body:'Opens a MetaQuotes-Demo account via web.metatrader.app using the trader\'s name and email, then activates the challenge with those credentials. Takes ~20–30 seconds.',
+    body:'Opens a MetaQuotes-Demo account via web.metatrader.app using the trader\'s name and email, then activates the challenge with those credentials. Takes ~30–45 seconds.',
     ok:'Open real MT5'}))return;
-  try{const r=await api('/api/admin/accounts/'+accountId+'/provision-real',{method:'POST'});
+  toast('Opening real MT5 demo — usually ~40s…','ok',12000);
+  try{const r=await api('/api/admin/accounts/'+accountId+'/provision-real',{method:'POST', timeoutMs:58000});
     toast(`Real MT5 ready: ${r.platform_login}@${r.platform_server}`,'ok',8000);
     go('pool');
   }catch(e){toast('Error: '+e.message,'err')}
