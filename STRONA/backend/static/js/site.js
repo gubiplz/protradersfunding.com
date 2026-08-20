@@ -484,7 +484,7 @@
       if (hint) {
         hint.hidden = applied;
         hint.innerHTML = anyPromo
-          ? 'Have a promo code? Get the <b>next size up for the same fee</b>.'
+          ? 'Have a promo code? <b>Apply it below</b>.'
           : 'Have a promo or coupon code?';
       }
       if (kodPromo && big) {

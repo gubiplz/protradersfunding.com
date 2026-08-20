@@ -59,7 +59,7 @@
          scrolled the whole page up to the bar, which read as "go find it
          yourself". Keep this markup in step with renderConfigurator(). #}
       <div class="cfg-promo" id="cfg-promo">
-        <div class="cfg-promo-val" id="cfg-promo-val">{% if cfg and cfg.promo_any %}Have a promo code? Get the <b>next size up for the same fee</b>.{% else %}Have a promo or coupon code?{% endif %}</div>
+        <div class="cfg-promo-val" id="cfg-promo-val">{% if cfg and cfg.promo_any %}Have a promo code? <b>Apply it below</b>.{% else %}Have a promo or coupon code?{% endif %}</div>
         <div class="code-row" id="cfg-code-row">
           <input class="code-inp" id="cfg-code" placeholder="Promo or coupon code" autocomplete="off"
             spellcheck="false" aria-label="Promo or coupon code">
@@ -187,7 +187,7 @@
         </div>
         <div class="pcfg-label">Coupon code</div>
         <div class="code-row">
-          <input id="pcfg-coupon" class="code-inp" placeholder="e.g. WELCOME10" autocomplete="off">
+          <input id="pcfg-coupon" class="code-inp" autocomplete="off" aria-label="Coupon code">
           <button class="code-btn" id="pcfg-apply" type="button">Apply</button>
         </div>
         {# The applied code has to confirm itself right here. The fee line sits
