@@ -347,7 +347,25 @@ async def _provision_one(session_factory, feed, aid: int) -> None:
                   f"z puli, trader {trader.email if trader else '?'}")
             return
 
-        # 3) pula pusta, ale admin włączył w panelu auto-provisioning symulowanych
+        # 3) pula pusta + auto real MT5 (web.metatrader.app) — przed symulacją,
+        #    bo realne poświadczenia są cenniejsze. Wymaga METAQUOTES_WEB_ENABLED
+        #    i przeglądarki (lokalnej albo BROWSER_CDP_URL).
+        if (real_fallback_enabled(s)
+                and (settings.metaquotes_web_enabled or settings.metaapi_auto_create)
+                and _may_attempt(aid)):
+            creds = await _create_demo_account(feed, acc, trader, settings)
+            if creds:
+                _apply_credentials(acc, creds)
+                acc.status = "funded" if acc.phase == "funded" else "active"
+                s.commit()
+                _clear_backoff(aid)
+                if trader:
+                    notify.send(_creds_event(acc), trader.email, _creds_ctx(trader, acc))
+                print(f"[provisioning] konto {aid} = realne demo MT5 "
+                      f"{acc.platform_login}@{acc.platform_server} (auto-fallback)")
+                return
+
+        # 4) pula pusta, ale admin włączył w panelu auto-provisioning symulowanych
         #    poświadczeń — generujemy je od ręki zamiast trzymać tradera w kolejce.
         if sim_fallback_enabled(s):
             _apply_local_credentials(acc)
@@ -359,7 +377,7 @@ async def _provision_one(session_factory, feed, aid: int) -> None:
                   f"({acc.platform_login}@{acc.platform_server}) — pula była pusta")
             return
 
-        # 4) konto czeka, aż admin doda rachunek do puli. Panel pokazuje takie
+        # 5) konto czeka, aż admin doda rachunek do puli. Panel pokazuje takie
         #    konta w sekcji MT5 Pool jako oczekujące.
         print(f"[provisioning] konto {aid} czeka na rachunek ${acc.initial_balance:,.0f} z puli")
     finally:
@@ -367,6 +385,7 @@ async def _provision_one(session_factory, feed, aid: int) -> None:
 
 
 SIM_FALLBACK_KEY = "provision_sim_fallback"
+REAL_FALLBACK_KEY = "provision_real_fallback"
 
 
 def sim_fallback_enabled(session) -> bool:
@@ -375,6 +394,16 @@ def sim_fallback_enabled(session) -> bool:
     Przełącznik z panelu admina, trzymany w bazie — na hostingu bezserwerowym
     zmiana env oznaczałaby redeploy, a to ma działać od kliknięcia."""
     row = session.get(AppSetting, SIM_FALLBACK_KEY)
+    return bool(row and row.value == "1")
+
+
+def real_fallback_enabled(session) -> bool:
+    """Czy przy pustej puli zakładać realne demo MT5 przez web.metatrader.app.
+
+    Osobny przełącznik od sim_fallback: realne konta wymagają przeglądarki
+    (lokalnej albo BROWSER_CDP_URL / Browserless) i trwają ~20–30 s sztuka.
+    Gdy obie flagi są włączone, real ma pierwszeństwo przed symulacją."""
+    row = session.get(AppSetting, REAL_FALLBACK_KEY)
     return bool(row and row.value == "1")
 
 

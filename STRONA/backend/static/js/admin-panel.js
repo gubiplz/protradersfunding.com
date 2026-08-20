@@ -613,14 +613,16 @@ const VIEWS={
   $('view').innerHTML=`
     ${waiting.length?`<div class="sec-card card-sm" style="border-color:var(--gold-line);background:var(--gold-bg)">
       <h3>${waiting.length} paid ${waiting.length===1?'order is':'orders are'} waiting for an MT5 account</h3>
-      <p class="muted" style="font-size:12.5px;margin:6px 0 12px">These challenges are paid for but not tradable yet: the pool has no free account of that size. Add one below and it is assigned automatically.</p>
+      <p class="muted" style="font-size:12.5px;margin:6px 0 12px">These challenges are paid for but not tradable yet: the pool has no free account of that size. Add one below or open a real MT5 demo for that trader.</p>
       <div class="tbl-wrap tw-sm rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.pool-waiting">
-        <thead><tr><th>Account</th><th>Trader</th><th>Needs size</th><th>Waiting since</th></tr></thead>
+        <thead><tr><th>Account</th><th>Trader</th><th>Needs size</th><th>Waiting since</th><th class="no-sort"></th></tr></thead>
         <tbody>${waiting.map(w=>`<tr>
           <td class="num" data-l="Account">${accLink(w.account_id)}</td>
           <td class="rt-main" data-l="Trader">${esc(w.trader_email||'—')}</td>
           <td class="num" data-l="Size"><b>$${fmt0(w.account_size)}</b></td>
-          <td class="muted" data-l="Since" data-sort="${esc(w.created_at||'')}">${w.created_at?dstr(w.created_at):'—'}</td></tr>`).join('')}
+          <td class="muted" data-l="Since" data-sort="${esc(w.created_at||'')}">${w.created_at?dstr(w.created_at):'—'}</td>
+          <td class="rt-acts"><button class="btn-p sm" onclick="provisionReal(${w.account_id})"
+            ${poolData.can_generate?'':'disabled title="'+esc(poolData.generate_hint||'Browser channel unavailable')+'"'}>Open real MT5 now</button></td></tr>`).join('')}
         </tbody></table></div>
       <p class="muted" style="font-size:12.5px;margin-top:10px">Missing: ${Object.entries(missingBySize).map(([sizeKey,cnt])=>`<b>${cnt}×</b> $${fmt0(Number(sizeKey))}`).join(', ')}</p>
     </div>`:''}
@@ -640,6 +642,24 @@ const VIEWS={
         Auto-provision simulated credentials when the pool has no matching account
       </label>
       <p class="muted" style="font-size:12px;margin-top:6px">With this on, a paid challenge never waits: if no free account of the right size is in the pool, the platform generates simulated credentials and activates the account right away.</p>
+    </div>
+
+    <div class="sec-card card-md">
+      <h3>Real MT5 accounts</h3>
+      <p class="muted" style="font-size:12.5px;margin-bottom:14px">Opens real demo accounts on MetaQuotes-Demo via <span class="mono">web.metatrader.app</span> and adds them to the pool. Needs a browser: local Chromium, or <span class="mono">BROWSER_CDP_URL</span> (Browserless).</p>
+      ${poolData.can_generate?'':`<div class="warn-box" style="margin:0 0 12px"><div>${esc(poolData.generate_hint||'Real MT5 generator unavailable on this host.')}</div></div>`}
+      <div class="pool-form">
+        <div><label class="muted" style="font-size:12px">Account size</label>
+          <select id="real-size" class="inp">${sizeOptions(50000)}</select></div>
+        <div><label class="muted" style="font-size:12px">How many</label>
+          <input id="real-count" class="inp" type="number" min="1" max="10" value="1"></div>
+      </div>
+      <button class="btn-p" onclick="genReal()" ${poolData.can_generate?'':'disabled'}>Generate real MT5 accounts</button>
+      <label style="display:flex;align-items:center;gap:9px;margin-top:14px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="real-fb" ${poolData.real_fallback?'checked':''} onchange="setRealFallback(this.checked)" style="width:16px;height:16px;accent-color:var(--acc)">
+        Auto-provision a real web MT5 demo when the pool has no matching account
+      </label>
+      <p class="muted" style="font-size:12px;margin-top:6px">Runs before the simulated fallback. Each open takes ~20–30 s and needs the browser channel above.</p>
     </div>
 
     <div class="sec-card card-md">
@@ -993,7 +1013,7 @@ function poolListHtml(){
     +(list.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.pool">
       <thead><tr><th>#</th><th>Login</th><th class="no-sort">Password</th><th>Server</th><th>Size</th><th>State</th><th>Assigned to</th><th>When</th><th class="no-sort"></th></tr></thead>
       <tbody>${list.map(p=>`<tr>
-        <td class="num rt-hide" data-l="#">${p.id}</td><td class="num rt-main" data-l="Login">${esc(p.platform_login)}${p.simulated?'<div class="muted" style="font-size:10.5px;letter-spacing:.06em">SIMULATED</div>':''}</td>
+        <td class="num rt-hide" data-l="#">${p.id}</td><td class="num rt-main" data-l="Login">${esc(p.platform_login)}${p.simulated?'<div class="muted" style="font-size:10.5px;letter-spacing:.06em">SIMULATED</div>':'<div class="muted" style="font-size:10.5px;letter-spacing:.06em">REAL MT5</div>'}</td>
         <td data-l="Password">${p.platform_password?`<span class="mono" style="cursor:pointer" title="Click to reveal"
           onclick="this.textContent=this.textContent==='••••••••'?this.dataset.p:'••••••••'" data-p="${esc(p.platform_password)}">••••••••</span>`:'<span class="muted">—</span>'}</td>
         <td class="muted" data-l="Server">${esc(p.platform_server)}</td><td class="num" data-l="Size">$${fmt0(p.account_size)}</td>
@@ -3046,6 +3066,30 @@ async function genSim(){
     toast(`${r.created.length} simulated account${r.created.length===1?'':'s'} added to the pool.`,'ok');
     go('pool');
   }catch(e){toast('Error: '+e.message,'err')}
+}
+async function genReal(){
+  const size=parseFloat($('real-size').value||'0'), cnt=parseInt($('real-count').value||'1',10);
+  try{const r=await api('/api/admin/pool/generate',{method:'POST',
+      body:JSON.stringify({account_size:size,count:cnt})});
+    const n=(r.created||[]).length;
+    toast(`${n} real MT5 account${n===1?'':'s'} added to the pool.`
+      +(r.errors&&r.errors.length?` (${r.errors.length} failed)`:''),'ok',8000);
+    go('pool');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function provisionReal(accountId){
+  if(!await askConfirm({title:'Open a real MT5 demo for this trader?',
+    body:'Opens a MetaQuotes-Demo account via web.metatrader.app using the trader\'s name and email, then activates the challenge with those credentials. Takes ~20–30 seconds.',
+    ok:'Open real MT5'}))return;
+  try{const r=await api('/api/admin/accounts/'+accountId+'/provision-real',{method:'POST'});
+    toast(`Real MT5 ready: ${r.platform_login}@${r.platform_server}`,'ok',8000);
+    go('pool');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function setRealFallback(on){
+  try{await api('/api/admin/pool/real-fallback',{method:'POST',body:JSON.stringify({enabled:on})});
+    toast(on?'Auto-provisioning of real web MT5 demos is ON.':'Real auto-provisioning turned off.','ok');
+  }catch(e){toast('Error: '+e.message,'err');go('pool')}
 }
 /* ---------- Payout BOT ---------- */
 async function savePayoutBot(){

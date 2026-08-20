@@ -301,3 +301,74 @@ def test_sim_fallback_aktywuje_konto_gdy_pula_pusta():
         s.close()
     finally:
         client.post("/api/admin/pool/sim-fallback", headers=ADMIN_H, json={"enabled": False})
+
+
+
+def test_real_fallback_toggle_i_kolejnosc_przed_symulacja(monkeypatch):
+    """Real fallback zakłada demo przez opener zanim sim_fallback wstawi placeholdery."""
+    ROZMIAR = 81_000
+    tid = _trader("real-fallback@pool.pl")
+    aid = _konto_czekajace(tid, ROZMIAR)
+
+    class FakeCreds:
+        login = "8100001"
+        password = "RealPass1"
+        server = "MetaQuotes-Demo"
+
+    class FakeOpener:
+        async def open_demo_account(self, spec):
+            return FakeCreds()
+
+    monkeypatch.setattr(provisioning.metaquotes_web, "make_opener", lambda settings=None: FakeOpener())
+    poprzednio = USTAWIENIA.metaquotes_web_enabled
+    USTAWIENIA.metaquotes_web_enabled = True
+    try:
+        r = client.post("/api/admin/pool/real-fallback", headers=ADMIN_H, json={"enabled": True})
+        assert r.status_code == 200
+        assert client.get("/api/admin/pool", headers=ADMIN_H).json()["real_fallback"] is True
+        # sim też włączony — real i tak wygrywa (kolejność w _provision_one)
+        client.post("/api/admin/pool/sim-fallback", headers=ADMIN_H, json={"enabled": True})
+        with realny_provisioning():
+            asyncio.run(provisioning.provision_pending(SessionLocal, None))
+        s = SessionLocal()
+        acc = s.get(Account, aid)
+        assert acc.status == "active"
+        assert acc.platform_login == "8100001"
+        assert acc.mt5_backed is True
+        s.close()
+    finally:
+        USTAWIENIA.metaquotes_web_enabled = poprzednio
+        client.post("/api/admin/pool/real-fallback", headers=ADMIN_H, json={"enabled": False})
+        client.post("/api/admin/pool/sim-fallback", headers=ADMIN_H, json={"enabled": False})
+
+
+def test_provision_real_dla_konkretnego_konta(monkeypatch):
+    """POST /api/admin/accounts/{id}/provision-real omija pulę i przypina realne demo."""
+    ROZMIAR = 82_000
+    tid = _trader("provision-real@pool.pl")
+    aid = _konto_czekajace(tid, ROZMIAR)
+
+    class FakeCreds:
+        login = "8200001"
+        password = "RealPass2"
+        server = "MetaQuotes-Demo"
+
+    class FakeOpener:
+        async def open_demo_account(self, spec):
+            assert spec.email == "provision-real@pool.pl"
+            return FakeCreds()
+
+    from app import main as main_mod
+    monkeypatch.setattr(main_mod.metaquotes_web, "make_opener", lambda settings=None: FakeOpener())
+    monkeypatch.setattr(main_mod, "_generator_status", lambda: (True, ""))
+
+    r = client.post(f"/api/admin/accounts/{aid}/provision-real", headers=ADMIN_H)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["platform_login"] == "8200001"
+    assert body["mt5_backed"] is True
+
+    s = SessionLocal()
+    acc = s.get(Account, aid)
+    assert acc.status == "active" and acc.platform_password == "RealPass2"
+    s.close()

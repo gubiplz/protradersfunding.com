@@ -4790,7 +4790,8 @@ def admin_pool_list():
                            session.query(Product).filter(Product.active == True).all()})  # noqa: E712
         return {"pool": pula, "waiting": czekajace, "sizes": rozmiary,
                 "can_generate": mozna, "generate_hint": powod,
-                "sim_fallback": provisioning.sim_fallback_enabled(session)}
+                "sim_fallback": provisioning.sim_fallback_enabled(session),
+                "real_fallback": provisioning.real_fallback_enabled(session)}
     finally:
         session.close()
 
@@ -4919,6 +4920,27 @@ def admin_pool_sim_fallback(payload: SimFallbackIn):
         session.close()
 
 
+class RealFallbackIn(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/admin/pool/real-fallback", dependencies=[Depends(auth.require_admin)])
+def admin_pool_real_fallback(payload: RealFallbackIn):
+    """Przełącznik: gdy pula nie ma wolnego rachunku, provisioning zakłada realne
+    demo MT5 przez web.metatrader.app (przed ewentualnym fallbackiem symulowanym)."""
+    session = SessionLocal()
+    try:
+        row = session.get(AppSetting, provisioning.REAL_FALLBACK_KEY)
+        if row is None:
+            row = AppSetting(key=provisioning.REAL_FALLBACK_KEY)
+            session.add(row)
+        row.value = "1" if payload.enabled else "0"
+        session.commit()
+        return {"real_fallback": payload.enabled}
+    finally:
+        session.close()
+
+
 @app.post("/api/admin/pool", dependencies=[Depends(auth.require_admin)])
 async def admin_pool_add(payload: NewPoolAccount):
     session = SessionLocal()
@@ -5021,6 +5043,56 @@ async def admin_pool_generate(payload: PoolGenerateIn):
     if not utworzone:
         raise HTTPException(502, "Could not open any account: " + "; ".join(bledy))
     return {"created": utworzone, "errors": bledy}
+
+
+@app.post("/api/admin/accounts/{account_id}/provision-real",
+          dependencies=[Depends(auth.require_admin)])
+async def admin_account_provision_real(account_id: int):
+    """Zakłada realne demo MT5 (web.metatrader.app) NA DANE tradera i przypina
+    poświadczenia do konkretnego konta — omija pulę. Do dogenerowania rachunku
+    dla czekającego zamówienia albo wymiany placeholderów."""
+    mozna, powod = _generator_status()
+    if not mozna:
+        raise HTTPException(400, powod)
+
+    opener = metaquotes_web.make_opener(settings)
+    if opener is None:
+        raise HTTPException(400, "The MetaQuotes channel is off")
+
+    session = SessionLocal()
+    try:
+        acc = session.get(Account, account_id)
+        if not acc:
+            raise HTTPException(404, "Account not found")
+        trader = session.get(Trader, acc.trader_id) if acc.trader_id else None
+        if not trader:
+            raise HTTPException(400, "Account has no trader — cannot open a demo in their name")
+
+        spec = metaquotes_web.WebDemoSpec.from_trader(trader, acc, settings)
+        try:
+            creds = await opener.open_demo_account(spec)
+        except Exception as e:
+            raise HTTPException(502, f"Could not open demo account: {str(e)[:200]}") from e
+
+        provisioning._apply_credentials(acc, {
+            "login": creds.login,
+            "password": creds.password,
+            "server": creds.server,
+        })
+        if acc.status == "provisioning":
+            acc.status = "funded" if acc.phase == "funded" else "active"
+        session.commit()
+        notify.send(provisioning._creds_event(acc), trader.email,
+                    provisioning._creds_ctx(trader, acc))
+        return {
+            "account_id": acc.id,
+            "platform_login": acc.platform_login,
+            "platform_server": acc.platform_server,
+            "status": acc.status,
+            "mt5_backed": bool(acc.mt5_backed),
+        }
+    finally:
+        session.close()
 
 
 class PoolPatchIn(BaseModel):
