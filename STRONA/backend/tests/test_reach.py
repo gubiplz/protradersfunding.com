@@ -261,11 +261,28 @@ def test_panel_czyta_i_zapisuje_ustawienia():
     assert zly.status_code == 400 and "must be between" in zly.json()["detail"]
 
 
-def test_reczny_boost_odmawia_gdy_bot_wylaczony():
+def test_reczny_boost_dziala_mimo_wylaczonego_automatu():
+    """Przełącznik gasi automat pod publikacjami, nie przycisk w panelu."""
     s = _sesja()
     try:
         _wyczysc(s)
     finally:
         s.close()
     r = client.post("/api/admin/reach/boost", headers=ADMIN, json={"link": LINK})
-    assert r.status_code == 400 and "off" in r.json()["detail"]
+    # Bez skonfigurowanego dostawcy kończy się na jego braku, a NIE na „off".
+    assert r.status_code == 400
+    assert "not configured" in r.json()["detail"] and "off" not in r.json()["detail"]
+
+
+def test_automat_nie_zamawia_przy_wylaczonym_botze():
+    s = _sesja()
+    try:
+        _wyczysc(s)
+
+        def transport(url, body, ct):  # pragma: no cover - nie ma prawa się wykonać
+            raise AssertionError("wyłączony automat nie może strzelać do dostawcy")
+
+        with _dostawca():
+            assert reach.po_publikacji(s, LINK, transport=transport)["skipped"] == "reach bot off"
+    finally:
+        s.close()

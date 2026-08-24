@@ -3154,7 +3154,8 @@ function reachCardHtml(rc){
     </div>
     <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
       Every post the Payout BOT publishes gets its reactions and views <b>right after it goes
-      out</b>. Paste a link above to do the same for anything else on the channel. The balance
+      out</b> — that is what the switch controls. Paste a link above to order for anything else
+      on the channel; that one works even while the bot is off. The balance
       alert lands in the bell and on your phone once a day while the account is below the
       threshold, and orders stop automatically when there is not enough left for one post.</p></div>`;
 }

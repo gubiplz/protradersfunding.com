@@ -4954,7 +4954,8 @@ def admin_reach_boost(payload: ReachBoostIn):
     """Ręczne zamówienie pod wklejonym linkiem — dla postów spoza Payout BOT-a."""
     session = SessionLocal()
     try:
-        wynik = reach.zamow(session, payload.link.strip(), powod="panel")
+        wynik = reach.zamow(session, payload.link.strip(), powod="panel",
+                            wymagaj_wlaczenia=False)
         if wynik.get("skipped"):
             raise HTTPException(400, wynik["skipped"])
         return wynik

@@ -292,10 +292,16 @@ def sprawdz_saldo(session, *, transport=None) -> dict:
             "unit_cost": cennik.get("unit_cost", cfg["unit_cost"])}
 
 
-def zamow(session, link: str, *, transport=None, powod: str = "manual") -> dict:
-    """Reakcje i wyświetlenia pod jednym postem. Best-effort, nigdy nie rzuca."""
+def zamow(session, link: str, *, transport=None, powod: str = "manual",
+          wymagaj_wlaczenia: bool = True) -> dict:
+    """Reakcje i wyświetlenia pod jednym postem. Best-effort, nigdy nie rzuca.
+
+    Przełącznik w panelu rządzi AUTOMATEM: wyłączony znaczy „nie dokupuj sam
+    pod każdą publikacją". Ręczne zamówienie z panelu to świadoma decyzja
+    admina i działa niezależnie — inaczej przycisk „Boost" byłby ślepy.
+    """
     cfg = ustawienia(session)
-    if not cfg["enabled"]:
+    if wymagaj_wlaczenia and not cfg["enabled"]:
         return {"ordered": 0, "skipped": "reach bot off"}
     if not is_enabled():
         return {"ordered": 0, "skipped": "reach provider not configured"}
