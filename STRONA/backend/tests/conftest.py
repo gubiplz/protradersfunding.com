@@ -24,6 +24,11 @@ os.environ["NOTIFY_WEBHOOK_URL"] = ""
 os.environ["TELEGRAM_BOT_TOKEN"] = ""
 os.environ["TELEGRAM_CHAT_ID"] = ""
 os.environ["SHOT_API_URL"] = ""
+# Dostawca zasięgu (Reach BOT) — puste, żeby żaden test nie zamówił niczego
+# za prawdziwe pieniądze. Testy Reach BOT-a włączają go same, podstawiając
+# transport, tym samym wzorcem co kanał Telegrama wyżej.
+os.environ["REACH_API_URL"] = ""
+os.environ["REACH_API_KEY"] = ""
 # Poller nie moze chodzic w tle testow — przestawialby salda kont.
 os.environ["POLLER_ENABLED"] = "false"
 # Payout BOT nie moze publikowac „przy okazji" zwyklych odczytow dashboardu:

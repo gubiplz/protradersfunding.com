@@ -35,7 +35,7 @@ from sqlalchemy import func, or_
 
 from . import (achievements, auth, billing, catalog, certshot, countries, fields, loyalty,
                lead_mail, metaquotes_web, notify,
-               payout_import, payoutbot,
+               payout_import, payoutbot, reach,
                poller, provisioning, push, rules, sms, telegram, telemetry, tradebot)
 from .config import get_settings
 from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint
@@ -4899,6 +4899,61 @@ def admin_payout_engine_run(request: Request):
         session.close()
 
 
+class ReachIn(BaseModel):
+    enabled: bool | None = None
+    svc_reactions: int | None = None
+    qty_reactions: int | None = None
+    svc_views: int | None = None
+    qty_views: int | None = None
+    min_balance: float | None = None
+    unit_cost: float | None = None
+
+
+class ReachBoostIn(BaseModel):
+    link: str
+
+
+@app.get("/api/admin/reach", dependencies=[Depends(auth.require_admin)])
+def admin_reach():
+    """Konfiguracja Reach BOT-a plus saldo u dostawcy.
+
+    Saldo jest odpytywane na żywo, bo to jedyna liczba, której admin nie ma
+    skąd wziąć — a od niej zależy, czy jutrzejszy post w ogóle dostanie zasięg.
+    """
+    session = SessionLocal()
+    try:
+        cfg = reach.ustawienia(session)
+        stan = reach.saldo_z_ustawien(session) if reach.is_enabled() else {"error": "not configured"}
+        return {**cfg, "provider_ready": reach.is_enabled(), "balance": stan}
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/reach", dependencies=[Depends(auth.require_admin)])
+def admin_reach_save(payload: ReachIn):
+    session = SessionLocal()
+    try:
+        try:
+            return reach.zapisz_ustawienia(session, **payload.model_dump())
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/reach/boost", dependencies=[Depends(auth.require_admin)])
+def admin_reach_boost(payload: ReachBoostIn):
+    """Ręczne zamówienie pod wklejonym linkiem — dla postów spoza Payout BOT-a."""
+    session = SessionLocal()
+    try:
+        wynik = reach.zamow(session, payload.link.strip(), powod="panel")
+        if wynik.get("skipped"):
+            raise HTTPException(400, wynik["skipped"])
+        return wynik
+    finally:
+        session.close()
+
+
 class SimFallbackIn(BaseModel):
     enabled: bool
 
@@ -5866,13 +5921,30 @@ async def api_tick(request: Request):
     # Przypomnienia o leadach — na czat dzialu, nie do klienta. Wlasna
     # deduplikacja po historii leada, wiec czestotliwosc crona nie ma znaczenia.
     leady = _lead_followups()
+    # Saldo dostawcy zasięgu. Raz na dobę wystarczy: alert ma ostrzec ZANIM
+    # konto zejdzie do zera, a nie dopiero przy odrzuconym zamówieniu.
+    zasieg = _reach_saldo_tick()
     if isinstance(wynik, dict):
         return {**wynik, "daily_recap": recap, "upsell_nudge": nudge.get("sent", 0),
                 "checkout_recovery": recovery.get("sent", 0), "payout_bot": payout,
-                "lead_followups": leady.get("sent", 0), "snapshots_pruned": pruned}
+                "lead_followups": leady.get("sent", 0), "snapshots_pruned": pruned,
+                "reach": zasieg}
     return {"tick": wynik, "daily_recap": recap, "upsell_nudge": nudge.get("sent", 0),
             "checkout_recovery": recovery.get("sent", 0), "payout_bot": payout,
-            "lead_followups": leady.get("sent", 0), "snapshots_pruned": pruned}
+            "lead_followups": leady.get("sent", 0), "snapshots_pruned": pruned,
+            "reach": zasieg}
+
+
+def _reach_saldo_tick() -> dict:
+    """Dobowe sprawdzenie salda dostawcy zasięgu. Nigdy nie wywraca ticka."""
+    session = SessionLocal()
+    try:
+        return reach.sprawdz_saldo(session)
+    except Exception as e:  # pragma: no cover - sieć/baza
+        print(f"[reach] sprawdzenie salda nieudane: {e}")
+        return {"error": str(e)}
+    finally:
+        session.close()
 
 
 def _payout_bot_tick(base_url: str | None = None, *,

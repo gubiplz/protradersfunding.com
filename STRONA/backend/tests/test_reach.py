@@ -1,0 +1,242 @@
+"""Reach BOT — zamówienia zasięgu pod postami kanału i strażnik salda.
+
+Żaden test nie rusza sieci: dostawca jest włączany na czas testu przez
+podstawienie transportu, tym samym wzorcem co kanał Telegrama w
+`test_payoutbot.py`.
+"""
+import json
+import os
+import tempfile
+import urllib.parse
+from contextlib import contextmanager
+
+os.environ.setdefault("DATABASE_URL",
+                      f"sqlite:///{tempfile.NamedTemporaryFile(suffix='.db', delete=False).name}")
+os.environ.setdefault("FEED", "sim")
+os.environ.setdefault("AUTO_SEED", "false")
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app import reach, telegram  # noqa: E402
+from app.config import get_settings  # noqa: E402
+from app.db import SessionLocal, init_db  # noqa: E402
+from app.main import app  # noqa: E402
+from app.models import AppSetting  # noqa: E402
+
+init_db()
+client = TestClient(app)
+ADMIN = {"X-Admin-Token": get_settings().admin_token}
+LINK = "https://t.me/kanal_testowy/321"
+
+
+@contextmanager
+def _dostawca():
+    u = get_settings()
+    stare = (u.reach_api_url, u.reach_api_key)
+    u.reach_api_url, u.reach_api_key = "https://dostawca.test/api/v2", "KLUCZ"
+    try:
+        yield
+    finally:
+        u.reach_api_url, u.reach_api_key = stare
+
+
+def _sesja():
+    return SessionLocal()
+
+
+def _wyczysc(s):
+    for row in s.query(AppSetting).filter(AppSetting.key.like("reach_%")).all():
+        s.delete(row)
+    s.commit()
+
+
+def _transport(saldo="7.95", zamowienia=None, log=None):
+    """Udaje panel SMM: `balance` oddaje saldo, `add` kolejne numery zamówień."""
+    licznik = {"n": 0}
+
+    def transport(url, body, ct):
+        pola = dict(urllib.parse.parse_qsl(body.decode()))
+        if log is not None:
+            log.append(pola)
+        if pola["action"] == "balance":
+            return 200, json.dumps({"balance": saldo, "currency": "USD"}).encode()
+        if zamowienia == "error":
+            return 200, b'{"error":"Not enough funds"}'
+        licznik["n"] += 1
+        return 200, json.dumps({"order": 1000 + licznik["n"]}).encode()
+
+    return transport
+
+
+# --------------------------------------------------------------------------- #
+#  Zamówienia                                                                  #
+# --------------------------------------------------------------------------- #
+def test_zamowienie_sklada_dwie_uslugi_pod_jednym_linkiem():
+    s = _sesja()
+    try:
+        _wyczysc(s)
+        reach.zapisz_ustawienia(s, enabled=True)
+        log = []
+        with _dostawca():
+            wynik = reach.zamow(s, LINK, transport=_transport(log=log))
+        assert wynik["ordered"] == 2
+        addy = [p for p in log if p["action"] == "add"]
+        assert [p["service"] for p in addy] == ["8612", "8407"]
+        assert [p["quantity"] for p in addy] == ["30", "400"]
+        assert {p["link"] for p in addy} == {LINK}
+        # Klucz idzie w ciele żądania, nigdy w URL-u — inaczej wyciekłby do logów.
+        assert all(p["key"] == "KLUCZ" for p in log)
+    finally:
+        s.close()
+
+
+def test_wylaczony_bot_i_brak_dostawcy_nic_nie_zamawiaja():
+    s = _sesja()
+    try:
+        _wyczysc(s)
+
+        def transport(url, body, ct):  # pragma: no cover - nie ma prawa się wykonać
+            raise AssertionError("wyłączony Reach BOT nie może strzelać do dostawcy")
+
+        with _dostawca():
+            assert reach.zamow(s, LINK, transport=transport)["skipped"] == "reach bot off"
+        reach.zapisz_ustawienia(s, enabled=True)
+        # Włączony w panelu, ale bez env dostawcy — cisza, nie wyjątek.
+        assert "not configured" in reach.zamow(s, LINK, transport=transport)["skipped"]
+    finally:
+        s.close()
+
+
+def test_link_musi_byc_publicznym_postem_telegrama():
+    s = _sesja()
+    try:
+        _wyczysc(s)
+        reach.zapisz_ustawienia(s, enabled=True)
+        with _dostawca():
+            wynik = reach.zamow(s, "https://example.com/post/1", transport=_transport())
+        assert "public t.me" in wynik["skipped"]
+    finally:
+        s.close()
+
+
+def test_puste_saldo_wstrzymuje_zamowienie_i_alarmuje():
+    """Bramka salda: przy pustym koncie nie strzelamy, tylko mówimy o tym adminowi."""
+    s = _sesja()
+    try:
+        _wyczysc(s)
+        reach.zapisz_ustawienia(s, enabled=True)
+        wyslane = []
+        with _dostawca():
+            wynik = reach.zamow(s, LINK, transport=_transport(saldo="0.01",
+                                                              log=wyslane))
+        assert wynik["ordered"] == 0 and "balance too low" in wynik["skipped"]
+        assert [p["action"] for p in wyslane] == ["balance"]  # żadnego `add`
+        wpis = s.get(AppSetting, reach.KLUCZ_WYNIK)
+        assert wpis and "SKIPPED" in wpis.value
+    finally:
+        s.close()
+
+
+def test_alert_o_niskim_saldzie_leci_raz_na_dobe(monkeypatch):
+    s = _sesja()
+    try:
+        _wyczysc(s)
+        reach.zapisz_ustawienia(s, enabled=True, min_balance=5)
+        alerty = []
+        monkeypatch.setattr(reach.notify, "notify_admins",
+                            lambda *a, **k: alerty.append(a))
+        with _dostawca():
+            reach.zamow(s, LINK, transport=_transport(saldo="2.00"))
+            reach.zamow(s, LINK, transport=_transport(saldo="2.00"))
+        assert len(alerty) == 1 and alerty[0][0] == "admin_reach"
+    finally:
+        s.close()
+
+
+def test_blad_dostawcy_nie_wywraca_wywolania_i_wpada_do_panelu(monkeypatch):
+    s = _sesja()
+    try:
+        _wyczysc(s)
+        reach.zapisz_ustawienia(s, enabled=True)
+        monkeypatch.setattr(reach.notify, "notify_admins", lambda *a, **k: None)
+        with _dostawca():
+            wynik = reach.zamow(s, LINK, transport=_transport(zamowienia="error"))
+        assert wynik["ordered"] == 0
+        assert all(w["error"] == "Not enough funds" for w in wynik["results"])
+        wpis = s.get(AppSetting, reach.KLUCZ_WYNIK)
+        assert wpis and "0/2" in wpis.value
+    finally:
+        s.close()
+
+
+# --------------------------------------------------------------------------- #
+#  Saldo i link posta                                                          #
+# --------------------------------------------------------------------------- #
+def test_saldo_liczy_ile_zostalo_postow():
+    with _dostawca():
+        b = reach.saldo(transport=_transport(saldo="7.95"), unit_cost=0.055, min_balance=1)
+    assert b["value"] == 7.95 and b["posts_left"] == 144 and b["low"] is False
+
+
+def test_link_posta_powstaje_z_odpowiedzi_telegrama():
+    """Bez publicznego `username` kanału nie ma czego podbijać."""
+    assert telegram.post_url({"message_id": 12, "chat": {"username": "kanal"}}) \
+        == "https://t.me/kanal/12"
+    assert telegram.post_url({"message_id": 12, "chat": {"id": -100}}) == ""
+    assert telegram.post_url({}) == ""
+
+
+def test_publikacja_payout_bota_oddaje_link_posta():
+    from app import payoutbot
+
+    with _dostawca():
+        pass
+    u = get_settings()
+    stare = (u.telegram_bot_token, u.telegram_chat_id, u.shot_api_url)
+    u.telegram_bot_token, u.telegram_chat_id = "TESTOWY", "@kanal_testowy"
+    u.shot_api_url = ""
+    try:
+        class Fake:
+            cert_token = "abc"
+            trader_share = 1234.0
+        wynik = payoutbot.opublikuj(
+            Fake(), "Ann Smith", base_url="https://ptf.test",
+            transport_tg=lambda u_, b_, c_: (
+                200, b'{"ok":true,"result":{"message_id":77,"chat":{"username":"kanal_testowy"}}}'))
+        assert wynik["posted"] is True
+        assert wynik["post_url"] == "https://t.me/kanal_testowy/77"
+    finally:
+        u.telegram_bot_token, u.telegram_chat_id, u.shot_api_url = stare
+
+
+# --------------------------------------------------------------------------- #
+#  Panel                                                                       #
+# --------------------------------------------------------------------------- #
+def test_panel_czyta_i_zapisuje_ustawienia():
+    s = _sesja()
+    try:
+        _wyczysc(s)
+    finally:
+        s.close()
+    r = client.get("/api/admin/reach", headers=ADMIN)
+    assert r.status_code == 200
+    assert r.json()["enabled"] is False and r.json()["provider_ready"] is False
+
+    zapis = client.post("/api/admin/reach", headers=ADMIN,
+                        json={"enabled": True, "qty_reactions": 50, "min_balance": 2.5})
+    assert zapis.status_code == 200
+    d = zapis.json()
+    assert d["enabled"] is True and d["qty_reactions"] == 50 and d["min_balance"] == 2.5
+
+    zly = client.post("/api/admin/reach", headers=ADMIN, json={"qty_views": 999999})
+    assert zly.status_code == 400 and "must be between" in zly.json()["detail"]
+
+
+def test_reczny_boost_odmawia_gdy_bot_wylaczony():
+    s = _sesja()
+    try:
+        _wyczysc(s)
+    finally:
+        s.close()
+    r = client.post("/api/admin/reach/boost", headers=ADMIN, json={"link": LINK})
+    assert r.status_code == 400 and "off" in r.json()["detail"]

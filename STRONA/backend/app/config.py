@@ -327,6 +327,13 @@ class Settings:
     # Wyłącznik awaryjny jak wyżej; testy ustawiają false z tego samego powodu.
     leads_on_traffic: bool = os.getenv("LEADS_ON_TRAFFIC", "true").lower() == "true"
 
+    # --- Reach BOT: dokupowanie zasięgu pod postami kanału ---
+    # Adres i klucz dostawcy TYLKO w zmiennych hostingu: to repozytorium jest
+    # publiczne. Reszta konfiguracji (usługi, ilości, próg salda) siedzi
+    # w app_settings, bo zmienia się z panelu, nie deployem.
+    reach_api_url: str = os.getenv("REACH_API_URL", "")
+    reach_api_key: str = os.getenv("REACH_API_KEY", "")
+
     @property
     def telegram_on(self) -> bool:
         # TELEGRAM_ENABLED=false to awaryjny wylacznik na CAŁEGO bota —

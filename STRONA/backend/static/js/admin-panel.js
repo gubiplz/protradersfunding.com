@@ -686,8 +686,9 @@ const VIEWS={
  },
 
  async settings(){
-  const [s,pb,bg]=await Promise.all([api('/api/stats'),api('/api/admin/payout-engine'),
-    api('/api/admin/bogo-promo').catch(()=>({enabled:false}))]);
+  const [s,pb,bg,rc]=await Promise.all([api('/api/stats'),api('/api/admin/payout-engine'),
+    api('/api/admin/bogo-promo').catch(()=>({enabled:false})),
+    api('/api/admin/reach').catch(()=>null)]);
   const brakuje=[!pb.telegram_ready?'Telegram channel':null,!pb.renderer_ready?'certificate renderer':null].filter(Boolean);
   $('view').innerHTML=`
     <div class="card-cols">
@@ -733,6 +734,8 @@ const VIEWS={
         the channel; only the share above lands on the certificate strip on the landing page, so it
         does not fill up with the same entries.
         <b>Run once now</b> replaces today's automatic run rather than adding to it.</p></div>
+
+    ${reachCardHtml(rc)}
 
     <div class="sec-card" style="max-width:560px"><h3>Buy 1 Get 1 Free</h3>
       <div class="chip-row" style="margin-bottom:12px">
@@ -3096,6 +3099,91 @@ async function setRealFallback(on){
   }catch(e){toast('Error: '+e.message,'err');go('pool')}
 }
 /* ---------- Payout BOT ---------- */
+/* ---------- Reach BOT: zasieg pod postami kanalu ----------
+   Karta stoi obok Payout BOT-a, bo to jego przedluzenie: kazdy opublikowany
+   certyfikat dostaje reakcje i wyswietlenia od razu po wyjsciu na kanal.
+   Adres i klucz dostawcy siedza w env (REACH_API_URL / REACH_API_KEY) —
+   panel steruje tylko tym, co i ile. */
+function reachCardHtml(rc){
+  if(!rc)return'';
+  const b=rc.balance||{};
+  const saldo=b.error?`<span class="chip" style="border-color:var(--red-line);color:var(--red)">balance <b>${esc(b.error)}</b></span>`
+    :`<span class="chip">balance <b>$${fmt(b.value)}</b></span>
+      <span class="chip"${b.low?' style="border-color:var(--red-line);color:var(--red)"':''}>about <b>${b.posts_left}</b> more posts</span>`;
+  return `<div class="sec-card" style="max-width:560px"><h3>Reach BOT</h3>
+    <div class="chip-row" style="margin-bottom:12px">
+      <span class="status ${rc.enabled?'funded':'pending'}"><span class="dot"></span>${rc.enabled?'running':'off'}</span>
+      ${rc.provider_ready?saldo:''}
+      ${rc.last_result?`<span class="chip">last <b>${esc(rc.last_result)}</b></span>`:''}
+    </div>
+    ${!rc.provider_ready?`<div class="warn-box" style="margin:0 0 12px">
+      <div><b>Provider not configured.</b> Set <span class="mono">REACH_API_URL</span> and
+      <span class="mono">REACH_API_KEY</span> in the environment. Posts still go out, they just
+      get no extra reach.</div></div>`:''}
+    <div class="pool-form">
+      <div><label class="muted" style="font-size:12px">Reactions per post</label>
+        <input id="rc-qr" class="inp" type="number" min="0" step="1" value="${rc.qty_reactions}"></div>
+      <div><label class="muted" style="font-size:12px">Views per post</label>
+        <input id="rc-qv" class="inp" type="number" min="0" step="1" value="${rc.qty_views}"></div>
+      <div><label class="muted" style="font-size:12px">Reactions service id</label>
+        <input id="rc-sr" class="inp" type="number" min="1" step="1" value="${rc.svc_reactions}"></div>
+      <div><label class="muted" style="font-size:12px">Views service id</label>
+        <input id="rc-sv" class="inp" type="number" min="1" step="1" value="${rc.svc_views}"></div>
+      <div><label class="muted" style="font-size:12px">Warn below ($)</label>
+        <input id="rc-min" class="inp" type="number" min="0" step="0.5" value="${rc.min_balance}"></div>
+      <div><label class="muted" style="font-size:12px">Cost per post ($)</label>
+        <input id="rc-cost" class="inp" type="number" min="0.001" step="0.001" value="${rc.unit_cost}"></div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn-p" onclick="saveReach(this)">Save settings</button>
+      <button class="btn-o" onclick="toggleReach(${rc.enabled?'false':'true'},this)">${rc.enabled?'Turn off':'Turn on'}</button>
+    </div>
+    <div style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)">
+      <label class="muted" style="font-size:12px">Boost a single post</label>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px">
+        <input id="rc-link" class="inp" style="flex:1;min-width:220px" placeholder="https://t.me/channel/123">
+        <button class="btn-o" onclick="boostReach(this)">Boost</button>
+      </div>
+    </div>
+    <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
+      Every post the Payout BOT publishes gets its reactions and views <b>right after it goes
+      out</b>. Paste a link above to do the same for anything else on the channel. The balance
+      alert lands in the bell and on your phone once a day while the account is below the
+      threshold, and orders stop automatically when there is not enough left for one post.</p></div>`;
+}
+async function saveReach(btn){
+  const body={
+    qty_reactions:parseInt($('rc-qr').value,10), qty_views:parseInt($('rc-qv').value,10),
+    svc_reactions:parseInt($('rc-sr').value,10), svc_views:parseInt($('rc-sv').value,10),
+    min_balance:parseFloat($('rc-min').value), unit_cost:parseFloat($('rc-cost').value),
+  };
+  if(Object.values(body).some(v=>isNaN(v))){toast('Fill every field with a number.','err');return}
+  return busy(btn,'Saving…',async()=>{
+    try{await api('/api/admin/reach',{method:'POST',body:JSON.stringify(body)});
+      toast('Reach BOT settings saved.','ok'); go('settings');
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
+}
+async function toggleReach(on,btn){
+  return busy(btn,'…',async()=>{
+    try{await api('/api/admin/reach',{method:'POST',body:JSON.stringify({enabled:on})});
+      toast(on?'Reach BOT is on. Every published post gets its reactions and views.'
+              :'Reach BOT is off. Posts go out with no extra reach.','ok');
+      go('settings');
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
+}
+async function boostReach(btn){
+  const link=($('rc-link').value||'').trim();
+  if(!link){toast('Paste a post link first.','err');return}
+  return busy(btn,'Ordering…',async()=>{
+    try{const r=await api('/api/admin/reach/boost',{method:'POST',body:JSON.stringify({link})});
+      toast(`Ordered for ${r.ordered}/2 services.`+(r.balance!=null?` Balance $${fmt(r.balance)}.`:''),'ok',7000);
+      go('settings');
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
+}
+
 async function savePayoutBot(){
   const body={
     win_from:parseInt($('pb-from').value,10),
@@ -3768,7 +3856,8 @@ const PUSH_GROUPS=[
   ['Leads',[['lead_new','New leads'],['lead_action','Lead activity (claims & statuses)'],
     ['lead_reminder','Follow-ups & nudges']]],
   ['Prop',[['admin_order','Orders & payments'],['admin_kyc','KYC submissions'],
-    ['admin_payout','Payout requests'],['admin_ticket','Support tickets']]],
+    ['admin_payout','Payout requests'],['admin_ticket','Support tickets'],
+    ['admin_reach','Channel reach & balance']]],
 ];
 function pushCatsHtml(){
   const cats=(ME&&ME.ui_prefs&&ME.ui_prefs.admin_push)||{};

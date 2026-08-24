@@ -47,7 +47,7 @@ import secrets
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from . import certshot, payout_import, telegram
+from . import certshot, payout_import, reach, telegram
 from .config import get_settings
 from .models import AppSetting, Payout, Product, Trader
 
@@ -352,9 +352,11 @@ def opublikuj(wyplata: Payout, nazwa: str, *, base_url: str | None = None,
 
     png = certshot.render(f"{link}?bare=1", transport=transport_shot)
     if png:
-        ok, powod = telegram.send_photo(png, tekst, transport=transport_tg)
+        ok, powod, dane = telegram.send_photo_json(png, tekst, transport=transport_tg)
         if ok:
-            return {"posted": True, "photo": True}
+            # `post_url` jest pusty dla kanału prywatnego — Reach BOT pominie
+            # wtedy zamówienie, bo nie ma publicznego linku do podbicia.
+            return {"posted": True, "photo": True, "post_url": telegram.post_url(dane)}
         # Powód prosto od Telegrama („bot is not a member of the channel chat",
         # „not enough rights to send photos"). Bez niego admin widzi samo
         # „odrzucone" i musi szukać przyczyny w logach hostingu.
@@ -362,13 +364,14 @@ def opublikuj(wyplata: Payout, nazwa: str, *, base_url: str | None = None,
 
     # Bez grafiki idzie sam podpis z linkiem — cisza na kanale byłaby myląca,
     # skoro wypłata i jej publiczny certyfikat już istnieją.
-    ok, powod = telegram.send_message(f"{tekst}\n{link}", transport=transport_tg)
-    return {"posted": ok, "photo": False, "reason": "" if ok else powod}
+    ok, powod, dane = telegram.send_message_json(f"{tekst}\n{link}", transport=transport_tg)
+    return {"posted": ok, "photo": False, "reason": "" if ok else powod,
+            "post_url": telegram.post_url(dane) if ok else ""}
 
 
 def uruchom(session, now: datetime | None = None, *, force: bool = False,
             backstop: bool = False, base_url: str | None = None,
-            transport_shot=None, transport_tg=None) -> dict:
+            transport_shot=None, transport_tg=None, transport_reach=None) -> dict:
     """Jeden przebieg silnika. Zwraca liczniki, jak pozostałe zadania crona."""
     czy, powod = nalezy_odpalic(session, now, backstop=backstop)
     if not czy and not force:
@@ -400,6 +403,13 @@ def uruchom(session, now: datetime | None = None, *, force: bool = False,
         session.commit()
     except Exception:  # pragma: no cover
         session.rollback()
+
+    # Zasięg pod świeżym postem. Best-effort i po zapisie wypłaty: nieudane
+    # zamówienie nie ma prawa ruszyć ani wypłaty, ani guardu dnia.
+    if wynik.get("posted") and wynik.get("post_url"):
+        wynik["reach"] = reach.po_publikacji(session, wynik["post_url"],
+                                             transport=transport_reach)
+
     return {"created": 1, "payout_id": wyplata.id, "trader": nazwa,
             "amount_usd": wyplata.trader_share, "on_lp": bool(wyplata.show_on_lp),
             "cert_token": wyplata.cert_token, **wynik}

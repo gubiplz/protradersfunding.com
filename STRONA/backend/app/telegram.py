@@ -123,14 +123,35 @@ def _strzal(metoda: str, pola: dict[str, str],
     return poszlo, powod
 
 
+def send_photo_json(png: bytes, caption: str, *, transport=None) -> tuple[bool, str, dict]:
+    """Jak `send_photo`, ale oddaje też wysłaną wiadomość.
+
+    Z `result` potrzebne są `message_id` i `chat.username` — z tych dwóch
+    składa się publiczny link do właśnie opublikowanego posta (`post_url`),
+    bez którego Reach BOT nie wie, pod czym zamawiać."""
+    if not is_enabled():
+        return False, "no bot token or channel", {}
+    return _strzal_json("sendPhoto",
+                        {"chat_id": settings.telegram_chat_id, "caption": caption[:1024],
+                         "parse_mode": "HTML"},
+                        ("photo", "certificate.png", png), transport)
+
+
 def send_photo(png: bytes, caption: str, *, transport=None) -> tuple[bool, str]:
     """Grafika + podpis pod nią. `caption` w HTML-u (limit Telegrama: 1024 znaki)."""
-    if not is_enabled():
-        return False, "no bot token or channel"
-    return _strzal("sendPhoto",
-                   {"chat_id": settings.telegram_chat_id, "caption": caption[:1024],
-                    "parse_mode": "HTML"},
-                   ("photo", "certificate.png", png), transport)
+    poszlo, powod, _ = send_photo_json(png, caption, transport=transport)
+    return poszlo, powod
+
+
+def post_url(dane: dict) -> str:
+    """Publiczny link do wiadomości z odpowiedzi Telegrama (albo pusty).
+
+    Kanał prywatny nie ma `username`, więc nie ma też publicznego linku —
+    i nie ma czego podbijać."""
+    czat = (dane or {}).get("chat") or {}
+    nazwa = czat.get("username")
+    mid = (dane or {}).get("message_id")
+    return f"https://t.me/{nazwa}/{mid}" if nazwa and mid else ""
 
 
 _BOT_USERNAME: str | None = None
@@ -181,6 +202,16 @@ def send_dm(chat_id: str | int, text: str, *, transport=None) -> tuple[bool, str
     znaczenia, który z kanałów (wypłaty/leady) jest skonfigurowany."""
     return _strzal("sendMessage", {"chat_id": str(chat_id), "text": text[:4096]},
                    None, transport)
+
+
+def send_message_json(text: str, *, transport=None) -> tuple[bool, str, dict]:
+    """Jak `send_message`, ale oddaje też wysłaną wiadomość (patrz `post_url`)."""
+    if not is_enabled():
+        return False, "no bot token or channel", {}
+    return _strzal_json("sendMessage",
+                        {"chat_id": settings.telegram_chat_id, "text": text[:4096],
+                         "parse_mode": "HTML", "disable_web_page_preview": "false"},
+                        None, transport)
 
 
 def send_message(text: str, *, transport=None) -> tuple[bool, str]:
