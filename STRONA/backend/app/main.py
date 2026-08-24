@@ -4912,6 +4912,16 @@ class ReachBoostIn(BaseModel):
     link: str
 
 
+class ReachChannelIn(BaseModel):
+    username: str
+    label: str | None = None
+    on: bool = True
+
+
+class ReachChannelsIn(BaseModel):
+    channels: list[ReachChannelIn]
+
+
 @app.get("/api/admin/reach", dependencies=[Depends(auth.require_admin)])
 def admin_reach():
     """Konfiguracja Reach BOT-a plus saldo u dostawcy.
@@ -4932,7 +4942,13 @@ def admin_reach():
             except Exception as e:  # pragma: no cover - sieć
                 print(f"[reach] cennik nie odświeżony: {e}")
         stan = reach.saldo_z_ustawien(session) if reach.is_enabled() else {"error": "not configured"}
-        return {**cfg, "provider_ready": reach.is_enabled(), "balance": stan}
+        # Status per kanał: bez uprawnień admina Telegram nie przysyła postów,
+        # więc automat po cichu nic nie robi — panel ma to powiedzieć wprost.
+        lista = []
+        for k in reach.kanaly(session):
+            lista.append({**k, "bot_admin": telegram.jest_adminem("@" + k["username"])})
+        return {**cfg, "provider_ready": reach.is_enabled(), "balance": stan,
+                "channels": lista, "bot_username": telegram.bot_username()}
     finally:
         session.close()
 
@@ -4945,6 +4961,21 @@ def admin_reach_save(payload: ReachIn):
             return reach.zapisz_ustawienia(session, **payload.model_dump())
         except ValueError as e:
             raise HTTPException(400, str(e))
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/reach/channels", dependencies=[Depends(auth.require_admin)])
+def admin_reach_channels(payload: ReachChannelsIn):
+    """Które kanały Reach BOT obsługuje. Kanał wypłat wraca na listę sam."""
+    session = SessionLocal()
+    try:
+        try:
+            lista = reach.zapisz_kanaly(session, [k.model_dump() for k in payload.channels])
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return {"channels": [{**k, "bot_admin": telegram.jest_adminem("@" + k["username"])}
+                             for k in lista]}
     finally:
         session.close()
 
@@ -7612,7 +7643,24 @@ async def telegram_webhook(request: Request,
         return _telegram_start(wiadomosc)
     if wiadomosc.get("reply_to_message"):
         return _telegram_notatka(wiadomosc)
+    # Nowy post na obserwowanym kanale — Reach BOT dokupuje pod nim zasięg.
+    # Telegram przysyła te update'y tylko z kanałów, w których bot jest
+    # administratorem; reszta i tak odpada na liście kanałów.
+    if (update or {}).get("channel_post"):
+        return {"ok": True, "reach": _reach_z_kanalu(update["channel_post"])}
     return {"ok": True}
+
+
+def _reach_z_kanalu(post: dict) -> dict:
+    """Best-effort: webhook MUSI oddać 2xx, inaczej Telegram ponawia w kółko."""
+    session = SessionLocal()
+    try:
+        return reach.z_kanalu(session, post)
+    except Exception as e:  # pragma: no cover - sieć/baza
+        print(f"[reach] post z kanału nieobsłużony: {e}")
+        return {"error": str(e)}
+    finally:
+        session.close()
 
 
 def _telegram_start(wiadomosc: dict) -> dict:

@@ -31,9 +31,14 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
-from . import notify
+import re
+
+from . import notify, telegram
 from .config import get_settings
 from .models import AppSetting
+
+# Publiczna nazwa kanału wg reguł Telegrama (5–32 znaki, litera na starcie).
+TELEGRAM_NAZWA = re.compile(r"^[a-z][a-z0-9_]{4,31}$")
 
 settings = get_settings()
 
@@ -56,6 +61,15 @@ DOMYSLNE = {
     # Stawki za 1000 sztuk, przepisane z cennika dostawcy przy dobowym ticku.
     "rate_reactions": "",
     "rate_views": "",
+    # Nazwy usług z cennika — panel ma pokazywać, CO zamawiamy. Usługa
+    # „Negative Reactions" ma id o jeden większe niż „Positive", więc literówka
+    # w ID kosztowałaby kanał 💩 zamiast 🔥.
+    "name_reactions": "",
+    "name_views": "",
+    # Obsługiwane kanały: JSON [{"username","label","on"}]. Pusty = tylko kanał
+    # wypłat (dopisywany automatycznie z TELEGRAM_CHAT_ID przy pierwszym
+    # odczycie), żeby lista nie startowała pusta i nie kłamała.
+    "channels": "",
 }
 
 LIMITY = {
@@ -96,6 +110,12 @@ def ustawienia(session) -> dict:
         "min_balance": float(out["min_balance"]),
         "fallback_cost": float(out["unit_cost"]),
         "last_result": wynik.value if wynik else None,
+        "name_reactions": out["name_reactions"],
+        "name_views": out["name_views"],
+        # Ostrzeżenie dla panelu: usługa negatywnych reakcji ma id o jeden
+        # większe niż pozytywna, a pomyłka jest widoczna dopiero na kanale.
+        "reactions_positive": ("positive" in out["name_reactions"].lower()
+                               if out["name_reactions"] else None),
     }
     # Koszt posta liczymy z zapamiętanych stawek dostawcy — admin nie ma go po
     # co wpisywać ręcznie, a przy zmianie cennika sam się poprawia.
@@ -120,16 +140,18 @@ def zapisz_ustawienia(session, **pola) -> dict:
     if pola.get("enabled") is not None:
         _ustaw(session, "enabled", "1" if pola["enabled"] else "0")
 
-    for klucz, stawka in (("svc_reactions", "rate_reactions"), ("svc_views", "rate_views")):
+    for klucz, stawka, nazwa in (("svc_reactions", "rate_reactions", "name_reactions"),
+                                 ("svc_views", "rate_views", "name_views")):
         wartosc = pola.get(klucz)
         if wartosc is None:
             continue
         if int(wartosc) <= 0:
             raise ValueError(f"'{klucz}' must be a positive service id")
-        # Zmiana usługi unieważnia zapamiętaną stawkę — inaczej „koszt posta"
-        # liczyłby się z ceny czegoś, czego już nie zamawiamy.
+        # Zmiana usługi unieważnia zapamiętaną stawkę i nazwę — inaczej panel
+        # pokazywałby cenę i opis czegoś, czego już nie zamawiamy.
         if str(int(wartosc)) != str(ustawienia(session)[klucz]):
             _ustaw(session, stawka, "")
+            _ustaw(session, nazwa, "")
         _ustaw(session, klucz, str(int(wartosc)))
 
     for klucz in ("qty_reactions", "qty_views", "min_balance", "unit_cost"):
@@ -143,6 +165,81 @@ def zapisz_ustawienia(session, **pola) -> dict:
 
     session.commit()
     return ustawienia(session)
+
+
+# --------------------------------------------------------------------------- #
+#  Obsługiwane kanały                                                          #
+# --------------------------------------------------------------------------- #
+def _czysta_nazwa(s: str) -> str:
+    """`@Kanal`, `https://t.me/Kanal`, `t.me/Kanal/12` → `kanal`."""
+    tekst = str(s or "").strip()
+    for przedrostek in ("https://", "http://"):
+        if tekst.startswith(przedrostek):
+            tekst = tekst[len(przedrostek):]
+    for host in ("t.me/", "telegram.me/"):
+        if tekst.lower().startswith(host):
+            tekst = tekst[len(host):]
+    tekst = tekst.split("/")[0].split("?")[0].lstrip("@").strip()
+    return tekst.lower()
+
+
+def kanaly(session) -> list[dict]:
+    """Lista obsługiwanych kanałów. Kanał wypłat dopisuje się sam.
+
+    Payout BOT publikuje tam, gdzie wskazuje `TELEGRAM_CHAT_ID`, więc ten
+    kanał jest obsługiwany niezależnie od tego, co admin doda ręcznie —
+    i musi być widoczny na liście, żeby panel nie kłamał o zasięgu.
+    """
+    row = _wiersz(session, "channels")
+    try:
+        lista = json.loads(row.value) if row and row.value else []
+    except Exception:
+        lista = []
+    out = []
+    for poz in lista if isinstance(lista, list) else []:
+        nazwa = _czysta_nazwa(poz.get("username"))
+        if not nazwa or any(k["username"] == nazwa for k in out):
+            continue
+        out.append({"username": nazwa,
+                    "label": str(poz.get("label") or "")[:40],
+                    "on": bool(poz.get("on", True)),
+                    "payout": False})
+
+    info = telegram.chat_info(settings.telegram_chat_id) if telegram.is_enabled() else {}
+    nazwa = _czysta_nazwa(info.get("username"))
+    if nazwa:
+        istniejacy = next((k for k in out if k["username"] == nazwa), None)
+        if istniejacy:
+            istniejacy["payout"] = True
+            istniejacy["label"] = istniejacy["label"] or (info.get("title") or "Payouts")
+        else:
+            out.insert(0, {"username": nazwa, "label": info.get("title") or "Payouts",
+                           "on": True, "payout": True})
+    return out
+
+
+def zapisz_kanaly(session, lista: list[dict]) -> list[dict]:
+    """Zapis listy z panelu. Rzuca `ValueError` z komunikatem po angielsku."""
+    czyste = []
+    for poz in lista or []:
+        nazwa = _czysta_nazwa((poz or {}).get("username"))
+        if not nazwa:
+            continue
+        if not TELEGRAM_NAZWA.match(nazwa):
+            raise ValueError(f"'{nazwa}' is not a valid public channel name")
+        if any(k["username"] == nazwa for k in czyste):
+            continue
+        czyste.append({"username": nazwa,
+                       "label": str((poz or {}).get("label") or "")[:40],
+                       "on": bool((poz or {}).get("on", True))})
+    _ustaw(session, "channels", json.dumps(czyste))
+    session.commit()
+    return kanaly(session)
+
+
+def kanal_wlaczony(session, username: str) -> bool:
+    nazwa = _czysta_nazwa(username)
+    return any(k["username"] == nazwa and k["on"] for k in kanaly(session))
 
 
 # --------------------------------------------------------------------------- #
@@ -234,17 +331,20 @@ def odswiez_cennik(session, *, transport=None) -> dict:
     ok, odp = _api("services", transport=transport, jako_lista=True)
     if not ok:
         return {"error": odp.get("error") if isinstance(odp, dict) else "bad response"}
-    stawki = {}
+    stawki, nazwy = {}, {}
     for poz in odp if isinstance(odp, list) else []:
         try:
-            stawki[int(poz["service"])] = float(poz["rate"])
+            usluga = int(poz["service"])
+            stawki[usluga] = float(poz["rate"])
+            nazwy[usluga] = str(poz.get("name") or "")[:120]
         except (KeyError, TypeError, ValueError):
             continue
     zapisane = {}
-    for klucz, usluga in (("rate_reactions", cfg["svc_reactions"]),
-                          ("rate_views", cfg["svc_views"])):
+    for klucz, nazwa_klucz, usluga in (("rate_reactions", "name_reactions", cfg["svc_reactions"]),
+                                       ("rate_views", "name_views", cfg["svc_views"])):
         if usluga in stawki:
             _ustaw(session, klucz, str(stawki[usluga]))
+            _ustaw(session, nazwa_klucz, nazwy.get(usluga, ""))
             zapisane[klucz] = stawki[usluga]
     session.commit()
     return {"rates": zapisane, "unit_cost": ustawienia(session)["unit_cost"]}
@@ -331,7 +431,10 @@ def zamow(session, link: str, *, transport=None, powod: str = "manual",
     udane = [w for w in wyniki if w["order"]]
     bledy = [w for w in wyniki if not w["order"]]
     print(f"[reach] {powod} {link} -> {json.dumps(wyniki)}")
+    # Numery zamówień zostają w panelu: bez nich sprawdzenie u dostawcy, co
+    # naprawdę poszło pod post, wymaga grzebania w logach hostingu.
     opis = (f"{link.rsplit('/', 1)[-1]}: {len(udane)}/{len(wyniki)} ok"
+            + (f" #{','.join(str(w['order']) for w in udane)}" if udane else "")
             + (f" — {bledy[0]['error']}" if bledy else ""))
     _zapisz_wynik(session, opis)
 
@@ -363,7 +466,50 @@ def po_publikacji(session, link: str | None, *, transport=None) -> dict:
     if not link:
         return {"ordered": 0, "skipped": "no post url"}
     try:
+        nazwa = _czysta_nazwa(link.rsplit("/", 2)[-2] if link.count("/") >= 4 else "")
+        if nazwa and not kanal_wlaczony(session, nazwa):
+            return {"ordered": 0, "skipped": f"channel @{nazwa} is off the list"}
         return zamow(session, link, transport=transport, powod="payout")
     except Exception as e:  # pragma: no cover - zamówienie nie może cofnąć wypłaty
         print(f"[reach] zamówienie po publikacji nieudane: {e}")
         return {"ordered": 0, "error": str(e)}
+
+
+def z_kanalu(session, post: dict, *, transport=None) -> dict:
+    """Nowy post na obserwowanym kanale (webhook Telegrama).
+
+    Telegram przysyła `channel_post` tylko z kanałów, w których bot jest
+    administratorem — dlatego panel pokazuje ten status per kanał. Albumy
+    lecą jako kilka wiadomości z jednym `media_group_id`, a webhooki bywają
+    ponawiane, więc pilnujemy ostatnio obsłużonego posta per kanał.
+    """
+    czat = (post or {}).get("chat") or {}
+    nazwa = _czysta_nazwa(czat.get("username"))
+    mid = (post or {}).get("message_id")
+    if not nazwa or not mid:
+        return {"ordered": 0, "skipped": "channel has no public name"}
+    if not kanal_wlaczony(session, nazwa):
+        return {"ordered": 0, "skipped": "channel not watched"}
+    if not ustawienia(session)["enabled"]:
+        return {"ordered": 0, "skipped": "reach bot off"}
+    tresc = any(post.get(k) for k in ("text", "caption", "photo", "video", "animation",
+                                      "document", "audio", "voice", "poll"))
+    if not tresc:
+        return {"ordered": 0, "skipped": "no content"}
+
+    klucz = f"seen_{czat.get('id') or nazwa}"
+    row = _wiersz(session, klucz)
+    grupa = str(post.get("media_group_id") or "")
+    znacznik = f"{mid}:{grupa}"
+    if row and row.value:
+        try:
+            stary_mid, stara_grupa = row.value.split(":", 1)
+            if int(stary_mid) >= int(mid) or (grupa and grupa == stara_grupa):
+                return {"ordered": 0, "skipped": "duplicate"}
+        except (ValueError, TypeError):
+            pass
+    _ustaw(session, klucz, znacznik)
+    session.commit()
+
+    return zamow(session, f"https://t.me/{nazwa}/{mid}", transport=transport,
+                 powod=f"channel @{nazwa}")

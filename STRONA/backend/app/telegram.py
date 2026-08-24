@@ -179,6 +179,53 @@ def bot_username() -> str:
     return _BOT_USERNAME
 
 
+_BOT_ID: int | None = None
+
+
+def bot_id(*, transport=None) -> int:
+    """Numeryczne id bota (getMe, raz na proces). 0 = brak tokenu albo błąd."""
+    global _BOT_ID
+    if _BOT_ID is not None:
+        return _BOT_ID
+    if not settings.telegram_bot_token:
+        return 0
+    poszlo, _, dane = _strzal_json("getMe", {}, None, transport)
+    _BOT_ID = int(dane.get("id") or 0) if poszlo else 0
+    return _BOT_ID
+
+
+def chat_info(chat_id: str | int, *, transport=None) -> dict:
+    """`getChat` — nazwa publiczna i tytuł kanału (pusty słownik przy błędzie).
+
+    Panel Reach BOT-a pokazuje, na jaki kanał faktycznie idą posty: w env jest
+    samo `TELEGRAM_CHAT_ID` (bywa liczbowe), a admin myśli o kanale nazwą."""
+    if not settings.telegram_bot_token or not chat_id:
+        return {}
+    poszlo, _, dane = _strzal_json("getChat", {"chat_id": str(chat_id)}, None, transport)
+    if not poszlo:
+        return {}
+    return {"id": dane.get("id"), "username": dane.get("username") or "",
+            "title": dane.get("title") or ""}
+
+
+def jest_adminem(chat_id: str | int, *, transport=None) -> bool | None:
+    """Czy bot jest administratorem kanału. `None` = nie dało się sprawdzić.
+
+    To NIE jest kosmetyka: bez uprawnień admina Telegram w ogóle nie wysyła
+    `channel_post`, więc automat po cichu nic nie robi. Panel musi umieć
+    powiedzieć „dodaj bota jako admina", zamiast milczeć."""
+    if not settings.telegram_bot_token or not chat_id:
+        return None
+    ja = bot_id(transport=transport)
+    if not ja:
+        return None
+    poszlo, _, dane = _strzal_json(
+        "getChatMember", {"chat_id": str(chat_id), "user_id": str(ja)}, None, transport)
+    if not poszlo:
+        return False  # „member list is inaccessible" = bot jest poza kanałem
+    return str(dane.get("status") or "") in ("administrator", "creator")
+
+
 def delete_lead_card(message_id: int, *, chat_id: str | None = None,
                      transport=None) -> tuple[bool, str]:
     """Zdejmuje kartę leada z czatu, w którym wisi — wołane przy kasowaniu leada.

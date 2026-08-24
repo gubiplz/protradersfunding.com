@@ -3104,7 +3104,77 @@ async function setRealFallback(on){
    certyfikat dostaje reakcje i wyswietlenia od razu po wyjsciu na kanal.
    Adres i klucz dostawcy siedza w env (REACH_API_URL / REACH_API_KEY) —
    panel steruje tylko tym, co i ile. */
+/* Lista obslugiwanych kanalow. WIDOCZNA ZAWSZE, takze przy wylaczonym
+   automacie — admin ma wiedziec, gdzie to poleci, ZANIM kliknie Turn on.
+   Kanal wyplat (TELEGRAM_CHAT_ID) jest na liscie na stale: Payout BOT i tak
+   tam publikuje. Status „bot admin" nie jest kosmetyka: bez uprawnien
+   Telegram nie przysyla postow i automat po cichu nic nie robi. */
+function reachChannelsHtml(rc){
+  const lista=rc.channels||[];
+  const bot=rc.bot_username?('@'+esc(rc.bot_username)):'the bot';
+  const wiersz=(k,i)=>{
+    const stan=k.payout?`<span class="chip" style="font-size:11px">posts from Payout BOT</span>`
+      :k.bot_admin===false?`<span class="chip" style="font-size:11px;border-color:var(--red-line);color:var(--red)">add ${bot} as admin</span>`
+      :k.bot_admin?`<span class="chip" style="font-size:11px">auto ready</span>`
+      :`<span class="chip" style="font-size:11px">status unknown</span>`;
+    return `<div class="mod-row" style="align-items:center;gap:10px">
+      <label style="display:flex;gap:9px;align-items:center;cursor:pointer;flex:1;min-width:0">
+        <input type="checkbox" data-rcch="${i}" ${k.on?'checked':''} onchange="reachToggleChannel()">
+        <span style="min-width:0">
+          <span class="lbl" style="display:block">${esc(k.label||('@'+k.username))}</span>
+          <span class="muted" style="font-size:11.5px">@${esc(k.username)}</span>
+        </span>
+      </label>
+      ${stan}
+      ${k.payout?'':`<button class="act-btn" title="Remove" onclick="reachDropChannel('${jsq(k.username)}')">&times;</button>`}
+    </div>`;
+  };
+  return `<div style="margin:2px 0 14px;padding-top:12px;border-top:1px dashed var(--line)">
+    <div class="lbl" style="font-size:12px;color:var(--muted);margin-bottom:6px">Channels served</div>
+    ${lista.length?lista.map(wiersz).join(''):`<p class="muted" style="font-size:12px">No channel is being served yet.</p>`}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <input id="rc-new" class="inp" style="flex:1;min-width:180px" placeholder="@channel">
+      <input id="rc-newlabel" class="inp" style="flex:1;min-width:140px" placeholder="Label (optional)">
+      <button class="btn-o" onclick="reachAddChannel(this)">Add channel</button>
+    </div>
+    <p class="muted" style="font-size:11.5px;margin:8px 0 0">Ticked channels get reactions and
+      views under every new post while the bot is on. A channel other than the payout one needs
+      ${bot} added as its administrator — Telegram only reports posts from channels the bot
+      administers.</p></div>`;
+}
+async function reachSaveChannels(kanaly,btn){
+  return busy(btn,'Saving…',async()=>{
+    try{await api('/api/admin/reach/channels',{method:'POST',body:JSON.stringify({channels:kanaly})});
+      go('settings');
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
+}
+function reachCurrentChannels(){
+  /* Kanal wyplat wraca na liste po stronie serwera, wiec wysylamy tez jego
+     stan — inaczej odznaczenie go nie mialoby jak przetrwac zapisu. */
+  const lista=(window._reach&&window._reach.channels)||[];
+  return lista.map((k,i)=>{
+    const cb=document.querySelector(`[data-rcch="${i}"]`);
+    return {username:k.username,label:k.label,on:cb?cb.checked:k.on};
+  });
+}
+async function reachToggleChannel(){
+  /* Zapis od razu po kliknieciu: gdyby czekal na „Save settings", odznaczenie
+     kanalu wygladaloby na zapisane, a nie byloby. */
+  return reachSaveChannels(reachCurrentChannels());
+}
+async function reachAddChannel(btn){
+  const nazwa=($('rc-new').value||'').trim();
+  if(!nazwa){toast('Paste a channel name first.','err');return}
+  const lista=reachCurrentChannels();
+  lista.push({username:nazwa,label:($('rc-newlabel').value||'').trim(),on:true});
+  return reachSaveChannels(lista,btn);
+}
+async function reachDropChannel(username){
+  return reachSaveChannels(reachCurrentChannels().filter(k=>k.username!==username));
+}
 function reachCardHtml(rc){
+  window._reach=rc;
   if(!rc)return'';
   const b=rc.balance||{};
   const saldo=b.error?`<span class="chip" style="border-color:var(--red-line);color:var(--red)">balance <b>${esc(b.error)}</b></span>`
@@ -3117,6 +3187,11 @@ function reachCardHtml(rc){
       ${rc.provider_ready?saldo:''}
       ${rc.last_result?`<span class="chip">last <b>${esc(rc.last_result)}</b></span>`:''}
     </div>
+    ${rc.reactions_positive===false?`<div class="warn-box" style="margin:0 0 12px">
+      <div><b>This is not the positive reactions service.</b> Service
+      <span class="mono">${rc.svc_reactions}</span> is
+      &bdquo;${esc(rc.name_reactions)}&rdquo; — the negative variant sits one id away from the
+      positive one, so check the id before turning this on.</div></div>`:''}
     ${!rc.provider_ready?`<div class="warn-box" style="margin:0 0 12px">
       <div><b>Provider not configured.</b> Set <span class="mono">REACH_API_URL</span> and
       <span class="mono">REACH_API_KEY</span> in the environment. Posts still go out, they just
@@ -3129,6 +3204,8 @@ function reachCardHtml(rc){
       <div><label class="muted" style="font-size:12px">Warn below ($)</label>
         <input id="rc-min" class="inp" type="number" min="0" step="0.5" value="${rc.min_balance}"></div>
     </div>
+    ${reachChannelsHtml(rc)}
+
     <details style="margin:2px 0 12px">
       <summary class="muted" style="font-size:12px;cursor:pointer">Provider services</summary>
       <div class="pool-form" style="margin-top:8px">
@@ -3137,6 +3214,8 @@ function reachCardHtml(rc){
         <div><label class="muted" style="font-size:12px">Views service id</label>
           <input id="rc-sv" class="inp" type="number" min="1" step="1" value="${rc.svc_views}"></div>
       </div>
+      ${rc.name_reactions?`<p class="muted" style="font-size:11.5px;margin:8px 0 0">
+        Ordering <b>${esc(rc.name_reactions)}</b>${rc.name_views?` and <b>${esc(rc.name_views)}</b>`:''}.</p>`:''}
       <p class="muted" style="font-size:11.5px;margin:6px 0 0">Which product to order at the
         provider. Only worth touching if a service is retired or you want a different one —
         the price per post is read from the provider's own price list.</p>

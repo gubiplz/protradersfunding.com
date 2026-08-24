@@ -15,6 +15,7 @@ os.environ.setdefault("DATABASE_URL",
 os.environ.setdefault("FEED", "sim")
 os.environ.setdefault("AUTO_SEED", "false")
 
+import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app import reach, telegram  # noqa: E402
@@ -178,6 +179,89 @@ def test_saldo_liczy_ile_zostalo_postow():
     assert b["value"] == 7.95 and b["posts_left"] == 144 and b["low"] is False
 
 
+# --------------------------------------------------------------------------- #
+#  Obsługiwane kanały                                                          #
+# --------------------------------------------------------------------------- #
+def test_lista_kanalow_czysci_nazwy_i_odrzuca_smieci():
+    s = _sesja()
+    try:
+        _wyczysc(s)
+        lista = reach.zapisz_kanaly(s, [
+            {"username": "https://t.me/fx_passing/12", "label": "Account management"},
+            {"username": "@FX_PassingPayouts", "label": "Payouts", "on": False},
+            {"username": "@fx_passing"},          # duplikat po normalizacji
+        ])
+        assert [k["username"] for k in lista] == ["fx_passing", "fx_passingpayouts"]
+        assert lista[1]["on"] is False
+        with pytest.raises(ValueError):
+            reach.zapisz_kanaly(s, [{"username": "@zle!"}])
+    finally:
+        s.close()
+
+
+def test_post_z_kanalu_zamawia_raz_i_pomija_albumy():
+    s = _sesja()
+    try:
+        _wyczysc(s)
+        reach.zapisz_ustawienia(s, enabled=True)
+        reach.zapisz_kanaly(s, [{"username": "fx_passing", "on": True}])
+        post = {"message_id": 55, "text": "hej", "chat": {"id": -100, "username": "fx_passing"}}
+        with _dostawca():
+            pierwszy = reach.z_kanalu(s, post, transport=_transport())
+            drugi = reach.z_kanalu(s, post, transport=_transport())
+            album = reach.z_kanalu(s, {**post, "message_id": 56, "media_group_id": "abc"},
+                                   transport=_transport())
+            album2 = reach.z_kanalu(s, {**post, "message_id": 57, "media_group_id": "abc"},
+                                    transport=_transport())
+        assert pierwszy["ordered"] == 2 and pierwszy["link"] == "https://t.me/fx_passing/55"
+        assert drugi["skipped"] == "duplicate"        # ponowienie webhooka
+        assert album["ordered"] == 2
+        assert album2["skipped"] == "duplicate"       # drugie zdjęcie tego albumu
+    finally:
+        s.close()
+
+
+def test_post_z_kanalu_spoza_listy_nic_nie_kosztuje():
+    s = _sesja()
+    try:
+        _wyczysc(s)
+        reach.zapisz_ustawienia(s, enabled=True)
+        reach.zapisz_kanaly(s, [{"username": "fx_passing", "on": False}])
+
+        def transport(url, body, ct):  # pragma: no cover - nie ma prawa się wykonać
+            raise AssertionError("kanał spoza listy nie może zamawiać")
+
+        with _dostawca():
+            obcy = reach.z_kanalu(s, {"message_id": 1, "text": "x",
+                                      "chat": {"id": -1, "username": "cudzy_kanal"}},
+                                  transport=transport)
+            wylaczony = reach.z_kanalu(s, {"message_id": 2, "text": "x",
+                                           "chat": {"id": -100, "username": "fx_passing"}},
+                                       transport=transport)
+        assert obcy["skipped"] == "channel not watched"
+        assert wylaczony["skipped"] == "channel not watched"
+    finally:
+        s.close()
+
+
+def test_publikacja_na_odznaczonym_kanale_nie_zamawia():
+    s = _sesja()
+    try:
+        _wyczysc(s)
+        reach.zapisz_ustawienia(s, enabled=True)
+        reach.zapisz_kanaly(s, [{"username": "fx_passingpayouts", "on": False}])
+
+        def transport(url, body, ct):  # pragma: no cover - nie ma prawa się wykonać
+            raise AssertionError("odznaczony kanał nie może zamawiać")
+
+        with _dostawca():
+            wynik = reach.po_publikacji(s, "https://t.me/fx_passingpayouts/9",
+                                        transport=transport)
+        assert "off the list" in wynik["skipped"]
+    finally:
+        s.close()
+
+
 def test_koszt_posta_liczy_sie_z_cennika_dostawcy():
     """Admin nie wpisuje ceny ręcznie — bierze się z cennika i sama się poprawia."""
     s = _sesja()
@@ -188,21 +272,37 @@ def test_koszt_posta_liczy_sie_z_cennika_dostawcy():
 
         def cennik(url, body, ct):
             return 200, json.dumps([
-                {"service": 8612, "rate": "0.0275"},
-                {"service": 8407, "rate": "0.1305"},
-                {"service": 1, "rate": "9.99"},
+                {"service": 8612, "rate": "0.0275", "name": "Telegram Positive Reactions"},
+                {"service": 8407, "rate": "0.1305", "name": "Telegram Views [1 Post]"},
+                {"service": 1, "rate": "9.99", "name": "Co innego"},
             ]).encode()
 
         with _dostawca():
             reach.odswiez_cennik(s, transport=cennik)
         cfg = reach.ustawienia(s)
+        # Usługa negatywnych reakcji ma id o jeden większe niż pozytywna,
+        # więc panel musi wiedzieć, CO zamawia, a nie tylko pod jakim numerem.
+        assert cfg["name_reactions"] == "Telegram Positive Reactions"
+        assert cfg["reactions_positive"] is True
         # 30 x 0.0275/1000 + 400 x 0.1305/1000
         assert cfg["unit_cost"] == 0.053025 and cfg["cost_from"] == "provider"
 
-        # Zmiana usługi kasuje starą stawkę: cena czegoś, czego już nie
-        # zamawiamy, wprowadzałaby w błąd licznik postów i bramkę salda.
+        # Zmiana usługi kasuje starą stawkę i nazwę: cena i opis czegoś, czego
+        # już nie zamawiamy, wprowadzałyby w błąd.
         reach.zapisz_ustawienia(s, svc_views=8408)
-        assert reach.ustawienia(s)["cost_from"] == "estimate"
+        po = reach.ustawienia(s)
+        assert po["cost_from"] == "estimate" and po["name_views"] == ""
+
+        # Podmiana na wariant negatywny (id o jeden dalej) musi być widoczna.
+        def cennik_neg(url, body, ct):
+            return 200, json.dumps([
+                {"service": 8613, "rate": "0.0275", "name": "Telegram Negative Reactions"},
+            ]).encode()
+
+        reach.zapisz_ustawienia(s, svc_reactions=8613)
+        with _dostawca():
+            reach.odswiez_cennik(s, transport=cennik_neg)
+        assert reach.ustawienia(s)["reactions_positive"] is False
     finally:
         s.close()
 
@@ -278,6 +378,9 @@ def test_automat_nie_zamawia_przy_wylaczonym_botze():
     s = _sesja()
     try:
         _wyczysc(s)
+
+        # Kanał NA liście — chodzi o sam wyłącznik, nie o bramkę kanałów.
+        reach.zapisz_kanaly(s, [{"username": "kanal_testowy", "on": True}])
 
         def transport(url, body, ct):  # pragma: no cover - nie ma prawa się wykonać
             raise AssertionError("wyłączony automat nie może strzelać do dostawcy")
