@@ -3109,7 +3109,8 @@ function reachCardHtml(rc){
   const b=rc.balance||{};
   const saldo=b.error?`<span class="chip" style="border-color:var(--red-line);color:var(--red)">balance <b>${esc(b.error)}</b></span>`
     :`<span class="chip">balance <b>$${fmt(b.value)}</b></span>
-      <span class="chip"${b.low?' style="border-color:var(--red-line);color:var(--red)"':''}>about <b>${b.posts_left}</b> more posts</span>`;
+      <span class="chip"${b.low?' style="border-color:var(--red-line);color:var(--red)"':''}>about <b>${b.posts_left}</b> more posts</span>
+      <span class="chip">${rc.cost_from==='provider'?'':'~'}<b>$${(rc.unit_cost||0).toFixed(3)}</b> per post</span>`;
   return `<div class="sec-card" style="max-width:560px"><h3>Reach BOT</h3>
     <div class="chip-row" style="margin-bottom:12px">
       <span class="status ${rc.enabled?'funded':'pending'}"><span class="dot"></span>${rc.enabled?'running':'off'}</span>
@@ -3125,15 +3126,21 @@ function reachCardHtml(rc){
         <input id="rc-qr" class="inp" type="number" min="0" step="1" value="${rc.qty_reactions}"></div>
       <div><label class="muted" style="font-size:12px">Views per post</label>
         <input id="rc-qv" class="inp" type="number" min="0" step="1" value="${rc.qty_views}"></div>
-      <div><label class="muted" style="font-size:12px">Reactions service id</label>
-        <input id="rc-sr" class="inp" type="number" min="1" step="1" value="${rc.svc_reactions}"></div>
-      <div><label class="muted" style="font-size:12px">Views service id</label>
-        <input id="rc-sv" class="inp" type="number" min="1" step="1" value="${rc.svc_views}"></div>
       <div><label class="muted" style="font-size:12px">Warn below ($)</label>
         <input id="rc-min" class="inp" type="number" min="0" step="0.5" value="${rc.min_balance}"></div>
-      <div><label class="muted" style="font-size:12px">Cost per post ($)</label>
-        <input id="rc-cost" class="inp" type="number" min="0.001" step="0.001" value="${rc.unit_cost}"></div>
     </div>
+    <details style="margin:2px 0 12px">
+      <summary class="muted" style="font-size:12px;cursor:pointer">Provider services</summary>
+      <div class="pool-form" style="margin-top:8px">
+        <div><label class="muted" style="font-size:12px">Reactions service id</label>
+          <input id="rc-sr" class="inp" type="number" min="1" step="1" value="${rc.svc_reactions}"></div>
+        <div><label class="muted" style="font-size:12px">Views service id</label>
+          <input id="rc-sv" class="inp" type="number" min="1" step="1" value="${rc.svc_views}"></div>
+      </div>
+      <p class="muted" style="font-size:11.5px;margin:6px 0 0">Which product to order at the
+        provider. Only worth touching if a service is retired or you want a different one —
+        the price per post is read from the provider's own price list.</p>
+    </details>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <button class="btn-p" onclick="saveReach(this)">Save settings</button>
       <button class="btn-o" onclick="toggleReach(${rc.enabled?'false':'true'},this)">${rc.enabled?'Turn off':'Turn on'}</button>
@@ -3155,7 +3162,7 @@ async function saveReach(btn){
   const body={
     qty_reactions:parseInt($('rc-qr').value,10), qty_views:parseInt($('rc-qv').value,10),
     svc_reactions:parseInt($('rc-sr').value,10), svc_views:parseInt($('rc-sv').value,10),
-    min_balance:parseFloat($('rc-min').value), unit_cost:parseFloat($('rc-cost').value),
+    min_balance:parseFloat($('rc-min').value),
   };
   if(Object.values(body).some(v=>isNaN(v))){toast('Fill every field with a number.','err');return}
   return busy(btn,'Saving…',async()=>{

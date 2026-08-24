@@ -4906,7 +4906,6 @@ class ReachIn(BaseModel):
     svc_views: int | None = None
     qty_views: int | None = None
     min_balance: float | None = None
-    unit_cost: float | None = None
 
 
 class ReachBoostIn(BaseModel):

@@ -178,6 +178,35 @@ def test_saldo_liczy_ile_zostalo_postow():
     assert b["value"] == 7.95 and b["posts_left"] == 144 and b["low"] is False
 
 
+def test_koszt_posta_liczy_sie_z_cennika_dostawcy():
+    """Admin nie wpisuje ceny ręcznie — bierze się z cennika i sama się poprawia."""
+    s = _sesja()
+    try:
+        _wyczysc(s)
+        reach.zapisz_ustawienia(s, enabled=True)
+        assert reach.ustawienia(s)["cost_from"] == "estimate"
+
+        def cennik(url, body, ct):
+            return 200, json.dumps([
+                {"service": 8612, "rate": "0.0275"},
+                {"service": 8407, "rate": "0.1305"},
+                {"service": 1, "rate": "9.99"},
+            ]).encode()
+
+        with _dostawca():
+            reach.odswiez_cennik(s, transport=cennik)
+        cfg = reach.ustawienia(s)
+        # 30 x 0.0275/1000 + 400 x 0.1305/1000
+        assert cfg["unit_cost"] == 0.053025 and cfg["cost_from"] == "provider"
+
+        # Zmiana usługi kasuje starą stawkę: cena czegoś, czego już nie
+        # zamawiamy, wprowadzałaby w błąd licznik postów i bramkę salda.
+        reach.zapisz_ustawienia(s, svc_views=8408)
+        assert reach.ustawienia(s)["cost_from"] == "estimate"
+    finally:
+        s.close()
+
+
 def test_link_posta_powstaje_z_odpowiedzi_telegrama():
     """Bez publicznego `username` kanału nie ma czego podbijać."""
     assert telegram.post_url({"message_id": 12, "chat": {"username": "kanal"}}) \

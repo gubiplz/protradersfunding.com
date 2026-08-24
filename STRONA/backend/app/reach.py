@@ -49,9 +49,13 @@ DOMYSLNE = {
     "svc_views": "8407",
     "qty_views": "400",
     "min_balance": "1",
-    # Koszt pary zamówień wg cennika dostawcy. Trzymany jako ustawienie, bo
-    # bramka salda musi działać także wtedy, gdy cennik nie odpowie.
+    # Ostatnia deska ratunku dla bramki salda: normalnie koszt liczy się
+    # z cennika dostawcy (patrz `odswiez_cennik`), ale gdy cennik nie odpowie,
+    # lepiej mieć przybliżenie niż wpuścić zamówienie na puste konto.
     "unit_cost": "0.055",
+    # Stawki za 1000 sztuk, przepisane z cennika dostawcy przy dobowym ticku.
+    "rate_reactions": "",
+    "rate_views": "",
 }
 
 LIMITY = {
@@ -83,16 +87,32 @@ def ustawienia(session) -> dict:
         row = _wiersz(session, klucz)
         out[klucz] = (row.value if row and row.value != "" else domyslne)
     wynik = session.get(AppSetting, KLUCZ_WYNIK)
-    return {
+    cfg = {
         "enabled": out["enabled"] == "1",
         "svc_reactions": int(float(out["svc_reactions"])),
         "qty_reactions": int(float(out["qty_reactions"])),
         "svc_views": int(float(out["svc_views"])),
         "qty_views": int(float(out["qty_views"])),
         "min_balance": float(out["min_balance"]),
-        "unit_cost": float(out["unit_cost"]),
+        "fallback_cost": float(out["unit_cost"]),
         "last_result": wynik.value if wynik else None,
     }
+    # Koszt posta liczymy z zapamiętanych stawek dostawcy — admin nie ma go po
+    # co wpisywać ręcznie, a przy zmianie cennika sam się poprawia.
+    stawki = {}
+    for klucz, pole in (("rate_reactions", "qty_reactions"), ("rate_views", "qty_views")):
+        try:
+            stawki[klucz] = float(out[klucz])
+        except (TypeError, ValueError):
+            stawki[klucz] = None
+    if stawki["rate_reactions"] is not None and stawki["rate_views"] is not None:
+        cfg["unit_cost"] = round(cfg["qty_reactions"] * stawki["rate_reactions"] / 1000
+                                 + cfg["qty_views"] * stawki["rate_views"] / 1000, 6)
+        cfg["cost_from"] = "provider"
+    else:
+        cfg["unit_cost"] = cfg["fallback_cost"]
+        cfg["cost_from"] = "estimate"
+    return cfg
 
 
 def zapisz_ustawienia(session, **pola) -> dict:
@@ -100,12 +120,16 @@ def zapisz_ustawienia(session, **pola) -> dict:
     if pola.get("enabled") is not None:
         _ustaw(session, "enabled", "1" if pola["enabled"] else "0")
 
-    for klucz in ("svc_reactions", "svc_views"):
+    for klucz, stawka in (("svc_reactions", "rate_reactions"), ("svc_views", "rate_views")):
         wartosc = pola.get(klucz)
         if wartosc is None:
             continue
         if int(wartosc) <= 0:
             raise ValueError(f"'{klucz}' must be a positive service id")
+        # Zmiana usługi unieważnia zapamiętaną stawkę — inaczej „koszt posta"
+        # liczyłby się z ceny czegoś, czego już nie zamawiamy.
+        if str(int(wartosc)) != str(ustawienia(session)[klucz]):
+            _ustaw(session, stawka, "")
         _ustaw(session, klucz, str(int(wartosc)))
 
     for klucz in ("qty_reactions", "qty_views", "min_balance", "unit_cost"):
@@ -138,8 +162,11 @@ def _urllib_transport(url: str, body: bytes, content_type: str) -> tuple[int, by
         return e.code, e.read()
 
 
-def _api(action: str, pola: dict | None = None, *, transport=None) -> tuple[bool, dict]:
-    """`(czy poszło, odpowiedź)`. Nigdy nie rzuca — błąd wraca jako `{"error": …}`."""
+def _api(action: str, pola: dict | None = None, *, transport=None,
+         jako_lista: bool = False) -> tuple[bool, dict | list]:
+    """`(czy poszło, odpowiedź)`. Nigdy nie rzuca — błąd wraca jako `{"error": …}`.
+
+    `jako_lista` dla `services`: cennik przychodzi tablicą, a nie obiektem."""
     if not is_enabled():
         return False, {"error": "reach provider not configured"}
     dane = {"key": settings.reach_api_key, "action": action, **{k: str(v) for k, v in (pola or {}).items()}}
@@ -154,6 +181,12 @@ def _api(action: str, pola: dict | None = None, *, transport=None) -> tuple[bool
         odp = json.loads(tresc or b"{}")
     except Exception:
         odp = {}
+    if jako_lista:
+        if status != 200 or not isinstance(odp, list):
+            opis = str((odp or {}).get("error") if isinstance(odp, dict) else f"HTTP {status}")
+            print(f"[reach] {action} odrzucone: {opis}")
+            return False, {"error": opis or f"HTTP {status}"}
+        return True, odp
     if not isinstance(odp, dict):
         odp = {}
     # Klucz jest w ciele żądania, więc do logu i panelu idzie sam opis błędu.
@@ -190,6 +223,33 @@ def saldo_z_ustawien(session, *, transport=None) -> dict:
                  min_balance=cfg["min_balance"])
 
 
+def odswiez_cennik(session, *, transport=None) -> dict:
+    """Przepisuje stawki wybranych usług z cennika dostawcy do ustawień.
+
+    Wołane raz na dobę z ticka, a nie przy każdym wejściu w panel: lista usług
+    dostawcy ma kilkaset pozycji i nie ma po co ciągnąć jej pod przycisk.
+    Po tym „koszt posta" liczy się sam i nadąża za zmianą cennika.
+    """
+    cfg = ustawienia(session)
+    ok, odp = _api("services", transport=transport, jako_lista=True)
+    if not ok:
+        return {"error": odp.get("error") if isinstance(odp, dict) else "bad response"}
+    stawki = {}
+    for poz in odp if isinstance(odp, list) else []:
+        try:
+            stawki[int(poz["service"])] = float(poz["rate"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    zapisane = {}
+    for klucz, usluga in (("rate_reactions", cfg["svc_reactions"]),
+                          ("rate_views", cfg["svc_views"])):
+        if usluga in stawki:
+            _ustaw(session, klucz, str(stawki[usluga]))
+            zapisane[klucz] = stawki[usluga]
+    session.commit()
+    return {"rates": zapisane, "unit_cost": ustawienia(session)["unit_cost"]}
+
+
 # --------------------------------------------------------------------------- #
 #  Zamówienia                                                                  #
 # --------------------------------------------------------------------------- #
@@ -221,11 +281,15 @@ def sprawdz_saldo(session, *, transport=None) -> dict:
     cfg = ustawienia(session)
     if not cfg["enabled"] or not is_enabled():
         return {"skipped": "off"}
+    # Cennik odświeżamy przy tej samej okazji: raz na dobę wystarczy, a dzięki
+    # temu „koszt posta" i licznik postów nadążają za zmianą cen u dostawcy.
+    cennik = odswiez_cennik(session, transport=transport)
     b = saldo_z_ustawien(session, transport=transport)
     if b.get("error"):
         return {"error": b["error"]}
     return {"balance": b["value"], "posts_left": b["posts_left"],
-            "low": b["low"], "alerted": _alert(session, b)}
+            "low": b["low"], "alerted": _alert(session, b),
+            "unit_cost": cennik.get("unit_cost", cfg["unit_cost"])}
 
 
 def zamow(session, link: str, *, transport=None, powod: str = "manual") -> dict:
