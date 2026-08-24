@@ -4922,6 +4922,15 @@ def admin_reach():
     session = SessionLocal()
     try:
         cfg = reach.ustawienia(session)
+        # Cennik dostawcy ma ~1,5 MB, więc normalnie odświeża go dobowy tick.
+        # Tutaj ciągniemy go RAZ, dopóki stawek nie ma — inaczej panel do
+        # pierwszego ticku pokazywałby zgadywany koszt posta.
+        if reach.is_enabled() and cfg.get("cost_from") != "provider":
+            try:
+                reach.odswiez_cennik(session)
+                cfg = reach.ustawienia(session)
+            except Exception as e:  # pragma: no cover - sieć
+                print(f"[reach] cennik nie odświeżony: {e}")
         stan = reach.saldo_z_ustawien(session) if reach.is_enabled() else {"error": "not configured"}
         return {**cfg, "provider_ready": reach.is_enabled(), "balance": stan}
     finally:
