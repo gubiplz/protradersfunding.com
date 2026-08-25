@@ -445,3 +445,126 @@ def test_lista_kanalow_miesci_sie_w_kolumnie_ustawien():
         assert wiersz is not None and len(wiersz.value) > 200
     finally:
         s.close()
+
+
+# --------------------------------------------------------------------------- #
+#  Ilosci per kanal i per boost                                                #
+# --------------------------------------------------------------------------- #
+def test_kanal_ma_wlasne_ilosci_a_pusty_wpis_bierze_globalne():
+    """Kanal z 170 subami i kanal z 400 nie potrzebuja tyle samo wyswietlen —
+    wspolna liczba robi z jednego posta ogladanego trzy razy czesciej, niz ma
+    subskrybentow. Puste pole ma znaczyc „jak globalnie", a NIE zero."""
+    s = _sesja()
+    try:
+        _wyczysc(s)
+        reach.zapisz_ustawienia(s, enabled=True, qty_reactions=30, qty_views=400)
+        reach.zapisz_kanaly(s, [
+            {"username": "kanal_maly", "on": True, "qty_reactions": 30, "qty_views": 250},
+            {"username": "kanal_duzy", "on": True},
+        ])
+
+        assert reach.ilosci(s, "kanal_maly") == {
+            "qty_reactions": 30, "qty_views": 250, "from": "channel"}
+        assert reach.ilosci(s, "kanal_duzy") == {
+            "qty_reactions": 30, "qty_views": 400, "from": "global"}
+        # Kanal spoza listy tez jedzie globalnymi — boost dziala na dowolny link.
+        assert reach.ilosci(s, "kanal_obcy")["qty_views"] == 400
+
+        log = []
+        with _dostawca():
+            wynik = reach.zamow(s, "https://t.me/kanal_maly/9",
+                                transport=_transport(log=log))
+        assert wynik["quantities"]["qty_views"] == 250
+        addy = [p for p in log if p["action"] == "add"]
+        assert [p["quantity"] for p in addy] == ["30", "250"]
+    finally:
+        s.close()
+
+
+def test_zero_w_kanale_to_nie_to_samo_co_puste():
+    """Zero = „tego nie zamawiaj wcale" i musi przetrwac zapis; gdyby wpadlo
+    w te sama dziure co puste pole, kanal po cichu dostawalby globalne 400."""
+    s = _sesja()
+    try:
+        _wyczysc(s)
+        reach.zapisz_ustawienia(s, enabled=True, qty_reactions=30, qty_views=400)
+        reach.zapisz_kanaly(s, [{"username": "kanal_bez_view", "on": True,
+                                 "qty_views": 0}])
+        assert reach.ilosci(s, "kanal_bez_view")["qty_views"] == 0
+
+        log = []
+        with _dostawca():
+            reach.zamow(s, "https://t.me/kanal_bez_view/3", transport=_transport(log=log))
+        addy = [p for p in log if p["action"] == "add"]
+        # Same reakcje — zamowienie na 0 wyswietlen nie ma prawa polecieć.
+        assert [p["service"] for p in addy] == ["8612"]
+    finally:
+        s.close()
+
+
+def test_boost_z_wlasnymi_ilosciami_bije_ustawienie_kanalu():
+    s = _sesja()
+    try:
+        _wyczysc(s)
+        reach.zapisz_ustawienia(s, enabled=True, qty_reactions=30, qty_views=400)
+        reach.zapisz_kanaly(s, [{"username": "kanal_maly", "on": True, "qty_views": 250}])
+        log = []
+        with _dostawca():
+            wynik = reach.zamow(s, "https://t.me/kanal_maly/11", transport=_transport(log=log),
+                                qty_reactions=5, qty_views=50)
+        assert wynik["quantities"] == {"qty_reactions": 5, "qty_views": 50,
+                                       "from": "explicit"}
+        addy = [p for p in log if p["action"] == "add"]
+        assert [p["quantity"] for p in addy] == ["5", "50"]
+    finally:
+        s.close()
+
+
+def test_panel_zapisuje_ilosci_kanalu_i_boost_je_przyjmuje():
+    s = _sesja()
+    try:
+        _wyczysc(s)
+    finally:
+        s.close()
+    odp = client.post("/api/admin/reach/channels", headers=ADMIN, json={"channels": [
+        {"username": "kanal_maly", "label": "Maly", "on": True,
+         "qty_reactions": 30, "qty_views": 250}]})
+    assert odp.status_code == 200
+    kanal = [k for k in odp.json()["channels"] if k["username"] == "kanal_maly"][0]
+    assert (kanal["qty_reactions"], kanal["qty_views"]) == (30, 250)
+
+    # Ilosc poza limitem odbija sie z 400, a nie 500.
+    zly = client.post("/api/admin/reach/channels", headers=ADMIN, json={"channels": [
+        {"username": "kanal_maly", "on": True, "qty_views": 999999}]})
+    assert zly.status_code == 400 and "qty_views" in zly.json()["detail"]
+
+    # Boost przyjmuje ilosci; bez dostawcy konczy sie na jego braku, nie na 500.
+    boost = client.post("/api/admin/reach/boost", headers=ADMIN,
+                        json={"link": "https://t.me/kanal_maly/12",
+                              "qty_reactions": 5, "qty_views": 50})
+    assert boost.status_code == 400 and "not configured" in boost.json()["detail"]
+
+
+def test_bramka_salda_liczy_koszt_z_ILOSCI_KANALU():
+    """Bramka liczyla koszt z ilosci globalnych. Kanal z wlasnymi, wiekszymi
+    ilosciami przechodzilby ja przy saldzie, ktore go nie pokrywa."""
+    s = _sesja()
+    try:
+        _wyczysc(s)
+        reach.zapisz_ustawienia(s, enabled=True, qty_reactions=30, qty_views=100)
+        reach._ustaw(s, "rate_reactions", "0.0425")
+        reach._ustaw(s, "rate_views", "0.1305")
+        s.commit()
+
+        # 30 reakcji + 100 views = $0.014325; 30 + 4000 views = $0.523275.
+        assert reach.koszt(s, 30, 100) == 0.014325
+        reach.zapisz_kanaly(s, [{"username": "kanal_drogi", "on": True, "qty_views": 4000}])
+
+        log = []
+        with _dostawca():
+            wynik = reach.zamow(s, "https://t.me/kanal_drogi/5",
+                                transport=_transport(saldo="0.20", log=log))
+        assert wynik["ordered"] == 0 and "balance too low" in wynik["skipped"]
+        assert [p for p in log if p["action"] == "add"] == []
+    finally:
+        s.close()

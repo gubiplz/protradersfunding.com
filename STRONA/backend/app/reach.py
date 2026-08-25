@@ -66,9 +66,12 @@ DOMYSLNE = {
     # w ID kosztowałaby kanał 💩 zamiast 🔥.
     "name_reactions": "",
     "name_views": "",
-    # Obsługiwane kanały: JSON [{"username","label","on"}]. Pusty = tylko kanał
-    # wypłat (dopisywany automatycznie z TELEGRAM_CHAT_ID przy pierwszym
-    # odczycie), żeby lista nie startowała pusta i nie kłamała.
+    # Obsługiwane kanały: JSON [{"username","label","on","qty_reactions","qty_views"}].
+    # Pusty = tylko kanał wypłat (dopisywany automatycznie z TELEGRAM_CHAT_ID
+    # przy pierwszym odczycie), żeby lista nie startowała pusta i nie kłamała.
+    # Ilości per kanał są opcjonalne (null = globalne): kanał z 170 subami i
+    # kanał z 400 nie potrzebują tyle samo wyświetleń, a wspólna liczba robi
+    # z jednego z nich post oglądany trzy razy częściej, niż ma subskrybentów.
     "channels": "",
 }
 
@@ -183,6 +186,16 @@ def _czysta_nazwa(s: str) -> str:
     return tekst.lower()
 
 
+def _ilosc_lub_nic(wartosc) -> int | None:
+    """`None`/`""` → `None` („jak globalnie"), reszta → liczba całkowita."""
+    if wartosc is None or (isinstance(wartosc, str) and not wartosc.strip()):
+        return None
+    try:
+        return int(float(wartosc))
+    except (TypeError, ValueError):
+        return None
+
+
 def kanaly(session) -> list[dict]:
     """Lista obsługiwanych kanałów. Kanał wypłat dopisuje się sam.
 
@@ -203,6 +216,8 @@ def kanaly(session) -> list[dict]:
         out.append({"username": nazwa,
                     "label": str(poz.get("label") or "")[:40],
                     "on": bool(poz.get("on", True)),
+                    "qty_reactions": _ilosc_lub_nic(poz.get("qty_reactions")),
+                    "qty_views": _ilosc_lub_nic(poz.get("qty_views")),
                     "payout": False})
 
     info = telegram.chat_info(settings.telegram_chat_id) if telegram.is_enabled() else {}
@@ -214,7 +229,8 @@ def kanaly(session) -> list[dict]:
             istniejacy["label"] = istniejacy["label"] or (info.get("title") or "Payouts")
         else:
             out.insert(0, {"username": nazwa, "label": info.get("title") or "Payouts",
-                           "on": True, "payout": True})
+                           "on": True, "qty_reactions": None, "qty_views": None,
+                           "payout": True})
     return out
 
 
@@ -229,9 +245,21 @@ def zapisz_kanaly(session, lista: list[dict]) -> list[dict]:
             raise ValueError(f"'{nazwa}' is not a valid public channel name")
         if any(k["username"] == nazwa for k in czyste):
             continue
-        czyste.append({"username": nazwa,
-                       "label": str((poz or {}).get("label") or "")[:40],
-                       "on": bool((poz or {}).get("on", True))})
+        wpis = {"username": nazwa,
+                "label": str((poz or {}).get("label") or "")[:40],
+                "on": bool((poz or {}).get("on", True))}
+        # Puste pole w panelu = „jak globalnie", nie „zero". Zero jest legalną
+        # wartością (kanał bez reakcji), więc te dwa stany muszą się różnić.
+        for klucz in ("qty_reactions", "qty_views"):
+            ile = _ilosc_lub_nic((poz or {}).get(klucz))
+            if ile is None:
+                continue
+            dol, gora = LIMITY[klucz]
+            if not (dol <= ile <= gora):
+                raise ValueError(f"'{klucz}' for @{nazwa} must be between "
+                                 f"{dol:g} and {gora:g}")
+            wpis[klucz] = ile
+        czyste.append(wpis)
     _ustaw(session, "channels", json.dumps(czyste))
     session.commit()
     return kanaly(session)
@@ -240,6 +268,55 @@ def zapisz_kanaly(session, lista: list[dict]) -> list[dict]:
 def kanal_wlaczony(session, username: str) -> bool:
     nazwa = _czysta_nazwa(username)
     return any(k["username"] == nazwa and k["on"] for k in kanaly(session))
+
+
+def ilosci(session, username: str | None = None, *,
+           qty_reactions: int | None = None, qty_views: int | None = None) -> dict:
+    """Ile zamówić pod postem: jawnie podane → ustawienie kanału → globalne.
+
+    Trzy poziomy, bo trzy różne decyzje: „tym razem inaczej" (ręczny boost),
+    „ten kanał zawsze inaczej" (mały kanał nie udźwignie 400 wyświetleń) oraz
+    domyślne, którymi jedzie automat.
+    """
+    cfg = ustawienia(session)
+    out = {"qty_reactions": cfg["qty_reactions"], "qty_views": cfg["qty_views"],
+           "from": "global"}
+    nazwa = _czysta_nazwa(username) if username else ""
+    if nazwa:
+        kanal = next((k for k in kanaly(session) if k["username"] == nazwa), None)
+        if kanal:
+            for klucz in ("qty_reactions", "qty_views"):
+                if kanal.get(klucz) is not None:
+                    out[klucz] = kanal[klucz]
+                    out["from"] = "channel"
+    for klucz, jawne in (("qty_reactions", qty_reactions), ("qty_views", qty_views)):
+        if jawne is None:
+            continue
+        dol, gora = LIMITY[klucz]
+        if not (dol <= int(jawne) <= gora):
+            raise ValueError(f"'{klucz}' must be between {dol:g} and {gora:g}")
+        out[klucz] = int(jawne)
+        out["from"] = "explicit"
+    return out
+
+
+def koszt(session, qty_reactions: int, qty_views: int) -> float:
+    """Koszt jednego zamówienia dla PODANYCH ilości (cennik dostawcy).
+
+    Bramka salda liczyła dotąd koszt z ilości globalnych — po wprowadzeniu
+    ustawień per kanał kłamałaby o każdym kanale, który ma własne."""
+    cfg = ustawienia(session)
+    stawki = {}
+    for klucz in ("rate_reactions", "rate_views"):
+        row = _wiersz(session, klucz)
+        try:
+            stawki[klucz] = float(row.value) if row and row.value else None
+        except (TypeError, ValueError):
+            stawki[klucz] = None
+    if stawki["rate_reactions"] is None or stawki["rate_views"] is None:
+        return cfg["fallback_cost"]
+    return round(qty_reactions * stawki["rate_reactions"] / 1000
+                 + qty_views * stawki["rate_views"] / 1000, 6)
 
 
 # --------------------------------------------------------------------------- #
@@ -393,7 +470,8 @@ def sprawdz_saldo(session, *, transport=None) -> dict:
 
 
 def zamow(session, link: str, *, transport=None, powod: str = "manual",
-          wymagaj_wlaczenia: bool = True) -> dict:
+          wymagaj_wlaczenia: bool = True,
+          qty_reactions: int | None = None, qty_views: int | None = None) -> dict:
     """Reakcje i wyświetlenia pod jednym postem. Best-effort, nigdy nie rzuca.
 
     Przełącznik w panelu rządzi AUTOMATEM: wyłączony znaczy „nie dokupuj sam
@@ -408,16 +486,21 @@ def zamow(session, link: str, *, transport=None, powod: str = "manual",
     if not (link or "").startswith("https://t.me/"):
         return {"ordered": 0, "skipped": "link must be a public t.me post url"}
 
+    # Kanał z linku rządzi ilościami, chyba że wywołujący poda je wprost.
+    nazwa_kanalu = _czysta_nazwa(link.rsplit("/", 2)[-2] if link.count("/") >= 4 else "")
+    ile = ilosci(session, nazwa_kanalu, qty_reactions=qty_reactions, qty_views=qty_views)
+    cena = koszt(session, ile["qty_reactions"], ile["qty_views"])
+
     b = saldo_z_ustawien(session, transport=transport)
-    if not b.get("error") and b["value"] < cfg["unit_cost"]:
+    if not b.get("error") and b["value"] < cena:
         _zapisz_wynik(session, f"SKIPPED balance ${b['value']:.2f}")
         _alert(session, {**b, "low": True})
         return {"ordered": 0, "skipped": f"balance too low (${b['value']:.2f})",
                 "balance": b["value"]}
 
     zlecenia = [
-        ("reactions", cfg["svc_reactions"], cfg["qty_reactions"]),
-        ("views", cfg["svc_views"], cfg["qty_views"]),
+        ("reactions", cfg["svc_reactions"], ile["qty_reactions"]),
+        ("views", cfg["svc_views"], ile["qty_views"]),
     ]
     wyniki = []
     for etykieta, usluga, ilosc in zlecenia:
@@ -448,7 +531,7 @@ def zamow(session, link: str, *, transport=None, powod: str = "manual",
     po = saldo_z_ustawien(session, transport=transport)
     _alert(session, po)
     return {"ordered": len(udane), "results": wyniki, "link": link,
-            "balance": po.get("value")}
+            "balance": po.get("value"), "quantities": ile, "cost": cena}
 
 
 def _zapisz_wynik(session, opis: str) -> None:

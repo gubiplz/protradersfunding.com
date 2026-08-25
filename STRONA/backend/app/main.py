@@ -4928,12 +4928,18 @@ class ReachIn(BaseModel):
 
 class ReachBoostIn(BaseModel):
     link: str
+    # Ilości tylko na TEN jeden strzał; puste = jak dla kanału z linku.
+    qty_reactions: int | None = None
+    qty_views: int | None = None
 
 
 class ReachChannelIn(BaseModel):
     username: str
     label: str | None = None
     on: bool = True
+    # None = „jak globalnie". Zero jest osobną, legalną wartością.
+    qty_reactions: int | None = None
+    qty_views: int | None = None
 
 
 class ReachChannelsIn(BaseModel):
@@ -5006,8 +5012,13 @@ def admin_reach_boost(payload: ReachBoostIn):
     """Ręczne zamówienie pod wklejonym linkiem — dla postów spoza Payout BOT-a."""
     session = SessionLocal()
     try:
-        wynik = reach.zamow(session, payload.link.strip(), powod="panel",
-                            wymagaj_wlaczenia=False)
+        try:
+            wynik = reach.zamow(session, payload.link.strip(), powod="panel",
+                                wymagaj_wlaczenia=False,
+                                qty_reactions=payload.qty_reactions,
+                                qty_views=payload.qty_views)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
         if wynik.get("skipped"):
             raise HTTPException(400, wynik["skipped"])
         return wynik

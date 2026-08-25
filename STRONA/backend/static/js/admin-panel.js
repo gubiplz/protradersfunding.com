@@ -3117,7 +3117,9 @@ function reachChannelsHtml(rc){
       :k.bot_admin===false?`<span class="chip" style="font-size:11px;border-color:var(--red-line);color:var(--red)">add ${bot} as admin</span>`
       :k.bot_admin?`<span class="chip" style="font-size:11px">auto ready</span>`
       :`<span class="chip" style="font-size:11px">status unknown</span>`;
-    return `<div class="mod-row" style="align-items:center;gap:10px">
+    /* Puste pole ilosci = „jak globalnie" — placeholder pokazuje wtedy liczbe,
+       ktora naprawde poleci, zeby admin nie musial jej szukac wyzej w karcie. */
+    return `<div class="mod-row" style="flex-wrap:wrap;align-items:center;gap:10px">
       <label style="display:flex;gap:9px;align-items:center;cursor:pointer;flex:1;min-width:0">
         <input type="checkbox" data-rcch="${i}" ${k.on?'checked':''} onchange="reachToggleChannel()">
         <span style="min-width:0">
@@ -3127,6 +3129,14 @@ function reachChannelsHtml(rc){
       </label>
       ${stan}
       ${k.payout?'':`<button class="act-btn" title="Remove" onclick="reachDropChannel('${jsq(k.username)}')">&times;</button>`}
+      <div style="display:flex;gap:8px;width:100%;padding-left:26px">
+        <input id="rc-qr-${i}" class="inp" style="flex:1;min-width:0;font-size:12px" inputmode="numeric"
+               placeholder="reactions — ${rc.qty_reactions}" value="${k.qty_reactions??''}"
+               onchange="reachToggleChannel()">
+        <input id="rc-qv-${i}" class="inp" style="flex:1;min-width:0;font-size:12px" inputmode="numeric"
+               placeholder="views — ${rc.qty_views}" value="${k.qty_views??''}"
+               onchange="reachToggleChannel()">
+      </div>
     </div>`;
   };
   return `<div style="margin:2px 0 14px;padding-top:12px;border-top:1px dashed var(--line)">
@@ -3153,9 +3163,14 @@ function reachCurrentChannels(){
   /* Kanal wyplat wraca na liste po stronie serwera, wiec wysylamy tez jego
      stan — inaczej odznaczenie go nie mialoby jak przetrwac zapisu. */
   const lista=(window._reach&&window._reach.channels)||[];
+  /* Puste pole zostaje NULL-em, nie zerem: zero znaczy „nie zamawiaj tego
+     wcale", a puste „jak globalnie" — panel nie moze tych stanow zlepic. */
+  const ile=id=>{const el=$(id);if(!el)return null;const v=(el.value||'').trim();
+    return v===''?null:Number(v)};
   return lista.map((k,i)=>{
     const cb=document.querySelector(`[data-rcch="${i}"]`);
-    return {username:k.username,label:k.label,on:cb?cb.checked:k.on};
+    return {username:k.username,label:k.label,on:cb?cb.checked:k.on,
+            qty_reactions:ile(`rc-qr-${i}`),qty_views:ile(`rc-qv-${i}`)};
   });
 }
 async function reachToggleChannel(){
@@ -3228,8 +3243,12 @@ function reachCardHtml(rc){
       <label class="muted" style="font-size:12px">Boost a single post</label>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px">
         <input id="rc-link" class="inp" style="flex:1;min-width:220px" placeholder="https://t.me/channel/123">
+        <input id="rc-bqr" class="inp" style="width:112px" inputmode="numeric" placeholder="reactions">
+        <input id="rc-bqv" class="inp" style="width:112px" inputmode="numeric" placeholder="views">
         <button class="btn-o" onclick="boostReach(this)">Boost</button>
       </div>
+      <p class="muted" style="font-size:11.5px;margin:6px 0 0">Leave the two numbers empty to use
+        whatever that channel is set to — fill them in to order a different amount just this once.</p>
     </div>
     <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
       Every post the Payout BOT publishes gets its reactions and views <b>right after it goes
@@ -3263,9 +3282,13 @@ async function toggleReach(on,btn){
 async function boostReach(btn){
   const link=($('rc-link').value||'').trim();
   if(!link){toast('Paste a post link first.','err');return}
+  const ile=id=>{const v=(($(id)||{}).value||'').trim();return v===''?null:Number(v)};
+  const body={link,qty_reactions:ile('rc-bqr'),qty_views:ile('rc-bqv')};
   return busy(btn,'Ordering…',async()=>{
-    try{const r=await api('/api/admin/reach/boost',{method:'POST',body:JSON.stringify({link})});
-      toast(`Ordered for ${r.ordered}/2 services.`+(r.balance!=null?` Balance $${fmt(r.balance)}.`:''),'ok',7000);
+    try{const r=await api('/api/admin/reach/boost',{method:'POST',body:JSON.stringify(body)});
+      const q=r.quantities||{};
+      toast(`Ordered ${q.qty_reactions??'?'} reactions and ${q.qty_views??'?'} views `
+            +`(${r.ordered}/2 services).`+(r.balance!=null?` Balance $${fmt(r.balance)}.`:''),'ok',7000);
       go('settings');
     }catch(e){toast('Error: '+e.message,'err')}
   });
