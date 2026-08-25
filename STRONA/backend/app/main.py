@@ -2686,6 +2686,16 @@ def telegram_link_test(trader: Trader = Depends(auth.current_trader)):
         f"Test from the panel — this connection works. "
         f"Your clicks on the LEADS channel sign as {trader.email}.")
     if not ok:
+        # „chat not found" nie znaczy, że parowanie jest zepsute — znaczy, że to
+        # konto Telegram nigdy nie odezwało się do BIEŻĄCEGO bota (np. token
+        # panelu zmieniono po sparowaniu). Surowy komunikat Telegrama nie mówi,
+        # co z tym zrobić, więc zamieniamy go na instrukcję.
+        if "chat not found" in (powod or "").lower():
+            bot = telegram.bot_username()
+            raise HTTPException(502, (
+                f"Open {('@' + bot) if bot else 'the panel bot'} in Telegram and press "
+                "Start, then send the test again — this account has never written to "
+                "that bot, so it has no chat to receive the message."))
         raise HTTPException(502, f"Telegram refused: {powod or 'unknown'}")
     return {"ok": True}
 

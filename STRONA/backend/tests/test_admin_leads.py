@@ -1483,6 +1483,27 @@ def test_test_dm_bez_sparowania_to_400():
                        headers=naglowki).status_code == 400
 
 
+def test_test_dm_do_bota_bez_czatu_mowi_co_zrobic(_srodowisko, monkeypatch):
+    """„chat not found" = to konto nie pisało do BIEŻĄCEGO bota (np. po zmianie
+    tokenu panelu). Parowanie jest całe, więc panel ma kazać kliknąć Start,
+    a nie oddawać surowy komunikat Telegrama, po którym nie wiadomo, co robić."""
+    email, tid, naglowki = _admin_z_tokenem()
+    s = SessionLocal()
+    try:
+        s.get(Trader, tid).telegram_user_id = "424242"
+        s.commit()
+    finally:
+        s.close()
+    monkeypatch.setattr(telegram, "send_dm",
+                        lambda czat, tekst, **kw: (False, "Bad Request: chat not found"))
+    monkeypatch.setattr(telegram, "bot_username", lambda **kw: "fxpassingadmin_bot")
+    odp = client.post("/api/me/telegram-link/test", headers=naglowki)
+    assert odp.status_code == 502
+    tresc = odp.json()["detail"]
+    assert "@fxpassingadmin_bot" in tresc and "Start" in tresc
+    assert email  # parowanie zostaje nietknięte
+
+
 def test_niesparowany_zostaje_przy_imieniu_a_zly_kod_nie_paruje(_srodowisko):
     lead_id = _wyslij(_zgloszenie()).json()["id"]
     _callback(lead_id, "claim", kto="Hubert", uid=999999)
