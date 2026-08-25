@@ -4935,7 +4935,10 @@ def admin_reach():
         # Cennik dostawcy ma ~1,5 MB, więc normalnie odświeża go dobowy tick.
         # Tutaj ciągniemy go RAZ, dopóki stawek nie ma — inaczej panel do
         # pierwszego ticku pokazywałby zgadywany koszt posta.
-        if reach.is_enabled() and cfg.get("cost_from") != "provider":
+        # Nazwa usługi jest tu równie ważna co stawka: po niej widać, czy
+        # zamawiamy wariant "Positive", więc brak nazwy też wymusza pobranie.
+        if reach.is_enabled() and (cfg.get("cost_from") != "provider"
+                                   or not cfg.get("name_reactions")):
             try:
                 reach.odswiez_cennik(session)
                 cfg = reach.ustawienia(session)
