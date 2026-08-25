@@ -94,7 +94,12 @@ def _strzal_json(metoda: str, pola: dict[str, str],
     # niezależne i jeden ma prawo działać, gdy drugi jest nieskonfigurowany.
     if not settings.telegram_bot_token:
         return False, "no bot token or channel", {}
-    body, content_type = _multipart(pola, plik)
+    # Metoda bez pól (getMe) nie ma z czego zbudować multiparta, a części bez
+    # ANI JEDNEJ granicy Telegram odbija jako HTTP 400 — pusty JSON przechodzi.
+    if pola or plik:
+        body, content_type = _multipart(pola, plik)
+    else:
+        body, content_type = b"{}", "application/json"
     url = f"{API}/bot{settings.telegram_bot_token}/{metoda}"
     try:
         status, tresc = (transport or _urllib_transport)(url, body, content_type)

@@ -389,3 +389,29 @@ def test_automat_nie_zamawia_przy_wylaczonym_botze():
             assert reach.po_publikacji(s, LINK, transport=transport)["skipped"] == "reach bot off"
     finally:
         s.close()
+
+
+def test_getme_idzie_bez_multiparta_wiec_status_admina_jest_znany(monkeypatch):
+    """Metoda bez pol nie moze isc multipartem — Telegram odbija taki request
+    jako HTTP 400, przez co `bot_id` wychodzilo 0, a panel przy kazdym kanale
+    pisal "nie wiadomo", mimo ze bot byl administratorem."""
+    monkeypatch.setattr(telegram.settings, "telegram_bot_token", "TESTOWY:TOKEN",
+                        raising=False)
+    monkeypatch.setattr(telegram, "_BOT_ID", None, raising=False)
+    widziane = []
+
+    def transport(url, body, content_type):
+        widziane.append((url.rsplit("/", 1)[-1], bytes(body or b""), content_type))
+        if url.endswith("/getMe"):
+            return 200, json.dumps({"ok": True, "result": {"id": 4242}}).encode()
+        return 200, json.dumps({"ok": True,
+                                "result": {"status": "administrator"}}).encode()
+
+    assert telegram.bot_id(transport=transport) == 4242
+    assert telegram.jest_adminem("@kanal", transport=transport) is True
+    getme = [w for w in widziane if w[0] == "getMe"][0]
+    # Puste cialo multiparta = 400 u Telegrama; JSON przechodzi.
+    assert getme[1] == b"{}" and getme[2] == "application/json"
+    # Wywolanie Z polami dalej idzie multipartem (zdjecia musza dzialac).
+    zparam = [w for w in widziane if w[0] == "getChatMember"][0]
+    assert zparam[2].startswith("multipart/form-data")
