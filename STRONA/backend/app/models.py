@@ -563,7 +563,10 @@ class AppSetting(Base):
     __tablename__ = "app_settings"
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
-    value: Mapped[str] = mapped_column(String(200), default="")
+    # TEXT, nie VARCHAR(200): pod jednym kluczem siedzi juz lista kanalow
+    # Reach BOT-a w JSON-ie i przy trzecim kanale przekraczala limit — Postgres
+    # odrzucal zapis, a panel oddawal 500 bez slowa wyjasnienia.
+    value: Mapped[str] = mapped_column(Text, default="")
 
 
 class JournalEntry(Base):

@@ -48,6 +48,7 @@ def init_db() -> None:
     from . import models  # noqa: F401  (rejestracja tabel)
     Base.metadata.create_all(bind=engine)
     _add_missing_columns()
+    _poszerz_kolumny()
     _add_missing_indexes()
     _relax_not_null()
     _przemianuj_statusy_leadow()
@@ -371,6 +372,38 @@ def _uzupelnij_zgubione_claimy() -> None:
                 "VALUES (:t, 'account_claimed', :p, :c)"),
                 {"t": tid, "p": '{"inferred": true, "backfill": true}', "c": kiedy})
             print(f"[db] trader {tid}: claim odtworzony z aktywności portalu")
+
+
+# Kolumny, którym za ciasno w pierwotnym VARCHAR. Poszerzenie w Postgresie jest
+# operacją na katalogu, nie przepisaniem tabeli, więc nie blokuje startu appki.
+# SQLite i tak nie egzekwuje długości, więc tam ten krok jest pomijany.
+_SZERSZE_KOLUMNY: dict[str, dict[str, str]] = {
+    # Lista kanałów Reach BOT-a siedzi tu jako JSON — przy trzecim kanale
+    # przekraczała 200 znaków i zapis leciał 500-tką.
+    "app_settings": {"value": "TEXT"},
+}
+
+
+def _poszerz_kolumny() -> None:
+    from sqlalchemy import inspect, text
+
+    if engine.dialect.name != "postgresql":
+        return
+    inspector = inspect(engine)
+    istniejace = set(inspector.get_table_names())
+    with engine.begin() as conn:
+        for tabela, kolumny in _SZERSZE_KOLUMNY.items():
+            if tabela not in istniejace:
+                continue
+            obecne = {c["name"]: c for c in inspector.get_columns(tabela)}
+            for nazwa, typ in kolumny.items():
+                kol = obecne.get(nazwa)
+                # Już TEXT (albo kolumny nie ma) = nic do roboty.
+                if not kol or getattr(kol["type"], "length", None) is None:
+                    continue
+                conn.execute(text(
+                    f"ALTER TABLE {tabela} ALTER COLUMN {nazwa} TYPE {typ}"))
+                print(f"[db] poszerzono kolumnę {tabela}.{nazwa} do {typ}")
 
 
 def _add_missing_columns() -> None:

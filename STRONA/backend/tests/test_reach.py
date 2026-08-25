@@ -415,3 +415,33 @@ def test_getme_idzie_bez_multiparta_wiec_status_admina_jest_znany(monkeypatch):
     # Wywolanie Z polami dalej idzie multipartem (zdjecia musza dzialac).
     zparam = [w for w in widziane if w[0] == "getChatMember"][0]
     assert zparam[2].startswith("multipart/form-data")
+
+
+def test_lista_kanalow_miesci_sie_w_kolumnie_ustawien():
+    """Trzy kanaly z etykietami to ponad 200 znakow JSON-a. Dopoki
+    app_settings.value bylo VARCHAR(200), Postgres odrzucal taki zapis i panel
+    oddawal 500 (SQLite w testach niczego nie egzekwuje, wiec pilnujemy tego
+    tutaj: kolumna ma byc bezdlugosciowa, a zapis ma wracac w calosci)."""
+    from app.models import AppSetting
+
+    assert getattr(AppSetting.__table__.c.value.type, "length", None) is None
+
+    s = _sesja()
+    try:
+        _wyczysc(s)
+        wejscie = [
+            {"username": "fx_passingpayouts", "label": "FOREX PASSING | PAYOUTS",
+             "on": True},
+            {"username": "fx_passing", "label": "FOREX PASSING | ACCOUNT MANAGEMENT",
+             "on": False},
+            {"username": "fx_passingtrackrecord", "label": "FOREX PASSING | TRACK RECORD",
+             "on": True},
+        ]
+        zapisane = reach.zapisz_kanaly(s, wejscie)
+        assert [k["username"] for k in zapisane] == [k["username"] for k in wejscie]
+        assert [k["on"] for k in zapisane] == [True, False, True]
+        # Sedno: serializacja NAPRAWDE przekracza dawny limit kolumny.
+        wiersz = s.get(AppSetting, "reach_channels")
+        assert wiersz is not None and len(wiersz.value) > 200
+    finally:
+        s.close()
