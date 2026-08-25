@@ -1822,10 +1822,14 @@ const VIEWS={
       <div><h3>Identity verified</h3><p class="muted" style="font-size:13.5px">Your KYC is approved. You can request payouts on funded accounts.</p></div></div>`;
     return;
   }
-  if(s==='pending'){
+  /* Poprawka w trakcie oczekiwania: rozmazany skan dowodu widac dopiero po
+     wyslaniu, a bez tej furtki trader musialby czekac na odrzucenie, zeby
+     wgrac czytelny. Serwer nadpisuje to samo zgloszenie — nie zaklada nowego. */
+  if(s==='pending'&&!window._kycPoprawka){
     $('view').innerHTML=hold+`<div class="panel" style="display:flex;gap:14px;align-items:center">
       <div class="tile-ic orange">${ICO.shield}</div>
-      <div><h3>Documents under review</h3><p class="muted" style="font-size:13.5px">Our team is reviewing your submission. You'll get an e-mail once it's approved.</p></div></div>`;
+      <div style="flex:1"><h3>Documents under review</h3><p class="muted" style="font-size:13.5px">Our team is reviewing your submission. You'll get an e-mail once it's approved.</p></div>
+      <button class="btn-o" onclick="window._kycPoprawka=true;go('kyc')">Replace documents</button></div>`;
     return;
   }
   $('view').innerHTML=hold+`
@@ -1833,6 +1837,12 @@ const VIEWS={
       <b style="font-size:13.5px">Your previous verification was declined.</b>
       ${ME.kyc_reject_reason?`<p style="font-size:12.5px;margin-top:4px"><b>Reason:</b> ${esc(ME.kyc_reject_reason)}</p>`:''}
       <p class="muted" style="font-size:12.5px;margin-top:4px">Please double-check your details and documents, then submit again. Reach out via Support if you need help.</p>
+    </div>`:''}
+    ${s==='pending'?`<div class="panel" style="margin-bottom:14px">
+      <b style="font-size:13.5px">Replacing your submission</b>
+      <p class="muted" style="font-size:12.5px;margin-top:4px">What you send now replaces the documents already waiting for review —
+         it does not start a second request, and it keeps your place in the queue.
+         <a href="#" onclick="window._kycPoprawka=false;go('kyc');return false">Cancel</a></p>
     </div>`:''}
     <div class="sec-card">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
@@ -2254,8 +2264,12 @@ async function submitKyc(){
       }
       await uploadDocument(fieldName,prepared);
     }
+    const bylaPoprawka=!!window._kycPoprawka;
+    window._kycPoprawka=false;
     ME=await api('/api/auth/me');boot();
-    toast('KYC submitted. Documents are under review.','ok');go('kyc');
+    toast(bylaPoprawka?'Documents replaced. Your submission is still under review.'
+                      :'KYC submitted. Documents are under review.','ok');
+    go('kyc');
   }catch(e){err('Error: '+e.message)}
   finally{if(btn){btn.disabled=false;btn.textContent='Submit KYC'}}
 }

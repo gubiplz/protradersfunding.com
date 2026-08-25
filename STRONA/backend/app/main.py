@@ -1580,6 +1580,12 @@ def submit_kyc(payload: KycIn, trader: Trader = Depends(auth.current_trader)):
             kraj = fields.country_name(payload.country)
         except ValueError as e:
             raise HTTPException(400, str(e))
+        # Poprawka zgłoszenia, którego admin jeszcze nie tknął, jest w porządku:
+        # rozmazane zdjęcie dowodu trzeba dać wymienić, zanim ktoś je odrzuci.
+        # Ale to JEST to samo zgłoszenie, więc nie robimy z niego nowego:
+        # bez tego admin dostaje drugi dzwonek o tym samym człowieku, a wpis
+        # „odmładza się" w kolejce i wypada z kolejności czekania.
+        poprawka = tr.kyc_status == "pending"
         tr.kyc_status = "pending"
         tr.kyc_fullname = nazwa
         tr.kyc_country = kraj
@@ -1588,12 +1594,14 @@ def submit_kyc(payload: KycIn, trader: Trader = Depends(auth.current_trader)):
         tr.kyc_id_type = payload.id_type
         tr.kyc_id_number = payload.id_number
         tr.kyc_doc_ref = payload.doc_ref or payload.id_number or ""
-        tr.kyc_submitted_at = datetime.now(timezone.utc)
+        if not (poprawka and tr.kyc_submitted_at):
+            tr.kyc_submitted_at = datetime.now(timezone.utc)
         session.commit()
-        telemetry.track("kyc_submitted", trader.id)
-        notify.notify_admins("admin_kyc", "New KYC submission",
-                             tr.kyc_fullname or tr.email)
-        return {"kyc_status": tr.kyc_status}
+        telemetry.track("kyc_resubmitted" if poprawka else "kyc_submitted", trader.id)
+        if not poprawka:
+            notify.notify_admins("admin_kyc", "New KYC submission",
+                                 tr.kyc_fullname or tr.email)
+        return {"kyc_status": tr.kyc_status, "updated": poprawka}
     finally:
         session.close()
 
