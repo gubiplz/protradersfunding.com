@@ -32,6 +32,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 
 from . import (achievements, auth, billing, catalog, certshot, countries, fields, loyalty,
                lead_mail, metaquotes_web, notify,
@@ -6397,6 +6398,13 @@ def _lead_wymaga_tokenu(podany: str | None) -> None:
     """
     oczekiwany = settings.lead_ingest_token
     if not oczekiwany or not podany or not secrets.compare_digest(podany, oczekiwany):
+        # Głośno, bo to jedyny ślad. Odmowa leci PRZED otwarciem sesji, więc po
+        # tej stronie nie zostaje ani wiersz, ani zdarzenie — a rozjazd sekretów
+        # z landingiem kasuje 100% leadów i z zewnątrz wygląda dokładnie tak samo
+        # jak wyłączona kampania.
+        print("[leads] ingest 401 — token "
+              + ("nieustawiony po tej stronie" if not oczekiwany
+                 else "nieprzysłany" if not podany else "niezgodny"))
         raise HTTPException(401, "Unauthorized")
 
 
@@ -6781,6 +6789,19 @@ def leads_ingest(payload: LeadIn,
 
     session = SessionLocal()
     try:
+        def wpisz(lead: Lead) -> None:
+            lead.name = (payload.name or "")[:120]
+            _ustaw_telefon(lead, payload.phone or "", payload.phoneIso)
+            lead.telegram = (payload.telegram or None)
+            lead.country = (payload.country or None)
+            lead.source = (payload.source or "")[:40]
+            lead.ref = (payload.ref or None)
+            lead.outcome = "not_qualified" if payload.outcome == "not_qualified" else "qualified"
+            lead.tier = ocena.get("tier") or None
+            lead.score = int(ocena.get("score") or 0)
+            lead.payload_json = json.dumps(dane, ensure_ascii=False)[:20000]
+            lead.updated_at = datetime.now(timezone.utc)
+
         lead = session.query(Lead).filter(Lead.email == email).one_or_none()
         nowy = lead is None
         if nowy:
@@ -6788,21 +6809,23 @@ def leads_ingest(payload: LeadIn,
             session.add(lead)
         else:
             lead.applications = (lead.applications or 1) + 1
-
-        lead.name = (payload.name or "")[:120]
-        _ustaw_telefon(lead, payload.phone or "", payload.phoneIso)
-        lead.telegram = (payload.telegram or None)
-        lead.country = (payload.country or None)
-        lead.source = (payload.source or "")[:40]
-        lead.ref = (payload.ref or None)
-        lead.outcome = "not_qualified" if payload.outcome == "not_qualified" else "qualified"
-        lead.tier = ocena.get("tier") or None
-        lead.score = int(ocena.get("score") or 0)
-        lead.payload_json = json.dumps(dane, ensure_ascii=False)[:20000]
-        lead.updated_at = datetime.now(timezone.utc)
+        wpisz(lead)
 
         # flush, bo nowy lead dostaje `id` dopiero z bazy, a zdarzenie musi je znać.
-        session.flush()
+        try:
+            session.flush()
+        except IntegrityError:
+            # Wyścig o UNIQUE(email): ten sam mail wjechał równolegle drugim
+            # requestem, oba odczyty zobaczyły pustkę i oba próbują INSERT.
+            # Przegrany dostawał 500, a landing przekazuje leada bez ponowienia,
+            # więc zgłoszenie przepadało. To jest po prostu drugie zgłoszenie
+            # tego człowieka i ma się zachować jak każde ponowne.
+            session.rollback()
+            lead = session.query(Lead).filter(Lead.email == email).one()
+            nowy = False
+            lead.applications = (lead.applications or 1) + 1
+            wpisz(lead)
+            session.flush()
         # Migawka TEGO zgłoszenia. `lead.payload_json` za chwilę nadpisze kolejne
         # i bez tej kopii nie dałoby się porównać, co człowiek odpowiadał wtedy,
         # a co teraz — a to jest cała treść tego, że zgłosił się drugi raz.
@@ -6834,24 +6857,41 @@ def leads_ingest(payload: LeadIn,
     # Push do adminów tak samo — telefon działu ma zabrzęczeć, ale landing nie
     # może czekać na push service ani oglądać jego błędów.
     _lead_push(lead_id, f"New lead: {kto}", opis, event="lead_new")
-    _, _, message_id = telegram.send_lead_alert(lead_id, tekst, chat_id=czat)
-    if message_id:
-        # Osobny, króciutki zapis po wysyłce. Nie da się tego zrobić w tamtej
-        # transakcji, bo id wiadomości powstaje dopiero w Telegramie — a bez
-        # niego odpowiedź na alert nie ma jak trafić do tego leada.
-        _zapamietaj_wiadomosc(lead_id, message_id, czat or None)
+    _, powod, message_id = telegram.send_lead_alert(lead_id, tekst, chat_id=czat)
+    _zapamietaj_wysylke(lead_id, message_id, czat or None, powod)
     return {"ok": True, "id": lead_id, "new": nowy}
 
 
-def _zapamietaj_wiadomosc(lead_id: int, message_id: int,
-                          chat_id: str | None) -> None:
+def _zapamietaj_wysylke(lead_id: int, message_id: int | None,
+                        chat_id: str | None, powod: str = "") -> None:
+    """Osobny, króciutki zapis po wysyłce karty. Także wtedy, gdy nie poszła.
+
+    Sukcesu nie da się zapisać w tamtej transakcji, bo id wiadomości powstaje
+    dopiero w Telegramie — a bez niego odpowiedź na alert nie ma jak trafić do
+    tego leada.
+
+    Porażka jest tu z innego powodu. `send_lead_alert` zwraca powód odmowy
+    wprost od Telegrama („chat not found", „bot is not a member of the group
+    chat") i dotąd był on wyrzucany. Bez niego „karty nie wychodzą" wygląda
+    w bazie identycznie jak „leadów nie ma" — a to dwie różne awarie i dwa
+    różne telefony do wykonania. Pusty `tg_message_id` jest przy okazji
+    kolejką dosyłek, którą przegląda `_lead_followups`.
+
+    Wyłączony Telegram to nie awaria: bez `lead_alerts_on` każdy lead dostawałby
+    zdarzenie o nieudanej karcie, choć nikt żadnej nie zamawiał.
+    """
     session = SessionLocal()
     try:
         lead = session.get(Lead, lead_id)
-        if lead:
+        if not lead:
+            return
+        if message_id:
             lead.tg_message_id = message_id
             lead.tg_chat_id = chat_id
-            session.commit()
+        elif telegram.lead_alerts_on(chat_id):
+            _zdarzenie(session, lead_id, "delivery",
+                       f"telegram card failed: {powod or 'unknown'}", actor="system")
+        session.commit()
     finally:
         session.close()
 
@@ -7054,9 +7094,8 @@ def admin_lead_create(payload: LeadManualIn):
     # Best-effort po commicie, dokładnie jak przy ingeście: padnięty Telegram
     # nie może cofnąć zapisanego leada ani kazać wpisywać go drugi raz.
     _lead_push(lead_id, f"New lead: {kto}", "added by hand", event="lead_new")
-    _, _, message_id = telegram.send_lead_alert(lead_id, tekst, chat_id=czat)
-    if message_id:
-        _zapamietaj_wiadomosc(lead_id, message_id, czat or None)
+    _, powod, message_id = telegram.send_lead_alert(lead_id, tekst, chat_id=czat)
+    _zapamietaj_wysylke(lead_id, message_id, czat or None, powod)
     return {"id": lead_id, "existing": False}
 
 
@@ -7968,6 +8007,18 @@ BOUGHT_UPDATE_DAYS = 7
 # dokładnie jedno zdanie — że aplikację czytał ktoś żywy.
 LEAD_AUTO_MAIL_MIN = 60
 
+# Jak długo po zgłoszeniu wolno jeszcze dosłać kartę, która nie wyszła. Doba,
+# bo to ratunek po awarii Telegrama, a nie archiwum: karta sprzed tygodnia
+# przeczytałaby się na kanale jak świeże zgłoszenie. Okno chroni też przed
+# wierszami sprzed kolumny `tg_message_id`, gdzie NULL nic nie znaczy.
+LEAD_CARD_RETRY_H = 24
+
+# Po ilu godzinach bez ANI JEDNEGO leada dział dostaje ostrzeżenie. Nie chodzi
+# o słabą kampanię, tylko o zerwany łańcuch landing→ingest→czat: cisza z tego
+# powodu wygląda dokładnie tak samo jak cisza z braku ruchu i raz kosztowała
+# już tydzień. Doba, bo tyle wynosi najgorszy odstęp między przebiegami.
+LEADS_SILENCE_H = 24
+
 
 def _utc(d: datetime | None) -> datetime | None:
     """SQLite oddaje daty bez strefy, Postgres ze strefą. Porównanie jednego
@@ -8094,6 +8145,7 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
     try:
         do_wyslania, pushy = _wyslij_zaplanowane(session, now)
         do_maila: list[int] = []
+        do_kart: list[tuple[int, str, str, dict]] = []
         leady = session.query(Lead).all()
 
         maile = [l.email for l in leady]
@@ -8126,6 +8178,21 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
             if niczyj and wiek_min >= 30 and (l.id, "unclaimed") not in juz:
                 _zdarzenie(session, l.id, "reminder", "unclaimed", actor="cron")
                 pushy.append((l.id, "Unclaimed lead (30 min+)", l.name or l.email))
+            # Karta, która nie wyszła. Wysyłka przy zgłoszeniu jest po commicie
+            # i best-effort, więc minutowa awaria Telegrama zostawiała leada
+            # w bazie i nic na kanale — do tej pory bezterminowo. Pusty
+            # `tg_message_id` jest tu jednocześnie warunkiem i kolejką: udana
+            # dosyłka wypełnia pole i wiersz sam wypada z następnego przebiegu.
+            # Bez dedupu przez `juz`, bo ten liczy raz na życie leada, a nieudana
+            # wysyłka ma prawo powtórzyć się tyle razy, ile trwa awaria.
+            czat_karty = telegram.lead_chat_id(l.source)
+            if (l.tg_message_id is None and wiek_min <= LEAD_CARD_RETRY_H * 60
+                    and l.outcome == "qualified" and len(do_kart) < 20
+                    # Przy wyłączonych alertach każdy lead ma puste pole i cała
+                    # baza wchodzi do kolejki, która nigdy się nie opróżni.
+                    and telegram.lead_alerts_on(czat_karty)):
+                tekst_karty, klawiatura = _stan_wiadomosci(l)
+                do_kart.append((l.id, czat_karty, tekst_karty, klawiatura))
             # Ten sam stan godzinę później: skoro nikt nie usiadł, niech
             # przynajmniej lead przestanie czekać w ciszy. Tylko do kogoś BEZ
             # handle'a — kto go zostawił, ma dostać wiadomość tam, gdzie na nią
@@ -8169,6 +8236,31 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
                     due_at=now + timedelta(days=BOUGHT_UPDATE_DAYS), created_by="cron",
                     text="Update konta: jak idzie challenge, czy zasady są jasne, "
                          "jak blisko limitu straty."))
+        # Cisza całkowita. Każda reguła wyżej mówi o leadzie, który JEST w bazie,
+        # więc przy zerze zgłoszeń wszystkie milczą — a to jest dokładnie ta
+        # awaria, która raz kosztowała tydzień. Znacznik w `app_settings`, a nie
+        # zdarzenie na leadzie, bo tu z definicji nie ma leada, przy którym
+        # dałoby się to zapisać; bez niego ostrzeżenie wracałoby co przebieg.
+        ostatni = max((_utc(l.created_at) for l in leady if l.created_at), default=None)
+        cisza = (now - ostatni).total_seconds() if ostatni else 0
+        if ostatni and cisza >= LEADS_SILENCE_H * 3600:
+            wpis = session.get(AppSetting, "leadbot_cisza_alert")
+            poprzednio = None
+            if wpis and wpis.value:
+                try:
+                    poprzednio = _utc(datetime.fromisoformat(wpis.value))
+                except ValueError:
+                    pass
+            if poprzednio is None or (now - poprzednio).total_seconds() >= LEADS_SILENCE_H * 3600:
+                if wpis is None:
+                    wpis = AppSetting(key="leadbot_cisza_alert", value="")
+                    session.add(wpis)
+                wpis.value = now.isoformat()
+                do_wyslania.append((
+                    telegram.lead_chat_id(""),
+                    f"⚠️ Zero nowych leadów od {int(cisza // 3600)} h. "
+                    "Sprawdź łańcuch: formularz → LEAD_WEBHOOK → /api/leads/ingest → czat."))
+
         # Commit PRZED wysyłką, jak przy porzuconych koszykach: jak Telegram
         # padnie, przypomnienie przepada. Gdyby zapis szedł po wysyłce, padnięta
         # wysyłka wracałaby przy każdym przebiegu crona i dział dostałby to samo
@@ -8191,12 +8283,22 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
 
     for czat, tekst in do_wyslania:
         telegram.send_lead_message(tekst, chat_id=czat)
+    # Dosyłka kart osobno od przypomnień, bo idzie `send_lead_alert` — karta ma
+    # mieć pod sobą przyciski, inaczej dział zobaczy leada, którego nie da się
+    # wziąć z czatu. Zapis wyniku tą samą funkcją co przy zgłoszeniu: sukces
+    # zdejmuje wiersz z kolejki, porażka dopisuje powód do historii.
+    doslane = 0
+    for lead_id, czat, tekst, klawiatura in do_kart:
+        _, powod, message_id = telegram.send_lead_alert(
+            lead_id, tekst, keyboard=klawiatura, chat_id=czat)
+        _zapamietaj_wysylke(lead_id, message_id, czat or None, powod)
+        doslane += 1 if message_id else 0
     # Po commicie, jak wysyłka na czat: padnięty push service nie cofnie zapisu,
     # a dedup wyżej gwarantuje, że kolejny przebieg nie wyśle tego drugi raz.
     for lead_id, tytul, tresc in pushy:
         _lead_push(lead_id, tytul, tresc, event="lead_reminder")
     return {"sent": len(do_wyslania), "checked": len(leady), "pushed": len(pushy),
-            "mailed": wyslane_maile}
+            "mailed": wyslane_maile, "cards": doslane}
 
 
 # Ruch strony przebiega follow-upy najwyżej co tyle minut. Wartość z sufitu

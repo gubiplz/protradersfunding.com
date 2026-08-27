@@ -758,7 +758,8 @@ class LeadEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
 
 
-LEAD_EVENTS = ("applied", "status", "note", "reminder", "claim", "tier", "bought")
+LEAD_EVENTS = ("applied", "status", "note", "reminder", "claim", "tier", "bought",
+               "sms", "email", "granted", "delivery")
 
 
 class LeadReminder(Base):

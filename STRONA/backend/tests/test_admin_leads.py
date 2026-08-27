@@ -11,13 +11,14 @@ os.environ.setdefault("AUTO_SEED", "false")
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy.exc import IntegrityError  # noqa: E402
 
 from app import auth, lead_mail, notify, provisioning, sms, telegram  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import (Account, Lead, LeadEvent, LeadReminder, Order,  # noqa: E402
-                        Product, Trader)
+from app.models import (Account, AppSetting, Lead, LeadEvent,  # noqa: E402
+                        LeadReminder, Order, Product, Trader)
 
 init_db()
 client = TestClient(app)
@@ -49,6 +50,10 @@ def _srodowisko(monkeypatch):
     # karta, a nie tylko że poszła.
     monkeypatch.setattr(u, "telegram_leads_chat_id", CZAT_PLATNY, raising=False)
     monkeypatch.setattr(u, "telegram_free_leads_chat_id", CZAT_FREE, raising=False)
+    # Token, choć żadna wysyłka nie idzie w sieć: kod odróżnia „Telegram odmówił"
+    # od „Telegramu tu nie ma" po konfiguracji, a bez tokenu ten plik testowałby
+    # tę drugą sytuację — czyli ścieżkę, w której kart się w ogóle nie zamawia.
+    monkeypatch.setattr(u, "telegram_bot_token", "token-testowy", raising=False)
     wyslane: dict[str, list] = {"alert": [], "answer": [], "edit": [],
                                 "przypomnienie": [], "dm": [], "delete": [],
                                 # Czat OBOK treści, nie zamiast: krotki wyżej
@@ -1992,3 +1997,162 @@ def test_smieciowy_nick_zostaje_tekstem(_srodowisko):
     _, tekst = _srodowisko["alert"][-1]
     assert "t.me" not in tekst
     assert "gubi please &lt;b&gt;" in tekst
+
+
+# --------------------------------------------------------------------------- #
+#  Karta, która nie wyszła                                                     #
+# --------------------------------------------------------------------------- #
+# Wysyłka karty jest po commicie i best-effort — i słusznie, bo padnięty
+# Telegram nie ma prawa kazać człowiekowi wypełniać formularza drugi raz. Ale
+# dopóki porażka nie zostawiała śladu, „karty nie wychodzą" wyglądało w bazie
+# identycznie jak „leadów nie ma" i cisza na kanale trwała tydzień.
+
+
+@pytest.fixture
+def _telegram_padl(monkeypatch):
+    """Telegram odrzuca każdą kartę. Powód dokładnie taki, jaki oddaje API przy
+    bocie spoza grupy — to jest realny scenariusz po zmianie czatu."""
+    monkeypatch.setattr(telegram, "send_lead_alert",
+                        lambda *a, **kw: (False, "chat not found", None))
+
+
+def test_nieudana_karta_zostawia_powod_w_historii(_telegram_padl):
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    assert _lead(lead_id).tg_message_id is None
+    assert [z.detail for z in _zdarzenia(lead_id, "delivery")] == [
+        "telegram card failed: chat not found"]
+
+
+def test_nieudana_karta_nie_gubi_leada(_telegram_padl):
+    """Lead jest zapisany PRZED wysyłką, więc odmowa Telegrama nie ma prawa
+    zwrócić landingowi błędu — inaczej człowiek klika drugi raz."""
+    odp = _wyslij(_zgloszenie())
+    assert odp.status_code == 200 and odp.json()["new"] is True
+
+
+def _padnij(monkeypatch):
+    """Podmienia wysyłkę na padającą i oddaje funkcję przywracającą tę z fixture.
+
+    `monkeypatch.undo()` się tu nie nadaje: cofnąłby też sekrety i czaty
+    ustawione w `_srodowisko`, a bez nich kod uznaje, że Telegramu tu w ogóle
+    nie ma — czyli testowalibyśmy wyłączony kanał zamiast awarii.
+    """
+    dziala = telegram.send_lead_alert
+    monkeypatch.setattr(telegram, "send_lead_alert",
+                        lambda *a, **kw: (False, "chat not found", None))
+    return lambda: monkeypatch.setattr(telegram, "send_lead_alert", dziala)
+
+
+def test_karta_dosylana_przy_nastepnym_przebiegu(_srodowisko, monkeypatch):
+    napraw = _padnij(monkeypatch)
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    napraw()
+
+    assert _cron().status_code == 200
+    assert _lead(lead_id).tg_message_id is not None
+    # Karta z przyciskami, nie goła wiadomość: bez nich leada nie da się wziąć
+    # z czatu, a dział pracuje z czatu, nie z panelu.
+    assert lead_id in [i for i, _ in _srodowisko["alert"]]
+
+
+def test_dosylka_zdejmuje_leada_z_kolejki(_srodowisko, monkeypatch):
+    napraw = _padnij(monkeypatch)
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    napraw()
+
+    _cron()
+    ile = len([i for i, _ in _srodowisko["alert"] if i == lead_id])
+    _cron(); _cron()
+    assert len([i for i, _ in _srodowisko["alert"] if i == lead_id]) == ile
+
+
+def test_stara_karta_nie_wraca_na_czat(_srodowisko, monkeypatch):
+    """Doba to granica ratunku po awarii. Karta sprzed tygodnia przeczytałaby
+    się na kanale jak świeże zgłoszenie i dział zadzwoniłby drugi raz."""
+    napraw = _padnij(monkeypatch)
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    napraw()
+    _cofnij(lead_id, od_zgloszenia=8)
+
+    _cron()
+    assert _lead(lead_id).tg_message_id is None
+    assert lead_id not in [i for i, _ in _srodowisko["alert"]]
+
+
+# --------------------------------------------------------------------------- #
+#  Wyścig o ten sam mail                                                       #
+# --------------------------------------------------------------------------- #
+
+
+def test_wyscig_o_unikalny_mail_nie_gubi_zgloszenia(_srodowisko, monkeypatch):
+    """Dwa równoległe POST-y z tym samym NOWYM mailem: oba odczyty widzą pustkę,
+    oba robią INSERT. Przegrany dostawał 500, a landing forwarduje bez
+    ponowienia — zgłoszenie przepadało. Ma się zachować jak drugie zgłoszenie.
+    """
+    from sqlalchemy.orm import Session as _Session
+
+    dane = _zgloszenie()
+    assert _wyslij(dane).status_code == 200          # wiersz „zwycięzcy"
+
+    oryginalny = _Session.flush
+    padlo = {"raz": False}
+
+    def raz_integrity(self, *a, **kw):
+        # Odtwarza dokładnie moment kolizji: SELECT już nie zobaczył wiersza,
+        # UNIQUE(email) zobaczy go dopiero teraz.
+        if not padlo["raz"]:
+            padlo["raz"] = True
+            raise IntegrityError("UNIQUE constraint failed: leads.email", {}, None)
+        return oryginalny(self, *a, **kw)
+
+    monkeypatch.setattr(_Session, "flush", raz_integrity)
+    odp = _wyslij(dane)
+    monkeypatch.setattr(_Session, "flush", oryginalny)
+
+    assert odp.status_code == 200
+    assert odp.json()["new"] is False
+    assert _lead(odp.json()["id"]).applications == 2
+
+
+# --------------------------------------------------------------------------- #
+#  Alarm ciszy                                                                 #
+# --------------------------------------------------------------------------- #
+# Każda reguła przypomnień mówi o leadzie, który JEST w bazie, więc przy zerze
+# zgłoszeń wszystkie milczą. To jest ta awaria, która raz kosztowała tydzień.
+
+
+def _wycisz_baze(godzin=48):
+    """Postarza WSZYSTKIE leady — alarm patrzy na najświeższy, nie na jeden."""
+    s = SessionLocal()
+    try:
+        teraz = datetime.now(timezone.utc)
+        for l in s.query(Lead).all():
+            l.created_at = teraz - timedelta(hours=godzin)
+        s.query(AppSetting).filter(AppSetting.key == "leadbot_cisza_alert").delete()
+        s.commit()
+    finally:
+        s.close()
+
+
+def test_cisza_dluzsza_niz_doba_alarmuje(_srodowisko):
+    _wyslij(_zgloszenie())
+    _wycisz_baze()
+    _cron()
+    assert any("Zero nowych leadów" in t for t in _srodowisko["przypomnienie"])
+
+
+def test_swiezy_lead_wycisza_alarm(_srodowisko):
+    _wycisz_baze()
+    _wyslij(_zgloszenie())
+    _cron()
+    assert not any("Zero nowych leadów" in t for t in _srodowisko["przypomnienie"])
+
+
+def test_alarm_ciszy_nie_wraca_przy_kazdym_przebiegu(_srodowisko):
+    """Przebieg chodzi z ruchu strony co ~10 minut. Alarm co przebieg uczyłby
+    dział ignorować kanał — a to jest jedyna wiadomość, której nie wolno."""
+    _wyslij(_zgloszenie())
+    _wycisz_baze()
+    _cron(); _cron(); _cron()
+    assert len([t for t in _srodowisko["przypomnienie"]
+                if "Zero nowych leadów" in t]) == 1

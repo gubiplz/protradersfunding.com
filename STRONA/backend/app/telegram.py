@@ -339,6 +339,17 @@ def _lead_sendable(chat_id: str | None) -> tuple[str, bool]:
     return czat, bool(settings.telegram_on and settings.telegram_bot_token and czat)
 
 
+def lead_alerts_on(chat_id: str | None = None) -> bool:
+    """Czy karty leadów mają dokąd iść.
+
+    Wywołujący potrzebuje tego, żeby odróżnić „Telegram odmówił" od „Telegramu
+    tu nie ma". Pierwsze jest awarią do ponowienia, drugie — świadomym
+    ustawieniem, i zapisywanie go jako awarii dopisywałoby każdemu leadowi
+    zdarzenie o nieudanej wysyłce oraz trzymało go w kolejce dosyłek bez końca.
+    """
+    return _lead_sendable(chat_id)[1]
+
+
 def lead_keyboard(lead_id: int, *, owner: str | None = None,
                   status: str = "new", tier: str | None = None) -> dict:
     """Klawiatura pod alertem — DWA etapy i to jest cały sens tej konstrukcji.
