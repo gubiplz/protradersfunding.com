@@ -1488,9 +1488,26 @@ function leadFreeBtn(l){
         title="Open the free $25K challenge for them — real account, credentials by e-mail">🎁 Free account</button>`;
 }
 
+/* Dwa realne pudla w szukajce: nazwisko z ogonkiem i numer przepisany z
+   rozmowy. „Zielinski" ma znalezc „Zielinskiego", a „601 234 567" — zapisane
+   „+48601234567". Fold zdejmuje ogonki po OBU stronach, telefon porownuje sie
+   po samych cyfrach i od konca, bo kierunkowy bywa pominiety. */
+/* NFD rozklada wylacznie litery bedace "baza + znak diakrytyczny". Te piec to
+   osobne znaki alfabetu i przechodza przez fold nietkniete — bez mapy "Lukasz"
+   nie znajduje "Łukasza". Polskie ł jest tu obowiazkowe, reszta wchodzi przy
+   okazji, bo lista leadow jest miedzynarodowa. Zapis przez \\u..., bo te znaki
+   sa tu jedynym nie-ASCII w KODZIE i normalizacja pliku zjadlaby je po cichu. */
+const OSOBNE={'\u0142':'l','\u00f8':'o','\u00e6':'ae','\u00df':'ss','\u0131':'i'};
+const fold=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+  .toLowerCase().replace(/[\u0142\u00f8\u00e6\u00df\u0131]/g,c=>OSOBNE[c]);
+const digits=s=>String(s||'').replace(/\D/g,'');
+
 function renderLeads(){
   const list=window._leads||[];
   const q=(window._leadQ||'').toLowerCase();
+  /* Prog szesciu cyfr: krotszy fragment trafialby w polowe bazy i wyszukiwarka
+     mowilaby „jest ich pieciu" zamiast pokazac tego jednego. */
+  const qf=fold(q), qd=digits(q);
   const f=window._leadFilter||'all';
   /* Burned leads live ONLY behind the Trash chip — every other filter works on
      the living list, so a burned lead really is out of the way. */
@@ -1504,10 +1521,10 @@ function renderLeads(){
       :f==='free'?isFreeLead(l)
       :f==='unowned'?!l.owner
       :l.status===f))&&
-    (!q||(l.email||'').toLowerCase().includes(q)||(l.name||'').toLowerCase().includes(q)
-     ||(l.phone||'').includes(q)||(l.ref||'').toLowerCase().includes(q)
-     ||('@'+String(l.telegram||'').replace(/^@/,'')).toLowerCase().includes(q)
-     ||(l.note||'').toLowerCase().includes(q)));
+    (!q||fold(l.email).includes(qf)||fold(l.name).includes(qf)
+     ||fold(l.ref).includes(qf)||fold(l.note).includes(qf)
+     ||fold('@'+String(l.telegram||'').replace(/^@/,'')).includes(qf)
+     ||(qd.length>=6&&digits(l.phone).endsWith(qd))));
   /* Kolejność pracy, nie kolejność wpłynięcia: najpierw zaległe follow-upy
      (najstarszy dług na górze), potem nietknięci nowi, reszta od najnowszych.
      Na telefonie nagłówki tabeli są schowane, więc to jedyny porządek, jaki
