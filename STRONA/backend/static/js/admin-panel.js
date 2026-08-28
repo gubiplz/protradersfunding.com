@@ -2052,6 +2052,40 @@ async function submitNewLead(){
   }catch(e){toast('Error: '+e.message,'err');btn.disabled=false}
 }
 
+/* Notatka to jedyne pole ze streszczeniem ROZMOWY — nie da sie jej odtworzyc
+   z niczego innego w bazie. Zapis szedl na `onchange`, wiec wygasla sesja,
+   brak zasiegu albo przypadkowe zamkniecie szuflady kasowaly ja bez sladu;
+   pasek offline sam przyznaje, ze zmiany przepadna. Kopia lezy lokalnie od
+   pierwszego znaku i znika DOPIERO, gdy serwer potwierdzi zapis.
+
+   Safari w trybie prywatnym rzuca z `localStorage` — wtedy pole ma zachowac
+   sie jak dotad, a nie zabrac ze soba zapisu notatki.
+
+   Deklaracje funkcji, nie obiekt w `const`: `oninput` w atrybucie siega po
+   nazwe do obiektu globalnego, a `const` na nim nie laduje. */
+function noteKey(id){return 'leadnote:'+id}
+function draftNote(id,v){try{localStorage.setItem(noteKey(id),v)}catch(e){}}
+function dropNote(id){try{localStorage.removeItem(noteKey(id))}catch(e){}}
+function noteText(l){
+  try{const v=localStorage.getItem(noteKey(l.id));return v===null?(l.note||''):v}
+  catch(e){return l.note||''}
+}
+
+/* Osobno od `patchLead`, bo tamten zjada blad w swoim `catch` i wolajacy nie
+   odrozni zapisanego od przepadnietego — a od tego zalezy, czy wolno skasowac
+   kopie. Czyscimy PRZED `openLead`, inaczej przerysowana szuflada wczytalaby
+   wlasny nieaktualny draft z powrotem. */
+async function saveLeadNote(id,val){
+  try{
+    await api('/api/admin/leads/'+id,
+      {method:'POST',body:JSON.stringify({note:val.trim()})});
+    dropNote(id);
+    toast('Note saved');
+    await openLead(id);
+    renderLeads();
+  }catch(e){toast('Not saved, the text is kept here: '+e.message,'err',7000)}
+}
+
 async function openLead(id){
   let l;
   try{l=await api('/api/admin/leads/'+id)}
@@ -2098,9 +2132,10 @@ async function openLead(id){
     ${leadSellCard(l)}
     ${leadInviteCard(l)}
     <div class="lead-card sec-card"><h4>Notes</h4>
-      <textarea class="inp" rows="${Math.min(6,(l.note||'').split('\n').length+1)}"
+      <textarea class="inp" rows="${Math.min(6,noteText(l).split('\n').length+1)}"
         placeholder="What they wrote, what they want — one line per note"
-        onchange="patchLead(${l.id},{note:this.value.trim()},'Note saved')">${esc(l.note||'')}</textarea>
+        oninput="draftNote(${l.id},this.value)"
+        onchange="saveLeadNote(${l.id},this.value)">${esc(noteText(l))}</textarea>
       <p class="muted" style="font-size:11.5px;margin-top:8px">Reply to the lead's message on Telegram and it lands here too.</p></div>
     ${ords.length?`<h4 style="margin:16px 0 6px">Orders</h4>
       <div class="tbl-wrap"><table class="tbl">
