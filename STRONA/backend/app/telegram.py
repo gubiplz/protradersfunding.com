@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import time
 import urllib.error
 import urllib.request
 
@@ -33,6 +34,11 @@ settings = get_settings()
 
 API = "https://api.telegram.org"
 TIMEOUT_SEK = 20
+
+# Najdłuższe czekanie, jakie wolno przespać w miejscu, przy odmowie z limitu.
+# Telegram sam podaje, ile trzeba odczekać; przy sekundach taniej jest poczekać
+# niż zostawiać kartę kolejce, a przy dłuższych — odwrotnie, bo request stoi.
+RETRY_AFTER_MAX_SEK = 5
 
 # Kontrakt transportu (ten sam kształt co w metaapi_provisioning):
 #     transport(url: str, body: bytes, content_type: str) -> tuple[int, bytes]
@@ -78,7 +84,8 @@ def _urllib_transport(url: str, body: bytes, content_type: str) -> tuple[int, by
 
 
 def _strzal_json(metoda: str, pola: dict[str, str],
-                 plik: tuple[str, str, bytes] | None, transport) -> tuple[bool, str, dict]:
+                 plik: tuple[str, str, bytes] | None, transport,
+                 ponowione: bool = False) -> tuple[bool, str, dict]:
     """`(czy poszło, powód odmowy, `result` z odpowiedzi)`.
 
     Powód wraca WYŻEJ, a nie tylko do logu: bez niego panel mówi „Telegram
@@ -113,6 +120,17 @@ def _strzal_json(metoda: str, pola: dict[str, str],
     if status == 200:
         wynik = odp.get("result")
         return True, "", wynik if isinstance(wynik, dict) else {}
+    # Jedna grupa przyjmuje ~20 wiadomości na minutę, a kampania wieczorem to
+    # przekracza. Telegram nie odmawia wtedy na stałe — MÓWI, ile odczekać.
+    # Bez tego nadwyżka schodziła do kolejki dosyłek, która chodzi z ruchu
+    # strony, więc karta z 20:03 lądowała na kanale dopiero po nocy. Jedno
+    # ponowienie: drugie znaczyłoby, że limit trzyma dłużej, niż wolno tu stać,
+    # i od tego jest właśnie kolejka.
+    if status == 429 and not ponowione:
+        czekaj = (odp.get("parameters") or {}).get("retry_after")
+        if isinstance(czekaj, (int, float)) and 0 < czekaj <= RETRY_AFTER_MAX_SEK:
+            time.sleep(float(czekaj))
+            return _strzal_json(metoda, pola, plik, transport, ponowione=True)
     # Token NIGDY nie może trafić do logu ani do panelu — jest w URL-u, więc
     # przekazujemy dalej sam opis z odpowiedzi, nigdy adresu żądania.
     opis = odp.get("description") or (tresc or b"")[:200].decode("utf-8", "replace")
