@@ -6572,6 +6572,32 @@ def _answers_z_payloadu(surowy: str | None) -> dict:
     return odp if isinstance(odp, dict) else {}
 
 
+# Pola kampanii, które landing parkuje przy wejściu i dokłada do zgłoszenia.
+# Lista jest zamknięta, bo `payload_json` to surowe ciało POST-a: bez niej panel
+# wyświetlałby dowolny klucz, który ktoś wstrzyknie w `attribution`.
+_POLA_KAMPANII = ("utm_source", "utm_medium", "utm_campaign", "utm_content",
+                  "fbclid", "gclid", "ttclid")
+
+
+def _kampania_z_payloadu(surowy: str | None) -> dict:
+    """Z której reklamy przyszedł ten człowiek.
+
+    Wydobywane przy odczycie, a nie zapisywane w osobnej kolumnie: to pytanie
+    zadawane raz na jakiś czas, przy dzieleniu budżetu, a nie coś, po czym
+    filtruje się listę. Bez tego odpowiedź zostaje w JSON-ie, którego panel
+    nigdzie nie pokazuje — czyli praktycznie tylko w bazie.
+    """
+    try:
+        dane = json.loads(surowy or "{}")
+    except ValueError:
+        return {}
+    pola = dane.get("attribution") if isinstance(dane, dict) else None
+    if not isinstance(pola, dict):
+        return {}
+    return {k: str(pola[k])[:120] for k in _POLA_KAMPANII
+            if isinstance(pola.get(k), str) and pola[k].strip()}
+
+
 def _tresc_z_payloadu(surowy: str | None) -> str:
     """Treść wysłanej wiadomości z JSON-a zdarzenia. Zły JSON to pusty string,
     a nie 500 — historia leada ma się otworzyć nawet, gdy jeden wpis jest
@@ -6601,6 +6627,7 @@ def _lead_json(lead: Lead, trader_id: int | None, paid_usd: float,
         "next_due": next_due.isoformat() if next_due else None,
         "applications": lead.applications,
         "answers": _answers_z_payloadu(lead.payload_json),
+        "campaign": _kampania_z_payloadu(lead.payload_json),
         "contacted_at": lead.contacted_at.isoformat() if lead.contacted_at else None,
         "created_at": lead.created_at.isoformat() if lead.created_at else None,
         # Wyliczane, nie przechowywane — patrz komentarz nad sekcją.

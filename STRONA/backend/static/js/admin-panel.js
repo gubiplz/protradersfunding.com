@@ -1512,6 +1512,13 @@ const fold=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
   .toLowerCase().replace(/[\u0142\u00f8\u00e6\u00df\u0131]/g,c=>OSOBNE[c]);
 const digits=s=>String(s||'').replace(/\D/g,'');
 
+/* Kampania w jednej linijce: skad i ktora. utm_medium, utm_content i
+   identyfikator klikniecia zostaja w danych — sa w wyszukiwarce, ale nikt nie
+   dzieli budzetu po slowie „paid", a kazde dodatkowe pole spycha kontakt nizej.
+   Ruch bez oznaczenia daje pusty string, czyli nic sie nie rysuje: „brak
+   kampanii" to normalny stan, nie brak danych. */
+const campaignLabel=c=>[c&&c.utm_source,c&&c.utm_campaign].filter(Boolean).join(' / ');
+
 function renderLeads(){
   const list=window._leads||[];
   const q=(window._leadQ||'').toLowerCase();
@@ -1533,6 +1540,9 @@ function renderLeads(){
       :l.status===f))&&
     (!q||fold(l.email).includes(qf)||fold(l.name).includes(qf)
      ||fold(l.ref).includes(qf)||fold(l.note).includes(qf)
+     /* Po wartosciach, nie po kluczach: szuka sie „sierpien" albo wklejonego
+        fbclid, nigdy slowa „utm_campaign". */
+     ||fold(Object.values(l.campaign||{}).join(' ')).includes(qf)
      ||fold('@'+String(l.telegram||'').replace(/^@/,'')).includes(qf)
      ||(qd.length>=6&&digits(l.phone).endsWith(qd))));
   /* Kolejność pracy, nie kolejność wpłynięcia: najpierw zaległe follow-upy
@@ -1591,6 +1601,9 @@ function renderLeads(){
         <td class="muted" data-l="Source">${esc(l.source||'—')}${
           isFreeLead(l)?' <span title="Free challenge funnel — no money changes hands">🆓</span>':''}${
           l.ref?`<div style="font-size:11px">via ${esc(l.ref)}</div>`:''}${
+          campaignLabel(l.campaign)?`<div style="font-size:11px" title="${
+            esc(Object.entries(l.campaign).map(([k,v])=>k+'='+v).join('\n'))
+          }">ad: ${esc(campaignLabel(l.campaign))}</div>`:''}${
           f==='free'?`<div class="lead-act-row">${leadFreeBtn(l)}</div>`:''}</td>
         <td data-l="Status"><button type="button" class="status status-tap ${LEAD_STATUS_CLS[l.status]||'pending'}"
             aria-label="Change status" title="${l.lost_reason?esc(lostLabel(l.lost_reason)):'Change status'}"
@@ -2185,6 +2198,9 @@ async function openLead(id){
       ${l.phone?`<span class="chip"><a href="tel:${esc(l.phone)}">${esc(l.phone)}</a></span>`:''}
       ${l.country?`<span class="chip">${esc(l.country)}</span>`:''}
       ${l.source?`<span class="chip">${esc(l.source)}${l.ref?' via '+esc(l.ref):''}</span>`:''}
+      ${campaignLabel(l.campaign)?`<span class="chip" title="${
+        esc(Object.entries(l.campaign).map(([k,v])=>k+'='+v).join('\n'))
+      }">ad: ${esc(campaignLabel(l.campaign))}</span>`:''}
     </div>
     ${l.phone||l.telegram||l.mail_ready?`<div class="chip-row" style="margin-top:2px">${leadPhoneActs(l)}</div>`:''}
     ${Object.keys(l.answers||{}).length?`<div class="lead-card sec-card"><h4>Answers</h4>

@@ -2349,3 +2349,64 @@ def test_alarm_ciszy_nie_wraca_przy_kazdym_przebiegu(_srodowisko):
     _cron(); _cron(); _cron()
     assert len([t for t in _srodowisko["przypomnienie"]
                 if "Zero nowych leadów" in t]) == 1
+
+
+# --------------------------------------------------------------------------- #
+#  Kampania — z którego ogłoszenia przyszedł lead                              #
+# --------------------------------------------------------------------------- #
+KAMPANIA = {"utm_source": "facebook", "utm_medium": "paid",
+            "utm_campaign": "sierpien", "utm_content": "wideo-3",
+            "fbclid": "FB123", "gclid": "GG1", "ttclid": "TT1"}
+
+
+def test_kampania_ze_zgloszenia_dochodzi_do_panelu():
+    """Landing parkuje utm_* przy wejściu i dokłada je do zgłoszenia. Bez tego
+    raport umie powiedzieć „ilu leadów", nigdy „z której reklamy"."""
+    lead_id = _wyslij(_zgloszenie(attribution=KAMPANIA)).json()["id"]
+    assert _z_listy(lead_id)["campaign"] == KAMPANIA
+
+
+def test_lead_bez_kampanii_ma_pusty_slownik():
+    """Ruch bez oznaczenia to normalny stan, nie brak danych — panel ma dostać
+    pusty słownik, a nie null, żeby nie musiał tego rozróżniać."""
+    assert _z_listy(_wyslij(_zgloszenie()).json()["id"])["campaign"] == {}
+
+
+def test_kampania_wpuszcza_tylko_znane_pola():
+    """`payload_json` to surowe ciało POST-a z sieci. Bez zamkniętej listy panel
+    wyświetlałby dowolny klucz, który ktoś tam wstrzyknie."""
+    lead_id = _wyslij(_zgloszenie(
+        attribution={"utm_source": "tiktok", "onmouseover": "alert(1)",
+                     "note": "cokolwiek"})).json()["id"]
+    assert _z_listy(lead_id)["campaign"] == {"utm_source": "tiktok"}
+
+
+def test_kampania_przycina_przydluga_wartosc():
+    lead_id = _wyslij(_zgloszenie(
+        attribution={"utm_campaign": "x" * 400})).json()["id"]
+    assert len(_z_listy(lead_id)["campaign"]["utm_campaign"]) == 120
+
+
+def test_kampania_pomija_puste_i_nietekstowe_wartosci():
+    """Pusty parametr w adresie i liczba wstrzyknięta POST-em wyglądają w panelu
+    tak samo źle: chip bez treści, po którym nie da się nic zdecydować."""
+    lead_id = _wyslij(_zgloszenie(
+        attribution={"utm_source": "  ", "utm_medium": 7,
+                     "utm_campaign": "wiosna"})).json()["id"]
+    assert _z_listy(lead_id)["campaign"] == {"utm_campaign": "wiosna"}
+
+
+def test_kampania_zlym_ksztaltem_nie_wywraca_listy():
+    """Jedno śmieciowe pole nie ma prawa zabrać całej listy leadów."""
+    for zle in ("utm_source=x", ["a"], 7):
+        lead_id = _wyslij(_zgloszenie(attribution=zle)).json()["id"]
+        assert _z_listy(lead_id)["campaign"] == {}
+
+
+def test_ponowne_zgloszenie_podmienia_kampanie():
+    """`payload_json` to migawka OSTATNIEGO zgłoszenia. Ten sam człowiek wraca
+    z drugiej reklamy — i to ta druga go ostatecznie przyprowadziła."""
+    dane = _zgloszenie(attribution={"utm_source": "facebook"})
+    lead_id = _wyslij(dane).json()["id"]
+    _wyslij({**dane, "attribution": {"utm_source": "tiktok"}})
+    assert _z_listy(lead_id)["campaign"] == {"utm_source": "tiktok"}
