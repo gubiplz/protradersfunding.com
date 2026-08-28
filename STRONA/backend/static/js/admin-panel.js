@@ -4176,6 +4176,21 @@ setInterval(()=>{
   if(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT'))return;
   if(VIEW==='overview'||VIEW==='accounts')VIEWS[VIEW]().catch(()=>{});
 },12000);
+/* Lista leadow to jedyny widok, w ktorym dane zmienia KTOS INNY — klik
+   „Przejmuje" leci z kanalu, nie z tego panelu. Bez odswiezania dwie osoby
+   pisza do tego samego czlowieka, bo obie maja wiersz z `owner: null` sprzed
+   kwadransa. Wolniej niz tick wyzej, bo to pelna tabela plus cztery zapytania
+   zbiorcze, a „kto wzial" zmienia sie rzadziej niz equity. */
+setInterval(()=>{
+  if(document.hidden||VIEW!=='leads')return;
+  const a=document.activeElement;
+  if(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT'))return;
+  /* Szuflada i arkusz mieszkaja poza `#view`, wiec przerysowanie tabeli ich nie
+     zamyka — ale podmiana listy pod reka w trakcie wybierania statusu wyglada
+     jak awaria panelu. Odswiezenie poczeka na zamkniecie. */
+  if($('act-sheet')||$('over').classList.contains('open'))return;
+  VIEWS.leads().catch(()=>{});
+},30000);
 setInterval(()=>{if(!document.hidden&&ME)loadInbox()},60000);
 
 /* ---------------- offline ----------------
