@@ -8013,6 +8013,16 @@ LEAD_AUTO_MAIL_MIN = 60
 # wierszami sprzed kolumny `tg_message_id`, gdzie NULL nic nie znaczy.
 LEAD_CARD_RETRY_H = 24
 
+# Do kiedy lead BEZ karty ma się jeszcze upomnieć — jednym zdaniem, zamiast
+# kolejnej próby wysłania. Po `LEAD_CARD_RETRY_H` dosyłka słusznie odpuszcza,
+# ale wtedy taki człowiek staje się dla działu niewidzialny: kanał czyta się
+# zamiast panelu, a nieudana wysyłka zostawia tylko wpis w historii, którego
+# nikt nie ogląda. Dokładnie tak przepadł tydzień, gdy bota nie było w grupie.
+# Górna granica pasma jest tu warunkiem, nie ozdobą: wiersze sprzed kolumny
+# `tg_message_id` mają w niej NULL, które nic nie znaczy, i bez niej pierwszy
+# przebieg po wdrożeniu wywołałby na czat całe archiwum.
+LEAD_CARD_DEAD_H = 48
+
 # Po ilu godzinach bez ANI JEDNEGO leada dział dostaje ostrzeżenie. Nie chodzi
 # o słabą kampanię, tylko o zerwany łańcuch landing→ingest→czat: cisza z tego
 # powodu wygląda dokładnie tak samo jak cisza z braku ruchu i raz kosztowała
@@ -8026,6 +8036,25 @@ def _utc(d: datetime | None) -> datetime | None:
     if d is None:
         return None
     return d if d.tzinfo is not None else d.replace(tzinfo=timezone.utc)
+
+
+def _tekst_martwej_karty(lead: Lead, wiek_min: float) -> str:
+    """Lead, którego kanał nigdy nie zobaczył.
+
+    Jedyna wiadomość, jaką dział dostanie o tym człowieku — więc niesie komplet
+    do odezwania się i link do panelu. Bez linku byłaby informacją, z którą na
+    telefonie nie da się nic zrobić, a to na telefonie się ją czyta.
+    """
+    e = html.escape
+    linie = [f"🚨 <b>Karta nie wyszła</b> — {e(lead.name or lead.email)}",
+             f"✉️ {e(lead.email)}"]
+    if lead.telegram:
+        linie.append(f"💬 {e(lead.telegram)}")
+    if lead.phone:
+        linie.append(f"📞 {e(lead.phone)}")
+    linie.append(f"Zgłosił się {int(wiek_min // 60)} h temu i nie ma go na kanale. "
+                 f"Weź go z panelu: /admin?lead={lead.id}")
+    return "\n".join(linie)
 
 
 def _tekst_przypomnienia(lead: Lead, powod: str, paid: float, dni: int) -> str:
@@ -8146,6 +8175,10 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
         do_wyslania, pushy = _wyslij_zaplanowane(session, now)
         do_maila: list[int] = []
         do_kart: list[tuple[int, str, str, dict]] = []
+        # Własny licznik, a nie długość `do_wyslania`: tamta lista wchodzi tu już
+        # z zaplanowanymi przypomnieniami i przy dziesięciu terminach na dziś
+        # limit zjadłby wszystkie alerty o brakujących kartach.
+        martwych = 0
         leady = session.query(Lead).all()
 
         maile = [l.email for l in leady]
@@ -8193,6 +8226,20 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
                     and telegram.lead_alerts_on(czat_karty)):
                 tekst_karty, klawiatura = _stan_wiadomosci(l)
                 do_kart.append((l.id, czat_karty, tekst_karty, klawiatura))
+            # Okno dosyłek minęło, karty nadal nie ma. Dalsze próby nie mają
+            # sensu, ale milczenie tym bardziej: to jedyny moment, w którym
+            # ktokolwiek dowie się, że ten człowiek nigdy nie trafił na kanał.
+            # `elif`, bo lead jest albo w kolejce, albo poza nią — nigdy w obu.
+            # Dedup przez `juz` (raz na życie wiersza) i limit na przebieg, żeby
+            # dzień awarii nie zszedł na czat jedną ścianą tekstu.
+            elif (l.tg_message_id is None and l.outcome == "qualified"
+                    and wiek_min <= LEAD_CARD_DEAD_H * 60
+                    and (l.id, "card_dead") not in juz
+                    and martwych < 10
+                    and telegram.lead_alerts_on(czat_karty)):
+                _zdarzenie(session, l.id, "reminder", "card_dead", actor="cron")
+                do_wyslania.append((czat_karty, _tekst_martwej_karty(l, wiek_min)))
+                martwych += 1
             # Ten sam stan godzinę później: skoro nikt nie usiadł, niech
             # przynajmniej lead przestanie czekać w ciszy. Tylko do kogoś BEZ
             # handle'a — kto go zostawił, ma dostać wiadomość tam, gdzie na nią

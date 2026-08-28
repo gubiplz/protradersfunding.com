@@ -2080,6 +2080,74 @@ def test_stara_karta_nie_wraca_na_czat(_srodowisko, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+#  Lead, którego kanał nigdy nie zobaczył                                      #
+# --------------------------------------------------------------------------- #
+# Dosyłka słusznie odpuszcza po dobie, ale wtedy taki człowiek robi się dla
+# działu niewidzialny: kanał czyta się zamiast panelu, a nieudana wysyłka
+# zostawia wpis w historii, którego nikt nie ogląda. Tak przepadł tydzień.
+
+
+def _bez_karty(monkeypatch, *, minut):
+    """Lead w wieku `minut`, którego karta nigdy nie wyszła. Oddaje `(id, mail)`."""
+    napraw = _padnij(monkeypatch)
+    dane = _zgloszenie()
+    lead_id = _wyslij(dane).json()["id"]
+    napraw()
+    _cofnij(lead_id, minut=minut)
+    return lead_id, dane["email"]
+
+
+def test_martwa_karta_upomina_sie_na_czacie(_srodowisko, monkeypatch):
+    lead_id, mail = _bez_karty(monkeypatch, minut=30 * 60)
+
+    _cron()
+    wiadomosci = [t for t in _srodowisko["przypomnienie"] if mail in t]
+    assert len(wiadomosci) == 1
+    assert "Karta nie wyszła" in wiadomosci[0]
+    # Bez linku do panelu byłaby informacją, z którą na telefonie nie da się nic
+    # zrobić — a to na telefonie się ją czyta.
+    assert f"/admin?lead={lead_id}" in wiadomosci[0]
+    assert [z.detail for z in _zdarzenia(lead_id, "reminder")] == ["unclaimed", "card_dead"]
+    # Alert zastępuje dosyłkę, nie towarzyszy jej: po dobie karta z przyciskami
+    # przeczytałaby się na kanale jak świeże zgłoszenie.
+    assert lead_id not in [i for i, _ in _srodowisko["alert"]]
+
+
+def test_martwa_karta_odzywa_sie_raz(_srodowisko, monkeypatch):
+    """Awaria trwa, przebiegów jest kilkanaście na dobę — jedno zdanie na lead,
+    inaczej alert utopiłby kanał, który ma go pokazać."""
+    _, mail = _bez_karty(monkeypatch, minut=30 * 60)
+
+    _cron(); _cron(); _cron()
+    assert len([t for t in _srodowisko["przypomnienie"] if mail in t]) == 1
+
+
+def test_stary_lead_bez_karty_nie_zalewa_czatu(_srodowisko, monkeypatch):
+    """Górna granica pasma jest warunkiem, nie ozdobą: wiersze sprzed kolumny
+    `tg_message_id` mają w niej NULL, które nic nie znaczy, i bez niej pierwszy
+    przebieg po wdrożeniu wywołałby na czat całe archiwum."""
+    lead_id, mail = _bez_karty(monkeypatch, minut=60 * 60)
+
+    _cron()
+    assert not any(mail in t for t in _srodowisko["przypomnienie"])
+    assert "card_dead" not in [z.detail for z in _zdarzenia(lead_id, "reminder")]
+
+
+def test_wylaczone_alerty_nie_zglaszaja_martwej_karty(_srodowisko, monkeypatch):
+    """Brak czatu to świadome ustawienie, nie awaria. Alert o niedoręczonej
+    karcie trafiłby wtedy dokładnie tam, gdzie go nie ma."""
+    lead_id, mail = _bez_karty(monkeypatch, minut=30 * 60)
+    monkeypatch.setattr(telegram, "lead_alerts_on", lambda *a, **kw: False)
+
+    _cron()
+    assert not any(mail in t for t in _srodowisko["przypomnienie"])
+    assert [z.detail for z in _zdarzenia(lead_id, "reminder")] == ["unclaimed"]
+    # Baza jest wspólna dla całego przebiegu, a ten lead wyszedł z testu bez
+    # zdarzenia — czyli odezwałby się w cudzym. Wypycha się go poza pasmo.
+    _cofnij(lead_id, od_zgloszenia=8)
+
+
+# --------------------------------------------------------------------------- #
 #  Wyścig o ten sam mail                                                       #
 # --------------------------------------------------------------------------- #
 
