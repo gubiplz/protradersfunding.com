@@ -325,6 +325,30 @@ TIER_BUTTONS = (("🔥 High", "tier_high"),
                 ("🟡 Warm", "tier_warm"),
                 ("⚪️ Cold", "tier_cold"))
 
+# Dlaczego przegraliśmy. Rząd pokazuje się WYŁĄCZNIE póki lead stoi na
+# „odpada" albo w koszu i powodu jeszcze nie ma — po wybraniu znika, bo wybrany
+# powód widać już w treści karty, a klawiatura na telefonie ma być krótka.
+#
+# Status zapisuje się nadal PIERWSZYM kliknięciem i te przyciski niczego nie
+# blokują. To świadoma różnica względem panelu, który powodu wymaga: tam arkusz
+# jest już otwarty i drugi tap nic nie kosztuje, a tu ktoś odkłada telefon
+# w połowie — wymuszony drugi krok kosztowałby zapisany status, czyli to jedno,
+# czego stracić nie wolno.
+#
+# Kody muszą być te same co `models.LOST_REASONS`; pilnuje tego test, bo ten
+# plik jest transportem i celowo nie importuje modeli.
+LOST_REASON_BUTTONS = (("💸 Za drogo", "price"),
+                       ("🏃 Kupił gdzie indziej", "competitor"),
+                       ("🚫 Nie kwalifikuje się", "not_qualified"),
+                       ("👻 Przestał odpisywać", "ghosted"),
+                       ("🤖 Bot / śmieć", "spam"),
+                       ("❔ Inne", "other"))
+
+# Statusy, po których pytamy o powód. `burned` nie ma swojego przycisku wyżej —
+# ustawia się go z panelu — ale karta na kanale przepisuje się po każdej zmianie,
+# więc pytanie i tak dojdzie do tego, kto ma pod ręką tylko telefon.
+LOST_STATUSES = ("rejected", "burned")
+
 CLAIM_BUTTON = ("🙋 Biorę tego", "claim")
 # Ten sam `claim`, inny opis: pod kartą z właścicielem to nie jest wzięcie
 # niczyjego leada, tylko odebranie go koledze, i przycisk ma to mówić wprost.
@@ -369,7 +393,8 @@ def lead_alerts_on(chat_id: str | None = None) -> bool:
 
 
 def lead_keyboard(lead_id: int, *, owner: str | None = None,
-                  status: str = "new", tier: str | None = None) -> dict:
+                  status: str = "new", tier: str | None = None,
+                  lost_reason: str | None = None) -> dict:
     """Klawiatura pod alertem — DWA etapy i to jest cały sens tej konstrukcji.
 
     Dopóki leada nikt nie wziął, jest jeden przycisk: „biorę". Statusy i ocena
@@ -384,6 +409,10 @@ def lead_keyboard(lead_id: int, *, owner: str | None = None,
 
     Statusy idą po dwa w rzędzie, bo cztery obok siebie Telegram na telefonie
     ściska do samych emoji.
+
+    Trzeci etap to powód przegranej — dochodzi dopiero, gdy lead stoi na
+    „odpada"/koszu i powodu jeszcze nie ma, i znika po wybraniu. Pod każdą inną
+    kartą byłby sześcioma przyciskami pytającymi o coś, co się nie stało.
     """
     def guzik(opis: str, akcja: str, wybrany: bool = False) -> dict:
         return {"text": ("• " + opis) if wybrany else opis,
@@ -392,7 +421,14 @@ def lead_keyboard(lead_id: int, *, owner: str | None = None,
     if not owner:
         return {"inline_keyboard": [[guzik(*CLAIM_BUTTON)]]}
     statusy = [guzik(o, s, s == status) for o, s in LEAD_BUTTONS]
+    # Pytanie o powód wchodzi NAD statusy, nie pod nie: to jedyny rząd, który
+    # czeka na odpowiedź, a na telefonie widać kilka pierwszych przycisków.
+    # Pod tierem i „przejmuję" trzeba by go szukać scrollem.
+    powody = ([[guzik(o, f"why_{k}") for o, k in LOST_REASON_BUTTONS[i:i + 2]]
+               for i in range(0, len(LOST_REASON_BUTTONS), 2)]
+              if status in LOST_STATUSES and not lost_reason else [])
     return {"inline_keyboard": [
+        *powody,
         *[statusy[i:i + 2] for i in range(0, len(statusy), 2)],
         [guzik(o, a, a == f"tier_{tier or ''}") for o, a in TIER_BUTTONS],
         # Przejęcie stoi pod kartą, która ma już właściciela, i to jest celowe:

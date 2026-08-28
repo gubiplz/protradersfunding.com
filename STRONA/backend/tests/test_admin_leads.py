@@ -968,6 +968,131 @@ def test_panel_odrzuca_nieznana_ocene():
 
 
 # --------------------------------------------------------------------------- #
+#  Powód przegranej                                                            #
+# --------------------------------------------------------------------------- #
+def test_kody_powodow_z_przyciskow_sa_te_same_co_w_modelu():
+    """`telegram.py` jest transportem i celowo nie importuje modeli, więc obie
+    listy są przepisane ręcznie. Rozjazd kończy się przyciskiem, po którym
+    walidacja odmawia — i nikt się nie dowie, bo dymek mówi tylko „nieznany
+    powód"."""
+    from app import telegram as tg
+    from app.models import LOST_REASONS
+
+    assert tuple(k for _, k in tg.LOST_REASON_BUTTONS) == LOST_REASONS
+
+
+def test_klawiatura_pyta_o_powod_dopiero_po_odrzuceniu():
+    """Trzeci stopień: rząd wchodzi, gdy lead odpadł i powodu jeszcze nie ma,
+    i znika po wybraniu — wybrany powód widać już w treści karty."""
+    from app import telegram as tg
+
+    zwykly = tg.lead_keyboard(1, owner="Hubert", status="messaged")
+    assert not any("why_" in g["callback_data"] for w in zwykly["inline_keyboard"]
+                   for g in w)
+
+    pyta = tg.lead_keyboard(1, owner="Hubert", status="rejected")
+    # Pytanie stoi NAD statusami — na telefonie widać kilka pierwszych guzików.
+    assert [g["callback_data"] for g in pyta["inline_keyboard"][0]] == [
+        "lead:1:why_price", "lead:1:why_competitor"]
+
+    po_wyborze = tg.lead_keyboard(1, owner="Hubert", status="rejected",
+                                  lost_reason="price")
+    assert not any("why_" in g["callback_data"]
+                   for w in po_wyborze["inline_keyboard"] for g in w)
+
+
+def test_przycisk_zapisuje_powod_i_pokazuje_go_na_karcie(_srodowisko):
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _callback(lead_id, "rejected")
+    _callback(lead_id, "why_price")
+
+    assert _lead(lead_id).lost_reason == "price"
+    assert [(z.detail, z.actor) for z in _zdarzenia(lead_id, "status")] == [
+        ("new → rejected", "telegram:Hubert"), ("lost: price", "telegram:Hubert")]
+    assert "Za drogo" in _srodowisko["edit"][-1][2]
+
+
+def test_powod_bez_odrzucenia_nic_nie_rusza(_srodowisko):
+    """Realny scenariusz: ktoś klika stary alert, na którym lead stał na
+    „odpada", a ten w międzyczasie odpisał i wrócił do gry."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _callback(lead_id, "why_price")
+
+    assert _lead(lead_id).lost_reason is None
+    assert "nie jest odrzucony" in _srodowisko["answer"][-1]
+
+
+def test_nieznany_powod_z_przycisku_nic_nie_rusza():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _callback(lead_id, "rejected")
+    _callback(lead_id, "why_bo_tak")
+    assert _lead(lead_id).lost_reason is None
+
+
+def test_ten_sam_powod_drugi_raz_nie_zasmieca_historii():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _callback(lead_id, "rejected")
+    _callback(lead_id, "why_ghosted")
+    _callback(lead_id, "why_ghosted")
+    assert [z.detail for z in _zdarzenia(lead_id, "status")] == [
+        "new → rejected", "lost: ghosted"]
+
+
+def test_powrot_leada_do_gry_kasuje_powod():
+    """Inaczej raport policzyłby jako straconego kogoś, do kogo dział właśnie
+    znowu pisze."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _callback(lead_id, "rejected")
+    _callback(lead_id, "why_price")
+    _callback(lead_id, "replied")
+    assert _lead(lead_id).lost_reason is None
+
+
+def test_przejscie_miedzy_odrzuceniem_a_koszem_zachowuje_powod():
+    """`rejected` i `burned` to dwa odcienie tej samej decyzji, a nie nowa —
+    powód nie ma się przy tym gubić."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    _callback(lead_id, "rejected")
+    _callback(lead_id, "why_spam")
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"status": "burned"})
+    assert _lead(lead_id).lost_reason == "spam"
+
+
+def test_panel_zapisuje_powod_razem_z_odrzuceniem():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    odp = client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN,
+                      json={"status": "rejected", "lost_reason": "competitor"})
+
+    assert odp.status_code == 200 and odp.json()["lost_reason"] == "competitor"
+    assert _lead(lead_id).lost_reason == "competitor"
+    assert [z.detail for z in _zdarzenia(lead_id, "status")] == [
+        "new → rejected", "lost: competitor"]
+
+
+def test_panel_pustym_powodem_zdejmuje_powod():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN,
+                json={"status": "rejected", "lost_reason": "other"})
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN, json={"lost_reason": ""})
+    assert _lead(lead_id).lost_reason is None
+
+
+def test_panel_odrzuca_nieznany_powod():
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    odp = client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN,
+                      json={"status": "rejected", "lost_reason": "za drogo"})
+    assert odp.status_code == 400 and _lead(lead_id).lost_reason is None
+
+
+def test_panel_nie_przyjmuje_powodu_dla_leada_w_grze():
+    """Powód bez przegranej to wiersz, którego raport nie ma gdzie policzyć."""
+    lead_id = _wyslij(_zgloszenie()).json()["id"]
+    odp = client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN,
+                      json={"status": "replied", "lost_reason": "price"})
+    assert odp.status_code == 400 and _lead(lead_id).lost_reason is None
+
+
+# --------------------------------------------------------------------------- #
 #  Notatki z odpowiedzi na kanale                                              #
 # --------------------------------------------------------------------------- #
 def _odpowiedz(message_id, tekst, autor="Hubert", pole="author_signature",

@@ -686,6 +686,14 @@ class Lead(Base):
     payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     status: Mapped[str] = mapped_column(String(16), default="new", index=True)
+    # Dlaczego przegraliśmy. Zamknięta lista, nie wolny tekst: „za drogo",
+    # „za drogie", „cena" i „$$$" to cztery wiersze w raporcie i jedna
+    # odpowiedź, której nikt nie policzy — a to jedyne pole, które ma mówić
+    # „dlaczego", nie „ilu".
+    # Ustawia się TYLKO przy `rejected`/`burned` i zeruje, gdy lead wraca do
+    # gry: inaczej raport liczyłby jako przegranego kogoś, do kogo dział
+    # właśnie znowu pisze.
+    lost_reason: Mapped[str | None] = mapped_column(String(24), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Ręczne „kupił" z panelu — dla zakupów poza sklepem (przelew, ustalenia na
     # Telegramie). Zapłacone zamówienie na ten sam mail liczy się AUTOMATYCZNIE
@@ -729,6 +737,21 @@ class Lead(Base):
 # "burned" = kosz: lead spalony znika z listy roboczej, ale wiersz zostaje —
 # skasowanie na stałe to osobna, świadoma decyzja (Delete w szufladzie).
 LEAD_STATUSES = ("new", "messaged", "replied", "no_reply", "rejected", "burned")
+
+# Statusy, które znaczą „skończyliśmy" — i tylko przy nich `lost_reason` ma sens.
+# `no_reply` tu NIE jest: to stan oczekiwania, dział jeszcze pisze i przypomnienia
+# dalej chodzą. Zapytanie o powód w tamtym miejscu kazałoby zamykać sprawę, która
+# jeszcze się toczy.
+LEAD_LOST_STATUSES = ("rejected", "burned")
+
+# Powód przegranej. Kod idzie do bazy i do raportu; opis żyje osobno w panelu
+# (angielski) i w telegram.py (polski) — tak samo jak przy statusach.
+#
+# „ghosted" i status `no_reply` to nie to samo i to rozróżnienie jest tu całym
+# sensem: `no_reply` znaczy „czekamy", ghosted — „przestaliśmy czekać".
+# „not_qualified" dotyczy człowieka, którego dział odsiał po rozmowie; kolumna
+# `outcome` niesie werdykt samej ankiety i tamtej to nie zastępuje.
+LOST_REASONS = ("price", "competitor", "not_qualified", "ghosted", "spam", "other")
 
 
 class LeadEvent(Base):

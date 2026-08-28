@@ -205,6 +205,10 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         # Bez indeksu: filtr zawsze wtorny do tg_message_id, ktory indeks ma.
         "tg_chat_id": "VARCHAR(32)",
         "bought": "BOOLEAN DEFAULT FALSE",
+        # NULL u wszystkich, ktorzy juz sa w bazie, i tak zostanie: powodu
+        # przegranej nie da sie zgadnac wstecz, a wpisanie tam czegokolwiek
+        # ("other") zafalszowaloby pierwszy raport o cala historie.
+        "lost_reason": "VARCHAR(24)",
     },
 }
 

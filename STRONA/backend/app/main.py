@@ -40,7 +40,8 @@ from . import (achievements, auth, billing, catalog, certshot, countries, fields
                poller, provisioning, push, rules, sms, telegram, telemetry, tradebot)
 from .config import get_settings
 from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint
-from .models import (LEAD_STATUSES, Account, AchievementReward, AppSetting, Breach, Certificate,
+from .models import (LEAD_LOST_STATUSES, LEAD_STATUSES, LOST_REASONS,
+                     Account, AchievementReward, AppSetting, Breach, Certificate,
                      CreditLedger, EquitySnapshot, JournalEntry, KycFile, Lead, LeadEvent,
                      LeadMailTemplate, LeadReminder, MailLog, Notification,
                      Order, Payout, PayoutRequest, PoolAccount, Product, PushSubscription,
@@ -6431,6 +6432,10 @@ class LeadIn(BaseModel):
 # się przy pierwszej zmianie tekstu na guziku.
 _ETYKIETY_STATUSU = {stan: opis for opis, stan in telegram.LEAD_BUTTONS}
 
+# To samo dla powodu przegranej. Kody są wspólne z `models.LOST_REASONS`
+# (pilnuje tego test) — tutaj chodzi wyłącznie o polski opis na kartę i w dymek.
+_ETYKIETY_POWODU = {kod: opis for opis, kod in telegram.LOST_REASON_BUTTONS}
+
 
 # Ten sam kształt, który waliduje landing i panel (`leadTgLink`
 # w admin-panel.js). Nick spoza niego zostaje zwykłym tekstem: martwy link
@@ -6494,7 +6499,12 @@ def _tekst_alertu(lead: Lead, dane: dict) -> str:
     if lead.owner:
         stan.append(f"👤 Zajmuje się: <b>{e(lead.owner)}</b>")
     if lead.status != "new":
-        stan.append(f"📌 {_ETYKIETY_STATUSU.get(lead.status, lead.status)}")
+        powod = _ETYKIETY_POWODU.get(lead.lost_reason or "")
+        # Powód dopisuje się do statusu, a nie do własnej linijki: „odpada"
+        # i „za drogo" to jedno zdanie, a każda kolejna linia na karcie
+        # spycha dane kontaktowe poza pierwszy ekran telefonu.
+        stan.append(f"📌 {_ETYKIETY_STATUSU.get(lead.status, lead.status)}"
+                    + (f" — {powod}" if powod else ""))
     if lead.applications > 1:
         stan.append(f"↻ Zgłasza się {lead.applications}. raz")
     if lead.note:
@@ -6586,6 +6596,7 @@ def _lead_json(lead: Lead, trader_id: int | None, paid_usd: float,
         "country": lead.country, "source": lead.source, "ref": lead.ref,
         "outcome": lead.outcome, "tier": lead.tier, "score": lead.score,
         "status": lead.status, "note": lead.note, "owner": lead.owner,
+        "lost_reason": lead.lost_reason,
         "bought": bool(lead.bought),
         "next_due": next_due.isoformat() if next_due else None,
         "applications": lead.applications,
@@ -6647,6 +6658,12 @@ def _zapisz_status(session, lead: Lead, status: str, actor: str) -> None:
     if status != "new" and lead.contacted_at is None:
         lead.contacted_at = datetime.now(timezone.utc)
     lead.status = status
+    # Lead wrócił do gry — powód przegranej przestał być prawdą i musi zniknąć,
+    # bo inaczej raport policzy jako straconego kogoś, do kogo dział właśnie
+    # znowu pisze. Ruch `rejected` ↔ `burned` powodu NIE rusza: to dwa odcienie
+    # tej samej decyzji, a nie nowa.
+    if status not in LEAD_LOST_STATUSES:
+        lead.lost_reason = None
     lead.updated_at = datetime.now(timezone.utc)
     _zdarzenie(session, lead.id, "status", f"{poprzedni} → {status}", actor)
     if status == "burned":
@@ -7106,6 +7123,12 @@ class LeadStatusIn(BaseModel):
     # samej notatki kasowałby to, kto się leadem zajmuje.
     owner: str | None = None
     tier: str | None = None
+    # Powód przegranej. Pusty string = zdejmij, `None` = nie ruszaj — ta sama
+    # umowa co przy `owner`. Serwer NIE wymaga powodu przy odrzuceniu, choć
+    # panel wymaga: ten sam status ustawia jednym kliknięciem przycisk na
+    # kanale, a wymuszanie tam drugiego kliknięcia kosztowałoby zapisany status
+    # za każdym razem, gdy ktoś odejdzie od telefonu w połowie.
+    lost_reason: str | None = None
     # Ręczne „kupił" (checkbox w tabeli) — zakupy zawarte poza sklepem.
     bought: bool | None = None
 
@@ -7153,6 +7176,22 @@ def admin_lead_update(lead_id: int, payload: LeadStatusIn):
                            f"{lead.tier or '—'} → {payload.tier}", actor="panel")
                 lead.tier = payload.tier
                 lead.updated_at = datetime.now(timezone.utc)
+        # Po `_zapisz_status`, i to jest tu istotne: tamten czyści powód przy
+        # powrocie leada do gry, więc odwrotna kolejność kasowałaby powód
+        # przysłany w tym samym żądaniu co odrzucenie.
+        if payload.lost_reason is not None:
+            powod = payload.lost_reason.strip().lower() or None
+            if powod and powod not in LOST_REASONS:
+                raise HTTPException(400, f"Unknown lost reason: {powod}")
+            if powod and lead.status not in LEAD_LOST_STATUSES:
+                raise HTTPException(
+                    400, "A lost reason only belongs to a rejected or burned lead")
+            if powod != lead.lost_reason:
+                lead.lost_reason = powod
+                lead.updated_at = datetime.now(timezone.utc)
+                _zdarzenie(session, lead.id, "status",
+                           f"lost: {powod}" if powod else "lost reason cleared",
+                           actor="panel")
         if payload.bought is not None and bool(payload.bought) != bool(lead.bought):
             lead.bought = bool(payload.bought)
             lead.updated_at = datetime.now(timezone.utc)
@@ -7164,6 +7203,7 @@ def admin_lead_update(lead_id: int, payload: LeadStatusIn):
         kto = lead.name or lead.email
         wynik = {"id": lead.id, "status": lead.status, "note": lead.note,
                  "owner": lead.owner, "tier": lead.tier, "bought": bool(lead.bought),
+                 "lost_reason": lead.lost_reason,
                  "contacted_at": lead.contacted_at.isoformat() if lead.contacted_at else None}
     finally:
         session.close()
@@ -7826,6 +7866,22 @@ def _wykonaj_akcje(session, lead: Lead, akcja: str, kto: str) -> tuple[str, bool
         _zdarzenie(session, lead.id, "tier", f"{poprzednia} → {nowa}", actor=f"telegram:{kto}")
         return f"Ocena: {nowa}", True
 
+    if akcja.startswith("why_"):
+        kod = akcja[len("why_"):]
+        if kod not in LOST_REASONS:
+            return "Nieznany powód", False
+        # Powód bez przegranej to wpis, którego raport nie ma gdzie policzyć.
+        # Zdarza się realnie: ktoś klika stary alert, na którym lead stał na
+        # „odpada", a w międzyczasie odpisał i wrócił do gry.
+        if lead.status not in LEAD_LOST_STATUSES:
+            return "Ten lead nie jest odrzucony", False
+        if lead.lost_reason == kod:
+            return "Ten powód już stoi", False
+        lead.lost_reason, lead.updated_at = kod, teraz
+        _zdarzenie(session, lead.id, "status", f"lost: {kod}",
+                   actor=f"telegram:{kto}")
+        return f"Powód: {_ETYKIETY_POWODU.get(kod, kod)}", True
+
     if akcja in LEAD_STATUSES:
         # Kto klika status na niczyim leadzie, ten go bierze. Alerty sprzed tej
         # zmiany mają pod sobą stare przyciski i bez tego zostawałyby na zawsze
@@ -7911,8 +7967,12 @@ def _telegram_przycisk(cb: dict) -> dict:
     # też to dostanie (imię z Telegrama nie mapuje się na konto w panelu, więc
     # nie ma go jak wykluczyć) — tag `lead-<id>` skleja to w jedno powiadomienie.
     opisy = {"claim": "took the lead", "release": "released the lead"}
-    opis = opisy.get(akcja) or (f"grade → {akcja[len('tier_'):]}"
-                                if akcja.startswith("tier_") else f"marked {akcja}")
+    if akcja.startswith("tier_"):
+        opis = f"grade → {akcja[len('tier_'):]}"
+    elif akcja.startswith("why_"):
+        opis = f"lost: {akcja[len('why_'):]}"
+    else:
+        opis = opisy.get(akcja) or f"marked {akcja}"
     _lead_push(lead_id, f"{kto}: {opis}", kogo)
     return {"ok": True}
 
@@ -7925,7 +7985,8 @@ def _stan_wiadomosci(lead: Lead) -> tuple[str, dict]:
     except ValueError:
         dane = {}
     return _tekst_alertu(lead, dane), telegram.lead_keyboard(
-        lead.id, owner=lead.owner, status=lead.status, tier=lead.tier)
+        lead.id, owner=lead.owner, status=lead.status, tier=lead.tier,
+        lost_reason=lead.lost_reason)
 
 
 def _telegram_notatka(wiadomosc: dict) -> dict:

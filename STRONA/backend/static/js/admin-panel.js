@@ -1183,6 +1183,16 @@ function renderOrders(){
 const LEAD_STATUSES=[['new','New'],['messaged','Messaged'],['replied','Replied'],
   ['no_reply','No reply'],['rejected','Rejected'],['burned','Burned']];
 const leadLabel=s=>(LEAD_STATUSES.find(([k])=>k===s)||[,s])[1];
+/* Why we lost them. A closed list, not a text field: "too expensive", "price",
+   "costs too much" and "$$" are four rows in a report and one answer nobody can
+   count — and this is the only field meant to say WHY rather than HOW MANY.
+   Codes must match models.LOST_REASONS; the wording here is the panel's own,
+   the way the status labels above are. */
+const LOST_STATUSES=['rejected','burned'];
+const LOST_REASONS=[['price','💸 Too expensive'],['competitor','🏃 Bought elsewhere'],
+  ['not_qualified','🚫 Does not qualify'],['ghosted','👻 Stopped replying'],
+  ['spam','🤖 Bot / junk'],['other','❔ Something else']];
+const lostLabel=k=>(LOST_REASONS.find(([c])=>c===k)||[,k])[1];
 /* The questionnaire answers are what the grade is made of, and they are the first
    thing you want in front of you when writing. Hover rather than a column: four
    free-text answers would push the rest of the row off the screen. */
@@ -1583,7 +1593,7 @@ function renderLeads(){
           l.ref?`<div style="font-size:11px">via ${esc(l.ref)}</div>`:''}${
           f==='free'?`<div class="lead-act-row">${leadFreeBtn(l)}</div>`:''}</td>
         <td data-l="Status"><button type="button" class="status status-tap ${LEAD_STATUS_CLS[l.status]||'pending'}"
-            aria-label="Change status" title="Change status"
+            aria-label="Change status" title="${l.lost_reason?esc(lostLabel(l.lost_reason)):'Change status'}"
             onclick="openLeadStatusFor(${l.id})"><span class="dot"></span>${esc(leadLabel(l.status))}</button>
           ${l.next_due?`<div class="due ${dueDays(l.next_due)<=0?'now':''}">⏰ ${dueLabel(l.next_due)}</div>`
             :l.owner&&(l.status==='messaged'||l.status==='replied')?'<div class="due now">no next step</div>'
@@ -1628,24 +1638,66 @@ function openLeadStatusFor(id){
     <div class="act-sheet-title">${esc(l.name||l.email||'Lead')} — status</div>
     <div class="act-sheet-list">${LEAD_STATUSES.map(([k,lab])=>
       `<button class="${l.status===k?'btn-p':k==='burned'?'btn-danger':'btn-o'}"
-        onclick="setLeadStatus(${id},'${k}');closeActSheet()">${k==='burned'?'🔥 Burned — to trash':lab}${l.status===k?' ✓':''}</button>`).join('')}</div>`;
+        onclick="setLeadStatus(${id},'${k}')">${k==='burned'?'🔥 Burned — to trash':lab}${l.status===k?' ✓':''}</button>`).join('')}</div>`;
   document.body.append(veil,s);
   requestAnimationFrame(()=>s.classList.add('open'));
 }
-/* Jak patchLead, ale bez otwierania szuflady — akcja z listy ma zostawić
-   admina na liście. Szuflada odświeża się tylko, gdy akurat wisi na tym leadzie. */
-async function setLeadStatus(id,status){
+
+/* Drugi krok po „Rejected"/„Burned". Status NIE jest jeszcze zapisany — idzie
+   razem z powodem w jednym żądaniu, więc zamknięty arkusz zostawia leada tam,
+   gdzie był: na roboczej liście. Ten kierunek jest celowy. Lead widoczny o jeden
+   klik za dużo kosztuje klik; lead, który po cichu zjechał do kosza, kosztuje
+   leada. Na Telegramie jest odwrotnie — tam status zapisuje pierwszy tap, bo
+   ktoś odkłada telefon w połowie i to jego chcemy uratować. */
+function askLostReason(id,status){
+  const l=leadNow(id)||{};
+  const tresc=`<div class="sheet-grab"></div>
+    <div class="act-sheet-title">${esc(l.name||l.email||'Lead')} — why did we lose them?</div>
+    <div class="act-sheet-list">${LOST_REASONS.map(([k,lab])=>
+      `<button class="btn-o" onclick="setLeadStatus(${id},'${status}','${k}')">${lab}</button>`).join('')}</div>`;
+  /* Przerysowanie OTWARTEGO arkusza zamiast drugiego obok: to ten sam wybór,
+     krok dalej. `closeActSheet` sprząta swój dopiero po animacji, więc nowy
+     i tak nie miałby się gdzie zmieścić. */
+  const otwarty=document.getElementById('act-sheet');
+  if(otwarty){otwarty.innerHTML=tresc;return}
+  const veil=document.createElement('div');veil.id='act-veil';veil.className='sheet-veil';
+  veil.onclick=closeActSheet;
+  const s=document.createElement('div');s.id='act-sheet';s.className='sheet';
+  s.innerHTML=tresc;
+  document.body.append(veil,s);
+  requestAnimationFrame(()=>s.classList.add('open'));
+}
+
+/* Szuflada jest świeższa od wiersza (przyszła z osobnego zapytania), ale przy
+   deep-linku wiersza może nie być wcale, a przy widoku listy — szuflady. */
+const leadNow=id=>(window._leadOpen&&window._leadOpen.id===id?window._leadOpen:null)
+  ||(window._leads||[]).find(x=>x.id===id)||null;
+
+/* Jeden zapis statusu dla listy i szuflady. Jak patchLead, ale bez otwierania
+   szuflady — akcja z listy ma zostawić admina na liście. Szuflada odświeża się
+   tylko, gdy akurat wisi na tym leadzie. */
+async function setLeadStatus(id,status,reason){
   const row=(window._leads||[]).find(x=>x.id===id);
-  if(row&&row.status===status)return;
+  const teraz=leadNow(id);
+  /* Powodu nie pytamy drugi raz przy `rejected` ↔ `burned`: to dwa odcienie
+     tej samej decyzji, a nie nowa. Arkusza tu NIE zamykamy — przerysowuje się
+     na drugi krok. */
+  if(reason===undefined&&LOST_STATUSES.includes(status)&&!(teraz&&teraz.lost_reason))
+    return askLostReason(id,status);
+  closeActSheet();
+  if(teraz&&teraz.status===status&&reason===undefined)return;
+  const patch=reason===undefined?{status}:{status,lost_reason:reason};
   try{
-    await api('/api/admin/leads/'+id,{method:'POST',body:JSON.stringify({status})});
+    await api('/api/admin/leads/'+id,{method:'POST',body:JSON.stringify(patch)});
     if(row){row.status=status;
+      if(reason!==undefined)row.lost_reason=reason;
       /* Backend gasi przypomnienia przy spaleniu — bez tego lokalna lista
          pokazywalaby "⏰ in 7d" na leadzie lezacym w koszu az do refetchu. */
       if(status==='burned')row.next_due=null}
     if(VIEW==='leads')renderLeads();
     if(window._leadOpen&&window._leadOpen.id===id)await openLead(id);
-    toast(status==='burned'?'Moved to trash':'Marked as '+leadLabel(status));
+    toast((status==='burned'?'Moved to trash':'Marked as '+leadLabel(status))
+      +(reason===undefined?'':' — '+lostLabel(reason)));
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
@@ -1717,6 +1769,11 @@ const LEAD_REMINDER_LBL={no_contact:'Nobody wrote to them yet',bought:'Bought �
 
 function leadEventDetail(e){
   if(e.kind==='reminder')return LEAD_REMINDER_LBL[e.detail]||e.detail.replace(/^planned: /,'');
+  /* Kind 'status' niesie dwie rzeczy: przejście „new → rejected" i powód
+     „lost: price". Kody idą do bazy po angielsku i tak samo wyglądają w CSV —
+     historia ma pokazać to, co widać na przyciskach. */
+  if(e.kind==='status'&&e.detail.startsWith('lost: '))
+    return 'Lost — '+lostLabel(e.detail.slice(6));
   if(e.kind==='status')return e.detail.split('→').map(s=>leadLabel(s.trim())).join(' → ');
   return e.detail;
 }
@@ -1764,8 +1821,14 @@ function leadModCard(l){
       <div><div class="lbl">Where it stands</div>
         <div class="muted" style="font-size:11.5px">we wrote → they answered → it went quiet, or they are out</div></div>
       <div class="seg wrap">${LEAD_STATUSES.map(([k,lab])=>
-        `<button class="${l.status===k?'on':''}" onclick="patchLead(${l.id},{status:'${k}'},'Marked as ${lab}')">${lab}</button>`).join('')}</div>
+        `<button class="${l.status===k?'on':''}" onclick="setLeadStatus(${l.id},'${k}')">${lab}</button>`).join('')}</div>
     </div>
+    ${l.lost_reason?`<div class="mod-row">
+      <div><div class="lbl">Why we lost them</div>
+        <div class="muted" style="font-size:11.5px">the one thing a report can answer with "why"</div></div>
+      <div class="seg wrap">${LOST_REASONS.map(([k,lab])=>
+        `<button class="${l.lost_reason===k?'on':''}" onclick="patchLead(${l.id},{lost_reason:'${k}'},'Reason: ${k}')">${lab}</button>`).join('')}</div>
+    </div>`:''}
     <div class="mod-row">
       <div><div class="lbl">Grade</div>
         <div class="muted" style="font-size:11.5px">scored from the form — correct it once you have talked</div></div>
@@ -2095,7 +2158,7 @@ async function openLead(id){
      still saying the lead has nothing due. */
   const row=(window._leads||[]).find(x=>x.id===id);
   if(row)Object.assign(row,{owner:l.owner,tier:l.tier,status:l.status,note:l.note,
-    next_due:l.next_due,contacted_at:l.contacted_at});
+    lost_reason:l.lost_reason,next_due:l.next_due,contacted_at:l.contacted_at});
   /* copyOpener sięga tu, gdy wiersza nie ma w liście (deep-link z pusha,
      zanim tabela się dociągnie). Przyciski w szufladzie czytają leada stąd
      z drugiego powodu: mail i nazwisko podane przez inline onclick trzeba by
@@ -2109,6 +2172,7 @@ async function openLead(id){
     ${zalegle.length?`<div class="due-banner" style="cursor:default">⏰ ${dueLabel(zalegle[0].due_at)} — ${esc(zalegle[0].text)}</div>`:''}
     <div class="chip-row">
       <span class="status ${LEAD_STATUS_CLS[l.status]||'pending'}"><span class="dot"></span>${esc(leadLabel(l.status))}</span>
+      ${l.lost_reason?`<span class="chip">${esc(lostLabel(l.lost_reason))}</span>`:''}
       ${l.tier?`<span class="chip">${esc(l.tier)} ${l.score}</span>`:''}
       ${l.paid_usd>0?`<span class="status paid"><span class="dot"></span>paid $${fmt0(l.paid_usd)}</span>`
         :l.bought?'<span class="status paid"><span class="dot"></span>bought</span>':''}
