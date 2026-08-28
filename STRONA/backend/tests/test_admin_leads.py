@@ -1,6 +1,8 @@
 """Leady z landingu: przyjęcie, deduplikacja po mailu, doliczenie zakupu
 i zmiana statusu — z panelu oraz przyciskiem z Telegrama. Dalej historia
 zdarzeń i przypomnienia z crona."""
+import csv
+import io
 import os
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -2410,3 +2412,97 @@ def test_ponowne_zgloszenie_podmienia_kampanie():
     lead_id = _wyslij(dane).json()["id"]
     _wyslij({**dane, "attribution": {"utm_source": "tiktok"}})
     assert _z_listy(lead_id)["campaign"] == {"utm_source": "tiktok"}
+
+
+# --------------------------------------------------------------------------- #
+#  Eksport CSV                                                                 #
+# --------------------------------------------------------------------------- #
+def _csv(**kw):
+    odp = client.get("/api/admin/leads.csv", headers=ADMIN, **kw)
+    assert odp.status_code == 200, odp.text
+    tekst = odp.content.decode("utf-8-sig")
+    return odp, list(csv.DictReader(io.StringIO(tekst)))
+
+
+def test_eksport_wymaga_admina():
+    assert client.get("/api/admin/leads.csv").status_code in (401, 403)
+
+
+def test_eksport_niesie_leada_z_kampania_i_powodem():
+    lead_id = _wyslij(_zgloszenie(email="csv@test.pl", name="Anna Zielińska",
+                                  attribution={"utm_source": "facebook",
+                                               "utm_campaign": "sierpien",
+                                               "fbclid": "FB1"})).json()["id"]
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN,
+                json={"status": "rejected", "lost_reason": "price"})
+    _, wiersze = _csv()
+    w = next(x for x in wiersze if x["email"] == "csv@test.pl")
+    assert (w["name"], w["utm_source"], w["utm_campaign"], w["click_id"],
+            w["status"], w["lost_reason"]) == ("Anna Zielińska", "facebook",
+                                               "sierpien", "FB1", "rejected", "price")
+
+
+def test_eksport_ma_znacznik_bom_i_nazwe_pliku():
+    """Bez BOM Excel czyta plik po windowsowemu i „Zieliński" otwiera się jako
+    krzaki — czyli kolumna z nazwiskiem jest bezużyteczna."""
+    _wyslij(_zgloszenie())
+    odp, _ = _csv()
+    assert odp.content.startswith(b"\xef\xbb\xbf")
+    assert 'attachment; filename="leads-' in odp.headers["content-disposition"]
+
+
+def test_eksport_nie_wykona_sie_w_arkuszu():
+    """Notatka wpisywana z ręki trafia wprost do komórki. Bez apostrofu `=1+1`
+    policzy się w Excelu, a `=HYPERLINK(...)` klika cudza ręka."""
+    lead_id = _wyslij(_zgloszenie(email="formula@test.pl")).json()["id"]
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN,
+                json={"note": "=HYPERLINK(\"http://zly.example\")"})
+    _, wiersze = _csv()
+    w = next(x for x in wiersze if x["email"] == "formula@test.pl")
+    assert w["note"].startswith("'=HYPERLINK")
+
+
+def test_eksport_zabezpiecza_takze_numer_telefonu():
+    """`+48…` też jest dla arkusza formułą. Apostrof w komórce się nie
+    wyświetla, więc taniej dołożyć go numerowi niż prowadzić listę wyjątków."""
+    _wyslij(_zgloszenie(email="plus@test.pl", phone="+48111222333"))
+    _, wiersze = _csv()
+    assert next(x for x in wiersze if x["email"] == "plus@test.pl")["phone"] \
+        == "'+48111222333"
+
+
+def test_eksport_pokazuje_daty_po_warszawsku():
+    """W bazie zostaje UTC, ale plik czyta człowiek zestawiający go z godziną
+    rozmowy na Telegramie."""
+    lead_id = _wyslij(_zgloszenie(email="czas@test.pl")).json()["id"]
+    s = SessionLocal()
+    try:
+        s.get(Lead, lead_id).created_at = datetime(2026, 8, 28, 22, 30)
+        s.commit()
+    finally:
+        s.close()
+    _, wiersze = _csv()
+    # 22:30 UTC to już 29 sierpnia po polsku — data dnia, nie tylko godzina.
+    assert next(x for x in wiersze if x["email"] == "czas@test.pl")["created"] \
+        == "2026-08-29 00:30"
+
+
+def test_eksport_bierze_takze_kosz():
+    """Raport „dlaczego przegrywamy" potrzebuje właśnie tych wierszy, które
+    w panelu leżą w koszu."""
+    lead_id = _wyslij(_zgloszenie(email="kosz@test.pl")).json()["id"]
+    client.post(f"/api/admin/leads/{lead_id}", headers=ADMIN,
+                json={"status": "burned", "lost_reason": "spam"})
+    _, wiersze = _csv()
+    assert any(x["email"] == "kosz@test.pl" for x in wiersze)
+
+
+def test_eksport_ma_kolumny_zgodne_z_naglowkiem():
+    """Nagłówek i wiersz powstają z jednej listy par — ten test pilnuje, że
+    dokładanie kolumny nie rozjedzie jednego z drugim."""
+    from app import main as app_main
+    _wyslij(_zgloszenie())
+    odp, wiersze = _csv()
+    naglowek = odp.content.decode("utf-8-sig").splitlines()[0].split(",")
+    assert naglowek == [n for n, _ in app_main._KOLUMNY_CSV]
+    assert all(len(w) == len(naglowek) and None not in w.values() for w in wiersze)

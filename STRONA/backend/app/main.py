@@ -10,8 +10,10 @@ Uruchomienie:  uvicorn app.main:app --reload  (z katalogu backend/)
 """
 from __future__ import annotations
 
+import csv
 import hashlib
 import html
+import io
 import json
 import os
 import random
@@ -6997,6 +6999,88 @@ def admin_leads(status: str | None = None, q: str | None = None):
         return wynik
     finally:
         session.close()
+
+
+def _komorka_csv(wartosc) -> str:
+    """Jedna komórka, bezpieczna do otwarcia w arkuszu.
+
+    Wartość zaczynająca się od `=`, `+`, `-` albo `@` nie jest dla Excela ani
+    Arkuszy tekstem, tylko formułą. Notatka „=1+1" policzyłaby się zamiast
+    pokazać, a `=HYPERLINK(...)` to już coś, co klika cudza ręka na cudzym
+    komputerze. Apostrof z przodu zdejmuje im to znaczenie i sam w komórce nie
+    widać. Płaci za to numer telefonu (`+48…`), który dostaje go bez potrzeby —
+    tańsze niż lista wyjątków przy polu wpisywanym z ulicy.
+    """
+    tekst = "" if wartosc is None else str(wartosc)
+    return "'" + tekst if tekst[:1] in ("=", "+", "-", "@") else tekst
+
+
+def _data_csv(iso: str | None) -> str:
+    """Data po warszawsku. W bazie zostaje UTC, ale plik czyta człowiek, który
+    zestawia go z godziną rozmowy na Telegramie."""
+    if not iso:
+        return ""
+    return (_utc(datetime.fromisoformat(iso)).astimezone(_WARSZAWA)
+            .strftime("%Y-%m-%d %H:%M"))
+
+
+# Nagłówek i wartość w jednej parze, więc kolumna nie ma jak rozjechać się
+# z opisem przy dokładaniu następnej. Czytane z `_lead_json`, nie z modelu —
+# ten sam słownik karmi listę w panelu, a plik ma mówić dokładnie to, co ekran.
+_KOLUMNY_CSV = (
+    ("created", lambda l: _data_csv(l["created_at"])),
+    ("name", lambda l: l["name"]),
+    ("email", lambda l: l["email"]),
+    ("phone", lambda l: l["phone"]),
+    ("telegram", lambda l: l["telegram"]),
+    ("country", lambda l: l["country"]),
+    ("source", lambda l: l["source"]),
+    ("ref", lambda l: l["ref"]),
+    ("utm_source", lambda l: l["campaign"].get("utm_source")),
+    ("utm_medium", lambda l: l["campaign"].get("utm_medium")),
+    ("utm_campaign", lambda l: l["campaign"].get("utm_campaign")),
+    ("utm_content", lambda l: l["campaign"].get("utm_content")),
+    # Jedna kolumna na trzy sieci: lead przychodzi z jednej reklamy, więc dwa
+    # identyfikatory naraz się nie zdarzają, a trzy puste kolumny w każdym
+    # wierszu spychałyby notatkę poza ekran.
+    ("click_id", lambda l: next((v for k, v in l["campaign"].items()
+                                 if k.endswith("clid")), "")),
+    ("status", lambda l: l["status"]),
+    ("lost_reason", lambda l: l["lost_reason"]),
+    ("owner", lambda l: l["owner"]),
+    ("tier", lambda l: l["tier"]),
+    ("score", lambda l: l["score"]),
+    ("outcome", lambda l: l["outcome"]),
+    ("applications", lambda l: l["applications"]),
+    ("paid_usd", lambda l: l["paid_usd"]),
+    ("contacted", lambda l: _data_csv(l["contacted_at"])),
+    ("note", lambda l: l["note"]),
+)
+
+
+@app.get("/api/admin/leads.csv", dependencies=[Depends(auth.require_admin)])
+def admin_leads_csv():
+    """Wszystkie leady do arkusza, razem z koszem.
+
+    Bez filtrów, choć panel je ma: jego chipy i szukajka pracują na już
+    pobranej liście i sięgają dalej niż `status`/`q` po stronie serwera, więc
+    przepisanie ich tutaj dałoby plik węższy albo szerszy niż ekran, z którego
+    się go pobiera. Arkusz filtruje lepiej niż panel — a raport „dlaczego
+    przegrywamy" potrzebuje właśnie tych wierszy, które w panelu leżą w koszu.
+    """
+    leady = admin_leads()
+    bufor = io.StringIO()
+    zapis = csv.writer(bufor)
+    zapis.writerow([nazwa for nazwa, _ in _KOLUMNY_CSV])
+    for l in leady:
+        zapis.writerow([_komorka_csv(f(l)) for _, f in _KOLUMNY_CSV])
+    dzis = datetime.now(_WARSZAWA).strftime("%Y-%m-%d")
+    # utf-8-sig, nie utf-8: Excel bez znacznika BOM czyta plik po windowsowemu
+    # i „Zieliński" otwiera się jako „ZieliÅ„ski". Reszta świata BOM ignoruje.
+    return Response(content=bufor.getvalue().encode("utf-8-sig"),
+                    media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition":
+                             f'attachment; filename="leads-{dzis}.csv"'})
 
 
 @app.get("/api/admin/leads/{lead_id}", dependencies=[Depends(auth.require_admin)])

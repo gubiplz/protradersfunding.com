@@ -1577,6 +1577,8 @@ function renderLeads(){
         <button class="${sheetActive?'on':''}" onclick="${sheetActive?`window._leadFilter='all';renderLeads()`:'openLeadStatusSheet()'}">${sheetActive?sheetActive[1]:'Status ▾'}</button>
         ${kosz.length?`<button class="${f==='burned'?'on':''}" title="Burned leads"
           onclick="window._leadFilter='${f==='burned'?'all':'burned'}';renderLeads()">🗑 ${kosz.length}</button>`:''}</div>
+      <button class="btn-o sm" onclick="exportLeads(this)"
+        title="Every lead, the trash included, as a spreadsheet">↓ CSV</button>
       <button class="btn-p sm" onclick="openNewLead()"
         title="Somebody who wrote to us without filling the form">+ Add lead</button>
     </div>
@@ -2071,6 +2073,29 @@ async function cancelLeadReminder(id,rid){
       await openLead(id);renderLeads();
     });
   }catch(e){toast('Error: '+e.message,'err')}
+}
+
+/* Pobranie idzie przez fetch, nie przez zwykły <a href>: autoryzacja panelu
+   siedzi w nagłówku, a link nie ma jak go donieść — dostałby 403. Nazwę pliku
+   podaje serwer, więc data w nazwie jest warszawska tak samo jak daty w środku. */
+async function exportLeads(btn){
+  const napis=btn.textContent;
+  btn.disabled=true;btn.textContent='…';
+  try{
+    const r=await fetch('/api/admin/leads.csv',{headers:adminH()});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const zNaglowka=(r.headers.get('content-disposition')||'').match(/filename="([^"]+)"/);
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(await r.blob());
+    a.download=zNaglowka?zNaglowka[1]:'leads.csv';
+    document.body.append(a);a.click();a.remove();
+    /* Zwolnienie adresu od razu po click() potrafi uciąć pobieranie, które
+       jeszcze się nie zaczęło — stąd odroczenie zamiast revoke w tej samej
+       linijce. */
+    setTimeout(()=>URL.revokeObjectURL(a.href),10000);
+    toast('Exported.');
+  }catch(e){toast('Export failed: '+e.message,'err')}
+  finally{btn.disabled=false;btn.textContent=napis}
 }
 
 /* Leada wpisanego z ręki nie da się dziś dodać nigdzie indziej: kto napisał na
