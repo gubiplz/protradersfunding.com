@@ -49,7 +49,9 @@ KLUCZ_ALERT = PREFIKS + "last_alert_day"
 
 DOMYSLNE = {
     "enabled": "0",
-    "svc_reactions": "8612",
+    # Reakcje z najtańszej półki dostawcy (0.0275/1000, m.in. 8612) mimo nazwy
+    # „Positive" idą ze wspólnej puli emoji i potrafią wsypać pod post 🍌 albo 🗿.
+    "svc_reactions": "7256",
     "qty_reactions": "30",
     "svc_views": "8407",
     "qty_views": "400",

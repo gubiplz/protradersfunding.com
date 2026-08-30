@@ -82,7 +82,7 @@ def test_zamowienie_sklada_dwie_uslugi_pod_jednym_linkiem():
             wynik = reach.zamow(s, LINK, transport=_transport(log=log))
         assert wynik["ordered"] == 2
         addy = [p for p in log if p["action"] == "add"]
-        assert [p["service"] for p in addy] == ["8612", "8407"]
+        assert [p["service"] for p in addy] == ["7256", "8407"]
         assert [p["quantity"] for p in addy] == ["30", "400"]
         assert {p["link"] for p in addy} == {LINK}
         # Klucz idzie w ciele żądania, nigdy w URL-u — inaczej wyciekłby do logów.
@@ -272,7 +272,7 @@ def test_koszt_posta_liczy_sie_z_cennika_dostawcy():
 
         def cennik(url, body, ct):
             return 200, json.dumps([
-                {"service": 8612, "rate": "0.0275", "name": "Telegram Positive Reactions"},
+                {"service": 7256, "rate": "0.0425", "name": "Telegram Positive Reactions"},
                 {"service": 8407, "rate": "0.1305", "name": "Telegram Views [1 Post]"},
                 {"service": 1, "rate": "9.99", "name": "Co innego"},
             ]).encode()
@@ -284,8 +284,8 @@ def test_koszt_posta_liczy_sie_z_cennika_dostawcy():
         # więc panel musi wiedzieć, CO zamawia, a nie tylko pod jakim numerem.
         assert cfg["name_reactions"] == "Telegram Positive Reactions"
         assert cfg["reactions_positive"] is True
-        # 30 x 0.0275/1000 + 400 x 0.1305/1000
-        assert cfg["unit_cost"] == 0.053025 and cfg["cost_from"] == "provider"
+        # 30 x 0.0425/1000 + 400 x 0.1305/1000
+        assert cfg["unit_cost"] == 0.053475 and cfg["cost_from"] == "provider"
 
         # Zmiana usługi kasuje starą stawkę i nazwę: cena i opis czegoś, czego
         # już nie zamawiamy, wprowadzałyby w błąd.
@@ -296,10 +296,10 @@ def test_koszt_posta_liczy_sie_z_cennika_dostawcy():
         # Podmiana na wariant negatywny (id o jeden dalej) musi być widoczna.
         def cennik_neg(url, body, ct):
             return 200, json.dumps([
-                {"service": 8613, "rate": "0.0275", "name": "Telegram Negative Reactions"},
+                {"service": 7257, "rate": "0.0825", "name": "Telegram Negative Reactions"},
             ]).encode()
 
-        reach.zapisz_ustawienia(s, svc_reactions=8613)
+        reach.zapisz_ustawienia(s, svc_reactions=7257)
         with _dostawca():
             reach.odswiez_cennik(s, transport=cennik_neg)
         assert reach.ustawienia(s)["reactions_positive"] is False
@@ -497,7 +497,7 @@ def test_zero_w_kanale_to_nie_to_samo_co_puste():
             reach.zamow(s, "https://t.me/kanal_bez_view/3", transport=_transport(log=log))
         addy = [p for p in log if p["action"] == "add"]
         # Same reakcje — zamowienie na 0 wyswietlen nie ma prawa polecieć.
-        assert [p["service"] for p in addy] == ["8612"]
+        assert [p["service"] for p in addy] == ["7256"]
     finally:
         s.close()
 
