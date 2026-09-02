@@ -843,6 +843,11 @@ def _send_teraz(event: str, to_email: str | None, ctx: dict | None = None) -> No
     adres = to_email          # oryginal dla kanalu push/centrum (pref sprawdza sam)
 
     # 1) e-mail
+    if to_email and to_email.lower().endswith("@imported.local"):
+        # Konta z importu nie mają skrzynek — każda taka wysyłka to twardy
+        # bounce w Brevo, a seria bounców psuje reputację nadawcy.
+        print(f"[notify] pominięto mail '{event}' do {to_email} (adres importowy)")
+        to_email = None
     if to_email and not _email_allowed(event, to_email):
         print(f"[notify] pominięto mail '{event}' do {to_email} (preferencje tradera)")
         to_email = None

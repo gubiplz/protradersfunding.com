@@ -50,6 +50,21 @@ def test_udana_wysylka_trafia_do_dziennika(monkeypatch):
     assert wpis["subject"]
 
 
+def test_adres_importowy_nie_idzie_do_smtp(monkeypatch):
+    """Konta z importu (`@imported.local`) nie mają skrzynek: każda wysyłka to
+    twardy bounce w Brevo, a seria bounców psuje reputację nadawcy. Ręczne
+    akcje admina na takich kontach (faza, wypłata) nie mogą strzelać mailami."""
+    class _EksplodujacySmtp:
+        def __init__(self, *a, **k):
+            raise AssertionError("SMTP nie może być dotknięty dla @imported.local")
+
+    monkeypatch.setattr(notify.settings, "smtp_host", "smtp.test", raising=False)
+    monkeypatch.setattr(notify.smtplib, "SMTP", _EksplodujacySmtp)
+
+    notify._send_teraz("account_funded", "rory.sinclair@imported.local",
+                       {"name": "Rory Sinclair", "login": "10011911015", "split": 80})
+
+
 def test_brak_smtp_to_tez_porazka_a_nie_ciche_wyslane():
     """Bez `SMTP_HOST` mail nie opuszcza serwera — dziennik ma o tym mówić.
 
