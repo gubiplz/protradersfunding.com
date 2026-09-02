@@ -192,6 +192,14 @@ def open_stripe_session(session, order: Order, item_name: str, *,
     znaku zapytania.
     """
     stripe = _stripe()
+    # Zamówienie bywa reużyte (dedup w create_checkout, ponowne wejście w link
+    # płatności) — starą sesję wygaszamy, żeby zapłacić dało się tylko
+    # najnowszą, a nie obie naraz z dwóch otwartych kart.
+    if order.stripe_session_id:
+        try:
+            stripe.checkout.Session.expire(order.stripe_session_id)
+        except stripe.error.StripeError:
+            pass  # już wygasła albo opłacona — webhook i tak dopasowuje po id
     baza = powrot or f"{settings.app_base_url}/portal"
     try:
         cs = stripe.checkout.Session.create(
@@ -237,15 +245,28 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
     prowizjonowany = upgrade or product
     price, discount_pct, kredyt = quote["total_due_usd"], quote["discount_pct"], quote["credits_used"]
 
-    order = Order(trader_id=trader.id, product_key=prowizjonowany.key, amount_usd=price,
-                  coupon=(coupon or None), weekend_trading=bool(weekend_trading),
-                  addon_split_boost=bool(split_boost),
-                  addon_express_payout=bool(express_payout),
-                  credits_used=kredyt,
-                  bogo_paid_key=quote["bogo_paid_key"],
-                  bogo=bogo_active(session),
-                  provider="stripe" if settings.stripe_enabled else "mock")
-    session.add(order)
+    # Podwójny klik „Buy" (albo powrót do sklepu po porzuconym checkoucie)
+    # reużywa wiszącego zamówienia zamiast tworzyć drugie. Dwa pending ordery
+    # to dwie ŻYWE sesje Stripe w dwóch kartach — da się zapłacić obie, a lista
+    # zamówień rośnie od duplikatów. Wycena idzie zawsze od nowa (świeże pola
+    # niżej), a stara sesja Stripe jest wygaszana przy otwieraniu nowej.
+    order = (session.query(Order)
+             .filter(Order.trader_id == trader.id, Order.status == "pending",
+                     Order.product_key == prowizjonowany.key,
+                     Order.provider.in_(("stripe", "mock")))
+             .order_by(Order.id.desc()).first())
+    if order is None:
+        order = Order(trader_id=trader.id, product_key=prowizjonowany.key)
+        session.add(order)
+    order.amount_usd = price
+    order.coupon = coupon or None
+    order.weekend_trading = bool(weekend_trading)
+    order.addon_split_boost = bool(split_boost)
+    order.addon_express_payout = bool(express_payout)
+    order.credits_used = kredyt
+    order.bogo_paid_key = quote["bogo_paid_key"]
+    order.bogo = bogo_active(session)
+    order.provider = "stripe" if settings.stripe_enabled else "mock"
     # `commit`, nie `flush`: `telemetry.track` otwiera WLASNA sesje, a wolane na
     # otwartej transakcji zapisu potrafi zablokowac sie na wlasnym zamowieniu.
     # Na SQLicie (dev) to bylo 5,2 s czekania na busy-timeout przy KAZDYM

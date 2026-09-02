@@ -1186,7 +1186,10 @@ body.kb-open .botnav,body.kb-open .tabbar{display:none}
 .sheet-veil{position:fixed;inset:0;z-index:60;background:var(--scrim)}
 .sheet{position:fixed;left:0;right:0;bottom:0;z-index:61;background:var(--panel);
   border:1px solid var(--line);border-bottom:0;border-radius:20px 20px 0 0;
-  padding:8px 14px calc(14px + env(safe-area-inset-bottom));max-height:70vh;overflow-y:auto;
+  /* 82dvh: przy 70vh „Sign Out" lądował tuż pod krawędzią ekranu iPhone'a
+     i nic nie zdradzało, że arkusz się przewija */
+  padding:8px 14px calc(14px + env(safe-area-inset-bottom));
+  max-height:80vh;max-height:82dvh;overflow-y:auto;
   overscroll-behavior:contain;box-shadow:0 -24px 60px -24px rgba(15,23,42,.35);
   transform:translateY(100%);visibility:hidden;
   /* prefers-reduced-motion: the global *{transition-duration:.01ms!important}
@@ -1216,11 +1219,21 @@ button,a{-webkit-tap-highlight-color:transparent}
 /* --- standalone mode (iOS Add to Home Screen) --- */
 html.pwa body{overscroll-behavior-y:none}
 html.pwa .topbar{padding-top:calc(13px + env(safe-area-inset-top))}  /* status bar overlays */
+/* topbar rośnie o notch, więc panel dzwonka musi zjechać o tyle samo —
+   ze stałym top:64px otwierał się POD topbarem na iPhone'ach z Dynamic Island */
+html.pwa .notif-panel{top:calc(64px + env(safe-area-inset-top))}
 @media(max-width:960px){
   html.pwa .topbar{padding-top:calc(12px + env(safe-area-inset-top))}
   html.pwa .side{display:none}     /* tab bar + sheet own navigation in standalone */
   html.pwa .burger{display:none}
 }
+
+/* --- boot retry (zimny start bez sieci; element tworzy portal-app.js) --- */
+#boot-retry{position:fixed;inset:0;z-index:99;display:flex;align-items:center;
+  justify-content:center;background:var(--bg);padding:24px}
+#boot-retry .br-card{text-align:center;max-width:320px}
+#boot-retry h3{color:var(--txt);font-size:17px;margin-bottom:6px}
+#boot-retry p{font-size:13.5px;color:var(--muted);margin-bottom:18px}
 
 /* ============================================================
    PHASE 2 — intermittent reinforcement layer

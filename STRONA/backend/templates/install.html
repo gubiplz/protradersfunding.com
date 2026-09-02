@@ -211,8 +211,17 @@
     e.preventDefault();deferred=e;
     if(!standalone)$('instCta').classList.remove('hidden');
   });
+  /* iOS nie zna beforeinstallprompt — bez tego iPhone nie widział ŻADNEGO
+     przycisku nad zakładkami. Pokazujemy CTA, a klik zwija do instrukcji. */
+  if(isIOS&&iosSafari&&!standalone){
+    $('instCta').classList.remove('hidden');
+    $('instCta').querySelector('small').textContent='Two taps in Safari — the steps below show where.';
+  }
   $('instBtn').addEventListener('click',async()=>{
-    if(!deferred)return;
+    if(!deferred){
+      if(isIOS){instShow('ios');$('tab-ios').scrollIntoView({behavior:'smooth'});}
+      return;
+    }
     deferred.prompt();
     const r=await deferred.userChoice;deferred=null;
     if(r.outcome==='accepted')$('instCta').classList.add('hidden');

@@ -111,8 +111,11 @@ def test_rownolegly_checkout_nie_pali_kredytow_bez_sladu(monkeypatch):
     tid = _trader(credits=100)
     s = SessionLocal()
     tr = s.get(Trader, tid)
+    # Dwa checkouty TEGO SAMEGO produktu sklejają się dziś w jedno zamówienie
+    # (dedup podwójnego kliku), więc dubel, którego ten test pilnuje, robi się
+    # na dwóch RÓŻNYCH produktach — oba wycenione z tego samego salda.
     o1 = billing.create_checkout(s, tr, "2step-25k", None)["order_id"]   # $299 - $100
-    o2 = billing.create_checkout(s, tr, "2step-25k", None)["order_id"]   # też $299 - $100
+    o2 = billing.create_checkout(s, tr, "2step-50k", None)["order_id"]   # inny produkt, to samo saldo
     billing.mock_complete(s, o1, tid)
     billing.mock_complete(s, o2, tid)
     z1, z2 = s.get(Order, o1), s.get(Order, o2)

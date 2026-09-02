@@ -46,6 +46,7 @@ class _FakeStripe:
     hierarchię wyjątków."""
     error = stripe_sdk.error
     wywolania: list = []
+    wygaszone: list = []
     licznik = iter(range(1000))
 
     class checkout:
@@ -56,6 +57,10 @@ class _FakeStripe:
                 _FakeStripe.wywolania.append((sid, kw))
                 return type("CS", (), {"id": sid, "url": f"https://checkout.stripe.com/{sid}"})
 
+            @staticmethod
+            def expire(sid):
+                _FakeStripe.wygaszone.append(sid)
+
     class Webhook:
         @staticmethod
         def construct_event(payload, sig, secret):
@@ -65,6 +70,7 @@ class _FakeStripe:
 @pytest.fixture
 def stripe_wlaczony(monkeypatch):
     _FakeStripe.wywolania = []
+    _FakeStripe.wygaszone = []
     monkeypatch.setattr(billing.settings, "stripe_secret_key", "sk_test_atrapa")
     monkeypatch.setattr(billing.settings, "stripe_webhook_secret", "whsec_atrapa")
     monkeypatch.setattr(billing, "_stripe", lambda: _FakeStripe)
@@ -288,6 +294,9 @@ def test_stare_zamowienie_nie_domyka_starej_sesji(stripe_wlaczony):
     r = client.post("/api/stripe/webhook", content=zdarzenie,
                     headers={"stripe-signature": "t=1,v1=atrapa"})
     assert r.json().get("ignored") == "session mismatch"
+    # Stara kasa jest też wygaszana u Stripe'a — klient z dwiema otwartymi
+    # kartami nie ma jak zapłacić dwa razy za to samo zamówienie.
+    assert stara in stripe_wlaczony.wygaszone
 
 
 def test_kasa_odmawia_gdy_zamowienie_juz_oplacone(stripe_wlaczony):

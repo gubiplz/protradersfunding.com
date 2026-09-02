@@ -563,7 +563,7 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
     #fff}
 }
 @media(max-width:640px){
-  .verify-box input,.code-inp{font-size:16px}   /* iOS zoomuje przy fokusie <16px */
+  .verify-box input,.code-inp,.promo-inp{font-size:16px}   /* iOS zoomuje przy fokusie <16px */
   .foot-col a{padding:10px 0}
   .pcfg-addbtn{min-height:44px}
   /* pas statystyk: 7-cyfrowe kwoty musza zmiescic sie w 2 kolumnach */

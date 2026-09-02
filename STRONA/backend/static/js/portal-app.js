@@ -28,6 +28,11 @@ async function api(path,opts={},_retry){
     throw new Error(e&&e.name==='AbortError'?'Request timed out — check your connection':'Network error — check your connection');
   }
   clearTimeout(tm);
+  /* 401 przy ZAŁOŻONEJ sesji = token wygasł/unieważniony. W standalone PWA nie
+     ma paska adresu, więc „Try again" na widoku nigdy by nie pomogło — jedyna
+     droga wyjścia to od razu ekran logowania. 401 bez tokenu (złe hasło przy
+     logowaniu) przechodzi niżej normalną ścieżką błędu. */
+  if(r.status===401&&TOKEN){sessionExpired();throw new Error('Your session has expired — please sign in again')}
   if(!r.ok){throw new Error((await r.json().catch(()=>({}))).detail||r.status)}
   return r.json();
 }
@@ -530,6 +535,34 @@ function logout(){
   fetch('/api/auth/logout',{method:'POST'}).finally(()=>{
     TOKEN=null;localStorage.removeItem('pf_token');location.reload()});
 }
+/* Token wygasł w trakcie sesji. Bez location.reload(): offline reload w PWA
+   zostawiłby gołą stronę błędu Safari zamiast naszego ekranu logowania.
+   Flaga gasi lawinę równoległych 401 (kilka widoków odpytuje naraz);
+   boot() zdejmuje ją po ponownym zalogowaniu. */
+let _expired=false;
+function sessionExpired(){
+  if(_expired)return;_expired=true;
+  TOKEN=null;ME=null;
+  try{localStorage.removeItem('pf_token')}catch(e){}
+  $('app').classList.add('hidden');$('verify-gate')?.classList.add('hidden');
+  $('auth').classList.remove('hidden');
+  authTab('login');loadAuthStats();
+  toast('Your session has expired. Please sign in again.','err',8000);
+}
+/* Zimny start bez zasięgu NIE wylogowuje: token zostaje w localStorage,
+   klient dostaje pełnoekranowe „Try again". Wcześniej KAŻDY błąd /api/auth/me
+   (także timeout w metrze) kasował token i wymuszał ponowne logowanie. */
+function bootRetry(msg){
+  let el=$('boot-retry');
+  if(!el){
+    el=document.createElement('div');el.id='boot-retry';
+    el.innerHTML='<div class="br-card"><h3>Can’t reach the server</h3><p></p>'
+      +'<button class="btn-p">Try again</button></div>';
+    el.querySelector('button').onclick=()=>{el.remove();boot()};
+    document.body.appendChild(el);
+  }
+  el.querySelector('p').textContent=msg||'Check your connection and try again.';
+}
 /* Benefit numbers on the login screen — REAL platform stats only; each card
    renders only past an honesty threshold, an empty strip simply stays hidden. */
 async function loadAuthStats(){
@@ -550,9 +583,13 @@ async function loadAuthStats(){
 /* ---------- return from payment ---------- */
 async function handlePaymentReturn(){
   const q=new URLSearchParams(location.search);
+  const mo=q.get('mock_order');
+  /* Parametry powrotu z płatności są JEDNORAZOWE. Bez replaceState zostawały
+     w adresie, a iOS po ubiciu appki przeładowuje bieżący URL — klient widział
+     „Payment received… account is being created" tygodnie po zakupie. */
+  if(q.get('paid')||q.get('canceled')||mo)history.replaceState(null,'','/portal');
   if(q.get('paid')){toast('✅ Payment received. Your MT5 account is being created. Credentials will appear under Challenges and in your inbox.','ok',9000);go('accounts');return true}
   if(q.get('canceled')){toast('Payment canceled. Nothing was charged.','err');return false}
-  const mo=q.get('mock_order');
   if(mo){try{
     const prov=await api(`/api/checkout/${mo}/mock-complete`,{method:'POST'});
     toast(prov.provisioning?'✅ Payment received. Your MT5 account is being created (up to a minute).':'✅ Account created. Credentials under Challenges.','ok',9000);
@@ -590,7 +627,14 @@ async function boot(){
     authTab(q0.get('buy')?'signup':'login');
     if(q0.get('buy'))$('auth-buynote').classList.remove('hidden');
     loadAuthStats();return}
-  try{ME=await api('/api/auth/me')}catch(e){logout();return}
+  _expired=false; /* świeże logowanie — łapacz 401 znowu uzbrojony */
+  try{ME=await api('/api/auth/me')}
+  catch(e){
+    /* 401: sessionExpired() w api() już wyczyścił token i pokazał logowanie.
+       Wszystko inne to sieć/timeout — token ZOSTAJE, dajemy przycisk Retry. */
+    if(!TOKEN)return;
+    bootRetry(e&&e.message);return;
+  }
   /* Admin accounts live in /admin only. The server already bounces them off
      /portal by the session cookie; this covers the leftover state where the
      cookie is gone but the localStorage token still works. */
@@ -625,6 +669,11 @@ async function boot(){
      deep link), finally ?view= from the URL (cold start via openWindow). */
   const widok=(await pendingNavView())||q.get('view');
   if(q.get('upsell')==='1')window._upsellJump=true;
+  /* ?view/?upsell skonsumowane — bez sprzątnięcia każdy kolejny reload PWA
+     skakał do starego deep linka. ?buy zostaje: konsumuje go (i czyści)
+     highlightPlanFromUrl() dopiero przy renderze sklepu. */
+  if(q.get('view')||q.get('upsell'))
+    history.replaceState(null,'','/portal'+(q.get('buy')?'?buy='+encodeURIComponent(q.get('buy')):''));
   /* view_open leci z go() — kazda nawigacja, nie tylko start appki */
   go(q.get('buy')?'store':(widok&&VIEWS[widok]?widok:'accounts'));
   refreshNotif();
@@ -747,6 +796,9 @@ function toggleCollapse(){
 function highlightPlanFromUrl(){
   const key=new URLSearchParams(location.search).get('buy');
   if(!key)return;
+  /* Jednorazowy deep link: bez sprzątnięcia każdy reload PWA znowu otwierał
+     modal zakupu. Czyścimy TU (nie w boot), bo sklep renderuje się async. */
+  history.replaceState(null,'','/portal');
   const card=document.querySelector(`[data-plan="${CSS.escape(key)}"]`);
   if(!card)return;
   card.classList.add('hl');

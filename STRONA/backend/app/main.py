@@ -28,11 +28,12 @@ from time import monotonic
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 
@@ -285,6 +286,22 @@ async def lifespan(app: FastAPI):
 # wystawialoby cala mape API kazdemu.
 app = FastAPI(title=f"{settings.site_name} API", version="0.7.0", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
+
+
+@app.exception_handler(RequestValidationError)
+async def _ludzkie_422(request: Request, exc: RequestValidationError):
+    """Pydantic oddaje listę słowników, a portal pokazuje `detail` wprost —
+    klient widział «[object Object]». Składamy z pierwszego błędu jedno zdanie:
+    etykietę pola (bez technicznego «body»/«query») plus komunikat walidatora."""
+    err = (exc.errors() or [{}])[0]
+    loc = [str(czlon) for czlon in err.get("loc", ())
+           if czlon not in ("body", "query", "path")]
+    pole = loc[-1].replace("_", " ").capitalize() if loc else ""
+    msg = err.get("msg") or "Invalid value"
+    return JSONResponse(status_code=422,
+                        content={"detail": f"{pole}: {msg}" if pole else msg})
+
+
 class _CachedStatic(StaticFiles):
     """StaticFiles z sensownym Cache-Control.
 
@@ -1457,6 +1474,15 @@ class PayoutReqIn(BaseModel):
     method: str = "bank"
     amount: float | None = None      # None = cała dostępna działka tradera
     details: dict | None = None      # dane wypłaty zależne od metody
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _przecinek_dziesietny(cls, v):
+        # Europejska klawiatura numeryczna na telefonie podpowiada przecinek —
+        # "123,45" ma przejść jako 123.45, nie wywalić się na float_parsing.
+        if isinstance(v, str):
+            return v.strip().replace(",", ".")
+        return v
 
 
 # Pola WYMAGANE per metoda — bez nich admin nie ma jak wykonać przelewu.
