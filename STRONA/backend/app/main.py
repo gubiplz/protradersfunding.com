@@ -604,6 +604,20 @@ def _konto_nie_import(session):
     return or_(Account.trader_id.is_(None), ~Account.trader_id.in_(techniczni))
 
 
+def _placacy_id(session):
+    """Traderzy, którzy ZAPŁACILI — kryterium podziału „klient vs. free signup".
+
+    Płacący = ma opłacone zamówienie za >$0, które nie jest grantem. Grant
+    (provider="grant", $0) to konto wręczone za darmo — BOGO, prezent od
+    admina, import archiwalnej wypłaty — więc sam w sobie nie robi z nikogo
+    klienta. Rejestracja też nie: lead, który założył konto portalowe i nigdy
+    nie kupił, ma nie zaśmiecać list i statystyk, po których patrzy się na
+    BIZNES. Kanał płatności (stripe/mock/manual) jest celowo bez znaczenia.
+    """
+    return session.query(Order.trader_id).filter(
+        Order.status == "paid", Order.provider != "grant", Order.amount_usd > 0)
+
+
 def _konto_wreczone():
     """Konto, które NAPRAWDĘ komuś wydaliśmy — bez wierszy archiwalnych.
 
@@ -5314,7 +5328,7 @@ def admin_pool_delete(pool_id: int):
 #  Publiczne: konta (admin read), leaderboard, certyfikat                      #
 # --------------------------------------------------------------------------- #
 @app.get("/api/accounts", dependencies=[Depends(auth.require_admin)])
-def list_accounts(imported: int = 0):
+def list_accounts(imported: int = 0, free: int = 0):
     session = SessionLocal()
     try:
         # Data płatności do kolumny "Paid" — jedno zapytanie zamiast N per konto.
@@ -5326,6 +5340,18 @@ def list_accounts(imported: int = 0):
         # Najnowsze konto na górze: panel czyta tę listę jak oś czasu,
         # a świeżo otwarte konto to zwykle to, po które admin przyszedł.
         konta = session.query(Account)
+        if free:
+            # Zakładka „Free signups": konta ludzi bez żadnej płatności.
+            # Konta z puli (trader_id NULL) to magazyn, nie signup — zostają
+            # w widoku głównym, żeby kolejka provisioningu nie znikała.
+            konta = konta.filter(Account.trader_id.isnot(None),
+                                 ~Account.trader_id.in_(_placacy_id(session)))
+        elif not imported:
+            # Widok domyślny: płacący + pula. Jawna gałąź na NULL z tego
+            # samego powodu co w `_konto_nie_import` — `IN (…)` odrzuciłoby
+            # NULL-e po cichu. `?imported=1` dalej znaczy „pokaż WSZYSTKO".
+            konta = konta.filter(or_(Account.trader_id.is_(None),
+                                     Account.trader_id.in_(_placacy_id(session))))
         if not imported:
             konta = konta.filter(_konto_nie_import(session))
         for a in konta.order_by(Account.created_at.desc(), Account.id.desc()).all():
@@ -6249,17 +6275,26 @@ def stats():
     try:
         # GROUP BY zamiast ciągnięcia wszystkich kont do Pythona: kafelki
         # potrzebują tylko liczników per status, a tabela rośnie bez końca.
+        # Liczniki BIZNESOWE widzą tylko konta płacących (plus pulę bez
+        # właściciela) — darmowe signupy zawyżały je, nie wnosząc ani centa.
+        placacy = _placacy_id(session)
         by_status: dict[str, int] = dict(
             session.query(Account.status, func.count(Account.id))
+            .filter(or_(Account.trader_id.is_(None), Account.trader_id.in_(placacy)))
             .group_by(Account.status).all())
         # Licznik traderów brał WSZYSTKIE nieadministracyjne wiersze, a każda
         # wypłata z Payout BOT-a i z importu CSV zakłada własnego tradera —
         # przy jednej wypłacie dziennie ten kafelek rósł sam z siebie i nie
         # odpowiadał już na pytanie „ilu mam klientów". Rekordy techniczne mają
         # adres `…@imported.local` (patrz `payout_import._email_techniczny`),
-        # więc rozdzielenie jest jednoznaczne, a nie zgadywane.
+        # więc rozdzielenie jest jednoznaczne, a nie zgadywane. Od podziału
+        # płacący/free „klient" znaczy dosłownie: ktoś, kto zapłacił.
         klienci = (session.query(Trader)
                    .filter(Trader.is_admin == False,                       # noqa: E712
+                           Trader.id.in_(placacy)).count())
+        darmowi = (session.query(Trader)
+                   .filter(Trader.is_admin == False,                       # noqa: E712
+                           Trader.id.notin_(placacy),
                            ~Trader.email.like(f"%{payout_import.TECHNICZNA_DOMENA}")).count())
         wewnetrzni = (session.query(Trader)
                       .filter(Trader.is_admin == False,                    # noqa: E712
@@ -6279,12 +6314,17 @@ def stats():
                 # nie objawia się NICZYM aż do zgłoszenia „nie dostałem maila".
                 "notify_mail_missing": notify.czego_brakuje(),
                 "traders": klienci, "traders_internal": wewnetrzni,
+                "traders_free": darmowi,
                 # Granty ($0, provider="grant") to nie sprzedaż — liczone tutaj
                 # zawyżałyby "paid orders" o darmowe konta z promocji BOGO.
                 "orders_paid": (session.query(Order)
                                 .filter(Order.status == "paid", Order.provider != "grant").count()),
                 "pool_free": session.query(PoolAccount).filter(PoolAccount.claimed == False).count(),  # noqa: E712
-                "provisioning": by_status.get("provisioning", 0),
+                # Provisioning to kolejka OPERACYJNA, nie statystyka — konto
+                # free signupa czekające na login MT5 też trzeba obsłużyć,
+                # więc licznik celowo omija filtr płacących z `by_status`.
+                "provisioning": (session.query(Account)
+                                 .filter(Account.status == "provisioning").count()),
                 # Kafelek na Overview pokazuje się tylko przy porażkach —
                 # cicha awaria SMTP ma być widoczna bez wchodzenia w Mail.
                 "mail_failed_7d": (session.query(MailLog)

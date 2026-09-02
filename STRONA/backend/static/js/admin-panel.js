@@ -475,6 +475,7 @@ const VIEWS={
       ${tile('purple','layers','Accounts',s.total,`${s.active} active · ${s.provisioning??0} provisioning`)}
       ${tile('green','trend','Funded',s.funded,`${s.failed} failed`)}
       ${tile('blue','users','Traders',s.traders,`${s.orders_paid} paid orders`
+        +(s.traders_free?` · ${s.traders_free} free signups hidden`:'')
         +(s.traders_internal?` · ${s.traders_internal} internal hidden`:''))}
       ${tile('orange','dollar','Revenue','$'+fmt0(revenue),'all paid orders')}
     </div>
@@ -492,9 +493,14 @@ const VIEWS={
  },
 
  async accounts(){
-  const list=await api('/api/accounts'+impQ());
-  window._accs=list;
   window._accFilter=window._accFilter||'all';
+  /* "Free signups" to INNY zbior danych z serwera (konta bez platnosci),
+     nie filtr po statusie -- domyslna lista w ogole ich nie zawiera. */
+  const ps=[];
+  if(window._accFilter==='free')ps.push('free=1');
+  if(IMPORTED)ps.push('imported=1');
+  const list=await api('/api/accounts'+(ps.length?'?'+ps.join('&'):''));
+  window._accs=list;
   renderAccounts();
  },
 
@@ -907,14 +913,14 @@ function renderAccounts(){
   const list=window._accs||[];
   const q=(window._accQ||'').toLowerCase();
   const f=window._accFilter;
-  const rows=list.filter(a=>(f==='all'||a.status===f)&&
+  const rows=list.filter(a=>(f==='all'||f==='free'||a.status===f)&&
     (!q||String(a.login).includes(q)||(a.trader_name||'').toLowerCase().includes(q)
       ||(a.trader_email||'').toLowerCase().includes(q)||(a.product_key||'').includes(q)));
-  const seg=[['all','All'],['active','Evaluation'],['funded','Funded'],['failed','Failed'],['provisioning','Provisioning']];
+  const seg=[['all','All'],['active','Evaluation'],['funded','Funded'],['failed','Failed'],['provisioning','Provisioning'],['free','Free signups']];
   $('view').innerHTML=`
     <div class="toolbar">
       ${searchBox('acc-q','_accQ','renderAccounts','Search login, trader, email or plan…')}
-      <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._accFilter='${f===k?'all':k}';renderAccounts()">${l}</button>`).join('')}</div>
+      <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="accSeg('${k}')">${l}</button>`).join('')}</div>
       <span class="count-pill">${rows.length} of ${list.length}${impPill()}</span>
     </div>
     ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.accounts.v2">
@@ -941,6 +947,15 @@ function renderAccounts(){
             XBTN(`deleteAccountRow(${a.id},'${jsq(a.login)}','${jsq(a.trader_name||'')}')`,'Delete account')}</td></tr>`}).join('')}
       </tbody></table></div>`
       :`<div class="empty"><h3>No accounts match</h3><p>Try a different search or filter.</p></div>`}`;
+}
+
+/* Przejscie do/z "Free signups" wymaga NOWEJ listy z serwera; pozostale
+   przyciski tylko filtruja te, ktora juz jest w przegladarce. */
+function accSeg(k){
+  const prev=window._accFilter;
+  window._accFilter=(prev===k)?'all':k;
+  if((prev==='free')!==(window._accFilter==='free'))go('accounts');
+  else renderAccounts();
 }
 
 /* ---------- kyc: seg buttons need a global to call ---------- */

@@ -28,7 +28,7 @@ from app import auth  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Account, Payout, Trader  # noqa: E402
+from app.models import Account, Order, Payout, Trader  # noqa: E402
 
 init_db()
 client = TestClient(app)
@@ -55,6 +55,13 @@ def dane():
         if email == IMPORTOWY:
             acc = s.query(Account).filter(Account.login == login).one()
             s.add(Payout(account_id=acc.id, profit_amount=3100, trader_share=2480, paid=True))
+            s.commit()
+        else:
+            # „Prawdziwa klientka" znaczy: ZAPŁACIŁA. Odkąd panel domyślnie
+            # chowa darmowe signupy (test_podzial_placacy_free), sama
+            # rejestracja nie wystarcza, żeby być na listach ludzi.
+            s.add(Order(trader_id=tr.id, product_key="2step-50k",
+                        amount_usd=299.0, status="paid", provider="manual"))
             s.commit()
     # Konto z puli: nikt go jeszcze nie odebrał, więc nie ma właściciela.
     s.add(Account(login="POOL70001", trader_id=None, trader_name="",

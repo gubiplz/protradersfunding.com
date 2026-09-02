@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app import auth, catalog  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Account, Trader  # noqa: E402
+from app.models import Account, Order, Trader  # noqa: E402
 
 init_db()
 _s = SessionLocal()
@@ -39,6 +39,12 @@ def _trader_z_kontem(email: str):
                   peak_equity=10_000, day_start_equity=10_000, day_start_balance=10_000,
                   status="active", phase="eval_1")
     s.add(acc); s.commit()
+    # Płacący klient — domyślna lista /api/accounts pokazuje tylko takich
+    # (test_podzial_placacy_free), a te testy pytają o widoczność haseł, nie
+    # o segmentację.
+    s.add(Order(trader_id=tr.id, product_key="2step-10k", amount_usd=99.0,
+                status="paid", provider="manual"))
+    s.commit()
     tid, aid = tr.id, acc.id
     s.close()
     return tid, aid, auth.make_token(tid)
