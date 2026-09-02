@@ -158,10 +158,13 @@ def test_wejscia_do_portalu_rozpisane_na_widoki():
 
 def test_wejscia_do_portalu_zwijane_per_dzien():
     tid, _, _ = _trader()
-    wczoraj = datetime.utcnow() - timedelta(days=1)
+    # Kotwica w południe UTC: dziennik zwija po dobie WARSZAWSKIEJ, więc test
+    # odpalony wieczorem przepychał „wczoraj + 90 min" za warszawską północ.
+    poludnie = datetime.utcnow().replace(hour=12, minute=0, second=0, microsecond=0)
+    wczoraj = poludnie - timedelta(days=1)
     s = SessionLocal()
     for chwila in (wczoraj, wczoraj + timedelta(minutes=5),
-                   wczoraj + timedelta(minutes=90), datetime.utcnow()):
+                   wczoraj + timedelta(minutes=90), poludnie):
         s.add(TelemetryEvent(trader_id=tid, name="view_open", created_at=chwila))
     s.commit(); s.close()
     labels = _labels(_journal(tid))

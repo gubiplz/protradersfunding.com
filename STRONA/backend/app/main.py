@@ -4007,6 +4007,47 @@ def admin_bot_stop(account_id: int):
         session.close()
 
 
+class BackfillIn(BaseModel):
+    days: int = 14
+    # Zmniejszane bez deployu, gdy porcja 3 dni symulacji nie mieści się
+    # w limicie czasu funkcji serverless na produkcyjnej bazie.
+    chunk_days: float = 3.0
+
+
+@app.post("/api/admin/accounts/{account_id}/bot/backfill",
+          dependencies=[Depends(auth.require_admin)])
+def admin_bot_backfill(account_id: int, payload: BackfillIn):
+    """Dogrywa botowi historię wstecz, jakby handlował od `days` dni.
+
+    Świeżo włączony bot potrzebuje tygodni realnego czasu, żeby krzywa equity
+    i miejsce w rankingu wyglądały na dojrzałe — a pusta tablica wyników nie
+    może tygodniami czekać na kosmetykę. Odtwarzanie idzie tym samym silnikiem
+    co żywy przebieg (szczegóły w `poller.backfill_bot`).
+
+    Wyłącznie konta FIRMOWE — bez właściciela i bez rachunku MT5 za plecami.
+    Klientowi historii się nie dopisuje: jego wykres to zapis faktów, nie
+    scenografia. `done=false` w odpowiedzi znaczy „wołaj dalej".
+    """
+    if not 1 <= payload.days <= 45:
+        raise HTTPException(400, "days must be between 1 and 45")
+    if not 0.25 <= payload.chunk_days <= 5:
+        raise HTTPException(400, "chunk_days must be between 0.25 and 5")
+    session = SessionLocal()
+    try:
+        acc = session.get(Account, account_id)
+        if not acc:
+            raise HTTPException(404, "Account not found")
+        if acc.trader_id is not None or acc.mt5_backed:
+            raise HTTPException(400, "History can only be backfilled on house accounts "
+                                     "(no owner, no real MT5 behind them)")
+        if not acc.bot_enabled:
+            raise HTTPException(400, "Start the Trade BOT first")
+        return poller.backfill_bot(session, acc, payload.days,
+                                   chunk_days=payload.chunk_days)
+    finally:
+        session.close()
+
+
 def _kyc_dict(t: Trader) -> dict:
     return {"trader_id": t.id, "email": t.email, "full_name": t.kyc_fullname,
             "country": t.kyc_country, "doc_ref": t.kyc_doc_ref,

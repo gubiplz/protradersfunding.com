@@ -9,6 +9,7 @@ Stan żyje w bazie (Account.*), więc restart procesu nie gubi postępu.
 from __future__ import annotations
 
 import asyncio
+import random
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -17,7 +18,7 @@ from sqlalchemy import func, select
 from .config import get_settings
 from .db import SessionLocal
 from .feed import Feed, make_feed
-from .models import Account, Breach, EquitySnapshot
+from .models import Account, AppSetting, Breach, EquitySnapshot, Trade
 from . import catalog, notify, provisioning, push, rules, tradebot
 from .rules import AccountRuntime, EquityTick, Phase, Status
 
@@ -303,6 +304,129 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
                 print(f"[poller] limit warning: {e}", flush=True)
 
 
+BACKFILL_LOCK_KEY = "bot_backfill_lock"
+BACKFILL_LOCK_TTL_SEC = 15 * 60
+# Backfill kończy godzinę przed „teraz" i od tego momentu konto przejmuje żywy
+# poller. Bufor jest też filtrem kursora: snapshoty dopisane przez lazy-tick
+# W TRAKCIE dogrywania mają ts przy „teraz", więc nie zafałszują wznowienia.
+BACKFILL_MARGIN = timedelta(hours=1)
+
+
+def _backfill_locked_id(session) -> int | None:
+    """Konto, któremu backfill właśnie dogrywa historię — poller je omija.
+
+    Bez zamka lazy-tick z ruchu publicznego wpycha się między odtwarzane kroki
+    z dzisiejszym `day_key` i saldem sprzed dwóch tygodni: baseline'y dnia
+    skaczą tam i z powrotem, licznik dni handlowych rośnie podwójnie, a wykres
+    dostaje samotny punkt „dziś" w środku przeszłości. Zamek siedzi w bazie,
+    bo na serverless backfill i lazy-tick to osobne procesy. Stary zamek
+    (proces ubity w połowie) wygasa po kwadransie — konto nie może zostać
+    wyłączone z silnika na zawsze."""
+    row = session.get(AppSetting, BACKFILL_LOCK_KEY)
+    if not row or not row.value:
+        return None
+    try:
+        aid, ts = row.value.split(":", 1)
+        if time.time() - float(ts) > BACKFILL_LOCK_TTL_SEC:
+            return None
+        return int(aid)
+    except ValueError:
+        return None
+
+
+def backfill_bot(session, acc: Account, days: int, *, chunk_days: float = 3.0,
+                 step_min: float = 20.0) -> dict:
+    """Dogrywa kontu botowemu historię WSTECZ, jakby bot działał od `days` dni.
+
+    Odtwarza przeszłość TYM SAMYM silnikiem co żywy przebieg (`tradebot.tick`
+    + `rules.evaluate` + snapshot), tylko z zegarem przestawionym w tył — konto
+    dostaje pełną tabelę transakcji, krzywą equity i naliczone dni handlowe,
+    a nie gołe saldo. Pierwsze wywołanie cofa też metrykę startu konta
+    (`created_at`/`started_at`/`bot_started_at`) — historia starsza niż konto
+    zdradzałaby dogrywkę na pierwszy rzut oka.
+
+    Jeden request odtwarza najwyżej `chunk_days` dni symulacji: pełne
+    kilkadziesiąt dni to tysiące zapytań do bazy i na serverless wypada z limitu
+    czasu. `done=False` w odpowiedzi znaczy „wołaj jeszcze raz" — kursor wznowień
+    to ostatni snapshot sprzed marginesu, więc kolejne wywołania są odporne na
+    powtórki i przerwany proces."""
+    now = datetime.now(timezone.utc)
+    koniec = now - BACKFILL_MARGIN
+    ostatni = (session.query(func.max(EquitySnapshot.ts))
+               .filter(EquitySnapshot.account_id == acc.id,
+                       EquitySnapshot.ts < koniec.replace(tzinfo=None)).scalar())
+    if ostatni is None:
+        # Czysta karta przed cofnięciem zegara: żywy tick (lazy-tick z ruchu
+        # publicznego) potrafi między startem bota a pierwszym backfillem otworzyć
+        # pozycję z DZISIEJSZĄ datą i zamknięciem w realnej przyszłości — replay
+        # nigdy jej nie domknie i przesiedzi całą dogrywkę bez jednej transakcji.
+        session.query(Trade).filter(Trade.account_id == acc.id).delete()
+        session.query(EquitySnapshot).filter(EquitySnapshot.account_id == acc.id).delete()
+        acc.balance = acc.equity = acc.peak_equity = acc.initial_balance
+        acc.day_start_equity = acc.day_start_balance = acc.initial_balance
+        acc.open_pnl = 0.0
+        acc.best_day_profit = 0.0
+        acc.trading_days_count = 0
+        acc.last_counted_trading_day = ""
+        start = now - timedelta(days=days)
+        acc.bot_started_at = start
+        acc.created_at = start
+        acc.started_at = start
+        acc.day_key = server_day_key(start + timedelta(hours=settings.server_utc_offset_hours))
+        kursor = start
+    else:
+        kursor = ostatni if ostatni.tzinfo else ostatni.replace(tzinfo=timezone.utc)
+    stop = min(kursor + timedelta(days=chunk_days), koniec)
+
+    rng = random.Random(f"{acc.bot_seed}:backfill:{kursor.isoformat()}")
+    t, kroki, padlo = kursor, 0, False
+    while True:
+        # Krok z jitterem: sztywna siatka co równe 20 minut wyglądałaby jak
+        # stempel generatora — żywe ticki przychodzą z ruchem i cronem, nierówno.
+        t = t + timedelta(minutes=step_min * rng.uniform(0.7, 1.3))
+        if t > stop:
+            break
+        snap = tradebot.tick(session, acc, t)
+        srv = t + timedelta(hours=settings.server_utc_offset_hours)
+        started = acc.started_at if acc.started_at.tzinfo else acc.started_at.replace(tzinfo=timezone.utc)
+        cfg = rules.config_from_account(acc)
+        rt = _runtime_from(acc)
+        tick = EquityTick(
+            equity=snap.equity, balance=snap.balance, open_pnl=snap.open_pnl,
+            volume_lots=snap.volume_lots, volume_known=snap.volume_known,
+            day_key=server_day_key(srv), has_open_position=snap.has_open_position,
+            days_elapsed=(srv - started).days,
+        )
+        res = rules.evaluate(cfg, rt, tick)
+        _write_runtime(acc, rt)
+        session.add(EquitySnapshot(account_id=acc.id, ts=t.replace(tzinfo=None),
+                                   balance=snap.balance, equity=snap.equity,
+                                   open_pnl=snap.open_pnl, day_key=tick.day_key))
+        kroki += 1
+        for btype, detail, eq in res.breaches:
+            session.add(Breach(account_id=acc.id, type=btype.value, detail=detail,
+                               equity_at_breach=eq))
+        if res.failed:
+            acc.closed_at = t
+            padlo = True
+            break
+
+    done = padlo or stop >= koniec
+    zamek = session.get(AppSetting, BACKFILL_LOCK_KEY)
+    if zamek is None:
+        zamek = AppSetting(key=BACKFILL_LOCK_KEY, value="")
+        session.add(zamek)
+    zamek.value = "" if done else f"{acc.id}:{time.time()}"
+    session.commit()
+    transakcje = (session.query(func.count(Trade.id))
+                  .filter(Trade.account_id == acc.id).scalar() or 0)
+    return {"done": done, "failed": padlo, "steps": kroki, "trades": int(transakcje),
+            "simulated_to": min(t, stop).isoformat(),
+            "balance": round(acc.balance, 2),
+            "profit_pct": round((acc.balance - acc.initial_balance)
+                                / acc.initial_balance * 100, 2)}
+
+
 def _active_query(session):
     return session.query(Account).filter(Account.status.in_(["active", "funded"]))
 
@@ -322,8 +446,11 @@ async def tick_once() -> dict:
     session = SessionLocal()
     try:
         accounts = _active_query(session).all()
+        w_dogrywce = _backfill_locked_id(session)
         bledy = 0
         for acc in accounts:
+            if acc.id == w_dogrywce:
+                continue
             # Awaria jednego konta (feed, broker, baza) nie może zatrzymać
             # przetwarzania pozostałych — na serverless kolejna szansa jest
             # dopiero za dobę. Rollback czyści sesję z niedokończonego stanu.

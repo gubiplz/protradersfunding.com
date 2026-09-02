@@ -909,14 +909,18 @@ function renderTickets(){
       <div class="tbl-wrap">`+closed.map(row).join('')+`</div></div>`:'');
 }
 
+/* Konto firmowe: bez właściciela i bez rachunku MT5 za plecami — czysty bot
+   pod tablicę wyników. Osobna zakładka, a pozostałe filtry ich NIE pokazują:
+   wymieszane z klientami zawyżałyby każdy rzut oka na realną sprzedaż. */
+const isHouse=a=>!a.trader_id&&!a.mt5_backed;
 function renderAccounts(){
   const list=window._accs||[];
   const q=(window._accQ||'').toLowerCase();
   const f=window._accFilter;
-  const rows=list.filter(a=>(f==='all'||f==='free'||a.status===f)&&
+  const rows=list.filter(a=>(f==='house'?isHouse(a):!isHouse(a)&&(f==='all'||f==='free'||a.status===f))&&
     (!q||String(a.login).includes(q)||(a.trader_name||'').toLowerCase().includes(q)
       ||(a.trader_email||'').toLowerCase().includes(q)||(a.product_key||'').includes(q)));
-  const seg=[['all','All'],['active','Evaluation'],['funded','Funded'],['failed','Failed'],['provisioning','Provisioning'],['free','Free signups']];
+  const seg=[['all','All'],['active','Evaluation'],['funded','Funded'],['failed','Failed'],['provisioning','Provisioning'],['free','Free signups'],['house','House bots']];
   $('view').innerHTML=`
     <div class="toolbar">
       ${searchBox('acc-q','_accQ','renderAccounts','Search login, trader, email or plan…')}
