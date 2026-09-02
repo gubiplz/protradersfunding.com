@@ -555,6 +555,9 @@ def test_zaproszenie_jest_jednorazowe(maile):
     r = client.post("/api/auth/reset",
                     json={"token": zaproszenie, "password": "drugieUzycie1"})
     assert r.status_code == 400
+    # "already set" to kontrakt z portalem (portal-app.js przełącza wtedy na
+    # logowanie) — przeredagowanie komunikatu bez tej frazy psuje UX po cichu.
+    assert "already set" in r.json()["detail"]
     assert client.post("/api/auth/login",
                        json={"email": email, "password": "pierwszeUzycie1"}).status_code == 200
 

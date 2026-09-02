@@ -742,7 +742,14 @@ def reset_password(payload: ResetIn, response: Response):
         if pwf and pwf != auth._pw_fp(tr.password_hash):
             # Hash już inny niż przy wysyłce linku — link zużyty albo hasło
             # zmienione w międzyczasie. (Tokeny bez pwf: krotkie okno przejsciowe.)
-            raise HTTPException(400, "This reset link has already been used. Request a new one")
+            # W KAŻDYM z tych przypadków hasło już istnieje, więc „poproś o nowy
+            # link" to zła rada — klient z dwoma mailami (zakup + BOGO) klikał
+            # drugi link i szedł w reset, mając świeżo ustawione hasło. Fraza
+            # "already set" jest markerem dla portalu (przełącza na logowanie).
+            raise HTTPException(400, "Your password is already set — this link was "
+                                     "used or replaced by a newer one. Log in with "
+                                     "your password, or request a new link if you "
+                                     "don't remember it")
         # PRZED zapisem, bo za chwilę flaga znika: to jedyne miejsce, w którym
         # widać różnicę między „klient odebrał konto z zaproszenia" (dziennik
         # w panelu żyje z tego rozróżnienia) a zwykłym „zapomniałem hasła".

@@ -360,7 +360,14 @@ async function doAuth(){
       if(r.token){TOKEN=r.token;localStorage.setItem('pf_token',TOKEN);
         toast('Password changed. Welcome back!','ok',7000);unlock();await boot();return}
       toast('Password changed. Log in with your new password.','ok',8000);authTab('login');
-    }catch(e){toast('Error: '+e.message,'err')}
+    }catch(e){toast('Error: '+e.message,'err',9000);
+      /* "already set" = marker z backendu: hasło już istnieje (np. drugi mail
+         przy BOGO niesie własny, martwy już token) — formularz resetu jest
+         wtedy ślepą uliczką, więc od razu pokazujemy logowanie. */
+      if(/already set/i.test(String(e.message))){
+        window._resetToken=null;history.replaceState(null,'','/portal');authTab('login');
+      }
+    }
     unlock();return;
   }
   /* Checked here so the customer sees it next to the field instead of getting
