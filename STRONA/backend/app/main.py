@@ -9304,6 +9304,12 @@ def portal(request: Request):
     # nie istnieje, wiec zalogowany admin jest odsylany od progu. Bez sesji
     # admina strona dziala normalnie: to tu jest jedyny ekran logowania,
     # takze dla administratorow.
-    if _admin_z_ciasteczka(request) is not None:
+    # Wyjatek ?impersonate=: swiadome wejscie admina „oczami klienta" (przycisk
+    # w panelu). Bez furtki odbicie ucina impersonacje dokladnie na tej
+    # maszynie, ktora JEST zalogowana jako admin — czyli jedynej, gdzie
+    # przycisk w ogole wystepuje. Sam parametr nic nie otwiera: bez waznego
+    # tokenu w srodku portal pokazuje zwykly ekran logowania.
+    if _admin_z_ciasteczka(request) is not None \
+            and "impersonate" not in request.query_params:
         return RedirectResponse("/admin", status_code=302)
     return _page(request, "portal.html")

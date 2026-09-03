@@ -104,3 +104,27 @@ def test_podglad_nie_smieci_w_dzienniku():
 def test_brak_tradera_to_404():
     assert client.post("/api/admin/traders/999999/impersonate",
                        headers=ADMIN).status_code == 404
+
+
+def test_cookie_admina_nie_ucina_impersonacji():
+    """Na maszynie admina /portal odbija do /admin po cookie sesji — czyli
+    dokładnie tam, gdzie ktoś klika „View portal as client", przekierowanie
+    zjadało ?impersonate= zanim JS zdążył go odebrać. Na dev bez cookie
+    działało, na produkcji nie: klasyczna różnica środowisk, stąd ten test."""
+    s = SessionLocal()
+    # Email unikalny w CAŁYM pakiecie: przy pełnym przebiegu wszystkie pliki
+    # testów dzielą jedną bazę (pierwszy import app.db wygrywa DATABASE_URL).
+    tr = Trader(email="wlasciciel-impersonacji@test.pl",
+                password_hash=auth.hash_password("haslo12345"),
+                full_name="Właściciel", referral_code="IMPADMIN1", is_admin=True)
+    s.add(tr); s.commit(); aid = tr.id; s.close()
+    ciastko = {"pf_session": auth.make_token(aid)}
+
+    # Kontrola: bez parametru admin dalej jest odsyłany do panelu.
+    r = client.get("/portal", cookies=ciastko, follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == "/admin"
+
+    # Z parametrem strona portalu MA się wyrenderować — token odbierze JS.
+    r = client.get("/portal?impersonate=cokolwiek", cookies=ciastko,
+                   follow_redirects=False)
+    assert r.status_code == 200
