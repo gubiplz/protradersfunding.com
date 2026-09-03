@@ -4048,6 +4048,86 @@ def admin_bot_backfill(account_id: int, payload: BackfillIn):
         session.close()
 
 
+@app.post("/api/admin/accounts/{account_id}/clear-history",
+          dependencies=[Depends(auth.require_admin)])
+def admin_clear_history(account_id: int):
+    """Zdejmuje z konta caly dorobek: transakcje, krzywa equity, breache.
+
+    Jedyna droga odwrotu po odpaleniu Trade BOT-a na zlym koncie. `Stop` tego
+    NIE odkreca: domyka pozycje po floatingu i zostawia obnizone saldo oraz
+    pelna historie, ktora trader widzi u siebie w portalu. Tutaj konto wraca
+    na kapital startowy biezacej fazy, jakby nikt na nim nie handlowal.
+
+    Bot gasnie razem z ustawieniami (styl, tempo, cel), zeby ponowny start byl
+    swiadomym wyborem — inaczej wyczyszczone konto zaczeloby zapelniac sie od
+    nowa na pierwszym ticku, tym samym botem, ktorego wlasnie odkrecamy. Dotyczy
+    to takze historii dogranej wstecz (`.../bot/backfill`) — ta znika tu razem
+    z reszta, bo lezy w tych samych tabelach.
+
+    Czego NIE ruszamy: fazy, certyfikatow i wyplat. Zaliczona faza to fakt
+    handlowy, a nie slad aktywnosci, i cofa sie ja osobno (`POST .../phase`);
+    certyfikat i wyplata to dokumenty, ktore mogly juz wyjsc do klienta.
+    """
+    session = SessionLocal()
+    try:
+        acc = session.get(Account, account_id)
+        if not acc:
+            raise HTTPException(404, "Account not found")
+
+        usunieto = {
+            "trades": (session.query(Trade).filter(Trade.account_id == acc.id)
+                       .delete(synchronize_session=False)),
+            "snapshots": (session.query(EquitySnapshot)
+                          .filter(EquitySnapshot.account_id == acc.id)
+                          .delete(synchronize_session=False)),
+            "breaches": (session.query(Breach).filter(Breach.account_id == acc.id)
+                         .delete(synchronize_session=False)),
+        }
+
+        # Bot gasi sie TU, a nie przez `tradebot.stop`: stop domyka otwarta
+        # pozycje i dopisuje jej floating do salda, ktore linijke nizej i tak
+        # cofamy do startowego. `bot_seed` schodzi razem z resztą, zeby kolejny
+        # start dobral persone od nowa.
+        acc.bot_enabled = False
+        acc.bot_paused = False
+        acc.bot_seed = None
+        acc.bot_style = None
+        acc.bot_pace = None
+        acc.bot_target_pct = 0.0
+        acc.bot_started_at = None
+
+        # Ten sam reset metryk co przy awansie fazy (`_ustaw_faze`), tylko bez
+        # zmiany fazy. `day_key` MUSI zejsc do pustego: zostawiony wskazuje dzien,
+        # ktorego baseline'u juz nie ma, a wtedy pierwszy tick porownalby equity
+        # z progiem dziennej straty policzonym dla skasowanej krzywej.
+        acc.balance = acc.initial_balance
+        acc.equity = acc.initial_balance
+        acc.open_pnl = 0.0
+        acc.peak_equity = acc.initial_balance
+        acc.day_key = ""
+        acc.day_start_equity = acc.initial_balance
+        acc.day_start_balance = acc.initial_balance
+        acc.best_day_profit = 0.0
+        acc.trading_days_count = 0
+        acc.last_counted_trading_day = ""
+        acc.limit_warn_daily_day = ""
+        acc.limit_warn_dd_day = ""
+        acc.breach_reason = None
+        acc.closed_at = None
+        # Konto zamkniete na zlamaniu reguly wraca do gry: powod breachu wlasnie
+        # zniknal razem z krzywa, a `failed` bez powodu to stan, ktorego panel
+        # nie umie wytlumaczyc. Konta w `provisioning` nie dotykamy — tam czeka
+        # sie na rachunek z puli, a nie na wynik handlu.
+        if acc.status == "failed":
+            acc.status = "funded" if acc.phase == "funded" else "active"
+
+        session.commit()
+        return {"cleared": account_id, "login": acc.login, "status": acc.status,
+                "balance": round(acc.balance, 2), **usunieto}
+    finally:
+        session.close()
+
+
 def _kyc_dict(t: Trader) -> dict:
     return {"trader_id": t.id, "email": t.email, "full_name": t.kyc_fullname,
             "country": t.kyc_country, "doc_ref": t.kyc_doc_ref,

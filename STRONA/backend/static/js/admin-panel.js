@@ -2610,6 +2610,8 @@ async function openAccount(id){
         add-on, and then the bot only touches crypto, the one market open on Saturday.</p>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn-o" style="border-color:var(--gold-line);color:var(--gold)" onclick="clearHistory(${a.id},'${esc(a.login)}')"
+        title="Deletes every trade and the whole equity curve, and puts the account back on its starting capital">Clear track record</button>
       <button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteAccount(${a.id},'${esc(a.login)}')">Delete account</button>
       ${a.trader_id?`<button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteTrader(${a.trader_id},'${esc(a.trader_email||a.trader_name||'')}')"
         title="Removes the client and ALL their data, freeing the e-mail for a fresh signup">Delete client &amp; all data</button>`:''}
@@ -3092,6 +3094,26 @@ async function stopBot(id){
     ok:'Stop the bot',danger:true}))return;
   try{const r=await api(`/api/admin/accounts/${id}/bot`,{method:'DELETE'});
     toast(`Bot stopped. Balance $${fmt(r.balance)}, and the account goes back to the live MT5 feed.`,'ok',8000);
+    openAccount(id);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+
+/* Wyjscie z bota odpalonego na zlym koncie. Stop tego nie zalatwia: zostawia
+   obnizone saldo i cala historie, ktora trader widzi u siebie w portalu.
+   Konto zostaje, wiec przycisk nie jest czerwony — ale dorobku nie da sie
+   odzyskac, dlatego mimo to pyta. */
+async function clearHistory(id,login){
+  if(!await askConfirm({title:`Clear the track record of ${esc(login)}?`,
+    body:'Every trade, the entire equity curve and any rule breaches are deleted, and the account goes '
+      +'back to the starting capital of its current phase — as if nobody had ever traded on it. '
+      +'<b>The Trade BOT is switched off</b> along with its style, pace and target, so starting it '
+      +'again is a fresh decision.<br><br>The phase, certificates and payouts are left alone. '
+      +'<b>This cannot be undone.</b>',
+    ok:'Clear the record',danger:true}))return;
+  try{
+    const r=await api(`/api/admin/accounts/${id}/clear-history`,{method:'POST'});
+    toast(`Track record cleared: ${r.trades} trade${r.trades===1?'':'s'} and ${r.snapshots} `
+      +`reading${r.snapshots===1?'':'s'} removed, balance back to $${fmt(r.balance)}.`,'ok',8000);
     openAccount(id);
   }catch(e){toast('Error: '+e.message,'err')}
 }
