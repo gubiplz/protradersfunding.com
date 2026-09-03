@@ -57,9 +57,26 @@ def make_token(trader_id: int, password_hash: str | None = None) -> str:
     return _serializer.dumps(payload)
 
 
+# Impersonacja z panelu („zobacz portal oczami klienta"): pełnoprawna sesja
+# tradera wystawiana adminowi bez znajomości hasła (w bazie leżą tylko skróty).
+# Krótka smycz zamiast 14 dni — to cudzy pęk kluczy w karcie przeglądarki
+# admina; flaga "imp" pozwala odróżnić taki ruch, żeby dziennik klienta nie
+# liczył podglądu jako jego aktywności.
+IMP_MAX_AGE = 60 * 60 * 2  # 2 godziny
+
+
+def make_impersonation_token(trader_id: int, password_hash: str | None = None) -> str:
+    payload: dict = {"tid": trader_id, "imp": 1}
+    if password_hash:
+        payload["pwf"] = _pw_fp(password_hash)
+    return _serializer.dumps(payload)
+
+
 def _parse_session(token: str) -> dict | None:
     try:
         data = _serializer.loads(token, max_age=TOKEN_MAX_AGE)
+        if data.get("imp"):
+            _serializer.loads(token, max_age=IMP_MAX_AGE)
         int(data["tid"])
         return data
     except (BadSignature, Exception):
@@ -163,6 +180,7 @@ def current_trader(request: Request,
     data = _parse_session(authorization.split(" ", 1)[1].strip())
     if data is None:
         raise HTTPException(401, "Invalid or expired token")
+    request.state.impersonated = bool(data.get("imp"))
     session = SessionLocal()
     try:
         trader = session.get(Trader, int(data["tid"]))

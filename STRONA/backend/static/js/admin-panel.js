@@ -2733,6 +2733,15 @@ function journalTimeline(items){
   }
   return out;
 }
+/* Podgląd portalu oczami klienta: token sesji z panelu, otwierany w nowej
+   karcie. Token idzie w URL-u i portal chowa go do sessionStorage — sesja
+   właściciela w localStorage zostaje nietknięta (wspólny origin!). */
+async function impersonate(tid){
+  try{
+    const r=await api(`/api/admin/traders/${tid}/impersonate`,{method:'POST'});
+    window.open('/portal?impersonate='+encodeURIComponent(r.token),'_blank');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
 async function renderClientCard(tid,email){
   const el=$('client-card'); if(!el)return;
   let d; try{d=await api(`/api/admin/traders/${tid}/journal`)}catch(e){
@@ -2745,6 +2754,7 @@ async function renderClientCard(tid,email){
     <div class="kv"><span>Signed up</span><b>${t.created_at?dstr(t.created_at):'—'}</b></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn-o sm" style="margin-top:10px" onclick="openTraderJournal(${tid},'${esc(t.email||email||'')}')">Full activity journal</button>
+      <button class="btn-o sm" style="margin-top:10px" onclick="impersonate(${tid})">View portal as client</button>
       ${kycAskBtn(t,'card')}
     </div>`;
 }
@@ -2753,7 +2763,7 @@ async function openTraderJournal(tid,email){
   const t=d.trader||{};
   openOver(`Journal · ${t.email||email||('trader #'+tid)}`,
     journalChips(t)
-    +`<div style="display:flex">${kycAskBtn(t,'journal')}</div>`
+    +`<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn-o sm" onclick="impersonate(${tid})">View portal as client</button>${kycAskBtn(t,'journal')}</div>`
     +`<p class="muted" style="font-size:12.5px;margin:2px 0">Everything this client did — sign-ins, portal visits, orders, payouts, tickets — newest first.</p>`
     +journalTimeline(d.items));
 }

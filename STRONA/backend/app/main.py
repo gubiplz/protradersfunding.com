@@ -2779,6 +2779,10 @@ def telemetry_ingest(payload: TelemetryIn, request: Request,
     _rate_limit(request, "telemetry", 120)
     if payload.name not in _TELEMETRY_CLIENT_EVENTS:
         raise HTTPException(400, "Unknown event")
+    # Podgląd z panelu (impersonacja) to nie aktywność klienta — dziennik
+    # pokazywałby „wejścia do portalu", których klient nigdy nie zrobił.
+    if getattr(request.state, "impersonated", False):
+        return {"ok": True}
     props = {str(k)[:32]: str(v)[:80] for k, v in (payload.props or {}).items()}
     telemetry.track(payload.name, trader.id, **props)
     return {"ok": True}
@@ -3733,6 +3737,23 @@ def admin_add_credits(trader_id: int, payload: CreditsIn):
             notify.send("credits_granted", email,
                         {"name": imie, "amount": kwota, "balance": nowe})
         return {"trader_id": trader_id, "email": email, "credits_usd": nowe}
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/traders/{trader_id}/impersonate",
+          dependencies=[Depends(auth.require_admin)])
+def admin_impersonate(trader_id: int):
+    """Wejściówka „zobacz portal oczami klienta" — bez znajomości hasła,
+    którego i tak nie da się odzyskać (w bazie leżą jednostronne skróty).
+    Token krótszy niż sesyjny i z flagą imp: patrz auth.make_impersonation_token."""
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader_id)
+        if not tr or tr.email.endswith("@removed.invalid"):
+            raise HTTPException(404, "Trader not found")
+        return {"token": auth.make_impersonation_token(tr.id, tr.password_hash),
+                "email": tr.email}
     finally:
         session.close()
 

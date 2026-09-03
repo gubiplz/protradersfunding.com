@@ -11,7 +11,20 @@ const dstr=iso=>dutc(iso).toLocaleString('en-US',{month:'short',day:'numeric',ho
 // UTC so the browser timezone does not shift the day back by one.
 
 const dday=d=>new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'});
-let TOKEN=localStorage.getItem('pf_token'), ME=null, AUTHMODE='login', chart=null, anCharts=[], CURV=null;
+/* Impersonacja z panelu admina: token przyjeżdża w ?impersonate= i mieszka
+   w sessionStorage (per KARTA) — localStorage jest wspólny dla wszystkich
+   kart, więc zapis tam nadpisałby prawdziwą sesję właściciela w /admin. */
+let IMP=null;
+try{
+  const _qi=new URLSearchParams(location.search);
+  if(_qi.get('impersonate')){
+    sessionStorage.setItem('pf_imp',_qi.get('impersonate'));
+    _qi.delete('impersonate');
+    history.replaceState(null,'',location.pathname+(_qi.toString()?'?'+_qi:'')+location.hash);
+  }
+  IMP=sessionStorage.getItem('pf_imp');
+}catch(e){}
+let TOKEN=IMP||localStorage.getItem('pf_token'), ME=null, AUTHMODE='login', chart=null, anCharts=[], CURV=null;
 /* Ostatni stan programu lojalnosciowego z /api/me/loyalty (punkty, nagrody). */
 let LOY=null;
 const H=()=>TOKEN?{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'}:{'Content-Type':'application/json'};
@@ -530,6 +543,9 @@ async function changeVerifyEmail(){
   }catch(e){toast('Error: '+e.message,'err')}
 }
 function logout(){
+  /* Tryb podglądu: NIE wolno dotknąć localStorage (sesja właściciela) ani
+     /api/auth/logout (skasowałby cookie serwera bramkujące /admin). */
+  if(IMP){try{sessionStorage.removeItem('pf_imp')}catch(e){}location.reload();return}
   // The session cookie is held by the server (it gates /admin), so clearing
   // localStorage alone would not be enough.
   fetch('/api/auth/logout',{method:'POST'}).finally(()=>{
@@ -542,12 +558,25 @@ function logout(){
 let _expired=false;
 function sessionExpired(){
   if(_expired)return;_expired=true;
+  /* Wygasł token PODGLĄDU (2 h) — wracamy do własnej sesji, nie ruszając
+     tokenu właściciela w localStorage. */
+  if(IMP){try{sessionStorage.removeItem('pf_imp')}catch(e){}location.reload();return}
   TOKEN=null;ME=null;
   try{localStorage.removeItem('pf_token')}catch(e){}
   $('app').classList.add('hidden');$('verify-gate')?.classList.add('hidden');
   $('auth').classList.remove('hidden');
   authTab('login');loadAuthStats();
   toast('Your session has expired. Please sign in again.','err',8000);
+}
+/* Żółty pasek trybu podglądu — przypomina, że klikane akcje (check-in,
+   zakupy, zgłoszenia) dzieją się NAPRAWDĘ na koncie klienta. */
+function impBanner(){
+  if($('imp-bar'))return;
+  const b=document.createElement('div');b.id='imp-bar';
+  b.style.cssText='position:fixed;bottom:0;left:0;right:0;z-index:9999;background:#7a5d00;color:#fff;padding:8px 14px;font-size:13px;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap';
+  b.innerHTML=`<span>Admin preview — signed in as <b>${esc(ME.email)}</b>. Actions here are real.</span>
+    <button style="background:none;border:1px solid #fff;color:#fff;border-radius:8px;padding:4px 12px;cursor:pointer" onclick="logout()">Exit preview</button>`;
+  document.body.appendChild(b);
 }
 /* Zimny start bez zasięgu NIE wylogowuje: token zostaje w localStorage,
    klient dostaje pełnoekranowe „Try again". Wcześniej KAŻDY błąd /api/auth/me
@@ -649,6 +678,7 @@ async function boot(){
   }
   $('verify-gate').classList.add('hidden');
   $('auth').classList.add('hidden');$('app').classList.remove('hidden');
+  if(IMP)impBanner();
   const nm=(ME.full_name||ME.email).trim();
   $('ava').textContent=nm[0].toUpperCase();
   $('who-name').textContent=ME.full_name||'Trader';
@@ -2122,8 +2152,9 @@ async function savePassword(){
   try{const r=await api('/api/me/password',{method:'POST',body:JSON.stringify({
     current_password:$('s-cur').value,new_password:$('s-new').value})});
     /* Older sessions just died (password fingerprint in the token) — swap in
-       the fresh token so THIS session survives the change. */
-    if(r.token){TOKEN=r.token;localStorage.setItem('pf_token',TOKEN)}
+       the fresh token so THIS session survives the change. W podglądzie admina
+       NIE dotykamy localStorage: nadpisałby token właściciela. */
+    if(r.token&&!IMP){TOKEN=r.token;localStorage.setItem('pf_token',TOKEN)}
     toast('Password changed.','ok');go('settings');
   }catch(e){toast('Error: '+e.message,'err')}
 }
