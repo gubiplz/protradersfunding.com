@@ -2573,7 +2573,8 @@ async function openAccount(id){
           <div><label class="muted" style="font-size:12px">Target profit</label>
             <input id="bot-newtarget" class="inp" type="number" step="0.01" min="0"
                    style="max-width:130px" value="${(a.bot_target_pct||0).toFixed(2)}"
-                   oninput="botTargetPreview(this.value,${a.initial_balance||0})"></div>
+                   oninput="botTargetPreview(this.value,${a.initial_balance||0})"
+                   onkeydown="if(event.key==='Enter')setBotTarget(${a.id})"></div>
           <button class="btn-o" onclick="setBotTarget(${a.id})">Update target</button>
           <span class="muted" id="bot-tgt-usd" style="font-size:12px;padding-bottom:10px">${botTargetUsd(a.bot_target_pct||0,a.initial_balance||0)}</span>
         </div>
@@ -2652,22 +2653,23 @@ function renderOffers(){
     <div class="sec-card card-md">
       <h3>New offer</h3>
       <p class="muted" style="font-size:12.5px;margin:6px 0 14px">Cuts the catalog price of the covered plans for a limited time. The discount is applied automatically at checkout — no code. If the client also has a coupon, the <b>better</b> of the two applies (never both).</p>
-      <div class="pool-form" style="flex-wrap:wrap">
-        <div><label class="muted" style="font-size:12px">Discount %</label>
-          <input id="of-pct" class="inp" type="number" min="1" max="90" step="0.5" value="30" style="width:90px"></div>
-        <div><label class="muted" style="font-size:12px">Plans</label>
-          <select id="of-scope" class="inp" onchange="$('of-keys-box').style.display=this.value==='keys'?'':'none'">
+      <div class="pool-form">
+        <div><label class="muted" style="display:block;font-size:12px;margin-bottom:4px">Discount %</label>
+          <input id="of-pct" class="inp" type="number" min="1" max="90" step="0.5" value="30" style="width:100%"></div>
+        <div><label class="muted" style="display:block;font-size:12px;margin-bottom:4px">Plans</label>
+          <select id="of-scope" class="inp" style="width:100%" onchange="$('of-keys-box').style.display=this.value==='keys'?'':'none'">
             <option value="all">All plans</option>
             <option value="2step">All 2-Step</option>
             <option value="instant">All Instant Funding</option>
             <option value="keys">Specific plans…</option>
           </select></div>
-        <div><label class="muted" style="font-size:12px">Trader (empty = everyone)</label>
-          <input id="of-email" class="inp" type="email" placeholder="client@example.com" style="min-width:210px"></div>
-        <div><label class="muted" style="font-size:12px">Ends</label>
-          <input id="of-ends" class="inp" type="datetime-local" value="${za24}"></div>
-        <div><label class="muted" style="font-size:12px">Title (banner &amp; mail)</label>
-          <input id="of-title" class="inp" placeholder="Weekend flash sale" style="min-width:200px"></div>
+        <div><label class="muted" style="display:block;font-size:12px;margin-bottom:4px">Trader (empty = everyone)</label>
+          <input id="of-email" class="inp" type="email" placeholder="client@example.com" style="width:100%"
+            oninput="const s=$('of-single');s.disabled=!this.value.trim();if(s.disabled)s.checked=false"></div>
+        <div><label class="muted" style="display:block;font-size:12px;margin-bottom:4px">Ends</label>
+          <input id="of-ends" class="inp" type="datetime-local" value="${za24}" style="width:100%"></div>
+        <div><label class="muted" style="display:block;font-size:12px;margin-bottom:4px">Title (banner &amp; mail)</label>
+          <input id="of-title" class="inp" placeholder="Weekend flash sale" style="width:100%"></div>
       </div>
       <div id="of-keys-box" style="display:none;margin-top:10px">
         <div class="muted" style="font-size:12px;margin-bottom:6px">Covered plans</div>
@@ -2679,7 +2681,7 @@ function renderOffers(){
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:10px 18px;margin-top:12px;font-size:13px">
         <label style="display:flex;align-items:center;gap:7px;cursor:pointer">
-          <input type="checkbox" id="of-single" style="width:15px;height:15px;accent-color:var(--acc)">
+          <input type="checkbox" id="of-single" disabled style="width:15px;height:15px;accent-color:var(--acc)">
           Single use <span class="muted">(personal offers only — burns after one purchase)</span></label>
         <label style="display:flex;align-items:center;gap:7px;cursor:pointer">
           <input type="checkbox" id="of-mail" style="width:15px;height:15px;accent-color:var(--acc)"> Send e-mail</label>
@@ -2713,8 +2715,12 @@ async function offerCreate(){
   const scope=$('of-scope').value;
   const keys=[...document.querySelectorAll('.of-key:checked')].map(c=>c.value);
   const ends=$('of-ends').value;
+  const pct=parseFloat($('of-pct').value);
+  if(!(pct>0&&pct<=90)){toast('Discount must be between 0 and 90%','err');return}
+  if(scope==='keys'&&!keys.length){toast('Tick at least one plan','err');return}
   if(!ends){toast('Pick an end date','err');return}
-  const body={discount_pct:parseFloat($('of-pct').value),scope,
+  if(new Date(ends)<=new Date()){toast('End date must be in the future','err');return}
+  const body={discount_pct:pct,scope,
     plan_keys:scope==='keys'?keys:null,
     trader_email:$('of-email').value.trim()||null,
     ends_at:new Date(ends).toISOString(),
@@ -2741,7 +2747,7 @@ async function offerNotify(id){
     const r=await api(`/api/admin/offers/${id}/notify`,{method:'POST',
       body:JSON.stringify({send_email:true,send_push:true})});
     toast(r.queued?'Notifications are going out in the background'
-      :`Sent — ${r.emailed||0} e-mails, ${r.pushed||0} pushes${r.skipped_optout?`, ${r.skipped_optout} opted out`:''}`);
+      :`Sent — ${r.emailed||0} e-mail${(r.emailed||0)===1?'':'s'}, ${r.pushed||0} push${(r.pushed||0)===1?'':'es'}${r.skipped_optout?`, ${r.skipped_optout} opted out`:''}`);
   }catch(e){toast(e.message,'err')}
 }
 
