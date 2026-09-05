@@ -39,6 +39,7 @@ import random
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from . import rules
 from .config import get_settings
 from .feed import MarketSnapshot
 from .models import Account, Trade
@@ -48,6 +49,23 @@ settings = get_settings()
 MIN_LOT = 0.01
 STYLES = ("scalper", "balanced", "swing")
 PACES = ("light", "steady", "busy")
+
+# Najmniejsza transakcja, jaka ma jeszcze sens w dolarach. Ponizej tego progu
+# `_close_trade` zaokragla cene do ticka instrumentu i ruch wychodzi ponizej
+# jednego ticka: cena zamkniecia rowna cenie otwarcia, `pnl = 0.00`, saldo stoi
+# w miejscu i bot probuje w kolko. Przy suficie zysku to jest roznica miedzy
+# „ostatnie wejscie ladu je na suficie" a nieskonczona seria transakcji-widm.
+MIN_FILL = 1.0
+
+# --- tryb zjazdu (`bot_mode='doom'`) ---
+# Ile z DZIENNEGO limitu straty wolno oddac w jednym dniu, gdy celem jest
+# limit CALKOWITY. Bez tego pierwszy dzien zjazdu zlamalby limit dzienny
+# i breach padlby z niewlasciwego powodu.
+DOOM_DAILY_SAFE = 0.85
+# Win rate persony przemnozony przez to w trybie zjazdu. Nie zero: kilka
+# wygranych w serii strat to roznica miedzy „trader sie posypal" a „admin
+# kliknal ubij konto".
+DOOM_WIN_SCALE = 0.45
 
 
 # --------------------------------------------------------------------------- #
@@ -290,17 +308,49 @@ def _tradable(p: Persona, weekend: bool) -> tuple[tuple[str, ...], tuple[float, 
 # --------------------------------------------------------------------------- #
 #  Sterowanie botem                                                            #
 # --------------------------------------------------------------------------- #
+DOOM_DAYS_DEFAULT = 5.0
+
+
 def start(session, acc: Account, *, style: str = "balanced", pace: str = "steady",
-          target_pct: float = 0.0) -> None:
+          target_pct: float = 0.0, mode: str = "profit",
+          doom_days: float | None = None, doom_limit: str = "overall") -> None:
     acc.bot_enabled = True
     acc.bot_style = style if style in STYLES else "balanced"
     acc.bot_pace = normalize_pace(pace)
-    acc.bot_target_pct = max(0.0, float(target_pct or 0.0))
+    acc.bot_target_pct = max(0.0, round(float(target_pct or 0.0), 2))
     acc.bot_paused = False
     if acc.bot_seed is None:
         acc.bot_seed = seed_for(acc)
     acc.bot_started_at = datetime.now(timezone.utc)
+    _apply_mode(acc, mode, doom_days, doom_limit)
     session.commit()
+
+
+def _apply_mode(acc: Account, mode: str, doom_days: float | None,
+                doom_limit: str) -> None:
+    """Ustawia kierunek jazdy. Bez commita — wołane pod cudzą transakcją."""
+    if mode == "doom":
+        acc.bot_mode = "doom"
+        # Sufit zysku i zjazd wykluczają się: jedno mówi „stań na +9,97%",
+        # drugie „zjedź na podłogę". Zostawienie obu dałoby konto, które
+        # nie rusza się w żadną stronę.
+        acc.bot_target_pct = 0.0
+        acc.bot_doom_limit = doom_limit if doom_limit in ("overall", "daily") else "overall"
+        dni = max(0.5, float(doom_days if doom_days is not None else DOOM_DAYS_DEFAULT))
+        acc.bot_doom_deadline = datetime.now(timezone.utc) + timedelta(days=dni)
+    else:
+        acc.bot_mode = "profit"
+        acc.bot_doom_deadline = None
+
+
+def set_mode(session, acc: Account, mode: str, *, doom_days: float | None = None,
+             doom_limit: str = "overall") -> dict:
+    """Przełącza bota między jazdą po zysk a zjazdem na drawdown."""
+    _apply_mode(acc, mode, doom_days, doom_limit)
+    session.commit()
+    return {"mode": acc.bot_mode, "target_pct": acc.bot_target_pct,
+            "doom_deadline": (acc.bot_doom_deadline.isoformat()
+                              if acc.bot_doom_deadline else None)}
 
 
 def stop(session, acc: Account, now: datetime | None = None) -> None:
@@ -315,6 +365,7 @@ def stop(session, acc: Account, now: datetime | None = None) -> None:
         acc.open_pnl = 0.0
     acc.bot_enabled = False
     acc.bot_paused = False
+    _apply_mode(acc, "profit", None, "overall")
     session.commit()
 
 
@@ -326,19 +377,140 @@ def set_paused(session, acc: Account, paused: bool) -> None:
     session.commit()
 
 
-def set_target(session, acc: Account, target_pct: float) -> float:
-    """Zmienia docelowy zysk DZIAŁAJĄCEGO bota i zwraca nową wartość.
+def is_doom(acc: Account) -> bool:
+    """Czy bot jedzie w dół, na złamanie limitu, zamiast w górę po zysk."""
+    return (getattr(acc, "bot_mode", None) or "profit") == "doom"
+
+
+def cap_equity(acc: Account) -> float | None:
+    """Saldo, ponad które bot nie ma prawa wyjść. None = bez limitu.
+
+    Sufit liczymy w DOLARACH, nie w procentach, bo tylko tak da się go porównać
+    z progiem fazy: `rules.profit_target_equity` też jest kwotą, a `Float` nie
+    trzyma 9,97 dokładnie i porównanie procentów rozjeżdżałoby się na ostatnim
+    miejscu po przecinku.
+    """
+    if is_doom(acc) or not acc.bot_target_pct or not acc.initial_balance:
+        return None
+    return round(acc.initial_balance * (1 + acc.bot_target_pct / 100.0), 2)
+
+
+def doom_floor(acc: Account) -> float:
+    """Podłoga, w którą ma trafić zjazd — TĄ SAMĄ formułą co silnik reguł.
+
+    `display_metrics` nie mutuje stanu konta i liczy obie podłogi dokładnie tak,
+    jak zrobi to potem `rules.evaluate`, więc bot celuje w ten sam próg, na
+    którym breach naprawdę padnie. Przepisana formuła rozjechałaby się przy
+    pierwszej zmianie reguł.
+    """
+    m = rules.display_metrics(
+        rules.config_from_account(acc),
+        balance=float(acc.balance or 0.0), equity=float(acc.equity or 0.0),
+        peak_equity=float(acc.peak_equity or 0.0),
+        day_start_equity=float(acc.day_start_equity or acc.balance or 0.0),
+        trading_days=int(acc.trading_days_count or 0))
+    return m["daily_floor"] if _doom_daily(acc) else m["overall_floor"]
+
+
+def _doom_daily(acc: Account) -> bool:
+    return (getattr(acc, "bot_doom_limit", None) or "overall") == "daily"
+
+
+def _frakcja_dnia_do_konca(now: datetime) -> float:
+    """Ile doby serwera jeszcze zostało (0–1). Godzin sesji nie ma (patrz
+    `_should_open` pkt 4), więc doba kalendarzowa jest właściwą miarą."""
+    srv = _server_now(now)
+    minelo = srv.hour * 3600 + srv.minute * 60 + srv.second
+    return (DZIEN_SEK - minelo) / DZIEN_SEK
+
+
+def _doom_days_left(acc: Account, now: datetime) -> float:
+    """Ile dni zostało do końca zjazdu. Minimum doba: cała reszta dystansu
+    wrzucona w kilka godzin dałaby jeden gigantyczny dzień zamiast osuwania."""
+    if not getattr(acc, "bot_doom_deadline", None):
+        return 1.0
+    zostalo = (_naive(acc.bot_doom_deadline) - _naive(now)).total_seconds() / DZIEN_SEK
+    return max(1.0, zostalo)
+
+
+def _doom_day_target(acc: Account, balance: float, now: datetime) -> float:
+    """Ujemny cel na dziś: porcja dystansu do podłogi, z rozrzutem.
+
+    `bot_doom_deadline` rozkłada zjazd tylko przy limicie CAŁKOWITYM — przy
+    dziennym jest bez znaczenia (patrz niżej).
+    """
+    # Dystans liczymy od SALDA NA START DNIA, nie od bieżącego. Cel dnia jest
+    # wszędzie porównywany ze zrealizowanym P&L dnia (`_today_realized`), który
+    # też liczy się od tego punktu — cel liczony od bieżącego salda kurczyłby
+    # się z każdą stratą i bramka „dzień zrobiony" w `_should_open` zamykała
+    # sesję daleko nad podłogą.
+    #
+    # +MIN_FILL, bo ostatni krok ma PRZEBIĆ podłogę, nie stanąć na niej —
+    # `_close_trade` zaokrągla cenę do ticka i zjada centy, a `rules` porównuje
+    # equity z podłogą co do grosza.
+    # Ten sam warunek świeżości co w `_today_realized`: na pierwszym ticku
+    # nowego dnia baseline jeszcze wisi na wczoraj.
+    if acc.day_key == _day_key(now) and acc.day_start_balance:
+        start_dnia = float(acc.day_start_balance)
+    else:
+        start_dnia = balance
+    dystans = max(0.0, start_dnia - doom_floor(acc)) + MIN_FILL
+    rng = random.Random(f"{acc.bot_seed}:doom:{_day_key(now)}")
+
+    if _doom_daily(acc):
+        # Limit DZIENNY zeruje się o północy, więc rozkładanie go na dni nie ma
+        # sensu — a wręcz jest niewykonalne: podłoga dnia to `start dnia − 5%`,
+        # podłoga całkowita stoi na −10%, więc gdy tylko konto zjedzie poniżej
+        # −5%, w dzienną już nie da się trafić przed całkowitą. Zjazd na limit
+        # dnia jest z definicji jedną złą sesją. Mnożnik ponad 1.0, bo stanięcie
+        # tuż nad podłogą to konto, które nie poległo, a przestało handlować.
+        return -dystans * rng.uniform(1.05, 1.25)
+
+    porcja = dystans / _doom_days_left(acc, now) * rng.uniform(0.85, 1.20)
+    limit_dnia = (acc.max_daily_loss_pct or 0.0) / 100.0 * (acc.initial_balance or 0.0)
+    if limit_dnia > 0:
+        porcja = min(porcja, limit_dnia * DOOM_DAILY_SAFE)
+    return -porcja
+
+
+def set_target(session, acc: Account, target_pct: float) -> dict:
+    """Zmienia docelowy zysk DZIAŁAJĄCEGO bota. Zwraca nową wartość i sufit.
 
     Po osiągnięciu celu bot przestaje otwierać pozycje, ale zostaje włączony —
     bez tej funkcji jedynym wyjściem było zatrzymanie go (co resynchronizuje
     saldo do feedu i robi uskok na krzywej) albo pauza, która niczego nie zmienia.
     Podniesienie celu puszcza bota dalej z tego samego miejsca, bez uskoku.
 
+    OBNIŻENIE celu przy otwartej pozycji, której plan przebija nowy sufit, domyka
+    ją po BIEŻĄCYM floatingu — tą samą mechaniką co `stop()`: equity sprzed
+    zamknięcia staje się saldem po nim, więc krzywa nie dostaje skoku, a
+    w historii wygląda to jak ręczne zamknięcie. Samego `plan_pnl` żywej
+    transakcji nie ruszamy: `_floating_pnl` skaluje nim szum, więc każda zmiana
+    w locie dałaby mikro-skok na wykresie.
+
     0 znosi limit — bot handluje bez górnej granicy zysku.
+
+    `cap_overshot` mówi, że saldo JUŻ jest ponad nowym sufitem. Cofnąć się nie
+    da (saldo tylko rośnie albo spada wynikiem transakcji), więc panel musi to
+    powiedzieć wprost zamiast obiecywać wynik, którego nie dowiezie.
     """
-    acc.bot_target_pct = max(0.0, round(float(target_pct or 0.0), 1))
+    acc.bot_target_pct = max(0.0, round(float(target_pct or 0.0), 2))
+    cap = cap_equity(acc)
+    now = datetime.now(timezone.utc)
+    balance = float(acc.balance if acc.balance is not None else acc.initial_balance or 0.0)
+
+    if cap is not None:
+        open_tr = _open_trade(session, acc)
+        if open_tr is not None and balance + (open_tr.plan_pnl or 0.0) > cap:
+            _close_trade(open_tr, _floating_pnl(open_tr, now), now)
+            balance = round(balance + open_tr.pnl, 2)
+            acc.balance = balance
+            acc.equity = balance
+            acc.open_pnl = 0.0
+
     session.commit()
-    return acc.bot_target_pct
+    return {"target_pct": acc.bot_target_pct, "cap_equity": cap,
+            "cap_overshot": cap is not None and balance > cap}
 
 
 def _open_trade(session, acc: Account) -> Trade | None:
@@ -412,7 +584,12 @@ def _close_trade(tr: Trade, pnl: float, now: datetime) -> None:
     sign = 1 if tr.side == "buy" else -1
     move = pnl / (tr.lots * pv) if tr.lots and pv else 0.0
     step = inst.tick if inst else 0.01
-    tr.close_price = _round_to(tr.open_price + sign * move, step)
+    # Ruch OBCINAMY do pelnych tickow, nigdy nie zaokraglajac w gore. Cena
+    # zamkniecia jest zrodlem prawdy dla P&L, wiec zaokraglenie do NAJBLIZSZEGO
+    # ticka potrafilo dolozyc kilka centow ponad plan — a pod sufitem zysku te
+    # centy przepychaly saldo ponad prog fazy i konto zdawalo przez przypadek.
+    ticki = math.floor(abs(move) / step + 1e-9)
+    tr.close_price = _round_to(tr.open_price + sign * math.copysign(ticki * step, move), step)
     # P&L liczymy z ZAOKRAGLONEJ ceny, zeby tabela zgadzala sie co do centa.
     tr.pnl = round(sign * (tr.close_price - tr.open_price) * tr.lots * pv, 2)
     tr.closed_at = now
@@ -430,6 +607,8 @@ def _today_realized(session, acc: Account, now: datetime) -> float:
 def _day_target(acc: Account, p: Persona, balance: float, now: datetime) -> float:
     """Cel na dzisiaj. Czasem ujemny — pro trader tez ma stratne dni, a krzywa
     bez ani jednego minusa wyglada jak wyklejona."""
+    if is_doom(acc):
+        return _doom_day_target(acc, balance, now)
     rng = random.Random(f"{acc.bot_seed}:{_day_key(now)}")
     if rng.random() < p.red_day_odds:
         return -balance * rng.uniform(0.10, 0.45) / 100.0
@@ -442,11 +621,13 @@ def _should_open(session, acc: Account, p: Persona, balance: float, now: datetim
     if getattr(acc, "bot_paused", False):
         return False
 
-    # 1) osiagniety docelowy zysk konta -> bot przestaje handlowac
-    if acc.bot_target_pct and acc.initial_balance:
-        profit_pct = (balance - acc.initial_balance) / acc.initial_balance * 100.0
-        if profit_pct >= acc.bot_target_pct:
-            return False
+    # 1) osiagniety docelowy zysk konta -> bot przestaje handlowac. Test jest
+    #    KWOTOWY i z marginesem `MIN_FILL`: resztka rzedu centow nie przezyje
+    #    zaokraglenia ceny do ticka i wygenerowalaby transakcje z `pnl = 0.00`,
+    #    ktora nie rusza salda, wiec bot otwieralby ja w nieskonczonosc.
+    cap = cap_equity(acc)
+    if cap is not None and balance >= cap - MIN_FILL:
+        return False
 
     # 2) dzienny cel zrobiony (w obie strony) -> koniec sesji
     target = _day_target(acc, p, balance, now)
@@ -504,26 +685,70 @@ def _open_new(session, acc: Account, p: Persona, balance: float, now: datetime) 
     open_price = _round_to(inst.price * (1 + rng.gauss(0, 0.004)), inst.tick)
     pv = _point_value(inst, open_price)
 
-    # Wielkosc pozycji wynika z dziennego celu rozlozonego na planowana liczbe
-    # wejsc — inaczej dwie wygrane realizowalyby caly dzien i historia bylaby
-    # pusta. `risk_pct` zostaje juz tylko jako sufit bezpieczenstwa.
-    day_goal = balance * p.daily_target_pct / 100.0
-    edge = max(0.15, p.win_rate * p.avg_r - (1 - p.win_rate) * 0.8)
-    risk_usd = min(day_goal / (p.trades_per_day * edge), balance * p.risk_pct / 100.0)
+    target = _day_target(acc, p, balance, now)
+    doom = is_doom(acc)
+
+    if doom:
+        # Sizing idzie z DZIENNEJ PORCJI STRATY, nie z celu persony (ten jest o
+        # rzad wielkosci mniejszy) i bez sufitu `risk_pct` — konto ma sie
+        # posypac, a nie ostroznie zarzadzac ryzykiem. Limit lotow nizej i tak
+        # zostaje, bo jego zlamanie to osobny, zdradzajacy breach.
+        #
+        # Dzielimy przez wejscia, ktore w tym dniu JESZCZE ZOSTALY, nie przez
+        # caly dzienny przydzial: zjazd zlecony po poludniu ma mniej okazji,
+        # a wygrane po drodze odrabiaja czesc dystansu — bez tej korekty dzien
+        # konczyl sie w polowie drogi do podlogi. Rosnaca pod wieczor pozycja
+        # to zreszta dokladnie obraz tradera, ktory goni strate.
+        zrealizowane = _today_realized(session, acc, now)
+        zostalo_wejsc = max(1.0, p.trades_per_day * _frakcja_dnia_do_konca(now))
+        risk_usd = abs(min(0.0, target - zrealizowane)) / zostalo_wejsc
+    else:
+        # Wielkosc pozycji wynika z dziennego celu rozlozonego na planowana liczbe
+        # wejsc — inaczej dwie wygrane realizowalyby caly dzien i historia bylaby
+        # pusta. `risk_pct` zostaje juz tylko jako sufit bezpieczenstwa.
+        day_goal = balance * p.daily_target_pct / 100.0
+        edge = max(0.15, p.win_rate * p.avg_r - (1 - p.win_rate) * 0.8)
+        risk_usd = min(day_goal / (p.trades_per_day * edge), balance * p.risk_pct / 100.0)
     lots = max(MIN_LOT, round(risk_usd / (inst.stop_move * pv), 2))
     if acc.max_lots and acc.max_lots > 0:
         lots = min(lots, round(acc.max_lots, 2))
 
-    win = rng.random() < p.win_rate
-    r = p.avg_r * rng.uniform(0.7, 1.35) if win else -rng.uniform(0.55, 1.0)
+    if doom:
+        # Male zyski, duze straty — dokladnie tak wyglada konto tradera, ktory
+        # sie posypal. Samo obnizenie win rate nie wystarcza: przy `avg_r`
+        # persony jedna wygrana odrabiala trzy straty i krzywa stalaby w miejscu.
+        win = rng.random() < p.win_rate * DOOM_WIN_SCALE
+        r = rng.uniform(0.25, 0.60) if win else -rng.uniform(1.2, 2.4)
+    else:
+        win = rng.random() < p.win_rate
+        r = p.avg_r * rng.uniform(0.7, 1.35) if win else -rng.uniform(0.55, 1.0)
     plan_pnl = lots * inst.stop_move * pv * r
 
     # Przyciecie do dziennego celu: bot nie „przestrzeliwuje" planu na dzien,
-    # dzieki czemu krzywa rosnie rownomiernie zamiast skakac.
-    target = _day_target(acc, p, balance, now)
+    # dzieki czemu krzywa rosnie rownomiernie zamiast skakac. Symetrycznie
+    # w dol, bo w trybie zjazdu cel dnia jest ujemny i tak samo wiazacy.
     realized = _today_realized(session, acc, now)
     if target > 0 and plan_pnl > 0:
         plan_pnl = min(plan_pnl, max(target - realized, target * 0.15))
+    elif target < 0 and plan_pnl < 0:
+        plan_pnl = max(plan_pnl, min(target - realized, target * 0.15))
+
+    # Twardy sufit konta — PO przycieciu do celu dnia, bo to on jest wiazacy.
+    # Cel dnia pilnuje tylko rytmu krzywej; sufit decyduje o tym, czy konto
+    # zda faze, wiec ostatnie wejscie musi zatrzymac sie DOKLADNIE na nim.
+    cap = cap_equity(acc)
+    if cap is not None and plan_pnl > 0:
+        plan_pnl = min(plan_pnl, max(0.0, cap - balance))
+
+    # Ostatnie wejscie pod sufitem bywa male, a `_close_trade` zaokragla cene
+    # zamkniecia do ticka instrumentu. Przy duzym wolumenie jeden tick jest wart
+    # wiecej niz cala planowana kwota: cena nie drgnie, `pnl` wychodzi 0.00,
+    # saldo stoi i bot probuje w kolko. Schodzimy wiec z WOLUMENU, zeby ruch
+    # mial co najmniej kilka tickow — mala pozycja na domkniecie planu jest
+    # zreszta dokladnie tym, co zrobilby trader.
+    maks_lot = abs(plan_pnl) / (3 * inst.tick * pv)
+    if maks_lot < lots:
+        lots = max(MIN_LOT, math.floor(maks_lot * 100) / 100)
 
     hold = min(HOLD_MAX_SEK, max(HOLD_MIN_SEK, _cykl_sek(p) * rng.uniform(*HOLD_UDZIAL)))
     close_at = now + timedelta(seconds=hold)

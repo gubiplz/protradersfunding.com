@@ -349,6 +349,14 @@ class Account(Base):
     # (saldo nie resynchronizuje sie do feedu, jak przy pelnym Stopie).
     bot_paused: Mapped[bool] = mapped_column(Boolean, default=False)
     bot_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Kierunek jazdy: 'profit' = bot idzie w gore do sufitu `bot_target_pct`,
+    # 'doom' = zjezdza na podloge drawdownu, zeby konto poleglo z reki silnika
+    # regul (Breach o normalnym typie), a nie kliknieciem admina.
+    bot_mode: Mapped[str] = mapped_column(String(16), default="profit")
+    # Do kiedy ma potrwac zjazd — z tego wychodzi dzienna porcja straty.
+    bot_doom_deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Ktora podloga ma pasc: 'overall' (max drawdown) albo 'daily' (limit dnia).
+    bot_doom_limit: Mapped[str] = mapped_column(String(16), default="overall")
 
     # Nieodgadywalny token certyfikatu — publiczny link /certificate/{token}
     # i weryfikacja /verify/{token} działają bez logowania, ale nie da się

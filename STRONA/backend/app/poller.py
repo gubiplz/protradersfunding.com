@@ -267,6 +267,13 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
 
     if res.failed:
         acc.closed_at = datetime.now(timezone.utc)
+        if bot_driven:
+            # Poller obsługuje tylko konta active/funded, więc po breachu bot
+            # nigdy już nie zamknąłby swojej otwartej pozycji — sterczałaby
+            # w portalu klienta w nieskończoność. Zamykamy po bieżącym
+            # floatingu (tą samą mechaniką co `tradebot.stop`), a bota gasimy:
+            # inaczej po ręcznym wskrzeszeniu konta zjazd ruszyłby od nowa.
+            tradebot.stop(session, acc)
         maid = acc.metaapi_account_id
         login, pw = acc.platform_login, acc.platform_password
         session.commit()

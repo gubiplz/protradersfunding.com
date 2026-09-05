@@ -63,12 +63,15 @@ def test_podniesienie_celu_wznawia_handel_po_jego_osiagnieciu():
     s.close()
 
 
-def test_krok_01_procenta_jest_zachowany():
+def test_krok_001_procenta_jest_zachowany():
+    """Setne procenta MUSZA przezyc zapis — na nich stoi „ma zabraknac 0,03 pp"."""
     aid = _konto_z_botem("bt-krok", cel=5.0)
     r = client.patch(f"/api/admin/accounts/{aid}/bot", headers=ADMIN_H, json={"target_pct": 5.1})
     assert r.json()["bot_target_pct"] == 5.1
-    r = client.patch(f"/api/admin/accounts/{aid}/bot", headers=ADMIN_H, json={"target_pct": 12.34})
-    assert r.json()["bot_target_pct"] == 12.3      # zaokraglane do dziesiatej
+    r = client.patch(f"/api/admin/accounts/{aid}/bot", headers=ADMIN_H, json={"target_pct": 9.97})
+    assert r.json()["bot_target_pct"] == 9.97
+    r = client.patch(f"/api/admin/accounts/{aid}/bot", headers=ADMIN_H, json={"target_pct": 12.3456})
+    assert r.json()["bot_target_pct"] == 12.35     # dalej niz do setnej nie schodzimy
 
 
 def test_zero_znosi_limit_zysku():

@@ -25,6 +25,7 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from time import monotonic
+from typing import Literal
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -398,6 +399,45 @@ def _metrics_for(acc: Account) -> dict:
     )
 
 
+def _bot_outcome(acc: Account) -> dict:
+    """Czy konto zda fazę i czego mu do tego brakuje. TYLKO dla admina.
+
+    Panel ma powiedzieć wynik JEDNYM zdaniem, zanim admin kliknie „start", więc
+    całą arytmetykę robi serwer: sufit bota i próg fazy to dwie różne formuły
+    w dwóch modułach, a porównanie ich w JS-ie rozjechałoby się przy pierwszej
+    zmianie reguł. Dni handlowe są tu, bo sam sufit ponad progiem NIE wystarcza
+    — `rules` wymaga jeszcze `min_trading_days`, a bez tej liczby panel milczy
+    i konto „nie zdaje bez powodu".
+    """
+    cfg = rules.config_from_account(acc)
+    cap = tradebot.cap_equity(acc)
+    cel = rules.profit_target_equity(cfg) if cfg.profit_target_pct > 0 else None
+    balance = round(float(acc.balance or 0.0), 2)
+    dni = int(acc.trading_days_count or 0)
+    brak_dni = max(0, int(cfg.min_trading_days or 0) - dni)
+    doom = tradebot.is_doom(acc)
+    return {
+        "mode": "doom" if doom else "profit",
+        "doom_deadline": (acc.bot_doom_deadline.isoformat()
+                          if doom and acc.bot_doom_deadline else None),
+        "doom_limit": acc.bot_doom_limit if doom else None,
+        "doom_floor": round(tradebot.doom_floor(acc), 2) if doom else None,
+        "cap_pct": round(float(acc.bot_target_pct or 0.0), 2),
+        "cap_equity": cap,
+        "cap_overshot": cap is not None and balance > cap,
+        "phase_target_pct": cfg.profit_target_pct,
+        "phase_target_equity": cel,
+        # Sufit minus próg fazy w punktach procentowych: to jest ta liczba,
+        # o którą właściciel prosi („ma zabraknąć 0,03 pp").
+        "gap_pp": (round(float(acc.bot_target_pct or 0.0) - cfg.profit_target_pct, 2)
+                   if cap is not None and cel is not None else None),
+        "will_pass": (cap >= cel) if (cap is not None and cel is not None) else None,
+        "trading_days": dni,
+        "min_trading_days": int(cfg.min_trading_days or 0),
+        "days_missing": brak_dni,
+    }
+
+
 def _account_dict(acc: Account, with_metrics: bool = True, with_credentials: bool = False,
                   admin_view: bool = False) -> dict:
     """`with_credentials` MUSI zostać False na endpointach bez autoryzacji.
@@ -441,6 +481,7 @@ def _account_dict(acc: Account, with_metrics: bool = True, with_credentials: boo
         d["bot_pace"] = (tradebot.normalize_pace(acc.bot_pace)
                          if getattr(acc, "bot_pace", None) else None)
         d["bot_target_pct"] = getattr(acc, "bot_target_pct", 0.0) or 0.0
+        d["bot_outcome"] = _bot_outcome(acc)
         # Weekend liczony w czasie serwera MT5, a nie w przeglądarce admina —
         # inaczej panel pokazywałby inny stan rynku niż ten, którym kieruje się bot.
         d["market_closed"] = tradebot.market_closed_for(acc)
@@ -3953,6 +3994,20 @@ class BotIn(BaseModel):
     style: str = "balanced"      # scalper | balanced | swing
     pace: str = "steady"         # light (1-2/dzień) | steady (4-8) | busy (~20)
     target_pct: float = 0.0      # 0 = bez limitu zysku
+    mode: Literal["profit", "doom"] = "profit"
+    doom_days: float | None = None      # w ilu dniach ma zjechać na podłogę
+    doom_limit: Literal["overall", "daily"] = "overall"
+
+
+def _waliduj_tryb(mode: str, target_pct: float | None, acc: Account) -> None:
+    """Wspólne bramki dla POST i PATCH bota."""
+    if mode == "doom":
+        if target_pct:
+            raise HTTPException(400, "A profit target and the drawdown ride are mutually "
+                                     "exclusive — pick one")
+        if acc.status not in ("active", "funded"):
+            raise HTTPException(400, f"Account status is '{acc.status}' — there is nothing "
+                                     f"left to fail")
 
 
 @app.post("/api/admin/accounts/{account_id}/bot", dependencies=[Depends(auth.require_admin)])
@@ -3970,28 +4025,37 @@ def admin_bot_start(account_id: int, payload: BotIn):
         if acc.status not in ("active", "funded"):
             raise HTTPException(400, f"Account status is '{acc.status}'. The bot only runs "
                                      f"on active and funded accounts")
+        _waliduj_tryb(payload.mode, payload.target_pct, acc)
         tradebot.start(session, acc, style=payload.style, pace=payload.pace,
-                       target_pct=payload.target_pct)
+                       target_pct=payload.target_pct, mode=payload.mode,
+                       doom_days=payload.doom_days, doom_limit=payload.doom_limit)
         return {"bot_enabled": True, "login": acc.login, "style": acc.bot_style,
-                "pace": acc.bot_pace, "target_pct": acc.bot_target_pct}
+                "pace": acc.bot_pace, "target_pct": acc.bot_target_pct,
+                "bot_outcome": _bot_outcome(acc)}
     finally:
         session.close()
 
 
 class BotPauseIn(BaseModel):
-    """Zmiana ustawień DZIAŁAJĄCEGO bota — oba pola opcjonalne, ale co najmniej jedno."""
+    """Zmiana ustawień DZIAŁAJĄCEGO bota — wszystkie pola opcjonalne, ale co najmniej jedno."""
     paused: bool | None = None
     target_pct: float | None = None
+    mode: Literal["profit", "doom"] | None = None
+    doom_days: float | None = None
+    doom_limit: Literal["overall", "daily"] = "overall"
 
 
 @app.patch("/api/admin/accounts/{account_id}/bot", dependencies=[Depends(auth.require_admin)])
 def admin_bot_pause(account_id: int, payload: BotPauseIn):
-    """Pauza/wznowienie oraz zmiana docelowego zysku.
+    """Pauza/wznowienie, zmiana docelowego zysku oraz przełączenie na zjazd.
 
     W odróżnieniu od Stop konto zostaje pod kontrolą bota, więc saldo nie wraca
     do feedu — ani po wznowieniu, ani po podniesieniu celu krzywa nie dostaje
     uskoku. Podniesienie celu to jedyny sposób, żeby ruszyć bota, który dobił do
     swojego `bot_target_pct` i przestał otwierać pozycje.
+
+    Odpowiedź niesie pełny `bot_outcome`, żeby panel nie musiał po każdej
+    zmianie robić drugiego GET-a po konto.
     """
     session = SessionLocal()
     try:
@@ -4000,16 +4064,22 @@ def admin_bot_pause(account_id: int, payload: BotPauseIn):
             raise HTTPException(404, "Account not found")
         if not acc.bot_enabled:
             raise HTTPException(400, "Trade BOT is not running on this account")
-        if payload.paused is None and payload.target_pct is None:
-            raise HTTPException(400, "Provide 'paused' or 'target_pct'")
+        if payload.paused is None and payload.target_pct is None and payload.mode is None:
+            raise HTTPException(400, "Provide 'paused', 'target_pct' or 'mode'")
+        if payload.mode is not None:
+            _waliduj_tryb(payload.mode, payload.target_pct, acc)
+            tradebot.set_mode(session, acc, payload.mode, doom_days=payload.doom_days,
+                              doom_limit=payload.doom_limit)
         if payload.target_pct is not None:
             if payload.target_pct < 0:
                 raise HTTPException(400, "The target cannot be negative")
+            _waliduj_tryb(acc.bot_mode, payload.target_pct, acc)
             tradebot.set_target(session, acc, payload.target_pct)
         if payload.paused is not None:
             tradebot.set_paused(session, acc, payload.paused)
         return {"bot_enabled": True, "bot_paused": acc.bot_paused,
-                "bot_target_pct": acc.bot_target_pct, "login": acc.login}
+                "bot_target_pct": acc.bot_target_pct, "login": acc.login,
+                "bot_outcome": _bot_outcome(acc)}
     finally:
         session.close()
 
@@ -4116,6 +4186,8 @@ def admin_clear_history(account_id: int):
         acc.bot_pace = None
         acc.bot_target_pct = 0.0
         acc.bot_started_at = None
+        acc.bot_mode = "profit"
+        acc.bot_doom_deadline = None
 
         # Ten sam reset metryk co przy awansie fazy (`_ustaw_faze`), tylko bez
         # zmiany fazy. `day_key` MUSI zejsc do pustego: zostawiony wskazuje dzien,

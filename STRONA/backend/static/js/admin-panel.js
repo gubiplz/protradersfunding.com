@@ -2546,6 +2546,7 @@ async function openAccount(id){
           <span class="chip">style <b>${esc(a.bot_style||'balanced')}</b></span>
           <span class="chip">pace <b>${esc(PACE_TXT[a.bot_pace]||a.bot_pace||'steady')}</b></span>
           ${a.bot_target_pct?`<span class="chip">stops at <b>+${a.bot_target_pct}%</b></span>`:''}
+          ${(a.bot_outcome&&a.bot_outcome.mode==='doom')?`<span class="status failed"><span class="dot"></span>riding down</span>`:''}
         </div>
         ${(a.bot_target_pct && (m.profit_pct||0) >= a.bot_target_pct)?`
           <div class="warn-box" style="margin:0 0 12px;background:var(--gold-bg);border:1px solid var(--gold-line);color:var(--gold-ink)">
@@ -2558,19 +2559,23 @@ async function openAccount(id){
             This challenge has no Weekend Trading add-on, so there is nothing it could trade right now.
             It stays on and picks up on its own when the week opens.
           </div>`:''}
+        ${botOutcomeBox(a)}
         <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
           <div><label class="muted" style="font-size:12px">Target profit</label>
-            <input id="bot-newtarget" class="inp" type="number" step="0.1" min="0"
-                   style="max-width:130px" value="${(a.bot_target_pct||0).toFixed(1)}"></div>
+            <input id="bot-newtarget" class="inp" type="number" step="0.01" min="0"
+                   style="max-width:130px" value="${(a.bot_target_pct||0).toFixed(2)}"
+                   oninput="botTargetPreview(this.value,${a.initial_balance||0})"></div>
           <button class="btn-o" onclick="setBotTarget(${a.id})">Update target</button>
+          <span class="muted" id="bot-tgt-usd" style="font-size:12px;padding-bottom:10px">${botTargetUsd(a.bot_target_pct||0,a.initial_balance||0)}</span>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn-p" onclick="pauseBot(${a.id},${a.bot_paused?'false':'true'})">${a.bot_paused?'Resume bot':'Pause bot'}</button>
           <button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="stopBot(${a.id})">Stop bot</button>
         </div>
         <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
-          <b>Target</b> is the account profit at which the bot stops trading. Raise it in 0.1% steps
-          to let it keep going, or set <b>0</b> for no limit. Changing it never resyncs the balance,
+          <b>Target</b> is a hard cap: the account profit the bot never trades past, precise
+          to 0.01% — the last trade lands the balance exactly on it. Raise it to let the bot
+          keep going, or set <b>0</b> for no limit. Changing it never resyncs the balance,
           so the equity curve continues without a jump.
           <b>Pause</b> only stops new entries — an open position runs to its close, the account
           stays on bot data and the balance is kept. <b>Stop</b> ends the bot for good and
@@ -2596,7 +2601,7 @@ async function openAccount(id){
               <option value="busy">Busy — around 20 trades a day</option>
             </select></div>
           <div><label class="muted" style="font-size:12px">Stop at profit %</label>
-            <input id="bot-target" class="inp" type="number" step="0.5" min="0" value="0" placeholder="0 = no limit"></div>
+            <input id="bot-target" class="inp" type="number" step="0.01" min="0" value="0" placeholder="0 = no limit"></div>
         </div>
         <button class="btn-p" onclick="startBot(${a.id})">Start Trade BOT</button>`}
       <p class="muted" style="font-size:12px;margin-top:12px;line-height:1.55">
@@ -3085,14 +3090,110 @@ async function pauseBot(id,paused){
     openAccount(id);
   }catch(e){toast('Error: '+e.message,'err')}
 }
+
+/* ---------- Trade BOT: outcome ----------
+   Zdanie „zda / nie zda" + presety. Arytmetyka jest po stronie serwera
+   (_bot_outcome w main.py): sufit bota i próg fazy to dwie różne formuły
+   w dwóch modułach — porównywanie ich w JS rozjechałoby się przy pierwszej
+   zmianie reguł. */
+function botTargetUsd(pct,base){
+  return (pct&&base)?`= $${fmt(Math.round(base*(1+pct/100)))}`:'';
+}
+function botTargetPreview(v,base){
+  const el=$('bot-tgt-usd'); if(el)el.textContent=botTargetUsd(parseFloat(v)||0,base);
+}
+function botOutcomeBox(a){
+  const o=a.bot_outcome; if(!o)return'';
+  const usd=v=>'$'+fmt(v);
+  if(o.mode==='doom')return`
+    <div class="warn-box" style="margin:0 0 12px;background:var(--red-bg);border:1px solid var(--red-line)">
+      <b style="display:block;color:var(--red)">Riding down to a breach</b>
+      The bot is losing on purpose, heading for the ${o.doom_limit==='daily'?'daily-loss':'max-drawdown'}
+      floor of <b>${usd(o.doom_floor)}</b>${o.doom_deadline?`, aiming to get there around ${dstr(o.doom_deadline)}`:''}.
+      The breach itself is booked by the risk engine, so the history reads like a trader
+      who lost it — not like an admin action.
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <button class="btn-o sm" onclick="cancelDoom(${a.id})">Call the ride-down off</button>
+    </div>`;
+  let msg='';
+  const P='<p class="muted" style="font-size:12.5px;margin:0 0 12px;line-height:1.55">';
+  if(o.cap_overshot){
+    msg=`<div class="warn-box" style="margin:0 0 12px">
+      <b style="display:block">Already above the cap</b>
+      The balance is past +${o.cap_pct.toFixed(2)}% (${usd(o.cap_equity)}) and cannot be walked
+      back without a visible jump in the equity curve. Raise the cap to let it continue,
+      or clear the track record and start over.
+    </div>`;
+  }else if(o.cap_equity!=null&&o.phase_target_equity!=null){
+    const cap=`Cap <b>+${o.cap_pct.toFixed(2)}%</b> = ${usd(o.cap_equity)}`;
+    const cel=`phase target <b>+${o.phase_target_pct.toFixed(2)}%</b> = ${usd(o.phase_target_equity)}`;
+    if(o.will_pass===false)
+      msg=`${P}${cap}, ${cel} — <b style="color:var(--red)">short by ${Math.abs(o.gap_pp).toFixed(2)} pp.
+        This account never passes.</b></p>`;
+    else if(o.days_missing>0)
+      msg=`${P}${cap} clears the ${cel}, but the phase also needs <b>${o.min_trading_days} trading
+        days</b> (${o.trading_days} so far, ${o.days_missing} missing) — <b class="up">it passes</b> once the days are in.</p>`;
+    else
+      msg=`${P}${cap} clears the ${cel} — <b class="up">this account passes</b> once the bot gets there.</p>`;
+  }else if(o.phase_target_equity!=null){
+    msg=`${P}No cap — the bot trades straight past the phase target of
+      +${o.phase_target_pct.toFixed(2)}% (${usd(o.phase_target_equity)}), so the account
+      <b class="up">passes</b> as soon as the trading days are in.</p>`;
+  }
+  return msg+`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+    ${o.phase_target_pct>0?`
+      <button class="btn-o sm" onclick="setBotOutcome(${a.id},${(o.phase_target_pct+0.02).toFixed(2)})">Will pass · +${(o.phase_target_pct+0.02).toFixed(2)}%</button>
+      <button class="btn-o sm" onclick="setBotOutcome(${a.id},${(o.phase_target_pct-0.03).toFixed(2)})">Miss by 0.03 pp · +${(o.phase_target_pct-0.03).toFixed(2)}%</button>`:''}
+    ${o.cap_pct?`<button class="btn-o sm" onclick="setBotOutcome(${a.id},0)">No cap</button>`:''}
+    <button class="btn-o sm" style="border-color:var(--red-line);color:var(--red)" onclick="makeItFail(${a.id})">Make it fail…</button>
+  </div>`;
+}
+async function setBotOutcome(id,pct){
+  /* mode:'profit' idzie zawsze — ustawienie celu na bocie w trybie zjazdu ma
+     znaczyć „zmieniłem zdanie, wracamy po zysk", a nie błąd 400. */
+  try{
+    const r=await api(`/api/admin/accounts/${id}/bot`,{method:'PATCH',
+      body:JSON.stringify({mode:'profit',target_pct:pct})});
+    const o=r.bot_outcome||{};
+    toast(!pct?'🎯 Cap removed. The bot trades with no profit limit.'
+      :o.will_pass===false?`🎯 Cap +${r.bot_target_pct}% — short of the phase target by ${Math.abs(o.gap_pp).toFixed(2)} pp. This account will not pass.`
+      :o.will_pass?`🎯 Cap +${r.bot_target_pct}% — clears the phase target. This account will pass.`
+      :`🎯 Target set to +${r.bot_target_pct}%. The bot continues from here.`,'ok',7000);
+    openAccount(id);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
 async function setBotTarget(id){
   const cel=parseFloat($('bot-newtarget').value);
   if(isNaN(cel)||cel<0){toast('Enter a target of 0% or more.','err');return}
+  await setBotOutcome(id,cel);
+}
+async function makeItFail(id){
+  /* askReason zwraca string — presety to liczba dni, Custom… pozwala wpisać
+     własną. Parsujemy pierwszą liczbę z odpowiedzi. */
+  const v=await askReason({
+    title:'Make this account fail',danger:true,confirmLabel:'Start the ride-down',
+    hint:'The bot starts <b>losing on purpose</b>: a believable losing streak spread over the days '
+        +'chosen below, down to the max-drawdown floor, where the <b>risk engine</b> books the breach '
+        +'and the trader gets the standard e-mail. In the history it reads like a trader who lost it, '
+        +'not like an admin action. Any profit cap is removed — the two are mutually exclusive.',
+    label:'Ride it down over',
+    presets:['2 days','3 days','5 days','7 days']});
+  if(v===null)return;
+  const dni=parseFloat(v);
+  if(isNaN(dni)||dni<=0){toast('Give the number of days, e.g. "4".','err');return}
   try{
     const r=await api(`/api/admin/accounts/${id}/bot`,{method:'PATCH',
-      body:JSON.stringify({target_pct:cel})});
-    toast(r.bot_target_pct?`🎯 Target set to +${r.bot_target_pct}%. The bot continues from here.`
-                          :'🎯 Target removed. The bot trades with no profit limit.','ok');
+      body:JSON.stringify({mode:'doom',doom_days:dni})});
+    const o=r.bot_outcome||{};
+    toast(`📉 Ride-down started: down to $${fmt(o.doom_floor)} over ~${dni} day${dni===1?'':'s'}. `
+      +'The risk engine books the breach when it gets there.','ok',9000);
+    openAccount(id);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function cancelDoom(id){
+  try{await api(`/api/admin/accounts/${id}/bot`,{method:'PATCH',body:JSON.stringify({mode:'profit'})});
+    toast('Ride-down called off. The bot goes back to normal trading, with no cap.','ok');
     openAccount(id);
   }catch(e){toast('Error: '+e.message,'err')}
 }
