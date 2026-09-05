@@ -9492,6 +9492,12 @@ def pay_order_public(request: Request, token: str,
                 # na stronie płatności, istnieje tylko w rozmowie na Telegramie.
                 "bogo": bool(getattr(o, "bogo", False)),
                 "weekend_trading": bool(getattr(o, "weekend_trading", False)),
+                # Bez flagi „gratis" i stawki partner nie odróżni weekendu
+                # doliczonego do kwoty od podarowanego — i albo przemilczy
+                # add-on, albo pokaże dopłatę, której w kwocie nie ma.
+                "weekend_free": bool(getattr(o, "weekend_free", False)),
+                "weekend_fee_usd": catalog.WEEKEND_ADDON_USD,
+                "headline": getattr(o, "pay_headline", None),
                 # Klient partnera dostał cenę niższą od cennikowej i ma prawo to
                 # ZOBACZYĆ. Bez tego rabat istnieje wyłącznie w rozmowie na
                 # Telegramie i w naszym raporcie — czyli dla kupującego wcale.

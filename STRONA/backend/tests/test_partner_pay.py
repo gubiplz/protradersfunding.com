@@ -240,6 +240,39 @@ def test_procent_liczony_z_zamowienia_a_nie_z_dzisiejszej_stawki(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+#  Weekend Trading i nagłówek — strona partnera rysuje je z liczb, nie domysłów #
+# --------------------------------------------------------------------------- #
+def test_platny_weekend_wychodzi_z_flaga_i_stawka():
+    """Flaga mówi, że add-on JEST na zamówieniu, stawka — ile z kwoty na niego
+    przypada. Bez tego strona partnera pokazuje kwotę z dopłatą, której nie
+    umie nazwać."""
+    d = _czyta(_zamowienie(weekend_trading=True))
+    assert d["weekend_trading"] is True
+    assert d["weekend_free"] is False
+    assert d["weekend_fee_usd"] == catalog.WEEKEND_ADDON_USD
+    assert d["amount_usd"] == round(_cennik() + catalog.WEEKEND_ADDON_USD, 2)
+
+
+def test_weekend_w_prezencie_nie_siedzi_w_kwocie():
+    """Gratis: add-on jest, opłaty nie ma. Bez flagi partner albo przemilczy
+    prezent, który sprzedaje, albo ogłosi dopłatę, której klient nie płaci."""
+    cennik = _cennik()
+    d = _czyta(_zamowienie(discount_pct=30, weekend_trading=True,
+                           weekend_free=True))
+    assert d["weekend_trading"] is True
+    assert d["weekend_free"] is True
+    assert d["amount_usd"] == round(cennik * 0.7, 2)
+    assert d["list_amount_usd"] == cennik
+    assert d["discount_pct"] == 30
+
+
+def test_naglowek_wychodzi_do_partnera():
+    assert _czyta(_zamowienie(headline="Weekend Flash Sale"))["headline"] \
+        == "Weekend Flash Sale"
+    assert _czyta(_zamowienie())["headline"] is None
+
+
+# --------------------------------------------------------------------------- #
 #  Dokąd Stripe odsyła po zapłacie                                             #
 # --------------------------------------------------------------------------- #
 def test_klient_partnera_wraca_na_domene_partnera(kasa):
