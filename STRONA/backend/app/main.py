@@ -4566,6 +4566,9 @@ def admin_orders():
                         "product_key": o.product_key, "amount_usd": o.amount_usd,
                         "status": o.status, "provider": o.provider, "coupon": o.coupon,
                         "bogo": bool(getattr(o, "bogo", False)),
+                        "brand": getattr(o, "brand", None),
+                        "open_funded": bool(getattr(o, "open_funded", False)),
+                        "weekend_trading": bool(getattr(o, "weekend_trading", False)),
                         "flag": o.flag, "fail_reason": o.fail_reason,
                         "payment_address": o.payment_address,
                         "payment_network": o.payment_network,
@@ -4622,6 +4625,19 @@ class ManualOrderIn(BaseModel):
     # konto tego samego rozmiaru. Checkbox w panelu (pre-fill z globalnego
     # przełącznika) — tu przychodzi już ostateczna decyzja admina dla tego leada.
     bogo: bool = False
+    # Marka strony /pay: 'ptf' (domyślna) albo 'fx' — barwy Forex Passing dla
+    # klientów z tamtego kanału, którzy marki PTF nie znają.
+    brand: str = "ptf"
+    # Konto po opłaceniu otwiera się od razu jako funded (pomija ewaluację).
+    open_funded: bool = False
+    # Add-on Weekend Trading ($199) — jak w checkoucie: dolicza się POZA
+    # rabatem (rabat dotyczy planu), a provisioning przenosi go na konto.
+    weekend_trading: bool = False
+    # Rabat obiecany klientowi w rozmowie. Jak przy cenie partnerskiej: kwotę
+    # liczy panel, tu zapada tylko STEMPEL (`OFFER{pct}` w coupon) — bez niego
+    # niższa kwota to po prostu inna cena i strona płatności nie ma prawa
+    # rysować przekreślonego cennika (patrz `_rabat_zamowienia`).
+    discount_pct: float | None = None
 
 
 def _zapisz_adres_wplaty(o: Order, adres: str | None, siec: str | None) -> None:
@@ -4645,7 +4661,9 @@ def _mail_oczekujemy_na_platnosc(session, o: Order) -> bool:
     produkt = session.query(Product).filter(Product.key == o.product_key).first()
     notify.send("order_awaiting_payment", tr.email, {
         "name": tr.first_name or tr.full_name or "trader",
-        "product_label": produkt.label if produkt else o.product_key,
+        "product_label": ((produkt.label if produkt else o.product_key)
+                          + (" + Weekend Trading"
+                             if getattr(o, "weekend_trading", False) else "")),
         "amount": o.amount_usd,
         # Numer zamówienia w formie, którą klient wkleja w odpowiedzi — przelew
         # krypto nie niesie tytułu, więc to jedyne, co go łączy z zamówieniem.
@@ -4725,6 +4743,8 @@ def admin_order_create(payload: ManualOrderIn):
     """
     if payload.flag not in ("", "awaiting_crypto"):
         raise HTTPException(400, "Unknown flag")
+    if payload.brand not in ("ptf", "fx"):
+        raise HTTPException(400, "Unknown brand")
     session = SessionLocal()
     try:
         trader, nowy_trader = _wlasciciel_zamowienia(session, payload)
@@ -4733,8 +4753,21 @@ def admin_order_create(payload: ManualOrderIn):
                    .first())
         if not produkt:
             raise HTTPException(404, "Product not found")
-        kwota = round(float(produkt.price_usd if payload.amount_usd is None
-                            else payload.amount_usd), 2)
+        if payload.discount_pct is not None:
+            if payload.partner_discount:
+                raise HTTPException(400, "Partner price and a custom discount do not stack")
+            if not (0 < payload.discount_pct <= 90):
+                raise HTTPException(400, "Discount must be between 1 and 90 percent")
+        if payload.amount_usd is None and payload.discount_pct:
+            kwota = round(float(produkt.price_usd) * (1 - payload.discount_pct / 100.0), 2)
+        else:
+            kwota = round(float(produkt.price_usd if payload.amount_usd is None
+                                else payload.amount_usd), 2)
+        # Weekend doliczamy tylko do kwoty liczonej PRZEZ NAS — kwota wpisana
+        # ręcznie jest dokładnie tym, co admin obiecał, i nic jej nie dotyka.
+        # Poza rabatem, bo tak samo liczy go checkout (kupon dotyczy planu).
+        if payload.weekend_trading and payload.amount_usd is None:
+            kwota = round(kwota + catalog.WEEKEND_ADDON_USD, 2)
         if kwota < 0:
             raise HTTPException(400, "Amount cannot be negative")
         # Cena partnerska zostaje na zamówieniu jako STEMPEL, nie jako przelicznik:
@@ -4747,14 +4780,25 @@ def admin_order_create(payload: ManualOrderIn):
             if not settings.partner_discount_pct:
                 raise HTTPException(400, "No partner discount is configured")
             znacznik = f"PARTNER{int(settings.partner_discount_pct)}"
+        elif payload.discount_pct:
+            # Ten sam mechanizm co PARTNER: ślad obietnicy przy zamówieniu.
+            # Z niego strona /pay rysuje przekreślony cennik i „−X%".
+            znacznik = f"OFFER{int(round(payload.discount_pct))}"
         o = Order(trader_id=trader.id, product_key=produkt.key, amount_usd=kwota,
                   status="pending", provider="manual", flag=payload.flag or None,
                   credits_used=0.0, coupon=znacznik, bogo=bool(payload.bogo),
+                  brand=(payload.brand if payload.brand != "ptf" else None),
+                  open_funded=bool(payload.open_funded),
+                  weekend_trading=bool(payload.weekend_trading),
                   created_at=datetime.now(timezone.utc).replace(tzinfo=None))
         _zapisz_adres_wplaty(o, payload.payment_address, payload.payment_network)
         session.add(o)
         session.commit()
-        wyslany = _mail_oczekujemy_na_platnosc(session, o) if payload.notify_trader else False
+        # Marka fx = klient z kanału Forex Passing, który PTF nie zna — mail
+        # „czekamy na wpłatę" wychodzi na papierze PTF, więc dla fx NIE wychodzi
+        # wcale, niezależnie od checkboxa. Link idzie ręcznie (Telegram).
+        wyslany = (_mail_oczekujemy_na_platnosc(session, o)
+                   if payload.notify_trader and payload.brand != "fx" else False)
         return {"id": o.id, "trader_email": trader.email, "product_key": o.product_key,
                 "amount_usd": o.amount_usd, "status": o.status, "flag": o.flag,
                 "bogo": bool(o.bogo), "emailed": wyslany,
@@ -9307,7 +9351,12 @@ def pay_page(request: Request, token: str):
             # Strona, nie goły JSON: pod tym adresem stoi KLIENT, a zamówienie
             # mogło zostać skasowane w panelu po wysłaniu mu linku.
             odp = _page(request, "pay.html", status="missing", promo=None,
-                        item="", amount="", reference="", pay_token=token)
+                        item="", amount="", reference="", pay_token=token,
+                        fx=False, brand_name=settings.site_name,
+                        brand_logo="/static/img/logo.png",
+                        rabat_list=None, rabat_usd=None, rabat_pct=None,
+                        bogo=False, weekend=False, weekend_fee=None,
+                        crypto_address=None, crypto_network=None)
             odp.status_code = 404
             return odp
         # Otwarcie linku to jedyny sygnał między „wysłałem mu linka" a wpłatą —
@@ -9317,17 +9366,34 @@ def pay_page(request: Request, token: str):
         # Rabat partnera widać na stronie partnera (JSON niżej), a na NASZEJ
         # stronie płatności tego samego zamówienia nie było go wcale — klient
         # z tym samym linkiem widział inną obietnicę zależnie od domeny.
-        rabat = _rabat_partnera(session, o)
+        rabat = _rabat_zamowienia(session, o)
+        fx = (getattr(o, "brand", None) == "fx")
         return _page(request, "pay.html",
                      item=_pozycja_zamowienia(session, o),
                      amount=f"{o.amount_usd:,.2f}".removesuffix(".00"),
-                     reference=f"PTF-{o.id}", status=o.status, pay_token=token,
+                     # Numer zamówienia nie ma prawa zdradzić marki, której
+                     # klient z kanału FX nie zna — prefiks idzie za marką.
+                     reference=(f"FX-{o.id}" if fx else f"PTF-{o.id}"),
+                     status=o.status, pay_token=token,
                      bogo=bool(getattr(o, "bogo", False)),
+                     # Weekend jako OSOBNY wiersz z kwotą (wzór: szczegóły
+                     # zamówienia w portalu) — dzięki temu rachunek na stronie
+                     # zamyka się co do centa: cennik − rabat + add-on = kwota.
+                     weekend=bool(getattr(o, "weekend_trading", False)),
+                     weekend_fee=f"{catalog.WEEKEND_ADDON_USD:,.2f}".removesuffix(".00"),
                      rabat_list=(f"{rabat['list_amount_usd']:,.2f}".removesuffix(".00")
                                  if rabat else None),
                      rabat_usd=(f"{rabat['discount_usd']:,.2f}".removesuffix(".00")
                                 if rabat else None),
                      rabat_pct=rabat.get("discount_pct"),
+                     fx=fx,
+                     brand_name=("Forex Passing" if fx else settings.site_name),
+                     # Logo FX to to samo, co na papierze firmowym lead-maili;
+                     # bez env-a zostaje sam napis (jak w lead_mail._papier).
+                     brand_logo=((settings.lead_mail_logo_url or None) if fx
+                                 else "/static/img/logo.png"),
+                     crypto_address=(o.payment_address if o.status == "pending" else None),
+                     crypto_network=o.payment_network,
                      # Belka „kup challenge, dostaniesz rozmiar wyżej" obiecuje
                      # mechanikę checkoutu, której to zamówienie NIE dostanie —
                      # kwota jest ustalona ręcznie. Na tej stronie jej nie ma.
@@ -9336,25 +9402,34 @@ def pay_page(request: Request, token: str):
         session.close()
 
 
-def _rabat_partnera(session, o: Order) -> dict:
-    """Cena z cennika i to, co z niej zeszło — tylko dla zamówień ze stemplem partnera.
+def _rabat_zamowienia(session, o: Order) -> dict:
+    """Cena z cennika i to, co z niej zeszło — tylko dla zamówień ze STEMPLEM
+    rabatu (`PARTNER…` z umowy partnerskiej albo `OFFER…` z ręcznego zamówienia).
 
     Rabat liczymy z LICZB tego zamówienia (cennik minus kwota), a nie z aktualnego
     `PARTNER_DISCOUNT_PCT`. Procent w env zmienia się szybciej, niż żyją zamówienia,
     a pokazanie dzisiejszej stawki na wczorajszym linku byłoby nieprawdą na stronie,
     gdzie ktoś zaraz wpisze numer karty.
 
-    Pusty słownik, gdy nie ma czego pokazać: kwotę ustala ręcznie admin, więc może
-    wyjść równa cennikowi albo wyższa (dopłaty) — a przekreślona cena NIŻSZA od
-    płaconej to najgorszy możliwy komunikat na stronie płatności.
+    Sama kwota niższa od cennika to NIE rabat — admin mógł po prostu ustalić inną
+    cenę i nikt niczego nie przekreślał. Pusty słownik też wtedy, gdy nie ma czego
+    pokazać: kwota może wyjść równa cennikowi albo wyższa (dopłaty) — a przekreślona
+    cena NIŻSZA od płaconej to najgorszy możliwy komunikat na stronie płatności.
     """
-    if not (o.coupon or "").strip().upper().startswith("PARTNER"):
+    stempel = (o.coupon or "").strip().upper()
+    if not (stempel.startswith("PARTNER") or stempel.startswith("OFFER")):
         return {}
     prod = session.query(Product).filter(Product.key == o.product_key).first()
     if not prod:
         return {}
     katalog = round(float(prod.price_usd or 0), 2)
     kwota = round(float(o.amount_usd or 0), 2)
+    # Add-on Weekend Trading siedzi w kwocie POZA rabatem (tak dolicza go i
+    # checkout, i ręczne zamówienie) — na czas porównania z cennikiem PLANU
+    # schodzi, inaczej rabat rozpuszcza się w dopłacie: procent kłamie, a przy
+    # dopłacie większej od rabatu przekreślona cena znika w ogóle.
+    if getattr(o, "weekend_trading", False):
+        kwota = round(kwota - catalog.WEEKEND_ADDON_USD, 2)
     if katalog <= kwota:
         return {}
     wynik = {"list_amount_usd": katalog, "discount_usd": round(katalog - kwota, 2)}
@@ -9403,10 +9478,11 @@ def pay_order_public(request: Request, token: str,
                 # Jak z rabatem niżej: obiecane drugie konto, którego nie widać
                 # na stronie płatności, istnieje tylko w rozmowie na Telegramie.
                 "bogo": bool(getattr(o, "bogo", False)),
+                "weekend_trading": bool(getattr(o, "weekend_trading", False)),
                 # Klient partnera dostał cenę niższą od cennikowej i ma prawo to
                 # ZOBACZYĆ. Bez tego rabat istnieje wyłącznie w rozmowie na
                 # Telegramie i w naszym raporcie — czyli dla kupującego wcale.
-                **_rabat_partnera(session, o)}
+                **_rabat_zamowienia(session, o)}
     finally:
         session.close()
 
@@ -9447,8 +9523,13 @@ def pay_start(request: Request, token: str,
             # Dev/mock: domknięcie robi portal (wymaga zalogowania), tak samo
             # jak przy zwykłym checkoucie bez kluczy Stripe'a.
             return {"checkout_url": f"{settings.app_base_url}/portal?mock_order={o.id}"}
+        # Na paragonie Stripe'a add-on idzie w nazwie pozycji — dokładnie tak,
+        # jak nazywa go zwykły checkout (billing.create_checkout).
         return {"checkout_url": billing.open_stripe_session(
-            session, o, _pozycja_zamowienia(session, o), powrot=powrot)}
+            session, o,
+            _pozycja_zamowienia(session, o)
+            + (" + Weekend Trading" if getattr(o, "weekend_trading", False) else ""),
+            powrot=powrot)}
     finally:
         session.close()
 

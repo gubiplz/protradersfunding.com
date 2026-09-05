@@ -1172,7 +1172,7 @@ function renderOrders(){
       <tbody>${rows.map(o=>`<tr>
         <td class="num rt-hide" data-l="#">${o.id}</td><td class="muted" data-l="Date" data-sort="${esc(o.created_at||'')}">${dstr(o.created_at)}</td>
         <td class="rt-main" data-l="Trader">${esc(o.trader_email||'—')}</td>
-        <td data-l="Product">${esc(o.product_key)}${o.bogo?` <span class="up" style="font-size:11px" title="Buy 1 Get 1 Free — paying this order also creates a free second account of the same size">+1 free</span>`:''}</td>
+        <td data-l="Product">${esc(o.product_key)}${o.bogo?` <span class="up" style="font-size:11px" title="Buy 1 Get 1 Free — paying this order also creates a free second account of the same size">+1 free</span>`:''}${o.open_funded?` <span class="up" style="font-size:11px" title="Opens straight as a funded account when paid — skips the evaluation">funded</span>`:''}${o.weekend_trading?` <span class="up" style="font-size:11px" title="Weekend Trading add-on — 2 extra trading days/week">wknd</span>`:''}${o.brand==='fx'?` <span class="up" style="font-size:11px" title="The payment page shows Forex Passing branding — no PTF anywhere on it">FX</span>`:''}</td>
         <td class="num" data-l="Amount">$${fmt(o.amount_usd)}${o.coupon?` <span class="up" style="font-size:11px">(${esc(o.coupon)})</span>`:''}</td>
         <td class="muted rt-hide" data-l="Provider">${esc(o.provider)}</td>
         <td data-l="Status"><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span>
@@ -4091,6 +4091,14 @@ async function openManualOrder(traderId,lead){
         <button type="button" class="on" onclick="moMethod('crypto')">Crypto / transfer</button>
         <button type="button" onclick="moMethod('link')">Card payment link</button>
       </div>
+      <div><label class="muted" style="font-size:12px">Payment page brand</label>
+        <div class="seg" id="mo-brand" style="width:100%">
+          <button type="button" class="on" onclick="moBrand('ptf')">Pro Traders Funding</button>
+          <button type="button" onclick="moBrand('fx')">Forex Passing</button>
+        </div>
+        <p class="hint" id="mo-brand-hint" style="display:none;margin-top:6px">The payment page renders
+          <b>Forex Passing</b> colours and logo — no PTF anywhere on it. No e-mail goes out
+          (our mails are PTF-branded); send the link yourself, e.g. on Telegram.</p></div>
       ${lead?`<div><label class="muted" style="font-size:12px">Customer</label>
         <div class="inp" style="display:flex;flex-direction:column;gap:2px">
           <b>${esc(lead.name||lead.email)}</b>
@@ -4101,8 +4109,14 @@ async function openManualOrder(traderId,lead){
       <div><label class="muted" style="font-size:12px">Challenge</label>
         <select id="mo-product" class="inp" onchange="moPrice()">${products.map(p=>
           `<option value="${esc(p.key)}" data-price="${p.price_usd}">${esc(p.label)} — $${fmt0(p.account_size)} · $${fmt(p.price_usd)}</option>`).join('')}</select></div>
-      <div><label class="muted" style="font-size:12px">Amount to collect (USD)</label>
-        <input id="mo-amount" class="inp" type="number" inputmode="decimal" step="0.01" min="0"></div>
+      <div style="display:grid;grid-template-columns:1fr 130px;gap:10px">
+        <div><label class="muted" style="font-size:12px">Amount to collect (USD)</label>
+          <input id="mo-amount" class="inp" type="number" inputmode="decimal" step="0.01" min="0"></div>
+        <div><label class="muted" style="font-size:12px">Discount %</label>
+          <input id="mo-discount" class="inp" type="number" inputmode="numeric" step="1" min="0" max="90"
+            placeholder="e.g. 30" oninput="const p=$('mo-partner');if(p)p.checked=false;moPrice()"
+            title="Recalculates the amount from the list price and shows a crossed-out list price on the payment page"></div>
+      </div>
       ${pct?`<label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
         <input type="checkbox" id="mo-partner"${lead?' checked':''} onchange="moPrice()" style="width:16px;height:16px;accent-color:var(--acc)">
         <span>Partner price <b>−${pct}%</b>
@@ -4111,6 +4125,14 @@ async function openManualOrder(traderId,lead){
         <input type="checkbox" id="mo-bogo"${bogoOn?' checked':''} style="width:16px;height:16px;accent-color:var(--acc)">
         <span><b>Buy 1 Get 1 Free</b>
           <span class="muted">— a second account of the same size is created automatically once this order is paid</span></span></label>
+      <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="mo-weekend" onchange="moPrice()" style="width:16px;height:16px;accent-color:var(--acc)">
+        <span><b>Weekend Trading</b> <b>+$199</b>
+          <span class="muted">— 2 extra trading days/week; added on top of the amount, outside the discount</span></span></label>
+      <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="mo-funded" style="width:16px;height:16px;accent-color:var(--acc)">
+        <span><b>Open as funded</b>
+          <span class="muted">— the account skips the evaluation and starts straight in the funded phase once this order is paid</span></span></label>
       <div class="stack" id="mo-crypto">
         <div><label class="muted" style="font-size:12px">Network</label>
           <input id="mo-network" class="inp" placeholder="e.g. USDT · TRC20" value="${esc(lastWallet().network||'')}"></div>
@@ -4131,6 +4153,10 @@ async function openManualOrder(traderId,lead){
   document.body.appendChild(box);
   /* A lead is always here to be sent a link, so start there. */
   moMethod(lead?'link':(window._moMethodPref||'crypto'));
+  /* Marka NIE jest zapamiętywana między otwarciami: wysłanie klientowi PTF
+     strony w barwach FX (albo odwrotnie) to błąd, który ma być niemożliwy
+     z rozpędu — każde okno startuje od PTF. */
+  moBrand('ptf');
   if(!lead)moFilter(traderId);
   moPrice();
 }
@@ -4176,8 +4202,21 @@ function moFilter(preselect){
 function moPrice(){
   const o=$('mo-product').selectedOptions[0];
   if(!o)return;
-  const pct=$('mo-partner')?.checked?(window._moPartnerPct||0):0;
-  $('mo-amount').value=(o.dataset.price*(1-pct/100)).toFixed(2);
+  /* Cena partnerska i ręczny rabat się NIE składają (serwer to samo mówi 400-tką):
+     zaznaczenie partnera czyści pole rabatu, wpisanie rabatu odznacza partnera. */
+  const partner=$('mo-partner')?.checked;
+  if(partner)$('mo-discount').value='';
+  const pct=partner?(window._moPartnerPct||0)
+    :Math.min(90,Math.max(0,parseFloat($('mo-discount').value)||0));
+  /* Weekend POZA rabatem — ta sama kolejność co w checkoucie (kupon dotyczy
+     planu). $199 jest zaszyte jak w portalu (portal-app.js, wiersz add-onu). */
+  const wk=$('mo-weekend')?.checked?199:0;
+  $('mo-amount').value=(o.dataset.price*(1-pct/100)+wk).toFixed(2);
+}
+function moBrand(m){
+  window._moBrand=m;
+  $('mo-brand').querySelectorAll('button').forEach((b,i)=>b.classList.toggle('on',(i===1)===(m==='fx')));
+  $('mo-brand-hint').style.display=m==='fx'?'':'none';
 }
 async function submitManualOrder(){
   const lead=window._moLead;
@@ -4185,6 +4224,8 @@ async function submitManualOrder(){
   if(!lead&&!tid){toast('Pick a customer first.','err');return}
   const amount=parseFloat($('mo-amount').value);
   if(!(amount>=0)){toast('Enter the amount to collect.','err');return}
+  const disc=$('mo-partner')?.checked?0:Math.round(parseFloat($('mo-discount').value)||0);
+  if(disc<0||disc>90){toast('Discount must be between 0 and 90%.','err');return}
   const link=window._moMethod==='link';
   const addr=link?'':($('mo-address').value||'').trim();
   const net=link?'':($('mo-network').value||'').trim();
@@ -4197,6 +4238,10 @@ async function submitManualOrder(){
       ...(lead?{email:lead.email}:{trader_id:tid}),
       product_key:$('mo-product').value,amount_usd:amount,
       partner_discount:!!$('mo-partner')?.checked,
+      brand:window._moBrand||'ptf',
+      open_funded:!!$('mo-funded')?.checked,
+      weekend_trading:!!$('mo-weekend')?.checked,
+      ...(disc>0?{discount_pct:disc}:{}),
       bogo:!!$('mo-bogo')?.checked,
       flag:(!link&&$('mo-awaiting').checked)?'awaiting_crypto':'',
       payment_address:addr,payment_network:net,

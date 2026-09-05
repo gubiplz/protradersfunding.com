@@ -131,7 +131,9 @@ def test_token_jest_nieodgadywalny():
     t1, t2 = _token(oid), _token(oid2)
     assert t1 != t2 and len(t1) >= 16
     # Numer zamówienia w tokenie = każdy link daje się wyliczyć z sąsiedniego.
-    assert str(oid) not in t1
+    # Sprawdzamy wspólny prefiks, nie `str(oid) not in t1`: jednocyfrowy numer
+    # trafia się w losowym tokenie co czwarty przebieg i test rzucał monetą.
+    assert t1[:8] != t2[:8]
 
 
 def test_link_do_oplaconego_zamowienia_sie_nie_wystawia():
@@ -219,13 +221,14 @@ def test_strona_nie_obiecuje_promocji_ktorej_to_zamowienie_nie_dostanie(monkeypa
     assert "promo-bar" not in client.get(f"/pay/{_token(oid)}").text
 
 
-def test_naglowek_nie_wchodzi_pod_pasek_nawigacji():
-    """Nawigacja jest `position:fixed`, więc pierwsza sekcja musi zarezerwować
-    na nią miejsce. Zmierzone w przeglądarce na goŁym `.sec`: przy 390 px pigułka
-    „Secure checkout" siedziała na wysokości 66 px, a pasek kończył się na 103 —
-    tytuł strony płatności był przykryty. `.page-head` liczy padding z --promo-h."""
+def test_strona_jest_samodzielna_bez_nawigacji_serwisu():
+    """Kasa nie dziedziczy z base.html: bez paska nawigacji, stopki i belek.
+    Klient ma tu JEDEN przycisk — każde wyjście z tej strony to porzucona
+    płatność, a przy marce FX nawigacja zdradzałaby w ogóle istnienie PTF."""
     oid, _, _ = _zamowienie()
-    assert 'class="page-head"' in client.get(f"/pay/{_token(oid)}").text
+    tresc = client.get(f"/pay/{_token(oid)}").text
+    assert "<nav" not in tresc
+    assert 'class="logo"' not in tresc
 
 
 # --------------------------------------------------------------------------- #
@@ -327,3 +330,159 @@ def test_bez_kluczy_stripe_link_prowadzi_do_mocka():
     oid, _, _ = _zamowienie()
     r = client.post(f"/api/pay/{_token(oid)}/start")
     assert r.status_code == 200 and f"mock_order={oid}" in r.json()["checkout_url"]
+
+
+# --------------------------------------------------------------------------- #
+#  Marka strony (PTF / Forex Passing) i rabat z panelu                         #
+# --------------------------------------------------------------------------- #
+def test_marka_domyslna_to_ptf():
+    oid, _, _ = _zamowienie()
+    tresc = client.get(f"/pay/{_token(oid)}").text
+    assert f"PTF-{oid}" in tresc
+    assert "Forex Passing" not in tresc
+
+
+def test_marka_fx_nie_zdradza_ptf():
+    """Klient z kanału Forex Passing marki PTF nie zna — strona w barwach FX
+    nie ma prawa pokazać ani nazwy, ani domeny, ani numeru z prefiksem PTF."""
+    oid, _, _ = _zamowienie(brand="fx")
+    tresc = client.get(f"/pay/{_token(oid)}").text
+    assert "Forex Passing" in tresc
+    assert "Pro Traders Funding" not in tresc
+    assert "protradersfunding" not in tresc.lower()
+    assert f"FX-{oid}" in tresc and f"PTF-{oid}" not in tresc
+
+
+def test_marka_fx_po_zaplacie_nie_wysyla_do_portalu_ptf():
+    oid, _, _ = _zamowienie(brand="fx")
+    token = _token(oid)
+    client.post(f"/api/admin/orders/{oid}/mark-paid", headers=ADMIN)
+    tresc = client.get(f"/pay/{token}").text
+    assert "Already paid" in tresc
+    assert "/portal" not in tresc and "protradersfunding" not in tresc.lower()
+
+
+def test_nieznana_marka_to_400():
+    tid, _ = _trader()
+    r = client.post("/api/admin/orders",
+                    json={"trader_id": tid, "product_key": "2step-25k", "flag": "",
+                          "notify_trader": False, "brand": "xyz"}, headers=ADMIN)
+    assert r.status_code == 400
+
+
+def test_marka_fx_nie_wysyla_ptf_maila():
+    """Mail „czekamy na wpłatę" wychodzi na papierze PTF — dla zamówienia FX
+    nie wychodzi WCALE, choćby checkbox został zaznaczony."""
+    tid, _ = _trader()
+    r = client.post("/api/admin/orders",
+                    json={"trader_id": tid, "product_key": "2step-25k",
+                          "flag": "awaiting_crypto", "notify_trader": True,
+                          "brand": "fx"}, headers=ADMIN)
+    assert r.status_code == 200
+    assert r.json()["emailed"] is False
+
+
+def test_rabat_z_panelu_widac_na_stronie():
+    """Rabat obiecany w rozmowie ma stać na stronie płatności: przekreślony
+    cennik i procent. Stempel OFFER — sama niższa kwota rabatu nie tworzy
+    (tego pilnuje test_partner_pay)."""
+    oid, _, _ = _zamowienie(discount_pct=30)  # cennik 2step-25k: $299
+    tresc = client.get(f"/pay/{_token(oid)}").text
+    assert "List price" in tresc and "$299" in tresc
+    assert "$209.30" in tresc, "kwota po rabacie policzona z cennika"
+    assert "(30%)" in tresc
+
+
+def test_nizsza_kwota_bez_stempla_nie_rysuje_rabatu():
+    oid, _, _ = _zamowienie(amount_usd=209.30)
+    tresc = client.get(f"/pay/{_token(oid)}").text
+    assert "List price" not in tresc
+
+
+def test_rabat_nie_laczy_sie_z_cena_partnerska():
+    tid, _ = _trader()
+    r = client.post("/api/admin/orders",
+                    json={"trader_id": tid, "product_key": "2step-25k", "flag": "",
+                          "notify_trader": False, "partner_discount": True,
+                          "discount_pct": 30}, headers=ADMIN)
+    assert r.status_code == 400
+
+
+# --------------------------------------------------------------------------- #
+#  Otwarcie od razu jako funded                                                #
+# --------------------------------------------------------------------------- #
+def test_open_funded_zaklada_konto_od_razu_funded():
+    """Oferta imienna „płacisz i masz konto funded": po opłaceniu konto pomija
+    ewaluację, choć plan ma 2 kroki."""
+    from app.models import Account
+    oid, _, _ = _zamowienie(open_funded=True)
+    r = client.post(f"/api/admin/orders/{oid}/mark-paid", headers=ADMIN)
+    assert r.status_code == 200, r.text
+    s = SessionLocal()
+    o = s.get(Order, oid)
+    acc = s.get(Account, o.account_id)
+    s.close()
+    assert acc is not None
+    assert acc.phase == "funded" and acc.status == "funded"
+
+
+def test_bez_open_funded_konto_zaczyna_ewaluacje():
+    from app.models import Account
+    oid, _, _ = _zamowienie()
+    client.post(f"/api/admin/orders/{oid}/mark-paid", headers=ADMIN)
+    s = SessionLocal()
+    o = s.get(Order, oid)
+    acc = s.get(Account, o.account_id)
+    s.close()
+    assert acc.phase == "eval_1" and acc.status == "active"
+
+
+# --------------------------------------------------------------------------- #
+#  Add-on Weekend Trading                                                      #
+# --------------------------------------------------------------------------- #
+def test_weekend_dolicza_sie_do_kwoty_liczonej_przez_serwer():
+    """Bez kwoty w żądaniu serwer liczy jak checkout: (cennik − rabat) + $199 —
+    add-on POZA rabatem, bo rabat dotyczy planu."""
+    oid, _, _ = _zamowienie(discount_pct=30, weekend_trading=True)  # 299*0.7+199
+    s = SessionLocal(); o = s.get(Order, oid); s.close()
+    assert o.amount_usd == pytest.approx(408.30)
+    assert bool(o.weekend_trading) is True
+
+
+def test_weekend_nie_rusza_kwoty_wpisanej_recznie():
+    """Kwota wpisana ręcznie jest dokładnie tym, co admin obiecał — panel sam
+    dolicza $199 w polu, więc serwer nie ma prawa doliczyć drugi raz."""
+    oid, _, _ = _zamowienie(amount_usd=250.0, weekend_trading=True)
+    s = SessionLocal(); o = s.get(Order, oid); s.close()
+    assert o.amount_usd == 250.0
+
+
+def test_weekend_widac_na_stronie_a_rabat_nie_znika():
+    """Add-on ma osobny wiersz, a rabat dalej liczy się od PLANU: bez zdjęcia
+    weekendu z kwoty dopłata $199 połknęłaby przekreślony cennik w całości."""
+    oid, _, _ = _zamowienie(discount_pct=30, weekend_trading=True)
+    tresc = client.get(f"/pay/{_token(oid)}").text
+    assert "Weekend Trading" in tresc and "$199" in tresc
+    assert "List price" in tresc and "$299" in tresc
+    assert "(30%)" in tresc
+    assert "$408.30" in tresc
+
+
+def test_weekend_bez_rabatu_nie_rysuje_przekreslonego_cennika():
+    """Dopłata to nie rabat: $299 + $199 = $498 bez żadnego przekreślenia."""
+    oid, _, _ = _zamowienie(weekend_trading=True)
+    tresc = client.get(f"/pay/{_token(oid)}").text
+    assert "Weekend Trading" in tresc
+    assert "List price" not in tresc
+    assert "$498" in tresc
+
+
+def test_weekend_przechodzi_na_konto_po_zaplacie():
+    from app.models import Account
+    oid, _, _ = _zamowienie(weekend_trading=True)
+    client.post(f"/api/admin/orders/{oid}/mark-paid", headers=ADMIN)
+    s = SessionLocal()
+    o = s.get(Order, oid)
+    acc = s.get(Account, o.account_id)
+    s.close()
+    assert bool(acc.weekend_trading) is True

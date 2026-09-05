@@ -157,6 +157,8 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         # produkcji — bez tego wpisu kazdy SELECT z modelu Order pada na
         # brakujacej kolumnie.
         "flash_offer_id": "INTEGER",
+        "brand": "VARCHAR(8)",
+        "open_funded": "BOOLEAN DEFAULT FALSE",
     },
     "pool_accounts": {
         "claimed_by_trader_id": "INTEGER",

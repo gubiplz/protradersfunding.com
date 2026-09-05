@@ -104,10 +104,14 @@ def create_account_from_order(session, order: Order, notify_admin: bool = True) 
         express_payout=bool(getattr(order, "addon_express_payout", False)),
         max_lots=getattr(product, "max_lots", 0.0) or 0.0,
         # Instant funding (steps=0) omija ewaluacje — konto od razu jest funded.
-        phase=("funded" if product.steps == 0 else "eval_1"),
+        # `open_funded` to ta sama obietnica zlozona recznie z panelu (oferta
+        # imienna), wiec dziala dla planu z dowolna liczba krokow.
+        phase=("funded" if product.steps == 0 or getattr(order, "open_funded", False)
+               else "eval_1"),
         # przy realnym provisioningu konto czeka na poświadczenia (nie jest jeszcze handlowalne)
         status=("provisioning" if real_mode
-                else ("funded" if product.steps == 0 else "active")),
+                else ("funded" if product.steps == 0 or getattr(order, "open_funded", False)
+                      else "active")),
         source=("grant" if order.provider == "grant" else "purchase"),
         grant_note=(order.coupon if order.provider == "grant" else None),
         bogo_paid_size=_bogo_paid_size(session, order),

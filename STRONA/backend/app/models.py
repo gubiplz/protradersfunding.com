@@ -208,6 +208,12 @@ class Order(Base):
     # jest publiczna; sesje Stripe'a zaklada dopiero klikniecie, wiec link nie
     # wygasa i `stripe_session_id` dalej pilnuje webhooka.
     pay_token: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    # Marka strony /pay/<token>: NULL/'ptf' = ProTradersFunding, 'fx' = barwy
+    # Forex Passing (klienci z tamtego kanalu nie znaja marki PTF).
+    brand: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    # Po oplaceniu konto otwiera sie od razu jako funded (pomija ewaluacje) —
+    # oferta imienna z panelu, niezaleznie od liczby krokow planu.
+    open_funded: Mapped[bool] = mapped_column(Boolean, default=False)
     # Znacznik wyslanego maila „platnosc nie doszla do skutku". Siedzi PRZY
     # ZAMOWIENIU, nie przy traderze, bo tylko to daje jeden mail na jedna
     # porzucona probe — ta sama osoba moze porzucic checkout kilka razy.

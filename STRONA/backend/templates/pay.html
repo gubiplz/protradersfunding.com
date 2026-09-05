@@ -1,86 +1,185 @@
-{% extends "base.html" %}
-{% block title %}Complete your payment — {{ site_name }}{% endblock %}
-{% block description %}Secure payment page for your {{ site_name }} challenge order.{% endblock %}
+{# Samodzielna strona kasy — CELOWO nie dziedziczy z base.html: żadnej nawigacji,
+   stopki ani belek promocyjnych. Klient dostał jeden link i ma tu zrobić jedną
+   rzecz — zapłacić. Przy marce `fx` (Forex Passing) strona nie ma prawa pokazać
+   niczego od {{ site_name }}: klient z tamtego kanału tej marki nie zna. #}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Complete your payment — {{ brand_name }}</title>
+{# Link idzie jeden do jednego — w wyszukiwarce nie ma czego szukać. #}
+<meta name="robots" content="noindex,nofollow">
+{% if not fx %}<link rel="icon" href="/static/img/favicon.png" type="image/png">{% endif %}
+<style>
+{% if fx %}
+/* Barwy Forex Passing — te same co na papierze firmowym lead-maili:
+   czerń logo, zieleń świecy, szarość opisu, linia w tle wykresu. */
+:root{--ink:#0d1a13;--muted:#6b7671;--line:#e6efea;--bg:#f3f7f4;--card:#fff;
+  --acc:#15803d;--acc2:#166534;--acc-bg:#ecf6ef;--ok:#15803d;--bad:#b91c1c;
+  --glow:rgba(21,128,61,.10)}
+{% else %}
+:root{--ink:#0f172a;--muted:#5b6b80;--line:#e7eaf3;--bg:#f6f7fb;--card:#fff;
+  --acc:#6366f1;--acc2:#8b5cf6;--acc-bg:#eef0ff;--ok:#059669;--bad:#dc2626;
+  --glow:rgba(99,102,241,.10)}
+{% endif %}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{font:15px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  background:var(--bg);color:var(--ink);min-height:100vh;min-height:100dvh;
+  display:flex;flex-direction:column;align-items:center;padding:44px 16px 30px;
+  background-image:radial-gradient(520px 260px at 50% -60px,var(--glow),transparent 70%)}
+.brand{display:flex;align-items:center;gap:11px;margin-bottom:26px;text-decoration:none;color:inherit}
+.brand img{display:block;height:40px;width:auto}
+.brand .ptf-mark{height:34px;width:34px;border-radius:9px}
+.brand b{font-size:17.5px;letter-spacing:-.2px;font-weight:700}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;
+  width:100%;max-width:480px;padding:30px 28px;
+  box-shadow:0 1px 2px rgba(15,23,42,.04),0 20px 50px -22px rgba(15,23,42,.14)}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;
+  letter-spacing:.4px;text-transform:uppercase;color:var(--acc);background:var(--acc-bg);
+  border-radius:999px;padding:5px 11px}
+.pill svg{width:11px;height:11px}
+h1{font-size:23px;letter-spacing:-.4px;margin:13px 0 20px;line-height:1.25}
+.rows>div{display:flex;justify-content:space-between;align-items:baseline;gap:16px;
+  padding:10px 0;border-bottom:1px solid var(--line);font-size:14px}
+.rows>div>span:first-child{color:var(--muted);flex:none}
+.rows>div>span:last-child{text-align:right}
+.strike{text-decoration:line-through;opacity:.55}
+.save{color:var(--acc);font-weight:700}
+.total{display:flex;justify-content:space-between;align-items:baseline;padding:16px 0 4px}
+.total .lbl{color:var(--muted);font-size:14px}
+.total .amt{font-size:31px;font-weight:800;letter-spacing:-.8px}
+.btn{display:block;width:100%;margin-top:18px;padding:15px 18px;border:0;border-radius:13px;
+  background:linear-gradient(135deg,var(--acc),var(--acc2));color:#fff;font:inherit;
+  font-size:15.5px;font-weight:700;letter-spacing:.1px;cursor:pointer;
+  box-shadow:0 10px 24px -10px var(--acc);transition:transform .12s,box-shadow .12s,opacity .12s}
+.btn:hover{transform:translateY(-1px);box-shadow:0 14px 30px -10px var(--acc)}
+.btn:active{transform:none}
+.btn[disabled]{opacity:.6;cursor:default;transform:none}
+.note{color:var(--muted);font-size:13px;margin-top:14px}
+.note b{color:var(--ink)}
+.alt{margin-top:22px;border-top:1px dashed var(--line);padding-top:18px}
+.alt h2{font-size:13.5px;margin-bottom:5px}
+.addr{display:flex;gap:8px;align-items:stretch;margin-top:9px}
+.addr code{flex:1;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
+  word-break:break-all;background:var(--bg);border:1px solid var(--line);border-radius:9px;
+  padding:9px 11px;line-height:1.45}
+.copy{flex:none;border:1px solid var(--line);background:var(--card);border-radius:9px;
+  padding:0 13px;font:inherit;font-size:12.5px;font-weight:600;color:var(--acc);cursor:pointer}
+.copy:hover{background:var(--acc-bg)}
+.state{text-align:center;padding:6px 0 2px}
+.state .icon{width:52px;height:52px;border-radius:50%;display:inline-flex;align-items:center;
+  justify-content:center;margin-bottom:14px}
+.state .icon svg{width:24px;height:24px}
+.state.ok .icon{background:color-mix(in srgb,var(--ok) 12%,#fff);color:var(--ok)}
+.state.bad .icon{background:color-mix(in srgb,var(--bad) 10%,#fff);color:var(--bad)}
+.state h2{font-size:19px;letter-spacing:-.3px;margin-bottom:8px}
+.state p{color:var(--muted);font-size:14px}
+.state a{color:var(--acc);font-weight:600;text-decoration:none}
+footer{margin-top:22px;display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px}
+footer svg{width:12px;height:12px}
+@media(max-width:420px){.card{padding:24px 18px}h1{font-size:21px}.total .amt{font-size:27px}}
+</style>
+</head>
+<body>
 
-{# The link is sent one-to-one to a customer, so it has no business showing up
-   in search results — and there is nothing here worth indexing anyway. #}
-{% block head_extra %}<meta name="robots" content="noindex,nofollow">{% endblock %}
+<div class="brand">
+  {% if fx %}
+    {% if brand_logo %}<img src="{{ brand_logo }}" alt="{{ brand_name }}">
+    {% else %}<b>{{ brand_name }}</b>{% endif %}
+  {% else %}
+    <img class="ptf-mark" src="/static/img/logo.png" alt=""><b>{{ brand_name }}</b>
+  {% endif %}
+</div>
 
-{% block content %}
-<section class="page-head">
-  <div class="wrap" style="max-width:640px">
-    <span class="pill">Secure checkout</span>
-    <h1>Complete your payment</h1>
-  </div>
-</section>
-
-<section class="sec-tight sec" style="padding-top:24px">
-  <div class="wrap" style="max-width:640px">
-    {% if status == 'pending' %}
-    <div class="verify-result">
-      <div class="rows">
-        <div><span>Order</span><span>{{ reference }}</span></div>
-        <div><span>Item</span><span>{{ item }}</span></div>
-        {% if bogo %}<div><span>Included</span><span><b>+ second account, same size — free</b></span></div>{% endif %}
-        {% if rabat_list %}
-        <div><span>List price</span><span style="text-decoration:line-through;opacity:.6">${{ rabat_list }}</span></div>
-        <div><span>Your discount</span><span><b>−${{ rabat_usd }}{% if rabat_pct %} ({{ rabat_pct }}%){% endif %}</b></span></div>
-        {% endif %}
-        <div><span>Amount due</span><span>${{ amount }}</span></div>
-      </div>
-      {% if bogo %}
-      {# Obiecane na Telegramie drugie konto MUSI stać przy kwocie — inaczej
-         klient płaci, patrząc na podsumowanie, w którym obietnicy nie ma. #}
-      <p style="font-size:13.5px;margin-top:14px;line-height:1.55">
-        <b>Buy 1 Get 1 Free</b> — this order comes with a second account of the same size at
-        no extra cost. Both accounts are created automatically once the payment clears.
-      </p>
-      {% endif %}
-      <div style="margin-top:22px">
-        <button class="btn" id="payBtn" type="button">Pay ${{ amount }} by card</button>
-      </div>
-      <p class="muted" style="font-size:13.5px;margin-top:16px">
-        Payments are processed by Stripe — we never see your card details. Once the payment
-        clears, your MT5 login{% if bogo %}s for both accounts are{% else %} is{% endif %} created
-        automatically and sent to the e-mail address on your {{ site_name }} account.
-      </p>
-    </div>
-    {% elif status == 'paid' %}
-    <div class="verify-result ok">
-      <h3>✓ Already paid</h3>
-      <p class="muted" style="font-size:14px">Order {{ reference }} has been paid — nothing else
-        to do here. Your account details are in the
-        <a href="/portal" style="color:var(--acc-soft)">trader portal</a> and in your inbox.</p>
-      {% if bogo %}
-      {# Po zapłacie obietnica ma stać dalej: klient wraca na tę stronę
-         sprawdzić, czy drugie konto na pewno mu się należy. #}
-      <p style="font-size:13.5px;margin-top:12px;line-height:1.55">
-        <b>Buy 1 Get 1 Free</b> — this order came with a second account of the same size.
-        Credentials for both accounts were sent to your e-mail and are visible in the portal.
-      </p>
-      {% endif %}
-    </div>
-    {% elif status == 'missing' %}
-    <div class="verify-result bad">
-      <h3>This payment link is not valid</h3>
-      <p class="muted" style="font-size:14px">We have no order behind this address — it may have been
-        cancelled, or the link got cut when it was copied. Ask us for a fresh one at
-        <a href="mailto:{{ support_email }}" style="color:var(--acc-soft)">{{ support_email }}</a>.</p>
-    </div>
-    {% else %}
-    <div class="verify-result bad">
-      <h3>This payment link is no longer active</h3>
-      <p class="muted" style="font-size:14px">Order {{ reference }} was cancelled. If that is not
-        what you expected, write to
-        <a href="mailto:{{ support_email }}" style="color:var(--acc-soft)">{{ support_email }}</a>
-        and quote the order number.</p>
-    </div>
+<div class="card">
+{% if status == 'pending' %}
+  <span class="pill">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+    Secure checkout</span>
+  <h1>Complete your payment</h1>
+  <div class="rows">
+    <div><span>Order</span><span>{{ reference }}</span></div>
+    <div><span>Item</span><span>{{ item }}</span></div>
+    {% if bogo %}<div><span>Included</span><span><b>+ second account, same size — free</b></span></div>{% endif %}
+    {% if rabat_list %}
+    <div><span>List price</span><span class="strike">${{ rabat_list }}</span></div>
+    <div><span>Your discount</span><span class="save">−${{ rabat_usd }}{% if rabat_pct %} ({{ rabat_pct }}%){% endif %}</span></div>
+    {% endif %}
+    {% if weekend %}
+    {# Osobny wiersz z kwotą, nie dopisek przy pozycji: dzięki temu rachunek
+       zamyka się na oczach klienta — cennik − rabat + add-on = kwota. #}
+    <div><span>Weekend Trading</span><span><b>+${{ weekend_fee }}</b> — 2 extra trading days/week</span></div>
     {% endif %}
   </div>
-</section>
-{% endblock %}
+  <div class="total"><span class="lbl">Amount due</span><span class="amt">${{ amount }}</span></div>
+  {% if bogo %}
+  {# Obiecane na Telegramie drugie konto MUSI stać przy kwocie — inaczej
+     klient płaci, patrząc na podsumowanie, w którym obietnicy nie ma. #}
+  <p class="note"><b>Buy 1 Get 1 Free</b> — this order comes with a
+    second account of the same size at no extra cost. Both accounts are created
+    automatically once the payment clears.</p>
+  {% endif %}
+  <button class="btn" id="payBtn" type="button">Pay ${{ amount }} by card</button>
+  <p class="note">Payments are processed by Stripe — we never see your card details. Once the
+    payment clears, your MT5 login{% if bogo %}s for both accounts are{% else %} is{% endif %}
+    created automatically and sent to your e-mail address.</p>
+  {% if crypto_address %}
+  {# Adres wpłaty stoi PRZY zamówieniu (rotowane portfele) — skoro admin go
+     podał, klient ma go widzieć też tutaj, nie tylko w mailu. #}
+  <div class="alt">
+    <h2>Prefer to pay in crypto?</h2>
+    <p class="note" style="margin-top:0">Send exactly <b>${{ amount }}</b>{% if crypto_network %} via <b>{{ crypto_network }}</b>{% endif %} to this address:</p>
+    <div class="addr"><code id="cryptoAddr">{{ crypto_address }}</code>
+      <button class="copy" type="button" id="copyBtn">Copy</button></div>
+    <p class="note">Crypto payments are confirmed manually — your account is activated as soon
+      as the transfer lands.</p>
+  </div>
+  {% endif %}
 
-{% block scripts %}
+{% elif status == 'paid' %}
+  <div class="state ok">
+    <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M20 6 9 17l-5-5"/></svg></span>
+    <h2>Already paid</h2>
+    <p>Order {{ reference }} has been paid — nothing else to do here.
+      {% if fx %}Your account details were sent to your e-mail address.
+      {% else %}Your account details are in the <a href="/portal">trader portal</a> and in your inbox.{% endif %}</p>
+    {% if bogo %}
+    {# Po zapłacie obietnica ma stać dalej: klient wraca na tę stronę
+       sprawdzić, czy drugie konto na pewno mu się należy. #}
+    <p style="margin-top:10px"><b style="color:var(--ink)">Buy 1 Get 1 Free</b> — this order came
+      with a second account of the same size. Credentials for both accounts were sent to your e-mail.</p>
+    {% endif %}
+  </div>
+
+{% elif status == 'missing' %}
+  <div class="state bad">
+    <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 8v5M12 16.5v.5"/><circle cx="12" cy="12" r="9"/></svg></span>
+    <h2>This payment link is not valid</h2>
+    <p>We have no order behind this address — it may have been cancelled, or the link got cut
+      when it was copied. Ask us for a fresh one at
+      <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p>
+  </div>
+
+{% else %}
+  <div class="state bad">
+    <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 8v5M12 16.5v.5"/><circle cx="12" cy="12" r="9"/></svg></span>
+    <h2>This payment link is no longer active</h2>
+    <p>Order {{ reference }} was cancelled.
+      {% if fx %}If that is not what you expected, reply wherever you received this link and
+      quote the order number.
+      {% else %}If that is not what you expected, write to
+      <a href="mailto:{{ support_email }}">{{ support_email }}</a> and quote the order number.{% endif %}</p>
+  </div>
+{% endif %}
+</div>
+
+<footer>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+  {{ brand_name }} · encrypted checkout{% if status == 'pending' %} · powered by Stripe{% endif %}
+</footer>
+
 {% if status == 'pending' %}
 <script>
 /* The Stripe session is created on click, not when the link is generated —
@@ -94,9 +193,16 @@ document.getElementById('payBtn').addEventListener('click', async function(){
     location.href=d.checkout_url;
   }catch(e){
     b.disabled=false; b.textContent=t;
-    alert(e.message+' Please try again or contact {{ support_email }}.');
+    alert(e.message+' Please try again{% if not fx %} or contact {{ support_email }}{% endif %}.');
   }
+});
+const cp=document.getElementById('copyBtn');
+if(cp)cp.addEventListener('click',async function(){
+  try{await navigator.clipboard.writeText(document.getElementById('cryptoAddr').textContent.trim());
+    this.textContent='Copied ✓'; setTimeout(()=>this.textContent='Copy',1600);
+  }catch(e){/* starsze przeglądarki: adres i tak da się zaznaczyć ręcznie */}
 });
 </script>
 {% endif %}
-{% endblock %}
+</body>
+</html>
