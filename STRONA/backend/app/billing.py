@@ -362,8 +362,17 @@ def handle_webhook(session, payload: bytes, sig_header: str | None) -> dict:
     # Po weryfikacji podpisu czytamy surowy JSON — obiekt Event z SDK zmienia
     # interfejs między wersjami (v15 nie jest już dict-em), a payload jest stały.
     event = json.loads(payload.decode() or "{}")
+    typ = event.get("type")
 
-    if event.get("type") == "checkout.session.completed":
+    if typ in ("checkout.session.expired", "checkout.session.async_payment_failed"):
+        return _webhook_platnosc_nie_doszla(session, typ,
+                                            event["data"]["object"])
+    if typ == "radar.early_fraud_warning.created":
+        return _webhook_fraud_warning(session, event["data"]["object"])
+    if typ == "charge.dispute.created":
+        return _webhook_chargeback(session, event["data"]["object"])
+
+    if typ == "checkout.session.completed":
         obj = event["data"]["object"]
         raw = (obj.get("metadata") or {}).get("order_id") or obj.get("client_reference_id")
         try:
@@ -386,6 +395,99 @@ def handle_webhook(session, payload: bytes, sig_header: str | None) -> dict:
         provisioning.create_account_from_order(session, order)
         return {"provisioned": True, "order_id": order.id}
     return {"received": True}
+
+
+def _order_po_platnosci(session, payment_intent: str | None) -> Order | None:
+    """Zamówienie dla danego payment_intent — przez NASZĄ sesję Checkout.
+
+    Eventy fraudowe niosą charge/payment_intent, a zamówienie zna tylko
+    `stripe_session_id` — pytamy więc Stripe'a, która sesja Checkout niesie ten
+    intent, i dopasowujemy po jej id. Skutek uboczny w naszą korzyść: obce
+    eventy (współdzielony sandbox) nie rozwiążą się na nic."""
+    if not payment_intent:
+        return None
+    try:
+        odp = _stripe().checkout.Session.list(payment_intent=payment_intent, limit=1)
+        dane = odp["data"] if isinstance(odp, dict) else odp.data
+        sid = (dane[0]["id"] if isinstance(dane[0], dict) else dane[0].id) if dane else None
+    except Exception as e:
+        print(f"[webhook] nie znalazłem sesji dla {payment_intent}: {e}")
+        return None
+    if not sid:
+        return None
+    return session.query(Order).filter(Order.stripe_session_id == sid).first()
+
+
+def _webhook_platnosc_nie_doszla(session, typ: str, obj: dict) -> dict:
+    """Porzucony albo odrzucony checkout domyka zamówienie jako failed.
+
+    Bez tego zamówienie, którego Radar nie przepuścił, wisi jako `pending` na
+    zawsze i wygląda w panelu jak „czekamy na wpłatę". `awaiting_crypto` celowo
+    zostaje: klient płaci poza Stripe'em, więc sesja Checkout MA prawo wygasnąć,
+    a zamówienie domyka ręcznie admin."""
+    order = (session.query(Order)
+             .filter(Order.stripe_session_id == obj.get("id"),
+                     Order.status == "pending").first())
+    if not order or order.flag == "awaiting_crypto":
+        return {"received": True}
+    order.status = "failed"
+    order.fail_reason = ("Stripe checkout expired (never paid)"
+                         if typ == "checkout.session.expired"
+                         else "Stripe payment failed")
+    session.commit()
+    telemetry.track("order_autofailed", order.trader_id, order=order.id, why=typ)
+    return {"received": True, "failed": order.id}
+
+
+def _webhook_fraud_warning(session, obj: dict) -> dict:
+    """Bank wystawcy karty zgłosił fraud (Early Fraud Warning / TC40).
+
+    Refund idzie od ręki i bez człowieka, z powodem `fraudulent` (Stripe
+    dopisuje kartę do blocklisty): zgłoszenie, które zdąży urosnąć w chargeback,
+    psuje metryki ryzyka konta, a proaktywny refund zwykle je ucina."""
+    zrefundowano = False
+    if obj.get("actionable") and obj.get("charge"):
+        try:
+            _stripe().Refund.create(charge=obj["charge"], reason="fraudulent")
+            zrefundowano = True
+        except Exception as e:
+            print(f"[webhook] refund po fraud warning nie wyszedł: {e}")
+    order = _order_po_platnosci(session, obj.get("payment_intent"))
+    if order:
+        order.flag = "fraud"
+        if order.status == "pending":
+            order.status = "failed"
+            order.fail_reason = "Stripe fraud warning (issuer report)"
+        session.commit()
+        telemetry.track("stripe_fraud_warning", order.trader_id,
+                        order=order.id, refunded=zrefundowano)
+    tytul = "Stripe fraud warning" + (f" — order #{order.id}" if order else "")
+    tresc = ("Refunded automatically, card blocklisted."
+             if zrefundowano else "Refund NOT issued — check the Stripe dashboard.")
+    if order and order.account_id:
+        tresc += f" The trading account (id {order.account_id}) is still live — review it."
+    from . import notify
+    notify.notify_admins("fraud", tytul, tresc)
+    return {"received": True, "refunded": zrefundowano,
+            **({"order_id": order.id} if order else {})}
+
+
+def _webhook_chargeback(session, obj: dict) -> dict:
+    """Chargeback otwarty — tu już tylko flaga i alarm; odpowiadać trzeba
+    w dashboardzie Stripe'a, refund niczego nie cofnie."""
+    order = _order_po_platnosci(session, obj.get("payment_intent"))
+    if order:
+        order.flag = "disputed"
+        session.commit()
+        telemetry.track("stripe_dispute", order.trader_id, order=order.id)
+    kwota = (obj.get("amount") or 0) / 100
+    from . import notify
+    notify.notify_admins(
+        "fraud",
+        "Chargeback opened" + (f" — order #{order.id}" if order else ""),
+        f"${kwota:.2f} disputed ({obj.get('reason') or 'reason unknown'}). "
+        "Respond in the Stripe dashboard.")
+    return {"received": True, **({"order_id": order.id} if order else {})}
 
 
 def _account_view(acc) -> dict:
