@@ -1165,6 +1165,45 @@ async function upgradeNow(key){
   openBuy(key);
 }
 
+/* ===== Flash sale: baner z odliczaniem + przekreślone ceny =====
+   Oferty przychodzą z /api/me/offers (globalne + imienne zalogowanego); ceny
+   po rabacie liczy SERWER w /api/products (offer_price_usd) — ta sama funkcja,
+   która wycenia checkout, więc kafelek nigdy nie obieca innej kwoty niż kasa. */
+let OFFERS=[];
+async function loadOffers(){
+  try{const d=await api('/api/me/offers');OFFERS=(d&&d.offers)||[]}catch(e){OFFERS=[]}
+}
+function flashBannerHtml(){
+  if(!OFFERS.length)return'';
+  const o=OFFERS.reduce((b,x)=>x.discount_pct>b.discount_pct?x:b);
+  const pct=o.discount_pct%1?o.discount_pct.toFixed(2):o.discount_pct;
+  return `<div class="gradient-banner">
+    <span class="gb-tag">${ICO.spark} Flash sale</span><span class="gb-sep"></span>
+    <span class="gb-txt">${esc(o.title||'Limited-time offer')} — <b>${pct}% off</b>.
+      Ends in <b id="offer-cd" data-ends="${esc(o.ends_at)}"></b>.</span>
+    <button class="gb-btn" onclick="go('store')">Shop the sale ›</button>
+  </div>`;
+}
+/* Timer w window._offerTimer i kasowany przy KAŻDYM starcie: go() przerysowuje
+   #view, więc bez tego po kilku przełączeniach zakładek biegłoby kilka
+   interwałów naraz na nieistniejących elementach. */
+function startOfferTimer(){
+  clearInterval(window._offerTimer);
+  const el=document.getElementById('offer-cd');
+  if(!el)return;
+  const koniec=dutc(el.dataset.ends).getTime();
+  const tick=()=>{
+    const e=document.getElementById('offer-cd');
+    if(!e){clearInterval(window._offerTimer);return}
+    let s=Math.floor((koniec-Date.now())/1000);
+    if(s<=0){clearInterval(window._offerTimer);e.textContent='0:00:00';return}
+    const d=Math.floor(s/86400);s%=86400;
+    const h=Math.floor(s/3600),m=Math.floor(s%3600/60),sec=s%60;
+    e.textContent=(d?d+'d ':'')+h+':'+String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');
+  };
+  tick();window._offerTimer=setInterval(tick,1000);
+}
+
 /* ============================ VIEWS ============================ */
 const VIEWS={
  async accounts(){
@@ -1181,6 +1220,7 @@ const VIEWS={
     pushCfg(),
     api('/api/me/accounts'),
     PRODUCTS.length?null:api('/api/products').then(p=>{PRODUCTS=p}).catch(()=>{}),
+    loadOffers(),
   ]);
   const banner=accs.length
     ?`<div class="gradient-banner">
@@ -1350,13 +1390,17 @@ const VIEWS={
   /* Upsell siedzi POD lista: zakladka ma najpierw pokazac konta, a nie blok
      sprzedazowy — wczesniej pierwsza karta zaczynala sie na 720px (desktop)
      i 971px (telefon), czyli ponizej pierwszego ekranu. */
-  $('view').innerHTML=(pushB||up.banner||banner)+stats+filterBar+list+up.html;
+  /* Flash sale wygrywa z refer&earn i upsellem — to promocja, którą właściciel
+     wystawił świadomie i na czas. Push opt-in zostaje przed nią (jednorazowy). */
+  const flashB=flashBannerHtml();
+  $('view').innerHTML=(pushB||flashB||up.banner||banner)+stats+filterBar+list+up.html;
+  startOfferTimer();
   rollStats();
   if(window._upsellJump){window._upsellJump=false;setTimeout(flashUpsell,60)}
  },
 
  async store(){
-  const ps=await api('/api/products');
+  const [ps]=await Promise.all([api('/api/products'),loadOffers()]);
   PRODUCTS=ps;
   const groups=[
     {id:'2step',name:'2-Step',match:p=>p.steps===2&&p.price_usd>0},
@@ -1369,6 +1413,7 @@ const VIEWS={
   if(!g){$('view').innerHTML='<div class="empty"><h3>No plans available</h3></div>';return}
   const items=ps.filter(g.match).sort((a,b)=>a.account_size-b.account_size);
   $('view').innerHTML=`
+    ${flashBannerHtml()}
     <div class="shop-tabs">${groups.map(x=>`<button class="shop-tab${x.id===g.id?' on':''}" onclick="window._shopTab='${x.id}';VIEWS.store()">${x.name}</button>`).join('')}</div>
     ${ME.credits_usd>0?`<div class="note" style="margin-bottom:14px"><b>Store credit: $${fmt(ME.credits_usd)}</b>, applied to your total automatically at checkout.</div>`:''}
     <div class="plan-grid">`+items.map(p=>`
@@ -1377,7 +1422,10 @@ const VIEWS={
       <div class="plan-size">$${fmt0(p.account_size)}</div>
       ${p.promo_upgrade_size&&pfPromo()?`<div class="plan-badge">→ trade $${fmt0(p.promo_upgrade_size)} with your promo</div>`:''}
       <div class="plan-kind">${p.steps===0?'Instant Funding, no evaluation':'2-Step Evaluation'}</div>
-      <div class="plan-price">$${fmt0(p.price_usd)} <small>one-time</small></div>
+      <div class="plan-price">${p.offer_price_usd!=null
+        ?`<s style="opacity:.5;font-size:.68em;font-weight:500">$${fmt0(p.price_usd)}</s> $${fmt(p.offer_price_usd)}`
+        :`$${fmt0(p.price_usd)}`} <small>one-time</small></div>
+      ${p.offer_pct?`<div class="plan-badge" style="background:#e0234515;color:#e02345">⚡ Flash sale −${p.offer_pct%1?p.offer_pct.toFixed(2):p.offer_pct}%</div>`:''}
       <div class="plan-refund">✓ Refunded with your first payout</div>
       <ul class="plan-feats">
         <li>${p.steps===0?'Funded from day one, <b>no profit target</b>'
@@ -1390,6 +1438,7 @@ const VIEWS={
       <button onclick="openBuy('${esc(p.key)}')" class="btn-p">Start Challenge</button>
     </div>`).join('')+`</div>
     <p class="muted" style="font-size:12px;margin-top:16px">Coupon and promo codes accepted at checkout.</p>`;
+  startOfferTimer();
   highlightPlanFromUrl();
  },
 
@@ -2662,7 +2711,7 @@ async function quoteNow(){
   else if(!previewFailed){const e=$('buy-err'); if(e)e.classList.add('hidden')}
   const row=(l,v,cls)=>`<div class="q-row${cls?' '+cls:''}"><span>${l}</span><b class="mono">${v}</b></div>`;
   let h=row('Plan fee','$'+fmt(q.plan_price_usd));
-  if(q.discount_usd>0)h+=row(`Coupon (−${q.discount_pct}%)`,'−$'+fmt(q.discount_usd),'good');
+  if(q.discount_usd>0)h+=row(q.discount_source==='offer'?(q.offer_title||`Flash sale (−${q.discount_pct}%)`):`Coupon (−${q.discount_pct}%)`,'−$'+fmt(q.discount_usd),'good');
   if(q.weekend_fee_usd>0)h+=row('Weekend Trading','+$'+fmt(q.weekend_fee_usd));
   if(q.split_boost_fee_usd>0)h+=row('Profit Split Boost','+$'+fmt(q.split_boost_fee_usd));
   if(q.express_payout_fee_usd>0)h+=row('Express Payout','+$'+fmt(q.express_payout_fee_usd));

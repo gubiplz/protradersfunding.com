@@ -153,6 +153,10 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "pay_token": "VARCHAR(32)",
         "addon_split_boost": "BOOLEAN DEFAULT FALSE",
         "addon_express_payout": "BOOLEAN DEFAULT FALSE",
+        # Tabele `flash_offers` zaklada create_all, ale `orders` stoi na
+        # produkcji — bez tego wpisu kazdy SELECT z modelu Order pada na
+        # brakujacej kolumnie.
+        "flash_offer_id": "INTEGER",
     },
     "pool_accounts": {
         "claimed_by_trader_id": "INTEGER",

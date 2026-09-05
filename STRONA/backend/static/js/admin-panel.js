@@ -96,6 +96,7 @@ const ICO={
   copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>',
   mail:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m3 6 9 6.5L21 6"/></svg>',
   pulse:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l2.5-6 4 12L16 12h5"/></svg>',
+  tag:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 5 5 19"/><circle cx="7.5" cy="7.5" r="2.4"/><circle cx="16.5" cy="16.5" r="2.4"/></svg>',
 };
 
 const NAV=[
@@ -107,6 +108,7 @@ const NAV=[
   {v:'kyc',label:'KYC',ico:'shield'},
   {v:'tickets',label:'Tickets',ico:'chat'},
   {v:'orders',label:'Orders',ico:'file'},
+  {v:'offers',label:'Offers',ico:'tag'},
   {v:'pool',label:'MT5 Pool',ico:'bank'},
   {v:'mail',label:'Mail',ico:'mail'},
   {v:'telemetry',label:'Telemetry',ico:'trend'},
@@ -134,6 +136,7 @@ const TITLES={
   kyc:['KYC','Identity verifications awaiting review'],
   tickets:['Tickets','Support conversations with traders'],
   orders:['Orders','Purchases and revenue'],
+  offers:['Flash Sale Offers','Time-limited discounts on selected plans — per trader or for everyone'],
   pool:['MT5 Pool','Pre-provisioned accounts ready to assign'],
   mail:['Mail','Every e-mail the platform tried to send — and which ones failed'],
   telemetry:['Telemetry','Product events from the last 14 days'],
@@ -583,6 +586,12 @@ const VIEWS={
   const pasek=((d.pending||[]).length||histAll.length)
     ?`<div class="toolbar">${searchBox('kyc-q','_kycQ','renderKyc','Search name, email, country or document…')}</div>`:'';
   $('view').innerHTML=pasek+freeChannelCard()+cards+histTbl;
+ },
+
+ async offers(){
+  const [d,prods]=await Promise.all([api('/api/admin/offers'),api('/api/products')]);
+  window._offers=d.offers||[]; window._offerProds=prods;
+  renderOffers();
  },
 
  async mail(){
@@ -2629,6 +2638,111 @@ async function openAccount(id){
   if(a.trader_id)renderClientCard(a.trader_id,a.trader_email||a.trader_name||'');
   window._oAcc=a;
   drawAdminChart();
+}
+
+/* ---------- Flash sale offers ---------- */
+/* Chipy statusow reuzywaja klas kont z portal.css — oferta nie ma wlasnych. */
+const OFFER_STATUS_CLS={active:'active',pending:'pending',expired:'provisioning',used:'passed',cancelled:'failed'};
+function renderOffers(){
+  const rows=window._offers||[],prods=window._offerProds||[];
+  const zywe=rows.filter(o=>['active','pending'].includes(o.status));
+  const local=d=>{const t=new Date(d);t.setMinutes(t.getMinutes()-t.getTimezoneOffset());return t.toISOString().slice(0,16)};
+  const za24=local(new Date(Date.now()+24*3600*1000));
+  $('view').innerHTML=`
+    <div class="sec-card card-md">
+      <h3>New offer</h3>
+      <p class="muted" style="font-size:12.5px;margin:6px 0 14px">Cuts the catalog price of the covered plans for a limited time. The discount is applied automatically at checkout — no code. If the client also has a coupon, the <b>better</b> of the two applies (never both).</p>
+      <div class="pool-form" style="flex-wrap:wrap">
+        <div><label class="muted" style="font-size:12px">Discount %</label>
+          <input id="of-pct" class="inp" type="number" min="1" max="90" step="0.5" value="30" style="width:90px"></div>
+        <div><label class="muted" style="font-size:12px">Plans</label>
+          <select id="of-scope" class="inp" onchange="$('of-keys-box').style.display=this.value==='keys'?'':'none'">
+            <option value="all">All plans</option>
+            <option value="2step">All 2-Step</option>
+            <option value="instant">All Instant Funding</option>
+            <option value="keys">Specific plans…</option>
+          </select></div>
+        <div><label class="muted" style="font-size:12px">Trader (empty = everyone)</label>
+          <input id="of-email" class="inp" type="email" placeholder="client@example.com" style="min-width:210px"></div>
+        <div><label class="muted" style="font-size:12px">Ends</label>
+          <input id="of-ends" class="inp" type="datetime-local" value="${za24}"></div>
+        <div><label class="muted" style="font-size:12px">Title (banner &amp; mail)</label>
+          <input id="of-title" class="inp" placeholder="Weekend flash sale" style="min-width:200px"></div>
+      </div>
+      <div id="of-keys-box" style="display:none;margin-top:10px">
+        <div class="muted" style="font-size:12px;margin-bottom:6px">Covered plans</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px 14px">${prods.map(p=>`
+          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer">
+            <input type="checkbox" class="of-key" value="${esc(p.key)}" style="width:15px;height:15px;accent-color:var(--acc)">
+            ${esc(p.label)} <span class="muted">$${fmt0(p.price_usd)}</span>
+          </label>`).join('')}</div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px 18px;margin-top:12px;font-size:13px">
+        <label style="display:flex;align-items:center;gap:7px;cursor:pointer">
+          <input type="checkbox" id="of-single" style="width:15px;height:15px;accent-color:var(--acc)">
+          Single use <span class="muted">(personal offers only — burns after one purchase)</span></label>
+        <label style="display:flex;align-items:center;gap:7px;cursor:pointer">
+          <input type="checkbox" id="of-mail" style="width:15px;height:15px;accent-color:var(--acc)"> Send e-mail</label>
+        <label style="display:flex;align-items:center;gap:7px;cursor:pointer">
+          <input type="checkbox" id="of-push" style="width:15px;height:15px;accent-color:var(--acc)"> Send push</label>
+      </div>
+      <p class="muted" style="font-size:12px;margin:8px 0 12px">The portal always shows a countdown banner to everyone the offer covers. E-mail and push go out only if ticked here.</p>
+      <button class="btn-p" onclick="busy(this,'Creating…',offerCreate)">Create offer</button>
+    </div>
+
+    <div class="sec-card">
+      <h3>Offers${zywe.length?` <small class="muted">(${zywe.length} live)</small>`:''}</h3>
+      ${rows.length?`<div class="tbl-wrap tw-sm rtbl-wrap"><table class="tbl rtbl">
+        <thead><tr><th>#</th><th>Offer</th><th>Who</th><th>Plans</th><th>Window</th><th>Status</th><th>Bought</th><th class="no-sort"></th></tr></thead>
+        <tbody>${rows.map(o=>`<tr>
+          <td class="num" data-l="#">${o.id}</td>
+          <td class="rt-main" data-l="Offer"><b>−${o.discount_pct%1?o.discount_pct.toFixed(2):o.discount_pct}%</b>${o.title?` · ${esc(o.title)}`:''}${o.single_use?' <span class="muted">(single use)</span>':''}</td>
+          <td data-l="Who">${o.trader_email?esc(o.trader_email):'<b>Everyone</b>'}</td>
+          <td data-l="Plans">${esc(o.plans_label||'')}</td>
+          <td class="muted" data-l="Window">${o.starts_at?dstr(o.starts_at)+' – ':'until '}${dstr(o.ends_at)}</td>
+          <td data-l="Status"><span class="status ${OFFER_STATUS_CLS[o.status]||'provisioning'}"><span class="dot"></span>${esc(o.status)}</span></td>
+          <td class="num" data-l="Bought">${o.bought||0}${o.revenue_usd?` <small class="muted">$${fmt(o.revenue_usd)}</small>`:''}</td>
+          <td class="rt-acts">${['active','pending'].includes(o.status)?`
+            <button class="btn-o sm" onclick="offerNotify(${o.id})">Notify</button>
+            <button class="btn-o sm danger" onclick="offerCancel(${o.id})">Cancel</button>`:''}</td>
+        </tr>`).join('')}</tbody></table></div>`
+      :'<p class="muted" style="font-size:13px">No offers yet. The first one you create appears here with its live status and sales.</p>'}
+    </div>`;
+}
+async function offerCreate(){
+  const scope=$('of-scope').value;
+  const keys=[...document.querySelectorAll('.of-key:checked')].map(c=>c.value);
+  const ends=$('of-ends').value;
+  if(!ends){toast('Pick an end date','err');return}
+  const body={discount_pct:parseFloat($('of-pct').value),scope,
+    plan_keys:scope==='keys'?keys:null,
+    trader_email:$('of-email').value.trim()||null,
+    ends_at:new Date(ends).toISOString(),
+    title:$('of-title').value.trim()||null,
+    single_use:$('of-single').checked,
+    send_email:$('of-mail').checked,send_push:$('of-push').checked};
+  try{
+    const r=await api('/api/admin/offers',{method:'POST',body:JSON.stringify(body)});
+    toast(r.queued?'Offer created — notifications are going out in the background'
+      :`Offer created${r.emailed?` — ${r.emailed} e-mail${r.emailed===1?'':'s'} sent`:''}${r.skipped_optout?` (${r.skipped_optout} opted out)`:''}`);
+    VIEWS.offers();
+  }catch(e){toast(e.message,'err')}
+}
+async function offerCancel(id){
+  if(!await askConfirm({title:'Cancel this offer?',danger:true,ok:'Cancel offer',
+    body:'The discount disappears from the store and checkout immediately. Orders already paid keep their price.'}))return;
+  try{await api(`/api/admin/offers/${id}/cancel`,{method:'POST'});toast('Offer cancelled');VIEWS.offers()}
+  catch(e){toast(e.message,'err')}
+}
+async function offerNotify(id){
+  if(!await askConfirm({title:'Send notifications again?',ok:'Send',
+    body:'Sends the e-mail and push about this offer to everyone it covers. Traders who opted out of marketing are skipped.'}))return;
+  try{
+    const r=await api(`/api/admin/offers/${id}/notify`,{method:'POST',
+      body:JSON.stringify({send_email:true,send_push:true})});
+    toast(r.queued?'Notifications are going out in the background'
+      :`Sent — ${r.emailed||0} e-mails, ${r.pushed||0} pushes${r.skipped_optout?`, ${r.skipped_optout} opted out`:''}`);
+  }catch(e){toast(e.message,'err')}
 }
 
 /* ---------- objective lines on the slide-over chart (same as the portal) ---------- */

@@ -36,8 +36,8 @@ from fastapi import HTTPException
 
 from . import catalog, loyalty, metaapi_provisioning, metaquotes_web, notify, telemetry
 from .config import get_settings
-from .models import (Account, AppSetting, CreditLedger, Order, PoolAccount, Product,
-                     RewardCode, Trader)
+from .models import (Account, AppSetting, CreditLedger, FlashOffer, Order,
+                     PoolAccount, Product, RewardCode, Trader)
 
 PLATFORM_SERVER = "MetaQuotes-Demo"
 
@@ -154,6 +154,16 @@ def create_account_from_order(session, order: Order, notify_admin: bool = True) 
                           synchronize_session=False))
         if not zajete:
             print(f"[provisioning] kod {kod} byl juz zuzyty przy zamowieniu #{order.id}", flush=True)
+    # Oferta flash schodzi tak samo jak kod nagrody: dopiero przy domknietej
+    # platnosci (porzucony koszyk jej nie pali) i tylko gdy jest jednorazowa.
+    # Oferta wygasla miedzy checkoutem a zaplata honoruje cene z zamowienia.
+    if getattr(order, "flash_offer_id", None):
+        (session.query(FlashOffer)
+         .filter(FlashOffer.id == order.flash_offer_id,
+                 FlashOffer.single_use == True,                              # noqa: E712
+                 FlashOffer.used_at == None)                                 # noqa: E711
+         .update({FlashOffer.used_at: now, FlashOffer.order_id: order.id},
+                 synchronize_session=False))
     session.commit()
     telemetry.track("order_paid", trader.id, order=order.id, product=order.product_key,
                     amount=order.amount_usd, provider=order.provider)

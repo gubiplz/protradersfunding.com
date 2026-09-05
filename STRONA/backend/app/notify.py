@@ -312,6 +312,17 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"If you ran into an error on the payment page, reply to this e-mail "
             f"and we'll sort it out.",
         ),
+        "flash_offer": (
+            ctx.get("title") or f"Flash sale: {_num(ctx.get('pct'))}% off — limited time",
+            f"Hi {name},\n\n"
+            f"a limited-time discount just went live on your account:\n\n"
+            f"  Offer:     {ctx.get('title') or 'Flash sale'}\n"
+            f"  Discount:  {_num(ctx.get('pct'))}% off {ctx.get('plans') or 'selected challenges'}\n"
+            f"  Ends:      {ctx.get('ends')}\n\n"
+            f"The discount is applied automatically at checkout — no code needed:\n"
+            f"{ctx.get('url') or settings.app_base_url + '/portal?view=store'}\n\n"
+            f"After the deadline the regular price applies.",
+        ),
         "order_awaiting_payment": (
             f"Awaiting your payment — {ctx.get('product_label')}",
             f"Hi {name},\n\nwe've put your {ctx.get('product_label')} challenge on hold "
@@ -683,6 +694,18 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                 + "Ran into an error on the payment page? Reply to this e-mail and "
                   "we'll sort it out."),
         ]
+    elif event == "flash_offer":
+        parts = [
+            _head_html("Flash sale", str(ctx.get("title") or "Limited-time offer"),
+                       f"Hi {name}, a limited-time discount just went live on your "
+                       f"account. It is applied automatically at checkout — no code "
+                       f"needed."),
+            _stat_html("Discount", f"-{_num(ctx.get('pct'))}%",
+                       str(ctx.get("plans") or "selected challenges")),
+            _button_html("See the Offer", ctx.get("url") or f"{portal}?view=store"),
+            _note_html(f"The offer ends {ctx.get('ends')}. After that the regular "
+                       f"price applies."),
+        ]
     elif event == "order_awaiting_payment":
         dane = _payment_lines(ctx)
         parts = [
@@ -741,6 +764,8 @@ _PREF_BY_EVENT = {
     # jest zachęta do kupna — wiec pod marketingiem, jak recap. Kto wypisal sie
     # z ofert, nie dostaje tez tego.
     "checkout_recovery": "notify_marketing",
+    # Oferta flash to czysty marketing — kto wypisal sie z ofert, nie dostaje.
+    "flash_offer": "notify_marketing",
 }
 
 

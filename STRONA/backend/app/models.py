@@ -188,6 +188,11 @@ class Order(Base):
     # Kredyty sklepowe odliczone od ceny tego zamowienia. Saldo tradera schodzi
     # dopiero przy DOMKNIECIU platnosci — porzucony checkout nie pali srodkow.
     credits_used: Mapped[float] = mapped_column(Float, default=0.0)
+    # Oferta flash sale, ktora wygrala wycene tego zamowienia. Stemplowana przy
+    # TWORZENIU zamowienia (jak `bogo`): oferta wygasla miedzy koszykiem a
+    # zaplata honoruje cene z zamowienia, a provisioning wie, co oznaczyc jako
+    # zuzyte po domknieciu platnosci.
+    flash_offer_id: Mapped[int | None] = mapped_column(ForeignKey("flash_offers.id"), nullable=True)
     # Reczna flaga admina dla nieoplaconych zamowien: NULL | awaiting_crypto
     flag: Mapped[str | None] = mapped_column(String(24), nullable=True)
     # Powod recznego oznaczenia jako failed — widoczny w panelu przy statusie.
@@ -275,6 +280,43 @@ class RewardCode(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"), nullable=True)
+
+
+# --------------------------------------------------------------------------- #
+#  FlashOffer — reczna oferta flash sale (cross-sell)                         #
+# --------------------------------------------------------------------------- #
+class FlashOffer(Base):
+    """Procent znizki na wskazane plany, w oknie czasowym, imiennie albo globalnie.
+
+    Osobny byt, bo nic istniejacego tego nie unosi: `catalog.COUPONS` to zaszyty
+    slownik wymagajacy wdrozenia kodu, a `RewardCode` ma obowiazkowe
+    `points_spent`, jest twardo per-trader i czytaja go widoki lojalnosciowe —
+    oferta wyplynelaby traderowi na liscie „kodow kupionych za punkty".
+
+    Stan (pending/active/expired/used/cancelled) jest WYLICZANY z dat
+    (`offers.status`), nie trzymany w kolumnie — nikt nie chodzi tu cronem,
+    wiec kolumna statusu rozjechalaby sie z zegarem.
+    """
+    __tablename__ = "flash_offers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    discount_pct: Mapped[float] = mapped_column(Float)
+    # NULL = oferta globalna (widzi ja kazdy w portalu i publiczny sklep)
+    trader_id: Mapped[int | None] = mapped_column(ForeignKey("traders.id"), nullable=True, index=True)
+    # all | 2step | instant | keys — rodziny lapia tez plany dodane do katalogu
+    # juz PO wystawieniu oferty; `keys` to jawna lista CSV w `plan_keys`.
+    scope: Mapped[str] = mapped_column(String(16), default="all")
+    plan_keys: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ends_at: Mapped[datetime] = mapped_column(DateTime)
+    # Jednorazowosc ma sens tylko imiennie; globalna jednorazowa bylaby wyscigiem
+    # „kto pierwszy" — endpoint wymusza False dla globalnych.
+    single_use: Mapped[bool] = mapped_column(Boolean, default=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
 # --------------------------------------------------------------------------- #

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
-from . import catalog, loyalty, provisioning, telemetry
+from . import catalog, loyalty, offers, provisioning, telemetry
 from .config import get_settings
 from .models import AppSetting, Order, Product, RewardCode, Trader
 
@@ -119,6 +119,20 @@ def compute_price(session, trader: Trader, product_key: str, coupon: str | None,
         price = round(product.price_usd * (1 - discount_pct / 100.0), 2)
     else:
         price, discount_pct = catalog.apply_coupon(product.price_usd, coupon)
+
+    # Flash sale: oferta KONKURUJE z kuponem — wygrywa korzystniejszy rabat,
+    # nigdy suma. BLACKFRIDAY 30% + oferta 40% to nie 70%: wlasciciel wystawia
+    # oferte nie wiedzac, jaki kod klient trzyma w localStorage, a cena
+    # przekreslona na kafelku planu musi zgadzac sie z modalem zakupu.
+    zrodlo_rabatu = "coupon" if discount_pct else None
+    oferta = offers.best_for(session, trader.id, product)
+    if oferta is not None:
+        cena_oferty = offers.price_after(product, oferta)
+        if cena_oferty < price:
+            price, discount_pct = cena_oferty, oferta.discount_pct
+            zrodlo_rabatu = "offer"
+        else:
+            oferta = None
     plan_po_kuponie = price
     # Add-on Weekend Trading: stala kwota, POZA rabatem kuponu (kupon dotyczy planu).
     if weekend_trading:
@@ -166,6 +180,9 @@ def compute_price(session, trader: Trader, product_key: str, coupon: str | None,
             "plan_price_usd": product.price_usd,
             "discount_pct": discount_pct,
             "discount_usd": round(product.price_usd - plan_po_kuponie, 2),
+            "discount_source": zrodlo_rabatu,
+            "offer_id": (oferta.id if oferta else None),
+            "offer_title": (oferta.title if oferta else None),
             "weekend_fee_usd": (catalog.WEEKEND_ADDON_USD if weekend_trading else 0.0),
             "split_boost_fee_usd": (catalog.SPLIT_BOOST_ADDON_USD if split_boost else 0.0),
             "express_payout_fee_usd": (catalog.EXPRESS_PAYOUT_ADDON_USD if express_payout else 0.0),
@@ -259,7 +276,11 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
         order = Order(trader_id=trader.id, product_key=prowizjonowany.key)
         session.add(order)
     order.amount_usd = price
-    order.coupon = coupon or None
+    # Gdy wygrala oferta flash, kupon NIE schodzi z zamowienia jako uzyty —
+    # inaczej provisioning spali kod PF- kupiony za punkty za rabat, ktorego
+    # klient nie dostal. Reuzyte zamowienie dostaje swieze pola za kazdym razem.
+    order.coupon = None if quote["discount_source"] == "offer" else (coupon or None)
+    order.flash_offer_id = quote["offer_id"]
     order.weekend_trading = bool(weekend_trading)
     order.addon_split_boost = bool(split_boost)
     order.addon_express_payout = bool(express_payout)

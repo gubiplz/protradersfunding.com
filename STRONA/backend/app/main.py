@@ -27,7 +27,8 @@ from pathlib import Path
 from time import monotonic
 from typing import Literal
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Response, UploadFile
+from fastapi import (BackgroundTasks, Depends, FastAPI, File, Header, HTTPException,
+                     Request, Response, UploadFile)
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -39,14 +40,15 @@ from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 
 from . import (achievements, auth, billing, catalog, certshot, countries, fields, loyalty,
-               lead_mail, metaquotes_web, notify,
+               lead_mail, metaquotes_web, notify, offers,
                payout_import, payoutbot, reach,
                poller, provisioning, push, rules, sms, telegram, telemetry, tradebot)
 from .config import get_settings
 from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint
 from .models import (LEAD_LOST_STATUSES, LEAD_STATUSES, LOST_REASONS,
                      Account, AchievementReward, AppSetting, Breach, Certificate,
-                     CreditLedger, EquitySnapshot, JournalEntry, KycFile, Lead, LeadEvent,
+                     CreditLedger, EquitySnapshot, FlashOffer, JournalEntry, KycFile,
+                     Lead, LeadEvent,
                      LeadMailTemplate, LeadReminder, MailLog, Notification,
                      Order, Payout, PayoutRequest, PoolAccount, Product, PushSubscription,
                      RewardCode, SupportTicket, TelemetryEvent, TicketMessage, Trade, Trader)
@@ -1318,28 +1320,56 @@ def promo_check(code: str = ""):
             "code": settings.promo_upgrade_code if catalog.promo_active() else None}
 
 
-def _products_payload(session) -> list[dict]:
+def _products_payload(session, trader_id: int | None = None) -> list[dict]:
     """Katalog planów w kształcie /api/products — używany też do wstrzyknięcia
-    danych w HTML landingu, żeby konfigurator nie czekał na fetch."""
+    danych w HTML landingu, żeby konfigurator nie czekał na fetch.
+
+    `trader_id=None` = kontekst anonimowy: dochodzą wyłącznie oferty GLOBALNE.
+    Cena po ofercie liczona tą samą `offers.price_after`, którą woła
+    `billing.compute_price` — kafelek nigdy nie obieca innej kwoty niż kasa.
+    """
     prods = session.query(Product).filter(Product.active == True).order_by(Product.steps, Product.account_size).all()  # noqa: E712
     # Cel promocji dołączony do każdego planu: landing i portal pokazują
     # DOKŁADNIE to, co zrobi checkout (jedno źródło prawdy).
     upgrades = catalog.upgrade_map(prods)
+    zywe = offers.live_for(session, trader_id)
     out = []
     for p in prods:
         d = _product_dict(p)
         cel = upgrades.get(p.key)
         d["promo_upgrade_size"] = cel.account_size if cel else None
         d["promo_upgrade_label"] = cel.label if cel else None
+        oferta = max((o for o in zywe if offers.covers(o, p) and o.discount_pct > 0),
+                     key=lambda o: o.discount_pct, default=None)
+        d["offer_pct"] = oferta.discount_pct if oferta else None
+        d["offer_price_usd"] = offers.price_after(p, oferta) if oferta else None
+        d["offer_ends_at"] = (oferta.ends_at.isoformat() if oferta else None)
         out.append(d)
     return out
 
 
 @app.get("/api/products")
-def list_products():
+def list_products(authorization: str | None = Header(default=None)):
+    # Katalog jest publiczny, ale ZALOGOWANY dostaje w kafelkach takze swoje
+    # oferty imienne — token czytamy best-effort, bez 401 dla anonima.
+    tid = None
+    if authorization and authorization.lower().startswith("bearer "):
+        dane = auth._parse_session(authorization.split(" ", 1)[1].strip())
+        if dane:
+            tid = int(dane["tid"])
     session = SessionLocal()
     try:
-        return _products_payload(session)
+        return _products_payload(session, tid)
+    finally:
+        session.close()
+
+
+@app.get("/api/me/offers")
+def my_offers(trader: Trader = Depends(auth.current_trader)):
+    """Żywe oferty flash zalogowanego (globalne + imienne) — na baner w portalu."""
+    session = SessionLocal()
+    try:
+        return {"offers": [offers.offer_dict(o) for o in offers.live_for(session, trader.id)]}
     finally:
         session.close()
 
@@ -1407,6 +1437,7 @@ def checkout_preview(product_key: str, coupon: str | None = None, promo_code: st
                 "split_boost_fee_usd": q["split_boost_fee_usd"],
                 "express_payout_fee_usd": q["express_payout_fee_usd"],
                 "credits_used": q["credits_used"], "total_due_usd": q["total_due_usd"],
+                "discount_source": q["discount_source"], "offer_title": q["offer_title"],
                 "credits_balance": round(float(trader.credits_usd or 0), 2)}
     finally:
         session.close()
@@ -4769,6 +4800,226 @@ def admin_bogo_promo_set(payload: BogoPromoIn):
         session.commit()
         _BOGO_BAR_CACHE["ts"] = 0.0
         return {"enabled": payload.enabled}
+    finally:
+        session.close()
+
+
+class FlashOfferIn(BaseModel):
+    discount_pct: float
+    scope: str = "all"                    # all | 2step | instant | keys
+    plan_keys: list[str] | None = None    # tylko dla scope="keys"
+    trader_id: int | None = None
+    trader_email: str | None = None       # wygodniejsze w panelu niz id
+    starts_at: str | None = None          # ISO; brak = od teraz
+    ends_at: str = ""                     # ISO, wymagane, > now
+    title: str | None = None
+    single_use: bool = False
+    send_email: bool = False
+    send_push: bool = False
+
+
+class FlashOfferNotifyIn(BaseModel):
+    send_email: bool = True
+    send_push: bool = False
+
+
+def _offer_plans_label(session, o: FlashOffer) -> str:
+    """Ludzki opis zasięgu oferty — do maila, pusha i listy w panelu."""
+    if o.scope == "2step":
+        return "all 2-Step challenges"
+    if o.scope == "instant":
+        return "all Instant Funding challenges"
+    if o.scope == "keys":
+        keys = [k.strip() for k in (o.plan_keys or "").split(",") if k.strip()]
+        prods = session.query(Product).filter(Product.key.in_(keys)).all()
+        etykiety = {p.key: p.label for p in prods}
+        return ", ".join(etykiety.get(k, k) for k in keys) or "selected challenges"
+    return "all challenges"
+
+
+def _offer_buy_url(o: FlashOffer) -> str:
+    keys = [k.strip() for k in (o.plan_keys or "").split(",") if k.strip()]
+    if o.scope == "keys" and len(keys) == 1:
+        # `store()` czyta `?buy=` i otwiera modal zakupu od razu
+        return f"/portal?view=store&buy={keys[0]}"
+    return "/portal?view=store"
+
+
+def _offer_blast(offer_id: int, email: bool, push_too: bool) -> dict:
+    """Mail + push o ofercie. Wolane inline (imienna) albo z BackgroundTasks
+    (globalna — wysylka do calej bazy nie moze trzymac requestu)."""
+    session = SessionLocal()
+    try:
+        o = session.get(FlashOffer, offer_id)
+        if o is None or offers.status(o) not in ("pending", "active"):
+            return {"emailed": 0, "pushed": 0, "skipped_optout": 0}
+        plans = _offer_plans_label(session, o)
+        url = _offer_buy_url(o)
+        ends = offers._aware(o.ends_at).strftime("%b %d, %H:%M UTC")
+        title = o.title or f"Flash sale: {o.discount_pct:g}% off"
+        body = f"{o.discount_pct:g}% off {plans} — ends {ends}."
+        if o.trader_id is not None:
+            traders = [session.get(Trader, o.trader_id)]
+        else:
+            traders = (session.query(Trader)
+                       .filter(Trader.is_admin == False).all())              # noqa: E712
+        emailed = pushed = skipped = 0
+        for tr in traders:
+            if tr is None or not tr.email:
+                continue
+            if push_too or email:
+                push._center_row(session, tr.id, "flash_offer", title, body, url)
+                session.commit()
+            if push_too:
+                push.send_to_trader(tr.id, title, body, url=url, tag=f"flash_{o.id}")
+                pushed += 1
+            if email:
+                # Bramke opt-out sprawdzamy TUTAJ, zeby zwrocic prawdziwe liczby —
+                # notify.send tez by ja zastosowal, ale po cichu.
+                if (tr.email.lower().endswith("@imported.local")
+                        or not notify._email_allowed("flash_offer", tr.email)):
+                    skipped += 1
+                    continue
+                notify.send("flash_offer", tr.email, {
+                    "name": tr.first_name or tr.full_name or "trader",
+                    "title": o.title, "pct": o.discount_pct,
+                    "plans": plans, "ends": ends,
+                    "url": f"{settings.app_base_url}{url}",
+                })
+                emailed += 1
+        return {"emailed": emailed, "pushed": pushed, "skipped_optout": skipped}
+    finally:
+        session.close()
+
+
+def _offer_admin_dict(session, o: FlashOffer, statystyki: dict | None = None) -> dict:
+    d = offers.offer_dict(o)
+    d["plans_label"] = _offer_plans_label(session, o)
+    if o.trader_id is not None:
+        tr = session.get(Trader, o.trader_id)
+        d["trader_email"] = tr.email if tr else None
+    else:
+        d["trader_email"] = None
+    kupione = (statystyki or {}).get(o.id, (0, 0.0))
+    d["bought"], d["revenue_usd"] = kupione[0], round(kupione[1], 2)
+    return d
+
+
+@app.get("/api/admin/offers", dependencies=[Depends(auth.require_admin)])
+def admin_offers_list():
+    session = SessionLocal()
+    try:
+        rows = session.query(FlashOffer).order_by(FlashOffer.id.desc()).all()
+        statystyki = {oid: (int(n), float(suma or 0)) for oid, n, suma in
+                      (session.query(Order.flash_offer_id, func.count(Order.id),
+                                     func.sum(Order.amount_usd))
+                       .filter(Order.flash_offer_id != None,                 # noqa: E711
+                               Order.status == "paid")
+                       .group_by(Order.flash_offer_id).all())}
+        return {"offers": [_offer_admin_dict(session, o, statystyki) for o in rows]}
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/offers", dependencies=[Depends(auth.require_admin)])
+def admin_offer_create(payload: FlashOfferIn, background: BackgroundTasks):
+    session = SessionLocal()
+    try:
+        if not (0 < payload.discount_pct <= 90):
+            raise HTTPException(400, "Discount must be between 0 and 90 percent")
+        if payload.scope not in ("all", "2step", "instant", "keys"):
+            raise HTTPException(400, "Unknown scope")
+        keys_csv = None
+        if payload.scope == "keys":
+            keys = [k.strip() for k in (payload.plan_keys or []) if k.strip()]
+            if not keys:
+                raise HTTPException(400, "Pick at least one plan for this offer")
+            znane = {p.key for p in session.query(Product).filter(Product.key.in_(keys)).all()}
+            obce = [k for k in keys if k not in znane]
+            if obce:
+                raise HTTPException(400, f"Unknown plan keys: {', '.join(obce)}")
+            keys_csv = ",".join(keys)
+        trader = None
+        if payload.trader_email and payload.trader_id is None:
+            trader = (session.query(Trader)
+                      .filter(Trader.email == payload.trader_email.strip().lower()).first())
+            if trader is None:
+                raise HTTPException(404, "No trader with that e-mail")
+        elif payload.trader_id is not None:
+            trader = session.get(Trader, payload.trader_id)
+            if trader is None:
+                raise HTTPException(404, "Trader not found")
+        try:
+            ends = datetime.fromisoformat((payload.ends_at or "").replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(400, "Invalid end date")
+        if ends.tzinfo is None:
+            ends = ends.replace(tzinfo=timezone.utc)
+        if ends <= datetime.now(timezone.utc):
+            raise HTTPException(400, "The offer would already be over — pick a future end date")
+        starts = None
+        if payload.starts_at:
+            try:
+                starts = datetime.fromisoformat(payload.starts_at.replace("Z", "+00:00"))
+            except ValueError:
+                raise HTTPException(400, "Invalid start date")
+            if starts.tzinfo is None:
+                starts = starts.replace(tzinfo=timezone.utc)
+            if starts >= ends:
+                raise HTTPException(400, "The offer must start before it ends")
+        # Globalna jednorazowa to wyscig „kto pierwszy" — wymuszamy False.
+        single_use = bool(payload.single_use) and trader is not None
+        o = FlashOffer(discount_pct=round(float(payload.discount_pct), 2),
+                       trader_id=(trader.id if trader else None),
+                       scope=payload.scope, plan_keys=keys_csv,
+                       title=(payload.title or "").strip()[:120] or None,
+                       starts_at=(starts.replace(tzinfo=None) if starts else None),
+                       ends_at=ends.replace(tzinfo=None),
+                       single_use=single_use)
+        session.add(o)
+        session.commit()
+        wynik = {"emailed": 0, "pushed": 0, "skipped_optout": 0}
+        if payload.send_email or payload.send_push:
+            if trader is not None:
+                wynik = _offer_blast(o.id, payload.send_email, payload.send_push)
+            else:
+                # globalna: kilka tysiecy traderow — wysylka w tle, po odpowiedzi
+                background.add_task(_offer_blast, o.id, payload.send_email, payload.send_push)
+                wynik = {"queued": True}
+        return {**_offer_admin_dict(session, o), **wynik}
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/offers/{offer_id}/cancel", dependencies=[Depends(auth.require_admin)])
+def admin_offer_cancel(offer_id: int):
+    session = SessionLocal()
+    try:
+        o = session.get(FlashOffer, offer_id)
+        if o is None:
+            raise HTTPException(404, "Offer not found")
+        if o.cancelled_at is None:
+            o.cancelled_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            session.commit()
+        return _offer_admin_dict(session, o)
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/offers/{offer_id}/notify", dependencies=[Depends(auth.require_admin)])
+def admin_offer_notify(offer_id: int, payload: FlashOfferNotifyIn, background: BackgroundTasks):
+    """Dosyłka powiadomień o już wystawionej ofercie (np. mail poszedł bez pusha)."""
+    session = SessionLocal()
+    try:
+        o = session.get(FlashOffer, offer_id)
+        if o is None:
+            raise HTTPException(404, "Offer not found")
+        if offers.status(o) not in ("pending", "active"):
+            raise HTTPException(400, "This offer is no longer live")
+        if o.trader_id is not None:
+            return _offer_blast(o.id, payload.send_email, payload.send_push)
+        background.add_task(_offer_blast, o.id, payload.send_email, payload.send_push)
+        return {"queued": True}
     finally:
         session.close()
 
