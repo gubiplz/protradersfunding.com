@@ -159,6 +159,8 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "flash_offer_id": "INTEGER",
         "brand": "VARCHAR(8)",
         "open_funded": "BOOLEAN DEFAULT FALSE",
+        "weekend_free": "BOOLEAN DEFAULT FALSE",
+        "pay_headline": "VARCHAR(80)",
     },
     "pool_accounts": {
         "claimed_by_trader_id": "INTEGER",

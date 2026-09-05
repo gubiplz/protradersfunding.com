@@ -7,7 +7,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Complete your payment — {{ brand_name }}</title>
+<title>{{ headline or 'Complete your payment' }} — {{ brand_name }}</title>
 {# Link idzie jeden do jednego — w wyszukiwarce nie ma czego szukać. #}
 <meta name="robots" content="noindex,nofollow">
 {% if not fx %}<link rel="icon" href="/static/img/favicon.png" type="image/png">{% endif %}
@@ -98,7 +98,8 @@ footer svg{width:12px;height:12px}
   <span class="pill">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
     Secure checkout</span>
-  <h1>Complete your payment</h1>
+  {# Nagłówek z zamówienia (np. „Weekend Flash Sale") — pusty zostawia domyślny. #}
+  <h1>{{ headline or 'Complete your payment' }}</h1>
   <div class="rows">
     <div><span>Order</span><span>{{ reference }}</span></div>
     <div><span>Item</span><span>{{ item }}</span></div>
@@ -109,8 +110,14 @@ footer svg{width:12px;height:12px}
     {% endif %}
     {% if weekend %}
     {# Osobny wiersz z kwotą, nie dopisek przy pozycji: dzięki temu rachunek
-       zamyka się na oczach klienta — cennik − rabat + add-on = kwota. #}
+       zamyka się na oczach klienta — cennik − rabat + add-on = kwota.
+       Gratis pokazujemy wprost z przekreśloną opłatą: to argument sprzedażowy,
+       nie pozycja rachunku. #}
+    {% if weekend_gratis %}
+    <div><span>Weekend Trading</span><span><span class="strike">${{ weekend_fee }}</span> <span class="save"><b>FREE</b></span> — 2 extra trading days/week</span></div>
+    {% else %}
     <div><span>Weekend Trading</span><span><b>+${{ weekend_fee }}</b> — 2 extra trading days/week</span></div>
+    {% endif %}
     {% endif %}
   </div>
   <div class="total"><span class="lbl">Amount due</span><span class="amt">${{ amount }}</span></div>

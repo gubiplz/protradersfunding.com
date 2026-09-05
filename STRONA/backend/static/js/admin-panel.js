@@ -4099,6 +4099,9 @@ async function openManualOrder(traderId,lead){
         <p class="hint" id="mo-brand-hint" style="display:none;margin-top:6px">The payment page renders
           <b>Forex Passing</b> colours and logo — no PTF anywhere on it. No e-mail goes out
           (our mails are PTF-branded); send the link yourself, e.g. on Telegram.</p></div>
+      <div><label class="muted" style="font-size:12px">Payment page headline <span style="opacity:.65">(optional)</span></label>
+        <input id="mo-headline" class="inp" maxlength="80"
+          placeholder="e.g. Weekend Flash Sale — empty keeps the default"></div>
       ${lead?`<div><label class="muted" style="font-size:12px">Customer</label>
         <div class="inp" style="display:flex;flex-direction:column;gap:2px">
           <b>${esc(lead.name||lead.email)}</b>
@@ -4126,9 +4129,13 @@ async function openManualOrder(traderId,lead){
         <span><b>Buy 1 Get 1 Free</b>
           <span class="muted">— a second account of the same size is created automatically once this order is paid</span></span></label>
       <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="mo-weekend" onchange="moPrice()" style="width:16px;height:16px;accent-color:var(--acc)">
+        <input type="checkbox" id="mo-weekend" onchange="moWeekend()" style="width:16px;height:16px;accent-color:var(--acc)">
         <span><b>Weekend Trading</b> <b>+$199</b>
           <span class="muted">— 2 extra trading days/week; added on top of the amount, outside the discount</span></span></label>
+      <label id="mo-wkfree-row" style="display:none;align-items:center;gap:9px;font-size:13px;cursor:pointer;margin-left:25px">
+        <input type="checkbox" id="mo-wkfree" onchange="moPrice()" style="width:16px;height:16px;accent-color:var(--acc)">
+        <span><b>On the house</b>
+          <span class="muted">— the add-on still lands on the account, but the $199 is not charged; the page shows it as FREE</span></span></label>
       <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
         <input type="checkbox" id="mo-funded" style="width:16px;height:16px;accent-color:var(--acc)">
         <span><b>Open as funded</b>
@@ -4209,9 +4216,19 @@ function moPrice(){
   const pct=partner?(window._moPartnerPct||0)
     :Math.min(90,Math.max(0,parseFloat($('mo-discount').value)||0));
   /* Weekend POZA rabatem — ta sama kolejność co w checkoucie (kupon dotyczy
-     planu). $199 jest zaszyte jak w portalu (portal-app.js, wiersz add-onu). */
-  const wk=$('mo-weekend')?.checked?199:0;
+     planu). $199 jest zaszyte jak w portalu (portal-app.js, wiersz add-onu).
+     Weekend „on the house" nie dolicza nic. */
+  const wk=($('mo-weekend')?.checked&&!$('mo-wkfree')?.checked)?199:0;
   $('mo-amount').value=(o.dataset.price*(1-pct/100)+wk).toFixed(2);
+}
+/* Pod-checkbox „gratis" pokazuje się tylko przy zaznaczonym weekendzie —
+   odznaczenie weekendu go czyści, żeby nie został cichy stan z poprzedniej
+   decyzji i nie wysłał „free" bez samego add-onu. */
+function moWeekend(){
+  const on=$('mo-weekend').checked;
+  $('mo-wkfree-row').style.display=on?'flex':'none';
+  if(!on)$('mo-wkfree').checked=false;
+  moPrice();
 }
 function moBrand(m){
   window._moBrand=m;
@@ -4241,6 +4258,8 @@ async function submitManualOrder(){
       brand:window._moBrand||'ptf',
       open_funded:!!$('mo-funded')?.checked,
       weekend_trading:!!$('mo-weekend')?.checked,
+      weekend_free:!!$('mo-wkfree')?.checked,
+      headline:($('mo-headline')?.value||'').trim(),
       ...(disc>0?{discount_pct:disc}:{}),
       bogo:!!$('mo-bogo')?.checked,
       flag:(!link&&$('mo-awaiting').checked)?'awaiting_crypto':'',

@@ -486,3 +486,60 @@ def test_weekend_przechodzi_na_konto_po_zaplacie():
     acc = s.get(Account, o.account_id)
     s.close()
     assert bool(acc.weekend_trading) is True
+
+
+def test_darmowy_weekend_nie_dolicza_oplaty_a_strona_mowi_free():
+    """Weekend „w prezencie": add-on jest, $199 nie ma — kwota to sam plan po
+    rabacie, a strona pokazuje przekreślone $199 i FREE. Rabat liczy się dalej
+    od planu, bo opłaty w kwocie nie było i nie ma czego zdejmować."""
+    oid, _, _ = _zamowienie(discount_pct=30, weekend_trading=True,
+                            weekend_free=True)
+    s = SessionLocal(); o = s.get(Order, oid); s.close()
+    assert o.amount_usd == pytest.approx(209.30)
+    tresc = client.get(f"/pay/{_token(oid)}").text
+    assert "Weekend Trading" in tresc and "FREE" in tresc
+    assert "(30%)" in tresc and "$209.30" in tresc
+
+
+def test_darmowy_weekend_tez_przechodzi_na_konto():
+    from app.models import Account
+    oid, _, _ = _zamowienie(weekend_trading=True, weekend_free=True)
+    client.post(f"/api/admin/orders/{oid}/mark-paid", headers=ADMIN)
+    s = SessionLocal()
+    o = s.get(Order, oid)
+    acc = s.get(Account, o.account_id)
+    s.close()
+    assert bool(acc.weekend_trading) is True
+
+
+def test_free_bez_weekendu_nie_zostawia_sladu():
+    """Samo `weekend_free` bez add-onu to stan bez sensu — serwer go zeruje,
+    zamiast zapisać zamówienie, które „nie dolicza" czegoś, czego nie ma."""
+    oid, _, _ = _zamowienie(weekend_free=True)
+    s = SessionLocal(); o = s.get(Order, oid); s.close()
+    assert bool(o.weekend_free) is False
+    assert o.amount_usd == 299.0
+
+
+# --------------------------------------------------------------------------- #
+#  Własny nagłówek strony płatności                                            #
+# --------------------------------------------------------------------------- #
+def test_naglowek_wlasny_zamiast_domyslnego():
+    oid, _, _ = _zamowienie(headline="Weekend Flash Sale")
+    tresc = client.get(f"/pay/{_token(oid)}").text
+    assert "Weekend Flash Sale" in tresc
+    assert "Complete your payment" not in tresc
+
+
+def test_pusty_naglowek_zostawia_domyslny():
+    oid, _, _ = _zamowienie(headline="   ")
+    tresc = client.get(f"/pay/{_token(oid)}").text
+    assert "Complete your payment" in tresc
+
+
+def test_naglowek_jest_escapowany():
+    """Nagłówek pisze admin, ale strona jest publiczna i bywa przeklejana —
+    HTML z pola nie ma prawa wykonać się w przeglądarce klienta."""
+    oid, _, _ = _zamowienie(headline="<script>alert(1)</script>")
+    tresc = client.get(f"/pay/{_token(oid)}").text
+    assert "<script>alert(1)</script>" not in tresc

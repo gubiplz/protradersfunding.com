@@ -4633,6 +4633,11 @@ class ManualOrderIn(BaseModel):
     # Add-on Weekend Trading ($199) — jak w checkoucie: dolicza się POZA
     # rabatem (rabat dotyczy planu), a provisioning przenosi go na konto.
     weekend_trading: bool = False
+    # Weekend w prezencie: add-on wchodzi na konto, ale opłata NIE wchodzi
+    # do kwoty — argument sprzedażowy „gratis", nie druga cena.
+    weekend_free: bool = False
+    # Własny nagłówek strony /pay (np. „Weekend Flash Sale"); pusty = domyślny.
+    headline: str | None = None
     # Rabat obiecany klientowi w rozmowie. Jak przy cenie partnerskiej: kwotę
     # liczy panel, tu zapada tylko STEMPEL (`OFFER{pct}` w coupon) — bez niego
     # niższa kwota to po prostu inna cena i strona płatności nie ma prawa
@@ -4766,7 +4771,9 @@ def admin_order_create(payload: ManualOrderIn):
         # Weekend doliczamy tylko do kwoty liczonej PRZEZ NAS — kwota wpisana
         # ręcznie jest dokładnie tym, co admin obiecał, i nic jej nie dotyka.
         # Poza rabatem, bo tak samo liczy go checkout (kupon dotyczy planu).
-        if payload.weekend_trading and payload.amount_usd is None:
+        # Weekend w prezencie opłaty nie ma z definicji.
+        if (payload.weekend_trading and not payload.weekend_free
+                and payload.amount_usd is None):
             kwota = round(kwota + catalog.WEEKEND_ADDON_USD, 2)
         if kwota < 0:
             raise HTTPException(400, "Amount cannot be negative")
@@ -4790,6 +4797,8 @@ def admin_order_create(payload: ManualOrderIn):
                   brand=(payload.brand if payload.brand != "ptf" else None),
                   open_funded=bool(payload.open_funded),
                   weekend_trading=bool(payload.weekend_trading),
+                  weekend_free=bool(payload.weekend_trading and payload.weekend_free),
+                  pay_headline=((payload.headline or "").strip()[:80] or None),
                   created_at=datetime.now(timezone.utc).replace(tzinfo=None))
         _zapisz_adres_wplaty(o, payload.payment_address, payload.payment_network)
         session.add(o)
@@ -9356,6 +9365,7 @@ def pay_page(request: Request, token: str):
                         brand_logo="/static/img/logo.png",
                         rabat_list=None, rabat_usd=None, rabat_pct=None,
                         bogo=False, weekend=False, weekend_fee=None,
+                        weekend_gratis=False, headline=None,
                         crypto_address=None, crypto_network=None)
             odp.status_code = 404
             return odp
@@ -9381,6 +9391,8 @@ def pay_page(request: Request, token: str):
                      # zamyka się co do centa: cennik − rabat + add-on = kwota.
                      weekend=bool(getattr(o, "weekend_trading", False)),
                      weekend_fee=f"{catalog.WEEKEND_ADDON_USD:,.2f}".removesuffix(".00"),
+                     weekend_gratis=bool(getattr(o, "weekend_free", False)),
+                     headline=getattr(o, "pay_headline", None),
                      rabat_list=(f"{rabat['list_amount_usd']:,.2f}".removesuffix(".00")
                                  if rabat else None),
                      rabat_usd=(f"{rabat['discount_usd']:,.2f}".removesuffix(".00")
@@ -9427,8 +9439,9 @@ def _rabat_zamowienia(session, o: Order) -> dict:
     # Add-on Weekend Trading siedzi w kwocie POZA rabatem (tak dolicza go i
     # checkout, i ręczne zamówienie) — na czas porównania z cennikiem PLANU
     # schodzi, inaczej rabat rozpuszcza się w dopłacie: procent kłamie, a przy
-    # dopłacie większej od rabatu przekreślona cena znika w ogóle.
-    if getattr(o, "weekend_trading", False):
+    # dopłacie większej od rabatu przekreślona cena znika w ogóle. Weekend
+    # w prezencie w kwocie nie siedzi, więc nie ma czego zdejmować.
+    if getattr(o, "weekend_trading", False) and not getattr(o, "weekend_free", False):
         kwota = round(kwota - catalog.WEEKEND_ADDON_USD, 2)
     if katalog <= kwota:
         return {}

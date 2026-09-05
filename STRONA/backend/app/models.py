@@ -214,6 +214,12 @@ class Order(Base):
     # Po oplaceniu konto otwiera sie od razu jako funded (pomija ewaluacje) —
     # oferta imienna z panelu, niezaleznie od liczby krokow planu.
     open_funded: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Weekend Trading w prezencie: add-on wchodzi na konto, ale $199 NIE siedzi
+    # w kwocie. Bez tego sladu strona /pay liczylaby rabat od kwoty minus 199
+    # i przekreslony cennik klamalby procentem.
+    weekend_free: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Wlasny naglowek strony /pay (np. „Weekend Flash Sale"); NULL = domyslny.
+    pay_headline: Mapped[str | None] = mapped_column(String(80), nullable=True)
     # Znacznik wyslanego maila „platnosc nie doszla do skutku". Siedzi PRZY
     # ZAMOWIENIU, nie przy traderze, bo tylko to daje jeden mail na jedna
     # porzucona probe — ta sama osoba moze porzucic checkout kilka razy.
