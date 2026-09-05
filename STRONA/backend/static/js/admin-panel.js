@@ -851,6 +851,16 @@ function searchBox(id,stateKey,render,ph){
    ta zakładka to jedyne miejsce, gdzie „mail nie wyszedł" widać, zanim
    zgłosi to klient. Fallback jest już pod ręką: Copy link przy zaproszeniu
    do portalu, Pay link przy zamówieniu, poświadczenia MT5 w karcie konta. */
+/* Sufit renderowania długich list: przy tysiącach wierszy telefon dławi się
+   nie danymi, a samym innerHTML. Dane siedzą już w pamięci — „Show all"
+   tylko zdejmuje sufit dla bieżącego widoku. */
+const LIST_CAP=100;
+function capList(rows,flag,rerender){
+  if(window[flag]||rows.length<=LIST_CAP)return{rows,more:''};
+  return{rows:rows.slice(0,LIST_CAP),
+    more:`<button class="btn-o" style="display:block;margin:12px auto" onclick="window.${flag}=1;${rerender}()">Show all ${rows.length}</button>`};
+}
+
 function renderMailLog(){
   const d=window._mailLog||{};
   const list=d.entries||[];
@@ -858,6 +868,7 @@ function renderMailLog(){
   const rows=list.filter(m=>(f==='all'||(f==='failed'?!m.ok:m.ok))&&
     (!q||(m.to||'').toLowerCase().includes(q)||(m.event||'').toLowerCase().includes(q)
       ||(m.subject||'').toLowerCase().includes(q)));
+  const cap=capList(rows,'_mailAll','renderMailLog');
   $('view').innerHTML=`
     <div class="toolbar">
       ${searchBox('mail-q','_mailQ','renderMailLog','Search recipient, subject or template…')}
@@ -868,14 +879,14 @@ function renderMailLog(){
     ${d.failed_7d?`<p class="lead-statline" style="color:var(--gold)">⚠ ${d.failed_7d} e-mail${d.failed_7d>1?'s':''} failed in the last 7 days — deliver the content another way (copy the portal-invite link, the pay link or the MT5 credentials from the account card), then check the SMTP settings.</p>`:''}
     ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.maillog">
       <thead><tr><th>Date</th><th>To</th><th>Subject</th><th>Template</th><th>Status</th></tr></thead>
-      <tbody>${rows.map(m=>`<tr>
+      <tbody>${cap.rows.map(m=>`<tr>
         <td class="muted" data-l="Date" data-sort="${esc(m.ts||'')}">${dstr(m.ts)}</td>
         <td class="rt-main" data-l="To">${esc(m.to||'—')}</td>
         <td data-l="Subject">${esc(m.subject||'—')}</td>
         <td class="muted" data-l="Template">${esc((m.event||'—').replace(/_/g,' '))}</td>
         <td data-l="Status"><span class="status ${m.ok?'paid':'failed'}"><span class="dot"></span>${m.ok?'sent':'failed'}</span>
-          ${m.error?`<div class="muted" style="font-size:11px;max-width:260px;word-break:break-word">${esc(m.error)}</div>`:''}</td></tr>`).join('')}
-      </tbody></table></div>`
+          ${m.error?`<div class="muted" style="font-size:var(--fs-cap);max-width:260px;word-break:break-word">${esc(m.error)}</div>`:''}</td></tr>`).join('')}
+      </tbody></table></div>${cap.more}`
     :list.length?`<div class="empty"><h3>No e-mails match</h3><p>Try a different search or filter.</p></div>`
     :`<div class="empty"><h3>Nothing sent yet</h3><p>Every e-mail the platform sends will be listed here, including the ones that fail.</p></div>`}`;
 }
@@ -929,6 +940,7 @@ function renderAccounts(){
   const rows=list.filter(a=>(f==='house'?isHouse(a):!isHouse(a)&&(f==='all'||f==='free'||a.status===f))&&
     (!q||String(a.login).includes(q)||(a.trader_name||'').toLowerCase().includes(q)
       ||(a.trader_email||'').toLowerCase().includes(q)||(a.product_key||'').includes(q)));
+  const cap=capList(rows,'_accAll','renderAccounts');
   const seg=[['all','All'],['active','Evaluation'],['funded','Funded'],['failed','Failed'],['provisioning','Provisioning'],['free','Free signups'],['house','House bots']];
   $('view').innerHTML=`
     <div class="toolbar">
@@ -941,12 +953,12 @@ function renderAccounts(){
         <th title="Trade BOT">Bot</th>
         <th style="text-align:right">Balance</th><th style="text-align:right">Equity</th><th style="text-align:right">P&amp;L</th>
         <th>Daily</th><th>Max DD</th><th class="no-sort"></th></tr></thead>
-      <tbody>${rows.map(a=>{const m=a.metrics||{};
+      <tbody>${cap.rows.map(a=>{const m=a.metrics||{};
         return `<tr class="clickable" onclick="openAccount(${a.id})">
           <td class="muted rt-hide" style="white-space:nowrap" data-l="Created" data-sort="${esc(a.created_at||'')}">${a.created_at?dstr(a.created_at):'—'}</td>
           <td class="muted rt-hide" style="white-space:nowrap" data-l="Paid" data-sort="${esc(a.paid_at||'')}">${a.paid_at?dstr(a.paid_at):'—'}</td>
           <td class="num rt-main" style="font-weight:600" data-l="Login">${a.status==='provisioning'?'<span class="muted">pending…</span>':esc(a.login)}</td>
-          <td data-l="Trader">${esc(a.trader_name||'—')}${a.trader_email?`<div class="muted" style="font-size:11px">${esc(a.trader_email)}</div>`:''}</td>
+          <td data-l="Trader">${esc(a.trader_name||'—')}${a.trader_email?`<div class="muted" style="font-size:var(--fs-cap)">${esc(a.trader_email)}</div>`:''}</td>
           <td class="muted" data-l="Plan">${esc(a.product_key)}</td>
           <td class="muted" data-l="Phase">${PHASE_LBL[a.phase]||esc(a.phase)}</td>
           <td data-l="Status"><span class="status ${esc(a.status)}"><span class="dot"></span>${STATUS_LBL[a.status]||esc(a.status)}</span></td>
@@ -958,7 +970,7 @@ function renderAccounts(){
           <td data-l="Max DD" data-sort="${(m.overall_dd_used_pct||0).toFixed(2)}">${mini(m.overall_dd_used_pct)}</td>
           <td class="rt-acts" style="text-align:right" onclick="event.stopPropagation()">${
             XBTN(`deleteAccountRow(${a.id},'${jsq(a.login)}','${jsq(a.trader_name||'')}')`,'Delete account')}</td></tr>`}).join('')}
-      </tbody></table></div>`
+      </tbody></table></div>${cap.more}`
       :`<div class="empty"><h3>No accounts match</h3><p>Try a different search or filter.</p></div>`}`;
 }
 
@@ -1104,10 +1116,10 @@ function renderPayoutsView(){
         const info=r.method==='usdt'?[d.network,d.address].filter(Boolean).join(' · ')
           :r.method==='wise'?(d.email||'')
           :[d.holder,d.iban,d.swift,d.bank_name].filter(Boolean).join(' · ');
-        return `${esc(label)}${info?`<div class="muted mono" style="font-size:11px;max-width:260px;word-break:break-all">${esc(info)}</div>`:''}`})()}</td>
+        return `${esc(label)}${info?`<div class="muted mono" style="font-size:var(--fs-cap);max-width:260px;word-break:break-all">${esc(info)}</div>`:''}`})()}</td>
       <td data-l="Status"><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending'
         :r.status==='approved'?'active':'failed'}"><span class="dot"></span>${esc(r.status)}</span>
-        ${r.status==='rejected'&&r.reject_reason?`<div class="muted" style="font-size:11px;max-width:200px">${esc(r.reject_reason)}</div>`:''}</td>
+        ${r.status==='rejected'&&r.reject_reason?`<div class="muted" style="font-size:var(--fs-cap);max-width:200px">${esc(r.reject_reason)}</div>`:''}</td>
       <td class="rt-acts" style="white-space:nowrap">${r.kind!=='payout'?'<span class="muted">—</span>'
         :r.cert_url
           ?`<a class="btn-o sm" href="${r.cert_url}" target="_blank">Open</a>
@@ -1138,6 +1150,7 @@ function renderOrders(){
     (!q||(o.trader_email||'').toLowerCase().includes(q)
     ||(o.product_key||'').includes(q)||(o.status||'').includes(q)
     ||(o.flag||'').includes(q)||String(o.id)===q));
+  const cap=capList(rows,'_ordAll','renderOrders');
   /* Kafelki opisuja TO, CO WIDAC pod nimi — czyli zbior po filtrze i szukajce.
      Wczesniej liczyly sie z calej listy, wiec przelaczenie na "Failed" zostawialo
      nad pusta tabela pelny przychod. Ten sam blad byl w portalu na Challenges. */
@@ -1169,21 +1182,21 @@ function renderOrders(){
     </div>
     ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.orders">
       <thead><tr><th>#</th><th>Date</th><th>Trader</th><th>Product</th><th>Amount</th><th>Provider</th><th>Status</th><th>Account</th><th class="no-sort"></th></tr></thead>
-      <tbody>${rows.map(o=>`<tr>
+      <tbody>${cap.rows.map(o=>`<tr>
         <td class="num rt-hide" data-l="#">${o.id}</td><td class="muted" data-l="Date" data-sort="${esc(o.created_at||'')}">${dstr(o.created_at)}</td>
         <td class="rt-main" data-l="Trader">${esc(o.trader_email||'—')}</td>
-        <td data-l="Product">${esc(o.product_key)}${o.bogo?` <span class="up" style="font-size:11px" title="Buy 1 Get 1 Free — paying this order also creates a free second account of the same size">+1 free</span>`:''}${o.open_funded?` <span class="up" style="font-size:11px" title="Opens straight as a funded account when paid — skips the evaluation">funded</span>`:''}${o.weekend_trading?` <span class="up" style="font-size:11px" title="Weekend Trading add-on — 2 extra trading days/week">wknd</span>`:''}${o.brand==='fx'?` <span class="up" style="font-size:11px" title="The payment page shows Forex Passing branding — no PTF anywhere on it">FX</span>`:''}</td>
-        <td class="num" data-l="Amount">$${fmt(o.amount_usd)}${o.coupon?` <span class="up" style="font-size:11px">(${esc(o.coupon)})</span>`:''}</td>
+        <td data-l="Product">${esc(o.product_key)}${o.bogo?` <span class="up" style="font-size:var(--fs-cap)" title="Buy 1 Get 1 Free — paying this order also creates a free second account of the same size">+1 free</span>`:''}${o.open_funded?` <span class="up" style="font-size:var(--fs-cap)" title="Opens straight as a funded account when paid — skips the evaluation">funded</span>`:''}${o.weekend_trading?` <span class="up" style="font-size:var(--fs-cap)" title="Weekend Trading add-on — 2 extra trading days/week">wknd</span>`:''}${o.brand==='fx'?` <span class="up" style="font-size:var(--fs-cap)" title="The payment page shows Forex Passing branding — no PTF anywhere on it">FX</span>`:''}</td>
+        <td class="num" data-l="Amount">$${fmt(o.amount_usd)}${o.coupon?` <span class="up" style="font-size:var(--fs-cap)">(${esc(o.coupon)})</span>`:''}</td>
         <td class="muted rt-hide" data-l="Provider">${esc(o.provider)}</td>
         <td data-l="Status"><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span>
-          ${o.status==='pending'&&o.flag==='awaiting_crypto'?'<div class="muted" style="font-size:11px;white-space:nowrap">⏳ awaiting crypto</div>':''}
-          ${o.flag==='bogo_grant_failed'?'<div style="font-size:11px;white-space:nowrap;color:var(--red)" title="The paid order promised a free second account, but creating it failed. Use Grant challenge to add it by hand.">⚠ BOGO grant failed — grant manually</div>':''}
-          ${o.flag==='credits_shortfall'?'<div style="font-size:11px;white-space:nowrap;color:var(--red)" title="The order was discounted with store credits, but a parallel checkout had already spent them — the company covered the difference.">⚠ credits shortfall — discount without coverage</div>':''}
-          ${o.flag==='fraud'?'<div style="font-size:11px;white-space:nowrap;color:var(--red)" title="The card issuer reported this payment as fraudulent (early fraud warning). The charge was refunded automatically and the card was blocklisted. Do not provision anything for this order.">⚠ fraud — auto-refunded</div>':''}
-          ${o.flag==='disputed'?'<div style="font-size:11px;white-space:nowrap;color:var(--red)" title="The cardholder opened a chargeback. Respond with evidence in the Stripe dashboard — this cannot be handled from the panel.">⚠ chargeback opened</div>':''}
+          ${o.status==='pending'&&o.flag==='awaiting_crypto'?'<div class="muted" style="font-size:var(--fs-cap);white-space:nowrap">⏳ awaiting crypto</div>':''}
+          ${o.flag==='bogo_grant_failed'?'<div style="font-size:var(--fs-cap);white-space:nowrap;color:var(--red)" title="The paid order promised a free second account, but creating it failed. Use Grant challenge to add it by hand.">⚠ BOGO grant failed — grant manually</div>':''}
+          ${o.flag==='credits_shortfall'?'<div style="font-size:var(--fs-cap);white-space:nowrap;color:var(--red)" title="The order was discounted with store credits, but a parallel checkout had already spent them — the company covered the difference.">⚠ credits shortfall — discount without coverage</div>':''}
+          ${o.flag==='fraud'?'<div style="font-size:var(--fs-cap);white-space:nowrap;color:var(--red)" title="The card issuer reported this payment as fraudulent (early fraud warning). The charge was refunded automatically and the card was blocklisted. Do not provision anything for this order.">⚠ fraud — auto-refunded</div>':''}
+          ${o.flag==='disputed'?'<div style="font-size:var(--fs-cap);white-space:nowrap;color:var(--red)" title="The cardholder opened a chargeback. Respond with evidence in the Stripe dashboard — this cannot be handled from the panel.">⚠ chargeback opened</div>':''}
           ${o.status!=='paid'&&o.payment_address?`<div class="muted" title="${esc((o.payment_network?o.payment_network+' · ':'')+o.payment_address)}"
-            style="font-size:11px;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(o.payment_network?o.payment_network+' · ':'')}${esc(o.payment_address)}</div>`:''}
-          ${o.status==='failed'&&o.fail_reason?`<div class="muted" style="font-size:11px;max-width:200px">${esc(o.fail_reason)}</div>`:''}</td>
+            style="font-size:var(--fs-cap);max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(o.payment_network?o.payment_network+' · ':'')}${esc(o.payment_address)}</div>`:''}
+          ${o.status==='failed'&&o.fail_reason?`<div class="muted" style="font-size:var(--fs-cap);max-width:200px">${esc(o.fail_reason)}</div>`:''}</td>
         <td class="num" data-l="Account">${accLink(o.account_id)}</td>
         <td class="rt-acts" style="white-space:nowrap">${o.status==='paid'?'':`
           ${o.status==='pending'?`<button class="btn-o sm" onclick="payLink(${o.id})"
@@ -1193,9 +1206,9 @@ function renderOrders(){
           <button class="btn-o sm" onclick="toggleOrderBogo(${o.id},${o.bogo?'false':'true'})"
             title="${o.bogo?'Remove the free second account from this order':'Buy 1 Get 1 Free — add a free second account of the same size when this order is paid'}">${o.bogo?'BOGO ✓':'BOGO'}</button>
           <button class="btn-o sm" onclick="markOrderFailed(${o.id})" title="Payment is not coming, close the order with a reason">Mark failed</button>`:''}
-          <button class="btn-p sm" onclick="markOrderPaid(${o.id})" title="Confirm the payment arrived, creates the account">Mark paid</button>`}
+          <button class="btn-p sm" onclick="markOrderPaid(${o.id},'${jsq(o.trader_email||'')}',${o.amount_usd})" title="Confirm the payment arrived, creates the account">Mark paid</button>`}
           ${XBTN(`deleteOrderRow(${o.id},'${jsq(o.trader_email||'')}',${o.amount_usd},${o.account_id||0})`,'Delete order')}</td></tr>`).join('')}
-      </tbody></table></div>`
+      </tbody></table></div>${cap.more}`
       :`<div class="empty"><h3>${list.length?'No orders match':'No orders yet'}</h3>${list.length?'<p>Try a different search or filter.</p>':''}</div>`}`;
 }
 
@@ -1523,7 +1536,7 @@ const isFreeLead=l=>String(l.source||'').toLowerCase().startsWith('free');
    drugi grant i tak dostałby 409, ale klikać nie ma po co. */
 function leadFreeBtn(l){
   return l.accounts>0
-    ?'<span class="muted" style="font-size:11px" title="A challenge account has already been opened for this e-mail">🎁 account opened</span>'
+    ?'<span class="muted" style="font-size:var(--fs-cap)" title="A challenge account has already been opened for this e-mail">🎁 account opened</span>'
     :`<button class="btn-o sm" onclick="grantFreeAccount(${l.id})"
         title="Open the free $25K challenge for them — real account, credentials by e-mail">🎁 Free account</button>`;
 }
@@ -1622,9 +1635,9 @@ function renderLeads(){
         <td data-l="Lead" class="rt-main"><b>${esc(l.name||'—')}</b>${
           l.tier?`<span class="g-dot" title="${esc(l.tier)} ${l.score}&#10;${esc(leadAnswers(l.answers))}">${l.tier==='high'?'🔥':l.tier==='warm'?'🟡':'⚪️'}</span>`:''}
           <span class="lead-when">${dstr(l.created_at)}</span>
-          ${l.owner?`<div style="font-size:11px" title="Taken by">👤 ${esc(l.owner)}</div>`:''}
-          ${l.applications>1?`<div class="muted" style="font-size:11px" title="Filled the form more than once">↻ applied ${l.applications}×</div>`:''}
-          ${l.outcome==='not_qualified'?`<div class="muted" style="font-size:11px">${
+          ${l.owner?`<div style="font-size:var(--fs-cap)" title="Taken by">👤 ${esc(l.owner)}</div>`:''}
+          ${l.applications>1?`<div class="muted" style="font-size:var(--fs-cap)" title="Filled the form more than once">↻ applied ${l.applications}×</div>`:''}
+          ${l.outcome==='not_qualified'?`<div class="muted" style="font-size:var(--fs-cap)">${
             l.source==='safe'?'safe page lead — warm up':'failed the questionnaire'}</div>`:''}</td>
         <td data-l="Contact">${l.telegram?`<div>${leadTgLink(l)}</div>`:''}
           ${l.phone?`<div class="muted lead-ph"><a href="tel:${esc(l.phone)}">${esc(l.phone)}</a>${
@@ -1632,8 +1645,8 @@ function renderLeads(){
           ${l.phone||l.telegram||l.mail_ready?`<div class="lead-act-row">${leadPhoneActs(l)}</div>`:''}</td>
         <td class="muted" data-l="Source">${esc(l.source||'—')}${
           isFreeLead(l)?' <span title="Free challenge funnel — no money changes hands">🆓</span>':''}${
-          l.ref?`<div style="font-size:11px">via ${esc(l.ref)}</div>`:''}${
-          campaignLabel(l.campaign)?`<div style="font-size:11px" title="${
+          l.ref?`<div style="font-size:var(--fs-cap)">via ${esc(l.ref)}</div>`:''}${
+          campaignLabel(l.campaign)?`<div style="font-size:var(--fs-cap)" title="${
             esc(Object.entries(l.campaign).map(([k,v])=>k+'='+v).join('\n'))
           }">ad: ${esc(campaignLabel(l.campaign))}</div>`:''}${
           f==='free'?`<div class="lead-act-row">${leadFreeBtn(l)}</div>`:''}</td>
@@ -1642,7 +1655,7 @@ function renderLeads(){
             onclick="openLeadStatusFor(${l.id})"><span class="dot"></span>${esc(leadLabel(l.status))}</button>
           ${l.next_due?`<div class="due ${dueDays(l.next_due)<=0?'now':''}">⏰ ${dueLabel(l.next_due)}</div>`
             :l.owner&&(l.status==='messaged'||l.status==='replied')?'<div class="due now">no next step</div>'
-            :l.contacted_at?`<div class="muted" style="font-size:11px">${dstr(l.contacted_at)}</div>`:''}</td>
+            :l.contacted_at?`<div class="muted" style="font-size:var(--fs-cap)">${dstr(l.contacted_at)}</div>`:''}</td>
         <td class="num" data-l="Bought" data-sort="${l.paid_usd>0?l.paid_usd:l.bought?0.5:0}">${
           l.paid_usd>0?`<span class="status paid"><span class="dot"></span>$${fmt0(l.paid_usd)}</span>`
           :l.bought?'<span class="status paid"><span class="dot"></span>bought</span>'
@@ -2280,7 +2293,7 @@ async function openLead(id){
         <td>${esc(o.product_key)}</td><td class="num">$${fmt0(o.amount_usd)}</td>
         <td><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span></td>
         <td>${o.status==='paid'
-          ?(o.bogo?'<span class="up" style="font-size:11px">2 accounts</span>':'<span class="muted">—</span>')
+          ?(o.bogo?'<span class="up" style="font-size:var(--fs-cap)">2 accounts</span>':'<span class="muted">—</span>')
           :`<button class="btn-o sm" onclick="toggleOrderBogo(${o.id},${o.bogo?'false':'true'},${l.id})"
              title="${o.bogo?'Remove the free second account from this order':'Add a free second account of the same size when this order is paid'}">${o.bogo?'On ✓':'Off'}</button>`}</td></tr>`).join('')}
       </tbody></table></div>`
@@ -2291,7 +2304,7 @@ async function openLead(id){
       <tbody>${ev.map(e=>`<tr>
         <td class="muted" style="white-space:nowrap">${dstr(e.created_at)}</td>
         <td>${esc(LEAD_EVENT_LBL[e.kind]||e.kind)}
-          <div class="muted" style="font-size:11px">${esc(e.actor||'—')}</div></td>
+          <div class="muted" style="font-size:var(--fs-cap)">${esc(e.actor||'—')}</div></td>
         <td><div style="font-size:12px">${esc(leadEventDetail(e))}</div>
           ${e.body?`<div class="lead-sent">${esc(e.body)}</div>`:''}
           ${Object.keys(e.answers||{}).length?`<div class="muted" style="font-size:11.5px;margin-top:4px">${
@@ -2438,9 +2451,12 @@ async function markOrderFailed(id){
     toast('Order marked as failed.','ok');go('orders')}
   catch(e){toast('Error: '+e.message,'err')}
 }
-async function markOrderPaid(id){
+async function markOrderPaid(id,email,amount){
+  /* Echo zamówienia w pytaniu: akcja zakłada konto i pali kupon, a przy
+     kilkunastu wierszach „Mark paid" łatwo trafić o linijkę za nisko. */
+  const kogo=email?`#${id} — ${esc(email)}${amount!=null?` · $${fmt(amount)}`:''}`:`#${id}`;
   if(!await askConfirm({title:'Mark this order as paid?',
-    body:'This creates the challenge account and sends the trader their credentials, exactly like a completed card payment.',
+    body:`${kogo}. This creates the challenge account and sends the trader their credentials, exactly like a completed card payment.`,
     ok:'Mark as paid'}))return;
   try{const d=await api(`/api/admin/orders/${id}/mark-paid`,{method:'POST'});
     /* Zamowienie BOGO tworzy DWA konta — toast musi to powiedziec, a gdy grant
@@ -2522,7 +2538,7 @@ async function openAccount(id){
         ${a.phase!=='eval_1'?`<button class="btn-o sm" onclick="setPhase(${a.id},'eval_1')">Back to Phase 1</button>`:''}
         ${(a.steps>=2&&a.phase!=='eval_2')?`<button class="btn-o sm" onclick="setPhase(${a.id},'eval_2')">Move to Phase 2</button>`:''}
         ${a.phase!=='funded'?`<button class="btn-p sm" onclick="setPhase(${a.id},'funded')">Make funded</button>`:''}
-        ${a.status!=='failed'?`<button class="btn-o sm" style="border-color:var(--red-line);color:var(--red)" onclick="breachAccount(${a.id})">Breach account</button>`:''}
+        ${a.status!=='failed'?`<button class="btn-o sm" style="border-color:var(--red-line);color:var(--red)" onclick="breachAccount(${a.id},'${jsq(a.login||'')}')">Breach account</button>`:''}
       </div>
       <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
         The risk engine promotes accounts automatically once the profit target and minimum
@@ -3056,9 +3072,9 @@ function askReason(opts){
 }
 
 /* ---------- payouts + certificates ---------- */
-async function breachAccount(id){
+async function breachAccount(id,login){
   const breachReason=await askReason({
-    title:'Breach this account',danger:true,confirmLabel:'Breach account',
+    title:login?`Breach account ${esc(login)}`:'Breach this account',danger:true,confirmLabel:'Breach account',
     hint:'The account is closed as <b>failed</b> and the reason below is shown to the trader in the portal and by e-mail.',
     presets:['Daily loss limit exceeded','Maximum drawdown exceeded',
       'Prohibited trading strategy','Copy trading between accounts',
@@ -3207,6 +3223,10 @@ async function pauseBot(id,paused){
   try{await api(`/api/admin/accounts/${id}/bot`,{method:'PATCH',body:JSON.stringify({paused})});
     toast(paused?'⏸ Bot paused. No new entries, the account keeps its balance.'
                 :'▶️ Bot resumed.','ok');
+    /* Karta konta to overlay NAD tabelą — bez tego kropka bota w wierszu
+       pod spodem świeciłaby po staremu aż do ręcznego odświeżenia. */
+    const row=(window._accs||[]).find(x=>x.id===id);
+    if(row){row.bot_paused=paused;if(VIEW==='accounts')renderAccounts()}
     openAccount(id);
   }catch(e){toast('Error: '+e.message,'err')}
 }
@@ -3544,10 +3564,10 @@ function reachChannelsHtml(rc){
   const lista=rc.channels||[];
   const bot=rc.bot_username?('@'+esc(rc.bot_username)):'the bot';
   const wiersz=(k,i)=>{
-    const stan=k.payout?`<span class="chip" style="font-size:11px">posts from Payout BOT</span>`
-      :k.bot_admin===false?`<span class="chip" style="font-size:11px;border-color:var(--red-line);color:var(--red)">add ${bot} as admin</span>`
-      :k.bot_admin?`<span class="chip" style="font-size:11px">auto ready</span>`
-      :`<span class="chip" style="font-size:11px">status unknown</span>`;
+    const stan=k.payout?`<span class="chip" style="font-size:var(--fs-cap)">posts from Payout BOT</span>`
+      :k.bot_admin===false?`<span class="chip" style="font-size:var(--fs-cap);border-color:var(--red-line);color:var(--red)">add ${bot} as admin</span>`
+      :k.bot_admin?`<span class="chip" style="font-size:var(--fs-cap)">auto ready</span>`
+      :`<span class="chip" style="font-size:var(--fs-cap)">status unknown</span>`;
     /* Puste pole ilosci = „jak globalnie" — placeholder pokazuje wtedy liczbe,
        ktora naprawde poleci, zeby admin nie musial jej szukac wyzej w karcie. */
     return `<div class="mod-row" style="flex-wrap:wrap;align-items:center;gap:10px">
@@ -4246,6 +4266,10 @@ async function submitManualOrder(){
   const link=window._moMethod==='link';
   const addr=link?'':($('mo-address').value||'').trim();
   const net=link?'':($('mo-network').value||'').trim();
+  /* Mail z instrukcją płatności bez adresu/sieci to prośba „zapłać donikąd" —
+     blokada tylko gdy mail faktycznie wyjdzie. */
+  if(!link&&$('mo-mail').checked&&(!addr||!net)){
+    toast('The payment e-mail needs a wallet address and network — fill both or untick the e-mail.','err');return}
   if(addr)saveWallet(addr,net);
   /* Na wolnej sieci drugi tap przed odpowiedzia zalozylby DRUGIE zamowienie
      (i konto leada) — blokada jak w submitNewLead. */
@@ -4467,7 +4491,7 @@ const PUSH_GROUPS=[
 function pushCatsHtml(){
   const cats=(ME&&ME.ui_prefs&&ME.ui_prefs.admin_push)||{};
   return PUSH_GROUPS.map(([grupa,katy])=>`
-    <div class="lbl" style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">${grupa}</div>
+    <div class="lbl" style="font-size:var(--fs-cap);color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">${grupa}</div>
     <div class="chip-row">${katy.map(([k,l])=>`<label class="chip" style="cursor:pointer;display:inline-flex;gap:6px;align-items:center">
       <input type="checkbox" ${cats[k]===false?'':'checked'} onchange="setPushCat('${k}',this.checked)">${l}</label>`).join('')}</div>`).join('');
 }

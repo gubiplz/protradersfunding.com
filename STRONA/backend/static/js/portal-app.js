@@ -299,7 +299,14 @@ $('sheet-nav').innerHTML=NAV.filter(n=>!TABS.some(t=>t.v===n.v)).map(n=>
 paintTheme();   /* the sheet's toggle was just rendered — give it its icon/label */
 function openSheet(){$('sheetVeil').classList.remove('hidden');$('sheet').classList.add('open')}
 function closeSheet(){$('sheetVeil').classList.add('hidden');$('sheet').classList.remove('open')}
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closeSheet()});
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape')return;
+  closeSheet();
+  /* ask-modal zostaje: potwierdzenie ma callback i Escape bez odpowiedzi
+     zostawiłby decyzję w zawieszeniu. pop() zdejmuje wierzchni modal. */
+  const m=[...document.querySelectorAll('.modal-wrap')].filter(x=>x.id!=='ask-modal').pop();
+  if(m)m.remove();
+});
 
 /* ---------- toasts ---------- */
 function toast(msg,kind='ok',ms=6000){
@@ -735,7 +742,7 @@ function maybeReviewNudge(){
   localStorage.setItem('pf_tp_nudge',String(Date.now()));
   const w=document.createElement('div'); w.id='tp-modal'; w.className='modal-wrap';
   w.onclick=e=>{if(e.target===w)w.remove()};
-  w.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+  w.innerHTML=`<div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
     <div class="modal-head"><h3>Enjoying your funded account?</h3></div>
     <p class="muted" style="font-size:13px;margin:2px 0 6px">Your challenge account was set up for you free of charge. If you like how it's going, a short Trustpilot review helps other traders find us — it takes a minute.</p>
     <div style="font-size:20px;letter-spacing:3px;color:#00b67a;margin:4px 0 12px">★★★★★</div>
@@ -2146,9 +2153,9 @@ function openJournalModal(){
   api('/api/me/accounts').then(accs=>{
     const box=document.createElement('div');
     box.id='j-modal'; box.className='modal-wrap';
-    box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+    box.innerHTML=`<div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
       <div class="modal-head"><h3>New Journal Entry</h3>
-        <button class="icon-btn" onclick="document.getElementById('j-modal').remove()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+        <button class="icon-btn" aria-label="Close" onclick="document.getElementById('j-modal').remove()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
       <div class="stack" style="margin-top:8px">
         <input id="j-title" class="inp" placeholder="Title, e.g. 'NY session — gold short'">
         <select id="j-acc" class="inp"><option value="">No account</option>
@@ -2159,7 +2166,7 @@ function openJournalModal(){
     box.onclick=()=>box.remove();
     document.body.appendChild(box);
     setTimeout(()=>$('j-title').focus(),50);
-  });
+  }).catch(e=>{toast('Error: '+e.message,'err')});
 }
 async function saveJournal(){
   try{
@@ -2453,7 +2460,7 @@ function openInvoice(orderId){
   const box=document.createElement('div');
   box.id='inv-modal'; box.className='modal-wrap';
   const date=dutc(o.created_at).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
-  box.innerHTML=`<div class="inv-print" onclick="event.stopPropagation()">
+  box.innerHTML=`<div class="inv-print" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
     <div class="inv-head">
       <div style="display:flex;align-items:center;gap:10px"><img src="/static/img/logo.png" alt="">
         <div><div class="inv-h1">${esc(SITE_NAME)}</div><div style="font-size:11px;color:#64748b">Trading skills evaluation platform</div></div></div>
@@ -2594,7 +2601,7 @@ function openBuy(key){
   box.id='buy-modal';
   box.className='modal-wrap';
   box.innerHTML=`
-    <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
       <div class="modal-head">
         <h3>${esc(p.label)}</h3>
         <button class="icon-btn" onclick="closeBuy()" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
@@ -3007,11 +3014,19 @@ const PHASE_LABEL={eval_1:'Phase 1',eval_2:'Phase 2',funded:'Funded'};
 async function openAcc(id){
   $('pg-title').textContent='Account Dashboard'; $('pg-crumb').textContent='Trader / Client Area / '+id;
   $('view').innerHTML='<div class="skel" style="height:110px;margin-bottom:16px"></div><div class="skel" style="height:300px"></div>';
-  const [a,act,pos]=await Promise.all([
-    api('/api/me/accounts/'+id),
-    api(`/api/me/accounts/${id}/activity`),
-    api(`/api/me/accounts/${id}/positions`).catch(()=>[]),
-  ]);
+  let a,act,pos;
+  try{
+    [a,act,pos]=await Promise.all([
+      api('/api/me/accounts/'+id),
+      api(`/api/me/accounts/${id}/activity`),
+      api(`/api/me/accounts/${id}/positions`).catch(()=>[]),
+    ]);
+  }catch(e){
+    $('view').innerHTML=`<div class="card" style="text-align:center;padding:34px 18px">
+      <p class="muted" style="margin:0 0 14px">Couldn't load this account — check your connection.</p>
+      <button class="btn-p" onclick="openAcc(${id})">Try again</button></div>`;
+    return;
+  }
   const m=a.metrics||{};
   window._act=act; window._accId=id; window._acc=a; window._onDetail=true;
   $('pg-crumb').textContent='Trader / Client Area / '+(a.login||id);
@@ -3408,7 +3423,7 @@ function payoutMethodLabel(m){return m==='usdt'?'USDT (crypto)':m==='wise'?'Wise
 function openPayoutModal(id,avail){
   const w=document.createElement('div'); w.id='po-modal'; w.className='modal-wrap';
   w.onclick=e=>{if(e.target===w)w.remove()};
-  w.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+  w.innerHTML=`<div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
     <div class="modal-head"><h3>Request a payout</h3></div>
     <p class="muted" style="font-size:12.5px;margin:2px 0 12px">Available on this account: <b>$${fmt(avail)}</b>, your split of current profit. You can request part of it.</p>
     <label class="muted" style="font-size:12px">Amount (USD)</label>
@@ -3425,6 +3440,7 @@ function openPayoutModal(id,avail){
       <button class="btn-o" onclick="$('po-modal').remove()">Cancel</button>
     </div></div>`;
   document.body.appendChild(w); poFields();
+  setTimeout(()=>$('po-amount')?.focus(),50);
 }
 function poFields(){
   const m=$('po-method').value, F=$('po-fields'), L=t=>`<label class="muted" style="font-size:12px">${t}</label>`;
@@ -3445,7 +3461,7 @@ function poFields(){
 function openScaleModal(id,from,to){
   const w=document.createElement('div'); w.id='sc-modal'; w.className='modal-wrap';
   w.onclick=e=>{if(e.target===w)w.remove()};
-  w.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+  w.innerHTML=`<div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
     <div class="modal-head"><h3>Move up to the $${fmt0(to)} plan</h3></div>
     <p class="muted" style="font-size:12.5px;margin:2px 0 14px">
       You leave the <b>$${fmt0(from)}</b> account behind and we set up a fresh

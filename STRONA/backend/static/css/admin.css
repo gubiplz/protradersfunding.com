@@ -52,7 +52,13 @@ html[data-theme=dark]{
   /* gotowe follow-upy: cała ich wartość polega na tym, że przypomnienie kosztuje
      jedno dotknięcie — przy 29 px kosztowało dwa, bo pierwsze trafiało w sąsiada */
   .chip.preset{min-height:44px;display:inline-flex;align-items:center}
+  /* linki w komórkach tabel (np. #konta przy zamówieniu): rysunek zostaje mały,
+     rośnie niewidoczne pole trafienia — padding znosi się z ujemnym marginesem */
+  .tbl td a{display:inline-block;padding:10px 6px;margin:-10px -6px}
 }
+/* 11px na telefonie schodzi poniżej progu czytelności — na wąskim ekranie
+   podpisy wskakują na 12px, desktop zostaje przy gęstszej siatce */
+@media(max-width:860px){:root{--fs-cap:12px}}
 
 /* The pill must stay inside the 248px sidebar — at the portal font size the
    full site name plus the ADMIN tag overflowed past its right edge. When space

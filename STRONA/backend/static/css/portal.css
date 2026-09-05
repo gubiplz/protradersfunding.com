@@ -499,7 +499,8 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
    raw page at the edge. The wrap must stay free of backdrop-filter/transform,
    or the fixed pseudo would anchor to the wrap and move with it again. */
 .modal-wrap{position:fixed;inset:0;z-index:70;display:flex;align-items:flex-start;justify-content:center;
-  padding:18px;overflow-y:auto;overscroll-behavior:contain}
+  padding:calc(18px + env(safe-area-inset-top,0px)) 18px calc(18px + env(safe-area-inset-bottom,0px));
+  overflow-y:auto;overscroll-behavior:contain}
 /* Welon NIE moze isc na `z-index:-1`. WebKit (Safari/Brave na iOS) wciagal wtedy
    ten fixed pseudoelement z `backdrop-filter` na warstwe NAD trescia i karta
    modala znikala — zostawal sam blur, przez ktory bylo widac strone pod spodem.
