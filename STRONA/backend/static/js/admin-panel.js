@@ -3118,11 +3118,28 @@ async function renderPayouts(id){
       </span>
     </div>`).join('')
     : '<p class="muted" style="font-size:12.5px">No payouts on this account yet.</p>';
+  const pool=d.payout_pool_usd;
   el.innerHTML=`<h3 style="font-size:15px;margin-bottom:10px">Payouts &amp; certificates</h3>
     ${lista}
+    <div class="kv" style="align-items:center;flex-wrap:wrap;row-gap:6px;margin-top:12px">
+      <span>Payout pool</span>
+      <span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;row-gap:6px">
+        ${pool!=null?`<b class="up">$${fmt(pool)}</b>`
+                    :'<span class="muted" style="font-size:12px">formula mode — profit × split</span>'}
+        <input id="pool-amount" class="inp" type="number" step="0.01" min="0"
+          placeholder="e.g. 500" style="width:110px">
+        <button class="btn-o sm" onclick="setPayoutPool(${id})">Set</button>
+        ${pool!=null?`<button class="btn-o sm" onclick="clearPayoutPool(${id})">Clear</button>`:''}
+      </span>
+    </div>
+    <p class="muted" style="font-size:12px;margin:4px 0 0;line-height:1.5">
+      A set pool <b>replaces</b> the profit × split formula as the amount the trader can
+      request — regardless of what the chart shows. Payouts are deducted from the pool and
+      the balance is <b>not</b> reset. Clear it to go back to the formula.</p>
     ${d.status!=='funded'?`<p class="muted" style="font-size:12.5px;margin-top:12px">
         Payouts can only be issued on a <b>funded</b> account. This one is
-        <b>${esc(d.status)}</b>. Move the phase to Funded first.</p>`:`
+        <b>${esc(d.status)}</b>. Move the phase to Funded first.
+        ${pool!=null?'The pool is already set and will apply once the account is funded.':''}</p>`:`
     <div class="pool-form" style="margin-top:14px">
       <div><label class="muted" style="font-size:12px">Trader payout ($)</label>
         <input id="po-amount" class="inp" type="number" step="0.01" min="0.01" value="${d.suggested_share||''}"
@@ -3140,19 +3157,40 @@ async function renderPayouts(id){
         <span class="muted">(the certificate, its QR and the verification link are created either
         way — this only decides whether the trader's payout is shown publicly)</span></span>
     </label>
-    <button class="btn-p" onclick="issuePayout(${id})">Issue payout + certificate</button>`}
+    <button class="btn-p" onclick="issuePayout(${id},${pool!=null})">Issue payout + certificate</button>`}
     <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
-      Current profit <b>$${fmt(d.profit)}</b> · split <b>${d.split_pct}%</b> → suggested
-      <b>$${fmt(d.suggested_share)}</b>. Issuing a payout books it and
-      <b>resets the account balance to its starting capital</b>, exactly like approving
-      a trader's request. The paid-out profit stops counting toward the next one.</p>`;
+      ${pool!=null
+        ?`Payout pool <b>$${fmt(pool)}</b> → suggested <b>$${fmt(d.suggested_share)}</b>.
+          Issuing a payout books it and <b>deducts it from the pool</b> — the account
+          balance keeps running (the bot paints it), so nothing is reset.`
+        :`Current profit <b>$${fmt(d.profit)}</b> · split <b>${d.split_pct}%</b> → suggested
+          <b>$${fmt(d.suggested_share)}</b>. Issuing a payout books it and
+          <b>resets the account balance to its starting capital</b>, exactly like approving
+          a trader's request. The paid-out profit stops counting toward the next one.`}</p>`;
 }
-async function issuePayout(id){
+async function setPayoutPool(id){
+  const v=parseFloat($('pool-amount').value);
+  if(!(v>=0)){toast('Enter a pool amount of 0 or more.','err');return}
+  try{const r=await api(`/api/admin/accounts/${id}/payout-pool`,{method:'POST',
+      body:JSON.stringify({amount:v})});
+    toast(`Payout pool set to $${fmt(r.payout_pool_usd)}. The trader can now request up to $${fmt(r.payout_available)}.`,'ok');
+    renderPayouts(id);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function clearPayoutPool(id){
+  try{await api(`/api/admin/accounts/${id}/payout-pool`,{method:'POST',
+      body:JSON.stringify({amount:null})});
+    toast('Payout pool cleared — back to the profit × split formula.','ok');
+    renderPayouts(id);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function issuePayout(id,poolMode){
   const amount=parseFloat($('po-amount').value||'0');
   if(!(amount>0)){toast('Enter a payout amount greater than 0.','err');return}
   const naLp=$('po-lp')?$('po-lp').checked:true;
   if(!await askConfirm({title:`Issue a payout of $${amount.toFixed(2)}?`,
-    body:'It is booked as paid and the account balance resets to its starting capital. '
+    body:(poolMode?'It is booked as paid and deducted from the payout pool — the balance is not reset. '
+                  :'It is booked as paid and the account balance resets to its starting capital. ')
       +(naLp?'The certificate will also show on the landing page.'
             :'The certificate stays off the landing page.'),
     ok:'Issue payout',danger:true}))return;
@@ -3268,14 +3306,15 @@ function botOutcomeBox(a){
   }else if(o.cap_equity!=null&&o.phase_target_equity!=null){
     const cap=`Cap <b>+${o.cap_pct.toFixed(2)}%</b> = ${usd(o.cap_equity)}`;
     const cel=`phase target <b>+${o.phase_target_pct.toFixed(2)}%</b> = ${usd(o.phase_target_equity)}`;
+    const kiedy=o.target_deadline?` The bot is pacing itself to get there around <b>${dstr(o.target_deadline)}</b>.`:'';
     if(o.will_pass===false)
       msg=`${P}${cap}, ${cel} — <b style="color:var(--red)">short by ${Math.abs(o.gap_pp).toFixed(2)} pp.
-        This account never passes.</b></p>`;
+        This account never passes.</b>${kiedy}</p>`;
     else if(o.days_missing>0)
       msg=`${P}${cap} clears the ${cel}, but the phase also needs <b>${o.min_trading_days} trading
-        days</b> (${o.trading_days} so far, ${o.days_missing} missing) — <b class="up">it passes</b> once the days are in.</p>`;
+        days</b> (${o.trading_days} so far, ${o.days_missing} missing) — <b class="up">it passes</b> once the days are in.${kiedy}</p>`;
     else
-      msg=`${P}${cap} clears the ${cel} — <b class="up">this account passes</b> once the bot gets there.</p>`;
+      msg=`${P}${cap} clears the ${cel} — <b class="up">this account passes</b> once the bot gets there.${kiedy}</p>`;
   }else if(o.phase_target_equity!=null){
     msg=`${P}No cap — the bot trades straight past the phase target of
       +${o.phase_target_pct.toFixed(2)}% (${usd(o.phase_target_equity)}), so the account
@@ -3292,14 +3331,32 @@ function botOutcomeBox(a){
 async function setBotOutcome(id,pct){
   /* mode:'profit' idzie zawsze — ustawienie celu na bocie w trybie zjazdu ma
      znaczyć „zmieniłem zdanie, wracamy po zysk", a nie błąd 400. */
+  let dni;
+  if(pct>0){
+    /* Bez terminu bot szedłby losowym tempem persony i moment zdania byłby
+       przypadkowy — pytamy o dni tak samo, jak Make it fail pyta o zjazd. */
+    const v=await askReason({
+      title:'How long should it take?',confirmLabel:'Set the pace',
+      hint:'The bot paces its daily gains to land on the target in roughly this many days — '
+          +'red days and weekends included, like a real trader passing a phase. '
+          +'On real funding platforms a pass typically takes <b>1–3 weeks per phase</b>.',
+      label:'Reach the target over',
+      presets:['7 days','14 days','21 days','30 days','No deadline — free pace']});
+    if(v===null)return;
+    if(/free pace/i.test(v))dni=0;
+    else{dni=parseFloat(v);
+      if(isNaN(dni)||dni<=0){toast('Give the number of days, e.g. "14".','err');return}}
+  }
   try{
     const r=await api(`/api/admin/accounts/${id}/bot`,{method:'PATCH',
-      body:JSON.stringify({mode:'profit',target_pct:pct})});
+      body:JSON.stringify({mode:'profit',target_pct:pct,
+        ...(dni!==undefined?{target_days:dni}:{})})});
     const o=r.bot_outcome||{};
+    const kiedy=o.target_deadline?` Aiming for around ${dstr(o.target_deadline)}.`:'';
     toast(!pct?'🎯 Cap removed. The bot trades with no profit limit.'
-      :o.will_pass===false?`🎯 Cap +${r.bot_target_pct}% — short of the phase target by ${Math.abs(o.gap_pp).toFixed(2)} pp. This account will not pass.`
-      :o.will_pass?`🎯 Cap +${r.bot_target_pct}% — clears the phase target. This account will pass.`
-      :`🎯 Target set to +${r.bot_target_pct}%. The bot continues from here.`,'ok',7000);
+      :o.will_pass===false?`🎯 Cap +${r.bot_target_pct}% — short of the phase target by ${Math.abs(o.gap_pp).toFixed(2)} pp. This account will not pass.${kiedy}`
+      :o.will_pass?`🎯 Cap +${r.bot_target_pct}% — clears the phase target. This account will pass.${kiedy}`
+      :`🎯 Target set to +${r.bot_target_pct}%. The bot continues from here.${kiedy}`,'ok',7000);
     openAccount(id);
   }catch(e){toast('Error: '+e.message,'err')}
 }

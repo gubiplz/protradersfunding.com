@@ -1855,7 +1855,7 @@ const VIEWS={
     <p class="muted" style="font-size:13px;margin:-6px 0 14px">Payouts are <b>on demand</b> — request whenever
       you are in profit. Every request is reviewed within <b>${data.summary.review_hours||24} hours</b>.</p>
     ${funded.filter(a=>a.scale_up_to).map(a=>{
-      const av=Math.max(0,(a.balance-a.initial_balance)*(a.profit_split_pct||80)/100);
+      const av=a.payout_available??0;
       return `<div class="scale-offer">
         <div class="so-txt">
           <b>${esc(a.login)} is up ${a.scale_trigger_pct}%. Now you choose.</b>
@@ -1870,7 +1870,7 @@ const VIEWS={
       </div>`}).join('')}
     ${funded.length?`<div class="panel" style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <span class="muted" style="font-size:13px;margin-right:6px">Request a payout:</span>
-      ${funded.map(a=>{const av=Math.max(0,(a.balance-a.initial_balance)*(a.profit_split_pct||80)/100);
+      ${funded.map(a=>{const av=a.payout_available??0;
         return `<button class="btn-o sm" onclick="openPayoutModal(${a.id},${av.toFixed(2)})">${esc(a.login)} · $${fmt(av)} available</button>`}).join('')}
     </div>`:''}
     ${data.requests.length?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="portal.payout-req">

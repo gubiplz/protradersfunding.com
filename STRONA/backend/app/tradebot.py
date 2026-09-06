@@ -67,6 +67,12 @@ DOOM_DAILY_SAFE = 0.85
 # kliknal ubij konto".
 DOOM_WIN_SCALE = 0.45
 
+# Sufit dziennego zysku (% salda) przy jeździe na termin (`bot_target_deadline`).
+# Termin w przeszłości albo bardzo krótki dałby jeden heroiczny dzień +8% —
+# a takich dni prawdziwi zdający nie mają; bot dojedzie „tak szybko, jak
+# wiarygodnie się da".
+TARGET_DAILY_MAX = 2.5
+
 
 # --------------------------------------------------------------------------- #
 #  Instrumenty                                                                 #
@@ -318,6 +324,7 @@ def start(session, acc: Account, *, style: str = "balanced", pace: str = "steady
     acc.bot_style = style if style in STYLES else "balanced"
     acc.bot_pace = normalize_pace(pace)
     acc.bot_target_pct = max(0.0, round(float(target_pct or 0.0), 2))
+    acc.bot_target_deadline = None  # świeży start nie dziedziczy starego terminu
     acc.bot_paused = False
     if acc.bot_seed is None:
         acc.bot_seed = seed_for(acc)
@@ -335,6 +342,7 @@ def _apply_mode(acc: Account, mode: str, doom_days: float | None,
         # drugie „zjedź na podłogę". Zostawienie obu dałoby konto, które
         # nie rusza się w żadną stronę.
         acc.bot_target_pct = 0.0
+        acc.bot_target_deadline = None
         acc.bot_doom_limit = doom_limit if doom_limit in ("overall", "daily") else "overall"
         dni = max(0.5, float(doom_days if doom_days is not None else DOOM_DAYS_DEFAULT))
         acc.bot_doom_deadline = datetime.now(timezone.utc) + timedelta(days=dni)
@@ -433,6 +441,16 @@ def _doom_days_left(acc: Account, now: datetime) -> float:
     return max(1.0, zostalo)
 
 
+def _target_days_left(acc: Account, now: datetime) -> float:
+    """Lustro `_doom_days_left` dla jazdy w górę: dni kalendarzowe do
+    `bot_target_deadline`. Weekend bez handlu sam zagęszcza kolejne dni —
+    dystans stoi, dni topnieją, porcja rośnie."""
+    if not getattr(acc, "bot_target_deadline", None):
+        return 1.0
+    zostalo = (_naive(acc.bot_target_deadline) - _naive(now)).total_seconds() / DZIEN_SEK
+    return max(1.0, zostalo)
+
+
 def _doom_day_target(acc: Account, balance: float, now: datetime) -> float:
     """Ujemny cel na dziś: porcja dystansu do podłogi, z rozrzutem.
 
@@ -473,7 +491,8 @@ def _doom_day_target(acc: Account, balance: float, now: datetime) -> float:
     return -porcja
 
 
-def set_target(session, acc: Account, target_pct: float) -> dict:
+def set_target(session, acc: Account, target_pct: float,
+               target_days: float | None = None) -> dict:
     """Zmienia docelowy zysk DZIAŁAJĄCEGO bota. Zwraca nową wartość i sufit.
 
     Po osiągnięciu celu bot przestaje otwierać pozycje, ale zostaje włączony —
@@ -495,6 +514,15 @@ def set_target(session, acc: Account, target_pct: float) -> dict:
     powiedzieć wprost zamiast obiecywać wynik, którego nie dowiezie.
     """
     acc.bot_target_pct = max(0.0, round(float(target_pct or 0.0), 2))
+    # Termin dojścia do sufitu: dodatni → ustaw, 0 → zdejmij zegar (wolne
+    # tempo persony), pominięty → zostaw stary (dzienna porcja i tak liczy się
+    # od nowego dystansu), cel zdjęty → zegar też znika.
+    if not acc.bot_target_pct:
+        acc.bot_target_deadline = None
+    elif target_days is not None:
+        acc.bot_target_deadline = (
+            None if float(target_days) <= 0 else
+            datetime.now(timezone.utc) + timedelta(days=max(0.5, float(target_days))))
     cap = cap_equity(acc)
     now = datetime.now(timezone.utc)
     balance = float(acc.balance if acc.balance is not None else acc.initial_balance or 0.0)
@@ -510,7 +538,9 @@ def set_target(session, acc: Account, target_pct: float) -> dict:
 
     session.commit()
     return {"target_pct": acc.bot_target_pct, "cap_equity": cap,
-            "cap_overshot": cap is not None and balance > cap}
+            "cap_overshot": cap is not None and balance > cap,
+            "target_deadline": (acc.bot_target_deadline.isoformat()
+                                if acc.bot_target_deadline else None)}
 
 
 def _open_trade(session, acc: Account) -> Trade | None:
@@ -610,6 +640,25 @@ def _day_target(acc: Account, p: Persona, balance: float, now: datetime) -> floa
     if is_doom(acc):
         return _doom_day_target(acc, balance, now)
     rng = random.Random(f"{acc.bot_seed}:{_day_key(now)}")
+    cap = cap_equity(acc)
+    if cap is not None and getattr(acc, "bot_target_deadline", None):
+        # Jazda na termin: porcja dystansu do sufitu, jak w doomie tylko w górę.
+        # Czerwone dni zostają dla wiarygodności, ale nie gdy zegar goni —
+        # codzienny przelicznik i tak odrobi każdy zjazd następnego dnia.
+        days_left = _target_days_left(acc, now)
+        if days_left > 2.0 and rng.random() < p.red_day_odds:
+            return -balance * rng.uniform(0.10, 0.45) / 100.0
+        # Ten sam warunek świeżości co w doomie: cel dnia musi liczyć się od
+        # punktu, od którego liczy się `_today_realized`.
+        if acc.day_key == _day_key(now) and acc.day_start_balance:
+            start_dnia = float(acc.day_start_balance)
+        else:
+            start_dnia = balance
+        # BEZ +MIN_FILL: sufit ma być trafiony co do grosza, nie przebity —
+        # przycięcie w `_open_new` i tak ląduje dokładnie na capie.
+        dystans = max(0.0, cap - start_dnia)
+        porcja = dystans / days_left * rng.uniform(0.85, 1.20)
+        return min(porcja, balance * TARGET_DAILY_MAX / 100.0)
     if rng.random() < p.red_day_odds:
         return -balance * rng.uniform(0.10, 0.45) / 100.0
     return balance * p.daily_target_pct / 100.0
@@ -706,7 +755,11 @@ def _open_new(session, acc: Account, p: Persona, balance: float, now: datetime) 
         # Wielkosc pozycji wynika z dziennego celu rozlozonego na planowana liczbe
         # wejsc — inaczej dwie wygrane realizowalyby caly dzien i historia bylaby
         # pusta. `risk_pct` zostaje juz tylko jako sufit bezpieczenstwa.
-        day_goal = balance * p.daily_target_pct / 100.0
+        #
+        # Przy jezdzie na termin cel dnia bywa kilkukrotnie wiekszy od stawki
+        # persony — sizing musi isc za NIM, inaczej dzien nigdy sie nie domyka
+        # i deadline przejezdza. Czerwony dzien (target<0) wraca do persony.
+        day_goal = target if target > 0 else balance * p.daily_target_pct / 100.0
         edge = max(0.15, p.win_rate * p.avg_r - (1 - p.win_rate) * 0.8)
         risk_usd = min(day_goal / (p.trades_per_day * edge), balance * p.risk_pct / 100.0)
     lots = max(MIN_LOT, round(risk_usd / (inst.stop_move * pv), 2))

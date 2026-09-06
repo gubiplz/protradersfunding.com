@@ -200,6 +200,8 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "bot_mode": "VARCHAR(16) DEFAULT 'profit'",
         "bot_doom_deadline": "TIMESTAMP",
         "bot_doom_limit": "VARCHAR(16) DEFAULT 'overall'",
+        "bot_target_deadline": "TIMESTAMP",
+        "payout_pool_usd": "FLOAT",
         "scale_count": "INTEGER DEFAULT 0",
         "express_payout": "BOOLEAN DEFAULT FALSE",
         "limit_warn_daily_day": "VARCHAR(10) DEFAULT ''",

@@ -411,6 +411,9 @@ class Account(Base):
     bot_doom_deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Ktora podloga ma pasc: 'overall' (max drawdown) albo 'daily' (limit dnia).
     bot_doom_limit: Mapped[str] = mapped_column(String(16), default="overall")
+    # Do kiedy bot ma dojsc do sufitu `bot_target_pct` — z tego wychodzi dzienna
+    # porcja zysku (lustro `bot_doom_deadline` dla jazdy w gore).
+    bot_target_deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Nieodgadywalny token certyfikatu — publiczny link /certificate/{token}
     # i weryfikacja /verify/{token} działają bez logowania, ale nie da się
@@ -429,6 +432,9 @@ class Account(Base):
     min_trading_days: Mapped[int] = mapped_column(Integer, default=4)
     drawdown_type: Mapped[str] = mapped_column(String(16), default="static")
     profit_split_pct: Mapped[float] = mapped_column(Float, default=80.0)
+    # Recznie ustalona pula do wyplaty (USD). NULL = formula
+    # (balance-initial)*split%; wartosc (takze 0) jest wiazaca i zastepuje formule.
+    payout_pool_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_lots: Mapped[float] = mapped_column(Float, default=6.0)
     consistency_pct: Mapped[float] = mapped_column(Float, default=0.0)  # 0 = wyłączona; 40 = reguła 40% best-day
 

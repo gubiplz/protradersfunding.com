@@ -427,6 +427,9 @@ def _bot_outcome(acc: Account) -> dict:
         "cap_pct": round(float(acc.bot_target_pct or 0.0), 2),
         "cap_equity": cap,
         "cap_overshot": cap is not None and balance > cap,
+        "target_deadline": (acc.bot_target_deadline.isoformat()
+                            if not doom and cap is not None
+                            and getattr(acc, "bot_target_deadline", None) else None),
         "phase_target_pct": cfg.profit_target_pct,
         "phase_target_equity": cel,
         # Sufit minus próg fazy w punktach procentowych: to jest ta liczba,
@@ -438,6 +441,20 @@ def _bot_outcome(acc: Account) -> dict:
         "min_trading_days": int(cfg.min_trading_days or 0),
         "days_missing": brak_dni,
     }
+
+
+def _payout_available(acc: Account) -> float:
+    """Ile trader może wypłacić — jedno źródło prawdy.
+
+    Pula ustawiona ręcznie (nawet 0.0) ZASTĘPUJE formułę zysk×split, bo
+    właściciel chce sterować wypłatami niezależnie od tego, co bot namalował
+    na wykresie. NULL = stare zachowanie, więc istniejące konta nie drgną.
+    """
+    pool = getattr(acc, "payout_pool_usd", None)
+    if pool is not None:
+        return round(max(0.0, float(pool)), 2)
+    profit = max(0.0, float(acc.balance or 0.0) - float(acc.initial_balance or 0.0))
+    return round(profit * float(acc.profit_split_pct or 80) / 100.0, 2)
 
 
 def _account_dict(acc: Account, with_metrics: bool = True, with_credentials: bool = False,
@@ -472,8 +489,10 @@ def _account_dict(acc: Account, with_metrics: bool = True, with_credentials: boo
         "scale_up_to": poller.scale_offer(acc),
         "scale_trigger_pct": poller.SCALE_TRIGGER_PCT,
         "scale_count": int(getattr(acc, "scale_count", 0) or 0),
+        "payout_available": _payout_available(acc),
     }
     if admin_view:
+        d["payout_pool_usd"] = getattr(acc, "payout_pool_usd", None)
         d["mt5_backed"] = bool(getattr(acc, "mt5_backed", True))
         d["bot_enabled"] = bool(getattr(acc, "bot_enabled", False))
         d["bot_paused"] = bool(getattr(acc, "bot_paused", False))
@@ -1750,9 +1769,11 @@ def request_payout(account_id: int, payload: PayoutReqIn, trader: Trader = Depen
         if otwarty:
             raise HTTPException(400, "A payout request for this account is already under review")
         profit = round(acc.balance - acc.initial_balance, 2)
-        if profit <= 0:
+        # Pula ustawiona ręcznie jest wiążąca nawet przy zerowym zysku na
+        # wykresie — bramka „brak zysku" pilnuje tylko trybu formuły.
+        if getattr(acc, "payout_pool_usd", None) is None and profit <= 0:
             raise HTTPException(400, "No profit available to pay out")
-        available = round(profit * acc.profit_split_pct / 100.0, 2)
+        available = _payout_available(acc)
         # Trader sam wybiera kwotę (część lub całość dostępnej działki).
         share = round(float(payload.amount), 2) if payload.amount is not None else available
         if share <= 0:
@@ -2210,8 +2231,7 @@ def my_payouts(trader: Trader = Depends(auth.current_trader)):
         reqs = (session.query(PayoutRequest).filter(PayoutRequest.account_id.in_(acc_ids))
                 .order_by(PayoutRequest.id.desc()).all()) if acc_ids else []
         pays = (session.query(Payout).filter(Payout.account_id.in_(acc_ids)).all()) if acc_ids else []
-        available = sum(max(0.0, a.balance - a.initial_balance) * a.profit_split_pct / 100.0
-                        for a in accs if a.status == "funded")
+        available = sum(_payout_available(a) for a in accs if a.status == "funded")
         return {
             "summary": {
                 "total_paid": round(sum(p.trader_share for p in pays), 2),
@@ -3135,7 +3155,8 @@ def admin_approve_payout(req_id: int):
         # działki. Bez tej kontroli brakującą różnicę po cichu dopłacałaby
         # firma, bo clamp do salda startowego niżej maskuje brak pokrycia.
         split = acc.profit_split_pct / 100.0 if acc.profit_split_pct else 1.0
-        available = round(round(acc.balance - acc.initial_balance, 2) * split, 2)
+        pool = getattr(acc, "payout_pool_usd", None)
+        available = _payout_available(acc)
         if r.trader_share > available:
             raise HTTPException(400, f"The account no longer covers this payout "
                                      f"(available share: ${available:,.2f}). Reject the "
@@ -3165,18 +3186,24 @@ def admin_approve_payout(req_id: int):
 
         session.add(Payout(account_id=acc.id, profit_amount=r.profit_amount,
                            trader_share=round(r.trader_share + fee_refund, 2), paid=True,
-                           balance_reset=True, method=r.method))
-        # Trader mógł poprosić o CZĘŚĆ dostępnej działki — z salda schodzi profit
-        # proporcjonalny do wypłaconej kwoty (kwota / split). Pełna kwota sprowadza
-        # konto dokładnie do salda startowego, jak dotychczasowy reset.
-        consumed = round(r.trader_share / split, 2)
-        new_balance = max(acc.initial_balance, round(acc.balance - consumed, 2))
-        acc.balance = new_balance
-        acc.equity = new_balance
-        acc.peak_equity = new_balance
-        acc.day_start_equity = new_balance
-        acc.day_start_balance = new_balance
-        acc.best_day_profit = 0.0
+                           balance_reset=(pool is None), method=r.method))
+        if pool is not None:
+            # Tryb puli: anty-podwójnej-wypłacie jest dekrement puli, a saldo
+            # maluje bot — reset by z nim walczył. Zwrot opłaty NIE schodzi
+            # z puli, to bonus firmy jak w trybie formuły.
+            acc.payout_pool_usd = max(0.0, round(float(pool) - r.trader_share, 2))
+        else:
+            # Trader mógł poprosić o CZĘŚĆ dostępnej działki — z salda schodzi profit
+            # proporcjonalny do wypłaconej kwoty (kwota / split). Pełna kwota sprowadza
+            # konto dokładnie do salda startowego, jak dotychczasowy reset.
+            consumed = round(r.trader_share / split, 2)
+            new_balance = max(acc.initial_balance, round(acc.balance - consumed, 2))
+            acc.balance = new_balance
+            acc.equity = new_balance
+            acc.peak_equity = new_balance
+            acc.day_start_equity = new_balance
+            acc.day_start_balance = new_balance
+            acc.best_day_profit = 0.0
         session.commit()
         notify.send("payout_approved", tr.email, {"name": tr.full_name or tr.email,
                     "login": acc.login, "trader_share": round(r.trader_share + fee_refund, 2),
@@ -3277,23 +3304,28 @@ def admin_issue_payout(request: Request, account_id: int, payload: IssuePayoutIn
             raise HTTPException(400, "A payout can only be issued on a funded account — "
                                      f"this account's status is '{acc.status}'")
         profit = round(max(0.0, acc.balance - acc.initial_balance), 2)
-        share = payload.amount if payload.amount is not None else round(
-            profit * acc.profit_split_pct / 100.0, 2)
+        pool = getattr(acc, "payout_pool_usd", None)
+        share = payload.amount if payload.amount is not None else _payout_available(acc)
         share = round(float(share), 2)
         if share <= 0:
             raise HTTPException(400, "The payout amount must be greater than zero "
                                      f"(zysk na koncie: ${profit:,.2f})")
 
+        # W trybie puli saldo maluje bot i reset by z nim walczył —
+        # anty-podwójnej-wypłacie jest dekrement puli.
+        reset = bool(payload.reset_balance and profit > 0 and pool is None)
         p = Payout(account_id=acc.id, profit_amount=profit, trader_share=share, paid=True,
                    method=payload.method, note=(payload.note or None),
                    cert_token=secrets.token_urlsafe(16)[:32],
                    show_on_lp=bool(payload.show_on_lp),
-                   balance_reset=bool(payload.reset_balance and profit > 0))
+                   balance_reset=reset)
         session.add(p)
+        if pool is not None:
+            acc.payout_pool_usd = max(0.0, round(float(pool) - share, 2))
 
         # Wypłacony zysk znika z konta — inaczej ten sam zysk dałoby się wypłacić
         # w kółko, a krzywa equity kłamałaby o dostępnym kapitale.
-        if payload.reset_balance and profit > 0:
+        if reset:
             acc.balance = acc.initial_balance
             acc.equity = acc.initial_balance
             acc.peak_equity = acc.initial_balance
@@ -3322,12 +3354,39 @@ def admin_account_payouts(account_id: int):
             raise HTTPException(404, "Account not found")
         rows = (session.query(Payout).filter(Payout.account_id == acc.id)
                 .order_by(Payout.id.desc()).all())
-        available = round(max(0.0, acc.balance - acc.initial_balance)
-                          * acc.profit_split_pct / 100.0, 2)
         return {"account": acc.login, "status": acc.status,
                 "profit": round(max(0.0, acc.balance - acc.initial_balance), 2),
-                "split_pct": acc.profit_split_pct, "suggested_share": available,
+                "split_pct": acc.profit_split_pct,
+                "suggested_share": _payout_available(acc),
+                "payout_pool_usd": getattr(acc, "payout_pool_usd", None),
                 "payouts": [_payout_dict(p, acc) for p in rows]}
+    finally:
+        session.close()
+
+
+class PayoutPoolIn(BaseModel):
+    amount: float | None = None
+
+
+@app.post("/api/admin/accounts/{account_id}/payout-pool", dependencies=[Depends(auth.require_admin)])
+def admin_set_payout_pool(account_id: int, payload: PayoutPoolIn):
+    """Ustawia ręczną pulę do wypłaty (None = powrót do formuły zysk×split).
+
+    Dozwolone też na koncie przed fundingiem — bramki `funded` na wnioskach
+    i tak pilnują, a właściciel chce móc przygotować pulę przed awansem.
+    """
+    session = SessionLocal()
+    try:
+        acc = session.get(Account, account_id)
+        if not acc:
+            raise HTTPException(404, "Account not found")
+        if payload.amount is not None and float(payload.amount) < 0:
+            raise HTTPException(400, "The pool cannot be negative")
+        acc.payout_pool_usd = (None if payload.amount is None
+                               else round(float(payload.amount), 2))
+        session.commit()
+        return {"payout_pool_usd": acc.payout_pool_usd,
+                "payout_available": _payout_available(acc)}
     finally:
         session.close()
 
@@ -3876,6 +3935,9 @@ def _ustaw_faze(session, acc: Account, faza: str) -> None:
     acc.last_counted_trading_day = ""
     acc.breach_reason = None
     acc.closed_at = None
+    # Termin bota z poprzedniej fazy żądałby całego nowego targetu w resztce
+    # dni — nowa faza zaczyna bez zegara, admin nastawi go od nowa.
+    acc.bot_target_deadline = None
     session.commit()
 
 
@@ -4071,6 +4133,7 @@ class BotPauseIn(BaseModel):
     """Zmiana ustawień DZIAŁAJĄCEGO bota — wszystkie pola opcjonalne, ale co najmniej jedno."""
     paused: bool | None = None
     target_pct: float | None = None
+    target_days: float | None = None
     mode: Literal["profit", "doom"] | None = None
     doom_days: float | None = None
     doom_limit: Literal["overall", "daily"] = "overall"
@@ -4104,8 +4167,12 @@ def admin_bot_pause(account_id: int, payload: BotPauseIn):
         if payload.target_pct is not None:
             if payload.target_pct < 0:
                 raise HTTPException(400, "The target cannot be negative")
+            # 0 = jawne „bez terminu"; ujemne dni to zawsze pomyłka klienta.
+            if payload.target_days is not None and payload.target_days < 0:
+                raise HTTPException(400, "The number of days cannot be negative")
             _waliduj_tryb(acc.bot_mode, payload.target_pct, acc)
-            tradebot.set_target(session, acc, payload.target_pct)
+            tradebot.set_target(session, acc, payload.target_pct,
+                                target_days=payload.target_days)
         if payload.paused is not None:
             tradebot.set_paused(session, acc, payload.paused)
         return {"bot_enabled": True, "bot_paused": acc.bot_paused,
@@ -4219,6 +4286,7 @@ def admin_clear_history(account_id: int):
         acc.bot_started_at = None
         acc.bot_mode = "profit"
         acc.bot_doom_deadline = None
+        acc.bot_target_deadline = None
 
         # Ten sam reset metryk co przy awansie fazy (`_ustaw_faze`), tylko bez
         # zmiany fazy. `day_key` MUSI zejsc do pustego: zostawiony wskazuje dzien,
