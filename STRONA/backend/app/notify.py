@@ -9,7 +9,9 @@ breached, payout_requested, payout_approved, kyc_approved.
 """
 from __future__ import annotations
 
+import html
 import json
+import re
 import smtplib
 import tempfile
 import urllib.request
@@ -347,6 +349,13 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
                f"automatically and the MT5 credentials land in your inbox.\n\n")
             + f"Questions, or changed your mind? Just reply to this e-mail.",
         ),
+        # Mail pisany w panelu z ręki. Temat i treść SĄ wolą klikającego —
+        # serwer dokłada tylko stopkę i papier firmowy, żeby wiadomość wyglądała
+        # jak reszta poczty z platformy, a nie jak list z przypadkowej skrzynki.
+        "admin_message": (
+            ctx.get("subject") or f"A message from {brand}",
+            ctx.get("body") or "",
+        ),
     }
     subject, body = T.get(event, (f"Notification: {event}", json.dumps(ctx, ensure_ascii=False)))
     return subject, body + footer
@@ -409,6 +418,46 @@ def _button_html(label: str, url: str) -> str:
      <a href="{url}" style="display:inline-block;background:{_INK};color:#ffffff;text-decoration:none;
        font:600 15px/1 {_FONT};padding:16px 36px;border-radius:999px">{label}</a>
    </td></tr>"""
+
+
+_URL = re.compile(r"https?://[^\s<>\"]+")
+
+
+def _akapit_html(tekst: str) -> str:
+    """Akapit ręcznego maila: escape + żywe linki.
+
+    Escape leci na kawałki MIĘDZY adresami, nie na cały tekst: `&` w linku
+    resetu musi wylądować w `href` jako `&amp;`, a w widocznym napisie zostać
+    sobą — zamiana hurtem psuła adresy z dwoma parametrami.
+    """
+    kawalki, koniec = [], 0
+    for m in _URL.finditer(tekst):
+        kawalki.append(html.escape(tekst[koniec:m.start()]))
+        url = m.group(0)
+        kawalki.append(f'<a href="{html.escape(url, quote=True)}" '
+                       f'style="color:{_GOLD};word-break:break-all">{html.escape(url)}</a>')
+        koniec = m.end()
+    kawalki.append(html.escape(tekst[koniec:]))
+    return f"""
+   <tr><td style="padding:0 44px">
+     <p style="font:400 15px/1.7 {_FONT};color:{_INK};margin:0 0 16px">{''.join(kawalki).replace(chr(10), '<br>')}</p>
+   </td></tr>"""
+
+
+def _tekst_html(tekst: str) -> list[str]:
+    """Zwykły tekst z panelu → kafelki maila. Akapit będący samym adresem
+    staje się przyciskiem: link do hasła ma być kciukiem do trafienia na
+    telefonie, a nie linijką do przepisania."""
+    parts = []
+    for akapit in re.split(r"\n\s*\n", tekst.strip()):
+        akapit = akapit.strip()
+        if not akapit:
+            continue
+        if _URL.fullmatch(akapit):
+            parts.append(_button_html("Open the Link", html.escape(akapit, quote=True)))
+        else:
+            parts.append(_akapit_html(akapit))
+    return parts
 
 
 def _note_html(text: str) -> str:
@@ -734,6 +783,12 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                        "the payment, and the MT5 credentials go straight to this "
                        "inbox."),
         ]
+    elif event == "admin_message":
+        # Temat jako nagłówek i tekst pod spodem — nic więcej. Wszystko, co
+        # w tym mailu widać, przyszło z panelu, więc leci przez escape:
+        # klient nie może dostać maila zepsutego znakiem `<` w treści.
+        parts = [_head_html(None, html.escape(ctx.get("subject") or brand), "")]
+        parts += _tekst_html(str(ctx.get("body") or ""))
     else:
         return None
     return _shell(parts)
@@ -862,23 +917,37 @@ def send(event: str, to_email: str | None, ctx: dict | None = None) -> None:
     _send_teraz(event, to_email, ctx)
 
 
-def _send_teraz(event: str, to_email: str | None, ctx: dict | None = None) -> None:
+def send_now(event: str, to_email: str | None, ctx: dict | None = None) -> str | None:
+    """Wysyłka Z POMINIĘCIEM kolejki, ze zwrotem powodu porażki (None = poszło).
+
+    Dla maili wychodzących z ręki: automat może sobie polecieć w tle i przegrać
+    po cichu, bo dziennik go złapie, ale człowiek, który kliknął „Send", ma
+    prawo w tej samej sekundzie wiedzieć, czy mail wyszedł — inaczej powie
+    klientowi „wysłałem" i oboje będą czekać na coś, czego nie ma.
+    """
+    return _send_teraz(event, to_email, ctx)
+
+
+def _send_teraz(event: str, to_email: str | None,
+                ctx: dict | None = None) -> str | None:
     ctx = ctx or {}
     subject, body = _render(event, ctx)
     adres = to_email          # oryginal dla kanalu push/centrum (pref sprawdza sam)
+    blad = pominiete = None
 
     # 1) e-mail
     if to_email and to_email.lower().endswith("@imported.local"):
         # Konta z importu nie mają skrzynek — każda taka wysyłka to twardy
         # bounce w Brevo, a seria bounców psuje reputację nadawcy.
         print(f"[notify] pominięto mail '{event}' do {to_email} (adres importowy)")
+        pominiete = "to konto ma adres z importu (@imported.local) — nie ma tam skrzynki"
         to_email = None
     if to_email and not _email_allowed(event, to_email):
         print(f"[notify] pominięto mail '{event}' do {to_email} (preferencje tradera)")
+        pominiete = "klient wyłączył tę kategorię maili w ustawieniach portalu"
         to_email = None
     if to_email:
-        html = _render_html(event, ctx, subject)
-        blad = None
+        tresc_html = _render_html(event, ctx, subject)
         if settings.smtp_host:
             try:
                 msg = EmailMessage()
@@ -886,8 +955,8 @@ def _send_teraz(event: str, to_email: str | None, ctx: dict | None = None) -> No
                 msg["To"] = to_email
                 msg["Subject"] = subject
                 msg.set_content(body)
-                if html:
-                    msg.add_alternative(html, subtype="html")
+                if tresc_html:
+                    msg.add_alternative(tresc_html, subtype="html")
                 with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as s:
                     s.starttls()
                     if settings.smtp_user:
@@ -903,11 +972,11 @@ def _send_teraz(event: str, to_email: str | None, ctx: dict | None = None) -> No
             # od wygody deva: brak konfiguracji to porażka wysyłki i ma być widoczna.
             blad = "SMTP_HOST nie ustawiony — mail nigdzie nie poszedł"
             print(f"\n📧 [MAIL → {to_email}] {subject}\n{body}\n")
-            if html:
+            if tresc_html:
                 # dev: podglad wersji HTML w przegladarce, bez SMTP
                 try:
                     out = Path(tempfile.gettempdir()) / f"propfunding-mail-{event}.html"
-                    out.write_text(html, encoding="utf-8")
+                    out.write_text(tresc_html, encoding="utf-8")
                     print(f"   ↳ HTML preview: {out}")
                 except Exception:  # pragma: no cover
                     pass
@@ -935,6 +1004,8 @@ def _send_teraz(event: str, to_email: str | None, ctx: dict | None = None) -> No
             push.send_event(event, to_email, subject, ctx)
         except Exception as e:  # pragma: no cover
             print(f"[notify] push błąd: {e}")
+
+    return blad or pominiete
 
 
 def notify_admins(event: str, title: str, body: str = "",

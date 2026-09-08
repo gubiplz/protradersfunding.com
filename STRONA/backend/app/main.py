@@ -6874,8 +6874,91 @@ def admin_mail_log():
                              "ts": m.ts.isoformat() if m.ts else None,
                              "event": m.event, "to": m.to_email,
                              "subject": m.subject, "ok": bool(m.ok),
-                             "error": m.error}
+                             "error": m.error,
+                             "can_resend": m.event in _MAILE_DO_PONOWIENIA}
                             for m in wpisy]}
+    finally:
+        session.close()
+
+
+# Maile, które da się ZŁOŻYĆ OD NOWA z tego, co siedzi w bazie. Dziennik trzyma
+# tylko adres, temat i wynik — nie treść — więc ponowienie nie jest kopią, tylko
+# ponownym wygenerowaniem tego samego zdarzenia. Zdarzenia spoza tej listy niosą
+# dane chwili, których już nie ma (kod weryfikacyjny, kwota z wniosku sprzed
+# zmiany, oferta, która wygasła) i wolimy odmówić, niż wysłać klientowi mail
+# mówiący coś innego niż za pierwszym razem.
+_MAILE_DO_PONOWIENIA = ("credentials", "challenge_granted", "portal_invite",
+                        "password_reset", "welcome")
+
+
+def _konto_z_tematu(session, tr: Trader, temat: str | None) -> Account | None:
+    """Konto, którego dotyczył mail z poświadczeniami — po loginie w temacie.
+
+    Temat brzmi „Your challenge account 555000111 is ready", więc login jest
+    w nim wprost i pasuje nawet klientowi z sześcioma kontami. Gdy nie pasuje
+    (tak wychodzą maile o kontach z grantu) rozstrzyga jedyne konto klienta,
+    a przy kilku — nic: mail z cudzym hasłem MT5 jest gorszy niż odmowa.
+    """
+    konta = (session.query(Account).filter(Account.trader_id == tr.id)
+             .order_by(Account.id.desc()).all())
+    for a in konta:
+        if a.platform_login and a.platform_login in (temat or ""):
+            return a
+    return konta[0] if len(konta) == 1 else None
+
+
+@app.post("/api/admin/mail-log/{entry_id}/resend",
+          dependencies=[Depends(auth.require_admin)])
+def admin_mail_resend(entry_id: int):
+    """Wyślij ten sam mail jeszcze raz — ze świeżymi linkami.
+
+    Nie jest to kopia archiwalnej wiadomości, tylko powtórzenie zdarzenia:
+    tokeny w linkach są jednorazowe i wygasają, więc kopia z zeszłego tygodnia
+    zaprowadziłaby klienta na martwy adres. Stąd bramka `_MAILE_DO_PONOWIENIA`:
+    ponawiamy to, co umiemy zbudować od nowa, resztę admin pisze z ręki.
+    """
+    session = SessionLocal()
+    try:
+        wpis = session.get(MailLog, entry_id)
+        if not wpis:
+            raise HTTPException(404, "Entry not found")
+        if wpis.event not in _MAILE_DO_PONOWIENIA:
+            raise HTTPException(400, f"“{(wpis.event or '').replace('_', ' ')}” "
+                                     f"carries details from the moment it was sent "
+                                     f"— write this one by hand instead")
+        tr = (session.query(Trader)
+              .filter(func.lower(Trader.email) == (wpis.to_email or "").lower())
+              .first())
+        if not tr:
+            raise HTTPException(400, "No client with that address any more")
+
+        base = get_settings().app_base_url
+        event, ctx = wpis.event, {"name": tr.full_name or tr.email}
+        if event in ("credentials", "challenge_granted"):
+            acc = _konto_z_tematu(session, tr, wpis.subject)
+            if acc is None:
+                raise HTTPException(400, "Cannot tell which account this was about "
+                                         "— send the credentials from the account card")
+            event, ctx = (provisioning._creds_event(acc),
+                          provisioning._creds_ctx(tr, acc))
+        elif event == "portal_invite":
+            if not tr.must_set_password:
+                raise HTTPException(400, "This client has set a password since "
+                                         "— send a password reset instead")
+            ctx["setup_url"] = (f"{base}/portal"
+                                f"?reset={auth.make_setup_token(tr.id, tr.password_hash)}")
+            ctx["portal_url"] = f"{base}/portal"
+        elif event == "password_reset":
+            ctx["reset_url"] = (f"{base}/portal"
+                                f"?reset={auth.make_reset_token(tr.id, tr.password_hash)}")
+
+        blad = notify.send_now(event, tr.email, ctx)
+        if blad:
+            raise HTTPException(400, blad)
+        telemetry.track("mail_resend", tr.id, event=event)
+        _slad_w_historii(session, tr, "email", f"resent: {wpis.subject or event}")
+        session.commit()
+        return {"ok": True, "event": event, "email": tr.email}
     finally:
         session.close()
 
@@ -8322,6 +8405,97 @@ def admin_trader_portal_invite(trader_id: int, send: bool = True):
                        actor="panel")
             session.commit()
         return {"ok": True, "email": tr.email, "setup_url": setup_url}
+    finally:
+        session.close()
+
+
+class TraderMailIn(BaseModel):
+    subject: str
+    body: str
+
+
+def _slad_w_historii(session, tr: Trader, rodzaj: str, opis: str) -> None:
+    """Dopisz zdarzenie do historii leada, o ile ten klient jakiegoś leada ma.
+
+    Klient z własnej rejestracji leada nie ma wcale i mieć nie musi — ślad po
+    mailu zostaje wtedy w dzienniku wysyłek i w telemetrii. Wiersz leada to
+    tylko drugie, wygodniejsze miejsce dla tych, którzy przyszli z formularza.
+    """
+    lead = (session.query(Lead)
+            .filter(func.lower(Lead.email) == tr.email.lower()).one_or_none())
+    if lead:
+        _zdarzenie(session, lead.id, rodzaj, opis, actor="panel")
+
+
+@app.post("/api/admin/traders/{trader_id}/email",
+          dependencies=[Depends(auth.require_admin)])
+def admin_trader_email(trader_id: int, dane: TraderMailIn):
+    """Mail do KLIENTA z treścią napisaną w panelu, z adresu platformy.
+
+    Odpowiednik `/api/admin/leads/{id}/email-custom`, ale dla drugiej strony
+    domu: tamten idzie do leada pod marką landingu, ten do zarejestrowanego
+    klienta pod marką portalu — tą samą, która wysłała mu poświadczenia
+    i link do hasła. Do dziś jedyną drogą do klienta z panelu były automaty,
+    więc „nie mogę znaleźć linku" kończyło się prywatną skrzynką właściciela,
+    czyli poza wszelkim dziennikiem.
+
+    Wysyłka idzie SYNCHRONICZNIE (`send_now`), nie w tle jak automaty: człowiek
+    przy przycisku ma zobaczyć porażkę SMTP od razu, a nie dowiedzieć się o niej
+    z dziennika dwa dni później.
+    """
+    temat = " ".join(dane.subject.split())
+    tekst = dane.body.strip()
+    if not temat or not tekst:
+        raise HTTPException(400, "Subject and message are both required")
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader_id)
+        if not tr:
+            raise HTTPException(404, "Trader not found")
+        blad = notify.send_now("admin_message", tr.email,
+                               {"name": tr.full_name or tr.email,
+                                "subject": temat, "body": tekst})
+        if blad:
+            raise HTTPException(400, blad)
+        telemetry.track("admin_email", tr.id, subject=temat[:120])
+        _slad_w_historii(session, tr, "email", temat)
+        session.commit()
+        return {"ok": True, "email": tr.email, "subject": temat}
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/traders/{trader_id}/password-reset",
+          dependencies=[Depends(auth.require_admin)])
+def admin_trader_password_reset(trader_id: int):
+    """Ten sam mail, który klient dostaje po kliknięciu „Forgot password".
+
+    Konto z nieodebranym hasłem obsługuje `portal-invite` (link na 7 dni) —
+    tu chodzi o kogoś, kto hasło KIEDYŚ ustawił i dziś go nie ma. Panel nadal
+    nie generuje wejściówki do ręki: godzinny link leci wyłącznie na adres
+    klienta, więc admin zyskuje tyle, że ma czym odblokować rozmowę, a nie
+    dostęp do cudzego konta.
+    """
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader_id)
+        if not tr:
+            raise HTTPException(404, "Trader not found")
+        if tr.must_set_password:
+            raise HTTPException(400, "This client never set a password — "
+                                     "send the portal invite instead")
+        base = get_settings().app_base_url
+        reset_url = (f"{base}/portal"
+                     f"?reset={auth.make_reset_token(tr.id, tr.password_hash)}")
+        blad = notify.send_now("password_reset", tr.email,
+                               {"name": tr.full_name or tr.email,
+                                "reset_url": reset_url})
+        if blad:
+            raise HTTPException(400, blad)
+        telemetry.track("password_reset_sent", tr.id, actor="panel")
+        _slad_w_historii(session, tr, "email", "password reset link")
+        session.commit()
+        return {"ok": True, "email": tr.email}
     finally:
         session.close()
 

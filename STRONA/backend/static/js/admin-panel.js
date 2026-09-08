@@ -888,17 +888,38 @@ function renderMailLog(){
     </div>
     ${d.failed_7d?`<p class="lead-statline" style="color:var(--gold)">⚠ ${d.failed_7d} e-mail${d.failed_7d>1?'s':''} failed in the last 7 days — deliver the content another way (copy the portal-invite link, the pay link or the MT5 credentials from the account card), then check the SMTP settings.</p>`:''}
     ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.maillog">
-      <thead><tr><th>Date</th><th>To</th><th>Subject</th><th>Template</th><th>Status</th></tr></thead>
+      <thead><tr><th>Date</th><th>To</th><th>Subject</th><th>Template</th><th>Status</th><th></th></tr></thead>
       <tbody>${cap.rows.map(m=>`<tr>
         <td class="muted" data-l="Date" data-sort="${esc(m.ts||'')}">${dstr(m.ts)}</td>
         <td class="rt-main" data-l="To">${esc(m.to||'—')}</td>
         <td data-l="Subject">${esc(m.subject||'—')}</td>
         <td class="muted" data-l="Template">${esc((m.event||'—').replace(/_/g,' '))}</td>
         <td data-l="Status"><span class="status ${m.ok?'paid':'failed'}"><span class="dot"></span>${m.ok?'sent':'failed'}</span>
-          ${m.error?`<div class="muted" style="font-size:var(--fs-cap);max-width:260px;word-break:break-word">${esc(m.error)}</div>`:''}</td></tr>`).join('')}
+          ${m.error?`<div class="muted" style="font-size:var(--fs-cap);max-width:260px;word-break:break-word">${esc(m.error)}</div>`:''}</td>
+        <td class="rt-acts">${m.can_resend?`<button class="btn-o sm" onclick="resendMail(${m.id},this)"
+          title="Send this one again — the links inside are generated fresh, because the originals expire">Resend</button>`:''}</td></tr>`).join('')}
       </tbody></table></div>${cap.more}`
     :list.length?`<div class="empty"><h3>No e-mails match</h3><p>Try a different search or filter.</p></div>`
     :`<div class="empty"><h3>Nothing sent yet</h3><p>Every e-mail the platform sends will be listed here, including the ones that fail.</p></div>`}`;
+}
+/* Ponowienie NIE jest kopia archiwalnego maila: tokeny w linkach sa jednorazowe
+   i wygasaja, wiec serwer sklada te sama wiadomosc od nowa. Stad ostrzezenie
+   o wygaszeniu poprzedniego linku — klient, ktory wroci do starego maila,
+   trafi na martwy adres. */
+async function resendMail(id,btn){
+  const m=((window._mailLog||{}).entries||[]).find(x=>x.id===id);if(!m)return;
+  if(!await askConfirm({title:'Send this e-mail again?',
+    body:`<b>${esc(m.subject||'')}</b> goes to <b>${esc(m.to||'')}</b> once more. `
+      +`Any link inside is generated fresh, so a link from the earlier copy may stop working.`,
+    ok:'Send again',cancel:'Not now'}))return;
+  await busy(btn,'Sending…',async()=>{
+    try{
+      await api('/api/admin/mail-log/'+id+'/resend',{method:'POST'});
+      toast('Sent again.');
+      window._mailLog=await api('/api/admin/mail-log');
+      renderMailLog();
+    }catch(e){toast('Not sent: '+e.message,'err')}
+  });
 }
 
 /* ---------- tickets: search + filters + list ---------- */
@@ -3012,16 +3033,106 @@ function renderClients(){
         <td class="rt-acts" style="white-space:nowrap">
           <button class="btn-p sm" onclick="openManualOrder(${t.id})"
             title="New order for this client — pick the plan, then copy a card payment link or take crypto">Sell / pay link</button>
+          <button class="btn-o sm" onclick="openClientMail(${t.id})"
+            title="Write to them from the platform address — or resend the portal invite / password link">E-mail</button>
           <button class="btn-o sm" onclick="openTraderJournal(${t.id},'${jsq(t.email||'')}')"
             title="Everything this client did — sign-ins, orders, payouts, tickets">Journal</button>
           <button class="btn-o sm" onclick="impersonate(${t.id})"
-            title="Open the portal the way this client sees it">View as client</button>
-          ${t.awaiting_claim?`<button class="btn-o sm" onclick="copyPortalInvite(${t.id})"
-            title="Copy a link that lets them set a portal password — valid 7 days">Invite link</button>`:''}</td></tr>`).join('')}
+            title="Open the portal the way this client sees it">View as client</button></td></tr>`).join('')}
       </tbody></table></div>${cap.more}`
     :`<div class="empty"><h3>${q||f!=='all'?'No clients match':'No clients yet'}</h3><p>${
       q||f!=='all'?'Clear the search or pick another filter.'
         :'Everyone who signs up — on their own or through an order — shows up here.'}</p></div>`);
+}
+
+/* Mail do KLIENTA pisany z reki, plus jednym klikiem to, co i tak wysyla
+   automat. Do tej pory z panelu szly do klienta wylacznie automaty, wiec
+   „nie moge znalezc linku do hasla" konczylo sie prywatna skrzynka wlasciciela
+   — poza dziennikiem wysylek i poza historia klienta. Okno laczy oba: u gory
+   gotowce (zaproszenie / reset), nizej wlasny tekst na firmowym papierze.
+   Szablony i pola sa te same, co przy mailu do leada (`lm-*`), bo naraz otwarte
+   jest tylko jedno okno — dzieki temu zapis i kasowanie szablonu dziala tu bez
+   drugiej kopii tych funkcji. */
+async function openClientMail(id){
+  const t=(window._clients||[]).find(x=>x.id===id);
+  if(!t)return;
+  try{window._mailTpls=await api('/api/admin/email-templates')}
+  catch(e){window._mailTpls=[];toast('Templates: '+e.message,'err')}
+  document.getElementById('client-mail-modal')?.remove();
+  const box=document.createElement('div');
+  box.id='client-mail-modal';box.className='modal-wrap';
+  box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>E-mail to ${esc(t.full_name||t.email)}</h3>
+      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('client-mail-modal').remove()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <p class="muted" style="font-size:12.5px;margin-bottom:12px">Goes to <b>${esc(t.email)}</b>
+      from the platform address, on the same letterhead as their MT5 credentials.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+      ${t.awaiting_claim
+        ?`<button class="btn-o sm" onclick="clientMailQuick(${t.id},'invite')"
+            title="The “set your password” e-mail — a fresh link, valid 7 days">Send portal invite</button>
+          <button class="btn-o sm" onclick="copyPortalInvite(${t.id})"
+            title="Same link, into your clipboard — for Telegram when e-mail keeps missing">Copy invite link</button>`
+        :`<button class="btn-o sm" onclick="clientMailQuick(${t.id},'reset')"
+            title="Exactly what “Forgot password” sends them — a 1-hour link, straight to their inbox">Send password reset</button>`}
+    </div>
+    <div class="stack">
+      <div><label class="muted" style="font-size:12px">Template</label>
+        <select id="lm-tpl" class="inp" onchange="fillMailTpl()"></select></div>
+      <div><label class="muted" style="font-size:12px">Subject</label>
+        <input id="lm-subject" class="inp" placeholder="Subject"></div>
+      <div><label class="muted" style="font-size:12px">Message</label>
+        <textarea id="lm-body" class="inp" rows="10" spellcheck="false"
+          placeholder="Hi {name},"></textarea>
+        <p class="muted" style="font-size:var(--fs-cap);margin-top:6px">A paragraph that is
+          just a link turns into a button, and <b>{name}</b> becomes their first name.</p></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="lm-name" class="inp" style="flex:1;min-width:0" placeholder="Template name">
+        <button class="btn-o sm" type="button" onclick="saveMailTpl()">Save template</button>
+        <button class="btn-o sm" type="button" id="lm-del" onclick="delMailTpl()"
+          style="display:none">Delete</button>
+      </div>
+      <button class="btn-p lg" style="width:100%" id="lm-send" onclick="sendClientMail(${t.id})">Send</button>
+    </div></div>`;
+  box.onclick=()=>box.remove();
+  document.body.appendChild(box);
+  paintMailTpls('');
+  $('lm-subject').focus();
+}
+async function clientMailQuick(id,kind){
+  const t=(window._clients||[]).find(x=>x.id===id);if(!t)return;
+  const invite=kind==='invite';
+  if(!await askConfirm({title:invite?'Send the portal invite?':'Send a password reset?',
+    body:`Goes to <b>${esc(t.email)}</b> — a link to `
+      +(invite?'set their portal password, valid for 7 days. Earlier links keep working until they expire or the password is set.'
+             :'choose a new portal password, valid for 1 hour. The link never passes through this panel.'),
+    ok:'Send',cancel:'Not now'}))return;
+  try{
+    await api('/api/admin/traders/'+id+(invite?'/portal-invite':'/password-reset'),{method:'POST'});
+    toast(invite?'Invite sent — the link works for 7 days':'Reset e-mail sent — the link works for 1 hour');
+    document.getElementById('client-mail-modal')?.remove();
+  }catch(e){toast('Not sent: '+e.message,'err')}
+}
+async function sendClientMail(id){
+  const t=(window._clients||[]).find(x=>x.id===id);if(!t)return;
+  const who={name:t.full_name||''};
+  const subject=mailFill($('lm-subject').value.trim(),who);
+  const body=mailFill($('lm-body').value.trim(),who);
+  if(!subject||!body){toast('Subject and message are both required.','err');return}
+  /* Ten sam podglad co przy mailu do leada: wysylka jest nieodwracalna,
+     wiec klikajacy widzi CALY tekst juz po podmianie {name}. */
+  if(!await askConfirm({title:'Send this e-mail?',
+    body:`Goes to <b>${esc(t.email)}</b>, subject <b>${esc(subject)}</b>:<br><br>`
+      +`<span style="color:var(--txt);white-space:pre-wrap">${esc(body)}</span>`,
+    ok:'Send',cancel:'Not yet'}))return;
+  await busy($('lm-send'),'Sending…',async()=>{
+    try{
+      await api('/api/admin/traders/'+id+'/email',{method:'POST',
+        body:JSON.stringify({subject,body})});
+      document.getElementById('client-mail-modal')?.remove();
+      toast('E-mail sent.');
+    }catch(e){toast('Not sent: '+e.message,'err')}
+  });
 }
 
 /* ---------- achievement certificates ---------- */
