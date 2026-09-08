@@ -97,11 +97,13 @@ const ICO={
   mail:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m3 6 9 6.5L21 6"/></svg>',
   pulse:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l2.5-6 4 12L16 12h5"/></svg>',
   tag:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 5 5 19"/><circle cx="7.5" cy="7.5" r="2.4"/><circle cx="16.5" cy="16.5" r="2.4"/></svg>',
+  person:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20.5c1-4 4-6 7.5-6s6.5 2 7.5 6"/></svg>',
 };
 
 const NAV=[
   {v:'overview',label:'Overview',ico:'grid'},
   {v:'leads',label:'Leads',ico:'users'},
+  {v:'clients',label:'Clients',ico:'person'},
   {v:'accounts',label:'Accounts',ico:'layers'},
   {v:'activity',label:'Activity',ico:'pulse'},
   {v:'payouts',label:'Payouts',ico:'wallet'},
@@ -130,6 +132,7 @@ $('botnav').innerHTML=['overview','leads','orders','accounts'].map(v=>{
 const TITLES={
   overview:['Overview','Platform health and items waiting for you'],
   leads:['Leads','Applications from the landing page, and who they turned into'],
+  clients:['Clients','Everyone with a portal account — including people who signed up on their own'],
   accounts:['Accounts','All challenge accounts and their live risk metrics'],
   activity:['Activity','Who claimed their account, who signs in, and what each client did'],
   payouts:['Payouts','Every payout booked so far, plus requests waiting for review'],
@@ -223,7 +226,8 @@ let PRZEJSCIE = 0;
    krotki i czytelny. Kodujemy tylko `q` — wartosci filtrow to `[a-z_]+`. */
 const STAN_POL={
   accounts:['_accQ','_accFilter'], activity:['_jrnQ','_jrnFilter'],
-  kyc:['_kycQ','_kycFilter'],      leads:['_leadQ','_leadFilter'],
+  clients:['_cliQ','_cliFilter'],  kyc:['_kycQ','_kycFilter'],
+  leads:['_leadQ','_leadFilter'],
   mail:['_mailQ','_mailFilter'],   orders:['_ordQ','_ordFilter'],
   payouts:['_payQ','_payFilter'],  pool:['_poolQ','_poolFilter'],
   tickets:['_tickQ','_tickFilter'],
@@ -612,6 +616,12 @@ const VIEWS={
  async leads(){
   window._leads=await api('/api/admin/leads');
   renderLeads();
+ },
+
+ async clients(){
+  window._clients=await api('/api/admin/traders'+impQ());
+  window._cliFilter=window._cliFilter||'all';
+  renderClients();
  },
 
  async pool(){
@@ -2956,6 +2966,62 @@ function renderActivity(){
       </tbody></table></div>`
     :`<div class="empty"><h3>${q||f!=='all'?'No clients match':'No clients yet'}</h3><p>${
       q||f!=='all'?'Clear the search or pick another filter.':'Client accounts show up here as they appear.'}</p></div>`);
+}
+
+/* Zakladka Clients: katalog WSZYSTKICH zarejestrowanych i to, co mozna im
+   wyslac. Klient byl dotad widoczny tylko przez slad, ktory po sobie zostawil —
+   leada z formularza, zamowienie albo konto. Kto zalozyl konto sam z portalu,
+   nie mial zadnego z tych trzech i nie pojawial sie w panelu nigdzie, wiec nie
+   dalo sie mu wystawic linku do platnosci. Activity odpowiada na „kto sie
+   loguje", ta lista na „co moge z nim zrobic". */
+const CLI_FILTERS=[
+  ['all','All',()=>true],
+  ['noacc','No account yet',t=>!t.accounts],
+  ['kyc','KYC pending',t=>t.kyc_status==='pending'],
+  ['credits','Has credits',t=>t.credits_usd>0],
+];
+function renderClients(){
+  const all=window._clients||[];
+  const f=window._cliFilter||'all';
+  const q=(window._cliQ||'').toLowerCase(), qf=fold(q);
+  const test=(CLI_FILTERS.find(x=>x[0]===f)||CLI_FILTERS[0])[2];
+  const rows=all.filter(t=>test(t)&&
+    (!q||fold(t.email).includes(qf)||fold(t.full_name).includes(qf)));
+  const cap=capList(rows,'_cliAll','renderClients');
+  $('view').innerHTML=`<div class="toolbar">
+      ${searchBox('cli-q','_cliQ','renderClients','Search name or email…')}
+      <div class="seg">${CLI_FILTERS.map(([k,l])=>
+        `<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''}
+          onclick="window._cliFilter='${f===k?'all':k}';renderClients()">${l}</button>`).join('')}</div>
+      <span class="count-pill">${rows.length} of ${all.length}${impPill()}</span>
+    </div>`
+    +(rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.clients">
+      <thead><tr><th>Joined</th><th>Client</th><th>Accounts</th><th>KYC</th>
+        <th>Credits</th><th>Actions</th></tr></thead>
+      <tbody>${cap.rows.map(t=>`<tr>
+        <td class="muted" data-l="Joined" data-sort="${esc(t.created_at||'')}">${t.created_at?dstr(t.created_at):'—'}</td>
+        <td class="rt-main" data-l="Client">${esc(t.full_name||'—')}
+          ${t.awaiting_claim?'<span class="status pending" style="margin-left:6px"><span class="dot"></span>awaiting claim</span>':''}
+          <div class="muted" style="font-size:11.5px">${esc(t.email)}</div>
+          ${t.referred_count?`<div class="muted" style="font-size:var(--fs-cap)" title="Traders who signed up with this client's referral code">brought ${t.referred_count}</div>`:''}</td>
+        <td class="muted" data-l="Accounts" data-sort="${t.accounts}">${t.accounts||'—'}</td>
+        <td data-l="KYC">${t.kyc_status&&t.kyc_status!=='none'
+          ?`<span class="status ${t.kyc_status==='approved'?'funded':t.kyc_status==='rejected'?'failed':'pending'}"><span class="dot"></span>${esc(t.kyc_status)}</span>`
+          :'<span class="muted">—</span>'}</td>
+        <td class="num" data-l="Credits" data-sort="${t.credits_usd}">${t.credits_usd?'$'+fmt(t.credits_usd):'<span class="muted">—</span>'}</td>
+        <td class="rt-acts" style="white-space:nowrap">
+          <button class="btn-p sm" onclick="openManualOrder(${t.id})"
+            title="New order for this client — pick the plan, then copy a card payment link or take crypto">Sell / pay link</button>
+          <button class="btn-o sm" onclick="openTraderJournal(${t.id},'${jsq(t.email||'')}')"
+            title="Everything this client did — sign-ins, orders, payouts, tickets">Journal</button>
+          <button class="btn-o sm" onclick="impersonate(${t.id})"
+            title="Open the portal the way this client sees it">View as client</button>
+          ${t.awaiting_claim?`<button class="btn-o sm" onclick="copyPortalInvite(${t.id})"
+            title="Copy a link that lets them set a portal password — valid 7 days">Invite link</button>`:''}</td></tr>`).join('')}
+      </tbody></table></div>${cap.more}`
+    :`<div class="empty"><h3>${q||f!=='all'?'No clients match':'No clients yet'}</h3><p>${
+      q||f!=='all'?'Clear the search or pick another filter.'
+        :'Everyone who signs up — on their own or through an order — shows up here.'}</p></div>`);
 }
 
 /* ---------- achievement certificates ---------- */

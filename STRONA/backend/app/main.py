@@ -3535,9 +3535,8 @@ def admin_traders(q: str | None = None, imported: int = 0):
     Pomijani są dokładnie ci, dla których ta lista i tak jest ślepą uliczką:
     zanonimizowani (`@removed.invalid`) i wiersze z ewidencji wypłat bez maila
     (`@imported.local` — adres wymyślony przez nas, mail poleciałby w próżnię).
-    Ci drudzy wracają przy `?imported=1` i jest to JEDYNE wejście — panel do tego
-    endpointu przełącznika „imported" nie podpina, bo nie ma tu listy z
-    licznikiem, przy której mógłby usiąść.
+    Ci drudzy wracają przy `?imported=1` — tym samym przełącznikiem przy
+    liczniku, co na pozostałych listach panelu (zakładka Clients).
     """
     session = SessionLocal()
     try:
@@ -3564,6 +3563,10 @@ def admin_traders(q: str | None = None, imported: int = 0):
                  "kyc_status": t.kyc_status, "accounts": counts.get(t.id, 0),
                  "credits_usd": round(float(t.credits_usd or 0), 2),
                  "referred_count": poleceni.get(t.referral_code, 0),
+                 # Zaproszenie do portalu ma sens tylko dla nieodebranego konta
+                 # (endpoint odmawia komuś z żywym hasłem) — bez tej flagi lista
+                 # oferowałaby przycisk kończący się u większości błędem.
+                 "awaiting_claim": bool(t.must_set_password),
                  "created_at": t.created_at.isoformat() if t.created_at else None} for t in rows]
     finally:
         session.close()
