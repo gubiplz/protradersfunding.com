@@ -127,7 +127,8 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .btn-o{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-weight:600;font-size:14px;
   padding:10px 18px;border-radius:11px;border:1px solid var(--line2);color:var(--txt);transition:.16s;
   background:var(--panel);white-space:nowrap}
-.btn-o:hover{border-color:var(--acc);color:var(--acc);background:var(--acc-bg)}
+.btn-o:hover:not(:disabled){border-color:var(--acc);color:var(--acc);background:var(--acc-bg)}
+.btn-o:disabled{opacity:.55;color:var(--muted);cursor:default}
 .btn-o.sm,.btn-p.sm{padding:8px 13px;font-size:13px;border-radius:9px}
 /* Potwierdzenie akcji NIEODWRACALNEJ w oknie portalu (askConfirm z danger:true).
    Czerwien niesie tu ostrzezenie, ktore w natywnym confirm() brala na siebie

@@ -1843,6 +1843,11 @@ const VIEWS={
  async payouts(){
   const [data,accs]=await Promise.all([api('/api/me/payouts'),api('/api/me/accounts')]);
   const funded=accs.filter(a=>a.status==='funded');
+  const czeka=funded.find(a=>(a.payout_days_left||0)>0);
+  /* „Available to request” obok wyszarzonego przycisku byłoby sprzecznością —
+     kwota jest prawdziwa, ale dziś nie do wzięcia. Podpis to mówi wprost. */
+  const zablokowane=funded.filter(a=>(a.payout_days_left||0)>0)
+                          .reduce((s,a)=>s+(a.payout_available||0),0);
   $('view').innerHTML=`
     <div class="stats-row">
       <div class="stat-tile"><div class="tile-ic green">${ICO.wallet}</div>
@@ -1850,10 +1855,16 @@ const VIEWS={
       <div class="stat-tile"><div class="tile-ic orange">${ICO.cal}</div>
         <div><div class="lbl">Pending requests</div><div class="val">${data.summary.pending}</div></div></div>
       <div class="stat-tile"><div class="tile-ic purple">${ICO.dollar}</div>
-        <div><div class="lbl">Available to request</div><div class="val">$${fmt(data.summary.available)}</div><div class="sub">your split of current profits</div></div></div>
+        <div><div class="lbl">Available to request</div><div class="val">$${fmt(data.summary.available)}</div><div class="sub">${zablokowane<=0
+          ?'your split of current profits'
+          :zablokowane>=(data.summary.available||0)-0.005
+            ?'unlocks at the trading-day minimum'
+            :`$${fmt(zablokowane)} of it unlocks at the trading-day minimum`}</div></div></div>
     </div>
     <p class="muted" style="font-size:13px;margin:-6px 0 14px">Payouts are <b>on demand</b> — request whenever
-      you are in profit. Every request is reviewed within <b>${data.summary.review_hours||24} hours</b>.</p>
+      you are in profit. Every request is reviewed within <b>${data.summary.review_hours||24} hours</b>.${
+      czeka?` Your ${esc(czeka.login)} plan unlocks its first payout after
+        <b>${czeka.metrics?.min_trading_days??0} trading days</b> — a day counts once you trade on it.`:''}</p>
     ${funded.filter(a=>a.scale_up_to).map(a=>{
       const av=a.payout_available??0;
       return `<div class="scale-offer">
@@ -1864,14 +1875,14 @@ const VIEWS={
             pay out.</span>
         </div>
         <div class="so-act">
-          <button class="btn-o sm" onclick="openPayoutModal(${a.id},${av.toFixed(2)})">Take $${fmt(av)} payout</button>
+          ${payoutBtn(a,av,'btn-o sm',`Take $${fmt(av)} payout`)}
           <button class="btn-p sm" onclick="openScaleModal(${a.id},${a.initial_balance},${a.scale_up_to})">Move up to $${fmt0(a.scale_up_to)}</button>
         </div>
       </div>`}).join('')}
     ${funded.length?`<div class="panel" style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <span class="muted" style="font-size:13px;margin-right:6px">Request a payout:</span>
       ${funded.map(a=>{const av=a.payout_available??0;
-        return `<button class="btn-o sm" onclick="openPayoutModal(${a.id},${av.toFixed(2)})">${esc(a.login)} · $${fmt(av)} available</button>`}).join('')}
+        return payoutBtn(a,av,'btn-o sm',`${esc(a.login)} · $${fmt(av)} available`)}).join('')}
     </div>`:''}
     ${data.requests.length?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="portal.payout-req">
       <thead><tr><th>Date</th><th>Account</th><th>Profit</th><th>Requested</th><th>Method</th><th>Status</th></tr></thead>
@@ -3420,6 +3431,16 @@ async function makePayoutCert(id){
 /* Payout request: amount + method + the details that method requires.
    The server validates the same rules again — the modal only saves an error round-trip. */
 function payoutMethodLabel(m){return m==='usdt'?'USDT (crypto)':m==='wise'?'Wise':'Bank transfer'}
+/* Przycisk wypłaty albo licznik dni, jeśli konto jeszcze nie dorosło do pierwszej.
+   Instant jest funded od pierwszego dnia, więc bez tego liczydła jedyną informacją
+   o 30 dniach był błąd z API — dopiero po wypełnieniu całego wniosku. */
+function payoutBtn(a,av,cls,label){
+  const left=a.payout_days_left||0, m=a.metrics||{};
+  return left
+    ?`<button class="${cls}" disabled title="This plan unlocks its first payout after ${m.min_trading_days??0} trading days.">${
+        esc(a.login)} · ${m.trading_days??0}/${m.min_trading_days??0} trading days</button>`
+    :`<button class="${cls}" onclick="openPayoutModal(${a.id},${av.toFixed(2)})">${label}</button>`;
+}
 function openPayoutModal(id,avail){
   const w=document.createElement('div'); w.id='po-modal'; w.className='modal-wrap';
   w.onclick=e=>{if(e.target===w)w.remove()};

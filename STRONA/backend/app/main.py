@@ -457,6 +457,25 @@ def _payout_available(acc: Account) -> float:
     return round(profit * float(acc.profit_split_pct or 80) / 100.0, 2)
 
 
+def _payout_days_left(acc: Account) -> int:
+    """Ile dni handlu brakuje kontu do wypłaty (0 = można wnioskować).
+
+    Instant Funding jest funded od pierwszej minuty, więc jego `min_trading_days`
+    nie ma żadnej fazy do zamknięcia — ta liczba znaczy w tym planie dokładnie
+    jedno: sklepową obietnicę „min. 30 dni handlu przed pierwszą wypłatą". Do
+    2026-09-09 nie pilnował jej nikt, ani portal, ani API, więc konto z zyskiem
+    mogło wypłacić drugiego dnia, mimo że dashboard pokazywał obok „X / 30 min".
+
+    Ewaluacji ta bramka NIE dotyczy: tam te same dni są warunkiem ZDANIA fazy,
+    zużywają się przed wejściem na funded (`trading_days_count` startuje wtedy od
+    zera) i policzenie ich drugi raz zamroziłoby wypłaty świeżo sfinansowanym
+    kontom 2-Step — czego cennik nigdzie nie obiecuje.
+    """
+    if acc.steps:
+        return 0
+    return max(0, int(acc.min_trading_days or 0) - int(acc.trading_days_count or 0))
+
+
 def _account_dict(acc: Account, with_metrics: bool = True, with_credentials: bool = False,
                   admin_view: bool = False) -> dict:
     """`with_credentials` MUSI zostać False na endpointach bez autoryzacji.
@@ -490,6 +509,7 @@ def _account_dict(acc: Account, with_metrics: bool = True, with_credentials: boo
         "scale_trigger_pct": poller.SCALE_TRIGGER_PCT,
         "scale_count": int(getattr(acc, "scale_count", 0) or 0),
         "payout_available": _payout_available(acc),
+        "payout_days_left": _payout_days_left(acc),
     }
     if admin_view:
         d["payout_pool_usd"] = getattr(acc, "payout_pool_usd", None)
@@ -1757,6 +1777,16 @@ def request_payout(account_id: int, payload: PayoutReqIn, trader: Trader = Depen
             raise HTTPException(404, "Account not found")
         if acc.status != "funded":
             raise HTTPException(400, "Payouts are available on funded accounts only")
+        # Bramka dni handlu leci PRZED KYC: „zrób KYC, a potem i tak poczekaj"
+        # to najgorsza kolejność, jaką można pokazać człowiekowi z zyskiem.
+        # Ręcznie ustawiona pula tej bramki nie otwiera — pula rządzi KWOTĄ,
+        # dni rządzą TERMINEM. Właściciel, który chce wypłacić wcześniej, ma na
+        # to „Issue payout" w panelu, poza ścieżką wniosku.
+        brak_dni = _payout_days_left(acc)
+        if brak_dni:
+            raise HTTPException(400, f"This plan pays out after {int(acc.min_trading_days)} "
+                                     f"trading days — {int(acc.trading_days_count or 0)} done, "
+                                     f"{brak_dni} to go")
         tr = session.get(Trader, trader.id)
         if tr.kyc_status != "approved":
             raise HTTPException(403, "Complete KYC verification first")
@@ -3359,6 +3389,9 @@ def admin_account_payouts(account_id: int):
                 "split_pct": acc.profit_split_pct,
                 "suggested_share": _payout_available(acc),
                 "payout_pool_usd": getattr(acc, "payout_pool_usd", None),
+                "payout_days_left": _payout_days_left(acc),
+                "min_trading_days": int(acc.min_trading_days or 0),
+                "trading_days": int(acc.trading_days_count or 0),
                 "payouts": [_payout_dict(p, acc) for p in rows]}
     finally:
         session.close()

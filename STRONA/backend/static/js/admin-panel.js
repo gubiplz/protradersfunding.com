@@ -3313,6 +3313,11 @@ async function renderPayouts(id){
       A set pool <b>replaces</b> the profit × split formula as the amount the trader can
       request — regardless of what the chart shows. Payouts are deducted from the pool and
       the balance is <b>not</b> reset. Clear it to go back to the formula.</p>
+    ${d.payout_days_left?`<p class="muted" style="font-size:12px;margin:8px 0 0;line-height:1.5">
+      The trader <b>cannot request</b> yet: this plan opens its first payout after
+      <b>${d.min_trading_days} trading days</b> and the account has <b>${d.trading_days}</b>
+      (${d.payout_days_left} to go). Issuing one from here goes through anyway — the wait is
+      a rule for their request form, not for you.</p>`:''}
     ${d.status!=='funded'?`<p class="muted" style="font-size:12.5px;margin-top:12px">
         Payouts can only be issued on a <b>funded</b> account. This one is
         <b>${esc(d.status)}</b>. Move the phase to Funded first.
