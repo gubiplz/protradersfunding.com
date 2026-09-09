@@ -1380,7 +1380,8 @@ const VIEWS={
       </div>
       <div class="cr-prog">${bars}</div>
       <div class="cr-nums">
-        <div class="cr-num"><div class="l">Balance</div><div class="v">$${fmt(a.balance)}</div></div>
+        <div class="cr-num"><div class="l">Balance</div><div class="v">$${fmt(a.balance)}</div>
+          ${funded?`<div class="ret ${(m.profit_pct||0)>=0?'up':'down'}">${(m.profit_pct||0)>=0?'+':''}${(m.profit_pct||0).toFixed(2)}%</div>`:''}</div>
         <div class="cr-num"><div class="l">Equity${openPnl?' <i class="live-dot" title="Open position"></i>':''}</div>
           <div class="v">$${fmt(a.equity)}${openPnl?` <small class="${openPnl>=0?'up':'down'}">${money(openPnl)}</small>`:''}</div></div>
         ${funded
@@ -3100,7 +3101,9 @@ async function openAcc(id){
           <div class="res-stat"><div class="l">Open P&amp;L</div>
             <div class="v ${openPnl>0?'up':openPnl<0?'down':''}">${openPnl>=0?'+':'-'}$${fmt(Math.abs(openPnl))}</div></div>
           ${targetPct?`<div class="res-stat"><div class="l">Progress to target</div>
-            <div class="v ${profitPct>=0?'up':'down'}">${reach.toFixed(1)}%</div></div>`:''}
+            <div class="v ${profitPct>=0?'up':'down'}">${reach.toFixed(1)}%</div></div>`
+           :`<div class="res-stat"><div class="l">Return</div>
+            <div class="v ${profitPct>=0?'up':'down'}">${profitPct>=0?'+':''}${profitPct.toFixed(2)}%</div></div>`}
         </div>
         ${curve.length>1
           ?'<div class="chart-box tall"><canvas id="d-chart"></canvas></div>'

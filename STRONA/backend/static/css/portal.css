@@ -1090,6 +1090,7 @@ body.kb-open .botnav,body.kb-open .tabbar{display:none}
 .cr-num .l{font-size:11px;color:var(--dim);display:flex;align-items:center;gap:5px;white-space:nowrap}
 .cr-num .v{font-family:var(--mono);font-weight:600;font-size:14px;margin-top:1px;white-space:nowrap}
 .cr-num .v small{font-weight:600;font-size:11px}
+.cr-num .ret{font-family:var(--mono);font-weight:600;font-size:11px;margin-top:1px;white-space:nowrap}
 @media(max-width:1259px){
   /* Ponizej ukladu jednoliniowego komorki dzielily miejsce po rowno (flex:1)
      i mogly sie skurczyc ponizej swojej tresci (min-width:0). Kwota z otwartym
