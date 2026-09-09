@@ -414,6 +414,16 @@ class Account(Base):
     # Do kiedy bot ma dojsc do sufitu `bot_target_pct` — z tego wychodzi dzienna
     # porcja zysku (lustro `bot_doom_deadline` dla jazdy w gore).
     bot_target_deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Recznie nadpisany charakter bota. NULL = wartosc wyliczona z ziarna konta,
+    # czyli zachowanie sprzed dolozenia tych kolumn.
+    bot_win_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bot_avg_r: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bot_risk_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bot_daily_target_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bot_red_day_odds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Amplituda buja otwartej pozycji wzgledem zaplanowanego wyniku.
+    bot_swing: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bot_symbols: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     # Nieodgadywalny token certyfikatu — publiczny link /certificate/{token}
     # i weryfikacja /verify/{token} działają bez logowania, ale nie da się

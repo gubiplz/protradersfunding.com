@@ -2673,6 +2673,7 @@ async function openAccount(id){
         <b>No pace trades over the weekend</b> unless the challenge has the Weekend Trading
         add-on, and then the bot only touches crypto, the one market open on Saturday.</p>
     </div>
+    <div class="sec-card" style="margin:0" id="bot-tune-card"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn-o" style="border-color:var(--gold-line);color:var(--gold)" onclick="clearHistory(${a.id},'${esc(a.login)}')"
         title="Deletes every trade and the whole equity curve, and puts the account back on its starting capital">Clear track record</button>
@@ -2682,6 +2683,7 @@ async function openAccount(id){
     </div>`);
   renderCerts(a.id);
   renderPayouts(a.id);
+  renderBotTuning(a.id);
   renderHistory(a.id);
   if(a.trader_id)renderClientCard(a.trader_id,a.trader_email||a.trader_name||'');
   window._oAcc=a;
@@ -3349,6 +3351,64 @@ async function renderPayouts(id){
           <b>$${fmt(d.suggested_share)}</b>. Issuing a payout books it and
           <b>resets the account balance to its starting capital</b>, exactly like approving
           a trader's request. The paid-out profit stops counting toward the next one.`}</p>`;
+}
+const BOT_TUNE=[
+  ['win_rate','Win rate','0.01','Share of trades that close green. 0.68 = 68 out of 100.'],
+  ['avg_r','Avg R','0.1','How big a winner is next to a loser. 2 = wins are twice the size.'],
+  ['risk_pct','Risk per trade %','0.01','Percent of the balance a single position puts at stake.'],
+  ['daily_target_pct','Daily target %','0.01','How much the account gains on a day that goes well.'],
+  ['red_day_odds','Red-day odds','0.01','Chance a day ends in the red. 0.2 = one day in five.'],
+  ['swing','Swing (floating)','0.05','How far an open position wanders from its planned result before it closes.'],
+];
+async function renderBotTuning(id){
+  const el=$('bot-tune-card'); if(!el)return;
+  let d; try{d=await api(`/api/admin/accounts/${id}/bot/tuning`)}catch(e){
+    el.innerHTML='<h3 style="font-size:15px">Trade BOT — advanced</h3>'
+      +`<p class="muted" style="font-size:12.5px">Could not load: ${esc(e.message)}</p>`;return}
+  const pola=BOT_TUNE.map(([k,label,step,hint])=>{
+    const [lo,hi]=d.limits[k]||[0,0];
+    /* Swing nie wychodzi z ziarna konta — jest jedna stala dla wszystkich,
+       więc „auto" pokazuje wartość domyślną, a nie wylosowaną. */
+    return `<div><label class="muted" style="font-size:12px" title="${esc(hint)}">${label}</label>
+      <input id="bt-${k}" class="inp" type="number" step="${step}" min="${lo}" max="${hi}"
+        value="${d.override[k]??''}" placeholder="auto">
+      <div class="muted" style="font-size:11px;margin-top:3px">auto: ${d.auto[k]} · ${lo}–${hi}</div></div>`}).join('');
+  const ile=BOT_TUNE.filter(([k])=>d.override[k]!=null).length+(d.override.symbols?1:0);
+  el.innerHTML=`<h3 style="font-size:15px;margin-bottom:4px">Trade BOT — advanced</h3>
+    <p class="muted" style="font-size:12px;margin:0 0 12px;line-height:1.55">
+      Leave a field empty and it stays as it is now: rolled once from this account's own seed,
+      so no two accounts trade alike. Fill one in and <b>this account only</b> follows your
+      number. ${ile?`<b>${ile} field${ile>1?'s':''} overridden.</b>`:'Nothing overridden yet.'}</p>
+    <div class="pool-form">${pola}</div>
+    <div style="margin-bottom:12px">
+      <label class="muted" style="font-size:12px">Instruments</label>
+      <input id="bt-symbols" class="inp" value="${esc(d.override.symbols||'')}" placeholder="auto">
+      <div class="muted" style="font-size:11px;margin-top:3px">
+        auto: ${d.auto.symbols.join(', ')}<br>Comma separated, from: ${d.instruments.join(', ')}.</div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn-p" onclick="saveBotTuning(${id})">Save overrides</button>
+      ${ile?`<button class="btn-o" onclick="clearBotTuning(${id})">Reset to auto</button>`:''}
+    </div>
+    <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
+      Changes apply to the <b>next</b> position the bot opens — trades already closed stay as
+      they were. A profit target or the drawdown ride still wins over these numbers: they set
+      the account's character, the target sets where it has to end up.</p>`;
+}
+async function saveBotTuning(id){
+  const body={};
+  for(const [k] of BOT_TUNE){const v=$('bt-'+k).value.trim(); body[k]=v===''?null:parseFloat(v)}
+  for(const [k,label] of BOT_TUNE){
+    if(body[k]!==null&&!isFinite(body[k])){toast(`${label} is not a number.`,'err');return}}
+  body.symbols=$('bt-symbols').value.trim();
+  try{await api(`/api/admin/accounts/${id}/bot/tuning`,{method:'POST',body:JSON.stringify(body)});
+    toast('Bot overrides saved.','ok'); renderBotTuning(id);
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function clearBotTuning(id){
+  try{await api(`/api/admin/accounts/${id}/bot/tuning`,{method:'POST',body:JSON.stringify({})});
+    toast('Back to the values from this account\'s seed.','ok'); renderBotTuning(id);
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 async function setPayoutPool(id){
   const v=parseFloat($('pool-amount').value);

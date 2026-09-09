@@ -4232,6 +4232,86 @@ def admin_bot_stop(account_id: int):
         session.close()
 
 
+class BotTuningIn(BaseModel):
+    """Ręczne nadpisanie charakteru bota na JEDNYM koncie.
+
+    Formularz panelu przychodzi w całości, więc puste pole znaczy „wyczyść
+    nadpisanie", a nie „zostaw jak było" — inaczej nie dałoby się wrócić do
+    wartości z ziarna konta.
+    """
+    win_rate: float | None = None
+    avg_r: float | None = None
+    risk_pct: float | None = None
+    daily_target_pct: float | None = None
+    red_day_odds: float | None = None
+    swing: float | None = None
+    symbols: str | None = None
+
+
+_TUNING_POLA = ("win_rate", "avg_r", "risk_pct", "daily_target_pct", "red_day_odds", "swing")
+
+
+def _bot_tuning(acc: Account) -> dict:
+    """Co panel musi wiedzieć: wartość z ziarna (auto) obok tej nadpisanej."""
+    auto = tradebot.auto_persona(acc)
+    return {
+        "auto": {"win_rate": round(auto.win_rate, 3), "avg_r": round(auto.avg_r, 2),
+                 "risk_pct": round(auto.risk_pct, 3),
+                 "daily_target_pct": round(auto.daily_target_pct, 2),
+                 "red_day_odds": round(auto.red_day_odds, 3),
+                 "swing": tradebot.SWING_DOMYSLNY,
+                 "symbols": list(auto.symbols),
+                 "trades_per_day": auto.trades_per_day},
+        "override": {"win_rate": acc.bot_win_rate, "avg_r": acc.bot_avg_r,
+                     "risk_pct": acc.bot_risk_pct,
+                     "daily_target_pct": acc.bot_daily_target_pct,
+                     "red_day_odds": acc.bot_red_day_odds, "swing": acc.bot_swing,
+                     "symbols": acc.bot_symbols or ""},
+        "limits": {k: list(v) for k, v in tradebot.OVERRIDE_LIMITS.items()},
+        "instruments": sorted(tradebot.INSTRUMENTS),
+    }
+
+
+@app.get("/api/admin/accounts/{account_id}/bot/tuning",
+         dependencies=[Depends(auth.require_admin)])
+def admin_bot_tuning_get(account_id: int):
+    session = SessionLocal()
+    try:
+        acc = session.get(Account, account_id)
+        if not acc:
+            raise HTTPException(404, "Account not found")
+        return _bot_tuning(acc)
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/accounts/{account_id}/bot/tuning",
+          dependencies=[Depends(auth.require_admin)])
+def admin_bot_tuning_set(account_id: int, payload: BotTuningIn):
+    """Zapisuje nadpisania. Działa też przy wyłączonym bocie — admin ustawia
+    charakter konta, zanim je odpali."""
+    session = SessionLocal()
+    try:
+        acc = session.get(Account, account_id)
+        if not acc:
+            raise HTTPException(404, "Account not found")
+        for pole in _TUNING_POLA:
+            wartosc = getattr(payload, pole)
+            if wartosc is not None:
+                lo, hi = tradebot.OVERRIDE_LIMITS[pole]
+                if not lo <= wartosc <= hi:
+                    raise HTTPException(400, f"'{pole}' must be between {lo} and {hi}")
+            setattr(acc, f"bot_{pole}", wartosc)
+        wybrane = tradebot.parse_symbols(payload.symbols)
+        if payload.symbols and payload.symbols.strip() and not wybrane:
+            raise HTTPException(400, "None of those instruments exist — pick from the list below")
+        acc.bot_symbols = ",".join(wybrane) or None
+        session.commit()
+        return _bot_tuning(acc)
+    finally:
+        session.close()
+
+
 class BackfillIn(BaseModel):
     days: int = 14
     # Zmniejszane bez deployu, gdy porcja 3 dni symulacji nie mieści się

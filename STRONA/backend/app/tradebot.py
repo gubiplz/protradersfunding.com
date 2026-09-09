@@ -36,7 +36,7 @@ from __future__ import annotations
 import hashlib
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 
 from . import rules
@@ -217,7 +217,7 @@ def seed_for(acc: Account) -> int:
     return int.from_bytes(hashlib.sha256(raw).digest()[:4], "big") & 0x7FFFFFFF
 
 
-def persona_for(acc: Account) -> Persona:
+def auto_persona(acc: Account) -> Persona:
     """Deterministyczna persona konta. To ona gwarantuje, ze leaderboard nie
     zamieni sie w liste klonow z identycznymi transakcjami."""
     rng = random.Random(acc.bot_seed if acc.bot_seed is not None else seed_for(acc))
@@ -248,6 +248,63 @@ def persona_for(acc: Account) -> Persona:
         symbols=symbols,
         weights=weights,
     )
+
+
+# Widelki recznych nadpisan. Sa szersze niz zakresy stylow (admin ma prawo
+# ustawic konto skrajne), ale nie wypuszczaja wartosci, ktore rozwalilyby
+# matematyke wejscia — win_rate 0 lub avg_r 0 zeruje `edge` w `_open_new`.
+OVERRIDE_LIMITS: dict[str, tuple[float, float]] = {
+    "win_rate": (0.05, 0.98),
+    "avg_r": (0.2, 8.0),
+    "risk_pct": (0.01, 5.0),
+    "daily_target_pct": (0.01, 10.0),
+    "red_day_odds": (0.0, 0.9),
+    "swing": (0.0, 2.0),
+}
+
+# Domyslna amplituda buja otwartej pozycji — bez nadpisania konta obowiazuje ta.
+SWING_DOMYSLNY = 0.55
+
+
+def clamp_override(field: str, value: float) -> float:
+    lo, hi = OVERRIDE_LIMITS[field]
+    return min(hi, max(lo, float(value)))
+
+
+def parse_symbols(raw: str | None) -> tuple[str, ...]:
+    """Lista instrumentow z pola tekstowego panelu — tylko te, ktore znamy."""
+    if not raw:
+        return ()
+    chosen = []
+    for part in raw.replace(";", ",").split(","):
+        sym = part.strip().upper()
+        if sym in INSTRUMENTS and sym not in chosen:
+            chosen.append(sym)
+    return tuple(chosen)
+
+
+def swing_for(acc: Account) -> float:
+    return clamp_override("swing", acc.bot_swing) if acc.bot_swing is not None else SWING_DOMYSLNY
+
+
+def persona_for(acc: Account) -> Persona:
+    """Persona konta po nalozeniu recznych nadpisan admina. Puste kolumny =
+    wartosc z ziarna, czyli zachowanie sprzed dolozenia tego panelu."""
+    p = auto_persona(acc)
+    zmiany: dict[str, object] = {}
+    for field, kolumna in (("win_rate", acc.bot_win_rate), ("avg_r", acc.bot_avg_r),
+                           ("risk_pct", acc.bot_risk_pct),
+                           ("daily_target_pct", acc.bot_daily_target_pct),
+                           ("red_day_odds", acc.bot_red_day_odds)):
+        if kolumna is not None:
+            zmiany[field] = clamp_override(field, kolumna)
+    symbols = parse_symbols(acc.bot_symbols)
+    if symbols:
+        # Wagi po rowno: skoro admin wskazal instrumenty palcem, „ulubiony"
+        # wylosowany z ziarna tylko by mu ten wybor przekrzywil.
+        zmiany["symbols"] = symbols
+        zmiany["weights"] = tuple(1.0 for _ in symbols)
+    return replace(p, **zmiany) if zmiany else p
 
 
 # --------------------------------------------------------------------------- #
@@ -367,7 +424,7 @@ def stop(session, acc: Account, now: datetime | None = None) -> None:
     now = now or datetime.now(timezone.utc)
     open_tr = _open_trade(session, acc)
     if open_tr is not None:
-        _close_trade(open_tr, _floating_pnl(open_tr, now), now)
+        _close_trade(open_tr, _floating_pnl(open_tr, now, swing_for(acc)), now)
         acc.balance = round((acc.balance or 0.0) + open_tr.pnl, 2)
         acc.equity = acc.balance
         acc.open_pnl = 0.0
@@ -530,7 +587,7 @@ def set_target(session, acc: Account, target_pct: float,
     if cap is not None:
         open_tr = _open_trade(session, acc)
         if open_tr is not None and balance + (open_tr.plan_pnl or 0.0) > cap:
-            _close_trade(open_tr, _floating_pnl(open_tr, now), now)
+            _close_trade(open_tr, _floating_pnl(open_tr, now, swing_for(acc)), now)
             balance = round(balance + open_tr.pnl, 2)
             acc.balance = balance
             acc.equity = balance
@@ -574,13 +631,13 @@ def tick(session, acc: Account, now: datetime | None = None) -> MarketSnapshot:
             session.flush()
             open_tr = None
         else:
-            floating = _floating_pnl(open_tr, now)
+            floating = _floating_pnl(open_tr, now, swing_for(acc))
             open_tr.pnl = round(floating, 2)
 
     if open_tr is None and _should_open(session, acc, p, balance, now):
         open_tr = _open_new(session, acc, p, balance, now)
 
-    floating = round(_floating_pnl(open_tr, now), 2) if open_tr is not None else 0.0
+    floating = round(_floating_pnl(open_tr, now, swing_for(acc)), 2) if open_tr is not None else 0.0
     lots = open_tr.lots if open_tr is not None else 0.0
     return MarketSnapshot(
         balance=round(balance, 2),
@@ -592,7 +649,7 @@ def tick(session, acc: Account, now: datetime | None = None) -> MarketSnapshot:
     )
 
 
-def _floating_pnl(tr: Trade, now: datetime) -> float:
+def _floating_pnl(tr: Trade, now: datetime, swing: float = SWING_DOMYSLNY) -> float:
     """P&L otwartej pozycji: gladkie dojscie do zaplanowanego wyniku plus szum,
     ktory wygasa do zera na zamknieciu (krzywa nie ma skoku przy realizacji)."""
     if tr.plan_close_at is None:
@@ -603,7 +660,7 @@ def _floating_pnl(tr: Trade, now: datetime) -> float:
     t = min(1.0, max(0.0, (_naive(now) - _naive(tr.opened_at)).total_seconds() / span))
     smooth = t * t * (3 - 2 * t)
     ph = (tr.id or 1) * 0.618
-    wobble = abs(tr.plan_pnl) * 0.55 * (1 - t) * (
+    wobble = abs(tr.plan_pnl) * swing * (1 - t) * (
         0.6 * math.sin(9.7 * t + ph) + 0.4 * math.sin(21.3 * t + 2 * ph))
     return tr.plan_pnl * smooth + wobble
 
