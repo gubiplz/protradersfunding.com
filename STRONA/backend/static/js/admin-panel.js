@@ -1619,14 +1619,10 @@ function renderLeads(){
      ||fold(Object.values(l.campaign||{}).join(' ')).includes(qf)
      ||fold('@'+String(l.telegram||'').replace(/^@/,'')).includes(qf)
      ||(qd.length>=6&&digits(l.phone).endsWith(qd))));
-  /* Kolejność pracy, nie kolejność wpłynięcia: najpierw zaległe follow-upy
-     (najstarszy dług na górze), potem nietknięci nowi, reszta od najnowszych.
-     Na telefonie nagłówki tabeli są schowane, więc to jedyny porządek, jaki
-     tam istnieje; na desktopie klik w nagłówek dalej sortuje po swojemu. */
-  const rank=l=>l.next_due&&dueDays(l.next_due)<=0?0:l.status==='new'?1:2;
-  rows.sort((a,b)=>rank(a)-rank(b)
-    ||(rank(a)===0?dutc(a.next_due)-dutc(b.next_due)
-      :String(b.created_at||'').localeCompare(String(a.created_at||''))));
+  /* Kolejność wpłynięcia, od najnowszego: świeży lead jest wart najwięcej i ma
+     być pierwszy, bez wyprzedzania przez zaległe follow-upy — te wołają o
+     siebie banerem i chipem „Due". */
+  rows.sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
   /* Same rule as Orders: the numbers describe WHAT IS VISIBLE below them, so
      switching to "Rejected" cannot leave the full revenue sitting on top. */
   /* „Bought" = zapłacone zamówienie ALBO ręczny przełącznik (deal poza sklepem);
