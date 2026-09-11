@@ -767,10 +767,15 @@ function maybeReviewNudge(){
   document.body.appendChild(w);
 }
 
+/* Lustro DISCIPLINE_MIN_DAYS z main.py. Serwer i tak odsiewa krotsze serie —
+   ta liczba stoi tu tylko po to, zeby ekran umial powiedziec, DLACZEGO kogos
+   na liscie nie ma. */
+const DISC_MIN_DAYS=10;
+
 const TITLES={
   accounts:['Challenges','Live overview of your challenge accounts'],
   store:['New Challenge','One-time fee · refunded with your first payout'],
-  board:['Leaderboard','Top traders across the platform, all time, live data'],
+  board:['Leaderboard','Top traders across the platform — by profit, and by discipline'],
   achievements:['Achievements','Milestones earned from your real activity'],
   loyalty:['Loyalty','Trade your points for a discount code'],
   journal:['Journal','Your private trading notes'],
@@ -1181,6 +1186,7 @@ function setUiPref(key,val){
   _prefT=setTimeout(()=>{api('/api/me',{method:'PATCH',body:JSON.stringify({ui_prefs:ME.ui_prefs})}).catch(()=>{})},800);
 }
 function chalFilter(f){setUiPref('chalFilter',f==='all'?null:f);VIEWS.accounts()}
+function boardTab(k){setUiPref('board_tab',k==='profit'?null:k);VIEWS.board()}
 
 /* Same-level-upgrade banner: applies the live Upgrade code (one promo state
    shared with the landing — coupons cleared) and opens the buy modal. */
@@ -1608,8 +1614,17 @@ const VIEWS={
  },
 
  async board(){
+  const t=(ME&&ME.ui_prefs&&ME.ui_prefs.board_tab)==='discipline'?'discipline':'profit';
+  $('view').innerHTML=`<div class="shop-tabs" style="margin-bottom:18px">${
+    [['profit','Profit'],['discipline','Discipline']].map(([k,l])=>
+      `<button class="shop-tab${t===k?' on':''}" onclick="boardTab('${k}')">${l}</button>`).join('')
+    }</div><div id="board-body"></div>`;
+  await (t==='discipline'?VIEWS._boardDiscipline():VIEWS._boardProfit());
+ },
+
+ async _boardProfit(){
   const b=await api('/api/leaderboard');
-  if(!b.length){$('view').innerHTML='<div class="empty"><h3>No ranked accounts yet</h3><p>The leaderboard fills up as traders make progress.</p></div>';return}
+  if(!b.length){$('board-body').innerHTML='<div class="empty"><h3>No ranked accounts yet</h3><p>The leaderboard fills up as traders make progress.</p></div>';return}
   /* Kafelek pokazywal SUME EQUITY kont funded, czyli w ogromnej wiekszosci nasz
      wlasny kapital: konto $200k z zyskiem $14k liczylo sie jako "$214,311". Ranking
      jest o wynikach traderow, wiec sumujemy to, co faktycznie wypracowali —
@@ -1636,7 +1651,7 @@ const VIEWS={
         <div><div class="l">Stage</div><div class="v">${r.status==='funded'?'Funded':'Eval'}</div></div>
       </div>
     </div>`}).join('');
-  $('view').innerHTML=`
+  $('board-body').innerHTML=`
     <div class="stats-row">
       <div class="stat-tile"><div class="tile-ic blue">${ICO.layers}</div>
         <div><div class="lbl">Traders ranked</div><div class="val">${b.length}</div></div></div>
@@ -1663,6 +1678,97 @@ const VIEWS={
       </tbody></table></div>`:''}
     <p class="muted" style="font-size:11.5px;margin-top:12px">Funded accounts only, ranked by profit. Names are masked for privacy.</p>`;
   localStorage.setItem('pf_board_prev',JSON.stringify(Object.fromEntries(b.map((r,i)=>[r.trader,i+1]))));
+ },
+
+ /* Druga lista mowi co innego niz pierwsza, wiec i wyglada inaczej: bez podium,
+    bez medali i bez strzalek zmiany miejsca. Podium znaczy „wyscig wygrany", a
+    tu nie ma czego wygrac — trzy konta na czele stoja rowno, bo dyscyplina to
+    stan, nie zdobycz. Strzalek nie ma z tego samego powodu, dla ktorego nie ma
+    konfetti: nie budujemy powodu, zeby zagladac tu codziennie. */
+ async _boardDiscipline(){
+  const [b,ja]=await Promise.all([api('/api/discipline'),api('/api/me/discipline').catch(()=>null)]);
+  if(!b.length){$('board-body').innerHTML=`<div class="empty"><h3>The Discipline board is being compiled</h3>
+    <p>Accounts join the board after ${DISC_MIN_DAYS} trading days. Nothing to do — it fills in on its own.</p></div>`;return}
+
+  /* Skladowe wyniku niosa cala tresc tej listy: samo „87" nie mowi traderowi,
+     co ma robic dalej. Pasmo jest jedno i podzielone w proporcji 40/30/30, bo
+     te wagi sa czescia komunikatu — trzy osobne mierniki to trzy osobne
+     spojrzenia, a pierscien chowa podzial za katem obrotu. */
+  const pasmo=r=>`<div class="disc-bar" aria-hidden="true">
+      <span class="disc-seg s1" style="flex:40"><i style="width:${r.clean_pts/40*100}%"></i></span>
+      <span class="disc-seg s2" style="flex:30"><i style="width:${r.buffer_pts/30*100}%"></i></span>
+      <span class="disc-seg s3" style="flex:30"><i style="width:${r.consist_pts/30*100}%"></i></span>
+    </div>`;
+  const legenda=r=>`<div class="disc-leg">
+      <span style="flex:40"><b>${r.clean_pts}</b>/40 daily risk</span>
+      <span style="flex:30"><b>${r.buffer_pts}</b>/30 buffer</span>
+      <span style="flex:30"><b>${r.consist_pts}</b>/30 spread</span>
+    </div>`;
+
+  const dni=b.reduce((s,r)=>s+r.trading_days,0);
+  const czyste=b.reduce((s,r)=>s+r.clean_days,0);
+  const zSpreadem=b.filter(r=>r.top_day_share!=null);
+  const rowne=zSpreadem.filter(r=>r.top_day_share<40).length;
+  const sredni=Math.round(b.reduce((s,r)=>s+r.score,0)/b.length);
+
+  const karta=(r,i)=>`
+    <div class="disc-card a${i+1}">
+      <div class="pod-rank">${String(i+1).padStart(2,'0')}</div>
+      <div class="disc-badge">${ICO.shield}</div>
+      <div class="pod-name">${esc(r.trader)}</div>
+      <div style="margin:6px 0 10px"><span class="status ${r.status==='funded'?'funded':'active'}"><span class="dot"></span>${r.status==='funded'?'Funded':'Evaluation'}</span></div>
+      <div class="disc-score">${r.score}<small>/100</small></div>
+      ${pasmo(r)}${legenda(r)}
+      <div class="pod-mini">
+        <div><div class="l">Account</div><div class="v">$${fmt0(r.account_size)}</div></div>
+        <div><div class="l">Clean days</div><div class="v">${r.clean_days}/${r.trading_days}</div></div>
+      </div>
+    </div>`;
+
+  /* Wlasne miejsce mowi serwer, bo ekran nie ma jak go poznac: lista jest
+     maskowana, wiec trader sie na niej nie rozpozna, i uciecia do dziesieciu,
+     wiec nieobecnosc na niej nie znaczy „nie zakwalifikowales sie". Bez rady,
+     bez „jeszcze troche" — samo miejsce i zasada wejscia. */
+  const uwaga=!ja?''
+    :ja.ranked
+      ?`<div class="disc-note">${ICO.shield}<div>Your account is <b>#${ja.rank} of ${ja.of}</b> ranked accounts,
+          scoring <b>${ja.score}/100</b> over ${ja.trading_days} trading days.</div></div>`
+      :`<div class="disc-note">${ICO.shield}<div>Your account is not ranked yet. Accounts join after
+          ${ja.min_days} trading days — no action is needed, the board updates on its own.</div></div>`;
+
+  $('board-body').innerHTML=`
+    <div class="stats-row">
+      <div class="stat-tile"><div class="tile-ic blue">${ICO.layers}</div>
+        <div><div class="lbl">Accounts ranked</div><div class="val">${b.length}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic purple">${ICO.shield}</div>
+        <div><div class="lbl">Average score</div><div class="val">${sredni}<span style="font-size:14px;color:var(--dim)">/100</span></div>
+          <div class="sub">across ranked accounts</div></div></div>
+      <div class="stat-tile"><div class="tile-ic green">${ICO.cal}</div>
+        <div><div class="lbl">Clean-day rate</div><div class="val">${dni?Math.round(czyste/dni*100):0}%</div>
+          <div class="sub">days inside half the daily limit</div></div></div>
+      <div class="stat-tile"><div class="tile-ic orange">${ICO.bars}</div>
+        <div><div class="lbl">Balanced spread</div><div class="val">${zSpreadem.length?Math.round(rowne/zSpreadem.length*100)+'%':'—'}</div>
+          <div class="sub">no single day over 40% of profit</div></div></div>
+    </div>
+    ${uwaga}
+    <div class="podium">${b.slice(0,3).map(karta).join('')}</div>
+    ${b.length>3?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="portal.discipline">
+      <thead><tr><th style="width:52px">#</th><th>Trader</th><th>Account</th><th>Stage</th>
+        <th style="min-width:190px">Score breakdown</th><th style="text-align:right">Score</th></tr></thead>
+      <tbody>`+b.slice(3).map((r,i)=>`<tr>
+        <td class="num muted">${String(i+4).padStart(2,'0')}</td>
+        <td>${esc(r.trader)}</td>
+        <td class="num muted">$${fmt0(r.account_size)}</td>
+        <td><span class="status ${r.status==='funded'?'funded':'active'}"><span class="dot"></span>${r.status==='funded'?'Funded':'Evaluation'}</span></td>
+        <td>${pasmo(r)}<div class="disc-leg tiny"><span style="flex:40">daily risk</span><span style="flex:30">buffer</span><span style="flex:30">spread</span></div></td>
+        <td class="num" style="text-align:right" data-sort="${r.score}"><b style="font-size:15px">${r.score}</b>
+          <div style="font-size:11px;opacity:.78">${r.clean_days}/${r.trading_days} clean days</div></td></tr>`).join('')+`
+      </tbody></table></div>`:''}
+    <p class="muted" style="font-size:11.5px;margin-top:12px">
+      100 points: up to 40 for how little of the daily loss limit gets used, up to 30 for how
+      much of the overall drawdown is still unspent, up to 30 for a result that does not rest
+      on one single day. Length of history is not scored — accounts join after ${DISC_MIN_DAYS} trading days;
+      evaluation and funded accounts are ranked together. Names are masked for privacy.</p>`;
  },
 
  async achievements(){

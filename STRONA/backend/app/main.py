@@ -6597,6 +6597,156 @@ def leaderboard():
     """Publiczny ranking — czubek pelnej listy z `_leaderboard_rows`."""
     return _leaderboard_rows()[:LEADERBOARD_LIMIT]
 
+
+# Ponizej dziesieciu dni handlowych „dyscyplina" to jeszcze nie dyscyplina, tylko
+# krotka seria — konto z trzema spokojnymi dniami stawaloby na czele listy.
+DISCIPLINE_MIN_DAYS = 10
+_DISCIPLINE_CACHE: dict = {"ts": 0.0, "data": None}
+
+
+def _discipline_rows():
+    """Ranking RYZYKA, nie zysku — liczony z dni, nie z salda.
+
+    Ranking zysku nagradza jedno duze zagranie: konto, ktore raz strzelilo +9%,
+    stoi wyzej niz takie, ktore przez miesiac nie zlamalo zadnej reguly. Ta lista
+    mowi to drugie, wiec wchodza na nia takze konta w ewaluacji — dyscyplina jest
+    tym, co WSZYSTKICH obowiazuje, a nie przywilejem funded.
+
+    Sto punktow w trzech czesciach, kazda z innego zrodla ryzyka:
+      * do 40 — ile dzienny budzet straty zostawal nietkniety,
+      * do 30 — ile zostalo z calkowitego drawdownu,
+      * do 30 — na ile wynik NIE wisi na jednym dniu.
+
+    Nazwiska maskowane tak samo jak w rankingu zysku i bez kraju — z tego samego
+    powodu (patrz `_leaderboard_rows`).
+    """
+    session = SessionLocal()
+    try:
+        accs = (session.query(Account)
+                .filter(Account.status.in_(("active", "funded"))).all())
+        if not accs:
+            return []
+        # Jedno zapytanie na CALA tabele zamiast jednego na konto: przy dwoch
+        # tysiacach kont wersja per-konto to dwa tysiace round-tripow. Wiersze
+        # kont spoza listy odsiewamy w Pythonie — to tansze niz IN z 2000 id.
+        dzien_kol = func.date(func.coalesce(Trade.closed_at, Trade.opened_at))
+        per_day: dict[int, dict[str, float]] = {}
+        for aid, dzien, pnl in (session.query(Trade.account_id, dzien_kol, func.sum(Trade.pnl))
+                                .filter(Trade.status == "closed")
+                                .group_by(Trade.account_id, dzien_kol).all()):
+            if dzien:
+                per_day.setdefault(aid, {})[str(dzien)] = round(float(pnl or 0), 2)
+
+        tr_ids = {a.trader_id for a in accs if a.trader_id}
+        traderzy = {t.id: t for t in session.query(Trader)
+                    .filter(Trader.id.in_(tr_ids)).all()} if tr_ids else {}
+
+        rows = []
+        for a in accs:
+            dni = per_day.get(a.id)
+            if dni is None:
+                # Konta czytane z MT5 nie maja wierszy w `trades` — dzien po dniu
+                # odtwarzamy ze snapshotow. Tylko dla nich, bo to zapytanie na konto.
+                dni = _recap_days(session, a.id, datetime.min, datetime.max, [])
+            if len(dni) < DISCIPLINE_MIN_DAYS:
+                continue
+
+            budzet = (a.max_daily_loss_pct or 0) / 100.0 * a.initial_balance
+            czyste = (sum(1 for v in dni.values() if v > -0.5 * budzet)
+                      if budzet > 0 else len(dni))
+            # UDZIAL czystych dni, nie ich LICZBA: przy liczbie te 40 punktow
+            # mierzy staz, a nie zachowanie — konto bez jednego potkniecia przez
+            # dwanascie dni nigdy nie doszloby wyzej niz 12/40 i przegrywaloby
+            # z niechlujnym kontem, ktore po prostu handluje dluzej. Dlugosc
+            # historii pilnuje DISCIPLINE_MIN_DAYS i rozstrzyga remisy.
+            #
+            # Ocena dnia jest STOPNIOWA, a nie zero-jedynkowa: strata zjadajaca
+            # 36% dziennego budzetu i strata zjadajaca 4% to nie to samo
+            # zachowanie, a przy progu binarnym oba dni wygladaja identycznie.
+            # Polowa budzetu to punkt, w ktorym dzien przestaje sie liczyc.
+            if budzet > 0:
+                oceny = [1.0 - min(1.0, max(0.0, -v) / budzet / 0.5) for v in dni.values()]
+                clean_pts = round(40 * sum(oceny) / len(oceny))
+            else:
+                clean_pts = 40
+
+            cfg = rules.config_from_account(a)
+            m = rules.display_metrics(cfg, balance=a.balance, equity=a.equity,
+                                      peak_equity=a.peak_equity,
+                                      day_start_equity=a.day_start_equity,
+                                      trading_days=len(dni))
+            zapas = max(0.0, min(1.0, 1 - (m["overall_dd_used_pct"] or 0) / 100.0))
+            buffer_pts = round(30 * zapas)
+
+            # Udzial najlepszego dnia liczymy w sumie dni ZYSKOWNYCH, nie w wyniku
+            # netto: netto bywa zerem albo minusem i ulamek traci sens.
+            zysk = sum(v for v in dni.values() if v > 0)
+            najlepszy = max(dni.values())
+            udzial = najlepszy / zysk if zysk > 0 and najlepszy > 0 else None
+            consist_pts = max(0, min(30, round(30 * (1 - udzial)))) if udzial is not None else 0
+
+            tr = traderzy.get(a.trader_id)
+            rows.append({"account_id": a.id, "trader_id": a.trader_id,
+                         "trader": _mask_name(a.trader_name or (tr.full_name if tr else "")),
+                         "status": a.status, "account_size": a.initial_balance,
+                         "score": int(clean_pts + buffer_pts + consist_pts),
+                         "clean_days": czyste, "trading_days": len(dni),
+                         "buffer_pct": round(zapas * 100),
+                         "top_day_share": round(udzial * 100) if udzial is not None else None,
+                         "clean_pts": int(clean_pts), "buffer_pts": int(buffer_pts),
+                         "consist_pts": int(consist_pts)})
+        # Remis rozstrzyga liczba dni: dluzej utrzymana dyscyplina znaczy wiecej.
+        rows.sort(key=lambda r: (r["score"], r["trading_days"]), reverse=True)
+        return rows
+    finally:
+        session.close()
+
+
+def _discipline_cached() -> list[dict]:
+    """CALA lista z 60-sekundowym cache.
+
+    Drozsza od rankingu zysku (dni po dniach, nie samo saldo), a zmienia sie
+    najwyzej raz na dobe — nie ma powodu liczyc jej co wejscie. Cache trzyma
+    komplet, a nie czubek, bo `/api/me/discipline` potrzebuje miejsca tradera
+    takze wtedy, gdy stoi poza pierwsza dziesiatka.
+    """
+    now = monotonic()
+    if _DISCIPLINE_CACHE["data"] is None or now - _DISCIPLINE_CACHE["ts"] >= 60:
+        _DISCIPLINE_CACHE.update(ts=now, data=_discipline_rows())
+    return _DISCIPLINE_CACHE["data"]
+
+
+@app.get("/api/discipline")
+def discipline_board():
+    """Czubek rankingu dyscypliny — publicznie, bez identyfikatorow.
+
+    `account_id`/`trader_id` sluza wylacznie do odnalezienia wlasnego wiersza
+    w `/api/me/discipline`. Na zewnatrz nie wychodza: zestawione z rankingiem
+    zysku rozmaskowalyby, kto jest kim.
+    """
+    return [{k: v for k, v in r.items() if k not in ("account_id", "trader_id")}
+            for r in _discipline_cached()[:LEADERBOARD_LIMIT]]
+
+
+@app.get("/api/me/discipline")
+def my_discipline(trader: Trader = Depends(auth.current_trader)):
+    """Miejsce tradera na liscie — jego wlasne, wiec bez maskowania.
+
+    Bez tego ekran nie umie powiedziec nic pewnego: lista jest maskowana (wiec
+    trader sie na niej nie rozpozna) i uciecia do dziesieciu (wiec nieobecnosc
+    nie znaczy „nie zakwalifikowales sie"). Licznik `trading_days_count` tez
+    tu nie wystarczy — potrafi pokazywac dni, ktorych nie ma w `trades`.
+    """
+    pelna = _discipline_cached()
+    moje = [(i + 1, r) for i, r in enumerate(pelna) if r["trader_id"] == trader.id]
+    if not moje:
+        return {"ranked": False, "min_days": DISCIPLINE_MIN_DAYS}
+    miejsce, r = min(moje, key=lambda x: x[0])
+    return {"ranked": True, "min_days": DISCIPLINE_MIN_DAYS, "rank": miejsce,
+            "of": len(pelna), "score": r["score"], "clean_days": r["clean_days"],
+            "trading_days": r["trading_days"]}
+
+
 def _qr_svg(url: str) -> str:
     """Kod QR do weryfikacji — inline SVG, żeby dokument był samowystarczalny
     (żadnego zewnętrznego generatora, który kiedyś padnie i zostawi puste pole).
