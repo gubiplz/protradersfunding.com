@@ -2072,6 +2072,190 @@ def account_stats(account_id: int, trader: Trader = Depends(auth.current_trader)
         session.close()
 
 
+def _naive_utc(dt: datetime | None) -> datetime | None:
+    """Data bez strefy, w UTC. Kolumny DateTime są naiwne, ale kod zapisuje do
+    nich i `datetime.now(timezone.utc)`, i wartości odczytane z bazy — porównanie
+    jednego z drugim rzuca TypeError."""
+    if dt is None:
+        return None
+    return dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
+
+
+def _recap_window(acc: Account) -> tuple[str, str, datetime, datetime] | None:
+    """(wynik, faza, od, do) dla podsumowania fazy — albo None, gdy nie ma czego.
+
+    Podsumowanie należy się fazie, która SIĘ SKOŃCZYŁA: oblanej (konto stoi) albo
+    zdanej (konto gra dalej, ale od zera). Okno bierzemy z dat awansu, bo liczniki
+    na koncie opisują już nową fazę — awans zeruje saldo, best day i dni handlowe.
+    """
+    start = acc.phase_started_at or acc.started_at
+    if acc.status in ("failed", "breached"):
+        return ("failed", acc.phase, start, acc.closed_at or datetime.now(timezone.utc))
+    if acc.prev_phase_started_at and acc.phase_started_at:
+        zdana = "eval_1" if acc.phase == "eval_2" or acc.steps < 2 else "eval_2"
+        return ("passed", zdana, acc.prev_phase_started_at, acc.phase_started_at)
+    return None
+
+
+def _recap_days(session, account_id: int, od: datetime, do: datetime,
+                trades: list[Trade]) -> dict[str, float]:
+    """Wynik dzień po dniu w oknie fazy — z transakcji, a gdy ich nie ma, ze snapshotów.
+
+    Konta czytane z MT5 nie mają wierszy w `trades` (feed oddaje samo equity),
+    więc bez tego zapasu podsumowanie takiego konta byłoby puste.
+    """
+    if trades:
+        days: dict[str, float] = {}
+        for t in trades:
+            d = (t.closed_at or t.opened_at).strftime("%Y-%m-%d")
+            days[d] = round(days.get(d, 0.0) + t.pnl, 2)
+        return days
+    snaps = (session.query(EquitySnapshot)
+             .filter(EquitySnapshot.account_id == account_id)
+             .order_by(EquitySnapshot.ts).limit(20000).all())
+    byday: dict[str, list] = {}
+    for s in snaps:
+        ts = _naive_utc(s.ts)
+        if ts is None or not (od <= ts < do):
+            continue
+        d = byday.setdefault(s.day_key, [s.balance, s.balance])
+        d[1] = s.balance
+    return {d: round(last - first, 2) for d, (first, last) in byday.items()}
+
+
+def _x(w: float) -> str:
+    """Krotność w formacie „1.5x" — pełne wielokrotności bez zbędnego „.0"."""
+    return f"{w:.0f}x" if abs(w - round(w)) < 0.05 else f"{w:.1f}x"
+
+
+def _recap_diagnosis(acc: Account, trades: list[Trade], days: dict[str, float],
+                     best: tuple[str, float] | None,
+                     worst: tuple[str, float] | None) -> dict | None:
+    """JEDNA obserwacja z liczb tej fazy. Pierwsza pasująca reguła wygrywa.
+
+    Jedna, bo dwie czyta się jak wykład, a nie jak podsumowanie. Zdania są
+    w czasie przeszłym i opisują to, co się stało — nie ma tu „prawie się udało"
+    ani niczego, co wskazuje na następną transakcję.
+    """
+    n = len(trades)
+    dni = len(days)
+    netto = sum(days.values())
+    wins = [t.pnl for t in trades if t.pnl > 0]
+    losses = [t.pnl for t in trades if t.pnl < 0]
+    wr = round(len(wins) * 100.0 / n) if n else 0
+    zyski = sum(v for v in days.values() if v > 0)
+
+    if best and worst and best[1] > 0 and abs(worst[1]) >= best[1] * 1.3:
+        oddane = sum(1 for v in days.values() if v > 0 and v <= abs(worst[1]))
+        return {"kind": "worst_vs_best",
+                "text": (f"Your worst day was {_x(abs(worst[1]) / best[1])} your best day."
+                         + (f" {oddane} days of gains went back in one session."
+                            if oddane >= 2 else ""))}
+    if best and zyski > 0 and best[1] / zyski >= 0.5 and dni >= 3:
+        reszta = (zyski - best[1]) / max(1, dni - 1)
+        return {"kind": "concentration",
+                "text": (f"Over half your profit came from a single day. "
+                         f"The rest of the {dni} trading days averaged ${reszta:,.0f}.")}
+    if wr >= 55 and netto < 0 and wins and losses:
+        r = abs(sum(losses) / len(losses)) / (sum(wins) / len(wins))
+        return {"kind": "asymmetry",
+                "text": (f"You won {wr}% of trades and still finished down — "
+                         f"the losers were {_x(r)} the size of the winners.")}
+    # Tylko gdy faza faktycznie zeszła na minus — inaczej zdanie opisywałoby
+    # obsunięcie, którego nie było.
+    if dni and netto < 0 and n / dni >= 15:
+        return {"kind": "volume",
+                "text": (f"{round(n / dni)} trades a day on average. The drawdown came "
+                         f"from volume, not from one bad call.")}
+    limit = acc.initial_balance * (acc.max_daily_loss_pct or 0) / 100.0
+    if days and limit > 0:
+        ostatni = max(days)
+        if days[ostatni] <= -0.5 * limit and dni >= 3:
+            return {"kind": "last_day",
+                    "text": (f"The account held inside the floors for {dni - 1} trading days, "
+                             f"then took {round(abs(days[ostatni]) / limit * 100)}% of the daily "
+                             f"loss allowance on the final day.")}
+    if n:
+        return {"kind": "summary",
+                "text": (f"{dni} trading day{'s' if dni != 1 else ''}, {n} trade"
+                         f"{'s' if n != 1 else ''}, {wr}% win rate. "
+                         f"The full day-by-day breakdown is in Analytics.")}
+    return None
+
+
+@app.get("/api/me/accounts/{account_id}/recap")
+def account_recap(account_id: int, trader: Trader = Depends(auth.current_trader)):
+    """Podsumowanie zakończonej fazy — także (a nawet zwłaszcza) tej oblanej.
+
+    Dziś konto po złamaniu reguły dostaje jednego maila i ciszę. To jest dokładnie
+    ten moment, w którym trader albo rozumie, co się stało, albo znika; liczby ma
+    w księdze, ale nikt mu ich nie zestawia.
+    """
+    session = SessionLocal()
+    try:
+        acc = _own_account(session, trader, account_id)
+        okno = _recap_window(acc)
+        if okno is None:
+            return {"available": False}
+        wynik, faza, od, do = okno
+        od, do = _naive_utc(od), _naive_utc(do)
+        trades = [t for t in session.query(Trade)
+                  .filter(Trade.account_id == acc.id, Trade.status == "closed")
+                  .order_by(Trade.closed_at, Trade.id).all()
+                  if od <= _naive_utc(t.closed_at or t.opened_at) < do]
+        days = _recap_days(session, acc.id, od, do, trades)
+        best = max(days.items(), key=lambda kv: kv[1]) if days else None
+        worst = min(days.items(), key=lambda kv: kv[1]) if days else None
+
+        wins = [t.pnl for t in trades if t.pnl > 0]
+        cel = (acc.profit_target_p1 if faza == "eval_1"
+               else acc.profit_target_p2 if faza == "eval_2" else None)
+        netto = round(sum(days.values()), 2)
+
+        breach = None
+        if wynik == "failed":
+            b = (session.query(Breach).filter(Breach.account_id == acc.id)
+                 .order_by(Breach.ts.desc()).first())
+            if b:
+                breach = {"type": b.type, "detail": b.detail,
+                          "ts": b.ts.isoformat() if b.ts else None,
+                          "equity": round(b.equity_at_breach, 2)}
+            elif acc.breach_reason:
+                breach = {"type": "rule", "detail": acc.breach_reason, "ts": None,
+                          "equity": round(acc.equity, 2)}
+
+        return {
+            "available": True, "outcome": wynik, "phase": faza,
+            "login": acc.login, "product_key": acc.product_key,
+            "size": round(acc.initial_balance, 2),
+            "from": od.isoformat(), "to": do.isoformat(),
+            # Dni kalendarzowe liczone po datach, a nie po różnicy godzin:
+            # faza od 6 do 11 września trwała sześć dni, nie cztery i pół.
+            "days_active": max(1, (do.date() - od.date()).days + 1),
+            # Silnik ryzyka liczy dzień handlowy od OTWARTEJ pozycji, a okno fazy
+            # zna tylko dni z zamkniętymi transakcjami — te liczby potrafią się
+            # rozejść. Przy oblanym koncie oddajemy tę, według której zapadła
+            # decyzja; po awansie licznik jest już wyzerowany i zostaje okno.
+            "trading_days": (acc.trading_days_count if wynik == "failed"
+                             and acc.trading_days_count else len(days)),
+            "min_trading_days": acc.min_trading_days,
+            "green_days": sum(1 for v in days.values() if v > 0),
+            "red_days": sum(1 for v in days.values() if v < 0),
+            "net_pnl": netto,
+            "net_pct": round(netto / acc.initial_balance * 100.0, 2) if acc.initial_balance else 0.0,
+            "target_pct": cel,
+            "target_balance": round(acc.initial_balance * (1 + cel / 100.0), 2) if cel else None,
+            "trades": len(trades),
+            "win_rate": round(len(wins) * 100.0 / len(trades), 1) if trades else None,
+            "best_day": {"day": best[0], "pnl": best[1]} if best else None,
+            "worst_day": {"day": worst[0], "pnl": worst[1]} if worst else None,
+            "breach": breach,
+            "diagnosis": _recap_diagnosis(acc, trades, days, best, worst),
+        }
+    finally:
+        session.close()
+
+
 def _achievements_payload(session, trader: Trader) -> dict:
     odznaki = achievements.badges(session, trader)
     ile = sum(1 for b in odznaki if b["unlocked"])
@@ -3985,6 +4169,8 @@ def _ustaw_faze(session, acc: Account, faza: str) -> None:
     acc.last_counted_trading_day = ""
     acc.breach_reason = None
     acc.closed_at = None
+    acc.prev_phase_started_at = acc.phase_started_at or acc.started_at
+    acc.phase_started_at = datetime.now(timezone.utc)
     # Termin bota z poprzedniej fazy żądałby całego nowego targetu w resztce
     # dni — nowa faza zaczyna bez zegara, admin nastawi go od nowa.
     acc.bot_target_deadline = None
@@ -4436,6 +4622,10 @@ def admin_clear_history(account_id: int):
         acc.limit_warn_dd_day = ""
         acc.breach_reason = None
         acc.closed_at = None
+        # Historia znika, więc podsumowanie fazy nie ma już z czego powstać —
+        # zostawiona data kazałaby mu liczyć z pustego okna.
+        acc.phase_started_at = datetime.now(timezone.utc)
+        acc.prev_phase_started_at = None
         # Konto zamkniete na zlamaniu reguly wraca do gry: powod breachu wlasnie
         # zniknal razem z krzywa, a `failed` bez powodu to stan, ktorego panel
         # nie umie wytlumaczyc. Konta w `provisioning` nie dotykamy — tam czeka

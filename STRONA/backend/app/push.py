@@ -67,7 +67,15 @@ def is_enabled() -> bool:
     return settings.push_enabled
 
 
-def event_url(event: str) -> str:
+# Zdarzenia kończące fazę prowadzą do jej podsumowania, a nie do listy kont —
+# ale tylko wtedy, gdy nadawca podał, KTÓREGO konta dotyczą.
+_RECAP_EVENTS = {"breached", "phase_passed", "account_funded"}
+
+
+def event_url(event: str, ctx: dict | None = None) -> str:
+    acc_id = (ctx or {}).get("account_id")
+    if event in _RECAP_EVENTS and acc_id:
+        return f"/portal?view=recap&acc={acc_id}"
     return f"/portal?view={_EVENT_VIEW.get(event, 'accounts')}"
 
 
@@ -155,13 +163,12 @@ def send_event(event: str, to_email: str | None, title: str, ctx: dict | None = 
             if val is not None and not bool(val):
                 return 0
         trader_id = tr.id
-        _center_row(session, trader_id, event, title,
-                    _BODY.get(event, ""), event_url(event))
+        url = event_url(event, ctx)
+        _center_row(session, trader_id, event, title, _BODY.get(event, ""), url)
         session.commit()
     finally:
         session.close()
-    return send_to_trader(trader_id, title, _BODY.get(event, ""),
-                          url=event_url(event), tag=event)
+    return send_to_trader(trader_id, title, _BODY.get(event, ""), url=url, tag=event)
 
 
 # --------------------------------------------------------------------------- #

@@ -1088,6 +1088,38 @@ body.kb-open .botnav,body.kb-open .tabbar{display:none}
   .rc-bars{gap:14px;margin-top:14px}
 }
 
+/* Podsumowanie zakonczonej fazy (karta konta, nad wynikami). Kolor niesie
+   krawedz, nie tlo: to ma byc rachunek do przeczytania, a nie alarm ani
+   fajerwerki. Ta sama bryla dla zdanej i oblanej fazy — rozni sie wylacznie
+   akcentem, bo obie opisuja to samo: faze, ktora sie skonczyla. */
+.recap{padding:20px 22px;border-left:3px solid var(--line2)}
+.recap.ok{border-left-color:var(--green)}
+.recap.bad{border-left-color:var(--red)}
+.recap-title{font-size:16px;font-weight:700;line-height:1.35;margin-bottom:4px}
+.recap-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+  gap:1px;margin-top:18px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.rp{background:var(--panel);padding:11px 13px}
+.rp span{display:block;font-size:11.5px;color:var(--muted);margin-bottom:3px}
+.rp b{font-family:var(--mono);font-size:15.5px;font-weight:700;color:var(--txt)}
+.rp b small{font-family:var(--mono);font-size:11.5px;font-weight:500;color:var(--dim)}
+.rp b.ok{color:var(--green)} .rp b.bad{color:var(--red)}
+.recap-read{display:flex;gap:11px;align-items:flex-start;margin-top:16px;
+  background:var(--bg3);border-radius:12px;padding:13px 15px}
+.rr-ic{flex:0 0 30px;height:30px;display:grid;place-items:center;border-radius:9px;
+  background:var(--acc-bg);color:var(--acc)}
+.rr-ic svg{width:16px;height:16px}
+.recap-read b{display:block;font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--dim);font-weight:700;margin-bottom:4px}
+.recap-read p{margin:0;font-size:13.5px;line-height:1.55;color:var(--txt)}
+.recap-foot{display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;
+  margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.rf-txt{flex:1 1 260px;font-size:12.5px;line-height:1.55;color:var(--muted)}
+@media(max-width:560px){
+  .recap{padding:17px 16px}
+  .recap-grid{grid-template-columns:repeat(2,1fr);margin-top:14px}
+  .recap-foot .btn-p{width:100%}
+}
+
 .chal-filter{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:2px 0 16px}
 .chal-count{margin-left:auto;font-size:12px;color:var(--dim)}
 .chal-nomatch{text-align:center;color:var(--muted);font-size:13.5px;padding:30px 16px}

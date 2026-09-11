@@ -213,6 +213,8 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "express_payout": "BOOLEAN DEFAULT FALSE",
         "limit_warn_daily_day": "VARCHAR(10) DEFAULT ''",
         "limit_warn_dd_day": "VARCHAR(10) DEFAULT ''",
+        "phase_started_at": "TIMESTAMP",
+        "prev_phase_started_at": "TIMESTAMP",
     },
     # Karta leada na kanale. Tabela `leads` stoi na produkcji od pierwszego
     # zgloszenia, wiec `create_all` ja pomija — bez tych wpisow kazdy SELECT

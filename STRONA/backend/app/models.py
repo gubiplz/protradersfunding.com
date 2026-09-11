@@ -475,6 +475,11 @@ class Account(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Awans fazy zeruje saldo, licznik dni handlowych i best day, a transakcje
+    # zostają w jednej tabeli dla całego konta. Bez tych dwóch dat nie da się
+    # już powiedzieć, co działo się w fazie, która właśnie się skończyła.
+    phase_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    prev_phase_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     trader: Mapped[Trader | None] = relationship(back_populates="accounts")
     snapshots: Mapped[list["EquitySnapshot"]] = relationship(back_populates="account", cascade="all, delete-orphan")

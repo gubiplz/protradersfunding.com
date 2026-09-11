@@ -143,19 +143,33 @@ async function refreshLive(rerender=false){
 /* Push-click target stored by sw.js in Cache Storage: read on startup AND on
    every return to the app — iOS can drop a postMessage to a suspended page,
    so this is the only reliable path. */
+/* Cel deep linka to para (widok, konto): powiadomienie o koncu fazy prowadzi do
+   `?view=recap&acc=N`, czyli do karty JEDNEGO konta. Bez `acc` link ladowal na
+   liscie kont i trader musial sam znalezc to, o ktorym byl push. */
+function navFromUrl(u){
+  try{const p=new URL(u,location.origin).searchParams;
+    return {v:p.get('view'),acc:+p.get('acc')||0};
+  }catch(_){return {v:null,acc:0}}
+}
+function goNav(n){
+  if(!n||!n.v)return false;
+  if(n.v==='recap'){if(!n.acc)return false;openAcc(n.acc);return true}
+  if(!VIEWS[n.v])return false;
+  go(n.v);return true;
+}
 async function pendingNavView(){
   let v=window._pendingView;window._pendingView=null;
   try{
     const c=await caches.open('pf-nav');const r=await c.match('/__pending-nav');
     if(r){const d=await r.json();await c.delete('/__pending-nav');
-      if(!v&&Date.now()-d.ts<30000)v=new URL(d.url,location.origin).searchParams.get('view')}
+      if(!v&&Date.now()-d.ts<30000)v=navFromUrl(d.url)}
   }catch(_){}
   return v||null;
 }
 async function applyPendingNav(){
-  const v=await pendingNavView();
-  if(!v||!VIEWS[v])return;
-  if(ME){go(v);refreshLive()}else window._pendingView=v; /* boot() finishes it */
+  const n=await pendingNavView();
+  if(!n)return;
+  if(ME){if(goNav(n))refreshLive()}else window._pendingView=n; /* boot() finishes it */
 }
 document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState!=='visible')return;
@@ -194,11 +208,10 @@ if('serviceWorker' in navigator){
     const d=e.data||{};
     if(d.type!=='navigate')return;
     try{caches.open('pf-nav').then(c=>c.delete('/__pending-nav'))}catch(_){}
-    let v=null;
-    try{v=new URL(d.url,location.origin).searchParams.get('view')}catch(_){}
-    if(!v||!VIEWS[v])return;
+    const n=navFromUrl(d.url);
+    if(!n.v)return;
     /* ME is still loading (iOS waking the PWA) => boot() finishes the navigation */
-    if(ME){go(v);refreshLive()}else window._pendingView=v;
+    if(ME){if(goNav(n))refreshLive()}else window._pendingView=n;
   });
   navigator.serviceWorker.startMessages?.();
 }
@@ -704,7 +717,7 @@ async function boot(){
   /* Deep links from notifications: _pendingView / fresh sw.js entry in Cache
      Storage (wins over a STALE ?view= left in the address after a previous
      deep link), finally ?view= from the URL (cold start via openWindow). */
-  const widok=(await pendingNavView())||q.get('view');
+  const nav=(await pendingNavView())||{v:q.get('view'),acc:+q.get('acc')||0};
   if(q.get('upsell')==='1')window._upsellJump=true;
   /* ?view/?upsell skonsumowane — bez sprzątnięcia każdy kolejny reload PWA
      skakał do starego deep linka. ?buy zostaje: konsumuje go (i czyści)
@@ -712,7 +725,8 @@ async function boot(){
   if(q.get('view')||q.get('upsell'))
     history.replaceState(null,'','/portal'+(q.get('buy')?'?buy='+encodeURIComponent(q.get('buy')):''));
   /* view_open leci z go() — kazda nawigacja, nie tylko start appki */
-  go(q.get('buy')?'store':(widok&&VIEWS[widok]?widok:'accounts'));
+  if(q.get('buy'))go('store');
+  else if(!goNav(nav))go('accounts');
   refreshNotif();
   maybeReviewNudge();
 }
@@ -1103,10 +1117,13 @@ function toggleNotif(){
 /* Bell row: switch the SPA view instead of a full navigation; with no
    matching view fall back to the row's URL. */
 function notifGo(a){
-  let v=null,up=false;
-  try{const u=new URL(a.getAttribute('href'),location.origin);
-    v=u.searchParams.get('view'); up=u.searchParams.get('upsell')==='1'}catch(_){}
-  if(v&&VIEWS[v]){if(up)window._upsellJump=true;go(v);return false}
+  const href=a.getAttribute('href');
+  let up=false;
+  try{up=new URL(href,location.origin).searchParams.get('upsell')==='1'}catch(_){}
+  if(up)window._upsellJump=true;
+  /* `false` zatrzymuje przejscie linkiem: nawigacja zostaje w SPA. Gdy celu nie
+     umiemy obsluzyc, puszczamy przegladarke i wchodzi zwykle przeladowanie. */
+  if(goNav(navFromUrl(href))){$('notif-panel')?.classList.add('hidden');return false}
   return true;
 }
 /* Deep link z powiadomienia „Scale your progress": po wejsciu w Challenges
@@ -3159,15 +3176,100 @@ const COUNTRY_BY_ISO=Object.fromEntries(COUNTRIES.map(c=>[c.i,c]));
 const COUNTRY_NAMES=COUNTRIES.map(c=>c.n);
 const PHASE_LABEL={eval_1:'Phase 1',eval_2:'Phase 2',funded:'Funded'};
 
+/* Podsumowanie zakonczonej fazy. Do dzis oblane konto dostawalo jednego maila
+   "rule breached" i pasek z powodem — tu trader dostaje liczby z TEJ fazy
+   i jedno zdanie, ktore je czyta. Bez konfetti przy zdanej i bez "niewiele
+   brakowalo" przy oblanej: obie wersje opisuja to, co juz sie stalo. */
+const BREACH_LABEL={daily_loss:'Daily loss limit',max_drawdown:'Max drawdown',
+  time_limit:'Time limit',max_lots:'Open volume limit',manual:'Account review',rule:'Rule'};
+const RECAP_DATE=iso=>dutc(iso).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+
+function recapSub(a,d){
+  const kiedy=RECAP_DATE(d.to);
+  if(d.outcome!=='failed')return `${PHASE_LABEL[d.phase]||esc(d.phase)} closed ${kiedy} after ${d.trading_days} trading day${d.trading_days===1?'':'s'}`;
+  const b=d.breach;
+  if(!b)return `Ended ${kiedy}`;
+  const nazwa=BREACH_LABEL[b.type]||'Rule';
+  const m=a.metrics||{};
+  const prog=b.type==='daily_loss'?m.daily_floor:b.type==='max_drawdown'?m.overall_floor:null;
+  const gdzie=b.equity!=null?` at $${fmt(b.equity)}`:'';
+  return `Ended ${kiedy} — ${nazwa.toLowerCase()} crossed${gdzie}${prog?` (floor $${fmt(prog)})`:''}`;
+}
+
+function rp(label,val,cls){
+  return `<div class="rp"><span>${label}</span><b${cls?` class="${cls}"`:''}>${val}</b></div>`;
+}
+
+function recapCardHtml(a,d){
+  if(!d||!d.available)return '';
+  const zdana=d.outcome==='passed';
+  /* Konto fundowane tez potrafi sie skonczyc na zlamaniu reguly, a wtedy nie ma
+     "fazy do powtorzenia" — jest zamkniete konto z wyplatami w historii. */
+  const fundowane=!zdana&&d.phase==='funded';
+  const dni=Math.max(1,d.days_active);
+  const cele=d.target_pct
+    ?rp('To target',`${d.net_pct>=0?'+':''}${d.net_pct.toFixed(1)}% / ${d.target_pct}%`,
+        d.net_pct>=d.target_pct?'ok':'')
+    :rp('Return',`${d.net_pct>=0?'+':''}${d.net_pct.toFixed(1)}%`,d.net_pct>=0?'ok':'bad');
+  const stopka=zdana
+    ?(a.phase==='funded'
+        ?'This account is funded now. The recap above covers the evaluation that just ended — balance, drawdown floors and the trading-day counter all restarted with the funded phase.'
+        :'Phase 2 is running on the same account. Balance, drawdown floors and the trading-day counter all restarted, so the numbers above stay here as history.')
+    :fundowane
+      ?'This funded account is closed. Payouts already approved stay in your history and in Payouts — the recap above covers the funded run only.'
+      :`You can run ${PHASE_LABEL[d.phase]||'this phase'} again on a new account. Nothing carries over — the recap above stays in your history.`;
+  return `<div class="sec-card recap ${zdana?'ok':'bad'}" id="recap">
+    <div class="rc-head">
+      <div>
+        <div class="rc-eyebrow">${zdana?`${PHASE_LABEL[d.phase]||esc(d.phase)} passed`:fundowane?'Account closed':'Challenge ended'}</div>
+        <div class="recap-title">Account ${esc(d.login)} · ${PHASE_LABEL[d.phase]||esc(d.phase)} · ${dni} day${dni===1?'':'s'}</div>
+        <div class="rc-sub">${esc(recapSub(a,d))}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="rc-pnl ${d.net_pnl>=0?'up':'down'}">${money(d.net_pnl)}</div>
+        <div class="rc-sub">net over the phase</div>
+      </div>
+    </div>
+    <div class="recap-grid">
+      ${rp('Trading days',`${d.trading_days}${d.min_trading_days&&d.phase!=='funded'?`<small> / ${d.min_trading_days} min</small>`:''}`)}
+      ${/* Konta czytane z MT5 nie maja wierszy transakcji — feed oddaje samo
+           equity. "Trades 0 / Win rate —" wygladaloby wtedy jak zepsuta karta,
+           wiec te dwa pola ustepuja miejsca bilansowi dni. */
+        d.trades
+        ?rp('Trades',d.trades)+rp('Win rate',d.win_rate!=null?`${d.win_rate}%`:'—')
+        :rp('Green days',d.green_days,d.green_days?'ok':'')+rp('Red days',d.red_days,d.red_days?'bad':'')}
+      ${rp('Best day',d.best_day?money(d.best_day.pnl):'—',d.best_day&&d.best_day.pnl>0?'ok':'')}
+      ${rp('Worst day',d.worst_day?money(d.worst_day.pnl):'—',d.worst_day&&d.worst_day.pnl<0?'bad':'')}
+      ${cele}
+    </div>
+    ${d.diagnosis?`<div class="recap-read">
+      <span class="rr-ic">${ICO.bars}</span>
+      <div><b>What the numbers say</b><p>${esc(d.diagnosis.text)}</p></div>
+    </div>`:''}
+    <div class="recap-foot">
+      <div class="rf-txt">${stopka}</div>
+      ${zdana?'':`<button class="btn-p" onclick="go('store')">Start a new challenge</button>`}
+    </div>
+  </div>`;
+}
+
 async function openAcc(id){
   $('pg-title').textContent='Account Dashboard'; $('pg-crumb').textContent='Trader / Client Area / '+id;
+  /* Karta konta to podwidok Challenges. Z listy trafia tu po go('accounts'),
+     ale z deep linka powiadomienia — prosto, i wtedy nawigacja zostawala bez
+     zaznaczonej pozycji. */
+  document.querySelectorAll('.sb-link[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v==='accounts'));
+  document.querySelectorAll('.tab-item[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v==='accounts'));
   $('view').innerHTML='<div class="skel" style="height:110px;margin-bottom:16px"></div><div class="skel" style="height:300px"></div>';
-  let a,act,pos;
+  let a,act,pos,rc;
   try{
-    [a,act,pos]=await Promise.all([
+    [a,act,pos,rc]=await Promise.all([
       api('/api/me/accounts/'+id),
       api(`/api/me/accounts/${id}/activity`),
       api(`/api/me/accounts/${id}/positions`).catch(()=>[]),
+      /* Podsumowanie fazy nie moze wywrocic karty konta — na starych kontach
+         bez dat awansu endpoint po prostu nie ma czego policzyc. */
+      api(`/api/me/accounts/${id}/recap`).catch(()=>({available:false})),
     ]);
   }catch(e){
     $('view').innerHTML=`<div class="card" style="text-align:center;padding:34px 18px">
@@ -3220,6 +3322,8 @@ async function openAcc(id){
       ${openPnl!==0?`<span class="act-chip live"><span class="live-dot"></span> Live position</span>`:''}
       <span class="act-chip" style="cursor:default">${planKind(a.steps)} · $${fmt0(a.initial_balance)}</span>
     </div>
+
+    ${recapCardHtml(a,rc)}
 
     <div class="detail-grid">
       <div class="sec-card" style="margin-bottom:0">
@@ -3309,7 +3413,10 @@ async function openAcc(id){
         ${prog('Max drawdown used',m.overall_dd_used_pct,true,`${ddPct.toFixed(2)}% / ${m.max_overall_loss_pct}% ($${fmt0(ddUsd)} / $${fmt0(ddLimUsd)})`)}
         ${a.max_lots?`<div><div class="prog-top"><span>Open volume limit (all positions combined)</span><b>max ${a.max_lots} lots</b></div></div>`:''}
       </div>
-      ${a.breach_reason?`<div class="warn-box" style="margin:16px 0 0;background:var(--red-bg);border-color:var(--red-line);color:var(--red)">${ICO.alert}<div><b style="color:var(--red)">Rule breached</b>${esc(a.breach_reason)}</div></div>`:''}
+      ${/* Powod zlamania niesie karta podsumowania na gorze — razem z liczbami,
+            ktore do niego doprowadzily. Pasek zostaje tylko dla kont sprzed
+            wprowadzenia dat fazy, gdzie podsumowania nie ma z czego zlozyc. */
+        a.breach_reason&&!(rc&&rc.available)?`<div class="warn-box" style="margin:16px 0 0;background:var(--red-bg);border-color:var(--red-line);color:var(--red)">${ICO.alert}<div><b style="color:var(--red)">Rule breached</b>${esc(a.breach_reason)}</div></div>`:''}
     </div>
 
     <div class="sec-card" id="cal-card"></div>

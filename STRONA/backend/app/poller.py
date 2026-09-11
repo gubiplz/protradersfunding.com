@@ -98,6 +98,8 @@ def _advance_phase(acc: Account, rt: AccountRuntime) -> None:
     acc.trading_days_count = 0
     acc.last_counted_trading_day = ""
     acc.breach_reason = None
+    acc.prev_phase_started_at = acc.phase_started_at or acc.started_at
+    acc.phase_started_at = datetime.now(timezone.utc)
 
 
 def scale_offer(acc: Account) -> float | None:
@@ -213,7 +215,7 @@ def _notify(acc: Account, event: str, extra: dict | None = None) -> None:
         if not trader:
             return
         ctx = {"name": trader.full_name or trader.email, "login": acc.login,
-               "split": acc.profit_split_pct}
+               "split": acc.profit_split_pct, "account_id": acc.id}
         ctx.update(extra or {})
         notify.send(event, trader.email, ctx)
     except Exception as e:  # pragma: no cover
