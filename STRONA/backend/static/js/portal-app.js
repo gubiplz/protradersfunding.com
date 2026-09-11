@@ -1211,6 +1211,137 @@ function startOfferTimer(){
   tick();window._offerTimer=setInterval(tick,1000);
 }
 
+/* ====================== Today's risk budget ======================
+   Ekran, ktory trader ma sprawdzic PRZED otwarciem pozycji. Portal pokazywal
+   limity wylacznie jako procent ZUZYCIA ("Daily loss 38%"), a decyzja o
+   wielkosci pozycji zapada w dolarach POZOSTALYCH — kazdy przeliczal to sobie
+   w glowie z salda i regulaminu. Tu nie powstaje zadna nowa liczba: wszystko
+   wychodzi z `metrics`, ktore serwer i tak liczy tym samym kodem co bramki
+   breachow, wiec pasek nie moze rozjechac sie z prawdziwym limitem. */
+function riskOf(a){
+  const m=a.metrics||{};
+  if(m.daily_floor==null||m.overall_floor==null||a.equity==null)return null;
+  const init=a.initial_balance||0;
+  const dayCap=(m.max_daily_loss_pct||0)/100*init;
+  const ddCap=(m.max_overall_loss_pct||0)/100*init;
+  if(dayCap<=0&&ddCap<=0)return null;
+  return {dayCap,ddCap,
+    dayLeft:Math.max(0,a.equity-m.daily_floor),
+    ddLeft:Math.max(0,a.equity-m.overall_floor),
+    /* Equity na otwarciu dnia = podloga dnia + caly dzienny limit. Serwer tej
+       liczby nie oddaje, a bez niej nie da sie pokazac wyniku DNIA — saldo
+       mowi tylko o calej ewaluacji. */
+    today:a.equity-(m.daily_floor+dayCap)};
+}
+/* Jak blisko limitu jest konto (0 = na podlodze, 1 = pelny budzet). Sluzy do
+   wyboru konta, ktore karta pokazuje domyslnie. */
+function riskRatio(r){
+  return r.dayCap>0?r.dayLeft/r.dayCap:r.ddCap>0?r.ddLeft/r.ddCap:1;
+}
+function riskBar(label,left,cap,foot){
+  const pct=cap>0?Math.max(0,Math.min(100,left/cap*100)):0;
+  const k=pct<=20?'bad':pct<=45?'warn':'ok';
+  return `<div class="rb">
+    <div class="rb-top"><span>${label}</span><b class="${k}">$${fmt(left)}</b></div>
+    <div class="rb-track"><i class="${k}" style="width:${pct.toFixed(1)}%"></i></div>
+    <div class="rb-foot">${foot}</div>
+  </div>`;
+}
+
+/* Migawka kont z poprzedniej wizyty — zrodlo linii "co sie zmienilo, odkad
+   ostatnio patrzyles". Trzymana lokalnie, bo to stan PRZEGLADARKI, nie konta:
+   ten sam trader na telefonie i na laptopie patrzyl ostatnio w innym momencie. */
+const SEEN_KEY='pf_seen_acc';
+function seenMap(){try{return JSON.parse(localStorage.getItem(SEEN_KEY)||'{}')||{}}catch(e){return{}}}
+function sinceLine(a){
+  /* Policzone RAZ na zaladowanie strony i zapamietane: migawka odswieza sie
+     zaraz po wyrenderowaniu, wiec bez tego cache linia znikalaby przy pierwszym
+     przelaczeniu zakladki — czyli dokladnie wtedy, gdy trader do niej wraca. */
+  window._sinceCache=window._sinceCache||{};
+  if(a.id in window._sinceCache)return window._sinceCache[a.id];
+  const s=seenMap()[a.id]||{};
+  const h=s.ts?(Date.now()-s.ts)/36e5:0;
+  let out='';
+  /* Ponizej 6 godzin to nie jest "poprzednia wizyta", tylko odswiezenie
+     strony — a podsumowanie zmian z ostatnich dziesieciu minut to szum. */
+  if(h>=6){
+    const db=+(a.balance-(s.b||0)).toFixed(2), dd=((a.metrics||{}).trading_days||0)-(s.td||0);
+    const zm=[];
+    if(Math.abs(db)>=0.01)zm.push(`balance ${money(db)}`);
+    if(dd>0)zm.push(`${dd} trading day${dd>1?'s':''}`);
+    if(s.ph&&s.ph!==a.phase)zm.push(`moved to ${PHASE_LABEL[a.phase]||esc(a.phase)}`);
+    if(zm.length)out=`<div class="rc-since">${ICO.eye} Since you last looked,
+      ${h<48?Math.round(h)+'h':Math.round(h/24)+' days'} ago: ${zm.join(' · ')}</div>`;
+  }
+  window._sinceCache[a.id]=out;
+  return out;
+}
+function markSeen(accs){
+  const m=seenMap(),now=Date.now();
+  let zmiana=false;
+  accs.forEach(a=>{
+    /* Najwyzej raz na 30 minut: przy odswiezaniu strony co minute roznica
+       zawsze bylaby zerowa i linia nigdy by sie nie pokazala. */
+    if(m[a.id]&&m[a.id].ts&&now-m[a.id].ts<18e5)return;
+    m[a.id]={b:a.balance,td:(a.metrics||{}).trading_days||0,ph:a.phase,ts:now};
+    zmiana=true;
+  });
+  if(zmiana)try{localStorage.setItem(SEEN_KEY,JSON.stringify(m))}catch(e){}
+}
+
+function riskCardHtml(accs){
+  const live=accs.filter(a=>!['breached','failed','provisioning'].includes(a.status)&&riskOf(a));
+  if(!live.length)return'';
+  /* Domyslnie konto NAJBLIZEJ limitu — to ono wymaga decyzji. Wybor tradera
+     wygrywa, dopoki wskazane konto zyje. */
+  const wybor=(ME&&ME.ui_prefs&&ME.ui_prefs.riskAcc)|0;
+  const a=live.find(x=>x.id===wybor)
+    ||live.reduce((b,x)=>riskRatio(riskOf(x))<riskRatio(riskOf(b))?x:b);
+  const r=riskOf(a),m=a.metrics||{};
+  const chips=live.length>1?`<div class="rc-tabs">${live.map(x=>
+    `<button class="rc-tab${x.id===a.id?' on':''}" onclick="pickRiskAcc(${x.id})">${esc(x.login)}</button>`).join('')}</div>`:'';
+  return `<div class="sec-card risk-card">
+    <div class="rc-head">
+      <div>
+        <div class="rc-eyebrow">Today · ${esc(a.login)} · ${PHASE_LABEL[a.phase]||esc(a.phase)}</div>
+        <div class="rc-pnl ${r.today>=0?'up':'down'}">${money(r.today)}</div>
+        <div class="rc-sub">since the daily reset</div>
+      </div>
+      <div class="rc-clock">${ICO.cal} Daily limit resets in
+        <b id="risk-cd" data-ends="${esc(a.day_reset_at||'')}">—</b></div>
+    </div>
+    <div class="rc-bars">
+      ${/* Bez mianownika "of $X": konto na plusie ma WIECEJ miejsca niz wynosi
+            limit (zysk dnia podnosi podloge o tyle samo), wiec "$3,000 of
+            $2,500" czytalo sie jak blad. Zostaje kwota i twarda granica. */''}
+      ${r.dayCap>0?riskBar('Room left today',r.dayLeft,r.dayCap,
+        `Daily stop-out at $${fmt(m.daily_floor)} · ${m.max_daily_loss_pct}% rule`):''}
+      ${r.ddCap>0?riskBar('Buffer above max drawdown',r.ddLeft,r.ddCap,
+        `Account closes at $${fmt(m.overall_floor)} · ${m.max_overall_loss_pct}% max drawdown`):''}
+    </div>
+    ${sinceLine(a)}${chips}
+  </div>`;
+}
+function pickRiskAcc(id){setUiPref('riskAcc',id);VIEWS.accounts()}
+/* Ten sam wzorzec co startOfferTimer: jeden interwal, kasowany przy kazdym
+   starcie, bo go() przerysowuje #view. Minuty, nie sekundy — do polnocy jest
+   kilka godzin i tykajace sekundy robilyby z tego zegar odliczajacy do straty. */
+function startRiskTimer(){
+  clearInterval(window._riskTimer);
+  const el=document.getElementById('risk-cd');
+  if(!el||!el.dataset.ends)return;
+  const koniec=dutc(el.dataset.ends).getTime();
+  const tick=()=>{
+    const e=document.getElementById('risk-cd');
+    if(!e){clearInterval(window._riskTimer);return}
+    const s=Math.floor((koniec-Date.now())/1000);
+    if(s<=0){clearInterval(window._riskTimer);e.textContent='moments';return}
+    const h=Math.floor(s/3600),mi=Math.floor(s%3600/60);
+    e.textContent=h?`${h}h ${mi}m`:`${mi}m`;
+  };
+  tick();window._riskTimer=setInterval(tick,30000);
+}
+
 /* ============================ VIEWS ============================ */
 const VIEWS={
  async accounts(){
@@ -1401,8 +1532,13 @@ const VIEWS={
   /* Flash sale wygrywa z refer&earn i upsellem — to promocja, którą właściciel
      wystawił świadomie i na czas. Push opt-in zostaje przed nią (jednorazowy). */
   const flashB=flashBannerHtml();
-  $('view').innerHTML=(pushB||flashB||up.banner||banner)+stats+filterBar+list+up.html;
+  /* Budzet ryzyka NAD podsumowaniami: kafelki mowia, ile trader ma, a ta karta
+     — ile moze dzis stracic, zanim konto zniknie. Przy filtrze liczy z calego
+     zbioru, bo limit dnia obowiazuje niezaleznie od tego, co jest na ekranie. */
+  $('view').innerHTML=(pushB||flashB||up.banner||banner)+riskCardHtml(accs)+stats+filterBar+list+up.html;
   startOfferTimer();
+  startRiskTimer();
+  markSeen(accs);
   rollStats();
   if(window._upsellJump){window._upsellJump=false;setTimeout(flashUpsell,60)}
  },

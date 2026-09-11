@@ -476,6 +476,19 @@ def _payout_days_left(acc: Account) -> int:
     return max(0, int(acc.min_trading_days or 0) - int(acc.trading_days_count or 0))
 
 
+def _next_day_reset() -> str:
+    """Kiedy dzienny limit straty wróci do pełna, w UTC.
+
+    Liczy to serwer, bo dzień handlowy zmienia się o północy czasu SERWERA MT5
+    (`server_utc_offset_hours`), a nie w strefie przeglądarki. Trader w Dubaju
+    i trader w Bogocie mają ten sam moment resetu i portal musi pokazać obu tę
+    samą godzinę — odliczanie liczone lokalnie kłamałoby jednemu z nich.
+    """
+    srv = poller.server_now()
+    nast = (srv + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return (nast - timedelta(hours=settings.server_utc_offset_hours)).isoformat()
+
+
 def _account_dict(acc: Account, with_metrics: bool = True, with_credentials: bool = False,
                   admin_view: bool = False) -> dict:
     """`with_credentials` MUSI zostać False na endpointach bez autoryzacji.
@@ -510,6 +523,7 @@ def _account_dict(acc: Account, with_metrics: bool = True, with_credentials: boo
         "scale_count": int(getattr(acc, "scale_count", 0) or 0),
         "payout_available": _payout_available(acc),
         "payout_days_left": _payout_days_left(acc),
+        "day_reset_at": _next_day_reset(),
     }
     if admin_view:
         d["payout_pool_usd"] = getattr(acc, "payout_pool_usd", None)
