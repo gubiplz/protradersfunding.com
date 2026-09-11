@@ -37,6 +37,8 @@ _EVENT_VIEW = {
     "weekly_review": "weekly",
     "credits_granted": "store",
     "limit_warning": "accounts",
+    "target_50": "accounts", "target_75": "accounts", "min_days_met": "accounts",
+    "payout_ready": "payouts",
 }
 
 # Krótkie treści pod tytułem (tytuł = temat maila, liczony w notify._render).
@@ -61,6 +63,13 @@ _BODY: dict[str, str] = {
     # Wyjątek od zasady „push nie komentuje wyników na żywo": ostrzeżenie o
     # limicie ISTNIEJE po to, żeby uratować konto — cisza tu kosztuje challenge.
     "limit_warning": "You are close to a trading limit. Slow down and protect the account.",
+    # Stan konta, czas przeszły, zero rady. Te cztery treści mają przetrwać
+    # lekturę regulaminu: mówią, co się JUŻ stało i co z tego wynika dla reguł,
+    # nigdy „ile jeszcze zostało" ani „wykorzystaj to teraz".
+    "target_50": "A progress update on your evaluation. Your limits and rules are unchanged.",
+    "target_75": "A progress update on your evaluation. Your limits and rules are unchanged.",
+    "min_days_met": "The trading-day requirement is now behind you. The profit target still decides when the phase closes.",
+    "payout_ready": "Your funded account meets the payout conditions. Requests are made from the portal, whenever you choose.",
 }
 
 

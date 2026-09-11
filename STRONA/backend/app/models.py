@@ -467,6 +467,13 @@ class Account(Base):
     # zbliżaniu się do limitu już wyszedł — jedno ostrzeżenie na dobę na typ.
     limit_warn_daily_day: Mapped[str] = mapped_column(String(10), default="")
     limit_warn_dd_day: Mapped[str] = mapped_column(String(10), default="")
+    # Strażnicy powiadomień o zmianie stanu konta. Daty, a nie flagi, bo przy
+    # reklamacji („nikt mnie nie uprzedził") liczy się KIEDY push wyszedł.
+    # Każdy zapala się raz na całe życie konta — awans fazy je zeruje.
+    target_50_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    target_75_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    min_days_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    payout_ready_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     trading_days_count: Mapped[int] = mapped_column(Integer, default=0)
     last_counted_trading_day: Mapped[str] = mapped_column(String(16), default="")
     breach_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)

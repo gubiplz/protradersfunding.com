@@ -457,25 +457,6 @@ def _payout_available(acc: Account) -> float:
     return round(profit * float(acc.profit_split_pct or 80) / 100.0, 2)
 
 
-def _payout_days_left(acc: Account) -> int:
-    """Ile dni handlu brakuje kontu do wypłaty (0 = można wnioskować).
-
-    Instant Funding jest funded od pierwszej minuty, więc jego `min_trading_days`
-    nie ma żadnej fazy do zamknięcia — ta liczba znaczy w tym planie dokładnie
-    jedno: sklepową obietnicę „min. 30 dni handlu przed pierwszą wypłatą". Do
-    2026-09-09 nie pilnował jej nikt, ani portal, ani API, więc konto z zyskiem
-    mogło wypłacić drugiego dnia, mimo że dashboard pokazywał obok „X / 30 min".
-
-    Ewaluacji ta bramka NIE dotyczy: tam te same dni są warunkiem ZDANIA fazy,
-    zużywają się przed wejściem na funded (`trading_days_count` startuje wtedy od
-    zera) i policzenie ich drugi raz zamroziłoby wypłaty świeżo sfinansowanym
-    kontom 2-Step — czego cennik nigdzie nie obiecuje.
-    """
-    if acc.steps:
-        return 0
-    return max(0, int(acc.min_trading_days or 0) - int(acc.trading_days_count or 0))
-
-
 def _next_day_reset() -> str:
     """Kiedy dzienny limit straty wróci do pełna, w UTC.
 
@@ -522,7 +503,7 @@ def _account_dict(acc: Account, with_metrics: bool = True, with_credentials: boo
         "scale_trigger_pct": poller.SCALE_TRIGGER_PCT,
         "scale_count": int(getattr(acc, "scale_count", 0) or 0),
         "payout_available": _payout_available(acc),
-        "payout_days_left": _payout_days_left(acc),
+        "payout_days_left": poller.payout_days_left(acc),
         "day_reset_at": _next_day_reset(),
     }
     if admin_view:
@@ -1796,7 +1777,7 @@ def request_payout(account_id: int, payload: PayoutReqIn, trader: Trader = Depen
         # Ręcznie ustawiona pula tej bramki nie otwiera — pula rządzi KWOTĄ,
         # dni rządzą TERMINEM. Właściciel, który chce wypłacić wcześniej, ma na
         # to „Issue payout" w panelu, poza ścieżką wniosku.
-        brak_dni = _payout_days_left(acc)
+        brak_dni = poller.payout_days_left(acc)
         if brak_dni:
             raise HTTPException(400, f"This plan pays out after {int(acc.min_trading_days)} "
                                      f"trading days — {int(acc.trading_days_count or 0)} done, "
@@ -3609,7 +3590,7 @@ def admin_account_payouts(account_id: int):
                 "split_pct": acc.profit_split_pct,
                 "suggested_share": _payout_available(acc),
                 "payout_pool_usd": getattr(acc, "payout_pool_usd", None),
-                "payout_days_left": _payout_days_left(acc),
+                "payout_days_left": poller.payout_days_left(acc),
                 "min_trading_days": int(acc.min_trading_days or 0),
                 "trading_days": int(acc.trading_days_count or 0),
                 "payouts": [_payout_dict(p, acc) for p in rows]}

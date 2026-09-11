@@ -98,6 +98,9 @@ def _advance_phase(acc: Account, rt: AccountRuntime) -> None:
     acc.trading_days_count = 0
     acc.last_counted_trading_day = ""
     acc.breach_reason = None
+    # Nowa faza ma własny cel i własne dni, więc strażnicy progów idą razem
+    # z metrykami — inaczej drugą ewaluację trader przechodziłby w ciszy.
+    acc.target_50_at = acc.target_75_at = acc.min_days_at = None
     acc.prev_phase_started_at = acc.phase_started_at or acc.started_at
     acc.phase_started_at = datetime.now(timezone.utc)
 
@@ -166,6 +169,10 @@ def apply_scale_up(session, acc: Account) -> float:
     acc.trading_days_count = 0
     acc.last_counted_trading_day = ""
     acc.breach_reason = None
+    # Po skalowaniu to inny rachunek: inny login, saldo od nowa, dni od zera.
+    # Strażnicy ze starego rozmiaru zablokowaliby wszystkie cztery progi.
+    acc.target_50_at = acc.target_75_at = None
+    acc.min_days_at = acc.payout_ready_at = None
     acc.started_at = datetime.now(timezone.utc)
     acc.closed_at = None
 
@@ -206,6 +213,84 @@ def _limit_warnings_due(acc: Account, metrics: dict, day_key: str) -> list[str]:
         acc.limit_warn_dd_day = day_key
         tytuly.append(f"{acc.login}: {int(round(dd))}% of max drawdown used")
     return tytuly
+
+
+def payout_days_left(acc: Account) -> int:
+    """Ile dni handlu brakuje kontu do wypłaty (0 = można wnioskować).
+
+    Instant Funding jest funded od pierwszej minuty, więc jego `min_trading_days`
+    nie ma żadnej fazy do zamknięcia — ta liczba znaczy w tym planie dokładnie
+    jedno: sklepową obietnicę „min. 30 dni handlu przed pierwszą wypłatą". Do
+    2026-09-09 nie pilnował jej nikt, ani portal, ani API, więc konto z zyskiem
+    mogło wypłacić drugiego dnia, mimo że dashboard pokazywał obok „X / 30 min".
+
+    Ewaluacji ta bramka NIE dotyczy: tam te same dni są warunkiem ZDANIA fazy,
+    zużywają się przed wejściem na funded (`trading_days_count` startuje wtedy od
+    zera) i policzenie ich drugi raz zamroziłoby wypłaty świeżo sfinansowanym
+    kontom 2-Step — czego cennik nigdzie nie obiecuje.
+    """
+    if acc.steps:
+        return 0
+    return max(0, int(acc.min_trading_days or 0) - int(acc.trading_days_count or 0))
+
+
+# Konto zaimportowane z historią przechodzi wszystkie progi naraz na pierwszym
+# ticku. Doba ciszy po założeniu oddziela „tak było od początku" od „właśnie się
+# zmieniło" — a tylko to drugie jest powodem, żeby zawracać komuś głowę.
+STATE_QUIET_HOURS = 24
+
+
+def _state_change_due(acc: Account, cfg, metrics: dict,
+                      now: datetime) -> tuple[str, str] | None:
+    """Jedno należne powiadomienie o zmianie stanu `(event, tytuł)`; stawia strażnika.
+
+    Konto zmienia stan po cichu: próg zysku pada w środku nocy, dni handlowe
+    dochodzą same z siebie, a wypłata robi się dostępna bez żadnego sygnału.
+    Trader dowiaduje się o tym dopiero, gdy sam otworzy portal — te cztery
+    zdarzenia mówią mu to wtedy, kiedy naprawdę się stały.
+
+    Świadomie NIE ma tu „zostało ci jeszcze X": próg opisany brakującym
+    dystansem to near-miss, czyli dokładnie ta mechanika, którą regulatorzy
+    wytykają brokerom detalicznym. Każdy tytuł mówi, co się JUŻ wydarzyło,
+    a treść (`push._BODY`) — co z tego wynika dla reguł konta.
+
+    `now` musi być w UTC, bo porównujemy je z `created_at`; `server_now()` jest
+    przesunięte o strefę serwera MT5 i tutaj by kłamało.
+    """
+    stworzone = acc.created_at
+    if stworzone is not None:
+        if stworzone.tzinfo is None:
+            stworzone = stworzone.replace(tzinfo=timezone.utc)
+        if (now - stworzone) < timedelta(hours=STATE_QUIET_HOURS):
+            return None
+
+    cel = float(cfg.profit_target_pct or 0)
+    zysk = float(metrics.get("profit_pct") or 0)
+    dni = int(metrics.get("trading_days") or 0)
+    wymagane = int(cfg.min_trading_days or 0)
+
+    if cel > 0 and zysk >= 0.75 * cel and acc.target_75_at is None:
+        # Konto, które przeskoczyło oba progi między tickami, dostaje tylko ten
+        # wyższy — wiadomość o progu, który już minął, nie niesie żadnego stanu.
+        acc.target_50_at = acc.target_50_at or now
+        acc.target_75_at = now
+        return "target_75", f"{acc.login}: three quarters of the {cel:g}% profit target reached"
+    if cel > 0 and zysk >= 0.5 * cel and acc.target_50_at is None:
+        acc.target_50_at = now
+        return "target_50", f"{acc.login}: half of the {cel:g}% profit target reached"
+    if (wymagane > 0 and dni >= wymagane and acc.min_days_at is None
+            and acc.phase != Phase.FUNDED.value):
+        # Tylko w ewaluacji, gdzie dni handlu są osobnym warunkiem ZDANIA fazy.
+        # Na funded te same dni są bramką wypłaty, więc mówi o nich `payout_ready`
+        # — inaczej Instant Funding dostałby dwie wiadomości o jednym zdarzeniu.
+        acc.min_days_at = now
+        return "min_days_met", f"{acc.login}: minimum of {wymagane} trading days completed"
+    if (acc.status == Status.FUNDED.value and acc.payout_ready_at is None
+            and payout_days_left(acc) == 0
+            and round(acc.balance - acc.initial_balance, 2) > 0):
+        acc.payout_ready_at = now
+        return "payout_ready", f"{acc.login}: eligible to request a payout"
+    return None
 
 
 def _notify(acc: Account, event: str, extra: dict | None = None) -> None:
@@ -302,6 +387,11 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
         # Skalowanie NIE dzieje się tu samo: przy +15% trader wybiera w portalu
         # między wypłatą a wyższym planem (POST /api/accounts/{id}/scale-up).
         ostrzezenia = _limit_warnings_due(acc, res.metrics, tick.day_key)
+        # Zmiana stanu ustępuje ostrzeżeniu o limicie: jeśli konto ociera się
+        # dziś o granicę, „połowa celu za tobą" w tym samym cyklu brzmi jak
+        # zachęta do dalszej jazdy. Próg poczeka do następnego ticku.
+        zmiana = (None if ostrzezenia
+                  else _state_change_due(acc, cfg, res.metrics, datetime.now(timezone.utc)))
         session.commit()
         # Push + centrum powiadomień, BEZ maila (jak daily_recap) — mail o
         # „prawie stracie" o 3 nad ranem to panika, nie pomoc.
@@ -311,6 +401,11 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
                 push.send_event("limit_warning", email, tytul)
             except Exception as e:  # pragma: no cover
                 print(f"[poller] limit warning: {e}", flush=True)
+        if zmiana:
+            try:
+                push.send_event(zmiana[0], email, zmiana[1], {"account_id": acc.id})
+            except Exception as e:  # pragma: no cover
+                print(f"[poller] state change: {e}", flush=True)
 
 
 BACKFILL_LOCK_KEY = "bot_backfill_lock"
@@ -378,6 +473,12 @@ def backfill_bot(session, acc: Account, days: int, *, chunk_days: float = 3.0,
         acc.trading_days_count = 0
         acc.last_counted_trading_day = ""
         start = now - timedelta(days=days)
+        # Dogrywka cofa `created_at`, więc dobowe okno ciszy przestaje osłaniać
+        # konto — a progi, które padły w ODTWORZONEJ historii, nie były dla
+        # tradera żadną zmianą stanu. Stemplujemy je jako ogłoszone: pierwszy
+        # żywy tick ma milczeć o czymś, czego nikt nie przeżył.
+        acc.target_50_at = acc.target_75_at = start
+        acc.min_days_at = acc.payout_ready_at = start
         acc.bot_started_at = start
         acc.created_at = start
         acc.started_at = start

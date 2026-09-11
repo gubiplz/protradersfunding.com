@@ -811,6 +811,11 @@ _PREF_BY_EVENT = {
     "breached": "notify_trading",
     # tylko push+centrum (push.send_event z pollera) — maila do tego zdarzenia nie ma
     "limit_warning": "notify_trading",
+    # Zmiany stanu konta (poller._state_change_due) — ta sama kategoria co
+    # ostrzeżenie o limicie, bo to ta sama rozmowa o WŁASNYM koncie, a nie
+    # oferta. Kto wyłączył „trading", wyłącza cały ten kanał naraz.
+    "target_50": "notify_trading", "target_75": "notify_trading",
+    "min_days_met": "notify_trading", "payout_ready": "notify_trading",
     "payout_requested": "notify_payouts", "payout_approved": "notify_payouts",
     "payout_rejected": "notify_payouts",
     # recap idzie tylko przez push/centrum (push.daily_recap), nie mailem
