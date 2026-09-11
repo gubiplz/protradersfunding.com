@@ -125,6 +125,10 @@ class Trader(Base):
     reveal_last: Mapped[str | None] = mapped_column(String(10), nullable=True)
     reveal_payload: Mapped[str | None] = mapped_column(String(240), nullable=True)  # JSON dzisiejszego wyniku
     streak_freezes: Mapped[int] = mapped_column(Integer, default=1)                 # ratuje serię po 1 dniu przerwy
+    # Klucze obserwacji z dwóch ostatnich przeglądów tygodnia, po przecinku,
+    # najnowszy pierwszy. Bez tego ten sam wniosek („jeden dzień zrobił tydzień")
+    # wracałby w każdy poniedziałek i przestałby cokolwiek znaczyć.
+    weekly_rules: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 

@@ -775,6 +775,7 @@ const TITLES={
   loyalty:['Loyalty','Trade your points for a discount code'],
   journal:['Journal','Your private trading notes'],
   analytics:['Analytics','Daily P&L computed from your account history'],
+  weekly:['Week in review','The week that closed, day by day'],
   rewards:['Rewards','Programs built into the platform'],
   payouts:['Payouts','Performance rewards across all your accounts'],
   certificates:['Certificates','Your verifiable documents: evaluation stages and payouts'],
@@ -799,7 +800,10 @@ function go(v){
   /* Nazwa widoku w propsach: dziennik w adminie rozpisuje z tego, co klient
      faktycznie przegladal, nie tylko ze "otworzyl portal". */
   track('view_open',{view:v,pwa:document.documentElement.classList.contains('pwa')?'1':'0'});
-  document.querySelectorAll('.sb-link[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  /* Przeglad tygodnia nie ma wlasnej pozycji w menu — wchodzi sie w niego z
+     powiadomienia. Bez tego aliasu nawigacja zostawala bez zaznaczenia. */
+  const sv={weekly:'analytics'}[v]||v;
+  document.querySelectorAll('.sb-link[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===sv));
   const tv={store:'accounts',achievements:'rewards',loyalty:'rewards'}[v]||v;
   const tabs=[...document.querySelectorAll('.tab-item[data-v]')];
   const hit=tabs.some(b=>b.dataset.v===tv);
@@ -1895,6 +1899,83 @@ const VIEWS={
       scales:{x:{ticks:{color:th.dim,font:{size:10},autoSkip:true,maxRotation:0,
           maxTicksLimit:matchMedia('(max-width:640px)').matches?6:undefined},grid:{display:false}},
         y:{ticks:{color:th.dim,font:{size:10},callback:v=>'$'+v},grid:{color:th.line}}}}});
+ },
+
+ /* Przeglad ZAMKNIETEGO tygodnia — cel poniedzialkowego powiadomienia. Nie ma
+    go w menu i nie da sie tu wejsc "sprawdzic wyniku na zywo": okno jest zawsze
+    to samo, niezaleznie od dnia wejscia. Obserwacje opisuja przeszlosc i konczy
+    je zdanie, ktore mowi to wprost — to nie sa sygnaly ani cele. */
+ async weekly(){
+  const d=await api('/api/me/weekly');
+  const wd=s=>new Date(s+'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'});
+  /* Os NIE stoi w polowie wykresu: polowki dostaja wysokosc w proporcji do
+     najlepszego i najgorszego dnia, a slupek liczy sie wzgledem swojej polowki.
+     Dzieki temu jeden dolar to tyle samo pikseli po obu stronach (czyli wykres
+     nie klamie), a tydzien z jednym glebokim minusem nie zostawia u gory
+     polowy pustej karty. */
+  const mp=Math.max(...d.days.map(x=>Math.max(0,x.pnl)));
+  const mn=Math.max(...d.days.map(x=>Math.max(0,-x.pnl)));
+  /* Dzien, ktory ledwo drgnal, nie moze zniknac do zera — 4% wysokosci zostawia
+     slad, ze handel BYL, tylko wynik wyszedl blisko zera. */
+  const h=(v,skala)=>Math.max(4,Math.abs(v)/skala*100);
+  /* Kwota jest pozycjonowana ABSOLUTNIE na koncu slupka, nie ustawiona obok niego
+     w flexie. Gdy siedziala w tym samym flexie, zabierala wysokosc najwyzszemu
+     slupkowi — i najlepszy dzien tygodnia wychodzil niemal rowny slabszemu.
+     Wykres ma nie klamac, wiec podpis nie moze zabierac slupkowi wysokosci; ta
+     sama wartosc procentowa niesie wiec i slupek, i odsuniecie podpisu. */
+  const slupek=x=>{
+    const gora=x.trades&&x.pnl>=0, dol=x.trades&&x.pnl<0;
+    const p=gora?h(x.pnl,mp):dol?h(x.pnl,mn):0;
+    return `<div class="wk-day${x.trades?'':' off'}" title="${x.label} ${x.day} · ${
+      x.trades?`${money(x.pnl)} · ${x.trades} trade${x.trades===1?'':'s'}`:'no trades'}">
+      <div class="wk-half up">${gora?`<b style="bottom:${p}%">${money(x.pnl)}</b>
+        <i style="height:${p}%"></i>`:''}</div>
+      <div class="wk-half dn">${dol?`<i style="height:${p}%"></i>
+        <b style="top:${p}%">${money(x.pnl)}</b>`:''}</div>
+      <span class="wk-lbl">${x.label}</span>
+    </div>`;
+  };
+  const zmiana=d.prev_trades
+    ?rp('Week before',`${money(d.prev_net_pnl)}<small> · ${d.prev_trades} trade${d.prev_trades===1?'':'s'}</small>`,
+        d.prev_net_pnl>=0?'ok':'bad')
+    :rp('Week before','—');
+  $('view').innerHTML=`
+    <div class="sec-card wk-card">
+      <div class="rc-head">
+        <div>
+          <div class="rc-eyebrow">Week of ${wd(d.from)} – ${wd(d.to)}</div>
+          <div class="recap-title">${d.trades
+            ?`${d.trades} trade${d.trades===1?'':'s'} over ${d.trading_days} day${d.trading_days===1?'':'s'}`
+            :'No closed trades this week'}</div>
+        </div>
+        <div style="text-align:right">
+          <div class="rc-pnl ${d.net_pnl>=0?'up':'down'}">${money(d.net_pnl)}</div>
+          <div class="rc-sub">net over the week</div>
+        </div>
+      </div>
+      <div class="wk-days" style="--wk-rows:${mp||1}fr ${mn||1}fr;--wk-up:${(mp||1)/((mp||1)+(mn||1))}">${d.days.map(slupek).join('')}</div>
+    </div>
+    ${d.trades?`
+    <div class="recap-grid wk-grid">
+      ${rp('Trading days',d.trading_days)}
+      ${rp('Win rate',d.win_rate!=null?`${d.win_rate}%`:'—')}
+      ${rp('Green days',d.green_days,d.green_days?'ok':'')}
+      ${rp('Red days',d.red_days,d.red_days?'bad':'')}
+      ${rp('Best day',d.best_day?money(d.best_day.pnl):'—',d.best_day&&d.best_day.pnl>0?'ok':'')}
+      ${rp('Worst day',d.worst_day?money(d.worst_day.pnl):'—',d.worst_day&&d.worst_day.pnl<0?'bad':'')}
+      ${rp('Accounts',d.accounts)}
+      ${zmiana}
+    </div>
+    <div class="sec-card"><h3>What happened</h3>
+      <ul class="wk-obs">${d.observations.map(o=>`<li>${esc(o)}</li>`).join('')}</ul>
+      <p class="wk-note">Observations describe what already happened. They are not signals,
+        advice, or targets.</p>
+    </div>`
+    :`<div class="sec-card"><h3>What happened</h3>
+      <p class="muted" style="font-size:13px">Nothing closed between ${wd(d.from)} and ${wd(d.to)}.
+        Weeks without trades stay empty here — the day-by-day history of every account is in
+        <a href="#" onclick="go('analytics');return false" style="color:var(--acc)">Analytics</a>.</p>
+    </div>`}`;
  },
 
  async certificates(){

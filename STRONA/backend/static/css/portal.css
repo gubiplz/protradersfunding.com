@@ -1120,6 +1120,65 @@ body.kb-open .botnav,body.kb-open .tabbar{display:none}
   .recap-foot .btn-p{width:100%}
 }
 
+/* Przeglad tygodnia. Slupki rosna od osi w gore i w dol, bo tydzien ma dni na
+   plusie i na minusie i zaden z nich nie ma wygladac na wazniejszy. Kafle liczb
+   i typografia te same co w podsumowaniu fazy — to ten sam gatunek ekranu. */
+.wk-days{--wk-lab:17px;position:relative;display:grid;grid-template-columns:repeat(7,1fr);
+  gap:6px;height:206px;margin-top:20px}
+/* Os idzie POD slupkami (bez tego kreska przecinala kazdy niski slupek w poprzek
+   i wygladalo to na blad renderowania), a jej wysokosc niesie `--wk-rows` — te
+   same proporcje, wedlug ktorych dziela sie polowki slupka. */
+.wk-days::after{content:'';position:absolute;left:0;right:0;z-index:0;
+  top:calc(var(--wk-lab) + (100% - var(--wk-lab) * 2 - 18px) * var(--wk-up,.5));
+  border-top:1px dashed var(--line2);pointer-events:none}
+/* Pasma na kwoty (--wk-lab) to PADDING, nie wiersze siatki: kwoty wisza absolutnie
+   przy koncach slupkow, wiec nie sa dziecmi siatki i wiersze by sie rozjechaly.
+   Pasma stoja poza proporcja mp:mn, wiec obie polowki dziela sie dokladnie tak,
+   jak dziela sie najlepszy i najgorszy dzien — inaczej dolar po jednej stronie
+   osi znaczylby co innego niz po drugiej. */
+.wk-day{position:relative;z-index:1;display:grid;height:100%;
+  padding-top:var(--wk-lab);grid-template-rows:var(--wk-rows,1fr 1fr) var(--wk-lab) 18px}
+.wk-half{position:relative;display:flex;flex-direction:column;align-items:center;min-height:0}
+.wk-half.up{justify-content:flex-end}
+.wk-half.dn{justify-content:flex-start}
+/* flex:none, bo bez tego slupek wyzszy niz polowka zostalby sciety przez
+   flex-shrink zamiast wystawac — a wtedy wysokosc przestaje niesc wartosc. */
+.wk-half i{display:block;flex:none;width:100%;max-width:34px}
+.wk-half.up i{background:var(--green);border-radius:5px 5px 0 0}
+.wk-half.dn i{background:var(--red);border-radius:0 0 5px 5px}
+.wk-half b{position:absolute;left:0;right:0;text-align:center;white-space:nowrap;
+  font-family:var(--mono);font-size:10.5px;font-weight:600;line-height:var(--wk-lab)}
+.wk-half.up b{color:var(--green)}
+.wk-half.dn b{color:var(--red)}
+/* Ostatni wiersz wprost: miedzy dolna polowka a nazwa dnia stoi puste pasmo na
+   kwote najglebszego dnia, a siatka sama wlozylaby nazwe wlasnie w nie. */
+.wk-lbl{grid-row:-1;align-self:center;text-align:center;font-size:11px;color:var(--muted)}
+.wk-day.off .wk-lbl{color:var(--dim);opacity:.55}
+.wk-grid{margin:16px 0}
+.wk-obs{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:11px}
+.wk-obs li{position:relative;padding-left:21px;font-size:13.5px;line-height:1.55;color:var(--txt)}
+.wk-obs li::before{content:'';position:absolute;left:5px;top:8px;width:6px;height:6px;
+  border-radius:50%;background:var(--acc)}
+/* Zdanie nosne, nie stopka prawnicza: bez niego lista obserwacji da sie
+   przeczytac jako podpowiedzi, co robic w nastepnym tygodniu. */
+.wk-note{margin:16px 0 0;padding-top:13px;border-top:1px solid var(--line);
+  font-size:12px;line-height:1.55;color:var(--muted)}
+@media(max-width:560px){
+  /* Kwoty nad slupkami zachodza na siebie przy siedmiu kolumnach na telefonie —
+     liczby stoja w kaflach nizej, a wartosc dnia niesie dotkniecie. Pasma kwot
+     ida do zera, zeby nie zostawialy pustych pasow nad i pod wykresem. */
+  .wk-days{--wk-lab:0px;height:172px;gap:4px;margin-top:16px}
+  .wk-half b{display:none}
+  .wk-half i{max-width:26px}
+}
+/* Na szerokim ekranie kolumna ma ~150px i slupek 34px gubi sie w niej jak patyk —
+   tydzien ma wygladac na zapis handlu, nie na resztki wykresu. */
+@media(min-width:900px){
+  .wk-days{--wk-lab:19px;height:246px}
+  .wk-half i{max-width:62px}
+  .wk-half b{font-size:11.5px}
+}
+
 .chal-filter{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:2px 0 16px}
 .chal-count{margin-left:auto;font-size:12px;color:var(--dim)}
 .chal-nomatch{text-align:center;color:var(--muted);font-size:13.5px;padding:30px 16px}

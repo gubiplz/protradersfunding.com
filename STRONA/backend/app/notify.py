@@ -815,6 +815,8 @@ _PREF_BY_EVENT = {
     "payout_rejected": "notify_payouts",
     # recap idzie tylko przez push/centrum (push.daily_recap), nie mailem
     "daily_recap": "notify_marketing",
+    # to samo dla poniedziałkowego przeglądu tygodnia (push.weekly_review)
+    "weekly_review": "notify_marketing",
     # Przypomnienie o porzuconym koszyku dotyczy wlasnego zakupu klienta, ale
     # jest zachęta do kupna — wiec pod marketingiem, jak recap. Kto wypisal sie
     # z ofert, nie dostaje tez tego.

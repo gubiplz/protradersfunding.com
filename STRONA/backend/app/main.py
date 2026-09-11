@@ -2256,6 +2256,28 @@ def account_recap(account_id: int, trader: Trader = Depends(auth.current_trader)
         session.close()
 
 
+@app.get("/api/me/weekly")
+def my_weekly_review(trader: Trader = Depends(auth.current_trader)):
+    """Przegląd ostatniego ZAMKNIĘTEGO tygodnia — cel poniedziałkowego pusha.
+
+    Zawsze ten sam tydzień niezależnie od dnia wejścia: kto otworzy powiadomienie
+    w czwartek, ma przed sobą to samo, co w poniedziałek rano. Liczby i obserwacje
+    liczy `push`, żeby ekran i powiadomienie nie mogły się rozejść.
+    """
+    session = SessionLocal()
+    try:
+        start, koniec = push.week_window(datetime.now(timezone.utc))
+        s = push.weekly_stats(session, trader.id, start, koniec)
+        poprzedni = push.weekly_stats(session, trader.id, start - timedelta(days=7), start)
+        s["prev_trades"] = poprzedni["trades"]
+        s["prev_net_pnl"] = poprzedni["net_pnl"]
+        s["observations"] = [t for _, t in
+                             push.weekly_observations(s, poprzedni)[:3]] if s["trades"] else []
+        return s
+    finally:
+        session.close()
+
+
 def _achievements_payload(session, trader: Trader) -> dict:
     odznaki = achievements.badges(session, trader)
     ile = sum(1 for b in odznaki if b["unlocked"])
@@ -6862,6 +6884,10 @@ async def _lazy_tick_middleware(request: Request, call_next):
         # wejść. Przed 06:00 to czysty test zegara — zero zapytań do bazy.
         if settings.recap_on_traffic:
             await run_in_threadpool(push.daily_recap)
+            # Przegląd tygodnia na tym samym ruchu i z tą samą logiką: sam
+            # sprawdza, czy jest poniedziałek po 06:00, i ma własny guard
+            # raz-na-tydzień. W pozostałe dni to jeden test zegara.
+            await run_in_threadpool(push.weekly_review)
         # Follow-upy leadów na tym samym ruchu: przypomnienia z terminem i nudge
         # „nikt nie wziął od 30 minut" liczą się w minutach, a cron Hobby chodzi
         # raz na dobę. Guard raz-na-LEADS_SWEEP_MIN siedzi w _lead_sweep_z_ruchu.
@@ -6952,6 +6978,8 @@ async def api_tick(request: Request):
     # push.daily_recap() sam pilnuje godziny, guardu raz-na-dobę i ciszy bez
     # transakcji.
     recap = push.daily_recap()
+    # Przegląd tygodnia tym samym trybem — zapas na poniedziałek bez wejść.
+    weekly = push.weekly_review()
     # „Scale your progress" raz w tygodniu (poniedzialek) — na tym samym cronie
     # z tego samego powodu co recap. Wlasny odstep 21 dni w `_upsell_nudge`
     # sprawia, ze recznie odpalony endpoint i ten przebieg sie nie dubluja.
@@ -6966,11 +6994,13 @@ async def api_tick(request: Request):
     # konto zejdzie do zera, a nie dopiero przy odrzuconym zamówieniu.
     zasieg = _reach_saldo_tick()
     if isinstance(wynik, dict):
-        return {**wynik, "daily_recap": recap, "upsell_nudge": nudge.get("sent", 0),
+        return {**wynik, "daily_recap": recap, "weekly_review": weekly.get("sent", 0),
+                "upsell_nudge": nudge.get("sent", 0),
                 "checkout_recovery": recovery.get("sent", 0), "payout_bot": payout,
                 "lead_followups": leady.get("sent", 0), "snapshots_pruned": pruned,
                 "reach": zasieg}
-    return {"tick": wynik, "daily_recap": recap, "upsell_nudge": nudge.get("sent", 0),
+    return {"tick": wynik, "daily_recap": recap, "weekly_review": weekly.get("sent", 0),
+            "upsell_nudge": nudge.get("sent", 0),
             "checkout_recovery": recovery.get("sent", 0), "payout_bot": payout,
             "lead_followups": leady.get("sent", 0), "snapshots_pruned": pruned,
             "reach": zasieg}
