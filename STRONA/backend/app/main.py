@@ -6127,6 +6127,9 @@ def admin_telegram_overview():
             # Czy ten czat obsługuje bot INNY niż główny — po tym widać, że
             # podział na boty faktycznie działa, a nie tylko jest ustawiony.
             "own_bot": bool(token and token != settings.telegram_bot_token),
+            # Tylko dla track recordu — plakaty odswieza workflow poza ta aplikacja.
+            "workflow_url": (settings.trackrecord_workflow_url
+                             if klucz == "trackrecord" else ""),
         })
     return out
 

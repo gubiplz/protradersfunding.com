@@ -262,6 +262,11 @@ class Settings:
     telegram_mgmt_chat_id: str = os.getenv("TELEGRAM_MGMT_CHAT_ID", "@forex_passing")
     telegram_trackrecord_chat_id: str = os.getenv(
         "TELEGRAM_TRACKRECORD_CHAT_ID", "@forex_passing_track_record")
+    # Adres workflow odswiezajacego plakaty track record. W ZMIENNEJ, nie w
+    # kodzie: to repozytorium jest publiczne, a adres zdradza partnera —
+    # pilnuje tego test `test_domena_partnera_nie_siedzi_w_kodzie`.
+    # Puste = panel pokazuje instrukcje zamiast przycisku.
+    trackrecord_workflow_url: str = os.getenv("TRACKRECORD_WORKFLOW_URL", "")
     # Sekret, którym landing autoryzuje POST /api/leads/ingest. Osobny od
     # ADMIN_TOKEN: landing stoi na cudzym hostingu i wycieka mu najwyżej prawo
     # dopisania leada, nigdy panel. Puste = endpoint odmawia wszystkiego.

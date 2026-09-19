@@ -113,6 +113,7 @@ const NAV=[
   {v:'offers',label:'Offers',ico:'tag'},
   {v:'pool',label:'MT5 Pool',ico:'bank'},
   {v:'mail',label:'Mail',ico:'mail'},
+  {v:'telegram',label:'Telegram',ico:'chat'},
   {v:'telemetry',label:'Telemetry',ico:'trend'},
   {v:'settings',label:'Settings',ico:'gear'},
 ];
@@ -142,6 +143,7 @@ const TITLES={
   offers:['Flash Sale Offers','Time-limited discounts on selected plans — per trader or for everyone'],
   pool:['MT5 Pool','Pre-provisioned accounts ready to assign'],
   mail:['Mail','Every e-mail the platform tried to send — and which ones failed'],
+  telegram:['Telegram','Kanały, boty i kolejka postów — wszystko w jednym miejscu'],
   telemetry:['Telemetry','Product events from the last 14 days'],
   settings:['Settings','Admin access and runtime configuration'],
 };
@@ -446,6 +448,102 @@ function leadChannel(nazwa,brakuje){
 
 /* ============================ VIEWS ============================ */
 const VIEWS={
+ /* Telegram w jednym miejscu: stan kanałów, oba boty i kolejka postów.
+    Powstało po zamrożeniu konta, którego objawem była CISZA — bot stracił
+    uprawnienia we wszystkich kanałach naraz, nic nie zgłosiło błędu, a posty
+    po prostu przestały wychodzić. Ta zakładka ma to pokazać, zanim ktoś
+    zauważy po tygodniu, że kanał stoi. */
+ async telegram(){
+  const [kan,pb,rc,posty]=await Promise.all([
+    api('/api/admin/telegram/overview').catch(()=>[]),
+    api('/api/admin/payout-engine').catch(()=>null),
+    api('/api/admin/reach').catch(()=>null),
+    api('/api/admin/channel-posts').catch(()=>[])]);
+
+  /* `bot_admin` jest TRÓJSTANOWE: true / false / null. `null` znaczy „nie dało
+     się sprawdzić" (brak tokenu, padnięta sieć) i NIE wolno go pokazywać jako
+     „wszystko gra" — to dokładnie ten stan, w którym awaria jest niewidoczna. */
+  const zdrowie=k=>{
+    if(!k.configured)return`<span class="status pending"><span class="dot"></span>brak konfiguracji</span>`;
+    if(k.bot_admin===true)return`<span class="status funded"><span class="dot"></span>administrator</span>`;
+    if(k.bot_admin===false)return`<span class="status failed"><span class="dot"></span>bez uprawnień</span>`;
+    return`<span class="status pending"><span class="dot"></span>nie sprawdzono</span>`;
+  };
+  const kartaKanalu=k=>`<div class="sec-card">
+    <h3>${esc(k.title)}</h3>
+    <div class="chip-row" style="margin-bottom:10px">
+      ${zdrowie(k)}
+      ${k.handle?`<a class="chip" href="https://t.me/${esc(k.handle.slice(1))}" target="_blank" rel="noopener">${esc(k.handle)}</a>`
+        :(k.chat_id?`<span class="chip mono">${esc(k.chat_id)}</span>`:'')}
+      ${k.bot_username?`<span class="chip">bot <b>@${esc(k.bot_username)}</b>${k.own_bot?' · własny':''}</span>`:''}
+    </div>
+    <div class="muted" style="font-size:12px;margin-bottom:10px">${esc(k.purpose)}</div>
+    ${k.bot_admin===false?`<div class="warn-box" style="margin:0 0 10px">
+      <div><b>Bot nie jest administratorem tego kanału.</b> Nic się tu nie opublikuje,
+      a Telegram nie zgłosi błędu — dodaj bota w Kanał → Administratorzy, z prawem
+      publikowania (oraz edycji i zmiany informacji tam, gdzie odświeżamy posty i opis).</div></div>`:''}
+    ${!k.configured?`<div class="warn-box" style="margin:0 0 10px">
+      <div>Brakuje tokenu albo numeru czatu. Ustaw <span class="mono">${esc(k.env)}</span>
+      w zmiennych środowiskowych.</div></div>`:''}
+    ${k.key==='payouts'?`<button class="btn-p" onclick="runPayoutBot()">Opublikuj wypłatę teraz</button>`:''}
+    ${k.key==='mgmt'?`<button class="btn-o" onclick="newChannelPost('mgmt')">Napisz post</button>`:''}
+    ${k.key==='trackrecord'?(k.workflow_url
+      ?`<a class="btn-o" target="_blank" rel="noopener" href="${esc(k.workflow_url)}">Odśwież plakaty</a>
+        <div class="muted" style="font-size:12px;margin-top:8px">Uruchamia pełny cykl:
+        odczyt liczb ze strony, nowe plakaty i podmianę w czterech istniejących postach —
+        dzięki czemu zachowują wyświetlenia i reakcje.</div>`
+      :`<div class="muted" style="font-size:12px">Plakaty odświeża workflow poza tą aplikacją.
+        Ustaw <span class="mono">TRACKRECORD_WORKFLOW_URL</span>, żeby pojawił się tu przycisk.</div>`):''}
+  </div>`;
+
+  const stan=p=>({draft:'pending',approved:'active',scheduled:'active',
+                  published:'funded',failed:'failed'})[p.status]||'pending';
+  const nazwaKanalu={mgmt:'Account Management',payouts:'Payouts',trackrecord:'Track Record'};
+  const wiersz=p=>`<tr>
+    <td>${esc(nazwaKanalu[p.channel]||p.channel)}</td>
+    <td style="max-width:420px">${esc((p.body||'').slice(0,150))}${(p.body||'').length>150?'…':''}
+      ${p.origin&&p.origin!=='panel'?`<div class="muted" style="font-size:11.5px;margin-top:3px">z archiwum: ${esc(p.origin)}</div>`:''}
+      ${p.last_error?`<div style="color:var(--red);font-size:12px;margin-top:4px">${esc(p.last_error)}</div>`:''}</td>
+    <td>${p.proof?`<span class="chip mono">${esc(p.proof)}</span>`:'<span class="muted">—</span>'}</td>
+    <td><span class="status ${stan(p)}"><span class="dot"></span>${esc(p.status)}</span></td>
+    <td>${p.scheduled_for?dstr(p.scheduled_for):'<span class="muted">—</span>'}</td>
+    <td style="white-space:nowrap">
+      ${p.status==='published'
+        ?(p.post_url?`<a class="btn-o sm" href="${esc(p.post_url)}" target="_blank" rel="noopener">Otwórz</a>`:'<span class="muted">—</span>')
+        :`${p.status==='draft'||p.status==='failed'?`<button class="btn-o sm" onclick="approvePost(${p.id})">Zatwierdź</button>`:''}
+          ${p.status==='approved'||p.status==='scheduled'?`<button class="btn-o sm" onclick="schedulePost(${p.id})">Zaplanuj</button>
+            <button class="btn-p sm" onclick="publishPost(${p.id})">Publikuj</button>`:''}
+          <button class="btn-o sm" onclick="deletePost(${p.id})">Usuń</button>`}
+    </td></tr>`;
+
+  const wKolejce=posty.filter(p=>p.status!=='published').length;
+  $('view').innerHTML=`
+    <div class="card-cols">${kan.map(kartaKanalu).join('')}</div>
+
+    <div class="sec-card" style="margin-top:16px">
+      <h3>Kolejka postów <span class="count-pill">${wKolejce} czeka</span></h3>
+      <div class="muted" style="font-size:12.5px;margin-bottom:10px">
+        Tick wypuszcza <b>jeden zaległy post na przebieg</b>, więc treść wraca rytmem,
+        a nie jednym zrzutem. Każda liczba w treści potrzebuje źródła: bez
+        <span class="mono">proof</span> post nie może zawierać kwoty ani procentu;
+        <span class="mono">payout:&lt;token&gt;</span> przypina kwoty do konkretnej wypłaty,
+        <span class="mono">stat:&lt;klucz&gt;:gte:&lt;wartość&gt;</span> jest przeliczany na
+        bieżących danych — raz przy zatwierdzeniu i drugi raz tuż przed publikacją.
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <button class="btn-p sm" onclick="newChannelPost('mgmt')">Napisz post</button>
+      </div>
+      ${posty.length?`<div class="tbl-wrap"><table class="tbl">
+        <thead><tr><th>Kanał</th><th>Treść</th><th>Źródło liczb</th><th>Stan</th><th>Termin</th><th></th></tr></thead>
+        <tbody>${posty.map(wiersz).join('')}</tbody></table></div>`
+        :`<div class="muted">Kolejka jest pusta.</div>`}
+    </div>
+
+    <div class="card-cols" style="margin-top:16px">
+      ${payoutCardHtml(pb)}
+      ${reachCardHtml(rc)}
+    </div>`;
+ },
  async overview(){
   const [s,pay,kyc,tick,orders]=await Promise.all([
     api('/api/stats'),api('/api/admin/payout-requests'),api('/api/admin/kyc'),
@@ -711,56 +809,17 @@ const VIEWS={
  },
 
  async settings(){
-  const [s,pb,bg,rc]=await Promise.all([api('/api/stats'),api('/api/admin/payout-engine'),
-    api('/api/admin/bogo-promo').catch(()=>({enabled:false})),
-    api('/api/admin/reach').catch(()=>null)]);
-  const brakuje=[!pb.telegram_ready?'Telegram channel':null,!pb.renderer_ready?'certificate renderer':null].filter(Boolean);
+  // Payout BOT i Reach BOT przeniosly sie do zakladki Telegram, wiec ten widok
+  // nie ciagnie juz ich stanu — dwa zapytania mniej przy kazdym wejsciu.
+  const [s,bg]=await Promise.all([api('/api/stats'),
+    api('/api/admin/bogo-promo').catch(()=>({enabled:false}))]);
   $('view').innerHTML=`
     <div class="card-cols">
-    <div class="sec-card" style="max-width:560px"><h3>Payout BOT</h3>
-      <div class="chip-row" style="margin-bottom:12px">
-        <span class="status ${pb.enabled?'funded':'pending'}"><span class="dot"></span>${pb.enabled?'running':'off'}</span>
-        <span class="chip">window <b>${String(pb.win_from).padStart(2,'0')}:00&ndash;${String(pb.win_to).padStart(2,'0')}:00 ET</b></span>
-        <span class="chip">today's slot <b>${esc(pb.today_slot_et||'--:--')} ET</b></span>
-        <span class="chip">on landing <b>${pb.lp_pct}%</b></span>
-        <span class="chip">last run <b>${esc(pb.last_day||'never')}</b></span>
-        ${pb.last_result?`<span class="chip" ${/FAILED/.test(pb.last_result)?'style="border-color:var(--red-line);color:var(--red)"':''}>last post <b>${esc(pb.last_result)}</b></span>`:''}
-      </div>
-      ${brakuje.length?`<div class="warn-box" style="margin:0 0 12px">
-        <div><b>Not configured yet: ${brakuje.join(' and ')}</b>
-        The payout and its certificate are still created, but nothing is published.
-        Set <span class="mono">TELEGRAM_BOT_TOKEN</span>, <span class="mono">TELEGRAM_CHAT_ID</span>
-        and <span class="mono">SHOT_API_URL</span> in the environment.</div></div>`:''}
-      <div class="pool-form">
-        <div><label class="muted" style="font-size:12px">Window from (ET hour)</label>
-          <input id="pb-from" class="inp" type="number" min="0" max="23" step="1" value="${pb.win_from}"></div>
-        <div><label class="muted" style="font-size:12px">Window to (ET hour)</label>
-          <input id="pb-to" class="inp" type="number" min="0" max="23" step="1" value="${pb.win_to}"></div>
-        <div><label class="muted" style="font-size:12px">Chance of landing page %</label>
-          <input id="pb-lp" class="inp" type="number" min="0" max="100" step="1" value="${pb.lp_pct}"></div>
-        <div><label class="muted" style="font-size:12px">Profit min %</label>
-          <input id="pb-min" class="inp" type="number" min="0.5" max="40" step="0.1" value="${pb.gross_min_pct}"></div>
-        <div><label class="muted" style="font-size:12px">Profit max %</label>
-          <input id="pb-max" class="inp" type="number" min="0.5" max="40" step="0.1" value="${pb.gross_max_pct}"></div>
-      </div>
-      <div style="margin-bottom:12px"><label class="muted" style="font-size:12px">Account sizes</label>
-        <input id="pb-sizes" class="inp" value="${pb.sizes.map(n=>n.toFixed(0)).join(',')}" placeholder="50000,100000,200000"></div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <button class="btn-p" onclick="savePayoutBot()">Save settings</button>
-        <button class="btn-o" onclick="togglePayoutBot(${pb.enabled?'false':'true'})">${pb.enabled?'Turn off':'Turn on'}</button>
-        <button class="btn-o" onclick="runPayoutBot()">Run once now</button>
-      </div>
-      <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
-        Creates <b>one payout a day</b> with today's date and a funded archive account behind it.
-        The posting minute is <b>drawn fresh every day</b> inside your window (US Eastern,
-        DST-aware), so posts never land at the same time twice. Site traffic releases the post at
-        that exact minute; with zero traffic it falls back to the daily tick, which fires from the
-        start of the window. <b>Every payout gets a public certificate</b> and is posted to
-        the channel; only the share above lands on the certificate strip on the landing page, so it
-        does not fill up with the same entries.
-        <b>Run once now</b> replaces today's automatic run rather than adding to it.</p></div>
-
-    ${reachCardHtml(rc)}
+    <div class="sec-card" style="max-width:560px"><h3>Telegram</h3>
+      <p class="muted" style="font-size:13px;margin:6px 0 12px">Payout BOT, Reach BOT,
+        stan kanałów i kolejka postów mają teraz własną zakładkę — wszystko, co dotyczy
+        kanałów, w jednym miejscu.</p>
+      <button class="btn-p" onclick="go('telegram')">Otwórz zakładkę Telegram</button></div>
 
     <div class="sec-card" style="max-width:560px"><h3>Buy 1 Get 1 Free</h3>
       <div class="chip-row" style="margin-bottom:12px">
@@ -3934,6 +3993,164 @@ async function reachAddChannel(btn){
 async function reachDropChannel(username){
   return reachSaveChannels(reachCurrentChannels().filter(k=>k.username!==username));
 }
+/* ---------- kolejka postów na kanały ---------- */
+/* Odmowa walidatora to informacja dla piszącego, nie błąd techniczny — dlatego
+   trafia do toasta w CAŁOŚCI („statystyka wynosi dziś X, a post zakłada Y"),
+   zamiast zostać zamieniona na ogólne „nie udało się zapisać". */
+async function approvePost(id){
+  try{
+    await api(`/api/admin/channel-posts/${id}/approve`,{method:'POST'});
+    toast('Zatwierdzone. Zaplanuj albo opublikuj od razu.');
+    go('telegram');
+  }catch(e){toast('Nie zatwierdzono — '+e.message,'err')}
+}
+async function publishPost(id){
+  if(!await askConfirm({title:'Opublikować na kanale?',
+      body:'Twierdzenia są sprawdzane jeszcze raz: post zatwierdzony wcześniej musi być prawdziwy także teraz.',
+      ok:'Publikuj'}))return;
+  try{
+    await api(`/api/admin/channel-posts/${id}/publish`,{method:'POST'});
+    toast('Opublikowane.');
+    go('telegram');
+  }catch(e){toast('Nie opublikowano — '+e.message,'err')}
+}
+/* Termin wpisuje się lokalnym czasem przeglądarki; `toISOString()` przelicza go
+   na UTC, bo w tym backendzie wszystkie znaczniki są w UTC. Bez tego post
+   zaplanowany na 18:00 wyszedłby o 20:00 latem. */
+async function schedulePost(id){
+  const teraz=new Date(Date.now()-new Date().getTimezoneOffset()*60000)
+    .toISOString().slice(0,16);
+  const kiedy=prompt('Kiedy opublikować? (RRRR-MM-DDTGG:MM, czas lokalny)',teraz);
+  if(!kiedy)return;
+  const d=new Date(kiedy);
+  if(isNaN(d)){toast('Nie rozumiem tej daty.','err');return}
+  try{
+    await api(`/api/admin/channel-posts/${id}/schedule`,{method:'POST',
+      body:JSON.stringify({scheduled_for:d.toISOString()})});
+    toast('Zaplanowane. Tick wypuszcza jeden zaległy post na przebieg.');
+    go('telegram');
+  }catch(e){toast('Nie zaplanowano — '+e.message,'err')}
+}
+async function deletePost(id){
+  if(!await askConfirm({title:'Usunąć ten post?',body:'Nie został opublikowany.',ok:'Usuń'}))return;
+  try{
+    await api(`/api/admin/channel-posts/${id}`,{method:'DELETE'});
+    go('telegram');
+  }catch(e){toast('Błąd: '+e.message,'err')}
+}
+function newChannelPost(kanal){
+  const box=document.createElement('div');
+  box.id='cpost-modal';box.className='modal-wrap';
+  const opt=(v,l)=>`<option value="${v}"${v===(kanal||'mgmt')?' selected':''}>${l}</option>`;
+  box.innerHTML=`<div class="modal" onclick="event.stopPropagation()" style="max-width:720px">
+    <div class="modal-head"><h3>Nowy post na kanał</h3>
+      <button class="icon-btn" onclick="document.getElementById('cpost-modal').remove()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <p class="muted" style="font-size:12.5px;margin-bottom:14px">Każda liczba potrzebuje źródła.
+      Bez <code>proof</code> post nie może zawierać kwoty ani procentu.
+      <code>payout:&lt;cert_token&gt;</code> przypina każdą kwotę do tej wypłaty;
+      <code>stat:&lt;klucz&gt;:gte:&lt;wartość&gt;</code> jest przeliczany na bieżących danych —
+      raz przy zatwierdzeniu i drugi raz tuż przed publikacją.</p>
+    <div class="stack">
+      <div class="pool-form">
+        <div><label class="muted" style="font-size:12px">Kanał</label>
+          <select id="cp-ch" class="inp">
+            ${opt('mgmt','Account Management')}${opt('payouts','Payouts')}${opt('trackrecord','Track Record')}
+          </select></div>
+        <div><label class="muted" style="font-size:12px">Rodzaj</label>
+          <select id="cp-kind" class="inp"><option value="text">Tekst</option><option value="photo">Ze zdjęciem</option></select></div>
+      </div>
+      <textarea id="cp-body" class="inp" rows="9" placeholder="Treść posta — HTML dozwolony"></textarea>
+      <input id="cp-proof" class="inp" placeholder="proof — puste, payout:&lt;cert_token&gt; albo stat:payouts_total_usd:gte:186000">
+      <input id="cp-media" class="inp" placeholder="tylko dla posta ze zdjęciem: adres strony do zrzutu">
+      <div style="display:flex;gap:8px">
+        <button class="btn-o lg" style="flex:1" onclick="document.getElementById('cpost-modal').remove()">Anuluj</button>
+        <button class="btn-p lg" style="flex:1" onclick="saveChannelPost()">Zapisz jako szkic</button>
+      </div>
+      <p class="hint">Szkic niczego nie publikuje. Zatwierdzenie to moment, w którym człowiek
+        bierze odpowiedzialność za treść — dlatego jest osobnym kliknięciem, a nie polem tutaj.</p>
+    </div></div>`;
+  box.onclick=()=>box.remove();
+  document.body.appendChild(box);
+}
+async function saveChannelPost(){
+  const body=($('cp-body').value||'').trim();
+  if(!body){toast('Post nie ma treści.','err');return}
+  try{
+    await api('/api/admin/channel-posts',{method:'POST',body:JSON.stringify({
+      channel:$('cp-ch').value, kind:$('cp-kind').value, body,
+      proof:($('cp-proof').value||'').trim(),
+      media_url:($('cp-media').value||'').trim()||null})});
+    document.getElementById('cpost-modal')?.remove();
+    toast('Zapisane jako szkic. Zatwierdź, gdy twierdzenia się zgadzają.');
+    go('telegram');
+  }catch(e){toast('Nie zapisano — '+e.message,'err')}
+}
+
+/* Czyszczenie listy kanałów Reach BOT-a. Kanał wypłat wraca na listę sam —
+   tak działa `reach.kanaly()`, więc pusta lista nie znaczy „nic nie podbijamy". */
+async function clearReachChannels(){
+  if(!await askConfirm({title:'Wyczyścić listę kanałów?',
+      body:'Zostanie sam kanał wypłat, który wraca na listę automatycznie. Resztę dodasz ręcznie.',
+      ok:'Wyczyść'}))return;
+  try{
+    await api('/api/admin/reach/channels',{method:'POST',body:JSON.stringify({channels:[]})});
+    toast('Lista wyczyszczona.');
+    go('telegram');
+  }catch(e){toast('Błąd: '+e.message,'err')}
+}
+
+/* Karta Payout BOT-a. Wyjeta z widoku ustawien, bo pokazuje sie teraz
+   w zakladce Telegram — jedno miejsce na wszystko, co dotyczy kanalow.
+   Wywolanie z dwoch widokow bylo tansze niz druga kopia markupu, ktora
+   rozjechalaby sie przy pierwszej zmianie tekstu. */
+function payoutCardHtml(pb){
+  if(!pb)return'';
+  const brakuje=[!pb.telegram_ready?'Telegram channel':null,!pb.renderer_ready?'certificate renderer':null].filter(Boolean);
+  return `<div class="sec-card" style="max-width:560px"><h3>Payout BOT</h3>
+      <div class="chip-row" style="margin-bottom:12px">
+        <span class="status ${pb.enabled?'funded':'pending'}"><span class="dot"></span>${pb.enabled?'running':'off'}</span>
+        <span class="chip">window <b>${String(pb.win_from).padStart(2,'0')}:00&ndash;${String(pb.win_to).padStart(2,'0')}:00 ET</b></span>
+        <span class="chip">today's slot <b>${esc(pb.today_slot_et||'--:--')} ET</b></span>
+        <span class="chip">on landing <b>${pb.lp_pct}%</b></span>
+        <span class="chip">last run <b>${esc(pb.last_day||'never')}</b></span>
+        ${pb.last_result?`<span class="chip" ${/FAILED/.test(pb.last_result)?'style="border-color:var(--red-line);color:var(--red)"':''}>last post <b>${esc(pb.last_result)}</b></span>`:''}
+      </div>
+      ${brakuje.length?`<div class="warn-box" style="margin:0 0 12px">
+        <div><b>Not configured yet: ${brakuje.join(' and ')}</b>
+        The payout and its certificate are still created, but nothing is published.
+        Set <span class="mono">TELEGRAM_BOT_TOKEN</span>, <span class="mono">TELEGRAM_CHAT_ID</span>
+        and <span class="mono">SHOT_API_URL</span> in the environment.</div></div>`:''}
+      <div class="pool-form">
+        <div><label class="muted" style="font-size:12px">Window from (ET hour)</label>
+          <input id="pb-from" class="inp" type="number" min="0" max="23" step="1" value="${pb.win_from}"></div>
+        <div><label class="muted" style="font-size:12px">Window to (ET hour)</label>
+          <input id="pb-to" class="inp" type="number" min="0" max="23" step="1" value="${pb.win_to}"></div>
+        <div><label class="muted" style="font-size:12px">Chance of landing page %</label>
+          <input id="pb-lp" class="inp" type="number" min="0" max="100" step="1" value="${pb.lp_pct}"></div>
+        <div><label class="muted" style="font-size:12px">Profit min %</label>
+          <input id="pb-min" class="inp" type="number" min="0.5" max="40" step="0.1" value="${pb.gross_min_pct}"></div>
+        <div><label class="muted" style="font-size:12px">Profit max %</label>
+          <input id="pb-max" class="inp" type="number" min="0.5" max="40" step="0.1" value="${pb.gross_max_pct}"></div>
+      </div>
+      <div style="margin-bottom:12px"><label class="muted" style="font-size:12px">Account sizes</label>
+        <input id="pb-sizes" class="inp" value="${pb.sizes.map(n=>n.toFixed(0)).join(',')}" placeholder="50000,100000,200000"></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn-p" onclick="savePayoutBot()">Save settings</button>
+        <button class="btn-o" onclick="togglePayoutBot(${pb.enabled?'false':'true'})">${pb.enabled?'Turn off':'Turn on'}</button>
+        <button class="btn-o" onclick="runPayoutBot()">Run once now</button>
+      </div>
+      <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
+        Creates <b>one payout a day</b> with today's date and a funded archive account behind it.
+        The posting minute is <b>drawn fresh every day</b> inside your window (US Eastern,
+        DST-aware), so posts never land at the same time twice. Site traffic releases the post at
+        that exact minute; with zero traffic it falls back to the daily tick, which fires from the
+        start of the window. <b>Every payout gets a public certificate</b> and is posted to
+        the channel; only the share above lands on the certificate strip on the landing page, so it
+        does not fill up with the same entries.
+        <b>Run once now</b> replaces today's automatic run rather than adding to it.</p></div>`;
+}
+
 function reachCardHtml(rc){
   window._reach=rc;
   if(!rc)return'';
@@ -3984,6 +4201,7 @@ function reachCardHtml(rc){
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <button class="btn-p" onclick="saveReach(this)">Save settings</button>
       <button class="btn-o" onclick="toggleReach(${rc.enabled?'false':'true'},this)">${rc.enabled?'Turn off':'Turn on'}</button>
+      <button class="btn-o" onclick="clearReachChannels()">Wyczyść listę kanałów</button>
     </div>
     <div style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)">
       <label class="muted" style="font-size:12px">Boost a single post</label>
