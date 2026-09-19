@@ -173,7 +173,7 @@ def send_photo(png: bytes, caption: str, *, transport=None) -> tuple[bool, str]:
 
 
 def send_content(chat_id: str, text: str, *, png: bytes | None = None,
-                 photo_url: str | None = None,
+                 photo_url: str | None = None, video_url: str | None = None,
                  token: str | None = None, transport=None) -> tuple[bool, str, dict]:
     """Post na DOWOLNY kanał treści — z grafiką albo bez.
 
@@ -189,6 +189,16 @@ def send_content(chat_id: str, text: str, *, png: bytes | None = None,
     token = token or bot_token_czatu(chat_id)
     if not token or not chat_id:
         return False, "no bot token or chat", {}
+    if video_url:
+        # Klip idzie ADRESEM, tak samo jak zdjęcie. Uwaga na limit: plik
+        # pobierany spod adresu może mieć najwyżej 20 MB — powyżej Telegram
+        # odmawia i nie ma tu nic do „spróbowania jeszcze raz".
+        # `supports_streaming` pozwala odtwarzać przed pobraniem całości.
+        return _strzal_json("sendVideo",
+                            {"chat_id": str(chat_id), "video": video_url,
+                             "caption": text[:1024], "parse_mode": "HTML",
+                             "supports_streaming": "true"},
+                            None, transport, token=token)
     if photo_url:
         # Telegram pobiera zdjęcie z podanego adresu SAM. Dzięki temu post
         # odtwarzany z archiwum nie wymaga wnoszenia cudzych plików do repo —

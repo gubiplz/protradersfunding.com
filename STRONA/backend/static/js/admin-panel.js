@@ -4115,11 +4115,11 @@ function newChannelPost(kanal){
             ${opt('mgmt','Account Management')}${opt('payouts','Payouts')}${opt('trackrecord','Track Record')}
           </select></div>
         <div><label class="muted" style="font-size:12px">Type</label>
-          <select id="cp-kind" class="inp"><option value="text">Text</option><option value="photo">Photo</option></select></div>
+          <select id="cp-kind" class="inp"><option value="text">Text</option><option value="photo">Photo</option><option value="video">Video</option></select></div>
       </div>
       <textarea id="cp-body" class="inp" rows="9" placeholder="Post body — HTML allowed"></textarea>
       <input id="cp-proof" class="inp" placeholder="proof — empty, payout:&lt;cert_token&gt; or stat:payouts_total_usd:gte:186000">
-      <input id="cp-media" class="inp" placeholder="photo posts only: URL of the page to screenshot">
+      <input id="cp-media" class="inp" placeholder="photo: URL of a ready image, or of a page to screenshot · video: URL of the .mp4">
       <div style="display:flex;gap:8px">
         <button class="btn-o lg" style="flex:1" onclick="document.getElementById('cpost-modal').remove()">Cancel</button>
         <button class="btn-p lg" style="flex:1" onclick="saveChannelPost()">Save as draft</button>

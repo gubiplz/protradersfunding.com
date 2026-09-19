@@ -45,6 +45,26 @@ STATUSY = ("draft", "approved", "scheduled", "published", "failed")
 
 # Limity Telegrama. Podpis pod zdjęciem 1024 znaki, sam tekst 4096.
 LIMIT_PODPISU = 1024
+# Rodzaje postów, które niosą załącznik — i przez to krótszy limit podpisu.
+ZE_ZALACZNIKIEM = ("photo", "video")
+# Rozszerzenia rozpoznawane jako GOTOWY plik. Świadomie wąskie: adres strony
+# z parametrem (np. `/payout/xxx?bare=1`) ma dalej iść do certshota.
+_OBRAZKI = (".png", ".jpg", ".jpeg", ".webp")
+_FILMY = (".mp4",)
+
+
+def _sciezka_adresu(adres: str) -> str:
+    """Sama ścieżka adresu, bez query stringa i kotwicy."""
+    return str(adres or "").split("?", 1)[0].split("#", 1)[0].lower()
+
+
+def _jest_obrazkiem(adres: str) -> bool:
+    return _sciezka_adresu(adres).endswith(_OBRAZKI)
+
+
+def _jest_filmem(adres: str) -> bool:
+    return _sciezka_adresu(adres).endswith(_FILMY)
+
 LIMIT_TEKSTU = 4096
 
 # Cokolwiek, co wygląda na twierdzenie liczbowe: kwota, procent albo licznik.
@@ -131,13 +151,19 @@ def waliduj(session, post: ChannelPost) -> None:
 
     # Odmowa, nie ciche przycięcie. Telegram utnie podpis do 1024 znaków
     # w połowie zdania, a obcięte zdanie potrafi znaczyć coś innego niż całe.
-    limit = LIMIT_PODPISU if post.kind == "photo" else LIMIT_TEKSTU
+    # Podpis pod zdjęciem I pod filmem ma ten sam limit 1024 znaków.
+    limit = LIMIT_PODPISU if post.kind in ZE_ZALACZNIKIEM else LIMIT_TEKSTU
     sprawdz(len(tresc) <= limit,
             f"treść ma {len(tresc)} znaków, a limit dla tego typu posta to {limit} "
             f"— Telegram utnie ją w połowie zdania")
 
-    if post.kind == "photo":
-        sprawdz(post.media_url, "post ze zdjęciem bez adresu grafiki")
+    if post.kind in ZE_ZALACZNIKIEM:
+        sprawdz(post.media_url,
+                "post ze zdjęciem bez adresu grafiki" if post.kind == "photo"
+                else "post z filmem bez adresu klipu")
+    if post.kind == "video":
+        sprawdz(_jest_filmem(post.media_url),
+                "adres klipu musi wskazywać na plik wideo (.mp4)")
 
     dowod = (post.proof or "").strip()
 
@@ -220,19 +246,34 @@ def opublikuj(session, post: ChannelPost, *, transport_shot=None,
         return {"posted": False, "reason": str(e)}
 
     czat = chat_id(post.channel)
-    png = adres_foto = None
-    if post.kind == "photo" and post.media_url:
-        if post.origin.startswith("archive:"):
-            # Zdjęcie z archiwum leci ADRESEM: Telegram pobiera je sam ze
-            # swojego CDN-u, więc nie trzeba wnosić cudzych plików do repo.
+    png = adres_foto = adres_klipu = None
+    if post.kind == "video" and post.media_url:
+        adres_klipu = post.media_url
+    elif post.kind == "photo" and post.media_url:
+        if post.origin.startswith("archive:") or _jest_obrazkiem(post.media_url):
+            # Gotowy obraz leci ADRESEM: Telegram pobiera go sam. Tą drogą idą
+            # grafiki zatwierdzone przed publikacją — to, co widział admin,
+            # jest dokładnie tym, co zobaczy kanał.
             adres_foto = post.media_url
         else:
             # Ta sama droga co przy certyfikatach: zrzut prawdziwej strony,
             # zamiast piątej kopii tego samego layoutu w kodzie.
             png = certshot.render(post.media_url, transport=transport_shot)
 
+    if post.kind in ZE_ZALACZNIKIEM and not (png or adres_foto or adres_klipu):
+        # Bez tego post wychodził jako goły tekst i zapisywał się jako
+        # `published` — awaria wyglądała w panelu jak sukces.
+        powod = (f"post rodzaju „{post.kind}” nie ma czego wysłać: "
+                 f"zrzut się nie udał, a adres nie wskazuje na gotowy plik")
+        post.status = "failed"
+        post.last_error = powod[:300]
+        post.updated_at = datetime.now(timezone.utc)
+        session.commit()
+        return {"posted": False, "reason": powod}
+
     ok, powod, dane = telegram.send_content(czat, post.body, png=png,
                                             photo_url=adres_foto,
+                                            video_url=adres_klipu,
                                             transport=transport_tg)
     if ok:
         post.status = "published"
@@ -246,7 +287,8 @@ def opublikuj(session, post: ChannelPost, *, transport_shot=None,
     post.updated_at = datetime.now(timezone.utc)
     session.commit()
     return {"posted": ok, "reason": "" if ok else post.last_error,
-            "post_url": post.post_url, "photo": bool(png)}
+            "post_url": post.post_url,
+            "photo": bool(png or adres_foto), "video": bool(adres_klipu)}
 
 
 def wyslij_zaplanowane(session, now: datetime | None = None) -> dict:

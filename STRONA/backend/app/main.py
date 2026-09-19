@@ -5962,7 +5962,7 @@ def admin_channel_post_create(payload: ChannelPostIn):
     """
     if payload.channel not in contentbot.KANALY:
         raise HTTPException(400, f"Unknown channel: {payload.channel}")
-    if payload.kind not in ("text", "photo"):
+    if payload.kind not in ("text", "photo", "video"):
         raise HTTPException(400, "kind must be text or photo")
     session = SessionLocal()
     try:
