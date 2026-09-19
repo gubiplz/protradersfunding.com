@@ -24,7 +24,7 @@ co tym samym kanałem idzie obok niej.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func
 
@@ -185,7 +185,20 @@ def waliduj(session, post: ChannelPost) -> None:
                 f"{biezaca:g}, a post zakłada {op} {prog:g}")
         return
 
-    raise NieprawdziwyPost(f"nieznany rodzaj dowodu „{dowod}”; użyj `payout:…` albo `stat:…`")
+    if dowod.startswith("archive:"):
+        # Dowód POCHODZENIA, nie aktualności. Mówi: „ten tekst przyszedł
+        # wprost z archiwum naszego własnego kanału i nikt go od tego czasu nie
+        # ruszał" — a człowiek zatwierdził całą partię, wgrywając plik. NIE mówi,
+        # że liczby są nadal prawdziwe; dlatego import zostawia jako szkice
+        # wszystko, co niesie twierdzenie związane z czasem (patrz CZASOWE_RX),
+        # a edycja treści kasuje ten dowód (PATCH w main.py).
+        sprawdz(post.origin == dowod,
+                "dowód `archive:` obowiązuje tylko dla posta wgranego z archiwum "
+                "i nieedytowanego — po zmianie treści trzeba wskazać inne źródło")
+        return
+
+    raise NieprawdziwyPost(f"nieznany rodzaj dowodu „{dowod}”; użyj `payout:…`, "
+                           f"`stat:…` albo `archive:…`")
 
 
 # --------------------------------------------------------------------------- #
@@ -207,13 +220,19 @@ def opublikuj(session, post: ChannelPost, *, transport_shot=None,
         return {"posted": False, "reason": str(e)}
 
     czat = chat_id(post.channel)
-    png = None
+    png = adres_foto = None
     if post.kind == "photo" and post.media_url:
-        # Ta sama droga co przy certyfikatach: zrzut prawdziwej strony, zamiast
-        # piątej kopii tego samego layoutu w kodzie.
-        png = certshot.render(post.media_url, transport=transport_shot)
+        if post.origin.startswith("archive:"):
+            # Zdjęcie z archiwum leci ADRESEM: Telegram pobiera je sam ze
+            # swojego CDN-u, więc nie trzeba wnosić cudzych plików do repo.
+            adres_foto = post.media_url
+        else:
+            # Ta sama droga co przy certyfikatach: zrzut prawdziwej strony,
+            # zamiast piątej kopii tego samego layoutu w kodzie.
+            png = certshot.render(post.media_url, transport=transport_shot)
 
     ok, powod, dane = telegram.send_content(czat, post.body, png=png,
+                                            photo_url=adres_foto,
                                             transport=transport_tg)
     if ok:
         post.status = "published"
@@ -255,3 +274,94 @@ def wyslij_zaplanowane(session, now: datetime | None = None) -> dict:
         return {"sent": 1 if wynik.get("posted") else 0, "id": post.id,
                 "reason": wynik.get("reason", "")}
     return {"sent": 0}
+
+
+# --------------------------------------------------------------------------- #
+#  Odtwarzanie treści ze starego kanału                                        #
+# --------------------------------------------------------------------------- #
+# Stary zestaw kanałów został porzucony po zamrożeniu konta. Jego treść wraca
+# na nowy kanał RYTMEM, w jakim wpadała wcześniej — stary account management
+# miał 18 postów w 18,5 dnia, czyli mniej więcej jeden dziennie. Jednorazowy
+# zrzut osiemnastu postów wyglądałby jak awaria, nie jak prowadzenie kanału.
+#
+# Archiwum NIE leży w tym repozytorium i leżeć nie może: jest publiczne, a to
+# są treści partnera. Plik wgrywa się z panelu, a zdjęcia lecą ADRESEM — Telegram
+# pobiera je sam ze swojego CDN-u, więc nie trzeba ich nigdzie kopiować.
+
+# Twierdzenia ZWIĄZANE Z CZASEM. Post, który mówi „w zeszłym miesiącu" albo
+# podaje konkretną datę, powtórzony za pół roku jest po prostu nieprawdziwy —
+# a dowód `archive:` tego nie wyłapie, bo potwierdza pochodzenie, nie
+# aktualność. Takie posty import zostawia jako SZKICE, do decyzji człowieka.
+CZASOWE_RX = re.compile(
+    r"\b(last month|this month|last week|this week|today|yesterday|"
+    r"january|february|march|april|may|june|july|august|september|"
+    r"october|november|december)\b", re.I)
+
+# Krótsze i tak nie są postami — „Channel created", „Channel photo updated".
+MIN_DLUGOSC = 40
+
+
+def _wpisy_archiwum(posty: list[dict]) -> list[dict]:
+    """Tylko realne posty, najstarsze pierwsze."""
+    out = [p for p in (posty or [])
+           if str(p.get("text") or "").strip()
+           and len(str(p["text"]).strip()) > MIN_DLUGOSC and p.get("id")]
+    return sorted(out, key=lambda p: str(p.get("date") or ""))
+
+
+def podglad_archiwum(posty: list[dict]) -> dict:
+    """Co jest w pliku i ile z tego pójdzie samo, bez udziału człowieka."""
+    wpisy = _wpisy_archiwum(posty)
+    czasowe = [p for p in wpisy if CZASOWE_RX.search(p["text"])]
+    return {"total": len(wpisy), "auto": len(wpisy) - len(czasowe),
+            "manual": len(czasowe)}
+
+
+def importuj_archiwum(session, posty: list[dict], *, kanal: str = "mgmt",
+                      co_ile_godzin: int = 24, start: datetime | None = None,
+                      now: datetime | None = None) -> dict:
+    """Wrzuca archiwalne posty do kolejki, rozłożone co `co_ile_godzin`.
+
+    Post bez twierdzeń związanych z czasem dostaje dowód `archive:` i status
+    `scheduled` — pójdzie sam. Post z takim twierdzeniem ląduje jako `draft`
+    z zajętym terminem: widać go w kolejce, ale nie wyjdzie, dopóki ktoś go nie
+    zatwierdzi. To jest granica, której automat nie przekracza.
+
+    Idempotentne po `origin`: ponowne wgranie tego samego pliku nie zdubluje
+    tego, co już wisi w kolejce.
+    """
+    teraz = now or datetime.now(timezone.utc)
+    kiedy = start or (teraz + timedelta(hours=co_ile_godzin))
+
+    juz = {o for (o,) in session.query(ChannelPost.origin)
+           .filter(ChannelPost.origin.like("archive:%")).all()}
+
+    dodane = pominiete = recznie = 0
+    for wpis in _wpisy_archiwum(posty):
+        origin = f"archive:{kanal}/{wpis['id']}"
+        if origin in juz:
+            pominiete += 1
+            continue
+        tresc = str(wpis["text"]).strip()
+        czasowy = bool(CZASOWE_RX.search(tresc))
+        # Zdjęcie tylko wtedy, gdy podpis się w nim mieści — Telegram tnie
+        # podpis na 1024 znakach, a obcięte zdanie potrafi znaczyć co innego.
+        foto = (wpis.get("photos") or [None])[0]
+        ze_zdjeciem = bool(foto) and len(tresc) <= LIMIT_PODPISU
+        session.add(ChannelPost(
+            channel=kanal,
+            kind="photo" if ze_zdjeciem else "text",
+            body=tresc,
+            media_url=foto if ze_zdjeciem else None,
+            proof=origin,
+            status="draft" if czasowy else "scheduled",
+            scheduled_for=kiedy,
+            origin=origin,
+            created_by="import"))
+        kiedy += timedelta(hours=co_ile_godzin)
+        dodane += 1
+        if czasowy:
+            recznie += 1
+    session.commit()
+    return {"added": dodane, "skipped": pominiete, "needs_review": recznie,
+            "every_hours": co_ile_godzin}

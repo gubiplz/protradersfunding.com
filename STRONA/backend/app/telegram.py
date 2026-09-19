@@ -173,6 +173,7 @@ def send_photo(png: bytes, caption: str, *, transport=None) -> tuple[bool, str]:
 
 
 def send_content(chat_id: str, text: str, *, png: bytes | None = None,
+                 photo_url: str | None = None,
                  token: str | None = None, transport=None) -> tuple[bool, str, dict]:
     """Post na DOWOLNY kanał treści — z grafiką albo bez.
 
@@ -188,6 +189,14 @@ def send_content(chat_id: str, text: str, *, png: bytes | None = None,
     token = token or bot_token_czatu(chat_id)
     if not token or not chat_id:
         return False, "no bot token or chat", {}
+    if photo_url:
+        # Telegram pobiera zdjęcie z podanego adresu SAM. Dzięki temu post
+        # odtwarzany z archiwum nie wymaga wnoszenia cudzych plików do repo —
+        # wystarczy adres, pod którym Telegram już to zdjęcie trzyma.
+        return _strzal_json("sendPhoto",
+                            {"chat_id": str(chat_id), "photo": photo_url,
+                             "caption": text[:1024], "parse_mode": "HTML"},
+                            None, transport, token=token)
     if png:
         return _strzal_json("sendPhoto",
                             {"chat_id": str(chat_id), "caption": text[:1024],

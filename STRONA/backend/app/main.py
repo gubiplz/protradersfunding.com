@@ -5990,7 +5990,13 @@ def admin_channel_post_edit(post_id: int, payload: ChannelPostIn):
         p.channel, p.kind = payload.channel, payload.kind
         p.body = payload.body or ""
         p.media_url = payload.media_url or None
-        p.proof = (payload.proof or "").strip()
+        nowy_dowod = (payload.proof or "").strip()
+        # Dowód `archive:` mówi „to przyszło wprost z archiwum i nikt tego nie
+        # ruszał". Po zmianie treści przestaje być prawdziwy, więc znika — a post
+        # wraca pod zwykłą regułę: liczba w tekście wymaga wskazanego źródła.
+        if nowy_dowod.startswith("archive:") and (payload.body or "").strip() != (p.body or "").strip():
+            nowy_dowod = ""
+        p.proof = nowy_dowod
         p.scheduled_for = payload.scheduled_for
         p.status, p.last_error = "draft", ""
         p.updated_at = datetime.now(timezone.utc)
@@ -6073,6 +6079,46 @@ def admin_channel_post_publish(post_id: int):
         if not wynik.get("posted"):
             raise HTTPException(502, wynik.get("reason") or "Telegram refused the post")
         return _post_dict(p)
+    finally:
+        session.close()
+
+
+class ArchiveImportIn(BaseModel):
+    """Zawartość pliku `messages.json` z archiwum starego kanału.
+
+    Plik wgrywa się z panelu, a NIE leży w tym repozytorium — jest publiczne,
+    a to są treści partnera.
+    """
+    posts: list[dict]
+    # Domyślnie co 24 h, bo tyle wynosił rytm starego kanału: 18 postów
+    # w 18,5 dnia. Zakres 1–168 h, żeby dało się zagęścić albo rozrzedzić,
+    # ale nie ustawić czegoś, co wysypie kanał w minutę.
+    every_hours: int = 24
+    start: datetime | None = None
+    dry_run: bool = False
+
+
+@app.post("/api/admin/archive/import", dependencies=[Depends(auth.require_admin)])
+def admin_archive_import(payload: ArchiveImportIn):
+    """Wrzuca archiwalne posty do kolejki, rozłożone w czasie.
+
+    `dry_run` liczy, co by wpadło, i niczego nie zapisuje — panel pokazuje to
+    przed potwierdzeniem, żeby nikt nie zaplanował osiemnastu postów w ciemno.
+
+    Idempotentne: ponowne wgranie tego samego pliku nie zdubluje tego, co już
+    wisi w kolejce (rozpoznaje po `origin`).
+    """
+    if not 1 <= payload.every_hours <= 168:
+        raise HTTPException(400, "every_hours must be between 1 and 168")
+    if not payload.posts:
+        raise HTTPException(400, "The file has no posts")
+    if payload.dry_run:
+        return contentbot.podglad_archiwum(payload.posts)
+    session = SessionLocal()
+    try:
+        return contentbot.importuj_archiwum(
+            session, payload.posts, co_ile_godzin=payload.every_hours,
+            start=payload.start)
     finally:
         session.close()
 

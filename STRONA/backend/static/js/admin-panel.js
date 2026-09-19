@@ -530,9 +530,19 @@ const VIEWS={
         <span class="mono">stat:&lt;key&gt;:gte:&lt;value&gt;</span> is re-checked against live
         numbers — once at approval and again right before it goes out.
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
         <button class="btn-p sm" onclick="newChannelPost('mgmt')">Write a post</button>
+        <span style="width:1px;height:22px;background:var(--line)"></span>
+        <span class="muted" style="font-size:12px">Refill from the old channel:</span>
+        <input id="arch-file" class="inp" type="file" accept=".json,application/json"
+          style="max-width:230px" onchange="archivePreview()">
+        <input id="arch-h" class="inp" type="number" min="1" max="168" step="1" value="24"
+          style="width:74px" title="Hours between posts">
+        <button class="btn-o sm" onclick="importArchive()">Queue them</button>
       </div>
+      <div id="arch-info" class="muted" style="font-size:12px;margin-bottom:10px">
+        Pick the <span class="mono">messages.json</span> from the channel archive. Posts go in
+        one every N hours, oldest first — the old channel ran about one a day.</div>
       ${posty.length?`<div class="tbl-wrap"><table class="tbl">
         <thead><tr><th>Channel</th><th>Body</th><th>Proof</th><th>Status</th><th>Scheduled</th><th></th></tr></thead>
         <tbody>${posty.map(wiersz).join('')}</tbody></table></div>`
@@ -3993,6 +4003,50 @@ async function reachAddChannel(btn){
 async function reachDropChannel(username){
   return reachSaveChannels(reachCurrentChannels().filter(k=>k.username!==username));
 }
+/* Odtwarzanie treści ze starego kanału. Plik wgrywa się TUTAJ, bo archiwum nie
+   leży w repozytorium i leżeć nie może — jest publiczne, a to treści partnera. */
+async function archiveFilePosts(){
+  const f=($('arch-file')||{}).files?.[0];
+  if(!f)return null;
+  try{
+    const d=JSON.parse(await f.text());
+    const posts=Array.isArray(d)?d:d.posts;
+    if(!Array.isArray(posts))throw new Error('no "posts" array');
+    return posts;
+  }catch(e){toast('That file does not look like a channel archive — '+e.message,'err');return null}
+}
+/* Podglad liczony na serwerze TĄ SAMĄ funkcją, która potem importuje — inaczej
+   panel obiecywałby co innego, niż wykona import. */
+async function archivePreview(){
+  const posts=await archiveFilePosts(); if(!posts)return;
+  try{
+    const r=await api('/api/admin/archive/import',{method:'POST',
+      body:JSON.stringify({posts,dry_run:true})});
+    $('arch-info').innerHTML=`<b>${r.total}</b> posts in the file · <b>${r.auto}</b> will be `
+      +`scheduled · <b>${r.manual}</b> land as drafts, because they make a time-bound claim `
+      +`(“last month”, a named month, a date). Repeated months later those simply read false, `
+      +`and the <span class="mono">archive:</span> proof cannot catch it — it confirms where `
+      +`the text came from, not that the numbers still hold.`;
+  }catch(e){toast('Could not read the file — '+e.message,'err')}
+}
+async function importArchive(){
+  const posts=await archiveFilePosts();
+  if(!posts){toast('Pick the archive file first.','err');return}
+  const h=Number(($('arch-h')||{}).value||24);
+  if(!(h>=1&&h<=168)){toast('Hours must be between 1 and 168.','err');return}
+  if(!await askConfirm({title:'Queue the archived posts?',
+      body:`They go out one every ${h} h, oldest first. Anything making a time-bound claim `
+           +`lands as a draft instead — it keeps its slot but will not go out until you `
+           +`approve it.`,
+      ok:'Queue'}))return;
+  try{
+    const r=await api('/api/admin/archive/import',{method:'POST',
+      body:JSON.stringify({posts,every_hours:h})});
+    toast(`Queued ${r.added} posts (${r.needs_review} need a look, ${r.skipped} already there).`);
+    go('telegram');
+  }catch(e){toast('Import failed — '+e.message,'err')}
+}
+
 /* ---------- kolejka postów na kanały ---------- */
 /* Odmowa walidatora to informacja dla piszącego, nie błąd techniczny — dlatego
    trafia do toasta w CAŁOŚCI („statystyka wynosi dziś X, a post zakłada Y"),
