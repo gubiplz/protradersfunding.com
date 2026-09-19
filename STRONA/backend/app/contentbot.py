@@ -300,19 +300,49 @@ CZASOWE_RX = re.compile(
 # Krótsze i tak nie są postami — „Channel created", „Channel photo updated".
 MIN_DLUGOSC = 40
 
+# Komunikaty SYSTEMOWE Telegrama, które w podglądzie kanału wyglądają jak post
+# i bywają dłuższe od progu: „<nazwa kanału> pinned a video". Wpuszczone do
+# kolejki wyszłyby na kanał jako zdanie o samym sobie.
+SYSTEMOWE_RX = re.compile(
+    r"\b(pinned a |pinned \"|joined the (channel|group)|"
+    r"channel (created|photo (updated|removed))|video chat (started|ended))", re.I)
+
+# Twierdzenia o LICZBIE WOLNYCH MIEJSC. Licznik miejsc na stronie zmienia się
+# każdego dnia, a opis kanału podaje aktualną wartość — post z „Only 2 Spots
+# Left" opublikowany w dniu, w którym licznik mówi co innego, przeczy własnemu
+# kanałowi. To nie jest to samo co twierdzenie czasowe (nie ma w nim daty),
+# ale starzeje się tak samo, więc kończy tak samo: szkicem.
+MIEJSCA_RX = re.compile(r"\b\d+\s+spots?\s+(left|remaining|available)\b", re.I)
+
+
+def wymaga_czlowieka(tekst: str) -> str:
+    """Powód, dla którego post nie może pójść sam. Pusty = może."""
+    trafienie = CZASOWE_RX.search(tekst)
+    if trafienie:
+        return f"time-bound claim: {trafienie.group(0)}"
+    trafienie = MIEJSCA_RX.search(tekst)
+    if trafienie:
+        return f"spots-left claim: {trafienie.group(0)}"
+    return ""
+
 
 def _wpisy_archiwum(posty: list[dict]) -> list[dict]:
     """Tylko realne posty, najstarsze pierwsze."""
     out = [p for p in (posty or [])
            if str(p.get("text") or "").strip()
-           and len(str(p["text"]).strip()) > MIN_DLUGOSC and p.get("id")]
+           and len(str(p["text"]).strip()) > MIN_DLUGOSC and p.get("id")
+           # Archiwizator zapisuje typ komunikatu systemowego w `service`;
+           # dla zwykłych postów jest tam `null`. Wzorzec jest zapasem na
+           # archiwa, które tego pola nie mają.
+           and not p.get("service")
+           and not SYSTEMOWE_RX.search(str(p["text"]))]
     return sorted(out, key=lambda p: str(p.get("date") or ""))
 
 
 def podglad_archiwum(posty: list[dict]) -> dict:
     """Co jest w pliku i ile z tego pójdzie samo, bez udziału człowieka."""
     wpisy = _wpisy_archiwum(posty)
-    czasowe = [p for p in wpisy if CZASOWE_RX.search(p["text"])]
+    czasowe = [p for p in wpisy if wymaga_czlowieka(p["text"])]
     return {"total": len(wpisy), "auto": len(wpisy) - len(czasowe),
             "manual": len(czasowe)}
 
@@ -343,7 +373,7 @@ def importuj_archiwum(session, posty: list[dict], *, kanal: str = "mgmt",
             pominiete += 1
             continue
         tresc = str(wpis["text"]).strip()
-        czasowy = bool(CZASOWE_RX.search(tresc))
+        czasowy = bool(wymaga_czlowieka(tresc))
         # Zdjęcie tylko wtedy, gdy podpis się w nim mieści — Telegram tnie
         # podpis na 1024 znakach, a obcięte zdanie potrafi znaczyć co innego.
         foto = (wpis.get("photos") or [None])[0]

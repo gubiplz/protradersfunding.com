@@ -214,3 +214,41 @@ def test_dry_run_niczego_nie_zapisuje():
                           "dry_run": True}, headers=ADMIN)
     assert r.status_code == 200 and r.json()["total"] == 1
     assert _kolejka() == []
+
+
+# --------------------------------------------------------------------------- #
+#  Co jeszcze nie jest postem, a co się starzeje                               #
+# --------------------------------------------------------------------------- #
+def test_komunikat_o_przypieciu_nie_jest_postem():
+    """„<kanał> pinned a video" ma 49 znaków, więc przechodził próg długości
+    i wyszedłby na kanał jako zdanie o samym sobie."""
+    _import([_post(1, "FOREX CHANNEL | ACCOUNT MANAGEMENT pinned a video", foto=False),
+             _post(2, "Prawdziwy wpis o prowadzeniu konta, wystarczająco długi.")])
+    assert [p.origin for p in _kolejka()] == ["archive:mgmt/2"]
+
+
+def test_pole_service_wystarczy_zeby_pominac():
+    """Archiwizator zapisuje typ komunikatu systemowego — ufamy mu wprost."""
+    wpis = _post(1, "Coś, co wygląda jak zwykły post o zarządzaniu kontem.")
+    wpis["service"] = "pinned"
+    _import([wpis])
+    assert _kolejka() == []
+
+
+def test_liczba_wolnych_miejsc_zostaje_szkicem():
+    """Licznik miejsc zmienia się codziennie i stoi w opisie kanału. Post
+    z „Only 2 Spots Left" wypuszczony w losowym dniu przeczy własnemu kanałowi."""
+    _import([_post(1, "🚨 Only 2 Spots Left 🚨 Do Not Wait! We Are Closing Our Spots.")])
+    assert _kolejka()[0].status == "draft"
+
+
+def test_powod_wstrzymania_nazywa_rzecz_po_imieniu():
+    assert "time-bound" in contentbot.wymaga_czlowieka("We paid out a lot last month.")
+    assert "spots-left" in contentbot.wymaga_czlowieka("Only 3 spots remaining. Do not wait.")
+    assert contentbot.wymaga_czlowieka("We manage the account. You get notified.") == ""
+
+
+def test_podglad_liczy_takze_miejsca():
+    posty = [_post(1, "🚨 Only 2 Spots Left 🚨 Do Not Wait! We Are Closing Our Spots."),
+             _post(2, "No promises here, just the way the desk works every day.")]
+    assert contentbot.podglad_archiwum(posty) == {"total": 2, "auto": 1, "manual": 1}
