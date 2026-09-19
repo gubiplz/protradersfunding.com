@@ -143,7 +143,7 @@ const TITLES={
   offers:['Flash Sale Offers','Time-limited discounts on selected plans — per trader or for everyone'],
   pool:['MT5 Pool','Pre-provisioned accounts ready to assign'],
   mail:['Mail','Every e-mail the platform tried to send — and which ones failed'],
-  telegram:['Telegram','Kanały, boty i kolejka postów — wszystko w jednym miejscu'],
+  telegram:['Telegram','Channels, bots and the posting queue — all in one place'],
   telemetry:['Telemetry','Product events from the last 14 days'],
   settings:['Settings','Admin access and runtime configuration'],
 };
@@ -464,10 +464,10 @@ const VIEWS={
      się sprawdzić" (brak tokenu, padnięta sieć) i NIE wolno go pokazywać jako
      „wszystko gra" — to dokładnie ten stan, w którym awaria jest niewidoczna. */
   const zdrowie=k=>{
-    if(!k.configured)return`<span class="status pending"><span class="dot"></span>brak konfiguracji</span>`;
+    if(!k.configured)return`<span class="status pending"><span class="dot"></span>not configured</span>`;
     if(k.bot_admin===true)return`<span class="status funded"><span class="dot"></span>administrator</span>`;
-    if(k.bot_admin===false)return`<span class="status failed"><span class="dot"></span>bez uprawnień</span>`;
-    return`<span class="status pending"><span class="dot"></span>nie sprawdzono</span>`;
+    if(k.bot_admin===false)return`<span class="status failed"><span class="dot"></span>no access</span>`;
+    return`<span class="status pending"><span class="dot"></span>not checked</span>`;
   };
   const kartaKanalu=k=>`<div class="sec-card">
     <h3>${esc(k.title)}</h3>
@@ -475,25 +475,25 @@ const VIEWS={
       ${zdrowie(k)}
       ${k.handle?`<a class="chip" href="https://t.me/${esc(k.handle.slice(1))}" target="_blank" rel="noopener">${esc(k.handle)}</a>`
         :(k.chat_id?`<span class="chip mono">${esc(k.chat_id)}</span>`:'')}
-      ${k.bot_username?`<span class="chip">bot <b>@${esc(k.bot_username)}</b>${k.own_bot?' · własny':''}</span>`:''}
+      ${k.bot_username?`<span class="chip">bot <b>@${esc(k.bot_username)}</b>${k.own_bot?' · own':''}</span>`:''}
     </div>
     <div class="muted" style="font-size:12px;margin-bottom:10px">${esc(k.purpose)}</div>
     ${k.bot_admin===false?`<div class="warn-box" style="margin:0 0 10px">
-      <div><b>Bot nie jest administratorem tego kanału.</b> Nic się tu nie opublikuje,
-      a Telegram nie zgłosi błędu — dodaj bota w Kanał → Administratorzy, z prawem
-      publikowania (oraz edycji i zmiany informacji tam, gdzie odświeżamy posty i opis).</div></div>`:''}
+      <div><b>The bot is not an administrator of this channel.</b> Nothing will be published
+      here and Telegram reports no error — add the bot under Channel → Administrators, with
+      permission to post (and to edit and change info where we refresh posts and the description).</div></div>`:''}
     ${!k.configured?`<div class="warn-box" style="margin:0 0 10px">
-      <div>Brakuje tokenu albo numeru czatu. Ustaw <span class="mono">${esc(k.env)}</span>
-      w zmiennych środowiskowych.</div></div>`:''}
-    ${k.key==='payouts'?`<button class="btn-p" onclick="runPayoutBot()">Opublikuj wypłatę teraz</button>`:''}
-    ${k.key==='mgmt'?`<button class="btn-o" onclick="newChannelPost('mgmt')">Napisz post</button>`:''}
+      <div>No token or chat id. Set <span class="mono">${esc(k.env)}</span>
+      in the environment.</div></div>`:''}
+    ${k.key==='payouts'?`<button class="btn-p" onclick="runPayoutBot()">Publish a payout now</button>`:''}
+    ${k.key==='mgmt'?`<button class="btn-o" onclick="newChannelPost('mgmt')">Write a post</button>`:''}
     ${k.key==='trackrecord'?(k.workflow_url
-      ?`<a class="btn-o" target="_blank" rel="noopener" href="${esc(k.workflow_url)}">Odśwież plakaty</a>
-        <div class="muted" style="font-size:12px;margin-top:8px">Uruchamia pełny cykl:
-        odczyt liczb ze strony, nowe plakaty i podmianę w czterech istniejących postach —
-        dzięki czemu zachowują wyświetlenia i reakcje.</div>`
-      :`<div class="muted" style="font-size:12px">Plakaty odświeża workflow poza tą aplikacją.
-        Ustaw <span class="mono">TRACKRECORD_WORKFLOW_URL</span>, żeby pojawił się tu przycisk.</div>`):''}
+      ?`<a class="btn-o" target="_blank" rel="noopener" href="${esc(k.workflow_url)}">Refresh posters</a>
+        <div class="muted" style="font-size:12px;margin-top:8px">Runs the whole cycle: reads
+        the numbers off the site, renders new posters and swaps them into the four existing
+        posts — which is how they keep their views and reactions.</div>`
+      :`<div class="muted" style="font-size:12px">Posters are refreshed by a workflow outside
+        this app. Set <span class="mono">TRACKRECORD_WORKFLOW_URL</span> to get a button here.</div>`):''}
   </div>`;
 
   const stan=p=>({draft:'pending',approved:'active',scheduled:'active',
@@ -502,18 +502,18 @@ const VIEWS={
   const wiersz=p=>`<tr>
     <td>${esc(nazwaKanalu[p.channel]||p.channel)}</td>
     <td style="max-width:420px">${esc((p.body||'').slice(0,150))}${(p.body||'').length>150?'…':''}
-      ${p.origin&&p.origin!=='panel'?`<div class="muted" style="font-size:11.5px;margin-top:3px">z archiwum: ${esc(p.origin)}</div>`:''}
+      ${p.origin&&p.origin!=='panel'?`<div class="muted" style="font-size:11.5px;margin-top:3px">from archive: ${esc(p.origin)}</div>`:''}
       ${p.last_error?`<div style="color:var(--red);font-size:12px;margin-top:4px">${esc(p.last_error)}</div>`:''}</td>
     <td>${p.proof?`<span class="chip mono">${esc(p.proof)}</span>`:'<span class="muted">—</span>'}</td>
     <td><span class="status ${stan(p)}"><span class="dot"></span>${esc(p.status)}</span></td>
     <td>${p.scheduled_for?dstr(p.scheduled_for):'<span class="muted">—</span>'}</td>
     <td style="white-space:nowrap">
       ${p.status==='published'
-        ?(p.post_url?`<a class="btn-o sm" href="${esc(p.post_url)}" target="_blank" rel="noopener">Otwórz</a>`:'<span class="muted">—</span>')
-        :`${p.status==='draft'||p.status==='failed'?`<button class="btn-o sm" onclick="approvePost(${p.id})">Zatwierdź</button>`:''}
-          ${p.status==='approved'||p.status==='scheduled'?`<button class="btn-o sm" onclick="schedulePost(${p.id})">Zaplanuj</button>
-            <button class="btn-p sm" onclick="publishPost(${p.id})">Publikuj</button>`:''}
-          <button class="btn-o sm" onclick="deletePost(${p.id})">Usuń</button>`}
+        ?(p.post_url?`<a class="btn-o sm" href="${esc(p.post_url)}" target="_blank" rel="noopener">Open</a>`:'<span class="muted">—</span>')
+        :`${p.status==='draft'||p.status==='failed'?`<button class="btn-o sm" onclick="approvePost(${p.id})">Approve</button>`:''}
+          ${p.status==='approved'||p.status==='scheduled'?`<button class="btn-o sm" onclick="schedulePost(${p.id})">Schedule</button>
+            <button class="btn-p sm" onclick="publishPost(${p.id})">Publish</button>`:''}
+          <button class="btn-o sm" onclick="deletePost(${p.id})">Delete</button>`}
     </td></tr>`;
 
   const wKolejce=posty.filter(p=>p.status!=='published').length;
@@ -521,22 +521,22 @@ const VIEWS={
     <div class="card-cols">${kan.map(kartaKanalu).join('')}</div>
 
     <div class="sec-card" style="margin-top:16px">
-      <h3>Kolejka postów <span class="count-pill">${wKolejce} czeka</span></h3>
+      <h3>Posting queue <span class="count-pill">${wKolejce} waiting</span></h3>
       <div class="muted" style="font-size:12.5px;margin-bottom:10px">
-        Tick wypuszcza <b>jeden zaległy post na przebieg</b>, więc treść wraca rytmem,
-        a nie jednym zrzutem. Każda liczba w treści potrzebuje źródła: bez
-        <span class="mono">proof</span> post nie może zawierać kwoty ani procentu;
-        <span class="mono">payout:&lt;token&gt;</span> przypina kwoty do konkretnej wypłaty,
-        <span class="mono">stat:&lt;klucz&gt;:gte:&lt;wartość&gt;</span> jest przeliczany na
-        bieżących danych — raz przy zatwierdzeniu i drugi raz tuż przed publikacją.
+        The tick releases <b>one overdue post per run</b>, so content comes back at a rhythm
+        rather than in one dump. Every figure needs a source: with no
+        <span class="mono">proof</span> a post may not carry an amount or a percentage;
+        <span class="mono">payout:&lt;token&gt;</span> pins amounts to that payout,
+        <span class="mono">stat:&lt;key&gt;:gte:&lt;value&gt;</span> is re-checked against live
+        numbers — once at approval and again right before it goes out.
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-        <button class="btn-p sm" onclick="newChannelPost('mgmt')">Napisz post</button>
+        <button class="btn-p sm" onclick="newChannelPost('mgmt')">Write a post</button>
       </div>
       ${posty.length?`<div class="tbl-wrap"><table class="tbl">
-        <thead><tr><th>Kanał</th><th>Treść</th><th>Źródło liczb</th><th>Stan</th><th>Termin</th><th></th></tr></thead>
+        <thead><tr><th>Channel</th><th>Body</th><th>Proof</th><th>Status</th><th>Scheduled</th><th></th></tr></thead>
         <tbody>${posty.map(wiersz).join('')}</tbody></table></div>`
-        :`<div class="muted">Kolejka jest pusta.</div>`}
+        :`<div class="muted">The queue is empty.</div>`}
     </div>
 
     <div class="card-cols" style="margin-top:16px">
@@ -817,9 +817,9 @@ const VIEWS={
     <div class="card-cols">
     <div class="sec-card" style="max-width:560px"><h3>Telegram</h3>
       <p class="muted" style="font-size:13px;margin:6px 0 12px">Payout BOT, Reach BOT,
-        stan kanałów i kolejka postów mają teraz własną zakładkę — wszystko, co dotyczy
-        kanałów, w jednym miejscu.</p>
-      <button class="btn-p" onclick="go('telegram')">Otwórz zakładkę Telegram</button></div>
+        channel health and the posting queue now have their own tab — everything about the
+        channels in one place.</p>
+      <button class="btn-p" onclick="go('telegram')">Open the Telegram tab</button></div>
 
     <div class="sec-card" style="max-width:560px"><h3>Buy 1 Get 1 Free</h3>
       <div class="chip-row" style="margin-bottom:12px">
@@ -4000,19 +4000,19 @@ async function reachDropChannel(username){
 async function approvePost(id){
   try{
     await api(`/api/admin/channel-posts/${id}/approve`,{method:'POST'});
-    toast('Zatwierdzone. Zaplanuj albo opublikuj od razu.');
+    toast('Approved. Schedule it, or publish now.');
     go('telegram');
-  }catch(e){toast('Nie zatwierdzono — '+e.message,'err')}
+  }catch(e){toast('Not approved — '+e.message,'err')}
 }
 async function publishPost(id){
-  if(!await askConfirm({title:'Opublikować na kanale?',
-      body:'Twierdzenia są sprawdzane jeszcze raz: post zatwierdzony wcześniej musi być prawdziwy także teraz.',
-      ok:'Publikuj'}))return;
+  if(!await askConfirm({title:'Publish to the channel?',
+      body:'The claims are re-checked first: a post approved earlier must still be true now.',
+      ok:'Publish'}))return;
   try{
     await api(`/api/admin/channel-posts/${id}/publish`,{method:'POST'});
-    toast('Opublikowane.');
+    toast('Published.');
     go('telegram');
-  }catch(e){toast('Nie opublikowano — '+e.message,'err')}
+  }catch(e){toast('Not published — '+e.message,'err')}
 }
 /* Termin wpisuje się lokalnym czasem przeglądarki; `toISOString()` przelicza go
    na UTC, bo w tym backendzie wszystkie znaczniki są w UTC. Bez tego post
@@ -4020,84 +4020,84 @@ async function publishPost(id){
 async function schedulePost(id){
   const teraz=new Date(Date.now()-new Date().getTimezoneOffset()*60000)
     .toISOString().slice(0,16);
-  const kiedy=prompt('Kiedy opublikować? (RRRR-MM-DDTGG:MM, czas lokalny)',teraz);
+  const kiedy=prompt('When should it go out? (YYYY-MM-DDTHH:MM, your local time)',teraz);
   if(!kiedy)return;
   const d=new Date(kiedy);
-  if(isNaN(d)){toast('Nie rozumiem tej daty.','err');return}
+  if(isNaN(d)){toast('That date does not parse.','err');return}
   try{
     await api(`/api/admin/channel-posts/${id}/schedule`,{method:'POST',
       body:JSON.stringify({scheduled_for:d.toISOString()})});
-    toast('Zaplanowane. Tick wypuszcza jeden zaległy post na przebieg.');
+    toast('Scheduled. The tick releases one overdue post per run.');
     go('telegram');
-  }catch(e){toast('Nie zaplanowano — '+e.message,'err')}
+  }catch(e){toast('Not scheduled — '+e.message,'err')}
 }
 async function deletePost(id){
-  if(!await askConfirm({title:'Usunąć ten post?',body:'Nie został opublikowany.',ok:'Usuń'}))return;
+  if(!await askConfirm({title:'Delete this post?',body:'It has not been published.',ok:'Delete'}))return;
   try{
     await api(`/api/admin/channel-posts/${id}`,{method:'DELETE'});
     go('telegram');
-  }catch(e){toast('Błąd: '+e.message,'err')}
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 function newChannelPost(kanal){
   const box=document.createElement('div');
   box.id='cpost-modal';box.className='modal-wrap';
   const opt=(v,l)=>`<option value="${v}"${v===(kanal||'mgmt')?' selected':''}>${l}</option>`;
   box.innerHTML=`<div class="modal" onclick="event.stopPropagation()" style="max-width:720px">
-    <div class="modal-head"><h3>Nowy post na kanał</h3>
+    <div class="modal-head"><h3>New channel post</h3>
       <button class="icon-btn" onclick="document.getElementById('cpost-modal').remove()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
-    <p class="muted" style="font-size:12.5px;margin-bottom:14px">Każda liczba potrzebuje źródła.
-      Bez <code>proof</code> post nie może zawierać kwoty ani procentu.
-      <code>payout:&lt;cert_token&gt;</code> przypina każdą kwotę do tej wypłaty;
-      <code>stat:&lt;klucz&gt;:gte:&lt;wartość&gt;</code> jest przeliczany na bieżących danych —
-      raz przy zatwierdzeniu i drugi raz tuż przed publikacją.</p>
+    <p class="muted" style="font-size:12.5px;margin-bottom:14px">Every figure needs a source.
+      With no <code>proof</code> a post may not carry an amount or a percentage.
+      <code>payout:&lt;cert_token&gt;</code> pins every amount to that payout;
+      <code>stat:&lt;key&gt;:gte:&lt;value&gt;</code> is re-checked against live numbers —
+      once at approval and again right before it goes out.</p>
     <div class="stack">
       <div class="pool-form">
-        <div><label class="muted" style="font-size:12px">Kanał</label>
+        <div><label class="muted" style="font-size:12px">Channel</label>
           <select id="cp-ch" class="inp">
             ${opt('mgmt','Account Management')}${opt('payouts','Payouts')}${opt('trackrecord','Track Record')}
           </select></div>
-        <div><label class="muted" style="font-size:12px">Rodzaj</label>
-          <select id="cp-kind" class="inp"><option value="text">Tekst</option><option value="photo">Ze zdjęciem</option></select></div>
+        <div><label class="muted" style="font-size:12px">Type</label>
+          <select id="cp-kind" class="inp"><option value="text">Text</option><option value="photo">Photo</option></select></div>
       </div>
-      <textarea id="cp-body" class="inp" rows="9" placeholder="Treść posta — HTML dozwolony"></textarea>
-      <input id="cp-proof" class="inp" placeholder="proof — puste, payout:&lt;cert_token&gt; albo stat:payouts_total_usd:gte:186000">
-      <input id="cp-media" class="inp" placeholder="tylko dla posta ze zdjęciem: adres strony do zrzutu">
+      <textarea id="cp-body" class="inp" rows="9" placeholder="Post body — HTML allowed"></textarea>
+      <input id="cp-proof" class="inp" placeholder="proof — empty, payout:&lt;cert_token&gt; or stat:payouts_total_usd:gte:186000">
+      <input id="cp-media" class="inp" placeholder="photo posts only: URL of the page to screenshot">
       <div style="display:flex;gap:8px">
-        <button class="btn-o lg" style="flex:1" onclick="document.getElementById('cpost-modal').remove()">Anuluj</button>
-        <button class="btn-p lg" style="flex:1" onclick="saveChannelPost()">Zapisz jako szkic</button>
+        <button class="btn-o lg" style="flex:1" onclick="document.getElementById('cpost-modal').remove()">Cancel</button>
+        <button class="btn-p lg" style="flex:1" onclick="saveChannelPost()">Save as draft</button>
       </div>
-      <p class="hint">Szkic niczego nie publikuje. Zatwierdzenie to moment, w którym człowiek
-        bierze odpowiedzialność za treść — dlatego jest osobnym kliknięciem, a nie polem tutaj.</p>
+      <p class="hint">A draft publishes nothing. Approving is the moment a person takes
+        responsibility for the wording — so it is a separate click, not a checkbox here.</p>
     </div></div>`;
   box.onclick=()=>box.remove();
   document.body.appendChild(box);
 }
 async function saveChannelPost(){
   const body=($('cp-body').value||'').trim();
-  if(!body){toast('Post nie ma treści.','err');return}
+  if(!body){toast('The post has no body.','err');return}
   try{
     await api('/api/admin/channel-posts',{method:'POST',body:JSON.stringify({
       channel:$('cp-ch').value, kind:$('cp-kind').value, body,
       proof:($('cp-proof').value||'').trim(),
       media_url:($('cp-media').value||'').trim()||null})});
     document.getElementById('cpost-modal')?.remove();
-    toast('Zapisane jako szkic. Zatwierdź, gdy twierdzenia się zgadzają.');
+    toast('Saved as a draft. Approve it when the claims check out.');
     go('telegram');
-  }catch(e){toast('Nie zapisano — '+e.message,'err')}
+  }catch(e){toast('Not saved — '+e.message,'err')}
 }
 
 /* Czyszczenie listy kanałów Reach BOT-a. Kanał wypłat wraca na listę sam —
    tak działa `reach.kanaly()`, więc pusta lista nie znaczy „nic nie podbijamy". */
 async function clearReachChannels(){
-  if(!await askConfirm({title:'Wyczyścić listę kanałów?',
-      body:'Zostanie sam kanał wypłat, który wraca na listę automatycznie. Resztę dodasz ręcznie.',
-      ok:'Wyczyść'}))return;
+  if(!await askConfirm({title:'Clear the channel list?',
+      body:'Only the payouts channel stays — it comes back on the list by itself. You add the rest by hand.',
+      ok:'Clear'}))return;
   try{
     await api('/api/admin/reach/channels',{method:'POST',body:JSON.stringify({channels:[]})});
-    toast('Lista wyczyszczona.');
+    toast('List cleared.');
     go('telegram');
-  }catch(e){toast('Błąd: '+e.message,'err')}
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 
 /* Karta Payout BOT-a. Wyjeta z widoku ustawien, bo pokazuje sie teraz
@@ -4201,7 +4201,7 @@ function reachCardHtml(rc){
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <button class="btn-p" onclick="saveReach(this)">Save settings</button>
       <button class="btn-o" onclick="toggleReach(${rc.enabled?'false':'true'},this)">${rc.enabled?'Turn off':'Turn on'}</button>
-      <button class="btn-o" onclick="clearReachChannels()">Wyczyść listę kanałów</button>
+      <button class="btn-o" onclick="clearReachChannels()">Clear channel list</button>
     </div>
     <div style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)">
       <label class="muted" style="font-size:12px">Boost a single post</label>

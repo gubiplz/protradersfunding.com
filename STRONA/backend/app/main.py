@@ -6098,11 +6098,11 @@ def admin_telegram_overview():
     """
     czaty = [
         ("payouts", "Payouts", settings.telegram_chat_id, "TELEGRAM_CHAT_ID",
-         "Payout BOT publikuje tu certyfikaty wypłat"),
+         "Payout BOT publishes payout certificates here"),
         ("leads", "LEADS", settings.telegram_leads_chat_id, "TELEGRAM_LEADS_CHAT_ID",
-         "Karty leadów z płatnego lejka"),
-        ("free_leads", "LEADS — darmowy lejek", settings.telegram_free_leads_chat_id,
-         "TELEGRAM_FREE_LEADS_CHAT_ID", "Karty leadów ze strony /freeaccount"),
+         "Lead cards from the paid funnel"),
+        ("free_leads", "LEADS — free funnel", settings.telegram_free_leads_chat_id,
+         "TELEGRAM_FREE_LEADS_CHAT_ID", "Lead cards from the /freeaccount page"),
     ]
     out = []
     for klucz, tytul, czat, zmienna, po_co in czaty:
