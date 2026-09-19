@@ -5836,11 +5836,20 @@ def leads_ingest(payload: LeadIn,
         lead.payload_json = json.dumps(dane, ensure_ascii=False)[:20000]
         lead.updated_at = datetime.now(timezone.utc)
 
-        # Desk wybierany RAZ w życiu leada. Ponowne zgłoszenie z innym numerem
-        # nie może go przenieść: pierwsza karta wisi na starym desku, a jej
-        # skasowanie i wszystkie przypomnienia idą tamtym botem i tamtym czatem.
-        if not lead.desk:
-            lead.desk = _desk_dla_leada(lead)
+        # Desk liczony przy KAŻDYM zgłoszeniu, nie tylko pierwszym.
+        #
+        # Najpierw było odwrotnie — „raz i na zawsze", żeby pierwsza karta nie
+        # została sierotą na starym czacie. Okazało się to gorsze od problemu,
+        # który miało rozwiązać: migracja dodająca tę kolumnę wpisała `leads`
+        # WSZYSTKIM istniejącym leadom, więc każdy, kto kiedykolwiek wypełnił
+        # formularz, zostawał przypięty do desku domyślnego na zawsze. Zgłoszenie
+        # z darmowego lejka od takiej osoby szło starym botem i wracało z 401.
+        #
+        # Sierota nie grozi, bo linijkę niżej zdejmujemy poprzednią kartę jej
+        # własnym botem, ZANIM wyślemy nową.
+        poprzedni_desk = lead.desk or "leads"
+        poprzednia_karta = lead.tg_message_id
+        lead.desk = _desk_dla_leada(lead)
 
         # flush, bo nowy lead dostaje `id` dopiero z bazy, a zdarzenie musi je znać.
         session.flush()
@@ -5874,6 +5883,13 @@ def leads_ingest(payload: LeadIn,
     # nie ma prawa zwrócić landingowi błędu i kazać człowiekowi klikać drugi raz.
     # Push do adminów tak samo — telefon działu ma zabrzęczeć, ale landing nie
     # może czekać na push service ani oglądać jego błędów.
+    # Poprzednia karta schodzi ZANIM pójdzie nowa, i to jej własnym botem.
+    # Dotąd ponowne zgłoszenie zostawiało starą kartę na kanale, bo `tg_message_id`
+    # było nadpisywane bez sprzątania — dział widział dwie karty tego samego
+    # człowieka, a klikalna była tylko nowsza. Przy zmianie desku ta sama linijka
+    # pilnuje, żeby karta nie została na czacie, którego już nie adresujemy.
+    if poprzednia_karta:
+        telegram.delete_lead_card(poprzednia_karta, bot=telegram.desk(poprzedni_desk))
     _lead_push(lead_id, f"New lead: {kto}", opis, event="lead_new")
     _, _, message_id = telegram.send_lead_alert(lead_id, tekst,
                                                 bot=telegram.desk(desk_leada))

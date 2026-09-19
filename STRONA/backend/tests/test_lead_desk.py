@@ -165,19 +165,36 @@ def test_desk_ng_nieskonfigurowany_spada_na_domyslny(monkeypatch, _srodowisko):
     assert _srodowisko["alert"] == [(lead_id, "leads")]
 
 
-def test_desk_jest_lepki_przy_ponownym_zgloszeniu():
-    """Druga aplikacja z płatnego lejka nie przenosi leada z desku NG.
+def test_desk_przeliczany_przy_kazdym_zgloszeniu(_srodowisko):
+    """Powrót tego samego człowieka innym lejkiem PRZENOSI go na właściwy desk.
 
-    Pierwsza karta wisi na czacie nigeryjskim; przeniesienie zostawiłoby ją tam
-    jako sierotę, bo kasowanie idzie już innym botem i innym czatem."""
-    mail = f"lepki{next(LICZNIK)}@test.pl"
-    pierwsze = _wyslij(_zgloszenie(email=mail, source="free"))
+    Wcześniej desk był „lepki" i to okazało się gorsze od problemu, który miał
+    rozwiązać: migracja wpisała `leads` wszystkim istniejącym leadom, więc każdy,
+    kto kiedykolwiek wypełnił formularz, zostawał na desku domyślnym na zawsze —
+    nawet wracając przez /freeaccount."""
+    mail = f"powrot{next(LICZNIK)}@test.pl"
+    pierwsze = _wyslij(_zgloszenie(email=mail, source="questionnaire"))
     lead_id = pierwsze.json()["id"]
-    assert _lead(lead_id).desk == "leads_ng"
+    assert _lead(lead_id).desk == "leads"
 
-    drugie = _wyslij(_zgloszenie(email=mail, source="questionnaire"))
+    drugie = _wyslij(_zgloszenie(email=mail, source="free"))
     assert drugie.json()["id"] == lead_id
     assert _lead(lead_id).desk == "leads_ng"
+    # Nowa karta poszła na desk NG...
+    assert _srodowisko["alert"][-1] == (lead_id, "leads_ng")
+    # ...a poprzednia została zdjęta ze STAREGO desku, jego własnym botem.
+    assert _srodowisko["delete"][-1][1] == "leads"
+
+
+def test_ponowne_zgloszenie_nie_zostawia_dwoch_kart(_srodowisko):
+    """Nawet bez zmiany desku stara karta schodzi — inaczej dział widzi dwie
+    karty tego samego człowieka, a klikalna jest tylko nowsza."""
+    mail = f"dwiekarty{next(LICZNIK)}@test.pl"
+    pierwsze = _wyslij(_zgloszenie(email=mail))
+    mid = _lead(pierwsze.json()["id"]).tg_message_id
+
+    _wyslij(_zgloszenie(email=mail))
+    assert _srodowisko["delete"] == [(mid, "leads")]
 
 
 def test_kasowanie_karty_idzie_na_desk_leada(_srodowisko):
