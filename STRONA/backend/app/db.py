@@ -237,6 +237,14 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         # ("other") zafalszowaloby pierwszy raport o cala historie.
         "lost_reason": "VARCHAR(24)",
     },
+    # Tabele `channel_posts` zaklada `create_all`, ale na produkcji zalozyl ja
+    # WCZESNIEJSZY wariant modelu, bez `origin`. Tamten kod zostal wycofany,
+    # a tabela w bazie zostala — i kazdy SELECT z nowego modelu konczyl sie
+    # `UndefinedColumn`, czyli 500 na calej zakladce Telegram. `create_all`
+    # zaklada nowe tabele, ale NIE dokłada kolumn do istniejacych.
+    "channel_posts": {
+        "origin": "VARCHAR(64) DEFAULT 'panel'",
+    },
 }
 
 
