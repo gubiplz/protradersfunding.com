@@ -519,6 +519,9 @@ const VIEWS={
           title="Recalculates the series on the site, redraws the four posters and swaps them into the existing posts — which is how they keep their views and reactions. Also rewrites the channel description.">Refresh track record</button>`:''}
         ${tr.workflow_url?`<a class="btn-o sm" target="_blank" rel="noopener"
           href="${esc(tr.workflow_url)}">Runs</a>`:''}
+        ${tr.key&&!tr.refresh_ready?`<span class="muted" style="font-size:12px">Track record
+          refresh needs <span class="mono">TRACKRECORD_DEPLOY_HOOK</span> — and a build after
+          you set it</span>`:''}
         <span style="width:1px;height:22px;background:var(--line)"></span>
         <span class="muted" style="font-size:12px">Refill from the old channel:</span>
         <input id="arch-file" class="inp" type="file" accept=".json,application/json"
