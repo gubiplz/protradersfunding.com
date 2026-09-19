@@ -5734,22 +5734,38 @@ def _zapisz_status(session, lead: Lead, status: str, actor: str) -> None:
 def _desk_dla_leada(lead: Lead) -> str:
     """Na który desk Telegrama trafia karta tego leada.
 
-    Rozdział jest po kraju, bo leady nigeryjskie obsługuje inna osoba i mają nie
-    mieszać się z resztą. Decyduje prefiks numeru (`phone_iso` ustawiane wyżej
-    z E.164), a nazwa kraju z formularza jest tylko zapasem — prefiks to jedyna
-    rzecz, którą człowiek faktycznie wpisał, więc przy sprzeczności wygrywa.
+    Rozstrzyga LEJEK, z którego przyszło zgłoszenie, a nie kraj człowieka.
+    Strona /freeaccount na forexpassing.com otwiera formularz z `source="free"`
+    (`ApplyModal source="free"` w `FreeAccountPage.tsx`), więc ta jedna wartość
+    wystarczy, żeby oddzielić darmowy lejek od płatnego. Ten sam podział istniał
+    już wcześniej w tym projekcie jako `TELEGRAM_FREE_LEADS_CHAT_ID`.
+
+    Kryterium po kraju numeru zostaje w kodzie, ale domyślnie WYŁĄCZONE
+    (`TELEGRAM_LEADS_NG_ISO` puste). Włączenie go dorzuca na ten desk także
+    nigeryjskie numery z płatnego lejka — a te dotyczą innej oferty, więc to
+    osobna decyzja, nie domyślne zachowanie.
 
     Każda niepewność schodzi na desk domyślny i to jest celowe:
-      * brak kraju i brak prefiksu (zgłoszenia z safe LP niosą sam mail),
+      * brak lejka, kraju i prefiksu (zgłoszenia z safe LP niosą sam mail),
       * desk NG jeszcze nieskonfigurowany — dzięki temu ten kod można wdrożyć,
         zanim bot nigeryjski w ogóle powstanie, i nic nie przestaje działać.
     Lead nigdy nie ginie i nigdy nie trafia na dwa deski naraz.
     """
+    if not settings.telegram_leads_ng_enabled:
+        return "leads"
+
+    zrodlo = (lead.source or "").strip().lower()
+    lejki = [p.strip().lower()
+             for p in (settings.telegram_leads_ng_sources or "").split(",") if p.strip()]
+    # Prefiks, nie równość: lejek bywa doprecyzowany („free_meta"), a i tak jest
+    # tym samym lejkiem. Tak samo liczy to `subscribe.js` po stronie landingu.
+    if any(zrodlo.startswith(p) for p in lejki):
+        return "leads_ng"
+
     kody = {k.strip().upper()
             for k in (settings.telegram_leads_ng_iso or "").split(",") if k.strip()}
-    trafiony = ((lead.phone_iso or "").upper() in kody
-                or "NIGERIA" in (lead.country or "").upper())
-    if trafiony and settings.telegram_leads_ng_enabled:
+    if kody and ((lead.phone_iso or "").upper() in kody
+                 or "NIGERIA" in (lead.country or "").upper()):
         return "leads_ng"
     return "leads"
 

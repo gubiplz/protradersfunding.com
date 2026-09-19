@@ -262,9 +262,16 @@ class Settings:
     telegram_leads_ng_bot_token: str = os.getenv("TELEGRAM_LEADS_NG_BOT_TOKEN", "")
     telegram_leads_ng_chat_id: str = os.getenv("TELEGRAM_LEADS_NG_CHAT_ID", "")
     telegram_leads_ng_webhook_secret: str = os.getenv("TELEGRAM_LEADS_NG_WEBHOOK_SECRET", "")
-    # Lista kodów ISO po przecinku. W zmiennej, nie w kodzie, żeby dołożenie
-    # kolejnego kraju nie wymagało deploya.
-    telegram_leads_ng_iso: str = os.getenv("TELEGRAM_LEADS_NG_ISO", "NG")
+    # GŁÓWNE kryterium: z jakiego lejka przyszedł lead. Strona /freeaccount na
+    # forexpassing.com otwiera formularz z `source="free"` i to ta wartość jedzie
+    # w payloadzie — czyli rozdział jest po STRONIE, z której człowiek wypełnił
+    # ankietę, a nie po jego numerze telefonu. Lista prefiksów po przecinku.
+    telegram_leads_ng_sources: str = os.getenv("TELEGRAM_LEADS_NG_SOURCES", "free")
+    # Dodatkowe kryterium po kraju numeru, DOMYŚLNIE WYŁĄCZONE. Puste = desk
+    # nigeryjski bierze wyłącznie leady z lejka wskazanego wyżej. Wpisanie „NG”
+    # dorzuci do niego także nigeryjskie numery z pozostałych lejków — to osobna
+    # decyzja, bo te leady dotyczą innej oferty niż darmowe konto.
+    telegram_leads_ng_iso: str = os.getenv("TELEGRAM_LEADS_NG_ISO", "")
     # Sekret, którym landing autoryzuje POST /api/leads/ingest. Osobny od
     # ADMIN_TOKEN: landing stoi na cudzym hostingu i wycieka mu najwyżej prawo
     # dopisania leada, nigdy panel. Puste = endpoint odmawia wszystkiego.

@@ -1,5 +1,9 @@
 """Rozdział leadów na dwa deski Telegrama (domyślny i nigeryjski).
 
+Rozstrzyga LEJEK: strona /freeaccount otwiera formularz z `source="free"`, więc
+darmowe zgłoszenia idą na desk nigeryjski, a płatne na domyślny. Kryterium po
+kraju numeru istnieje, ale jest domyślnie wyłączone.
+
 Deski to osobne boty, osobne czaty i osobne sekrety webhooka. Tu sprawdzamy trzy
 rzeczy, na których to stoi: że lead trafia na właściwy desk, że KAŻDA niepewność
 schodzi na desk domyślny zamiast gubić leada, i że raz wybrany desk już się nie
@@ -47,7 +51,9 @@ def _srodowisko(monkeypatch):
     monkeypatch.setattr(u, "telegram_leads_ng_bot_token", "TOKEN-NG", raising=False)
     monkeypatch.setattr(u, "telegram_leads_ng_chat_id", "-100222", raising=False)
     monkeypatch.setattr(u, "telegram_leads_ng_webhook_secret", SEKRET_NG, raising=False)
-    monkeypatch.setattr(u, "telegram_leads_ng_iso", "NG", raising=False)
+    monkeypatch.setattr(u, "telegram_leads_ng_sources", "free", raising=False)
+    # Domyślnie WYŁĄCZONE — testy kryterium krajowego włączają je sobie same.
+    monkeypatch.setattr(u, "telegram_leads_ng_iso", "", raising=False)
 
     wyslane: dict[str, list] = {"alert": [], "delete": [], "przypomnienie": []}
     monkeypatch.setattr(
@@ -98,8 +104,9 @@ def _lead(lead_id) -> Lead:
 # --------------------------------------------------------------------------- #
 #  Wybór desku                                                                 #
 # --------------------------------------------------------------------------- #
-def test_numer_nigeryjski_idzie_na_desk_ng(_srodowisko):
-    r = _wyslij(_zgloszenie(phone="+2348012345678", phoneIso="NG"))
+def test_lejek_free_idzie_na_desk_ng(_srodowisko):
+    """Strona /freeaccount otwiera formularz z `source="free"` — to jest KRYTERIUM."""
+    r = _wyslij(_zgloszenie(source="free"))
     assert r.status_code == 200
     lead_id = r.json()["id"]
     assert _lead(lead_id).desk == "leads_ng"
@@ -107,17 +114,28 @@ def test_numer_nigeryjski_idzie_na_desk_ng(_srodowisko):
     assert _srodowisko["alert"] == [(lead_id, "leads_ng")]
 
 
-def test_prefiks_wygrywa_z_krajem_z_formularza():
-    """`+234` przy `country: United Kingdom` to nadal desk nigeryjski.
-
-    Prefiks jest jedyną rzeczą, którą człowiek faktycznie wpisał; kraj bywa
-    zgadnięty ze strefy czasowej urządzenia."""
-    r = _wyslij(_zgloszenie(phone="+2348012345678", phoneIso="GB",
-                            country="United Kingdom"))
+def test_lejek_dopasowywany_po_prefiksie():
+    """Doprecyzowany lejek („free_meta") to nadal ten sam lejek."""
+    r = _wyslij(_zgloszenie(source="free_meta"))
     assert _lead(r.json()["id"]).desk == "leads_ng"
 
 
-def test_sam_kraj_bez_prefiksu_tez_wystarczy():
+def test_numer_nigeryjski_z_platnego_lejka_zostaje_na_desku_domyslnym():
+    """Domyślnie decyduje WYŁĄCZNIE lejek. Nigeryjski numer z ankiety płatnej
+    dotyczy innej oferty niż darmowe konto, więc nie miesza się z tamtym deskiem."""
+    r = _wyslij(_zgloszenie(phone="+2348012345678", phoneIso="NG"))
+    assert _lead(r.json()["id"]).desk == "leads"
+
+
+def test_kryterium_krajowe_da_sie_wlaczyc(monkeypatch):
+    """Jedna zmienna środowiskowa, bez zmiany kodu."""
+    monkeypatch.setattr(get_settings(), "telegram_leads_ng_iso", "NG", raising=False)
+    r = _wyslij(_zgloszenie(phone="+2348012345678", phoneIso="NG"))
+    assert _lead(r.json()["id"]).desk == "leads_ng"
+
+
+def test_wlaczone_kryterium_krajowe_lapie_tez_nazwe_kraju(monkeypatch):
+    monkeypatch.setattr(get_settings(), "telegram_leads_ng_iso", "NG", raising=False)
     r = _wyslij(_zgloszenie(phone="0801234567", phoneIso="", country="Nigeria"))
     assert _lead(r.json()["id"]).desk == "leads_ng"
 
@@ -141,29 +159,29 @@ def test_desk_ng_nieskonfigurowany_spada_na_domyslny(monkeypatch, _srodowisko):
     """Kod można wdrożyć, ZANIM bot nigeryjski w ogóle powstanie."""
     u = get_settings()
     monkeypatch.setattr(u, "telegram_leads_ng_bot_token", "", raising=False)
-    r = _wyslij(_zgloszenie(phone="+2348012345678", phoneIso="NG"))
+    r = _wyslij(_zgloszenie(source="free"))
     lead_id = r.json()["id"]
     assert _lead(lead_id).desk == "leads"
     assert _srodowisko["alert"] == [(lead_id, "leads")]
 
 
 def test_desk_jest_lepki_przy_ponownym_zgloszeniu():
-    """Druga aplikacja z polskim numerem nie przenosi leada z desku NG.
+    """Druga aplikacja z płatnego lejka nie przenosi leada z desku NG.
 
     Pierwsza karta wisi na czacie nigeryjskim; przeniesienie zostawiłoby ją tam
     jako sierotę, bo kasowanie idzie już innym botem i innym czatem."""
     mail = f"lepki{next(LICZNIK)}@test.pl"
-    pierwsze = _wyslij(_zgloszenie(email=mail, phone="+2348012345678", phoneIso="NG"))
+    pierwsze = _wyslij(_zgloszenie(email=mail, source="free"))
     lead_id = pierwsze.json()["id"]
     assert _lead(lead_id).desk == "leads_ng"
 
-    drugie = _wyslij(_zgloszenie(email=mail, phone="+48111222333", phoneIso="PL"))
+    drugie = _wyslij(_zgloszenie(email=mail, source="questionnaire"))
     assert drugie.json()["id"] == lead_id
     assert _lead(lead_id).desk == "leads_ng"
 
 
 def test_kasowanie_karty_idzie_na_desk_leada(_srodowisko):
-    r = _wyslij(_zgloszenie(phone="+2348012345678", phoneIso="NG"))
+    r = _wyslij(_zgloszenie(source="free"))
     lead_id = r.json()["id"]
     mid = _lead(lead_id).tg_message_id
     assert mid
