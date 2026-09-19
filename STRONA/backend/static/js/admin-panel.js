@@ -192,6 +192,16 @@ const impQ=(sep='?')=>IMPORTED?sep+'imported=1':'';
 const impPill=()=>` · <span class="statlink" onclick="toggleImported()"
   title="Rows imported from the payout records: real payouts, but nobody signed up for them"
   >imported ${IMPORTED?'shown':'hidden'}</span>`;
+/* Czy klienci z darmowego lejka są na liście. Osobno od filtrów w grupie, bo
+   to inne pytanie: tamte zawężają „jakich", ten mówi „czy w ogóle". Domyślnie
+   pokazani — gdyby domyślnie byli ukryci, panel po wdrożeniu wyglądałby jak
+   utrata połowy bazy. */
+let FREE_SHOWN=localStorage.getItem('pf_admin_free')!=='0';
+function toggleFree(on){
+  FREE_SHOWN=!!on;
+  localStorage.setItem('pf_admin_free',FREE_SHOWN?'1':'0');
+  renderClients();   // filtr jest po stronie przegladarki, wystarczy przerysowac
+}
 function toggleImported(){
   IMPORTED=!IMPORTED;
   localStorage.setItem('pf_admin_imported',IMPORTED?'1':'0');
@@ -3071,10 +3081,6 @@ function renderActivity(){
    loguje", ta lista na „co moge z nim zrobic". */
 const CLI_FILTERS=[
   ['all','All',()=>true],
-  /* Desk liczy backend z leada dopasowanego po mailu — patrz /api/admin/traders.
-     Klient bez leada (rejestracja wprost z portalu) nie ma desku i nie wpada
-     do żadnego z lejków, co jest poprawną odpowiedzią, a nie luką. */
-  ['free','Free',t=>t.desk==='free'],
   ['noacc','No account yet',t=>!t.accounts],
   ['kyc','KYC pending',t=>t.kyc_status==='pending'],
   ['credits','Has credits',t=>t.credits_usd>0],
@@ -3084,15 +3090,24 @@ function renderClients(){
   const f=window._cliFilter||'all';
   const q=(window._cliQ||'').toLowerCase(), qf=fold(q);
   const test=(CLI_FILTERS.find(x=>x[0]===f)||CLI_FILTERS[0])[2];
-  const rows=all.filter(t=>test(t)&&
+  /* Desk liczy backend z leada dopasowanego po mailu — patrz /api/admin/traders.
+     Klient bez leada (rejestracja wprost z portalu) nie ma desku i zostaje na
+     liście niezależnie od checkboxa: nie przyszedł z darmowego lejka. */
+  const rows=all.filter(t=>test(t)&&(FREE_SHOWN||t.desk!=='free')&&
     (!q||fold(t.email).includes(qf)||fold(t.full_name).includes(qf)));
+  const ukryci=FREE_SHOWN?0:all.filter(t=>t.desk==='free').length;
   const cap=capList(rows,'_cliAll','renderClients');
   $('view').innerHTML=`<div class="toolbar">
       ${searchBox('cli-q','_cliQ','renderClients','Search name or email…')}
       <div class="seg">${CLI_FILTERS.map(([k,l])=>
         `<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''}
           onclick="window._cliFilter='${f===k?'all':k}';renderClients()">${l}</button>`).join('')}</div>
-      <span class="count-pill">${rows.length} of ${all.length}${impPill()}</span>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;user-select:none"
+        title="Clients who came through the free funnel — the one that posts to the LEADS NIGERIA channel. Unticking hides them.">
+        <input type="checkbox" ${FREE_SHOWN?'checked':''} onchange="toggleFree(this.checked)"
+          style="width:15px;height:15px;accent-color:var(--acc)">Free</label>
+      <span class="count-pill">${rows.length} of ${all.length}${
+        ukryci?` · <span class="muted">${ukryci} free hidden</span>`:''}${impPill()}</span>
     </div>`
     +(rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.clients">
       <thead><tr><th>Joined</th><th>Client</th><th>Accounts</th><th>KYC</th>
