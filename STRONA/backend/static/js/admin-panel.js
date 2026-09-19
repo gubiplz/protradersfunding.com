@@ -477,15 +477,19 @@ const VIEWS={
 
   const stan=p=>({draft:'pending',approved:'active',scheduled:'active',
                   published:'funded',failed:'failed'})[p.status]||'pending';
+  /* Kolejność cyklu życia, nie alfabetyczna — po alfabecie wyszłoby
+     approved, draft, failed, published, scheduled, czyli nic. `failed` na
+     końcu, bo to ślepy zaułek, a nie etap. */
+  const rangaStanu={draft:0,approved:1,scheduled:2,published:3,failed:4};
   const nazwaKanalu={mgmt:'Account Management',payouts:'Payouts',trackrecord:'Track Record'};
   const wiersz=p=>`<tr>
-    <td>${esc(nazwaKanalu[p.channel]||p.channel)}</td>
-    <td style="max-width:420px">${esc((p.body||'').slice(0,150))}${(p.body||'').length>150?'…':''}
+    <td data-sort="${esc(nazwaKanalu[p.channel]||p.channel)}">${esc(nazwaKanalu[p.channel]||p.channel)}</td>
+    <td style="max-width:420px" data-sort="${esc((p.body||'').slice(0,150))}">${esc((p.body||'').slice(0,150))}${(p.body||'').length>150?'…':''}
       ${p.origin&&p.origin!=='panel'?`<div class="muted" style="font-size:11.5px;margin-top:3px">from archive: ${esc(p.origin)}</div>`:''}
       ${p.last_error?`<div style="color:var(--red);font-size:12px;margin-top:4px">${esc(p.last_error)}</div>`:''}</td>
-    <td>${p.proof?`<span class="chip mono">${esc(p.proof)}</span>`:'<span class="muted">—</span>'}</td>
-    <td><span class="status ${stan(p)}"><span class="dot"></span>${esc(p.status)}</span></td>
-    <td>${p.scheduled_for?dstr(p.scheduled_for):'<span class="muted">—</span>'}</td>
+    <td data-sort="${esc(p.proof||'')}">${p.proof?`<span class="chip mono">${esc(p.proof)}</span>`:'<span class="muted">—</span>'}</td>
+    <td data-sort="${rangaStanu[p.status]??9}"><span class="status ${stan(p)}"><span class="dot"></span>${esc(p.status)}</span></td>
+    <td data-sort="${esc(p.scheduled_for||'')}">${p.scheduled_for?dstr(p.scheduled_for):'<span class="muted">—</span>'}</td>
     <td style="white-space:nowrap">
       ${p.status==='published'
         ?(p.post_url?`<a class="btn-o sm" href="${esc(p.post_url)}" target="_blank" rel="noopener">Open</a>`:'<span class="muted">—</span>')
@@ -531,8 +535,8 @@ const VIEWS={
       <div id="arch-info" class="muted" style="font-size:12px;margin-bottom:10px">
         Pick the <span class="mono">messages.json</span> from the channel archive. Posts go in
         one every N hours, oldest first — the old channel ran about one a day.</div>
-      ${posty.length?`<div class="tbl-wrap"><table class="tbl">
-        <thead><tr><th>Channel</th><th>Body</th><th>Proof</th><th>Status</th><th>Scheduled</th><th></th></tr></thead>
+      ${posty.length?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="admin.channel-posts">
+        <thead><tr><th>Channel</th><th>Body</th><th>Proof</th><th>Status</th><th>Scheduled</th><th class="no-sort"></th></tr></thead>
         <tbody>${posty.map(wiersz).join('')}</tbody></table></div>`
         :`<div class="muted">The queue is empty.</div>`}
     </div>`;
