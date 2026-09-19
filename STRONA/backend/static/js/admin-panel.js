@@ -498,10 +498,14 @@ const VIEWS={
   const wKolejce=posty.filter(p=>p.status!=='published').length;
   $('view').innerHTML=`
     ${alarm}
-    <div class="card-cols">
-      ${payoutCardHtml(pb)}
-      ${reachCardHtml(rc)}
-      ${trackRecordCardHtml(tr)}
+    <div class="tg-cols">
+      <div class="tg-col">
+        ${payoutCardHtml(pb)}
+        ${trackRecordCardHtml(tr)}
+      </div>
+      <div class="tg-col">
+        ${reachCardHtml(rc)}
+      </div>
     </div>
 
     <div class="sec-card" style="margin-top:16px">
