@@ -501,6 +501,7 @@ const VIEWS={
     <div class="card-cols">
       ${payoutCardHtml(pb)}
       ${reachCardHtml(rc)}
+      ${trackRecordCardHtml(tr)}
     </div>
 
     <div class="sec-card" style="margin-top:16px">
@@ -515,13 +516,6 @@ const VIEWS={
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
         <button class="btn-p sm" onclick="newChannelPost('mgmt')">Write a post</button>
-        ${tr.refresh_ready?`<button class="btn-o sm" onclick="refreshTrackRecord(this)"
-          title="Recalculates the series on the site, redraws the four posters and swaps them into the existing posts — which is how they keep their views and reactions. Also rewrites the channel description.">Refresh track record</button>`:''}
-        ${tr.workflow_url?`<a class="btn-o sm" target="_blank" rel="noopener"
-          href="${esc(tr.workflow_url)}">Runs</a>`:''}
-        ${tr.key&&!tr.refresh_ready?`<span class="muted" style="font-size:12px">Track record
-          refresh needs <span class="mono">TRACKRECORD_DEPLOY_HOOK</span> — and a build after
-          you set it</span>`:''}
         <span style="width:1px;height:22px;background:var(--line)"></span>
         <span class="muted" style="font-size:12px">Refill from the old channel:</span>
         <input id="arch-file" class="inp" type="file" accept=".json,application/json"
@@ -4124,6 +4118,39 @@ async function saveChannelPost(){
     toast('Saved as a draft. Approve it when the claims check out.');
     go('telegram');
   }catch(e){toast('Not saved — '+e.message,'err')}
+}
+
+/* Karta kanalu track record. Stoi obok obu botow, bo jest tym samym rodzajem
+   rzeczy — narzedziem jednego kanalu. Wczesniej przycisk siedzial w pasku
+   kolejki postow, czyli przy CZYMS INNYM: kolejka dotyczy account managementu,
+   a to sa cztery plakaty na osobnym kanale. */
+function trackRecordCardHtml(tr){
+  if(!tr||!tr.key)return'';
+  const zdrowie=tr.bot_admin===true
+    ?`<span class="status funded"><span class="dot"></span>administrator</span>`
+    :tr.bot_admin===false
+      ?`<span class="status failed"><span class="dot"></span>no access</span>`
+      :`<span class="status pending"><span class="dot"></span>not checked</span>`;
+  return `<div class="sec-card" style="max-width:560px"><h3>Track Record</h3>
+    <div class="chip-row" style="margin-bottom:12px">
+      ${zdrowie}
+      ${tr.handle?`<a class="chip" href="https://t.me/${esc(tr.handle.slice(1))}" target="_blank" rel="noopener">${esc(tr.handle)}</a>`:''}
+      ${tr.bot_username?`<span class="chip">bot <b>@${esc(tr.bot_username)}</b></span>`:''}
+    </div>
+    <p class="muted" style="font-size:12.5px;margin:0 0 12px;line-height:1.55">
+      Four posters that are <b>edited in place</b>, never reposted — that is how they keep the
+      views and reactions they have collected. Refreshing recalculates the series on the site
+      first, then redraws the posters from it and rewrites the channel description.</p>
+    ${tr.refresh_ready
+      ?`<button class="btn-p" onclick="refreshTrackRecord(this)">Refresh track record</button>`
+      :`<div class="warn-box" style="margin:0"><div>Set <span class="mono">TRACKRECORD_DEPLOY_HOOK</span>
+         to the site's Vercel deploy hook to get the button here. Vercel picks a changed variable
+         up on the <b>next build</b>, so nothing happens until one runs.</div></div>`}
+    ${tr.workflow_url?`<a class="btn-o" style="margin-left:8px" target="_blank" rel="noopener"
+      href="${esc(tr.workflow_url)}">Past runs</a>`:''}
+    <p class="hint" style="margin-top:10px">It takes a few minutes and you will not see it finish
+      here — the posts change on the channel.</p>
+  </div>`;
 }
 
 /* Reczne odswiezenie track recordu. Panel nie rysuje plakatow i nie edytuje
