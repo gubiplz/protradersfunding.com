@@ -235,7 +235,7 @@ SLOWNIK = [
     ("Accounts", "initial_balance", "Saldo startowe rachunku", "USD"),
     ("Accounts", "balance / equity", "Saldo zamknięte / kapitał z wynikiem pozycji otwartych", "USD"),
     ("Accounts", "profit_pct", "Zysk względem salda startowego", "%"),
-    ("Accounts", "max_drawdown_pct", "Największe historyczne obsunięcie od szczytu kapitału", "%"),
+    ("Accounts", "max_drawdown_pct", "Największe historyczne obsunięcie od szczytu kapitału. UWAGA: liczone z całej krzywej, więc obejmuje także zjazdy, które NIE są stratą z handlu — reset salda przy przejściu fazy i pobranie wypłaty wyglądają w danych jak nagły spadek kapitału", "%"),
     ("Accounts", "overall_dd_used_pct", "Ile wykorzystano dopuszczalnego obsunięcia REGULAMINOWEGO (100 = rachunek pęka)", "%"),
     ("Accounts", "daily_loss_used_pct", "To samo dla limitu dziennego", "%"),
     ("Accounts", "profit_factor", "Suma zysków / wartość bezwzględna sumy strat; puste = brak strat", "krotność"),
@@ -271,6 +271,15 @@ NOTA = [
     "Uwaga na dwie podobnie brzmiące liczby: max_drawdown_pct to historyczne",
     "obsunięcie od szczytu kapitału, a overall_dd_used_pct mówi, ile zużyto",
     "limitu regulaminowego, przy którym rachunek przestaje istnieć.",
+    "",
+    "max_drawdown_pct liczy się z całej krzywej kapitału, a ta zawiera zdarzenia,",
+    "które nie są stratą z handlu: przejście fazy resetuje saldo do startowego,",
+    "a wypłata je pomniejsza. Jedno i drugie wygląda w danych jak nagły zjazd.",
+    "Żeby zobaczyć samo obsunięcie z handlu, licz z arkusza Trades.",
+    "",
+    "Arkusz Payouts bywa pusty, choć wypłaty na kanale są publikowane: tamte",
+    "dotyczą rachunków archiwalnych Payout BOT-a, które nie należą do klientów",
+    "i z tego samego powodu co darmowe rejestracje są poza tym wyciągiem.",
 ]
 
 
