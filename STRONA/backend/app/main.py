@@ -9162,9 +9162,15 @@ async def telegram_webhook(request: Request,
     Zawsze odpowiada 200: przy błędzie Telegram ponawia update'y i zapętliłby
     się na wiadomości, której i tak nie umiemy obsłużyć.
     """
-    sekret = settings.telegram_webhook_secret
-    if not sekret or not x_telegram_bot_api_secret_token or \
-            not secrets.compare_digest(x_telegram_bot_api_secret_token, sekret):
+    # Każdy bot ma w Telegramie własne `setWebhook`, więc i własny sekret.
+    # Przyjmujemy każdy ze skonfigurowanych: adres jest jeden, a rozróżnienie,
+    # KTÓRYM botem odpowiedzieć, i tak bierze się z czatu w treści update'u,
+    # nie z sekretu. `compare_digest` na każdym z osobna, żeby porównanie
+    # zostało stałoczasowe.
+    sekrety = [x for x in (settings.telegram_webhook_secret,
+                           settings.telegram_free_leads_webhook_secret) if x]
+    podany = x_telegram_bot_api_secret_token or ""
+    if not sekrety or not any(secrets.compare_digest(podany, s) for s in sekrety):
         raise HTTPException(401, "Unauthorized")
 
     update = await request.json()
@@ -9340,6 +9346,15 @@ def _wykonaj_akcje(session, lead: Lead, akcja: str, kto: str) -> tuple[str, bool
     return "Nieznany przycisk", False
 
 
+def _czat_callbacku(cb: dict) -> str:
+    """Czat, w którym wisi klikana karta — stąd wiadomo, który bot ma odpowiedzieć.
+
+    `callback_query_id` jest ważny wyłącznie dla bota, który dostał kliknięcie,
+    więc odpowiedź cudzym tokenem zostawia klikającemu kręcące się kółko.
+    """
+    return str(((cb.get("message") or {}).get("chat") or {}).get("id") or "")
+
+
 def _telegram_przycisk(cb: dict) -> dict:
     czesci = str(cb.get("data") or "").split(":")
     if len(czesci) != 3 or czesci[0] != "lead":
@@ -9360,7 +9375,8 @@ def _telegram_przycisk(cb: dict) -> dict:
                 kto = sparowany[0][:60]
         lead = session.get(Lead, int(surowe_id)) if surowe_id.isdigit() else None
         if not lead:
-            telegram.answer_callback(cb.get("id", ""), "Nie znaleziono leada")
+            telegram.answer_callback(cb.get("id", ""), "Nie znaleziono leada",
+                                     chat_id=_czat_callbacku(cb))
             return {"ok": True}
         dymek, zmiana = _wykonaj_akcje(session, lead, akcja, kto)
         # Karta sprzed kolumny `tg_chat_id` dopisuje sobie czat przy pierwszym
@@ -9381,7 +9397,7 @@ def _telegram_przycisk(cb: dict) -> dict:
     finally:
         session.close()
 
-    telegram.answer_callback(cb.get("id", ""), dymek)
+    telegram.answer_callback(cb.get("id", ""), dymek, chat_id=_czat_callbacku(cb))
     if not zmiana:
         return {"ok": True}          # odmowa albo kliknięcie w to samo drugi raz
     wiadomosc = cb.get("message") or {}

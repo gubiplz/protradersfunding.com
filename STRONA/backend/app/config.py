@@ -237,6 +237,17 @@ class Settings:
     # więc te leady mają własny czat. Puste = wpadają do czatu wyżej, razem
     # z płatnymi — tak było, zanim ten podział powstał.
     telegram_free_leads_chat_id: str = os.getenv("TELEGRAM_FREE_LEADS_CHAT_ID", "")
+    # ...i własnego BOTA. Zamrożenie konta Telegrama we wrześniu 2026 odebrało
+    # jednemu botowi uprawnienia we wszystkich kanałach naraz, bo wszystkim
+    # zajmował się ten sam. Osobny token dla darmowego czatu sprawia, że
+    # następna taka awaria zabiera jeden kanał, a nie komplet.
+    # Puste = ten czat obsługuje bot główny, czyli zachowanie sprzed podziału.
+    telegram_free_leads_bot_token: str = os.getenv("TELEGRAM_FREE_LEADS_BOT_TOKEN", "")
+    # Własny sekret webhooka tego bota. Osobny, a nie wspólny, bo każdy bot ma
+    # w Telegramie własne `setWebhook` — współdzielenie sekretu znaczyłoby, że
+    # jego rotacja wymaga jednoczesnego dostępu do obu tokenów.
+    telegram_free_leads_webhook_secret: str = os.getenv(
+        "TELEGRAM_FREE_LEADS_WEBHOOK_SECRET", "")
     # Sekret, którym landing autoryzuje POST /api/leads/ingest. Osobny od
     # ADMIN_TOKEN: landing stoi na cudzym hostingu i wycieka mu najwyżej prawo
     # dopisania leada, nigdy panel. Puste = endpoint odmawia wszystkiego.

@@ -85,7 +85,8 @@ def _urllib_transport(url: str, body: bytes, content_type: str) -> tuple[int, by
 
 def _strzal_json(metoda: str, pola: dict[str, str],
                  plik: tuple[str, str, bytes] | None, transport,
-                 ponowione: bool = False) -> tuple[bool, str, dict]:
+                 ponowione: bool = False,
+                 token: str | None = None) -> tuple[bool, str, dict]:
     """`(czy poszło, powód odmowy, `result` z odpowiedzi)`.
 
     Powód wraca WYŻEJ, a nie tylko do logu: bez niego panel mówi „Telegram
@@ -99,7 +100,10 @@ def _strzal_json(metoda: str, pola: dict[str, str],
     # Tu sprawdzamy WYŁĄCZNIE token, bo to on jest w URL-u. Czy cel wysyłki
     # istnieje, wie tylko wywołujący: kanał z wypłatami i czat z leadami są
     # niezależne i jeden ma prawo działać, gdy drugi jest nieskonfigurowany.
-    if not settings.telegram_bot_token:
+    # Brak `token` = bot główny; osobny podaje ten, kto wie, do którego czatu
+    # pisze (patrz `token_dla_czatu`).
+    token = token or settings.telegram_bot_token
+    if not token:
         return False, "no bot token or channel", {}
     # Metoda bez pól (getMe) nie ma z czego zbudować multiparta, a części bez
     # ANI JEDNEJ granicy Telegram odbija jako HTTP 400 — pusty JSON przechodzi.
@@ -107,7 +111,7 @@ def _strzal_json(metoda: str, pola: dict[str, str],
         body, content_type = _multipart(pola, plik)
     else:
         body, content_type = b"{}", "application/json"
-    url = f"{API}/bot{settings.telegram_bot_token}/{metoda}"
+    url = f"{API}/bot{token}/{metoda}"
     try:
         status, tresc = (transport or _urllib_transport)(url, body, content_type)
     except Exception as e:  # pragma: no cover - sieć
@@ -130,7 +134,8 @@ def _strzal_json(metoda: str, pola: dict[str, str],
         czekaj = (odp.get("parameters") or {}).get("retry_after")
         if isinstance(czekaj, (int, float)) and 0 < czekaj <= RETRY_AFTER_MAX_SEK:
             time.sleep(float(czekaj))
-            return _strzal_json(metoda, pola, plik, transport, ponowione=True)
+            return _strzal_json(metoda, pola, plik, transport, ponowione=True,
+                                token=token)
     # Token NIGDY nie może trafić do logu ani do panelu — jest w URL-u, więc
     # przekazujemy dalej sam opis z odpowiedzi, nigdy adresu żądania.
     opis = odp.get("description") or (tresc or b"")[:200].decode("utf-8", "replace")
@@ -140,9 +145,10 @@ def _strzal_json(metoda: str, pola: dict[str, str],
 
 
 def _strzal(metoda: str, pola: dict[str, str],
-            plik: tuple[str, str, bytes] | None, transport) -> tuple[bool, str]:
+            plik: tuple[str, str, bytes] | None, transport,
+            token: str | None = None) -> tuple[bool, str]:
     """`_strzal_json` dla wywołujących, których `message_id` nie interesuje."""
-    poszlo, powod, _ = _strzal_json(metoda, pola, plik, transport)
+    poszlo, powod, _ = _strzal_json(metoda, pola, plik, transport, token=token)
     return poszlo, powod
 
 
@@ -258,11 +264,12 @@ def delete_lead_card(message_id: int, *, chat_id: str | None = None,
 
     `message_id` jest unikalne w obrębie czatu, nie bota: bez `chat_id` z bazy
     kasowanie karty free trafiłoby w cudzą wiadomość o tym samym numerze."""
-    czat, mozna = _lead_sendable(chat_id)
+    czat, token, mozna = _lead_sendable(chat_id)
     if not mozna:
         return False, "leads chat not configured"
     return _strzal("deleteMessage",
-                   {"chat_id": czat, "message_id": str(message_id)}, None, transport)
+                   {"chat_id": czat, "message_id": str(message_id)}, None, transport,
+                   token)
 
 
 def send_dm(chat_id: str | int, text: str, *, transport=None) -> tuple[bool, str]:
@@ -370,15 +377,38 @@ def lead_chat_id(source: str | None = None) -> str:
     return settings.telegram_leads_chat_id
 
 
-def _lead_sendable(chat_id: str | None) -> tuple[str, bool]:
-    """Docelowy czat i czy da się do niego pisać.
+def lead_bot_token(chat_id: str | None = None) -> str:
+    """Token bota obsługującego TEN czat leadów.
+
+    Bliźniak `lead_chat_id`, tylko o jeden krok dalej: tamta funkcja wybiera
+    czat po lejku, ta wybiera bota po czacie. Rozstrzyga CZAT, a nie `source`,
+    bo wywołujący zna czat zawsze — z bazy (`lead.tg_chat_id`) albo z samego
+    update'u Telegrama — a `source` tylko przy pierwszej wysyłce.
+
+    Puste `TELEGRAM_FREE_LEADS_BOT_TOKEN` = darmowy czat obsługuje bot główny,
+    czyli zachowanie sprzed podziału. Nic nie przestaje działać przez samo
+    wdrożenie tego kodu.
+    """
+    if (chat_id and settings.telegram_free_leads_bot_token
+            and str(chat_id) == str(settings.telegram_free_leads_chat_id)):
+        return settings.telegram_free_leads_bot_token
+    return settings.telegram_bot_token
+
+
+def _lead_sendable(chat_id: str | None) -> tuple[str, str, bool]:
+    """Docelowy czat, token do niego i czy da się do niego pisać.
 
     Sprawdzamy TEN czat, a nie „czy leady w ogóle są skonfigurowane":
     konfiguracja z samym TELEGRAM_FREE_LEADS_CHAT_ID gubiłaby po cichu
     wszystkie karty free, bo tamten warunek patrzy tylko na czat działu.
+
+    Czat i token wracają RAZEM, bo rozdzielenie ich to dokładnie ta pomyłka,
+    przed którą ten podział ma chronić: wysyłka cudzym botem na własny czat
+    kończy się „Unauthorized" albo, gorzej, trafia nie tam, gdzie miała.
     """
     czat = chat_id if chat_id is not None else settings.telegram_leads_chat_id
-    return czat, bool(settings.telegram_on and settings.telegram_bot_token and czat)
+    token = lead_bot_token(czat)
+    return czat, token, bool(settings.telegram_on and token and czat)
 
 
 def lead_alerts_on(chat_id: str | None = None) -> bool:
@@ -389,7 +419,7 @@ def lead_alerts_on(chat_id: str | None = None) -> bool:
     ustawieniem, i zapisywanie go jako awarii dopisywałoby każdemu leadowi
     zdarzenie o nieudanej wysyłce oraz trzymało go w kolejce dosyłek bez końca.
     """
-    return _lead_sendable(chat_id)[1]
+    return _lead_sendable(chat_id)[2]
 
 
 def lead_keyboard(lead_id: int, *, owner: str | None = None,
@@ -450,7 +480,7 @@ def send_lead_alert(lead_id: int, text: str, *,
     `callback_data` musi zmieścić się w 64 bajtach, stąd samo `lead:<id>:<akcja>`
     zamiast czegokolwiek opisowego — resztę webhook dobiera z bazy po id.
     """
-    czat, mozna = _lead_sendable(chat_id)
+    czat, token, mozna = _lead_sendable(chat_id)
     if not mozna:
         return False, "no bot token or leads chat", None
     poszlo, powod, wynik = _strzal_json(
@@ -458,7 +488,7 @@ def send_lead_alert(lead_id: int, text: str, *,
         {"chat_id": czat, "text": text[:4096],
          "parse_mode": "HTML", "disable_web_page_preview": "true",
          "reply_markup": json.dumps(keyboard or lead_keyboard(lead_id))},
-        None, transport)
+        None, transport, token=token)
     mid = wynik.get("message_id")
     return poszlo, powod, mid if isinstance(mid, int) else None
 
@@ -471,21 +501,26 @@ def send_lead_message(text: str, *, chat_id: str | None = None,
     wypłatami. Przypomnienie niesie imię i mail człowieka, więc pomyłka w czacie
     jest wyciekiem, a nie literówką; jedno wywołanie mniej do pomylenia.
     """
-    czat, mozna = _lead_sendable(chat_id)
+    czat, token, mozna = _lead_sendable(chat_id)
     if not mozna:
         return False, "no bot token or leads chat"
     return _strzal("sendMessage",
                    {"chat_id": czat, "text": text[:4096],
                     "parse_mode": "HTML", "disable_web_page_preview": "true"},
-                   None, transport)
+                   None, transport, token)
 
 
-def answer_callback(callback_id: str, text: str, *, transport=None) -> tuple[bool, str]:
+def answer_callback(callback_id: str, text: str, *, chat_id: str | None = None,
+                    transport=None) -> tuple[bool, str]:
     """Zdejmuje „zegarek" z przycisku. Bez tej odpowiedzi Telegram kręci kółkiem
-    przez minutę i klikający nie wie, czy cokolwiek się stało."""
+    przez minutę i klikający nie wie, czy cokolwiek się stało.
+
+    Odpowiedzieć musi TEN bot, który dostał kliknięcie — `callback_query_id`
+    jest ważny wyłącznie dla niego. Czat pochodzi z update'u, więc `chat_id`
+    wystarczy, żeby trafić w tego właściwego."""
     return _strzal("answerCallbackQuery",
                    {"callback_query_id": callback_id, "text": text[:200]},
-                   None, transport)
+                   None, transport, lead_bot_token(chat_id))
 
 
 def edit_lead_message(chat_id: str, message_id: int, text: str,
@@ -502,4 +537,6 @@ def edit_lead_message(chat_id: str, message_id: int, text: str,
             "disable_web_page_preview": "true"}
     if keyboard is not None:
         pola["reply_markup"] = json.dumps(keyboard)
-    return _strzal("editMessageText", pola, None, transport)
+    # Kartę przepisuje bot, który ją wysłał — `message_id` jest jego i cudzym
+    # tokenem nie da się jej tknąć. Czat wystarcza, żeby go wskazać.
+    return _strzal("editMessageText", pola, None, transport, lead_bot_token(chat_id))
