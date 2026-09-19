@@ -5063,15 +5063,22 @@ function openInbox(){
      (decyzja usera): dwa pola Leads/Prop, klik przełącza listę. Wybór
      zapamiętany per przeglądarka. */
   const tab=localStorage.getItem('pf_admin_inbox_tab')||'leads';
-  const leady=INBOX.filter(i=>i.type==='lead'),prop=INBOX.filter(i=>i.type!=='lead');
-  const items=tab==='prop'?prop:leady;
+  /* Trzy deski, bo tyle ich jest na Telegramie: płatny lejek, darmowy
+     (kanał LEADS NIGERIA) i platforma. Backend przysyła `desk` przy każdym
+     zdarzeniu o leadzie — panel nie zgaduje po źródle. */
+  const leady=INBOX.filter(i=>i.type==='lead'&&i.desk!=='nigeria'),
+        nigeria=INBOX.filter(i=>i.type==='lead'&&i.desk==='nigeria'),
+        prop=INBOX.filter(i=>i.type!=='lead');
+  const items=tab==='prop'?prop:tab==='nigeria'?nigeria:leady;
   const segBtn=(k,l,n)=>`<button class="${tab===k?'on':''}"
     onclick="localStorage.setItem('pf_admin_inbox_tab','${k}');openInbox()">${l}${n?` (${n})`:''}</button>`;
   openOver('Notifications',pushCardHtml()
-    +`<div class="seg" style="margin-bottom:12px">${segBtn('leads','Leads',leady.length)}${segBtn('prop','Prop',prop.length)}</div>`
+    +`<div class="seg" style="margin-bottom:12px">${segBtn('leads','Leads',leady.length)}${segBtn('nigeria','Nigeria',nigeria.length)}${segBtn('prop','Prop',prop.length)}</div>`
     +(items.length?`<div class="tbl-wrap">${items.map(wiersz).join('')}</div>`
       :`<div class="empty"><h3>Nothing here</h3><p>${tab==='prop'
         ?'Orders, KYC submissions, payout requests and ticket messages show up here.'
+        :tab==='nigeria'
+        ?'Leads from the free funnel — the ones that go to the LEADS NIGERIA channel.'
         :'New leads, claims, statuses and follow-ups show up here.'}</p></div>`));
   paintPushCard();
   localStorage.setItem('pf_admin_inbox_seen',new Date().toISOString());
@@ -5110,6 +5117,10 @@ function pushCardHtml(){
 const PUSH_GROUPS=[
   ['Leads',[['lead_new','New leads'],['lead_action','Lead activity (claims & statuses)'],
     ['lead_reminder','Follow-ups & nudges']]],
+  /* Darmowy lejek ma własny czat na Telegramie (LEADS NIGERIA), więc ma też
+     własne przełączniki — inaczej wyciszenie jednego desku gasiło oba. */
+  ['Leads Nigeria',[['ng_new','New leads'],['ng_action','Lead activity (claims & statuses)'],
+    ['ng_reminder','Follow-ups & nudges']]],
   ['Prop',[['admin_order','Orders & payments'],['admin_kyc','KYC submissions'],
     ['admin_payout','Payout requests'],['admin_ticket','Support tickets'],
     ['admin_reach','Channel reach & balance']]],

@@ -5645,7 +5645,7 @@ def admin_inbox():
     co jest „nieprzeczytane" rozstrzyga frontend po localStorage."""
     session = SessionLocal()
     try:
-        zamowienia = session.query(Order).order_by(Order.id.desc()).limit(15).all()
+        zamowienia = session.query(Order).order_by(Order.id.desc()).limit(25).all()
         kyc = (session.query(Trader).filter(Trader.kyc_status == "pending")
                .order_by(Trader.kyc_submitted_at.desc().nullslast()).limit(10).all())
         wnioski = (session.query(PayoutRequest).filter(PayoutRequest.status == "pending")
@@ -5686,7 +5686,7 @@ def admin_inbox():
         # otworzyć od razu kartę leada zamiast gołej zakładki.
         zdarzenia_leadow = (session.query(LeadEvent, Lead)
                             .join(Lead, Lead.id == LeadEvent.lead_id)
-                            .order_by(LeadEvent.id.desc()).limit(15).all())
+                            .order_by(LeadEvent.id.desc()).limit(60).all())
         for z, l in zdarzenia_leadow:
             kto_lead = l.name or l.email
             tytul = {
@@ -5700,9 +5700,20 @@ def admin_inbox():
             items.append({"type": "lead", "ts": z.created_at.isoformat(),
                           "title": tytul,
                           "body": (z.detail or z.kind)[:120], "view": "leads",
-                          "lead_id": l.id})
+                          "lead_id": l.id, "desk": _desk_leada(l.source)})
         items.sort(key=lambda i: i["ts"], reverse=True)
-        return {"items": items[:30]}
+        # Budżet PER DESK, nie jeden na całość. Wspólne obcięcie po czasie
+        # znaczyło, że seria zdarzeń o leadach wypychała z dzwonka wszystkie
+        # zamówienia — i że liczba przy każdym polu mówiła o obcięciu, a nie
+        # o tym, ile naprawdę przyszło.
+        budzet: dict[str, int] = {}
+        wynik = []
+        for i in items:
+            k = i.get("desk") if i["type"] == "lead" else "prop"
+            budzet[k] = budzet.get(k, 0) + 1
+            if budzet[k] <= 30:
+                wynik.append(i)
+        return {"items": wynik}
     finally:
         session.close()
 
@@ -8365,6 +8376,15 @@ def _kontakt_zastepczy(session, lead: Lead, actor: str) -> str:
     return " · ".join(powody)
 
 
+def _desk_leada(source: str | None) -> str:
+    """„nigeria" albo „leads" — ten sam podział co czaty na Telegramie.
+
+    Reguła mieszka w `telegram.lead_chat_id`; tutaj jest jej nazwa, bo panel
+    i preferencje pushu potrzebują etykiety, a nie identyfikatora czatu.
+    """
+    return "nigeria" if (source or "").strip().lower().startswith("free") else "leads"
+
+
 def _lead_push(lead_id: int, title: str, body: str = "", *,
                event: str = "lead_action") -> None:
     """Web push + dzwonek panelu do wszystkich adminów o TYM leadzie.
@@ -8375,6 +8395,18 @@ def _lead_push(lead_id: int, title: str, body: str = "", *,
     `?lead=` przy starcie), a tag skleja serię zdarzeń jednego leada w jedno
     powiadomienie na ekranie telefonu. notify_admins nigdy nie rzuca, a w
     trakcie requestu odkłada wysyłkę na po odpowiedzi — wolno to wołać zewsząd."""
+    # Desk czytamy TUTAJ, a nie w wywołaniach: jest ich pięć, rozsianych po
+    # pliku, i połowa nie ma już obiektu leada pod ręką. Jedno zapytanie o
+    # kolumnę przy zdarzeniu, które i tak zaraz pójdzie w świat przez push.
+    session = SessionLocal()
+    try:
+        source = session.query(Lead.source).filter(Lead.id == lead_id).scalar()
+    finally:
+        session.close()
+    if _desk_leada(source) == "nigeria":
+        # Osobne klucze preferencji, żeby wyciszenie jednego desku nie gasiło
+        # drugiego: lead_new -> ng_new, lead_action -> ng_action itd.
+        event = event.replace("lead_", "ng_", 1)
     notify.notify_admins(event, title, body,
                          url=f"/admin?lead={lead_id}", tag=f"lead-{lead_id}")
 
@@ -9905,6 +9937,14 @@ LEAD_REMINDERS = ("no_contact", "bought", "stalled", "unclaimed")
 # zakupu i o niego trzeba zahaczać co tydzień, a nie raz pogratulować.
 BOUGHT_UPDATE_DAYS = 7
 
+# Ile razy cykl ma się odezwać, zanim zgaśnie sam. Bez sufitu zapomniany wpis
+# jest nieskończonym źródłem wiadomości na czacie: przypomnienie, które przyszło
+# piąty raz, przestaje być przypomnieniem i staje się szumem, który uczy dział
+# przewijać kanał. Trzy razy to dość, żeby temat nie zginął, i mało, żeby nie
+# zginął w nim sam kanał. Po wyczerpaniu serii wpis zostaje w historii leada
+# i da się go w panelu uzbroić ponownie.
+POWTORZEN_MAX = 3
+
 # Po ilu minutach ciszy mail do leada wychodzi SAM. Dłużej niż nudge „nikt nie
 # wziął" (30 min) i to jest cały sens tej wartości: pierwszy strzał należy do
 # człowieka, automat jest dopiero zabezpieczeniem na to, że nikt nie usiadł.
@@ -9993,14 +10033,21 @@ def _tekst_przypomnienia(lead: Lead, powod: str, paid: float, dni: int) -> str:
     return "\n".join(linie)
 
 
-def _tekst_zaplanowanego(lead: Lead, r: LeadReminder) -> str:
+def _tekst_zaplanowanego(lead: Lead, r: LeadReminder, ostatni: bool = False) -> str:
     """Przypomnienie ustawione ręcznie w panelu albo cykl założony po zakupie.
 
     Treść pisze człowiek, więc idzie przez `html.escape` tak samo jak dane
     z formularza — panel jest po drugiej stronie tego samego `parse_mode=HTML`.
+
+    `ostatni` dokłada zdanie o wygaśnięciu serii. Ciche urwanie się po trzeciej
+    wiadomości byłoby gorsze niż brak limitu: dział zostałby z przekonaniem, że
+    automat dalej pilnuje tematu, i przestałby go pilnować sam.
     """
     e = html.escape
-    ile = f" ({r.sent_count + 1}. raz)" if r.repeat_days else ""
+    # Licznik jest już podniesiony przez wywołującego — numer tej wysyłki to
+    # `sent_count`, nie `sent_count + 1`. Kolejność musi być taka, bo z tej
+    # samej liczby wyliczany jest sufit serii.
+    ile = f" ({r.sent_count}. raz)" if r.repeat_days else ""
     linie = [f"🔔 <b>{e(lead.name or lead.email)}</b>{ile}", f"✉️ {e(lead.email)}"]
     if lead.phone:
         linie.append(f"📞 {e(lead.phone)}")
@@ -10009,6 +10056,9 @@ def _tekst_zaplanowanego(lead: Lead, r: LeadReminder) -> str:
     if lead.owner:
         linie.append(f"👤 {e(lead.owner)}")
     linie.append(f"➡️ {e(r.text)}")
+    if ostatni:
+        linie.append("⏹ Ostatnie z serii — dalej już nie przypomnę. "
+                     f"Jeśli temat żyje, uzbrój go w panelu: /admin?lead={lead.id}")
     return "\n".join(linie)
 
 
@@ -10019,14 +10069,41 @@ def cron_lead_followups(no_contact_days: int = 3, stalled_days: int = 7):
     return _lead_followups(no_contact_days, stalled_days)
 
 
+def _nadal_klient(session, lead: Lead) -> bool:
+    """Czy lead DALEJ spełnia warunek, na którym założono cykl po zakupie.
+
+    Warunek (`paid > 0 or bought`) sprawdzany był tylko w chwili zakładania
+    cyklu, a wpis żyje tygodniami — więc zwrot zamówienia albo ręczne odznaczenie
+    zostawiało bijący cykl o kliencie, który klientem już nie jest. Kwerenda idzie
+    tylko dla WYMAGALNYCH cykli, czyli kilku wierszy na przebieg.
+
+    E-mail porównywany małymi literami po obu stronach: adres z formularza
+    bywa zapisany inaczej niż ten, którym trader zakładał konto.
+    """
+    if lead.bought:
+        return True
+    trader = (session.query(Trader.id)
+              .filter(func.lower(Trader.email) == (lead.email or "").strip().lower())
+              .first())
+    if not trader:
+        return False
+    suma = (session.query(func.sum(Order.amount_usd))
+            .filter(Order.trader_id == trader[0], Order.status == "paid").scalar())
+    return float(suma or 0) > 0
+
+
 def _wyslij_zaplanowane(session, now: datetime
                         ) -> tuple[list[tuple[str, str]], list[tuple[int, str, str]]]:
     """Przypomnienia z terminem, który już minął: ustawione ręcznie w panelu
     i cykle założone po zakupie.
 
-    Cykliczne NIE gasną po wysłaniu, tylko przesuwają termin o `repeat_days` —
-    dopóki ktoś ich nie wyłączy w panelu. Jednorazowe zamykają się same, żeby
-    nie trzeba było po nich sprzątać.
+    Cykliczne przesuwają termin o `repeat_days`, ale najwyżej `POWTORZEN_MAX`
+    razy — potem gasną same i mówią o tym w ostatniej wiadomości. Jednorazowe
+    zamykają się po pierwszej wysyłce.
+
+    Cykl założony po zakupie dostaje przed każdą wysyłką PONOWNE sprawdzenie
+    warunku: wpis powstały na stanie, który już nie obowiązuje, gaśnie po cichu
+    zamiast dalej wołać o kliencie, który nim nie jest.
 
     Zwraca dwie listy: wiadomości `(czat, tekst)` — czat, bo leady free mają
     własny i przypomnienie ma trafić tam, gdzie wisi karta — oraz pushe
@@ -10046,12 +10123,24 @@ def _wyslij_zaplanowane(session, now: datetime
         if not lead:
             r.active = False
             continue
-        teksty.append((telegram.lead_chat_id(lead.source), _tekst_zaplanowanego(lead, r)))
-        pushy.append((lead.id, f"Reminder: {r.text[:80]}", lead.name or lead.email))
+        # Cykl po zakupie: warunek sprawdzany PRZED wysyłką, nie tylko przy
+        # zakładaniu. Gaśnie bez wiadomości — dział nie musi wiedzieć, że coś,
+        # co nie powinno było powstać, przestało istnieć.
+        if r.kind == "bought" and not _nadal_klient(session, lead):
+            r.active = False
+            _zdarzenie(session, lead.id, "reminder",
+                       "cykl po zakupie wygaszony: lead nie jest już klientem",
+                       actor="cron")
+            continue
+
         r.sent_count = (r.sent_count or 0) + 1
         r.last_sent_at = now
+        ostatni = bool(r.repeat_days) and r.sent_count >= POWTORZEN_MAX
+        teksty.append((telegram.lead_chat_id(lead.source),
+                       _tekst_zaplanowanego(lead, r, ostatni)))
+        pushy.append((lead.id, f"Reminder: {r.text[:80]}", lead.name or lead.email))
         _zdarzenie(session, lead.id, "reminder", f"planned: {r.text}"[:200], actor="cron")
-        if r.repeat_days:
+        if r.repeat_days and not ostatni:
             r.due_at = now + timedelta(days=r.repeat_days)
         else:
             r.active = False
