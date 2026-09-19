@@ -1030,6 +1030,8 @@ function renderAccounts(){
       ${searchBox('acc-q','_accQ','renderAccounts','Search login, trader, email or plan…')}
       <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="accSeg('${k}')">${l}</button>`).join('')}</div>
       <span class="count-pill">${rows.length} of ${list.length}${impPill()}</span>
+      <button class="btn-o sm" onclick="exportStatements(this)"
+        title="One Excel file with every managed account: trades, daily summary, equity curve, payouts and rule breaches. Free signups are not included.">Statements .xlsx</button>
     </div>
     ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.accounts.v2">
       <thead><tr><th>Created</th><th>Paid</th><th>Login</th><th>Trader</th><th>Plan</th><th>Phase</th><th>Status</th>
@@ -2200,24 +2202,42 @@ async function cancelLeadReminder(id,rid){
 /* Pobranie idzie przez fetch, nie przez zwykły <a href>: autoryzacja panelu
    siedzi w nagłówku, a link nie ma jak go donieść — dostałby 403. Nazwę pliku
    podaje serwer, więc data w nazwie jest warszawska tak samo jak daty w środku. */
-async function exportLeads(btn){
+/* Pobranie pliku spod trasy ADMINA. Zwykły <a href> tu nie wystarczy: panel
+   autoryzuje się nagłówkiem, którego link nie poniesie — stąd fetch + blob. */
+async function sciagnij(sciezka,btn,domyslna,komunikat){
   const napis=btn.textContent;
   btn.disabled=true;btn.textContent='…';
   try{
-    const r=await fetch('/api/admin/leads.csv',{headers:adminH()});
-    if(!r.ok)throw new Error('HTTP '+r.status);
+    const r=await fetch(sciezka,{headers:adminH()});
+    if(!r.ok){
+      /* Serwer tłumaczy odmowę zdaniem (np. brakująca biblioteka na hostingu).
+         Samo „HTTP 503" kazałoby szukać błędu w danych. */
+      let opis='HTTP '+r.status;
+      try{opis=(await r.json()).detail||opis}catch(e){}
+      throw new Error(opis);
+    }
     const zNaglowka=(r.headers.get('content-disposition')||'').match(/filename="([^"]+)"/);
     const a=document.createElement('a');
     a.href=URL.createObjectURL(await r.blob());
-    a.download=zNaglowka?zNaglowka[1]:'leads.csv';
+    a.download=zNaglowka?zNaglowka[1]:domyslna;
     document.body.append(a);a.click();a.remove();
     /* Zwolnienie adresu od razu po click() potrafi uciąć pobieranie, które
        jeszcze się nie zaczęło — stąd odroczenie zamiast revoke w tej samej
        linijce. */
     setTimeout(()=>URL.revokeObjectURL(a.href),10000);
-    toast('Exported.');
-  }catch(e){toast('Export failed: '+e.message,'err')}
+    const ile=r.headers.get('x-accounts-exported');
+    toast(komunikat?(ile?komunikat.replace('{n}',ile):komunikat):'Exported.','ok',7000);
+  }catch(e){toast('Export failed: '+e.message,'err',9000)}
   finally{btn.disabled=false;btn.textContent=napis}
+}
+async function exportLeads(btn){
+  return sciagnij('/api/admin/leads.csv',btn,'leads.csv');
+}
+/* Wyciąg ze WSZYSTKICH prowadzonych rachunków w jednym skoroszycie. Darmowe
+   rejestracje są poza zakresem — nie prowadzimy ich tak jak płatnych. */
+async function exportStatements(btn){
+  return sciagnij('/api/admin/statements.xlsx',btn,'account-statements.xlsx',
+    'Exported {n} accounts — trades, daily summary, equity curve, payouts and breaches.');
 }
 
 /* Leada wpisanego z ręki nie da się dziś dodać nigdzie indziej: kto napisał na

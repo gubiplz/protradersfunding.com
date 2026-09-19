@@ -42,7 +42,7 @@ from sqlalchemy.exc import IntegrityError
 from . import (achievements, auth, billing, catalog, certshot, contentbot, countries,
                fields, loyalty,
                lead_mail, metaquotes_web, notify, offers,
-               payout_import, payoutbot, reach,
+               payout_import, payoutbot, reach, statements,
                poller, provisioning, push, rules, sms, telegram, telemetry, tradebot)
 from .config import get_settings
 from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint
@@ -8637,6 +8637,40 @@ _KOLUMNY_CSV = (
     ("contacted", lambda l: _data_csv(l["contacted_at"])),
     ("note", lambda l: l["note"]),
 )
+
+
+@app.get("/api/admin/statements.xlsx", dependencies=[Depends(auth.require_admin)])
+def admin_statements_xlsx():
+    """Wyciąg ze wszystkich prowadzonych rachunków — jeden skoroszyt.
+
+    Broker daje klientowi statement per rachunek; tutaj jedno kliknięcie daje
+    wszystkie naraz, bo pytanie nad tym plikiem brzmi zwykle „jak nam idzie".
+    Rachunki DARMOWE i importowane są pominięte — nie prowadzimy ich tak jak
+    płatnych, więc ich historia nie opowiada o usłudze.
+
+    Plik powstaje w pamięci przy każdym żądaniu, bez pliku tymczasowego:
+    funkcja bezserwerowa nie ma dysku, który przeżyłby odpowiedź.
+    """
+    session = SessionLocal()
+    try:
+        konta = statements.konta_do_wyciagu(
+            session, placacy_id=_placacy_id(session),
+            filtr_nie_import=_konto_nie_import(session))
+        try:
+            dane = statements.zbuduj(session, konta)
+        except ImportError:
+            # Brak openpyxl na hostingu to problem WDROŻENIA, nie danych —
+            # ogólne 500 kazałoby szukać błędu w liczbach.
+            raise HTTPException(503, "The spreadsheet library is missing on the server "
+                                     "(openpyxl) — redeploy with it in requirements.txt")
+        nazwa = statements.nazwa_pliku()
+        return Response(
+            content=dane,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{nazwa}"',
+                     "X-Accounts-Exported": str(len(konta))})
+    finally:
+        session.close()
 
 
 @app.get("/api/admin/leads.csv", dependencies=[Depends(auth.require_admin)])

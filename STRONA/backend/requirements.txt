@@ -31,3 +31,6 @@ tzdata>=2024.1
 
 # Testy
 pytest>=8.0
+# Wyciag z kont do Excela (app/statements.py). Czysty Python,
+# bez rozszerzen C — wchodzi do funkcji bezserwerowej bez budowania.
+openpyxl>=3.1
