@@ -284,3 +284,23 @@ def test_endpoint_oddaje_plik_xlsx(swiat):
     # że nie odesłaliśmy strony błędu z nagłówkiem Excela.
     assert r.content[:2] == b"PK"
     assert int(r.headers["x-accounts-exported"]) >= 1
+
+
+def test_w_pliku_nie_ma_polskiego_tekstu(swiat):
+    """Plik czyta klient, partner albo model językowy — nie osoba pisząca ten
+    kod. Komentarze zostają po polsku, ZAWARTOŚĆ nie może."""
+    openpyxl = pytest.importorskip("openpyxl")
+    s = SessionLocal()
+    try:
+        dane = statements.zbuduj(s, _konta(s))
+    finally:
+        s.close()
+    wb = openpyxl.load_workbook(io.BytesIO(dane))
+    ogonki = set("ąćęłńóśźżĄĆĘŁŃÓŚŹŻ")
+    winne = []
+    for nazwa in wb.sheetnames:
+        for wiersz in wb[nazwa].iter_rows():
+            for c in wiersz:
+                if isinstance(c.value, str) and ogonki & set(c.value):
+                    winne.append(f"{nazwa}!{c.coordinate}: {c.value[:60]}")
+    assert not winne, winne
