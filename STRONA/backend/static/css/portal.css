@@ -127,8 +127,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .btn-o{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-weight:600;font-size:14px;
   padding:10px 18px;border-radius:11px;border:1px solid var(--line2);color:var(--txt);transition:.16s;
   background:var(--panel);white-space:nowrap}
-.btn-o:hover:not(:disabled){border-color:var(--acc);color:var(--acc);background:var(--acc-bg)}
-.btn-o:disabled{opacity:.55;color:var(--muted);cursor:default}
+.btn-o:hover{border-color:var(--acc);color:var(--acc);background:var(--acc-bg)}
 .btn-o.sm,.btn-p.sm{padding:8px 13px;font-size:13px;border-radius:9px}
 /* Potwierdzenie akcji NIEODWRACALNEJ w oknie portalu (askConfirm z danger:true).
    Czerwien niesie tu ostrzezenie, ktore w natywnym confirm() brala na siebie
@@ -500,8 +499,7 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
    raw page at the edge. The wrap must stay free of backdrop-filter/transform,
    or the fixed pseudo would anchor to the wrap and move with it again. */
 .modal-wrap{position:fixed;inset:0;z-index:70;display:flex;align-items:flex-start;justify-content:center;
-  padding:calc(18px + env(safe-area-inset-top,0px)) 18px calc(18px + env(safe-area-inset-bottom,0px));
-  overflow-y:auto;overscroll-behavior:contain}
+  padding:18px;overflow-y:auto;overscroll-behavior:contain}
 /* Welon NIE moze isc na `z-index:-1`. WebKit (Safari/Brave na iOS) wciagal wtedy
    ten fixed pseudoelement z `backdrop-filter` na warstwe NAD trescia i karta
    modala znikala — zostawal sam blur, przez ktory bylo widac strone pod spodem.
@@ -974,27 +972,7 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
   /* content and toasts must never slide under the fixed bar */
   .has-botnav .content{padding-bottom:calc(50px + 56px + env(safe-area-inset-bottom))}
   .has-botnav #toasts{bottom:calc(12px + 56px + env(safe-area-inset-bottom))}
-  /* scrollIntoView musi celowac NAD pasek: bez tego element przewiniety "do
-     widoku" laduje pod fixed nawigacja i klik trafia w jej przyciski. */
-  html{scroll-padding-bottom:calc(70px + env(safe-area-inset-bottom))}
 }
-/* Klawiatura ekranowa: position:fixed na iOS nie wie o niej nic i pasek
-   zawisa nad polem edycji w polowie ekranu — na czas pisania znika. */
-body.kb-open .botnav,body.kb-open .tabbar{display:none}
-
-/* Wskaznik pull-to-refresh (admin-panel.js): kolko z strzalka zjezdza z gory
-   proporcjonalnie do pociagniecia, po progu kreci sie do konca odswiezania. */
-#ptr{position:fixed;top:calc(6px + env(safe-area-inset-top));left:50%;
-  transform:translateX(-50%);z-index:80;width:38px;height:38px;border-radius:50%;
-  display:flex;align-items:center;justify-content:center;
-  background:var(--card,#fff);border:1px solid var(--line);
-  box-shadow:0 4px 14px rgba(15,23,42,.16);color:var(--muted);
-  opacity:0;pointer-events:none;transition:opacity .15s}
-#ptr svg{width:20px;height:20px}
-#ptr.show{opacity:1}
-#ptr.ready{color:var(--acc)}
-#ptr.spin svg{animation:ptr-spin .8s linear infinite}
-@keyframes ptr-spin{to{transform:rotate(360deg)}}
 
 /* ---------------- challenge cards (portal Challenges view) ---------------- */
 /* "Scale your progress" upsell strip (real math from the best live account) */
@@ -1050,135 +1028,6 @@ body.kb-open .botnav,body.kb-open .tabbar{display:none}
 .pg-dots{color:var(--dim);padding:0 2px;user-select:none}
 @media(max-width:700px){.upsell-head{flex-direction:column}.upsell-head .btn-p{align-self:stretch}}
 
-/* Budzet ryzyka na dzis — pierwsza karta w Challenges. Kwoty monospace, bo
-   trader porownuje je z wielkoscia pozycji, a nie czyta jak zdanie. */
-.risk-card{padding:20px 22px;max-width:var(--wrap)}
-.rc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
-.rc-eyebrow{font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--dim);
-  font-weight:700;margin-bottom:6px}
-.rc-pnl{font-family:var(--mono);font-size:28px;font-weight:700;line-height:1.1}
-.rc-pnl.up{color:var(--green)} .rc-pnl.down{color:var(--red)}
-.rc-sub{font-size:12.5px;color:var(--muted);margin-top:3px}
-.rc-clock{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);
-  background:var(--bg3);border-radius:99px;padding:7px 13px}
-.rc-clock svg{width:15px;height:15px;flex:0 0 15px;color:var(--dim)}
-.rc-clock b{font-family:var(--mono);color:var(--txt);font-weight:600}
-.rc-bars{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px;margin-top:18px}
-.rb-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;
-  font-size:12.5px;color:var(--muted);margin-bottom:6px}
-.rb-top b{font-family:var(--mono);font-size:15px;font-weight:700}
-.rb-top b.ok{color:var(--green)} .rb-top b.warn{color:var(--gold)} .rb-top b.bad{color:var(--red)}
-.rb-track{height:8px;border-radius:99px;background:var(--bg3);overflow:hidden}
-.rb-track i{display:block;height:100%;border-radius:99px;transition:width .7s cubic-bezier(.22,1,.36,1)}
-.rb-track .ok{background:linear-gradient(90deg,#10b981,#34d399)}
-.rb-track .warn{background:linear-gradient(90deg,#f59e0b,#fbbf24)}
-.rb-track .bad{background:linear-gradient(90deg,#ef4444,#f87171)}
-.rb-foot{font-size:11.5px;color:var(--dim);margin-top:6px;line-height:1.45}
-.rc-since{display:flex;gap:8px;align-items:flex-start;margin-top:18px;padding-top:15px;
-  border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
-.rc-since svg{width:15px;height:15px;flex:0 0 15px;color:var(--dim);margin-top:2px}
-.rc-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px}
-.rc-tab{padding:5px 11px;border-radius:99px;border:1px solid var(--line);background:transparent;
-  color:var(--muted);font-family:var(--mono);font-size:12px;cursor:pointer;transition:.15s}
-.rc-tab:hover{border-color:var(--line2);color:var(--txt)}
-.rc-tab.on{background:var(--acc-bg);border-color:transparent;color:var(--acc);font-weight:600}
-@media(max-width:560px){
-  .rc-head{flex-direction:column}
-  .rc-pnl{font-size:24px}
-  .rc-bars{gap:14px;margin-top:14px}
-}
-
-/* Podsumowanie zakonczonej fazy (karta konta, nad wynikami). Kolor niesie
-   krawedz, nie tlo: to ma byc rachunek do przeczytania, a nie alarm ani
-   fajerwerki. Ta sama bryla dla zdanej i oblanej fazy — rozni sie wylacznie
-   akcentem, bo obie opisuja to samo: faze, ktora sie skonczyla. */
-.recap{padding:20px 22px;border-left:3px solid var(--line2)}
-.recap.ok{border-left-color:var(--green)}
-.recap.bad{border-left-color:var(--red)}
-.recap-title{font-size:16px;font-weight:700;line-height:1.35;margin-bottom:4px}
-.recap-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
-  gap:1px;margin-top:18px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden}
-.rp{background:var(--panel);padding:11px 13px}
-.rp span{display:block;font-size:11.5px;color:var(--muted);margin-bottom:3px}
-.rp b{font-family:var(--mono);font-size:15.5px;font-weight:700;color:var(--txt)}
-.rp b small{font-family:var(--mono);font-size:11.5px;font-weight:500;color:var(--dim)}
-.rp b.ok{color:var(--green)} .rp b.bad{color:var(--red)}
-.recap-read{display:flex;gap:11px;align-items:flex-start;margin-top:16px;
-  background:var(--bg3);border-radius:12px;padding:13px 15px}
-.rr-ic{flex:0 0 30px;height:30px;display:grid;place-items:center;border-radius:9px;
-  background:var(--acc-bg);color:var(--acc)}
-.rr-ic svg{width:16px;height:16px}
-.recap-read b{display:block;font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;
-  color:var(--dim);font-weight:700;margin-bottom:4px}
-.recap-read p{margin:0;font-size:13.5px;line-height:1.55;color:var(--txt)}
-.recap-foot{display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;
-  margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
-.rf-txt{flex:1 1 260px;font-size:12.5px;line-height:1.55;color:var(--muted)}
-@media(max-width:560px){
-  .recap{padding:17px 16px}
-  .recap-grid{grid-template-columns:repeat(2,1fr);margin-top:14px}
-  .recap-foot .btn-p{width:100%}
-}
-
-/* Przeglad tygodnia. Slupki rosna od osi w gore i w dol, bo tydzien ma dni na
-   plusie i na minusie i zaden z nich nie ma wygladac na wazniejszy. Kafle liczb
-   i typografia te same co w podsumowaniu fazy — to ten sam gatunek ekranu. */
-.wk-days{--wk-lab:17px;position:relative;display:grid;grid-template-columns:repeat(7,1fr);
-  gap:6px;height:206px;margin-top:20px}
-/* Os idzie POD slupkami (bez tego kreska przecinala kazdy niski slupek w poprzek
-   i wygladalo to na blad renderowania), a jej wysokosc niesie `--wk-rows` — te
-   same proporcje, wedlug ktorych dziela sie polowki slupka. */
-.wk-days::after{content:'';position:absolute;left:0;right:0;z-index:0;
-  top:calc(var(--wk-lab) + (100% - var(--wk-lab) * 2 - 18px) * var(--wk-up,.5));
-  border-top:1px dashed var(--line2);pointer-events:none}
-/* Pasma na kwoty (--wk-lab) to PADDING, nie wiersze siatki: kwoty wisza absolutnie
-   przy koncach slupkow, wiec nie sa dziecmi siatki i wiersze by sie rozjechaly.
-   Pasma stoja poza proporcja mp:mn, wiec obie polowki dziela sie dokladnie tak,
-   jak dziela sie najlepszy i najgorszy dzien — inaczej dolar po jednej stronie
-   osi znaczylby co innego niz po drugiej. */
-.wk-day{position:relative;z-index:1;display:grid;height:100%;
-  padding-top:var(--wk-lab);grid-template-rows:var(--wk-rows,1fr 1fr) var(--wk-lab) 18px}
-.wk-half{position:relative;display:flex;flex-direction:column;align-items:center;min-height:0}
-.wk-half.up{justify-content:flex-end}
-.wk-half.dn{justify-content:flex-start}
-/* flex:none, bo bez tego slupek wyzszy niz polowka zostalby sciety przez
-   flex-shrink zamiast wystawac — a wtedy wysokosc przestaje niesc wartosc. */
-.wk-half i{display:block;flex:none;width:100%;max-width:34px}
-.wk-half.up i{background:var(--green);border-radius:5px 5px 0 0}
-.wk-half.dn i{background:var(--red);border-radius:0 0 5px 5px}
-.wk-half b{position:absolute;left:0;right:0;text-align:center;white-space:nowrap;
-  font-family:var(--mono);font-size:10.5px;font-weight:600;line-height:var(--wk-lab)}
-.wk-half.up b{color:var(--green)}
-.wk-half.dn b{color:var(--red)}
-/* Ostatni wiersz wprost: miedzy dolna polowka a nazwa dnia stoi puste pasmo na
-   kwote najglebszego dnia, a siatka sama wlozylaby nazwe wlasnie w nie. */
-.wk-lbl{grid-row:-1;align-self:center;text-align:center;font-size:11px;color:var(--muted)}
-.wk-day.off .wk-lbl{color:var(--dim);opacity:.55}
-.wk-grid{margin:16px 0}
-.wk-obs{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:11px}
-.wk-obs li{position:relative;padding-left:21px;font-size:13.5px;line-height:1.55;color:var(--txt)}
-.wk-obs li::before{content:'';position:absolute;left:5px;top:8px;width:6px;height:6px;
-  border-radius:50%;background:var(--acc)}
-/* Zdanie nosne, nie stopka prawnicza: bez niego lista obserwacji da sie
-   przeczytac jako podpowiedzi, co robic w nastepnym tygodniu. */
-.wk-note{margin:16px 0 0;padding-top:13px;border-top:1px solid var(--line);
-  font-size:12px;line-height:1.55;color:var(--muted)}
-@media(max-width:560px){
-  /* Kwoty nad slupkami zachodza na siebie przy siedmiu kolumnach na telefonie —
-     liczby stoja w kaflach nizej, a wartosc dnia niesie dotkniecie. Pasma kwot
-     ida do zera, zeby nie zostawialy pustych pasow nad i pod wykresem. */
-  .wk-days{--wk-lab:0px;height:172px;gap:4px;margin-top:16px}
-  .wk-half b{display:none}
-  .wk-half i{max-width:26px}
-}
-/* Na szerokim ekranie kolumna ma ~150px i slupek 34px gubi sie w niej jak patyk —
-   tydzien ma wygladac na zapis handlu, nie na resztki wykresu. */
-@media(min-width:900px){
-  .wk-days{--wk-lab:19px;height:246px}
-  .wk-half i{max-width:62px}
-  .wk-half b{font-size:11.5px}
-}
-
 .chal-filter{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:2px 0 16px}
 .chal-count{margin-left:auto;font-size:12px;color:var(--dim)}
 .chal-nomatch{text-align:center;color:var(--muted);font-size:13.5px;padding:30px 16px}
@@ -1219,7 +1068,6 @@ body.kb-open .botnav,body.kb-open .tabbar{display:none}
 .cr-num .l{font-size:11px;color:var(--dim);display:flex;align-items:center;gap:5px;white-space:nowrap}
 .cr-num .v{font-family:var(--mono);font-weight:600;font-size:14px;margin-top:1px;white-space:nowrap}
 .cr-num .v small{font-weight:600;font-size:11px}
-.cr-num .ret{font-family:var(--mono);font-weight:600;font-size:11px;margin-top:1px;white-space:nowrap}
 @media(max-width:1259px){
   /* Ponizej ukladu jednoliniowego komorki dzielily miejsce po rowno (flex:1)
      i mogly sie skurczyc ponizej swojej tresci (min-width:0). Kwota z otwartym
@@ -1318,10 +1166,7 @@ body.kb-open .botnav,body.kb-open .tabbar{display:none}
 .sheet-veil{position:fixed;inset:0;z-index:60;background:var(--scrim)}
 .sheet{position:fixed;left:0;right:0;bottom:0;z-index:61;background:var(--panel);
   border:1px solid var(--line);border-bottom:0;border-radius:20px 20px 0 0;
-  /* 82dvh: przy 70vh „Sign Out" lądował tuż pod krawędzią ekranu iPhone'a
-     i nic nie zdradzało, że arkusz się przewija */
-  padding:8px 14px calc(14px + env(safe-area-inset-bottom));
-  max-height:80vh;max-height:82dvh;overflow-y:auto;
+  padding:8px 14px calc(14px + env(safe-area-inset-bottom));max-height:70vh;overflow-y:auto;
   overscroll-behavior:contain;box-shadow:0 -24px 60px -24px rgba(15,23,42,.35);
   transform:translateY(100%);visibility:hidden;
   /* prefers-reduced-motion: the global *{transition-duration:.01ms!important}
@@ -1351,21 +1196,11 @@ button,a{-webkit-tap-highlight-color:transparent}
 /* --- standalone mode (iOS Add to Home Screen) --- */
 html.pwa body{overscroll-behavior-y:none}
 html.pwa .topbar{padding-top:calc(13px + env(safe-area-inset-top))}  /* status bar overlays */
-/* topbar rośnie o notch, więc panel dzwonka musi zjechać o tyle samo —
-   ze stałym top:64px otwierał się POD topbarem na iPhone'ach z Dynamic Island */
-html.pwa .notif-panel{top:calc(64px + env(safe-area-inset-top))}
 @media(max-width:960px){
   html.pwa .topbar{padding-top:calc(12px + env(safe-area-inset-top))}
   html.pwa .side{display:none}     /* tab bar + sheet own navigation in standalone */
   html.pwa .burger{display:none}
 }
-
-/* --- boot retry (zimny start bez sieci; element tworzy portal-app.js) --- */
-#boot-retry{position:fixed;inset:0;z-index:99;display:flex;align-items:center;
-  justify-content:center;background:var(--bg);padding:24px}
-#boot-retry .br-card{text-align:center;max-width:320px}
-#boot-retry h3{color:var(--txt);font-size:17px;margin-bottom:6px}
-#boot-retry p{font-size:13.5px;color:var(--muted);margin-bottom:18px}
 
 /* ============================================================
    PHASE 2 — intermittent reinforcement layer
@@ -1448,48 +1283,6 @@ html.pwa .notif-panel{top:calc(64px + env(safe-area-inset-top))}
 .rank-up,.rank-down{font-family:var(--mono);font-size:10.5px;font-weight:700;margin-left:4px;white-space:nowrap}
 .rank-up{color:var(--green)}
 .rank-down{color:var(--red)}
-
-/* --- discipline board --- */
-/* Czolowa trojka stoi w tej samej siatce co podium zyskow, ale bez zlota i bez
-   wyrozniania pierwszej karty: rowna wysokosc i rowna ramka to cala roznica,
-   ktora niesie komunikat „to nie jest wyscig". Miejsce odroznia kreska z lewej,
-   od mocnej do bladej — czytelna, a nie swietujaca. */
-.disc-card{position:relative;background:var(--panel);border:1px solid var(--line);
-  border-left:3px solid var(--dim);border-radius:var(--r);padding:20px}
-.disc-card.a1{border-left-color:var(--acc)}
-.disc-card.a2{border-left-color:var(--muted)}
-.disc-card .pod-rank{left:auto;right:14px}
-.disc-badge{width:38px;height:38px;border-radius:9px;background:var(--acc-bg);color:var(--acc);
-  display:flex;align-items:center;justify-content:center;margin-bottom:11px}
-.disc-badge svg{width:19px;height:19px}
-/* Wynik neutralnym kolorem tekstu, nie zielenia: 87/100 to stan, nie zysk. */
-.disc-score{font-family:var(--mono);font-size:28px;font-weight:800;color:var(--txt);line-height:1}
-.disc-score small{font-size:13px;font-weight:600;color:var(--dim);margin-left:2px}
-/* Proporcje 40/30/30 daje `flex:40|30|30` z markupu (grow na zerowej bazie):
-   szerokosc segmentu niesie WAGE skladowej, a wypelnienie w srodku — jej stan.
-   Gdyby szerokosc zalezala od punktow, konto z zerowym buforem gubiloby
-   informacje, ze bufor w ogole jest liczony. */
-.disc-bar{display:flex;gap:2px;height:7px;margin:12px 0 7px}
-.disc-seg{background:var(--line);border-radius:4px;overflow:hidden}
-.disc-seg i{display:block;height:100%;border-radius:4px}
-.disc-seg.s1 i{background:var(--acc)}
-.disc-seg.s2 i{background:var(--green)}
-.disc-seg.s3 i{background:var(--acc2)}
-.disc-leg{display:flex;gap:2px;font-size:10px;color:var(--dim);line-height:1.3}
-.disc-leg span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.disc-leg b{font-family:var(--mono);font-weight:700;color:var(--muted)}
-.disc-leg.tiny{font-size:9.5px;text-transform:uppercase;letter-spacing:.05em}
-.disc-card .pod-mini{margin-top:14px}
-.disc-note{display:flex;gap:11px;align-items:flex-start;background:var(--acc-bg);
-  border:1px solid var(--acc-line);border-radius:12px;padding:13px 15px;margin-bottom:18px;
-  font-size:13px;line-height:1.5;color:var(--txt)}
-.disc-note svg{width:17px;height:17px;flex:0 0 17px;margin-top:1px;color:var(--acc)}
-@media(max-width:560px){
-  /* Trzy podpisy pod pasmem nie mieszcza sie w kolumnie telefonu — zostaje samo
-     pasmo, a liczby stoja w kaflu nizej. */
-  .disc-leg{display:none}
-  .disc-card{padding:16px}
-}
 
 /* --- pull-to-refresh (mobile PWA) --- */
 /* contain only OUTSIDE standalone: it blocks Chrome's native pull-to-refresh
@@ -1710,10 +1503,3 @@ html[data-theme=dark] .inv-print{border:1px solid var(--line2)}
      pustka na tle strony. Wartosci = limit tabeli + padding karty. */
   .sec-card.card-sm{max-width:1030px}
 }
-
-/* ---------------- offline ----------------
-   Pasek nad naglowkiem (wzor z admin.css): PWA bez sieci pokazuje ostatnie
-   dane, zapisy przepadna. W ukladzie, nie na fixed — nie zaslania nawigacji. */
-.offline-bar{padding:calc(6px + env(safe-area-inset-top)) 14px 6px;text-align:center;
-  font-size:12.5px;font-weight:700;color:var(--gold);
-  background:var(--gold-bg);border-bottom:1px solid var(--gold-line)}

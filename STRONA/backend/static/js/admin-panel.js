@@ -1,28 +1,8 @@
 const $=id=>document.getElementById(id);
 const fmt=n=>(n??0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmt0=n=>(n??0).toLocaleString('en-US',{maximumFractionDigits:0});
-/* Baza zapisuje nagie UTC (bez "Z") — new Date() wziąłby to za czas lokalny.
-   Dokładamy "Z" i renderujemy w Europe/Warsaw: dział czyta panel po polsku. */
-const dutc=iso=>new Date(/[Zz]|[+-]\d\d:?\d\d$/.test(iso||'')?iso:iso+'Z');
-const dstr=iso=>dutc(iso).toLocaleString('en-US',{timeZone:'Europe/Warsaw',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
-const wawIso=iso=>dutc(iso).toLocaleString('sv-SE',{timeZone:'Europe/Warsaw'});
+const dstr=iso=>new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-/* Do interpolacji w onclick="fn('...')". Samo esc() nie wystarcza: parser HTML
-   odwija &#39; z powrotem do apostrofu PRZED parsowaniem JS-a, wiec nazwisko
-   w rodzaju O'Brien uciety string i przycisk przestawal dzialac. Najpierw
-   escape JS-a, potem HTML calego wyniku. */
-const jsq=s=>esc(String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
-/* Anty-zawieszka przycisków: gasnie na czas fn(), finally ZAWSZE przywraca.
-   Drugi klik w trakcie = no-op. fn zwraca 'keep' => zostaje wyłączony. */
-async function busy(btn,label,fn){
-  if(!btn)return fn();
-  if(btn.disabled)return;
-  const html=btn.innerHTML;
-  btn.disabled=true;if(label)btn.textContent=label;
-  let keep=false;
-  try{const w=await fn();keep=(w==='keep');return w}
-  finally{if(!keep&&btn.isConnected){btn.disabled=false;btn.innerHTML=html}}
-}
 
 /* The panel is opened by an administrator ACCOUNT, not a shared token. The
    session is the same as the trader portal (`pf_token`), so a signed-in admin
@@ -30,19 +10,8 @@ async function busy(btn,label,fn){
 let TOKEN=localStorage.getItem('pf_token')||null, ME=null;
 const adminH=()=>{const h={'Content-Type':'application/json'};
   if(TOKEN)h['Authorization']='Bearer '+TOKEN; return h};
-/* Timeout 15 s + JEDEN retry tylko dla GET po błędzie sieci/timeoucie — HTTP
-   error (nawet 500) nigdy nie jest ponawiany, żeby mutacje się nie dublowały. */
-async function api(path,opts={},_retry){
-  const ms=opts.timeoutMs||15000; delete opts.timeoutMs;
-  const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),ms);
-  let r;
-  try{r=await fetch(path,{headers:adminH(),...opts,signal:ctl.signal})}
-  catch(e){
-    clearTimeout(tm);
-    if(!_retry&&(opts.method||'GET').toUpperCase()==='GET')return api(path,{...opts,timeoutMs:ms},1);
-    throw new Error(e&&e.name==='AbortError'?'Request timed out':'Network error');
-  }
-  clearTimeout(tm);
+async function api(path,opts={}){
+  const r=await fetch(path,{headers:adminH(),...opts});
   if(r.status===401||r.status===403){signInForm();throw new Error('Access denied')}
   if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||r.status);
   return r.json();
@@ -63,22 +32,6 @@ function signOut(){
     TOKEN=null;ME=null;localStorage.removeItem('pf_token');location.replace('/portal')});
 }
 
-/* Globalny łapacz błędów JS → telemetria. Dedupe + limit 5/sesję,
-   fire-and-forget: prosty fetch zamiast api(), żeby raportowanie nie weszło
-   w pętlę z signInForm() przy wygasłej sesji. */
-const _jsErrSeen=new Set();
-function reportJsError(msg,src){
-  try{
-    const key=String(msg||'unknown').slice(0,80);
-    if(!TOKEN||_jsErrSeen.has(key)||_jsErrSeen.size>=5)return;
-    _jsErrSeen.add(key);
-    fetch('/api/telemetry',{method:'POST',headers:adminH(),
-      body:JSON.stringify({name:'js_error',props:{msg:key,src:String(src||'').slice(0,80),view:'admin'}})}).catch(()=>{});
-  }catch(e){}
-}
-addEventListener('error',e=>reportJsError(e.message,(e.filename||'')+':'+(e.lineno||0)));
-addEventListener('unhandledrejection',e=>reportJsError(e.reason&&e.reason.message||e.reason,'promise'));
-
 const ICO={
   layers:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 2 9 5-9 5-9-5z"/><path d="m3 12 9 5 9-5M3 17l9 5 9-5"/></svg>',
   grid:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
@@ -94,25 +47,18 @@ const ICO={
   trend:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>',
   arrow:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><path d="M9 6l6 6-6 6"/></svg>',
   copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>',
-  mail:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m3 6 9 6.5L21 6"/></svg>',
-  pulse:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l2.5-6 4 12L16 12h5"/></svg>',
-  tag:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 5 5 19"/><circle cx="7.5" cy="7.5" r="2.4"/><circle cx="16.5" cy="16.5" r="2.4"/></svg>',
-  person:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20.5c1-4 4-6 7.5-6s6.5 2 7.5 6"/></svg>',
 };
 
 const NAV=[
   {v:'overview',label:'Overview',ico:'grid'},
   {v:'leads',label:'Leads',ico:'users'},
-  {v:'clients',label:'Clients',ico:'person'},
   {v:'accounts',label:'Accounts',ico:'layers'},
-  {v:'activity',label:'Activity',ico:'pulse'},
   {v:'payouts',label:'Payouts',ico:'wallet'},
   {v:'kyc',label:'KYC',ico:'shield'},
   {v:'tickets',label:'Tickets',ico:'chat'},
   {v:'orders',label:'Orders',ico:'file'},
-  {v:'offers',label:'Offers',ico:'tag'},
   {v:'pool',label:'MT5 Pool',ico:'bank'},
-  {v:'mail',label:'Mail',ico:'mail'},
+  {v:'content',label:'Content',ico:'chat'},
   {v:'telemetry',label:'Telemetry',ico:'trend'},
   {v:'settings',label:'Settings',ico:'gear'},
 ];
@@ -120,11 +66,9 @@ $('side-nav').innerHTML=NAV.map(n=>
   `<button class="sb-link" data-v="${n.v}" onclick="go('${n.v}')" title="${n.label}">${ICO[n.ico]}<span class="sb-txt">${n.label}</span></button>`).join('');
 
 /* Mobile bottom bar: the 4 most-used sections; "More" opens the drawer with
-   the full list. Same go()/NAV as the sidebar — one source of truth.
-   Leads i Orders to codzienna robota (Telegram -> zamowienie -> mark paid),
-   a siedzialy w szufladzie; Payouts/KYC sa od swieta i tam wracaja. */
+   the full list. Same go()/NAV as the sidebar — one source of truth. */
 const MORE_ICO='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>';
-$('botnav').innerHTML=['overview','leads','orders','accounts'].map(v=>{
+$('botnav').innerHTML=['overview','accounts','payouts','kyc'].map(v=>{
   const n=NAV.find(x=>x.v===v);
   return `<button class="botnav-btn" data-v="${n.v}" onclick="go('${n.v}')">${ICO[n.ico]}<span>${n.label}</span></button>`;
 }).join('')+`<button class="botnav-btn" onclick="toggleSide(true)" aria-label="All sections">${MORE_ICO}<span>More</span></button>`;
@@ -132,16 +76,13 @@ $('botnav').innerHTML=['overview','leads','orders','accounts'].map(v=>{
 const TITLES={
   overview:['Overview','Platform health and items waiting for you'],
   leads:['Leads','Applications from the landing page, and who they turned into'],
-  clients:['Clients','Everyone with a portal account — including people who signed up on their own'],
   accounts:['Accounts','All challenge accounts and their live risk metrics'],
-  activity:['Activity','Who claimed their account, who signs in, and what each client did'],
   payouts:['Payouts','Every payout booked so far, plus requests waiting for review'],
   kyc:['KYC','Identity verifications awaiting review'],
   tickets:['Tickets','Support conversations with traders'],
   orders:['Orders','Purchases and revenue'],
-  offers:['Flash Sale Offers','Time-limited discounts on selected plans — per trader or for everyone'],
   pool:['MT5 Pool','Pre-provisioned accounts ready to assign'],
-  mail:['Mail','Every e-mail the platform tried to send — and which ones failed'],
+  content:['Content','Telegram channels: bot health, payout posts and the publishing queue'],
   telemetry:['Telemetry','Product events from the last 14 days'],
   settings:['Settings','Admin access and runtime configuration'],
 };
@@ -170,45 +111,12 @@ function toggleTheme(){
 }
 paintTheme();
 
-/* Sticky toolbar w Leads przykleja sie POD topbarem, a topbar zmienia wysokosc
-   (safe-area w PWA, wesze okna) — mierzymy go zamiast zgadywac. */
-const measureTopbar=()=>document.documentElement.style
-  .setProperty('--tb-h',(document.querySelector('.topbar')?.offsetHeight||58)+'px');
-measureTopbar();
-addEventListener('resize',measureTopbar);
-
 let VIEW='overview';
-
-/* ---------- wiersze z importu ewidencji wyplat ----------
-   Za adresem `…@imported.local` nie stoi klient, ktory sie zapisal, tylko wiersz
-   z CSV-ki. Sa potrzebne (prawdziwe wyplaty, prawdziwe certyfikaty), ale na
-   listach, po ktorych szuka sie LUDZI, topia prawdziwe konta. Domyslnie ukryte,
-   z jednym przelacznikiem na caly panel -- pytanie brzmi "czy dzis patrze takze
-   na archiwum", a nie "czy patrze na nie w tej jednej tabeli". */
-let IMPORTED=localStorage.getItem('pf_admin_imported')==='1';
-const impQ=(sep='?')=>IMPORTED?sep+'imported=1':'';
-const impPill=()=>` · <span class="statlink" onclick="toggleImported()"
-  title="Rows imported from the payout records: real payouts, but nobody signed up for them"
-  >imported ${IMPORTED?'shown':'hidden'}</span>`;
-function toggleImported(){
-  IMPORTED=!IMPORTED;
-  localStorage.setItem('pf_admin_imported',IMPORTED?'1':'0');
-  go(VIEW);   // filtr siedzi na serwerze, wiec samo przerysowanie nic nie zmieni
-}
-
 /* Ekran przejscia: paski trzymaja wysokosc widoku, kolko w kolorze akcentu mowi,
    ze cos sie dzieje. Same paski na ciemnym motywie czytaly sie jako pusty ekran. */
 const LOADING_HTML=(h=260)=>`<div class="view-load">
   <div class="skel" style="height:110px;margin-bottom:16px"></div>
   <div class="skel" style="height:${h}px"></div>
-  <div class="vl-mid"><span class="vl-ring"></span><span class="vl-txt">Loading…</span></div>
-</div>`;
-/* Szkielet w ksztalcie listy leadow: wysokosci ≈ docelowy wiersz/karta,
-   zeby wstawienie danych nie podnosilo strony. */
-const LEADS_SKEL=()=>`<div class="view-load">
-  <div class="skel" style="height:44px;margin-bottom:10px"></div>
-  <div class="skel" style="height:14px;width:40%;margin-bottom:10px"></div>
-  ${'<div class="skel lead-skel-row"></div>'.repeat(6)}
   <div class="vl-mid"><span class="vl-ring"></span><span class="vl-txt">Loading…</span></div>
 </div>`;
 
@@ -219,106 +127,17 @@ const LEADS_SKEL=()=>`<div class="view-load">
    biezacy widok; to rzadka sciezka, wiec dodatkowe zapytanie nic nie kosztuje. */
 let PRZEJSCIE = 0;
 
-/* ---------- adres pamieta, gdzie jestes ----------
-   F5 wyrzucalo na Overview i kazalo szukac swojego miejsca od nowa. Adres
-   `#widok:filtr?q=fraza` (np. `#leads:free?q=kowalski`) niesie caly stan listy:
-   `:filtr` znika przy `all`, `?q=` przy pustej frazie, wiec typowy adres zostaje
-   krotki i czytelny. Kodujemy tylko `q` — wartosci filtrow to `[a-z_]+`. */
-const STAN_POL={
-  accounts:['_accQ','_accFilter'], activity:['_jrnQ','_jrnFilter'],
-  clients:['_cliQ','_cliFilter'],  kyc:['_kycQ','_kycFilter'],
-  leads:['_leadQ','_leadFilter'],
-  mail:['_mailQ','_mailFilter'],   orders:['_ordQ','_ordFilter'],
-  payouts:['_payQ','_payFilter'],  pool:['_poolQ','_poolFilter'],
-  tickets:['_tickQ','_tickFilter'],
-};
-let OSTATNI_HASZ='', ZAPIS_T=0, PIERWSZY_ZAPIS=true;
-
-const haszZe=st=>st.view+(st.filter&&st.filter!=='all'?':'+st.filter:'')
-                        +(st.q?'?q='+encodeURIComponent(st.q):'');
-
-function budujHasz(){
-  const [kluczQ,kluczF]=STAN_POL[VIEW]||[];
-  return haszZe({view:VIEW, filter:kluczF?(window[kluczF]||'all'):'all',
-                 q:kluczQ?(window[kluczQ]||''):''});
-}
-function czytajHasz(){
-  const h=location.hash.slice(1);
-  if(!h)return null;
-  const i=h.indexOf('?');
-  const lewa=i<0?h:h.slice(0,i);
-  const q=i<0?'':(new URLSearchParams(h.slice(i+1)).get('q')||'');
-  const j=lewa.indexOf(':');
-  const view=j<0?lewa:lewa.slice(0,j);
-  /* Biala lista na TITLES, nie na VIEWS: w VIEWS siedzi `_kycRender`, ktore NIE
-     jest async — `go('_kycRender')` rzucilby na `undefined.then(...)` i zostawil
-     bialy ekran. Nieznany hasz oddaje null i konczy sie cichym Overview. */
-  return TITLES[view]?{view, filter:j<0?'all':lewa.slice(j+1), q}:null;
-}
-function ustawStan(st){
-  const [kluczQ,kluczF]=STAN_POL[st.view]||[];
-  if(kluczF)window[kluczF]=st.filter;
-  if(kluczQ)window[kluczQ]=st.q;
-}
-function zapiszStan(push){
-  const nowy=budujHasz();
-  /* Pierwsze przejscie w sesji nie zostawia za soba wpisu: Wstecz ma wyjsc
-     z panelu, a nie wracac na adres bez hasza, ktory nic nie znaczy. Flaga
-     gasnie PRZED straznikiem — po F5 adres juz niesie wlasciwy hasz, wiec
-     startowe `go()` konczy sie na strazniku i flaga zostawalaby zapalona,
-     a nastepne przelaczenie zakladki nadpisywaloby wpis zamiast go dolozyc. */
-  const pierwszy=PIERWSZY_ZAPIS; PIERWSZY_ZAPIS=false;
-  /* Straznik robi z powtorek koszt zerowy — inaczej auto-odswiezanie co 12 s
-     waliloby w limit `history` w Safari, a pisanie w wyszukiwarce zrobiloby
-     jeden wpis w historii na znak. */
-  if(nowy===OSTATNI_HASZ)return;
-  OSTATNI_HASZ=nowy;
-  try{history[push&&!pierwszy?'pushState':'replaceState'](null,'','/admin?pwa=1#'+nowy)}catch(_){}
-}
-const zapiszPozniej=()=>{clearTimeout(ZAPIS_T);ZAPIS_T=setTimeout(()=>zapiszStan(false),250)};
-/* Filtry to kilkanascie wpisanych w HTML `onclick="window._xFilter=…;renderX()"`
-   i nie wszystkie siedza w `.seg` (banner terminow, statlink, arkusz akcji na
-   telefonie). Jeden listener na dokumencie lapie kazdy z nich bez dotykania
-   kilkunastu miejsc; `setTimeout(…,0)` czeka, az inline onclick ustawi globala. */
-document.addEventListener('click',()=>setTimeout(()=>zapiszStan(false),0));
-addEventListener('hashchange',()=>{
-  const h=location.hash.slice(1);
-  if(h===OSTATNI_HASZ)return;   // wlasny zapis, nie ruch Wstecz/Dalej
-  OSTATNI_HASZ=h;               // bzdurny hasz tez: go() nizej go nadpisze
-  const st=czytajHasz();
-  if(st)ustawStan(st);
-  go(st?st.view:'overview');
-});
-
 function go(v){
-  /* Re-render TEGO SAMEGO widoku (po akcji, undo, odswiezeniu) nie moze rzucac
-     admina na gore listy: stara tresc zostaje do przyjscia danych (bez szkieletu,
-     ktory skraca strone i ucina scroll), a po przerysowaniu wracamy w to samo
-     miejsce. Nowa zakladka dostaje szkielet jak dotad. */
-  const samWidok=v===VIEW&&!$('view').querySelector('.view-load');
-  const wrocDo=samWidok?scrollY:0;
-  const innyWidok=v!==VIEW;
   VIEW=v;
-  zapiszStan(innyWidok);   // wpis w historii tylko na zmiane zakladki
   document.querySelectorAll('.sb-link[data-v],.botnav-btn[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const t=TITLES[v]||['',''];
   $('pg-title').textContent=t[0]; $('pg-crumb').textContent=t[1];
   toggleSide(false);
   const moj=++PRZEJSCIE;
-  if(!samWidok)$('view').innerHTML=v==='leads'?LEADS_SKEL():LOADING_HTML(260);
+  $('view').innerHTML=LOADING_HTML(260);
   VIEWS[v]()
-    .then(()=>{
-      if(moj!==PRZEJSCIE){if(VIEWS[VIEW])VIEWS[VIEW]();return}
-      if(wrocDo)scrollTo(0,wrocDo);
-    })
-    .catch(e=>{
-      /* Blad zostaje W widoku z przyciskiem ponowienia. Sam toast znikal po
-         paru sekundach i na ekranie zostawal wieczny szkielet ladowania. */
-      if(moj!==PRZEJSCIE||String(e.message).includes('token'))return;
-      $('view').innerHTML=`<div class="empty"><h3>Couldn't load this view</h3>
-        <p>${esc(e.message)}</p>
-        <button class="btn-p" style="margin-top:14px" onclick="go('${v}')">Try again</button></div>`;
-    });
+    .then(()=>{if(moj!==PRZEJSCIE&&VIEWS[VIEW])VIEWS[VIEW]()})
+    .catch(e=>{if(!String(e.message).includes('token'))toast('Error: '+e.message,'err')});
 }
 function toggleSide(open){
   $('side').classList.toggle('open',open);
@@ -408,20 +227,6 @@ function withUndo(opis,wykonaj,wiersz,onUndo){
    pozwala mu doleciec juz po zamknieciu strony. */
 addEventListener('beforeunload',()=>{[..._czekajace].forEach(z=>z.domknij())});
 
-/* Toast "zrobione + Cofnij" dla akcji, ktore JUZ poszly na serwer, ale maja
-   endpoint odwrotny (approve KYC -> reset). Inaczej niz withUndo: tam zadanie
-   czeka 5 s w kolejce, tutaj cofniecie to drugi, jawny request. */
-function undoToast(msg,onUndo,ms=8000){
-  const t=document.createElement('div');
-  t.className='toast undo';
-  t.innerHTML='<span class="undo-txt"></span>'
-    +`<button class="undo-btn" type="button" aria-label="Undo">${UNDO_ICO}Undo</button>`;
-  t.querySelector('.undo-txt').textContent=msg;
-  t.querySelector('.undo-btn').onclick=()=>{t.remove();onUndo()};
-  $('toasts').appendChild(t);
-  setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),350)},ms);
-}
-
 function closeOver(){$('over').classList.remove('open')}
 function openOver(title,html){$('o-title').textContent=title;$('o-body').innerHTML=html;$('over').classList.add('open')}
 
@@ -431,21 +236,75 @@ function mini(pct){const p=Math.min(100,Math.max(0,pct||0));
   const c=p>=100?'bad':p>=70?'warn':'ok';
   return `<div class="mini"><i class="${c}" style="width:${p}%"></i></div>`}
 
-/* Kanał do leada, który nie ma czym wysłać, CHOWA swój przycisk — i wtedy brak
-   konfiguracji wygląda dokładnie tak samo jak zepsuta funkcja. Ten pasek jest
-   jedynym miejscem, gdzie widać różnicę, więc mówi wprost, której zmiennej
-   brakuje, zamiast „off". Serwer zwraca `undefined` na starszym deployu:
-   wtedy nie ma o czym meldować i chip się nie pojawia. */
-function leadChannel(nazwa,brakuje){
-  if(!Array.isArray(brakuje))return'';
-  return brakuje.length
-    ?`<span class="sys warn" title="Set it in the hosting environment, then redeploy">
-        <span class="dot"></span>${nazwa}: <b>needs ${brakuje.map(esc).join(', ')}</b></span>`
-    :`<span class="sys"><span class="dot"></span>${nazwa}: <b>on</b></span>`;
-}
-
 /* ============================ VIEWS ============================ */
 const VIEWS={
+ /* Telegram in one place: is the bot still an admin, what can be published now,
+    and what is queued. Built after the September 2026 account freeze, whose
+    symptom was silence — nothing reported an error, posts simply stopped. */
+ async content(){
+  const [kan,pe,posty]=await Promise.all([
+    api('/api/admin/channels/status'),
+    api('/api/admin/payout-engine').catch(()=>null),
+    api('/api/admin/channel-posts')]);
+
+  const zdrowie=k=>{
+    if(!k.configured)return`<span class="status pending"><span class="dot"></span>not configured</span>`;
+    if(k.is_admin)return`<span class="status funded"><span class="dot"></span>admin</span>`;
+    return`<span class="status failed"><span class="dot"></span>${esc(k.member_status||'no access')}</span>`;
+  };
+  const kartaKanalu=k=>`<div class="sec-card">
+    <h3>${esc(k.title)}</h3>
+    <div class="chip-row" style="margin-bottom:10px">
+      ${zdrowie(k)}
+      ${k.handle?`<span class="chip">${esc(k.handle)}</span>`:(k.chat_id?`<span class="chip mono">${esc(k.chat_id)}</span>`:'')}
+      ${k.bot_username?`<span class="chip">bot <b>@${esc(k.bot_username)}</b></span>`:''}
+    </div>
+    <div class="muted" style="font-size:12px;margin-bottom:10px">${esc(k.purpose)}</div>
+    ${(k.configured&&!k.is_admin)?`<div class="warn-box" style="margin:0 0 10px">
+      <div><b>The bot is not an administrator of this channel.</b> Nothing will be
+      published here and Telegram reports no error — add the bot under
+      Channel → Administrators, with permission to post (and to edit, for Track Record).</div></div>`:''}
+    ${k.key==='payouts'&&pe?`<button class="btn-p" onclick="runPayoutBot()">Publish a payout now</button>`:''}
+    ${k.key==='trackrecord'?`<a class="btn-o" target="_blank" rel="noopener"
+       href="https://github.com/gubiplz/forexpassing.com/actions/workflows/track-record-refresh.yml">Refresh posters on GitHub Actions</a>
+      <div class="muted" style="font-size:12px;margin-top:8px">Runs scrape → render → editMessageMedia
+      on the four existing posts, so their views and reactions survive.</div>`:''}
+    ${k.key==='mgmt'?`<button class="btn-o" onclick="newChannelPost()">Write a post</button>`:''}
+  </div>`;
+
+  const stan=p=>({draft:'pending',approved:'active',scheduled:'active',
+                  published:'funded',failed:'failed'})[p.status]||'pending';
+  const wiersz=p=>`<tr>
+    <td>${esc(p.channel)}</td>
+    <td style="max-width:420px">${esc((p.body||'').slice(0,160))}${(p.body||'').length>160?'…':''}
+      ${p.last_error?`<div style="color:var(--red);font-size:12px;margin-top:4px">${esc(p.last_error)}</div>`:''}</td>
+    <td>${p.proof?`<span class="chip mono">${esc(p.proof)}</span>`:'<span class="muted">—</span>'}</td>
+    <td><span class="status ${stan(p)}"><span class="dot"></span>${esc(p.status)}</span></td>
+    <td>${p.scheduled_for?dstr(p.scheduled_for):'<span class="muted">—</span>'}</td>
+    <td style="white-space:nowrap">
+      ${p.status==='published'?`<a class="btn-o sm" href="${esc(p.post_url||'#')}" target="_blank">Open</a>`
+        :`${p.status==='draft'||p.status==='failed'?`<button class="btn-o sm" onclick="approvePost(${p.id})">Approve</button>`:''}
+          ${p.status==='approved'||p.status==='scheduled'?`<button class="btn-p sm" onclick="publishPost(${p.id})">Publish now</button>`:''}
+          <button class="btn-o sm" onclick="deletePost(${p.id})">Delete</button>`}
+    </td></tr>`;
+
+  $('view').innerHTML=`
+    <div class="pool-form" style="align-items:stretch">${kan.map(kartaKanalu).join('')}</div>
+    <div class="sec-card" style="margin-top:16px">
+      <h3>Publishing queue</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:10px">
+        Every claim needs a source. A post with no <span class="mono">proof</span> may not carry
+        a figure at all; <span class="mono">payout:&lt;token&gt;</span> pins every amount to that
+        payout, <span class="mono">stat:&lt;key&gt;:gte:&lt;value&gt;</span> is re-checked against live
+        numbers — at approval and again right before it goes out.
+      </div>
+      <button class="btn-o sm" onclick="newChannelPost()">Write a post</button>
+      ${posty.length?`<div class="tbl-wrap" style="margin-top:12px"><table class="tbl">
+        <thead><tr><th>Channel</th><th>Body</th><th>Proof</th><th>Status</th><th>Scheduled</th><th></th></tr></thead>
+        <tbody>${posty.map(wiersz).join('')}</tbody></table></div>`
+        :`<div class="muted" style="margin-top:12px">Nothing queued yet.</div>`}
+    </div>`;
+ },
  async overview(){
   const [s,pay,kyc,tick,orders]=await Promise.all([
     api('/api/stats'),api('/api/admin/payout-requests'),api('/api/admin/kyc'),
@@ -458,63 +317,42 @@ const VIEWS={
   const todo=(n,label,view,ico)=>`<div class="todo ${n?'has':''}" onclick="go('${view}')">
     <div class="tile-ic ${n?'orange':'blue'}">${ICO[ico]}</div>
     <div><div class="n">${n}</div><div class="l">${label}</div></div><span class="go">${ICO.arrow}</span></div>`;
-  /* Konto z ZAKUPU czeka na rachunek z puli po cichu: mail z poświadczeniami
-     wychodzi dopiero przy uzbrojeniu, więc póki pula jest pusta, nikt nawet nie
-     próbuje wysyłać — i dziennik maili też milczy. Wiersz prowadzi do MT5 Pool,
-     bo tam widać, komu i jakiego rozmiaru rachunku brakuje. */
   $('view').innerHTML=`
     <div class="sysbar">
       <span class="sys ${s.stripe==='mock'?'warn':''}"><span class="dot"></span>Payments: <b>${esc(s.stripe)}</b></span>
       <span class="sys"><span class="dot"></span>Provisioning queue: <b>${s.provisioning??0}</b></span>
       <span class="sys"><span class="dot"></span>Pool free: <b>${s.pool_free??0}</b></span>
-      ${leadChannel('Client e-mail',s.notify_mail_missing)}
-      ${leadChannel('Lead e-mail',s.lead_mail_missing)}
-      ${leadChannel('Lead SMS',s.lead_sms_missing)}
     </div>
     <div class="todo-grid">
       ${todo(pendingPay,'payout requests to review','payouts','wallet')}
       ${todo((kyc.pending||[]).length,'KYC submissions pending','kyc','shield')}
       ${todo(openTick,'support tickets open','tickets','chat')}
-      ${s.mail_failed_7d?todo(s.mail_failed_7d,'e-mails failed to send (7 days)','mail','alert'):''}
-      ${s.provisioning?todo(s.provisioning,'accounts waiting for an MT5 account from the pool','pool','bank'):''}
     </div>
     <div class="stats-row">
       ${tile('purple','layers','Accounts',s.total,`${s.active} active · ${s.provisioning??0} provisioning`)}
       ${tile('green','trend','Funded',s.funded,`${s.failed} failed`)}
       ${tile('blue','users','Traders',s.traders,`${s.orders_paid} paid orders`
-        +(s.traders_free?` · ${s.traders_free} free signups hidden`:'')
         +(s.traders_internal?` · ${s.traders_internal} internal hidden`:''))}
       ${tile('orange','dollar','Revenue','$'+fmt0(revenue),'all paid orders')}
     </div>
     <div class="sec-card card-sm">
       <h3>Recent orders</h3>
-      ${orders.length?`<div class="tbl-wrap tw-sm rtbl-wrap" style="border:0;box-shadow:none;border-radius:0"><table class="tbl rtbl"><thead><tr>
+      ${orders.length?`<div class="tbl-wrap tw-sm" style="border:0;box-shadow:none;border-radius:0"><table class="tbl"><thead><tr>
         <th>#</th><th>Trader</th><th>Product</th><th>Amount</th><th>Status</th><th>Account</th></tr></thead>
         <tbody>${orders.slice(0,8).map(o=>`<tr>
-          <td class="num rt-hide" data-l="#">${o.id}</td><td class="rt-main" data-l="Trader">${esc(o.trader_email||'—')}</td><td data-l="Product">${esc(o.product_key)}</td>
-          <td class="num" data-l="Amount">$${fmt(o.amount_usd)}</td>
-          <td data-l="Status"><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span></td>
-          <td class="num rt-hide" data-l="Account">${accLink(o.account_id)}</td></tr>`).join('')}</tbody></table></div>`
+          <td class="num">${o.id}</td><td>${esc(o.trader_email||'—')}</td><td>${esc(o.product_key)}</td>
+          <td class="num">$${fmt(o.amount_usd)}</td>
+          <td><span class="status ${o.status==='paid'?'paid':'pending'}"><span class="dot"></span>${esc(o.status)}</span></td>
+          <td class="num">${o.account_id||'—'}</td></tr>`).join('')}</tbody></table></div>`
         :'<p class="muted" style="font-size:13px">No orders yet.</p>'}
     </div>`;
  },
 
  async accounts(){
-  window._accFilter=window._accFilter||'all';
-  /* "Free signups" to INNY zbior danych z serwera (konta bez platnosci),
-     nie filtr po statusie -- domyslna lista w ogole ich nie zawiera. */
-  const ps=[];
-  if(window._accFilter==='free')ps.push('free=1');
-  if(IMPORTED)ps.push('imported=1');
-  const list=await api('/api/accounts'+(ps.length?'?'+ps.join('&'):''));
+  const list=await api('/api/accounts');
   window._accs=list;
+  window._accFilter=window._accFilter||'all';
   renderAccounts();
- },
-
- async activity(){
-  window._jrn=(await api('/api/admin/journal'+impQ())).items||[];
-  window._jrnFilter=window._jrnFilter||'all';
-  renderActivity();
  },
 
  async payouts(){
@@ -525,22 +363,15 @@ const VIEWS={
  },
 
  async kyc(){
-  /* Lista kanalu FREE leci osobnym zapytaniem, ale rownolegle — to podglad
-     przed wysylka hurtowa, a nie czesc kolejki weryfikacji. */
-  const [d,free]=await Promise.all([api('/api/admin/kyc'+impQ()),
-                                    api('/api/admin/kyc/free-channel')]);
-  window._kycData=d; window._kycFree=free;
+  window._kycData=await api('/api/admin/kyc');
   renderKyc();
  },
 
  _kycRender(){
   const d=window._kycData||{};
-  const q=(window._kycQ||'').toLowerCase();
-  const pasuje=t=>!q||[t.full_name,t.email,t.country,t.id_type,t.id_number,t.doc_ref]
-    .some(x=>String(x||'').toLowerCase().includes(q));
-  const pending=(d.pending||[]).filter(pasuje), histAll=d.history||[];
+  const pending=d.pending||[], histAll=d.history||[];
   const kf=window._kycFilter||'all';
-  const hist=histAll.filter(t=>(kf==='all'||t.status===kf)&&pasuje(t));
+  const hist=histAll.filter(t=>kf==='all'||t.status===kf);
   const cards=pending.length?`<div class="badge-grid" style="grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr))">`+
     pending.map(t=>`<div class="panel">
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
@@ -564,48 +395,53 @@ const VIEWS={
         <button class="btn-o" onclick="rejectKyc(${t.trader_id})">Reject</button>
       </div>
     </div>`).join('')+`</div>`
-    :`<div class="empty"><h3>${q?'No pending submissions match':'Nothing to verify'}</h3><p>${
-      q?'Check the history below or clear the search.':'KYC submissions from traders show up here.'}</p></div>`;
+    :`<div class="empty"><h3>Nothing to verify</h3><p>KYC submissions from traders show up here.</p></div>`;
   const histTbl=histAll.length?`<div class="sec-card card-md" style="margin-top:18px">
     <h3>History</h3>
     <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Past verification decisions.</p>
     <div class="toolbar" style="margin-bottom:10px">
       <div class="seg">${[['all','All'],['approved','Approved'],['rejected','Rejected']]
-        .map(([k,l])=>`<button class="${kf===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._kycFilter='${kf===k?'all':k}';renderKyc()">${l}</button>`).join('')}</div>
-      <span class="count-pill">${hist.length} of ${histAll.length}${impPill()}</span>
+        .map(([k,l])=>`<button class="${kf===k?'on':''}" onclick="window._kycFilter='${k}';renderKyc()">${l}</button>`).join('')}</div>
+      <span class="count-pill">${hist.length} of ${histAll.length}</span>
     </div>
-    ${hist.length?`<div class="tbl-wrap rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.kyc">
+    ${hist.length?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="admin.kyc">
       <thead><tr><th>Reviewed</th><th>Trader</th><th>Country</th><th>Document</th><th>Status</th><th class="no-sort">Documents</th><th class="no-sort"></th></tr></thead>
       <tbody>${hist.map(t=>`<tr>
-        <td class="muted" data-l="Reviewed" data-sort="${esc(t.reviewed_at||'')}">${t.reviewed_at?dstr(t.reviewed_at):'—'}</td>
-        <td class="rt-main" data-l="Trader">${esc(t.full_name||'—')}<div class="muted" style="font-size:11.5px">${esc(t.email)}</div></td>
-        <td class="muted" data-l="Country">${esc(t.country||'—')}</td>
-        <td class="muted" data-l="Document">${esc(t.id_type||'—')} ${esc(t.id_number||t.doc_ref||'')}</td>
-        <td data-l="Status"><span class="status ${t.status==='approved'?'funded':'failed'}"><span class="dot"></span>${esc(t.status)}</span></td>
-        <td class="rt-acts">${(t.docs||[]).map(k=>`<button class="btn-o sm" onclick="viewDoc(${t.trader_id},'${k}')">${esc(k.replace('_',' '))}</button>`).join(' ')||'<span class="muted">—</span>'}</td>
-        <td class="rt-acts" style="white-space:nowrap"><button class="btn-o sm" onclick="revertKyc(${t.trader_id})"
+        <td class="muted" data-sort="${esc(t.reviewed_at||'')}">${t.reviewed_at?dstr(t.reviewed_at):'—'}</td>
+        <td>${esc(t.full_name||'—')}<div class="muted" style="font-size:11.5px">${esc(t.email)}</div></td>
+        <td class="muted">${esc(t.country||'—')}</td>
+        <td class="muted">${esc(t.id_type||'—')} ${esc(t.id_number||t.doc_ref||'')}</td>
+        <td><span class="status ${t.status==='approved'?'funded':'failed'}"><span class="dot"></span>${esc(t.status)}</span></td>
+        <td>${(t.docs||[]).map(k=>`<button class="btn-o sm" onclick="viewDoc(${t.trader_id},'${k}')">${esc(k.replace('_',' '))}</button>`).join(' ')||'<span class="muted">—</span>'}</td>
+        <td style="white-space:nowrap"><button class="btn-o sm" onclick="revertKyc(${t.trader_id})"
           title="Undo this decision, back to the pending queue">Revert</button>
-          ${XBTN(`deleteKycRow(${t.trader_id},'${jsq(t.email)}')`,'Delete KYC record and uploaded documents')}</td></tr>`).join('')}
-      </tbody></table></div>`:`<p class="muted" style="font-size:13px">No ${esc(kf)} decisions${q?' match':''}.</p>`}</div>`:'';
-  const pasek=((d.pending||[]).length||histAll.length)
-    ?`<div class="toolbar">${searchBox('kyc-q','_kycQ','renderKyc','Search name, email, country or document…')}</div>`:'';
-  $('view').innerHTML=pasek+freeChannelCard()+cards+histTbl;
- },
-
- async offers(){
-  const [d,prods]=await Promise.all([api('/api/admin/offers'),api('/api/products')]);
-  window._offers=d.offers||[]; window._offerProds=prods;
-  renderOffers();
- },
-
- async mail(){
-  window._mailLog=await api('/api/admin/mail-log');
-  renderMailLog();
+          ${XBTN(`deleteKycRow(${t.trader_id},'${esc(t.email)}')`,'Delete KYC record and uploaded documents')}</td></tr>`).join('')}
+      </tbody></table></div>`:`<p class="muted" style="font-size:13px">No ${esc(kf)} decisions.</p>`}</div>`:'';
+  $('view').innerHTML=cards+histTbl;
  },
 
  async tickets(){
-  window._tickets=await api('/api/admin/tickets');
-  renderTickets();
+  const rows=await api('/api/admin/tickets');
+  window._tickets=rows;
+  /* X siedzi W wierszu, ktory sam otwiera rozmowe, wiec musi zatrzymac klikniecie —
+     inaczej kazde usuniecie otwieraloby przy okazji watek. Do `delTicket` idzie
+     samo id: temat bywa z apostrofem ("Can't log in"), a wstrzykniety w inline
+     onclick rozwalilby ten atrybut. */
+  const row=t=>`
+    <div class="ticket-row" onclick="openTicket(${t.id})">
+      <div class="tile-ic ${t.status==='open'?'orange':t.status==='answered'?'green':'blue'}" style="width:36px;height:36px;flex:0 0 36px">${ICO.chat}</div>
+      <div class="sub"><b>${esc(t.subject)}</b>
+        <span>#${t.id} · ${esc(t.trader_email||'—')} · ${t.messages} message${t.messages>1?'s':''} · ${dstr(t.last_ts)}</span></div>
+      <span class="status ${t.status==='closed'?'failed':t.status==='answered'?'paid':'pending'}"><span class="dot"></span>${esc(t.status)}</span>
+      ${XBTN(`event.stopPropagation();delTicket(${t.id})`,'Delete this ticket and its conversation')}
+    </div>`;
+  const active=rows.filter(t=>t.status!=='closed'), closed=rows.filter(t=>t.status==='closed');
+  $('view').innerHTML=(active.length?`<div class="tbl-wrap">`+active.map(row).join('')+`</div>`
+      :`<div class="empty"><h3>No open tickets</h3><p>Support conversations started by traders appear here.</p></div>`)
+    +(closed.length?`<div class="sec-card" style="margin-top:18px">
+      <h3>History</h3>
+      <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Closed tickets. Click to review the conversation.</p>
+      <div class="tbl-wrap">`+closed.map(row).join('')+`</div></div>`:'');
  },
 
  async orders(){
@@ -616,12 +452,6 @@ const VIEWS={
  async leads(){
   window._leads=await api('/api/admin/leads');
   renderLeads();
- },
-
- async clients(){
-  window._clients=await api('/api/admin/traders'+impQ());
-  window._cliFilter=window._cliFilter||'all';
-  renderClients();
  },
 
  async pool(){
@@ -639,16 +469,14 @@ const VIEWS={
   $('view').innerHTML=`
     ${waiting.length?`<div class="sec-card card-sm" style="border-color:var(--gold-line);background:var(--gold-bg)">
       <h3>${waiting.length} paid ${waiting.length===1?'order is':'orders are'} waiting for an MT5 account</h3>
-      <p class="muted" style="font-size:12.5px;margin:6px 0 12px">These challenges are paid for but not tradable yet: the pool has no free account of that size. Add one below or open a real MT5 demo for that trader.</p>
-      <div class="tbl-wrap tw-sm rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.pool-waiting">
-        <thead><tr><th>Account</th><th>Trader</th><th>Needs size</th><th>Waiting since</th><th class="no-sort"></th></tr></thead>
+      <p class="muted" style="font-size:12.5px;margin:6px 0 12px">These challenges are paid for but not tradable yet: the pool has no free account of that size. Add one below and it is assigned automatically.</p>
+      <div class="tbl-wrap tw-sm"><table class="tbl sortable" data-tkey="admin.pool-waiting">
+        <thead><tr><th>Account</th><th>Trader</th><th>Needs size</th><th>Waiting since</th></tr></thead>
         <tbody>${waiting.map(w=>`<tr>
-          <td class="num" data-l="Account">${accLink(w.account_id)}</td>
-          <td class="rt-main" data-l="Trader">${esc(w.trader_email||'—')}</td>
-          <td class="num" data-l="Size"><b>$${fmt0(w.account_size)}</b></td>
-          <td class="muted" data-l="Since" data-sort="${esc(w.created_at||'')}">${w.created_at?dstr(w.created_at):'—'}</td>
-          <td class="rt-acts"><button class="btn-p sm" onclick="provisionReal(${w.account_id})"
-            ${poolData.can_generate?'':'disabled title="'+esc(poolData.generate_hint||'Browser channel unavailable')+'"'}>Open real MT5 now</button></td></tr>`).join('')}
+          <td class="num">#${w.account_id}</td>
+          <td>${esc(w.trader_email||'—')}</td>
+          <td class="num"><b>$${fmt0(w.account_size)}</b></td>
+          <td class="muted" data-sort="${esc(w.created_at||'')}">${w.created_at?dstr(w.created_at):'—'}</td></tr>`).join('')}
         </tbody></table></div>
       <p class="muted" style="font-size:12.5px;margin-top:10px">Missing: ${Object.entries(missingBySize).map(([sizeKey,cnt])=>`<b>${cnt}×</b> $${fmt0(Number(sizeKey))}`).join(', ')}</p>
     </div>`:''}
@@ -671,30 +499,12 @@ const VIEWS={
     </div>
 
     <div class="sec-card card-md">
-      <h3>Real MT5 accounts</h3>
-      <p class="muted" style="font-size:12.5px;margin-bottom:14px">Opens real demo accounts on MetaQuotes-Demo via <span class="mono">web.metatrader.app</span> and adds them to the pool. Needs a browser: local Chromium, or <span class="mono">BROWSER_CDP_URL</span> (Browserless).</p>
-      ${poolData.can_generate?'':`<div class="warn-box" style="margin:0 0 12px"><div>${esc(poolData.generate_hint||'Real MT5 generator unavailable on this host.')}</div></div>`}
-      <div class="pool-form">
-        <div><label class="muted" style="font-size:12px">Account size</label>
-          <select id="real-size" class="inp">${sizeOptions(50000)}</select></div>
-        <div><label class="muted" style="font-size:12px">How many</label>
-          <input id="real-count" class="inp" type="number" min="1" max="10" value="1"></div>
-      </div>
-      <button class="btn-p" onclick="genReal()" ${poolData.can_generate?'':'disabled'}>Generate real MT5 accounts</button>
-      <label style="display:flex;align-items:center;gap:9px;margin-top:14px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="real-fb" ${poolData.real_fallback?'checked':''} onchange="setRealFallback(this.checked)" style="width:16px;height:16px;accent-color:var(--acc)">
-        Auto-provision a real web MT5 demo when the pool has no matching account
-      </label>
-      <p class="muted" style="font-size:12px;margin-top:6px">Runs before the simulated fallback. Each open takes ~20–30 s and needs the browser channel above.</p>
-    </div>
-
-    <div class="sec-card card-md">
       <h3>Add account manually</h3>
       <p class="muted" style="font-size:12.5px;margin-bottom:14px">Accounts you created at your broker. Paste the credentials here. Provisioning assigns the first free account of a matching size when a challenge is purchased.</p>
       <div class="pool-form">
-        <input id="pl-login" class="inp" inputmode="numeric" autocomplete="off" placeholder="MT5 login">
-        <input id="pl-pass" class="inp" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="Password">
-        <input id="pl-server" class="inp" spellcheck="false" autocapitalize="off" placeholder="Server">
+        <input id="pl-login" class="inp" placeholder="MT5 login">
+        <input id="pl-pass" class="inp" placeholder="Password">
+        <input id="pl-server" class="inp" placeholder="Server">
         <select id="pl-size" class="inp">${sizeOptions(null)}</select>
       </div>
       <button class="btn-p" onclick="addPool()">+ Add to pool</button>
@@ -711,8 +521,7 @@ const VIEWS={
  },
 
  async settings(){
-  const [s,pb,bg,rc]=await Promise.all([api('/api/stats'),api('/api/admin/payout-engine'),
-    api('/api/admin/bogo-promo').catch(()=>({enabled:false})),
+  const [s,pb,rc]=await Promise.all([api('/api/stats'),api('/api/admin/payout-engine'),
     api('/api/admin/reach').catch(()=>null)]);
   const brakuje=[!pb.telegram_ready?'Telegram channel':null,!pb.renderer_ready?'certificate renderer':null].filter(Boolean);
   $('view').innerHTML=`
@@ -762,21 +571,6 @@ const VIEWS={
 
     ${reachCardHtml(rc)}
 
-    <div class="sec-card" style="max-width:560px"><h3>Buy 1 Get 1 Free</h3>
-      <div class="chip-row" style="margin-bottom:12px">
-        <span class="status ${bg.enabled?'funded':'pending'}"><span class="dot"></span>${bg.enabled?'running':'off'}</span>
-      </div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <button class="btn-p" onclick="setBogoPromo(${bg.enabled?'false':'true'})">${bg.enabled?'Turn off':'Turn on'}</button>
-      </div>
-      <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
-        While it's on, a bar on the public site announces the promo and <b>every paid order
-        automatically gets a second account of the same size</b> — including checkout purchases,
-        not just manual orders. Orders are stamped when they are <b>created</b>: turning the promo
-        off later does not take BOGO away from a customer who already holds a payment link, and
-        turning it on does not add it to orders issued before. For a single lead you can always
-        override this with the checkbox in the New order window or on the order itself.</p></div>
-
     <div class="sec-card" style="max-width:560px"><h3>Notifications</h3>
       <div class="mod-row">
         <div><div class="lbl">Push to this device</div>
@@ -820,13 +614,13 @@ const VIEWS={
   const items=d.items||[];
   $('view').innerHTML=items.length?`
     <p class="muted" style="font-size:12.5px;margin-bottom:10px">Click a row to see the individual events; click a trader email inside to see everything that user did.</p>
-    <div class="tbl-wrap tw-sm rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.telemetry">
+    <div class="tbl-wrap tw-sm"><table class="tbl sortable" data-tkey="admin.telemetry">
     <thead><tr><th>Day</th><th>Event</th><th style="text-align:right">Count</th>
       <th style="text-align:right">Unique traders</th></tr></thead>
-    <tbody>${items.map(i=>`<tr class="clickable" onclick="openTelemetryDetail('${jsq(i.day)}','${jsq(i.name)}')">
-      <td class="num" data-l="Day">${esc(i.day)}</td><td class="rt-main" data-l="Event">${esc(i.name)}</td>
-      <td class="num" style="text-align:right" data-l="Count">${i.count}</td>
-      <td class="num" style="text-align:right" data-l="Traders">${i.traders}</td></tr>`).join('')}
+    <tbody>${items.map(i=>`<tr class="clickable" onclick="openTelemetryDetail('${esc(i.day)}','${esc(i.name)}')">
+      <td class="num">${esc(i.day)}</td><td>${esc(i.name)}</td>
+      <td class="num" style="text-align:right">${i.count}</td>
+      <td class="num" style="text-align:right">${i.traders}</td></tr>`).join('')}
     </tbody></table></div>`
     :`<div class="empty"><h3>No events yet</h3>
       <p>Product events (signups, logins, orders, check-ins) land here as traders use the platform.</p></div>`;
@@ -848,221 +642,56 @@ function qFocus(id,pos){
    sits inside the field on the right whenever there is anything to clear. */
 function searchBox(id,stateKey,render,ph){
   const val=window[stateKey]||'';
-  /* Jedyny generator pol wyszukiwania w panelu — dopisanie tu `zapiszPozniej()`
-     sprawia, ze wpisana fraza przezywa F5 we WSZYSTKICH widokach naraz. */
   return `<span class="q-wrap"><input class="inp" id="${id}" placeholder="${ph}" value="${esc(val)}"
-      oninput="window.${stateKey}=this.value;const p=this.selectionStart;${render}();qFocus('${id}',p);zapiszPozniej()">
+      oninput="window.${stateKey}=this.value;const p=this.selectionStart;${render}();qFocus('${id}',p)">
     ${val?`<button class="q-x" type="button" aria-label="Clear search" title="Clear"
-      onclick="window.${stateKey}='';${render}();qFocus('${id}');zapiszStan(false)">&times;</button>`:''}</span>`;
+      onclick="window.${stateKey}='';${render}();qFocus('${id}')">&times;</button>`:''}</span>`;
 }
 
-/* ---------- mail: dziennik doręczeń ----------
-   SMTP pada po cichu (notify łapie wyjątek, żeby nie wywrócić requestu) —
-   ta zakładka to jedyne miejsce, gdzie „mail nie wyszedł" widać, zanim
-   zgłosi to klient. Fallback jest już pod ręką: Copy link przy zaproszeniu
-   do portalu, Pay link przy zamówieniu, poświadczenia MT5 w karcie konta. */
-/* Sufit renderowania długich list: przy tysiącach wierszy telefon dławi się
-   nie danymi, a samym innerHTML. Dane siedzą już w pamięci — „Show all"
-   tylko zdejmuje sufit dla bieżącego widoku. */
-const LIST_CAP=100;
-function capList(rows,flag,rerender){
-  if(window[flag]||rows.length<=LIST_CAP)return{rows,more:''};
-  return{rows:rows.slice(0,LIST_CAP),
-    more:`<button class="btn-o" style="display:block;margin:12px auto" onclick="window.${flag}=1;${rerender}()">Show all ${rows.length}</button>`};
-}
-
-function renderMailLog(){
-  const d=window._mailLog||{};
-  const list=d.entries||[];
-  const q=(window._mailQ||'').toLowerCase(), f=window._mailFilter||'all';
-  const rows=list.filter(m=>(f==='all'||(f==='failed'?!m.ok:m.ok))&&
-    (!q||(m.to||'').toLowerCase().includes(q)||(m.event||'').toLowerCase().includes(q)
-      ||(m.subject||'').toLowerCase().includes(q)));
-  const cap=capList(rows,'_mailAll','renderMailLog');
-  $('view').innerHTML=`
-    <div class="toolbar">
-      ${searchBox('mail-q','_mailQ','renderMailLog','Search recipient, subject or template…')}
-      <div class="seg">${[['all','All'],['sent','Sent'],['failed','Failed']]
-        .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._mailFilter='${f===k?'all':k}';renderMailLog()">${l}</button>`).join('')}</div>
-      <span class="count-pill">${rows.length} of ${list.length}</span>
-    </div>
-    ${d.failed_7d?`<p class="lead-statline" style="color:var(--gold)">⚠ ${d.failed_7d} e-mail${d.failed_7d>1?'s':''} failed in the last 7 days — deliver the content another way (copy the portal-invite link, the pay link or the MT5 credentials from the account card), then check the SMTP settings.</p>`:''}
-    ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.maillog">
-      <thead><tr><th>Date</th><th>To</th><th>Subject</th><th>Template</th><th>Status</th><th></th></tr></thead>
-      <tbody>${cap.rows.map(m=>`<tr>
-        <td class="muted" data-l="Date" data-sort="${esc(m.ts||'')}">${dstr(m.ts)}</td>
-        <td class="rt-main" data-l="To">${esc(m.to||'—')}</td>
-        <td data-l="Subject">${esc(m.subject||'—')}</td>
-        <td class="muted" data-l="Template">${esc((m.event||'—').replace(/_/g,' '))}</td>
-        <td data-l="Status"><span class="status ${m.ok?'paid':'failed'}"><span class="dot"></span>${m.ok?'sent':'failed'}</span>
-          ${m.error?`<div class="muted" style="font-size:var(--fs-cap);max-width:260px;word-break:break-word">${esc(m.error)}</div>`:''}</td>
-        <td class="rt-acts">${m.can_resend?`<button class="btn-o sm" onclick="resendMail(${m.id},this)"
-          title="Send this one again — the links inside are generated fresh, because the originals expire">Resend</button>`:''}</td></tr>`).join('')}
-      </tbody></table></div>${cap.more}`
-    :list.length?`<div class="empty"><h3>No e-mails match</h3><p>Try a different search or filter.</p></div>`
-    :`<div class="empty"><h3>Nothing sent yet</h3><p>Every e-mail the platform sends will be listed here, including the ones that fail.</p></div>`}`;
-}
-/* Ponowienie NIE jest kopia archiwalnego maila: tokeny w linkach sa jednorazowe
-   i wygasaja, wiec serwer sklada te sama wiadomosc od nowa. Stad ostrzezenie
-   o wygaszeniu poprzedniego linku — klient, ktory wroci do starego maila,
-   trafi na martwy adres. */
-async function resendMail(id,btn){
-  const m=((window._mailLog||{}).entries||[]).find(x=>x.id===id);if(!m)return;
-  if(!await askConfirm({title:'Send this e-mail again?',
-    body:`<b>${esc(m.subject||'')}</b> goes to <b>${esc(m.to||'')}</b> once more. `
-      +`Any link inside is generated fresh, so a link from the earlier copy may stop working.`,
-    ok:'Send again',cancel:'Not now'}))return;
-  await busy(btn,'Sending…',async()=>{
-    try{
-      await api('/api/admin/mail-log/'+id+'/resend',{method:'POST'});
-      toast('Sent again.');
-      window._mailLog=await api('/api/admin/mail-log');
-      renderMailLog();
-    }catch(e){toast('Not sent: '+e.message,'err')}
-  });
-}
-
-/* ---------- tickets: search + filters + list ---------- */
-function renderTickets(){
-  const list=window._tickets||[];
-  window._tickFilter=window._tickFilter||'all';
-  const q=(window._tickQ||'').toLowerCase(), f=window._tickFilter;
-  const rows=list.filter(t=>(f==='all'||t.status===f)&&
-    (!q||String(t.id).includes(q)||(t.subject||'').toLowerCase().includes(q)
-      ||(t.trader_email||'').toLowerCase().includes(q)));
-  /* X siedzi W wierszu, ktory sam otwiera rozmowe, wiec musi zatrzymac klikniecie —
-     inaczej kazde usuniecie otwieraloby przy okazji watek. Do `delTicket` idzie
-     samo id: temat bywa z apostrofem ("Can't log in"), a wstrzykniety w inline
-     onclick rozwalilby ten atrybut. */
-  const row=t=>`
-    <div class="ticket-row" onclick="openTicket(${t.id})">
-      <div class="tile-ic ${t.status==='open'?'orange':t.status==='answered'?'green':'gray'}" style="width:36px;height:36px;flex:0 0 36px">${ICO.chat}</div>
-      <div class="sub"><b>${esc(t.subject)}</b>
-        <span>#${t.id} · ${esc(t.trader_email||'—')} · ${t.messages} message${t.messages>1?'s':''} · ${dstr(t.last_ts)}</span></div>
-      <span class="status ${t.status==='closed'?'failed':t.status==='answered'?'paid':'pending'}"><span class="dot"></span>${esc(t.status)}</span>
-      ${XBTN(`event.stopPropagation();delTicket(${t.id})`,'Delete this ticket and its conversation')}
-    </div>`;
-  const seg=[['all','All'],['open','Open'],['answered','Answered'],['closed','Closed']];
-  const active=rows.filter(t=>t.status!=='closed'), closed=rows.filter(t=>t.status==='closed');
-  $('view').innerHTML=`
-    <div class="toolbar">
-      ${searchBox('tick-q','_tickQ','renderTickets','Search subject, e-mail or #…')}
-      <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._tickFilter='${f===k?'all':k}';renderTickets()">${l}</button>`).join('')}</div>
-      <span class="count-pill">${rows.length} of ${list.length}</span>
-    </div>`
-    +(active.length?`<div class="tbl-wrap">`+active.map(row).join('')+`</div>`
-      :closed.length?'' // samo History: pusta sekcja "open" nic nie wnosi
-      :q||f!=='all'?`<div class="empty"><h3>No tickets match</h3><p>Try a different search or filter.</p></div>`
-      :`<div class="empty"><h3>No open tickets</h3><p>Support conversations started by traders appear here.</p></div>`)
-    +(closed.length?`<div class="sec-card" style="margin-top:18px">
-      <h3>History</h3>
-      <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Closed tickets. Click to review the conversation.</p>
-      <div class="tbl-wrap">`+closed.map(row).join('')+`</div></div>`:'');
-}
-
-/* Konto firmowe: bez właściciela i bez rachunku MT5 za plecami — czysty bot
-   pod tablicę wyników. Osobna zakładka, a pozostałe filtry ich NIE pokazują:
-   wymieszane z klientami zawyżałyby każdy rzut oka na realną sprzedaż. */
-const isHouse=a=>!a.trader_id&&!a.mt5_backed;
 function renderAccounts(){
   const list=window._accs||[];
   const q=(window._accQ||'').toLowerCase();
   const f=window._accFilter;
-  const rows=list.filter(a=>(f==='house'?isHouse(a):!isHouse(a)&&(f==='all'||f==='free'||a.status===f))&&
+  const rows=list.filter(a=>(f==='all'||a.status===f)&&
     (!q||String(a.login).includes(q)||(a.trader_name||'').toLowerCase().includes(q)
       ||(a.trader_email||'').toLowerCase().includes(q)||(a.product_key||'').includes(q)));
-  const cap=capList(rows,'_accAll','renderAccounts');
-  const seg=[['all','All'],['active','Evaluation'],['funded','Funded'],['failed','Failed'],['provisioning','Provisioning'],['free','Free signups'],['house','House bots']];
+  const seg=[['all','All'],['active','Evaluation'],['funded','Funded'],['failed','Failed'],['provisioning','Provisioning']];
   $('view').innerHTML=`
     <div class="toolbar">
       ${searchBox('acc-q','_accQ','renderAccounts','Search login, trader, email or plan…')}
-      <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="accSeg('${k}')">${l}</button>`).join('')}</div>
-      <span class="count-pill">${rows.length} of ${list.length}${impPill()}</span>
+      <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._accFilter='${k}';renderAccounts()">${l}</button>`).join('')}</div>
+      <span class="count-pill">${rows.length} of ${list.length}</span>
+      <button class="btn-o sm" onclick="exportTrackRecord()"
+        title="Every bot-driven account: trades, daily and monthly results, payouts and a field dictionary">Export track record</button>
     </div>
-    ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.accounts.v2">
+    ${rows.length?`<div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.accounts.v2">
       <thead><tr><th>Created</th><th>Paid</th><th>Login</th><th>Trader</th><th>Plan</th><th>Phase</th><th>Status</th>
         <th title="Trade BOT">Bot</th>
         <th style="text-align:right">Balance</th><th style="text-align:right">Equity</th><th style="text-align:right">P&amp;L</th>
         <th>Daily</th><th>Max DD</th><th class="no-sort"></th></tr></thead>
-      <tbody>${cap.rows.map(a=>{const m=a.metrics||{};
+      <tbody>${rows.map(a=>{const m=a.metrics||{};
         return `<tr class="clickable" onclick="openAccount(${a.id})">
-          <td class="muted rt-hide" style="white-space:nowrap" data-l="Created" data-sort="${esc(a.created_at||'')}">${a.created_at?dstr(a.created_at):'—'}</td>
-          <td class="muted rt-hide" style="white-space:nowrap" data-l="Paid" data-sort="${esc(a.paid_at||'')}">${a.paid_at?dstr(a.paid_at):'—'}</td>
-          <td class="num rt-main" style="font-weight:600" data-l="Login">${a.status==='provisioning'?'<span class="muted">pending…</span>':esc(a.login)}</td>
-          <td data-l="Trader">${esc(a.trader_name||'—')}${a.trader_email?`<div class="muted" style="font-size:var(--fs-cap)">${esc(a.trader_email)}</div>`:''}</td>
-          <td class="muted" data-l="Plan">${esc(a.product_key)}</td>
-          <td class="muted" data-l="Phase">${PHASE_LBL[a.phase]||esc(a.phase)}</td>
-          <td data-l="Status"><span class="status ${esc(a.status)}"><span class="dot"></span>${STATUS_LBL[a.status]||esc(a.status)}</span></td>
-          <td data-l="Bot" data-sort="${a.bot_enabled?(a.bot_paused?1:2):0}" title="${a.bot_enabled?(a.bot_paused?'Trade BOT paused':'Trade BOT running'):'Trade BOT off'}">${a.bot_enabled?(a.bot_paused?'🟡':'🟢'):'🔴'}</td>
-          <td class="num" style="text-align:right" data-l="Balance">$${fmt(a.balance)}</td>
-          <td class="num rt-hide" style="text-align:right" data-l="Equity">$${fmt(a.equity)}</td>
-          <td class="num ${(m.profit_pct||0)>=0?'up':'down'}" style="text-align:right" data-l="P&amp;L">${(m.profit_pct||0)>=0?'+':''}${(m.profit_pct||0).toFixed(2)}%</td>
-          <td data-l="Daily" data-sort="${(m.daily_loss_used_pct||0).toFixed(2)}">${mini(m.daily_loss_used_pct)}</td>
-          <td data-l="Max DD" data-sort="${(m.overall_dd_used_pct||0).toFixed(2)}">${mini(m.overall_dd_used_pct)}</td>
-          <td class="rt-acts" style="text-align:right" onclick="event.stopPropagation()">${
-            XBTN(`deleteAccountRow(${a.id},'${jsq(a.login)}','${jsq(a.trader_name||'')}')`,'Delete account')}</td></tr>`}).join('')}
-      </tbody></table></div>${cap.more}`
+          <td class="muted" style="white-space:nowrap" data-sort="${esc(a.created_at||'')}">${a.created_at?dstr(a.created_at):'—'}</td>
+          <td class="muted" style="white-space:nowrap" data-sort="${esc(a.paid_at||'')}">${a.paid_at?dstr(a.paid_at):'—'}</td>
+          <td class="num" style="font-weight:600">${a.status==='provisioning'?'<span class="muted">pending…</span>':esc(a.login)}</td>
+          <td>${esc(a.trader_name||'—')}${a.trader_email?`<div class="muted" style="font-size:11px">${esc(a.trader_email)}</div>`:''}</td>
+          <td class="muted">${esc(a.product_key)}</td>
+          <td class="muted">${PHASE_LBL[a.phase]||esc(a.phase)}</td>
+          <td><span class="status ${esc(a.status)}"><span class="dot"></span>${STATUS_LBL[a.status]||esc(a.status)}</span></td>
+          <td data-sort="${a.bot_enabled?(a.bot_paused?1:2):0}" title="${a.bot_enabled?(a.bot_paused?'Trade BOT paused':'Trade BOT running'):'Trade BOT off'}">${a.bot_enabled?(a.bot_paused?'🟡':'🟢'):'🔴'}</td>
+          <td class="num" style="text-align:right">$${fmt(a.balance)}</td>
+          <td class="num" style="text-align:right">$${fmt(a.equity)}</td>
+          <td class="num ${(m.profit_pct||0)>=0?'up':'down'}" style="text-align:right">${(m.profit_pct||0)>=0?'+':''}${(m.profit_pct||0).toFixed(2)}%</td>
+          <td data-sort="${(m.daily_loss_used_pct||0).toFixed(2)}">${mini(m.daily_loss_used_pct)}</td>
+          <td data-sort="${(m.overall_dd_used_pct||0).toFixed(2)}">${mini(m.overall_dd_used_pct)}</td>
+          <td style="text-align:right" onclick="event.stopPropagation()">${
+            XBTN(`deleteAccountRow(${a.id},'${esc(a.login)}','${esc(a.trader_name||'')}')`,'Delete account')}</td></tr>`}).join('')}
+      </tbody></table></div>`
       :`<div class="empty"><h3>No accounts match</h3><p>Try a different search or filter.</p></div>`}`;
-}
-
-/* Przejscie do/z "Free signups" wymaga NOWEJ listy z serwera; pozostale
-   przyciski tylko filtruja te, ktora juz jest w przegladarce. */
-function accSeg(k){
-  const prev=window._accFilter;
-  window._accFilter=(prev===k)?'all':k;
-  if((prev==='free')!==(window._accFilter==='free'))go('accounts');
-  else renderAccounts();
 }
 
 /* ---------- kyc: seg buttons need a global to call ---------- */
 function renderKyc(){VIEWS._kycRender()}
-
-/* Kanal FREE: darmowy challenge dostaje ktos, kogo jeszcze nie znamy, a prezent
-   sciaga dublerow — wiec przed dalszym korzystaniem z panelu ma sie zweryfikowac.
-   Wysylka jest hurtowa i NIEODWRACALNA, dlatego karta pokazuje imienna liste
-   przed klikiem, a nie sam licznik. */
-function freeChannelCard(){
-  const f=window._kycFree||{};
-  const czeka=f.waiting||[], gotowe=f.done||[];
-  if(!czeka.length&&!gotowe.length)return '';
-  const lista=czeka.slice(0,12).map(t=>`<span class="chip">${esc(t.email)}</span>`).join(' ')
-    +(czeka.length>12?`<span class="chip">+${czeka.length-12} more</span>`:'');
-  const wstrzymani=gotowe.filter(t=>t.kyc_locked&&t.kyc_status!=='approved').length;
-  return `<div class="sec-card card-md" style="margin-bottom:18px">
-    <h3>Free challenge — identity checks</h3>
-    <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Traders who were handed a free account.
-      Asking pauses their dashboard until you approve the documents — the MT5 account keeps trading either way.</p>
-    <div class="kv"><span>Waiting for a request</span><b>${czeka.length}</b></div>
-    <div class="kv"><span>Already asked</span><b>${gotowe.length}</b></div>
-    <div class="kv"><span>Dashboard paused now</span><b>${wstrzymani}</b></div>
-    ${czeka.length?`<div class="chip-row" style="margin:12px 0">${lista}</div>
-      <button class="btn-p" onclick="askFreeChannelKyc(this)">Ask all ${czeka.length} to verify</button>`
-    :'<p class="muted" style="font-size:12.5px;margin-top:10px">Everyone from the free channel has already been asked.</p>'}
-  </div>`;
-}
-/* Serwer wysyla paczkami (limit czasu funkcji), wiec petla chodzi do `left===0`.
-   Przerwana w polowie nie szkodzi: ponowne klikniecie zaczyna od tych, ktorzy
-   maila jeszcze nie dostali. */
-async function askFreeChannelKyc(btn){
-  const czeka=(window._kycFree||{}).waiting||[];
-  if(!czeka.length)return;
-  if(!await askConfirm({title:`Ask ${czeka.length} free-challenge trader${czeka.length===1?'':'s'} to verify?`,
-    body:'Each of them gets an e-mail with a link to the Verification tab, and their dashboard stays paused '
-      +'until you approve the documents. Their trading account keeps running. E-mails cannot be unsent.',
-    ok:'Send the requests',requireText:'SEND'}))return;
-  btn.disabled=true;
-  let wyslane=0;
-  try{
-    for(;;){
-      const r=await api('/api/admin/kyc/free-channel/request',{method:'POST'});
-      wyslane+=r.count||0;
-      btn.textContent=`Sending… ${wyslane}/${czeka.length}`;
-      if(!r.count||!r.left)break;
-    }
-    toast(`Verification requested from ${wyslane} trader${wyslane===1?'':'s'}.`,'ok');
-  }catch(e){toast(`Error after ${wyslane} sent: ${e.message}`,'err')}
-  go('kyc');
-}
 
 /* ---------- pool: search + state filter (list only — the forms above keep
    whatever the admin typed, so only #pool-list re-renders) ---------- */
@@ -1082,31 +711,31 @@ function poolListHtml(){
   return `<div class="toolbar">
       ${searchBox('pool-q','_poolQ','renderPoolList','Search login, server or trader…')}
       <div class="seg">${[['all','All'],['free','Free'],['assigned','Assigned'],['retired','Retired']]
-        .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._poolFilter='${f===k?'all':k}';renderPoolList()">${l}</button>`).join('')}</div>
+        .map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._poolFilter='${k}';renderPoolList()">${l}</button>`).join('')}</div>
       <span class="count-pill">${list.length} of ${rows.length}</span>
     </div>`
-    +(list.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.pool">
+    +(list.length?`<div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.pool">
       <thead><tr><th>#</th><th>Login</th><th class="no-sort">Password</th><th>Server</th><th>Size</th><th>State</th><th>Assigned to</th><th>When</th><th class="no-sort"></th></tr></thead>
       <tbody>${list.map(p=>`<tr>
-        <td class="num rt-hide" data-l="#">${p.id}</td><td class="num rt-main" data-l="Login">${esc(p.platform_login)}${p.simulated?'<div class="muted" style="font-size:10.5px;letter-spacing:.06em">SIMULATED</div>':'<div class="muted" style="font-size:10.5px;letter-spacing:.06em">REAL MT5</div>'}</td>
-        <td data-l="Password">${p.platform_password?`<span class="mono" style="cursor:pointer" title="Click to reveal"
+        <td class="num">${p.id}</td><td class="num">${esc(p.platform_login)}${p.simulated?'<div class="muted" style="font-size:10.5px;letter-spacing:.06em">SIMULATED</div>':''}</td>
+        <td>${p.platform_password?`<span class="mono" style="cursor:pointer" title="Click to reveal"
           onclick="this.textContent=this.textContent==='••••••••'?this.dataset.p:'••••••••'" data-p="${esc(p.platform_password)}">••••••••</span>`:'<span class="muted">—</span>'}</td>
-        <td class="muted" data-l="Server">${esc(p.platform_server)}</td><td class="num" data-l="Size">$${fmt0(p.account_size)}</td>
-        <td data-l="Status">${p.retired_reason?`<span class="status failed"><span class="dot"></span>retired</span>`
+        <td class="muted">${esc(p.platform_server)}</td><td class="num">$${fmt0(p.account_size)}</td>
+        <td>${p.retired_reason?`<span class="status failed"><span class="dot"></span>retired</span>`
           :p.claimed?`<span class="status pending"><span class="dot"></span>assigned</span>`
           :'<span class="status funded"><span class="dot"></span>free</span>'}</td>
-        <td data-l="Assigned">${p.claimed?`${esc(p.trader_email||'—')}<div class="muted" style="font-size:11.5px">${p.retired_reason?esc(p.retired_reason)+' — not reusable':`account ${accLink(p.claimed_by_account_id)}${p.account_status?' · '+esc(p.account_status):''}`}</div>`:'<span class="muted">—</span>'}</td>
-        <td class="muted" data-l="When" data-sort="${esc(p.claimed_at||'')}">${p.claimed_at?dstr(p.claimed_at):'—'}</td>
-        <td class="rt-acts" style="white-space:nowrap">
+        <td>${p.claimed?`${esc(p.trader_email||'—')}<div class="muted" style="font-size:11.5px">${p.retired_reason?esc(p.retired_reason)+' — not reusable':`account #${p.claimed_by_account_id}${p.account_status?' · '+esc(p.account_status):''}`}</div>`:'<span class="muted">—</span>'}</td>
+        <td class="muted" data-sort="${esc(p.claimed_at||'')}">${p.claimed_at?dstr(p.claimed_at):'—'}</td>
+        <td style="white-space:nowrap">
           <button class="btn-o sm" onclick="editPool(${p.id})">Edit</button>
           ${p.claimed&&!p.retired_reason?''
-            :' '+XBTN(`delPool(${p.id},'${jsq(p.platform_login)}',${p.retired_reason?1:0})`,
+            :' '+XBTN(`delPool(${p.id},'${esc(p.platform_login)}',${p.retired_reason?1:0})`,
                       p.retired_reason?'Delete this retired entry':'Remove from pool')}</td></tr>
         <tr id="pool-edit-${p.id}" class="tr-sub" style="display:none"><td colspan="9" style="background:var(--bg)">
           <div class="pool-form" style="margin:6px 0">
-            <input id="ed-login-${p.id}" class="inp" inputmode="numeric" value="${esc(p.platform_login)}" placeholder="MT5 login">
-            <input id="ed-pass-${p.id}" class="inp" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="New password (leave empty to keep)">
-            <input id="ed-server-${p.id}" class="inp" spellcheck="false" autocapitalize="off" value="${esc(p.platform_server)}" placeholder="Server">
+            <input id="ed-login-${p.id}" class="inp" value="${esc(p.platform_login)}" placeholder="MT5 login">
+            <input id="ed-pass-${p.id}" class="inp" placeholder="New password (leave empty to keep)">
+            <input id="ed-server-${p.id}" class="inp" value="${esc(p.platform_server)}" placeholder="Server">
             ${p.claimed?'':`<select id="ed-size-${p.id}" class="inp">${poolSizeOptions(p.account_size)}</select>`}
           </div>
           <button class="btn-p sm" onclick="savePool(${p.id},${p.claimed})">Save</button>
@@ -1124,50 +753,44 @@ function renderPoolList(){const el=document.getElementById('pool-list');if(el)el
 function renderPayoutsView(){
   const list=window._payReqs||[];
   const f=window._payFilter||'all';
-  const q=(window._payQ||'').toLowerCase();
-  const rows=list.filter(r=>(f==='all'||r.status===f)&&
-    (!q||String(r.account_login||'').toLowerCase().includes(q)
-      ||(r.trader_email||'').toLowerCase().includes(q)
-      ||(r.method||'').toLowerCase().includes(q)||(r.status||'').includes(q)));
+  const rows=list.filter(r=>f==='all'||r.status===f);
   const seg=[['all','All'],['pending','Pending'],['approved','Approved'],['paid','Paid'],['rejected','Rejected']];
   $('view').innerHTML=`
     <div class="toolbar">
-      ${list.length?`${searchBox('pay-q','_payQ','renderPayoutsView','Search account, trader or method…')}
-      <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._payFilter='${f===k?'all':k}';renderPayoutsView()">${l}</button>`).join('')}</div>`:''}
+      ${list.length?`<div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._payFilter='${k}';renderPayoutsView()">${l}</button>`).join('')}</div>`:''}
       <button class="btn-o sm" onclick="openPayoutImport()">Import history</button>
       ${list.length?`<span class="count-pill">${rows.length} of ${list.length}</span>`:''}
-    </div>`+(rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.payouts">
+    </div>`+(rows.length?`<div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.payouts">
     <thead><tr><th>Date</th><th>Account</th><th>Trader</th><th>Profit</th><th>Trader share</th><th>Method</th><th>Status</th><th class="no-sort">Certificate</th><th class="no-sort"></th></tr></thead>
     <tbody>${rows.map(r=>`<tr>
-      <td class="muted" data-l="Date" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td><td class="num rt-main" data-l="Account">${accLink(r.account_id,r.account_login)}${r.express?' <span class="express-pill" title="Express Payout add-on — this request jumps the review queue">EXPRESS</span>':''}</td>
-      <td data-l="Trader">${esc(r.trader_email||'—')}</td>
-      <td class="num" data-l="Profit">$${fmt(r.profit_amount)}</td><td class="num up" data-l="Share">$${fmt(r.trader_share)}</td>
-      <td data-l="Method">${(()=>{const d=r.details||{};
+      <td class="muted" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td><td class="num">${esc(r.account_login||'—')}</td>
+      <td>${esc(r.trader_email||'—')}</td>
+      <td class="num">$${fmt(r.profit_amount)}</td><td class="num up">$${fmt(r.trader_share)}</td>
+      <td>${(()=>{const d=r.details||{};
         const label=r.method==='usdt'?'USDT':r.method==='wise'?'Wise':'Bank';
         const info=r.method==='usdt'?[d.network,d.address].filter(Boolean).join(' · ')
           :r.method==='wise'?(d.email||'')
           :[d.holder,d.iban,d.swift,d.bank_name].filter(Boolean).join(' · ');
-        return `${esc(label)}${info?`<div class="muted mono" style="font-size:var(--fs-cap);max-width:260px;word-break:break-all">${esc(info)}</div>`:''}`})()}</td>
-      <td data-l="Status"><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending'
+        return `${esc(label)}${info?`<div class="muted mono" style="font-size:11px;max-width:260px;word-break:break-all">${esc(info)}</div>`:''}`})()}</td>
+      <td><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending'
         :r.status==='approved'?'active':'failed'}"><span class="dot"></span>${esc(r.status)}</span>
-        ${r.status==='rejected'&&r.reject_reason?`<div class="muted" style="font-size:var(--fs-cap);max-width:200px">${esc(r.reject_reason)}</div>`:''}</td>
-      <td class="rt-acts" style="white-space:nowrap">${r.kind!=='payout'?'<span class="muted">—</span>'
+        ${r.status==='rejected'&&r.reject_reason?`<div class="muted" style="font-size:11px;max-width:200px">${esc(r.reject_reason)}</div>`:''}</td>
+      <td style="white-space:nowrap">${r.kind!=='payout'?'<span class="muted">—</span>'
         :r.cert_url
           ?`<a class="btn-o sm" href="${r.cert_url}" target="_blank">Open</a>
             <button class="btn-o sm" onclick="copyCert('${location.origin}${r.cert_url}')">Copy link</button>
-            <button class="btn-o sm" onclick="setCertLp(${r.id},${r.show_on_lp?'false':'true'})"
-              title="${r.show_on_lp?'Currently shown in the landing-page payout strip':'Currently not on the landing page'}">
-              ${r.show_on_lp?'Take off the LP':'Put on the LP'}</button>
+            <button class="btn-o sm" onclick="setCertLp(${r.id},${r.show_on_lp?'false':'true'})">
+              ${r.show_on_lp?'On LP ✓':'Not on LP'}</button>
             <button class="btn-o sm" onclick="revokeCert(${r.id})">Revoke</button>`
           :`<button class="btn-o sm" onclick="askCertLp(${r.id})">Generate</button>`}</td>
-      <td class="rt-acts" style="text-align:right;white-space:nowrap">${r.kind==='request'&&r.status==='pending'
-        ?`<button class="btn-p sm" onclick="approvePayout(${r.id},this)">Approve &amp; pay</button>
-          <button class="btn-o sm" onclick="rejectPayout(${r.id},this)">Reject</button>`
-        :XBTN(`deletePayoutRow('${r.kind}',${r.id},${r.trader_share},'${jsq(r.account_login||'')}')`,
+      <td style="text-align:right;white-space:nowrap">${r.kind==='request'&&r.status==='pending'
+        ?`<button class="btn-p sm" onclick="approvePayout(${r.id})">Approve &amp; pay</button>
+          <button class="btn-o sm" onclick="rejectPayout(${r.id})">Reject</button>`
+        :XBTN(`deletePayoutRow('${r.kind}',${r.id},${r.trader_share},'${esc(r.account_login||'')}')`,
               r.kind==='payout'?'Delete payout':'Delete request')}</td></tr>`).join('')}
     </tbody></table></div>
     <p class="muted" style="font-size:11.5px;margin-top:10px">Approving pays the trader share and refunds the challenge fee on the first payout for that account.</p>`
-    :list.length?`<div class="empty"><h3>No payouts match</h3><p>Try a different search or filter.</p></div>`
+    :list.length?`<div class="empty"><h3>No ${esc(f)} payouts</h3><p>Try a different filter.</p></div>`
     :`<div class="empty"><h3>No payouts yet</h3><p>Payouts you issue and requests from funded traders both land here.</p></div>`);
 }
 
@@ -1177,26 +800,22 @@ function renderOrders(){
   const q=(window._ordQ||'').toLowerCase();
   const f=window._ordFilter||'all';
   const rows=list.filter(o=>
-    (f==='all'||(f==='awaiting'?(o.flag==='awaiting_crypto'&&o.status==='pending'):o.status===f))&&
+    (f==='all'||(f==='awaiting'?o.flag==='awaiting_crypto':o.status===f))&&
     (!q||(o.trader_email||'').toLowerCase().includes(q)
     ||(o.product_key||'').includes(q)||(o.status||'').includes(q)
     ||(o.flag||'').includes(q)||String(o.id)===q));
-  const cap=capList(rows,'_ordAll','renderOrders');
   /* Kafelki opisuja TO, CO WIDAC pod nimi — czyli zbior po filtrze i szukajce.
      Wczesniej liczyly sie z calej listy, wiec przelaczenie na "Failed" zostawialo
      nad pusta tabela pelny przychod. Ten sam blad byl w portalu na Challenges. */
   const paid=rows.filter(o=>o.status==='paid');
-  /* Granty BOGO ($0, provider "grant") to nie sprzedaz: w liczniku i sredniej
-     zanizalyby srednia i zawyzaly liczbe oplaconych zamowien. */
-  const sold=paid.filter(o=>o.provider!=='grant');
-  const revenue=sold.reduce((s,o)=>s+o.amount_usd,0);
-  const avg=sold.length?revenue/sold.length:0;
+  const revenue=paid.reduce((s,o)=>s+o.amount_usd,0);
+  const avg=paid.length?revenue/paid.length:0;
   const zawezone=rows.length!==list.length;
   const podpis=zawezone?`<div class="sub">of ${list.length} total</div>`:'';
   $('view').innerHTML=`
     <div class="stats-row">
       <div class="stat-tile"><div class="tile-ic green">${ICO.dollar}</div>
-        <div><div class="lbl">Revenue</div><div class="val">$${fmt0(revenue)}</div><div class="sub">${sold.length} paid orders</div></div></div>
+        <div><div class="lbl">Revenue</div><div class="val">$${fmt0(revenue)}</div><div class="sub">${paid.length} paid orders</div></div></div>
       <div class="stat-tile"><div class="tile-ic blue">${ICO.file}</div>
         <div><div class="lbl">Orders ${zawezone?'shown':'total'}</div><div class="val">${rows.length}</div>
           <div class="sub">${rows.length-paid.length} unpaid</div></div></div>
@@ -1206,40 +825,33 @@ function renderOrders(){
     <div class="toolbar">
       ${searchBox('ord-q','_ordQ','renderOrders','Search email, product, status…')}
       <div class="seg">${[['all','All'],['paid','Paid'],['pending','Pending'],['awaiting','Awaiting crypto'],['failed','Failed']]
-        .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._ordFilter='${f===k?'all':k}';renderOrders()">${l}</button>`).join('')}</div>
+        .map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._ordFilter='${k}';renderOrders()">${l}</button>`).join('')}</div>
       <span class="count-pill">${rows.length} of ${list.length}</span>
       <button class="btn-p sm" onclick="openManualOrder()"
         title="Record an order the customer pays outside Stripe (crypto, transfer)">+ New order</button>
     </div>
-    ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.orders">
+    ${rows.length?`<div class="tbl-wrap tw-wide"><table class="tbl sortable" data-tkey="admin.orders">
       <thead><tr><th>#</th><th>Date</th><th>Trader</th><th>Product</th><th>Amount</th><th>Provider</th><th>Status</th><th>Account</th><th class="no-sort"></th></tr></thead>
-      <tbody>${cap.rows.map(o=>`<tr>
-        <td class="num rt-hide" data-l="#">${o.id}</td><td class="muted" data-l="Date" data-sort="${esc(o.created_at||'')}">${dstr(o.created_at)}</td>
-        <td class="rt-main" data-l="Trader">${esc(o.trader_email||'—')}</td>
-        <td data-l="Product">${esc(o.product_key)}${o.bogo?` <span class="up" style="font-size:var(--fs-cap)" title="Buy 1 Get 1 Free — paying this order also creates a free second account of the same size">+1 free</span>`:''}${o.open_funded?` <span class="up" style="font-size:var(--fs-cap)" title="Opens straight as a funded account when paid — skips the evaluation">funded</span>`:''}${o.weekend_trading?` <span class="up" style="font-size:var(--fs-cap)" title="Weekend Trading add-on — 2 extra trading days/week">wknd</span>`:''}${o.brand==='fx'?` <span class="up" style="font-size:var(--fs-cap)" title="The payment page shows Forex Passing branding — no PTF anywhere on it">FX</span>`:''}</td>
-        <td class="num" data-l="Amount">$${fmt(o.amount_usd)}${o.coupon?` <span class="up" style="font-size:var(--fs-cap)">(${esc(o.coupon)})</span>`:''}</td>
-        <td class="muted rt-hide" data-l="Provider">${esc(o.provider)}</td>
-        <td data-l="Status"><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span>
-          ${o.status==='pending'&&o.flag==='awaiting_crypto'?'<div class="muted" style="font-size:var(--fs-cap);white-space:nowrap">⏳ awaiting crypto</div>':''}
-          ${o.flag==='bogo_grant_failed'?'<div style="font-size:var(--fs-cap);white-space:nowrap;color:var(--red)" title="The paid order promised a free second account, but creating it failed. Use Grant challenge to add it by hand.">⚠ BOGO grant failed — grant manually</div>':''}
-          ${o.flag==='credits_shortfall'?'<div style="font-size:var(--fs-cap);white-space:nowrap;color:var(--red)" title="The order was discounted with store credits, but a parallel checkout had already spent them — the company covered the difference.">⚠ credits shortfall — discount without coverage</div>':''}
-          ${o.flag==='fraud'?'<div style="font-size:var(--fs-cap);white-space:nowrap;color:var(--red)" title="The card issuer reported this payment as fraudulent (early fraud warning). The charge was refunded automatically and the card was blocklisted. Do not provision anything for this order.">⚠ fraud — auto-refunded</div>':''}
-          ${o.flag==='disputed'?'<div style="font-size:var(--fs-cap);white-space:nowrap;color:var(--red)" title="The cardholder opened a chargeback. Respond with evidence in the Stripe dashboard — this cannot be handled from the panel.">⚠ chargeback opened</div>':''}
+      <tbody>${rows.map(o=>`<tr>
+        <td class="num">${o.id}</td><td class="muted" data-sort="${esc(o.created_at||'')}">${dstr(o.created_at)}</td>
+        <td>${esc(o.trader_email||'—')}</td><td>${esc(o.product_key)}</td>
+        <td class="num">$${fmt(o.amount_usd)}${o.coupon?` <span class="up" style="font-size:11px">(${esc(o.coupon)})</span>`:''}</td>
+        <td class="muted">${esc(o.provider)}</td>
+        <td><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span>
+          ${o.status==='pending'&&o.flag==='awaiting_crypto'?'<div class="muted" style="font-size:11px;white-space:nowrap">⏳ awaiting crypto</div>':''}
           ${o.status!=='paid'&&o.payment_address?`<div class="muted" title="${esc((o.payment_network?o.payment_network+' · ':'')+o.payment_address)}"
-            style="font-size:var(--fs-cap);max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(o.payment_network?o.payment_network+' · ':'')}${esc(o.payment_address)}</div>`:''}
-          ${o.status==='failed'&&o.fail_reason?`<div class="muted" style="font-size:var(--fs-cap);max-width:200px">${esc(o.fail_reason)}</div>`:''}</td>
-        <td class="num" data-l="Account">${accLink(o.account_id)}</td>
-        <td class="rt-acts" style="white-space:nowrap">${o.status==='paid'?'':`
+            style="font-size:11px;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(o.payment_network?o.payment_network+' · ':'')}${esc(o.payment_address)}</div>`:''}
+          ${o.status==='failed'&&o.fail_reason?`<div class="muted" style="font-size:11px;max-width:200px">${esc(o.fail_reason)}</div>`:''}</td>
+        <td class="num">${o.account_id||'—'}</td>
+        <td style="white-space:nowrap">${o.status==='paid'?'':`
           ${o.status==='pending'?`<button class="btn-o sm" onclick="payLink(${o.id})"
             title="Copy a card-payment link for this order — send it to the customer">Pay link</button>
           <button class="btn-o sm" onclick="flagOrder(${o.id},'${o.flag==='awaiting_crypto'?'':'awaiting_crypto'}')"
             title="${o.flag==='awaiting_crypto'?'Clear the awaiting-crypto flag':'Mark as awaiting crypto payment'}">${o.flag==='awaiting_crypto'?'Clear flag':'Crypto?'}</button>
-          <button class="btn-o sm" onclick="toggleOrderBogo(${o.id},${o.bogo?'false':'true'})"
-            title="${o.bogo?'Remove the free second account from this order':'Buy 1 Get 1 Free — add a free second account of the same size when this order is paid'}">${o.bogo?'BOGO ✓':'BOGO'}</button>
           <button class="btn-o sm" onclick="markOrderFailed(${o.id})" title="Payment is not coming, close the order with a reason">Mark failed</button>`:''}
-          <button class="btn-p sm" onclick="markOrderPaid(${o.id},'${jsq(o.trader_email||'')}',${o.amount_usd})" title="Confirm the payment arrived, creates the account">Mark paid</button>`}
-          ${XBTN(`deleteOrderRow(${o.id},'${jsq(o.trader_email||'')}',${o.amount_usd},${o.account_id||0})`,'Delete order')}</td></tr>`).join('')}
-      </tbody></table></div>${cap.more}`
+          <button class="btn-p sm" onclick="markOrderPaid(${o.id})" title="Confirm the payment arrived, creates the account">Mark paid</button>`}
+          ${XBTN(`deleteOrderRow(${o.id},'${esc(o.trader_email||'')}',${o.amount_usd},${o.account_id||0})`,'Delete order')}</td></tr>`).join('')}
+      </tbody></table></div>`
       :`<div class="empty"><h3>${list.length?'No orders match':'No orders yet'}</h3>${list.length?'<p>Try a different search or filter.</p>':''}</div>`}`;
 }
 
@@ -1252,21 +864,9 @@ function renderOrders(){
    The statuses read as one line: we wrote → they answered → it went quiet, or
    they are out. Contact goes through Telegram, so "we wrote" is a state that
    lasts, not a call that either connected or did not. */
-/* 'burned' is the trash can: the lead vanishes from the working list into the
-   Trash chip, but the row survives — permanent delete stays a separate call. */
 const LEAD_STATUSES=[['new','New'],['messaged','Messaged'],['replied','Replied'],
-  ['no_reply','No reply'],['rejected','Rejected'],['burned','Burned']];
+  ['no_reply','No reply'],['rejected','Rejected']];
 const leadLabel=s=>(LEAD_STATUSES.find(([k])=>k===s)||[,s])[1];
-/* Why we lost them. A closed list, not a text field: "too expensive", "price",
-   "costs too much" and "$$" are four rows in a report and one answer nobody can
-   count — and this is the only field meant to say WHY rather than HOW MANY.
-   Codes must match models.LOST_REASONS; the wording here is the panel's own,
-   the way the status labels above are. */
-const LOST_STATUSES=['rejected','burned'];
-const LOST_REASONS=[['price','💸 Too expensive'],['competitor','🏃 Bought elsewhere'],
-  ['not_qualified','🚫 Does not qualify'],['ghosted','👻 Stopped replying'],
-  ['spam','🤖 Bot / junk'],['other','❔ Something else']];
-const lostLabel=k=>(LOST_REASONS.find(([c])=>c===k)||[,k])[1];
 /* The questionnaire answers are what the grade is made of, and they are the first
    thing you want in front of you when writing. Hover rather than a column: four
    free-text answers would push the rest of the row off the screen. */
@@ -1289,221 +889,6 @@ function copyOpener(id){
     .then(()=>toast('Opener copied — paste it in the chat'))
     .catch(()=>{prompt('Copy the opener:',txt)});
 }
-/* Klik w telegramowy przycisk = pierwszy kontakt: status „new" sam przechodzi
-   w „messaged", a niczyj lead staje się TWÓJ — ten sam gest, który otwiera
-   czat, robi całą księgowość (przyciski na kanale TG robią to samo). Undo
-   cofa jedno i drugie, gdy chat otworzył się przez pomyłkę; każdy inny
-   status zostaje w spokoju — drugi klik niczego nie psuje. */
-async function markMessaged(id){
-  const row=(window._leads||[]).find(x=>x.id===id);
-  const l=row||(window._leadOpen&&window._leadOpen.id===id?window._leadOpen:null);
-  if(!l||l.status!=='new')return;
-  const przejmuje=!l.owner&&!!meMail();
-  const odswiez=()=>{
-    if(VIEW==='leads')renderLeads();
-    if(window._leadOpen&&window._leadOpen.id===id)openLead(id);
-  };
-  const ustaw=(status,owner)=>{
-    if(row){row.status=status;if(owner!==undefined)row.owner=owner}
-    if(window._leadOpen&&window._leadOpen.id===id){
-      window._leadOpen.status=status;
-      if(owner!==undefined)window._leadOpen.owner=owner;
-    }
-  };
-  try{
-    const d=await api('/api/admin/leads/'+id,{method:'POST',
-      body:JSON.stringify({status:'messaged',...(przejmuje?{owner:meMail()}:{})})});
-    ustaw(d.status,przejmuje?meMail():undefined);
-    if(row)row.contacted_at=d.contacted_at;
-    odswiez();
-    /* 30 s, nie 8: klik przełącza na Telegrama — undo musi doczekać powrotu */
-    undoToast(przejmuje?'Messaged — and it’s yours.':'Marked as messaged.',async()=>{
-      await api('/api/admin/leads/'+id,{method:'POST',
-        body:JSON.stringify({status:'new',...(przejmuje?{owner:''}:{})})});
-      ustaw('new',przejmuje?'':undefined);
-      odswiez();
-    },30000);
-  }catch(e){toast('Error: '+e.message,'err')}
-}
-/* Ostatnia droga do kogoś, komu Telegram nie dochodzi: SMS z linkiem z
-   powrotem na Telegram. Ta wysyłka KOSZTUJE i nie da się jej cofnąć, więc
-   inaczej niż reszta ikon nie leci od razu — pytanie pokazuje dokładną treść
-   (składa ją serwer, panel tylko wyświetla) i numer, na który pójdzie.
-
-   Odmowa „już poszedł" nie jest tu błędem, tylko drugim pytaniem: admin, który
-   klika ponownie, zwykle wie, że pierwszy nie doszedł. Dopiero jego świadome
-   „tak" wysyła powtórkę.
-
-   Statusu tu NIE ruszamy: robi to serwer, tą samą transakcją co wysyłkę.
-   Osobny strzał z przeglądarki mógłby nie dojść i zostawiłby leada z SMS-em
-   w świecie, a na liście „do napisania". */
-async function sendLeadSms(id){
-  const l=(window._leads||[]).find(x=>x.id===id)
-    ||(window._leadOpen&&window._leadOpen.id===id?window._leadOpen:null);
-  if(!l)return;
-  const pyt=(tytul,tresc,ok)=>askConfirm({title:tytul,body:tresc,ok:ok,cancel:'Not now'});
-  const podglad=`Goes to <b>${esc(l.phone||'')}</b> as a paid text message:<br><br>`
-    +`<span style="color:var(--txt)">${esc(l.sms_text||'')}</span>`;
-  if(!await pyt('Send this text?',podglad,'Send'))return;
-  const strzal=async force=>api('/api/admin/leads/'+id+'/sms'+(force?'?force=true':''),
-    {method:'POST'});
-  try{
-    await strzal(false);
-  }catch(e){
-    if(!/already went out/i.test(e.message)){toast('Not sent: '+e.message,'err');return}
-    if(!await pyt('Send it a second time?',
-      'This lead already had one text from us. Send another only if you know the '
-      +'first one did not arrive — from their side a repeat reads as pestering.',
-      'Send again'))return;
-    try{await strzal(true)}catch(e2){toast('Not sent: '+e2.message,'err');return}
-  }
-  toast('Text sent — it points them back to Telegram');
-  if(VIEW==='leads')await VIEWS.leads();
-  if(window._leadOpen&&window._leadOpen.id===id)openLead(id);
-}
-/* Dno drabiny kontaktu: adres jest jedynym polem, którego formularz nie puszcza
-   pustego, więc ten kanał zawsze ma dokąd pójść. Podgląd pokazuje CAŁY tekst,
-   nie zapowiedź — to jest mail podpisany marką landingu i wychodzi w czyimś
-   imieniu, więc klikający ma prawo zobaczyć go, zanim to się stanie.
-
-   Powtórka pyta drugi raz z innego powodu niż przy SMS-ie: mail nic nie
-   kosztuje, ale ten sam tekst drugi raz w tej samej skrzynce czyta się jak
-   automat i unieważnia jedyne zdanie, które ten mail ma do sprzedania — że
-   aplikację czytał człowiek. */
-async function sendLeadEmail(id){
-  const l=(window._leads||[]).find(x=>x.id===id)
-    ||(window._leadOpen&&window._leadOpen.id===id?window._leadOpen:null);
-  if(!l)return;
-  const pyt=(tytul,tresc,ok)=>askConfirm({title:tytul,body:tresc,ok:ok,cancel:'Not now'});
-  const podglad=`Goes to <b>${esc(l.email||'')}</b>, subject `
-    +`<b>${esc(l.mail_subject||'')}</b>:<br><br>`
-    +`<span style="color:var(--txt);white-space:pre-wrap">${esc(l.mail_text||'')}</span>`;
-  if(!await pyt('Send this e-mail?',podglad,'Send'))return;
-  const strzal=async force=>api('/api/admin/leads/'+id+'/email'+(force?'?force=true':''),
-    {method:'POST'});
-  try{
-    await strzal(false);
-  }catch(e){
-    if(!/already went out/i.test(e.message)){toast('Not sent: '+e.message,'err');return}
-    if(!await pyt('Send it a second time?',
-      'This lead already had this exact e-mail from us. The same text twice reads '
-      +'as an autoresponder — send again only if you know the first one never arrived.',
-      'Send again'))return;
-    try{await strzal(true)}catch(e2){toast('Not sent: '+e2.message,'err');return}
-  }
-  toast('E-mail sent — it points them back to Telegram');
-  if(VIEW==='leads')await VIEWS.leads();
-  if(window._leadOpen&&window._leadOpen.id===id)openLead(id);
-}
-/* Mail pisany z ręki: temat i treść wpisuje admin, serwer ubiera je w papier
-   firmowy marki z landingu (akapit będący samym linkiem -> zielony przycisk,
-   blok po „--" -> szara stopka). Szablony mieszkają na SERWERZE, nie w
-   localStorage: z panelu korzysta więcej niż jedno urządzenie i szablon
-   zapisany na laptopie musi istnieć na telefonie. {name} podmienia się na
-   imię PRZED podglądem — admin zatwierdza dokładnie to, co wyjdzie. */
-const mailFill=(t,l)=>String(t||'')
-  .replaceAll('{name}',String(l.name||'').trim().split(/\s+/)[0]||'there');
-async function openLeadMail(id){
-  const l=(window._leads||[]).find(x=>x.id===id)
-    ||(window._leadOpen&&window._leadOpen.id===id?window._leadOpen:null);
-  if(!l)return;
-  try{window._mailTpls=await api('/api/admin/email-templates')}
-  catch(e){window._mailTpls=[];toast('Templates: '+e.message,'err')}
-  document.getElementById('lead-mail-modal')?.remove();
-  const box=document.createElement('div');
-  box.id='lead-mail-modal';box.className='modal-wrap';
-  box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
-    <div class="modal-head"><h3>E-mail to ${esc(l.name||l.email)}</h3>
-      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('lead-mail-modal').remove()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
-    <p class="muted" style="font-size:12.5px;margin-bottom:14px">Goes to <b>${esc(l.email||'')}</b> on the brand letterhead.
-      A paragraph that is just a link becomes the green button, everything after a <b>--</b> line becomes the grey footer,
-      and <b>{name}</b> becomes their first name.</p>
-    <div class="stack">
-      <div><label class="muted" style="font-size:12px">Template</label>
-        <select id="lm-tpl" class="inp" onchange="fillMailTpl()"></select></div>
-      <div><label class="muted" style="font-size:12px">Subject</label>
-        <input id="lm-subject" class="inp" placeholder="Subject"></div>
-      <div><label class="muted" style="font-size:12px">Message</label>
-        <textarea id="lm-body" class="inp" rows="12" spellcheck="false"
-          placeholder="Hi {name},"></textarea></div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input id="lm-name" class="inp" style="flex:1;min-width:0" placeholder="Template name">
-        <button class="btn-o sm" type="button" onclick="saveMailTpl()">Save template</button>
-        <button class="btn-o sm" type="button" id="lm-del" onclick="delMailTpl()"
-          style="display:none">Delete</button>
-      </div>
-      <button class="btn-p lg" style="width:100%" id="lm-send" onclick="sendCustomLeadMail(${l.id})">Send</button>
-    </div></div>`;
-  box.onclick=()=>box.remove();
-  document.body.appendChild(box);
-  paintMailTpls('');
-  $('lm-subject').focus();
-}
-function paintMailTpls(sel){
-  const s=$('lm-tpl');if(!s)return;
-  s.innerHTML='<option value="">— start from scratch —</option>'
-    +(window._mailTpls||[]).map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('');
-  s.value=String(sel||'');
-  /* Nie atrybut `hidden`: reguła klasy .btn-o ustawia display i wygrywa z
-     arkuszem przeglądarki, więc przycisk zostawał widoczny mimo atrybutu. */
-  $('lm-del').style.display=s.value?'':'none';
-}
-function fillMailTpl(){
-  const t=(window._mailTpls||[]).find(x=>String(x.id)===$('lm-tpl').value);
-  $('lm-del').style.display=t?'':'none';
-  if(!t)return;
-  $('lm-subject').value=t.subject;$('lm-body').value=t.body;$('lm-name').value=t.name;
-}
-async function saveMailTpl(){
-  const name=$('lm-name').value.trim(),subject=$('lm-subject').value.trim(),
-    body=$('lm-body').value.trim();
-  if(!name){toast('Give the template a name.','err');$('lm-name').focus();return}
-  if(!subject||!body){toast('Subject and message are both required.','err');return}
-  try{
-    const t=await api('/api/admin/email-templates',{method:'POST',
-      body:JSON.stringify({name,subject,body})});
-    window._mailTpls=await api('/api/admin/email-templates');
-    paintMailTpls(t.id);
-    toast('Template saved.');
-  }catch(e){toast('Not saved: '+e.message,'err')}
-}
-async function delMailTpl(){
-  const t=(window._mailTpls||[]).find(x=>String(x.id)===$('lm-tpl').value);
-  if(!t)return;
-  if(!await askConfirm({title:'Delete this template?',
-    body:`<b>${esc(t.name)}</b> disappears for everyone using the panel. E-mails already sent stay in each lead's history.`,
-    ok:'Delete',danger:true}))return;
-  try{
-    await api('/api/admin/email-templates/'+t.id,{method:'DELETE'});
-    window._mailTpls=(window._mailTpls||[]).filter(x=>x.id!==t.id);
-    paintMailTpls('');
-    toast('Template deleted.');
-  }catch(e){toast('Error: '+e.message,'err')}
-}
-async function sendCustomLeadMail(id){
-  const l=(window._leads||[]).find(x=>x.id===id)
-    ||(window._leadOpen&&window._leadOpen.id===id?window._leadOpen:null);
-  if(!l)return;
-  const subject=mailFill($('lm-subject').value.trim(),l);
-  const body=mailFill($('lm-body').value.trim(),l);
-  if(!subject||!body){toast('Subject and message are both required.','err');return}
-  /* Ten sam podgląd co przy automacie: wysyłka jest nieodwracalna i wychodzi
-     pod cudzą marką, więc klikający widzi CAŁY tekst po podmianie {name}. */
-  const podglad=`Goes to <b>${esc(l.email||'')}</b>, subject <b>${esc(subject)}</b>:<br><br>`
-    +`<span style="color:var(--txt);white-space:pre-wrap">${esc(body)}</span>`;
-  if(!await askConfirm({title:'Send this e-mail?',body:podglad,ok:'Send',cancel:'Not yet'}))return;
-  await busy($('lm-send'),'Sending…',async()=>{
-    try{
-      await api('/api/admin/leads/'+id+'/email-custom',{method:'POST',
-        body:JSON.stringify({subject,body})});
-      document.getElementById('lead-mail-modal')?.remove();
-      toast('E-mail sent.');
-      if(VIEW==='leads')await VIEWS.leads();
-      if(window._leadOpen&&window._leadOpen.id===id)openLead(id);
-    }catch(e){toast('Not sent: '+e.message,'err')}
-  });
-}
 /* Same shape the landing validates against. A handle that fails it ("gubi
    please") renders as plain text: a dead t.me link looks like contact and
    is not, and the desk should see the typo, not chase it. */
@@ -1511,12 +896,8 @@ const TG_HANDLE_RE=/^@?[A-Za-z][A-Za-z0-9_]{4,31}$/;
 function leadTgLink(l){
   const h=String(l.telegram||'').replace(/^@/,'');
   if(!h)return'';
-  /* Sam podgląd profilu, bez księgowości: „napisz i oznacz jako messaged"
-     mieszka na ikonie samolotu niżej. Klik w dane kontaktowe nie może po
-     cichu zmieniać statusu leada ani przypisywać właściciela. */
   return TG_HANDLE_RE.test(h)
-    ?`<a href="https://t.me/${esc(h)}" target="_blank" rel="noopener"
-        title="Open the Telegram profile — the paper plane below writes to them">@${esc(h)}</a>`
+    ?`<a href="https://t.me/${esc(h)}?text=${encodeURIComponent(leadOpener(l))}" target="_blank" rel="noopener">@${esc(h)}</a>`
     :`<span class="muted" title="Not a valid Telegram handle — ask for the right one">${esc(l.telegram)}</span>`;
 }
 /* Three icon actions (owner's spec): paper plane = write on Telegram by the
@@ -1527,263 +908,138 @@ function leadTgLink(l){
 const ICO_TG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>';
 const ICO_PHONE='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.6a2 2 0 0 1-.5 2.1L8 9.6a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.8.3 1.7.5 2.6.6a2 2 0 0 1 1.7 2z"/></svg>';
 const ICO_COPY='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-const ICO_SMS='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.5 9.5 9.5 0 0 1-2.8-.4L3 21l1.4-4.2A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5z"/></svg>';
-const ICO_MAIL='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m3 6 9 6.5L21 6"/></svg>';
-const ICO_PEN='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
 function leadPhoneActs(l){
   const h=String(l.telegram||'').replace(/^@/,'');
   const handleOk=TG_HANDLE_RE.test(h);
   const digits=String(l.phone||'').replace(/\D/g,'');
   const intl=String(l.phone||'').trim().startsWith('+')&&digits.length>=8;
-  if(!handleOk&&!intl&&!l.sms_ready&&!l.mail_ready)return'';
+  if(!handleOk&&!intl)return'';
   const opener=encodeURIComponent(leadOpener(l));
   return `<span class="lead-acts">${handleOk
     ?`<a class="act-btn" title="Write on Telegram to @${esc(h)} — opener prefilled"
         aria-label="Telegram by handle" href="https://t.me/${esc(h)}?text=${opener}"
-        target="_blank" rel="noopener" onclick="markMessaged(${l.id})">${ICO_TG}</a>`:''}${intl
+        target="_blank" rel="noopener">${ICO_TG}</a>`:''}${intl
     ?`<a class="act-btn" title="Telegram chat found by the phone number (opener goes to the clipboard)"
         aria-label="Telegram by phone" href="https://t.me/+${digits}"
-        target="_blank" rel="noopener" onclick="copyOpener(${l.id});markMessaged(${l.id})">${ICO_PHONE}</a>`:''}${l.sms_ready
-    ?`<button class="act-btn" type="button" aria-label="Send a text message"
-        title="Text them the Telegram link — for people the Telegram side never reaches"
-        onclick="sendLeadSms(${l.id})">${ICO_SMS}</button>`:''}${l.mail_ready
-    ?`<button class="act-btn" type="button" aria-label="Send the e-mail"
-        title="E-mail them the Telegram link — the only channel that always has somewhere to go"
-        onclick="sendLeadEmail(${l.id})">${ICO_MAIL}</button>`:''}${l.mail_ready
-    ?`<button class="act-btn" type="button" aria-label="Write an e-mail"
-        title="Write your own e-mail — subject and text are yours, templates included"
-        onclick="openLeadMail(${l.id})">${ICO_PEN}</button>`:''}
+        target="_blank" rel="noopener" onclick="copyOpener(${l.id})">${ICO_PHONE}</a>`:''}
     <button class="act-btn" type="button" title="Copy the opener"
       aria-label="Copy the opener" onclick="copyOpener(${l.id})">${ICO_COPY}</button></span>`;
 }
 
-/* Ten sam prefiks, po którym backend wybiera grupę na Telegramie
-   (`telegram.lead_chat_id`) — free-* to inny koszt i inni ludzie do obsługi,
-   więc jedno źródło prawdy decyduje i o czacie, i o zakładce. */
-const isFreeLead=l=>String(l.source||'').toLowerCase().startsWith('free');
-/* Konto rozdaje się z listy dopiero w zakładce Free — kliknięcie zakłada
-   PRAWDZIWE konto MT5 i wysyła maila, więc nie ma prawa wisieć obok każdego
-   płatnego leada. Gdy konto już jest, przycisk ustępuje miejsca stanowi:
-   drugi grant i tak dostałby 409, ale klikać nie ma po co. */
-function leadFreeBtn(l){
-  return l.accounts>0
-    ?'<span class="muted" style="font-size:var(--fs-cap)" title="A challenge account has already been opened for this e-mail">🎁 account opened</span>'
-    :`<button class="btn-o sm" onclick="grantFreeAccount(${l.id})"
-        title="Open the free $25K challenge for them — real account, credentials by e-mail">🎁 Free account</button>`;
-}
-
-/* Dwa realne pudla w szukajce: nazwisko z ogonkiem i numer przepisany z
-   rozmowy. „Zielinski" ma znalezc „Zielinskiego", a „601 234 567" — zapisane
-   „+48601234567". Fold zdejmuje ogonki po OBU stronach, telefon porownuje sie
-   po samych cyfrach i od konca, bo kierunkowy bywa pominiety. */
-/* NFD rozklada wylacznie litery bedace "baza + znak diakrytyczny". Te piec to
-   osobne znaki alfabetu i przechodza przez fold nietkniete — bez mapy "Lukasz"
-   nie znajduje "Łukasza". Polskie ł jest tu obowiazkowe, reszta wchodzi przy
-   okazji, bo lista leadow jest miedzynarodowa. Zapis przez \\u..., bo te znaki
-   sa tu jedynym nie-ASCII w KODZIE i normalizacja pliku zjadlaby je po cichu. */
-const OSOBNE={'\u0142':'l','\u00f8':'o','\u00e6':'ae','\u00df':'ss','\u0131':'i'};
-const fold=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-  .toLowerCase().replace(/[\u0142\u00f8\u00e6\u00df\u0131]/g,c=>OSOBNE[c]);
-const digits=s=>String(s||'').replace(/\D/g,'');
-
-/* Kampania w jednej linijce: skad i ktora. utm_medium, utm_content i
-   identyfikator klikniecia zostaja w danych — sa w wyszukiwarce, ale nikt nie
-   dzieli budzetu po slowie „paid", a kazde dodatkowe pole spycha kontakt nizej.
-   Ruch bez oznaczenia daje pusty string, czyli nic sie nie rysuje: „brak
-   kampanii" to normalny stan, nie brak danych. */
-const campaignLabel=c=>[c&&c.utm_source,c&&c.utm_campaign].filter(Boolean).join(' / ');
-
 function renderLeads(){
   const list=window._leads||[];
   const q=(window._leadQ||'').toLowerCase();
-  /* Prog szesciu cyfr: krotszy fragment trafialby w polowe bazy i wyszukiwarka
-     mowilaby „jest ich pieciu" zamiast pokazac tego jednego. */
-  const qf=fold(q), qd=digits(q);
   const f=window._leadFilter||'all';
-  /* Burned leads live ONLY behind the Trash chip — every other filter works on
-     the living list, so a burned lead really is out of the way. */
-  const kosz=list.filter(l=>l.status==='burned');
-  const zywe=list.filter(l=>l.status!=='burned');
-  const baza=f==='burned'?kosz:zywe;
-  const rows=baza.filter(l=>
-    (f==='all'||f==='burned'||(f==='bought'?(l.paid_usd>0||l.bought)
+  const rows=list.filter(l=>
+    (f==='all'||(f==='bought'?(l.paid_usd>0||l.bought)
       :f==='due'?(l.next_due&&dueDays(l.next_due)<=0)
       :f==='mine'?l.owner===meMail()
-      :f==='free'?isFreeLead(l)
-      :f==='unowned'?!l.owner
+      :f==='free'?!l.owner
       :l.status===f))&&
-    (!q||fold(l.email).includes(qf)||fold(l.name).includes(qf)
-     ||fold(l.ref).includes(qf)||fold(l.note).includes(qf)
-     /* Po wartosciach, nie po kluczach: szuka sie „sierpien" albo wklejonego
-        fbclid, nigdy slowa „utm_campaign". */
-     ||fold(Object.values(l.campaign||{}).join(' ')).includes(qf)
-     ||fold('@'+String(l.telegram||'').replace(/^@/,'')).includes(qf)
-     ||(qd.length>=6&&digits(l.phone).endsWith(qd))));
-  /* Kolejność wpłynięcia, od najnowszego: świeży lead jest wart najwięcej i ma
-     być pierwszy, bez wyprzedzania przez zaległe follow-upy — te wołają o
-     siebie banerem i chipem „Due". */
-  rows.sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
-  /* Same rule as Orders: the numbers describe WHAT IS VISIBLE below them, so
+    (!q||(l.email||'').toLowerCase().includes(q)||(l.name||'').toLowerCase().includes(q)
+     ||(l.phone||'').includes(q)||(l.ref||'').toLowerCase().includes(q)));
+  /* Same rule as Orders: the tiles describe WHAT IS VISIBLE below them, so
      switching to "Rejected" cannot leave the full revenue sitting on top. */
-  /* „Bought" = zapłacone zamówienie ALBO ręczny przełącznik (deal poza sklepem);
+  /* „Bought" = zapłacone zamówienie ALBO ręczny checkbox (deal poza sklepem);
      przychód sumuje tylko realne zamówienia — ręczne oznaczenie nie niesie kwoty. */
   const bought=rows.filter(l=>l.paid_usd>0||l.bought);
   const revenue=bought.reduce((s,l)=>s+(l.paid_usd||0),0);
   const waiting=rows.filter(l=>l.status==='new').length;
+  const conv=rows.length?Math.round(bought.length/rows.length*100):0;
   /* Counted over the WHOLE list, not the filtered rows: a follow-up that came
      due is the one thing that must not hide behind the filter you left on. */
-  const due=zywe.filter(l=>l.next_due&&dueDays(l.next_due)<=0).length;
-  /* Statusy i „Unclaimed" filtruje się rzadziej niż Due/Mine/Bought/Free —
-     mieszkają w dolnym arkuszu pod jednym chipem, zamiast rozpychać toolbar do
-     12 chipów. Kosz ma własny chip, więc w arkuszu statusów go nie ma. */
-  const sheetActive=[...LEAD_STATUSES.filter(([k])=>k!=='burned'),['unowned','Unclaimed']]
-    .find(([k])=>k===f);
+  const due=list.filter(l=>l.next_due&&dueDays(l.next_due)<=0).length;
   $('view').innerHTML=`
-    ${due&&f!=='due'?`<button class="due-banner" onclick="window._leadFilter='due';renderLeads()">⏰ ${due} follow-up${due>1?'s':''} due — someone is waiting to hear back</button>`:''}
-    <div class="toolbar lead-toolbar">
-      ${searchBox('lead-q','_leadQ','renderLeads','Search name, email, phone or partner…')}
-      <div class="seg">${[['all','All'],['due','Due'],['mine','Mine'],['free','Free'],['bought','Bought']]
-        .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._leadFilter='${f===k?'all':k}';renderLeads()">${l}</button>`).join('')}
-        <button class="${sheetActive?'on':''}" onclick="${sheetActive?`window._leadFilter='all';renderLeads()`:'openLeadStatusSheet()'}">${sheetActive?sheetActive[1]:'Status ▾'}</button>
-        ${kosz.length?`<button class="${f==='burned'?'on':''}" title="Burned leads"
-          onclick="window._leadFilter='${f==='burned'?'all':'burned'}';renderLeads()">🗑 ${kosz.length}</button>`:''}</div>
-      <button class="btn-o sm" onclick="exportLeads(this)"
-        title="Every lead, the trash included, as a spreadsheet">↓ CSV</button>
-      <button class="btn-p sm" onclick="openNewLead()"
-        title="Somebody who wrote to us without filling the form">+ Add lead</button>
+    <div class="stats-row">
+      <div class="stat-tile ${due?'clickable':''}" ${due?`onclick="window._leadFilter='due';renderLeads()"`:''}>
+        <div class="tile-ic ${due?'orange':'blue'}">${ICO.alert}</div>
+        <div><div class="lbl">Follow-ups due</div><div class="val">${due}</div>
+          <div class="sub">${due?'someone is waiting to hear back':'nothing scheduled for today'}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic ${waiting?'orange':'blue'}">${ICO.alert}</div>
+        <div><div class="lbl">Nobody wrote yet</div><div class="val">${waiting}</div>
+          <div class="sub">of ${rows.length} shown</div></div></div>
+      <div class="stat-tile"><div class="tile-ic green">${ICO.dollar}</div>
+        <div><div class="lbl">Revenue from leads</div><div class="val">$${fmt0(revenue)}</div>
+          <div class="sub">${bought.length} bought</div></div></div>
+      <div class="stat-tile"><div class="tile-ic purple">${ICO.trend}</div>
+        <div><div class="lbl">Conversion</div><div class="val">${conv}%</div>
+          <div class="sub">lead to paid order</div></div></div>
     </div>
-    ${rows.length?`<p class="lead-statline">${rows.length}${rows.length!==baza.length?` of ${baza.length}`:''} lead${rows.length===1&&rows.length===baza.length?'':'s'}${f==='burned'?' in the trash':''}${
-        waiting?` · <span class="statlink" onclick="window._leadFilter='new';renderLeads()">${waiting} untouched</span>`:''} · ${bought.length} bought · $${fmt0(revenue)}</p>
-    <div class="tbl-wrap tw-wide lead-wrap rtbl-wrap"><table class="tbl sortable lead-tbl rtbl" data-tkey="admin.leads.v3">
-      <thead><tr><th>Date</th><th>Lead</th><th>Contact</th><th>Source</th>
+    <div class="toolbar">
+      ${searchBox('lead-q','_leadQ','renderLeads','Search name, email, phone or partner…')}
+      <div class="seg">${[['all','All'],['due','Due'],['mine','Mine'],['free','Free'],
+        ...LEAD_STATUSES,['bought','Bought']]
+        .map(([k,l])=>`<button class="${f===k?'on':''}" onclick="window._leadFilter='${k}';renderLeads()">${l}</button>`).join('')}</div>
+      <span class="count-pill">${rows.length} of ${list.length}</span>
+    </div>
+    ${rows.length?`<p class="muted" style="font-size:12.5px;margin-bottom:10px">Tap a row for the full history: every application with the answers given at the time, status changes and who made them — and the button that deletes it.</p>
+    <div class="tbl-wrap tw-wide lead-wrap"><table class="tbl sortable lead-tbl" data-tkey="admin.leads">
+      <thead><tr><th>Date</th><th>Lead</th><th>Contact</th><th>Grade</th><th>Source</th>
         <th>Status</th><th>Bought</th><th>Note</th></tr></thead>
-      <tbody>${rows.map(l=>`<tr class="clickable" onclick="if(event.target.closest('a,button,input,textarea,select'))return;openLead(${l.id})">
-        <td class="muted rt-hide" data-l="Date" data-sort="${esc(l.created_at||'')}">${dstr(l.created_at)}</td>
-        <td data-l="Lead" class="rt-main"><b>${esc(l.name||'—')}</b>${
-          l.tier?`<span class="g-dot" title="${esc(l.tier)} ${l.score}&#10;${esc(leadAnswers(l.answers))}">${l.tier==='high'?'🔥':l.tier==='warm'?'🟡':'⚪️'}</span>`:''}
-          <span class="lead-when">${dstr(l.created_at)}</span>
-          ${l.owner?`<div style="font-size:var(--fs-cap)" title="Taken by">👤 ${esc(l.owner)}</div>`:''}
-          ${l.applications>1?`<div class="muted" style="font-size:var(--fs-cap)" title="Filled the form more than once">↻ applied ${l.applications}×</div>`:''}
-          ${l.outcome==='not_qualified'?`<div class="muted" style="font-size:var(--fs-cap)">${
+      <tbody>${rows.map(l=>`<tr class="clickable" onclick="openLead(${l.id})">
+        <td class="muted" data-l="Date" data-sort="${esc(l.created_at||'')}">${dstr(l.created_at)}</td>
+        <td data-l="Lead"><b>${esc(l.name||'—')}</b>
+          ${l.owner?`<div style="font-size:11px" title="Taken by">👤 ${esc(l.owner)}</div>`
+            :'<div class="muted" style="font-size:11px">nobody took it</div>'}
+          ${l.applications>1?`<div class="muted" style="font-size:11px" title="Filled the form more than once">↻ applied ${l.applications}×</div>`:''}
+          ${l.outcome==='not_qualified'?`<div class="muted" style="font-size:11px">${
             l.source==='safe'?'safe page lead — warm up':'failed the questionnaire'}</div>`:''}</td>
-        <td data-l="Contact">${l.telegram?`<div>${leadTgLink(l)}</div>`:''}
+        <td data-l="Contact" onclick="event.stopPropagation()"><a href="mailto:${esc(l.email)}">${esc(l.email)}</a>
+          ${l.telegram?`<div>${leadTgLink(l)}</div>`:''}
           ${l.phone?`<div class="muted lead-ph"><a href="tel:${esc(l.phone)}">${esc(l.phone)}</a>${
             l.phone_iso?` ${esc(l.phone_iso)}`:''}</div>`:''}
-          ${l.phone||l.telegram||l.mail_ready?`<div class="lead-act-row">${leadPhoneActs(l)}</div>`:''}</td>
-        <td class="muted" data-l="Source">${esc(l.source||'—')}${
-          isFreeLead(l)?' <span title="Free challenge funnel — no money changes hands">🆓</span>':''}${
-          l.ref?`<div style="font-size:var(--fs-cap)">via ${esc(l.ref)}</div>`:''}${
-          campaignLabel(l.campaign)?`<div style="font-size:var(--fs-cap)" title="${
-            esc(Object.entries(l.campaign).map(([k,v])=>k+'='+v).join('\n'))
-          }">ad: ${esc(campaignLabel(l.campaign))}</div>`:''}${
-          f==='free'?`<div class="lead-act-row">${leadFreeBtn(l)}</div>`:''}</td>
-        <td data-l="Status"><button type="button" class="status status-tap ${LEAD_STATUS_CLS[l.status]||'pending'}"
-            aria-label="Change status" title="${l.lost_reason?esc(lostLabel(l.lost_reason)):'Change status'}"
-            onclick="openLeadStatusFor(${l.id})"><span class="dot"></span>${esc(leadLabel(l.status))}</button>
+          ${l.phone||l.telegram?`<div class="lead-ph">${leadPhoneActs(l)}</div>`:''}</td>
+        <td data-l="Grade" data-sort="${l.score||0}" title="${esc(leadAnswers(l.answers))}">${l.tier?`<span class="status ${l.tier==='high'?'paid':l.tier==='warm'?'pending':'failed'}"><span class="dot"></span>${esc(l.tier)} ${l.score}</span>`:'<span class="muted">—</span>'}</td>
+        <td class="muted" data-l="Source">${esc(l.source||'—')}${l.ref?`<div style="font-size:11px">via ${esc(l.ref)}</div>`:''}</td>
+        <td data-l="Status" onclick="event.stopPropagation()"><select class="inp sm st-${esc(l.status)}" style="min-width:116px" onchange="setLeadStatus(${l.id},this.value)">${
+          LEAD_STATUSES.map(([k,lab])=>`<option value="${k}"${l.status===k?' selected':''}>${lab}</option>`).join('')}</select>
           ${l.next_due?`<div class="due ${dueDays(l.next_due)<=0?'now':''}">⏰ ${dueLabel(l.next_due)}</div>`
-            :l.owner&&(l.status==='messaged'||l.status==='replied')?'<div class="due now">no next step</div>'
-            :l.contacted_at?`<div class="muted" style="font-size:var(--fs-cap)">${dstr(l.contacted_at)}</div>`:''}</td>
-        <td class="num" data-l="Bought" data-sort="${l.paid_usd>0?l.paid_usd:l.bought?0.5:0}">${
+            :l.contacted_at?`<div class="muted" style="font-size:11px">${dstr(l.contacted_at)}</div>`:''}</td>
+        <td class="num" data-l="Bought" data-sort="${l.paid_usd>0?l.paid_usd:l.bought?0.5:0}" onclick="event.stopPropagation()">${
           l.paid_usd>0?`<span class="status paid"><span class="dot"></span>$${fmt0(l.paid_usd)}</span>`
-          :l.bought?'<span class="status paid"><span class="dot"></span>bought</span>'
-          :'<span class="muted no-buy">—</span>'}</td>
-        <td data-l="Note" class="muted lead-note" title="${esc(l.note||'')}">${esc((l.note||'').split('\n')[0])}</td></tr>`).join('')}
+          :`<input type="checkbox" class="bought-cb" ${l.bought?'checked':''}
+              title="Mark as bought — deal closed outside the store" aria-label="Bought"
+              onchange="setLeadBought(${l.id},this.checked)">`}</td>
+        <td data-l="Note" onclick="event.stopPropagation()"><input class="inp sm" style="min-width:170px" value="${esc(l.note||'')}"
+          placeholder="Add a note…" onchange="setLeadNote(${l.id},this.value)"></td></tr>`).join('')}
       </tbody></table></div>`
       :`<div class="empty"><h3>${list.length?'No leads match':'No leads yet'}</h3>
         <p>${list.length?'Try a different search or filter.':'Applications from the landing page land here.'}</p></div>`}`;
 }
 
-/* Filtr po statusie w dolnym arkuszu (ten sam #act-sheet co long-press):
-   pięć statusów + „Unclaimed" rozpychało toolbar do jedenastu chipów, a
-   filtruje się nimi rzadziej niż Due/Mine/Bought/Free. Wybrany wraca do
-   toolbara jako chip z ✕ w miejscu „Status ▾". */
-function openLeadStatusSheet(){
-  if(document.getElementById('act-sheet'))return;
-  const veil=document.createElement('div');veil.id='act-veil';veil.className='sheet-veil';
-  veil.onclick=closeActSheet;
-  const s=document.createElement('div');s.id='act-sheet';s.className='sheet';
-  s.innerHTML=`<div class="sheet-grab"></div><div class="act-sheet-title">Filter by status</div>
-    <div class="act-sheet-list">${[...LEAD_STATUSES.filter(([k])=>k!=='burned'),['unowned','Unclaimed — nobody took it']]
-      .map(([k,lab])=>`<button class="btn-o" onclick="window._leadFilter='${k}';renderLeads();closeActSheet()">${lab}</button>`).join('')}</div>`;
-  document.body.append(veil,s);
-  requestAnimationFrame(()=>s.classList.add('open'));
-}
-
-/* Tap w pigułkę statusu na wierszu: arkusz zmiany statusu TEGO leada.
-   Zmiana z listy była możliwa tylko przez szufladę albo long-press, którego
-   nie widać — pigułka jest na wierzchu i sama zapowiada, co się stanie. */
-function openLeadStatusFor(id){
-  if(document.getElementById('act-sheet'))return;
-  const l=(window._leads||[]).find(x=>x.id===id);
-  if(!l)return;
-  const veil=document.createElement('div');veil.id='act-veil';veil.className='sheet-veil';
-  veil.onclick=closeActSheet;
-  const s=document.createElement('div');s.id='act-sheet';s.className='sheet';
-  s.innerHTML=`<div class="sheet-grab"></div>
-    <div class="act-sheet-title">${esc(l.name||l.email||'Lead')} — status</div>
-    <div class="act-sheet-list">${LEAD_STATUSES.map(([k,lab])=>
-      `<button class="${l.status===k?'btn-p':k==='burned'?'btn-danger':'btn-o'}"
-        onclick="setLeadStatus(${id},'${k}')">${k==='burned'?'🔥 Burned — to trash':lab}${l.status===k?' ✓':''}</button>`).join('')}</div>`;
-  document.body.append(veil,s);
-  requestAnimationFrame(()=>s.classList.add('open'));
-}
-
-/* Drugi krok po „Rejected"/„Burned". Status NIE jest jeszcze zapisany — idzie
-   razem z powodem w jednym żądaniu, więc zamknięty arkusz zostawia leada tam,
-   gdzie był: na roboczej liście. Ten kierunek jest celowy. Lead widoczny o jeden
-   klik za dużo kosztuje klik; lead, który po cichu zjechał do kosza, kosztuje
-   leada. Na Telegramie jest odwrotnie — tam status zapisuje pierwszy tap, bo
-   ktoś odkłada telefon w połowie i to jego chcemy uratować. */
-function askLostReason(id,status){
-  const l=leadNow(id)||{};
-  const tresc=`<div class="sheet-grab"></div>
-    <div class="act-sheet-title">${esc(l.name||l.email||'Lead')} — why did we lose them?</div>
-    <div class="act-sheet-list">${LOST_REASONS.map(([k,lab])=>
-      `<button class="btn-o" onclick="setLeadStatus(${id},'${status}','${k}')">${lab}</button>`).join('')}</div>`;
-  /* Przerysowanie OTWARTEGO arkusza zamiast drugiego obok: to ten sam wybór,
-     krok dalej. `closeActSheet` sprząta swój dopiero po animacji, więc nowy
-     i tak nie miałby się gdzie zmieścić. */
-  const otwarty=document.getElementById('act-sheet');
-  if(otwarty){otwarty.innerHTML=tresc;return}
-  const veil=document.createElement('div');veil.id='act-veil';veil.className='sheet-veil';
-  veil.onclick=closeActSheet;
-  const s=document.createElement('div');s.id='act-sheet';s.className='sheet';
-  s.innerHTML=tresc;
-  document.body.append(veil,s);
-  requestAnimationFrame(()=>s.classList.add('open'));
-}
-
-/* Szuflada jest świeższa od wiersza (przyszła z osobnego zapytania), ale przy
-   deep-linku wiersza może nie być wcale, a przy widoku listy — szuflady. */
-const leadNow=id=>(window._leadOpen&&window._leadOpen.id===id?window._leadOpen:null)
-  ||(window._leads||[]).find(x=>x.id===id)||null;
-
-/* Jeden zapis statusu dla listy i szuflady. Jak patchLead, ale bez otwierania
-   szuflady — akcja z listy ma zostawić admina na liście. Szuflada odświeża się
-   tylko, gdy akurat wisi na tym leadzie. */
-async function setLeadStatus(id,status,reason){
-  const row=(window._leads||[]).find(x=>x.id===id);
-  const teraz=leadNow(id);
-  /* Powodu nie pytamy drugi raz przy `rejected` ↔ `burned`: to dwa odcienie
-     tej samej decyzji, a nie nowa. Arkusza tu NIE zamykamy — przerysowuje się
-     na drugi krok. */
-  if(reason===undefined&&LOST_STATUSES.includes(status)&&!(teraz&&teraz.lost_reason))
-    return askLostReason(id,status);
-  closeActSheet();
-  if(teraz&&teraz.status===status&&reason===undefined)return;
-  const patch=reason===undefined?{status}:{status,lost_reason:reason};
+/* Both writers patch the row in memory instead of refetching the list: the admin
+   is usually working down a long table and a full re-render would throw away
+   their scroll position and whatever they were typing in the next note. */
+async function setLeadStatus(id,status){
   try{
-    await api('/api/admin/leads/'+id,{method:'POST',body:JSON.stringify(patch)});
-    if(row){row.status=status;
-      if(reason!==undefined)row.lost_reason=reason;
-      /* Backend gasi przypomnienia przy spaleniu — bez tego lokalna lista
-         pokazywalaby "⏰ in 7d" na leadzie lezacym w koszu az do refetchu. */
-      if(status==='burned')row.next_due=null}
-    if(VIEW==='leads')renderLeads();
-    if(window._leadOpen&&window._leadOpen.id===id)await openLead(id);
-    toast((status==='burned'?'Moved to trash':'Marked as '+leadLabel(status))
-      +(reason===undefined?'':' — '+lostLabel(reason)));
+    const d=await api('/api/admin/leads/'+id,{method:'POST',body:JSON.stringify({status})});
+    const row=(window._leads||[]).find(l=>l.id===id);
+    if(row){row.status=d.status;row.contacted_at=d.contacted_at}
+    toast('Marked as '+leadLabel(status));
+    if(window._leadFilter&&window._leadFilter!=='all')renderLeads();
+  }catch(e){toast('Error: '+e.message,'err');VIEWS.leads()}
+}
+
+async function setLeadNote(id,note){
+  try{
+    await api('/api/admin/leads/'+id,{method:'POST',body:JSON.stringify({note})});
+    const row=(window._leads||[]).find(l=>l.id===id);
+    if(row)row.note=note;
+    toast('Note saved');
   }catch(e){toast('Error: '+e.message,'err')}
+}
+
+/* Ręczne „kupił" — dla deali zamkniętych poza sklepem (przelew, Telegram).
+   Zapłacone zamówienie na ten sam mail i tak liczy się samo i pokazuje kwotę;
+   checkbox istnieje dokładnie dla zakupów, których sklep nie widzi. */
+async function setLeadBought(id,on){
+  try{
+    await api('/api/admin/leads/'+id,{method:'POST',body:JSON.stringify({bought:on})});
+    const row=(window._leads||[]).find(l=>l.id===id);
+    if(row)row.bought=on;
+    toast(on?'Marked as bought':'Unmarked');
+    if(window._leadFilter==='bought')renderLeads();
+  }catch(e){toast('Error: '+e.message,'err');VIEWS.leads()}
 }
 
 /* Who is sitting at the panel = the signed-in admin account. Leads are owned
@@ -1827,9 +1083,7 @@ function deleteLead(id){
   const przywroc=()=>{window._leads=lista;if(VIEW==='leads')renderLeads()};
   withUndo(`Deleting lead ${kto}`,async()=>{
     try{
-      /* keepalive jak w xdel: DELETE idzie 5 s po kliknieciu — zamkniecie
-         karty w tym oknie nie moze zgubic zadania. */
-      await api('/api/admin/leads/'+id,{method:'DELETE',keepalive:true});
+      await api('/api/admin/leads/'+id,{method:'DELETE'});
     }catch(e){
       toast('Error: '+e.message,'err');
       przywroc();
@@ -1843,10 +1097,9 @@ function deleteLead(id){
    application overwrites the first and only the counter survives. Every write
    also lands in lead_events, and that is what gets read back here. */
 const LEAD_STATUS_CLS={new:'pending',messaged:'pending',replied:'paid',
-  no_reply:'failed',rejected:'failed',burned:'failed'};
+  no_reply:'failed',rejected:'failed'};
 const LEAD_EVENT_LBL={applied:'Applied',status:'Status',note:'Note',reminder:'Reminder',
-  claim:'Owner',tier:'Grade',bought:'Bought',sms:'Text sent',email:'E-mail sent',
-  granted:'Free account'};
+  claim:'Owner',tier:'Grade',bought:'Bought'};
 /* Reminders are sent to US, never to the lead — the landing they applied through
    is a separate brand. The wording says who is being nudged. */
 const LEAD_REMINDER_LBL={no_contact:'Nobody wrote to them yet',bought:'Bought — stop treating as a lead',
@@ -1854,18 +1107,13 @@ const LEAD_REMINDER_LBL={no_contact:'Nobody wrote to them yet',bought:'Bought �
 
 function leadEventDetail(e){
   if(e.kind==='reminder')return LEAD_REMINDER_LBL[e.detail]||e.detail.replace(/^planned: /,'');
-  /* Kind 'status' niesie dwie rzeczy: przejście „new → rejected" i powód
-     „lost: price". Kody idą do bazy po angielsku i tak samo wyglądają w CSV —
-     historia ma pokazać to, co widać na przyciskach. */
-  if(e.kind==='status'&&e.detail.startsWith('lost: '))
-    return 'Lost — '+lostLabel(e.detail.slice(6));
   if(e.kind==='status')return e.detail.split('→').map(s=>leadLabel(s.trim())).join(' → ');
   return e.detail;
 }
 
 /* Whole days, not hours: a reminder set for Friday is "in 2 days" all Wednesday
    long, and "3 hours overdue" is not a thing anyone acts on differently. */
-const dueDays=iso=>{const a=dutc(iso),b=new Date();
+const dueDays=iso=>{const a=new Date(iso),b=new Date();
   a.setHours(0,0,0,0);b.setHours(0,0,0,0);return Math.round((a-b)/86400000)};
 const dueLabel=iso=>{const d=dueDays(iso);
   return d<0?`${-d}d overdue`:d===0?'due today':d===1?'tomorrow':`in ${d}d`};
@@ -1906,153 +1154,15 @@ function leadModCard(l){
       <div><div class="lbl">Where it stands</div>
         <div class="muted" style="font-size:11.5px">we wrote → they answered → it went quiet, or they are out</div></div>
       <div class="seg wrap">${LEAD_STATUSES.map(([k,lab])=>
-        `<button class="${l.status===k?'on':''}" onclick="setLeadStatus(${l.id},'${k}')">${lab}</button>`).join('')}</div>
+        `<button class="${l.status===k?'on':''}" onclick="patchLead(${l.id},{status:'${k}'},'Marked as ${lab}')">${lab}</button>`).join('')}</div>
     </div>
-    ${l.lost_reason?`<div class="mod-row">
-      <div><div class="lbl">Why we lost them</div>
-        <div class="muted" style="font-size:11.5px">the one thing a report can answer with "why"</div></div>
-      <div class="seg wrap">${LOST_REASONS.map(([k,lab])=>
-        `<button class="${l.lost_reason===k?'on':''}" onclick="patchLead(${l.id},{lost_reason:'${k}'},'Reason: ${k}')">${lab}</button>`).join('')}</div>
-    </div>`:''}
     <div class="mod-row">
       <div><div class="lbl">Grade</div>
         <div class="muted" style="font-size:11.5px">scored from the form — correct it once you have talked</div></div>
       <div class="seg wrap">${grades.map(([k,lab])=>
         `<button class="${l.tier===k?'on':''}" onclick="patchLead(${l.id},{tier:'${k}'},'Grade set to ${k}')">${lab}</button>`).join('')}</div>
     </div>
-    ${l.paid_usd>0?'':`<div class="mod-row">
-      <div><div class="lbl">Bought</div>
-        <div class="muted" style="font-size:11.5px">deal closed outside the store — a paid order counts itself</div></div>
-      <div class="mod-btns"><button class="btn-o" onclick="patchLead(${l.id},{bought:${!l.bought}},'${
-        l.bought?'Unmarked':'Marked as bought'}')">${l.bought?'Bought ✓ — unmark':'Mark as bought'}</button></div>
-    </div>`}
   </div>`;
-}
-
-/* Closing the sale, from the same screen as the conversation. The Orders tab
-   cannot do this one: it picks a customer from the list of accounts, and a lead
-   has none until somebody pays. */
-function leadSellCard(l){
-  return `<div class="lead-card sec-card">
-    <div class="mod-row">
-      <div><div class="lbl">Sell a challenge</div>
-        <div class="muted" style="font-size:11.5px">Opens an unpaid order and copies a card payment link to send them.</div></div>
-      <button class="btn-p" onclick="sellToLead()">Payment link</button>
-    </div>
-  </div>`;
-}
-function sellToLead(){
-  const l=window._leadOpen;
-  if(!l)return;
-  openManualOrder(null,{id:l.id,email:l.email,name:l.name});
-}
-
-/* Druga strona tej samej szuflady: leadowi z free nic się nie sprzedaje, tylko
-   wydaje obiecane konto. Warunku nie sprawdza panel — obietnica z landingu bywa
-   rozliczana ręcznie w rozmowie, więc decyzję podejmuje człowiek, a ekran tylko
-   pilnuje, żeby wiedział, co klika. */
-function leadFreeCard(l){
-  if(!isFreeLead(l))return'';
-  const jest=l.accounts>0;
-  return `<div class="lead-card sec-card">
-    <div class="mod-row">
-      <div><div class="lbl">Free challenge</div>
-        <div class="muted" style="font-size:11.5px">${jest
-          ?'They already have a challenge account on this e-mail — nothing left to hand out here.'
-          :'Opens a real 2-step $25K account and e-mails the login with a link to set the password.'}</div></div>
-      ${jest?'<span class="status paid"><span class="dot"></span>account opened</span>'
-        :`<button class="btn-p" onclick="grantFreeAccount(${l.id})">🎁 Free account</button>`}
-    </div>
-  </div>`;
-}
-/* Nie ma cofnięcia: za oknem potwierdzenia jedzie konto MT5 z puli i mail do
-   klienta. Dlatego pytanie mówi wprost, na jaki adres to leci. */
-async function grantFreeAccount(id){
-  const l=(window._leads||[]).find(x=>x.id===id)
-    ||(window._leadOpen&&window._leadOpen.id===id?window._leadOpen:{});
-  if(!await askConfirm({title:'Open the free $25K account?',
-    body:`<b>${esc(l.email||'')}</b> gets a real 2-step $25K challenge account and an `
-      +`e-mail with the login and a “set your password” link. This is the same thing `
-      +`a paid order does — there is no undo from here.`,ok:'Open the account'}))return;
-  try{
-    const r=await api('/api/admin/leads/'+id+'/free-account',{method:'POST'});
-    toast(r.login?`Account ${r.login} is live — credentials e-mailed.`:'Account opened.');
-    if(VIEW==='leads')await VIEWS.leads();
-    openLead(id);
-  }catch(e){toast('Not opened: '+e.message,'err')}
-}
-
-/* Konto założone ZA klienta nie ma hasła znanego komukolwiek — pierwszy link
-   „ustaw hasło" jedzie w mailu z poświadczeniami, ale żyje 7 dni. Ta karta to
-   druga szansa: świeży link bez przepychania klienta przez „forgot password".
-   „Copy link" jest tu nie dla wygody, tylko na wypadek, gdy MAIL jest
-   problemem (spam, literówka w adresie, cicha awaria SMTP) — wtedy link
-   idzie klientowi na Telegramie z ręki. Karta znika, gdy klient hasło
-   ustawi — wtedy panel nie ma tu nic do roboty. */
-function inviteRow(tid,ctx){
-  return `<div class="mod-row">
-      <div><div class="lbl">Portal access</div>
-        <div class="muted" style="font-size:11.5px">We opened this account for them and no password has been set yet. Send a fresh “set your password” link (valid 7 days) — or copy it and deliver it yourself when e-mail is the problem.</div></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-        <button class="btn-o" onclick="copyPortalInvite(${tid})"
-          title="Generates the link without sending anything — paste it to the client on Telegram or SMS">Copy link</button>
-        <button class="btn-p" onclick="sendPortalInvite(${tid},'${ctx}')">Send invite</button>
-      </div>
-    </div>`;
-}
-/* Przy stanie innym niz „awaiting" zaproszenia nie wygenerujemy — serwer nie da
-   wejsciowki na konto z zywym haslem (`portal-invite` odmawia) i slusznie. Ale pusta
-   szuflada kazala dzialowi zgadywac, czemu przycisku nie ma, wiec kazdy stan
-   mowi tu o sobie. Dla „password" zostaje droga bezpieczna: reset idzie
-   WYLACZNIE na adres klienta, panel linku nie oglada. */
-function leadInviteCard(l){
-  if(!l.trader_id)return'';
-  const st=l.portal_state||(l.must_set_password?'awaiting':'password');
-  if(st==='awaiting')return`<div class="lead-card sec-card">${inviteRow(l.trader_id,'lead')}</div>`;
-  const opis=st==='google'
-    ?'Signs in with Google — no portal password needed.'
-    :'Portal password already set. If they cannot get in, send them a reset link.';
-  return `<div class="lead-card sec-card"><div class="mod-row">
-      <div><div class="lbl">Portal access</div>
-        <div class="muted" style="font-size:11.5px">${opis}</div></div>
-      ${st==='google'?'':`<div style="display:flex;justify-content:flex-end">
-        <button class="btn-o" onclick="sendLeadReset()">Send reset e-mail</button></div>`}
-    </div></div>`;
-}
-async function sendLeadReset(){
-  const l=window._leadOpen;if(!l)return;
-  if(!await askConfirm({title:'Send a password reset?',
-    body:`Goes to <b>${esc(l.email)}</b> — a link to choose a new portal password, `
-      +`valid for 1 hour. The link never passes through this panel.`,
-    ok:'Send',cancel:'Not now'}))return;
-  try{await api('/api/auth/forgot',{method:'POST',body:JSON.stringify({email:l.email})})}
-  catch(e){toast('Not sent: '+e.message,'err');return}
-  toast('Reset e-mail sent — the link works for 1 hour');
-}
-async function sendPortalInvite(tid,ctx){
-  const email=ctx==='lead'&&window._leadOpen?window._leadOpen.email
-    :(window._oAcc&&window._oAcc.trader_email)||'';
-  if(!await askConfirm({title:'Send the portal invite?',
-    body:`Goes to <b>${esc(email)}</b> — a link to set their portal password, `
-      +`valid for 7 days. Earlier links keep working until they expire or the `
-      +`password is set.`,
-    ok:'Send',cancel:'Not now'}))return;
-  try{await api('/api/admin/traders/'+tid+'/portal-invite',{method:'POST'})}
-  catch(e){toast('Not sent: '+e.message,'err');return}
-  toast('Invite sent — the link works for 7 days');
-  if(ctx==='lead'&&window._leadOpen)openLead(window._leadOpen.id);
-}
-async function copyPortalInvite(tid){
-  let d;
-  try{d=await api('/api/admin/traders/'+tid+'/portal-invite?send=false',{method:'POST'})}
-  catch(e){toast('Error: '+e.message,'err');return}
-  try{await navigator.clipboard.writeText(d.setup_url);
-    toast('Link copied — valid 7 days, works once')}
-  catch(e){
-    /* iOS poza gestem albo http: schowek odmawia — link ma być widoczny,
-       skoro już powstał i został odnotowany w historii leada. */
-    await askConfirm({title:'Copy this link',body:`<span class="mono" style="word-break:break-all;font-size:12px">${esc(d.setup_url)}</span>`,ok:'Done'});
-  }
 }
 
 /* Osobna karta na dole, nie przycisk obok „Release": to jedyna operacja w tej
@@ -2081,12 +1191,11 @@ function leadReminderCard(l){
         <div class="rem-txt"><div>${esc(r.text)}</div>
           <div class="muted">${dueLabel(r.due_at)}${r.repeat_days?` · repeats every ${r.repeat_days}d`:''}${
             r.sent_count?` · sent ${r.sent_count}×`:''}${r.created_by==='cron'?' · automatic':''}</div></div>
-        ${XBTN(`cancelLeadReminder(${l.id},${r.id})`,'Done — dismiss this follow-up')}
+        ${XBTN(`cancelLeadReminder(${l.id},${r.id})`,'Cancel this reminder')}
       </div>`).join('')}</div>`:'<p class="muted" style="font-size:12.5px">Nothing scheduled.</p>'}
-    <div class="chip-row rem-presets">${REMINDER_PRESETS.map(([lab,days,,text],i)=>
-      `<button class="chip preset" title="${esc(text)} — in ${days}d"
-        onclick="schedulePreset(${l.id},${i})">${lab} · ${days}d</button>`).join('')}</div>
-    <input id="rem-text" class="inp sm" placeholder="Or in your own words…">
+    <div class="chip-row rem-presets">${REMINDER_PRESETS.map(([lab],i)=>
+      `<button class="chip preset" onclick="pickPreset(${i})">${lab}</button>`).join('')}</div>
+    <input id="rem-text" class="inp sm" placeholder="What needs doing, in your own words…">
     <div class="rem-when">
       <label>in <input id="rem-days" class="inp sm" type="number" min="0" max="365" value="3"> days</label>
       <label title="Keeps nudging on the same cycle until you cancel it">
@@ -2100,20 +1209,9 @@ function leadReminderCard(l){
   </div>`;
 }
 
-/* Chip presetu od razu planuje: jeden dotyk zamiast „wypełnij → przewiń →
-   Schedule". POST zwraca id, więc Undo kasuje przez istniejący endpoint
-   cancel. Własny tekst i nietypowy termin dalej idą przez formularz niżej. */
-async function schedulePreset(id,i){
-  const [lab,days,rep,text]=REMINDER_PRESETS[i];
-  try{
-    const r=await api(`/api/admin/leads/${id}/reminders`,
-      {method:'POST',body:JSON.stringify({text,due_in_days:days,repeat_days:rep>0?rep:null})});
-    await openLead(id);renderLeads();
-    undoToast(`${lab} — in ${days}d${rep>0?`, repeats every ${rep}d`:''}.`,async()=>{
-      await api(`/api/admin/leads/${id}/reminders/${r.id}/cancel`,{method:'POST'});
-      await openLead(id);renderLeads();
-    });
-  }catch(e){toast('Error: '+e.message,'err')}
+function pickPreset(i){
+  const [,days,rep,text]=REMINDER_PRESETS[i];
+  $('rem-text').value=text;$('rem-days').value=days;$('rem-rep').checked=rep>0;
 }
 
 async function addLeadReminder(id){
@@ -2135,126 +1233,9 @@ async function addLeadReminder(id){
 async function cancelLeadReminder(id,rid){
   try{
     await api(`/api/admin/leads/${id}/reminders/${rid}/cancel`,{method:'POST'});
+    toast('Reminder cancelled');
     await openLead(id);renderLeads();
-    /* Ten sam wzorzec co przy planowaniu presetem: cancel nie kasuje wiersza,
-       wiec Undo po prostu zapala go z powrotem — z licznikiem i terminem. */
-    undoToast('Reminder dismissed.',async()=>{
-      await api(`/api/admin/leads/${id}/reminders/${rid}/reactivate`,{method:'POST'});
-      await openLead(id);renderLeads();
-    });
   }catch(e){toast('Error: '+e.message,'err')}
-}
-
-/* Pobranie idzie przez fetch, nie przez zwykły <a href>: autoryzacja panelu
-   siedzi w nagłówku, a link nie ma jak go donieść — dostałby 403. Nazwę pliku
-   podaje serwer, więc data w nazwie jest warszawska tak samo jak daty w środku. */
-async function exportLeads(btn){
-  const napis=btn.textContent;
-  btn.disabled=true;btn.textContent='…';
-  try{
-    const r=await fetch('/api/admin/leads.csv',{headers:adminH()});
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    const zNaglowka=(r.headers.get('content-disposition')||'').match(/filename="([^"]+)"/);
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(await r.blob());
-    a.download=zNaglowka?zNaglowka[1]:'leads.csv';
-    document.body.append(a);a.click();a.remove();
-    /* Zwolnienie adresu od razu po click() potrafi uciąć pobieranie, które
-       jeszcze się nie zaczęło — stąd odroczenie zamiast revoke w tej samej
-       linijce. */
-    setTimeout(()=>URL.revokeObjectURL(a.href),10000);
-    toast('Exported.');
-  }catch(e){toast('Export failed: '+e.message,'err')}
-  finally{btn.disabled=false;btn.textContent=napis}
-}
-
-/* Leada wpisanego z ręki nie da się dziś dodać nigdzie indziej: kto napisał na
-   Telegramie prosto z reklamy, nie ma ani konta, ani wiersza w tabeli leadów. */
-function openNewLead(){
-  document.getElementById('lead-modal')?.remove();
-  const box=document.createElement('div');
-  box.id='lead-modal';box.className='modal-wrap';
-  box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
-    <div class="modal-head"><h3>Add lead</h3>
-      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('lead-modal').remove()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
-    <p class="muted" style="font-size:12.5px;margin-bottom:14px">For somebody who reached us without the form — a reply to an ad, a message on Telegram.
-      They land in the same list as everyone else, with history, reminders and the card on the channel.</p>
-    <div class="stack">
-      <div><label class="muted" style="font-size:12px">E-mail</label>
-        <input id="nl-email" class="inp" type="email" inputmode="email" autocapitalize="off"
-          spellcheck="false" placeholder="name@example.com"></div>
-      <div><label class="muted" style="font-size:12px">Full name</label>
-        <input id="nl-name" class="inp" placeholder="Optional"></div>
-      <div><label class="muted" style="font-size:12px">Phone</label>
-        <input id="nl-phone" class="inp" type="tel" inputmode="tel" placeholder="+48 601 234 567"></div>
-      <div><label class="muted" style="font-size:12px">Telegram</label>
-        <input id="nl-telegram" class="inp" autocapitalize="off" spellcheck="false" placeholder="@handle"></div>
-      <div><label class="muted" style="font-size:12px">Country</label>
-        <input id="nl-country" class="inp" placeholder="Optional"></div>
-      <div><label class="muted" style="font-size:12px">First note</label>
-        <textarea id="nl-note" class="inp" rows="3" placeholder="What they wrote, what they want"></textarea></div>
-      <button class="btn-p lg" style="width:100%" id="nl-go" onclick="submitNewLead()">Add lead</button>
-      <p class="hint">Marked as <b>manual</b>, so the landing page conversion keeps counting only the people it actually brought in.</p>
-    </div></div>`;
-  box.onclick=()=>box.remove();
-  document.body.appendChild(box);
-  $('nl-email').focus();
-}
-
-async function submitNewLead(){
-  const email=$('nl-email').value.trim();
-  if(!email){toast('E-mail is required.','err');$('nl-email').focus();return}
-  const btn=$('nl-go');btn.disabled=true;
-  try{
-    const r=await api('/api/admin/leads',{method:'POST',body:JSON.stringify({
-      email,name:$('nl-name').value.trim(),phone:$('nl-phone').value.trim(),
-      telegram:$('nl-telegram').value.trim(),country:$('nl-country').value.trim(),
-      note:$('nl-note').value.trim()})});
-    document.getElementById('lead-modal')?.remove();
-    /* Ten mail już jest — otwieramy tamtą kartę zamiast udawać, że dodaliśmy
-       nowego. Kto go prowadzi, jest tu najważniejsze: bez tego dwie osoby piszą
-       do tego samego człowieka. */
-    if(r.existing)toast(r.owner?`Already in the list — ${r.owner} is on it.`
-      :'Already in the list, nobody took it yet.','warn',7000);
-    else toast('Lead added.');
-    await VIEWS.leads();
-    openLead(r.id);
-  }catch(e){toast('Error: '+e.message,'err');btn.disabled=false}
-}
-
-/* Notatka to jedyne pole ze streszczeniem ROZMOWY — nie da sie jej odtworzyc
-   z niczego innego w bazie. Zapis szedl na `onchange`, wiec wygasla sesja,
-   brak zasiegu albo przypadkowe zamkniecie szuflady kasowaly ja bez sladu;
-   pasek offline sam przyznaje, ze zmiany przepadna. Kopia lezy lokalnie od
-   pierwszego znaku i znika DOPIERO, gdy serwer potwierdzi zapis.
-
-   Safari w trybie prywatnym rzuca z `localStorage` — wtedy pole ma zachowac
-   sie jak dotad, a nie zabrac ze soba zapisu notatki.
-
-   Deklaracje funkcji, nie obiekt w `const`: `oninput` w atrybucie siega po
-   nazwe do obiektu globalnego, a `const` na nim nie laduje. */
-function noteKey(id){return 'leadnote:'+id}
-function draftNote(id,v){try{localStorage.setItem(noteKey(id),v)}catch(e){}}
-function dropNote(id){try{localStorage.removeItem(noteKey(id))}catch(e){}}
-function noteText(l){
-  try{const v=localStorage.getItem(noteKey(l.id));return v===null?(l.note||''):v}
-  catch(e){return l.note||''}
-}
-
-/* Osobno od `patchLead`, bo tamten zjada blad w swoim `catch` i wolajacy nie
-   odrozni zapisanego od przepadnietego — a od tego zalezy, czy wolno skasowac
-   kopie. Czyscimy PRZED `openLead`, inaczej przerysowana szuflada wczytalaby
-   wlasny nieaktualny draft z powrotem. */
-async function saveLeadNote(id,val){
-  try{
-    await api('/api/admin/leads/'+id,
-      {method:'POST',body:JSON.stringify({note:val.trim()})});
-    dropNote(id);
-    toast('Note saved');
-    await openLead(id);
-    renderLeads();
-  }catch(e){toast('Not saved, the text is kept here: '+e.message,'err',7000)}
 }
 
 async function openLead(id){
@@ -2266,21 +1247,14 @@ async function openLead(id){
      still saying the lead has nothing due. */
   const row=(window._leads||[]).find(x=>x.id===id);
   if(row)Object.assign(row,{owner:l.owner,tier:l.tier,status:l.status,note:l.note,
-    lost_reason:l.lost_reason,next_due:l.next_due,contacted_at:l.contacted_at});
+    next_due:l.next_due,contacted_at:l.contacted_at});
   /* copyOpener sięga tu, gdy wiersza nie ma w liście (deep-link z pusha,
-     zanim tabela się dociągnie). Przyciski w szufladzie czytają leada stąd
-     z drugiego powodu: mail i nazwisko podane przez inline onclick trzeba by
-     wcisnąć w atrybut HTML, a nazwiska bywają z apostrofem. */
+     zanim tabela się dociągnie). */
   window._leadOpen=l;
   const ev=l.events||[],ords=l.orders||[];
-  /* Wejście z bannera „follow-ups due" ma od razu pokazywać CO jest do
-     zrobienia — bez przewijania do karty Follow-up w połowie szuflady. */
-  const zalegle=(l.reminders||[]).filter(r=>r.active&&dueDays(r.due_at)<=0);
   openOver(l.name||l.email,`
-    ${zalegle.length?`<div class="due-banner" style="cursor:default">⏰ ${dueLabel(zalegle[0].due_at)} — ${esc(zalegle[0].text)}</div>`:''}
     <div class="chip-row">
       <span class="status ${LEAD_STATUS_CLS[l.status]||'pending'}"><span class="dot"></span>${esc(leadLabel(l.status))}</span>
-      ${l.lost_reason?`<span class="chip">${esc(lostLabel(l.lost_reason))}</span>`:''}
       ${l.tier?`<span class="chip">${esc(l.tier)} ${l.score}</span>`:''}
       ${l.paid_usd>0?`<span class="status paid"><span class="dot"></span>paid $${fmt0(l.paid_usd)}</span>`
         :l.bought?'<span class="status paid"><span class="dot"></span>bought</span>':''}
@@ -2293,51 +1267,37 @@ async function openLead(id){
       ${l.phone?`<span class="chip"><a href="tel:${esc(l.phone)}">${esc(l.phone)}</a></span>`:''}
       ${l.country?`<span class="chip">${esc(l.country)}</span>`:''}
       ${l.source?`<span class="chip">${esc(l.source)}${l.ref?' via '+esc(l.ref):''}</span>`:''}
-      ${campaignLabel(l.campaign)?`<span class="chip" title="${
-        esc(Object.entries(l.campaign).map(([k,v])=>k+'='+v).join('\n'))
-      }">ad: ${esc(campaignLabel(l.campaign))}</span>`:''}
     </div>
-    ${l.phone||l.telegram||l.mail_ready?`<div class="chip-row" style="margin-top:2px">${leadPhoneActs(l)}</div>`:''}
+    ${l.phone||l.telegram?`<div class="chip-row" style="margin-top:2px">${leadPhoneActs(l)}</div>`:''}
     ${Object.keys(l.answers||{}).length?`<div class="lead-card sec-card"><h4>Answers</h4>
       ${Object.entries(l.answers).map(([q,v])=>`<div class="note-line"><span class="muted">${esc(q)}</span><br><b>${esc(v)}</b></div>`).join('')}
       <p class="muted" style="font-size:11.5px;margin-top:8px">From the latest application — earlier ones sit in the history below.</p></div>`:''}
     ${leadModCard(l)}
     ${leadReminderCard(l)}
-    ${leadFreeCard(l)}
-    ${leadSellCard(l)}
-    ${leadInviteCard(l)}
-    <div class="lead-card sec-card"><h4>Notes</h4>
-      <textarea class="inp" rows="${Math.min(6,noteText(l).split('\n').length+1)}"
-        placeholder="What they wrote, what they want — one line per note"
-        oninput="draftNote(${l.id},this.value)"
-        onchange="saveLeadNote(${l.id},this.value)">${esc(noteText(l))}</textarea>
-      <p class="muted" style="font-size:11.5px;margin-top:8px">Reply to the lead's message on Telegram and it lands here too.</p></div>
+    ${l.note?`<div class="lead-card sec-card"><h4>Notes</h4>
+      ${l.note.split('\n').filter(Boolean).map(n=>`<div class="note-line">${esc(n)}</div>`).join('')}
+      <p class="muted" style="font-size:11.5px;margin-top:8px">Reply to the lead's message on Telegram and it lands here.</p></div>`:''}
     ${ords.length?`<h4 style="margin:16px 0 6px">Orders</h4>
       <div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>Date</th><th>Product</th><th>Amount</th><th>Status</th>
-        <th title="Buy 1 Get 1 Free — paying the order also creates a free second account of the same size">BOGO</th></tr></thead>
+      <thead><tr><th>Date</th><th>Product</th><th>Amount</th><th>Status</th></tr></thead>
       <tbody>${ords.map(o=>`<tr><td class="muted" style="white-space:nowrap">${dstr(o.created_at)}</td>
         <td>${esc(o.product_key)}</td><td class="num">$${fmt0(o.amount_usd)}</td>
-        <td><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span></td>
-        <td>${o.status==='paid'
-          ?(o.bogo?'<span class="up" style="font-size:var(--fs-cap)">2 accounts</span>':'<span class="muted">—</span>')
-          :`<button class="btn-o sm" onclick="toggleOrderBogo(${o.id},${o.bogo?'false':'true'},${l.id})"
-             title="${o.bogo?'Remove the free second account from this order':'Add a free second account of the same size when this order is paid'}">${o.bogo?'On ✓':'Off'}</button>`}</td></tr>`).join('')}
+        <td><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span></td></tr>`).join('')}
       </tbody></table></div>`
       :'<p class="muted" style="font-size:12.5px;margin-top:14px">No orders on this e-mail address.</p>'}
-    ${ev.length?`<details class="lead-his"><summary>History (${ev.length})</summary>
-      <div class="tbl-wrap"><table class="tbl" style="table-layout:fixed">
+    <h4 style="margin:16px 0 6px">History</h4>
+    ${ev.length?`<div class="tbl-wrap"><table class="tbl" style="table-layout:fixed">
       <thead><tr><th style="width:104px">When</th><th style="width:96px">What</th><th>Details</th></tr></thead>
       <tbody>${ev.map(e=>`<tr>
         <td class="muted" style="white-space:nowrap">${dstr(e.created_at)}</td>
         <td>${esc(LEAD_EVENT_LBL[e.kind]||e.kind)}
-          <div class="muted" style="font-size:var(--fs-cap)">${esc(e.actor||'—')}</div></td>
+          <div class="muted" style="font-size:11px">${esc(e.actor||'—')}</div></td>
         <td><div style="font-size:12px">${esc(leadEventDetail(e))}</div>
-          ${e.body?`<div class="lead-sent">${esc(e.body)}</div>`:''}
           ${Object.keys(e.answers||{}).length?`<div class="muted" style="font-size:11.5px;margin-top:4px">${
             Object.entries(e.answers).map(([q,v])=>`${esc(q)} → <b>${esc(v)}</b>`).join('<br>')}</div>`:''}</td></tr>`).join('')}
-      </tbody></table></div></details>`
-      :'<p class="muted" style="font-size:12.5px;margin-top:14px">No history yet — it starts with the first change.</p>'}
+      </tbody></table></div>`
+      :`<div class="empty"><h3>Nothing recorded yet</h3>
+        <p>History starts at the first change made after this feature went live.</p></div>`}
     ${leadDangerCard(l)}`);
 }
 /* Jedno zdanie o mailu z instrukcją wpłaty. Brak adresu portfela MUSI krzyczeć:
@@ -2404,56 +1364,16 @@ async function flagOrder(id,flag){
     renderOrders()}
   catch(e){toast('Error: '+e.message,'err')}
 }
-/* Decyzja BOGO per zamówienie. `leadId` przychodzi z szuflady leada — wtedy
-   odświeżamy szufladę; bez niego jesteśmy w zakładce Orders i wystarczy
-   podmienić wpis w lokalnej liście. */
-async function toggleOrderBogo(id,on,leadId){
-  try{await api(`/api/admin/orders/${id}/bogo`,{method:'POST',body:JSON.stringify({bogo:on})});
-    toast(on?'BOGO on — paying this order will also create a free second account of the same size.'
-            :'BOGO off — this order creates one account.','ok',7000);
-    const o=(window._orders||[]).find(x=>x.id===id); if(o)o.bogo=on;
-    if(leadId)await openLead(leadId); else renderOrders();
-  }catch(e){toast('Error: '+e.message,'err')}
-}
 /* Link do zapłaty kartą za KONKRETNE zamówienie — do wklejenia klientowi na
    Telegramie. Token jest stały, więc drugie kliknięcie daje ten sam adres i nie
    unieważnia linku, którego klient już używa. */
 async function payLink(id,prefix){
-  let d;
-  try{d=await api(`/api/admin/orders/${id}/pay-link`,{method:'POST'})}
+  let url;
+  try{url=(await api(`/api/admin/orders/${id}/pay-link`,{method:'POST'})).url}
   catch(e){toast('Error: '+e.message,'err');return}
-  /* Ten sam token wisi pod dwiema markami. Który wysłać, wie admin, który przed
-     chwilą z tym człowiekiem rozmawiał — zamówienie nie wie, skąd on przyszedł,
-     więc zgadywanie za niego kończyłoby się linkiem z obcą marką. Bez
-     PARTNER_PAY_BASE_URL nie ma z czego wybierać i nic się nie zmienia. */
-  const url=d.partner_url?await askPayBrand(d.url,d.partner_url):d.url;
-  if(!url)return;
   try{await navigator.clipboard.writeText(url);
     toast(`🔗 ${prefix?prefix+' ':''}Payment link copied — paste it to the customer.`,'ok',9000)}
   catch(e){showPayLink(url)}   /* Safari bez gestu / http: kopiowanie odpada, a link musi być widoczny */
-}
-/* Nazwy marek biorą się z samych adresów, a nie z kodu: domena partnera żyje
-   w zmiennej środowiskowej serwera i nie ma prawa trafić do repozytorium. */
-function askPayBrand(ourUrl,partnerUrl){
-  const host=u=>{try{return new URL(u).hostname.replace(/^www\./,'')}catch(e){return u}};
-  return new Promise(resolve=>{
-    const box=document.createElement('div');box.className='modal-wrap';
-    const done=v=>{box.remove();resolve(v)};
-    box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
-      <div class="modal-head"><h3>Which page should they land on?</h3>
-        <button class="icon-btn" id="pb-x" aria-label="Close">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
-      <p class="muted" style="font-size:12.5px;margin-bottom:14px">Same order, same amount — only the page differs. Send the brand this customer came from.</p>
-      <div class="stack">
-        <button class="btn-p lg" style="width:100%" data-u="${esc(ourUrl)}">${esc(host(ourUrl))}</button>
-        <button class="btn-o lg" style="width:100%" data-u="${esc(partnerUrl)}">${esc(host(partnerUrl))}</button>
-        <p class="hint">Either way the card is charged by us — that is the name on the statement.</p>
-      </div></div>`;
-    box.onclick=()=>done(null);
-    box.querySelector('#pb-x').onclick=()=>done(null);
-    box.querySelectorAll('button[data-u]').forEach(b=>b.onclick=()=>done(b.dataset.u));
-    document.body.appendChild(box);
-  });
 }
 function showPayLink(url){
   const box=document.createElement('div');box.className='modal-wrap';
@@ -2478,34 +1398,18 @@ async function markOrderFailed(id){
     toast('Order marked as failed.','ok');go('orders')}
   catch(e){toast('Error: '+e.message,'err')}
 }
-async function markOrderPaid(id,email,amount){
-  /* Echo zamówienia w pytaniu: akcja zakłada konto i pali kupon, a przy
-     kilkunastu wierszach „Mark paid" łatwo trafić o linijkę za nisko. */
-  const kogo=email?`#${id} — ${esc(email)}${amount!=null?` · $${fmt(amount)}`:''}`:`#${id}`;
+async function markOrderPaid(id){
   if(!await askConfirm({title:'Mark this order as paid?',
-    body:`${kogo}. This creates the challenge account and sends the trader their credentials, exactly like a completed card payment.`,
+    body:'This creates the challenge account and sends the trader their credentials, exactly like a completed card payment.',
     ok:'Mark as paid'}))return;
   try{const d=await api(`/api/admin/orders/${id}/mark-paid`,{method:'POST'});
-    /* Zamowienie BOGO tworzy DWA konta — toast musi to powiedziec, a gdy grant
-       nie wyszedl, admin ma sie dowiedziec od razu, nie z dzwonka po fakcie. */
-    toast(d.already?'This order was already paid.'
-      :d.bogo&&d.bogo_grant_ok?`✅ Paid. Account #${d.account_id} + free BOGO account created.`
-      :d.bogo?`⚠️ Paid, account #${d.account_id} created — but the BOGO grant FAILED. Grant the second account manually.`
-      :`✅ Paid. Account #${d.account_id} created.`,d.bogo&&!d.bogo_grant_ok?'err':'ok',d.bogo?9000:undefined);
-    go('orders')}
+    toast(d.already?'This order was already paid.':`✅ Paid. Account #${d.account_id} created.`,'ok');go('orders')}
   catch(e){toast('Error: '+e.message,'err')}
 }
 
 /* Bot pace is stored as a short key; the chip shows what it actually means. */
 const PACE_TXT={light:'1–2 trades/day',steady:'4–8 trades/day',busy:'~20 trades/day'};
 
-/* Numer konta w tabeli ma być drzwiami, nie ślepą liczbą — łańcuch
-   zamówienie→konto kończył się na ręcznym szukaniu w zakładce Accounts. */
-function accLink(id,label){
-  const txt=label!=null&&label!==''?esc(String(label)):id?'#'+id:'';
-  if(!id)return txt||'—';
-  return `<a href="#" onclick="openAccount(${id});return false" title="Open the account card">${txt}</a>`;
-}
 async function openAccount(id){
   const a=await api('/api/accounts/'+id);
   const m=a.metrics||{};
@@ -2550,11 +1454,6 @@ async function openAccount(id){
       ${a.mt5_backed===false?'<div class="kv"><span>Backed by MT5</span><b>no, generated locally</b></div>':''}
       ${!a.platform_password?'<p class="muted" style="font-size:12.5px">Not provisioned yet.</p>':''}
     </div>
-    ${(a.trader_must_set_password&&a.trader_id)?`<div class="sec-card" style="margin:0">${inviteRow(a.trader_id,'acc')}</div>`:''}
-    ${a.trader_id?`<div class="sec-card" style="margin:0" id="client-card">
-      <h3 style="font-size:15px;margin-bottom:10px">Client</h3>
-      <div class="muted" style="font-size:12.5px">Loading…</div>
-    </div>`:''}
     <div class="sec-card" style="margin:0">
       <h3 style="font-size:15px;margin-bottom:10px">Phase</h3>
       <div class="chip-row" style="margin-bottom:10px">
@@ -2565,7 +1464,7 @@ async function openAccount(id){
         ${a.phase!=='eval_1'?`<button class="btn-o sm" onclick="setPhase(${a.id},'eval_1')">Back to Phase 1</button>`:''}
         ${(a.steps>=2&&a.phase!=='eval_2')?`<button class="btn-o sm" onclick="setPhase(${a.id},'eval_2')">Move to Phase 2</button>`:''}
         ${a.phase!=='funded'?`<button class="btn-p sm" onclick="setPhase(${a.id},'funded')">Make funded</button>`:''}
-        ${a.status!=='failed'?`<button class="btn-o sm" style="border-color:var(--red-line);color:var(--red)" onclick="breachAccount(${a.id},'${jsq(a.login||'')}')">Breach account</button>`:''}
+        ${a.status!=='failed'?`<button class="btn-o sm" style="border-color:var(--red-line);color:var(--red)" onclick="breachAccount(${a.id})">Breach account</button>`:''}
       </div>
       <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
         The risk engine promotes accounts automatically once the profit target and minimum
@@ -2598,7 +1497,6 @@ async function openAccount(id){
           <span class="chip">style <b>${esc(a.bot_style||'balanced')}</b></span>
           <span class="chip">pace <b>${esc(PACE_TXT[a.bot_pace]||a.bot_pace||'steady')}</b></span>
           ${a.bot_target_pct?`<span class="chip">stops at <b>+${a.bot_target_pct}%</b></span>`:''}
-          ${(a.bot_outcome&&a.bot_outcome.mode==='doom')?`<span class="status failed"><span class="dot"></span>riding down</span>`:''}
         </div>
         ${(a.bot_target_pct && (m.profit_pct||0) >= a.bot_target_pct)?`
           <div class="warn-box" style="margin:0 0 12px;background:var(--gold-bg);border:1px solid var(--gold-line);color:var(--gold-ink)">
@@ -2611,24 +1509,19 @@ async function openAccount(id){
             This challenge has no Weekend Trading add-on, so there is nothing it could trade right now.
             It stays on and picks up on its own when the week opens.
           </div>`:''}
-        ${botOutcomeBox(a)}
         <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
           <div><label class="muted" style="font-size:12px">Target profit</label>
-            <input id="bot-newtarget" class="inp" type="number" step="0.01" min="0"
-                   style="max-width:130px" value="${(a.bot_target_pct||0).toFixed(2)}"
-                   oninput="botTargetPreview(this.value,${a.initial_balance||0})"
-                   onkeydown="if(event.key==='Enter')setBotTarget(${a.id})"></div>
+            <input id="bot-newtarget" class="inp" type="number" step="0.1" min="0"
+                   style="max-width:130px" value="${(a.bot_target_pct||0).toFixed(1)}"></div>
           <button class="btn-o" onclick="setBotTarget(${a.id})">Update target</button>
-          <span class="muted" id="bot-tgt-usd" style="font-size:12px;padding-bottom:10px">${botTargetUsd(a.bot_target_pct||0,a.initial_balance||0)}</span>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn-p" onclick="pauseBot(${a.id},${a.bot_paused?'false':'true'})">${a.bot_paused?'Resume bot':'Pause bot'}</button>
           <button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="stopBot(${a.id})">Stop bot</button>
         </div>
         <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
-          <b>Target</b> is a hard cap: the account profit the bot never trades past, precise
-          to 0.01% — the last trade lands the balance exactly on it. Raise it to let the bot
-          keep going, or set <b>0</b> for no limit. Changing it never resyncs the balance,
+          <b>Target</b> is the account profit at which the bot stops trading. Raise it in 0.1% steps
+          to let it keep going, or set <b>0</b> for no limit. Changing it never resyncs the balance,
           so the equity curve continues without a jump.
           <b>Pause</b> only stops new entries — an open position runs to its close, the account
           stays on bot data and the balance is kept. <b>Stop</b> ends the bot for good and
@@ -2654,7 +1547,7 @@ async function openAccount(id){
               <option value="busy">Busy — around 20 trades a day</option>
             </select></div>
           <div><label class="muted" style="font-size:12px">Stop at profit %</label>
-            <input id="bot-target" class="inp" type="number" step="0.01" min="0" value="0" placeholder="0 = no limit"></div>
+            <input id="bot-target" class="inp" type="number" step="0.5" min="0" value="0" placeholder="0 = no limit"></div>
         </div>
         <button class="btn-p" onclick="startBot(${a.id})">Start Trade BOT</button>`}
       <p class="muted" style="font-size:12px;margin-top:12px;line-height:1.55">
@@ -2669,131 +1562,16 @@ async function openAccount(id){
         <b>No pace trades over the weekend</b> unless the challenge has the Weekend Trading
         add-on, and then the bot only touches crypto, the one market open on Saturday.</p>
     </div>
-    <div class="sec-card" style="margin:0" id="bot-tune-card"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn-o" style="border-color:var(--gold-line);color:var(--gold)" onclick="clearHistory(${a.id},'${esc(a.login)}')"
-        title="Deletes every trade and the whole equity curve, and puts the account back on its starting capital">Clear track record</button>
       <button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteAccount(${a.id},'${esc(a.login)}')">Delete account</button>
       ${a.trader_id?`<button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteTrader(${a.trader_id},'${esc(a.trader_email||a.trader_name||'')}')"
         title="Removes the client and ALL their data, freeing the e-mail for a fresh signup">Delete client &amp; all data</button>`:''}
     </div>`);
   renderCerts(a.id);
   renderPayouts(a.id);
-  renderBotTuning(a.id);
   renderHistory(a.id);
-  if(a.trader_id)renderClientCard(a.trader_id,a.trader_email||a.trader_name||'');
   window._oAcc=a;
   drawAdminChart();
-}
-
-/* ---------- Flash sale offers ---------- */
-/* Chipy statusow reuzywaja klas kont z portal.css — oferta nie ma wlasnych. */
-const OFFER_STATUS_CLS={active:'active',pending:'pending',expired:'provisioning',used:'passed',cancelled:'failed'};
-function renderOffers(){
-  const rows=window._offers||[],prods=window._offerProds||[];
-  const zywe=rows.filter(o=>['active','pending'].includes(o.status));
-  const local=d=>{const t=new Date(d);t.setMinutes(t.getMinutes()-t.getTimezoneOffset());return t.toISOString().slice(0,16)};
-  const za24=local(new Date(Date.now()+24*3600*1000));
-  $('view').innerHTML=`
-    <div class="sec-card card-md">
-      <h3>New offer</h3>
-      <p class="muted" style="font-size:12.5px;margin:6px 0 14px">Cuts the catalog price of the covered plans for a limited time. The discount is applied automatically at checkout — no code. If the client also has a coupon, the <b>better</b> of the two applies (never both).</p>
-      <div class="pool-form">
-        <div><label class="muted" style="display:block;font-size:12px;margin-bottom:4px">Discount %</label>
-          <input id="of-pct" class="inp" type="number" min="1" max="90" step="0.5" value="30" style="width:100%"></div>
-        <div><label class="muted" style="display:block;font-size:12px;margin-bottom:4px">Plans</label>
-          <select id="of-scope" class="inp" style="width:100%" onchange="$('of-keys-box').style.display=this.value==='keys'?'':'none'">
-            <option value="all">All plans</option>
-            <option value="2step">All 2-Step</option>
-            <option value="instant">All Instant Funding</option>
-            <option value="keys">Specific plans…</option>
-          </select></div>
-        <div><label class="muted" style="display:block;font-size:12px;margin-bottom:4px">Trader (empty = everyone)</label>
-          <input id="of-email" class="inp" type="email" placeholder="client@example.com" style="width:100%"
-            oninput="const s=$('of-single');s.disabled=!this.value.trim();if(s.disabled)s.checked=false"></div>
-        <div><label class="muted" style="display:block;font-size:12px;margin-bottom:4px">Ends</label>
-          <input id="of-ends" class="inp" type="datetime-local" value="${za24}" style="width:100%"></div>
-        <div><label class="muted" style="display:block;font-size:12px;margin-bottom:4px">Title (banner &amp; mail)</label>
-          <input id="of-title" class="inp" placeholder="Weekend flash sale" style="width:100%"></div>
-      </div>
-      <div id="of-keys-box" style="display:none;margin-top:10px">
-        <div class="muted" style="font-size:12px;margin-bottom:6px">Covered plans</div>
-        <div style="display:flex;flex-wrap:wrap;gap:8px 14px">${prods.map(p=>`
-          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer">
-            <input type="checkbox" class="of-key" value="${esc(p.key)}" style="width:15px;height:15px;accent-color:var(--acc)">
-            ${esc(p.label)} <span class="muted">$${fmt0(p.price_usd)}</span>
-          </label>`).join('')}</div>
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:10px 18px;margin-top:12px;font-size:13px">
-        <label style="display:flex;align-items:center;gap:7px;cursor:pointer">
-          <input type="checkbox" id="of-single" disabled style="width:15px;height:15px;accent-color:var(--acc)">
-          Single use <span class="muted">(personal offers only — burns after one purchase)</span></label>
-        <label style="display:flex;align-items:center;gap:7px;cursor:pointer">
-          <input type="checkbox" id="of-mail" style="width:15px;height:15px;accent-color:var(--acc)"> Send e-mail</label>
-        <label style="display:flex;align-items:center;gap:7px;cursor:pointer">
-          <input type="checkbox" id="of-push" style="width:15px;height:15px;accent-color:var(--acc)"> Send push</label>
-      </div>
-      <p class="muted" style="font-size:12px;margin:8px 0 12px">The portal always shows a countdown banner to everyone the offer covers. E-mail and push go out only if ticked here.</p>
-      <button class="btn-p" onclick="busy(this,'Creating…',offerCreate)">Create offer</button>
-    </div>
-
-    <div class="sec-card">
-      <h3>Offers${zywe.length?` <small class="muted">(${zywe.length} live)</small>`:''}</h3>
-      ${rows.length?`<div class="tbl-wrap tw-sm rtbl-wrap"><table class="tbl rtbl">
-        <thead><tr><th>#</th><th>Offer</th><th>Who</th><th>Plans</th><th>Window</th><th>Status</th><th>Bought</th><th class="no-sort"></th></tr></thead>
-        <tbody>${rows.map(o=>`<tr>
-          <td class="num" data-l="#">${o.id}</td>
-          <td class="rt-main" data-l="Offer"><b>−${o.discount_pct%1?o.discount_pct.toFixed(2):o.discount_pct}%</b>${o.title?` · ${esc(o.title)}`:''}${o.single_use?' <span class="muted">(single use)</span>':''}</td>
-          <td data-l="Who">${o.trader_email?esc(o.trader_email):'<b>Everyone</b>'}</td>
-          <td data-l="Plans">${esc(o.plans_label||'')}</td>
-          <td class="muted" data-l="Window">${o.starts_at?dstr(o.starts_at)+' – ':'until '}${dstr(o.ends_at)}</td>
-          <td data-l="Status"><span class="status ${OFFER_STATUS_CLS[o.status]||'provisioning'}"><span class="dot"></span>${esc(o.status)}</span></td>
-          <td class="num" data-l="Bought">${o.bought||0}${o.revenue_usd?` <small class="muted">$${fmt(o.revenue_usd)}</small>`:''}</td>
-          <td class="rt-acts">${['active','pending'].includes(o.status)?`
-            <button class="btn-o sm" onclick="offerNotify(${o.id})">Notify</button>
-            <button class="btn-o sm danger" onclick="offerCancel(${o.id})">Cancel</button>`:''}</td>
-        </tr>`).join('')}</tbody></table></div>`
-      :'<p class="muted" style="font-size:13px">No offers yet. The first one you create appears here with its live status and sales.</p>'}
-    </div>`;
-}
-async function offerCreate(){
-  const scope=$('of-scope').value;
-  const keys=[...document.querySelectorAll('.of-key:checked')].map(c=>c.value);
-  const ends=$('of-ends').value;
-  const pct=parseFloat($('of-pct').value);
-  if(!(pct>0&&pct<=90)){toast('Discount must be between 0 and 90%','err');return}
-  if(scope==='keys'&&!keys.length){toast('Tick at least one plan','err');return}
-  if(!ends){toast('Pick an end date','err');return}
-  if(new Date(ends)<=new Date()){toast('End date must be in the future','err');return}
-  const body={discount_pct:pct,scope,
-    plan_keys:scope==='keys'?keys:null,
-    trader_email:$('of-email').value.trim()||null,
-    ends_at:new Date(ends).toISOString(),
-    title:$('of-title').value.trim()||null,
-    single_use:$('of-single').checked,
-    send_email:$('of-mail').checked,send_push:$('of-push').checked};
-  try{
-    const r=await api('/api/admin/offers',{method:'POST',body:JSON.stringify(body)});
-    toast(r.queued?'Offer created — notifications are going out in the background'
-      :`Offer created${r.emailed?` — ${r.emailed} e-mail${r.emailed===1?'':'s'} sent`:''}${r.skipped_optout?` (${r.skipped_optout} opted out)`:''}`);
-    VIEWS.offers();
-  }catch(e){toast(e.message,'err')}
-}
-async function offerCancel(id){
-  if(!await askConfirm({title:'Cancel this offer?',danger:true,ok:'Cancel offer',
-    body:'The discount disappears from the store and checkout immediately. Orders already paid keep their price.'}))return;
-  try{await api(`/api/admin/offers/${id}/cancel`,{method:'POST'});toast('Offer cancelled');VIEWS.offers()}
-  catch(e){toast(e.message,'err')}
-}
-async function offerNotify(id){
-  if(!await askConfirm({title:'Send notifications again?',ok:'Send',
-    body:'Sends the e-mail and push about this offer to everyone it covers. Traders who opted out of marketing are skipped.'}))return;
-  try{
-    const r=await api(`/api/admin/offers/${id}/notify`,{method:'POST',
-      body:JSON.stringify({send_email:true,send_push:true})});
-    toast(r.queued?'Notifications are going out in the background'
-      :`Sent — ${r.emailed||0} e-mail${(r.emailed||0)===1?'':'s'}, ${r.pushed||0} push${(r.pushed||0)===1?'':'es'}${r.skipped_optout?`, ${r.skipped_optout} opted out`:''}`);
-  }catch(e){toast(e.message,'err')}
 }
 
 /* ---------- objective lines on the slide-over chart (same as the portal) ---------- */
@@ -2845,292 +1623,6 @@ async function renderHistory(id){
         <b style="text-align:right;font-weight:500">${ic[i.kind]||'·'} ${esc(i.label)}</b>
       </div>`).join('')
       :'<p class="muted" style="font-size:12.5px">Nothing recorded yet.</p>');
-}
-
-/* ---------- dziennik klienta (kto, kiedy, co robił) ---------- */
-const JRN_ICO={login:'🔑',view:'👀',order:'🧾',payment:'💳',breach:'⛔',payout:'💸',
-  account:'🏁',ticket:'🎫',telemetry:'⚡'};
-function journalChips(t){
-  const chips=[];
-  if(t.awaiting_claim)chips.push('<span class="status pending"><span class="dot"></span>awaiting claim</span>');
-  else if(t.claimed_at)chips.push(`<span class="status passed"><span class="dot"></span>claimed ${dstr(t.claimed_at)}</span>`);
-  if(t.invited_at)chips.push(`<span class="chip">invite sent ${dstr(t.invited_at)}</span>`);
-  if(t.logged_in_today)chips.push('<span class="status funded"><span class="dot"></span>signed in today</span>');
-  else if(t.last_login_at)chips.push(`<span class="chip">last sign-in ${dstr(t.last_login_at)}</span>`);
-  else chips.push('<span class="status failed"><span class="dot"></span>never signed in</span>');
-  chips.push(`<span class="chip">${t.logins_7d||0} sign-in${t.logins_7d===1?'':'s'} in 7 days</span>`);
-  if(t.last_seen_at&&t.last_seen_at!==t.last_login_at)chips.push(`<span class="chip">last seen ${dstr(t.last_seen_at)}</span>`);
-  if(t.kyc_status)chips.push(`<span class="chip">KYC <b>${esc(t.kyc_status)}</b></span>`);
-  if(t.kyc_requested_at)chips.push(`<span class="chip">KYC asked ${dstr(t.kyc_requested_at)}</span>`);
-  if(t.kyc_locked&&t.kyc_status!=='approved')chips.push('<span class="status failed"><span class="dot"></span>portal paused</span>');
-  return `<div class="chip-row" style="margin-bottom:12px">${chips.join('')}</div>`;
-}
-/* Prosba o weryfikacje wysylana z reki. Klient, ktory przeszedl ewaluacje i nigdy
-   nie wszedl w zakladke KYC, nie dostaje od nas w tej sprawie ZADNEGO maila —
-   wychodzi to dopiero przy wniosku o wyplate, ktory trzeba wtedy odrzucic.
-   Dziala takze przed funded: prosba sama otwiera weryfikacje temu klientowi
-   (`kyc_requested_at` po stronie serwera). Przycisku nie ma tylko przy
-   pending/approved, bo dokumenty juz sa i nie ma o co prosic. */
-function kycAskBtn(t,gdzie){
-  if(!t||t.kyc_status==='approved'||t.kyc_status==='pending')return '';
-  return `<button class="btn-o sm" style="margin-top:10px" onclick="requestKyc(${t.id},'${jsq(t.email||'')}','${gdzie}')">`
-    +`${t.kyc_requested_at?'Ask for verification again':'Ask for verification'}</button>`;
-}
-async function requestKyc(tid,email,gdzie){
-  if(!await askConfirm({title:'Ask this client to verify their identity?',
-    body:'They get an e-mail with a link to the Verification tab, and it opens '
-      +'verification for them — also before their first funded account.',
-    ok:'Send the request'}))return;
-  try{await api(`/api/admin/kyc/${tid}/request`,{method:'POST'});
-    toast('Verification request sent.','ok');
-    /* Odswiezamy TE szuflade, z ktorej padlo klikniecie: karta klienta i dziennik
-       renderuja sie do tego samego overlaya, wiec zgadywanie zamienialoby jedna
-       w druga. */
-    if(gdzie==='journal')openTraderJournal(tid,email); else renderClientCard(tid,email);
-  }catch(e){toast('Error: '+e.message,'err')}
-}
-function journalTimeline(items){
-  if(!(items||[]).length)return '<p class="muted" style="font-size:12.5px">Nothing recorded yet.</p>';
-  /* Data raz, nad grupą wpisów — sto wierszy z pełnym timestampem czyta się
-     gorzej niż dzień jako nagłówek i sama godzina przy wpisie. */
-  let out='',dzien='';
-  for(const i of items){
-    const w=wawIso(i.ts||'');
-    const d=w.slice(0,10);
-    if(d!==dzien){dzien=d;out+=`<div class="muted" style="font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;margin:14px 0 4px">${dstr(i.ts).split(',')[0]||d}</div>`}
-    out+=`<div class="kv" style="align-items:flex-start">
-      <span style="white-space:nowrap" class="muted">${w.slice(11,16)}</span>
-      <b style="text-align:right;font-weight:500">${JRN_ICO[i.kind]||'·'} ${esc(i.label)}</b>
-    </div>`;
-  }
-  return out;
-}
-/* Podgląd portalu oczami klienta: token sesji z panelu, otwierany w nowej
-   karcie. Token idzie w URL-u i portal chowa go do sessionStorage — sesja
-   właściciela w localStorage zostaje nietknięta (wspólny origin!). */
-async function impersonate(tid){
-  try{
-    const r=await api(`/api/admin/traders/${tid}/impersonate`,{method:'POST'});
-    window.open('/portal?impersonate='+encodeURIComponent(r.token),'_blank');
-  }catch(e){toast('Error: '+e.message,'err')}
-}
-async function renderClientCard(tid,email){
-  const el=$('client-card'); if(!el)return;
-  let d; try{d=await api(`/api/admin/traders/${tid}/journal`)}catch(e){
-    el.innerHTML='<h3 style="font-size:15px">Client</h3>'
-      +`<p class="muted" style="font-size:12.5px">Could not load: ${esc(e.message)}</p>`;return}
-  const t=d.trader||{};
-  el.innerHTML=`<h3 style="font-size:15px;margin-bottom:10px">Client</h3>
-    ${journalChips(t)}
-    <div class="kv"><span>E-mail</span><b>${esc(t.email||email||'—')}</b></div>
-    <div class="kv"><span>Signed up</span><b>${t.created_at?dstr(t.created_at):'—'}</b></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn-o sm" style="margin-top:10px" onclick="openTraderJournal(${tid},'${esc(t.email||email||'')}')">Full activity journal</button>
-      <button class="btn-o sm" style="margin-top:10px" onclick="impersonate(${tid})">View portal as client</button>
-      ${kycAskBtn(t,'card')}
-    </div>`;
-}
-async function openTraderJournal(tid,email){
-  let d; try{d=await api(`/api/admin/traders/${tid}/journal`)}catch(e){toast('Error: '+e.message,'err');return}
-  const t=d.trader||{};
-  openOver(`Journal · ${t.email||email||('trader #'+tid)}`,
-    journalChips(t)
-    +`<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn-o sm" onclick="impersonate(${tid})">View portal as client</button>${kycAskBtn(t,'journal')}</div>`
-    +`<p class="muted" style="font-size:12.5px;margin:2px 0">Everything this client did — sign-ins, portal visits, orders, payouts, tickets — newest first.</p>`
-    +journalTimeline(d.items));
-}
-
-/* Zakladka Activity: te same dane co karta Client, ale dla WSZYSTKICH naraz —
-   filtry odpowiadaja na pytania dzialu („kto nie odebral konta?", „kto zamilkl?")
-   bez klikania po kolei w kazde konto. */
-const JRN_FILTERS=[
-  ['all','All',()=>true],
-  ['today','Active today',t=>t.logged_in_today],
-  ['awaiting','Awaiting claim',t=>t.awaiting_claim],
-  ['never','Never signed in',t=>!t.last_login_at],
-  ['quiet','Quiet 7+ days',t=>t.last_login_at&&!t.logins_7d],
-];
-function renderActivity(){
-  const all=window._jrn||[];
-  const f=window._jrnFilter||'all';
-  const q=(window._jrnQ||'').toLowerCase();
-  const test=(JRN_FILTERS.find(x=>x[0]===f)||JRN_FILTERS[0])[2];
-  const rows=all.filter(t=>test(t)&&(!q||[t.email,t.full_name]
-    .some(x=>String(x||'').toLowerCase().includes(q))));
-  const chip=t=>t.awaiting_claim
-    ?'<span class="status pending"><span class="dot"></span>awaiting claim</span>'
-    :(t.claimed_at?'<span class="status passed"><span class="dot"></span>claimed</span>'
-                  :'<span class="muted">—</span>');
-  const login=t=>t.logged_in_today
-    ?'<span class="status funded"><span class="dot"></span>today</span>'
-    :(t.last_login_at?dstr(t.last_login_at)
-      :'<span class="status failed"><span class="dot"></span>never</span>');
-  $('view').innerHTML=`<div class="toolbar">
-      ${searchBox('jrn-q','_jrnQ','renderActivity','Search name or email…')}
-      <div class="seg">${JRN_FILTERS.map(([k,l])=>
-        `<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''}
-          onclick="window._jrnFilter='${f===k?'all':k}';renderActivity()">${l}</button>`).join('')}</div>
-      <span class="count-pill">${rows.length} of ${all.length}${impPill()}</span>
-    </div>`
-    +(rows.length?`<div class="tbl-wrap rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.activity">
-      <thead><tr><th>Client</th><th>Claim</th><th>Last sign-in</th><th>7 days</th><th>Last seen</th><th>Accounts</th><th>KYC</th></tr></thead>
-      <tbody>${rows.map(t=>`<tr class="clickable" onclick="openTraderJournal(${t.id},'${jsq(t.email||'')}')">
-        <td class="rt-main" data-l="Client">${esc(t.full_name||'—')}<div class="muted" style="font-size:11.5px">${esc(t.email)}</div></td>
-        <td data-l="Claim" data-sort="${t.awaiting_claim?0:(t.claimed_at?2:1)}">${chip(t)}</td>
-        <td data-l="Last sign-in" data-sort="${esc(t.last_login_at||'')}">${login(t)}</td>
-        <td class="muted" data-l="7 days" data-sort="${t.logins_7d}">${t.logins_7d?t.logins_7d+'×':'—'}</td>
-        <td class="muted" data-l="Last seen" data-sort="${esc(t.last_seen_at||'')}">${t.last_seen_at?dstr(t.last_seen_at):'—'}</td>
-        <td class="muted" data-l="Accounts" data-sort="${t.accounts}">${t.accounts||'—'}</td>
-        <td class="muted" data-l="KYC">${esc(t.kyc_status||'—')}</td></tr>`).join('')}
-      </tbody></table></div>`
-    :`<div class="empty"><h3>${q||f!=='all'?'No clients match':'No clients yet'}</h3><p>${
-      q||f!=='all'?'Clear the search or pick another filter.':'Client accounts show up here as they appear.'}</p></div>`);
-}
-
-/* Zakladka Clients: katalog WSZYSTKICH zarejestrowanych i to, co mozna im
-   wyslac. Klient byl dotad widoczny tylko przez slad, ktory po sobie zostawil —
-   leada z formularza, zamowienie albo konto. Kto zalozyl konto sam z portalu,
-   nie mial zadnego z tych trzech i nie pojawial sie w panelu nigdzie, wiec nie
-   dalo sie mu wystawic linku do platnosci. Activity odpowiada na „kto sie
-   loguje", ta lista na „co moge z nim zrobic". */
-const CLI_FILTERS=[
-  ['all','All',()=>true],
-  ['noacc','No account yet',t=>!t.accounts],
-  ['kyc','KYC pending',t=>t.kyc_status==='pending'],
-  ['credits','Has credits',t=>t.credits_usd>0],
-];
-function renderClients(){
-  const all=window._clients||[];
-  const f=window._cliFilter||'all';
-  const q=(window._cliQ||'').toLowerCase(), qf=fold(q);
-  const test=(CLI_FILTERS.find(x=>x[0]===f)||CLI_FILTERS[0])[2];
-  const rows=all.filter(t=>test(t)&&
-    (!q||fold(t.email).includes(qf)||fold(t.full_name).includes(qf)));
-  const cap=capList(rows,'_cliAll','renderClients');
-  $('view').innerHTML=`<div class="toolbar">
-      ${searchBox('cli-q','_cliQ','renderClients','Search name or email…')}
-      <div class="seg">${CLI_FILTERS.map(([k,l])=>
-        `<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''}
-          onclick="window._cliFilter='${f===k?'all':k}';renderClients()">${l}</button>`).join('')}</div>
-      <span class="count-pill">${rows.length} of ${all.length}${impPill()}</span>
-    </div>`
-    +(rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.clients">
-      <thead><tr><th>Joined</th><th>Client</th><th>Accounts</th><th>KYC</th>
-        <th>Credits</th><th>Actions</th></tr></thead>
-      <tbody>${cap.rows.map(t=>`<tr>
-        <td class="muted" data-l="Joined" data-sort="${esc(t.created_at||'')}">${t.created_at?dstr(t.created_at):'—'}</td>
-        <td class="rt-main" data-l="Client">${esc(t.full_name||'—')}
-          ${t.awaiting_claim?'<span class="status pending" style="margin-left:6px"><span class="dot"></span>awaiting claim</span>':''}
-          <div class="muted" style="font-size:11.5px">${esc(t.email)}</div>
-          ${t.referred_count?`<div class="muted" style="font-size:var(--fs-cap)" title="Traders who signed up with this client's referral code">brought ${t.referred_count}</div>`:''}</td>
-        <td class="muted" data-l="Accounts" data-sort="${t.accounts}">${t.accounts||'—'}</td>
-        <td data-l="KYC">${t.kyc_status&&t.kyc_status!=='none'
-          ?`<span class="status ${t.kyc_status==='approved'?'funded':t.kyc_status==='rejected'?'failed':'pending'}"><span class="dot"></span>${esc(t.kyc_status)}</span>`
-          :'<span class="muted">—</span>'}</td>
-        <td class="num" data-l="Credits" data-sort="${t.credits_usd}">${t.credits_usd?'$'+fmt(t.credits_usd):'<span class="muted">—</span>'}</td>
-        <td class="rt-acts" style="white-space:nowrap">
-          <button class="btn-p sm" onclick="openManualOrder(${t.id})"
-            title="New order for this client — pick the plan, then copy a card payment link or take crypto">Sell / pay link</button>
-          <button class="btn-o sm" onclick="openClientMail(${t.id})"
-            title="Write to them from the platform address — or resend the portal invite / password link">E-mail</button>
-          <button class="btn-o sm" onclick="openTraderJournal(${t.id},'${jsq(t.email||'')}')"
-            title="Everything this client did — sign-ins, orders, payouts, tickets">Journal</button>
-          <button class="btn-o sm" onclick="impersonate(${t.id})"
-            title="Open the portal the way this client sees it">View as client</button></td></tr>`).join('')}
-      </tbody></table></div>${cap.more}`
-    :`<div class="empty"><h3>${q||f!=='all'?'No clients match':'No clients yet'}</h3><p>${
-      q||f!=='all'?'Clear the search or pick another filter.'
-        :'Everyone who signs up — on their own or through an order — shows up here.'}</p></div>`);
-}
-
-/* Mail do KLIENTA pisany z reki, plus jednym klikiem to, co i tak wysyla
-   automat. Do tej pory z panelu szly do klienta wylacznie automaty, wiec
-   „nie moge znalezc linku do hasla" konczylo sie prywatna skrzynka wlasciciela
-   — poza dziennikiem wysylek i poza historia klienta. Okno laczy oba: u gory
-   gotowce (zaproszenie / reset), nizej wlasny tekst na firmowym papierze.
-   Szablony i pola sa te same, co przy mailu do leada (`lm-*`), bo naraz otwarte
-   jest tylko jedno okno — dzieki temu zapis i kasowanie szablonu dziala tu bez
-   drugiej kopii tych funkcji. */
-async function openClientMail(id){
-  const t=(window._clients||[]).find(x=>x.id===id);
-  if(!t)return;
-  try{window._mailTpls=await api('/api/admin/email-templates')}
-  catch(e){window._mailTpls=[];toast('Templates: '+e.message,'err')}
-  document.getElementById('client-mail-modal')?.remove();
-  const box=document.createElement('div');
-  box.id='client-mail-modal';box.className='modal-wrap';
-  box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
-    <div class="modal-head"><h3>E-mail to ${esc(t.full_name||t.email)}</h3>
-      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('client-mail-modal').remove()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
-    <p class="muted" style="font-size:12.5px;margin-bottom:12px">Goes to <b>${esc(t.email)}</b>
-      from the platform address, on the same letterhead as their MT5 credentials.</p>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
-      ${t.awaiting_claim
-        ?`<button class="btn-o sm" onclick="clientMailQuick(${t.id},'invite')"
-            title="The “set your password” e-mail — a fresh link, valid 7 days">Send portal invite</button>
-          <button class="btn-o sm" onclick="copyPortalInvite(${t.id})"
-            title="Same link, into your clipboard — for Telegram when e-mail keeps missing">Copy invite link</button>`
-        :`<button class="btn-o sm" onclick="clientMailQuick(${t.id},'reset')"
-            title="Exactly what “Forgot password” sends them — a 1-hour link, straight to their inbox">Send password reset</button>`}
-    </div>
-    <div class="stack">
-      <div><label class="muted" style="font-size:12px">Template</label>
-        <select id="lm-tpl" class="inp" onchange="fillMailTpl()"></select></div>
-      <div><label class="muted" style="font-size:12px">Subject</label>
-        <input id="lm-subject" class="inp" placeholder="Subject"></div>
-      <div><label class="muted" style="font-size:12px">Message</label>
-        <textarea id="lm-body" class="inp" rows="10" spellcheck="false"
-          placeholder="Hi {name},"></textarea>
-        <p class="muted" style="font-size:var(--fs-cap);margin-top:6px">A paragraph that is
-          just a link turns into a button, and <b>{name}</b> becomes their first name.</p></div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input id="lm-name" class="inp" style="flex:1;min-width:0" placeholder="Template name">
-        <button class="btn-o sm" type="button" onclick="saveMailTpl()">Save template</button>
-        <button class="btn-o sm" type="button" id="lm-del" onclick="delMailTpl()"
-          style="display:none">Delete</button>
-      </div>
-      <button class="btn-p lg" style="width:100%" id="lm-send" onclick="sendClientMail(${t.id})">Send</button>
-    </div></div>`;
-  box.onclick=()=>box.remove();
-  document.body.appendChild(box);
-  paintMailTpls('');
-  $('lm-subject').focus();
-}
-async function clientMailQuick(id,kind){
-  const t=(window._clients||[]).find(x=>x.id===id);if(!t)return;
-  const invite=kind==='invite';
-  if(!await askConfirm({title:invite?'Send the portal invite?':'Send a password reset?',
-    body:`Goes to <b>${esc(t.email)}</b> — a link to `
-      +(invite?'set their portal password, valid for 7 days. Earlier links keep working until they expire or the password is set.'
-             :'choose a new portal password, valid for 1 hour. The link never passes through this panel.'),
-    ok:'Send',cancel:'Not now'}))return;
-  try{
-    await api('/api/admin/traders/'+id+(invite?'/portal-invite':'/password-reset'),{method:'POST'});
-    toast(invite?'Invite sent — the link works for 7 days':'Reset e-mail sent — the link works for 1 hour');
-    document.getElementById('client-mail-modal')?.remove();
-  }catch(e){toast('Not sent: '+e.message,'err')}
-}
-async function sendClientMail(id){
-  const t=(window._clients||[]).find(x=>x.id===id);if(!t)return;
-  const who={name:t.full_name||''};
-  const subject=mailFill($('lm-subject').value.trim(),who);
-  const body=mailFill($('lm-body').value.trim(),who);
-  if(!subject||!body){toast('Subject and message are both required.','err');return}
-  /* Ten sam podglad co przy mailu do leada: wysylka jest nieodwracalna,
-     wiec klikajacy widzi CALY tekst juz po podmianie {name}. */
-  if(!await askConfirm({title:'Send this e-mail?',
-    body:`Goes to <b>${esc(t.email)}</b>, subject <b>${esc(subject)}</b>:<br><br>`
-      +`<span style="color:var(--txt);white-space:pre-wrap">${esc(body)}</span>`,
-    ok:'Send',cancel:'Not yet'}))return;
-  await busy($('lm-send'),'Sending…',async()=>{
-    try{
-      await api('/api/admin/traders/'+id+'/email',{method:'POST',
-        body:JSON.stringify({subject,body})});
-      document.getElementById('client-mail-modal')?.remove();
-      toast('E-mail sent.');
-    }catch(e){toast('Not sent: '+e.message,'err')}
-  });
 }
 
 /* ---------- achievement certificates ---------- */
@@ -3247,9 +1739,9 @@ function askReason(opts){
 }
 
 /* ---------- payouts + certificates ---------- */
-async function breachAccount(id,login){
+async function breachAccount(id){
   const breachReason=await askReason({
-    title:login?`Breach account ${esc(login)}`:'Breach this account',danger:true,confirmLabel:'Breach account',
+    title:'Breach this account',danger:true,confirmLabel:'Breach account',
     hint:'The account is closed as <b>failed</b> and the reason below is shown to the trader in the portal and by e-mail.',
     presets:['Daily loss limit exceeded','Maximum drawdown exceeded',
       'Prohibited trading strategy','Copy trading between accounts',
@@ -3293,33 +1785,11 @@ async function renderPayouts(id){
       </span>
     </div>`).join('')
     : '<p class="muted" style="font-size:12.5px">No payouts on this account yet.</p>';
-  const pool=d.payout_pool_usd;
   el.innerHTML=`<h3 style="font-size:15px;margin-bottom:10px">Payouts &amp; certificates</h3>
     ${lista}
-    <div class="kv" style="align-items:center;flex-wrap:wrap;row-gap:6px;margin-top:12px">
-      <span>Payout pool</span>
-      <span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;row-gap:6px">
-        ${pool!=null?`<b class="up">$${fmt(pool)}</b>`
-                    :'<span class="muted" style="font-size:12px">formula mode — profit × split</span>'}
-        <input id="pool-amount" class="inp" type="number" step="0.01" min="0"
-          placeholder="e.g. 500" style="width:110px">
-        <button class="btn-o sm" onclick="setPayoutPool(${id})">Set</button>
-        ${pool!=null?`<button class="btn-o sm" onclick="clearPayoutPool(${id})">Clear</button>`:''}
-      </span>
-    </div>
-    <p class="muted" style="font-size:12px;margin:4px 0 0;line-height:1.5">
-      A set pool <b>replaces</b> the profit × split formula as the amount the trader can
-      request — regardless of what the chart shows. Payouts are deducted from the pool and
-      the balance is <b>not</b> reset. Clear it to go back to the formula.</p>
-    ${d.payout_days_left?`<p class="muted" style="font-size:12px;margin:8px 0 0;line-height:1.5">
-      The trader <b>cannot request</b> yet: this plan opens its first payout after
-      <b>${d.min_trading_days} trading days</b> and the account has <b>${d.trading_days}</b>
-      (${d.payout_days_left} to go). Issuing one from here goes through anyway — the wait is
-      a rule for their request form, not for you.</p>`:''}
     ${d.status!=='funded'?`<p class="muted" style="font-size:12.5px;margin-top:12px">
         Payouts can only be issued on a <b>funded</b> account. This one is
-        <b>${esc(d.status)}</b>. Move the phase to Funded first.
-        ${pool!=null?'The pool is already set and will apply once the account is funded.':''}</p>`:`
+        <b>${esc(d.status)}</b>. Move the phase to Funded first.</p>`:`
     <div class="pool-form" style="margin-top:14px">
       <div><label class="muted" style="font-size:12px">Trader payout ($)</label>
         <input id="po-amount" class="inp" type="number" step="0.01" min="0.01" value="${d.suggested_share||''}"
@@ -3337,98 +1807,19 @@ async function renderPayouts(id){
         <span class="muted">(the certificate, its QR and the verification link are created either
         way — this only decides whether the trader's payout is shown publicly)</span></span>
     </label>
-    <button class="btn-p" onclick="issuePayout(${id},${pool!=null})">Issue payout + certificate</button>`}
+    <button class="btn-p" onclick="issuePayout(${id})">Issue payout + certificate</button>`}
     <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
-      ${pool!=null
-        ?`Payout pool <b>$${fmt(pool)}</b> → suggested <b>$${fmt(d.suggested_share)}</b>.
-          Issuing a payout books it and <b>deducts it from the pool</b> — the account
-          balance keeps running (the bot paints it), so nothing is reset.`
-        :`Current profit <b>$${fmt(d.profit)}</b> · split <b>${d.split_pct}%</b> → suggested
-          <b>$${fmt(d.suggested_share)}</b>. Issuing a payout books it and
-          <b>resets the account balance to its starting capital</b>, exactly like approving
-          a trader's request. The paid-out profit stops counting toward the next one.`}</p>`;
+      Current profit <b>$${fmt(d.profit)}</b> · split <b>${d.split_pct}%</b> → suggested
+      <b>$${fmt(d.suggested_share)}</b>. Issuing a payout books it and
+      <b>resets the account balance to its starting capital</b>, exactly like approving
+      a trader's request. The paid-out profit stops counting toward the next one.</p>`;
 }
-const BOT_TUNE=[
-  ['win_rate','Win rate','0.01','Share of trades that close green. 0.68 = 68 out of 100.'],
-  ['avg_r','Avg R','0.1','How big a winner is next to a loser. 2 = wins are twice the size.'],
-  ['risk_pct','Risk per trade %','0.01','Percent of the balance a single position puts at stake.'],
-  ['daily_target_pct','Daily target %','0.01','How much the account gains on a day that goes well.'],
-  ['red_day_odds','Red-day odds','0.01','Chance a day ends in the red. 0.2 = one day in five.'],
-  ['swing','Swing (floating)','0.05','How far an open position wanders from its planned result before it closes.'],
-];
-async function renderBotTuning(id){
-  const el=$('bot-tune-card'); if(!el)return;
-  let d; try{d=await api(`/api/admin/accounts/${id}/bot/tuning`)}catch(e){
-    el.innerHTML='<h3 style="font-size:15px">Trade BOT — advanced</h3>'
-      +`<p class="muted" style="font-size:12.5px">Could not load: ${esc(e.message)}</p>`;return}
-  const pola=BOT_TUNE.map(([k,label,step,hint])=>{
-    const [lo,hi]=d.limits[k]||[0,0];
-    /* Swing nie wychodzi z ziarna konta — jest jedna stala dla wszystkich,
-       więc „auto" pokazuje wartość domyślną, a nie wylosowaną. */
-    return `<div><label class="muted" style="font-size:12px" title="${esc(hint)}">${label}</label>
-      <input id="bt-${k}" class="inp" type="number" step="${step}" min="${lo}" max="${hi}"
-        value="${d.override[k]??''}" placeholder="auto">
-      <div class="muted" style="font-size:11px;margin-top:3px">auto: ${d.auto[k]} · ${lo}–${hi}</div></div>`}).join('');
-  const ile=BOT_TUNE.filter(([k])=>d.override[k]!=null).length+(d.override.symbols?1:0);
-  el.innerHTML=`<h3 style="font-size:15px;margin-bottom:4px">Trade BOT — advanced</h3>
-    <p class="muted" style="font-size:12px;margin:0 0 12px;line-height:1.55">
-      Leave a field empty and it stays as it is now: rolled once from this account's own seed,
-      so no two accounts trade alike. Fill one in and <b>this account only</b> follows your
-      number. ${ile?`<b>${ile} field${ile>1?'s':''} overridden.</b>`:'Nothing overridden yet.'}</p>
-    <div class="pool-form">${pola}</div>
-    <div style="margin-bottom:12px">
-      <label class="muted" style="font-size:12px">Instruments</label>
-      <input id="bt-symbols" class="inp" value="${esc(d.override.symbols||'')}" placeholder="auto">
-      <div class="muted" style="font-size:11px;margin-top:3px">
-        auto: ${d.auto.symbols.join(', ')}<br>Comma separated, from: ${d.instruments.join(', ')}.</div>
-    </div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn-p" onclick="saveBotTuning(${id})">Save overrides</button>
-      ${ile?`<button class="btn-o" onclick="clearBotTuning(${id})">Reset to auto</button>`:''}
-    </div>
-    <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
-      Changes apply to the <b>next</b> position the bot opens — trades already closed stay as
-      they were. A profit target or the drawdown ride still wins over these numbers: they set
-      the account's character, the target sets where it has to end up.</p>`;
-}
-async function saveBotTuning(id){
-  const body={};
-  for(const [k] of BOT_TUNE){const v=$('bt-'+k).value.trim(); body[k]=v===''?null:parseFloat(v)}
-  for(const [k,label] of BOT_TUNE){
-    if(body[k]!==null&&!isFinite(body[k])){toast(`${label} is not a number.`,'err');return}}
-  body.symbols=$('bt-symbols').value.trim();
-  try{await api(`/api/admin/accounts/${id}/bot/tuning`,{method:'POST',body:JSON.stringify(body)});
-    toast('Bot overrides saved.','ok'); renderBotTuning(id);
-  }catch(e){toast('Error: '+e.message,'err')}
-}
-async function clearBotTuning(id){
-  try{await api(`/api/admin/accounts/${id}/bot/tuning`,{method:'POST',body:JSON.stringify({})});
-    toast('Back to the values from this account\'s seed.','ok'); renderBotTuning(id);
-  }catch(e){toast('Error: '+e.message,'err')}
-}
-async function setPayoutPool(id){
-  const v=parseFloat($('pool-amount').value);
-  if(!(v>=0)){toast('Enter a pool amount of 0 or more.','err');return}
-  try{const r=await api(`/api/admin/accounts/${id}/payout-pool`,{method:'POST',
-      body:JSON.stringify({amount:v})});
-    toast(`Payout pool set to $${fmt(r.payout_pool_usd)}. The trader can now request up to $${fmt(r.payout_available)}.`,'ok');
-    renderPayouts(id);
-  }catch(e){toast('Error: '+e.message,'err')}
-}
-async function clearPayoutPool(id){
-  try{await api(`/api/admin/accounts/${id}/payout-pool`,{method:'POST',
-      body:JSON.stringify({amount:null})});
-    toast('Payout pool cleared — back to the profit × split formula.','ok');
-    renderPayouts(id);
-  }catch(e){toast('Error: '+e.message,'err')}
-}
-async function issuePayout(id,poolMode){
+async function issuePayout(id){
   const amount=parseFloat($('po-amount').value||'0');
   if(!(amount>0)){toast('Enter a payout amount greater than 0.','err');return}
   const naLp=$('po-lp')?$('po-lp').checked:true;
   if(!await askConfirm({title:`Issue a payout of $${amount.toFixed(2)}?`,
-    body:(poolMode?'It is booked as paid and deducted from the payout pool — the balance is not reset. '
-                  :'It is booked as paid and the account balance resets to its starting capital. ')
+    body:'It is booked as paid and the account balance resets to its starting capital. '
       +(naLp?'The certificate will also show on the landing page.'
             :'The certificate stays off the landing page.'),
     ok:'Issue payout',danger:true}))return;
@@ -3482,9 +1873,11 @@ async function setCertLp(pid,show,accId){
 /* Revoking kills the DOCUMENT — the public link stops working. To only take an
    entry off the strip use setCertLp(). The payout row stays either way. */
 async function revokeCert(pid,accId){
-  /* Bez okna potwierdzenia: withUndo i tak trzyma zadanie 5 s z przyciskiem
-     cofniecia, a certyfikat da sie wygenerowac od nowa — podwojna zapora
-     (confirm + undo) tylko spowalniala moderacje na telefonie. */
+  if(!await askConfirm({title:'Revoke this certificate?',
+    body:'The public link stops working and the entry disappears from the landing page. The payout '
+      +'itself stays on the account.<br><br>To only hide it from the landing page, use '
+      +'<b>Take off the LP</b> instead.',
+    ok:'Revoke certificate',danger:true}))return;
   withUndo('Revoking the certificate',async()=>{
     try{await api(`/api/admin/payouts/${pid}/certificate`,{method:'DELETE'});
       toast('Certificate revoked. Removed from the landing page.','ok');
@@ -3499,136 +1892,17 @@ async function pauseBot(id,paused){
   try{await api(`/api/admin/accounts/${id}/bot`,{method:'PATCH',body:JSON.stringify({paused})});
     toast(paused?'⏸ Bot paused. No new entries, the account keeps its balance.'
                 :'▶️ Bot resumed.','ok');
-    /* Karta konta to overlay NAD tabelą — bez tego kropka bota w wierszu
-       pod spodem świeciłaby po staremu aż do ręcznego odświeżenia. */
-    const row=(window._accs||[]).find(x=>x.id===id);
-    if(row){row.bot_paused=paused;if(VIEW==='accounts')renderAccounts()}
-    openAccount(id);
-  }catch(e){toast('Error: '+e.message,'err')}
-}
-
-/* ---------- Trade BOT: outcome ----------
-   Zdanie „zda / nie zda" + presety. Arytmetyka jest po stronie serwera
-   (_bot_outcome w main.py): sufit bota i próg fazy to dwie różne formuły
-   w dwóch modułach — porównywanie ich w JS rozjechałoby się przy pierwszej
-   zmianie reguł. */
-function botTargetUsd(pct,base){
-  return (pct&&base)?`= $${fmt(Math.round(base*(1+pct/100)))}`:'';
-}
-function botTargetPreview(v,base){
-  const el=$('bot-tgt-usd'); if(el)el.textContent=botTargetUsd(parseFloat(v)||0,base);
-}
-function botOutcomeBox(a){
-  const o=a.bot_outcome; if(!o)return'';
-  const usd=v=>'$'+fmt(v);
-  if(o.mode==='doom')return`
-    <div class="warn-box" style="margin:0 0 12px;background:var(--red-bg);border:1px solid var(--red-line)">
-      <b style="display:block;color:var(--red)">Riding down to a breach</b>
-      The bot is losing on purpose, heading for the ${o.doom_limit==='daily'?'daily-loss':'max-drawdown'}
-      floor of <b>${usd(o.doom_floor)}</b>${o.doom_deadline?`, aiming to get there around ${dstr(o.doom_deadline)}`:''}.
-      The breach itself is booked by the risk engine, so the history reads like a trader
-      who lost it — not like an admin action.
-    </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-      <button class="btn-o sm" onclick="cancelDoom(${a.id})">Call the ride-down off</button>
-    </div>`;
-  let msg='';
-  const P='<p class="muted" style="font-size:12.5px;margin:0 0 12px;line-height:1.55">';
-  if(o.cap_overshot){
-    msg=`<div class="warn-box" style="margin:0 0 12px">
-      <b style="display:block">Already above the cap</b>
-      The balance is past +${o.cap_pct.toFixed(2)}% (${usd(o.cap_equity)}) and cannot be walked
-      back without a visible jump in the equity curve. Raise the cap to let it continue,
-      or clear the track record and start over.
-    </div>`;
-  }else if(o.cap_equity!=null&&o.phase_target_equity!=null){
-    const cap=`Cap <b>+${o.cap_pct.toFixed(2)}%</b> = ${usd(o.cap_equity)}`;
-    const cel=`phase target <b>+${o.phase_target_pct.toFixed(2)}%</b> = ${usd(o.phase_target_equity)}`;
-    const kiedy=o.target_deadline?` The bot is pacing itself to get there around <b>${dstr(o.target_deadline)}</b>.`:'';
-    if(o.will_pass===false)
-      msg=`${P}${cap}, ${cel} — <b style="color:var(--red)">short by ${Math.abs(o.gap_pp).toFixed(2)} pp.
-        This account never passes.</b>${kiedy}</p>`;
-    else if(o.days_missing>0)
-      msg=`${P}${cap} clears the ${cel}, but the phase also needs <b>${o.min_trading_days} trading
-        days</b> (${o.trading_days} so far, ${o.days_missing} missing) — <b class="up">it passes</b> once the days are in.${kiedy}</p>`;
-    else
-      msg=`${P}${cap} clears the ${cel} — <b class="up">this account passes</b> once the bot gets there.${kiedy}</p>`;
-  }else if(o.phase_target_equity!=null){
-    msg=`${P}No cap — the bot trades straight past the phase target of
-      +${o.phase_target_pct.toFixed(2)}% (${usd(o.phase_target_equity)}), so the account
-      <b class="up">passes</b> as soon as the trading days are in.</p>`;
-  }
-  return msg+`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-    ${o.phase_target_pct>0?`
-      <button class="btn-o sm" onclick="setBotOutcome(${a.id},${(o.phase_target_pct+0.02).toFixed(2)})">Will pass · +${(o.phase_target_pct+0.02).toFixed(2)}%</button>
-      <button class="btn-o sm" onclick="setBotOutcome(${a.id},${(o.phase_target_pct-0.03).toFixed(2)})">Miss by 0.03 pp · +${(o.phase_target_pct-0.03).toFixed(2)}%</button>`:''}
-    ${o.cap_pct?`<button class="btn-o sm" onclick="setBotOutcome(${a.id},0)">No cap</button>`:''}
-    <button class="btn-o sm" style="border-color:var(--red-line);color:var(--red)" onclick="makeItFail(${a.id})">Make it fail…</button>
-  </div>`;
-}
-async function setBotOutcome(id,pct){
-  /* mode:'profit' idzie zawsze — ustawienie celu na bocie w trybie zjazdu ma
-     znaczyć „zmieniłem zdanie, wracamy po zysk", a nie błąd 400. */
-  let dni;
-  if(pct>0){
-    /* Bez terminu bot szedłby losowym tempem persony i moment zdania byłby
-       przypadkowy — pytamy o dni tak samo, jak Make it fail pyta o zjazd. */
-    const v=await askReason({
-      title:'How long should it take?',confirmLabel:'Set the pace',
-      hint:'The bot paces its daily gains to land on the target in roughly this many days — '
-          +'red days and weekends included, like a real trader passing a phase. '
-          +'On real funding platforms a pass typically takes <b>1–3 weeks per phase</b>.',
-      label:'Reach the target over',
-      presets:['7 days','14 days','21 days','30 days','No deadline — free pace']});
-    if(v===null)return;
-    if(/free pace/i.test(v))dni=0;
-    else{dni=parseFloat(v);
-      if(isNaN(dni)||dni<=0){toast('Give the number of days, e.g. "14".','err');return}}
-  }
-  try{
-    const r=await api(`/api/admin/accounts/${id}/bot`,{method:'PATCH',
-      body:JSON.stringify({mode:'profit',target_pct:pct,
-        ...(dni!==undefined?{target_days:dni}:{})})});
-    const o=r.bot_outcome||{};
-    const kiedy=o.target_deadline?` Aiming for around ${dstr(o.target_deadline)}.`:'';
-    toast(!pct?'🎯 Cap removed. The bot trades with no profit limit.'
-      :o.will_pass===false?`🎯 Cap +${r.bot_target_pct}% — short of the phase target by ${Math.abs(o.gap_pp).toFixed(2)} pp. This account will not pass.${kiedy}`
-      :o.will_pass?`🎯 Cap +${r.bot_target_pct}% — clears the phase target. This account will pass.${kiedy}`
-      :`🎯 Target set to +${r.bot_target_pct}%. The bot continues from here.${kiedy}`,'ok',7000);
     openAccount(id);
   }catch(e){toast('Error: '+e.message,'err')}
 }
 async function setBotTarget(id){
   const cel=parseFloat($('bot-newtarget').value);
   if(isNaN(cel)||cel<0){toast('Enter a target of 0% or more.','err');return}
-  await setBotOutcome(id,cel);
-}
-async function makeItFail(id){
-  /* askReason zwraca string — presety to liczba dni, Custom… pozwala wpisać
-     własną. Parsujemy pierwszą liczbę z odpowiedzi. */
-  const v=await askReason({
-    title:'Make this account fail',danger:true,confirmLabel:'Start the ride-down',
-    hint:'The bot starts <b>losing on purpose</b>: a believable losing streak spread over the days '
-        +'chosen below, down to the max-drawdown floor, where the <b>risk engine</b> books the breach '
-        +'and the trader gets the standard e-mail. In the history it reads like a trader who lost it, '
-        +'not like an admin action. Any profit cap is removed — the two are mutually exclusive.',
-    label:'Ride it down over',
-    presets:['2 days','3 days','5 days','7 days']});
-  if(v===null)return;
-  const dni=parseFloat(v);
-  if(isNaN(dni)||dni<=0){toast('Give the number of days, e.g. "4".','err');return}
   try{
     const r=await api(`/api/admin/accounts/${id}/bot`,{method:'PATCH',
-      body:JSON.stringify({mode:'doom',doom_days:dni})});
-    const o=r.bot_outcome||{};
-    toast(`📉 Ride-down started: down to $${fmt(o.doom_floor)} over ~${dni} day${dni===1?'':'s'}. `
-      +'The risk engine books the breach when it gets there.','ok',9000);
-    openAccount(id);
-  }catch(e){toast('Error: '+e.message,'err')}
-}
-async function cancelDoom(id){
-  try{await api(`/api/admin/accounts/${id}/bot`,{method:'PATCH',body:JSON.stringify({mode:'profit'})});
-    toast('Ride-down called off. The bot goes back to normal trading, with no cap.','ok');
+      body:JSON.stringify({target_pct:cel})});
+    toast(r.bot_target_pct?`🎯 Target set to +${r.bot_target_pct}%. The bot continues from here.`
+                          :'🎯 Target removed. The bot trades with no profit limit.','ok');
     openAccount(id);
   }catch(e){toast('Error: '+e.message,'err')}
 }
@@ -3646,31 +1920,13 @@ async function stopBot(id){
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
-/* Wyjscie z bota odpalonego na zlym koncie. Stop tego nie zalatwia: zostawia
-   obnizone saldo i cala historie, ktora trader widzi u siebie w portalu.
-   Konto zostaje, wiec przycisk nie jest czerwony — ale dorobku nie da sie
-   odzyskac, dlatego mimo to pyta. */
-async function clearHistory(id,login){
-  if(!await askConfirm({title:`Clear the track record of ${esc(login)}?`,
-    body:'Every trade, the entire equity curve and any rule breaches are deleted, and the account goes '
-      +'back to the starting capital of its current phase — as if nobody had ever traded on it. '
-      +'<b>The Trade BOT is switched off</b> along with its style, pace and target, so starting it '
-      +'again is a fresh decision.<br><br>The phase, certificates and payouts are left alone. '
-      +'<b>This cannot be undone.</b>',
-    ok:'Clear the record',danger:true}))return;
-  try{
-    const r=await api(`/api/admin/accounts/${id}/clear-history`,{method:'POST'});
-    toast(`Track record cleared: ${r.trades} trade${r.trades===1?'':'s'} and ${r.snapshots} `
-      +`reading${r.snapshots===1?'':'s'} removed, balance back to $${fmt(r.balance)}.`,'ok',8000);
-    openAccount(id);
-  }catch(e){toast('Error: '+e.message,'err')}
-}
-
-/* Ta sama sciezka co X w tabeli: jedno pytanie, 5 s na cofniecie. Wczesniej
-   przycisk w slide-overze kasowal OD RAZU — jedyne usuwanie w panelu bez okna
-   na „jednak nie". Slide-over zamyka sie dopiero po potwierdzeniu. */
 async function deleteAccount(id,login){
-  if(await deleteAccountRow(id,login))closeOver();
+  if(!await askConfirm({title:`Delete account ${esc(login)}?`,
+    body:'This removes it from the platform permanently, together with its snapshots, breaches and '
+      +'certificates.',
+    ok:'Delete account',danger:true}))return;
+  try{await api('/api/accounts/'+id,{method:'DELETE'});closeOver();toast('Account deleted.','ok');go('accounts')}
+  catch(e){toast('Error: '+e.message,'err')}
 }
 async function deleteTrader(tid,who){
   /* Jedno okno zamiast dwoch: wczesniej admin odpowiadal na confirm(), a zaraz
@@ -3689,46 +1945,31 @@ async function deleteTrader(tid,who){
 }
 
 /* ---------- actions ---------- */
-/* Obie akcje pod busy(): drugi klik w trakcie requestu to no-op. Serwer ma
-   własną blokadę (warunkowy UPDATE), ale bez tej dubel kończył się mylącym
-   „already handled" zamiast po prostu nie zadziałać. */
-async function rejectPayout(id,btn){
-  await busy(btn,null,async()=>{
-    const reason=await askReason({
-      title:'Reject this payout request',danger:true,confirmLabel:'Reject request',
-      hint:'The trader sees the reason under the request status and gets it by e-mail.',
-      presets:['Profit target not met','Minimum trading days not met',
-        'Open positions at the time of the request','Trading activity under review',
-        'KYC verification incomplete']});
-    if(reason===null)return;   // Cancel
-    try{await api(`/api/admin/payout-requests/${id}/reject`,{method:'POST',
-        body:JSON.stringify({reason})});
-      toast('Request rejected.','ok');go('payouts')}
-    catch(e){toast('Error: '+e.message,'err')}
-  });
+async function rejectPayout(id){
+  const reason=await askReason({
+    title:'Reject this payout request',danger:true,confirmLabel:'Reject request',
+    hint:'The trader sees the reason under the request status and gets it by e-mail.',
+    presets:['Profit target not met','Minimum trading days not met',
+      'Open positions at the time of the request','Trading activity under review',
+      'KYC verification incomplete']});
+  if(reason===null)return;   // Cancel
+  try{await api(`/api/admin/payout-requests/${id}/reject`,{method:'POST',
+      body:JSON.stringify({reason})});
+    toast('Request rejected.','ok');go('payouts')}
+  catch(e){toast('Error: '+e.message,'err')}
 }
-async function approvePayout(id,btn){
-  await busy(btn,null,async()=>{
-    if(!await askConfirm({title:'Approve and pay this request?',
-      body:'This pays the trader share, plus the fee refund on a first payout. <b>It cannot be undone.</b>',
-      ok:'Approve & pay',danger:true}))return;
-    try{const d=await api(`/api/admin/payout-requests/${id}/approve`,{method:'POST'});
-      toast(`✅ Paid $${fmt(d.total_paid)}${d.fee_refund?` (incl. $${fmt(d.fee_refund)} fee refund)`:''}`,'ok');
-      go('payouts');
-    }catch(e){toast('Error: '+e.message,'err')}
-  });
+async function approvePayout(id){
+  if(!await askConfirm({title:'Approve and pay this request?',
+    body:'This pays the trader share, plus the fee refund on a first payout. <b>It cannot be undone.</b>',
+    ok:'Approve & pay',danger:true}))return;
+  try{const d=await api(`/api/admin/payout-requests/${id}/approve`,{method:'POST'});
+    toast(`✅ Paid $${fmt(d.total_paid)}${d.fee_refund?` (incl. $${fmt(d.fee_refund)} fee refund)`:''}`,'ok');
+    go('payouts');
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 async function approveKyc(tid){
-  /* Jeden tap, zero okien — pomylke cofa przycisk w toascie (istniejacy
-     endpoint /reset, ten sam co Revert w historii). */
-  try{
-    await api(`/api/admin/kyc/${tid}/approve`,{method:'POST'});go('kyc');
-    undoToast('KYC approved.',async()=>{
-      try{await api(`/api/admin/kyc/${tid}/reset`,{method:'POST'});
-        toast('Approval undone — back in the pending queue.','ok');go('kyc');
-      }catch(e){toast('Error: '+e.message,'err')}
-    });
-  }catch(e){toast('Error: '+e.message,'err')}
+  try{await api(`/api/admin/kyc/${tid}/approve`,{method:'POST'});toast('KYC approved.','ok');go('kyc')}
+  catch(e){toast('Error: '+e.message,'err')}
 }
 async function rejectKyc(tid){
   const reason=await askReason({
@@ -3754,18 +1995,125 @@ async function viewDoc(tid,kind){
   window.open(URL.createObjectURL(await r.blob()),'_blank');
 }
 
+/* ---------- channel content queue ---------- */
+/* A refusal from the validator is information for whoever wrote the post, not a
+   technical error — so it is shown in full ("the statistic is X today, the post
+   assumes Y") instead of a generic "could not save". */
+async function approvePost(id){
+  try{
+    await api(`/api/admin/channel-posts/${id}/approve`,{method:'POST'});
+    toast('Approved. Publish it now, or leave it queued.');
+    go('content');
+  }catch(e){toast('Not approved — '+e.message,'err')}
+}
+async function publishPost(id){
+  if(!await askConfirm({title:'Publish to the channel?',
+      body:'The claims are re-checked first: a post approved earlier must still be true now.',
+      ok:'Publish'}))return;
+  try{
+    await api(`/api/admin/channel-posts/${id}/publish`,{method:'POST'});
+    toast('Published.');
+    go('content');
+  }catch(e){toast('Not published — '+e.message,'err')}
+}
+async function deletePost(id){
+  if(!await askConfirm({title:'Delete this post?',body:'It has not been published.',ok:'Delete'}))return;
+  try{
+    await api(`/api/admin/channel-posts/${id}`,{method:'DELETE'});
+    go('content');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+function newChannelPost(){
+  const box=document.createElement('div');
+  box.id='cpost-modal';box.className='modal-wrap';
+  box.innerHTML=`<div class="modal" onclick="event.stopPropagation()" style="max-width:720px">
+    <div class="modal-head"><h3>New channel post</h3>
+      <button class="icon-btn" onclick="document.getElementById('cpost-modal').remove()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <p class="muted" style="font-size:12.5px;margin-bottom:14px">Every figure needs a source.
+      With no <code>proof</code> the post may not carry an amount or a percentage at all.
+      <code>payout:&lt;cert_token&gt;</code> pins every amount to that payout;
+      <code>stat:&lt;key&gt;:gte:&lt;value&gt;</code> is re-checked against live numbers — once at
+      approval, once again right before it goes out.</p>
+    <div class="stack">
+      <div class="pool-form">
+        <div><label class="muted" style="font-size:12px">Channel</label>
+          <select id="cp-ch" class="inp">
+            <option value="mgmt">Account Management</option>
+            <option value="payouts">Payouts</option>
+            <option value="trackrecord">Track Record</option>
+          </select></div>
+        <div><label class="muted" style="font-size:12px">Type</label>
+          <select id="cp-kind" class="inp">
+            <option value="text">Text</option><option value="photo">Photo</option></select></div>
+      </div>
+      <textarea id="cp-body" class="inp" rows="9" placeholder="Post body — HTML allowed"></textarea>
+      <input id="cp-proof" class="inp" placeholder="proof — empty, payout:&lt;cert_token&gt; or stat:payouts_total_usd:gte:186000">
+      <input id="cp-media" class="inp" placeholder="photo posts only: URL of the page to screenshot">
+      <div style="display:flex;gap:8px">
+        <button class="btn-o lg" style="flex:1" onclick="document.getElementById('cpost-modal').remove()">Cancel</button>
+        <button class="btn-p lg" style="flex:1" onclick="saveChannelPost()">Save as draft</button>
+      </div>
+      <p class="hint">A draft publishes nothing. Approving is the moment a person takes
+        responsibility for the wording — so it is a separate click, not a checkbox here.</p>
+    </div></div>`;
+  box.onclick=()=>box.remove();
+  document.body.appendChild(box);
+}
+async function saveChannelPost(){
+  const body=($('cp-body').value||'').trim();
+  if(!body){toast('The post has no body.','err');return}
+  try{
+    await api('/api/admin/channel-posts',{method:'POST',body:JSON.stringify({
+      channel:$('cp-ch').value, kind:$('cp-kind').value, body,
+      proof:($('cp-proof').value||'').trim(),
+      media_url:($('cp-media').value||'').trim()||null})});
+    document.getElementById('cpost-modal')?.remove();
+    toast('Saved as a draft. Approve it when the claims check out.');
+    go('content');
+  }catch(e){toast('Not saved — '+e.message,'err')}
+}
+
+/* Track record of every bot-driven account, as a file.
+
+   Raw fetch rather than api(), which only speaks JSON — and a synthetic <a download>
+   rather than a plain link, because the admin token travels in a header and a bare
+   href carries none. Filename comes from Content-Disposition so the server stays the
+   one place that names the file. */
+async function exportTrackRecord(format){
+  const btn=event&&event.target; if(btn)btn.disabled=true;
+  toast('Building the export…');
+  try{
+    const r=await fetch(`/api/admin/export/track-record?format=${format||'zip'}`,{headers:adminH()});
+    if(!r.ok){
+      let powod=r.status===403?'Administrator rights required.':`HTTP ${r.status}`;
+      try{powod=(await r.json()).detail||powod}catch(e){}
+      toast('Export failed: '+powod,'err');return;
+    }
+    const cd=r.headers.get('content-disposition')||'';
+    const m=cd.match(/filename="([^"]+)"/);
+    const url=URL.createObjectURL(await r.blob());
+    const a=document.createElement('a');
+    a.href=url; a.download=m?m[1]:'track-record.zip';
+    document.body.appendChild(a); a.click(); a.remove();
+    // Revoke late: Safari cancels the download if the URL dies too early.
+    setTimeout(()=>URL.revokeObjectURL(url),30000);
+    toast('Export downloaded. Start with CZYTAJ-TO-NAJPIERW.md — it explains every field.');
+  }catch(e){toast('Export failed: '+e.message,'err')}
+  finally{if(btn)btn.disabled=false}
+}
+
 /* ---------- telemetry drill-down ---------- */
 function telemetryRows(items){
-  return `<div class="tbl-wrap rtbl-wrap"><table class="tbl rtbl">
+  return `<div class="tbl-wrap"><table class="tbl">
     <thead><tr><th>Time</th><th>Event</th><th>Trader</th><th>Details</th></tr></thead>
     <tbody>${items.map(e=>{
       let props='';
       try{props=Object.entries(JSON.parse(e.props||'{}')).map(([k,v])=>`${esc(k)}: ${esc(v)}`).join(' · ')}
       catch(_){props=esc(e.props||'')}
-      return `<tr><td class="muted" style="white-space:nowrap" data-l="Time">${dstr(e.ts)}</td>
-        <td class="rt-main" data-l="Event">${esc(e.name)}</td>
-        <td data-l="Trader">${e.trader_id?`<a href="#" onclick="openTraderJournal(${e.trader_id},'${esc(e.email||'')}');return false">${esc(e.email||('#'+e.trader_id))}</a>`:'<span class="muted">—</span>'}</td>
-        <td class="muted" style="font-size:11.5px" data-l="Details">${props||'—'}</td></tr>`}).join('')}
+      return `<tr><td class="muted" style="white-space:nowrap">${dstr(e.ts)}</td><td>${esc(e.name)}</td>
+        <td>${e.trader_id?`<a href="#" onclick="openTraderActivity(${e.trader_id},'${esc(e.email||'')}');return false">${esc(e.email||('#'+e.trader_id))}</a>`:'<span class="muted">—</span>'}</td>
+        <td class="muted" style="font-size:11.5px">${props||'—'}</td></tr>`}).join('')}
     </tbody></table></div>`;
 }
 async function openTelemetryDetail(day,name){
@@ -3773,6 +2121,14 @@ async function openTelemetryDetail(day,name){
     const items=d.items||[];
     openOver(`${name} · ${day}`,items.length?telemetryRows(items)
       :'<div class="empty"><h3>No events</h3></div>')}
+  catch(e){toast('Error: '+e.message,'err')}
+}
+async function openTraderActivity(tid,email){
+  try{const d=await api(`/api/admin/telemetry/events?trader_id=${tid}`);
+    const items=d.items||[];
+    openOver(`Activity · ${email||('trader #'+tid)}`,
+      `<p class="muted" style="font-size:12.5px;margin-bottom:10px">Everything this user did, newest first (last ${items.length} events).</p>`
+      +(items.length?telemetryRows(items):'<div class="empty"><h3>No events</h3></div>'))}
   catch(e){toast('Error: '+e.message,'err')}
 }
 async function openTicket(id){
@@ -3817,142 +2173,24 @@ async function genSim(){
     go('pool');
   }catch(e){toast('Error: '+e.message,'err')}
 }
-async function genReal(){
-  const size=parseFloat($('real-size').value||'0'), cnt=parseInt($('real-count').value||'1',10);
-  if(cnt>2){toast('Open at most 2 at a time — each takes ~40s and the server cuts off at 60s.','err',8000);return}
-  toast(`Opening ${cnt} real MT5 demo${cnt===1?'':'s'} via Browserless — usually ~40s each…`,'ok',12000);
-  try{const r=await api('/api/admin/pool/generate',{method:'POST',
-      body:JSON.stringify({account_size:size,count:cnt}), timeoutMs:58000});
-    const n=(r.created||[]).length;
-    toast(`${n} real MT5 account${n===1?'':'s'} added to the pool.`
-      +(r.errors&&r.errors.length?` (${r.errors.length} failed)`:''),'ok',8000);
-    go('pool');
-  }catch(e){toast('Error: '+e.message,'err')}
-}
-async function provisionReal(accountId){
-  if(!await askConfirm({title:'Open a real MT5 demo for this trader?',
-    body:'Opens a MetaQuotes-Demo account via web.metatrader.app using the trader\'s name and email, then activates the challenge with those credentials. Takes ~30–45 seconds.',
-    ok:'Open real MT5'}))return;
-  toast('Opening real MT5 demo — usually ~40s…','ok',12000);
-  try{const r=await api('/api/admin/accounts/'+accountId+'/provision-real',{method:'POST', timeoutMs:58000});
-    toast(`Real MT5 ready: ${r.platform_login}@${r.platform_server}`,'ok',8000);
-    go('pool');
-  }catch(e){toast('Error: '+e.message,'err')}
-}
-async function setRealFallback(on){
-  try{await api('/api/admin/pool/real-fallback',{method:'POST',body:JSON.stringify({enabled:on})});
-    toast(on?'Auto-provisioning of real web MT5 demos is ON.':'Real auto-provisioning turned off.','ok');
-  }catch(e){toast('Error: '+e.message,'err');go('pool')}
-}
 /* ---------- Payout BOT ---------- */
 /* ---------- Reach BOT: zasieg pod postami kanalu ----------
    Karta stoi obok Payout BOT-a, bo to jego przedluzenie: kazdy opublikowany
    certyfikat dostaje reakcje i wyswietlenia od razu po wyjsciu na kanal.
    Adres i klucz dostawcy siedza w env (REACH_API_URL / REACH_API_KEY) —
    panel steruje tylko tym, co i ile. */
-/* Lista obslugiwanych kanalow. WIDOCZNA ZAWSZE, takze przy wylaczonym
-   automacie — admin ma wiedziec, gdzie to poleci, ZANIM kliknie Turn on.
-   Kanal wyplat (TELEGRAM_CHAT_ID) jest na liscie na stale: Payout BOT i tak
-   tam publikuje. Status „bot admin" nie jest kosmetyka: bez uprawnien
-   Telegram nie przysyla postow i automat po cichu nic nie robi. */
-function reachChannelsHtml(rc){
-  const lista=rc.channels||[];
-  const bot=rc.bot_username?('@'+esc(rc.bot_username)):'the bot';
-  const wiersz=(k,i)=>{
-    const stan=k.payout?`<span class="chip" style="font-size:var(--fs-cap)">posts from Payout BOT</span>`
-      :k.bot_admin===false?`<span class="chip" style="font-size:var(--fs-cap);border-color:var(--red-line);color:var(--red)">add ${bot} as admin</span>`
-      :k.bot_admin?`<span class="chip" style="font-size:var(--fs-cap)">auto ready</span>`
-      :`<span class="chip" style="font-size:var(--fs-cap)">status unknown</span>`;
-    /* Puste pole ilosci = „jak globalnie" — placeholder pokazuje wtedy liczbe,
-       ktora naprawde poleci, zeby admin nie musial jej szukac wyzej w karcie. */
-    return `<div class="mod-row" style="flex-wrap:wrap;align-items:center;gap:10px">
-      <label style="display:flex;gap:9px;align-items:center;cursor:pointer;flex:1;min-width:0">
-        <input type="checkbox" data-rcch="${i}" ${k.on?'checked':''} onchange="reachToggleChannel()">
-        <span style="min-width:0">
-          <span class="lbl" style="display:block">${esc(k.label||('@'+k.username))}</span>
-          <span class="muted" style="font-size:11.5px">@${esc(k.username)}</span>
-        </span>
-      </label>
-      ${stan}
-      ${k.payout?'':`<button class="act-btn" title="Remove" onclick="reachDropChannel('${jsq(k.username)}')">&times;</button>`}
-      <div style="display:flex;gap:8px;width:100%;padding-left:26px">
-        <input id="rc-qr-${i}" class="inp" style="flex:1;min-width:0;font-size:12px" inputmode="numeric"
-               placeholder="reactions — ${rc.qty_reactions}" value="${k.qty_reactions??''}"
-               onchange="reachToggleChannel()">
-        <input id="rc-qv-${i}" class="inp" style="flex:1;min-width:0;font-size:12px" inputmode="numeric"
-               placeholder="views — ${rc.qty_views}" value="${k.qty_views??''}"
-               onchange="reachToggleChannel()">
-      </div>
-    </div>`;
-  };
-  return `<div style="margin:2px 0 14px;padding-top:12px;border-top:1px dashed var(--line)">
-    <div class="lbl" style="font-size:12px;color:var(--muted);margin-bottom:6px">Channels served</div>
-    ${lista.length?lista.map(wiersz).join(''):`<p class="muted" style="font-size:12px">No channel is being served yet.</p>`}
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
-      <input id="rc-new" class="inp" style="flex:1;min-width:180px" placeholder="@channel">
-      <input id="rc-newlabel" class="inp" style="flex:1;min-width:140px" placeholder="Label (optional)">
-      <button class="btn-o" onclick="reachAddChannel(this)">Add channel</button>
-    </div>
-    <p class="muted" style="font-size:11.5px;margin:8px 0 0">Ticked channels get reactions and
-      views under every new post while the bot is on. A channel other than the payout one needs
-      ${bot} added as its administrator — Telegram only reports posts from channels the bot
-      administers.</p></div>`;
-}
-async function reachSaveChannels(kanaly,btn){
-  return busy(btn,'Saving…',async()=>{
-    try{await api('/api/admin/reach/channels',{method:'POST',body:JSON.stringify({channels:kanaly})});
-      go('settings');
-    }catch(e){toast('Error: '+e.message,'err')}
-  });
-}
-function reachCurrentChannels(){
-  /* Kanal wyplat wraca na liste po stronie serwera, wiec wysylamy tez jego
-     stan — inaczej odznaczenie go nie mialoby jak przetrwac zapisu. */
-  const lista=(window._reach&&window._reach.channels)||[];
-  /* Puste pole zostaje NULL-em, nie zerem: zero znaczy „nie zamawiaj tego
-     wcale", a puste „jak globalnie" — panel nie moze tych stanow zlepic. */
-  const ile=id=>{const el=$(id);if(!el)return null;const v=(el.value||'').trim();
-    return v===''?null:Number(v)};
-  return lista.map((k,i)=>{
-    const cb=document.querySelector(`[data-rcch="${i}"]`);
-    return {username:k.username,label:k.label,on:cb?cb.checked:k.on,
-            qty_reactions:ile(`rc-qr-${i}`),qty_views:ile(`rc-qv-${i}`)};
-  });
-}
-async function reachToggleChannel(){
-  /* Zapis od razu po kliknieciu: gdyby czekal na „Save settings", odznaczenie
-     kanalu wygladaloby na zapisane, a nie byloby. */
-  return reachSaveChannels(reachCurrentChannels());
-}
-async function reachAddChannel(btn){
-  const nazwa=($('rc-new').value||'').trim();
-  if(!nazwa){toast('Paste a channel name first.','err');return}
-  const lista=reachCurrentChannels();
-  lista.push({username:nazwa,label:($('rc-newlabel').value||'').trim(),on:true});
-  return reachSaveChannels(lista,btn);
-}
-async function reachDropChannel(username){
-  return reachSaveChannels(reachCurrentChannels().filter(k=>k.username!==username));
-}
 function reachCardHtml(rc){
-  window._reach=rc;
   if(!rc)return'';
   const b=rc.balance||{};
   const saldo=b.error?`<span class="chip" style="border-color:var(--red-line);color:var(--red)">balance <b>${esc(b.error)}</b></span>`
     :`<span class="chip">balance <b>$${fmt(b.value)}</b></span>
-      <span class="chip"${b.low?' style="border-color:var(--red-line);color:var(--red)"':''}>about <b>${b.posts_left}</b> more posts</span>
-      <span class="chip">${rc.cost_from==='provider'?'':'~'}<b>$${(rc.unit_cost||0).toFixed(3)}</b> per post</span>`;
+      <span class="chip"${b.low?' style="border-color:var(--red-line);color:var(--red)"':''}>about <b>${b.posts_left}</b> more posts</span>`;
   return `<div class="sec-card" style="max-width:560px"><h3>Reach BOT</h3>
     <div class="chip-row" style="margin-bottom:12px">
       <span class="status ${rc.enabled?'funded':'pending'}"><span class="dot"></span>${rc.enabled?'running':'off'}</span>
       ${rc.provider_ready?saldo:''}
       ${rc.last_result?`<span class="chip">last <b>${esc(rc.last_result)}</b></span>`:''}
     </div>
-    ${rc.reactions_positive===false?`<div class="warn-box" style="margin:0 0 12px">
-      <div><b>This is not the positive reactions service.</b> Service
-      <span class="mono">${rc.svc_reactions}</span> is
-      &bdquo;${esc(rc.name_reactions)}&rdquo; — the negative variant sits one id away from the
-      positive one, so check the id before turning this on.</div></div>`:''}
     ${!rc.provider_ready?`<div class="warn-box" style="margin:0 0 12px">
       <div><b>Provider not configured.</b> Set <span class="mono">REACH_API_URL</span> and
       <span class="mono">REACH_API_KEY</span> in the environment. Posts still go out, they just
@@ -3962,82 +2200,57 @@ function reachCardHtml(rc){
         <input id="rc-qr" class="inp" type="number" min="0" step="1" value="${rc.qty_reactions}"></div>
       <div><label class="muted" style="font-size:12px">Views per post</label>
         <input id="rc-qv" class="inp" type="number" min="0" step="1" value="${rc.qty_views}"></div>
+      <div><label class="muted" style="font-size:12px">Reactions service id</label>
+        <input id="rc-sr" class="inp" type="number" min="1" step="1" value="${rc.svc_reactions}"></div>
+      <div><label class="muted" style="font-size:12px">Views service id</label>
+        <input id="rc-sv" class="inp" type="number" min="1" step="1" value="${rc.svc_views}"></div>
       <div><label class="muted" style="font-size:12px">Warn below ($)</label>
         <input id="rc-min" class="inp" type="number" min="0" step="0.5" value="${rc.min_balance}"></div>
+      <div><label class="muted" style="font-size:12px">Cost per post ($)</label>
+        <input id="rc-cost" class="inp" type="number" min="0.001" step="0.001" value="${rc.unit_cost}"></div>
     </div>
-    ${reachChannelsHtml(rc)}
-
-    <details style="margin:2px 0 12px">
-      <summary class="muted" style="font-size:12px;cursor:pointer">Provider services</summary>
-      <div class="pool-form" style="margin-top:8px">
-        <div><label class="muted" style="font-size:12px">Reactions service id</label>
-          <input id="rc-sr" class="inp" type="number" min="1" step="1" value="${rc.svc_reactions}"></div>
-        <div><label class="muted" style="font-size:12px">Views service id</label>
-          <input id="rc-sv" class="inp" type="number" min="1" step="1" value="${rc.svc_views}"></div>
-      </div>
-      ${rc.name_reactions?`<p class="muted" style="font-size:11.5px;margin:8px 0 0">
-        Ordering <b>${esc(rc.name_reactions)}</b>${rc.name_views?` and <b>${esc(rc.name_views)}</b>`:''}.</p>`:''}
-      <p class="muted" style="font-size:11.5px;margin:6px 0 0">Which product to order at the
-        provider. Only worth touching if a service is retired or you want a different one —
-        the price per post is read from the provider's own price list.</p>
-    </details>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn-p" onclick="saveReach(this)">Save settings</button>
-      <button class="btn-o" onclick="toggleReach(${rc.enabled?'false':'true'},this)">${rc.enabled?'Turn off':'Turn on'}</button>
+      <button class="btn-p" onclick="saveReach()">Save settings</button>
+      <button class="btn-o" onclick="toggleReach(${rc.enabled?'false':'true'})">${rc.enabled?'Turn off':'Turn on'}</button>
     </div>
     <div style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)">
       <label class="muted" style="font-size:12px">Boost a single post</label>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px">
         <input id="rc-link" class="inp" style="flex:1;min-width:220px" placeholder="https://t.me/channel/123">
-        <input id="rc-bqr" class="inp" style="width:112px" inputmode="numeric" placeholder="reactions">
-        <input id="rc-bqv" class="inp" style="width:112px" inputmode="numeric" placeholder="views">
-        <button class="btn-o" onclick="boostReach(this)">Boost</button>
+        <button class="btn-o" onclick="boostReach()">Boost</button>
       </div>
-      <p class="muted" style="font-size:11.5px;margin:6px 0 0">Leave the two numbers empty to use
-        whatever that channel is set to — fill them in to order a different amount just this once.</p>
     </div>
     <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
       Every post the Payout BOT publishes gets its reactions and views <b>right after it goes
-      out</b> — that is what the switch controls. Paste a link above to order for anything else
-      on the channel; that one works even while the bot is off. The balance
+      out</b>. Paste a link above to do the same for anything else on the channel. The balance
       alert lands in the bell and on your phone once a day while the account is below the
       threshold, and orders stop automatically when there is not enough left for one post.</p></div>`;
 }
-async function saveReach(btn){
+async function saveReach(){
   const body={
     qty_reactions:parseInt($('rc-qr').value,10), qty_views:parseInt($('rc-qv').value,10),
     svc_reactions:parseInt($('rc-sr').value,10), svc_views:parseInt($('rc-sv').value,10),
-    min_balance:parseFloat($('rc-min').value),
+    min_balance:parseFloat($('rc-min').value), unit_cost:parseFloat($('rc-cost').value),
   };
   if(Object.values(body).some(v=>isNaN(v))){toast('Fill every field with a number.','err');return}
-  return busy(btn,'Saving…',async()=>{
-    try{await api('/api/admin/reach',{method:'POST',body:JSON.stringify(body)});
-      toast('Reach BOT settings saved.','ok'); go('settings');
-    }catch(e){toast('Error: '+e.message,'err')}
-  });
+  try{await api('/api/admin/reach',{method:'POST',body:JSON.stringify(body)});
+    toast('Reach BOT settings saved.','ok'); go('settings');
+  }catch(e){toast('Error: '+e.message,'err')}
 }
-async function toggleReach(on,btn){
-  return busy(btn,'…',async()=>{
-    try{await api('/api/admin/reach',{method:'POST',body:JSON.stringify({enabled:on})});
-      toast(on?'Reach BOT is on. Every published post gets its reactions and views.'
-              :'Reach BOT is off. Posts go out with no extra reach.','ok');
-      go('settings');
-    }catch(e){toast('Error: '+e.message,'err')}
-  });
+async function toggleReach(on){
+  try{await api('/api/admin/reach',{method:'POST',body:JSON.stringify({enabled:on})});
+    toast(on?'Reach BOT is on. Every published post gets its reactions and views.'
+            :'Reach BOT is off. Posts go out with no extra reach.','ok');
+    go('settings');
+  }catch(e){toast('Error: '+e.message,'err')}
 }
-async function boostReach(btn){
+async function boostReach(){
   const link=($('rc-link').value||'').trim();
   if(!link){toast('Paste a post link first.','err');return}
-  const ile=id=>{const v=(($(id)||{}).value||'').trim();return v===''?null:Number(v)};
-  const body={link,qty_reactions:ile('rc-bqr'),qty_views:ile('rc-bqv')};
-  return busy(btn,'Ordering…',async()=>{
-    try{const r=await api('/api/admin/reach/boost',{method:'POST',body:JSON.stringify(body)});
-      const q=r.quantities||{};
-      toast(`Ordered ${q.qty_reactions??'?'} reactions and ${q.qty_views??'?'} views `
-            +`(${r.ordered}/2 services).`+(r.balance!=null?` Balance $${fmt(r.balance)}.`:''),'ok',7000);
-      go('settings');
-    }catch(e){toast('Error: '+e.message,'err')}
-  });
+  try{const r=await api('/api/admin/reach/boost',{method:'POST',body:JSON.stringify({link})});
+    toast(`Ordered for ${r.ordered}/2 services.`+(r.balance!=null?` Balance $${fmt(r.balance)}.`:''),'ok',7000);
+    go('settings');
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 
 async function savePayoutBot(){
@@ -4078,22 +2291,13 @@ async function runPayoutBot(){
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
-async function setBogoPromo(on){
-  try{await api('/api/admin/bogo-promo',{method:'POST',body:JSON.stringify({enabled:on})});
-    toast(on?'Buy 1 Get 1 Free is ON — the site shows the promo bar and every new paid order gets a free second account.'
-            :'Buy 1 Get 1 Free is off. Orders created while it was on keep their free account.','ok',8000);
-    go('settings');
-  }catch(e){toast('Error: '+e.message,'err')}
-}
 async function setSimFallback(on){
   try{await api('/api/admin/pool/sim-fallback',{method:'POST',body:JSON.stringify({enabled:on})});
     toast(on?'Auto-provisioning of simulated credentials is ON.':'Auto-provisioning turned off.','ok');
   }catch(e){toast('Error: '+e.message,'err');go('pool')}
 }
 function editPool(id){
-  /* '' zamiast 'table-row': na telefonie wiersz edycji jest kartą (display:flex
-     z .rtbl) i wpisany na sztywno table-row rozjechałby układ. */
-  const w=$('pool-edit-'+id); w.style.display=(w.style.display==='none'?'':'none');
+  const w=$('pool-edit-'+id); w.style.display=(w.style.display==='none'?'table-row':'none');
 }
 async function savePool(id,claimed){
   const body={platform_login:$('ed-login-'+id).value.trim(),
@@ -4127,8 +2331,7 @@ function delPool(id,login,retired){
 const GRANT_REASONS=['BOGO promotion','Free upgrade','Compensation','Partner deal','Contest prize','Marketing campaign'];
 
 const grantOpt=(t,chosen)=>`<option value="${t.id}"${chosen===t.id?' selected':''}>`
-  +`${esc(t.email)}${t.full_name?' — '+esc(t.full_name):''} (${t.accounts} acc.`
-  +`${t.referred_count?` · ${t.referred_count} referred`:''})</option>`;
+  +`${esc(t.email)}${t.full_name?' — '+esc(t.full_name):''} (${t.accounts} acc.)</option>`;
 
 function grantFilter(){
   const all=window._grantTraders||[],q=($('g-search').value||'').trim().toLowerCase();
@@ -4163,7 +2366,7 @@ async function openGrant(traderId){
   box.id='grant-modal';box.className='modal-wrap';
   box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
     <div class="modal-head"><h3>Grant a challenge</h3>
-      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('grant-modal').remove()">
+      <button class="icon-btn" onclick="document.getElementById('grant-modal').remove()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
     <p class="muted" style="font-size:12.5px;margin-bottom:14px">Creates a real MT5 account for the trader without payment and e-mails them the credentials. The account behaves exactly like a purchased one.</p>
     <div class="stack">
@@ -4185,7 +2388,7 @@ async function openGrant(traderId){
       <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
         <input type="checkbox" id="g-funded" style="width:16px;height:16px;accent-color:var(--acc)">
         Start as <b>funded</b>, skipping the evaluation entirely</label>
-      <button class="btn-p lg" style="width:100%" id="g-go" onclick="submitGrant()">Grant &amp; create account</button>
+      <button class="btn-p lg" style="width:100%" onclick="submitGrant()">Grant &amp; create account</button>
       <p class="hint">Trader gets an e-mail with the allocation and MT5 credentials.</p>
     </div></div>`;
   box.onclick=()=>box.remove();
@@ -4202,8 +2405,6 @@ async function submitGrant(){
     note:($('g-note').value||'').trim()||null,
     bogo_paid_key:$('g-paid').value||null,
     funded:$('g-funded').checked};
-  /* Drugi tap = drugie konto z mailem do tradera — blokada na czas requestu. */
-  const btn=$('g-go');btn.disabled=true;
   try{
     const r=await api('/api/admin/grant',{method:'POST',body:JSON.stringify(body)});
     document.getElementById('grant-modal')?.remove();
@@ -4211,7 +2412,7 @@ async function submitGrant(){
       ?'MT5 account is being created. Credentials e-mailed within a minute.'
       :'Credentials e-mailed to the trader.'}`,'ok',9000);
     go('accounts');
-  }catch(e){toast('Error: '+e.message,'err');btn.disabled=false}
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 
 /* ---------- one delete control for the whole panel ----------
@@ -4235,14 +2436,12 @@ async function xdel(url,question,after,okMsg){
      wskazuje juz przycisk modala i `closest` nie znajduje niczego. Wiersz nie
      znikal wiec wcale: zostawal na ekranie az do przeladowania widoku, a odliczanie
      do cofniecia sugerowalo, ze cos sie stalo. Dotyczylo to wszystkich piatki X-ow.
-     `.ticket-row` obok `tr`, bo zgloszenia nie sa tabela, tylko kaflami.
-     `_row` maja klony przyciskow w arkuszu long-press — klon zyje poza tabela,
-     wiec closest() nie znalazlby wiersza do schowania. */
-  const wiersz=_ostatniPrzycisk&&(_ostatniPrzycisk._row||_ostatniPrzycisk.closest('tr, .ticket-row'));
+     `.ticket-row` obok `tr`, bo zgloszenia nie sa tabela, tylko kaflami. */
+  const wiersz=_ostatniPrzycisk&&_ostatniPrzycisk.closest('tr, .ticket-row');
   const [tytul,...reszta]=String(question).split('\n\n');
   if(!await askConfirm({title:tytul.trim(),
     body:esc(reszta.join('\n').trim()).replace(/\n/g,'<br>'),
-    ok:'Delete',danger:true}))return false;
+    ok:'Delete',danger:true}))return;
   withUndo(tytul.trim().replace(/\?+$/,''),async()=>{
     try{const r=await api(url,{method:'DELETE',keepalive:true});
       toast(typeof okMsg==='function'?okMsg(r):(okMsg||'Deleted.'),'ok');
@@ -4252,9 +2451,6 @@ async function xdel(url,question,after,okMsg){
       if(wiersz&&wiersz.style)wiersz.style.display='';   // nie udalo sie — wroc
     }
   },wiersz);
-  /* Prawda/falsz mowi wolajacemu, czy usuwanie POSZLO do kolejki — slide-over
-     konta zamyka sie tylko wtedy, nie przy „Cancel". */
-  return true;
 }
 
 /* Removes the whole row from the ledger — a mistyped payout, a duplicate, an
@@ -4271,7 +2467,7 @@ function deletePayoutRow(kind,id,amount,login){
 }
 
 function deleteAccountRow(id,login,trader){
-  return xdel(`/api/accounts/${id}`,
+  xdel(`/api/accounts/${id}`,
     `Delete account ${login}${trader?` (${trader})`:''}?\n\nIts trades, snapshots, payouts and `
     +`certificates go with it. This cannot be undone.`,
     ()=>go('accounts'));
@@ -4317,7 +2513,7 @@ function openPayoutImport(){
   box.id='payimp-modal';box.className='modal-wrap';
   box.innerHTML=`<div class="modal" onclick="event.stopPropagation()" style="max-width:760px">
     <div class="modal-head"><h3>Import historical payouts</h3>
-      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('payimp-modal').remove()">
+      <button class="icon-btn" onclick="document.getElementById('payimp-modal').remove()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
     <p class="muted" style="font-size:12.5px;margin-bottom:14px">Paste one payout per line, CSV,
       starting with the header row. Missing traders and funded accounts are created for you.
@@ -4371,33 +2567,20 @@ async function payoutImport(commit){
   }
 }
 
-/* ---------- modal: order paid outside Stripe (card link, crypto, transfer) ----------
-   Opens two ways. From Orders you pick an existing customer. From a lead card you
-   pass `lead` ({id,email,name}) and there is nobody to pick — the lead has no
-   account and will not open one just to receive a payment link. The backend
-   creates it from the e-mail, which is also the only way this ever shows up as
-   "Bought": that column is derived from traders by e-mail, not stored. */
-async function openManualOrder(traderId,lead){
-  let products=[],traders=[],pct=0;
-  /* Rabat partnerski jest miły, ale nie jest warunkiem sprzedaży: gdyby jego
-     odczyt wywrócił okno, admin nie wystawiłby ŻADNEGO zamówienia przez zniżkę,
-     której akurat nie ma. Brak odpowiedzi = zero = okno bez tej opcji. */
-  let bogoOn=false;
-  try{[products,traders,pct,bogoOn]=await Promise.all([
-    (await fetch('/api/products')).json(),lead?[]:api('/api/admin/traders'),
-    api('/api/admin/partner-terms').then(d=>d.discount_pct||0).catch(()=>0),
-    /* Pre-fill checkboxa BOGO stanem globalnej promocji — admin widzi domyślną
-       decyzję i może ją nadpisać dla tego jednego zamówienia. */
-    api('/api/admin/bogo-promo').then(d=>!!d.enabled).catch(()=>false)])}
+/* ---------- modal: order paid outside Stripe (card link, crypto, transfer) ---------- */
+async function openManualOrder(traderId){
+  let products=[],traders=[];
+  try{[products,traders]=await Promise.all([
+    (await fetch('/api/products')).json(),api('/api/admin/traders')])}
   catch(e){toast('Error: '+e.message,'err');return}
-  if(!lead&&!traders.length){toast('No registered traders yet.','err');return}
-  window._moTraders=traders;window._moLead=lead||null;window._moPartnerPct=pct;
+  if(!traders.length){toast('No registered traders yet.','err');return}
+  window._moTraders=traders;
   document.getElementById('order-modal')?.remove();
   const box=document.createElement('div');
   box.id='order-modal';box.className='modal-wrap';
   box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
     <div class="modal-head"><h3>New order</h3>
-      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('order-modal').remove()">
+      <button class="icon-btn" onclick="document.getElementById('order-modal').remove()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
     <p class="muted" style="font-size:12.5px;margin-bottom:14px" id="mo-lead">For a customer paying outside Stripe — crypto or a transfer.
       The order lands as <b>unpaid</b>; the account is created only when you hit <b>Mark paid</b>, exactly like a card payment.</p>
@@ -4406,60 +2589,19 @@ async function openManualOrder(traderId,lead){
         <button type="button" class="on" onclick="moMethod('crypto')">Crypto / transfer</button>
         <button type="button" onclick="moMethod('link')">Card payment link</button>
       </div>
-      <div><label class="muted" style="font-size:12px">Payment page brand</label>
-        <div class="seg" id="mo-brand" style="width:100%">
-          <button type="button" class="on" onclick="moBrand('ptf')">Pro Traders Funding</button>
-          <button type="button" onclick="moBrand('fx')">Forex Passing</button>
-        </div>
-        <p class="hint" id="mo-brand-hint" style="display:none;margin-top:6px">The payment page renders
-          <b>Forex Passing</b> colours and logo — no PTF anywhere on it. No e-mail goes out
-          (our mails are PTF-branded); send the link yourself, e.g. on Telegram.</p></div>
-      <div><label class="muted" style="font-size:12px">Payment page headline <span style="opacity:.65">(optional)</span></label>
-        <input id="mo-headline" class="inp" maxlength="80"
-          placeholder="e.g. Weekend Flash Sale — empty keeps the default"></div>
-      ${lead?`<div><label class="muted" style="font-size:12px">Customer</label>
-        <div class="inp" style="display:flex;flex-direction:column;gap:2px">
-          <b>${esc(lead.name||lead.email)}</b>
-          <span class="muted" style="font-size:12px">${esc(lead.email)}</span></div></div>`
-      :`<div><label class="muted" style="font-size:12px">Customer</label>
-        <input id="mo-search" class="inp" type="search" autocapitalize="off" style="margin-bottom:7px" placeholder="Search by e-mail or name" oninput="moFilter()">
-        <select id="mo-trader" class="inp" size="5"></select></div>`}
+      <div><label class="muted" style="font-size:12px">Customer</label>
+        <input id="mo-search" class="inp" style="margin-bottom:7px" placeholder="Search by e-mail or name" oninput="moFilter()">
+        <select id="mo-trader" class="inp" size="5"></select></div>
       <div><label class="muted" style="font-size:12px">Challenge</label>
         <select id="mo-product" class="inp" onchange="moPrice()">${products.map(p=>
           `<option value="${esc(p.key)}" data-price="${p.price_usd}">${esc(p.label)} — $${fmt0(p.account_size)} · $${fmt(p.price_usd)}</option>`).join('')}</select></div>
-      <div style="display:grid;grid-template-columns:1fr 130px;gap:10px">
-        <div><label class="muted" style="font-size:12px">Amount to collect (USD)</label>
-          <input id="mo-amount" class="inp" type="number" inputmode="decimal" step="0.01" min="0"></div>
-        <div><label class="muted" style="font-size:12px">Discount %</label>
-          <input id="mo-discount" class="inp" type="number" inputmode="numeric" step="1" min="0" max="90"
-            placeholder="e.g. 30" oninput="const p=$('mo-partner');if(p)p.checked=false;moPrice()"
-            title="Recalculates the amount from the list price and shows a crossed-out list price on the payment page"></div>
-      </div>
-      ${pct?`<label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="mo-partner"${lead?' checked':''} onchange="moPrice()" style="width:16px;height:16px;accent-color:var(--acc)">
-        <span>Partner price <b>−${pct}%</b>
-          <span class="muted">— the rate agreed for customers the partner brings in</span></span></label>`:''}
-      <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="mo-bogo"${bogoOn?' checked':''} style="width:16px;height:16px;accent-color:var(--acc)">
-        <span><b>Buy 1 Get 1 Free</b>
-          <span class="muted">— a second account of the same size is created automatically once this order is paid</span></span></label>
-      <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="mo-weekend" onchange="moWeekend()" style="width:16px;height:16px;accent-color:var(--acc)">
-        <span><b>Weekend Trading</b> <b>+$199</b>
-          <span class="muted">— 2 extra trading days/week; added on top of the amount, outside the discount</span></span></label>
-      <label id="mo-wkfree-row" style="display:none;align-items:center;gap:9px;font-size:13px;cursor:pointer;margin-left:25px">
-        <input type="checkbox" id="mo-wkfree" onchange="moPrice()" style="width:16px;height:16px;accent-color:var(--acc)">
-        <span><b>On the house</b>
-          <span class="muted">— the add-on still lands on the account, but the $199 is not charged; the page shows it as FREE</span></span></label>
-      <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="mo-funded" style="width:16px;height:16px;accent-color:var(--acc)">
-        <span><b>Open as funded</b>
-          <span class="muted">— the account skips the evaluation and starts straight in the funded phase once this order is paid</span></span></label>
+      <div><label class="muted" style="font-size:12px">Amount to collect (USD)</label>
+        <input id="mo-amount" class="inp" type="number" step="0.01" min="0"></div>
       <div class="stack" id="mo-crypto">
         <div><label class="muted" style="font-size:12px">Network</label>
           <input id="mo-network" class="inp" placeholder="e.g. USDT · TRC20" value="${esc(lastWallet().network||'')}"></div>
         <div><label class="muted" style="font-size:12px">Wallet address <span style="opacity:.65">(goes into the e-mail)</span></label>
-          <input id="mo-address" class="inp" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="Paste the wallet address" value="${esc(lastWallet().address||'')}"></div>
+          <input id="mo-address" class="inp" spellcheck="false" placeholder="Paste the wallet address" value="${esc(lastWallet().address||'')}"></div>
         <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
           <input type="checkbox" id="mo-awaiting" checked style="width:16px;height:16px;accent-color:var(--acc)">
           Mark as <b>awaiting crypto payment</b></label>
@@ -4473,38 +2615,24 @@ async function openManualOrder(traderId,lead){
     </div></div>`;
   box.onclick=()=>box.remove();
   document.body.appendChild(box);
-  /* A lead is always here to be sent a link, so start there. */
-  moMethod(lead?'link':(window._moMethodPref||'crypto'));
-  /* Marka NIE jest zapamiętywana między otwarciami: wysłanie klientowi PTF
-     strony w barwach FX (albo odwrotnie) to błąd, który ma być niemożliwy
-     z rozpędu — każde okno startuje od PTF. */
-  moBrand('ptf');
-  if(!lead)moFilter(traderId);
+  moMethod(window._moMethod||'crypto');
+  moFilter(traderId);
   moPrice();
 }
 /* Jak klient płaci. Link kartą nie ma nic wspólnego z portfelem, więc pola
    crypto znikają — inaczej admin wysyłałby maila z adresem USDT komuś, kogo
-   właśnie kieruje do kasy Stripe'a.
-
-   Dwie różne rzeczy trzymamy celowo osobno: `_moMethod` to stan TEGO okna i
-   z niego czyta `submitManualOrder`, a `_moMethodPref` to zapamiętany domyślny
-   wybór zakładki Orders. Lead zawsze startuje na linku i nie ma prawa tego
-   wyboru nadpisać następnym otwarciom. */
+   właśnie kieruje do kasy Stripe'a. */
 function moMethod(m){
   window._moMethod=m;
-  if(!window._moLead)window._moMethodPref=m;
   const link=m==='link';
   $('mo-method').querySelectorAll('button').forEach((b,i)=>b.classList.toggle('on',(i===1)===link));
   $('mo-crypto').style.display=link?'none':'';
   $('mo-go').textContent=link?'Create order & copy payment link':'Create order';
-  $('mo-lead').innerHTML=(link
+  $('mo-lead').innerHTML=link
     ?`The order lands as <b>unpaid</b> and you get a link to our payment page — send it to the customer
       (Telegram, chat, e-mail). They pay by card, the account is created automatically. The link never expires.`
     :`For a customer paying outside Stripe — crypto or a transfer.
-      The order lands as <b>unpaid</b>; the account is created only when you hit <b>Mark paid</b>, exactly like a card payment.`)
-    +(window._moLead?`<br><br>This lead has no account yet, so one is opened on their e-mail.
-      They have no password for it — they get in through <b>“Forgot password?”</b>. Once the
-      payment goes through, the lead shows up as <b>Bought</b> on its own.`:'');
+      The order lands as <b>unpaid</b>; the account is created only when you hit <b>Mark paid</b>, exactly like a card payment.`;
 }
 function moFilter(preselect){
   const q=($('mo-search').value||'').toLowerCase();
@@ -4518,84 +2646,31 @@ function moFilter(preselect){
   if(sel.selectedIndex<0&&hit.length)sel.selectedIndex=0;
   sel.selectedOptions[0]?.scrollIntoView({block:'nearest'});
 }
-/* Cenę partnerską liczy panel, a nie serwer, bo admin ma ją zobaczyć ZANIM
-   kliknie „utwórz" — kwota, która zmienia się po zatwierdzeniu, to przy
-   pieniądzach zła niespodzianka. Serwer odnotowuje tylko, że rabat był. */
 function moPrice(){
   const o=$('mo-product').selectedOptions[0];
-  if(!o)return;
-  /* Cena partnerska i ręczny rabat się NIE składają (serwer to samo mówi 400-tką):
-     zaznaczenie partnera czyści pole rabatu, wpisanie rabatu odznacza partnera. */
-  const partner=$('mo-partner')?.checked;
-  if(partner)$('mo-discount').value='';
-  const pct=partner?(window._moPartnerPct||0)
-    :Math.min(90,Math.max(0,parseFloat($('mo-discount').value)||0));
-  /* Weekend POZA rabatem — ta sama kolejność co w checkoucie (kupon dotyczy
-     planu). $199 jest zaszyte jak w portalu (portal-app.js, wiersz add-onu).
-     Weekend „on the house" nie dolicza nic. */
-  const wk=($('mo-weekend')?.checked&&!$('mo-wkfree')?.checked)?199:0;
-  $('mo-amount').value=(o.dataset.price*(1-pct/100)+wk).toFixed(2);
-}
-/* Pod-checkbox „gratis" pokazuje się tylko przy zaznaczonym weekendzie —
-   odznaczenie weekendu go czyści, żeby nie został cichy stan z poprzedniej
-   decyzji i nie wysłał „free" bez samego add-onu. */
-function moWeekend(){
-  const on=$('mo-weekend').checked;
-  $('mo-wkfree-row').style.display=on?'flex':'none';
-  if(!on)$('mo-wkfree').checked=false;
-  moPrice();
-}
-function moBrand(m){
-  window._moBrand=m;
-  $('mo-brand').querySelectorAll('button').forEach((b,i)=>b.classList.toggle('on',(i===1)===(m==='fx')));
-  $('mo-brand-hint').style.display=m==='fx'?'':'none';
+  if(o)$('mo-amount').value=o.dataset.price;
 }
 async function submitManualOrder(){
-  const lead=window._moLead;
-  const tid=lead?0:parseInt($('mo-trader').value);
-  if(!lead&&!tid){toast('Pick a customer first.','err');return}
+  const tid=parseInt($('mo-trader').value);
+  if(!tid){toast('Pick a customer first.','err');return}
   const amount=parseFloat($('mo-amount').value);
   if(!(amount>=0)){toast('Enter the amount to collect.','err');return}
-  const disc=$('mo-partner')?.checked?0:Math.round(parseFloat($('mo-discount').value)||0);
-  if(disc<0||disc>90){toast('Discount must be between 0 and 90%.','err');return}
   const link=window._moMethod==='link';
   const addr=link?'':($('mo-address').value||'').trim();
   const net=link?'':($('mo-network').value||'').trim();
-  /* Mail z instrukcją płatności bez adresu/sieci to prośba „zapłać donikąd" —
-     blokada tylko gdy mail faktycznie wyjdzie. */
-  if(!link&&$('mo-mail').checked&&(!addr||!net)){
-    toast('The payment e-mail needs a wallet address and network — fill both or untick the e-mail.','err');return}
   if(addr)saveWallet(addr,net);
-  /* Na wolnej sieci drugi tap przed odpowiedzia zalozylby DRUGIE zamowienie
-     (i konto leada) — blokada jak w submitNewLead. */
-  const btn=$('mo-go');btn.disabled=true;
   try{
     const r=await api('/api/admin/orders',{method:'POST',body:JSON.stringify({
-      ...(lead?{email:lead.email}:{trader_id:tid}),
-      product_key:$('mo-product').value,amount_usd:amount,
-      partner_discount:!!$('mo-partner')?.checked,
-      brand:window._moBrand||'ptf',
-      open_funded:!!$('mo-funded')?.checked,
-      weekend_trading:!!$('mo-weekend')?.checked,
-      weekend_free:!!$('mo-wkfree')?.checked,
-      headline:($('mo-headline')?.value||'').trim(),
-      ...(disc>0?{discount_pct:disc}:{}),
-      bogo:!!$('mo-bogo')?.checked,
+      trader_id:tid,product_key:$('mo-product').value,amount_usd:amount,
       flag:(!link&&$('mo-awaiting').checked)?'awaiting_crypto':'',
       payment_address:addr,payment_network:net,
       notify_trader:!link&&$('mo-mail').checked})});
     document.getElementById('order-modal')?.remove();
-    // Nowe konto trzeba powiedzieć wprost: klient go nie zakładał i nie zna
-    // hasła, więc dział musi wiedzieć, co odpowiedzieć na "nie mogę się zalogować".
-    const konto=r.trader_created?' New account opened — they log in via “Forgot password?”.':'';
-    if(link){await payLink(r.id,`Order #${r.id} for ${r.trader_email} — $${fmt(r.amount_usd)}.${konto}`)}
+    if(link){await payLink(r.id,`Order #${r.id} for ${r.trader_email} — $${fmt(r.amount_usd)}.`)}
     else{const [txt,kind]=mailInfo(r);
-      toast(`🧾 Order #${r.id} for ${r.trader_email} — $${fmt(r.amount_usd)}. ${txt}${konto}`,kind,9000)}
-    // Z karty leada zostajemy przy leadzie: nowe zamówienie dopisuje się do
-    // jego tabeli Orders, a skok do zakładki Orders gubiłby miejsce w robocie.
-    if(lead){await openLead(lead.id);renderLeads()}
-    else go('orders');
-  }catch(e){toast('Error: '+e.message,'err');btn.disabled=false}
+      toast(`🧾 Order #${r.id} for ${r.trader_email} — $${fmt(r.amount_usd)}. ${txt}`,kind,9000)}
+    go('orders');
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 
 /* ---------- modal: store credits ---------- */
@@ -4608,7 +2683,7 @@ async function openCredits(traderId){
   box.id='credits-modal';box.className='modal-wrap';
   box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
     <div class="modal-head"><h3>Add store credits</h3>
-      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('credits-modal').remove()">
+      <button class="icon-btn" onclick="document.getElementById('credits-modal').remove()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
     <p class="muted" style="font-size:12.5px;margin-bottom:14px">Credits are a USD store balance:
       they reduce the price of the trader's next challenge automatically at checkout.
@@ -4618,9 +2693,9 @@ async function openCredits(traderId){
         <select id="cr-trader" class="inp" onchange="creditsBalance()">${traders.map(t=>
           `<option value="${t.id}" data-credits="${t.credits_usd||0}"${traderId===t.id?' selected':''}>${esc(t.email)}${t.full_name?' — '+esc(t.full_name):''}</option>`).join('')}</select></div>
       <div class="muted" id="cr-balance" style="font-size:12.5px"></div>
-      <input id="cr-amount" class="inp" type="number" inputmode="numeric" step="1" placeholder="Amount in USD, e.g. 100">
+      <input id="cr-amount" class="inp" type="number" step="1" placeholder="Amount in USD, e.g. 100">
       <input id="cr-note" class="inp" placeholder="Note for the ledger, e.g. Contest prize">
-      <button class="btn-p lg" style="width:100%" id="cr-go" onclick="submitCredits()">Add credits</button>
+      <button class="btn-p lg" style="width:100%" onclick="submitCredits()">Add credits</button>
       <p class="hint">The balance is spent automatically on the trader's next purchase.</p>
     </div></div>`;
   box.onclick=()=>box.remove();
@@ -4635,14 +2710,12 @@ function creditsBalance(){
 async function submitCredits(){
   const amount=parseFloat($('cr-amount').value);
   if(!amount){toast('Enter a non-zero amount.','err');return}
-  /* Drugi tap = saldo doliczone dwa razy — blokada na czas requestu. */
-  const btn=$('cr-go');btn.disabled=true;
   try{
     const r=await api(`/api/admin/traders/${$('cr-trader').value}/credits`,{method:'POST',
       body:JSON.stringify({amount,note:($('cr-note').value||'').trim()||null})});
     document.getElementById('credits-modal')?.remove();
     toast(`💳 ${r.email} now has $${fmt(r.credits_usd)} in store credits.`,'ok',7000);
-  }catch(e){toast('Error: '+e.message,'err');btn.disabled=false}
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 
 /* ---------- modal: new account ---------- */
@@ -4654,20 +2727,15 @@ async function openCreate(){
   box.id='create-modal';box.className='modal-wrap';
   box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
     <div class="modal-head"><h3>New challenge account</h3>
-      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('create-modal').remove()">
+      <button class="icon-btn" onclick="document.getElementById('create-modal').remove()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
     <p class="muted" style="font-size:12.5px;margin-bottom:14px">Everything typed by hand, from an MT5 account outside the pool — nothing is taken from MT5 Pool and its state stays untouched. Drawdown type comes from the plan you pick.</p>
     <div class="stack">
-      <div><label class="muted" style="font-size:12px" for="c-login">MT5 login</label>
-        <input id="c-login" class="inp" inputmode="numeric" autocomplete="off" placeholder="e.g. 100099"></div>
-      <div><label class="muted" style="font-size:12px" for="c-pass">MT5 password</label>
-        <input id="c-pass" class="inp" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="As set at the broker"></div>
-      <div><label class="muted" style="font-size:12px" for="c-server">MT5 server</label>
-        <input id="c-server" class="inp" spellcheck="false" autocapitalize="off" placeholder="e.g. MetaQuotes-Demo"></div>
-      <div><label class="muted" style="font-size:12px" for="c-name">Trader name</label>
-        <input id="c-name" class="inp" autocapitalize="words" placeholder="Shown in the portal and e-mails"></div>
-      <div><label class="muted" style="font-size:12px" for="c-email">Trader e-mail <span style="opacity:.65">(links the account to their portal)</span></label>
-        <input id="c-email" class="inp" type="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="trader@example.com"></div>
+      <input id="c-login" class="inp" placeholder="MT5 login (e.g. 100099)">
+      <input id="c-pass" class="inp" placeholder="MT5 password">
+      <input id="c-server" class="inp" placeholder="MT5 server (e.g. MetaQuotes-Demo)">
+      <input id="c-name" class="inp" placeholder="Trader name">
+      <input id="c-email" class="inp" placeholder="Trader e-mail (links the account to their portal)">
       <div><label class="muted" style="font-size:12px">Challenge</label>
         <select id="c-product" class="inp">${products.map(p=>
           `<option value="${esc(p.key)}">${esc(p.label)} — $${fmt0(p.account_size)} · normally $${fmt0(p.price_usd)}</option>`).join('')}</select></div>
@@ -4680,7 +2748,7 @@ async function openCreate(){
         <select id="c-paid" class="inp">
           <option value="">— not a paid upgrade —</option>
           ${products.map(p=>`<option value="${esc(p.key)}">${esc(p.label)} — $${fmt0(p.account_size)}</option>`).join('')}</select></div>
-      <button class="btn-p lg" style="width:100%" id="c-go" onclick="submitCreate()">Create account</button>
+      <button class="btn-p lg" style="width:100%" onclick="submitCreate()">Create account</button>
       <p class="hint">If the e-mail matches a registered trader, the account shows up in their portal and they get the credentials by e-mail.</p>
     </div></div>`;
   box.onclick=()=>box.remove();
@@ -4696,15 +2764,13 @@ async function submitCreate(){
     note:($('c-note').value||'').trim()||null,
     bogo_paid_key:$('c-paid').value||null};
   if(!body.login){toast('MT5 login is required.','err');return}
-  /* Drugi tap = drugie konto z tym samym loginem — blokada na czas requestu. */
-  const btn=$('c-go');btn.disabled=true;
   try{const r=await api('/api/accounts',{method:'POST',body:JSON.stringify(body)});
     document.getElementById('create-modal')?.remove();
     toast(r.email_unknown?'Account created, but no trader with that e-mail, so it has no owner yet.'
           :r.linked_trader?`Account created for ${r.linked_trader}.`:'Account created.',
           r.email_unknown?'err':'ok');
     go('accounts');
-  }catch(e){toast('Error: '+e.message,'err');btn.disabled=false}
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 
 /* ---------- admin inbox (bell) ---------- */
@@ -4786,7 +2852,7 @@ const PUSH_GROUPS=[
 function pushCatsHtml(){
   const cats=(ME&&ME.ui_prefs&&ME.ui_prefs.admin_push)||{};
   return PUSH_GROUPS.map(([grupa,katy])=>`
-    <div class="lbl" style="font-size:var(--fs-cap);color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">${grupa}</div>
+    <div class="lbl" style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">${grupa}</div>
     <div class="chip-row">${katy.map(([k,l])=>`<label class="chip" style="cursor:pointer;display:inline-flex;gap:6px;align-items:center">
       <input type="checkbox" ${cats[k]===false?'':'checked'} onchange="setPushCat('${k}',this.checked)">${l}</label>`).join('')}</div>`).join('');
 }
@@ -4865,12 +2931,12 @@ async function tgPollLink(pozostalo){
   _tgPoll=setTimeout(()=>tgPollLink(pozostalo-1),3000);
 }
 async function tgLinkTest(btn){
-  await busy(btn,'Sending…',async()=>{
-    try{
-      await api('/api/me/telegram-link/test',{method:'POST'});
-      toast('📨 Test sent — check your Telegram','ok');
-    }catch(e){toast('Test failed: '+e.message,'err')}
-  });
+  btn.disabled=true;btn.textContent='Sending…';
+  try{
+    await api('/api/me/telegram-link/test',{method:'POST'});
+    toast('📨 Test sent — check your Telegram','ok');
+  }catch(e){toast('Test failed: '+e.message,'err')}
+  btn.disabled=false;btn.textContent='Send test message';
 }
 async function paintPushCard(){
   const btn=$('push-btn'),st=$('push-state');
@@ -4954,233 +3020,18 @@ if(localStorage.getItem('pf_admin_collapsed')==='1')$('side').classList.add('col
     ME=m; $('tok-state').textContent=m.email;
     $('app-shell').style.visibility='visible';   // only now reveal the panel
     /* Deep-link z pusha (zimny start): /admin?lead=<id> otwiera kartę leada.
-       Adres wraca na /admin?pwa=1 — NIE na gołe /admin: bez `pwa=1` odświeżenie
-       strony po wygaśnięciu ciasteczka trafia w celowy 404 serwera i admin
-       "wylatuje z aplikacji", zamiast przejść przez furtkę i ekran logowania. */
+       Adres od razu wraca na czyste /admin — razem z `?pwa=1` z manifestu,
+       żeby odświeżenie strony nie powtarzało nawigacji. */
     const lead=new URLSearchParams(location.search).get('lead');
-    /* Hasz trzeba odczytac PRZED przepisaniem adresu i dokleic z powrotem —
-       inaczej `replaceState` nizej skasowalby wlasnie odzyskany stan. */
-    const st=czytajHasz();
-    const hasz=st?'#'+haszZe(st):'';
-    if(location.search!=='?pwa=1'||location.hash!==hasz)
-      history.replaceState(null,'','/admin?pwa=1'+hasz);
-    OSTATNI_HASZ=hasz.slice(1);
-    if(lead){go('leads');openLead(+lead)}   // deep-link z pusha wygrywa z haszem
-    else if(st){ustawStan(st);go(st.view)}  // globale PRZED go(): widok czyta je od razu
+    if(location.search)history.replaceState(null,'','/admin');
+    if(lead){go('leads');openLead(+lead)}
     else go('overview');
     applyPendingLead();
     loadInbox();
-  }catch(e){
-    if(e&&e.message==='Access denied')return; /* api() already redirected to login */
-    /* Blad sieci na zimnym starcie (PWA w windzie, słaby zasięg): bez tego
-       szkielet zostawał niewidoczny na zawsze — martwy bialy ekran. */
-    document.body.insertAdjacentHTML('beforeend',
-      `<div style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;background:var(--bg,#f6f7fb);z-index:99">
-        <div style="font-weight:700">No connection</div>
-        <div style="font-size:13px;color:#64748b">The panel could not load. Check your network and try again.</div>
-        <button class="btn-p" onclick="location.reload()">Retry</button>
-      </div>`);
-  }
+  }catch(e){/* api() already redirected to login */}
 })();
 setInterval(()=>{
   if(document.hidden)return;
-  /* Nie przerysowuj pod rekami: re-render zabija fokus i kursor w wyszukiwarce
-     albo w polu otwartego modala — tick poczeka na nastepny obrot. */
-  const a=document.activeElement;
-  if(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT'))return;
   if(VIEW==='overview'||VIEW==='accounts')VIEWS[VIEW]().catch(()=>{});
 },12000);
-/* Lista leadow to jedyny widok, w ktorym dane zmienia KTOS INNY — klik
-   „Przejmuje" leci z kanalu, nie z tego panelu. Bez odswiezania dwie osoby
-   pisza do tego samego czlowieka, bo obie maja wiersz z `owner: null` sprzed
-   kwadransa. Wolniej niz tick wyzej, bo to pelna tabela plus cztery zapytania
-   zbiorcze, a „kto wzial" zmienia sie rzadziej niz equity. */
-setInterval(()=>{
-  if(document.hidden||VIEW!=='leads')return;
-  const a=document.activeElement;
-  if(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT'))return;
-  /* Szuflada i arkusz mieszkaja poza `#view`, wiec przerysowanie tabeli ich nie
-     zamyka — ale podmiana listy pod reka w trakcie wybierania statusu wyglada
-     jak awaria panelu. Odswiezenie poczeka na zamkniecie. */
-  if($('act-sheet')||$('over').classList.contains('open'))return;
-  VIEWS.leads().catch(()=>{});
-},30000);
 setInterval(()=>{if(!document.hidden&&ME)loadInbox()},60000);
-
-/* ---------------- offline ----------------
-   PWA otwarta w windzie pokazuje ostatnie dane, ale kazdy zapis przepadnie.
-   Pasek mowi to wprost, zamiast pozwalac klikac w proznie. */
-function paintOffline(){
-  const bar=document.querySelector('.offline-bar');
-  if(navigator.onLine){bar&&bar.remove();return}
-  if(bar)return;
-  const b=document.createElement('div');b.className='offline-bar';
-  b.textContent='Offline — showing the last loaded data, changes will not save.';
-  /* Nad paskiem gornym, w normalnym ukladzie. Przyklejony na fixed zaslanialby
-     hamburger i przyciski akcji — akurat wtedy, gdy trzeba przejsc do widoku,
-     ktory sie zdazyl zaladowac. */
-  const m=document.querySelector('.main');
-  m?m.prepend(b):document.body.prepend(b);
-}
-addEventListener('online',()=>{paintOffline();toast('Back online.','ok',3000)});
-addEventListener('offline',paintOffline);
-paintOffline();
-
-/* ---------------- walidacja przy wyjsciu z pola ----------------
-   Jedna delegacja dla wszystkich formularzy panelu: pole .inp z trescia,
-   ktore nie przechodzi checkValidity (type=email, required, min itd.),
-   dostaje czerwona ramke i komunikat przegladarki pod spodem — style .bad
-   i .field-err juz istnieja w portal.css. Puste pole nie krzyczy: wymagane
-   braki wylapuje i tak przycisk zapisu. */
-document.addEventListener('focusout',e=>{
-  const el=e.target;
-  if(!(el instanceof HTMLInputElement)||!el.classList.contains('inp'))return;
-  const nast=el.nextElementSibling;
-  const err=nast&&nast.classList&&nast.classList.contains('field-err')?nast:null;
-  if(el.value&&!el.checkValidity()){
-    el.classList.add('bad');
-    const box=err||el.insertAdjacentElement('afterend',
-      Object.assign(document.createElement('div'),{className:'field-err'}));
-    box.textContent=el.validationMessage;
-  }else{el.classList.remove('bad');err&&err.remove()}
-});
-
-/* ---------------- szybkie akcje: long-press na karcie (telefon) ----------------
-   Przyciski wiersza mieszkaja na dole karty .rtbl — przytrzymanie karty pol
-   sekundy otwiera dolny arkusz (portalowy .sheet) ze SKLONOWANYMI przyciskami.
-   cloneNode zachowuje inline onclick, wiec klony robia dokladnie to samo;
-   `_row` wskazuje zrodlowy wiersz, zeby undo po usunieciu schowalo wlasciwa
-   karte (patrz xdel). */
-function closeActSheet(){
-  const s=document.getElementById('act-sheet');
-  if(!s)return;
-  s.classList.remove('open');
-  setTimeout(()=>{s.remove();document.getElementById('act-veil')?.remove()},180);
-}
-function openActSheet(tr){
-  if(document.getElementById('act-sheet'))return;
-  /* `:scope>.btn-x` lapie X na kaflu ticketa — tam przycisk lezy prosto
-     w wierszu, nie w komorce .rt-acts. */
-  const btns=[...tr.querySelectorAll('.rt-acts button,.rt-acts a,.lead-acts button,.lead-acts a,:scope>.btn-x')];
-  if(!btns.length)return;
-  const veil=document.createElement('div');veil.id='act-veil';veil.className='sheet-veil';
-  veil.onclick=closeActSheet;
-  const s=document.createElement('div');s.id='act-sheet';s.className='sheet';
-  s.innerHTML='<div class="sheet-grab"></div><div class="act-sheet-title"></div><div class="act-sheet-list"></div>';
-  const tytul=(tr.querySelector('.rt-main, .sub b')?.innerText||'').trim().split('\n')[0];
-  s.querySelector('.act-sheet-title').textContent=tytul||'Actions';
-  const list=s.querySelector('.act-sheet-list');
-  btns.forEach(b=>{
-    const c=b.cloneNode(true);
-    c._row=tr;
-    /* przyciski-ikony (X, kopiowanie openera) dostaja w arkuszu podpis z title */
-    if(!c.textContent.trim()&&(b.title||b.getAttribute('aria-label')))
-      c.append(' '+(b.title||b.getAttribute('aria-label')));
-    c.addEventListener('click',closeActSheet);
-    list.appendChild(c);
-  });
-  document.body.append(veil,s);
-  requestAnimationFrame(()=>s.classList.add('open'));
-  try{navigator.vibrate&&navigator.vibrate(10)}catch(_){}
-}
-let _lpT=null,_lpXY=null,_lpFired=false;
-addEventListener('touchstart',e=>{
-  if(!matchMedia('(max-width:860px)').matches)return;
-  const tr=e.target.closest&&e.target.closest('table.rtbl tr,.ticket-row');
-  if(!tr||tr.classList.contains('tr-sub'))return;
-  /* start na przycisku/polu = zwykla interakcja, nie long-press */
-  if(e.target.closest('button,a,input,select,textarea'))return;
-  _lpXY=[e.touches[0].clientX,e.touches[0].clientY];
-  _lpT=setTimeout(()=>{
-    _lpT=null;_lpFired=true;openActSheet(tr);
-    setTimeout(()=>{_lpFired=false},700);   // gdy click w ogole nie przyjdzie
-  },500);
-},{passive:true});
-addEventListener('touchmove',e=>{
-  if(!_lpT)return;
-  const dx=e.touches[0].clientX-_lpXY[0],dy=e.touches[0].clientY-_lpXY[1];
-  if(dx*dx+dy*dy>100){clearTimeout(_lpT);_lpT=null}   // to przewijanie, nie przytrzymanie
-},{passive:true});
-addEventListener('touchend',()=>{if(_lpT){clearTimeout(_lpT);_lpT=null}});
-addEventListener('touchcancel',()=>{if(_lpT){clearTimeout(_lpT);_lpT=null}});
-/* po otwarciu arkusza klik konczacy przytrzymanie nie moze otworzyc wiersza */
-addEventListener('click',e=>{
-  if(_lpFired){_lpFired=false;e.stopPropagation();e.preventDefault()}
-},true);
-
-/* ---------------- pull-to-refresh (mobile / PWA) ----------------
-   Zainstalowana PWA nie ma przycisku ani gestu odswiezania — jedyna droga do
-   swiezych danych bylo przelaczenie zakladki. Pociagniecie w dol przy samej
-   gorze strony przeladowuje DANE biezacego widoku (nie cala strone: pelny
-   reload traci stan i na slabym zasiegu potrafi wywalic z panelu). */
-(function(){
-  if(!('ontouchstart' in window))return;
-  let startY=0,pull=0,armed=false,busy=false,el=null;
-  const THRESH=72;
-  function ind(){
-    if(el)return el;
-    el=document.createElement('div');el.id='ptr';
-    el.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>';
-    document.body.appendChild(el);return el;
-  }
-  /* Gest rusza tylko, gdy przewija sie sam dokument: wewnetrzne scrolle
-     (szuflada, arkusz, tabela) maja wlasna fizyke i nie moga odpalac odswiezania. */
-  function wewnetrznyScroll(n){
-    for(;n&&n!==document.body;n=n.parentElement){
-      if(n.nodeType!==1)continue;
-      const s=getComputedStyle(n);
-      if((s.overflowY==='auto'||s.overflowY==='scroll')&&n.scrollHeight>n.clientHeight+1)return true;
-    }
-    return false;
-  }
-  addEventListener('touchstart',e=>{
-    armed=false;pull=0;
-    if(busy||!ME||window.scrollY>0)return;
-    if($('over').classList.contains('open')||document.getElementById('act-sheet')
-       ||document.body.classList.contains('nav-open'))return;
-    const a=document.activeElement;
-    if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))return; /* klawiatura otwarta */
-    if(wewnetrznyScroll(e.target))return;
-    startY=e.touches[0].clientY;armed=true;
-  },{passive:true});
-  addEventListener('touchmove',e=>{
-    if(!armed||busy)return;
-    pull=e.touches[0].clientY-startY;
-    const i=ind();
-    if(pull<=8){i.classList.remove('show','ready');return}
-    const p=Math.min(pull,120);
-    i.classList.add('show');
-    i.style.transform=`translateX(-50%) translateY(${Math.round(p*0.55)}px) rotate(${Math.round(p*2)}deg)`;
-    i.classList.toggle('ready',pull>THRESH);
-  },{passive:true});
-  async function koniec(){
-    if(!armed)return;armed=false;
-    const i=ind(),odpal=pull>THRESH&&!busy;
-    pull=0;
-    if(!odpal){i.classList.remove('show','ready');i.style.transform='';return}
-    busy=true;i.classList.remove('ready');i.classList.add('show','spin');
-    i.style.transform='translateX(-50%) translateY(46px)';
-    /* Minimalne pol sekundy krecenia — blyskajacy na ulamek klatki wskaznik
-       wyglada jak usterka, nie jak potwierdzenie. */
-    const chwila=new Promise(r=>setTimeout(r,500));
-    try{await Promise.all([(VIEWS[VIEW]||(()=>Promise.resolve()))(),loadInbox(),chwila])}
-    catch(_){}
-    busy=false;i.classList.remove('show','spin');i.style.transform='';
-  }
-  addEventListener('touchend',koniec,{passive:true});
-  addEventListener('touchcancel',koniec,{passive:true});
-})();
-
-/* ---------------- klawiatura ekranowa vs dolny pasek ----------------
-   position:fixed na iOS nie wie nic o klawiaturze: pasek "przykleja sie" nad
-   nia albo zawisa w polowie ekranu. Na czas pisania pasek znika
-   (body.kb-open w portal.css), wraca po zamknieciu klawiatury. */
-addEventListener('focusin',e=>{
-  if(e.target.matches&&e.target.matches('input,textarea,select'))
-    document.body.classList.add('kb-open');
-});
-addEventListener('focusout',()=>setTimeout(()=>{
-  const a=document.activeElement;
-  if(!(a&&a.matches&&a.matches('input,textarea,select')))
-    document.body.classList.remove('kb-open');
-},80));

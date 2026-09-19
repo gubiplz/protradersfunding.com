@@ -15,7 +15,7 @@ os.environ.setdefault("ADMIN_TOKEN", "tajny-token")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import auth, catalog, notify, payout_import  # noqa: E402
+from app import auth, catalog, notify  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
@@ -888,133 +888,6 @@ def test_kyc_reject_i_historia_decyzji():
         assert wpis["status"] == "approved"
 
 
-def test_prosba_o_kyc_z_panelu(monkeypatch):
-    """Klient, który nigdy nie wszedł w zakładkę weryfikacji, nie dostaje od nas
-    w tej sprawie ŻADNEGO maila — wychodzi to dopiero przy wniosku o wypłatę,
-    którym trzeba wtedy odmówić. Przycisk w panelu jest jedynym sposobem, żeby go
-    poprosić, i musi działać także PRZED funded: prośba sama otwiera weryfikację,
-    bo inaczej mail zapraszałby na ekran, który odbija 403.
-    """
-    maile = []
-    monkeypatch.setattr(notify, "_send_teraz",
-                        lambda event, to, ctx=None: maile.append((event, to, ctx or {})))
-    tid, h = _trader("kyc-prosba@test.pl", "Prosba Kyc")
-    with TestClient(app) as c:
-        assert c.get("/api/auth/me", headers=h).json()["kyc_available"] is False
-
-        # Bez konta funded: prośba przechodzi i otwiera klientowi weryfikację.
-        r = c.post(f"/api/admin/kyc/{tid}/request", headers=ADMIN_H)
-        assert r.status_code == 200, r.text
-        assert maile[-1][0] == "kyc_requested" and maile[-1][1] == "kyc-prosba@test.pl"
-        assert maile[-1][2]["again"] is False
-        assert c.get("/api/auth/me", headers=h).json()["kyc_available"] is True
-
-        # Panel bierze stąd ślad, że już prosiliśmy (napis na przycisku i chip).
-        t = c.get(f"/api/admin/traders/{tid}/journal", headers=ADMIN_H).json()["trader"]
-        assert t["kyc_requested_at"]
-
-        r = c.post("/api/me/kyc", headers=h, json={"full_name": "Prosba Kyc",
-                                                   "country": "PL", "id_type": "passport"})
-        assert r.status_code == 200, "proszony klient składa dokumenty bez funded"
-        assert c.post(f"/api/admin/kyc/{tid}/request",
-                      headers=ADMIN_H).status_code == 400, "dokumenty już są"
-        c.post(f"/api/admin/kyc/{tid}/approve", headers=ADMIN_H)
-        assert c.post(f"/api/admin/kyc/{tid}/request",
-                      headers=ADMIN_H).status_code == 400, "już zweryfikowany"
-
-        # Po odrzuceniu prośba znów wolna — to ponaglenie do poprawki.
-        c.post(f"/api/admin/kyc/{tid}/reject", headers=ADMIN_H)
-        assert c.post(f"/api/admin/kyc/{tid}/request", headers=ADMIN_H).status_code == 200
-        assert maile[-1][2]["again"] is True
-
-        assert c.post("/api/admin/kyc/9999999/request", headers=ADMIN_H).status_code == 404
-        assert c.post(f"/api/admin/kyc/{tid}/request").status_code in (401, 403)
-
-
-def _konto_grant(tid, notatka):
-    """Konto przyznane (nie kupione) — z notatką, która mówi, skąd się wzięło."""
-    s = SessionLocal()
-    acc = Account(login=str(next(_KYC_LOGIN)), trader_id=tid, trader_name="Free",
-                  platform_login="x", platform_password="x",
-                  platform_server="MetaQuotes-Demo", product_key="2step-25k",
-                  initial_balance=25_000, balance=25_000, equity=25_000,
-                  peak_equity=25_000, day_start_equity=25_000,
-                  day_start_balance=25_000, status="active", phase="eval_1",
-                  source="grant", grant_note=notatka)
-    s.add(acc); s.commit(); s.close()
-
-
-def test_kanal_free_prosba_hurtem_wstrzymuje_portal(monkeypatch):
-    """Darmowy challenge dostaje ktoś, kogo jeszcze nie znamy, a prezent ściąga
-    dublerów: jedna osoba na trzech adresach. Prośba o weryfikację idzie więc do
-    całego kanału FREE hurtem i w komplecie ze wstrzymaniem portalu — konto na
-    MT5 pracuje dalej, panel otwiera się dopiero po akceptacji dokumentów.
-
-    Test pilnuje trzech rzeczy naraz: że blokada faktycznie odcina portal, ale
-    NIE odcina drogi wyjścia (KYC, support, własny profil), że powtórne
-    kliknięcie nie wysyła drugiego maila i że approve jest wyjściem z blokady.
-    """
-    maile = []
-    monkeypatch.setattr(notify, "_send_teraz",
-                        lambda event, to, ctx=None: maile.append((event, to, ctx or {})))
-    tid, h = _trader("free-kyc@test.pl", "Free Kyc")
-    _konto_grant(tid, notify.FREE_PROGRAM_NOTE)
-    with TestClient(app) as c:
-        czekaja = c.get("/api/admin/kyc/free-channel", headers=ADMIN_H).json()
-        assert any(x["email"] == "free-kyc@test.pl" for x in czekaja["waiting"])
-
-        r = c.post("/api/admin/kyc/free-channel/request", headers=ADMIN_H).json()
-        assert "free-kyc@test.pl" in r["sent"]
-        assert maile[-1][0] == "kyc_requested"
-        assert maile[-1][2]["locked"] is True, "mail ma tłumaczyć, czemu panel stoi"
-
-        # Portal stoi, ale własny profil i droga wyjścia zostają otwarte.
-        me = c.get("/api/auth/me", headers=h).json()
-        assert me["kyc_locked"] is True and me["kyc_available"] is True
-        odbite = c.get("/api/me/journal", headers=h)
-        assert odbite.status_code == 403 and "verify" in odbite.json()["detail"].lower()
-        assert c.get("/api/me/tickets", headers=h).status_code == 200
-        assert c.post("/api/me/kyc", headers=h,
-                      json={"full_name": "Free Kyc", "country": "PL",
-                            "id_type": "passport"}).status_code == 200
-
-        # Drugie kliknięcie: żadnego drugiego maila do tej samej osoby.
-        ile = len(maile)
-        powtorka = c.post("/api/admin/kyc/free-channel/request", headers=ADMIN_H).json()
-        assert "free-kyc@test.pl" not in powtorka["sent"] and len(maile) == ile
-        stan = c.get("/api/admin/kyc/free-channel", headers=ADMIN_H).json()
-        assert any(x["email"] == "free-kyc@test.pl" and x["kyc_locked"]
-                   for x in stan["done"])
-
-        # Akceptacja to jedyne wyjście z blokady — i musi je otwierać w całości.
-        assert c.post(f"/api/admin/kyc/{tid}/approve", headers=ADMIN_H).status_code == 200
-        assert c.get("/api/auth/me", headers=h).json()["kyc_locked"] is False
-        assert c.get("/api/me/journal", headers=h).status_code == 200
-
-        assert c.post("/api/admin/kyc/free-channel/request").status_code in (401, 403)
-
-
-def test_hurtowa_prosba_omija_klientow_z_zakupu():
-    """Kupujący nie ma prawa wpaść w wysyłkę dla kanału FREE.
-
-    `source="grant"` samo w sobie nie znaczy „darmowy challenge": tak samo
-    powstaje drugie konto z promocji BOGO i wiersz archiwalny z ewidencji
-    wypłat. Wstrzymanie portalu komuś, kto nam zapłacił, byłoby awarią droższą
-    niż cała ta weryfikacja.
-    """
-    kupil, _ = _trader("free-nie-ja@test.pl", "Kupiec")
-    _konto(kupil, str(next(_KYC_LOGIN)))
-    bogo, _ = _trader("free-bogo@test.pl", "Bogo")
-    _konto_grant(bogo, "BOGO — second account")
-    z_ewidencji, _ = _trader("free-import@test.pl", "Import")
-    _konto_grant(z_ewidencji, payout_import.IMPORT_NOTE)
-    with TestClient(app) as c:
-        d = c.get("/api/admin/kyc/free-channel", headers=ADMIN_H).json()
-        maile = {x["email"] for x in d["waiting"] + d["done"]}
-        assert not maile & {"free-nie-ja@test.pl", "free-bogo@test.pl",
-                            "free-import@test.pl"}
-
-
 def test_ui_prefs_zapisywane_na_koncie():
     """PATCH /api/me przyjmuje ui_prefs (JSON, np. sortowanie tabel) i oddaje
     je w /api/auth/me — preferencja trzyma się konta, nie przeglądarki."""
@@ -1661,15 +1534,3 @@ def test_flaga_przy_numerze_kierunkowym_jest_od_razu():
 
     # 3. otwarcie listy dalej dociaga plik (siatka bezpieczenstwa)
     assert "if(open){flagsCss();ccRender()" in html
-
-
-# --- popup Trustpilot dla kont z kampanii free challenge -------------------------
-
-def test_review_nudge_tylko_dla_listy_trustpilot():
-    """Przypomnienie o opinii dostają wyłącznie konta z listy na serwerze —
-    portal dostaje gotową flagę, adresy klientów nie wyciekają do JS."""
-    _, h = _trader("okechukwuchidibere1@gmail.com")
-    _, h2 = _trader("zwykly-klient@probe.test")
-    with TestClient(app) as c:
-        assert c.get("/api/auth/me", headers=h).json()["review_nudge"] is True
-        assert c.get("/api/auth/me", headers=h2).json()["review_nudge"] is False

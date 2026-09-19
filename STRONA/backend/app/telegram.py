@@ -24,9 +24,10 @@ from __future__ import annotations
 
 import json
 import secrets
-import time
 import urllib.error
+import urllib.parse
 import urllib.request
+from typing import NamedTuple
 
 from .config import get_settings
 
@@ -35,13 +36,47 @@ settings = get_settings()
 API = "https://api.telegram.org"
 TIMEOUT_SEK = 20
 
-# Najdłuższe czekanie, jakie wolno przespać w miejscu, przy odmowie z limitu.
-# Telegram sam podaje, ile trzeba odczekać; przy sekundach taniej jest poczekać
-# niż zostawiać kartę kolejce, a przy dłuższych — odwrotnie, bo request stoi.
-RETRY_AFTER_MAX_SEK = 5
-
 # Kontrakt transportu (ten sam kształt co w metaapi_provisioning):
 #     transport(url: str, body: bytes, content_type: str) -> tuple[int, bytes]
+
+
+# --------------------------------------------------------------------------- #
+#  Trzy boty, nie jeden                                                       #
+# --------------------------------------------------------------------------- #
+# Do 2026-09 wszystkim zajmował się jeden bot. Zamrożenie konta, do którego był
+# przypisany, położyło w jednej chwili kanał z wypłatami, account management,
+# track record i OBA deski leadów. Stąd podział: treść, leady i leady
+# nigeryjskie mają osobne tokeny, więc następna taka awaria zabiera jedną
+# trzecią, a nie całość.
+#
+# `chat_id` i `secret` siedzą w tej samej strukturze celowo. Update z Telegrama
+# NIE niesie żadnej informacji o tym, który bot go dostał — rozróżnia je wyłącznie
+# adres webhooka — więc ten, kto zna desk, musi od razu znać komplet: czym wysłać,
+# dokąd i jakim sekretem zweryfikować przychodzące.
+
+class Bot(NamedTuple):
+    key: str      # "content" | "leads" | "leads_ng"
+    token: str
+    chat_id: str
+    secret: str
+
+
+def desk(key: str) -> Bot:
+    """Komplet danych jednego bota. Nieznany klucz => bot pusty, czyli wyłączony."""
+    if key == "content":
+        return Bot("content", settings.telegram_bot_token,
+                   settings.telegram_chat_id, "")
+    if key == "leads":
+        return Bot("leads", settings.telegram_leads_token,
+                   settings.telegram_leads_chat_id, settings.telegram_webhook_secret)
+    if key == "leads_ng":
+        return Bot("leads_ng", settings.telegram_leads_ng_bot_token,
+                   settings.telegram_leads_ng_chat_id,
+                   settings.telegram_leads_ng_webhook_secret)
+    return Bot(key, "", "", "")
+
+
+DESKI_LEADOW = ("leads", "leads_ng")
 
 
 def is_enabled() -> bool:
@@ -85,7 +120,7 @@ def _urllib_transport(url: str, body: bytes, content_type: str) -> tuple[int, by
 
 def _strzal_json(metoda: str, pola: dict[str, str],
                  plik: tuple[str, str, bytes] | None, transport,
-                 ponowione: bool = False) -> tuple[bool, str, dict]:
+                 token: str | None = None) -> tuple[bool, str, dict]:
     """`(czy poszło, powód odmowy, `result` z odpowiedzi)`.
 
     Powód wraca WYŻEJ, a nie tylko do logu: bez niego panel mówi „Telegram
@@ -99,15 +134,12 @@ def _strzal_json(metoda: str, pola: dict[str, str],
     # Tu sprawdzamy WYŁĄCZNIE token, bo to on jest w URL-u. Czy cel wysyłki
     # istnieje, wie tylko wywołujący: kanał z wypłatami i czat z leadami są
     # niezależne i jeden ma prawo działać, gdy drugi jest nieskonfigurowany.
-    if not settings.telegram_bot_token:
+    # Brak `token` = bot treści; to domyślne z czasów, gdy bot był jeden.
+    token = token or settings.telegram_bot_token
+    if not token:
         return False, "no bot token or channel", {}
-    # Metoda bez pól (getMe) nie ma z czego zbudować multiparta, a części bez
-    # ANI JEDNEJ granicy Telegram odbija jako HTTP 400 — pusty JSON przechodzi.
-    if pola or plik:
-        body, content_type = _multipart(pola, plik)
-    else:
-        body, content_type = b"{}", "application/json"
-    url = f"{API}/bot{settings.telegram_bot_token}/{metoda}"
+    body, content_type = _multipart(pola, plik)
+    url = f"{API}/bot{token}/{metoda}"
     try:
         status, tresc = (transport or _urllib_transport)(url, body, content_type)
     except Exception as e:  # pragma: no cover - sieć
@@ -120,17 +152,6 @@ def _strzal_json(metoda: str, pola: dict[str, str],
     if status == 200:
         wynik = odp.get("result")
         return True, "", wynik if isinstance(wynik, dict) else {}
-    # Jedna grupa przyjmuje ~20 wiadomości na minutę, a kampania wieczorem to
-    # przekracza. Telegram nie odmawia wtedy na stałe — MÓWI, ile odczekać.
-    # Bez tego nadwyżka schodziła do kolejki dosyłek, która chodzi z ruchu
-    # strony, więc karta z 20:03 lądowała na kanale dopiero po nocy. Jedno
-    # ponowienie: drugie znaczyłoby, że limit trzyma dłużej, niż wolno tu stać,
-    # i od tego jest właśnie kolejka.
-    if status == 429 and not ponowione:
-        czekaj = (odp.get("parameters") or {}).get("retry_after")
-        if isinstance(czekaj, (int, float)) and 0 < czekaj <= RETRY_AFTER_MAX_SEK:
-            time.sleep(float(czekaj))
-            return _strzal_json(metoda, pola, plik, transport, ponowione=True)
     # Token NIGDY nie może trafić do logu ani do panelu — jest w URL-u, więc
     # przekazujemy dalej sam opis z odpowiedzi, nigdy adresu żądania.
     opis = odp.get("description") or (tresc or b"")[:200].decode("utf-8", "replace")
@@ -140,9 +161,10 @@ def _strzal_json(metoda: str, pola: dict[str, str],
 
 
 def _strzal(metoda: str, pola: dict[str, str],
-            plik: tuple[str, str, bytes] | None, transport) -> tuple[bool, str]:
+            plik: tuple[str, str, bytes] | None, transport,
+            token: str | None = None) -> tuple[bool, str]:
     """`_strzal_json` dla wywołujących, których `message_id` nie interesuje."""
-    poszlo, powod, _ = _strzal_json(metoda, pola, plik, transport)
+    poszlo, powod, _ = _strzal_json(metoda, pola, plik, transport, token)
     return poszlo, powod
 
 
@@ -177,101 +199,115 @@ def post_url(dane: dict) -> str:
     return f"https://t.me/{nazwa}/{mid}" if nazwa and mid else ""
 
 
-_BOT_USERNAME: str | None = None
+def _get(metoda: str, token: str, parametry: str = "") -> dict:
+    """GET na Bot API. Zwraca `result` albo `{}`; nigdy nie wywraca wywołania.
+
+    Osobno od `_strzal_json`, bo to są odczyty do panelu (getMe, getChat,
+    getChatMember) — krótki timeout, brak multipart i brak logowania odmowy
+    jako błędu: „bot nie jest adminem" to tutaj odpowiedź, a nie awaria.
+    """
+    if not token:
+        return {}
+    url = f"{API}/bot{token}/{metoda}"
+    if parametry:
+        url += f"?{parametry}"
+    try:
+        with urllib.request.urlopen(url, timeout=6) as r:
+            dane = json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            dane = json.loads(e.read() or b"{}")
+        except Exception:
+            return {}
+    except Exception as e:  # pragma: no cover - sieć
+        print(f"[telegram] {metoda} błąd: {e}")
+        return {}
+    wynik = dane.get("result")
+    return wynik if isinstance(wynik, dict) else {}
 
 
-def bot_username() -> str:
+# getMe raz na proces i to PER TOKEN. Jeden wspólny cache był poprawny, dopóki
+# bot był jeden; teraz zwróciłby nazwę tego bota, który odpytał pierwszy, dla
+# wszystkich trzech.
+_BOT_ME: dict[str, dict] = {}
+
+
+def get_me(token: str | None = None) -> dict:
+    """`{id, username, first_name}` bota albo `{}` — do zdrowia w panelu."""
+    token = token or settings.telegram_leads_token
+    if not token:
+        return {}
+    if token not in _BOT_ME:
+        dane = _get("getMe", token)
+        if not dane:
+            return {}          # nie cache'ujemy porażki sieciowej
+        _BOT_ME[token] = dane
+    return _BOT_ME[token]
+
+
+def bot_username(token: str | None = None) -> str:
     """Nazwa bota (bez @) — do instrukcji parowania w panelu.
 
-    getMe raz na proces (nazwa bota nie zmienia się między requestami);
-    brak tokenu albo padnięta sieć = pusty string, panel pisze wtedy
+    Domyślnie bot DESKU LEADÓW, nie treści: parowanie polega na tym, że admin
+    pisze `/start <kod>` do bota, którego kliknięcia obsługuje panel. Wskazanie
+    tu bota treści wysyłałoby ludzi do bota, którego webhook prowadzi zupełnie
+    gdzie indziej (kupowanie zasięgu), i parowanie po cichu nie działałoby.
+
+    Brak tokenu albo padnięta sieć = pusty string, panel pisze wtedy
     „the desk bot" zamiast linka."""
-    global _BOT_USERNAME
-    if _BOT_USERNAME is not None:
-        return _BOT_USERNAME
-    if not settings.telegram_bot_token:
-        return ""
-    try:
-        with urllib.request.urlopen(
-                f"{API}/bot{settings.telegram_bot_token}/getMe", timeout=5) as r:
-            dane = json.loads(r.read() or b"{}")
-        _BOT_USERNAME = str((dane.get("result") or {}).get("username") or "")
-    except Exception as e:  # pragma: no cover - sieć
-        print(f"[telegram] getMe błąd: {e}")
-        return ""
-    return _BOT_USERNAME
+    return str(get_me(token).get("username") or "")
 
 
-_BOT_ID: int | None = None
-
-
-def bot_id(*, transport=None) -> int:
-    """Numeryczne id bota (getMe, raz na proces). 0 = brak tokenu albo błąd."""
-    global _BOT_ID
-    if _BOT_ID is not None:
-        return _BOT_ID
-    if not settings.telegram_bot_token:
-        return 0
-    poszlo, _, dane = _strzal_json("getMe", {}, None, transport)
-    _BOT_ID = int(dane.get("id") or 0) if poszlo else 0
-    return _BOT_ID
-
-
-def chat_info(chat_id: str | int, *, transport=None) -> dict:
-    """`getChat` — nazwa publiczna i tytuł kanału (pusty słownik przy błędzie).
-
-    Panel Reach BOT-a pokazuje, na jaki kanał faktycznie idą posty: w env jest
-    samo `TELEGRAM_CHAT_ID` (bywa liczbowe), a admin myśli o kanale nazwą."""
-    if not settings.telegram_bot_token or not chat_id:
+def get_chat(chat_id: str, *, token: str | None = None) -> dict:
+    """Opis kanału/czatu (`title`, `username`) albo `{}`."""
+    if not chat_id:
         return {}
-    poszlo, _, dane = _strzal_json("getChat", {"chat_id": str(chat_id)}, None, transport)
-    if not poszlo:
-        return {}
-    return {"id": dane.get("id"), "username": dane.get("username") or "",
-            "title": dane.get("title") or ""}
+    return _get("getChat", token or settings.telegram_bot_token,
+                f"chat_id={urllib.parse.quote(str(chat_id))}")
 
 
-def jest_adminem(chat_id: str | int, *, transport=None) -> bool | None:
-    """Czy bot jest administratorem kanału. `None` = nie dało się sprawdzić.
+def chat_member_status(chat_id: str, user_id: int, *,
+                       token: str | None = None) -> str:
+    """Status bota w kanale: `administrator`, `member`, `left`… albo `""`.
 
-    To NIE jest kosmetyka: bez uprawnień admina Telegram w ogóle nie wysyła
-    `channel_post`, więc automat po cichu nic nie robi. Panel musi umieć
-    powiedzieć „dodaj bota jako admina", zamiast milczeć."""
-    if not settings.telegram_bot_token or not chat_id:
-        return None
-    ja = bot_id(transport=transport)
-    if not ja:
-        return None
-    poszlo, _, dane = _strzal_json(
-        "getChatMember", {"chat_id": str(chat_id), "user_id": str(ja)}, None, transport)
-    if not poszlo:
-        return False  # „member list is inaccessible" = bot jest poza kanałem
-    return str(dane.get("status") or "") in ("administrator", "creator")
+    PUŁAPKA, na którą łatwo się nabrać: `getChat` na kanale PUBLICZNYM udaje się
+    każdemu botowi, także takiemu bez żadnych uprawnień. Jedyne wiarygodne
+    pytanie „czy mogę tu publikować" to `getChatMember` o samego siebie.
+    """
+    if not chat_id or not user_id:
+        return ""
+    dane = _get("getChatMember", token or settings.telegram_bot_token,
+                f"chat_id={urllib.parse.quote(str(chat_id))}&user_id={user_id}")
+    return str(dane.get("status") or "")
 
 
-def delete_lead_card(message_id: int, *, chat_id: str | None = None,
+def delete_lead_card(message_id: int, *, bot: Bot | None = None,
                      transport=None) -> tuple[bool, str]:
-    """Zdejmuje kartę leada z czatu, w którym wisi — wołane przy kasowaniu leada.
+    """Zdejmuje kartę leada z czatu działu — wołane przy kasowaniu leada.
 
     Bez tego wpis testowy znikał z bazy, a jego karta wisiała na kanale jak
     sierota i dalej dawała się klikać — w lead, którego już nie było.
 
-    `message_id` jest unikalne w obrębie czatu, nie bota: bez `chat_id` z bazy
-    kasowanie karty free trafiłoby w cudzą wiadomość o tym samym numerze."""
-    czat, mozna = _lead_sendable(chat_id)
-    if not mozna:
+    `bot` musi być TYM desku, na którym karta wisi: kasowanie cudzym tokenem
+    w cudzym czacie po prostu nie trafi w wiadomość i sierota zostanie."""
+    bot = bot or desk("leads")
+    if not leads_enabled(bot):
         return False, "leads chat not configured"
     return _strzal("deleteMessage",
-                   {"chat_id": czat, "message_id": str(message_id)}, None, transport)
+                   {"chat_id": bot.chat_id, "message_id": str(message_id)},
+                   None, transport, bot.token)
 
 
-def send_dm(chat_id: str | int, text: str, *, transport=None) -> tuple[bool, str]:
+def send_dm(chat_id: str | int, text: str, *, bot: Bot | None = None,
+            transport=None) -> tuple[bool, str]:
     """Wiadomość w prywatnym czacie z botem (odpowiedź na `/start <kod>`).
 
-    Wymaga tylko tokenu bota — `chat_id` przychodzi z update'u, więc nie ma
-    znaczenia, który z kanałów (wypłaty/leady) jest skonfigurowany."""
+    `chat_id` przychodzi z update'u, ale TOKEN musi być tego bota, który ten
+    update dostał — prywatna rozmowa istnieje osobno z każdym botem i cudzym
+    tokenem nie da się do niej napisać."""
+    bot = bot or desk("leads")
     return _strzal("sendMessage", {"chat_id": str(chat_id), "text": text[:4096]},
-                   None, transport)
+                   None, transport, bot.token)
 
 
 def send_message_json(text: str, *, transport=None) -> tuple[bool, str, dict]:
@@ -301,10 +337,11 @@ def send_message(text: str, *, transport=None) -> tuple[bool, str]:
 # --------------------------------------------------------------------------- #
 #  Leady — prywatny czat, wiadomość z przyciskami                             #
 # --------------------------------------------------------------------------- #
-# Ten sam bot, ale INNY czat niż kanał z wypłatami: tamten jest publiczny,
-# a tu leci imię, mail i telefon człowieka. Pomyłka w tym miejscu to wyciek
-# danych na oczach klientów, więc czat jest osobną zmienną, nie parametrem
-# z wartością domyślną.
+# INNY bot i INNY czat niż kanał z wypłatami: tamten jest publiczny, a tu leci
+# imię, mail i telefon człowieka. Pomyłka w tym miejscu to wyciek danych na
+# oczach klientów, więc desk jest jawnym argumentem, a nie czymś, co funkcja
+# sobie dobiera — i dlatego `Bot` niesie token razem z czatem: dobranie jednego
+# bez drugiego to właśnie ta pomyłka.
 
 # Przyciski pod alertem. Opisy mówią, co się przed chwilą zrobiło, a nie jak
 # nazywa się kolumna — klikający ma przed sobą rozmowę, nie schemat tabeli.
@@ -325,30 +362,6 @@ TIER_BUTTONS = (("🔥 High", "tier_high"),
                 ("🟡 Warm", "tier_warm"),
                 ("⚪️ Cold", "tier_cold"))
 
-# Dlaczego przegraliśmy. Rząd pokazuje się WYŁĄCZNIE póki lead stoi na
-# „odpada" albo w koszu i powodu jeszcze nie ma — po wybraniu znika, bo wybrany
-# powód widać już w treści karty, a klawiatura na telefonie ma być krótka.
-#
-# Status zapisuje się nadal PIERWSZYM kliknięciem i te przyciski niczego nie
-# blokują. To świadoma różnica względem panelu, który powodu wymaga: tam arkusz
-# jest już otwarty i drugi tap nic nie kosztuje, a tu ktoś odkłada telefon
-# w połowie — wymuszony drugi krok kosztowałby zapisany status, czyli to jedno,
-# czego stracić nie wolno.
-#
-# Kody muszą być te same co `models.LOST_REASONS`; pilnuje tego test, bo ten
-# plik jest transportem i celowo nie importuje modeli.
-LOST_REASON_BUTTONS = (("💸 Za drogo", "price"),
-                       ("🏃 Kupił gdzie indziej", "competitor"),
-                       ("🚫 Nie kwalifikuje się", "not_qualified"),
-                       ("👻 Przestał odpisywać", "ghosted"),
-                       ("🤖 Bot / śmieć", "spam"),
-                       ("❔ Inne", "other"))
-
-# Statusy, po których pytamy o powód. `burned` nie ma swojego przycisku wyżej —
-# ustawia się go z panelu — ale karta na kanale przepisuje się po każdej zmianie,
-# więc pytanie i tak dojdzie do tego, kto ma pod ręką tylko telefon.
-LOST_STATUSES = ("rejected", "burned")
-
 CLAIM_BUTTON = ("🙋 Biorę tego", "claim")
 # Ten sam `claim`, inny opis: pod kartą z właścicielem to nie jest wzięcie
 # niczyjego leada, tylko odebranie go koledze, i przycisk ma to mówić wprost.
@@ -356,45 +369,17 @@ TAKEOVER_BUTTON = ("🤝 Przejmuję", "claim")
 RELEASE_BUTTON = ("↩️ Oddaję", "release")
 
 
-def lead_chat_id(source: str | None = None) -> str:
-    """Czat dla leada o takim `source` — free ma swój, reszta idzie do działu.
-
-    Zwykła funkcja, a nie property w ustawieniach, bo `get_settings()` jest
-    `lru_cache`'owane i testy podmieniają pola obiektu w miejscu.
-
-    Bez skonfigurowanego czatu free leady z darmowego challenge'u wracają do
-    czatu działu — mieszają się z płatnymi, ale nie giną.
-    """
-    if (source or "").strip().lower().startswith("free") and settings.telegram_free_leads_chat_id:
-        return settings.telegram_free_leads_chat_id
-    return settings.telegram_leads_chat_id
-
-
-def _lead_sendable(chat_id: str | None) -> tuple[str, bool]:
-    """Docelowy czat i czy da się do niego pisać.
-
-    Sprawdzamy TEN czat, a nie „czy leady w ogóle są skonfigurowane":
-    konfiguracja z samym TELEGRAM_FREE_LEADS_CHAT_ID gubiłaby po cichu
-    wszystkie karty free, bo tamten warunek patrzy tylko na czat działu.
-    """
-    czat = chat_id if chat_id is not None else settings.telegram_leads_chat_id
-    return czat, bool(settings.telegram_on and settings.telegram_bot_token and czat)
-
-
-def lead_alerts_on(chat_id: str | None = None) -> bool:
-    """Czy karty leadów mają dokąd iść.
-
-    Wywołujący potrzebuje tego, żeby odróżnić „Telegram odmówił" od „Telegramu
-    tu nie ma". Pierwsze jest awarią do ponowienia, drugie — świadomym
-    ustawieniem, i zapisywanie go jako awarii dopisywałoby każdemu leadowi
-    zdarzenie o nieudanej wysyłce oraz trzymało go w kolejce dosyłek bez końca.
-    """
-    return _lead_sendable(chat_id)[1]
+def leads_enabled(bot: Bot | None = None) -> bool:
+    """Czy dany desk leadów jest skonfigurowany. Bez argumentu — desk domyślny."""
+    if bot is None or bot.key == "leads":
+        return settings.telegram_leads_enabled
+    if bot.key == "leads_ng":
+        return settings.telegram_leads_ng_enabled
+    return bool(bot.token and bot.chat_id)
 
 
 def lead_keyboard(lead_id: int, *, owner: str | None = None,
-                  status: str = "new", tier: str | None = None,
-                  lost_reason: str | None = None) -> dict:
+                  status: str = "new", tier: str | None = None) -> dict:
     """Klawiatura pod alertem — DWA etapy i to jest cały sens tej konstrukcji.
 
     Dopóki leada nikt nie wziął, jest jeden przycisk: „biorę". Statusy i ocena
@@ -409,10 +394,6 @@ def lead_keyboard(lead_id: int, *, owner: str | None = None,
 
     Statusy idą po dwa w rzędzie, bo cztery obok siebie Telegram na telefonie
     ściska do samych emoji.
-
-    Trzeci etap to powód przegranej — dochodzi dopiero, gdy lead stoi na
-    „odpada"/koszu i powodu jeszcze nie ma, i znika po wybraniu. Pod każdą inną
-    kartą byłby sześcioma przyciskami pytającymi o coś, co się nie stało.
     """
     def guzik(opis: str, akcja: str, wybrany: bool = False) -> dict:
         return {"text": ("• " + opis) if wybrany else opis,
@@ -421,14 +402,7 @@ def lead_keyboard(lead_id: int, *, owner: str | None = None,
     if not owner:
         return {"inline_keyboard": [[guzik(*CLAIM_BUTTON)]]}
     statusy = [guzik(o, s, s == status) for o, s in LEAD_BUTTONS]
-    # Pytanie o powód wchodzi NAD statusy, nie pod nie: to jedyny rząd, który
-    # czeka na odpowiedź, a na telefonie widać kilka pierwszych przycisków.
-    # Pod tierem i „przejmuję" trzeba by go szukać scrollem.
-    powody = ([[guzik(o, f"why_{k}") for o, k in LOST_REASON_BUTTONS[i:i + 2]]
-               for i in range(0, len(LOST_REASON_BUTTONS), 2)]
-              if status in LOST_STATUSES and not lost_reason else [])
     return {"inline_keyboard": [
-        *powody,
         *[statusy[i:i + 2] for i in range(0, len(statusy), 2)],
         [guzik(o, a, a == f"tier_{tier or ''}") for o, a in TIER_BUTTONS],
         # Przejęcie stoi pod kartą, która ma już właściciela, i to jest celowe:
@@ -439,7 +413,7 @@ def lead_keyboard(lead_id: int, *, owner: str | None = None,
 
 def send_lead_alert(lead_id: int, text: str, *,
                     keyboard: dict | None = None,
-                    chat_id: str | None = None,
+                    bot: Bot | None = None,
                     transport=None) -> tuple[bool, str, int | None]:
     """Alert o nowym leadzie. Zwraca też `message_id` wysłanej wiadomości.
 
@@ -450,46 +424,56 @@ def send_lead_alert(lead_id: int, text: str, *,
     `callback_data` musi zmieścić się w 64 bajtach, stąd samo `lead:<id>:<akcja>`
     zamiast czegokolwiek opisowego — resztę webhook dobiera z bazy po id.
     """
-    czat, mozna = _lead_sendable(chat_id)
-    if not mozna:
+    bot = bot or desk("leads")
+    if not leads_enabled(bot):
         return False, "no bot token or leads chat", None
     poszlo, powod, wynik = _strzal_json(
         "sendMessage",
-        {"chat_id": czat, "text": text[:4096],
+        {"chat_id": bot.chat_id, "text": text[:4096],
          "parse_mode": "HTML", "disable_web_page_preview": "true",
          "reply_markup": json.dumps(keyboard or lead_keyboard(lead_id))},
-        None, transport)
+        None, transport, bot.token)
     mid = wynik.get("message_id")
     return poszlo, powod, mid if isinstance(mid, int) else None
 
 
-def send_lead_message(text: str, *, chat_id: str | None = None,
+def send_lead_message(text: str, *, bot: Bot | None = None,
                       transport=None) -> tuple[bool, str]:
     """Wiadomość na czat z leadami BEZ przycisków — przypomnienia z crona.
 
     Osobna funkcja od `send_message`, bo tamta celuje w publiczny kanał z
     wypłatami. Przypomnienie niesie imię i mail człowieka, więc pomyłka w czacie
     jest wyciekiem, a nie literówką; jedno wywołanie mniej do pomylenia.
+
+    Z tego samego powodu `bot` nie ma tu rozsądnej wartości „dowolna": desk
+    nigeryjski i domyślny czyta kto inny, a przypomnienie niesie imię i mail.
     """
-    czat, mozna = _lead_sendable(chat_id)
-    if not mozna:
+    bot = bot or desk("leads")
+    if not leads_enabled(bot):
         return False, "no bot token or leads chat"
     return _strzal("sendMessage",
-                   {"chat_id": czat, "text": text[:4096],
+                   {"chat_id": bot.chat_id, "text": text[:4096],
                     "parse_mode": "HTML", "disable_web_page_preview": "true"},
-                   None, transport)
+                   None, transport, bot.token)
 
 
-def answer_callback(callback_id: str, text: str, *, transport=None) -> tuple[bool, str]:
+def answer_callback(callback_id: str, text: str, *, bot: Bot | None = None,
+                    transport=None) -> tuple[bool, str]:
     """Zdejmuje „zegarek" z przycisku. Bez tej odpowiedzi Telegram kręci kółkiem
-    przez minutę i klikający nie wie, czy cokolwiek się stało."""
+    przez minutę i klikający nie wie, czy cokolwiek się stało.
+
+    Odpowiedzieć musi TEN bot, który dostał kliknięcie — `callback_query_id`
+    jest ważny wyłącznie dla niego. Desk zna webhook z adresu, którym przyszedł
+    update, i przekazuje go tutaj."""
+    bot = bot or desk("leads")
     return _strzal("answerCallbackQuery",
                    {"callback_query_id": callback_id, "text": text[:200]},
-                   None, transport)
+                   None, transport, bot.token)
 
 
 def edit_lead_message(chat_id: str, message_id: int, text: str,
                       *, keyboard: dict | None = None,
+                      bot: Bot | None = None,
                       transport=None) -> tuple[bool, str]:
     """Przepisuje alert po każdej zmianie: kto go wziął, jaki status, jaka notatka.
 
@@ -502,4 +486,5 @@ def edit_lead_message(chat_id: str, message_id: int, text: str,
             "disable_web_page_preview": "true"}
     if keyboard is not None:
         pola["reply_markup"] = json.dumps(keyboard)
-    return _strzal("editMessageText", pola, None, transport)
+    return _strzal("editMessageText", pola, None, transport,
+                   (bot or desk("leads")).token)

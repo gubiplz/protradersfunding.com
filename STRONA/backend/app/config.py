@@ -225,18 +225,46 @@ class Settings:
     # Bot musi być ADMINISTRATOREM kanału z prawem publikowania. Post i tak wychodzi
     # z nazwą kanału, nie bota. Token TYLKO w zmiennych hostingu — repozytorium,
     # z którego deployuje Vercel, jest publiczne (scripts/sync-vercel-repo.sh).
+    #
+    # UWAGA, to jest BOT TREŚCI i ten sam token siedzi w PIĘCIU magazynach:
+    # Vercel PTF (tutaj), Vercel forexpassing.com, sekret GitHuba w tamtym repo
+    # (`telegram-spots.yml`), Vercel jap-tg-boost i lokalnie w `tg-graphics`.
+    # Zamrożenie jednego konta Telegrama w 2026-09 położyło wszystkie kanały
+    # naraz właśnie dlatego, że nigdzie nie było zapisane, ilu ma konsumentów.
+    # Przy wymianie tokenu trzeba przejść wszystkie pięć; ten w GitHubie gnije
+    # najciszej, bo jego workflow chodzi wyłącznie z ręki.
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")     # @kanal albo -100...
+
+    # Pozostałe kanały tego samego bota. Panel pyta o nie `getChatMember`, żeby
+    # utrata uprawnień była widoczna OD RAZU, a nie dopiero wtedy, gdy post nie
+    # wyjdzie. Publikuje na nie co innego (account management — kolejka treści,
+    # track record — `tg-graphics` z repo forexpassing.com), ale bot jest ten sam.
+    telegram_mgmt_chat_id: str = os.getenv("TELEGRAM_MGMT_CHAT_ID", "@fx_passing")
+    telegram_trackrecord_chat_id: str = os.getenv(
+        "TELEGRAM_TRACKRECORD_CHAT_ID", "@fx_passingtrackrecord")
 
     # --- Leady z landingu ---
     # Osobny czat, i to nie jest kosmetyka: TELEGRAM_CHAT_ID to PUBLICZNY kanał
     # z certyfikatami wypłat, a alert o leadzie niesie imię, mail i telefon.
     # Puste = alerty o leadach nie wychodzą wcale (lead i tak jest w bazie).
     telegram_leads_chat_id: str = os.getenv("TELEGRAM_LEADS_CHAT_ID", "")
-    # Darmowy challenge to inny koszt i inni ludzie przy telefonie niż zakup,
-    # więc te leady mają własny czat. Puste = wpadają do czatu wyżej, razem
-    # z płatnymi — tak było, zanim ten podział powstał.
-    telegram_free_leads_chat_id: str = os.getenv("TELEGRAM_FREE_LEADS_CHAT_ID", "")
+    # Osobny BOT dla desku leadów. Dawniej karty leadów jechały tym samym
+    # tokenem co kanał z wypłatami — jedno zamrożenie zabierało i jedno, i
+    # drugie. Puste => desk leadów spada z powrotem na `telegram_bot_token`,
+    # więc wdrożenie tego kodu niczego nie psuje, zanim bot powstanie.
+    telegram_leads_bot_token: str = os.getenv("TELEGRAM_LEADS_BOT_TOKEN", "")
+
+    # --- Desk nigeryjski ---
+    # Trzeci bot i trzeci czat: leady z Nigerii obsługuje inna osoba i nie mają
+    # się mieszać z resztą. Puste => wszystko leci na desk domyślny (patrz
+    # `_desk_dla_leada` w main.py) i żaden lead nie ginie.
+    telegram_leads_ng_bot_token: str = os.getenv("TELEGRAM_LEADS_NG_BOT_TOKEN", "")
+    telegram_leads_ng_chat_id: str = os.getenv("TELEGRAM_LEADS_NG_CHAT_ID", "")
+    telegram_leads_ng_webhook_secret: str = os.getenv("TELEGRAM_LEADS_NG_WEBHOOK_SECRET", "")
+    # Lista kodów ISO po przecinku. W zmiennej, nie w kodzie, żeby dołożenie
+    # kolejnego kraju nie wymagało deploya.
+    telegram_leads_ng_iso: str = os.getenv("TELEGRAM_LEADS_NG_ISO", "NG")
     # Sekret, którym landing autoryzuje POST /api/leads/ingest. Osobny od
     # ADMIN_TOKEN: landing stoi na cudzym hostingu i wycieka mu najwyżej prawo
     # dopisania leada, nigdy panel. Puste = endpoint odmawia wszystkiego.
@@ -244,70 +272,9 @@ class Settings:
     # Sekret, który Telegram odsyła w nagłówku X-Telegram-Bot-Api-Secret-Token
     # przy każdym update. Bez niego /api/telegram/webhook przyjmowałby zmianę
     # statusu od kogokolwiek, kto zna adres. Puste = webhook odmawia.
+    # To sekret DESKU LEADS; desk nigeryjski ma własny (patrz wyżej). Każdy bot
+    # dostaje inny, więc wyciek jednego nie pozwala podszyć się pod drugiego.
     telegram_webhook_secret: str = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
-
-    # --- SMS (Twilio) ---
-    # Wyjście awaryjne do leada, któremu nie działa Telegram. Komplet trzech
-    # zmiennych albo nic: brak choćby jednej = panel nie proponuje wysyłki,
-    # zamiast dawać przycisk, który zawsze odmawia. `TWILIO_FROM` to numer
-    # nadawcy ALBO identyfikator Messaging Service (`MG…`) — patrz sms.py.
-    twilio_sid: str = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
-    twilio_token: str = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
-    twilio_from: str = os.getenv("TWILIO_FROM", "").strip()
-    # Dokąd SMS ma zaprowadzić człowieka. Cały sens tej wysyłki to wrócić do
-    # Telegrama, gdzie dział pracuje — SMS jest mostem, nie kanałem rozmowy.
-    # Adres w zmiennej, nie w kodzie: to handle marki partnerskiej, a repo jest
-    # publiczne. Puste = SMS-y nie wychodzą (most donikąd jest gorszy niż brak).
-    sms_telegram_url: str = os.getenv("SMS_TELEGRAM_URL", "").strip()
-
-    # --- Mail do leada ---
-    # Trzeci kanał, po Telegramie i SMS-ie, i jedyny, który ZAWSZE ma dokąd
-    # pójść: adres jest polem wymaganym formularza, a handle'a i numeru bywa
-    # brak. Stąd nie jest kanałem masowym — jest dnem drabiny kontaktu.
-    #
-    # Nadawcą MUSI być adres marki, przez którą człowiek się zgłosił, a nie
-    # `MAIL_FROM`. Lead nie zna tej firmy; mail z jej domeny jest dla niego
-    # mailem od obcego i tak zostanie potraktowany. Puste = panel nie proponuje
-    # wysyłki, zamiast dawać przycisk, który wysyła spod złego szyldu.
-    lead_mail_from: str = os.getenv("LEAD_MAIL_FROM", "").strip()
-    # Logo do nagłówka tego maila. MUSI stać na domenie marki z landingu:
-    # obrazek zaciągany z domeny tej firmy zdradza w kliencie pocztowym
-    # dokładnie to, czego pilnuje `lead_mail_from`. W zmiennej z tego samego
-    # powodu co `SMS_TELEGRAM_URL` — repo jest publiczne. Puste = nagłówek
-    # pisany tekstem, mail wychodzi normalnie.
-    lead_mail_logo_url: str = os.getenv("LEAD_MAIL_LOGO_URL", "").strip()
-    # Dokąd idzie ODRZUCONY. Kanał do subskrypcji, nie adres do pisania — i to
-    # jest CAŁA różnica wobec `SMS_TELEGRAM_URL`: tam się pisze, tu się dołącza.
-    # Pomylenie tych dwóch adresów kosztuje najwięcej po cichu: zakwalifikowany
-    # wysłany na kanał nie ma gdzie napisać, a odrzucony wysłany do działu
-    # zajmuje czas rozmowy, której ten mail mu nie obiecuje. W zmiennej z tego
-    # samego powodu co reszta — repo jest publiczne, a to handle marki
-    # partnerskiej. Puste = mail do leada nie wychodzi wcale (patrz
-    # `lead_mail.czego_brakuje`), bo połowa jego treści prowadziłaby donikąd.
-    lead_telegram_channel_url: str = os.getenv("LEAD_TELEGRAM_CHANNEL_URL", "").strip()
-    # Sekret w ADRESIE webhooka od dostawcy poczty — nie w nagłówku, bo Brevo
-    # nie podpisuje wywołań i nie pozwala dodać własnego nagłówka; adres z
-    # tokenem w query to jedyna kontrola, jaka tam jest. Puste = webhook
-    # odmawia, czyli historia leada po prostu nie wie o doręczeniach.
-    brevo_webhook_secret: str = os.getenv("BREVO_WEBHOOK_SECRET", "").strip()
-
-    # --- Strona partnerska ---
-    # Firma partnerska prowadzi własny landing i chce, żeby jej klient płacił
-    # nie opuszczając jej domeny. Jej serwer czyta zamówienie przez
-    # GET /api/pay/<token>, więc potrzebuje własnego sekretu — znowu osobnego
-    # od ADMIN_TOKEN, bo stoi na cudzym hostingu. Puste = odczyt zamknięty.
-    partner_api_token: str = os.getenv("PARTNER_API_TOKEN", "")
-    # Adres, pod którym partner wystawia swoją stronę płatności; panel dokleja
-    # do niego `/pay/<token>`. Hosta partnera NIE MA w kodzie — oba repozytoria
-    # są publiczne, więc adres żyje wyłącznie tutaj, w zmiennej środowiskowej.
-    # Puste = panel oferuje tylko link na własnej domenie, czyli stan sprzed
-    # tej zmiany.
-    partner_pay_base_url: str = os.getenv("PARTNER_PAY_BASE_URL", "").rstrip("/")
-    # Rabat należny klientowi, którego przyprowadził partner. To warunek umowy,
-    # więc — tak samo jak adres wyżej — nie ma go w kodzie: repozytorium jest
-    # publiczne, a stawka potrafi się zmienić szybciej niż deploy. 0 = okno
-    # zamówienia w ogóle nie proponuje ceny partnerskiej.
-    partner_discount_pct: float = float(os.getenv("PARTNER_DISCOUNT_PCT", "0") or 0)
 
     # Payout BOT łapie swój dzienny slot także na ruchu strony (middleware w
     # main.py). To wyłącznik awaryjny tej ścieżki — cron /api/tick zostaje wtedy
@@ -328,23 +295,42 @@ class Settings:
     leads_on_traffic: bool = os.getenv("LEADS_ON_TRAFFIC", "true").lower() == "true"
 
     # --- Reach BOT: dokupowanie zasięgu pod postami kanału ---
-    # Adres i klucz dostawcy TYLKO w zmiennych hostingu: to repozytorium jest
-    # publiczne. Reszta konfiguracji (usługi, ilości, próg salda) siedzi
-    # w app_settings, bo zmienia się z panelu, nie deployem.
+    # Adres i klucz dostawcy TYLKO w zmiennych hostingu: repozytorium, z którego
+    # deployuje Vercel, jest publiczne. Reszta konfiguracji (usługi, ilości,
+    # próg salda) siedzi w app_settings, bo zmienia się z panelu, nie deployem.
     reach_api_url: str = os.getenv("REACH_API_URL", "")
     reach_api_key: str = os.getenv("REACH_API_KEY", "")
 
     @property
-    def telegram_on(self) -> bool:
-        # TELEGRAM_ENABLED=false to awaryjny wylacznik na CAŁEGO bota —
-        # normalnie o wszystkim decyduje obecnosc tokenu i kanalu (tak samo
-        # jak przy push). Czytany w jednym miejscu, bo każdy kanał ma własny
-        # warunek i tylko ten wyłącznik jest wspólny.
-        return os.getenv("TELEGRAM_ENABLED", "true").lower() == "true"
+    def telegram_enabled(self) -> bool:
+        # TELEGRAM_ENABLED=false to awaryjny wylacznik — normalnie o wszystkim
+        # decyduje obecnosc tokenu i kanalu (tak samo jak przy push).
+        if os.getenv("TELEGRAM_ENABLED", "true").lower() != "true":
+            return False
+        return bool(self.telegram_bot_token and self.telegram_chat_id)
 
     @property
-    def telegram_enabled(self) -> bool:
-        return self.telegram_on and bool(self.telegram_bot_token and self.telegram_chat_id)
+    def telegram_leads_token(self) -> str:
+        # Dopóki bot desku nie istnieje, karty jadą starym tokenem treści —
+        # inaczej samo wdrożenie tego kodu uciszyłoby alerty o leadach.
+        return self.telegram_leads_bot_token or self.telegram_bot_token
+
+    @property
+    def telegram_leads_enabled(self) -> bool:
+        # Ten sam wyłącznik awaryjny, ale własny czat: alerty o leadach mogą
+        # działać, gdy kanał z wypłatami stoi, i odwrotnie.
+        if os.getenv("TELEGRAM_ENABLED", "true").lower() != "true":
+            return False
+        return bool(self.telegram_leads_token and self.telegram_leads_chat_id)
+
+    @property
+    def telegram_leads_ng_enabled(self) -> bool:
+        # Desk nigeryjski nie ma awaryjnego spadku na inny token: jeśli nie jest
+        # skonfigurowany do końca, lead ma trafić na desk domyślny, a nie na
+        # czat nigeryjski botem, który go nie obsługuje.
+        if os.getenv("TELEGRAM_ENABLED", "true").lower() != "true":
+            return False
+        return bool(self.telegram_leads_ng_bot_token and self.telegram_leads_ng_chat_id)
 
     # --- Zrzut certyfikatu do obrazka (zewnętrzna przeglądarka po HTTP) ---
     # Serwer nie ma czym zrobić rastra: JPG w portalu powstaje w przeglądarce

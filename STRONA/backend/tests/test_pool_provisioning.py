@@ -111,30 +111,6 @@ def test_wpis_bez_metaapi_dziala_a_konto_nie_dostaje_zmyslonego_id():
     s.close()
 
 
-def test_dosypanie_puli_od_reki_uzbraja_czekajace_konto(monkeypatch):
-    """Admin dodaje rachunek do puli DLA konta, które już czeka — poświadczenia
-    i mail mają pójść od razu, nie przy najbliższym dziennym cronie."""
-    from app import notify
-    zebrane = []
-    monkeypatch.setattr(notify, "_send_teraz",
-                        lambda event, to, ctx=None: zebrane.append((event, to)))
-    ROZMIAR = 74_000
-    tid = _trader("dosypka@pool.pl")
-    aid = _konto_czekajace(tid, ROZMIAR)
-
-    with realny_provisioning():
-        r = client.post("/api/admin/pool", headers=ADMIN_H,
-                        json={"platform_login": "7400001", "platform_password": "Haslo123",
-                              "platform_server": "GOMarketsLtd-Demo", "account_size": ROZMIAR})
-        assert r.status_code == 200
-
-    s = SessionLocal()
-    acc = s.get(Account, aid)
-    assert acc.status == "active" and acc.platform_login == "7400001"
-    s.close()
-    assert ("credentials", "dosypka@pool.pl") in zebrane
-
-
 def test_bez_pasujacego_rozmiaru_konto_czeka():
     ROZMIAR = 73_000
     tid = _trader("czeka@pool.pl")
@@ -204,30 +180,6 @@ def test_api_puli_wystawia_zamowienia_czekajace_na_rachunek():
     assert czeka, "konto w statusie provisioning musi byc widoczne jako oczekujace"
     assert czeka[0]["account_size"] == ROZMIAR
     assert czeka[0]["trader_email"] == "wkolejce@pool.pl"
-
-
-def test_czekajace_konto_widac_juz_na_overview():
-    """Kolejka po rachunek z puli musi być widoczna BEZ wchodzenia w MT5 Pool.
-
-    Konto z zakupu zostaje w `provisioning`, a mail z poświadczeniami wychodzi
-    dopiero przy uzbrojeniu — więc dopóki pula jest pusta, nikt nawet nie próbuje
-    go wysłać i kafelek „e-mails failed" stoi na zerze. Cała awaria polega na tym,
-    że nigdzie nic nie mruga: klient nie dostaje nic, a panel wygląda na zdrowy.
-
-    Licznik na Overview i lista w MT5 Pool muszą liczyć DOKŁADNIE ten sam zbiór —
-    wiersz obiecuje, że po kliknięciu zobaczy się te konta, więc rozjazd zamieniłby
-    alert w zagadkę.
-    """
-    tid = _trader("overview@pool.pl")
-    aid = _konto_czekajace(tid, 78_000)
-
-    ile = client.get("/api/stats", headers=ADMIN_H).json()["provisioning"]
-    czekaja = client.get("/api/admin/pool", headers=ADMIN_H).json()["waiting"]
-    assert aid in [w["account_id"] for w in czekaja]
-    assert ile == len(czekaja)
-
-    kod = client.get("/static/js/admin-panel.js").text
-    assert "s.provisioning?todo(s.provisioning," in kod and "'pool','bank'" in kod
 
 
 def test_wolny_wpis_mozna_usunac_a_przydzielonego_nie():
@@ -301,74 +253,3 @@ def test_sim_fallback_aktywuje_konto_gdy_pula_pusta():
         s.close()
     finally:
         client.post("/api/admin/pool/sim-fallback", headers=ADMIN_H, json={"enabled": False})
-
-
-
-def test_real_fallback_toggle_i_kolejnosc_przed_symulacja(monkeypatch):
-    """Real fallback zakłada demo przez opener zanim sim_fallback wstawi placeholdery."""
-    ROZMIAR = 81_000
-    tid = _trader("real-fallback@pool.pl")
-    aid = _konto_czekajace(tid, ROZMIAR)
-
-    class FakeCreds:
-        login = "8100001"
-        password = "RealPass1"
-        server = "MetaQuotes-Demo"
-
-    class FakeOpener:
-        async def open_demo_account(self, spec):
-            return FakeCreds()
-
-    monkeypatch.setattr(provisioning.metaquotes_web, "make_opener", lambda settings=None: FakeOpener())
-    poprzednio = USTAWIENIA.metaquotes_web_enabled
-    USTAWIENIA.metaquotes_web_enabled = True
-    try:
-        r = client.post("/api/admin/pool/real-fallback", headers=ADMIN_H, json={"enabled": True})
-        assert r.status_code == 200
-        assert client.get("/api/admin/pool", headers=ADMIN_H).json()["real_fallback"] is True
-        # sim też włączony — real i tak wygrywa (kolejność w _provision_one)
-        client.post("/api/admin/pool/sim-fallback", headers=ADMIN_H, json={"enabled": True})
-        with realny_provisioning():
-            asyncio.run(provisioning.provision_pending(SessionLocal, None))
-        s = SessionLocal()
-        acc = s.get(Account, aid)
-        assert acc.status == "active"
-        assert acc.platform_login == "8100001"
-        assert acc.mt5_backed is True
-        s.close()
-    finally:
-        USTAWIENIA.metaquotes_web_enabled = poprzednio
-        client.post("/api/admin/pool/real-fallback", headers=ADMIN_H, json={"enabled": False})
-        client.post("/api/admin/pool/sim-fallback", headers=ADMIN_H, json={"enabled": False})
-
-
-def test_provision_real_dla_konkretnego_konta(monkeypatch):
-    """POST /api/admin/accounts/{id}/provision-real omija pulę i przypina realne demo."""
-    ROZMIAR = 82_000
-    tid = _trader("provision-real@pool.pl")
-    aid = _konto_czekajace(tid, ROZMIAR)
-
-    class FakeCreds:
-        login = "8200001"
-        password = "RealPass2"
-        server = "MetaQuotes-Demo"
-
-    class FakeOpener:
-        async def open_demo_account(self, spec):
-            assert spec.email == "provision-real@pool.pl"
-            return FakeCreds()
-
-    from app import main as main_mod
-    monkeypatch.setattr(main_mod.metaquotes_web, "make_opener", lambda settings=None: FakeOpener())
-    monkeypatch.setattr(main_mod, "_generator_status", lambda: (True, ""))
-
-    r = client.post(f"/api/admin/accounts/{aid}/provision-real", headers=ADMIN_H)
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["platform_login"] == "8200001"
-    assert body["mt5_backed"] is True
-
-    s = SessionLocal()
-    acc = s.get(Account, aid)
-    assert acc.status == "active" and acc.platform_password == "RealPass2"
-    s.close()

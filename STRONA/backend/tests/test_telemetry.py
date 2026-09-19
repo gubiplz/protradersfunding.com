@@ -86,20 +86,6 @@ def test_endpoint_wymaga_auth_i_whitelisty():
     assert _wiersze("dowolna_nazwa") == []
 
 
-def test_js_error_przechodzi_whitelist():
-    """Globalny łapacz błędów w appkach raportuje przez /api/telemetry —
-    zdarzenie musi być na whiteliście, inaczej raporty odbijają się o 400."""
-    tid, _, h = _trader()
-    r = client.post("/api/telemetry", headers=h,
-                    json={"name": "js_error",
-                          "props": {"msg": "x is not a function", "src": "portal-app.js:12",
-                                    "view": "accounts"}})
-    assert r.status_code == 200
-    rows = _wiersze("js_error", tid)
-    assert len(rows) == 1
-    assert "x is not a function" in rows[0].props
-
-
 def test_admin_agregacja_liczy_per_dzien():
     tid1, _, _ = _trader()
     tid2, _, _ = _trader()
@@ -112,19 +98,3 @@ def test_admin_agregacja_liczy_per_dzien():
     wiersz = next(i for i in r.json()["items"] if i["name"] == "agg_zdarzenie")
     assert wiersz["count"] == 3 and wiersz["traders"] == 2
     assert len(wiersz["day"]) == 10  # YYYY-MM-DD
-
-
-def test_zalew_telemetrii_lapie_limit(monkeypatch):
-    """view_open leci przy każdej nawigacji, więc limit jest hojny — ale skrypt
-    z ważnym tokenem nie może zalewać telemetry_events bez końca."""
-    import app.main as main_mod
-    monkeypatch.setattr(main_mod, "_RL_DISABLED", False)
-    main_mod._RL_HITS.clear()
-    _, _, h = _trader()
-    try:
-        kody = {client.post("/api/telemetry", headers=h,
-                            json={"name": "view_open", "props": {"view": "accounts"}}
-                            ).status_code for _ in range(130)}
-    finally:
-        main_mod._RL_HITS.clear()
-    assert 429 in kody and 200 in kody

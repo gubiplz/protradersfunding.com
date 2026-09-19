@@ -31,7 +31,7 @@ and a marked gap is safe. An invented answer about money is not.
 | Max daily loss         | 5%                | 5% |
 | Max overall loss       | 10%               | 8% |
 | Drawdown type          | static            | static |
-| Minimum trading days   | 5 (to pass a phase) | 30 (before a payout) |
+| Minimum trading days   | 5                 | 30 (see §9, gap 3) |
 | Profit split           | **90%**           | **70%** |
 | Leverage               | up to 1:100       | up to 1:100 |
 | Weekend trading        | $199 add-on       | $199 add-on |
@@ -101,14 +101,10 @@ the exact rule, time and equity are recorded in the trader's dashboard.
 
 ## 5. Payouts
 
-Requirements, all four enforced in code:
+Requirements, all three enforced in code:
 1. account status is `funded`,
-2. on **Instant Funding**, the account has at least **30 trading days** — a day counts once
-   the trader trades on it, so 30 trading days is longer than 30 calendar days. The counter
-   is on the account card ("Trading Days X / 30 min"). 2-Step accounts have no such wait:
-   their 5 minimum days are spent passing the evaluation,
-3. trader's KYC status is `approved`,
-4. profit (balance − starting balance) is greater than zero.
+2. trader's KYC status is `approved`,
+3. profit (balance − starting balance) is greater than zero.
 
 - Available share = profit × the plan's split (90% or 70%).
 - The trader may request **part or all** of the available share.
@@ -209,10 +205,10 @@ in bold.
 2. **FAQ says minimum trading days are "typically 3–4".** The plans actually sold enforce
    **5** (2-Step). The 3–4 figure comes from unused legacy presets. **Say 5.**
 
-3. **RESOLVED 2026-09-09 — Instant Funding's 30 minimum trading days are now enforced**
-   on the payout request (they were advertised but unchecked). The gap number stays so
-   older references still point somewhere. **Answer from §5: the wait is real, it counts
-   trading days rather than calendar days, and the account card shows the score.**
+3. **Instant Funding advertises 30 minimum trading days, but nothing enforces it.** The
+   account is funded from day one and a payout request only checks funded status, KYC and
+   profit. **Do not tell a customer they must wait 30 days, and do not tell them they can
+   ignore it. If asked directly, escalate.**
 
 4. **Reward frequency ("Bi-weekly" / "Every 7 days") is published but not enforced by any
    scheduler.** Treat it as the team's service commitment. **Do not promise a specific

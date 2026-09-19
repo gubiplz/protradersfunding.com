@@ -3,12 +3,10 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Trader Portal — {{ site_name }}</title>
-<meta name="robots" content="noindex, nofollow">
 {% include "_analytics.html" %}
 <link rel="icon" href="/static/img/favicon.png" type="image/png">
-<link rel="manifest" href="/static/manifest.json?v={{ asset_v }}">
+<link rel="manifest" href="/static/manifest.json">
 <meta name="theme-color" content="#f6f7fb">
-<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="ProTraders">
@@ -24,13 +22,11 @@ document.documentElement.dataset.theme='dark';
 document.querySelector('meta[name="theme-color"]').setAttribute('content','#0b0d12')}}catch(e){}
 if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('/sw.js'))</script>
 <link rel="stylesheet" href="/static/css/portal.css?v={{ asset_v }}">
-<!-- defer: skrypty nie blokują parsowania (LCP), a kolejność wykonania jest
-     gwarantowana — bundle portalu (też defer, na dole body) idzie ostatni. -->
-<script defer src="/static/lib/chart.umd.min.js"></script>
-<script defer src="/static/lib/gsap.min.js"></script>
-<script defer src="/static/js/equity-chart.js?v={{ asset_v }}"></script>
-<script defer src="/static/js/sortable.js?v={{ asset_v }}"></script>
-<script defer src="/static/js/reward-fx.js?v={{ asset_v }}"></script>
+<script src="/static/lib/chart.umd.min.js"></script>
+<script src="/static/lib/gsap.min.js"></script>
+<script src="/static/js/equity-chart.js?v={{ asset_v }}"></script>
+<script src="/static/js/sortable.js?v={{ asset_v }}"></script>
+<script src="/static/js/reward-fx.js?v={{ asset_v }}"></script>
 <!-- Dial codes and per-country phone lengths. Same table the server validates
      against, so the buy modal and /api/checkout can never disagree. -->
 </head>
@@ -216,14 +212,12 @@ const GOOGLE_CLIENT_ID={{ google_client_id|tojson }};
 const SITE_NAME={{ site_name|tojson }};
 const ASSET_V={{ asset_v|tojson }};
 </script>
-<script defer src="/countries.js?v={{ asset_v }}"></script>
-<script defer src="/static/js/portal-app.js?v={{ asset_v }}"></script>
+<script src="/countries.js?v={{ asset_v }}"></script>
+<script src="/static/js/portal-app.js?v={{ asset_v }}"></script>
 {% if google_client_id %}
 {# hl=en: the button label comes from this script's bundled strings and would
    otherwise follow the visitor's browser language — the site is English-only #}
-{# Guard w onload: gsi (async) potrafi załadować się PRZED odroczonym
-   portal-app.js — wtedy dokończy boot() (initGoogle przy window.google). #}
-<script src="https://accounts.google.com/gsi/client?hl=en" async defer onload="window.initGoogle&&initGoogle()"></script>
+<script src="https://accounts.google.com/gsi/client?hl=en" async defer onload="initGoogle()"></script>
 {% endif %}
 </body>
 </html>

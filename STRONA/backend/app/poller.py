@@ -9,17 +9,13 @@ Stan żyje w bazie (Account.*), więc restart procesu nie gubi postępu.
 from __future__ import annotations
 
 import asyncio
-import random
-import time
 from datetime import datetime, timedelta, timezone
-
-from sqlalchemy import func, select
 
 from .config import get_settings
 from .db import SessionLocal
 from .feed import Feed, make_feed
-from .models import Account, AppSetting, Breach, EquitySnapshot, Trade
-from . import catalog, notify, provisioning, push, rules, tradebot
+from .models import Account, Breach, EquitySnapshot
+from . import catalog, notify, provisioning, rules, tradebot
 from .rules import AccountRuntime, EquityTick, Phase, Status
 
 # Plan skalowania kont funded: po +SCALE_TRIGGER% trader WYBIERA — wypłata albo
@@ -98,11 +94,6 @@ def _advance_phase(acc: Account, rt: AccountRuntime) -> None:
     acc.trading_days_count = 0
     acc.last_counted_trading_day = ""
     acc.breach_reason = None
-    # Nowa faza ma własny cel i własne dni, więc strażnicy progów idą razem
-    # z metrykami — inaczej drugą ewaluację trader przechodziłby w ciszy.
-    acc.target_50_at = acc.target_75_at = acc.min_days_at = None
-    acc.prev_phase_started_at = acc.phase_started_at or acc.started_at
-    acc.phase_started_at = datetime.now(timezone.utc)
 
 
 def scale_offer(acc: Account) -> float | None:
@@ -169,10 +160,6 @@ def apply_scale_up(session, acc: Account) -> float:
     acc.trading_days_count = 0
     acc.last_counted_trading_day = ""
     acc.breach_reason = None
-    # Po skalowaniu to inny rachunek: inny login, saldo od nowa, dni od zera.
-    # Strażnicy ze starego rozmiaru zablokowaliby wszystkie cztery progi.
-    acc.target_50_at = acc.target_75_at = None
-    acc.min_days_at = acc.payout_ready_at = None
     acc.started_at = datetime.now(timezone.utc)
     acc.closed_at = None
 
@@ -191,108 +178,6 @@ def apply_scale_up(session, acc: Account) -> float:
     return float(bal)
 
 
-# Próg ostrzeżenia „zbliżasz się do limitu" (procent WYKORZYSTANIA limitu,
-# nie procent straty) — jak u FTMO, zanim konto realnie pęknie.
-LIMIT_WARN_PCT = 80.0
-
-
-def _limit_warnings_due(acc: Account, metrics: dict, day_key: str) -> list[str]:
-    """Tytuły należnych ostrzeżeń o limitach; przy okazji stawia strażniki.
-
-    Raz dziennie na typ limitu (kolumny limit_warn_*_day). Na serverless tick
-    budzi się z ruchem albo dziennym cronem, więc ostrzeżenie może przyjść
-    z opóźnieniem — nadal lepsze niż cisza aż do breachu.
-    """
-    tytuly = []
-    daily = float(metrics.get("daily_loss_used_pct") or 0)
-    dd = float(metrics.get("overall_dd_used_pct") or 0)
-    if daily >= LIMIT_WARN_PCT and acc.limit_warn_daily_day != day_key:
-        acc.limit_warn_daily_day = day_key
-        tytuly.append(f"{acc.login}: {int(round(daily))}% of daily loss limit used")
-    if dd >= LIMIT_WARN_PCT and acc.limit_warn_dd_day != day_key:
-        acc.limit_warn_dd_day = day_key
-        tytuly.append(f"{acc.login}: {int(round(dd))}% of max drawdown used")
-    return tytuly
-
-
-def payout_days_left(acc: Account) -> int:
-    """Ile dni handlu brakuje kontu do wypłaty (0 = można wnioskować).
-
-    Instant Funding jest funded od pierwszej minuty, więc jego `min_trading_days`
-    nie ma żadnej fazy do zamknięcia — ta liczba znaczy w tym planie dokładnie
-    jedno: sklepową obietnicę „min. 30 dni handlu przed pierwszą wypłatą". Do
-    2026-09-09 nie pilnował jej nikt, ani portal, ani API, więc konto z zyskiem
-    mogło wypłacić drugiego dnia, mimo że dashboard pokazywał obok „X / 30 min".
-
-    Ewaluacji ta bramka NIE dotyczy: tam te same dni są warunkiem ZDANIA fazy,
-    zużywają się przed wejściem na funded (`trading_days_count` startuje wtedy od
-    zera) i policzenie ich drugi raz zamroziłoby wypłaty świeżo sfinansowanym
-    kontom 2-Step — czego cennik nigdzie nie obiecuje.
-    """
-    if acc.steps:
-        return 0
-    return max(0, int(acc.min_trading_days or 0) - int(acc.trading_days_count or 0))
-
-
-# Konto zaimportowane z historią przechodzi wszystkie progi naraz na pierwszym
-# ticku. Doba ciszy po założeniu oddziela „tak było od początku" od „właśnie się
-# zmieniło" — a tylko to drugie jest powodem, żeby zawracać komuś głowę.
-STATE_QUIET_HOURS = 24
-
-
-def _state_change_due(acc: Account, cfg, metrics: dict,
-                      now: datetime) -> tuple[str, str] | None:
-    """Jedno należne powiadomienie o zmianie stanu `(event, tytuł)`; stawia strażnika.
-
-    Konto zmienia stan po cichu: próg zysku pada w środku nocy, dni handlowe
-    dochodzą same z siebie, a wypłata robi się dostępna bez żadnego sygnału.
-    Trader dowiaduje się o tym dopiero, gdy sam otworzy portal — te cztery
-    zdarzenia mówią mu to wtedy, kiedy naprawdę się stały.
-
-    Świadomie NIE ma tu „zostało ci jeszcze X": próg opisany brakującym
-    dystansem to near-miss, czyli dokładnie ta mechanika, którą regulatorzy
-    wytykają brokerom detalicznym. Każdy tytuł mówi, co się JUŻ wydarzyło,
-    a treść (`push._BODY`) — co z tego wynika dla reguł konta.
-
-    `now` musi być w UTC, bo porównujemy je z `created_at`; `server_now()` jest
-    przesunięte o strefę serwera MT5 i tutaj by kłamało.
-    """
-    stworzone = acc.created_at
-    if stworzone is not None:
-        if stworzone.tzinfo is None:
-            stworzone = stworzone.replace(tzinfo=timezone.utc)
-        if (now - stworzone) < timedelta(hours=STATE_QUIET_HOURS):
-            return None
-
-    cel = float(cfg.profit_target_pct or 0)
-    zysk = float(metrics.get("profit_pct") or 0)
-    dni = int(metrics.get("trading_days") or 0)
-    wymagane = int(cfg.min_trading_days or 0)
-
-    if cel > 0 and zysk >= 0.75 * cel and acc.target_75_at is None:
-        # Konto, które przeskoczyło oba progi między tickami, dostaje tylko ten
-        # wyższy — wiadomość o progu, który już minął, nie niesie żadnego stanu.
-        acc.target_50_at = acc.target_50_at or now
-        acc.target_75_at = now
-        return "target_75", f"{acc.login}: three quarters of the {cel:g}% profit target reached"
-    if cel > 0 and zysk >= 0.5 * cel and acc.target_50_at is None:
-        acc.target_50_at = now
-        return "target_50", f"{acc.login}: half of the {cel:g}% profit target reached"
-    if (wymagane > 0 and dni >= wymagane and acc.min_days_at is None
-            and acc.phase != Phase.FUNDED.value):
-        # Tylko w ewaluacji, gdzie dni handlu są osobnym warunkiem ZDANIA fazy.
-        # Na funded te same dni są bramką wypłaty, więc mówi o nich `payout_ready`
-        # — inaczej Instant Funding dostałby dwie wiadomości o jednym zdarzeniu.
-        acc.min_days_at = now
-        return "min_days_met", f"{acc.login}: minimum of {wymagane} trading days completed"
-    if (acc.status == Status.FUNDED.value and acc.payout_ready_at is None
-            and payout_days_left(acc) == 0
-            and round(acc.balance - acc.initial_balance, 2) > 0):
-        acc.payout_ready_at = now
-        return "payout_ready", f"{acc.login}: eligible to request a payout"
-    return None
-
-
 def _notify(acc: Account, event: str, extra: dict | None = None) -> None:
     """Best-effort powiadomienie tradera (e-mail/webhook)."""
     try:
@@ -300,7 +185,7 @@ def _notify(acc: Account, event: str, extra: dict | None = None) -> None:
         if not trader:
             return
         ctx = {"name": trader.full_name or trader.email, "login": acc.login,
-               "split": acc.profit_split_pct, "account_id": acc.id}
+               "split": acc.profit_split_pct}
         ctx.update(extra or {})
         notify.send(event, trader.email, ctx)
     except Exception as e:  # pragma: no cover
@@ -354,13 +239,6 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
 
     if res.failed:
         acc.closed_at = datetime.now(timezone.utc)
-        if bot_driven:
-            # Poller obsługuje tylko konta active/funded, więc po breachu bot
-            # nigdy już nie zamknąłby swojej otwartej pozycji — sterczałaby
-            # w portalu klienta w nieskończoność. Zamykamy po bieżącym
-            # floatingu (tą samą mechaniką co `tradebot.stop`), a bota gasimy:
-            # inaczej po ręcznym wskrzeszeniu konta zjazd ruszyłby od nowa.
-            tradebot.stop(session, acc)
         maid = acc.metaapi_account_id
         login, pw = acc.platform_login, acc.platform_password
         session.commit()
@@ -386,155 +264,7 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
     else:
         # Skalowanie NIE dzieje się tu samo: przy +15% trader wybiera w portalu
         # między wypłatą a wyższym planem (POST /api/accounts/{id}/scale-up).
-        ostrzezenia = _limit_warnings_due(acc, res.metrics, tick.day_key)
-        # Zmiana stanu ustępuje ostrzeżeniu o limicie: jeśli konto ociera się
-        # dziś o granicę, „połowa celu za tobą" w tym samym cyklu brzmi jak
-        # zachęta do dalszej jazdy. Próg poczeka do następnego ticku.
-        zmiana = (None if ostrzezenia
-                  else _state_change_due(acc, cfg, res.metrics, datetime.now(timezone.utc)))
         session.commit()
-        # Push + centrum powiadomień, BEZ maila (jak daily_recap) — mail o
-        # „prawie stracie" o 3 nad ranem to panika, nie pomoc.
-        email = acc.trader.email if acc.trader else None
-        for tytul in ostrzezenia:
-            try:
-                push.send_event("limit_warning", email, tytul)
-            except Exception as e:  # pragma: no cover
-                print(f"[poller] limit warning: {e}", flush=True)
-        if zmiana:
-            try:
-                push.send_event(zmiana[0], email, zmiana[1], {"account_id": acc.id})
-            except Exception as e:  # pragma: no cover
-                print(f"[poller] state change: {e}", flush=True)
-
-
-BACKFILL_LOCK_KEY = "bot_backfill_lock"
-BACKFILL_LOCK_TTL_SEC = 15 * 60
-# Backfill kończy godzinę przed „teraz" i od tego momentu konto przejmuje żywy
-# poller. Bufor jest też filtrem kursora: snapshoty dopisane przez lazy-tick
-# W TRAKCIE dogrywania mają ts przy „teraz", więc nie zafałszują wznowienia.
-BACKFILL_MARGIN = timedelta(hours=1)
-
-
-def _backfill_locked_id(session) -> int | None:
-    """Konto, któremu backfill właśnie dogrywa historię — poller je omija.
-
-    Bez zamka lazy-tick z ruchu publicznego wpycha się między odtwarzane kroki
-    z dzisiejszym `day_key` i saldem sprzed dwóch tygodni: baseline'y dnia
-    skaczą tam i z powrotem, licznik dni handlowych rośnie podwójnie, a wykres
-    dostaje samotny punkt „dziś" w środku przeszłości. Zamek siedzi w bazie,
-    bo na serverless backfill i lazy-tick to osobne procesy. Stary zamek
-    (proces ubity w połowie) wygasa po kwadransie — konto nie może zostać
-    wyłączone z silnika na zawsze."""
-    row = session.get(AppSetting, BACKFILL_LOCK_KEY)
-    if not row or not row.value:
-        return None
-    try:
-        aid, ts = row.value.split(":", 1)
-        if time.time() - float(ts) > BACKFILL_LOCK_TTL_SEC:
-            return None
-        return int(aid)
-    except ValueError:
-        return None
-
-
-def backfill_bot(session, acc: Account, days: int, *, chunk_days: float = 3.0,
-                 step_min: float = 20.0) -> dict:
-    """Dogrywa kontu botowemu historię WSTECZ, jakby bot działał od `days` dni.
-
-    Odtwarza przeszłość TYM SAMYM silnikiem co żywy przebieg (`tradebot.tick`
-    + `rules.evaluate` + snapshot), tylko z zegarem przestawionym w tył — konto
-    dostaje pełną tabelę transakcji, krzywą equity i naliczone dni handlowe,
-    a nie gołe saldo. Pierwsze wywołanie cofa też metrykę startu konta
-    (`created_at`/`started_at`/`bot_started_at`) — historia starsza niż konto
-    zdradzałaby dogrywkę na pierwszy rzut oka.
-
-    Jeden request odtwarza najwyżej `chunk_days` dni symulacji: pełne
-    kilkadziesiąt dni to tysiące zapytań do bazy i na serverless wypada z limitu
-    czasu. `done=False` w odpowiedzi znaczy „wołaj jeszcze raz" — kursor wznowień
-    to ostatni snapshot sprzed marginesu, więc kolejne wywołania są odporne na
-    powtórki i przerwany proces."""
-    now = datetime.now(timezone.utc)
-    koniec = now - BACKFILL_MARGIN
-    ostatni = (session.query(func.max(EquitySnapshot.ts))
-               .filter(EquitySnapshot.account_id == acc.id,
-                       EquitySnapshot.ts < koniec.replace(tzinfo=None)).scalar())
-    if ostatni is None:
-        # Czysta karta przed cofnięciem zegara: żywy tick (lazy-tick z ruchu
-        # publicznego) potrafi między startem bota a pierwszym backfillem otworzyć
-        # pozycję z DZISIEJSZĄ datą i zamknięciem w realnej przyszłości — replay
-        # nigdy jej nie domknie i przesiedzi całą dogrywkę bez jednej transakcji.
-        session.query(Trade).filter(Trade.account_id == acc.id).delete()
-        session.query(EquitySnapshot).filter(EquitySnapshot.account_id == acc.id).delete()
-        acc.balance = acc.equity = acc.peak_equity = acc.initial_balance
-        acc.day_start_equity = acc.day_start_balance = acc.initial_balance
-        acc.open_pnl = 0.0
-        acc.best_day_profit = 0.0
-        acc.trading_days_count = 0
-        acc.last_counted_trading_day = ""
-        start = now - timedelta(days=days)
-        # Dogrywka cofa `created_at`, więc dobowe okno ciszy przestaje osłaniać
-        # konto — a progi, które padły w ODTWORZONEJ historii, nie były dla
-        # tradera żadną zmianą stanu. Stemplujemy je jako ogłoszone: pierwszy
-        # żywy tick ma milczeć o czymś, czego nikt nie przeżył.
-        acc.target_50_at = acc.target_75_at = start
-        acc.min_days_at = acc.payout_ready_at = start
-        acc.bot_started_at = start
-        acc.created_at = start
-        acc.started_at = start
-        acc.day_key = server_day_key(start + timedelta(hours=settings.server_utc_offset_hours))
-        kursor = start
-    else:
-        kursor = ostatni if ostatni.tzinfo else ostatni.replace(tzinfo=timezone.utc)
-    stop = min(kursor + timedelta(days=chunk_days), koniec)
-
-    rng = random.Random(f"{acc.bot_seed}:backfill:{kursor.isoformat()}")
-    t, kroki, padlo = kursor, 0, False
-    while True:
-        # Krok z jitterem: sztywna siatka co równe 20 minut wyglądałaby jak
-        # stempel generatora — żywe ticki przychodzą z ruchem i cronem, nierówno.
-        t = t + timedelta(minutes=step_min * rng.uniform(0.7, 1.3))
-        if t > stop:
-            break
-        snap = tradebot.tick(session, acc, t)
-        srv = t + timedelta(hours=settings.server_utc_offset_hours)
-        started = acc.started_at if acc.started_at.tzinfo else acc.started_at.replace(tzinfo=timezone.utc)
-        cfg = rules.config_from_account(acc)
-        rt = _runtime_from(acc)
-        tick = EquityTick(
-            equity=snap.equity, balance=snap.balance, open_pnl=snap.open_pnl,
-            volume_lots=snap.volume_lots, volume_known=snap.volume_known,
-            day_key=server_day_key(srv), has_open_position=snap.has_open_position,
-            days_elapsed=(srv - started).days,
-        )
-        res = rules.evaluate(cfg, rt, tick)
-        _write_runtime(acc, rt)
-        session.add(EquitySnapshot(account_id=acc.id, ts=t.replace(tzinfo=None),
-                                   balance=snap.balance, equity=snap.equity,
-                                   open_pnl=snap.open_pnl, day_key=tick.day_key))
-        kroki += 1
-        for btype, detail, eq in res.breaches:
-            session.add(Breach(account_id=acc.id, type=btype.value, detail=detail,
-                               equity_at_breach=eq))
-        if res.failed:
-            acc.closed_at = t
-            padlo = True
-            break
-
-    done = padlo or stop >= koniec
-    zamek = session.get(AppSetting, BACKFILL_LOCK_KEY)
-    if zamek is None:
-        zamek = AppSetting(key=BACKFILL_LOCK_KEY, value="")
-        session.add(zamek)
-    zamek.value = "" if done else f"{acc.id}:{time.time()}"
-    session.commit()
-    transakcje = (session.query(func.count(Trade.id))
-                  .filter(Trade.account_id == acc.id).scalar() or 0)
-    return {"done": done, "failed": padlo, "steps": kroki, "trades": int(transakcje),
-            "simulated_to": min(t, stop).isoformat(),
-            "balance": round(acc.balance, 2),
-            "profit_pct": round((acc.balance - acc.initial_balance)
-                                / acc.initial_balance * 100, 2)}
 
 
 def _active_query(session):
@@ -556,71 +286,11 @@ async def tick_once() -> dict:
     session = SessionLocal()
     try:
         accounts = _active_query(session).all()
-        w_dogrywce = _backfill_locked_id(session)
-        bledy = 0
         for acc in accounts:
-            if acc.id == w_dogrywce:
-                continue
-            # Awaria jednego konta (feed, broker, baza) nie może zatrzymać
-            # przetwarzania pozostałych — na serverless kolejna szansa jest
-            # dopiero za dobę. Rollback czyści sesję z niedokończonego stanu.
-            try:
-                await process_account(session, acc, _feed)
-            except Exception as e:
-                session.rollback()
-                bledy += 1
-                print(f"[poller] konto {acc.login}: przebieg nieudany: {e}", flush=True)
-        wynik = {"accounts": len(accounts), "feed": settings.feed}
-        if bledy:
-            wynik["errors"] = bledy
-        return wynik
+            await process_account(session, acc, _feed)
+        return {"accounts": len(accounts), "feed": settings.feed}
     finally:
         session.close()
-
-
-def prune_equity_snapshots(session, dni_pelne: int = 30, partia: int = 500,
-                           budzet_s: float = 10.0) -> int:
-    """Retencja wykresu equity: dni starsze niż `dni_pelne` chudną do jednego
-    (ostatniego) snapshotu na (konto, dzień) — wykres dzienny tego nie widzi,
-    a tabela przestaje rosnąć bez końca.
-
-    Kasowanie idzie partiami z budżetem czasu i commitem po każdej partii:
-    na serverless (Vercel, limit 60 s) przerwany przebieg nie traci pracy,
-    resztę dokończy następny cron. Woła to handler /api/tick PO tick_once —
-    celowo nie sam tick_once, bo jego odpala też lazy-tick z ruchu strony.
-    """
-    # Naiwny UTC jak kolumna `ts` — aware vs naive wywraca porównanie na Postgresie.
-    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=dni_pelne)
-    keepers = (select(func.max(EquitySnapshot.id))
-               .where(EquitySnapshot.ts < cutoff)
-               .group_by(EquitySnapshot.account_id, EquitySnapshot.day_key))
-    start = time.monotonic()
-    usuniete = 0
-    while time.monotonic() - start < budzet_s:
-        ids = [i for (i,) in session.query(EquitySnapshot.id)
-               .filter(EquitySnapshot.ts < cutoff, EquitySnapshot.id.not_in(keepers))
-               .limit(partia).all()]
-        if not ids:
-            break
-        session.query(EquitySnapshot).filter(EquitySnapshot.id.in_(ids)) \
-            .delete(synchronize_session=False)
-        session.commit()
-        usuniete += len(ids)
-        if len(ids) < partia:
-            break
-    return usuniete
-
-
-async def provision_kickoff() -> None:
-    """Natychmiastowa próba uzbrojenia kont czekających w 'provisioning'.
-
-    Wołane zaraz po zaksięgowaniu płatności (mark-paid, webhook Stripe) — na
-    serverless najbliższy pełny tick może przyjść dopiero z dziennego crona,
-    a mail z poświadczeniami wychodzi dopiero przy przydziale rachunku."""
-    global _feed
-    if _feed is None:
-        _feed = make_feed()
-    await provisioning.provision_pending(SessionLocal, _feed)
 
 
 async def _loop() -> None:

@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 
-from fastapi import Depends, Header, HTTPException, Request
+from fastapi import Depends, Header, HTTPException
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 from .config import get_settings
@@ -57,26 +57,9 @@ def make_token(trader_id: int, password_hash: str | None = None) -> str:
     return _serializer.dumps(payload)
 
 
-# Impersonacja z panelu („zobacz portal oczami klienta"): pełnoprawna sesja
-# tradera wystawiana adminowi bez znajomości hasła (w bazie leżą tylko skróty).
-# Krótka smycz zamiast 14 dni — to cudzy pęk kluczy w karcie przeglądarki
-# admina; flaga "imp" pozwala odróżnić taki ruch, żeby dziennik klienta nie
-# liczył podglądu jako jego aktywności.
-IMP_MAX_AGE = 60 * 60 * 2  # 2 godziny
-
-
-def make_impersonation_token(trader_id: int, password_hash: str | None = None) -> str:
-    payload: dict = {"tid": trader_id, "imp": 1}
-    if password_hash:
-        payload["pwf"] = _pw_fp(password_hash)
-    return _serializer.dumps(payload)
-
-
 def _parse_session(token: str) -> dict | None:
     try:
         data = _serializer.loads(token, max_age=TOKEN_MAX_AGE)
-        if data.get("imp"):
-            _serializer.loads(token, max_age=IMP_MAX_AGE)
         int(data["tid"])
         return data
     except (BadSignature, Exception):
@@ -109,32 +92,6 @@ def parse_reset_token(token: str) -> tuple[int, str | None] | None:
         return None
 
 
-# Zaproszenie do konta założonego ZA klienta (must_set_password): mechanika jak
-# przy resecie (odcisk hasła w tokenie = jednorazowość), ale ważność 7 dni.
-# Godzinny link umierał, zanim klient doczytał mail z poświadczeniami, i cała
-# furtka kończyła się na „forgot password". Ryzyko bez zmian: konto nie ma
-# hasła znanego komukolwiek, więc link wart jest dokładnie tyle, co dostęp do
-# skrzynki — jak każdy reset. Osobna sól, żeby godzinnego resetu i zaproszenia
-# nie dało się użyć zamiennie.
-_setup_serializer = URLSafeTimedSerializer(settings.secret_key, salt="pw-setup")
-SETUP_MAX_AGE = 60 * 60 * 24 * 7  # 7 dni
-
-
-def make_setup_token(trader_id: int, password_hash: str | None = None) -> str:
-    payload: dict = {"tid": trader_id}
-    if password_hash:
-        payload["pwf"] = _pw_fp(password_hash)
-    return _setup_serializer.dumps(payload)
-
-
-def parse_setup_token(token: str) -> tuple[int, str | None] | None:
-    try:
-        data = _setup_serializer.loads(token, max_age=SETUP_MAX_AGE)
-        return int(data["tid"]), data.get("pwf")
-    except (BadSignature, Exception):
-        return None
-
-
 _verify_serializer = URLSafeTimedSerializer(settings.secret_key, salt="email-verify")
 VERIFY_MAX_AGE = 60 * 60 * 24
 
@@ -150,37 +107,13 @@ def parse_verify_token(token: str) -> int | None:
         return None
 
 
-# Portal wstrzymany do czasu weryfikacji (`Trader.kyc_locked`) przepuszcza tylko
-# to, bez czego klient nie odblokuje się sam: własny profil, formularz KYC
-# z plikami, potwierdzenie adresu e-mail, support i wylogowanie. Lista jest
-# z definicji WĄSKA — endpoint dopisany za pół roku ma być domyślnie zamknięty,
-# bo bramka zapomniana przy nowej funkcji to bramka, której nie ma.
-# `/api/telemetry` jest tu mimo tej reguły: to jedyny ślad, że klient w ogóle
-# wszedł w zakładkę weryfikacji, a właśnie o to pyta support („czy on to
-# widział?"). Nic nie zmienia po stronie konta.
-BEZ_BLOKADY = ("/api/auth/me", "/api/auth/logout", "/api/me/kyc",
-               "/api/me/tickets", "/api/me/verify-email", "/api/telemetry")
-KYC_BLOKADA = ("Your portal access is paused until we verify your identity. "
-               "Upload your documents in the Verification tab — we review them "
-               "within one business day. Your trading account keeps running.")
-
-
-def portal_wstrzymany(trader: Trader, sciezka: str) -> bool:
-    """Czy to żądanie ma się odbić o wstrzymany portal."""
-    if not trader.kyc_locked or trader.kyc_status == "approved":
-        return False
-    return not any(sciezka == p or sciezka.startswith(p + "/") for p in BEZ_BLOKADY)
-
-
 # --- FastAPI dependencies ---
-def current_trader(request: Request,
-                   authorization: str | None = Header(default=None)) -> Trader:
+def current_trader(authorization: str | None = Header(default=None)) -> Trader:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(401, "Missing token (sign in)")
     data = _parse_session(authorization.split(" ", 1)[1].strip())
     if data is None:
         raise HTTPException(401, "Invalid or expired token")
-    request.state.impersonated = bool(data.get("imp"))
     session = SessionLocal()
     try:
         trader = session.get(Trader, int(data["tid"]))
@@ -192,8 +125,6 @@ def current_trader(request: Request,
         pwf = data.get("pwf")
         if pwf and pwf != _pw_fp(trader.password_hash):
             raise HTTPException(401, "Invalid or expired token")
-        if portal_wstrzymany(trader, request.url.path):
-            raise HTTPException(403, KYC_BLOKADA)
         session.expunge(trader)
         return trader
     finally:

@@ -27,10 +27,6 @@ class Trader(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     email: Mapped[str] = mapped_column(String(180), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
-    # Konto założone ZA klienta (ręczne zamówienie, import wypłat): hasło jest
-    # losowe i nie zna go nikt, łącznie z nami. Bez tej flagi mail „gotowe,
-    # zaloguj się" wysyła człowieka pod drzwi, do których nie ma klucza.
-    must_set_password: Mapped[bool] = mapped_column(Boolean, default=False)
     full_name: Mapped[str] = mapped_column(String(120), default="")
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -99,15 +95,6 @@ class Trader(Base):
     # Kredyty sklepowe (USD) — nadaje admin, automatycznie odliczane od ceny
     # nastepnego zakupu w checkoucie. Pelna historia w tabeli credit_ledger.
     credits_usd: Mapped[float] = mapped_column(Float, default=0.0)
-    # Prośba o weryfikację wysłana z panelu. Otwiera KYC temu traderowi nawet bez
-    # konta funded (patrz `main.kyc_dostepne`) — admin świadomie o dokumenty
-    # poprosił, więc bramka od zbierania skanów „na zapas" już go nie dotyczy.
-    kyc_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # Portal wstrzymany do czasu akceptacji dokumentów (`auth.current_trader`).
-    # Darmowy challenge dostaje ktoś, kogo jeszcze nie znamy, a prezent ściąga
-    # dublerów — więc konto z kanału FREE żyje na MT5, ale portal otwiera się
-    # dopiero po weryfikacji. Approve zdejmuje flagę.
-    kyc_locked: Mapped[bool] = mapped_column(Boolean, default=False)
     kyc_submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     kyc_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Powód odrzucenia KYC — pokazywany traderowi w portalu i w mailu;
@@ -125,10 +112,6 @@ class Trader(Base):
     reveal_last: Mapped[str | None] = mapped_column(String(10), nullable=True)
     reveal_payload: Mapped[str | None] = mapped_column(String(240), nullable=True)  # JSON dzisiejszego wyniku
     streak_freezes: Mapped[int] = mapped_column(Integer, default=1)                 # ratuje serię po 1 dniu przerwy
-    # Klucze obserwacji z dwóch ostatnich przeglądów tygodnia, po przecinku,
-    # najnowszy pierwszy. Bez tego ten sam wniosek („jeden dzień zrobił tydzień")
-    # wracałby w każdy poniedziałek i przestałby cokolwiek znaczyć.
-    weekly_rules: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
@@ -178,25 +161,11 @@ class Order(Base):
     stripe_session_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # BOGO: klucz produktu, za ktory klient zaplacil (gdy admin przyznaje wiekszy tier)
     bogo_paid_key: Mapped[str | None] = mapped_column(String(48), nullable=True)
-    # Buy 1 Get 1 Free: po oplaceniu tego zamowienia provisioning dorzuca drugie
-    # konto tego samego rozmiaru jako grant. Stemplowane przy TWORZENIU zamowienia
-    # (globalna promocja albo decyzja admina per lead), nie przy platnosci — dzieki
-    # temu wylaczenie promocji nie zabiera BOGO klientom z linkiem juz w reku.
-    bogo: Mapped[bool] = mapped_column(Boolean, default=False)
     # Add-on Weekend Trading ($199): 2 dodatkowe dni handlu w tygodniu.
     weekend_trading: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Add-on Split Boost: +10 pp do profit splitu (tylko Instant Funding).
-    addon_split_boost: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Add-on Express Payout: wnioski o wypłatę z tego konta ida na poczatek kolejki.
-    addon_express_payout: Mapped[bool] = mapped_column(Boolean, default=False)
     # Kredyty sklepowe odliczone od ceny tego zamowienia. Saldo tradera schodzi
     # dopiero przy DOMKNIECIU platnosci — porzucony checkout nie pali srodkow.
     credits_used: Mapped[float] = mapped_column(Float, default=0.0)
-    # Oferta flash sale, ktora wygrala wycene tego zamowienia. Stemplowana przy
-    # TWORZENIU zamowienia (jak `bogo`): oferta wygasla miedzy koszykiem a
-    # zaplata honoruje cene z zamowienia, a provisioning wie, co oznaczyc jako
-    # zuzyte po domknieciu platnosci.
-    flash_offer_id: Mapped[int | None] = mapped_column(ForeignKey("flash_offers.id"), nullable=True)
     # Reczna flaga admina dla nieoplaconych zamowien: NULL | awaiting_crypto
     flag: Mapped[str | None] = mapped_column(String(24), nullable=True)
     # Powod recznego oznaczenia jako failed — widoczny w panelu przy statusie.
@@ -212,18 +181,6 @@ class Order(Base):
     # jest publiczna; sesje Stripe'a zaklada dopiero klikniecie, wiec link nie
     # wygasa i `stripe_session_id` dalej pilnuje webhooka.
     pay_token: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
-    # Marka strony /pay/<token>: NULL/'ptf' = ProTradersFunding, 'fx' = barwy
-    # Forex Passing (klienci z tamtego kanalu nie znaja marki PTF).
-    brand: Mapped[str | None] = mapped_column(String(8), nullable=True)
-    # Po oplaceniu konto otwiera sie od razu jako funded (pomija ewaluacje) —
-    # oferta imienna z panelu, niezaleznie od liczby krokow planu.
-    open_funded: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Weekend Trading w prezencie: add-on wchodzi na konto, ale $199 NIE siedzi
-    # w kwocie. Bez tego sladu strona /pay liczylaby rabat od kwoty minus 199
-    # i przekreslony cennik klamalby procentem.
-    weekend_free: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Wlasny naglowek strony /pay (np. „Weekend Flash Sale"); NULL = domyslny.
-    pay_headline: Mapped[str | None] = mapped_column(String(80), nullable=True)
     # Znacznik wyslanego maila „platnosc nie doszla do skutku". Siedzi PRZY
     # ZAMOWIENIU, nie przy traderze, bo tylko to daje jeden mail na jedna
     # porzucona probe — ta sama osoba moze porzucic checkout kilka razy.
@@ -299,43 +256,6 @@ class RewardCode(Base):
 
 
 # --------------------------------------------------------------------------- #
-#  FlashOffer — reczna oferta flash sale (cross-sell)                         #
-# --------------------------------------------------------------------------- #
-class FlashOffer(Base):
-    """Procent znizki na wskazane plany, w oknie czasowym, imiennie albo globalnie.
-
-    Osobny byt, bo nic istniejacego tego nie unosi: `catalog.COUPONS` to zaszyty
-    slownik wymagajacy wdrozenia kodu, a `RewardCode` ma obowiazkowe
-    `points_spent`, jest twardo per-trader i czytaja go widoki lojalnosciowe —
-    oferta wyplynelaby traderowi na liscie „kodow kupionych za punkty".
-
-    Stan (pending/active/expired/used/cancelled) jest WYLICZANY z dat
-    (`offers.status`), nie trzymany w kolumnie — nikt nie chodzi tu cronem,
-    wiec kolumna statusu rozjechalaby sie z zegarem.
-    """
-    __tablename__ = "flash_offers"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    discount_pct: Mapped[float] = mapped_column(Float)
-    # NULL = oferta globalna (widzi ja kazdy w portalu i publiczny sklep)
-    trader_id: Mapped[int | None] = mapped_column(ForeignKey("traders.id"), nullable=True, index=True)
-    # all | 2step | instant | keys — rodziny lapia tez plany dodane do katalogu
-    # juz PO wystawieniu oferty; `keys` to jawna lista CSV w `plan_keys`.
-    scope: Mapped[str] = mapped_column(String(16), default="all")
-    plan_keys: Mapped[str | None] = mapped_column(String(400), nullable=True)
-    title: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    starts_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    ends_at: Mapped[datetime] = mapped_column(DateTime)
-    # Jednorazowosc ma sens tylko imiennie; globalna jednorazowa bylaby wyscigiem
-    # „kto pierwszy" — endpoint wymusza False dla globalnych.
-    single_use: Mapped[bool] = mapped_column(Boolean, default=False)
-    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"), nullable=True)
-    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
-
-
-# --------------------------------------------------------------------------- #
 #  AchievementReward — nagroda za prog odznak (3/8, 5/8, 8/8)                 #
 # --------------------------------------------------------------------------- #
 class AchievementReward(Base):
@@ -392,9 +312,6 @@ class Account(Base):
     # albo mail w ogole go nie zawiera.
     bogo_paid_size: Mapped[float | None] = mapped_column(Float, nullable=True)
     weekend_trading: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Add-on Express Payout kupiony przy checkoucie: wnioski o wypłatę z tego
-    # konta panel pokazuje na poczatku kolejki przegladu.
-    express_payout: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # --- Trade BOT (admin) ---
     # Gdy wlaczony, konto NIE jest czytane z MT5 — snapshoty generuje tradebot.py.
@@ -407,27 +324,6 @@ class Account(Base):
     # (saldo nie resynchronizuje sie do feedu, jak przy pelnym Stopie).
     bot_paused: Mapped[bool] = mapped_column(Boolean, default=False)
     bot_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # Kierunek jazdy: 'profit' = bot idzie w gore do sufitu `bot_target_pct`,
-    # 'doom' = zjezdza na podloge drawdownu, zeby konto poleglo z reki silnika
-    # regul (Breach o normalnym typie), a nie kliknieciem admina.
-    bot_mode: Mapped[str] = mapped_column(String(16), default="profit")
-    # Do kiedy ma potrwac zjazd — z tego wychodzi dzienna porcja straty.
-    bot_doom_deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # Ktora podloga ma pasc: 'overall' (max drawdown) albo 'daily' (limit dnia).
-    bot_doom_limit: Mapped[str] = mapped_column(String(16), default="overall")
-    # Do kiedy bot ma dojsc do sufitu `bot_target_pct` — z tego wychodzi dzienna
-    # porcja zysku (lustro `bot_doom_deadline` dla jazdy w gore).
-    bot_target_deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # Recznie nadpisany charakter bota. NULL = wartosc wyliczona z ziarna konta,
-    # czyli zachowanie sprzed dolozenia tych kolumn.
-    bot_win_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
-    bot_avg_r: Mapped[float | None] = mapped_column(Float, nullable=True)
-    bot_risk_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
-    bot_daily_target_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
-    bot_red_day_odds: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # Amplituda buja otwartej pozycji wzgledem zaplanowanego wyniku.
-    bot_swing: Mapped[float | None] = mapped_column(Float, nullable=True)
-    bot_symbols: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     # Nieodgadywalny token certyfikatu — publiczny link /certificate/{token}
     # i weryfikacja /verify/{token} działają bez logowania, ale nie da się
@@ -446,9 +342,6 @@ class Account(Base):
     min_trading_days: Mapped[int] = mapped_column(Integer, default=4)
     drawdown_type: Mapped[str] = mapped_column(String(16), default="static")
     profit_split_pct: Mapped[float] = mapped_column(Float, default=80.0)
-    # Recznie ustalona pula do wyplaty (USD). NULL = formula
-    # (balance-initial)*split%; wartosc (takze 0) jest wiazaca i zastepuje formule.
-    payout_pool_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_lots: Mapped[float] = mapped_column(Float, default=6.0)
     consistency_pct: Mapped[float] = mapped_column(Float, default=0.0)  # 0 = wyłączona; 40 = reguła 40% best-day
 
@@ -463,17 +356,6 @@ class Account(Base):
     day_start_equity: Mapped[float] = mapped_column(Float, default=0.0)
     day_start_balance: Mapped[float] = mapped_column(Float, default=0.0)
     best_day_profit: Mapped[float] = mapped_column(Float, default=0.0)
-    # Strażniki ostrzeżenia „80% limitu": dzień (YYYY-MM-DD), w którym push o
-    # zbliżaniu się do limitu już wyszedł — jedno ostrzeżenie na dobę na typ.
-    limit_warn_daily_day: Mapped[str] = mapped_column(String(10), default="")
-    limit_warn_dd_day: Mapped[str] = mapped_column(String(10), default="")
-    # Strażnicy powiadomień o zmianie stanu konta. Daty, a nie flagi, bo przy
-    # reklamacji („nikt mnie nie uprzedził") liczy się KIEDY push wyszedł.
-    # Każdy zapala się raz na całe życie konta — awans fazy je zeruje.
-    target_50_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    target_75_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    min_days_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    payout_ready_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     trading_days_count: Mapped[int] = mapped_column(Integer, default=0)
     last_counted_trading_day: Mapped[str] = mapped_column(String(16), default="")
     breach_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -486,11 +368,6 @@ class Account(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # Awans fazy zeruje saldo, licznik dni handlowych i best day, a transakcje
-    # zostają w jednej tabeli dla całego konta. Bez tych dwóch dat nie da się
-    # już powiedzieć, co działo się w fazie, która właśnie się skończyła.
-    phase_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    prev_phase_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     trader: Mapped[Trader | None] = relationship(back_populates="accounts")
     snapshots: Mapped[list["EquitySnapshot"]] = relationship(back_populates="account", cascade="all, delete-orphan")
@@ -657,10 +534,48 @@ class AppSetting(Base):
     __tablename__ = "app_settings"
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
-    # TEXT, nie VARCHAR(200): pod jednym kluczem siedzi juz lista kanalow
-    # Reach BOT-a w JSON-ie i przy trzecim kanale przekraczala limit — Postgres
-    # odrzucal zapis, a panel oddawal 500 bez slowa wyjasnienia.
-    value: Mapped[str] = mapped_column(Text, default="")
+    value: Mapped[str] = mapped_column(String(200), default="")
+
+
+class ChannelPost(Base):
+    """Kolejka postow na kanaly Telegrama: szkic -> zatwierdzony -> opublikowany.
+
+    Czemu osobna tabela, a nie `app_settings`: `AppSetting.value` to String(200),
+    a podpis pod postem ma 700-1000 znakow. Kolejka i tak potrzebuje stanu,
+    terminu i historii bledow, wiec jedna kolumna tekstowa niczego by nie
+    zalatwila.
+
+    `proof` jest sercem tej tabeli i dlatego jest kolumna, a nie komentarzem.
+    Trzyma MASZYNOWO SPRAWDZALNE zrodlo kazdej liczby w tresci:
+
+        ""                      -> tresc ponadczasowa, bez liczb
+        "payout:<cert_token>"   -> kwoty musza zgadzac sie z ta wyplata
+        "stat:<klucz>:<op>:<v>" -> relacja przeliczana z biezacych danych
+
+    Walidator sprawdza to DWA razy: przy zatwierdzeniu i ponownie tuz przed
+    publikacja. Post zatwierdzony w poniedzialek nie moze wyjsc w piatek na
+    poniedzialkowych liczbach.
+    """
+    __tablename__ = "channel_posts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # `mgmt` | `payouts` | `trackrecord` — patrz `contentbot.KANALY`.
+    channel: Mapped[str] = mapped_column(String(16), default="mgmt", index=True)
+    kind: Mapped[str] = mapped_column(String(8), default="text")   # text | photo
+    body: Mapped[str] = mapped_column(Text, default="")
+    # Adres strony do zrzutu przez `certshot`. Puste = post sam tekst.
+    media_url: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    proof: Mapped[str] = mapped_column(String(120), default="")
+    # draft | approved | scheduled | published | failed
+    status: Mapped[str] = mapped_column(String(12), default="draft", index=True)
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    post_url: Mapped[str] = mapped_column(String(200), default="")
+    last_error: Mapped[str] = mapped_column(String(300), default="")
+    created_by: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
 class JournalEntry(Base):
@@ -780,14 +695,6 @@ class Lead(Base):
     payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     status: Mapped[str] = mapped_column(String(16), default="new", index=True)
-    # Dlaczego przegraliśmy. Zamknięta lista, nie wolny tekst: „za drogo",
-    # „za drogie", „cena" i „$$$" to cztery wiersze w raporcie i jedna
-    # odpowiedź, której nikt nie policzy — a to jedyne pole, które ma mówić
-    # „dlaczego", nie „ilu".
-    # Ustawia się TYLKO przy `rejected`/`burned` i zeruje, gdy lead wraca do
-    # gry: inaczej raport liczyłby jako przegranego kogoś, do kogo dział
-    # właśnie znowu pisze.
-    lost_reason: Mapped[str | None] = mapped_column(String(24), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Ręczne „kupił" z panelu — dla zakupów poza sklepem (przelew, ustalenia na
     # Telegramie). Zapłacone zamówienie na ten sam mail liczy się AUTOMATYCZNIE
@@ -804,12 +711,14 @@ class Lead(Base):
     # notatka i to jedyne, po czym da się ją powiązać z leadem — w `reply` nie ma
     # niczego poza id wiadomości, na którą odpowiedziano.
     tg_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
-    # Czat, w którym ta karta wisi (free ma swój). `message_id` jest unikalne
-    # w obrębie czatu, nie bota, więc bez tego edycja i kasowanie strzelałyby
-    # na oślep. Wyliczanie czatu z `source` nie wystarczy: ponowne zgłoszenie
-    # nadpisuje `tg_message_id`, więc lead z free, który wypełni płatny
-    # formularz, ma kartę w drugim czacie. NULL = wiersz sprzed tej kolumny.
-    tg_chat_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Na którym desku wisi karta: `leads` albo `leads_ng`. Każdy desk to inny
+    # bot, inny czat i inny sekret webhooka, więc bez tej kolumny kasowanie
+    # karty i przypomnienia adresowałyby zły czat złym tokenem — karta zostałaby
+    # sierotą, a przypomnienie z imieniem i mailem poszłoby nie tam, gdzie miało.
+    # Pisane RAZ, przy pierwszym zgłoszeniu: ponowna aplikacja z innym numerem
+    # nie może przenieść leada na drugi desk, bo pierwsza karta została tam,
+    # gdzie była.
+    desk: Mapped[str] = mapped_column(String(8), default="leads")
     # Kiedy status pierwszy raz ruszył z „new". Da się to wyliczyć z `lead_events`,
     # ale kolumna zostaje: lista leadów pokazuje tę datę w każdym wierszu, a
     # dokładanie do niej podzapytania po historii kosztowałoby więcej niż jedno
@@ -828,24 +737,7 @@ class Lead(Base):
 # „odpisał". Przy telefonie jedna próba rozstrzygała od razu — odebrał albo nie.
 # Wiadomość zostaje bez odpowiedzi godzinami, nie znacząc jeszcze niczego, więc
 # `messaged` to stan oczekiwania i to jego pilnują przypomnienia.
-# "burned" = kosz: lead spalony znika z listy roboczej, ale wiersz zostaje —
-# skasowanie na stałe to osobna, świadoma decyzja (Delete w szufladzie).
-LEAD_STATUSES = ("new", "messaged", "replied", "no_reply", "rejected", "burned")
-
-# Statusy, które znaczą „skończyliśmy" — i tylko przy nich `lost_reason` ma sens.
-# `no_reply` tu NIE jest: to stan oczekiwania, dział jeszcze pisze i przypomnienia
-# dalej chodzą. Zapytanie o powód w tamtym miejscu kazałoby zamykać sprawę, która
-# jeszcze się toczy.
-LEAD_LOST_STATUSES = ("rejected", "burned")
-
-# Powód przegranej. Kod idzie do bazy i do raportu; opis żyje osobno w panelu
-# (angielski) i w telegram.py (polski) — tak samo jak przy statusach.
-#
-# „ghosted" i status `no_reply` to nie to samo i to rozróżnienie jest tu całym
-# sensem: `no_reply` znaczy „czekamy", ghosted — „przestaliśmy czekać".
-# „not_qualified" dotyczy człowieka, którego dział odsiał po rozmowie; kolumna
-# `outcome` niesie werdykt samej ankiety i tamtej to nie zastępuje.
-LOST_REASONS = ("price", "competitor", "not_qualified", "ghosted", "spam", "other")
+LEAD_STATUSES = ("new", "messaged", "replied", "no_reply", "rejected")
 
 
 class LeadEvent(Base):
@@ -875,8 +767,7 @@ class LeadEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
 
 
-LEAD_EVENTS = ("applied", "status", "note", "reminder", "claim", "tier", "bought",
-               "sms", "email", "granted", "delivery")
+LEAD_EVENTS = ("applied", "status", "note", "reminder", "claim", "tier", "bought")
 
 
 class LeadReminder(Base):
@@ -910,43 +801,3 @@ class LeadReminder(Base):
     last_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_by: Mapped[str] = mapped_column(String(60), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
-
-
-class LeadMailTemplate(Base):
-    """Szablon maila pisanego z ręki w panelu — temat i treść do wielokrotnego użytku.
-
-    Osobno od `tresc()` w `lead_mail.py` i celowo NIE zamiast niej: tamten tekst
-    to automat przypięty do wyniku ankiety i ma jedną, kontrolowaną wersję.
-    Szablony są narzędziem działu — treść pisze człowiek, panel ją tylko
-    przechowuje, a wysyłka i tak przechodzi przez ten sam `lead_mail.wyslij`
-    (papier firmowy marki, wersja tekstowa jako źródło prawdy).
-
-    `name` jest kluczem podmiany: zapis pod istniejącą nazwą nadpisuje szablon,
-    bo „poprawiłem literówkę" nie ma prawa mnożyć wpisów na liście.
-    """
-    __tablename__ = "lead_mail_templates"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(80), unique=True, index=True)
-    subject: Mapped[str] = mapped_column(String(200))
-    body: Mapped[str] = mapped_column(Text)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
-
-
-class MailLog(Base):
-    """Dziennik prób wysyłki maili — dowód doręczenia albo ślad awarii.
-
-    SMTP pada u nas po cichu: `notify` łapie wyjątek, żeby nie wywrócić
-    requestu, przez co „mail nie doszedł" wyglądał identycznie jak „mail
-    nigdy nie wyszedł". Ten dziennik rozstrzyga to jedno pytanie; panel
-    pokazuje stąd błędy, zanim zgłosi je klient.
-    """
-    __tablename__ = "mail_log"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
-    event: Mapped[str] = mapped_column(String(40), default="")
-    to_email: Mapped[str] = mapped_column(String(200), default="")
-    subject: Mapped[str] = mapped_column(String(200), default="")
-    ok: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
-    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
