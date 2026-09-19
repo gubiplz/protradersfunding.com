@@ -156,7 +156,10 @@ def _strzal_json(metoda: str, pola: dict[str, str],
     # przekazujemy dalej sam opis z odpowiedzi, nigdy adresu żądania.
     opis = odp.get("description") or (tresc or b"")[:200].decode("utf-8", "replace")
     opis = opis or f"HTTP {status}"
-    print(f"[telegram] {metoda} odrzucone ({status}): {opis}")
+    # Numer PRZED dwukropkiem to publiczny identyfikator bota (ten sam, który
+    # widzi każdy uczestnik czatu), nie sekret — a bez niego „Unauthorized" nie
+    # mówi, KTÓRY z trzech botów odmówił, i diagnoza jest zgadywanką.
+    print(f"[telegram] {metoda} odrzucone ({status}) bot={token.split(':')[0]}: {opis}")
     return False, opis, {}
 
 

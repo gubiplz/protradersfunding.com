@@ -5876,6 +5876,7 @@ def leads_ingest(payload: LeadIn,
         if lead.applications and lead.applications > 1:
             opis += f" · applied {lead.applications}×"
         desk_leada = lead.desk or "leads"
+        lead_source = lead.source or ""
     finally:
         session.close()
 
@@ -5891,8 +5892,14 @@ def leads_ingest(payload: LeadIn,
     if poprzednia_karta:
         telegram.delete_lead_card(poprzednia_karta, bot=telegram.desk(poprzedni_desk))
     _lead_push(lead_id, f"New lead: {kto}", opis, event="lead_new")
-    _, _, message_id = telegram.send_lead_alert(lead_id, tekst,
-                                                bot=telegram.desk(desk_leada))
+    bot_leada = telegram.desk(desk_leada)
+    # Jedna linijka, która odpowiada na „czemu karta nie doszła": na jaki desk
+    # poszedł lead, czy desk jest w ogóle skonfigurowany i na jaki czat celuje.
+    # Bez niej zostaje samo „Unauthorized" z Telegrama, które nie mówi nic o tym,
+    # czy zawiódł token, czy wybór desku.
+    print(f"[leads] #{lead_id} zrodlo={lead_source or '—'} desk={desk_leada} "
+          f"czat={bot_leada.chat_id or '—'} token={'jest' if bot_leada.token else 'BRAK'}")
+    _, _, message_id = telegram.send_lead_alert(lead_id, tekst, bot=bot_leada)
     if message_id:
         # Osobny, króciutki zapis po wysyłce. Nie da się tego zrobić w tamtej
         # transakcji, bo id wiadomości powstaje dopiero w Telegramie — a bez
