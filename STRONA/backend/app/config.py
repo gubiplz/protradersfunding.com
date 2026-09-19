@@ -248,6 +248,20 @@ class Settings:
     # jego rotacja wymaga jednoczesnego dostępu do obu tokenów.
     telegram_free_leads_webhook_secret: str = os.getenv(
         "TELEGRAM_FREE_LEADS_WEBHOOK_SECRET", "")
+    # To samo dla czatu z leadami płatnymi. Docelowy podział to trzy boty:
+    # ten czat, czat darmowy i kanały treści (wypłaty, account management,
+    # track record) — każdy osobno, żeby zamrożenie konta zabierało jedną
+    # trzecią. Puste = czat obsługuje bot główny, czyli stan sprzed podziału.
+    telegram_leads_bot_token: str = os.getenv("TELEGRAM_LEADS_BOT_TOKEN", "")
+    telegram_leads_webhook_secret: str = os.getenv("TELEGRAM_LEADS_WEBHOOK_SECRET", "")
+
+    # --- Pozostałe kanały treści ---
+    # Kanał z wypłatami siedzi wyżej jako TELEGRAM_CHAT_ID (publikuje na niego
+    # Payout BOT). Te dwa obsługuje kolejka treści i panel; domyślne wartości to
+    # publiczne adresy, więc bez env i tak celują tam, gdzie trzeba.
+    telegram_mgmt_chat_id: str = os.getenv("TELEGRAM_MGMT_CHAT_ID", "@forex_passing")
+    telegram_trackrecord_chat_id: str = os.getenv(
+        "TELEGRAM_TRACKRECORD_CHAT_ID", "@forex_passing_track_record")
     # Sekret, którym landing autoryzuje POST /api/leads/ingest. Osobny od
     # ADMIN_TOKEN: landing stoi na cudzym hostingu i wycieka mu najwyżej prawo
     # dopisania leada, nigdy panel. Puste = endpoint odmawia wszystkiego.

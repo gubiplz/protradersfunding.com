@@ -652,6 +652,48 @@ class PoolAccount(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
+class ChannelPost(Base):
+    """Kolejka postow na kanaly Telegrama: szkic -> zatwierdzony -> zaplanowany.
+
+    Po co kolejka, a nie wrzucanie od reki: tresc ze starych kanalow ma wracac
+    RYTMEM, w jakim wpadala wczesniej, a nie jednym zrzutem 47 postow. Termin
+    per post zalatwia i migracje, i zwykle planowanie.
+
+    `proof` jest sercem tej tabeli i dlatego jest kolumna, a nie komentarzem.
+    Trzyma MASZYNOWO SPRAWDZALNE zrodlo kazdej liczby w tresci:
+
+        ""                      -> tresc ponadczasowa, bez liczb
+        "payout:<cert_token>"   -> kwoty musza zgadzac sie z ta wyplata
+        "stat:<klucz>:<op>:<v>" -> relacja przeliczana z biezacych danych
+
+    Walidator sprawdza to DWA razy: przy zatwierdzeniu i ponownie tuz przed
+    publikacja. Post zatwierdzony w poniedzialek nie moze wyjsc w piatek na
+    poniedzialkowych liczbach — a przy kolejce z terminem to nie jest teoria.
+    """
+    __tablename__ = "channel_posts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # `mgmt` | `payouts` | `trackrecord` — patrz `contentbot.KANALY`.
+    channel: Mapped[str] = mapped_column(String(16), default="mgmt", index=True)
+    kind: Mapped[str] = mapped_column(String(8), default="text")   # text | photo
+    body: Mapped[str] = mapped_column(Text, default="")
+    # Adres strony do zrzutu przez `certshot` albo gotowy obraz. Puste = sam tekst.
+    media_url: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    proof: Mapped[str] = mapped_column(String(120), default="")
+    # draft | approved | scheduled | published | failed
+    status: Mapped[str] = mapped_column(String(12), default="draft", index=True)
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    post_url: Mapped[str] = mapped_column(String(200), default="")
+    last_error: Mapped[str] = mapped_column(String(300), default="")
+    # Skad wziete: `panel` albo `archive:<kanal>/<id>` przy przenosinach.
+    origin: Mapped[str] = mapped_column(String(64), default="panel")
+    created_by: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 class AppSetting(Base):
     """Ustawienia przelaczane z panelu w czasie dzialania (env wymagalby deployu)."""
     __tablename__ = "app_settings"

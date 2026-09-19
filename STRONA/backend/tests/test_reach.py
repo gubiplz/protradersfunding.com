@@ -397,7 +397,9 @@ def test_getme_idzie_bez_multiparta_wiec_status_admina_jest_znany(monkeypatch):
     pisal "nie wiadomo", mimo ze bot byl administratorem."""
     monkeypatch.setattr(telegram.settings, "telegram_bot_token", "TESTOWY:TOKEN",
                         raising=False)
-    monkeypatch.setattr(telegram, "_BOT_ID", None, raising=False)
+    # Cache `getMe` jest teraz PER TOKEN (darmowy czat ma własnego bota),
+    # więc czyścimy słownik, a nie pojedynczą wartość.
+    monkeypatch.setattr(telegram, "_BOT_ID", {}, raising=False)
     widziane = []
 
     def transport(url, body, content_type):

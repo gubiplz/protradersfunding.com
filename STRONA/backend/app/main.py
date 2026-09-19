@@ -39,7 +39,8 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 
-from . import (achievements, auth, billing, catalog, certshot, countries, fields, loyalty,
+from . import (achievements, auth, billing, catalog, certshot, contentbot, countries,
+               fields, loyalty,
                lead_mail, metaquotes_web, notify, offers,
                payout_import, payoutbot, reach,
                poller, provisioning, push, rules, sms, telegram, telemetry, tradebot)
@@ -47,6 +48,7 @@ from .config import get_settings
 from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint
 from .models import (LEAD_LOST_STATUSES, LEAD_STATUSES, LOST_REASONS,
                      Account, AchievementReward, AppSetting, Breach, Certificate,
+                     ChannelPost,
                      CreditLedger, EquitySnapshot, FlashOffer, JournalEntry, KycFile,
                      Lead, LeadEvent,
                      LeadMailTemplate, LeadReminder, MailLog, Notification,
@@ -5906,6 +5908,229 @@ class ReachChannelsIn(BaseModel):
     channels: list[ReachChannelIn]
 
 
+class ChannelPostIn(BaseModel):
+    channel: str = "mgmt"
+    kind: str = "text"
+    body: str = ""
+    media_url: str | None = None
+    proof: str = ""
+    scheduled_for: datetime | None = None
+
+
+class ScheduleIn(BaseModel):
+    scheduled_for: datetime
+
+
+def _post_dict(p: ChannelPost) -> dict:
+    return {"id": p.id, "channel": p.channel, "kind": p.kind, "body": p.body,
+            "media_url": p.media_url or "", "proof": p.proof or "",
+            "status": p.status, "origin": p.origin or "panel",
+            "scheduled_for": p.scheduled_for.isoformat() if p.scheduled_for else None,
+            "published_at": p.published_at.isoformat() if p.published_at else None,
+            "message_id": p.message_id, "post_url": p.post_url or "",
+            "last_error": p.last_error or "", "created_by": p.created_by or "",
+            "created_at": p.created_at.isoformat() if p.created_at else None}
+
+
+@app.get("/api/admin/channel-posts", dependencies=[Depends(auth.require_admin)])
+def admin_channel_posts(channel: str | None = None, status: str | None = None):
+    session = SessionLocal()
+    try:
+        q = session.query(ChannelPost)
+        if channel:
+            q = q.filter(ChannelPost.channel == channel)
+        if status:
+            q = q.filter(ChannelPost.status == status)
+        # Zaplanowane najpierw i po terminie — kolejka ma się czytać jak plan,
+        # a nie jak log. Reszta po dacie utworzenia, najnowsze u góry.
+        wiersze = q.order_by(ChannelPost.status != "scheduled",
+                             ChannelPost.scheduled_for.is_(None),
+                             ChannelPost.scheduled_for,
+                             ChannelPost.id.desc()).limit(300).all()
+        return [_post_dict(p) for p in wiersze]
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/channel-posts", dependencies=[Depends(auth.require_admin)])
+def admin_channel_post_create(payload: ChannelPostIn):
+    """Nowy post zawsze powstaje jako SZKIC.
+
+    Nie da się utworzyć od razu zatwierdzonego: zatwierdzenie jest momentem,
+    w którym człowiek bierze odpowiedzialność za treść, i musi być osobnym
+    kliknięciem, a nie polem w formularzu.
+    """
+    if payload.channel not in contentbot.KANALY:
+        raise HTTPException(400, f"Unknown channel: {payload.channel}")
+    if payload.kind not in ("text", "photo"):
+        raise HTTPException(400, "kind must be text or photo")
+    session = SessionLocal()
+    try:
+        p = ChannelPost(channel=payload.channel, kind=payload.kind,
+                        body=payload.body or "", media_url=payload.media_url or None,
+                        proof=(payload.proof or "").strip(), status="draft",
+                        scheduled_for=payload.scheduled_for, origin="panel")
+        session.add(p)
+        session.commit()
+        return _post_dict(p)
+    finally:
+        session.close()
+
+
+@app.patch("/api/admin/channel-posts/{post_id}", dependencies=[Depends(auth.require_admin)])
+def admin_channel_post_edit(post_id: int, payload: ChannelPostIn):
+    """Edycja cofa post do szkicu — zmieniona treść nie jest już tą zatwierdzoną."""
+    session = SessionLocal()
+    try:
+        p = session.get(ChannelPost, post_id)
+        if not p:
+            raise HTTPException(404, "Post not found")
+        if p.status == "published":
+            raise HTTPException(409, "This post is already published")
+        p.channel, p.kind = payload.channel, payload.kind
+        p.body = payload.body or ""
+        p.media_url = payload.media_url or None
+        p.proof = (payload.proof or "").strip()
+        p.scheduled_for = payload.scheduled_for
+        p.status, p.last_error = "draft", ""
+        p.updated_at = datetime.now(timezone.utc)
+        session.commit()
+        return _post_dict(p)
+    finally:
+        session.close()
+
+
+@app.delete("/api/admin/channel-posts/{post_id}", dependencies=[Depends(auth.require_admin)])
+def admin_channel_post_delete(post_id: int):
+    session = SessionLocal()
+    try:
+        p = session.get(ChannelPost, post_id)
+        if not p:
+            raise HTTPException(404, "Post not found")
+        session.delete(p)
+        session.commit()
+        return {"ok": True, "id": post_id}
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/channel-posts/{post_id}/approve", dependencies=[Depends(auth.require_admin)])
+def admin_channel_post_approve(post_id: int):
+    """Zatwierdzenie = człowiek potwierdza treść, a walidator jej twierdzenia.
+
+    Odmowa wraca jako 400 z PEŁNYM zdaniem walidatora („statystyka wynosi dziś
+    X, a post zakłada Y"), bo to informacja dla piszącego, a nie błąd
+    techniczny do odnotowania w logu.
+    """
+    session = SessionLocal()
+    try:
+        p = session.get(ChannelPost, post_id)
+        if not p:
+            raise HTTPException(404, "Post not found")
+        try:
+            contentbot.waliduj(session, p)
+        except contentbot.NieprawdziwyPost as e:
+            raise HTTPException(400, str(e))
+        p.status, p.last_error = "approved", ""
+        p.updated_at = datetime.now(timezone.utc)
+        session.commit()
+        return _post_dict(p)
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/channel-posts/{post_id}/schedule", dependencies=[Depends(auth.require_admin)])
+def admin_channel_post_schedule(post_id: int, payload: ScheduleIn):
+    session = SessionLocal()
+    try:
+        p = session.get(ChannelPost, post_id)
+        if not p:
+            raise HTTPException(404, "Post not found")
+        if p.status not in ("approved", "scheduled"):
+            raise HTTPException(409, "Approve the post before scheduling it")
+        p.status = "scheduled"
+        p.scheduled_for = payload.scheduled_for
+        p.updated_at = datetime.now(timezone.utc)
+        session.commit()
+        return _post_dict(p)
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/channel-posts/{post_id}/publish", dependencies=[Depends(auth.require_admin)])
+def admin_channel_post_publish(post_id: int):
+    """Publikacja natychmiastowa. Waliduje PONOWNIE, mimo zatwierdzenia."""
+    session = SessionLocal()
+    try:
+        p = session.get(ChannelPost, post_id)
+        if not p:
+            raise HTTPException(404, "Post not found")
+        if p.status == "published":
+            raise HTTPException(409, "This post is already published")
+        if p.status not in ("approved", "scheduled"):
+            raise HTTPException(409, "Approve the post before publishing it")
+        wynik = contentbot.opublikuj(session, p)
+        if not wynik.get("posted"):
+            raise HTTPException(502, wynik.get("reason") or "Telegram refused the post")
+        return _post_dict(p)
+    finally:
+        session.close()
+
+
+@app.get("/api/admin/telegram/overview", dependencies=[Depends(auth.require_admin)])
+def admin_telegram_overview():
+    """Stan czatów, na które pisze SAMA aplikacja — po jednym wierszu na czat.
+
+    Powstało po zamrożeniu konta we wrześniu 2026, którego objawem była cisza:
+    bot stracił uprawnienia we wszystkich kanałach naraz, nic nie zgłosiło
+    błędu, a posty po prostu przestały wychodzić.
+
+    Pytamy `getChatMember` (przez `jest_adminem`), nie `getChat`. `getChat` na
+    kanale PUBLICZNYM udaje się każdemu botowi, także takiemu bez żadnych
+    uprawnień — odpowiedziałby „w porządku" na dokładnie tę awarię, którą ma
+    wykrywać.
+
+    Każdy czat sprawdzany jest TYM botem, który go obsługuje: darmowy czat ma
+    własny token, więc pytanie botem głównym dotyczyłoby cudzych uprawnień.
+
+    Nigdy nie rzuca — sprawdzenie zdrowia, które samo się wywraca, zabiera ze
+    sobą całą zakładkę.
+    """
+    czaty = [
+        ("payouts", "Payouts", settings.telegram_chat_id, "TELEGRAM_CHAT_ID",
+         "Payout BOT publikuje tu certyfikaty wypłat"),
+        ("leads", "LEADS", settings.telegram_leads_chat_id, "TELEGRAM_LEADS_CHAT_ID",
+         "Karty leadów z płatnego lejka"),
+        ("free_leads", "LEADS — darmowy lejek", settings.telegram_free_leads_chat_id,
+         "TELEGRAM_FREE_LEADS_CHAT_ID", "Karty leadów ze strony /freeaccount"),
+    ]
+    out = []
+    for klucz, tytul, czat, zmienna, po_co in czaty:
+        token = telegram.bot_token_czatu(czat) if czat else ""
+        # Każdy czat w osobnym `try`: jeden padnięty odczyt nie ma prawa zabrać
+        # całej listy.
+        try:
+            opis = telegram.chat_info(czat, token=token) if czat else {}
+            admin = telegram.jest_adminem(czat, token=token) if czat else None
+            nazwa_bota = telegram.bot_username(token=token) if token else ""
+        except Exception as e:  # pragma: no cover - sieć
+            print(f"[telegram] przeglad {klucz}: {e}")
+            opis, admin, nazwa_bota = {}, None, ""
+        out.append({
+            "key": klucz, "title": tytul, "purpose": po_co,
+            "env": zmienna, "chat_id": czat,
+            "configured": bool(token and czat),
+            "bot_username": nazwa_bota,
+            "bot_admin": admin,
+            "chat_title": opis.get("title") or "",
+            "handle": ("@" + opis["username"]) if opis.get("username") else "",
+            # Czy ten czat obsługuje bot INNY niż główny — po tym widać, że
+            # podział na boty faktycznie działa, a nie tylko jest ustawiony.
+            "own_bot": bool(token and token != settings.telegram_bot_token),
+        })
+    return out
+
+
 @app.get("/api/admin/reach", dependencies=[Depends(auth.require_admin)])
 def admin_reach():
     """Konfiguracja Reach BOT-a plus saldo u dostawcy.
@@ -7124,17 +7349,32 @@ async def api_tick(request: Request):
     # Saldo dostawcy zasięgu. Raz na dobę wystarczy: alert ma ostrzec ZANIM
     # konto zejdzie do zera, a nie dopiero przy odrzuconym zamówieniu.
     zasieg = _reach_saldo_tick()
+    # Kolejka treści: JEDEN zaległy post na przebieg. Przy przenosinach archiwum
+    # to jest cały sens — treść ma wracać rytmem, nie zrzutem 47 postów naraz.
+    tresc = _content_tick()
     if isinstance(wynik, dict):
         return {**wynik, "daily_recap": recap, "weekly_review": weekly.get("sent", 0),
                 "upsell_nudge": nudge.get("sent", 0),
                 "checkout_recovery": recovery.get("sent", 0), "payout_bot": payout,
                 "lead_followups": leady.get("sent", 0), "snapshots_pruned": pruned,
-                "reach": zasieg}
+                "reach": zasieg, "channel_posts": tresc.get("sent", 0)}
     return {"tick": wynik, "daily_recap": recap, "weekly_review": weekly.get("sent", 0),
             "upsell_nudge": nudge.get("sent", 0),
             "checkout_recovery": recovery.get("sent", 0), "payout_bot": payout,
             "lead_followups": leady.get("sent", 0), "snapshots_pruned": pruned,
-            "reach": zasieg}
+            "reach": zasieg, "channel_posts": tresc.get("sent", 0)}
+
+
+def _content_tick() -> dict:
+    """Zaplanowane posty na kanały. Nigdy nie wywraca ticka."""
+    session = SessionLocal()
+    try:
+        return contentbot.wyslij_zaplanowane(session)
+    except Exception as e:  # pragma: no cover - sieć/baza
+        print(f"[content] tick blad: {e}")
+        return {"sent": 0}
+    finally:
+        session.close()
 
 
 def _reach_saldo_tick() -> dict:
@@ -7528,30 +7768,11 @@ def public_stats():
         return _PUBLIC_STATS_CACHE["data"]
     session = SessionLocal()
     try:
-        # Agregaty w SQL zamiast .all(): Payout rośnie codziennie (bot + import
-        # CSV), a to woła landing — każda zimna instancja płaciła pełny transfer
-        # tabeli z Supabase tylko po to, by policzyć sumę i maksimum w Pythonie.
-        pay_cnt, pay_sum, pay_max = (
-            session.query(func.count(Payout.id),
-                          func.coalesce(func.sum(Payout.trader_share), 0.0),
-                          func.coalesce(func.max(Payout.trader_share), 0.0))
-            .filter(Payout.paid == True).one())  # noqa: E712
-        countries_cnt = (
-            session.query(func.count(func.distinct(func.lower(func.trim(Trader.kyc_country)))))
-            .filter(Trader.kyc_status == "approved",
-                    Trader.kyc_country.isnot(None),
-                    func.trim(Trader.kyc_country) != "").scalar())
-        data = {
-            "accounts_total": session.query(Account).count(),
-            "active_accounts": session.query(Account).filter(Account.status == "active").count(),
-            "funded_accounts": session.query(Account).filter(Account.status == "funded").count(),
-            "traders_total": session.query(Trader).filter(Trader.is_admin == False).count(),  # noqa: E712
-            "payouts_count": pay_cnt,
-            # Pełne dolary: ".96" przy sześciocyfrowej kwocie poszerzał kafel LP aż do obcięcia.
-            "payouts_total_usd": int(round(pay_sum)),
-            "largest_payout_usd": int(round(pay_max)),
-            "countries_count": countries_cnt,
-        }
+        # Liczenie siedzi w `contentbot`, bo czyta je też walidator kolejki
+        # treści: post twierdzący „$186,000 wypłat" musi być sprawdzany DOKŁADNIE
+        # tą samą definicją, którą pokazuje strona. Dwie implementacje tych
+        # samych liczb rozjechałyby się przy pierwszej zmianie definicji.
+        data = contentbot.statystyki_publiczne(session)
         _PUBLIC_STATS_CACHE.update(ts=now, data=data)
         return data
     finally:
@@ -9167,10 +9388,19 @@ async def telegram_webhook(request: Request,
     # KTÓRYM botem odpowiedzieć, i tak bierze się z czatu w treści update'u,
     # nie z sekretu. `compare_digest` na każdym z osobna, żeby porównanie
     # zostało stałoczasowe.
-    sekrety = [x for x in (settings.telegram_webhook_secret,
-                           settings.telegram_free_leads_webhook_secret) if x]
+    # Sekret mówi nie tylko „wpuścić", ale też KTÓRY bot to przysłał — a to
+    # jedyne, po czym da się rozpoznać nadawcę prywatnej wiadomości. Przy karcie
+    # na kanale wystarczy czat z treści update'u, ale `/start` przychodzi z DM-u,
+    # gdzie czat to id człowieka, identyczne u każdego bota.
+    boty = [(settings.telegram_webhook_secret, settings.telegram_bot_token),
+            (settings.telegram_free_leads_webhook_secret,
+             settings.telegram_free_leads_bot_token),
+            (settings.telegram_leads_webhook_secret,
+             settings.telegram_leads_bot_token)]
     podany = x_telegram_bot_api_secret_token or ""
-    if not sekrety or not any(secrets.compare_digest(podany, s) for s in sekrety):
+    token_bota = next((tok for sek, tok in boty
+                       if sek and secrets.compare_digest(podany, sek)), None)
+    if token_bota is None:
         raise HTTPException(401, "Unauthorized")
 
     update = await request.json()
@@ -9182,7 +9412,7 @@ async def telegram_webhook(request: Request,
     wiadomosc = (update or {}).get("channel_post") or (update or {}).get("message") or {}
     if ((wiadomosc.get("chat") or {}).get("type") == "private"
             and str(wiadomosc.get("text") or "").startswith("/start")):
-        return _telegram_start(wiadomosc)
+        return _telegram_start(wiadomosc, token_bota)
     if wiadomosc.get("reply_to_message"):
         return _telegram_notatka(wiadomosc)
     # Nowy post na obserwowanym kanale — Reach BOT dokupuje pod nim zasięg.
@@ -9205,7 +9435,7 @@ def _reach_z_kanalu(post: dict) -> dict:
         session.close()
 
 
-def _telegram_start(wiadomosc: dict) -> dict:
+def _telegram_start(wiadomosc: dict, token_bota: str | None = None) -> dict:
     """`/start <kod>` w DM z botem — sparowanie konta admina z Telegramem.
 
     Kod wydaje panel (POST /api/me/telegram-link). Od sparowania kliknięcia
@@ -9220,7 +9450,8 @@ def _telegram_start(wiadomosc: dict) -> dict:
     if not (czat and uid and kod):
         if czat:
             telegram.send_dm(czat, "Send /start <code> — you will find the code "
-                                   "in the admin panel, under Settings → Notifications.")
+                                   "in the admin panel, under Settings → Notifications.",
+                             token=token_bota)
         return {"ok": True}
     session = SessionLocal()
     try:
@@ -9230,7 +9461,8 @@ def _telegram_start(wiadomosc: dict) -> dict:
         if not tr:
             session.close()
             telegram.send_dm(czat, "Unknown or already used code. "
-                                   "Generate a fresh one in the panel and try again.")
+                                   "Generate a fresh one in the panel and try again.",
+                             token=token_bota)
             return {"ok": True}
         for inny in session.query(Trader).filter(Trader.telegram_user_id == uid).all():
             inny.telegram_user_id = None
@@ -9245,8 +9477,8 @@ def _telegram_start(wiadomosc: dict) -> dict:
         email = tr.email
     finally:
         session.close()
-    telegram.send_dm(czat, f"Linked as {email}. Your clicks on the LEADS channel "
-                           "now sign with this account.")
+    telegram.send_dm(czat, f"Linked as {email}. Your clicks on the LEADS channels "
+                           "now sign with this account.", token=token_bota)
     return {"ok": True}
 
 

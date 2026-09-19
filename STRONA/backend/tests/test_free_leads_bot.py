@@ -64,27 +64,27 @@ def _szpieg():
 #  Wybór tokenu                                                                #
 # --------------------------------------------------------------------------- #
 def test_czat_free_dostaje_wlasnego_bota():
-    assert telegram.lead_bot_token(CZAT_FREE) == TOKEN_FREE
+    assert telegram.bot_token_czatu(CZAT_FREE) == TOKEN_FREE
 
 
 def test_czat_dzialu_zostaje_przy_bocie_glownym():
-    assert telegram.lead_bot_token(CZAT_DZIALU) == TOKEN_GLOWNY
+    assert telegram.bot_token_czatu(CZAT_DZIALU) == TOKEN_GLOWNY
 
 
 def test_bez_czatu_bot_glowny():
-    assert telegram.lead_bot_token(None) == TOKEN_GLOWNY
-    assert telegram.lead_bot_token("") == TOKEN_GLOWNY
+    assert telegram.bot_token_czatu(None) == TOKEN_GLOWNY
+    assert telegram.bot_token_czatu("") == TOKEN_GLOWNY
 
 
 def test_nieskonfigurowany_bot_free_spada_na_glownego(monkeypatch):
     """Samo wdrożenie tego kodu niczego nie zmienia, dopóki token nie jest ustawiony."""
     monkeypatch.setattr(get_settings(), "telegram_free_leads_bot_token", "", raising=False)
-    assert telegram.lead_bot_token(CZAT_FREE) == TOKEN_GLOWNY
+    assert telegram.bot_token_czatu(CZAT_FREE) == TOKEN_GLOWNY
 
 
 def test_numer_czatu_porownywany_jako_tekst(monkeypatch):
     """`chat_id` bywa intem z update'u, a stringiem z bazy — to ten sam czat."""
-    assert telegram.lead_bot_token(int(CZAT_FREE)) == TOKEN_FREE
+    assert telegram.bot_token_czatu(int(CZAT_FREE)) == TOKEN_FREE
 
 
 # --------------------------------------------------------------------------- #

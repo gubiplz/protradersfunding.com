@@ -172,6 +172,33 @@ def send_photo(png: bytes, caption: str, *, transport=None) -> tuple[bool, str]:
     return poszlo, powod
 
 
+def send_content(chat_id: str, text: str, *, png: bytes | None = None,
+                 token: str | None = None, transport=None) -> tuple[bool, str, dict]:
+    """Post na DOWOLNY kanał treści — z grafiką albo bez.
+
+    `send_photo_json` i `send_message_json` celują na sztywno w kanał wypłat,
+    bo Payout BOT ma tylko jeden adres. Kolejka treści obsługuje kilka kanałów,
+    więc czat jest tu argumentem, a token dobierany tak samo jak wszędzie
+    indziej — po czacie, nie po domyśle wywołującego.
+
+    Limit podpisu pod zdjęciem to 1024 znaki, samego tekstu 4096. Walidator
+    kolejki odmawia wcześniej, żeby Telegram nie uciął twierdzenia w połowie
+    zdania — tutaj przycięcie zostaje wyłącznie jako ostatni bezpiecznik.
+    """
+    token = token or bot_token_czatu(chat_id)
+    if not token or not chat_id:
+        return False, "no bot token or chat", {}
+    if png:
+        return _strzal_json("sendPhoto",
+                            {"chat_id": str(chat_id), "caption": text[:1024],
+                             "parse_mode": "HTML"},
+                            ("photo", "post.png", png), transport, token=token)
+    return _strzal_json("sendMessage",
+                        {"chat_id": str(chat_id), "text": text[:4096],
+                         "parse_mode": "HTML", "disable_web_page_preview": "true"},
+                        None, transport, token=token)
+
+
 def post_url(dane: dict) -> str:
     """Publiczny link do wiadomości z odpowiedzi Telegrama (albo pusty).
 
@@ -183,73 +210,92 @@ def post_url(dane: dict) -> str:
     return f"https://t.me/{nazwa}/{mid}" if nazwa and mid else ""
 
 
-_BOT_USERNAME: str | None = None
+_BOT_USERNAME: dict[str, str] = {}
 
 
-def bot_username() -> str:
-    """Nazwa bota (bez @) — do instrukcji parowania w panelu.
+def bot_username(token: str | None = None) -> str:
+    """Nazwa bota (bez @) — do instrukcji parowania i do przeglądu kanałów.
 
-    getMe raz na proces (nazwa bota nie zmienia się między requestami);
-    brak tokenu albo padnięta sieć = pusty string, panel pisze wtedy
+    getMe raz na proces i PER TOKEN. Jeden wspólny cache był poprawny, dopóki
+    bot był jeden; odkąd darmowy czat ma własnego, zwracałby nazwę tego, który
+    odpytał pierwszy, dla wszystkich — a panel pokazuje po niej, KTÓRY bot
+    obsługuje dany kanał.
+
+    Brak tokenu albo padnięta sieć = pusty string, panel pisze wtedy
     „the desk bot" zamiast linka."""
-    global _BOT_USERNAME
-    if _BOT_USERNAME is not None:
-        return _BOT_USERNAME
-    if not settings.telegram_bot_token:
+    token = token or settings.telegram_bot_token
+    if not token:
         return ""
-    try:
-        with urllib.request.urlopen(
-                f"{API}/bot{settings.telegram_bot_token}/getMe", timeout=5) as r:
-            dane = json.loads(r.read() or b"{}")
-        _BOT_USERNAME = str((dane.get("result") or {}).get("username") or "")
-    except Exception as e:  # pragma: no cover - sieć
-        print(f"[telegram] getMe błąd: {e}")
-        return ""
-    return _BOT_USERNAME
+    if token not in _BOT_USERNAME:
+        try:
+            with urllib.request.urlopen(f"{API}/bot{token}/getMe", timeout=5) as r:
+                dane = json.loads(r.read() or b"{}")
+        except Exception as e:  # pragma: no cover - sieć
+            print(f"[telegram] getMe błąd: {e}")
+            return ""          # nie cache'ujemy porażki sieciowej
+        _BOT_USERNAME[token] = str((dane.get("result") or {}).get("username") or "")
+    return _BOT_USERNAME[token]
 
 
-_BOT_ID: int | None = None
+_BOT_ID: dict[str, int] = {}
 
 
-def bot_id(*, transport=None) -> int:
-    """Numeryczne id bota (getMe, raz na proces). 0 = brak tokenu albo błąd."""
-    global _BOT_ID
-    if _BOT_ID is not None:
-        return _BOT_ID
-    if not settings.telegram_bot_token:
+def bot_id(*, transport=None, token: str | None = None) -> int:
+    """Numeryczne id bota (getMe, raz na proces). 0 = brak tokenu albo błąd.
+
+    Cache jest PER TOKEN. Jeden wspólny był poprawny, dopóki bot był jeden;
+    odkąd darmowy czat ma własnego, zwracałby id tego, który odpytał pierwszy,
+    dla wszystkich — a po tym id sprawdzamy uprawnienia w kanale."""
+    token = token or settings.telegram_bot_token
+    if not token:
         return 0
-    poszlo, _, dane = _strzal_json("getMe", {}, None, transport)
-    _BOT_ID = int(dane.get("id") or 0) if poszlo else 0
-    return _BOT_ID
+    if token not in _BOT_ID:
+        poszlo, _, dane = _strzal_json("getMe", {}, None, transport, token=token)
+        if not poszlo:
+            return 0          # nie cache'ujemy porażki sieciowej
+        _BOT_ID[token] = int(dane.get("id") or 0)
+    return _BOT_ID[token]
 
 
-def chat_info(chat_id: str | int, *, transport=None) -> dict:
+def chat_info(chat_id: str | int, *, token: str | None = None,
+              transport=None) -> dict:
     """`getChat` — nazwa publiczna i tytuł kanału (pusty słownik przy błędzie).
 
     Panel Reach BOT-a pokazuje, na jaki kanał faktycznie idą posty: w env jest
-    samo `TELEGRAM_CHAT_ID` (bywa liczbowe), a admin myśli o kanale nazwą."""
-    if not settings.telegram_bot_token or not chat_id:
+    samo `TELEGRAM_CHAT_ID` (bywa liczbowe), a admin myśli o kanale nazwą.
+
+    Bez `token` pytamy botem, który TEN czat obsługuje — bot spoza kanału
+    dostaje „chat not found" i panel pokazałby pustkę zamiast nazwy."""
+    token = token or bot_token_czatu(chat_id)
+    if not token or not chat_id:
         return {}
-    poszlo, _, dane = _strzal_json("getChat", {"chat_id": str(chat_id)}, None, transport)
+    poszlo, _, dane = _strzal_json("getChat", {"chat_id": str(chat_id)}, None,
+                                   transport, token=token)
     if not poszlo:
         return {}
     return {"id": dane.get("id"), "username": dane.get("username") or "",
             "title": dane.get("title") or ""}
 
 
-def jest_adminem(chat_id: str | int, *, transport=None) -> bool | None:
+def jest_adminem(chat_id: str | int, *, token: str | None = None,
+                 transport=None) -> bool | None:
     """Czy bot jest administratorem kanału. `None` = nie dało się sprawdzić.
 
     To NIE jest kosmetyka: bez uprawnień admina Telegram w ogóle nie wysyła
     `channel_post`, więc automat po cichu nic nie robi. Panel musi umieć
-    powiedzieć „dodaj bota jako admina", zamiast milczeć."""
-    if not settings.telegram_bot_token or not chat_id:
+    powiedzieć „dodaj bota jako admina", zamiast milczeć.
+
+    Pytamy o TEGO bota, który ma tu publikować — inaczej odpowiedź dotyczyłaby
+    cudzych uprawnień i była bezwartościowa."""
+    token = token or bot_token_czatu(chat_id)
+    if not token or not chat_id:
         return None
-    ja = bot_id(transport=transport)
+    ja = bot_id(transport=transport, token=token)
     if not ja:
         return None
     poszlo, _, dane = _strzal_json(
-        "getChatMember", {"chat_id": str(chat_id), "user_id": str(ja)}, None, transport)
+        "getChatMember", {"chat_id": str(chat_id), "user_id": str(ja)}, None,
+        transport, token=token)
     if not poszlo:
         return False  # „member list is inaccessible" = bot jest poza kanałem
     return str(dane.get("status") or "") in ("administrator", "creator")
@@ -272,13 +318,15 @@ def delete_lead_card(message_id: int, *, chat_id: str | None = None,
                    token)
 
 
-def send_dm(chat_id: str | int, text: str, *, transport=None) -> tuple[bool, str]:
+def send_dm(chat_id: str | int, text: str, *, token: str | None = None,
+            transport=None) -> tuple[bool, str]:
     """Wiadomość w prywatnym czacie z botem (odpowiedź na `/start <kod>`).
 
-    Wymaga tylko tokenu bota — `chat_id` przychodzi z update'u, więc nie ma
-    znaczenia, który z kanałów (wypłaty/leady) jest skonfigurowany."""
+    `chat_id` przychodzi z update'u, ale TOKEN musi być tego bota, który ten
+    update dostał: prywatna rozmowa istnieje osobno z każdym botem, więc
+    odpowiedź cudzym tokenem trafia do innej rozmowy albo nigdzie."""
     return _strzal("sendMessage", {"chat_id": str(chat_id), "text": text[:4096]},
-                   None, transport)
+                   None, transport, token)
 
 
 def send_message_json(text: str, *, transport=None) -> tuple[bool, str, dict]:
@@ -377,8 +425,8 @@ def lead_chat_id(source: str | None = None) -> str:
     return settings.telegram_leads_chat_id
 
 
-def lead_bot_token(chat_id: str | None = None) -> str:
-    """Token bota obsługującego TEN czat leadów.
+def bot_token_czatu(chat_id: str | None = None) -> str:
+    """Token bota obsługującego TEN czat — leadów albo kanał treści.
 
     Bliźniak `lead_chat_id`, tylko o jeden krok dalej: tamta funkcja wybiera
     czat po lejku, ta wybiera bota po czacie. Rozstrzyga CZAT, a nie `source`,
@@ -389,9 +437,16 @@ def lead_bot_token(chat_id: str | None = None) -> str:
     czyli zachowanie sprzed podziału. Nic nie przestaje działać przez samo
     wdrożenie tego kodu.
     """
-    if (chat_id and settings.telegram_free_leads_bot_token
-            and str(chat_id) == str(settings.telegram_free_leads_chat_id)):
-        return settings.telegram_free_leads_bot_token
+    czat = str(chat_id or "")
+    # Tabela, a nie łańcuch ifów: dołożenie kolejnego bota ma być wpisem, nie
+    # rozgałęzieniem. Pierwszy wpis z ustawionym tokenem i pasującym czatem
+    # wygrywa; brak dopasowania = bot główny.
+    for cel, token in ((settings.telegram_free_leads_chat_id,
+                        settings.telegram_free_leads_bot_token),
+                       (settings.telegram_leads_chat_id,
+                        settings.telegram_leads_bot_token)):
+        if czat and token and cel and czat == str(cel):
+            return token
     return settings.telegram_bot_token
 
 
@@ -407,7 +462,7 @@ def _lead_sendable(chat_id: str | None) -> tuple[str, str, bool]:
     kończy się „Unauthorized" albo, gorzej, trafia nie tam, gdzie miała.
     """
     czat = chat_id if chat_id is not None else settings.telegram_leads_chat_id
-    token = lead_bot_token(czat)
+    token = bot_token_czatu(czat)
     return czat, token, bool(settings.telegram_on and token and czat)
 
 
@@ -520,7 +575,7 @@ def answer_callback(callback_id: str, text: str, *, chat_id: str | None = None,
     wystarczy, żeby trafić w tego właściwego."""
     return _strzal("answerCallbackQuery",
                    {"callback_query_id": callback_id, "text": text[:200]},
-                   None, transport, lead_bot_token(chat_id))
+                   None, transport, bot_token_czatu(chat_id))
 
 
 def edit_lead_message(chat_id: str, message_id: int, text: str,
@@ -539,4 +594,4 @@ def edit_lead_message(chat_id: str, message_id: int, text: str,
         pola["reply_markup"] = json.dumps(keyboard)
     # Kartę przepisuje bot, który ją wysłał — `message_id` jest jego i cudzym
     # tokenem nie da się jej tknąć. Czat wystarcza, żeby go wskazać.
-    return _strzal("editMessageText", pola, None, transport, lead_bot_token(chat_id))
+    return _strzal("editMessageText", pola, None, transport, bot_token_czatu(chat_id))
