@@ -460,45 +460,20 @@ const VIEWS={
     api('/api/admin/reach').catch(()=>null),
     api('/api/admin/channel-posts').catch(()=>[])]);
 
-  /* `bot_admin` jest TRÓJSTANOWE: true / false / null. `null` znaczy „nie dało
-     się sprawdzić" (brak tokenu, padnięta sieć) i NIE wolno go pokazywać jako
-     „wszystko gra" — to dokładnie ten stan, w którym awaria jest niewidoczna. */
-  const zdrowie=k=>{
-    if(!k.configured)return`<span class="status pending"><span class="dot"></span>not configured</span>`;
-    if(k.bot_admin===true)return`<span class="status funded"><span class="dot"></span>administrator</span>`;
-    if(k.bot_admin===false)return`<span class="status failed"><span class="dot"></span>no access</span>`;
-    return`<span class="status pending"><span class="dot"></span>not checked</span>`;
-  };
-  const kartaKanalu=k=>`<div class="sec-card">
-    <h3>${esc(k.title)}</h3>
-    <div class="chip-row" style="margin-bottom:10px">
-      ${zdrowie(k)}
-      ${k.handle?`<a class="chip" href="https://t.me/${esc(k.handle.slice(1))}" target="_blank" rel="noopener">${esc(k.handle)}</a>`
-        :(k.chat_id?`<span class="chip mono">${esc(k.chat_id)}</span>`:'')}
-      ${k.bot_username?`<span class="chip">bot <b>@${esc(k.bot_username)}</b>${k.own_bot?' · own':''}</span>`:''}
-      <span class="chip mono" title="Environment variable this chat id comes from">${esc(k.env)}</span>
-    </div>
-    <div class="muted" style="font-size:12px;margin-bottom:10px">${esc(k.purpose)}</div>
-    ${k.bot_admin===false?`<div class="warn-box" style="margin:0 0 10px">
-      <div><b>The bot is not an administrator of this channel.</b> Nothing will be published
-      here and Telegram reports no error — add the bot under Channel → Administrators, with
-      permission to post (and to edit and change info where we refresh posts and the description).
-      <br><br>If the bot <i>is</i> an admin of the channel you meant, then this chat id points
-      somewhere else: check <span class="mono">${esc(k.env)}</span>, and remember Vercel only
-      picks up a changed variable on the <b>next build</b>.</div></div>`:''}
-    ${!k.configured?`<div class="warn-box" style="margin:0 0 10px">
-      <div>No token or chat id. Set <span class="mono">${esc(k.env)}</span>
-      in the environment.</div></div>`:''}
-    ${k.key==='payouts'?`<button class="btn-p" onclick="runPayoutBot()">Publish a payout now</button>`:''}
-    ${k.key==='mgmt'?`<button class="btn-o" onclick="newChannelPost('mgmt')">Write a post</button>`:''}
-    ${k.key==='trackrecord'?(k.workflow_url
-      ?`<a class="btn-o" target="_blank" rel="noopener" href="${esc(k.workflow_url)}">Refresh posters</a>
-        <div class="muted" style="font-size:12px;margin-top:8px">Runs the whole cycle: reads
-        the numbers off the site, renders new posters and swaps them into the four existing
-        posts — which is how they keep their views and reactions.</div>`
-      :`<div class="muted" style="font-size:12px">Posters are refreshed by a workflow outside
-        this app. Set <span class="mono">TRACKRECORD_WORKFLOW_URL</span> to get a button here.</div>`):''}
-  </div>`;
+  /* Karty kanalow zniknely — powtarzaly to, co i tak widac w samych kanalach.
+     Zostal po nich JEDEN wiersz: kanaly, na ktorych nic nie wyjdzie. Objawem
+     zamrozenia byla CISZA, wiec alarm zostaje, sciana kart nie.
+     `bot_admin` jest TROJSTANOWE: true / false / null — `null` znaczy „nie dalo
+     sie sprawdzic" i NIE jest awaria, wiec nie trafia do alarmu. */
+  const chore=(kan||[]).filter(k=>!k.configured||k.bot_admin===false);
+  const tr=(kan||[]).find(k=>k.key==='trackrecord')||{};
+  const alarm=chore.length?`<div class="warn-box" style="margin:0 0 16px"><div>
+    <b>Nothing will be published on ${chore.length===1?'one channel':chore.length+' channels'}.</b>
+    ${chore.map(k=>`<br>&middot; <b>${esc(k.title)}</b> &mdash; ${k.configured
+      ?`the bot is not an administrator there, or <span class="mono">${esc(k.env)}</span> points at another chat`
+      :`no token or chat id: set <span class="mono">${esc(k.env)}</span>`}`).join('')}
+    <br><br>Telegram reports no error for this, and Vercel only picks up a changed variable
+    on the <b>next build</b>.</div></div>`:'';
 
   const stan=p=>({draft:'pending',approved:'active',scheduled:'active',
                   published:'funded',failed:'failed'})[p.status]||'pending';
@@ -522,7 +497,11 @@ const VIEWS={
 
   const wKolejce=posty.filter(p=>p.status!=='published').length;
   $('view').innerHTML=`
-    <div class="card-cols">${kan.map(kartaKanalu).join('')}</div>
+    ${alarm}
+    <div class="card-cols">
+      ${payoutCardHtml(pb)}
+      ${reachCardHtml(rc)}
+    </div>
 
     <div class="sec-card" style="margin-top:16px">
       <h3>Posting queue <span class="count-pill">${wKolejce} waiting</span></h3>
@@ -536,6 +515,9 @@ const VIEWS={
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
         <button class="btn-p sm" onclick="newChannelPost('mgmt')">Write a post</button>
+        ${tr.workflow_url?`<a class="btn-o sm" target="_blank" rel="noopener" href="${esc(tr.workflow_url)}"
+          title="Reads the numbers off the site, renders new posters and swaps them into the four existing posts — which is how they keep their views and reactions."
+          >Refresh track record</a>`:''}
         <span style="width:1px;height:22px;background:var(--line)"></span>
         <span class="muted" style="font-size:12px">Refill from the old channel:</span>
         <input id="arch-file" class="inp" type="file" accept=".json,application/json"
@@ -551,11 +533,6 @@ const VIEWS={
         <thead><tr><th>Channel</th><th>Body</th><th>Proof</th><th>Status</th><th>Scheduled</th><th></th></tr></thead>
         <tbody>${posty.map(wiersz).join('')}</tbody></table></div>`
         :`<div class="muted">The queue is empty.</div>`}
-    </div>
-
-    <div class="card-cols" style="margin-top:16px">
-      ${payoutCardHtml(pb)}
-      ${reachCardHtml(rc)}
     </div>`;
  },
  async overview(){
@@ -3974,7 +3951,7 @@ function reachChannelsHtml(rc){
 async function reachSaveChannels(kanaly,btn){
   return busy(btn,'Saving…',async()=>{
     try{await api('/api/admin/reach/channels',{method:'POST',body:JSON.stringify({channels:kanaly})});
-      go('settings');
+      go(VIEW);   // karta zyje w dwoch widokach — wracamy tam, skad kliknieto
     }catch(e){toast('Error: '+e.message,'err')}
   });
 }
@@ -4154,7 +4131,7 @@ async function clearReachChannels(){
   try{
     await api('/api/admin/reach/channels',{method:'POST',body:JSON.stringify({channels:[]})});
     toast('List cleared.');
-    go('telegram');
+    go(VIEW);
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
@@ -4288,7 +4265,7 @@ async function saveReach(btn){
   if(Object.values(body).some(v=>isNaN(v))){toast('Fill every field with a number.','err');return}
   return busy(btn,'Saving…',async()=>{
     try{await api('/api/admin/reach',{method:'POST',body:JSON.stringify(body)});
-      toast('Reach BOT settings saved.','ok'); go('settings');
+      toast('Reach BOT settings saved.','ok'); go(VIEW);
     }catch(e){toast('Error: '+e.message,'err')}
   });
 }
@@ -4297,7 +4274,7 @@ async function toggleReach(on,btn){
     try{await api('/api/admin/reach',{method:'POST',body:JSON.stringify({enabled:on})});
       toast(on?'Reach BOT is on. Every published post gets its reactions and views.'
               :'Reach BOT is off. Posts go out with no extra reach.','ok');
-      go('settings');
+      go(VIEW);
     }catch(e){toast('Error: '+e.message,'err')}
   });
 }
@@ -4311,7 +4288,7 @@ async function boostReach(btn){
       const q=r.quantities||{};
       toast(`Ordered ${q.qty_reactions??'?'} reactions and ${q.qty_views??'?'} views `
             +`(${r.ordered}/2 services).`+(r.balance!=null?` Balance $${fmt(r.balance)}.`:''),'ok',7000);
-      go('settings');
+      go(VIEW);
     }catch(e){toast('Error: '+e.message,'err')}
   });
 }
@@ -4328,14 +4305,14 @@ async function savePayoutBot(){
   if(Object.values(body).some(v=>typeof v==='number'&&isNaN(v))){
     toast('Fill every field with a number.','err');return}
   try{await api('/api/admin/payout-engine',{method:'POST',body:JSON.stringify(body)});
-    toast('Payout BOT settings saved.','ok'); go('settings');
+    toast('Payout BOT settings saved.','ok'); go(VIEW);
   }catch(e){toast('Error: '+e.message,'err')}
 }
 async function togglePayoutBot(on){
   try{await api('/api/admin/payout-engine',{method:'POST',body:JSON.stringify({enabled:on})});
     toast(on?'Payout BOT is on. It posts once a day at a random minute inside your window.'
             :'Payout BOT is off. No new payouts are generated.','ok');
-    go('settings');
+    go(VIEW);
   }catch(e){toast('Error: '+e.message,'err')}
 }
 async function runPayoutBot(){
@@ -4350,7 +4327,7 @@ async function runPayoutBot(){
     else toast(`Payout created: ${r.trader} · $${fmt(r.amount_usd)}`
       +(r.posted?(r.photo?' · posted with the certificate image.':' · posted as text only.')
                 :' · not posted: '+(r.reason||'channel off')),'ok',9000);
-    go('settings');
+    go(VIEW);
   }catch(e){toast('Error: '+e.message,'err')}
 }
 
