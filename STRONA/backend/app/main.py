@@ -3795,7 +3795,25 @@ def admin_traders(q: str | None = None, imported: int = 0):
         poleceni = dict(session.query(Trader.referred_by, func.count(Trader.id))
                         .filter(Trader.referred_by.isnot(None))
                         .group_by(Trader.referred_by).all())
+        # Z jakiego lejka przyszedł ten człowiek. Trader sam tego nie pamięta,
+        # więc odpowiedź daje lead dopasowany po mailu — jedno zapytanie po
+        # wszystkich, jak liczniki wyżej. Kto zapisał się z portalu sam, nie ma
+        # żadnego leada i zostaje bez desku; to poprawna odpowiedź, nie brak
+        # danych.
+        deski: dict[str, str] = {}
+        for mail, source in session.query(Lead.email, Lead.source).all():
+            klucz = (mail or "").strip().lower()
+            if not klucz:
+                continue
+            desk = _desk_leada(source)
+            # `leads.email` jest UNIQUE, więc jedna osoba ma JEDEN wiersz —
+            # ale ograniczenie rozróżnia wielkość liter, a to dopasowanie już
+            # nie. To jedyny sposób na remis i rozstrzyga go darmowy lejek, bo
+            # filtr odpowiada na pytanie „kto przyszedł z darmowego".
+            if desk == "free" or klucz not in deski:
+                deski[klucz] = desk
         return [{"id": t.id, "email": t.email, "full_name": t.full_name,
+                 "desk": deski.get((t.email or "").strip().lower()),
                  "kyc_status": t.kyc_status, "accounts": counts.get(t.id, 0),
                  "credits_usd": round(float(t.credits_usd or 0), 2),
                  "referred_count": poleceni.get(t.referral_code, 0),
@@ -8377,12 +8395,18 @@ def _kontakt_zastepczy(session, lead: Lead, actor: str) -> str:
 
 
 def _desk_leada(source: str | None) -> str:
-    """„nigeria" albo „leads" — ten sam podział co czaty na Telegramie.
+    """„free" albo „leads" — ten sam podział co czaty na Telegramie.
 
     Reguła mieszka w `telegram.lead_chat_id`; tutaj jest jej nazwa, bo panel
     i preferencje pushu potrzebują etykiety, a nie identyfikatora czatu.
+
+    Desk nazywa się od LEJKA, nie od kanału. Kanał nosi dziś tytuł
+    „LEADS NIGERIA", ale warunkiem jest `source` zaczynający się od „free" —
+    gdyby doszedł drugi kraj albo kanał zmienił nazwę, `desk == "nigeria"`
+    czytałoby się jak nieprawda. Ta sama nazwa siedzi już w
+    `TELEGRAM_FREE_LEADS_CHAT_ID` i w kluczu `free_leads`.
     """
-    return "nigeria" if (source or "").strip().lower().startswith("free") else "leads"
+    return "free" if (source or "").strip().lower().startswith("free") else "leads"
 
 
 def _lead_push(lead_id: int, title: str, body: str = "", *,
@@ -8403,10 +8427,10 @@ def _lead_push(lead_id: int, title: str, body: str = "", *,
         source = session.query(Lead.source).filter(Lead.id == lead_id).scalar()
     finally:
         session.close()
-    if _desk_leada(source) == "nigeria":
+    if _desk_leada(source) == "free":
         # Osobne klucze preferencji, żeby wyciszenie jednego desku nie gasiło
-        # drugiego: lead_new -> ng_new, lead_action -> ng_action itd.
-        event = event.replace("lead_", "ng_", 1)
+        # drugiego: lead_new -> free_new, lead_action -> free_action itd.
+        event = event.replace("lead_", "free_", 1)
     notify.notify_admins(event, title, body,
                          url=f"/admin?lead={lead_id}", tag=f"lead-{lead_id}")
 

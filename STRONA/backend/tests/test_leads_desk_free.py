@@ -26,7 +26,7 @@ from app.models import Lead, LeadEvent  # noqa: E402
 
 init_db()
 
-PRZEDROSTEK = "desk-nigeria"
+PRZEDROSTEK = "desk-free"
 
 
 @pytest.fixture
@@ -61,10 +61,10 @@ def _lead(s, nazwa, source):
 #  Rozpoznanie desku
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("source,oczekiwany", [
-    ("free", "nigeria"),
-    ("freeaccount", "nigeria"),
-    ("FREE", "nigeria"),
-    ("  free  ", "nigeria"),
+    ("free", "free"),
+    ("freeaccount", "free"),
+    ("FREE", "free"),
+    ("  free  ", "free"),
     ("money", "leads"),
     ("safe", "leads"),
     ("manual", "leads"),
@@ -82,7 +82,7 @@ def test_reguła_zgadza_sie_z_telegramem(monkeypatch):
     monkeypatch.setattr(main.telegram.settings, "telegram_leads_chat_id", "-100leads")
     for source in ("free", "freeaccount", "money", "safe", None):
         czat = main.telegram.lead_chat_id(source)
-        assert (czat == "-100free") == (main._desk_leada(source) == "nigeria")
+        assert (czat == "-100free") == (main._desk_leada(source) == "free")
 
 
 # --------------------------------------------------------------------------- #
@@ -103,7 +103,7 @@ def test_dzwonek_niesie_desk_przy_zdarzeniu_o_leadzie(swiat):
                             headers={"X-Admin-Token": get_settings().admin_token}).json()
     wg_id = {i["lead_id"]: i for i in d["items"] if i.get("lead_id")}
 
-    assert wg_id[darmowy.id]["desk"] == "nigeria"
+    assert wg_id[darmowy.id]["desk"] == "free"
     assert wg_id[platny.id]["desk"] == "leads"
 
 
@@ -122,12 +122,12 @@ def test_budzet_dzwonka_jest_per_desk(swiat, monkeypatch):
     from app.main import app
     d = TestClient(app).get("/api/admin/inbox",
                             headers={"X-Admin-Token": get_settings().admin_token}).json()
-    z_nigerii = [i for i in d["items"] if i.get("desk") == "nigeria"]
+    z_nigerii = [i for i in d["items"] if i.get("desk") == "free"]
 
     assert len(z_nigerii) <= 30, "budżet jednego desku ma być ograniczony"
     # I nie zjada budżetu pozostałych — pozostałe deski mają własny licznik,
-    # więc obecność zdarzeń z nigerii nie kasuje wpisów innego rodzaju.
-    assert all(i.get("desk") != "nigeria" or i["type"] == "lead" for i in d["items"])
+    # więc obecność zdarzeń z darmowego lejka nie kasuje wpisów innego rodzaju.
+    assert all(i.get("desk") != "free" or i["type"] == "lead" for i in d["items"])
 
 
 # --------------------------------------------------------------------------- #
@@ -145,7 +145,7 @@ def test_lead_z_darmowego_lejka_uzywa_kategorii_ng(swiat, monkeypatch):
     main._lead_push(darmowy.id, "Ktoś: took the lead")
     main._lead_push(darmowy.id, "Follow-up", event="lead_reminder")
 
-    assert uzyte == ["ng_new", "ng_action", "ng_reminder"]
+    assert uzyte == ["free_new", "free_action", "free_reminder"]
 
 
 def test_lead_platny_zostaje_przy_kategoriach_lead(swiat, monkeypatch):
@@ -171,7 +171,7 @@ def test_wyciszenie_jednego_desku_nie_gasi_drugiego(swiat, monkeypatch):
     admin = Trader(email=f"{PRZEDROSTEK}-adm@example.com",
                    password_hash=auth.hash_password("haslo1234"),
                    referral_code=auth.secrets.token_hex(3), is_admin=True,
-                   ui_prefs='{"admin_push":{"ng_new":false}}')
+                   ui_prefs='{"admin_push":{"free_new":false}}')
     s.add(admin)
     s.commit()
     admin_id = admin.id
@@ -181,7 +181,7 @@ def test_wyciszenie_jednego_desku_nie_gasi_drugiego(swiat, monkeypatch):
     monkeypatch.setattr(push_mod, "send_to_trader",
                         lambda tid, *a, **k: (dostali.append(tid), 1)[1])
     try:
-        notify.notify_admins("ng_new", "Nowy lead z darmowego")
+        notify.notify_admins("free_new", "Nowy lead z darmowego")
         assert admin_id not in dostali, "wyciszony desk nie brzęczy"
 
         notify.notify_admins("lead_new", "Nowy lead płatny")
