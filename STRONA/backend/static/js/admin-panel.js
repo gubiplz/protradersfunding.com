@@ -476,12 +476,16 @@ const VIEWS={
       ${k.handle?`<a class="chip" href="https://t.me/${esc(k.handle.slice(1))}" target="_blank" rel="noopener">${esc(k.handle)}</a>`
         :(k.chat_id?`<span class="chip mono">${esc(k.chat_id)}</span>`:'')}
       ${k.bot_username?`<span class="chip">bot <b>@${esc(k.bot_username)}</b>${k.own_bot?' · own':''}</span>`:''}
+      <span class="chip mono" title="Environment variable this chat id comes from">${esc(k.env)}</span>
     </div>
     <div class="muted" style="font-size:12px;margin-bottom:10px">${esc(k.purpose)}</div>
     ${k.bot_admin===false?`<div class="warn-box" style="margin:0 0 10px">
       <div><b>The bot is not an administrator of this channel.</b> Nothing will be published
       here and Telegram reports no error — add the bot under Channel → Administrators, with
-      permission to post (and to edit and change info where we refresh posts and the description).</div></div>`:''}
+      permission to post (and to edit and change info where we refresh posts and the description).
+      <br><br>If the bot <i>is</i> an admin of the channel you meant, then this chat id points
+      somewhere else: check <span class="mono">${esc(k.env)}</span>, and remember Vercel only
+      picks up a changed variable on the <b>next build</b>.</div></div>`:''}
     ${!k.configured?`<div class="warn-box" style="margin:0 0 10px">
       <div>No token or chat id. Set <span class="mono">${esc(k.env)}</span>
       in the environment.</div></div>`:''}
