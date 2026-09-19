@@ -546,6 +546,117 @@ def _zapisz_wynik(session, opis: str) -> None:
         session.rollback()
 
 
+# --------------------------------------------------------------------------- #
+#  Subskrybenci kanału                                                         #
+# --------------------------------------------------------------------------- #
+# Reakcje i wyświetlenia kupuje się POD POSTEM, subskrybentów POD KANAŁEM —
+# ten sam dostawca, ta sama akcja `add`, ale linkiem jest adres kanału, a nie
+# posta. Dlatego to osobna ścieżka, a nie flaga w `zamow`.
+#
+# Usługi nie ma w ustawieniach na stałe: dostawca ma ich kilkadziesiąt (różne
+# źródła, różne tempo, różny odpad), ceny i dostępność zmieniają się z tygodnia
+# na tydzień, a pomyłka w id kosztuje realne pieniądze. Panel pokazuje listę
+# z cennika i admin wybiera świadomie — kod niczego nie zgaduje.
+SUB_LIMITY = (10, 100000)
+
+# Po czym poznać usługę „członkowie kanału" w cenniku liczącym kilkaset pozycji.
+_SUB_SZUKANE = ("member", "subscriber")
+# Wyrazy, które znaczą COŚ INNEGO niż dołączenie do kanału. „Leave"/„remove"
+# to usługi kasujące subskrybentów — nazwa też zawiera „members".
+_SUB_ODPADA = ("leave", "remove", "unsub", "drop", "view", "reaction", "vote",
+               "poll", "comment", "share", "report", "story")
+
+
+def uslugi_subskrypcji(*, transport=None, limit: int = 40) -> list[dict]:
+    """Usługi „Telegram members" z cennika dostawcy, od najtańszej.
+
+    Panel wywołuje to na żądanie (cennik waży ~1,5 MB), żeby admin widział
+    nazwę, cenę za 1000 i widełki ilości ZANIM cokolwiek zamówi.
+    """
+    ok, odp = _api("services", transport=transport, jako_lista=True)
+    if not ok:
+        raise ValueError(str(odp.get("error") if isinstance(odp, dict) else "bad response"))
+    out = []
+    for poz in odp if isinstance(odp, list) else []:
+        opis = f"{poz.get('name') or ''} {poz.get('category') or ''}".lower()
+        if "telegram" not in opis:
+            continue
+        if not any(s in opis for s in _SUB_SZUKANE):
+            continue
+        if any(s in opis for s in _SUB_ODPADA):
+            continue
+        try:
+            out.append({"service": int(poz["service"]),
+                        "name": str(poz.get("name") or "")[:120],
+                        "category": str(poz.get("category") or "")[:80],
+                        "rate": float(poz["rate"]),
+                        "min": int(float(poz.get("min") or 0)),
+                        "max": int(float(poz.get("max") or 0))})
+        except (KeyError, TypeError, ValueError):
+            continue
+    out.sort(key=lambda u: u["rate"])
+    return out[:limit]
+
+
+def zamow_subskrypcje(session, kanal: str, ilosc: int, usluga: int,
+                      *, transport=None) -> dict:
+    """Subskrybenci na kanał. Rzuca `ValueError` z komunikatem po angielsku.
+
+    W odróżnieniu od `zamow` NIE jest best-effort: to ręczne, płatne kliknięcie
+    admina, więc odmowa ma wrócić do panelu jako zdanie, a nie zniknąć w logu.
+    Cena liczy się ZE ŚWIEŻEGO cennika dostawcy, nie z tego, co przyszło
+    z przeglądarki — inaczej bramka salda pilnowałaby liczby podanej przez
+    stronę, którą ma chronić.
+    """
+    if not is_enabled():
+        raise ValueError("Reach provider is not configured")
+    # Prywatne zaproszenie (`t.me/joinchat/AAA`, `t.me/+AAA`) NIE jest nazwą
+    # kanału: `_czysta_nazwa` zwraca z niego „joinchat", co przechodzi walidację
+    # nazwy i wysyła zamówienie pod adres, pod którym nie ma naszego kanału.
+    # Pieniądze wydane, kanał bez zmian, dostawca bez błędu.
+    surowy = str(kanal or "").strip().lower()
+    if "joinchat" in surowy or "/+" in surowy or surowy.startswith("+"):
+        raise ValueError("That is a private invite link — subscribers can only be "
+                         "ordered for a channel with a public @name")
+    nazwa = _czysta_nazwa(kanal)
+    if not TELEGRAM_NAZWA.match(nazwa):
+        raise ValueError(f"'{kanal}' is not a valid public channel name")
+    dol, gora = SUB_LIMITY
+    try:
+        ilosc = int(ilosc)
+        usluga = int(usluga)
+    except (TypeError, ValueError):
+        raise ValueError("Quantity and service must be numbers")
+    if not (dol <= ilosc <= gora):
+        raise ValueError(f"Quantity must be between {dol} and {gora}")
+
+    wybrana = next((u for u in uslugi_subskrypcji(transport=transport)
+                    if u["service"] == usluga), None)
+    if wybrana is None:
+        raise ValueError(f"Service {usluga} is not on the provider's member list")
+    if wybrana["min"] and ilosc < wybrana["min"]:
+        raise ValueError(f"This service takes at least {wybrana['min']}")
+    if wybrana["max"] and ilosc > wybrana["max"]:
+        raise ValueError(f"This service takes at most {wybrana['max']}")
+
+    cena = round(ilosc * wybrana["rate"] / 1000, 4)
+    b = saldo(transport=transport, unit_cost=cena or None)
+    if not b.get("error") and b["value"] < cena:
+        raise ValueError(f"Balance is ${b['value']:.2f}, this order costs ${cena:.2f}")
+
+    link = f"https://t.me/{nazwa}"
+    ok, odp = _api("add", {"service": usluga, "link": link, "quantity": ilosc},
+                   transport=transport)
+    if not ok:
+        raise ValueError(str(odp.get("error") or "provider refused the order"))
+    print(f"[reach] subskrypcje @{nazwa} x{ilosc} usluga {usluga} -> {odp.get('order')}")
+    _zapisz_wynik(session, f"@{nazwa}: +{ilosc} members #{odp.get('order')} (${cena:.2f})")
+    po = saldo_z_ustawien(session, transport=transport)
+    _alert(session, po)
+    return {"order": odp.get("order"), "channel": nazwa, "quantity": ilosc,
+            "cost": cena, "service": wybrana, "balance": po.get("value")}
+
+
 def po_publikacji(session, link: str | None, *, transport=None) -> dict:
     """Hak dla Payout BOT-a: zamówienie zaraz po udanej publikacji posta."""
     if not link:

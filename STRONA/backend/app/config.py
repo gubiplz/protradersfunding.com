@@ -267,6 +267,15 @@ class Settings:
     # pilnuje tego test `test_domena_partnera_nie_siedzi_w_kodzie`.
     # Puste = panel pokazuje instrukcje zamiast przycisku.
     trackrecord_workflow_url: str = os.getenv("TRACKRECORD_WORKFLOW_URL", "")
+    # Deploy hook, ktorym panel odswieza track record RECZNIE. Caly lancuch
+    # wisi na jednym zdarzeniu: deploy produkcyjny przelicza serie na stronie
+    # (pierwszy krok builda), a udany deploy budzi workflow, ktory zrzuca te
+    # strone na plakaty, podmienia je w czterech istniejacych postach i pisze
+    # opis kanalu. Deploy hook to jedyny sposob, zeby ten lancuch ruszyc bez
+    # PAT-a do GitHuba — a PAT wygasa i jest kolejna rzecza do pilnowania.
+    # Sam URL jest sekretem (kto go ma, ten deployuje), wiec siedzi w zmiennej.
+    # Puste = panel mowi, czego brakuje, zamiast pokazywac martwy przycisk.
+    trackrecord_deploy_hook: str = os.getenv("TRACKRECORD_DEPLOY_HOOK", "")
     # Sekret, którym landing autoryzuje POST /api/leads/ingest. Osobny od
     # ADMIN_TOKEN: landing stoi na cudzym hostingu i wycieka mu najwyżej prawo
     # dopisania leada, nigdy panel. Puste = endpoint odmawia wszystkiego.

@@ -6149,6 +6149,14 @@ def admin_telegram_overview():
          "Lead cards from the paid funnel"),
         ("free_leads", "LEADS — free funnel", settings.telegram_free_leads_chat_id,
          "TELEGRAM_FREE_LEADS_CHAT_ID", "Lead cards from the /freeaccount page"),
+        # Te dwa czaty brakowalo tu od poczatku, a to wlasnie na nich cisza jest
+        # najdrozsza: na mgmt wychodzi kolejka tresci, a track record edytuje
+        # workflow spoza tej aplikacji. Bez wiersza w przegladzie panel nie mial
+        # jak powiedziec, ze bot stracil tam uprawnienia.
+        ("mgmt", "Account Management", settings.telegram_mgmt_chat_id,
+         "TELEGRAM_MGMT_CHAT_ID", "The posting queue publishes here"),
+        ("trackrecord", "Track Record", settings.telegram_trackrecord_chat_id,
+         "TELEGRAM_TRACKRECORD_CHAT_ID", "Four posters refreshed in place"),
     ]
     out = []
     for klucz, tytul, czat, zmienna, po_co in czaty:
@@ -6176,6 +6184,9 @@ def admin_telegram_overview():
             # Tylko dla track recordu — plakaty odswieza workflow poza ta aplikacja.
             "workflow_url": (settings.trackrecord_workflow_url
                              if klucz == "trackrecord" else ""),
+            # Czy panel ma czym pociagnac za sznurek odswiezenia.
+            "refresh_ready": bool(klucz == "trackrecord"
+                                  and settings.trackrecord_deploy_hook),
         })
     return out
 
@@ -6256,6 +6267,83 @@ def admin_reach_boost(payload: ReachBoostIn):
         if wynik.get("skipped"):
             raise HTTPException(400, wynik["skipped"])
         return wynik
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/trackrecord/refresh", dependencies=[Depends(auth.require_admin)])
+def admin_trackrecord_refresh():
+    """Reczne odswiezenie track recordu: liczby na stronie -> plakaty -> kanal.
+
+    Nie robi tego ta aplikacja i robic nie moze: plakaty powstaja ze ZRZUTU
+    zywej strony partnera, a posty edytuje bot, ktorego token trzyma tamto
+    repozytorium. Panel robi wiec jedno — pociaga za sznurek, ktory uruchamia
+    caly lancuch: deploy przelicza serie na stronie, a udany deploy budzi
+    workflow zrzucajacy ja na cztery plakaty, podmieniajacy je w istniejacych
+    postach (zostaja przy swoich wyswietleniach) i piszacy opis kanalu.
+
+    Zwraca 202: zadanie jest przyjete, a nie wykonane — przebieg trwa kilka
+    minut i panel nie ma jak na niego poczekac.
+    """
+    import urllib.request
+
+    adres = settings.trackrecord_deploy_hook
+    if not adres:
+        raise HTTPException(400,
+            "Set TRACKRECORD_DEPLOY_HOOK to the site's Vercel deploy hook first")
+    try:
+        req = urllib.request.Request(adres, data=b"{}",
+                                     headers={"Content-Type": "application/json"},
+                                     method="POST")
+        with urllib.request.urlopen(req, timeout=20) as r:
+            tresc = r.read()[:400].decode("utf-8", "replace")
+            kod = r.status
+    except Exception as e:
+        # Adres hooka jest sekretem, wiec do panelu idzie sam powod, nigdy URL.
+        print(f"[trackrecord] deploy hook nie odpowiedzial: {e}")
+        raise HTTPException(502, f"The deploy hook did not answer: {type(e).__name__}")
+    if kod >= 300:
+        raise HTTPException(502, f"The deploy hook answered HTTP {kod}")
+    return JSONResponse(status_code=202, content={
+        "queued": True,
+        "detail": ("Deploy started. The site recalculates the series, then the refresh "
+                   "workflow redraws the four posters, swaps them into the existing "
+                   "posts and rewrites the channel description. It takes a few minutes."),
+        "response": tresc})
+
+
+class ReachSubsIn(BaseModel):
+    channel: str
+    quantity: int
+    service: int
+
+
+@app.get("/api/admin/reach/member-services", dependencies=[Depends(auth.require_admin)])
+def admin_reach_member_services():
+    """Usługi „Telegram members" z cennika dostawcy, od najtańszej.
+
+    Osobny endpoint, bo cennik waży ~1,5 MB i nie ma po co jechać przy każdym
+    wejściu w panel — admin ciągnie go, dopiero gdy zamierza kupić subskrypcje.
+    """
+    if not reach.is_enabled():
+        raise HTTPException(400, "Reach provider is not configured")
+    try:
+        return {"services": reach.uslugi_subskrypcji()}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/admin/reach/subscribers", dependencies=[Depends(auth.require_admin)])
+def admin_reach_subscribers(payload: ReachSubsIn):
+    """Zakup subskrybentów na kanał. Kosztuje realne pieniądze, więc odmowa
+    wraca do panelu zdaniem, a nie cichym `skipped`."""
+    session = SessionLocal()
+    try:
+        try:
+            return reach.zamow_subskrypcje(session, payload.channel,
+                                           payload.quantity, payload.service)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
     finally:
         session.close()
 

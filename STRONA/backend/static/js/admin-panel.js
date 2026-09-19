@@ -515,9 +515,10 @@ const VIEWS={
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
         <button class="btn-p sm" onclick="newChannelPost('mgmt')">Write a post</button>
-        ${tr.workflow_url?`<a class="btn-o sm" target="_blank" rel="noopener" href="${esc(tr.workflow_url)}"
-          title="Reads the numbers off the site, renders new posters and swaps them into the four existing posts — which is how they keep their views and reactions."
-          >Refresh track record</a>`:''}
+        ${tr.refresh_ready?`<button class="btn-o sm" onclick="refreshTrackRecord(this)"
+          title="Recalculates the series on the site, redraws the four posters and swaps them into the existing posts — which is how they keep their views and reactions. Also rewrites the channel description.">Refresh track record</button>`:''}
+        ${tr.workflow_url?`<a class="btn-o sm" target="_blank" rel="noopener"
+          href="${esc(tr.workflow_url)}">Runs</a>`:''}
         <span style="width:1px;height:22px;background:var(--line)"></span>
         <span class="muted" style="font-size:12px">Refill from the old channel:</span>
         <input id="arch-file" class="inp" type="file" accept=".json,application/json"
@@ -4120,6 +4121,25 @@ async function saveChannelPost(){
     toast('Saved as a draft. Approve it when the claims check out.');
     go('telegram');
   }catch(e){toast('Not saved — '+e.message,'err')}
+}
+
+/* Reczne odswiezenie track recordu. Panel nie rysuje plakatow i nie edytuje
+   postow — pociaga za jeden sznurek: deploy strony przelicza serie, a udany
+   deploy budzi workflow, ktory zrzuca strone na cztery plakaty, podmienia je
+   w ISTNIEJACYCH postach (zostaja przy swoich wyswietleniach i reakcjach)
+   i przepisuje opis kanalu. Odpowiedz to 202 — przyjete, nie zrobione. */
+async function refreshTrackRecord(btn){
+  if(!await askConfirm({title:'Refresh the track record?',
+      body:'The site recalculates the series from the live panel, then the four posters are '
+        +'redrawn and swapped into the existing posts, and the channel description is rewritten. '
+        +'It takes a few minutes and you will not see it finish here — check the channel.',
+      ok:'Refresh'}))return;
+  return busy(btn,'Starting…',async()=>{
+    try{
+      const r=await api('/api/admin/trackrecord/refresh',{method:'POST'});
+      toast(r.detail||'Refresh started.','ok',9000);
+    }catch(e){toast('Not started — '+e.message,'err',9000)}
+  });
 }
 
 /* Czyszczenie listy kanałów Reach BOT-a. Kanał wypłat wraca na listę sam —
