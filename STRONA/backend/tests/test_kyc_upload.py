@@ -158,3 +158,69 @@ def test_konto_po_breachu_dalej_otwiera_weryfikacje():
         "full_name": "Po Breachu", "country": "Poland", "dob": "01/01/1990",
         "address": "ul. Testowa 2", "id_type": "passport", "id_number": "X2"})
     assert r.status_code == 200
+
+
+def test_poprawka_pending_nadpisuje_ale_nie_zaklada_drugiego_zgloszenia(monkeypatch):
+    """Rozmazany skan widac dopiero po wyslaniu, wiec wymiane dokumentow trzeba
+    dopuscic. Ale to WCIAZ to samo zgloszenie: admin nie moze dostac drugiego
+    dzwonka o tym samym czlowieku, a wpis nie moze sie odmladzac w kolejce
+    (inaczej niecierpliwy trader przeskakuje tych, ktorzy czekaja dluzej)."""
+    from app import main as app_main
+
+    dzwonki = []
+    monkeypatch.setattr(app_main.notify, "notify_admins",
+                        lambda *a, **kw: dzwonki.append(a))
+
+    tid, h = _trader()
+    dane = {"full_name": "Jan Testowy", "country": "Poland", "dob": "1990-01-01",
+            "address": "Testowa 1", "id_type": "Passport", "id_number": "AB123456"}
+    pierwsze = client.post("/api/me/kyc", headers=h, json=dane)
+    assert pierwsze.status_code == 200 and pierwsze.json()["updated"] is False
+    assert len(dzwonki) == 1
+
+    s = SessionLocal()
+    zlozone = s.get(Trader, tid).kyc_submitted_at
+    s.close()
+    assert zlozone is not None
+
+    poprawione = dict(dane, id_number="CD999999", address="Poprawiona 7")
+    druga = client.post("/api/me/kyc", headers=h, json=poprawione)
+    assert druga.status_code == 200
+    assert druga.json() == {"kyc_status": "pending", "updated": True}
+
+    # Zadnego drugiego powiadomienia i zadnego resetu daty zlozenia.
+    assert len(dzwonki) == 1
+    s = SessionLocal()
+    tr = s.get(Trader, tid)
+    assert tr.kyc_submitted_at == zlozone
+    assert (tr.kyc_id_number, tr.kyc_address) == ("CD999999", "Poprawiona 7")
+    s.close()
+
+    # W kolejce admina nadal DOKLADNIE jeden wpis dla tego tradera.
+    kolejka = client.get("/api/admin/kyc", headers=ADMIN).json()
+    assert len([t for t in kolejka["pending"] if t["trader_id"] == tid]) == 1
+
+
+def test_zgloszenie_po_odrzuceniu_budzi_admina_i_odswieza_date():
+    """Odrzucone zgloszenie to zamkniety watek — powrot z poprawionymi
+    dokumentami jest NOWYM zgloszeniem i ma trafic adminowi na wierzch."""
+    tid, h = _trader()
+    dane = {"full_name": "Jan Testowy", "country": "Poland", "dob": "1990-01-01",
+            "address": "Testowa 1", "id_type": "Passport", "id_number": "AB123456"}
+    client.post("/api/me/kyc", headers=h, json=dane)
+
+    s = SessionLocal()
+    pierwsza_data = s.get(Trader, tid).kyc_submitted_at
+    s.close()
+
+    assert client.post(f"/api/admin/kyc/{tid}/reject", headers=ADMIN,
+                       json={"reason": "Blurry scan"}).status_code == 200
+
+    ponowne = client.post("/api/me/kyc", headers=h, json=dict(dane, id_number="CD999999"))
+    assert ponowne.status_code == 200 and ponowne.json()["updated"] is False
+
+    s = SessionLocal()
+    tr = s.get(Trader, tid)
+    assert tr.kyc_status == "pending"
+    assert tr.kyc_submitted_at > pierwsza_data
+    s.close()

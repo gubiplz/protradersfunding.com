@@ -109,7 +109,7 @@ def _overall_floor(cfg: ChallengeConfig, rt: AccountRuntime) -> float:
     return cfg.initial_balance - limit_amount
 
 
-def _profit_target_equity(cfg: ChallengeConfig) -> float:
+def profit_target_equity(cfg: ChallengeConfig) -> float:
     # round() niweluje artefakty zmiennoprzecinkowe (np. 110000.00000000001)
     return round(cfg.initial_balance * (1 + cfg.profit_target_pct / 100.0), 2)
 
@@ -152,7 +152,7 @@ def evaluate(cfg: ChallengeConfig, rt: AccountRuntime, tick: EquityTick) -> Eval
     # --- 4. Wyliczenie progów ---
     daily_floor = _daily_loss_floor(cfg, rt)
     overall_floor = _overall_floor(cfg, rt)
-    target_equity = _profit_target_equity(cfg)
+    target_equity = profit_target_equity(cfg)
 
     res.metrics = {
         "daily_floor": round(daily_floor, 2),
@@ -230,7 +230,7 @@ def evaluate(cfg: ChallengeConfig, rt: AccountRuntime, tick: EquityTick) -> Eval
 
 def _target_reached(cfg: ChallengeConfig, tick: EquityTick, rt: AccountRuntime) -> bool:
     # cel liczony od BALANSU (zysk z zamkniętych transakcji), nie floating equity
-    return tick.balance >= _profit_target_equity(cfg)
+    return tick.balance >= profit_target_equity(cfg)
 
 
 def _used_pct(day_start_equity: float, equity: float, initial: float, max_pct: float) -> float:
@@ -285,7 +285,7 @@ def display_metrics(cfg: ChallengeConfig, *, balance: float, equity: float,
     return {
         "daily_floor": round(daily_floor, 2),
         "overall_floor": round(overall_floor, 2),
-        "target_equity": round(_profit_target_equity(cfg), 2) if cfg.profit_target_pct > 0 else None,
+        "target_equity": round(profit_target_equity(cfg), 2) if cfg.profit_target_pct > 0 else None,
         "daily_loss_used_pct": _used_pct(day_start_equity, equity, cfg.initial_balance, cfg.max_daily_loss_pct),
         "overall_dd_used_pct": _overall_used_pct(cfg, AccountRuntime(peak_equity=peak_equity), equity),
         "profit_pct": round((balance - cfg.initial_balance) / cfg.initial_balance * 100, 2),

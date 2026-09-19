@@ -30,13 +30,14 @@ from __future__ import annotations
 import secrets
 from datetime import datetime, timezone
 from time import monotonic
+from urllib.parse import quote
 
 from fastapi import HTTPException
 
-from . import loyalty, metaapi_provisioning, metaquotes_web, notify, telemetry
+from . import catalog, loyalty, metaapi_provisioning, metaquotes_web, notify, telemetry
 from .config import get_settings
-from .models import (Account, AppSetting, CreditLedger, Order, PoolAccount, Product,
-                     RewardCode, Trader)
+from .models import (Account, AppSetting, CreditLedger, FlashOffer, Order,
+                     PoolAccount, Product, RewardCode, Trader)
 
 PLATFORM_SERVER = "MetaQuotes-Demo"
 
@@ -95,13 +96,22 @@ def create_account_from_order(session, order: Order, notify_admin: bool = True) 
         profit_target_p1=product.profit_target_p1, profit_target_p2=product.profit_target_p2,
         max_daily_loss_pct=product.max_daily_loss_pct, max_overall_loss_pct=product.max_overall_loss_pct,
         min_trading_days=product.min_trading_days, drawdown_type=product.drawdown_type,
-        profit_split_pct=product.profit_split_pct,
+        # Split Boost: +10 pp do splitu planu (kupiony przy checkoucie; compute_price
+        # dopuszcza go wylacznie na Instant, wiec 70 -> 80).
+        profit_split_pct=(product.profit_split_pct
+                          + (catalog.SPLIT_BOOST_PP
+                             if getattr(order, "addon_split_boost", False) else 0)),
+        express_payout=bool(getattr(order, "addon_express_payout", False)),
         max_lots=getattr(product, "max_lots", 0.0) or 0.0,
         # Instant funding (steps=0) omija ewaluacje — konto od razu jest funded.
-        phase=("funded" if product.steps == 0 else "eval_1"),
+        # `open_funded` to ta sama obietnica zlozona recznie z panelu (oferta
+        # imienna), wiec dziala dla planu z dowolna liczba krokow.
+        phase=("funded" if product.steps == 0 or getattr(order, "open_funded", False)
+               else "eval_1"),
         # przy realnym provisioningu konto czeka na poświadczenia (nie jest jeszcze handlowalne)
         status=("provisioning" if real_mode
-                else ("funded" if product.steps == 0 else "active")),
+                else ("funded" if product.steps == 0 or getattr(order, "open_funded", False)
+                      else "active")),
         source=("grant" if order.provider == "grant" else "purchase"),
         grant_note=(order.coupon if order.provider == "grant" else None),
         bogo_paid_size=_bogo_paid_size(session, order),
@@ -119,13 +129,23 @@ def create_account_from_order(session, order: Order, notify_admin: bool = True) 
     # Kredyty sklepowe schodza z salda dopiero TERAZ — platnosc jest domknieta.
     # Ponowny min() na wypadek rownoleglego zakupu, ktory zdazyl zuzyc saldo;
     # zamowienia nie wywracamy (klient juz zaplacil pomniejszona kwote).
-    zuzycie = min(round(float(getattr(order, "credits_used", 0) or 0), 2),
-                  round(float(trader.credits_usd or 0), 2))
+    przyznany = round(float(getattr(order, "credits_used", 0) or 0), 2)
+    zuzycie = min(przyznany, round(float(trader.credits_usd or 0), 2))
     if zuzycie > 0:
         trader.credits_usd = round(float(trader.credits_usd) - zuzycie, 2)
-        order.credits_used = zuzycie
         session.add(CreditLedger(trader_id=trader.id, amount=-zuzycie,
                                  note=f"Applied to order #{order.id}", order_id=order.id))
+    if przyznany > zuzycie:
+        # Rabat zszedl z ceny, ale pokrycia w saldzie juz nie ma — rownolegly
+        # checkout w drugiej karcie zdazyl zuzyc te same kredyty. Roznice
+        # doplaca firma, wiec musi zostac flaga i dzwonek; `credits_used`
+        # zostaje pelne, bo taki rabat NAPRAWDE poszedl (ledger trzyma tylko
+        # to, co realnie zeszlo z salda).
+        order.flag = "credits_shortfall"
+        notify.notify_admins("admin_order",
+                             f"Credits shortfall ${round(przyznany - zuzycie, 2):,.2f} "
+                             f"on order #{order.id} — discount granted without balance coverage",
+                             trader.email)
     # Kod kupiony za punkty jest JEDNORAZOWY i schodzi w tym samym momencie co
     # kredyty: przy domknietej platnosci. Znacznik ustawiamy warunkowym UPDATE-em,
     # wiec dwa rownolegle zamowienia z tym samym kodem zaliczy tylko jedno.
@@ -138,6 +158,16 @@ def create_account_from_order(session, order: Order, notify_admin: bool = True) 
                           synchronize_session=False))
         if not zajete:
             print(f"[provisioning] kod {kod} byl juz zuzyty przy zamowieniu #{order.id}", flush=True)
+    # Oferta flash schodzi tak samo jak kod nagrody: dopiero przy domknietej
+    # platnosci (porzucony koszyk jej nie pali) i tylko gdy jest jednorazowa.
+    # Oferta wygasla miedzy checkoutem a zaplata honoruje cene z zamowienia.
+    if getattr(order, "flash_offer_id", None):
+        (session.query(FlashOffer)
+         .filter(FlashOffer.id == order.flash_offer_id,
+                 FlashOffer.single_use == True,                              # noqa: E712
+                 FlashOffer.used_at == None)                                 # noqa: E711
+         .update({FlashOffer.used_at: now, FlashOffer.order_id: order.id},
+                 synchronize_session=False))
     session.commit()
     telemetry.track("order_paid", trader.id, order=order.id, product=order.product_key,
                     amount=order.amount_usd, provider=order.provider)
@@ -150,6 +180,32 @@ def create_account_from_order(session, order: Order, notify_admin: bool = True) 
     if not real_mode:
         notify.send(_creds_event(acc), trader.email, _creds_ctx(trader, acc))
     # przy realnym provisioningu: konto zostaje 'provisioning' — poller je uzbroi i wyśle mail
+
+    # Buy 1 Get 1 Free: drugie konto tego samego rozmiaru jako grant ($0, ta sama
+    # ścieżka provisioningu, własny mail z poświadczeniami). Guard na `grant`
+    # przerywa rekurencję — grant_challenge wraca do tej funkcji ze swoim
+    # zamówieniem. Podwójnego grantu pilnuje atomowe przejęcie zamówienia wyżej:
+    # ten kod wykona się najwyżej raz na zamówienie. Import leniwy (billing
+    # importuje provisioning na poziomie modułu). Błąd grantu NIE wywraca
+    # opłaconego zamówienia — klient ma już pierwsze konto, admin dostaje alert
+    # i przyznaje drugie ręcznie z panelu.
+    if getattr(order, "bogo", False) and order.provider != "grant":
+        from . import billing
+        try:
+            billing.grant_challenge(session, trader, order.product_key, "Buy 1 Get 1 Free")
+        except Exception as e:
+            print(f"[provisioning] BOGO grant dla zamowienia #{order.id} nie wyszedl: {e}", flush=True)
+            # Sesja mogła zostać z na wpół dodanym grantem — bez rollbacku każdy
+            # kolejny commit w tym request-cie przepchnąłby te obiekty do bazy.
+            session.rollback()
+            # Dzwonek łatwo przegapić, a bez trwałego śladu opłacone zamówienie
+            # z obietnicą drugiego konta wygląda w panelu na obsłużone. Flaga
+            # trzyma się zamówienia, panel pokazuje ją przy statusie.
+            order.flag = "bogo_grant_failed"
+            session.commit()
+            notify.notify_admins("admin_order",
+                                 f"BOGO grant FAILED for order #{order.id} ({order.product_key}) — grant manually",
+                                 trader.email)
     return acc
 
 
@@ -179,7 +235,27 @@ def _creds_event(acc: Account) -> str:
 
 
 def _creds_ctx(trader: Trader, acc: Account) -> dict:
+    # Konto założone ZA klienta (ręczne zamówienie, import wypłat) ma hasło,
+    # którego nie zna nikt. Ten mail jest pierwszym powodem, żeby wejść do
+    # portalu — więc to tutaj musi być droga do środka, inaczej człowiek czyta
+    # „zaloguj się" i nie ma czym. Link jest jednorazowy (odcisk hasła siedzi
+    # w tokenie) i ważny 7 dni; po wygaśnięciu zostaje „forgot password"
+    # i mail mówi o tym wprost.
+    base = get_settings().app_base_url
+    setup_url = None
+    if getattr(trader, "must_set_password", False):
+        from . import auth   # tutaj, nie u góry: auth ciągnie config i sesje
+        setup_url = (f"{base}/portal"
+                     f"?reset={auth.make_setup_token(trader.id, trader.password_hash)}")
     return {
+        "setup_url": setup_url,
+        "portal_url": f"{base}/portal",
+        # Furtka dla drugiej strony tego `if`. Flaga mówi tylko tyle, że wiersz
+        # tradera założyliśmy my — konto starsze niż sama flaga (2026-08-11) albo
+        # przejęte przez Google ma ją zgaszoną, choć hasła nadal nie ma. Nie da
+        # się tego rozstrzygnąć z kolumn, więc mail nie zgaduje: pokazuje drogę,
+        # która jest nieszkodliwa też dla kogoś, kto hasło ma.
+        "forgot_url": f"{base}/portal?forgot=1&email={quote(trader.email)}",
         "name": trader.full_name or trader.email, "login": acc.platform_login,
         "platform_login": acc.platform_login, "platform_password": acc.platform_password,
         "platform_server": acc.platform_server, "initial_balance": acc.initial_balance,
@@ -285,7 +361,25 @@ async def _provision_one(session_factory, feed, aid: int) -> None:
                   f"z puli, trader {trader.email if trader else '?'}")
             return
 
-        # 3) pula pusta, ale admin włączył w panelu auto-provisioning symulowanych
+        # 3) pula pusta + auto real MT5 (web.metatrader.app) — przed symulacją,
+        #    bo realne poświadczenia są cenniejsze. Wymaga METAQUOTES_WEB_ENABLED
+        #    i przeglądarki (lokalnej albo BROWSER_CDP_URL).
+        if (real_fallback_enabled(s)
+                and (settings.metaquotes_web_enabled or settings.metaapi_auto_create)
+                and _may_attempt(aid)):
+            creds = await _create_demo_account(feed, acc, trader, settings)
+            if creds:
+                _apply_credentials(acc, creds)
+                acc.status = "funded" if acc.phase == "funded" else "active"
+                s.commit()
+                _clear_backoff(aid)
+                if trader:
+                    notify.send(_creds_event(acc), trader.email, _creds_ctx(trader, acc))
+                print(f"[provisioning] konto {aid} = realne demo MT5 "
+                      f"{acc.platform_login}@{acc.platform_server} (auto-fallback)")
+                return
+
+        # 4) pula pusta, ale admin włączył w panelu auto-provisioning symulowanych
         #    poświadczeń — generujemy je od ręki zamiast trzymać tradera w kolejce.
         if sim_fallback_enabled(s):
             _apply_local_credentials(acc)
@@ -297,7 +391,7 @@ async def _provision_one(session_factory, feed, aid: int) -> None:
                   f"({acc.platform_login}@{acc.platform_server}) — pula była pusta")
             return
 
-        # 4) konto czeka, aż admin doda rachunek do puli. Panel pokazuje takie
+        # 5) konto czeka, aż admin doda rachunek do puli. Panel pokazuje takie
         #    konta w sekcji MT5 Pool jako oczekujące.
         print(f"[provisioning] konto {aid} czeka na rachunek ${acc.initial_balance:,.0f} z puli")
     finally:
@@ -305,6 +399,7 @@ async def _provision_one(session_factory, feed, aid: int) -> None:
 
 
 SIM_FALLBACK_KEY = "provision_sim_fallback"
+REAL_FALLBACK_KEY = "provision_real_fallback"
 
 
 def sim_fallback_enabled(session) -> bool:
@@ -313,6 +408,16 @@ def sim_fallback_enabled(session) -> bool:
     Przełącznik z panelu admina, trzymany w bazie — na hostingu bezserwerowym
     zmiana env oznaczałaby redeploy, a to ma działać od kliknięcia."""
     row = session.get(AppSetting, SIM_FALLBACK_KEY)
+    return bool(row and row.value == "1")
+
+
+def real_fallback_enabled(session) -> bool:
+    """Czy przy pustej puli zakładać realne demo MT5 przez web.metatrader.app.
+
+    Osobny przełącznik od sim_fallback: realne konta wymagają przeglądarki
+    (lokalnej albo BROWSER_CDP_URL / Browserless) i trwają ~20–30 s sztuka.
+    Gdy obie flagi są włączone, real ma pierwszeństwo przed symulacją."""
+    row = session.get(AppSetting, REAL_FALLBACK_KEY)
     return bool(row and row.value == "1")
 
 

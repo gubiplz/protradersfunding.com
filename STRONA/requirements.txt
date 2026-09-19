@@ -1,12 +1,12 @@
 # Zależności dla hostingu bezserwerowego (Vercel czyta requirements.txt Z KORZENIA).
 #
 # To NIE jest pełna lista aplikacji — pełna jest w backend/requirements.txt.
-# Różnica jest jedna i celowa: nie ma tu `playwright`. Provisioning realnych kont
-# MT5 potrzebuje Chromium (~150 MB), czego na Vercela się nie wgra, a importy
-# Playwrighta w kodzie są leniwe (wewnątrz funkcji), więc bez pakietu aplikacja
-# startuje normalnie — po prostu trzymaj MT5_PROVISIONING=false.
+# Playwright jest tu tylko jako klient CDP: Chromium (~150 MB) NIE jest instalowane.
+# Realne konta MT5 otwieramy na Browserless (BROWSER_CDP_URL) — bez tej zmiennej
+# panel i tak pokaże, że generator jest niedostępny.
 #
-# Lokalnie i na zwykłym serwerze instaluj z backend/requirements.txt.
+# Lokalnie i na zwykłym serwerze (lokalne Chromium): backend/requirements.txt
+# + `playwright install chromium`.
 
 fastapi>=0.110
 sqlalchemy>=2.0
@@ -22,3 +22,5 @@ pywebpush>=2.0
 # Baza stref czasowych dla zoneinfo (Payout BOT liczy okno w America/New_York);
 # na odchudzonym obrazie funkcji /usr/share/zoneinfo może nie istnieć.
 tzdata>=2024.1
+# Klient CDP do Browserless — bez lokalnego Chromium.
+playwright>=1.40

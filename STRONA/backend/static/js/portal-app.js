@@ -3,17 +3,66 @@ const fmt=n=>(n??0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFract
 const fmt0=n=>(n??0).toLocaleString('en-US',{maximumFractionDigits:0});
 /* Catalog models: 0 = Instant Funding, 2 = 2-Step (1-Step is legacy, kept for old accounts). */
 const planKind=s=>s===0?'Instant':s===1?'1-Step':'2-Step';
-const dstr=iso=>new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
+/* Baza oddaje nagie UTC (bez "Z") — new Date() wziąłby to za czas lokalny.
+   Doklejamy "Z" i renderujemy w strefie przeglądarki: klient widzi SWÓJ czas. */
+const dutc=iso=>new Date(/[Zz]|[+-]\d\d:?\d\d$/.test(iso||'')?iso:iso+'Z');
+const dstr=iso=>dutc(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
 // Date only — trade history has no time component. `YYYY-MM-DD` is read as
 // UTC so the browser timezone does not shift the day back by one.
 
 const dday=d=>new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'});
-let TOKEN=localStorage.getItem('pf_token'), ME=null, AUTHMODE='login', chart=null, CURV=null;
+/* Impersonacja z panelu admina: token przyjeżdża w ?impersonate= i mieszka
+   w sessionStorage (per KARTA) — localStorage jest wspólny dla wszystkich
+   kart, więc zapis tam nadpisałby prawdziwą sesję właściciela w /admin. */
+let IMP=null;
+try{
+  const _qi=new URLSearchParams(location.search);
+  if(_qi.get('impersonate')){
+    sessionStorage.setItem('pf_imp',_qi.get('impersonate'));
+    _qi.delete('impersonate');
+    history.replaceState(null,'',location.pathname+(_qi.toString()?'?'+_qi:'')+location.hash);
+  }
+  IMP=sessionStorage.getItem('pf_imp');
+}catch(e){}
+let TOKEN=IMP||localStorage.getItem('pf_token'), ME=null, AUTHMODE='login', chart=null, anCharts=[], CURV=null;
 /* Ostatni stan programu lojalnosciowego z /api/me/loyalty (punkty, nagrody). */
 let LOY=null;
 const H=()=>TOKEN?{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'}:{'Content-Type':'application/json'};
-async function api(path,opts={}){const r=await fetch(path,{headers:H(),...opts});if(!r.ok){throw new Error((await r.json().catch(()=>({}))).detail||r.status)}return r.json()}
+/* Sieć bywa mobilna: twardy timeout 15 s (AbortController) + JEDEN retry, ale
+   wyłącznie dla GET i wyłącznie po błędzie sieci/timeoucie. Odpowiedź HTTP —
+   nawet 500 — nigdy nie jest ponawiana: POST /checkout nie może się zdublować. */
+async function api(path,opts={},_retry){
+  const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),15000);
+  let r;
+  try{r=await fetch(path,{headers:H(),...opts,signal:ctl.signal})}
+  catch(e){
+    clearTimeout(tm);
+    if(!_retry&&(opts.method||'GET').toUpperCase()==='GET')return api(path,opts,1);
+    throw new Error(e&&e.name==='AbortError'?'Request timed out — check your connection':'Network error — check your connection');
+  }
+  clearTimeout(tm);
+  /* 401 przy ZAŁOŻONEJ sesji = token wygasł/unieważniony. W standalone PWA nie
+     ma paska adresu, więc „Try again" na widoku nigdy by nie pomogło — jedyna
+     droga wyjścia to od razu ekran logowania. 401 bez tokenu (złe hasło przy
+     logowaniu) przechodzi niżej normalną ścieżką błędu. */
+  if(r.status===401&&TOKEN){sessionExpired();throw new Error('Your session has expired — please sign in again')}
+  if(!r.ok){throw new Error((await r.json().catch(()=>({}))).detail||r.status)}
+  return r.json();
+}
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+/* Anty-zawieszka przycisków: gasnie na czas fn(), finally ZAWSZE przywraca —
+   restore tylko w catchu zostawiał martwy przycisk, gdy wywrócił się success
+   path. Drugi klik w trakcie = no-op. fn zwraca 'keep' => przycisk zostaje
+   wyłączony (np. redirect do Stripe, gdzie strona zaraz znika). */
+async function busy(btn,label,fn){
+  if(!btn)return fn();
+  if(btn.disabled)return;
+  const html=btn.innerHTML;
+  btn.disabled=true;if(label)btn.textContent=label;
+  let keep=false;
+  try{const w=await fn();keep=(w==='keep');return w}
+  finally{if(!keep&&btn.isConnected){btn.disabled=false;btn.innerHTML=html}}
+}
 /* "Upgrade Your Size" promo code applied on the public site (or typed in the buy
    modal). Shared key with the landing page — one applied state everywhere. */
 function pfPromo(){try{return localStorage.getItem('pf_promo_code')||''}catch(e){return ''}}
@@ -78,32 +127,49 @@ ckSpace();addEventListener('resize',ckSpace);addEventListener('load',ckSpace);
 /* Fresh ME (credits, streak) + bell badge without a page reload. Re-render of
    the current view only on demand (pull-to-refresh / push navigation) or when
    the credit balance changed — no screen flashing every minute. */
+let _refreshing=false; /* re-entrancy: minutowy interval + visibilitychange potrafią się nałożyć */
 async function refreshLive(rerender=false){
-  if(!TOKEN||!ME)return;
+  if(!TOKEN||!ME||_refreshing)return;
+  _refreshing=true;
   refreshNotif();
   try{
     const stare=ME.credits_usd;
     ME=await api('/api/auth/me');
     if(!rerender&&ME.credits_usd!==stare)rerender=true;
   }catch(e){}
+  finally{_refreshing=false}
   if(rerender&&window._view&&VIEWS[window._view])go(window._view);
 }
 /* Push-click target stored by sw.js in Cache Storage: read on startup AND on
    every return to the app — iOS can drop a postMessage to a suspended page,
    so this is the only reliable path. */
+/* Cel deep linka to para (widok, konto): powiadomienie o koncu fazy prowadzi do
+   `?view=recap&acc=N`, czyli do karty JEDNEGO konta. Bez `acc` link ladowal na
+   liscie kont i trader musial sam znalezc to, o ktorym byl push. */
+function navFromUrl(u){
+  try{const p=new URL(u,location.origin).searchParams;
+    return {v:p.get('view'),acc:+p.get('acc')||0};
+  }catch(_){return {v:null,acc:0}}
+}
+function goNav(n){
+  if(!n||!n.v)return false;
+  if(n.v==='recap'){if(!n.acc)return false;openAcc(n.acc);return true}
+  if(!VIEWS[n.v])return false;
+  go(n.v);return true;
+}
 async function pendingNavView(){
   let v=window._pendingView;window._pendingView=null;
   try{
     const c=await caches.open('pf-nav');const r=await c.match('/__pending-nav');
     if(r){const d=await r.json();await c.delete('/__pending-nav');
-      if(!v&&Date.now()-d.ts<30000)v=new URL(d.url,location.origin).searchParams.get('view')}
+      if(!v&&Date.now()-d.ts<30000)v=navFromUrl(d.url)}
   }catch(_){}
   return v||null;
 }
 async function applyPendingNav(){
-  const v=await pendingNavView();
-  if(!v||!VIEWS[v])return;
-  if(ME){go(v);refreshLive()}else window._pendingView=v; /* boot() finishes it */
+  const n=await pendingNavView();
+  if(!n)return;
+  if(ME){if(goNav(n))refreshLive()}else window._pendingView=n; /* boot() finishes it */
 }
 document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState!=='visible')return;
@@ -118,6 +184,21 @@ function track(name,props){try{
 }catch(e){}}
 addEventListener('appinstalled',()=>track('pwa_install'));
 
+/* Globalny łapacz błędów JS → telemetria (drill-down w adminie). Dedupe po
+   treści + limit 5/sesję, fire-and-forget — raportowanie nie może samo
+   wywrócić appki ani zaspamować bazy pętlą błędów. */
+const _jsErrSeen=new Set();
+function reportJsError(msg,src){
+  try{
+    const key=String(msg||'unknown').slice(0,80);
+    if(!TOKEN||_jsErrSeen.has(key)||_jsErrSeen.size>=5)return;
+    _jsErrSeen.add(key);
+    track('js_error',{msg:key,src:String(src||'').slice(0,80),view:String(window._view||'')});
+  }catch(e){}
+}
+addEventListener('error',e=>reportJsError(e.message,(e.filename||'')+':'+(e.lineno||0)));
+addEventListener('unhandledrejection',e=>reportJsError(e.reason&&e.reason.message||e.reason,'promise'));
+
 /* Push click with the portal open: sw.js does postMessage instead of
    navigate() (a reload loses SPA state). Top-level listener + startMessages()
    — without it the spec QUEUES SW messages forever (addEventListener alone
@@ -127,11 +208,10 @@ if('serviceWorker' in navigator){
     const d=e.data||{};
     if(d.type!=='navigate')return;
     try{caches.open('pf-nav').then(c=>c.delete('/__pending-nav'))}catch(_){}
-    let v=null;
-    try{v=new URL(d.url,location.origin).searchParams.get('view')}catch(_){}
-    if(!v||!VIEWS[v])return;
+    const n=navFromUrl(d.url);
+    if(!n.v)return;
     /* ME is still loading (iOS waking the PWA) => boot() finishes the navigation */
-    if(ME){go(v);refreshLive()}else window._pendingView=v;
+    if(ME){if(goNav(n))refreshLive()}else window._pendingView=n;
   });
   navigator.serviceWorker.startMessages?.();
 }
@@ -210,7 +290,8 @@ const NAV=[
   {v:'settings',label:'Settings',ico:'gear'},
 ];
 $('side-nav').innerHTML='<div class="side-sec sb-txt">Main menu</div>'+NAV.map(n=>
-  `<button class="sb-link" data-v="${n.v}" onclick="go('${n.v}')" title="${n.label}">${ICO[n.ico]}<span class="sb-txt">${n.label}</span></button>`).join('');
+  `<button class="sb-link" data-v="${n.v}" onclick="go('${n.v}')" title="${n.label}">${ICO[n.ico]}<span class="sb-txt">${n.label}</span></button>`).join('')+
+  `<a class="sb-link" href="/academy" target="_blank" rel="noopener" title="Academy">${ICO.book}<span class="sb-txt">Academy</span></a>`;
 
 /* ---------- mobile tab bar + "More" sheet ---------- */
 const TABS=[
@@ -224,13 +305,21 @@ $('tabbar').innerHTML=TABS.map(t=>
   `<button class="tab-item" data-v="more" onclick="openSheet()"><span class="tab-ic">${ICO.grid}</span><span class="tab-lbl">More</span></button>`;
 $('sheet-nav').innerHTML=NAV.filter(n=>!TABS.some(t=>t.v===n.v)).map(n=>
   `<button class="sb-link" data-v="${n.v}" onclick="go('${n.v}');closeSheet()">${ICO[n.ico]}<span class="sb-txt">${n.label}</span></button>`).join('')+
-  `<div class="sheet-div"></div>
+  `<a class="sb-link" href="/academy" target="_blank" rel="noopener" onclick="closeSheet()">${ICO.book}<span class="sb-txt">Academy</span></a>
+   <div class="sheet-div"></div>
    <button class="sb-link theme-toggle" onclick="toggleTheme()"></button>
    <button class="sb-link sheet-signout" onclick="logout()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H3"/></svg><span class="sb-txt">Sign Out</span></button>`;
 paintTheme();   /* the sheet's toggle was just rendered — give it its icon/label */
 function openSheet(){$('sheetVeil').classList.remove('hidden');$('sheet').classList.add('open')}
 function closeSheet(){$('sheetVeil').classList.add('hidden');$('sheet').classList.remove('open')}
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closeSheet()});
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape')return;
+  closeSheet();
+  /* ask-modal zostaje: potwierdzenie ma callback i Escape bez odpowiedzi
+     zostawiłby decyzję w zawieszeniu. pop() zdejmuje wierzchni modal. */
+  const m=[...document.querySelectorAll('.modal-wrap')].filter(x=>x.id!=='ask-modal').pop();
+  if(m)m.remove();
+});
 
 /* ---------- toasts ---------- */
 function toast(msg,kind='ok',ms=6000){
@@ -309,7 +398,14 @@ async function doAuth(){
       if(r.token){TOKEN=r.token;localStorage.setItem('pf_token',TOKEN);
         toast('Password changed. Welcome back!','ok',7000);unlock();await boot();return}
       toast('Password changed. Log in with your new password.','ok',8000);authTab('login');
-    }catch(e){toast('Error: '+e.message,'err')}
+    }catch(e){toast('Error: '+e.message,'err',9000);
+      /* "already set" = marker z backendu: hasło już istnieje (np. drugi mail
+         przy BOGO niesie własny, martwy już token) — formularz resetu jest
+         wtedy ślepą uliczką, więc od razu pokazujemy logowanie. */
+      if(/already set/i.test(String(e.message))){
+        window._resetToken=null;history.replaceState(null,'','/portal');authTab('login');
+      }
+    }
     unlock();return;
   }
   /* Checked here so the customer sees it next to the field instead of getting
@@ -467,10 +563,54 @@ async function changeVerifyEmail(){
   }catch(e){toast('Error: '+e.message,'err')}
 }
 function logout(){
+  /* Tryb podglądu: NIE wolno dotknąć localStorage (sesja właściciela) ani
+     /api/auth/logout (skasowałby cookie serwera bramkujące /admin). */
+  if(IMP){try{sessionStorage.removeItem('pf_imp')}catch(e){}location.reload();return}
   // The session cookie is held by the server (it gates /admin), so clearing
   // localStorage alone would not be enough.
   fetch('/api/auth/logout',{method:'POST'}).finally(()=>{
     TOKEN=null;localStorage.removeItem('pf_token');location.reload()});
+}
+/* Token wygasł w trakcie sesji. Bez location.reload(): offline reload w PWA
+   zostawiłby gołą stronę błędu Safari zamiast naszego ekranu logowania.
+   Flaga gasi lawinę równoległych 401 (kilka widoków odpytuje naraz);
+   boot() zdejmuje ją po ponownym zalogowaniu. */
+let _expired=false;
+function sessionExpired(){
+  if(_expired)return;_expired=true;
+  /* Wygasł token PODGLĄDU (2 h) — wracamy do własnej sesji, nie ruszając
+     tokenu właściciela w localStorage. */
+  if(IMP){try{sessionStorage.removeItem('pf_imp')}catch(e){}location.reload();return}
+  TOKEN=null;ME=null;
+  try{localStorage.removeItem('pf_token')}catch(e){}
+  $('app').classList.add('hidden');$('verify-gate')?.classList.add('hidden');
+  $('auth').classList.remove('hidden');
+  authTab('login');loadAuthStats();
+  toast('Your session has expired. Please sign in again.','err',8000);
+}
+/* Żółty pasek trybu podglądu — przypomina, że klikane akcje (check-in,
+   zakupy, zgłoszenia) dzieją się NAPRAWDĘ na koncie klienta. */
+function impBanner(){
+  if($('imp-bar'))return;
+  const b=document.createElement('div');b.id='imp-bar';
+  b.style.cssText='position:fixed;bottom:0;left:0;right:0;z-index:9999;background:#7a5d00;color:#fff;padding:8px 14px;font-size:13px;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap';
+  b.innerHTML=`<span>Admin preview — signed in as <b>${esc(ME.email)}</b>. Actions here are real.</span>
+    <button style="background:none;border:1px solid #fff;color:#fff;border-radius:8px;padding:4px 12px;cursor:pointer" onclick="logout()">Exit preview</button>`;
+  document.body.appendChild(b);
+}
+/* Zimny start bez zasięgu NIE wylogowuje: token zostaje w localStorage,
+   klient dostaje pełnoekranowe „Try again". Wcześniej KAŻDY błąd /api/auth/me
+   (także timeout w metrze) kasował token i wymuszał ponowne logowanie. */
+function bootRetry(msg){
+  let el=$('boot-retry');
+  if(!el){
+    el=document.createElement('div');el.id='boot-retry';
+    el.innerHTML='<div class="br-card"><h3>Can’t reach the server</h3><p></p>'
+      +'<button class="btn-p">Try again</button></div>';
+    el.querySelector('button').onclick=()=>{el.remove();boot()};
+    document.body.appendChild(el);
+  }
+  el.querySelector('p').textContent=msg||'Check your connection and try again.';
 }
 /* Benefit numbers on the login screen — REAL platform stats only; each card
    renders only past an honesty threshold, an empty strip simply stays hidden. */
@@ -492,9 +632,13 @@ async function loadAuthStats(){
 /* ---------- return from payment ---------- */
 async function handlePaymentReturn(){
   const q=new URLSearchParams(location.search);
+  const mo=q.get('mock_order');
+  /* Parametry powrotu z płatności są JEDNORAZOWE. Bez replaceState zostawały
+     w adresie, a iOS po ubiciu appki przeładowuje bieżący URL — klient widział
+     „Payment received… account is being created" tygodnie po zakupie. */
+  if(q.get('paid')||q.get('canceled')||mo)history.replaceState(null,'','/portal');
   if(q.get('paid')){toast('✅ Payment received. Your MT5 account is being created. Credentials will appear under Challenges and in your inbox.','ok',9000);go('accounts');return true}
   if(q.get('canceled')){toast('Payment canceled. Nothing was charged.','err');return false}
-  const mo=q.get('mock_order');
   if(mo){try{
     const prov=await api(`/api/checkout/${mo}/mock-complete`,{method:'POST'});
     toast(prov.provisioning?'✅ Payment received. Your MT5 account is being created (up to a minute).':'✅ Account created. Credentials under Challenges.','ok',9000);
@@ -517,6 +661,14 @@ async function boot(){
   const rt=q0.get('reset');
   if(rt){window._resetToken=rt;
     $('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('reset');loadAuthStats();return}
+  /* Z maila z poswiadczeniami MT5: klient, ktory nie ma hasla do portalu, ma
+     wejsc od razu na ekran resetu. Bez tego lezy na logowaniu i musi jeszcze
+     znalezc „Forgot password". Adres w ?email= to jego wlasny adres. */
+  if(q0.get('forgot')){
+    $('auth').classList.remove('hidden');$('app').classList.add('hidden');
+    authTab('forgot');
+    const em=q0.get('email');if(em)$('a-email').value=em;
+    loadAuthStats();return}
   if(!TOKEN){
     $('auth').classList.remove('hidden');$('app').classList.add('hidden');
     /* Wejscie z cennika (?buy=) to najczesciej NOWY klient — startujemy od
@@ -524,7 +676,14 @@ async function boot(){
     authTab(q0.get('buy')?'signup':'login');
     if(q0.get('buy'))$('auth-buynote').classList.remove('hidden');
     loadAuthStats();return}
-  try{ME=await api('/api/auth/me')}catch(e){logout();return}
+  _expired=false; /* świeże logowanie — łapacz 401 znowu uzbrojony */
+  try{ME=await api('/api/auth/me')}
+  catch(e){
+    /* 401: sessionExpired() w api() już wyczyścił token i pokazał logowanie.
+       Wszystko inne to sieć/timeout — token ZOSTAJE, dajemy przycisk Retry. */
+    if(!TOKEN)return;
+    bootRetry(e&&e.message);return;
+  }
   /* Admin accounts live in /admin only. The server already bounces them off
      /portal by the session cookie; this covers the leftover state where the
      cookie is gone but the localStorage token still works. */
@@ -539,11 +698,18 @@ async function boot(){
   }
   $('verify-gate').classList.add('hidden');
   $('auth').classList.add('hidden');$('app').classList.remove('hidden');
+  if(IMP)impBanner();
   const nm=(ME.full_name||ME.email).trim();
   $('ava').textContent=nm[0].toUpperCase();
   $('who-name').textContent=ME.full_name||'Trader';
   $('who-mail').textContent=ME.email;
   if(localStorage.getItem('pf_side_collapsed')==='1')$('side').classList.add('collapsed');
+  /* Portal wstrzymany do weryfikacji (kyc_locked): serwer odpowiada 403 na
+     wszystko poza KYC, supportem i wlasnym profilem, wiec pelny panel pokazalby
+     same bledy. Wychodzimy z boota przed warstwa engagementu — jej zapytania
+     tez sie odbija, a kartka z passa nie jest tym, co ten klient ma teraz
+     zobaczyc. */
+  if(ME.kyc_locked&&ME.kyc_status!=='approved'){wstrzymajPortal();go('kyc');return}
   initEngagement();
   flagsWarm();
   if(await handlePaymentReturn())return;
@@ -551,21 +717,70 @@ async function boot(){
   /* Deep links from notifications: _pendingView / fresh sw.js entry in Cache
      Storage (wins over a STALE ?view= left in the address after a previous
      deep link), finally ?view= from the URL (cold start via openWindow). */
-  const widok=(await pendingNavView())||q.get('view');
+  const nav=(await pendingNavView())||{v:q.get('view'),acc:+q.get('acc')||0};
   if(q.get('upsell')==='1')window._upsellJump=true;
-  go(q.get('buy')?'store':(widok&&VIEWS[widok]?widok:'accounts'));
+  /* ?view/?upsell skonsumowane — bez sprzątnięcia każdy kolejny reload PWA
+     skakał do starego deep linka. ?buy zostaje: konsumuje go (i czyści)
+     highlightPlanFromUrl() dopiero przy renderze sklepu. */
+  if(q.get('view')||q.get('upsell'))
+    history.replaceState(null,'','/portal'+(q.get('buy')?'?buy='+encodeURIComponent(q.get('buy')):''));
+  /* view_open leci z go() — kazda nawigacja, nie tylko start appki */
+  if(q.get('buy'))go('store');
+  else if(!goNav(nav))go('accounts');
   refreshNotif();
-  track('view_open',{view:window._view,pwa:document.documentElement.classList.contains('pwa')?'1':'0'});
+  maybeReviewNudge();
 }
+
+/* Zostawiamy dokladnie dwie zakladki: te, ktora zdejmuje blokade (KYC), i te,
+   ktora pozwala o nia dopytac (Support). Pozycje nawigacji USUWAMY, zamiast je
+   wygaszac — link, ktory po kliknieciu oddaje blad, wyglada jak zepsuta appka,
+   a nie jak swiadoma pauza. */
+function wstrzymajPortal(){
+  const wolne=['kyc','support'];
+  document.querySelectorAll('#side-nav .sb-link[data-v],#sheet-nav .sb-link[data-v]')
+    .forEach(b=>{if(!wolne.includes(b.dataset.v))b.remove()});
+  $('tabbar').classList.add('hidden');
+  $('bell-btn')?.classList.add('hidden');
+  $('streakChip')?.classList.add('hidden');
+  document.querySelector('.top-right .btn-p')?.classList.add('hidden');
+}
+
+/* Kampania "free challenge": wybrane konta (lista na serwerze — review_nudge
+   z /api/auth/me) dostają po zalogowaniu przypomnienie o opinii na Trustpilot.
+   Raz na 3 dni; znacznik w localStorage liczy się od pokazania, nie od kliku,
+   żeby zamknięcie tłem nie pokazywało popupu przy każdym wejściu. */
+function maybeReviewNudge(){
+  if(!ME||!ME.review_nudge)return;
+  const last=+localStorage.getItem('pf_tp_nudge')||0;
+  if(Date.now()-last<3*86400000)return;
+  localStorage.setItem('pf_tp_nudge',String(Date.now()));
+  const w=document.createElement('div'); w.id='tp-modal'; w.className='modal-wrap';
+  w.onclick=e=>{if(e.target===w)w.remove()};
+  w.innerHTML=`<div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>Enjoying your funded account?</h3></div>
+    <p class="muted" style="font-size:13px;margin:2px 0 6px">Your challenge account was set up for you free of charge. If you like how it's going, a short Trustpilot review helps other traders find us — it takes a minute.</p>
+    <div style="font-size:20px;letter-spacing:3px;color:#00b67a;margin:4px 0 12px">★★★★★</div>
+    <div style="display:flex;gap:10px;margin-top:6px">
+      <button class="btn-p" onclick="window.open('https://www.trustpilot.com/review/protradersfunding.com','_blank','noopener');$('tp-modal').remove()">Leave a review</button>
+      <button class="btn-o" onclick="$('tp-modal').remove()">Maybe later</button>
+    </div></div>`;
+  document.body.appendChild(w);
+}
+
+/* Lustro DISCIPLINE_MIN_DAYS z main.py. Serwer i tak odsiewa krotsze serie —
+   ta liczba stoi tu tylko po to, zeby ekran umial powiedziec, DLACZEGO kogos
+   na liscie nie ma. */
+const DISC_MIN_DAYS=10;
 
 const TITLES={
   accounts:['Challenges','Live overview of your challenge accounts'],
   store:['New Challenge','One-time fee · refunded with your first payout'],
-  board:['Leaderboard','Top traders across the platform, all time, live data'],
+  board:['Leaderboard','Top traders across the platform — by profit, and by discipline'],
   achievements:['Achievements','Milestones earned from your real activity'],
   loyalty:['Loyalty','Trade your points for a discount code'],
   journal:['Journal','Your private trading notes'],
   analytics:['Analytics','Daily P&L computed from your account history'],
+  weekly:['Week in review','The week that closed, day by day'],
   rewards:['Rewards','Programs built into the platform'],
   payouts:['Payouts','Performance rewards across all your accounts'],
   certificates:['Certificates','Your verifiable documents: evaluation stages and payouts'],
@@ -587,7 +802,13 @@ let PRZEJSCIE = 0;
 
 function go(v){
   CURV=v; window._view=v; window._onDetail=false;
-  document.querySelectorAll('.sb-link[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  /* Nazwa widoku w propsach: dziennik w adminie rozpisuje z tego, co klient
+     faktycznie przegladal, nie tylko ze "otworzyl portal". */
+  track('view_open',{view:v,pwa:document.documentElement.classList.contains('pwa')?'1':'0'});
+  /* Przeglad tygodnia nie ma wlasnej pozycji w menu — wchodzi sie w niego z
+     powiadomienia. Bez tego aliasu nawigacja zostawala bez zaznaczenia. */
+  const sv={weekly:'analytics'}[v]||v;
+  document.querySelectorAll('.sb-link[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===sv));
   const tv={store:'accounts',achievements:'rewards',loyalty:'rewards'}[v]||v;
   const tabs=[...document.querySelectorAll('.tab-item[data-v]')];
   const hit=tabs.some(b=>b.dataset.v===tv);
@@ -598,10 +819,18 @@ function go(v){
   $('notif-panel')?.classList.add('hidden');
   const moj=++PRZEJSCIE;
   $('view').innerHTML=LOADING_HTML();
-  /* Bez `catch` — tak samo jak dotad. Blad widoku ma byc widoczny w konsoli,
-     a nie polkniety przez opakowanie dodane dla numeru przelaczenia. */
   Promise.resolve(VIEWS[v]())
-    .then(()=>{if(moj!==PRZEJSCIE&&VIEWS[CURV])VIEWS[CURV]()});
+    .then(()=>{if(moj!==PRZEJSCIE&&VIEWS[CURV])VIEWS[CURV]()})
+    .catch(e=>{
+      /* Blad zostaje W widoku z przyciskiem ponowienia (wzor admina) — bez
+         catcha na ekranie wisial wieczny szkielet ladowania. Zgloszenie do
+         telemetrii, zeby blad nie zniknal razem z konsola uzytkownika. */
+      reportJsError(e&&e.message||e,'view:'+v);
+      if(moj!==PRZEJSCIE)return;
+      $('view').innerHTML=`<div class="empty"><h3>Couldn't load this view</h3>
+        <p>${esc(e&&e.message||'Something went wrong')}</p>
+        <button class="btn-p" style="margin-top:14px" onclick="go('${v}')">Try again</button></div>`;
+    });
 }
 function toggleSide(open){
   $('side').classList.toggle('open',open);
@@ -627,6 +856,9 @@ function toggleCollapse(){
 function highlightPlanFromUrl(){
   const key=new URLSearchParams(location.search).get('buy');
   if(!key)return;
+  /* Jednorazowy deep link: bez sprzątnięcia każdy reload PWA znowu otwierał
+     modal zakupu. Czyścimy TU (nie w boot), bo sklep renderuje się async. */
+  history.replaceState(null,'','/portal');
   const card=document.querySelector(`[data-plan="${CSS.escape(key)}"]`);
   if(!card)return;
   card.classList.add('hl');
@@ -789,6 +1021,19 @@ async function doReveal(){
   }catch(e){toast('Error: '+e.message,'err')}
   finally{delete c.dataset.busy}
 }
+/* Prowizja afiliacyjna -> kredyty sklepowe (min $10, pilnuje serwer). */
+async function claimAffiliate(btn){
+  await busy(btn,'Claiming…',async()=>{
+    try{
+      const r=await api('/api/me/affiliate/claim',{method:'POST'});
+      ME=await api('/api/auth/me');
+      toast(`✅ $${fmt(r.claimed_usd)} added to your store credit.\nIt applies automatically at checkout.`,'ok',7000);
+      go('rewards');
+      return 'keep';
+    }catch(e){toast('Claim failed: '+e.message,'err',6000)}
+  });
+}
+
 function initRevealCard(){
   if(ME.reveal_last!==utcToday())return;       // stays face-down until claimed
   let p=null;
@@ -834,21 +1079,19 @@ function pushBannerHtml(){
   }catch(e){return ''}
 }
 async function enablePush(btn){
-  if(btn){btn.disabled=true;btn.textContent='Enabling…'}
-  try{
-    const cfg=await pushCfg();
-    if(!cfg.enabled)throw new Error('push is not configured yet');
-    const reg=await navigator.serviceWorker.ready;
-    if(await Notification.requestPermission()!=='granted')throw new Error('permission was not granted');
-    const sub=await reg.pushManager.subscribe({userVisibleOnly:true,
-      applicationServerKey:b64ToU8(cfg.key)});
-    await api('/api/me/push/subscribe',{method:'POST',body:JSON.stringify(sub.toJSON())});
-    document.getElementById('push-banner')?.remove();
-    toast('🔔 Notifications enabled on this device.','ok');
-  }catch(e){
-    toast('Could not enable notifications: '+e.message,'err');
-    if(btn){btn.disabled=false;btn.textContent='Enable ›'}
-  }
+  await busy(btn,'Enabling…',async()=>{
+    try{
+      const cfg=await pushCfg();
+      if(!cfg.enabled)throw new Error('push is not configured yet');
+      const reg=await navigator.serviceWorker.ready;
+      if(await Notification.requestPermission()!=='granted')throw new Error('permission was not granted');
+      const sub=await reg.pushManager.subscribe({userVisibleOnly:true,
+        applicationServerKey:b64ToU8(cfg.key)});
+      await api('/api/me/push/subscribe',{method:'POST',body:JSON.stringify(sub.toJSON())});
+      document.getElementById('push-banner')?.remove();
+      toast('🔔 Notifications enabled on this device.','ok');
+    }catch(e){toast('Could not enable notifications: '+e.message,'err')}
+  });
 }
 function dismissPush(){
   try{localStorage.setItem('pf_push_ask_ts',String(Date.now()))}catch(e){}
@@ -871,7 +1114,7 @@ function toggleNotif(){
   p.innerHTML=`<div class="notif-head"><b>Notifications</b>
       ${r.unread?`<button class="linklike" onclick="readNotif()">Mark all read</button>`:''}</div>`
     +((r.items&&r.items.length)?r.items.map(n=>{
-      const kiedy=n.created_at?new Date(n.created_at+(n.created_at.endsWith('Z')?'':'Z'))
+      const kiedy=n.created_at?dutc(n.created_at)
         .toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
       return `<a class="notif-row${n.read?'':' unread'}" href="${esc(n.url||'/portal')}" onclick="return notifGo(this)">
         <div class="t">${esc(n.title)}</div>${n.body?`<div class="b">${esc(n.body)}</div>`:''}
@@ -883,10 +1126,13 @@ function toggleNotif(){
 /* Bell row: switch the SPA view instead of a full navigation; with no
    matching view fall back to the row's URL. */
 function notifGo(a){
-  let v=null,up=false;
-  try{const u=new URL(a.getAttribute('href'),location.origin);
-    v=u.searchParams.get('view'); up=u.searchParams.get('upsell')==='1'}catch(_){}
-  if(v&&VIEWS[v]){if(up)window._upsellJump=true;go(v);return false}
+  const href=a.getAttribute('href');
+  let up=false;
+  try{up=new URL(href,location.origin).searchParams.get('upsell')==='1'}catch(_){}
+  if(up)window._upsellJump=true;
+  /* `false` zatrzymuje przejscie linkiem: nawigacja zostaje w SPA. Gdy celu nie
+     umiemy obsluzyc, puszczamy przegladarke i wchodzi zwykle przeladowanie. */
+  if(goNav(navFromUrl(href))){$('notif-panel')?.classList.add('hidden');return false}
   return true;
 }
 /* Deep link z powiadomienia „Scale your progress": po wejsciu w Challenges
@@ -940,6 +1186,7 @@ function setUiPref(key,val){
   _prefT=setTimeout(()=>{api('/api/me',{method:'PATCH',body:JSON.stringify({ui_prefs:ME.ui_prefs})}).catch(()=>{})},800);
 }
 function chalFilter(f){setUiPref('chalFilter',f==='all'?null:f);VIEWS.accounts()}
+function boardTab(k){setUiPref('board_tab',k==='profit'?null:k);VIEWS.board()}
 
 /* Same-level-upgrade banner: applies the live Upgrade code (one promo state
    shared with the landing — coupons cleared) and opens the buy modal. */
@@ -950,6 +1197,176 @@ async function upgradeNow(key){
       localStorage.removeItem('pf_coupon_code');localStorage.removeItem('pf_coupon_pct')}
   }catch(e){}
   openBuy(key);
+}
+
+/* ===== Flash sale: baner z odliczaniem + przekreślone ceny =====
+   Oferty przychodzą z /api/me/offers (globalne + imienne zalogowanego); ceny
+   po rabacie liczy SERWER w /api/products (offer_price_usd) — ta sama funkcja,
+   która wycenia checkout, więc kafelek nigdy nie obieca innej kwoty niż kasa. */
+let OFFERS=[];
+async function loadOffers(){
+  try{const d=await api('/api/me/offers');OFFERS=(d&&d.offers)||[]}catch(e){OFFERS=[]}
+}
+function flashBannerHtml(){
+  if(!OFFERS.length)return'';
+  const o=OFFERS.reduce((b,x)=>x.discount_pct>b.discount_pct?x:b);
+  const pct=o.discount_pct%1?o.discount_pct.toFixed(2):o.discount_pct;
+  return `<div class="gradient-banner">
+    <span class="gb-tag">${ICO.spark} Flash sale</span><span class="gb-sep"></span>
+    <span class="gb-txt">${esc(o.title||'Limited-time offer')} — <b>${pct}% off</b>.
+      Ends in <b id="offer-cd" data-ends="${esc(o.ends_at)}"></b>.</span>
+    <button class="gb-btn" onclick="go('store')">Shop the sale ›</button>
+  </div>`;
+}
+/* Timer w window._offerTimer i kasowany przy KAŻDYM starcie: go() przerysowuje
+   #view, więc bez tego po kilku przełączeniach zakładek biegłoby kilka
+   interwałów naraz na nieistniejących elementach. */
+function startOfferTimer(){
+  clearInterval(window._offerTimer);
+  const el=document.getElementById('offer-cd');
+  if(!el)return;
+  const koniec=dutc(el.dataset.ends).getTime();
+  const tick=()=>{
+    const e=document.getElementById('offer-cd');
+    if(!e){clearInterval(window._offerTimer);return}
+    let s=Math.floor((koniec-Date.now())/1000);
+    if(s<=0){clearInterval(window._offerTimer);e.textContent='0:00:00';return}
+    const d=Math.floor(s/86400);s%=86400;
+    const h=Math.floor(s/3600),m=Math.floor(s%3600/60),sec=s%60;
+    e.textContent=(d?d+'d ':'')+h+':'+String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');
+  };
+  tick();window._offerTimer=setInterval(tick,1000);
+}
+
+/* ====================== Today's risk budget ======================
+   Ekran, ktory trader ma sprawdzic PRZED otwarciem pozycji. Portal pokazywal
+   limity wylacznie jako procent ZUZYCIA ("Daily loss 38%"), a decyzja o
+   wielkosci pozycji zapada w dolarach POZOSTALYCH — kazdy przeliczal to sobie
+   w glowie z salda i regulaminu. Tu nie powstaje zadna nowa liczba: wszystko
+   wychodzi z `metrics`, ktore serwer i tak liczy tym samym kodem co bramki
+   breachow, wiec pasek nie moze rozjechac sie z prawdziwym limitem. */
+function riskOf(a){
+  const m=a.metrics||{};
+  if(m.daily_floor==null||m.overall_floor==null||a.equity==null)return null;
+  const init=a.initial_balance||0;
+  const dayCap=(m.max_daily_loss_pct||0)/100*init;
+  const ddCap=(m.max_overall_loss_pct||0)/100*init;
+  if(dayCap<=0&&ddCap<=0)return null;
+  return {dayCap,ddCap,
+    dayLeft:Math.max(0,a.equity-m.daily_floor),
+    ddLeft:Math.max(0,a.equity-m.overall_floor),
+    /* Equity na otwarciu dnia = podloga dnia + caly dzienny limit. Serwer tej
+       liczby nie oddaje, a bez niej nie da sie pokazac wyniku DNIA — saldo
+       mowi tylko o calej ewaluacji. */
+    today:a.equity-(m.daily_floor+dayCap)};
+}
+/* Jak blisko limitu jest konto (0 = na podlodze, 1 = pelny budzet). Sluzy do
+   wyboru konta, ktore karta pokazuje domyslnie. */
+function riskRatio(r){
+  return r.dayCap>0?r.dayLeft/r.dayCap:r.ddCap>0?r.ddLeft/r.ddCap:1;
+}
+function riskBar(label,left,cap,foot){
+  const pct=cap>0?Math.max(0,Math.min(100,left/cap*100)):0;
+  const k=pct<=20?'bad':pct<=45?'warn':'ok';
+  return `<div class="rb">
+    <div class="rb-top"><span>${label}</span><b class="${k}">$${fmt(left)}</b></div>
+    <div class="rb-track"><i class="${k}" style="width:${pct.toFixed(1)}%"></i></div>
+    <div class="rb-foot">${foot}</div>
+  </div>`;
+}
+
+/* Migawka kont z poprzedniej wizyty — zrodlo linii "co sie zmienilo, odkad
+   ostatnio patrzyles". Trzymana lokalnie, bo to stan PRZEGLADARKI, nie konta:
+   ten sam trader na telefonie i na laptopie patrzyl ostatnio w innym momencie. */
+const SEEN_KEY='pf_seen_acc';
+function seenMap(){try{return JSON.parse(localStorage.getItem(SEEN_KEY)||'{}')||{}}catch(e){return{}}}
+function sinceLine(a){
+  /* Policzone RAZ na zaladowanie strony i zapamietane: migawka odswieza sie
+     zaraz po wyrenderowaniu, wiec bez tego cache linia znikalaby przy pierwszym
+     przelaczeniu zakladki — czyli dokladnie wtedy, gdy trader do niej wraca. */
+  window._sinceCache=window._sinceCache||{};
+  if(a.id in window._sinceCache)return window._sinceCache[a.id];
+  const s=seenMap()[a.id]||{};
+  const h=s.ts?(Date.now()-s.ts)/36e5:0;
+  let out='';
+  /* Ponizej 6 godzin to nie jest "poprzednia wizyta", tylko odswiezenie
+     strony — a podsumowanie zmian z ostatnich dziesieciu minut to szum. */
+  if(h>=6){
+    const db=+(a.balance-(s.b||0)).toFixed(2), dd=((a.metrics||{}).trading_days||0)-(s.td||0);
+    const zm=[];
+    if(Math.abs(db)>=0.01)zm.push(`balance ${money(db)}`);
+    if(dd>0)zm.push(`${dd} trading day${dd>1?'s':''}`);
+    if(s.ph&&s.ph!==a.phase)zm.push(`moved to ${PHASE_LABEL[a.phase]||esc(a.phase)}`);
+    if(zm.length)out=`<div class="rc-since">${ICO.eye} Since you last looked,
+      ${h<48?Math.round(h)+'h':Math.round(h/24)+' days'} ago: ${zm.join(' · ')}</div>`;
+  }
+  window._sinceCache[a.id]=out;
+  return out;
+}
+function markSeen(accs){
+  const m=seenMap(),now=Date.now();
+  let zmiana=false;
+  accs.forEach(a=>{
+    /* Najwyzej raz na 30 minut: przy odswiezaniu strony co minute roznica
+       zawsze bylaby zerowa i linia nigdy by sie nie pokazala. */
+    if(m[a.id]&&m[a.id].ts&&now-m[a.id].ts<18e5)return;
+    m[a.id]={b:a.balance,td:(a.metrics||{}).trading_days||0,ph:a.phase,ts:now};
+    zmiana=true;
+  });
+  if(zmiana)try{localStorage.setItem(SEEN_KEY,JSON.stringify(m))}catch(e){}
+}
+
+function riskCardHtml(accs){
+  const live=accs.filter(a=>!['breached','failed','provisioning'].includes(a.status)&&riskOf(a));
+  if(!live.length)return'';
+  /* Domyslnie konto NAJBLIZEJ limitu — to ono wymaga decyzji. Wybor tradera
+     wygrywa, dopoki wskazane konto zyje. */
+  const wybor=(ME&&ME.ui_prefs&&ME.ui_prefs.riskAcc)|0;
+  const a=live.find(x=>x.id===wybor)
+    ||live.reduce((b,x)=>riskRatio(riskOf(x))<riskRatio(riskOf(b))?x:b);
+  const r=riskOf(a),m=a.metrics||{};
+  const chips=live.length>1?`<div class="rc-tabs">${live.map(x=>
+    `<button class="rc-tab${x.id===a.id?' on':''}" onclick="pickRiskAcc(${x.id})">${esc(x.login)}</button>`).join('')}</div>`:'';
+  return `<div class="sec-card risk-card">
+    <div class="rc-head">
+      <div>
+        <div class="rc-eyebrow">Today · ${esc(a.login)} · ${PHASE_LABEL[a.phase]||esc(a.phase)}</div>
+        <div class="rc-pnl ${r.today>=0?'up':'down'}">${money(r.today)}</div>
+        <div class="rc-sub">since the daily reset</div>
+      </div>
+      <div class="rc-clock">${ICO.cal} Daily limit resets in
+        <b id="risk-cd" data-ends="${esc(a.day_reset_at||'')}">—</b></div>
+    </div>
+    <div class="rc-bars">
+      ${/* Bez mianownika "of $X": konto na plusie ma WIECEJ miejsca niz wynosi
+            limit (zysk dnia podnosi podloge o tyle samo), wiec "$3,000 of
+            $2,500" czytalo sie jak blad. Zostaje kwota i twarda granica. */''}
+      ${r.dayCap>0?riskBar('Room left today',r.dayLeft,r.dayCap,
+        `Daily stop-out at $${fmt(m.daily_floor)} · ${m.max_daily_loss_pct}% rule`):''}
+      ${r.ddCap>0?riskBar('Buffer above max drawdown',r.ddLeft,r.ddCap,
+        `Account closes at $${fmt(m.overall_floor)} · ${m.max_overall_loss_pct}% max drawdown`):''}
+    </div>
+    ${sinceLine(a)}${chips}
+  </div>`;
+}
+function pickRiskAcc(id){setUiPref('riskAcc',id);VIEWS.accounts()}
+/* Ten sam wzorzec co startOfferTimer: jeden interwal, kasowany przy kazdym
+   starcie, bo go() przerysowuje #view. Minuty, nie sekundy — do polnocy jest
+   kilka godzin i tykajace sekundy robilyby z tego zegar odliczajacy do straty. */
+function startRiskTimer(){
+  clearInterval(window._riskTimer);
+  const el=document.getElementById('risk-cd');
+  if(!el||!el.dataset.ends)return;
+  const koniec=dutc(el.dataset.ends).getTime();
+  const tick=()=>{
+    const e=document.getElementById('risk-cd');
+    if(!e){clearInterval(window._riskTimer);return}
+    const s=Math.floor((koniec-Date.now())/1000);
+    if(s<=0){clearInterval(window._riskTimer);e.textContent='moments';return}
+    const h=Math.floor(s/3600),mi=Math.floor(s%3600/60);
+    e.textContent=h?`${h}h ${mi}m`:`${mi}m`;
+  };
+  tick();window._riskTimer=setInterval(tick,30000);
 }
 
 /* ============================ VIEWS ============================ */
@@ -968,6 +1385,7 @@ const VIEWS={
     pushCfg(),
     api('/api/me/accounts'),
     PRODUCTS.length?null:api('/api/products').then(p=>{PRODUCTS=p}).catch(()=>{}),
+    loadOffers(),
   ]);
   const banner=accs.length
     ?`<div class="gradient-banner">
@@ -1120,7 +1538,8 @@ const VIEWS={
       </div>
       <div class="cr-prog">${bars}</div>
       <div class="cr-nums">
-        <div class="cr-num"><div class="l">Balance</div><div class="v">$${fmt(a.balance)}</div></div>
+        <div class="cr-num"><div class="l">Balance</div><div class="v">$${fmt(a.balance)}</div>
+          ${funded?`<div class="ret ${(m.profit_pct||0)>=0?'up':'down'}">${(m.profit_pct||0)>=0?'+':''}${(m.profit_pct||0).toFixed(2)}%</div>`:''}</div>
         <div class="cr-num"><div class="l">Equity${openPnl?' <i class="live-dot" title="Open position"></i>':''}</div>
           <div class="v">$${fmt(a.equity)}${openPnl?` <small class="${openPnl>=0?'up':'down'}">${money(openPnl)}</small>`:''}</div></div>
         ${funded
@@ -1137,13 +1556,22 @@ const VIEWS={
   /* Upsell siedzi POD lista: zakladka ma najpierw pokazac konta, a nie blok
      sprzedazowy — wczesniej pierwsza karta zaczynala sie na 720px (desktop)
      i 971px (telefon), czyli ponizej pierwszego ekranu. */
-  $('view').innerHTML=(pushB||up.banner||banner)+stats+filterBar+list+up.html;
+  /* Flash sale wygrywa z refer&earn i upsellem — to promocja, którą właściciel
+     wystawił świadomie i na czas. Push opt-in zostaje przed nią (jednorazowy). */
+  const flashB=flashBannerHtml();
+  /* Budzet ryzyka NAD podsumowaniami: kafelki mowia, ile trader ma, a ta karta
+     — ile moze dzis stracic, zanim konto zniknie. Przy filtrze liczy z calego
+     zbioru, bo limit dnia obowiazuje niezaleznie od tego, co jest na ekranie. */
+  $('view').innerHTML=(pushB||flashB||up.banner||banner)+riskCardHtml(accs)+stats+filterBar+list+up.html;
+  startOfferTimer();
+  startRiskTimer();
+  markSeen(accs);
   rollStats();
   if(window._upsellJump){window._upsellJump=false;setTimeout(flashUpsell,60)}
  },
 
  async store(){
-  const ps=await api('/api/products');
+  const [ps]=await Promise.all([api('/api/products'),loadOffers()]);
   PRODUCTS=ps;
   const groups=[
     {id:'2step',name:'2-Step',match:p=>p.steps===2&&p.price_usd>0},
@@ -1156,6 +1584,7 @@ const VIEWS={
   if(!g){$('view').innerHTML='<div class="empty"><h3>No plans available</h3></div>';return}
   const items=ps.filter(g.match).sort((a,b)=>a.account_size-b.account_size);
   $('view').innerHTML=`
+    ${flashBannerHtml()}
     <div class="shop-tabs">${groups.map(x=>`<button class="shop-tab${x.id===g.id?' on':''}" onclick="window._shopTab='${x.id}';VIEWS.store()">${x.name}</button>`).join('')}</div>
     ${ME.credits_usd>0?`<div class="note" style="margin-bottom:14px"><b>Store credit: $${fmt(ME.credits_usd)}</b>, applied to your total automatically at checkout.</div>`:''}
     <div class="plan-grid">`+items.map(p=>`
@@ -1164,7 +1593,10 @@ const VIEWS={
       <div class="plan-size">$${fmt0(p.account_size)}</div>
       ${p.promo_upgrade_size&&pfPromo()?`<div class="plan-badge">→ trade $${fmt0(p.promo_upgrade_size)} with your promo</div>`:''}
       <div class="plan-kind">${p.steps===0?'Instant Funding, no evaluation':'2-Step Evaluation'}</div>
-      <div class="plan-price">$${fmt0(p.price_usd)} <small>one-time</small></div>
+      <div class="plan-price">${p.offer_price_usd!=null
+        ?`<s style="opacity:.5;font-size:.68em;font-weight:500">$${fmt0(p.price_usd)}</s> $${fmt(p.offer_price_usd)}`
+        :`$${fmt0(p.price_usd)}`} <small>one-time</small></div>
+      ${p.offer_pct?`<div class="plan-badge" style="background:#e0234515;color:#e02345">⚡ Flash sale −${p.offer_pct%1?p.offer_pct.toFixed(2):p.offer_pct}%</div>`:''}
       <div class="plan-refund">✓ Refunded with your first payout</div>
       <ul class="plan-feats">
         <li>${p.steps===0?'Funded from day one, <b>no profit target</b>'
@@ -1177,12 +1609,22 @@ const VIEWS={
       <button onclick="openBuy('${esc(p.key)}')" class="btn-p">Start Challenge</button>
     </div>`).join('')+`</div>
     <p class="muted" style="font-size:12px;margin-top:16px">Coupon and promo codes accepted at checkout.</p>`;
+  startOfferTimer();
   highlightPlanFromUrl();
  },
 
  async board(){
+  const t=(ME&&ME.ui_prefs&&ME.ui_prefs.board_tab)==='discipline'?'discipline':'profit';
+  $('view').innerHTML=`<div class="shop-tabs" style="margin-bottom:18px">${
+    [['profit','Profit'],['discipline','Discipline']].map(([k,l])=>
+      `<button class="shop-tab${t===k?' on':''}" onclick="boardTab('${k}')">${l}</button>`).join('')
+    }</div><div id="board-body"></div>`;
+  await (t==='discipline'?VIEWS._boardDiscipline():VIEWS._boardProfit());
+ },
+
+ async _boardProfit(){
   const b=await api('/api/leaderboard');
-  if(!b.length){$('view').innerHTML='<div class="empty"><h3>No ranked accounts yet</h3><p>The leaderboard fills up as traders make progress.</p></div>';return}
+  if(!b.length){$('board-body').innerHTML='<div class="empty"><h3>No ranked accounts yet</h3><p>The leaderboard fills up as traders make progress.</p></div>';return}
   /* Kafelek pokazywal SUME EQUITY kont funded, czyli w ogromnej wiekszosci nasz
      wlasny kapital: konto $200k z zyskiem $14k liczylo sie jako "$214,311". Ranking
      jest o wynikach traderow, wiec sumujemy to, co faktycznie wypracowali —
@@ -1209,7 +1651,7 @@ const VIEWS={
         <div><div class="l">Stage</div><div class="v">${r.status==='funded'?'Funded':'Eval'}</div></div>
       </div>
     </div>`}).join('');
-  $('view').innerHTML=`
+  $('board-body').innerHTML=`
     <div class="stats-row">
       <div class="stat-tile"><div class="tile-ic blue">${ICO.layers}</div>
         <div><div class="lbl">Traders ranked</div><div class="val">${b.length}</div></div></div>
@@ -1236,6 +1678,97 @@ const VIEWS={
       </tbody></table></div>`:''}
     <p class="muted" style="font-size:11.5px;margin-top:12px">Funded accounts only, ranked by profit. Names are masked for privacy.</p>`;
   localStorage.setItem('pf_board_prev',JSON.stringify(Object.fromEntries(b.map((r,i)=>[r.trader,i+1]))));
+ },
+
+ /* Druga lista mowi co innego niz pierwsza, wiec i wyglada inaczej: bez podium,
+    bez medali i bez strzalek zmiany miejsca. Podium znaczy „wyscig wygrany", a
+    tu nie ma czego wygrac — trzy konta na czele stoja rowno, bo dyscyplina to
+    stan, nie zdobycz. Strzalek nie ma z tego samego powodu, dla ktorego nie ma
+    konfetti: nie budujemy powodu, zeby zagladac tu codziennie. */
+ async _boardDiscipline(){
+  const [b,ja]=await Promise.all([api('/api/discipline'),api('/api/me/discipline').catch(()=>null)]);
+  if(!b.length){$('board-body').innerHTML=`<div class="empty"><h3>The Discipline board is being compiled</h3>
+    <p>Accounts join the board after ${DISC_MIN_DAYS} trading days. Nothing to do — it fills in on its own.</p></div>`;return}
+
+  /* Skladowe wyniku niosa cala tresc tej listy: samo „87" nie mowi traderowi,
+     co ma robic dalej. Pasmo jest jedno i podzielone w proporcji 40/30/30, bo
+     te wagi sa czescia komunikatu — trzy osobne mierniki to trzy osobne
+     spojrzenia, a pierscien chowa podzial za katem obrotu. */
+  const pasmo=r=>`<div class="disc-bar" aria-hidden="true">
+      <span class="disc-seg s1" style="flex:40"><i style="width:${r.clean_pts/40*100}%"></i></span>
+      <span class="disc-seg s2" style="flex:30"><i style="width:${r.buffer_pts/30*100}%"></i></span>
+      <span class="disc-seg s3" style="flex:30"><i style="width:${r.consist_pts/30*100}%"></i></span>
+    </div>`;
+  const legenda=r=>`<div class="disc-leg">
+      <span style="flex:40"><b>${r.clean_pts}</b>/40 daily risk</span>
+      <span style="flex:30"><b>${r.buffer_pts}</b>/30 buffer</span>
+      <span style="flex:30"><b>${r.consist_pts}</b>/30 spread</span>
+    </div>`;
+
+  const dni=b.reduce((s,r)=>s+r.trading_days,0);
+  const czyste=b.reduce((s,r)=>s+r.clean_days,0);
+  const zSpreadem=b.filter(r=>r.top_day_share!=null);
+  const rowne=zSpreadem.filter(r=>r.top_day_share<40).length;
+  const sredni=Math.round(b.reduce((s,r)=>s+r.score,0)/b.length);
+
+  const karta=(r,i)=>`
+    <div class="disc-card a${i+1}">
+      <div class="pod-rank">${String(i+1).padStart(2,'0')}</div>
+      <div class="disc-badge">${ICO.shield}</div>
+      <div class="pod-name">${esc(r.trader)}</div>
+      <div style="margin:6px 0 10px"><span class="status ${r.status==='funded'?'funded':'active'}"><span class="dot"></span>${r.status==='funded'?'Funded':'Evaluation'}</span></div>
+      <div class="disc-score">${r.score}<small>/100</small></div>
+      ${pasmo(r)}${legenda(r)}
+      <div class="pod-mini">
+        <div><div class="l">Account</div><div class="v">$${fmt0(r.account_size)}</div></div>
+        <div><div class="l">Clean days</div><div class="v">${r.clean_days}/${r.trading_days}</div></div>
+      </div>
+    </div>`;
+
+  /* Wlasne miejsce mowi serwer, bo ekran nie ma jak go poznac: lista jest
+     maskowana, wiec trader sie na niej nie rozpozna, i uciecia do dziesieciu,
+     wiec nieobecnosc na niej nie znaczy „nie zakwalifikowales sie". Bez rady,
+     bez „jeszcze troche" — samo miejsce i zasada wejscia. */
+  const uwaga=!ja?''
+    :ja.ranked
+      ?`<div class="disc-note">${ICO.shield}<div>Your account is <b>#${ja.rank} of ${ja.of}</b> ranked accounts,
+          scoring <b>${ja.score}/100</b> over ${ja.trading_days} trading days.</div></div>`
+      :`<div class="disc-note">${ICO.shield}<div>Your account is not ranked yet. Accounts join after
+          ${ja.min_days} trading days — no action is needed, the board updates on its own.</div></div>`;
+
+  $('board-body').innerHTML=`
+    <div class="stats-row">
+      <div class="stat-tile"><div class="tile-ic blue">${ICO.layers}</div>
+        <div><div class="lbl">Accounts ranked</div><div class="val">${b.length}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic purple">${ICO.shield}</div>
+        <div><div class="lbl">Average score</div><div class="val">${sredni}<span style="font-size:14px;color:var(--dim)">/100</span></div>
+          <div class="sub">across ranked accounts</div></div></div>
+      <div class="stat-tile"><div class="tile-ic green">${ICO.cal}</div>
+        <div><div class="lbl">Clean-day rate</div><div class="val">${dni?Math.round(czyste/dni*100):0}%</div>
+          <div class="sub">days inside half the daily limit</div></div></div>
+      <div class="stat-tile"><div class="tile-ic orange">${ICO.bars}</div>
+        <div><div class="lbl">Balanced spread</div><div class="val">${zSpreadem.length?Math.round(rowne/zSpreadem.length*100)+'%':'—'}</div>
+          <div class="sub">no single day over 40% of profit</div></div></div>
+    </div>
+    ${uwaga}
+    <div class="podium">${b.slice(0,3).map(karta).join('')}</div>
+    ${b.length>3?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="portal.discipline">
+      <thead><tr><th style="width:52px">#</th><th>Trader</th><th>Account</th><th>Stage</th>
+        <th style="min-width:190px">Score breakdown</th><th style="text-align:right">Score</th></tr></thead>
+      <tbody>`+b.slice(3).map((r,i)=>`<tr>
+        <td class="num muted">${String(i+4).padStart(2,'0')}</td>
+        <td>${esc(r.trader)}</td>
+        <td class="num muted">$${fmt0(r.account_size)}</td>
+        <td><span class="status ${r.status==='funded'?'funded':'active'}"><span class="dot"></span>${r.status==='funded'?'Funded':'Evaluation'}</span></td>
+        <td>${pasmo(r)}<div class="disc-leg tiny"><span style="flex:40">daily risk</span><span style="flex:30">buffer</span><span style="flex:30">spread</span></div></td>
+        <td class="num" style="text-align:right" data-sort="${r.score}"><b style="font-size:15px">${r.score}</b>
+          <div style="font-size:11px;opacity:.78">${r.clean_days}/${r.trading_days} clean days</div></td></tr>`).join('')+`
+      </tbody></table></div>`:''}
+    <p class="muted" style="font-size:11.5px;margin-top:12px">
+      100 points: up to 40 for how little of the daily loss limit gets used, up to 30 for how
+      much of the overall drawdown is still unspent, up to 30 for a result that does not rest
+      on one single day. Length of history is not scored — accounts join after ${DISC_MIN_DAYS} trading days;
+      evaluation and funded accounts are ranked together. Names are masked for privacy.</p>`;
  },
 
  async achievements(){
@@ -1360,61 +1893,111 @@ const VIEWS={
  },
 
  async analytics(){
+  anCharts.forEach(c=>c.destroy());anCharts=[];
   const accs=await api('/api/me/accounts');
   if(!accs.length){$('view').innerHTML='<div class="empty"><h3>No accounts yet</h3><p>Analytics appear once you have a challenge account.</p></div>';return}
   window._anAcc=window._anAcc||accs[0].id;
   if(!accs.some(a=>a.id===window._anAcc))window._anAcc=accs[0].id;
-  const act=await api(`/api/me/accounts/${window._anAcc}/activity`);
+  const [act,st]=await Promise.all([
+    api(`/api/me/accounts/${window._anAcc}/activity`),
+    api(`/api/me/accounts/${window._anAcc}/stats`)]);
   const days=act.days;
   const total=days.reduce((s,d)=>s+d.pnl,0);
   const bestD=days.reduce((m,d)=>d.pnl>(m?.pnl??-1e18)?d:m,null);
   const worstD=days.reduce((m,d)=>d.pnl<(m?.pnl??1e18)?d:m,null);
   const green=days.filter(d=>d.pnl>0).length;
-  // Stats come from TRADES only — a payout is a cash movement, not a trade.
-  const trades=(act.ledger||[]).filter(r=>r.kind==='trade');
-  const wins=trades.filter(t=>t.pnl>0).length;
-  const winRate=trades.length?wins/trades.length*100:null;
-  // per-instrument breakdown — only when the account has recorded trades
-  const bySym={};
-  trades.forEach(t=>{const s=bySym[t.symbol]||(bySym[t.symbol]={pnl:0,n:0,w:0});
-    s.pnl+=t.pnl;s.n++;if(t.pnl>0)s.w++});
-  const syms=Object.entries(bySym).sort((x,y)=>y[1].pnl-x[1].pnl);
-  const maxAbs=Math.max(1,...syms.map(([,s])=>Math.abs(s.pnl)));
+  const has=st.trades>0;
+  const dur=s=>{if(s==null)return'—';const m=Math.round(s/60);
+    return m>=60?Math.floor(m/60)+'h '+String(m%60).padStart(2,'0')+'m':m+'m'};
+  const pct=b=>b.trades?Math.round(b.wins/b.trades*100):0;
+  const pf=has?(st.profit_factor===null?(st.wins?'∞':'—'):st.profit_factor.toFixed(2)):'—';
+  const maxSym=has?Math.max(1,...st.by_symbol.map(r=>Math.abs(r.pnl))):1;
+  const maxLS=has?Math.max(1,Math.abs(st.long.pnl),Math.abs(st.short.pnl)):1;
+  const lsRow=(label,b)=>`<div class="sym-row">
+    <b>${label}</b>
+    <span class="muted">${b.trades} trade${b.trades===1?'':'s'} · ${pct(b)}% won</span>
+    <div class="sym-bar"><i class="${b.pnl>=0?'ok':'bad'}" style="width:${Math.abs(b.pnl)/maxLS*100}%"></i></div>
+    <span class="num ${b.pnl>=0?'up':'down'}">${money(b.pnl)}</span>
+  </div>`;
   $('view').innerHTML=`
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
       <select id="an-sel" class="inp" style="max-width:260px" onchange="window._anAcc=parseInt(this.value);VIEWS.analytics()">
         ${accs.map(a=>`<option value="${a.id}"${a.id===window._anAcc?' selected':''}>${esc(a.login)} · ${esc(a.product_key)}</option>`).join('')}
       </select>
-      <span class="muted" style="font-size:12px">Computed from real equity snapshots of this account.</span>
+      <span class="muted" style="font-size:12px">Computed server-side from every closed trade on this account.</span>
     </div>
     <div class="stats-row">
       <div class="stat-tile"><div class="tile-ic ${total>=0?'green':'orange'}">${ICO.trend}</div>
         <div><div class="lbl">Total P&amp;L</div><div class="val ${total>=0?'up':'down'}">${total>=0?'+':''}$${fmt(total)}</div></div></div>
+      ${has?`
+      <div class="stat-tile"><div class="tile-ic purple">${ICO.target}</div>
+        <div><div class="lbl">Win rate</div><div class="val">${st.win_rate.toFixed(1)}%</div>
+        <div class="sub">${st.wins} of ${st.trades} trades</div></div></div>
+      <div class="stat-tile"><div class="tile-ic blue">${ICO.bars}</div>
+        <div><div class="lbl">Profit factor</div><div class="val">${pf}</div>
+        <div class="sub">$${fmt(st.gross_profit)} won / $${fmt(-st.gross_loss)} lost</div></div></div>
+      <div class="stat-tile"><div class="tile-ic green">${ICO.spark}</div>
+        <div><div class="lbl">Expectancy</div><div class="val ${st.expectancy>=0?'up':'down'}">${money(st.expectancy)}</div>
+        <div class="sub">per trade</div></div></div>
+      <div class="stat-tile"><div class="tile-ic green">${ICO.dollar}</div>
+        <div><div class="lbl">Avg win / loss</div>
+        <div class="val">${st.avg_win!==null?'+$'+fmt(st.avg_win):'—'} <span class="muted" style="font-weight:400">/</span> ${st.avg_loss!==null?'-$'+fmt(-st.avg_loss):'—'}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic blue">${ICO.eye}</div>
+        <div><div class="lbl">Avg duration</div><div class="val">${dur(st.avg_duration_sec)}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic ${st.streak>=0?'green':'orange'}">${ICO.flame}</div>
+        <div><div class="lbl">Streak</div><div class="val ${st.streak>0?'up':st.streak<0?'down':''}">${st.streak===0?'—':Math.abs(st.streak)+(st.streak>0?' wins':' losses')}</div>
+        <div class="sub">most recent trades</div></div></div>
+      <div class="stat-tile"><div class="tile-ic green">${ICO.trophy}</div>
+        <div><div class="lbl">Best trade</div><div class="val up">${money(st.best_trade.pnl)}</div>
+        <div class="sub">${esc(st.best_trade.symbol)}</div></div></div>
+      <div class="stat-tile"><div class="tile-ic orange">${ICO.alert}</div>
+        <div><div class="lbl">Worst trade</div><div class="val ${st.worst_trade.pnl<0?'down':''}">${money(st.worst_trade.pnl)}</div>
+        <div class="sub">${esc(st.worst_trade.symbol)}</div></div></div>`:''}
       <div class="stat-tile"><div class="tile-ic green">${ICO.dollar}</div>
         <div><div class="lbl">Best day</div><div class="val up">${bestD?'+$'+fmt(Math.max(0,bestD.pnl)):'—'}</div><div class="sub">${bestD?bestD.day:''}</div></div></div>
       <div class="stat-tile"><div class="tile-ic orange">${ICO.alert}</div>
         <div><div class="lbl">Worst day</div><div class="val ${worstD&&worstD.pnl<0?'down':''}">${worstD?(worstD.pnl<0?'-$'+fmt(-worstD.pnl):'$'+fmt(worstD.pnl)):'—'}</div><div class="sub">${worstD?worstD.day:''}</div></div></div>
       <div class="stat-tile"><div class="tile-ic blue">${ICO.cal}</div>
         <div><div class="lbl">Profitable days</div><div class="val">${green} / ${days.length}</div></div></div>
-      ${winRate!==null?`<div class="stat-tile"><div class="tile-ic purple">${ICO.target}</div>
-        <div><div class="lbl">Win rate</div><div class="val">${winRate.toFixed(1)}%</div>
-        <div class="sub">${wins} of ${trades.length} positions</div></div></div>`:''}
     </div>
-    ${syms.length?`<div class="sec-card"><h3>Instruments</h3>
-      <div class="sym-list">${syms.map(([sym,s])=>`
+    ${has?`
+    <div class="card-cols">
+      <div class="sec-card"><h3>P&amp;L by weekday</h3>
+        <div class="chart-box"><canvas id="an-wd"></canvas></div></div>
+      <div class="sec-card"><h3>P&amp;L by hour <span class="muted" style="font-weight:400;font-size:12px">(UTC)</span></h3>
+        <div class="chart-box"><canvas id="an-hr"></canvas></div></div>
+    </div>
+    <div class="sec-card"><h3>Long vs short</h3>
+      <div class="sym-list">${lsRow('Long',st.long)}${lsRow('Short',st.short)}</div>
+    </div>
+    ${st.by_symbol.length?`<div class="sec-card"><h3>Instruments</h3>
+      <div class="sym-list">${st.by_symbol.map(r=>`
         <div class="sym-row">
-          <b>${esc(sym)}</b>
-          <span class="muted">${s.n} trade${s.n===1?'':'s'} · ${(s.w/s.n*100).toFixed(0)}% won</span>
-          <div class="sym-bar"><i class="${s.pnl>=0?'ok':'bad'}" style="width:${Math.abs(s.pnl)/maxAbs*100}%"></i></div>
-          <span class="num ${s.pnl>=0?'up':'down'}">${money(s.pnl)}</span>
+          <b>${esc(r.symbol)}</b>
+          <span class="muted">${r.trades} trade${r.trades===1?'':'s'} · ${r.win_rate.toFixed(0)}% won</span>
+          <div class="sym-bar"><i class="${r.pnl>=0?'ok':'bad'}" style="width:${Math.abs(r.pnl)/maxSym*100}%"></i></div>
+          <span class="num ${r.pnl>=0?'up':'down'}">${money(r.pnl)}</span>
         </div>`).join('')}</div>
-    </div>`:''}
+    </div>`:''}`
+    :`<div class="sec-card"><h3>Trade statistics</h3>
+      <p class="muted" style="font-size:13px">No closed trades on this account yet — win rate, profit factor and the breakdown charts appear after your first closed position.</p>
+    </div>`}
     <div class="sec-card"><h3>Daily P&amp;L</h3>
       ${days.length?'<div class="chart-box"><canvas id="an-chart"></canvas></div>'
         :'<p class="muted" style="font-size:13px">No daily data yet. The chart appears after the first risk-engine readings.</p>'}
     </div>`;
   if(chart){chart.destroy();chart=null}
   const th=chartTheme();
+  const bar=(el,labels,data,maxTicks)=>anCharts.push(new Chart($(el),{type:'bar',
+    data:{labels,datasets:[{data,backgroundColor:data.map(v=>v>=0?'rgba(16,185,129,.75)':'rgba(239,68,68,.75)'),borderRadius:5}]},
+    options:{maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{x:{ticks:{color:th.dim,font:{size:10},autoSkip:true,maxRotation:0,maxTicksLimit:maxTicks},grid:{display:false}},
+        y:{ticks:{color:th.dim,font:{size:10},callback:v=>'$'+v},grid:{color:th.line}}}}}));
+  if(has){
+    bar('an-wd',['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],st.by_weekday.map(b=>b.pnl));
+    bar('an-hr',st.by_hour.map((_,h)=>h+'h'),st.by_hour.map(b=>b.pnl),
+        matchMedia('(max-width:640px)').matches?8:12);
+  }
   if(days.length)chart=new Chart($('an-chart'),{type:'bar',
     data:{labels:days.map(d=>d.day),datasets:[{data:days.map(d=>d.pnl),
       backgroundColor:days.map(d=>d.pnl>=0?'rgba(16,185,129,.75)':'rgba(239,68,68,.75)'),borderRadius:5}]},
@@ -1422,6 +2005,83 @@ const VIEWS={
       scales:{x:{ticks:{color:th.dim,font:{size:10},autoSkip:true,maxRotation:0,
           maxTicksLimit:matchMedia('(max-width:640px)').matches?6:undefined},grid:{display:false}},
         y:{ticks:{color:th.dim,font:{size:10},callback:v=>'$'+v},grid:{color:th.line}}}}});
+ },
+
+ /* Przeglad ZAMKNIETEGO tygodnia — cel poniedzialkowego powiadomienia. Nie ma
+    go w menu i nie da sie tu wejsc "sprawdzic wyniku na zywo": okno jest zawsze
+    to samo, niezaleznie od dnia wejscia. Obserwacje opisuja przeszlosc i konczy
+    je zdanie, ktore mowi to wprost — to nie sa sygnaly ani cele. */
+ async weekly(){
+  const d=await api('/api/me/weekly');
+  const wd=s=>new Date(s+'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'});
+  /* Os NIE stoi w polowie wykresu: polowki dostaja wysokosc w proporcji do
+     najlepszego i najgorszego dnia, a slupek liczy sie wzgledem swojej polowki.
+     Dzieki temu jeden dolar to tyle samo pikseli po obu stronach (czyli wykres
+     nie klamie), a tydzien z jednym glebokim minusem nie zostawia u gory
+     polowy pustej karty. */
+  const mp=Math.max(...d.days.map(x=>Math.max(0,x.pnl)));
+  const mn=Math.max(...d.days.map(x=>Math.max(0,-x.pnl)));
+  /* Dzien, ktory ledwo drgnal, nie moze zniknac do zera — 4% wysokosci zostawia
+     slad, ze handel BYL, tylko wynik wyszedl blisko zera. */
+  const h=(v,skala)=>Math.max(4,Math.abs(v)/skala*100);
+  /* Kwota jest pozycjonowana ABSOLUTNIE na koncu slupka, nie ustawiona obok niego
+     w flexie. Gdy siedziala w tym samym flexie, zabierala wysokosc najwyzszemu
+     slupkowi — i najlepszy dzien tygodnia wychodzil niemal rowny slabszemu.
+     Wykres ma nie klamac, wiec podpis nie moze zabierac slupkowi wysokosci; ta
+     sama wartosc procentowa niesie wiec i slupek, i odsuniecie podpisu. */
+  const slupek=x=>{
+    const gora=x.trades&&x.pnl>=0, dol=x.trades&&x.pnl<0;
+    const p=gora?h(x.pnl,mp):dol?h(x.pnl,mn):0;
+    return `<div class="wk-day${x.trades?'':' off'}" title="${x.label} ${x.day} · ${
+      x.trades?`${money(x.pnl)} · ${x.trades} trade${x.trades===1?'':'s'}`:'no trades'}">
+      <div class="wk-half up">${gora?`<b style="bottom:${p}%">${money(x.pnl)}</b>
+        <i style="height:${p}%"></i>`:''}</div>
+      <div class="wk-half dn">${dol?`<i style="height:${p}%"></i>
+        <b style="top:${p}%">${money(x.pnl)}</b>`:''}</div>
+      <span class="wk-lbl">${x.label}</span>
+    </div>`;
+  };
+  const zmiana=d.prev_trades
+    ?rp('Week before',`${money(d.prev_net_pnl)}<small> · ${d.prev_trades} trade${d.prev_trades===1?'':'s'}</small>`,
+        d.prev_net_pnl>=0?'ok':'bad')
+    :rp('Week before','—');
+  $('view').innerHTML=`
+    <div class="sec-card wk-card">
+      <div class="rc-head">
+        <div>
+          <div class="rc-eyebrow">Week of ${wd(d.from)} – ${wd(d.to)}</div>
+          <div class="recap-title">${d.trades
+            ?`${d.trades} trade${d.trades===1?'':'s'} over ${d.trading_days} day${d.trading_days===1?'':'s'}`
+            :'No closed trades this week'}</div>
+        </div>
+        <div style="text-align:right">
+          <div class="rc-pnl ${d.net_pnl>=0?'up':'down'}">${money(d.net_pnl)}</div>
+          <div class="rc-sub">net over the week</div>
+        </div>
+      </div>
+      <div class="wk-days" style="--wk-rows:${mp||1}fr ${mn||1}fr;--wk-up:${(mp||1)/((mp||1)+(mn||1))}">${d.days.map(slupek).join('')}</div>
+    </div>
+    ${d.trades?`
+    <div class="recap-grid wk-grid">
+      ${rp('Trading days',d.trading_days)}
+      ${rp('Win rate',d.win_rate!=null?`${d.win_rate}%`:'—')}
+      ${rp('Green days',d.green_days,d.green_days?'ok':'')}
+      ${rp('Red days',d.red_days,d.red_days?'bad':'')}
+      ${rp('Best day',d.best_day?money(d.best_day.pnl):'—',d.best_day&&d.best_day.pnl>0?'ok':'')}
+      ${rp('Worst day',d.worst_day?money(d.worst_day.pnl):'—',d.worst_day&&d.worst_day.pnl<0?'bad':'')}
+      ${rp('Accounts',d.accounts)}
+      ${zmiana}
+    </div>
+    <div class="sec-card"><h3>What happened</h3>
+      <ul class="wk-obs">${d.observations.map(o=>`<li>${esc(o)}</li>`).join('')}</ul>
+      <p class="wk-note">Observations describe what already happened. They are not signals,
+        advice, or targets.</p>
+    </div>`
+    :`<div class="sec-card"><h3>What happened</h3>
+      <p class="muted" style="font-size:13px">Nothing closed between ${wd(d.from)} and ${wd(d.to)}.
+        Weeks without trades stay empty here — the day-by-day history of every account is in
+        <a href="#" onclick="go('analytics');return false" style="color:var(--acc)">Analytics</a>.</p>
+    </div>`}`;
  },
 
  async certificates(){
@@ -1493,7 +2153,10 @@ const VIEWS={
           <div><div class="muted" style="font-size:11px">Referred</div><div class="mono" style="font-weight:700;font-size:18px">${aff.referred??0}</div></div>
           <div><div class="muted" style="font-size:11px">Rate</div><div class="mono" style="font-weight:700;font-size:18px">${aff.commission_pct??10}%</div></div>
           <div><div class="muted" style="font-size:11px">Earned</div><div class="mono up" style="font-weight:700;font-size:18px">$${fmt(aff.commission_earned??0)}</div></div>
+          <div><div class="muted" style="font-size:11px">Unclaimed</div><div class="mono" style="font-weight:700;font-size:18px">$${fmt(aff.commission_unclaimed??0)}</div></div>
         </div>
+        ${(aff.commission_unclaimed??0)>=10?`<button class="btn-p sm" onclick="claimAffiliate(this)">Claim $${fmt(aff.commission_unclaimed)} as store credit</button>`
+          :(aff.commission_unclaimed??0)>0?`<span class="muted" style="font-size:12px">Claim unlocks at $10 unclaimed</span>`:''}
       </div>
     </div>`;
   const cards=[
@@ -1521,6 +2184,11 @@ const VIEWS={
  async payouts(){
   const [data,accs]=await Promise.all([api('/api/me/payouts'),api('/api/me/accounts')]);
   const funded=accs.filter(a=>a.status==='funded');
+  const czeka=funded.find(a=>(a.payout_days_left||0)>0);
+  /* „Available to request” obok wyszarzonego przycisku byłoby sprzecznością —
+     kwota jest prawdziwa, ale dziś nie do wzięcia. Podpis to mówi wprost. */
+  const zablokowane=funded.filter(a=>(a.payout_days_left||0)>0)
+                          .reduce((s,a)=>s+(a.payout_available||0),0);
   $('view').innerHTML=`
     <div class="stats-row">
       <div class="stat-tile"><div class="tile-ic green">${ICO.wallet}</div>
@@ -1528,10 +2196,18 @@ const VIEWS={
       <div class="stat-tile"><div class="tile-ic orange">${ICO.cal}</div>
         <div><div class="lbl">Pending requests</div><div class="val">${data.summary.pending}</div></div></div>
       <div class="stat-tile"><div class="tile-ic purple">${ICO.dollar}</div>
-        <div><div class="lbl">Available to request</div><div class="val">$${fmt(data.summary.available)}</div><div class="sub">your split of current profits</div></div></div>
+        <div><div class="lbl">Available to request</div><div class="val">$${fmt(data.summary.available)}</div><div class="sub">${zablokowane<=0
+          ?'your split of current profits'
+          :zablokowane>=(data.summary.available||0)-0.005
+            ?'unlocks at the trading-day minimum'
+            :`$${fmt(zablokowane)} of it unlocks at the trading-day minimum`}</div></div></div>
     </div>
+    <p class="muted" style="font-size:13px;margin:-6px 0 14px">Payouts are <b>on demand</b> — request whenever
+      you are in profit. Every request is reviewed within <b>${data.summary.review_hours||24} hours</b>.${
+      czeka?` Your ${esc(czeka.login)} plan unlocks its first payout after
+        <b>${czeka.metrics?.min_trading_days??0} trading days</b> — a day counts once you trade on it.`:''}</p>
     ${funded.filter(a=>a.scale_up_to).map(a=>{
-      const av=Math.max(0,(a.balance-a.initial_balance)*(a.profit_split_pct||80)/100);
+      const av=a.payout_available??0;
       return `<div class="scale-offer">
         <div class="so-txt">
           <b>${esc(a.login)} is up ${a.scale_trigger_pct}%. Now you choose.</b>
@@ -1540,22 +2216,24 @@ const VIEWS={
             pay out.</span>
         </div>
         <div class="so-act">
-          <button class="btn-o sm" onclick="openPayoutModal(${a.id},${av.toFixed(2)})">Take $${fmt(av)} payout</button>
+          ${payoutBtn(a,av,'btn-o sm',`Take $${fmt(av)} payout`)}
           <button class="btn-p sm" onclick="openScaleModal(${a.id},${a.initial_balance},${a.scale_up_to})">Move up to $${fmt0(a.scale_up_to)}</button>
         </div>
       </div>`}).join('')}
     ${funded.length?`<div class="panel" style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <span class="muted" style="font-size:13px;margin-right:6px">Request a payout:</span>
-      ${funded.map(a=>{const av=Math.max(0,(a.balance-a.initial_balance)*(a.profit_split_pct||80)/100);
-        return `<button class="btn-o sm" onclick="openPayoutModal(${a.id},${av.toFixed(2)})">${esc(a.login)} · $${fmt(av)} available</button>`}).join('')}
+      ${funded.map(a=>{const av=a.payout_available??0;
+        return payoutBtn(a,av,'btn-o sm',`${esc(a.login)} · $${fmt(av)} available`)}).join('')}
     </div>`:''}
     ${data.requests.length?`<div class="tbl-wrap"><table class="tbl sortable" data-tkey="portal.payout-req">
       <thead><tr><th>Date</th><th>Account</th><th>Profit</th><th>Requested</th><th>Method</th><th>Status</th></tr></thead>
       <tbody>`+data.requests.map(r=>`<tr>
-        <td class="muted" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td><td class="num">${esc(r.account)}</td>
+        <td class="muted" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td>
+        <td class="num">${esc(r.account)}${r.express?' <span style="font-size:10px;font-weight:700;letter-spacing:.4px;color:var(--orange,#f59e0b);border:1px solid currentColor;border-radius:6px;padding:1px 5px;vertical-align:1px">EXPRESS</span>':''}</td>
         <td class="num">$${fmt(r.profit_amount)}</td><td class="num">$${fmt(r.trader_share)}</td>
         <td class="muted">${esc(payoutMethodLabel(r.method))}</td>
         <td><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending':'failed'}"><span class="dot"></span>${esc(r.status)}</span>
+          ${r.status==='pending'&&r.expected_by?`<div class="muted" style="font-size:11px">decision by ${dstr(r.expected_by)}</div>`:''}
           ${r.status==='rejected'&&r.reject_reason?`<div class="muted" style="font-size:11px;max-width:220px">${esc(r.reject_reason)}</div>`:''}</td></tr>`).join('')+`
       </tbody></table></div>`
       :`<div class="empty"><h3>No payout requests yet</h3><p>Pass a challenge, get funded and request your first performance reward. Your challenge fee comes back with it.</p></div>`}
@@ -1613,6 +2291,13 @@ const VIEWS={
 
  async kyc(){
   const s=ME.kyc_status;
+  /* Powod pauzy stoi NAD formularzem, nie w mailu: klient trafia tu takze
+     wprost z zakladki i musi wiedziec, czemu reszta panelu zniknela. */
+  const hold=ME.kyc_locked&&s!=='approved'?`<div class="panel" style="margin-bottom:14px;border-color:var(--red-line);background:var(--red-bg)">
+      <b style="font-size:13.5px">Your dashboard is paused until we verify your identity.</b>
+      <p class="muted" style="font-size:12.5px;margin-top:4px">Your trading account keeps running — nothing changes on the platform.
+         We review documents within one business day and the dashboard opens the moment it's approved.</p>
+    </div>`:'';
   /* Weryfikacja otwiera sie dopiero po przejsciu ewaluacji. Pokazujemy powod
      zamiast formularza — wypelnienie go i tak skonczyloby sie odmowa z serwera,
      a tak trader od razu wie, czego brakuje. Zlozone juz zgloszenia (pending /
@@ -1623,7 +2308,8 @@ const VIEWS={
       ${ICO.shield}
       <h3>Verification opens after your first funded account</h3>
       <p>Pass an evaluation and this page unlocks. We only ask for identity documents
-         from traders who have a payout to claim — there is nothing to do here yet.</p>
+         from traders who have a payout to claim — if you would rather verify now,
+         write to support and we will open it for you.</p>
       <button class="btn-p" onclick="go('accounts')">View my challenges</button></div>`;
     return;
   }
@@ -1633,17 +2319,27 @@ const VIEWS={
       <div><h3>Identity verified</h3><p class="muted" style="font-size:13.5px">Your KYC is approved. You can request payouts on funded accounts.</p></div></div>`;
     return;
   }
-  if(s==='pending'){
-    $('view').innerHTML=`<div class="panel" style="display:flex;gap:14px;align-items:center">
+  /* Poprawka w trakcie oczekiwania: rozmazany skan dowodu widac dopiero po
+     wyslaniu, a bez tej furtki trader musialby czekac na odrzucenie, zeby
+     wgrac czytelny. Serwer nadpisuje to samo zgloszenie — nie zaklada nowego. */
+  if(s==='pending'&&!window._kycPoprawka){
+    $('view').innerHTML=hold+`<div class="panel" style="display:flex;gap:14px;align-items:center">
       <div class="tile-ic orange">${ICO.shield}</div>
-      <div><h3>Documents under review</h3><p class="muted" style="font-size:13.5px">Our team is reviewing your submission. You'll get an e-mail once it's approved.</p></div></div>`;
+      <div style="flex:1"><h3>Documents under review</h3><p class="muted" style="font-size:13.5px">Our team is reviewing your submission. You'll get an e-mail once it's approved.</p></div>
+      <button class="btn-o" onclick="window._kycPoprawka=true;go('kyc')">Replace documents</button></div>`;
     return;
   }
-  $('view').innerHTML=`
+  $('view').innerHTML=hold+`
     ${s==='rejected'?`<div class="panel" style="margin-bottom:14px;border-color:var(--red-line);background:var(--red-bg)">
       <b style="font-size:13.5px">Your previous verification was declined.</b>
       ${ME.kyc_reject_reason?`<p style="font-size:12.5px;margin-top:4px"><b>Reason:</b> ${esc(ME.kyc_reject_reason)}</p>`:''}
       <p class="muted" style="font-size:12.5px;margin-top:4px">Please double-check your details and documents, then submit again. Reach out via Support if you need help.</p>
+    </div>`:''}
+    ${s==='pending'?`<div class="panel" style="margin-bottom:14px">
+      <b style="font-size:13.5px">Replacing your submission</b>
+      <p class="muted" style="font-size:12.5px;margin-top:4px">What you send now replaces the documents already waiting for review —
+         it does not start a second request, and it keeps your place in the queue.
+         <a href="#" onclick="window._kycPoprawka=false;go('kyc');return false">Cancel</a></p>
     </div>`:''}
     <div class="sec-card">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
@@ -1809,9 +2505,9 @@ function openJournalModal(){
   api('/api/me/accounts').then(accs=>{
     const box=document.createElement('div');
     box.id='j-modal'; box.className='modal-wrap';
-    box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+    box.innerHTML=`<div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
       <div class="modal-head"><h3>New Journal Entry</h3>
-        <button class="icon-btn" onclick="document.getElementById('j-modal').remove()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+        <button class="icon-btn" aria-label="Close" onclick="document.getElementById('j-modal').remove()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
       <div class="stack" style="margin-top:8px">
         <input id="j-title" class="inp" placeholder="Title, e.g. 'NY session — gold short'">
         <select id="j-acc" class="inp"><option value="">No account</option>
@@ -1822,7 +2518,7 @@ function openJournalModal(){
     box.onclick=()=>box.remove();
     document.body.appendChild(box);
     setTimeout(()=>$('j-title').focus(),50);
-  });
+  }).catch(e=>{toast('Error: '+e.message,'err')});
 }
 async function saveJournal(){
   try{
@@ -1864,8 +2560,9 @@ async function savePassword(){
   try{const r=await api('/api/me/password',{method:'POST',body:JSON.stringify({
     current_password:$('s-cur').value,new_password:$('s-new').value})});
     /* Older sessions just died (password fingerprint in the token) — swap in
-       the fresh token so THIS session survives the change. */
-    if(r.token){TOKEN=r.token;localStorage.setItem('pf_token',TOKEN)}
+       the fresh token so THIS session survives the change. W podglądzie admina
+       NIE dotykamy localStorage: nadpisałby token właściciela. */
+    if(r.token&&!IMP){TOKEN=r.token;localStorage.setItem('pf_token',TOKEN)}
     toast('Password changed.','ok');go('settings');
   }catch(e){toast('Error: '+e.message,'err')}
 }
@@ -2065,8 +2762,12 @@ async function submitKyc(){
       }
       await uploadDocument(fieldName,prepared);
     }
+    const bylaPoprawka=!!window._kycPoprawka;
+    window._kycPoprawka=false;
     ME=await api('/api/auth/me');boot();
-    toast('KYC submitted. Documents are under review.','ok');go('kyc');
+    toast(bylaPoprawka?'Documents replaced. Your submission is still under review.'
+                      :'KYC submitted. Documents are under review.','ok');
+    go('kyc');
   }catch(e){err('Error: '+e.message)}
   finally{if(btn){btn.disabled=false;btn.textContent='Submit KYC'}}
 }
@@ -2110,8 +2811,8 @@ function openInvoice(orderId){
   if(!o)return;
   const box=document.createElement('div');
   box.id='inv-modal'; box.className='modal-wrap';
-  const date=new Date(o.created_at).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
-  box.innerHTML=`<div class="inv-print" onclick="event.stopPropagation()">
+  const date=dutc(o.created_at).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+  box.innerHTML=`<div class="inv-print" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
     <div class="inv-head">
       <div style="display:flex;align-items:center;gap:10px"><img src="/static/img/logo.png" alt="">
         <div><div class="inv-h1">${esc(SITE_NAME)}</div><div style="font-size:11px;color:#64748b">Trading skills evaluation platform</div></div></div>
@@ -2162,16 +2863,14 @@ function credsBlock(a, compact){
    nie wyslal dwoch prosb — poza tym baza i tak trzyma UNIQUE (trader, prog),
    wiec drugie zadanie dostanie 409 zamiast drugiej nagrody. */
 async function claimReward(tier, btn){
-  if(btn){btn.disabled=true; btn.textContent='Claiming…';}
-  try{
-    const r=await api('/api/me/achievements/claim',{method:'POST',body:JSON.stringify({tier})});
-    toast(r.account?'Your free challenge is being set up.':'Reward code added to your account.','ok');
-    go('achievements');
-    if(r.account)setTimeout(()=>go('accounts'),1400);
-  }catch(e){
-    toast('Error: '+e.message,'err');
-    if(btn){btn.disabled=false; btn.textContent='Claim reward';}
-  }
+  await busy(btn,'Claiming…',async()=>{
+    try{
+      const r=await api('/api/me/achievements/claim',{method:'POST',body:JSON.stringify({tier})});
+      toast(r.account?'Your free challenge is being set up.':'Reward code added to your account.','ok');
+      go('achievements');
+      if(r.account)setTimeout(()=>go('accounts'),1400);
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
 }
 
 function copyVal(btn, val){
@@ -2229,17 +2928,15 @@ async function redeemReward(key,btn){
     cancel:'Not yet',
   });
   if(!zgoda)return;
-  if(btn)btn.disabled=true;
-  try{
-    const d=await api('/api/me/loyalty/redeem',{method:'POST',body:JSON.stringify({reward:key})});
-    await VIEWS.loyalty();
-    toast(`🎟️ Your code ${d.code.code} is ready — ${d.code.pct}% off your next challenge.`,'ok',10000);
-    const el=document.querySelector('.rw-code');
-    if(el&&window.RFX&&RFX.burstFrom)RFX.burstFrom(el,{count:60,palette:RFX.GOLD});
-  }catch(e){
-    if(btn)btn.disabled=false;
-    toast('Error: '+e.message,'err');
-  }
+  await busy(btn,null,async()=>{
+    try{
+      const d=await api('/api/me/loyalty/redeem',{method:'POST',body:JSON.stringify({reward:key})});
+      await VIEWS.loyalty();
+      toast(`🎟️ Your code ${d.code.code} is ready — ${d.code.pct}% off your next challenge.`,'ok',10000);
+      const el=document.querySelector('.rw-code');
+      if(el&&window.RFX&&RFX.burstFrom)RFX.burstFrom(el,{count:60,palette:RFX.GOLD});
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
 }
 
 /* ---------- purchase modal ---------- */
@@ -2256,7 +2953,7 @@ function openBuy(key){
   box.id='buy-modal';
   box.className='modal-wrap';
   box.innerHTML=`
-    <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
       <div class="modal-head">
         <h3>${esc(p.label)}</h3>
         <button class="icon-btn" onclick="closeBuy()" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
@@ -2309,6 +3006,16 @@ function openBuy(key){
             style="width:15px;height:15px;accent-color:var(--acc)">
           <span><b>Weekend Trading</b> — 2 extra trading days/week <b>+$199</b></span>
         </label>
+        ${p.steps===0?`<label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
+          <input type="checkbox" id="c-boost" onchange="quoteRefresh(true)"
+            style="width:15px;height:15px;accent-color:var(--acc)">
+          <span><b>Profit Split Boost</b> — keep ${Math.min(100,(p.profit_split_pct||70)+10)}% instead of ${p.profit_split_pct||70}% <b>+$149</b></span>
+        </label>`:''}
+        <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
+          <input type="checkbox" id="c-express" onchange="quoteRefresh(true)"
+            style="width:15px;height:15px;accent-color:var(--acc)">
+          <span><b>Express Payout</b> — your payout requests jump the review queue <b>+$49</b></span>
+        </label>
         ${ME.credits_usd>0?`<label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
           <input type="checkbox" id="c-usecr" checked onchange="quoteRefresh(true)"
             style="width:15px;height:15px;accent-color:var(--acc)">
@@ -2337,6 +3044,8 @@ async function quoteNow(){
   const p=PRODUCTS.find(x=>x.key===window._buyKey),box=$('buy-quote');
   if(!p||!box)return;
   const wk=!!($('c-weekend')&&$('c-weekend').checked);
+  const sb=!!($('c-boost')&&$('c-boost').checked);
+  const ex=!!($('c-express')&&$('c-express').checked);
   const uc=!$('c-usecr')||$('c-usecr').checked;
   const bc=window._buyCode||{};
   let q=null,previewFailed=false;
@@ -2344,14 +3053,16 @@ async function quoteNow(){
     q=await api('/api/checkout/preview?product_key='+encodeURIComponent(p.key)
       +'&coupon='+encodeURIComponent(bc.coupon||'')
       +'&promo_code='+encodeURIComponent(bc.promo||'')
-      +'&weekend='+(wk?'1':'0')+'&use_credits='+(uc?'1':'0'));
+      +'&weekend='+(wk?'1':'0')+'&split_boost='+(sb?'1':'0')
+      +'&express='+(ex?'1':'0')+'&use_credits='+(uc?'1':'0'));
   }catch(e){
     /* The preview must never block buying — fall back to the catalog price. */
     previewFailed=true;
     if(e&&e.message&&/coupon/i.test(e.message))buyErr(e.message);
     q={plan_price_usd:p.price_usd,discount_pct:0,discount_usd:0,
-       weekend_fee_usd:wk?199:0,credits_used:0,
-       total_due_usd:Math.round((p.price_usd+(wk?199:0))*100)/100};
+       weekend_fee_usd:wk?199:0,split_boost_fee_usd:sb?149:0,
+       express_payout_fee_usd:ex?49:0,credits_used:0,
+       total_due_usd:Math.round((p.price_usd+(wk?199:0)+(sb?149:0)+(ex?49:0))*100)/100};
   }
   /* A coupon the server does not recognize changes nothing — say so instead
      of quietly showing the full price (promo codes are confirmed separately). */
@@ -2359,8 +3070,10 @@ async function quoteNow(){
   else if(!previewFailed){const e=$('buy-err'); if(e)e.classList.add('hidden')}
   const row=(l,v,cls)=>`<div class="q-row${cls?' '+cls:''}"><span>${l}</span><b class="mono">${v}</b></div>`;
   let h=row('Plan fee','$'+fmt(q.plan_price_usd));
-  if(q.discount_usd>0)h+=row(`Coupon (−${q.discount_pct}%)`,'−$'+fmt(q.discount_usd),'good');
+  if(q.discount_usd>0)h+=row(q.discount_source==='offer'?(q.offer_title||`Flash sale (−${q.discount_pct}%)`):`Coupon (−${q.discount_pct}%)`,'−$'+fmt(q.discount_usd),'good');
   if(q.weekend_fee_usd>0)h+=row('Weekend Trading','+$'+fmt(q.weekend_fee_usd));
+  if(q.split_boost_fee_usd>0)h+=row('Profit Split Boost','+$'+fmt(q.split_boost_fee_usd));
+  if(q.express_payout_fee_usd>0)h+=row('Express Payout','+$'+fmt(q.express_payout_fee_usd));
   if(q.credits_used>0)h+=row('Store credit','−$'+fmt(q.credits_used),'good');
   h+=`<div class="q-row total"><span>Total due</span><b class="mono" id="buy-total">$${fmt(q.total_due_usd)}</b></div>`;
   box.innerHTML=h;
@@ -2613,27 +3326,28 @@ async function buy(key){
   const tel=phoneCheck(CC,$('c-phone').value);
   if(!tel.ok){fieldErr('c-phone',tel.msg);return}
   const first=imie.value, last=nazwisko.value, phone=tel.value;
-  const btn=$('buy-go'); if(btn){btn.disabled=true; btn.textContent='Processing…'}
-  try{
-    const res=await api('/api/checkout',{method:'POST',
-      body:JSON.stringify({product_key:key,coupon,promo_code:promo,first_name:first,last_name:last,phone,phone_country:CC,
-        weekend_trading:!!($('c-weekend')&&$('c-weekend').checked),
-        use_credits:!$('c-usecr')||$('c-usecr').checked})});
-    if(res.checkout_url && !res.mock){window.location=res.checkout_url;return;}  // real Stripe
-    let prov=res;
-    if(res.mock){prov=await api(`/api/checkout/${res.order_id}/mock-complete`,{method:'POST'});}
-    ME=await api('/api/auth/me');
-    closeBuy();
-    if(prov.provisioning){
-      toast('✅ Payment received.\nYour MT5 demo account is being created, up to a minute.\nCredentials arrive by e-mail and under Challenges.','ok',9000);
-    }else{
-      toast(`✅ Account created!\nServer: ${prov.platform_server||'—'}\nLogin: ${prov.platform_login}\nPassword: ${prov.platform_password}\n(also sent by e-mail)`,'ok',12000);
-    }
-    go('accounts');
-  }catch(e){
-    buyErr('Error: '+e.message);
-    const btn=$('buy-go'); if(btn){btn.disabled=false; btn.textContent='Try again'}
-  }
+  await busy($('buy-go'),'Processing…',async()=>{
+    try{
+      const res=await api('/api/checkout',{method:'POST',
+        body:JSON.stringify({product_key:key,coupon,promo_code:promo,first_name:first,last_name:last,phone,phone_country:CC,
+          weekend_trading:!!($('c-weekend')&&$('c-weekend').checked),
+          split_boost:!!($('c-boost')&&$('c-boost').checked),
+          express_payout:!!($('c-express')&&$('c-express').checked),
+          use_credits:!$('c-usecr')||$('c-usecr').checked})});
+      /* real Stripe: strona zaraz znika — przycisk ma zostać wyłączony */
+      if(res.checkout_url && !res.mock){window.location=res.checkout_url;return 'keep'}
+      let prov=res;
+      if(res.mock){prov=await api(`/api/checkout/${res.order_id}/mock-complete`,{method:'POST'});}
+      ME=await api('/api/auth/me');
+      closeBuy();
+      if(prov.provisioning){
+        toast('✅ Payment received.\nYour MT5 demo account is being created, up to a minute.\nCredentials arrive by e-mail and under Challenges.','ok',9000);
+      }else{
+        toast(`✅ Account created!\nServer: ${prov.platform_server||'—'}\nLogin: ${prov.platform_login}\nPassword: ${prov.platform_password}\n(also sent by e-mail)`,'ok',12000);
+      }
+      go('accounts');
+    }catch(e){buyErr('Error: '+e.message)}
+  });
 }
 
 /* ---------- ACCOUNT DETAIL ---------- */
@@ -2649,14 +3363,107 @@ const COUNTRY_BY_ISO=Object.fromEntries(COUNTRIES.map(c=>[c.i,c]));
 const COUNTRY_NAMES=COUNTRIES.map(c=>c.n);
 const PHASE_LABEL={eval_1:'Phase 1',eval_2:'Phase 2',funded:'Funded'};
 
+/* Podsumowanie zakonczonej fazy. Do dzis oblane konto dostawalo jednego maila
+   "rule breached" i pasek z powodem — tu trader dostaje liczby z TEJ fazy
+   i jedno zdanie, ktore je czyta. Bez konfetti przy zdanej i bez "niewiele
+   brakowalo" przy oblanej: obie wersje opisuja to, co juz sie stalo. */
+const BREACH_LABEL={daily_loss:'Daily loss limit',max_drawdown:'Max drawdown',
+  time_limit:'Time limit',max_lots:'Open volume limit',manual:'Account review',rule:'Rule'};
+const RECAP_DATE=iso=>dutc(iso).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+
+function recapSub(a,d){
+  const kiedy=RECAP_DATE(d.to);
+  if(d.outcome!=='failed')return `${PHASE_LABEL[d.phase]||esc(d.phase)} closed ${kiedy} after ${d.trading_days} trading day${d.trading_days===1?'':'s'}`;
+  const b=d.breach;
+  if(!b)return `Ended ${kiedy}`;
+  const nazwa=BREACH_LABEL[b.type]||'Rule';
+  const m=a.metrics||{};
+  const prog=b.type==='daily_loss'?m.daily_floor:b.type==='max_drawdown'?m.overall_floor:null;
+  const gdzie=b.equity!=null?` at $${fmt(b.equity)}`:'';
+  return `Ended ${kiedy} — ${nazwa.toLowerCase()} crossed${gdzie}${prog?` (floor $${fmt(prog)})`:''}`;
+}
+
+function rp(label,val,cls){
+  return `<div class="rp"><span>${label}</span><b${cls?` class="${cls}"`:''}>${val}</b></div>`;
+}
+
+function recapCardHtml(a,d){
+  if(!d||!d.available)return '';
+  const zdana=d.outcome==='passed';
+  /* Konto fundowane tez potrafi sie skonczyc na zlamaniu reguly, a wtedy nie ma
+     "fazy do powtorzenia" — jest zamkniete konto z wyplatami w historii. */
+  const fundowane=!zdana&&d.phase==='funded';
+  const dni=Math.max(1,d.days_active);
+  const cele=d.target_pct
+    ?rp('To target',`${d.net_pct>=0?'+':''}${d.net_pct.toFixed(1)}% / ${d.target_pct}%`,
+        d.net_pct>=d.target_pct?'ok':'')
+    :rp('Return',`${d.net_pct>=0?'+':''}${d.net_pct.toFixed(1)}%`,d.net_pct>=0?'ok':'bad');
+  const stopka=zdana
+    ?(a.phase==='funded'
+        ?'This account is funded now. The recap above covers the evaluation that just ended — balance, drawdown floors and the trading-day counter all restarted with the funded phase.'
+        :'Phase 2 is running on the same account. Balance, drawdown floors and the trading-day counter all restarted, so the numbers above stay here as history.')
+    :fundowane
+      ?'This funded account is closed. Payouts already approved stay in your history and in Payouts — the recap above covers the funded run only.'
+      :`You can run ${PHASE_LABEL[d.phase]||'this phase'} again on a new account. Nothing carries over — the recap above stays in your history.`;
+  return `<div class="sec-card recap ${zdana?'ok':'bad'}" id="recap">
+    <div class="rc-head">
+      <div>
+        <div class="rc-eyebrow">${zdana?`${PHASE_LABEL[d.phase]||esc(d.phase)} passed`:fundowane?'Account closed':'Challenge ended'}</div>
+        <div class="recap-title">Account ${esc(d.login)} · ${PHASE_LABEL[d.phase]||esc(d.phase)} · ${dni} day${dni===1?'':'s'}</div>
+        <div class="rc-sub">${esc(recapSub(a,d))}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="rc-pnl ${d.net_pnl>=0?'up':'down'}">${money(d.net_pnl)}</div>
+        <div class="rc-sub">net over the phase</div>
+      </div>
+    </div>
+    <div class="recap-grid">
+      ${rp('Trading days',`${d.trading_days}${d.min_trading_days&&d.phase!=='funded'?`<small> / ${d.min_trading_days} min</small>`:''}`)}
+      ${/* Konta czytane z MT5 nie maja wierszy transakcji — feed oddaje samo
+           equity. "Trades 0 / Win rate —" wygladaloby wtedy jak zepsuta karta,
+           wiec te dwa pola ustepuja miejsca bilansowi dni. */
+        d.trades
+        ?rp('Trades',d.trades)+rp('Win rate',d.win_rate!=null?`${d.win_rate}%`:'—')
+        :rp('Green days',d.green_days,d.green_days?'ok':'')+rp('Red days',d.red_days,d.red_days?'bad':'')}
+      ${rp('Best day',d.best_day?money(d.best_day.pnl):'—',d.best_day&&d.best_day.pnl>0?'ok':'')}
+      ${rp('Worst day',d.worst_day?money(d.worst_day.pnl):'—',d.worst_day&&d.worst_day.pnl<0?'bad':'')}
+      ${cele}
+    </div>
+    ${d.diagnosis?`<div class="recap-read">
+      <span class="rr-ic">${ICO.bars}</span>
+      <div><b>What the numbers say</b><p>${esc(d.diagnosis.text)}</p></div>
+    </div>`:''}
+    <div class="recap-foot">
+      <div class="rf-txt">${stopka}</div>
+      ${zdana?'':`<button class="btn-p" onclick="go('store')">Start a new challenge</button>`}
+    </div>
+  </div>`;
+}
+
 async function openAcc(id){
   $('pg-title').textContent='Account Dashboard'; $('pg-crumb').textContent='Trader / Client Area / '+id;
+  /* Karta konta to podwidok Challenges. Z listy trafia tu po go('accounts'),
+     ale z deep linka powiadomienia — prosto, i wtedy nawigacja zostawala bez
+     zaznaczonej pozycji. */
+  document.querySelectorAll('.sb-link[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v==='accounts'));
+  document.querySelectorAll('.tab-item[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v==='accounts'));
   $('view').innerHTML='<div class="skel" style="height:110px;margin-bottom:16px"></div><div class="skel" style="height:300px"></div>';
-  const [a,act,pos]=await Promise.all([
-    api('/api/me/accounts/'+id),
-    api(`/api/me/accounts/${id}/activity`),
-    api(`/api/me/accounts/${id}/positions`).catch(()=>[]),
-  ]);
+  let a,act,pos,rc;
+  try{
+    [a,act,pos,rc]=await Promise.all([
+      api('/api/me/accounts/'+id),
+      api(`/api/me/accounts/${id}/activity`),
+      api(`/api/me/accounts/${id}/positions`).catch(()=>[]),
+      /* Podsumowanie fazy nie moze wywrocic karty konta — na starych kontach
+         bez dat awansu endpoint po prostu nie ma czego policzyc. */
+      api(`/api/me/accounts/${id}/recap`).catch(()=>({available:false})),
+    ]);
+  }catch(e){
+    $('view').innerHTML=`<div class="card" style="text-align:center;padding:34px 18px">
+      <p class="muted" style="margin:0 0 14px">Couldn't load this account — check your connection.</p>
+      <button class="btn-p" onclick="openAcc(${id})">Try again</button></div>`;
+    return;
+  }
   const m=a.metrics||{};
   window._act=act; window._accId=id; window._acc=a; window._onDetail=true;
   $('pg-crumb').textContent='Trader / Client Area / '+(a.login||id);
@@ -2675,7 +3482,7 @@ async function openAcc(id){
   const dlUsd=a.initial_balance*dlPct/100, dlLimUsd=a.initial_balance*(m.max_daily_loss_pct||0)/100;
   const curve=a.equity_curve||[];
   const openPnl=a.open_pnl||0;
-  const started=a.created_at?new Date(a.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'—';
+  const started=a.created_at?dutc(a.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'—';
   const split=a.profit_split_pct??90;
   const objOn=objLinesOn();
   $('view').innerHTML=`
@@ -2703,6 +3510,8 @@ async function openAcc(id){
       <span class="act-chip" style="cursor:default">${planKind(a.steps)} · $${fmt0(a.initial_balance)}</span>
     </div>
 
+    ${recapCardHtml(a,rc)}
+
     <div class="detail-grid">
       <div class="sec-card" style="margin-bottom:0">
         <div class="res-head"><h3>Current Results</h3>
@@ -2719,7 +3528,9 @@ async function openAcc(id){
           <div class="res-stat"><div class="l">Open P&amp;L</div>
             <div class="v ${openPnl>0?'up':openPnl<0?'down':''}">${openPnl>=0?'+':'-'}$${fmt(Math.abs(openPnl))}</div></div>
           ${targetPct?`<div class="res-stat"><div class="l">Progress to target</div>
-            <div class="v ${profitPct>=0?'up':'down'}">${reach.toFixed(1)}%</div></div>`:''}
+            <div class="v ${profitPct>=0?'up':'down'}">${reach.toFixed(1)}%</div></div>`
+           :`<div class="res-stat"><div class="l">Return</div>
+            <div class="v ${profitPct>=0?'up':'down'}">${profitPct>=0?'+':''}${profitPct.toFixed(2)}%</div></div>`}
         </div>
         ${curve.length>1
           ?'<div class="chart-box tall"><canvas id="d-chart"></canvas></div>'
@@ -2789,7 +3600,10 @@ async function openAcc(id){
         ${prog('Max drawdown used',m.overall_dd_used_pct,true,`${ddPct.toFixed(2)}% / ${m.max_overall_loss_pct}% ($${fmt0(ddUsd)} / $${fmt0(ddLimUsd)})`)}
         ${a.max_lots?`<div><div class="prog-top"><span>Open volume limit (all positions combined)</span><b>max ${a.max_lots} lots</b></div></div>`:''}
       </div>
-      ${a.breach_reason?`<div class="warn-box" style="margin:16px 0 0;background:var(--red-bg);border-color:var(--red-line);color:var(--red)">${ICO.alert}<div><b style="color:var(--red)">Rule breached</b>${esc(a.breach_reason)}</div></div>`:''}
+      ${/* Powod zlamania niesie karta podsumowania na gorze — razem z liczbami,
+            ktore do niego doprowadzily. Pasek zostaje tylko dla kont sprzed
+            wprowadzenia dat fazy, gdzie podsumowania nie ma z czego zlozyc. */
+        a.breach_reason&&!(rc&&rc.available)?`<div class="warn-box" style="margin:16px 0 0;background:var(--red-bg);border-color:var(--red-line);color:var(--red)">${ICO.alert}<div><b style="color:var(--red)">Rule breached</b>${esc(a.breach_reason)}</div></div>`:''}
     </div>
 
     <div class="sec-card" id="cal-card"></div>
@@ -3050,10 +3864,20 @@ async function makePayoutCert(id){
 /* Payout request: amount + method + the details that method requires.
    The server validates the same rules again — the modal only saves an error round-trip. */
 function payoutMethodLabel(m){return m==='usdt'?'USDT (crypto)':m==='wise'?'Wise':'Bank transfer'}
+/* Przycisk wypłaty albo licznik dni, jeśli konto jeszcze nie dorosło do pierwszej.
+   Instant jest funded od pierwszego dnia, więc bez tego liczydła jedyną informacją
+   o 30 dniach był błąd z API — dopiero po wypełnieniu całego wniosku. */
+function payoutBtn(a,av,cls,label){
+  const left=a.payout_days_left||0, m=a.metrics||{};
+  return left
+    ?`<button class="${cls}" disabled title="This plan unlocks its first payout after ${m.min_trading_days??0} trading days.">${
+        esc(a.login)} · ${m.trading_days??0}/${m.min_trading_days??0} trading days</button>`
+    :`<button class="${cls}" onclick="openPayoutModal(${a.id},${av.toFixed(2)})">${label}</button>`;
+}
 function openPayoutModal(id,avail){
   const w=document.createElement('div'); w.id='po-modal'; w.className='modal-wrap';
   w.onclick=e=>{if(e.target===w)w.remove()};
-  w.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+  w.innerHTML=`<div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
     <div class="modal-head"><h3>Request a payout</h3></div>
     <p class="muted" style="font-size:12.5px;margin:2px 0 12px">Available on this account: <b>$${fmt(avail)}</b>, your split of current profit. You can request part of it.</p>
     <label class="muted" style="font-size:12px">Amount (USD)</label>
@@ -3070,6 +3894,7 @@ function openPayoutModal(id,avail){
       <button class="btn-o" onclick="$('po-modal').remove()">Cancel</button>
     </div></div>`;
   document.body.appendChild(w); poFields();
+  setTimeout(()=>$('po-amount')?.focus(),50);
 }
 function poFields(){
   const m=$('po-method').value, F=$('po-fields'), L=t=>`<label class="muted" style="font-size:12px">${t}</label>`;
@@ -3090,7 +3915,7 @@ function poFields(){
 function openScaleModal(id,from,to){
   const w=document.createElement('div'); w.id='sc-modal'; w.className='modal-wrap';
   w.onclick=e=>{if(e.target===w)w.remove()};
-  w.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+  w.innerHTML=`<div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
     <div class="modal-head"><h3>Move up to the $${fmt0(to)} plan</h3></div>
     <p class="muted" style="font-size:12.5px;margin:2px 0 14px">
       You leave the <b>$${fmt0(from)}</b> account behind and we set up a fresh
@@ -3104,13 +3929,14 @@ function openScaleModal(id,from,to){
   document.body.appendChild(w);
 }
 async function scaleUp(id){
-  const btn=$('sc-go'); btn.disabled=true;
-  try{const r=await api(`/api/accounts/${id}/scale-up`,{method:'POST'});
-    $('sc-modal').remove();
-    toast(`📈 You are moving up to a $${fmt0(r.new_size)} account. We are setting it up now — `
-      +`your credentials arrive by email.`,'ok',9000);
-    go('accounts');
-  }catch(e){btn.disabled=false;toast('Error: '+e.message,'err')}
+  await busy($('sc-go'),null,async()=>{
+    try{const r=await api(`/api/accounts/${id}/scale-up`,{method:'POST'});
+      $('sc-modal').remove();
+      toast(`📈 You are moving up to a $${fmt0(r.new_size)} account. We are setting it up now — `
+        +`your credentials arrive by email.`,'ok',9000);
+      go('accounts');
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
 }
 async function submitPayout(id){
   const m=$('po-method').value, amount=parseFloat($('po-amount').value||'0');
@@ -3118,13 +3944,47 @@ async function submitPayout(id){
     :m==='bank'?{holder:$('po-holder').value.trim(),iban:$('po-iban').value.trim(),
                  swift:$('po-swift').value.trim(),bank_name:$('po-bank').value.trim()}
     :{email:$('po-email').value.trim()};
-  const btn=$('po-send'); btn.disabled=true;
-  try{const r=await api(`/api/accounts/${id}/payout-request`,{method:'POST',
-      body:JSON.stringify({method:m,amount,details})});
-    $('po-modal').remove();
-    toast(`✅ Request submitted: $${fmt(r.trader_share)} via ${payoutMethodLabel(m)}. Awaiting review.`,'ok',8000);
-    go('payouts');
-  }catch(e){btn.disabled=false;toast('Error: '+e.message,'err')}
+  await busy($('po-send'),null,async()=>{
+    try{const r=await api(`/api/accounts/${id}/payout-request`,{method:'POST',
+        body:JSON.stringify({method:m,amount,details})});
+      $('po-modal').remove();
+      toast(`✅ Request submitted: $${fmt(r.trader_share)} via ${payoutMethodLabel(m)}. Awaiting review.`,'ok',8000);
+      go('payouts');
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
 }
 
+/* Klawiatura ekranowa vs dolny tabbar: position:fixed na iOS nie wie o niej
+   nic i pasek zawisa nad polem edycji w polowie ekranu — na czas pisania
+   znika (body.kb-open w portal.css), wraca po zamknieciu klawiatury. */
+addEventListener('focusin',e=>{
+  if(e.target.matches&&e.target.matches('input,textarea,select'))
+    document.body.classList.add('kb-open');
+});
+addEventListener('focusout',()=>setTimeout(()=>{
+  const a=document.activeElement;
+  if(!(a&&a.matches&&a.matches('input,textarea,select')))
+    document.body.classList.remove('kb-open');
+},80));
+
+/* ---------- offline ----------
+   PWA otwarta bez sieci pokazuje ostatnie dane, ale kazdy zapis przepadnie.
+   Pasek mowi to wprost (wzor z panelu admina) — w ukladzie nad naglowkiem,
+   nie na fixed, zeby nie zaslanial hamburgera i przyciskow. */
+function paintOffline(){
+  const bar=document.querySelector('.offline-bar');
+  if(navigator.onLine){bar&&bar.remove();return}
+  if(bar)return;
+  const b=document.createElement('div');b.className='offline-bar';
+  b.textContent='Offline — showing the last loaded data, changes will not save.';
+  const m=document.querySelector('.main');
+  m?m.prepend(b):document.body.prepend(b);
+}
+addEventListener('online',()=>{paintOffline();toast('Back online.','ok',3000)});
+addEventListener('offline',paintOffline);
+paintOffline();
+
+/* gsi (async) mogl zaladowac sie PRZED tym plikiem (defer) — wtedy jego
+   onload trafil w pustke i przycisk Google nikt by juz nie narysowal. */
+if(window.google)initGoogle();
 boot();

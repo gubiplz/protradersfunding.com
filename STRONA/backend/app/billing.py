@@ -12,11 +12,19 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
-from . import catalog, loyalty, provisioning, telemetry
+from . import catalog, loyalty, offers, provisioning, telemetry
 from .config import get_settings
-from .models import Order, Product, RewardCode, Trader
+from .models import AppSetting, Order, Product, RewardCode, Trader
 
 settings = get_settings()
+
+# Buy 1 Get 1 Free — globalny wlacznik w AppSetting (przycisk w panelu admina).
+BOGO_KEY = "bogo_promo"
+
+
+def bogo_active(session) -> bool:
+    row = session.get(AppSetting, BOGO_KEY)
+    return bool(row and row.value == "1")
 
 
 def _stripe():
@@ -76,6 +84,7 @@ def _powod_odmowy(session, trader: Trader, code: str) -> str:
 
 def compute_price(session, trader: Trader, product_key: str, coupon: str | None,
                   promo_code: str | None = None, weekend_trading: bool = False,
+                  split_boost: bool = False, express_payout: bool = False,
                   use_credits: bool = True) -> dict:
     """Jedyne miejsce, w ktorym liczy sie cena checkoutu.
 
@@ -110,10 +119,33 @@ def compute_price(session, trader: Trader, product_key: str, coupon: str | None,
         price = round(product.price_usd * (1 - discount_pct / 100.0), 2)
     else:
         price, discount_pct = catalog.apply_coupon(product.price_usd, coupon)
+
+    # Flash sale: oferta KONKURUJE z kuponem — wygrywa korzystniejszy rabat,
+    # nigdy suma. BLACKFRIDAY 30% + oferta 40% to nie 70%: wlasciciel wystawia
+    # oferte nie wiedzac, jaki kod klient trzyma w localStorage, a cena
+    # przekreslona na kafelku planu musi zgadzac sie z modalem zakupu.
+    zrodlo_rabatu = "coupon" if discount_pct else None
+    oferta = offers.best_for(session, trader.id, product)
+    if oferta is not None:
+        cena_oferty = offers.price_after(product, oferta)
+        if cena_oferty < price:
+            price, discount_pct = cena_oferty, oferta.discount_pct
+            zrodlo_rabatu = "offer"
+        else:
+            oferta = None
     plan_po_kuponie = price
     # Add-on Weekend Trading: stala kwota, POZA rabatem kuponu (kupon dotyczy planu).
     if weekend_trading:
         price = round(price + catalog.WEEKEND_ADDON_USD, 2)
+    # Split Boost tylko dla Instant Funding — walidacja TUTAJ, nie w UI: modal
+    # mozna obejsc golym POST-em, a boost na planie 2-Step (split 90%) dawalby
+    # 100% i firma pracowalaby za darmo.
+    if split_boost:
+        if product.steps != 0:
+            raise HTTPException(400, "The profit split boost is available on Instant Funding plans only")
+        price = round(price + catalog.SPLIT_BOOST_ADDON_USD, 2)
+    if express_payout:
+        price = round(price + catalog.EXPRESS_PAYOUT_ADDON_USD, 2)
 
     # Promocja „Upgrade Your Size": TYLKO z poprawnym kodem promo zamowienie
     # idzie na NASTEPNY plan w gore, a kwota zostaje z planu WYBRANEGO (`price`
@@ -148,13 +180,19 @@ def compute_price(session, trader: Trader, product_key: str, coupon: str | None,
             "plan_price_usd": product.price_usd,
             "discount_pct": discount_pct,
             "discount_usd": round(product.price_usd - plan_po_kuponie, 2),
+            "discount_source": zrodlo_rabatu,
+            "offer_id": (oferta.id if oferta else None),
+            "offer_title": (oferta.title if oferta else None),
             "weekend_fee_usd": (catalog.WEEKEND_ADDON_USD if weekend_trading else 0.0),
+            "split_boost_fee_usd": (catalog.SPLIT_BOOST_ADDON_USD if split_boost else 0.0),
+            "express_payout_fee_usd": (catalog.EXPRESS_PAYOUT_ADDON_USD if express_payout else 0.0),
             "credits_used": (kredyt if kredyt > 0 else 0.0),
             "total_due_usd": price,
             "bogo_paid_key": (product.key if upgrade else None)}
 
 
-def open_stripe_session(session, order: Order, item_name: str) -> str:
+def open_stripe_session(session, order: Order, item_name: str, *,
+                        powrot: str | None = None) -> str:
     """Sesja Stripe Checkout dla ISTNIEJĄCEGO zamówienia; zwraca adres kasy.
 
     Jedyne miejsce, w którym powstaje sesja płatności — dlatego linki wystawiane
@@ -162,8 +200,24 @@ def open_stripe_session(session, order: Order, item_name: str) -> str:
     Webhook domyka zamówienie tylko wtedy, gdy `stripe_session_id` zgadza się co
     do znaku, więc sesja MUSI powstać u nas i MUSI zostać zapisana przy
     zamówieniu — inaczej opłacona płatność zostaje zignorowana.
+
+    `powrot` to adres, na który Stripe odsyła po zapłacie i po rezygnacji —
+    domyślnie nasz portal. Podaje go płatność wystawiona przez partnera: jego
+    klient kupował pod cudzą marką i wyrzucenie go po zapłacie na NASZĄ stronę
+    logowania to jednocześnie zła marka i ściana („zaloguj się" kontem, o którym
+    nie wie). Dokleja się `?paid=1` / `?canceled=1`, więc adres musi być bez
+    znaku zapytania.
     """
     stripe = _stripe()
+    # Zamówienie bywa reużyte (dedup w create_checkout, ponowne wejście w link
+    # płatności) — starą sesję wygaszamy, żeby zapłacić dało się tylko
+    # najnowszą, a nie obie naraz z dwóch otwartych kart.
+    if order.stripe_session_id:
+        try:
+            stripe.checkout.Session.expire(order.stripe_session_id)
+        except stripe.error.StripeError:
+            pass  # już wygasła albo opłacona — webhook i tak dopasowuje po id
+    baza = powrot or f"{settings.app_base_url}/portal"
     try:
         cs = stripe.checkout.Session.create(
             mode="payment",
@@ -175,8 +229,8 @@ def open_stripe_session(session, order: Order, item_name: str) -> str:
                 },
                 "quantity": 1,
             }],
-            success_url=f"{settings.app_base_url}/portal?paid=1",
-            cancel_url=f"{settings.app_base_url}/portal?canceled=1",
+            success_url=f"{baza}?paid=1",
+            cancel_url=f"{baza}?canceled=1",
             metadata={"order_id": str(order.id)},
             client_reference_id=str(order.id),
         )
@@ -198,20 +252,42 @@ def open_stripe_session(session, order: Order, item_name: str) -> str:
 
 def create_checkout(session, trader: Trader, product_key: str, coupon: str | None,
                     promo_code: str | None = None, weekend_trading: bool = False,
+                    split_boost: bool = False, express_payout: bool = False,
                     use_credits: bool = True) -> dict:
     quote = compute_price(session, trader, product_key, coupon,
                           promo_code=promo_code, weekend_trading=weekend_trading,
+                          split_boost=split_boost, express_payout=express_payout,
                           use_credits=use_credits)
     product, upgrade = quote["product"], quote["upgrade"]
     prowizjonowany = upgrade or product
     price, discount_pct, kredyt = quote["total_due_usd"], quote["discount_pct"], quote["credits_used"]
 
-    order = Order(trader_id=trader.id, product_key=prowizjonowany.key, amount_usd=price,
-                  coupon=(coupon or None), weekend_trading=bool(weekend_trading),
-                  credits_used=kredyt,
-                  bogo_paid_key=quote["bogo_paid_key"],
-                  provider="stripe" if settings.stripe_enabled else "mock")
-    session.add(order)
+    # Podwójny klik „Buy" (albo powrót do sklepu po porzuconym checkoucie)
+    # reużywa wiszącego zamówienia zamiast tworzyć drugie. Dwa pending ordery
+    # to dwie ŻYWE sesje Stripe w dwóch kartach — da się zapłacić obie, a lista
+    # zamówień rośnie od duplikatów. Wycena idzie zawsze od nowa (świeże pola
+    # niżej), a stara sesja Stripe jest wygaszana przy otwieraniu nowej.
+    order = (session.query(Order)
+             .filter(Order.trader_id == trader.id, Order.status == "pending",
+                     Order.product_key == prowizjonowany.key,
+                     Order.provider.in_(("stripe", "mock")))
+             .order_by(Order.id.desc()).first())
+    if order is None:
+        order = Order(trader_id=trader.id, product_key=prowizjonowany.key)
+        session.add(order)
+    order.amount_usd = price
+    # Gdy wygrala oferta flash, kupon NIE schodzi z zamowienia jako uzyty —
+    # inaczej provisioning spali kod PF- kupiony za punkty za rabat, ktorego
+    # klient nie dostal. Reuzyte zamowienie dostaje swieze pola za kazdym razem.
+    order.coupon = None if quote["discount_source"] == "offer" else (coupon or None)
+    order.flash_offer_id = quote["offer_id"]
+    order.weekend_trading = bool(weekend_trading)
+    order.addon_split_boost = bool(split_boost)
+    order.addon_express_payout = bool(express_payout)
+    order.credits_used = kredyt
+    order.bogo_paid_key = quote["bogo_paid_key"]
+    order.bogo = bogo_active(session)
+    order.provider = "stripe" if settings.stripe_enabled else "mock"
     # `commit`, nie `flush`: `telemetry.track` otwiera WLASNA sesje, a wolane na
     # otwartej transakcji zapisu potrafi zablokowac sie na wlasnym zamowieniu.
     # Na SQLicie (dev) to bylo 5,2 s czekania na busy-timeout przy KAZDYM
@@ -231,7 +307,9 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
     if settings.stripe_enabled:
         nazwa = (f"{prowizjonowany.label} challenge"
                  + (f" ({catalog.PROMO_NAME} promo)" if upgrade else "")
-                 + (" + Weekend Trading" if weekend_trading else ""))
+                 + (" + Weekend Trading" if weekend_trading else "")
+                 + (" + Split Boost" if split_boost else "")
+                 + (" + Express Payout" if express_payout else ""))
         url = open_stripe_session(session, order, nazwa)
         return {"checkout_url": url, "order_id": order.id, "amount": price,
                 "discount_pct": discount_pct, "credits_used": kredyt}
@@ -305,8 +383,17 @@ def handle_webhook(session, payload: bytes, sig_header: str | None) -> dict:
     # Po weryfikacji podpisu czytamy surowy JSON — obiekt Event z SDK zmienia
     # interfejs między wersjami (v15 nie jest już dict-em), a payload jest stały.
     event = json.loads(payload.decode() or "{}")
+    typ = event.get("type")
 
-    if event.get("type") == "checkout.session.completed":
+    if typ in ("checkout.session.expired", "checkout.session.async_payment_failed"):
+        return _webhook_platnosc_nie_doszla(session, typ,
+                                            event["data"]["object"])
+    if typ == "radar.early_fraud_warning.created":
+        return _webhook_fraud_warning(session, event["data"]["object"])
+    if typ == "charge.dispute.created":
+        return _webhook_chargeback(session, event["data"]["object"])
+
+    if typ == "checkout.session.completed":
         obj = event["data"]["object"]
         raw = (obj.get("metadata") or {}).get("order_id") or obj.get("client_reference_id")
         try:
@@ -329,6 +416,99 @@ def handle_webhook(session, payload: bytes, sig_header: str | None) -> dict:
         provisioning.create_account_from_order(session, order)
         return {"provisioned": True, "order_id": order.id}
     return {"received": True}
+
+
+def _order_po_platnosci(session, payment_intent: str | None) -> Order | None:
+    """Zamówienie dla danego payment_intent — przez NASZĄ sesję Checkout.
+
+    Eventy fraudowe niosą charge/payment_intent, a zamówienie zna tylko
+    `stripe_session_id` — pytamy więc Stripe'a, która sesja Checkout niesie ten
+    intent, i dopasowujemy po jej id. Skutek uboczny w naszą korzyść: obce
+    eventy (współdzielony sandbox) nie rozwiążą się na nic."""
+    if not payment_intent:
+        return None
+    try:
+        odp = _stripe().checkout.Session.list(payment_intent=payment_intent, limit=1)
+        dane = odp["data"] if isinstance(odp, dict) else odp.data
+        sid = (dane[0]["id"] if isinstance(dane[0], dict) else dane[0].id) if dane else None
+    except Exception as e:
+        print(f"[webhook] nie znalazłem sesji dla {payment_intent}: {e}")
+        return None
+    if not sid:
+        return None
+    return session.query(Order).filter(Order.stripe_session_id == sid).first()
+
+
+def _webhook_platnosc_nie_doszla(session, typ: str, obj: dict) -> dict:
+    """Porzucony albo odrzucony checkout domyka zamówienie jako failed.
+
+    Bez tego zamówienie, którego Radar nie przepuścił, wisi jako `pending` na
+    zawsze i wygląda w panelu jak „czekamy na wpłatę". `awaiting_crypto` celowo
+    zostaje: klient płaci poza Stripe'em, więc sesja Checkout MA prawo wygasnąć,
+    a zamówienie domyka ręcznie admin."""
+    order = (session.query(Order)
+             .filter(Order.stripe_session_id == obj.get("id"),
+                     Order.status == "pending").first())
+    if not order or order.flag == "awaiting_crypto":
+        return {"received": True}
+    order.status = "failed"
+    order.fail_reason = ("Stripe checkout expired (never paid)"
+                         if typ == "checkout.session.expired"
+                         else "Stripe payment failed")
+    session.commit()
+    telemetry.track("order_autofailed", order.trader_id, order=order.id, why=typ)
+    return {"received": True, "failed": order.id}
+
+
+def _webhook_fraud_warning(session, obj: dict) -> dict:
+    """Bank wystawcy karty zgłosił fraud (Early Fraud Warning / TC40).
+
+    Refund idzie od ręki i bez człowieka, z powodem `fraudulent` (Stripe
+    dopisuje kartę do blocklisty): zgłoszenie, które zdąży urosnąć w chargeback,
+    psuje metryki ryzyka konta, a proaktywny refund zwykle je ucina."""
+    zrefundowano = False
+    if obj.get("actionable") and obj.get("charge"):
+        try:
+            _stripe().Refund.create(charge=obj["charge"], reason="fraudulent")
+            zrefundowano = True
+        except Exception as e:
+            print(f"[webhook] refund po fraud warning nie wyszedł: {e}")
+    order = _order_po_platnosci(session, obj.get("payment_intent"))
+    if order:
+        order.flag = "fraud"
+        if order.status == "pending":
+            order.status = "failed"
+            order.fail_reason = "Stripe fraud warning (issuer report)"
+        session.commit()
+        telemetry.track("stripe_fraud_warning", order.trader_id,
+                        order=order.id, refunded=zrefundowano)
+    tytul = "Stripe fraud warning" + (f" — order #{order.id}" if order else "")
+    tresc = ("Refunded automatically, card blocklisted."
+             if zrefundowano else "Refund NOT issued — check the Stripe dashboard.")
+    if order and order.account_id:
+        tresc += f" The trading account (id {order.account_id}) is still live — review it."
+    from . import notify
+    notify.notify_admins("fraud", tytul, tresc)
+    return {"received": True, "refunded": zrefundowano,
+            **({"order_id": order.id} if order else {})}
+
+
+def _webhook_chargeback(session, obj: dict) -> dict:
+    """Chargeback otwarty — tu już tylko flaga i alarm; odpowiadać trzeba
+    w dashboardzie Stripe'a, refund niczego nie cofnie."""
+    order = _order_po_platnosci(session, obj.get("payment_intent"))
+    if order:
+        order.flag = "disputed"
+        session.commit()
+        telemetry.track("stripe_dispute", order.trader_id, order=order.id)
+    kwota = (obj.get("amount") or 0) / 100
+    from . import notify
+    notify.notify_admins(
+        "fraud",
+        "Chargeback opened" + (f" — order #{order.id}" if order else ""),
+        f"${kwota:.2f} disputed ({obj.get('reason') or 'reason unknown'}). "
+        "Respond in the Stripe dashboard.")
+    return {"received": True, **({"order_id": order.id} if order else {})}
 
 
 def _account_view(acc) -> dict:

@@ -275,7 +275,7 @@ class MetaQuotesWebOpener:
             else:
                 browser = await pw.chromium.launch(headless=self._headless)
             try:
-                page = await browser.new_page(locale="en-US", viewport={"width": 1500, "height": 1000})
+                page = await self._page(browser)
                 page.set_default_timeout(self._timeout_ms)
                 await page.goto(self._url, wait_until="domcontentloaded")
 
@@ -295,13 +295,20 @@ class MetaQuotesWebOpener:
                 await self._dump(locals().get("page"))
                 raise
             finally:
-                # Zdalna przegladarka nie jest nasza — zamykamy tylko wlasna,
-                # inaczej ubilibysmy instancje wspoldzielona z innymi zadaniami.
-                if self._cdp_url:
-                    for kontekst in browser.contexts:
-                        await kontekst.close()
-                else:
+                # CDP: disconnect (close) — nie ubijamy cudzych kontekstów osobno.
+                # Lokalnie: zamykamy cały Chromium.
+                try:
                     await browser.close()
+                except Exception:
+                    pass
+
+    async def _page(self, browser):
+        """Nowa karta. Po CDP bierzemy istniejący kontekst Browserless — `browser.new_page()`
+        na pustym połączeniu potrafi wisieć do timeoutu funkcji."""
+        if self._cdp_url and browser.contexts:
+            ctx = browser.contexts[0]
+            return await ctx.new_page()
+        return await browser.new_page(locale="en-US", viewport={"width": 1500, "height": 1000})
 
     async def _fill_form(self, page, spec: WebDemoSpec) -> None:
         await page.fill("input[name=firstName]", spec.first_name)
@@ -578,11 +585,18 @@ def make_opener(settings=None) -> MetaQuotesWebOpener | None:
         settings = get_settings()
     if not settings.metaquotes_web_enabled:
         return None
+    cdp = (settings.browser_cdp_url or "").strip()
+    # Na Browserless formularz jest gotowy w ~7 s — 9 s bootu + 45 s timeoutu
+    # łatwo przebija 60 s limitu funkcji na Vercelu Hobby. Lokalne Chromium
+    # zostaje przy dłuższych wartościach (zimny start bywa wolniejszy).
+    boot_ms = 2500 if cdp else 9000
+    timeout_sec = min(settings.metaquotes_web_timeout_sec, 35) if cdp else settings.metaquotes_web_timeout_sec
     return MetaQuotesWebOpener(
         url=settings.metaquotes_web_url,
         headless=settings.metaquotes_web_headless,
+        boot_wait_ms=boot_ms,
         min_interval_sec=settings.metaquotes_web_min_interval_sec,
-        timeout_ms=settings.metaquotes_web_timeout_sec * 1000,
+        timeout_ms=timeout_sec * 1000,
         screenshot_dir=(settings.metaquotes_web_screenshot_dir or None),
-        cdp_url=settings.browser_cdp_url,
+        cdp_url=cdp,
     )

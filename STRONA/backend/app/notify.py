@@ -9,7 +9,9 @@ breached, payout_requested, payout_approved, kyc_approved.
 """
 from __future__ import annotations
 
+import html
 import json
+import re
 import smtplib
 import tempfile
 import urllib.request
@@ -87,7 +89,19 @@ def _bogo_upgrade(ctx: dict) -> bool:
         return False
 
 
+# Notatka, którą panel wpisuje grantowi z /freeaccount. Ta sama treść maila
+# obsługuje wszystkie granty, a domyślna mówi o promocji „buy one, get one
+# free" — do kogoś, kto niczego nie kupił, byłoby to po prostu nieprawdą.
+FREE_PROGRAM_NOTE = "free program"
+
+
+def _z_darmowego_programu(ctx: dict) -> bool:
+    return (ctx.get("grant_note") or "").strip().lower() == FREE_PROGRAM_NOTE
+
+
 def _bogo_subject(ctx: dict) -> str:
+    if _z_darmowego_programu(ctx):
+        return "Your free challenge account is open 🎉"
     return "Your upgraded challenge is live 🎁" if _bogo_upgrade(ctx) else "Your BOGO challenge is live 🎁"
 
 
@@ -95,6 +109,9 @@ def _bogo_intro(ctx: dict) -> str:
     """Konto przyznane przez admina opisujemy jako promocję BOGO, nigdy jako
     „aktywowane przez nasz zespół". Gdy znamy opłacony tier, mówimy o upgrade —
     to zdanie jest wtedy prawdziwe. Gdy go nie znamy, nie sugerujemy płatności."""
+    if _z_darmowego_programu(ctx):
+        return ("Your free challenge account is open and ready to trade. "
+                "Same rules and the same profit split as a purchased account.")
     if _bogo_upgrade(ctx):
         return (f"Your promotion has been applied. You paid for the "
                 f"{_tier(ctx.get('bogo_paid_size'))} tier and we upgraded your allocation to "
@@ -104,6 +121,22 @@ def _bogo_intro(ctx: dict) -> str:
     # na poczatku, bo wygladaloby jak polecenie zamiast nazwy promocji.
     return ("Your bonus challenge is live: buy one, get one free. "
             "Same rules and the same profit split as a purchased account.")
+
+
+def _bez_hasla_txt(ctx: dict) -> str:
+    """Akapit dla klienta, któremu nie mintujemy linku do ustawienia hasła.
+
+    Ten mail bywa pierwszym powodem, żeby wejść do portalu, a `setup_url`
+    dostaje wyłącznie konto z flagą `must_set_password`. Bez tej furtki reszta
+    czyta „zaloguj się" i nie ma czym: flagi nie ma na koncie starszym niż ona
+    sama ani na przejętym przez Google, a hasło MT5 z tabelki wyżej do portalu
+    nie pasuje — to najczęstsza pomyłka w zgłoszeniach do supportu.
+    """
+    if not ctx.get("forgot_url"):
+        return ""
+    return (f"\nThe password above is for MetaTrader 5 only. If you have never set a "
+            f"password for the {settings.site_name} portal, get one here:\n"
+            f"{ctx['forgot_url']}\n")
 
 
 def _render(event: str, ctx: dict) -> tuple[str, str]:
@@ -142,7 +175,11 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"  Server:     {ctx.get('platform_server')}\n"
             f"  Capital:    {ctx.get('initial_balance')}\n\n"
             f"Log in with MetaTrader 5 (desktop, mobile or web) using the server above.\n"
-            f"Good luck. Track your progress in the dashboard.",
+            + (f"\nWe opened your portal account for you, so it has no password yet. "
+               f"Set one here (the link works for 7 days; after that use \"Forgot password\" "
+               f"on the sign-in screen):\n{ctx.get('setup_url')}\n"
+               if ctx.get("setup_url") else _bez_hasla_txt(ctx))
+            + f"Good luck. Track your progress in the dashboard.",
         ),
         "phase_passed": (
             f"Congratulations — phase passed! ✅ ({login})",
@@ -194,11 +231,37 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"{ctx.get('reset_url')}\n\n"
             f"If you didn't request this, you can safely ignore this e-mail.",
         ),
+        "portal_invite": (
+            f"Your {brand} portal access",
+            f"{name}, your {brand} account is ready — we opened it for you, so it "
+            f"has no password yet.\n\nSet one here (the link works for 7 days):\n"
+            f"{ctx.get('setup_url')}\n\n"
+            f"After that you can sign in any time at {ctx.get('portal_url')} — "
+            f"if the link expires, use \"Forgot password\" on the sign-in screen.",
+        ),
         "kyc_rejected": (
             "Identity verification — action needed",
             f"{name}, we could not verify your identity with the documents provided."
             + (f"\n\nReason: {ctx.get('reason')}" if ctx.get("reason") else "")
             + "\n\nPlease review your details and submit the verification again from your dashboard.",
+        ),
+        "kyc_requested": (
+            "Action needed: verify your identity"
+            if ctx.get("locked") else "Verify your identity to unlock payouts",
+            f"{name}, "
+            + ("we need to confirm who you are before you keep using the "
+               "portal. Your trading account keeps running as normal — the "
+               "dashboard is paused until we have checked your documents, and "
+               "we do that within one business day."
+               if ctx.get("locked") else
+               "identity verification is now open on your account — it is "
+               "the step we need before we can send you a payout.")
+            + ("\n\nYour previous submission could not be verified, so please "
+               "check the details and send it again."
+               if ctx.get("again") else "")
+            + f"\n\nOpen the Verification tab in your portal and upload your "
+              f"documents — it takes a couple of minutes:\n"
+              f"{ctx.get('portal_url')}?view=kyc",
         ),
         "ticket_reply": (
             f"Support replied to your ticket #{ctx.get('ticket_id')} 💬",
@@ -218,7 +281,12 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"  MT5 login:  {ctx.get('platform_login')}\n"
             f"  Password:   {ctx.get('platform_password')}\n"
             f"  Server:     {ctx.get('platform_server')}\n"
-            f"\nLog in to the portal to see your objectives and progress.",
+            + (f"\nWe opened your portal account for you, so it has no password yet. "
+               f"Set one here (the link works for 7 days; after that use \"Forgot password\" "
+               f"on the sign-in screen):\n{ctx.get('setup_url')}\n"
+               if ctx.get("setup_url") else _bez_hasla_txt(ctx))
+            + f"\nLog in to the portal to see your objectives and progress."
+            + (f"\n{ctx.get('portal_url')}" if ctx.get("portal_url") else ""),
         ),
         "verify_email": (
             f"{ctx.get('code')} is your {brand} verification code",
@@ -246,13 +314,27 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"If you ran into an error on the payment page, reply to this e-mail "
             f"and we'll sort it out.",
         ),
+        "flash_offer": (
+            ctx.get("title") or f"Flash sale: {_num(ctx.get('pct'))}% off — limited time",
+            f"Hi {name},\n\n"
+            f"a limited-time discount just went live on your account:\n\n"
+            f"  Offer:     {ctx.get('title') or 'Flash sale'}\n"
+            f"  Discount:  {_num(ctx.get('pct'))}% off {ctx.get('plans') or 'selected challenges'}\n"
+            f"  Ends:      {ctx.get('ends')}\n\n"
+            f"The discount is applied automatically at checkout — no code needed:\n"
+            f"{ctx.get('url') or settings.app_base_url + '/portal?view=store'}\n\n"
+            f"After the deadline the regular price applies.",
+        ),
         "order_awaiting_payment": (
             f"Awaiting your payment — {ctx.get('product_label')}",
             f"Hi {name},\n\nwe've put your {ctx.get('product_label')} challenge on hold "
             f"and we're waiting for the payment to arrive.\n\n"
             f"  Challenge:  {ctx.get('product_label')}\n"
             f"  Amount due: ${_kwota(ctx.get('amount'))}\n"
-            f"  Reference:  {ctx.get('reference')}\n\n"
+            f"  Reference:  {ctx.get('reference')}\n"
+            + ("  Included:   a second account of the same size — free (Buy 1 Get 1)\n"
+               if ctx.get("bogo") else "")
+            + "\n"
             + ("Send the amount above to:\n"
                + "".join(f"  {k}: {v}\n" for k, v in _payment_lines(ctx))
                + "\nWhen it's on its way, reply to this e-mail with the transaction "
@@ -260,9 +342,19 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
                  "match it.\n\n"
                if _payment_lines(ctx) else
                "We'll send you the payment details in a separate message shortly.\n\n")
-            + f"The moment we confirm the payment your account is created "
-            f"automatically and the MT5 credentials land in your inbox.\n\n"
-            f"Questions, or changed your mind? Just reply to this e-mail.",
+            + (f"The moment we confirm the payment both of your accounts are created "
+               f"automatically and two sets of MT5 credentials land in your inbox.\n\n"
+               if ctx.get("bogo") else
+               f"The moment we confirm the payment your account is created "
+               f"automatically and the MT5 credentials land in your inbox.\n\n")
+            + f"Questions, or changed your mind? Just reply to this e-mail.",
+        ),
+        # Mail pisany w panelu z ręki. Temat i treść SĄ wolą klikającego —
+        # serwer dokłada tylko stopkę i papier firmowy, żeby wiadomość wyglądała
+        # jak reszta poczty z platformy, a nie jak list z przypadkowej skrzynki.
+        "admin_message": (
+            ctx.get("subject") or f"A message from {brand}",
+            ctx.get("body") or "",
         ),
     }
     subject, body = T.get(event, (f"Notification: {event}", json.dumps(ctx, ensure_ascii=False)))
@@ -328,6 +420,46 @@ def _button_html(label: str, url: str) -> str:
    </td></tr>"""
 
 
+_URL = re.compile(r"https?://[^\s<>\"]+")
+
+
+def _akapit_html(tekst: str) -> str:
+    """Akapit ręcznego maila: escape + żywe linki.
+
+    Escape leci na kawałki MIĘDZY adresami, nie na cały tekst: `&` w linku
+    resetu musi wylądować w `href` jako `&amp;`, a w widocznym napisie zostać
+    sobą — zamiana hurtem psuła adresy z dwoma parametrami.
+    """
+    kawalki, koniec = [], 0
+    for m in _URL.finditer(tekst):
+        kawalki.append(html.escape(tekst[koniec:m.start()]))
+        url = m.group(0)
+        kawalki.append(f'<a href="{html.escape(url, quote=True)}" '
+                       f'style="color:{_GOLD};word-break:break-all">{html.escape(url)}</a>')
+        koniec = m.end()
+    kawalki.append(html.escape(tekst[koniec:]))
+    return f"""
+   <tr><td style="padding:0 44px">
+     <p style="font:400 15px/1.7 {_FONT};color:{_INK};margin:0 0 16px">{''.join(kawalki).replace(chr(10), '<br>')}</p>
+   </td></tr>"""
+
+
+def _tekst_html(tekst: str) -> list[str]:
+    """Zwykły tekst z panelu → kafelki maila. Akapit będący samym adresem
+    staje się przyciskiem: link do hasła ma być kciukiem do trafienia na
+    telefonie, a nie linijką do przepisania."""
+    parts = []
+    for akapit in re.split(r"\n\s*\n", tekst.strip()):
+        akapit = akapit.strip()
+        if not akapit:
+            continue
+        if _URL.fullmatch(akapit):
+            parts.append(_button_html("Open the Link", html.escape(akapit, quote=True)))
+        else:
+            parts.append(_akapit_html(akapit))
+    return parts
+
+
 def _note_html(text: str) -> str:
     return f"""
    <tr><td align="center" style="padding:22px 44px 0">
@@ -374,12 +506,15 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
         # Zakup z promocja tez jest upgrade'em — badge i tekst musza to powiedziec,
         # bo konto jest wieksze niz tier, ktory klient widzial w koszyku.
         upgraded = _bogo_upgrade(ctx)
-        badge = ((ctx.get("grant_note") or "BOGO activation complete") if granted
-                 else (f"{_promo_name()} applied" if upgraded else "Account ready"))
-        headline = (("Your upgraded challenge is live" if upgraded else "Your BOGO challenge is live")
-                    if granted else
-                    ("Your upgraded challenge account is ready" if upgraded
-                     else "Your challenge account is ready"))
+        if granted and _z_darmowego_programu(ctx):
+            badge, headline = "Free challenge", "Your free challenge account is open"
+        elif granted:
+            badge = ctx.get("grant_note") or "BOGO activation complete"
+            headline = "Your upgraded challenge is live" if upgraded else "Your BOGO challenge is live"
+        else:
+            badge = f"{_promo_name()} applied" if upgraded else "Account ready"
+            headline = ("Your upgraded challenge account is ready" if upgraded
+                        else "Your challenge account is ready")
         steps = ctx.get("steps")
         kind = f"{steps}-Step challenge on MT5" if steps else "Challenge on MT5"
         lead = _bogo_intro(ctx)
@@ -402,10 +537,30 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                 ("Leverage", "1:100"),
                 ("Profit split", f"{ctx.get('profit_split_pct')}%" if ctx.get("profit_split_pct") else None),
             ]),
-            _button_html("View Dashboard", f"{portal}?view=accounts"),
-            _note_html("Sign in to the portal with your e-mail address. "
-                       "The credentials above are only for the MetaTrader 5 platform."),
         ]
+        # Konto założone ZA klienta nie ma jeszcze hasła do portalu — „View
+        # Dashboard" byłby wtedy przyciskiem pod drzwi bez klucza.
+        if ctx.get("setup_url"):
+            parts += [
+                _button_html("Set Your Password", ctx["setup_url"]),
+                _note_html("We opened the portal account for you, so it has no password yet — "
+                           "the button above sets one (the link works for 7 days; after that use "
+                           "“Forgot password” on the sign-in screen). The credentials above are "
+                           "only for the MetaTrader 5 platform."),
+            ]
+        else:
+            # Brak `setup_url` nie znaczy „ten klient ma hasło" — znaczy tylko
+            # tyle, że nie mamy prawa mu go nadać (patrz `_bez_hasla_txt`).
+            # Dlatego obok przycisku musi stać druga droga, ta samoobsługowa.
+            zapomniane = (f" Never set one? <a href=\"{ctx['forgot_url'].replace('&', '&amp;')}\" "
+                          f"style=\"color:{_GOLD}\">Get a portal password</a> — "
+                          f"we will e-mail you a link." if ctx.get("forgot_url") else "")
+            parts += [
+                _button_html("View Dashboard", f"{portal}?view=accounts"),
+                _note_html("Sign in to the portal with your e-mail address and portal "
+                           "password — the credentials above are only for the "
+                           "MetaTrader 5 platform." + zapomniane),
+            ]
     elif event == "welcome":
         mobile = f"""
    <tr><td align="center" style="padding:40px 44px 0">
@@ -504,6 +659,29 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                        + " Please review your details and submit the verification again."),
             _button_html("Retry Verification", f"{portal}?view=kyc"),
         ]
+    elif event == "kyc_requested":
+        zablokowany = bool(ctx.get("locked"))
+        parts = [
+            _head_html("Verification",
+                       "Verify your identity to reopen your dashboard"
+                       if zablokowany else "One step left before your payout",
+                       (f"{name}, we need to confirm who you are before you keep "
+                        f"using the portal. Your trading account keeps running as "
+                        f"normal — only the dashboard is paused, and we review "
+                        f"documents within one business day."
+                        if zablokowany else
+                        f"{name}, identity verification is now open on your account "
+                        f"— it is the last thing we need before sending you money.")
+                       + (" Your previous submission could not be verified, so "
+                          "please check the details and send it again."
+                          if ctx.get("again") else "")),
+            _button_html("Verify Your Identity", f"{portal}?view=kyc"),
+            _note_html("It takes a couple of minutes: your ID document and proof "
+                       "of address."
+                       + (" Your dashboard opens as soon as it's approved."
+                          if zablokowany else
+                          " Payout requests are released once it's done.")),
+        ]
     elif event == "password_reset":
         parts = [
             _head_html(None, "Reset your password",
@@ -512,6 +690,16 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
             _button_html("Set a New Password", ctx.get("reset_url") or portal),
             _note_html("The link is valid for 1 hour. If you didn't request this, "
                        "you can safely ignore this e-mail."),
+        ]
+    elif event == "portal_invite":
+        parts = [
+            _head_html(None, "Your portal access is ready",
+                       f"{name}, your {brand} account is ready — we opened it for "
+                       f"you, so it has no password yet."),
+            _button_html("Set Your Password", ctx.get("setup_url") or portal),
+            _note_html("The link works for 7 days. If it expires, use "
+                       "“Forgot password” on the sign-in screen to get "
+                       "a fresh one."),
         ]
     elif event == "ticket_reply":
         parts = [
@@ -555,6 +743,18 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                 + "Ran into an error on the payment page? Reply to this e-mail and "
                   "we'll sort it out."),
         ]
+    elif event == "flash_offer":
+        parts = [
+            _head_html("Flash sale", str(ctx.get("title") or "Limited-time offer"),
+                       f"Hi {name}, a limited-time discount just went live on your "
+                       f"account. It is applied automatically at checkout — no code "
+                       f"needed."),
+            _stat_html("Discount", f"-{_num(ctx.get('pct'))}%",
+                       str(ctx.get("plans") or "selected challenges")),
+            _button_html("See the Offer", ctx.get("url") or f"{portal}?view=store"),
+            _note_html(f"The offer ends {ctx.get('ends')}. After that the regular "
+                       f"price applies."),
+        ]
     elif event == "order_awaiting_payment":
         dane = _payment_lines(ctx)
         parts = [
@@ -564,17 +764,31 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                        f"take it from there."),
             _stat_html("Challenge", str(ctx.get("product_label") or ""),
                        f"Amount due ${_kwota(ctx.get('amount'))}"),
-            _rows_html([("Reference", ctx.get("reference") or ""), *dane]),
+            _rows_html([("Reference", ctx.get("reference") or ""),
+                        *([("Included", "+ second account, same size — free (Buy 1 Get 1)")]
+                          if ctx.get("bogo") else []),
+                        *dane]),
             _note_html(
                 "When the payment is on its way, reply to this e-mail with the "
                 "transaction hash and the reference above — that is the fastest way "
                 "for us to match it. "
                 if dane else
                 "We'll send you the payment details in a separate message shortly. "),
-            _note_html("Your account is created automatically the moment we confirm "
+            _note_html("Both of your accounts are created automatically the moment we "
+                       "confirm the payment — this order includes a free second account "
+                       "of the same size — and the MT5 credentials go straight to this "
+                       "inbox."
+                       if ctx.get("bogo") else
+                       "Your account is created automatically the moment we confirm "
                        "the payment, and the MT5 credentials go straight to this "
                        "inbox."),
         ]
+    elif event == "admin_message":
+        # Temat jako nagłówek i tekst pod spodem — nic więcej. Wszystko, co
+        # w tym mailu widać, przyszło z panelu, więc leci przez escape:
+        # klient nie może dostać maila zepsutego znakiem `<` w treści.
+        parts = [_head_html(None, html.escape(ctx.get("subject") or brand), "")]
+        parts += _tekst_html(str(ctx.get("body") or ""))
     else:
         return None
     return _shell(parts)
@@ -584,7 +798,10 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
 # Zdarzenia TRANSAKCYJNE (welcome, credentials/challenge_granted z poświadczeniami
 # MT5 za opłacony produkt, verify_email, password_reset, order_awaiting_payment
 # z instrukcją wpłaty do WŁASNEGO zamówienia klienta) celowo NIE mają wpisu —
-# muszą dojść zawsze, niezależnie od preferencji.
+# muszą dojść zawsze, niezależnie od preferencji. Tak samo `kyc_requested`:
+# wysyła je admin ręcznie, jednej osobie, żeby odblokować JEJ pieniądze —
+# zjedzenie tego przez przełącznik „updates" znaczyłoby, że klient czeka na
+# wypłatę, a my myślimy, że poprosiliśmy.
 _PREF_BY_EVENT = {
     "kyc_approved": "notify_updates", "kyc_rejected": "notify_updates",
     "ticket_reply": "notify_updates",
@@ -592,14 +809,25 @@ _PREF_BY_EVENT = {
     "phase_passed": "notify_trading", "account_funded": "notify_trading",
     "account_scaled": "notify_trading",
     "breached": "notify_trading",
+    # tylko push+centrum (push.send_event z pollera) — maila do tego zdarzenia nie ma
+    "limit_warning": "notify_trading",
+    # Zmiany stanu konta (poller._state_change_due) — ta sama kategoria co
+    # ostrzeżenie o limicie, bo to ta sama rozmowa o WŁASNYM koncie, a nie
+    # oferta. Kto wyłączył „trading", wyłącza cały ten kanał naraz.
+    "target_50": "notify_trading", "target_75": "notify_trading",
+    "min_days_met": "notify_trading", "payout_ready": "notify_trading",
     "payout_requested": "notify_payouts", "payout_approved": "notify_payouts",
     "payout_rejected": "notify_payouts",
     # recap idzie tylko przez push/centrum (push.daily_recap), nie mailem
     "daily_recap": "notify_marketing",
+    # to samo dla poniedziałkowego przeglądu tygodnia (push.weekly_review)
+    "weekly_review": "notify_marketing",
     # Przypomnienie o porzuconym koszyku dotyczy wlasnego zakupu klienta, ale
     # jest zachęta do kupna — wiec pod marketingiem, jak recap. Kto wypisal sie
     # z ofert, nie dostaje tez tego.
     "checkout_recovery": "notify_marketing",
+    # Oferta flash to czysty marketing — kto wypisal sie z ofert, nie dostaje.
+    "flash_offer": "notify_marketing",
 }
 
 
@@ -652,23 +880,81 @@ def _odloz(fn, *args) -> bool:
     return True
 
 
+def _zapisz_w_dzienniku(event: str, to_email: str, subject: str,
+                        blad: str | None) -> None:
+    """Ślad każdej próby wysyłki. Best-effort: dziennik nie ma prawa wywrócić
+    ani wysyłki, ani requestu, w którego tle leci — stąd goły `except`."""
+    try:
+        from .db import SessionLocal
+        from .models import MailLog
+        session = SessionLocal()
+        try:
+            session.add(MailLog(event=event, to_email=to_email,
+                                subject=(subject or "")[:200],
+                                ok=blad is None, error=blad))
+            session.commit()
+        finally:
+            session.close()
+    except Exception:  # pragma: no cover
+        pass
+
+
+def czego_brakuje() -> list[str]:
+    """Nazwy zmiennych, bez których kanał do KLIENTA stoi — dla paska w panelu.
+
+    Odpowiednik `lead_mail.czego_brakuje()`, tyle że dla wysyłki, którą idzie
+    wszystko, co klient dostaje od platformy: poświadczenia MT5, reset hasła,
+    potwierdzenie wypłaty. Kanał leadowy miał ten wskaźnik od początku, ten nie
+    — i dlatego „maile w ogóle nie dochodzą" dawało się przeoczyć tygodniami.
+
+    `MAIL_FROM` liczy się jako brak także wtedy, gdy zostało na domyślnym
+    `@propfunding.local`: żaden dostawca nie podpisze nadawcy w domenie `.local`,
+    więc taki adres nie jest konfiguracją, tylko jej brakiem w przebraniu.
+    """
+    nadawca = (settings.mail_from or "").strip()
+    return [nazwa for nazwa, wartosc in (
+        ("SMTP_HOST", settings.smtp_host),
+        ("MAIL_FROM", "" if nadawca.endswith(".local") else nadawca))
+        if not wartosc]
+
+
 def send(event: str, to_email: str | None, ctx: dict | None = None) -> None:
     if _odloz(_send_teraz, event, to_email, ctx):
         return
     _send_teraz(event, to_email, ctx)
 
 
-def _send_teraz(event: str, to_email: str | None, ctx: dict | None = None) -> None:
+def send_now(event: str, to_email: str | None, ctx: dict | None = None) -> str | None:
+    """Wysyłka Z POMINIĘCIEM kolejki, ze zwrotem powodu porażki (None = poszło).
+
+    Dla maili wychodzących z ręki: automat może sobie polecieć w tle i przegrać
+    po cichu, bo dziennik go złapie, ale człowiek, który kliknął „Send", ma
+    prawo w tej samej sekundzie wiedzieć, czy mail wyszedł — inaczej powie
+    klientowi „wysłałem" i oboje będą czekać na coś, czego nie ma.
+    """
+    return _send_teraz(event, to_email, ctx)
+
+
+def _send_teraz(event: str, to_email: str | None,
+                ctx: dict | None = None) -> str | None:
     ctx = ctx or {}
     subject, body = _render(event, ctx)
     adres = to_email          # oryginal dla kanalu push/centrum (pref sprawdza sam)
+    blad = pominiete = None
 
     # 1) e-mail
+    if to_email and to_email.lower().endswith("@imported.local"):
+        # Konta z importu nie mają skrzynek — każda taka wysyłka to twardy
+        # bounce w Brevo, a seria bounców psuje reputację nadawcy.
+        print(f"[notify] pominięto mail '{event}' do {to_email} (adres importowy)")
+        pominiete = "to konto ma adres z importu (@imported.local) — nie ma tam skrzynki"
+        to_email = None
     if to_email and not _email_allowed(event, to_email):
         print(f"[notify] pominięto mail '{event}' do {to_email} (preferencje tradera)")
+        pominiete = "klient wyłączył tę kategorię maili w ustawieniach portalu"
         to_email = None
     if to_email:
-        html = _render_html(event, ctx, subject)
+        tresc_html = _render_html(event, ctx, subject)
         if settings.smtp_host:
             try:
                 msg = EmailMessage()
@@ -676,8 +962,8 @@ def _send_teraz(event: str, to_email: str | None, ctx: dict | None = None) -> No
                 msg["To"] = to_email
                 msg["Subject"] = subject
                 msg.set_content(body)
-                if html:
-                    msg.add_alternative(html, subtype="html")
+                if tresc_html:
+                    msg.add_alternative(tresc_html, subtype="html")
                 with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as s:
                     s.starttls()
                     if settings.smtp_user:
@@ -685,16 +971,23 @@ def _send_teraz(event: str, to_email: str | None, ctx: dict | None = None) -> No
                     s.send_message(msg)
             except Exception as e:  # pragma: no cover
                 print(f"[notify] SMTP błąd: {e}")
+                blad = str(e)[:500]
         else:
+            # Bez hosta mail NIGDZIE nie idzie — a do 2026-08-19 lądował w dzienniku
+            # jako `ok=True`, więc panel pokazywał zielone „wysłane" dla czegoś, co
+            # nie opuściło serwera, a kafelek porażek stał na zerze. Cisza ważniejsza
+            # od wygody deva: brak konfiguracji to porażka wysyłki i ma być widoczna.
+            blad = "SMTP_HOST nie ustawiony — mail nigdzie nie poszedł"
             print(f"\n📧 [MAIL → {to_email}] {subject}\n{body}\n")
-            if html:
+            if tresc_html:
                 # dev: podglad wersji HTML w przegladarce, bez SMTP
                 try:
                     out = Path(tempfile.gettempdir()) / f"propfunding-mail-{event}.html"
-                    out.write_text(html, encoding="utf-8")
+                    out.write_text(tresc_html, encoding="utf-8")
                     print(f"   ↳ HTML preview: {out}")
                 except Exception:  # pragma: no cover
                     pass
+        _zapisz_w_dzienniku(event, to_email, subject, blad)
 
     # 2) webhook (Make/Telegram itp.)
     if settings.notify_webhook_url:
@@ -718,6 +1011,8 @@ def _send_teraz(event: str, to_email: str | None, ctx: dict | None = None) -> No
             push.send_event(event, to_email, subject, ctx)
         except Exception as e:  # pragma: no cover
             print(f"[notify] push błąd: {e}")
+
+    return blad or pominiete
 
 
 def notify_admins(event: str, title: str, body: str = "",

@@ -1,6 +1,7 @@
+# /portal celowo NIE jest tu blokowany: strona ma meta noindex, a Disallow
+# nie pozwoliłby Google tego noindexu w ogóle odczytać.
 User-agent: *
 Allow: /
-Disallow: /portal
 Disallow: /admin
 Disallow: /api/
 

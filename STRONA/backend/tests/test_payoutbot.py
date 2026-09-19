@@ -405,6 +405,60 @@ def test_telegram_zwraca_false_gdy_odrzucone():
         ) == (False, "chat not found")
 
 
+def _limit(retry_after, potem=None):
+    """Transport odmawiający z limitu. Zbiera strzały, żeby test mógł powiedzieć,
+    ile razy poszliśmy do Telegrama, a nie tylko jaki był wynik."""
+    strzaly: list[str] = []
+    odmowa = (429, b'{"description":"Too Many Requests: retry later",'
+                   b'"parameters":{"retry_after":%d}}' % retry_after)
+
+    def transport(url, body, ct):
+        strzaly.append(url)
+        return potem if potem is not None and len(strzaly) > 1 else odmowa
+
+    return strzaly, transport
+
+
+def test_limit_grupy_ponawia_po_czasie_z_odpowiedzi(monkeypatch):
+    """Grupa przyjmuje ~20 wiadomości na minutę, a kampania wieczorem to
+    przekracza. Telegram nie odmawia wtedy na stałe — podaje, ile odczekać.
+    Bez ponowienia nadwyżka schodziła do kolejki dosyłek, a ta chodzi z ruchu
+    strony: karta z 20:03 lądowała na kanale dopiero rano."""
+    spane: list[float] = []
+    monkeypatch.setattr(telegram.time, "sleep", spane.append)
+    strzaly, transport = _limit(1, potem=(200, b'{"ok":true,"result":{"message_id":7}}'))
+
+    with _kanal():
+        assert telegram.send_photo(PNG, "x", transport=transport) == (True, "")
+    assert len(strzaly) == 2
+    assert spane == [1.0], "czekamy dokładnie tyle, ile każe Telegram"
+
+
+def test_dlugi_limit_zostawia_karte_kolejce(monkeypatch):
+    """Pół minuty to za długo, żeby trzymać request. Od czekania jest kolejka
+    dosyłek, więc odmowa ma wrócić od razu i z powodem."""
+    monkeypatch.setattr(telegram.time, "sleep",
+                        lambda s: (_ for _ in ()).throw(
+                            AssertionError("nie wolno tu stać pół minuty")))
+    strzaly, transport = _limit(30)
+
+    with _kanal():
+        poszlo, powod = telegram.send_photo(PNG, "x", transport=transport)
+    assert poszlo is False and "Too Many Requests" in powod
+    assert len(strzaly) == 1
+
+
+def test_limit_ponawia_najwyzej_raz(monkeypatch):
+    """Drugie ponowienie znaczyłoby, że limit trzyma dłużej niż wolno tu stać —
+    a wtedy rekurencja mnożyłaby strzały zamiast oddać sprawę kolejce."""
+    monkeypatch.setattr(telegram.time, "sleep", lambda s: None)
+    strzaly, transport = _limit(1)
+
+    with _kanal():
+        assert telegram.send_photo(PNG, "x", transport=transport)[0] is False
+    assert len(strzaly) == 2
+
+
 def test_renderer_odrzuca_odpowiedz_ktora_nie_jest_obrazkiem():
     """Usługi przy błędzie potrafią zwrócić JSON-a ze statusem 200 — bez tej
     kontroli poleciałby on na kanał jako „grafika"."""

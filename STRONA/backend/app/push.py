@@ -10,7 +10,7 @@ jeden przełącznik w ustawieniach wyłącza kategorię wszędzie naraz.
 
 Zasada produktu: push NIGDY nie komentuje wyników tradingu w czasie rzeczywistym
 — tylko zdarzenia konta (poświadczenia, payout, KYC), przypomnienie o serii
-i dzienny recap ZAMKNIĘTEGO dnia.
+oraz recap ZAMKNIĘTEGO dnia i przegląd ZAMKNIĘTEGO tygodnia.
 
 Generowanie kluczy (raz, wynik do env):  python -m app.push
 """
@@ -34,7 +34,11 @@ _EVENT_VIEW = {
     "kyc_approved": "kyc", "kyc_rejected": "kyc",
     "ticket_reply": "support",
     "daily_recap": "analytics",
+    "weekly_review": "weekly",
     "credits_granted": "store",
+    "limit_warning": "accounts",
+    "target_50": "accounts", "target_75": "accounts", "min_days_met": "accounts",
+    "payout_ready": "payouts",
 }
 
 # Krótkie treści pod tytułem (tytuł = temat maila, liczony w notify._render).
@@ -56,6 +60,16 @@ _BODY: dict[str, str] = {
     "kyc_rejected": "Your verification needs another look.",
     "ticket_reply": "Support replied to your ticket.",
     "credits_granted": "Store credit added. It applies automatically at your next checkout.",
+    # Wyjątek od zasady „push nie komentuje wyników na żywo": ostrzeżenie o
+    # limicie ISTNIEJE po to, żeby uratować konto — cisza tu kosztuje challenge.
+    "limit_warning": "You are close to a trading limit. Slow down and protect the account.",
+    # Stan konta, czas przeszły, zero rady. Te cztery treści mają przetrwać
+    # lekturę regulaminu: mówią, co się JUŻ stało i co z tego wynika dla reguł,
+    # nigdy „ile jeszcze zostało" ani „wykorzystaj to teraz".
+    "target_50": "A progress update on your evaluation. Your limits and rules are unchanged.",
+    "target_75": "A progress update on your evaluation. Your limits and rules are unchanged.",
+    "min_days_met": "The trading-day requirement is now behind you. The profit target still decides when the phase closes.",
+    "payout_ready": "Your funded account meets the payout conditions. Requests are made from the portal, whenever you choose.",
 }
 
 
@@ -63,7 +77,15 @@ def is_enabled() -> bool:
     return settings.push_enabled
 
 
-def event_url(event: str) -> str:
+# Zdarzenia kończące fazę prowadzą do jej podsumowania, a nie do listy kont —
+# ale tylko wtedy, gdy nadawca podał, KTÓREGO konta dotyczą.
+_RECAP_EVENTS = {"breached", "phase_passed", "account_funded"}
+
+
+def event_url(event: str, ctx: dict | None = None) -> str:
+    acc_id = (ctx or {}).get("account_id")
+    if event in _RECAP_EVENTS and acc_id:
+        return f"/portal?view=recap&acc={acc_id}"
     return f"/portal?view={_EVENT_VIEW.get(event, 'accounts')}"
 
 
@@ -151,13 +173,12 @@ def send_event(event: str, to_email: str | None, title: str, ctx: dict | None = 
             if val is not None and not bool(val):
                 return 0
         trader_id = tr.id
-        _center_row(session, trader_id, event, title,
-                    _BODY.get(event, ""), event_url(event))
+        url = event_url(event, ctx)
+        _center_row(session, trader_id, event, title, _BODY.get(event, ""), url)
         session.commit()
     finally:
         session.close()
-    return send_to_trader(trader_id, title, _BODY.get(event, ""),
-                          url=event_url(event), tag=event)
+    return send_to_trader(trader_id, title, _BODY.get(event, ""), url=url, tag=event)
 
 
 # --------------------------------------------------------------------------- #
@@ -211,9 +232,11 @@ def _daily_recap(now: datetime | None = None) -> dict:
         # Wczorajsza doba UTC; closed_at w bazie jest naiwne (UTC bez tz).
         start = datetime.strptime(dzis, "%Y-%m-%d") - timedelta(days=1)
         koniec = start + timedelta(days=1)
+        # Konta firmowe nie maja wlasciciela; bez filtru trafiaja tu jako klucz None
+        # i lecimy po nie do bazy tylko po to, by je odrzucic.
         wiersze = (session.query(Trade, Account.trader_id)
                    .join(Account, Trade.account_id == Account.id)
-                   .filter(Trade.status == "closed",
+                   .filter(Account.trader_id.isnot(None), Trade.status == "closed",
                            Trade.closed_at >= start, Trade.closed_at < koniec)
                    .all())
         per: dict[int, list] = {}
@@ -251,6 +274,177 @@ def _daily_recap(now: datetime | None = None) -> dict:
             _center_row(session, tid, "daily_recap", tytul, tresc, event_url("daily_recap"))
             session.commit()
             send_to_trader(tid, tytul, tresc, url=event_url("daily_recap"), tag="daily_recap")
+            wyslane += 1
+        return {"sent": wyslane}
+    finally:
+        session.close()
+
+
+# --------------------------------------------------------------------------- #
+#  Tygodniowy przegląd (poniedziałek rano, ten sam ruch strony co recap)       #
+# --------------------------------------------------------------------------- #
+# Obserwacje opisują WYŁĄCZNIE to, co już się wydarzyło — w czasie przeszłym,
+# bez liczby w tytule i bez zdania, które dałoby się przeczytać jako sygnał,
+# radę albo cel. To rachunek z zamkniętego tygodnia, nie zachęta do pozycji.
+WEEKLY_OD_GODZINY = 6
+_DNI = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+
+def _kwota(v: float) -> str:
+    return f"{'+' if v >= 0 else '−'}${abs(v):,.0f}"
+
+
+def week_window(now: datetime) -> tuple[datetime, datetime]:
+    """Ostatni PEŁNY tydzień jako (poniedziałek, poniedziałek) w naiwnym UTC."""
+    dzis = now.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+    poniedzialek = dzis - timedelta(days=now.weekday())
+    return poniedzialek - timedelta(days=7), poniedzialek
+
+
+def weekly_stats(session, trader_id: int, start: datetime, koniec: datetime) -> dict:
+    """Siedem dni tygodnia z zamkniętych transakcji jednego tradera."""
+    from .models import Account, Trade
+
+    dni = [{"day": (start + timedelta(days=i)).strftime("%Y-%m-%d"),
+            "name": _DNI[i], "label": _DNI[i][:3], "pnl": 0.0, "trades": 0}
+           for i in range(7)]
+    wiersze = (session.query(Trade)
+               .join(Account, Trade.account_id == Account.id)
+               .filter(Account.trader_id == trader_id, Trade.status == "closed",
+                       Trade.closed_at >= start, Trade.closed_at < koniec)
+               .all())
+    wygrane, konta = 0, set()
+    for t in wiersze:
+        ts = t.closed_at
+        # Część zapisów w bazie ma strefę, część nie (models._utcnow kontra
+        # wartości ustawiane wprost) — bez normalizacji odejmowanie by padło.
+        if ts.tzinfo is not None:
+            ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+        pnl = float(t.pnl or 0)
+        i = (ts - start).days
+        if 0 <= i < 7:
+            dni[i]["pnl"] += pnl
+            dni[i]["trades"] += 1
+        wygrane += 1 if pnl > 0 else 0
+        konta.add(t.account_id)
+    for d in dni:
+        d["pnl"] = round(d["pnl"], 2)
+    handlowe = [d for d in dni if d["trades"]]
+    return {
+        "from": start.strftime("%Y-%m-%d"),
+        "to": (koniec - timedelta(days=1)).strftime("%Y-%m-%d"),
+        "days": dni,
+        "trades": len(wiersze),
+        "accounts": len(konta),
+        "net_pnl": round(sum(d["pnl"] for d in dni), 2),
+        "win_rate": round(wygrane / len(wiersze) * 100) if wiersze else None,
+        "trading_days": len(handlowe),
+        "green_days": sum(1 for d in handlowe if d["pnl"] > 0),
+        "red_days": sum(1 for d in handlowe if d["pnl"] < 0),
+        "best_day": max(handlowe, key=lambda d: d["pnl"]) if handlowe else None,
+        "worst_day": min(handlowe, key=lambda d: d["pnl"]) if handlowe else None,
+    }
+
+
+def weekly_observations(s: dict, prev: dict) -> list[tuple[str, str]]:
+    """Prawdziwe obserwacje o tym tygodniu, od najbardziej wyrazistej.
+
+    Pierwsza trafia do powiadomienia, trzy pierwsze na ekran przeglądu.
+    Ostatnia pozycja jest zawsze prawdziwa, więc lista nigdy nie jest pusta.
+    """
+    dni = [d for d in s["days"] if d["trades"]]
+    if not dni:
+        return [("quiet", "No closed trades last week.")]
+    ruch = sum(abs(d["pnl"]) for d in dni)
+    szczyt = max(dni, key=lambda d: abs(d["pnl"]))
+    zielone = sum(d["pnl"] for d in dni if d["pnl"] > 0)
+    worst = s["worst_day"]
+    out: list[tuple[str, str]] = []
+
+    if len(dni) >= 2 and ruch > 0 and abs(szczyt["pnl"]) >= 0.6 * ruch:
+        out.append(("one_day", f"{szczyt['name']} carried the week: {_kwota(szczyt['pnl'])} "
+                               f"of the ${ruch:,.0f} that moved across {len(dni)} sessions."))
+    if worst and worst["pnl"] < 0 and zielone > 0 and abs(worst["pnl"]) > zielone:
+        n = s["green_days"]
+        out.append(("gave_back", f"{worst['name']} gave back more than your "
+                                 f"{n} green day{'' if n == 1 else 's'} put together."))
+    if len(dni) >= 3 and s["red_days"] == 0:
+        out.append(("all_green", f"{len(dni)} trading days, none of them red. "
+                                 f"Net {_kwota(s['net_pnl'])}."))
+    if prev["trades"] >= 5 and s["trades"] >= 1.5 * prev["trades"] and s["trades"] >= 15:
+        out.append(("busier", f"You placed {s['trades']} trades, up from "
+                              f"{prev['trades']} the week before."))
+    if prev["trades"] >= 10 and s["trades"] <= 0.5 * prev["trades"]:
+        out.append(("quieter", f"You placed {s['trades']} trades, down from "
+                               f"{prev['trades']} the week before."))
+    if len(dni) >= 3 and ruch > 0 and abs(szczyt["pnl"]) <= 0.4 * ruch:
+        out.append(("steady", f"No single day carried the week — the result came "
+                              f"from {len(dni)} sessions."))
+    out.append(("plain", f"{s['trades']} trade{'' if s['trades'] == 1 else 's'} across "
+                         f"{len(dni)} day{'' if len(dni) == 1 else 's'}. "
+                         f"Net {_kwota(s['net_pnl'])}."))
+    return out
+
+
+def weekly_review(now: datetime | None = None) -> dict:
+    """Przegląd zamkniętego tygodnia: poniedziałek od 06:00 czasu polskiego.
+
+    Raz na tydzień (guard w AppSetting), kategoria notify_marketing, tydzień
+    BEZ transakcji = cisza. Tytuł nigdy nie niesie liczby — kwota w powiadomieniu
+    systemowym czytałaby się jak wynik do pobicia. `now` wstrzykują testy.
+    """
+    try:
+        return _weekly_review(now)
+    except Exception as e:  # pragma: no cover
+        print(f"[push] weekly błąd: {e}")
+        return {"sent": 0, "error": str(e)}
+
+
+def _weekly_review(now: datetime | None = None) -> dict:
+    from .db import SessionLocal
+    from .models import Account, AppSetting, Trade, Trader
+    teraz = now or datetime.now(timezone.utc)
+    lokalnie = teraz.astimezone(WARSZAWA)
+    if lokalnie.weekday() != 0 or lokalnie.hour < WEEKLY_OD_GODZINY:
+        return {"sent": 0, "skipped": "not Monday morning Europe/Warsaw"}
+    session = SessionLocal()
+    try:
+        tydzien = teraz.strftime("%G-W%V")
+        guard = session.get(AppSetting, "last_weekly_week")
+        if guard and guard.value == tydzien:
+            return {"sent": 0, "skipped": "already ran this week"}
+        if guard:
+            guard.value = tydzien
+        else:
+            session.add(AppSetting(key="last_weekly_week", value=tydzien))
+        session.commit()
+
+        start, koniec = week_window(teraz)
+        # Konta firmowe nie maja wlasciciela — bez tego filtru None wpada do zbioru
+        # i `sorted` wysypuje CALY przeglad tygodnia, dla wszystkich naraz.
+        traderzy = {tid for _, tid in
+                    (session.query(Trade.id, Account.trader_id)
+                     .join(Account, Trade.account_id == Account.id)
+                     .filter(Account.trader_id.isnot(None), Trade.status == "closed",
+                             Trade.closed_at >= start, Trade.closed_at < koniec).all())}
+        wyslane = 0
+        for tid in sorted(traderzy):
+            tr = session.get(Trader, tid)
+            if not tr or (tr.notify_marketing is not None and not tr.notify_marketing):
+                continue
+            s = weekly_stats(session, tid, start, koniec)
+            if not s["trades"]:
+                continue
+            obs = weekly_observations(s, weekly_stats(session, tid, start - timedelta(days=7), start))
+            # Ta sama obserwacja trzeci tydzień z rzędu przestaje cokolwiek
+            # znaczyć — wtedy schodzimy do kolejnej prawdziwej.
+            historia = [x for x in (tr.weekly_rules or "").split(",") if x][:2]
+            klucz, tresc = next((o for o in obs if historia.count(o[0]) < 2), obs[0])
+            tr.weekly_rules = ",".join(([klucz] + historia)[:2])
+            tytul = "Your week in review"
+            _center_row(session, tid, "weekly_review", tytul, tresc, event_url("weekly_review"))
+            session.commit()
+            send_to_trader(tid, tytul, tresc, url=event_url("weekly_review"), tag="weekly_review")
             wyslane += 1
         return {"sent": wyslane}
     finally:

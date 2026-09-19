@@ -48,9 +48,12 @@ def init_db() -> None:
     from . import models  # noqa: F401  (rejestracja tabel)
     Base.metadata.create_all(bind=engine)
     _add_missing_columns()
+    _poszerz_kolumny()
     _add_missing_indexes()
     _relax_not_null()
     _przemianuj_statusy_leadow()
+    _odbierz_konta_google()
+    _uzupelnij_zgubione_claimy()
 
 
 # Odcisk wersji kodu, dla ktorej schemat jest juz doprowadzony do porzadku.
@@ -89,6 +92,10 @@ def mark_schema_current(fingerprint: str) -> None:
 # więc bez tego stara baza wywala się na SELECT-cie z nowym polem.
 _NEW_COLUMNS: dict[str, dict[str, str]] = {
     "traders": {
+        # FALSE dla wszystkich, którzy już są w bazie — hasło albo znają, albo
+        # przejdą zwykłym „forgot password". Flaga dotyczy kont zakładanych ZA
+        # klienta i tylko takie mają dostać w mailu link do ustawienia hasła.
+        "must_set_password": "BOOLEAN DEFAULT FALSE",
         "first_name": "VARCHAR(60)",
         "last_name": "VARCHAR(60)",
         "phone": "VARCHAR(32)",
@@ -97,6 +104,8 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "kyc_fullname": "VARCHAR(120)",
         "kyc_country": "VARCHAR(64)",
         "kyc_doc_ref": "VARCHAR(120)",
+        "kyc_requested_at": "TIMESTAMP",
+        "kyc_locked": "BOOLEAN DEFAULT FALSE",
         "kyc_submitted_at": "TIMESTAMP",
         "kyc_reject_reason": "VARCHAR(200)",
         "kyc_dob": "VARCHAR(16)",
@@ -127,12 +136,14 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "telegram_user_id": "VARCHAR(20)",
         "telegram_link_code": "VARCHAR(12)",
         "telegram_username": "VARCHAR(40)",
+        "weekly_rules": "VARCHAR(40)",
     },
     "products": {
         "max_lots": "FLOAT DEFAULT 6.0",
     },
     "orders": {
         "bogo_paid_key": "VARCHAR(48)",
+        "bogo": "BOOLEAN DEFAULT FALSE",
         "weekend_trading": "BOOLEAN DEFAULT FALSE",
         "credits_used": "FLOAT DEFAULT 0",
         "flag": "VARCHAR(24)",
@@ -141,6 +152,16 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "payment_address": "VARCHAR(200)",
         "payment_network": "VARCHAR(40)",
         "pay_token": "VARCHAR(32)",
+        "addon_split_boost": "BOOLEAN DEFAULT FALSE",
+        "addon_express_payout": "BOOLEAN DEFAULT FALSE",
+        # Tabele `flash_offers` zaklada create_all, ale `orders` stoi na
+        # produkcji — bez tego wpisu kazdy SELECT z modelu Order pada na
+        # brakujacej kolumnie.
+        "flash_offer_id": "INTEGER",
+        "brand": "VARCHAR(8)",
+        "open_funded": "BOOLEAN DEFAULT FALSE",
+        "weekend_free": "BOOLEAN DEFAULT FALSE",
+        "pay_headline": "VARCHAR(80)",
     },
     "pool_accounts": {
         "claimed_by_trader_id": "INTEGER",
@@ -177,21 +198,44 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "bot_target_pct": "FLOAT DEFAULT 0",
         "bot_paused": "BOOLEAN DEFAULT FALSE",
         "bot_started_at": "TIMESTAMP",
+        "bot_mode": "VARCHAR(16) DEFAULT 'profit'",
+        "bot_doom_deadline": "TIMESTAMP",
+        "bot_doom_limit": "VARCHAR(16) DEFAULT 'overall'",
+        "bot_target_deadline": "TIMESTAMP",
+        "bot_win_rate": "FLOAT",
+        "bot_avg_r": "FLOAT",
+        "bot_risk_pct": "FLOAT",
+        "bot_daily_target_pct": "FLOAT",
+        "bot_red_day_odds": "FLOAT",
+        "bot_swing": "FLOAT",
+        "bot_symbols": "VARCHAR(200)",
+        "payout_pool_usd": "FLOAT",
         "scale_count": "INTEGER DEFAULT 0",
+        "express_payout": "BOOLEAN DEFAULT FALSE",
+        "limit_warn_daily_day": "VARCHAR(10) DEFAULT ''",
+        "limit_warn_dd_day": "VARCHAR(10) DEFAULT ''",
+        "target_50_at": "TIMESTAMP",
+        "target_75_at": "TIMESTAMP",
+        "min_days_at": "TIMESTAMP",
+        "payout_ready_at": "TIMESTAMP",
+        "phase_started_at": "TIMESTAMP",
+        "prev_phase_started_at": "TIMESTAMP",
     },
     # Karta leada na kanale. Tabela `leads` stoi na produkcji od pierwszego
-    # zgloszenia, wiec `create_all` ja pomija — bez tych trzech wpisow kazdy
-    # SELECT z modelu Lead pyta o kolumny, ktorych w bazie nie ma, i panel
-    # oddaje 500 na samej liscie leadow.
+    # zgloszenia, wiec `create_all` ja pomija — bez tych wpisow kazdy SELECT
+    # z modelu Lead pyta o kolumny, ktorych w bazie nie ma, i panel oddaje
+    # 500 na samej liscie leadow.
     "leads": {
         "owner": "VARCHAR(60)",
         "owner_at": "TIMESTAMP",
         "tg_message_id": "INTEGER",
+        # Bez indeksu: filtr zawsze wtorny do tg_message_id, ktory indeks ma.
+        "tg_chat_id": "VARCHAR(32)",
         "bought": "BOOLEAN DEFAULT FALSE",
-        # Desk, na ktorym wisi karta (`leads` / `leads_ng`). DEFAULT ustawia
-        # wszystkie istniejace leady na desk domyslny i to jest poprawne:
-        # ich karty wisza dokladnie tam.
-        "desk": "VARCHAR(8) DEFAULT 'leads'",
+        # NULL u wszystkich, ktorzy juz sa w bazie, i tak zostanie: powodu
+        # przegranej nie da sie zgadnac wstecz, a wpisanie tam czegokolwiek
+        # ("other") zafalszowaloby pierwszy raport o cala historie.
+        "lost_reason": "VARCHAR(24)",
     },
 }
 
@@ -288,6 +332,109 @@ def _przemianuj_statusy_leadow() -> None:
                 {"nowy": nowy, "stary": stary}).rowcount
             if zmienione:
                 print(f"[db] leads.status {stary} -> {nowy}: {zmienione}")
+
+
+def _odbierz_konta_google() -> None:
+    """Klienci z kontem założonym ZA nich, którzy weszli przez Google, zanim
+    logowanie Google liczyło się jako odbiór konta — flaga wisiała mimo że
+    klient normalnie korzystał z portalu. `google_sub` ustawia wyłącznie
+    ścieżka Google, więc para (must_set_password, google_sub) jednoznacznie
+    wskazuje ofiary. Claim w dzienniku dostaje datę pierwszego wejścia przez
+    Google, nie datę naprawy."""
+    from datetime import datetime
+
+    from sqlalchemy import inspect, text
+
+    if not {"traders", "telemetry_events"} <= set(inspect(engine).get_table_names()):
+        return
+    with engine.begin() as conn:
+        ofiary = conn.execute(text(
+            "SELECT id FROM traders "
+            "WHERE must_set_password AND google_sub IS NOT NULL")).scalars().all()
+        for tid in ofiary:
+            kiedy = conn.execute(text(
+                "SELECT MIN(created_at) FROM telemetry_events "
+                "WHERE trader_id = :t AND name IN ('login', 'signup') "
+                "AND props LIKE '%\"google\": true%'"), {"t": tid}).scalar()
+            conn.execute(text(
+                "INSERT INTO telemetry_events (trader_id, name, props, created_at) "
+                "VALUES (:t, 'account_claimed', :p, :c)"),
+                {"t": tid, "p": '{"google": true, "backfill": true}',
+                 "c": kiedy or datetime.utcnow()})
+            conn.execute(text(
+                "UPDATE traders SET must_set_password = :f WHERE id = :t"),
+                {"f": False, "t": tid})
+            print(f"[db] trader {tid}: konto odebrane wstecznie (Google)")
+
+
+# Zdarzenia, których nie da się wywołać bez zalogowania — ich obecność dowodzi,
+# że klient wszedł do portalu, choćby wiersz o samym wejściu przepadł.
+_SLADY_ZALOGOWANEGO = "('view_open', 'checkin', 'push_subscribed', 'pwa_install')"
+
+
+def _uzupelnij_zgubione_claimy() -> None:
+    """telemetry.track() z zasady nie wywala żądania biznesowego — gdy zapis
+    padnie (np. w oknie deployu), klient odbiera konto, a dziennik do końca
+    świata twierdzi „never". Zgaszona flaga must_set_password bez śladu
+    login/signup/claim, ale z aktywnością wymagającą zalogowania, oznacza
+    właśnie zgubiony wiersz. Cezura 2026-08-11 (narodziny must_set_password):
+    starsze konta bywały aktywne, zanim logowania trafiały do telemetrii,
+    więc pasowałyby do wzorca niewinnie. Claim dostaje datę pierwszego śladu."""
+    from sqlalchemy import inspect, text
+
+    if not {"traders", "telemetry_events"} <= set(inspect(engine).get_table_names()):
+        return
+    with engine.begin() as conn:
+        ofiary = conn.execute(text(
+            "SELECT id FROM traders "
+            "WHERE NOT must_set_password AND created_at >= :cezura "
+            "AND id NOT IN (SELECT trader_id FROM telemetry_events "
+            "               WHERE name IN ('login', 'signup', 'account_claimed')) "
+            "AND id IN (SELECT trader_id FROM telemetry_events "
+            f"              WHERE name IN {_SLADY_ZALOGOWANEGO})"),
+            {"cezura": "2026-08-11"}).scalars().all()
+        for tid in ofiary:
+            kiedy = conn.execute(text(
+                "SELECT MIN(created_at) FROM telemetry_events "
+                f"WHERE trader_id = :t AND name IN {_SLADY_ZALOGOWANEGO}"),
+                {"t": tid}).scalar()
+            conn.execute(text(
+                "INSERT INTO telemetry_events (trader_id, name, props, created_at) "
+                "VALUES (:t, 'account_claimed', :p, :c)"),
+                {"t": tid, "p": '{"inferred": true, "backfill": true}', "c": kiedy})
+            print(f"[db] trader {tid}: claim odtworzony z aktywności portalu")
+
+
+# Kolumny, którym za ciasno w pierwotnym VARCHAR. Poszerzenie w Postgresie jest
+# operacją na katalogu, nie przepisaniem tabeli, więc nie blokuje startu appki.
+# SQLite i tak nie egzekwuje długości, więc tam ten krok jest pomijany.
+_SZERSZE_KOLUMNY: dict[str, dict[str, str]] = {
+    # Lista kanałów Reach BOT-a siedzi tu jako JSON — przy trzecim kanale
+    # przekraczała 200 znaków i zapis leciał 500-tką.
+    "app_settings": {"value": "TEXT"},
+}
+
+
+def _poszerz_kolumny() -> None:
+    from sqlalchemy import inspect, text
+
+    if engine.dialect.name != "postgresql":
+        return
+    inspector = inspect(engine)
+    istniejace = set(inspector.get_table_names())
+    with engine.begin() as conn:
+        for tabela, kolumny in _SZERSZE_KOLUMNY.items():
+            if tabela not in istniejace:
+                continue
+            obecne = {c["name"]: c for c in inspector.get_columns(tabela)}
+            for nazwa, typ in kolumny.items():
+                kol = obecne.get(nazwa)
+                # Już TEXT (albo kolumny nie ma) = nic do roboty.
+                if not kol or getattr(kol["type"], "length", None) is None:
+                    continue
+                conn.execute(text(
+                    f"ALTER TABLE {tabela} ALTER COLUMN {nazwa} TYPE {typ}"))
+                print(f"[db] poszerzono kolumnę {tabela}.{nazwa} do {typ}")
 
 
 def _add_missing_columns() -> None:
