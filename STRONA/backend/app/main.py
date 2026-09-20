@@ -7390,7 +7390,12 @@ def _ping_partnera() -> None:
         # Znacznik w adresie, zeby w logach partnera dalo sie odroznic puls
         # STAD od pulsu z jego wlasnego ruchu. Bez tego nie da sie
         # odpowiedziec na pytanie "czy ta droga w ogole dziala".
-        urllib.request.urlopen(baza + "/api/spots-ping?src=panel", timeout=4).read(200)
+        odp = urllib.request.urlopen(baza + "/api/spots-ping?src=panel",
+                                     timeout=4).read(200)
+        # Log takze przy POWODZENIU. Cisza przy sukcesie znaczy, ze nie da sie
+        # odroznic "puls poszedl" od "adresu nie ma w srodowisku, wiec funkcja
+        # wyszla na samym poczatku" — a to dwa zupelnie rozne stany.
+        print(f"[partner-ping] poszedl, odpowiedz: {odp[:80]!r}")
     except Exception as e:  # pragma: no cover - cudza dostepnosc to nie nasz blad
         print(f"[partner-ping] nie odpowiedzial: {e}")
 
