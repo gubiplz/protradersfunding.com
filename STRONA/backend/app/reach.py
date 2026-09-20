@@ -657,15 +657,20 @@ def zamow_subskrypcje(session, kanal: str, ilosc: int, usluga: int,
             "cost": cena, "service": wybrana, "balance": po.get("value")}
 
 
-def po_publikacji(session, link: str | None, *, transport=None) -> dict:
-    """Hak dla Payout BOT-a: zamówienie zaraz po udanej publikacji posta."""
+def po_publikacji(session, link: str | None, *, transport=None,
+                  powod: str = "payout") -> dict:
+    """Hak po udanej publikacji posta — Payout BOT i kolejka treści.
+
+    `powod` trafia do dziennika zamówień, więc musi mówić, KTO zamówił:
+    inaczej nie da się odpowiedzieć, na co poszły pieniądze.
+    """
     if not link:
         return {"ordered": 0, "skipped": "no post url"}
     try:
         nazwa = _czysta_nazwa(link.rsplit("/", 2)[-2] if link.count("/") >= 4 else "")
         if nazwa and not kanal_wlaczony(session, nazwa):
             return {"ordered": 0, "skipped": f"channel @{nazwa} is off the list"}
-        return zamow(session, link, transport=transport, powod="payout")
+        return zamow(session, link, transport=transport, powod=powod)
     except Exception as e:  # pragma: no cover - zamówienie nie może cofnąć wypłaty
         print(f"[reach] zamówienie po publikacji nieudane: {e}")
         return {"ordered": 0, "error": str(e)}

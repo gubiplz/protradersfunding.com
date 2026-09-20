@@ -23,12 +23,13 @@ co tym samym kanałem idzie obok niej.
 """
 from __future__ import annotations
 
+import html
 import re
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func
 
-from . import certshot, telegram
+from . import certshot, reach, telegram
 from .config import get_settings
 from .models import Account, ChannelPost, Payout, Trader
 
@@ -44,6 +45,23 @@ KANALY = {
 STATUSY = ("draft", "approved", "scheduled", "published", "failed")
 
 # Limity Telegrama. Podpis pod zdjęciem 1024 znaki, sam tekst 4096.
+_ZNACZNIKI_RX = re.compile(r"<[^>]+>")
+
+
+def dlugosc_widoczna(tekst: str) -> int:
+    """Ile znaków NAPRAWDĘ zobaczy Telegram.
+
+    Przy `parse_mode=HTML` limit dotyczy tekstu PO sparsowaniu: znaczniki
+    i encje się do niego nie liczą. Mierzenie surowego HTML-a odrzucało posty,
+    które w rzeczywistości się mieszczą — `<a href="…">` to kilkadziesiąt
+    znaków, których czytelnik nigdy nie zobaczy, a `&#39;` zamiast apostrofu
+    to pięć zamiast jednego. Tą pomyłką cztery posty z archiwum straciły
+    grafikę: import degradował je do samego tekstu, bo „nie mieściły się”
+    w podpisie, w którym mieściły się z zapasem.
+    """
+    return len(html.unescape(_ZNACZNIKI_RX.sub("", tekst or "")))
+
+
 LIMIT_PODPISU = 1024
 # Rodzaje postów, które niosą załącznik — i przez to krótszy limit podpisu.
 ZE_ZALACZNIKIEM = ("photo", "video")
@@ -153,8 +171,9 @@ def waliduj(session, post: ChannelPost) -> None:
     # w połowie zdania, a obcięte zdanie potrafi znaczyć coś innego niż całe.
     # Podpis pod zdjęciem I pod filmem ma ten sam limit 1024 znaków.
     limit = LIMIT_PODPISU if post.kind in ZE_ZALACZNIKIEM else LIMIT_TEKSTU
-    sprawdz(len(tresc) <= limit,
-            f"treść ma {len(tresc)} znaków, a limit dla tego typu posta to {limit} "
+    dlugosc = dlugosc_widoczna(post.body)
+    sprawdz(dlugosc <= limit,
+            f"treść ma {dlugosc} znaków, a limit dla tego typu posta to {limit} "
             f"— Telegram utnie ją w połowie zdania")
 
     if post.kind in ZE_ZALACZNIKIEM:
@@ -231,7 +250,7 @@ def waliduj(session, post: ChannelPost) -> None:
 #  Publikacja                                                                  #
 # --------------------------------------------------------------------------- #
 def opublikuj(session, post: ChannelPost, *, transport_shot=None,
-              transport_tg=None) -> dict:
+              transport_tg=None, transport_reach=None) -> dict:
     """Waliduje PONOWNIE i publikuje. Best-effort: zapisuje błąd, nie rzuca dalej.
 
     Wołane także z crona, gdzie wyjątek zabrałby cały przebieg ticku.
@@ -286,9 +305,27 @@ def opublikuj(session, post: ChannelPost, *, transport_shot=None,
         post.last_error = (powod or "unknown")[:300]
     post.updated_at = datetime.now(timezone.utc)
     session.commit()
+    # Zasieg dokupujemy tak samo jak przy wyplatach. Do tej pory `po_publikacji`
+    # wolal WYLACZNIE payout bot, wiec post z kolejki tresci wychodzil bez
+    # reakcji i wyswietlen — nie dlatego, ze reach bot byl wylaczony, tylko
+    # dlatego, ze nikt go nie pytal. Best-effort: nieudane zamowienie nie moze
+    # cofnac publikacji, ktora juz sie odbyla.
+    zasieg = {}
+    if ok:
+        try:
+            zasieg = reach.po_publikacji(session, post.post_url,
+                                         transport=transport_reach, powod="content")
+        except Exception as e:  # pragma: no cover - publikacji nie da sie cofnac
+            # Post JUZ wisi na kanale. Wyjatek z dokupienia zasiegu nie moze
+            # sie stad wydostac, bo wywolujacy zobaczylby nieudany przebieg
+            # tam, gdzie publikacja w pelni sie powiodla.
+            print(f"[contentbot] zasieg po publikacji nieudany: {e}")
+            zasieg = {"ordered": 0, "error": str(e)}
+
     return {"posted": ok, "reason": "" if ok else post.last_error,
             "post_url": post.post_url,
-            "photo": bool(png or adres_foto), "video": bool(adres_klipu)}
+            "photo": bool(png or adres_foto), "video": bool(adres_klipu),
+            "reach": zasieg}
 
 
 def wyslij_zaplanowane(session, now: datetime | None = None) -> dict:
@@ -419,7 +456,9 @@ def importuj_archiwum(session, posty: list[dict], *, kanal: str = "mgmt",
         # Zdjęcie tylko wtedy, gdy podpis się w nim mieści — Telegram tnie
         # podpis na 1024 znakach, a obcięte zdanie potrafi znaczyć co innego.
         foto = (wpis.get("photos") or [None])[0]
-        ze_zdjeciem = bool(foto) and len(tresc) <= LIMIT_PODPISU
+        # Mierzymy TEKST WIDOCZNY, nie surowy HTML — inaczej post, ktory
+        # miesci sie w podpisie, traci zdjecie przez wlasne znaczniki.
+        ze_zdjeciem = bool(foto) and dlugosc_widoczna(tresc) <= LIMIT_PODPISU
         session.add(ChannelPost(
             channel=kanal,
             kind="photo" if ze_zdjeciem else "text",
