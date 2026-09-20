@@ -347,6 +347,12 @@ class Settings:
     # odświeża się ruchem, bo cron Hobby ma dwa sloty i oba zajmuje ten
     # panel. Wyłącznik jest, bo to uprzejmość wobec cudzego systemu,
     # a nie nasza funkcja — ma dać się zgasić bez zmiany kodu.
+    # Czy kolejka treści publikuje z ruchu strony. Bez tego chodzi wyłącznie
+    # z crona, a ten na Hobby budzi się raz na dobę — wtedy rozrzucone pory
+    # publikacji są dekoracją, bo wszystko i tak wychodzi o godzinie crona.
+    content_on_traffic: bool = (
+        os.getenv("CONTENT_ON_TRAFFIC", "true").strip().lower()
+        not in ("0", "false", "no"))
     partner_ping_on_traffic: bool = (
         os.getenv("PARTNER_PING_ON_TRAFFIC", "true").strip().lower()
         not in ("0", "false", "no"))

@@ -6067,7 +6067,15 @@ def admin_channel_post_approve(post_id: int):
             contentbot.waliduj(session, p)
         except contentbot.NieprawdziwyPost as e:
             raise HTTPException(400, str(e))
-        p.status, p.last_error = "approved", ""
+        # Post, ktory MA JUZ TERMIN, zatwierdzenie od razu uzbraja. Inaczej
+        # zostawal w stanie „approved z data", ktory dla crona nie znaczy nic
+        # (`wyslij_zaplanowane` bierze wylacznie `scheduled`), a w panelu
+        # wyglada jak gotowy do wyjscia — termin widoczny, status zielony.
+        # Dokladnie tak przepadly wszystkie posty odtworzone z archiwum:
+        # przyszly z importu z data, czlowiek klikal Approve i nic sie nie
+        # dzialo, bo drugi klik w Schedule nie wygladal na potrzebny.
+        p.status = "scheduled" if p.scheduled_for else "approved"
+        p.last_error = ""
         p.updated_at = datetime.now(timezone.utc)
         session.commit()
         return _post_dict(p)
@@ -7469,6 +7477,10 @@ async def _lazy_tick_middleware(request: Request, call_next):
         # raz na dobę. Guard raz-na-LEADS_SWEEP_MIN siedzi w _lead_sweep_z_ruchu.
         if settings.leads_on_traffic:
             await run_in_threadpool(_lead_sweep_z_ruchu)
+        # Kolejka tresci na tym samym ruchu. Bez tego posty wychodza wylacznie
+        # o godzinie crona, a wylosowane pory publikacji sa dekoracja.
+        if settings.content_on_traffic:
+            await run_in_threadpool(_content_sweep_z_ruchu)
         # Uprzejmosc wobec partnera: jego licznik miejsc tez budzi sie ruchem,
         # a nasz panel chodzi rowniej niz jego kampanie. Wlasny throttle
         # w srodku, wiec to najczesciej jeden test zegara.
@@ -10429,6 +10441,50 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
 # świadomie: częściej = szybszy nudge „nikt nie wziął", ale każdy przebieg to
 # pełny przegląd tabeli leadów.
 LEADS_SWEEP_MIN = 10
+
+
+# Jak często wolno zajrzeć do kolejki treści przy ruchu. Dziesięć minut to
+# kompromis: post wychodzi blisko swojej wylosowanej minuty, a gdyby zaległo
+# się ich kilka (np. po przerwie), kanał dostaje je w rytmie, a nie ścianą.
+CONTENT_SWEEP_MIN = 10
+
+
+def _content_sweep_z_ruchu() -> None:
+    """Publikacja zaległego posta z ruchu strony.
+
+    `_content_tick` był wołany tylko z `/api/tick`, a cron na Hobby chodzi raz
+    na dobę — więc wylosowane pory publikacji nie miały znaczenia i wszystko
+    wychodziło o godzinie crona. Budzikiem jest teraz ruch, dokładnie jak przy
+    payout bocie i follow-upach leadów.
+
+    Strażnik w `app_settings`, nie w pamięci: instancji jest wiele i każda
+    miałaby własny licznik, czyli limit przestałby cokolwiek ograniczać.
+    Znacznik commitowany PRZED robotą, żeby dwa równoległe requesty nie
+    wysłały dwóch postów. NIGDY nie rzuca — odpowiedź dla klienta jest
+    ważniejsza niż post na kanale.
+    """
+    try:
+        now = datetime.now(timezone.utc)
+        session = SessionLocal()
+        try:
+            row = session.get(AppSetting, "contentbot_last_sweep")
+            if row and row.value:
+                try:
+                    ostatni = _utc(datetime.fromisoformat(row.value))
+                    if ostatni and (now - ostatni).total_seconds() < CONTENT_SWEEP_MIN * 60:
+                        return
+                except ValueError:
+                    pass
+            if row is None:
+                row = AppSetting(key="contentbot_last_sweep", value="")
+                session.add(row)
+            row.value = now.isoformat()
+            session.commit()
+        finally:
+            session.close()
+        _content_tick()
+    except Exception as e:  # pragma: no cover - post nie moze wywrocic requestu
+        print(f"[contentbot] przebieg z ruchu nie wyszedl: {e}")
 
 
 def _lead_sweep_z_ruchu() -> None:
