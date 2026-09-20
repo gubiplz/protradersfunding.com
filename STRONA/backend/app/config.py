@@ -342,6 +342,14 @@ class Settings:
     # Puste = panel oferuje tylko link na własnej domenie, czyli stan sprzed
     # tej zmiany.
     partner_pay_base_url: str = os.getenv("PARTNER_PAY_BASE_URL", "").rstrip("/")
+    # Czy z NASZEGO ruchu dorzucać uderzeń budzikowi partnera. Ten sam
+    # adres co wyżej, inne zastosowanie: u partnera licznik miejsc
+    # odświeża się ruchem, bo cron Hobby ma dwa sloty i oba zajmuje ten
+    # panel. Wyłącznik jest, bo to uprzejmość wobec cudzego systemu,
+    # a nie nasza funkcja — ma dać się zgasić bez zmiany kodu.
+    partner_ping_on_traffic: bool = (
+        os.getenv("PARTNER_PING_ON_TRAFFIC", "true").strip().lower()
+        not in ("0", "false", "no"))
     # Rabat należny klientowi, którego przyprowadził partner. To warunek umowy,
     # więc — tak samo jak adres wyżej — nie ma go w kodzie: repozytorium jest
     # publiczne, a stawka potrafi się zmienić szybciej niż deploy. 0 = okno

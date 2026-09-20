@@ -16,6 +16,7 @@ import html
 import io
 import json
 import os
+import urllib.request
 import random
 import re
 import secrets
@@ -7355,6 +7356,42 @@ _LAZY_TICK_PATHS = {"/api/me/accounts", "/api/accounts", "/api/leaderboard"}
 _PAYOUT_TICK_PATHS = _LAZY_TICK_PATHS | {"/api/public/stats"}
 
 
+# Puls do partnera: kiedy ostatnio poszedł i jak rzadko wolno. Pięć minut,
+# bo licznik po tamtej stronie zmienia się kilka razy dziennie, a nie co
+# minutę — częściej byłoby pukaniem bez powodu.
+_OSTATNI_PING_PARTNERA = 0.0
+_PING_PARTNERA_SEK = 300
+
+
+def _ping_partnera() -> None:
+    """Dorzuca uderzenie budzikowi partnera, jeśli minęło dość czasu.
+
+    Partner ma ten sam problem co my — konto Hobby, dwa sloty crona zajęte
+    przez ten panel — więc jego licznik miejsc odświeża się RUCHEM. Ruch na
+    jego stronie chodzi falami razem z kampaniami, a panel odzywa się przez
+    cały dzień, więc stąd dokładamy mu pulsu.
+
+    Adres wyłącznie ze zmiennej środowiskowej: oba repozytoria są publiczne,
+    a nazwy partnera w kodzie być nie może (`test_domena_partnera_nie_siedzi_w_kodzie`).
+
+    Nic tu nie może wywrócić requestu ani go opóźnić: cudzy endpoint to cudza
+    dostępność. Krótki timeout i połknięty wyjątek są tu cechą, nie
+    niedbalstwem.
+    """
+    global _OSTATNI_PING_PARTNERA
+    baza = settings.partner_pay_base_url
+    if not baza:
+        return
+    teraz = time.time()
+    if teraz - _OSTATNI_PING_PARTNERA < _PING_PARTNERA_SEK:
+        return
+    _OSTATNI_PING_PARTNERA = teraz
+    try:
+        urllib.request.urlopen(baza + "/api/spots-ping", timeout=4).read(200)
+    except Exception as e:  # pragma: no cover - cudza dostepnosc to nie nasz blad
+        print(f"[partner-ping] nie odpowiedzial: {e}")
+
+
 async def _lazy_tick() -> None:
     """Dogania silnik przy wejściu na dashboard — dla hostingu bezserwerowego.
 
@@ -7415,6 +7452,11 @@ async def _lazy_tick_middleware(request: Request, call_next):
         # raz na dobę. Guard raz-na-LEADS_SWEEP_MIN siedzi w _lead_sweep_z_ruchu.
         if settings.leads_on_traffic:
             await run_in_threadpool(_lead_sweep_z_ruchu)
+        # Uprzejmosc wobec partnera: jego licznik miejsc tez budzi sie ruchem,
+        # a nasz panel chodzi rowniej niz jego kampanie. Wlasny throttle
+        # w srodku, wiec to najczesciej jeden test zegara.
+        if settings.partner_ping_on_traffic:
+            await run_in_threadpool(_ping_partnera)
     return await call_next(request)
 
 
