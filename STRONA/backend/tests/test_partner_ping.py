@@ -63,7 +63,8 @@ def test_puls_idzie_pod_adres_ze_zmiennej(monkeypatch, strzaly):
 
     main._ping_partnera()
 
-    assert strzaly == [f"{BAZA}/api/spots-ping"]
+    assert strzaly == [f"{BAZA}/api/spots-ping?src=panel"], \
+        "znacznik jest po to, zeby w logach partnera odroznic puls STAD"
 
 
 def test_drugi_strzal_w_oknie_nie_wychodzi(monkeypatch, strzaly):

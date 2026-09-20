@@ -7387,7 +7387,10 @@ def _ping_partnera() -> None:
         return
     _OSTATNI_PING_PARTNERA = teraz
     try:
-        urllib.request.urlopen(baza + "/api/spots-ping", timeout=4).read(200)
+        # Znacznik w adresie, zeby w logach partnera dalo sie odroznic puls
+        # STAD od pulsu z jego wlasnego ruchu. Bez tego nie da sie
+        # odpowiedziec na pytanie "czy ta droga w ogole dziala".
+        urllib.request.urlopen(baza + "/api/spots-ping?src=panel", timeout=4).read(200)
     except Exception as e:  # pragma: no cover - cudza dostepnosc to nie nasz blad
         print(f"[partner-ping] nie odpowiedzial: {e}")
 
