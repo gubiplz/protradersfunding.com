@@ -34,14 +34,15 @@ def zeruj_throttle():
 
 @pytest.fixture
 def strzaly(monkeypatch):
-    wywolane: list[str] = []
+    """Zapamietuje ZADANIA, nie adresy — naglowek jest tu tak samo istotny."""
+    wywolane: list = []
 
     class Odp:
         def read(self, _n=None):
             return b"{}"
 
-    def fake(url, timeout=None):
-        wywolane.append(url)
+    def fake(zadanie, timeout=None):
+        wywolane.append(zadanie)
         return Odp()
 
     monkeypatch.setattr(main.urllib.request, "urlopen", fake)
@@ -63,8 +64,22 @@ def test_puls_idzie_pod_adres_ze_zmiennej(monkeypatch, strzaly):
 
     main._ping_partnera()
 
-    assert strzaly == [f"{BAZA}/api/spots-ping?src=panel"], \
+    assert len(strzaly) == 1
+    assert strzaly[0].full_url == f"{BAZA}/api/spots-ping?src=panel", \
         "znacznik jest po to, zeby w logach partnera odroznic puls STAD"
+
+
+def test_puls_niesie_naglowek_przegladarki(monkeypatch, strzaly):
+    """Sedno awarii, ktora to zlapala: strona partnera stoi za Cloudflare,
+    ktory goly request z Pythona odrzuca jako bota. Bez tego naglowka puls
+    dostaje 403 i NIE DOCIERA — a po naszej stronie wszystko wyglada sprawnie.
+    Ta sama pulapka wywrocila kiedys `spots-sync`."""
+    monkeypatch.setattr(main.settings, "partner_pay_base_url", BAZA)
+
+    main._ping_partnera()
+
+    ua = strzaly[0].get_header("User-agent") or ""
+    assert "Mozilla" in ua, "bez naglowka przegladarki Cloudflare odbija puls"
 
 
 def test_drugi_strzal_w_oknie_nie_wychodzi(monkeypatch, strzaly):

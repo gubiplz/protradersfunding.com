@@ -7390,8 +7390,17 @@ def _ping_partnera() -> None:
         # Znacznik w adresie, zeby w logach partnera dalo sie odroznic puls
         # STAD od pulsu z jego wlasnego ruchu. Bez tego nie da sie
         # odpowiedziec na pytanie "czy ta droga w ogole dziala".
-        odp = urllib.request.urlopen(baza + "/api/spots-ping?src=panel",
-                                     timeout=4).read(200)
+        # Nagłówek przeglądarki NIE jest ozdobą. Strona partnera stoi za
+        # Cloudflare, który goły request z Pythona odrzuca jako bota —
+        # `urllib` bez tego dostaje 403 (kod 1010) i puls nie dociera wcale.
+        # Ta sama pułapka wywróciła kiedyś `spots-sync` i objawiała się tak
+        # samo: wszystko po naszej stronie wygląda na sprawne.
+        zadanie = urllib.request.Request(
+            baza + "/api/spots-ping?src=panel",
+            headers={"User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                    "Chrome/125.0 Safari/537.36")})
+        odp = urllib.request.urlopen(zadanie, timeout=4).read(200)
         # Log takze przy POWODZENIU. Cisza przy sukcesie znaczy, ze nie da sie
         # odroznic "puls poszedl" od "adresu nie ma w srodowisku, wiec funkcja
         # wyszla na samym poczatku" — a to dwa zupelnie rozne stany.
