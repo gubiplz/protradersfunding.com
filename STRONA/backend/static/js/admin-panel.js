@@ -192,6 +192,12 @@ const impQ=(sep='?')=>IMPORTED?sep+'imported=1':'';
 const impPill=()=>` · <span class="statlink" onclick="toggleImported()"
   title="Rows imported from the payout records: real payouts, but nobody signed up for them"
   >imported ${IMPORTED?'shown':'hidden'}</span>`;
+/* Ten sam warunek, ktory serwer stosuje przy `?imported=0` (main.py:_nie_import).
+   Potrzebny tutaj, bo JEDNA lista filtruje sie w przegladarce: `/api/admin/payouts`
+   celowo oddaje PELNA ksiege pieniedzy -- to jedyna droga do wystawienia
+   certyfikatu, wiec endpoint nie ma prawa niczego chowac. Patrz renderPayoutsView. */
+const DOMENA_ARCHIWALNA='@imported.local';
+const zArchiwum=r=>String(r&&r.trader_email||'').endsWith(DOMENA_ARCHIWALNA);
 /* Czy klienci z darmowego lejka są na liście. Osobno od filtrów w grupie, bo
    to inne pytanie: tamte zawężają „jakich", ten mówi „czy w ogóle". Domyślnie
    pokazani — gdyby domyślnie byli ukryci, panel po wdrożeniu wyglądałby jak
@@ -1193,7 +1199,14 @@ function renderPayoutsView(){
   const list=window._payReqs||[];
   const f=window._payFilter||'all';
   const q=(window._payQ||'').toLowerCase();
-  const rows=list.filter(r=>(f==='all'||r.status===f)&&
+  /* Wiersze archiwalne (import ewidencji + Payout BOT) odsiewamy TUTAJ, a nie
+     na serwerze jak na pozostalych zakladkach. Dwa powody: endpoint jest ksiega
+     pieniedzy i ma oddawac komplet, a dzieki pelnej liscie w pamieci widac, ILE
+     wierszy jest schowanych -- bez tego "3 of 3" wygladaloby jak utrata bazy.
+     Wnioski traderow maja prawdziwe adresy, wiec nie znikaja nigdy. */
+  const widoczne=IMPORTED?list:list.filter(r=>!zArchiwum(r));
+  const ukryte=list.length-widoczne.length;
+  const rows=widoczne.filter(r=>(f==='all'||r.status===f)&&
     (!q||String(r.account_login||'').toLowerCase().includes(q)
       ||(r.trader_email||'').toLowerCase().includes(q)
       ||(r.method||'').toLowerCase().includes(q)||(r.status||'').includes(q)));
@@ -1203,7 +1216,8 @@ function renderPayoutsView(){
       ${list.length?`${searchBox('pay-q','_payQ','renderPayoutsView','Search account, trader or method…')}
       <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._payFilter='${f===k?'all':k}';renderPayoutsView()">${l}</button>`).join('')}</div>`:''}
       <button class="btn-o sm" onclick="openPayoutImport()">Import history</button>
-      ${list.length?`<span class="count-pill">${rows.length} of ${list.length}</span>`:''}
+      ${list.length?`<span class="count-pill">${rows.length} of ${list.length}${
+        ukryte?` · <span class="muted">${ukryte} imported hidden</span>`:''}${impPill()}</span>`:''}
     </div>`+(rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.payouts">
     <thead><tr><th>Date</th><th>Account</th><th>Trader</th><th>Profit</th><th>Trader share</th><th>Method</th><th>Status</th><th class="no-sort">Certificate</th><th class="no-sort"></th></tr></thead>
     <tbody>${rows.map(r=>`<tr>
@@ -1235,6 +1249,11 @@ function renderPayoutsView(){
               r.kind==='payout'?'Delete payout':'Delete request')}</td></tr>`).join('')}
     </tbody></table></div>
     <p class="muted" style="font-size:11.5px;margin-top:10px">Approving pays the trader share and refunds the challenge fee on the first payout for that account.</p>`
+    /* Gdy WSZYSTKO, co jest w ksiedze, to wiersze archiwalne, zwykle "No payouts
+       match" wskazywaloby na wyszukiwarke -- a schowal je przelacznik. */
+    :!widoczne.length&&ukryte?`<div class="empty"><h3>Only imported payouts here</h3>
+      <p>All ${ukryte} rows come from the payout records, and imported rows are hidden.
+      <span class="statlink" onclick="toggleImported()">Show them</span>.</p></div>`
     :list.length?`<div class="empty"><h3>No payouts match</h3><p>Try a different search or filter.</p></div>`
     :`<div class="empty"><h3>No payouts yet</h3><p>Payouts you issue and requests from funded traders both land here.</p></div>`);
 }
