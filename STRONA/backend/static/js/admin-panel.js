@@ -800,6 +800,17 @@ const VIEWS={
     </div>
 
     <div class="sec-card card-md">
+      <h3>Copytrading accounts</h3>
+      <p class="muted" style="font-size:12.5px;margin-bottom:14px">The Copytrading add-on ($299) is the only product that gives the buyer a <b>real</b> MT5 account. Everything else runs on local credentials. Each real account costs us a monthly fee at the provider, so this stays off until the channel is proven.</p>
+      <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="copy-real" ${poolData.copytrading_real?'checked':''} onchange="setCopytradingReal(this.checked)" style="width:16px;height:16px;accent-color:var(--acc)">
+        Provision real MT5 accounts for Copytrading purchases
+      </label>
+      <p class="muted" style="font-size:12px;margin-top:6px">Off: those accounts get local credentials like everyone else, and the add-on stays what it is — a written permission to copy between the trader's own accounts. Turning this off never takes a real account away from someone who already has one.</p>
+      ${poolData.copytrading_waiting>0?`<div class="warn-box" style="margin:12px 0 0"><div><b>${poolData.copytrading_waiting}</b> paid ${poolData.copytrading_waiting===1?'account is':'accounts are'} waiting for real credentials. They stay in the queue until a channel succeeds or you add a matching account to the pool.</div></div>`:''}
+    </div>
+
+    <div class="sec-card card-md">
       <h3>Add account manually</h3>
       <p class="muted" style="font-size:12.5px;margin-bottom:14px">Accounts you created at your broker. Paste the credentials here. Provisioning assigns the first free account of a matching size when a challenge is purchased.</p>
       <div class="pool-form">
@@ -824,8 +835,9 @@ const VIEWS={
  async settings(){
   // Payout BOT i Reach BOT przeniosly sie do zakladki Telegram, wiec ten widok
   // nie ciagnie juz ich stanu — dwa zapytania mniej przy kazdym wejsciu.
-  const [s,bg]=await Promise.all([api('/api/stats'),
-    api('/api/admin/bogo-promo').catch(()=>({enabled:false}))]);
+  const [s,bg,cp]=await Promise.all([api('/api/stats'),
+    api('/api/admin/bogo-promo').catch(()=>({enabled:false})),
+    api('/api/admin/copytrading-offer').catch(()=>({enabled:false,price_usd:299,real_mt5:false}))]);
   $('view').innerHTML=`
     <div class="card-cols">
     <div class="sec-card" style="max-width:560px"><h3>Telegram</h3>
@@ -848,6 +860,26 @@ const VIEWS={
         off later does not take BOGO away from a customer who already holds a payment link, and
         turning it on does not add it to orders issued before. For a single lead you can always
         override this with the checkbox in the New order window or on the order itself.</p></div>
+
+    <div class="sec-card" style="max-width:560px"><h3>Copytrading add-on</h3>
+      <div class="chip-row" style="margin-bottom:12px">
+        <span class="status ${cp.enabled?'funded':'pending'}"><span class="dot"></span>${cp.enabled?'in the cart':'hidden'}</span>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn-p" onclick="setCopytradingOffer(${cp.enabled?'false':'true'})">${cp.enabled?'Hide from the cart':'Show in the cart'}</button>
+      </div>
+      <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
+        <b>$${fmt(cp.price_usd||299)}</b> — permission to copy trades between the trader's own
+        accounts and to log in from more than one device. While it's on, the checkbox appears in
+        the buy modal; while it's off the checkbox is gone <b>and the server refuses the add-on</b>,
+        so it cannot be bought by a crafted request either. Accounts already sold keep the
+        permission — turning this off changes only what is on sale.
+        ${cp.real_mt5
+          ? `Accounts bought with it are provisioned as <b>real MT5</b> — switch that off in the
+             <a href="#" onclick="go('pool');return false">MT5 Pool</a> tab.`
+          : `Accounts bought with it currently get <b>local credentials</b>, like every other
+             account. Real MT5 for them is switched on in the
+             <a href="#" onclick="go('pool');return false">MT5 Pool</a> tab.`}</p></div>
 
     <div class="sec-card" style="max-width:560px"><h3>Notifications</h3>
       <div class="mod-row">
@@ -2670,7 +2702,7 @@ async function openAccount(id){
         ${a.phase!=='eval_1'?`<button class="btn-o sm" onclick="setPhase(${a.id},'eval_1')">Back to Phase 1</button>`:''}
         ${(a.steps>=2&&a.phase!=='eval_2')?`<button class="btn-o sm" onclick="setPhase(${a.id},'eval_2')">Move to Phase 2</button>`:''}
         ${a.phase!=='funded'?`<button class="btn-p sm" onclick="setPhase(${a.id},'funded')">Make funded</button>`:''}
-        ${a.status!=='failed'?`<button class="btn-o sm" style="border-color:var(--red-line);color:var(--red)" onclick="breachAccount(${a.id},'${jsq(a.login||'')}')">Breach account</button>`:''}
+        ${a.status!=='failed'?`<button class="btn-o sm" style="border-color:var(--red-line);color:var(--red)" onclick="breachAccount(${a.id},'${jsq(a.login||'')}',${a.copytrading?'true':'false'})">Breach account</button>`:''}
       </div>
       <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
         The risk engine promotes accounts automatically once the profit target and minimum
@@ -3362,13 +3394,23 @@ function askReason(opts){
 }
 
 /* ---------- payouts + certificates ---------- */
-async function breachAccount(id,login){
+/* `copytrading` decyduje o dwóch podpowiedziach, nie o uprawnieniu — serwer
+   i tak odrzuca te powody dla konta z dodatkiem (main.py). Chodzi o to, żeby
+   panel nie proponował kliknięcia, które zaraz odbije się z błędem: trader
+   z add-onem MA na piśmie zgodę na kopiowanie między swoimi kontami i na wiele
+   urządzeń, więc breach za to jest naszym błędem, nie jego. „Account sharing"
+   znika z listy razem z nimi, bo w tej sytuacji jest mylące — oddanie
+   poświadczeń komuś obcemu dalej jest zakazane i wtedy trzeba to napisać
+   wprost, własnymi słowami. */
+async function breachAccount(id,login,copytrading){
+  const powody=['Daily loss limit exceeded','Maximum drawdown exceeded',
+    'Prohibited trading strategy','Copy trading between accounts',
+    'News trading violation','Account sharing','Closed by the risk desk'];
   const breachReason=await askReason({
     title:login?`Breach account ${esc(login)}`:'Breach this account',danger:true,confirmLabel:'Breach account',
-    hint:'The account is closed as <b>failed</b> and the reason below is shown to the trader in the portal and by e-mail.',
-    presets:['Daily loss limit exceeded','Maximum drawdown exceeded',
-      'Prohibited trading strategy','Copy trading between accounts',
-      'News trading violation','Account sharing','Closed by the risk desk']});
+    hint:'The account is closed as <b>failed</b> and the reason below is shown to the trader in the portal and by e-mail.'
+      +(copytrading?'<br><b>This account holds the Copytrading add-on</b> — copying between the trader\'s own accounts and using more than one device are allowed on it.':''),
+    presets:copytrading?powody.filter(p=>!/copy trading|account sharing/i.test(p)):powody});
   if(breachReason===null)return;   // Cancel
   try{const r=await api(`/api/admin/accounts/${id}/breach`,{method:'POST',
       body:JSON.stringify({reason:breachReason})});
@@ -3953,6 +3995,17 @@ async function provisionReal(accountId){
     toast(`Real MT5 ready: ${r.platform_login}@${r.platform_server}`,'ok',8000);
     go('pool');
   }catch(e){toast('Error: '+e.message,'err')}
+}
+async function setCopytradingReal(on){
+  try{await api('/api/admin/pool/copytrading-real',{method:'POST',body:JSON.stringify({enabled:!!on})});
+    toast(on?'Copytrading purchases will get real MT5 accounts.':'Copytrading purchases will get local credentials.','ok');
+  }catch(e){toast(e.message||'Could not save','err'); go(VIEW)}
+}
+async function setCopytradingOffer(on){
+  try{await api('/api/admin/copytrading-offer',{method:'POST',body:JSON.stringify({enabled:!!on})});
+    toast(on?'Copytrading is now offered in the cart.':'Copytrading is hidden from the cart.','ok');
+  }catch(e){toast(e.message||'Could not save','err')}
+  go(VIEW);
 }
 async function setRealFallback(on){
   try{await api('/api/admin/pool/real-fallback',{method:'POST',body:JSON.stringify({enabled:on})});

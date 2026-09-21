@@ -490,6 +490,10 @@ def _account_dict(acc: Account, with_metrics: bool = True, with_credentials: boo
         "initial_balance": acc.initial_balance, "steps": acc.steps,
         "drawdown_type": acc.drawdown_type, "profit_split_pct": acc.profit_split_pct,
         "weekend_trading": bool(getattr(acc, "weekend_trading", False)),
+        # Portal rysuje z tego plakietke „Copytrading" i — co wazniejsze —
+        # odswieza liczby tylko na kontach, za ktorymi stoi realny rachunek.
+        "copytrading": bool(getattr(acc, "copytrading", False)),
+        "mt5_backed": bool(getattr(acc, "mt5_backed", False)),
         "max_lots": getattr(acc, "max_lots", 0.0) or 0.0,
         "phase": acc.phase, "status": acc.status,
         "balance": round(acc.balance, 2), "equity": round(acc.equity, 2),
@@ -1312,6 +1316,7 @@ class CheckoutIn(BaseModel):
     weekend_trading: bool = False
     split_boost: bool = False          # +10 pp splitu (tylko Instant; pilnuje billing)
     express_payout: bool = False       # wnioski o wypłatę na początek kolejki
+    copytrading: bool = False          # kopiowanie miedzy wlasnymi kontami + wiele urzadzen
     use_credits: bool = True           # False = zostaw kredyty sklepowe na później
     # Dane potrzebne do założenia konta demo MT5 na nazwisko klienta.
     # Zbierane w kroku płatności; zapisywane na profilu tradera.
@@ -1371,6 +1376,7 @@ def _products_payload(session, trader_id: int | None = None) -> list[dict]:
     # DOKŁADNIE to, co zrobi checkout (jedno źródło prawdy).
     upgrades = catalog.upgrade_map(prods)
     zywe = offers.live_for(session, trader_id)
+    oferowany_copytrading = catalog.copytrading_offered(session)
     out = []
     for p in prods:
         d = _product_dict(p)
@@ -1382,6 +1388,12 @@ def _products_payload(session, trader_id: int | None = None) -> list[dict]:
         d["offer_pct"] = oferta.discount_pct if oferta else None
         d["offer_price_usd"] = offers.price_after(p, oferta) if oferta else None
         d["offer_ends_at"] = (oferta.ends_at.isoformat() if oferta else None)
+        # Flaga globalna, ale jedzie przy KAZDYM planie, bo modal zakupu i tak
+        # ma w rece wlasnie ten slownik (tak samo czyta `steps` przy Split
+        # Boost). Osobne zapytanie o jeden bool byloby kolejnym round-tripem
+        # przed pokazaniem koszyka.
+        d["copytrading_offered"] = oferowany_copytrading
+        d["copytrading_fee_usd"] = catalog.COPYTRADING_ADDON_USD
         out.append(d)
     return out
 
@@ -1451,6 +1463,7 @@ def checkout(payload: CheckoutIn, trader: Trader = Depends(auth.current_trader))
                                        weekend_trading=payload.weekend_trading,
                                        split_boost=payload.split_boost,
                                        express_payout=payload.express_payout,
+                                       copytrading=payload.copytrading,
                                        use_credits=payload.use_credits)
     finally:
         session.close()
@@ -1459,6 +1472,7 @@ def checkout(payload: CheckoutIn, trader: Trader = Depends(auth.current_trader))
 @app.get("/api/checkout/preview")
 def checkout_preview(product_key: str, coupon: str | None = None, promo_code: str | None = None,
                      weekend: bool = False, split_boost: bool = False, express: bool = False,
+                     copytrading: bool = False,
                      use_credits: bool = True,
                      trader: Trader = Depends(auth.current_trader)):
     """Podgląd rozbicia ceny dla modala zakupu — dokładnie ta sama matematyka
@@ -1469,11 +1483,13 @@ def checkout_preview(product_key: str, coupon: str | None = None, promo_code: st
         q = billing.compute_price(session, trader, product_key, coupon,
                                   promo_code=promo_code, weekend_trading=weekend,
                                   split_boost=split_boost, express_payout=express,
+                                  copytrading=copytrading,
                                   use_credits=use_credits)
         return {"plan_price_usd": q["plan_price_usd"], "discount_pct": q["discount_pct"],
                 "discount_usd": q["discount_usd"], "weekend_fee_usd": q["weekend_fee_usd"],
                 "split_boost_fee_usd": q["split_boost_fee_usd"],
                 "express_payout_fee_usd": q["express_payout_fee_usd"],
+                "copytrading_fee_usd": q["copytrading_fee_usd"],
                 "credits_used": q["credits_used"], "total_due_usd": q["total_due_usd"],
                 "discount_source": q["discount_source"], "offer_title": q["offer_title"],
                 "credits_balance": round(float(trader.credits_usd or 0), 2)}
@@ -4323,14 +4339,34 @@ class BreachIn(BaseModel):
     reason: str | None = None
 
 
+#: Powody breachu, ktorych NIE wolno uzyc wobec konta z add-onem Copytrading —
+#: bo za te wlasnie rzeczy trader nam zaplacil. Dopasowanie po fragmencie, nie
+#: po calym napisie: panel podpowiada gotowe zdanie, ale pole jest wolnego
+#: tekstu i „copy trading on 2 devices" ma odbic sie tak samo.
+_POWODY_SPRZECZNE_Z_COPYTRADINGIEM = ("copy trading", "copytrading", "account sharing",
+                                      "multiple devices", "more than one device")
+
+
 @app.post("/api/admin/accounts/{account_id}/breach", dependencies=[Depends(auth.require_admin)])
-def admin_breach_account(account_id: int, payload: BreachIn):
+async def admin_breach_account(account_id: int, payload: BreachIn):
     """Ręczne zamknięcie konta za złamanie zasad.
 
     Zapisuje wpis w historii breachy (typ `manual`), żeby powód został na stałe
     przy koncie — inaczej zostałby tylko w jednym polu i zniknął po pierwszej
     zmianie fazy. Trade BOT jest zatrzymywany: konto jest zamknięte, więc nie ma
     czego dalej rozgrywać.
+
+    Dwie rzeczy, których ta ścieżka wcześniej nie robiła:
+
+    1. **Egzekwuje.** Do tej pory ustawiała status u nas i wysyłała maila, ale
+       nie zamykała pozycji ani nie odcinała konta u brokera. Przy zmyślonych
+       poświadczeniach nie miało to znaczenia; przy realnym rachunku znaczyło,
+       że konto „zamknięte" dalej gra. Teraz idzie tą samą drogą co silnik.
+    2. **Nie pozwala zbreachować kogoś za to, co nam sprzedaliśmy.** Konto
+       z add-onem Copytrading ma na piśmie zgodę na kopiowanie między własnymi
+       kontami i na wiele urządzeń — a panel ma „Copy trading between accounts"
+       na liście gotowych powodów. Jedno kliknięcie z rozpędu i klient ma
+       rację, a my zwrot $299 plus zgłoszenie. Taki powód odbija się z 400.
     """
     session = SessionLocal()
     try:
@@ -4341,6 +4377,15 @@ def admin_breach_account(account_id: int, payload: BreachIn):
             raise HTTPException(400, "This account is already closed")
 
         powod = (payload.reason or "").strip() or "Closed by the risk desk"
+        if getattr(acc, "copytrading", False):
+            maly = powod.lower()
+            if any(fragment in maly for fragment in _POWODY_SPRZECZNE_Z_COPYTRADINGIEM):
+                raise HTTPException(
+                    400,
+                    "This account holds the Copytrading add-on: copying between the "
+                    "trader's own accounts and using more than one device are allowed "
+                    "on it. Sharing credentials with someone else still is not — say "
+                    "that explicitly if that is what happened.")
         if getattr(acc, "bot_enabled", False):
             tradebot.stop(session, acc)
         acc.status = "failed"
@@ -4350,12 +4395,17 @@ def admin_breach_account(account_id: int, payload: BreachIn):
                            equity_at_breach=round(acc.equity or 0.0, 2)))
         session.commit()
 
+        # Po commicie: stan w bazie ma byc zapisany takze wtedy, gdy broker
+        # milczy. Odwrotna kolejnosc znaczylaby, ze awaria sieci cofa breach.
+        zamkniete = await poller.odetnij_od_handlu(acc)
+
         trader = session.get(Trader, acc.trader_id) if acc.trader_id else None
         if trader:
             notify.send("breached", trader.email,
                         {"name": trader.full_name or trader.email,
                          "login": acc.login, "reason": powod})
-        return {"status": acc.status, "reason": acc.breach_reason, "login": acc.login}
+        return {"status": acc.status, "reason": acc.breach_reason, "login": acc.login,
+                "positions_closed": zamkniete}
     finally:
         session.close()
 
@@ -5254,6 +5304,42 @@ class BogoPromoIn(BaseModel):
     enabled: bool
 
 
+class CopytradingOfferIn(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/admin/copytrading-offer", dependencies=[Depends(auth.require_admin)])
+def admin_copytrading_offer_state():
+    session = SessionLocal()
+    try:
+        return {"enabled": catalog.copytrading_offered(session),
+                "price_usd": catalog.COPYTRADING_ADDON_USD,
+                "real_mt5": provisioning.copytrading_real_enabled(session)}
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/copytrading-offer", dependencies=[Depends(auth.require_admin)])
+def admin_copytrading_offer_set(payload: CopytradingOfferIn):
+    """Czy dodatek Copytrading widać w koszyku.
+
+    Wyłączenie chowa checkbox i ODRZUCA gołe POST-y z tą flagą (billing) —
+    schowany element formularza nie jest zabezpieczeniem. Kont już kupionych
+    nie dotyczy: zgoda na kopiowanie została im udzielona i zostaje.
+    """
+    session = SessionLocal()
+    try:
+        row = session.get(AppSetting, catalog.COPYTRADING_OFFERED_KEY)
+        if row is None:
+            row = AppSetting(key=catalog.COPYTRADING_OFFERED_KEY)
+            session.add(row)
+        row.value = "1" if payload.enabled else "0"
+        session.commit()
+        return {"enabled": payload.enabled}
+    finally:
+        session.close()
+
+
 @app.get("/api/admin/bogo-promo", dependencies=[Depends(auth.require_admin)])
 def admin_bogo_promo_state():
     session = SessionLocal()
@@ -5818,7 +5904,14 @@ def admin_pool_list():
         return {"pool": pula, "waiting": czekajace, "sizes": rozmiary,
                 "can_generate": mozna, "generate_hint": powod,
                 "sim_fallback": provisioning.sim_fallback_enabled(session),
-                "real_fallback": provisioning.real_fallback_enabled(session)}
+                "real_fallback": provisioning.real_fallback_enabled(session),
+                "copytrading_real": provisioning.copytrading_real_enabled(session),
+                # Ile oplaconych kont czeka na realny rachunek. Zero przy
+                # wlaczonym przelaczniku znaczy „nic nie wisi"; liczba wieksza
+                # od zera to kolejka, ktora sama sie nie rozejdzie.
+                "copytrading_waiting": session.query(Account).filter(
+                    Account.status == "provisioning",
+                    Account.copytrading == True).count()}
     finally:
         session.close()
 
@@ -6420,6 +6513,36 @@ def admin_pool_sim_fallback(payload: SimFallbackIn):
         row.value = "1" if payload.enabled else "0"
         session.commit()
         return {"sim_fallback": payload.enabled}
+    finally:
+        session.close()
+
+
+class CopytradingRealIn(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/admin/pool/copytrading-real", dependencies=[Depends(auth.require_admin)])
+def admin_pool_copytrading_real(payload: CopytradingRealIn):
+    """Przełącznik: konta z add-onem Copytrading dostają REALNY rachunek MT5.
+
+    Osobny od widoczności dodatku w koszyku (Settings), bo to dwie różne
+    decyzje. Sprzedaż można włączyć od razu — dodatek jest przede wszystkim
+    zgodą regulaminową. Realny rachunek kosztuje nas u dostawcy co miesiąc,
+    więc włącza się go dopiero, gdy kanał jest sprawdzony; do tego czasu konto
+    z dodatkiem idzie na poświadczenia lokalne, jak cała reszta produkcji.
+
+    Wyłączenie NIE zabiera realnego rachunku kontom, które już go mają —
+    dotyczy tego, co dopiero powstanie.
+    """
+    session = SessionLocal()
+    try:
+        row = session.get(AppSetting, provisioning.COPYTRADING_REAL_KEY)
+        if row is None:
+            row = AppSetting(key=provisioning.COPYTRADING_REAL_KEY)
+            session.add(row)
+        row.value = "1" if payload.enabled else "0"
+        session.commit()
+        return {"copytrading_real": payload.enabled}
     finally:
         session.close()
 
@@ -7547,6 +7670,31 @@ def _require_cron(x_admin_token: str | None = Header(default=None),
         if secrets.compare_digest(authorization.split(" ", 1)[1].strip(), sekret):
             return
     raise HTTPException(401, "Not allowed to trigger the risk engine")
+
+
+@app.api_route("/api/cron/risk", methods=["GET", "POST"], dependencies=[Depends(_require_cron)])
+async def api_cron_risk():
+    """Silnik ryzyka dla kont z REALNYM rachunkiem MT5 — co minute, z zewnatrz.
+
+    Cron Vercela na koncie Hobby chodzi raz na dobe i oba sloty sa zajete.
+    Konto, za ktore trader zaplacil i na ktorym naprawde handluje, nie moze
+    czekac na limit dziennej straty do jutra — wiec ten adres wola zewnetrzny
+    scheduler (cron-job.org / GitHub Actions) z naglowkiem
+    `Authorization: Bearer <CRON_SECRET>`. GET jest obsluzony, bo wiekszosc
+    schedulerow puka wlasnie GET-em.
+
+    NIE jest to `/api/tick` z wieksza czestotliwoscia. Tamten przy okazji
+    odpala payout bota, powiadomienia push, dzienne i tygodniowe podsumowania,
+    odzyskiwanie porzuconych koszykow, follow-upy leadow i PUBLIKACJE TRESCI
+    na kanale. Puszczenie tego 1440 razy dziennie zamiast raz nie byloby
+    optymalizacja, tylko awaria.
+
+    Bledy pojedynczych kont sa wyciszane w `tick_ryzyka` (kazde ma wlasny
+    `try`), ale awaria bazy czy feedu przechodzi tu na wierzch jako 500 —
+    celowo. Alert od schedulera jest jedynym monitoringiem, jaki mamy; ciche
+    200 przy martwym silniku byloby gorsze niz jego brak.
+    """
+    return await poller.tick_ryzyka()
 
 
 @app.api_route("/api/tick", methods=["GET", "POST"], dependencies=[Depends(_require_cron)])

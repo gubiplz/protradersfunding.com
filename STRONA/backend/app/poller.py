@@ -13,7 +13,8 @@ import random
 import time
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 
 from .config import get_settings
 from .db import SessionLocal
@@ -539,6 +540,130 @@ def backfill_bot(session, acc: Account, days: int, *, chunk_days: float = 3.0,
 
 def _active_query(session):
     return session.query(Account).filter(Account.status.in_(["active", "funded"]))
+
+
+async def odetnij_od_handlu(acc: Account) -> int:
+    """Zamyka pozycje i odcina konto od handlu u brokera. Zwraca liczbe zamknietych.
+
+    Wyciagniete z `process_account`, zeby RECZNY breach z panelu robil dokladnie
+    to samo, co automatyczny. Do tej pory nie robil: ustawial status w naszej
+    bazie i wysylal maila, a trader handlowal dalej. Przy zmyslonych
+    poswiadczeniach to nie mialo znaczenia — przy realnym rachunku znaczy, ze
+    konto „zamkniete" nadal gra.
+
+    Nie rzuca: breach ma sie dokonac takze wtedy, gdy broker nie odpowiada.
+    """
+    global _feed
+    if _feed is None:
+        _feed = make_feed()
+    maid = acc.metaapi_account_id
+    login, pw = acc.platform_login, acc.platform_password
+    # Konto botowe nie ma realnych pozycji; konto bez rachunku nie ma czego odcinac.
+    if getattr(acc, "bot_enabled", False) or not (maid or (login and pw)):
+        return 0
+    try:
+        zamkniete = await _feed.close_all_positions(maid, login=login, password=pw)
+        await _feed.lock(maid, login=login, password=pw)
+        print(f"[poller] ENFORCEMENT {acc.login}: odciete od handlu "
+              f"— zamknieto {zamkniete} pozycji", flush=True)
+        return zamkniete
+    except Exception as e:  # pragma: no cover - cudza dostepnosc
+        print(f"[poller] enforcement blad: {e}", flush=True)
+        return 0
+
+
+#: Znacznik ostatniego przebiegu ryzyka — patrz `_zajmij_tick_ryzyka`.
+RISK_TICK_KEY = "risk_tick_at"
+
+
+def _zajmij_tick_ryzyka(session, min_odstep_s: float) -> bool:
+    """Wpuszcza JEDEN przebieg naraz. True = mozesz liczyc.
+
+    Tick ryzyka odpala zewnetrzny scheduler co minute, a na hostingu
+    bezserwerowym kazde zadanie to inna instancja — dwa nakladajace sie
+    przebiegi policzylyby ten sam ruch dwa razy i dopisaly dwa snapshoty
+    equity do wykresu. Pamiec procesu niczego tu nie pilnuje, wiec zamek
+    siedzi w bazie.
+
+    Sedno jest w warunkowym UPDATE: `WHERE value = <to, co przeczytalem>`.
+    Bazy danych wykonuja go atomowo, wiec z dwoch rownoleglych instancji
+    dokladnie jedna dostaje rowcount 1. Samo "przeczytaj, porownaj, zapisz"
+    by nie wystarczylo — obie przeczytalyby te sama stara wartosc.
+    """
+    teraz = time.time()
+    row = session.get(AppSetting, RISK_TICK_KEY)
+    if row is None:
+        try:
+            session.add(AppSetting(key=RISK_TICK_KEY, value=str(teraz)))
+            session.commit()
+            return True
+        except IntegrityError:
+            # Ktos inny zdazyl zalozyc ten sam wiersz — czyli wlasnie liczy.
+            session.rollback()
+            return False
+
+    poprzedni = row.value
+    try:
+        if teraz - float(poprzedni) < min_odstep_s:
+            return False
+    except (TypeError, ValueError):
+        pass   # zepsuty wiersz nie ma prawa zablokowac silnika na zawsze
+
+    wynik = session.execute(
+        update(AppSetting)
+        .where(AppSetting.key == RISK_TICK_KEY, AppSetting.value == poprzedni)
+        .values(value=str(teraz)))
+    session.commit()
+    return wynik.rowcount == 1
+
+
+async def tick_ryzyka(min_odstep_s: float = 20.0) -> dict:
+    """Przebieg silnika TYLKO po kontach z realnym rachunkiem MT5.
+
+    `tick_once` robi cala reszte roboty doby: payout bota, powiadomienia,
+    podsumowania, publikacje na kanale, sprzatanie snapshotow. Odpalenie tego
+    1440 razy dziennie zamiast raz nie byloby optymalizacja, tylko awaria.
+    Tutaj liczy sie jedno: konto, za ktore ktos zaplacil, handluje NAPRAWDE
+    i limit dziennej straty ma byc zauwazony w minutach, a nie nazajutrz.
+
+    Konta bez `metaapi_account_id` sa pomijane swiadomie — ich equity nie
+    rusza sie samo, wiec czestszy przebieg nic by dla nich nie zmienil,
+    a kosztowalby tyle samo.
+    """
+    global _feed
+    if _feed is None:
+        _feed = make_feed()
+
+    session = SessionLocal()
+    try:
+        if not _zajmij_tick_ryzyka(session, min_odstep_s):
+            return {"skipped": True, "reason": "inny przebieg w toku"}
+    finally:
+        session.close()
+
+    # Konta z add-onem czekajace na poswiadczenia maja je dostac w minutach,
+    # a nie przy dobowym cronie. Backoff (w bazie) pilnuje, zeby nieudana
+    # proba nie powtarzala sie co tyknniecie.
+    await provisioning.provision_pending(SessionLocal, _feed)
+
+    session = SessionLocal()
+    try:
+        konta = _active_query(session).filter(Account.metaapi_account_id.isnot(None)).all()
+        bledy = 0
+        for acc in konta:
+            try:
+                await process_account(session, acc, _feed)
+            except Exception as e:
+                session.rollback()
+                bledy += 1
+                print(f"[risk] konto {acc.login}: przebieg nieudany: {e}", flush=True)
+        session.commit()
+        wynik = {"accounts": len(konta)}
+        if bledy:
+            wynik["errors"] = bledy
+        return wynik
+    finally:
+        session.close()
 
 
 async def tick_once() -> dict:

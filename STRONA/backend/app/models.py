@@ -190,6 +190,10 @@ class Order(Base):
     addon_split_boost: Mapped[bool] = mapped_column(Boolean, default=False)
     # Add-on Express Payout: wnioski o wypłatę z tego konta ida na poczatek kolejki.
     addon_express_payout: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Add-on Copytrading ($299): zgoda na kopiowanie miedzy wlasnymi kontami
+    # i na wiele urzadzen. Pociaga za soba REALNY rachunek MT5 — patrz
+    # `provisioning.chce_realnego_mt5`.
+    addon_copytrading: Mapped[bool] = mapped_column(Boolean, default=False)
     # Kredyty sklepowe odliczone od ceny tego zamowienia. Saldo tradera schodzi
     # dopiero przy DOMKNIECIU platnosci — porzucony checkout nie pali srodkow.
     credits_used: Mapped[float] = mapped_column(Float, default=0.0)
@@ -396,6 +400,11 @@ class Account(Base):
     # Add-on Express Payout kupiony przy checkoucie: wnioski o wypłatę z tego
     # konta panel pokazuje na poczatku kolejki przegladu.
     express_payout: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Add-on Copytrading kupiony przy checkoucie. Dwa skutki: (1) traderowi
+    # wolno kopiowac transakcje miedzy swoimi kontami i uzywac wielu urzadzen,
+    # wiec panel NIE moze breachowac takiego konta za kopiowanie; (2) tylko
+    # takie konto dostaje realny rachunek MT5 i realny odczyt equity.
+    copytrading: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # --- Trade BOT (admin) ---
     # Gdy wlaczony, konto NIE jest czytane z MT5 — snapshoty generuje tradebot.py.

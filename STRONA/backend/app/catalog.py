@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from .config import get_settings
-from .models import Product
+from .models import AppSetting, Product
 
 settings = get_settings()
 
@@ -48,6 +48,31 @@ WEEKEND_ADDON_USD = 199.0
 SPLIT_BOOST_ADDON_USD = 149.0
 SPLIT_BOOST_PP = 10
 EXPRESS_PAYOUT_ADDON_USD = 49.0
+
+# Add-on Copytrading: wolno kopiowac transakcje miedzy WLASNYMI kontami tradera
+# i logowac sie z wiecej niz jednego urzadzenia. Bez tego dodatku obowiazuje
+# dotychczasowy zakaz — panel ma „Copy trading between accounts" na liscie
+# powodow breachu i to sie nie zmienia dla kont bez dodatku.
+#
+# To jedyny add-on, ktory kosztuje NAS pieniadze po sprzedazy: konto z nim
+# dostaje realny rachunek MT5 u brokera, czytany przez MetaApi (oplata za konto
+# leci co miesiac, dopoki konto zyje). Stad cena osobno od reszty.
+COPYTRADING_ADDON_USD = 299.0
+
+# Czy add-on ma sie w ogole pokazywac w koszyku. Przelacznik z zakladki
+# Settings, trzymany w bazie — na hostingu bezserwerowym zmiana env to
+# redeploy, a to ma dzialac od klikniecia.
+#
+# Brak wiersza = WIDOCZNY. Domyslka jest po stronie sprzedazy, bo dodatek sam
+# w sobie jest tylko zgoda regulaminowa i nic nas nie kosztuje; to REALNE konta
+# MT5 kosztuja i te maja osobny przelacznik (zakladka MT5 Pool), domyslnie
+# wylaczony.
+COPYTRADING_OFFERED_KEY = "copytrading_offered"
+
+
+def copytrading_offered(session) -> bool:
+    row = session.get(AppSetting, COPYTRADING_OFFERED_KEY)
+    return row is None or row.value == "1"
 
 # Rozmiar oznaczany w sklepie jako „Best value". Etykieta marketingowa,
 # nie zmierzona statystyka — stala, nie zapytanie o sprzedaz. Gdyby miala byc

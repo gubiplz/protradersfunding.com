@@ -101,6 +101,58 @@ def test_zakup_bez_addonow_zostaje_przy_katalogowym_splicie():
     s.close()
 
 
+# --- Copytrading ---------------------------------------------------------- #
+# Jedyny add-on, ktory kosztuje NAS pieniadze po sprzedazy: konto z nim dostaje
+# realny rachunek MT5 czytany przez MetaApi. Dlatego flaga musi dojechac az na
+# konto — z niej, a nie z zamowienia, bierze sie decyzja o provisioningu.
+
+def test_copytrading_dolicza_299_na_kazdym_planie():
+    """Bez ograniczenia rodziny planow — inaczej niz Split Boost."""
+    _, h = _trader("addon-copy-preview@test.pl")
+
+    instant = client.get("/api/checkout/preview?product_key=instant-25k"
+                         "&copytrading=true", headers=h).json()
+    dwustop = client.get("/api/checkout/preview?product_key=2step-25k"
+                         "&copytrading=true", headers=h)
+
+    assert instant["copytrading_fee_usd"] == catalog.COPYTRADING_ADDON_USD == 299.0
+    assert instant["total_due_usd"] == INSTANT_25K + 299.0
+    assert dwustop.status_code == 200, "2-Step tez ma prawo kupic ten dodatek"
+    assert dwustop.json()["copytrading_fee_usd"] == 299.0
+
+
+def test_zakup_z_copytradingiem_znaczy_zamowienie_i_konto():
+    _, h = _trader("addon-copy-zakup@test.pl")
+
+    oid = client.post("/api/checkout", headers=h,
+                      json={"product_key": "instant-25k",
+                            "copytrading": True}).json()["order_id"]
+    done = client.post(f"/api/checkout/{oid}/mock-complete", headers=h)
+
+    assert done.status_code == 200
+    s = SessionLocal()
+    order, acc = s.get(Order, oid), s.get(Account, done.json()["account_id"])
+    assert order.addon_copytrading is True
+    assert order.amount_usd == INSTANT_25K + 299.0
+    assert acc.copytrading is True
+    s.close()
+
+
+def test_zakup_bez_copytradingu_nie_ustawia_flagi():
+    """Domyslka jest wazna: to ona pilnuje, komu zakladamy platne konto MT5."""
+    _, h = _trader("addon-copy-brak@test.pl")
+
+    oid = client.post("/api/checkout", headers=h,
+                      json={"product_key": "instant-25k"}).json()["order_id"]
+    done = client.post(f"/api/checkout/{oid}/mock-complete", headers=h)
+
+    s = SessionLocal()
+    order, acc = s.get(Order, oid), s.get(Account, done.json()["account_id"])
+    assert order.addon_copytrading is False
+    assert acc.copytrading is False
+    s.close()
+
+
 # --- express w widokach wypłat ------------------------------------------- #
 KAPITAL = 100_000.0
 

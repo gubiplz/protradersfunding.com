@@ -136,6 +136,14 @@ async function refreshLive(rerender=false){
     const stare=ME.credits_usd;
     ME=await api('/api/auth/me');
     if(!rerender&&ME.credits_usd!==stare)rerender=true;
+    /* Do tej pory ten przebieg pytal WYLACZNIE o saldo kredytow, wiec liczby na
+       kartach kont staly do nastepnego wejscia w zakladke. Dla kont stojacych na
+       poswiadczeniach lokalnych to bez znaczenia — ich equity i tak sie nie rusza.
+       Dla konta z realnym rachunkiem MT5 znaczylo, ze trader patrzy na wczorajszy
+       stan podczas otwartej pozycji. Przerysowujemy tylko liste Challenges i tylko
+       wtedy, gdy stoi na niej cos zywego: jedno zapytanie na minute, nie dla
+       kazdego i nie na kazdym ekranie. */
+    if(!rerender&&window._view==='accounts'&&window._zywaLista)rerender=true;
   }catch(e){}
   finally{_refreshing=false}
   if(rerender&&window._view&&VIEWS[window._view])go(window._view);
@@ -1387,6 +1395,10 @@ const VIEWS={
     PRODUCTS.length?null:api('/api/products').then(p=>{PRODUCTS=p}).catch(()=>{}),
     loadOffers(),
   ]);
+  /* Konto z realnym rachunkiem MT5 (add-on Copytrading) ma equity, ktore ZMIENIA
+     sie samo miedzy odslonami — reszta kont stoi. Minutowe odswiezanie wlacza sie
+     wiec tylko wtedy, gdy jest co odswiezac; patrz refreshLive(). */
+  window._zywaLista=accs.some(a=>a.mt5_backed);
   const banner=accs.length
     ?`<div class="gradient-banner">
         <span class="gb-tag">${ICO.spark} Refer &amp; earn</span><span class="gb-sep"></span>
@@ -3019,6 +3031,11 @@ function openBuy(key){
             style="width:15px;height:15px;accent-color:var(--acc)">
           <span><b>Express Payout</b> — your payout requests jump the review queue <b>+$49</b></span>
         </label>
+        ${p.copytrading_offered?`<label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
+          <input type="checkbox" id="c-copy" onchange="quoteRefresh(true)"
+            style="width:15px;height:15px;accent-color:var(--acc)">
+          <span><b>Copytrading</b> — copy trades between your own accounts, trade from more than one device <b>+$${fmt(p.copytrading_fee_usd||299)}</b></span>
+        </label>`:''}
         ${ME.credits_usd>0?`<label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
           <input type="checkbox" id="c-usecr" checked onchange="quoteRefresh(true)"
             style="width:15px;height:15px;accent-color:var(--acc)">
@@ -3049,6 +3066,7 @@ async function quoteNow(){
   const wk=!!($('c-weekend')&&$('c-weekend').checked);
   const sb=!!($('c-boost')&&$('c-boost').checked);
   const ex=!!($('c-express')&&$('c-express').checked);
+  const cp=!!($('c-copy')&&$('c-copy').checked);
   const uc=!$('c-usecr')||$('c-usecr').checked;
   const bc=window._buyCode||{};
   let q=null,previewFailed=false;
@@ -3057,15 +3075,16 @@ async function quoteNow(){
       +'&coupon='+encodeURIComponent(bc.coupon||'')
       +'&promo_code='+encodeURIComponent(bc.promo||'')
       +'&weekend='+(wk?'1':'0')+'&split_boost='+(sb?'1':'0')
-      +'&express='+(ex?'1':'0')+'&use_credits='+(uc?'1':'0'));
+      +'&express='+(ex?'1':'0')+'&copytrading='+(cp?'1':'0')
+      +'&use_credits='+(uc?'1':'0'));
   }catch(e){
     /* The preview must never block buying — fall back to the catalog price. */
     previewFailed=true;
     if(e&&e.message&&/coupon/i.test(e.message))buyErr(e.message);
     q={plan_price_usd:p.price_usd,discount_pct:0,discount_usd:0,
        weekend_fee_usd:wk?199:0,split_boost_fee_usd:sb?149:0,
-       express_payout_fee_usd:ex?49:0,credits_used:0,
-       total_due_usd:Math.round((p.price_usd+(wk?199:0)+(sb?149:0)+(ex?49:0))*100)/100};
+       express_payout_fee_usd:ex?49:0,copytrading_fee_usd:cp?299:0,credits_used:0,
+       total_due_usd:Math.round((p.price_usd+(wk?199:0)+(sb?149:0)+(ex?49:0)+(cp?299:0))*100)/100};
   }
   /* A coupon the server does not recognize changes nothing — say so instead
      of quietly showing the full price (promo codes are confirmed separately). */
@@ -3077,6 +3096,7 @@ async function quoteNow(){
   if(q.weekend_fee_usd>0)h+=row('Weekend Trading','+$'+fmt(q.weekend_fee_usd));
   if(q.split_boost_fee_usd>0)h+=row('Profit Split Boost','+$'+fmt(q.split_boost_fee_usd));
   if(q.express_payout_fee_usd>0)h+=row('Express Payout','+$'+fmt(q.express_payout_fee_usd));
+  if(q.copytrading_fee_usd>0)h+=row('Copytrading','+$'+fmt(q.copytrading_fee_usd));
   if(q.credits_used>0)h+=row('Store credit','−$'+fmt(q.credits_used),'good');
   h+=`<div class="q-row total"><span>Total due</span><b class="mono" id="buy-total">$${fmt(q.total_due_usd)}</b></div>`;
   box.innerHTML=h;
@@ -3336,6 +3356,7 @@ async function buy(key){
           weekend_trading:!!($('c-weekend')&&$('c-weekend').checked),
           split_boost:!!($('c-boost')&&$('c-boost').checked),
           express_payout:!!($('c-express')&&$('c-express').checked),
+          copytrading:!!($('c-copy')&&$('c-copy').checked),
           use_credits:!$('c-usecr')||$('c-usecr').checked})});
       /* real Stripe: strona zaraz znika — przycisk ma zostać wyłączony */
       if(res.checkout_url && !res.mock){window.location=res.checkout_url;return 'keep'}

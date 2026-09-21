@@ -28,8 +28,8 @@ maila. Do tego czasu nie jest handlowalne.
 from __future__ import annotations
 
 import secrets
+import time
 from datetime import datetime, timezone
-from time import monotonic
 from urllib.parse import quote
 
 from fastapi import HTTPException
@@ -74,7 +74,7 @@ def create_account_from_order(session, order: Order, notify_admin: bool = True) 
     trader = session.get(Trader, order.trader_id)
     now = datetime.now(timezone.utc)
     settings = get_settings()
-    real_mode = real_provisioning_enabled(settings)
+    real_mode = chce_realnego_mt5(order, settings, session)
 
     login = _gen_login()
     password = _gen_password()
@@ -102,6 +102,10 @@ def create_account_from_order(session, order: Order, notify_admin: bool = True) 
                           + (catalog.SPLIT_BOOST_PP
                              if getattr(order, "addon_split_boost", False) else 0)),
         express_payout=bool(getattr(order, "addon_express_payout", False)),
+        # Copytrading: zgoda dla tradera, a dla nas decyzja o REALNYM rachunku
+        # MT5 (patrz `chce_realnego_mt5`). Czytane przez `getattr`, bo ta sama
+        # funkcja obsluguje zamowienia sprzed dodania kolumny.
+        copytrading=bool(getattr(order, "addon_copytrading", False)),
         max_lots=getattr(product, "max_lots", 0.0) or 0.0,
         # Instant funding (steps=0) omija ewaluacje — konto od razu jest funded.
         # `open_funded` to ta sama obietnica zlozona recznie z panelu (oferta
@@ -220,6 +224,37 @@ def real_provisioning_enabled(settings=None) -> bool:
     return bool((settings or get_settings()).mt5_provisioning)
 
 
+def chce_realnego_mt5(obiekt, settings=None, session=None) -> bool:
+    """Czy TO konkretne konto ma dostac realny rachunek MT5.
+
+    Realny rachunek kosztuje nas u dostawcy co miesiac, wiec nie dostaje go
+    kazdy, kto cos kupil — tylko ten, kto doplacil za add-on Copytrading.
+
+    Dwie drogi, w tej kolejnosci:
+
+      * `MT5_PROVISIONING` w srodowisku — tryb globalny: REALNE rachunki dla
+        wszystkich, niezaleznie od dodatkow. Tak dziala pula kont i tak bylo
+        od poczatku; ta galaz zostaje nietknieta.
+      * przelacznik „Copytrading accounts" w zakladce MT5 Pool — dla
+        produkcji, gdzie env jest wylaczone i konta stoja na poswiadczeniach
+        lokalnych. Wtedy realny rachunek dostaje WYLACZNIE ten, kto doplacil
+        za add-on. Przelacznik siedzi w bazie, bo na hostingu bezserwerowym
+        zmiana env to redeploy, a to ma dzialac od klikniecia — dokladnie tak
+        dzialaja juz sim_fallback i real_fallback.
+
+    Przyjmuje zarowno Order (`addon_copytrading`), jak i Account
+    (`copytrading`), bo ta sama decyzja zapada DWA RAZY: przy zakladaniu konta
+    (czy czeka na poswiadczenia) i przy provisioningu (ktora sciezka). Gdyby
+    kryteria sie rozjechaly, konto zalozone jako lokalne wpadloby do kolejki
+    realnego provisioningu i utknelo tam na zawsze.
+    """
+    if real_provisioning_enabled(settings):
+        return True
+    kupil = bool(getattr(obiekt, "copytrading", False)
+                 or getattr(obiekt, "addon_copytrading", False))
+    return kupil and session is not None and copytrading_real_enabled(session)
+
+
 def _bogo_paid_size(session, order) -> float | None:
     """Rozmiar tieru, za który klient zapłacił (promocja BOGO). None = brak."""
     key = getattr(order, "bogo_paid_key", None)
@@ -321,7 +356,7 @@ async def _provision_one(session_factory, feed, aid: int) -> None:
 
         # 0) Realny provisioning wyłączony — dokończ konto lokalnie. Bez tego konta
         #    założone przy poprzedniej konfiguracji wisiałyby w 'provisioning' na wieki.
-        if not real_provisioning_enabled(settings):
+        if not chce_realnego_mt5(acc, settings, s):
             _apply_local_credentials(acc)
             acc.status = "funded" if acc.phase == "funded" else "active"
             s.commit()
@@ -338,13 +373,13 @@ async def _provision_one(session_factory, feed, aid: int) -> None:
         #    naprawdę istnieją.
         if (settings.provisioning_source == "auto"
                 and (settings.metaquotes_web_enabled or settings.metaapi_auto_create)
-                and _may_attempt(aid)):
-            creds = await _create_demo_account(feed, acc, trader, settings)
+                and _may_attempt(s, aid)):
+            creds = await _create_demo_account(feed, acc, trader, settings, s)
             if creds:
                 _apply_credentials(acc, creds)
                 acc.status = "funded" if acc.phase == "funded" else "active"
                 s.commit()
-                _clear_backoff(aid)
+                _clear_backoff(s, aid)
                 if trader:
                     notify.send(_creds_event(acc), trader.email, _creds_ctx(trader, acc))
                 print(f"[provisioning] konto {aid} = realne demo MT5 "
@@ -366,13 +401,13 @@ async def _provision_one(session_factory, feed, aid: int) -> None:
         #    i przeglądarki (lokalnej albo BROWSER_CDP_URL).
         if (real_fallback_enabled(s)
                 and (settings.metaquotes_web_enabled or settings.metaapi_auto_create)
-                and _may_attempt(aid)):
-            creds = await _create_demo_account(feed, acc, trader, settings)
+                and _may_attempt(s, aid)):
+            creds = await _create_demo_account(feed, acc, trader, settings, s)
             if creds:
                 _apply_credentials(acc, creds)
                 acc.status = "funded" if acc.phase == "funded" else "active"
                 s.commit()
-                _clear_backoff(aid)
+                _clear_backoff(s, aid)
                 if trader:
                     notify.send(_creds_event(acc), trader.email, _creds_ctx(trader, acc))
                 print(f"[provisioning] konto {aid} = realne demo MT5 "
@@ -400,6 +435,7 @@ async def _provision_one(session_factory, feed, aid: int) -> None:
 
 SIM_FALLBACK_KEY = "provision_sim_fallback"
 REAL_FALLBACK_KEY = "provision_real_fallback"
+COPYTRADING_REAL_KEY = "provision_copytrading_real"
 
 
 def sim_fallback_enabled(session) -> bool:
@@ -418,6 +454,19 @@ def real_fallback_enabled(session) -> bool:
     (lokalnej albo BROWSER_CDP_URL / Browserless) i trwają ~20–30 s sztuka.
     Gdy obie flagi są włączone, real ma pierwszeństwo przed symulacją."""
     row = session.get(AppSetting, REAL_FALLBACK_KEY)
+    return bool(row and row.value == "1")
+
+
+def copytrading_real_enabled(session) -> bool:
+    """Czy konta z add-onem Copytrading maja dostawac REALNY rachunek MT5.
+
+    Przelacznik z zakladki MT5 Pool. Wylaczony = dodatek dalej sie sprzedaje
+    i dalej znaczy zgode na kopiowanie, ale konto idzie na lokalne
+    poswiadczenia — tak jak cala dotychczasowa produkcja. Dzieki temu sprzedaz
+    mozna wlaczyc, zanim rachunek u dostawcy bedzie gotowy, i nie zostawic
+    klienta z kontem wiszacym w kolejce.
+    """
+    row = session.get(AppSetting, COPYTRADING_REAL_KEY)
     return bool(row and row.value == "1")
 
 
@@ -449,64 +498,129 @@ def _apply_credentials(acc: Account, creds: dict) -> None:
     acc.mt5_backed = True
 
 
-async def _create_demo_account(feed, acc: Account, trader: Trader | None, settings) -> dict | None:
-    """Zakłada realne konto demo MT5. Kolejność kanałów:
+async def _create_demo_account(feed, acc: Account, trader: Trader | None,
+                               settings, session=None) -> dict | None:
+    """Zaklada realne konto demo MT5. Kanaly w kolejnosci:
 
-      1. web terminal MetaQuotes (darmowy, serwer MetaQuotes-Demo),
-      2. REST MetaApi (płatny generator, konto u brokera),
-      3. feed.provision() (SDK), gdy ktoś skonfigurował tylko ten kanał.
+      1. REST MetaApi — jedyny, ktory dziala na hostingu bezserwerowym,
+      2. web terminal MetaQuotes (Playwright) — wymaga przegladarki,
+      3. feed.provision() (SDK), gdy skonfigurowany jest tylko ten kanal.
 
-    Zwraca poświadczenia albo None. Przy błędzie nakłada backoff na to konto,
-    żeby poller (domyślnie co 3 s) nie zalewał zewnętrznego serwisu.
+    MetaApi idzie PIERWSZE, choc jest platne. Wczesniej pierwszy byl web
+    terminal, a `METAQUOTES_WEB_ENABLED` domyslnie jest wlaczone — na hostingu
+    bez Chromium ta galaz rzucala wyjatkiem przy kazdej probie i backoff odcinal
+    konto, ZANIM ktokolwiek siegnal po MetaApi. Do tego kanal, ktory padnie, nie
+    blokuje juz nastepnego: kazdy ma wlasny `try`.
+
+    Zwraca poswiadczenia albo None. Przy porazce wszystkich kanalow naklada
+    backoff na to konto, zeby poller nie zalewal zewnetrznego serwisu.
     """
-    try:
-        opener = metaquotes_web.make_opener(settings)
-        if opener is not None:
-            spec = metaquotes_web.WebDemoSpec.from_trader(trader, acc, settings)
-            creds = await opener.open_demo_account(spec)
-            return {
-                "login": creds.login,
-                "password": creds.password,
-                "server": creds.server,
-            }
+    powody = []
+    for nazwa, kanal in _kanaly_demo(feed, acc, trader, settings):
+        try:
+            creds = await kanal()
+        except Exception as e:
+            powody.append(f"{nazwa}: {e}")
+            continue
+        if creds:
+            if powody:
+                print(f"[provisioning] konto {acc.id}: {nazwa} zadzialal po "
+                      f"nieudanych probach ({'; '.join(powody)})", flush=True)
+            return creds
+        powody.append(f"{nazwa}: brak poswiadczen")
+    delay = _apply_backoff(session, acc.id)
+    print(f"[provisioning] konto {acc.id}: zakladanie dema nieudane "
+          f"({'; '.join(powody) or 'brak skonfigurowanego kanalu'}) "
+          f"— kolejna proba za {delay:.0f}s", flush=True)
+    return None
 
-        provisioner = metaapi_provisioning.make_provisioner(settings)
-        if provisioner is not None:
+
+def _kanaly_demo(feed, acc: Account, trader: Trader | None, settings):
+    """Lista (nazwa, funkcja) — tylko kanaly, ktore sa skonfigurowane.
+
+    Budowa specyfikacji siedzi WEWNATRZ funkcji kanalu, nie tutaj: zly numer
+    telefonu albo brakujace nazwisko ma wywrocic jeden kanal, a nie cala
+    kolejke, zanim ktorykolwiek ruszy.
+    """
+    kanaly = []
+
+    provisioner = metaapi_provisioning.make_provisioner(settings)
+    if provisioner is not None:
+        async def _metaapi():
             spec = metaapi_provisioning.spec_from_account(acc, trader, settings)
             return await provisioner.provision(settings.metaapi_provisioning_profile_id, spec)
+        kanaly.append(("metaapi", _metaapi))
 
-        # Brak profilu/tokenu → spróbuj kanałem feedu (SDK), jeśli go implementuje.
-        return await feed.provision({
-            "name": acc.trader_name,
-            "email": (trader.email if trader else None),
-            "balance": acc.initial_balance,
-        })
-    except Exception as e:
-        delay = _apply_backoff(acc.id)
-        print(f"[provisioning] konto {acc.id}: zakładanie dema nieudane ({e}) "
-              f"— kolejna próba za {delay:.0f}s")
-        return None
+    opener = metaquotes_web.make_opener(settings)
+    if opener is not None:
+        async def _web():
+            spec = metaquotes_web.WebDemoSpec.from_trader(trader, acc, settings)
+            creds = await opener.open_demo_account(spec)
+            return {"login": creds.login, "password": creds.password, "server": creds.server}
+        kanaly.append(("web terminal", _web))
+
+    if not kanaly:
+        async def _feed():
+            return await feed.provision({
+                "name": acc.trader_name,
+                "email": (trader.email if trader else None),
+                "balance": acc.initial_balance,
+            })
+        kanaly.append(("feed", _feed))
+
+    return kanaly
 
 
-# --- backoff per konto (proces-lokalny; wystarcza, bo poller jest jeden) --------
+# --- backoff per konto (w BAZIE, nie w pamieci procesu) ------------------------
+# Wczesniej stal w slownikach modulu. Na hostingu bezserwerowym kazde zadanie to
+# inny proces, wiec slownik byl pusty przy KAZDEJ probie i backoff nie istnial:
+# broker odrzucajacy dema dostawal zapytanie przy kazdym tyknieciu. Wiersz w
+# `app_settings` przezywa proces i jest wspolny dla wszystkich instancji.
 _PROVISION_BACKOFF_BASE_SEC = 30.0
 _PROVISION_BACKOFF_MAX_SEC = 1800.0
-_attempts: dict[int, int] = {}
-_next_attempt_at: dict[int, float] = {}
 
 
-def _may_attempt(account_id: int) -> bool:
-    return monotonic() >= _next_attempt_at.get(account_id, 0.0)
+def _backoff_key(account_id: int) -> str:
+    return f"provision_backoff:{account_id}"
 
 
-def _apply_backoff(account_id: int) -> float:
-    n = _attempts.get(account_id, 0)
-    _attempts[account_id] = n + 1
-    delay = min(_PROVISION_BACKOFF_BASE_SEC * (2 ** n), _PROVISION_BACKOFF_MAX_SEC)
-    _next_attempt_at[account_id] = monotonic() + delay
+def _backoff_row(session, account_id: int):
+    return session.get(AppSetting, _backoff_key(account_id)) if session is not None else None
+
+
+def _may_attempt(session, account_id: int) -> bool:
+    row = _backoff_row(session, account_id)
+    if not row or not row.value:
+        return True
+    try:
+        _prob, kiedy = row.value.split("|", 1)
+        return time.time() >= float(kiedy)
+    except (ValueError, TypeError):
+        # Zepsuty wiersz nie ma prawa zablokowac provisioningu na zawsze.
+        return True
+
+
+def _apply_backoff(session, account_id: int) -> float:
+    prob = 0
+    row = _backoff_row(session, account_id)
+    if row and row.value:
+        try:
+            prob = int(row.value.split("|", 1)[0])
+        except (ValueError, TypeError):
+            prob = 0
+    delay = min(_PROVISION_BACKOFF_BASE_SEC * (2 ** prob), _PROVISION_BACKOFF_MAX_SEC)
+    if session is not None:
+        wartosc = f"{prob + 1}|{time.time() + delay}"
+        if row:
+            row.value = wartosc
+        else:
+            session.add(AppSetting(key=_backoff_key(account_id), value=wartosc))
+        session.commit()
     return delay
 
 
-def _clear_backoff(account_id: int) -> None:
-    _attempts.pop(account_id, None)
-    _next_attempt_at.pop(account_id, None)
+def _clear_backoff(session, account_id: int) -> None:
+    row = _backoff_row(session, account_id)
+    if row is not None:
+        session.delete(row)
+        session.commit()

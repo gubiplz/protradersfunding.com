@@ -155,6 +155,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "pay_token": "VARCHAR(32)",
         "addon_split_boost": "BOOLEAN DEFAULT FALSE",
         "addon_express_payout": "BOOLEAN DEFAULT FALSE",
+        "addon_copytrading": "BOOLEAN DEFAULT FALSE",
         # Tabele `flash_offers` zaklada create_all, ale `orders` stoi na
         # produkcji — bez tego wpisu kazdy SELECT z modelu Order pada na
         # brakujacej kolumnie.
@@ -213,6 +214,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "payout_pool_usd": "FLOAT",
         "scale_count": "INTEGER DEFAULT 0",
         "express_payout": "BOOLEAN DEFAULT FALSE",
+        "copytrading": "BOOLEAN DEFAULT FALSE",
         "limit_warn_daily_day": "VARCHAR(10) DEFAULT ''",
         "limit_warn_dd_day": "VARCHAR(10) DEFAULT ''",
         "target_50_at": "TIMESTAMP",
