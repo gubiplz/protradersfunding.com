@@ -331,6 +331,90 @@ def claim_pool_account(session, acc: Account) -> bool:
     return True
 
 
+REJESTRACJA = "metaapi_register"
+
+
+async def zarejestruj_w_metaapi(session, acc: Account, settings=None) -> str | None:
+    """Podpina rachunek MT5 tego konta pod MetaApi. Zwraca metaapi_account_id.
+
+    Bez tego kroku silnik nie ma czego czytac: `MetaApiRestFeed` adresuje konto
+    przez identyfikator MetaApi, a nie przez login u brokera. Dotad trzeba bylo
+    wkleic go recznie przy KAZDYM koncie.
+
+    Osobna funkcja od zakladania dema, bo to dwie rozne rzeczy i tylko jedna
+    dziala: MetaApi odmawia zalozenia dema na MetaQuotes-Demo, ale podlaczenie
+    istniejacego konta na tym samym serwerze przyjmuje.
+
+    Nie rzuca. Rejestracja kosztuje u dostawcy, wiec robimy ja WYLACZNIE dla
+    konta, ktore ma na to zgode (`chce_realnego_mt5`), i z backoffem — konto
+    odrzucone przez MetaApi nie ma dobijac sie przy kazdym tyknieciu.
+    """
+    if acc.metaapi_account_id:
+        return acc.metaapi_account_id
+    if not (acc.platform_login and acc.platform_password and acc.platform_server):
+        return None
+    if not chce_realnego_mt5(acc, settings, session):
+        return None
+    if not _may_attempt(session, acc.id, REJESTRACJA):
+        return None
+
+    rejestrator = metaapi_provisioning.make_registrar(settings)
+    if rejestrator is None:
+        return None
+    creds = metaapi_provisioning.DemoCredentials(
+        login=str(acc.platform_login),
+        password=str(acc.platform_password),
+        server=str(acc.platform_server),
+    )
+    try:
+        aid = await rejestrator.register_account(creds, name=(acc.trader_name or f"Account {acc.id}"))
+    except Exception as e:
+        delay = _apply_backoff(session, acc.id, REJESTRACJA)
+        print(f"[provisioning] konto {acc.id}: rejestracja w MetaApi nieudana ({e}) "
+              f"— kolejna proba za {delay:.0f}s", flush=True)
+        return None
+
+    acc.metaapi_account_id = aid
+    session.commit()
+    _clear_backoff(session, acc.id, REJESTRACJA)
+    print(f"[provisioning] konto {acc.id} = {acc.platform_login}@{acc.platform_server} "
+          f"podpiete pod MetaApi ({aid})", flush=True)
+    return aid
+
+
+async def dopnij_brakujace_rejestracje(session_factory, settings=None) -> int:
+    """Przechodzi po kontach, ktore maja rachunek, ale nie maja go w MetaApi.
+
+    Rejestracja jest tu DOGRYWANA, a nie warunkiem uruchomienia konta. Trader,
+    ktory zaplacil, dostaje login od reki; gdy MetaApi akurat nie odpowiada, to
+    NASZ problem z odczytem, nie powod, zeby trzymac go w kolejce. Wolane
+    z ticku ryzyka, wiec kolejna proba jest za minute, a nie za dobe.
+    """
+    s = session_factory()
+    try:
+        kandydaci = [a.id for a in s.query(Account).filter(
+            Account.status.in_(["active", "funded"]),
+            Account.metaapi_account_id.is_(None),
+            Account.copytrading == True,                      # noqa: E712
+            Account.mt5_backed == True,                       # noqa: E712
+            Account.platform_password.isnot(None)).all()]
+    finally:
+        s.close()
+    zrobione = 0
+    for aid in kandydaci:
+        s = session_factory()
+        try:
+            acc = s.get(Account, aid)
+            if acc and await zarejestruj_w_metaapi(s, acc, settings):
+                zrobione += 1
+        except Exception as e:  # pragma: no cover - cudza dostepnosc
+            s.rollback()
+            print(f"[provisioning] konto {aid}: dogrywka rejestracji padla: {e}", flush=True)
+        finally:
+            s.close()
+    return zrobione
+
+
 async def provision_pending(session_factory, feed) -> None:
     """Dla każdego konta w stanie 'provisioning' próbuje przydzielić pulę (lub,
     opcjonalnie, auto-utworzyć konto przez MetaApi). Wołane z pollera w każdej pętli."""
@@ -390,6 +474,10 @@ async def _provision_one(session_factory, feed, aid: int) -> None:
         if claim_pool_account(s, acc):
             acc.status = "funded" if acc.phase == "funded" else "active"
             s.commit()
+            # Pierwsza proba podpiecia pod MetaApi. Nieudana NIE wstrzymuje
+            # konta — trader ma dzialajace poswiadczenia, a dogrywka z ticku
+            # ryzyka sprobuje ponownie za minute.
+            await zarejestruj_w_metaapi(s, acc, settings)
             if trader:
                 notify.send(_creds_event(acc), trader.email, _creds_ctx(trader, acc))
             print(f"[provisioning] konto {aid} = {acc.platform_login}@{acc.platform_server} "
@@ -580,16 +668,18 @@ _PROVISION_BACKOFF_BASE_SEC = 30.0
 _PROVISION_BACKOFF_MAX_SEC = 1800.0
 
 
-def _backoff_key(account_id: int) -> str:
-    return f"provision_backoff:{account_id}"
+def _backoff_key(account_id: int, rodzaj: str = "provision") -> str:
+    return f"{rodzaj}_backoff:{account_id}"
 
 
-def _backoff_row(session, account_id: int):
-    return session.get(AppSetting, _backoff_key(account_id)) if session is not None else None
+def _backoff_row(session, account_id: int, rodzaj: str = "provision"):
+    if session is None:
+        return None
+    return session.get(AppSetting, _backoff_key(account_id, rodzaj))
 
 
-def _may_attempt(session, account_id: int) -> bool:
-    row = _backoff_row(session, account_id)
+def _may_attempt(session, account_id: int, rodzaj: str = "provision") -> bool:
+    row = _backoff_row(session, account_id, rodzaj)
     if not row or not row.value:
         return True
     try:
@@ -600,9 +690,9 @@ def _may_attempt(session, account_id: int) -> bool:
         return True
 
 
-def _apply_backoff(session, account_id: int) -> float:
+def _apply_backoff(session, account_id: int, rodzaj: str = "provision") -> float:
     prob = 0
-    row = _backoff_row(session, account_id)
+    row = _backoff_row(session, account_id, rodzaj)
     if row and row.value:
         try:
             prob = int(row.value.split("|", 1)[0])
@@ -614,13 +704,13 @@ def _apply_backoff(session, account_id: int) -> float:
         if row:
             row.value = wartosc
         else:
-            session.add(AppSetting(key=_backoff_key(account_id), value=wartosc))
+            session.add(AppSetting(key=_backoff_key(account_id, rodzaj), value=wartosc))
         session.commit()
     return delay
 
 
-def _clear_backoff(session, account_id: int) -> None:
-    row = _backoff_row(session, account_id)
+def _clear_backoff(session, account_id: int, rodzaj: str = "provision") -> None:
+    row = _backoff_row(session, account_id, rodzaj)
     if row is not None:
         session.delete(row)
         session.commit()

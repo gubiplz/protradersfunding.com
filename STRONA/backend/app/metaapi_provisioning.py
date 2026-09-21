@@ -314,6 +314,22 @@ def make_provisioner(settings=None) -> MetaApiProvisioner | None:
     )
 
 
+def make_registrar(settings=None):
+    """Klient do PODLACZANIA istniejacego rachunku — wymaga samego tokenu.
+
+    `make_provisioner` zada takze profilu provisioningu, bo sluzy do zakladania
+    kont OD ZERA. Do podlaczenia profil jest niepotrzebny i, co wazniejsze,
+    i tak go nie mamy: MetaApi nie pozwala zakladac dem na MetaQuotes-Demo
+    (sprawdzone 2026-09-21: „Matching available trading server … not found"),
+    a podlaczenie tego samego serwera przyjmuje bez zastrzezen.
+    """
+    s = settings or get_settings()
+    token = getattr(s, "metaapi_token", None)
+    if not token:
+        return None
+    return MetaApiProvisioner(token)
+
+
 def spec_from_account(acc, trader, settings) -> DemoSpec:
     """Buduje DemoSpec z rekordów Account/Trader."""
     return DemoSpec(

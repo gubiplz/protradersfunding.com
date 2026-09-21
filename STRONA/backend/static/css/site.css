@@ -161,6 +161,15 @@ h1,h2,h3,.display{font-family:var(--display);letter-spacing:-.02em}
 .cfg-row span{color:var(--muted)}
 .cfg-row b{font-family:var(--mono);font-weight:600}
 .cfg-row em{font-style:normal;font-size:11px;color:var(--green);font-family:var(--body);font-weight:500}
+/* Pasek dodatkow w karcie hero. Chipy, nie wiersze: trzy pelne karty (jak
+   w cenniku) dolozylyby ~150 px do karty, ktora ma sie miescic nad foldem. */
+.cfg-addons{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:12px 0 2px}
+.cfg-chip{border:1px solid var(--line2);border-radius:999px;padding:6px 12px;font-size:12.5px;
+  font-weight:600;color:var(--txt);background:#fff;transition:.15s;white-space:nowrap}
+.cfg-chip:hover{border-color:var(--acc)}
+.cfg-chip.on{border-color:var(--green);background:var(--green);color:#fff}
+.cfg-chip-note{font-size:11.5px;color:var(--muted)}
+.cfg-chip-note b{color:var(--green);font-weight:700}
 /* Kod promocyjny w karcie hero. Wczesniej: trojstopniowy gradient, swiecaca
    poswiata ::after i napis 21px w foncie ozdobnym — najglosniejszy element
    karty, w ktorej wszystko inne ma 12-14px. Teraz plaski panel w jezyku

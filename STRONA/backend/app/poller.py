@@ -645,6 +645,11 @@ async def tick_ryzyka(min_odstep_s: float = 20.0) -> dict:
     # a nie przy dobowym cronie. Backoff (w bazie) pilnuje, zeby nieudana
     # proba nie powtarzala sie co tyknniecie.
     await provisioning.provision_pending(SessionLocal, _feed)
+    # Dogrywka podpiec pod MetaApi: konto dostaje poswiadczenia OD RAZU, a jego
+    # rejestracja u dostawcy moze sie nie udac za pierwszym razem. Bez tego
+    # kroku silnik nigdy by go nie zobaczyl — `MetaApiRestFeed` adresuje konto
+    # identyfikatorem MetaApi, nie loginem u brokera.
+    await provisioning.dopnij_brakujace_rejestracje(SessionLocal)
 
     session = SessionLocal()
     try:

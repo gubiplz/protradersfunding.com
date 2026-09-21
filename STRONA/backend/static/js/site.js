@@ -241,7 +241,15 @@
   /* The applied code is NOT kept here any more — it lives in readCode(). It used
      to be a snapshot taken once at boot, so a code entered in the bar or in the
      hero stayed invisible to this card until the page was reloaded. */
-  let cfgType = '2step', cfgSize = null, cfgWt = false;
+  /* Dodatki sa WSPOLNE dla obu kreatorow (hero i cennik): to ta sama decyzja
+     zakupowa, a dwa niezalezne stany znaczylyby, ze zaznaczenie w jednym znika
+     po przewinieciu do drugiego. */
+  let cfgType = '2step', cfgSize = null, cfgWt = false, cfgCt = false;
+  const CENA_WT = 199, CENA_CT = 299;
+  /* Cene dodatku bierzemy z katalogu, gdy serwer ja podal — stala ponizej jest
+     tylko awaryjna, zeby karta nie pokazala „$undefined" przy starym payloadzie. */
+  const cenaCt = p => (p && p.copytrading_fee_usd) || CENA_CT;
+  const oferujeCt = p => !!(p && p.copytrading_offered);
   const typeItems = t => PRODUCTS
     .filter(p => (t === 'instant' ? p.steps === 0 : p.steps === 2) && p.price_usd > 0)
     .sort((a, b) => a.account_size - b.account_size);
@@ -270,11 +278,24 @@
     wt.textContent = cfgWt ? '✓ Added' : 'Add $199';
     wt.classList.toggle('on', cfgWt);
 
+    /* Copytrading schodzi z karty razem z wylaczeniem sprzedazy w panelu —
+       i wtedy NIE moze zostac policzony w cenie, choćby ktos zdazyl go
+       wczesniej kliknac. */
+    const ctRow = $('#pcfg-ct-row'), ct = $('#pcfg-ct');
+    const ctOn = oferujeCt(p);
+    if (ctRow) ctRow.hidden = !ctOn;
+    if (!ctOn) cfgCt = false;
+    if (ct) {
+      ct.textContent = cfgCt ? '✓ Added' : 'Add $' + cenaCt(p);
+      ct.classList.toggle('on', cfgCt);
+    }
+
     /* The upgrade promo does not touch the fee — it moves the account one tier
        up, so the size has to be stated where the price is, or the offer reads
        like nothing happened. */
     const upSize = cfgPromo && p.promo_upgrade_size ? p.promo_upgrade_size : null;
-    const fee = Math.round((p.price_usd * (1 - cfgPct / 100) + (cfgWt ? 199 : 0)) * 100) / 100;
+    const fee = Math.round((p.price_usd * (1 - cfgPct / 100)
+      + (cfgWt ? CENA_WT : 0) + (cfgCt ? cenaCt(p) : 0)) * 100) / 100;
     $('#pcfg-fee').textContent = '$' + fee.toLocaleString('en-US',
       { minimumFractionDigits: fee % 1 ? 2 : 0, maximumFractionDigits: 2 });
     $('#pcfg-feesub').textContent = (cfgPct ? `${cfgPct}% coupon applied · ` : '')
@@ -284,10 +305,14 @@
 
     const q = new URLSearchParams({ buy: p.key });
     if (cfgWt) q.set('wt', '1');
+    if (cfgCt) q.set('ct', '1');
     if (cfgCoupon) q.set('coupon', cfgCoupon);
     $('#pcfg-cta').href = '/portal?' + q.toString();
 
     const wkVal = cfgWt ? '<span class="ok">✓ Added to your order</span>' : '$199 bonus add-on';
+    /* Wiersz pojawia sie tylko, gdy dodatek jest w sprzedazy — tabela regul ma
+       opisywac to, co mozna kupic DZIS, a nie to, co kiedys bylo w ofercie. */
+    const ctVal = cfgCt ? '<span class="ok">✓ Added to your order</span>' : `$${cenaCt(p)} add-on`;
     const rows = cfgType === 'instant' ? [
       ['Profit target', 'None. Funded from day one'],
       ['Maximum daily drawdown', p.max_daily_loss_pct + '%'],
@@ -298,6 +323,7 @@
       ['Profit split', p.profit_split_pct + '%'],
       ['Max open volume', p.max_lots + ' lots'],
       ['Weekend trading', wkVal],
+      ...(oferujeCt(p) ? [['Copytrading', ctVal]] : []),
       ['News trading', '<span class="ok">✓ Allowed</span>'],
       ['Leverage', 'Up to 1:100'],
     ] : [
@@ -311,6 +337,7 @@
       ['Max open volume', p.max_lots + ' lots'],
       ['Fee refund', '<span class="ok">✓ With your first payout</span>'],
       ['Weekend trading', wkVal],
+      ...(oferujeCt(p) ? [['Copytrading', ctVal]] : []),
       ['News trading', '<span class="ok">✓ Allowed</span>'],
       ['Leverage', 'Up to 1:100'],
     ];
@@ -511,11 +538,35 @@
         ? '*You pay the price of the size you pick; with the promo applied we create the account one size up. Fee still refunded with your first payout.'
         : "*One-time fee, refunded with your first payout. Rewards depend on your trading.";
     }
+    /* Pasek dodatkow. Ten sam stan, co w cenniku nizej — wiec zaznaczenie
+       przenosi sie miedzy kartami i cena zgadza sie w obu. */
+    const pasek = $('#cfg-addons');
+    if (pasek) {
+      if (!oferujeCt(p)) cfgCt = false;
+      const chip = (id, on, txt) =>
+        `<button type="button" class="cfg-chip${on ? ' on' : ''}" data-a="${id}">${txt}</button>`;
+      pasek.innerHTML =
+        chip('wt', cfgWt, `${cfgWt ? '✓ ' : '+ '}Weekend $${CENA_WT}`)
+        + (oferujeCt(p) ? chip('ct', cfgCt, `${cfgCt ? '✓ ' : '+ '}Copytrading $${cenaCt(p)}`) : '')
+        + '<span class="cfg-chip-note">News trading <b>included</b></span>';
+      $$('#cfg-addons .cfg-chip').forEach(b => b.addEventListener('click', () => {
+        if (b.dataset.a === 'wt') cfgWt = !cfgWt; else cfgCt = !cfgCt;
+        renderConfigurator();
+        /* Cennik nizej pokazuje te same dodatki — bez tego obie karty
+           twierdzilyby co innego o tym samym zamowieniu. */
+        if ($('#pcfg')) renderPricing();
+      }));
+    }
+    const dodatki = (cfgWt ? CENA_WT : 0) + (cfgCt && oferujeCt(p) ? cenaCt(p) : 0);
+    const razem = Math.round((oplata + dodatki) * 100) / 100;
+
     const cta = $('#cfg-cta');
     const q = new URLSearchParams({ buy: p.key });
+    if (cfgWt) q.set('wt', '1');
+    if (cfgCt && oferujeCt(p)) q.set('ct', '1');
     if (kodKupon) q.set('coupon', kodKupon);   /* bez tego rabat ginal po klikniciu */
     cta.href = '/portal?' + q.toString();
-    cta.textContent = `Start with ${sizeLabel(p.account_size)} → $${fmt(Math.round(oplata))}`;
+    cta.textContent = `Start with ${sizeLabel(p.account_size)} → $${fmt(Math.round(razem))}`;
   }
 
   async function products() {
@@ -531,7 +582,9 @@
       const hsend = () => hi && submitCodeField(hi, heroMsg);
       const hb = $('#cfg-code-apply'); if (hb) hb.addEventListener('click', hsend);
       if (hi) hi.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); hsend(); } });
-      const wt = $('#pcfg-wt'); if (wt) wt.addEventListener('click', () => { cfgWt = !cfgWt; renderPricing(); });
+      const odswiez = () => { renderPricing(); if ($('#cfg')) renderConfigurator(); };
+      const wt = $('#pcfg-wt'); if (wt) wt.addEventListener('click', () => { cfgWt = !cfgWt; odswiez(); });
+      const ct = $('#pcfg-ct'); if (ct) ct.addEventListener('click', () => { cfgCt = !cfgCt; odswiez(); });
     };
     /* The server inlines the live catalog into the page (#pf-products) so the
        hero configurator paints together with the rest of the document; the

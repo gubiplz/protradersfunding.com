@@ -53,6 +53,11 @@
         <div class="cfg-row"><span id="cfg-target-label">{% if cfg and cfg.instant %}Profit target{% else %}Profit target — Phase 1{% endif %}</span><b id="cfg-target">{% if cfg %}{% if cfg.instant %}None. Funded from day one{% else %}+{{ cfg.target_pct }}% = $<span id="cfg-tusd" data-v="{{ cfg.target_usd_raw }}">{{ cfg.target_usd }}</span>{% endif %}{% else %}—{% endif %}</b></div>
         <div class="cfg-row"><span>Your profit split</span><b id="cfg-split">{% if cfg %}{{ cfg.split }}%{% else %}—{% endif %}</b></div>
       </div>
+      {# Add-ony w JEDNEJ linii, nie w kartach jak w cenniku nizej: ta karta ma
+         nad soba fold i kazdy dodatkowy wiersz spycha przycisk zakupu ponizej
+         ekranu. Wypelnia je renderConfigurator(), bo lista zalezy od tego, co
+         katalog aktualnie oferuje. #}
+      <div class="cfg-addons" id="cfg-addons"></div>
       {# Default (not-applied) promo copy pre-rendered too — the box popping in
          after script load read as another flash. JS adjusts for applied codes. #}
       {# The code is entered right here now. The old block only held a link that
@@ -180,6 +185,12 @@
         <div class="pcfg-addon">
           <div><b>Weekend Trading</b><span>Bonus add-on: $199 for 2 extra trading days/week</span></div>
           <button class="pcfg-addbtn" id="pcfg-wt" type="button">Add $199</button>
+        </div>
+        {# Widoczny tylko wtedy, gdy add-on jest w sprzedazy (przelacznik
+           w panelu, Settings). Pokazuje go renderPricing(). #}
+        <div class="pcfg-addon" id="pcfg-ct-row" hidden>
+          <div><b>Copytrading</b><span>Copy trades between your own accounts · more than one device</span></div>
+          <button class="pcfg-addbtn" id="pcfg-ct" type="button">Add $299</button>
         </div>
         <div class="pcfg-addon static">
           <div><b>News Trading</b><span>Trade straight through high-impact news</span></div>

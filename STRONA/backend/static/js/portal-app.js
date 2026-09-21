@@ -3033,6 +3033,7 @@ function openBuy(key){
         </label>
         ${p.copytrading_offered?`<label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
           <input type="checkbox" id="c-copy" onchange="quoteRefresh(true)"
+            ${new URLSearchParams(location.search).get('ct')==='1'?'checked':''}
             style="width:15px;height:15px;accent-color:var(--acc)">
           <span><b>Copytrading</b> — copy trades between your own accounts, trade from more than one device <b>+$${fmt(p.copytrading_fee_usd||299)}</b></span>
         </label>`:''}
