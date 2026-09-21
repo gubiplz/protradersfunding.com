@@ -27,3 +27,8 @@ pywebpush>=2.0
 tzdata>=2024.1
 # Klient CDP do Browserless — bez lokalnego Chromium.
 playwright>=1.40
+# Klient HTTP dla MetaApi: podpiecie rachunku MT5 (app/metaapi_provisioning.py)
+# i odczyt equity (app/feed.py MetaApiRestFeed). Oba moduly importuja go LENIWIE,
+# wiec jego brak nie wywraca startu aplikacji — objawia sie dopiero przy probie
+# podpiecia konta, jako „No module named 'httpx'" w powodzie porazki.
+httpx>=0.27
