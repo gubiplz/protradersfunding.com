@@ -5048,6 +5048,7 @@ def admin_orders():
                         "brand": getattr(o, "brand", None),
                         "open_funded": bool(getattr(o, "open_funded", False)),
                         "weekend_trading": bool(getattr(o, "weekend_trading", False)),
+                        "copytrading": bool(getattr(o, "addon_copytrading", False)),
                         "flag": o.flag, "fail_reason": o.fail_reason,
                         "payment_address": o.payment_address,
                         "payment_network": o.payment_network,
@@ -5104,6 +5105,11 @@ class ManualOrderIn(BaseModel):
     # konto tego samego rozmiaru. Checkbox w panelu (pre-fill z globalnego
     # przełącznika) — tu przychodzi już ostateczna decyzja admina dla tego leada.
     bogo: bool = False
+    # Add-on Copytrading: zgoda na kopiowanie miedzy wlasnymi kontami klienta
+    # i na wiele urzadzen. Tu, a nie tylko w checkoucie, bo sprzedaz poza
+    # Stripe'em (crypto, przelew) idzie WYLACZNIE ta droga — bez tego dodatku
+    # nie dalo sie sprzedac nikomu, kto nie placi karta.
+    copytrading: bool = False
     # Marka strony /pay: 'ptf' (domyślna) albo 'fx' — barwy Forex Passing dla
     # klientów z tamtego kanału, którzy marki PTF nie znają.
     brand: str = "ptf"
@@ -5254,6 +5260,10 @@ def admin_order_create(payload: ManualOrderIn):
         if (payload.weekend_trading and not payload.weekend_free
                 and payload.amount_usd is None):
             kwota = round(kwota + catalog.WEEKEND_ADDON_USD, 2)
+        # Ten sam warunek co wyzej: kwota wpisana recznie jest dokladnie tym,
+        # co admin obiecal, wiec nic jej nie dolicza.
+        if payload.copytrading and payload.amount_usd is None:
+            kwota = round(kwota + catalog.COPYTRADING_ADDON_USD, 2)
         if kwota < 0:
             raise HTTPException(400, "Amount cannot be negative")
         # Cena partnerska zostaje na zamówieniu jako STEMPEL, nie jako przelicznik:
@@ -5277,6 +5287,7 @@ def admin_order_create(payload: ManualOrderIn):
                   open_funded=bool(payload.open_funded),
                   weekend_trading=bool(payload.weekend_trading),
                   weekend_free=bool(payload.weekend_trading and payload.weekend_free),
+                  addon_copytrading=bool(payload.copytrading),
                   pay_headline=((payload.headline or "").strip()[:80] or None),
                   created_at=datetime.now(timezone.utc).replace(tzinfo=None))
         _zapisz_adres_wplaty(o, payload.payment_address, payload.payment_network)

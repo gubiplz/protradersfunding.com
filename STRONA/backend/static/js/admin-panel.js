@@ -1335,7 +1335,7 @@ function renderOrders(){
       <tbody>${cap.rows.map(o=>`<tr>
         <td class="num rt-hide" data-l="#">${o.id}</td><td class="muted" data-l="Date" data-sort="${esc(o.created_at||'')}">${dstr(o.created_at)}</td>
         <td class="rt-main" data-l="Trader">${esc(o.trader_email||'—')}</td>
-        <td data-l="Product">${esc(o.product_key)}${o.bogo?` <span class="up" style="font-size:var(--fs-cap)" title="Buy 1 Get 1 Free — paying this order also creates a free second account of the same size">+1 free</span>`:''}${o.open_funded?` <span class="up" style="font-size:var(--fs-cap)" title="Opens straight as a funded account when paid — skips the evaluation">funded</span>`:''}${o.weekend_trading?` <span class="up" style="font-size:var(--fs-cap)" title="Weekend Trading add-on — 2 extra trading days/week">wknd</span>`:''}${o.brand==='fx'?` <span class="up" style="font-size:var(--fs-cap)" title="The payment page shows Forex Passing branding — no PTF anywhere on it">FX</span>`:''}</td>
+        <td data-l="Product">${esc(o.product_key)}${o.bogo?` <span class="up" style="font-size:var(--fs-cap)" title="Buy 1 Get 1 Free — paying this order also creates a free second account of the same size">+1 free</span>`:''}${o.open_funded?` <span class="up" style="font-size:var(--fs-cap)" title="Opens straight as a funded account when paid — skips the evaluation">funded</span>`:''}${o.weekend_trading?` <span class="up" style="font-size:var(--fs-cap)" title="Weekend Trading add-on — 2 extra trading days/week">wknd</span>`:''}${o.copytrading?` <span class="up" style="font-size:var(--fs-cap)" title="Copytrading add-on — copying between the customer's own accounts and more than one device; real MT5 account">copy</span>`:''}${o.brand==='fx'?` <span class="up" style="font-size:var(--fs-cap)" title="The payment page shows Forex Passing branding — no PTF anywhere on it">FX</span>`:''}</td>
         <td class="num" data-l="Amount">$${fmt(o.amount_usd)}${o.coupon?` <span class="up" style="font-size:var(--fs-cap)">(${esc(o.coupon)})</span>`:''}</td>
         <td class="muted rt-hide" data-l="Provider">${esc(o.provider)}</td>
         <td data-l="Status"><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span>
@@ -4875,6 +4875,10 @@ async function openManualOrder(traderId,lead){
         <span><b>On the house</b>
           <span class="muted">— the add-on still lands on the account, but the $199 is not charged; the page shows it as FREE</span></span></label>
       <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="mo-copy" onchange="moPrice()" style="width:16px;height:16px;accent-color:var(--acc)">
+        <span><b>Copytrading</b> <b>+$299</b>
+          <span class="muted">— copying between the customer's own accounts and more than one device; the account is provisioned on a real MT5 account when that is switched on in MT5 Pool</span></span></label>
+      <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
         <input type="checkbox" id="mo-funded" style="width:16px;height:16px;accent-color:var(--acc)">
         <span><b>Open as funded</b>
           <span class="muted">— the account skips the evaluation and starts straight in the funded phase once this order is paid</span></span></label>
@@ -4957,7 +4961,8 @@ function moPrice(){
      planu). $199 jest zaszyte jak w portalu (portal-app.js, wiersz add-onu).
      Weekend „on the house" nie dolicza nic. */
   const wk=($('mo-weekend')?.checked&&!$('mo-wkfree')?.checked)?199:0;
-  $('mo-amount').value=(o.dataset.price*(1-pct/100)+wk).toFixed(2);
+  const cp=$('mo-copy')?.checked?299:0;
+  $('mo-amount').value=(o.dataset.price*(1-pct/100)+wk+cp).toFixed(2);
 }
 /* Pod-checkbox „gratis" pokazuje się tylko przy zaznaczonym weekendzie —
    odznaczenie weekendu go czyści, żeby nie został cichy stan z poprzedniej
@@ -5001,6 +5006,7 @@ async function submitManualOrder(){
       open_funded:!!$('mo-funded')?.checked,
       weekend_trading:!!$('mo-weekend')?.checked,
       weekend_free:!!$('mo-wkfree')?.checked,
+      copytrading:!!$('mo-copy')?.checked,
       headline:($('mo-headline')?.value||'').trim(),
       ...(disc>0?{discount_pct:disc}:{}),
       bogo:!!$('mo-bogo')?.checked,

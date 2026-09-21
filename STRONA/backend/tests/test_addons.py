@@ -153,6 +153,33 @@ def test_zakup_bez_copytradingu_nie_ustawia_flagi():
     s.close()
 
 
+def test_reczne_zamowienie_tez_sprzedaje_copytrading():
+    """Sprzedaz poza Stripe'em (crypto, przelew) idzie WYLACZNIE ta droga —
+    bez tego dodatku nie dalo sie sprzedac nikomu, kto nie placi karta."""
+    r = client.post("/api/admin/orders", headers=ADMIN_H,
+                    json={"email": "reczne-copy@test.pl", "product_key": "instant-25k",
+                          "copytrading": True})
+
+    assert r.status_code == 200, r.text
+    s = SessionLocal()
+    order = s.get(Order, r.json()["id"])
+    assert order.addon_copytrading is True
+    assert order.amount_usd == INSTANT_25K + 299.0, "dodatek ma sie doliczyc do kwoty"
+    s.close()
+
+
+def test_reczna_kwota_zostaje_nietknieta():
+    """Kwota wpisana recznie jest doklad­nie tym, co admin obiecal klientowi."""
+    r = client.post("/api/admin/orders", headers=ADMIN_H,
+                    json={"email": "reczne-kwota@test.pl", "product_key": "instant-25k",
+                          "copytrading": True, "amount_usd": 500.0})
+
+    s = SessionLocal()
+    order = s.get(Order, r.json()["id"])
+    assert order.amount_usd == 500.0 and order.addon_copytrading is True
+    s.close()
+
+
 # --- express w widokach wypłat ------------------------------------------- #
 KAPITAL = 100_000.0
 
