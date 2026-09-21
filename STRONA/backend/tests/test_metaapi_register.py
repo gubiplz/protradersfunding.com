@@ -165,6 +165,28 @@ def test_porazka_nie_wywraca_konta_i_naklada_przerwe(monkeypatch, wlaczone):
     assert len(r.wywolania) == 1
 
 
+def test_recznie_wymuszone_podpiecie_omija_przerwe(monkeypatch, wlaczone):
+    """Przerwa chroni przed automatem, nie przed człowiekiem: admin klika
+    „Connect them now" właśnie dlatego, że usunął przyczynę poprzedniej
+    porażki — kazanie mu czekać pół godziny byłoby karaniem go za to."""
+    r = _Rejestrator(blad=RuntimeError("chwilowa awaria"))
+    monkeypatch.setattr(provisioning.metaapi_provisioning, "make_registrar", lambda s=None: r)
+    aid = _konto()
+    _podepnij(aid)                      # porażka → przerwa
+    assert len(r.wywolania) == 1
+
+    r.blad = None                       # przyczyna usunięta
+    s = SessionLocal()
+    try:
+        wynik = asyncio.run(provisioning.zarejestruj_w_metaapi(
+            s, s.get(Account, aid), None, None, wymus=True))
+    finally:
+        s.close()
+
+    assert wynik == "mt-777"
+    assert len(r.wywolania) == 2, "wymuszenie ma pominąć przerwę"
+
+
 def test_brak_tokenu_konczy_sie_cicho(monkeypatch, wlaczone):
     monkeypatch.setattr(provisioning.metaapi_provisioning, "make_registrar", lambda s=None: None)
     aid = _konto()

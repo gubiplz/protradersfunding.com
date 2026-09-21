@@ -335,7 +335,8 @@ REJESTRACJA = "metaapi_register"
 
 
 async def zarejestruj_w_metaapi(session, acc: Account, settings=None,
-                                powody: list | None = None) -> str | None:
+                                powody: list | None = None,
+                                *, wymus: bool = False) -> str | None:
     """Podpina rachunek MT5 tego konta pod MetaApi. Zwraca metaapi_account_id.
 
     Bez tego kroku silnik nie ma czego czytac: `MetaApiRestFeed` adresuje konto
@@ -365,7 +366,11 @@ async def zarejestruj_w_metaapi(session, acc: Account, settings=None,
     if not chce_realnego_mt5(acc, settings, session):
         zapisz("real MT5 is switched off for Copytrading accounts (MT5 Pool tab)")
         return None
-    if not _may_attempt(session, acc.id, REJESTRACJA):
+    # Przerwa po porazce chroni przed AUTOMATEM dobijajacym sie co tyknniecie.
+    # Klikniecie „Connect them now" to swiadoma decyzja czlowieka, ktory wlasnie
+    # poprawil przyczyne — kazanie mu czekac pol godziny na wygasniecie przerwy
+    # bylo karaniem go za blad, ktory sam usunal.
+    if not wymus and not _may_attempt(session, acc.id, REJESTRACJA):
         zapisz("waiting out the backoff after an earlier failure — try again in a minute")
         return None
 
@@ -395,7 +400,8 @@ async def zarejestruj_w_metaapi(session, acc: Account, settings=None,
     return aid
 
 
-async def dopnij_brakujace_rejestracje(session_factory, settings=None) -> dict:
+async def dopnij_brakujace_rejestracje(session_factory, settings=None,
+                                       *, wymus: bool = False) -> dict:
     """Przechodzi po kontach, ktore maja rachunek, ale nie maja go w MetaApi.
 
     Rejestracja jest tu DOGRYWANA, a nie warunkiem uruchomienia konta. Trader,
@@ -418,7 +424,7 @@ async def dopnij_brakujace_rejestracje(session_factory, settings=None) -> dict:
         s = session_factory()
         try:
             acc = s.get(Account, aid)
-            if acc and await zarejestruj_w_metaapi(s, acc, settings, powody):
+            if acc and await zarejestruj_w_metaapi(s, acc, settings, powody, wymus=wymus):
                 zrobione += 1
         except Exception as e:  # pragma: no cover - cudza dostepnosc
             s.rollback()

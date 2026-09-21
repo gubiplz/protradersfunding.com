@@ -6549,7 +6549,10 @@ async def admin_pool_reconnect():
     poswiadczenia i nie ma odczytu, bez zadnego sposobu, zeby to popchnac.
     Przycisk w zakladce MT5 Pool wola to wprost.
     """
-    wynik = await provisioning.dopnij_brakujace_rejestracje(SessionLocal)
+    # `wymus`: admin wlasnie kliknal, wiec pomijamy przerwe po wczesniejszych
+    # porazkach. Ona jest po to, zeby automat nie dobijal sie do MetaApi co
+    # minute — nie po to, zeby kazac czlowiekowi czekac, gdy juz usunal przyczyne.
+    wynik = await provisioning.dopnij_brakujace_rejestracje(SessionLocal, wymus=True)
     session = SessionLocal()
     try:
         zostalo = session.query(Account).filter(
