@@ -334,7 +334,8 @@ def claim_pool_account(session, acc: Account) -> bool:
 REJESTRACJA = "metaapi_register"
 
 
-async def zarejestruj_w_metaapi(session, acc: Account, settings=None) -> str | None:
+async def zarejestruj_w_metaapi(session, acc: Account, settings=None,
+                                powody: list | None = None) -> str | None:
     """Podpina rachunek MT5 tego konta pod MetaApi. Zwraca metaapi_account_id.
 
     Bez tego kroku silnik nie ma czego czytac: `MetaApiRestFeed` adresuje konto
@@ -349,17 +350,28 @@ async def zarejestruj_w_metaapi(session, acc: Account, settings=None) -> str | N
     konta, ktore ma na to zgode (`chce_realnego_mt5`), i z backoffem — konto
     odrzucone przez MetaApi nie ma dobijac sie przy kazdym tyknieciu.
     """
+    def zapisz(powod: str) -> None:
+        """Cicha porazka jest tu najgorszym wyjsciem: admin widzi konto
+        z poswiadczeniami i bez odczytu, a panel milczy. Powod jedzie na
+        wierzch, do przycisku „Connect them now"."""
+        if powody is not None:
+            powody.append({"account": acc.platform_login or str(acc.id), "reason": powod})
+
     if acc.metaapi_account_id:
         return acc.metaapi_account_id
     if not (acc.platform_login and acc.platform_password and acc.platform_server):
+        zapisz("no MT5 credentials on the account")
         return None
     if not chce_realnego_mt5(acc, settings, session):
+        zapisz("real MT5 is switched off for Copytrading accounts (MT5 Pool tab)")
         return None
     if not _may_attempt(session, acc.id, REJESTRACJA):
+        zapisz("waiting out the backoff after an earlier failure — try again in a minute")
         return None
 
     rejestrator = metaapi_provisioning.make_registrar(settings)
     if rejestrator is None:
+        zapisz("no MetaApi token on this deployment")
         return None
     creds = metaapi_provisioning.DemoCredentials(
         login=str(acc.platform_login),
@@ -372,6 +384,7 @@ async def zarejestruj_w_metaapi(session, acc: Account, settings=None) -> str | N
         delay = _apply_backoff(session, acc.id, REJESTRACJA)
         print(f"[provisioning] konto {acc.id}: rejestracja w MetaApi nieudana ({e}) "
               f"— kolejna proba za {delay:.0f}s", flush=True)
+        zapisz(str(e)[:300])
         return None
 
     acc.metaapi_account_id = aid
@@ -382,7 +395,7 @@ async def zarejestruj_w_metaapi(session, acc: Account, settings=None) -> str | N
     return aid
 
 
-async def dopnij_brakujace_rejestracje(session_factory, settings=None) -> int:
+async def dopnij_brakujace_rejestracje(session_factory, settings=None) -> dict:
     """Przechodzi po kontach, ktore maja rachunek, ale nie maja go w MetaApi.
 
     Rejestracja jest tu DOGRYWANA, a nie warunkiem uruchomienia konta. Trader,
@@ -400,19 +413,20 @@ async def dopnij_brakujace_rejestracje(session_factory, settings=None) -> int:
             Account.platform_password.isnot(None)).all()]
     finally:
         s.close()
-    zrobione = 0
+    zrobione, powody = 0, []
     for aid in kandydaci:
         s = session_factory()
         try:
             acc = s.get(Account, aid)
-            if acc and await zarejestruj_w_metaapi(s, acc, settings):
+            if acc and await zarejestruj_w_metaapi(s, acc, settings, powody):
                 zrobione += 1
         except Exception as e:  # pragma: no cover - cudza dostepnosc
             s.rollback()
             print(f"[provisioning] konto {aid}: dogrywka rejestracji padla: {e}", flush=True)
+            powody.append({"account": str(aid), "reason": str(e)[:300]})
         finally:
             s.close()
-    return zrobione
+    return {"connected": zrobione, "problems": powody}
 
 
 async def provision_pending(session_factory, feed) -> None:

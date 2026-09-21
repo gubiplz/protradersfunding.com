@@ -6549,7 +6549,7 @@ async def admin_pool_reconnect():
     poswiadczenia i nie ma odczytu, bez zadnego sposobu, zeby to popchnac.
     Przycisk w zakladce MT5 Pool wola to wprost.
     """
-    ile = await provisioning.dopnij_brakujace_rejestracje(SessionLocal)
+    wynik = await provisioning.dopnij_brakujace_rejestracje(SessionLocal)
     session = SessionLocal()
     try:
         zostalo = session.query(Account).filter(
@@ -6558,7 +6558,8 @@ async def admin_pool_reconnect():
             Account.metaapi_account_id.is_(None)).count()
     finally:
         session.close()
-    return {"connected": ile, "still_missing": zostalo}
+    return {"connected": wynik["connected"], "still_missing": zostalo,
+            "problems": wynik["problems"]}
 
 
 class CopytradingRealIn(BaseModel):

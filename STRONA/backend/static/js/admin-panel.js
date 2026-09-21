@@ -4003,10 +4003,13 @@ async function connectMetaapi(btn){
   await busy(btn,'Connecting…',async()=>{
     try{
       const r=await api('/api/admin/pool/reconnect',{method:'POST',body:'{}'});
+      /* Powod z serwera, nie domysl: „nic nie podpieto" bez wyjasnienia
+         kosztowalo juz jedna runde zgadywania. */
+      const powod=(r.problems||[]).map(p=>`${p.account}: ${p.reason}`).join('\n');
       toast(r.connected
-        ? `Connected ${r.connected} account${r.connected>1?'s':''} to MetaApi.${r.still_missing?` ${r.still_missing} still waiting — MetaApi validates a fresh account for about a minute, try again shortly.`:''}`
-        : 'Nothing connected. MetaApi validates a freshly opened account for about a minute — try again shortly, or check the token and the MetaApi balance.',
-        r.connected?'ok':'err',9000);
+        ? `Connected ${r.connected} account${r.connected>1?'s':''} to MetaApi.${r.still_missing?`\n${r.still_missing} still waiting.\n${powod}`:''}`
+        : `Nothing connected.\n${powod||'No account is waiting for a connection.'}`,
+        r.connected?'ok':'err',14000);
     }catch(e){toast('Error: '+e.message,'err')}
   });
   go(VIEW);
