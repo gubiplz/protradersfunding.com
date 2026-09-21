@@ -6539,6 +6539,28 @@ def admin_pool_sim_fallback(payload: SimFallbackIn):
         session.close()
 
 
+@app.post("/api/admin/pool/reconnect", dependencies=[Depends(auth.require_admin)])
+async def admin_pool_reconnect():
+    """Podepnij pod MetaApi konta, ktorym tego brakuje — TERAZ, bez czekania.
+
+    Normalnie robi to dogrywka w ticku ryzyka, co minute. Ale MetaApi waliduje
+    polaczenie asynchronicznie i swiezo zalozone konto potrafi najpierw odbic
+    „sprobuj za 60 sekund" — a wtedy admin patrzy na konto, ktore ma
+    poswiadczenia i nie ma odczytu, bez zadnego sposobu, zeby to popchnac.
+    Przycisk w zakladce MT5 Pool wola to wprost.
+    """
+    ile = await provisioning.dopnij_brakujace_rejestracje(SessionLocal)
+    session = SessionLocal()
+    try:
+        zostalo = session.query(Account).filter(
+            Account.status.in_(["active", "funded"]),
+            Account.copytrading == True,                       # noqa: E712
+            Account.metaapi_account_id.is_(None)).count()
+    finally:
+        session.close()
+    return {"connected": ile, "still_missing": zostalo}
+
+
 class CopytradingRealIn(BaseModel):
     enabled: bool
 

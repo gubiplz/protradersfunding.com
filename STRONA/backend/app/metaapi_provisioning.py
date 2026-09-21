@@ -323,6 +323,10 @@ def make_registrar(settings=None):
     (sprawdzone 2026-09-21: „Matching available trading server … not found"),
     a podlaczenie tego samego serwera przyjmuje bez zastrzezen.
     """
+    # Import lokalny, jak w `make_provisioner` wyzej: modul ma dac sie zaimportowac
+    # bez calej konfiguracji aplikacji (tak chodza jego testy).
+    from .config import get_settings
+
     s = settings or get_settings()
     token = getattr(s, "metaapi_token", None)
     if not token:

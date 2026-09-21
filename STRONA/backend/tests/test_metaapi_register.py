@@ -174,6 +174,39 @@ def test_brak_tokenu_konczy_sie_cicho(monkeypatch, wlaczone):
 
 
 # --------------------------------------------------------------------------- #
+#  Sam klient MetaApi
+# --------------------------------------------------------------------------- #
+def test_klient_powstaje_takze_bez_podanych_ustawien(monkeypatch):
+    """Regresja: `make_registrar()` wołane BEZ ustawień wywracało się na
+    `NameError` (moduł importuje `get_settings` lokalnie, a ta funkcja o tym
+    zapomniała). Wyrażenie `settings or get_settings()` skraca się, gdy
+    ustawienia podano — więc ścieżka z provisioningu działała, a dogrywka
+    z ticku ryzyka, która podaje `None`, była trwale zepsuta.
+
+    Atrapa `make_registrar` w pozostałych testach tego nie złapie z definicji,
+    dlatego ten przypadek woła funkcję PRAWDZIWĄ.
+    """
+    from app import metaapi_provisioning as mp
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "metaapi_token", "tok-testowy", raising=False)
+
+    klient = mp.make_registrar()          # bez argumentu — o to całe zamieszanie
+
+    assert klient is not None
+    assert isinstance(klient, mp.MetaApiProvisioner)
+
+
+def test_bez_tokenu_klient_nie_powstaje(monkeypatch):
+    from app import metaapi_provisioning as mp
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "metaapi_token", "", raising=False)
+
+    assert mp.make_registrar() is None
+
+
+# --------------------------------------------------------------------------- #
 #  Dogrywka z ticku ryzyka
 # --------------------------------------------------------------------------- #
 def test_dogrywka_bierze_tylko_konta_ktorym_czegos_brakuje(rejestrator, wlaczone):
