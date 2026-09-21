@@ -5917,6 +5917,17 @@ def admin_pool_list():
                 "sim_fallback": provisioning.sim_fallback_enabled(session),
                 "real_fallback": provisioning.real_fallback_enabled(session),
                 "copytrading_real": provisioning.copytrading_real_enabled(session),
+                # Bez tokenu przelacznik wyzej jest atrapa: konto dostanie
+                # rachunek z puli, ale NIKT go nie podepnie pod MetaApi, wiec
+                # silnik nie zobaczy z niego ani jednej liczby. Panel ma o tym
+                # powiedziec wprost, zamiast pozwolic wlaczyc cos, co milczy.
+                "metaapi_ready": bool(settings.metaapi_token),
+                # Ile kont z dodatkiem czeka na podpiecie mimo dzialajacych
+                # poswiadczen — to sa te, na ktorych silnik jest slepy.
+                "copytrading_bez_metaapi": session.query(Account).filter(
+                    Account.status.in_(["active", "funded"]),
+                    Account.copytrading == True,                   # noqa: E712
+                    Account.metaapi_account_id.is_(None)).count(),
                 # Ile oplaconych kont czeka na realny rachunek. Zero przy
                 # wlaczonym przelaczniku znaczy „nic nie wisi"; liczba wieksza
                 # od zera to kolejka, ktora sama sie nie rozejdzie.

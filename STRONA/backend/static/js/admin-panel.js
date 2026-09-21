@@ -807,6 +807,8 @@ const VIEWS={
         Provision real MT5 accounts for Copytrading purchases
       </label>
       <p class="muted" style="font-size:12px;margin-top:6px">Off: those accounts get local credentials like everyone else, and the add-on stays what it is — a written permission to copy between the trader's own accounts. Turning this off never takes a real account away from someone who already has one.</p>
+      ${poolData.metaapi_ready?'':`<div class="warn-box" style="margin:12px 0 0"><div><b>No MetaApi token on this deployment.</b> Accounts still get their MT5 credentials from the pool, but nothing connects them to MetaApi — the risk engine reads nothing from them and the dashboard shows a frozen balance. Set <span class="mono">METAAPI_TOKEN</span> in the hosting environment <b>and redeploy</b> (environment variables only apply to a new deployment).</div></div>`}
+      ${poolData.copytrading_bez_metaapi>0?`<div class="warn-box" style="margin:12px 0 0"><div><b>${poolData.copytrading_bez_metaapi}</b> live ${poolData.copytrading_bez_metaapi===1?'account has':'accounts have'} the add-on and working MT5 credentials but ${poolData.copytrading_bez_metaapi===1?'is':'are'} not connected to MetaApi yet. The risk engine retries every minute; if this number does not fall, the token or the MetaApi balance is the reason.</div></div>`:''}
       ${poolData.copytrading_waiting>0?`<div class="warn-box" style="margin:12px 0 0"><div><b>${poolData.copytrading_waiting}</b> paid ${poolData.copytrading_waiting===1?'account is':'accounts are'} waiting for real credentials. They stay in the queue until a channel succeeds or you add a matching account to the pool.</div></div>`:''}
     </div>
 
