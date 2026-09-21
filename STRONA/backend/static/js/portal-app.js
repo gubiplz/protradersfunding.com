@@ -2407,7 +2407,10 @@ const VIEWS={
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg> Back to Tickets</button>
       <div class="sec-card">
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:14px">
-          <h3 style="margin:0">${esc(t.subject)}</h3>
+          <div><h3 style="margin:0">${esc(t.subject)}</h3>
+            ${/* Ten sam znak, ktory klient ma w temacie maila — po to, zeby
+                  wiedzial, ze trafil na wlasciwa sprawe. */''}
+            ${t.ref?`<span class="muted" style="font-size:12px">#${esc(t.ref)}</span>`:''}</div>
           <span class="status ${t.status==='closed'?'failed':t.status==='answered'?'paid':'pending'}"><span class="dot"></span>${t.status}</span>
         </div>
         <div class="thread">${t.thread.map(m=>`
@@ -2434,7 +2437,7 @@ const VIEWS={
   $('view').innerHTML=head+`<div class="tbl-wrap">`+rows.map(t=>`
     <div class="ticket-row" onclick="window._ticketView=${t.id};go('support')">
       <div class="tile-ic blue" style="width:36px;height:36px;flex:0 0 36px">${ICO.chat}</div>
-      <div class="sub"><b>${esc(t.subject)}</b><span>#${t.id} · ${t.messages} message${t.messages>1?'s':''} · updated ${dstr(t.last_ts)}</span></div>
+      <div class="sub"><b>${esc(t.subject)}</b><span>${t.ref?`#${esc(t.ref)} · `:''}${t.messages} message${t.messages>1?'s':''} · updated ${dstr(t.last_ts)}</span></div>
       <span class="status ${t.status==='closed'?'failed':t.status==='answered'?'paid':'pending'}"><span class="dot"></span>${t.status}</span>
     </div>`).join('')+`</div>`;
  },

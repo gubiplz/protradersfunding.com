@@ -264,7 +264,12 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
               f"{ctx.get('portal_url')}?view=kyc",
         ),
         "ticket_reply": (
-            f"Support replied to your ticket #{ctx.get('ticket_id')} 💬",
+            # Znak zgłoszenia, NIE klucz główny: numer po kolei mówił klientowi,
+            # ile zgłoszeń ma w sumie firma, i dawał się policzyć z dwóch maili.
+            # Bez znaku temat po prostu go nie ma — „#None" byłoby gorsze niż nic.
+            ("Support replied to your ticket "
+             + (f"#{ctx['ticket_ref']} " if ctx.get("ticket_ref") else "")
+             + "💬"),
             f"{name}, our support team replied to your ticket "
             f"\"{ctx.get('subject')}\". Log in to the portal to read the answer.",
         ),

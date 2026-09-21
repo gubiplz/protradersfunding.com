@@ -54,7 +54,8 @@ from .models import (LEAD_LOST_STATUSES, LEAD_STATUSES, LOST_REASONS,
                      Lead, LeadEvent,
                      LeadMailTemplate, LeadReminder, MailLog, Notification,
                      Order, Payout, PayoutRequest, PoolAccount, Product, PushSubscription,
-                     RewardCode, SupportTicket, TelemetryEvent, TicketMessage, Trade, Trader)
+                     RewardCode, SupportTicket, TelemetryEvent, TicketMessage, Trade, Trader,
+                     nowy_znak_biletu)
 
 settings = get_settings()
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
@@ -2574,11 +2575,26 @@ def _wiadomosci_biletow(session, ticket_ids) -> dict[int, list[TicketMessage]]:
     return out
 
 
+def _wolny_znak_biletu(session) -> str:
+    """Znak, którego nie ma jeszcze żadne zgłoszenie.
+
+    Pula ma ~887 mln kombinacji, więc pierwsze losowanie trafia praktycznie
+    zawsze; pętla jest po to, żeby przy kolizji klient nie dostał kodu, który
+    prowadzi do CUDZEJ sprawy. Limit obrotów zamiast `while True`: gdyby kiedyś
+    zabrakło puli, ma polecieć błąd, a nie zawiesić się żądanie.
+    """
+    for _ in range(12):
+        znak = nowy_znak_biletu()
+        if not session.query(SupportTicket.id).filter(SupportTicket.ref == znak).first():
+            return znak
+    raise HTTPException(500, "Could not allocate a ticket reference")
+
+
 def _ticket_dict(session, t: SupportTicket, with_thread: bool = False, msgs=None) -> dict:
     if msgs is None:
         msgs = (session.query(TicketMessage).filter(TicketMessage.ticket_id == t.id)
                 .order_by(TicketMessage.id).all())
-    d = {"id": t.id, "subject": t.subject, "status": t.status,
+    d = {"id": t.id, "ref": t.ref, "subject": t.subject, "status": t.status,
          "created_at": t.created_at.isoformat(),
          "last_ts": msgs[-1].ts.isoformat() if msgs else t.created_at.isoformat(),
          "messages": len(msgs)}
@@ -2594,13 +2610,14 @@ def ticket_create(payload: TicketIn, trader: Trader = Depends(auth.current_trade
         raise HTTPException(400, "Subject and message are required")
     session = SessionLocal()
     try:
-        t = SupportTicket(trader_id=trader.id, subject=subject[:200])
+        t = SupportTicket(trader_id=trader.id, subject=subject[:200],
+                          ref=_wolny_znak_biletu(session))
         session.add(t)
         session.flush()
         session.add(TicketMessage(ticket_id=t.id, author="trader", body=message[:20000]))
         session.commit()
         notify.notify_admins("admin_ticket", f"New ticket: {subject[:80]}", trader.email)
-        return {"id": t.id, "status": t.status}
+        return {"id": t.id, "ref": t.ref, "status": t.status}
     finally:
         session.close()
 
@@ -2698,7 +2715,7 @@ def admin_ticket_reply(ticket_id: int, payload: AdminTicketReplyIn):
         session.commit()
         if payload.message.strip() and tr:
             notify.send("ticket_reply", tr.email, {"name": tr.full_name or tr.email,
-                        "subject": t.subject, "ticket_id": t.id})
+                        "subject": t.subject, "ticket_ref": t.ref})
         return _ticket_dict(session, t, with_thread=True)
     finally:
         session.close()

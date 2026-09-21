@@ -5,6 +5,7 @@ dnia, liczniki). Dochodzą modele biznesowe prop firmy: Trader (konto klienta),
 Product (plan challenge'a), Order (zakup przez Stripe), PayoutRequest (wypłata)."""
 from __future__ import annotations
 
+import secrets
 from datetime import datetime, timezone
 
 from sqlalchemy import (Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text,
@@ -717,6 +718,25 @@ class JournalEntry(Base):
     content: Mapped[str] = mapped_column(Text, default="")
 
 
+# Alfabet znaku zgłoszenia: bez 0/O i 1/I/L, bo ten kod klient przepisuje
+# z maila albo dyktuje. Litera, której nie da się pomylić, jest warta więcej
+# niż cztery dodatkowe znaki w puli.
+_ZNAKI_BILETU = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+
+
+def nowy_znak_biletu() -> str:
+    """Publiczne oznaczenie zgłoszenia — losowe, nie kolejne.
+
+    Klucz główny szedł wcześniej wprost do tematu maila („your ticket #9"),
+    czyli klient widział, ile zgłoszeń ma w sumie cała firma, i mógł policzyć
+    przyrost z dwóch maili. To informacja o skali biznesu, nie o jego sprawie.
+
+    31^6 to ~887 mln kombinacji — przy tej liczbie zgłoszeń kolizja jest
+    praktycznie niemożliwa, a i tak sprawdzamy ją przy zakładaniu (main.py).
+    """
+    return "".join(secrets.choice(_ZNAKI_BILETU) for _ in range(6))
+
+
 class SupportTicket(Base):
     __tablename__ = "support_tickets"
 
@@ -725,6 +745,12 @@ class SupportTicket(Base):
     subject: Mapped[str] = mapped_column(String(200))
     status: Mapped[str] = mapped_column(String(16), default="open")  # open|answered|closed
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    # Nullable WYŁĄCZNIE ze względu na wiersze sprzed tej zmiany; `db.py`
+    # nadaje im znak przy starcie. Domyślna wartość jest tu po to, żeby żadna
+    # inna droga tworzenia zgłoszenia (testy, przyszły import) nie zostawiła
+    # pustego pola — wtedy panel musiałby pokazać „#null".
+    ref: Mapped[str | None] = mapped_column(String(12), index=True,
+                                            default=nowy_znak_biletu)
 
 
 class TicketMessage(Base):

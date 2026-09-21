@@ -1010,7 +1010,7 @@ function renderTickets(){
     <div class="ticket-row" onclick="openTicket(${t.id})">
       <div class="tile-ic ${t.status==='open'?'orange':t.status==='answered'?'green':'gray'}" style="width:36px;height:36px;flex:0 0 36px">${ICO.chat}</div>
       <div class="sub"><b>${esc(t.subject)}</b>
-        <span>#${t.id} · ${esc(t.trader_email||'—')} · ${t.messages} message${t.messages>1?'s':''} · ${dstr(t.last_ts)}</span></div>
+        <span>${t.ref?`#${esc(t.ref)} · `:''}${esc(t.trader_email||'—')} · ${t.messages} message${t.messages>1?'s':''} · ${dstr(t.last_ts)}</span></div>
       <span class="status ${t.status==='closed'?'failed':t.status==='answered'?'paid':'pending'}"><span class="dot"></span>${esc(t.status)}</span>
       ${XBTN(`event.stopPropagation();delTicket(${t.id})`,'Delete this ticket and its conversation')}
     </div>`;
@@ -3892,7 +3892,7 @@ async function openTelemetryDetail(day,name){
 }
 async function openTicket(id){
   const t=await api('/api/admin/tickets/'+id);
-  openOver(`#${t.id} · ${t.subject}`,`
+  openOver(`#${t.ref||t.id} · ${t.subject}`,`
     <div class="chip-row">
       <span class="status ${t.status==='closed'?'failed':t.status==='answered'?'paid':'pending'}"><span class="dot"></span>${esc(t.status)}</span>
       <span class="chip">${esc(t.trader_email||'—')}</span>
@@ -4661,7 +4661,7 @@ function deleteOrderRow(id,email,amount,accId){
 function delTicket(id){
   const t=(window._tickets||[]).find(x=>x.id===id);
   xdel(`/api/admin/tickets/${id}`,
-    `Delete ticket #${id}${t?` — ${t.subject}`:''}?\n\n`
+    `Delete ticket #${t&&t.ref?t.ref:id}${t?` — ${t.subject}`:''}?\n\n`
     +`The whole conversation${t&&t.messages?` (${t.messages} message${t.messages>1?'s':''})`:''} `
     +`goes with it and the trader loses it from their portal too. Closing a ticket only ends it; `
     +`this erases it. This cannot be undone.`,

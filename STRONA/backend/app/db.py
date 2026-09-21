@@ -54,6 +54,7 @@ def init_db() -> None:
     _przemianuj_statusy_leadow()
     _odbierz_konta_google()
     _uzupelnij_zgubione_claimy()
+    _nadaj_znaki_biletom()
 
 
 # Odcisk wersji kodu, dla ktorej schemat jest juz doprowadzony do porzadku.
@@ -245,6 +246,12 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
     "channel_posts": {
         "origin": "VARCHAR(64) DEFAULT 'panel'",
     },
+    # Publiczne oznaczenie zgloszenia. Bez DEFAULT-u w SQL-u: kazdy wiersz ma
+    # dostac WLASNY znak, a stala w DEFAULT dalaby wszystkim ten sam. Stare
+    # wiersze uzupelnia `_nadaj_znaki_biletom` ponizej.
+    "support_tickets": {
+        "ref": "VARCHAR(12)",
+    },
 }
 
 
@@ -263,6 +270,8 @@ _NEW_INDEXES: list[tuple[str, str]] = [
     ("leads", "tg_message_id"),
     # Kazdy klik przycisku na kanale LEADS szuka admina po id konta Telegram.
     ("traders", "telegram_user_id"),
+    # Znak zgloszenia sprawdzamy na wyjatkowosc przy kazdym nowym tickecie.
+    ("support_tickets", "ref"),
 ]
 
 
@@ -460,3 +469,41 @@ def _add_missing_columns() -> None:
                     continue
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl_type}"))
                 print(f"[db] dodano kolumnę {table}.{name}")
+
+
+def _nadaj_znaki_biletom() -> None:
+    """Zgłoszenia sprzed tej zmiany nie mają publicznego znaku.
+
+    Temat maila szedł wcześniej z kluczem głównym („your ticket #9"), więc
+    klient widział, ile zgłoszeń ma w sumie firma. Znak zastępuje ten numer
+    wszędzie, gdzie treść ogląda klient — ale wiersze, które już są w bazie,
+    zostałyby z pustym polem i panel pokazałby „#null".
+
+    Każdy wiersz dostaje WŁASNY znak, więc leci osobny UPDATE. Przy kilkunastu
+    zgłoszeniach to nic, a jedno zapytanie ze stałą nadałoby wszystkim ten sam.
+    Powtórki odsiewamy w pamięci: świeżo wstawionych nie widać w SELECT-cie,
+    który już poszedł.
+    """
+    from sqlalchemy import inspect, text
+
+    from .models import nowy_znak_biletu
+
+    inspector = inspect(engine)
+    if "support_tickets" not in set(inspector.get_table_names()):
+        return
+    if "ref" not in {c["name"] for c in inspector.get_columns("support_tickets")}:
+        return
+    with engine.begin() as conn:
+        zajete = {r[0] for r in conn.execute(
+            text("SELECT ref FROM support_tickets WHERE ref IS NOT NULL")) if r[0]}
+        puste = [r[0] for r in conn.execute(
+            text("SELECT id FROM support_tickets WHERE ref IS NULL"))]
+        for tid in puste:
+            znak = nowy_znak_biletu()
+            while znak in zajete:
+                znak = nowy_znak_biletu()
+            zajete.add(znak)
+            conn.execute(text("UPDATE support_tickets SET ref = :r WHERE id = :i"),
+                         {"r": znak, "i": tid})
+    if puste:
+        print(f"[db] nadano znak {len(puste)} zgloszeniom")
