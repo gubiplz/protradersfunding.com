@@ -1,12 +1,15 @@
-"""Instant Funding: 30 dni handlu przed pierwszą wypłatą — teraz naprawdę.
+"""Karencja dni handlu przed pierwszą wypłatą: 30 na Instancie, 5 na 2-Step.
 
-Sklep, tabela objectives i dashboard mówiły „min. 30 dni handlu", ale wniosek
+Sklep, tabela objectives i dashboard mówiły „min. N dni handlu", ale wniosek
 o wypłatę sprawdzał wyłącznie status funded, KYC i zysk. Konto Instant jest
 funded od pierwszej minuty, więc klient z zyskiem wypłacał drugiego dnia,
-patrząc jednocześnie na licznik „2 / 30 min". Testy pilnują, żeby bramka
-działała TAM, gdzie obiecana, i NIE działała tam, gdzie nikt jej nie obiecał:
-konto po ewaluacji zużyło swoje dni na zdanie fazy i wchodzi na funded
-z licznikiem od zera — policzenie ich drugi raz zamroziłoby mu wypłaty.
+patrząc jednocześnie na licznik „2 / 30 min".
+
+Karencja liczy się na KONCIE FUNDED: `trading_days_count` zeruje się przy
+zmianie fazy, więc 2-Step wchodzi na funded od zera i odrabia swoje 5 dni tam,
+a nie w ewaluacji. Od 2026-09-22 dotyczy obu planów — karta planu 2-Step mówi
+od tej samej zmiany „N days per phase, and before your first payout", żeby
+reguła była opublikowana, zanim zacznie obowiązywać.
 """
 import os
 import tempfile
@@ -69,11 +72,19 @@ def test_instant_po_trzydziestym_dniu_wyplaca():
     assert r.status_code == 200, r.text
 
 
-def test_konto_po_ewaluacji_nie_czeka_drugi_raz():
+def test_2step_swiezo_funded_czeka_swoje_piec_dni():
     """Świeżo sfinansowane 2-Step ma `trading_days_count == 0`, bo licznik zeruje
-    się przy zmianie fazy. Dni już zapłacone zdaniem ewaluacji — cennik nie
-    obiecuje przy tym planie żadnej karencji na wypłatę."""
+    się przy zmianie fazy — więc swoje 5 dni odrabia już na koncie funded."""
     aid, h = _konto("md-2step@test.pl", steps=2, dni=0, min_dni=5)
+    with TestClient(app) as c:
+        r = c.post(f"/api/accounts/{aid}/payout-request", headers=h, json=WISE)
+    assert r.status_code == 400, r.text
+    tresc = r.json()["detail"]
+    assert "5" in tresc and "trading days" in tresc
+
+
+def test_2step_po_pieciu_dniach_wyplaca():
+    aid, h = _konto("md-2step-ok@test.pl", steps=2, dni=5, min_dni=5)
     with TestClient(app) as c:
         r = c.post(f"/api/accounts/{aid}/payout-request", headers=h, json=WISE)
     assert r.status_code == 200, r.text

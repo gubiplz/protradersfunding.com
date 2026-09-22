@@ -217,21 +217,26 @@ def _limit_warnings_due(acc: Account, metrics: dict, day_key: str) -> list[str]:
 
 
 def payout_days_left(acc: Account) -> int:
-    """Ile dni handlu brakuje kontu do wypłaty (0 = można wnioskować).
+    """Ile dni handlu brakuje kontu do PIERWSZEJ wypłaty (0 = można wnioskować).
 
-    Instant Funding jest funded od pierwszej minuty, więc jego `min_trading_days`
-    nie ma żadnej fazy do zamknięcia — ta liczba znaczy w tym planie dokładnie
-    jedno: sklepową obietnicę „min. 30 dni handlu przed pierwszą wypłatą". Do
-    2026-09-09 nie pilnował jej nikt, ani portal, ani API, więc konto z zyskiem
-    mogło wypłacić drugiego dnia, mimo że dashboard pokazywał obok „X / 30 min".
+    `trading_days_count` zeruje się przy zmianie fazy, więc na koncie funded
+    liczy dni przehandlowane JUŻ NA NIM, a nie te zużyte wcześniej na zdanie
+    ewaluacji. Dzięki temu jeden warunek obsługuje oba plany bez rozgałęziania:
+    Instant wchodzi na funded od pierwszej minuty i czeka swoje 30 dni, 2-Step
+    wchodzi po ewaluacji z licznikiem od zera i czeka 5.
 
-    Ewaluacji ta bramka NIE dotyczy: tam te same dni są warunkiem ZDANIA fazy,
-    zużywają się przed wejściem na funded (`trading_days_count` startuje wtedy od
-    zera) i policzenie ich drugi raz zamroziłoby wypłaty świeżo sfinansowanym
-    kontom 2-Step — czego cennik nigdzie nie obiecuje.
+    Po pierwszej wypłacie bramka przestaje wiązać sama z siebie: wypłata nie
+    zeruje licznika, więc raz przekroczony próg zostaje przekroczony. Zerują go
+    tylko reset konta i awans fazy, czyli sytuacje, w których nowe konto ma
+    prawo odczekać od nowa.
+
+    Historia: do 2026-09-09 nie pilnował tego nikt, ani portal, ani API, więc
+    konto Instant z zyskiem wypłacało drugiego dnia, patrząc obok na licznik
+    „2 / 30 min". Bramka weszła wtedy WYŁĄCZNIE dla Instanta, bo karta 2-Step
+    ogłaszała swoje 5 dni jako warunek zdania fazy, a nie karencję wypłaty.
+    2026-09-22 objęła oba plany — razem ze zmianą tekstu na karcie planu, żeby
+    reguła była opublikowana, zanim zacznie obowiązywać.
     """
-    if acc.steps:
-        return 0
     return max(0, int(acc.min_trading_days or 0) - int(acc.trading_days_count or 0))
 
 
