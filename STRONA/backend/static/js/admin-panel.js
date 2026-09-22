@@ -3857,9 +3857,24 @@ async function rejectPayout(id,btn){
     const reason=await askReason({
       title:'Reject this payout request',danger:true,confirmLabel:'Reject request',
       hint:'The trader sees the reason under the request status and gets it by e-mail.',
-      presets:['Profit target not met','Minimum trading days not met',
-        'Open positions at the time of the request','Trading activity under review',
-        'KYC verification incomplete']});
+      /* Powody, ktore ODPADLY, bo wniosek z nimi nie ma jak dojsc do admina:
+         „Profit target not met" (konto musi byc funded, a `profit > 0` jest
+         warunkiem zlozenia), „Minimum trading days not met" (od 2026-09-22
+         bramkuje `payout_days_left` na OBU planach) i „KYC verification
+         incomplete" (`request_payout` wymaga `kyc_status == "approved"`).
+         Zostawienie ich w liscie produkowalo odmowy sprzeczne z tym, co
+         system wpuscil. Reszta to rzeczy, ktorych automat NIE sprawdza:
+         otwarte pozycje i naruszenia regulaminu widoczne dopiero w przegladzie.
+         Numery sekcji sa celowo w tresci — trader dostaje ja mailem i ma
+         miec czym sprawdzic, o ktora regule chodzi. */
+      presets:['Open positions at the time of the request',
+        'Trading activity under review',
+        'Prohibited trading activity — Terms §6',
+        'Exploiting demo pricing, latency or feed errors — Terms §6',
+        'Account traded by an unapproved third party — Terms §6-7',
+        'More than one registration for the same person — Terms §3',
+        'Chargeback or payment dispute on this account — Terms §6',
+        'Identity does not match the account holder — Terms §6']});
     if(reason===null)return;   // Cancel
     try{await api(`/api/admin/payout-requests/${id}/reject`,{method:'POST',
         body:JSON.stringify({reason})});

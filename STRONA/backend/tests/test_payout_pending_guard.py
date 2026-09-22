@@ -38,6 +38,10 @@ def _funded(email):
     acc = Account(login=f"8{tid:08d}"[:9], trader_id=tid, trader_name="Guard Tester",
                   product_key="2step-100k", initial_balance=KAPITAL, steps=2,
                   profit_split_pct=80, status="funded", phase="funded",
+                  # Karencja dni handlu na koncie funded (poller.payout_days_left)
+                  # obejmuje od 2026-09-22 takze 2-Step, wiec konto bez dni
+                  # odbijaloby sie o bramke zamiast sprawdzac swoja rzecz.
+                  min_trading_days=5, trading_days_count=5,
                   balance=KAPITAL + ZYSK, equity=KAPITAL + ZYSK,
                   peak_equity=KAPITAL + ZYSK, day_start_equity=KAPITAL + ZYSK,
                   day_start_balance=KAPITAL + ZYSK)
