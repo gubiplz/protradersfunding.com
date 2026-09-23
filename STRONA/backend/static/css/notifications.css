@@ -171,9 +171,18 @@ html[data-theme=dark] .np-scrim{background:rgba(0,0,0,.36)}
 .picked>.np-rb>.np-ck svg{opacity:1;transform:none}
 .np.editing .np-dot,.np.editing .np-chev{opacity:0!important}
 .np.editing .np-rb{cursor:default}
-.np-editbar{position:absolute;left:0;right:0;bottom:0;z-index:8;display:flex;align-items:center;justify-content:space-between;padding:8px 10px calc(8px + var(--np-bot));background:var(--np-bar);-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%);border-top:.5px solid var(--np-hair);transform:translateY(105%);transition:transform .5s var(--np-spring)}
-.np.editing .np-editbar{transform:none}
-.np.editing .np-scroll{padding-bottom:calc(84px + var(--np-bot))}
+/* Tryb Edit: akcje w nagłówku obok „Done" — tam, gdzie się ich szuka; pasek
+   na dole panelu ginął (na preview Vercela chował się też pod jego paskiem). */
+.np-editacts,.np-onedit{display:none}
+.np.editing .np-editacts{display:flex;gap:6px;align-items:center}
+.np.editing .np-bar-r>.np-ibtn,.np.editing .np-noedit{display:none}
+.np.editing .np-onedit{display:inline-flex}
+.np .np-act{height:32px;padding:0 13px;border-radius:16px;font-size:13.5px;font-weight:650;color:var(--acc);
+  background:var(--acc-bg);white-space:nowrap;transition:transform .35s var(--np-spring),opacity .2s,background .2s}
+.np .np-act.danger{color:var(--red);background:color-mix(in srgb,var(--red) 12%,transparent)}
+.np .np-act:disabled{opacity:.4;cursor:default}
+.np .np-act:not(:disabled):active{transform:scale(.94)}
+.np.editing .np-editacts{animation:np-inF .3s var(--np-ease)}
 
 .np-chev{position:absolute;right:14px;bottom:13px;color:var(--dim);transition:transform .5s var(--np-spring)}
 .np-chev svg{width:16px;height:16px}

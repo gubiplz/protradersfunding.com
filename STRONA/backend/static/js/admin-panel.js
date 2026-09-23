@@ -6001,19 +6001,19 @@ function npEnsure(){
           <div class="np-bar-r">
             <button type="button" class="np-ibtn np-gear" data-np="settings" aria-label="Notification settings">${npI('gear')}</button>
             <button type="button" class="np-ibtn" data-np="close" aria-label="Close">${npI('x',2.2)}</button>
+            <span class="np-editacts">
+              <button type="button" class="np-act" data-np="bulkread" disabled>Mark read</button>
+              <button type="button" class="np-act danger" data-np="bulkdel" disabled>Delete</button>
+            </span>
           </div>
         </header>
         <div class="np-scroll" id="np-scroll">
           <div class="np-lt"><div><h2>Notifications</h2><small id="np-sub"></small></div>
-            <button type="button" class="np-tbtn" data-np="allread">Mark all read</button></div>
+            <button type="button" class="np-tbtn np-noedit" data-np="allread">Mark all read</button>
+            <button type="button" class="np-tbtn np-onedit" data-np="selall">Select all</button></div>
           <div class="np-pr" data-push="${PUSH.st}" data-np="pushrow">${npPushInner()}</div>
           <div class="np-segw"><div class="np-seg" id="np-seg" role="tablist" aria-label="Filter"></div></div>
           <div class="np-items" id="np-items" role="list"></div>
-        </div>
-        <div class="np-editbar">
-          <button type="button" class="np-tbtn" data-np="selall">Select all</button>
-          <button type="button" class="np-tbtn" data-np="bulkread">Mark read</button>
-          <button type="button" class="np-tbtn danger" data-np="bulkdel">Delete</button>
         </div>
       </div>
       <div class="np-pg np-settings" id="np-settings" inert></div>
@@ -6228,7 +6228,7 @@ function npEditbar(){
   const del=document.querySelector('[data-np="bulkdel"]'),rd=document.querySelector('[data-np="bulkread"]'),
         all=document.querySelector('[data-np="selall"]');
   if(!del)return;
-  del.textContent=n?`Delete (${n})`:'Delete';del.disabled=!n;rd.disabled=!n;
+  del.textContent=n?`Delete ${n}`:'Delete';del.disabled=!n;rd.disabled=!n;
   rd.textContent=n&&![...NP.picked].some(id=>{const i=npItem(id);return i&&!i.read})?'Mark unread':'Mark read';
   all.textContent=vis.length&&vis.every(i=>NP.picked.has(i.id))?'Deselect all':'Select all';
 }
