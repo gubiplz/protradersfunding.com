@@ -6913,7 +6913,8 @@ def admin_reach():
         for k in reach.kanaly(session):
             lista.append({**k, "bot_admin": telegram.jest_adminem("@" + k["username"])})
         return {**cfg, "provider_ready": reach.is_enabled(), "balance": stan,
-                "channels": lista, "bot_username": telegram.bot_username()}
+                "channels": lista, "bot_username": telegram.bot_username(),
+                "webhook": _reach_webhook_stan(), "scan_every_min": reach.SKAN_CO_MIN}
     finally:
         session.close()
 
@@ -6928,6 +6929,78 @@ def admin_reach_save(payload: ReachIn):
             raise HTTPException(400, str(e))
     finally:
         session.close()
+
+
+WEBHOOK_SCIEZKA = "/api/telegram/webhook"
+
+
+def _bez_www(url: str) -> str:
+    """`https://www.x.com/a/` → `x.com/a` — do porównania adresów webhooka."""
+    s = (url or "").strip().lower().split("://", 1)[-1].rstrip("/")
+    return s[4:] if s.startswith("www.") else s
+
+
+def _reach_webhook_stan(info: dict | None = None) -> dict:
+    """Czy Telegram wysyła posty z kanałów bota głównego do NAS.
+
+    Bot jest adminem kanału (chip „auto ready"), a post i tak nie dochodzi,
+    gdy webhook wskazuje gdzie indziej albo `allowed_updates` pomija
+    `channel_post`. 2026-09-23 tak właśnie przepadł post na @forex_passing:
+    panel mówił „auto ready", a Telegram do nas nie zapukał.
+    """
+    nasz = settings.app_base_url.rstrip("/") + WEBHOOK_SCIEZKA
+    naprawialny = bool(settings.telegram_webhook_secret and nasz.startswith("https://"))
+    if not settings.telegram_bot_token:
+        return {"state": "no_bot", "fixable": False}
+    info = info if info is not None else telegram.webhook_info()
+    if info.get("error"):
+        return {"state": "unknown", "error": info["error"], "fixable": False}
+    url = info.get("url") or ""
+    dozwolone = info.get("allowed_updates") or []
+    if not url:
+        stan = "off"
+    elif _bez_www(url) != _bez_www(nasz):
+        stan = "elsewhere"
+    elif dozwolone and "channel_post" not in dozwolone:
+        stan = "no_channel_posts"
+    else:
+        stan = "ok"
+    host = url.split("://", 1)[-1].split("/", 1)[0] if url else ""
+    return {"state": stan, "host": host, "pending": info.get("pending_update_count") or 0,
+            "last_error": info.get("last_error_message") or None, "fixable": naprawialny}
+
+
+class ReachWebhookIn(BaseModel):
+    force: bool = False
+
+
+@app.post("/api/admin/reach/webhook", dependencies=[Depends(auth.require_admin)])
+def admin_reach_webhook(payload: ReachWebhookIn):
+    """Kieruje update'y bota głównego na nasz webhook, z `channel_post`.
+
+    Adres spoza naszej domeny nadpisujemy tylko po `force` — ten sam bot może
+    obsługiwać cudzy system, a przejęcie go po cichu wyłączyłoby tamten.
+    """
+    nasz = settings.app_base_url.rstrip("/") + WEBHOOK_SCIEZKA
+    if not settings.telegram_webhook_secret:
+        raise HTTPException(400, "TELEGRAM_WEBHOOK_SECRET is not set on the server")
+    if not nasz.startswith("https://"):
+        raise HTTPException(400, "APP_BASE_URL must be the public https address")
+    info = telegram.webhook_info()
+    if info.get("error"):
+        raise HTTPException(502, f"Telegram: {info['error']}")
+    obecny = info.get("url") or ""
+    if obecny and _bez_www(obecny) != _bez_www(nasz) and not payload.force:
+        raise HTTPException(409, f"The bot's updates go to {obecny.split('://', 1)[-1].split('/', 1)[0]}")
+    # Bez `allowed_updates` Telegram zostawia poprzednią listę — więc podajemy
+    # ją tylko wtedy, gdy trzeba do niej DOPISAĆ channel_post.
+    dozwolone = info.get("allowed_updates") or []
+    nowe = (sorted(set(dozwolone) | {"channel_post", "message", "callback_query"})
+            if dozwolone and "channel_post" not in dozwolone else None)
+    ok, powod = telegram.ustaw_webhook(nasz, settings.telegram_webhook_secret, nowe)
+    if not ok:
+        raise HTTPException(502, f"Telegram refused: {powod}")
+    return {"ok": True, "webhook": _reach_webhook_stan()}
 
 
 @app.post("/api/admin/reach/channels", dependencies=[Depends(auth.require_admin)])
@@ -8201,6 +8274,10 @@ async def _lazy_tick_middleware(request: Request, call_next):
         # o godzinie crona, a wylosowane pory publikacji sa dekoracja.
         if settings.content_on_traffic:
             await run_in_threadpool(_content_sweep_z_ruchu)
+        # Reach BOT: posty wrzucone na kanał ręcznie dochodzą webhookiem, a gdy
+        # ten milczy — tym skanem. Throttle raz na 10 min siedzi w `reach`.
+        if settings.reach_scan_on_traffic:
+            await run_in_threadpool(_reach_skan)
         # Uprzejmosc wobec partnera: jego licznik miejsc tez budzi sie ruchem,
         # a nasz panel chodzi rowniej niz jego kampanie. Wlasny throttle
         # w srodku, wiec to najczesciej jeden test zegara.
@@ -8331,6 +8408,7 @@ async def api_tick(request: Request):
     # Saldo dostawcy zasięgu. Raz na dobę wystarczy: alert ma ostrzec ZANIM
     # konto zejdzie do zera, a nie dopiero przy odrzuconym zamówieniu.
     zasieg = _reach_saldo_tick()
+    _reach_skan()
     # Kolejka treści: JEDEN zaległy post na przebieg. Przy przenosinach archiwum
     # to jest cały sens — treść ma wracać rytmem, nie zrzutem 47 postów naraz.
     tresc = _content_tick()
@@ -8355,6 +8433,18 @@ def _content_tick() -> dict:
     except Exception as e:  # pragma: no cover - sieć/baza
         print(f"[content] tick blad: {e}")
         return {"sent": 0}
+    finally:
+        session.close()
+
+
+def _reach_skan() -> dict:
+    """Skan kanałów Reach BOT-a — zapas dla webhooka. NIGDY nie rzuca."""
+    session = SessionLocal()
+    try:
+        return reach.skanuj_kanaly(session)
+    except Exception as e:  # pragma: no cover - sieć/baza
+        print(f"[reach] skan kanałów nieudany: {e}")
+        return {"error": str(e)}
     finally:
         session.close()
 

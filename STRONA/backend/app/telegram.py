@@ -341,6 +341,25 @@ def chat_info(chat_id: str | int, *, token: str | None = None,
             "title": dane.get("title") or ""}
 
 
+def webhook_info(*, token: str | None = None, transport=None) -> dict:
+    """`getWebhookInfo` bota: dokąd Telegram wysyła update'y i jakie.
+
+    Webhook ustawia się ręcznie raz na bota, więc jego stan nie wynika z kodu
+    ani z env — to jedyne miejsce, w którym widać, czy posty z kanału w ogóle
+    mają szansę do nas dojść. `{"error": …}`, gdy nie dało się zapytać."""
+    poszlo, powod, dane = _strzal_json("getWebhookInfo", {}, None, transport, token=token)
+    return dane if poszlo else {"error": powod or "telegram did not answer"}
+
+
+def ustaw_webhook(url: str, secret: str, allowed: list[str] | None = None, *,
+                  token: str | None = None, transport=None) -> tuple[bool, str]:
+    """`setWebhook`. `allowed=None` zostawia listę typów, jaką bot już ma."""
+    pola = {"url": url, "secret_token": secret}
+    if allowed is not None:
+        pola["allowed_updates"] = json.dumps(allowed)
+    return _strzal("setWebhook", pola, None, transport, token)
+
+
 def jest_adminem(chat_id: str | int, *, token: str | None = None,
                  transport=None) -> bool | None:
     """Czy bot jest administratorem kanału. `None` = nie dało się sprawdzić.

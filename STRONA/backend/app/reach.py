@@ -29,7 +29,7 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import re
 
@@ -670,6 +670,9 @@ def po_publikacji(session, link: str | None, *, transport=None,
         nazwa = _czysta_nazwa(link.rsplit("/", 2)[-2] if link.count("/") >= 4 else "")
         if nazwa and not kanal_wlaczony(session, nazwa):
             return {"ordered": 0, "skipped": f"channel @{nazwa} is off the list"}
+        mid = link.rstrip("/").rsplit("/", 1)[-1]
+        if nazwa and mid.isdigit() and not _zajmij_post(session, nazwa, int(mid)):
+            return {"ordered": 0, "skipped": "duplicate"}
         return zamow(session, link, transport=transport, powod=powod)
     except Exception as e:  # pragma: no cover - zamówienie nie może cofnąć wypłaty
         print(f"[reach] zamówienie po publikacji nieudane: {e}")
@@ -698,19 +701,202 @@ def z_kanalu(session, post: dict, *, transport=None) -> dict:
     if not tresc:
         return {"ordered": 0, "skipped": "no content"}
 
-    klucz = f"seen_{czat.get('id') or nazwa}"
-    row = _wiersz(session, klucz)
     grupa = str(post.get("media_group_id") or "")
-    znacznik = f"{mid}:{grupa}"
-    if row and row.value:
-        try:
-            stary_mid, stara_grupa = row.value.split(":", 1)
-            if int(stary_mid) >= int(mid) or (grupa and grupa == stara_grupa):
-                return {"ordered": 0, "skipped": "duplicate"}
-        except (ValueError, TypeError):
-            pass
-    _ustaw(session, klucz, znacznik)
-    session.commit()
+    if not _zajmij_post(session, nazwa, int(mid), grupa, chat_id=czat.get("id")):
+        return {"ordered": 0, "skipped": "duplicate"}
 
     return zamow(session, f"https://t.me/{nazwa}/{mid}", transport=transport,
                  powod=f"channel @{nazwa}")
+
+
+# --------------------------------------------------------------------------- #
+#  Znacznik „ostatni obsłużony post" per kanał                                 #
+# --------------------------------------------------------------------------- #
+# Trzy drogi zamawiają pod postem: webhook Telegrama (`z_kanalu`), nasza
+# publikacja (`po_publikacji`) i skan kanału (`skanuj_kanaly`). Wszystkie
+# przechodzą przez JEDEN znacznik na kanał, zajmowany atomowo — inaczej post
+# złapany dwiema drogami (albo przez dwie równoległe funkcje Vercela) byłby
+# opłacony dwa razy.
+def _klucz_posta(nazwa: str) -> str:
+    return f"seen_@{nazwa}"
+
+
+def _ostatni_post(session, nazwa: str, chat_id=None) -> tuple[int, str]:
+    """(numer posta, media_group_id) ostatnio obsłużonego posta kanału.
+
+    Starsze wersje trzymały znacznik pod id czatu (`seen_-100…`) albo nazwą
+    bez „@" — czytamy też te, żeby wdrożenie nie odświeżyło starych postów.
+    """
+    najlepszy = (0, "")
+    klucze = [_klucz_posta(nazwa), f"seen_{nazwa}"] + ([f"seen_{chat_id}"] if chat_id else [])
+    for klucz in klucze:
+        row = _wiersz(session, klucz)
+        if not row or not row.value:
+            continue
+        try:
+            mid, grupa = row.value.split(":", 1)
+            if int(mid) > najlepszy[0]:
+                najlepszy = (int(mid), grupa)
+        except (ValueError, TypeError):
+            continue
+    return najlepszy
+
+
+def _zajmij_post(session, nazwa: str, mid: int, grupa: str = "", *, chat_id=None) -> bool:
+    """Zajmuje post `mid` kanału. False = ten post (albo nowszy) już obsłużony.
+
+    Compare-and-set na `app_settings`: UPDATE … WHERE value = <stara wartość>
+    przechodzi tylko jednemu z równoległych wywołań.
+    """
+    stary_mid, stara_grupa = _ostatni_post(session, nazwa, chat_id)
+    if stary_mid >= mid or (grupa and grupa == stara_grupa):
+        return False
+    klucz = PREFIKS + _klucz_posta(nazwa)
+    nowa = f"{mid}:{grupa}"
+    row = session.get(AppSetting, klucz)
+    try:
+        if row is None:
+            session.add(AppSetting(key=klucz, value=nowa))
+            session.commit()
+            return True
+        stara = row.value
+        ile = (session.query(AppSetting)
+               .filter(AppSetting.key == klucz, AppSetting.value == stara)
+               .update({AppSetting.value: nowa}, synchronize_session=False))
+        session.commit()
+        session.expire_all()
+        return ile == 1
+    except Exception:  # pragma: no cover - wyścig na INSERT: wygrał ktoś inny
+        session.rollback()
+        return False
+
+
+# --------------------------------------------------------------------------- #
+#  Skan kanałów — zapas na wypadek, gdy webhook milczy                          #
+# --------------------------------------------------------------------------- #
+# Webhook zależy od rzeczy, których stąd nie widać: czy bot jest adminem, czy
+# `setWebhook` wskazuje na nas i czy `allowed_updates` zawiera `channel_post`.
+# 2026-09-23 post na @forex_passing nie dostał nic, bo Telegram po prostu nie
+# zapukał. Publiczny podgląd `t.me/s/<kanał>` nie wymaga niczego — skan co
+# kilka minut łapie posty, których webhook nie zgłosił.
+SKAN_CO_MIN = 10
+# Post świeższy niż to zostawiamy webhookowi i naszej publikacji — obie drogi
+# zajmują znacznik w sekundach, skan nie ma się z nimi ścigać.
+SKAN_KARENCJA = timedelta(minutes=2)
+# Starsze posty nie dostają zamówienia: zasięg dokupiony po dwóch dniach nie
+# wygląda naturalnie, a po długiej przerwie skan nie może wysypać budżetu.
+SKAN_MAX_WIEK = timedelta(hours=48)
+SKAN_MAX_NA_KANAL = 3
+_POST = re.compile(r'data-post="([A-Za-z0-9_]+)/(\d+)"')
+_CZAS = re.compile(r'<time datetime="([^"]+)"')
+
+
+def _pobierz_strone(url: str) -> str:
+    zadanie = urllib.request.Request(url, headers={
+        "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36")})
+    with urllib.request.urlopen(zadanie, timeout=TIMEOUT_SEK) as odp:
+        return odp.read(2_000_000).decode("utf-8", "replace")
+
+
+def posty_kanalu(nazwa: str, *, fetch=None) -> list[tuple[int, datetime]]:
+    """(numer, czas UTC) postów z publicznego podglądu, rosnąco.
+
+    Komunikaty serwisowe („kanał utworzony", „przypięto") odpadają — to nie
+    są posty, pod którymi ktokolwiek zobaczy reakcje.
+    """
+    html = (fetch or _pobierz_strone)(f"https://t.me/s/{nazwa}")
+    out = {}
+    for blok in html.split("tgme_widget_message_wrap")[1:]:
+        if "service_message" in blok:
+            continue
+        p, c = _POST.search(blok), _CZAS.search(blok)
+        if not p or not c or p.group(1).lower() != nazwa:
+            continue
+        try:
+            kiedy = datetime.fromisoformat(c.group(1))
+        except ValueError:
+            continue
+        if kiedy.tzinfo is None:
+            kiedy = kiedy.replace(tzinfo=timezone.utc)
+        out[int(p.group(2))] = kiedy.astimezone(timezone.utc)
+    return sorted(out.items())
+
+
+def _pora_skanu(session, teraz: datetime) -> bool:
+    """Throttle: jeden skan na SKAN_CO_MIN, zajmowany compare-and-set."""
+    klucz = PREFIKS + "scan_at"
+    row = session.get(AppSetting, klucz)
+    nowa = teraz.isoformat()
+    try:
+        if row is None:
+            session.add(AppSetting(key=klucz, value=nowa))
+            session.commit()
+            return True
+        try:
+            ostatni = datetime.fromisoformat(row.value)
+            if teraz - ostatni < timedelta(minutes=SKAN_CO_MIN):
+                return False
+        except (TypeError, ValueError):
+            pass
+        ile = (session.query(AppSetting)
+               .filter(AppSetting.key == klucz, AppSetting.value == row.value)
+               .update({AppSetting.value: nowa}, synchronize_session=False))
+        session.commit()
+        session.expire_all()
+        return ile == 1
+    except Exception:  # pragma: no cover
+        session.rollback()
+        return False
+
+
+def skanuj_kanaly(session, *, fetch=None, transport=None, teraz: datetime | None = None,
+                  wymus: bool = False) -> dict:
+    """Zamawia pod postami, których webhook nie zgłosił. Nigdy nie rzuca.
+
+    Pierwszy skan kanału bez znacznika zamawia TYLKO pod najnowszym postem
+    (o ile jest świeży) — inaczej wdrożenie opłaciłoby od nowa całą historię
+    kanału, także posty już podbite ręcznie.
+    """
+    teraz = teraz or datetime.now(timezone.utc)
+    if not ustawienia(session)["enabled"]:
+        return {"ordered": 0, "skipped": "reach bot off"}
+    if not is_enabled():
+        return {"ordered": 0, "skipped": "reach provider not configured"}
+    if not wymus and not _pora_skanu(session, teraz):
+        return {"ordered": 0, "skipped": "not yet"}
+    zamowione, bledy = [], []
+    for kanal in kanaly(session):
+        nazwa = kanal["username"]
+        if not kanal["on"]:
+            continue
+        try:
+            posty = posty_kanalu(nazwa, fetch=fetch)
+        except Exception as e:
+            bledy.append(f"@{nazwa}: {e}")
+            continue
+        if not posty:
+            continue
+        ostatni, _ = _ostatni_post(session, nazwa)
+        kandydaci = [(mid, kiedy) for mid, kiedy in posty
+                     if mid > ostatni and SKAN_KARENCJA <= teraz - kiedy <= SKAN_MAX_WIEK]
+        if not ostatni:
+            # Kanał wypłat: pod postami Payout BOT-a zamawia sam bot, a do dziś
+            # nie zostawiał znacznika — pierwszy skan tylko ustawia punkt startu.
+            kandydaci = [] if kanal["payout"] else [p for p in kandydaci if p[0] == posty[-1][0]]
+            if not kandydaci:
+                # Najnowszy post jest za stary albo za świeży — sam znacznik,
+                # żeby następny skan liczył od tego miejsca.
+                if teraz - posty[-1][1] >= SKAN_KARENCJA:
+                    _zajmij_post(session, nazwa, posty[-1][0])
+                continue
+        for mid, _kiedy in kandydaci[-SKAN_MAX_NA_KANAL:]:
+            if not _zajmij_post(session, nazwa, mid):
+                continue
+            wynik = zamow(session, f"https://t.me/{nazwa}/{mid}", transport=transport,
+                          powod=f"scan @{nazwa}")
+            if wynik.get("ordered"):
+                zamowione.append(f"@{nazwa}/{mid}")
+    if bledy:
+        print(f"[reach] skan kanałów: {'; '.join(bledy)}")
+    return {"ordered": len(zamowione), "posts": zamowione, "errors": bledy}

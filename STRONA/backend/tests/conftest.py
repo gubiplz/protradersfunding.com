@@ -44,6 +44,8 @@ os.environ["RECAP_ON_TRAFFIC"] = "false"
 # (dedup po lead_events) w srodku niezwiazanych testow. Test sweepa wlacza go
 # sam monkeypatchem na singletonie settings.
 os.environ["LEADS_ON_TRAFFIC"] = "false"
+# Skan kanałów Reach BOT-a z ruchu chodziłby po t.me w środku testów.
+os.environ["REACH_SCAN_ON_TRAFFIC"] = "false"
 # Web push: puste klucze VAPID = push wylaczony (settings.push_enabled to
 # property liczone z kluczy). Testy pusha wlaczaja go same monkeypatchem
 # kluczy na singletonie settings — dlatego NIE ustawiamy tu PUSH_ENABLED=false,
