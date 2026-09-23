@@ -643,15 +643,11 @@ const VIEWS={
      wychodzi dopiero przy uzbrojeniu, więc póki pula jest pusta, nikt nawet nie
      próbuje wysyłać — i dziennik maili też milczy. Wiersz prowadzi do MT5 Pool,
      bo tam widać, komu i jakiego rozmiaru rachunku brakuje. */
+  /* Kolejność czytania: co czeka na mnie → jak stoi platforma → ostatnie
+     zamówienia → stan systemu (konfiguracja, zwykle bez zmian — na dole). */
+  const czeka=(pendingPay?1:0)+((kyc.pending||[]).length?1:0)+(openTick?1:0)+(s.mail_failed_7d?1:0)+(s.provisioning?1:0);
   $('view').innerHTML=`
-    <div class="sysbar">
-      <span class="sys ${s.stripe==='mock'?'warn':''}"><span class="dot"></span>Payments: <b>${esc(s.stripe)}</b></span>
-      <span class="sys"><span class="dot"></span>Provisioning queue: <b>${s.provisioning??0}</b></span>
-      <span class="sys"><span class="dot"></span>Pool free: <b>${s.pool_free??0}</b></span>
-      ${leadChannel('Client e-mail',s.notify_mail_missing)}
-      ${leadChannel('Lead e-mail',s.lead_mail_missing)}
-      ${leadChannel('Lead SMS',s.lead_sms_missing)}
-    </div>
+    <h4 class="ov-h">Needs attention <small>${czeka?`${czeka} waiting`:'all clear'}</small></h4>
     <div class="todo-grid">
       ${todo(pendingPay,'payout requests to review','payouts','wallet')}
       ${todo((kyc.pending||[]).length,'KYC submissions pending','kyc','shield')}
@@ -659,6 +655,7 @@ const VIEWS={
       ${s.mail_failed_7d?todo(s.mail_failed_7d,'e-mails failed to send (7 days)','mail','alert'):''}
       ${s.provisioning?todo(s.provisioning,'accounts waiting for an MT5 account from the pool','pool','bank'):''}
     </div>
+    <h4 class="ov-h">Platform</h4>
     <div class="stats-row">
       ${tile('purple','layers','Accounts',s.total,`${s.active} active · ${s.provisioning??0} provisioning`)}
       ${tile('green','trend','Funded',s.funded,`${s.failed} failed`)}
@@ -677,6 +674,15 @@ const VIEWS={
           <td data-l="Status"><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span></td>
           <td class="num rt-hide" data-l="Account">${accLink(o.account_id)}</td></tr>`).join('')}</tbody></table></div>`
         :'<p class="muted" style="font-size:13px">No orders yet.</p>'}
+    </div>
+    <h4 class="ov-h" style="margin-top:18px">System</h4>
+    <div class="sysbar">
+      <span class="sys ${s.stripe==='mock'?'warn':''}"><span class="dot"></span>Payments: <b>${esc(s.stripe)}</b></span>
+      <span class="sys"><span class="dot"></span>Provisioning queue: <b>${s.provisioning??0}</b></span>
+      <span class="sys"><span class="dot"></span>Pool free: <b>${s.pool_free??0}</b></span>
+      ${leadChannel('Client e-mail',s.notify_mail_missing)}
+      ${leadChannel('Lead e-mail',s.lead_mail_missing)}
+      ${leadChannel('Lead SMS',s.lead_sms_missing)}
     </div>`;
  },
 

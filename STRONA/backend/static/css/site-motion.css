@@ -30,14 +30,6 @@
   .card:hover,.fork-card:hover{transform:translateY(-3px);box-shadow:0 22px 44px -26px rgba(79,70,229,.28),0 2px 6px rgba(15,23,42,.05)}
 }
 
-/* pigułka przełączników: gradient jedzie pod wybraną opcję, sama opcja traci
-   własne tło (bez JS zostaje dotychczasowy wygląd z site.css) */
-.sm-has-pill{position:relative}
-.sm-pill{position:absolute;left:0;top:0;z-index:0;pointer-events:none;background:var(--grad);
-  box-shadow:0 8px 20px -8px rgba(99,102,241,.55);transition:opacity .2s}
-.sm-has-pill>.cfg-tab,.sm-has-pill>.ptog,.sm-has-pill>.psize{position:relative;z-index:1}
-.sm-has-pill>.cfg-tab.on,.sm-has-pill>.ptog.on,.sm-has-pill>.psize.on{background:transparent!important;box-shadow:none!important}
-
 /* FAQ: pozycje jak grupowana lista iOS */
 .faq details{transition:box-shadow .3s,border-color .3s}
 .faq details[open]{box-shadow:0 18px 40px -26px rgba(79,70,229,.3),0 2px 6px rgba(15,23,42,.04)}
@@ -53,5 +45,4 @@
 
 @media(prefers-reduced-motion:reduce){
   .rv{filter:none}
-  .sm-pill{transition:none}
 }

@@ -86,13 +86,13 @@ function liczba(el){
 function wejscie(view){
   if(RM())return;
   view.animate([{opacity:0,transform:'translateY(8px)'},{opacity:1,transform:'none'}],{duration:420,easing:EASE});
-  const kafle=[...view.querySelectorAll('.stat-tile,.sec-card,.tbl-wrap,.acc-card,.lead-card,.ticket-row,.kpi')]
+  const kafle=[...view.querySelectorAll('.stat-tile,.todo,.sec-card,.tbl-wrap,.acc-card,.lead-card,.ticket-row,.kpi')]
     .filter(el=>el.getBoundingClientRect().top<innerHeight).slice(0,14);
   kafle.forEach((el,i)=>el.animate([{opacity:0,transform:'translateY(10px) scale(.985)'},{opacity:1,transform:'none'}],
     {duration:520,delay:40+i*35,easing:SPRING,fill:'backwards'}));
   const wiersze=[...view.querySelectorAll('tbody tr')].slice(0,16);
   wiersze.forEach((el,i)=>el.animate([{opacity:0},{opacity:1}],{duration:320,delay:80+i*22,easing:EASE,fill:'backwards'}));
-  view.querySelectorAll('.stat-tile .val').forEach(liczba);
+  view.querySelectorAll('.stat-tile .val,.todo .n').forEach(liczba);
 }
 
 /* Komórki tabeli bez treści (same spacje albo „—"): na telefonie tabela staje

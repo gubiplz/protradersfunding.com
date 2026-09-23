@@ -13,31 +13,41 @@ const RM=matchMedia('(prefers-reduced-motion: reduce)').matches;
 const SPRING='linear(0,.0048,.0185 1.6%,.0735 3.3%,.2837 7.4%,.5128 11.7%,.7052 16.4%,.8398 21.3%,.9291 26.6%,.9826 32.3%,1.0115 38.4%,1.0228 45.3%,1.0212 52.3%,1.0114 62.2%,1.0022 76.5%,1)';
 const EASE='cubic-bezier(.22,1,.36,1)';
 
-/* ---------- pigułka w przełącznikach ---------- */
-const GRUPY=[['#cfg-tabs','.cfg-tab'],['#pcfg-toggle','.ptog'],['#pcfg-sizes','.psize']];
-const pamiec=new Map();
-function pigulka(box,przycisk){
-  const on=box.querySelector(przycisk+'.on');
-  let p=box.querySelector(':scope>.sm-pill');
-  if(!on){if(p)p.style.opacity='0';return}
-  if(!p){p=document.createElement('span');p.className='sm-pill';p.setAttribute('aria-hidden','true');box.prepend(p);box.classList.add('sm-has-pill')}
-  const cel={x:on.offsetLeft,y:on.offsetTop,w:on.offsetWidth,h:on.offsetHeight};
-  const byl=pamiec.get(box.id);
-  p.style.borderRadius=getComputedStyle(on).borderRadius;
-  p.style.opacity='1';
-  if(byl&&!RM&&(byl.x!==cel.x||byl.y!==cel.y||byl.w!==cel.w)){
-    p.animate([{transform:`translate(${byl.x}px,${byl.y}px)`,width:byl.w+'px',height:byl.h+'px'},
-               {transform:`translate(${cel.x}px,${cel.y}px)`,width:cel.w+'px',height:cel.h+'px'}],{duration:540,easing:SPRING});
-    on.animate([{transform:'scale(.96)'},{transform:'none'}],{duration:420,easing:SPRING});
-  }
-  p.style.transform=`translate(${cel.x}px,${cel.y}px)`;p.style.width=cel.w+'px';p.style.height=cel.h+'px';
-  pamiec.set(box.id,cel);
+/* ---------- wybór w konfiguratorze i cenniku ----------
+   Sekcja przerysowuje się od zera po każdym kliknięciu, więc tło nie może
+   „jechać" pod przyciskami (napis zmieniał kolor od razu, tło docierało
+   później — wyglądało nienaturalnie). Zamiast tego wybrana opcja zapala się
+   W MIEJSCU krótkim sprężystym wciśnięciem, a karta zmienia wysokość płynnie. */
+const GRUPY=[['#cfg-tabs','.cfg-tab','step'],['#pcfg-toggle','.ptog','t'],
+             ['#pcfg-sizes','.psize','s'],['#cfg-sizes','.cfg-size','key']];
+const wybrane=new Map();
+function sprawdz(){
+  GRUPY.forEach(([sel,btn,klucz])=>{
+    const box=document.querySelector(sel);if(!box)return;
+    const on=box.querySelector(btn+'.on'),val=on?on.dataset[klucz]:null;
+    const byl=wybrane.get(sel);
+    if(byl!==undefined&&val!==byl&&on&&!RM)
+      on.animate([{transform:'scale(.94)',filter:'brightness(1.12)'},{transform:'none',filter:'none'}],{duration:440,easing:SPRING});
+    wybrane.set(sel,val);
+  });
 }
-function wszystkie(){GRUPY.forEach(([s,b])=>{const box=document.querySelector(s);if(box)pigulka(box,b)})}
-new MutationObserver(()=>requestAnimationFrame(wszystkie))
-  .observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class']});
-addEventListener('resize',()=>{pamiec.clear();wszystkie()});
-addEventListener('load',wszystkie);
+new MutationObserver(sprawdz).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class']});
+addEventListener('load',sprawdz);
+
+let ostatniKlik=0;
+addEventListener('pointerdown',()=>{ostatniKlik=performance.now()},true);
+if(!RM&&'ResizeObserver' in window){
+  const ro=new ResizeObserver(es=>es.forEach(en=>{
+    const el=en.target,h=el.offsetHeight,byl=+el.dataset.smH||0;
+    el.dataset.smH=h;
+    if(!byl||Math.abs(h-byl)<2||performance.now()-ostatniKlik>700)return;
+    const ov=el.style.overflow;el.style.overflow='hidden';
+    const a=el.animate([{height:byl+'px'},{height:h+'px'}],{duration:380,easing:EASE});
+    a.onfinish=a.oncancel=()=>{el.style.overflow=ov};
+  }));
+  const podlacz=()=>['#pcfg','.prules','#cfg'].forEach(s=>{const el=document.querySelector(s);if(el&&!el.dataset.smRo){el.dataset.smRo='1';ro.observe(el)}});
+  podlacz();addEventListener('load',podlacz);
+}
 
 /* ---------- FAQ: płynne rozwijanie ---------- */
 document.addEventListener('click',e=>{
