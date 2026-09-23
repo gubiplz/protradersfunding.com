@@ -42,7 +42,7 @@ from sqlalchemy.exc import IntegrityError
 
 from . import (achievements, auth, billing, catalog, certshot, contentbot, countries,
                fields, loyalty,
-               lead_mail, metaquotes_web, notify, offers, origin,
+               lead_mail, mail_templates, metaquotes_web, notify, offers, origin,
                payout_import, payoutbot, reach, statements,
                poller, provisioning, push, rules, sms, telegram, telemetry, tradebot)
 from .config import get_settings
@@ -8286,6 +8286,11 @@ def stats():
                 # zepsuta funkcja.
                 "lead_sms_missing": sms.czego_brakuje(),
                 "lead_mail_missing": lead_mail.czego_brakuje(),
+                # Nadawca „Forex Passing" w oknie maila: potrzebuje mniej niż
+                # automat (bez URL-i Telegrama), więc ma własny wskaźnik — bez
+                # niego panel gasiłby opcję z powodu zmiennej, której nie użyje.
+                "fx_sender_ready": lead_mail.nadawca_gotowy(),
+                "fx_sender_missing": lead_mail.czego_brakuje_nadawcy(),
                 # Kanał do klienta (poświadczenia MT5, reset hasła, wypłaty) nie
                 # ma przycisku, który mógłby się schować — bez tej listy jego brak
                 # nie objawia się NICZYM aż do zgłoszenia „nie dostałem maila".
@@ -9602,9 +9607,67 @@ def admin_lead_email(lead_id: int, force: bool = False):
         session.close()
 
 
+NADAWCY_MAILA = ("ptf", "fx")
+
+
+def _nadawca_z_pola(sender: str | None, domyslny: str) -> str:
+    """„ptf" (adres platformy) albo „fx" (marka landingu); inne wartości → 400."""
+    wybor = (sender or domyslny).strip().lower()
+    if wybor not in NADAWCY_MAILA:
+        raise HTTPException(400, "sender must be 'ptf' or 'fx'")
+    return wybor
+
+
+def _wyslij_z_panelu(session, *, sender: str, email: str, temat: str, tekst: str,
+                     trader: Trader | None = None, lead: Lead | None = None) -> None:
+    """Jedna wysyłka maila pisanego z ręki — dla klienta, leada i gołego adresu.
+
+    Dwa okna w panelu (Clients, Leads) i przycisk w zakładce Mail otwierają to
+    samo pole tekstowe, więc i wysyłka jest jedna; różni się tylko nadawca:
+
+    * `ptf` — `notify.send_now("admin_message")`: adres platformy, złota
+      papeteria, wpis w `MailLog`, push do portalu, jak dotąd dla klienta.
+    * `fx`  — `lead_mail.wyslij(..., tylko_nadawca=True)`: marka landingu,
+      zielona papeteria, Resend (gdy jest klucz) albo SMTP; wpis w `MailLog`
+      dopisujemy TU pod zdarzeniem `admin_message_fx`, bo `lead_mail` nie zna
+      dziennika, a zakładka Mail ma pokazywać obu nadawców obok siebie.
+
+    Ślady: trader → telemetria + historia leada o tym samym mailu (jeśli jest);
+    lead → zdarzenie `email` z pełną treścią i nadawcą, `new` → `messaged`.
+    Wysyłka jest synchroniczna: człowiek przy przycisku ma zobaczyć porażkę
+    od razu. Rzuca HTTPException(400) z powodem, gdy nie poszło.
+    """
+    if sender == "fx":
+        if not lead_mail.nadawca_gotowy():
+            raise HTTPException(400, "Sender not configured: set "
+                                + " and ".join(lead_mail.czego_brakuje_nadawcy()))
+        poszlo, powod = lead_mail.wyslij(email, temat, tekst, tylko_nadawca=True)
+        notify._zapisz_w_dzienniku("admin_message_fx", email, temat,
+                                   None if poszlo else (powod or "not sent")[:500])
+        if not poszlo:
+            raise HTTPException(400, powod)
+    else:
+        imie = (trader.full_name if trader else None) or (lead.name if lead else None) or email
+        blad = notify.send_now("admin_message", email,
+                               {"name": imie, "subject": temat, "body": tekst})
+        if blad:
+            raise HTTPException(400, blad)
+    if trader is not None:
+        telemetry.track("admin_email", trader.id, subject=temat[:120], sender=sender)
+        if lead is None:
+            _slad_w_historii(session, trader, "email", temat)
+    if lead is not None:
+        _zdarzenie(session, lead.id, "email", temat, "panel",
+                   payload=json.dumps({"body": tekst, "sender": sender},
+                                      ensure_ascii=False))
+        if lead.status == "new":
+            _zapisz_status(session, lead, "messaged", actor="panel")
+
+
 class LeadMailIn(BaseModel):
     subject: str
     body: str
+    sender: str | None = None     # domyślnie "fx" — lead zna markę landingu
 
 
 @app.post("/api/admin/leads/{lead_id}/email-custom",
@@ -9615,8 +9678,8 @@ def admin_lead_email_custom(lead_id: int, dane: LeadMailIn):
     Osobny endpoint, a nie parametr przy `/email`, bo tamta droga ma odwrotny
     kontrakt: treść składa serwer z `outcome` i panel nie ma prawa jej podmienić.
     Tu jest na odwrót — treść JEST wolą klikającego, serwer tylko ubiera ją
-    w papier firmowy marki (`_html_z_tekstu`) i pilnuje, żeby w historii leada
-    został dokładnie ten tekst, który wyszedł.
+    w papier firmowy wybranego nadawcy i pilnuje, żeby w historii leada został
+    dokładnie ten tekst, który wyszedł.
 
     Bez blokady „raz na leada": tamta chroni przed DRUGĄ KOPIĄ tego samego
     automatu, a tu każdy mail admin pisze (i widzi w podglądzie) sam — powtórka
@@ -9629,20 +9692,19 @@ def admin_lead_email_custom(lead_id: int, dane: LeadMailIn):
     tekst = dane.body.strip()
     if not temat or not tekst:
         raise HTTPException(400, "Subject and message are both required")
+    nadawca = _nadawca_z_pola(dane.sender, "fx")
     session = SessionLocal()
     try:
         lead = session.get(Lead, lead_id)
         if not lead:
             raise HTTPException(404, "Lead not found")
-        poszlo, powod = lead_mail.wyslij(lead.email, temat, tekst)
-        if not poszlo:
-            raise HTTPException(400, powod)
-        _zdarzenie(session, lead.id, "email", temat, "panel",
-                   payload=json.dumps({"body": tekst}, ensure_ascii=False))
-        if lead.status == "new":
-            _zapisz_status(session, lead, "messaged", actor="panel")
+        trader = (session.query(Trader)
+                  .filter(func.lower(Trader.email) == (lead.email or "").lower())
+                  .first())
+        _wyslij_z_panelu(session, sender=nadawca, email=lead.email, temat=temat,
+                         tekst=tekst, trader=trader, lead=lead)
         session.commit()
-        return {"ok": True, "id": lead_id, "status": lead.status}
+        return {"ok": True, "id": lead_id, "status": lead.status, "sender": nadawca}
     finally:
         session.close()
 
@@ -9651,19 +9713,28 @@ class MailTemplateIn(BaseModel):
     name: str
     subject: str
     body: str
+    sender: str | None = None     # "ptf" | "fx" | None (przy obu nadawcach)
 
 
 def _szablon_json(t: LeadMailTemplate) -> dict:
     return {"id": t.id, "name": t.name, "subject": t.subject, "body": t.body,
+            "sender": t.sender, "builtin": False,
             "updated_at": t.updated_at.isoformat() if t.updated_at else None}
 
 
 @app.get("/api/admin/email-templates", dependencies=[Depends(auth.require_admin)])
 def admin_email_templates():
+    """Wbudowane (z kodu, `mail_templates.py`) przed zapisanymi (z bazy).
+
+    Jedna lista, bo panel ma jeden selektor; `builtin` i `id` w formie
+    „b:<klucz>" odróżniają te, których nie da się skasować ani nadpisać —
+    „Save template" na nich robi kopię pod własną nazwą.
+    """
     session = SessionLocal()
     try:
-        return [_szablon_json(t) for t in
-                session.query(LeadMailTemplate).order_by(LeadMailTemplate.name)]
+        return mail_templates.lista() + [
+            _szablon_json(t) for t in
+            session.query(LeadMailTemplate).order_by(LeadMailTemplate.name)]
     finally:
         session.close()
 
@@ -9689,6 +9760,9 @@ def admin_email_template_save(dane: MailTemplateIn):
             t = LeadMailTemplate(name=nazwa)
             session.add(t)
         t.subject, t.body = temat, tekst
+        # Pusty nadawca to świadome „przy obu", nie brak danych — dlatego None,
+        # a nie domyślne „ptf". Śmieć w polu → 400, jak przy wysyłce.
+        t.sender = _nadawca_z_pola(dane.sender, "ptf") if (dane.sender or "").strip() else None
         t.updated_at = datetime.now(timezone.utc)
         session.commit()
         return _szablon_json(t)
@@ -9767,6 +9841,60 @@ def admin_trader_portal_invite(trader_id: int, send: bool = True):
 class TraderMailIn(BaseModel):
     subject: str
     body: str
+    sender: str | None = None     # domyślnie "ptf" — klient zna platformę
+
+
+class MailSendIn(BaseModel):
+    to: str
+    subject: str
+    body: str
+    sender: str | None = None
+
+
+@app.get("/api/admin/mail/senders", dependencies=[Depends(auth.require_admin)])
+def admin_mail_senders():
+    """Którymi nadawcami da się dziś wysłać — dla selektora w oknie maila.
+
+    Osobno od `/api/stats`, bo okno otwiera się dziesiątki razy dziennie, a
+    tamten endpoint liczy pół panelu. `missing` nazywa zmienne po imieniu, żeby
+    wyszarzona opcja mówiła, CO ustawić, a nie tylko że nie można.
+    """
+    return {"ptf": {"label": settings.site_name, "ready": not notify.czego_brakuje(),
+                    "missing": notify.czego_brakuje()},
+            "fx": {"label": lead_mail.MARKA, "ready": lead_mail.nadawca_gotowy(),
+                   "missing": lead_mail.czego_brakuje_nadawcy()}}
+
+
+@app.post("/api/admin/mail/send", dependencies=[Depends(auth.require_admin)])
+def admin_mail_send(dane: MailSendIn):
+    """Mail z zakładki Mail na DOWOLNY adres — ta sama wysyłka co przy kliencie
+    i leadzie, tylko odbiorca wpisany z ręki.
+
+    Adres jest dopasowywany do klienta i leada po e-mailu, żeby historia się nie
+    gubiła: mail do „abdu@…" wpisany ręcznie ma zostawić ten sam ślad, co mail
+    wysłany z karty tego samego człowieka. Bez dopasowania zostaje sam wpis w
+    dzienniku wysyłek — to wystarczy dla adresu, którego w bazie nie ma.
+    """
+    email = (dane.to or "").strip().lower()
+    if not _EMAIL_RX.fullmatch(email):
+        raise HTTPException(400, "Enter a valid e-mail address")
+    temat = " ".join(dane.subject.split())
+    tekst = dane.body.strip()
+    if not temat or not tekst:
+        raise HTTPException(400, "Subject and message are both required")
+    nadawca = _nadawca_z_pola(dane.sender, "ptf")
+    session = SessionLocal()
+    try:
+        trader = session.query(Trader).filter(func.lower(Trader.email) == email).first()
+        lead = session.query(Lead).filter(func.lower(Lead.email) == email).first()
+        _wyslij_z_panelu(session, sender=nadawca, email=email, temat=temat,
+                         tekst=tekst, trader=trader, lead=lead)
+        session.commit()
+        return {"ok": True, "email": email, "sender": nadawca,
+                "trader_id": trader.id if trader else None,
+                "lead_id": lead.id if lead else None}
+    finally:
+        session.close()
 
 
 def _slad_w_historii(session, tr: Trader, rodzaj: str, opis: str) -> None:
@@ -9802,20 +9930,16 @@ def admin_trader_email(trader_id: int, dane: TraderMailIn):
     tekst = dane.body.strip()
     if not temat or not tekst:
         raise HTTPException(400, "Subject and message are both required")
+    nadawca = _nadawca_z_pola(dane.sender, "ptf")
     session = SessionLocal()
     try:
         tr = session.get(Trader, trader_id)
         if not tr:
             raise HTTPException(404, "Trader not found")
-        blad = notify.send_now("admin_message", tr.email,
-                               {"name": tr.full_name or tr.email,
-                                "subject": temat, "body": tekst})
-        if blad:
-            raise HTTPException(400, blad)
-        telemetry.track("admin_email", tr.id, subject=temat[:120])
-        _slad_w_historii(session, tr, "email", temat)
+        _wyslij_z_panelu(session, sender=nadawca, email=tr.email, temat=temat,
+                         tekst=tekst, trader=tr)
         session.commit()
-        return {"ok": True, "email": tr.email, "subject": temat}
+        return {"ok": True, "email": tr.email, "subject": temat, "sender": nadawca}
     finally:
         session.close()
 

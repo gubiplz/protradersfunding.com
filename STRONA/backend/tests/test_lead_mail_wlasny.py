@@ -174,18 +174,47 @@ def test_webhook_brevo_dopasowuje_wlasny_temat(poczta, monkeypatch):
 
 # --- szablony ------------------------------------------------------------------
 
-def _zapisz(name="Follow-up", subject=TEMAT, body=TEKST):
+def _zapisz(name="Follow-up", subject=TEMAT, body=TEKST, sender=None):
     return client.post("/api/admin/email-templates", headers=ADMIN,
-                       json={"name": name, "subject": subject, "body": body})
+                       json={"name": name, "subject": subject, "body": body,
+                             "sender": sender})
+
+
+def _zapisane():
+    """Lista BEZ wbudowanych: te siedzą w kodzie (`mail_templates.py`), nie da
+    się ich zapisać ani skasować, więc testy zapisu patrzą obok nich."""
+    return [t for t in client.get("/api/admin/email-templates", headers=ADMIN).json()
+            if not t["builtin"]]
 
 
 def test_szablon_zapisuje_sie_i_wraca_na_liscie():
     _sprzatnij_szablony()
     r = _zapisz()
     assert r.status_code == 200
-    lista = client.get("/api/admin/email-templates", headers=ADMIN).json()
-    assert [(t["name"], t["subject"], t["body"]) for t in lista] \
+    assert [(t["name"], t["subject"], t["body"]) for t in _zapisane()] \
         == [("Follow-up", TEMAT, TEKST)]
+
+
+def test_wbudowane_szablony_sa_na_liscie_per_nadawca():
+    """Wbudowane idą PRZED zapisanymi, mają nadawcę i id „b:…", a serwer
+    podstawia adresy z ustawień — bez pustego guzika, gdy adresu brak."""
+    lista = client.get("/api/admin/email-templates", headers=ADMIN).json()
+    wbudowane = [t for t in lista if t["builtin"]]
+    assert wbudowane and lista[:len(wbudowane)] == wbudowane
+    assert {t["sender"] for t in wbudowane} == {"ptf", "fx"}
+    assert all(str(t["id"]).startswith("b:") for t in wbudowane)
+    assert all("{portal_url}" not in t["body"] and "{telegram_url}" not in t["body"]
+               for t in wbudowane)
+    assert any("{name}" in t["body"] for t in wbudowane)
+
+
+def test_szablon_zapisuje_nadawce():
+    _sprzatnij_szablony()
+    assert _zapisz(name="Tylko FX", sender="fx").json()["sender"] == "fx"
+    assert _zapisz(name="Oba").json()["sender"] is None
+    assert client.post("/api/admin/email-templates", headers=ADMIN,
+                       json={"name": "Zly", "subject": TEMAT, "body": TEKST,
+                             "sender": "xyz"}).status_code == 400
 
 
 def test_ta_sama_nazwa_nadpisuje_a_nie_mnozy():
@@ -196,7 +225,7 @@ def test_ta_sama_nazwa_nadpisuje_a_nie_mnozy():
     stary = _zapisz().json()
     nowy = _zapisz(subject="Better subject", body="Better body.").json()
     assert nowy["id"] == stary["id"]
-    lista = client.get("/api/admin/email-templates", headers=ADMIN).json()
+    lista = _zapisane()
     assert len(lista) == 1 and lista[0]["subject"] == "Better subject"
 
 
@@ -204,8 +233,7 @@ def test_szablony_wracaja_alfabetycznie():
     _sprzatnij_szablony()
     for nazwa in ("Zimny kontakt", "Follow-up", "Ostatnia próba"):
         _zapisz(name=nazwa)
-    lista = client.get("/api/admin/email-templates", headers=ADMIN).json()
-    assert [t["name"] for t in lista] \
+    assert [t["name"] for t in _zapisane()] \
         == ["Follow-up", "Ostatnia próba", "Zimny kontakt"]
 
 
@@ -222,7 +250,7 @@ def test_kasowanie_szablonu():
     tid = _zapisz().json()["id"]
     assert client.delete(f"/api/admin/email-templates/{tid}",
                          headers=ADMIN).status_code == 200
-    assert client.get("/api/admin/email-templates", headers=ADMIN).json() == []
+    assert _zapisane() == []
     assert client.delete(f"/api/admin/email-templates/{tid}",
                          headers=ADMIN).status_code == 404
 
