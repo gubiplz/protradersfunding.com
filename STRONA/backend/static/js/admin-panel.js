@@ -1676,7 +1676,11 @@ async function openMailComposer(ctx){
           ${senderOpt('ptf')}${senderOpt('fx')}</select></div>
       <p class="muted" id="lm-sub" style="font-size:12.5px;margin:0"></p>
       <div><label class="muted" style="font-size:12px">Template</label>
-        <select id="lm-tpl" class="inp" onchange="fillMailTpl()"></select></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="lm-tpl" class="inp" style="flex:1;min-width:0" onchange="fillMailTpl()"></select>
+          <button class="btn-o sm" type="button" id="lm-shuffle" onclick="mailShuffle()" style="display:none"
+            title="A different take on the same update — same numbers, different wording">Another wording</button>
+        </div></div>
       <div><label class="muted" style="font-size:12px">Subject</label>
         <input id="lm-subject" class="inp" placeholder="Subject"></div>
       <div><label class="muted" style="font-size:12px">Message</label>
@@ -1774,21 +1778,48 @@ async function openTgComposer(id){
 }
 function tgText(){return String($('tg-body').value||'').trim().replaceAll('{name}',(_tgCtx&&_tgCtx.name)||'there')}
 function tgCount(){const n=tgText().length;$('tg-count').textContent=n?n+' characters':''}
-function tgFill(){
+/* Losowanie ujecia z pamiecia: „Another wording" nie wraca do zadnego z
+   kilku ostatnio pokazanych, dopoki ma z czego wybierac. */
+const _wordingHist={};
+function pickWording(key,variants,current){
+  const v=(variants||[]).filter(Boolean);if(!v.length)return '';
+  const hist=_wordingHist[key]||(_wordingHist[key]=[]);
+  let pool=v.filter(x=>x!==current&&!hist.includes(x));
+  if(!pool.length)pool=v.filter(x=>x!==current);
+  if(!pool.length)pool=v;
+  const pick=pool[Math.floor(Math.random()*pool.length)];
+  hist.push(pick);while(hist.length>Math.min(6,Math.max(1,v.length-1)))hist.shift();
+  return pick;
+}
+/* Szablony „dynamic: insights" biora tresc z serwera — liczby konta tego
+   klienta (Where it stands / What we did / What's next), nie nawiasy do reki. */
+async function insightsFor(traderId){
+  if(!traderId)return null;
+  try{return await api('/api/admin/traders/'+traderId+'/insights')}
+  catch(e){toast('Live numbers: '+e.message,'err');return null}
+}
+async function tgFill(){
   const t=(window._tgTpls||[]).find(x=>String(x.id)===$('tg-tpl').value);
-  $('tg-shuffle').style.display=t&&(t.variants||[]).length>1?'':'none';
+  $('tg-shuffle').style.display='none';
   if(!t){tgCount();return}
-  const v=t.variants&&t.variants.length?t.variants:[t.body];
-  $('tg-body').value=v[Math.floor(Math.random()*v.length)];
+  let v=t.variants&&t.variants.length?t.variants:[t.body];
+  if(t.dynamic==='insights'){
+    $('tg-body').value='Loading the live numbers…';
+    const ins=await insightsFor(_tgCtx&&_tgCtx.trader&&_tgCtx.trader.id);
+    if(!ins||!(ins.variants||[]).length){
+      $('tg-body').value='';toast('No accounts on this client yet — nothing to report.','err',6000);tgCount();return;
+    }
+    v=ins.variants;t.variants=v;                       // „Another wording" losuje z tych samych
+  }
+  $('tg-body').value=pickWording('tg:'+t.id,v,'');
+  $('tg-shuffle').style.display=v.length>1?'':'none';
   $('tg-name').value=t.builtin?t.name+' (copy)':t.name;
   tgCount();
 }
 function tgShuffle(){
   const t=(window._tgTpls||[]).find(x=>String(x.id)===$('tg-tpl').value);
   const v=(t&&t.variants)||[];if(v.length<2)return;
-  const cur=$('tg-body').value;
-  const inne=v.filter(x=>x!==cur);
-  $('tg-body').value=inne[Math.floor(Math.random()*inne.length)];
+  $('tg-body').value=pickWording('tg:'+t.id,v,$('tg-body').value);
   tgCount();
 }
 function tgHandle(){
@@ -1871,9 +1902,21 @@ function paintMailTpls(sel){
      arkuszem przeglądarki, więc przycisk zostawał widoczny mimo atrybutu. */
   $('lm-del').style.display=cur&&!cur.builtin?'':'none';
 }
-function fillMailTpl(){
+/* Klient, ktorego liczby ma wziac szablon „insights": z karty (trader), z leada
+   (jesli juz sie zarejestrowal) albo z wpisanego adresu dopasowanego do listy
+   klientow, gdy byla otwarta. */
+function mailTraderId(){
+  const c=_mailCtx||{};
+  if(c.trader)return c.trader.id;
+  if(c.lead&&c.lead.trader_id)return c.lead.trader_id;
+  const to=(c.email||($('lm-to')&&$('lm-to').value)||'').trim().toLowerCase();
+  const t=(window._clients||[]).find(x=>String(x.email||'').toLowerCase()===to);
+  return t?t.id:null;
+}
+async function fillMailTpl(){
   const t=(window._mailTpls||[]).find(x=>String(x.id)===$('lm-tpl').value);
   $('lm-del').style.display=t&&!t.builtin?'':'none';
+  $('lm-shuffle').style.display='none';
   if(!t)return;
   /* Szablon z nadawca przestawia selektor — „Free account is ready" spod
      platformy to inna wiadomosc niz spod marki, przez ktora czlowiek sie zglosil. */
@@ -1881,7 +1924,26 @@ function fillMailTpl(){
     const o=[...$('lm-from').options].find(o=>o.value===t.sender);
     if(o&&!o.disabled){$('lm-from').value=t.sender;$('lm-sub').innerHTML=mailSubtitle();paintMailTpls(t.id)}
   }
-  $('lm-subject').value=t.subject;$('lm-body').value=t.body;$('lm-name').value=t.builtin?t.name+' (copy)':t.name;
+  $('lm-subject').value=t.subject;$('lm-name').value=t.builtin?t.name+' (copy)':t.name;
+  if(t.dynamic==='insights'){
+    /* „Weekly update" z LICZBAMI tego klienta — serwer sklada tekst z metryk
+       konta, ksiegi transakcji i wyplat. Bez klienta/kont nie ma czego wstawic. */
+    const tid=mailTraderId();
+    if(!tid){$('lm-body').value='';toast('Pick a client first — the update is built from their account numbers.','err',7000);return}
+    $('lm-body').value='Loading the live numbers…';
+    const ins=await insightsFor(tid);
+    if(!ins||!(ins.mail_variants||[]).length){$('lm-body').value='';toast('No accounts on this client yet — nothing to report.','err',6000);return}
+    t.variants=ins.mail_variants;
+    $('lm-body').value=pickWording('mail:'+t.id,t.variants,'');
+    $('lm-shuffle').style.display=t.variants.length>1?'':'none';
+    return;
+  }
+  $('lm-body').value=t.body;
+}
+function mailShuffle(){
+  const t=(window._mailTpls||[]).find(x=>String(x.id)===$('lm-tpl').value);
+  const v=(t&&t.variants)||[];if(v.length<2)return;
+  $('lm-body').value=pickWording('mail:'+t.id,v,$('lm-body').value);
 }
 async function saveMailTpl(){
   const name=$('lm-name').value.trim(),subject=$('lm-subject').value.trim(),
@@ -3482,6 +3544,7 @@ function renderActivity(){
    loguje", ta lista na „co moge z nim zrobic". */
 const CLI_FILTERS=[
   ['all','All',()=>true],
+  ['bought','Bought',t=>(t.paid_usd||0)>0],
   ['noacc','No account yet',t=>!t.accounts],
   ['kyc','KYC pending',t=>t.kyc_status==='pending'],
   ['credits','Has credits',t=>t.credits_usd>0],
