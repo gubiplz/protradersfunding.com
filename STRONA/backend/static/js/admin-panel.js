@@ -234,11 +234,18 @@ const COUNTRY_VIA={kyc:'KYC document',phone:'phone prefix at checkout',login:'IP
 const countryTitle=o=>o&&o.country
   ?`Country from ${COUNTRY_VIA[o.country_via]||o.country_via||'a signal'}`
   :'No country yet — none of: KYC, phone at checkout, IP at sign-up / sign-in, lead phone or application IP. Fills in at their next sign-in.';
+/* Mala pigulka, nie `.chip` z panelu bocznego (padding 5x10, pelna czcionka):
+   w waskiej kolumnie tamta lamala sie w pol — „Free" w jednej linii, „· NG" w
+   drugiej. `nowrap` trzyma separator i pigulke razem; style inline, bo
+   admin.css idzie przez @import i potrafi wisiec w cache po deployu. */
+const ORG_CHIP='display:inline-block;white-space:nowrap;font-size:10.5px;line-height:1.5;font-weight:600;'
+  +'letter-spacing:.02em;padding:0 6px;border-radius:999px;border:1px solid var(--line);'
+  +'background:var(--panel2);color:var(--muted);vertical-align:1px';
 function freeChip(t){
   const o=(t&&t.origin)||{};
-  if(!isFreeOrigin(t))return o.country?` · <span class="muted" title="${esc(countryTitle(o))}">${esc(o.country)}</span>`:'';
+  if(!isFreeOrigin(t))return o.country?`<span style="white-space:nowrap"> · <span class="muted" title="${esc(countryTitle(o))}">${esc(o.country)}</span></span>`:'';
   const why=(o.via||[]).join(', ')||'free funnel';
-  return ` · <span class="chip" title="${esc(why)}${o.country?' · '+esc(countryTitle(o)):''}">Free${o.country?' · '+esc(o.country):''}</span>`;
+  return `<span style="white-space:nowrap"> <span class="org-chip" style="${ORG_CHIP}" title="${esc(why)}${o.country?' · '+esc(countryTitle(o)):''}">Free${o.country?' · '+esc(o.country):''}</span></span>`;
 }
 /* Filtr po odczytanym kraju: lista zbudowana z tego, co JEST na liście (z
    licznikami), plus „No country" — bo brak kraju to tez odpowiedz: nikt bez
