@@ -6940,6 +6940,14 @@ def _bez_www(url: str) -> str:
     return s[4:] if s.startswith("www.") else s
 
 
+def _nasz_webhook() -> str:
+    """Adres webhooka BEZ „www.": Vercel odsyła www.protradersfunding.com 307
+    na domenę główną, a Telegram przekierowań nie śledzi — webhook na www
+    wygląda na ustawiony, a żaden update nie dochodzi do funkcji."""
+    baza = settings.app_base_url.rstrip("/").replace("://www.", "://", 1)
+    return baza + WEBHOOK_SCIEZKA
+
+
 def _reach_webhook_stan(info: dict | None = None) -> dict:
     """Czy Telegram wysyła posty z kanałów bota głównego do NAS.
 
@@ -6948,7 +6956,7 @@ def _reach_webhook_stan(info: dict | None = None) -> dict:
     `channel_post`. 2026-09-23 tak właśnie przepadł post na @forex_passing:
     panel mówił „auto ready", a Telegram do nas nie zapukał.
     """
-    nasz = settings.app_base_url.rstrip("/") + WEBHOOK_SCIEZKA
+    nasz = _nasz_webhook()
     naprawialny = bool(settings.telegram_webhook_secret and nasz.startswith("https://"))
     if not settings.telegram_bot_token:
         return {"state": "no_bot", "fixable": False}
@@ -6961,13 +6969,23 @@ def _reach_webhook_stan(info: dict | None = None) -> dict:
         stan = "off"
     elif _bez_www(url) != _bez_www(nasz):
         stan = "elsewhere"
+    elif url.rstrip("/").lower() != nasz.lower():
+        # Ta sama strona, ale inny zapis (www, http) — przekierowanie po
+        # drodze i Telegram odbija się od niego przy każdym poście.
+        stan = "redirect"
     elif dozwolone and "channel_post" not in dozwolone:
         stan = "no_channel_posts"
     else:
         stan = "ok"
     host = url.split("://", 1)[-1].split("/", 1)[0] if url else ""
-    return {"state": stan, "host": host, "pending": info.get("pending_update_count") or 0,
-            "last_error": info.get("last_error_message") or None, "fixable": naprawialny}
+    blad_ts = info.get("last_error_date")
+    return {"state": stan, "host": host, "url": url.split("://", 1)[-1] if url else "",
+            "pending": info.get("pending_update_count") or 0,
+            "allowed": dozwolone or None,
+            "last_error": info.get("last_error_message") or None,
+            "last_error_at": (datetime.fromtimestamp(blad_ts, timezone.utc).isoformat()
+                              if blad_ts else None),
+            "fixable": naprawialny}
 
 
 class ReachWebhookIn(BaseModel):
@@ -6981,7 +6999,7 @@ def admin_reach_webhook(payload: ReachWebhookIn):
     Adres spoza naszej domeny nadpisujemy tylko po `force` — ten sam bot może
     obsługiwać cudzy system, a przejęcie go po cichu wyłączyłoby tamten.
     """
-    nasz = settings.app_base_url.rstrip("/") + WEBHOOK_SCIEZKA
+    nasz = _nasz_webhook()
     if not settings.telegram_webhook_secret:
         raise HTTPException(400, "TELEGRAM_WEBHOOK_SECRET is not set on the server")
     if not nasz.startswith("https://"):
