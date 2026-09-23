@@ -170,6 +170,28 @@ html[data-theme=dark] .over-bg{background:rgba(0,0,0,.4)}
 tbody tr{transition:background .15s}
 .ticket-row{transition:background .15s,transform .35s var(--np-spring)}
 .ticket-row:active{transform:scale(.99)}
+/* ---------- telefon: przejrzystość ---------- */
+@media(max-width:860px){
+  /* tabela jako karty: kontener bez ramki (kreska .tbl-wrap z góry pliku
+     nadpisywała wyzerowanie z admin.css i szła pionowo przy kartach) */
+  .rtbl-wrap{box-shadow:none!important;background:transparent!important}
+  table.rtbl tr{border-color:transparent;border-radius:18px;
+    box-shadow:0 0 0 .5px var(--np-hair),0 1px 2px rgba(15,23,42,.03),0 10px 26px -20px rgba(15,23,42,.22)}
+  table.rtbl td.rt-main{border-bottom:.5px solid var(--np-hair)}
+  /* komórki bez treści (same spacje albo „—") nie zabierają miejsca na
+     karcie; oznacza je ui-motion.js */
+  table.rtbl td.ui-empty{display:none}
+}
+@media(max-width:640px){
+  .topbar .crumb{display:none}
+  .topbar h1{font-size:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .topbar>div:has(>#pg-title){min-width:0;flex:1}
+}
+@media(max-width:480px){
+  /* „+ New challenge" w portalu: na wąskim ekranie okrągły plus */
+  .top-right>.btn-p.sm[onclick^="go('store')"]{font-size:0;width:38px;height:38px;padding:0;border-radius:50%}
+  .top-right>.btn-p.sm[onclick^="go('store')"]::before{content:"+";font-size:22px;font-weight:500;line-height:1}
+}
 /* Zmiana motywu: przenikanie całej strony */
 ::view-transition-old(root),::view-transition-new(root){animation-duration:.4s;animation-timing-function:var(--np-ease)}
 @media(prefers-reduced-motion:reduce){

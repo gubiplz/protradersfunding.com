@@ -95,6 +95,16 @@ function wejscie(view){
   view.querySelectorAll('.stat-tile .val').forEach(liczba);
 }
 
+/* Komórki tabeli bez treści (same spacje albo „—"): na telefonie tabela staje
+   się kartami i takie komórki robiły puste pasy. `:empty` nie łapie spacji. */
+function puste(root){
+  root.querySelectorAll('table.rtbl td:not(.rt-main):not(.rt-acts)').forEach(td=>{
+    const tekst=td.textContent.replace(/\s+/g,'');
+    const nic=(!tekst||/^[—–-]$/.test(tekst))&&!td.querySelector('img,svg,button,input,select,textarea,a[href]');
+    td.classList.toggle('ui-empty',nic);
+  });
+}
+
 /* ---------- obserwator ---------- */
 let zaplanowane=false;const doSeg=new Set();let doNav=false,doWidok=false;
 function planuj(){
@@ -106,6 +116,7 @@ function planuj(){
     if(doWidok){
       doWidok=false;
       const v=document.getElementById('view');
+      if(v)puste(v);
       if(v&&czekaNaWidok&&!v.querySelector('.view-load')&&v.children.length){czekaNaWidok=false;wejscie(v)}
     }
   });
