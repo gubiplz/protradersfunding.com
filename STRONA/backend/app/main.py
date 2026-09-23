@@ -6058,6 +6058,8 @@ def _naiwny_utc(dt: datetime) -> datetime:
 
 
 INBOX_MARKI_LIMIT = 3000
+# Rodzaje zdarzeń leada, które są wiadomością WYSŁANĄ przez dział.
+INBOX_WYSLANE = ("email", "sms", "telegram")
 
 
 class InboxMarkIn(BaseModel):
@@ -6165,9 +6167,22 @@ def admin_inbox(authorization: str | None = Header(default=None)):
         # Leady tą samą listą co reszta kolejek: historia zdarzeń już istnieje
         # (lead_events), więc dzwonek tylko ją czyta. `lead_id` pozwala frontowi
         # otworzyć od razu kartę leada zamiast gołej zakładki.
-        zdarzenia_leadow = (session.query(LeadEvent, Lead)
-                            .join(Lead, Lead.id == LeadEvent.lead_id)
-                            .order_by(LeadEvent.id.desc()).limit(60).all())
+        # Wiadomości WYSŁANE przez dział (mail, SMS, Telegram z panelu) to
+        # własna akcja admina, nie nowina — domyślnie nie trafiają do dzwonka
+        # i nie zjadają budżetu 30 pozycji. Włącznik: Settings dzwonka →
+        # „Messages you sent" (ui_prefs.inbox.sent).
+        pokaz_wyslane = False
+        if kto:
+            ja = session.get(Trader, kto)
+            try:
+                pokaz_wyslane = (json.loads((ja.ui_prefs if ja else None) or "{}")
+                                 .get("inbox") or {}).get("sent") is True
+            except ValueError:
+                pokaz_wyslane = False
+        q_zd = session.query(LeadEvent, Lead).join(Lead, Lead.id == LeadEvent.lead_id)
+        if not pokaz_wyslane:
+            q_zd = q_zd.filter(~LeadEvent.kind.in_(INBOX_WYSLANE))
+        zdarzenia_leadow = q_zd.order_by(LeadEvent.id.desc()).limit(60).all()
         for z, l in zdarzenia_leadow:
             kto_lead = l.name or l.email
             tytul = {
