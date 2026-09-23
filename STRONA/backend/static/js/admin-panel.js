@@ -4845,6 +4845,9 @@ function editPost(id){
       <label class="muted" for="tgp-body">Text · Telegram HTML only: &lt;b&gt; &lt;i&gt; &lt;u&gt; &lt;s&gt;
         &lt;a href&gt; &lt;code&gt; &lt;blockquote&gt;</label>
       <textarea id="tgp-body" class="inp" rows="10" oninput="_tgp.body=this.value;tgpOdswiez()"></textarea>
+      <p class="tgp-hint">A line that is just <b>Get started</b> or <b>Click here…</b>, and every
+        <b>@…admin</b> mention, goes out as a link to that admin's DM with the message typed in —
+        like on the old channel. Text you already wrapped in &lt;a href&gt; stays as written.</p>
       ${wyszedl?`<p class="tgp-hint">Published${p.post_url?' — <a href="'+esc(p.post_url)+'" target="_blank" rel="noopener">open on Telegram</a>':''}.
         Saving rewrites the text on the channel in place (views and reactions stay). The graphic
         cannot be swapped on a published post — delete and post again for that.</p>`

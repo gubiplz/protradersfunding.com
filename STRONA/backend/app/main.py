@@ -6183,7 +6183,10 @@ def _post_dict(p: ChannelPost) -> dict:
             "published_at": p.published_at.isoformat() if p.published_at else None,
             "message_id": p.message_id, "post_url": p.post_url or "",
             "last_error": p.last_error or "", "created_by": p.created_by or "",
-            "created_at": p.created_at.isoformat() if p.created_at else None}
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+            # Zapasowy adres wezwań dla podglądu (`tgLinkuj`), gdy post
+            # nie wymienia admina — ten sam, którego użyje wysyłka.
+            "cta_fallback": settings.sms_telegram_url or ""}
 
 
 @app.get("/api/admin/channel-posts", dependencies=[Depends(auth.require_admin)])
@@ -6258,7 +6261,9 @@ def admin_channel_post_edit(post_id: int, payload: ChannelPostIn):
                     raise HTTPException(409, "This post has no Telegram message id "
                                              "— it cannot be edited from here")
                 ok, powod = telegram.edit_content(contentbot.chat_id(p.channel),
-                                                  p.message_id, tekst, kind=p.kind)
+                                                  p.message_id,
+                                                  contentbot.dolinkuj(tekst),
+                                                  kind=p.kind)
                 if not ok:
                     raise HTTPException(502, f"Telegram refused the edit: {powod}")
                 p.body = tekst
