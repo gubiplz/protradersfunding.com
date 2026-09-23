@@ -1199,6 +1199,7 @@ function unSetOpen(open){
   np.classList.toggle('open',open);
   $('np-scrim').classList.toggle('open',open);
   np.inert=!open;
+  document.documentElement.classList.toggle('np-lock',open);
   if(open){np.style.transform='';refreshPush();unRenderList({anim:'f'});unSeg(false);refreshNotif()}
   else{if(UN.edit)unSetEdit(false);unObserve(false);if(UN.nav!=='list')setTimeout(()=>{if(!UN.open)unNav('list')},400)}
 }
@@ -1433,8 +1434,14 @@ addEventListener('keydown',e=>{
   if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();return unRowAct('del',rb.closest('.np-row'))}
   if(e.key==='Enter'||e.key===' '){e.preventDefault();return rb.click()}
 });
-npGestures({items:'#np-items',panel:'#np',editing:()=>UN.edit,open:()=>UN.open,
+npGestures({items:'#np-items',panel:'#np',list:'#np-list',editing:()=>UN.edit,open:()=>UN.open,
   onAct:(act,row)=>unRowAct(act,row),onDismiss:()=>unSetOpen(false),
+  onTabSwipe:dir=>{
+    if(UN.nav!=='list')return false;
+    const nast=UN_TABS[UN_TABS.findIndex(t=>t[0]===UN.tab)+dir];
+    if(!nast)return false;
+    unSetTab(nast[0]);return true;
+  },
   onEnd:()=>{if(UN.dirty){UN.dirty=false;setTimeout(()=>unRenderList(),350)}}});
 setInterval(()=>{if(UN.open)npQ('#np-items time[data-ts]').forEach(t=>t.textContent=npRel(t.dataset.ts))},30000);
 

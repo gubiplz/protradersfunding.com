@@ -173,10 +173,10 @@ html[data-theme=dark] .np-scrim{background:rgba(0,0,0,.36)}
 .np.editing .np-rb{cursor:default}
 /* Tryb Edit: akcje w nagłówku obok „Done" — tam, gdzie się ich szuka; pasek
    na dole panelu ginął (na preview Vercela chował się też pod jego paskiem). */
-.np-editacts,.np-onedit{display:none}
+.np-editacts,.np .np-onedit{display:none}
 .np.editing .np-editacts{display:flex;gap:6px;align-items:center}
 .np.editing .np-bar-r>.np-ibtn,.np.editing .np-noedit{display:none}
-.np.editing .np-onedit{display:inline-flex}
+.np.editing .np-tbtn.np-onedit{display:inline-flex}
 .np .np-act{height:32px;padding:0 13px;border-radius:16px;font-size:13.5px;font-weight:650;color:var(--acc);
   background:var(--acc-bg);white-space:nowrap;transition:transform .35s var(--np-spring),opacity .2s,background .2s}
 .np .np-act.danger{color:var(--red);background:color-mix(in srgb,var(--red) 12%,transparent)}
@@ -311,3 +311,14 @@ html[data-theme=dark] .np-scrim{background:rgba(0,0,0,.36)}
 .np-undo button:hover{background:rgba(255,255,255,.1)}
 html.pwa{--np-tabbar:0px}
 @media(max-width:960px){html.pwa{--np-tabbar:64px}}
+
+/* Telefon: arkusz trzyma gesty dla siebie. Strona pod spodem stoi (bez
+   przewijania i bez odświeżania pociągnięciem w dół), lista nie ma poziomego
+   przewijania, więc przesunięcie wiersza nie buja całym panelem. */
+.np{overscroll-behavior:contain}
+.np-scroll{overflow-x:hidden;overscroll-behavior-x:none;touch-action:pan-y}
+.np-bar,.np-grab{touch-action:none}
+@media(max-width:640px){
+  html.np-lock,html.np-lock body{overflow:hidden;overscroll-behavior:none}
+  .np-scrim{touch-action:none}
+}

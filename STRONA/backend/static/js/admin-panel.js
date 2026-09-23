@@ -6065,6 +6065,7 @@ function npSetOpen(open){
   np.classList.toggle('open',open);
   $('np-scrim').classList.toggle('open',open);
   np.inert=!open;
+  document.documentElement.classList.toggle('np-lock',open);
   if(open){
     np.style.transform='';
     refreshPush();
@@ -6518,8 +6519,14 @@ addEventListener('keydown',e=>{
     if(wszystkie[n])wszystkie[n].focus();
   }
 });
-npGestures({items:'#np-items',panel:'#np',editing:()=>NP.edit,open:()=>NP.open,
+npGestures({items:'#np-items',panel:'#np',list:'#np-list',editing:()=>NP.edit,open:()=>NP.open,
   onAct:(act,row)=>npRowAct(act,row),onDismiss:()=>npSetOpen(false),
+  onTabSwipe:dir=>{
+    if(NP.nav!=='list')return false;
+    const nast=NP_TABS[NP_TABS.findIndex(t=>t[0]===NP.tab)+dir];
+    if(!nast)return false;
+    npSetTab(nast[0]);return true;
+  },
   onEnd:()=>{if(NP.dirty){NP.dirty=false;setTimeout(()=>npRenderList(),350)}}});
 setInterval(()=>{if(NP.open)npQ('#np-items time[data-ts]').forEach(t=>t.textContent=npRel(t.dataset.ts))},30000);
 
