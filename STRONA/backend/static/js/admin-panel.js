@@ -1822,7 +1822,7 @@ function mailSubtitle(){
 async function openMailComposer(ctx){
   ctx=ctx||{};
   const t=ctx.trader||null,l=ctx.lead||null;
-  _mailCtx={trader:t,lead:l,
+  _mailCtx={trader:t,lead:l,mark:ctx.mark||null,
     email:(t&&t.email)||(l&&l.email)||(ctx.email||''),
     name:(t&&(t.full_name||''))||(l&&(l.name||''))||''};
   let tpls=[],senders={ptf:{ready:true,missing:[]},fx:{ready:false,missing:['?']}};
@@ -1912,32 +1912,49 @@ function openMailCompose(){return openMailComposer({})}
    dokladnie to, za co Telegram zamraza konta — i za co padlo poprzednie.
    Zeby DM-y nie wygladaly na automat: kazdy szablon ma kilka ujec tej samej
    tresci, losowane przy otwarciu, z przyciskiem „inne ujecie"; {name} to
-   pierwsze imie. Po otwarciu czatu panel zapisuje slad (historia leada,
-   status new -> messaged). NIE w zakladce Leads — tam dziala karta z
-   przyciskami i inny mechanizm. */
+   pierwsze imie. Po otwarciu czatu panel zapisuje slad (historia leada).
+   W Clients lead `new` przechodzi na `messaged`. W Leads to okno otwiera
+   OSOBNY przycisk „Message" (szybkie przyciski karty zostaja, jak byly) i
+   status rusza tylko przy pierwszym kontakcie z leadem, ktorego nikt nie
+   wzial — wtedy idzie powiadomienie „messaged"; kazda kolejna wiadomosc
+   zostaje wylacznie w historii (`_pierwszy_kontakt` po stronie serwera). */
 let _tgCtx=null;
-async function openTgComposer(id){
-  const t=(window._clients||[]).find(x=>x.id===id);
-  if(!t)return;
+const leadById=id=>(window._leads||[]).find(x=>x.id===id)
+  ||(window._leadOpen&&window._leadOpen.id===id?window._leadOpen:null);
+async function openTgComposer(id,opts){
+  opts=opts||{};
+  const lead=opts.lead||null;
+  const t=lead?null:(window._clients||[]).find(x=>x.id===id);
+  if(!t&&!lead)return;
+  const traderId=t?t.id:(lead.trader_id||null);
   let tpls=[];
-  try{tpls=(await api('/api/admin/email-templates')).filter(x=>x.sender==='tg')}
+  try{tpls=(await api('/api/admin/email-templates')).filter(x=>x.sender==='tg'&&(!x.dynamic||traderId))}
   catch(e){toast('Templates: '+e.message,'err')}
   window._tgTpls=tpls;
-  _tgCtx={trader:t,name:(t.full_name||'').trim().split(/\s+/)[0]||'there'};
+  const kto=t?(t.full_name||t.email):(lead.name||lead.email);
+  const uchwyt=String((t?t.telegram:lead.telegram)||'').trim().replace(/^https?:\/\/t\.me\//i,'').replace(/^@/,'');
+  const cyfry=lead?String(lead.phone||'').replace(/\D/g,''):'';
+  _tgCtx={trader:t,lead,traderId,phone:cyfry.length>=8?cyfry:'',
+    name:(kto||'').trim().split(/\s+/)[0]||'there'};
   document.getElementById('tg-modal')?.remove();
   const box=document.createElement('div');
   box.id='tg-modal';box.className='modal-wrap';
   box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
-    <div class="modal-head"><h3>Telegram to ${esc(t.full_name||t.email)}</h3>
+    <div class="modal-head"><h3>${lead?'Message to':'Telegram to'} ${esc(kto)}</h3>
       <button class="icon-btn" aria-label="Close" onclick="document.getElementById('tg-modal').remove()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    ${lead?`<div class="seg" style="margin-bottom:12px"><button class="on" type="button">Telegram</button>
+      <button type="button" ${lead.email?'':'disabled title="No e-mail on this lead"'} onclick="leadMsgEmail(${lead.id})">E-mail</button></div>
+    <p class="muted" style="font-size:12.5px;margin-bottom:12px">${lead.status==='new'&&!lead.owner
+      ?'Nobody has taken this lead yet — this first message marks it <b>messaged</b> and everyone gets the notification.'
+      :'Goes into the lead’s history only — the status and owner stay as they are.'}</p>`:''}
     <p class="muted" style="font-size:12.5px;margin-bottom:12px">Opens the chat in <b>your</b> Telegram with the text
       already typed — you press send from the account you are logged into. Nothing goes out from here by itself.
       <b>{name}</b> becomes their first name; “Another wording” swaps in a different take on the same message.</p>
     <div class="stack">
       <div><label class="muted" style="font-size:12px">Their handle</label>
-        <input id="tg-to" class="inp" placeholder="@handle" value="${esc(t.telegram?'@'+t.telegram:'')}"
-          title="${t.telegram?'From their application':'No handle on file — ask them for it, or paste it here'}"></div>
+        <input id="tg-to" class="inp" placeholder="@handle" value="${esc(uchwyt?'@'+uchwyt:'')}"
+          title="${uchwyt?'From their application':_tgCtx.phone?'No handle — “Open in Telegram” finds the chat by their phone number and copies the text':'No handle on file — ask them for it, or paste it here'}"></div>
       <div><label class="muted" style="font-size:12px">Template</label>
         <select id="tg-tpl" class="inp" onchange="tgFill()">
           <option value="">— write your own —</option>
@@ -1959,7 +1976,18 @@ async function openTgComposer(id){
   box.onclick=()=>box.remove();
   document.body.appendChild(box);
   $('tg-body').oninput=tgCount;
-  (t.telegram?$('tg-tpl'):$('tg-to')).focus();
+  (uchwyt?$('tg-tpl'):$('tg-to')).focus();
+}
+/* „Message" w Leads: to samo okno w trybie leada; przelacznik na e-mail
+   otwiera wspolne okno maila z ta sama zasada statusu (`mark: 'first'`). */
+function openLeadMessage(id){
+  const l=leadById(id);if(!l)return;
+  return openTgComposer(l.id,{lead:l});
+}
+function leadMsgEmail(id){
+  const l=leadById(id);if(!l)return;
+  document.getElementById('tg-modal')?.remove();
+  return openMailComposer({lead:l,mark:'first'});
 }
 function tgText(){return String($('tg-body').value||'').trim().replaceAll('{name}',(_tgCtx&&_tgCtx.name)||'there')}
 function tgCount(){const n=tgText().length;$('tg-count').textContent=n?n+' characters':''}
@@ -2000,7 +2028,7 @@ async function tgFill(){
   let v=t.variants&&t.variants.length?t.variants:[t.body];
   if(t.dynamic==='insights'){
     $('tg-body').value='Loading the live numbers…';
-    const ins=await insightsFor(_tgCtx&&_tgCtx.trader&&_tgCtx.trader.id);
+    const ins=await insightsFor(_tgCtx&&_tgCtx.traderId);
     if(!ins||!(ins.variants||[]).length){
       $('tg-body').value='';toast('No accounts on this client yet — nothing to report.','err',6000);tgCount();return;
     }
@@ -2022,26 +2050,36 @@ function tgHandle(){
   return /^[A-Za-z][A-Za-z0-9_]{4,31}$/.test(h)?h:'';
 }
 async function tgLog(handle,text){
-  const t=_tgCtx&&_tgCtx.trader;if(!t)return;
-  try{await api('/api/admin/traders/'+t.id+'/telegram-note',{method:'POST',body:JSON.stringify({text,handle})})}
-  catch(e){toast('Sent, but not logged: '+e.message,'err')}
+  const c=_tgCtx||{};
+  const url=c.lead?'/api/admin/leads/'+c.lead.id+'/telegram-note'
+    :c.trader?'/api/admin/traders/'+c.trader.id+'/telegram-note':null;
+  if(!url)return null;
+  try{return await api(url,{method:'POST',body:JSON.stringify({text,handle})})}
+  catch(e){toast('Sent, but not logged: '+e.message,'err');return null}
 }
 async function tgCopy(){
   const text=tgText();if(!text){toast('Write the message first.','err');return}
   try{await navigator.clipboard.writeText(text);toast('Copied — paste it into the chat.')}
   catch(e){toast('Could not copy — select the text and copy it by hand.','err');return}
-  await tgLog(tgHandle(),text);
+  const r=await tgLog(tgHandle(),text);
+  if(r&&r.marked&&_tgCtx&&_tgCtx.lead){toast('Marked messaged.');if(VIEW==='leads')await VIEWS.leads()}
 }
 async function tgOpen(){
   const text=tgText();if(!text){toast('Write the message first.','err');$('tg-body').focus();return}
   const h=tgHandle();
-  if(!h){toast('Enter a valid Telegram handle (5–32 letters, digits or _).','err');$('tg-to').focus();return}
-  /* Okno otwierane PRZED await — przegladarki blokuja window.open po asynchronicznej przerwie. */
-  window.open('https://t.me/'+encodeURIComponent(h)+'?text='+encodeURIComponent(text),'_blank','noopener');
-  await tgLog(h,text);
+  const tel=!h&&_tgCtx&&_tgCtx.phone;
+  if(!h&&!tel){toast('Enter a valid Telegram handle (5–32 letters, digits or _).','err');$('tg-to').focus();return}
+  /* Okno otwierane PRZED await — przegladarki blokuja window.open po asynchronicznej przerwie.
+     Czat po numerze (t.me/+48…) nie przyjmuje ?text= — tekst idzie do schowka. */
+  if(h)window.open('https://t.me/'+encodeURIComponent(h)+'?text='+encodeURIComponent(text),'_blank','noopener');
+  else{window.open('https://t.me/+'+tel,'_blank','noopener');try{await navigator.clipboard.writeText(text)}catch(e){}}
+  const r=await tgLog(h,text);
   document.getElementById('tg-modal')?.remove();
-  toast('Chat opened with the text ready — press send there.');
+  toast((h?'Chat opened with the text ready — press send there.':'Chat opened by phone number — the text is in your clipboard, paste it.')
+    +(r&&r.marked?' Marked messaged.':''));
   if(VIEW==='clients')await VIEWS.clients();
+  if(_tgCtx&&_tgCtx.lead){const id=_tgCtx.lead.id;
+    if(VIEW==='leads')await VIEWS.leads();if(window._leadOpen&&window._leadOpen.id===id)openLead(id)}
 }
 async function tgSaveTpl(){
   const name=$('tg-name').value.trim(),body=$('tg-body').value.trim();
@@ -2194,7 +2232,7 @@ async function sendComposedMail(){
     try{
       const id=c.trader?c.trader.id:(c.lead?c.lead.id:null);
       if(c.trader)await api('/api/admin/traders/'+id+'/email',{method:'POST',body:JSON.stringify({subject,body,sender})});
-      else if(c.lead)await api('/api/admin/leads/'+id+'/email-custom',{method:'POST',body:JSON.stringify({subject,body,sender})});
+      else if(c.lead)await api('/api/admin/leads/'+id+'/email-custom',{method:'POST',body:JSON.stringify({subject,body,sender,mark:c.mark||undefined})});
       else await api('/api/admin/mail/send',{method:'POST',body:JSON.stringify({to,subject,body,sender})});
       document.getElementById('mail-modal')?.remove();
       toast('E-mail sent.');
@@ -2245,6 +2283,7 @@ const ICO_PHONE='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stro
 const ICO_COPY='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 const ICO_SMS='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.5 9.5 9.5 0 0 1-2.8-.4L3 21l1.4-4.2A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5z"/></svg>';
 const ICO_MAIL='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m3 6 9 6.5L21 6"/></svg>';
+const ICO_TPL='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/><path d="M8.5 10.5h7M8.5 13.5h4.5"/></svg>';
 const ICO_PEN='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
 function leadPhoneActs(l){
   const h=String(l.telegram||'').replace(/^@/,'');
@@ -2269,6 +2308,9 @@ function leadPhoneActs(l){
     ?`<button class="act-btn" type="button" aria-label="Write an e-mail"
         title="Write your own e-mail — from Forex Passing or the platform, templates included"
         onclick="openLeadMail(${l.id})">${ICO_PEN}</button>`:''}
+    <button class="act-btn" type="button" aria-label="Message with a template"
+      title="Message with a template — Telegram or e-mail. Changes the status only on the first message to a lead nobody has taken."
+      onclick="openLeadMessage(${l.id})">${ICO_TPL}</button>
     <button class="act-btn" type="button" title="Copy the opener"
       aria-label="Copy the opener" onclick="copyOpener(${l.id})">${ICO_COPY}</button></span>`;
 }

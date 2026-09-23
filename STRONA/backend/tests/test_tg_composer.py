@@ -1,4 +1,4 @@
-"""Wiadomość na Telegram z konta ADMINA — okno w Clients, nie w Leads.
+"""Wiadomość na Telegram z konta ADMINA — okno w Clients i przycisk „Message" w Leads.
 
 Panel nie wysyła nic sam: otwiera czat `t.me/<handle>?text=…` w aplikacji
 admina, a „wyślij" naciska człowiek z konta, na którym jest zalogowany.
@@ -114,14 +114,17 @@ def test_pusty_tekst_to_400():
 
 # --- panel -----------------------------------------------------------------------------
 
-def test_panel_ma_okno_tg_w_clients_a_nie_w_leads():
+def test_panel_ma_okno_tg_w_clients_a_w_leads_osobny_przycisk():
     kod = client.get("/static/js/admin-panel.js").text
-    assert "async function openTgComposer(id)" in kod
+    assert "async function openTgComposer(id,opts)" in kod
     assert 'onclick="openTgComposer(${t.id})"' in kod          # wiersz klienta
-    assert "'/api/admin/traders/'+t.id+'/telegram-note'" in kod
+    assert "'/api/admin/traders/'+c.trader.id+'/telegram-note'" in kod
+    assert "'/api/admin/leads/'+c.lead.id+'/telegram-note'" in kod
     assert "https://t.me/'+encodeURIComponent(h)+'?text='" in kod
     assert "Another wording" in kod and "function tgShuffle()" in kod
-    # Leads ma swoj mechanizm (karta z przyciskami) — okna TG tam nie ma.
+    # Leads: szybkie przyciski karty zostają; okno z szablonami otwiera
+    # OSOBNY przycisk „Message", nie render listy wprost.
     poczatek = kod.index("function renderLeads(")
     koniec = kod.index("function ", poczatek + 20)
     assert "openTgComposer" not in kod[poczatek:koniec]
+    assert 'onclick="openLeadMessage(${l.id})"' in kod
