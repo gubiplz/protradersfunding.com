@@ -201,7 +201,9 @@ def test_wbudowane_szablony_sa_na_liscie_per_nadawca():
     lista = client.get("/api/admin/email-templates", headers=ADMIN).json()
     wbudowane = [t for t in lista if t["builtin"]]
     assert wbudowane and lista[:len(wbudowane)] == wbudowane
-    assert {t["sender"] for t in wbudowane} == {"ptf", "fx"}
+    # ptf/fx to nadawcy maila; "tg" to szablony wiadomości na Telegram (okno
+    # w Clients) — w tej samej liście, ale selektor maila ich nie pokazuje.
+    assert {t["sender"] for t in wbudowane} == {"ptf", "fx", "tg"}
     assert all(str(t["id"]).startswith("b:") for t in wbudowane)
     assert all("{portal_url}" not in t["body"] and "{telegram_url}" not in t["body"]
                for t in wbudowane)

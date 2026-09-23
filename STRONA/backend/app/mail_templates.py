@@ -199,6 +199,85 @@ WBUDOWANE: list[tuple[str, str, str, str, str]] = [
 ]
 
 
+TG = "tg"
+
+# Wiadomości na Telegram pisane Z KONTA ADMINA (nie bota): panel otwiera czat
+# z gotowym tekstem, człowiek naciska „wyślij". Krótko, bez linków, bez
+# podpisu firmy — DM od człowieka nie ma stopki. Każdy szablon ma KILKA
+# wariantów tej samej treści; panel losuje jeden przy otwarciu i ma przycisk
+# „inne ujęcie", żeby dziesięć osób nie dostało dziesięciu identycznych
+# wiadomości — to jedyna rzecz, po której DM z konta wygląda na automat.
+# (klucz, nazwa, [warianty])
+WBUDOWANE_TG: list[tuple[str, str, list[str]]] = [
+    ("tg-hello", "First message after the application", [
+        "Hey {name}, this is the Forex Passing desk — your application just landed with me. "
+        "Ready to walk you through the next step when you are.",
+        "Hi {name}, Forex Passing desk here. I've got your application in front of me — "
+        "want to go through the next step now, or later today?",
+        "{name}, hi — desk at Forex Passing. Saw your application come in. "
+        "Got a couple of minutes to sort the next step?",
+    ]),
+    ("tg-free-ready", "Free account is ready", [
+        "Hey {name}, good news — your free challenge account is set up and live. "
+        "Login details are in your e-mail (check spam too). We're managing the positions, "
+        "so nothing for you to do on the account. Any questions, I'm here.",
+        "{name}, your free account is ready. The platform sent the login to your e-mail — "
+        "have a look in spam if it's not in the inbox. The desk runs the trades, you just watch. "
+        "Shout if anything's unclear.",
+        "Hi {name} — account's live. Login went out by e-mail a moment ago. "
+        "We take it from here on the trading side; ping me if you don't see the e-mail.",
+    ]),
+    ("tg-need-login", "Need the platform login", [
+        "Hey {name}, we're ready to start — the only thing missing is the login to the "
+        "challenge account. Send me the account number, the trading password and the server, "
+        "exactly as the prop firm gave them to you.",
+        "{name}, one thing before we start: I need the login for the challenge account. "
+        "Account number, trading password (not investor) and the server name — "
+        "paste them here and I'll confirm the same day.",
+        "Hi {name} — can you send the challenge account login when you get a sec? "
+        "Number, password, server. Then we're off.",
+    ]),
+    ("tg-started", "Management has started", [
+        "{name}, we're logged in and the desk has started on your account. "
+        "Please don't place or close trades yourself from now — it cuts across the plan. "
+        "You can follow everything live with your own login.",
+        "Hey {name} — management is on. From here you don't need to touch the account "
+        "(please don't, it clashes with what the desk is doing). I'll send a note when "
+        "something worth knowing happens.",
+    ]),
+    ("tg-checkin", "Check-in / no reply", [
+        "Hey {name}, just checking in — did you get my last message? No rush, "
+        "just want to make sure it didn't get lost.",
+        "{name}, quick one: still up for this? If the timing's off, no problem — "
+        "tell me and I'll park it.",
+        "Hi {name} — haven't heard back, so one more nudge from me. "
+        "If you have questions, ask away; if not, we can start whenever you say.",
+    ]),
+    ("tg-payout", "Payout on the way", [
+        "{name}, good news — a payout from your account is on the way. "
+        "Once it lands on your side, message me and I'll send the settlement details for the split.",
+        "Hey {name}, payout's been approved. The prop firm pays you the full amount first; "
+        "when it arrives, let me know and we settle our share from it — never before.",
+    ]),
+    ("tg-breach", "Account hit a rule", [
+        "{name}, straight answer: the account hit a rule and is closed for trading. "
+        "Not on you — it happens. If you want to go again, tell me and I'll set the next one up.",
+        "Hey {name} — the account breached and got closed. I'd rather tell you now than "
+        "let you find out on the platform. Say the word if you want another go.",
+    ]),
+]
+
+
+def lista_tg() -> list[dict]:
+    """Szablony Telegrama w kształcie szablonu maila: `body` = pierwszy
+    wariant, `variants` = wszystkie; `sender="tg"` trzyma je poza selektorem
+    maila (ten filtruje po ptf/fx)."""
+    return [{"id": f"b:{klucz}", "name": nazwa, "sender": TG,
+             "subject": "", "body": warianty[0], "variants": list(warianty),
+             "builtin": True, "updated_at": None}
+            for klucz, nazwa, warianty in WBUDOWANE_TG]
+
+
 def _wartosci() -> dict[str, str]:
     """Placeholdery podstawiane przez serwer — z ustawień, nie z kodu."""
     baza = (settings.app_base_url or "").rstrip("/")
@@ -231,4 +310,4 @@ def lista() -> list[dict]:
     return [{"id": f"b:{klucz}", "name": nazwa, "sender": nadawca,
              "subject": _podstaw(temat, wartosci), "body": _podstaw(tresc, wartosci),
              "builtin": True, "updated_at": None}
-            for klucz, nadawca, nazwa, temat, tresc in WBUDOWANE]
+            for klucz, nadawca, nazwa, temat, tresc in WBUDOWANE] + lista_tg()

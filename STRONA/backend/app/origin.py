@@ -80,21 +80,25 @@ def pochodzenie(trader: Trader | None, lead: Lead | None, *,
              if iso and iso.strip()]
     if znane:
         p.country_via, p.country = znane[0]
+    # O Afryce decyduje NAJBARDZIEJ wiarygodny sygnał (kolejność wyżej), nie
+    # którykolwiek. Wersja „którykolwiek" chowała klienta z USA, który raz
+    # wszedł przez VPN albo miał nigeryjski prefiks na starym leadzie — a to
+    # jest high ticket, którego nie wolno zgubić w filtrze. Słabsze, sprzeczne
+    # sygnały zostają w `via`, żeby chip mówił o konflikcie, ale nie decydują.
+    p.africa = countries.is_africa(p.country)
     for zrodlo, iso in znane:
         if countries.is_africa(iso):
-            p.africa = True
             p.via.append(f"{zrodlo}:{iso}")
     p.free = p.desk == "free" or free_grant or p.africa
     return p
 
 
-def mapa_pochodzenia(session, traderzy: list[Trader]) -> dict[int, Pochodzenie]:
-    """Pochodzenie dla listy traderów w DWÓCH zapytaniach, nie 2×N.
+def leady_po_mailu(session, traderzy: list[Trader]) -> dict[int, Lead]:
+    """Lead każdego tradera dopasowany po e-mailu — jedno zapytanie na listę.
 
-    Leady dopasowane po e-mailu (lower/strip); `leads.email` jest UNIQUE, ale
-    z rozróżnianiem wielkości liter, więc remis jest możliwy i rozstrzyga go
-    darmowy lejek — filtr odpowiada na pytanie „kto przyszedł z darmowego".
-    Granty „free program" po tej samej regule co `_kanal_free` w `main`.
+    `leads.email` jest UNIQUE, ale z rozróżnianiem wielkości liter, a to
+    dopasowanie już nie; remis rozstrzyga darmowy lejek, bo filtr odpowiada
+    na pytanie „kto przyszedł z darmowego". Trader bez leada nie ma wpisu.
     """
     if not traderzy:
         return {}
@@ -107,13 +111,32 @@ def mapa_pochodzenia(session, traderzy: list[Trader]) -> dict[int, Pochodzenie]:
         if stary is None or (desk_z_source(lead.source) == "free"
                              and desk_z_source(stary.source) != "free"):
             leady[klucz] = lead
+    wynik = {}
+    for t in traderzy:
+        lead = leady.get((t.email or "").strip().lower())
+        if lead is not None:
+            wynik[t.id] = lead
+    return wynik
+
+
+def mapa_pochodzenia(session, traderzy: list[Trader],
+                     leady: dict[int, Lead] | None = None) -> dict[int, Pochodzenie]:
+    """Pochodzenie dla listy traderów w DWÓCH zapytaniach, nie 2×N.
+
+    `leady` można podać z zewnątrz (`leady_po_mailu`), gdy wywołujący i tak
+    potrzebuje samych leadów — np. po uchwyt Telegrama do karty klienta.
+    Granty „free program" po tej samej regule co `_kanal_free` w `main`.
+    """
+    if not traderzy:
+        return {}
+    if leady is None:
+        leady = leady_po_mailu(session, traderzy)
     granty = {tid for (tid,) in
               session.query(Account.trader_id)
               .filter(Account.source == "grant",
                       func.lower(func.coalesce(Account.grant_note, ""))
                       == FREE_PROGRAM_NOTE).distinct().all()}
-    return {t.id: pochodzenie(t, leady.get((t.email or "").strip().lower()),
-                              free_grant=t.id in granty)
+    return {t.id: pochodzenie(t, leady.get(t.id), free_grant=t.id in granty)
             for t in traderzy}
 
 

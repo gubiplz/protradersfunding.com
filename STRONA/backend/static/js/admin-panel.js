@@ -210,7 +210,11 @@ function toggleFree(on){
      w ktorym stoi checkbox. Sztywne renderClients() z zakladki Activity
      rysowalo liste klientow pod naglowkiem Activity (ta sama pulapka, co
      kiedys karty Telegrama i go('settings')). */
-  if(VIEW==='activity')renderActivity();else renderClients();
+  if(VIEW==='activity')renderActivity();
+  else if(VIEW==='payouts')renderPayoutsView();
+  else if(VIEW==='orders')renderOrders();
+  else if(VIEW==='accounts')renderAccounts();
+  else renderClients();
 }
 /* „Free" to werdykt z `origin` (backend, app/origin.py): lead z darmowego
    lejka LUB grant „free program" LUB ktorykolwiek sygnal z Afryki (kraj z IP
@@ -238,13 +242,26 @@ function freeChip(t){
    licznikami), plus „No country" — bo brak kraju to tez odpowiedz: nikt bez
    sygnalu nie jest jeszcze niczyj, dostanie go przy nastepnym logowaniu. */
 const krajWiersza=t=>(t&&t.origin&&t.origin.country)||'';
-function countrySelect(all,key,render){
+/* Wybor trzymany NA STALE (localStorage, jak checkbox Free) i WSPOLNY dla
+   Clients i Activity: kto filtruje po kraju, filtruje po tym samym kraju w
+   obu miejscach, a po wyjsciu ze strony filtr ma czekac tam, gdzie go zostawil. */
+let COUNTRY_FILTER='';
+try{COUNTRY_FILTER=localStorage.getItem('pf_admin_country')||''}catch(e){}
+function setCountryFilter(v,render){
+  COUNTRY_FILTER=v||'';
+  try{localStorage.setItem('pf_admin_country',COUNTRY_FILTER)}catch(e){}
+  if(typeof window[render]==='function')window[render]();
+}
+function countrySelect(all,render){
   const n={};all.forEach(t=>{const k=krajWiersza(t)||'-';n[k]=(n[k]||0)+1});
-  const cur=window[key]||'';
+  const cur=COUNTRY_FILTER;
+  /* Zapamietany kraj, ktorego nie ma na tej liscie, dalej jest wybrany
+     (lista bylaby pusta) — opcja pokazuje go z zerem, zeby dalo sie go zdjac. */
+  if(cur&&cur!=='-'&&!n[cur])n[cur]=0;
   const opts=Object.keys(n).filter(k=>k!=='-').sort().map(k=>`<option value="${k}"${cur===k?' selected':''}>${k} · ${n[k]}</option>`).join('');
   return `<select class="inp" style="width:auto;padding:6px 10px;font-size:12.5px" aria-label="Country"
-      title="Country from KYC, phone prefix or IP. “No country” = no signal yet; it fills in at the next sign-in."
-      onchange="window.${key}=this.value;${render}()">
+      title="Country from KYC, phone prefix or IP. “No country” = no signal yet; it fills in at the next sign-in. Remembered across visits, shared by Clients and Activity."
+      onchange="setCountryFilter(this.value,'${render}')">
       <option value="">Any country</option>${opts}${n['-']?`<option value="-"${cur==='-'?' selected':''}>No country · ${n['-']}</option>`:''}</select>`;
 }
 const pasujeKraj=(t,c)=>!c||(c==='-'?!krajWiersza(t):krajWiersza(t)===c);
@@ -1121,7 +1138,12 @@ function renderAccounts(){
   const list=window._accs||[];
   const q=(window._accQ||'').toLowerCase();
   const f=window._accFilter;
+  /* Checkbox Free i filtr kraju po `origin` WLASCICIELA konta (to samo, co w
+     Clients). Uwaga na nazwy: segment "Free signups" znaczy "niepłacący" (inny
+     zbior z serwera), checkbox "Free" znaczy "z darmowego lejka / Afryka". */
+  const ukryciFree=FREE_SHOWN?0:list.filter(isFreeOrigin).length;
   const rows=list.filter(a=>(f==='house'?isHouse(a):!isHouse(a)&&(f==='all'||f==='free'||a.status===f))&&
+    (FREE_SHOWN||!isFreeOrigin(a))&&pasujeKraj(a,COUNTRY_FILTER)&&
     (!q||String(a.login).includes(q)||(a.trader_name||'').toLowerCase().includes(q)
       ||(a.trader_email||'').toLowerCase().includes(q)||(a.product_key||'').includes(q)));
   const cap=capList(rows,'_accAll','renderAccounts');
@@ -1130,7 +1152,10 @@ function renderAccounts(){
     <div class="toolbar">
       ${searchBox('acc-q','_accQ','renderAccounts','Search login, trader, email or plan…')}
       <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="accSeg('${k}')">${l}</button>`).join('')}</div>
-      <span class="count-pill">${rows.length} of ${list.length}${impPill()}</span>
+      ${freeCheckbox()}
+      ${countrySelect(list,'renderAccounts')}
+      <span class="count-pill">${rows.length} of ${list.length}${
+        ukryciFree?` · <span class="muted">${ukryciFree} free hidden</span>`:''}${impPill()}</span>
       <button class="btn-o sm" onclick="exportStatements(this)"
         title="One Excel file with every managed account: trades, daily summary, equity curve, payouts and rule breaches. Free signups are not included.">Statements .xlsx</button>
     </div>
@@ -1144,7 +1169,7 @@ function renderAccounts(){
           <td class="muted rt-hide" style="white-space:nowrap" data-l="Created" data-sort="${esc(a.created_at||'')}">${a.created_at?dstr(a.created_at):'—'}</td>
           <td class="muted rt-hide" style="white-space:nowrap" data-l="Paid" data-sort="${esc(a.paid_at||'')}">${a.paid_at?dstr(a.paid_at):'—'}</td>
           <td class="num rt-main" style="font-weight:600" data-l="Login">${a.status==='provisioning'?'<span class="muted">pending…</span>':esc(a.login)}</td>
-          <td data-l="Trader">${esc(a.trader_name||'—')}${a.trader_email?`<div class="muted" style="font-size:var(--fs-cap)">${esc(a.trader_email)}</div>`:''}</td>
+          <td data-l="Trader">${esc(a.trader_name||'—')}${a.trader_email?`<div class="muted" style="font-size:var(--fs-cap)">${esc(a.trader_email)}${freeChip(a)}</div>`:''}</td>
           <td class="muted" data-l="Plan">${esc(a.product_key)}</td>
           <td class="muted" data-l="Phase">${PHASE_LBL[a.phase]||esc(a.phase)}</td>
           <td data-l="Status"><span class="status ${esc(a.status)}"><span class="dot"></span>${STATUS_LBL[a.status]||esc(a.status)}</span></td>
@@ -1287,7 +1312,10 @@ function renderPayoutsView(){
      Wnioski traderow maja prawdziwe adresy, wiec nie znikaja nigdy. */
   const widoczne=IMPORTED?list:list.filter(r=>!zArchiwum(r));
   const ukryte=list.length-widoczne.length;
-  const rows=widoczne.filter(r=>(f==='all'||r.status===f)&&
+  /* Ten sam checkbox Free co w Clients/Activity — wiersz wyplaty niesie
+     `origin` swojego tradera (endpoint liczy je raz dla calej listy). */
+  const ukryciFree=FREE_SHOWN?0:widoczne.filter(isFreeOrigin).length;
+  const rows=widoczne.filter(r=>(f==='all'||r.status===f)&&(FREE_SHOWN||!isFreeOrigin(r))&&
     (!q||String(r.account_login||'').toLowerCase().includes(q)
       ||(r.trader_email||'').toLowerCase().includes(q)
       ||(r.method||'').toLowerCase().includes(q)||(r.status||'').includes(q)));
@@ -1295,15 +1323,17 @@ function renderPayoutsView(){
   $('view').innerHTML=`
     <div class="toolbar">
       ${list.length?`${searchBox('pay-q','_payQ','renderPayoutsView','Search account, trader or method…')}
-      <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._payFilter='${f===k?'all':k}';renderPayoutsView()">${l}</button>`).join('')}</div>`:''}
+      <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._payFilter='${f===k?'all':k}';renderPayoutsView()">${l}</button>`).join('')}</div>
+      ${freeCheckbox()}`:''}
       <button class="btn-o sm" onclick="openPayoutImport()">Import history</button>
       ${list.length?`<span class="count-pill">${rows.length} of ${list.length}${
-        ukryte?` · <span class="muted">${ukryte} imported hidden</span>`:''}${impPill()}</span>`:''}
+        ukryte?` · <span class="muted">${ukryte} imported hidden</span>`:''}${
+        ukryciFree?` · <span class="muted">${ukryciFree} free hidden</span>`:''}${impPill()}</span>`:''}
     </div>`+(rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.payouts">
     <thead><tr><th>Date</th><th>Account</th><th>Trader</th><th>Profit</th><th>Trader share</th><th>Method</th><th>Status</th><th class="no-sort">Certificate</th><th class="no-sort"></th></tr></thead>
     <tbody>${rows.map(r=>`<tr>
       <td class="muted" data-l="Date" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td><td class="num rt-main" data-l="Account">${accLink(r.account_id,r.account_login)}${r.express?' <span class="express-pill" title="Express Payout add-on — this request jumps the review queue">EXPRESS</span>':''}</td>
-      <td data-l="Trader">${esc(r.trader_email||'—')}</td>
+      <td data-l="Trader">${esc(r.trader_email||'—')}${freeChip(r)}</td>
       <td class="num" data-l="Profit">$${fmt(r.profit_amount)}</td><td class="num up" data-l="Share">$${fmt(r.trader_share)}</td>
       <td data-l="Method">${(()=>{const d=r.details||{};
         const label=r.method==='usdt'?'USDT':r.method==='wise'?'Wise':'Bank';
@@ -1344,8 +1374,13 @@ function renderOrders(){
   const list=window._orders||[];
   const q=(window._ordQ||'').toLowerCase();
   const f=window._ordFilter||'all';
+  /* Free / kraj: to samo `origin` co w Clients — USA to high ticket, free i
+     Afryka low; kafelki liczone z wierszy PO filtrze, wiec przychod dzieli sie
+     razem z lista. */
+  const ukryciFree=FREE_SHOWN?0:list.filter(isFreeOrigin).length;
   const rows=list.filter(o=>
     (f==='all'||(f==='awaiting'?(o.flag==='awaiting_crypto'&&o.status==='pending'):o.status===f))&&
+    (FREE_SHOWN||!isFreeOrigin(o))&&pasujeKraj(o,COUNTRY_FILTER)&&
     (!q||(o.trader_email||'').toLowerCase().includes(q)
     ||(o.product_key||'').includes(q)||(o.status||'').includes(q)
     ||(o.flag||'').includes(q)||String(o.id)===q));
@@ -1375,7 +1410,10 @@ function renderOrders(){
       ${searchBox('ord-q','_ordQ','renderOrders','Search email, product, status…')}
       <div class="seg">${[['all','All'],['paid','Paid'],['pending','Pending'],['awaiting','Awaiting crypto'],['failed','Failed']]
         .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._ordFilter='${f===k?'all':k}';renderOrders()">${l}</button>`).join('')}</div>
-      <span class="count-pill">${rows.length} of ${list.length}</span>
+      ${freeCheckbox()}
+      ${countrySelect(list,'renderOrders')}
+      <span class="count-pill">${rows.length} of ${list.length}${
+        ukryciFree?` · <span class="muted">${ukryciFree} free hidden</span>`:''}</span>
       <button class="btn-p sm" onclick="openManualOrder()"
         title="Record an order the customer pays outside Stripe (crypto, transfer)">+ New order</button>
     </div>
@@ -1383,7 +1421,7 @@ function renderOrders(){
       <thead><tr><th>#</th><th>Date</th><th>Trader</th><th>Product</th><th>Amount</th><th>Provider</th><th>Status</th><th>Account</th><th class="no-sort"></th></tr></thead>
       <tbody>${cap.rows.map(o=>`<tr>
         <td class="num rt-hide" data-l="#">${o.id}</td><td class="muted" data-l="Date" data-sort="${esc(o.created_at||'')}">${dstr(o.created_at)}</td>
-        <td class="rt-main" data-l="Trader">${esc(o.trader_email||'—')}</td>
+        <td class="rt-main" data-l="Trader">${esc(o.trader_email||'—')}${freeChip(o)}</td>
         <td data-l="Product">${esc(o.product_key)}${o.bogo?` <span class="up" style="font-size:var(--fs-cap)" title="Buy 1 Get 1 Free — paying this order also creates a free second account of the same size">+1 free</span>`:''}${o.open_funded?` <span class="up" style="font-size:var(--fs-cap)" title="Opens straight as a funded account when paid — skips the evaluation">funded</span>`:''}${o.weekend_trading?` <span class="up" style="font-size:var(--fs-cap)" title="Weekend Trading add-on — 2 extra trading days/week">wknd</span>`:''}${o.copytrading?` <span class="up" style="font-size:var(--fs-cap)" title="Copytrading add-on — copying between the customer's own accounts and more than one device; real MT5 account">copy</span>`:''}${o.brand==='fx'?` <span class="up" style="font-size:var(--fs-cap)" title="The payment page shows Forex Passing branding — no PTF anywhere on it">FX</span>`:''}</td>
         <td class="num" data-l="Amount">$${fmt(o.amount_usd)}${o.coupon?` <span class="up" style="font-size:var(--fs-cap)">(${esc(o.coupon)})</span>`:''}</td>
         <td class="muted rt-hide" data-l="Provider">${esc(o.provider)}</td>
@@ -1678,6 +1716,122 @@ function openClientMail(id){
   return openMailComposer({trader:t});
 }
 function openMailCompose(){return openMailComposer({})}
+/* ===== Telegram z KONTA ADMINA — okno w Clients ==============================
+   Panel NIE wysyla nic sam: otwiera czat z gotowym tekstem (t.me/<handle>?text=),
+   a „wyslij" naciska czlowiek w swojej aplikacji, z konta, na ktorym jest
+   zalogowany (@forex_passing_admin). Automat piszacy z konta uzytkownika to
+   dokladnie to, za co Telegram zamraza konta — i za co padlo poprzednie.
+   Zeby DM-y nie wygladaly na automat: kazdy szablon ma kilka ujec tej samej
+   tresci, losowane przy otwarciu, z przyciskiem „inne ujecie"; {name} to
+   pierwsze imie. Po otwarciu czatu panel zapisuje slad (historia leada,
+   status new -> messaged). NIE w zakladce Leads — tam dziala karta z
+   przyciskami i inny mechanizm. */
+let _tgCtx=null;
+async function openTgComposer(id){
+  const t=(window._clients||[]).find(x=>x.id===id);
+  if(!t)return;
+  let tpls=[];
+  try{tpls=(await api('/api/admin/email-templates')).filter(x=>x.sender==='tg')}
+  catch(e){toast('Templates: '+e.message,'err')}
+  window._tgTpls=tpls;
+  _tgCtx={trader:t,name:(t.full_name||'').trim().split(/\s+/)[0]||'there'};
+  document.getElementById('tg-modal')?.remove();
+  const box=document.createElement('div');
+  box.id='tg-modal';box.className='modal-wrap';
+  box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>Telegram to ${esc(t.full_name||t.email)}</h3>
+      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('tg-modal').remove()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <p class="muted" style="font-size:12.5px;margin-bottom:12px">Opens the chat in <b>your</b> Telegram with the text
+      already typed — you press send from the account you are logged into. Nothing goes out from here by itself.
+      <b>{name}</b> becomes their first name; “Another wording” swaps in a different take on the same message.</p>
+    <div class="stack">
+      <div><label class="muted" style="font-size:12px">Their handle</label>
+        <input id="tg-to" class="inp" placeholder="@handle" value="${esc(t.telegram?'@'+t.telegram:'')}"
+          title="${t.telegram?'From their application':'No handle on file — ask them for it, or paste it here'}"></div>
+      <div><label class="muted" style="font-size:12px">Template</label>
+        <select id="tg-tpl" class="inp" onchange="tgFill()">
+          <option value="">— write your own —</option>
+          ${tpls.map(x=>`<option value="${esc(String(x.id))}">${esc(x.name)}</option>`).join('')}</select></div>
+      <div><label class="muted" style="font-size:12px">Message</label>
+        <textarea id="tg-body" class="inp" rows="7" spellcheck="true" placeholder="Hey {name}, …"></textarea>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
+          <button class="btn-o sm" type="button" id="tg-shuffle" onclick="tgShuffle()" style="display:none">Another wording</button>
+          <span class="muted" id="tg-count" style="font-size:var(--fs-cap)"></span></div></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="tg-name" class="inp" style="flex:1;min-width:0" placeholder="Save as template (name)">
+        <button class="btn-o sm" type="button" onclick="tgSaveTpl()">Save template</button>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn-o lg" style="flex:1" onclick="tgCopy()" title="Copy the text — for when the chat is already open on your phone">Copy text</button>
+        <button class="btn-p lg" style="flex:1" id="tg-open" onclick="tgOpen()">Open in Telegram</button>
+      </div>
+    </div></div>`;
+  box.onclick=()=>box.remove();
+  document.body.appendChild(box);
+  $('tg-body').oninput=tgCount;
+  (t.telegram?$('tg-tpl'):$('tg-to')).focus();
+}
+function tgText(){return String($('tg-body').value||'').trim().replaceAll('{name}',(_tgCtx&&_tgCtx.name)||'there')}
+function tgCount(){const n=tgText().length;$('tg-count').textContent=n?n+' characters':''}
+function tgFill(){
+  const t=(window._tgTpls||[]).find(x=>String(x.id)===$('tg-tpl').value);
+  $('tg-shuffle').style.display=t&&(t.variants||[]).length>1?'':'none';
+  if(!t){tgCount();return}
+  const v=t.variants&&t.variants.length?t.variants:[t.body];
+  $('tg-body').value=v[Math.floor(Math.random()*v.length)];
+  $('tg-name').value=t.builtin?t.name+' (copy)':t.name;
+  tgCount();
+}
+function tgShuffle(){
+  const t=(window._tgTpls||[]).find(x=>String(x.id)===$('tg-tpl').value);
+  const v=(t&&t.variants)||[];if(v.length<2)return;
+  const cur=$('tg-body').value;
+  const inne=v.filter(x=>x!==cur);
+  $('tg-body').value=inne[Math.floor(Math.random()*inne.length)];
+  tgCount();
+}
+function tgHandle(){
+  const h=String($('tg-to').value||'').trim().replace(/^https?:\/\/t\.me\//i,'').replace(/^@/,'').replace(/[?#].*$/,'');
+  return /^[A-Za-z][A-Za-z0-9_]{4,31}$/.test(h)?h:'';
+}
+async function tgLog(handle,text){
+  const t=_tgCtx&&_tgCtx.trader;if(!t)return;
+  try{await api('/api/admin/traders/'+t.id+'/telegram-note',{method:'POST',body:JSON.stringify({text,handle})})}
+  catch(e){toast('Sent, but not logged: '+e.message,'err')}
+}
+async function tgCopy(){
+  const text=tgText();if(!text){toast('Write the message first.','err');return}
+  try{await navigator.clipboard.writeText(text);toast('Copied — paste it into the chat.')}
+  catch(e){toast('Could not copy — select the text and copy it by hand.','err');return}
+  await tgLog(tgHandle(),text);
+}
+async function tgOpen(){
+  const text=tgText();if(!text){toast('Write the message first.','err');$('tg-body').focus();return}
+  const h=tgHandle();
+  if(!h){toast('Enter a valid Telegram handle (5–32 letters, digits or _).','err');$('tg-to').focus();return}
+  /* Okno otwierane PRZED await — przegladarki blokuja window.open po asynchronicznej przerwie. */
+  window.open('https://t.me/'+encodeURIComponent(h)+'?text='+encodeURIComponent(text),'_blank','noopener');
+  await tgLog(h,text);
+  document.getElementById('tg-modal')?.remove();
+  toast('Chat opened with the text ready — press send there.');
+  if(VIEW==='clients')await VIEWS.clients();
+}
+async function tgSaveTpl(){
+  const name=$('tg-name').value.trim(),body=$('tg-body').value.trim();
+  if(!name){toast('Give the template a name.','err');$('tg-name').focus();return}
+  if(!body){toast('Write the message first.','err');return}
+  try{
+    const t=await api('/api/admin/email-templates',{method:'POST',
+      body:JSON.stringify({name,subject:'(telegram)',body,sender:'tg'})});
+    window._tgTpls=(await api('/api/admin/email-templates')).filter(x=>x.sender==='tg');
+    const s=$('tg-tpl');
+    s.innerHTML='<option value="">— write your own —</option>'
+      +window._tgTpls.map(x=>`<option value="${esc(String(x.id))}">${esc(x.name)}</option>`).join('');
+    s.value=String(t.id);
+    toast('Template saved.');
+  }catch(e){toast('Not saved: '+e.message,'err')}
+}
 /* Podpowiedzi adresu: klienci z pamieci (lista Clients, jesli byla otwarta)
    plus leady z serwera od dwoch znakow. Datalist, nie wlasny dropdown — jedna
    linia i dziala na telefonie. */
@@ -3266,12 +3420,15 @@ async function openTraderJournal(tid,email){
 /* Zakladka Activity: te same dane co karta Client, ale dla WSZYSTKICH naraz —
    filtry odpowiadaja na pytania dzialu („kto nie odebral konta?", „kto zamilkl?")
    bez klikania po kolei w kazde konto. */
+/* Ruch liczy sie po LAST SEEN (kazde otwarcie portalu z zapamietana sesja),
+   nie po logowaniu: kto wbija na strone bez logowania, tez jest aktywny.
+   Logowanie zostaje osobna kolumna z wlasnym zielonym „today". */
 const JRN_FILTERS=[
   ['all','All',()=>true],
-  ['today','Active today',t=>t.logged_in_today],
+  ['today','Active today',t=>t.seen_today],
   ['awaiting','Awaiting claim',t=>t.awaiting_claim],
-  ['never','Never signed in',t=>!t.last_login_at],
-  ['quiet','Quiet 7+ days',t=>t.last_login_at&&!t.logins_7d],
+  ['never','Never seen',t=>!t.last_seen_at],
+  ['quiet','Quiet 7+ days',t=>t.last_seen_at&&!t.active_days_7d],
 ];
 function renderActivity(){
   const all=window._jrn||[];
@@ -3280,7 +3437,7 @@ function renderActivity(){
   const test=(JRN_FILTERS.find(x=>x[0]===f)||JRN_FILTERS[0])[2];
   /* Ten sam checkbox i ten sam werdykt co w Clients (`origin` z backendu) —
      odznaczony chowa tych samych ludzi z tego samego powodu. */
-  const kraj=window._jrnCountry||'';
+  const kraj=COUNTRY_FILTER;
   const rows=all.filter(t=>test(t)&&(FREE_SHOWN||!isFreeOrigin(t))&&pasujeKraj(t,kraj)&&(!q||[t.email,t.full_name]
     .some(x=>String(x||'').toLowerCase().includes(q))));
   const ukryci=FREE_SHOWN?0:all.filter(isFreeOrigin).length;
@@ -3298,7 +3455,7 @@ function renderActivity(){
         `<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''}
           onclick="window._jrnFilter='${f===k?'all':k}';renderActivity()">${l}</button>`).join('')}</div>
       ${freeCheckbox()}
-      ${countrySelect(all,'_jrnCountry','renderActivity')}
+      ${countrySelect(all,'renderActivity')}
       <span class="count-pill">${rows.length} of ${all.length}${
         ukryci?` · <span class="muted">${ukryci} free hidden</span>`:''}${impPill()}</span>
     </div>`
@@ -3308,7 +3465,7 @@ function renderActivity(){
         <td class="rt-main" data-l="Client">${esc(t.full_name||'—')}<div class="muted" style="font-size:11.5px">${esc(t.email)}${freeChip(t)}</div></td>
         <td data-l="Claim" data-sort="${t.awaiting_claim?0:(t.claimed_at?2:1)}">${chip(t)}</td>
         <td data-l="Last sign-in" data-sort="${esc(t.last_login_at||'')}">${login(t)}</td>
-        <td class="muted" data-l="7 days" data-sort="${t.logins_7d}">${t.logins_7d?t.logins_7d+'×':'—'}</td>
+        <td class="muted" data-l="7 days" data-sort="${t.active_days_7d||0}" title="Days with any activity in the last 7 (portal opened, not just signed in)${t.logins_7d?' · '+t.logins_7d+' sign-in'+(t.logins_7d>1?'s':''):''}">${t.active_days_7d?t.active_days_7d+(t.active_days_7d>1?' days':' day'):'—'}</td>
         <td class="muted" data-l="Last seen" data-sort="${esc(t.last_seen_at||'')}">${t.last_seen_at?dstr(t.last_seen_at):'—'}</td>
         <td class="muted" data-l="Accounts" data-sort="${t.accounts}">${t.accounts||'—'}</td>
         <td class="muted" data-l="KYC">${esc(t.kyc_status||'—')}</td></tr>`).join('')}
@@ -3337,7 +3494,7 @@ function renderClients(){
   /* Desk liczy backend z leada dopasowanego po mailu — patrz /api/admin/traders.
      Klient bez leada (rejestracja wprost z portalu) nie ma desku i zostaje na
      liście niezależnie od checkboxa: nie przyszedł z darmowego lejka. */
-  const kraj=window._cliCountry||'';
+  const kraj=COUNTRY_FILTER;
   const rows=all.filter(t=>test(t)&&(FREE_SHOWN||!isFreeOrigin(t))&&pasujeKraj(t,kraj)&&
     (!q||fold(t.email).includes(qf)||fold(t.full_name).includes(qf)));
   const ukryci=FREE_SHOWN?0:all.filter(isFreeOrigin).length;
@@ -3348,7 +3505,7 @@ function renderClients(){
         `<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''}
           onclick="window._cliFilter='${f===k?'all':k}';renderClients()">${l}</button>`).join('')}</div>
       ${freeCheckbox()}
-      ${countrySelect(all,'_cliCountry','renderClients')}
+      ${countrySelect(all,'renderClients')}
       <span class="count-pill">${rows.length} of ${all.length}${
         ukryci?` · <span class="muted">${ukryci} free hidden</span>`:''}${impPill()}</span>
     </div>`
@@ -3371,6 +3528,8 @@ function renderClients(){
             title="New order for this client — pick the plan, then copy a card payment link or take crypto">Sell / pay link</button>
           <button class="btn-o sm" onclick="openClientMail(${t.id})"
             title="Write to them from the platform address — or resend the portal invite / password link">E-mail</button>
+          <button class="btn-o sm" onclick="openTgComposer(${t.id})"
+            title="${t.telegram?'Open a Telegram chat with @'+esc(t.telegram)+' from your own account, text ready to send':'Write to them on Telegram from your own account — you will need their handle'}">Telegram</button>
           <button class="btn-o sm" onclick="openTraderJournal(${t.id},'${jsq(t.email||'')}')"
             title="Everything this client did — sign-ins, orders, payouts, tickets">Journal</button>
           <button class="btn-o sm" onclick="impersonate(${t.id})"

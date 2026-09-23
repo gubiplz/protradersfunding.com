@@ -346,5 +346,8 @@ def test_panel_ma_zakladke_activity():
     assert "renderActivity(" in kod
     assert "'/api/admin/journal'" in kod
     assert "v:'activity'" in kod
-    for filtr in ("Awaiting claim", "Never signed in", "Active today", "Quiet 7+ days"):
+    for filtr in ("Awaiting claim", "Never seen", "Active today", "Quiet 7+ days"):
         assert filtr in kod
+    # Ruch po LAST SEEN, nie po logowaniu: filtry patrzą na `seen_today` i
+    # `active_days_7d`, a zielone „today" zostaje przy logowaniu.
+    assert "t=>t.seen_today" in kod and "!t.active_days_7d" in kod
