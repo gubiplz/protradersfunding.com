@@ -114,6 +114,10 @@ def test_liczba_zapytan_nie_rosnie_z_liczba_wierszy():
     naglowek = _admin_naglowek()
     with TestClient(app) as c:
         _dosyp(3)
+        # Rozgrzewka: pierwsze wywołanie płaci jednorazowe koszty (cache
+        # leaderboardu, znak wodny dzwonka zakładany przy pierwszym otwarciu),
+        # które nie rosną z danymi — to nie jest N+1, a zafałszowałoby porównanie.
+        _zapytania(c, naglowek)
         malo = _zapytania(c, naglowek)
         _dosyp(12)          # pieciokrotnie wiecej danych na kazdej liscie
         duzo = _zapytania(c, naglowek)

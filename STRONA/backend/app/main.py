@@ -36,7 +36,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 
@@ -51,7 +51,7 @@ from .models import (LEAD_LOST_STATUSES, LEAD_STATUSES, LOST_REASONS,
                      Account, AchievementReward, AppSetting, Breach, Certificate,
                      ChannelPost,
                      CreditLedger, EquitySnapshot, FlashOffer, JournalEntry, KycFile,
-                     Lead, LeadEvent,
+                     AdminInboxMark, Lead, LeadEvent,
                      LeadMailTemplate, LeadReminder, MailLog, Notification,
                      Order, Payout, PayoutRequest, PoolAccount, PostMedia, Product,
                      PushSubscription,
@@ -5862,12 +5862,82 @@ def admin_mark_order_failed(order_id: int, payload: OrderFailIn):
         session.close()
 
 
+def _admin_id(authorization: str | None) -> int:
+    """Kto patrzy na dzwonek: id konta admina albo 0 dla panelu na stałym tokenie.
+
+    `auth.require_admin` tylko wpuszcza — nie mówi, kto wszedł — a stan
+    dzwonka (przeczytane, usunięte) jest per człowiek."""
+    if authorization and authorization.lower().startswith("bearer "):
+        return auth.parse_token(authorization.split(" ", 1)[1].strip()) or 0
+    return 0
+
+
+def _naiwny_utc(dt: datetime) -> datetime:
+    """Porównywalna data: część kolumn wraca z bazy ze strefą, część bez."""
+    return dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
+
+
+INBOX_MARKI_LIMIT = 3000
+
+
+class InboxMarkIn(BaseModel):
+    ids: list[str] = Field(default_factory=list, max_length=500)
+    read: bool | None = None
+    hidden: bool | None = None
+
+
+@app.post("/api/admin/inbox/mark", dependencies=[Depends(auth.require_admin)])
+def admin_inbox_mark(payload: InboxMarkIn,
+                     authorization: str | None = Header(default=None)):
+    """Przeczytane / nieprzeczytane / usunięte / przywrócone — dla listy pozycji.
+
+    Jedno wywołanie na całą paczkę, bo panel oznacza hurtem („Mark all read",
+    zaznaczenie w trybie Edit, cały stos zdarzeń jednego leada)."""
+    kto = _admin_id(authorization)
+    ids = sorted({i.strip()[:40] for i in payload.ids if i and i.strip() and i.strip() != "*"})
+    if not ids or (payload.read is None and payload.hidden is None):
+        return {"ok": True, "changed": 0}
+    session = SessionLocal()
+    try:
+        teraz = datetime.now(timezone.utc)
+        istniejace = {m.item_id: m for m in session.query(AdminInboxMark)
+                      .filter(AdminInboxMark.admin_id == kto,
+                              AdminInboxMark.item_id.in_(ids)).all()}
+        for item_id in ids:
+            m = istniejace.get(item_id)
+            if m is None:
+                m = AdminInboxMark(admin_id=kto, item_id=item_id, hidden=False)
+                session.add(m)
+            if payload.read is not None:
+                m.read = payload.read
+            if payload.hidden is not None:
+                m.hidden = payload.hidden
+            m.updated_at = teraz
+        session.commit()
+        # Pozycje dzwonka żyją tygodniami, nie latami: najstarsze oznaczenia
+        # dotyczą rzeczy, które dawno wypadły z listy, więc je przycinamy.
+        nadmiar = (session.query(AdminInboxMark.id)
+                   .filter(AdminInboxMark.admin_id == kto, AdminInboxMark.item_id != "*")
+                   .order_by(AdminInboxMark.updated_at.desc())
+                   .offset(INBOX_MARKI_LIMIT).all())
+        if nadmiar:
+            session.query(AdminInboxMark).filter(
+                AdminInboxMark.id.in_([n.id for n in nadmiar])).delete(synchronize_session=False)
+            session.commit()
+        return {"ok": True, "changed": len(ids)}
+    finally:
+        session.close()
+
+
 @app.get("/api/admin/inbox", dependencies=[Depends(auth.require_admin)])
-def admin_inbox():
+def admin_inbox(authorization: str | None = Header(default=None)):
     """Dzwonek w panelu: ostatnie „coś przyszło" ze wszystkich kolejek.
 
-    Agregacja z istniejących tabel (bez osobnej tabeli powiadomień admina);
-    co jest „nieprzeczytane" rozstrzyga frontend po localStorage."""
+    Agregacja z istniejących tabel (bez osobnej tabeli powiadomień admina).
+    Każda pozycja ma stabilne `id`, `kind` (rodzaj zdarzenia — panel dobiera
+    po nim ikonę) i `read`. Przeczytane i usunięte trzyma `admin_inbox_marks`,
+    per admin — usunięta pozycja nie wraca przy następnym odświeżeniu."""
+    kto = _admin_id(authorization)
     session = SessionLocal()
     try:
         zamowienia = session.query(Order).order_by(Order.id.desc()).limit(25).all()
@@ -5890,20 +5960,25 @@ def admin_inbox():
 
         items = []
         for o in zamowienia:
-            items.append({"type": "order", "ts": (o.paid_at or o.created_at).isoformat(),
+            items.append({"id": f"order:{o.id}", "kind": "order",
+                          "type": "order", "ts": (o.paid_at or o.created_at).isoformat(),
                           "title": f"Order #{o.id} · {o.product_key} · {o.status}",
                           "body": email_of(o.trader_id), "view": "orders"})
         for t in kyc:
             if t.kyc_submitted_at:
-                items.append({"type": "kyc", "ts": t.kyc_submitted_at.isoformat(),
+                items.append({"id": f"kyc:{t.id}:{int(t.kyc_submitted_at.timestamp())}",
+                              "kind": "kyc",
+                              "type": "kyc", "ts": t.kyc_submitted_at.isoformat(),
                               "title": f"KYC pending · {t.kyc_fullname or t.email}",
                               "body": t.email, "view": "kyc"})
         for pr in wnioski:
-            items.append({"type": "payout", "ts": pr.ts.isoformat(),
+            items.append({"id": f"payout:{pr.id}", "kind": "payout",
+                          "type": "payout", "ts": pr.ts.isoformat(),
                           "title": f"Payout request ${pr.trader_share:,.2f}",
                           "body": email_of(pr.trader_id), "view": "payouts"})
         for m, t in bilety:
-            items.append({"type": "ticket", "ts": m.ts.isoformat(),
+            items.append({"id": f"ticket:{m.id}", "kind": "ticket",
+                          "type": "ticket", "ts": m.ts.isoformat(),
                           "title": f"Ticket #{t.id}: {t.subject}",
                           "body": email_of(t.trader_id), "view": "tickets"})
         # Leady tą samą listą co reszta kolejek: historia zdarzeń już istnieje
@@ -5922,11 +5997,35 @@ def admin_inbox():
                 "bought": f"Lead {kto_lead}",
                 "reminder": f"Follow-up: {kto_lead}",
             }.get(z.kind, f"Lead {kto_lead}")
-            items.append({"type": "lead", "ts": z.created_at.isoformat(),
+            items.append({"id": f"lead:{z.id}", "kind": z.kind, "who": kto_lead,
+                          "actor": z.actor or "",
+                          "type": "lead", "ts": z.created_at.isoformat(),
                           "title": tytul,
                           "body": (z.detail or z.kind)[:120], "view": "leads",
                           "lead_id": l.id, "desk": _desk_leada(l.source)})
         items.sort(key=lambda i: i["ts"], reverse=True)
+
+        marki = {m.item_id: m for m in session.query(AdminInboxMark)
+                 .filter(AdminInboxMark.admin_id == kto).all()}
+        znak = marki.get("*")
+        if znak is None:
+            # Pierwsze otwarcie: to, co już leży w kolejkach, nie jest „nowe".
+            znak = AdminInboxMark(admin_id=kto, item_id="*", read=True, hidden=False,
+                                  updated_at=datetime.now(timezone.utc))
+            session.add(znak)
+            session.commit()
+        granica = _naiwny_utc(znak.updated_at)
+        widoczne = []
+        for i in items:
+            m = marki.get(i["id"])
+            if m is not None and m.hidden:
+                continue
+            if m is not None and m.read is not None:
+                i["read"] = bool(m.read)
+            else:
+                i["read"] = _naiwny_utc(datetime.fromisoformat(i["ts"])) <= granica
+            widoczne.append(i)
+        items = widoczne
         # Budżet PER DESK, nie jeden na całość. Wspólne obcięcie po czasie
         # znaczyło, że seria zdarzeń o leadach wypychała z dzwonka wszystkie
         # zamówienia — i że liczba przy każdym polu mówiła o obcięciu, a nie
