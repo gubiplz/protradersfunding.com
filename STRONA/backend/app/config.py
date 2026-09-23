@@ -324,6 +324,10 @@ class Settings:
     # SMTP platformy — mail spod niej przez cudzy SMTP dostaje etykietę
     # „via" albo ląduje w spamie.
     resend_api_key: str = os.getenv("RESEND_API_KEY", "").strip()
+    # Opcjonalny drugi klucz Resenda — tylko do CZYTANIA maili przychodzących
+    # na domenę platformy, gdy ta domena siedzi na innym koncie Resenda niż
+    # domena landingu (`app/inbox.py`). Pusty = wszystko z `RESEND_API_KEY`.
+    resend_api_key_ptf: str = os.getenv("RESEND_API_KEY_PTF", "").strip()
     # Nadawca spod marki landingu. Przy ustawionym kluczu Resend WYGRYWA
     # `RESEND_FROM`: domena nadawcy musi być zweryfikowana u Resenda, a stary
     # `LEAD_MAIL_FROM` był dobierany pod SMTP i może wskazywać skrzynkę, której

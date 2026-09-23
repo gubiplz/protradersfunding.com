@@ -41,7 +41,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 
 from . import (achievements, auth, billing, catalog, certshot, contentbot, countries,
-               fields, insights, loyalty,
+               fields, inbox, insights, loyalty,
                lead_mail, mail_templates, metaquotes_web, notify, offers, origin,
                payout_import, payoutbot, reach, statements,
                poller, provisioning, push, rules, sms, telegram, telemetry, tradebot)
@@ -9994,6 +9994,63 @@ class MailSendIn(BaseModel):
     subject: str
     body: str
     sender: str | None = None
+
+
+def _nadawcy_odebranych(session, maile: set[str]) -> tuple[dict, dict]:
+    """Kto z naszych napisał: klient (po mailu konta) i lead (po mailu zgłoszenia)."""
+    maile = {m for m in maile if m}
+    if not maile:
+        return {}, {}
+    traderzy = {t.email.lower(): t for t in session.query(Trader)
+                .filter(func.lower(Trader.email).in_(maile)).all()}
+    leady = {}
+    for lead in (session.query(Lead).filter(func.lower(Lead.email).in_(maile))
+                 .order_by(Lead.id.desc()).all()):
+        leady.setdefault(lead.email.lower(), lead)
+    return traderzy, leady
+
+
+def _dopisz_nadawce(wiersz: dict, traderzy: dict, leady: dict) -> dict:
+    t, lead = traderzy.get(wiersz["from_email"]), leady.get(wiersz["from_email"])
+    wiersz["trader_id"] = t.id if t else None
+    wiersz["trader_name"] = (t.full_name or t.email) if t else None
+    wiersz["lead_id"] = lead.id if lead else None
+    wiersz["lead_name"] = lead.name if lead else None
+    return wiersz
+
+
+@app.get("/api/admin/mail/inbox", dependencies=[Depends(auth.require_admin)])
+def admin_mail_inbox(brand: str = "all"):
+    """Maile ODEBRANE (Resend Receiving), z podziałem na platformę i landing.
+
+    Czytane na żądanie z API Resenda (`app/inbox.py`); nadawca dopasowany do
+    klienta i leada po mailu, żeby z listy dało się przejść do karty i odpisać
+    spod właściwej marki.
+    """
+    if brand not in ("all", *inbox.MARKI):
+        raise HTTPException(400, "brand must be all, ptf or fx")
+    dane = inbox.lista(brand)
+    session = SessionLocal()
+    try:
+        traderzy, leady = _nadawcy_odebranych(session, {w["from_email"] for w in dane["items"]})
+        dane["items"] = [_dopisz_nadawce(w, traderzy, leady) for w in dane["items"]]
+        return dane
+    finally:
+        session.close()
+
+
+@app.get("/api/admin/mail/inbox/{email_id}", dependencies=[Depends(auth.require_admin)])
+def admin_mail_inbox_one(email_id: str, k: int = 0):
+    try:
+        m = inbox.jeden(email_id, k)
+    except RuntimeError as e:
+        raise HTTPException(502, str(e)) from None
+    session = SessionLocal()
+    try:
+        traderzy, leady = _nadawcy_odebranych(session, {m["from_email"]})
+        return _dopisz_nadawce(m, traderzy, leady)
+    finally:
+        session.close()
 
 
 @app.get("/api/admin/mail/senders", dependencies=[Depends(auth.require_admin)])
