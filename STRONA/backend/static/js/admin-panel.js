@@ -528,13 +528,14 @@ const VIEWS={
     <td data-sort="${rangaStanu[p.status]??9}"><span class="status ${stan(p)}"><span class="dot"></span>${esc(p.status)}</span></td>
     <td data-sort="${esc(p.scheduled_for||'')}">${p.scheduled_for?dstr(p.scheduled_for):'<span class="muted">—</span>'}</td>
     <td style="white-space:nowrap">
-      <button class="btn-o sm" onclick="previewPost(${p.id})" title="How it will look on Telegram — and edit it">Preview</button>
       ${p.status==='published'
-        ?(p.post_url?`<a class="btn-o sm" href="${esc(p.post_url)}" target="_blank" rel="noopener">Open</a>`:'<span class="muted">—</span>')
-        :`${p.status==='draft'||p.status==='failed'?`<button class="btn-o sm" onclick="approvePost(${p.id})">Approve</button>`:''}
+        ?`<button class="btn-o sm" onclick="previewPost(${p.id})" title="${p.post_url?'Open this post on Telegram':'No link — the channel has no username and no message id was stored'}">Preview</button>
+          <button class="btn-o sm" onclick="editPost(${p.id})" title="Edit the text — the change goes live on Telegram">Edit</button>`
+        :`<button class="btn-o sm" onclick="previewPost(${p.id})" title="How it will look on Telegram — and edit it">Preview</button>
+          ${p.status==='draft'||p.status==='failed'?`<button class="btn-o sm" onclick="approvePost(${p.id})">Approve</button>`:''}
           ${p.status==='approved'||p.status==='scheduled'?`<button class="btn-o sm" onclick="schedulePost(${p.id})">Schedule</button>
-            <button class="btn-p sm" onclick="publishPost(${p.id})">Publish</button>`:''}
-          <button class="btn-o sm" onclick="deletePost(${p.id})">Delete</button>`}
+            <button class="btn-p sm" onclick="publishPost(${p.id})">Publish</button>`:''}`}
+      <button class="btn-o sm" onclick="deletePost(${p.id})" title="${p.status==='published'?'Removes it from the channel too':'Removes it from the queue'}">Delete</button>
     </td></tr>`;
 
   _postyKolejki=Object.fromEntries(posty.map(p=>[p.id,p]));
@@ -4283,11 +4284,29 @@ async function schedulePost(id){
   }catch(e){toast('Not scheduled — '+e.message,'err')}
 }
 async function deletePost(id){
-  if(!await askConfirm({title:'Delete this post?',body:'It has not been published.',ok:'Delete'}))return;
+  const p=_postyKolejki[id]||{};
+  const wyszedl=p.status==='published';
+  if(!await askConfirm({title:'Delete this post?',
+    body:wyszedl?'It is <b>published</b> — this removes it from the Telegram channel as well, for everyone. Views and reactions go with it.'
+                :'It has not been published — it just leaves the queue.',
+    ok:'Delete',danger:true}))return;
   try{
     await api(`/api/admin/channel-posts/${id}`,{method:'DELETE'});
+    toast(wyszedl?'Removed from the channel and the queue.':'Removed from the queue.');
     go('telegram');
-  }catch(e){toast('Error: '+e.message,'err')}
+  }catch(e){
+    /* Telegram odmówił (bot bez uprawnień, wiadomość już skasowana ręcznie):
+       wiersz został. Drugie pytanie kasuje SAM wiersz — świadomie. */
+    if(wyszedl&&/Telegram refused/i.test(e.message)){
+      if(!await askConfirm({title:'Telegram would not delete it',
+        body:esc(e.message)+'<br><br>Delete only the queue entry? The post stays on the channel unless you remove it there.',
+        ok:'Delete the entry only',danger:true}))return;
+      try{await api(`/api/admin/channel-posts/${id}?force=1`,{method:'DELETE'});toast('Queue entry removed.');go('telegram')}
+      catch(e2){toast('Error: '+e2.message,'err')}
+      return;
+    }
+    toast('Error: '+e.message,'err');
+  }
 }
 /* ---------- podgląd posta jak na Telegramie + edycja w tym samym oknie ---------- */
 /* Kopia robocza siedzi w `_tgp`, a nie w polach formularza: makieta, licznik
@@ -4297,20 +4316,41 @@ async function deletePost(id){
 let _postyKolejki={},_tytulyKanalow={},_tgp=null;
 const TGP_KANALY={mgmt:'Account Management',payouts:'Payouts',trackrecord:'Track Record'};
 
+/* „Preview" opublikowanego posta prowadzi DO POSTA — na kanał, nie do makiety.
+   Makieta ma sens, dopóki post nie wyszedł; potem prawdą jest to, co wisi na
+   Telegramie, i tam ma trafić klikający. Kanał prywatny dostaje link
+   t.me/c/… (backend `telegram.post_url`); bez linku zostaje komunikat. */
 function previewPost(id){
+  const p=_postyKolejki[id];
+  if(!p){toast('This post is no longer in the queue — refresh the tab.','err');return}
+  if(p.status==='published'){
+    if(p.post_url)window.open(p.post_url,'_blank','noopener');
+    else toast('No link to this post — the channel has no username and no message id was stored. Use Edit to see the text.','err',8000);
+    return;
+  }
+  editPost(id);
+}
+/* Edycja w oknie bocznym. Post nieopublikowany: tekst i grafika, zapis cofa do
+   szkicu (i ponownie zatwierdza, jeśli był zatwierdzony). Post OPUBLIKOWANY:
+   sam tekst — zapis idzie na Telegram (`editMessageText`/`Caption`) i dopiero
+   po jego zgodzie do bazy; grafiki tą drogą Telegram nie podmienia. */
+function editPost(id){
   const p=_postyKolejki[id];
   if(!p){toast('This post is no longer in the queue — refresh the tab.','err');return}
   _tgp={...p,media_url:p.media_url||'',_wymiary:'',
         _oryginal:{kind:p.kind,media_url:p.media_url||''}};
-  const edycja=p.status!=='published';
-  openOver('Preview on Telegram',`
+  const wyszedl=p.status==='published';
+  openOver(wyszedl?'Edit the published post':'Preview on Telegram',`
     <div id="tgp-live"></div>
     <div id="tgp-stan" style="margin-top:10px"></div>
-    ${edycja?`<div class="tgp-edit">
+    <div class="tgp-edit">
       <label class="muted" for="tgp-body">Text · Telegram HTML only: &lt;b&gt; &lt;i&gt; &lt;u&gt; &lt;s&gt;
         &lt;a href&gt; &lt;code&gt; &lt;blockquote&gt;</label>
       <textarea id="tgp-body" class="inp" rows="10" oninput="_tgp.body=this.value;tgpOdswiez()"></textarea>
-      <label class="muted">Graphic</label>
+      ${wyszedl?`<p class="tgp-hint">Published${p.post_url?' — <a href="'+esc(p.post_url)+'" target="_blank" rel="noopener">open on Telegram</a>':''}.
+        Saving rewrites the text on the channel in place (views and reactions stay). The graphic
+        cannot be swapped on a published post — delete and post again for that.</p>`
+      :`<label class="muted">Graphic</label>
       <div class="tgp-media-row">
         <span id="tgp-media-lbl" class="tgp-media-lbl"></span>
         <label class="btn-o sm tgp-file">Upload image<input type="file"
@@ -4321,19 +4361,18 @@ function previewPost(id){
       <p class="tgp-hint">PNG or JPG, up to 5 MB. Our own graphics (payout certificates) are
         <b>1320 × 1320 px</b>, square — upload that size and the channel stays consistent.
         Portrait up to 4:5 (1080 × 1350) also shows in full; the preview follows the file's
-        proportions.</p>
+        proportions.</p>`}
       <div style="display:flex;gap:8px;margin-top:6px">
         <button class="btn-o lg" style="flex:1" onclick="closeOver()">Cancel</button>
-        <button class="btn-p lg" style="flex:1" id="tgp-zapisz" onclick="tgpZapisz()">Save</button>
+        <button class="btn-p lg" style="flex:1" id="tgp-zapisz" onclick="tgpZapisz()">${wyszedl?'Save to Telegram':'Save'}</button>
       </div>
-      <p class="tgp-hint">${p.status==='approved'||p.status==='scheduled'
+      ${wyszedl?'':`<p class="tgp-hint">${p.status==='approved'||p.status==='scheduled'
         ?'Saving re-runs the approval checks, so the post keeps its place'
           +(p.scheduled_for?' and its time ('+esc(dstr(p.scheduled_for))+')':'')
           +' — or tells you why it cannot.'
-        :'This post is a draft: saving keeps it a draft until you approve it.'}</p>
-    </div>`:`<p class="tgp-hint">Already published — this is how it went out. Published posts
-      cannot be edited.</p>`}`);
-  if(edycja)$('tgp-body').value=p.body||'';
+        :'This post is a draft: saving keeps it a draft until you approve it.'}</p>`}
+    </div>`);
+  $('tgp-body').value=p.body||'';
   tgpOdswiez();
 }
 
@@ -4412,6 +4451,10 @@ async function tgpZapisz(){
     await api(`/api/admin/channel-posts/${p.id}`,{method:'PATCH',body:JSON.stringify({
       channel:p.channel,kind:p.kind,body,media_url:p.media_url||null,
       proof:p.proof||'',scheduled_for:p.scheduled_for||null})});
+    if(p.status==='published'){
+      toast('Text updated on Telegram.');
+      closeOver();go('telegram');return;
+    }
     if(bylZatwierdzony){
       try{
         await api(`/api/admin/channel-posts/${p.id}/approve`,{method:'POST'});

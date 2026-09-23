@@ -6164,14 +6164,38 @@ def admin_channel_post_create(payload: ChannelPostIn):
 
 @app.patch("/api/admin/channel-posts/{post_id}", dependencies=[Depends(auth.require_admin)])
 def admin_channel_post_edit(post_id: int, payload: ChannelPostIn):
-    """Edycja cofa post do szkicu — zmieniona treść nie jest już tą zatwierdzoną."""
+    """Edycja cofa post do szkicu — zmieniona treść nie jest już tą zatwierdzoną.
+
+    Post OPUBLIKOWANY to inny przypadek: nie ma czego cofać do szkicu, bo
+    wiadomość już wisi na kanale. Edycja idzie wtedy PROSTO na Telegram
+    (`editMessageText` / `editMessageCaption`) i dopiero po jego zgodzie do
+    bazy — inaczej panel pokazywałby treść, której na kanale nie ma. Zmiana
+    kanału, rodzaju czy grafiki opublikowanego posta to 409 z powodem: tego
+    Telegram tą drogą nie robi, a udawanie, że zrobił, byłoby gorsze.
+    """
     session = SessionLocal()
     try:
         p = session.get(ChannelPost, post_id)
         if not p:
             raise HTTPException(404, "Post not found")
         if p.status == "published":
-            raise HTTPException(409, "This post is already published")
+            if payload.channel != p.channel or payload.kind != p.kind \
+                    or (payload.media_url or None) != (p.media_url or None):
+                raise HTTPException(409, "A published post can only have its text "
+                                         "edited — channel, kind and graphic stay")
+            tekst = payload.body or ""
+            if tekst.strip() != (p.body or "").strip():
+                if not p.message_id:
+                    raise HTTPException(409, "This post has no Telegram message id "
+                                             "— it cannot be edited from here")
+                ok, powod = telegram.edit_content(contentbot.chat_id(p.channel),
+                                                  p.message_id, tekst, kind=p.kind)
+                if not ok:
+                    raise HTTPException(502, f"Telegram refused the edit: {powod}")
+                p.body = tekst
+                p.updated_at = datetime.now(timezone.utc)
+                session.commit()
+            return _post_dict(p)
         p.channel, p.kind = payload.channel, payload.kind
         p.body = payload.body or ""
         p.media_url = payload.media_url or None
@@ -6192,15 +6216,30 @@ def admin_channel_post_edit(post_id: int, payload: ChannelPostIn):
 
 
 @app.delete("/api/admin/channel-posts/{post_id}", dependencies=[Depends(auth.require_admin)])
-def admin_channel_post_delete(post_id: int):
+def admin_channel_post_delete(post_id: int, force: int = 0):
+    """Kasuje post z kolejki — a OPUBLIKOWANY także z kanału.
+
+    Do 2026-09 usunięcie opublikowanego posta znikało z panelu, a wiadomość
+    wisiała na kanale dalej: panel kłamał, że jej nie ma. Teraz najpierw
+    `deleteMessage`, potem wiersz. Odmowa Telegrama zostawia wiersz i wraca
+    jako 502 z powodem; `?force=1` kasuje sam wiersz mimo odmowy — dla posta,
+    który z kanału zniknął już inną drogą (ręcznie, z telefonu).
+    """
     session = SessionLocal()
     try:
         p = session.get(ChannelPost, post_id)
         if not p:
             raise HTTPException(404, "Post not found")
+        z_kanalu = False
+        if p.status == "published" and p.message_id and not force:
+            ok, powod = telegram.delete_content(contentbot.chat_id(p.channel), p.message_id)
+            if not ok:
+                raise HTTPException(502, f"Telegram refused to delete the post: {powod}. "
+                                         "Remove it on Telegram first, or delete only the queue entry.")
+            z_kanalu = True
         session.delete(p)
         session.commit()
-        return {"ok": True, "id": post_id}
+        return {"ok": True, "id": post_id, "removed_from_channel": z_kanalu}
     finally:
         session.close()
 
@@ -6218,6 +6257,10 @@ def admin_channel_post_approve(post_id: int):
         p = session.get(ChannelPost, post_id)
         if not p:
             raise HTTPException(404, "Post not found")
+        if p.status == "published":
+            # Zatwierdzenie opublikowanego cofałoby go do „scheduled" i cron
+            # wysłałby go DRUGI raz.
+            raise HTTPException(409, "This post is already published")
         try:
             contentbot.waliduj(session, p)
         except contentbot.NieprawdziwyPost as e:
