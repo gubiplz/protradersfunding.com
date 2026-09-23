@@ -53,7 +53,8 @@ from .models import (LEAD_LOST_STATUSES, LEAD_STATUSES, LOST_REASONS,
                      CreditLedger, EquitySnapshot, FlashOffer, JournalEntry, KycFile,
                      Lead, LeadEvent,
                      LeadMailTemplate, LeadReminder, MailLog, Notification,
-                     Order, Payout, PayoutRequest, PoolAccount, Product, PushSubscription,
+                     Order, Payout, PayoutRequest, PoolAccount, PostMedia, Product,
+                     PushSubscription,
                      RewardCode, SupportTicket, TelemetryEvent, TicketMessage, Trade, Trader,
                      nowy_znak_biletu)
 
@@ -6249,6 +6250,94 @@ def admin_channel_post_publish(post_id: int):
         if not wynik.get("posted"):
             raise HTTPException(502, wynik.get("reason") or "Telegram refused the post")
         return _post_dict(p)
+    finally:
+        session.close()
+
+
+# Telegram przyjmuje zdjęcie podane ADRESEM tylko do 5 MB (plik wysłany wprost
+# może mieć 10 MB, ale ta ścieżka go nie używa). Większe odbija dopiero przy
+# publikacji, czyli za późno — więc odmawiamy już przy wgrywaniu.
+POST_MEDIA_MAX = 5 * 1024 * 1024
+
+
+def wymiary_obrazka(dane: bytes) -> tuple[str, int, int] | None:
+    """(mime, szerokość, wysokość) dla PNG albo JPEG; `None` dla czegokolwiek innego.
+
+    Tylko te dwa formaty, bo tylko je Telegram na pewno pokaże jako ZDJĘCIE
+    pobrane z adresu — WebP potrafi wrócić jako naklejka albo dokument.
+    Wymiary czytane z nagłówka, bez dekodowania pikseli i bez Pillow.
+    """
+    if dane.startswith(b"\x89PNG\r\n\x1a\n") and len(dane) >= 24:
+        return ("image/png", int.from_bytes(dane[16:20], "big"),
+                int.from_bytes(dane[20:24], "big"))
+    if dane.startswith(b"\xff\xd8"):
+        i = 2
+        while i + 9 < len(dane):
+            if dane[i] != 0xFF:
+                i += 1
+                continue
+            znacznik = dane[i + 1]
+            if znacznik in (0xD8, 0x01) or 0xD0 <= znacznik <= 0xD7 or znacznik == 0xFF:
+                i += 1 if znacznik == 0xFF else 2
+                continue
+            dlugosc = int.from_bytes(dane[i + 2:i + 4], "big")
+            # SOF0..SOF15 poza DHT (C4), JPG (C8) i DAC (CC) niosą wymiary.
+            if 0xC0 <= znacznik <= 0xCF and znacznik not in (0xC4, 0xC8, 0xCC):
+                return ("image/jpeg", int.from_bytes(dane[i + 7:i + 9], "big"),
+                        int.from_bytes(dane[i + 5:i + 7], "big"))
+            i += 2 + dlugosc
+        return None
+    return None
+
+
+@app.post("/api/admin/post-media", dependencies=[Depends(auth.require_admin)])
+async def admin_post_media_upload(file: UploadFile = File(...)):
+    """Wgrywa grafikę do posta i oddaje jej publiczny adres.
+
+    Nie przypina jej do żadnego posta — adres wraca do edytora, a zapisuje go
+    zwykła edycja posta. Dzięki temu podmiana grafiki przechodzi przez tę samą
+    bramkę co zmiana treści: post wraca do szkicu i trzeba go zatwierdzić.
+    """
+    dane = await file.read(POST_MEDIA_MAX + 1)
+    if len(dane) > POST_MEDIA_MAX:
+        raise HTTPException(413, "The image is over 5 MB — Telegram refuses photos "
+                                 "sent by URL above that. Export it smaller.")
+    info = wymiary_obrazka(dane)
+    if not info:
+        raise HTTPException(400, "Upload a PNG or JPG — other formats may reach "
+                                 "the channel as a file instead of a photo.")
+    mime, szer, wys = info
+    # Limity Telegrama dla zdjęć: suma boków do 10 000 px, proporcje do 1:20.
+    if szer <= 0 or wys <= 0 or szer + wys > 10000 or max(szer, wys) > 20 * min(szer, wys):
+        raise HTTPException(400, f"Telegram will not take a {szer}×{wys} photo "
+                                 "(sides may add up to 10,000 px, ratio at most 1:20).")
+    session = SessionLocal()
+    try:
+        m = PostMedia(token=secrets.token_urlsafe(18), mime=mime,
+                      width=szer, height=wys, data=dane)
+        session.add(m)
+        session.commit()
+        rozszerzenie = "png" if mime == "image/png" else "jpg"
+        baza = (settings.app_base_url or "").rstrip("/")
+        return {"url": f"{baza}/media/posts/{m.token}.{rozszerzenie}",
+                "width": szer, "height": wys, "bytes": len(dane)}
+    finally:
+        session.close()
+
+
+@app.get("/media/posts/{nazwa}")
+def post_media(nazwa: str):
+    """Publiczny plik grafiki posta — pobiera go Telegram przy publikacji."""
+    token = nazwa.rsplit(".", 1)[0]
+    session = SessionLocal()
+    try:
+        m = session.query(PostMedia).filter(PostMedia.token == token).one_or_none()
+        if not m:
+            raise HTTPException(404, "Not found")
+        # Treść pod danym tokenem nigdy się nie zmienia — nowa grafika to nowy
+        # token — więc cache może trzymać ją bez końca.
+        return Response(content=m.data, media_type=m.mime,
+                        headers={"Cache-Control": "public, max-age=31536000, immutable"})
     finally:
         session.close()
 

@@ -507,6 +507,7 @@ const VIEWS={
     <td data-sort="${rangaStanu[p.status]??9}"><span class="status ${stan(p)}"><span class="dot"></span>${esc(p.status)}</span></td>
     <td data-sort="${esc(p.scheduled_for||'')}">${p.scheduled_for?dstr(p.scheduled_for):'<span class="muted">—</span>'}</td>
     <td style="white-space:nowrap">
+      <button class="btn-o sm" onclick="previewPost(${p.id})" title="How it will look on Telegram — and edit it">Preview</button>
       ${p.status==='published'
         ?(p.post_url?`<a class="btn-o sm" href="${esc(p.post_url)}" target="_blank" rel="noopener">Open</a>`:'<span class="muted">—</span>')
         :`${p.status==='draft'||p.status==='failed'?`<button class="btn-o sm" onclick="approvePost(${p.id})">Approve</button>`:''}
@@ -515,6 +516,8 @@ const VIEWS={
           <button class="btn-o sm" onclick="deletePost(${p.id})">Delete</button>`}
     </td></tr>`;
 
+  _postyKolejki=Object.fromEntries(posty.map(p=>[p.id,p]));
+  _tytulyKanalow=Object.fromEntries((kan||[]).map(k=>[k.key,k.title]));
   const wKolejce=posty.filter(p=>p.status!=='published').length;
   $('view').innerHTML=`
     ${alarm}
@@ -4224,6 +4227,142 @@ async function deletePost(id){
     go('telegram');
   }catch(e){toast('Error: '+e.message,'err')}
 }
+/* ---------- podgląd posta jak na Telegramie + edycja w tym samym oknie ---------- */
+/* Kopia robocza siedzi w `_tgp`, a nie w polach formularza: makieta, licznik
+   i zapis czytają jedno źródło, więc to, co widać, jest tym, co pójdzie na
+   serwer. Logika Telegrama (parser znaczników, wybór grafiki) żyje
+   w tg-preview.js, żeby dało się ją sprawdzić bez przeglądarki. */
+let _postyKolejki={},_tytulyKanalow={},_tgp=null;
+const TGP_KANALY={mgmt:'Account Management',payouts:'Payouts',trackrecord:'Track Record'};
+
+function previewPost(id){
+  const p=_postyKolejki[id];
+  if(!p){toast('This post is no longer in the queue — refresh the tab.','err');return}
+  _tgp={...p,media_url:p.media_url||'',_wymiary:'',
+        _oryginal:{kind:p.kind,media_url:p.media_url||''}};
+  const edycja=p.status!=='published';
+  openOver('Preview on Telegram',`
+    <div id="tgp-live"></div>
+    <div id="tgp-stan" style="margin-top:10px"></div>
+    ${edycja?`<div class="tgp-edit">
+      <label class="muted" for="tgp-body">Text · Telegram HTML only: &lt;b&gt; &lt;i&gt; &lt;u&gt; &lt;s&gt;
+        &lt;a href&gt; &lt;code&gt; &lt;blockquote&gt;</label>
+      <textarea id="tgp-body" class="inp" rows="10" oninput="_tgp.body=this.value;tgpOdswiez()"></textarea>
+      <label class="muted">Graphic</label>
+      <div class="tgp-media-row">
+        <span id="tgp-media-lbl" class="tgp-media-lbl"></span>
+        <label class="btn-o sm tgp-file">Upload image<input type="file"
+          accept="image/png,image/jpeg" onchange="tgpWgraj(this)"></label>
+        <button class="btn-o sm" id="tgp-bez" onclick="tgpBezGrafiki()">Remove</button>
+        <button class="btn-o sm" id="tgp-przywroc" onclick="tgpPrzywroc()">Restore original</button>
+      </div>
+      <p class="tgp-hint">PNG or JPG, up to 5 MB. Our own graphics (payout certificates) are
+        <b>1320 × 1320 px</b>, square — upload that size and the channel stays consistent.
+        Portrait up to 4:5 (1080 × 1350) also shows in full; the preview follows the file's
+        proportions.</p>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button class="btn-o lg" style="flex:1" onclick="closeOver()">Cancel</button>
+        <button class="btn-p lg" style="flex:1" id="tgp-zapisz" onclick="tgpZapisz()">Save</button>
+      </div>
+      <p class="tgp-hint">${p.status==='approved'||p.status==='scheduled'
+        ?'Saving re-runs the approval checks, so the post keeps its place'
+          +(p.scheduled_for?' and its time ('+esc(dstr(p.scheduled_for))+')':'')
+          +' — or tells you why it cannot.'
+        :'This post is a draft: saving keeps it a draft until you approve it.'}</p>
+    </div>`:`<p class="tgp-hint">Already published — this is how it went out. Published posts
+      cannot be edited.</p>`}`);
+  if(edycja)$('tgp-body').value=p.body||'';
+  tgpOdswiez();
+}
+
+function tgpOdswiez(){
+  const p=_tgp;
+  if(!p||!$('tgp-live'))return;
+  const kiedy=p.published_at||p.scheduled_for;
+  const godzina=(kiedy?dutc(kiedy):new Date()).toLocaleTimeString('en-GB',
+    {timeZone:'Europe/Warsaw',hour:'2-digit',minute:'2-digit'});
+  $('tgp-live').innerHTML=tgMakieta({
+    tytul:_tytulyKanalow[p.channel]||TGP_KANALY[p.channel]||p.channel,godzina,post:p});
+  tgDopasujZrzuty($('tgp-live'));
+
+  const t=tgHtml(p.body),g=tgGrafika(p),limit=tgLimit(p.kind);
+  const problemy=[...t.problemy];
+  if(g.problem)problemy.push(g.problem);
+  if(t.widoczne>limit)problemy.push(`The text has ${t.widoczne} characters and the limit `
+    +`${p.kind==='text'?'for a text post':'under a photo or video'} is ${limit} — it will not be approved.`);
+  const zrodlo={image:'ready image — Telegram fetches this exact file',
+    page:'screenshot of a page — the channel gets a 1320 × 1320 px capture of what you see here',
+    video:'video clip',none:'no graphic, text only'}[g.typ];
+  $('tgp-stan').innerHTML=`<div class="tgp-counter${t.widoczne>limit?' over':''}">`
+    +`${t.widoczne} / ${limit} characters · ${esc(zrodlo)}</div>`
+    +(problemy.length?`<div class="warn-box" style="margin-top:8px"><div>${problemy.map(esc).join('<br>')}</div></div>`:'');
+
+  if($('tgp-media-lbl')){
+    $('tgp-media-lbl').textContent=g.typ==='none'&&!p.media_url?'none'
+      :p._wymiary?'uploaded · '+p._wymiary
+      :String(p.media_url).replace(/^https?:\/\//,'');
+    const zmieniona=p.kind!==p._oryginal.kind||(p.media_url||'')!==p._oryginal.media_url;
+    $('tgp-przywroc').hidden=!zmieniona;
+    $('tgp-bez').hidden=p.kind==='text'&&!p.media_url;
+  }
+}
+
+/* Wgranie NIE zmienia posta — daje adres, który trafia do kopii roboczej.
+   Post zmienia się dopiero przy „Save", tą samą bramką co tekst. */
+async function tgpWgraj(inp){
+  const f=inp.files&&inp.files[0];
+  inp.value='';
+  if(!f||!_tgp)return;
+  if(f.size>5*1024*1024){toast('The image is over 5 MB — Telegram refuses photos sent by URL above that.','err');return}
+  const fd=new FormData();
+  fd.append('file',f);
+  toast('Uploading…');
+  try{
+    // Własne nagłówki, bo domyślne `api()` wymusza JSON, a to jest multipart.
+    const r=await api('/api/admin/post-media',{method:'POST',body:fd,timeoutMs:60000,
+      headers:TOKEN?{Authorization:'Bearer '+TOKEN}:{}});
+    Object.assign(_tgp,{kind:'photo',media_url:r.url,_wymiary:`${r.width} × ${r.height} px`});
+    tgpOdswiez();
+    toast(`Uploaded, ${r.width} × ${r.height} px. Save to put it on the post.`);
+  }catch(e){toast('Not uploaded — '+e.message,'err')}
+}
+function tgpBezGrafiki(){Object.assign(_tgp,{kind:'text',media_url:'',_wymiary:''});tgpOdswiez()}
+function tgpPrzywroc(){
+  Object.assign(_tgp,{kind:_tgp._oryginal.kind,media_url:_tgp._oryginal.media_url,_wymiary:''});
+  tgpOdswiez();
+}
+
+/* Edycja na serwerze cofa post do szkicu (zmieniona treść nie jest już tą
+   zatwierdzoną). Gdyby na tym się kończyło, zaplanowany post po poprawce
+   literówki cicho wypadałby z planu — a „Save" ma znaczyć „wyjdzie tak, jak
+   widzę". Dlatego post, który BYŁ zatwierdzony, od razu przechodzi to samo
+   zatwierdzenie jeszcze raz: walidator sprawdza nową treść, termin zostaje.
+   Odmowa jest pokazana w całości, a post zostaje szkicem — nie udajemy sukcesu. */
+async function tgpZapisz(){
+  const p=_tgp;
+  if(!p)return;
+  const body=(p.body||'').trim();
+  if(!body){toast('The post has no text.','err');return}
+  const bylZatwierdzony=p.status==='approved'||p.status==='scheduled';
+  const btn=$('tgp-zapisz');
+  if(btn)btn.disabled=true;
+  try{
+    await api(`/api/admin/channel-posts/${p.id}`,{method:'PATCH',body:JSON.stringify({
+      channel:p.channel,kind:p.kind,body,media_url:p.media_url||null,
+      proof:p.proof||'',scheduled_for:p.scheduled_for||null})});
+    if(bylZatwierdzony){
+      try{
+        await api(`/api/admin/channel-posts/${p.id}/approve`,{method:'POST'});
+        toast(p.scheduled_for?'Saved — it goes out exactly as previewed, on its schedule.'
+                             :'Saved and approved — publish or schedule it.');
+      }catch(e){toast('Saved, but it is a draft again: '+e.message,'err',10000)}
+    }else toast('Saved as a draft. Approve it to send.');
+    closeOver();
+    go('telegram');
+  }catch(e){toast('Not saved — '+e.message,'err')}
+  finally{if(btn)btn.disabled=false}
+}
+
 function newChannelPost(kanal){
   const box=document.createElement('div');
   box.id='cpost-modal';box.className='modal-wrap';

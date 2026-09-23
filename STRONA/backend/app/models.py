@@ -804,6 +804,25 @@ class KycFile(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
+class PostMedia(Base):
+    """Grafika wgrana z panelu do posta na kanale.
+
+    W bazie z tego samego powodu co `KycFile`: Vercel nie ma trwałego dysku.
+    Wystawiana pod `/media/posts/{token}.{ext}` — adres kończy się rozszerzeniem
+    obrazka, więc `contentbot.opublikuj` wysyła ją tą samą drogą co każdy gotowy
+    obraz (Telegram pobiera plik sam) i ścieżka publikacji się nie zmienia.
+    Token zamiast id: przed publikacją grafika nie ma być do wyliczenia."""
+    __tablename__ = "post_media"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    mime: Mapped[str] = mapped_column(String(20))
+    width: Mapped[int] = mapped_column(Integer, default=0)
+    height: Mapped[int] = mapped_column(Integer, default=0)
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 class TelemetryEvent(Base):
     """Zdarzenie produktowe (telemetria wewnętrzna, bez zewnętrznych usług).
 

@@ -517,3 +517,36 @@ button.status-tap{border:0;cursor:pointer;font-family:inherit}
     transform:translate(-50%,100%)}
   #act-sheet.open{transform:translate(-50%,0)}
 }
+
+/* Podgląd posta jak na Telegramie. Zawsze w ciemnym motywie Telegrama, niezależnie
+   od motywu panelu — ma wyglądać jak kanał, a nie jak panel. */
+.tgp{border-radius:14px;overflow:hidden;border:1px solid var(--line);background:#0e1621;color:#f5f5f5;
+  font:14px/1.42 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.tgp-head{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#17212b;border-bottom:1px solid #0b1219}
+.tgp-head b{display:block;font-size:14.5px;font-weight:600}
+.tgp-head small{display:block;color:#7f91a4;font-size:12.5px}
+.tgp-ava{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;flex:none;
+  background:linear-gradient(135deg,#6a8cff,#8a5cf6);color:#fff;font-weight:600;font-size:13px}
+.tgp-chat{padding:16px 12px 18px;background:#0e1621}
+.tgp-bubble{max-width:min(420px,100%);background:#182533;border-radius:12px 12px 12px 4px;overflow:hidden}
+.tgp-media{display:block;width:100%;height:auto;max-height:560px;object-fit:contain;background:#0b1219}
+.tgp-shot{position:relative;width:100%;aspect-ratio:1;overflow:hidden;background:#fff}
+.tgp-shot iframe{position:absolute;top:0;left:0;width:660px;height:660px;border:0;
+  transform-origin:0 0;transform:scale(var(--k,.6));pointer-events:none}
+.tgp-miss{padding:28px 16px;text-align:center;color:#f0a8a8;font-size:12.5px;background:#2a1a1f}
+.tgp-text{padding:8px 12px 2px;white-space:pre-wrap;overflow-wrap:anywhere}
+.tgp-text a{color:#6ab3f3;text-decoration:none}
+.tgp-text code,.tgp-text pre{font-family:ui-monospace,Menlo,monospace;font-size:13px;color:#e6c07b}
+.tgp-text pre{margin:4px 0;padding:8px;background:#0e1621;border-radius:6px;white-space:pre-wrap}
+.tgp-text blockquote{margin:4px 0;padding:2px 0 2px 10px;border-left:3px solid #6ab3f3}
+.tgp-spoiler{background:#5b6b7b;color:transparent;border-radius:3px}
+.tgp-meta{text-align:right;color:#6d7f8f;font-size:11.5px;padding:0 10px 6px}
+.tgp-counter{font-size:12px;color:var(--muted)}
+.tgp-counter.over{color:var(--red)}
+.tgp-edit{display:flex;flex-direction:column;gap:8px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+.tgp-edit label.muted{font-size:12px}
+.tgp-media-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tgp-media-lbl{flex:1;min-width:0;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tgp-file{position:relative;overflow:hidden;cursor:pointer}
+.tgp-file input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.tgp-hint{font-size:11.5px;color:var(--muted);line-height:1.5;margin:0}
