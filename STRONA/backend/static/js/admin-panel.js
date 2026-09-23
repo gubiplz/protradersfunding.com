@@ -4544,12 +4544,14 @@ async function openTicket(id){
     <div class="thread">${t.thread.map(m=>`
       <div class="msg ${m.author==='admin'?'trader':'admin'}">
         <div class="who">${m.author==='admin'?'You (support)':'Trader'} · ${dstr(m.ts)}</div>${esc(m.body)}</div>`).join('')}</div>
-    ${t.status!=='closed'?`
-      <textarea id="tk-reply" class="inp" rows="4" placeholder="Write a reply…"></textarea>
+    ${t.status!=='closed'?`<div class="tk-compose">
+      <textarea id="tk-reply" class="inp" rows="3" placeholder="Write a reply…"></textarea>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn-p" onclick="replyTicket(${t.id},false)">Send reply</button>
         <button class="btn-o" onclick="replyTicket(${t.id},true)">Reply &amp; close</button>
-      </div>`:'<p class="muted" style="font-size:12.5px">This ticket is closed.</p>'}`);
+      </div></div>`:'<p class="muted" style="font-size:12.5px">This ticket is closed.</p>'}`);
+  /* Rozmowa otwiera się na OSTATNIEJ wiadomości, jak w komunikatorze. */
+  requestAnimationFrame(()=>{const b=$('o-body');if(b)b.scrollTop=b.scrollHeight});
 }
 async function replyTicket(id,close){
   const el=$('tk-reply');const msg=el?el.value.trim():'';
@@ -6867,12 +6869,20 @@ addEventListener('click',e=>{
    position:fixed na iOS nie wie nic o klawiaturze: pasek "przykleja sie" nad
    nia albo zawisa w polowie ekranu. Na czas pisania pasek znika
    (body.kb-open w portal.css), wraca po zamknieciu klawiatury. */
-addEventListener('focusin',e=>{
-  if(e.target.matches&&e.target.matches('input,textarea,select'))
-    document.body.classList.add('kb-open');
-});
-addEventListener('focusout',()=>setTimeout(()=>{
+/* Klawiatura ekranowa vs dolny pasek: position:fixed na iOS nie wie o niej nic
+   i pasek zawisa nad polem edycji w połowie ekranu — na czas pisania znika
+   (body.kb-open w portal.css). Stan liczymy z FAKTÓW (aktywne pole w DOM-ie +
+   zwężony visualViewport), a nie z samego focusout: zamknięcie okna z polem
+   odpowiedzi usuwało pole z DOM-u bez focusout i pasek znikał do przeładowania. */
+function kbSprawdz(){
   const a=document.activeElement;
-  if(!(a&&a.matches&&a.matches('input,textarea,select')))
-    document.body.classList.remove('kb-open');
-},80));
+  const pole=!!(a&&a.isConnected&&a.matches&&
+    a.matches('input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=button]),textarea,select'));
+  const vv=window.visualViewport;
+  const klawiatura=pole&&(!vv||vv.height<window.innerHeight-120);
+  document.body.classList.toggle('kb-open',klawiatura);
+}
+addEventListener('focusin',()=>setTimeout(kbSprawdz,60));
+addEventListener('focusout',()=>setTimeout(kbSprawdz,80));
+addEventListener('click',()=>setTimeout(kbSprawdz,150),true);
+if(window.visualViewport)visualViewport.addEventListener('resize',kbSprawdz);
