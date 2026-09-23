@@ -8674,7 +8674,8 @@ def _lead_json(lead: Lead, trader_id: int | None, paid_usd: float,
     zaczęła nazywać pól inaczej niż tabela, z której się ją otwiera."""
     zakwalifikowany = lead.outcome != "not_qualified"
     mail_temat, mail_tekst = lead_mail.tresc(lead.name,
-                                             zakwalifikowany=zakwalifikowany)
+                                             zakwalifikowany=zakwalifikowany,
+                                             free=_desk_leada(lead.source) == "free")
     # Bez tradera pod ręką liczymy z samego leada (prefiks numeru, IP
     # zgłoszenia) — lista i karta podają tradera, gdy go znają.
     if pochodzenie is None:
@@ -8711,7 +8712,8 @@ def _lead_json(lead: Lead, trader_id: int | None, paid_usd: float,
         # a nie składa. Wysyłka jest płatna i nieodwracalna, więc admin ma prawo
         # zobaczyć treść, zanim kliknie; gdyby panel składał ją u siebie, prędzej
         # czy później pokazywałby co innego, niż faktycznie idzie w świat.
-        "sms_text": sms.tresc(lead.name, zakwalifikowany=zakwalifikowany),
+        "sms_text": sms.tresc(lead.name, zakwalifikowany=zakwalifikowany,
+                              free=_desk_leada(lead.source) == "free"),
         # Mail idzie tam, gdzie Telegram i SMS nie mają dokąd. Adres jest polem
         # wymaganym formularza, więc „ready" prawie zawsze jest prawdą — prawie,
         # bo część leadów dopisano z ręki i tam trafia się „brak".
@@ -8783,7 +8785,8 @@ def _sms_do_leada(session, lead: Lead, actor: str, *,
     if not wymuszaj and session.query(LeadEvent).filter(
             LeadEvent.lead_id == lead.id, LeadEvent.kind == "sms").first():
         return False, "SMS already went out to this lead"
-    tresc = sms.tresc(lead.name, zakwalifikowany=lead.outcome != "not_qualified")
+    tresc = sms.tresc(lead.name, zakwalifikowany=lead.outcome != "not_qualified",
+                      free=_desk_leada(lead.source) == "free")
     poszlo, powod = sms.wyslij(lead.phone, tresc)
     if poszlo:
         _zdarzenie(session, lead.id, "sms", tresc, actor)
@@ -8808,7 +8811,8 @@ def _mail_do_leada(session, lead: Lead, actor: str, *,
             LeadEvent.lead_id == lead.id, LeadEvent.kind == "email").first():
         return False, "E-mail already went out to this lead"
     temat, tekst = lead_mail.tresc(
-        lead.name, zakwalifikowany=lead.outcome != "not_qualified")
+        lead.name, zakwalifikowany=lead.outcome != "not_qualified",
+        free=_desk_leada(lead.source) == "free")
     poszlo, powod = lead_mail.wyslij(lead.email, temat, tekst)
     if poszlo:
         _zdarzenie(session, lead.id, "email", temat, actor,
