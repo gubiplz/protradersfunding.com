@@ -43,6 +43,13 @@ class Trader(Base):
     # kraju, a z samego „+1" nie da się odtworzyć, czy to USA, Kanada, czy
     # któraś z wysp karaibskich — dlatego wybór trzymamy osobno.
     phone_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    # Kraj z IP (nagłówek `x-vercel-ip-country`) przy rejestracji i przy
+    # ostatnim logowaniu. Dwa osobne, bo odpowiadają na dwa pytania: skąd ten
+    # człowiek PRZYSZEDŁ i skąd DZIŚ wchodzi. Konto założone za klienta przez
+    # panel nie ma pierwszego — dostaje drugie przy pierwszym wejściu. Sam sygnał,
+    # nie werdykt: co z niego wynika, liczy `origin.pochodzenie()`.
+    signup_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    last_login_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
 
     # program afiliacyjny / referral
     referral_code: Mapped[str | None] = mapped_column(String(16), unique=True, index=True, nullable=True)
@@ -862,6 +869,11 @@ class Lead(Base):
     name: Mapped[str] = mapped_column(String(120), default="")
     phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
     phone_iso: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    # Kraj z IP zgłoszenia (`cf-ipcountry` z landingu). Osobno od `phone_iso`
+    # (prefiks numeru) i `country` (co człowiek wpisał): trzy źródła, które
+    # potrafią się kłócić, i właśnie ta kłótnia jest informacją — VPN wygląda
+    # jak IP z jednego kraju i numer z drugiego.
+    ip_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
     telegram: Mapped[str | None] = mapped_column(String(60), nullable=True)
     country: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
@@ -1026,6 +1038,12 @@ class LeadMailTemplate(Base):
     name: Mapped[str] = mapped_column(String(80), unique=True, index=True)
     subject: Mapped[str] = mapped_column(String(200))
     body: Mapped[str] = mapped_column(Text)
+    # Pod którym nadawcą ten szablon ma sens: "ptf" (adres platformy) albo "fx"
+    # (marka landingu). NULL = szablon sprzed podziału nadawców, pokazywany
+    # przy obu. Sam tekst NIE mówi, spod czyjego szyldu ma wyjść — „Your free
+    # account is ready" podpisane platformą to inna wiadomość niż podpisane
+    # marką, przez którą człowiek się zgłosił.
+    sender: Mapped[str | None] = mapped_column(String(8), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 

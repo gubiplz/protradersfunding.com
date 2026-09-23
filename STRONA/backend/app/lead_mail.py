@@ -41,8 +41,11 @@ utrzymuje. Bez `LEAD_MAIL_FROM` ten kanał jest po prostu wyłączony.
 """
 from __future__ import annotations
 
+import json
 import re
 import smtplib
+import urllib.error
+import urllib.request
 from email.message import EmailMessage
 from email.utils import formataddr, parseaddr
 from html import escape
@@ -97,12 +100,34 @@ def czego_brakuje() -> list[str]:
     dokładnie tym, czego ten tekst unika. Lepiej, żeby dział zobaczył brakującą
     zmienną, niż żeby połowa leadów dostała ślepy zaułek.
     """
-    return [nazwa for nazwa, wartosc in (
-        ("SMTP_HOST", settings.smtp_host),
-        ("LEAD_MAIL_FROM", settings.lead_mail_from),
+    return czego_brakuje_nadawcy() + [nazwa for nazwa, wartosc in (
         ("SMS_TELEGRAM_URL", settings.sms_telegram_url),
         ("LEAD_TELEGRAM_CHANNEL_URL", settings.lead_telegram_channel_url))
         if not wartosc]
+
+
+def czego_brakuje_nadawcy() -> list[str]:
+    """Czego brakuje, żeby WYSŁAĆ spod marki landingu — bez warunków automatu.
+
+    Mail pisany z ręki w panelu nie prowadzi nigdzie „z automatu", więc nie
+    potrzebuje URL-i Telegrama; potrzebuje nadawcy i drogi. Droga to Resend
+    (klucz API) albo SMTP — jedno z dwóch wystarcza, dlatego brak obu zgłaszany
+    jest jako jedna pozycja, a nie dwie.
+    """
+    braki = []
+    # Kolejność jak dotąd: droga przed nadawcą, bo tak czyta ją pasek stanu.
+    # Klucz Resend zastępuje SMTP, więc brak SMTP przy ustawionym kluczu nie
+    # jest brakiem; bez obu nazwa zostaje „SMTP_HOST", bo tak ją zna panel.
+    if not (settings.resend_api_key or settings.smtp_host):
+        braki.append("SMTP_HOST")
+    if not settings.lead_mail_from:
+        braki.append("LEAD_MAIL_FROM")
+    return braki
+
+
+def nadawca_gotowy() -> bool:
+    """Czy da się wysłać dowolny tekst spod marki landingu (panel: nadawca FX)."""
+    return not czego_brakuje_nadawcy()
 
 
 def adres(surowy: str | None) -> str | None:
@@ -251,10 +276,15 @@ def _html_z_tekstu(tekst: str) -> str:
         if akapit.startswith("http") and not akapit.split()[1:]:
             # Napis idzie za ADRESEM, nie za gałęzią tekstu. „Message the desk"
             # nad linkiem do kanału obiecywałby rozmowę, której tam nie ma —
-            # w kanale nie ma nawet pola do pisania.
-            napis = ("Join us on Telegram"
-                     if akapit == settings.lead_telegram_channel_url
-                     else "Message the desk on Telegram")
+            # w kanale nie ma nawet pola do pisania. A link spoza Telegrama
+            # (portal, strona płatności) nie ma prawa obiecywać Telegrama wcale:
+            # mail „konto gotowe" z guzikiem o desku prowadziłby do portalu.
+            if akapit == settings.lead_telegram_channel_url:
+                napis = "Join us on Telegram"
+            elif "t.me/" in akapit or "telegram.me/" in akapit:
+                napis = "Message the desk on Telegram"
+            else:
+                napis = "Open the Link"
             blok.append(
                 f'<table role="presentation" cellpadding="0" cellspacing="0" '
                 f'style="margin:26px 0"><tr><td bgcolor="{_ZIELEN}" '
@@ -297,10 +327,53 @@ def _smtp_transport(msg: EmailMessage) -> None:
         s.send_message(msg)
 
 
+RESEND_URL = "https://api.resend.com/emails"
+
+
+def _resend_transport(msg: EmailMessage) -> None:
+    """Ten sam `EmailMessage`, tylko przez HTTPS Resenda zamiast SMTP.
+
+    Domena marki landingu jest zweryfikowana u Resenda, nie u dostawcy SMTP
+    platformy — mail spod niej przez cudzy SMTP wychodzi z etykietą „via" albo
+    wcale. `urllib` z biblioteki standardowej, jak w `sms.py`: jedno wywołanie
+    nie jest powodem na zależność. Odmowa Resenda (4xx/5xx) idzie wyjątkiem
+    z kodem i ciałem, a `wyslij` zamienia go na `(False, powód)`.
+    """
+    tekst = msg.get_body(preferencelist=("plain",))
+    html = msg.get_body(preferencelist=("html",))
+    dane = {"from": msg["From"], "to": [msg["To"]], "subject": msg["Subject"],
+            "text": tekst.get_content() if tekst else "",
+            "html": html.get_content() if html else None}
+    if msg["Reply-To"]:
+        dane["reply_to"] = msg["Reply-To"]
+    req = urllib.request.Request(
+        RESEND_URL, data=json.dumps(dane).encode("utf-8"),
+        headers={"Authorization": f"Bearer {settings.resend_api_key}",
+                 "Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT_SEK) as odp:
+            odp.read()
+    except urllib.error.HTTPError as e:
+        cialo = e.read().decode("utf-8", "replace")[:300]
+        raise RuntimeError(f"resend {e.code}: {cialo}") from None
+
+
+def _transport():
+    """Resend, gdy jest klucz; inaczej SMTP. Wybierane przy KAŻDEJ wysyłce, a
+    nie przy imporcie, żeby testy mogły podmienić jedno i drugie."""
+    return _resend_transport if settings.resend_api_key else _smtp_transport
+
+
 def wyslij(email: str | None, temat: str, tekst: str, *,
-           transport=None) -> tuple[bool, str]:
-    """`(czy poszło, powód odmowy)`. Nigdy nie rzuca."""
-    if not is_enabled():
+           transport=None, tylko_nadawca: bool = False) -> tuple[bool, str]:
+    """`(czy poszło, powód odmowy)`. Nigdy nie rzuca.
+
+    `tylko_nadawca=True` to tryb maila pisanego z ręki w panelu: potrzebuje
+    nadawcy i drogi, ale nie URL-i Telegrama, bo treść nie prowadzi nigdzie
+    z automatu — pisze ją człowiek. Domyślnie (automat `tresc()`) obowiązuje
+    pełny komplet z `is_enabled()`.
+    """
+    if not (nadawca_gotowy() if tylko_nadawca else is_enabled()):
         return False, "lead e-mail is not configured"
     cel = adres(email)
     if not cel:
@@ -323,7 +396,7 @@ def wyslij(email: str | None, temat: str, tekst: str, *,
     # dostają pełną wiadomość, a nie zachętę do włączenia obrazków.
     msg.add_alternative(_html_z_tekstu(tekst), subtype="html")
     try:
-        (transport or _smtp_transport)(msg)
+        (transport or _transport())(msg)
     except Exception as e:  # pragma: no cover - sieć
         print(f"[lead_mail] nie poszło do {cel}: {e}")
         return False, f"mail error: {e}"

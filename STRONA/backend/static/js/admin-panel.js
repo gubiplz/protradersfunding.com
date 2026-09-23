@@ -206,7 +206,28 @@ let FREE_SHOWN=localStorage.getItem('pf_admin_free')!=='0';
 function toggleFree(on){
   FREE_SHOWN=!!on;
   localStorage.setItem('pf_admin_free',FREE_SHOWN?'1':'0');
-  renderClients();   // filtr jest po stronie przegladarki, wystarczy przerysowac
+  /* Filtr jest po stronie przegladarki, wystarczy przerysowac — ale TEN widok,
+     w ktorym stoi checkbox. Sztywne renderClients() z zakladki Activity
+     rysowalo liste klientow pod naglowkiem Activity (ta sama pulapka, co
+     kiedys karty Telegrama i go('settings')). */
+  if(VIEW==='activity')renderActivity();else renderClients();
+}
+/* „Free" to werdykt z `origin` (backend, app/origin.py): lead z darmowego
+   lejka LUB grant „free program" LUB ktorykolwiek sygnal z Afryki (kraj z IP
+   przy rejestracji/logowaniu, prefiks numeru, KYC, IP zgloszenia). `desk`
+   zostaje jak byl (sam lejek) — steruje Telegramem, nie tym filtrem. */
+const isFreeOrigin=t=>!!(t&&t.origin&&t.origin.free)||(t&&t.desk==='free');
+const freeCheckbox=()=>`<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;user-select:none"
+    title="Free-funnel traffic: a lead from the free funnel, a free-program grant, or any Africa signal (IP at sign-up / sign-in, phone prefix, KYC). Unticking hides them.">
+    <input type="checkbox" ${FREE_SHOWN?'checked':''} onchange="toggleFree(this.checked)"
+      style="width:15px;height:15px;accent-color:var(--acc)">Free</label>`;
+/* Chip mowi nie tylko ZE free, ale i SKAD: kraj obok, powody w tooltipie —
+   inaczej „Free" przy kliencie z polskim KYC wyglada jak blad panelu. */
+function freeChip(t){
+  const o=(t&&t.origin)||{};
+  if(!isFreeOrigin(t))return o.country?` · <span class="muted" title="Country from KYC, phone or IP">${esc(o.country)}</span>`:'';
+  const why=(o.via||[]).join(', ')||'free funnel';
+  return ` · <span class="chip" title="${esc(why)}">Free${o.country?' · '+esc(o.country):''}</span>`;
 }
 function toggleImported(){
   IMPORTED=!IMPORTED;
@@ -507,13 +528,14 @@ const VIEWS={
     <td data-sort="${rangaStanu[p.status]??9}"><span class="status ${stan(p)}"><span class="dot"></span>${esc(p.status)}</span></td>
     <td data-sort="${esc(p.scheduled_for||'')}">${p.scheduled_for?dstr(p.scheduled_for):'<span class="muted">—</span>'}</td>
     <td style="white-space:nowrap">
-      <button class="btn-o sm" onclick="previewPost(${p.id})" title="How it will look on Telegram — and edit it">Preview</button>
       ${p.status==='published'
-        ?(p.post_url?`<a class="btn-o sm" href="${esc(p.post_url)}" target="_blank" rel="noopener">Open</a>`:'<span class="muted">—</span>')
-        :`${p.status==='draft'||p.status==='failed'?`<button class="btn-o sm" onclick="approvePost(${p.id})">Approve</button>`:''}
+        ?`<button class="btn-o sm" onclick="previewPost(${p.id})" title="${p.post_url?'Open this post on Telegram':'No link — the channel has no username and no message id was stored'}">Preview</button>
+          <button class="btn-o sm" onclick="editPost(${p.id})" title="Edit the text — the change goes live on Telegram">Edit</button>`
+        :`<button class="btn-o sm" onclick="previewPost(${p.id})" title="How it will look on Telegram — and edit it">Preview</button>
+          ${p.status==='draft'||p.status==='failed'?`<button class="btn-o sm" onclick="approvePost(${p.id})">Approve</button>`:''}
           ${p.status==='approved'||p.status==='scheduled'?`<button class="btn-o sm" onclick="schedulePost(${p.id})">Schedule</button>
-            <button class="btn-p sm" onclick="publishPost(${p.id})">Publish</button>`:''}
-          <button class="btn-o sm" onclick="deletePost(${p.id})">Delete</button>`}
+            <button class="btn-p sm" onclick="publishPost(${p.id})">Publish</button>`:''}`}
+      <button class="btn-o sm" onclick="deletePost(${p.id})" title="${p.status==='published'?'Removes it from the channel too':'Removes it from the queue'}">Delete</button>
     </td></tr>`;
 
   _postyKolejki=Object.fromEntries(posty.map(p=>[p.id,p]));
@@ -995,6 +1017,8 @@ function renderMailLog(){
       <div class="seg">${[['all','All'],['sent','Sent'],['failed','Failed']]
         .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._mailFilter='${f===k?'all':k}';renderMailLog()">${l}</button>`).join('')}</div>
       <span class="count-pill">${rows.length} of ${list.length}</span>
+      <button class="btn-p sm" onclick="openMailCompose()"
+        title="Write an e-mail to a client, a lead or any address — from the platform or from Forex Passing, with templates">Compose</button>
     </div>
     ${d.failed_7d?`<p class="lead-statline" style="color:var(--gold)">⚠ ${d.failed_7d} e-mail${d.failed_7d>1?'s':''} failed in the last 7 days — deliver the content another way (copy the portal-invite link, the pay link or the MT5 credentials from the account card), then check the SMTP settings.</p>`:''}
     ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.maillog">
@@ -1003,7 +1027,7 @@ function renderMailLog(){
         <td class="muted" data-l="Date" data-sort="${esc(m.ts||'')}">${dstr(m.ts)}</td>
         <td class="rt-main" data-l="To">${esc(m.to||'—')}</td>
         <td data-l="Subject">${esc(m.subject||'—')}</td>
-        <td class="muted" data-l="Template">${esc((m.event||'—').replace(/_/g,' '))}</td>
+        <td class="muted" data-l="Template">${m.event==='admin_message_fx'?'written · Forex Passing':m.event==='admin_message'?'written · platform':esc((m.event||'—').replace(/_/g,' '))}</td>
         <td data-l="Status"><span class="status ${m.ok?'paid':'failed'}"><span class="dot"></span>${m.ok?'sent':'failed'}</span>
           ${m.error?`<div class="muted" style="font-size:var(--fs-cap);max-width:260px;word-break:break-word">${esc(m.error)}</div>`:''}</td>
         <td class="rt-acts">${m.can_resend?`<button class="btn-o sm" onclick="resendMail(${m.id},this)"
@@ -1528,23 +1552,72 @@ async function sendLeadEmail(id){
    imię PRZED podglądem — admin zatwierdza dokładnie to, co wyjdzie. */
 const mailFill=(t,l)=>String(t||'')
   .replaceAll('{name}',String(l.name||'').trim().split(/\s+/)[0]||'there');
-async function openLeadMail(id){
-  const l=(window._leads||[]).find(x=>x.id===id)
-    ||(window._leadOpen&&window._leadOpen.id===id?window._leadOpen:null);
-  if(!l)return;
-  try{window._mailTpls=await api('/api/admin/email-templates')}
-  catch(e){window._mailTpls=[];toast('Templates: '+e.message,'err')}
-  document.getElementById('lead-mail-modal')?.remove();
+/* ===== JEDNO okno maila: Clients, Leads i zakladka Mail =====================
+   Do 2026-09 byly dwa okna o tych samych polach (klient: spod platformy, lead:
+   spod marki landingu) i zadnego wyboru nadawcy. Teraz jest jedno:
+   * odbiorca = klient (z karty), lead (z olowka) albo adres wpisany z reki
+     (przycisk Compose w zakladce Mail) — z podpowiedziami z listy klientow
+     i wyszukiwarki leadow;
+   * nadawca = Pro Traders Funding (adres platformy, zlota papeteria, jak
+     poswiadczenia MT5) albo Forex Passing (marka landingu, zielona papeteria,
+     Resend) — domyslnie ptf dla klienta, fx dla leada;
+   * szablony: wbudowane (w kodzie, per nadawca, nie do skasowania — „Save
+     template" robi kopie) plus zapisane przez dzial; lista przefiltrowana po
+     nadawcy, szablon z nadawca przestawia selektor.
+   Wysylka: klient -> /traders/{id}/email, lead -> /leads/{id}/email-custom,
+   adres -> /api/admin/mail/send (serwer dopasowuje klienta i leada po mailu,
+   zeby slad trafil do tej samej historii). {name} podmienia sie PRZED
+   podgladem — admin zatwierdza dokladnie to, co wyjdzie. */
+let _mailCtx=null;
+const SENDER_LABEL={ptf:'Pro Traders Funding · platform address',fx:'Forex Passing · partner desk'};
+function mailSubtitle(){
+  const from=$('lm-from')?$('lm-from').value:'ptf';
+  const to=_mailCtx&&(_mailCtx.email||'')||($('lm-to')?$('lm-to').value.trim():'');
+  return (to?`Goes to <b>${esc(to)}</b> `:'Goes to the address above ')
+    +(from==='fx'
+      ?'from <b>Forex Passing</b> — the green letterhead of the landing page, the brand they applied through.'
+      :'from the <b>platform address</b> — the same gold letterhead as their MT5 credentials.')
+    +' A paragraph that is just a link becomes a button, everything after a <b>--</b> line becomes the grey footer, and <b>{name}</b> becomes their first name.';
+}
+async function openMailComposer(ctx){
+  ctx=ctx||{};
+  const t=ctx.trader||null,l=ctx.lead||null;
+  _mailCtx={trader:t,lead:l,
+    email:(t&&t.email)||(l&&l.email)||(ctx.email||''),
+    name:(t&&(t.full_name||''))||(l&&(l.name||''))||''};
+  let tpls=[],senders={ptf:{ready:true,missing:[]},fx:{ready:false,missing:['?']}};
+  try{[tpls,senders]=await Promise.all([api('/api/admin/email-templates'),api('/api/admin/mail/senders')])}
+  catch(e){toast('Mail: '+e.message,'err')}
+  window._mailTpls=tpls||[];window._mailSenders=senders;
+  document.getElementById('mail-modal')?.remove();
+  const fixed=!!(t||l);
+  const from0=l?'fx':'ptf';
   const box=document.createElement('div');
-  box.id='lead-mail-modal';box.className='modal-wrap';
+  box.id='mail-modal';box.className='modal-wrap';
+  const senderOpt=k=>`<option value="${k}"${senders[k]&&senders[k].ready?'':' disabled'}${k===from0?' selected':''}>${SENDER_LABEL[k]}${
+    senders[k]&&senders[k].ready?'':' — not configured: '+esc((senders[k]&&senders[k].missing||[]).join(', '))}</option>`;
   box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
-    <div class="modal-head"><h3>E-mail to ${esc(l.name||l.email)}</h3>
-      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('lead-mail-modal').remove()">
+    <div class="modal-head"><h3>${fixed?'E-mail to '+esc(_mailCtx.name||_mailCtx.email):'New e-mail'}</h3>
+      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('mail-modal').remove()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
-    <p class="muted" style="font-size:12.5px;margin-bottom:14px">Goes to <b>${esc(l.email||'')}</b> on the brand letterhead.
-      A paragraph that is just a link becomes the green button, everything after a <b>--</b> line becomes the grey footer,
-      and <b>{name}</b> becomes their first name.</p>
+    ${t?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      ${t.awaiting_claim
+        ?`<button class="btn-o sm" onclick="clientMailQuick(${t.id},'invite')"
+            title="The “set your password” e-mail — a fresh link, valid 7 days">Send portal invite</button>
+          <button class="btn-o sm" onclick="copyPortalInvite(${t.id})"
+            title="Same link, into your clipboard — for Telegram when e-mail keeps missing">Copy invite link</button>`
+        :`<button class="btn-o sm" onclick="clientMailQuick(${t.id},'reset')"
+            title="Exactly what “Forgot password” sends them — a 1-hour link, straight to their inbox">Send password reset</button>`}
+    </div>`:''}
     <div class="stack">
+      <div><label class="muted" style="font-size:12px">To</label>
+        <input id="lm-to" class="inp" list="lm-to-list" autocomplete="off" placeholder="name@example.com"
+          value="${esc(_mailCtx.email)}" ${fixed?'readonly':''} oninput="mailToSuggest(this.value)" onchange="$('lm-sub').innerHTML=mailSubtitle()">
+        <datalist id="lm-to-list"></datalist></div>
+      <div><label class="muted" style="font-size:12px">From</label>
+        <select id="lm-from" class="inp" onchange="paintMailTpls($('lm-tpl').value);$('lm-sub').innerHTML=mailSubtitle()">
+          ${senderOpt('ptf')}${senderOpt('fx')}</select></div>
+      <p class="muted" id="lm-sub" style="font-size:12.5px;margin:0"></p>
       <div><label class="muted" style="font-size:12px">Template</label>
         <select id="lm-tpl" class="inp" onchange="fillMailTpl()"></select></div>
       <div><label class="muted" style="font-size:12px">Subject</label>
@@ -1554,40 +1627,97 @@ async function openLeadMail(id){
           placeholder="Hi {name},"></textarea></div>
       <div style="display:flex;gap:8px;align-items:center">
         <input id="lm-name" class="inp" style="flex:1;min-width:0" placeholder="Template name">
-        <button class="btn-o sm" type="button" onclick="saveMailTpl()">Save template</button>
+        <button class="btn-o sm" type="button" onclick="saveMailTpl()"
+          title="Saved for everyone using the panel, under the sender picked above. A built-in template is saved as your own copy.">Save template</button>
         <button class="btn-o sm" type="button" id="lm-del" onclick="delMailTpl()"
           style="display:none">Delete</button>
       </div>
-      <button class="btn-p lg" style="width:100%" id="lm-send" onclick="sendCustomLeadMail(${l.id})">Send</button>
+      <button class="btn-p lg" style="width:100%" id="lm-send" onclick="sendComposedMail()">Send</button>
     </div></div>`;
   box.onclick=()=>box.remove();
   document.body.appendChild(box);
+  /* Nadawca domyslny moze byc wylaczony (brak konfiguracji) — wtedy select
+     zostaje na pierwszej dostepnej opcji, a nie na wyszarzonej. */
+  const sel=$('lm-from');
+  if(sel.selectedOptions[0]&&sel.selectedOptions[0].disabled){
+    const ok=[...sel.options].find(o=>!o.disabled);if(ok)sel.value=ok.value;
+  }
+  $('lm-sub').innerHTML=mailSubtitle();
   paintMailTpls('');
-  $('lm-subject').focus();
+  (fixed?$('lm-subject'):$('lm-to')).focus();
+}
+/* Wrappery pod stare nazwy — wolaja je karty klienta i leada (i test panelu). */
+function openLeadMail(id){
+  const l=(window._leads||[]).find(x=>x.id===id)
+    ||(window._leadOpen&&window._leadOpen.id===id?window._leadOpen:null);
+  if(!l)return;
+  return openMailComposer({lead:l});
+}
+function openClientMail(id){
+  const t=(window._clients||[]).find(x=>x.id===id);
+  if(!t)return;
+  return openMailComposer({trader:t});
+}
+function openMailCompose(){return openMailComposer({})}
+/* Podpowiedzi adresu: klienci z pamieci (lista Clients, jesli byla otwarta)
+   plus leady z serwera od dwoch znakow. Datalist, nie wlasny dropdown — jedna
+   linia i dziala na telefonie. */
+let _mailToTimer=null;
+async function mailToSuggest(q){
+  q=(q||'').trim().toLowerCase();
+  const dl=$('lm-to-list');if(!dl)return;
+  const local=(window._clients||[]).filter(t=>fold(t.email).includes(fold(q))||fold(t.full_name).includes(fold(q))).slice(0,8)
+    .map(t=>({email:t.email,label:(t.full_name||'')+' · client'}));
+  const paint=list=>{dl.innerHTML=list.map(x=>`<option value="${esc(x.email)}">${esc(x.label)}</option>`).join('')};
+  paint(local);
+  clearTimeout(_mailToTimer);
+  if(q.length<2)return;
+  _mailToTimer=setTimeout(async()=>{
+    try{
+      const leads=await api('/api/admin/leads?q='+encodeURIComponent(q));
+      const seen=new Set(local.map(x=>x.email.toLowerCase()));
+      paint(local.concat(leads.filter(l=>!seen.has(String(l.email||'').toLowerCase())).slice(0,8)
+        .map(l=>({email:l.email,label:(l.name||'')+' · lead'+(l.source?' · '+l.source:'')}))));
+    }catch(e){}
+  },250);
 }
 function paintMailTpls(sel){
   const s=$('lm-tpl');if(!s)return;
+  const from=$('lm-from')?$('lm-from').value:'ptf';
+  const all=window._mailTpls||[];
+  const pasuje=t=>!t.sender||t.sender===from;
+  const opt=t=>`<option value="${esc(String(t.id))}">${esc(t.name)}</option>`;
+  const built=all.filter(t=>t.builtin&&pasuje(t)),saved=all.filter(t=>!t.builtin&&pasuje(t));
   s.innerHTML='<option value="">— start from scratch —</option>'
-    +(window._mailTpls||[]).map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('');
+    +(built.length?`<optgroup label="Built-in · ${from==='fx'?'Forex Passing':'Pro Traders Funding'}">${built.map(opt).join('')}</optgroup>`:'')
+    +(saved.length?`<optgroup label="Saved">${saved.map(opt).join('')}</optgroup>`:'');
   s.value=String(sel||'');
+  if(s.value!==String(sel||''))s.value='';
+  const cur=all.find(x=>String(x.id)===s.value);
   /* Nie atrybut `hidden`: reguła klasy .btn-o ustawia display i wygrywa z
      arkuszem przeglądarki, więc przycisk zostawał widoczny mimo atrybutu. */
-  $('lm-del').style.display=s.value?'':'none';
+  $('lm-del').style.display=cur&&!cur.builtin?'':'none';
 }
 function fillMailTpl(){
   const t=(window._mailTpls||[]).find(x=>String(x.id)===$('lm-tpl').value);
-  $('lm-del').style.display=t?'':'none';
+  $('lm-del').style.display=t&&!t.builtin?'':'none';
   if(!t)return;
-  $('lm-subject').value=t.subject;$('lm-body').value=t.body;$('lm-name').value=t.name;
+  /* Szablon z nadawca przestawia selektor — „Free account is ready" spod
+     platformy to inna wiadomosc niz spod marki, przez ktora czlowiek sie zglosil. */
+  if(t.sender&&$('lm-from').value!==t.sender){
+    const o=[...$('lm-from').options].find(o=>o.value===t.sender);
+    if(o&&!o.disabled){$('lm-from').value=t.sender;$('lm-sub').innerHTML=mailSubtitle();paintMailTpls(t.id)}
+  }
+  $('lm-subject').value=t.subject;$('lm-body').value=t.body;$('lm-name').value=t.builtin?t.name+' (copy)':t.name;
 }
 async function saveMailTpl(){
   const name=$('lm-name').value.trim(),subject=$('lm-subject').value.trim(),
-    body=$('lm-body').value.trim();
+    body=$('lm-body').value.trim(),sender=$('lm-from').value;
   if(!name){toast('Give the template a name.','err');$('lm-name').focus();return}
   if(!subject||!body){toast('Subject and message are both required.','err');return}
   try{
     const t=await api('/api/admin/email-templates',{method:'POST',
-      body:JSON.stringify({name,subject,body})});
+      body:JSON.stringify({name,subject,body,sender})});
     window._mailTpls=await api('/api/admin/email-templates');
     paintMailTpls(t.id);
     toast('Template saved.');
@@ -1595,7 +1725,7 @@ async function saveMailTpl(){
 }
 async function delMailTpl(){
   const t=(window._mailTpls||[]).find(x=>String(x.id)===$('lm-tpl').value);
-  if(!t)return;
+  if(!t||t.builtin)return;
   if(!await askConfirm({title:'Delete this template?',
     body:`<b>${esc(t.name)}</b> disappears for everyone using the panel. E-mails already sent stay in each lead's history.`,
     ok:'Delete',danger:true}))return;
@@ -1606,28 +1736,50 @@ async function delMailTpl(){
     toast('Template deleted.');
   }catch(e){toast('Error: '+e.message,'err')}
 }
-async function sendCustomLeadMail(id){
-  const l=(window._leads||[]).find(x=>x.id===id)
-    ||(window._leadOpen&&window._leadOpen.id===id?window._leadOpen:null);
-  if(!l)return;
-  const subject=mailFill($('lm-subject').value.trim(),l);
-  const body=mailFill($('lm-body').value.trim(),l);
+async function sendComposedMail(){
+  const c=_mailCtx||{};
+  const to=(c.email||$('lm-to').value||'').trim();
+  if(!to||!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)){toast('Enter a valid e-mail address.','err');$('lm-to').focus();return}
+  const sender=$('lm-from').value;
+  const who={name:c.name||''};
+  const subject=mailFill($('lm-subject').value.trim(),who);
+  const body=mailFill($('lm-body').value.trim(),who);
   if(!subject||!body){toast('Subject and message are both required.','err');return}
-  /* Ten sam podgląd co przy automacie: wysyłka jest nieodwracalna i wychodzi
-     pod cudzą marką, więc klikający widzi CAŁY tekst po podmianie {name}. */
-  const podglad=`Goes to <b>${esc(l.email||'')}</b>, subject <b>${esc(subject)}</b>:<br><br>`
-    +`<span style="color:var(--txt);white-space:pre-wrap">${esc(body)}</span>`;
-  if(!await askConfirm({title:'Send this e-mail?',body:podglad,ok:'Send',cancel:'Not yet'}))return;
+  /* Wysylka jest nieodwracalna i (przy fx) wychodzi pod cudza marka, wiec
+     klikajacy widzi CALY tekst po podmianie {name} i nadawce. */
+  if(!await askConfirm({title:'Send this e-mail?',
+    body:`Goes to <b>${esc(to)}</b> from <b>${esc(sender==='fx'?'Forex Passing':'the platform address')}</b>, subject <b>${esc(subject)}</b>:<br><br>`
+      +`<span style="color:var(--txt);white-space:pre-wrap">${esc(body)}</span>`,
+    ok:'Send',cancel:'Not yet'}))return;
   await busy($('lm-send'),'Sending…',async()=>{
     try{
-      await api('/api/admin/leads/'+id+'/email-custom',{method:'POST',
-        body:JSON.stringify({subject,body})});
-      document.getElementById('lead-mail-modal')?.remove();
+      const id=c.trader?c.trader.id:(c.lead?c.lead.id:null);
+      if(c.trader)await api('/api/admin/traders/'+id+'/email',{method:'POST',body:JSON.stringify({subject,body,sender})});
+      else if(c.lead)await api('/api/admin/leads/'+id+'/email-custom',{method:'POST',body:JSON.stringify({subject,body,sender})});
+      else await api('/api/admin/mail/send',{method:'POST',body:JSON.stringify({to,subject,body,sender})});
+      document.getElementById('mail-modal')?.remove();
       toast('E-mail sent.');
-      if(VIEW==='leads')await VIEWS.leads();
-      if(window._leadOpen&&window._leadOpen.id===id)openLead(id);
+      if(c.lead){if(VIEW==='leads')await VIEWS.leads();if(window._leadOpen&&window._leadOpen.id===id)openLead(id)}
+      if(VIEW==='mail')await VIEWS.mail();
     }catch(e){toast('Not sent: '+e.message,'err')}
   });
+}
+/* Stare nazwy, na wypadek wywolan z innych miejsc panelu. */
+const sendCustomLeadMail=()=>sendComposedMail();
+const sendClientMail=()=>sendComposedMail();
+async function clientMailQuick(id,kind){
+  const t=(window._clients||[]).find(x=>x.id===id);if(!t)return;
+  const invite=kind==='invite';
+  if(!await askConfirm({title:invite?'Send the portal invite?':'Send a password reset?',
+    body:`Goes to <b>${esc(t.email)}</b> — a link to `
+      +(invite?'set their portal password, valid for 7 days. Earlier links keep working until they expire or the password is set.'
+             :'choose a new portal password, valid for 1 hour. The link never passes through this panel.'),
+    ok:'Send',cancel:'Not now'}))return;
+  try{
+    await api('/api/admin/traders/'+id+(invite?'/portal-invite':'/password-reset'),{method:'POST'});
+    toast(invite?'Invite sent — the link works for 7 days':'Reset e-mail sent — the link works for 1 hour');
+    document.getElementById('mail-modal')?.remove();
+  }catch(e){toast('Not sent: '+e.message,'err')}
 }
 /* Same shape the landing validates against. A handle that fails it ("gubi
    please") renders as plain text: a dead t.me link looks like contact and
@@ -1674,9 +1826,9 @@ function leadPhoneActs(l){
         onclick="sendLeadSms(${l.id})">${ICO_SMS}</button>`:''}${l.mail_ready
     ?`<button class="act-btn" type="button" aria-label="Send the e-mail"
         title="E-mail them the Telegram link — the only channel that always has somewhere to go"
-        onclick="sendLeadEmail(${l.id})">${ICO_MAIL}</button>`:''}${l.mail_ready
+        onclick="sendLeadEmail(${l.id})">${ICO_MAIL}</button>`:''}${l.email
     ?`<button class="act-btn" type="button" aria-label="Write an e-mail"
-        title="Write your own e-mail — subject and text are yours, templates included"
+        title="Write your own e-mail — from Forex Passing or the platform, templates included"
         onclick="openLeadMail(${l.id})">${ICO_PEN}</button>`:''}
     <button class="act-btn" type="button" title="Copy the opener"
       aria-label="Copy the opener" onclick="copyOpener(${l.id})">${ICO_COPY}</button></span>`;
@@ -3098,8 +3250,11 @@ function renderActivity(){
   const f=window._jrnFilter||'all';
   const q=(window._jrnQ||'').toLowerCase();
   const test=(JRN_FILTERS.find(x=>x[0]===f)||JRN_FILTERS[0])[2];
-  const rows=all.filter(t=>test(t)&&(!q||[t.email,t.full_name]
+  /* Ten sam checkbox i ten sam werdykt co w Clients (`origin` z backendu) —
+     odznaczony chowa tych samych ludzi z tego samego powodu. */
+  const rows=all.filter(t=>test(t)&&(FREE_SHOWN||!isFreeOrigin(t))&&(!q||[t.email,t.full_name]
     .some(x=>String(x||'').toLowerCase().includes(q))));
+  const ukryci=FREE_SHOWN?0:all.filter(isFreeOrigin).length;
   const chip=t=>t.awaiting_claim
     ?'<span class="status pending"><span class="dot"></span>awaiting claim</span>'
     :(t.claimed_at?'<span class="status passed"><span class="dot"></span>claimed</span>'
@@ -3113,12 +3268,14 @@ function renderActivity(){
       <div class="seg">${JRN_FILTERS.map(([k,l])=>
         `<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''}
           onclick="window._jrnFilter='${f===k?'all':k}';renderActivity()">${l}</button>`).join('')}</div>
-      <span class="count-pill">${rows.length} of ${all.length}${impPill()}</span>
+      ${freeCheckbox()}
+      <span class="count-pill">${rows.length} of ${all.length}${
+        ukryci?` · <span class="muted">${ukryci} free hidden</span>`:''}${impPill()}</span>
     </div>`
     +(rows.length?`<div class="tbl-wrap rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.activity">
       <thead><tr><th>Client</th><th>Claim</th><th>Last sign-in</th><th>7 days</th><th>Last seen</th><th>Accounts</th><th>KYC</th></tr></thead>
       <tbody>${rows.map(t=>`<tr class="clickable" onclick="openTraderJournal(${t.id},'${jsq(t.email||'')}')">
-        <td class="rt-main" data-l="Client">${esc(t.full_name||'—')}<div class="muted" style="font-size:11.5px">${esc(t.email)}</div></td>
+        <td class="rt-main" data-l="Client">${esc(t.full_name||'—')}<div class="muted" style="font-size:11.5px">${esc(t.email)}${freeChip(t)}</div></td>
         <td data-l="Claim" data-sort="${t.awaiting_claim?0:(t.claimed_at?2:1)}">${chip(t)}</td>
         <td data-l="Last sign-in" data-sort="${esc(t.last_login_at||'')}">${login(t)}</td>
         <td class="muted" data-l="7 days" data-sort="${t.logins_7d}">${t.logins_7d?t.logins_7d+'×':'—'}</td>
@@ -3150,19 +3307,16 @@ function renderClients(){
   /* Desk liczy backend z leada dopasowanego po mailu — patrz /api/admin/traders.
      Klient bez leada (rejestracja wprost z portalu) nie ma desku i zostaje na
      liście niezależnie od checkboxa: nie przyszedł z darmowego lejka. */
-  const rows=all.filter(t=>test(t)&&(FREE_SHOWN||t.desk!=='free')&&
+  const rows=all.filter(t=>test(t)&&(FREE_SHOWN||!isFreeOrigin(t))&&
     (!q||fold(t.email).includes(qf)||fold(t.full_name).includes(qf)));
-  const ukryci=FREE_SHOWN?0:all.filter(t=>t.desk==='free').length;
+  const ukryci=FREE_SHOWN?0:all.filter(isFreeOrigin).length;
   const cap=capList(rows,'_cliAll','renderClients');
   $('view').innerHTML=`<div class="toolbar">
       ${searchBox('cli-q','_cliQ','renderClients','Search name or email…')}
       <div class="seg">${CLI_FILTERS.map(([k,l])=>
         `<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''}
           onclick="window._cliFilter='${f===k?'all':k}';renderClients()">${l}</button>`).join('')}</div>
-      <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;user-select:none"
-        title="Clients who came through the free funnel — the one that posts to the LEADS NIGERIA channel. Unticking hides them.">
-        <input type="checkbox" ${FREE_SHOWN?'checked':''} onchange="toggleFree(this.checked)"
-          style="width:15px;height:15px;accent-color:var(--acc)">Free</label>
+      ${freeCheckbox()}
       <span class="count-pill">${rows.length} of ${all.length}${
         ukryci?` · <span class="muted">${ukryci} free hidden</span>`:''}${impPill()}</span>
     </div>`
@@ -3173,8 +3327,7 @@ function renderClients(){
         <td class="muted" data-l="Joined" data-sort="${esc(t.created_at||'')}">${t.created_at?dstr(t.created_at):'—'}</td>
         <td class="rt-main" data-l="Client">${esc(t.full_name||'—')}
           ${t.awaiting_claim?'<span class="status pending" style="margin-left:6px"><span class="dot"></span>awaiting claim</span>':''}
-          <div class="muted" style="font-size:11.5px">${esc(t.email)}${
-            t.desk==='free'?' · <span class="chip">Free</span>':''}</div>
+          <div class="muted" style="font-size:11.5px">${esc(t.email)}${freeChip(t)}</div>
           ${t.referred_count?`<div class="muted" style="font-size:var(--fs-cap)" title="Traders who signed up with this client's referral code">brought ${t.referred_count}</div>`:''}</td>
         <td class="muted" data-l="Accounts" data-sort="${t.accounts}">${t.accounts||'—'}</td>
         <td data-l="KYC">${t.kyc_status&&t.kyc_status!=='none'
@@ -3194,96 +3347,6 @@ function renderClients(){
     :`<div class="empty"><h3>${q||f!=='all'?'No clients match':'No clients yet'}</h3><p>${
       q||f!=='all'?'Clear the search or pick another filter.'
         :'Everyone who signs up — on their own or through an order — shows up here.'}</p></div>`);
-}
-
-/* Mail do KLIENTA pisany z reki, plus jednym klikiem to, co i tak wysyla
-   automat. Do tej pory z panelu szly do klienta wylacznie automaty, wiec
-   „nie moge znalezc linku do hasla" konczylo sie prywatna skrzynka wlasciciela
-   — poza dziennikiem wysylek i poza historia klienta. Okno laczy oba: u gory
-   gotowce (zaproszenie / reset), nizej wlasny tekst na firmowym papierze.
-   Szablony i pola sa te same, co przy mailu do leada (`lm-*`), bo naraz otwarte
-   jest tylko jedno okno — dzieki temu zapis i kasowanie szablonu dziala tu bez
-   drugiej kopii tych funkcji. */
-async function openClientMail(id){
-  const t=(window._clients||[]).find(x=>x.id===id);
-  if(!t)return;
-  try{window._mailTpls=await api('/api/admin/email-templates')}
-  catch(e){window._mailTpls=[];toast('Templates: '+e.message,'err')}
-  document.getElementById('client-mail-modal')?.remove();
-  const box=document.createElement('div');
-  box.id='client-mail-modal';box.className='modal-wrap';
-  box.innerHTML=`<div class="modal" onclick="event.stopPropagation()">
-    <div class="modal-head"><h3>E-mail to ${esc(t.full_name||t.email)}</h3>
-      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('client-mail-modal').remove()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
-    <p class="muted" style="font-size:12.5px;margin-bottom:12px">Goes to <b>${esc(t.email)}</b>
-      from the platform address, on the same letterhead as their MT5 credentials.</p>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
-      ${t.awaiting_claim
-        ?`<button class="btn-o sm" onclick="clientMailQuick(${t.id},'invite')"
-            title="The “set your password” e-mail — a fresh link, valid 7 days">Send portal invite</button>
-          <button class="btn-o sm" onclick="copyPortalInvite(${t.id})"
-            title="Same link, into your clipboard — for Telegram when e-mail keeps missing">Copy invite link</button>`
-        :`<button class="btn-o sm" onclick="clientMailQuick(${t.id},'reset')"
-            title="Exactly what “Forgot password” sends them — a 1-hour link, straight to their inbox">Send password reset</button>`}
-    </div>
-    <div class="stack">
-      <div><label class="muted" style="font-size:12px">Template</label>
-        <select id="lm-tpl" class="inp" onchange="fillMailTpl()"></select></div>
-      <div><label class="muted" style="font-size:12px">Subject</label>
-        <input id="lm-subject" class="inp" placeholder="Subject"></div>
-      <div><label class="muted" style="font-size:12px">Message</label>
-        <textarea id="lm-body" class="inp" rows="10" spellcheck="false"
-          placeholder="Hi {name},"></textarea>
-        <p class="muted" style="font-size:var(--fs-cap);margin-top:6px">A paragraph that is
-          just a link turns into a button, and <b>{name}</b> becomes their first name.</p></div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input id="lm-name" class="inp" style="flex:1;min-width:0" placeholder="Template name">
-        <button class="btn-o sm" type="button" onclick="saveMailTpl()">Save template</button>
-        <button class="btn-o sm" type="button" id="lm-del" onclick="delMailTpl()"
-          style="display:none">Delete</button>
-      </div>
-      <button class="btn-p lg" style="width:100%" id="lm-send" onclick="sendClientMail(${t.id})">Send</button>
-    </div></div>`;
-  box.onclick=()=>box.remove();
-  document.body.appendChild(box);
-  paintMailTpls('');
-  $('lm-subject').focus();
-}
-async function clientMailQuick(id,kind){
-  const t=(window._clients||[]).find(x=>x.id===id);if(!t)return;
-  const invite=kind==='invite';
-  if(!await askConfirm({title:invite?'Send the portal invite?':'Send a password reset?',
-    body:`Goes to <b>${esc(t.email)}</b> — a link to `
-      +(invite?'set their portal password, valid for 7 days. Earlier links keep working until they expire or the password is set.'
-             :'choose a new portal password, valid for 1 hour. The link never passes through this panel.'),
-    ok:'Send',cancel:'Not now'}))return;
-  try{
-    await api('/api/admin/traders/'+id+(invite?'/portal-invite':'/password-reset'),{method:'POST'});
-    toast(invite?'Invite sent — the link works for 7 days':'Reset e-mail sent — the link works for 1 hour');
-    document.getElementById('client-mail-modal')?.remove();
-  }catch(e){toast('Not sent: '+e.message,'err')}
-}
-async function sendClientMail(id){
-  const t=(window._clients||[]).find(x=>x.id===id);if(!t)return;
-  const who={name:t.full_name||''};
-  const subject=mailFill($('lm-subject').value.trim(),who);
-  const body=mailFill($('lm-body').value.trim(),who);
-  if(!subject||!body){toast('Subject and message are both required.','err');return}
-  /* Ten sam podglad co przy mailu do leada: wysylka jest nieodwracalna,
-     wiec klikajacy widzi CALY tekst juz po podmianie {name}. */
-  if(!await askConfirm({title:'Send this e-mail?',
-    body:`Goes to <b>${esc(t.email)}</b>, subject <b>${esc(subject)}</b>:<br><br>`
-      +`<span style="color:var(--txt);white-space:pre-wrap">${esc(body)}</span>`,
-    ok:'Send',cancel:'Not yet'}))return;
-  await busy($('lm-send'),'Sending…',async()=>{
-    try{
-      await api('/api/admin/traders/'+id+'/email',{method:'POST',
-        body:JSON.stringify({subject,body})});
-      document.getElementById('client-mail-modal')?.remove();
-      toast('E-mail sent.');
-    }catch(e){toast('Not sent: '+e.message,'err')}
-  });
 }
 
 /* ---------- achievement certificates ---------- */
@@ -4221,11 +4284,29 @@ async function schedulePost(id){
   }catch(e){toast('Not scheduled — '+e.message,'err')}
 }
 async function deletePost(id){
-  if(!await askConfirm({title:'Delete this post?',body:'It has not been published.',ok:'Delete'}))return;
+  const p=_postyKolejki[id]||{};
+  const wyszedl=p.status==='published';
+  if(!await askConfirm({title:'Delete this post?',
+    body:wyszedl?'It is <b>published</b> — this removes it from the Telegram channel as well, for everyone. Views and reactions go with it.'
+                :'It has not been published — it just leaves the queue.',
+    ok:'Delete',danger:true}))return;
   try{
     await api(`/api/admin/channel-posts/${id}`,{method:'DELETE'});
+    toast(wyszedl?'Removed from the channel and the queue.':'Removed from the queue.');
     go('telegram');
-  }catch(e){toast('Error: '+e.message,'err')}
+  }catch(e){
+    /* Telegram odmówił (bot bez uprawnień, wiadomość już skasowana ręcznie):
+       wiersz został. Drugie pytanie kasuje SAM wiersz — świadomie. */
+    if(wyszedl&&/Telegram refused/i.test(e.message)){
+      if(!await askConfirm({title:'Telegram would not delete it',
+        body:esc(e.message)+'<br><br>Delete only the queue entry? The post stays on the channel unless you remove it there.',
+        ok:'Delete the entry only',danger:true}))return;
+      try{await api(`/api/admin/channel-posts/${id}?force=1`,{method:'DELETE'});toast('Queue entry removed.');go('telegram')}
+      catch(e2){toast('Error: '+e2.message,'err')}
+      return;
+    }
+    toast('Error: '+e.message,'err');
+  }
 }
 /* ---------- podgląd posta jak na Telegramie + edycja w tym samym oknie ---------- */
 /* Kopia robocza siedzi w `_tgp`, a nie w polach formularza: makieta, licznik
@@ -4235,20 +4316,41 @@ async function deletePost(id){
 let _postyKolejki={},_tytulyKanalow={},_tgp=null;
 const TGP_KANALY={mgmt:'Account Management',payouts:'Payouts',trackrecord:'Track Record'};
 
+/* „Preview" opublikowanego posta prowadzi DO POSTA — na kanał, nie do makiety.
+   Makieta ma sens, dopóki post nie wyszedł; potem prawdą jest to, co wisi na
+   Telegramie, i tam ma trafić klikający. Kanał prywatny dostaje link
+   t.me/c/… (backend `telegram.post_url`); bez linku zostaje komunikat. */
 function previewPost(id){
+  const p=_postyKolejki[id];
+  if(!p){toast('This post is no longer in the queue — refresh the tab.','err');return}
+  if(p.status==='published'){
+    if(p.post_url)window.open(p.post_url,'_blank','noopener');
+    else toast('No link to this post — the channel has no username and no message id was stored. Use Edit to see the text.','err',8000);
+    return;
+  }
+  editPost(id);
+}
+/* Edycja w oknie bocznym. Post nieopublikowany: tekst i grafika, zapis cofa do
+   szkicu (i ponownie zatwierdza, jeśli był zatwierdzony). Post OPUBLIKOWANY:
+   sam tekst — zapis idzie na Telegram (`editMessageText`/`Caption`) i dopiero
+   po jego zgodzie do bazy; grafiki tą drogą Telegram nie podmienia. */
+function editPost(id){
   const p=_postyKolejki[id];
   if(!p){toast('This post is no longer in the queue — refresh the tab.','err');return}
   _tgp={...p,media_url:p.media_url||'',_wymiary:'',
         _oryginal:{kind:p.kind,media_url:p.media_url||''}};
-  const edycja=p.status!=='published';
-  openOver('Preview on Telegram',`
+  const wyszedl=p.status==='published';
+  openOver(wyszedl?'Edit the published post':'Preview on Telegram',`
     <div id="tgp-live"></div>
     <div id="tgp-stan" style="margin-top:10px"></div>
-    ${edycja?`<div class="tgp-edit">
+    <div class="tgp-edit">
       <label class="muted" for="tgp-body">Text · Telegram HTML only: &lt;b&gt; &lt;i&gt; &lt;u&gt; &lt;s&gt;
         &lt;a href&gt; &lt;code&gt; &lt;blockquote&gt;</label>
       <textarea id="tgp-body" class="inp" rows="10" oninput="_tgp.body=this.value;tgpOdswiez()"></textarea>
-      <label class="muted">Graphic</label>
+      ${wyszedl?`<p class="tgp-hint">Published${p.post_url?' — <a href="'+esc(p.post_url)+'" target="_blank" rel="noopener">open on Telegram</a>':''}.
+        Saving rewrites the text on the channel in place (views and reactions stay). The graphic
+        cannot be swapped on a published post — delete and post again for that.</p>`
+      :`<label class="muted">Graphic</label>
       <div class="tgp-media-row">
         <span id="tgp-media-lbl" class="tgp-media-lbl"></span>
         <label class="btn-o sm tgp-file">Upload image<input type="file"
@@ -4259,19 +4361,18 @@ function previewPost(id){
       <p class="tgp-hint">PNG or JPG, up to 5 MB. Our own graphics (payout certificates) are
         <b>1320 × 1320 px</b>, square — upload that size and the channel stays consistent.
         Portrait up to 4:5 (1080 × 1350) also shows in full; the preview follows the file's
-        proportions.</p>
+        proportions.</p>`}
       <div style="display:flex;gap:8px;margin-top:6px">
         <button class="btn-o lg" style="flex:1" onclick="closeOver()">Cancel</button>
-        <button class="btn-p lg" style="flex:1" id="tgp-zapisz" onclick="tgpZapisz()">Save</button>
+        <button class="btn-p lg" style="flex:1" id="tgp-zapisz" onclick="tgpZapisz()">${wyszedl?'Save to Telegram':'Save'}</button>
       </div>
-      <p class="tgp-hint">${p.status==='approved'||p.status==='scheduled'
+      ${wyszedl?'':`<p class="tgp-hint">${p.status==='approved'||p.status==='scheduled'
         ?'Saving re-runs the approval checks, so the post keeps its place'
           +(p.scheduled_for?' and its time ('+esc(dstr(p.scheduled_for))+')':'')
           +' — or tells you why it cannot.'
-        :'This post is a draft: saving keeps it a draft until you approve it.'}</p>
-    </div>`:`<p class="tgp-hint">Already published — this is how it went out. Published posts
-      cannot be edited.</p>`}`);
-  if(edycja)$('tgp-body').value=p.body||'';
+        :'This post is a draft: saving keeps it a draft until you approve it.'}</p>`}
+    </div>`);
+  $('tgp-body').value=p.body||'';
   tgpOdswiez();
 }
 
@@ -4350,6 +4451,10 @@ async function tgpZapisz(){
     await api(`/api/admin/channel-posts/${p.id}`,{method:'PATCH',body:JSON.stringify({
       channel:p.channel,kind:p.kind,body,media_url:p.media_url||null,
       proof:p.proof||'',scheduled_for:p.scheduled_for||null})});
+    if(p.status==='published'){
+      toast('Text updated on Telegram.');
+      closeOver();go('telegram');return;
+    }
     if(bylZatwierdzony){
       try{
         await api(`/api/admin/channel-posts/${p.id}/approve`,{method:'POST'});

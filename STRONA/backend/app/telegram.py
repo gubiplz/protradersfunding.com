@@ -219,14 +219,59 @@ def send_content(chat_id: str, text: str, *, png: bytes | None = None,
 
 
 def post_url(dane: dict) -> str:
-    """Publiczny link do wiadomości z odpowiedzi Telegrama (albo pusty).
+    """Link do wiadomości z odpowiedzi Telegrama (albo pusty).
 
-    Kanał prywatny nie ma `username`, więc nie ma też publicznego linku —
-    i nie ma czego podbijać."""
+    Kanał publiczny: `t.me/<username>/<id>`. Kanał prywatny nie ma `username`,
+    ale ma link dla członków: `t.me/c/<id czatu bez -100>/<id wiadomości>` —
+    otwiera post każdemu, kto na kanale jest, czyli całemu działowi. Do 2026-09
+    prywatny kanał dostawał pusty link i „Preview" w panelu nie miało dokąd
+    prowadzić. Publiczny link zostaje pierwszy, bo tylko on nadaje się do
+    podbijania zasięgu (`reach`)."""
     czat = (dane or {}).get("chat") or {}
     nazwa = czat.get("username")
     mid = (dane or {}).get("message_id")
-    return f"https://t.me/{nazwa}/{mid}" if nazwa and mid else ""
+    if not mid:
+        return ""
+    if nazwa:
+        return f"https://t.me/{nazwa}/{mid}"
+    cid = str(czat.get("id") or "")
+    if cid.startswith("-100") and cid[4:].isdigit():
+        return f"https://t.me/c/{cid[4:]}/{mid}"
+    return ""
+
+
+def edit_content(chat_id: str, message_id: int, text: str, *, kind: str = "text",
+                 token: str | None = None, transport=None) -> tuple[bool, str]:
+    """Przepisuje OPUBLIKOWANY post na kanale — tekst albo podpis pod grafiką.
+
+    Telegram ma dwie metody, bo to dwa różne pola: `editMessageText` dla
+    wiadomości tekstowej, `editMessageCaption` dla zdjęcia i klipu. Pomylenie
+    ich kończy się „message can't be edited" bez słowa o powodzie. Samej
+    grafiki nie da się podmienić tą drogą (`editMessageMedia` wymaga pliku
+    pod adresem) — panel mówi to wprost i nie próbuje."""
+    token = token or bot_token_czatu(chat_id)
+    if not token or not chat_id or not message_id:
+        return False, "no bot token, chat or message"
+    if kind in ("photo", "video"):
+        pola = {"chat_id": str(chat_id), "message_id": str(message_id),
+                "caption": text[:1024], "parse_mode": "HTML"}
+        return _strzal("editMessageCaption", pola, None, transport, token)
+    pola = {"chat_id": str(chat_id), "message_id": str(message_id),
+            "text": text[:4096], "parse_mode": "HTML",
+            "disable_web_page_preview": "true"}
+    return _strzal("editMessageText", pola, None, transport, token)
+
+
+def delete_content(chat_id: str, message_id: int, *, token: str | None = None,
+                   transport=None) -> tuple[bool, str]:
+    """Kasuje opublikowany post z kanału. Bot-administrator kanału może to
+    zrobić bez limitu czasu (48 h dotyczy czatów prywatnych)."""
+    token = token or bot_token_czatu(chat_id)
+    if not token or not chat_id or not message_id:
+        return False, "no bot token, chat or message"
+    return _strzal("deleteMessage",
+                   {"chat_id": str(chat_id), "message_id": str(message_id)},
+                   None, transport, token)
 
 
 _BOT_USERNAME: dict[str, str] = {}

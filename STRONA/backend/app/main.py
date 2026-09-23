@@ -42,7 +42,7 @@ from sqlalchemy.exc import IntegrityError
 
 from . import (achievements, auth, billing, catalog, certshot, contentbot, countries,
                fields, loyalty,
-               lead_mail, metaquotes_web, notify, offers,
+               lead_mail, mail_templates, metaquotes_web, notify, offers, origin,
                payout_import, payoutbot, reach, statements,
                poller, provisioning, push, rules, sms, telegram, telemetry, tradebot)
 from .config import get_settings
@@ -786,6 +786,18 @@ def _rate_limit(request: Request, bucket: str, limit: int, window: int = 60) -> 
             _RL_HITS.pop(k, None)
 
 
+def _kraj_z_ip(request: Request) -> str | None:
+    """ISO2 kraju z nagłówka, który Vercel dokleja do każdego requestu.
+
+    Bez geoip i bez zewnętrznych wywołań: `x-vercel-ip-country` jest darmowy
+    i zawsze obecny na produkcji, a lokalnie i w testach go nie ma — wtedy
+    wynik to None i nic się nie psuje. „XX" (nieznany) i śmieci też dają None,
+    żeby kolumna trzymała wyłącznie kody, które `countries` rozpozna.
+    """
+    kod = (request.headers.get("x-vercel-ip-country") or "").strip().upper()
+    return kod if len(kod) == 2 and kod.isalpha() and kod != "XX" else None
+
+
 def _ustaw_ciasteczko_sesji(response: Response, token: str) -> None:
     """Zapisuje sesje w ciasteczku, zeby SERWER mogl bramkowac strone /admin.
 
@@ -1046,6 +1058,7 @@ def signup(payload: SignupIn, request: Request, response: Response):
             referred_by=referred_by,
             email_verified=False, email_verify_code=f"{secrets.randbelow(1_000_000):06d}",
             terms_accepted_at=datetime.now(timezone.utc),
+            signup_country=_kraj_z_ip(request), last_login_country=_kraj_z_ip(request),
         )
         session.add(tr)
         session.commit()
@@ -1068,6 +1081,12 @@ def login(payload: LoginIn, request: Request, response: Response):
         tr = session.query(Trader).filter(Trader.email == payload.email.strip().lower()).first()
         if not tr or not auth.verify_password(payload.password, tr.password_hash):
             raise HTTPException(401, "Wrong e-mail or password")
+        # Kraj z IP przy KAŻDYM logowaniu: konto założone za klienta przez
+        # panel nie ma `signup_country` i to jest jego pierwszy sygnał geo.
+        kraj = _kraj_z_ip(request)
+        if kraj:
+            tr.last_login_country = kraj
+            session.commit()
         telemetry.track("login", tr.id)
         token = auth.make_token(tr.id, tr.password_hash)
         _ustaw_ciasteczko_sesji(response, token)
@@ -1162,8 +1181,12 @@ def google_login(payload: GoogleAuthIn, request: Request, response: Response):
                 email_verified=False,
                 # Klauzula pod przyciskiem: kontynuacja przez Google = zgoda.
                 terms_accepted_at=datetime.now(timezone.utc),
+                signup_country=_kraj_z_ip(request),
             )
             session.add(tr)
+        kraj = _kraj_z_ip(request)
+        if kraj:
+            tr.last_login_country = kraj
         # Google ręczy za adres — potwierdzenie + mail powitalny idą wspólną
         # ścieżką weryfikacji (idempotentne: zweryfikowani nic nie dostają,
         # więc zwykłe logowanie Google nie spamuje welcome'em).
@@ -3835,20 +3858,13 @@ def admin_traders(q: str | None = None, imported: int = 0):
         # wszystkich, jak liczniki wyżej. Kto zapisał się z portalu sam, nie ma
         # żadnego leada i zostaje bez desku; to poprawna odpowiedź, nie brak
         # danych.
-        deski: dict[str, str] = {}
-        for mail, source in session.query(Lead.email, Lead.source).all():
-            klucz = (mail or "").strip().lower()
-            if not klucz:
-                continue
-            desk = _desk_leada(source)
-            # `leads.email` jest UNIQUE, więc jedna osoba ma JEDEN wiersz —
-            # ale ograniczenie rozróżnia wielkość liter, a to dopasowanie już
-            # nie. To jedyny sposób na remis i rozstrzyga go darmowy lejek, bo
-            # filtr odpowiada na pytanie „kto przyszedł z darmowego".
-            if desk == "free" or klucz not in deski:
-                deski[klucz] = desk
+        # `desk` zostaje jak dotąd (lejek), a obok idzie `origin` — werdykt
+        # z WSZYSTKICH sygnałów (grant, kraj z IP/numeru/KYC). Reguła i jej
+        # powody siedzą w `origin.py`; tu tylko trzy zapytania na całą listę.
+        pochodzenia = origin.mapa_pochodzenia(session, rows)
         return [{"id": t.id, "email": t.email, "full_name": t.full_name,
-                 "desk": deski.get((t.email or "").strip().lower()),
+                 "desk": pochodzenia[t.id].desk,
+                 "origin": pochodzenia[t.id].json(),
                  "kyc_status": t.kyc_status, "accounts": counts.get(t.id, 0),
                  "credits_usd": round(float(t.credits_usd or 0), 2),
                  "referred_count": poleceni.get(t.referral_code, 0),
@@ -4106,10 +4122,16 @@ def admin_journal_overview(imported: int = 0):
         klienci = session.query(Trader).filter(Trader.is_admin.is_(False))
         if not imported:
             klienci = klienci.filter(_nie_import())
-        for tr in klienci.all():
+        lista = klienci.all()
+        # To samo `origin` co w Clients — checkbox „Free" w obu zakładkach
+        # ma chować tych samych ludzi z tego samego powodu.
+        pochodzenia = origin.mapa_pochodzenia(session, lista)
+        for tr in lista:
             login = logowania.get(tr.id)
             wiersze.append({
                 "id": tr.id, "email": tr.email, "full_name": tr.full_name,
+                "desk": pochodzenia[tr.id].desk,
+                "origin": pochodzenia[tr.id].json(),
                 "created_at": iso(tr.created_at),
                 "kyc_status": tr.kyc_status,
                 "awaiting_claim": bool(tr.must_set_password),
@@ -6142,14 +6164,38 @@ def admin_channel_post_create(payload: ChannelPostIn):
 
 @app.patch("/api/admin/channel-posts/{post_id}", dependencies=[Depends(auth.require_admin)])
 def admin_channel_post_edit(post_id: int, payload: ChannelPostIn):
-    """Edycja cofa post do szkicu — zmieniona treść nie jest już tą zatwierdzoną."""
+    """Edycja cofa post do szkicu — zmieniona treść nie jest już tą zatwierdzoną.
+
+    Post OPUBLIKOWANY to inny przypadek: nie ma czego cofać do szkicu, bo
+    wiadomość już wisi na kanale. Edycja idzie wtedy PROSTO na Telegram
+    (`editMessageText` / `editMessageCaption`) i dopiero po jego zgodzie do
+    bazy — inaczej panel pokazywałby treść, której na kanale nie ma. Zmiana
+    kanału, rodzaju czy grafiki opublikowanego posta to 409 z powodem: tego
+    Telegram tą drogą nie robi, a udawanie, że zrobił, byłoby gorsze.
+    """
     session = SessionLocal()
     try:
         p = session.get(ChannelPost, post_id)
         if not p:
             raise HTTPException(404, "Post not found")
         if p.status == "published":
-            raise HTTPException(409, "This post is already published")
+            if payload.channel != p.channel or payload.kind != p.kind \
+                    or (payload.media_url or None) != (p.media_url or None):
+                raise HTTPException(409, "A published post can only have its text "
+                                         "edited — channel, kind and graphic stay")
+            tekst = payload.body or ""
+            if tekst.strip() != (p.body or "").strip():
+                if not p.message_id:
+                    raise HTTPException(409, "This post has no Telegram message id "
+                                             "— it cannot be edited from here")
+                ok, powod = telegram.edit_content(contentbot.chat_id(p.channel),
+                                                  p.message_id, tekst, kind=p.kind)
+                if not ok:
+                    raise HTTPException(502, f"Telegram refused the edit: {powod}")
+                p.body = tekst
+                p.updated_at = datetime.now(timezone.utc)
+                session.commit()
+            return _post_dict(p)
         p.channel, p.kind = payload.channel, payload.kind
         p.body = payload.body or ""
         p.media_url = payload.media_url or None
@@ -6170,15 +6216,30 @@ def admin_channel_post_edit(post_id: int, payload: ChannelPostIn):
 
 
 @app.delete("/api/admin/channel-posts/{post_id}", dependencies=[Depends(auth.require_admin)])
-def admin_channel_post_delete(post_id: int):
+def admin_channel_post_delete(post_id: int, force: int = 0):
+    """Kasuje post z kolejki — a OPUBLIKOWANY także z kanału.
+
+    Do 2026-09 usunięcie opublikowanego posta znikało z panelu, a wiadomość
+    wisiała na kanale dalej: panel kłamał, że jej nie ma. Teraz najpierw
+    `deleteMessage`, potem wiersz. Odmowa Telegrama zostawia wiersz i wraca
+    jako 502 z powodem; `?force=1` kasuje sam wiersz mimo odmowy — dla posta,
+    który z kanału zniknął już inną drogą (ręcznie, z telefonu).
+    """
     session = SessionLocal()
     try:
         p = session.get(ChannelPost, post_id)
         if not p:
             raise HTTPException(404, "Post not found")
+        z_kanalu = False
+        if p.status == "published" and p.message_id and not force:
+            ok, powod = telegram.delete_content(contentbot.chat_id(p.channel), p.message_id)
+            if not ok:
+                raise HTTPException(502, f"Telegram refused to delete the post: {powod}. "
+                                         "Remove it on Telegram first, or delete only the queue entry.")
+            z_kanalu = True
         session.delete(p)
         session.commit()
-        return {"ok": True, "id": post_id}
+        return {"ok": True, "id": post_id, "removed_from_channel": z_kanalu}
     finally:
         session.close()
 
@@ -6196,6 +6257,10 @@ def admin_channel_post_approve(post_id: int):
         p = session.get(ChannelPost, post_id)
         if not p:
             raise HTTPException(404, "Post not found")
+        if p.status == "published":
+            # Zatwierdzenie opublikowanego cofałoby go do „scheduled" i cron
+            # wysłałby go DRUGI raz.
+            raise HTTPException(409, "This post is already published")
         try:
             contentbot.waliduj(session, p)
         except contentbot.NieprawdziwyPost as e:
@@ -8264,6 +8329,11 @@ def stats():
                 # zepsuta funkcja.
                 "lead_sms_missing": sms.czego_brakuje(),
                 "lead_mail_missing": lead_mail.czego_brakuje(),
+                # Nadawca „Forex Passing" w oknie maila: potrzebuje mniej niż
+                # automat (bez URL-i Telegrama), więc ma własny wskaźnik — bez
+                # niego panel gasiłby opcję z powodu zmiennej, której nie użyje.
+                "fx_sender_ready": lead_mail.nadawca_gotowy(),
+                "fx_sender_missing": lead_mail.czego_brakuje_nadawcy(),
                 # Kanał do klienta (poświadczenia MT5, reset hasła, wypłaty) nie
                 # ma przycisku, który mógłby się schować — bez tej listy jego brak
                 # nie objawia się NICZYM aż do zgłoszenia „nie dostałem maila".
@@ -8406,6 +8476,9 @@ class LeadIn(BaseModel):
     phoneIso: str | None = None
     telegram: str | None = None
     country: str | None = None
+    # Kraj z IP zgłoszenia (`cf-ipcountry` na landingu). Osobno od `phoneIso`,
+    # bo tamto jest zgadywane ze strefy czasowej urządzenia, a to z adresu.
+    ipCountry: str | None = None
     source: str = ""
     ref: str | None = None
     outcome: str = "qualified"
@@ -8595,15 +8668,22 @@ def _tresc_z_payloadu(surowy: str | None) -> str:
 
 
 def _lead_json(lead: Lead, trader_id: int | None, paid_usd: float,
-               next_due: datetime | None = None, accounts: int = 0) -> dict:
+               next_due: datetime | None = None, accounts: int = 0,
+               pochodzenie: origin.Pochodzenie | None = None) -> dict:
     """Lead dla panelu. Wspólne dla listy i karty szczegółów, żeby karta nie
     zaczęła nazywać pól inaczej niż tabela, z której się ją otwiera."""
     zakwalifikowany = lead.outcome != "not_qualified"
     mail_temat, mail_tekst = lead_mail.tresc(lead.name,
                                              zakwalifikowany=zakwalifikowany)
+    # Bez tradera pod ręką liczymy z samego leada (prefiks numeru, IP
+    # zgłoszenia) — lista i karta podają tradera, gdy go znają.
+    if pochodzenie is None:
+        pochodzenie = origin.pochodzenie(None, lead)
     return {
         "id": lead.id, "email": lead.email, "name": lead.name,
         "phone": lead.phone, "phone_iso": lead.phone_iso, "telegram": lead.telegram,
+        "ip_country": lead.ip_country,
+        "desk": pochodzenie.desk, "origin": pochodzenie.json(),
         "country": lead.country, "source": lead.source, "ref": lead.ref,
         "outcome": lead.outcome, "tier": lead.tier, "score": lead.score,
         "status": lead.status, "note": lead.note, "owner": lead.owner,
@@ -8850,6 +8930,8 @@ def leads_ingest(payload: LeadIn,
             _ustaw_telefon(lead, payload.phone or "", payload.phoneIso)
             lead.telegram = (payload.telegram or None)
             lead.country = (payload.country or None)
+            kod_ip = (payload.ipCountry or "").strip().upper()[:2]
+            lead.ip_country = kod_ip if kod_ip.isalpha() and kod_ip != "XX" else None
             lead.source = (payload.source or "")[:40]
             lead.ref = (payload.ref or None)
             lead.outcome = "not_qualified" if payload.outcome == "not_qualified" else "qualified"
@@ -9001,11 +9083,28 @@ def admin_leads(status: str | None = None, q: str | None = None):
             if lid not in terminy or kiedy < terminy[lid]:
                 terminy[lid] = kiedy
 
+        # Pochodzenie z sygnałów tradera (kraj z KYC/IP/logowania), gdy lead
+        # już się zarejestrował; bez tradera liczy się z samego leada.
+        obiekty: dict[int, Trader] = {}
+        granty: set[int] = set()
+        if traderzy:
+            idki = list(traderzy.values())
+            obiekty = {t.id: t for t in
+                       session.query(Trader).filter(Trader.id.in_(idki)).all()}
+            granty = {tid for (tid,) in
+                      session.query(Account.trader_id)
+                      .filter(Account.trader_id.in_(idki),
+                              Account.source == "grant",
+                              func.lower(func.coalesce(Account.grant_note, ""))
+                              == origin.FREE_PROGRAM_NOTE).distinct().all()}
+
         wynik = []
         for l in leady:
             trader_id = traderzy.get(l.email)
             wynik.append(_lead_json(l, trader_id, zaplacone.get(trader_id, 0) or 0,
-                                    terminy.get(l.id), konta.get(trader_id, 0)))
+                                    terminy.get(l.id), konta.get(trader_id, 0),
+                                    origin.pochodzenie(obiekty.get(trader_id), l,
+                                                       free_grant=trader_id in granty)))
         return wynik
     finally:
         session.close()
@@ -9169,8 +9268,13 @@ def admin_lead_detail(lead_id: int):
                          .order_by(LeadReminder.active.desc(), LeadReminder.due_at).all())
         otwarte = [r.due_at for r in przypomnienia if r.active]
 
+        grant_free = bool(trader) and session.query(Account.id).filter(
+            Account.trader_id == trader.id, Account.source == "grant",
+            func.lower(func.coalesce(Account.grant_note, ""))
+            == origin.FREE_PROGRAM_NOTE).first() is not None
         dane = _lead_json(lead, trader.id if trader else None, zaplacone,
-                          min(otwarte) if otwarte else None, konta)
+                          min(otwarte) if otwarte else None, konta,
+                          origin.pochodzenie(trader, lead, free_grant=grant_free))
         # Tylko w szczegółach (jak orders/events): szuflada pokazuje przycisk
         # „wyślij zaproszenie do portalu" wyłącznie tam, gdzie ma to sens —
         # konto założone ZA klienta, który hasła jeszcze nie ustawił.
@@ -9546,9 +9650,67 @@ def admin_lead_email(lead_id: int, force: bool = False):
         session.close()
 
 
+NADAWCY_MAILA = ("ptf", "fx")
+
+
+def _nadawca_z_pola(sender: str | None, domyslny: str) -> str:
+    """„ptf" (adres platformy) albo „fx" (marka landingu); inne wartości → 400."""
+    wybor = (sender or domyslny).strip().lower()
+    if wybor not in NADAWCY_MAILA:
+        raise HTTPException(400, "sender must be 'ptf' or 'fx'")
+    return wybor
+
+
+def _wyslij_z_panelu(session, *, sender: str, email: str, temat: str, tekst: str,
+                     trader: Trader | None = None, lead: Lead | None = None) -> None:
+    """Jedna wysyłka maila pisanego z ręki — dla klienta, leada i gołego adresu.
+
+    Dwa okna w panelu (Clients, Leads) i przycisk w zakładce Mail otwierają to
+    samo pole tekstowe, więc i wysyłka jest jedna; różni się tylko nadawca:
+
+    * `ptf` — `notify.send_now("admin_message")`: adres platformy, złota
+      papeteria, wpis w `MailLog`, push do portalu, jak dotąd dla klienta.
+    * `fx`  — `lead_mail.wyslij(..., tylko_nadawca=True)`: marka landingu,
+      zielona papeteria, Resend (gdy jest klucz) albo SMTP; wpis w `MailLog`
+      dopisujemy TU pod zdarzeniem `admin_message_fx`, bo `lead_mail` nie zna
+      dziennika, a zakładka Mail ma pokazywać obu nadawców obok siebie.
+
+    Ślady: trader → telemetria + historia leada o tym samym mailu (jeśli jest);
+    lead → zdarzenie `email` z pełną treścią i nadawcą, `new` → `messaged`.
+    Wysyłka jest synchroniczna: człowiek przy przycisku ma zobaczyć porażkę
+    od razu. Rzuca HTTPException(400) z powodem, gdy nie poszło.
+    """
+    if sender == "fx":
+        if not lead_mail.nadawca_gotowy():
+            raise HTTPException(400, "Sender not configured: set "
+                                + " and ".join(lead_mail.czego_brakuje_nadawcy()))
+        poszlo, powod = lead_mail.wyslij(email, temat, tekst, tylko_nadawca=True)
+        notify._zapisz_w_dzienniku("admin_message_fx", email, temat,
+                                   None if poszlo else (powod or "not sent")[:500])
+        if not poszlo:
+            raise HTTPException(400, powod)
+    else:
+        imie = (trader.full_name if trader else None) or (lead.name if lead else None) or email
+        blad = notify.send_now("admin_message", email,
+                               {"name": imie, "subject": temat, "body": tekst})
+        if blad:
+            raise HTTPException(400, blad)
+    if trader is not None:
+        telemetry.track("admin_email", trader.id, subject=temat[:120], sender=sender)
+        if lead is None:
+            _slad_w_historii(session, trader, "email", temat)
+    if lead is not None:
+        _zdarzenie(session, lead.id, "email", temat, "panel",
+                   payload=json.dumps({"body": tekst, "sender": sender},
+                                      ensure_ascii=False))
+        if lead.status == "new":
+            _zapisz_status(session, lead, "messaged", actor="panel")
+
+
 class LeadMailIn(BaseModel):
     subject: str
     body: str
+    sender: str | None = None     # domyślnie "fx" — lead zna markę landingu
 
 
 @app.post("/api/admin/leads/{lead_id}/email-custom",
@@ -9559,8 +9721,8 @@ def admin_lead_email_custom(lead_id: int, dane: LeadMailIn):
     Osobny endpoint, a nie parametr przy `/email`, bo tamta droga ma odwrotny
     kontrakt: treść składa serwer z `outcome` i panel nie ma prawa jej podmienić.
     Tu jest na odwrót — treść JEST wolą klikającego, serwer tylko ubiera ją
-    w papier firmowy marki (`_html_z_tekstu`) i pilnuje, żeby w historii leada
-    został dokładnie ten tekst, który wyszedł.
+    w papier firmowy wybranego nadawcy i pilnuje, żeby w historii leada został
+    dokładnie ten tekst, który wyszedł.
 
     Bez blokady „raz na leada": tamta chroni przed DRUGĄ KOPIĄ tego samego
     automatu, a tu każdy mail admin pisze (i widzi w podglądzie) sam — powtórka
@@ -9573,20 +9735,19 @@ def admin_lead_email_custom(lead_id: int, dane: LeadMailIn):
     tekst = dane.body.strip()
     if not temat or not tekst:
         raise HTTPException(400, "Subject and message are both required")
+    nadawca = _nadawca_z_pola(dane.sender, "fx")
     session = SessionLocal()
     try:
         lead = session.get(Lead, lead_id)
         if not lead:
             raise HTTPException(404, "Lead not found")
-        poszlo, powod = lead_mail.wyslij(lead.email, temat, tekst)
-        if not poszlo:
-            raise HTTPException(400, powod)
-        _zdarzenie(session, lead.id, "email", temat, "panel",
-                   payload=json.dumps({"body": tekst}, ensure_ascii=False))
-        if lead.status == "new":
-            _zapisz_status(session, lead, "messaged", actor="panel")
+        trader = (session.query(Trader)
+                  .filter(func.lower(Trader.email) == (lead.email or "").lower())
+                  .first())
+        _wyslij_z_panelu(session, sender=nadawca, email=lead.email, temat=temat,
+                         tekst=tekst, trader=trader, lead=lead)
         session.commit()
-        return {"ok": True, "id": lead_id, "status": lead.status}
+        return {"ok": True, "id": lead_id, "status": lead.status, "sender": nadawca}
     finally:
         session.close()
 
@@ -9595,19 +9756,28 @@ class MailTemplateIn(BaseModel):
     name: str
     subject: str
     body: str
+    sender: str | None = None     # "ptf" | "fx" | None (przy obu nadawcach)
 
 
 def _szablon_json(t: LeadMailTemplate) -> dict:
     return {"id": t.id, "name": t.name, "subject": t.subject, "body": t.body,
+            "sender": t.sender, "builtin": False,
             "updated_at": t.updated_at.isoformat() if t.updated_at else None}
 
 
 @app.get("/api/admin/email-templates", dependencies=[Depends(auth.require_admin)])
 def admin_email_templates():
+    """Wbudowane (z kodu, `mail_templates.py`) przed zapisanymi (z bazy).
+
+    Jedna lista, bo panel ma jeden selektor; `builtin` i `id` w formie
+    „b:<klucz>" odróżniają te, których nie da się skasować ani nadpisać —
+    „Save template" na nich robi kopię pod własną nazwą.
+    """
     session = SessionLocal()
     try:
-        return [_szablon_json(t) for t in
-                session.query(LeadMailTemplate).order_by(LeadMailTemplate.name)]
+        return mail_templates.lista() + [
+            _szablon_json(t) for t in
+            session.query(LeadMailTemplate).order_by(LeadMailTemplate.name)]
     finally:
         session.close()
 
@@ -9633,6 +9803,9 @@ def admin_email_template_save(dane: MailTemplateIn):
             t = LeadMailTemplate(name=nazwa)
             session.add(t)
         t.subject, t.body = temat, tekst
+        # Pusty nadawca to świadome „przy obu", nie brak danych — dlatego None,
+        # a nie domyślne „ptf". Śmieć w polu → 400, jak przy wysyłce.
+        t.sender = _nadawca_z_pola(dane.sender, "ptf") if (dane.sender or "").strip() else None
         t.updated_at = datetime.now(timezone.utc)
         session.commit()
         return _szablon_json(t)
@@ -9711,6 +9884,60 @@ def admin_trader_portal_invite(trader_id: int, send: bool = True):
 class TraderMailIn(BaseModel):
     subject: str
     body: str
+    sender: str | None = None     # domyślnie "ptf" — klient zna platformę
+
+
+class MailSendIn(BaseModel):
+    to: str
+    subject: str
+    body: str
+    sender: str | None = None
+
+
+@app.get("/api/admin/mail/senders", dependencies=[Depends(auth.require_admin)])
+def admin_mail_senders():
+    """Którymi nadawcami da się dziś wysłać — dla selektora w oknie maila.
+
+    Osobno od `/api/stats`, bo okno otwiera się dziesiątki razy dziennie, a
+    tamten endpoint liczy pół panelu. `missing` nazywa zmienne po imieniu, żeby
+    wyszarzona opcja mówiła, CO ustawić, a nie tylko że nie można.
+    """
+    return {"ptf": {"label": settings.site_name, "ready": not notify.czego_brakuje(),
+                    "missing": notify.czego_brakuje()},
+            "fx": {"label": lead_mail.MARKA, "ready": lead_mail.nadawca_gotowy(),
+                   "missing": lead_mail.czego_brakuje_nadawcy()}}
+
+
+@app.post("/api/admin/mail/send", dependencies=[Depends(auth.require_admin)])
+def admin_mail_send(dane: MailSendIn):
+    """Mail z zakładki Mail na DOWOLNY adres — ta sama wysyłka co przy kliencie
+    i leadzie, tylko odbiorca wpisany z ręki.
+
+    Adres jest dopasowywany do klienta i leada po e-mailu, żeby historia się nie
+    gubiła: mail do „abdu@…" wpisany ręcznie ma zostawić ten sam ślad, co mail
+    wysłany z karty tego samego człowieka. Bez dopasowania zostaje sam wpis w
+    dzienniku wysyłek — to wystarczy dla adresu, którego w bazie nie ma.
+    """
+    email = (dane.to or "").strip().lower()
+    if not _EMAIL_RX.fullmatch(email):
+        raise HTTPException(400, "Enter a valid e-mail address")
+    temat = " ".join(dane.subject.split())
+    tekst = dane.body.strip()
+    if not temat or not tekst:
+        raise HTTPException(400, "Subject and message are both required")
+    nadawca = _nadawca_z_pola(dane.sender, "ptf")
+    session = SessionLocal()
+    try:
+        trader = session.query(Trader).filter(func.lower(Trader.email) == email).first()
+        lead = session.query(Lead).filter(func.lower(Lead.email) == email).first()
+        _wyslij_z_panelu(session, sender=nadawca, email=email, temat=temat,
+                         tekst=tekst, trader=trader, lead=lead)
+        session.commit()
+        return {"ok": True, "email": email, "sender": nadawca,
+                "trader_id": trader.id if trader else None,
+                "lead_id": lead.id if lead else None}
+    finally:
+        session.close()
 
 
 def _slad_w_historii(session, tr: Trader, rodzaj: str, opis: str) -> None:
@@ -9746,20 +9973,16 @@ def admin_trader_email(trader_id: int, dane: TraderMailIn):
     tekst = dane.body.strip()
     if not temat or not tekst:
         raise HTTPException(400, "Subject and message are both required")
+    nadawca = _nadawca_z_pola(dane.sender, "ptf")
     session = SessionLocal()
     try:
         tr = session.get(Trader, trader_id)
         if not tr:
             raise HTTPException(404, "Trader not found")
-        blad = notify.send_now("admin_message", tr.email,
-                               {"name": tr.full_name or tr.email,
-                                "subject": temat, "body": tekst})
-        if blad:
-            raise HTTPException(400, blad)
-        telemetry.track("admin_email", tr.id, subject=temat[:120])
-        _slad_w_historii(session, tr, "email", temat)
+        _wyslij_z_panelu(session, sender=nadawca, email=tr.email, temat=temat,
+                         tekst=tekst, trader=tr)
         session.commit()
-        return {"ok": True, "email": tr.email, "subject": temat}
+        return {"ok": True, "email": tr.email, "subject": temat, "sender": nadawca}
     finally:
         session.close()
 

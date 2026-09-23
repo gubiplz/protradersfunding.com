@@ -904,3 +904,43 @@ def iso_from_e164(numer: str) -> str | None:
         if najlepszy is None or (len(kierunkowy), glowny) > najlepszy[:2]:
             najlepszy = (len(kierunkowy), glowny, iso)
     return najlepszy[2] if najlepszy else None
+
+
+# Afryka wg podziału ONZ (M49, region 002) — 54 państwa plus terytoria, które
+# libphonenumber prowadzi jako osobne kody (EH, RE, YT, SH, IO). Lista jest tu,
+# a nie w tabeli wyżej, bo `COUNTRIES` jest generowane z metadanych numerów,
+# a przynależność do kontynentu to inna wiedza i inna zmiana. Do czego służy:
+# panel odpowiada na pytanie „czy to jest ruch z darmowego lejka" i jeden
+# sygnał z tego zbioru (IP, prefiks numeru, kraj z KYC) wystarcza za odpowiedź
+# TAK — patrz `origin.pochodzenie()`.
+AFRICA: frozenset[str] = frozenset({
+    "DZ", "AO", "BJ", "BW", "BF", "BI", "CV", "CM", "CF", "TD", "KM", "CG",
+    "CD", "CI", "DJ", "EG", "GQ", "ER", "SZ", "ET", "GA", "GM", "GH", "GN",
+    "GW", "KE", "LS", "LR", "LY", "MG", "MW", "ML", "MR", "MU", "MA", "MZ",
+    "NA", "NE", "NG", "RW", "ST", "SN", "SC", "SL", "SO", "ZA", "SS", "SD",
+    "TZ", "TG", "TN", "UG", "ZM", "ZW",
+    "EH", "RE", "YT", "SH", "IO",
+})
+
+
+def is_africa(iso2: str | None) -> bool:
+    return (iso2 or "").strip().upper() in AFRICA
+
+
+_BY_NAME: dict[str, str] = {nazwa.casefold(): iso for iso, nazwa, *_ in COUNTRIES}
+
+
+def iso_from_name(nazwa: str | None) -> str | None:
+    """ISO2 z nazwy kraju — odwrotność `fields.country_name`.
+
+    Formularz KYC zapisuje NAZWĘ („Nigeria"), bo tak człowiek ją wybiera z
+    listy, a reszta systemu liczy na kodach. Kod podany zamiast nazwy wraca
+    jak jest; nazwa spoza listy daje None — nie zgadujemy po fragmentach,
+    bo „Niger" pasuje do dwóch krajów.
+    """
+    tekst = (nazwa or "").strip()
+    if not tekst:
+        return None
+    if len(tekst) == 2 and tekst.upper() in BY_ISO:
+        return tekst.upper()
+    return _BY_NAME.get(tekst.casefold())
