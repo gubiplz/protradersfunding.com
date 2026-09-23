@@ -1,0 +1,162 @@
+/* Warstwa „Apple" dla panelu admina i portalu tradera — PREVIEW.
+   Ładowana jako OSTATNIA (po portal.css, admin.css, notifications.css) i tylko
+   nadpisuje: materiały z rozmyciem, hairline 0.5 px, kolorowe kafelki ikon w
+   nawigacji jak w Ustawieniach iOS, przełączniki i segmenty iOS, kapsułki
+   toastów, sprężyny. Usunięcie linku do tego pliku przywraca poprzedni wygląd
+   w całości. Tokeny --np-* pochodzą z notifications.css. */
+
+/* ---------- typografia i drobiazgi ---------- */
+body{letter-spacing:-.006em}
+.topbar h1{font-size:21px;letter-spacing:-.022em}
+h2,h3{letter-spacing:-.015em}
+::selection{background:color-mix(in srgb,var(--acc) 26%,transparent)}
+*{scrollbar-width:thin;scrollbar-color:var(--np-fill2) transparent}
+
+/* ---------- pasek boczny: materiał + kafelki ikon ---------- */
+.side{background:color-mix(in srgb,var(--panel) 80%,transparent);-webkit-backdrop-filter:blur(30px) saturate(180%);
+  backdrop-filter:blur(30px) saturate(180%);border-right:.5px solid var(--np-hair)}
+.side-sec{letter-spacing:.02em;text-transform:none;font-size:12px;font-weight:600;padding:14px 10px 6px}
+.side-nav{gap:1px}
+.sb-link{gap:11px;padding:6px 10px;border:0;border-radius:10px;color:var(--txt);font-weight:500;
+  transition:background .2s,transform .35s var(--np-spring)}
+.sb-link svg{width:28px;height:28px;flex:0 0 28px;padding:5.5px;border-radius:8px;opacity:1;color:#fff;
+  background:var(--k,#8e8e93);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.14),0 1px 2px rgba(0,0,0,.08)}
+.sb-link:hover{background:var(--np-fill);color:var(--txt)}
+.sb-link:active{transform:scale(.97)}
+.sb-link.on{background:color-mix(in srgb,var(--acc) 13%,transparent);color:var(--txt);border:0;font-weight:650}
+.sb-link.on::before{display:none}
+/* Kolor sekcji jak w Ustawieniach iOS — każda ma swój, sąsiedzi się nie powtarzają */
+.sb-link[data-v=overview]{--k:#5856d6}
+.sb-link[data-v=leads]{--k:#ff9500}
+.sb-link[data-v=clients]{--k:#007aff}
+.sb-link[data-v=accounts]{--k:#af52de}
+.sb-link[data-v=activity]{--k:#ff3b30}
+.sb-link[data-v=payouts]{--k:#34c759}
+.sb-link[data-v=kyc]{--k:#30b0c7}
+.sb-link[data-v=tickets]{--k:#32ade6}
+.sb-link[data-v=orders]{--k:#00c7be}
+.sb-link[data-v=offers]{--k:#ff2d55}
+.sb-link[data-v=pool]{--k:#a2845e}
+.sb-link[data-v=mail]{--k:#0a84ff}
+.sb-link[data-v=telegram]{--k:#2aabee}
+.sb-link[data-v=telemetry]{--k:#ff9f0a}
+.sb-link[data-v=settings]{--k:#8e8e93}
+.sb-link[data-v=board]{--k:#ff9500}
+.sb-link[data-v=achievements]{--k:#ffb300}
+.sb-link[data-v=loyalty]{--k:#af52de}
+.sb-link[data-v=journal]{--k:#a2845e}
+.sb-link[data-v=analytics]{--k:#32ade6}
+.sb-link[data-v=rewards]{--k:#ff2d55}
+.sb-link[data-v=certificates]{--k:#30b0c7}
+.sb-link[data-v=support]{--k:#0a84ff}
+.sb-link[href="/academy"]{--k:#ff3b30}
+.sb-link.theme-toggle{--k:#5e5ce6}
+.sb-link.sheet-signout{--k:#ff3b30;color:var(--red)}
+html[data-theme=dark] .sb-link svg{box-shadow:inset 0 0 0 .5px rgba(255,255,255,.18)}
+.side-foot,.side-bottom{border-top:.5px solid var(--np-hair)}
+.collapse-btn,.signout{border-radius:10px;transition:background .2s,transform .35s var(--np-spring)}
+.collapse-btn:active,.signout:active{transform:scale(.97)}
+
+/* ---------- górny pasek ---------- */
+.topbar{background:color-mix(in srgb,var(--bg) 74%,transparent);-webkit-backdrop-filter:blur(24px) saturate(180%);
+  backdrop-filter:blur(24px) saturate(180%);border-bottom:.5px solid var(--np-hair)}
+.icon-btn{border-radius:50%;transition:background .2s,color .2s,transform .35s var(--np-spring)}
+.icon-btn:active{transform:scale(.9)}
+.bell-badge,#bell-dot{box-shadow:0 0 0 2px var(--bg)}
+
+/* ---------- pasek zakładek (telefon) ---------- */
+.tabbar,.botnav{background:color-mix(in srgb,var(--panel) 72%,transparent);-webkit-backdrop-filter:blur(30px) saturate(180%);
+  backdrop-filter:blur(30px) saturate(180%);border-top:.5px solid var(--np-hair)}
+.tab-item.on::before{display:none}
+.tab-lbl,.botnav-btn span{font-weight:500;letter-spacing:0}
+.tab-ic,.botnav-btn svg{transition:transform .4s var(--np-spring)}
+.tab-item:active .tab-ic,.botnav-btn:active svg{transform:scale(.86)}
+.botnav-btn:active,.sb-link:active{opacity:1}
+.sheet{border:0;border-radius:14px 14px 0 0;box-shadow:0 -20px 60px -20px rgba(0,0,0,.35);
+  transition:transform .55s var(--np-spring),visibility .55s}
+
+/* ---------- karty ---------- */
+.sec-card,.tbl-wrap,.stat-tile,.modal{border-color:transparent;
+  box-shadow:0 0 0 .5px var(--np-hair),0 1px 2px rgba(15,23,42,.03),0 12px 32px -20px rgba(15,23,42,.2)}
+.sec-card{border-radius:20px}
+html[data-theme=dark] .sec-card,html[data-theme=dark] .tbl-wrap,html[data-theme=dark] .stat-tile{
+  box-shadow:0 0 0 .5px var(--np-hair),0 12px 32px -20px rgba(0,0,0,.6)}
+
+/* ---------- przyciski ---------- */
+.btn-p{border-radius:12px;box-shadow:0 8px 18px -10px rgba(99,102,241,.65);
+  transition:transform .4s var(--np-spring),filter .2s,box-shadow .2s}
+.btn-p:hover{transform:none;filter:brightness(1.07)}
+.btn-p:active:not(:disabled){transform:scale(.96)}
+.btn-o{border-color:transparent;background:var(--np-fill);color:var(--acc);
+  transition:transform .4s var(--np-spring),background .2s,color .2s}
+.btn-o:hover:not(:disabled){border-color:transparent;background:var(--np-fill2);color:var(--acc)}
+.btn-o:active:not(:disabled){transform:scale(.96)}
+.btn-o.sm,.btn-p.sm{border-radius:10px}
+
+/* ---------- pola ---------- */
+.inp{background:var(--np-fill);border-color:transparent;border-radius:12px;transition:background .2s,box-shadow .2s,border-color .2s}
+.inp:hover:not(:disabled){background:var(--np-fill2)}
+.inp:focus{background:var(--panel);border-color:var(--acc);box-shadow:0 0 0 4px color-mix(in srgb,var(--acc) 16%,transparent)}
+
+/* ---------- segmenty (filtry) jak UISegmentedControl ---------- */
+.seg,.shop-tabs{background:var(--np-fill);border:0;box-shadow:none;border-radius:10px;padding:2px;gap:2px}
+.seg button,.shop-tabs button{border-radius:8px;color:var(--muted);font-weight:600;transition:background .25s,color .2s,box-shadow .25s}
+.seg button.on,.shop-tabs button.on{background:var(--np-pill);color:var(--txt);
+  box-shadow:0 3px 8px rgba(0,0,0,.1),0 3px 1px rgba(0,0,0,.03),0 0 0 .5px rgba(0,0,0,.04)}
+.seg button.on::after{opacity:.4}
+
+/* ---------- przełączniki iOS ---------- */
+.switch{width:51px;height:31px;flex:0 0 51px}
+.switch i{background:var(--np-fill2);transition:background .3s var(--np-ease)}
+.switch i::after{top:2px;left:2px;width:27px;height:27px;background:#fff;
+  box-shadow:0 3px 8px rgba(0,0,0,.15),0 1px 1px rgba(0,0,0,.16);transition:transform .5s var(--np-spring)}
+.switch input:checked+i{background:var(--np-on)}
+.switch input:checked+i::after{transform:translateX(20px)}
+.switch input:focus-visible+i{outline:2px solid var(--acc);outline-offset:2px}
+
+/* ---------- toasty: kapsułka z ikoną, sprężyna na wejściu i wyjściu ---------- */
+#toasts{right:20px;bottom:20px;gap:8px;align-items:flex-end}
+.toast{display:flex;align-items:center;gap:11px;border:0;border-radius:18px;padding:12px 18px 12px 12px;
+  background:var(--np-material);-webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%);
+  box-shadow:0 18px 44px -16px rgba(15,23,42,.38),0 0 0 .5px var(--np-hair);color:var(--txt);font-weight:500;
+  animation:ap-toast-in .6s var(--np-bounce);transition:opacity .3s var(--np-ease),transform .35s var(--np-ease)}
+.toast::before{content:"";flex:none;width:24px;height:24px;border-radius:50%;background:var(--acc) no-repeat center/13px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M12 8h.01M12 12v5'/%3E%3C/svg%3E")}
+.toast.ok::before{background-color:var(--green2);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E")}
+.toast.err::before{background-color:var(--red);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M12 7v6M12 17h.01'/%3E%3C/svg%3E")}
+.toast.undo::before{display:none}
+.toast.out{opacity:0;transform:translateY(10px) scale(.95)}
+@keyframes ap-toast-in{from{opacity:0;transform:translateY(18px) scale(.94)}}
+@media(max-width:700px){
+  #toasts{left:12px;right:12px;align-items:center}
+  .toast{max-width:100%}
+}
+
+/* ---------- szuflada (admin: karta konta, bilet) i okna ---------- */
+@media(min-width:641px){
+  .over-panel{top:12px;right:12px;bottom:12px;border:0;border-radius:24px;overflow:hidden;
+    box-shadow:var(--np-shadow)}
+  .over.open .over-panel{animation:ap-over-in .6s var(--np-spring)}
+  @keyframes ap-over-in{from{transform:translateX(calc(100% + 24px))}}
+}
+@media(max-width:640px){
+  .over-panel{top:calc(env(safe-area-inset-top) + 10px);left:0;width:100%;border:0;border-radius:14px 14px 0 0}
+  .over.open .over-panel{animation:ap-sheet-in .6s var(--np-spring)}
+  @keyframes ap-sheet-in{from{transform:translateY(104%)}}
+  .over-head{position:relative;padding-top:20px}
+  .over-head::before{content:"";position:absolute;top:6px;left:50%;width:38px;height:5px;margin-left:-19px;border-radius:3px;background:var(--np-fill2)}
+}
+.over-bg{background:rgba(15,23,42,.18);-webkit-backdrop-filter:none;backdrop-filter:none;animation:ap-fade .3s var(--np-ease)}
+html[data-theme=dark] .over-bg{background:rgba(0,0,0,.4)}
+.over-head{background:color-mix(in srgb,var(--panel) 82%,transparent);-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px);
+  border-bottom:.5px solid var(--np-hair)}
+.modal{border-radius:24px;animation:ap-modal-in .55s var(--np-spring)}
+@keyframes ap-modal-in{from{opacity:0;transform:scale(.94)}}
+@keyframes ap-fade{from{opacity:0}}
+
+@media(prefers-reduced-motion:reduce){
+  .toast,.modal,.over.open .over-panel,.over-bg{animation:none!important}
+  .sb-link,.btn-p,.btn-o,.icon-btn,.switch i::after{transition-duration:.01ms!important}
+}

@@ -424,7 +424,7 @@ function toggleCollapse(){const c=$('side').classList.toggle('collapsed');
 function toast(msg,kind='ok',ms=6000){
   const t=document.createElement('div');t.className='toast '+kind;t.textContent=msg;
   $('toasts').appendChild(t);
-  setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),350)},ms);
+  setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),380)},ms);
 }
 /* ---------- trwale usuwanie z oknem na cofniecie ----------
    Klikniete usuwanie NIE leci od razu: przez 5 s czeka w kolejce, a admin widzi
@@ -503,7 +503,7 @@ function undoToast(msg,onUndo,ms=8000){
   t.querySelector('.undo-txt').textContent=msg;
   t.querySelector('.undo-btn').onclick=()=>{t.remove();onUndo()};
   $('toasts').appendChild(t);
-  setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),350)},ms);
+  setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),380)},ms);
 }
 
 function closeOver(){$('over').classList.remove('open')}

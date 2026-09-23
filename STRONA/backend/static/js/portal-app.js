@@ -334,7 +334,7 @@ function toast(msg,kind='ok',ms=6000){
   const t=document.createElement('div');
   t.className='toast '+kind; t.textContent=msg;
   $('toasts').appendChild(t);
-  setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),350)},ms);
+  setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),380)},ms);
 }
 
 /* ---------- auth ---------- */

@@ -25,6 +25,7 @@ document.querySelector('meta[name="theme-color"]').setAttribute('content','#0b0d
 if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('/sw.js'))</script>
 <link rel="stylesheet" href="/static/css/portal.css?v={{ asset_v }}">
 <link rel="stylesheet" href="/static/css/notifications.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/css/apple.css?v={{ asset_v }}">
 <!-- defer: skrypty nie blokują parsowania (LCP), a kolejność wykonania jest
      gwarantowana — bundle portalu (też defer, na dole body) idzie ostatni. -->
 <script defer src="/static/lib/chart.umd.min.js"></script>
