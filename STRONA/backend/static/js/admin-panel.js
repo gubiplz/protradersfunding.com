@@ -1132,6 +1132,25 @@ const RS_STATUS={delivered:['delivered','paid'],opened:['opened','paid'],clicked
   delivery_delayed:['delayed','pending'],bounced:['bounced','failed'],complained:['spam report','failed'],
   failed:['failed','failed'],canceled:['canceled','failed']};
 const rsFailed=m=>(RS_STATUS[m.last_event]||[])[1]==='failed';
+/* Dziennik SMTP daje nagie UTC z „T" („2026-09-23T17:00:00"), Resend —
+   ze spacją, mikrosekundami i „+00" („2026-09-23 20:50:15.674981+00").
+   Porównane jako tekst spacja przegrywa z „T", więc każdy mail do leada
+   lądował pod mailami platformy z tego samego dnia. Jeden format (ISO UTC
+   z „Z") dla sortu listy i dla `data-sort` nagłówka Date. */
+const mailTs=ts=>{
+  if(!ts)return '';
+  const s=String(ts).trim().replace(' ','T').replace(/(\.\d{3})\d+/,'$1').replace(/([+-]\d\d)$/,'$1:00');
+  const d=dutc(s);
+  return isNaN(d)?'':d.toISOString();
+};
+/* Szukajka: każde słowo musi trafić w którekolwiek pole (kolejność dowolna),
+   np. „geol payout" albo „lead failed". */
+const mailMatch=(q,pola)=>{
+  const slowa=q.toLowerCase().split(/\s+/).filter(Boolean);
+  if(!slowa.length)return true;
+  const tekst=pola.map(x=>String(x||'').toLowerCase()).join(' \u0001 ');
+  return slowa.every(w=>tekst.includes(w));
+};
 
 function renderMailInbox(){
   const d=window._mailIn;
@@ -1140,10 +1159,12 @@ function renderMailInbox(){
     mailRemoteLater('in');
     return;
   }
-  const list=d.items||[];
-  const q=(window._inboxQ||'').toLowerCase();
+  const list=(d.items||[]).map(m=>({...m,ts:mailTs(m.created_at)}))
+    .sort((a,b)=>(b.ts>a.ts)-(b.ts<a.ts));
+  const q=window._inboxQ||'';
   const rows=list.filter(m=>(MAIL_BRAND==='all'||m.brand===MAIL_BRAND)&&
-    (!q||[m.from,m.subject,(m.to||[]).join(' '),m.trader_name,m.lead_name].some(x=>String(x||'').toLowerCase().includes(q))));
+    mailMatch(q,[m.from,m.from_email,m.subject,(m.to||[]).join(' '),m.trader_name,m.lead_name,
+      m.trader_id?'client':'',m.lead_id?'lead':'',BRAND_LABEL[m.brand]]));
   const cap=capList(rows,'_mailAll','renderMailLog');
   const dom=d.domains||{};
   const pusto=!d.configured
@@ -1164,7 +1185,7 @@ function renderMailInbox(){
     ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.inbox">
       <thead><tr><th>Date</th><th>From</th><th>Subject</th><th>To</th><th>Brand</th></tr></thead>
       <tbody>${cap.rows.map(m=>`<tr class="clickable" onclick="openMailItem('in','${jsq(m.id)}',${m.k||0})">
-        <td class="muted" data-l="Date" data-sort="${esc(m.created_at||'')}">${dstr(m.created_at)}</td>
+        <td class="muted" data-l="Date" data-sort="${esc(m.ts)}">${m.ts?dstr(m.ts):'—'}</td>
         <td class="rt-main" data-l="From">${esc(m.trader_name||m.lead_name||m.from||'—')} ${mailKto(m)}
           <div class="muted" style="font-size:var(--fs-cap)">${esc(m.from_email||'')}</div></td>
         <td data-l="Subject">${esc(m.subject||'(no subject)')}${m.attachments?` <span class="muted" title="Attachments">· ${m.attachments} file${m.attachments>1?'s':''}</span>`:''}</td>
@@ -1183,25 +1204,25 @@ function renderMailLog(){
      (`admin_message_fx`) — gdy lista z Resenda doszla bez bledu, bierzemy go
      stamtad (ma status doreczenia), a kopie z dziennika chowamy. */
   const zDziennika=(d.entries||[]).filter(m=>!(rsOk&&m.event==='admin_message_fx')).map(m=>({
-    kind:'log',id:m.id,ts:m.ts,to:m.to,subject:m.subject,brand:m.event==='admin_message_fx'?'fx':'ptf',
+    kind:'log',id:m.id,ts:mailTs(m.ts),to:m.to,subject:m.subject,brand:m.event==='admin_message_fx'?'fx':'ptf',
     ok:m.ok,failed:!m.ok,error:m.error,can_resend:m.can_resend,
     label:m.event==='admin_message_fx'?'written · Forex Passing':m.event==='admin_message'?'written · platform':(m.event||'—').replace(/_/g,' '),
     status:m.ok?['sent','paid']:['failed','failed']}));
   const zResenda=((rs&&rs.items)||[]).map(m=>({
-    kind:'rs',id:m.id,k:m.k||0,ts:m.created_at,to:(m.to||[]).join(', '),subject:m.subject,brand:m.brand,
-    ok:!rsFailed(m),failed:rsFailed(m),trader_id:m.trader_id,lead_id:m.lead_id,
+    kind:'rs',id:m.id,k:m.k||0,ts:mailTs(m.created_at),to:(m.to||[]).join(', '),subject:m.subject,brand:m.brand,
+    ok:!rsFailed(m),failed:rsFailed(m),trader_id:m.trader_id,lead_id:m.lead_id,name:m.trader_name||m.lead_name,
     label:'Resend · '+(BRAND_LABEL[m.brand]||'other'),status:RS_STATUS[m.last_event]||[m.last_event||'sent','pending']}));
-  const list=[...zDziennika,...zResenda].sort((a,b)=>String(b.ts||'').localeCompare(String(a.ts||'')));
-  const q=(window._mailQ||'').toLowerCase(), f=window._mailFilter||'all';
+  const list=[...zDziennika,...zResenda].sort((a,b)=>(b.ts>a.ts)-(b.ts<a.ts));
+  const q=window._mailQ||'', f=window._mailFilter||'all';
   const rows=list.filter(m=>(f==='all'||(f==='failed'?m.failed:!m.failed))&&
     (MAIL_BRAND==='all'||m.brand===MAIL_BRAND)&&
-    (!q||(m.to||'').toLowerCase().includes(q)||(m.label||'').toLowerCase().includes(q)
-      ||(m.subject||'').toLowerCase().includes(q)));
+    mailMatch(q,[m.to,m.name,m.subject,m.label,m.status[0],m.error,BRAND_LABEL[m.brand],
+      m.trader_id?'client':'',m.lead_id?'lead':'']));
   const cap=capList(rows,'_mailAll','renderMailLog');
   $('view').innerHTML=`
     <div class="toolbar">
       ${mailSwitches()}
-      ${searchBox('mail-q','_mailQ','renderMailLog','Search recipient, subject or template…')}
+      ${searchBox('mail-q','_mailQ','renderMailLog','Search recipient, name, subject, template or status…')}
       <div class="seg">${[['all','All'],['sent','Sent'],['failed','Failed']]
         .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._mailFilter='${f===k?'all':k}';renderMailLog()">${l}</button>`).join('')}</div>
       <span class="count-pill">${rows.length} of ${list.length}${rs?'':' · <span class="muted">loading Resend…</span>'}</span>
@@ -1214,7 +1235,7 @@ function renderMailLog(){
     ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.maillog">
       <thead><tr><th>Date</th><th>To</th><th>Subject</th><th>Template</th><th>Status</th><th></th></tr></thead>
       <tbody>${cap.rows.map(m=>`<tr${m.kind==='rs'?` class="clickable" onclick="openMailItem('sent','${jsq(m.id)}',${m.k})"`:''}>
-        <td class="muted" data-l="Date" data-sort="${esc(m.ts||'')}">${dstr(m.ts)}</td>
+        <td class="muted" data-l="Date" data-sort="${esc(m.ts)}">${m.ts?dstr(m.ts):'—'}</td>
         <td class="rt-main" data-l="To">${esc(m.to||'—')} ${mailKto(m)}</td>
         <td data-l="Subject">${esc(m.subject||'—')}</td>
         <td class="muted" data-l="Template">${esc(m.label)}</td>
@@ -6377,13 +6398,17 @@ async function setInboxPref(k,on){
   if(k==='group')npRenderList();
   if(k==='seen')npObserve(true);
   await npSavePrefs(prefs,()=>maluj(!on));
+  if(k==='sent')loadInbox();   // filtr stoi na serwerze — lista przychodzi na nowo
 }
 function npRenderSettings(){
   const box=$('np-settings');if(!box)return;
   const linked=ME&&ME.telegram_linked;
-  const pref=(k,ic,c,t,opis)=>`<div class="np-cell"><span class="np-ci" style="--k:var(--${c})">${npI(ic,2)}</span>
+  const pref=(k,ic,c,t,opis,on=npPref(k))=>`<div class="np-cell"><span class="np-ci" style="--k:var(--${c})">${npI(ic,2)}</span>
     <span class="np-ct"><b>${t}</b><span>${opis}</span></span>
-    <button type="button" class="np-sw" role="switch" data-np-pref="${k}" aria-checked="${npPref(k)}" aria-label="${t}"><i></i></button></div>`;
+    <button type="button" class="np-sw" role="switch" data-np-pref="${k}" aria-checked="${on}" aria-label="${t}"><i></i></button></div>`;
+  /* „Wysłane" domyślnie WYŁĄCZONE (odwrotnie niż reszta): mail, SMS czy
+     Telegram wysłany przez dział to własna akcja, nie nowina. */
+  const wyslane=!!(ME&&ME.ui_prefs&&ME.ui_prefs.inbox&&ME.ui_prefs.inbox.sent===true);
   box.innerHTML=`
     <header class="np-bar"><div class="np-bar-l"><button type="button" class="np-tbtn np-back" data-np="back">${npI('chevL',2.4)}<span>Back</span></button></div>
       <div class="np-bar-t">Notification settings</div><div class="np-bar-r"></div></header>
@@ -6403,6 +6428,7 @@ function npRenderSettings(){
       <div class="np-grp flat">
         ${pref('group','layers','purple','Group by lead','Events about one lead stack into one card')}
         ${pref('seen','eye','blue','Mark as read when seen','After two seconds on screen')}
+        ${pref('sent','mail','gold','Messages you sent','Emails, SMS and Telegram messages the team sent to leads',wyslane)}
       </div>
       <div class="np-grp flat" style="margin-top:28px"><button type="button" class="np-cell danger" data-np="clearall"><b>Delete all notifications</b></button></div>
     </div></div>`;
