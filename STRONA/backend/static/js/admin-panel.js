@@ -4692,7 +4692,26 @@ function reachChannelsHtml(rc){
       </div>
     </div>`;
   };
+  /* Stan webhooka bota glownego: „auto ready" mowi tylko, ze bot jest adminem.
+     Czy Telegram faktycznie wysyla nam posty, wie dopiero getWebhookInfo. */
+  const wh=rc.webhook||{};
+  const WH={ok:['Telegram reports new posts to the panel instantly','ok'],
+    off:['Telegram is not sending this bot\'s updates anywhere','bad'],
+    elsewhere:[`Telegram sends this bot's updates to ${esc(wh.host||'another address')}, not to the panel`,'bad'],
+    no_channel_posts:['The webhook skips channel posts','bad'],
+    unknown:['Could not check the Telegram connection','unk'],
+    no_bot:['No bot token on the server','unk']}[wh.state]||null;
+  const whRow=WH?`<div class="mod-row" style="align-items:center;gap:10px;flex-wrap:wrap">
+      <span class="status ${WH[1]==='ok'?'funded':WH[1]==='bad'?'failed':'pending'}"><span class="dot"></span>${WH[1]==='ok'?'live':WH[1]==='bad'?'not connected':'unknown'}</span>
+      <span style="flex:1;min-width:200px;font-size:12.5px">${WH[0]}${wh.last_error?`<span class="muted" style="display:block;font-size:11.5px">Last Telegram error: ${esc(wh.last_error)}</span>`:''}</span>
+      ${WH[1]==='bad'&&wh.fixable?`<button class="btn-o sm" onclick="reachFixWebhook(this,${wh.state==='elsewhere'})">Fix</button>`:''}
+    </div>`:'';
   return `<div style="margin:2px 0 14px;padding-top:12px;border-top:1px dashed var(--line)">
+    <div class="lbl" style="font-size:12px;color:var(--muted);margin-bottom:6px">New posts</div>
+    ${whRow}
+    <p class="muted" style="font-size:11.5px;margin:6px 0 12px">Backup: every ${rc.scan_every_min||10} minutes the panel
+      also reads the public page of each ticked channel, so a post Telegram didn't report still gets
+      its reactions and views (posts older than 48 h are skipped).</p>
     <div class="lbl" style="font-size:12px;color:var(--muted);margin-bottom:6px">Channels served</div>
     ${lista.length?lista.map(wiersz).join(''):`<p class="muted" style="font-size:12px">No channel is being served yet.</p>`}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
@@ -4704,6 +4723,17 @@ function reachChannelsHtml(rc){
       views under every new post while the bot is on. A channel other than the payout one needs
       ${bot} added as its administrator — Telegram only reports posts from channels the bot
       administers.</p></div>`;
+}
+async function reachFixWebhook(btn,cudzy){
+  if(cudzy&&!await askConfirm({title:'Point the bot at the panel?',
+    body:'This bot\'s updates currently go to another address. If another system uses this bot, it will stop receiving them.',
+    ok:'Point to the panel'}))return;
+  return busy(btn,'Fixing…',async()=>{
+    try{const r=await api('/api/admin/reach/webhook',{method:'POST',body:JSON.stringify({force:!!cudzy})});
+      toast(r.webhook&&r.webhook.state==='ok'?'Telegram now reports new posts to the panel.':'Saved — check the status line.','ok');
+      go(VIEW);
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
 }
 async function reachSaveChannels(kanaly,btn){
   return busy(btn,'Saving…',async()=>{

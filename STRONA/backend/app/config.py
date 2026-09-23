@@ -384,6 +384,11 @@ class Settings:
     partner_ping_on_traffic: bool = (
         os.getenv("PARTNER_PING_ON_TRAFFIC", "true").strip().lower()
         not in ("0", "false", "no"))
+    # Reach BOT: skan publicznego podglądu kanałów z ruchu strony (co 10 min).
+    # Zapas na posty, których webhook Telegrama nie zgłosił.
+    reach_scan_on_traffic: bool = (
+        os.getenv("REACH_SCAN_ON_TRAFFIC", "true").strip().lower()
+        not in ("0", "false", "no"))
     # Rabat należny klientowi, którego przyprowadził partner. To warunek umowy,
     # więc — tak samo jak adres wyżej — nie ma go w kodzie: repozytorium jest
     # publiczne, a stawka potrafi się zmienić szybciej niż deploy. 0 = okno
