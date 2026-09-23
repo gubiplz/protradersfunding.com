@@ -2206,9 +2206,19 @@ const VIEWS={
   if(!accs.length){$('view').innerHTML='<div class="empty"><h3>No accounts yet</h3><p>Analytics appear once you have a challenge account.</p></div>';return}
   window._anAcc=window._anAcc||accs[0].id;
   if(!accs.some(a=>a.id===window._anAcc))window._anAcc=accs[0].id;
+  /* Każda faza osobno: po awansie konto startuje od zera, więc Phase 1,
+     Phase 2 i Funded to trzy różne historie, a nie jedna wspólna. Domyślnie
+     faza bieżąca; wybór pamiętamy per konto. */
+  const accSel=accs.find(a=>a.id===window._anAcc);
+  const fazy=(accSel&&accSel.phases&&accSel.phases.length)?accSel.phases:[{phase:accSel?.phase,label:'',current:true}];
+  window._anPhase=window._anPhase||{};
+  let faza=window._anPhase[window._anAcc];
+  if(!fazy.some(f=>f.phase===faza))faza=(fazy.find(f=>f.current)||fazy[fazy.length-1]).phase;
+  const fazaInfo=fazy.find(f=>f.phase===faza)||{};
+  const q=faza?`?phase=${encodeURIComponent(faza)}`:'';
   const [act,st]=await Promise.all([
-    api(`/api/me/accounts/${window._anAcc}/activity`),
-    api(`/api/me/accounts/${window._anAcc}/stats`)]);
+    api(`/api/me/accounts/${window._anAcc}/activity${q}`),
+    api(`/api/me/accounts/${window._anAcc}/stats${q}`)]);
   const days=act.days;
   const total=days.reduce((s,d)=>s+d.pnl,0);
   const bestD=days.reduce((m,d)=>d.pnl>(m?.pnl??-1e18)?d:m,null);
@@ -2229,10 +2239,13 @@ const VIEWS={
   </div>`;
   $('view').innerHTML=`
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
-      <select id="an-sel" class="inp" style="max-width:260px" onchange="window._anAcc=parseInt(this.value);VIEWS.analytics()">
-        ${accs.map(a=>`<option value="${a.id}"${a.id===window._anAcc?' selected':''}>${esc(a.login)} · ${esc(a.product_key)}</option>`).join('')}
+      <select id="an-sel" class="inp" style="max-width:340px" onchange="const [i,f]=this.value.split('|');window._anAcc=parseInt(i);window._anPhase[window._anAcc]=f;VIEWS.analytics()">
+        ${accs.map(a=>((a.phases&&a.phases.length)?a.phases:[{phase:a.phase,label:''}]).slice().reverse().map(f=>
+          `<option value="${a.id}|${esc(f.phase||'')}"${a.id===window._anAcc&&f.phase===faza?' selected':''}>${esc(a.login)} · ${esc(a.product_key)}${f.label?' · '+esc(f.label)+(f.current&&a.phases.length>1?' (now)':''):''}</option>`).join('')).join('')}
       </select>
-      <span class="muted" style="font-size:12px">Computed server-side from every closed trade on this account.</span>
+      <span class="muted" style="font-size:12px">${fazaInfo.label
+        ?`${esc(fazaInfo.label)} only${fazaInfo.from?` · since ${dstr(fazaInfo.from)}`:''}${fazaInfo.to?` until ${dstr(fazaInfo.to)}`:''} — every phase starts from zero.`
+        :'Computed server-side from every closed trade on this account.'}</span>
     </div>
     <div class="stats-row">
       <div class="stat-tile"><div class="tile-ic ${total>=0?'green':'orange'}">${ICO.trend}</div>
@@ -3797,7 +3810,11 @@ async function openAcc(id){
   const dlUsd=a.initial_balance*dlPct/100, dlLimUsd=a.initial_balance*(m.max_daily_loss_pct||0)/100;
   const curve=a.equity_curve||[];
   const openPnl=a.open_pnl||0;
-  const started=a.created_at?dutc(a.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'—';
+  /* Po awansie liczby konta opisują bieżącą fazę od zera, więc i data startu
+     jest datą startu fazy (Phase 2 / Funded), a nie założenia konta. */
+  const fazaOd=(a.phases&&a.phases.length>1&&a.phase_started_at)?a.phase_started_at:a.created_at;
+  const started=fazaOd?dutc(fazaOd).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'—';
+  const startLbl=(a.phases&&a.phases.length>1&&a.phase_started_at)?((a.phases.find(f=>f.current)||{}).label||'Phase')+' started':'Start';
   const split=a.profit_split_pct??90;
   const objOn=objLinesOn();
   $('view').innerHTML=`
@@ -3857,7 +3874,7 @@ async function openAcc(id){
         <div class="kv2"><span class="k">Status</span>
           <span class="status ${esc(a.status)}"><span class="dot"></span>${a.status==='active'?'evaluation':esc(a.status)}</span></div>
         <div class="kv2"><span class="k">Account Number</span><span class="v">${esc(a.login)}</span></div>
-        <div class="kv2"><span class="k">Start</span><span class="v">${started}</span></div>
+        <div class="kv2"><span class="k">${startLbl}</span><span class="v">${started}</span></div>
         <div class="kv2"><span class="k">Account Size</span><span class="v">$${fmt0(a.initial_balance)}</span></div>
         <div class="kv2"><span class="k">Profit Split</span>
           <span class="v">${split}:${100-split}<span class="split-under"><i style="width:${split}%"></i></span></span></div>

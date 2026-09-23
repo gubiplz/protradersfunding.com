@@ -514,6 +514,13 @@ def _account_dict(acc: Account, with_metrics: bool = True, with_credentials: boo
         "payout_available": _payout_available(acc),
         "payout_days_left": poller.payout_days_left(acc),
         "day_reset_at": _next_day_reset(),
+        # Fazy konta do wyboru w Analytics (Phase 1 / Phase 2 / Funded) —
+        # każda liczona osobno, bo awans zaczyna konto od zera.
+        "phase_started_at": acc.phase_started_at.isoformat() if acc.phase_started_at else None,
+        "phases": [{"phase": o["phase"], "label": o["label"], "current": o["current"],
+                    "from": o["from"].isoformat() if o["from"] else None,
+                    "to": o["to"].isoformat() if o["to"] else None}
+                   for o in _phase_windows(acc)],
     }
     if admin_view:
         d["payout_pool_usd"] = getattr(acc, "payout_pool_usd", None)
@@ -560,17 +567,77 @@ def _mask_name(full_name: str) -> str:
     return f"{parts[0]} {parts[-1][0]}."
 
 
+PHASE_LABEL = {"eval_1": "Phase 1", "eval_2": "Phase 2", "funded": "Funded"}
+
+
+def _bez_strefy(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    return dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
+
+
+def _phase_windows(acc: Account) -> list[dict]:
+    """Okna faz konta, od najstarszej: faza, etykieta, [od, do), czy bieżąca.
+
+    Awans zostawia to samo konto i ten sam login, a transakcje i snapshoty nie
+    niosą fazy — granice odtwarzamy z dat na koncie: `phase_started_at` to start
+    fazy bieżącej, `prev_phase_started_at` start poprzedniej. Pierwsza faza nie
+    ma dolnej granicy (wszystko sprzed pierwszego awansu to Phase 1), więc konto
+    bez awansu wygląda dokładnie jak dawniej. Gdy daty brak (np. admin wyczyścił
+    historię), okna się nie dzieli — lepiej całość niż zmyślony podział.
+    """
+    kolej = ["eval_1", "eval_2", "funded"] if (acc.steps or 1) >= 2 else ["eval_1", "funded"]
+    teraz = acc.phase if acc.phase in kolej else None
+    start = _bez_strefy(acc.phase_started_at)
+    prev = _bez_strefy(acc.prev_phase_started_at)
+    okna: list[tuple[str, datetime | None, datetime | None]]
+    if teraz is None or kolej.index(teraz) == 0 or start is None:
+        okna = [(acc.phase, None, None)]
+    elif kolej.index(teraz) == 1:
+        okna = [(kolej[0], None, start), (teraz, start, None)]
+    elif prev is not None and prev < start:
+        okna = [(kolej[0], None, prev), (kolej[1], prev, start), (teraz, start, None)]
+    else:
+        okna = [(kolej[1], None, start), (teraz, start, None)]
+    return [{"phase": f, "label": PHASE_LABEL.get(f, f), "from": od, "to": do,
+             "current": do is None} for f, od, do in okna]
+
+
+def _phase_window(acc: Account, phase: str | None) -> tuple[datetime | None, datetime | None]:
+    """[od, do) wybranej fazy; bez parametru albo z nieznaną fazą — bieżąca.
+
+    Domyślnie bieżąca faza: po awansie konto startuje „od zera", więc widok
+    konta i Analytics liczą tylko jej transakcje, a poprzednia faza zostaje
+    do obejrzenia z wyboru w Analytics."""
+    okna = _phase_windows(acc)
+    for o in okna:
+        if phase and o["phase"] == phase:
+            return o["from"], o["to"]
+    return okna[-1]["from"], okna[-1]["to"]
+
+
+def _w_oknie(ts: datetime | None, od: datetime | None, do: datetime | None) -> bool:
+    ts = _bez_strefy(ts)
+    if ts is None:
+        return od is None
+    return (od is None or ts >= od) and (do is None or ts < do)
+
+
 CURVE_POINTS = 300
 
 
-def _curve_from_snapshots(session, acc: Account) -> list[dict]:
+def _curve_from_snapshots(session, acc: Account, od=None, do=None) -> list[dict]:
     """Awaryjna krzywa dla kont bez ani jednej transakcji (np. sam feed sim).
 
-    Próbkuje CAŁĄ historię, a nie ostatnie 300 tyknięć pollera — przy stojącym
-    koncie te ostatnie mają identyczne equity i dawały płaską kreskę zamiast
-    wykresu.
+    Próbkuje CAŁĄ historię fazy, a nie ostatnie 300 tyknięć pollera — przy
+    stojącym koncie te ostatnie mają identyczne equity i dawały płaską kreskę
+    zamiast wykresu.
     """
     q = session.query(EquitySnapshot).filter(EquitySnapshot.account_id == acc.id)
+    if od is not None:
+        q = q.filter(EquitySnapshot.ts >= od)
+    if do is not None:
+        q = q.filter(EquitySnapshot.ts < do)
     total = q.count()
     if total <= CURVE_POINTS:
         snaps = q.order_by(EquitySnapshot.ts).all()
@@ -584,7 +651,7 @@ def _curve_from_snapshots(session, acc: Account) -> list[dict]:
              "balance": round(s.balance, 2), "kind": "tick"} for i, s in enumerate(snaps)]
 
 
-def _equity_curve(session, acc: Account) -> list[dict]:
+def _equity_curve(session, acc: Account, phase: str | None = None) -> list[dict]:
     """Krzywa equity indeksowana LICZBĄ TRANSAKCJI — jak na dashboardach propów.
 
     Punkt 0 to kapitał startowy, każdy kolejny — stan konta po n-tej zamkniętej
@@ -592,17 +659,23 @@ def _equity_curve(session, acc: Account) -> list[dict]:
     chronologicznie jako krok w dół przy tym samym `i` (nie są transakcją), więc
     ostatni punkt zgadza się co do centa z saldem konta. Otwarta pozycja dokłada
     punkt z bieżącym equity — tam i tylko tam `equity` różni się od `balance`.
-    """
-    trades = (session.query(Trade)
-              .filter(Trade.account_id == acc.id, Trade.status == "closed")
-              .order_by(Trade.closed_at, Trade.id).all())
-    if not trades:
-        return _curve_from_snapshots(session, acc)
 
-    payouts = (session.query(Payout)
-               .filter(Payout.account_id == acc.id, Payout.balance_reset.is_(True),
-                       Payout.profit_amount > 0)
-               .order_by(Payout.ts).all())
+    Tylko jedna faza (domyślnie bieżąca): awans zeruje saldo, więc krzywa
+    Phase 2 startuje od kapitału startowego, a nie od końca Phase 1.
+    """
+    od, do = _phase_window(acc, phase)
+    trades = [t for t in (session.query(Trade)
+                          .filter(Trade.account_id == acc.id, Trade.status == "closed")
+                          .order_by(Trade.closed_at, Trade.id).all())
+              if _w_oknie(t.closed_at or t.opened_at, od, do)]
+    if not trades:
+        return _curve_from_snapshots(session, acc, od, do)
+
+    payouts = [p for p in (session.query(Payout)
+                           .filter(Payout.account_id == acc.id, Payout.balance_reset.is_(True),
+                                   Payout.profit_amount > 0)
+                           .order_by(Payout.ts).all())
+               if _w_oknie(p.ts, od, do)]
     running = acc.initial_balance
     first_ts = trades[0].opened_at or trades[0].closed_at
     out = [{"i": 0, "ts": first_ts.isoformat(), "equity": round(running, 2),
@@ -626,8 +699,9 @@ def _equity_curve(session, acc: Account) -> list[dict]:
                     "side": t.side, "lots": t.lots, "pnl": round(t.pnl, 2)})
     _drain_payouts(None, len(trades))
 
-    floating = sum(t.pnl for t in session.query(Trade)
-                   .filter(Trade.account_id == acc.id, Trade.status == "open").all())
+    floating = 0.0 if do is not None else sum(
+        t.pnl for t in session.query(Trade)
+        .filter(Trade.account_id == acc.id, Trade.status == "open").all())
     if floating:
         out.append({"i": len(trades) + 1, "ts": datetime.now(timezone.utc).isoformat(),
                     "equity": round(running + floating, 2), "balance": round(running, 2),
@@ -1924,7 +1998,8 @@ LEDGER_MAX = 300
 
 
 @app.get("/api/me/accounts/{account_id}/activity")
-def account_activity(account_id: int, trader: Trader = Depends(auth.current_trader)):
+def account_activity(account_id: int, phase: str | None = None,
+                     trader: Trader = Depends(auth.current_trader)):
     """Kalendarz dzienny + księga operacji na koncie (transakcje i wypłaty).
 
     Saldo przy każdym wierszu bierzemy ze SNAPSHOTU z chwili zdarzenia, a nie
@@ -1934,17 +2009,27 @@ def account_activity(account_id: int, trader: Trader = Depends(auth.current_trad
 
     Dzienny wynik liczymy z TRANSAKCJI, nie z różnicy sald. Inaczej dzień, w
     którym trader zarobił i od razu dostał wypłatę, pokazywał zero.
+
+    Jedna faza na raz (`phase`, domyślnie bieżąca) — po awansie konto startuje
+    od zera, a poprzednia faza zostaje do obejrzenia osobno.
     """
     session = SessionLocal()
     try:
         acc = _own_account(session, trader, account_id)
-        snaps = (session.query(EquitySnapshot).filter(EquitySnapshot.account_id == account_id)
-                 .order_by(EquitySnapshot.ts).limit(20000).all())
-        trades = (session.query(Trade)
-                  .filter(Trade.account_id == account_id, Trade.status == "closed")
-                  .order_by(Trade.closed_at).all())
-        payouts = (session.query(Payout).filter(Payout.account_id == account_id)
-                   .order_by(Payout.ts).all())
+        od, do = _phase_window(acc, phase)
+        q = session.query(EquitySnapshot).filter(EquitySnapshot.account_id == account_id)
+        if od is not None:
+            q = q.filter(EquitySnapshot.ts >= od)
+        if do is not None:
+            q = q.filter(EquitySnapshot.ts < do)
+        snaps = q.order_by(EquitySnapshot.ts).limit(20000).all()
+        trades = [t for t in (session.query(Trade)
+                              .filter(Trade.account_id == account_id, Trade.status == "closed")
+                              .order_by(Trade.closed_at).all())
+                  if _w_oknie(t.closed_at or t.opened_at, od, do)]
+        payouts = [p for p in (session.query(Payout).filter(Payout.account_id == account_id)
+                               .order_by(Payout.ts).all())
+                   if _w_oknie(p.ts, od, do)]
 
         def _naive(dt):
             return dt.replace(tzinfo=None) if dt and dt.tzinfo else dt
@@ -2012,7 +2097,8 @@ def account_activity(account_id: int, trader: Trader = Depends(auth.current_trad
 
 
 @app.get("/api/me/accounts/{account_id}/stats")
-def account_stats(account_id: int, trader: Trader = Depends(auth.current_trader)):
+def account_stats(account_id: int, phase: str | None = None,
+                  trader: Trader = Depends(auth.current_trader)):
     """Statystyki WSZYSTKICH zamkniętych transakcji konta — bez sufitu LEDGER_MAX.
 
     Księga w /activity jest przycięta, więc liczenie w przeglądarce kłamałoby
@@ -2021,10 +2107,12 @@ def account_stats(account_id: int, trader: Trader = Depends(auth.current_trader)
     """
     session = SessionLocal()
     try:
-        _own_account(session, trader, account_id)
-        trades = (session.query(Trade)
-                  .filter(Trade.account_id == account_id, Trade.status == "closed")
-                  .order_by(Trade.closed_at).all())
+        acc = _own_account(session, trader, account_id)
+        od, do = _phase_window(acc, phase)
+        trades = [t for t in (session.query(Trade)
+                              .filter(Trade.account_id == account_id, Trade.status == "closed")
+                              .order_by(Trade.closed_at).all())
+                  if _w_oknie(t.closed_at or t.opened_at, od, do)]
         n = len(trades)
         if n == 0:
             return {"trades": 0}
