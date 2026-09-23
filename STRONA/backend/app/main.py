@@ -2707,6 +2707,15 @@ def ticket_reply(ticket_id: int, payload: TicketReplyIn, trader: Trader = Depend
         session.close()
 
 
+def _pochodzenia_po_id(session, idki) -> dict:
+    """`origin.mapa_pochodzenia` dla zbioru id traderów (bez None)."""
+    idki = {i for i in idki if i}
+    if not idki:
+        return {}
+    traderzy = session.query(Trader).filter(Trader.id.in_(idki)).all()
+    return origin.mapa_pochodzenia(session, traderzy)
+
+
 @app.get("/api/admin/tickets", dependencies=[Depends(auth.require_admin)])
 def admin_tickets():
     session = SessionLocal()
@@ -2716,10 +2725,16 @@ def admin_tickets():
         # round-tripow do bazy, a baza stoi za oceanem.
         wiadomosci = _wiadomosci_biletow(session, [t.id for t in rows])
         maile = _maile_traderow(session, {t.trader_id for t in rows})
+        # Pochodzenie (free lejek / grant / Afryka + kraj) pod checkbox „Free"
+        # i filtr kraju — to samo `origin`, co w Clients, raz dla całej listy.
+        pochodzenia = _pochodzenia_po_id(session, {t.trader_id for t in rows})
         out = []
         for t in rows:
             d = _ticket_dict(session, t, msgs=wiadomosci[t.id])
             d["trader_email"] = maile.get(t.trader_id)
+            p = pochodzenia.get(t.trader_id)
+            d["origin"] = p.json() if p else None
+            d["desk"] = p.desk if p else None
             out.append(d)
         return out
     finally:
@@ -4818,8 +4833,16 @@ def admin_kyc(imported: int = 0):
         history = (history
                    .order_by(Trader.kyc_reviewed_at.desc().nullslast(), Trader.id.desc())
                    .limit(200).all())
-        return {"pending": [_kyc_dict(t) for t in pending],
-                "history": [_kyc_dict(t) for t in history]}
+        # Checkbox „Free" i filtr kraju jak w Clients: `origin` raz dla obu list.
+        pochodzenia = origin.mapa_pochodzenia(session, [*pending, *history])
+
+        def wiersz(t):
+            d, p = _kyc_dict(t), pochodzenia.get(t.id)
+            d["origin"] = p.json() if p else None
+            d["desk"] = p.desk if p else None
+            return d
+        return {"pending": [wiersz(t) for t in pending],
+                "history": [wiersz(t) for t in history]}
     finally:
         session.close()
 
