@@ -165,6 +165,26 @@ def test_mail_z_poswiadczeniami_mowi_o_upgradzie():
     assert "paid for the" not in bez
 
 
+def test_przelacznik_w_panelu_gasi_i_zapala_promocje(promo):
+    """Settings → Upgrade your size: bez zmiany env gasi pasek, kod i upgrade
+    w checkoucie (jedna bramka `promo_active`), a potem zapala z powrotem."""
+    from app.config import get_settings
+    admin = {"X-Admin-Token": get_settings().admin_token}
+    try:
+        r = client.post("/api/admin/upgrade-promo", headers=admin, json={"enabled": False}).json()
+        assert r["enabled"] is False and r["active"] is False and r["env_on"] is True
+        assert "promo-bar" not in client.get("/").text
+        assert client.get(f"/api/promo?code={KOD}").json()["valid"] is False
+
+        r = client.post("/api/admin/upgrade-promo", headers=admin, json={"enabled": True}).json()
+        assert r["enabled"] is True and r["active"] is True
+        assert "promo-bar" in client.get("/").text
+        assert client.get(f"/api/promo?code={KOD}").json()["valid"] is True
+    finally:
+        client.post("/api/admin/upgrade-promo", headers=admin, json={"enabled": True})
+    assert client.post("/api/admin/upgrade-promo", json={"enabled": False}).status_code == 403
+
+
 def test_wylacznik_gasi_takze_tresc_na_stronie(monkeypatch):
     monkeypatch.setattr(catalog.settings, "promo_upgrade", False)
     assert "promo-bar" not in client.get("/").text

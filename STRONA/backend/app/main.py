@@ -36,7 +36,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 
@@ -51,7 +51,7 @@ from .models import (LEAD_LOST_STATUSES, LEAD_STATUSES, LOST_REASONS,
                      Account, AchievementReward, AppSetting, Breach, Certificate,
                      ChannelPost,
                      CreditLedger, EquitySnapshot, FlashOffer, JournalEntry, KycFile,
-                     Lead, LeadEvent,
+                     AdminInboxMark, Lead, LeadEvent,
                      LeadMailTemplate, LeadReminder, MailLog, Notification,
                      Order, Payout, PayoutRequest, PoolAccount, PostMedia, Product,
                      PushSubscription,
@@ -514,6 +514,13 @@ def _account_dict(acc: Account, with_metrics: bool = True, with_credentials: boo
         "payout_available": _payout_available(acc),
         "payout_days_left": poller.payout_days_left(acc),
         "day_reset_at": _next_day_reset(),
+        # Fazy konta do wyboru w Analytics (Phase 1 / Phase 2 / Funded) —
+        # każda liczona osobno, bo awans zaczyna konto od zera.
+        "phase_started_at": acc.phase_started_at.isoformat() if acc.phase_started_at else None,
+        "phases": [{"phase": o["phase"], "label": o["label"], "current": o["current"],
+                    "from": o["from"].isoformat() if o["from"] else None,
+                    "to": o["to"].isoformat() if o["to"] else None}
+                   for o in _phase_windows(acc)],
     }
     if admin_view:
         d["payout_pool_usd"] = getattr(acc, "payout_pool_usd", None)
@@ -560,17 +567,77 @@ def _mask_name(full_name: str) -> str:
     return f"{parts[0]} {parts[-1][0]}."
 
 
+PHASE_LABEL = {"eval_1": "Phase 1", "eval_2": "Phase 2", "funded": "Funded"}
+
+
+def _bez_strefy(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    return dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
+
+
+def _phase_windows(acc: Account) -> list[dict]:
+    """Okna faz konta, od najstarszej: faza, etykieta, [od, do), czy bieżąca.
+
+    Awans zostawia to samo konto i ten sam login, a transakcje i snapshoty nie
+    niosą fazy — granice odtwarzamy z dat na koncie: `phase_started_at` to start
+    fazy bieżącej, `prev_phase_started_at` start poprzedniej. Pierwsza faza nie
+    ma dolnej granicy (wszystko sprzed pierwszego awansu to Phase 1), więc konto
+    bez awansu wygląda dokładnie jak dawniej. Gdy daty brak (np. admin wyczyścił
+    historię), okna się nie dzieli — lepiej całość niż zmyślony podział.
+    """
+    kolej = ["eval_1", "eval_2", "funded"] if (acc.steps or 1) >= 2 else ["eval_1", "funded"]
+    teraz = acc.phase if acc.phase in kolej else None
+    start = _bez_strefy(acc.phase_started_at)
+    prev = _bez_strefy(acc.prev_phase_started_at)
+    okna: list[tuple[str, datetime | None, datetime | None]]
+    if teraz is None or kolej.index(teraz) == 0 or start is None:
+        okna = [(acc.phase, None, None)]
+    elif kolej.index(teraz) == 1:
+        okna = [(kolej[0], None, start), (teraz, start, None)]
+    elif prev is not None and prev < start:
+        okna = [(kolej[0], None, prev), (kolej[1], prev, start), (teraz, start, None)]
+    else:
+        okna = [(kolej[1], None, start), (teraz, start, None)]
+    return [{"phase": f, "label": PHASE_LABEL.get(f, f), "from": od, "to": do,
+             "current": do is None} for f, od, do in okna]
+
+
+def _phase_window(acc: Account, phase: str | None) -> tuple[datetime | None, datetime | None]:
+    """[od, do) wybranej fazy; bez parametru albo z nieznaną fazą — bieżąca.
+
+    Domyślnie bieżąca faza: po awansie konto startuje „od zera", więc widok
+    konta i Analytics liczą tylko jej transakcje, a poprzednia faza zostaje
+    do obejrzenia z wyboru w Analytics."""
+    okna = _phase_windows(acc)
+    for o in okna:
+        if phase and o["phase"] == phase:
+            return o["from"], o["to"]
+    return okna[-1]["from"], okna[-1]["to"]
+
+
+def _w_oknie(ts: datetime | None, od: datetime | None, do: datetime | None) -> bool:
+    ts = _bez_strefy(ts)
+    if ts is None:
+        return od is None
+    return (od is None or ts >= od) and (do is None or ts < do)
+
+
 CURVE_POINTS = 300
 
 
-def _curve_from_snapshots(session, acc: Account) -> list[dict]:
+def _curve_from_snapshots(session, acc: Account, od=None, do=None) -> list[dict]:
     """Awaryjna krzywa dla kont bez ani jednej transakcji (np. sam feed sim).
 
-    Próbkuje CAŁĄ historię, a nie ostatnie 300 tyknięć pollera — przy stojącym
-    koncie te ostatnie mają identyczne equity i dawały płaską kreskę zamiast
-    wykresu.
+    Próbkuje CAŁĄ historię fazy, a nie ostatnie 300 tyknięć pollera — przy
+    stojącym koncie te ostatnie mają identyczne equity i dawały płaską kreskę
+    zamiast wykresu.
     """
     q = session.query(EquitySnapshot).filter(EquitySnapshot.account_id == acc.id)
+    if od is not None:
+        q = q.filter(EquitySnapshot.ts >= od)
+    if do is not None:
+        q = q.filter(EquitySnapshot.ts < do)
     total = q.count()
     if total <= CURVE_POINTS:
         snaps = q.order_by(EquitySnapshot.ts).all()
@@ -584,7 +651,7 @@ def _curve_from_snapshots(session, acc: Account) -> list[dict]:
              "balance": round(s.balance, 2), "kind": "tick"} for i, s in enumerate(snaps)]
 
 
-def _equity_curve(session, acc: Account) -> list[dict]:
+def _equity_curve(session, acc: Account, phase: str | None = None) -> list[dict]:
     """Krzywa equity indeksowana LICZBĄ TRANSAKCJI — jak na dashboardach propów.
 
     Punkt 0 to kapitał startowy, każdy kolejny — stan konta po n-tej zamkniętej
@@ -592,17 +659,23 @@ def _equity_curve(session, acc: Account) -> list[dict]:
     chronologicznie jako krok w dół przy tym samym `i` (nie są transakcją), więc
     ostatni punkt zgadza się co do centa z saldem konta. Otwarta pozycja dokłada
     punkt z bieżącym equity — tam i tylko tam `equity` różni się od `balance`.
-    """
-    trades = (session.query(Trade)
-              .filter(Trade.account_id == acc.id, Trade.status == "closed")
-              .order_by(Trade.closed_at, Trade.id).all())
-    if not trades:
-        return _curve_from_snapshots(session, acc)
 
-    payouts = (session.query(Payout)
-               .filter(Payout.account_id == acc.id, Payout.balance_reset.is_(True),
-                       Payout.profit_amount > 0)
-               .order_by(Payout.ts).all())
+    Tylko jedna faza (domyślnie bieżąca): awans zeruje saldo, więc krzywa
+    Phase 2 startuje od kapitału startowego, a nie od końca Phase 1.
+    """
+    od, do = _phase_window(acc, phase)
+    trades = [t for t in (session.query(Trade)
+                          .filter(Trade.account_id == acc.id, Trade.status == "closed")
+                          .order_by(Trade.closed_at, Trade.id).all())
+              if _w_oknie(t.closed_at or t.opened_at, od, do)]
+    if not trades:
+        return _curve_from_snapshots(session, acc, od, do)
+
+    payouts = [p for p in (session.query(Payout)
+                           .filter(Payout.account_id == acc.id, Payout.balance_reset.is_(True),
+                                   Payout.profit_amount > 0)
+                           .order_by(Payout.ts).all())
+               if _w_oknie(p.ts, od, do)]
     running = acc.initial_balance
     first_ts = trades[0].opened_at or trades[0].closed_at
     out = [{"i": 0, "ts": first_ts.isoformat(), "equity": round(running, 2),
@@ -626,8 +699,9 @@ def _equity_curve(session, acc: Account) -> list[dict]:
                     "side": t.side, "lots": t.lots, "pnl": round(t.pnl, 2)})
     _drain_payouts(None, len(trades))
 
-    floating = sum(t.pnl for t in session.query(Trade)
-                   .filter(Trade.account_id == acc.id, Trade.status == "open").all())
+    floating = 0.0 if do is not None else sum(
+        t.pnl for t in session.query(Trade)
+        .filter(Trade.account_id == acc.id, Trade.status == "open").all())
     if floating:
         out.append({"i": len(trades) + 1, "ts": datetime.now(timezone.utc).isoformat(),
                     "equity": round(running + floating, 2), "balance": round(running, 2),
@@ -1924,7 +1998,8 @@ LEDGER_MAX = 300
 
 
 @app.get("/api/me/accounts/{account_id}/activity")
-def account_activity(account_id: int, trader: Trader = Depends(auth.current_trader)):
+def account_activity(account_id: int, phase: str | None = None,
+                     trader: Trader = Depends(auth.current_trader)):
     """Kalendarz dzienny + księga operacji na koncie (transakcje i wypłaty).
 
     Saldo przy każdym wierszu bierzemy ze SNAPSHOTU z chwili zdarzenia, a nie
@@ -1934,17 +2009,27 @@ def account_activity(account_id: int, trader: Trader = Depends(auth.current_trad
 
     Dzienny wynik liczymy z TRANSAKCJI, nie z różnicy sald. Inaczej dzień, w
     którym trader zarobił i od razu dostał wypłatę, pokazywał zero.
+
+    Jedna faza na raz (`phase`, domyślnie bieżąca) — po awansie konto startuje
+    od zera, a poprzednia faza zostaje do obejrzenia osobno.
     """
     session = SessionLocal()
     try:
         acc = _own_account(session, trader, account_id)
-        snaps = (session.query(EquitySnapshot).filter(EquitySnapshot.account_id == account_id)
-                 .order_by(EquitySnapshot.ts).limit(20000).all())
-        trades = (session.query(Trade)
-                  .filter(Trade.account_id == account_id, Trade.status == "closed")
-                  .order_by(Trade.closed_at).all())
-        payouts = (session.query(Payout).filter(Payout.account_id == account_id)
-                   .order_by(Payout.ts).all())
+        od, do = _phase_window(acc, phase)
+        q = session.query(EquitySnapshot).filter(EquitySnapshot.account_id == account_id)
+        if od is not None:
+            q = q.filter(EquitySnapshot.ts >= od)
+        if do is not None:
+            q = q.filter(EquitySnapshot.ts < do)
+        snaps = q.order_by(EquitySnapshot.ts).limit(20000).all()
+        trades = [t for t in (session.query(Trade)
+                              .filter(Trade.account_id == account_id, Trade.status == "closed")
+                              .order_by(Trade.closed_at).all())
+                  if _w_oknie(t.closed_at or t.opened_at, od, do)]
+        payouts = [p for p in (session.query(Payout).filter(Payout.account_id == account_id)
+                               .order_by(Payout.ts).all())
+                   if _w_oknie(p.ts, od, do)]
 
         def _naive(dt):
             return dt.replace(tzinfo=None) if dt and dt.tzinfo else dt
@@ -2012,7 +2097,8 @@ def account_activity(account_id: int, trader: Trader = Depends(auth.current_trad
 
 
 @app.get("/api/me/accounts/{account_id}/stats")
-def account_stats(account_id: int, trader: Trader = Depends(auth.current_trader)):
+def account_stats(account_id: int, phase: str | None = None,
+                  trader: Trader = Depends(auth.current_trader)):
     """Statystyki WSZYSTKICH zamkniętych transakcji konta — bez sufitu LEDGER_MAX.
 
     Księga w /activity jest przycięta, więc liczenie w przeglądarce kłamałoby
@@ -2021,10 +2107,12 @@ def account_stats(account_id: int, trader: Trader = Depends(auth.current_trader)
     """
     session = SessionLocal()
     try:
-        _own_account(session, trader, account_id)
-        trades = (session.query(Trade)
-                  .filter(Trade.account_id == account_id, Trade.status == "closed")
-                  .order_by(Trade.closed_at).all())
+        acc = _own_account(session, trader, account_id)
+        od, do = _phase_window(acc, phase)
+        trades = [t for t in (session.query(Trade)
+                              .filter(Trade.account_id == account_id, Trade.status == "closed")
+                              .order_by(Trade.closed_at).all())
+                  if _w_oknie(t.closed_at or t.opened_at, od, do)]
         n = len(trades)
         if n == 0:
             return {"trades": 0}
@@ -2362,21 +2450,82 @@ def my_achievements_claim(payload: ClaimIn, trader: Trader = Depends(auth.curren
 #  Centrum powiadomień (dzwonek w portalu); endpointy push — sekcja
 #  „Web push (PWA)" niżej                                                     #
 # --------------------------------------------------------------------------- #
+# Zakładki dzwonka w portalu. Kategoria idzie za przełącznikiem z Settings
+# (`notify._PREF_BY_EVENT`), z jednym wyjątkiem: recap i przegląd tygodnia
+# są pod „marketingiem" tylko dlatego, że da się je wyłączyć razem z ofertami
+# — treścią to rozmowa o własnym handlu, więc w dzwonku stoją pod Trading.
+_KATEGORIA_Z_PREFERENCJI = {"notify_trading": "trading", "notify_payouts": "payouts",
+                            "notify_updates": "updates", "notify_marketing": "updates"}
+_KATEGORIA_WYJATKI = {"daily_recap": "trading", "weekly_review": "trading",
+                      "upsell_scale": "trading"}
+
+
+def _kategoria_powiadomienia(event: str) -> str:
+    if event in _KATEGORIA_WYJATKI:
+        return _KATEGORIA_WYJATKI[event]
+    return _KATEGORIA_Z_PREFERENCJI.get(notify._PREF_BY_EVENT.get(event, ""), "updates")
+
+
+def _moje_powiadomienia(session, trader_id: int):
+    """Wiersze dzwonka TRADERA. Alerty działu (url `/admin…`) leżą w tej samej
+    tabeli pod kontem admina — w portalu nie mają czego szukać."""
+    return session.query(Notification).filter(
+        Notification.trader_id == trader_id,
+        or_(Notification.url.is_(None), ~Notification.url.like("/admin%")))
+
+
 @app.get("/api/me/notifications")
 def my_notifications(limit: int = 20, trader: Trader = Depends(auth.current_trader)):
     session = SessionLocal()
     try:
         limit = max(1, min(50, limit))
-        rows = (session.query(Notification).filter(Notification.trader_id == trader.id)
-                .order_by(Notification.id.desc()).limit(limit).all())
-        unread = (session.query(Notification)
-                  .filter(Notification.trader_id == trader.id,
-                          Notification.read_at.is_(None)).count())
+        rows = _moje_powiadomienia(session, trader.id).order_by(Notification.id.desc()).limit(limit).all()
+        unread = _moje_powiadomienia(session, trader.id).filter(Notification.read_at.is_(None)).count()
         return {"unread": unread,
-                "items": [{"id": n.id, "event": n.event, "title": n.title, "body": n.body,
+                "items": [{"id": n.id, "event": n.event, "cat": _kategoria_powiadomienia(n.event),
+                           "title": n.title, "body": n.body,
                            "url": n.url, "read": n.read_at is not None,
                            "created_at": n.created_at.isoformat() if n.created_at else None}
                           for n in rows]}
+    finally:
+        session.close()
+
+
+class NotificationIdsIn(BaseModel):
+    ids: list[int] = Field(default_factory=list, max_length=200)
+    read: bool = True
+
+
+@app.post("/api/me/notifications/mark")
+def notifications_mark(payload: NotificationIdsIn, trader: Trader = Depends(auth.current_trader)):
+    """Przeczytane / nieprzeczytane dla wybranych pozycji (wiersz, zaznaczenie w Edit)."""
+    if not payload.ids:
+        return {"ok": True, "changed": 0}
+    session = SessionLocal()
+    try:
+        kiedy = datetime.now(timezone.utc).replace(tzinfo=None) if payload.read else None
+        ile = (_moje_powiadomienia(session, trader.id)
+               .filter(Notification.id.in_(payload.ids))
+               .update({Notification.read_at: kiedy}, synchronize_session=False))
+        session.commit()
+        return {"ok": True, "changed": ile}
+    finally:
+        session.close()
+
+
+@app.post("/api/me/notifications/delete")
+def notifications_delete(payload: NotificationIdsIn, trader: Trader = Depends(auth.current_trader)):
+    """Usunięcie pozycji z dzwonka. Panel wysyła to dopiero po 5 s okna „Undo",
+    więc cofnięcie nie musi niczego odtwarzać. Tylko własne wiersze tradera."""
+    if not payload.ids:
+        return {"ok": True, "deleted": 0}
+    session = SessionLocal()
+    try:
+        ile = (_moje_powiadomienia(session, trader.id)
+               .filter(Notification.id.in_(payload.ids))
+               .delete(synchronize_session=False))
+        session.commit()
+        return {"ok": True, "deleted": ile}
     finally:
         session.close()
 
@@ -5443,6 +5592,37 @@ def admin_copytrading_offer_set(payload: CopytradingOfferIn):
         session.close()
 
 
+@app.get("/api/admin/upgrade-promo", dependencies=[Depends(auth.require_admin)])
+def admin_upgrade_promo_state():
+    """Stan promocji „Upgrade your size" dla karty w Settings.
+
+    `enabled` = włącznik z panelu, `active` = czy promocja naprawdę działa
+    teraz (włącznik + env + data końcowa) — panel pokazuje, CZEMU jest wyłączona."""
+    return {"enabled": catalog.promo_switch_on(), "active": catalog.promo_active(),
+            "env_on": settings.promo_upgrade, "ends": settings.promo_upgrade_ends or None,
+            "code": settings.promo_upgrade_code}
+
+
+@app.post("/api/admin/upgrade-promo", dependencies=[Depends(auth.require_admin)])
+def admin_upgrade_promo_set(payload: BogoPromoIn):
+    """Włącz/wyłącz promocję „Upgrade your size" z panelu, bez zmiany env.
+
+    Gasi razem pasek na stronie, pole kodu i mechanikę w checkoucie — wszystkie
+    pytają `catalog.promo_active()`. Zamówień już opłaconych nie rusza."""
+    session = SessionLocal()
+    try:
+        row = session.get(AppSetting, catalog.PROMO_UPGRADE_KEY)
+        if row is None:
+            row = AppSetting(key=catalog.PROMO_UPGRADE_KEY)
+            session.add(row)
+        row.value = "1" if payload.enabled else "0"
+        session.commit()
+    finally:
+        session.close()
+    catalog._PROMO_SWITCH["ts"] = 0.0
+    return admin_upgrade_promo_state()
+
+
 @app.get("/api/admin/bogo-promo", dependencies=[Depends(auth.require_admin)])
 def admin_bogo_promo_state():
     session = SessionLocal()
@@ -5862,12 +6042,83 @@ def admin_mark_order_failed(order_id: int, payload: OrderFailIn):
         session.close()
 
 
+def _admin_id(authorization: str | None) -> int:
+    """Kto patrzy na dzwonek: id konta admina albo 0 dla panelu na stałym tokenie.
+
+    `auth.require_admin` tylko wpuszcza — nie mówi, kto wszedł — a stan
+    dzwonka (przeczytane, usunięte) jest per człowiek."""
+    if authorization and authorization.lower().startswith("bearer "):
+        return auth.parse_token(authorization.split(" ", 1)[1].strip()) or 0
+    return 0
+
+
+def _naiwny_utc(dt: datetime) -> datetime:
+    """Porównywalna data: część kolumn wraca z bazy ze strefą, część bez."""
+    return dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
+
+
+INBOX_MARKI_LIMIT = 3000
+
+
+class InboxMarkIn(BaseModel):
+    ids: list[str] = Field(default_factory=list, max_length=500)
+    read: bool | None = None
+    hidden: bool | None = None
+
+
+@app.post("/api/admin/inbox/mark", dependencies=[Depends(auth.require_admin)])
+def admin_inbox_mark(payload: InboxMarkIn,
+                     authorization: str | None = Header(default=None)):
+    """Przeczytane / nieprzeczytane / usunięte / przywrócone — dla listy pozycji.
+
+    Jedno wywołanie na całą paczkę, bo panel oznacza hurtem („Mark all read",
+    zaznaczenie w trybie Edit, cały stos zdarzeń jednego leada)."""
+    kto = _admin_id(authorization)
+    ids = sorted({i.strip()[:40] for i in payload.ids if i and i.strip() and i.strip() != "*"})
+    if not ids or (payload.read is None and payload.hidden is None):
+        return {"ok": True, "changed": 0}
+    session = SessionLocal()
+    try:
+        teraz = datetime.now(timezone.utc)
+        istniejace = {m.item_id: m for m in session.query(AdminInboxMark)
+                      .filter(AdminInboxMark.admin_id == kto,
+                              AdminInboxMark.item_id.in_(ids)).all()}
+        for item_id in ids:
+            m = istniejace.get(item_id)
+            if m is None:
+                m = AdminInboxMark(admin_id=kto, item_id=item_id, hidden=False)
+                session.add(m)
+            if payload.read is not None:
+                m.read = payload.read
+            if payload.hidden is not None:
+                m.hidden = payload.hidden
+            m.updated_at = teraz
+        session.commit()
+        # Pozycje dzwonka żyją tygodniami, nie latami: najstarsze oznaczenia
+        # dotyczą rzeczy, które dawno wypadły z listy, więc je przycinamy.
+        nadmiar = (session.query(AdminInboxMark.id)
+                   .filter(AdminInboxMark.admin_id == kto, AdminInboxMark.item_id != "*")
+                   .order_by(AdminInboxMark.updated_at.desc())
+                   .offset(INBOX_MARKI_LIMIT).all())
+        if nadmiar:
+            session.query(AdminInboxMark).filter(
+                AdminInboxMark.id.in_([n.id for n in nadmiar])).delete(synchronize_session=False)
+            session.commit()
+        return {"ok": True, "changed": len(ids)}
+    finally:
+        session.close()
+
+
 @app.get("/api/admin/inbox", dependencies=[Depends(auth.require_admin)])
-def admin_inbox():
+def admin_inbox(authorization: str | None = Header(default=None)):
     """Dzwonek w panelu: ostatnie „coś przyszło" ze wszystkich kolejek.
 
-    Agregacja z istniejących tabel (bez osobnej tabeli powiadomień admina);
-    co jest „nieprzeczytane" rozstrzyga frontend po localStorage."""
+    Agregacja z istniejących tabel (bez osobnej tabeli powiadomień admina).
+    Każda pozycja ma stabilne `id`, `kind` (rodzaj zdarzenia — panel dobiera
+    po nim ikonę), `ref` (id obiektu, który otwiera klik: bilet, wniosek,
+    zamówienie, trader z KYC) i `read`. Przeczytane i usunięte trzyma `admin_inbox_marks`,
+    per admin — usunięta pozycja nie wraca przy następnym odświeżeniu."""
+    kto = _admin_id(authorization)
     session = SessionLocal()
     try:
         zamowienia = session.query(Order).order_by(Order.id.desc()).limit(25).all()
@@ -5890,20 +6141,25 @@ def admin_inbox():
 
         items = []
         for o in zamowienia:
-            items.append({"type": "order", "ts": (o.paid_at or o.created_at).isoformat(),
+            items.append({"id": f"order:{o.id}", "kind": "order", "ref": o.id,
+                          "type": "order", "ts": (o.paid_at or o.created_at).isoformat(),
                           "title": f"Order #{o.id} · {o.product_key} · {o.status}",
                           "body": email_of(o.trader_id), "view": "orders"})
         for t in kyc:
             if t.kyc_submitted_at:
-                items.append({"type": "kyc", "ts": t.kyc_submitted_at.isoformat(),
+                items.append({"id": f"kyc:{t.id}:{int(t.kyc_submitted_at.timestamp())}",
+                              "kind": "kyc", "ref": t.id,
+                              "type": "kyc", "ts": t.kyc_submitted_at.isoformat(),
                               "title": f"KYC pending · {t.kyc_fullname or t.email}",
                               "body": t.email, "view": "kyc"})
         for pr in wnioski:
-            items.append({"type": "payout", "ts": pr.ts.isoformat(),
+            items.append({"id": f"payout:{pr.id}", "kind": "payout", "ref": pr.id,
+                          "type": "payout", "ts": pr.ts.isoformat(),
                           "title": f"Payout request ${pr.trader_share:,.2f}",
                           "body": email_of(pr.trader_id), "view": "payouts"})
         for m, t in bilety:
-            items.append({"type": "ticket", "ts": m.ts.isoformat(),
+            items.append({"id": f"ticket:{m.id}", "kind": "ticket", "ref": t.id,
+                          "type": "ticket", "ts": m.ts.isoformat(),
                           "title": f"Ticket #{t.id}: {t.subject}",
                           "body": email_of(t.trader_id), "view": "tickets"})
         # Leady tą samą listą co reszta kolejek: historia zdarzeń już istnieje
@@ -5922,11 +6178,35 @@ def admin_inbox():
                 "bought": f"Lead {kto_lead}",
                 "reminder": f"Follow-up: {kto_lead}",
             }.get(z.kind, f"Lead {kto_lead}")
-            items.append({"type": "lead", "ts": z.created_at.isoformat(),
+            items.append({"id": f"lead:{z.id}", "kind": z.kind, "who": kto_lead,
+                          "actor": z.actor or "",
+                          "type": "lead", "ts": z.created_at.isoformat(),
                           "title": tytul,
                           "body": (z.detail or z.kind)[:120], "view": "leads",
                           "lead_id": l.id, "desk": _desk_leada(l.source)})
         items.sort(key=lambda i: i["ts"], reverse=True)
+
+        marki = {m.item_id: m for m in session.query(AdminInboxMark)
+                 .filter(AdminInboxMark.admin_id == kto).all()}
+        znak = marki.get("*")
+        if znak is None:
+            # Pierwsze otwarcie: to, co już leży w kolejkach, nie jest „nowe".
+            znak = AdminInboxMark(admin_id=kto, item_id="*", read=True, hidden=False,
+                                  updated_at=datetime.now(timezone.utc))
+            session.add(znak)
+            session.commit()
+        granica = _naiwny_utc(znak.updated_at)
+        widoczne = []
+        for i in items:
+            m = marki.get(i["id"])
+            if m is not None and m.hidden:
+                continue
+            if m is not None and m.read is not None:
+                i["read"] = bool(m.read)
+            else:
+                i["read"] = _naiwny_utc(datetime.fromisoformat(i["ts"])) <= granica
+            widoczne.append(i)
+        items = widoczne
         # Budżet PER DESK, nie jeden na całość. Wspólne obcięcie po czasie
         # znaczyło, że seria zdarzeń o leadach wypychała z dzwonka wszystkie
         # zamówienia — i że liczba przy każdym polu mówiła o obcięciu, a nie

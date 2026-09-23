@@ -1067,3 +1067,30 @@ class MailLog(Base):
     subject: Mapped[str] = mapped_column(String(200), default="")
     ok: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
+class AdminInboxMark(Base):
+    """Stan jednej pozycji z dzwonka admina: przeczytana / usunięta.
+
+    Dzwonek nie ma własnej tabeli powiadomień — składa się z zamówień, KYC,
+    wniosków, biletów i `lead_events` (patrz `admin_inbox`). Tu leży tylko to,
+    co admin z pozycją ZROBIŁ, kluczem jest więc stabilne id pozycji
+    (`order:12`, `lead:345`…), a nie klucz obcy do którejkolwiek z tych tabel.
+
+    Stan jest per admin, bo dwóch ludzi na dyżurze czyta dzwonek osobno.
+    `admin_id = 0` to panel wpuszczony stałym tokenem (bez konta).
+
+    Wiersz `item_id = "*"` to znak wodny: wszystko starsze niż `updated_at` jest
+    przeczytane, chyba że admin świadomie oznaczył to jako nieprzeczytane
+    (`read = False`). Zakłada go pierwsze otwarcie dzwonka, żeby wdrożenie nie
+    zapaliło setki starych pozycji jako nowych.
+    """
+    __tablename__ = "admin_inbox_marks"
+    __table_args__ = (UniqueConstraint("admin_id", "item_id", name="uq_admin_inbox_mark"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    admin_id: Mapped[int] = mapped_column(Integer, index=True)
+    item_id: Mapped[str] = mapped_column(String(40))
+    read: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    hidden: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

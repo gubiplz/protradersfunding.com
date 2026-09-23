@@ -14,6 +14,8 @@ import vm from 'node:vm';
 
 const [, , sciezka, daneJson, importedShown] = process.argv;
 const zrodlo = readFileSync(sciezka, 'utf8');
+// Strona ładuje np-kit.js (wspólne klocki dzwonka) PRZED panelem — tu tak samo.
+const kit = readFileSync(new URL('np-kit.js', 'file://' + sciezka), 'utf8');
 
 const elementy = new Map();
 function element(id) {
@@ -81,6 +83,7 @@ okno.globalThis = okno;
 
 const kontekst = vm.createContext(okno);
 try {
+  vm.runInContext(kit, kontekst, { filename: 'np-kit.js' });
   vm.runInContext(zrodlo, kontekst, { filename: 'admin-panel.js' });
 } catch (e) {
   console.error('BUNDLE_NIE_WSTAL: ' + e.message);

@@ -1,0 +1,48 @@
+/* Ruch i czytelność strony publicznej — warstwa na site.css (tamten ma budżet
+   rozmiaru pilnowany testem). Sprężyny, pigułki przełączników, płynniejsze
+   wejścia sekcji, klarowniejsze karty. Działa razem z static/js/site-motion.js. */
+:root{
+  --sm-spring:linear(0,.0048,.0185 1.6%,.0735 3.3%,.2837 7.4%,.5128 11.7%,.7052 16.4%,.8398 21.3%,.9291 26.6%,.9826 32.3%,1.0115 38.4%,1.0228 45.3%,1.0212 52.3%,1.0114 62.2%,1.0022 76.5%,1);
+  --sm-ease:cubic-bezier(.22,1,.36,1);
+  --sm-hair:rgba(15,23,42,.1);
+}
+
+/* wejście sekcji: krótszy dystans, delikatne rozmycie, sprężyna */
+.rv{opacity:0;transform:translateY(18px) scale(.985);filter:blur(4px)}
+.rv.in{opacity:1;transform:none;filter:none;
+  transition:opacity .75s var(--sm-ease),transform 1s var(--sm-spring),filter .75s var(--sm-ease)}
+
+/* nagłówek: szkło i włosowa kreska po przewinięciu */
+.nav{transition:background .3s,border-color .3s,box-shadow .3s}
+.nav.on{background:rgba(255,255,255,.72);-webkit-backdrop-filter:blur(24px) saturate(180%);
+  backdrop-filter:blur(24px) saturate(180%);border-bottom-color:var(--sm-hair)}
+
+/* przyciski: wciśnięcie sprężyną zamiast skoku w górę */
+.btn,.btn-ghost,.btn-sm,.cfg-tab,.ptog,.psize,.cfg-size,.cfg-chip,.code-btn{
+  transition:transform .4s var(--sm-spring),box-shadow .25s,filter .2s,background .2s,color .2s,border-color .2s}
+.btn:hover{transform:none}
+.btn:active,.btn-ghost:active,.btn-sm:active,.code-btn:active{transform:scale(.96)}
+.cfg-size:active,.cfg-chip:active{transform:scale(.95)}
+
+/* karty: lekkie uniesienie pod kursorem */
+.card,.fork-card,.aff-band{transition:transform .5s var(--sm-spring),box-shadow .3s,border-color .3s}
+@media(hover:hover){
+  .card:hover,.fork-card:hover{transform:translateY(-3px);box-shadow:0 22px 44px -26px rgba(79,70,229,.28),0 2px 6px rgba(15,23,42,.05)}
+}
+
+/* FAQ: pozycje jak grupowana lista iOS */
+.faq details{transition:box-shadow .3s,border-color .3s}
+.faq details[open]{box-shadow:0 18px 40px -26px rgba(79,70,229,.3),0 2px 6px rgba(15,23,42,.04)}
+.faq summary::after{transition:transform .45s var(--sm-spring)}
+
+.hero-glow{will-change:transform}
+
+/* menu na telefonie: prawdziwe szkło zamiast prawie białej płachty, przez
+   którą prześwitywały plamy poświaty z hero */
+.mobile-menu{background:rgba(255,255,255,.86);-webkit-backdrop-filter:blur(30px) saturate(180%);
+  backdrop-filter:blur(30px) saturate(180%);border-bottom:.5px solid var(--sm-hair);
+  box-shadow:0 24px 40px -28px rgba(15,23,42,.35)}
+
+@media(prefers-reduced-motion:reduce){
+  .rv{filter:none}
+}

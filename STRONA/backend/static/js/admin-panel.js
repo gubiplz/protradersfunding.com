@@ -424,7 +424,7 @@ function toggleCollapse(){const c=$('side').classList.toggle('collapsed');
 function toast(msg,kind='ok',ms=6000){
   const t=document.createElement('div');t.className='toast '+kind;t.textContent=msg;
   $('toasts').appendChild(t);
-  setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),350)},ms);
+  setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),380)},ms);
 }
 /* ---------- trwale usuwanie z oknem na cofniecie ----------
    Klikniete usuwanie NIE leci od razu: przez 5 s czeka w kolejce, a admin widzi
@@ -503,7 +503,7 @@ function undoToast(msg,onUndo,ms=8000){
   t.querySelector('.undo-txt').textContent=msg;
   t.querySelector('.undo-btn').onclick=()=>{t.remove();onUndo()};
   $('toasts').appendChild(t);
-  setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),350)},ms);
+  setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),380)},ms);
 }
 
 function closeOver(){$('over').classList.remove('open')}
@@ -643,15 +643,11 @@ const VIEWS={
      wychodzi dopiero przy uzbrojeniu, więc póki pula jest pusta, nikt nawet nie
      próbuje wysyłać — i dziennik maili też milczy. Wiersz prowadzi do MT5 Pool,
      bo tam widać, komu i jakiego rozmiaru rachunku brakuje. */
+  /* Kolejność czytania: co czeka na mnie → jak stoi platforma → ostatnie
+     zamówienia → stan systemu (konfiguracja, zwykle bez zmian — na dole). */
+  const czeka=(pendingPay?1:0)+((kyc.pending||[]).length?1:0)+(openTick?1:0)+(s.mail_failed_7d?1:0)+(s.provisioning?1:0);
   $('view').innerHTML=`
-    <div class="sysbar">
-      <span class="sys ${s.stripe==='mock'?'warn':''}"><span class="dot"></span>Payments: <b>${esc(s.stripe)}</b></span>
-      <span class="sys"><span class="dot"></span>Provisioning queue: <b>${s.provisioning??0}</b></span>
-      <span class="sys"><span class="dot"></span>Pool free: <b>${s.pool_free??0}</b></span>
-      ${leadChannel('Client e-mail',s.notify_mail_missing)}
-      ${leadChannel('Lead e-mail',s.lead_mail_missing)}
-      ${leadChannel('Lead SMS',s.lead_sms_missing)}
-    </div>
+    <h4 class="ov-h">Needs attention <small>${czeka?`${czeka} waiting`:'all clear'}</small></h4>
     <div class="todo-grid">
       ${todo(pendingPay,'payout requests to review','payouts','wallet')}
       ${todo((kyc.pending||[]).length,'KYC submissions pending','kyc','shield')}
@@ -659,6 +655,7 @@ const VIEWS={
       ${s.mail_failed_7d?todo(s.mail_failed_7d,'e-mails failed to send (7 days)','mail','alert'):''}
       ${s.provisioning?todo(s.provisioning,'accounts waiting for an MT5 account from the pool','pool','bank'):''}
     </div>
+    <h4 class="ov-h">Platform</h4>
     <div class="stats-row">
       ${tile('purple','layers','Accounts',s.total,`${s.active} active · ${s.provisioning??0} provisioning`)}
       ${tile('green','trend','Funded',s.funded,`${s.failed} failed`)}
@@ -677,6 +674,15 @@ const VIEWS={
           <td data-l="Status"><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span></td>
           <td class="num rt-hide" data-l="Account">${accLink(o.account_id)}</td></tr>`).join('')}</tbody></table></div>`
         :'<p class="muted" style="font-size:13px">No orders yet.</p>'}
+    </div>
+    <h4 class="ov-h" style="margin-top:18px">System</h4>
+    <div class="sysbar">
+      <span class="sys ${s.stripe==='mock'?'warn':''}"><span class="dot"></span>Payments: <b>${esc(s.stripe)}</b></span>
+      <span class="sys"><span class="dot"></span>Provisioning queue: <b>${s.provisioning??0}</b></span>
+      <span class="sys"><span class="dot"></span>Pool free: <b>${s.pool_free??0}</b></span>
+      ${leadChannel('Client e-mail',s.notify_mail_missing)}
+      ${leadChannel('Lead e-mail',s.lead_mail_missing)}
+      ${leadChannel('Lead SMS',s.lead_sms_missing)}
     </div>`;
  },
 
@@ -920,9 +926,10 @@ const VIEWS={
  async settings(){
   // Payout BOT i Reach BOT przeniosly sie do zakladki Telegram, wiec ten widok
   // nie ciagnie juz ich stanu — dwa zapytania mniej przy kazdym wejsciu.
-  const [s,bg,cp]=await Promise.all([api('/api/stats'),
+  const [s,bg,cp,up]=await Promise.all([api('/api/stats'),
     api('/api/admin/bogo-promo').catch(()=>({enabled:false})),
-    api('/api/admin/copytrading-offer').catch(()=>({enabled:false,price_usd:299,real_mt5:false}))]);
+    api('/api/admin/copytrading-offer').catch(()=>({enabled:false,price_usd:299,real_mt5:false})),
+    api('/api/admin/upgrade-promo').catch(()=>null)]);
   $('view').innerHTML=`
     <div class="card-cols">
     <div class="sec-card" style="max-width:560px"><h3>Telegram</h3>
@@ -930,6 +937,21 @@ const VIEWS={
         channel health and the posting queue now have their own tab — everything about the
         channels in one place.</p>
       <button class="btn-p" onclick="go('telegram')">Open the Telegram tab</button></div>
+
+    ${up?`<div class="sec-card" style="max-width:560px"><h3>Upgrade your size</h3>
+      <div class="chip-row" style="margin-bottom:12px">
+        <span class="status ${up.active?'funded':'pending'}"><span class="dot"></span>${up.active?'running':'off'}</span>
+        <span class="muted" style="font-size:12px">code <b class="mono">${esc(up.code||'')}</b>${up.ends?` · ends ${esc(up.ends)}`:''}</span>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn-p" onclick="setUpgradePromo(${up.enabled?'false':'true'})" ${!up.env_on&&!up.enabled?'disabled':''}>${up.enabled?'Turn off':'Turn on'}</button>
+      </div>
+      <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
+        While it's on, the promo bar runs on the public site and <b>a purchase with the code gets
+        the next size up for the same fee</b>. Turning it off hides the bar and the code field and
+        stops the upgrade at checkout; orders already paid keep what they got.
+        ${!up.env_on?'<br><b style="color:var(--red)">Blocked by the server: PROMO_UPGRADE=false in the environment.</b>'
+          :up.enabled&&!up.active?'<br><b style="color:var(--gold)">Switched on, but the end date has passed — change PROMO_UPGRADE_ENDS.</b>':''}</p></div>`:''}
 
     <div class="sec-card" style="max-width:560px"><h3>Buy 1 Get 1 Free</h3>
       <div class="chip-row" style="margin-bottom:12px">
@@ -967,13 +989,10 @@ const VIEWS={
              <a href="#" onclick="go('pool');return false">MT5 Pool</a> tab.`}</p></div>
 
     <div class="sec-card" style="max-width:560px"><h3>Notifications</h3>
-      <div class="mod-row">
-        <div><div class="lbl">Push to this device</div>
-          <div class="muted" style="font-size:11.5px" id="push-state">New leads, claims and follow-ups — straight to this device.</div></div>
-        <button class="btn-p" id="push-btn" onclick="toggleAdminPush()">Enable</button>
-      </div>
-      <div style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)">
-        <div class="lbl" style="font-size:12px;color:var(--muted)">What buzzes your phone <span style="font-weight:400">(this account, every device — the full list of admin notifications)</span></div>
+      <div class="np-pr" data-push="${PUSH.st}" style="margin-top:12px">${npPushInner()}</div>
+      <div data-np-push-help></div>
+      <div style="margin-top:6px">
+        <div class="lbl" style="font-size:12px;color:var(--muted);margin-top:10px">What buzzes your phone <span style="font-weight:400">(this account, every device — the full list of admin notifications)</span></div>
         <div id="push-cats">${pushCatsHtml()}</div>
         <p class="muted" style="font-size:11.5px;margin-top:8px">Muted categories still land in the bell — they just stop buzzing.</p>
       </div>
@@ -1000,7 +1019,7 @@ const VIEWS={
         <a class="btn-o sm" href="/docs" target="_blank">API docs</a>
       </div></div>
     </div>`;
-  paintPushCard();
+  npPaintPush();refreshPush();
   paintTgIdentity();
  },
 
@@ -5286,6 +5305,13 @@ async function setBogoPromo(on){
     go('settings');
   }catch(e){toast('Error: '+e.message,'err')}
 }
+async function setUpgradePromo(on){
+  try{await api('/api/admin/upgrade-promo',{method:'POST',body:JSON.stringify({enabled:on})});
+    toast(on?'Upgrade promo is ON — the bar is back on the site and the code upgrades purchases.'
+            :'Upgrade promo is off — bar hidden, the code no longer upgrades new purchases.','ok',7000);
+    go('settings');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
 async function setSimFallback(on){
   try{await api('/api/admin/pool/sim-fallback',{method:'POST',body:JSON.stringify({enabled:on})});
     toast(on?'Auto-provisioning of simulated credentials is ON.':'Auto-provisioning turned off.','ok');
@@ -5914,112 +5940,589 @@ async function submitCreate(){
   }catch(e){toast('Error: '+e.message,'err');btn.disabled=false}
 }
 
-/* ---------- admin inbox (bell) ---------- */
+/* ---------- dzwonek: panel powiadomień ----------
+   Lista pod dzwonkiem to agregat kolejek z /api/admin/inbox (zamówienia, KYC,
+   wnioski, bilety, zdarzenia leadów). Przeczytane i usunięte trzyma serwer,
+   per admin (admin_inbox_marks), więc telefon i laptop widzą to samo.
+   Wspólne klocki (ikony, gesty, push, czas) — static/js/np-kit.js.
+
+   Klik w pozycję prowadzi PROSTO do rzeczy (bilet, wniosek o wypłatę, karta
+   leada…), bez ekranu pośredniego. Przeczytane/usuń — tylko gestem
+   przesunięcia (i hurtem w Edit), żeby wiersz nie był zaśmiecony przyciskami. */
 let INBOX=[];
+const NP={tab:'all',open:false,nav:'list',edit:false,picked:new Set(),
+  expanded:new Set(),fresh:new Set(),hiding:new Set(),loaded:false,known:null,dirty:false,ctxRow:null};
+try{const t=localStorage.getItem('pf_admin_inbox_tab');if(['all','leads','free','prop'].includes(t))NP.tab=t}catch(_){}
+const NP_TABS=[['all','All'],['leads','Leads'],['free','Free'],['prop','Prop']];
+
+/* Rodzaj zdarzenia → ikona, kolor, podpis. Wcześniej każde zdarzenie leada
+   miało ten sam trójkąt ostrzeżenia, bo panel nie znał rodzaju. */
+const NP_KIND={
+  applied:['userPlus','acc','New lead'],taken:['userCheck','green','Taken'],
+  released:['undo','gold','Released'],status:['arrows','purple','Status changed'],
+  reminder:['alarm','gold','Follow-up'],note:['note','blue','Note'],tier:['trend','purple','Tier changed'],
+  bought:['bag','green','Bought'],sms:['sms','blue','SMS sent'],email:['mail','blue','Email sent'],
+  telegram:['send','blue','Telegram message'],granted:['gift','green','Free account'],
+  delivery:['truck','blue','Delivery'],
+  order:['bag','green','Order'],kyc:['shield','blue','KYC'],payout:['wallet','purple','Payout request'],
+  ticket:['chat','acc','Ticket'],
+};
+function npKind(i){
+  if(i.type!=='lead')return NP_KIND[i.type]?i.type:'order';
+  if(i.kind==='claim')return /^released/i.test(i.body||'')?'released':'taken';
+  return NP_KIND[i.kind]?i.kind:'status';
+}
+const npCat=i=>i.type==='lead'?(i.desk==='free'?'free':'leads'):'prop';
+const npWho=i=>i.type==='lead'?(i.who||i.title):i.title;
+const npCap=s=>s?s.charAt(0).toUpperCase()+s.slice(1):s;
+/* `child` = wiersz w rozwiniętym stosie: rodzaj stoi już w pogrubionym
+   tytule, więc tekst go nie powtarza („Released / Released"). Autora
+   pokazujemy tylko, gdy to człowiek (adres z @), a nie landing czy cron. */
+function npText(i,child){
+  const b=String(i.body||'').trim();
+  if(i.type!=='lead')return b;
+  const k=npKind(i),lab=NP_KIND[k][2],kto=/@/.test(i.actor||'')?i.actor:'';
+  if(k==='released')return kto?`Released by ${kto}`:'Released back to the pool';
+  if(k==='status')return `Status: ${b}`;
+  if(k==='taken'||k==='reminder')return npCap(b)||lab;
+  const szczeg=b&&b!==i.kind&&b!=='applied'?b:'';
+  if(child)return npCap(szczeg)||(kto?`By ${kto}`:lab);
+  return szczeg?`${lab} · ${szczeg}`:lab;
+}
+const npPref=k=>{const p=ME&&ME.ui_prefs&&ME.ui_prefs.inbox;return !(p&&p[k]===false)};
+const npVisible=()=>INBOX.filter(i=>!NP.hiding.has(i.id)&&(NP.tab==='all'||i.cat===NP.tab));
+const npUnread=tab=>INBOX.filter(i=>!i.read&&!NP.hiding.has(i.id)&&(tab==='all'||i.cat===tab)).length;
+const npItem=id=>INBOX.find(i=>i.id===id);
+
 async function loadInbox(){
   try{
-    const d=await api('/api/admin/inbox');INBOX=d.items||[];
-    const seen=localStorage.getItem('pf_admin_inbox_seen')||'';
-    const n=INBOX.filter(i=>i.ts>seen).length;
-    const dot=$('bell-dot');
-    if(n){dot.textContent=n>9?'9+':n;dot.style.display='block'}else dot.style.display='none';
+    const d=await api('/api/admin/inbox');
+    const items=(d.items||[]).filter(i=>i.id).map(i=>({...i,cat:npCat(i)}));
+    if(NP.known)items.forEach(i=>{if(!NP.known.has(i.id))NP.fresh.add(i.id)});
+    NP.known=new Set(items.map(i=>i.id));
+    INBOX=items;NP.loaded=true;
+    npBadge();
+    if(NP.open){
+      if(npSwiping())NP.dirty=true;else npRenderList();
+      npSeg(true);
+    }
   }catch(_){}
 }
-function openInbox(){
-  const seen=localStorage.getItem('pf_admin_inbox_seen')||'';
-  const TYPE_ICO={order:'file',kyc:'shield',payout:'wallet',ticket:'chat',lead:'alert'};
-  const wiersz=i=>`
-    <div class="ticket-row" onclick="closeOver();go('${esc(i.view)}')${i.lead_id?`;openLead(${i.lead_id})`:''}">
-      <div class="tile-ic ${i.ts>seen?'orange':'blue'}" style="width:36px;height:36px;flex:0 0 36px">${ICO[TYPE_ICO[i.type]]||ICO.file}</div>
-      <div class="sub"><b>${esc(i.title)}</b>
-        <span>${esc(i.body||'')} · ${dstr(i.ts)}</span></div>
-      ${i.ts>seen?'<span class="status pending"><span class="dot"></span>new</span>':''}
-    </div>`;
-  /* Ten sam podział co przełączniki w Settings, ale jako FILTR na górze
-     (decyzja usera): dwa pola Leads/Prop, klik przełącza listę. Wybór
-     zapamiętany per przeglądarka. */
-  const tab=localStorage.getItem('pf_admin_inbox_tab')||'leads';
-  /* Trzy deski, bo tyle ich jest na Telegramie: płatny lejek, darmowy
-     (kanał LEADS NIGERIA) i platforma. Backend przysyła `desk` przy każdym
-     zdarzeniu o leadzie — panel nie zgaduje po źródle. */
-  const leady=INBOX.filter(i=>i.type==='lead'&&i.desk!=='free'),
-        darmowe=INBOX.filter(i=>i.type==='lead'&&i.desk==='free'),
-        prop=INBOX.filter(i=>i.type!=='lead');
-  const items=tab==='prop'?prop:tab==='free'?darmowe:leady;
-  const segBtn=(k,l,n)=>`<button class="${tab===k?'on':''}"
-    onclick="localStorage.setItem('pf_admin_inbox_tab','${k}');openInbox()">${l}${n?` (${n})`:''}</button>`;
-  openOver('Notifications',pushCardHtml()
-    +`<div class="seg" style="margin-bottom:12px">${segBtn('leads','Leads',leady.length)}${segBtn('free','Free',darmowe.length)}${segBtn('prop','Prop',prop.length)}</div>`
-    +(items.length?`<div class="tbl-wrap">${items.map(wiersz).join('')}</div>`
-      :`<div class="empty"><h3>Nothing here</h3><p>${tab==='prop'
-        ?'Orders, KYC submissions, payout requests and ticket messages show up here.'
-        :tab==='free'
-        ?'Leads from the free funnel — the ones that go to the LEADS NIGERIA channel.'
-        :'New leads, claims, statuses and follow-ups show up here.'}</p></div>`));
-  paintPushCard();
-  localStorage.setItem('pf_admin_inbox_seen',new Date().toISOString());
-  loadInbox();
+function npBadge(){
+  const n=npUnread('all'),dot=$('bell-dot');
+  if(!dot)return;
+  npBumpNum(dot,n);
+  if(n){dot.textContent=n>9?'9+':n;dot.style.display='block'}
+  else dot.style.display='none';
 }
 
-/* ---------- web push na telefon działu ----------
-   Ta sama infrastruktura co w portalu tradera (/api/push/*, wspólny /sw.js):
-   konto admina to Trader z is_admin, więc subskrypcja idzie tym samym
-   endpointem. Na iOS push działa wyłącznie w PWA z ekranu głównego —
-   stąd podpowiedź o instalacji zamiast martwego przycisku. */
-const b64ToU8=b64=>{const p='='.repeat((4-b64.length%4)%4);
-  const raw=atob((b64+p).replace(/-/g,'+').replace(/_/g,'/'));
-  return Uint8Array.from(raw,c=>c.charCodeAt(0))};
-function pushCardHtml(){
-  const ios=/iPhone|iPad|iPod/.test(navigator.userAgent);
-  const ok='serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window;
-  if(!ok)return `<div class="lead-card sec-card" style="margin-bottom:12px"><div class="mod-row">
-    <div><div class="lbl">Push to this device</div><div class="muted" style="font-size:11.5px">${
-      ios?'Install the panel first: open /admin in Safari → Share → Add to Home Screen, then come back here.'
-         :'This browser does not support web push.'}</div></div></div></div>`;
-  return `<div class="lead-card sec-card" style="margin-bottom:12px"><div class="mod-row">
-    <div><div class="lbl">Push to this device</div>
-      <div class="muted" style="font-size:11.5px" id="push-state">New leads, claims and follow-ups — straight to this device.</div></div>
-    <button class="btn-p" id="push-btn" onclick="toggleAdminPush()">Enable</button>
-  </div>
-  <p class="muted" style="font-size:11.5px;margin-top:8px">Pick which categories buzz — and pair
-    your Telegram — in <a href="#" onclick="closeOver();go('settings');return false">Settings</a>.</p></div>`;
+function npEnsure(){
+  if($('np'))return;
+  document.body.insertAdjacentHTML('beforeend',`
+  <div class="np-scrim" id="np-scrim"></div>
+  <section class="np" id="np" role="dialog" aria-modal="true" aria-label="Notifications" inert>
+    <div class="np-body">
+      <div class="np-pg np-list" id="np-list">
+        <div class="np-grab" data-np-drag></div>
+        <header class="np-bar" data-np-drag>
+          <div class="np-bar-l"><button type="button" class="np-tbtn" data-np="edit">Edit</button></div>
+          <div class="np-bar-t">Notifications</div>
+          <div class="np-bar-r">
+            <button type="button" class="np-ibtn np-gear" data-np="settings" aria-label="Notification settings">${npI('gear')}</button>
+            <button type="button" class="np-ibtn" data-np="close" aria-label="Close">${npI('x',2.2)}</button>
+            <span class="np-editacts">
+              <button type="button" class="np-act" data-np="bulkread" disabled>Mark read</button>
+              <button type="button" class="np-act danger" data-np="bulkdel" disabled>Delete</button>
+            </span>
+          </div>
+        </header>
+        <div class="np-scroll" id="np-scroll">
+          <div class="np-lt"><div><h2>Notifications</h2><small id="np-sub"></small></div>
+            <button type="button" class="np-tbtn np-noedit" data-np="allread">Mark all read</button>
+            <button type="button" class="np-tbtn np-onedit" data-np="selall">Select all</button></div>
+          <div class="np-pr" data-push="${PUSH.st}" data-np="pushrow">${npPushInner()}</div>
+          <div class="np-segw"><div class="np-seg" id="np-seg" role="tablist" aria-label="Filter"></div></div>
+          <div class="np-items" id="np-items" role="list"></div>
+        </div>
+      </div>
+      <div class="np-pg np-settings" id="np-settings" inert></div>
+    </div>
+  </section>
+  <div class="np-ctx" id="np-ctx" role="menu"></div>`);
+  const seg=$('np-seg');
+  seg.style.setProperty('--n',NP_TABS.length);
+  seg.innerHTML='<span class="np-pill"></span>'+NP_TABS.map(([k,l])=>
+    `<button type="button" role="tab" data-np-tab="${k}"><span>${l}</span><b class="np-n zero"></b></button>`).join('');
+  $('np-scroll').addEventListener('scroll',()=>npCtxClose(),{passive:true});
+  npPaintPush();npSeg(false);npNav('list');
 }
 
-/* KOMPLETNA lista tego, co może brzęczeć u admina, w dwóch grupach: Leads
-   (rura z landingu) i Prop (platforma). Wyciszane per KONTO
-   (ui_prefs.admin_push) — jedna decyzja gasi wszystkie urządzenia admina.
-   Brak wpisu = kategoria brzęczy; nowa kategoria zdarzeń dzwoni u wszystkich,
-   dopóki ktoś jej świadomie nie zgasi. */
+function openInbox(){npSetOpen(!NP.open)}
+function npSetOpen(open){
+  npEnsure();
+  NP.open=open;
+  const np=$('np');
+  np.classList.toggle('open',open);
+  $('np-scrim').classList.toggle('open',open);
+  np.inert=!open;
+  if(open){
+    np.style.transform='';
+    refreshPush();
+    npRenderList({anim:'f'});npSeg(false);
+    loadInbox();
+  }else{
+    npCtxClose();if(NP.edit)npSetEdit(false);npObserve(false);
+    if(NP.nav!=='list')setTimeout(()=>{if(!NP.open)npNav('list')},400);
+  }
+}
+
+function npSeg(bump){
+  const seg=$('np-seg');
+  if(!seg)return;
+  seg.style.setProperty('--i',Math.max(0,NP_TABS.findIndex(t=>t[0]===NP.tab)));
+  npQ('button',seg).forEach(b=>{
+    const on=b.dataset.npTab===NP.tab;
+    b.setAttribute('aria-selected',String(on));b.tabIndex=on?0:-1;
+    const el=b.querySelector('.np-n'),n=b.dataset.npTab==='all'?0:npUnread(b.dataset.npTab);
+    el.textContent=n>99?'99+':n;el.classList.toggle('zero',!n);
+    if(bump)npBumpNum(el,n);else el.dataset.n=n;
+  });
+  const all=npUnread('all'),sub=$('np-sub');
+  if(sub)sub.textContent=all?`${all} unread`:'All caught up';
+  const ar=document.querySelector('[data-np="allread"]');
+  if(ar)ar.disabled=!npUnread(NP.tab);
+  const ed=document.querySelector('[data-np="edit"]');
+  if(ed)ed.disabled=!npVisible().length&&!NP.edit;
+}
+function npSetTab(tab){
+  if(tab===NP.tab)return;
+  const dir=NP_TABS.findIndex(t=>t[0]===tab)>NP_TABS.findIndex(t=>t[0]===NP.tab)?'r':'l';
+  NP.tab=tab;NP.picked.clear();
+  try{localStorage.setItem('pf_admin_inbox_tab',tab)}catch(_){}
+  npSeg(false);
+  const sc=$('np-scroll'),segw=document.querySelector('.np-segw');
+  if(sc&&segw&&sc.scrollTop>segw.offsetTop)sc.scrollTop=segw.offsetTop;
+  npRenderList({anim:dir});
+  if(NP.edit)npEditbar();
+}
+
+/* Stos: kolejne zdarzenia JEDNEGO leada z tego samego dnia jako jedna karta
+   („Clarisse Castro · 4"), rozwijana jak stos powiadomień w iOS. */
+function npBlocks(items){
+  if(!npPref('group'))return items.map(one=>({one}));
+  const out=[],by=new Map();
+  for(const i of items){
+    if(!i.lead_id){out.push({one:i});continue}
+    let b=by.get(i.lead_id);
+    if(!b){b={key:'L'+i.lead_id,items:[]};by.set(i.lead_id,b);out.push(b)}
+    b.items.push(i);
+  }
+  return out.map(b=>b.items&&b.items.length===1?{one:b.items[0]}:b);
+}
+const npSwipeBg=()=>`<div class="np-ra" aria-hidden="true">
+  <button type="button" class="np-ra-l" data-np-act="read" tabindex="-1"><span class="if-unread">${npI('check',2.4)}</span><span class="if-read">${npI('dot')}</span><span class="if-unread">Read</span><span class="if-read">Unread</span></button>
+  <button type="button" class="np-ra-r" data-np-act="del" tabindex="-1"><span>Delete</span>${npI('trash')}</button></div>`;
+function npRow(i,o={}){
+  const k=NP_KIND[npKind(i)];
+  const glowny=o.child?k[2]:npWho(i);
+  const chip=!o.child&&i.cat==='free'?'<span class="np-chip">Free</span>':'';
+  return `<div class="np-row${i.read?'':' unread'}${NP.picked.has(i.id)?' picked':''}" data-id="${esc(i.id)}" role="listitem" style="--d:${o.d||0}">
+    ${npSwipeBg()}
+    <div class="np-rb${o.sep?' np-sepd':''}" tabindex="0" data-np-open="${esc(i.id)}">
+      <span class="np-ck" aria-hidden="true">${npI('check',3)}</span><span class="np-dot" aria-hidden="true"></span>
+      <span class="np-ico" style="--k:var(--${k[1]})">${npI(k[0])}</span>
+      <div class="np-txt"><div class="np-l1"><span class="np-who">${esc(glowny)}</span>${chip}<time data-ts="${esc(i.ts)}">${esc(npRel(i.ts))}</time></div>
+        <div class="np-l2">${esc(npText(i,o.child))}</div></div>
+    </div></div>`;
+}
+function npStack(b,sep,dzien){
+  const sk=b.key+'|'+dzien,open=NP.expanded.has(sk),top=b.items[0],k=NP_KIND[npKind(top)];
+  const unread=b.items.some(i=>!i.read),picked=b.items.every(i=>NP.picked.has(i.id));
+  const reszta=[...new Set(b.items.slice(1).map(i=>NP_KIND[npKind(i)][2]))].join(' · ');
+  const chip=top.cat==='free'?'<span class="np-chip">Free</span>':'';
+  return `<div class="np-stk${open?' open':''}" data-key="${esc(sk)}">
+    <div class="np-row np-stk-h${unread?' unread':''}${picked?' picked':''}" data-ids="${esc(b.items.map(i=>i.id).join(','))}">
+      ${npSwipeBg()}
+      <div class="np-rb${sep?' np-sepd':''}" tabindex="0" data-np-toggle="${esc(sk)}" aria-expanded="${open}">
+        <span class="np-ck" aria-hidden="true">${npI('check',3)}</span><span class="np-dot" aria-hidden="true"></span>
+        <span class="np-ico" style="--k:var(--${k[1]})">${npI(k[0])}</span>
+        <div class="np-txt"><div class="np-l1"><span class="np-who">${esc(npWho(top))}</span><span class="np-cnt">${b.items.length}</span>${chip}<time data-ts="${esc(top.ts)}">${esc(npRel(top.ts))}</time></div>
+          <div class="np-l2">${esc(npText(top))}</div>
+          <div class="np-l3">Earlier: ${esc(reszta)}</div></div>
+        <span class="np-chev">${npI('chevD',2.2)}</span>
+      </div></div>
+    <div class="np-kids"><div class="np-kids-in">${b.items.map((i,n)=>npRow(i,{child:true,sep:true,d:n})).join('')}</div></div>
+  </div>`;
+}
+function npRenderList(o={}){
+  const box=$('np-items');
+  if(!box)return;
+  if(!NP.loaded){
+    box.innerHTML=`<div class="np-sk">${'<div class="np-sk-r"><span class="np-sk-i"></span><span class="np-sk-t"><span class="np-sk-l" style="display:block;width:55%"></span><span class="np-sk-l" style="display:block;width:85%"></span></span></div>'.repeat(6)}</div>`;
+    return;
+  }
+  const items=npVisible();
+  if(!items.length){
+    box.innerHTML=`<div class="np-empty"><span class="np-e-ic">${npI('checkCircle')}</span><b>You're all caught up</b><span>${
+      NP.tab==='prop'?'Orders, KYC, payout requests and ticket messages land here.'
+      :NP.tab==='free'?'Leads from the free funnel land here.'
+      :'New leads, claims, statuses and follow-ups land here.'}</span></div>`;
+  }else{
+    const dni=[];let cur=null;
+    for(const i of items){
+      const lab=npDayLabel(i.ts);
+      if(!cur||cur.lab!==lab)dni.push(cur={lab,items:[]});
+      cur.items.push(i);
+    }
+    const tabName=(NP_TABS.find(t=>t[0]===NP.tab)||[])[1];
+    box.innerHTML=dni.map(d=>`<section class="np-day"><h3 class="np-day-h">${d.lab}</h3><div class="np-grp">${
+      npBlocks(d.items).map((b,n)=>b.one?npRow(b.one,{sep:n>0}):npStack(b,n>0,d.lab)).join('')}</div></section>`).join('')
+      +`<button type="button" class="np-clr" data-np="clear">${NP.tab==='all'?'Delete all':`Delete all in ${tabName}`}</button>`;
+  }
+  if(o.anim&&!npRM()){box.classList.remove('in-l','in-r','in-f');void box.offsetWidth;box.classList.add('in-'+o.anim)}
+  NP.fresh.forEach(id=>{
+    const r=box.querySelector(`.np-row[data-id="${CSS.escape(id)}"]`);
+    if(!r)return;
+    const stk=r.closest('.np-stk');
+    if(stk&&!stk.classList.contains('open')){const h=stk.querySelector('.np-stk-h');h.classList.remove('pulse');void h.offsetWidth;h.classList.add('pulse')}
+    else npGrow(r);
+  });
+  NP.fresh.clear();
+  npObserve(true);
+}
+function npPaintRead(){
+  npQ('#np-items .np-row[data-id]').forEach(r=>{const i=npItem(r.dataset.id);r.classList.toggle('unread',!!i&&!i.read)});
+  npQ('#np-items .np-row[data-ids]').forEach(r=>r.classList.toggle('unread',npIds(r).some(id=>{const i=npItem(id);return i&&!i.read})));
+}
+/* Przeczytane: od razu w panelu, zapis na serwer w tle. */
+function npMark(ids,read=true){
+  const zm=INBOX.filter(i=>ids.includes(i.id)&&i.read!==read);
+  if(!zm.length)return;
+  zm.forEach(i=>i.read=read);
+  npPaintRead();npSeg(false);npBadge();
+  api('/api/admin/inbox/mark',{method:'POST',body:JSON.stringify({ids:zm.map(i=>i.id),read})}).catch(()=>{});
+}
+/* Usuwanie przez withUndo: wiersz znika od razu, serwer dostaje zapis po 5 s,
+   „Undo" w tym czasie po prostu niczego nie wysyła. */
+function npDelete(ids){
+  ids=ids.filter(id=>!NP.hiding.has(id));
+  if(!ids.length)return;
+  npCtxClose();npCloseSwipes();
+  const set=new Set(ids),box=$('np-items');
+  const els=[];
+  npQ('.np-stk',box).forEach(s=>{if(npIds(s.querySelector('.np-stk-h')).every(id=>set.has(id)))els.push(s)});
+  npQ('.np-row[data-id]',box).forEach(r=>{if(set.has(r.dataset.id)&&!els.some(s=>s.contains(r)))els.push(r)});
+  els.forEach(npCollapse);
+  setTimeout(()=>{
+    ids.forEach(id=>{NP.hiding.add(id);NP.picked.delete(id)});
+    npRenderList();npSeg(false);npBadge();if(NP.edit)npEditbar();
+    withUndo(ids.length===1?'Notification deleted':`${ids.length} notifications deleted`,
+      ()=>{
+        INBOX=INBOX.filter(i=>!set.has(i.id));ids.forEach(id=>NP.hiding.delete(id));
+        api('/api/admin/inbox/mark',{method:'POST',keepalive:true,
+          body:JSON.stringify({ids,hidden:true})}).catch(()=>{});
+      },null,
+      ()=>{ids.forEach(id=>{NP.hiding.delete(id);NP.fresh.add(id)});npRenderList();npSeg(true);npBadge()});
+  },npRM()?0:300);
+}
+function npRowAct(act,row){
+  const ids=npIds(row);
+  if(!ids.length)return;
+  if(act==='del')return npDelete(ids);
+  if(act==='read'){npMark(ids,ids.some(id=>{const i=npItem(id);return i&&!i.read}));npCloseSwipes()}
+}
+function npToggleStack(sk){
+  const el=npQ('#np-items .np-stk').find(s=>s.dataset.key===sk);
+  if(!el)return;
+  const open=!NP.expanded.has(sk);
+  open?NP.expanded.add(sk):NP.expanded.delete(sk);
+  el.classList.toggle('open',open);
+  el.querySelector('.np-stk-h > .np-rb').setAttribute('aria-expanded',String(open));
+}
+
+/* Tryb Edit: zaznaczanie i akcje hurtem. */
+function npSetEdit(on){
+  NP.edit=on;NP.picked.clear();
+  $('np').classList.toggle('editing',on);
+  const b=document.querySelector('[data-np="edit"]');if(b)b.textContent=on?'Done':'Edit';
+  npQ('#np-items .picked').forEach(r=>r.classList.remove('picked'));
+  npCloseSwipes();npEditbar();
+}
+function npPaintPicked(){
+  npQ('#np-items .np-row[data-id]').forEach(r=>r.classList.toggle('picked',NP.picked.has(r.dataset.id)));
+  npQ('#np-items .np-row[data-ids]').forEach(r=>r.classList.toggle('picked',npIds(r).every(id=>NP.picked.has(id))));
+}
+function npEditbar(){
+  const n=NP.picked.size,vis=npVisible();
+  const del=document.querySelector('[data-np="bulkdel"]'),rd=document.querySelector('[data-np="bulkread"]'),
+        all=document.querySelector('[data-np="selall"]');
+  if(!del)return;
+  del.textContent=n?`Delete ${n}`:'Delete';del.disabled=!n;rd.disabled=!n;
+  rd.textContent=n&&![...NP.picked].some(id=>{const i=npItem(id);return i&&!i.read})?'Mark unread':'Mark read';
+  all.textContent=vis.length&&vis.every(i=>NP.picked.has(i.id))?'Deselect all':'Select all';
+}
+function npPick(row){
+  const ids=npIds(row),all=ids.every(id=>NP.picked.has(id));
+  ids.forEach(id=>all?NP.picked.delete(id):NP.picked.add(id));
+  npPaintPicked();npEditbar();
+}
+
+function npNav(nav){
+  NP.nav=nav;
+  const np=$('np');if(!np)return;
+  np.classList.toggle('nav-settings',nav==='settings');
+  if(nav==='settings')npRenderSettings();
+  $('np-list').inert=nav==='settings';
+  $('np-settings').inert=nav!=='settings';
+}
+const npBack=()=>npNav('list');
+
+/* Klik w pozycję = prosto do rzeczy. Bilet i lead mają własne okno; wniosek o
+   wypłatę, KYC i zamówienie to wiersz na liście — zakładka otwiera się,
+   przewija do NIEGO i podświetla go na chwilę (akcje Approve/Reject są w
+   wierszu, więc „Review payout" to po prostu ten wiersz). */
+function npOpenItem(id){
+  const i=npItem(id);if(!i)return;
+  npMark([id],true);
+  npGoTo(i);
+}
+function npGoTo(i){
+  npSetOpen(false);
+  if(i.lead_id){go('leads');openLead(i.lead_id);return}
+  if(i.type==='ticket'&&i.ref){go('tickets');openTicket(i.ref);return}
+  go(i.view);
+  const sel={payout:[`[onclick^="approvePayout(${i.ref},"]`,`[onclick^="deletePayoutRow('request',${i.ref},"]`],
+    kyc:[`[onclick="approveKyc(${i.ref})"]`],
+    order:[`[onclick^="deleteOrderRow(${i.ref},"]`,`[onclick^="markOrderPaid(${i.ref},"]`]}[i.type];
+  if(sel&&i.ref)npReveal(sel.map(s=>'#view '+s).join(','));
+}
+function npReveal(sel){
+  let n=0;
+  const t=setInterval(()=>{
+    const el=document.querySelector(sel);
+    if(!el&&++n<50)return;
+    clearInterval(t);
+    if(!el)return;
+    const box=el.closest('tr,.sec-card,.lead-card,[class*="card"]')||el;
+    box.scrollIntoView({behavior:npRM()?'auto':'smooth',block:'center'});
+    box.classList.remove('np-flash');void box.offsetWidth;box.classList.add('np-flash');
+    setTimeout(()=>box.classList.remove('np-flash'),2600);
+  },100);
+}
+
+/* ---------- push na tym urządzeniu: stan i przełącznik w np-kit.js ---------- */
+function npCatCount(){
+  const cats=(ME&&ME.ui_prefs&&ME.ui_prefs.admin_push)||{},klucze=PUSH_GROUPS.flatMap(g=>g[1].map(r=>r[0]));
+  return [klucze.filter(k=>cats[k]!==false).length,klucze.length];
+}
+function npPushOnText(){
+  const [on,all]=npCatCount();
+  return on===all?'On · every category buzzes':`On · ${on} of ${all} categories buzz`;
+}
+
+/* KOMPLETNA lista tego, co może brzęczeć u admina, w trzech grupach. Wyciszane
+   per KONTO (ui_prefs.admin_push) — jedna decyzja gasi wszystkie urządzenia
+   admina. Brak wpisu = kategoria brzęczy; nowa kategoria zdarzeń dzwoni u
+   wszystkich, dopóki ktoś jej świadomie nie zgasi. Klucz = nazwa zdarzenia
+   z `notify.notify_admins`, bo tym porównuje `_chca_push`. */
 const PUSH_GROUPS=[
-  ['Leads',[['lead_new','New leads'],['lead_action','Lead activity (claims & statuses)'],
-    ['lead_reminder','Follow-ups & nudges']]],
+  ['Leads',[['lead_new','New leads','Someone finished the questionnaire','userPlus','acc'],
+    ['lead_action','Lead activity','Claims, releases and status changes','arrows','purple'],
+    ['lead_reminder','Follow-ups & nudges','Reminders you planned on a lead','alarm','gold']]],
   /* Darmowy lejek ma własny czat na Telegramie (LEADS NIGERIA), więc ma też
      własne przełączniki — inaczej wyciszenie jednego desku gasiło oba. Grupa
      nazywa się od LEJKA, nie od kanału: warunkiem jest darmowe zgłoszenie. */
-  ['Leads Free',[['free_new','New leads'],['free_action','Lead activity (claims & statuses)'],
-    ['free_reminder','Follow-ups & nudges']]],
-  ['Prop',[['admin_order','Orders & payments'],['admin_kyc','KYC submissions'],
-    ['admin_payout','Payout requests'],['admin_ticket','Support tickets'],
-    ['admin_reach','Channel reach & balance']]],
+  ['Leads Free',[['free_new','New free leads','Free account requests','userPlus','green'],
+    ['free_action','Free lead activity','Claims, releases and status changes','arrows','purple'],
+    ['free_reminder','Free follow-ups','Reminders on free leads','alarm','gold']]],
+  ['Prop',[['admin_order','Orders & payments','New challenge purchases','bag','green'],
+    ['admin_kyc','KYC submissions','Documents waiting for review','shield','blue'],
+    ['admin_payout','Payout requests','Traders asking to be paid','wallet','purple'],
+    ['admin_ticket','Support tickets','Trader messages','chat','acc'],
+    ['admin_reach','Channel reach & balance','Telegram post milestones','megaphone','blue'],
+    ['fraud','Chargebacks & fraud','Disputes and early fraud warnings','octagon','red']]],
 ];
 function pushCatsHtml(){
   const cats=(ME&&ME.ui_prefs&&ME.ui_prefs.admin_push)||{};
-  return PUSH_GROUPS.map(([grupa,katy])=>`
-    <div class="lbl" style="font-size:var(--fs-cap);color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">${grupa}</div>
-    <div class="chip-row">${katy.map(([k,l])=>`<label class="chip" style="cursor:pointer;display:inline-flex;gap:6px;align-items:center">
-      <input type="checkbox" ${cats[k]===false?'':'checked'} onchange="setPushCat('${k}',this.checked)">${l}</label>`).join('')}</div>`).join('');
+  return PUSH_GROUPS.map(([grupa,katy])=>`<h4 class="np-sec-h">${esc(grupa)}</h4><div class="np-grp flat">${katy.map(([k,l,opis,ic,c])=>`
+    <div class="np-cell"><span class="np-ci" style="--k:var(--${c})">${npI(ic,2)}</span>
+      <span class="np-ct"><b>${esc(l)}</b><span>${esc(opis)}</span></span>
+      <button type="button" class="np-sw" role="switch" data-np-cat="${k}" aria-checked="${cats[k]!==false}" aria-label="${esc(l)}"><i></i></button></div>`).join('')}</div>`).join('');
+}
+async function npSavePrefs(prefs,cofnij){
+  try{
+    await api('/api/me',{method:'PATCH',body:JSON.stringify({ui_prefs:prefs})});
+    ME.ui_prefs=prefs;
+  }catch(e){cofnij();toast('Error: '+e.message,'err')}
 }
 async function setPushCat(k,on){
   const prefs=(ME&&ME.ui_prefs&&typeof ME.ui_prefs==='object')?{...ME.ui_prefs}:{};
   const cats={...(prefs.admin_push||{})};
   if(on)delete cats[k];else cats[k]=false;
   prefs.admin_push=cats;
-  try{
-    await api('/api/me',{method:'PATCH',body:JSON.stringify({ui_prefs:prefs})});
-    ME.ui_prefs=prefs;
-    toast(on?'Will buzz again':'Muted — stays in the bell');
-  }catch(e){toast('Error: '+e.message,'err')}
+  const maluj=v=>npQ(`[data-np-cat="${k}"]`).forEach(s=>s.setAttribute('aria-checked',String(v)));
+  maluj(on);
+  await npSavePrefs(prefs,()=>maluj(!on));
+  npPaintPush();
 }
+async function setInboxPref(k,on){
+  const prefs=(ME&&ME.ui_prefs&&typeof ME.ui_prefs==='object')?{...ME.ui_prefs}:{};
+  prefs.inbox={...(prefs.inbox||{}),[k]:on};
+  const maluj=v=>npQ(`[data-np-pref="${k}"]`).forEach(s=>s.setAttribute('aria-checked',String(v)));
+  maluj(on);
+  if(ME)ME.ui_prefs=prefs;
+  if(k==='group')npRenderList();
+  if(k==='seen')npObserve(true);
+  await npSavePrefs(prefs,()=>maluj(!on));
+}
+function npRenderSettings(){
+  const box=$('np-settings');if(!box)return;
+  const linked=ME&&ME.telegram_linked;
+  const pref=(k,ic,c,t,opis)=>`<div class="np-cell"><span class="np-ci" style="--k:var(--${c})">${npI(ic,2)}</span>
+    <span class="np-ct"><b>${t}</b><span>${opis}</span></span>
+    <button type="button" class="np-sw" role="switch" data-np-pref="${k}" aria-checked="${npPref(k)}" aria-label="${t}"><i></i></button></div>`;
+  box.innerHTML=`
+    <header class="np-bar"><div class="np-bar-l"><button type="button" class="np-tbtn np-back" data-np="back">${npI('chevL',2.4)}<span>Back</span></button></div>
+      <div class="np-bar-t">Notification settings</div><div class="np-bar-r"></div></header>
+    <div class="np-scroll"><div class="np-set">
+      <h4 class="np-sec-h">This device</h4>
+      <div class="np-grp flat"><div class="np-pr" data-push="${PUSH.st}" style="margin:0;border-radius:0;box-shadow:none">${npPushInner()}</div>
+        <div data-np-push-help></div></div>
+      <p class="np-sec-f">Push is per device. Switch it on on every phone and computer that should buzz.</p>
+      ${pushCatsHtml()}
+      <p class="np-sec-f">These apply to every device on your account. A muted category still lands in this list — it just doesn't buzz.</p>
+      <h4 class="np-sec-h">Telegram</h4>
+      <div class="np-grp flat"><div class="np-cell"><span class="np-ci" style="--k:var(--blue)">${npI('send',2)}</span>
+        <span class="np-ct"><b>Telegram identity</b><span>${linked?'Connected'+(ME.telegram_username?' as '+esc(ME.telegram_username):''):'Not linked yet'}</span></span>
+        ${linked?'<button type="button" class="np-pillbtn" data-np="tgtest">Send test</button>'
+          :'<button type="button" class="np-pillbtn" data-np="tglink">Link</button>'}</div></div>
+      <h4 class="np-sec-h">This list</h4>
+      <div class="np-grp flat">
+        ${pref('group','layers','purple','Group by lead','Events about one lead stack into one card')}
+        ${pref('seen','eye','blue','Mark as read when seen','After two seconds on screen')}
+      </div>
+      <div class="np-grp flat" style="margin-top:28px"><button type="button" class="np-cell danger" data-np="clearall"><b>Delete all notifications</b></button></div>
+    </div></div>`;
+  npPaintPush();
+}
+function npObserve(on){
+  npObserveSeen(on&&NP.open&&npPref('seen')?$('np-scroll'):null,
+    on?npQ('#np-items .np-row.unread'):[],ids=>npMark(ids,true),
+    ()=>NP.open&&NP.nav!=='settings'&&!NP.edit);
+}
+
+/* Menu pod prawym przyciskiem myszy — na dotyku są gesty. */
+function npCtxClose(){const m=$('np-ctx');if(m)m.classList.remove('show');NP.ctxRow=null}
+addEventListener('contextmenu',e=>{
+  const rb=e.target.closest&&e.target.closest('#np-items .np-rb');
+  if(!rb||NP.edit)return;
+  e.preventDefault();
+  const row=rb.closest('.np-row'),ids=npIds(row),m=$('np-ctx');
+  const unread=ids.some(id=>{const i=npItem(id);return i&&!i.read});
+  NP.ctxRow=row;
+  m.innerHTML=`<button type="button" data-np-cact="open">${npI('chevR')}${ids.length>1?'Show events':'Open'}</button>
+    <button type="button" data-np-cact="read">${npI(unread?'check':'dot')}${unread?'Mark as read':'Mark as unread'}</button>
+    <hr><button type="button" class="danger" data-np-cact="del">${npI('trash')}Delete${ids.length>1?` ${ids.length}`:''}</button>`;
+  m.classList.add('show');
+  const r=m.getBoundingClientRect();
+  const x=Math.min(e.clientX,innerWidth-r.width-8),y=Math.min(e.clientY,innerHeight-r.height-8);
+  m.style.left=x+'px';m.style.top=y+'px';
+  m.style.setProperty('--ox',(e.clientX-x)+'px');m.style.setProperty('--oy',(e.clientY-y)+'px');
+});
+
+addEventListener('click',e=>{
+  const t=e.target;
+  if(!t.closest)return;
+  if(!t.closest('#np-ctx'))npCtxClose();
+  if(t.id==='np-scrim')return npSetOpen(false);
+  const cact=t.closest('[data-np-cact]');
+  if(cact){
+    const row=NP.ctxRow,ids=npIds(row),a=cact.dataset.npCact;npCtxClose();
+    if(!row)return;
+    if(a==='del')return npDelete(ids);
+    if(a==='read')return npRowAct('read',row);
+    if(a==='open')return row.dataset.ids?npToggleStack(row.closest('.np-stk').dataset.key):npOpenItem(ids[0]);
+    return;
+  }
+  const cat=t.closest('[data-np-cat]');
+  if(cat)return setPushCat(cat.dataset.npCat,cat.getAttribute('aria-checked')!=='true');
+  const pref=t.closest('[data-np-pref]');
+  if(pref)return setInboxPref(pref.dataset.npPref,pref.getAttribute('aria-checked')!=='true');
+  const tab=t.closest('[data-np-tab]');
+  if(tab)return npSetTab(tab.dataset.npTab);
+  const a=t.closest('[data-np]');
+  if(a){
+    switch(a.dataset.np){
+      case 'push':return npTogglePush();
+      case 'pushrow':if(['ios','denied','nokey','unsupported'].includes(PUSH.st))npNav('settings');return;
+      case 'close':return npSetOpen(false);
+      case 'settings':return npNav('settings');
+      case 'back':return npBack();
+      case 'edit':return npSetEdit(!NP.edit);
+      case 'allread':return npMark(npVisible().filter(x=>!x.read).map(x=>x.id),true);
+      case 'selall':{
+        const vis=npVisible(),all=vis.every(x=>NP.picked.has(x.id));
+        vis.forEach(x=>all?NP.picked.delete(x.id):NP.picked.add(x.id));
+        npPaintPicked();return npEditbar();
+      }
+      case 'bulkread':{
+        const ids=[...NP.picked];
+        npMark(ids,ids.some(id=>{const x=npItem(id);return x&&!x.read}));
+        return npEditbar();
+      }
+      case 'bulkdel':return npDelete([...NP.picked]);
+      case 'clear':return npArm(a,npVisible().length,()=>npDelete(npVisible().map(x=>x.id)));
+      case 'clearall':{const ids=INBOX.filter(x=>!NP.hiding.has(x.id)).map(x=>x.id);
+        return npArm(a,ids.length,()=>{npNav('list');npDelete(ids)})}
+      case 'tgtest':return tgLinkTest(a);
+      case 'tglink':npSetOpen(false);go('settings');return;
+    }
+    return;
+  }
+  const act=t.closest('[data-np-act]');
+  if(act)return npRowAct(act.dataset.npAct,act.closest('.np-row'));
+  const rb=t.closest('#np-items .np-rb');
+  if(rb){
+    if(+rb.dataset.off)return npSlide(rb,0);
+    const row=rb.closest('.np-row');
+    if(NP.edit)return npPick(row);
+    if(rb.dataset.npToggle)return npToggleStack(rb.dataset.npToggle);
+    return npOpenItem(rb.dataset.npOpen);
+  }
+});
+addEventListener('keydown',e=>{
+  if(!NP.open)return;
+  if(e.key==='Escape'){
+    if($('np-ctx').classList.contains('show'))return npCtxClose();
+    if(NP.edit)return npSetEdit(false);
+    if(NP.nav==='settings')return npBack();
+    return npSetOpen(false);
+  }
+  const el=document.activeElement;
+  const segB=el&&el.closest&&el.closest('#np-seg button');
+  if(segB&&(e.key==='ArrowLeft'||e.key==='ArrowRight')){
+    e.preventDefault();
+    const i=NP_TABS.findIndex(t=>t[0]===NP.tab)+(e.key==='ArrowRight'?1:-1);
+    const nowa=NP_TABS[(i+NP_TABS.length)%NP_TABS.length][0];
+    npSetTab(nowa);document.querySelector(`[data-np-tab="${nowa}"]`).focus();
+    return;
+  }
+  const rb=el&&el.closest&&el.closest('#np-items .np-rb');
+  if(!rb||NP.edit)return;
+  if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();return npRowAct('del',rb.closest('.np-row'))}
+  if(e.key==='Enter'||e.key===' '){e.preventDefault();return rb.click()}
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    e.preventDefault();
+    const wszystkie=npQ('#np-items .np-rb').filter(x=>x.offsetHeight>4&&!x.closest('.np-stk:not(.open) .np-kids'));
+    const n=wszystkie.indexOf(rb)+(e.key==='ArrowDown'?1:-1);
+    if(wszystkie[n])wszystkie[n].focus();
+  }
+});
+npGestures({items:'#np-items',panel:'#np',editing:()=>NP.edit,open:()=>NP.open,
+  onAct:(act,row)=>npRowAct(act,row),onDismiss:()=>npSetOpen(false),
+  onEnd:()=>{if(NP.dirty){NP.dirty=false;setTimeout(()=>npRenderList(),350)}}});
+setInterval(()=>{if(NP.open)npQ('#np-items time[data-ts]').forEach(t=>t.textContent=npRel(t.dataset.ts))},30000);
+
 /* Tożsamość Telegrama z ŻYWYM statusem: po wydaniu kodu panel odpytuje
    GET /api/me/telegram-link co 3 s i sam przełącza się na „Connected as @nick"
    w chwili, gdy /start dojdzie — bez przeładowania. „Send test message" to
@@ -6091,43 +6594,6 @@ async function tgLinkTest(btn){
     }catch(e){toast('Test failed: '+e.message,'err')}
   });
 }
-async function paintPushCard(){
-  const btn=$('push-btn'),st=$('push-state');
-  if(!btn)return;
-  try{
-    let cfg;try{cfg=await api('/api/push/public-key')}catch(_){cfg={enabled:false}}
-    if(!cfg.enabled){st.textContent='Push is not configured on the server.';btn.style.display='none';return}
-    window._pushKey=cfg.key;
-    if(Notification.permission==='denied'){
-      st.textContent='Notifications are blocked for this site in the browser settings.';
-      btn.style.display='none';return}
-    const reg=await navigator.serviceWorker.ready;
-    const sub=await reg.pushManager.getSubscription();
-    if(sub){st.textContent='Enabled on this device.';btn.textContent='Disable'}
-    else btn.textContent='Enable';
-  }catch(_){}
-}
-async function toggleAdminPush(){
-  const btn=$('push-btn');if(btn)btn.disabled=true;
-  try{
-    const reg=await navigator.serviceWorker.ready;
-    let sub=await reg.pushManager.getSubscription();
-    if(sub){
-      await api('/api/me/push/unsubscribe',{method:'POST',body:JSON.stringify({endpoint:sub.endpoint})});
-      await sub.unsubscribe();
-      toast('Push disabled on this device.');
-    }else{
-      const perm=await Notification.requestPermission();
-      if(perm!=='granted'){toast('Notifications were not allowed.','err');return}
-      sub=await reg.pushManager.subscribe({userVisibleOnly:true,
-        applicationServerKey:b64ToU8(window._pushKey)});
-      await api('/api/me/push/subscribe',{method:'POST',body:JSON.stringify(sub.toJSON())});
-      toast('🔔 Push enabled on this device.','ok');
-    }
-  }catch(e){toast('Push setup failed: '+e.message,'err')}
-  finally{if(btn)btn.disabled=false;paintPushCard()}
-}
-
 /* ---------- deep-link z powiadomienia ----------
    Push niesie url `/admin?lead=<id>`. Trzy drogi, którymi może przyjść:
    zimny start (parametr w adresie — boot niżej), klik przy otwartym panelu

@@ -1,0 +1,241 @@
+/* Warstwa „Apple" dla panelu admina i portalu tradera — PREVIEW.
+   Ładowana jako OSTATNIA (po portal.css, admin.css, notifications.css) i tylko
+   nadpisuje: materiały z rozmyciem, hairline 0.5 px, kolorowe kafelki ikon w
+   nawigacji jak w Ustawieniach iOS, przełączniki i segmenty iOS, kapsułki
+   toastów, sprężyny. Usunięcie linku do tego pliku przywraca poprzedni wygląd
+   w całości. Tokeny --np-* pochodzą z notifications.css. */
+
+/* ---------- typografia i drobiazgi ---------- */
+body{letter-spacing:-.006em}
+.topbar h1{font-size:21px;letter-spacing:-.022em}
+h2,h3{letter-spacing:-.015em}
+::selection{background:color-mix(in srgb,var(--acc) 26%,transparent)}
+*{scrollbar-width:thin;scrollbar-color:var(--np-fill2) transparent}
+
+/* ---------- pasek boczny: materiał + kafelki ikon ---------- */
+.side{background:color-mix(in srgb,var(--panel) 80%,transparent);-webkit-backdrop-filter:blur(30px) saturate(180%);
+  backdrop-filter:blur(30px) saturate(180%);border-right:.5px solid var(--np-hair)}
+.side-sec{letter-spacing:.02em;text-transform:none;font-size:12px;font-weight:600;padding:14px 10px 6px}
+.side-nav{gap:1px}
+.sb-link{gap:11px;padding:6px 10px;border:0;border-radius:10px;color:var(--txt);font-weight:500;
+  transition:background .2s,transform .35s var(--np-spring)}
+/* Kafelek jak ikona w dzwonku: miękki odcień + kolorowy znak, nie pełny kolor.
+   Paleta ograniczona do barw PTF i pogrupowana znaczeniem, żeby menu nie było tęczą. */
+.sb-link svg{width:30px;height:30px;flex:0 0 30px;padding:6px;border-radius:9px;opacity:1;color:var(--k,var(--muted));
+  background:color-mix(in srgb,var(--k,var(--muted)) var(--np-tint),transparent);transition:background .25s,transform .4s var(--np-spring)}
+.sb-link.on svg{background:color-mix(in srgb,var(--k,var(--muted)) 24%,transparent)}
+.sb-link:hover svg{transform:scale(1.06)}
+.sb-link:hover{background:var(--np-fill);color:var(--txt)}
+.sb-link:active{transform:scale(.97)}
+.sb-link.on{background:color-mix(in srgb,var(--acc) 13%,transparent);color:var(--txt);border:0;font-weight:650}
+.sb-link.on::before{display:none}
+/* indygo = główne, złoto = sprzedaż, fiolet = handel, niebieski = weryfikacja
+   i wsparcie, zieleń = pieniądze, szary = narzędzia */
+.sb-link[data-v=overview],.sb-link[data-v=tickets],.sb-link[data-v=accounts][title=Challenges],
+.sb-link[data-v=support],.sb-link[href="/academy"]{--k:var(--acc)}
+.sb-link[data-v=leads],.sb-link[data-v=offers],.sb-link[data-v=board],.sb-link[data-v=achievements]{--k:var(--gold)}
+.sb-link[data-v=accounts],.sb-link[data-v=activity],.sb-link[data-v=loyalty],.sb-link[data-v=rewards]{--k:var(--purple)}
+.sb-link[data-v=clients],.sb-link[data-v=kyc],.sb-link[data-v=journal],.sb-link[data-v=analytics]{--k:var(--blue)}
+.sb-link[data-v=payouts],.sb-link[data-v=orders],.sb-link[data-v=certificates]{--k:var(--green)}
+.sb-link.sheet-signout{--k:var(--red);color:var(--red)}
+.side-foot,.side-bottom{border-top:.5px solid var(--np-hair)}
+.collapse-btn,.signout{border-radius:10px;transition:background .2s,transform .35s var(--np-spring)}
+.collapse-btn:active,.signout:active{transform:scale(.97)}
+
+/* ---------- górny pasek ---------- */
+.topbar{background:color-mix(in srgb,var(--bg) 74%,transparent);-webkit-backdrop-filter:blur(24px) saturate(180%);
+  backdrop-filter:blur(24px) saturate(180%);border-bottom:.5px solid var(--np-hair)}
+.icon-btn{border-radius:50%;transition:background .2s,color .2s,transform .35s var(--np-spring)}
+.icon-btn:active{transform:scale(.9)}
+.bell-badge,#bell-dot{box-shadow:0 0 0 2px var(--bg)}
+
+/* ---------- pasek zakładek (telefon) ---------- */
+.tabbar,.botnav{background:color-mix(in srgb,var(--panel) 72%,transparent);-webkit-backdrop-filter:blur(30px) saturate(180%);
+  backdrop-filter:blur(30px) saturate(180%);border-top:.5px solid var(--np-hair)}
+.tab-item.on::before{display:none}
+.tab-lbl,.botnav-btn span{font-weight:500;letter-spacing:0}
+.tab-ic,.botnav-btn svg{transition:transform .4s var(--np-spring)}
+.tab-item:active .tab-ic,.botnav-btn:active svg{transform:scale(.86)}
+.botnav-btn:active,.sb-link:active{opacity:1}
+.sheet{border:0;border-radius:14px 14px 0 0;box-shadow:0 -20px 60px -20px rgba(0,0,0,.35);
+  transition:transform .55s var(--np-spring),visibility .55s}
+
+/* ---------- karty ---------- */
+.sec-card,.tbl-wrap,.stat-tile,.modal{border-color:transparent;
+  box-shadow:0 0 0 .5px var(--np-hair),0 1px 2px rgba(15,23,42,.03),0 12px 32px -20px rgba(15,23,42,.2)}
+.sec-card{border-radius:20px}
+html[data-theme=dark] .sec-card,html[data-theme=dark] .tbl-wrap,html[data-theme=dark] .stat-tile{
+  box-shadow:0 0 0 .5px var(--np-hair),0 12px 32px -20px rgba(0,0,0,.6)}
+
+/* ---------- przyciski ---------- */
+.btn-p{border-radius:12px;box-shadow:0 8px 18px -10px rgba(99,102,241,.65);
+  transition:transform .4s var(--np-spring),filter .2s,box-shadow .2s}
+.btn-p:hover{transform:none;filter:brightness(1.07)}
+.btn-p:active:not(:disabled){transform:scale(.96)}
+.btn-o{border-color:transparent;background:var(--np-fill);color:var(--acc);
+  transition:transform .4s var(--np-spring),background .2s,color .2s}
+.btn-o:hover:not(:disabled){border-color:transparent;background:var(--np-fill2);color:var(--acc)}
+.btn-o:active:not(:disabled){transform:scale(.96)}
+.btn-o.sm,.btn-p.sm{border-radius:10px}
+
+/* ---------- pola ---------- */
+.inp{background:var(--np-fill);border-color:transparent;border-radius:12px;transition:background .2s,box-shadow .2s,border-color .2s}
+.inp:hover:not(:disabled){background:var(--np-fill2)}
+.inp:focus{background:var(--panel);border-color:var(--acc);box-shadow:0 0 0 4px color-mix(in srgb,var(--acc) 16%,transparent)}
+
+/* ---------- segmenty (filtry) jak UISegmentedControl ---------- */
+.seg,.shop-tabs{background:var(--np-fill);border:0;box-shadow:none;border-radius:10px;padding:2px;gap:2px}
+.seg button,.shop-tabs button{border-radius:8px;color:var(--muted);font-weight:600;transition:background .25s,color .2s,box-shadow .25s}
+.seg button.on,.shop-tabs button.on{background:var(--np-pill);color:var(--txt);
+  box-shadow:0 3px 8px rgba(0,0,0,.1),0 3px 1px rgba(0,0,0,.03),0 0 0 .5px rgba(0,0,0,.04)}
+.seg button.on::after{opacity:.4}
+
+/* ---------- przełączniki iOS ---------- */
+.switch{width:51px;height:31px;flex:0 0 51px}
+.switch i{background:var(--np-fill2);transition:background .3s var(--np-ease)}
+.switch i::after{top:2px;left:2px;width:27px;height:27px;background:#fff;
+  box-shadow:0 3px 8px rgba(0,0,0,.15),0 1px 1px rgba(0,0,0,.16);transition:transform .5s var(--np-spring)}
+.switch input:checked+i{background:var(--np-on)}
+.switch input:checked+i::after{transform:translateX(20px)}
+.switch input:focus-visible+i{outline:2px solid var(--acc);outline-offset:2px}
+
+/* ---------- toasty: kapsułka z ikoną, sprężyna na wejściu i wyjściu ---------- */
+#toasts{right:20px;bottom:20px;gap:8px;align-items:flex-end}
+.toast{display:flex;align-items:center;gap:11px;border:0;border-radius:18px;padding:12px 18px 12px 12px;
+  background:var(--np-material);-webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%);
+  box-shadow:0 18px 44px -16px rgba(15,23,42,.38),0 0 0 .5px var(--np-hair);color:var(--txt);font-weight:500;
+  animation:ap-toast-in .6s var(--np-bounce);transition:opacity .3s var(--np-ease),transform .35s var(--np-ease)}
+.toast::before{content:"";flex:none;width:24px;height:24px;border-radius:50%;background:var(--acc) no-repeat center/13px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M12 8h.01M12 12v5'/%3E%3C/svg%3E")}
+.toast.ok::before{background-color:var(--green2);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E")}
+.toast.err::before{background-color:var(--red);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M12 7v6M12 17h.01'/%3E%3C/svg%3E")}
+.toast.undo::before{display:none}
+.toast.out{opacity:0;transform:translateY(10px) scale(.95)}
+@keyframes ap-toast-in{from{opacity:0;transform:translateY(18px) scale(.94)}}
+@media(max-width:700px){
+  #toasts{left:12px;right:12px;align-items:center}
+  .toast{max-width:100%}
+}
+
+/* ---------- szuflada (admin: karta konta, bilet) i okna ---------- */
+@media(min-width:641px){
+  .over-panel{top:12px;right:12px;bottom:12px;border:0;border-radius:24px;overflow:hidden;
+    box-shadow:var(--np-shadow)}
+  .over.open .over-panel{animation:ap-over-in .6s var(--np-spring)}
+  @keyframes ap-over-in{from{transform:translateX(calc(100% + 24px))}}
+}
+@media(max-width:640px){
+  .over-panel{top:calc(env(safe-area-inset-top) + 10px);left:0;width:100%;border:0;border-radius:14px 14px 0 0}
+  .over.open .over-panel{animation:ap-sheet-in .6s var(--np-spring)}
+  @keyframes ap-sheet-in{from{transform:translateY(104%)}}
+  .over-head{position:relative;padding-top:20px}
+  .over-head::before{content:"";position:absolute;top:6px;left:50%;width:38px;height:5px;margin-left:-19px;border-radius:3px;background:var(--np-fill2)}
+}
+.over-bg{background:rgba(15,23,42,.18);-webkit-backdrop-filter:none;backdrop-filter:none;animation:ap-fade .3s var(--np-ease)}
+html[data-theme=dark] .over-bg{background:rgba(0,0,0,.4)}
+.over-head{background:color-mix(in srgb,var(--panel) 82%,transparent);-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px);
+  border-bottom:.5px solid var(--np-hair)}
+.modal{border-radius:24px;animation:ap-modal-in .55s var(--np-spring)}
+@keyframes ap-modal-in{from{opacity:0;transform:scale(.94)}}
+@keyframes ap-fade{from{opacity:0}}
+
+@media(prefers-reduced-motion:reduce){
+  .toast,.modal,.over.open .over-panel,.over-bg{animation:none!important}
+  .sb-link,.btn-p,.btn-o,.icon-btn,.switch i::after{transition-duration:.01ms!important}
+}
+
+/* ---------- ruch (ui-motion.js) ---------- */
+/* Pigułka segmentu jedzie pod aktywną opcję; sam przycisk traci tło, bo
+   niesie je pigułka. Bez JS zostaje zwykłe tło przycisku z góry pliku. */
+.seg.has-pill,.shop-tabs.has-pill{position:relative}
+.ui-pill{position:absolute;left:0;top:0;z-index:0;border-radius:8px;pointer-events:none;background:var(--np-pill);
+  box-shadow:0 3px 8px rgba(0,0,0,.1),0 3px 1px rgba(0,0,0,.03),0 0 0 .5px rgba(0,0,0,.04);transition:opacity .2s}
+.has-pill>button,.has-pill>.shop-tab{position:relative;z-index:1}
+.has-pill>button.on,.has-pill>.shop-tab.on{background:transparent!important;box-shadow:none!important}
+.side-nav.has-glider{position:relative}
+.ui-glider{position:absolute;left:0;top:0;z-index:0;border-radius:10px;pointer-events:none;
+  background:color-mix(in srgb,var(--acc) 12%,transparent);transition:opacity .2s}
+.side-nav.has-glider>.sb-link{position:relative;z-index:1}
+.side-nav.has-glider>.sb-link.on{background:transparent}
+/* Górny pasek: kreska dopiero po przewinięciu, jak duży tytuł w iOS */
+.topbar{border-bottom-color:transparent;transition:border-color .25s,background .25s}
+.topbar.ui-scrolled{border-bottom-color:var(--np-hair)}
+/* Kafelki i wiersze, które się klika: lekkie uniesienie i wciśnięcie */
+.stat-tile{transition:transform .45s var(--np-spring),box-shadow .3s}
+.stat-tile.clickable:hover{transform:translateY(-2px);
+  box-shadow:0 0 0 .5px var(--np-hair),0 18px 36px -20px rgba(15,23,42,.3)}
+.stat-tile.clickable:active{transform:scale(.97)}
+tbody tr{transition:background .15s}
+.ticket-row{transition:background .15s,transform .35s var(--np-spring)}
+.ticket-row:active{transform:scale(.99)}
+/* ---------- kafelki podsumowań jak widżety iOS ----------
+   Wszędzie ten sam znacznik (.stat-tile > .tile-ic + div z .lbl/.val/.sub),
+   więc przebudowa samym CSS: mała ikona-squircle i etykieta w pierwszym
+   rzędzie, duża liczba pod spodem, podpis na dole. */
+.stats-row,.todo-grid{gap:12px}
+.stat-tile{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;column-gap:10px;row-gap:12px;
+  padding:16px 18px 18px;border-radius:20px}
+.stat-tile>div:not(.tile-ic){display:contents}
+.stat-tile>div:not(.tile-ic)>*{grid-column:1/-1}
+.stat-tile>.tile-ic{grid-column:1;grid-row:1}
+/* selektor z >div:not(.tile-ic)> — musi przebić regułę „cała szerokość" wyżej */
+.stat-tile>div:not(.tile-ic)>.lbl{grid-column:2;grid-row:1;margin:0;font-size:13px;font-weight:600;color:var(--muted);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat-tile .val{font-family:var(--display);font-size:28px;font-weight:700;letter-spacing:-.03em;line-height:1.05;
+  font-variant-numeric:tabular-nums}
+.stat-tile .val small{font-family:var(--body);font-size:13px;letter-spacing:0;font-weight:500}
+.stat-tile .sub{margin-top:-8px;font-size:12px;line-height:1.4;color:var(--dim)}
+.tile-ic{width:32px;height:32px;flex:0 0 32px;border-radius:10px}
+.tile-ic svg{width:17px;height:17px}
+/* kafelki „do zrobienia": liczba jak w widżecie, zero wycofane, żeby wzrok
+   szedł tylko tam, gdzie coś czeka */
+.todo{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;column-gap:14px;
+  padding:16px 18px;border:0;border-radius:20px;
+  box-shadow:0 0 0 .5px var(--np-hair),0 1px 2px rgba(15,23,42,.03),0 12px 32px -20px rgba(15,23,42,.2);
+  transition:transform .45s var(--np-spring),box-shadow .3s,opacity .2s}
+.todo:hover{transform:translateY(-2px);box-shadow:0 0 0 .5px var(--np-hair),0 18px 36px -20px rgba(15,23,42,.3)}
+.todo:active{transform:scale(.97)}
+.todo .n{font-family:var(--display);font-size:28px;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.todo .l{font-size:13px;line-height:1.35;margin-top:3px}
+.todo:not(.has){opacity:.62}
+.todo:not(.has):hover{opacity:1}
+.todo .go{transition:transform .4s var(--np-spring)}
+.todo:hover .go{transform:translateX(3px)}
+html[data-theme=dark] .todo{box-shadow:0 0 0 .5px var(--np-hair),0 12px 32px -20px rgba(0,0,0,.6)}
+/* Overview: nagłówki sekcji i spokojniejszy pasek stanu systemu */
+.ov-h{display:flex;align-items:center;gap:8px;margin:6px 2px 10px;font:650 15px/1.2 var(--body);letter-spacing:-.01em;color:var(--txt)}
+.ov-h small{font-weight:500;font-size:12.5px;color:var(--dim)}
+.sysbar{gap:8px}
+.sys{border:0;background:var(--np-fill);border-radius:999px;padding:6px 12px;font-size:12.5px}
+.sys b{font-family:var(--body);font-weight:650}
+
+/* ---------- telefon: przejrzystość ---------- */
+@media(max-width:860px){
+  /* tabela jako karty: kontener bez ramki (kreska .tbl-wrap z góry pliku
+     nadpisywała wyzerowanie z admin.css i szła pionowo przy kartach) */
+  .rtbl-wrap{box-shadow:none!important;background:transparent!important}
+  table.rtbl tr{border-color:transparent;border-radius:18px;
+    box-shadow:0 0 0 .5px var(--np-hair),0 1px 2px rgba(15,23,42,.03),0 10px 26px -20px rgba(15,23,42,.22)}
+  table.rtbl td.rt-main{border-bottom:.5px solid var(--np-hair)}
+  /* komórki bez treści (same spacje albo „—") nie zabierają miejsca na
+     karcie; oznacza je ui-motion.js */
+  table.rtbl td.ui-empty{display:none}
+}
+@media(max-width:640px){
+  .topbar .crumb{display:none}
+  .topbar h1{font-size:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .topbar>div:has(>#pg-title){min-width:0;flex:1}
+}
+@media(max-width:480px){
+  /* „+ New challenge" w portalu: na wąskim ekranie okrągły plus */
+  .top-right>.btn-p.sm[onclick^="go('store')"]{font-size:0;width:38px;height:38px;padding:0;border-radius:50%}
+  .top-right>.btn-p.sm[onclick^="go('store')"]::before{content:"+";font-size:22px;font-weight:500;line-height:1}
+}
+/* Zmiana motywu: przenikanie całej strony */
+::view-transition-old(root),::view-transition-new(root){animation-duration:.4s;animation-timing-function:var(--np-ease)}
+@media(prefers-reduced-motion:reduce){
+  .ui-pill,.ui-glider{transition:none}
+  .stat-tile,.ticket-row{transition:none}
+}

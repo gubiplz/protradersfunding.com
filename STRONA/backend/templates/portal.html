@@ -24,6 +24,8 @@ document.documentElement.dataset.theme='dark';
 document.querySelector('meta[name="theme-color"]').setAttribute('content','#0b0d12')}}catch(e){}
 if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('/sw.js'))</script>
 <link rel="stylesheet" href="/static/css/portal.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/css/notifications.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/css/apple.css?v={{ asset_v }}">
 <!-- defer: skrypty nie blokują parsowania (LCP), a kolejność wykonania jest
      gwarantowana — bundle portalu (też defer, na dole body) idzie ostatni. -->
 <script defer src="/static/lib/chart.umd.min.js"></script>
@@ -194,7 +196,6 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
     <div class="sheet-grab"></div>
     <nav class="sheet-nav" id="sheet-nav"></nav>
   </div>
-  <div class="notif-panel hidden" id="notif-panel"></div>
 </div>
 
 <div class="cookie-note hidden" id="cookie-note" role="dialog" aria-label="Cookie notice">
@@ -217,7 +218,9 @@ const SITE_NAME={{ site_name|tojson }};
 const ASSET_V={{ asset_v|tojson }};
 </script>
 <script defer src="/countries.js?v={{ asset_v }}"></script>
+<script defer src="/static/js/np-kit.js?v={{ asset_v }}"></script>
 <script defer src="/static/js/portal-app.js?v={{ asset_v }}"></script>
+<script defer src="/static/js/ui-motion.js?v={{ asset_v }}"></script>
 {% if google_client_id %}
 {# hl=en: the button label comes from this script's bundled strings and would
    otherwise follow the visitor's browser language — the site is English-only #}

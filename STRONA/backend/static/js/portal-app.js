@@ -334,7 +334,7 @@ function toast(msg,kind='ok',ms=6000){
   const t=document.createElement('div');
   t.className='toast '+kind; t.textContent=msg;
   $('toasts').appendChild(t);
-  setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),350)},ms);
+  setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),380)},ms);
 }
 
 /* ---------- auth ---------- */
@@ -1106,31 +1106,338 @@ function dismissPush(){
   document.getElementById('push-banner')?.remove();
 }
 
+/* ---------- dzwonek tradera: panel powiadomień ----------
+   Ten sam panel co u admina (static/js/np-kit.js + notifications.css):
+   zakładki, gesty, push na tym urządzeniu, kółko zębate z ustawieniami.
+   Klik w pozycję prowadzi prosto do widoku (payout, konto, bilet…) przez
+   `notifGo`; przeczytane/usuń — tylko gestem przesunięcia i hurtem w Edit. */
+const UN={tab:'all',open:false,nav:'list',edit:false,picked:new Set(),fresh:new Set(),
+  hiding:new Set(),known:null,loaded:false,dirty:false,items:[],unread:0};
+try{const t=localStorage.getItem('pf_notif_tab');if(['all','trading','payouts','updates'].includes(t))UN.tab=t}catch(_){}
+const UN_TABS=[['all','All'],['trading','Trading'],['payouts','Payouts'],['updates','Updates']];
+const UN_KIND={
+  phase_passed:['trophy','green','Phase passed'],account_funded:['badge','acc','Funded'],
+  account_scaled:['trend','purple','Scaled up'],breached:['octagon','red','Breach'],
+  limit_warning:['gauge','gold','Limit warning'],target_50:['target','green','Profit target'],
+  target_75:['target','green','Profit target'],min_days_met:['calCheck','blue','Trading days'],
+  payout_ready:['wallet','green','Payout ready'],payout_requested:['wallet','purple','Payout requested'],
+  payout_approved:['checkCircle','green','Payout approved'],payout_rejected:['xCircle','red','Payout rejected'],
+  kyc_approved:['shield','blue','Verified'],kyc_rejected:['shieldX','red','Verification'],
+  ticket_reply:['chat','acc','Support'],credits_granted:['gift','gold','Credit'],
+  daily_recap:['chart','acc','Daily recap'],weekly_review:['chart','purple','Weekly review'],
+  checkout_recovery:['bag','gold','Checkout'],flash_offer:['tag','purple','Offer'],
+  upsell_scale:['trend','acc','Scale up'],
+};
+const unKind=i=>UN_KIND[i.event]||['bell','acc','Update'];
+const unPref=()=>{try{return localStorage.getItem('pf_notif_seen')!=='0'}catch(_){return true}};
+const unVisible=()=>UN.items.filter(i=>!UN.hiding.has(String(i.id))&&(UN.tab==='all'||i.cat===UN.tab));
+const unUnread=tab=>UN.items.filter(i=>!i.read&&!UN.hiding.has(String(i.id))&&(tab==='all'||i.cat===tab)).length;
+const unItem=id=>UN.items.find(i=>String(i.id)===String(id));
+
 async function refreshNotif(){
   try{
-    window._notif=await api('/api/me/notifications?limit=20');
-    const b=$('bell-badge'); if(!b)return;
-    const n=window._notif.unread||0;
-    b.textContent=n>9?'9+':n;
-    b.classList.toggle('hidden',!n);
+    const r=await api('/api/me/notifications?limit=50');
+    const items=(r.items||[]).map(i=>({...i,ts:i.created_at||new Date().toISOString(),cat:i.cat||'updates'}))
+      .sort((a,b)=>a.ts<b.ts?1:a.ts>b.ts?-1:0);
+    if(UN.known)items.forEach(i=>{if(!UN.known.has(i.id))UN.fresh.add(String(i.id))});
+    UN.known=new Set(items.map(i=>i.id));
+    UN.items=items;UN.loaded=true;
+    unBadge();
+    if(UN.open){if(npSwiping())UN.dirty=true;else unRenderList();unSeg(true)}
   }catch(e){}
 }
-function toggleNotif(){
-  const p=$('notif-panel'); if(!p)return;
-  if(!p.classList.contains('hidden')){p.classList.add('hidden');return}
-  const r=window._notif||{items:[],unread:0};
-  p.innerHTML=`<div class="notif-head"><b>Notifications</b>
-      ${r.unread?`<button class="linklike" onclick="readNotif()">Mark all read</button>`:''}</div>`
-    +((r.items&&r.items.length)?r.items.map(n=>{
-      const kiedy=n.created_at?dutc(n.created_at)
-        .toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
-      return `<a class="notif-row${n.read?'':' unread'}" href="${esc(n.url||'/portal')}" onclick="return notifGo(this)">
-        <div class="t">${esc(n.title)}</div>${n.body?`<div class="b">${esc(n.body)}</div>`:''}
-        <div class="d">${kiedy}</div></a>`}).join('')
-      :'<div class="notif-empty">Nothing yet. Pass a phase and it lands here.</div>');
-  p.classList.remove('hidden');
-  if(r.unread)readNotif(false);
+function unBadge(){
+  const b=$('bell-badge');if(!b)return;
+  const n=unUnread('all');
+  b.textContent=n>9?'9+':n;
+  b.classList.toggle('hidden',!n);
+  npBumpNum(b,n);
 }
+function unEnsure(){
+  if($('np'))return;
+  document.body.insertAdjacentHTML('beforeend',`
+  <div class="np-scrim" id="np-scrim"></div>
+  <section class="np" id="np" role="dialog" aria-modal="true" aria-label="Notifications" inert>
+    <div class="np-body">
+      <div class="np-pg np-list" id="np-list">
+        <div class="np-grab" data-np-drag></div>
+        <header class="np-bar" data-np-drag>
+          <div class="np-bar-l"><button type="button" class="np-tbtn" data-un="edit">Edit</button></div>
+          <div class="np-bar-t">Notifications</div>
+          <div class="np-bar-r">
+            <button type="button" class="np-ibtn np-gear" data-un="settings" aria-label="Notification settings">${npI('gear')}</button>
+            <button type="button" class="np-ibtn" data-un="close" aria-label="Close">${npI('x',2.2)}</button>
+            <span class="np-editacts">
+              <button type="button" class="np-act" data-un="bulkread" disabled>Mark read</button>
+              <button type="button" class="np-act danger" data-un="bulkdel" disabled>Delete</button>
+            </span>
+          </div>
+        </header>
+        <div class="np-scroll" id="np-scroll">
+          <div class="np-lt"><div><h2>Notifications</h2><small id="np-sub"></small></div>
+            <button type="button" class="np-tbtn np-noedit" data-un="allread">Mark all read</button>
+            <button type="button" class="np-tbtn np-onedit" data-un="selall">Select all</button></div>
+          <div class="np-pr" data-push="${PUSH.st}" data-un="pushrow">${npPushInner()}</div>
+          <div class="np-segw"><div class="np-seg" id="np-seg" role="tablist" aria-label="Filter"></div></div>
+          <div class="np-items" id="np-items" role="list"></div>
+        </div>
+      </div>
+      <div class="np-pg np-settings" id="np-settings" inert></div>
+    </div>
+  </section>`);
+  const seg=$('np-seg');
+  seg.style.setProperty('--n',UN_TABS.length);
+  seg.innerHTML='<span class="np-pill"></span>'+UN_TABS.map(([k,l])=>
+    `<button type="button" role="tab" data-un-tab="${k}"><span>${l}</span><b class="np-n zero"></b></button>`).join('');
+  npPaintPush();unSeg(false);unNav('list');
+}
+function toggleNotif(){unSetOpen(!UN.open)}
+function unSetOpen(open){
+  unEnsure();
+  UN.open=open;
+  const np=$('np');
+  np.classList.toggle('open',open);
+  $('np-scrim').classList.toggle('open',open);
+  np.inert=!open;
+  if(open){np.style.transform='';refreshPush();unRenderList({anim:'f'});unSeg(false);refreshNotif()}
+  else{if(UN.edit)unSetEdit(false);unObserve(false);if(UN.nav!=='list')setTimeout(()=>{if(!UN.open)unNav('list')},400)}
+}
+function unSeg(bump){
+  const seg=$('np-seg');if(!seg)return;
+  seg.style.setProperty('--i',Math.max(0,UN_TABS.findIndex(t=>t[0]===UN.tab)));
+  npQ('button',seg).forEach(b=>{
+    const on=b.dataset.unTab===UN.tab;
+    b.setAttribute('aria-selected',String(on));b.tabIndex=on?0:-1;
+    const el=b.querySelector('.np-n'),n=b.dataset.unTab==='all'?0:unUnread(b.dataset.unTab);
+    el.textContent=n>99?'99+':n;el.classList.toggle('zero',!n);
+    if(bump)npBumpNum(el,n);else el.dataset.n=n;
+  });
+  const all=unUnread('all'),sub=$('np-sub');
+  if(sub)sub.textContent=all?`${all} unread`:'All caught up';
+  const ar=document.querySelector('[data-un="allread"]');if(ar)ar.disabled=!unUnread(UN.tab);
+  const ed=document.querySelector('[data-un="edit"]');if(ed)ed.disabled=!unVisible().length&&!UN.edit;
+}
+function unSetTab(tab){
+  if(tab===UN.tab)return;
+  const dir=UN_TABS.findIndex(t=>t[0]===tab)>UN_TABS.findIndex(t=>t[0]===UN.tab)?'r':'l';
+  UN.tab=tab;UN.picked.clear();
+  try{localStorage.setItem('pf_notif_tab',tab)}catch(_){}
+  unSeg(false);
+  const sc=$('np-scroll'),segw=document.querySelector('.np-segw');
+  if(sc&&segw&&sc.scrollTop>segw.offsetTop)sc.scrollTop=segw.offsetTop;
+  unRenderList({anim:dir});
+  if(UN.edit)unEditbar();
+}
+function unRow(i,sep){
+  const k=unKind(i);
+  return `<div class="np-row${i.read?'':' unread'}${UN.picked.has(String(i.id))?' picked':''}" data-id="${i.id}" role="listitem">
+    <div class="np-ra" aria-hidden="true">
+      <button type="button" class="np-ra-l" data-un-act="read" tabindex="-1"><span class="if-unread">${npI('check',2.4)}</span><span class="if-read">${npI('dot')}</span><span class="if-unread">Read</span><span class="if-read">Unread</span></button>
+      <button type="button" class="np-ra-r" data-un-act="del" tabindex="-1"><span>Delete</span>${npI('trash')}</button></div>
+    <div class="np-rb${sep?' np-sepd':''}" tabindex="0" data-un-open="${i.id}">
+      <span class="np-ck" aria-hidden="true">${npI('check',3)}</span><span class="np-dot" aria-hidden="true"></span>
+      <span class="np-ico" style="--k:var(--${k[1]})">${npI(k[0])}</span>
+      <div class="np-txt"><div class="np-l1"><span class="np-who">${esc(i.title||k[2])}</span><time data-ts="${esc(i.ts)}">${esc(npRel(i.ts))}</time></div>
+        ${i.body?`<div class="np-l2">${esc(i.body)}</div>`:''}</div>
+    </div></div>`;
+}
+function unRenderList(o={}){
+  const box=$('np-items');if(!box)return;
+  if(!UN.loaded){
+    box.innerHTML=`<div class="np-sk">${'<div class="np-sk-r"><span class="np-sk-i"></span><span class="np-sk-t"><span class="np-sk-l" style="display:block;width:55%"></span><span class="np-sk-l" style="display:block;width:85%"></span></span></div>'.repeat(5)}</div>`;
+    return;
+  }
+  const items=unVisible();
+  if(!items.length){
+    box.innerHTML=`<div class="np-empty"><span class="np-e-ic">${npI('checkCircle')}</span><b>You're all caught up</b><span>${
+      UN.tab==='payouts'?'Payout requests and approvals land here.'
+      :UN.tab==='trading'?'Phase passes, targets and limit warnings land here.'
+      :'Pass a phase, request a payout or get a support reply — it lands here.'}</span></div>`;
+  }else{
+    const dni=[];let cur=null;
+    for(const i of items){const lab=npDayLabel(i.ts);if(!cur||cur.lab!==lab)dni.push(cur={lab,items:[]});cur.items.push(i)}
+    box.innerHTML=dni.map(d=>`<section class="np-day"><h3 class="np-day-h">${d.lab}</h3><div class="np-grp">${
+      d.items.map((i,n)=>unRow(i,n>0)).join('')}</div></section>`).join('')
+      +`<button type="button" class="np-clr" data-un="clear">${UN.tab==='all'?'Delete all':'Delete all in '+(UN_TABS.find(t=>t[0]===UN.tab)||[])[1]}</button>`;
+  }
+  if(o.anim&&!npRM()){box.classList.remove('in-l','in-r','in-f');void box.offsetWidth;box.classList.add('in-'+o.anim)}
+  UN.fresh.forEach(id=>{const r=box.querySelector(`.np-row[data-id="${CSS.escape(id)}"]`);if(r)npGrow(r)});
+  UN.fresh.clear();
+  unObserve(true);
+}
+function unPaintRead(){
+  npQ('#np-items .np-row[data-id]').forEach(r=>{const i=unItem(r.dataset.id);r.classList.toggle('unread',!!i&&!i.read)});
+}
+function unMark(ids,read=true){
+  const zm=UN.items.filter(i=>ids.map(String).includes(String(i.id))&&i.read!==read);
+  if(!zm.length)return;
+  zm.forEach(i=>i.read=read);
+  unPaintRead();unSeg(false);unBadge();
+  api('/api/me/notifications/mark',{method:'POST',body:JSON.stringify({ids:zm.map(i=>+i.id),read})}).catch(()=>{});
+}
+function unDelete(ids){
+  ids=ids.map(String).filter(id=>!UN.hiding.has(id));
+  if(!ids.length)return;
+  npCloseSwipes();
+  const set=new Set(ids);
+  npQ('#np-items .np-row[data-id]').filter(r=>set.has(r.dataset.id)).forEach(npCollapse);
+  setTimeout(()=>{
+    ids.forEach(id=>{UN.hiding.add(id);UN.picked.delete(id)});
+    unRenderList();unSeg(false);unBadge();if(UN.edit)unEditbar();
+    npUndoToast(ids.length===1?'Notification deleted':`${ids.length} notifications deleted`,
+      ()=>{
+        UN.items=UN.items.filter(i=>!set.has(String(i.id)));ids.forEach(id=>UN.hiding.delete(id));
+        api('/api/me/notifications/delete',{method:'POST',keepalive:true,body:JSON.stringify({ids:ids.map(Number)})}).catch(()=>{});
+      },
+      ()=>{ids.forEach(id=>{UN.hiding.delete(id);UN.fresh.add(id)});unRenderList();unSeg(true);unBadge()});
+  },npRM()?0:300);
+}
+function unRowAct(act,row){
+  const ids=npIds(row);if(!ids.length)return;
+  if(act==='del')return unDelete(ids);
+  if(act==='read'){unMark(ids,ids.some(id=>{const i=unItem(id);return i&&!i.read}));npCloseSwipes()}
+}
+function unSetEdit(on){
+  UN.edit=on;UN.picked.clear();
+  $('np').classList.toggle('editing',on);
+  const b=document.querySelector('[data-un="edit"]');if(b)b.textContent=on?'Done':'Edit';
+  npQ('#np-items .picked').forEach(r=>r.classList.remove('picked'));
+  npCloseSwipes();unEditbar();
+}
+function unEditbar(){
+  const n=UN.picked.size,vis=unVisible();
+  const del=document.querySelector('[data-un="bulkdel"]'),rd=document.querySelector('[data-un="bulkread"]'),
+        all=document.querySelector('[data-un="selall"]');
+  if(!del)return;
+  del.textContent=n?`Delete ${n}`:'Delete';del.disabled=!n;rd.disabled=!n;
+  rd.textContent=n&&![...UN.picked].some(id=>{const i=unItem(id);return i&&!i.read})?'Mark unread':'Mark read';
+  all.textContent=vis.length&&vis.every(i=>UN.picked.has(String(i.id)))?'Deselect all':'Select all';
+}
+function unNav(nav){
+  UN.nav=nav;
+  const np=$('np');if(!np)return;
+  np.classList.toggle('nav-settings',nav==='settings');
+  if(nav==='settings')unRenderSettings();
+  $('np-list').inert=nav==='settings';
+  $('np-settings').inert=nav!=='settings';
+}
+/* Kategorie = te same przełączniki co w Settings (notify_*): gaszą mail,
+   push i wpis w dzwonku naraz — tak działa backend (`notify._PREF_BY_EVENT`). */
+const UN_CATS=[['trading','Trading','Phase passes, funding, targets and limit warnings','trophy','green'],
+  ['payouts','Payouts','Requested, approved and sent','wallet','purple'],
+  ['updates','Account & support','KYC results, support replies and credits','shield','blue'],
+  ['marketing','Recaps & offers','Daily recap, weekly review and occasional offers','chart','acc']];
+function unCatsHtml(){
+  const n=(ME&&ME.notify)||{};
+  return `<div class="np-grp flat">${UN_CATS.map(([k,t,d,ic,c])=>`<div class="np-cell"><span class="np-ci" style="--k:var(--${c})">${npI(ic,2)}</span>
+    <span class="np-ct"><b>${t}</b><span>${d}</span></span>
+    <button type="button" class="np-sw" role="switch" data-un-cat="${k}" aria-checked="${!!n[k]}" aria-label="${t}"><i></i></button></div>`).join('')}</div>`;
+}
+function unRenderSettings(){
+  const box=$('np-settings');if(!box)return;
+  box.innerHTML=`
+    <header class="np-bar"><div class="np-bar-l"><button type="button" class="np-tbtn np-back" data-un="back">${npI('chevL',2.4)}<span>Back</span></button></div>
+      <div class="np-bar-t">Notification settings</div><div class="np-bar-r"></div></header>
+    <div class="np-scroll"><div class="np-set">
+      <h4 class="np-sec-h">This device</h4>
+      <div class="np-grp flat"><div class="np-pr" data-push="${PUSH.st}" style="margin:0;border-radius:0;box-shadow:none">${npPushInner()}</div>
+        <div data-np-push-help></div></div>
+      <p class="np-sec-f">Push is per device. Switch it on on every phone and computer you want alerts on.</p>
+      <h4 class="np-sec-h">What you hear about</h4>
+      ${unCatsHtml()}
+      <p class="np-sec-f">Turning a category off stops its email, push and bell notifications. Essential emails (verification, MT5 credentials) always arrive.</p>
+      <h4 class="np-sec-h">This list</h4>
+      <div class="np-grp flat"><div class="np-cell"><span class="np-ci" style="--k:var(--blue)">${npI('eye',2)}</span>
+        <span class="np-ct"><b>Mark as read when seen</b><span>After two seconds on screen</span></span>
+        <button type="button" class="np-sw" role="switch" data-un="seen" aria-checked="${unPref()}" aria-label="Mark as read when seen"><i></i></button></div></div>
+      <div class="np-grp flat" style="margin-top:28px"><button type="button" class="np-cell danger" data-un="clearall"><b>Delete all notifications</b></button></div>
+    </div></div>`;
+  npPaintPush();
+}
+async function unSetCat(k,on){
+  const maluj=v=>npQ(`[data-un-cat="${k}"]`).forEach(s=>s.setAttribute('aria-checked',String(v)));
+  maluj(on);
+  try{const r=await api('/api/me',{method:'PATCH',body:JSON.stringify({['notify_'+k]:on})});ME.notify=r.notify}
+  catch(e){maluj(!on);toast('Error: '+e.message,'err')}
+}
+function unObserve(on){
+  npObserveSeen(on&&UN.open&&unPref()?$('np-scroll'):null,on?npQ('#np-items .np-row.unread'):[],
+    ids=>unMark(ids,true),()=>UN.open&&UN.nav!=='settings'&&!UN.edit);
+}
+/* Klik = prosto do widoku z adresu powiadomienia (notifGo trzyma nawigację
+   w SPA); przeczytane od razu. */
+function unOpen(id){
+  const i=unItem(id);if(!i)return;
+  unMark([id],true);
+  const href=i.url||'/portal';
+  unSetOpen(false);
+  if(notifGo({getAttribute:()=>href}))location.href=href;
+}
+addEventListener('click',e=>{
+  const t=e.target;
+  if(!t.closest)return;
+  if(t.id==='np-scrim')return unSetOpen(false);
+  const cat=t.closest('[data-un-cat]');
+  if(cat)return unSetCat(cat.dataset.unCat,cat.getAttribute('aria-checked')!=='true');
+  const tab=t.closest('[data-un-tab]');
+  if(tab)return unSetTab(tab.dataset.unTab);
+  const push=t.closest('[data-np="push"]');
+  if(push)return npTogglePush();
+  const a=t.closest('[data-un]');
+  if(a){
+    switch(a.dataset.un){
+      case 'pushrow':if(['ios','denied','nokey','unsupported'].includes(PUSH.st))unNav('settings');return;
+      case 'close':return unSetOpen(false);
+      case 'settings':return unNav('settings');
+      case 'back':return unNav('list');
+      case 'edit':return unSetEdit(!UN.edit);
+      case 'allread':return unMark(unVisible().filter(x=>!x.read).map(x=>x.id),true);
+      case 'selall':{
+        const vis=unVisible(),all=vis.every(x=>UN.picked.has(String(x.id)));
+        vis.forEach(x=>all?UN.picked.delete(String(x.id)):UN.picked.add(String(x.id)));
+        npQ('#np-items .np-row[data-id]').forEach(r=>r.classList.toggle('picked',UN.picked.has(r.dataset.id)));
+        return unEditbar();
+      }
+      case 'bulkread':{const ids=[...UN.picked];unMark(ids,ids.some(id=>{const x=unItem(id);return x&&!x.read}));return unEditbar()}
+      case 'bulkdel':return unDelete([...UN.picked]);
+      case 'clear':return npArm(a,unVisible().length,()=>unDelete(unVisible().map(x=>x.id)));
+      case 'clearall':{const ids=UN.items.filter(x=>!UN.hiding.has(String(x.id))).map(x=>x.id);
+        return npArm(a,ids.length,()=>{unNav('list');unDelete(ids)})}
+      case 'seen':{
+        const on=a.getAttribute('aria-checked')!=='true';a.setAttribute('aria-checked',String(on));
+        try{localStorage.setItem('pf_notif_seen',on?'1':'0')}catch(_){}
+        return unObserve(true);
+      }
+    }
+    return;
+  }
+  const act=t.closest('[data-un-act]');
+  if(act)return unRowAct(act.dataset.unAct,act.closest('.np-row'));
+  const rb=t.closest('#np-items .np-rb');
+  if(rb){
+    if(+rb.dataset.off)return npSlide(rb,0);
+    if(UN.edit){
+      const id=rb.closest('.np-row').dataset.id;
+      UN.picked.has(id)?UN.picked.delete(id):UN.picked.add(id);
+      rb.closest('.np-row').classList.toggle('picked',UN.picked.has(id));
+      return unEditbar();
+    }
+    return unOpen(rb.dataset.unOpen);
+  }
+});
+addEventListener('keydown',e=>{
+  if(!UN.open)return;
+  if(e.key==='Escape'){if(UN.edit)return unSetEdit(false);if(UN.nav==='settings')return unNav('list');return unSetOpen(false)}
+  const el=document.activeElement,rb=el&&el.closest&&el.closest('#np-items .np-rb');
+  if(!rb||UN.edit)return;
+  if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();return unRowAct('del',rb.closest('.np-row'))}
+  if(e.key==='Enter'||e.key===' '){e.preventDefault();return rb.click()}
+});
+npGestures({items:'#np-items',panel:'#np',editing:()=>UN.edit,open:()=>UN.open,
+  onAct:(act,row)=>unRowAct(act,row),onDismiss:()=>unSetOpen(false),
+  onEnd:()=>{if(UN.dirty){UN.dirty=false;setTimeout(()=>unRenderList(),350)}}});
+setInterval(()=>{if(UN.open)npQ('#np-items time[data-ts]').forEach(t=>t.textContent=npRel(t.dataset.ts))},30000);
+
 /* Bell row: switch the SPA view instead of a full navigation; with no
    matching view fall back to the row's URL. */
 function notifGo(a){
@@ -1154,17 +1461,6 @@ function flashUpsell(){
   el.classList.remove('flash');void el.offsetWidth;el.classList.add('flash');
   setTimeout(()=>el.classList.remove('flash'),2800);
 }
-async function readNotif(rerender=true){
-  try{await api('/api/me/notifications/read',{method:'POST'});await refreshNotif()}catch(e){}
-  if(rerender)$('notif-panel')?.classList.add('hidden');
-}
-document.addEventListener('click',e=>{
-  const p=document.getElementById('notif-panel');
-  if(!p||p.classList.contains('hidden'))return;
-  if(e.target.closest('#notif-panel')||e.target.closest('#bell-btn'))return;
-  p.classList.add('hidden');
-});
-
 /* Installed app (standalone): the PWA scope is /portal — everything else
    (landing, /verify, certificates, legal pages) is the WEBSITE. A plain
    navigation would swallow it inside the app window with no browser UI, so
@@ -1910,9 +2206,19 @@ const VIEWS={
   if(!accs.length){$('view').innerHTML='<div class="empty"><h3>No accounts yet</h3><p>Analytics appear once you have a challenge account.</p></div>';return}
   window._anAcc=window._anAcc||accs[0].id;
   if(!accs.some(a=>a.id===window._anAcc))window._anAcc=accs[0].id;
+  /* Każda faza osobno: po awansie konto startuje od zera, więc Phase 1,
+     Phase 2 i Funded to trzy różne historie, a nie jedna wspólna. Domyślnie
+     faza bieżąca; wybór pamiętamy per konto. */
+  const accSel=accs.find(a=>a.id===window._anAcc);
+  const fazy=(accSel&&accSel.phases&&accSel.phases.length)?accSel.phases:[{phase:accSel?.phase,label:'',current:true}];
+  window._anPhase=window._anPhase||{};
+  let faza=window._anPhase[window._anAcc];
+  if(!fazy.some(f=>f.phase===faza))faza=(fazy.find(f=>f.current)||fazy[fazy.length-1]).phase;
+  const fazaInfo=fazy.find(f=>f.phase===faza)||{};
+  const q=faza?`?phase=${encodeURIComponent(faza)}`:'';
   const [act,st]=await Promise.all([
-    api(`/api/me/accounts/${window._anAcc}/activity`),
-    api(`/api/me/accounts/${window._anAcc}/stats`)]);
+    api(`/api/me/accounts/${window._anAcc}/activity${q}`),
+    api(`/api/me/accounts/${window._anAcc}/stats${q}`)]);
   const days=act.days;
   const total=days.reduce((s,d)=>s+d.pnl,0);
   const bestD=days.reduce((m,d)=>d.pnl>(m?.pnl??-1e18)?d:m,null);
@@ -1933,10 +2239,13 @@ const VIEWS={
   </div>`;
   $('view').innerHTML=`
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
-      <select id="an-sel" class="inp" style="max-width:260px" onchange="window._anAcc=parseInt(this.value);VIEWS.analytics()">
-        ${accs.map(a=>`<option value="${a.id}"${a.id===window._anAcc?' selected':''}>${esc(a.login)} · ${esc(a.product_key)}</option>`).join('')}
+      <select id="an-sel" class="inp" style="max-width:340px" onchange="const [i,f]=this.value.split('|');window._anAcc=parseInt(i);window._anPhase[window._anAcc]=f;VIEWS.analytics()">
+        ${accs.map(a=>((a.phases&&a.phases.length)?a.phases:[{phase:a.phase,label:''}]).slice().reverse().map(f=>
+          `<option value="${a.id}|${esc(f.phase||'')}"${a.id===window._anAcc&&f.phase===faza?' selected':''}>${esc(a.login)} · ${esc(a.product_key)}${f.label?' · '+esc(f.label)+(f.current&&a.phases.length>1?' (now)':''):''}</option>`).join('')).join('')}
       </select>
-      <span class="muted" style="font-size:12px">Computed server-side from every closed trade on this account.</span>
+      <span class="muted" style="font-size:12px">${fazaInfo.label
+        ?`${esc(fazaInfo.label)} only${fazaInfo.from?` · since ${dstr(fazaInfo.from)}`:''}${fazaInfo.to?` until ${dstr(fazaInfo.to)}`:''} — every phase starts from zero.`
+        :'Computed server-side from every closed trade on this account.'}</span>
     </div>
     <div class="stats-row">
       <div class="stat-tile"><div class="tile-ic ${total>=0?'green':'orange'}">${ICO.trend}</div>
@@ -2488,18 +2797,12 @@ const VIEWS={
     </div>
 
     <div class="sec-card" style="max-width:640px"><h3>Notification Preferences</h3>
-      <div style="margin-top:6px">
-        ${sw('updates','Email Updates','KYC results, support replies and store-credit e-mails. Essential e-mails (verification, MT5 credentials) always arrive.')}
-        ${sw('trading','Trading Alerts','Phase passed, funded status and rule-breach notifications.')}
-        ${sw('payouts','Payout Notifications','Updates about your payout requests.')}
-        ${sw('marketing','Daily Recap & Offers','A short recap of the previous trading day (only when you traded) and occasional product news.')}
-      </div>
-      <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
-        <div class="switch-row"><div><h4>Push Notifications</h4>
-          <p id="pushStatus">Checking this device…</p></div>
-          <button class="btn-p sm" id="pushBtn" onclick="togglePush()" style="display:none"></button></div>
-        <a class="btn-o sm" id="pushInstallLink" href="/install" target="_blank" rel="noopener" style="display:none;margin-top:8px">How to install the app</a>
-      </div></div>
+      <div class="np-pr" data-push="${PUSH.st}" style="margin-top:12px">${npPushInner()}</div>
+      <div data-np-push-help></div>
+      <div style="margin-top:14px">${unCatsHtml()}</div>
+      <p class="muted" style="font-size:12px;margin-top:8px">Turning a category off stops its email, push and bell notifications.
+        Essential e-mails (verification, MT5 credentials) always arrive.</p>
+    </div>
 
     <div class="sec-card" style="max-width:640px;border-color:var(--red-line)"><h3 style="color:var(--red)">Danger Zone</h3>
       <p class="muted" style="font-size:13px;margin:8px 0 14px">Deleting your account anonymizes your personal data and permanently disables login.
@@ -2509,7 +2812,7 @@ const VIEWS={
         <button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteAccount()">Delete Account</button>
       </div></div>
     </div>`;
-  initPushUI();
+  npPaintPush();refreshPush();
  },
 };
 
@@ -3507,7 +3810,11 @@ async function openAcc(id){
   const dlUsd=a.initial_balance*dlPct/100, dlLimUsd=a.initial_balance*(m.max_daily_loss_pct||0)/100;
   const curve=a.equity_curve||[];
   const openPnl=a.open_pnl||0;
-  const started=a.created_at?dutc(a.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'—';
+  /* Po awansie liczby konta opisują bieżącą fazę od zera, więc i data startu
+     jest datą startu fazy (Phase 2 / Funded), a nie założenia konta. */
+  const fazaOd=(a.phases&&a.phases.length>1&&a.phase_started_at)?a.phase_started_at:a.created_at;
+  const started=fazaOd?dutc(fazaOd).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'—';
+  const startLbl=(a.phases&&a.phases.length>1&&a.phase_started_at)?((a.phases.find(f=>f.current)||{}).label||'Phase')+' started':'Start';
   const split=a.profit_split_pct??90;
   const objOn=objLinesOn();
   $('view').innerHTML=`
@@ -3567,7 +3874,7 @@ async function openAcc(id){
         <div class="kv2"><span class="k">Status</span>
           <span class="status ${esc(a.status)}"><span class="dot"></span>${a.status==='active'?'evaluation':esc(a.status)}</span></div>
         <div class="kv2"><span class="k">Account Number</span><span class="v">${esc(a.login)}</span></div>
-        <div class="kv2"><span class="k">Start</span><span class="v">${started}</span></div>
+        <div class="kv2"><span class="k">${startLbl}</span><span class="v">${started}</span></div>
         <div class="kv2"><span class="k">Account Size</span><span class="v">$${fmt0(a.initial_balance)}</span></div>
         <div class="kv2"><span class="k">Profit Split</span>
           <span class="v">${split}:${100-split}<span class="split-under"><i style="width:${split}%"></i></span></span></div>
