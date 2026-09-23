@@ -283,6 +283,39 @@ def test_mail_na_obcy_adres_zostawia_slad_tylko_w_dzienniku(resend, smtp):
     assert _dziennik(email) == [("admin_message", True, None)]
 
 
+def test_serwer_domyka_imie_gdy_panel_go_nie_zna(resend, smtp):
+    """Mail na wpisany adres: panel nie ma imienia, serwer zna leada po mailu."""
+    lid, email = _lead(name="Ada Obi")
+    r = client.post("/api/admin/mail/send", headers=ADMIN,
+                    json={"to": email, "subject": "Hello {name}",
+                          "body": "Hi {name},\n\nOne thing.", "sender": "fx"})
+    assert r.status_code == 200, r.text
+    (_, _, dane), = resend
+    assert dane["subject"] == "Hello Ada" and dane["text"].startswith("Hi Ada,")
+
+
+def test_nieznany_adres_dostaje_there(resend, smtp):
+    email = f"nikt{next(LICZNIK)}@test.pl"
+    r = client.post("/api/admin/mail/send", headers=ADMIN,
+                    json={"to": email, "subject": "Hello {name}", "body": "Hi {name},"})
+    assert r.status_code == 200, r.text
+    assert smtp[0]["Subject"] == "Hello there"
+
+
+def test_nawias_do_uzupelnienia_blokuje_wysylke(resend, smtp):
+    tid, _ = _trader()
+    r = client.post(f"/api/admin/traders/{tid}/email", headers=ADMIN,
+                    json={"subject": TEMAT,
+                          "body": "Where it stands: [current balance / phase / days traded]."})
+    assert r.status_code == 400 and "bracketed" in r.json()["detail"]
+    assert "[current balance" in r.json()["detail"]
+    assert resend == [] and smtp == []
+    # Krótki nawias w zwykłym tekście („[1]") nie jest rusztowaniem.
+    r = client.post(f"/api/admin/traders/{tid}/email", headers=ADMIN,
+                    json={"subject": TEMAT, "body": "See note [1] below."})
+    assert r.status_code == 200, r.text
+
+
 def test_mail_na_zly_adres_to_400(resend, smtp):
     for zly in ("", "bez-malpy", "a@b"):
         r = client.post("/api/admin/mail/send", headers=ADMIN,

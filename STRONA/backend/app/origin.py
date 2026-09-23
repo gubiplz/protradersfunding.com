@@ -46,12 +46,13 @@ FREE_PROGRAM_NOTE = "free program"
 class Pochodzenie:
     desk: str | None = None       # "free" | "leads" | None (bez leada)
     country: str | None = None    # ISO2 z pierwszego wiarygodnego sygnału
+    country_via: str | None = None  # z którego sygnału (kyc/phone/login/signup/lead-phone/lead-ip)
     africa: bool = False
     free: bool = False            # desk == "free" or grant or africa
     via: list[str] = field(default_factory=list)
 
     def json(self) -> dict:
-        return {"desk": self.desk, "country": self.country,
+        return {"desk": self.desk, "country": self.country, "country_via": self.country_via,
                 "africa": self.africa, "free": self.free, "via": list(self.via)}
 
 
@@ -78,7 +79,7 @@ def pochodzenie(trader: Trader | None, lead: Lead | None, *,
     znane = [(zrodlo, iso.strip().upper()) for zrodlo, iso in sygnaly
              if iso and iso.strip()]
     if znane:
-        p.country = znane[0][1]
+        p.country_via, p.country = znane[0]
     for zrodlo, iso in znane:
         if countries.is_africa(iso):
             p.africa = True

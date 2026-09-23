@@ -223,12 +223,31 @@ const freeCheckbox=()=>`<label style="display:flex;align-items:center;gap:6px;fo
       style="width:15px;height:15px;accent-color:var(--acc)">Free</label>`;
 /* Chip mowi nie tylko ZE free, ale i SKAD: kraj obok, powody w tooltipie —
    inaczej „Free" przy kliencie z polskim KYC wyglada jak blad panelu. */
+const COUNTRY_VIA={kyc:'KYC document',phone:'phone prefix at checkout',login:'IP at last sign-in',
+  signup:'IP at sign-up',['lead-phone']:'phone prefix on the lead',['lead-ip']:'IP of the application'};
+const countryTitle=o=>o&&o.country
+  ?`Country from ${COUNTRY_VIA[o.country_via]||o.country_via||'a signal'}`
+  :'No country yet — none of: KYC, phone at checkout, IP at sign-up / sign-in, lead phone or application IP. Fills in at their next sign-in.';
 function freeChip(t){
   const o=(t&&t.origin)||{};
-  if(!isFreeOrigin(t))return o.country?` · <span class="muted" title="Country from KYC, phone or IP">${esc(o.country)}</span>`:'';
+  if(!isFreeOrigin(t))return o.country?` · <span class="muted" title="${esc(countryTitle(o))}">${esc(o.country)}</span>`:'';
   const why=(o.via||[]).join(', ')||'free funnel';
-  return ` · <span class="chip" title="${esc(why)}">Free${o.country?' · '+esc(o.country):''}</span>`;
+  return ` · <span class="chip" title="${esc(why)}${o.country?' · '+esc(countryTitle(o)):''}">Free${o.country?' · '+esc(o.country):''}</span>`;
 }
+/* Filtr po odczytanym kraju: lista zbudowana z tego, co JEST na liście (z
+   licznikami), plus „No country" — bo brak kraju to tez odpowiedz: nikt bez
+   sygnalu nie jest jeszcze niczyj, dostanie go przy nastepnym logowaniu. */
+const krajWiersza=t=>(t&&t.origin&&t.origin.country)||'';
+function countrySelect(all,key,render){
+  const n={};all.forEach(t=>{const k=krajWiersza(t)||'-';n[k]=(n[k]||0)+1});
+  const cur=window[key]||'';
+  const opts=Object.keys(n).filter(k=>k!=='-').sort().map(k=>`<option value="${k}"${cur===k?' selected':''}>${k} · ${n[k]}</option>`).join('');
+  return `<select class="inp" style="width:auto;padding:6px 10px;font-size:12.5px" aria-label="Country"
+      title="Country from KYC, phone prefix or IP. “No country” = no signal yet; it fills in at the next sign-in."
+      onchange="window.${key}=this.value;${render}()">
+      <option value="">Any country</option>${opts}${n['-']?`<option value="-"${cur==='-'?' selected':''}>No country · ${n['-']}</option>`:''}</select>`;
+}
+const pasujeKraj=(t,c)=>!c||(c==='-'?!krajWiersza(t):krajWiersza(t)===c);
 function toggleImported(){
   IMPORTED=!IMPORTED;
   localStorage.setItem('pf_admin_imported',IMPORTED?'1':'0');
@@ -1741,10 +1760,19 @@ async function sendComposedMail(){
   const to=(c.email||$('lm-to').value||'').trim();
   if(!to||!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)){toast('Enter a valid e-mail address.','err');$('lm-to').focus();return}
   const sender=$('lm-from').value;
-  const who={name:c.name||''};
-  const subject=mailFill($('lm-subject').value.trim(),who);
-  const body=mailFill($('lm-body').value.trim(),who);
+  /* Imie: z karty (klient/lead), a przy wpisanym adresie — z listy klientow,
+     jesli byla otwarta. Reszte domyka serwer (zna klienta i leada po mailu),
+     wiec {name} zostaje w tekscie, gdy tu imienia nie ma. */
+  const znany=!c.name&&(window._clients||[]).find(t=>String(t.email||'').toLowerCase()===to.toLowerCase());
+  const who={name:c.name||(znany&&znany.full_name)||''};
+  const fill=s=>who.name?mailFill(s,who):s;
+  const subject=fill($('lm-subject').value.trim());
+  const body=fill($('lm-body').value.trim());
   if(!subject||!body){toast('Subject and message are both required.','err');return}
+  /* Szablon ma miejsca do uzupelnienia w nawiasach kwadratowych — mail z takim
+     nawiasem to mail z widocznym rusztowaniem. Serwer odmawia tak samo. */
+  const rusztowanie=(body+'\n'+subject).match(/\[[^\[\]\n]{4,}\]/);
+  if(rusztowanie){toast('Fill in the bracketed part first: '+rusztowanie[0].slice(0,60),'err',8000);$('lm-body').focus();return}
   /* Wysylka jest nieodwracalna i (przy fx) wychodzi pod cudza marka, wiec
      klikajacy widzi CALY tekst po podmianie {name} i nadawce. */
   if(!await askConfirm({title:'Send this e-mail?',
@@ -3252,7 +3280,8 @@ function renderActivity(){
   const test=(JRN_FILTERS.find(x=>x[0]===f)||JRN_FILTERS[0])[2];
   /* Ten sam checkbox i ten sam werdykt co w Clients (`origin` z backendu) —
      odznaczony chowa tych samych ludzi z tego samego powodu. */
-  const rows=all.filter(t=>test(t)&&(FREE_SHOWN||!isFreeOrigin(t))&&(!q||[t.email,t.full_name]
+  const kraj=window._jrnCountry||'';
+  const rows=all.filter(t=>test(t)&&(FREE_SHOWN||!isFreeOrigin(t))&&pasujeKraj(t,kraj)&&(!q||[t.email,t.full_name]
     .some(x=>String(x||'').toLowerCase().includes(q))));
   const ukryci=FREE_SHOWN?0:all.filter(isFreeOrigin).length;
   const chip=t=>t.awaiting_claim
@@ -3269,6 +3298,7 @@ function renderActivity(){
         `<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''}
           onclick="window._jrnFilter='${f===k?'all':k}';renderActivity()">${l}</button>`).join('')}</div>
       ${freeCheckbox()}
+      ${countrySelect(all,'_jrnCountry','renderActivity')}
       <span class="count-pill">${rows.length} of ${all.length}${
         ukryci?` · <span class="muted">${ukryci} free hidden</span>`:''}${impPill()}</span>
     </div>`
@@ -3307,7 +3337,8 @@ function renderClients(){
   /* Desk liczy backend z leada dopasowanego po mailu — patrz /api/admin/traders.
      Klient bez leada (rejestracja wprost z portalu) nie ma desku i zostaje na
      liście niezależnie od checkboxa: nie przyszedł z darmowego lejka. */
-  const rows=all.filter(t=>test(t)&&(FREE_SHOWN||!isFreeOrigin(t))&&
+  const kraj=window._cliCountry||'';
+  const rows=all.filter(t=>test(t)&&(FREE_SHOWN||!isFreeOrigin(t))&&pasujeKraj(t,kraj)&&
     (!q||fold(t.email).includes(qf)||fold(t.full_name).includes(qf)));
   const ukryci=FREE_SHOWN?0:all.filter(isFreeOrigin).length;
   const cap=capList(rows,'_cliAll','renderClients');
@@ -3317,6 +3348,7 @@ function renderClients(){
         `<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''}
           onclick="window._cliFilter='${f===k?'all':k}';renderClients()">${l}</button>`).join('')}</div>
       ${freeCheckbox()}
+      ${countrySelect(all,'_cliCountry','renderClients')}
       <span class="count-pill">${rows.length} of ${all.length}${
         ukryci?` · <span class="muted">${ukryci} free hidden</span>`:''}${impPill()}</span>
     </div>`

@@ -9655,6 +9655,10 @@ def admin_lead_email(lead_id: int, force: bool = False):
 
 
 NADAWCY_MAILA = ("ptf", "fx")
+# Miejsce do uzupełnienia w szablonie: „[current balance / phase / days traded]".
+# Cztery znaki minimum, żeby przypis „[1]" albo „[x]" w zwykłym tekście
+# nie blokował wysyłki.
+_RUSZTOWANIE_RX = re.compile(r"\[[^\[\]\n]{4,}\]")
 
 
 def _nadawca_z_pola(sender: str | None, domyslny: str) -> str:
@@ -9684,6 +9688,19 @@ def _wyslij_z_panelu(session, *, sender: str, email: str, temat: str, tekst: str
     Wysyłka jest synchroniczna: człowiek przy przycisku ma zobaczyć porażkę
     od razu. Rzuca HTTPException(400) z powodem, gdy nie poszło.
     """
+    # `{name}` podmienia panel przed podglądem, ale przy mailu na wpisany adres
+    # nie zna imienia — serwer zna klienta i leada dopasowanych po mailu, więc
+    # domyka to tutaj. „there" tylko wtedy, gdy nikt imienia nie ma.
+    imie_calosc = ((trader.full_name if trader else "") or (lead.name if lead else "") or "").strip()
+    imie = imie_calosc.split()[0] if imie_calosc else "there"
+    temat = temat.replace("{name}", imie)
+    tekst = tekst.replace("{name}", imie)
+    # Szablony mają miejsca do uzupełnienia w nawiasach kwadratowych
+    # („[current balance / phase / days traded]"). Mail z takim nawiasem to
+    # mail z widocznym rusztowaniem — odmowa, zanim ktoś go zobaczy.
+    rusztowanie = _RUSZTOWANIE_RX.search(tekst) or _RUSZTOWANIE_RX.search(temat)
+    if rusztowanie:
+        raise HTTPException(400, f"Fill in the bracketed part first: {rusztowanie.group(0)[:80]}")
     if sender == "fx":
         if not lead_mail.nadawca_gotowy():
             raise HTTPException(400, "Sender not configured: set "
@@ -10572,6 +10589,18 @@ BOUGHT_UPDATE_DAYS = 7
 # skończoną serię razem z komunikatem o jej końcu.
 POWTORZEN_MAX: int | None = None
 
+# Osobny sufit dla desku DARMOWEGO lejka (czat „LEADS NIGERIA"). Tam cykl
+# „bought" (klient = dostał darmowe konto) mielił „(5. raz)" o tych samych
+# ludziach, a dział nie miał gdzie tego wyłączyć. Trzy wysyłki i koniec:
+# darmowy klient nie kupi drugiego konta co tydzień, więc cotygodniowe
+# zahaczanie nie ma tam sensu, jaki ma przy płacących. Płatny desk zostaje
+# bez sufitu (`POWTORZEN_MAX`).
+POWTORZEN_MAX_FREE: int | None = 3
+
+
+def _sufit_serii(lead: Lead) -> int | None:
+    return POWTORZEN_MAX_FREE if _desk_leada(lead.source) == "free" else POWTORZEN_MAX
+
 # Po ilu minutach ciszy mail do leada wychodzi SAM. Dłużej niż nudge „nikt nie
 # wziął" (30 min) i to jest cały sens tej wartości: pierwszy strzał należy do
 # człowieka, automat jest dopiero zabezpieczeniem na to, że nikt nie usiadł.
@@ -10763,8 +10792,9 @@ def _wyslij_zaplanowane(session, now: datetime
 
         r.sent_count = (r.sent_count or 0) + 1
         r.last_sent_at = now
-        ostatni = (bool(r.repeat_days) and POWTORZEN_MAX is not None
-                   and r.sent_count >= POWTORZEN_MAX)
+        sufit = _sufit_serii(lead)
+        ostatni = (bool(r.repeat_days) and sufit is not None
+                   and r.sent_count >= sufit)
         teksty.append((telegram.lead_chat_id(lead.source),
                        _tekst_zaplanowanego(lead, r, ostatni)))
         pushy.append((lead.id, f"Reminder: {r.text[:80]}", lead.name or lead.email))

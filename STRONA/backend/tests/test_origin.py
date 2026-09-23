@@ -127,6 +127,8 @@ def test_sam_grant_free_program_daje_free():
 def test_trader_bez_leada_z_nigeryjskim_ip_jest_free():
     p = origin.pochodzenie(Trader(email="a@b.c", signup_country="NG"), None)
     assert p.free and p.africa and p.country == "NG" and p.via == ["signup:NG"]
+    assert p.country_via == "signup" and p.json()["country_via"] == "signup"
+    assert origin.pochodzenie(Trader(email="a@b.c"), None).country_via is None
 
 
 def test_kyc_nazwa_kraju_liczy_sie_jako_sygnal():

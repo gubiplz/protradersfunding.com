@@ -80,9 +80,9 @@ def swiat():
             s.close()
 
 
-def _lead(s, nazwa, *, bought=False, z_zakupem=False):
+def _lead(s, nazwa, *, bought=False, z_zakupem=False, source="money"):
     mail = f"{PRZEDROSTEK}-{nazwa}@example.com"
-    lead = Lead(email=mail, name=nazwa, source="money", status="messaged",
+    lead = Lead(email=mail, name=nazwa, source=source, status="messaged",
                 bought=bought, created_at=TERAZ - timedelta(days=30))
     s.add(lead)
     s.flush()
@@ -124,6 +124,67 @@ def _przebieg(s, monkeypatch, lead):
 def test_domyslnie_nie_ma_sufitu(swiat):
     """Stan produkcyjny: cykl o kliencie nie ma się kończyć z powodu kalendarza."""
     assert main.POWTORZEN_MAX is None
+
+
+# --------------------------------------------------------------------------- #
+#  Desk darmowego lejka (LEADS NIGERIA): trzy i koniec
+# --------------------------------------------------------------------------- #
+def test_desk_darmowy_ma_sufit_trzech(swiat):
+    """Płatny desk bez sufitu, darmowy z trzema — dwa różne pytania: klient
+    płacący może kupić znowu, darmowy nie kupi drugiego konta co tydzień."""
+    assert main.POWTORZEN_MAX_FREE == 3
+    assert main._sufit_serii(Lead(email="a@b.c", source="freeaccount")) == 3
+    assert main._sufit_serii(Lead(email="a@b.c", source="money")) is None
+    assert main._sufit_serii(Lead(email="a@b.c", source="")) is None
+
+
+def test_darmowy_cykl_konczy_sie_trzecia_wiadomoscia(swiat, monkeypatch):
+    lead = _lead(swiat, "ng-trzeci", bought=True, source="free")
+    r = _cykl(swiat, lead, sent=2)
+
+    teksty, _ = _przebieg(swiat, monkeypatch, lead)
+
+    assert len(teksty) == 1 and "(3. raz)" in teksty[0]
+    assert "Ostatnie z serii" in teksty[0]
+    assert r.sent_count == 3 and r.active is False
+
+
+def test_darmowy_cykl_ktory_juz_przebil_sufit_gasnie_po_jednej(swiat, monkeypatch):
+    """Wpisy sprzed sufitu stoją na produkcji z licznikiem 5 — dostają jedną
+    ostatnią wiadomość (z informacją, że to koniec) i gasną, zamiast lecieć dalej."""
+    lead = _lead(swiat, "ng-piaty", bought=True, source="free")
+    r = _cykl(swiat, lead, sent=5)
+
+    teksty, _ = _przebieg(swiat, monkeypatch, lead)
+
+    assert len(teksty) == 1 and "Ostatnie z serii" in teksty[0]
+    assert r.active is False
+
+    # Sesja ma wyłączony autoflush — drugi przebieg czyta z bazy, więc stan
+    # z pierwszego musi być zapisany, tak jak zapisuje go cron po każdym biegu.
+    swiat.commit()
+    teksty2, _ = _przebieg(swiat, monkeypatch, lead)
+    assert teksty2 == [], "zgaszony wpis nie wraca"
+
+
+def test_darmowy_przed_sufitem_leci_dalej(swiat, monkeypatch):
+    lead = _lead(swiat, "ng-drugi", bought=True, source="free")
+    r = _cykl(swiat, lead, sent=1)
+
+    teksty, _ = _przebieg(swiat, monkeypatch, lead)
+
+    assert len(teksty) == 1 and "Ostatnie z serii" not in teksty[0]
+    assert r.sent_count == 2 and r.active is True
+
+
+def test_platny_desk_nie_dostaje_sufitu_darmowego(swiat, monkeypatch):
+    lead = _lead(swiat, "platny-dalej", bought=True, source="money")
+    r = _cykl(swiat, lead, sent=5)
+
+    teksty, _ = _przebieg(swiat, monkeypatch, lead)
+
+    assert len(teksty) == 1 and "Ostatnie z serii" not in teksty[0]
+    assert r.sent_count == 6 and r.active is True
 
 
 def test_cykl_leci_dalej_po_wielu_wysylkach(swiat, monkeypatch):
