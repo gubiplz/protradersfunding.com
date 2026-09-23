@@ -42,7 +42,7 @@ from sqlalchemy.exc import IntegrityError
 
 from . import (achievements, auth, billing, catalog, certshot, contentbot, countries,
                fields, loyalty,
-               lead_mail, metaquotes_web, notify, offers,
+               lead_mail, metaquotes_web, notify, offers, origin,
                payout_import, payoutbot, reach, statements,
                poller, provisioning, push, rules, sms, telegram, telemetry, tradebot)
 from .config import get_settings
@@ -786,6 +786,18 @@ def _rate_limit(request: Request, bucket: str, limit: int, window: int = 60) -> 
             _RL_HITS.pop(k, None)
 
 
+def _kraj_z_ip(request: Request) -> str | None:
+    """ISO2 kraju z nagłówka, który Vercel dokleja do każdego requestu.
+
+    Bez geoip i bez zewnętrznych wywołań: `x-vercel-ip-country` jest darmowy
+    i zawsze obecny na produkcji, a lokalnie i w testach go nie ma — wtedy
+    wynik to None i nic się nie psuje. „XX" (nieznany) i śmieci też dają None,
+    żeby kolumna trzymała wyłącznie kody, które `countries` rozpozna.
+    """
+    kod = (request.headers.get("x-vercel-ip-country") or "").strip().upper()
+    return kod if len(kod) == 2 and kod.isalpha() and kod != "XX" else None
+
+
 def _ustaw_ciasteczko_sesji(response: Response, token: str) -> None:
     """Zapisuje sesje w ciasteczku, zeby SERWER mogl bramkowac strone /admin.
 
@@ -1046,6 +1058,7 @@ def signup(payload: SignupIn, request: Request, response: Response):
             referred_by=referred_by,
             email_verified=False, email_verify_code=f"{secrets.randbelow(1_000_000):06d}",
             terms_accepted_at=datetime.now(timezone.utc),
+            signup_country=_kraj_z_ip(request), last_login_country=_kraj_z_ip(request),
         )
         session.add(tr)
         session.commit()
@@ -1068,6 +1081,12 @@ def login(payload: LoginIn, request: Request, response: Response):
         tr = session.query(Trader).filter(Trader.email == payload.email.strip().lower()).first()
         if not tr or not auth.verify_password(payload.password, tr.password_hash):
             raise HTTPException(401, "Wrong e-mail or password")
+        # Kraj z IP przy KAŻDYM logowaniu: konto założone za klienta przez
+        # panel nie ma `signup_country` i to jest jego pierwszy sygnał geo.
+        kraj = _kraj_z_ip(request)
+        if kraj:
+            tr.last_login_country = kraj
+            session.commit()
         telemetry.track("login", tr.id)
         token = auth.make_token(tr.id, tr.password_hash)
         _ustaw_ciasteczko_sesji(response, token)
@@ -1162,8 +1181,12 @@ def google_login(payload: GoogleAuthIn, request: Request, response: Response):
                 email_verified=False,
                 # Klauzula pod przyciskiem: kontynuacja przez Google = zgoda.
                 terms_accepted_at=datetime.now(timezone.utc),
+                signup_country=_kraj_z_ip(request),
             )
             session.add(tr)
+        kraj = _kraj_z_ip(request)
+        if kraj:
+            tr.last_login_country = kraj
         # Google ręczy za adres — potwierdzenie + mail powitalny idą wspólną
         # ścieżką weryfikacji (idempotentne: zweryfikowani nic nie dostają,
         # więc zwykłe logowanie Google nie spamuje welcome'em).
@@ -3835,20 +3858,13 @@ def admin_traders(q: str | None = None, imported: int = 0):
         # wszystkich, jak liczniki wyżej. Kto zapisał się z portalu sam, nie ma
         # żadnego leada i zostaje bez desku; to poprawna odpowiedź, nie brak
         # danych.
-        deski: dict[str, str] = {}
-        for mail, source in session.query(Lead.email, Lead.source).all():
-            klucz = (mail or "").strip().lower()
-            if not klucz:
-                continue
-            desk = _desk_leada(source)
-            # `leads.email` jest UNIQUE, więc jedna osoba ma JEDEN wiersz —
-            # ale ograniczenie rozróżnia wielkość liter, a to dopasowanie już
-            # nie. To jedyny sposób na remis i rozstrzyga go darmowy lejek, bo
-            # filtr odpowiada na pytanie „kto przyszedł z darmowego".
-            if desk == "free" or klucz not in deski:
-                deski[klucz] = desk
+        # `desk` zostaje jak dotąd (lejek), a obok idzie `origin` — werdykt
+        # z WSZYSTKICH sygnałów (grant, kraj z IP/numeru/KYC). Reguła i jej
+        # powody siedzą w `origin.py`; tu tylko trzy zapytania na całą listę.
+        pochodzenia = origin.mapa_pochodzenia(session, rows)
         return [{"id": t.id, "email": t.email, "full_name": t.full_name,
-                 "desk": deski.get((t.email or "").strip().lower()),
+                 "desk": pochodzenia[t.id].desk,
+                 "origin": pochodzenia[t.id].json(),
                  "kyc_status": t.kyc_status, "accounts": counts.get(t.id, 0),
                  "credits_usd": round(float(t.credits_usd or 0), 2),
                  "referred_count": poleceni.get(t.referral_code, 0),
@@ -4106,10 +4122,16 @@ def admin_journal_overview(imported: int = 0):
         klienci = session.query(Trader).filter(Trader.is_admin.is_(False))
         if not imported:
             klienci = klienci.filter(_nie_import())
-        for tr in klienci.all():
+        lista = klienci.all()
+        # To samo `origin` co w Clients — checkbox „Free" w obu zakładkach
+        # ma chować tych samych ludzi z tego samego powodu.
+        pochodzenia = origin.mapa_pochodzenia(session, lista)
+        for tr in lista:
             login = logowania.get(tr.id)
             wiersze.append({
                 "id": tr.id, "email": tr.email, "full_name": tr.full_name,
+                "desk": pochodzenia[tr.id].desk,
+                "origin": pochodzenia[tr.id].json(),
                 "created_at": iso(tr.created_at),
                 "kyc_status": tr.kyc_status,
                 "awaiting_claim": bool(tr.must_set_password),
@@ -8406,6 +8428,9 @@ class LeadIn(BaseModel):
     phoneIso: str | None = None
     telegram: str | None = None
     country: str | None = None
+    # Kraj z IP zgłoszenia (`cf-ipcountry` na landingu). Osobno od `phoneIso`,
+    # bo tamto jest zgadywane ze strefy czasowej urządzenia, a to z adresu.
+    ipCountry: str | None = None
     source: str = ""
     ref: str | None = None
     outcome: str = "qualified"
@@ -8595,15 +8620,22 @@ def _tresc_z_payloadu(surowy: str | None) -> str:
 
 
 def _lead_json(lead: Lead, trader_id: int | None, paid_usd: float,
-               next_due: datetime | None = None, accounts: int = 0) -> dict:
+               next_due: datetime | None = None, accounts: int = 0,
+               pochodzenie: origin.Pochodzenie | None = None) -> dict:
     """Lead dla panelu. Wspólne dla listy i karty szczegółów, żeby karta nie
     zaczęła nazywać pól inaczej niż tabela, z której się ją otwiera."""
     zakwalifikowany = lead.outcome != "not_qualified"
     mail_temat, mail_tekst = lead_mail.tresc(lead.name,
                                              zakwalifikowany=zakwalifikowany)
+    # Bez tradera pod ręką liczymy z samego leada (prefiks numeru, IP
+    # zgłoszenia) — lista i karta podają tradera, gdy go znają.
+    if pochodzenie is None:
+        pochodzenie = origin.pochodzenie(None, lead)
     return {
         "id": lead.id, "email": lead.email, "name": lead.name,
         "phone": lead.phone, "phone_iso": lead.phone_iso, "telegram": lead.telegram,
+        "ip_country": lead.ip_country,
+        "desk": pochodzenie.desk, "origin": pochodzenie.json(),
         "country": lead.country, "source": lead.source, "ref": lead.ref,
         "outcome": lead.outcome, "tier": lead.tier, "score": lead.score,
         "status": lead.status, "note": lead.note, "owner": lead.owner,
@@ -8850,6 +8882,8 @@ def leads_ingest(payload: LeadIn,
             _ustaw_telefon(lead, payload.phone or "", payload.phoneIso)
             lead.telegram = (payload.telegram or None)
             lead.country = (payload.country or None)
+            kod_ip = (payload.ipCountry or "").strip().upper()[:2]
+            lead.ip_country = kod_ip if kod_ip.isalpha() and kod_ip != "XX" else None
             lead.source = (payload.source or "")[:40]
             lead.ref = (payload.ref or None)
             lead.outcome = "not_qualified" if payload.outcome == "not_qualified" else "qualified"
@@ -9001,11 +9035,28 @@ def admin_leads(status: str | None = None, q: str | None = None):
             if lid not in terminy or kiedy < terminy[lid]:
                 terminy[lid] = kiedy
 
+        # Pochodzenie z sygnałów tradera (kraj z KYC/IP/logowania), gdy lead
+        # już się zarejestrował; bez tradera liczy się z samego leada.
+        obiekty: dict[int, Trader] = {}
+        granty: set[int] = set()
+        if traderzy:
+            idki = list(traderzy.values())
+            obiekty = {t.id: t for t in
+                       session.query(Trader).filter(Trader.id.in_(idki)).all()}
+            granty = {tid for (tid,) in
+                      session.query(Account.trader_id)
+                      .filter(Account.trader_id.in_(idki),
+                              Account.source == "grant",
+                              func.lower(func.coalesce(Account.grant_note, ""))
+                              == origin.FREE_PROGRAM_NOTE).distinct().all()}
+
         wynik = []
         for l in leady:
             trader_id = traderzy.get(l.email)
             wynik.append(_lead_json(l, trader_id, zaplacone.get(trader_id, 0) or 0,
-                                    terminy.get(l.id), konta.get(trader_id, 0)))
+                                    terminy.get(l.id), konta.get(trader_id, 0),
+                                    origin.pochodzenie(obiekty.get(trader_id), l,
+                                                       free_grant=trader_id in granty)))
         return wynik
     finally:
         session.close()
@@ -9169,8 +9220,13 @@ def admin_lead_detail(lead_id: int):
                          .order_by(LeadReminder.active.desc(), LeadReminder.due_at).all())
         otwarte = [r.due_at for r in przypomnienia if r.active]
 
+        grant_free = bool(trader) and session.query(Account.id).filter(
+            Account.trader_id == trader.id, Account.source == "grant",
+            func.lower(func.coalesce(Account.grant_note, ""))
+            == origin.FREE_PROGRAM_NOTE).first() is not None
         dane = _lead_json(lead, trader.id if trader else None, zaplacone,
-                          min(otwarte) if otwarte else None, konta)
+                          min(otwarte) if otwarte else None, konta,
+                          origin.pochodzenie(trader, lead, free_grant=grant_free))
         # Tylko w szczegółach (jak orders/events): szuflada pokazuje przycisk
         # „wyślij zaproszenie do portalu" wyłącznie tam, gdzie ma to sens —
         # konto założone ZA klienta, który hasła jeszcze nie ustawił.

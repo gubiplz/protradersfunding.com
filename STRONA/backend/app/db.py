@@ -101,6 +101,10 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "last_name": "VARCHAR(60)",
         "phone": "VARCHAR(32)",
         "phone_country": "VARCHAR(2)",
+        # NULL u wszystkich, ktorzy juz sa: kraju z IP nie da sie odtworzyc
+        # wstecz. Zapelnia sie samo przy nastepnym logowaniu (last_login_country).
+        "signup_country": "VARCHAR(2)",
+        "last_login_country": "VARCHAR(2)",
         "kyc_status": "VARCHAR(16) DEFAULT 'none'",
         "kyc_fullname": "VARCHAR(120)",
         "kyc_country": "VARCHAR(64)",
@@ -239,6 +243,14 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         # przegranej nie da sie zgadnac wstecz, a wpisanie tam czegokolwiek
         # ("other") zafalszowaloby pierwszy raport o cala historie.
         "lost_reason": "VARCHAR(24)",
+        # Kraj z IP zgloszenia — landing zaczal go przysylac 2026-09; starsze
+        # leady maja NULL i zostaja przy prefiksie numeru.
+        "ip_country": "VARCHAR(2)",
+    },
+    # Nadawca, pod ktorym szablon ma sens (ptf/fx). NULL = szablon sprzed
+    # podzialu, pokazywany przy obu nadawcach.
+    "lead_mail_templates": {
+        "sender": "VARCHAR(8)",
     },
     # Tabele `channel_posts` zaklada `create_all`, ale na produkcji zalozyl ja
     # WCZESNIEJSZY wariant modelu, bez `origin`. Tamten kod zostal wycofany,

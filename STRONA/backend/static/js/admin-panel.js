@@ -206,7 +206,28 @@ let FREE_SHOWN=localStorage.getItem('pf_admin_free')!=='0';
 function toggleFree(on){
   FREE_SHOWN=!!on;
   localStorage.setItem('pf_admin_free',FREE_SHOWN?'1':'0');
-  renderClients();   // filtr jest po stronie przegladarki, wystarczy przerysowac
+  /* Filtr jest po stronie przegladarki, wystarczy przerysowac — ale TEN widok,
+     w ktorym stoi checkbox. Sztywne renderClients() z zakladki Activity
+     rysowalo liste klientow pod naglowkiem Activity (ta sama pulapka, co
+     kiedys karty Telegrama i go('settings')). */
+  if(VIEW==='activity')renderActivity();else renderClients();
+}
+/* „Free" to werdykt z `origin` (backend, app/origin.py): lead z darmowego
+   lejka LUB grant „free program" LUB ktorykolwiek sygnal z Afryki (kraj z IP
+   przy rejestracji/logowaniu, prefiks numeru, KYC, IP zgloszenia). `desk`
+   zostaje jak byl (sam lejek) — steruje Telegramem, nie tym filtrem. */
+const isFreeOrigin=t=>!!(t&&t.origin&&t.origin.free)||(t&&t.desk==='free');
+const freeCheckbox=()=>`<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;user-select:none"
+    title="Free-funnel traffic: a lead from the free funnel, a free-program grant, or any Africa signal (IP at sign-up / sign-in, phone prefix, KYC). Unticking hides them.">
+    <input type="checkbox" ${FREE_SHOWN?'checked':''} onchange="toggleFree(this.checked)"
+      style="width:15px;height:15px;accent-color:var(--acc)">Free</label>`;
+/* Chip mowi nie tylko ZE free, ale i SKAD: kraj obok, powody w tooltipie —
+   inaczej „Free" przy kliencie z polskim KYC wyglada jak blad panelu. */
+function freeChip(t){
+  const o=(t&&t.origin)||{};
+  if(!isFreeOrigin(t))return o.country?` · <span class="muted" title="Country from KYC, phone or IP">${esc(o.country)}</span>`:'';
+  const why=(o.via||[]).join(', ')||'free funnel';
+  return ` · <span class="chip" title="${esc(why)}">Free${o.country?' · '+esc(o.country):''}</span>`;
 }
 function toggleImported(){
   IMPORTED=!IMPORTED;
@@ -3098,8 +3119,11 @@ function renderActivity(){
   const f=window._jrnFilter||'all';
   const q=(window._jrnQ||'').toLowerCase();
   const test=(JRN_FILTERS.find(x=>x[0]===f)||JRN_FILTERS[0])[2];
-  const rows=all.filter(t=>test(t)&&(!q||[t.email,t.full_name]
+  /* Ten sam checkbox i ten sam werdykt co w Clients (`origin` z backendu) —
+     odznaczony chowa tych samych ludzi z tego samego powodu. */
+  const rows=all.filter(t=>test(t)&&(FREE_SHOWN||!isFreeOrigin(t))&&(!q||[t.email,t.full_name]
     .some(x=>String(x||'').toLowerCase().includes(q))));
+  const ukryci=FREE_SHOWN?0:all.filter(isFreeOrigin).length;
   const chip=t=>t.awaiting_claim
     ?'<span class="status pending"><span class="dot"></span>awaiting claim</span>'
     :(t.claimed_at?'<span class="status passed"><span class="dot"></span>claimed</span>'
@@ -3113,12 +3137,14 @@ function renderActivity(){
       <div class="seg">${JRN_FILTERS.map(([k,l])=>
         `<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''}
           onclick="window._jrnFilter='${f===k?'all':k}';renderActivity()">${l}</button>`).join('')}</div>
-      <span class="count-pill">${rows.length} of ${all.length}${impPill()}</span>
+      ${freeCheckbox()}
+      <span class="count-pill">${rows.length} of ${all.length}${
+        ukryci?` · <span class="muted">${ukryci} free hidden</span>`:''}${impPill()}</span>
     </div>`
     +(rows.length?`<div class="tbl-wrap rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.activity">
       <thead><tr><th>Client</th><th>Claim</th><th>Last sign-in</th><th>7 days</th><th>Last seen</th><th>Accounts</th><th>KYC</th></tr></thead>
       <tbody>${rows.map(t=>`<tr class="clickable" onclick="openTraderJournal(${t.id},'${jsq(t.email||'')}')">
-        <td class="rt-main" data-l="Client">${esc(t.full_name||'—')}<div class="muted" style="font-size:11.5px">${esc(t.email)}</div></td>
+        <td class="rt-main" data-l="Client">${esc(t.full_name||'—')}<div class="muted" style="font-size:11.5px">${esc(t.email)}${freeChip(t)}</div></td>
         <td data-l="Claim" data-sort="${t.awaiting_claim?0:(t.claimed_at?2:1)}">${chip(t)}</td>
         <td data-l="Last sign-in" data-sort="${esc(t.last_login_at||'')}">${login(t)}</td>
         <td class="muted" data-l="7 days" data-sort="${t.logins_7d}">${t.logins_7d?t.logins_7d+'×':'—'}</td>
@@ -3150,19 +3176,16 @@ function renderClients(){
   /* Desk liczy backend z leada dopasowanego po mailu — patrz /api/admin/traders.
      Klient bez leada (rejestracja wprost z portalu) nie ma desku i zostaje na
      liście niezależnie od checkboxa: nie przyszedł z darmowego lejka. */
-  const rows=all.filter(t=>test(t)&&(FREE_SHOWN||t.desk!=='free')&&
+  const rows=all.filter(t=>test(t)&&(FREE_SHOWN||!isFreeOrigin(t))&&
     (!q||fold(t.email).includes(qf)||fold(t.full_name).includes(qf)));
-  const ukryci=FREE_SHOWN?0:all.filter(t=>t.desk==='free').length;
+  const ukryci=FREE_SHOWN?0:all.filter(isFreeOrigin).length;
   const cap=capList(rows,'_cliAll','renderClients');
   $('view').innerHTML=`<div class="toolbar">
       ${searchBox('cli-q','_cliQ','renderClients','Search name or email…')}
       <div class="seg">${CLI_FILTERS.map(([k,l])=>
         `<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''}
           onclick="window._cliFilter='${f===k?'all':k}';renderClients()">${l}</button>`).join('')}</div>
-      <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;user-select:none"
-        title="Clients who came through the free funnel — the one that posts to the LEADS NIGERIA channel. Unticking hides them.">
-        <input type="checkbox" ${FREE_SHOWN?'checked':''} onchange="toggleFree(this.checked)"
-          style="width:15px;height:15px;accent-color:var(--acc)">Free</label>
+      ${freeCheckbox()}
       <span class="count-pill">${rows.length} of ${all.length}${
         ukryci?` · <span class="muted">${ukryci} free hidden</span>`:''}${impPill()}</span>
     </div>`
@@ -3173,8 +3196,7 @@ function renderClients(){
         <td class="muted" data-l="Joined" data-sort="${esc(t.created_at||'')}">${t.created_at?dstr(t.created_at):'—'}</td>
         <td class="rt-main" data-l="Client">${esc(t.full_name||'—')}
           ${t.awaiting_claim?'<span class="status pending" style="margin-left:6px"><span class="dot"></span>awaiting claim</span>':''}
-          <div class="muted" style="font-size:11.5px">${esc(t.email)}${
-            t.desk==='free'?' · <span class="chip">Free</span>':''}</div>
+          <div class="muted" style="font-size:11.5px">${esc(t.email)}${freeChip(t)}</div>
           ${t.referred_count?`<div class="muted" style="font-size:var(--fs-cap)" title="Traders who signed up with this client's referral code">brought ${t.referred_count}</div>`:''}</td>
         <td class="muted" data-l="Accounts" data-sort="${t.accounts}">${t.accounts||'—'}</td>
         <td data-l="KYC">${t.kyc_status&&t.kyc_status!=='none'
