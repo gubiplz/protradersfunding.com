@@ -1,10 +1,12 @@
 """Update o koncie z PRAWDZIWYCH liczb — pod mail „Weekly update" i DM na Telegram.
 
 Mail „Weekly update" wyszedł raz z pustymi nawiasami. Teraz serwer składa
-treść z metryk konta, księgi transakcji i wypłat w układzie Where it stands /
-What we did / What is next, w kilku ujęciach (otwarcie × styl × zakończenie),
-a panel losuje jedno i ma „Another wording". Bez kont — pusto, wprost.
+treść z metryk konta, księgi transakcji i wypłat: stan konta, transakcje, co
+dalej. Pisane jak człowiek: akapity, bez etykiet „Where it stands:", bez
+punktorów, najwyżej jedna pauza, bez dni handlowych. Ujęć jest dużo i każde
+zmienia kilka zdań naraz („Another wording"). Bez kont — pusto, wprost.
 """
+import re
 import os
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -56,6 +58,13 @@ def _konto(tid, *, balance=26200.0, status="active", phase="eval_1", days=3, min
     return aid, login
 
 
+def _jak_czlowiek(tekst):
+    """Bez znaków AI: etykiet sekcji, punktorów, średników, lawiny pauz, nawiasów-rusztowań."""
+    for zakaz in ("Where it stands", "What we did", "What's next", "What is next", "•", ";", "["):
+        assert zakaz not in tekst, (zakaz, tekst)
+    assert tekst.count("–") + tekst.count("—") <= 2, tekst
+
+
 def test_bez_kont_nie_ma_czego_raportowac():
     tid = _trader()
     r = client.get(f"/api/admin/traders/{tid}/insights", headers=ADMIN)
@@ -74,24 +83,27 @@ def test_update_z_liczbami_konta_w_ukladzie_weekly_update():
     assert k["best_symbol"] == "XAUUSD" and k["streak"] == 3
     assert abs(k["profit_pct"] - 4.8) < 0.01 and k["days"] == 3 and k["min_days"] == 5
 
-    # DM: otwarcia × style × zakończenia — dużo ujęć, każde z tymi samymi liczbami.
-    assert len(dane["variants"]) >= 24 and len(set(dane["variants"])) == len(dane["variants"])
-    for tekst in dane["variants"]:
+    # DM: dużo ujęć, każde z tymi samymi liczbami, pisane jak człowiek.
+    warianty = dane["variants"]
+    assert len(warianty) >= 40 and len(set(warianty)) == len(warianty)
+    for tekst in warianty:
         assert tekst.startswith(("Hey Ada", "Ada,", "Hi Ada"))
-        assert "Where it stands:" in tekst and "What we did:" in tekst and "What's next:" in tekst
-        assert login in tekst and "$26,200" in tekst and "+4.8%" in tekst
-        assert "3.2% left to the 8% target" in tekst
-        assert "3 of 5 minimum trading days" in tekst
-        assert "6 closed trades, 83% winners, net +$1,300, best on XAUUSD" in tekst
-        assert "Last 3 in a row were winners" in tekst
-        assert "http" not in tekst and "[" not in tekst
-    # Mail: układ szablonu — akapity, link do desku, stopka.
-    assert len(dane["mail_variants"]) >= 6
+        _jak_czlowiek(tekst)
+        assert login in tekst and "$26,200" in tekst and "4.8%" in tekst
+        assert "3.2%" in tekst and "6" in tekst and "XAUUSD" in tekst and "$1,300" in tekst
+        assert "trading days" not in tekst and "minimum" not in tekst
+        assert "http" not in tekst
+    # „Another wording" ma z czego zmieniać: otwarcia, zdania o stanie i o
+    # transakcjach występują w kilku wersjach.
+    assert len({w.split("\n")[0] for w in warianty}) >= 5
+    assert len({z for w in warianty for z in re.findall(r"[^.\n]*trades[^.\n]*\.", w)}) >= 3
+    # Mail: akapity, link do desku, stopka.
+    assert len(dane["mail_variants"]) >= 12
     for tekst in dane["mail_variants"]:
         assert tekst.startswith("Hi Ada,\n\n")
-        assert "Where it stands:" in tekst and "What is next:" in tekst
+        _jak_czlowiek(tekst)
+        assert "$26,200" in tekst and "trading days" not in tekst
         assert tekst.rstrip().endswith("--\nForex Passing")
-        assert "[" not in tekst
 
 
 def test_konto_ktore_padlo_mowi_to_wprost():
@@ -99,25 +111,29 @@ def test_konto_ktore_padlo_mowi_to_wprost():
     _, login = _konto(tid, balance=22400.0, status="failed", breach="max daily loss")
     dane = client.get(f"/api/admin/traders/{tid}/insights", headers=ADMIN).json()
     assert dane["accounts"][0]["status"] == "failed"
-    t = dane["variants"][0]
-    assert f"account {login} hit a rule and is closed (max daily loss)" in t
-    assert "$22,400" in t and "If you want to go again" in t
+    for t in dane["variants"]:
+        assert login in t and "(max daily loss)" in t and "closed" in t
+        assert "$22,400" in t and "If you want to go again" in t
 
 
 def test_bez_zamknietych_transakcji_mowi_ze_nic_do_raportu():
     tid = _trader("Cy")
     _konto(tid, trades=[])
-    t = client.get(f"/api/admin/traders/{tid}/insights", headers=ADMIN).json()["variants"][0]
-    assert "nothing closed yet" in t
+    for t in client.get(f"/api/admin/traders/{tid}/insights", headers=ADMIN).json()["variants"]:
+        assert "othing closed yet" in t
 
 
-def test_dwa_konta_to_dwie_linie():
+def test_dwa_konta_to_dwa_bloki_bez_punktorow():
     tid = _trader("Dee")
-    _, a = _konto(tid)
-    _, b = _konto(tid, balance=25500.0)
-    t = client.get(f"/api/admin/traders/{tid}/insights", headers=ADMIN).json()["variants"][0]
-    assert f"• account {a}" in t or f"• {a}" in t
-    assert f"• account {b}" in t or f"• {b}" in t
+    _, a = _konto(tid, balance=27500.0)          # cel 8% zaliczony
+    _, b = _konto(tid, balance=25500.0)          # jeszcze nie
+    for t in client.get(f"/api/admin/traders/{tid}/insights", headers=ADMIN).json()["variants"]:
+        _jak_czlowiek(t)
+        # Każde konto to blok, który zaczyna się od nagłówka z numerem i fazą.
+        naglowki = [ln for ln in t.split("\n") if re.fullmatch(rf"(Account )?({a}|{b})(, | \()phase 1\)?", ln)]
+        assert len(naglowki) == 2, t
+        # „Co dalej" widzi, że drugie konto jeszcze nie ma celu.
+        assert "next stage from here" not in t and "Target's done" not in t
 
 
 def test_szablony_dynamiczne_i_wiecej_ujec():

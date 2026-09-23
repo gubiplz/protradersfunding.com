@@ -287,8 +287,8 @@ def test_panel_ma_jeden_checkbox_free_w_obu_zakladkach():
     """Activity i Clients rysują TEN SAM checkbox i filtrują TYM SAMYM werdyktem
     (`origin.free`), a przełącznik przerysowuje bieżący widok, nie zawsze Clients."""
     kod = client.get("/static/js/admin-panel.js").text
-    # Activity, Clients, Payouts, Orders, Accounts — jeden checkbox, jeden werdykt.
-    assert kod.count("${freeCheckbox()}") == 5
+    # Activity, Clients, Payouts, Orders, Accounts, KYC, Tickets — jeden checkbox, jeden werdykt.
+    assert kod.count("${freeCheckbox()}") == 7
     assert "FREE_SHOWN||!isFreeOrigin(t)" in kod
     assert "FREE_SHOWN||!isFreeOrigin(r)" in kod and "FREE_SHOWN||!isFreeOrigin(o)" in kod
     assert "FREE_SHOWN||!isFreeOrigin(a)" in kod
@@ -296,14 +296,35 @@ def test_panel_ma_jeden_checkbox_free_w_obu_zakladkach():
     assert "else if(VIEW==='payouts')renderPayoutsView();" in kod
     assert "else if(VIEW==='orders')renderOrders();" in kod
     assert "else if(VIEW==='accounts')renderAccounts();" in kod
-    assert kod.count("${freeChip(t)}") == 2 and "${freeChip(r)}" in kod
+    # Clients, Activity, Tickets, KYC (karta i historia).
+    assert kod.count("${freeChip(t)}") == 5 and "${freeChip(r)}" in kod
     assert "${freeChip(o)}" in kod and "${freeChip(a)}" in kod
     assert "t.origin.free" in kod
-    # Filtr kraju: cztery zakładki, jedna zapamiętana wartość (localStorage),
+    # Filtr kraju: siedem zakładek, jedna zapamiętana wartość (localStorage),
     # z opcją „Any country", która wyłącza filtrowanie.
-    assert kod.count("${countrySelect(") == 4
+    assert kod.count("${countrySelect(") == 7
     assert "localStorage.setItem('pf_admin_country'" in kod
     assert '<option value="">Any country</option>' in kod
+
+
+def test_kyc_i_tickets_niosa_origin_pod_filtry(swiat):
+    """Checkbox Free i filtr kraju w zakładkach KYC i Tickets — wiersz niesie
+    `origin` tradera, a kraj z KYC wygrywa z IP rejestracji."""
+    from app.models import SupportTicket
+    t = _trader(swiat, signup_country="US", kyc_status="pending", kyc_country="Nigeria")
+    swiat.add(SupportTicket(trader_id=t.id, subject="Payout question", status="open"))
+    swiat.commit()
+    kyc = {w["email"]: w for w in client.get("/api/admin/kyc", headers=ADMIN).json()["pending"]}
+    assert kyc[t.email]["origin"]["country"] == "NG" and kyc[t.email]["origin"]["free"] is True
+    bilet = next(b for b in client.get("/api/admin/tickets", headers=ADMIN).json()
+                 if b["trader_email"] == t.email)
+    assert bilet["origin"]["country"] == "NG" and bilet["origin"]["africa"] is True
+    kod = client.get("/static/js/admin-panel.js").text
+    assert "countrySelect(list,'renderTickets')" in kod
+    assert "countrySelect(wszystkie,'renderKyc')" in kod
+    assert "countrySelect(widoczne,'renderPayoutsView')" in kod
+    assert "else if(VIEW==='kyc')renderKyc();" in kod
+    assert "else if(VIEW==='tickets')renderTickets();" in kod
 
 
 def test_lista_kont_niesie_origin_wlasciciela(swiat):

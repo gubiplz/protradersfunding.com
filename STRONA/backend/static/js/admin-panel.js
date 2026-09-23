@@ -214,6 +214,8 @@ function toggleFree(on){
   else if(VIEW==='payouts')renderPayoutsView();
   else if(VIEW==='orders')renderOrders();
   else if(VIEW==='accounts')renderAccounts();
+  else if(VIEW==='kyc')renderKyc();
+  else if(VIEW==='tickets')renderTickets();
   else renderClients();
 }
 /* „Free" to werdykt z `origin` (backend, app/origin.py): lead z darmowego
@@ -260,7 +262,7 @@ function countrySelect(all,render){
   if(cur&&cur!=='-'&&!n[cur])n[cur]=0;
   const opts=Object.keys(n).filter(k=>k!=='-').sort().map(k=>`<option value="${k}"${cur===k?' selected':''}>${k} · ${n[k]}</option>`).join('');
   return `<select class="inp" style="width:auto;padding:6px 10px;font-size:12.5px" aria-label="Country"
-      title="Country from KYC, phone prefix or IP. “No country” = no signal yet; it fills in at the next sign-in. Remembered across visits, shared by Clients and Activity."
+      title="Country from KYC, phone prefix or IP. “No country” = no signal yet; it fills in at the next sign-in. Remembered across visits and shared by every tab."
       onchange="setCountryFilter(this.value,'${render}')">
       <option value="">Any country</option>${opts}${n['-']?`<option value="-"${cur==='-'?' selected':''}>No country · ${n['-']}</option>`:''}</select>`;
 }
@@ -708,16 +710,21 @@ const VIEWS={
  _kycRender(){
   const d=window._kycData||{};
   const q=(window._kycQ||'').toLowerCase();
-  const pasuje=t=>!q||[t.full_name,t.email,t.country,t.id_type,t.id_number,t.doc_ref]
-    .some(x=>String(x||'').toLowerCase().includes(q));
-  const pending=(d.pending||[]).filter(pasuje), histAll=d.history||[];
+  /* Checkbox Free i filtr kraju jak w Clients — po `origin` tradera (kraj z
+     KYC wygrywa, wiec tu zwykle zgadza sie z polem Country wniosku). */
+  const wszystkie=[...(d.pending||[]),...(d.history||[])];
+  const ukryciFree=FREE_SHOWN?0:wszystkie.filter(isFreeOrigin).length;
+  const wFiltrze=t=>(FREE_SHOWN||!isFreeOrigin(t))&&pasujeKraj(t,COUNTRY_FILTER);
+  const pasuje=t=>wFiltrze(t)&&(!q||[t.full_name,t.email,t.country,t.id_type,t.id_number,t.doc_ref]
+    .some(x=>String(x||'').toLowerCase().includes(q)));
+  const pending=(d.pending||[]).filter(pasuje), histAll=(d.history||[]).filter(wFiltrze);
   const kf=window._kycFilter||'all';
   const hist=histAll.filter(t=>(kf==='all'||t.status===kf)&&pasuje(t));
   const cards=pending.length?`<div class="badge-grid" style="grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr))">`+
     pending.map(t=>`<div class="panel">
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
         <div><h3 style="font-size:15.5px">${esc(t.full_name||t.email)}</h3>
-          <div class="muted" style="font-size:12px">${esc(t.email)}</div></div>
+          <div class="muted" style="font-size:12px">${esc(t.email)}${freeChip(t)}</div></div>
         <span class="status pending"><span class="dot"></span>pending</span>
       </div>
       <div style="margin:12px 0">
@@ -750,7 +757,7 @@ const VIEWS={
       <thead><tr><th>Reviewed</th><th>Trader</th><th>Country</th><th>Document</th><th>Status</th><th class="no-sort">Documents</th><th class="no-sort"></th></tr></thead>
       <tbody>${hist.map(t=>`<tr>
         <td class="muted" data-l="Reviewed" data-sort="${esc(t.reviewed_at||'')}">${t.reviewed_at?dstr(t.reviewed_at):'—'}</td>
-        <td class="rt-main" data-l="Trader">${esc(t.full_name||'—')}<div class="muted" style="font-size:11.5px">${esc(t.email)}</div></td>
+        <td class="rt-main" data-l="Trader">${esc(t.full_name||'—')}<div class="muted" style="font-size:11.5px">${esc(t.email)}${freeChip(t)}</div></td>
         <td class="muted" data-l="Country">${esc(t.country||'—')}</td>
         <td class="muted" data-l="Document">${esc(t.id_type||'—')} ${esc(t.id_number||t.doc_ref||'')}</td>
         <td data-l="Status"><span class="status ${t.status==='approved'?'funded':'failed'}"><span class="dot"></span>${esc(t.status)}</span></td>
@@ -759,8 +766,12 @@ const VIEWS={
           title="Undo this decision, back to the pending queue">Revert</button>
           ${XBTN(`deleteKycRow(${t.trader_id},'${jsq(t.email)}')`,'Delete KYC record and uploaded documents')}</td></tr>`).join('')}
       </tbody></table></div>`:`<p class="muted" style="font-size:13px">No ${esc(kf)} decisions${q?' match':''}.</p>`}</div>`:'';
-  const pasek=((d.pending||[]).length||histAll.length)
-    ?`<div class="toolbar">${searchBox('kyc-q','_kycQ','renderKyc','Search name, email, country or document…')}</div>`:'';
+  const pasek=wszystkie.length
+    ?`<div class="toolbar">${searchBox('kyc-q','_kycQ','renderKyc','Search name, email, country or document…')}
+      ${freeCheckbox()}
+      ${countrySelect(wszystkie,'renderKyc')}
+      <span class="count-pill">${pending.length} pending${
+        ukryciFree?` · <span class="muted">${ukryciFree} free hidden</span>`:''}</span></div>`:'';
   $('view').innerHTML=pasek+freeChannelCard()+cards+histTbl;
  },
 
@@ -1097,7 +1108,10 @@ function renderTickets(){
   const list=window._tickets||[];
   window._tickFilter=window._tickFilter||'all';
   const q=(window._tickQ||'').toLowerCase(), f=window._tickFilter;
+  /* Checkbox Free i filtr kraju po `origin` autora biletu (jak w Clients). */
+  const ukryciFree=FREE_SHOWN?0:list.filter(isFreeOrigin).length;
   const rows=list.filter(t=>(f==='all'||t.status===f)&&
+    (FREE_SHOWN||!isFreeOrigin(t))&&pasujeKraj(t,COUNTRY_FILTER)&&
     (!q||String(t.id).includes(q)||(t.subject||'').toLowerCase().includes(q)
       ||(t.trader_email||'').toLowerCase().includes(q)));
   /* X siedzi W wierszu, ktory sam otwiera rozmowe, wiec musi zatrzymac klikniecie —
@@ -1108,7 +1122,7 @@ function renderTickets(){
     <div class="ticket-row" onclick="openTicket(${t.id})">
       <div class="tile-ic ${t.status==='open'?'orange':t.status==='answered'?'green':'gray'}" style="width:36px;height:36px;flex:0 0 36px">${ICO.chat}</div>
       <div class="sub"><b>${esc(t.subject)}</b>
-        <span>${t.ref?`#${esc(t.ref)} · `:''}${esc(t.trader_email||'—')} · ${t.messages} message${t.messages>1?'s':''} · ${dstr(t.last_ts)}</span></div>
+        <span>${t.ref?`#${esc(t.ref)} · `:''}${esc(t.trader_email||'—')}${freeChip(t)} · ${t.messages} message${t.messages>1?'s':''} · ${dstr(t.last_ts)}</span></div>
       <span class="status ${t.status==='closed'?'failed':t.status==='answered'?'paid':'pending'}"><span class="dot"></span>${esc(t.status)}</span>
       ${XBTN(`event.stopPropagation();delTicket(${t.id})`,'Delete this ticket and its conversation')}
     </div>`;
@@ -1118,11 +1132,14 @@ function renderTickets(){
     <div class="toolbar">
       ${searchBox('tick-q','_tickQ','renderTickets','Search subject, e-mail or #…')}
       <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._tickFilter='${f===k?'all':k}';renderTickets()">${l}</button>`).join('')}</div>
-      <span class="count-pill">${rows.length} of ${list.length}</span>
+      ${freeCheckbox()}
+      ${countrySelect(list,'renderTickets')}
+      <span class="count-pill">${rows.length} of ${list.length}${
+        ukryciFree?` · <span class="muted">${ukryciFree} free hidden</span>`:''}</span>
     </div>`
     +(active.length?`<div class="tbl-wrap">`+active.map(row).join('')+`</div>`
       :closed.length?'' // samo History: pusta sekcja "open" nic nie wnosi
-      :q||f!=='all'?`<div class="empty"><h3>No tickets match</h3><p>Try a different search or filter.</p></div>`
+      :q||f!=='all'||!FREE_SHOWN||COUNTRY_FILTER?`<div class="empty"><h3>No tickets match</h3><p>Try a different search or filter.</p></div>`
       :`<div class="empty"><h3>No open tickets</h3><p>Support conversations started by traders appear here.</p></div>`)
     +(closed.length?`<div class="sec-card" style="margin-top:18px">
       <h3>History</h3>
@@ -1316,6 +1333,7 @@ function renderPayoutsView(){
      `origin` swojego tradera (endpoint liczy je raz dla calej listy). */
   const ukryciFree=FREE_SHOWN?0:widoczne.filter(isFreeOrigin).length;
   const rows=widoczne.filter(r=>(f==='all'||r.status===f)&&(FREE_SHOWN||!isFreeOrigin(r))&&
+    pasujeKraj(r,COUNTRY_FILTER)&&
     (!q||String(r.account_login||'').toLowerCase().includes(q)
       ||(r.trader_email||'').toLowerCase().includes(q)
       ||(r.method||'').toLowerCase().includes(q)||(r.status||'').includes(q)));
@@ -1324,7 +1342,8 @@ function renderPayoutsView(){
     <div class="toolbar">
       ${list.length?`${searchBox('pay-q','_payQ','renderPayoutsView','Search account, trader or method…')}
       <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._payFilter='${f===k?'all':k}';renderPayoutsView()">${l}</button>`).join('')}</div>
-      ${freeCheckbox()}`:''}
+      ${freeCheckbox()}
+      ${countrySelect(widoczne,'renderPayoutsView')}`:''}
       <button class="btn-o sm" onclick="openPayoutImport()">Import history</button>
       ${list.length?`<span class="count-pill">${rows.length} of ${list.length}${
         ukryte?` · <span class="muted">${ukryte} imported hidden</span>`:''}${
@@ -1787,12 +1806,22 @@ function pickWording(key,variants,current){
   let pool=v.filter(x=>x!==current&&!hist.includes(x));
   if(!pool.length)pool=v.filter(x=>x!==current);
   if(!pool.length)pool=v;
+  /* „Another wording" ma zmieniac cala wiadomosc, nie jedno zdanie: losujemy
+     tylko z ujec, ktore maja najwiecej zdan innych niz tekst na ekranie. */
+  const zdania=t=>String(t||'').split(/(?<=[.!?])\s+|\n+/).map(s=>s.trim()).filter(Boolean);
+  const teraz=new Set(zdania(current));
+  if(teraz.size&&pool.length>3){
+    const inne=x=>zdania(x).filter(s=>!teraz.has(s)).length;
+    const best=Math.max(...pool.map(inne));
+    const top=pool.filter(x=>inne(x)>=best-1);
+    if(top.length)pool=top;
+  }
   const pick=pool[Math.floor(Math.random()*pool.length)];
   hist.push(pick);while(hist.length>Math.min(6,Math.max(1,v.length-1)))hist.shift();
   return pick;
 }
 /* Szablony „dynamic: insights" biora tresc z serwera — liczby konta tego
-   klienta (Where it stands / What we did / What's next), nie nawiasy do reki. */
+   klienta (stan, transakcje, co dalej), nie nawiasy do reki. */
 async function insightsFor(traderId){
   if(!traderId)return null;
   try{return await api('/api/admin/traders/'+traderId+'/insights')}

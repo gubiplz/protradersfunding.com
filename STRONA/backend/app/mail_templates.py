@@ -164,11 +164,9 @@ WBUDOWANE: list[tuple[str, str, str, str, str]] = [
      "This week on your account",
      "Hi {name},\n\n"
      "Quick update on the account we manage for you.\n\n"
-     "Where it stands: [current balance / phase / days traded].\n\n"
-     "What we did: [one or two sentences — trades taken, what worked, what "
-     "did not].\n\n"
-     "What is next: [next milestone — profit target, minimum days, payout "
-     "window].\n\n"
+     "[balance and phase, how far from the target].\n\n"
+     "[trades closed, what worked].\n\n"
+     "[next step: profit target or payout window].\n\n"
      "Any questions, the desk is on Telegram:\n\n"
      "{telegram_url}\n\n"
      "--\nForex Passing"),
@@ -298,11 +296,11 @@ WBUDOWANE_TG: list[tuple[str, str, list[str], list[str]]] = [
         "this round. Want me to line up the next attempt?",
     ], ["", "Sorry about this one.", "Your call on what's next.", "I'll wait for your word."]),
 
-    # Update z PRAWDZIWYCH liczb (Where it stands / What we did / What's next):
+    # Update z PRAWDZIWYCH liczb (stan konta, wynik, co dalej):
     # treść składa serwer z metryk konta (`insights.py`), panel pobiera ją przy
     # wyborze szablonu. Bez kont — szablon mówi o tym wprost.
     ("tg-update", "Account update (live numbers)", [
-        "Hey {name}, quick update on your account — loading the live numbers…",
+        "Hey {name}, quick update on your account. Loading the live numbers…",
     ], [""]),
 ]
 

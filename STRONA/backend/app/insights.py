@@ -3,9 +3,10 @@
 Szablon „Weekly update" w mailu miał nawiasy do ręcznego uzupełnienia i wyszedł
 raz z pustymi nawiasami. Tu liczby bierze serwer z tego, co panel i tak wie:
 metryki reguł (`rules.display_metrics`), licznik dni handlowych, zamknięte
-transakcje z księgi, wypłaty. Tekst składany w KILKU ujęciach (otwarcie ×
-zakończenie × styl podsumowania), żeby „Another wording" miało z czego wybierać
-i żeby dziesięć update'ów nie brzmiało jak jeden szablon.
+transakcje z księgi, wypłaty. Tekst składany z klocków, każdy w kilku ujęciach
+(otwarcie, stan, cel, drawdown, wynik, co dalej, zakończenie, układ akapitów),
+żeby „Another wording" zmieniało całą wiadomość i żeby dziesięć update'ów nie
+brzmiało jak jeden szablon. Bez etykiet, punktorów i ciągu pauz: to znaki AI.
 
 Zasady treści jak w `lead_mail.tresc()`: liczby, nie przymiotniki; jedno
 zdanie o tym, co dalej; zero obietnic. Konto, które padło, dostaje zdanie
@@ -13,7 +14,8 @@ wprost — nie da się napisać „update", który tego nie zauważa.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import random
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 from sqlalchemy import func
@@ -115,6 +117,14 @@ def _usd(x: float) -> str:
     return f"${x:,.0f}"
 
 
+def _usd_znak(x: float) -> str:
+    return ("+" if x >= 0 else "-") + _usd(abs(x))
+
+
+def _proc(x: float) -> str:
+    return ("+" if x >= 0 else "") + f"{x:.1f}%"
+
+
 def _faza(k: KontoInfo) -> str:
     if k.status == "failed":
         return "closed"
@@ -127,140 +137,282 @@ def _faza(k: KontoInfo) -> str:
     return k.phase or "evaluation"
 
 
-def _gdzie_stoi(k: KontoInfo, styl: int) -> str:
-    """„Where it stands" — stan konta w jednym z dwóch stylów (liczby te same)."""
-    znak = "+" if k.profit_pct >= 0 else ""
+# Klocki tekstu. Każde zdanie ma kilka ujęć; ujęcie wybiera `Ujecie` (indeks
+# per zdanie), więc „Another wording" zmienia naraz otwarcie, zdania o stanie,
+# o transakcjach, o dalszym kroku, zakończenie i układ akapitów, a nie tylko
+# pierwsze zdanie. Styl jak pisze człowiek na Telegramie: akapity zamiast
+# etykiet i punktorów, najwyżej jedna pauza w wiadomości (jest tylko w jednym
+# ujęciu stanu konta). Dni handlowych celowo nie pokazujemy.
+
+@dataclass(frozen=True)
+class Ujecie:
+    otw: int
+    stan: int
+    cel: int
+    dd: int
+    wynik: int
+    dalej: int
+    zak: int
+    uklad: int
+
+
+def _naglowek(k: KontoInfo, u: Ujecie) -> str:
+    """Pierwsza linia bloku konta: numer i faza, bez ozdobników."""
+    return [f"Account {k.login}, {_faza(k)}", f"{k.login} ({_faza(k)})"][u.otw % 2]
+
+
+def _stan(k: KontoInfo, u: Ujecie, wiele: bool, *, blok: bool = False, pauza: bool = True) -> str:
+    """Stan konta: saldo, wynik od startu, faza, cel, drawdown, wypłaty.
+    `blok` = nad zdaniem stoi nagłówek z numerem i fazą, więc zdanie ich nie
+    powtarza. `pauza=False` wyłącza jedyne ujęcie z pauzą (limit na wiadomość)."""
     faza = _faza(k)
     if k.status == "failed":
         powod = f" ({k.breach_reason})" if k.breach_reason else ""
-        return (f"account {k.login} hit a rule and is closed{powod}; "
-                f"balance ended at {_usd(k.balance)} from {_usd(k.initial_balance)}.")
-    czesci = []
-    if styl == 0:
-        czesci.append(f"account {k.login} ({faza}) at {_usd(k.balance)}, "
-                      f"{znak}{k.profit_pct:.1f}% from the {_usd(k.initial_balance)} start.")
+        if blok:
+            return [f"Hit a rule and got closed{powod}. Ended at {_usd(k.balance)} "
+                    f"from {_usd(k.initial_balance)}.",
+                    f"Closed after it hit a rule{powod}, finishing at {_usd(k.balance)} "
+                    f"on {_usd(k.initial_balance)}."][u.stan % 2]
+        return [
+            f"Account {k.login} hit a rule and is closed{powod}. It finished at "
+            f"{_usd(k.balance)} from the {_usd(k.initial_balance)} start.",
+            f"Account {k.login} is closed after it hit a rule{powod}, ending at "
+            f"{_usd(k.balance)} on a {_usd(k.initial_balance)} start.",
+        ][u.stan % 2]
+    wzrost = "up" if k.profit_pct >= 0 else "down"
+    p = f"{abs(k.profit_pct):.1f}%"
+    twoje = "Account" if wiele else "Your account"
+    if blok:
+        ujecia = [
+            f"At {_usd(k.balance)}, {wzrost} {p} from the {_usd(k.initial_balance)} start.",
+            f"Balance {_usd(k.balance)}, {_proc(k.profit_pct)} on {_usd(k.initial_balance)}.",
+            f"Sitting at {_usd(k.balance)} – {_proc(k.profit_pct)} overall.",
+            f"{_usd(k.balance)} now, {wzrost} {p} since the start.",
+        ]
     else:
-        czesci.append(f"{k.login} is in {faza}, balance {_usd(k.balance)} "
-                      f"({znak}{k.profit_pct:.1f}% on {_usd(k.initial_balance)}).")
+        ujecia = [
+        f"{twoje} {k.login} is at {_usd(k.balance)}, {wzrost} {p} from the "
+        f"{_usd(k.initial_balance)} start. It's in {faza}.",
+        f"Account {k.login} is sitting at {_usd(k.balance)} – that's "
+        f"{_proc(k.profit_pct)} on {_usd(k.initial_balance)}, still in {faza}.",
+        f"{k.login} ({faza}) is on {_usd(k.balance)} right now, {wzrost} {p} overall.",
+        f"Balance on {k.login} is {_usd(k.balance)}, so {_proc(k.profit_pct)} since the start. "
+        f"We're in {faza}.",
+        ]
+    i = u.stan % 4
+    if i == (2 if blok else 1) and not pauza:
+        i = 0
+    zd = [ujecia[i]]
     if faza != "funded" and k.target_pct > 0:
-        do_celu = max(0.0, k.target_pct - k.profit_pct)
-        czesci.append("Profit target is done." if do_celu <= 0
-                      else f"{do_celu:.1f}% left to the {k.target_pct:.0f}% target.")
-    if k.min_days:
-        czesci.append(f"{k.days} trading days done (minimum {k.min_days} covered)."
-                      if k.days >= k.min_days
-                      else f"{k.days} of {k.min_days} minimum trading days done.")
+        zostalo = k.target_pct - k.profit_pct
+        if zostalo <= 0:
+            zd.append(["The profit target is already hit.",
+                       "Target is done.",
+                       f"The {k.target_pct:.0f}% target is already reached."][u.cel % 3])
+        else:
+            zd.append([f"{zostalo:.1f}% left to the {k.target_pct:.0f}% target.",
+                       f"The {k.target_pct:.0f}% target is {zostalo:.1f}% away.",
+                       f"About {zostalo:.1f}% more gets it to the target."][u.cel % 3])
     if k.dd_used_pct > 0:
-        czesci.append(f"Drawdown used: {k.dd_used_pct:.0f}% of the limit"
-                      + (", plenty of room." if k.dd_used_pct < 40
-                         else ", so size stays small." if k.dd_used_pct >= 70 else "."))
+        dd = f"{k.dd_used_pct:.0f}%"
+        if k.dd_used_pct >= 70:
+            zd.append([f"We've used {dd} of the drawdown limit, so size stays small.",
+                       f"Drawdown is at {dd} of the limit, which is why we're trading smaller.",
+                       f"{dd} of the max loss is used, so we're being careful with size."][u.dd % 3])
+        elif k.dd_used_pct < 40:
+            zd.append([f"Only {dd} of the drawdown limit used, so there's plenty of room.",
+                       f"Drawdown used is {dd} of the limit, lots of room left.",
+                       f"Risk is fine, {dd} of the max loss used."][u.dd % 3])
+        else:
+            zd.append([f"We've used {dd} of the drawdown limit.",
+                       f"Drawdown is at {dd} of the limit.",
+                       f"{dd} of the max loss used so far."][u.dd % 3])
     if faza == "funded":
         if k.payouts_usd > 0:
-            czesci.append(f"Paid out so far: {_usd(k.payouts_usd)} (your share {k.split_pct:.0f}%).")
+            zd.append([f"Paid out so far: {_usd(k.payouts_usd)}, your share at {k.split_pct:.0f}%.",
+                       f"You've had {_usd(k.payouts_usd)} paid out so far ({k.split_pct:.0f}% split)."]
+                      [u.cel % 2])
         if k.payout_days_left > 0:
-            czesci.append(f"{k.payout_days_left} trading days to the first payout window.")
-    return " ".join(czesci)
-
-
-def _co_zrobilismy(k: KontoInfo) -> str:
-    """„What we did" — z zamkniętych transakcji; bez nich mówi to wprost."""
-    if k.status == "failed":
-        return "the last positions went against us and the limit closed the account before it could turn."
-    if not k.trades:
-        return "positions are being placed; nothing closed yet, so no result to report."
-    wr = 100.0 * k.wins / k.trades
-    zd = [f"{k.trades} closed trades, {wr:.0f}% winners, net "
-          f"{'+' if k.net_pnl >= 0 else ''}{_usd(k.net_pnl)}"
-          + (f", best on {k.best_symbol}." if k.best_symbol else ".")]
-    if k.streak >= 3:
-        zd.append(f"Last {k.streak} in a row were winners.")
-    elif k.streak <= -3:
-        zd.append(f"Last {-k.streak} went against us, so size is down until it turns.")
-    if k.daily_used_pct >= 50:
-        zd.append(f"Today used {k.daily_used_pct:.0f}% of the daily limit, so we stopped for the day.")
+            zd.append([f"First payout window opens in {k.payout_days_left} trading days.",
+                       f"{k.payout_days_left} more trading days until the first payout window."]
+                      [u.dd % 2])
     return " ".join(zd)
 
 
+def _wynik(k: KontoInfo, u: Ujecie) -> str:
+    """Co zrobiliśmy: z zamkniętych transakcji; bez nich mówi to wprost."""
+    if k.status == "failed":
+        return ["The last positions went against us and the limit closed it before it could turn.",
+                "The last few trades went the wrong way and the limit kicked in before they came back."
+                ][u.wynik % 2]
+    if not k.trades:
+        return ["Positions are going on, but nothing closed yet, so no result to show.",
+                "Nothing closed yet, so there's no trade result to report.",
+                "Trades are open and nothing closed yet. I'll have numbers next time."][u.wynik % 3]
+    wr = f"{100.0 * k.wins / k.trades:.0f}%"
+    net = _usd_znak(k.net_pnl)
+    skad = k.best_symbol if k.best_symbol and k.net_pnl > 0 else None
+    zd = [[
+        f"{k.trades} trades closed, {wr} of them winners, net {net}."
+        + (f" Most of it came from {skad}." if skad else ""),
+        f"We've closed {k.trades} trades so far. {k.wins} won, net result {net}"
+        + (f", mostly from {skad}." if skad else "."),
+        f"So far {k.trades} closed trades at a {wr} win rate, {net} net."
+        + (f" {skad} did the most work." if skad else ""),
+    ][u.wynik % 3]]
+    if k.streak >= 3:
+        zd.append([f"The last {k.streak} were all winners.",
+                   f"Last {k.streak} in a row went our way."][u.wynik % 2])
+    elif k.streak <= -3:
+        zd.append([f"The last {-k.streak} went against us, so size is down until it turns.",
+                   f"{-k.streak} losers in a row, so we've cut size for now."][u.wynik % 2])
+    if k.daily_used_pct >= 50:
+        zd.append(f"Today already used {k.daily_used_pct:.0f}% of the daily limit, "
+                  "so we're done for the day.")
+    return " ".join(zd)
+
+
+def _dalej(konta: list[KontoInfo], u: Ujecie) -> str:
+    """Jedno zdanie o najbliższym kroku (bez dni handlowych)."""
+    zywe = [k for k in konta if k.status != "failed"]
+    if not zywe:
+        return ["If you want to go again, say the word and I'll set the next account up.",
+                "If you want to go again, tell me and the next one gets set up."][u.dalej % 2]
+    def przed_celem(x: KontoInfo) -> bool:
+        return _faza(x) != "funded" and x.target_pct > 0 and x.profit_pct < x.target_pct
+
+    brakuje = [x for x in zywe if przed_celem(x)]
+    if len(zywe) > 1 and brakuje and len(brakuje) < len(zywe):
+        loginy = " and ".join(x.login for x in brakuje)
+        return [f"Next step is getting {loginy} over the target as well.",
+                f"{loginy} still needs the target, then everything moves on.",
+                f"Once {loginy} hits the target too, everything moves to the next stage."
+                ][u.dalej % 3]
+    if len(zywe) > 1 and brakuje:
+        return ["Next step is the profit target on each of them.",
+                "From here it's getting each account to its target without forcing it.",
+                "Once the targets are in, the accounts move to the next stage."][u.dalej % 3]
+    k = brakuje[0] if brakuje else zywe[0]
+    faza = _faza(k)
+    if przed_celem(k):
+        return ["Next step is the profit target, then it moves on.",
+                "From here it's just getting to the target without forcing it.",
+                "Once the target is in, the account moves to the next stage."][u.dalej % 3]
+    if faza != "funded":
+        return ["Target's done, so next is moving it to the next stage.",
+                "With the target in, it goes to the next stage from here.",
+                "Next up is the move to the next stage."][u.dalej % 3]
+    if k.payout_days_left > 0:
+        return ["Next up is the first payout window.",
+                "Now it's about getting to the first payout.",
+                "The first payout is the next thing on the list."][u.dalej % 3]
+    return ["From here we keep it steady.",
+            "Plan stays the same, steady and small.",
+            "Nothing changes from here, we keep it steady."][u.dalej % 3]
+
+
 _OTWARCIA = [
-    "Hey {name}, quick update on your account.",
-    "{name}, here's where your account stands right now.",
-    "Hi {name} — a short update from the desk.",
-    "{name}, update time. Straight numbers, no fluff:",
+    "Hey {name}, quick update on your {konto}.",
+    "{name}, here's how your {konto} {jest} doing.",
+    "Hi {name}, short update from the desk.",
+    "Hey {name}, where things are with your {konto}.",
+    "{name}, quick one on your {konto}.",
 ]
 _ZAKONCZENIA = [
     "Any questions, just ask.",
-    "I'll send the next one when something moves.",
-    "Shout if you want the full trade list.",
-    "That's it for now — more when there's more.",
+    "I'll message again when something moves.",
+    "If you want the full trade list, just say.",
+    "That's it for now.",
+    "Let me know if you want more detail on any of it.",
+]
+_OTWARCIA_MAIL = [
+    "Hi {name},\n\nQuick update on the {konto} we manage for you.",
+    "Hi {name},\n\nHere is where your {konto} {jest} this week.",
+    "Hi {name},\n\nA short update from the desk on your {konto}.",
+]
+_ZAKONCZENIA_MAIL = [
+    "Any questions, the desk is on Telegram:",
+    "If you want more detail, message the desk on Telegram:",
+    "You can always reach the desk on Telegram:",
 ]
 
+# Ile ujęć oddajemy panelowi. Kombinacji jest dużo więcej; bierzemy stały,
+# rozrzucony podzbiór (to samo ziarno = te same teksty między odświeżeniami).
+_ILE_UJEC = 48
+_ILE_UJEC_MAIL = 24
 
-def _dalej(konta: list[KontoInfo]) -> str:
-    """Jedno zdanie „co dalej" z najbliższego kamienia milowego."""
-    zywe = [k for k in konta if k.status != "failed"]
-    if not zywe:
-        return "If you want to go again, say the word and I'll set the next account up."
-    k = zywe[0]
-    if _faza(k) != "funded" and k.target_pct > 0 and k.profit_pct < k.target_pct:
-        return "Next milestone: the profit target, then the account moves on."
-    if k.min_days and k.days < k.min_days:
-        return "Next milestone: the minimum trading days, then we can move on."
-    if _faza(k) == "funded" and k.payout_days_left > 0:
-        return "Next milestone: the first payout window."
-    return "Next: keep it steady and let the numbers do the work."
+
+def _ujecia(ile: int, n_otw: int, n_zak: int, ziarno: int) -> list[Ujecie]:
+    los = random.Random(ziarno)
+    wszystkie = [Ujecie(o, s, c, d, w, n, z, l)
+                 for o in range(n_otw) for s in range(4) for c in range(3) for d in range(3)
+                 for w in range(3) for n in range(3) for z in range(n_zak) for l in range(4)]
+    los.shuffle(wszystkie)
+    return wszystkie[:ile]
+
+
+def _tresc(imie: str, konta: list[KontoInfo], u: Ujecie, otwarcie: str, zakonczenie: str) -> str:
+    wiele = len(konta) > 1
+    otw = (otwarcie.replace("{name}", imie)
+           .replace("{konto}", "accounts" if wiele else "account")
+           .replace("{jest}", "are" if wiele else "is"))
+    dalej = _dalej(konta, u)
+    if wiele:
+        # Kilka kont: każde to blok — nagłówek, linia stanu, linia transakcji —
+        # bez punktorów. Kolejne konto dostaje przesunięte ujęcia, żeby dwa
+        # bloki nie zaczynały się tym samym zdaniem; pauza najwyżej w pierwszym.
+        srodek = []
+        for i, k in enumerate(konta):
+            ui = replace(u, stan=u.stan + i, cel=u.cel + i, dd=u.dd + i, wynik=u.wynik + i,
+                         otw=u.otw)
+            srodek.append(f"{_naglowek(k, ui)}\n{_stan(k, ui, True, blok=True, pauza=i == 0)}"
+                          f"\n{_wynik(k, ui)}")
+        akapity = [otw, *srodek, dalej, zakonczenie]
+    else:
+        k = konta[0]
+        stan, wynik = _stan(k, u, False), _wynik(k, u)
+        if u.uklad == 3:
+            blok = f"{_naglowek(k, u)}\n{_stan(k, u, False, blok=True)}\n{wynik}"
+            akapity = [otw, blok, dalej, zakonczenie]
+        elif u.uklad == 0:
+            akapity = [otw, stan, wynik, dalej, zakonczenie]
+        elif u.uklad == 1:
+            akapity = [f"{otw} {stan}", wynik, f"{dalej} {zakonczenie}"]
+        else:
+            akapity = [otw, stan, f"{wynik} {dalej}", zakonczenie]
+    return "\n\n".join(a for a in akapity if a)
 
 
 def zloz(name: str | None, konta: list[KontoInfo]) -> list[str]:
-    """Wszystkie ujęcia update'u w układzie „Weekly update" z maila:
-    Where it stands / What we did / What's next — otwarcie × styl × zakończenie."""
+    """Ujęcia DM-a na Telegram: otwarcie, stan, wynik, co dalej, zakończenie
+    i układ akapitów losowane osobno, liczby zawsze te same."""
     imie = (name or "").strip().split(" ")[0] or "there"
     if not konta:
         return []
-    wersje = []
-    for styl in (0, 1):
-        if len(konta) == 1:
-            stoi = _gdzie_stoi(konta[0], styl)
-            zrobilismy = _co_zrobilismy(konta[0])
-        else:
-            stoi = "\n".join(f"• {_gdzie_stoi(k, styl)}" for k in konta)
-            zrobilismy = "\n".join(f"• {k.login}: {_co_zrobilismy(k)}" for k in konta)
-        srodek = (f"Where it stands: {stoi}\n\n"
-                  f"What we did: {zrobilismy}\n\n"
-                  f"What's next: {_dalej(konta)}")
-        for otw in _OTWARCIA:
-            for zak in _ZAKONCZENIA:
-                wersje.append(f"{otw.replace('{name}', imie)}\n\n{srodek}\n\n{zak}")
-    return wersje
-
-
-_OTWARCIA_MAIL = [
-    "Hi {name},\n\nQuick update on the account we manage for you.",
-    "Hi {name},\n\nHere is where your account stands this week.",
-    "Hi {name},\n\nShort update from the desk — numbers first, then what comes next.",
-]
+    out: list[str] = []
+    for u in _ujecia(_ILE_UJEC, len(_OTWARCIA), len(_ZAKONCZENIA), 7):
+        t = _tresc(imie, konta, u, _OTWARCIA[u.otw], _ZAKONCZENIA[u.zak])
+        if t not in out:
+            out.append(t)
+    return out
 
 
 def zloz_mail(name: str | None, konta: list[KontoInfo], telegram_url: str) -> list[str]:
-    """Wersja MAILOWA „Weekly update": ten sam środek co w DM-ie, w układzie
-    z szablonu (akapity, link do desku jako guzik, stopka po `--`)."""
+    """Wersja MAILOWA „Weekly update": ten sam środek co w DM-ie, akapity,
+    link do desku jako guzik i stopka po `--`."""
     imie = (name or "").strip().split(" ")[0] or "there"
     if not konta:
         return []
-    ogon = ("\n\nAny questions, the desk is on Telegram:\n\n" + telegram_url
-            if telegram_url else "") + "\n\n--\nForex Passing"
-    wersje = []
-    for styl in (0, 1):
-        if len(konta) == 1:
-            stoi, zrobilismy = _gdzie_stoi(konta[0], styl), _co_zrobilismy(konta[0])
-        else:
-            stoi = "\n".join(f"• {_gdzie_stoi(k, styl)}" for k in konta)
-            zrobilismy = "\n".join(f"• {k.login}: {_co_zrobilismy(k)}" for k in konta)
-        srodek = (f"Where it stands: {stoi}\n\n"
-                  f"What we did: {zrobilismy}\n\n"
-                  f"What is next: {_dalej(konta)}")
-        for otw in _OTWARCIA_MAIL:
-            wersje.append(f"{otw.replace('{name}', imie)}\n\n{srodek}{ogon}")
-    return wersje
+    out: list[str] = []
+    for u in _ujecia(_ILE_UJEC_MAIL, len(_OTWARCIA_MAIL), len(_ZAKONCZENIA_MAIL), 11):
+        ogon = (f"{_ZAKONCZENIA_MAIL[u.zak]}\n\n{telegram_url}" if telegram_url
+                else "Any questions, just reply to this e-mail.")
+        # W mailu układ 1 (wszystko w trzech gęstych akapitach) odpada.
+        u_mail = replace(u, uklad=0 if u.uklad == 1 else u.uklad)
+        t = _tresc(imie, konta, u_mail, _OTWARCIA_MAIL[u.otw], ogon) + "\n\n--\nForex Passing"
+        if t not in out:
+            out.append(t)
+    return out
 
 
 def dla_tradera(session, trader_id: int, name: str | None, telegram_url: str = "") -> Insights:
