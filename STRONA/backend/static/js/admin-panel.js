@@ -1050,16 +1050,135 @@ function capList(rows,flag,rerender){
     more:`<button class="btn-o" style="display:block;margin:12px auto" onclick="window.${flag}=1;${rerender}()">Show all ${rows.length}</button>`};
 }
 
+/* ---------- Mail: odebrane (Resend Receiving) ----------
+   Przelacznik Sent / Received i marka All / PTF / Forex Passing. Marka
+   zapamietana na stale (jak filtr kraju) i wspolna dla obu widokow: w Sent
+   dzieli dziennik po nadawcy, w Received po domenie, na ktora przyszedl mail. */
+let MAIL_BRAND='all';
+try{MAIL_BRAND=localStorage.getItem('pf_admin_mailbrand')||'all'}catch(e){}
+const BRAND_LABEL={ptf:'PTF',fx:'Forex Passing'};
+function setMailBrand(b){
+  MAIL_BRAND=b||'all';
+  try{localStorage.setItem('pf_admin_mailbrand',MAIL_BRAND)}catch(e){}
+  renderMailLog();
+}
+function setMailBox(b){window._mailBox=b;window._mailAll=0;renderMailLog()}
+const mailBrandOf=m=>m.event==='admin_message_fx'?'fx':'ptf';
+function mailSwitches(){
+  const box=window._mailBox||'sent';
+  return `<div class="seg">${[['sent','Sent'],['in','Received']].map(([k,l])=>
+      `<button class="${box===k?'on':''}" onclick="setMailBox('${k}')">${l}</button>`).join('')}</div>
+    <div class="seg" title="Which brand: the platform address or the Forex Passing desk. Remembered across visits.">${
+      [['all','All'],['ptf','PTF'],['fx','Forex Passing']].map(([k,l])=>
+      `<button class="${MAIL_BRAND===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="setMailBrand('${k}')">${l}</button>`).join('')}</div>`;
+}
+async function loadInbox(force){
+  if(window._inbox&&!force)return window._inbox;
+  try{window._inbox=await api('/api/admin/mail/inbox')}
+  catch(e){window._inbox={items:[],errors:[e.message],configured:true,domains:{}}}
+  return window._inbox;
+}
+async function refreshInbox(btn){
+  await busy(btn,'Loading…',async()=>{await loadInbox(true);renderMailLog()});
+}
+function renderInbox(){
+  const d=window._inbox;
+  if(!d){
+    $('view').innerHTML=`<div class="toolbar">${mailSwitches()}</div><div class="empty"><h3>Loading received mail…</h3></div>`;
+    loadInbox().then(()=>{if(VIEW==='mail'&&window._mailBox==='in')renderInbox()});
+    return;
+  }
+  const list=d.items||[];
+  const q=(window._inboxQ||'').toLowerCase();
+  const rows=list.filter(m=>(MAIL_BRAND==='all'||m.brand===MAIL_BRAND)&&
+    (!q||[m.from,m.subject,(m.to||[]).join(' '),m.trader_name,m.lead_name].some(x=>String(x||'').toLowerCase().includes(q))));
+  const cap=capList(rows,'_mailAll','renderMailLog');
+  const dom=d.domains||{};
+  const kto=m=>m.trader_id?`<span class="chip" title="A client with this e-mail">client</span>`
+    :m.lead_id?`<span class="chip" title="A lead with this e-mail">lead</span>`:'';
+  const pusto=!d.configured
+    ?`<div class="empty"><h3>Receiving is not connected</h3><p>Set <b>RESEND_API_KEY</b> on the server. Received mail is read from Resend.</p></div>`
+    :list.length?`<div class="empty"><h3>No e-mails match</h3><p>Try a different search or brand.</p></div>`
+    :`<div class="empty"><h3>Nothing received yet</h3><p>Mail shows up here once the domain receives through Resend:
+        in Resend open <b>Domains → ${esc([...(dom.ptf||[]),...(dom.fx||[])].join(' / ')||'your domain')} → Receiving</b>
+        and add the MX record it gives you at the DNS provider.</p></div>`;
+  $('view').innerHTML=`
+    <div class="toolbar">
+      ${mailSwitches()}
+      ${searchBox('inbox-q','_inboxQ','renderMailLog','Search sender, subject or address…')}
+      <span class="count-pill">${rows.length} of ${list.length}</span>
+      <button class="btn-o sm" onclick="refreshInbox(this)">Refresh</button>
+      <button class="btn-p sm" onclick="openMailCompose()">Compose</button>
+    </div>
+    ${(d.errors||[]).map(e=>`<p class="lead-statline" style="color:var(--gold)">⚠ ${esc(e)}</p>`).join('')}
+    ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.inbox">
+      <thead><tr><th>Date</th><th>From</th><th>Subject</th><th>To</th><th>Brand</th></tr></thead>
+      <tbody>${cap.rows.map(m=>`<tr class="clickable" onclick="openInboxMail('${jsq(m.id)}',${m.k||0})">
+        <td class="muted" data-l="Date" data-sort="${esc(m.created_at||'')}">${dstr(m.created_at)}</td>
+        <td class="rt-main" data-l="From">${esc(m.trader_name||m.lead_name||m.from||'—')} ${kto(m)}
+          <div class="muted" style="font-size:var(--fs-cap)">${esc(m.from_email||'')}</div></td>
+        <td data-l="Subject">${esc(m.subject||'(no subject)')}${m.attachments?` <span class="muted" title="Attachments">· ${m.attachments} file${m.attachments>1?'s':''}</span>`:''}</td>
+        <td class="muted" data-l="To">${esc((m.to||[]).join(', '))}</td>
+        <td class="muted" data-l="Brand">${esc(BRAND_LABEL[m.brand]||'other')}</td></tr>`).join('')}
+      </tbody></table></div>${cap.more}`:pusto}`;
+}
+/* Tresc maila: HTML idzie do ramki z pustym `sandbox` (bez skryptow, bez
+   formularzy, bez dostepu do panelu) — mail od obcego nie moze niczego tu
+   uruchomic. Obrazki z sieci sie laduja, jak w zwyklej skrzynce. */
+async function openInboxMail(id,k){
+  let m;
+  try{m=await api('/api/admin/mail/inbox/'+encodeURIComponent(id)+'?k='+(k||0))}
+  catch(e){toast('Mail: '+e.message,'err');return}
+  window._inboxOpen=m;
+  document.getElementById('inbox-modal')?.remove();
+  const box=document.createElement('div');
+  box.id='inbox-modal';box.className='modal-wrap';
+  const tresc=m.html
+    ?`<iframe sandbox="" referrerpolicy="no-referrer" style="width:100%;height:55vh;border:1px solid var(--line);border-radius:10px;background:#fff" srcdoc="${esc(m.html)}"></iframe>`
+    :`<pre style="white-space:pre-wrap;word-break:break-word;font-family:var(--body);font-size:13.5px;margin:0">${esc(m.text||'(empty)')}</pre>`;
+  box.innerHTML=`<div class="modal" style="max-width:760px" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>${esc(m.subject||'(no subject)')}</h3>
+      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('inbox-modal').remove()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <div class="kv"><span>From</span><b>${esc(m.from||'—')}</b></div>
+    <div class="kv"><span>To</span><b>${esc((m.to||[]).join(', '))}</b></div>
+    <div class="kv"><span>Received</span><b>${dstr(m.created_at)} · ${esc(BRAND_LABEL[m.brand]||'other')}</b></div>
+    ${(m.attachments||[]).length?`<div class="kv"><span>Attachments</span><b>${m.attachments.map(a=>esc(a.filename||'file')).join(', ')}</b></div>`:''}
+    <div style="margin:14px 0">${tresc}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn-p" onclick="replyInboxMail()">Reply</button>
+      ${m.trader_id?`<button class="btn-o" onclick="document.getElementById('inbox-modal').remove();openTraderJournal(${m.trader_id},'${jsq(m.from_email)}')">Open client</button>`:''}
+      ${m.lead_id?`<button class="btn-o" onclick="document.getElementById('inbox-modal').remove();openLead(${m.lead_id})">Open lead</button>`:''}
+    </div></div>`;
+  box.onclick=()=>box.remove();
+  document.body.appendChild(box);
+}
+/* Odpowiedz idzie tym samym oknem co kazdy mail z panelu, spod marki, na
+   ktora przyszedl list — klient pisal do Forex Passing, odpowiedz przychodzi
+   od Forex Passing. Znany klient = jego karta (i szybkie przyciski). */
+function replyInboxMail(){
+  const m=window._inboxOpen;if(!m)return;
+  document.getElementById('inbox-modal')?.remove();
+  const t=m.trader_id?(window._clients||[]).find(x=>x.id===m.trader_id):null;
+  const temat=/^re:/i.test(m.subject||'')?m.subject:'Re: '+(m.subject||'');
+  const cytat=(m.text||'').trim().split('\n').slice(0,20).map(l=>'> '+l).join('\n');
+  return openMailComposer({trader:t||null,email:m.from_email,from:m.brand||'ptf',
+    subject:temat,body:'\n\n'+(cytat?`On ${dstr(m.created_at)}, ${m.from} wrote:\n${cytat}`:'')});
+}
+
 function renderMailLog(){
+  if(window._mailBox==='in')return renderInbox();
   const d=window._mailLog||{};
   const list=d.entries||[];
   const q=(window._mailQ||'').toLowerCase(), f=window._mailFilter||'all';
   const rows=list.filter(m=>(f==='all'||(f==='failed'?!m.ok:m.ok))&&
+    (MAIL_BRAND==='all'||mailBrandOf(m)===MAIL_BRAND)&&
     (!q||(m.to||'').toLowerCase().includes(q)||(m.event||'').toLowerCase().includes(q)
       ||(m.subject||'').toLowerCase().includes(q)));
   const cap=capList(rows,'_mailAll','renderMailLog');
   $('view').innerHTML=`
     <div class="toolbar">
+      ${mailSwitches()}
       ${searchBox('mail-q','_mailQ','renderMailLog','Search recipient, subject or template…')}
       <div class="seg">${[['all','All'],['sent','Sent'],['failed','Failed']]
         .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._mailFilter='${f===k?'all':k}';renderMailLog()">${l}</button>`).join('')}</div>
@@ -1667,7 +1786,7 @@ async function openMailComposer(ctx){
   window._mailTpls=tpls||[];window._mailSenders=senders;
   document.getElementById('mail-modal')?.remove();
   const fixed=!!(t||l);
-  const from0=l?'fx':'ptf';
+  const from0=ctx.from||(l?'fx':'ptf');
   const box=document.createElement('div');
   box.id='mail-modal';box.className='modal-wrap';
   const senderOpt=k=>`<option value="${k}"${senders[k]&&senders[k].ready?'':' disabled'}${k===from0?' selected':''}>${SENDER_LABEL[k]}${
@@ -1724,6 +1843,8 @@ async function openMailComposer(ctx){
   }
   $('lm-sub').innerHTML=mailSubtitle();
   paintMailTpls('');
+  if(ctx.subject)$('lm-subject').value=ctx.subject;
+  if(ctx.body){$('lm-body').value=ctx.body;$('lm-body').focus();$('lm-body').setSelectionRange(0,0);return}
   (fixed?$('lm-subject'):$('lm-to')).focus();
 }
 /* Wrappery pod stare nazwy — wolaja je karty klienta i leada (i test panelu). */
