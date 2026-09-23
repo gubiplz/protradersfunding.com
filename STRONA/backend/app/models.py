@@ -984,7 +984,10 @@ class LeadEvent(Base):
 
 
 LEAD_EVENTS = ("applied", "status", "note", "reminder", "claim", "tier", "bought",
-               "sms", "email", "granted", "delivery")
+               "sms", "email", "granted", "delivery",
+               # Wiadomość na Telegramie wysłana Z RĘKI z konta admina (panel
+               # otworzył czat z gotowym tekstem, człowiek nacisnął „wyślij").
+               "telegram")
 
 
 class LeadReminder(Base):

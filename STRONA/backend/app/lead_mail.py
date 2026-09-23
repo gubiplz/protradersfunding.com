@@ -249,12 +249,18 @@ def _naglowek() -> str:
     nic. Wymiary są wpisane na sztywno, bo klient pocztowy bez nich przez
     moment rysuje obrazek w pełnej rozdzielczości i układ skacze.
     """
+    # Wyśrodkowane, nie w rogu: logo ze strony to ciemny znak na przezroczystym
+    # tle (`logo-email-v2.png`), a taki znak w lewym rogu czyta się jak
+    # przypadkowa naklejka. `margin:0 auto` plus `align="center"` na komórce,
+    # bo Outlook ignoruje samo `margin:auto`.
     if settings.lead_mail_logo_url:
-        return (f'<img src="{escape(settings.lead_mail_logo_url, quote=True)}" '
+        return (f'<div align="center" style="text-align:center;margin:0 0 30px">'
+                f'<img src="{escape(settings.lead_mail_logo_url, quote=True)}" '
                 f'width="150" height="99" alt="{MARKA}" '
-                f'style="display:block;border:0;margin:0 0 26px">')
-    return (f'<div style="font-size:19px;font-weight:700;color:{_ATRAMENT};'
-            f'margin:0 0 26px">{MARKA}</div>')
+                f'style="display:block;border:0;margin:0 auto;width:150px;height:auto">'
+                f'</div>')
+    return (f'<div align="center" style="font-size:19px;font-weight:700;color:{_ATRAMENT};'
+            f'text-align:center;margin:0 0 30px">{MARKA}</div>')
 
 
 def _html_z_tekstu(tekst: str) -> str:

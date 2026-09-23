@@ -3422,6 +3422,20 @@ def admin_payouts_all():
                 "express": bool(acc.express_payout) if acc else False,
             })
 
+        # Pochodzenie (free lejek / grant / Afryka) dla checkboxa „Free" — to
+        # samo `origin`, co w Clients i Activity, liczone raz dla wszystkich
+        # traderów z tej listy. Wiersz bez tradera (import ewidencji) nie ma go.
+        idki = {acc.trader_id for _p, acc, _tr in rows if acc and acc.trader_id} | \
+               {r.trader_id for r in reqs if r.trader_id}
+        traderzy = session.query(Trader).filter(Trader.id.in_(idki)).all() if idki else []
+        pochodzenia = origin.mapa_pochodzenia(session, traderzy)
+        po_mailu = {(t.email or "").lower(): t.id for t in traderzy}
+        for w in out:
+            tid = po_mailu.get((w.get("trader_email") or "").lower())
+            p = pochodzenia.get(tid) if tid else None
+            w["origin"] = p.json() if p else None
+            w["desk"] = p.desk if p else None
+
         out.sort(key=lambda r: r["ts"] or "", reverse=True)
         # Express ($49) = przeskoczenie kolejki: pending z add-onem nad resztą,
         # w obu grupach zostaje porządek „najnowsze pierwsze" (sort stabilny).
@@ -3861,10 +3875,16 @@ def admin_traders(q: str | None = None, imported: int = 0):
         # `desk` zostaje jak dotąd (lejek), a obok idzie `origin` — werdykt
         # z WSZYSTKICH sygnałów (grant, kraj z IP/numeru/KYC). Reguła i jej
         # powody siedzą w `origin.py`; tu tylko trzy zapytania na całą listę.
-        pochodzenia = origin.mapa_pochodzenia(session, rows)
+        leady = origin.leady_po_mailu(session, rows)
+        pochodzenia = origin.mapa_pochodzenia(session, rows, leady=leady)
         return [{"id": t.id, "email": t.email, "full_name": t.full_name,
                  "desk": pochodzenia[t.id].desk,
                  "origin": pochodzenia[t.id].json(),
+                 # Uchwyt Telegrama zna tylko lead (z ankiety) — trader go nie
+                 # ma. Panel otwiera z nim czat z gotowym tekstem („Telegram"
+                 # w wierszu klienta); bez uchwytu okno prosi o wpisanie.
+                 "lead_id": leady[t.id].id if t.id in leady else None,
+                 "telegram": (leady[t.id].telegram or None) if t.id in leady else None,
                  "kyc_status": t.kyc_status, "accounts": counts.get(t.id, 0),
                  "credits_usd": round(float(t.credits_usd or 0), 2),
                  "referred_count": poleceni.get(t.referral_code, 0),
@@ -4107,6 +4127,15 @@ def admin_journal_overview(imported: int = 0):
         logins7 = _mapa(nazwy=_DZIENNIK_LOGOWANIA,
                         od=teraz - timedelta(days=7), licz=True)
         widziani = _mapa()
+        # Ruch to KAŻDE otwarcie portalu (zapamiętana sesja nie loguje się na
+        # nowo), więc „aktywny" liczy się po dowolnym zdarzeniu, nie po
+        # logowaniu. Dni z aktywnością w ostatnim tygodniu, nie liczba zdarzeń:
+        # jedno wejście z dziesięcioma podglądami to jeden dzień, nie dziesięć.
+        dni7 = dict(session.query(TelemetryEvent.trader_id,
+                                  func.count(func.distinct(func.date(TelemetryEvent.created_at))))
+                    .filter(TelemetryEvent.trader_id.isnot(None),
+                            TelemetryEvent.created_at >= teraz - timedelta(days=7))
+                    .group_by(TelemetryEvent.trader_id).all())
         zaproszenia = _mapa(nazwy=("portal_invite",))
         odebrania = _mapa(nazwy=("account_claimed",))
         konta = dict(session.query(Account.trader_id, func.count(Account.id))
@@ -4141,6 +4170,8 @@ def admin_journal_overview(imported: int = 0):
                 "logged_in_today": bool(login and login >= dzis),
                 "logins_7d": int(logins7.get(tr.id) or 0),
                 "last_seen_at": iso(widziani.get(tr.id)),
+                "seen_today": bool(widziani.get(tr.id) and widziani.get(tr.id) >= dzis),
+                "active_days_7d": int(dni7.get(tr.id) or 0),
                 "accounts": int(konta.get(tr.id) or 0),
             })
         wiersze.sort(key=lambda w: w["last_seen_at"] or w["created_at"] or "",
@@ -5062,9 +5093,17 @@ def admin_orders():
         # Maile jednym zapytaniem zamiast osobnego na kazde zamowienie: przy 100
         # pozycjach to bylo 101 round-tripow do bazy, a baza stoi za oceanem.
         maile = _maile_traderow(session, (o.trader_id for o in rows))
+        # Pochodzenie tradera (free lejek / grant / kraj) przy zamówieniu — USA
+        # to high ticket, free/Afryka low; checkbox Free i filtr kraju w Orders
+        # dzielą listę po tym samym `origin`, co Clients, Activity i Payouts.
+        idki = {o.trader_id for o in rows if o.trader_id}
+        traderzy = session.query(Trader).filter(Trader.id.in_(idki)).all() if idki else []
+        pochodzenia = origin.mapa_pochodzenia(session, traderzy)
         out = []
         for o in rows:
+            p = pochodzenia.get(o.trader_id)
             out.append({"id": o.id, "trader_email": maile.get(o.trader_id),
+                        "origin": p.json() if p else None, "desk": p.desk if p else None,
                         "product_key": o.product_key, "amount_usd": o.amount_usd,
                         "status": o.status, "provider": o.provider, "coupon": o.coupon,
                         "bogo": bool(getattr(o, "bogo", False)),
@@ -7013,6 +7052,12 @@ def list_accounts(imported: int = 0, free: int = 0):
                          .filter(Order.account_id.isnot(None), Order.paid_at.isnot(None))
                          .group_by(Order.account_id).all())
         emaile = dict(session.query(Trader.id, Trader.email).all())
+        # Pochodzenie właściciela (free lejek / grant / kraj) na każdym koncie —
+        # checkbox Free i filtr kraju w Accounts dzielą listę po tym samym
+        # `origin`, co Clients, Activity, Payouts i Orders. Konto z puli
+        # (bez tradera) nie ma go. Liczone raz dla wszystkich właścicieli.
+        traderzy = session.query(Trader).filter(Trader.is_admin == False).all()  # noqa: E712
+        pochodzenia = origin.mapa_pochodzenia(session, traderzy)
         out = []
         # Najnowsze konto na górze: panel czyta tę listę jak oś czasu,
         # a świeżo otwarte konto to zwykle to, po które admin przyszedł.
@@ -7036,6 +7081,9 @@ def list_accounts(imported: int = 0, free: int = 0):
             p = zaplacone.get(a.id)
             d["paid_at"] = p.isoformat() if p else None
             d["trader_email"] = emaile.get(a.trader_id)
+            p = pochodzenia.get(a.trader_id) if a.trader_id else None
+            d["origin"] = p.json() if p else None
+            d["desk"] = p.desk if p else None
             out.append(d)
         return out
     finally:
@@ -9655,6 +9703,10 @@ def admin_lead_email(lead_id: int, force: bool = False):
 
 
 NADAWCY_MAILA = ("ptf", "fx")
+# Miejsce do uzupełnienia w szablonie: „[current balance / phase / days traded]".
+# Cztery znaki minimum, żeby przypis „[1]" albo „[x]" w zwykłym tekście
+# nie blokował wysyłki.
+_RUSZTOWANIE_RX = re.compile(r"\[[^\[\]\n]{4,}\]")
 
 
 def _nadawca_z_pola(sender: str | None, domyslny: str) -> str:
@@ -9684,6 +9736,19 @@ def _wyslij_z_panelu(session, *, sender: str, email: str, temat: str, tekst: str
     Wysyłka jest synchroniczna: człowiek przy przycisku ma zobaczyć porażkę
     od razu. Rzuca HTTPException(400) z powodem, gdy nie poszło.
     """
+    # `{name}` podmienia panel przed podglądem, ale przy mailu na wpisany adres
+    # nie zna imienia — serwer zna klienta i leada dopasowanych po mailu, więc
+    # domyka to tutaj. „there" tylko wtedy, gdy nikt imienia nie ma.
+    imie_calosc = ((trader.full_name if trader else "") or (lead.name if lead else "") or "").strip()
+    imie = imie_calosc.split()[0] if imie_calosc else "there"
+    temat = temat.replace("{name}", imie)
+    tekst = tekst.replace("{name}", imie)
+    # Szablony mają miejsca do uzupełnienia w nawiasach kwadratowych
+    # („[current balance / phase / days traded]"). Mail z takim nawiasem to
+    # mail z widocznym rusztowaniem — odmowa, zanim ktoś go zobaczy.
+    rusztowanie = _RUSZTOWANIE_RX.search(tekst) or _RUSZTOWANIE_RX.search(temat)
+    if rusztowanie:
+        raise HTTPException(400, f"Fill in the bracketed part first: {rusztowanie.group(0)[:80]}")
     if sender == "fx":
         if not lead_mail.nadawca_gotowy():
             raise HTTPException(400, "Sender not configured: set "
@@ -9809,7 +9874,10 @@ def admin_email_template_save(dane: MailTemplateIn):
         t.subject, t.body = temat, tekst
         # Pusty nadawca to świadome „przy obu", nie brak danych — dlatego None,
         # a nie domyślne „ptf". Śmieć w polu → 400, jak przy wysyłce.
-        t.sender = _nadawca_z_pola(dane.sender, "ptf") if (dane.sender or "").strip() else None
+        # „tg" to szablon wiadomości na Telegram (okno w Clients) — nie jest
+        # nadawcą maila, więc `_nadawca_z_pola` go nie zna; tu jest legalny.
+        wybor = (dane.sender or "").strip().lower()
+        t.sender = "tg" if wybor == "tg" else (_nadawca_z_pola(wybor, "ptf") if wybor else None)
         t.updated_at = datetime.now(timezone.utc)
         session.commit()
         return _szablon_json(t)
@@ -9987,6 +10055,49 @@ def admin_trader_email(trader_id: int, dane: TraderMailIn):
                          tekst=tekst, trader=tr)
         session.commit()
         return {"ok": True, "email": tr.email, "subject": temat, "sender": nadawca}
+    finally:
+        session.close()
+
+
+class TelegramNoteIn(BaseModel):
+    text: str
+    handle: str | None = None
+
+
+@app.post("/api/admin/traders/{trader_id}/telegram-note",
+          dependencies=[Depends(auth.require_admin)])
+def admin_trader_telegram_note(trader_id: int, dane: TelegramNoteIn):
+    """Ślad po wiadomości na Telegramie wysłanej Z RĘKI z konta admina.
+
+    Panel nie wysyła nic sam — otwiera czat z gotowym tekstem, a „wyślij"
+    naciska człowiek w swojej aplikacji, z konta, na którym jest zalogowany.
+    Automat piszący z konta użytkownika to dokładnie to, za co Telegram
+    zamraża konta (i za co padło poprzednie). Ten endpoint tylko zapisuje,
+    CO poszło i DO KOGO: zdarzenie `telegram` w historii leada (gdy lead
+    jest), telemetria klienta, a lead `new` przechodzi na `messaged`.
+    """
+    tekst = " ".join(dane.text.split())
+    if not tekst:
+        raise HTTPException(400, "Message is empty")
+    uchwyt = (dane.handle or "").strip().lstrip("@")[:60]
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader_id)
+        if not tr:
+            raise HTTPException(404, "Trader not found")
+        lead = (session.query(Lead)
+                .filter(func.lower(Lead.email) == (tr.email or "").lower()).first())
+        telemetry.track("admin_telegram", tr.id, handle=uchwyt, chars=len(tekst))
+        if lead is not None:
+            _zdarzenie(session, lead.id, "telegram",
+                       f"@{uchwyt}: {tekst}"[:200] if uchwyt else tekst[:200], "panel",
+                       payload=json.dumps({"body": tekst, "handle": uchwyt}, ensure_ascii=False))
+            if uchwyt and not lead.telegram:
+                lead.telegram = uchwyt
+            if lead.status == "new":
+                _zapisz_status(session, lead, "messaged", actor="panel")
+        session.commit()
+        return {"ok": True, "lead_id": lead.id if lead else None, "handle": uchwyt}
     finally:
         session.close()
 
@@ -10572,6 +10683,18 @@ BOUGHT_UPDATE_DAYS = 7
 # skończoną serię razem z komunikatem o jej końcu.
 POWTORZEN_MAX: int | None = None
 
+# Osobny sufit dla desku DARMOWEGO lejka (czat „LEADS NIGERIA"). Tam cykl
+# „bought" (klient = dostał darmowe konto) mielił „(5. raz)" o tych samych
+# ludziach, a dział nie miał gdzie tego wyłączyć. Trzy wysyłki i koniec:
+# darmowy klient nie kupi drugiego konta co tydzień, więc cotygodniowe
+# zahaczanie nie ma tam sensu, jaki ma przy płacących. Płatny desk zostaje
+# bez sufitu (`POWTORZEN_MAX`).
+POWTORZEN_MAX_FREE: int | None = 3
+
+
+def _sufit_serii(lead: Lead) -> int | None:
+    return POWTORZEN_MAX_FREE if _desk_leada(lead.source) == "free" else POWTORZEN_MAX
+
 # Po ilu minutach ciszy mail do leada wychodzi SAM. Dłużej niż nudge „nikt nie
 # wziął" (30 min) i to jest cały sens tej wartości: pierwszy strzał należy do
 # człowieka, automat jest dopiero zabezpieczeniem na to, że nikt nie usiadł.
@@ -10763,8 +10886,9 @@ def _wyslij_zaplanowane(session, now: datetime
 
         r.sent_count = (r.sent_count or 0) + 1
         r.last_sent_at = now
-        ostatni = (bool(r.repeat_days) and POWTORZEN_MAX is not None
-                   and r.sent_count >= POWTORZEN_MAX)
+        sufit = _sufit_serii(lead)
+        ostatni = (bool(r.repeat_days) and sufit is not None
+                   and r.sent_count >= sufit)
         teksty.append((telegram.lead_chat_id(lead.source),
                        _tekst_zaplanowanego(lead, r, ostatni)))
         pushy.append((lead.id, f"Reminder: {r.text[:80]}", lead.name or lead.email))
