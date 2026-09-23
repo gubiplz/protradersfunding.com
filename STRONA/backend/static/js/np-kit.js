@@ -252,26 +252,56 @@ async function npTogglePush(){
   PUSH.target=null;npPushSave(st);
 }
 
+/* Gesty panelu. Trzy różne ruchy, rozróżnione MIEJSCEM i KIERUNKIEM:
+   - na powiadomieniu w bok: przeczytane (w prawo) / usuń (w lewo);
+   - w panelu poza powiadomieniem w bok: poprzednia/następna zakładka filtra;
+   - w dół od góry (uchwyt, pasek, albo lista przewinięta do samej góry):
+     zsunięcie arkusza na telefonie.
+   Zsuwanie idzie na zdarzeniach touch z preventDefault, bo na zdarzeniach
+   pointer przeglądarka zabierała gest sobie: przewijała stronę pod spodem
+   albo odświeżała ją pociągnięciem w dół. */
 function npGestures(cfg){
   NP_G.cfg=cfg;
+  const panel=()=>document.querySelector(cfg.panel);
+  const kontrolka=el=>el.closest('button,a,input,select,textarea,label,[role=switch]');
   addEventListener('pointerdown',e=>{
     if(!e.target.closest)return;
     NP_G.press=e.target.closest(cfg.panel)?{x:e.clientX,y:e.clientY,pid:e.pointerId}:null;
+    if(!cfg.open()||e.button!==0)return;
     const rb=e.target.closest(cfg.items+' .np-rb');
-    if(rb&&!cfg.editing()&&e.button===0&&!e.target.closest('button')){
+    if(rb&&!cfg.editing()&&!kontrolka(e.target)){
       NP_G.sw={rb,row:rb.closest('.np-row'),x:e.clientX,y:e.clientY,base:+(rb.dataset.off||0),dx:0,on:false,pid:e.pointerId};
       return;
     }
+    if(!rb&&cfg.onTabSwipe&&cfg.list&&e.target.closest(cfg.list)&&!cfg.editing()&&!e.target.closest('input,select,textarea'))
+      NP_G.tab={x:e.clientX,y:e.clientY,pid:e.pointerId,dx:0,on:false,el:null};
+    // Myszą (np. wąskie okno na komputerze) zsuwa się za uchwyt; palcem — niżej, przez touch.
     const uchwyt=e.target.closest(cfg.panel+' [data-np-drag]');
-    if(uchwyt&&npNarrow()&&cfg.open()&&!e.target.closest('button'))
+    if(e.pointerType==='mouse'&&uchwyt&&npNarrow()&&!kontrolka(e.target))
       NP_G.drag={y:e.clientY,t:performance.now(),pid:e.pointerId,dy:0};
   });
   addEventListener('pointermove',e=>{
     const d=NP_G.drag;
     if(d&&e.pointerId===d.pid){
       d.dy=Math.max(0,e.clientY-d.y);
-      const np=document.querySelector(cfg.panel);
+      const np=panel();
       if(d.dy>3&&np){np.classList.add('dragging');np.style.transform=`translateY(${d.dy}px)`}
+      return;
+    }
+    const tb=NP_G.tab;
+    if(tb&&e.pointerId===tb.pid){
+      const dx=e.clientX-tb.x,dy=e.clientY-tb.y;
+      if(!tb.on){
+        if(Math.abs(dx)<10){if(Math.abs(dy)>10)NP_G.tab=null;return}
+        if(Math.abs(dy)>Math.abs(dx)*.8){NP_G.tab=null;return}
+        tb.on=true;tb.el=document.querySelector(cfg.items);
+        if(!tb.el){NP_G.tab=null;return}
+        tb.el.getAnimations().forEach(a=>a.cancel());
+        npCloseSwipes();
+      }
+      tb.dx=dx;
+      tb.el.style.transform=`translateX(${dx*.35}px)`;
+      tb.el.style.opacity=String(1-Math.min(.35,Math.abs(dx)/700));
       return;
     }
     const s=NP_G.sw;
@@ -299,10 +329,21 @@ function npGestures(cfg){
     const d=NP_G.drag;
     if(d&&e.pointerId===d.pid){
       NP_G.drag=null;
-      const np=document.querySelector(cfg.panel);
+      const np=panel();
       if(np){np.classList.remove('dragging');np.style.transform=''}
       const v=d.dy/Math.max(1,performance.now()-d.t);
       if(d.dy>120||(d.dy>30&&v>.6))cfg.onDismiss();
+      return;
+    }
+    const tb=NP_G.tab;
+    if(tb&&e.pointerId===tb.pid){
+      NP_G.tab=null;
+      if(!tb.on)return;
+      const el=tb.el,dx=tb.dx;
+      el.style.transform='';el.style.opacity='';
+      const zmiana=Math.abs(dx)>60&&e.type==='pointerup'?cfg.onTabSwipe(dx<0?1:-1):false;
+      if(!zmiana&&!npRM())
+        el.animate([{transform:`translateX(${dx*.35}px)`},{transform:'none'}],{duration:420,easing:'cubic-bezier(.22,1,.36,1)'});
       return;
     }
     const s=NP_G.sw;
@@ -319,6 +360,42 @@ function npGestures(cfg){
   };
   addEventListener('pointerup',koniec);
   addEventListener('pointercancel',koniec);
+
+  /* Zsuwanie arkusza palcem (telefon). */
+  document.addEventListener('touchstart',e=>{
+    const np=panel();
+    if(!np||!cfg.open()||!npNarrow()||e.touches.length!==1||!np.contains(e.target))return;
+    const uchwyt=e.target.closest('[data-np-drag]'),sc=e.target.closest('.np-scroll');
+    if(!uchwyt&&!(sc&&sc.scrollTop<=0))return;
+    const t=e.touches[0];
+    NP_G.td={x:t.clientX,y:t.clientY,t:performance.now(),dy:0,on:false,sc};
+  },{passive:true});
+  document.addEventListener('touchmove',e=>{
+    const d=NP_G.td;
+    if(!d)return;
+    const t=e.touches[0],dx=t.clientX-d.x,dy=t.clientY-d.y;
+    if(!d.on){
+      if(Math.abs(dy)<6&&Math.abs(dx)<6)return;
+      if(dy<=0||Math.abs(dx)>Math.abs(dy)||(d.sc&&d.sc.scrollTop>0)){NP_G.td=null;return}
+      d.on=true;NP_G.sw=null;NP_G.tab=null;npCloseSwipes();
+      panel().classList.add('dragging');
+    }
+    e.preventDefault();
+    d.dy=Math.max(0,dy);
+    panel().style.transform=`translateY(${d.dy}px)`;
+  },{passive:false});
+  const zsunKoniec=()=>{
+    const d=NP_G.td;NP_G.td=null;
+    if(!d||!d.on)return;
+    NP_G.suppress=true;setTimeout(()=>{NP_G.suppress=false},0);
+    const np=panel();
+    const v=d.dy/Math.max(1,performance.now()-d.t);
+    np.classList.remove('dragging');np.style.transform='';
+    if(d.dy>110||(d.dy>30&&v>.5))cfg.onDismiss();
+  };
+  document.addEventListener('touchend',zsunKoniec);
+  document.addEventListener('touchcancel',zsunKoniec);
+
   addEventListener('click',e=>{
     if(NP_G.suppress){NP_G.suppress=false;e.preventDefault();e.stopPropagation()}
   },true);

@@ -45,3 +45,12 @@ html[data-theme=dark] .card:hover,html[data-theme=dark] .fork-card:hover{
 html[data-theme=dark] ::selection{background:rgba(125,135,248,.35)}
 /* zmiana motywu: przenikanie całej strony */
 ::view-transition-old(root),::view-transition-new(root){animation-duration:.4s}
+/* reszta wpisanych jasnych wartości z site.css: pasek afiliacji (gradient,
+   którego pierwsze sprawdzenie nie złapało, bo to background-image), obwódki
+   pigułek i ikon, płótno makiety, najechanie w tabeli celów */
+html[data-theme=dark] .aff-band{background:linear-gradient(120deg,rgba(99,102,241,.16),rgba(139,92,246,.12)),var(--panel);
+  border-color:rgba(125,135,248,.3)}
+html[data-theme=dark] :is(.pill,.pcfg-addbtn,.fork-n,.why-ic,.notice){border-color:rgba(125,135,248,.3)}
+html[data-theme=dark] .pill{color:#a5b4fc}
+html[data-theme=dark] .mock canvas{background:var(--panel2)}
+html[data-theme=dark] table.obj tr:hover td{background:rgba(255,255,255,.03)}
