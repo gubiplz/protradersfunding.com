@@ -308,7 +308,11 @@ class Settings:
     # `MAIL_FROM`. Lead nie zna tej firmy; mail z jej domeny jest dla niego
     # mailem od obcego i tak zostanie potraktowany. Puste = panel nie proponuje
     # wysyłki, zamiast dawać przycisk, który wysyła spod złego szyldu.
-    lead_mail_from: str = os.getenv("LEAD_MAIL_FROM", "").strip()
+    # `RESEND_FROM` to ta sama zmienna pod nazwą, jaką nosi u dostawcy: nadawca
+    # spod marki landingu jest jeden, niezależnie od drogi (Resend czy SMTP).
+    # `LEAD_MAIL_FROM` ma pierwszeństwo, bo była pierwsza.
+    lead_mail_from: str = (os.getenv("LEAD_MAIL_FROM", "").strip()
+                           or os.getenv("RESEND_FROM", "").strip())
     # Klucz API Resend dla maili spod marki landingu. Ustawiony = `lead_mail`
     # wysyła przez HTTPS Resenda zamiast SMTP; pusty = SMTP jak dotąd. Osobny
     # dostawca, bo domena tej marki jest zweryfikowana TAM, nie u dostawcy
