@@ -41,7 +41,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 
 from . import (achievements, auth, billing, catalog, certshot, contentbot, countries,
-               fields, loyalty,
+               fields, insights, loyalty,
                lead_mail, mail_templates, metaquotes_web, notify, offers, origin,
                payout_import, payoutbot, reach, statements,
                poller, provisioning, push, rules, sms, telegram, telemetry, tradebot)
@@ -3877,7 +3877,14 @@ def admin_traders(q: str | None = None, imported: int = 0):
         # powody siedzą w `origin.py`; tu tylko trzy zapytania na całą listę.
         leady = origin.leady_po_mailu(session, rows)
         pochodzenia = origin.mapa_pochodzenia(session, rows, leady=leady)
+        # Suma OPŁACONYCH zamówień per klient — filtr „Bought" w Clients.
+        # Granty ($0) nie są zakupem, więc nie liczą się do sumy.
+        zaplacone = dict(session.query(Order.trader_id, func.sum(Order.amount_usd))
+                         .filter(Order.status == "paid", Order.provider != "grant",
+                                 Order.amount_usd > 0)
+                         .group_by(Order.trader_id).all())
         return [{"id": t.id, "email": t.email, "full_name": t.full_name,
+                 "paid_usd": round(float(zaplacone.get(t.id) or 0), 2),
                  "desk": pochodzenia[t.id].desk,
                  "origin": pochodzenia[t.id].json(),
                  # Uchwyt Telegrama zna tylko lead (z ankiety) — trader go nie
@@ -10055,6 +10062,30 @@ def admin_trader_email(trader_id: int, dane: TraderMailIn):
                          tekst=tekst, trader=tr)
         session.commit()
         return {"ok": True, "email": tr.email, "subject": temat, "sender": nadawca}
+    finally:
+        session.close()
+
+
+@app.get("/api/admin/traders/{trader_id}/insights",
+         dependencies=[Depends(auth.require_admin)])
+def admin_trader_insights(trader_id: int):
+    """Update o kontach klienta z prawdziwych liczb — pod wiadomość na Telegram.
+
+    Układ jak „Weekly update" z maila (Where it stands / What we did / What's
+    next), ale liczby wstawia serwer z metryk reguł, księgi transakcji i wypłat,
+    zamiast zostawiać nawiasy do ręcznego uzupełnienia. `variants` to wszystkie
+    ujęcia tej samej treści — panel losuje jedno i ma „Another wording".
+    """
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader_id)
+        if not tr:
+            raise HTTPException(404, "Trader not found")
+        # Link do desku właściwego dla lejka (free ma swój) — pod wersję mailową.
+        lead = origin.leady_po_mailu(session, [tr]).get(tr.id)
+        free = bool(lead) and _desk_leada(lead.source) == "free"
+        return insights.dla_tradera(session, tr.id, tr.full_name,
+                                    settings.telegram_url_desku(free)).json()
     finally:
         session.close()
 
