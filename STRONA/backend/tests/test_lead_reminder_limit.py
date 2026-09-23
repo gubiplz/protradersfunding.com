@@ -1,13 +1,15 @@
-"""Cykl przypomnień o leadzie: sufit serii i ponowne sprawdzenie warunku.
+"""Cykl przypomnień o leadzie: długość serii i ponowne sprawdzenie warunku.
 
-Dwie usterki, obie zobaczone w danych produkcyjnych, obie pilnowane tutaj:
+Usterka z produkcji, którą pilnuje ten plik: cykl typu „bought" bił ludziom,
+którzy nie kupili. Warunek sprawdzany był wyłącznie przy zakładaniu wpisu, więc
+cykl powstały na stanie, który przestał obowiązywać, żył dalej — jedenaście
+leadów z `paid_usd = 0` miało licznik 5.
 
-1. Cykl typu „bought" bił ludziom, którzy nie kupili. Warunek sprawdzany był
-   wyłącznie przy zakładaniu wpisu, więc cykl powstały na stanie, który przestał
-   obowiązywać, żył dalej — jedenaście leadów z `paid_usd = 0` miało licznik 5.
-
-2. Cykl nie miał końca. Wpis, o którym wszyscy zapomnieli, był nieskończonym
-   źródłem wiadomości na czacie działu.
+Sufit serii był drugą, nietrafioną odpowiedzią na ten sam szum i dlatego dziś
+jest wyłączony (`POWTORZEN_MAX = None`): cykl o kliencie ma chodzić tak długo,
+jak długo ten człowiek jest klientem. Mechanizm sufitu zostaje w kodzie, więc
+testy sprawdzają oba ustawienia — brak limitu jako stan domyślny i skończoną
+serię po wpisaniu liczby.
 """
 import os
 import tempfile
@@ -117,24 +119,48 @@ def _przebieg(s, monkeypatch, lead):
 
 
 # --------------------------------------------------------------------------- #
-#  Sufit serii
+#  Długość serii
 # --------------------------------------------------------------------------- #
-def test_cykl_gasnie_po_wyczerpaniu_serii(swiat, monkeypatch):
+def test_domyslnie_nie_ma_sufitu(swiat):
+    """Stan produkcyjny: cykl o kliencie nie ma się kończyć z powodu kalendarza."""
+    assert main.POWTORZEN_MAX is None
+
+
+def test_cykl_leci_dalej_po_wielu_wysylkach(swiat, monkeypatch):
+    """Dwudziesta wiadomość ma wyjść tak samo jak pierwsza, dopóki lead jest
+    klientem. Serię kończy `_nadal_klient`, nie licznik."""
+    lead = _lead(swiat, "bezsufitu", bought=True)
+    r = _cykl(swiat, lead, sent=19)
+
+    teksty, _ = _przebieg(swiat, monkeypatch, lead)
+
+    assert len(teksty) == 1
+    assert "Ostatnie z serii" not in teksty[0], "nic tu nie wygasa"
+    assert r.sent_count == 20
+    assert r.active is True
+    assert r.due_at > TERAZ, "termin ma się przesunąć na kolejny tydzień"
+
+
+def test_sufit_dziala_gdy_ktos_go_ustawi(swiat, monkeypatch):
+    """Mechanizm zostaje w kodzie — wpisanie liczby ma przywrócić skończoną
+    serię bez dotykania czegokolwiek poza tą stałą."""
+    monkeypatch.setattr(main, "POWTORZEN_MAX", 3)
     lead = _lead(swiat, "sufit", bought=True)
-    r = _cykl(swiat, lead, sent=main.POWTORZEN_MAX - 1)
+    r = _cykl(swiat, lead, sent=2)
 
     teksty, _ = _przebieg(swiat, monkeypatch, lead)
 
     assert len(teksty) == 1, "ostatnia wiadomość ma jeszcze wyjść"
-    assert r.sent_count == main.POWTORZEN_MAX
+    assert r.sent_count == 3
     assert r.active is False, "po wyczerpaniu serii wpis ma zgasnąć"
 
 
 def test_ostatnia_wiadomosc_mowi_ze_jest_ostatnia(swiat, monkeypatch):
     """Ciche urwanie byłoby gorsze niż brak limitu — dział myślałby, że automat
     dalej pilnuje tematu, i przestałby pilnować go sam."""
+    monkeypatch.setattr(main, "POWTORZEN_MAX", 3)
     lead = _lead(swiat, "ostatnia", bought=True)
-    _cykl(swiat, lead, sent=main.POWTORZEN_MAX - 1)
+    _cykl(swiat, lead, sent=2)
 
     teksty, _ = _przebieg(swiat, monkeypatch, lead)
 

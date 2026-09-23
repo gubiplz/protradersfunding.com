@@ -10245,13 +10245,16 @@ LEAD_REMINDERS = ("no_contact", "bought", "stalled", "unclaimed")
 # zakupu i o niego trzeba zahaczać co tydzień, a nie raz pogratulować.
 BOUGHT_UPDATE_DAYS = 7
 
-# Ile razy cykl ma się odezwać, zanim zgaśnie sam. Bez sufitu zapomniany wpis
-# jest nieskończonym źródłem wiadomości na czacie: przypomnienie, które przyszło
-# piąty raz, przestaje być przypomnieniem i staje się szumem, który uczy dział
-# przewijać kanał. Trzy razy to dość, żeby temat nie zginął, i mało, żeby nie
-# zginął w nim sam kanał. Po wyczerpaniu serii wpis zostaje w historii leada
-# i da się go w panelu uzbroić ponownie.
-POWTORZEN_MAX = 3
+# Sufit serii: po ilu wysyłkach cykl gaśnie sam. `None` znaczy „nigdy" i tak
+# jest dziś ustawione. Sufit był odpowiedzią na wpisy, które biły w kółko o
+# ludziach dawno nieaktualnych — ale prawdziwą przyczyną tamtego szumu nie była
+# długość serii, tylko to, że nikt nie sprawdzał, czy wpis wciąż ma sens.
+# Sprawdza to teraz `_nadal_klient` przed KAŻDĄ wysyłką cyklu „bought", więc
+# cykl kończy się w chwili, gdy lead przestaje być klientem — a dopóki nim
+# jest, zahaczanie o niego co tydzień jest dokładnie tym, po co ten cykl
+# powstał. Mechanizm sufitu zostaje na miejscu: wpisanie tu liczby przywraca
+# skończoną serię razem z komunikatem o jej końcu.
+POWTORZEN_MAX: int | None = None
 
 # Po ilu minutach ciszy mail do leada wychodzi SAM. Dłużej niż nudge „nikt nie
 # wziął" (30 min) i to jest cały sens tej wartości: pierwszy strzał należy do
@@ -10347,9 +10350,10 @@ def _tekst_zaplanowanego(lead: Lead, r: LeadReminder, ostatni: bool = False) -> 
     Treść pisze człowiek, więc idzie przez `html.escape` tak samo jak dane
     z formularza — panel jest po drugiej stronie tego samego `parse_mode=HTML`.
 
-    `ostatni` dokłada zdanie o wygaśnięciu serii. Ciche urwanie się po trzeciej
-    wiadomości byłoby gorsze niż brak limitu: dział zostałby z przekonaniem, że
-    automat dalej pilnuje tematu, i przestałby go pilnować sam.
+    `ostatni` dokłada zdanie o wygaśnięciu serii — dziś pada tylko wtedy, gdy
+    ktoś świadomie ustawi sufit w `POWTORZEN_MAX`. Ciche urwanie się serii
+    byłoby gorsze niż brak limitu: dział zostałby z przekonaniem, że automat
+    dalej pilnuje tematu, i przestałby go pilnować sam.
     """
     e = html.escape
     # Licznik jest już podniesiony przez wywołującego — numer tej wysyłki to
@@ -10405,9 +10409,9 @@ def _wyslij_zaplanowane(session, now: datetime
     """Przypomnienia z terminem, który już minął: ustawione ręcznie w panelu
     i cykle założone po zakupie.
 
-    Cykliczne przesuwają termin o `repeat_days`, ale najwyżej `POWTORZEN_MAX`
-    razy — potem gasną same i mówią o tym w ostatniej wiadomości. Jednorazowe
-    zamykają się po pierwszej wysyłce.
+    Cykliczne przesuwają termin o `repeat_days` bez ograniczenia liczby wysyłek;
+    gdy `POWTORZEN_MAX` dostanie liczbę, seria kończy się po tylu wiadomościach
+    i mówi o tym w ostatniej. Jednorazowe zamykają się po pierwszej wysyłce.
 
     Cykl założony po zakupie dostaje przed każdą wysyłką PONOWNE sprawdzenie
     warunku: wpis powstały na stanie, który już nie obowiązuje, gaśnie po cichu
@@ -10443,7 +10447,8 @@ def _wyslij_zaplanowane(session, now: datetime
 
         r.sent_count = (r.sent_count or 0) + 1
         r.last_sent_at = now
-        ostatni = bool(r.repeat_days) and r.sent_count >= POWTORZEN_MAX
+        ostatni = (bool(r.repeat_days) and POWTORZEN_MAX is not None
+                   and r.sent_count >= POWTORZEN_MAX)
         teksty.append((telegram.lead_chat_id(lead.source),
                        _tekst_zaplanowanego(lead, r, ostatni)))
         pushy.append((lead.id, f"Reminder: {r.text[:80]}", lead.name or lead.email))
@@ -10580,6 +10585,8 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
                 # trzeba przestać dzwonić jak do leada. Ale klient z opłaconym
                 # kontem potrzebuje kontaktu W KÓŁKO, więc ta sama chwila zakłada
                 # cykl. Bez tego dopisek o zakupie przychodził raz i temat gasł.
+                # Cykl chodzi bez sufitu (`POWTORZEN_MAX`) — kończy go dopiero
+                # utrata statusu klienta, sprawdzana przed każdą wysyłką.
                 session.add(LeadReminder(
                     lead_id=l.id, kind="bought", repeat_days=BOUGHT_UPDATE_DAYS,
                     due_at=now + timedelta(days=BOUGHT_UPDATE_DAYS), created_by="cron",
