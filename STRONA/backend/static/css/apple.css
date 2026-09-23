@@ -239,3 +239,42 @@ html[data-theme=dark] .todo{box-shadow:0 0 0 .5px var(--np-hair),0 12px 32px -20
   .ui-pill,.ui-glider{transition:none}
   .stat-tile,.ticket-row{transition:none}
 }
+
+/* ---------- szuflada (karta konta, bilet): przewija się jej treść, nie strona ---------- */
+.over-body{flex:1 1 auto;min-height:0;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+@media(max-width:960px){
+  html:has(#over.open),html:has(#over.open) body{overflow:hidden;overscroll-behavior:none}
+  .over-bg{touch-action:none}
+}
+/* rozmowa w bilecie: pole odpowiedzi przyklejone do dołu, jak w komunikatorze */
+.tk-compose{position:sticky;bottom:-34px;z-index:2;display:flex;flex-direction:column;gap:10px;
+  margin:0 -20px -34px;padding:12px 20px calc(14px + env(safe-area-inset-bottom));
+  background:color-mix(in srgb,var(--bg) 86%,transparent);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);
+  border-top:.5px solid var(--np-hair)}
+
+/* ---------- sortowanie na telefonie (sortable.js) ---------- */
+.sk-bar{display:none;justify-content:flex-end;margin:0 2px 8px}
+@media(max-width:860px){.sk-bar{display:flex}}
+.sk-sort{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border:0;border-radius:15px;
+  font:600 13px var(--body);color:var(--acc);background:var(--np-fill);cursor:pointer;
+  transition:transform .35s var(--np-spring),background .2s}
+.sk-sort:active{transform:scale(.94)}
+.sk-sort svg{width:14px;height:14px}
+.sk-sheet{position:fixed;inset:0;z-index:96;pointer-events:none}
+.sk-sheet.open{pointer-events:auto}
+.sk-veil{position:absolute;inset:0;background:rgba(0,0,0,.35);opacity:0;transition:opacity .3s}
+.sk-sheet.open .sk-veil{opacity:1}
+.sk-panel{position:absolute;left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom));max-height:72vh;overflow:auto;
+  padding:4px 0 6px;border-radius:20px;background:var(--np-material);
+  -webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%);
+  box-shadow:0 -10px 40px -10px rgba(0,0,0,.35),0 0 0 .5px var(--np-hair);
+  transform:translateY(115%);transition:transform .5s var(--np-spring)}
+.sk-sheet.open .sk-panel{transform:none}
+.sk-grab{width:38px;height:5px;margin:6px auto 2px;border-radius:3px;background:var(--np-fill2)}
+.sk-title{padding:6px 0 8px;text-align:center;font-size:13px;font-weight:600;color:var(--dim)}
+.sk-list button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;
+  border:0;border-top:.5px solid var(--np-sep);background:none;color:var(--txt);font:500 16px var(--body);text-align:left;cursor:pointer}
+.sk-list button:active{background:var(--np-fill)}
+.sk-list button.on{color:var(--acc);font-weight:650}
+.sk-list b{font-size:13px;font-weight:600}
+@media(prefers-reduced-motion:reduce){.sk-panel,.sk-veil{transition:none}}

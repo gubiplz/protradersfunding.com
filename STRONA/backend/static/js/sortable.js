@@ -106,19 +106,107 @@
     }
   }
 
+  function setSort(table, idx, dir) {
+    const p = sortPrefs(), key = table.dataset.tkey;
+    if (dir) p[key] = [idx, dir]; else delete p[key];
+    applySort(table, idx, dir);
+    savePrefs();
+    paintBar(table);
+  }
+
   document.addEventListener('click', function (e) {
     const th = e.target.closest && e.target.closest('table.sortable[data-tkey] th');
     if (!th || th.classList.contains('no-sort') || !th.closest('thead')) return;
     const table = th.closest('table');
     const idx = Array.prototype.indexOf.call(th.parentNode.children, th);
-    const key = table.dataset.tkey;
-    const p = sortPrefs();
-    const cur = p[key];
+    const cur = sortPrefs()[table.dataset.tkey];
     let dir = 1;                                     // fresh column -> ascending
     if (cur && cur[0] === idx) dir = cur[1] === 1 ? -1 : cur[1] === -1 ? 0 : 1;
-    if (dir) p[key] = [idx, dir]; else delete p[key];
-    applySort(table, idx, dir);
-    savePrefs();
+    setSort(table, idx, dir);
+  });
+
+  /* ---------- Telefon: tabela staje się kartami (thead znika), więc sortowanie
+     dostaje JEDEN mały przycisk nad listą z bieżącym stanem („⇅ Date ↓") i
+     arkusz od dołu z kolumnami. Te same preferencje co klik w nagłówek, więc
+     wybór na telefonie i na komputerze to jedno i to samo. */
+  function columns(table) {
+    const r = table.tHead && table.tHead.rows[0];
+    if (!r) return [];
+    return Array.prototype.map.call(r.cells, function (th, i) {
+      return { i: i, label: th.textContent.trim(), ok: !th.classList.contains('no-sort') };
+    }).filter(function (c) { return c.ok && c.label; });
+  }
+  function barLabel(table) {
+    const st = sortPrefs()[table.dataset.tkey];
+    const c = st && columns(table).filter(function (x) { return x.i === st[0]; })[0];
+    return c ? c.label + (st[1] > 0 ? ' ↑' : ' ↓') : 'Sort';
+  }
+  function paintBar(table) {
+    if (table._skBar && table._skBar.isConnected)
+      table._skBar.querySelector('span').textContent = barLabel(table);
+  }
+  function ensureBar(table) {
+    if (!columns(table).length) return;
+    const host = table.closest('.tbl-wrap') || table;
+    let bar = host.previousElementSibling;
+    if (!(bar && bar.classList && bar.classList.contains('sk-bar'))) {
+      bar = document.createElement('div');
+      bar.className = 'sk-bar';
+      bar.innerHTML = '<button type="button" class="sk-sort" aria-haspopup="dialog">'
+        + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"'
+        + ' stroke-linejoin="round" aria-hidden="true"><path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/></svg>'
+        + '<span></span></button>';
+      host.parentNode.insertBefore(bar, host);
+    }
+    bar._table = table;
+    table._skBar = bar;
+    paintBar(table);
+  }
+  let sheet = null;
+  function closeSheet() { if (sheet) sheet.classList.remove('open'); }
+  function openSheet(table) {
+    if (!sheet) {
+      sheet = document.createElement('div');
+      sheet.className = 'sk-sheet';
+      sheet.innerHTML = '<div class="sk-veil"></div><div class="sk-panel" role="dialog" aria-label="Sort by">'
+        + '<div class="sk-grab"></div><div class="sk-title">Sort by</div><div class="sk-list"></div></div>';
+      document.body.appendChild(sheet);
+      sheet.querySelector('.sk-veil').addEventListener('click', closeSheet);
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeSheet(); });
+    }
+    const st = sortPrefs()[table.dataset.tkey];
+    const list = sheet.querySelector('.sk-list');
+    list.textContent = '';
+    columns(table).concat([{ i: -1, label: 'Default order' }]).forEach(function (c) {
+      const on = c.i < 0 ? !st : !!(st && st[0] === c.i);
+      const b = document.createElement('button');
+      b.type = 'button';
+      if (on) b.className = 'on';
+      const s = document.createElement('span');
+      s.textContent = c.label;
+      b.appendChild(s);
+      if (on && c.i >= 0) {
+        const k = document.createElement('b');
+        k.textContent = st[1] > 0 ? '↑ Ascending' : '↓ Descending';
+        b.appendChild(k);
+      }
+      b.addEventListener('click', function () {
+        if (c.i < 0) setSort(table, 0, 0);
+        else {
+          const cur = sortPrefs()[table.dataset.tkey];
+          setSort(table, c.i, cur && cur[0] === c.i && cur[1] === 1 ? -1 : 1);
+        }
+        closeSheet();
+      });
+      list.appendChild(b);
+    });
+    requestAnimationFrame(function () { sheet.classList.add('open'); });
+  }
+  document.addEventListener('click', function (e) {
+    const b = e.target.closest && e.target.closest('.sk-sort');
+    if (!b) return;
+    const t = b.parentNode._table;
+    if (t && t.isConnected) openSheet(t);
   });
 
   /* Re-apply the saved sort whenever a sortable table (re)appears. */
@@ -134,6 +222,7 @@
           if (st && t.tHead && t.tHead.rows[0] && st[0] < t.tHead.rows[0].cells.length) {
             applySort(t, st[0], st[1]);
           }
+          ensureBar(t);
         }
       }
     }

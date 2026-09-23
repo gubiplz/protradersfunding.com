@@ -46,3 +46,20 @@
 @media(prefers-reduced-motion:reduce){
   .rv{filter:none}
 }
+
+/* logo na telefonie: CAŁA nazwa marki zamiast „Pro Traders…" — czcionka
+   dopasowana do szerokości ekranu, a gdy i tak brakuje miejsca, nazwa łamie
+   się na dwie linie („Pro Traders / Funding") zamiast ucinania */
+@media(max-width:960px){
+  .nav .logo-txt{overflow:visible;text-overflow:clip;white-space:normal;line-height:1.05;
+    font-size:clamp(13px,3.9vw,19px)}
+}
+@media(max-width:440px){
+  .theme-tog{width:34px;height:34px}
+  .nav .btn-sm{padding:8px 11px}
+}
+/* nazwa łamie się tylko przed ostatnim słowem („Pro Traders / Funding"),
+   nigdy po „Pro"; na najwęższych telefonach „Get Funded" schodzi z nagłówka
+   (zostaje w hero i w menu), żeby marka mieściła się czytelnie */
+.nav .lt-a{white-space:nowrap}
+@media(max-width:375px){.nav-right .btn-sm{display:none}}

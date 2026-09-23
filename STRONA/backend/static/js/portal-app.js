@@ -4293,18 +4293,23 @@ async function submitPayout(id){
   });
 }
 
-/* Klawiatura ekranowa vs dolny tabbar: position:fixed na iOS nie wie o niej
-   nic i pasek zawisa nad polem edycji w polowie ekranu — na czas pisania
-   znika (body.kb-open w portal.css), wraca po zamknieciu klawiatury. */
-addEventListener('focusin',e=>{
-  if(e.target.matches&&e.target.matches('input,textarea,select'))
-    document.body.classList.add('kb-open');
-});
-addEventListener('focusout',()=>setTimeout(()=>{
+/* Klawiatura ekranowa vs dolny pasek: position:fixed na iOS nie wie o niej nic
+   i pasek zawisa nad polem edycji w połowie ekranu — na czas pisania znika
+   (body.kb-open w portal.css). Stan liczymy z FAKTÓW (aktywne pole w DOM-ie +
+   zwężony visualViewport), a nie z samego focusout: zamknięcie okna z polem
+   odpowiedzi usuwało pole z DOM-u bez focusout i pasek znikał do przeładowania. */
+function kbSprawdz(){
   const a=document.activeElement;
-  if(!(a&&a.matches&&a.matches('input,textarea,select')))
-    document.body.classList.remove('kb-open');
-},80));
+  const pole=!!(a&&a.isConnected&&a.matches&&
+    a.matches('input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=button]),textarea,select'));
+  const vv=window.visualViewport;
+  const klawiatura=pole&&(!vv||vv.height<window.innerHeight-120);
+  document.body.classList.toggle('kb-open',klawiatura);
+}
+addEventListener('focusin',()=>setTimeout(kbSprawdz,60));
+addEventListener('focusout',()=>setTimeout(kbSprawdz,80));
+addEventListener('click',()=>setTimeout(kbSprawdz,150),true);
+if(window.visualViewport)visualViewport.addEventListener('resize',kbSprawdz);
 
 /* ---------- offline ----------
    PWA otwarta bez sieci pokazuje ostatnie dane, ale kazdy zapis przepadnie.
