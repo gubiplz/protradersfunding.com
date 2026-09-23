@@ -5504,6 +5504,37 @@ def admin_copytrading_offer_set(payload: CopytradingOfferIn):
         session.close()
 
 
+@app.get("/api/admin/upgrade-promo", dependencies=[Depends(auth.require_admin)])
+def admin_upgrade_promo_state():
+    """Stan promocji „Upgrade your size" dla karty w Settings.
+
+    `enabled` = włącznik z panelu, `active` = czy promocja naprawdę działa
+    teraz (włącznik + env + data końcowa) — panel pokazuje, CZEMU jest wyłączona."""
+    return {"enabled": catalog.promo_switch_on(), "active": catalog.promo_active(),
+            "env_on": settings.promo_upgrade, "ends": settings.promo_upgrade_ends or None,
+            "code": settings.promo_upgrade_code}
+
+
+@app.post("/api/admin/upgrade-promo", dependencies=[Depends(auth.require_admin)])
+def admin_upgrade_promo_set(payload: BogoPromoIn):
+    """Włącz/wyłącz promocję „Upgrade your size" z panelu, bez zmiany env.
+
+    Gasi razem pasek na stronie, pole kodu i mechanikę w checkoucie — wszystkie
+    pytają `catalog.promo_active()`. Zamówień już opłaconych nie rusza."""
+    session = SessionLocal()
+    try:
+        row = session.get(AppSetting, catalog.PROMO_UPGRADE_KEY)
+        if row is None:
+            row = AppSetting(key=catalog.PROMO_UPGRADE_KEY)
+            session.add(row)
+        row.value = "1" if payload.enabled else "0"
+        session.commit()
+    finally:
+        session.close()
+    catalog._PROMO_SWITCH["ts"] = 0.0
+    return admin_upgrade_promo_state()
+
+
 @app.get("/api/admin/bogo-promo", dependencies=[Depends(auth.require_admin)])
 def admin_bogo_promo_state():
     session = SessionLocal()

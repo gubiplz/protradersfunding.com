@@ -920,9 +920,10 @@ const VIEWS={
  async settings(){
   // Payout BOT i Reach BOT przeniosly sie do zakladki Telegram, wiec ten widok
   // nie ciagnie juz ich stanu — dwa zapytania mniej przy kazdym wejsciu.
-  const [s,bg,cp]=await Promise.all([api('/api/stats'),
+  const [s,bg,cp,up]=await Promise.all([api('/api/stats'),
     api('/api/admin/bogo-promo').catch(()=>({enabled:false})),
-    api('/api/admin/copytrading-offer').catch(()=>({enabled:false,price_usd:299,real_mt5:false}))]);
+    api('/api/admin/copytrading-offer').catch(()=>({enabled:false,price_usd:299,real_mt5:false})),
+    api('/api/admin/upgrade-promo').catch(()=>null)]);
   $('view').innerHTML=`
     <div class="card-cols">
     <div class="sec-card" style="max-width:560px"><h3>Telegram</h3>
@@ -930,6 +931,21 @@ const VIEWS={
         channel health and the posting queue now have their own tab — everything about the
         channels in one place.</p>
       <button class="btn-p" onclick="go('telegram')">Open the Telegram tab</button></div>
+
+    ${up?`<div class="sec-card" style="max-width:560px"><h3>Upgrade your size</h3>
+      <div class="chip-row" style="margin-bottom:12px">
+        <span class="status ${up.active?'funded':'pending'}"><span class="dot"></span>${up.active?'running':'off'}</span>
+        <span class="muted" style="font-size:12px">code <b class="mono">${esc(up.code||'')}</b>${up.ends?` · ends ${esc(up.ends)}`:''}</span>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn-p" onclick="setUpgradePromo(${up.enabled?'false':'true'})" ${!up.env_on&&!up.enabled?'disabled':''}>${up.enabled?'Turn off':'Turn on'}</button>
+      </div>
+      <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
+        While it's on, the promo bar runs on the public site and <b>a purchase with the code gets
+        the next size up for the same fee</b>. Turning it off hides the bar and the code field and
+        stops the upgrade at checkout; orders already paid keep what they got.
+        ${!up.env_on?'<br><b style="color:var(--red)">Blocked by the server: PROMO_UPGRADE=false in the environment.</b>'
+          :up.enabled&&!up.active?'<br><b style="color:var(--gold)">Switched on, but the end date has passed — change PROMO_UPGRADE_ENDS.</b>':''}</p></div>`:''}
 
     <div class="sec-card" style="max-width:560px"><h3>Buy 1 Get 1 Free</h3>
       <div class="chip-row" style="margin-bottom:12px">
@@ -5280,6 +5296,13 @@ async function setBogoPromo(on){
   try{await api('/api/admin/bogo-promo',{method:'POST',body:JSON.stringify({enabled:on})});
     toast(on?'Buy 1 Get 1 Free is ON — the site shows the promo bar and every new paid order gets a free second account.'
             :'Buy 1 Get 1 Free is off. Orders created while it was on keep their free account.','ok',8000);
+    go('settings');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function setUpgradePromo(on){
+  try{await api('/api/admin/upgrade-promo',{method:'POST',body:JSON.stringify({enabled:on})});
+    toast(on?'Upgrade promo is ON — the bar is back on the site and the code upgrades purchases.'
+            :'Upgrade promo is off — bar hidden, the code no longer upgrades new purchases.','ok',7000);
     go('settings');
   }catch(e){toast('Error: '+e.message,'err')}
 }

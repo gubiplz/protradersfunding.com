@@ -6,6 +6,7 @@ tabelę `products`, z której czyta sklep — TEN plik jest źródłem prawdy.
 """
 from __future__ import annotations
 
+import time
 from datetime import date, datetime, timezone
 
 from .config import get_settings
@@ -200,13 +201,39 @@ def promo_code_ok(code: str | None) -> bool:
     return code.strip().upper() == settings.promo_upgrade_code.upper()
 
 
+# Włącznik promocji z panelu (Settings). Env `PROMO_UPGRADE` zostaje twardym
+# wyłącznikiem z zewnątrz — panel może promocję zgasić i zapalić z powrotem,
+# ale nie włączy jej, gdy env mówi „false". Brak wiersza = włączona, żeby
+# wdrożenie przełącznika niczego samo nie wyłączyło.
+PROMO_UPGRADE_KEY = "promo_upgrade_on"
+# Krótki TTL zamiast zapytania przy każdym renderze strony i każdym checkoucie
+# (baza stoi za oceanem); POST z panelu zeruje `ts`, więc instancja, która go
+# obsłużyła, widzi zmianę od razu, a pozostałe najpóźniej po minucie.
+_PROMO_SWITCH: dict = {"ts": 0.0, "val": True}
+
+
+def promo_switch_on() -> bool:
+    now = time.time()
+    if now - _PROMO_SWITCH["ts"] > 60:
+        from .db import SessionLocal
+        s = SessionLocal()
+        try:
+            row = s.get(AppSetting, PROMO_UPGRADE_KEY)
+            _PROMO_SWITCH.update(ts=now, val=row is None or row.value == "1")
+        except Exception:  # pragma: no cover — brak tabeli/bazy: zostaje ostatni znany stan
+            _PROMO_SWITCH["ts"] = now
+        finally:
+            s.close()
+    return _PROMO_SWITCH["val"]
+
+
 def promo_active(now: datetime | None = None) -> bool:
-    """Czy promocja obowiązuje TERAZ (flaga + opcjonalna data końcowa).
+    """Czy promocja obowiązuje TERAZ (env + włącznik z panelu + data końcowa).
 
     Jedno źródło prawdy dla treści na stronie i dla checkoutu — nie da się
     reklamować upgrade'u, którego kasa nie zrobi, ani rozdawać go po terminie.
     """
-    if not settings.promo_upgrade:
+    if not settings.promo_upgrade or not promo_switch_on():
         return False
     koniec = settings.promo_upgrade_ends
     if not koniec:
