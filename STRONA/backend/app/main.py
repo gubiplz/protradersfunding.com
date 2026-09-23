@@ -10011,7 +10011,9 @@ def _nadawcy_odebranych(session, maile: set[str]) -> tuple[dict, dict]:
 
 
 def _dopisz_nadawce(wiersz: dict, traderzy: dict, leady: dict) -> dict:
-    t, lead = traderzy.get(wiersz["from_email"]), leady.get(wiersz["from_email"])
+    """Dopasowanie po `person_email`: nadawca odebranego, odbiorca wysłanego."""
+    klucz = wiersz.get("person_email") or wiersz.get("from_email")
+    t, lead = traderzy.get(klucz), leady.get(klucz)
     wiersz["trader_id"] = t.id if t else None
     wiersz["trader_name"] = (t.full_name or t.email) if t else None
     wiersz["lead_id"] = lead.id if lead else None
@@ -10029,28 +10031,50 @@ def admin_mail_inbox(brand: str = "all"):
     """
     if brand not in ("all", *inbox.MARKI):
         raise HTTPException(400, "brand must be all, ptf or fx")
-    dane = inbox.lista(brand)
+    return _z_ludzmi(inbox.lista(brand))
+
+
+def _z_ludzmi(dane: dict) -> dict:
     session = SessionLocal()
     try:
-        traderzy, leady = _nadawcy_odebranych(session, {w["from_email"] for w in dane["items"]})
+        traderzy, leady = _nadawcy_odebranych(session, {w["person_email"] for w in dane["items"]})
         dane["items"] = [_dopisz_nadawce(w, traderzy, leady) for w in dane["items"]]
         return dane
     finally:
         session.close()
 
 
-@app.get("/api/admin/mail/inbox/{email_id}", dependencies=[Depends(auth.require_admin)])
-def admin_mail_inbox_one(email_id: str, k: int = 0):
+def _jeden_z_resenda(email_id: str, k: int, *, wyslany: bool) -> dict:
     try:
-        m = inbox.jeden(email_id, k)
+        m = inbox.jeden(email_id, k, wyslany=wyslany)
     except RuntimeError as e:
         raise HTTPException(502, str(e)) from None
     session = SessionLocal()
     try:
-        traderzy, leady = _nadawcy_odebranych(session, {m["from_email"]})
+        traderzy, leady = _nadawcy_odebranych(session, {m["person_email"]})
         return _dopisz_nadawce(m, traderzy, leady)
     finally:
         session.close()
+
+
+@app.get("/api/admin/mail/inbox/{email_id}", dependencies=[Depends(auth.require_admin)])
+def admin_mail_inbox_one(email_id: str, k: int = 0):
+    return _jeden_z_resenda(email_id, k, wyslany=False)
+
+
+@app.get("/api/admin/mail/sent", dependencies=[Depends(auth.require_admin)])
+def admin_mail_sent(brand: str = "all"):
+    """Maile WYSŁANE przez Resenda (spod Forex Passing: ręczne z panelu i
+    automaty do leadów) ze statusem doręczenia. Maile platformy idą przez
+    SMTP i są w `/api/admin/mail-log` — panel skleja obie listy."""
+    if brand not in ("all", *inbox.MARKI):
+        raise HTTPException(400, "brand must be all, ptf or fx")
+    return _z_ludzmi(inbox.wyslane(brand))
+
+
+@app.get("/api/admin/mail/sent/{email_id}", dependencies=[Depends(auth.require_admin)])
+def admin_mail_sent_one(email_id: str, k: int = 0):
+    return _jeden_z_resenda(email_id, k, wyslany=True)
 
 
 @app.get("/api/admin/mail/senders", dependencies=[Depends(auth.require_admin)])

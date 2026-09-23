@@ -782,7 +782,10 @@ const VIEWS={
  },
 
  async mail(){
+  /* Lista z Resenda (wyslane i odebrane) dociaga sie w tle przy renderze —
+     tu tylko zerujemy ja, zeby wejscie w zakladke pokazalo swiezy stan. */
   window._mailLog=await api('/api/admin/mail-log');
+  window._mailSentRs=null;window._mailIn=null;
   renderMailLog();
  },
 
@@ -1050,10 +1053,14 @@ function capList(rows,flag,rerender){
     more:`<button class="btn-o" style="display:block;margin:12px auto" onclick="window.${flag}=1;${rerender}()">Show all ${rows.length}</button>`};
 }
 
-/* ---------- Mail: odebrane (Resend Receiving) ----------
-   Przelacznik Sent / Received i marka All / PTF / Forex Passing. Marka
-   zapamietana na stale (jak filtr kraju) i wspolna dla obu widokow: w Sent
-   dzieli dziennik po nadawcy, w Received po domenie, na ktora przyszedl mail. */
+/* ---------- Mail: wyslane i odebrane, platforma i Forex Passing ----------
+   Sent = dziennik platformy (MailLog: wszystko, co wychodzi przez SMTP PTF)
+   + lista wyslanych z API Resenda (wszystko spod Forex Passing, razem z
+   automatami do leadow, ze statusem doreczenia). Received = Resend Receiving.
+   Marka All / PTF / Forex Passing zapamietana na stale i wspolna dla obu.
+   PUŁAPKA: nazwy funkcji w tym pliku sa globalne — `loadInbox` byl juz zajety
+   przez dzwonek powiadomien i po cichu nadpisal pierwsza wersje tego widoku
+   (wieczne „ladowanie"). Stad przedrostek `mail…` i test na duplikaty. */
 let MAIL_BRAND='all';
 try{MAIL_BRAND=localStorage.getItem('pf_admin_mailbrand')||'all'}catch(e){}
 const BRAND_LABEL={ptf:'PTF',fx:'Forex Passing'};
@@ -1063,7 +1070,6 @@ function setMailBrand(b){
   renderMailLog();
 }
 function setMailBox(b){window._mailBox=b;window._mailAll=0;renderMailLog()}
-const mailBrandOf=m=>m.event==='admin_message_fx'?'fx':'ptf';
 function mailSwitches(){
   const box=window._mailBox||'sent';
   return `<div class="seg">${[['sent','Sent'],['in','Received']].map(([k,l])=>
@@ -1072,20 +1078,40 @@ function mailSwitches(){
       [['all','All'],['ptf','PTF'],['fx','Forex Passing']].map(([k,l])=>
       `<button class="${MAIL_BRAND===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="setMailBrand('${k}')">${l}</button>`).join('')}</div>`;
 }
-async function loadInbox(force){
-  if(window._inbox&&!force)return window._inbox;
-  try{window._inbox=await api('/api/admin/mail/inbox')}
-  catch(e){window._inbox={items:[],errors:[e.message],configured:true,domains:{}}}
-  return window._inbox;
+/* Dane z Resenda laduja sie leniwie i niezaleznie od dziennika: zakladka Mail
+   pokazuje dziennik od razu, a lista z Resenda dojezdza, gdy przyjdzie. Blad
+   nigdy nie zostawia wiecznego ladowania — zapisuje sie jako `errors`. */
+async function loadMailRemote(kind,force){
+  const pole=kind==='in'?'_mailIn':'_mailSentRs';
+  if(window[pole]&&!force)return window[pole];
+  try{window[pole]=await api(kind==='in'?'/api/admin/mail/inbox':'/api/admin/mail/sent',{timeoutMs:20000})}
+  catch(e){window[pole]={items:[],errors:[e.message],configured:true,domains:{}}}
+  return window[pole];
 }
-async function refreshInbox(btn){
-  await busy(btn,'Loading…',async()=>{await loadInbox(true);renderMailLog()});
+async function refreshMailRemote(btn){
+  const kind=window._mailBox==='in'?'in':'sent';
+  await busy(btn,'Loading…',async()=>{
+    if(kind==='sent')window._mailLog=await api('/api/admin/mail-log');
+    await loadMailRemote(kind,true);renderMailLog();
+  });
 }
-function renderInbox(){
-  const d=window._inbox;
+function mailRemoteLater(kind){
+  loadMailRemote(kind).then(()=>{if(VIEW==='mail'&&(window._mailBox||'sent')===(kind==='in'?'in':'sent'))renderMailLog()});
+}
+const mailKto=m=>m.trader_id?`<span class="chip" title="A client with this e-mail">client</span>`
+  :m.lead_id?`<span class="chip" title="A lead with this e-mail">lead</span>`:'';
+/* Status z Resenda (`last_event`) po ludzku: doreczony / otwarty / odbity. */
+const RS_STATUS={delivered:['delivered','paid'],opened:['opened','paid'],clicked:['clicked','paid'],
+  sent:['sent','pending'],queued:['queued','pending'],scheduled:['scheduled','pending'],
+  delivery_delayed:['delayed','pending'],bounced:['bounced','failed'],complained:['spam report','failed'],
+  failed:['failed','failed'],canceled:['canceled','failed']};
+const rsFailed=m=>(RS_STATUS[m.last_event]||[])[1]==='failed';
+
+function renderMailInbox(){
+  const d=window._mailIn;
   if(!d){
     $('view').innerHTML=`<div class="toolbar">${mailSwitches()}</div><div class="empty"><h3>Loading received mail…</h3></div>`;
-    loadInbox().then(()=>{if(VIEW==='mail'&&window._mailBox==='in')renderInbox()});
+    mailRemoteLater('in');
     return;
   }
   const list=d.items||[];
@@ -1094,8 +1120,6 @@ function renderInbox(){
     (!q||[m.from,m.subject,(m.to||[]).join(' '),m.trader_name,m.lead_name].some(x=>String(x||'').toLowerCase().includes(q))));
   const cap=capList(rows,'_mailAll','renderMailLog');
   const dom=d.domains||{};
-  const kto=m=>m.trader_id?`<span class="chip" title="A client with this e-mail">client</span>`
-    :m.lead_id?`<span class="chip" title="A lead with this e-mail">lead</span>`:'';
   const pusto=!d.configured
     ?`<div class="empty"><h3>Receiving is not connected</h3><p>Set <b>RESEND_API_KEY</b> on the server. Received mail is read from Resend.</p></div>`
     :list.length?`<div class="empty"><h3>No e-mails match</h3><p>Try a different search or brand.</p></div>`
@@ -1107,73 +1131,45 @@ function renderInbox(){
       ${mailSwitches()}
       ${searchBox('inbox-q','_inboxQ','renderMailLog','Search sender, subject or address…')}
       <span class="count-pill">${rows.length} of ${list.length}</span>
-      <button class="btn-o sm" onclick="refreshInbox(this)">Refresh</button>
+      <button class="btn-o sm" onclick="refreshMailRemote(this)">Refresh</button>
       <button class="btn-p sm" onclick="openMailCompose()">Compose</button>
     </div>
     ${(d.errors||[]).map(e=>`<p class="lead-statline" style="color:var(--gold)">⚠ ${esc(e)}</p>`).join('')}
     ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.inbox">
       <thead><tr><th>Date</th><th>From</th><th>Subject</th><th>To</th><th>Brand</th></tr></thead>
-      <tbody>${cap.rows.map(m=>`<tr class="clickable" onclick="openInboxMail('${jsq(m.id)}',${m.k||0})">
+      <tbody>${cap.rows.map(m=>`<tr class="clickable" onclick="openMailItem('in','${jsq(m.id)}',${m.k||0})">
         <td class="muted" data-l="Date" data-sort="${esc(m.created_at||'')}">${dstr(m.created_at)}</td>
-        <td class="rt-main" data-l="From">${esc(m.trader_name||m.lead_name||m.from||'—')} ${kto(m)}
+        <td class="rt-main" data-l="From">${esc(m.trader_name||m.lead_name||m.from||'—')} ${mailKto(m)}
           <div class="muted" style="font-size:var(--fs-cap)">${esc(m.from_email||'')}</div></td>
         <td data-l="Subject">${esc(m.subject||'(no subject)')}${m.attachments?` <span class="muted" title="Attachments">· ${m.attachments} file${m.attachments>1?'s':''}</span>`:''}</td>
         <td class="muted" data-l="To">${esc((m.to||[]).join(', '))}</td>
         <td class="muted" data-l="Brand">${esc(BRAND_LABEL[m.brand]||'other')}</td></tr>`).join('')}
       </tbody></table></div>${cap.more}`:pusto}`;
 }
-/* Tresc maila: HTML idzie do ramki z pustym `sandbox` (bez skryptow, bez
-   formularzy, bez dostepu do panelu) — mail od obcego nie moze niczego tu
-   uruchomic. Obrazki z sieci sie laduja, jak w zwyklej skrzynce. */
-async function openInboxMail(id,k){
-  let m;
-  try{m=await api('/api/admin/mail/inbox/'+encodeURIComponent(id)+'?k='+(k||0))}
-  catch(e){toast('Mail: '+e.message,'err');return}
-  window._inboxOpen=m;
-  document.getElementById('inbox-modal')?.remove();
-  const box=document.createElement('div');
-  box.id='inbox-modal';box.className='modal-wrap';
-  const tresc=m.html
-    ?`<iframe sandbox="" referrerpolicy="no-referrer" style="width:100%;height:55vh;border:1px solid var(--line);border-radius:10px;background:#fff" srcdoc="${esc(m.html)}"></iframe>`
-    :`<pre style="white-space:pre-wrap;word-break:break-word;font-family:var(--body);font-size:13.5px;margin:0">${esc(m.text||'(empty)')}</pre>`;
-  box.innerHTML=`<div class="modal" style="max-width:760px" onclick="event.stopPropagation()">
-    <div class="modal-head"><h3>${esc(m.subject||'(no subject)')}</h3>
-      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('inbox-modal').remove()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
-    <div class="kv"><span>From</span><b>${esc(m.from||'—')}</b></div>
-    <div class="kv"><span>To</span><b>${esc((m.to||[]).join(', '))}</b></div>
-    <div class="kv"><span>Received</span><b>${dstr(m.created_at)} · ${esc(BRAND_LABEL[m.brand]||'other')}</b></div>
-    ${(m.attachments||[]).length?`<div class="kv"><span>Attachments</span><b>${m.attachments.map(a=>esc(a.filename||'file')).join(', ')}</b></div>`:''}
-    <div style="margin:14px 0">${tresc}</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn-p" onclick="replyInboxMail()">Reply</button>
-      ${m.trader_id?`<button class="btn-o" onclick="document.getElementById('inbox-modal').remove();openTraderJournal(${m.trader_id},'${jsq(m.from_email)}')">Open client</button>`:''}
-      ${m.lead_id?`<button class="btn-o" onclick="document.getElementById('inbox-modal').remove();openLead(${m.lead_id})">Open lead</button>`:''}
-    </div></div>`;
-  box.onclick=()=>box.remove();
-  document.body.appendChild(box);
-}
-/* Odpowiedz idzie tym samym oknem co kazdy mail z panelu, spod marki, na
-   ktora przyszedl list — klient pisal do Forex Passing, odpowiedz przychodzi
-   od Forex Passing. Znany klient = jego karta (i szybkie przyciski). */
-function replyInboxMail(){
-  const m=window._inboxOpen;if(!m)return;
-  document.getElementById('inbox-modal')?.remove();
-  const t=m.trader_id?(window._clients||[]).find(x=>x.id===m.trader_id):null;
-  const temat=/^re:/i.test(m.subject||'')?m.subject:'Re: '+(m.subject||'');
-  const cytat=(m.text||'').trim().split('\n').slice(0,20).map(l=>'> '+l).join('\n');
-  return openMailComposer({trader:t||null,email:m.from_email,from:m.brand||'ptf',
-    subject:temat,body:'\n\n'+(cytat?`On ${dstr(m.created_at)}, ${m.from} wrote:\n${cytat}`:'')});
-}
 
 function renderMailLog(){
-  if(window._mailBox==='in')return renderInbox();
+  if(window._mailBox==='in')return renderMailInbox();
   const d=window._mailLog||{};
-  const list=d.entries||[];
+  const rs=window._mailSentRs;
+  if(!rs)mailRemoteLater('sent');
+  const rsOk=!!(rs&&rs.configured&&!(rs.errors||[]).length);
+  /* Jeden wiersz na mail. Mail spod Forex Passing zapisuje sie tez w dzienniku
+     (`admin_message_fx`) — gdy lista z Resenda doszla bez bledu, bierzemy go
+     stamtad (ma status doreczenia), a kopie z dziennika chowamy. */
+  const zDziennika=(d.entries||[]).filter(m=>!(rsOk&&m.event==='admin_message_fx')).map(m=>({
+    kind:'log',id:m.id,ts:m.ts,to:m.to,subject:m.subject,brand:m.event==='admin_message_fx'?'fx':'ptf',
+    ok:m.ok,failed:!m.ok,error:m.error,can_resend:m.can_resend,
+    label:m.event==='admin_message_fx'?'written · Forex Passing':m.event==='admin_message'?'written · platform':(m.event||'—').replace(/_/g,' '),
+    status:m.ok?['sent','paid']:['failed','failed']}));
+  const zResenda=((rs&&rs.items)||[]).map(m=>({
+    kind:'rs',id:m.id,k:m.k||0,ts:m.created_at,to:(m.to||[]).join(', '),subject:m.subject,brand:m.brand,
+    ok:!rsFailed(m),failed:rsFailed(m),trader_id:m.trader_id,lead_id:m.lead_id,
+    label:'Resend · '+(BRAND_LABEL[m.brand]||'other'),status:RS_STATUS[m.last_event]||[m.last_event||'sent','pending']}));
+  const list=[...zDziennika,...zResenda].sort((a,b)=>String(b.ts||'').localeCompare(String(a.ts||'')));
   const q=(window._mailQ||'').toLowerCase(), f=window._mailFilter||'all';
-  const rows=list.filter(m=>(f==='all'||(f==='failed'?!m.ok:m.ok))&&
-    (MAIL_BRAND==='all'||mailBrandOf(m)===MAIL_BRAND)&&
-    (!q||(m.to||'').toLowerCase().includes(q)||(m.event||'').toLowerCase().includes(q)
+  const rows=list.filter(m=>(f==='all'||(f==='failed'?m.failed:!m.failed))&&
+    (MAIL_BRAND==='all'||m.brand===MAIL_BRAND)&&
+    (!q||(m.to||'').toLowerCase().includes(q)||(m.label||'').toLowerCase().includes(q)
       ||(m.subject||'').toLowerCase().includes(q)));
   const cap=capList(rows,'_mailAll','renderMailLog');
   $('view').innerHTML=`
@@ -1182,25 +1178,74 @@ function renderMailLog(){
       ${searchBox('mail-q','_mailQ','renderMailLog','Search recipient, subject or template…')}
       <div class="seg">${[['all','All'],['sent','Sent'],['failed','Failed']]
         .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._mailFilter='${f===k?'all':k}';renderMailLog()">${l}</button>`).join('')}</div>
-      <span class="count-pill">${rows.length} of ${list.length}</span>
+      <span class="count-pill">${rows.length} of ${list.length}${rs?'':' · <span class="muted">loading Resend…</span>'}</span>
+      <button class="btn-o sm" onclick="refreshMailRemote(this)">Refresh</button>
       <button class="btn-p sm" onclick="openMailCompose()"
         title="Write an e-mail to a client, a lead or any address — from the platform or from Forex Passing, with templates">Compose</button>
     </div>
+    ${(rs&&rs.errors||[]).map(e=>`<p class="lead-statline" style="color:var(--gold)">⚠ Resend: ${esc(e)}</p>`).join('')}
     ${d.failed_7d?`<p class="lead-statline" style="color:var(--gold)">⚠ ${d.failed_7d} e-mail${d.failed_7d>1?'s':''} failed in the last 7 days — deliver the content another way (copy the portal-invite link, the pay link or the MT5 credentials from the account card), then check the SMTP settings.</p>`:''}
     ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.maillog">
       <thead><tr><th>Date</th><th>To</th><th>Subject</th><th>Template</th><th>Status</th><th></th></tr></thead>
-      <tbody>${cap.rows.map(m=>`<tr>
+      <tbody>${cap.rows.map(m=>`<tr${m.kind==='rs'?` class="clickable" onclick="openMailItem('sent','${jsq(m.id)}',${m.k})"`:''}>
         <td class="muted" data-l="Date" data-sort="${esc(m.ts||'')}">${dstr(m.ts)}</td>
-        <td class="rt-main" data-l="To">${esc(m.to||'—')}</td>
+        <td class="rt-main" data-l="To">${esc(m.to||'—')} ${mailKto(m)}</td>
         <td data-l="Subject">${esc(m.subject||'—')}</td>
-        <td class="muted" data-l="Template">${m.event==='admin_message_fx'?'written · Forex Passing':m.event==='admin_message'?'written · platform':esc((m.event||'—').replace(/_/g,' '))}</td>
-        <td data-l="Status"><span class="status ${m.ok?'paid':'failed'}"><span class="dot"></span>${m.ok?'sent':'failed'}</span>
+        <td class="muted" data-l="Template">${esc(m.label)}</td>
+        <td data-l="Status"><span class="status ${m.status[1]}"><span class="dot"></span>${esc(m.status[0])}</span>
           ${m.error?`<div class="muted" style="font-size:var(--fs-cap);max-width:260px;word-break:break-word">${esc(m.error)}</div>`:''}</td>
         <td class="rt-acts">${m.can_resend?`<button class="btn-o sm" onclick="resendMail(${m.id},this)"
           title="Send this one again — the links inside are generated fresh, because the originals expire">Resend</button>`:''}</td></tr>`).join('')}
       </tbody></table></div>${cap.more}`
-    :list.length?`<div class="empty"><h3>No e-mails match</h3><p>Try a different search or filter.</p></div>`
+    :list.length?`<div class="empty"><h3>No e-mails match</h3><p>Try a different search, brand or filter.</p></div>`
     :`<div class="empty"><h3>Nothing sent yet</h3><p>Every e-mail the platform sends will be listed here, including the ones that fail.</p></div>`}`;
+}
+
+/* Tresc maila (wyslanego z Resenda albo odebranego): HTML idzie do ramki
+   z pustym `sandbox` (bez skryptow, bez formularzy, bez dostepu do panelu) —
+   mail od obcego nie moze niczego tu uruchomic. */
+async function openMailItem(kind,id,k){
+  let m;
+  const base=kind==='in'?'/api/admin/mail/inbox/':'/api/admin/mail/sent/';
+  try{m=await api(base+encodeURIComponent(id)+'?k='+(k||0))}
+  catch(e){toast('Mail: '+e.message,'err');return}
+  m.kind=kind;window._mailOpen=m;
+  document.getElementById('mailitem-modal')?.remove();
+  const box=document.createElement('div');
+  box.id='mailitem-modal';box.className='modal-wrap';
+  const tresc=m.html
+    ?`<iframe sandbox="" referrerpolicy="no-referrer" style="width:100%;height:55vh;border:1px solid var(--line);border-radius:10px;background:#fff" srcdoc="${esc(m.html)}"></iframe>`
+    :`<pre style="white-space:pre-wrap;word-break:break-word;font-family:var(--body);font-size:13.5px;margin:0">${esc(m.text||'(empty)')}</pre>`;
+  const st=kind==='sent'?(RS_STATUS[m.last_event]||[m.last_event||'sent','pending']):null;
+  box.innerHTML=`<div class="modal" style="max-width:760px" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>${esc(m.subject||'(no subject)')}</h3>
+      <button class="icon-btn" aria-label="Close" onclick="document.getElementById('mailitem-modal').remove()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <div class="kv"><span>From</span><b>${esc(m.from||'—')}</b></div>
+    <div class="kv"><span>To</span><b>${esc((m.to||[]).join(', '))}</b></div>
+    <div class="kv"><span>${kind==='in'?'Received':'Sent'}</span><b>${dstr(m.created_at)} · ${esc(BRAND_LABEL[m.brand]||'other')}</b></div>
+    ${st?`<div class="kv"><span>Status</span><b><span class="status ${st[1]}"><span class="dot"></span>${esc(st[0])}</span></b></div>`:''}
+    ${(m.attachments||[]).length?`<div class="kv"><span>Attachments</span><b>${m.attachments.map(a=>esc(a.filename||'file')).join(', ')}</b></div>`:''}
+    <div style="margin:14px 0">${tresc}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${kind==='in'?`<button class="btn-p" onclick="replyMailItem()">Reply</button>`:''}
+      ${m.trader_id?`<button class="btn-o" onclick="document.getElementById('mailitem-modal').remove();openTraderJournal(${m.trader_id},'${jsq(m.person_email||'')}')">Open client</button>`:''}
+      ${m.lead_id?`<button class="btn-o" onclick="document.getElementById('mailitem-modal').remove();openLead(${m.lead_id})">Open lead</button>`:''}
+    </div></div>`;
+  box.onclick=()=>box.remove();
+  document.body.appendChild(box);
+}
+/* Odpowiedz idzie tym samym oknem co kazdy mail z panelu, spod marki, na
+   ktora przyszedl list — klient pisal do Forex Passing, odpowiedz przychodzi
+   od Forex Passing. Znany klient = jego karta (i szybkie przyciski). */
+function replyMailItem(){
+  const m=window._mailOpen;if(!m)return;
+  document.getElementById('mailitem-modal')?.remove();
+  const t=m.trader_id?(window._clients||[]).find(x=>x.id===m.trader_id):null;
+  const temat=/^re:/i.test(m.subject||'')?m.subject:'Re: '+(m.subject||'');
+  const cytat=(m.text||'').trim().split('\n').slice(0,20).map(l=>'> '+l).join('\n');
+  return openMailComposer({trader:t||null,email:m.from_email,from:m.brand||'ptf',
+    subject:temat,body:'\n\n'+(cytat?`On ${dstr(m.created_at)}, ${m.from} wrote:\n${cytat}`:'')});
 }
 /* Ponowienie NIE jest kopia archiwalnego maila: tokeny w linkach sa jednorazowe
    i wygasaja, wiec serwer sklada te sama wiadomosc od nowa. Stad ostrzezenie
