@@ -15,7 +15,6 @@ os.environ.setdefault(
     f"sqlite:///{tempfile.NamedTemporaryFile(suffix='.db', delete=False).name}")
 os.environ.setdefault("FEED", "sim")
 os.environ.setdefault("AUTO_SEED", "false")
-os.environ.setdefault("LEAD_INGEST_TOKEN", "sekret-origin")
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -65,6 +64,14 @@ def swiat():
             s.commit()
         finally:
             s.close()
+
+
+@pytest.fixture
+def token(monkeypatch):
+    """Sekret ingestu na czas testu — w pełnym zestawie ustawienia są już
+    wczytane, więc `os.environ` przed importem nic nie zmienia."""
+    monkeypatch.setattr(get_settings(), "lead_ingest_token", "sekret-origin", raising=False)
+    return {"X-Lead-Token": "sekret-origin"}
 
 
 def _trader(s, mail=None, **pola):
@@ -185,9 +192,9 @@ def test_lista_leadow_ma_origin_z_sygnalow_tradera(swiat):
     assert lead["origin"]["country"] == "NG"
 
 
-def test_ingest_zapisuje_kraj_z_ip(swiat):
+def test_ingest_zapisuje_kraj_z_ip(swiat, token):
     mail = f"{PRZEDROSTEK}-ingest@example.com"
-    r = client.post("/api/leads/ingest", headers={"X-Lead-Token": "sekret-origin"},
+    r = client.post("/api/leads/ingest", headers=token,
                     json={"email": mail, "name": "Ada", "source": "free",
                           "ipCountry": "ng", "phone": "+2348012345678"})
     assert r.status_code == 200, r.text
@@ -197,9 +204,9 @@ def test_ingest_zapisuje_kraj_z_ip(swiat):
     assert dane["ip_country"] == "NG" and dane["origin"]["free"]
 
 
-def test_ingest_odrzuca_xx_i_smieci_w_kraju_ip(swiat):
+def test_ingest_odrzuca_xx_i_smieci_w_kraju_ip(swiat, token):
     mail = f"{PRZEDROSTEK}-xx@example.com"
-    client.post("/api/leads/ingest", headers={"X-Lead-Token": "sekret-origin"},
+    client.post("/api/leads/ingest", headers=token,
                 json={"email": mail, "name": "Ada", "ipCountry": "XX"})
     assert swiat.query(Lead).filter(Lead.email == mail).one().ip_country is None
 
