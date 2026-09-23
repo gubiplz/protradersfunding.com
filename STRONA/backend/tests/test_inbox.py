@@ -133,11 +133,50 @@ def test_bez_klucza_mowi_ze_nie_podlaczone(monkeypatch):
     assert d["configured"] is False and d["items"] == []
 
 
-def test_panel_ma_received_i_przelacznik_marki():
+def test_wyslane_z_resenda_ze_statusem_i_odbiorca(resend):
+    odp, _ = resend
+    s = SessionLocal()
+    lead = Lead(email="wyslany.lead@x.pl", name="Wyslany", source="money", status="new")
+    s.add(lead); s.commit(); lid = lead.id; s.close()
+    odp["/emails?limit=100"] = _lista(
+        {"id": "s1", "to": ["wyslany.lead@x.pl"], "from": f"Desk <contact@{FX_DOM}>",
+         "subject": "Your account", "created_at": "2026-09-23T12:00:00Z", "last_event": "delivered"},
+        {"id": "s2", "to": ["ktos@y.com"], "from": f"no-reply@{PTF_DOM}",
+         "subject": "Reset", "created_at": "2026-09-23T13:00:00Z", "last_event": "bounced"},
+    )
+    d = client.get("/api/admin/mail/sent", headers=ADMIN).json()
+    assert [m["id"] for m in d["items"]] == ["s2", "s1"]
+    s1 = d["items"][1]
+    assert s1["brand"] == "fx" and s1["last_event"] == "delivered" and s1["lead_id"] == lid
+    assert d["items"][0]["brand"] == "ptf"                     # marka po NADAWCY
+    fx = client.get("/api/admin/mail/sent?brand=fx", headers=ADMIN).json()
+    assert [m["id"] for m in fx["items"]] == ["s1"]
+    odp["/emails/s1"] = {"id": "s1", "to": ["wyslany.lead@x.pl"], "from": f"contact@{FX_DOM}",
+                         "subject": "Your account", "html": "<p>x</p>", "last_event": "opened"}
+    m = client.get("/api/admin/mail/sent/s1", headers=ADMIN).json()
+    assert m["brand"] == "fx" and m["last_event"] == "opened" and m["lead_id"] == lid
+
+
+def test_panel_ma_received_sent_z_resenda_i_przelacznik_marki():
     kod = client.get("/static/js/admin-panel.js").text
-    assert "function renderInbox()" in kod and "if(window._mailBox==='in')return renderInbox();" in kod
+    assert "function renderMailInbox()" in kod and "if(window._mailBox==='in')return renderMailInbox();" in kod
+    assert "'/api/admin/mail/inbox':'/api/admin/mail/sent'" in kod
     assert "[['all','All'],['ptf','PTF'],['fx','Forex Passing']]" in kod
     assert "localStorage.setItem('pf_admin_mailbrand'" in kod
     assert '<iframe sandbox=""' in kod                                 # HTML obcego bez skryptów
-    assert "function replyInboxMail()" in kod and "from:m.brand||'ptf'" in kod
+    assert "function replyMailItem()" in kod and "from:m.brand||'ptf'" in kod
     assert "const from0=ctx.from||(l?'fx':'ptf');" in kod
+    # Kopia z dziennika chowana, gdy Resend oddał listę (jeden wiersz na mail).
+    assert "!(rsOk&&m.event==='admin_message_fx')" in kod
+
+
+def test_panel_nie_ma_dwoch_funkcji_o_tej_samej_nazwie():
+    """Funkcje panelu są globalne: druga deklaracja po cichu nadpisuje pierwszą.
+    Tak `loadInbox` dzwonka powiadomień zjadł ładowanie maili odebranych —
+    zakładka Received kręciła się bez końca."""
+    import collections
+    import re
+    kod = client.get("/static/js/admin-panel.js").text
+    nazwy = re.findall(r"^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(", kod, re.M)
+    dubel = [n for n, c in collections.Counter(nazwy).items() if c > 1]
+    assert dubel == [], dubel
