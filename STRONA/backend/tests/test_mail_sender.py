@@ -122,6 +122,10 @@ def test_klucz_resend_kieruje_lead_mail_do_resenda(resend):
     (url, naglowki, dane), = resend
     assert url == lead_mail.RESEND_URL
     assert naglowki.get("Authorization") == "Bearer re_test_123"
+    # Bez własnego User-Agenta Cloudflare przed Resendem odpowiada 403/1010,
+    # zanim żądanie dotrze do API — pierwszy mail z produkcji padł na tym.
+    assert naglowki.get("User-agent") == lead_mail.RESEND_UA
+    assert "python-urllib" not in naglowki.get("User-agent", "").lower()
     assert dane["from"] == NADAWCA and dane["reply_to"] == NADAWCA
     assert dane["to"] == ["anna@test.pl"] and dane["subject"] == TEMAT
     assert dane["text"].strip() == TEKST
@@ -307,6 +311,96 @@ def test_panel_ma_jedno_okno_maila_z_nadawca_i_compose():
     assert "JSON.stringify({name,subject,body,sender})" in kod
     assert "t.builtin" in kod                           # wbudowane bez Delete
     assert "client-mail-modal" not in kod and "lead-mail-modal" not in kod
+
+
+# --- emoji ----------------------------------------------------------------------------
+
+EMOJI_TEMAT = "Your FREE Challenge Account is Ready! 🚀"
+EMOJI_TEKST = "Hi Anna,\n\nGreat news! 🎉 Your account is live.\n\nhttps://example.test/portal\n\n--\nDesk ✅"
+
+
+def test_emoji_przechodza_przez_resend_bez_zmian(resend):
+    """Temat i treść z emoji (tak wysyła dział od zawsze) mają dojść do Resenda
+    jako te same znaki — w JSON-ie UTF-8, w HTML-u bez podmiany na encje."""
+    assert lead_mail.wyslij("anna@test.pl", EMOJI_TEMAT, EMOJI_TEKST, tylko_nadawca=True)[0]
+    (_, _, dane), = resend
+    assert dane["subject"] == EMOJI_TEMAT
+    assert "🎉" in dane["text"] and "✅" in dane["text"]
+    assert "🎉" in dane["html"] and "✅" in dane["html"]
+
+
+def test_emoji_przechodza_przez_smtp_marki_landingu(monkeypatch):
+    poszly = []
+    monkeypatch.setattr(lead_mail.settings, "resend_api_key", "")
+    monkeypatch.setattr(lead_mail.settings, "smtp_host", "smtp.probe.test")
+    monkeypatch.setattr(lead_mail.settings, "lead_mail_from", NADAWCA)
+    monkeypatch.setattr(lead_mail, "_smtp_transport", poszly.append)
+    assert lead_mail.wyslij("anna@test.pl", EMOJI_TEMAT, EMOJI_TEKST, tylko_nadawca=True)[0]
+    msg = poszly[0]
+    # Nagłówek jest kodowany (RFC 2047) w drodze, ale po odkodowaniu to ten sam temat.
+    assert str(msg["Subject"]) == EMOJI_TEMAT
+    assert "🎉" in msg.get_body(preferencelist=("plain",)).get_content()
+    assert "🎉" in msg.get_body(preferencelist=("html",)).get_content()
+    # Serializacja do bajtów (to, co idzie po drucie) nie może się wywrócić,
+    # a po drugiej stronie temat ma wrócić jako te same znaki. Polityka
+    # `email` koduje TYLKO fragment z emoji, nie cały nagłówek — stąd
+    # sprawdzamy odczyt, a nie kształt zakodowanego słowa.
+    import email
+    from email.policy import default
+    z_drutu = email.message_from_bytes(msg.as_bytes(), policy=default)
+    assert z_drutu["Subject"] == EMOJI_TEMAT
+    assert "🎉" in z_drutu.get_body(preferencelist=("plain",)).get_content()
+
+
+def test_emoji_przechodza_przez_adres_platformy(smtp):
+    tid, email = _trader()
+    r = client.post(f"/api/admin/traders/{tid}/email", headers=ADMIN,
+                    json={"subject": EMOJI_TEMAT, "body": EMOJI_TEKST})
+    assert r.status_code == 200, r.text
+    msg = smtp[0]
+    assert str(msg["Subject"]) == EMOJI_TEMAT
+    assert "🎉" in msg.get_body(preferencelist=("plain",)).get_content()
+    assert "🎉" in msg.get_body(preferencelist=("html",)).get_content()
+    msg.as_bytes()
+
+
+def test_szablon_z_emoji_wraca_z_bazy_bez_zmian():
+    r = client.post("/api/admin/email-templates", headers=ADMIN,
+                    json={"name": "Emoji test 🚀", "subject": EMOJI_TEMAT,
+                          "body": EMOJI_TEKST, "sender": "fx"})
+    assert r.status_code == 200, r.text
+    assert r.json()["subject"] == EMOJI_TEMAT and r.json()["name"] == "Emoji test 🚀"
+    lista = client.get("/api/admin/email-templates", headers=ADMIN).json()
+    assert any(t["subject"] == EMOJI_TEMAT and "🎉" in t["body"] for t in lista)
+    client.delete(f"/api/admin/email-templates/{r.json()['id']}", headers=ADMIN)
+
+
+# --- nadawca z konfiguracji ---------------------------------------------------------------
+
+def _config_z_env(**env):
+    """Świeży import `app.config` w osobnym procesie, z podanym środowiskiem."""
+    import subprocess
+    import sys
+    kod = ("from app.config import get_settings; "
+           "print(get_settings().lead_mail_from)")
+    srodowisko = {**os.environ, "LEAD_MAIL_FROM": "", "RESEND_FROM": "",
+                  "RESEND_API_KEY": "", **env}
+    return subprocess.run([sys.executable, "-c", kod], capture_output=True, text=True,
+                          env=srodowisko, cwd=os.path.dirname(os.path.dirname(__file__))
+                          ).stdout.strip()
+
+
+def test_resend_from_wygrywa_gdy_jest_klucz_resend():
+    """Na Vercelu obok siebie stoją stary LEAD_MAIL_FROM (pod SMTP) i nowy
+    RESEND_FROM (domena zweryfikowana u Resenda). Z kluczem Resend nadawcą ma
+    być ten drugi — inaczej Resend odmówi podpisania cudzej domeny."""
+    assert _config_z_env(LEAD_MAIL_FROM="Old <old@smtp.test>", RESEND_FROM="New <new@resend.test>",
+                         RESEND_API_KEY="re_x") == "New <new@resend.test>"
+    assert _config_z_env(LEAD_MAIL_FROM="Old <old@smtp.test>", RESEND_FROM="New <new@resend.test>") \
+        == "Old <old@smtp.test>"
+    assert _config_z_env(RESEND_FROM="New <new@resend.test>") == "New <new@resend.test>"
+    assert _config_z_env(LEAD_MAIL_FROM="Old <old@smtp.test>", RESEND_API_KEY="re_x") \
+        == "Old <old@smtp.test>"
 
 
 def test_bez_tokenu_admina_ani_kroku(resend, smtp):

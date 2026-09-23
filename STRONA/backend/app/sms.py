@@ -72,7 +72,7 @@ def czego_brakuje() -> list[str]:
         ("SMS_TELEGRAM_URL", settings.sms_telegram_url)) if not wartosc]
 
 
-def tresc(imie: str | None, *, zakwalifikowany: bool) -> str:
+def tresc(imie: str | None, *, zakwalifikowany: bool, free: bool = False) -> str:
     """Jedyne miejsce z treścią SMS-a — woła to i przycisk w panelu, i klik
     w Telegramie. Rozjazd tych dwóch ścieżek znaczyłby, że ten sam człowiek
     dostaje inną wiadomość zależnie od tego, gdzie akurat kliknął dział.
@@ -93,7 +93,9 @@ def tresc(imie: str | None, *, zakwalifikowany: bool) -> str:
        i przestaje dowozić cokolwiek. STOP obsługuje sam Twilio.
     """
     pierwsze = (imie or "").strip().split(" ")[0] or "there"
-    link = settings.sms_telegram_url
+    # `free` = lead z darmowego lejka: inny desk, inny link. Decyzja siedzi w
+    # `settings.telegram_url_desku`, żeby SMS i mail nie mogły się rozjechać.
+    link = settings.telegram_url_desku(free)
     if zakwalifikowany:
         return (f"Hi {pierwsze}, Forex Passing desk here - your application went "
                 f"through. Next step is Telegram: {link} Reply STOP to opt out.")

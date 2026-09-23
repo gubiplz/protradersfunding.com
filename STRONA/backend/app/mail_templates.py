@@ -117,7 +117,7 @@ WBUDOWANE: list[tuple[str, str, str, str, str]] = [
      "The login details for the trading platform come in a separate e-mail "
      "from the platform. Check the spam folder if you do not see it.\n\n"
      "Questions go to the desk on Telegram:\n\n"
-     "{telegram_url}\n\n"
+     "{free_telegram_url}\n\n"
      "--\nForex Passing\n"
      "You are getting this because you applied on our site."),
 
@@ -204,7 +204,10 @@ def _wartosci() -> dict[str, str]:
     baza = (settings.app_base_url or "").rstrip("/")
     return {
         "{portal_url}": f"{baza}/portal" if baza else "",
-        "{telegram_url}": settings.sms_telegram_url or "",
+        "{telegram_url}": settings.telegram_url_desku(False),
+        # Desk darmowego lejka — inne konto niż płatny; szablon o darmowym
+        # koncie ma prowadzić tam, gdzie ten człowiek i tak już pisał.
+        "{free_telegram_url}": settings.telegram_url_desku(True),
         "{support_email}": settings.support_email or "",
     }
 

@@ -136,7 +136,7 @@ def adres(surowy: str | None) -> str | None:
     return tekst if _ADRES.match(tekst) else None
 
 
-def _link_do_dzialu(imie: str | None) -> str:
+def _link_do_dzialu(imie: str | None, *, free: bool = False) -> str:
     """Adres działu z pierwszą wiadomością już wpisaną w pole tekstowe.
 
     Tylko dla ZAKWALIFIKOWANEGO. Telegram czyta `?text=` także dla zwykłego
@@ -156,11 +156,14 @@ def _link_do_dzialu(imie: str | None) -> str:
     kto = " ".join((imie or "").split())
     przedstawienie = f"This is {kto}. " if kto else ""
     wiadomosc = f"Hi. {przedstawienie}My application came back a yes."
-    link = settings.sms_telegram_url
+    # Darmowy lejek ma swój desk (inne konto, inny bot) — patrz
+    # `settings.telegram_url_desku`; SMS bierze ten sam link tą samą drogą.
+    link = settings.telegram_url_desku(free)
     return f"{link}{'&' if '?' in link else '?'}text={quote(wiadomosc)}"
 
 
-def tresc(imie: str | None, *, zakwalifikowany: bool) -> tuple[str, str]:
+def tresc(imie: str | None, *, zakwalifikowany: bool,
+          free: bool = False) -> tuple[str, str]:
     """`(temat, treść)`. Jedyne miejsce z tym tekstem — woła je i przycisk
     w panelu, i podgląd, który panel pokazuje PRZED wysyłką.
 
@@ -205,7 +208,7 @@ def tresc(imie: str | None, *, zakwalifikowany: bool) -> tuple[str, str]:
             f"to prepare, no documents to dig up.\n\n"
             f"We do it on Telegram because that is where our desk works, and it is "
             f"the difference between starting this week and waiting on e-mail:\n\n"
-            f"{_link_do_dzialu(imie)}\n\n"
+            f"{_link_do_dzialu(imie, free=free)}\n\n"
             f"The first message is already written for you. Send it as it is — "
             f"we pick up the rest from your application.\n\n"
             f"One thing worth knowing: we work through applications in batches, and "
@@ -328,6 +331,7 @@ def _smtp_transport(msg: EmailMessage) -> None:
 
 
 RESEND_URL = "https://api.resend.com/emails"
+RESEND_UA = "propfunding-mailer/1.0 (+stdlib urllib)"
 
 
 def _resend_transport(msg: EmailMessage) -> None:
@@ -346,16 +350,30 @@ def _resend_transport(msg: EmailMessage) -> None:
             "html": html.get_content() if html else None}
     if msg["Reply-To"]:
         dane["reply_to"] = msg["Reply-To"]
+    # `User-Agent` NIE jest kosmetyką: api.resend.com stoi za Cloudflarem, a ten
+    # odrzuca domyślne `Python-urllib/3.x` jako sygnaturę bota — 403 z ciałem
+    # „error code: 1010", zanim żądanie w ogóle dotrze do Resenda. Zmierzone
+    # 2026-09-23: ten sam POST bez nagłówka = 1010, z nagłówkiem = odpowiedź
+    # Resenda. Pierwszy mail z produkcji padł dokładnie na tym.
     req = urllib.request.Request(
         RESEND_URL, data=json.dumps(dane).encode("utf-8"),
         headers={"Authorization": f"Bearer {settings.resend_api_key}",
-                 "Content-Type": "application/json"}, method="POST")
+                 "Content-Type": "application/json",
+                 "Accept": "application/json",
+                 "User-Agent": RESEND_UA}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT_SEK) as odp:
             odp.read()
     except urllib.error.HTTPError as e:
         cialo = e.read().decode("utf-8", "replace")[:300]
-        raise RuntimeError(f"resend {e.code}: {cialo}") from None
+        # Resend opisuje odmowę w JSON-ie (`message`: „domain is not verified",
+        # „API key is invalid") — to zdanie ma zobaczyć człowiek w panelu, nie
+        # surowy słownik.
+        try:
+            powod = json.loads(cialo).get("message") or cialo
+        except ValueError:
+            powod = cialo
+        raise RuntimeError(f"resend {e.code}: {powod}") from None
 
 
 def _transport():

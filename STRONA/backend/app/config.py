@@ -298,6 +298,16 @@ class Settings:
     # Adres w zmiennej, nie w kodzie: to handle marki partnerskiej, a repo jest
     # publiczne. Puste = SMS-y nie wychodzą (most donikąd jest gorszy niż brak).
     sms_telegram_url: str = os.getenv("SMS_TELEGRAM_URL", "").strip()
+    # Desk DARMOWEGO lejka (/freeaccount) — inne konto niż płatny desk, bo
+    # obsługują je inni ludzie i inny bot. Lead z `source=free*` dostaje ten
+    # link w SMS-ie, w automacie mailowym i w szablonie „Free account is
+    # ready"; puste = spada na `SMS_TELEGRAM_URL`, żeby brak zmiennej nie
+    # zostawił darmowego leada bez żadnego adresu.
+    free_telegram_url: str = os.getenv("FREE_TELEGRAM_URL", "").strip()
+
+    def telegram_url_desku(self, free: bool) -> str:
+        """Link do desku właściwego dla lejka — jedno miejsce tej decyzji."""
+        return (self.free_telegram_url or self.sms_telegram_url) if free else self.sms_telegram_url
 
     # --- Mail do leada ---
     # Trzeci kanał, po Telegramie i SMS-ie, i jedyny, który ZAWSZE ma dokąd
@@ -308,17 +318,21 @@ class Settings:
     # `MAIL_FROM`. Lead nie zna tej firmy; mail z jej domeny jest dla niego
     # mailem od obcego i tak zostanie potraktowany. Puste = panel nie proponuje
     # wysyłki, zamiast dawać przycisk, który wysyła spod złego szyldu.
-    # `RESEND_FROM` to ta sama zmienna pod nazwą, jaką nosi u dostawcy: nadawca
-    # spod marki landingu jest jeden, niezależnie od drogi (Resend czy SMTP).
-    # `LEAD_MAIL_FROM` ma pierwszeństwo, bo była pierwsza.
-    lead_mail_from: str = (os.getenv("LEAD_MAIL_FROM", "").strip()
-                           or os.getenv("RESEND_FROM", "").strip())
     # Klucz API Resend dla maili spod marki landingu. Ustawiony = `lead_mail`
     # wysyła przez HTTPS Resenda zamiast SMTP; pusty = SMTP jak dotąd. Osobny
     # dostawca, bo domena tej marki jest zweryfikowana TAM, nie u dostawcy
     # SMTP platformy — mail spod niej przez cudzy SMTP dostaje etykietę
     # „via" albo ląduje w spamie.
     resend_api_key: str = os.getenv("RESEND_API_KEY", "").strip()
+    # Nadawca spod marki landingu. Przy ustawionym kluczu Resend WYGRYWA
+    # `RESEND_FROM`: domena nadawcy musi być zweryfikowana u Resenda, a stary
+    # `LEAD_MAIL_FROM` był dobierany pod SMTP i może wskazywać skrzynkę, której
+    # Resend nie podpisze. Bez klucza zostaje `LEAD_MAIL_FROM`, a `RESEND_FROM`
+    # jest tylko zapasem — jedna zmienna wystarcza w obu konfiguracjach.
+    lead_mail_from: str = (
+        (os.getenv("RESEND_FROM", "").strip() if os.getenv("RESEND_API_KEY", "").strip() else "")
+        or os.getenv("LEAD_MAIL_FROM", "").strip()
+        or os.getenv("RESEND_FROM", "").strip())
     # Logo do nagłówka tego maila. MUSI stać na domenie marki z landingu:
     # obrazek zaciągany z domeny tej firmy zdradza w kliencie pocztowym
     # dokładnie to, czego pilnuje `lead_mail_from`. W zmiennej z tego samego
