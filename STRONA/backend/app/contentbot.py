@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import html
 import re
+from urllib.parse import quote
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func
@@ -60,6 +61,74 @@ def dlugosc_widoczna(tekst: str) -> int:
     w podpisie, w którym mieściły się z zapasem.
     """
     return len(html.unescape(_ZNACZNIKI_RX.sub("", tekst or "")))
+
+
+# --------------------------------------------------------------------------- #
+#  Linki wezwania do działania                                                 #
+# --------------------------------------------------------------------------- #
+# Na starym kanale „Click here to send us a message", „Get started" i wzmianka
+# o adminie były LINKAMI do jego DM-a z gotową wiadomością. Archiwizator
+# zapisał sam tekst, więc po przenosinach te słowa przestały być klikalne.
+# Linki dokładamy przy WYSYŁCE, nie w bazie: edycja treści kasuje dowód
+# `archive:` (patrz `waliduj`), a treść w kolejce ma zostać tą z archiwum.
+# Ten sam algorytm jest w podglądzie (`tgLinkuj` w tg-preview.js).
+PROSBA_DM = ("I am ready to get funded and start earning payouts! "
+             "Please send me more information")
+# Linia, która w CAŁOŚCI jest wezwaniem, np. „👉 Get started". Ten sam zwrot
+# w środku zdania („Message @x to get started!") zostaje tekstem — tam
+# klikalna jest wzmianka.
+_CTA_RX = re.compile(
+    r"^(?P<przed>\s*(?:<[^>]+>)*[^\w<\n]*)"
+    r"(?P<cta>click here\b[^<\n]*?|get started|send us a message|message us|contact us)"
+    r"(?P<po>[!.]?(?:<[^>]+>)*\s*)$", re.I)
+_ADMIN_RX = re.compile(r"(?<![\w@/])@(\w*admin\w*)\b", re.I)
+_LINK_RX = re.compile(r"(<a\b[^>]*>.*?</a>)", re.I | re.S)
+
+
+def _z_prosba(adres: str) -> str:
+    """t.me/<uchwyt> dostaje gotową wiadomość, inne adresy zostają jak są."""
+    if not re.match(r"^https?://t\.me/\w+/?$", adres or "", re.I):
+        return adres
+    return adres.rstrip("/") + "?text=" + quote(PROSBA_DM, safe="")
+
+
+def adres_cta(tekst: str, zapas: str = "") -> str:
+    """Dokąd prowadzi wezwanie: admin wymieniony w poście, inaczej `zapas`.
+
+    Najpierw wzmianka z treści, bo post, który mówi „Message @x", ma
+    prowadzić do @x, nawet gdy desk w ustawieniach jest inny.
+    """
+    wzmianka = _ADMIN_RX.search(_ZNACZNIKI_RX.sub(" ", tekst or ""))
+    if wzmianka:
+        return _z_prosba(f"https://t.me/{wzmianka.group(1)}")
+    return _z_prosba((zapas or "").strip())
+
+
+def dolinkuj(tekst: str, zapas: str | None = None) -> str:
+    """Treść z linkami na wezwaniach i wzmiankach admina. Idempotentne.
+
+    Tekst już będący linkiem zostaje nietknięty, więc post napisany ręcznie
+    z własnym `<a href>` wychodzi dokładnie tak, jak go napisano.
+    """
+    tekst = tekst or ""
+    adres = adres_cta(tekst, settings.sms_telegram_url if zapas is None else zapas)
+    if not adres:
+        return tekst
+    href = html.escape(adres, quote=True)
+
+    linie = []
+    for linia in tekst.split("\n"):
+        m = None if "<a" in linia.lower() else _CTA_RX.match(linia)
+        if m:
+            linia = (f'{m.group("przed")}<a href="{href}">{m.group("cta")}</a>'
+                     f'{m.group("po")}')
+        linie.append(linia)
+
+    kawalki = _LINK_RX.split("\n".join(linie))
+    for i in range(0, len(kawalki), 2):   # nieparzyste = istniejące <a>…</a>
+        kawalki[i] = _ADMIN_RX.sub(lambda w: f'<a href="{href}">{w.group(0)}</a>',
+                                   kawalki[i])
+    return "".join(kawalki)
 
 
 LIMIT_PODPISU = 1024
@@ -290,7 +359,7 @@ def opublikuj(session, post: ChannelPost, *, transport_shot=None,
         session.commit()
         return {"posted": False, "reason": powod}
 
-    ok, powod, dane = telegram.send_content(czat, post.body, png=png,
+    ok, powod, dane = telegram.send_content(czat, dolinkuj(post.body), png=png,
                                             photo_url=adres_foto,
                                             video_url=adres_klipu,
                                             transport=transport_tg)

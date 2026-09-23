@@ -13,11 +13,12 @@ try {
   // Deklaracje z klasycznego skryptu laduja w kontekscie tylko jako funkcje;
   // stale `const` trzeba wystawic jawnie, dlatego dopisujemy eksport.
   vm.runInContext(readFileSync(sciezka, 'utf8')
-    + '\n;globalThis.__tg={tgHtml,tgGrafika,tgLimit,tgMakieta};', kontekst,
+    + '\n;globalThis.__tg={tgHtml,tgGrafika,tgLimit,tgMakieta,tgLinkuj};', kontekst,
   { filename: 'tg-preview.js' });
 } catch (e) {
   console.error('MODUL_NIE_WSTAL: ' + e.message);
   process.exit(3);
 }
-const wyniki = JSON.parse(zadaniaJson).map(z => kontekst.__tg[z.fn](z.arg));
+const wyniki = JSON.parse(zadaniaJson).map(z =>
+  z.args ? kontekst.__tg[z.fn](...z.args) : kontekst.__tg[z.fn](z.arg));
 process.stdout.write(JSON.stringify(wyniki));
