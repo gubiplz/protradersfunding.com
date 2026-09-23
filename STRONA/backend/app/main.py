@@ -2362,21 +2362,82 @@ def my_achievements_claim(payload: ClaimIn, trader: Trader = Depends(auth.curren
 #  Centrum powiadomień (dzwonek w portalu); endpointy push — sekcja
 #  „Web push (PWA)" niżej                                                     #
 # --------------------------------------------------------------------------- #
+# Zakładki dzwonka w portalu. Kategoria idzie za przełącznikiem z Settings
+# (`notify._PREF_BY_EVENT`), z jednym wyjątkiem: recap i przegląd tygodnia
+# są pod „marketingiem" tylko dlatego, że da się je wyłączyć razem z ofertami
+# — treścią to rozmowa o własnym handlu, więc w dzwonku stoją pod Trading.
+_KATEGORIA_Z_PREFERENCJI = {"notify_trading": "trading", "notify_payouts": "payouts",
+                            "notify_updates": "updates", "notify_marketing": "updates"}
+_KATEGORIA_WYJATKI = {"daily_recap": "trading", "weekly_review": "trading",
+                      "upsell_scale": "trading"}
+
+
+def _kategoria_powiadomienia(event: str) -> str:
+    if event in _KATEGORIA_WYJATKI:
+        return _KATEGORIA_WYJATKI[event]
+    return _KATEGORIA_Z_PREFERENCJI.get(notify._PREF_BY_EVENT.get(event, ""), "updates")
+
+
+def _moje_powiadomienia(session, trader_id: int):
+    """Wiersze dzwonka TRADERA. Alerty działu (url `/admin…`) leżą w tej samej
+    tabeli pod kontem admina — w portalu nie mają czego szukać."""
+    return session.query(Notification).filter(
+        Notification.trader_id == trader_id,
+        or_(Notification.url.is_(None), ~Notification.url.like("/admin%")))
+
+
 @app.get("/api/me/notifications")
 def my_notifications(limit: int = 20, trader: Trader = Depends(auth.current_trader)):
     session = SessionLocal()
     try:
         limit = max(1, min(50, limit))
-        rows = (session.query(Notification).filter(Notification.trader_id == trader.id)
-                .order_by(Notification.id.desc()).limit(limit).all())
-        unread = (session.query(Notification)
-                  .filter(Notification.trader_id == trader.id,
-                          Notification.read_at.is_(None)).count())
+        rows = _moje_powiadomienia(session, trader.id).order_by(Notification.id.desc()).limit(limit).all()
+        unread = _moje_powiadomienia(session, trader.id).filter(Notification.read_at.is_(None)).count()
         return {"unread": unread,
-                "items": [{"id": n.id, "event": n.event, "title": n.title, "body": n.body,
+                "items": [{"id": n.id, "event": n.event, "cat": _kategoria_powiadomienia(n.event),
+                           "title": n.title, "body": n.body,
                            "url": n.url, "read": n.read_at is not None,
                            "created_at": n.created_at.isoformat() if n.created_at else None}
                           for n in rows]}
+    finally:
+        session.close()
+
+
+class NotificationIdsIn(BaseModel):
+    ids: list[int] = Field(default_factory=list, max_length=200)
+    read: bool = True
+
+
+@app.post("/api/me/notifications/mark")
+def notifications_mark(payload: NotificationIdsIn, trader: Trader = Depends(auth.current_trader)):
+    """Przeczytane / nieprzeczytane dla wybranych pozycji (wiersz, zaznaczenie w Edit)."""
+    if not payload.ids:
+        return {"ok": True, "changed": 0}
+    session = SessionLocal()
+    try:
+        kiedy = datetime.now(timezone.utc).replace(tzinfo=None) if payload.read else None
+        ile = (_moje_powiadomienia(session, trader.id)
+               .filter(Notification.id.in_(payload.ids))
+               .update({Notification.read_at: kiedy}, synchronize_session=False))
+        session.commit()
+        return {"ok": True, "changed": ile}
+    finally:
+        session.close()
+
+
+@app.post("/api/me/notifications/delete")
+def notifications_delete(payload: NotificationIdsIn, trader: Trader = Depends(auth.current_trader)):
+    """Usunięcie pozycji z dzwonka. Panel wysyła to dopiero po 5 s okna „Undo",
+    więc cofnięcie nie musi niczego odtwarzać. Tylko własne wiersze tradera."""
+    if not payload.ids:
+        return {"ok": True, "deleted": 0}
+    session = SessionLocal()
+    try:
+        ile = (_moje_powiadomienia(session, trader.id)
+               .filter(Notification.id.in_(payload.ids))
+               .delete(synchronize_session=False))
+        session.commit()
+        return {"ok": True, "deleted": ile}
     finally:
         session.close()
 
@@ -5935,7 +5996,8 @@ def admin_inbox(authorization: str | None = Header(default=None)):
 
     Agregacja z istniejących tabel (bez osobnej tabeli powiadomień admina).
     Każda pozycja ma stabilne `id`, `kind` (rodzaj zdarzenia — panel dobiera
-    po nim ikonę) i `read`. Przeczytane i usunięte trzyma `admin_inbox_marks`,
+    po nim ikonę), `ref` (id obiektu, który otwiera klik: bilet, wniosek,
+    zamówienie, trader z KYC) i `read`. Przeczytane i usunięte trzyma `admin_inbox_marks`,
     per admin — usunięta pozycja nie wraca przy następnym odświeżeniu."""
     kto = _admin_id(authorization)
     session = SessionLocal()
@@ -5960,24 +6022,24 @@ def admin_inbox(authorization: str | None = Header(default=None)):
 
         items = []
         for o in zamowienia:
-            items.append({"id": f"order:{o.id}", "kind": "order",
+            items.append({"id": f"order:{o.id}", "kind": "order", "ref": o.id,
                           "type": "order", "ts": (o.paid_at or o.created_at).isoformat(),
                           "title": f"Order #{o.id} · {o.product_key} · {o.status}",
                           "body": email_of(o.trader_id), "view": "orders"})
         for t in kyc:
             if t.kyc_submitted_at:
                 items.append({"id": f"kyc:{t.id}:{int(t.kyc_submitted_at.timestamp())}",
-                              "kind": "kyc",
+                              "kind": "kyc", "ref": t.id,
                               "type": "kyc", "ts": t.kyc_submitted_at.isoformat(),
                               "title": f"KYC pending · {t.kyc_fullname or t.email}",
                               "body": t.email, "view": "kyc"})
         for pr in wnioski:
-            items.append({"id": f"payout:{pr.id}", "kind": "payout",
+            items.append({"id": f"payout:{pr.id}", "kind": "payout", "ref": pr.id,
                           "type": "payout", "ts": pr.ts.isoformat(),
                           "title": f"Payout request ${pr.trader_share:,.2f}",
                           "body": email_of(pr.trader_id), "view": "payouts"})
         for m, t in bilety:
-            items.append({"id": f"ticket:{m.id}", "kind": "ticket",
+            items.append({"id": f"ticket:{m.id}", "kind": "ticket", "ref": t.id,
                           "type": "ticket", "ts": m.ts.isoformat(),
                           "title": f"Ticket #{t.id}: {t.subject}",
                           "body": email_of(t.trader_id), "view": "tickets"})

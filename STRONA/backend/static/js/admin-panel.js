@@ -5915,59 +5915,16 @@ async function submitCreate(){
    Lista pod dzwonkiem to agregat kolejek z /api/admin/inbox (zamówienia, KYC,
    wnioski, bilety, zdarzenia leadów). Przeczytane i usunięte trzyma serwer,
    per admin (admin_inbox_marks), więc telefon i laptop widzą to samo.
+   Wspólne klocki (ikony, gesty, push, czas) — static/js/np-kit.js.
 
-   Panel ma WŁASNY element (#np), a nie ogólną szufladę `over`: przełączenie
-   zakładki przerysowuje tylko listę. Wcześniej każdy klik w Leads/Free/Prop
-   budował szufladę od zera razem z kartą pushu, która startowała z napisem
-   „Enable" i dopiero po odpytaniu service workera wracała do „Disable" — stąd
-   przeskakiwanie przy zmianie kategorii. Stan pushu żyje teraz w jednym
-   miejscu (PUSH) i jest tylko MALOWANY na każdym przełączniku, który go pokazuje. */
+   Klik w pozycję prowadzi PROSTO do rzeczy (bilet, wniosek o wypłatę, karta
+   leada…), bez ekranu pośredniego. Przeczytane/usuń — tylko gestem
+   przesunięcia (i hurtem w Edit), żeby wiersz nie był zaśmiecony przyciskami. */
 let INBOX=[];
-const NP={tab:'all',open:false,nav:'list',sel:null,edit:false,picked:new Set(),
-  expanded:new Set(),fresh:new Set(),hiding:new Set(),loaded:false,known:null,sw:null,dirty:false};
+const NP={tab:'all',open:false,nav:'list',edit:false,picked:new Set(),
+  expanded:new Set(),fresh:new Set(),hiding:new Set(),loaded:false,known:null,dirty:false,ctxRow:null};
 try{const t=localStorage.getItem('pf_admin_inbox_tab');if(['all','leads','free','prop'].includes(t))NP.tab=t}catch(_){}
 const NP_TABS=[['all','All'],['leads','Leads'],['free','Free'],['prop','Prop']];
-const npQ=(s,r=document)=>[...r.querySelectorAll(s)];
-const npRM=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
-const npWide=()=>matchMedia('(min-width:1400px)').matches;
-const npNarrow=()=>matchMedia('(max-width:640px)').matches;
-const NP_P={
-  bell:'<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
-  gear:'<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
-  x:'<path d="M18 6 6 18M6 6l12 12"/>',
-  chevL:'<path d="m15 18-6-6 6-6"/>',chevR:'<path d="m9 18 6-6-6-6"/>',chevD:'<path d="m6 9 6 6 6-6"/>',
-  check:'<path d="M20 6 9 17l-5-5"/>',
-  dot:'<circle cx="12" cy="12" r="4.5" fill="currentColor" stroke="none"/>',
-  trash:'<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
-  userPlus:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>',
-  userCheck:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m16 11 2 2 4-4"/>',
-  undo:'<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
-  arrows:'<path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>',
-  send:'<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
-  alarm:'<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3 2 6M22 6l-3-3"/>',
-  bag:'<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>',
-  shield:'<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>',
-  wallet:'<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>',
-  chat:'<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>',
-  octagon:'<path d="M7.86 2h8.28L22 7.86v8.28L16.14 22H7.86L2 16.14V7.86z"/><path d="M12 8v4M12 16h.01"/>',
-  megaphone:'<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
-  note:'<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
-  trend:'<path d="m22 7-8.5 8.5-5-5L2 17"/><path d="M16 7h6v6"/>',
-  gift:'<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C10 3 12 8 12 8s2-5 4.5-5a2.5 2.5 0 0 1 0 5"/>',
-  truck:'<path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/>',
-  sms:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
-  mail:'<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
-  mailOpen:'<path d="M21.2 8.4c.5.38.8.97.8 1.6v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V10a2 2 0 0 1 .8-1.6l8-6a2 2 0 0 1 2.4 0l8 6Z"/><path d="m22 10-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 10"/>',
-  phone:'<rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/>',
-  laptop:'<path d="M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16"/>',
-  share:'<path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="m16 6-4-4-4 4"/><path d="M12 2v13"/>',
-  plusSq:'<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M8 12h8M12 8v8"/>',
-  layers:'<path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/>',
-  eye:'<path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/>',
-  bellOff:'<path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5"/><path d="M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="m2 2 20 20"/>',
-  checkCircle:'<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
-};
-const npI=(n,sw=1.9)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NP_P[n]||''}</svg>`;
 
 /* Rodzaj zdarzenia → ikona, kolor, podpis. Wcześniej każde zdarzenie leada
    miało ten sam trójkąt ostrzeżenia, bo panel nie znał rodzaju. */
@@ -5989,10 +5946,9 @@ function npKind(i){
 const npCat=i=>i.type==='lead'?(i.desk==='free'?'free':'leads'):'prop';
 const npWho=i=>i.type==='lead'?(i.who||i.title):i.title;
 const npCap=s=>s?s.charAt(0).toUpperCase()+s.slice(1):s;
-/* `child` = wiersz w rozwiniętym stosie albo w historii: rodzaj stoi już
-   w pogrubionym tytule, więc tekst nie może go powtarzać („Released /
-   Released"). Autora pokazujemy tylko, gdy to człowiek (adres z @), a nie
-   landing czy cron. */
+/* `child` = wiersz w rozwiniętym stosie: rodzaj stoi już w pogrubionym
+   tytule, więc tekst go nie powtarza („Released / Released"). Autora
+   pokazujemy tylko, gdy to człowiek (adres z @), a nie landing czy cron. */
 function npText(i,child){
   const b=String(i.body||'').trim();
   if(i.type!=='lead')return b;
@@ -6004,21 +5960,10 @@ function npText(i,child){
   if(child)return npCap(szczeg)||(kto?`By ${kto}`:lab);
   return szczeg?`${lab} · ${szczeg}`:lab;
 }
-const npByTs=(a,b)=>a.ts<b.ts?1:a.ts>b.ts?-1:0;
-const npDay=iso=>dutc(iso).toLocaleDateString('en-CA',{timeZone:'Europe/Warsaw'});
-function npDaysAgo(iso){return Math.round((Date.parse(npDay(new Date().toISOString()))-Date.parse(npDay(iso)))/864e5)}
-function npRel(iso){
-  const m=(Date.now()-dutc(iso).getTime())/6e4,d=npDaysAgo(iso);
-  if(m<1)return 'now';
-  if(d<=0)return m<60?Math.floor(m)+'m':Math.floor(m/60)+'h';
-  if(d===1)return dutc(iso).toLocaleTimeString('en-GB',{timeZone:'Europe/Warsaw',hour:'2-digit',minute:'2-digit'});
-  return dutc(iso).toLocaleDateString('en-GB',{timeZone:'Europe/Warsaw',day:'numeric',month:'short'});
-}
 const npPref=k=>{const p=ME&&ME.ui_prefs&&ME.ui_prefs.inbox;return !(p&&p[k]===false)};
 const npVisible=()=>INBOX.filter(i=>!NP.hiding.has(i.id)&&(NP.tab==='all'||i.cat===NP.tab));
 const npUnread=tab=>INBOX.filter(i=>!i.read&&!NP.hiding.has(i.id)&&(tab==='all'||i.cat===tab)).length;
 const npItem=id=>INBOX.find(i=>i.id===id);
-const npIds=row=>row?(row.dataset.ids?row.dataset.ids.split(','):[row.dataset.id]):[];
 
 async function loadInbox(){
   try{
@@ -6029,19 +5974,16 @@ async function loadInbox(){
     INBOX=items;NP.loaded=true;
     npBadge();
     if(NP.open){
-      if(NP.sw&&NP.sw.on)NP.dirty=true;else npRenderList();
+      if(npSwiping())NP.dirty=true;else npRenderList();
       npSeg(true);
-      if(NP.sel&&!npItem(NP.sel)){NP.sel=null;npRenderDetail()}
     }
   }catch(_){}
 }
 function npBadge(){
   const n=npUnread('all'),dot=$('bell-dot');
   if(!dot)return;
-  const byl=+dot.dataset.n||0;
-  dot.dataset.n=n;
-  if(n){dot.textContent=n>9?'9+':n;dot.style.display='block';
-    if(n>byl&&byl){dot.classList.remove('np-bump');void dot.offsetWidth;dot.classList.add('np-bump')}}
+  npBumpNum(dot,n);
+  if(n){dot.textContent=n>9?'9+':n;dot.style.display='block'}
   else dot.style.display='none';
 }
 
@@ -6074,7 +6016,6 @@ function npEnsure(){
           <button type="button" class="np-tbtn danger" data-np="bulkdel">Delete</button>
         </div>
       </div>
-      <div class="np-pg np-detail" id="np-detail"></div>
       <div class="np-pg np-settings" id="np-settings" inert></div>
     </div>
   </section>
@@ -6083,8 +6024,8 @@ function npEnsure(){
   seg.style.setProperty('--n',NP_TABS.length);
   seg.innerHTML='<span class="np-pill"></span>'+NP_TABS.map(([k,l])=>
     `<button type="button" role="tab" data-np-tab="${k}"><span>${l}</span><b class="np-n zero"></b></button>`).join('');
-  $('np-scroll').addEventListener('scroll',()=>{npCloseSwipes();npCtxClose()},{passive:true});
-  npPaintPush();npSeg(false);npRenderDetail();npNav('list');
+  $('np-scroll').addEventListener('scroll',()=>npCtxClose(),{passive:true});
+  npPaintPush();npSeg(false);npNav('list');
 }
 
 function openInbox(){npSetOpen(!NP.open)}
@@ -6102,20 +6043,20 @@ function npSetOpen(open){
     loadInbox();
   }else{
     npCtxClose();if(NP.edit)npSetEdit(false);npObserve(false);
+    if(NP.nav!=='list')setTimeout(()=>{if(!NP.open)npNav('list')},400);
   }
 }
 
 function npSeg(bump){
   const seg=$('np-seg');
   if(!seg)return;
-  const i=Math.max(0,NP_TABS.findIndex(t=>t[0]===NP.tab));
-  seg.style.setProperty('--i',i);
+  seg.style.setProperty('--i',Math.max(0,NP_TABS.findIndex(t=>t[0]===NP.tab)));
   npQ('button',seg).forEach(b=>{
     const on=b.dataset.npTab===NP.tab;
     b.setAttribute('aria-selected',String(on));b.tabIndex=on?0:-1;
-    const el=b.querySelector('.np-n'),n=b.dataset.npTab==='all'?0:npUnread(b.dataset.npTab),byl=+el.dataset.n||0;
-    el.textContent=n>99?'99+':n;el.dataset.n=n;el.classList.toggle('zero',!n);
-    if(bump&&n>byl){el.classList.remove('np-bump');void el.offsetWidth;el.classList.add('np-bump')}
+    const el=b.querySelector('.np-n'),n=b.dataset.npTab==='all'?0:npUnread(b.dataset.npTab);
+    el.textContent=n>99?'99+':n;el.classList.toggle('zero',!n);
+    if(bump)npBumpNum(el,n);else el.dataset.n=n;
   });
   const all=npUnread('all'),sub=$('np-sub');
   if(sub)sub.textContent=all?`${all} unread`:'All caught up';
@@ -6152,21 +6093,17 @@ function npBlocks(items){
 const npSwipeBg=()=>`<div class="np-ra" aria-hidden="true">
   <button type="button" class="np-ra-l" data-np-act="read" tabindex="-1"><span class="if-unread">${npI('check',2.4)}</span><span class="if-read">${npI('dot')}</span><span class="if-unread">Read</span><span class="if-read">Unread</span></button>
   <button type="button" class="np-ra-r" data-np-act="del" tabindex="-1"><span>Delete</span>${npI('trash')}</button></div>`;
-const npHov=()=>`<div class="np-hov">
-  <button type="button" class="np-hb" data-np-act="read" aria-label="Toggle read"><span class="if-unread">${npI('check',2.4)}</span><span class="if-read">${npI('dot')}</span></button>
-  <button type="button" class="np-hb del" data-np-act="del" aria-label="Delete">${npI('trash')}</button></div>`;
 function npRow(i,o={}){
   const k=NP_KIND[npKind(i)];
   const glowny=o.child?k[2]:npWho(i);
   const chip=!o.child&&i.cat==='free'?'<span class="np-chip">Free</span>':'';
   return `<div class="np-row${i.read?'':' unread'}${NP.picked.has(i.id)?' picked':''}" data-id="${esc(i.id)}" role="listitem" style="--d:${o.d||0}">
     ${npSwipeBg()}
-    <div class="np-rb${o.sep?' np-sepd':''}${NP.sel===i.id?' on':''}" tabindex="0" data-np-open="${esc(i.id)}">
+    <div class="np-rb${o.sep?' np-sepd':''}" tabindex="0" data-np-open="${esc(i.id)}">
       <span class="np-ck" aria-hidden="true">${npI('check',3)}</span><span class="np-dot" aria-hidden="true"></span>
       <span class="np-ico" style="--k:var(--${k[1]})">${npI(k[0])}</span>
       <div class="np-txt"><div class="np-l1"><span class="np-who">${esc(glowny)}</span>${chip}<time data-ts="${esc(i.ts)}">${esc(npRel(i.ts))}</time></div>
         <div class="np-l2">${esc(npText(i,o.child))}</div></div>
-      ${npHov()}
     </div></div>`;
 }
 function npStack(b,sep,dzien){
@@ -6184,7 +6121,6 @@ function npStack(b,sep,dzien){
           <div class="np-l2">${esc(npText(top))}</div>
           <div class="np-l3">Earlier: ${esc(reszta)}</div></div>
         <span class="np-chev">${npI('chevD',2.2)}</span>
-        ${npHov()}
       </div></div>
     <div class="np-kids"><div class="np-kids-in">${b.items.map((i,n)=>npRow(i,{child:true,sep:true,d:n})).join('')}</div></div>
   </div>`;
@@ -6205,7 +6141,7 @@ function npRenderList(o={}){
   }else{
     const dni=[];let cur=null;
     for(const i of items){
-      const d=npDaysAgo(i.ts),lab=d<=0?'Today':d===1?'Yesterday':'Earlier';
+      const lab=npDayLabel(i.ts);
       if(!cur||cur.lab!==lab)dni.push(cur={lab,items:[]});
       cur.items.push(i);
     }
@@ -6225,25 +6161,10 @@ function npRenderList(o={}){
   NP.fresh.clear();
   npObserve(true);
 }
-function npGrow(el){
-  if(npRM())return;
-  const h=el.offsetHeight;
-  el.style.height='0px';el.style.opacity='0';void el.offsetHeight;
-  el.style.transition='height .5s var(--np-spring),opacity .3s var(--np-ease)';
-  el.style.height=h+'px';el.style.opacity='1';
-  el.classList.add('pop');
-  setTimeout(()=>{el.style.height=el.style.opacity=el.style.transition=''},650);
-}
-function npCollapse(el){
-  if(npRM()){el.style.display='none';return}
-  el.style.height=el.offsetHeight+'px';void el.offsetHeight;el.classList.add('gone');
-}
 function npPaintRead(){
   npQ('#np-items .np-row[data-id]').forEach(r=>{const i=npItem(r.dataset.id);r.classList.toggle('unread',!!i&&!i.read)});
   npQ('#np-items .np-row[data-ids]').forEach(r=>r.classList.toggle('unread',npIds(r).some(id=>{const i=npItem(id);return i&&!i.read})));
-  if(NP.sel)npRenderDetail();
 }
-
 /* Przeczytane: od razu w panelu, zapis na serwer w tle. */
 function npMark(ids,read=true){
   const zm=INBOX.filter(i=>ids.includes(i.id)&&i.read!==read);
@@ -6265,7 +6186,6 @@ function npDelete(ids){
   els.forEach(npCollapse);
   setTimeout(()=>{
     ids.forEach(id=>{NP.hiding.add(id);NP.picked.delete(id)});
-    if(NP.sel&&set.has(NP.sel)){NP.sel=null;npRenderDetail();if(NP.nav==='detail'&&!npWide())npNav('list')}
     npRenderList();npSeg(false);npBadge();if(NP.edit)npEditbar();
     withUndo(ids.length===1?'Notification deleted':`${ids.length} notifications deleted`,
       ()=>{
@@ -6318,180 +6238,57 @@ function npPick(row){
   npPaintPicked();npEditbar();
 }
 
-/* Nawigacja w panelu: lista → szczegóły / ustawienia (wsuwane z prawej).
-   Od 1400 px szczegóły stoją obok listy jako druga kolumna. */
 function npNav(nav){
   NP.nav=nav;
   const np=$('np');if(!np)return;
-  np.classList.toggle('nav-detail',nav==='detail');
   np.classList.toggle('nav-settings',nav==='settings');
   if(nav==='settings')npRenderSettings();
-  const wide=npWide();
-  $('np-list').inert=nav==='settings'||(!wide&&nav==='detail');
-  $('np-detail').inert=!(nav==='detail'||(wide&&nav!=='settings'));
+  $('np-list').inert=nav==='settings';
   $('np-settings').inert=nav!=='settings';
 }
-function npBack(){
-  if(NP.nav==='detail'&&!npWide()){
-    npNav('list');
-    setTimeout(()=>{if(NP.nav!=='list')return;npQ('#np-items .np-rb.on').forEach(r=>r.classList.remove('on'));NP.sel=null},450);
-    return;
-  }
-  npNav('list');
-}
+const npBack=()=>npNav('list');
+
+/* Klik w pozycję = prosto do rzeczy. Bilet i lead mają własne okno; wniosek o
+   wypłatę, KYC i zamówienie to wiersz na liście — zakładka otwiera się,
+   przewija do NIEGO i podświetla go na chwilę (akcje Approve/Reject są w
+   wierszu, więc „Review payout" to po prostu ten wiersz). */
 function npOpenItem(id){
   const i=npItem(id);if(!i)return;
-  NP.sel=id;
-  npQ('#np-items .np-rb.on').forEach(r=>r.classList.remove('on'));
-  const rb=document.querySelector(`#np-items .np-row[data-id="${CSS.escape(id)}"] > .np-rb`);
-  if(rb)rb.classList.add('on');
   npMark([id],true);
-  npRenderDetail();
-  if(!npWide())npNav('detail');
+  npGoTo(i);
 }
 function npGoTo(i){
   npSetOpen(false);
+  if(i.lead_id){go('leads');openLead(i.lead_id);return}
+  if(i.type==='ticket'&&i.ref){go('tickets');openTicket(i.ref);return}
   go(i.view);
-  if(i.lead_id)openLead(i.lead_id);
+  const sel={payout:[`[onclick^="approvePayout(${i.ref},"]`,`[onclick^="deletePayoutRow('request',${i.ref},"]`],
+    kyc:[`[onclick="approveKyc(${i.ref})"]`],
+    order:[`[onclick^="deleteOrderRow(${i.ref},"]`,`[onclick^="markOrderPaid(${i.ref},"]`]}[i.type];
+  if(sel&&i.ref)npReveal(sel.map(s=>'#view '+s).join(','));
 }
-function npRenderDetail(){
-  const box=$('np-detail');if(!box)return;
-  const i=NP.sel&&npItem(NP.sel);
-  if(!i){
-    box.innerHTML=npWide()?`<div class="np-ph"><span class="np-e-ic">${npI('bell')}</span><b>No notification selected</b>
-      <span>Pick one on the left to see its history and jump straight to it.</span></div>`:'';
-    return;
-  }
-  const k=NP_KIND[npKind(i)];
-  const hist=i.lead_id?INBOX.filter(x=>x.lead_id===i.lead_id&&!NP.hiding.has(x.id)).sort(npByTs):[];
-  const cel={orders:'Open orders',kyc:'Review KYC',payouts:'Review payout',tickets:'Open ticket',leads:'Open lead'}[i.view]||'Open';
-  box.innerHTML=`
-    <header class="np-bar"><div class="np-bar-l"><button type="button" class="np-tbtn np-back" data-np="back">${npI('chevL',2.4)}<span>Back</span></button></div>
-      <div class="np-bar-t">${esc(k[2])}</div><div class="np-bar-r"></div></header>
-    <div class="np-scroll"><div class="np-det">
-      <div class="np-hero"><span class="np-ico" style="--k:var(--${k[1]})">${npI(k[0])}</span>
-        <h3>${esc(npWho(i))}</h3><p>${esc(npText(i))}</p>
-        <div class="np-meta"><span>${esc(dstr(i.ts))}</span><span>·</span><span>${esc({leads:'Leads',free:'Free',prop:'Prop'}[i.cat])}</span></div></div>
-      <div class="np-acts"><button type="button" class="np-btn-p" data-np="open">${cel}</button>
-        <div class="np-btn-row">
-          <button type="button" class="np-btn-s" data-np="dread">${npI(i.read?'dot':'check')}${i.read?'Mark unread':'Mark read'}</button>
-          <button type="button" class="np-btn-s danger" data-np="ddel">${npI('trash')}Delete</button></div></div>
-      ${hist.length>1?`<h4 class="np-sec-h">History</h4><div class="np-grp flat">${hist.map(h=>{const hk=NP_KIND[npKind(h)];
-        return `<button type="button" class="np-hrow${h.id===i.id?' cur':''}" data-np-hist="${esc(h.id)}"><span class="np-ico" style="--k:var(--${hk[1]})">${npI(hk[0])}</span>
-          <span class="t"><b>${esc(hk[2])}</b><span>${esc(npText(h,true))}</span></span><time>${esc(npRel(h.ts))}</time></button>`}).join('')}</div>`:''}
-    </div></div>`;
+function npReveal(sel){
+  let n=0;
+  const t=setInterval(()=>{
+    const el=document.querySelector(sel);
+    if(!el&&++n<50)return;
+    clearInterval(t);
+    if(!el)return;
+    const box=el.closest('tr,.sec-card,.lead-card,[class*="card"]')||el;
+    box.scrollIntoView({behavior:npRM()?'auto':'smooth',block:'center'});
+    box.classList.remove('np-flash');void box.offsetWidth;box.classList.add('np-flash');
+    setTimeout(()=>box.classList.remove('np-flash'),2600);
+  },100);
 }
 
-/* ---------- web push na telefon działu ----------
-   Ta sama infrastruktura co w portalu tradera (/api/push/*, wspólny /sw.js):
-   konto admina to Trader z is_admin, więc subskrypcja idzie tym samym
-   endpointem. Na iOS push działa wyłącznie w PWA z ekranu głównego —
-   stąd podpowiedź o instalacji zamiast martwego przełącznika.
-   Ostatni znany stan leży w localStorage, więc przełącznik od razu pokazuje
-   prawdę, a sprawdzenie service workera tylko ją potwierdza. */
-const b64ToU8=b64=>{const p='='.repeat((4-b64.length%4)%4);
-  const raw=atob((b64+p).replace(/-/g,'+').replace(/_/g,'/'));
-  return Uint8Array.from(raw,c=>c.charCodeAt(0))};
-const PUSH={st:(()=>{try{return localStorage.getItem('pf_push_st')||'unknown'}catch(_){return 'unknown'}})(),
-  target:null,key:null};
-if(PUSH.st==='pending')PUSH.st='unknown';
-const npPushInner=()=>`<span class="np-pr-ic"><span class="np-ic-laptop">${npI('laptop')}</span><span class="np-ic-phone">${npI('phone')}</span></span>
-  <div class="np-pr-t"><b>Push on this device</b><span data-np-push-txt></span></div>
-  <button type="button" class="np-sw" role="switch" data-np="push" aria-label="Push notifications on this device"><i></i></button>
-  <span class="np-pr-go">${npI('chevR')}</span>`;
+/* ---------- push na tym urządzeniu: stan i przełącznik w np-kit.js ---------- */
 function npCatCount(){
   const cats=(ME&&ME.ui_prefs&&ME.ui_prefs.admin_push)||{},klucze=PUSH_GROUPS.flatMap(g=>g[1].map(r=>r[0]));
   return [klucze.filter(k=>cats[k]!==false).length,klucze.length];
 }
-const PUSH_TXT={
-  on:()=>{const [on,all]=npCatCount();return on===all?'On · every category buzzes':`On · ${on} of ${all} categories buzz`},
-  off:()=>'Off · alerts only show up in this list',
-  pending:()=>PUSH.target?'Turning on…':'Turning off…',
-  unknown:()=>'Checking this device…',
-  ios:()=>'Add the panel to your Home Screen to get push',
-  unsupported:()=>'This browser can\'t receive push',
-  denied:()=>'Blocked for this site in browser settings',
-  nokey:()=>'Push isn\'t configured on the server',
-};
-function npPaintPush(){
-  const st=PUSH.st;
-  npQ('[data-push]').forEach(el=>el.dataset.push=st);
-  npQ('[data-np-push-txt]').forEach(el=>el.textContent=(PUSH_TXT[st]||PUSH_TXT.unknown)());
-  npQ('[data-np="push"]').forEach(sw=>{
-    sw.setAttribute('aria-checked',String(st==='pending'?!!PUSH.target:st==='on'));
-    sw.classList.toggle('pending',st==='pending');
-    sw.hidden=!['on','off','pending','unknown'].includes(st);
-    sw.disabled=st==='unknown';
-  });
-  npQ('[data-np-push-help]').forEach(el=>el.innerHTML=npPushHelp());
-}
-function npPushHelp(){
-  const st=PUSH.st;
-  if(st==='ios')return `<ol class="np-guide">
-    <li><span class="np-gi">${npI('share')}</span><span>Open <b>/admin</b> in Safari and tap <b>Share</b></span></li>
-    <li><span class="np-gi">${npI('plusSq')}</span><span>Choose <b>Add to Home Screen</b></span></li>
-    <li><span class="np-gi">${npI('bell')}</span><span>Open <b>PTF Admin</b> from the Home Screen and switch push on here</span></li></ol>`;
-  if(st==='denied')return '<p class="np-note">Notifications are blocked for this site. Open the site settings (the icon left of the address bar) → Notifications → Allow, then reload.</p>';
-  if(st==='nokey')return '<p class="np-note">VAPID keys are missing on the server, so push can\'t reach any device yet.</p>';
-  if(st==='unsupported')return '<p class="np-note">This browser doesn\'t support web push. Chrome, Edge, Firefox and Safari 16.4+ do.</p>';
-  return '';
-}
-async function refreshPush(){
-  let st;
-  const ok='serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window;
-  if(!ok)st=/iPhone|iPad|iPod/.test(navigator.userAgent)?'ios':'unsupported';
-  else{
-    if(!PUSH.key){
-      let cfg;
-      try{cfg=await api('/api/push/public-key')}catch(_){npPaintPush();return}
-      if(!cfg.enabled)st='nokey';else PUSH.key=cfg.key;
-    }
-    if(!st){
-      if(Notification.permission==='denied')st='denied';
-      else{
-        try{
-          const reg=await Promise.race([navigator.serviceWorker.ready,
-            new Promise((_,z)=>setTimeout(()=>z(new Error('sw')),4000))]);
-          st=(await reg.pushManager.getSubscription())?'on':'off';
-        }catch(_){npPaintPush();return}
-      }
-    }
-  }
-  if(PUSH.st==='pending')return;
-  PUSH.st=st;
-  try{localStorage.setItem('pf_push_st',st)}catch(_){}
-  npPaintPush();
-}
-async function toggleAdminPush(){
-  if(!['on','off'].includes(PUSH.st))return;
-  const chce=PUSH.st==='off';
-  PUSH.target=chce;PUSH.st='pending';npPaintPush();
-  let st=chce?'off':'on';
-  try{
-    const reg=await navigator.serviceWorker.ready;
-    let sub=await reg.pushManager.getSubscription();
-    if(!chce){
-      if(sub){
-        await api('/api/me/push/unsubscribe',{method:'POST',body:JSON.stringify({endpoint:sub.endpoint})});
-        await sub.unsubscribe();
-      }
-      st='off';
-    }else{
-      const perm=await Notification.requestPermission();
-      if(perm==='denied')st='denied';
-      else if(perm!=='granted'){st='off';toast('Notifications were not allowed.','err')}
-      else{
-        if(!PUSH.key){const cfg=await api('/api/push/public-key');PUSH.key=cfg.key}
-        sub=sub||await reg.pushManager.subscribe({userVisibleOnly:true,
-          applicationServerKey:b64ToU8(PUSH.key)});
-        await api('/api/me/push/subscribe',{method:'POST',body:JSON.stringify(sub.toJSON())});
-        st='on';
-      }
-    }
-  }catch(e){toast('Push setup failed: '+e.message,'err')}
-  PUSH.st=st;PUSH.target=null;
-  try{localStorage.setItem('pf_push_st',st)}catch(_){}
-  npPaintPush();
+function npPushOnText(){
+  const [on,all]=npCatCount();
+  return on===all?'On · every category buzzes':`On · ${on} of ${all} categories buzz`;
 }
 
 /* KOMPLETNA lista tego, co może brzęczeć u admina, w trzech grupach. Wyciszane
@@ -6579,106 +6376,13 @@ function npRenderSettings(){
     </div></div>`;
   npPaintPush();
 }
-
-/* „Przeczytane, gdy widziane": pozycja 2 s na ekranie gaśnie sama. Paczka
-   leci jednym zapytaniem, a nie po jednym na wiersz. */
-let _npIo=null;const _npSeenT=new Map();let _npSeenQ=[],_npSeenFlush=0;
 function npObserve(on){
-  if(_npIo){_npIo.disconnect();_npIo=null}
-  _npSeenT.forEach(clearTimeout);_npSeenT.clear();
-  if(!on||!NP.open||!npPref('seen')||!$('np-scroll'))return;
-  _npIo=new IntersectionObserver(es=>es.forEach(en=>{
-    const r=en.target;
-    const widac=en.isIntersecting&&en.intersectionRatio>.8&&r.offsetHeight>4&&!r.closest('.np-stk:not(.open) .np-kids');
-    if(widac&&r.classList.contains('unread')&&NP.nav!=='settings'&&!NP.edit){
-      if(!_npSeenT.has(r))_npSeenT.set(r,setTimeout(()=>{
-        _npSeenT.delete(r);
-        if(!document.contains(r)||!NP.open)return;
-        _npSeenQ.push(...npIds(r));
-        clearTimeout(_npSeenFlush);
-        _npSeenFlush=setTimeout(()=>{const ids=_npSeenQ;_npSeenQ=[];npMark(ids,true)},250);
-      },2000));
-    }else if(_npSeenT.has(r)){clearTimeout(_npSeenT.get(r));_npSeenT.delete(r)}
-  }),{root:$('np-scroll'),threshold:[0,.8,1]});
-  npQ('#np-items .np-row.unread').forEach(r=>_npIo.observe(r));
+  npObserveSeen(on&&NP.open&&npPref('seen')?$('np-scroll'):null,
+    on?npQ('#np-items .np-row.unread'):[],ids=>npMark(ids,true),
+    ()=>NP.open&&NP.nav!=='settings'&&!NP.edit);
 }
 
-/* Gesty: przesunięcie w lewo = usuń (do końca — od razu), w prawo =
-   przeczytane/nieprzeczytane. Myszą też działa. */
-function npCloseSwipes(opr){
-  npQ('#np-items .np-rb[data-off]').forEach(rb=>{if(rb!==opr&&+rb.dataset.off){rb.dataset.off=0;rb.style.transform=''}});
-}
-const npSlide=(rb,x)=>{rb.dataset.off=x;rb.style.transform=x?`translateX(${x}px)`:''};
-addEventListener('pointerdown',e=>{
-  /* Przeciągnięcie kasuje stuknięcie (jak w iOS): wciśnięcie na koszu z
-     najechania i zjechanie myszą z niego kończyło się klikiem w WIERSZ, bo
-     click trafia we wspólnego przodka — i otwierały się szczegóły. */
-  NP.press=e.target.closest&&e.target.closest('#np')?{x:e.clientX,y:e.clientY,pid:e.pointerId}:null;
-  const rb=e.target.closest&&e.target.closest('#np-items .np-rb');
-  if(rb&&!NP.edit&&e.button===0&&!e.target.closest('button')){
-    NP.sw={rb,row:rb.closest('.np-row'),x:e.clientX,y:e.clientY,base:+(rb.dataset.off||0),dx:0,on:false,pid:e.pointerId};
-    return;
-  }
-  const uchwyt=e.target.closest&&e.target.closest('[data-np-drag]');
-  if(uchwyt&&npNarrow()&&NP.open&&!e.target.closest('button'))
-    NP.drag={y:e.clientY,t:performance.now(),pid:e.pointerId,dy:0};
-});
-addEventListener('pointermove',e=>{
-  const d=NP.drag;
-  if(d&&e.pointerId===d.pid){
-    d.dy=Math.max(0,e.clientY-d.y);
-    if(d.dy>3){const np=$('np');np.classList.add('dragging');np.style.transform=`translateY(${d.dy}px)`}
-    return;
-  }
-  const s=NP.sw;
-  if(!s||e.pointerId!==s.pid)return;
-  const dx=e.clientX-s.x,dy=e.clientY-s.y;
-  if(!s.on){
-    if(Math.abs(dx)<8){if(Math.abs(dy)>8)NP.sw=null;return}
-    if(Math.abs(dy)>Math.abs(dx)){NP.sw=null;return}
-    s.on=true;npCloseSwipes(s.rb);s.rb.classList.add('drag');
-    try{s.rb.setPointerCapture(e.pointerId)}catch(_){}
-  }
-  const W=s.rb.offsetWidth;let x=s.base+dx;
-  if(x>0)x=110*(1-Math.exp(-x/110));
-  if(x<-W)x=-W;
-  s.dx=x;s.rb.style.transform=`translateX(${x}px)`;
-  s.row.classList.toggle('arm-del',x<-W*.55);
-  s.row.classList.toggle('arm-read',x>56);
-});
-function npPointerEnd(e){
-  const pr=NP.press;
-  if(pr&&e.pointerId===pr.pid){
-    NP.press=null;
-    if(Math.hypot(e.clientX-pr.x,e.clientY-pr.y)>8){NP.suppress=true;setTimeout(()=>{NP.suppress=false},0)}
-  }
-  const d=NP.drag;
-  if(d&&e.pointerId===d.pid){
-    NP.drag=null;
-    const np=$('np');np.classList.remove('dragging');
-    const v=d.dy/Math.max(1,performance.now()-d.t);
-    np.style.transform='';
-    if(d.dy>120||(d.dy>30&&v>.6))npSetOpen(false);
-    return;
-  }
-  const s=NP.sw;
-  if(!s||e.pointerId!==s.pid)return;
-  NP.sw=null;
-  if(!s.on)return;
-  NP.suppress=true;setTimeout(()=>{NP.suppress=false},0);
-  s.rb.classList.remove('drag');s.row.classList.remove('arm-del','arm-read');
-  const W=s.rb.offsetWidth,x=s.dx;
-  if(x<-W*.55){npSlide(s.rb,-W);npRowAct('del',s.row)}
-  else if(x>56){npSlide(s.rb,0);npRowAct('read',s.row)}
-  else if(x<-44)npSlide(s.rb,-92);
-  else npSlide(s.rb,0);
-  if(NP.dirty){NP.dirty=false;setTimeout(()=>npRenderList(),350)}
-}
-addEventListener('pointerup',npPointerEnd);
-addEventListener('pointercancel',npPointerEnd);
-
-/* Menu pod prawym przyciskiem (mysz) / długim przytrzymaniem nie ma — na
-   dotyku są gesty. */
+/* Menu pod prawym przyciskiem myszy — na dotyku są gesty. */
 function npCtxClose(){const m=$('np-ctx');if(m)m.classList.remove('show');NP.ctxRow=null}
 addEventListener('contextmenu',e=>{
   const rb=e.target.closest&&e.target.closest('#np-items .np-rb');
@@ -6686,11 +6390,9 @@ addEventListener('contextmenu',e=>{
   e.preventDefault();
   const row=rb.closest('.np-row'),ids=npIds(row),m=$('np-ctx');
   const unread=ids.some(id=>{const i=npItem(id);return i&&!i.read});
-  const pierwszy=npItem(ids[0]);
   NP.ctxRow=row;
   m.innerHTML=`<button type="button" data-np-cact="open">${npI('chevR')}${ids.length>1?'Show events':'Open'}</button>
     <button type="button" data-np-cact="read">${npI(unread?'check':'dot')}${unread?'Mark as read':'Mark as unread'}</button>
-    ${pierwszy&&pierwszy.lead_id?`<button type="button" data-np-cact="go">${npI('userCheck')}Open lead card</button>`:''}
     <hr><button type="button" class="danger" data-np-cact="del">${npI('trash')}Delete${ids.length>1?` ${ids.length}`:''}</button>`;
   m.classList.add('show');
   const r=m.getBoundingClientRect();
@@ -6699,9 +6401,6 @@ addEventListener('contextmenu',e=>{
   m.style.setProperty('--ox',(e.clientX-x)+'px');m.style.setProperty('--oy',(e.clientY-y)+'px');
 });
 
-addEventListener('click',e=>{
-  if(NP.suppress){NP.suppress=false;e.preventDefault();e.stopPropagation()}
-},true);
 addEventListener('click',e=>{
   const t=e.target;
   if(!t.closest)return;
@@ -6713,7 +6412,6 @@ addEventListener('click',e=>{
     if(!row)return;
     if(a==='del')return npDelete(ids);
     if(a==='read')return npRowAct('read',row);
-    if(a==='go'){const i=npItem(ids[0]);if(i)npGoTo(i);return}
     if(a==='open')return row.dataset.ids?npToggleStack(row.closest('.np-stk').dataset.key):npOpenItem(ids[0]);
     return;
   }
@@ -6725,9 +6423,8 @@ addEventListener('click',e=>{
   if(tab)return npSetTab(tab.dataset.npTab);
   const a=t.closest('[data-np]');
   if(a){
-    const i=NP.sel&&npItem(NP.sel);
     switch(a.dataset.np){
-      case 'push':return toggleAdminPush();
+      case 'push':return npTogglePush();
       case 'pushrow':if(['ios','denied','nokey','unsupported'].includes(PUSH.st))npNav('settings');return;
       case 'close':return npSetOpen(false);
       case 'settings':return npNav('settings');
@@ -6748,9 +6445,6 @@ addEventListener('click',e=>{
       case 'clear':return npArm(a,npVisible().length,()=>npDelete(npVisible().map(x=>x.id)));
       case 'clearall':{const ids=INBOX.filter(x=>!NP.hiding.has(x.id)).map(x=>x.id);
         return npArm(a,ids.length,()=>{npNav('list');npDelete(ids)})}
-      case 'open':if(i)npGoTo(i);return;
-      case 'dread':if(i)npMark([i.id],!i.read);return;
-      case 'ddel':if(i)npDelete([i.id]);return;
       case 'tgtest':return tgLinkTest(a);
       case 'tglink':npSetOpen(false);go('settings');return;
     }
@@ -6758,8 +6452,6 @@ addEventListener('click',e=>{
   }
   const act=t.closest('[data-np-act]');
   if(act)return npRowAct(act.dataset.npAct,act.closest('.np-row'));
-  const hist=t.closest('[data-np-hist]');
-  if(hist)return npOpenItem(hist.dataset.npHist);
   const rb=t.closest('#np-items .np-rb');
   if(rb){
     if(+rb.dataset.off)return npSlide(rb,0);
@@ -6769,27 +6461,12 @@ addEventListener('click',e=>{
     return npOpenItem(rb.dataset.npOpen);
   }
 });
-/* Dwuetapowe „usuń wszystko": pierwszy klik uzbraja, drugi wykonuje. Bez
-   systemowego confirm(), który na iOS w PWA potrafi zamrozić widok. */
-function npArm(btn,ile,fn){
-  const lab=btn.querySelector('b')||btn;
-  if(btn.classList.contains('armed')){clearTimeout(btn._t);btn.classList.remove('armed');lab.textContent=btn._o;return fn()}
-  if(!ile)return;
-  btn._o=lab.textContent;btn.classList.add('armed');
-  lab.textContent=`Delete ${ile} notification${ile===1?'':'s'}? Tap again`;
-  btn._t=setTimeout(()=>{btn.classList.remove('armed');lab.textContent=btn._o},3500);
-}
-addEventListener('scroll',e=>{
-  const sc=e.target;
-  if(sc&&sc.classList&&sc.classList.contains('np-scroll'))
-    sc.closest('.np-pg').classList.toggle('scrolled',sc.scrollTop>30);
-},true);
 addEventListener('keydown',e=>{
   if(!NP.open)return;
   if(e.key==='Escape'){
     if($('np-ctx').classList.contains('show'))return npCtxClose();
     if(NP.edit)return npSetEdit(false);
-    if(NP.nav==='settings'||(NP.nav==='detail'&&!npWide()))return npBack();
+    if(NP.nav==='settings')return npBack();
     return npSetOpen(false);
   }
   const el=document.activeElement;
@@ -6812,7 +6489,9 @@ addEventListener('keydown',e=>{
     if(wszystkie[n])wszystkie[n].focus();
   }
 });
-matchMedia('(min-width:1400px)').addEventListener('change',()=>{if($('np')){npRenderDetail();npNav(NP.nav)}});
+npGestures({items:'#np-items',panel:'#np',editing:()=>NP.edit,open:()=>NP.open,
+  onAct:(act,row)=>npRowAct(act,row),onDismiss:()=>npSetOpen(false),
+  onEnd:()=>{if(NP.dirty){NP.dirty=false;setTimeout(()=>npRenderList(),350)}}});
 setInterval(()=>{if(NP.open)npQ('#np-items time[data-ts]').forEach(t=>t.textContent=npRel(t.dataset.ts))},30000);
 
 /* Tożsamość Telegrama z ŻYWYM statusem: po wydaniu kodu panel odpytuje

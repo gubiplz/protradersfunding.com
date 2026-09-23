@@ -44,6 +44,52 @@ def _wpisy(tid):
     return dane
 
 
+def _wiersz(tid, event, url="/portal", title="T"):
+    s = SessionLocal()
+    n = Notification(trader_id=tid, event=event, title=title, body="", url=url)
+    s.add(n); s.commit(); nid = n.id; s.close()
+    return nid
+
+
+def test_pozycje_maja_kategorie_zakladki():
+    """Zakładki dzwonka: kategoria za przełącznikiem z Settings, recap pod Trading."""
+    tid, _, H = _trader()
+    for ev in ("phase_passed", "payout_approved", "ticket_reply", "daily_recap", "flash_offer"):
+        _wiersz(tid, ev)
+    kat = {i["event"]: i["cat"] for i in client.get("/api/me/notifications", headers=H).json()["items"]}
+    assert kat == {"phase_passed": "trading", "payout_approved": "payouts",
+                   "ticket_reply": "updates", "daily_recap": "trading", "flash_offer": "updates"}
+
+
+def test_alerty_dzialu_nie_trafiaja_do_dzwonka_tradera():
+    """Admin ma w tej samej tabeli alerty działu (url /admin…) — portal ich nie pokazuje."""
+    tid, _, H = _trader(is_admin=True)
+    _wiersz(tid, "lead_new", url="/admin?lead=5")
+    _wiersz(tid, "phase_passed")
+    r = client.get("/api/me/notifications", headers=H).json()
+    assert [i["event"] for i in r["items"]] == ["phase_passed"] and r["unread"] == 1
+
+
+def test_przeczytane_i_usuwanie_wybranych_tylko_wlasnych():
+    tid, _, H = _trader()
+    obcy, _, _ = _trader()
+    a, b = _wiersz(tid, "phase_passed"), _wiersz(tid, "payout_approved")
+    cudzy = _wiersz(obcy, "phase_passed")
+
+    r = client.post("/api/me/notifications/mark", headers=H, json={"ids": [a, cudzy], "read": True})
+    assert r.json()["changed"] == 1
+    items = {i["id"]: i["read"] for i in client.get("/api/me/notifications", headers=H).json()["items"]}
+    assert items == {a: True, b: False}
+    client.post("/api/me/notifications/mark", headers=H, json={"ids": [a], "read": False})
+    assert client.get("/api/me/notifications", headers=H).json()["unread"] == 2
+
+    r = client.post("/api/me/notifications/delete", headers=H, json={"ids": [a, cudzy]})
+    assert r.json()["deleted"] == 1, "cudzego wiersza nie wolno usunąć"
+    assert [i["id"] for i in client.get("/api/me/notifications", headers=H).json()["items"]] == [b]
+    assert _wpisy(obcy), "wiersz innego tradera został"
+    assert client.post("/api/me/notifications/delete", json={"ids": [b]}).status_code == 401
+
+
 def test_notify_send_zasila_centrum_takze_bez_pusha():
     """Push wyłączony (conftest zeruje VAPID) — wpis w centrum i tak powstaje."""
     tid, email, H = _trader()
