@@ -19,40 +19,25 @@ h2,h3{letter-spacing:-.015em}
 .side-nav{gap:1px}
 .sb-link{gap:11px;padding:6px 10px;border:0;border-radius:10px;color:var(--txt);font-weight:500;
   transition:background .2s,transform .35s var(--np-spring)}
-.sb-link svg{width:28px;height:28px;flex:0 0 28px;padding:5.5px;border-radius:8px;opacity:1;color:#fff;
-  background:var(--k,#8e8e93);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.14),0 1px 2px rgba(0,0,0,.08)}
+/* Kafelek jak ikona w dzwonku: miękki odcień + kolorowy znak, nie pełny kolor.
+   Paleta ograniczona do barw PTF i pogrupowana znaczeniem, żeby menu nie było tęczą. */
+.sb-link svg{width:30px;height:30px;flex:0 0 30px;padding:6px;border-radius:9px;opacity:1;color:var(--k,var(--muted));
+  background:color-mix(in srgb,var(--k,var(--muted)) var(--np-tint),transparent);transition:background .25s,transform .4s var(--np-spring)}
+.sb-link.on svg{background:color-mix(in srgb,var(--k,var(--muted)) 24%,transparent)}
+.sb-link:hover svg{transform:scale(1.06)}
 .sb-link:hover{background:var(--np-fill);color:var(--txt)}
 .sb-link:active{transform:scale(.97)}
 .sb-link.on{background:color-mix(in srgb,var(--acc) 13%,transparent);color:var(--txt);border:0;font-weight:650}
 .sb-link.on::before{display:none}
-/* Kolor sekcji jak w Ustawieniach iOS — każda ma swój, sąsiedzi się nie powtarzają */
-.sb-link[data-v=overview]{--k:#5856d6}
-.sb-link[data-v=leads]{--k:#ff9500}
-.sb-link[data-v=clients]{--k:#007aff}
-.sb-link[data-v=accounts]{--k:#af52de}
-.sb-link[data-v=activity]{--k:#ff3b30}
-.sb-link[data-v=payouts]{--k:#34c759}
-.sb-link[data-v=kyc]{--k:#30b0c7}
-.sb-link[data-v=tickets]{--k:#32ade6}
-.sb-link[data-v=orders]{--k:#00c7be}
-.sb-link[data-v=offers]{--k:#ff2d55}
-.sb-link[data-v=pool]{--k:#a2845e}
-.sb-link[data-v=mail]{--k:#0a84ff}
-.sb-link[data-v=telegram]{--k:#2aabee}
-.sb-link[data-v=telemetry]{--k:#ff9f0a}
-.sb-link[data-v=settings]{--k:#8e8e93}
-.sb-link[data-v=board]{--k:#ff9500}
-.sb-link[data-v=achievements]{--k:#ffb300}
-.sb-link[data-v=loyalty]{--k:#af52de}
-.sb-link[data-v=journal]{--k:#a2845e}
-.sb-link[data-v=analytics]{--k:#32ade6}
-.sb-link[data-v=rewards]{--k:#ff2d55}
-.sb-link[data-v=certificates]{--k:#30b0c7}
-.sb-link[data-v=support]{--k:#0a84ff}
-.sb-link[href="/academy"]{--k:#ff3b30}
-.sb-link.theme-toggle{--k:#5e5ce6}
-.sb-link.sheet-signout{--k:#ff3b30;color:var(--red)}
-html[data-theme=dark] .sb-link svg{box-shadow:inset 0 0 0 .5px rgba(255,255,255,.18)}
+/* indygo = główne, złoto = sprzedaż, fiolet = handel, niebieski = weryfikacja
+   i wsparcie, zieleń = pieniądze, szary = narzędzia */
+.sb-link[data-v=overview],.sb-link[data-v=tickets],.sb-link[data-v=accounts][title=Challenges],
+.sb-link[data-v=support],.sb-link[href="/academy"]{--k:var(--acc)}
+.sb-link[data-v=leads],.sb-link[data-v=offers],.sb-link[data-v=board],.sb-link[data-v=achievements]{--k:var(--gold)}
+.sb-link[data-v=accounts],.sb-link[data-v=activity],.sb-link[data-v=loyalty],.sb-link[data-v=rewards]{--k:var(--purple)}
+.sb-link[data-v=clients],.sb-link[data-v=kyc],.sb-link[data-v=journal],.sb-link[data-v=analytics]{--k:var(--blue)}
+.sb-link[data-v=payouts],.sb-link[data-v=orders],.sb-link[data-v=certificates]{--k:var(--green)}
+.sb-link.sheet-signout{--k:var(--red);color:var(--red)}
 .side-foot,.side-bottom{border-top:.5px solid var(--np-hair)}
 .collapse-btn,.signout{border-radius:10px;transition:background .2s,transform .35s var(--np-spring)}
 .collapse-btn:active,.signout:active{transform:scale(.97)}
@@ -159,4 +144,35 @@ html[data-theme=dark] .over-bg{background:rgba(0,0,0,.4)}
 @media(prefers-reduced-motion:reduce){
   .toast,.modal,.over.open .over-panel,.over-bg{animation:none!important}
   .sb-link,.btn-p,.btn-o,.icon-btn,.switch i::after{transition-duration:.01ms!important}
+}
+
+/* ---------- ruch (ui-motion.js) ---------- */
+/* Pigułka segmentu jedzie pod aktywną opcję; sam przycisk traci tło, bo
+   niesie je pigułka. Bez JS zostaje zwykłe tło przycisku z góry pliku. */
+.seg.has-pill,.shop-tabs.has-pill{position:relative}
+.ui-pill{position:absolute;left:0;top:0;z-index:0;border-radius:8px;pointer-events:none;background:var(--np-pill);
+  box-shadow:0 3px 8px rgba(0,0,0,.1),0 3px 1px rgba(0,0,0,.03),0 0 0 .5px rgba(0,0,0,.04);transition:opacity .2s}
+.has-pill>button,.has-pill>.shop-tab{position:relative;z-index:1}
+.has-pill>button.on,.has-pill>.shop-tab.on{background:transparent!important;box-shadow:none!important}
+.side-nav.has-glider{position:relative}
+.ui-glider{position:absolute;left:0;top:0;z-index:0;border-radius:10px;pointer-events:none;
+  background:color-mix(in srgb,var(--acc) 12%,transparent);transition:opacity .2s}
+.side-nav.has-glider>.sb-link{position:relative;z-index:1}
+.side-nav.has-glider>.sb-link.on{background:transparent}
+/* Górny pasek: kreska dopiero po przewinięciu, jak duży tytuł w iOS */
+.topbar{border-bottom-color:transparent;transition:border-color .25s,background .25s}
+.topbar.ui-scrolled{border-bottom-color:var(--np-hair)}
+/* Kafelki i wiersze, które się klika: lekkie uniesienie i wciśnięcie */
+.stat-tile{transition:transform .45s var(--np-spring),box-shadow .3s}
+.stat-tile.clickable:hover{transform:translateY(-2px);
+  box-shadow:0 0 0 .5px var(--np-hair),0 18px 36px -20px rgba(15,23,42,.3)}
+.stat-tile.clickable:active{transform:scale(.97)}
+tbody tr{transition:background .15s}
+.ticket-row{transition:background .15s,transform .35s var(--np-spring)}
+.ticket-row:active{transform:scale(.99)}
+/* Zmiana motywu: przenikanie całej strony */
+::view-transition-old(root),::view-transition-new(root){animation-duration:.4s;animation-timing-function:var(--np-ease)}
+@media(prefers-reduced-motion:reduce){
+  .ui-pill,.ui-glider{transition:none}
+  .stat-tile,.ticket-row{transition:none}
 }
