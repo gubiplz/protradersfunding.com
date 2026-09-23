@@ -10,6 +10,9 @@
 <link rel="preload" href="/static/fonts/space-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/css/site.css?v={{ asset_v }}">
 <link rel="stylesheet" href="/static/css/site-motion.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/css/site-theme.css?v={{ asset_v }}">
+<script>/* motyw przed pierwszym malowaniem — bez białego błysku; klucz wspólny z portalem */
+try{if(localStorage.getItem('pf_theme2')==='dark')document.documentElement.dataset.theme='dark'}catch(e){}</script>
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="{{ site_name }}">
 <meta property="og:title" content="{% block og_title %}{{ site_name }} — Get Funded to Trade{% endblock %}">
@@ -95,6 +98,10 @@ document.getElementById('bogoX').addEventListener('click',function(){
       <a href="/affiliate">Affiliate</a>
     </nav>
     <div class="nav-right">
+      <button class="theme-tog" id="themeTog" type="button" aria-label="Switch to dark mode" title="Dark mode">
+        <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+        <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      </button>
       <a class="nav-login" href="/portal">Log in</a>
       <a class="btn btn-sm" href="/#pricing">Get Funded</a>
       <button class="burger" id="burger" aria-label="Menu" aria-expanded="false"><span></span><span></span><span></span></button>

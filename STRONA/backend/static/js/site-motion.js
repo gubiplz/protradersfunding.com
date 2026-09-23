@@ -83,6 +83,21 @@ if(menu&&!RM){
   }).observe(menu,{attributes:true,attributeFilter:['class']});
 }
 
+/* ---------- motyw jasny/ciemny: ikonka w nagłówku ----------
+   Klucz `pf_theme2` wspólny z portalem tradera — jeden wybór dla całego PTF. */
+const tog=document.getElementById('themeTog');
+if(tog){
+  const opis=()=>{const d=document.documentElement.dataset.theme==='dark';
+    tog.setAttribute('aria-label',d?'Switch to light mode':'Switch to dark mode');tog.title=d?'Light mode':'Dark mode'};
+  opis();
+  tog.addEventListener('click',()=>{
+    const ciemny=document.documentElement.dataset.theme!=='dark';
+    const ustaw=()=>{document.documentElement.dataset.theme=ciemny?'dark':'light';
+      try{localStorage.setItem('pf_theme2',ciemny?'dark':'light')}catch(_){}opis()};
+    if(document.startViewTransition&&!RM)document.startViewTransition(ustaw);else ustaw();
+  });
+}
+
 /* ---------- poświata w hero: paralaksa ---------- */
 const glow=document.querySelector('.hero-glow');
 if(glow&&!RM){
