@@ -278,3 +278,11 @@ html[data-theme=dark] .todo{box-shadow:0 0 0 .5px var(--np-hair),0 12px 32px -20
 .sk-list button.on{color:var(--acc);font-weight:650}
 .sk-list b{font-size:13px;font-weight:600}
 @media(prefers-reduced-motion:reduce){.sk-panel,.sk-veil{transition:none}}
+
+/* uchwyt na oknach modalnych na telefonie: widać, że okno zsuwa się w dół
+   (ui-motion.js); szuflada i arkusze mają swoje uchwyty */
+@media(max-width:640px){
+  .modal-wrap>.modal{position:relative}
+  .modal-wrap>.modal::before{content:"";position:absolute;top:7px;left:50%;width:36px;height:4px;margin-left:-18px;
+    border-radius:2px;background:var(--np-fill2)}
+}
