@@ -171,9 +171,14 @@ def test_stan_webhooka(monkeypatch):
     monkeypatch.setattr(main.settings, "telegram_bot_token", "T:K", raising=False)
     monkeypatch.setattr(main.settings, "telegram_webhook_secret", "S", raising=False)
     monkeypatch.setattr(main.settings, "app_base_url", "https://protradersfunding.com", raising=False)
-    nasz = "https://www.protradersfunding.com/api/telegram/webhook"
+    nasz = "https://protradersfunding.com/api/telegram/webhook"
     assert main._reach_webhook_stan({"url": ""})["state"] == "off"
     assert main._reach_webhook_stan({"url": nasz})["state"] == "ok"
+    # www odbija 307 na domenę główną, a Telegram przekierowań nie śledzi
+    www = main._reach_webhook_stan({"url": "https://www.protradersfunding.com/api/telegram/webhook",
+                                    "last_error_message": "Wrong response from the webhook: 307",
+                                    "last_error_date": 1790186000, "pending_update_count": 4})
+    assert www["state"] == "redirect" and www["pending"] == 4 and www["last_error_at"].startswith("2026-09-")
     assert main._reach_webhook_stan({"url": nasz, "allowed_updates": ["message", "callback_query"]})["state"] \
         == "no_channel_posts"
     obcy = main._reach_webhook_stan({"url": "https://hook.make.com/abc"})
@@ -200,6 +205,11 @@ def test_naprawa_webhooka_dopisuje_channel_post_i_pyta_o_cudzy_adres(monkeypatch
     assert r.status_code == 200 and r.json()["webhook"]["state"] == "ok"
     assert wolania[-1] == ("https://protradersfunding.com/api/telegram/webhook", "S",
                            ["callback_query", "channel_post", "message"])
+
+    # www = ta sama strona: naprawa bez pytania, na adres bez www
+    stan.update(url="https://www.protradersfunding.com/api/telegram/webhook", allowed_updates=[])
+    r = client.post("/api/admin/reach/webhook", headers=ADMIN, json={})
+    assert r.status_code == 200 and wolania[-1][0] == "https://protradersfunding.com/api/telegram/webhook"
 
     stan.update(url="https://hook.make.com/abc", allowed_updates=[])
     r = client.post("/api/admin/reach/webhook", headers=ADMIN, json={})

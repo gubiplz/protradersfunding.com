@@ -4698,12 +4698,16 @@ function reachChannelsHtml(rc){
   const WH={ok:['Telegram reports new posts to the panel instantly','ok'],
     off:['Telegram is not sending this bot\'s updates anywhere','bad'],
     elsewhere:[`Telegram sends this bot's updates to ${esc(wh.host||'another address')}, not to the panel`,'bad'],
+    redirect:[`The webhook is set to ${esc(wh.host||'another spelling of this site')}, which redirects — Telegram does not follow redirects, so posts never arrive`,'bad'],
     no_channel_posts:['The webhook skips channel posts','bad'],
     unknown:['Could not check the Telegram connection','unk'],
     no_bot:['No bot token on the server','unk']}[wh.state]||null;
   const whRow=WH?`<div class="mod-row" style="align-items:center;gap:10px;flex-wrap:wrap">
       <span class="status ${WH[1]==='ok'?'funded':WH[1]==='bad'?'failed':'pending'}"><span class="dot"></span>${WH[1]==='ok'?'live':WH[1]==='bad'?'not connected':'unknown'}</span>
-      <span style="flex:1;min-width:200px;font-size:12.5px">${WH[0]}${wh.last_error?`<span class="muted" style="display:block;font-size:11.5px">Last Telegram error: ${esc(wh.last_error)}</span>`:''}</span>
+      <span style="flex:1;min-width:200px;font-size:12.5px">${WH[0]}
+        ${wh.url?`<span class="muted mono" style="display:block;font-size:11px;word-break:break-all">${esc(wh.url)}${
+          wh.allowed?' · '+esc(wh.allowed.join(', ')):' · all update types'}${wh.pending?` · <b>${wh.pending}</b> waiting`:''}</span>`:''}
+        ${wh.last_error?`<span class="muted" style="display:block;font-size:11.5px">Last Telegram error${wh.last_error_at?' ('+dstr(wh.last_error_at)+')':''}: ${esc(wh.last_error)}</span>`:''}</span>
       ${WH[1]==='bad'&&wh.fixable?`<button class="btn-o sm" onclick="reachFixWebhook(this,${wh.state==='elsewhere'})">Fix</button>`:''}
     </div>`:'';
   return `<div style="margin:2px 0 14px;padding-top:12px;border-top:1px dashed var(--line)">
