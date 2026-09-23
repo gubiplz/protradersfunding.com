@@ -8846,6 +8846,21 @@ def _zapisz_status(session, lead: Lead, status: str, actor: str) -> None:
          .update({"active": False}))
 
 
+def _pierwszy_kontakt(session, lead: Lead, actor: str) -> bool:
+    """Przycisk „Message" w Leads: status rusza TYLKO przy pierwszym kontakcie.
+
+    Lead `new`, którego nikt nie wziął, po pierwszej wiadomości przechodzi na
+    `messaged` (i panel wysyła o tym powiadomienie). Każda następna wiadomość
+    — do leada już przejętego albo już ruszonego — zostaje wyłącznie w
+    historii: to rozmowa, nie zmiana etapu, a przestawianie statusu za
+    każdym razem nadpisywało to, co ustawił właściciel leada.
+    """
+    if lead.status != "new" or lead.owner:
+        return False
+    _zapisz_status(session, lead, "messaged", actor=actor)
+    return True
+
+
 def _sms_do_leada(session, lead: Lead, actor: str, *,
                   wymuszaj: bool = False) -> tuple[bool, str]:
     """Wyślij leadowi SMS-a i zapisz to w jego historii. `(czy poszło, powód)`.
@@ -9748,7 +9763,8 @@ def _nadawca_z_pola(sender: str | None, domyslny: str) -> str:
 
 
 def _wyslij_z_panelu(session, *, sender: str, email: str, temat: str, tekst: str,
-                     trader: Trader | None = None, lead: Lead | None = None) -> None:
+                     trader: Trader | None = None, lead: Lead | None = None,
+                     oznacz: str = "new") -> bool:
     """Jedna wysyłka maila pisanego z ręki — dla klienta, leada i gołego adresu.
 
     Dwa okna w panelu (Clients, Leads) i przycisk w zakładce Mail otwierają to
@@ -9802,14 +9818,23 @@ def _wyslij_z_panelu(session, *, sender: str, email: str, temat: str, tekst: str
         _zdarzenie(session, lead.id, "email", temat, "panel",
                    payload=json.dumps({"body": tekst, "sender": sender},
                                       ensure_ascii=False))
+        # `oznacz="first"` = przycisk „Message" w Leads (`_pierwszy_kontakt`);
+        # domyślnie jak dotąd: każdy `new` po mailu przechodzi na `messaged`.
+        if oznacz == "first":
+            return _pierwszy_kontakt(session, lead, "panel")
         if lead.status == "new":
             _zapisz_status(session, lead, "messaged", actor="panel")
+            return True
+    return False
 
 
 class LeadMailIn(BaseModel):
     subject: str
     body: str
     sender: str | None = None     # domyślnie "fx" — lead zna markę landingu
+    # "first" = przycisk „Message" w Leads: status tylko przy pierwszym
+    # kontakcie z niczyim leadem (`_pierwszy_kontakt`). Brak = jak dotąd.
+    mark: str | None = None
 
 
 @app.post("/api/admin/leads/{lead_id}/email-custom",
@@ -9843,12 +9868,18 @@ def admin_lead_email_custom(lead_id: int, dane: LeadMailIn):
         trader = (session.query(Trader)
                   .filter(func.lower(Trader.email) == (lead.email or "").lower())
                   .first())
-        _wyslij_z_panelu(session, sender=nadawca, email=lead.email, temat=temat,
-                         tekst=tekst, trader=trader, lead=lead)
+        oznaczony = _wyslij_z_panelu(session, sender=nadawca, email=lead.email, temat=temat,
+                                     tekst=tekst, trader=trader, lead=lead,
+                                     oznacz="first" if dane.mark == "first" else "new")
         session.commit()
-        return {"ok": True, "id": lead_id, "status": lead.status, "sender": nadawca}
+        wynik = {"ok": True, "id": lead_id, "status": lead.status, "sender": nadawca,
+                 "marked": oznaczony}
+        kto = lead.name or lead.email
     finally:
         session.close()
+    if oznaczony and dane.mark == "first":
+        _lead_push(lead_id, "Panel: marked messaged", kto)
+    return wynik
 
 
 class MailTemplateIn(BaseModel):
@@ -10235,6 +10266,41 @@ def admin_trader_telegram_note(trader_id: int, dane: TelegramNoteIn):
         return {"ok": True, "lead_id": lead.id if lead else None, "handle": uchwyt}
     finally:
         session.close()
+
+
+@app.post("/api/admin/leads/{lead_id}/telegram-note",
+          dependencies=[Depends(auth.require_admin)])
+def admin_lead_telegram_note(lead_id: int, dane: TelegramNoteIn):
+    """Ślad po wiadomości na Telegramie z przycisku „Message" w Leads.
+
+    Jak przy kliencie: panel nic nie wysyła sam, tylko zapisuje, co poszło
+    i do kogo. Status — tylko przy pierwszym kontakcie z niczyim leadem
+    (`_pierwszy_kontakt`), i tylko wtedy idzie powiadomienie „messaged".
+    """
+    tekst = " ".join(dane.text.split())
+    if not tekst:
+        raise HTTPException(400, "Message is empty")
+    uchwyt = (dane.handle or "").strip().lstrip("@")[:60]
+    session = SessionLocal()
+    try:
+        lead = session.get(Lead, lead_id)
+        if not lead:
+            raise HTTPException(404, "Lead not found")
+        _zdarzenie(session, lead.id, "telegram",
+                   f"@{uchwyt}: {tekst}"[:200] if uchwyt else tekst[:200], "panel",
+                   payload=json.dumps({"body": tekst, "handle": uchwyt}, ensure_ascii=False))
+        if uchwyt and not lead.telegram:
+            lead.telegram = uchwyt
+        oznaczony = _pierwszy_kontakt(session, lead, "panel")
+        session.commit()
+        wynik = {"ok": True, "id": lead.id, "status": lead.status, "marked": oznaczony,
+                 "handle": uchwyt}
+        kto = lead.name or lead.email
+    finally:
+        session.close()
+    if oznaczony:
+        _lead_push(lead_id, "Panel: marked messaged", kto)
+    return wynik
 
 
 @app.post("/api/admin/traders/{trader_id}/password-reset",
