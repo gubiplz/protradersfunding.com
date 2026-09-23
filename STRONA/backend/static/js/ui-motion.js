@@ -148,6 +148,72 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.querySelectorAll('.side-nav').forEach(n=>slizg(n,false));
 });
 
+/* ---------- okna zsuwane palcem w dół (telefon) ----------
+   To samo co w dzwonku, dla każdego okna od dołu: szuflada admina (bilet,
+   karta konta), menu „More" w portalu, arkusz sortowania, okna modalne.
+   Ciągnie się za dowolne miejsce, o ile treść pod palcem jest przewinięta do
+   samej góry — inaczej palec przewija treść, jak w iOS. Zamyka się tą samą
+   drogą co przycisk (closeOver / closeSheet / × w nagłówku okna), więc okno
+   sprząta po sobie tak samo. Potwierdzenie (#ask-modal) zostaje: czeka na
+   odpowiedź i zsunięcie bez niej zawiesiłoby decyzję. */
+const OKNA=[
+  {sel:'#over.open .over-panel',maxW:640,zamknij:()=>{if(typeof window.closeOver==='function')window.closeOver()}},
+  {sel:'.sheet.open',zamknij:()=>{if(typeof window.closeSheet==='function')window.closeSheet()}},
+  {sel:'.sk-sheet.open .sk-panel',zamknij:el=>{const v=el.parentNode.querySelector('.sk-veil');if(v)v.click()}},
+  {sel:'.modal-wrap:not(#ask-modal) > .modal',zamknij:el=>{
+    const x=el.querySelector('.modal-head [aria-label="Close"],.modal-head .icon-btn,.modal-x');
+    if(x)x.click();else{const w=el.closest('.modal-wrap');if(w)w.remove()}}},
+];
+let zsuw=null;
+function przewinieteWGore(od,panel){
+  for(let n=od;n&&n!==panel.parentNode;n=n.parentElement){
+    if(n.scrollTop>0&&/(auto|scroll)/.test(getComputedStyle(n).overflowY))return false;
+  }
+  return true;
+}
+document.addEventListener('touchstart',e=>{
+  if(e.touches.length!==1||!e.target.closest||e.target.closest('#np'))return;
+  if(e.target.closest('input,textarea,select,[contenteditable]'))return;
+  for(const o of OKNA){
+    if(o.maxW&&innerWidth>o.maxW)continue;
+    const panel=e.target.closest(o.sel);
+    if(!panel)continue;
+    if(!przewinieteWGore(e.target,panel))return;
+    const t=e.touches[0];
+    zsuw={o,panel,x:t.clientX,y:t.clientY,t:performance.now(),dy:0,on:false};
+    return;
+  }
+},{passive:true});
+document.addEventListener('touchmove',e=>{
+  const z=zsuw;if(!z)return;
+  const t=e.touches[0],dx=t.clientX-z.x,dy=t.clientY-z.y;
+  if(!z.on){
+    if(Math.abs(dy)<6&&Math.abs(dx)<6)return;
+    if(dy<=0||Math.abs(dx)>Math.abs(dy)){zsuw=null;return}
+    z.on=true;z.panel.getAnimations().forEach(a=>a.cancel());
+    z.panel.style.transition='none';
+  }
+  e.preventDefault();
+  z.dy=dy;
+  z.panel.style.transform=`translateY(${Math.max(0,dy)}px)`;
+},{passive:false});
+function zsuwKoniec(){
+  const z=zsuw;zsuw=null;
+  if(!z||!z.on)return;
+  const v=z.dy/Math.max(1,performance.now()-z.t),p=z.panel;
+  if(z.dy>110||(z.dy>35&&v>.5)){
+    p.style.transition=RM()?'none':'transform .24s cubic-bezier(.4,0,1,1)';
+    p.style.transform=`translateY(${innerHeight}px)`;
+    setTimeout(()=>{z.o.zamknij(p);p.style.transition='';p.style.transform=''},RM()?0:230);
+  }else{
+    p.style.transition=RM()?'none':'transform .45s '+EASE;
+    p.style.transform='';
+    setTimeout(()=>{p.style.transition=''},460);
+  }
+}
+document.addEventListener('touchend',zsuwKoniec);
+document.addEventListener('touchcancel',zsuwKoniec);
+
 /* ---------- górny pasek po przewinięciu ---------- */
 const pasek=()=>document.querySelector('.topbar');
 addEventListener('scroll',()=>{const p=pasek();if(p)p.classList.toggle('ui-scrolled',scrollY>4)},{passive:true});
