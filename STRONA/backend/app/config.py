@@ -108,7 +108,9 @@ class Settings:
     server_utc_offset_hours: int = int(os.getenv("SERVER_UTC_OFFSET_HOURS", "2"))
 
     # --- Demo seed ---
-    auto_seed: bool = os.getenv("AUTO_SEED", "true").lower() == "true"
+    # Na Vercelu domyslnie WYLACZONY — dane demo i konto admina ze znanym
+    # haslem nie maja prawa pojawic sie na produkcji przez brak jednej zmiennej.
+    auto_seed: bool = os.getenv("AUTO_SEED", "false" if os.getenv("VERCEL") else "true").lower() == "true"
 
     # --- Marka / strona publiczna ---
     site_name: str = os.getenv("SITE_NAME", "Pro Traders Funding")

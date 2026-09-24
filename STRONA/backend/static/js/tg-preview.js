@@ -146,17 +146,22 @@ const tgSciezka = u => String(u || '').split('?')[0].split('#')[0].toLowerCase()
 
 /* Ta sama decyzja co `contentbot.opublikuj`. -> {typ, url, problem}
    typ: 'none' | 'image' | 'page' | 'video' */
+const tgBezpiecznyUrl = u => /^https?:\/\//i.test(String(u)) || /^\/(?!\/)/.test(String(u));
 function tgGrafika(post){
   const url = (post && post.media_url) || '';
   const kind = (post && post.kind) || 'text';
   if (kind === 'video'){
     if (!url) return {typ:'none', url:'', problem:'Video post with no clip URL — it will not be sent.'};
+    if (!tgBezpiecznyUrl(url)) return {typ:'none', url:'', problem:'The clip URL must start with https://.'};
     if (!tgSciezka(url).endsWith('.mp4'))
       return {typ:'none', url, problem:'The clip URL must point at an .mp4 file.'};
     return {typ:'video', url, problem:''};
   }
   if (kind !== 'photo') return {typ:'none', url:'', problem:''};
   if (!url) return {typ:'none', url:'', problem:'Photo post with no image — it will not be sent.'};
+  // Adres laduje do <img>/<iframe> w panelu admina — `javascript:` odpalilby
+  // kod w originie panelu. Tylko http(s) albo sciezka z tej samej domeny.
+  if (!tgBezpiecznyUrl(url)) return {typ:'none', url:'', problem:'The image URL must start with https://.'};
   const archiwum = String(post.origin || '').startsWith('archive:');
   if (archiwum || /\.(png|jpe?g|webp)$/.test(tgSciezka(url))) return {typ:'image', url, problem:''};
   return {typ:'page', url, problem:''};
@@ -175,7 +180,7 @@ function tgMakieta({tytul, godzina, post}){
     media = `<img class="tgp-media" src="${tgEsc(g.url)}" alt=""
       onerror="this.outerHTML='<div class=&quot;tgp-miss&quot;>The image did not load here — Telegram will not be able to fetch it either.</div>'">`;
   } else if (g.typ === 'page'){
-    media = `<div class="tgp-shot"><iframe src="${tgEsc(g.url)}"
+    media = `<div class="tgp-shot"><iframe src="${tgEsc(g.url)}" sandbox=""
       tabindex="-1" aria-hidden="true" scrolling="no" loading="lazy"></iframe></div>`;
   } else if (g.typ === 'video'){
     media = `<video class="tgp-media" src="${tgEsc(g.url)}" controls muted playsinline preload="metadata"></video>`;

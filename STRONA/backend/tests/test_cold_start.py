@@ -37,7 +37,6 @@ def test_schemat_migruje_sie_raz_na_deploy(monkeypatch):
     zrobione: list[str] = []
     monkeypatch.setattr(main_mod, "init_db", lambda: zrobione.append("schemat"))
     monkeypatch.setattr(main_mod, "sync_catalog", lambda: zrobione.append("cennik"))
-    monkeypatch.setattr(main_mod, "_migruj_login_admina", lambda: None)
 
     monkeypatch.setenv("VERCEL_GIT_COMMIT_SHA", "deploy-pierwszy")
     main_mod._przygotuj_baze()
@@ -66,7 +65,6 @@ def test_bez_odcisku_deployu_pelna_sciezka_idzie_zawsze(monkeypatch):
     zrobione: list[str] = []
     monkeypatch.setattr(main_mod, "init_db", lambda: zrobione.append("schemat"))
     monkeypatch.setattr(main_mod, "sync_catalog", lambda: None)
-    monkeypatch.setattr(main_mod, "_migruj_login_admina", lambda: None)
     monkeypatch.delenv("VERCEL_GIT_COMMIT_SHA", raising=False)
 
     main_mod._przygotuj_baze()

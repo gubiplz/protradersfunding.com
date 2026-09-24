@@ -681,7 +681,8 @@ const VIEWS={
   /* Kolejność czytania: co czeka na mnie → jak stoi platforma → ostatnie
      zamówienia → stan systemu (konfiguracja, zwykle bez zmian — na dole). */
   const czeka=(pendingPay?1:0)+((kyc.pending||[]).length?1:0)+(openTick?1:0)+(s.mail_failed_7d?1:0)+(s.provisioning?1:0);
-  $('view').innerHTML=`
+  const sec=(s.security_warnings||[]).map(w=>`<div class="sec-warn">${ICO.alert||''}<span>${esc(w)}</span></div>`).join('');
+  $('view').innerHTML=`${sec}
     <h4 class="ov-h">Needs attention <small>${czeka?`${czeka} waiting`:'all clear'}</small></h4>
     <div class="todo-grid">
       ${todo(pendingPay,'payout requests to review','payouts','wallet')}
@@ -3575,10 +3576,10 @@ async function openAccount(id){
     </div>
     <div class="sec-card" style="margin:0" id="bot-tune-card"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn-o" style="border-color:var(--gold-line);color:var(--gold)" onclick="clearHistory(${a.id},'${esc(a.login)}')"
+      <button class="btn-o" style="border-color:var(--gold-line);color:var(--gold)" onclick="clearHistory(${a.id},'${jsq(a.login)}')"
         title="Deletes every trade and the whole equity curve, and puts the account back on its starting capital">Clear track record</button>
-      <button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteAccount(${a.id},'${esc(a.login)}')">Delete account</button>
-      ${a.trader_id?`<button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteTrader(${a.trader_id},'${esc(a.trader_email||a.trader_name||'')}')"
+      <button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteAccount(${a.id},'${jsq(a.login)}')">Delete account</button>
+      ${a.trader_id?`<button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteTrader(${a.trader_id},'${jsq(a.trader_email||a.trader_name||'')}')"
         title="Removes the client and ALL their data, freeing the e-mail for a fresh signup">Delete client &amp; all data</button>`:''}
     </div>`);
   renderCerts(a.id);
@@ -3815,7 +3816,7 @@ function journalTimeline(items){
 async function impersonate(tid){
   try{
     const r=await api(`/api/admin/traders/${tid}/impersonate`,{method:'POST'});
-    window.open('/portal?impersonate='+encodeURIComponent(r.token),'_blank');
+    window.open('/portal?impersonate=1#imp='+encodeURIComponent(r.token),'_blank');
   }catch(e){toast('Error: '+e.message,'err')}
 }
 async function renderClientCard(tid,email){
@@ -3830,7 +3831,7 @@ async function renderClientCard(tid,email){
     <div class="kv"><span>Signed up</span><b>${t.created_at?dstr(t.created_at):'—'}</b></div>
     <div style="margin-top:12px">${msgRow(tid)}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn-o sm" style="margin-top:10px" onclick="openTraderJournal(${tid},'${esc(t.email||email||'')}')">Full activity journal</button>
+      <button class="btn-o sm" style="margin-top:10px" onclick="openTraderJournal(${tid},'${jsq(t.email||email||'')}')">Full activity journal</button>
       <button class="btn-o sm" style="margin-top:10px" onclick="impersonate(${tid})">View portal as client</button>
       ${kycAskBtn(t,'card')}
     </div>`;
@@ -4560,7 +4561,7 @@ async function stopBot(id){
    Konto zostaje, wiec przycisk nie jest czerwony — ale dorobku nie da sie
    odzyskac, dlatego mimo to pyta. */
 async function clearHistory(id,login){
-  if(!await askConfirm({title:`Clear the track record of ${esc(login)}?`,
+  if(!await askConfirm({title:`Clear the track record of ${login}?`,
     body:'Every trade, the entire equity curve and any rule breaches are deleted, and the account goes '
       +'back to the starting capital of its current phase — as if nobody had ever traded on it. '
       +'<b>The Trade BOT is switched off</b> along with its style, pace and target, so starting it '
@@ -4585,7 +4586,7 @@ async function deleteTrader(tid,who){
   /* Jedno okno zamiast dwoch: wczesniej admin odpowiadal na confirm(), a zaraz
      potem na prompt() o wpisanie DELETE — dwa systemowe monity pod rzad pod
      najgrozniejsza operacja w panelu. Teraz pytanie i potwierdzenie sa razem. */
-  if(!await askConfirm({title:`Delete ${esc(who)} and ALL their data?`,
+  if(!await askConfirm({title:`Delete ${who} and ALL their data?`,
     body:'This permanently removes their profile, every challenge account, orders, KYC documents, '
       +'payouts, tickets and notifications.<br><br>The e-mail address becomes free again, so the '
       +'client can sign up from scratch. <b>This cannot be undone.</b>',
@@ -4688,7 +4689,7 @@ function telemetryRows(items){
       catch(_){props=esc(e.props||'')}
       return `<tr><td class="muted" style="white-space:nowrap" data-l="Time">${dstr(e.ts)}</td>
         <td class="rt-main" data-l="Event">${esc(e.name)}</td>
-        <td data-l="Trader">${e.trader_id?`<a href="#" onclick="openTraderJournal(${e.trader_id},'${esc(e.email||'')}');return false">${esc(e.email||('#'+e.trader_id))}</a>`:'<span class="muted">—</span>'}</td>
+        <td data-l="Trader">${e.trader_id?`<a href="#" onclick="openTraderJournal(${e.trader_id},'${jsq(e.email||'')}');return false">${esc(e.email||('#'+e.trader_id))}</a>`:'<span class="muted">—</span>'}</td>
         <td class="muted" style="font-size:11.5px" data-l="Details">${props||'—'}</td></tr>`}).join('')}
     </tbody></table></div>`;
 }

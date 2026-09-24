@@ -97,6 +97,9 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         # przejdą zwykłym „forgot password". Flaga dotyczy kont zakładanych ZA
         # klienta i tylko takie mają dostać w mailu link do ustawienia hasła.
         "must_set_password": "BOOLEAN DEFAULT FALSE",
+        # NULL dla istniejących kont — o tym, czy znają hasło, decyduje wtedy
+        # google_sub (main._haslo_ustawione). Bez DEFAULT: brak backfillu.
+        "password_set": "BOOLEAN",
         "first_name": "VARCHAR(60)",
         "last_name": "VARCHAR(60)",
         "phone": "VARCHAR(32)",

@@ -709,7 +709,7 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
     elif event == "ticket_reply":
         parts = [
             _head_html("Support", "New reply to your ticket",
-                       f"{name}, our support team replied to “{ctx.get('subject')}”."),
+                       f"{name}, our support team replied to “{html.escape(str(ctx.get('subject') or ''))}”."),
             _button_html("Read the Reply", f"{portal}?view=support"),
         ]
     elif event == "credits_granted":

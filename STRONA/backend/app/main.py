@@ -86,7 +86,10 @@ def sync_catalog() -> None:
 def seed_demo() -> None:
     session = SessionLocal()
     try:
-        if not session.query(Trader).filter(Trader.is_admin == True).first():  # noqa: E712
+        # Na Vercelu (produkcja i preview) NIGDY konta ze znanym haslem — admini
+        # ida z ADMIN_BOOTSTRAP. Lokalnie zostaje wygoda „od zera z adminem".
+        if not os.environ.get("VERCEL") and \
+                not session.query(Trader).filter(Trader.is_admin == True).first():  # noqa: E712
             admin = Trader(email="admin@local", password_hash=auth.hash_password("admin123"),
                            full_name="Administrator", is_admin=True,
                            referral_code="ADMIN", kyc_status="approved")
@@ -138,29 +141,6 @@ def seed_demo() -> None:
 
 def _gen_ref_code() -> str:
     return secrets.token_hex(3).upper()
-
-
-def _migruj_login_admina() -> None:
-    """Jednorazowo: konto administratora „admin" → „admin@admin" (hasło: admin).
-
-    Pole logowania w portalu ma type=email, więc goły login „admin" nie
-    przechodzi walidacji przeglądarki i admin nie może się zalogować.
-    Idempotentne — po zmianie adresu warunek nie łapie już żadnego wiersza.
-    Rejestracja wymaga formatu e-mail, więc wiersz „admin" może być tylko
-    ręcznie założonym kontem administratora.
-    """
-    session = SessionLocal()
-    try:
-        tr = (session.query(Trader)
-              .filter(Trader.email == "admin", Trader.is_admin == True)  # noqa: E712
-              .first())
-        if tr and not session.query(Trader).filter(Trader.email == "admin@admin").first():
-            tr.email = "admin@admin"
-            tr.password_hash = auth.hash_password("admin")
-            session.commit()
-            print("[migracja] konto admina: login 'admin' -> 'admin@admin' (haslo: admin)")
-    finally:
-        session.close()
 
 
 def _bootstrap_adminow() -> None:
@@ -230,6 +210,27 @@ def _bootstrap_adminow() -> None:
         session.close()
 
 
+_DOMYSLNE_SEKRETY = {"", "dev-secret-change-me", "change-me", "secret", "admin"}
+
+
+def ostrzezenia_bezpieczenstwa() -> list[str]:
+    """Slabe sekrety w env — bez ujawniania ich wartosci.
+
+    Celowo tylko ostrzezenie, a nie odmowa startu: produkcja z kluczem
+    skopiowanym z .env.example leglaby przy deployu, a zmiana klucza i tak
+    wylogowuje wszystkich — to decyzja wlasciciela, nie deployu.
+    """
+    out = []
+    if settings.secret_key.strip().lower() in _DOMYSLNE_SEKRETY or len(settings.secret_key) < 24:
+        out.append("SECRET_KEY is a default or short value — anyone who knows it can forge "
+                   "logins. Set a long random SECRET_KEY in Vercel (everyone will be logged out once).")
+    tok = (settings.admin_token or "").strip()
+    if tok and (tok.lower() in _DOMYSLNE_SEKRETY or len(tok) < 16):
+        out.append("ADMIN_TOKEN is weak — the X-Admin-Token header gives full admin access. "
+                   "Set a long random value or leave it empty.")
+    return out
+
+
 def _warn_if_placeholder_provisioning() -> None:
     """Log startowy: w którym trybie stoi provisioning i skąd biorą się poświadczenia."""
     if provisioning.real_provisioning_enabled(settings):
@@ -268,7 +269,6 @@ def _przygotuj_baze() -> None:
     if odcisk and schema_fingerprint() == odcisk:
         return
     init_db()
-    _migruj_login_admina()
     sync_catalog()    # oferta i cennik z kodu — niezależnie od trybu
     if settings.auto_seed:
         seed_demo()   # admin zawsze; konta demo tylko w trybie sim
@@ -284,6 +284,8 @@ async def lifespan(app: FastAPI):
     # startu. Funkcja sama pilnuje kosztu własnym znacznikiem w bazie.
     _bootstrap_adminow()
     _warn_if_placeholder_provisioning()
+    for o in ostrzezenia_bezpieczenstwa():
+        print(f"[start] BEZPIECZENSTWO: {o}", flush=True)
     if settings.poller_enabled:
         poller.start()
     yield
@@ -962,6 +964,7 @@ def reset_password(payload: ResetIn, response: Response):
         # w panelu żyje z tego rozróżnienia) a zwykłym „zapomniałem hasła".
         odebral_konto = bool(tr.must_set_password)
         tr.password_hash = auth.hash_password(payload.password)
+        tr.password_set = True
         # Hasło właśnie zaczęło istnieć — konto przestaje być „założone za kogoś".
         tr.must_set_password = False
         session.commit()
@@ -1135,6 +1138,7 @@ def signup(payload: SignupIn, request: Request, response: Response):
             full_name=nazwa, referral_code=code,
             referred_by=referred_by,
             email_verified=False, email_verify_code=f"{secrets.randbelow(1_000_000):06d}",
+            password_set=True,
             terms_accepted_at=datetime.now(timezone.utc),
             signup_country=_kraj_z_ip(request), last_login_country=_kraj_z_ip(request),
         )
@@ -1158,6 +1162,12 @@ def login(payload: LoginIn, request: Request, response: Response):
     try:
         tr = session.query(Trader).filter(Trader.email == payload.email.strip().lower()).first()
         if not tr or not auth.verify_password(payload.password, tr.password_hash):
+            # Konto założone przez Google nie ma hasła, które klient zna — sam
+            # „wrong password" kończył się mailem do supportu. Rejestracja i tak
+            # zdradza, że adres jest z Google, więc nic tu nie wycieka.
+            if tr and tr.google_sub and not _haslo_ustawione(tr):
+                raise HTTPException(401, "This account was created with Google. Use “Continue "
+                                         "with Google”, or set a password with “Forgot password?”")
             raise HTTPException(401, "Wrong e-mail or password")
         # Kraj z IP przy KAŻDYM logowaniu: konto założone za klienta przez
         # panel nie ma `signup_country` i to jest jego pierwszy sygnał geo.
@@ -1228,6 +1238,14 @@ def google_login(payload: GoogleAuthIn, request: Request, response: Response):
             tr = session.query(Trader).filter(Trader.email == email).first()
             if tr is not None and sub and not tr.google_sub:
                 tr.google_sub = sub                       # podpięcie istniejącego konta
+                # Konto z NIEPOTWIERDZONYM adresem mógł założyć ktokolwiek —
+                # także ktoś, kto podszył się pod ten e-mail i zna swoje hasło.
+                # Google właśnie udowodnił, kto jest właścicielem adresu, więc
+                # hasło ustawione przez nieznaną osobę przestaje działać (a nowy
+                # hash zmienia odcisk, czyli ubija jej otwarte sesje).
+                if tr.email_verified is False:
+                    tr.password_hash = auth.hash_password(secrets.token_urlsafe(24))
+                    tr.password_set = False
         nowy = tr is None
         # Konto założone ZA klienta czeka na odbiór. Google ręczy za adres tak
         # samo jak klik w link zaproszenia, więc pierwsze wejście przez Google
@@ -1254,6 +1272,7 @@ def google_login(payload: GoogleAuthIn, request: Request, response: Response):
                 full_name=str(claims.get("name") or "").strip()[:120],
                 referral_code=code, referred_by=referred_by,
                 google_sub=sub or None,
+                password_set=False,        # hasło losowe — klient go nie zna
                 # False tylko na moment: _potwierdz_email niżej przestawia flagę
                 # i wysyła welcome — tą samą ścieżką co klik w link z maila.
                 email_verified=False,
@@ -1347,6 +1366,8 @@ def me(trader: Trader = Depends(auth.current_trader)):
                 # ścianę z formularzem KYC zamiast pustego panelu z błędami.
                 "kyc_locked": bool(trader.kyc_locked),
                 "email_verified": trader.email_verified is not False,
+                "password_set": _haslo_ustawione(trader),
+                "google": bool(trader.google_sub),
                 # potrzebne, żeby formularz KYC podświetlił zapisany kraj na liście
                 "kyc_country": trader.kyc_country,
                 "kyc_reject_reason": trader.kyc_reject_reason,
@@ -1700,7 +1721,9 @@ class KycIn(BaseModel):
 
 class PayoutReqIn(BaseModel):
     method: str = "bank"
-    amount: float | None = None      # None = cała dostępna działka tradera
+    # allow_inf_nan=False: JSON przepuszcza literał NaN, a NaN przechodzi przez
+    # KAŻDE porównanie z saldem (share > available == False).
+    amount: float | None = Field(default=None, allow_inf_nan=False)  # None = cała dostępna działka
     details: dict | None = None      # dane wypłaty zależne od metody
 
     @field_validator("amount", mode="before")
@@ -2996,8 +3019,20 @@ def me_patch(payload: MePatch, trader: Trader = Depends(auth.current_trader)):
 
 
 class PasswordIn(BaseModel):
-    current_password: str
+    current_password: str = ""
     new_password: str
+
+
+def _haslo_ustawione(tr: Trader) -> bool:
+    """Czy klient zna swoje hasło do portalu.
+
+    Konto założone przez „Continue with Google" dostaje losowe hasło, którego
+    nikt nie zna. Kolumna `password_set` mówi to wprost od chwili jej dodania;
+    dla starszych kont (NULL) przyjmujemy: jest Google = hasła nie zna.
+    """
+    if tr.password_set is not None:
+        return bool(tr.password_set)
+    return not tr.google_sub
 
 
 @app.post("/api/me/password")
@@ -3007,11 +3042,15 @@ def me_password(payload: PasswordIn, trader: Trader = Depends(auth.current_trade
     session = SessionLocal()
     try:
         tr = session.get(Trader, trader.id)
-        if not auth.verify_password(payload.current_password, tr.password_hash):
+        # Konto z Google nie ma hasła, które klient mógłby podać — pierwsze
+        # ustawienie idzie bez „obecnego". Sesja i tak jest uwierzytelniona.
+        ustawia_pierwsze = not _haslo_ustawione(tr)
+        if not ustawia_pierwsze and not auth.verify_password(payload.current_password, tr.password_hash):
             raise HTTPException(400, "Your current password is wrong")
         tr.password_hash = auth.hash_password(payload.new_password)
+        tr.password_set = True
         session.commit()
-        telemetry.track("password_changed", tr.id)
+        telemetry.track("password_set" if ustawia_pierwsze else "password_changed", tr.id)
         # Zmiana hasla uniewaznia wszystkie starsze sesje (odcisk hasla w
         # tokenie) — swiezy token pozwala TEJ sesji dzialac dalej bez wylogowania.
         return {"ok": True, "token": auth.make_token(tr.id, tr.password_hash)}
@@ -3209,6 +3248,29 @@ def push_public_key():
             "key": settings.vapid_public_key or None}
 
 
+def _push_endpoint_ok(endpoint: str) -> bool:
+    """Serwer POST-uje na ten adres przy każdym pushu — nie może to być
+    localhost ani sieć wewnętrzna (blind SSRF). Celowo BEZ listy dozwolonych
+    hostów: usługa push przeglądarki może się zmienić, a wtedy klient po cichu
+    przestałby dostawać powiadomienia."""
+    import ipaddress
+    from urllib.parse import urlsplit
+    try:
+        u = urlsplit(endpoint.strip())
+    except ValueError:
+        return False
+    host = (u.hostname or "").lower()
+    if u.scheme != "https" or not host or "." not in host:
+        return False
+    if host == "localhost" or host.endswith((".local", ".internal", ".localhost")):
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return True          # nazwa domenowa — ok
+    return ip.is_global
+
+
 @app.post("/api/me/push/subscribe")
 def push_subscribe(payload: PushSubscribeIn, trader: Trader = Depends(auth.current_trader)):
     if not push.is_enabled():
@@ -3216,6 +3278,8 @@ def push_subscribe(payload: PushSubscribeIn, trader: Trader = Depends(auth.curre
     p256dh = (payload.keys or {}).get("p256dh")
     auth_key = (payload.keys or {}).get("auth")
     if not payload.endpoint or not p256dh or not auth_key:
+        raise HTTPException(400, "Invalid push subscription")
+    if not _push_endpoint_ok(payload.endpoint):
         raise HTTPException(400, "Invalid push subscription")
     session = SessionLocal()
     try:
@@ -3271,7 +3335,7 @@ def telegram_link_code(trader: Trader = Depends(auth.current_trader)):
     session = SessionLocal()
     try:
         tr = session.get(Trader, trader.id)
-        kod = secrets.token_hex(3).upper()
+        kod = secrets.token_hex(5).upper()   # 10 znaków: kod żyje do użycia, a /start nie ma limitu prób
         tr.telegram_link_code = kod
         session.commit()
         # Nazwa bota robi z instrukcji klikalny link t.me/<bot> — bez niej
@@ -3396,6 +3460,21 @@ _KYC_MIME = {"image/jpeg": ".jpg", "image/png": ".png", "application/pdf": ".pdf
 _KYC_MAX_BYTES = 5 * 1024 * 1024
 
 
+def _kyc_zgodny_typ(mime: str, data: bytes) -> bool:
+    """Czy zawartość pliku to naprawdę deklarowany typ.
+
+    Content-type ustawia klient — bez tego do panelu dało się wgrać HTML
+    podpisany jako image/png. JPEG/PNG mają stałe pierwsze bajty; PDF może
+    mieć przed nagłówkiem śmieci (spec dopuszcza do 1024 B)."""
+    if mime == "image/jpeg":
+        return data[:3] == b"\xff\xd8\xff"
+    if mime == "image/png":
+        return data[:4] == b"\x89PNG"
+    if mime == "application/pdf":
+        return b"%PDF-" in data[:1024]
+    return False
+
+
 @app.post("/api/me/kyc/docs")
 async def kyc_upload_docs(trader: Trader = Depends(auth.current_trader),
                           id_front: UploadFile | None = File(default=None),
@@ -3421,9 +3500,13 @@ async def kyc_upload_docs(trader: Trader = Depends(auth.current_trader),
                 raise HTTPException(
                     400, f"{kind}: allowed formats are JPG, PNG and PDF "
                          f"(got {up.content_type or 'unknown'})")
-            data = await up.read()
+            # +1 bajt: wystarczy, żeby stwierdzić „za duży", bez czytania całości
+            data = await up.read(_KYC_MAX_BYTES + 1)
             if len(data) > _KYC_MAX_BYTES:
                 raise HTTPException(400, f"{kind}: the file is larger than 5 MB")
+            if not _kyc_zgodny_typ(up.content_type, data):
+                raise HTTPException(400, f"{kind}: the file doesn't look like a real "
+                                         f"JPG, PNG or PDF. Please upload the original file")
             # Plik do bazy, nie na dysk — na Vercelu filesystem jest read-only.
             fname = f"{kind}-{secrets.token_hex(6)}{ext}"
             (session.query(KycFile)
@@ -3450,7 +3533,8 @@ def admin_kyc_doc(trader_id: int, kind: str):
                .first())
         if row:
             return Response(content=row.data, media_type=row.mime,
-                            headers={"Content-Disposition": f'inline; filename="{row.filename}"'})
+                            headers={"Content-Disposition": f'inline; filename="{row.filename}"',
+                                     "X-Content-Type-Options": "nosniff"})
         # Stare uploady sprzed przejścia na bazę (tylko dev z zapisem na dysku)
         tr = session.get(Trader, trader_id)
         fname = getattr(tr, _KYC_KINDS[kind], None) if tr else None
@@ -3725,7 +3809,7 @@ def admin_reject_payout(req_id: int, payload: PayoutRejectIn):
 
 
 class IssuePayoutIn(BaseModel):
-    amount: float | None = None       # kwota dla tradera; None = pełny udział z zysku
+    amount: float | None = Field(default=None, allow_inf_nan=False)  # None = pełny udział z zysku
     method: str = "bank"
     note: str | None = None
     reset_balance: bool = True        # jak przy zatwierdzeniu wniosku: zysk wypłacony
@@ -3841,7 +3925,7 @@ def admin_account_payouts(account_id: int):
 
 
 class PayoutPoolIn(BaseModel):
-    amount: float | None = None
+    amount: float | None = Field(default=None, allow_inf_nan=False)
 
 
 @app.post("/api/admin/accounts/{account_id}/payout-pool", dependencies=[Depends(auth.require_admin)])
@@ -4357,7 +4441,7 @@ def admin_journal_overview(imported: int = 0):
 
 
 class CreditsIn(BaseModel):
-    amount: float                      # dodatni = zasilenie, ujemny = korekta
+    amount: float = Field(allow_inf_nan=False)  # dodatni = zasilenie, ujemny = korekta
     note: str | None = None
 
 
@@ -4403,6 +4487,10 @@ def admin_impersonate(trader_id: int):
         tr = session.get(Trader, trader_id)
         if not tr or tr.email.endswith("@removed.invalid"):
             raise HTTPException(404, "Trader not found")
+        # Podglad innego admina = jego sesja bez hasla. Panel nie ma rol,
+        # wiec to bylaby furtka do dzialania pod cudzym nazwiskiem.
+        if tr.is_admin:
+            raise HTTPException(400, "Administrator accounts can't be viewed as a client")
         return {"token": auth.make_impersonation_token(tr.id, tr.password_hash),
                 "email": tr.email}
     finally:
@@ -5344,7 +5432,7 @@ class ManualOrderIn(BaseModel):
     trader_id: int | None = None
     email: str | None = None
     product_key: str
-    amount_usd: float | None = None
+    amount_usd: float | None = Field(default=None, allow_inf_nan=False)
     flag: str = "awaiting_crypto"
     notify_trader: bool = True
     payment_address: str | None = None
@@ -6551,6 +6639,19 @@ class ChannelPostIn(BaseModel):
     media_url: str | None = None
     proof: str = ""
     scheduled_for: datetime | None = None
+
+    @field_validator("media_url")
+    @classmethod
+    def _tylko_http(cls, v):
+        # Adres trafia do <img>/<iframe> w podgladzie panelu — `javascript:`
+        # albo `data:` wykonalby kod w originie admina. Dozwolone: http(s)
+        # i sciezka z tej samej domeny.
+        v = (v or "").strip()
+        if not v:
+            return None
+        if v.lower().startswith(("http://", "https://")) or (v.startswith("/") and not v.startswith("//")):
+            return v
+        raise ValueError("Media URL must start with https://")
 
 
 class ScheduleIn(BaseModel):
@@ -8896,6 +8997,7 @@ def stats():
                 "funded": by_status.get("funded", 0), "active": by_status.get("active", 0),
                 "failed": by_status.get("failed", 0), "feed": settings.feed,
                 "stripe": "live" if settings.stripe_enabled else "mock",
+                "security_warnings": ostrzezenia_bezpieczenstwa(),
                 # Oba kanały do leada chowają swój przycisk, gdy nie mają czym
                 # wysłać — i to jest jedyne miejsce, w którym widać, DLACZEGO.
                 # Bez tego brak konfiguracji wygląda dokładnie tak samo jak
@@ -12389,15 +12491,7 @@ def _admin_z_ciasteczka(request: Request) -> Trader | None:
     token = request.cookies.get(SESSION_COOKIE)
     if not token:
         return None
-    tid = auth.parse_token(token)
-    if tid is None:
-        return None
-    session = SessionLocal()
-    try:
-        tr = session.get(Trader, tid)
-        return tr if (tr and tr.is_admin) else None
-    finally:
-        session.close()
+    return auth.admin_z_tokenu(token)
 
 
 @app.get("/admin")
