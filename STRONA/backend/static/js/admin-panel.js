@@ -4782,12 +4782,14 @@ function reachChannelsHtml(rc){
       ${stan}
       ${k.payout?'':`<button class="act-btn" title="Remove" onclick="reachDropChannel('${jsq(k.username)}')">&times;</button>`}
       <div style="display:flex;gap:8px;width:100%;padding-left:26px">
-        <input id="rc-qr-${i}" class="inp" style="flex:1;min-width:0;font-size:12px" inputmode="numeric"
-               placeholder="reactions — ${rc.qty_reactions}" value="${k.qty_reactions??''}"
-               onchange="reachToggleChannel()">
-        <input id="rc-qv-${i}" class="inp" style="flex:1;min-width:0;font-size:12px" inputmode="numeric"
-               placeholder="views — ${rc.qty_views}" value="${k.qty_views??''}"
-               onchange="reachToggleChannel()">
+        <input id="rc-qr-${i}" class="inp" style="flex:1;min-width:0;font-size:12px"
+               title="A number, or a range like 20-40 (random per post). Empty = as set above."
+               placeholder="reactions — ${rcZakres(rc.qty_reactions,rc.qty_reactions_max)}"
+               value="${rcZakres(k.qty_reactions,k.qty_reactions_max)}" onchange="reachToggleChannel()">
+        <input id="rc-qv-${i}" class="inp" style="flex:1;min-width:0;font-size:12px"
+               title="A number, or a range like 300-500 (random per post). Empty = as set above."
+               placeholder="views — ${rcZakres(rc.qty_views,rc.qty_views_max)}"
+               value="${rcZakres(k.qty_views,k.qty_views_max)}" onchange="reachToggleChannel()">
       </div>
     </div>`;
   };
@@ -4850,13 +4852,18 @@ function reachCurrentChannels(){
      stan — inaczej odznaczenie go nie mialoby jak przetrwac zapisu. */
   const lista=(window._reach&&window._reach.channels)||[];
   /* Puste pole zostaje NULL-em, nie zerem: zero znaczy „nie zamawiaj tego
-     wcale", a puste „jak globalnie" — panel nie moze tych stanow zlepic. */
-  const ile=id=>{const el=$(id);if(!el)return null;const v=(el.value||'').trim();
-    return v===''?null:Number(v)};
+     wcale", a puste „jak globalnie" — panel nie moze tych stanow zlepic.
+     „20-40" to zakres: kazdy post dostaje losowa liczbe z tego przedzialu. */
+  const ile=id=>{const el=$(id);if(!el)return [null,null];const v=(el.value||'').trim();
+    if(v==='')return [null,null];
+    const m=v.match(/^(\d+)\s*(?:[-–—]\s*(\d+))?$/);
+    if(!m){toast(`"${v}" is not a number or a range like 20-40.`,'err');return [NaN,null]}
+    return [Number(m[1]),m[2]!=null?Number(m[2]):null]};
   return lista.map((k,i)=>{
     const cb=document.querySelector(`[data-rcch="${i}"]`);
+    const [qr,qr2]=ile(`rc-qr-${i}`),[qv,qv2]=ile(`rc-qv-${i}`);
     return {username:k.username,label:k.label,on:cb?cb.checked:k.on,
-            qty_reactions:ile(`rc-qr-${i}`),qty_views:ile(`rc-qv-${i}`)};
+            qty_reactions:qr,qty_reactions_max:qr2,qty_views:qv,qty_views_max:qv2};
   });
 }
 async function reachToggleChannel(){
@@ -5332,13 +5339,25 @@ function reachCardHtml(rc){
       <div><b>Provider not configured.</b> Set <span class="mono">REACH_API_URL</span> and
       <span class="mono">REACH_API_KEY</span> in the environment. Posts still go out, they just
       get no extra reach.</div></div>`:''}
-    <div class="pool-form">
-      <div><label class="muted" style="font-size:12px">Reactions per post</label>
-        <input id="rc-qr" class="inp" type="number" min="0" step="1" value="${rc.qty_reactions}"></div>
-      <div><label class="muted" style="font-size:12px">Views per post</label>
-        <input id="rc-qv" class="inp" type="number" min="0" step="1" value="${rc.qty_views}"></div>
-      <div><label class="muted" style="font-size:12px">Warn below ($)</label>
-        <input id="rc-min" class="inp" type="number" min="0" step="0.5" value="${rc.min_balance}"></div>
+    <div class="rc-qty" id="rc-qty" data-mode="${rc.qty_mode||'fixed'}">
+      <div class="seg" style="margin-bottom:10px" role="radiogroup" aria-label="Amount per post">
+        ${[['fixed','Fixed'],['range','Range']].map(([m,l])=>`<button type="button" data-all="1"
+          class="${(rc.qty_mode||'fixed')===m?'on':''}" onclick="reachQtyMode('${m}')">${l}</button>`).join('')}</div>
+      <div class="pool-form">
+        <div><label class="muted" style="font-size:12px">Reactions per post</label>
+          <div class="rc-pair"><input id="rc-qr" class="inp" type="number" min="0" step="1" value="${rc.qty_reactions}"
+            aria-label="Reactions (from)"><span class="rc-to">to</span><input id="rc-qr2" class="inp" type="number" min="0"
+            step="1" value="${rc.qty_reactions_max??rc.qty_reactions}" aria-label="Reactions (to)"></div></div>
+        <div><label class="muted" style="font-size:12px">Views per post</label>
+          <div class="rc-pair"><input id="rc-qv" class="inp" type="number" min="0" step="1" value="${rc.qty_views}"
+            aria-label="Views (from)"><span class="rc-to">to</span><input id="rc-qv2" class="inp" type="number" min="0"
+            step="1" value="${rc.qty_views_max??rc.qty_views}" aria-label="Views (to)"></div></div>
+        <div><label class="muted" style="font-size:12px">Warn below ($)</label>
+          <input id="rc-min" class="inp" type="number" min="0" step="0.5" value="${rc.min_balance}"></div>
+      </div>
+      <p class="muted rc-range-hint" style="font-size:11.5px;margin:-4px 0 10px">Each post gets a random
+        number from each range, so no two posts show exactly the same counts. The balance check
+        counts the top of the range.</p>
     </div>
     ${reachChannelsHtml(rc)}
 
@@ -5379,13 +5398,30 @@ function reachCardHtml(rc){
       alert lands in the bell and on your phone once a day while the account is below the
       threshold, and orders stop automatically when there is not enough left for one post.</p></div>`;
 }
+/* Stała albo zakres — przełącznik tylko pokazuje/chowa pola „to"; zapis
+   dopiero przyciskiem „Save settings", jak reszta karty. */
+function reachQtyMode(m){
+  const box=$('rc-qty');if(!box)return;
+  box.dataset.mode=m;
+  box.querySelectorAll('.seg button').forEach(b=>b.classList.toggle('on',b.getAttribute('onclick').includes(`'${m}'`)));
+}
+const rcZakres=(lo,hi)=>lo==null?'':(hi!=null&&hi>lo?`${lo}-${hi}`:String(lo));
 async function saveReach(btn){
+  const zakres=($('rc-qty')&&$('rc-qty').dataset.mode)==='range';
   const body={
     qty_reactions:parseInt($('rc-qr').value,10), qty_views:parseInt($('rc-qv').value,10),
     svc_reactions:parseInt($('rc-sr').value,10), svc_views:parseInt($('rc-sv').value,10),
     min_balance:parseFloat($('rc-min').value),
   };
   if(Object.values(body).some(v=>isNaN(v))){toast('Fill every field with a number.','err');return}
+  body.qty_mode=zakres?'range':'fixed';
+  const qr2=parseInt($('rc-qr2').value,10),qv2=parseInt($('rc-qv2').value,10);
+  if(zakres){
+    if(isNaN(qr2)||isNaN(qv2)){toast('Fill both ends of each range.','err');return}
+    if(qr2<body.qty_reactions||qv2<body.qty_views){toast('The second number of a range has to be the bigger one.','err');return}
+  }
+  if(!isNaN(qr2))body.qty_reactions_max=qr2;
+  if(!isNaN(qv2))body.qty_views_max=qv2;
   return busy(btn,'Saving…',async()=>{
     try{await api('/api/admin/reach',{method:'POST',body:JSON.stringify(body)});
       toast('Reach BOT settings saved.','ok'); go(VIEW);

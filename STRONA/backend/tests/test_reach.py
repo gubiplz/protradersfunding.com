@@ -465,10 +465,13 @@ def test_kanal_ma_wlasne_ilosci_a_pusty_wpis_bierze_globalne():
             {"username": "kanal_duzy", "on": True},
         ])
 
+        # stała liczba = przedział jednopunktowy (qty_x_max == qty_x)
         assert reach.ilosci(s, "kanal_maly") == {
-            "qty_reactions": 30, "qty_views": 250, "from": "channel"}
+            "qty_reactions": 30, "qty_reactions_max": 30,
+            "qty_views": 250, "qty_views_max": 250, "from": "channel"}
         assert reach.ilosci(s, "kanal_duzy") == {
-            "qty_reactions": 30, "qty_views": 400, "from": "global"}
+            "qty_reactions": 30, "qty_reactions_max": 30,
+            "qty_views": 400, "qty_views_max": 400, "from": "global"}
         # Kanal spoza listy tez jedzie globalnymi — boost dziala na dowolny link.
         assert reach.ilosci(s, "kanal_obcy")["qty_views"] == 400
 
@@ -514,7 +517,8 @@ def test_boost_z_wlasnymi_ilosciami_bije_ustawienie_kanalu():
         with _dostawca():
             wynik = reach.zamow(s, "https://t.me/kanal_maly/11", transport=_transport(log=log),
                                 qty_reactions=5, qty_views=50)
-        assert wynik["quantities"] == {"qty_reactions": 5, "qty_views": 50,
+        assert wynik["quantities"] == {"qty_reactions": 5, "qty_reactions_max": 5,
+                                       "qty_views": 50, "qty_views_max": 50,
                                        "from": "explicit"}
         addy = [p for p in log if p["action"] == "add"]
         assert [p["quantity"] for p in addy] == ["5", "50"]

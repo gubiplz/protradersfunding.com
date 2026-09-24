@@ -55,7 +55,9 @@ h2,h3{letter-spacing:-.015em}
 .tab-item.on::before{display:none}
 .tab-lbl,.botnav-btn span{font-weight:500;letter-spacing:0}
 .tab-ic,.botnav-btn svg{transition:transform .4s var(--np-spring)}
-.tab-item:active .tab-ic,.botnav-btn:active svg{transform:scale(.86)}
+/* Wciśnięcie z klasy .pressed (ui-motion.js), nie z :active — iOS zostawiał
+   :active na ostatnio dotkniętej zakładce, gdy palec zjechał z paska. */
+.tab-item.pressed .tab-ic,.botnav-btn.pressed svg{transform:scale(.86)}
 .botnav-btn:active,.sb-link:active{opacity:1}
 .sheet{border:0;border-radius:14px 14px 0 0;box-shadow:0 -20px 60px -20px rgba(0,0,0,.35);
   transition:transform .55s var(--np-spring),visibility .55s}

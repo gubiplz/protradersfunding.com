@@ -35,7 +35,7 @@ html[data-theme=dark]{
 .btn-p:active,.btn-o:active,.btn-danger:active,.icon-btn:active,.seg button:active,
 .act-btn:active,.undo-btn:active,.btn-x:active,.q-x:active,.todo:active,
 .stat-tile.clickable:active,.chip.preset:active{transform:scale(.97)}
-.botnav-btn:active,.sb-link:active{opacity:.6}
+.sb-link:active{opacity:.6}
 @media(pointer:coarse){
   /* pełny cel dotyku 44 px — portal robi to już dla .icon-btn i .inp */
   .btn-p,.btn-o,.btn-danger,.seg button{min-height:44px}
@@ -619,3 +619,11 @@ html,body{overscroll-behavior-y:none}
   transform:rotate(90deg);transition:transform .2s var(--ease-out)}
 .bt-adv[open]>summary::after{transform:rotate(-90deg)}
 .bt-adv[open]>.bt-adv-body{margin-top:10px}
+
+/* Reach BOT: stała liczba albo zakres „od – do" (losowo pod każdym postem).
+   W trybie stałym drugie pole i podpowiedź znikają. */
+.rc-pair{display:flex;align-items:center;gap:6px}
+.rc-pair .inp{flex:1 1 0;min-width:0}
+.rc-to{flex:none;font-size:12px;color:var(--dim)}
+.rc-qty[data-mode=fixed] .rc-to,.rc-qty[data-mode=fixed] #rc-qr2,.rc-qty[data-mode=fixed] #rc-qv2,
+.rc-qty[data-mode=fixed] .rc-range-hint{display:none}
