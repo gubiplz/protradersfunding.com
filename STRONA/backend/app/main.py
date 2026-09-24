@@ -144,6 +144,51 @@ def _gen_ref_code() -> str:
     return secrets.token_hex(3).upper()
 
 
+#: Konto założone kiedyś przez migrację startową (usuniętą w PR #34) ze znanym
+#: hasłem „admin". W publicznym repo to gotowe dane logowania do panelu.
+_ZNANE_KONTO_ADMINA = ("admin@admin", "admin")
+
+
+def _usun_znane_konto_admina() -> None:
+    """Usuwa (anonimizuje) konto admin@admin, jeśli nadal ma hasło „admin".
+
+    Ta sama anonimizacja co „Delete account" w portalu: wiersz zostaje (FK:
+    zamówienia, telemetria, dziennik), znika adres, prawa admina i hasło — nowy
+    hash ubija też wszystkie otwarte sesje tego konta. Warunki bezpieczeństwa:
+    hasło nadal „admin" (ktoś, kto je zmienił, świadomie tego konta używa) i
+    istnieje INNY aktywny admin, żeby nikt nie został odcięty od panelu.
+    Po usunięciu to jeden SELECT na zimny start, który nic nie znajduje.
+    """
+    email, haslo = _ZNANE_KONTO_ADMINA
+    session = SessionLocal()
+    try:
+        tr = session.query(Trader).filter(func.lower(Trader.email) == email).first()
+        if tr is None or not auth.verify_password(haslo, tr.password_hash):
+            return
+        inny_admin = (session.query(Trader.id)
+                      .filter(Trader.is_admin == True, Trader.id != tr.id,  # noqa: E712
+                              ~Trader.email.like("%@removed.invalid")).first())
+        if inny_admin is None:
+            print("[bezpieczenstwo] admin@admin ma haslo 'admin', ale to JEDYNY admin — "
+                  "zostawiam; dodaj admina przez ADMIN_BOOTSTRAP", flush=True)
+            return
+        tr.email = f"deleted-{tr.id}@removed.invalid"
+        tr.full_name = "Deleted User"
+        tr.is_admin = False
+        tr.password_hash = auth.hash_password(secrets.token_hex(24))
+        tr.google_sub = None
+        tr.telegram_user_id = None
+        tr.telegram_link_code = None
+        session.commit()
+        print(f"[bezpieczenstwo] konto admin@admin (id {tr.id}) usuniete — "
+              f"mialo znane haslo 'admin'", flush=True)
+    except Exception as e:  # pragma: no cover - start aplikacji ważniejszy
+        session.rollback()
+        print(f"[bezpieczenstwo] usuniecie admin@admin nieudane: {e}", flush=True)
+    finally:
+        session.close()
+
+
 def _bootstrap_adminow() -> None:
     """Konta administratorów z env `ADMIN_BOOTSTRAP` — bez dostępu do bazy z zewnątrz.
 
@@ -289,6 +334,7 @@ async def lifespan(app: FastAPI):
     # ADMIN_BOOTSTRAP dodany między deployami ma działać od następnego zimnego
     # startu. Funkcja sama pilnuje kosztu własnym znacznikiem w bazie.
     _bootstrap_adminow()
+    _usun_znane_konto_admina()
     _warn_if_placeholder_provisioning()
     for o in ostrzezenia_bezpieczenstwa():
         print(f"[start] BEZPIECZENSTWO: {o}", flush=True)

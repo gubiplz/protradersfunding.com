@@ -137,3 +137,60 @@ def test_inline_handlery_nie_uzywaja_samego_esc():
     for plik in STATIC.glob("*.js"):
         znalezione = wzorzec.findall(plik.read_text(encoding="utf-8"))
         assert not znalezione, f"{plik.name}: {znalezione[:3]}"
+
+
+def _zwolnij_admin_admin():
+    s = SessionLocal()
+    for t in s.query(Trader).filter(Trader.email == "admin@admin").all():
+        t.email = f"zwolniony-aa-{next(LICZNIK)}@test.pl"
+    s.commit(); s.close()
+
+
+def _admin_admin(haslo="admin", is_admin=True) -> int:
+    _zwolnij_admin_admin()
+    s = SessionLocal()
+    tr = Trader(email="admin@admin", password_hash=auth.hash_password(haslo),
+                full_name="Administrator", is_admin=is_admin, referral_code=f"AA{next(LICZNIK):05d}")
+    s.add(tr); s.commit(); tid = tr.id; s.close()
+    return tid
+
+
+def test_konto_admin_admin_ze_znanym_haslem_jest_usuwane():
+    _konto(is_admin=True)                       # inny, prawdziwy admin istnieje
+    tid = _admin_admin()
+    stary_token = _bearer(tid)
+    main_mod._usun_znane_konto_admina()
+    s = SessionLocal(); tr = s.get(Trader, tid)
+    assert tr.email.endswith("@removed.invalid") and tr.is_admin is False
+    assert not auth.verify_password("admin", tr.password_hash)
+    s.close()
+    assert client.get("/api/stats", headers=stary_token).status_code in (401, 403)
+    assert client.post("/api/auth/login", json={"email": "admin@admin", "password": "admin"}).status_code == 401
+
+
+def test_admin_admin_ze_zmienionym_haslem_zostaje():
+    _konto(is_admin=True)
+    tid = _admin_admin(haslo="mocne-haslo-2026")
+    main_mod._usun_znane_konto_admina()
+    s = SessionLocal(); tr = s.get(Trader, tid)
+    assert tr.email == "admin@admin" and tr.is_admin is True
+    s.close()
+    _zwolnij_admin_admin()
+
+
+def test_jedyny_admin_nie_jest_usuwany():
+    tid = _admin_admin()
+    s = SessionLocal()
+    inni = [t.id for t in s.query(Trader).filter(Trader.is_admin == True, Trader.id != tid).all()]  # noqa: E712
+    s.query(Trader).filter(Trader.id.in_(inni)).update({Trader.is_admin: False}, synchronize_session=False)
+    s.commit(); s.close()
+    try:
+        main_mod._usun_znane_konto_admina()
+        s = SessionLocal(); tr = s.get(Trader, tid)
+        assert tr.email == "admin@admin" and tr.is_admin is True, "nie odcinamy jedynego admina"
+        s.close()
+    finally:
+        s = SessionLocal()
+        s.query(Trader).filter(Trader.id.in_(inni)).update({Trader.is_admin: True}, synchronize_session=False)
+        s.commit(); s.close()
+        _zwolnij_admin_admin()
