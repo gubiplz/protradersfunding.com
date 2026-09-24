@@ -153,10 +153,11 @@ async function refreshLive(rerender=false){
   if(!TOKEN||!ME||_refreshing)return;
   _refreshing=true;
   refreshNotif();
+  let cicho=false;
   try{
     const stare=ME.credits_usd;
     ME=await api('/api/auth/me');
-    if(!rerender&&ME.credits_usd!==stare)rerender=true;
+    if(!rerender&&ME.credits_usd!==stare)cicho=true;
     /* Do tej pory ten przebieg pytal WYLACZNIE o saldo kredytow, wiec liczby na
        kartach kont staly do nastepnego wejscia w zakladke. Dla kont stojacych na
        poswiadczeniach lokalnych to bez znaczenia — ich equity i tak sie nie rusza.
@@ -164,10 +165,26 @@ async function refreshLive(rerender=false){
        stan podczas otwartej pozycji. Przerysowujemy tylko liste Challenges i tylko
        wtedy, gdy stoi na niej cos zywego: jedno zapytanie na minute, nie dla
        kazdego i nie na kazdym ekranie. */
-    if(!rerender&&window._view==='accounts'&&window._zywaLista)rerender=true;
+    if(!rerender&&window._view==='accounts'&&window._zywaLista)cicho=true;
   }catch(e){}
   finally{_refreshing=false}
   if(rerender&&window._view&&VIEWS[window._view])go(window._view);
+  else if(cicho&&window._view&&VIEWS[window._view])przerysujCicho(window._view);
+}
+/* Odświeżenie z minutnika, a nie z ręki klienta. go() pokazywało szkielet
+   (strona migała i traciła scroll), wysyłało sztuczne `view_open` do dziennika
+   i wyrzucało z karty konta z powrotem na listę. Tu: bez szkieletu, bez
+   telemetrii, z powrotem w to samo miejsce — i wcale, gdy klient coś wpisuje,
+   ma otwarte okno albo ogląda kartę jednego konta. */
+function przerysujCicho(v){
+  if(window._onDetail||document.querySelector('.modal'))return;
+  const a=document.activeElement;
+  if(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT'))return;
+  const moj=PRZEJSCIE,y=scrollY;
+  Promise.resolve(VIEWS[v]()).then(()=>{
+    if(moj!==PRZEJSCIE){if(VIEWS[CURV])VIEWS[CURV]();return}
+    scrollTo(0,y);
+  }).catch(()=>{});
 }
 /* Push-click target stored by sw.js in Cache Storage: read on startup AND on
    every return to the app — iOS can drop a postMessage to a suspended page,
@@ -183,7 +200,7 @@ function navFromUrl(u){
 function goNav(n){
   if(!n||!n.v)return false;
   if(n.v==='recap'){if(!n.acc)return false;openAcc(n.acc);return true}
-  if(!VIEWS[n.v])return false;
+  if(!Object.prototype.hasOwnProperty.call(VIEWS,n.v))return false;
   go(n.v);return true;
 }
 async function pendingNavView(){
@@ -847,6 +864,9 @@ function go(v){
   toggleSide(false);
   $('notif-panel')?.classList.add('hidden');
   const moj=++PRZEJSCIE;
+  /* Wykresy Analytics (Chart.js z własnymi ResizeObserverami) żyły dalej na
+     odpiętych canvasach aż do NASTĘPNEGO wejścia w Analytics. */
+  if(anCharts.length){anCharts.forEach(c=>{try{c.destroy()}catch(_){}});anCharts=[]}
   $('view').innerHTML=LOADING_HTML();
   Promise.resolve(VIEWS[v]())
     .then(()=>{if(moj!==PRZEJSCIE&&VIEWS[CURV])VIEWS[CURV]()})

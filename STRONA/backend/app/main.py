@@ -9019,6 +9019,13 @@ def admin_mail_resend(entry_id: int):
         session.close()
 
 
+def _przychod_calkowity(session) -> dict:
+    """Suma i liczba opłaconych zamówień (bez grantów BOGO za $0)."""
+    suma, ile = (session.query(func.coalesce(func.sum(Order.amount_usd), 0.0), func.count(Order.id))
+                 .filter(Order.status == "paid", Order.provider != "grant").one())
+    return {"revenue_usd": round(float(suma or 0), 2), "paid_orders": int(ile or 0)}
+
+
 @app.get("/api/stats", dependencies=[Depends(auth.require_admin)])
 def stats():
     """Statystyki OPERACYJNE (feed, tryb Stripe, pula) — tylko admin.
@@ -9058,6 +9065,10 @@ def stats():
                 "failed": by_status.get("failed", 0), "feed": settings.feed,
                 "stripe": "live" if settings.stripe_enabled else "mock",
                 "security_warnings": ostrzezenia_bezpieczenstwa(),
+                # Przychód z CAŁEJ tabeli (tylko odczyt). Kafelek Overview liczył
+                # go z /api/admin/orders, które oddaje 100 ostatnich zamówień —
+                # podpis „all paid orders" kłamał od setnego zamówienia.
+                **_przychod_calkowity(session),
                 # Oba kanały do leada chowają swój przycisk, gdy nie mają czym
                 # wysłać — i to jest jedyne miejsce, w którym widać, DLACZEGO.
                 # Bez tego brak konfiguracji wygląda dokładnie tak samo jak
