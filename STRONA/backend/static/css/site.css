@@ -35,6 +35,7 @@ html.has-promo{--promo-h:38px}
 html.has-promo.promo-off{--promo-h:0px}
 html.promo-off .promo-bar{display:none}
 
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 *{box-sizing:border-box;margin:0;padding:0}
 /* `display` z klasy przebija regule przegladarki dla atrybutu `hidden`, wiec
    kazdy element z wlasnym `display:flex/grid` zostawal na ekranie mimo `hidden`.
@@ -97,7 +98,7 @@ h1,h2,h3,.display{font-family:var(--display);letter-spacing:-.02em}
 .burger{display:none;flex-direction:column;gap:5px;padding:8px}
 .burger span{width:22px;height:2px;background:var(--txt);border-radius:2px;transition:.2s}
 .mobile-menu{display:none;position:fixed;top:calc(68px + var(--promo-h));left:0;right:0;z-index:49;background:rgba(255,255,255,.98);
-  backdrop-filter:blur(14px);border-bottom:1px solid var(--line);padding:18px 24px 26px;flex-direction:column;gap:16px;font-size:16px;
+  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-bottom:1px solid var(--line);padding:18px 24px 26px;flex-direction:column;gap:16px;font-size:16px;
   box-shadow:0 20px 40px -20px rgba(15,23,42,.15)}
 .mobile-menu.open{display:flex}
 

@@ -40,6 +40,7 @@
   --sbw:248px;
 }
 
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 *{box-sizing:border-box;margin:0;padding:0}
 /* html gets the app background — the macOS rubber-band bounce reveals the root
    canvas past the page edge, and a bare one flashed white instead of the page color. */
@@ -60,7 +61,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .up{color:var(--green)} .down{color:var(--red)}
 
 /* ---------------- APP LAYOUT ---------------- */
-.app{display:flex;min-height:100vh}
+.app{display:flex;min-height:100vh;min-height:100dvh}
 
 .side{width:var(--sbw);flex:0 0 var(--sbw);background:var(--panel);border-right:1px solid var(--line);
   display:flex;flex-direction:column;position:fixed;top:0;bottom:0;left:0;z-index:40;
@@ -447,7 +448,7 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
    dokladnie na zgodzie i przycisku „Create account" — i tapniecie trafia w
    baner. Na body tego dac nie mozna: html,body maja height:100%, wiec przy
    border-box padding schowalby sie w srodku zamiast wydluzyc strone. */
-.auth-wrap{min-height:100vh;display:grid;grid-template-columns:1.1fr 1fr;
+.auth-wrap{min-height:100vh;min-height:100dvh;display:grid;grid-template-columns:1.1fr 1fr;
   padding-bottom:var(--ck-h,0px)}
 .auth-brand{position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:space-between;
   padding:44px 52px;border-right:1px solid var(--line);background:
@@ -841,7 +842,7 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 @media print{
   body *{visibility:hidden}
   #inv-modal,#inv-modal *{visibility:visible}
-  #inv-modal{position:absolute!important;inset:0;background:#fff!important;backdrop-filter:none;padding:0}
+  #inv-modal{position:absolute!important;inset:0;background:#fff!important;-webkit-backdrop-filter:none;backdrop-filter:none;padding:0}
   #inv-modal .inv-print{box-shadow:none;border-radius:0;max-width:none}
   #inv-modal .noprint{display:none!important}
 }
@@ -913,7 +914,7 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 @media(max-width:960px){
   /* scrim under the open drawer (.side z-index:40, topbar 30) + scroll lock */
   body.nav-open::before{content:"";position:fixed;inset:0;z-index:39;
-    background:var(--scrim);backdrop-filter:blur(2px);animation:scrim-in .2s ease}
+    background:var(--scrim);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);animation:scrim-in .2s ease}
   body.nav-open{overflow:hidden}
   /* brand pill must not overlap the drawer close button */
   .side-head{min-width:0}
@@ -979,7 +980,7 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
    lifted above the bar below. Requires viewport-fit=cover for the safe area.
    Offsets are scoped to body.has-botnav so the portal is not double-padded. */
 .botnav{position:fixed;left:0;right:0;bottom:0;z-index:35;display:none;
-  background:var(--glass);backdrop-filter:blur(12px);
+  background:var(--glass);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
   border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
 .botnav-btn{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;
   justify-content:center;gap:3px;min-height:56px;padding:6px 2px 7px;background:none;
@@ -1540,7 +1541,7 @@ html:not(.pwa){overscroll-behavior-y:contain}
 .act-chip.live{color:var(--green);border-color:var(--green-line)}
 .act-chip.live:hover{color:var(--green);border-color:var(--green-line)}
 
-.detail-grid{display:grid;grid-template-columns:1fr;gap:14px;margin-bottom:14px}
+.detail-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;margin-bottom:14px}
 @media(min-width:1100px){.detail-grid{grid-template-columns:minmax(0,1fr) 320px;align-items:start}}
 .res-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
 .res-head h3{margin:0}

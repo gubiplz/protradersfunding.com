@@ -22,7 +22,7 @@
 }
 
 .cert-page{
-  min-height:100vh;display:flex;flex-direction:column;align-items:center;
+  min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;align-items:center;
   justify-content:center;gap:16px;padding:24px 16px;
   background:radial-gradient(70% 55% at 50% 0%,#0d1a3a 0%,var(--k-tlo) 72%);
 }
