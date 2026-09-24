@@ -36,6 +36,12 @@ class Trader(Base):
     # go nie zna) — portal pozwala wtedy ustawić hasło bez „obecnego".
     # NULL = konto sprzed tej kolumny: patrz main._haslo_ustawione.
     password_set: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Zmiana adresu e-mail: nowy adres czeka, aż klient wpisze kod wysłany na
+    # OBECNY adres. Kod trzymany jako skrót HMAC, nie jawnie.
+    pending_email: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    email_change_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    email_change_expires: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    email_change_attempts: Mapped[int | None] = mapped_column(Integer, nullable=True)
     full_name: Mapped[str] = mapped_column(String(120), default="")
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
 

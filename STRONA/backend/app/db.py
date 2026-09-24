@@ -131,6 +131,11 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         # NULL dla istniejących kont — o tym, czy znają hasło, decyduje wtedy
         # google_sub (main._haslo_ustawione). Bez DEFAULT: brak backfillu.
         "password_set": "BOOLEAN",
+        # Zmiana e-maila potwierdzana kodem na stary adres (main.me_email_*).
+        "pending_email": "VARCHAR(180)",
+        "email_change_hash": "VARCHAR(64)",
+        "email_change_expires": "TIMESTAMP",
+        "email_change_attempts": "INTEGER",
         "first_name": "VARCHAR(60)",
         "last_name": "VARCHAR(60)",
         "phone": "VARCHAR(32)",
