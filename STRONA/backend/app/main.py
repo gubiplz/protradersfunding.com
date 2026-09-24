@@ -4349,6 +4349,9 @@ def admin_traders(q: str | None = None, imported: int = 0):
                  # w wierszu klienta); bez uchwytu okno prosi o wpisanie.
                  "lead_id": leady[t.id].id if t.id in leady else None,
                  "telegram": (leady[t.id].telegram or None) if t.id in leady else None,
+                 # Numer do czatu po telefonie, gdy uchwyt z ankiety nie istnieje.
+                 # Najpierw z leada (ankieta), potem z konta tradera.
+                 "phone": ((leady[t.id].phone if t.id in leady else None) or t.phone or None),
                  "kyc_status": t.kyc_status, "accounts": counts.get(t.id, 0),
                  "credits_usd": round(float(t.credits_usd or 0), 2),
                  "referred_count": poleceni.get(t.referral_code, 0),
@@ -7208,6 +7211,15 @@ def admin_archive_import(payload: ArchiveImportIn):
             start=payload.start)
     finally:
         session.close()
+
+
+@app.get("/api/admin/telegram/handle", dependencies=[Depends(auth.require_admin)])
+def admin_telegram_handle(h: str = ""):
+    """Czy uchwyt prowadzi do konta — okno wiadomości pyta o to przy otwarciu,
+    żeby „Open in Telegram" nie kończyło się w Telegramie na „użytkownik nie
+    istnieje". Szczegóły w `telegram.sprawdz_uchwyt`."""
+    uchwyt = h.strip().replace("https://t.me/", "").lstrip("@").split("?")[0]
+    return {"handle": uchwyt, **telegram.sprawdz_uchwyt(uchwyt)}
 
 
 @app.get("/api/admin/telegram/overview", dependencies=[Depends(auth.require_admin)])

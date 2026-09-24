@@ -129,4 +129,5 @@ def test_panel_ma_przycisk_message_w_leads():
     assert "function openLeadMessage(id)" in kod and "function leadMsgEmail(id)" in kod
     assert "openMailComposer({lead:l,mark:'first'})" in kod
     assert "mark:c.mark||undefined" in kod
-    assert "window.open('https://t.me/+'+tel" in kod              # czat po numerze
+    # czat po numerze: t.me w przeglądarce, tg:// w aplikacji na telefonie (PWA)
+    assert "'https://t.me/+'+tel" in kod and "'tg://resolve?phone='+tel" in kod

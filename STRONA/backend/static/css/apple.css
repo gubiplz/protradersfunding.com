@@ -338,6 +338,37 @@ html[data-theme=dark] .todo{box-shadow:0 0 0 .5px var(--np-hair),0 12px 32px -20
   table.lead-tbl td.rt-main{margin-bottom:2px}
 }
 
+/* ---------- telefon: rekordy jako osobne karty + czytelne pola ----------
+   Jeden wspólny kontener z kreską 0,5 px między rekordami zlewał listę w jedną
+   ścianę tekstu — przy przewijaniu nie było widać, gdzie kończy się konto,
+   a zaczyna następne. Siatka pól i tytuł zostają jak wyżej; każdy rekord
+   dostaje z powrotem własne tło, zaokrąglenie i 10 px odstępu.
+   Do tego dwie rzeczy, które psuły czytanie pól w siatce:
+   - komórki liczbowe mają inline `text-align:right` pod kolumny desktopu;
+     w kolumnie siatki szerokiej na 100+ px liczba odjeżdżała od swojej
+     etykiety (P&L wisiał w połowie pustego pola) — tu idą pod etykietę;
+   - e-mail w polu szerokim na jedną kolumnę łamał się w środku adresu
+     („corneliusr37@gma / il.com") — pola z osobą dostają dwie kolumny,
+     a druga linia (e-mail, kraj) jest jedną linią z wielokropkiem. Pełny
+     adres jest w szczegółach rekordu po stuknięciu. */
+@media(max-width:860px){
+  .rtbl-wrap{background:transparent!important;box-shadow:none!important;border-radius:0;overflow:visible}
+  table.rtbl tr,table.rtbl tr+tr{margin:0 0 10px;border-radius:14px;background:var(--panel);
+    box-shadow:0 0 0 .5px var(--np-hair),0 1px 2px rgba(15,23,42,.04),0 8px 22px -18px rgba(15,23,42,.28)}
+  /* rozwijany wiersz edycji (pool) doklejony do swojej karty, nie osobna karta */
+  table.rtbl tr.tr-sub{margin-top:-14px;border-radius:0 0 14px 14px;box-shadow:0 .5px 0 var(--np-hair)}
+  table.rtbl td{text-align:left!important}
+  table.rtbl td[data-l="Trader"],table.rtbl td[data-l="Client"],table.rtbl td[data-l="From"]{grid-column:span 2}
+  table.rtbl:not(.lead-tbl) td:not(.rt-main)>div.muted{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* tytuł karty (np. e-mail w Orders) też jedną linią — łamany w środku
+     adresu był nieczytelny; pełna wartość jest w szczegółach */
+  table.rtbl:not(.lead-tbl) td.rt-main,table.rtbl:not(.lead-tbl) td.rt-main>div{
+    white-space:nowrap!important;overflow:hidden;text-overflow:ellipsis}
+  /* akcje tylko na komputer (np. usunięcie konta): na telefonie za łatwo trafić
+     kciukiem przy przewijaniu; arkusz przytrzymania też ich nie pokazuje */
+  table.rtbl td.rt-desk{display:none!important}
+}
+
 /* ---------- bilety: rozmowa jak w komunikatorze (chat-kit.js) ----------
    Moje dymki po prawej w kolorze akcentu, rozmówcy po lewej na szarym (jak
    iMessage/WhatsApp). Kolejne wiadomości jednej osoby w grupie: ciaśniej
