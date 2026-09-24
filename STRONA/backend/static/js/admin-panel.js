@@ -1791,9 +1791,10 @@ const leadAnswers=a=>Object.entries(a||{}).map(([q,v])=>`${q} → ${v}`).join('\
 
 /* ---------- click-to-message ----------
    The desk writes the same first message every time, so it lives here once.
-   t.me by phone number cannot prefill a draft, which is why every phone action
-   ALSO drops the opener on the clipboard; t.me by handle and WhatsApp prefill
-   it themselves. Edit the text below to change what the team opens with. */
+   Telegram prefills the draft both by handle and by phone number
+   (t.me/+<phone>?text=); phone actions still drop the opener on the clipboard
+   as a fallback for older Telegram clients. Edit the text below to change what
+   the team opens with. */
 const leadOpener=l=>{const first=(l.name||'').trim().split(/\s+/)[0]||'there';
   return `Hey ${first}, this is the Forex Passing desk — your application just landed with me. `
     +`Ready to walk you through the next step when you are.`};
@@ -2131,7 +2132,7 @@ async function tgCheck(){
   el.innerHTML=r.exists
     ?'<span class="up">&#10003; '+esc(r.name||('@'+h))+'</span>'
     :'<span class="down"><b>No Telegram account is called @'+esc(h)+'.</b></span> '
-      +(tel?'“Open in Telegram” will find them by phone (+'+esc(tel)+') and copy the text for you.'
+      +(tel?'“Open in Telegram” will open the chat by their phone number (+'+esc(tel)+') with the text typed in.'
            :'Ask them for their real handle, or use “Copy text”.');
 }
 /* W panelu zainstalowanym na telefonie (PWA) link https://t.me otwierał się
@@ -2141,9 +2142,13 @@ async function tgCheck(){
    zrobiłby nic, a t.me pokaże stronę z przyciskiem. */
 const _tgPwa=()=>{try{return matchMedia('(display-mode: standalone)').matches||navigator.standalone===true}catch(e){return false}};
 function tgLink(h,tel,text){
-  if(_tgPwa())return h?'tg://resolve?domain='+encodeURIComponent(h)+'&text='+encodeURIComponent(text)
-                      :'tg://resolve?phone='+tel;
-  return h?'https://t.me/'+encodeURIComponent(h)+'?text='+encodeURIComponent(text):'https://t.me/+'+tel;
+  /* Link po numerze TEŻ przyjmuje gotowy tekst (core.telegram.org/api/links:
+     t.me/+<numer>?text= i tg://resolve?phone=<numer>&text=). Stary komentarz
+     twierdził inaczej i czat po numerze otwierał się z pustym polem. */
+  const t=text?encodeURIComponent(text):'';
+  if(_tgPwa())return h?'tg://resolve?domain='+encodeURIComponent(h)+(t?'&text='+t:'')
+                      :'tg://resolve?phone='+tel+(t?'&text='+t:'');
+  return h?'https://t.me/'+encodeURIComponent(h)+(t?'?text='+t:''):'https://t.me/+'+tel+(t?'?text='+t:'');
 }
 /* „Message" w Leads: to samo okno w trybie leada; przelacznik na e-mail
    otwiera wspolne okno maila z ta sama zasada statusu (`mark: 'first'`). */
@@ -2250,7 +2255,8 @@ async function tgOpen(){
   else{window.open(url,'_blank','noopener');if(!h){try{await navigator.clipboard.writeText(text)}catch(e){}}}
   const r=await tgLog(h,text);
   document.getElementById('tg-modal')?.remove();
-  toast((h?'Chat opened with the text ready — press send there.':'Chat opened by phone number — the text is in your clipboard, paste it.')
+  toast((h?'Chat opened with the text ready — press send there.'
+          :'Chat opened by phone number with the text ready — press send there. (Also copied, in case your Telegram leaves the field empty.)')
     +(r&&r.marked?' Marked messaged.':''));
   if(VIEW==='clients')await VIEWS.clients();
   if(_tgCtx&&_tgCtx.lead){const id=_tgCtx.lead.id;
@@ -2450,9 +2456,12 @@ function leadTgLink(l){
 }
 /* Three icon actions (owner's spec): paper plane = write on Telegram by the
    HANDLE the lead left (prefilled opener); phone = Telegram chat looked up by
-   the PHONE NUMBER (t.me cannot prefill there, so the click also drops the
-   opener on the clipboard); copy = just the opener. Each icon shows only when
-   its target actually exists — a dead t.me link looks like contact and is not. */
+   the PHONE NUMBER (prefilled too; the opener also goes to the clipboard as a
+   fallback); copy = just the opener. Each icon shows only when its target
+   actually exists — a dead t.me link looks like contact and is not.
+   Links come from `tgLink`: in the panel installed on a phone they are tg://
+   straight into the Telegram app — https://t.me with target=_blank opened an
+   in-app browser there that went blank after handing over to Telegram. */
 const ICO_TG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>';
 const ICO_PHONE='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.6a2 2 0 0 1-.5 2.1L8 9.6a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.8.3 1.7.5 2.6.6a2 2 0 0 1 1.7 2z"/></svg>';
 const ICO_COPY='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
@@ -2460,20 +2469,47 @@ const ICO_SMS='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke
 const ICO_MAIL='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m3 6 9 6.5L21 6"/></svg>';
 const ICO_TPL='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/><path d="M8.5 10.5h7M8.5 13.5h4.5"/></svg>';
 const ICO_PEN='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+/* Uchwyt z ankiety bywa imieniem („CorneliusRogers"), a nie kontem. Ikona
+   samolotu otwierała wtedy martwy czat. Każdy widoczny uchwyt sprawdzamy raz
+   w tle (ten sam endpoint co okno wiadomości) i przy „nie ma takiego konta"
+   samolot znika — zostaje telefon, który otwiera czat po numerze. Wynik
+   w pamięci strony i w sessionStorage, żeby przewijanie listy nie pytało
+   t.me o to samo. */
+const _tgStan=(()=>{try{return JSON.parse(sessionStorage.getItem('pf_tg_stan')||'{}')}catch(e){return{}}})();
+let _tgStanT=null,_tgStanTrwa=false;
+function tgSprawdzWidoczneLater(){clearTimeout(_tgStanT);_tgStanT=setTimeout(tgSprawdzWidoczne,300)}
+async function tgSprawdzWidoczne(){
+  if(_tgStanTrwa)return;_tgStanTrwa=true;
+  try{
+    const doSprawdzenia=[...new Set([...document.querySelectorAll('a[data-tg-h]')]
+      .map(a=>a.dataset.tgH.toLowerCase()))].filter(h=>!(h in _tgStan)).slice(0,30);
+    for(let i=0;i<doSprawdzenia.length;i+=4){
+      await Promise.all(doSprawdzenia.slice(i,i+4).map(async h=>{
+        try{const r=await api('/api/admin/telegram/handle?h='+encodeURIComponent(h));
+          if(r&&r.exists!=null)_tgStan[h]=r.exists}catch(e){}
+      }));
+    }
+    try{sessionStorage.setItem('pf_tg_stan',JSON.stringify(_tgStan))}catch(e){}
+    document.querySelectorAll('a[data-tg-h]').forEach(a=>{
+      if(_tgStan[a.dataset.tgH.toLowerCase()]===false)a.remove()});
+  }finally{_tgStanTrwa=false}
+}
 function leadPhoneActs(l){
   const h=String(l.telegram||'').replace(/^@/,'');
-  const handleOk=TG_HANDLE_RE.test(h);
+  const handleOk=TG_HANDLE_RE.test(h)&&_tgStan[h.toLowerCase()]!==false;
+  if(handleOk&&!(h.toLowerCase() in _tgStan))tgSprawdzWidoczneLater();
   const digits=String(l.phone||'').replace(/\D/g,'');
   const intl=String(l.phone||'').trim().startsWith('+')&&digits.length>=8;
   if(!handleOk&&!intl&&!l.sms_ready&&!l.mail_ready)return'';
-  const opener=encodeURIComponent(leadOpener(l));
+  const opener=leadOpener(l);
+  const cel=_tgPwa()?'':' target="_blank" rel="noopener"';
   return `<span class="lead-acts">${handleOk
     ?`<a class="act-btn" title="Write on Telegram to @${esc(h)} — opener prefilled"
-        aria-label="Telegram by handle" href="https://t.me/${esc(h)}?text=${opener}"
-        target="_blank" rel="noopener" onclick="markMessaged(${l.id})">${ICO_TG}</a>`:''}${intl
-    ?`<a class="act-btn" title="Telegram chat found by the phone number (opener goes to the clipboard)"
-        aria-label="Telegram by phone" href="https://t.me/+${digits}"
-        target="_blank" rel="noopener" onclick="copyOpener(${l.id});markMessaged(${l.id})">${ICO_PHONE}</a>`:''}${l.sms_ready
+        aria-label="Telegram by handle" data-tg-h="${esc(h)}" href="${esc(tgLink(h,'',opener))}"${cel}
+        onclick="markMessaged(${l.id})">${ICO_TG}</a>`:''}${intl
+    ?`<a class="act-btn" title="Telegram chat by the phone number — opener prefilled"
+        aria-label="Telegram by phone" href="${esc(tgLink('',digits,opener))}"${cel}
+        onclick="copyOpener(${l.id});markMessaged(${l.id})">${ICO_PHONE}</a>`:''}${l.sms_ready
     ?`<button class="act-btn" type="button" aria-label="Send a text message"
         title="Text them the Telegram link — for people the Telegram side never reaches"
         onclick="sendLeadSms(${l.id})">${ICO_SMS}</button>`:''}${l.mail_ready

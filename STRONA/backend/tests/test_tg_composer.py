@@ -120,7 +120,7 @@ def test_panel_ma_okno_tg_w_clients_a_w_leads_osobny_przycisk():
     assert 'onclick="openTgComposer(${t.id})"' in kod          # wiersz klienta
     assert "'/api/admin/traders/'+c.trader.id+'/telegram-note'" in kod
     assert "'/api/admin/leads/'+c.lead.id+'/telegram-note'" in kod
-    assert "https://t.me/'+encodeURIComponent(h)+'?text='" in kod
+    assert "'https://t.me/'+encodeURIComponent(h)+(t?'?text='+t:'')" in kod
     assert "Another wording" in kod and "function tgShuffle()" in kod
     # Leads: szybkie przyciski karty zostają; okno z szablonami otwiera
     # OSOBNY przycisk „Message", nie render listy wprost.
