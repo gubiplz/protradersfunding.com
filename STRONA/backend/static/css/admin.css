@@ -580,7 +580,7 @@ button.status-tap{border:0;cursor:pointer;font-family:inherit}
   .toolbar>.tb-act .tb-lbl{display:none}
   .toolbar>.tb-act .tb-ico{font-size:17px}
   .toolbar .tb-filters{display:flex;order:2;flex:1 0 100%;min-width:0;align-items:center;gap:8px;
-    overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+    overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scrollbar-width:none}
   .toolbar .tb-filters::-webkit-scrollbar{display:none}
   #view>.toolbar .tb-filters{margin:0 -16px;padding:0 16px;scroll-padding:0 16px}
   .toolbar .tb-filters>*{flex:none}

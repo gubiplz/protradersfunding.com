@@ -320,8 +320,11 @@ html[data-theme=dark] .todo{box-shadow:0 0 0 .5px var(--np-hair),0 12px 32px -20
   table.rtbl td.rt-main div,table.rtbl td.rt-main .muted{font-size:12.5px;font-weight:400;margin-top:1px}
   table.rtbl tr.clickable td.rt-main{padding-right:20px}
   table.rtbl tr.clickable td.rt-main::after{right:0}
-  table.rtbl td.rt-acts{grid-column:1/-1;display:flex;flex-wrap:nowrap;justify-content:flex-start;gap:6px;
-    overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;margin:1px -14px 0;padding:1px 14px}
+  /* overflow-y:hidden — samo overflow-x:auto robi z paska przewijanie w OBU
+     osiach, a niewidzialne pole trafienia X-a (.btn-x::after, inset -9px na
+     dotyku) wystawało poza pasek: przyciski jeździły palcem też w pionie. */
+  table.rtbl td.rt-acts{grid-column:1/-1;display:flex;flex-wrap:nowrap;justify-content:flex-start;align-items:center;gap:6px;
+    overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scrollbar-width:none;margin:1px -14px 0;padding:1px 14px}
   table.rtbl td.rt-acts::-webkit-scrollbar{display:none}
   table.rtbl td.rt-acts .btn-o,table.rtbl td.rt-acts .btn-p,table.rtbl td.rt-acts .btn-danger{
     flex:none;min-height:32px;height:32px;padding:0 12px;font-size:13px;border-radius:10px}
