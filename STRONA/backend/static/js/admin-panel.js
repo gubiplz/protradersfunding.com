@@ -1645,8 +1645,8 @@ function renderPayoutsView(){
       <td class="num" data-l="Profit">$${fmt(r.profit_amount)}</td><td class="num up" data-l="Share">$${fmt(r.trader_share)}</td>
       <td data-l="Method">${(()=>{const d=r.details||{};
         const label=r.method==='usdt'?'USDT':r.method==='wise'?'Wise':'Bank';
-        const info=r.method==='usdt'?[d.network,d.address].filter(Boolean).join(' · ')
-          :r.method==='wise'?(d.email||'')
+        if(r.method==='usdt')return esc(label)+payAddrHtml(d.network,d.address);
+        const info=r.method==='wise'?(d.email||'')
           :[d.holder,d.iban,d.swift,d.bank_name].filter(Boolean).join(' · ');
         return `${esc(label)}${info?`<div class="muted mono" style="font-size:var(--fs-cap);max-width:260px;word-break:break-all">${esc(info)}</div>`:''}`})()}</td>
       <td data-l="Status"><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending'
@@ -3828,17 +3828,37 @@ async function renderClientCard(tid,email){
     ${journalChips(t)}
     <div class="kv"><span>E-mail</span><b>${esc(t.email||email||'—')}</b></div>
     <div class="kv"><span>Signed up</span><b>${t.created_at?dstr(t.created_at):'—'}</b></div>
+    <div style="margin-top:12px">${msgRow(tid)}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn-o sm" style="margin-top:10px" onclick="openTraderJournal(${tid},'${esc(t.email||email||'')}')">Full activity journal</button>
       <button class="btn-o sm" style="margin-top:10px" onclick="impersonate(${tid})">View portal as client</button>
       ${kycAskBtn(t,'card')}
     </div>`;
 }
+/* „Message" w dzienniku (Activity) i na karcie Client (Accounts): te same okna
+   co w Clients — e-mail i Telegram z szablonami. Okna biora klienta z listy
+   Clients (tam jest uchwyt Telegrama z leada i `awaiting_claim` pod
+   zaproszenie), a z tych zakladek lista moze jeszcze nie byc wczytana — wtedy
+   dociagamy ja raz, tym samym filtrem importu. */
+const msgRow=tid=>`<div class="jrn-msg"><span class="muted">Message</span>
+    <button class="btn-p sm" onclick="jrnMessage(${tid},'mail')"
+      title="E-mail from the platform or Forex Passing address — templates, or resend the portal invite / password link">E-mail</button>
+    <button class="btn-p sm" onclick="jrnMessage(${tid},'tg')"
+      title="Open a Telegram chat from your own account with a template ready to send">Telegram</button></div>`;
+async function jrnMessage(tid,kanal){
+  if(!(window._clients||[]).some(x=>x.id===tid)){
+    try{window._clients=await api('/api/admin/traders'+impQ())}
+    catch(e){toast('Error: '+e.message,'err');return}
+  }
+  if(!(window._clients||[]).some(x=>x.id===tid)){toast('This client cannot be messaged from the panel.','err');return}
+  return kanal==='tg'?openTgComposer(tid):openClientMail(tid);
+}
 async function openTraderJournal(tid,email){
   let d; try{d=await api(`/api/admin/traders/${tid}/journal`)}catch(e){toast('Error: '+e.message,'err');return}
   const t=d.trader||{};
   openOver(`Journal · ${t.email||email||('trader #'+tid)}`,
     journalChips(t)
+    +msgRow(tid)
     +`<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn-o sm" onclick="impersonate(${tid})">View portal as client</button>${kycAskBtn(t,'journal')}</div>`
     +`<p class="muted" style="font-size:12.5px;margin:2px 0">Everything this client did — sign-ins, portal visits, orders, payouts, tickets — newest first.</p>`
     +journalTimeline(d.items));
@@ -4341,6 +4361,31 @@ async function revokeCert(pid,accId){
       accId?renderPayouts(accId):VIEWS.payouts();
     }catch(e){toast('Error: '+e.message,'err')}
   });
+}
+/* Adres portfela w tabeli wyplat: 42 znaki lamane po 10 rozpychaly komorke na
+   pol ekranu. W wierszu skrot 0x56e0…b193 (dosc, zeby poznac portfel), pelny
+   adres dopiero po „show" — z kopiowaniem, bo przepisywanie go recznie to
+   przelew w prozni. */
+const skrotAdresu=a=>a.length>14?a.slice(0,6)+'…'+a.slice(-4):a;
+function payAddrHtml(net,addr){
+  net=String(net||'').trim();addr=String(addr||'').trim();
+  if(!addr)return net?`<div class="muted mono pay-addr">${esc(net)}</div>`:'';
+  const krotki=skrotAdresu(addr)===addr;
+  return `<div class="muted mono pay-addr" data-addr="${esc(addr)}">${net?esc(net)+' · ':''}<span class="pa-short">${esc(skrotAdresu(addr))}</span>${
+    krotki?'':`<span class="pa-full" hidden>${esc(addr)}</span>
+    <button type="button" class="pa-btn" onclick="event.stopPropagation();payAddrToggle(this)" aria-expanded="false">show</button>`}
+    <button type="button" class="pa-btn pa-copy"${krotki?'':' hidden'} onclick="event.stopPropagation();payAddrCopy(this)">copy</button></div>`;
+}
+function payAddrToggle(b){
+  const box=b.closest('.pay-addr'),full=box.querySelector('.pa-full'),open=full.hidden;
+  full.hidden=!open;box.querySelector('.pa-short').hidden=open;
+  box.querySelector('.pa-copy').hidden=!open;
+  b.textContent=open?'hide':'show';b.setAttribute('aria-expanded',String(open));
+}
+function payAddrCopy(b){
+  const a=b.closest('.pay-addr').dataset.addr;
+  (navigator.clipboard?navigator.clipboard.writeText(a):Promise.reject())
+    .then(()=>toast('Wallet address copied.','ok'),()=>{prompt('Copy the address:',a)});
 }
 function copyCert(url){navigator.clipboard.writeText(url)
   .then(()=>toast('Certificate link copied.','ok'),()=>toast('Could not copy.','err'))}
