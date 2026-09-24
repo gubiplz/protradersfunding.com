@@ -1,4 +1,4 @@
-{# Analityka: GA4 (liczby) + Microsoft Clarity (nagrania sesji, heatmapy).
+{# Analityka: GA4 (liczby) + Microsoft Clarity (nagrania sesji, heatmapy) + Vercel Web Analytics.
    Jeden plik na trzy szablony — snippet powielony w każdym z osobna rozjeżdżał
    się przy pierwszej zmianie, a wtedy część ruchu cicho przestaje się liczyć.
    Puste id = znacznik w ogóle nie wychodzi, więc lokalnie i w testach nie leci
@@ -23,3 +23,7 @@ var t=document.createElement("script");t.async=1;
 t.src="https://www.clarity.ms/tag/{{ clarity_id }}";document.head.appendChild(t)}
 ev.forEach(function(e){addEventListener(e,go,{passive:true})});
 addEventListener("load",function(){setTimeout(go,4000)})})();</script>{% endif %}
+{# Vercel Web Analytics — liczby wizyt bez cookies, privacy-friendly.
+   Wymaga włączenia w dashboard Vercela dla projektu. #}
+<script>window.va=window.va||function(){(window.vaq=window.vaq||[]).push(arguments)};</script>
+<script defer src="/_vercel/insights/script.js"></script>

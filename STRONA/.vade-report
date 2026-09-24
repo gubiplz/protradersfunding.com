@@ -1,0 +1,51 @@
+Implemented Vercel Web Analytics for the project.
+
+## What was implemented:
+
+### Modified Files:
+- `backend/templates/_analytics.html` - Added Vercel Web Analytics script
+
+### Changes Made:
+1. Fetched the latest Vercel Analytics quickstart documentation from the official Vercel docs
+2. Identified this as a Python/FastAPI application with Jinja2 templates (not a JavaScript framework)
+3. Added the Vercel Web Analytics script to the existing `_analytics.html` template following the HTML/vanilla JS installation method from the official documentation
+
+### Implementation Details:
+
+The Vercel Web Analytics script was added to `backend/templates/_analytics.html`, which is already included in:
+- `base.html` - the main base template used by most pages
+- `certificate.html` - certificate verification page
+- `portal.html` - trader portal page
+
+This ensures analytics will be tracked across all pages of the application.
+
+The implementation uses the vanilla HTML/JavaScript approach as documented in the Vercel Analytics quickstart guide:
+```html
+<script>window.va=window.va||function(){(window.vaq=window.vaq||[]).push(arguments)};</script>
+<script defer src="/_vercel/insights/script.js"></script>
+```
+
+### Why this approach:
+
+1. This is a Python/FastAPI application deployed on Vercel, not a Node.js/JavaScript framework
+2. No package installation is needed - Vercel Analytics for vanilla HTML/JS uses a simple script tag
+3. The script is added to the existing analytics template that already contains Google Analytics and Microsoft Clarity
+4. The implementation is privacy-friendly and works without cookies
+
+### Template Validation:
+
+✓ Jinja2 template syntax validated successfully
+✓ Template renders correctly with empty context
+✓ Vercel Analytics script is present in rendered output
+
+### Next Steps:
+
+To enable analytics data collection, you need to:
+1. Deploy this change to Vercel
+2. Go to your project's Analytics section in the Vercel dashboard
+3. Click the "Enable" button to activate Web Analytics for this project
+4. Once enabled, you'll see analytics data in your Vercel dashboard after users visit the site
+
+### Note:
+
+No package.json or lock files were modified because this is a Python-based project. The Vercel Analytics script is loaded directly from Vercel's CDN and requires no npm dependencies.
