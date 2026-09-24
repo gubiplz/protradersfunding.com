@@ -2,6 +2,8 @@
 jak i na Postgres/Supabase (produkcja) — wystarczy zmienić DATABASE_URL."""
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
@@ -79,6 +81,34 @@ def schema_fingerprint() -> str | None:
         return row[0] if row else None
     except Exception:
         return None
+
+
+@contextmanager
+def zamek_migracji():
+    """Jedna instancja naraz przez ścieżkę migracji (tylko Postgres).
+
+    Po deployu kilka instancji startuje jednocześnie i każda widzi nowy odcisk
+    commita — bez zamka dwie robiły ten sam ALTER TABLE i druga padała na
+    „column already exists", a z nią cały start tej instancji (500-tki).
+
+    `pg_advisory_xact_lock` (zamek TRANSAKCYJNY, nie sesyjny): zwalnia się sam
+    przy końcu transakcji, więc działa także za poolerem Supabase w trybie
+    transakcyjnym, gdzie zamek sesyjny potrafiłby „wisieć" na cudzym połączeniu.
+    """
+    if engine.dialect.name != "postgresql":
+        yield
+        return
+    from sqlalchemy import text
+    conn = engine.connect()
+    trans = conn.begin()
+    try:
+        conn.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": 72_730_001})
+        yield
+    finally:
+        try:
+            trans.commit()
+        finally:
+            conn.close()
 
 
 def mark_schema_current(fingerprint: str) -> None:
@@ -295,6 +325,8 @@ _NEW_INDEXES: list[tuple[str, str]] = [
     ("traders", "telegram_user_id"),
     # Znak zgloszenia sprawdzamy na wyjatkowosc przy kazdym nowym tickecie.
     ("support_tickets", "ref"),
+    # Każde „Continue with Google" szuka konta po tej kolumnie.
+    ("traders", "google_sub"),
 ]
 
 
@@ -534,7 +566,8 @@ def _add_missing_columns() -> None:
             for name, ddl_type in columns.items():
                 if name in have:
                     continue
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl_type}"))
+                jesli = "IF NOT EXISTS " if engine.dialect.name == "postgresql" else ""
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {jesli}{name} {ddl_type}"))
                 print(f"[db] dodano kolumnę {table}.{name}")
 
 

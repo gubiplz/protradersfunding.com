@@ -102,8 +102,16 @@ def leady_po_mailu(session, traderzy: list[Trader]) -> dict[int, Lead]:
     """
     if not traderzy:
         return {}
+    # Tylko leady z maili tej listy — wcześniej każda lista w panelu (konta,
+    # klienci, wypłaty) czytała CAŁĄ tabelę leadów. Porcje po 500, żeby
+    # klauzula IN nie rosła bez końca razem z bazą klientów.
+    szukane = sorted({(t.email or "").strip().lower() for t in traderzy} - {""})
+    kandydaci: list[Lead] = []
+    for i in range(0, len(szukane), 500):
+        kandydaci += (session.query(Lead)
+                      .filter(func.lower(func.trim(Lead.email)).in_(szukane[i:i + 500])).all())
     leady: dict[str, Lead] = {}
-    for lead in session.query(Lead).all():
+    for lead in kandydaci:
         klucz = (lead.email or "").strip().lower()
         if not klucz:
             continue

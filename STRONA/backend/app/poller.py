@@ -342,7 +342,9 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
         volume_known=getattr(snap, "volume_known", False),
         day_key=server_day_key(now),
         has_open_position=snap.has_open_position,
-        days_elapsed=(now - (acc.started_at.replace(tzinfo=timezone.utc) if acc.started_at.tzinfo is None else acc.started_at)).days,
+        # Prawdziwy UTC, nie `now` (to zegar serwera MT5, UTC+offset z etykietą
+        # UTC) — odejmowany od startu w UTC dawał limit dni o offset za wcześnie.
+        days_elapsed=(datetime.now(timezone.utc) - (acc.started_at.replace(tzinfo=timezone.utc) if acc.started_at.tzinfo is None else acc.started_at)).days,
     )
 
     res = rules.evaluate(cfg, rt, tick)
@@ -728,34 +730,82 @@ async def tick_ryzyka(min_odstep_s: float = 20.0) -> dict:
     except Exception as e:  # pragma: no cover
         print(f"[risk] dokonczenie odciec nieudane: {e}", flush=True)
 
-    # Konta z add-onem czekajace na poswiadczenia maja je dostac w minutach,
-    # a nie przy dobowym cronie. Backoff (w bazie) pilnuje, zeby nieudana
-    # proba nie powtarzala sie co tyknniecie.
-    await provisioning.provision_pending(SessionLocal, _feed)
-    # Dogrywka podpiec pod MetaApi: konto dostaje poswiadczenia OD RAZU, a jego
-    # rejestracja u dostawcy moze sie nie udac za pierwszym razem. Bez tego
-    # kroku silnik nigdy by go nie zobaczyl — `MetaApiRestFeed` adresuje konto
-    # identyfikatorem MetaApi, nie loginem u brokera.
-    await provisioning.dopnij_brakujace_rejestracje(SessionLocal)
-
+    # Najpierw OCENA RYZYKA kont z realnym rachunkiem — to jest sens tego ticku
+    # (dzienny limit straty ma być zauważony w minutach). Provisioning i dogrywka
+    # rejestracji idą po niej: to wywołania sieciowe, które wcześniej potrafiły
+    # zjeść cały limit funkcji, zanim silnik obejrzał choć jedno konto.
+    start = time.monotonic()
     session = SessionLocal()
     try:
-        konta = _active_query(session).filter(Account.metaapi_account_id.isnot(None)).all()
-        bledy = 0
+        konta = (_active_query(session).filter(Account.metaapi_account_id.isnot(None))
+                 .order_by(Account.id).all())
+        # Rotacja: przebieg przerwany budżetem czasu zaczyna następnym razem od
+        # konta, na którym stanął — inaczej ogon listy nie byłby liczony nigdy.
+        kursor = _odczytaj_kursor(session)
+        konta = [a for a in konta if a.id > kursor] + [a for a in konta if a.id <= kursor]
+        bledy, policzone, ostatnie = 0, 0, None
         for acc in konta:
+            if time.monotonic() - start > RISK_BUDZET_S:
+                break
+            ostatnie = acc.id
             try:
                 await process_account(session, acc, _feed)
+                policzone += 1
             except Exception as e:
                 session.rollback()
                 bledy += 1
                 print(f"[risk] konto {acc.login}: przebieg nieudany: {e}", flush=True)
         session.commit()
+        pelny = policzone + bledy >= len(konta)
+        _zapisz_kursor(0 if pelny or ostatnie is None else ostatnie)
         wynik = {"accounts": len(konta)}
+        if not pelny:
+            wynik["evaluated"] = policzone + bledy
         if bledy:
             wynik["errors"] = bledy
-        return wynik
     finally:
         session.close()
+
+    # Konta z add-onem czekajace na poswiadczenia maja je dostac w minutach,
+    # a nie przy dobowym cronie. Backoff (w bazie) pilnuje, zeby nieudana
+    # proba nie powtarzala sie co tyknniecie. Tylko gdy zostal czas.
+    if time.monotonic() - start < RISK_BUDZET_S:
+        await provisioning.provision_pending(SessionLocal, _feed)
+        # Dogrywka podpiec pod MetaApi: konto dostaje poswiadczenia OD RAZU, a jego
+        # rejestracja u dostawcy moze sie nie udac za pierwszym razem. Bez tego
+        # kroku silnik nigdy by go nie zobaczyl — `MetaApiRestFeed` adresuje konto
+        # identyfikatorem MetaApi, nie loginem u brokera.
+        await provisioning.dopnij_brakujace_rejestracje(SessionLocal)
+    return wynik
+
+
+#: Budżet ticku ryzyka (s) — maxDuration funkcji to 60 s.
+RISK_BUDZET_S = 40.0
+RISK_CURSOR_KEY = "risk_tick_cursor"
+
+
+def _odczytaj_kursor(session) -> int:
+    row = session.get(AppSetting, RISK_CURSOR_KEY)
+    try:
+        return int(row.value) if row and row.value else 0
+    except ValueError:
+        return 0
+
+
+def _zapisz_kursor(wartosc: int) -> None:
+    s = SessionLocal()
+    try:
+        row = s.get(AppSetting, RISK_CURSOR_KEY)
+        if row is None:
+            s.add(AppSetting(key=RISK_CURSOR_KEY, value=str(wartosc)))
+        else:
+            row.value = str(wartosc)
+        s.commit()
+    except Exception as e:  # pragma: no cover - kursor to optymalizacja, nie warunek
+        s.rollback()
+        print(f"[risk] zapis kursora nieudany: {e}", flush=True)
+    finally:
+        s.close()
 
 
 #: Zamek pełnego przebiegu — patrz `zajmij_zamek`.

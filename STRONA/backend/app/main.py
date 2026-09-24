@@ -47,7 +47,7 @@ from . import (achievements, auth, billing, catalog, certshot, contentbot, count
                payout_import, payoutbot, reach, statements,
                poller, provisioning, push, rules, sms, telegram, telemetry, tradebot, zamki)
 from .config import get_settings
-from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint
+from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint, zamek_migracji
 from .models import (LEAD_LOST_STATUSES, LEAD_STATUSES, LOST_REASONS,
                      Account, AchievementReward, AppSetting, Breach, Certificate,
                      ChannelPost,
@@ -269,12 +269,17 @@ def _przygotuj_baze() -> None:
     odcisk = os.environ.get("VERCEL_GIT_COMMIT_SHA", "")
     if odcisk and schema_fingerprint() == odcisk:
         return
-    init_db()
-    sync_catalog()    # oferta i cennik z kodu — niezależnie od trybu
-    if settings.auto_seed:
-        seed_demo()   # admin zawsze; konta demo tylko w trybie sim
-    if odcisk:
-        mark_schema_current(odcisk)
+    # Równoległe zimne starty po deployu: jedna instancja migruje, reszta
+    # czeka na zamku i po nim widzi już aktualny odcisk.
+    with zamek_migracji():
+        if odcisk and schema_fingerprint() == odcisk:
+            return
+        init_db()
+        sync_catalog()    # oferta i cennik z kodu — niezależnie od trybu
+        if settings.auto_seed:
+            seed_demo()   # admin zawsze; konta demo tylko w trybie sim
+        if odcisk:
+            mark_schema_current(odcisk)
 
 
 @asynccontextmanager
@@ -8462,6 +8467,12 @@ async def _lazy_tick() -> None:
         print(f"[lazy-tick] błąd przebiegu: {e}")
 
 
+#: Zadania z ruchu strony (recap, leady, treści, Reach, partner) — najwyżej raz
+#: na tyle sekund na instancję. 0 = przy każdym requeście (testy).
+SWEEP_RUCHU_CO_S = float(os.getenv("TRAFFIC_SWEEP_SEC", "30"))
+_OSTATNI_SWEEP_RUCHU = -1e9
+
+
 @app.middleware("http")
 async def _lazy_tick_middleware(request: Request, call_next):
     if request.url.path in _PAYOUT_TICK_PATHS:
@@ -8477,6 +8488,15 @@ async def _lazy_tick_middleware(request: Request, call_next):
         # tworzenia wypłat).
         if settings.payoutbot_on_traffic:
             await run_in_threadpool(_payout_bot_tick, _public_base(request))
+        # Reszta zadań z ruchu najwyżej raz na SWEEP_RUCHU_CO_S na instancję.
+        # Każde ma własny strażnik w bazie, ale sam odczyt strażników przy
+        # KAŻDYM wejściu na landing to kilkanaście zapytań przed odpowiedzią.
+        # Opóźnienie ≤ 30 s nie ma znaczenia dla żadnego z nich.
+        global _OSTATNI_SWEEP_RUCHU
+        teraz_m = time.monotonic()
+        if teraz_m - _OSTATNI_SWEEP_RUCHU < SWEEP_RUCHU_CO_S:
+            return await call_next(request)
+        _OSTATNI_SWEEP_RUCHU = teraz_m
         # Dzienny recap analogicznie z ruchu: pierwszy request po 06:00 czasu
         # polskiego go wysyła (godziny i guardu raz-na-dobę pilnuje
         # push.daily_recap), cron /api/tick o 15:00 UTC tylko dosyła w dni bez
@@ -8551,7 +8571,7 @@ def _require_cron(x_admin_token: str | None = Header(default=None),
     raise HTTPException(401, "Not allowed to trigger the risk engine")
 
 
-@app.api_route("/api/cron/risk", methods=["GET", "POST"], dependencies=[Depends(_require_cron)])
+@app.api_route("/api/cron/risk", methods=["GET", "POST"], include_in_schema=False, dependencies=[Depends(_require_cron)])
 async def api_cron_risk():
     """Silnik ryzyka dla kont z REALNYM rachunkiem MT5 — co minute, z zewnatrz.
 
@@ -8576,7 +8596,12 @@ async def api_cron_risk():
     return await poller.tick_ryzyka()
 
 
-@app.api_route("/api/tick", methods=["GET", "POST"], dependencies=[Depends(_require_cron)])
+#: Ile sekund z `maxDuration` (60 s, vercel.json) wolno zużyć zadaniom crona
+#: po przebiegu kont — zapas na odpowiedź i na wolniejszy ostatni krok.
+TICK_BUDZET_S = 48.0
+
+
+@app.api_route("/api/tick", methods=["GET", "POST"], include_in_schema=False, dependencies=[Depends(_require_cron)])
 async def api_tick(request: Request):
     """Jeden przebieg silnika ryzyka — dla hostingu bez procesu w tle.
 
@@ -8596,44 +8621,63 @@ async def api_tick(request: Request):
     # wdrożenia (`*.vercel.app`), a ten jest za ochroną deploymentu — cron ma
     # własny sekret i wchodzi, ale przeglądarka usługi już nie i sfotografowała
     # ekran logowania Vercela. Taki „certyfikat" wyszedł na kanał 2026-08-08.
+    start = time.monotonic()
     baza = settings.app_base_url.rstrip("/")
     payout = _payout_bot_tick(baza if baza.startswith("https://") else _public_base(request),
                               backstop=True)
     wynik = await poller.tick_once()
-    # Retencja snapshotów equity — tylko z crona (raz na dobę wystarcza),
-    # nigdy z lazy-ticku, żeby ruch strony nie płacił za sprzątanie.
-    sesja_prune = SessionLocal()
-    try:
-        pruned = poller.prune_equity_snapshots(sesja_prune)
-    except Exception as e:  # pragma: no cover
-        print(f"[poller] pruning nieudany: {e}")
-        pruned = 0
-    finally:
-        sesja_prune.close()
+    # Każde dalsze zadanie w osłonie: wyjątek w jednym (np. recap) wywracał
+    # CAŁY cron do 500 i reszta doby przepadała. Do tego budżet czasu — cron
+    # chodzi raz na dobę, a Vercel ubija funkcję po `maxDuration` (60 s);
+    # lepiej świadomie pominąć ogon z wpisem w logu niż stracić wszystko.
+    def zadanie(nazwa, fn, domyslnie):
+        zostalo = TICK_BUDZET_S - (time.monotonic() - start)
+        if zostalo <= 0:
+            print(f"[tick] {nazwa}: pominięte — koniec budżetu czasu", flush=True)
+            return domyslnie
+        try:
+            return fn()
+        except Exception as e:  # pragma: no cover - jedno zadanie nie wywraca crona
+            print(f"[tick] {nazwa}: błąd {e}", flush=True)
+            return domyslnie
+
     # Dzienny recap normalnie wychodzi z ruchu strony od 06:00 czasu polskiego
     # (middleware wyżej) — tu jest tylko zapasem na dzień bez wejść;
     # push.daily_recap() sam pilnuje godziny, guardu raz-na-dobę i ciszy bez
     # transakcji.
-    recap = push.daily_recap()
+    recap = zadanie("daily_recap", push.daily_recap, {"sent": 0})
     # Przegląd tygodnia tym samym trybem — zapas na poniedziałek bez wejść.
-    weekly = push.weekly_review()
+    weekly = zadanie("weekly_review", push.weekly_review, {"sent": 0})
     # „Scale your progress" raz w tygodniu (poniedzialek) — na tym samym cronie
     # z tego samego powodu co recap. Wlasny odstep 21 dni w `_upsell_nudge`
     # sprawia, ze recznie odpalony endpoint i ten przebieg sie nie dubluja.
-    nudge = _upsell_nudge() if datetime.now(timezone.utc).weekday() == 0 else {"sent": 0}
+    nudge = (zadanie("upsell_nudge", _upsell_nudge, {"sent": 0})
+             if datetime.now(timezone.utc).weekday() == 0 else {"sent": 0})
     # Porzucone koszyki — tu samo zamowienie niesie znacznik `recovery_sent_at`,
     # wiec deduplikacja nie zalezy od tego, jak czesto ten cron chodzi.
-    recovery = _checkout_recovery()
+    recovery = zadanie("checkout_recovery", _checkout_recovery, {"sent": 0})
     # Przypomnienia o leadach — na czat dzialu, nie do klienta. Wlasna
     # deduplikacja po historii leada, wiec czestotliwosc crona nie ma znaczenia.
-    leady = _lead_followups()
+    leady = zadanie("lead_followups", _lead_followups, {"sent": 0})
     # Saldo dostawcy zasięgu. Raz na dobę wystarczy: alert ma ostrzec ZANIM
     # konto zejdzie do zera, a nie dopiero przy odrzuconym zamówieniu.
-    zasieg = _reach_saldo_tick()
-    _reach_skan()
+    zasieg = zadanie("reach_saldo", _reach_saldo_tick, None)
+    zadanie("reach_skan", _reach_skan, None)
     # Kolejka treści: JEDEN zaległy post na przebieg. Przy przenosinach archiwum
     # to jest cały sens — treść ma wracać rytmem, nie zrzutem 47 postów naraz.
-    tresc = _content_tick()
+    tresc = zadanie("channel_posts", _content_tick, {"sent": 0})
+
+    # Retencja snapshotów equity NA KOŃCU i tylko z resztką budżetu — to
+    # sprzątanie, nie może zjadać czasu zadaniom, które coś komuś wysyłają.
+    # Tylko z crona (raz na dobę wystarcza), nigdy z lazy-ticku.
+    def sprzatanie():
+        sesja_prune = SessionLocal()
+        try:
+            zostalo = TICK_BUDZET_S - (time.monotonic() - start)
+            return poller.prune_equity_snapshots(sesja_prune, budzet_s=max(0.0, min(10.0, zostalo)))
+        finally:
+            sesja_prune.close()
+    pruned = zadanie("prune_snapshots", sprzatanie, 0)
     if isinstance(wynik, dict):
         return {**wynik, "daily_recap": recap, "weekly_review": weekly.get("sent", 0),
                 "upsell_nudge": nudge.get("sent", 0),
@@ -8701,7 +8745,7 @@ def _payout_bot_tick(base_url: str | None = None, *,
         session.close()
 
 
-@app.api_route("/api/cron/streak-reminder", methods=["GET", "POST"],
+@app.api_route("/api/cron/streak-reminder", methods=["GET", "POST"], include_in_schema=False,
                dependencies=[Depends(_require_cron)])
 def cron_streak_reminder():
     """Push „Twoja seria wygaśnie" — odpalany raz dziennie po południu UTC.
@@ -8733,7 +8777,7 @@ def cron_streak_reminder():
         session.close()
 
 
-@app.api_route("/api/cron/checkout-recovery", methods=["GET", "POST"],
+@app.api_route("/api/cron/checkout-recovery", methods=["GET", "POST"], include_in_schema=False,
                dependencies=[Depends(_require_cron)])
 def cron_checkout_recovery(min_minutes: int = 60, max_hours: int = 72):
     """Recznie/cronem — cala robota siedzi w `_checkout_recovery`."""
@@ -8797,7 +8841,7 @@ def _checkout_recovery(min_minutes: int = 60, max_hours: int = 72) -> dict:
         session.close()
 
 
-@app.api_route("/api/cron/upsell-nudge", methods=["GET", "POST"],
+@app.api_route("/api/cron/upsell-nudge", methods=["GET", "POST"], include_in_schema=False,
                dependencies=[Depends(_require_cron)])
 def cron_upsell_nudge(min_days: int = 21):
     """Recznie/cronem — cala robota siedzi w `_upsell_nudge`."""
@@ -11627,7 +11671,7 @@ def _tekst_zaplanowanego(lead: Lead, r: LeadReminder, ostatni: bool = False) -> 
     return "\n".join(linie)
 
 
-@app.api_route("/api/cron/lead-followups", methods=["GET", "POST"],
+@app.api_route("/api/cron/lead-followups", methods=["GET", "POST"], include_in_schema=False,
                dependencies=[Depends(_require_cron)])
 def cron_lead_followups(no_contact_days: int = 3, stalled_days: int = 7):
     """Ręcznie/cronem — cała robota siedzi w `_lead_followups`."""
