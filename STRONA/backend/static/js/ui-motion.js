@@ -226,4 +226,27 @@ if(typeof _theme==='function'&&document.startViewTransition){
     document.startViewTransition(()=>_theme.apply(this,a));
   };
 }
+
+/* ---------- dolny pasek zakładek: wciśnięcie bez „przyklejania" ----------
+   Na iPhonie przesunięcie palcem po pasku zapalało kolejne zakładki, a po
+   zjechaniu z paska :active zostawał na ostatnio dotkniętej. Teraz wciśnięta
+   jest tylko zakładka pod palcem: gaśnie, gdy palec z niej zjedzie, podniesie
+   się, gest zostanie przerwany albo strona się przewinie. */
+(function(){
+  const SEL='.botnav-btn,.tab-item';
+  let el=null;
+  const zgas=()=>{if(el){el.classList.remove('pressed');el=null}};
+  addEventListener('pointerdown',e=>{
+    zgas();
+    const b=e.target&&e.target.closest?e.target.closest(SEL):null;
+    if(b){el=b;b.classList.add('pressed')}
+  },{passive:true});
+  addEventListener('pointermove',e=>{
+    if(!el)return;
+    const r=el.getBoundingClientRect();
+    if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)zgas();
+  },{passive:true});
+  ['pointerup','pointercancel','touchcancel','scroll','blur'].forEach(t=>addEventListener(t,zgas,{passive:true,capture:true}));
+  document.addEventListener('visibilitychange',zgas);
+})();
 })();

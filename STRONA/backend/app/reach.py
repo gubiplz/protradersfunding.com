@@ -31,6 +31,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
+import random
 import re
 
 from . import notify, telegram
@@ -55,6 +56,12 @@ DOMYSLNE = {
     "qty_reactions": "30",
     "svc_views": "8407",
     "qty_views": "400",
+    # Stała ilość albo ZAKRES: „range" losuje pod każdym postem liczbę z
+    # [qty_x, qty_x_max], żeby kolejne posty nie miały co do sztuki tyle samo
+    # reakcji i wyświetleń — równe liczby pod każdym postem zdradzają zakup.
+    "qty_mode": "fixed",
+    "qty_reactions_max": "",
+    "qty_views_max": "",
     "min_balance": "1",
     # Ostatnia deska ratunku dla bramki salda: normalnie koszt liczy się
     # z cennika dostawcy (patrz `odswiez_cennik`), ale gdy cennik nie odpowie,
@@ -112,6 +119,7 @@ def ustawienia(session) -> dict:
         "qty_reactions": int(float(out["qty_reactions"])),
         "svc_views": int(float(out["svc_views"])),
         "qty_views": int(float(out["qty_views"])),
+        "qty_mode": out["qty_mode"] if out["qty_mode"] in ("fixed", "range") else "fixed",
         "min_balance": float(out["min_balance"]),
         "fallback_cost": float(out["unit_cost"]),
         "last_result": wynik.value if wynik else None,
@@ -122,8 +130,14 @@ def ustawienia(session) -> dict:
         "reactions_positive": ("positive" in out["name_reactions"].lower()
                                if out["name_reactions"] else None),
     }
+    # Górny koniec zakresu; w trybie stałym (albo bez wpisanego końca) = dolny.
+    for klucz in ("qty_reactions", "qty_views"):
+        gora = _ilosc_lub_nic(out[klucz + "_max"])
+        cfg[klucz + "_max"] = (max(cfg[klucz], gora) if cfg["qty_mode"] == "range"
+                               and gora is not None else cfg[klucz])
     # Koszt posta liczymy z zapamiętanych stawek dostawcy — admin nie ma go po
-    # co wpisywać ręcznie, a przy zmianie cennika sam się poprawia.
+    # co wpisywać ręcznie, a przy zmianie cennika sam się poprawia. W zakresie
+    # z GÓRNEGO końca: bramka salda i ostrzeżenia mają liczyć najgorszy post.
     stawki = {}
     for klucz, pole in (("rate_reactions", "qty_reactions"), ("rate_views", "qty_views")):
         try:
@@ -131,8 +145,8 @@ def ustawienia(session) -> dict:
         except (TypeError, ValueError):
             stawki[klucz] = None
     if stawki["rate_reactions"] is not None and stawki["rate_views"] is not None:
-        cfg["unit_cost"] = round(cfg["qty_reactions"] * stawki["rate_reactions"] / 1000
-                                 + cfg["qty_views"] * stawki["rate_views"] / 1000, 6)
+        cfg["unit_cost"] = round(cfg["qty_reactions_max"] * stawki["rate_reactions"] / 1000
+                                 + cfg["qty_views_max"] * stawki["rate_views"] / 1000, 6)
         cfg["cost_from"] = "provider"
     else:
         cfg["unit_cost"] = cfg["fallback_cost"]
@@ -142,6 +156,19 @@ def ustawienia(session) -> dict:
 
 def zapisz_ustawienia(session, **pola) -> dict:
     """Zapis z panelu. Rzuca `ValueError` z komunikatem po angielsku."""
+    # Zakres sprawdzamy PRZED zapisem, z pól żądania i obecnych wartości: sesja
+    # ma autoflush=False, więc świeżo dodanych wierszy odczyt by nie zobaczył,
+    # a częściowy zapis „od 30 do 10" zostałby w bazie mimo błędu.
+    teraz = ustawienia(session)
+    tryb = pola.get("qty_mode") or teraz["qty_mode"]
+    if tryb not in ("fixed", "range"):
+        raise ValueError("'qty_mode' must be 'fixed' or 'range'")
+    if tryb == "range":
+        for klucz, nazwa in (("qty_reactions", "reactions"), ("qty_views", "views")):
+            od = pola.get(klucz) if pola.get(klucz) is not None else teraz[klucz]
+            do = pola.get(klucz + "_max")
+            if do is not None and int(float(do)) < int(float(od)):
+                raise ValueError(f"The {nazwa} range is upside down: {int(float(od))} to {int(float(do))}")
     if pola.get("enabled") is not None:
         _ustaw(session, "enabled", "1" if pola["enabled"] else "0")
 
@@ -167,6 +194,17 @@ def zapisz_ustawienia(session, **pola) -> dict:
         if not (dol <= float(wartosc) <= gora):
             raise ValueError(f"'{klucz}' must be between {dol:g} and {gora:g}")
         _ustaw(session, klucz, str(float(wartosc)))
+
+    if pola.get("qty_mode") is not None:
+        _ustaw(session, "qty_mode", pola["qty_mode"])
+    for klucz in ("qty_reactions", "qty_views"):
+        gora = pola.get(klucz + "_max")
+        if gora is None:
+            continue
+        dol_z, gora_z = LIMITY[klucz]
+        if not (dol_z <= float(gora) <= gora_z):
+            raise ValueError(f"'{klucz}_max' must be between {dol_z:g} and {gora_z:g}")
+        _ustaw(session, klucz + "_max", str(int(float(gora))))
 
     session.commit()
     return ustawienia(session)
@@ -220,6 +258,8 @@ def kanaly(session) -> list[dict]:
                     "on": bool(poz.get("on", True)),
                     "qty_reactions": _ilosc_lub_nic(poz.get("qty_reactions")),
                     "qty_views": _ilosc_lub_nic(poz.get("qty_views")),
+                    "qty_reactions_max": _ilosc_lub_nic(poz.get("qty_reactions_max")),
+                    "qty_views_max": _ilosc_lub_nic(poz.get("qty_views_max")),
                     "payout": False})
 
     info = telegram.chat_info(settings.telegram_chat_id) if telegram.is_enabled() else {}
@@ -232,6 +272,7 @@ def kanaly(session) -> list[dict]:
         else:
             out.insert(0, {"username": nazwa, "label": info.get("title") or "Payouts",
                            "on": True, "qty_reactions": None, "qty_views": None,
+                           "qty_reactions_max": None, "qty_views_max": None,
                            "payout": True})
     return out
 
@@ -261,6 +302,14 @@ def zapisz_kanaly(session, lista: list[dict]) -> list[dict]:
                 raise ValueError(f"'{klucz}' for @{nazwa} must be between "
                                  f"{dol:g} and {gora:g}")
             wpis[klucz] = ile
+            # Kanał może mieć własny ZAKRES („20-40" w panelu): górny koniec
+            # osobno, pusty = stała liczba dla tego kanału.
+            maks = _ilosc_lub_nic((poz or {}).get(klucz + "_max"))
+            if maks is not None and maks != ile:
+                if not (ile <= maks <= gora):
+                    raise ValueError(f"'{klucz}' range for @{nazwa} must go up, "
+                                     f"from {ile} to at most {gora:g}")
+                wpis[klucz + "_max"] = maks
         czyste.append(wpis)
     _ustaw(session, "channels", json.dumps(czyste))
     session.commit()
@@ -281,7 +330,9 @@ def ilosci(session, username: str | None = None, *,
     domyślne, którymi jedzie automat.
     """
     cfg = ustawienia(session)
-    out = {"qty_reactions": cfg["qty_reactions"], "qty_views": cfg["qty_views"],
+    # Każda ilość to przedział [qty_x, qty_x_max]; stała = przedział jednopunktowy.
+    out = {"qty_reactions": cfg["qty_reactions"], "qty_reactions_max": cfg["qty_reactions_max"],
+           "qty_views": cfg["qty_views"], "qty_views_max": cfg["qty_views_max"],
            "from": "global"}
     nazwa = _czysta_nazwa(username) if username else ""
     if nazwa:
@@ -290,6 +341,7 @@ def ilosci(session, username: str | None = None, *,
             for klucz in ("qty_reactions", "qty_views"):
                 if kanal.get(klucz) is not None:
                     out[klucz] = kanal[klucz]
+                    out[klucz + "_max"] = max(kanal[klucz], kanal.get(klucz + "_max") or kanal[klucz])
                     out["from"] = "channel"
     for klucz, jawne in (("qty_reactions", qty_reactions), ("qty_views", qty_views)):
         if jawne is None:
@@ -297,9 +349,16 @@ def ilosci(session, username: str | None = None, *,
         dol, gora = LIMITY[klucz]
         if not (dol <= int(jawne) <= gora):
             raise ValueError(f"'{klucz}' must be between {dol:g} and {gora:g}")
-        out[klucz] = int(jawne)
+        out[klucz] = out[klucz + "_max"] = int(jawne)
         out["from"] = "explicit"
     return out
+
+
+def losuj_ilosci(ile: dict, rng=None) -> dict:
+    """Konkretne liczby na TEN post: z przedziału, gdy jest zakres, inaczej stałe."""
+    rng = rng or random.SystemRandom()
+    return {k: (rng.randint(ile[k], ile[k + "_max"]) if ile[k + "_max"] > ile[k] else ile[k])
+            for k in ("qty_reactions", "qty_views")}
 
 
 def koszt(session, qty_reactions: int, qty_views: int) -> float:
@@ -490,7 +549,8 @@ def zamow(session, link: str, *, transport=None, powod: str = "manual",
 
     # Kanał z linku rządzi ilościami, chyba że wywołujący poda je wprost.
     nazwa_kanalu = _czysta_nazwa(link.rsplit("/", 2)[-2] if link.count("/") >= 4 else "")
-    ile = ilosci(session, nazwa_kanalu, qty_reactions=qty_reactions, qty_views=qty_views)
+    zakres = ilosci(session, nazwa_kanalu, qty_reactions=qty_reactions, qty_views=qty_views)
+    ile = {**zakres, **losuj_ilosci(zakres)}
     cena = koszt(session, ile["qty_reactions"], ile["qty_views"])
 
     b = saldo_z_ustawien(session, transport=transport)

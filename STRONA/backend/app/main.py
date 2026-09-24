@@ -6513,6 +6513,10 @@ class ReachIn(BaseModel):
     qty_reactions: int | None = None
     svc_views: int | None = None
     qty_views: int | None = None
+    # „fixed" = stała ilość, „range" = losowo z [qty_x, qty_x_max] pod każdym postem
+    qty_mode: Literal["fixed", "range"] | None = None
+    qty_reactions_max: int | None = None
+    qty_views_max: int | None = None
     min_balance: float | None = None
 
 
@@ -6530,6 +6534,9 @@ class ReachChannelIn(BaseModel):
     # None = „jak globalnie". Zero jest osobną, legalną wartością.
     qty_reactions: int | None = None
     qty_views: int | None = None
+    # Górny koniec zakresu kanału („20-40" w panelu); None = stała liczba.
+    qty_reactions_max: int | None = None
+    qty_views_max: int | None = None
 
 
 class ReachChannelsIn(BaseModel):
