@@ -137,7 +137,8 @@ function npObserveSeen(root,rows,onSeen,ok){
   rows.forEach(r=>NP_SEEN.io.observe(r));
 }
 
-/* Gesty. Przesunięcie wiersza w lewo = usuń (do końca — od razu), w prawo =
+/* Gesty. Przesunięcie wiersza w lewo = usuń (za 1/3 wiersza albo szybkim
+   machnięciem — od razu, z Undo), w prawo =
    przeczytane/nieprzeczytane; myszą też działa. Na telefonie arkusz zsuwa się
    w dół za uchwyt. Przeciągnięcie kasuje stuknięcie, jak w iOS: wciśnięcie na
    przycisku i zjechanie z niego nie może skończyć się klikiem w WIERSZ (click
@@ -145,9 +146,15 @@ function npObserveSeen(root,rows,onSeen,ok){
 const NP_G={sw:null,drag:null,press:null,suppress:false,cfg:null};
 const npSwiping=()=>!!(NP_G.sw&&NP_G.sw.on);
 const npSlide=(rb,x)=>{rb.dataset.off=x;rb.style.transform=x?`translateX(${x}px)`:''};
+/* Próg usunięcia: tyle co w iOS Mail — jedna trzecia wiersza, nie ponad
+   połowa. Pomyłkę łapie Undo, a nie długość ruchu. */
+const npDelAt=W=>Math.max(96,W*.32);
+const npBuzz=()=>{try{navigator.vibrate&&navigator.vibrate(8)}catch(_){}};
+/* Wiersz `.leaving` właśnie odjeżdża po usunięciu — zamykanie innych
+   swipe'ów nie może go ściągnąć z powrotem (wracał i zwijał się naraz). */
 function npCloseSwipes(opr){
   const c=NP_G.cfg;if(!c)return;
-  npQ(c.items+' .np-rb[data-off]').forEach(rb=>{if(rb!==opr&&+rb.dataset.off)npSlide(rb,0)});
+  npQ(c.items+' .np-rb[data-off]').forEach(rb=>{if(rb!==opr&&+rb.dataset.off&&!rb.closest('.leaving'))npSlide(rb,0)});
 }
 /* ---------- push na tym urządzeniu ----------
    Jeden stan (PUSH), malowany na KAŻDYM przełączniku, który go pokazuje
@@ -316,9 +323,17 @@ function npGestures(cfg){
     const W=s.rb.offsetWidth;let x=s.base+dx;
     if(x>0)x=110*(1-Math.exp(-x/110));
     if(x<-W)x=-W;
-    s.dx=x;s.rb.style.transform=`translateX(${x}px)`;
-    s.row.classList.toggle('arm-del',x<-W*.55);
-    s.row.classList.toggle('arm-read',x>56);
+    const t=performance.now();
+    if(s.pt!=null)s.v=.6*((x-s.dx)/Math.max(1,t-s.pt))+.4*(s.v||0);
+    s.pt=t;s.dx=x;s.rb.style.transform=`translateX(${x}px)`;
+    // Pod spodem tylko tło strony, w którą jedzie wiersz (dawniej połowa
+    // niebieska, połowa czerwona); --sw prowadzi napis Delete za krawędzią.
+    s.row.classList.toggle('sw-l',x<0);s.row.classList.toggle('sw-r',x>0);
+    s.row.style.setProperty('--sw',Math.max(0,-x)+'px');
+    const del=x<-npDelAt(W),read=x>56;
+    if((del&&!s.row.classList.contains('arm-del'))||(read&&!s.row.classList.contains('arm-read')))npBuzz();
+    s.row.classList.toggle('arm-del',del);
+    s.row.classList.toggle('arm-read',read);
   });
   const koniec=e=>{
     const pr=NP_G.press;
@@ -351,10 +366,12 @@ function npGestures(cfg){
     NP_G.sw=null;
     if(!s.on)return;
     s.rb.classList.remove('drag');s.row.classList.remove('arm-del','arm-read');
-    const W=s.rb.offsetWidth,x=s.dx;
-    if(x<-W*.55){npSlide(s.rb,-W);cfg.onAct('del',s.row)}
-    else if(x>56){npSlide(s.rb,0);cfg.onAct('read',s.row)}
-    else if(x<-44)npSlide(s.rb,-92);
+    const W=s.rb.offsetWidth,x=s.dx,up=e.type==='pointerup';
+    // Szybkie machnięcie w lewo usuwa jak pełny ruch; krótkie puszczenie
+    // wraca sprężyną — bez pół-otwartego stanu, który trzeba było dostukać.
+    const flick=x<-48&&(s.v||0)<-.5;
+    if(up&&(x<-npDelAt(W)||flick)){s.row.classList.add('leaving');npSlide(s.rb,-W);cfg.onAct('del',s.row)}
+    else if(up&&x>56){npSlide(s.rb,0);cfg.onAct('read',s.row)}
     else npSlide(s.rb,0);
     if(cfg.onEnd)cfg.onEnd();
   };

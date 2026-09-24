@@ -1112,7 +1112,7 @@ function dismissPush(){
    Klik w pozycję prowadzi prosto do widoku (payout, konto, bilet…) przez
    `notifGo`; przeczytane/usuń — tylko gestem przesunięcia i hurtem w Edit. */
 const UN={tab:'all',open:false,nav:'list',edit:false,picked:new Set(),fresh:new Set(),
-  hiding:new Set(),known:null,loaded:false,dirty:false,items:[],unread:0};
+  hiding:new Set(),gone:new Set(),known:null,loaded:false,dirty:false,items:[],unread:0};
 try{const t=localStorage.getItem('pf_notif_tab');if(['all','trading','payouts','updates'].includes(t))UN.tab=t}catch(_){}
 const UN_TABS=[['all','All'],['trading','Trading'],['payouts','Payouts'],['updates','Updates']];
 const UN_KIND={
@@ -1137,9 +1137,15 @@ const unItem=id=>UN.items.find(i=>String(i.id)===String(id));
 async function refreshNotif(){
   try{
     const r=await api('/api/me/notifications?limit=50');
-    const items=(r.items||[]).map(i=>({...i,ts:i.created_at||new Date().toISOString(),cat:i.cat||'updates'}))
+    const items=(r.items||[]).filter(i=>!UN.gone.has(String(i.id)))
+      .map(i=>({...i,ts:i.created_at||new Date().toISOString(),cat:i.cat||'updates'}))
       .sort((a,b)=>a.ts<b.ts?1:a.ts>b.ts?-1:0);
-    if(UN.known)items.forEach(i=>{if(!UN.known.has(i.id))UN.fresh.add(String(i.id))});
+    // „Nowe" tylko, gdy nowsze od wszystkiego, co już było — starsze, które
+    // dosunęły się po usunięciu, nie wjeżdżają jak świeże powiadomienie.
+    if(UN.known){
+      const top=UN.items.reduce((m,i)=>i.ts>m?i.ts:m,'');
+      items.forEach(i=>{if(!UN.known.has(i.id)&&i.ts>top)UN.fresh.add(String(i.id))});
+    }
     UN.known=new Set(items.map(i=>i.id));
     UN.items=items;UN.loaded=true;
     unBadge();
@@ -1282,16 +1288,20 @@ function unDelete(ids){
   npCloseSwipes();
   const set=new Set(ids);
   npQ('#np-items .np-row[data-id]').filter(r=>set.has(r.dataset.id)).forEach(npCollapse);
-  setTimeout(()=>{
-    ids.forEach(id=>{UN.hiding.add(id);UN.picked.delete(id)});
-    unRenderList();unSeg(false);unBadge();if(UN.edit)unEditbar();
-    npUndoToast(ids.length===1?'Notification deleted':`${ids.length} notifications deleted`,
-      ()=>{
-        UN.items=UN.items.filter(i=>!set.has(String(i.id)));ids.forEach(id=>UN.hiding.delete(id));
-        api('/api/me/notifications/delete',{method:'POST',keepalive:true,body:JSON.stringify({ids:ids.map(Number)})}).catch(()=>{});
-      },
-      ()=>{ids.forEach(id=>{UN.hiding.delete(id);UN.fresh.add(id)});unRenderList();unSeg(true);unBadge()});
-  },npRM()?0:300);
+  // Ukryte OD RAZU: kolejne usunięcie w trakcie animacji przerysowuje listę
+  // i dawniej wskrzeszało zwijany wiersz. Z UN.hiding schodzą dopiero po
+  // potwierdzonym zapisie; nieudany zapis przywraca je jawnie.
+  ids.forEach(id=>{UN.hiding.add(id);UN.picked.delete(id)});
+  unSeg(false);unBadge();if(UN.edit)unEditbar();
+  setTimeout(()=>{if(!npSwiping())unRenderList()},npRM()?0:300);
+  const przywroc=()=>{ids.forEach(id=>UN.hiding.delete(id));unRenderList();unSeg(true);unBadge()};
+  npUndoToast(ids.length===1?'Notification deleted':`${ids.length} notifications deleted`,
+    ()=>{
+      api('/api/me/notifications/delete',{method:'POST',keepalive:true,body:JSON.stringify({ids:ids.map(Number)})})
+        .then(()=>{ids.forEach(id=>{UN.gone.add(id);UN.hiding.delete(id)});UN.items=UN.items.filter(i=>!set.has(String(i.id)))})
+        .catch(()=>{przywroc();toast("Couldn't delete — the notifications are back.",'err')});
+    },
+    ()=>{ids.forEach(id=>UN.fresh.add(id));przywroc()});
 }
 function unRowAct(act,row){
   const ids=npIds(row);if(!ids.length)return;
@@ -2323,7 +2333,7 @@ const VIEWS={
         y:{ticks:{color:th.dim,font:{size:10},callback:v=>'$'+v},grid:{color:th.line}}}}}));
   if(has){
     bar('an-wd',['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],st.by_weekday.map(b=>b.pnl));
-    bar('an-hr',st.by_hour.map((_,h)=>h+'h'),st.by_hour.map(b=>b.pnl),
+    bar('an-hr',st.by_hour.map((_,h)=>h+':00'),st.by_hour.map(b=>b.pnl),
         matchMedia('(max-width:640px)').matches?8:12);
   }
   if(days.length)chart=new Chart($('an-chart'),{type:'bar',

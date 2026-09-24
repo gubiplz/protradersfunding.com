@@ -15,6 +15,7 @@
  * equityChartConfig(curve, opts):
  *   opts.lines — [{y, label, color}] horizontal dashed objective lines with a
  *                label badge at the left edge (target / floors / account size).
+ *   opts.tz    — IANA zone for day boundaries and dates (default: browser's).
  */
 window.chartTheme = function () {
   var s = getComputedStyle(document.documentElement);
@@ -75,6 +76,28 @@ window.equityChartConfig = function (curve, opts) {
   opts = opts || {};
   var th = window.chartTheme();
   var byTrades = curve.some(function (p) { return p.kind === 'trade'; });
+  // The first trading day reads in trade numbers; from the second day on the
+  // axis turns into dates, one label per day. The start point carries the
+  // first trade's OPEN time, so it does not count as a day of its own.
+  // Naive ISO from the database is UTC. opts.tz: the admin panel pins
+  // Europe/Warsaw like the rest of it, the portal uses the browser's zone.
+  var parseTs = function (ts) {
+    if (!ts) return null;
+    var s = String(ts).replace(' ', 'T');
+    if (!/(z|[+-]\d\d:?\d\d)$/i.test(s)) s += 'Z';
+    var d = new Date(s);
+    return isNaN(d) ? null : d;
+  };
+  var tz = opts.tz ? { timeZone: opts.tz } : {};
+  var fmt = function (d, o) { return d.toLocaleString('en-US', Object.assign(o, tz)); };
+  var dayNo = {}, days = 0, lastDay = null;
+  curve.forEach(function (p, i) {
+    var d = p.kind === 'start' ? null : parseTs(p.ts);
+    if (!d) return;
+    var k = d.toLocaleDateString('en-CA', tz);
+    if (k !== lastDay) { dayNo[i] = days++; lastDay = k; }
+  });
+  var byDays = days > 1;
   var money = function (v) {
     return '$' + Number(v).toLocaleString('en-US',
       { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -159,10 +182,11 @@ window.equityChartConfig = function (curve, opts) {
             title: function (items) {
               var p = curve[items[0].dataIndex];
               if (p.kind === 'start') return 'Starting balance';
-              if (p.kind === 'payout') return 'Payout';
-              if (p.kind === 'open') return 'Open position';
-              if (p.kind === 'tick') return new Date(p.ts).toLocaleString();
-              return 'Trade #' + p.i;
+              var d = parseTs(p.ts);
+              var when = d ? fmt(d, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+              var head = p.kind === 'payout' ? 'Payout' : p.kind === 'open' ? 'Open position'
+                : p.kind === 'tick' ? '' : 'Trade #' + p.i;
+              return head && when ? head + ' · ' + when : head || when;
             },
             label: function (item) {
               if (item.datasetIndex !== 0) return null;
@@ -185,11 +209,22 @@ window.equityChartConfig = function (curve, opts) {
           display: true,
           title: {
             display: true,
-            text: byTrades ? 'Trades' : 'Risk-engine readings',
+            text: byDays ? 'Date' : byTrades ? 'Trades' : 'Risk-engine readings',
             color: th.dim,
             font: { size: 11 },
           },
-          ticks: { color: th.dim, font: { size: 10 }, autoSkip: true, maxTicksLimit: 10 },
+          ticks: byDays ? {
+            color: th.dim, font: { size: 10 }, autoSkip: false, maxRotation: 0,
+            // One label on the first point of each day; with many days only
+            // every k-th day, so the dates never collide on a phone.
+            callback: function (v, i) {
+              var n = dayNo[i];
+              if (n == null) return '';
+              var k = Math.ceil(days / (this.chart.width < 520 ? 5 : 10));
+              var d = parseTs(curve[i].ts);
+              return n % k === 0 && d ? fmt(d, { day: 'numeric', month: 'short' }) : '';
+            },
+          } : { color: th.dim, font: { size: 10 }, autoSkip: true, maxTicksLimit: 10 },
           grid: { display: false },
         },
         y: Object.assign({

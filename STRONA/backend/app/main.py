@@ -6099,7 +6099,8 @@ def admin_inbox_mark(payload: InboxMarkIn,
         # Pozycje dzwonka żyją tygodniami, nie latami: najstarsze oznaczenia
         # dotyczą rzeczy, które dawno wypadły z listy, więc je przycinamy.
         nadmiar = (session.query(AdminInboxMark.id)
-                   .filter(AdminInboxMark.admin_id == kto, AdminInboxMark.item_id != "*")
+                   .filter(AdminInboxMark.admin_id == kto, AdminInboxMark.item_id != "*",
+                           ~AdminInboxMark.item_id.like("clear:%"))
                    .order_by(AdminInboxMark.updated_at.desc())
                    .offset(INBOX_MARKI_LIMIT).all())
         if nadmiar:
@@ -6107,6 +6108,54 @@ def admin_inbox_mark(payload: InboxMarkIn,
                 AdminInboxMark.id.in_([n.id for n in nadmiar])).delete(synchronize_session=False)
             session.commit()
         return {"ok": True, "changed": len(ids)}
+    finally:
+        session.close()
+
+
+INBOX_KATEGORIE = ("all", "leads", "free", "prop")
+
+
+def _kat_inbox(i: dict) -> str:
+    """Ta sama kategoria co zakładka dzwonka w panelu (`npCat`)."""
+    if i["type"] != "lead":
+        return "prop"
+    return "free" if i.get("desk") == "free" else "leads"
+
+
+class InboxClearIn(BaseModel):
+    cat: Literal["all", "leads", "free", "prop"]
+    before: str | None = Field(default=None, max_length=40)
+
+
+@app.post("/api/admin/inbox/clear", dependencies=[Depends(auth.require_admin)])
+def admin_inbox_clear(payload: InboxClearIn,
+                      authorization: str | None = Header(default=None)):
+    """„Delete all" w zakładce dzwonka: granica czasu zamiast listy id.
+
+    Samo ukrycie widocznych id nie czyściło dzwonka — na ich miejsce wjeżdżały
+    starsze pozycje, które dotąd wypadały poza limit, i wyglądało to jak powrót
+    usuniętych. Znacznik `clear:<kategoria>` ukrywa wszystko w kategorii do
+    `before` (najnowsza pozycja, którą admin widział — nie „teraz", bo to, co
+    przyszło w 5 s okna Undo, jeszcze go nie widziało). Granica nigdy się nie
+    cofa."""
+    kto = _admin_id(authorization)
+    granica = _naiwny_utc(datetime.now(timezone.utc))
+    if payload.before:
+        try:
+            granica = min(granica, _naiwny_utc(datetime.fromisoformat(payload.before.replace("Z", "+00:00"))))
+        except ValueError:
+            pass
+    klucz = f"clear:{payload.cat}"
+    session = SessionLocal()
+    try:
+        m = (session.query(AdminInboxMark)
+             .filter(AdminInboxMark.admin_id == kto, AdminInboxMark.item_id == klucz).first())
+        if m is None:
+            session.add(AdminInboxMark(admin_id=kto, item_id=klucz, hidden=True, updated_at=granica))
+        elif _naiwny_utc(m.updated_at) < granica:
+            m.updated_at = granica
+        session.commit()
+        return {"ok": True, "cat": payload.cat, "before": granica.isoformat()}
     finally:
         session.close()
 
@@ -6123,12 +6172,28 @@ def admin_inbox(authorization: str | None = Header(default=None)):
     kto = _admin_id(authorization)
     session = SessionLocal()
     try:
-        zamowienia = session.query(Order).order_by(Order.id.desc()).limit(25).all()
+        marki = {m.item_id: m for m in session.query(AdminInboxMark)
+                 .filter(AdminInboxMark.admin_id == kto).all()}
+        # Usunięte wypadają JUŻ w zapytaniu: dawniej limit (25/10/60) liczył
+        # się razem z nimi, więc usuwanie opróżniało dzwonek, a starsze
+        # pozycje dosuwały się dopiero po odświeżeniu.
+        ukryte: dict[str, list[int]] = {}
+        for k, m in marki.items():
+            pre, _, num = k.partition(":")
+            if m.hidden and num.isdigit():
+                ukryte.setdefault(pre, []).append(int(num))
+
+        def bez_ukrytych(q, kol, pre):
+            return q.filter(~kol.in_(ukryte[pre])) if ukryte.get(pre) else q
+
+        zamowienia = bez_ukrytych(session.query(Order), Order.id, "order") \
+            .order_by(Order.id.desc()).limit(25).all()
         kyc = (session.query(Trader).filter(Trader.kyc_status == "pending")
                .order_by(Trader.kyc_submitted_at.desc().nullslast()).limit(10).all())
-        wnioski = (session.query(PayoutRequest).filter(PayoutRequest.status == "pending")
+        wnioski = (bez_ukrytych(session.query(PayoutRequest), PayoutRequest.id, "payout")
+                   .filter(PayoutRequest.status == "pending")
                    .order_by(PayoutRequest.id.desc()).limit(10).all())
-        bilety = (session.query(TicketMessage, SupportTicket)
+        bilety = (bez_ukrytych(session.query(TicketMessage, SupportTicket), TicketMessage.id, "ticket")
                   .join(SupportTicket, SupportTicket.id == TicketMessage.ticket_id)
                   .filter(TicketMessage.author == "trader")
                   .order_by(TicketMessage.id.desc()).limit(10).all())
@@ -6182,6 +6247,7 @@ def admin_inbox(authorization: str | None = Header(default=None)):
         q_zd = session.query(LeadEvent, Lead).join(Lead, Lead.id == LeadEvent.lead_id)
         if not pokaz_wyslane:
             q_zd = q_zd.filter(~LeadEvent.kind.in_(INBOX_WYSLANE))
+        q_zd = bez_ukrytych(q_zd, LeadEvent.id, "lead")
         zdarzenia_leadow = q_zd.order_by(LeadEvent.id.desc()).limit(60).all()
         for z, l in zdarzenia_leadow:
             kto_lead = l.name or l.email
@@ -6201,8 +6267,6 @@ def admin_inbox(authorization: str | None = Header(default=None)):
                           "lead_id": l.id, "desk": _desk_leada(l.source)})
         items.sort(key=lambda i: i["ts"], reverse=True)
 
-        marki = {m.item_id: m for m in session.query(AdminInboxMark)
-                 .filter(AdminInboxMark.admin_id == kto).all()}
         znak = marki.get("*")
         if znak is None:
             # Pierwsze otwarcie: to, co już leży w kolejkach, nie jest „nowe".
@@ -6211,10 +6275,15 @@ def admin_inbox(authorization: str | None = Header(default=None)):
             session.add(znak)
             session.commit()
         granica = _naiwny_utc(znak.updated_at)
+        wyczyszczone = {k[6:]: _naiwny_utc(m.updated_at) for k, m in marki.items()
+                        if k.startswith("clear:")}
         widoczne = []
         for i in items:
             m = marki.get(i["id"])
             if m is not None and m.hidden:
+                continue
+            g = [wyczyszczone[k] for k in ("all", _kat_inbox(i)) if k in wyczyszczone]
+            if g and _naiwny_utc(datetime.fromisoformat(i["ts"])) <= max(g):
                 continue
             if m is not None and m.read is not None:
                 i["read"] = bool(m.read)

@@ -172,12 +172,21 @@ function toggleTheme(){
 }
 paintTheme();
 
-/* Sticky toolbar w Leads przykleja sie POD topbarem, a topbar zmienia wysokosc
-   (safe-area w PWA, wesze okna) — mierzymy go zamiast zgadywac. */
-const measureTopbar=()=>document.documentElement.style
-  .setProperty('--tb-h',(document.querySelector('.topbar')?.offsetHeight||58)+'px');
+/* Pasek narzedzi kazdego widoku przykleja sie POD topbarem, a topbar zmienia
+   wysokosc (safe-area w PWA, zawiniety tytul, doladowane fonty, obrot). Pomiar
+   raz przy starcie i na `resize` zostawial stara wysokosc i pasek stawal w
+   polowie ekranu — ResizeObserver lapie kazda zmiane. */
+const measureTopbar=()=>{const tb=document.querySelector('.topbar');
+  if(tb&&tb.offsetHeight)document.documentElement.style.setProperty('--tb-h',tb.offsetHeight+'px')};
 measureTopbar();
 addEventListener('resize',measureTopbar);
+if(window.ResizeObserver&&document.querySelector('.topbar'))
+  new ResizeObserver(measureTopbar).observe(document.querySelector('.topbar'));
+/* Akcja w pasku widoku („+ Add lead", „↓ CSV"…): na telefonie sama ikona
+   w kwadracie 40 px (etykieta w aria-label/title), zeby pasek trzymal
+   2 wiersze: szukajka + akcje, pod spodem filtry przewijane w bok. */
+const tbAct=(ico,label,onclick,cls='btn-o',title='')=>`<button class="${cls} sm tb-act" onclick="${onclick}"
+    aria-label="${esc(label)}" title="${esc(title||label)}"><span class="tb-ico" aria-hidden="true">${ico}</span><span class="tb-lbl">${esc(label)}</span></button>`;
 
 let VIEW='overview';
 
@@ -485,12 +494,17 @@ function withUndo(opis,wykonaj,wiersz,onUndo){
     toast('Restored — nothing was deleted.','ok',3500);
   };
   _czekajace.add(zadanie);
+  return zadanie;
 }
 
 /* Wyjscie ze strony DOMYKA to, co czeka: admin widzial, ze wiersz zniknal, wiec
    zamkniecie karty nie moze go po cichu przywrocic. `keepalive` na zadaniu
-   pozwala mu doleciec juz po zamknieciu strony. */
-addEventListener('beforeunload',()=>{[..._czekajace].forEach(z=>z.domknij())});
+   pozwala mu doleciec juz po zamknieciu strony. iOS w PWA nie wysyla
+   `beforeunload` przy zamknieciu aplikacji — stad tez pagehide i schowanie. */
+const domknijCzekajace=()=>{[..._czekajace].forEach(z=>z.domknij())};
+addEventListener('beforeunload',domknijCzekajace);
+addEventListener('pagehide',domknijCzekajace);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')domknijCzekajace()});
 
 /* Toast "zrobione + Cofnij" dla akcji, ktore JUZ poszly na serwer, ale maja
    endpoint odwrotny (approve KYC -> reset). Inaczej niz withUndo: tam zadanie
@@ -762,9 +776,9 @@ const VIEWS={
     <h3>History</h3>
     <p class="muted" style="font-size:12.5px;margin:4px 0 12px">Past verification decisions.</p>
     <div class="toolbar" style="margin-bottom:10px">
-      <div class="seg">${[['all','All'],['approved','Approved'],['rejected','Rejected']]
+      <div class="tb-filters"><div class="seg">${[['all','All'],['approved','Approved'],['rejected','Rejected']]
         .map(([k,l])=>`<button class="${kf===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._kycFilter='${kf===k?'all':k}';renderKyc()">${l}</button>`).join('')}</div>
-      <span class="count-pill">${hist.length} of ${histAll.length}${impPill()}</span>
+      <span class="count-pill">${hist.length} of ${histAll.length}${impPill()}</span></div>
     </div>
     ${hist.length?`<div class="tbl-wrap rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.kyc">
       <thead><tr><th>Reviewed</th><th>Trader</th><th>Country</th><th>Document</th><th>Status</th><th class="no-sort">Documents</th><th class="no-sort"></th></tr></thead>
@@ -1221,14 +1235,13 @@ function renderMailLog(){
   const cap=capList(rows,'_mailAll','renderMailLog');
   $('view').innerHTML=`
     <div class="toolbar">
-      ${mailSwitches()}
       ${searchBox('mail-q','_mailQ','renderMailLog','Search recipient, name, subject, template or status…')}
+      <div class="tb-filters">${mailSwitches()}
       <div class="seg">${[['all','All'],['sent','Sent'],['failed','Failed']]
         .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._mailFilter='${f===k?'all':k}';renderMailLog()">${l}</button>`).join('')}</div>
-      <span class="count-pill">${rows.length} of ${list.length}${rs?'':' · <span class="muted">loading Resend…</span>'}</span>
-      <button class="btn-o sm" onclick="refreshMailRemote(this)">Refresh</button>
-      <button class="btn-p sm" onclick="openMailCompose()"
-        title="Write an e-mail to a client, a lead or any address — from the platform or from Forex Passing, with templates">Compose</button>
+      <span class="count-pill">${rows.length} of ${list.length}${rs?'':' · <span class="muted">loading Resend…</span>'}</span></div>
+      ${tbAct('↻','Refresh','refreshMailRemote(this)','btn-o','Fetch the latest from Resend')}
+      ${tbAct('✎','Compose','openMailCompose()','btn-p','Write an e-mail to a client, a lead or any address — from the platform or from Forex Passing, with templates')}
     </div>
     ${(rs&&rs.errors||[]).map(e=>`<p class="lead-statline" style="color:var(--gold)">⚠ Resend: ${esc(e)}</p>`).join('')}
     ${d.failed_7d?`<p class="lead-statline" style="color:var(--gold)">⚠ ${d.failed_7d} e-mail${d.failed_7d>1?'s':''} failed in the last 7 days — deliver the content another way (copy the portal-invite link, the pay link or the MT5 credentials from the account card), then check the SMTP settings.</p>`:''}
@@ -1342,11 +1355,11 @@ function renderTickets(){
   $('view').innerHTML=`
     <div class="toolbar">
       ${searchBox('tick-q','_tickQ','renderTickets','Search subject, e-mail or #…')}
-      <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._tickFilter='${f===k?'all':k}';renderTickets()">${l}</button>`).join('')}</div>
+      <div class="tb-filters"><div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._tickFilter='${f===k?'all':k}';renderTickets()">${l}</button>`).join('')}</div>
       ${freeCheckbox()}
       ${countrySelect(list,'renderTickets')}
       <span class="count-pill">${rows.length} of ${list.length}${
-        ukryciFree?` · <span class="muted">${ukryciFree} free hidden</span>`:''}</span>
+        ukryciFree?` · <span class="muted">${ukryciFree} free hidden</span>`:''}</span></div>
     </div>`
     +(active.length?`<div class="tbl-wrap">`+active.map(row).join('')+`</div>`
       :closed.length?'' // samo History: pusta sekcja "open" nic nie wnosi
@@ -1379,13 +1392,12 @@ function renderAccounts(){
   $('view').innerHTML=`
     <div class="toolbar">
       ${searchBox('acc-q','_accQ','renderAccounts','Search login, trader, email or plan…')}
-      <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="accSeg('${k}')">${l}</button>`).join('')}</div>
+      <div class="tb-filters"><div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="accSeg('${k}')">${l}</button>`).join('')}</div>
       ${freeCheckbox()}
       ${countrySelect(list,'renderAccounts')}
       <span class="count-pill">${rows.length} of ${list.length}${
-        ukryciFree?` · <span class="muted">${ukryciFree} free hidden</span>`:''}${impPill()}</span>
-      <button class="btn-o sm" onclick="exportStatements(this)"
-        title="One Excel file with every managed account: trades, daily summary, equity curve, payouts and rule breaches. Free signups are not included.">Statements .xlsx</button>
+        ukryciFree?` · <span class="muted">${ukryciFree} free hidden</span>`:''}${impPill()}</span></div>
+      ${tbAct('↓','Statements .xlsx','exportStatements(this)','btn-o','One Excel file with every managed account: trades, daily summary, equity curve, payouts and rule breaches. Free signups are not included.')}
     </div>
     ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.accounts.v2">
       <thead><tr><th>Created</th><th>Paid</th><th>Login</th><th>Trader</th><th>Plan</th><th>Phase</th><th>Status</th>
@@ -1489,9 +1501,9 @@ function poolListHtml(){
       ||(p.trader_email||'').toLowerCase().includes(q)));
   return `<div class="toolbar">
       ${searchBox('pool-q','_poolQ','renderPoolList','Search login, server or trader…')}
-      <div class="seg">${[['all','All'],['free','Free'],['assigned','Assigned'],['retired','Retired']]
+      <div class="tb-filters"><div class="seg">${[['all','All'],['free','Free'],['assigned','Assigned'],['retired','Retired']]
         .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._poolFilter='${f===k?'all':k}';renderPoolList()">${l}</button>`).join('')}</div>
-      <span class="count-pill">${list.length} of ${rows.length}</span>
+      <span class="count-pill">${list.length} of ${rows.length}</span></div>
     </div>`
     +(list.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.pool">
       <thead><tr><th>#</th><th>Login</th><th class="no-sort">Password</th><th>Server</th><th>Size</th><th>State</th><th>Assigned to</th><th>When</th><th class="no-sort"></th></tr></thead>
@@ -1552,13 +1564,13 @@ function renderPayoutsView(){
   $('view').innerHTML=`
     <div class="toolbar">
       ${list.length?`${searchBox('pay-q','_payQ','renderPayoutsView','Search account, trader or method…')}
-      <div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._payFilter='${f===k?'all':k}';renderPayoutsView()">${l}</button>`).join('')}</div>
+      <div class="tb-filters"><div class="seg">${seg.map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._payFilter='${f===k?'all':k}';renderPayoutsView()">${l}</button>`).join('')}</div>
       ${freeCheckbox()}
-      ${countrySelect(widoczne,'renderPayoutsView')}`:''}
-      <button class="btn-o sm" onclick="openPayoutImport()">Import history</button>
-      ${list.length?`<span class="count-pill">${rows.length} of ${list.length}${
+      ${countrySelect(widoczne,'renderPayoutsView')}
+      <span class="count-pill">${rows.length} of ${list.length}${
         ukryte?` · <span class="muted">${ukryte} imported hidden</span>`:''}${
-        ukryciFree?` · <span class="muted">${ukryciFree} free hidden</span>`:''}${impPill()}</span>`:''}
+        ukryciFree?` · <span class="muted">${ukryciFree} free hidden</span>`:''}${impPill()}</span></div>`:''}
+      ${tbAct('⤓','Import history','openPayoutImport()','btn-o','Import past payouts from the payout records')}
     </div>`+(rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.payouts">
     <thead><tr><th>Date</th><th>Account</th><th>Trader</th><th>Profit</th><th>Trader share</th><th>Method</th><th>Status</th><th class="no-sort">Certificate</th><th class="no-sort"></th></tr></thead>
     <tbody>${rows.map(r=>`<tr>
@@ -1638,14 +1650,13 @@ function renderOrders(){
     </div>
     <div class="toolbar">
       ${searchBox('ord-q','_ordQ','renderOrders','Search email, product, status…')}
-      <div class="seg">${[['all','All'],['paid','Paid'],['pending','Pending'],['awaiting','Awaiting crypto'],['failed','Failed']]
+      <div class="tb-filters"><div class="seg">${[['all','All'],['paid','Paid'],['pending','Pending'],['awaiting','Awaiting crypto'],['failed','Failed']]
         .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._ordFilter='${f===k?'all':k}';renderOrders()">${l}</button>`).join('')}</div>
       ${freeCheckbox()}
       ${countrySelect(list,'renderOrders')}
       <span class="count-pill">${rows.length} of ${list.length}${
-        ukryciFree?` · <span class="muted">${ukryciFree} free hidden</span>`:''}</span>
-      <button class="btn-p sm" onclick="openManualOrder()"
-        title="Record an order the customer pays outside Stripe (crypto, transfer)">+ New order</button>
+        ukryciFree?` · <span class="muted">${ukryciFree} free hidden</span>`:''}</span></div>
+      ${tbAct('+','New order','openManualOrder()','btn-p','Record an order the customer pays outside Stripe (crypto, transfer)')}
     </div>
     ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.orders">
       <thead><tr><th>#</th><th>Date</th><th>Trader</th><th>Product</th><th>Amount</th><th>Provider</th><th>Status</th><th>Account</th><th class="no-sort"></th></tr></thead>
@@ -2447,15 +2458,13 @@ function renderLeads(){
     ${due&&f!=='due'?`<button class="due-banner" onclick="window._leadFilter='due';renderLeads()">⏰ ${due} follow-up${due>1?'s':''} due — someone is waiting to hear back</button>`:''}
     <div class="toolbar lead-toolbar">
       ${searchBox('lead-q','_leadQ','renderLeads','Search name, email, phone or partner…')}
-      <div class="seg">${[['all','All'],['due','Due'],['mine','Mine'],['free','Free'],['bought','Bought']]
+      <div class="tb-filters"><div class="seg">${[['all','All'],['due','Due'],['mine','Mine'],['free','Free'],['bought','Bought']]
         .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._leadFilter='${f===k?'all':k}';renderLeads()">${l}</button>`).join('')}
         <button class="${sheetActive?'on':''}" onclick="${sheetActive?`window._leadFilter='all';renderLeads()`:'openLeadStatusSheet()'}">${sheetActive?sheetActive[1]:'Status ▾'}</button>
         ${kosz.length?`<button class="${f==='burned'?'on':''}" title="Burned leads"
-          onclick="window._leadFilter='${f==='burned'?'all':'burned'}';renderLeads()">🗑 ${kosz.length}</button>`:''}</div>
-      <button class="btn-o sm" onclick="exportLeads(this)"
-        title="Every lead, the trash included, as a spreadsheet">↓ CSV</button>
-      <button class="btn-p sm" onclick="openNewLead()"
-        title="Somebody who wrote to us without filling the form">+ Add lead</button>
+          onclick="window._leadFilter='${f==='burned'?'all':'burned'}';renderLeads()">🗑 ${kosz.length}</button>`:''}</div></div>
+      ${tbAct('↓','CSV','exportLeads(this)','btn-o','Every lead, the trash included, as a spreadsheet')}
+      ${tbAct('+','Add lead','openNewLead()','btn-p','Somebody who wrote to us without filling the form')}
     </div>
     ${rows.length?`<p class="lead-statline">${rows.length}${rows.length!==baza.length?` of ${baza.length}`:''} lead${rows.length===1&&rows.length===baza.length?'':'s'}${f==='burned'?' in the trash':''}${
         waiting?` · <span class="statlink" onclick="window._leadFilter='new';renderLeads()">${waiting} untouched</span>`:''} · ${bought.length} bought · $${fmt0(revenue)}</p>
@@ -3797,13 +3806,13 @@ function renderActivity(){
       :'<span class="status failed"><span class="dot"></span>never</span>');
   $('view').innerHTML=`<div class="toolbar">
       ${searchBox('jrn-q','_jrnQ','renderActivity','Search name or email…')}
-      <div class="seg">${JRN_FILTERS.map(([k,l])=>
+      <div class="tb-filters"><div class="seg">${JRN_FILTERS.map(([k,l])=>
         `<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''}
           onclick="window._jrnFilter='${f===k?'all':k}';renderActivity()">${l}</button>`).join('')}</div>
       ${freeCheckbox()}
       ${countrySelect(all,'renderActivity')}
       <span class="count-pill">${rows.length} of ${all.length}${
-        ukryci?` · <span class="muted">${ukryci} free hidden</span>`:''}${impPill()}</span>
+        ukryci?` · <span class="muted">${ukryci} free hidden</span>`:''}${impPill()}</span></div>
     </div>`
     +(rows.length?`<div class="tbl-wrap rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.activity">
       <thead><tr><th>Client</th><th>Claim</th><th>Last sign-in</th><th>7 days</th><th>Last seen</th><th>Accounts</th><th>KYC</th></tr></thead>
@@ -3848,13 +3857,13 @@ function renderClients(){
   const cap=capList(rows,'_cliAll','renderClients');
   $('view').innerHTML=`<div class="toolbar">
       ${searchBox('cli-q','_cliQ','renderClients','Search name or email…')}
-      <div class="seg">${CLI_FILTERS.map(([k,l])=>
+      <div class="tb-filters"><div class="seg">${CLI_FILTERS.map(([k,l])=>
         `<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''}
           onclick="window._cliFilter='${f===k?'all':k}';renderClients()">${l}</button>`).join('')}</div>
       ${freeCheckbox()}
       ${countrySelect(all,'renderClients')}
       <span class="count-pill">${rows.length} of ${all.length}${
-        ukryci?` · <span class="muted">${ukryci} free hidden</span>`:''}${impPill()}</span>
+        ukryci?` · <span class="muted">${ukryci} free hidden</span>`:''}${impPill()}</span></div>
     </div>`
     +(rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.clients">
       <thead><tr><th>Joined</th><th>Client</th><th>Accounts</th><th>KYC</th>
@@ -6008,7 +6017,7 @@ async function submitCreate(){
    przesunięcia (i hurtem w Edit), żeby wiersz nie był zaśmiecony przyciskami. */
 let INBOX=[];
 const NP={tab:'all',open:false,nav:'list',edit:false,picked:new Set(),
-  expanded:new Set(),fresh:new Set(),hiding:new Set(),loaded:false,known:null,dirty:false,ctxRow:null};
+  expanded:new Set(),fresh:new Set(),hiding:new Set(),gone:new Set(),loaded:false,known:null,dirty:false,ctxRow:null};
 try{const t=localStorage.getItem('pf_admin_inbox_tab');if(['all','leads','free','prop'].includes(t))NP.tab=t}catch(_){}
 const NP_TABS=[['all','All'],['leads','Leads'],['free','Free'],['prop','Prop']];
 
@@ -6054,8 +6063,14 @@ const npItem=id=>INBOX.find(i=>i.id===id);
 async function loadInbox(){
   try{
     const d=await api('/api/admin/inbox');
-    const items=(d.items||[]).filter(i=>i.id).map(i=>({...i,cat:npCat(i)}));
-    if(NP.known)items.forEach(i=>{if(!NP.known.has(i.id))NP.fresh.add(i.id)});
+    const items=(d.items||[]).filter(i=>i.id&&!NP.gone.has(i.id)).map(i=>({...i,cat:npCat(i)}));
+    /* „Nowe" (wjazd z góry) = naprawdę nowsze od wszystkiego, co już było.
+       Starsza pozycja, która dosunęła się na miejsce usuniętej, nie udaje
+       świeżego powiadomienia. */
+    if(NP.known){
+      const top=INBOX.reduce((m,i)=>i.ts>m?i.ts:m,'');
+      items.forEach(i=>{if(!NP.known.has(i.id)&&i.ts>top)NP.fresh.add(i.id)});
+    }
     NP.known=new Set(items.map(i=>i.id));
     INBOX=items;NP.loaded=true;
     npBadge();
@@ -6261,27 +6276,41 @@ function npMark(ids,read=true){
   api('/api/admin/inbox/mark',{method:'POST',body:JSON.stringify({ids:zm.map(i=>i.id),read})}).catch(()=>{});
 }
 /* Usuwanie przez withUndo: wiersz znika od razu, serwer dostaje zapis po 5 s,
-   „Undo" w tym czasie po prostu niczego nie wysyła. */
-function npDelete(ids){
+   „Undo" w tym czasie po prostu niczego nie wysyła.
+   - Id trafiają do NP.hiding OD RAZU (nie po animacji): kolejne usunięcie w
+     tych 300 ms przerysowuje listę i dawniej wskrzeszało zwijany wiersz.
+   - Znikają z NP.hiding dopiero po POTWIERDZONYM zapisie (i zostają w NP.gone
+     na resztę sesji) — odświeżenie, które wyszło przed zapisem, nie przywróci
+     ich; nieudany zapis przywraca je jawnie, zamiast po cichu przy następnym
+     odświeżeniu.
+   - `cat` = „Delete all" w zakładce: serwer dostaje granicę czasu dla całej
+     kategorii, więc starsze pozycje nie wjeżdżają na miejsce usuniętych. */
+let npPending=null;
+function npDelete(ids,cat){
   ids=ids.filter(id=>!NP.hiding.has(id));
   if(!ids.length)return;
+  if(npPending)npPending.domknij();   // jeden toast naraz, poprzednie idzie na serwer
   npCtxClose();npCloseSwipes();
   const set=new Set(ids),box=$('np-items');
   const els=[];
   npQ('.np-stk',box).forEach(s=>{if(npIds(s.querySelector('.np-stk-h')).every(id=>set.has(id)))els.push(s)});
   npQ('.np-row[data-id]',box).forEach(r=>{if(set.has(r.dataset.id)&&!els.some(s=>s.contains(r)))els.push(r)});
+  ids.forEach(id=>{NP.hiding.add(id);NP.picked.delete(id)});
   els.forEach(npCollapse);
-  setTimeout(()=>{
-    ids.forEach(id=>{NP.hiding.add(id);NP.picked.delete(id)});
-    npRenderList();npSeg(false);npBadge();if(NP.edit)npEditbar();
-    withUndo(ids.length===1?'Notification deleted':`${ids.length} notifications deleted`,
-      ()=>{
-        INBOX=INBOX.filter(i=>!set.has(i.id));ids.forEach(id=>NP.hiding.delete(id));
-        api('/api/admin/inbox/mark',{method:'POST',keepalive:true,
-          body:JSON.stringify({ids,hidden:true})}).catch(()=>{});
-      },null,
-      ()=>{ids.forEach(id=>{NP.hiding.delete(id);NP.fresh.add(id)});npRenderList();npSeg(true);npBadge()});
-  },npRM()?0:300);
+  npSeg(false);npBadge();if(NP.edit)npEditbar();
+  setTimeout(()=>{if(!npSwiping())npRenderList()},npRM()?0:300);
+  const przywroc=()=>{ids.forEach(id=>NP.hiding.delete(id));npRenderList();npSeg(true);npBadge()};
+  const przed=ids.map(id=>(npItem(id)||{}).ts||'').sort().pop();
+  const zad=withUndo(ids.length===1?'Notification deleted':`${ids.length} notifications deleted`,
+    ()=>{
+      if(npPending===zad)npPending=null;
+      (cat?api('/api/admin/inbox/clear',{method:'POST',keepalive:true,body:JSON.stringify({cat,before:przed})})
+         :api('/api/admin/inbox/mark',{method:'POST',keepalive:true,body:JSON.stringify({ids,hidden:true})}))
+        .then(()=>{ids.forEach(id=>{NP.gone.add(id);NP.hiding.delete(id)});INBOX=INBOX.filter(i=>!set.has(i.id))})
+        .catch(()=>{przywroc();toast("Couldn't delete — the notifications are back.",'err')});
+    },null,
+    ()=>{if(npPending===zad)npPending=null;ids.forEach(id=>NP.fresh.add(id));przywroc()});
+  npPending=zad;
 }
 function npRowAct(act,row){
   const ids=npIds(row);
@@ -6534,9 +6563,9 @@ addEventListener('click',e=>{
         return npEditbar();
       }
       case 'bulkdel':return npDelete([...NP.picked]);
-      case 'clear':return npArm(a,npVisible().length,()=>npDelete(npVisible().map(x=>x.id)));
+      case 'clear':return npArm(a,npVisible().length,()=>npDelete(npVisible().map(x=>x.id),NP.tab));
       case 'clearall':{const ids=INBOX.filter(x=>!NP.hiding.has(x.id)).map(x=>x.id);
-        return npArm(a,ids.length,()=>{npNav('list');npDelete(ids)})}
+        return npArm(a,ids.length,()=>{npNav('list');npDelete(ids,'all')})}
       case 'tgtest':return tgLinkTest(a);
       case 'tglink':npSetOpen(false);go('settings');return;
     }
