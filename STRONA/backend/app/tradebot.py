@@ -72,6 +72,19 @@ DOOM_WIN_SCALE = 0.45
 # a takich dni prawdziwi zdający nie mają; bot dojedzie „tak szybko, jak
 # wiarygodnie się da".
 TARGET_DAILY_MAX = 2.5
+# Ujemny cel (np. −2%): zejście do zadanego poziomu, nie zjazd na złamanie
+# limitu (to robi doom). NIE równe osuwanie — właściciel chce, żeby wyglądało
+# naturalnie: trochę zysku, potem większy spadek. Co trzeci dzień zielony
+# (+0,1–0,4%), reszta czerwona i wyraźnie większa (−0,35–0,9%), średnio około
+# −0,3% dziennie; w środku dnia straty większe niż wygrane.
+DESCENT_DAILY_PCT = (0.35, 0.90)
+DESCENT_GREEN_ODDS = 0.30
+DESCENT_GREEN_PCT = (0.10, 0.30)
+# Trafienie w zejściu: najwyżej 50%, niezależnie od persony — persona z
+# win-rate 0.7 miała w zejściu wartość oczekiwaną bliską zera i konto potrafiło
+# stać tygodniami nad celem.
+DESCENT_WIN_MAX = 0.50
+DESCENT_WIN_SCALE = 0.8
 
 
 # --------------------------------------------------------------------------- #
@@ -380,7 +393,7 @@ def start(session, acc: Account, *, style: str = "balanced", pace: str = "steady
     acc.bot_enabled = True
     acc.bot_style = style if style in STYLES else "balanced"
     acc.bot_pace = normalize_pace(pace)
-    acc.bot_target_pct = max(0.0, round(float(target_pct or 0.0), 2))
+    acc.bot_target_pct = round(float(target_pct or 0.0), 2)
     acc.bot_target_deadline = None  # świeży start nie dziedziczy starego terminu
     acc.bot_paused = False
     if acc.bot_seed is None:
@@ -447,6 +460,13 @@ def is_doom(acc: Account) -> bool:
     return (getattr(acc, "bot_mode", None) or "profit") == "doom"
 
 
+def target_equity(acc: Account) -> float | None:
+    """Saldo, w które celuje `bot_target_pct` — w obie strony. None = bez celu."""
+    if is_doom(acc) or not acc.bot_target_pct or not acc.initial_balance:
+        return None
+    return round(acc.initial_balance * (1 + acc.bot_target_pct / 100.0), 2)
+
+
 def cap_equity(acc: Account) -> float | None:
     """Saldo, ponad które bot nie ma prawa wyjść. None = bez limitu.
 
@@ -454,10 +474,30 @@ def cap_equity(acc: Account) -> float | None:
     z progiem fazy: `rules.profit_target_equity` też jest kwotą, a `Float` nie
     trzyma 9,97 dokładnie i porównanie procentów rozjeżdżałoby się na ostatnim
     miejscu po przecinku.
+
+    Dodatni cel zawsze jest sufitem (od niego liczy się, czy konto zda fazę).
+    Ujemny jest sufitem tylko wtedy, gdy konto stoi PONIŻEJ niego. Gdy saldo
+    stoi NAD celem — dowolnego znaku — bot do niego schodzi (`descent_floor`).
     """
-    if is_doom(acc) or not acc.bot_target_pct or not acc.initial_balance:
+    cel = target_equity(acc)
+    if cel is None:
         return None
-    return round(acc.initial_balance * (1 + acc.bot_target_pct / 100.0), 2)
+    if acc.bot_target_pct > 0:
+        return cel
+    return cel if float(acc.balance or acc.initial_balance or 0.0) < cel else None
+
+
+def descent_floor(acc: Account) -> float | None:
+    """Cel, do którego bot SCHODZI, bo saldo stoi nad nim. None = nie schodzi.
+
+    Cel jest punktem docelowym w obie strony: konto na +6% z nowym celem +3%
+    albo −2% osuwa się do niego tak, jak traderowi idzie gorszy okres, zamiast
+    stać bezczynnie nad sufitem (dawniej „cap overshot" = koniec handlu).
+    """
+    cel = target_equity(acc)
+    if cel is None:
+        return None
+    return cel if float(acc.balance or acc.initial_balance or 0.0) > cel + MIN_FILL else None
 
 
 def doom_floor(acc: Account) -> float:
@@ -570,7 +610,7 @@ def set_target(session, acc: Account, target_pct: float,
     da (saldo tylko rośnie albo spada wynikiem transakcji), więc panel musi to
     powiedzieć wprost zamiast obiecywać wynik, którego nie dowiezie.
     """
-    acc.bot_target_pct = max(0.0, round(float(target_pct or 0.0), 2))
+    acc.bot_target_pct = round(float(target_pct or 0.0), 2)
     # Termin dojścia do sufitu: dodatni → ustaw, 0 → zdejmij zegar (wolne
     # tempo persony), pominięty → zostaw stary (dzienna porcja i tak liczy się
     # od nowego dystansu), cel zdjęty → zegar też znika.
@@ -697,6 +737,24 @@ def _day_target(acc: Account, p: Persona, balance: float, now: datetime) -> floa
     if is_doom(acc):
         return _doom_day_target(acc, balance, now)
     rng = random.Random(f"{acc.bot_seed}:{_day_key(now)}")
+    podloga = descent_floor(acc)
+    if podloga is not None:
+        # Ujemny cel: spokojna porcja w dół, liczona od startu dnia (jak w
+        # doomie — `_today_realized` liczy się od tego samego punktu). Z terminem
+        # porcja wynika z dystansu i dni, bez niego — umiarkowane tempo persony.
+        if acc.day_key == _day_key(now) and acc.day_start_balance:
+            start_dnia = float(acc.day_start_balance)
+        else:
+            start_dnia = balance
+        dystans = max(0.0, start_dnia - podloga)
+        if getattr(acc, "bot_target_deadline", None):
+            porcja = dystans / _target_days_left(acc, now) * rng.uniform(0.85, 1.20)
+            porcja = min(porcja, balance * TARGET_DAILY_MAX / 100.0)
+        else:
+            if dystans > balance * 0.3 / 100.0 and rng.random() < DESCENT_GREEN_ODDS:
+                return balance * rng.uniform(*DESCENT_GREEN_PCT) / 100.0
+            porcja = balance * rng.uniform(*DESCENT_DAILY_PCT) / 100.0
+        return -min(porcja, dystans)
     cap = cap_equity(acc)
     if cap is not None and getattr(acc, "bot_target_deadline", None):
         # Jazda na termin: porcja dystansu do sufitu, jak w doomie tylko w górę.
@@ -731,8 +789,14 @@ def _should_open(session, acc: Account, p: Persona, balance: float, now: datetim
     #    KWOTOWY i z marginesem `MIN_FILL`: resztka rzedu centow nie przezyje
     #    zaokraglenia ceny do ticka i wygenerowalaby transakcje z `pnl = 0.00`,
     #    ktora nie rusza salda, wiec bot otwieralby ja w nieskonczonosc.
+    #    Saldo NAD celem (nowy, niższy cel albo cel ujemny) = zejście, więc
+    #    sufit nie zatrzymuje; zatrzymuje dopiero dojście do celu z góry.
+    podloga = descent_floor(acc)
     cap = cap_equity(acc)
-    if cap is not None and balance >= cap - MIN_FILL:
+    if podloga is None and cap is not None and balance >= cap - MIN_FILL:
+        return False
+    cel = target_equity(acc)
+    if cel is not None and abs(balance - cel) <= MIN_FILL:
         return False
 
     # 2) dzienny cel zrobiony (w obie strony) -> koniec sesji
@@ -793,8 +857,18 @@ def _open_new(session, acc: Account, p: Persona, balance: float, now: datetime) 
 
     target = _day_target(acc, p, balance, now)
     doom = is_doom(acc)
+    podloga = descent_floor(acc)
+    zejscie = podloga is not None and target < 0
 
-    if doom:
+    if zejscie:
+        # Jak w doomie: stawka z porcji dnia rozłożonej na wejścia, które w tym
+        # dniu jeszcze zostały — ale ze zwykłym sufitem ryzyka persony, bo konto
+        # ma się osuwać spokojnie, nie posypać.
+        zrealizowane = _today_realized(session, acc, now)
+        zostalo_wejsc = max(1.0, p.trades_per_day * _frakcja_dnia_do_konca(now))
+        risk_usd = min(abs(min(0.0, target - zrealizowane)) / zostalo_wejsc * 2.2,
+                       balance * p.risk_pct / 100.0)
+    elif doom:
         # Sizing idzie z DZIENNEJ PORCJI STRATY, nie z celu persony (ten jest o
         # rzad wielkosci mniejszy) i bez sufitu `risk_pct` — konto ma sie
         # posypac, a nie ostroznie zarzadzac ryzykiem. Limit lotow nizej i tak
@@ -823,7 +897,13 @@ def _open_new(session, acc: Account, p: Persona, balance: float, now: datetime) 
     if acc.max_lots and acc.max_lots > 0:
         lots = min(lots, round(acc.max_lots, 2))
 
-    if doom:
+    if zejscie:
+        # Lekko ujemna wartość oczekiwana: wygrane trochę rzadsze i mniejsze niż
+        # zwykle, straty zwyczajne. Krzywa schodzi, ale wygląda jak słabszy
+        # tydzień tradera, a nie jak konto, które się sypie.
+        win = rng.random() < min(DESCENT_WIN_MAX, p.win_rate * DESCENT_WIN_SCALE)
+        r = rng.uniform(0.4, 0.9) if win else -rng.uniform(0.8, 1.6)
+    elif doom:
         # Male zyski, duze straty — dokladnie tak wyglada konto tradera, ktory
         # sie posypal. Samo obnizenie win rate nie wystarcza: przy `avg_r`
         # persony jedna wygrana odrabiala trzy straty i krzywa stalaby w miejscu.
@@ -847,8 +927,11 @@ def _open_new(session, acc: Account, p: Persona, balance: float, now: datetime) 
     # Cel dnia pilnuje tylko rytmu krzywej; sufit decyduje o tym, czy konto
     # zda faze, wiec ostatnie wejscie musi zatrzymac sie DOKLADNIE na nim.
     cap = cap_equity(acc)
-    if cap is not None and plan_pnl > 0:
+    if cap is not None and podloga is None and plan_pnl > 0:
         plan_pnl = min(plan_pnl, max(0.0, cap - balance))
+    # I lustrzanie dla ujemnego celu: ostatnia strata ląduje DOKŁADNIE na nim.
+    if podloga is not None and plan_pnl < 0:
+        plan_pnl = max(plan_pnl, min(0.0, podloga - balance))
 
     # Ostatnie wejscie pod sufitem bywa male, a `_close_trade` zaokragla cene
     # zamkniecia do ticka instrumentu. Przy duzym wolumenie jeden tick jest wart

@@ -609,3 +609,13 @@ button.status-tap{border:0;cursor:pointer;font-family:inherit}
    całą stronę (z wpisaną frazą i otwartą kartą). Przewijanie zostaje, znika
    tylko gest odświeżania i gumowe odbicie przy krawędzi (Safari 16+). */
 html,body{overscroll-behavior-y:none}
+
+/* „Trade BOT — advanced" jako rozwijana sekcja: nagłówek karty to przełącznik
+   ze strzałką, treść pojawia się dopiero po kliknięciu. */
+.bt-adv>summary{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  cursor:pointer;list-style:none;-webkit-user-select:none;user-select:none}
+.bt-adv>summary::-webkit-details-marker{display:none}
+.bt-adv>summary::after{content:"›";font-size:20px;line-height:1;color:var(--dim);
+  transform:rotate(90deg);transition:transform .2s var(--ease-out)}
+.bt-adv[open]>summary::after{transform:rotate(-90deg)}
+.bt-adv[open]>.bt-adv-body{margin-top:10px}

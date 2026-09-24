@@ -44,7 +44,9 @@ def _konto_z_botem(login: str, *, cel: float, zysk_pct: float = 0.0) -> int:
 
 def test_podniesienie_celu_wznawia_handel_po_jego_osiagnieciu():
     """Sedno zmiany: bot na celu jest bezczynny, po podniesieniu znow otwiera pozycje."""
-    aid = _konto_z_botem("bt-wznow", cel=5.0, zysk_pct=5.2)
+    # dokładnie NA celu — konto ponad celem od 2026-09-24 schodzi do niego
+    # (test_bot_descent.py), więc „bezczynny" znaczy: saldo równe celowi
+    aid = _konto_z_botem("bt-wznow", cel=5.0, zysk_pct=5.0)
     s = SessionLocal()
     acc = s.get(Account, aid)
     persona = tradebot.persona_for(acc)
@@ -100,10 +102,11 @@ def test_zmiana_celu_nie_rusza_salda():
     s.close()
 
 
-def test_ujemny_cel_i_pusty_patch_sa_odrzucane():
+def test_cel_pod_podloga_i_pusty_patch_sa_odrzucane():
+    """Ujemny cel jest dozwolony (spokojne zejście), ale nie na podłogę DD."""
     aid = _konto_z_botem("bt-walidacja", cel=5.0)
     assert client.patch(f"/api/admin/accounts/{aid}/bot", headers=ADMIN_H,
-                        json={"target_pct": -2}).status_code == 400
+                        json={"target_pct": -12}).status_code == 400
     assert client.patch(f"/api/admin/accounts/{aid}/bot", headers=ADMIN_H,
                         json={}).status_code == 400
 

@@ -3495,13 +3495,14 @@ async function openAccount(id){
           <span class="status ${a.bot_paused?'pending':'funded'}"><span class="dot"></span>${a.bot_paused?'paused':'running'}</span>
           <span class="chip">style <b>${esc(a.bot_style||'balanced')}</b></span>
           <span class="chip">pace <b>${esc(PACE_TXT[a.bot_pace]||a.bot_pace||'steady')}</b></span>
-          ${a.bot_target_pct?`<span class="chip">stops at <b>+${a.bot_target_pct}%</b></span>`:''}
+          ${a.bot_target_pct?`<span class="chip">${a.bot_target_pct>0?'stops at':'drifts to'} <b>${pctS(a.bot_target_pct)}</b></span>`:''}
           ${(a.bot_outcome&&a.bot_outcome.mode==='doom')?`<span class="status failed"><span class="dot"></span>riding down</span>`:''}
         </div>
-        ${(a.bot_target_pct && (m.profit_pct||0) >= a.bot_target_pct)?`
+        ${(a.bot_target_pct && (a.bot_target_pct>0?(m.profit_pct||0) >= a.bot_target_pct
+            :Math.abs((m.profit_pct||0)-a.bot_target_pct)<=0.02))?`
           <div class="warn-box" style="margin:0 0 12px;background:var(--gold-bg);border:1px solid var(--gold-line);color:var(--gold-ink)">
             <b style="display:block">Target reached — the bot stopped opening positions</b>
-            It is still running at +${(m.profit_pct||0).toFixed(2)}%, just idle. Raise the target below to continue from here.
+            It is still running at ${pctS(m.profit_pct||0)}, just idle. Change the target below to continue from here.
           </div>`:''}
         ${a.market_closed?`
           <div class="warn-box" style="margin:0 0 12px;background:var(--gold-bg);border:1px solid var(--gold-line);color:var(--gold-ink)">
@@ -3512,7 +3513,8 @@ async function openAccount(id){
         ${botOutcomeBox(a)}
         <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
           <div><label class="muted" style="font-size:12px">Target profit</label>
-            <input id="bot-newtarget" class="inp" type="number" step="0.01" min="0"
+            <input id="bot-newtarget" class="inp" type="number" step="0.1"
+                   min="${(a.bot_outcome&&a.bot_outcome.min_target_pct)??-9.5}"
                    style="max-width:130px" value="${(a.bot_target_pct||0).toFixed(2)}"
                    oninput="botTargetPreview(this.value,${a.initial_balance||0})"
                    onkeydown="if(event.key==='Enter')setBotTarget(${a.id})"></div>
@@ -3526,7 +3528,10 @@ async function openAccount(id){
         <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
           <b>Target</b> is a hard cap: the account profit the bot never trades past, precise
           to 0.01% — the last trade lands the balance exactly on it. Raise it to let the bot
-          keep going, or set <b>0</b> for no limit. Changing it never resyncs the balance,
+          keep going, or set <b>0</b> for no limit. A target <b>below the current result</b> — lower
+          than where the account is now, or negative (e.g. −2) — makes the bot drift down to it the
+          way a trader has a bad stretch: some green days, then bigger red ones, stopping exactly
+          there, always above the drawdown floor. Changing it never resyncs the balance,
           so the equity curve continues without a jump.
           <b>Pause</b> only stops new entries — an open position runs to its close, the account
           stays on bot data and the balance is kept. <b>Stop</b> ends the bot for good and
@@ -3551,8 +3556,9 @@ async function openAccount(id){
               <option value="steady" selected>Steady — 4–8 trades a day</option>
               <option value="busy">Busy — around 20 trades a day</option>
             </select></div>
-          <div><label class="muted" style="font-size:12px">Stop at profit %</label>
-            <input id="bot-target" class="inp" type="number" step="0.01" min="0" value="0" placeholder="0 = no limit"></div>
+          <div><label class="muted" style="font-size:12px">Target %</label>
+            <input id="bot-target" class="inp" type="number" step="0.1" min="-9.5" value="0"
+              placeholder="0 = no limit" title="Positive: stops at that profit. Negative: drifts down to it. 0: no limit."></div>
         </div>
         <button class="btn-p" onclick="startBot(${a.id})">Start Trade BOT</button>`}
       <p class="muted" style="font-size:12px;margin-top:12px;line-height:1.55">
@@ -4195,11 +4201,17 @@ const BOT_TUNE=[
   ['red_day_odds','Red-day odds','0.01','Chance a day ends in the red. 0.2 = one day in five.'],
   ['swing','Swing (floating)','0.05','How far an open position wanders from its planned result before it closes.'],
 ];
+let BT_ADV_OPEN=false;
 async function renderBotTuning(id){
   const el=$('bot-tune-card'); if(!el)return;
+  /* Zwinięta domyślnie (prośba właściciela) — to strojenie charakteru konta,
+     po które sięga się rzadko. Stan rozwinięcia żyje do przeładowania, żeby
+     zapis nadpisań nie zwijał sekcji pod ręką. */
+  const zwin=(tresc)=>{el.innerHTML=`<details class="bt-adv"${BT_ADV_OPEN?' open':''}
+      ontoggle="BT_ADV_OPEN=this.open"><summary><h3 style="font-size:15px;margin:0">Trade BOT — advanced</h3></summary>
+      <div class="bt-adv-body">${tresc}</div></details>`};
   let d; try{d=await api(`/api/admin/accounts/${id}/bot/tuning`)}catch(e){
-    el.innerHTML='<h3 style="font-size:15px">Trade BOT — advanced</h3>'
-      +`<p class="muted" style="font-size:12.5px">Could not load: ${esc(e.message)}</p>`;return}
+    zwin(`<p class="muted" style="font-size:12.5px">Could not load: ${esc(e.message)}</p>`);return}
   const pola=BOT_TUNE.map(([k,label,step,hint])=>{
     const [lo,hi]=d.limits[k]||[0,0];
     /* Swing nie wychodzi z ziarna konta — jest jedna stala dla wszystkich,
@@ -4209,8 +4221,7 @@ async function renderBotTuning(id){
         value="${d.override[k]??''}" placeholder="auto">
       <div class="muted" style="font-size:11px;margin-top:3px">auto: ${d.auto[k]} · ${lo}–${hi}</div></div>`}).join('');
   const ile=BOT_TUNE.filter(([k])=>d.override[k]!=null).length+(d.override.symbols?1:0);
-  el.innerHTML=`<h3 style="font-size:15px;margin-bottom:4px">Trade BOT — advanced</h3>
-    <p class="muted" style="font-size:12px;margin:0 0 12px;line-height:1.55">
+  zwin(`<p class="muted" style="font-size:12px;margin:0 0 12px;line-height:1.55">
       Leave a field empty and it stays as it is now: rolled once from this account's own seed,
       so no two accounts trade alike. Fill one in and <b>this account only</b> follows your
       number. ${ile?`<b>${ile} field${ile>1?'s':''} overridden.</b>`:'Nothing overridden yet.'}</p>
@@ -4228,7 +4239,7 @@ async function renderBotTuning(id){
     <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
       Changes apply to the <b>next</b> position the bot opens — trades already closed stay as
       they were. A profit target or the drawdown ride still wins over these numbers: they set
-      the account's character, the target sets where it has to end up.</p>`;
+      the account's character, the target sets where it has to end up.</p>`);
 }
 async function saveBotTuning(id){
   const body={};
@@ -4351,6 +4362,7 @@ async function pauseBot(id,paused){
    (_bot_outcome w main.py): sufit bota i próg fazy to dwie różne formuły
    w dwóch modułach — porównywanie ich w JS rozjechałoby się przy pierwszej
    zmianie reguł. */
+const pctS=v=>(v>0?'+':v<0?'−':'')+Math.abs(v).toFixed(2)+'%';
 function botTargetUsd(pct,base){
   return (pct&&base)?`= $${fmt(Math.round(base*(1+pct/100)))}`:'';
 }
@@ -4373,7 +4385,19 @@ function botOutcomeBox(a){
     </div>`;
   let msg='';
   const P='<p class="muted" style="font-size:12.5px;margin:0 0 12px;line-height:1.55">';
-  if(o.cap_overshot){
+  if(o.descent_equity!=null&&o.cap_pct>0){
+    msg=`${P}Above the target — the bot works down to <b>${pctS(o.cap_pct)}</b> = ${usd(o.descent_equity)}
+      the way a trader has a weaker stretch: some green days, then bigger red ones. It stops exactly there.${
+      o.phase_target_equity!=null?` The phase target is ${pctS(o.phase_target_pct)} (${usd(o.phase_target_equity)}).`:''}</p>`;
+  }else if(o.cap_pct<0){
+    msg=o.descent_equity!=null
+      ?`${P}Drifting down to <b>${pctS(o.cap_pct)}</b> = ${usd(o.descent_equity)} — a bad stretch, not a
+        collapse: some green days, then bigger red ones. It stops exactly there, above the drawdown
+        floor. <b style="color:var(--red)">This account does not pass</b> while the target is negative.</p>`
+      :o.cap_equity!=null
+      ?`${P}Below the target — the bot works back up to <b>${pctS(o.cap_pct)}</b> = ${usd(o.cap_equity)} and stops there.</p>`
+      :`${P}Sitting on the target of <b>${pctS(o.cap_pct)}</b>. Change it to move the account again.</p>`;
+  }else if(o.cap_overshot){
     msg=`<div class="warn-box" style="margin:0 0 12px">
       <b style="display:block">Already above the cap</b>
       The balance is past +${o.cap_pct.toFixed(2)}% (${usd(o.cap_equity)}) and cannot be walked
@@ -4401,7 +4425,7 @@ function botOutcomeBox(a){
     ${o.phase_target_pct>0?`
       <button class="btn-o sm" onclick="setBotOutcome(${a.id},${(o.phase_target_pct+0.02).toFixed(2)})">Will pass · +${(o.phase_target_pct+0.02).toFixed(2)}%</button>
       <button class="btn-o sm" onclick="setBotOutcome(${a.id},${(o.phase_target_pct-0.03).toFixed(2)})">Miss by 0.03 pp · +${(o.phase_target_pct-0.03).toFixed(2)}%</button>`:''}
-    ${o.cap_pct?`<button class="btn-o sm" onclick="setBotOutcome(${a.id},0)">No cap</button>`:''}
+    ${o.cap_pct?`<button class="btn-o sm" onclick="setBotOutcome(${a.id},0)">${o.cap_pct>0?'No cap':'Clear target'}</button>`:''}
     <button class="btn-o sm" style="border-color:var(--red-line);color:var(--red)" onclick="makeItFail(${a.id})">Make it fail…</button>
   </div>`;
 }
@@ -4431,6 +4455,7 @@ async function setBotOutcome(id,pct){
     const o=r.bot_outcome||{};
     const kiedy=o.target_deadline?` Aiming for around ${dstr(o.target_deadline)}.`:'';
     toast(!pct?'🎯 Cap removed. The bot trades with no profit limit.'
+      :pct<0?`📉 Target ${pctS(r.bot_target_pct)} — the bot drifts there like a bad stretch (some green days, bigger red ones) and stops.`
       :o.will_pass===false?`🎯 Cap +${r.bot_target_pct}% — short of the phase target by ${Math.abs(o.gap_pp).toFixed(2)} pp. This account will not pass.${kiedy}`
       :o.will_pass?`🎯 Cap +${r.bot_target_pct}% — clears the phase target. This account will pass.${kiedy}`
       :`🎯 Target set to +${r.bot_target_pct}%. The bot continues from here.${kiedy}`,'ok',7000);
@@ -4439,7 +4464,7 @@ async function setBotOutcome(id,pct){
 }
 async function setBotTarget(id){
   const cel=parseFloat($('bot-newtarget').value);
-  if(isNaN(cel)||cel<0){toast('Enter a target of 0% or more.','err');return}
+  if(isNaN(cel)){toast('Enter a target, e.g. 8 or −2.','err');return}
   await setBotOutcome(id,cel);
 }
 async function makeItFail(id){
