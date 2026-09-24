@@ -448,8 +448,10 @@ class MetaApiRestFeed(Feed):
             pozycje = await self._zapytaj("GET", self._klient(metaapi_account_id, "/positions")) or []
         except Exception as e:
             print(f"[MetaApiRestFeed] {metaapi_account_id}: nie udalo sie pobrac pozycji do zamkniecia ({e})", flush=True)
-            return 0
-        zamkniete = 0
+            # Rzucamy: „0 zamknietych" wygladalo jak sukces, a pozycje zostawaly
+            # otwarte na koncie, ktore u nas juz jest `failed` i nie wraca do pollera.
+            raise RuntimeError(f"positions unreadable: {e}") from e
+        zamkniete, nieudane = 0, 0
         for poz in pozycje:
             pid = _g(poz, "id")
             try:
@@ -457,7 +459,10 @@ class MetaApiRestFeed(Feed):
                                     {"actionType": "POSITION_CLOSE_ID", "positionId": str(pid)})
                 zamkniete += 1
             except Exception as e:
+                nieudane += 1
                 print(f"[MetaApiRestFeed] {metaapi_account_id}: pozycja {pid} nie zamknieta ({e})", flush=True)
+        if nieudane:
+            raise RuntimeError(f"{nieudane} position(s) not closed ({zamkniete} closed)")
         return zamkniete
 
     async def lock(self, metaapi_account_id: str, *,
@@ -470,6 +475,7 @@ class MetaApiRestFeed(Feed):
             await self._zapytaj("POST", url, {})
         except Exception as e:
             print(f"[MetaApiRestFeed] {metaapi_account_id}: undeploy nieudany ({e})", flush=True)
+            raise
 
 
 # --------------------------------------------------------------------------- #

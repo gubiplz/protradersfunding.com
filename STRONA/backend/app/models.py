@@ -381,6 +381,14 @@ class Account(Base):
     __tablename__ = "accounts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Blokada optymistyczna: każdy zapis ORM dokłada `WHERE row_version = :stara`
+    # i podbija licznik. Tick pollera trzyma konto w pamięci przez wywołania
+    # sieciowe — bez tego potrafił nadpisać saldo zmienione w tym czasie przez
+    # zatwierdzenie wypłaty (zysk wracał i dało się go wypłacić drugi raz).
+    # Przegrany dostaje StaleDataError: tick pomija konto do następnego
+    # przebiegu, request z panelu dostaje 409 „spróbuj ponownie".
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    __mapper_args__ = {"version_id_col": row_version}
     login: Mapped[str] = mapped_column(String(64), index=True)
     trader_name: Mapped[str] = mapped_column(String(120), default="")
     trader_id: Mapped[int | None] = mapped_column(ForeignKey("traders.id"), nullable=True, index=True)
@@ -420,6 +428,10 @@ class Account(Base):
     # --- Trade BOT (admin) ---
     # Gdy wlaczony, konto NIE jest czytane z MT5 — snapshoty generuje tradebot.py.
     bot_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Odcięcie od handlu po breachu (zamknięcie pozycji + undeploy) nie udało
+    # się — tick ryzyka ponawia je, zamiast zostawić konto grające na MT5.
+    enforcement_pending: Mapped[bool] = mapped_column(Boolean, default=False)
+    enforcement_attempts: Mapped[int] = mapped_column(Integer, default=0)
     bot_seed: Mapped[int | None] = mapped_column(Integer, nullable=True)
     bot_style: Mapped[str | None] = mapped_column(String(16), nullable=True)   # scalper|balanced|swing
     bot_pace: Mapped[str | None] = mapped_column(String(16), nullable=True)    # light|steady|busy
