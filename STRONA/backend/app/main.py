@@ -430,6 +430,10 @@ def _bot_outcome(acc: Account) -> dict:
         "doom_limit": acc.bot_doom_limit if doom else None,
         "doom_floor": round(tradebot.doom_floor(acc), 2) if doom else None,
         "cap_pct": round(float(acc.bot_target_pct or 0.0), 2),
+        # Ujemny cel, do którego bot schodzi (None = nie schodzi), i najniższy
+        # dozwolony cel — pół punktu nad podłogą całkowitą (`_waliduj_tryb`).
+        "descent_equity": tradebot.descent_floor(acc),
+        "min_target_pct": -(float(acc.max_overall_loss_pct or 10.0) - 0.5),
         "cap_equity": cap,
         "cap_overshot": cap is not None and balance > cap,
         "target_deadline": (acc.bot_target_deadline.isoformat()
@@ -4638,7 +4642,7 @@ async def admin_breach_account(account_id: int, payload: BreachIn):
 class BotIn(BaseModel):
     style: str = "balanced"      # scalper | balanced | swing
     pace: str = "steady"         # light (1-2/dzień) | steady (4-8) | busy (~20)
-    target_pct: float = 0.0      # 0 = bez limitu zysku
+    target_pct: float = 0.0      # 0 = bez limitu; ujemny = spokojne zejście do tego poziomu
     mode: Literal["profit", "doom"] = "profit"
     doom_days: float | None = None      # w ilu dniach ma zjechać na podłogę
     doom_limit: Literal["overall", "daily"] = "overall"
@@ -4646,6 +4650,14 @@ class BotIn(BaseModel):
 
 def _waliduj_tryb(mode: str, target_pct: float | None, acc: Account) -> None:
     """Wspólne bramki dla POST i PATCH bota."""
+    if target_pct and target_pct < 0:
+        # Ujemny cel to kontrolowane zejście, nie złamanie limitu: musi stać
+        # nad podłogą całkowitą z zapasem. Na złamanie jest tryb zjazdu (doom).
+        dno = float(acc.max_overall_loss_pct or 10.0)
+        if target_pct <= -(dno - 0.5):
+            raise HTTPException(400, f"A negative target must stay above −{dno - 0.5:g}% — "
+                                     f"the max drawdown is {dno:g}%. Use the drawdown ride "
+                                     f"to fail the account")
     if mode == "doom":
         if target_pct:
             raise HTTPException(400, "A profit target and the drawdown ride are mutually "
@@ -4717,8 +4729,6 @@ def admin_bot_pause(account_id: int, payload: BotPauseIn):
             tradebot.set_mode(session, acc, payload.mode, doom_days=payload.doom_days,
                               doom_limit=payload.doom_limit)
         if payload.target_pct is not None:
-            if payload.target_pct < 0:
-                raise HTTPException(400, "The target cannot be negative")
             # 0 = jawne „bez terminu"; ujemne dni to zawsze pomyłka klienta.
             if payload.target_days is not None and payload.target_days < 0:
                 raise HTTPException(400, "The number of days cannot be negative")
