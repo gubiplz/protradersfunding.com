@@ -5381,8 +5381,8 @@ function payoutCardHtml(pb){
   return `<div class="sec-card" style="max-width:560px"><h3>Payout BOT</h3>
       <div class="chip-row" style="margin-bottom:12px">
         <span class="status ${pb.enabled?'funded':'pending'}"><span class="dot"></span>${pb.enabled?'running':'off'}</span>
-        <span class="chip">window <b>${String(pb.win_from).padStart(2,'0')}:00&ndash;${String(pb.win_to).padStart(2,'0')}:00 ET</b></span>
-        <span class="chip">today's slot <b>${esc(pb.today_slot_et||'--:--')} ET</b></span>
+        <span class="chip">window <b>${String(pb.win_from).padStart(2,'0')}:00&ndash;${String(pb.win_to).padStart(2,'0')}:00 ${esc(pb.timezone||'Warsaw')}</b></span>
+        <span class="chip">today's slot <b>${esc(pb.today_slot||'--:--')} ${esc(pb.timezone||'Warsaw')}</b></span>
         <span class="chip">on landing <b>${pb.lp_pct}%</b></span>
         <span class="chip">last run <b>${esc(pb.last_day||'never')}</b></span>
         ${pb.last_result?`<span class="chip" ${/FAILED/.test(pb.last_result)?'style="border-color:var(--red-line);color:var(--red)"':''}>last post <b>${esc(pb.last_result)}</b></span>`:''}
@@ -5393,9 +5393,9 @@ function payoutCardHtml(pb){
         Set <span class="mono">TELEGRAM_BOT_TOKEN</span>, <span class="mono">TELEGRAM_CHAT_ID</span>
         and <span class="mono">SHOT_API_URL</span> in the environment.</div></div>`:''}
       <div class="pool-form">
-        <div><label class="muted" style="font-size:12px">Window from (ET hour)</label>
+        <div><label class="muted" style="font-size:12px">Window from (Warsaw hour)</label>
           <input id="pb-from" class="inp" type="number" min="0" max="23" step="1" value="${pb.win_from}"></div>
-        <div><label class="muted" style="font-size:12px">Window to (ET hour)</label>
+        <div><label class="muted" style="font-size:12px">Window to (Warsaw hour)</label>
           <input id="pb-to" class="inp" type="number" min="0" max="23" step="1" value="${pb.win_to}"></div>
         <div><label class="muted" style="font-size:12px">Chance of landing page %</label>
           <input id="pb-lp" class="inp" type="number" min="0" max="100" step="1" value="${pb.lp_pct}"></div>
@@ -5413,7 +5413,7 @@ function payoutCardHtml(pb){
       </div>
       <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
         Creates <b>one payout a day</b> with today's date and a funded archive account behind it.
-        The posting minute is <b>drawn fresh every day</b> inside your window (US Eastern,
+        The posting minute is <b>drawn fresh every day</b> inside your window (Warsaw time,
         DST-aware), so posts never land at the same time twice. Site traffic releases the post at
         that exact minute; with zero traffic it falls back to the daily tick, which fires from the
         start of the window. <b>Every payout gets a public certificate</b> and is posted to

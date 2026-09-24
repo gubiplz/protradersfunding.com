@@ -30,6 +30,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import random
 import re
@@ -46,6 +47,8 @@ settings = get_settings()
 TIMEOUT_SEK = 15
 PREFIKS = "reach_"
 KLUCZ_WYNIK = PREFIKS + "last_result"
+# Strefa godziny pokazywanej w panelu (ta sama co w Payout BOT-cie).
+STREFA_PANELU = ZoneInfo("Europe/Warsaw")
 KLUCZ_ALERT = PREFIKS + "last_alert_day"
 
 DOMYSLNE = {
@@ -606,9 +609,13 @@ def zamow(session, link: str, *, transport=None, powod: str = "manual",
 
 
 def _zapisz_wynik(session, opis: str) -> None:
-    """Ostatni wynik w panelu obok Payout BOT-a. Osobna, best-effortowa transakcja."""
+    """Ostatni wynik w panelu obok Payout BOT-a. Osobna, best-effortowa transakcja.
+
+    Godzina w czasie warszawskim, jak slot Payout BOT-a obok — dwie karty obok
+    siebie w dwóch różnych strefach (UTC tu, ET tam) wyglądały, jakby post
+    i jego zasięg dzieliło kilka godzin."""
     try:
-        dzien = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+        dzien = datetime.now(STREFA_PANELU).strftime("%Y-%m-%d %H:%M")
         _ustaw(session, "last_result", f"{dzien} {opis}"[:200])
         session.commit()
     except Exception:  # pragma: no cover

@@ -321,10 +321,28 @@ def _przygotuj_baze() -> None:
             return
         init_db()
         sync_catalog()    # oferta i cennik z kodu — niezależnie od trybu
+        _przenies_payoutbota_na_warszawe()
         if settings.auto_seed:
             seed_demo()   # admin zawsze; konta demo tylko w trybie sim
         if odcisk:
             mark_schema_current(odcisk)
+
+
+def _przenies_payoutbota_na_warszawe() -> None:
+    """Jednorazowe przeliczenie okna Payout BOT-a z ET na czas warszawski.
+
+    Best-effort: błąd tutaj nie może zablokować startu aplikacji — w najgorszym
+    razie okno zostaje w starych liczbach i admin poprawia je w panelu."""
+    session = SessionLocal()
+    try:
+        zmiany = payoutbot.przenies_okno_na_warszawe(session)
+        if zmiany:
+            print(f"[payoutbot] okno przeliczone z ET na Warsaw: {zmiany}")
+    except Exception as e:  # pragma: no cover - start ma wstać mimo wszystko
+        session.rollback()
+        print(f"[payoutbot] przeliczenie okna na Warsaw nieudane: {e}")
+    finally:
+        session.close()
 
 
 @asynccontextmanager
@@ -6739,7 +6757,8 @@ def admin_payout_engine():
         return {**cfg, "due": czy, "blocked_by": powod,
                 # Wylosowana na dziś minuta publikacji — admin ma widzieć, na
                 # którą godzinę silnik jest „uzbrojony", zamiast zgadywać.
-                "today_slot_et": payoutbot.slot_dnia(cfg).strftime("%H:%M"),
+                "today_slot": payoutbot.slot_dnia(cfg).strftime("%H:%M"),
+                "timezone": payoutbot.NAZWA_STREFY,
                 # Panel ma pokazać wprost, czego brakuje do publikacji — inaczej
                 # admin włącza silnik i przez dobę nie wie, czemu kanał milczy.
                 "telegram_ready": telegram.is_enabled(),
