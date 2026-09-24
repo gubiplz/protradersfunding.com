@@ -2751,15 +2751,13 @@ const VIEWS={
             ${t.ref?`<span class="muted" style="font-size:12px">#${esc(t.ref)}</span>`:''}</div>
           <span class="status ${t.status==='closed'?'failed':t.status==='answered'?'paid':'pending'}"><span class="dot"></span>${t.status}</span>
         </div>
-        <div class="thread">${t.thread.map(m=>`
-          <div class="msg ${m.author}"><div class="who">${m.author==='admin'?'Support team':'You'} · ${dstr(m.ts)}</div>${esc(m.body)}</div>`).join('')}
-        </div>
-        ${t.status!=='closed'?`
-        <div style="display:flex;gap:10px;margin-top:16px">
-          <input id="t-reply" class="inp" placeholder="Write a reply…">
-          <button class="btn-p" onclick="replyTicket(${t.id})">Send</button>
-        </div>`:'<p class="muted" style="font-size:12.5px;margin-top:14px">This ticket is closed. Create a new one if you need more help.</p>'}
+        ${chatHtml(t.thread,{me:'trader',them:'Support team'})}
+        ${t.status!=='closed'?`<div class="chat-dock">${chatCompose({id:'t-reply',send:`replyTicket(${t.id})`,
+          placeholder:'Message support…'})}</div>`
+          :'<p class="chat-closed">This ticket is closed. Create a new one if you need more help.</p>'}
       </div>`;
+    /* Jak w komunikatorze: rozmowa otwiera się na OSTATNIEJ wiadomości. */
+    requestAnimationFrame(()=>scrollTo(0,document.documentElement.scrollHeight));
     return;
   }
   const rows=await api('/api/me/tickets');

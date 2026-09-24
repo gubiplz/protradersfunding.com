@@ -4656,21 +4656,20 @@ async function openTelemetryDetail(day,name){
 }
 async function openTicket(id){
   const t=await api('/api/admin/tickets/'+id);
+  const otwarty=t.status!=='closed';
+  /* Rozmowa jak w komunikatorze (chat-kit.js). „Reply & close" przeszło do
+     nagłówka jako „Close ticket" — wpisany tekst i tak idzie przed zamknięciem. */
   openOver(`#${t.ref||t.id} · ${t.subject}`,`
     <div class="chip-row">
       <span class="status ${t.status==='closed'?'failed':t.status==='answered'?'paid':'pending'}"><span class="dot"></span>${esc(t.status)}</span>
       <span class="chip">${esc(t.trader_email||'—')}</span>
       <span class="chip">opened ${dstr(t.created_at)}</span>
+      ${otwarty?`<button class="btn-o sm" style="margin-left:auto" onclick="replyTicket(${t.id},true)"
+        title="Close the ticket. Anything typed below is sent first.">Close ticket</button>`:''}
     </div>
-    <div class="thread">${t.thread.map(m=>`
-      <div class="msg ${m.author==='admin'?'trader':'admin'}">
-        <div class="who">${m.author==='admin'?'You (support)':'Trader'} · ${dstr(m.ts)}</div>${esc(m.body)}</div>`).join('')}</div>
-    ${t.status!=='closed'?`<div class="tk-compose">
-      <textarea id="tk-reply" class="inp" rows="3" placeholder="Write a reply…"></textarea>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <button class="btn-p" onclick="replyTicket(${t.id},false)">Send reply</button>
-        <button class="btn-o" onclick="replyTicket(${t.id},true)">Reply &amp; close</button>
-      </div></div>`:'<p class="muted" style="font-size:12.5px">This ticket is closed.</p>'}`);
+    ${chatHtml(t.thread,{me:'admin',them:'Trader',tz:'Europe/Warsaw'})}
+    ${otwarty?`<div class="tk-compose">${chatCompose({id:'tk-reply',send:`replyTicket(${t.id},false)`,
+      placeholder:'Reply to the trader…'})}</div>`:'<p class="chat-closed">This ticket is closed.</p>'}`);
   /* Rozmowa otwiera się na OSTATNIEJ wiadomości, jak w komunikatorze. */
   requestAnimationFrame(()=>{const b=$('o-body');if(b)b.scrollTop=b.scrollHeight});
 }
