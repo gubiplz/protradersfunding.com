@@ -571,7 +571,10 @@ button.status-tap{border:0;cursor:pointer;font-family:inherit}
       pod ręką, a nie zjadać pół ekranu nad tabelą. */
 @media(max-width:640px){
   #view>.toolbar{margin:0 -16px 12px;padding:8px 16px;gap:8px}
-  .toolbar .q-wrap{flex:1 1 0;min-width:0;width:auto;max-width:none}
+  /* basis 180 px, nie 0: przy zerze szukajka mieściła się w jednej linii z
+     paskiem filtrów (100%) i ściskała do niewidzialności tam, gdzie obok nie
+     ma przycisków akcji (Payouts, Tickets, Traders, Activity). */
+  .toolbar .q-wrap{flex:1 1 180px;min-width:0;width:auto;max-width:none}
   .toolbar .q-wrap .inp{min-height:40px;height:40px;padding-top:8px;padding-bottom:8px}
   .toolbar>.tb-act{width:40px;height:40px;min-height:40px;padding:0;margin-left:0;font-size:17px;border-radius:12px}
   .toolbar>.tb-act .tb-lbl{display:none}
@@ -585,4 +588,10 @@ button.status-tap{border:0;cursor:pointer;font-family:inherit}
   .toolbar .tb-filters .seg button{flex:none;white-space:nowrap;min-height:34px;padding:6px 12px}
   .toolbar .tb-filters select.inp{min-height:34px;height:34px;padding:4px 8px!important}
   .toolbar .tb-filters .count-pill{padding-right:2px}
+  /* Bez przesuwanej pigułki (ui-motion.js) w pasku przewijanym palcem: Safari
+     przewija go na osobnej warstwie, a pigułka na transformie zostawała w
+     miejscu, gdy chipy jechały w bok. Tło niesie sam wybrany przycisk. */
+  .toolbar .tb-filters .ui-pill{display:none}
+  .toolbar .tb-filters .seg.has-pill>button.on{background:var(--np-pill)!important;
+    box-shadow:0 3px 8px rgba(0,0,0,.1),0 3px 1px rgba(0,0,0,.03),0 0 0 .5px rgba(0,0,0,.04)!important}
 }

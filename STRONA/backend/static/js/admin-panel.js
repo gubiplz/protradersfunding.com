@@ -185,6 +185,27 @@ if(window.ResizeObserver&&document.querySelector('.topbar'))
 /* Akcja w pasku widoku („+ Add lead", „↓ CSV"…): na telefonie sama ikona
    w kwadracie 40 px (etykieta w aria-label/title), zeby pasek trzymal
    2 wiersze: szukajka + akcje, pod spodem filtry przewijane w bok. */
+/* Pasek filtrów na telefonie przewija się w bok, a klik w filtr przerysowuje
+   widok od zera (innerHTML) — pasek wracał na początek i wybrany chip uciekał
+   za ekran. Przewinięcie pamiętane per widok i przywracane zaraz po
+   przerysowaniu; wybrany chip zawsze zostaje w polu widzenia. */
+const TB_SCROLL={};
+addEventListener('scroll',e=>{const t=e.target;
+  if(t&&t.classList&&t.classList.contains('tb-filters'))TB_SCROLL[VIEW]=t.scrollLeft},true);
+function tbRestoreScroll(){
+  const f=document.querySelector('#view>.toolbar .tb-filters');
+  if(!f||f._tbOk||f.scrollWidth<=f.clientWidth)return;
+  f._tbOk=true;
+  f.scrollLeft=TB_SCROLL[VIEW]||0;
+  const on=f.querySelector('.seg button.on:not([data-all])');
+  if(!on)return;
+  const r=on.getBoundingClientRect(),fr=f.getBoundingClientRect(),m=16;
+  if(r.left<fr.left+m)f.scrollLeft-=fr.left+m-r.left;
+  else if(r.right>fr.right-m)f.scrollLeft+=r.right-(fr.right-m);
+  TB_SCROLL[VIEW]=f.scrollLeft;
+}
+if(document.getElementById('view'))
+  new MutationObserver(tbRestoreScroll).observe(document.getElementById('view'),{childList:true});
 const tbAct=(ico,label,onclick,cls='btn-o',title='')=>`<button class="${cls} sm tb-act" onclick="${onclick}"
     aria-label="${esc(label)}" title="${esc(title||label)}"><span class="tb-ico" aria-hidden="true">${ico}</span><span class="tb-lbl">${esc(label)}</span></button>`;
 
