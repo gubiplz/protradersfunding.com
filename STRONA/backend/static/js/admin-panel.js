@@ -1487,7 +1487,7 @@ function renderAccounts(){
           <td class="num ${(m.profit_pct||0)>=0?'up':'down'}" style="text-align:right" data-l="P&amp;L">${(m.profit_pct||0)>=0?'+':''}${(m.profit_pct||0).toFixed(2)}%</td>
           <td data-l="Daily" data-sort="${(m.daily_loss_used_pct||0).toFixed(2)}">${mini(m.daily_loss_used_pct)}</td>
           <td data-l="Max DD" data-sort="${(m.overall_dd_used_pct||0).toFixed(2)}">${mini(m.overall_dd_used_pct)}</td>
-          <td class="rt-acts" style="text-align:right" onclick="event.stopPropagation()">${
+          <td class="rt-acts rt-desk" style="text-align:right" onclick="event.stopPropagation()">${
             XBTN(`deleteAccountRow(${a.id},'${jsq(a.login)}','${jsq(a.trader_name||'')}')`,'Delete account')}</td></tr>`}).join('')}
       </tbody></table></div>${cap.more}`
       :`<div class="empty"><h3>No accounts match</h3><p>Try a different search or filter.</p></div>`}`;
@@ -2061,7 +2061,9 @@ async function openTgComposer(id,opts){
   window._tgTpls=tpls;
   const kto=t?(t.full_name||t.email):(lead.name||lead.email);
   const uchwyt=String((t?t.telegram:lead.telegram)||'').trim().replace(/^https?:\/\/t\.me\//i,'').replace(/^@/,'');
-  const cyfry=lead?String(lead.phone||'').replace(/\D/g,''):'';
+  // Telefon także dla klienta (z leada albo z konta) — zapas, gdy uchwyt z
+  // ankiety nie prowadzi do żadnego konta na Telegramie.
+  const cyfry=String((lead?lead.phone:t&&t.phone)||'').replace(/\D/g,'');
   _tgCtx={trader:t,lead,traderId,phone:cyfry.length>=8?cyfry:'',
     name:(kto||'').trim().split(/\s+/)[0]||'there'};
   document.getElementById('tg-modal')?.remove();
@@ -2081,8 +2083,9 @@ async function openTgComposer(id,opts){
       <b>{name}</b> becomes their first name; “Another wording” swaps in a different take on the same message.</p>
     <div class="stack">
       <div><label class="muted" style="font-size:12px">Their handle</label>
-        <input id="tg-to" class="inp" placeholder="@handle" value="${esc(uchwyt?'@'+uchwyt:'')}"
-          title="${uchwyt?'From their application':_tgCtx.phone?'No handle — “Open in Telegram” finds the chat by their phone number and copies the text':'No handle on file — ask them for it, or paste it here'}"></div>
+        <input id="tg-to" class="inp" placeholder="@handle" value="${esc(uchwyt?'@'+uchwyt:'')}" oninput="tgCheckLater()"
+          title="${uchwyt?'From their application':_tgCtx.phone?'No handle — “Open in Telegram” finds the chat by their phone number and copies the text':'No handle on file — ask them for it, or paste it here'}">
+        <div id="tg-to-ok" style="font-size:12px;margin-top:5px;line-height:1.45"></div></div>
       <div><label class="muted" style="font-size:12px">Template</label>
         <select id="tg-tpl" class="inp" onchange="tgFill()">
           <option value="">— write your own —</option>
@@ -2105,6 +2108,42 @@ async function openTgComposer(id,opts){
   document.body.appendChild(box);
   $('tg-body').oninput=tgCount;
   (uchwyt?$('tg-tpl'):$('tg-to')).focus();
+  _tgSprawdzony={h:'',exists:null};
+  tgCheck();
+}
+/* Uchwyt z ankiety bywa imieniem („CorneliusRogers"), a nie nazwą konta —
+   Telegram odpowiadał wtedy „ten użytkownik nie istnieje" i nie było wiadomo,
+   czy zawinił panel. Sprawdzamy od razu przy otwarciu okna i przy wpisywaniu;
+   wynik zapamiętany, bo `tgOpen` nie może czekać na sieć (window.open po
+   await blokują przeglądarki). */
+let _tgSprawdzony={h:'',exists:null},_tgCheckT=null;
+function tgCheckLater(){clearTimeout(_tgCheckT);_tgCheckT=setTimeout(tgCheck,500)}
+async function tgCheck(){
+  const el=$('tg-to-ok');if(!el)return;
+  const h=tgHandle();
+  if(!h){_tgSprawdzony={h:'',exists:null};el.innerHTML='';return}
+  el.innerHTML='<span class="muted">Checking @'+esc(h)+' on Telegram…</span>';
+  let r=null;try{r=await api('/api/admin/telegram/handle?h='+encodeURIComponent(h))}catch(e){}
+  if(tgHandle()!==h)return;   // w międzyczasie wpisano coś innego
+  _tgSprawdzony={h,exists:r?r.exists:null};
+  if(!r||r.exists==null){el.innerHTML='';return}
+  const tel=_tgCtx&&_tgCtx.phone;
+  el.innerHTML=r.exists
+    ?'<span class="up">&#10003; '+esc(r.name||('@'+h))+'</span>'
+    :'<span class="down"><b>No Telegram account is called @'+esc(h)+'.</b></span> '
+      +(tel?'“Open in Telegram” will find them by phone (+'+esc(tel)+') and copy the text for you.'
+           :'Ask them for their real handle, or use “Copy text”.');
+}
+/* W panelu zainstalowanym na telefonie (PWA) link https://t.me otwierał się
+   w przeglądarce WEWNĄTRZ aplikacji: ta przekazywała go Telegramowi i zostawała
+   pusta — po powrocie biały ekran. tg:// idzie prosto do aplikacji Telegram.
+   W zwykłej przeglądarce zostaje t.me: na komputerze bez Telegrama tg:// nie
+   zrobiłby nic, a t.me pokaże stronę z przyciskiem. */
+const _tgPwa=()=>{try{return matchMedia('(display-mode: standalone)').matches||navigator.standalone===true}catch(e){return false}};
+function tgLink(h,tel,text){
+  if(_tgPwa())return h?'tg://resolve?domain='+encodeURIComponent(h)+'&text='+encodeURIComponent(text)
+                      :'tg://resolve?phone='+tel;
+  return h?'https://t.me/'+encodeURIComponent(h)+'?text='+encodeURIComponent(text):'https://t.me/+'+tel;
 }
 /* „Message" w Leads: to samo okno w trybie leada; przelacznik na e-mail
    otwiera wspolne okno maila z ta sama zasada statusu (`mark: 'first'`). */
@@ -2194,13 +2233,21 @@ async function tgCopy(){
 }
 async function tgOpen(){
   const text=tgText();if(!text){toast('Write the message first.','err');$('tg-body').focus();return}
-  const h=tgHandle();
-  const tel=!h&&_tgCtx&&_tgCtx.phone;
+  let h=tgHandle();
+  // Uchwyt, o którym już wiemy, że nie istnieje, nie jest otwierany — Telegram
+  // i tak odpowie „użytkownik nie istnieje". Jest numer: idziemy po numerze.
+  const zly=!!h&&_tgSprawdzony.h===h&&_tgSprawdzony.exists===false;
+  const tel=(!h||zly)&&_tgCtx&&_tgCtx.phone;
+  if(zly&&!tel){toast('@'+h+' is not a Telegram account — ask them for their real handle, or use “Copy text”.','err',8000);$('tg-to').focus();return}
+  if(zly)h='';
   if(!h&&!tel){toast('Enter a valid Telegram handle (5–32 letters, digits or _).','err');$('tg-to').focus();return}
-  /* Okno otwierane PRZED await — przegladarki blokuja window.open po asynchronicznej przerwie.
-     Czat po numerze (t.me/+48…) nie przyjmuje ?text= — tekst idzie do schowka. */
-  if(h)window.open('https://t.me/'+encodeURIComponent(h)+'?text='+encodeURIComponent(text),'_blank','noopener');
-  else{window.open('https://t.me/+'+tel,'_blank','noopener');try{await navigator.clipboard.writeText(text)}catch(e){}}
+  /* Czat po numerze nie przyjmuje tekstu — tekst idzie do schowka.
+     Przeglądarka: okno PRZED await (window.open po asynchronicznej przerwie
+     jest blokowane). PWA: schowek PRZED przejściem — location.href zostawia
+     stronę i zapis mógłby nie zdążyć. */
+  const url=tgLink(h,tel,text);
+  if(_tgPwa()){if(!h){try{await navigator.clipboard.writeText(text)}catch(e){}}location.href=url}
+  else{window.open(url,'_blank','noopener');if(!h){try{await navigator.clipboard.writeText(text)}catch(e){}}}
   const r=await tgLog(h,text);
   document.getElementById('tg-modal')?.remove();
   toast((h?'Chat opened with the text ready — press send there.':'Chat opened by phone number — the text is in your clipboard, paste it.')
@@ -5381,8 +5428,8 @@ function payoutCardHtml(pb){
   return `<div class="sec-card" style="max-width:560px"><h3>Payout BOT</h3>
       <div class="chip-row" style="margin-bottom:12px">
         <span class="status ${pb.enabled?'funded':'pending'}"><span class="dot"></span>${pb.enabled?'running':'off'}</span>
-        <span class="chip">window <b>${String(pb.win_from).padStart(2,'0')}:00&ndash;${String(pb.win_to).padStart(2,'0')}:00 ET</b></span>
-        <span class="chip">today's slot <b>${esc(pb.today_slot_et||'--:--')} ET</b></span>
+        <span class="chip">window <b>${String(pb.win_from).padStart(2,'0')}:00&ndash;${String(pb.win_to).padStart(2,'0')}:00 ${esc(pb.timezone||'Warsaw')}</b></span>
+        <span class="chip">today's slot <b>${esc(pb.today_slot||'--:--')} ${esc(pb.timezone||'Warsaw')}</b></span>
         <span class="chip">on landing <b>${pb.lp_pct}%</b></span>
         <span class="chip">last run <b>${esc(pb.last_day||'never')}</b></span>
         ${pb.last_result?`<span class="chip" ${/FAILED/.test(pb.last_result)?'style="border-color:var(--red-line);color:var(--red)"':''}>last post <b>${esc(pb.last_result)}</b></span>`:''}
@@ -5393,9 +5440,9 @@ function payoutCardHtml(pb){
         Set <span class="mono">TELEGRAM_BOT_TOKEN</span>, <span class="mono">TELEGRAM_CHAT_ID</span>
         and <span class="mono">SHOT_API_URL</span> in the environment.</div></div>`:''}
       <div class="pool-form">
-        <div><label class="muted" style="font-size:12px">Window from (ET hour)</label>
+        <div><label class="muted" style="font-size:12px">Window from (Warsaw hour)</label>
           <input id="pb-from" class="inp" type="number" min="0" max="23" step="1" value="${pb.win_from}"></div>
-        <div><label class="muted" style="font-size:12px">Window to (ET hour)</label>
+        <div><label class="muted" style="font-size:12px">Window to (Warsaw hour)</label>
           <input id="pb-to" class="inp" type="number" min="0" max="23" step="1" value="${pb.win_to}"></div>
         <div><label class="muted" style="font-size:12px">Chance of landing page %</label>
           <input id="pb-lp" class="inp" type="number" min="0" max="100" step="1" value="${pb.lp_pct}"></div>
@@ -5413,7 +5460,7 @@ function payoutCardHtml(pb){
       </div>
       <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
         Creates <b>one payout a day</b> with today's date and a funded archive account behind it.
-        The posting minute is <b>drawn fresh every day</b> inside your window (US Eastern,
+        The posting minute is <b>drawn fresh every day</b> inside your window (Warsaw time,
         DST-aware), so posts never land at the same time twice. Site traffic releases the post at
         that exact minute; with zero traffic it falls back to the daily tick, which fires from the
         start of the window. <b>Every payout gets a public certificate</b> and is posted to
@@ -7091,7 +7138,10 @@ function openActSheet(tr){
   if(document.getElementById('act-sheet'))return;
   /* `:scope>.btn-x` lapie X na kaflu ticketa — tam przycisk lezy prosto
      w wierszu, nie w komorce .rt-acts. */
-  const btns=[...tr.querySelectorAll('.rt-acts button,.rt-acts a,.lead-acts button,.lead-acts a,:scope>.btn-x')];
+  /* `.rt-desk` = akcje celowo schowane na telefonie (usunięcie konta) —
+     przytrzymanie karty nie może ich wnieść tylnymi drzwiami. */
+  const btns=[...tr.querySelectorAll('.rt-acts button,.rt-acts a,.lead-acts button,.lead-acts a,:scope>.btn-x')]
+    .filter(b=>!b.closest('.rt-desk'));
   if(!btns.length)return;
   const veil=document.createElement('div');veil.id='act-veil';veil.className='sheet-veil';
   veil.onclick=closeActSheet;

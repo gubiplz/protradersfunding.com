@@ -4,11 +4,15 @@ Admin włącza go raz w panelu (Settings -> Payout BOT), a od tego momentu raz n
 dobę powstaje wypłata z aktualną datą: konto archiwalne, publiczny certyfikat
 i post na kanale Telegrama z grafiką tego certyfikatu.
 
-Odbiorcy kanału to Amerykanie i Brytyjczycy, więc CAŁY czas silnika liczy się
-w strefie US Eastern (America/New_York, z automatycznym DST) — nie w czasie
-serwera MT5. Publikacja nie ma sztywnej godziny: admin ustawia OKNO (od–do,
-pełne godziny ET), a silnik losuje na każdy dzień inną minutę w tym oknie
-(`slot_dnia`). Post o równej godzinie co dobę wyglądałby jak automat.
+CAŁY czas silnika liczy się w strefie Europe/Warsaw (z automatycznym DST) —
+w tej, w której admin siedzi i wpisuje godziny. Wcześniej była to US Eastern,
+bo odbiorcy kanału to Amerykanie i Brytyjczycy, ale wpisywanie okna w cudzej
+strefie kończyło się przeliczaniem w głowie przy każdej zmianie. Pora posta
+dla odbiorców się nie zmieniła: przy przejściu zapisane okno zostało jednorazowo
+przeliczone (`przenies_okno_na_warszawe`). Publikacja nie ma sztywnej godziny:
+admin ustawia OKNO (od–do, pełne godziny czasu warszawskiego), a silnik losuje
+na każdy dzień inną minutę w tym oknie (`slot_dnia`). Post o równej godzinie co
+dobę wyglądałby jak automat.
 
 Kto dostarcza ticki: na Vercelu ruch na stronie (middleware w `main.py` odpala
 przebieg przy publicznych odczytach — landing pobiera `/api/leaderboard`), a raz
@@ -23,7 +27,7 @@ Cztery zasady, na których to stoi:
    w imporcie obie ścieżki zaczęłyby się rozjeżdżać.
 
 2. **Dzień determinuje wynik.** Losowość idzie z `random.Random("...:{dzien}")`
-   (dzień w ET), więc dwa przebiegi tego samego dnia dają ten sam wynik. Razem
+   (dzień w czasie warszawskim), więc dwa przebiegi tego samego dnia dają ten sam wynik. Razem
    z guardem `payoutbot_last_day` znaczy to, że nawet zdublowany tick nie zrobi
    drugiej, innej wypłaty.
 
@@ -53,9 +57,14 @@ from .models import AppSetting, Payout, Product, Trader
 
 settings = get_settings()
 
-# Strefa odbiorców kanału. `tzdata` w requirements gwarantuje bazę stref także
-# na odchudzonych obrazach Linuksa (zoneinfo bierze ją wtedy z pakietu).
-ET = ZoneInfo("America/New_York")
+# Strefa, w której admin wpisuje okno i czyta slot. `tzdata` w requirements
+# gwarantuje bazę stref także na odchudzonych obrazach Linuksa.
+STREFA = ZoneInfo("Europe/Warsaw")
+NAZWA_STREFY = "Warsaw"
+# Strefa sprzed zmiany — potrzebna WYŁĄCZNIE do jednorazowego przeliczenia
+# zapisanego okna (`przenies_okno_na_warszawe`).
+_STREFA_DAWNA = ZoneInfo("America/New_York")
+KLUCZ_STREFY = "tz"
 
 # --------------------------------------------------------------------------- #
 #  Ustawienia                                                                  #
@@ -70,8 +79,8 @@ KLUCZ_WYNIK = PREFIKS + "last_result"
 
 DOMYSLNE: dict[str, str] = {
     "enabled": "0",
-    "win_from": "9",                                 # okno publikacji, godziny ET
-    "win_to": "11",
+    "win_from": "15",                                # okno publikacji, godziny
+    "win_to": "17",                                  # czasu warszawskiego
     "lp_pct": "30",                                  # szansa na pas na landingu
     "sizes": "50000,100000,200000,300000,400000",
     "gross_min_pct": "9",                            # zysk brutto jako % konta
@@ -181,21 +190,55 @@ def zapisz_ustawienia(session, **pola) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-#  Czas wschodni USA i dzienny slot publikacji                                  #
+#  Czas warszawski i dzienny slot publikacji                                   #
 # --------------------------------------------------------------------------- #
-def _czas_et(now: datetime | None = None) -> datetime:
+def _czas_lokalny(now: datetime | None = None) -> datetime:
     base = now or datetime.now(timezone.utc)
     if base.tzinfo is None:
         base = base.replace(tzinfo=timezone.utc)
-    return base.astimezone(ET)
+    return base.astimezone(STREFA)
 
 
 def _dzien(now: datetime | None = None) -> str:
-    return _czas_et(now).strftime("%Y-%m-%d")
+    return _czas_lokalny(now).strftime("%Y-%m-%d")
+
+
+def przenies_okno_na_warszawe(session, now: datetime | None = None) -> dict | None:
+    """Jednorazowo przelicza zapisane okno z ET na czas warszawski.
+
+    Bez tego zmiana strefy przesunęłaby posty: okno 11–15 zapisane w ET
+    czytane jako czas warszawski to publikacja o 5–9 rano w USA. Przesuwamy
+    o BIEŻĄCĄ różnicę stref (6 h przez większość roku, 5 h w tygodniach, gdy
+    jedna strefa już zmieniła czas, a druga jeszcze nie), więc posty wychodzą
+    o tej samej porze co przed zmianą, a admin widzi ją już w swoim czasie.
+
+    Znacznik w `app_settings` robi z tego operację jednorazową. Okno, które po
+    przesunięciu wyszłoby za północ, jest przycinane do 23 — pole godzin nie
+    zna okna przez północ i tak było też przed zmianą.
+    Zwraca `{"from": (stare, nowe), "to": (stare, nowe)}` albo `None`.
+    """
+    znacznik = _wiersz(session, KLUCZ_STREFY)
+    if znacznik and znacznik.value == NAZWA_STREFY:
+        return None
+    teraz = now or datetime.now(timezone.utc)
+    roznica = round((teraz.astimezone(STREFA).utcoffset()
+                     - teraz.astimezone(_STREFA_DAWNA).utcoffset()).total_seconds() / 3600)
+    zmiany = {}
+    for klucz, pole in (("win_from", "from"), ("win_to", "to")):
+        row = _wiersz(session, klucz)
+        if row is None or row.value == "":
+            continue          # nieustawione = nowe domyślne, już warszawskie
+        stare = int(float(row.value))
+        nowe = min(stare + roznica, 23)
+        row.value = str(float(nowe))
+        zmiany[pole] = (stare, nowe)
+    _ustaw(session, KLUCZ_STREFY, NAZWA_STREFY)
+    session.commit()
+    return zmiany or None
 
 
 def slot_dnia(cfg: dict, now: datetime | None = None) -> datetime:
-    """Wylosowana NA DZIŚ minuta publikacji wewnątrz okna, jako czas ET.
+    """Wylosowana NA DZIŚ minuta publikacji wewnątrz okna, w czasie warszawskim.
 
     Seed z samej daty — slot nie może się przesuwać między tickami tej samej
     doby, inaczej pierwszy tick po północy „przelosowałby" godzinę w nieskończoność.
@@ -204,10 +247,10 @@ def slot_dnia(cfg: dict, now: datetime | None = None) -> datetime:
     timedelty do północy — w dni zmiany DST arytmetyka absolutna przesuwałaby
     okno o godzinę.
     """
-    et = _czas_et(now)
-    rng = random.Random(f"payoutbot-slot:{et.strftime('%Y-%m-%d')}")
+    lok = _czas_lokalny(now)
+    rng = random.Random(f"payoutbot-slot:{lok.strftime('%Y-%m-%d')}")
     minuta = rng.randint(int(cfg["win_from"]) * 60, int(cfg["win_to"]) * 60)
-    return et.replace(hour=min(minuta // 60, 23), minute=minuta % 60,
+    return lok.replace(hour=min(minuta // 60, 23), minute=minuta % 60,
                       second=0, microsecond=0)
 
 
@@ -222,22 +265,22 @@ def nalezy_odpalic(session, now: datetime | None = None, *,
     cfg = ustawienia(session)
     if not cfg["enabled"]:
         return False, "engine off"
-    et = _czas_et(now)
-    if cfg["last_day"] == et.strftime("%Y-%m-%d"):
+    lok = _czas_lokalny(now)
+    if cfg["last_day"] == lok.strftime("%Y-%m-%d"):
         return False, "already ran today"
-    if backstop and et.hour < cfg["win_from"]:
-        return False, f"waiting for the {cfg['win_from']:02d}:00 ET window"
+    if backstop and lok.hour < cfg["win_from"]:
+        return False, f"waiting for the {cfg['win_from']:02d}:00 {NAZWA_STREFY} window"
     # Backstop dosyla BEZWARUNKOWO dopiero PO koncu okna (dzien calkiem bez
     # ruchu). W srodku okna czeka na slot jak kazdy tick: geometria zalezy od
-    # panelu (okno 11-15 ET + cron 15:00 UTC = poczatek okna) i publikacja od
+    # panelu (wtedy okno 11-15 ET + cron 15:00 UTC = poczatek okna) i publikacja od
     # progu okna oznaczalaby post codziennie o stalej godzinie crona — czyli
     # dokladnie ten "typowy bot", ktorego slot ma unikac. Tak wyszla wpadka
     # z 2026-08-08: cron z dryfem trafil 11:29 ET, przed slotem 11:48.
-    if backstop and et.hour >= cfg["win_to"]:
+    if backstop and lok.hour >= cfg["win_to"]:
         return True, ""
     slot = slot_dnia(cfg, now)
-    if et < slot:
-        return False, f"waiting for today's slot {slot.strftime('%H:%M')} ET"
+    if lok < slot:
+        return False, f"waiting for today's slot {slot.strftime('%H:%M')} {NAZWA_STREFY}"
     return True, ""
 
 

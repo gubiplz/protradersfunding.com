@@ -23,6 +23,7 @@ z nazwą kanału, nie bota, więc z zewnątrz wygląda jak wpis właściciela.
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import time
 import urllib.error
@@ -678,3 +679,53 @@ def edit_lead_message(chat_id: str, message_id: int, text: str,
     # Kartę przepisuje bot, który ją wysłał — `message_id` jest jego i cudzym
     # tokenem nie da się jej tknąć. Czat wystarcza, żeby go wskazać.
     return _strzal("editMessageText", pola, None, transport, bot_token_czatu(chat_id))
+
+
+# --------------------------------------------------------------------------- #
+#  Czy uchwyt z ankiety prowadzi do prawdziwego konta                          #
+# --------------------------------------------------------------------------- #
+UCHWYT_RX = re.compile(r"^[A-Za-z][A-Za-z0-9_]{4,31}$")
+_OG_TYTUL_RX = re.compile(r'<meta property="og:title" content="([^"]*)"')
+
+
+def _get_strony(url: str) -> tuple[int, bytes]:
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (panel)"})
+    try:
+        with urllib.request.urlopen(req, timeout=6) as odp:
+            return odp.status, odp.read(200_000)
+    except urllib.error.HTTPError as e:
+        return e.code, e.read(2000)
+
+
+def sprawdz_uchwyt(uchwyt: str, *, transport=None) -> dict:
+    """`{"exists": True/False/None, "name": str}` dla `@uchwyt`.
+
+    Uchwyt przychodzi z ankiety, gdzie ludzie wpisują w to pole imię i nazwisko
+    („CorneliusRogers") albo coś z pamięci. Link `t.me/<uchwyt>` do takiego
+    konta otwiera Telegram z komunikatem „ten użytkownik nie istnieje" — i dział
+    nie wie, czy zawinił panel, czy dane. Bot API tego nie sprawdzi (zna tylko
+    ludzi, którzy do bota pisali), ale publiczna strona t.me tak: istniejące
+    konto ma na niej swoją nazwę (`tgme_page_title`), nieistniejące — wyłącznie
+    ogólny tytuł „Telegram: Contact @…".
+
+    `None` = nie dało się sprawdzić (sieć, nietypowa odpowiedź). Panel wtedy
+    milczy, zamiast straszyć ostrzeżeniem, które może być nieprawdziwe.
+    """
+    if not UCHWYT_RX.match(uchwyt or ""):
+        return {"exists": False, "name": ""}
+    try:
+        status, tresc = (transport or _get_strony)(f"https://t.me/{uchwyt}")
+    except Exception as e:  # pragma: no cover - sieć
+        print(f"[telegram] sprawdzenie @{uchwyt} nieudane: {e}")
+        return {"exists": None, "name": ""}
+    if status != 200:
+        return {"exists": None, "name": ""}
+    html_ = (tresc or b"").decode("utf-8", "replace")
+    tytul = _OG_TYTUL_RX.search(html_)
+    nazwa = tytul.group(1) if tytul else ""
+    if 'class="tgme_page_title"' in html_:
+        import html as _html
+        return {"exists": True, "name": _html.unescape(nazwa)}
+    if nazwa.startswith("Telegram: Contact @"):
+        return {"exists": False, "name": ""}
+    return {"exists": None, "name": ""}

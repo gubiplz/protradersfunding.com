@@ -321,10 +321,28 @@ def _przygotuj_baze() -> None:
             return
         init_db()
         sync_catalog()    # oferta i cennik z kodu — niezależnie od trybu
+        _przenies_payoutbota_na_warszawe()
         if settings.auto_seed:
             seed_demo()   # admin zawsze; konta demo tylko w trybie sim
         if odcisk:
             mark_schema_current(odcisk)
+
+
+def _przenies_payoutbota_na_warszawe() -> None:
+    """Jednorazowe przeliczenie okna Payout BOT-a z ET na czas warszawski.
+
+    Best-effort: błąd tutaj nie może zablokować startu aplikacji — w najgorszym
+    razie okno zostaje w starych liczbach i admin poprawia je w panelu."""
+    session = SessionLocal()
+    try:
+        zmiany = payoutbot.przenies_okno_na_warszawe(session)
+        if zmiany:
+            print(f"[payoutbot] okno przeliczone z ET na Warsaw: {zmiany}")
+    except Exception as e:  # pragma: no cover - start ma wstać mimo wszystko
+        session.rollback()
+        print(f"[payoutbot] przeliczenie okna na Warsaw nieudane: {e}")
+    finally:
+        session.close()
 
 
 @asynccontextmanager
@@ -4331,6 +4349,9 @@ def admin_traders(q: str | None = None, imported: int = 0):
                  # w wierszu klienta); bez uchwytu okno prosi o wpisanie.
                  "lead_id": leady[t.id].id if t.id in leady else None,
                  "telegram": (leady[t.id].telegram or None) if t.id in leady else None,
+                 # Numer do czatu po telefonie, gdy uchwyt z ankiety nie istnieje.
+                 # Najpierw z leada (ankieta), potem z konta tradera.
+                 "phone": ((leady[t.id].phone if t.id in leady else None) or t.phone or None),
                  "kyc_status": t.kyc_status, "accounts": counts.get(t.id, 0),
                  "credits_usd": round(float(t.credits_usd or 0), 2),
                  "referred_count": poleceni.get(t.referral_code, 0),
@@ -6739,7 +6760,8 @@ def admin_payout_engine():
         return {**cfg, "due": czy, "blocked_by": powod,
                 # Wylosowana na dziś minuta publikacji — admin ma widzieć, na
                 # którą godzinę silnik jest „uzbrojony", zamiast zgadywać.
-                "today_slot_et": payoutbot.slot_dnia(cfg).strftime("%H:%M"),
+                "today_slot": payoutbot.slot_dnia(cfg).strftime("%H:%M"),
+                "timezone": payoutbot.NAZWA_STREFY,
                 # Panel ma pokazać wprost, czego brakuje do publikacji — inaczej
                 # admin włącza silnik i przez dobę nie wie, czemu kanał milczy.
                 "telegram_ready": telegram.is_enabled(),
@@ -7189,6 +7211,15 @@ def admin_archive_import(payload: ArchiveImportIn):
             start=payload.start)
     finally:
         session.close()
+
+
+@app.get("/api/admin/telegram/handle", dependencies=[Depends(auth.require_admin)])
+def admin_telegram_handle(h: str = ""):
+    """Czy uchwyt prowadzi do konta — okno wiadomości pyta o to przy otwarciu,
+    żeby „Open in Telegram" nie kończyło się w Telegramie na „użytkownik nie
+    istnieje". Szczegóły w `telegram.sprawdz_uchwyt`."""
+    uchwyt = h.strip().replace("https://t.me/", "").lstrip("@").split("?")[0]
+    return {"handle": uchwyt, **telegram.sprawdz_uchwyt(uchwyt)}
 
 
 @app.get("/api/admin/telegram/overview", dependencies=[Depends(auth.require_admin)])

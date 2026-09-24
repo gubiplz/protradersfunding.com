@@ -127,19 +127,19 @@ def test_wynik_publikacji_widoczny_w_panelu():
         s.close()
 
 
-def test_czeka_na_slot_w_oknie_et():
-    """Okno liczy się w czasie wschodnim USA, a publikacja czeka na wylosowany
+def test_czeka_na_slot_w_oknie_warszawskim():
+    """Okno liczy się w czasie warszawskim, a publikacja czeka na wylosowany
     slot — nie na początek okna."""
     s = _sesja()
     _wyczysc(s)
     try:
         payoutbot.zapisz_ustawienia(s, enabled=True, win_from=15, win_to=17)
-        # 06:00 UTC to 02:00 ET — długo przed oknem.
+        # 06:00 UTC to 08:00 CEST — długo przed oknem.
         wczesnie = datetime(2026, 8, 4, 6, 0, tzinfo=timezone.utc)
         czy, powod = payoutbot.nalezy_odpalic(s, wczesnie)
-        assert czy is False and "ET" in powod
-        # 22:30 UTC = 18:30 EDT — po końcu okna, więc KAŻDY możliwy slot minął.
-        czy2, _ = payoutbot.nalezy_odpalic(s, datetime(2026, 8, 4, 22, 30, tzinfo=timezone.utc))
+        assert czy is False and "Warsaw" in powod
+        # 16:30 UTC = 18:30 CEST — po końcu okna, więc KAŻDY możliwy slot minął.
+        czy2, _ = payoutbot.nalezy_odpalic(s, datetime(2026, 8, 4, 16, 30, tzinfo=timezone.utc))
         assert czy2 is True
     finally:
         s.close()
@@ -169,21 +169,21 @@ def test_slot_jest_staly_w_ciagu_dnia_i_siedzi_w_oknie():
     assert len(sloty) >= 3, sloty
 
 
-def test_okno_liczone_w_czasie_wschodnim_z_dst():
-    """Ta sama chwila UTC jest w oknie latem (EDT, UTC-4), a zimą (EST, UTC-5)
+def test_okno_liczone_w_czasie_warszawskim_z_dst():
+    """Ta sama chwila UTC jest w oknie latem (CEST, UTC+2), a zimą (CET, UTC+1)
     jeszcze przed nim — strefa musi być liczona z DST, nie stałym offsetem."""
     s = _sesja()
     _wyczysc(s)
     try:
         payoutbot.zapisz_ustawienia(s, enabled=True, win_from=9, win_to=11)
-        lato = datetime(2026, 8, 4, 13, 30, tzinfo=timezone.utc)      # 09:30 EDT
-        zima = datetime(2026, 1, 15, 13, 30, tzinfo=timezone.utc)     # 08:30 EST
+        lato = datetime(2026, 8, 4, 7, 30, tzinfo=timezone.utc)       # 09:30 CEST
+        zima = datetime(2026, 1, 15, 7, 30, tzinfo=timezone.utc)      # 08:30 CET
         # Latem 13:30 UTC jest JUZ w oknie: backstop albo publikuje (slot minal),
         # albo czeka na slot — nigdy nie czeka na poczatek okna.
         czy_lato, powod_lato = payoutbot.nalezy_odpalic(s, lato, backstop=True)
         assert czy_lato or "slot" in powod_lato
         czy, powod = payoutbot.nalezy_odpalic(s, zima, backstop=True)
-        assert czy is False and "09:00 ET" in powod
+        assert czy is False and "09:00 Warsaw" in powod
     finally:
         s.close()
 
@@ -204,7 +204,7 @@ def test_backstop_w_srodku_okna_czeka_na_slot_a_po_oknie_dosyla():
                      if payoutbot.slot_dnia(
                          cfg, datetime(2026, 8, d, 15, 0, tzinfo=timezone.utc))
                      .strftime("%H:%M") != "09:00")
-        start_okna = datetime(2026, 8, dzien, 13, 0, tzinfo=timezone.utc)  # 09:00 EDT
+        start_okna = datetime(2026, 8, dzien, 7, 0, tzinfo=timezone.utc)  # 09:00 CEST
         # Przed slotem czekaja OBA tryby — takze cron.
         czy, powod = payoutbot.nalezy_odpalic(s, start_okna)
         assert czy is False and "slot" in powod
@@ -215,7 +215,7 @@ def test_backstop_w_srodku_okna_czeka_na_slot_a_po_oknie_dosyla():
         w_slocie = slot.astimezone(timezone.utc)
         assert payoutbot.nalezy_odpalic(s, w_slocie, backstop=True)[0] is True
         # ...a po koncu okna dosyla bezwarunkowo (dzien bez ruchu strony).
-        po_oknie = datetime(2026, 8, dzien, 15, 30, tzinfo=timezone.utc)  # 11:30 EDT
+        po_oknie = datetime(2026, 8, dzien, 9, 30, tzinfo=timezone.utc)  # 11:30 CEST
         assert payoutbot.nalezy_odpalic(s, po_oknie, backstop=True)[0] is True
     finally:
         s.close()
@@ -532,8 +532,9 @@ def test_zapis_ustawien_z_panelu():
     assert d["lp_pct"] == 25
     assert d["sizes"] == [50_000, 100_000]
     # Panel pokazuje wylosowaną na dziś minutę — format HH:MM, wewnątrz okna.
-    godz, minuta = map(int, d["today_slot_et"].split(":"))
+    godz, minuta = map(int, d["today_slot"].split(":"))
     assert 9 * 60 <= godz * 60 + minuta <= 11 * 60
+    assert d["timezone"] == "Warsaw"
     assert d["telegram_ready"] is False and d["renderer_ready"] is False
     client.post("/api/admin/payout-engine", headers=ADMIN, json={"enabled": False})
 
@@ -575,7 +576,7 @@ def test_ruch_na_stronie_wyzwala_payout(monkeypatch):
     _wyczysc(s)
     try:
         # Okno 0–23 ze slotem gdziekolwiek — realny zegar testu zawsze jest
-        # za JAKIMŚ slotem tylko przy oknie zaczynającym się o północy ET.
+        # za JAKIMŚ slotem tylko przy oknie zaczynającym się o północy.
         payoutbot.zapisz_ustawienia(s, enabled=True, win_from=0, win_to=0)
         przed = s.query(Payout).filter(Payout.note == payoutbot.NOTATKA).count()
     finally:
@@ -654,3 +655,102 @@ def test_kwoty_bez_groszy():
     assert all(k >= 1 for k in kwoty)
     # Podpis i certyfikat drukuja to samo — bez ".00" na koncu.
     assert all("." not in payoutbot.kwota_txt(k) for k in kwoty)
+
+
+# --------------------------------------------------------------------------- #
+#  Przejście z ET na czas warszawski                                           #
+# --------------------------------------------------------------------------- #
+def _przygotuj_stare_okno(s, od, do):
+    """Stan sprzed zmiany: okno zapisane w ET i brak znacznika strefy."""
+    from app.models import AppSetting as _AS
+    for klucz, wartosc in (("win_from", od), ("win_to", do)):
+        row = s.get(_AS, payoutbot.PREFIKS + klucz) or _AS(key=payoutbot.PREFIKS + klucz)
+        row.value = str(float(wartosc))
+        s.merge(row)
+    znacznik = s.get(_AS, payoutbot.PREFIKS + payoutbot.KLUCZ_STREFY)
+    if znacznik:
+        s.delete(znacznik)
+    s.commit()
+
+
+def test_okno_z_et_przeliczone_tak_by_post_wychodzil_o_tej_samej_porze():
+    """Sedno zmiany: okno 11–15 ET ma się stać 17–21 w Warszawie (latem różnica
+    6 h), a nie zostać 11–15 czytanym po nowemu — to byłoby 5–9 rano w USA."""
+    s = _sesja()
+    _wyczysc(s)
+    try:
+        _przygotuj_stare_okno(s, 11, 15)
+        wrzesien = datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc)
+        zmiany = payoutbot.przenies_okno_na_warszawe(s, wrzesien)
+        assert zmiany == {"from": (11, 17), "to": (15, 21)}
+        cfg = payoutbot.ustawienia(s)
+        assert (cfg["win_from"], cfg["win_to"]) == (17, 21)
+        # Ta sama chwila co wczoraj o 13:48 ET mieści się w nowym oknie.
+        teraz_et = datetime(2026, 9, 24, 17, 48, tzinfo=timezone.utc)   # 13:48 EDT
+        lok = teraz_et.astimezone(payoutbot.STREFA)
+        assert cfg["win_from"] <= lok.hour < cfg["win_to"]
+    finally:
+        s.close()
+
+
+def test_przeliczenie_jest_jednorazowe():
+    """Każdy deploy odpala start aplikacji — drugi przebieg nie może przesunąć
+    okna o kolejne 6 h."""
+    s = _sesja()
+    _wyczysc(s)
+    try:
+        _przygotuj_stare_okno(s, 11, 15)
+        kiedy = datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc)
+        payoutbot.przenies_okno_na_warszawe(s, kiedy)
+        assert payoutbot.przenies_okno_na_warszawe(s, kiedy) is None
+        cfg = payoutbot.ustawienia(s)
+        assert (cfg["win_from"], cfg["win_to"]) == (17, 21)
+    finally:
+        s.close()
+
+
+def test_okno_za_polnoc_przyciete_do_23():
+    s = _sesja()
+    _wyczysc(s)
+    try:
+        _przygotuj_stare_okno(s, 16, 20)
+        payoutbot.przenies_okno_na_warszawe(s, datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc))
+        cfg = payoutbot.ustawienia(s)
+        assert (cfg["win_from"], cfg["win_to"]) == (22, 23)
+    finally:
+        s.close()
+
+
+def test_roznica_stref_liczona_na_dzis_a_nie_na_sztywno():
+    """Między końcem czasu letniego w UE (25.10) a w USA (1.11) różnica to 5 h."""
+    s = _sesja()
+    _wyczysc(s)
+    try:
+        _przygotuj_stare_okno(s, 11, 15)
+        zmiany = payoutbot.przenies_okno_na_warszawe(
+            s, datetime(2026, 10, 28, 12, 0, tzinfo=timezone.utc))
+        assert zmiany == {"from": (11, 16), "to": (15, 20)}
+    finally:
+        s.close()
+
+
+def test_reach_zapisuje_godzine_w_czasie_warszawskim(monkeypatch):
+    """Karta Reach BOT-a stoi obok Payout BOT-a — obie mają mówić tym samym
+    czasem. 17:48 UTC to 19:48 w Warszawie."""
+    from app import reach
+    from app.models import AppSetting as _AS
+
+    class _Zegar(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            chwila = datetime(2026, 9, 24, 17, 48, tzinfo=timezone.utc)
+            return chwila.astimezone(tz) if tz else chwila.replace(tzinfo=None)
+
+    monkeypatch.setattr(reach, "datetime", _Zegar)
+    s = _sesja()
+    try:
+        reach._zapisz_wynik(s, "8: 2/2 ok")
+        assert s.get(_AS, reach.KLUCZ_WYNIK).value == "2026-09-24 19:48 8: 2/2 ok"
+    finally:
+        s.close()
+
