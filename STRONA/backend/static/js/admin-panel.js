@@ -2246,18 +2246,26 @@ async function tgOpen(){
   if(zly&&!tel){toast('@'+h+' is not a Telegram account — ask them for their real handle, or use “Copy text”.','err',8000);$('tg-to').focus();return}
   if(zly)h='';
   if(!h&&!tel){toast('Enter a valid Telegram handle (5–32 letters, digits or _).','err');$('tg-to').focus();return}
-  /* Czat po numerze nie przyjmuje tekstu — tekst idzie do schowka.
-     Przeglądarka: okno PRZED await (window.open po asynchronicznej przerwie
-     jest blokowane). PWA: schowek PRZED przejściem — location.href zostawia
-     stronę i zapis mógłby nie zdążyć. */
+  /* Tekst jest w linku (text=), ale nie każda aplikacja go przyjmuje:
+     Telegram na telefonie wpisuje go sam, Telegram na Macu otwiera pusty czat.
+     Dlatego ZAWSZE także do schowka — i zapis startuje TERAZ, w chwili
+     kliknięcia, przed otwarciem karty. Wcześniej szedł po window.open, kiedy
+     panel tracił już fokus na rzecz nowej karty, a przeglądarka odmawia
+     zapisu do schowka stronie bez fokusu — na komputerze schowek zostawał
+     pusty. Bez await przed window.open: okno po asynchronicznej przerwie jest
+     blokowane. PWA: przejście dopiero po zapisie, bo location.href zostawia
+     stronę. */
   const url=tgLink(h,tel,text);
-  if(_tgPwa()){if(!h){try{await navigator.clipboard.writeText(text)}catch(e){}}location.href=url}
-  else{window.open(url,'_blank','noopener');if(!h){try{await navigator.clipboard.writeText(text)}catch(e){}}}
+  const kopia=(navigator.clipboard?navigator.clipboard.writeText(text):Promise.reject()).then(()=>true,()=>false);
+  if(_tgPwa()){await kopia;location.href=url}
+  else window.open(url,'_blank','noopener');
+  const skopiowane=await kopia;
   const r=await tgLog(h,text);
   document.getElementById('tg-modal')?.remove();
-  toast((h?'Chat opened with the text ready — press send there.'
-          :'Chat opened by phone number with the text ready — press send there. (Also copied, in case your Telegram leaves the field empty.)')
-    +(r&&r.marked?' Marked messaged.':''));
+  const mac=/Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent||'');
+  toast((h?'Chat opened with the text ready.':'Chat opened by phone number with the text ready.')
+    +(skopiowane?` If the field is empty (Telegram on a computer ignores it), paste with ${mac?'⌘V':'Ctrl+V'} — it is copied.`:'')
+    +(r&&r.marked?' Marked messaged.':''),'ok',skopiowane?9000:6000);
   if(VIEW==='clients')await VIEWS.clients();
   if(_tgCtx&&_tgCtx.lead){const id=_tgCtx.lead.id;
     if(VIEW==='leads')await VIEWS.leads();if(window._leadOpen&&window._leadOpen.id===id)openLead(id)}
@@ -2506,7 +2514,7 @@ function leadPhoneActs(l){
   return `<span class="lead-acts">${handleOk
     ?`<a class="act-btn" title="Write on Telegram to @${esc(h)} — opener prefilled"
         aria-label="Telegram by handle" data-tg-h="${esc(h)}" href="${esc(tgLink(h,'',opener))}"${cel}
-        onclick="markMessaged(${l.id})">${ICO_TG}</a>`:''}${intl
+        onclick="copyOpener(${l.id});markMessaged(${l.id})">${ICO_TG}</a>`:''}${intl
     ?`<a class="act-btn" title="Telegram chat by the phone number — opener prefilled"
         aria-label="Telegram by phone" href="${esc(tgLink('',digits,opener))}"${cel}
         onclick="copyOpener(${l.id});markMessaged(${l.id})">${ICO_PHONE}</a>`:''}${l.sms_ready
