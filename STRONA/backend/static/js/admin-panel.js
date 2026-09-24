@@ -367,7 +367,7 @@ function czytajHasz(){
   /* Biala lista na TITLES, nie na VIEWS: w VIEWS siedzi `_kycRender`, ktore NIE
      jest async — `go('_kycRender')` rzucilby na `undefined.then(...)` i zostawil
      bialy ekran. Nieznany hasz oddaje null i konczy sie cichym Overview. */
-  return TITLES[view]?{view, filter:j<0?'all':lewa.slice(j+1), q}:null;
+  return Object.prototype.hasOwnProperty.call(TITLES,view)?{view, filter:j<0?'all':lewa.slice(j+1), q}:null;
 }
 function ustawStan(st){
   const [kluczQ,kluczF]=STAN_POL[st.view]||[];
@@ -422,7 +422,7 @@ function go(v){
   if(!samWidok)$('view').innerHTML=v==='leads'?LEADS_SKEL():LOADING_HTML(260);
   VIEWS[v]()
     .then(()=>{
-      if(moj!==PRZEJSCIE){if(VIEWS[VIEW])VIEWS[VIEW]();return}
+      if(moj!==PRZEJSCIE){if(VIEWS[VIEW])VIEWS[VIEW]().catch(()=>{});return}
       if(wrocDo)scrollTo(0,wrocDo);
     })
     .catch(e=>{
@@ -666,7 +666,8 @@ const VIEWS={
   const [s,pay,kyc,tick,orders]=await Promise.all([
     api('/api/stats'),api('/api/admin/payout-requests'),api('/api/admin/kyc'),
     api('/api/admin/tickets'),api('/api/admin/orders')]);
-  const revenue=orders.filter(o=>o.status==='paid').reduce((x,o)=>x+o.amount_usd,0);
+  /* Suma z serwera (cała tabela); lista zamówień niżej to tylko 100 ostatnich. */
+  const revenue=s.revenue_usd!=null?s.revenue_usd:orders.filter(o=>o.status==='paid').reduce((x,o)=>x+o.amount_usd,0);
   const pendingPay=pay.filter(r=>r.status==='pending').length;
   const openTick=tick.filter(t=>t.status==='open').length;
   const tile=(cls,ico,lbl,val,sub)=>`<div class="stat-tile"><div class="tile-ic ${cls}">${ICO[ico]}</div>
@@ -1704,7 +1705,9 @@ function renderOrders(){
   const revenue=sold.reduce((s,o)=>s+o.amount_usd,0);
   const avg=sold.length?revenue/sold.length:0;
   const zawezone=rows.length!==list.length;
-  const podpis=zawezone?`<div class="sub">of ${list.length} total</div>`:'';
+  /* Endpoint oddaje 100 ostatnich — kafelki mówią wtedy wprost, z czego liczą. */
+  const podpis=zawezone?`<div class="sub">of ${list.length} ${list.length>=100?'latest':'total'}</div>`
+    :(list.length>=100?'<div class="sub">latest 100 orders</div>':'');
   $('view').innerHTML=`
     <div class="stats-row">
       <div class="stat-tile"><div class="tile-ic green">${ICO.dollar}</div>
@@ -4701,7 +4704,10 @@ async function openTelemetryDetail(day,name){
   catch(e){toast('Error: '+e.message,'err')}
 }
 async function openTicket(id){
-  const t=await api('/api/admin/tickets/'+id);
+  /* Wołane z onclick i z dzwonka — usunięty ticket albo brak sieci kończyły
+     się cichym unhandled rejection zamiast komunikatu. */
+  let t;
+  try{t=await api('/api/admin/tickets/'+id)}catch(e){toast('Error: '+e.message,'err');return}
   const otwarty=t.status!=='closed';
   /* Rozmowa jak w komunikatorze (chat-kit.js). „Reply & close" przeszło do
      nagłówka jako „Close ticket" — wpisany tekst i tak idzie przed zamknięciem. */
@@ -6887,12 +6893,16 @@ async function tgLinkCode(){
     $('tg-link-code').innerHTML=`Open a private chat with ${bot} on Telegram and send:
       <span class="mono" style="user-select:all">/start ${esc(d.code)}</span>
       <span id="tg-wait">— waiting for your message…</span>`;
-    tgPollLink(40);
+    tgPollLink(40,++_tgGen);
   }catch(e){toast('Error: '+e.message,'err')}
 }
-let _tgPoll=0;
-async function tgPollLink(pozostalo){
+/* Pokolenie pętli: drugi „Generate code" w trakcie odpytywania startował
+   drugą pętlę (clearTimeout nie łapie tej, która akurat czeka na fetch),
+   a wyjście z Settings nie zatrzymywało żadnej. */
+let _tgPoll=0,_tgGen=0;
+async function tgPollLink(pozostalo,gen){
   clearTimeout(_tgPoll);
+  if(gen!==_tgGen||!$('tg-wait'))return;
   if(pozostalo<=0){
     const w=$('tg-wait');
     if(w)w.textContent='— nothing arrived in 2 minutes; send the code and reopen Settings.';
@@ -6908,7 +6918,8 @@ async function tgPollLink(pozostalo){
       return;
     }
   }catch(_){/* chwilowy błąd sieci — następna próba za 3 s */}
-  _tgPoll=setTimeout(()=>tgPollLink(pozostalo-1),3000);
+  if(gen!==_tgGen)return;
+  _tgPoll=setTimeout(()=>tgPollLink(pozostalo-1,gen),3000);
 }
 async function tgLinkTest(btn){
   await busy(btn,'Sending…',async()=>{
@@ -6997,8 +7008,18 @@ setInterval(()=>{
      albo w polu otwartego modala — tick poczeka na nastepny obrot. */
   const a=document.activeElement;
   if(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT'))return;
-  if(VIEW==='overview'||VIEW==='accounts')VIEWS[VIEW]().catch(()=>{});
+  if(VIEW==='overview'||VIEW==='accounts')odswiezWTle(VIEW);
 },12000);
+/* Odświeżenie z timera omija go(), więc nie miało jego strażnika: admin
+   przechodził na inną zakładkę, a spóźniona odpowiedź Overview wpisywała się
+   pod tytuł „Clients". Jeśli w międzyczasie było przejście, rysujemy jeszcze
+   raz WŁAŚCIWY widok — tak samo jak go() przy wyścigu. */
+function odswiezWTle(v){
+  const moj=PRZEJSCIE;
+  VIEWS[v]().then(()=>{
+    if(moj!==PRZEJSCIE||VIEW!==v){if(VIEWS[VIEW])VIEWS[VIEW]().catch(()=>{})}
+  }).catch(()=>{});
+}
 /* Lista leadow to jedyny widok, w ktorym dane zmienia KTOS INNY — klik
    „Przejmuje" leci z kanalu, nie z tego panelu. Bez odswiezania dwie osoby
    pisza do tego samego czlowieka, bo obie maja wiersz z `owner: null` sprzed
@@ -7012,7 +7033,7 @@ setInterval(()=>{
      zamyka — ale podmiana listy pod reka w trakcie wybierania statusu wyglada
      jak awaria panelu. Odswiezenie poczeka na zamkniecie. */
   if($('act-sheet')||$('over').classList.contains('open'))return;
-  VIEWS.leads().catch(()=>{});
+  odswiezWTle('leads');
 },30000);
 setInterval(()=>{if(!document.hidden&&ME)loadInbox()},60000);
 

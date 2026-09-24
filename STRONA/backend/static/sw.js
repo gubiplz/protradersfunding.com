@@ -43,7 +43,11 @@ self.addEventListener('notificationclick', (e) => {
     const ws = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     let act = null;
     for (const w of ws) {
-      if (w.url.includes(app) && 'focus' in w) {
+      /* Ścieżka, nie podciąg: `/portal?next=/admin` zawiera „/admin", więc
+         push admina trafiał do karty logowania portalu. */
+      let sciezka = '';
+      try { sciezka = new URL(w.url).pathname; } catch (_) {}
+      if (sciezka.startsWith(app) && 'focus' in w) {
         /* postMessage instead of navigate(): the SPA switches the view without a
            reload (navigate() would drop the logged-in state mid-flow). */
         w.postMessage({ type: 'navigate', url });
