@@ -23,3 +23,8 @@ var t=document.createElement("script");t.async=1;
 t.src="https://www.clarity.ms/tag/{{ clarity_id }}";document.head.appendChild(t)}
 ev.forEach(function(e){addEventListener(e,go,{passive:true})});
 addEventListener("load",function(){setTimeout(go,4000)})})();</script>{% endif %}
+{# Vercel Web Analytics — bezkonfiguracyjna, działa od razu po deploymencie
+   na Vercelu. Zbiera podstawowe metryki (Core Web Vitals, unikalnych odwiedzin)
+   bez ciasteczek i GDPR. Deferred ładowanie — zero wpływu na wydajność. #}
+<script>window.va=window.va||function(){(window.vaq=window.vaq||[]).push(arguments)};</script>
+<script defer src="/_vercel/insights/script.js"></script>
