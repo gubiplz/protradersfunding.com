@@ -4773,7 +4773,7 @@ function reachChannelsHtml(rc){
        ktora naprawde poleci, zeby admin nie musial jej szukac wyzej w karcie. */
     return `<div class="mod-row" style="flex-wrap:wrap;align-items:center;gap:10px">
       <label style="display:flex;gap:9px;align-items:center;cursor:pointer;flex:1;min-width:0">
-        <input type="checkbox" data-rcch="${i}" ${k.on?'checked':''} onchange="reachToggleChannel()">
+        <input type="checkbox" data-rcch="${i}" ${k.on?'checked':''} onchange="reachChannelEdit()">
         <span style="min-width:0">
           <span class="lbl" style="display:block">${esc(k.label||('@'+k.username))}</span>
           <span class="muted" style="font-size:11.5px">@${esc(k.username)}</span>
@@ -4788,14 +4788,14 @@ function reachChannelsHtml(rc){
         <div class="rc-ch-q">
           <div class="rc-pair"><span class="rc-lbl">Reactions</span><input id="rc-qr-${i}" class="inp" type="number" min="0" step="1"
               placeholder="reactions — ${rcZakres(rc.qty_reactions,rc.qty_reactions_max)}"
-              value="${k.qty_reactions??''}" onchange="reachToggleChannel()" aria-label="Reactions (from)"
+              value="${k.qty_reactions??''}" onchange="reachChannelEdit()" oninput="this.classList.remove('rc-bad')" aria-label="Reactions (from)"
             ><span class="rc-to">to</span><input id="rc-qr2-${i}" class="inp rc-max" type="number" min="0" step="1"
-              placeholder="to" value="${k.qty_reactions_max??''}" onchange="reachToggleChannel()" aria-label="Reactions (to)"></div>
+              placeholder="to" value="${k.qty_reactions_max??''}" onchange="reachChannelEdit()" oninput="this.classList.remove('rc-bad')" aria-label="Reactions (to)"></div>
           <div class="rc-pair"><span class="rc-lbl">Views</span><input id="rc-qv-${i}" class="inp" type="number" min="0" step="1"
               placeholder="views — ${rcZakres(rc.qty_views,rc.qty_views_max)}"
-              value="${k.qty_views??''}" onchange="reachToggleChannel()" aria-label="Views (from)"
+              value="${k.qty_views??''}" onchange="reachChannelEdit()" oninput="this.classList.remove('rc-bad')" aria-label="Views (from)"
             ><span class="rc-to">to</span><input id="rc-qv2-${i}" class="inp rc-max" type="number" min="0" step="1"
-              placeholder="to" value="${k.qty_views_max??''}" onchange="reachToggleChannel()" aria-label="Views (to)"></div>
+              placeholder="to" value="${k.qty_views_max??''}" onchange="reachChannelEdit()" oninput="this.classList.remove('rc-bad')" aria-label="Views (to)"></div>
         </div>
       </div>
     </div>`;
@@ -4824,7 +4824,8 @@ function reachChannelsHtml(rc){
     <p class="muted" style="font-size:11.5px;margin:6px 0 12px">Backup: every ${rc.scan_every_min||10} minutes the panel
       also reads the public page of each ticked channel, so a post Telegram didn't report still gets
       its reactions and views (posts older than 48 h are skipped).</p>
-    <div class="lbl" style="font-size:12px;color:var(--muted);margin-bottom:6px">Channels served</div>
+    <div class="lbl" style="font-size:12px;color:var(--muted);margin-bottom:6px">Channels served
+      <span id="rc-ch-st" class="rc-st" role="status" aria-live="polite"></span></div>
     ${lista.length?lista.map(wiersz).join(''):`<p class="muted" style="font-size:12px">No channel is being served yet.</p>`}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
       <input id="rc-new" class="inp" style="flex:1;min-width:180px" placeholder="@channel">
@@ -4878,12 +4879,51 @@ function reachChannelMode(i,m){
   const box=$(`rc-ch-${i}`);if(!box)return;
   box.dataset.mode=m;
   box.querySelectorAll('.rc-ch-seg button').forEach(b=>b.classList.toggle('on',b.dataset.m===m));
-  reachToggleChannel();
+  reachChannelEdit();
 }
-async function reachToggleChannel(){
-  /* Zapis od razu po kliknieciu: gdyby czekal na „Save settings", odznaczenie
-     kanalu wygladaloby na zapisane, a nie byloby. */
-  return reachSaveChannels(reachCurrentChannels());
+/* Zakres „od–do" przy kanale sprawdzany TUTAJ, przed wysylka: w trakcie
+   edycji bywa chwilowo odwrocony (nowe „od" 25 przy starym „do" 20) i serwer
+   odbilby go czerwonym toastem, zanim admin zdazy poprawic drugie pole. */
+function reachRangeBad(i){
+  const box=$(`rc-ch-${i}`);if(!box)return false;
+  let zle=false;
+  for(const [a,b] of [['rc-qr','rc-qr2'],['rc-qv','rc-qv2']]){
+    const lo=$(`${a}-${i}`),hi=$(`${b}-${i}`);if(!lo||!hi)continue;
+    const l=lo.value.trim(),h=hi.value.trim();
+    const bad=box.dataset.mode==='range'&&h!==''&&(l===''||Number(h)<Number(l));
+    /* Wlasna klasa, nie .bad: globalny focusout zdejmuje .bad z kazdego pola,
+       ktore przechodzi checkValidity — a odwrocony zakres je przechodzi. */
+    hi.classList.toggle('rc-bad',bad);lo.classList.toggle('rc-bad',bad&&l==='');
+    if(bad)zle=true;
+  }
+  return zle;
+}
+/* Pola przy kanale zapisuja sie PO CICHU, bez przerysowania widoku. Pelne
+   go(VIEW) po kazdym polu podmienialo karte sekunde pozniej — akurat wtedy,
+   gdy admin pisal juz w nastepnym polu: fokus i wpisane cyfry znikaly.
+   Stan zbierany od razu przy zmianie (po przejsciu na inna zakladke pol juz
+   nie ma), wysylka w kolejce — dwa POST-y nie wyprzedza sie nawzajem. */
+let _rcQ=Promise.resolve(),_rcN=0;
+function reachChannelEdit(){
+  const lista=(window._reach&&window._reach.channels)||[];
+  const st=$('rc-ch-st');
+  if(lista.map((k,i)=>reachRangeBad(i)).some(Boolean)){
+    if(st){st.textContent='“to” can’t be below “from” — not saved';st.className='rc-st bad'}
+    return;
+  }
+  const kanaly=reachCurrentChannels(),n=++_rcN;
+  if(st){st.textContent='Saving…';st.className='rc-st'}
+  _rcQ=_rcQ.then(async()=>{
+    if(n!==_rcN)return;   // czeka juz nowszy komplet — ten jest nieaktualny
+    try{
+      await api('/api/admin/reach/channels',{method:'POST',body:JSON.stringify({channels:kanaly})});
+      if(n===_rcN&&st){st.textContent='Saved';st.className='rc-st ok'}
+    }catch(e){
+      if(st){st.textContent='Not saved';st.className='rc-st bad'}
+      toast('Error: '+e.message,'err');
+    }
+  });
+  return _rcQ;
 }
 async function reachAddChannel(btn){
   const nazwa=($('rc-new').value||'').trim();
