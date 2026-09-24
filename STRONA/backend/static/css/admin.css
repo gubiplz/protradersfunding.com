@@ -652,3 +652,7 @@ html,body{overscroll-behavior-y:none}
 .rc-st.ok{color:var(--green)}
 .rc-st.bad{color:var(--red)}
 .inp.rc-bad,.inp.rc-bad:focus{border-color:var(--red);box-shadow:0 0 0 3px color-mix(in srgb,var(--red) 14%,transparent)}
+/* Overview: ostrzezenie o slabym sekrecie w env (tylko admin) */
+.sec-warn{display:flex;gap:10px;align-items:flex-start;margin:0 0 12px;padding:12px 14px;border-radius:12px;
+  border:1px solid var(--red-line,var(--red));background:color-mix(in srgb,var(--red) 8%,transparent);color:var(--red);font-size:13px;line-height:1.45}
+.sec-warn svg{flex:none;width:18px;height:18px;margin-top:1px}

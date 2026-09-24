@@ -200,6 +200,31 @@ def current_trader(request: Request,
         session.close()
 
 
+def admin_z_tokenu(token: str) -> Trader | None:
+    """Konto administratora z tokenu sesji albo None.
+
+    Te same bramki co `current_trader`: odcisk hasla (zmiana/reset hasla
+    wylogowuje takze z panelu) i konto nieusuniete. Do tego token podgladu
+    „oczami klienta" (flaga imp) NIGDY nie daje praw admina — to wejsciowka
+    do cudzego portalu, nie do panelu.
+    """
+    data = _parse_session(token)
+    if data is None or data.get("imp"):
+        return None
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, int(data["tid"]))
+        if not tr or not tr.is_admin or tr.email.endswith("@removed.invalid"):
+            return None
+        pwf = data.get("pwf")
+        if pwf and pwf != _pw_fp(tr.password_hash):
+            return None
+        session.expunge(tr)
+        return tr
+    finally:
+        session.close()
+
+
 def require_admin(
     x_admin_token: str | None = Header(default=None),
     authorization: str | None = Header(default=None),
@@ -211,13 +236,6 @@ def require_admin(
             and secrets.compare_digest(x_admin_token, settings.admin_token):
         return
     if authorization and authorization.lower().startswith("bearer "):
-        tid = parse_token(authorization.split(" ", 1)[1].strip())
-        if tid is not None:
-            session = SessionLocal()
-            try:
-                tr = session.get(Trader, tid)
-                if tr and tr.is_admin:
-                    return
-            finally:
-                session.close()
+        if admin_z_tokenu(authorization.split(" ", 1)[1].strip()) is not None:
+            return
     raise HTTPException(403, "Administrator rights required")

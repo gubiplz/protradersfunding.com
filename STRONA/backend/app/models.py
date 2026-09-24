@@ -32,6 +32,10 @@ class Trader(Base):
     # losowe i nie zna go nikt, łącznie z nami. Bez tej flagi mail „gotowe,
     # zaloguj się" wysyła człowieka pod drzwi, do których nie ma klucza.
     must_set_password: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Czy klient ZNA swoje hasło. False = konto z Google (hasło losowe, nikt
+    # go nie zna) — portal pozwala wtedy ustawić hasło bez „obecnego".
+    # NULL = konto sprzed tej kolumny: patrz main._haslo_ustawione.
+    password_set: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     full_name: Mapped[str] = mapped_column(String(120), default="")
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
 

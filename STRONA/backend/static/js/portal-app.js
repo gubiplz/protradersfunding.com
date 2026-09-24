@@ -14,13 +14,30 @@ const dday=d=>new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{month:'short'
 /* Impersonacja z panelu admina: token przyjeżdża w ?impersonate= i mieszka
    w sessionStorage (per KARTA) — localStorage jest wspólny dla wszystkich
    kart, więc zapis tam nadpisałby prawdziwą sesję właściciela w /admin. */
+/* ?next= po logowaniu: tylko ta sama domena. startsWith('/') przepuszczal
+   „/\evil.com" (przegladarka czyta /\ jak //) i „/%09/evil.com". */
+function bezpiecznyNext(n){
+  if(!n)return '';
+  try{const u=new URL(n,location.origin);return u.origin===location.origin?u.pathname+u.search+u.hash:''}catch(e){return ''}
+}
 let IMP=null;
+function impToken(t){
+  try{const b=String(t).split('.')[0].replace(/-/g,'+').replace(/_/g,'/');
+    return JSON.parse(atob(b+'==='.slice((b.length+3)%4))).imp===1}catch(e){return false}
+}
 try{
   const _qi=new URLSearchParams(location.search);
-  if(_qi.get('impersonate')){
-    sessionStorage.setItem('pf_imp',_qi.get('impersonate'));
-    _qi.delete('impersonate');
-    history.replaceState(null,'',location.pathname+(_qi.toString()?'?'+_qi:'')+location.hash);
+  const _hi=new URLSearchParams(location.hash.slice(1));
+  const _aq=window.__authQ||{};
+  const _qimp=_aq.impersonate||_qi.get('impersonate');
+  const _t=_aq.imp||_hi.get('imp')||(_qimp&&_qimp!=='1'?_qimp:'');
+  if(_t||_qi.has('impersonate')||_hi.has('imp')){
+    /* Przyjmujemy WYLACZNIE token podgladu (flaga imp w podpisanym payloadzie).
+       Zwykla sesja podrzucona w linku logowalaby ofiare na cudze konto —
+       a ta potem wpisywalaby tam swoje dane do wyplat i KYC. */
+    if(_t&&impToken(_t))sessionStorage.setItem('pf_imp',_t);
+    _qi.delete('impersonate');_hi.delete('imp');
+    history.replaceState(null,'',location.pathname+(_qi.toString()?'?'+_qi:'')+(_hi.toString()?'#'+_hi:''));
   }
   IMP=sessionStorage.getItem('pf_imp');
 }catch(e){}
@@ -50,6 +67,10 @@ async function api(path,opts={},_retry){
   return r.json();
 }
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+/* Do interpolacji w onclick="fn('...')": samo esc() nie wystarcza, bo parser HTML
+   odwija &#39; z powrotem do apostrofu PRZED parsowaniem JS-a. Najpierw escape
+   JS-a, potem HTML calego wyniku (lustro jsq z admin-panel.js). */
+const jsq=s=>esc(String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
 /* Anty-zawieszka przycisków: gasnie na czas fn(), finally ZAWSZE przywraca —
    restore tylko w catchu zostawiał martwy przycisk, gdy wywrócił się success
    path. Drugi klik w trakcie = no-op. fn zwraca 'keep' => przycisk zostaje
@@ -445,8 +466,8 @@ async function doAuth(){
     if(res.trader&&res.trader.is_admin){location.replace('/admin');return}
     // There is ONE login — the admin panel redirects here with ?next=/admin and
     // after signing in we go exactly back there instead of losing the user here.
-    const nextUrl=new URLSearchParams(location.search).get('next');
-    if(nextUrl && nextUrl.startsWith('/') && !nextUrl.startsWith('//')){location.href=nextUrl;return}
+    const nextUrl=bezpiecznyNext(new URLSearchParams(location.search).get('next'));
+    if(nextUrl){location.href=nextUrl;return}
     unlock();await boot();
   }catch(e){toast('Error: '+e.message,'err');unlock()}
 }
@@ -530,8 +551,8 @@ async function onGoogleCred(resp){
     clearRef();
     TOKEN=res.token;localStorage.setItem('pf_token',TOKEN);
     if(res.trader&&res.trader.is_admin){location.replace('/admin');return}
-    const nextUrl=new URLSearchParams(location.search).get('next');
-    if(nextUrl&&nextUrl.startsWith('/')&&!nextUrl.startsWith('//')){location.href=nextUrl;return}
+    const nextUrl=bezpiecznyNext(new URLSearchParams(location.search).get('next'));
+    if(nextUrl){location.href=nextUrl;return}
     await boot();
   }catch(e){toast('Error: '+e.message,'err')}
 }
@@ -659,14 +680,14 @@ async function handlePaymentReturn(){
 async function boot(){
   const q0=new URLSearchParams(location.search);
   /* E-mail verification deep link: works without logging in (token from mail). */
-  const vt=q0.get('verify');
+  const vt=(window.__authQ||{}).verify||q0.get('verify');
   if(vt){
     try{await api('/api/auth/verify-email',{method:'POST',body:JSON.stringify({token:vt})});
       toast('E-mail confirmed ✅','ok',8000)}
     catch(e){toast('Verification failed: '+e.message,'err',8000)}
     history.replaceState(null,'','/portal');
   }
-  const rt=q0.get('reset');
+  const rt=(window.__authQ||{}).reset||q0.get('reset');
   if(rt){window._resetToken=rt;
     $('auth').classList.remove('hidden');$('app').classList.add('hidden');authTab('reset');loadAuthStats();return}
   /* Z maila z poswiadczeniami MT5: klient, ktory nie ma hasla do portalu, ma
@@ -1002,7 +1023,7 @@ function revealFace(p){
     <div class="reveal-hint">New reveal tomorrow</div>`;
   return `<div class="reveal-tag">Rare drop · -${p.pct}% next challenge</div>
     <div class="reveal-code"><code>${esc(p.code)}</code>
-      <button class="copy" onclick="event.stopPropagation();copyVal(this,'${esc(p.code)}')" title="Copy">${ICO.copy}</button></div>
+      <button class="copy" onclick="event.stopPropagation();copyVal(this,'${jsq(p.code)}')" title="Copy">${ICO.copy}</button></div>
     <div class="reveal-t">valid 48h, personal, works only on your account</div>`;
 }
 function paintReveal(p){
@@ -1931,7 +1952,7 @@ const VIEWS={
         <li>Max open volume <b>${p.max_lots} lots</b></li>
         <li>Min trading days <b>${p.min_trading_days}</b> · split <b>${p.profit_split_pct}%</b></li>
       </ul>
-      <button onclick="openBuy('${esc(p.key)}')" class="btn-p">Start Challenge</button>
+      <button onclick="openBuy('${jsq(p.key)}')" class="btn-p">Start Challenge</button>
     </div>`).join('')+`</div>
     <p class="muted" style="font-size:12px;margin-top:16px">Coupon and promo codes accepted at checkout.</p>`;
   startOfferTimer();
@@ -2107,7 +2128,7 @@ const VIEWS={
     const stan=r.status==='claimed'
       ?(r.code?`<div class="mrw-code"><b>${esc(r.code)}</b>
            <button class="icon-btn" aria-label="Copy code"
-             onclick="copyVal(this,'${esc(r.code)}')">${ICO.copy}</button></div>`
+             onclick="copyVal(this,'${jsq(r.code)}')">${ICO.copy}</button></div>`
           :`<div class="badge-state on">✓ Account created</div>`)
       :r.status==='ready'
         ?`<button class="btn-p sm mrw-go" onclick="claimReward(${r.tier},this)">Claim reward</button>`
@@ -2185,7 +2206,7 @@ const VIEWS={
             ${c.pct}% off · ${fmt0(c.points_spent)} pts${c.status==='active'?` · expires ${dstr(c.expires_at)}`:c.status==='used'?` · used ${dstr(c.used_at)}`:' · expired'}</span>
         </div>
         ${c.status==='active'
-          ?`<button class="btn-o sm" onclick="copyVal(this,'${esc(c.code)}')">Copy</button>`
+          ?`<button class="btn-o sm" onclick="copyVal(this,'${jsq(c.code)}')">Copy</button>`
           :`<span class="status ${c.status==='used'?'paid':'failed'}"><span class="dot"></span>${c.status}</span>`}
       </div>`).join('')+`</div>`
       :`<p class="muted" style="font-size:12.5px">No codes yet. Redeem your points above and the code shows up here.</p>`}
@@ -2484,7 +2505,7 @@ const VIEWS={
           <h3 style="font-size:15.5px">Your affiliate link</h3>
           <div class="cred-row" style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 13px;margin-top:8px;max-width:520px">
             <code style="font-family:var(--mono);font-size:12.5px">${esc(link)}</code>
-            <button class="copy" onclick="copyVal(this,'${esc(link)}')" title="Copy">${ICO.copy}</button>
+            <button class="copy" onclick="copyVal(this,'${jsq(link)}')" title="Copy">${ICO.copy}</button>
           </div>
         </div>
         <div style="display:flex;gap:22px;text-align:center">
@@ -2796,12 +2817,13 @@ const VIEWS={
         <button class="btn-p" style="align-self:flex-start" onclick="saveProfile()">Save Changes</button>
       </div></div>
 
-    <div class="sec-card" style="max-width:640px"><h3>Change Password</h3>
+    <div class="sec-card" style="max-width:640px"><h3>${ME.password_set===false?'Set a Password':'Change Password'}</h3>
+      ${ME.password_set===false?`<p class="muted" style="font-size:12.5px;margin-top:6px">You signed up with Google. Set a password to also log in with your e-mail — “Continue with Google” keeps working.</p>`:''}
       <div style="display:flex;flex-direction:column;gap:11px;margin-top:12px">
-        <input id="s-cur" type="password" class="inp" placeholder="Current password" autocomplete="current-password">
+        ${ME.password_set===false?'':`<input id="s-cur" type="password" class="inp" placeholder="Current password" autocomplete="current-password">`}
         <input id="s-new" type="password" class="inp" placeholder="New password (min. 8 characters)" autocomplete="new-password">
         <input id="s-new2" type="password" class="inp" placeholder="Confirm new password" autocomplete="new-password">
-        <button class="btn-p" style="align-self:flex-start" onclick="savePassword()">Change Password</button>
+        <button class="btn-p" style="align-self:flex-start" onclick="savePassword()">${ME.password_set===false?'Set Password':'Change Password'}</button>
       </div></div>
 
     <div class="sec-card" style="max-width:640px"><h3>Appearance</h3>
@@ -2890,13 +2912,15 @@ async function saveProfile(){
 }
 async function savePassword(){
   if($('s-new').value!==$('s-new2').value){toast('Passwords do not match.','err');return}
-  try{const r=await api('/api/me/password',{method:'POST',body:JSON.stringify({
-    current_password:$('s-cur').value,new_password:$('s-new').value})});
+  try{const pierwsze=ME&&ME.password_set===false;
+    const r=await api('/api/me/password',{method:'POST',body:JSON.stringify({
+    current_password:$('s-cur')?$('s-cur').value:'',new_password:$('s-new').value})});
+    if(ME)ME.password_set=true;
     /* Older sessions just died (password fingerprint in the token) — swap in
        the fresh token so THIS session survives the change. W podglądzie admina
        NIE dotykamy localStorage: nadpisałby token właściciela. */
     if(r.token&&!IMP){TOKEN=r.token;localStorage.setItem('pf_token',TOKEN)}
-    toast('Password changed.','ok');go('settings');
+    toast(pierwsze?'Password set. You can now log in with your e-mail too.':'Password changed.','ok');go('settings');
   }catch(e){toast('Error: '+e.message,'err')}
 }
 async function patchPref(key,val){
@@ -3179,7 +3203,7 @@ function credsBlock(a, compact){
     <div class="cred-row">
       <span class="k">${label}</span>
       <span class="v"><code>${esc(val)}</code>
-        <button class="copy" onclick="event.stopPropagation();copyVal(this,'${esc(String(val)).replace(/'/g,"\\'")}')" title="Copy">${ICO.copy}</button>
+        <button class="copy" onclick="event.stopPropagation();copyVal(this,'${jsq(val)}')" title="Copy">${ICO.copy}</button>
       </span>
     </div>`;
   return `
@@ -3361,7 +3385,7 @@ function openBuy(key){
           <span><b>Use my store credit</b> — $${fmt(ME.credits_usd)} available, 1 credit = $1</span>
         </label>`:''}
         <p id="buy-err" class="form-err hidden"></p>
-        <button id="buy-go" onclick="buy('${esc(p.key)}')" class="btn-p lg" style="width:100%">Buy &amp; create my account</button>
+        <button id="buy-go" onclick="buy('${jsq(p.key)}')" class="btn-p lg" style="width:100%">Buy &amp; create my account</button>
         <p class="hint">One-time payment · fee refunded with your first payout</p>
       </div>
     </div>`;
@@ -4195,7 +4219,7 @@ function credCell(label,val){
   if(!val)return '';
   return `<div class="cred-cell"><div class="l">${label}</div>
     <div class="v"><span class="mono">${esc(val)}</span>
-      <button class="copy" onclick="copyVal(this,'${esc(String(val)).replace(/'/g,"\\'")}')" title="Copy">${ICO.copy}</button>
+      <button class="copy" onclick="copyVal(this,'${jsq(val)}')" title="Copy">${ICO.copy}</button>
     </div></div>`;
 }
 function prog(label,pct,danger,suffix){const p=Math.min(100,Math.max(0,pct||0));

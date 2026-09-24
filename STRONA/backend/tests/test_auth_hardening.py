@@ -158,32 +158,26 @@ def test_rate_limit_login(monkeypatch):
         main_mod._RL_HITS.clear()
 
 
-def test_migracja_loginu_admina_na_admin_at_admin():
-    """Reczne konto „admin" (bez formatu e-mail) nie przechodzi walidacji
-    type=email w portalu — migracja startowa przemianowuje je na admin@admin
-    z haslem admin. Idempotentna: drugi bieg niczego nie zmienia.
+def test_start_nie_ustawia_znanego_hasla_adminowi():
+    """Dawna migracja startowa przemianowywala reczne konto „admin" na
+    admin@admin z haslem „admin" — w publicznym repo to gotowe dane logowania.
+    Start aplikacji nie moze dotykac loginu ani hasla zadnego konta.
 
-    Sprzatanie na wstepie: test_admin_login tez zaklada konto "admin", a kazdy
-    `with TestClient(app)` odpala lifespan (i te migracje) — bez czyszczenia
-    admin@admin bywa juz zajete i asercje zaleza od kolejnosci plikow.
     Zajete konta PRZEMIANOWUJEMY zamiast kasowac: wczesniejsze pliki zostawiaja
-    na nich wiersze z FK (telemetria logowan, powiadomienia) i twardy DELETE
-    wywala sie na FOREIGN KEY constraint."""
+    na nich wiersze z FK (telemetria logowan, powiadomienia)."""
+    assert not hasattr(main_mod, "_migruj_login_admina")
     s = SessionLocal()
     for i, stary in enumerate(s.query(Trader)
                               .filter(Trader.email.in_(("admin", "admin@admin"))).all()):
         stary.email = f"zwolniony-admin-{i}@test.pl"
-        stary.is_admin = False          # migracja nie moze go widziec
+        stary.is_admin = False
     s.add(Trader(email="admin", password_hash=auth.hash_password("stare-haslo"),
                  full_name="Administrator", is_admin=True,
                  referral_code=auth.secrets.token_hex(3)))
     s.commit(); s.close()
-    main_mod._migruj_login_admina()
-    main_mod._migruj_login_admina()          # drugi bieg = no-op
-    s = SessionLocal()
-    assert s.query(Trader).filter(Trader.email == "admin").count() == 0
-    assert s.query(Trader).filter(Trader.email == "admin@admin").count() == 1
-    s.close()
     with TestClient(app) as c:
         r = c.post("/api/auth/login", json={"email": "admin@admin", "password": "admin"})
-    assert r.status_code == 200 and r.json()["trader"]["is_admin"] is True
+    assert r.status_code == 401
+    s = SessionLocal()
+    assert s.query(Trader).filter(Trader.email == "admin").count() == 1
+    s.close()

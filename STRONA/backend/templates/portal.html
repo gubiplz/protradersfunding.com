@@ -4,6 +4,13 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Trader Portal — {{ site_name }}</title>
 <meta name="robots" content="noindex, nofollow">
+{# Tokeny z linkow (reset, verify, podglad admina) schodza z paska ZANIM ruszy
+   GA/Clarity — inaczej zywy link resetu hasla ladowal w page_location i w
+   nagraniach sesji. portal-app.js czyta je potem z window.__authQ. #}
+<script>(function(){try{var u=new URL(location.href),q={},h=new URLSearchParams(u.hash.slice(1)),z=0;
+['reset','verify','impersonate'].forEach(function(n){if(u.searchParams.has(n)){q[n]=u.searchParams.get(n);u.searchParams.delete(n);z=1}});
+if(h.has('imp')){q.imp=h.get('imp');h.delete('imp');z=1}
+if(z){window.__authQ=q;var hs=h.toString();history.replaceState(null,'',u.pathname+u.search+(hs?'#'+hs:''))}}catch(e){}})();</script>
 {% include "_analytics.html" %}
 <link rel="icon" href="/static/img/favicon.png" type="image/png">
 <link rel="manifest" href="/static/manifest.json?v={{ asset_v }}">

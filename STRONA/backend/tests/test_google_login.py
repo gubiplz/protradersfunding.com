@@ -87,11 +87,55 @@ def test_google_podpina_sie_do_istniejacego_konta(monkeypatch):
     tr = s.get(Trader, stary_id)
     assert tr.google_sub == "sub-starego-konta"
     assert tr.email_verified is True, "Google potwierdził adres — bramka znika"
-    # stare hasło dalej działa (podpięcie niczego nie odbiera)
     s.close()
+    # Adres NIE był potwierdzony, więc hasło mógł ustawić ktokolwiek (także ktoś,
+    # kto podszył się pod ten e-mail). Po dowodzie z Google stare hasło umiera,
+    # a logowanie hasłem mówi, którędy wejść.
     with TestClient(app) as c:
-        assert c.post("/api/auth/login", json={"email": "stary@gmail.com",
+        r = c.post("/api/auth/login", json={"email": "stary@gmail.com", "password": "haslo12345"})
+        assert r.status_code == 401 and "Google" in r.json()["detail"]
+
+
+def test_google_na_potwierdzonym_koncie_haslo_zostaje(monkeypatch):
+    """Konto z POTWIERDZONYM adresem: podpięcie Google niczego nie odbiera."""
+    s = SessionLocal()
+    s.add(Trader(email="potw@gmail.com", password_hash=auth.hash_password("haslo12345"),
+                 full_name="Potwierdzony", referral_code="POTW01", email_verified=True))
+    s.commit(); s.close()
+    _wlacz(monkeypatch, _claims(email="potw@gmail.com", sub="sub-potwierdzonego"))
+    with TestClient(app) as c:
+        assert c.post("/api/auth/google", json={"credential": "stub"}).status_code == 200
+        assert c.post("/api/auth/login", json={"email": "potw@gmail.com",
                                                "password": "haslo12345"}).status_code == 200
+
+
+def test_konto_z_google_ustawia_haslo_i_loguje_sie_mailem(monkeypatch):
+    """Rejestracja przez Google → logowanie hasłem mówi, co zrobić → klient
+    ustawia hasło w portalu BEZ „obecnego" → od teraz działają obie drogi."""
+    _wlacz(monkeypatch, _claims(email="nowy-gg@gmail.com", sub="sub-nowego-gg"))
+    with TestClient(app) as c:
+        r = c.post("/api/auth/google", json={"credential": "stub"})
+        assert r.status_code == 200
+        tok = r.json()["token"]
+        h = {"Authorization": f"Bearer {tok}"}
+        me = c.get("/api/auth/me", headers=h).json()
+        assert me["password_set"] is False and me["google"] is True
+
+        zly = c.post("/api/auth/login", json={"email": "nowy-gg@gmail.com", "password": "cokolwiek1"})
+        assert zly.status_code == 401 and "Continue with Google" in zly.json()["detail"]
+
+        r = c.post("/api/me/password", headers=h, json={"new_password": "moje-haslo-123"})
+        assert r.status_code == 200
+        h = {"Authorization": f"Bearer {r.json()['token']}"}
+        assert c.get("/api/auth/me", headers=h).json()["password_set"] is True
+
+        assert c.post("/api/auth/login", json={"email": "nowy-gg@gmail.com",
+                                               "password": "moje-haslo-123"}).status_code == 200
+        # druga zmiana już wymaga obecnego hasła
+        bez = c.post("/api/me/password", headers=h, json={"new_password": "inne-haslo-456"})
+        assert bez.status_code == 400
+        # Google dalej działa
+        assert c.post("/api/auth/google", json={"credential": "stub"}).status_code == 200
 
 
 def test_google_odbiera_konto_zalozone_za_klienta(monkeypatch):
