@@ -194,9 +194,10 @@ def test_mail_wychodzi_spod_marki_z_landingu(poczta):
     assert lead_mail.wyslij("ktos@example.com", "temat", "treść") == (True, "")
     msg = poczta[0]
     assert msg["From"] == NADAWCA
-    # Odpowiedź musi wrócić tam, skąd mail wyszedł — inaczej pierwsza odpowiedź
-    # w tej relacji trafia pod szyld, którego lead nie zna.
-    assert msg["Reply-To"] == NADAWCA
+    # Odpowiedź wraca pod tę samą markę, na jej adres kontaktowy („contact@"
+    # domeny nadawcy, jak w mailach landingu) — nie pod szyld, którego lead nie
+    # zna, i nie na „noreply@", gdzie by przepadła.
+    assert msg["Reply-To"] == "Forex Passing <contact@forexpassing.test>"
     assert msg["To"] == "ktos@example.com"
 
 
@@ -368,7 +369,8 @@ def test_link_zostaje_jednym_slowem(poczta):
     assert " " not in link and "%20" in link
     kod = lead_mail._html_z_tekstu(lead_mail.tresc("Anna Nowak",
                                                    zakwalifikowany=True)[1])
-    assert kod.count("<a ") == 1 and f'href="{link}"' in kod
+    # jeden przycisk; pozostałe dwa linki to stopka (domena, contact@)
+    assert kod.count(f'href="{link}"') == 1 and kod.count("<a ") == 3
 
 
 def test_adres_dzialu_z_wlasnym_pytajnikiem_nie_peka(poczta, monkeypatch):

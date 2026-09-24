@@ -204,7 +204,7 @@ function tbRestoreScroll(){
   else if(r.right>fr.right-m)f.scrollLeft+=r.right-(fr.right-m);
   TB_SCROLL[VIEW]=f.scrollLeft;
 }
-if(document.getElementById('view'))
+if(typeof MutationObserver!=="undefined"&&document.getElementById("view"))
   new MutationObserver(tbRestoreScroll).observe(document.getElementById('view'),{childList:true});
 const tbAct=(ico,label,onclick,cls='btn-o',title='')=>`<button class="${cls} sm tb-act" onclick="${onclick}"
     aria-label="${esc(label)}" title="${esc(title||label)}"><span class="tb-ico" aria-hidden="true">${ico}</span><span class="tb-lbl">${esc(label)}</span></button>`;
@@ -1087,14 +1087,59 @@ function qFocus(id,pos){
   const p=(pos==null?el.value.length:Math.min(pos,el.value.length));
   try{el.setSelectionRange(p,p)}catch(e){}
 }
-/* One search box, one behaviour: caret survives the re-render and a clear "x"
-   sits inside the field on the right whenever there is anything to clear. */
+/* Wyszukiwarki: pole, w którym człowiek pisze, NIE jest przebudowywane.
+   Dawniej każdy znak przerysowywał cały widok (innerHTML) razem z polem, a
+   qFocus tylko przenosił kursor do nowego — na telefonie przepadały przez to
+   podpowiedzi i autokorekta klawiatury (kompozycja słowa w Gboard/iOS),
+   przytrzymany Backspace kasował jeden znak i stawał, a znaki wpisane w
+   trakcie przerysowania ginęły. Teraz widok renderuje się do ukrytego
+   bliźniaka o tym samym id (render pisze przez $('view') / $('pool-list')),
+   a do żywego DOM-u wraca wszystko POZA gałęzią z polem: pasek zostaje,
+   podmieniają się jego pozostałe dzieci (filtry, licznik, „×"). Raz na
+   klatkę; w trakcie kompozycji IME — dopiero po jej końcu. Gdy układ się nie
+   zgadza (inny kontener, pole zniknęło), stara droga: render + qFocus. */
+function qInput(el,stateKey,render){
+  window[stateKey]=el.value;
+  zapiszPozniej();
+  if(el._qComp||el._qRaf)return;
+  el._qRaf=requestAnimationFrame(()=>{el._qRaf=0;qRender(el,render)});
+}
+function qRender(el,render){
+  const fn=window[render];
+  if(typeof fn!=='function')return;
+  const stara=()=>{const p=el.selectionStart;fn();qFocus(el.id,p)};
+  const root=el.isConnected&&el.parentElement?el.parentElement.closest('[id]'):null;
+  if(!root)return stara();
+  const id=root.id,tmp=document.createElement(root.tagName);
+  tmp.hidden=true;tmp.className=root.className;
+  root.id='';tmp.id=id;root.after(tmp);
+  try{fn()}finally{tmp.id='';root.id=id}
+  const nowe=tmp.querySelector('#'+CSS.escape(el.id));
+  const glebokosc=(w,do_)=>{let n=0;while(w&&w!==do_){w=w.parentElement;n++}return w?n:-1};
+  if(!nowe||glebokosc(el,root)!==glebokosc(nowe,tmp)){
+    // render poszedł gdzie indziej albo inny układ: bliźniak do kosza, stara droga
+    tmp.remove();return stara();
+  }
+  let s=el,n=nowe;
+  while(s!==root){
+    const sp=s.parentElement,np=n.parentElement,nk=[...np.childNodes],i=nk.indexOf(n);
+    [...sp.childNodes].forEach(c=>{if(c!==s)c.remove()});
+    nk.slice(0,i).forEach(c=>sp.insertBefore(c,s));
+    nk.slice(i+1).forEach(c=>sp.appendChild(c));
+    if(sp!==root)sp.className=np.className;
+    s=sp;n=np;
+  }
+  tmp.remove();
+}
+/* One search box, one behaviour: the field survives typing (qInput) and a
+   clear "x" sits inside it on the right whenever there is anything to clear. */
 function searchBox(id,stateKey,render,ph){
   const val=window[stateKey]||'';
   /* Jedyny generator pol wyszukiwania w panelu — dopisanie tu `zapiszPozniej()`
      sprawia, ze wpisana fraza przezywa F5 we WSZYSTKICH widokach naraz. */
   return `<span class="q-wrap"><input class="inp" id="${id}" placeholder="${ph}" value="${esc(val)}"
-      oninput="window.${stateKey}=this.value;const p=this.selectionStart;${render}();qFocus('${id}',p);zapiszPozniej()">
+      oninput="qInput(this,'${stateKey}','${render}')"
+      oncompositionstart="this._qComp=1" oncompositionend="this._qComp=0;qInput(this,'${stateKey}','${render}')">
     ${val?`<button class="q-x" type="button" aria-label="Clear search" title="Clear"
       onclick="window.${stateKey}='';${render}();qFocus('${id}');zapiszStan(false)">&times;</button>`:''}</span>`;
 }
@@ -6919,7 +6964,7 @@ addEventListener('click',e=>{
    reload traci stan i na slabym zasiegu potrafi wywalic z panelu). */
 (function(){
   if(!('ontouchstart' in window))return;
-  let startY=0,pull=0,armed=false,busy=false,el=null;
+  let startY=0,startX=0,pull=0,armed=false,pion=false,busy=false,el=null;
   const THRESH=72;
   function ind(){
     if(el)return el;
@@ -6934,6 +6979,9 @@ addEventListener('click',e=>{
       if(n.nodeType!==1)continue;
       const s=getComputedStyle(n);
       if((s.overflowY==='auto'||s.overflowY==='scroll')&&n.scrollHeight>n.clientHeight+1)return true;
+      /* pasek przewijany w BOK (filtry, przyciski w wierszu, chipy): palec
+         przesuwa go poziomo i zjeżdża przy tym w dół — to nie jest odświeżanie */
+      if((s.overflowX==='auto'||s.overflowX==='scroll')&&n.scrollWidth>n.clientWidth+1)return true;
     }
     return false;
   }
@@ -6945,11 +6993,19 @@ addEventListener('click',e=>{
     const a=document.activeElement;
     if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))return; /* klawiatura otwarta */
     if(wewnetrznyScroll(e.target))return;
-    startY=e.touches[0].clientY;armed=true;
+    startY=e.touches[0].clientY;startX=e.touches[0].clientX;armed=true;pion=false;
   },{passive:true});
   addEventListener('touchmove',e=>{
     if(!armed||busy)return;
     pull=e.touches[0].clientY-startY;
+    /* Kierunek rozstrzyga pierwszy wyraźny ruch: bardziej w bok niż w dół =
+       to przesuwanie czegoś poziomo, gest odświeżania odpada do końca dotyku. */
+    const dx=Math.abs(e.touches[0].clientX-startX);
+    if(!pion){
+      if(dx<10&&Math.abs(pull)<10)return;
+      if(dx>=Math.abs(pull)*.7){armed=false;if(el){el.classList.remove('show','ready');el.style.transform=''}return}
+      pion=true;
+    }
     const i=ind();
     if(pull<=8){i.classList.remove('show','ready');return}
     const p=Math.min(pull,120);

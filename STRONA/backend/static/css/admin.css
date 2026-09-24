@@ -54,7 +54,10 @@ html[data-theme=dark]{
   .chip.preset{min-height:44px;display:inline-flex;align-items:center}
   /* linki w komórkach tabel (np. #konta przy zamówieniu): rysunek zostaje mały,
      rośnie niewidoczne pole trafienia — padding znosi się z ujemnym marginesem */
-  .tbl td a{display:inline-block;padding:10px 6px;margin:-10px -6px}
+  /* NIE ikonki akcji (.act-btn): to linki <a> obok <button>-ów, a padding z
+     ujemnym marginesem podnosił je o 10 px i wsuwał na sąsiada — Telegram
+     i telefon stały krzywo względem reszty ikon w wierszu leada */
+  .tbl td a:not(.act-btn){display:inline-block;padding:10px 6px;margin:-10px -6px}
 }
 /* 11px na telefonie schodzi poniżej progu czytelności — na wąskim ekranie
    podpisy wskakują na 12px, desktop zostaje przy gęstszej siatce */
@@ -407,9 +410,14 @@ button.status-tap{border:0;cursor:pointer;font-family:inherit}
     column-gap:14px;justify-content:flex-start;text-align:left}
   table.lead-tbl td[data-l="Contact"]>div{flex:0 1 auto}
   table.lead-tbl td[data-l="Contact"] a{font-size:var(--fs-body);line-height:1.9;word-break:break-all}
-  table.lead-tbl .lead-act-row{flex:1 1 100%;display:flex;justify-content:flex-end}
-  .lead-acts{gap:8px;margin:2px 0 0}
+  /* selektor przez td[data-l=Contact]: `…Contact"]>div{flex:0 1 auto}` wyżej
+     ma większą wagę i ściskał rząd ikon do szerokości zawartości */
+  table.lead-tbl td[data-l="Contact"]>.lead-act-row{flex:1 1 100%;display:flex;justify-content:flex-start}
+  /* jeden równy rząd: każda ikona tej samej szerokości (do 52 px), przy
+     7 ikonach dzielą szerokość wiersza zamiast zawijać się w drugi, krzywy */
+  .lead-acts{display:flex;flex-wrap:nowrap;gap:6px;width:100%;margin:2px 0 0}
   .act-btn{width:44px;height:40px}
+  .lead-acts>.act-btn{flex:1 1 44px;min-width:36px;max-width:52px;width:auto;margin:0;padding:0}
   .act-btn svg{width:17px;height:17px}
   /* meta: źródło i kwota obok siebie, notatka jedną uciętą linią pod nimi;
      lead bez zakupu nie pokazuje pustego „—" (:has — panel to PWA na
@@ -595,3 +603,9 @@ button.status-tap{border:0;cursor:pointer;font-family:inherit}
   .toolbar .tb-filters .seg.has-pill>button.on{background:var(--np-pill)!important;
     box-shadow:0 3px 8px rgba(0,0,0,.1),0 3px 1px rgba(0,0,0,.03),0 0 0 .5px rgba(0,0,0,.04)!important}
 }
+
+/* Panel nie odświeża się pociągnięciem w dół. Na iPhonie w Safari przesunięcie
+   palcem paska filtrów czy przycisków w bok łatwo zjeżdża w dół i przeładowywało
+   całą stronę (z wpisaną frazą i otwartą kartą). Przewijanie zostaje, znika
+   tylko gest odświeżania i gumowe odbicie przy krawędzi (Safari 16+). */
+html,body{overscroll-behavior-y:none}

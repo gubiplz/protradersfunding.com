@@ -600,11 +600,11 @@ function sessionExpired(){
    zakupy, zgłoszenia) dzieją się NAPRAWDĘ na koncie klienta. */
 function impBanner(){
   if($('imp-bar'))return;
-  const b=document.createElement('div');b.id='imp-bar';
-  b.style.cssText='position:fixed;bottom:0;left:0;right:0;z-index:9999;background:#7a5d00;color:#fff;padding:8px 14px;font-size:13px;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap';
-  b.innerHTML=`<span>Admin preview — signed in as <b>${esc(ME.email)}</b>. Actions here are real.</span>
-    <button style="background:none;border:1px solid #fff;color:#fff;border-radius:8px;padding:4px 12px;cursor:pointer" onclick="logout()">Exit preview</button>`;
+  const b=document.createElement('div');b.id='imp-bar';b.setAttribute('role','status');
+  b.innerHTML=`<span class="imp-txt">Admin preview — <b>${esc(ME.email)}</b><span class="imp-real">. Actions here are real.</span></span>
+    <button type="button" onclick="logout()">Exit preview</button>`;
   document.body.appendChild(b);
+  document.body.classList.add('imp-on');
 }
 /* Zimny start bez zasięgu NIE wylogowuje: token zostaje w localStorage,
    klient dostaje pełnoekranowe „Try again". Wcześniej KAŻDY błąd /api/auth/me
