@@ -160,9 +160,16 @@ html[data-theme=dark] .np-scrim{background:rgba(0,0,0,.36)}
 .np-ra{position:absolute;inset:0;display:flex}
 .np .np-ra button{flex:1;display:flex;align-items:center;gap:8px;padding:0 24px;color:#fff;font-size:13px;font-weight:650}
 .np .np-ra-l{background:var(--acc);justify-content:flex-start}
-.np .np-ra-r{background:var(--red);justify-content:flex-end}
+.np .np-ra-r{background:var(--red);justify-content:flex-end;transition:padding-right .14s var(--np-ease)}
 .np-ra svg{width:20px;height:20px;transition:transform .35s var(--np-bounce)}
 .np-row.arm-del .np-ra-r svg,.np-row.arm-read .np-ra-l svg{transform:scale(1.25)}
+/* Jedna strona naraz, na całą szerokość: w lewo tylko czerwone, w prawo tylko
+   akcent. Po przekroczeniu progu „Delete" doskakuje do krawędzi wiersza i jedzie
+   za palcem (--sw = odsłonięta szerokość), jak w iOS Mail. */
+.np-row.sw-l>.np-ra .np-ra-l,.np-row.sw-r>.np-ra .np-ra-r{display:none}
+.np-row.arm-del>.np-ra .np-ra-r{padding-right:max(24px,calc(var(--sw,0px) - 104px))}
+/* Usunięty wiersz odjeżdża krótko i bez sprężyny, zanim się zwinie. */
+.np-row.leaving>.np-rb{transition:transform .2s cubic-bezier(.4,0,1,1)}
 
 .np-ck{flex:none;align-self:center;width:0;height:22px;margin-right:-12px;border-radius:50%;border:1.5px solid var(--np-fill2);display:grid;place-items:center;color:#fff;opacity:0;overflow:hidden;transition:width .4s var(--np-spring),margin .4s var(--np-spring),opacity .2s,background .2s,border-color .2s}
 .np-ck svg{width:13px;height:13px;opacity:0;transform:scale(.4);transition:opacity .15s,transform .4s var(--np-bounce)}
