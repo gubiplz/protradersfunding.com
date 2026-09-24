@@ -286,3 +286,49 @@ html[data-theme=dark] .todo{box-shadow:0 0 0 .5px var(--np-hair),0 12px 32px -20
   .modal-wrap>.modal::before{content:"";position:absolute;top:7px;left:50%;width:36px;height:4px;margin-left:-18px;
     border-radius:2px;background:var(--np-fill2)}
 }
+
+/* ---------- telefon: tabele jako zwarta lista (inset grouped) ----------
+   Karta na rekord (cień, 10 px odstępu, każde pole w osobnej linii z 72 px
+   etykietą) dawała pół ekranu na jeden obiekt. Teraz jak lista w Ustawieniach
+   iOS: jeden zaokrąglony kontener, rekordy oddzielone włosową kreską, tytuł
+   u góry, pola w siatce (mała etykieta NAD wartością, ~3 w wierszu), akcje
+   jednym paskiem mniejszych przycisków przewijanym w bok. Reguły tutaj, bo
+   apple.css ładuje się po admin.css i nadpisuje jego wzorzec kart. */
+@media(max-width:860px){
+  .rtbl-wrap{background:var(--panel)!important;border-radius:16px;overflow:hidden;
+    box-shadow:0 0 0 .5px var(--np-hair),0 1px 2px rgba(15,23,42,.03)!important}
+  table.rtbl tr{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));
+    column-gap:12px;row-gap:7px;align-items:start;margin:0;padding:11px 14px 12px;
+    border:0;border-radius:0;background:transparent;box-shadow:none}
+  table.rtbl tr+tr{box-shadow:inset 0 .5px 0 var(--np-hair)}
+  /* break-word, nie anywhere: słowo łamie się tylko, gdy samo się nie
+     mieści — „Approved" nie rozpada się na „Approve / d" */
+  table.rtbl td{display:block;padding:0;min-width:0;text-align:left;
+    font-size:13px;line-height:1.35;overflow-wrap:break-word}
+  table.rtbl td .status,table.rtbl td .pill,table.rtbl td .chip{white-space:nowrap}
+  /* .tbl-wrap.tw-wide (portal.css) daje komórkom 10 px z boku silniejszym
+     selektorem — w liście tekst wyjeżdżał o 10 px w prawo od przycisków */
+  .rtbl-wrap table.rtbl td{padding-left:0!important;padding-right:0!important}
+  .rtbl-wrap table.rtbl td.rt-acts{padding-left:14px!important;padding-right:14px!important}
+  .rtbl-wrap table.rtbl tr.clickable td.rt-main{padding-right:22px!important}
+  table.rtbl td::before{display:block;margin-bottom:1px;font-size:10px;line-height:1.3;letter-spacing:.06em}
+  table.rtbl td.rt-main::before,table.rtbl td.rt-acts::before,
+  table.lead-tbl td::before,table.rtbl tr.tr-sub td::before{display:none}
+  /* tytuł rekordu zawsze tak samo: nazwa pogrubiona, druga linia zwykła */
+  table.rtbl td.rt-main{grid-column:1/-1;padding:0;margin:0;border:0;font-size:15px;font-weight:600;line-height:1.3}
+  table.rtbl td.rt-main b{font-size:15px;font-weight:650}
+  table.rtbl td.rt-main div,table.rtbl td.rt-main .muted{font-size:12.5px;font-weight:400;margin-top:1px}
+  table.rtbl tr.clickable td.rt-main{padding-right:20px}
+  table.rtbl tr.clickable td.rt-main::after{right:0}
+  table.rtbl td.rt-acts{grid-column:1/-1;display:flex;flex-wrap:nowrap;justify-content:flex-start;gap:6px;
+    overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;margin:1px -14px 0;padding:1px 14px}
+  table.rtbl td.rt-acts::-webkit-scrollbar{display:none}
+  table.rtbl td.rt-acts .btn-o,table.rtbl td.rt-acts .btn-p,table.rtbl td.rt-acts .btn-danger{
+    flex:none;min-height:32px;height:32px;padding:0 12px;font-size:13px;border-radius:10px}
+  table.rtbl tr.tr-sub{display:block}
+  /* leady mają własny, skomponowany układ (admin.css) — tylko ciaśniej:
+     status i źródło w jednej linii, bez kreski pod nazwiskiem */
+  table.lead-tbl tr{display:flex;padding:11px 14px 12px;row-gap:4px}
+  table.lead-tbl td[data-l="Status"]{flex:0 1 auto;margin-right:10px}
+  table.lead-tbl td.rt-main{margin-bottom:2px}
+}
