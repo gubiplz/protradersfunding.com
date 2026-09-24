@@ -106,7 +106,7 @@ class Trader(Base):
     # Stabilny identyfikator Google (claim `sub` z id_tokenu) — konto założone
     # lub podpięte przez „Sign in with Google". E-mail może się u Google
     # zmienić, sub nigdy.
-    google_sub: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    google_sub: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
     # Kredyty sklepowe (USD) — nadaje admin, automatycznie odliczane od ceny
     # nastepnego zakupu w checkoucie. Pelna historia w tabeli credit_ledger.

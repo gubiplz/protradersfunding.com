@@ -64,6 +64,8 @@ os.environ.setdefault("ADMIN_TOKEN", "tajny-token")
 # tylko wtedy, gdy ustawimy to przez setdefault (nie twardo).
 os.environ.setdefault("FEED", "sim")
 os.environ.setdefault("AUTO_SEED", "false")
+# Zadania z ruchu strony bez ogranicznika — testy biją w nie request po requeście.
+os.environ.setdefault("TRAFFIC_SWEEP_SEC", "0")
 
 # Rate-limit endpointów auth trzyma licznik per PROCES, a TestClient zawsze
 # przychodzi z tego samego "IP" — cała suita szybko wpadłaby w 429. Test
