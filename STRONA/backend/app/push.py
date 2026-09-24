@@ -220,14 +220,10 @@ def _daily_recap(now: datetime | None = None) -> dict:
     session = SessionLocal()
     try:
         dzis = teraz.strftime("%Y-%m-%d")
-        guard = session.get(AppSetting, "last_recap_day")
-        if guard and guard.value == dzis:
+        # Atomowo: dwie instancje w tej samej sekundzie wysyłały dwa recapy.
+        from .zamki import zajmij_ustawienie
+        if not zajmij_ustawienie(session, "last_recap_day", dzis, lambda stara: stara != dzis):
             return {"sent": 0, "skipped": "already ran today"}
-        if guard:
-            guard.value = dzis
-        else:
-            session.add(AppSetting(key="last_recap_day", value=dzis))
-        session.commit()
 
         # Wczorajsza doba UTC; closed_at w bazie jest naiwne (UTC bez tz).
         start = datetime.strptime(dzis, "%Y-%m-%d") - timedelta(days=1)
@@ -410,14 +406,10 @@ def _weekly_review(now: datetime | None = None) -> dict:
     session = SessionLocal()
     try:
         tydzien = teraz.strftime("%G-W%V")
-        guard = session.get(AppSetting, "last_weekly_week")
-        if guard and guard.value == tydzien:
+        from .zamki import zajmij_ustawienie
+        if not zajmij_ustawienie(session, "last_weekly_week", tydzien,
+                                 lambda stara: stara != tydzien):
             return {"sent": 0, "skipped": "already ran this week"}
-        if guard:
-            guard.value = tydzien
-        else:
-            session.add(AppSetting(key="last_weekly_week", value=tydzien))
-        session.commit()
 
         start, koniec = week_window(teraz)
         # Konta firmowe nie maja wlasciciela — bez tego filtru None wpada do zbioru

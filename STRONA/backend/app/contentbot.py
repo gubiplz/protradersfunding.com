@@ -406,6 +406,14 @@ def wyslij_zaplanowane(session, now: datetime | None = None) -> dict:
     rytmem, nie zrzutem.
     """
     teraz = now or datetime.now(timezone.utc)
+    naiwnie = teraz.astimezone(timezone.utc).replace(tzinfo=None)
+    # Post przejęty przez proces, który padł w trakcie (timeout funkcji),
+    # wraca do kolejki po kwadransie — inaczej wisiałby w „publishing" na zawsze.
+    (session.query(ChannelPost)
+     .filter(ChannelPost.status == "publishing",
+             ChannelPost.updated_at < naiwnie - timedelta(minutes=15))
+     .update({ChannelPost.status: "scheduled"}, synchronize_session=False))
+    session.commit()
     zalegle = (session.query(ChannelPost)
                .filter(ChannelPost.status == "scheduled",
                        ChannelPost.scheduled_for.isnot(None))
@@ -418,6 +426,17 @@ def wyslij_zaplanowane(session, now: datetime | None = None) -> dict:
             termin = termin.replace(tzinfo=timezone.utc)
         if termin > teraz:
             continue
+        # Przejęcie ATOMOWE przed wysyłką: zrzut ekranu + Telegram trwają do
+        # minuty, a w tym czasie cron i ruch strony potrafiły wysłać ten sam
+        # post dwa razy. Przegrany (0 wierszy) bierze następny.
+        wzial = (session.query(ChannelPost)
+                 .filter(ChannelPost.id == post.id, ChannelPost.status == "scheduled")
+                 .update({ChannelPost.status: "publishing", ChannelPost.updated_at: naiwnie},
+                         synchronize_session=False))
+        session.commit()
+        if not wzial:
+            continue
+        session.refresh(post)
         wynik = opublikuj(session, post)
         return {"sent": 1 if wynik.get("posted") else 0, "id": post.id,
                 "reason": wynik.get("reason", "")}

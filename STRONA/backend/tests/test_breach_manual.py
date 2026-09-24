@@ -105,8 +105,87 @@ def test_milczacy_broker_nie_cofa_breachu(monkeypatch):
 
     assert r.status_code == 200 and r.json()["positions_closed"] == 0
     s = SessionLocal()
-    assert s.get(Account, aid).status == "failed"
+    acc = s.get(Account, aid)
+    assert acc.status == "failed"
+    # Nieudane odcięcie zostaje w bazie — tick ryzyka je ponowi.
+    assert acc.enforcement_pending is True and acc.enforcement_attempts == 1
     s.close()
+
+
+def test_nieudane_odciecie_jest_ponawiane_az_do_skutku(monkeypatch):
+    """Konto `failed` nie wraca do pollera, więc jedna awaria sieci zostawiała
+    otwarte pozycje na MT5 na zawsze. Teraz: flaga w bazie → kolejne ticki
+    ponawiają → po 3 porażkach alert do adminów → sukces czyści flagę."""
+    import asyncio
+    from app import notify
+
+    class _Kaprysny(Feed):
+        def __init__(self):
+            self.dziala = False
+            self.zamkniete = []
+
+        async def snapshot(self, *a, **k):
+            return None
+
+        async def close_all_positions(self, metaapi_account_id, *, login=None, password=None):
+            if not self.dziala:
+                raise RuntimeError("broker down")
+            self.zamkniete.append(metaapi_account_id)
+            return 3
+
+        async def lock(self, metaapi_account_id, *, login=None, password=None):
+            if not self.dziala:
+                raise RuntimeError("broker down")
+
+    alerty = []
+    monkeypatch.setattr(notify, "notify_admins", lambda *a, **k: alerty.append(a))
+    b = _Kaprysny()
+    monkeypatch.setattr(poller, "_feed", b)
+    aid = _konto("800009", metaapi_id="acc-9")
+    client.post(f"/api/admin/accounts/{aid}/breach", headers=ADMIN, json={"reason": "Rule violation"})
+
+    asyncio.run(poller.dokoncz_odciecia(b))       # próba 2 — dalej pada
+    asyncio.run(poller.dokoncz_odciecia(b))       # próba 3 — alert
+    s = SessionLocal(); acc = s.get(Account, aid)
+    assert acc.enforcement_pending is True and acc.enforcement_attempts == 3
+    s.close()
+    moje = [a for a in alerty if "800009" in a[1]]
+    assert len(moje) == 1 and moje[0][0] == "enforcement_failed"
+
+    b.dziala = True
+    assert asyncio.run(poller.dokoncz_odciecia(b)) >= 1   # zaległe z innych testów też się domykają
+    assert "acc-9" in b.zamkniete
+    s = SessionLocal(); acc = s.get(Account, aid)
+    assert acc.enforcement_pending is False and acc.enforcement_attempts == 0
+    s.close()
+    assert asyncio.run(poller.dokoncz_odciecia(b)) == 0   # nic więcej do roboty
+
+
+def test_odciecie_poddaje_sie_po_limicie_prob(monkeypatch):
+    import asyncio
+    from app import notify
+
+    class _Martwy(Feed):
+        async def snapshot(self, *a, **k):
+            return None
+
+        async def close_all_positions(self, *a, **k):
+            raise RuntimeError("account deleted at provider")
+
+    alerty = []
+    monkeypatch.setattr(notify, "notify_admins", lambda *a, **k: alerty.append(a))
+    m = _Martwy()
+    monkeypatch.setattr(poller, "_feed", m)
+    aid = _konto("800010", metaapi_id="acc-10")
+    client.post(f"/api/admin/accounts/{aid}/breach", headers=ADMIN, json={"reason": "Rule violation"})
+    for _ in range(poller.ODCIECIE_MAX + 3):
+        asyncio.run(poller.dokoncz_odciecia(m))
+    s = SessionLocal(); acc = s.get(Account, aid)
+    assert acc.enforcement_pending is False and acc.enforcement_attempts == poller.ODCIECIE_MAX
+    s.close()
+    moje = [a for a in alerty if "800010" in a[1]]
+    assert [a[0] for a in moje] == ["enforcement_failed", "enforcement_failed"]
+    assert "manually" in moje[-1][2]
 
 
 def test_konto_bez_rachunku_nie_dzwoni_do_brokera(broker):

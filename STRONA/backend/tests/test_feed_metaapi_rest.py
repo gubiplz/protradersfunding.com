@@ -139,7 +139,16 @@ def test_jedna_niezamknieta_pozycja_nie_przerywa_reszty():
     t = T({"/positions": (200, [{"id": "7"}, {"id": "9"}]), "/trade": (200, {})})
     f = MetaApiRestFeed(token="tok", transport=t)
 
-    assert asyncio.run(f.close_all_positions(KONTO)) == 1
+    # Obie pozycje próbowane, ale porażka jednej jest ZGŁASZANA — poller
+    # zapisuje wtedy enforcement_pending i tick ryzyka ponawia odcięcie.
+    try:
+        asyncio.run(f.close_all_positions(KONTO))
+        raise AssertionError("nieudane zamknięcie musi być widoczne dla wołającego")
+    except RuntimeError as e:
+        assert "1 position(s) not closed (1 closed)" in str(e)
+    # 7 odrzucona, a mimo to 9 zamknięta (atrapa zapisuje tylko udane wywołania)
+    zamykane = [j["positionId"] for m, u, j in t.wywolania if "/trade" in u]
+    assert zamykane == ["9"]
 
 
 def test_lock_robi_undeploy_w_provisioningu():
@@ -152,11 +161,15 @@ def test_lock_robi_undeploy_w_provisioningu():
     assert "mt-provisioning-api-v1" in url
 
 
-def test_nieudany_undeploy_nie_wywraca_breachu():
-    """Breach ma się dokonać także wtedy, gdy broker nie odpowiada."""
+def test_nieudany_undeploy_jest_zglaszany():
+    """Breach i tak się dokonuje (to pilnuje poller), ale feed nie może
+    udawać sukcesu — inaczej nikt nie ponowi odcięcia."""
     f, _ = _feed({"/undeploy": (503, None)})
-
-    asyncio.run(f.lock(KONTO))   # brak wyjątku = test zdany
+    try:
+        asyncio.run(f.lock(KONTO))
+        raise AssertionError("nieudany undeploy musi rzucić")
+    except RuntimeError:
+        pass
 
 
 # --------------------------------------------------------------------------- #

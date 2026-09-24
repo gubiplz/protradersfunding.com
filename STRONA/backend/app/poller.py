@@ -375,13 +375,11 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
         # nie daje uprawnień serwerowych, więc tam zamykamy tylko pozycje.
         # Konto botowe nie ma realnych pozycji na MT5 — nie ma czego zamykać.
         if not bot_driven and (maid or (login and pw)):
-            try:
-                closed = await feed.close_all_positions(maid, login=login, password=pw)
-                await feed.lock(maid, login=login, password=pw)
+            ok, closed = await _sprobuj_odciac(feed, maid, login, pw)
+            _zapisz_odciecie(acc.id, ok)
+            if ok:
                 print(f"[poller] ENFORCEMENT {acc.login}: konto FAILED "
                       f"({acc.breach_reason}) — zamknięto {closed} pozycji", flush=True)
-            except Exception as e:  # pragma: no cover
-                print(f"[poller] enforcement błąd: {e}", flush=True)
         _notify(acc, "breached", {"reason": acc.breach_reason})
     elif res.passed_phase:
         _advance_phase(acc, rt)
@@ -566,15 +564,92 @@ async def odetnij_od_handlu(acc: Account) -> int:
     # Konto botowe nie ma realnych pozycji; konto bez rachunku nie ma czego odcinac.
     if getattr(acc, "bot_enabled", False) or not (maid or (login and pw)):
         return 0
-    try:
-        zamkniete = await _feed.close_all_positions(maid, login=login, password=pw)
-        await _feed.lock(maid, login=login, password=pw)
+    ok, zamkniete = await _sprobuj_odciac(_feed, maid, login, pw)
+    _zapisz_odciecie(acc.id, ok)
+    if ok:
         print(f"[poller] ENFORCEMENT {acc.login}: odciete od handlu "
               f"— zamknieto {zamkniete} pozycji", flush=True)
-        return zamkniete
-    except Exception as e:  # pragma: no cover - cudza dostepnosc
+    return zamkniete
+
+
+async def _sprobuj_odciac(feed, maid, login, pw) -> tuple[bool, int]:
+    """Zamknij pozycje i odetnij konto. (sukces, ile zamknietych) — nie rzuca."""
+    try:
+        zamkniete = await feed.close_all_positions(maid, login=login, password=pw)
+        await feed.lock(maid, login=login, password=pw)
+        return True, int(zamkniete or 0)
+    except Exception as e:  # cudza dostepnosc — wynik idzie do bazy, tick ponowi
         print(f"[poller] enforcement blad: {e}", flush=True)
-        return 0
+        return False, 0
+
+
+#: Po tylu nieudanych probach admin dostaje alert; po ODCIECIE_MAX tick
+#: przestaje ponawiac (np. konto usuniete u dostawcy) i prosi o reczna akcje.
+ODCIECIE_ALERT = 3
+ODCIECIE_MAX = 10
+
+
+def _zapisz_odciecie(account_id: int, ok: bool) -> None:
+    """Wynik odciecia do bazy — WLASNA krotka sesja, niezalezna od wolajacego."""
+    s = SessionLocal()
+    try:
+        acc = s.get(Account, account_id)
+        if acc is None:
+            return
+        if ok:
+            acc.enforcement_pending = False
+            acc.enforcement_attempts = 0
+            s.commit()
+            return
+        proby = int(acc.enforcement_attempts or 0) + 1
+        acc.enforcement_attempts = proby
+        acc.enforcement_pending = proby < ODCIECIE_MAX
+        s.commit()
+        if proby == ODCIECIE_ALERT or proby == ODCIECIE_MAX:
+            koniec = proby >= ODCIECIE_MAX
+            notify.notify_admins(
+                "enforcement_failed",
+                f"Account {acc.login}: positions may still be open",
+                ("Automatic close/lock failed 10 times and was stopped — close the "
+                 "positions and lock the account at the broker manually."
+                 if koniec else
+                 f"The breach was recorded, but closing positions / locking the account "
+                 f"failed {proby} times. It keeps retrying every minute."),
+                url=f"/admin#accounts", tag=f"enforce-{acc.id}")
+    except Exception as e:  # pragma: no cover
+        s.rollback()
+        print(f"[poller] zapis odciecia nieudany: {e}", flush=True)
+    finally:
+        s.close()
+
+
+async def dokoncz_odciecia(feed=None) -> int:
+    """Ponawia odciecia, ktore sie nie udaly (np. MetaApi nie odpowiadalo).
+
+    Konto po breachu ma status `failed` i nie wraca do `_active_query`, wiec
+    bez tego kroku jedna awaria sieci zostawiala otwarte pozycje na zawsze."""
+    global _feed
+    if feed is None:
+        if _feed is None:
+            _feed = make_feed()
+        feed = _feed
+    s = SessionLocal()
+    try:
+        konta = [(a.id, a.login, a.metaapi_account_id, a.platform_login, a.platform_password)
+                 for a in (s.query(Account)
+                           .filter(Account.enforcement_pending == True)  # noqa: E712
+                           .order_by(Account.id).limit(20).all())]
+    finally:
+        s.close()
+    udane = 0
+    for aid, login_konta, maid, login, pw in konta:
+        ok, n = await _sprobuj_odciac(feed, maid, login, pw)
+        _zapisz_odciecie(aid, ok)
+        if ok:
+            udane += 1
+            print(f"[poller] ENFORCEMENT {login_konta}: odciecie dokonczone "
+                  f"— zamknieto {n} pozycji", flush=True)
+    return udane
 
 
 #: Znacznik ostatniego przebiegu ryzyka — patrz `_zajmij_tick_ryzyka`.
@@ -646,6 +721,13 @@ async def tick_ryzyka(min_odstep_s: float = 20.0) -> dict:
     finally:
         session.close()
 
+    # Najpierw odcięcia po breachu, które wcześniej się nie udały — to jest
+    # realne ryzyko (konto `failed` dalej gra na MT5), więc przed wszystkim.
+    try:
+        await dokoncz_odciecia(_feed)
+    except Exception as e:  # pragma: no cover
+        print(f"[risk] dokonczenie odciec nieudane: {e}", flush=True)
+
     # Konta z add-onem czekajace na poswiadczenia maja je dostac w minutach,
     # a nie przy dobowym cronie. Backoff (w bazie) pilnuje, zeby nieudana
     # proba nie powtarzala sie co tyknniecie.
@@ -676,6 +758,63 @@ async def tick_ryzyka(min_odstep_s: float = 20.0) -> dict:
         session.close()
 
 
+#: Zamek pełnego przebiegu — patrz `zajmij_zamek`.
+FULL_TICK_KEY = "full_tick_lock"
+
+
+def zajmij_zamek(klucz: str, przeterminowanie_s: float = 120.0) -> str | None:
+    """Zamek w bazie na czas przebiegu. Zwraca token (do zwolnienia) albo None.
+
+    Wartość wiersza to `run:<czas>` w trakcie i `done:<czas>` po zwolnieniu.
+    Przejęcie to warunkowy UPDATE `WHERE value = <przeczytana>` — z dwóch
+    instancji wygrywa dokładnie jedna. Zamek po padniętym procesie (run
+    starszy niż `przeterminowanie_s`) wolno przejąć, inaczej jedna awaria
+    zablokowałaby silnik na zawsze.
+    """
+    teraz = time.time()
+    token = f"run:{teraz:.6f}"
+    s = SessionLocal()
+    try:
+        row = s.get(AppSetting, klucz)
+        if row is None:
+            try:
+                s.add(AppSetting(key=klucz, value=token))
+                s.commit()
+                return token
+            except IntegrityError:
+                s.rollback()
+                return None
+        stara = row.value or ""
+        if stara.startswith("run:"):
+            try:
+                if teraz - float(stara[4:]) < przeterminowanie_s:
+                    return None          # ktoś właśnie liczy
+            except ValueError:
+                pass                     # zepsuty wiersz nie blokuje na zawsze
+        wynik = s.execute(update(AppSetting)
+                          .where(AppSetting.key == klucz, AppSetting.value == stara)
+                          .values(value=token))
+        s.commit()
+        return token if wynik.rowcount == 1 else None
+    finally:
+        s.close()
+
+
+def zwolnij_zamek(klucz: str, token: str) -> None:
+    """Zwalnia TYLKO własny zamek (ktoś mógł przejąć przeterminowany)."""
+    s = SessionLocal()
+    try:
+        s.execute(update(AppSetting)
+                  .where(AppSetting.key == klucz, AppSetting.value == token)
+                  .values(value=f"done:{time.time():.6f}"))
+        s.commit()
+    except Exception as e:  # pragma: no cover
+        s.rollback()
+        print(f"[poller] zwolnienie zamka {klucz} nieudane: {e}", flush=True)
+    finally:
+        s.close()
+
+
 async def tick_once() -> dict:
     """Jeden pełny przebieg pollera — provisioning + equity wszystkich kont.
 
@@ -684,9 +823,26 @@ async def tick_once() -> dict:
     kręcić `_loop`, więc silnik napędza tam cron uderzający w endpoint. Zwraca
     licznik przetworzonych kont — cron ma po czym poznać, że coś się dzieje.
     """
+    # Jeden pełny przebieg naraz: ruch na stronie (lazy tick) na kilku
+    # instancjach odpalał równoległe przebiegi po wszystkich kontach —
+    # podwójne snapshoty, maile i pozycje bota.
+    token = zajmij_zamek(FULL_TICK_KEY)
+    if token is None:
+        return {"skipped": True, "reason": "another pass is running"}
+    try:
+        return await _tick_once_pod_zamkiem()
+    finally:
+        zwolnij_zamek(FULL_TICK_KEY, token)
+
+
+async def _tick_once_pod_zamkiem() -> dict:
     global _feed
     if _feed is None:
         _feed = make_feed()
+    try:
+        await dokoncz_odciecia(_feed)
+    except Exception as e:  # pragma: no cover
+        print(f"[poller] dokonczenie odciec nieudane: {e}", flush=True)
     await provisioning.provision_pending(SessionLocal, _feed)
     session = SessionLocal()
     try:

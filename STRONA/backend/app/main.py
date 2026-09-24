@@ -37,6 +37,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.orm.exc import StaleDataError
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 
@@ -44,7 +45,7 @@ from . import (achievements, auth, billing, catalog, certshot, contentbot, count
                fields, inbox, insights, loyalty,
                lead_mail, mail_templates, metaquotes_web, notify, offers, origin,
                payout_import, payoutbot, reach, statements,
-               poller, provisioning, push, rules, sms, telegram, telemetry, tradebot)
+               poller, provisioning, push, rules, sms, telegram, telemetry, tradebot, zamki)
 from .config import get_settings
 from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint
 from .models import (LEAD_LOST_STATUSES, LEAD_STATUSES, LOST_REASONS,
@@ -296,6 +297,14 @@ async def lifespan(app: FastAPI):
 # wystawialoby cala mape API kazdemu.
 app = FastAPI(title=f"{settings.site_name} API", version="0.7.0", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
+
+
+@app.exception_handler(StaleDataError)
+async def _konflikt_zapisu(request: Request, exc: StaleDataError):
+    """Konto zmieniło się między odczytem a zapisem (np. tick pollera właśnie
+    przeliczył saldo). Nic nie zostało zapisane — wystarczy powtórzyć."""
+    return JSONResponse(status_code=409, content={
+        "detail": "This account was updated a moment ago. Please try again."})
 
 
 @app.exception_handler(RequestValidationError)
@@ -1956,7 +1965,14 @@ def request_payout(account_id: int, payload: PayoutReqIn, trader: Trader = Depen
                            trader_share=share, method=method, details=details_json,
                            status="pending")
         session.add(pr)
-        session.commit()
+        try:
+            session.commit()
+        except IntegrityError:
+            # Podwójne kliknięcie: drugi request przeszedł sprawdzenie w Pythonie
+            # równolegle z pierwszym, ale baza (ux_payout_requests_pending) nie
+            # przepuściła drugiego wiersza.
+            session.rollback()
+            raise HTTPException(400, "A payout request for this account is already under review")
         notify.send("payout_requested", tr.email, {"name": tr.full_name or tr.email,
                     "login": acc.login, "profit_amount": profit, "trader_share": share})
         notify.notify_admins("admin_payout", f"Payout request ${share:,.2f}", tr.email)
@@ -11925,19 +11941,18 @@ def _content_sweep_z_ruchu() -> None:
         now = datetime.now(timezone.utc)
         session = SessionLocal()
         try:
-            row = session.get(AppSetting, "contentbot_last_sweep")
-            if row and row.value:
+            def pora(stara):
+                if not stara:
+                    return True
                 try:
-                    ostatni = _utc(datetime.fromisoformat(row.value))
-                    if ostatni and (now - ostatni).total_seconds() < CONTENT_SWEEP_MIN * 60:
-                        return
+                    ostatni = _utc(datetime.fromisoformat(stara))
                 except ValueError:
-                    pass
-            if row is None:
-                row = AppSetting(key="contentbot_last_sweep", value="")
-                session.add(row)
-            row.value = now.isoformat()
-            session.commit()
+                    return True
+                return not ostatni or (now - ostatni).total_seconds() >= CONTENT_SWEEP_MIN * 60
+            # Atomowo (zamki.zajmij_ustawienie): dwie instancje obsługujące ruch
+            # w tej samej sekundzie przechodziły obie i robota szła podwójnie.
+            if not zamki.zajmij_ustawienie(session, "contentbot_last_sweep", now.isoformat(), pora):
+                return
         finally:
             session.close()
         _content_tick()
@@ -11958,19 +11973,18 @@ def _lead_sweep_z_ruchu() -> None:
         now = datetime.now(timezone.utc)
         session = SessionLocal()
         try:
-            row = session.get(AppSetting, "leadbot_last_sweep")
-            if row and row.value:
+            def pora(stara):
+                if not stara:
+                    return True
                 try:
-                    ostatni = _utc(datetime.fromisoformat(row.value))
-                    if ostatni and (now - ostatni).total_seconds() < LEADS_SWEEP_MIN * 60:
-                        return
+                    ostatni = _utc(datetime.fromisoformat(stara))
                 except ValueError:
-                    pass
-            if row is None:
-                row = AppSetting(key="leadbot_last_sweep", value="")
-                session.add(row)
-            row.value = now.isoformat()
-            session.commit()
+                    return True
+                return not ostatni or (now - ostatni).total_seconds() >= LEADS_SWEEP_MIN * 60
+            # Atomowo (zamki.zajmij_ustawienie): dwie instancje obsługujące ruch
+            # w tej samej sekundzie przechodziły obie i robota szła podwójnie.
+            if not zamki.zajmij_ustawienie(session, "leadbot_last_sweep", now.isoformat(), pora):
+                return
         finally:
             session.close()
         _lead_followups()

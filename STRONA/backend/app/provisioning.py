@@ -308,10 +308,28 @@ def claim_pool_account(session, acc: Account) -> bool:
     Przy okazji zapisuje, KOMU rachunek przypadł i kiedy — bez tego pula jest
     workiem loginów, z którego nie da się odtworzyć, czyj jest dany rachunek.
     """
-    pool = (session.query(PoolAccount)
-            .filter(PoolAccount.claimed == False,  # noqa: E712
-                    PoolAccount.account_size == acc.initial_balance)
-            .order_by(PoolAccount.id).first())
+    # Przejęcie rekordu ATOMOWO: `UPDATE ... WHERE claimed = false` wygrywa
+    # dokładnie raz. Zwykłe „SELECT wolny → ustaw claimed" na serverless
+    # (webhook + tick ryzyka równolegle) dawało dwóm płacącym klientom TEN SAM
+    # login i hasło MT5. Przegrany bierze następnego kandydata.
+    teraz = datetime.now(timezone.utc)
+    kandydaci = [pid for (pid,) in (session.query(PoolAccount.id)
+                 .filter(PoolAccount.claimed == False,  # noqa: E712
+                         PoolAccount.account_size == acc.initial_balance)
+                 .order_by(PoolAccount.id).limit(10).all())]
+    pool = None
+    for pid in kandydaci:
+        wygral = (session.query(PoolAccount)
+                  .filter(PoolAccount.id == pid, PoolAccount.claimed == False)  # noqa: E712
+                  .update({PoolAccount.claimed: True,
+                           PoolAccount.claimed_by_account_id: acc.id,
+                           PoolAccount.claimed_by_trader_id: acc.trader_id,
+                           PoolAccount.claimed_at: teraz},
+                          synchronize_session=False))
+        if wygral:
+            pool = session.get(PoolAccount, pid)
+            session.refresh(pool)
+            break
     if not pool:
         return False
     # metaapi_account_id zwykle jest puste (admin go nie podaje) — kopiujemy tylko,
@@ -324,11 +342,21 @@ def claim_pool_account(session, acc: Account) -> bool:
     acc.login = pool.platform_login
     # Wpis symulowany = zmyslone poswiadczenia; realny feed nie ma sie nimi logowac.
     acc.mt5_backed = not bool(getattr(pool, "simulated", False))
-    pool.claimed = True
-    pool.claimed_by_account_id = acc.id
-    pool.claimed_by_trader_id = acc.trader_id
-    pool.claimed_at = datetime.now(timezone.utc)
     return True
+
+
+def _zajmij_konto_do_przydzialu(session, aid: int) -> bool:
+    """Blokada wiersza konta na czas przydziału z puli (krótka transakcja).
+
+    UPDATE bez zmiany wartości, ale z warunkiem na status: na Postgresie bierze
+    blokadę wiersza, więc równoległy przebieg dla TEGO SAMEGO konta czeka, a po
+    commicie pierwszego ponownie sprawdza WHERE — status jest już `active`,
+    więc dostaje 0 wierszy i odpuszcza. Bez tego jedno konto potrafiło zużyć
+    dwa rachunki z puli i wysłać klientowi dwa maile z różnymi hasłami."""
+    n = (session.query(Account)
+         .filter(Account.id == aid, Account.status == "provisioning")
+         .update({Account.status: "provisioning"}, synchronize_session=False))
+    return bool(n)
 
 
 REJESTRACJA = "metaapi_register"
@@ -491,7 +519,15 @@ async def _provision_one(session_factory, feed, aid: int) -> None:
                 return
 
         # 2) PULA gotowych kont — domyślnie jedyne źródło poświadczeń.
-        if claim_pool_account(s, acc):
+        if not _zajmij_konto_do_przydzialu(s, aid):
+            s.rollback()
+            return                      # równoległy przebieg już je obsłużył
+        if not claim_pool_account(s, acc):
+            # Pula pusta: puszczamy blokadę od razu — dalsze gałęzie potrafią
+            # iść w sieć (web terminal), a trzymana blokada wstrzymałaby inne ticki.
+            s.rollback()
+            acc = s.get(Account, aid)
+        else:
             acc.status = "funded" if acc.phase == "funded" else "active"
             s.commit()
             # Pierwsza proba podpiecia pod MetaApi. Nieudana NIE wstrzymuje

@@ -50,6 +50,7 @@ def init_db() -> None:
     _add_missing_columns()
     _poszerz_kolumny()
     _add_missing_indexes()
+    _add_unique_guards()
     _relax_not_null()
     _przemianuj_statusy_leadow()
     _odbierz_konta_google()
@@ -192,6 +193,11 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "show_on_lp": "BOOLEAN DEFAULT TRUE",
     },
     "accounts": {
+        # Nieudane odcięcie od handlu po breachu — ponawiane przez tick ryzyka.
+        "enforcement_pending": "BOOLEAN DEFAULT FALSE",
+        "enforcement_attempts": "INTEGER DEFAULT 0",
+        # Licznik blokady optymistycznej (models.Account.__mapper_args__).
+        "row_version": "INTEGER NOT NULL DEFAULT 1",
         "platform_investor_password": "VARCHAR(64)",
         "cert_token": "VARCHAR(32)",
         "source": "VARCHAR(16) DEFAULT 'purchase'",
@@ -318,6 +324,50 @@ def _relax_not_null() -> None:
                 if nullable.get(name) is False:
                     conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {name} DROP NOT NULL"))
                     print(f"[db] {table}.{name} nie jest już wymagane")
+
+
+#: Częściowe indeksy UNIKALNE — baza pilnuje reguły, której kod w Pythonie nie
+#: upilnuje przy równoległych requestach (podwójne kliknięcie = dwa wiersze).
+_UNIQUE_GUARDS: list[tuple[str, str, str, str]] = [
+    # jedna wypłata „pending" na konto
+    ("ux_payout_requests_pending", "payout_requests", "account_id", "status = 'pending'"),
+]
+
+
+def _add_unique_guards() -> None:
+    """Zakłada częściowe indeksy unikalne — tylko gdy dane już teraz są czyste.
+
+    Jeśli w bazie SĄ duplikaty (stary wyścig), CREATE UNIQUE INDEX by się
+    wywalił i położył start aplikacji. Wtedy indeks jest pomijany z logiem —
+    reguła i tak działa w kodzie, a admin rozwiąże duplikaty ręcznie.
+    Nigdy nie rzuca."""
+    from sqlalchemy import inspect, text
+
+    try:
+        inspector = inspect(engine)
+        tabele = set(inspector.get_table_names())
+    except Exception as e:  # pragma: no cover
+        print(f"[db] indeksy unikalne pominięte: {e}")
+        return
+    for nazwa, tabela, kolumna, warunek in _UNIQUE_GUARDS:
+        if tabela not in tabele:
+            continue
+        try:
+            if any(i["name"] == nazwa for i in inspector.get_indexes(tabela)):
+                continue
+            with engine.begin() as conn:
+                dup = conn.execute(text(
+                    f"SELECT {kolumna} FROM {tabela} WHERE {warunek} "
+                    f"GROUP BY {kolumna} HAVING COUNT(*) > 1 LIMIT 1")).first()
+                if dup is not None:
+                    print(f"[db] indeks {nazwa} POMINIĘTY: w {tabela} są duplikaty "
+                          f"({kolumna}={dup[0]}) — do wyjaśnienia ręcznie")
+                    continue
+                conn.execute(text(f"CREATE UNIQUE INDEX IF NOT EXISTS {nazwa} "
+                                  f"ON {tabela} ({kolumna}) WHERE {warunek}"))
+            print(f"[db] dodano indeks unikalny {nazwa}")
+        except Exception as e:  # pragma: no cover - start aplikacji ważniejszy
+            print(f"[db] indeks {nazwa} nie powstał: {e}")
 
 
 def _add_missing_indexes() -> None:
