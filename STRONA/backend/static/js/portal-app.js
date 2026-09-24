@@ -387,10 +387,39 @@ function authBack(e){
   return true;   /* follow href="/" */
 }
 
-function authTab(m){AUTHMODE=m;
+/* Przełączanie trybów karty logowania jak w iOS: pigułka przesuwa się pod
+   zakładkami (CSS), karta płynnie zmienia wysokość zamiast skakać, a pola,
+   które właśnie się pojawiły, łagodnie wjeżdżają. Bez animacji, gdy karta
+   jest niewidoczna (start) albo system prosi o ograniczenie ruchu. */
+function authTab(m){
+  const card=document.querySelector('.auth-card');
+  const spokoj=!card||!card.offsetParent||matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if(spokoj||m===AUTHMODE){_authTabUstaw(m);return}
+  const pola=[...card.querySelectorAll('.stack > *, #g-auth, #auth-buynote')];
+  const bylo=new Set(pola.filter(e=>e.offsetParent));
+  const tytul=$('auth-title').textContent;
+  const przed=card.getBoundingClientRect().height;
+  card.style.height='';card.style.transition='';
+  _authTabUstaw(m);
+  const po=card.getBoundingClientRect().height;
+  pola.forEach(e=>{if(e.offsetParent&&!bylo.has(e)){e.classList.remove('a-in');void e.offsetWidth;e.classList.add('a-in')}});
+  if($('auth-title').textContent!==tytul)['auth-title','auth-sub'].forEach(id=>{
+    const e=$(id);e.classList.remove('a-swap');void e.offsetWidth;e.classList.add('a-swap')});
+  if(Math.abs(po-przed)<1)return;
+  card.style.height=przed+'px';card.style.overflow='hidden';
+  void card.offsetHeight;
+  card.style.transition='height .38s cubic-bezier(.22,1,.36,1)';
+  card.style.height=po+'px';
+  clearTimeout(card._authT);
+  card._authT=setTimeout(()=>{card.style.height='';card.style.overflow='';card.style.transition=''},420);
+}
+function _authTabUstaw(m){AUTHMODE=m;
   const login=m==='login',signup=m==='signup',forgot=m==='forgot',reset=m==='reset';
   $('tab-login').classList.toggle('on',login);
   $('tab-signup').classList.toggle('on',signup);
+  $('tab-login').setAttribute('aria-selected',String(login));
+  $('tab-signup').setAttribute('aria-selected',String(signup));
+  document.querySelector('.auth-tabs').classList.toggle('is-signup',signup);
   $('a-name').classList.toggle('hidden',!signup);
   $('a-ref').classList.toggle('hidden',!signup);
   $('a-terms-row').classList.toggle('hidden',!signup);
@@ -552,14 +581,20 @@ function initGoogle(){
 function renderGoogleBtn(){
   const holder=document.getElementById('g-btn');
   if(!holder||!window.google||!google.accounts)return;
+  /* Przycisk Google to iframe od Google — kasowanie go przy KAŻDYM przełączeniu
+     Log in / Create account zostawiało na chwilę pustą dziurę (miganie).
+     Jeden napis „Continue with Google" pasuje do obu zakładek, więc renderujemy
+     ponownie tylko wtedy, gdy zmienił się motyw albo szerokość. */
+  const theme=document.documentElement.dataset.theme==='dark'?'filled_black':'outline';
+  const width=Math.min(holder.offsetWidth||320,380);
+  const klucz=theme+'|'+width;
+  if(holder.dataset.k===klucz&&holder.childElementCount)return;
+  holder.dataset.k=klucz;
   holder.innerHTML='';
   google.accounts.id.renderButton(holder,{
-    theme:document.documentElement.dataset.theme==='dark'?'filled_black':'outline',
-    size:'large',shape:'pill',width:Math.min(holder.offsetWidth||320,380),
-    /* the label follows the active tab — one button serves both flows;
-       locale pinned: the whole site is English, GIS must not localize */
-    locale:'en',
-    text:AUTHMODE==='signup'?'signup_with':'signin_with'});
+    theme,size:'large',shape:'pill',width,
+    /* locale pinned: the whole site is English, GIS must not localize */
+    locale:'en',text:'continue_with'});
 }
 async function onGoogleCred(resp){
   try{
@@ -2832,8 +2867,9 @@ const VIEWS={
         <div><label class="muted" style="font-size:12px">Full Name</label>
           <input id="s-name" class="inp" value="${esc(ME.full_name||'')}"></div>
         <div><label class="muted" style="font-size:12px">Email Address</label>
-          <input class="inp" value="${esc(ME.email)}" disabled>
-          <p class="muted" style="font-size:11.5px;margin-top:4px">Email cannot be changed.</p></div>
+          <div class="em-row"><input class="inp" value="${esc(ME.email)}" disabled>
+            ${IMP?'':`<button type="button" class="btn-o" id="em-open" onclick="emailChangeOpen()">Change</button>`}</div>
+          <div id="em-flow"></div></div>
         <button class="btn-p" style="align-self:flex-start" onclick="saveProfile()">Save Changes</button>
       </div></div>
 
@@ -2929,6 +2965,72 @@ async function saveProfile(){
   try{await api('/api/me',{method:'PATCH',body:JSON.stringify({full_name:nazwa.value})});
     ME=await api('/api/auth/me');boot();toast('Profile saved.','ok');go('settings');
   }catch(e){toast('Error: '+e.message,'err')}
+}
+/* Zmiana e-maila w dwóch krokach: nowy adres (+ hasło, jeśli konto je ma)
+   → kod 6 cyfr na OBECNY adres → wpisanie kodu. Stary adres potwierdza
+   zmianę, bo to on dowodzi, że robi ją właściciel konta. */
+let _emNowy='',_emHaslo='';
+function emailChangeOpen(){
+  const f=$('em-flow');if(!f)return;
+  $('em-open')?.classList.add('hidden');
+  /* Konto z Google: najpierw hasło w PTF, potem zmiana adresu (to samo
+     pilnuje serwer). Przycisk prowadzi prosto do karty „Set a Password". */
+  if(ME.password_set===false){
+    f.innerHTML=`<div class="em-step a-in">
+      <p class="em-hint">You signed up with Google. <b>Set a password first</b> — then you can change your e-mail,
+        and you'll be able to log in with the new address and that password.</p>
+      <div class="em-btns"><button type="button" class="btn-p" onclick="emailChangeClose();$('s-new').scrollIntoView({behavior:'smooth',block:'center'});setTimeout(()=>$('s-new').focus(),350)">Set a password</button>
+        <button type="button" class="btn-o" onclick="emailChangeClose()">Cancel</button></div></div>`;
+    return;
+  }
+  f.innerHTML=`<div class="em-step a-in">
+    <input id="em-new" type="email" class="inp" placeholder="New e-mail address" autocomplete="email" value="${esc(_emNowy)}">
+    <input id="em-pass" type="password" class="inp" placeholder="Your current password" autocomplete="current-password">
+    <p class="muted em-hint">We'll send a 6-digit code to <b>${esc(ME.email)}</b> to confirm it's you.</p>
+    <div class="em-btns"><button type="button" class="btn-p" onclick="emailChangeSend(this)">Send code</button>
+      <button type="button" class="btn-o" onclick="emailChangeClose()">Cancel</button></div></div>`;
+  $('em-new').focus();
+}
+function emailChangeClose(){
+  _emNowy=_emHaslo='';
+  const f=$('em-flow');if(f)f.innerHTML='';
+  $('em-open')?.classList.remove('hidden');
+}
+async function emailChangeSend(btn,ponownie){
+  if(btn.disabled)return;
+  if(!ponownie){_emNowy=($('em-new').value||'').trim();_emHaslo=$('em-pass')?$('em-pass').value:''}
+  if(!_emNowy){toast('Enter the new e-mail address.','err');return}
+  const napis=btn.textContent;btn.disabled=true;btn.textContent='Sending…';
+  try{
+    const r=await api('/api/me/email/start',{method:'POST',body:JSON.stringify({new_email:_emNowy,password:_emHaslo})});
+    _emNowy=r.new_email;
+    $('em-flow').innerHTML=`<div class="em-step a-in">
+      <p class="em-hint">Code sent to <b>${esc(r.sent_to)}</b>. Enter it to switch your login to <b>${esc(r.new_email)}</b>.</p>
+      <input id="em-code" class="inp em-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="••••••"
+        oninput="this.value=this.value.replace(/\\D/g,'').slice(0,6);if(this.value.length===6)emailChangeConfirm($('em-go'))">
+      <div class="em-btns"><button type="button" class="btn-p" id="em-go" onclick="emailChangeConfirm(this)">Confirm</button>
+        <button type="button" class="btn-o" onclick="emailChangeSend(this,1)">Resend</button>
+        <button type="button" class="btn-o" onclick="emailChangeClose()">Cancel</button></div>
+      <p class="muted em-hint">Valid for ${r.minutes} minutes. Check spam if it doesn't arrive.</p></div>`;
+    $('em-code').focus();
+    if(ponownie)toast('New code sent.','ok');
+  }catch(e){toast('Error: '+e.message,'err');btn.disabled=false;btn.textContent=napis}
+}
+async function emailChangeConfirm(btn){
+  if(!btn||btn.disabled)return;
+  const kod=($('em-code').value||'').trim();
+  if(kod.length!==6){toast('Enter the 6-digit code.','err');return}
+  btn.disabled=true;btn.textContent='Checking…';
+  try{
+    const r=await api('/api/me/email/confirm',{method:'POST',body:JSON.stringify({code:kod})});
+    _emNowy=_emHaslo='';
+    ME=await api('/api/auth/me');
+    toast('E-mail changed to '+r.email+'. Use it to log in from now on.','ok',8000);
+    go('settings');
+  }catch(e){
+    toast('Error: '+e.message,'err');btn.disabled=false;btn.textContent='Confirm';
+    if(/start the e-mail change again/i.test(e.message))emailChangeOpen();
+  }
 }
 async function savePassword(){
   if($('s-new').value!==$('s-new2').value){toast('Passwords do not match.','err');return}

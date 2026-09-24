@@ -3125,6 +3125,126 @@ def me_password(payload: PasswordIn, trader: Trader = Depends(auth.current_trade
         session.close()
 
 
+class EmailChangeIn(BaseModel):
+    new_email: str
+    password: str = ""
+
+
+class EmailCodeIn(BaseModel):
+    code: str
+
+
+#: Ile ważny jest kod zmiany e-maila i ile prób wpisania dopuszczamy.
+EMAIL_CHANGE_MIN = 30
+EMAIL_CHANGE_PROBY = 5
+
+
+def _skrot_kodu(trader_id: int, kod: str) -> str:
+    """HMAC kodu — w bazie nie leży nic, co dałoby się wpisać w portalu."""
+    import hmac
+    return hmac.new(settings.secret_key.encode(), f"{trader_id}:{kod}".encode(),
+                    hashlib.sha256).hexdigest()
+
+
+def _email_zajety(session, email: str, poza_id: int) -> bool:
+    return session.query(Trader.id).filter(func.lower(Trader.email) == email,
+                                           Trader.id != poza_id).first() is not None
+
+
+@app.post("/api/me/email/start")
+def me_email_start(payload: EmailChangeIn, request: Request,
+                   trader: Trader = Depends(auth.current_trader)):
+    """Krok 1 zmiany adresu: kod na OBECNY e-mail.
+
+    Kod idzie na stary adres, bo to on dowodzi, że zmianę robi właściciel
+    konta — a nie ktoś z przejętą sesją albo telefonem zostawionym na biurku.
+    Do tego obecne hasło; konto z Google musi je najpierw ustawić."""
+    if getattr(request.state, "impersonated", False):
+        raise HTTPException(403, "E-mail can't be changed while viewing the portal as a client")
+    _rate_limit(request, "email_change", 5)
+    try:
+        nowy = fields.email(payload.new_email)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader.id)
+        if nowy == (tr.email or "").lower():
+            raise HTTPException(400, "That's already your e-mail address")
+        # Konto z Google najpierw ustawia hasło w PTF. Po zmianie adresu logowanie
+        # przez Google może już nie pasować do nowego maila, a bez hasła klient
+        # zostałby bez żadnej drogi do konta z nowego adresu.
+        if not _haslo_ustawione(tr):
+            raise HTTPException(400, "Set a password first (Settings → Set a Password), "
+                                     "then you can change your e-mail")
+        if not auth.verify_password(payload.password, tr.password_hash):
+            raise HTTPException(400, "Your password is wrong")
+        if _email_zajety(session, nowy, tr.id):
+            raise HTTPException(400, "This e-mail is already used by another account")
+        kod = f"{secrets.randbelow(1_000_000):06d}"
+        tr.pending_email = nowy
+        tr.email_change_hash = _skrot_kodu(tr.id, kod)
+        tr.email_change_expires = datetime.now(timezone.utc) + timedelta(minutes=EMAIL_CHANGE_MIN)
+        tr.email_change_attempts = 0
+        session.commit()
+        notify.send("email_change_code", tr.email,
+                    {"name": tr.full_name or tr.email, "code": kod, "new_email": nowy,
+                     "minutes": EMAIL_CHANGE_MIN})
+        telemetry.track("email_change_requested", tr.id)
+        return {"ok": True, "sent_to": tr.email, "new_email": nowy, "minutes": EMAIL_CHANGE_MIN}
+    finally:
+        session.close()
+
+
+@app.post("/api/me/email/confirm")
+def me_email_confirm(payload: EmailCodeIn, request: Request,
+                     trader: Trader = Depends(auth.current_trader)):
+    """Krok 2: kod ze starej skrzynki → adres zmieniony, oba adresy powiadomione."""
+    if getattr(request.state, "impersonated", False):
+        raise HTTPException(403, "E-mail can't be changed while viewing the portal as a client")
+    _rate_limit(request, "email_change_code", 10)
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader.id)
+        wygasa = _utc(tr.email_change_expires) if tr.email_change_expires else None
+        if not tr.pending_email or not tr.email_change_hash or not wygasa \
+                or wygasa < datetime.now(timezone.utc):
+            raise HTTPException(400, "This code has expired. Start the e-mail change again")
+        proby = int(tr.email_change_attempts or 0) + 1
+        kod = "".join(ch for ch in (payload.code or "") if ch.isdigit())
+        if not secrets.compare_digest(_skrot_kodu(tr.id, kod), tr.email_change_hash):
+            tr.email_change_attempts = proby
+            if proby >= EMAIL_CHANGE_PROBY:
+                tr.pending_email = tr.email_change_hash = tr.email_change_expires = None
+                session.commit()
+                raise HTTPException(400, "Too many wrong codes. Start the e-mail change again")
+            session.commit()
+            raise HTTPException(400, f"Wrong code. {EMAIL_CHANGE_PROBY - proby} attempt(s) left")
+        nowy = tr.pending_email
+        if _email_zajety(session, nowy, tr.id):
+            tr.pending_email = tr.email_change_hash = tr.email_change_expires = None
+            session.commit()
+            raise HTTPException(400, "This e-mail is already used by another account")
+        stary = tr.email
+        tr.email = nowy
+        tr.pending_email = tr.email_change_hash = tr.email_change_expires = None
+        tr.email_change_attempts = None
+        try:
+            session.commit()
+        except IntegrityError:            # ktoś w tej sekundzie założył konto na ten adres
+            session.rollback()
+            raise HTTPException(400, "This e-mail is already used by another account")
+        imie = tr.full_name or nowy
+        # Stary adres dowiaduje się ZAWSZE — jeśli to nie właściciel zmienił
+        # adres, to jedyny moment, w którym może zareagować.
+        notify.send("email_changed_old", stary, {"name": imie, "new_email": nowy})
+        notify.send("email_changed_new", nowy, {"name": imie, "old_email": stary})
+        telemetry.track("email_changed", tr.id)
+        return {"ok": True, "email": nowy}
+    finally:
+        session.close()
+
+
 class DeleteIn(BaseModel):
     password: str
 

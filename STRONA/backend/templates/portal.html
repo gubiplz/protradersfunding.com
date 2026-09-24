@@ -80,9 +80,9 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
         Your selected challenge is saved, and after this step you go <b>straight to checkout</b>.
         New here? <b>Create your free account</b>. Already registered? Switch to <b>Log in</b>.
       </div>
-      <div class="auth-tabs">
-        <button id="tab-login" class="auth-tab on" onclick="authTab('login')">Log in</button>
-        <button id="tab-signup" class="auth-tab" onclick="authTab('signup')">Create account</button>
+      <div class="auth-tabs" role="tablist">
+        <button id="tab-login" class="auth-tab on" type="button" role="tab" aria-selected="true" onclick="authTab('login')">Log in</button>
+        <button id="tab-signup" class="auth-tab" type="button" role="tab" aria-selected="false" onclick="authTab('signup')">Create account</button>
       </div>
       <form class="stack" id="a-form" onsubmit="doAuth();return false">
         <input id="a-name" placeholder="Full name" class="inp hidden" autocomplete="name"

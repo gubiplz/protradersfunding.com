@@ -293,6 +293,25 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             + f"\nLog in to the portal to see your objectives and progress."
             + (f"\n{ctx.get('portal_url')}" if ctx.get("portal_url") else ""),
         ),
+        "email_change_code": (
+            f"{ctx.get('code')} is your code to change your {brand} e-mail",
+            f"Hi {name},\n\nSomeone (hopefully you) asked to change the e-mail of your "
+            f"{brand} account to {ctx.get('new_email')}.\n\n  Confirmation code: {ctx.get('code')}\n\n"
+            f"Enter it in the portal under Settings. The code is valid for "
+            f"{ctx.get('minutes') or 30} minutes.\n\nIf this wasn't you, don't share the code "
+            f"and change your password — your e-mail stays as it is.",
+        ),
+        "email_changed_old": (
+            f"Your {brand} e-mail was changed",
+            f"Hi {name},\n\nThe e-mail of your {brand} account was changed to "
+            f"{ctx.get('new_email')}. From now on you log in with that address.\n\n"
+            f"If this wasn't you, reply to this e-mail right away.",
+        ),
+        "email_changed_new": (
+            f"This is now your {brand} login",
+            f"Hi {name},\n\nThis address is now the e-mail of your {brand} account "
+            f"(it replaced {ctx.get('old_email')}). Use it to log in from now on.",
+        ),
         "verify_email": (
             f"{ctx.get('code')} is your {brand} verification code",
             f"Hi {name}!\n\nConfirm your e-mail address to finish setting up your "
@@ -720,6 +739,31 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
             _stat_html("Credit added", f"${_num(ctx.get('amount'))}",
                        f"Current balance ${_num(ctx.get('balance'))}"),
             _button_html("Browse Challenges", f"{portal}?view=store"),
+        ]
+    elif event == "email_change_code":
+        parts = [
+            _head_html("Security", "Confirm your new e-mail",
+                       f"Hi {name}, someone (hopefully you) asked to change the e-mail of "
+                       f"your {brand} account to <b>{html.escape(str(ctx.get('new_email') or ''))}</b>."),
+            _stat_html("Confirmation code", str(ctx.get("code") or "")),
+            _note_html(f"Enter the code in the portal under Settings. It is valid for "
+                       f"{int(ctx.get('minutes') or 30)} minutes. If this wasn't you, don't share "
+                       f"the code and change your password — your e-mail stays as it is."),
+        ]
+    elif event == "email_changed_old":
+        parts = [
+            _head_html("Security", "Your e-mail was changed",
+                       f"Hi {name}, the e-mail of your {brand} account is now "
+                       f"<b>{html.escape(str(ctx.get('new_email') or ''))}</b>. "
+                       f"From now on you log in with that address."),
+            _note_html("If this wasn't you, reply to this e-mail right away."),
+        ]
+    elif event == "email_changed_new":
+        parts = [
+            _head_html(None, "This is now your login",
+                       f"Hi {name}, this address is now the e-mail of your {brand} account "
+                       f"(it replaced {html.escape(str(ctx.get('old_email') or ''))})."),
+            _button_html("Open the Portal", portal),
         ]
     elif event == "verify_email":
         parts = [

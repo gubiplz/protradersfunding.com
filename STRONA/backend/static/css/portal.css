@@ -468,8 +468,26 @@ table.sortable th[data-dir=desc]::after{content:'▼'}
 .auth-card .sub{font-size:13.5px;color:var(--muted);margin-bottom:22px}
 .auth-tabs{display:grid;grid-template-columns:1fr 1fr;gap:5px;background:var(--bg);
   border:1px solid var(--line);border-radius:11px;padding:4px;margin-bottom:18px}
-.auth-tab{padding:9px;border-radius:8px;font-size:13.5px;font-weight:600;color:var(--muted);transition:.15s;text-align:center}
-.auth-tab.on{background:var(--grad);color:#fff}
+.auth-tab{padding:9px;border-radius:8px;font-size:13.5px;font-weight:600;color:var(--muted);transition:color .25s;text-align:center}
+.auth-tab.on{color:#fff}
+/* Segmented control jak w iOS: JEDNA pigułka jedzie pod zakładkami zamiast
+   gasnąć na jednej i zapalać się na drugiej. Szerokość = kolumna siatki
+   (50% − połowa gapu − padding), przesunięcie = kolumna + gap. */
+.auth-tabs{position:relative;isolation:isolate}
+.auth-tabs::before{content:"";position:absolute;z-index:-1;top:4px;bottom:4px;left:4px;
+  width:calc(50% - 6.5px);border-radius:8px;background:var(--grad);
+  box-shadow:0 4px 14px -6px rgba(99,102,241,.55);
+  transition:transform .38s cubic-bezier(.22,1,.36,1)}
+.auth-tabs.is-signup::before{transform:translateX(calc(100% + 5px))}
+.auth-tab{position:relative;background:none;-webkit-tap-highlight-color:transparent}
+.auth-tab:active{transform:scale(.97);transition:transform .1s,color .25s}
+@keyframes a-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+@keyframes a-swap{from{opacity:0}to{opacity:1}}
+.auth-card .a-in{animation:a-in .32s cubic-bezier(.22,1,.36,1) both}
+.auth-card .a-swap{animation:a-swap .25s ease-out both}
+@media (prefers-reduced-motion:reduce){
+  .auth-tabs::before{transition:none}
+  .auth-card .a-in,.auth-card .a-swap{animation:none}}
 .auth-card .stack{display:flex;flex-direction:column;gap:11px}
 .auth-hint{font-size:11.5px;color:var(--dim);text-align:center;margin-top:14px}
 /* baner „zamówienie czeka za tym krokiem" przy wejściu z cennika (?buy=) */
@@ -1754,3 +1772,14 @@ body.imp-on .cookie-note{bottom:calc(12px + 42px + env(safe-area-inset-bottom))}
   /* baner cookies stoi nad paskiem zakładek — w podglądzie także nad żółtym */
   body.imp-on .cookie-note{bottom:calc(70px + 42px + env(safe-area-inset-bottom))}
 }
+/* Settings: zmiana e-maila (dwa kroki pod polem adresu) */
+.em-row{display:flex;gap:8px;align-items:stretch}
+.em-row .inp{flex:1;min-width:0}
+.em-row .btn-o{flex:none}
+.em-step{display:flex;flex-direction:column;gap:10px;margin-top:10px;padding:14px;border:1px solid var(--line);
+  border-radius:12px;background:var(--bg)}
+.em-hint{font-size:12.5px;line-height:1.5;margin:0}
+.em-btns{display:flex;gap:8px;flex-wrap:wrap}
+.em-code{font-size:22px;letter-spacing:.4em;text-align:center;font-variant-numeric:tabular-nums}
+.em-step.a-in{animation:a-in .32s cubic-bezier(.22,1,.36,1) both}
+@media (prefers-reduced-motion:reduce){.em-step.a-in{animation:none}}
