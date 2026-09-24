@@ -22,6 +22,7 @@ z nazwą kanału, nie bota, więc z zewnątrz wygląda jak wpis właściciela.
 """
 from __future__ import annotations
 
+import html
 import json
 import re
 import secrets
@@ -32,6 +33,57 @@ import urllib.request
 from .config import get_settings
 
 settings = get_settings()
+
+
+# Znacznik HTML albo encja — rzeczy, których Telegram nie liczy do limitu.
+_TOKEN_HTML_RX = re.compile(r"<[^>]*>|&(?:#\d+|#x[0-9a-fA-F]+|\w+);")
+_NAZWA_ZNACZNIKA_RX = re.compile(r"^<\s*(/?)\s*([a-zA-Z0-9-]+)")
+
+
+def przytnij_html(tekst: str, limit: int) -> str:
+    """Tekst w `parse_mode=HTML` skrócony do `limit` WIDOCZNYCH znaków.
+
+    Telegram liczy 1024/4096 po sparsowaniu, a `tekst[:1024]` liczył surowy
+    HTML. Post z archiwum (997 widocznych znaków) po dołożeniu linków CTA miał
+    1480 znaków HTML-a, cięcie wypadło w środku `<a href="…">` i Telegram
+    odrzucił całość: „Can't find end tag corresponding to start tag a".
+    Mieszczący się tekst wychodzi bez zmian; za długi jest cięty między
+    znakami (nigdy w znaczniku ani encji), a otwarte znaczniki domykane.
+    """
+    tekst = tekst or ""
+    if len(html.unescape(_TOKEN_HTML_RX.sub(lambda m: "" if m.group(0).startswith("<")
+                                            else m.group(0), tekst))) <= limit:
+        return tekst
+    wynik, otwarte, zostalo, poz = [], [], limit, 0
+    for m in _TOKEN_HTML_RX.finditer(tekst):
+        zwykly = tekst[poz:m.start()]
+        if len(zwykly) >= zostalo:
+            wynik.append(zwykly[:zostalo])
+            zostalo = 0
+            break
+        wynik.append(zwykly)
+        zostalo -= len(zwykly)
+        token = m.group(0)
+        if token.startswith("<"):
+            nazwa = _NAZWA_ZNACZNIKA_RX.match(token)
+            if nazwa:
+                if nazwa.group(1):
+                    if nazwa.group(2).lower() in otwarte:
+                        otwarte.reverse()
+                        otwarte.remove(nazwa.group(2).lower())
+                        otwarte.reverse()
+                elif not token.endswith("/>"):
+                    otwarte.append(nazwa.group(2).lower())
+            wynik.append(token)
+        else:
+            if zostalo < 1:
+                break
+            wynik.append(token)
+            zostalo -= 1
+        poz = m.end()
+    else:
+        wynik.append(tekst[poz:poz + zostalo])
+    return "".join(wynik) + "".join(f"</{n}>" for n in reversed(otwarte))
 
 API = "https://api.telegram.org"
 TIMEOUT_SEK = 20
@@ -162,7 +214,7 @@ def send_photo_json(png: bytes, caption: str, *, transport=None) -> tuple[bool, 
     if not is_enabled():
         return False, "no bot token or channel", {}
     return _strzal_json("sendPhoto",
-                        {"chat_id": settings.telegram_chat_id, "caption": caption[:1024],
+                        {"chat_id": settings.telegram_chat_id, "caption": przytnij_html(caption, 1024),
                          "parse_mode": "HTML"},
                         ("photo", "certificate.png", png), transport)
 
@@ -197,7 +249,7 @@ def send_content(chat_id: str, text: str, *, png: bytes | None = None,
         # `supports_streaming` pozwala odtwarzać przed pobraniem całości.
         return _strzal_json("sendVideo",
                             {"chat_id": str(chat_id), "video": video_url,
-                             "caption": text[:1024], "parse_mode": "HTML",
+                             "caption": przytnij_html(text, 1024), "parse_mode": "HTML",
                              "supports_streaming": "true"},
                             None, transport, token=token)
     if photo_url:
@@ -206,15 +258,15 @@ def send_content(chat_id: str, text: str, *, png: bytes | None = None,
         # wystarczy adres, pod którym Telegram już to zdjęcie trzyma.
         return _strzal_json("sendPhoto",
                             {"chat_id": str(chat_id), "photo": photo_url,
-                             "caption": text[:1024], "parse_mode": "HTML"},
+                             "caption": przytnij_html(text, 1024), "parse_mode": "HTML"},
                             None, transport, token=token)
     if png:
         return _strzal_json("sendPhoto",
-                            {"chat_id": str(chat_id), "caption": text[:1024],
+                            {"chat_id": str(chat_id), "caption": przytnij_html(text, 1024),
                              "parse_mode": "HTML"},
                             ("photo", "post.png", png), transport, token=token)
     return _strzal_json("sendMessage",
-                        {"chat_id": str(chat_id), "text": text[:4096],
+                        {"chat_id": str(chat_id), "text": przytnij_html(text, 4096),
                          "parse_mode": "HTML", "disable_web_page_preview": "true"},
                         None, transport, token=token)
 
@@ -255,10 +307,10 @@ def edit_content(chat_id: str, message_id: int, text: str, *, kind: str = "text"
         return False, "no bot token, chat or message"
     if kind in ("photo", "video"):
         pola = {"chat_id": str(chat_id), "message_id": str(message_id),
-                "caption": text[:1024], "parse_mode": "HTML"}
+                "caption": przytnij_html(text, 1024), "parse_mode": "HTML"}
         return _strzal("editMessageCaption", pola, None, transport, token)
     pola = {"chat_id": str(chat_id), "message_id": str(message_id),
-            "text": text[:4096], "parse_mode": "HTML",
+            "text": przytnij_html(text, 4096), "parse_mode": "HTML",
             "disable_web_page_preview": "true"}
     return _strzal("editMessageText", pola, None, transport, token)
 
@@ -418,7 +470,7 @@ def send_message_json(text: str, *, transport=None) -> tuple[bool, str, dict]:
     if not is_enabled():
         return False, "no bot token or channel", {}
     return _strzal_json("sendMessage",
-                        {"chat_id": settings.telegram_chat_id, "text": text[:4096],
+                        {"chat_id": settings.telegram_chat_id, "text": przytnij_html(text, 4096),
                          "parse_mode": "HTML", "disable_web_page_preview": "false"},
                         None, transport)
 
@@ -432,7 +484,7 @@ def send_message(text: str, *, transport=None) -> tuple[bool, str]:
     if not is_enabled():
         return False, "no bot token or channel"
     return _strzal("sendMessage",
-                   {"chat_id": settings.telegram_chat_id, "text": text[:4096],
+                   {"chat_id": settings.telegram_chat_id, "text": przytnij_html(text, 4096),
                     "parse_mode": "HTML", "disable_web_page_preview": "false"},
                    None, transport)
 
@@ -624,7 +676,7 @@ def send_lead_alert(lead_id: int, text: str, *,
         return False, "no bot token or leads chat", None
     poszlo, powod, wynik = _strzal_json(
         "sendMessage",
-        {"chat_id": czat, "text": text[:4096],
+        {"chat_id": czat, "text": przytnij_html(text, 4096),
          "parse_mode": "HTML", "disable_web_page_preview": "true",
          "reply_markup": json.dumps(keyboard or lead_keyboard(lead_id))},
         None, transport, token=token)
@@ -644,7 +696,7 @@ def send_lead_message(text: str, *, chat_id: str | None = None,
     if not mozna:
         return False, "no bot token or leads chat"
     return _strzal("sendMessage",
-                   {"chat_id": czat, "text": text[:4096],
+                   {"chat_id": czat, "text": przytnij_html(text, 4096),
                     "parse_mode": "HTML", "disable_web_page_preview": "true"},
                    None, transport, token)
 
@@ -672,7 +724,7 @@ def edit_lead_message(chat_id: str, message_id: int, text: str,
     przyciski znikają; to zostawione dla wiadomości, które mają się domknąć.
     """
     pola = {"chat_id": chat_id, "message_id": str(message_id),
-            "text": text[:4096], "parse_mode": "HTML",
+            "text": przytnij_html(text, 4096), "parse_mode": "HTML",
             "disable_web_page_preview": "true"}
     if keyboard is not None:
         pola["reply_markup"] = json.dumps(keyboard)
