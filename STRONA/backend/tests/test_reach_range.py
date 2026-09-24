@@ -57,8 +57,17 @@ def test_kanal_z_wlasnym_zakresem_i_boost_dokladny():
     try:
         _wyczysc(s)
         reach.zapisz_ustawienia(s, enabled=True, qty_reactions=30, qty_views=400)
-        reach.zapisz_kanaly(s, [{"username": "kanal_zakres", "on": True, "qty_reactions": 10,
-                                 "qty_reactions_max": 15, "qty_views": 100, "qty_views_max": 180}])
+        reach.zapisz_kanaly(s, [{"username": "kanal_zakres", "on": True, "qty_mode": "range",
+                                 "qty_reactions": 10, "qty_reactions_max": 15,
+                                 "qty_views": 100, "qty_views_max": 180}])
+        # ten sam kanał w trybie Fixed: górny koniec się nie liczy
+        reach.zapisz_kanaly(s, [{"username": "kanal_staly", "on": True, "qty_mode": "fixed",
+                                 "qty_reactions": 10, "qty_reactions_max": 15}])
+        st = reach.ilosci(s, "kanal_staly")
+        assert st["qty_reactions"] == st["qty_reactions_max"] == 10
+        reach.zapisz_kanaly(s, [{"username": "kanal_zakres", "on": True, "qty_mode": "range",
+                                 "qty_reactions": 10, "qty_reactions_max": 15,
+                                 "qty_views": 100, "qty_views_max": 180}])
         z = reach.ilosci(s, "kanal_zakres")
         assert (z["qty_reactions"], z["qty_reactions_max"], z["qty_views"], z["qty_views_max"]) \
             == (10, 15, 100, 180)
@@ -106,6 +115,7 @@ def test_walidacja_zakresu_i_panel():
     try:
         import pytest
         with pytest.raises(ValueError):
-            reach.zapisz_kanaly(s, [{"username": "kanal_zly", "qty_views": 300, "qty_views_max": 100}])
+            reach.zapisz_kanaly(s, [{"username": "kanal_zly", "qty_mode": "range",
+                                     "qty_views": 300, "qty_views_max": 100}])
     finally:
         s.close()

@@ -627,3 +627,14 @@ html,body{overscroll-behavior-y:none}
 .rc-to{flex:none;font-size:12px;color:var(--dim)}
 .rc-qty[data-mode=fixed] .rc-to,.rc-qty[data-mode=fixed] #rc-qr2,.rc-qty[data-mode=fixed] #rc-qv2,
 .rc-qty[data-mode=fixed] .rc-range-hint{display:none}
+/* ten sam przełącznik przy każdym kanale: Fixed = dwa pola obok siebie,
+   Range = „od to do" dla reakcji i dla wyświetleń, każde w swoim wierszu */
+.rc-ch{width:100%;padding-left:26px;display:flex;flex-direction:column;gap:8px}
+.rc-ch-seg{align-self:flex-start}
+.rc-ch-seg button{padding:4px 12px;font-size:12px;min-height:0}
+.rc-ch-q{display:flex;gap:8px}
+.rc-ch-q .rc-pair{flex:1 1 0;min-width:0}
+.rc-ch-q .inp{font-size:12px}
+.rc-lbl{flex:0 0 66px;font-size:12px;color:var(--dim)}
+.rc-ch[data-mode=fixed] .rc-to,.rc-ch[data-mode=fixed] .rc-max,.rc-ch[data-mode=fixed] .rc-lbl{display:none}
+.rc-ch[data-mode=range] .rc-ch-q{flex-direction:column}

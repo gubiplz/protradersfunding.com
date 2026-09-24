@@ -4781,15 +4781,22 @@ function reachChannelsHtml(rc){
       </label>
       ${stan}
       ${k.payout?'':`<button class="act-btn" title="Remove" onclick="reachDropChannel('${jsq(k.username)}')">&times;</button>`}
-      <div style="display:flex;gap:8px;width:100%;padding-left:26px">
-        <input id="rc-qr-${i}" class="inp" style="flex:1;min-width:0;font-size:12px"
-               title="A number, or a range like 20-40 (random per post). Empty = as set above."
-               placeholder="reactions — ${rcZakres(rc.qty_reactions,rc.qty_reactions_max)}"
-               value="${rcZakres(k.qty_reactions,k.qty_reactions_max)}" onchange="reachToggleChannel()">
-        <input id="rc-qv-${i}" class="inp" style="flex:1;min-width:0;font-size:12px"
-               title="A number, or a range like 300-500 (random per post). Empty = as set above."
-               placeholder="views — ${rcZakres(rc.qty_views,rc.qty_views_max)}"
-               value="${rcZakres(k.qty_views,k.qty_views_max)}" onchange="reachToggleChannel()">
+      <div class="rc-ch" id="rc-ch-${i}" data-mode="${k.qty_mode==='range'?'range':'fixed'}">
+        <div class="seg rc-ch-seg" role="radiogroup" aria-label="Amount per post on this channel">
+          ${[['fixed','Fixed'],['range','Range']].map(([m,l])=>`<button type="button" data-all="1" data-m="${m}"
+            class="${(k.qty_mode==='range'?'range':'fixed')===m?'on':''}" onclick="reachChannelMode(${i},'${m}')">${l}</button>`).join('')}</div>
+        <div class="rc-ch-q">
+          <div class="rc-pair"><span class="rc-lbl">Reactions</span><input id="rc-qr-${i}" class="inp" type="number" min="0" step="1"
+              placeholder="reactions — ${rcZakres(rc.qty_reactions,rc.qty_reactions_max)}"
+              value="${k.qty_reactions??''}" onchange="reachToggleChannel()" aria-label="Reactions (from)"
+            ><span class="rc-to">to</span><input id="rc-qr2-${i}" class="inp rc-max" type="number" min="0" step="1"
+              placeholder="to" value="${k.qty_reactions_max??''}" onchange="reachToggleChannel()" aria-label="Reactions (to)"></div>
+          <div class="rc-pair"><span class="rc-lbl">Views</span><input id="rc-qv-${i}" class="inp" type="number" min="0" step="1"
+              placeholder="views — ${rcZakres(rc.qty_views,rc.qty_views_max)}"
+              value="${k.qty_views??''}" onchange="reachToggleChannel()" aria-label="Views (from)"
+            ><span class="rc-to">to</span><input id="rc-qv2-${i}" class="inp rc-max" type="number" min="0" step="1"
+              placeholder="to" value="${k.qty_views_max??''}" onchange="reachToggleChannel()" aria-label="Views (to)"></div>
+        </div>
       </div>
     </div>`;
   };
@@ -4853,18 +4860,25 @@ function reachCurrentChannels(){
   const lista=(window._reach&&window._reach.channels)||[];
   /* Puste pole zostaje NULL-em, nie zerem: zero znaczy „nie zamawiaj tego
      wcale", a puste „jak globalnie" — panel nie moze tych stanow zlepic.
-     „20-40" to zakres: kazdy post dostaje losowa liczbe z tego przedzialu. */
-  const ile=id=>{const el=$(id);if(!el)return [null,null];const v=(el.value||'').trim();
-    if(v==='')return [null,null];
-    const m=v.match(/^(\d+)\s*(?:[-–—]\s*(\d+))?$/);
-    if(!m){toast(`"${v}" is not a number or a range like 20-40.`,'err');return [NaN,null]}
-    return [Number(m[1]),m[2]!=null?Number(m[2]):null]};
+     Tryb Range przy kanale: kazdy post dostaje losowa liczbe z „od–do". */
+  const ile=id=>{const el=$(id);if(!el)return null;const v=(el.value||'').trim();
+    return v===''?null:Number(v)};
   return lista.map((k,i)=>{
     const cb=document.querySelector(`[data-rcch="${i}"]`);
-    const [qr,qr2]=ile(`rc-qr-${i}`),[qv,qv2]=ile(`rc-qv-${i}`);
+    const box=$(`rc-ch-${i}`),zakres=(box?box.dataset.mode:k.qty_mode)==='range';
     return {username:k.username,label:k.label,on:cb?cb.checked:k.on,
-            qty_reactions:qr,qty_reactions_max:qr2,qty_views:qv,qty_views_max:qv2};
+            qty_mode:zakres?'range':'fixed',
+            qty_reactions:ile(`rc-qr-${i}`),qty_views:ile(`rc-qv-${i}`),
+            qty_reactions_max:zakres?ile(`rc-qr2-${i}`):null,qty_views_max:zakres?ile(`rc-qv2-${i}`):null};
   });
+}
+/* Przełącznik Fixed/Range przy kanale: pokazuje pola „to" i od razu zapisuje
+   tryb (jak każda zmiana na liście kanałów). */
+function reachChannelMode(i,m){
+  const box=$(`rc-ch-${i}`);if(!box)return;
+  box.dataset.mode=m;
+  box.querySelectorAll('.rc-ch-seg button').forEach(b=>b.classList.toggle('on',b.dataset.m===m));
+  reachToggleChannel();
 }
 async function reachToggleChannel(){
   /* Zapis od razu po kliknieciu: gdyby czekal na „Save settings", odznaczenie

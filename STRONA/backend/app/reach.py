@@ -260,6 +260,12 @@ def kanaly(session) -> list[dict]:
                     "qty_views": _ilosc_lub_nic(poz.get("qty_views")),
                     "qty_reactions_max": _ilosc_lub_nic(poz.get("qty_reactions_max")),
                     "qty_views_max": _ilosc_lub_nic(poz.get("qty_views_max")),
+                    # Tryb kanału jawnie (przełącznik przy kanale); stare wpisy
+                    # bez trybu: zakres, jeśli mają górny koniec.
+                    "qty_mode": (poz.get("qty_mode") if poz.get("qty_mode") in ("fixed", "range")
+                                 else "range" if (poz.get("qty_reactions_max") is not None
+                                                  or poz.get("qty_views_max") is not None)
+                                 else "fixed"),
                     "payout": False})
 
     info = telegram.chat_info(settings.telegram_chat_id) if telegram.is_enabled() else {}
@@ -273,7 +279,7 @@ def kanaly(session) -> list[dict]:
             out.insert(0, {"username": nazwa, "label": info.get("title") or "Payouts",
                            "on": True, "qty_reactions": None, "qty_views": None,
                            "qty_reactions_max": None, "qty_views_max": None,
-                           "payout": True})
+                           "qty_mode": "fixed", "payout": True})
     return out
 
 
@@ -288,9 +294,11 @@ def zapisz_kanaly(session, lista: list[dict]) -> list[dict]:
             raise ValueError(f"'{nazwa}' is not a valid public channel name")
         if any(k["username"] == nazwa for k in czyste):
             continue
+        zakres = (poz or {}).get("qty_mode") == "range"
         wpis = {"username": nazwa,
                 "label": str((poz or {}).get("label") or "")[:40],
-                "on": bool((poz or {}).get("on", True))}
+                "on": bool((poz or {}).get("on", True)),
+                "qty_mode": "range" if zakres else "fixed"}
         # Puste pole w panelu = „jak globalnie", nie „zero". Zero jest legalną
         # wartością (kanał bez reakcji), więc te dwa stany muszą się różnić.
         for klucz in ("qty_reactions", "qty_views"):
@@ -302,9 +310,9 @@ def zapisz_kanaly(session, lista: list[dict]) -> list[dict]:
                 raise ValueError(f"'{klucz}' for @{nazwa} must be between "
                                  f"{dol:g} and {gora:g}")
             wpis[klucz] = ile
-            # Kanał może mieć własny ZAKRES („20-40" w panelu): górny koniec
-            # osobno, pusty = stała liczba dla tego kanału.
-            maks = _ilosc_lub_nic((poz or {}).get(klucz + "_max"))
+            # Kanał w trybie Range ma własny ZAKRES: górny koniec osobno,
+            # pusty = stała liczba. W trybie Fixed górny koniec się nie liczy.
+            maks = _ilosc_lub_nic((poz or {}).get(klucz + "_max")) if zakres else None
             if maks is not None and maks != ile:
                 if not (ile <= maks <= gora):
                     raise ValueError(f"'{klucz}' range for @{nazwa} must go up, "
@@ -341,7 +349,8 @@ def ilosci(session, username: str | None = None, *,
             for klucz in ("qty_reactions", "qty_views"):
                 if kanal.get(klucz) is not None:
                     out[klucz] = kanal[klucz]
-                    out[klucz + "_max"] = max(kanal[klucz], kanal.get(klucz + "_max") or kanal[klucz])
+                    maks = kanal.get(klucz + "_max") if kanal.get("qty_mode") == "range" else None
+                    out[klucz + "_max"] = max(kanal[klucz], maks or kanal[klucz])
                     out["from"] = "channel"
     for klucz, jawne in (("qty_reactions", qty_reactions), ("qty_views", qty_views)):
         if jawne is None:

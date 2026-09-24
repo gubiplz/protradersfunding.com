@@ -6534,7 +6534,8 @@ class ReachChannelIn(BaseModel):
     # None = „jak globalnie". Zero jest osobną, legalną wartością.
     qty_reactions: int | None = None
     qty_views: int | None = None
-    # Górny koniec zakresu kanału („20-40" w panelu); None = stała liczba.
+    # Przełącznik przy kanale: stała liczba albo zakres [qty_x, qty_x_max].
+    qty_mode: Literal["fixed", "range"] = "fixed"
     qty_reactions_max: int | None = None
     qty_views_max: int | None = None
 
