@@ -638,6 +638,15 @@ html,body{overscroll-behavior-y:none}
 .rc-lbl{flex:0 0 66px;font-size:12px;color:var(--dim)}
 .rc-ch[data-mode=fixed] .rc-to,.rc-ch[data-mode=fixed] .rc-max,.rc-ch[data-mode=fixed] .rc-lbl{display:none}
 .rc-ch[data-mode=range] .rc-ch-q{flex-direction:column}
+/* dziennik klienta i karta Client: wiersz „Message" nad reszta akcji */
+.jrn-msg{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.jrn-msg>.muted{font-size:12px;margin-right:2px}
+/* Payouts: adres portfela skrocony, pelny po „show" */
+.pay-addr{font-size:var(--fs-cap);max-width:260px;overflow-wrap:anywhere;line-height:1.5}
+.pay-addr .pa-full{word-break:break-all}
+.pay-addr .pa-btn{background:none;border:0;padding:2px 4px;margin-left:2px;font:inherit;font-family:var(--sans,inherit);
+  font-size:11.5px;font-weight:600;color:var(--acc);cursor:pointer;min-height:0}
+.pay-addr .pa-btn[hidden],.pay-addr [hidden]{display:none}
 /* stan cichego zapisu listy kanałów Reach BOT (obok nagłówka) */
 .rc-st{margin-left:8px;font-weight:500;font-size:11.5px;color:var(--muted)}
 .rc-st.ok{color:var(--green)}
