@@ -49,10 +49,23 @@ def test_kroki_i_etykieta_sekcji():
 
 def test_stopka_pod_kartka_z_domena_nadawcy_bez_telegramu():
     kod = lead_mail._html_z_tekstu("Hi\n\nhttps://example.test/portal\n\n--\nForex Passing\nWhy you got this.")
-    assert "desk-probe.test" in kod and "contact@desk-probe.test" in kod
-    assert kod.count("<a ") == 1                    # jedno wyjście: sam przycisk
+    # jak landing: szare linki bez podkreślenia (inaczej klient pocztowy sam
+    # robi z nich niebieskie), obok przycisku nic więcej klikalnego
+    assert 'href="https://desk-probe.test"' in kod and 'href="mailto:contact@desk-probe.test"' in kod
+    assert kod.count("<a ") == 3 and kod.count("text-decoration:none") >= 2
     assert "Trading carries risk" in kod and "Why you got this." in kod
     assert "Telegram" not in kod                    # link do portalu nie obiecuje Telegrama
+
+
+def test_stopka_podaje_contact_a_nie_noreply(monkeypatch):
+    """2026-09-24: nadawca „noreply@" lądował w stopce jako adres do pisania."""
+    monkeypatch.setattr(lead_mail.settings, "lead_mail_from", "Forex Passing <noreply@marka-probe.test>")
+    monkeypatch.setattr(lead_mail.settings, "lead_mail_contact", "")
+    kod = lead_mail._html_z_tekstu("Hi\n\nText.")
+    assert "contact@marka-probe.test" in kod and "noreply@" not in kod
+    assert lead_mail._odpowiedz_do() == "Forex Passing <contact@marka-probe.test>"
+    monkeypatch.setattr(lead_mail.settings, "lead_mail_contact", "hello@marka-probe.test")
+    assert "hello@marka-probe.test" in lead_mail._html_z_tekstu("Hi\n\nText.")
 
 
 def test_pojedynczy_enter_zostaje_lamaniem_i_html_jest_escapowany():

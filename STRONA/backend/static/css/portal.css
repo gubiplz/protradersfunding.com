@@ -1729,3 +1729,28 @@ html[data-theme=dark] .inv-print{border:1px solid var(--line2)}
 .offline-bar{padding:calc(6px + env(safe-area-inset-top)) 14px 6px;text-align:center;
   font-size:12.5px;font-weight:700;color:var(--gold);
   background:var(--gold-bg);border-bottom:1px solid var(--gold-line)}
+
+/* Żółty pasek podglądu admina („View as client"). Dawniej inline
+   position:fixed;bottom:0 — na telefonie leżał DOKŁADNIE na dolnej nawigacji
+   i zasłaniał ją. Na desktopie zostaje na dole ekranu; tam, gdzie jest dolna
+   nawigacja, stoi tuż NAD nią, w jednej linii, a treść i toasty odsuwają się
+   o jego wysokość. */
+#imp-bar{position:fixed;left:0;right:0;bottom:0;z-index:9999;display:flex;align-items:center;
+  justify-content:center;gap:12px;padding:8px 14px;background:#7a5d00;color:#fff;font-size:13px}
+#imp-bar .imp-txt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#imp-bar button{flex:none;background:none;border:1px solid #fff;color:#fff;border-radius:8px;
+  padding:4px 12px;font:inherit;font-weight:600;cursor:pointer}
+body.imp-on .content{padding-bottom:100px}
+body.imp-on .cookie-note{bottom:calc(12px + 42px + env(safe-area-inset-bottom))}
+/* dolny pasek zakładek portalu (.tabbar, ≤700 px): 58 px + safe-area */
+@media(max-width:700px){
+  #imp-bar{bottom:calc(58px + env(safe-area-inset-bottom));padding:6px 12px;font-size:12px;gap:10px;
+    justify-content:space-between;box-shadow:0 -1px 0 rgba(0,0,0,.12)}
+  #imp-bar .imp-real{display:none}
+  #imp-bar button{padding:4px 10px;min-height:0}
+  body.imp-on .content{padding-bottom:calc(74px + 38px + env(safe-area-inset-bottom))}
+  body.imp-on #toasts{bottom:calc(70px + 38px + env(safe-area-inset-bottom))}
+  body.kb-open #imp-bar{display:none}
+  /* baner cookies stoi nad paskiem zakładek — w podglądzie także nad żółtym */
+  body.imp-on .cookie-note{bottom:calc(70px + 42px + env(safe-area-inset-bottom))}
+}

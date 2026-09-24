@@ -126,7 +126,8 @@ def test_klucz_resend_kieruje_lead_mail_do_resenda(resend):
     # zanim żądanie dotrze do API — pierwszy mail z produkcji padł na tym.
     assert naglowki.get("User-agent") == lead_mail.RESEND_UA
     assert "python-urllib" not in naglowki.get("User-agent", "").lower()
-    assert dane["from"] == NADAWCA and dane["reply_to"] == NADAWCA
+    # odpowiedzi na adres kontaktowy marki (contact@ domeny nadawcy), nie na nadawcę
+    assert dane["from"] == NADAWCA and dane["reply_to"] == "Forex Passing <contact@partner.test>"
     assert dane["to"] == ["anna@test.pl"] and dane["subject"] == TEMAT
     assert dane["text"].strip() == TEKST
     assert "Open the Link" in dane["html"]          # link spoza Telegrama

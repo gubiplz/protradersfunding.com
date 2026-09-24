@@ -233,6 +233,26 @@ def _nadawca() -> str:
     return formataddr((nazwa or MARKA, adr)) if adr else settings.lead_mail_from
 
 
+def _kontakt() -> str:
+    """Adres, na który lead ma PISAĆ: `LEAD_MAIL_CONTACT` albo „contact@"
+    domeny nadawcy. Nie sam nadawca — ten bywa „noreply@", a wtedy stopka
+    podawała leadowi skrzynkę bez odbiorcy, a Reply-To kierował tam każdą
+    odpowiedź. Tak samo jak maile landingu (`api/_lib/emails.js`: CONTACT)."""
+    if settings.lead_mail_contact:
+        return parseaddr(settings.lead_mail_contact)[1] or settings.lead_mail_contact
+    adr = parseaddr(settings.lead_mail_from or "")[1]
+    return f"contact@{adr.rpartition('@')[2]}" if "@" in adr else ""
+
+
+def _odpowiedz_do() -> str:
+    """Reply-To z nazwą marki na adres kontaktowy; bez niego — nadawca."""
+    kontakt = _kontakt()
+    if not kontakt:
+        return _nadawca()
+    nazwa = parseaddr(settings.lead_mail_from or "")[0]
+    return formataddr((nazwa or MARKA, kontakt))
+
+
 def _naglowek() -> str:
     """Logo marki wyśrodkowane nad treścią albo sama nazwa, gdy go nie ma.
 
@@ -332,15 +352,24 @@ def _akapit(tekst: str, *, kolor: str, rozmiar: int = 16, srodek: bool = False,
 
 
 def _stopka_zewnetrzna() -> str:
-    """Pod kartką, jak na landingu: marka, domena i adres z NADAWCY (z
-    ustawień, nie z kodu — domeny partnera w kodzie być nie może), niżej
-    zdanie o ryzyku. Bez słowa o Telegramie: mail z linkiem do portalu nie
-    ma prawa go obiecywać nawet w stopce."""
+    """Pod kartką, 1:1 jak maile landingu: „marka · domena · contact@",
+    domena i adres jako szare linki bez podkreślenia, niżej zdanie o ryzyku.
+    Domena i adres z USTAWIEŃ (nadawca / `LEAD_MAIL_CONTACT`), nie z kodu —
+    domeny partnera w kodzie być nie może. Bez słowa o Telegramie: mail z
+    linkiem do portalu nie ma prawa go obiecywać nawet w stopce.
+
+    Linki, a nie zwykły tekst, bo Gmail i Poczta w iOS i tak zamieniają adres
+    i domenę w tekście na NIEBIESKIE podkreślone linki — wtedy stopka nie
+    wyglądała jak ta z landingu, tylko krzyczała bardziej niż przycisk."""
     adr = parseaddr(settings.lead_mail_from or "")[1]
     domena = adr.rpartition("@")[2] if "@" in adr else ""
-    # Zwykły tekst, nie linki: mail ma JEDNO wyjście (przycisk), a drugi
-    # klikalny element zawsze zabiera kliknięcia pierwszemu.
-    czesci = [MARKA] + [escape(x) for x in (domena, adr) if x]
+    kontakt = _kontakt()
+    link = f'color:{_FAINT};text-decoration:none'
+    czesci = [MARKA]
+    if domena:
+        czesci.append(f'<a href="https://{escape(domena)}" style="{link}">{escape(domena)}</a>')
+    if kontakt:
+        czesci.append(f'<a href="mailto:{escape(kontakt)}" style="{link}">{escape(kontakt)}</a>')
     return (f'<table role="presentation" width="580" cellpadding="0" cellspacing="0" '
             f'style="width:580px;max-width:100%;font-family:{_FONT}">'
             f'<tr><td align="center" style="padding:22px 24px 8px;color:{_FAINT};font-size:12px;'
@@ -520,7 +549,7 @@ def wyslij(email: str | None, temat: str, tekst: str, *,
     # Odpowiedzi mają wracać tam, skąd mail wyszedł. Domyślny Reply-To wskazałby
     # skrzynkę firmy, o której lead nie słyszał — i pierwsza odpowiedź w tej
     # relacji zdradziłaby to, czego reszta systemu pilnuje.
-    msg["Reply-To"] = _nadawca()
+    msg["Reply-To"] = _odpowiedz_do()
     msg.set_content(tekst)
     # HTML jako ALTERNATYWA, nigdy zamiast. Klient z wyłączoną grafiką, czytnik
     # ekranowy i filtr antyspamowy, który punktuje mail bez wersji tekstowej,

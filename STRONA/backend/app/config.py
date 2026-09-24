@@ -343,6 +343,11 @@ class Settings:
     # powodu co `SMS_TELEGRAM_URL` — repo jest publiczne. Puste = nagłówek
     # pisany tekstem, mail wychodzi normalnie.
     lead_mail_logo_url: str = os.getenv("LEAD_MAIL_LOGO_URL", "").strip()
+    # Adres do PISANIA pod marką landingu (stopka maila i Reply-To). Nadawca
+    # bywa skrzynką „noreply@", na którą odpowiedź leada przepada, a landing
+    # od zawsze podaje „contact@". Puste = „contact@" z domeny nadawcy — domeny
+    # marki w kodzie być nie może (repo jest publiczne).
+    lead_mail_contact: str = os.getenv("LEAD_MAIL_CONTACT", "").strip()
     # Dokąd idzie ODRZUCONY. Kanał do subskrypcji, nie adres do pisania — i to
     # jest CAŁA różnica wobec `SMS_TELEGRAM_URL`: tam się pisze, tu się dołącza.
     # Pomylenie tych dwóch adresów kosztuje najwięcej po cichu: zakwalifikowany
