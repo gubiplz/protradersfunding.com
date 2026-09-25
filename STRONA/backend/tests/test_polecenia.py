@@ -1,4 +1,4 @@
-"""Program poleceń partnera: lead z `ref` → „pending", pierwsza wypłata → „confirmed".
+"""Program poleceń partnera: lead z `ref` → „pending", zakup → „confirmed".
 
 Dotąd partner dopisywał poleconych ręcznie, a „confirmed" ktoś przestawiał
 w bazie z ręki. Teraz robi to backend, bo tylko on zna oba fakty: `ref` przychodzi
@@ -15,19 +15,23 @@ os.environ.setdefault("AUTO_SEED", "false")
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import auth, polecenia  # noqa: E402
+from app import auth, catalog, notify, polecenia, telegram  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Account, Lead, Trader  # noqa: E402
+from app.models import Account, Lead, Order, Trader  # noqa: E402
 
 init_db()
+_s = SessionLocal(); catalog.seed_products(_s); _s.close()
 client = TestClient(app)
 ADMIN = {"X-Admin-Token": get_settings().admin_token}
 TOKEN_LANDINGU = "sekret-landingu-polecenia"
 ADRES = "https://baza-partnera.example/rest/v1/rpc/sync_referral"
 KLUCZ = "klucz-testowy"
 LICZNIK = iter(range(10_000))
+NUMERY = iter(range(500_000, 600_000))
+PARTNER = {"name": "Anna Partner", "email": "anna@partner.pl"}
+KTO = "Anna Partner · anna@partner.pl (anna-partner)"
 
 
 @pytest.fixture(autouse=True)
@@ -39,12 +43,31 @@ def wyslane(monkeypatch):
     monkeypatch.setattr(u, "referral_sync_key", KLUCZ, raising=False)
     lista: list[tuple[str, dict, str]] = []
 
-    def transport(url, body, key):
+    def transport(url, body, key, timeout=6):
+        if url.endswith("/referral_partner"):
+            # Do właściciela sluga — osobna funkcja pod tym samym /rpc/.
+            assert url == ADRES.replace("sync_referral", "referral_partner")
+            return 200, json.dumps(PARTNER if body["p_slug"] == "anna-partner" else None).encode()
         lista.append((url, body, key))
         return 200, json.dumps("confirmed" if body["p_paid"] else "pending").encode()
 
     monkeypatch.setattr(polecenia, "_post", transport)
     return lista
+
+
+@pytest.fixture(autouse=True)
+def kanal(monkeypatch):
+    """Karta, wiadomości na czat leadów i pushe — zamiast Telegrama i web pusha."""
+    zlapane: dict[str, list] = {"karta": [], "wiadomosc": [], "push": []}
+    monkeypatch.setattr(telegram, "send_lead_alert",
+                        lambda lead_id, tekst, **kw: (zlapane["karta"].append(tekst),
+                                                      (True, "", next(NUMERY)))[1])
+    monkeypatch.setattr(telegram, "send_lead_message",
+                        lambda tekst, **kw: (zlapane["wiadomosc"].append(tekst), (True, ""))[1])
+    monkeypatch.setattr(notify, "notify_admins",
+                        lambda event, title, body="", url="/admin", tag=None:
+                        zlapane["push"].append((title, body)))
+    return zlapane
 
 
 def _mail():
@@ -67,12 +90,16 @@ def _ref(email):
         s.close()
 
 
-def _funded(email):
+def _funded(email, plan=None):
+    """Funded trader o tym mailu; z `plan` także opłacone zamówienie na ten plan."""
     s = SessionLocal()
     tr = Trader(email=email, password_hash=auth.hash_password("haslo1234"),
                 full_name="Polecony", referral_code=auth.secrets.token_hex(3),
                 kyc_status="approved")
     s.add(tr); s.commit(); tid = tr.id
+    if plan:
+        s.add(Order(trader_id=tid, product_key=plan, amount_usd=549.0, status="paid"))
+        s.commit()
     kapital = 100_000.0
     acc = Account(login=f"8{tid:08d}"[:9], trader_id=tid, trader_name="Polecony",
                   product_key="2step-50k", initial_balance=kapital, steps=2,
@@ -165,3 +192,113 @@ def test_wyplata_tradera_bez_polecenia_nic_nie_wysyla(wyslane):
                     json={"amount": 300, "method": "bank", "reset_balance": False})
     assert r.status_code == 200, r.text
     assert wyslane == []
+
+
+def _cron():
+    r = client.post("/api/cron/lead-followups", headers=ADMIN)
+    assert r.status_code == 200, r.text
+
+
+def _o(zlapane, fraza):
+    return [t for t in zlapane if fraza in t]
+
+
+def test_karta_i_push_mowia_czyj_to_ref(kanal):
+    email = _mail()
+    _zgloszenie(email)
+    karta = kanal["karta"][-1]
+    assert f"🤝 <b>Polecenie</b> — partner: {KTO}" in karta
+    # Slug nie dubluje się już w „Source" — ma własną linijkę.
+    assert "<b>Source:</b> questionnaire\n" in karta + "\n"
+    tytul, tresc = kanal["push"][-1]
+    assert tytul.startswith("New lead") and tresc.endswith("🤝 ref: Anna Partner")
+    s = SessionLocal()
+    try:
+        assert s.query(Lead).filter(Lead.email == email).one().ref_partner == \
+            "Anna Partner · anna@partner.pl"
+    finally:
+        s.close()
+
+
+def test_lead_bez_ref_nie_ma_linijki_polecenia(kanal):
+    _zgloszenie(_mail(), ref=None)
+    assert "Polecenie" not in kanal["karta"][-1]
+    assert "ref:" not in kanal["push"][-1][1]
+
+
+def test_zakup_2step_potwierdza_i_konto_nalezy_sie_od_razu(wyslane, kanal):
+    email = _mail()
+    _zgloszenie(email)
+    wyslane.clear()
+    _funded(email, plan="2step-100k")
+    _cron()
+    assert wyslane == [(ADRES, {"p_slug": "anna-partner", "p_email": email,
+                                "p_account_size": "2-Step 100K", "p_paid": True}, KLUCZ)]
+    [tekst] = _o(kanal["wiadomosc"], email)
+    assert "Polecony kupił konto" in tekst and KTO in tekst
+    assert "należy się teraz <b>2-Step 100K</b>" in tekst
+    assert any("Referral bought" in t and "2-Step 100K now" in b for t, b in kanal["push"])
+    # Drugi przebieg nie powtarza ani alarmu, ani potwierdzenia.
+    wyslane.clear()
+    _cron()
+    assert wyslane == [] and len(_o(kanal["wiadomosc"], email)) == 1
+
+
+def test_instant_konto_dla_partnera_dopiero_po_pierwszej_wyplacie(wyslane, kanal):
+    email = _mail()
+    _zgloszenie(email)
+    aid, _ = _funded(email, plan="instant-100k")
+    _cron()
+    [tekst] = _o(kanal["wiadomosc"], email)
+    assert "<b>Instant 100K</b>, ale dopiero po PIERWSZEJ" in tekst
+    for _ in range(2):
+        r = client.post(f"/api/admin/accounts/{aid}/payout", headers=ADMIN,
+                        json={"amount": 300, "method": "bank", "reset_balance": False})
+        assert r.status_code == 200, r.text
+    wyplata = [t for t in _o(kanal["wiadomosc"], email) if "Pierwsza wypłata" in t]
+    assert len(wyplata) == 1  # druga wypłata nie wraca z tym samym
+    assert "Teraz wydaj partnerowi <b>Instant 100K</b>" in wyplata[0] and KTO in wyplata[0]
+
+
+def test_2step_wyplata_nie_wola_o_drugie_konto(kanal):
+    email = _mail()
+    _zgloszenie(email)
+    aid, _ = _funded(email, plan="2step-100k")
+    _cron()
+    client.post(f"/api/admin/accounts/{aid}/payout", headers=ADMIN,
+                json={"amount": 300, "method": "bank", "reset_balance": False})
+    assert not [t for t in _o(kanal["wiadomosc"], email) if "Pierwsza wypłata" in t]
+
+
+def test_slug_bez_wlasciciela_bez_alarmu_o_koncie(wyslane, kanal):
+    email = _mail()
+    _zgloszenie(email, ref="nikt-taki")
+    assert "partner: nikt-taki" in kanal["karta"][-1]
+    wyslane.clear()
+    _funded(email, plan="2step-100k")
+    _cron()
+    assert not [t for t in _o(kanal["wiadomosc"], email) if "Polecony kupił" in t]
+    assert wyslane == []
+    # Zwykłe „KUPIŁ" idzie dalej i też mówi, z jakiego linku przyszedł.
+    assert [t for t in _o(kanal["wiadomosc"], email) if "KUPIŁ" in t and "partner: nikt-taki" in t]
+
+
+def test_baza_partnera_padla_przy_zgloszeniu_cron_dopyta(wyslane, kanal, monkeypatch):
+    email = _mail()
+    dziala = polecenia._post
+
+    def bez_wlasciciela(url, body, key, timeout=6):
+        if url.endswith("/referral_partner"):
+            raise OSError("timeout")
+        return dziala(url, body, key, timeout)
+    monkeypatch.setattr(polecenia, "_post", bez_wlasciciela)
+    _zgloszenie(email)
+    assert "partner: anna-partner" in kanal["karta"][-1]  # sam slug, lead wszedł
+    _funded(email, plan="2step-100k")
+    _cron()
+    kupil = lambda: [t for t in _o(kanal["wiadomosc"], email) if "Polecony kupił" in t]  # noqa: E731
+    assert kupil() == []  # nie wiadomo czyj — bez wpisu, spróbuje znowu
+    monkeypatch.setattr(polecenia, "_post", dziala)
+    _cron()
+    [tekst] = kupil()
+    assert KTO in tekst
