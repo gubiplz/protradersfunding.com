@@ -3970,7 +3970,7 @@ def admin_approve_payout(req_id: int):
         notify.send("payout_approved", tr.email, {"name": tr.full_name or tr.email,
                     "login": acc.login, "trader_share": round(r.trader_share + fee_refund, 2),
                     "fee_refund": bool(fee_refund)})
-        polecenia.po_wyplacie(session, tr.email)
+        _polecenie_po_wyplacie(session, tr.email)
         return {"approved": req_id, "fee_refund": fee_refund,
                 "total_paid": round(r.trader_share + fee_refund, 2)}
     finally:
@@ -4103,7 +4103,7 @@ def admin_issue_payout(request: Request, account_id: int, payload: IssuePayoutIn
                         {"name": trader.full_name or trader.email, "login": acc.login,
                          "trader_share": share, "fee_refund": False,
                          "cert_url": f"{_public_base(request)}/payout/{p.cert_token}"})
-            polecenia.po_wyplacie(session, trader.email)
+            _polecenie_po_wyplacie(session, trader.email)
         return _payout_dict(p, acc)
     finally:
         session.close()
@@ -9457,6 +9457,11 @@ def _link_telegram(nick: str | None) -> str:
     return f'<a href="https://t.me/{uchwyt}">@{uchwyt}</a>'
 
 
+def _linia_polecenia(lead: Lead) -> str:
+    """Wspólna linijka „z czyjego linku" do każdej wiadomości o leadzie (HTML)."""
+    return f"🤝 <b>Polecenie</b> — partner: {html.escape(polecenia.opis(lead))}"
+
+
 def _tekst_alertu(lead: Lead, dane: dict) -> str:
     """Treść wiadomości na Telegram. WSZYSTKO od użytkownika przez html.escape:
     imię z formularza trafia do wiadomości z `parse_mode=HTML`, więc jeden
@@ -9515,6 +9520,10 @@ def _tekst_alertu(lead: Lead, dane: dict) -> str:
         # notatki dopisują się jedna pod drugą przez cały czas życia leada.
         ostatnia = lead.note.strip().split("\n")[-1]
         stan.append(f"📝 {e(ostatnia[:300])}")
+    # Polecenie na samej górze stanu: od niego zależy, komu należy się konto
+    # przy zakupie, więc ma być widać bez czytania ankiety.
+    if lead.ref:
+        stan.insert(0, _linia_polecenia(lead))
     if stan:
         linie += ["", *stan]
 
@@ -9524,7 +9533,7 @@ def _tekst_alertu(lead: Lead, dane: dict) -> str:
     wiersze = (("Name", e(lead.name or "")), ("Email", e(lead.email or "")),
                ("Telegram", _link_telegram(lead.telegram)),
                ("Phone", e(f"{lead.phone}{kraj}") if lead.phone else ""),
-               ("Source", e(" / ".join(x for x in (lead.source, lead.ref) if x))))
+               ("Source", e(lead.source or "")))
     linie += ["", *(f"<b>{k}:</b> {v}" for k, v in wiersze if v)]
 
     # Uzasadnienie oceny. Bez tego przy nazwisku stoi goła liczba, której nie ma
@@ -9631,6 +9640,7 @@ def _lead_json(lead: Lead, trader_id: int | None, paid_usd: float,
         "ip_country": lead.ip_country,
         "desk": pochodzenie.desk, "origin": pochodzenie.json(),
         "country": lead.country, "source": lead.source, "ref": lead.ref,
+        "ref_partner": lead.ref_partner,
         "outcome": lead.outcome, "tier": lead.tier, "score": lead.score,
         "status": lead.status, "note": lead.note, "owner": lead.owner,
         "lost_reason": lead.lost_reason,
@@ -9841,9 +9851,16 @@ def _lead_push(lead_id: int, title: str, body: str = "", *,
     # kolumnę przy zdarzeniu, które i tak zaraz pójdzie w świat przez push.
     session = SessionLocal()
     try:
-        source = session.query(Lead.source).filter(Lead.id == lead_id).scalar()
+        source, ref, ref_partner = (session.query(Lead.source, Lead.ref, Lead.ref_partner)
+                                    .filter(Lead.id == lead_id).one_or_none()
+                                    or (None, None, None))
     finally:
         session.close()
+    # Polecenie w KAŻDYM pushu o leadzie, tym samym jednym zapytaniem: na
+    # ekranie blokady nie ma karty, a to, czyj to lead, zmienia rozmowę.
+    if ref:
+        kto_polecil = (ref_partner or "").split(" · ")[0] or ref
+        body = f"{body} · 🤝 ref: {kto_polecil}" if body else f"🤝 ref: {kto_polecil}"
     if _desk_leada(source) == "free":
         # Osobne klucze preferencji, żeby wyciszenie jednego desku nie gasiło
         # drugiego: lead_new -> free_new, lead_action -> free_action itd.
@@ -9886,6 +9903,10 @@ def leads_ingest(payload: LeadIn,
     if "@" not in email:
         raise HTTPException(400, "Invalid email")
     ocena = payload.quality or {}
+    # Kto polecił — PRZED sesją, bo to zapytanie do bazy partnera, a sesja nie
+    # ma czekać na sieć. Tylko przy linku partnera, więc zwykły lead nic nie płaci.
+    slug = polecenia.czysty_slug(payload.ref)
+    wlasciciel = polecenia.wlasciciel(slug) if slug else None
 
     session = SessionLocal()
     try:
@@ -9901,7 +9922,9 @@ def leads_ingest(payload: LeadIn,
             # wprost, inna karta) kasowało `ref` i polecenie przepadało, zanim
             # ktokolwiek zdążył je potwierdzić. Nie-slug nie wchodzi wcale —
             # kolumna ma 40 znaków, a Postgres na dłuższym by się wywrócił.
-            lead.ref = lead.ref or polecenia.czysty_slug(payload.ref)
+            lead.ref = lead.ref or slug
+            if wlasciciel and lead.ref == slug:
+                lead.ref_partner = wlasciciel
             lead.outcome = "not_qualified" if payload.outcome == "not_qualified" else "qualified"
             lead.tier = ocena.get("tier") or None
             lead.score = int(ocena.get("score") or 0)
@@ -11818,6 +11841,8 @@ def _tekst_martwej_karty(lead: Lead, wiek_min: float) -> str:
     e = html.escape
     linie = [f"🚨 <b>Karta nie wyszła</b> — {e(lead.name or lead.email)}",
              f"✉️ {e(lead.email)}"]
+    if lead.ref:
+        linie.append(_linia_polecenia(lead))
     if lead.telegram:
         linie.append(f"💬 {e(lead.telegram)}")
     if lead.phone:
@@ -11847,6 +11872,8 @@ def _tekst_przypomnienia(lead: Lead, powod: str, paid: float, dni: int) -> str:
     # Telegram nad telefonem, bo tamtędy idzie kontakt — numer jest tu zapasem
     # na wypadek, gdyby ktoś nie zostawił handle'a.
     linie = [naglowek, f"✉️ {e(lead.email)}"]
+    if lead.ref:
+        linie.append(_linia_polecenia(lead))
     if lead.telegram:
         linie.append(f"💬 {e(lead.telegram)}")
     if lead.phone:
@@ -11856,6 +11883,61 @@ def _tekst_przypomnienia(lead: Lead, powod: str, paid: float, dni: int) -> str:
     if stopka:
         linie.append(stopka)
     return "\n".join(linie)
+
+
+def _tekst_zakupu_polecenia(lead: Lead, plan: tuple[str, int] | None) -> str:
+    """Polecony kupił: co i jakie konto należy się partnerowi.
+
+    Zasada programu: ten sam plan i rozmiar. 2-Step od razu; Instant dopiero
+    po pierwszej wypłacie poleconego (osobna wiadomość, gdy ta przyjdzie).
+    """
+    e = html.escape
+    linie = [f"🤝💸 <b>Polecony kupił konto</b> — {e(lead.name or lead.email)}",
+             f"✉️ {e(lead.email)}", _linia_polecenia(lead)]
+    if plan is None:
+        linie += ["🛒 Plan nieznany — oznaczone ręcznie jako kupione, sklep zamówienia nie widział.",
+                  "🎁 Sprawdź, co kupił: partnerowi należy się ten sam plan i rozmiar "
+                  "(Instant dopiero po jego pierwszej wypłacie)."]
+    elif plan[1] == 0:
+        linie += [f"🛒 Kupił: <b>{e(plan[0])}</b>",
+                  f"🎁 Partnerowi należy się <b>{e(plan[0])}</b>, ale dopiero po PIERWSZEJ "
+                  "wypłacie poleconego. Dam znać, kiedy przyjdzie."]
+    else:
+        linie += [f"🛒 Kupił: <b>{e(plan[0])}</b>",
+                  f"🎁 Partnerowi należy się teraz <b>{e(plan[0])}</b> — wydaj mu konto."]
+    return "\n".join(linie)
+
+
+def _polecenie_po_wyplacie(session, trader_email: str | None) -> None:
+    """Wypłata poszła: potwierdź polecenie (siatka bezpieczeństwa, gdyby cron
+    przegapił zakup) i — przy Instant — powiedz, że teraz należy się konto partnerowi.
+
+    Wołane po commicie wypłaty. Dedup zdarzeniem na leadzie, więc liczy się
+    tylko pierwsza wypłata, a kolejne nie wracają z tym samym alarmem.
+    """
+    polecenia.po_wyplacie(session, trader_email)
+    email = (trader_email or "").strip().lower()
+    lead = session.query(Lead).filter(Lead.email == email).one_or_none() if email else None
+    if not (lead and lead.ref and lead.ref_partner):
+        return
+    plan = polecenia.plan_leada(session, email)
+    if not plan or plan[1] != 0:
+        return
+    if (session.query(LeadEvent.id).filter(LeadEvent.lead_id == lead.id,
+                                           LeadEvent.kind == "reminder",
+                                           LeadEvent.detail == "ref_payout").first()):
+        return
+    _zdarzenie(session, lead.id, "reminder", "ref_payout", actor="payout")
+    session.commit()
+    e = html.escape
+    tekst = "\n".join([
+        f"🤝💵 <b>Pierwsza wypłata poleconego</b> — {e(lead.name or lead.email)}",
+        f"✉️ {e(lead.email)}", _linia_polecenia(lead),
+        f"🎁 Teraz wydaj partnerowi <b>{e(plan[0])}</b> (ten sam plan co polecony)."])
+    czat = telegram.lead_chat_id(lead.source)
+    lead_id, kto = lead.id, lead.name or lead.email
+    notify.w_tle(lambda: telegram.send_lead_message(tekst, chat_id=czat))
+    _lead_push(lead_id, f"Referral's 1st payout: {kto}", f"issue {plan[0]} to the partner now")
 
 
 def _tekst_zaplanowanego(lead: Lead, r: LeadReminder, ostatni: bool = False) -> str:
@@ -11875,6 +11957,8 @@ def _tekst_zaplanowanego(lead: Lead, r: LeadReminder, ostatni: bool = False) -> 
     # samej liczby wyliczany jest sufit serii.
     ile = f" ({r.sent_count}. raz)" if r.repeat_days else ""
     linie = [f"🔔 <b>{e(lead.name or lead.email)}</b>{ile}", f"✉️ {e(lead.email)}"]
+    if lead.ref:
+        linie.append(_linia_polecenia(lead))
     if lead.phone:
         linie.append(f"📞 {e(lead.phone)}")
     if lead.telegram:
@@ -11996,6 +12080,10 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
     try:
         do_wyslania, pushy = _wyslij_zaplanowane(session, now)
         do_maila: list[int] = []
+        do_polecen: list[tuple[str, str, str | None]] = []
+        # Leady, o których zakupie dział dostał już wiadomość „polecony kupił".
+        # Ogólne „KUPIŁ" z łańcucha niżej byłoby drugą wiadomością o tym samym.
+        kupil_z_polecenia: set[int] = set()
         do_kart: list[tuple[int, str, str, dict]] = []
         # Własny licznik, a nie długość `do_wyslania`: tamta lista wchodzi tu już
         # z zaplanowanymi przypomnieniami i przy dziesięciu terminach na dziś
@@ -12033,6 +12121,30 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
             if niczyj and wiek_min >= 30 and (l.id, "unclaimed") not in juz:
                 _zdarzenie(session, l.id, "reminder", "unclaimed", actor="cron")
                 pushy.append((l.id, "Unclaimed lead (30 min+)", l.name or l.email))
+            # Polecony z linku partnera kupił konto: polecenie przechodzi na
+            # „confirmed", a dział dostaje, JAKIE konto należy się partnerowi.
+            # Osobno od łańcucha powodów niżej, bo tam „bought" mogło wygrać
+            # już wcześniej i przez `juz` więcej się nie odezwie. Własny dedup.
+            if l.ref and (paid > 0 or l.bought) and (l.id, "ref_bought") not in juz:
+                # Bez `ref_partner`: lead sprzed tej kolumny albo baza partnera
+                # padła przy zgłoszeniu — pytamy teraz. None = nie wiadomo, bez
+                # wpisu, następny przebieg spróbuje znowu.
+                kto_polecil = l.ref_partner or polecenia.wlasciciel(l.ref)
+                if kto_polecil is not None:
+                    l.ref_partner = kto_polecil or None
+                    _zdarzenie(session, l.id, "reminder", "ref_bought", actor="cron")
+                    # Slug bez właściciela (link sprzed programu, literówka) nie
+                    # ma komu wydać konta — sam wpis w historii, bez alarmu.
+                    if l.ref_partner:
+                        kupil_z_polecenia.add(l.id)
+                        plan = polecenia.plan_leada(session, l.email)
+                        do_polecen.append((l.ref, l.email, plan[0] if plan else None))
+                        do_wyslania.append((telegram.lead_chat_id(l.source),
+                                            _tekst_zakupu_polecenia(l, plan)))
+                        nazwa = plan[0] if plan else "account"
+                        po_wyplacie = " after their 1st payout" if plan and plan[1] == 0 else " now"
+                        pushy.append((l.id, f"Referral bought: {l.name or l.email}",
+                                      f"{nazwa} → partner gets {nazwa}{po_wyplacie}"))
             # Karta, która nie wyszła. Wysyłka przy zgłoszeniu jest po commicie
             # i best-effort, więc minutowa awaria Telegrama zostawiała leada
             # w bazie i nic na kanale — do tej pory bezterminowo. Pusty
@@ -12087,14 +12199,15 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
             if (l.id, powod) in juz:
                 continue
             _zdarzenie(session, l.id, "reminder", powod, actor="cron")
-            do_wyslania.append((telegram.lead_chat_id(l.source),
-                                _tekst_przypomnienia(l, powod, paid, dni)))
-            tytul = {
-                "bought": f"{l.name or l.email} bought — ${paid:,.0f}",
-                "no_contact": f"No contact yet: {l.name or l.email} ({dni}d)",
-                "stalled": f"Stalled: {l.name or l.email} ({dni}d quiet)",
-            }[powod]
-            pushy.append((l.id, tytul, l.email))
+            if l.id not in kupil_z_polecenia:
+                do_wyslania.append((telegram.lead_chat_id(l.source),
+                                    _tekst_przypomnienia(l, powod, paid, dni)))
+                tytul = {
+                    "bought": f"{l.name or l.email} bought — ${paid:,.0f}",
+                    "no_contact": f"No contact yet: {l.name or l.email} ({dni}d)",
+                    "stalled": f"Stalled: {l.name or l.email} ({dni}d quiet)",
+                }[powod]
+                pushy.append((l.id, tytul, l.email))
             if powod == "bought":
                 # Jednorazowe „ten człowiek kupił" załatwia moment, w którym
                 # trzeba przestać dzwonić jak do leada. Ale klient z opłaconym
@@ -12144,6 +12257,8 @@ def _lead_followups(no_contact_days: int = 3, stalled_days: int = 7) -> dict:
         # że przerwany przebieg powtórzy WSZYSTKIE maile z tej rundy, a nie ten
         # jeden, przy którym się wywrócił.
         wyslane_maile = 0
+        for slug, email, plan in do_polecen:
+            polecenia.wyslij(slug, email, plan, True)
         for lead_id in do_maila:
             lead = session.get(Lead, lead_id)
             if lead and _mail_do_leada(session, lead, "cron:unclaimed")[0]:

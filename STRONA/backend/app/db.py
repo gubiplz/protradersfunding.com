@@ -290,6 +290,8 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         # Kraj z IP zgloszenia — landing zaczal go przysylac 2026-09; starsze
         # leady maja NULL i zostaja przy prefiksie numeru.
         "ip_country": "VARCHAR(2)",
+        # Właściciel linku partnera — patrz Lead.ref_partner.
+        "ref_partner": "VARCHAR(160)",
     },
     # Nadawca, pod ktorym szablon ma sens (ptf/fx). NULL = szablon sprzed
     # podzialu, pokazywany przy obu nadawcach.

@@ -1409,11 +1409,12 @@ def test_nowy_lead_pushuje_do_adminow(_pushy):
 
 def test_push_niekwalifikowanego_mowi_skad_i_dlaczego(_pushy):
     a = _wyslij(_zgloszenie(outcome="not_qualified", quality=None)).json()["id"]
+    # Zgłoszenie z fixture'a przychodzi z linku partnera — push mówi też, czyj to ref.
     assert next(p for p in _pushy if p["url"] == f"/admin?lead={a}")["body"] \
-        == "failed the questionnaire"
+        .startswith("failed the questionnaire · 🤝 ref: ")
     _pushy.clear()
     b = _wyslij(_zgloszenie(outcome="not_qualified", source="safe",
-                            quality=None)).json()["id"]
+                            quality=None, ref=None)).json()["id"]
     assert next(p for p in _pushy if p["url"] == f"/admin?lead={b}")["body"] \
         == "safe page lead — warm up"
 
@@ -1492,7 +1493,8 @@ def test_zaplanowane_przypomnienie_pushuje(_pushy):
 
     p = next(p for p in _pushy if p["title"].startswith("Reminder:"))
     assert "oddzwonić po weekendzie" in p["title"]
-    assert p["url"] == f"/admin?lead={lead_id}" and p["body"] == "Jan Kowalski"
+    # Lead z fixture'a przyszedł z linku partnera — ref dopisuje każdy push.
+    assert p["url"] == f"/admin?lead={lead_id}" and p["body"].startswith("Jan Kowalski · 🤝 ref: ")
 
 
 def test_sweep_z_ruchu_chodzi_raz_na_okno(monkeypatch):

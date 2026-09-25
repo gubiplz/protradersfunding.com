@@ -901,6 +901,10 @@ class Lead(Base):
 
     source: Mapped[str] = mapped_column(String(40), default="")   # skąd formularz
     ref: Mapped[str | None] = mapped_column(String(40), nullable=True)  # slug partnera
+    # „Imię · mail" właściciela `ref`, z bazy partnera przy zgłoszeniu. Kopia, bo
+    # stoi w każdym powiadomieniu o tym leadzie, a pytanie tamtej bazy przy
+    # każdym kliknięciu na kanale byłoby siecią w środku callbacku.
+    ref_partner: Mapped[str | None] = mapped_column(String(160), nullable=True)
     outcome: Mapped[str] = mapped_column(String(16), default="qualified")
     tier: Mapped[str | None] = mapped_column(String(8), nullable=True)  # high|warm|cold
     score: Mapped[int] = mapped_column(Integer, default=0)

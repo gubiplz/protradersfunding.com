@@ -2647,7 +2647,7 @@ function renderLeads(){
           ${l.phone||l.telegram||l.mail_ready?`<div class="lead-act-row">${leadPhoneActs(l)}</div>`:''}</td>
         <td class="muted" data-l="Source">${esc(l.source||'—')}${
           isFreeLead(l)?' <span title="Free challenge funnel — no money changes hands">🆓</span>':''}${
-          l.ref?`<div style="font-size:var(--fs-cap)">via ${esc(l.ref)}</div>`:''}${
+          l.ref?`<div style="font-size:var(--fs-cap)">🤝 ref: ${esc(leadRef(l))}</div>`:''}${
           campaignLabel(l.campaign)?`<div style="font-size:var(--fs-cap)" title="${
             esc(Object.entries(l.campaign).map(([k,v])=>k+'='+v).join('\n'))
           }">ad: ${esc(campaignLabel(l.campaign))}</div>`:''}${
@@ -2825,7 +2825,10 @@ const LEAD_EVENT_LBL={applied:'Applied',status:'Status',note:'Note',reminder:'Re
 /* Reminders are sent to US, never to the lead — the landing they applied through
    is a separate brand. The wording says who is being nudged. */
 const LEAD_REMINDER_LBL={no_contact:'Nobody wrote to them yet',bought:'Bought — stop treating as a lead',
-  stalled:'Conversation led nowhere'};
+  stalled:'Conversation led nowhere',ref_bought:'Referral bought — matching account due to the partner',
+  ref_payout:'Referral\'s 1st payout — Instant matching account due now'};
+/* Czyj link: imie partnera, gdy baza partnera je oddala, inaczej sam slug. */
+const leadRef=l=>l.ref_partner?`${l.ref_partner.split(' · ')[0]} (${l.ref})`:l.ref;
 
 function leadEventDetail(e){
   if(e.kind==='reminder')return LEAD_REMINDER_LBL[e.detail]||e.detail.replace(/^planned: /,'');
@@ -3285,7 +3288,7 @@ async function openLead(id){
       <span class="chip"><a href="mailto:${esc(l.email)}">${esc(l.email)}</a></span>
       ${l.phone?`<span class="chip"><a href="tel:${esc(l.phone)}">${esc(l.phone)}</a></span>`:''}
       ${l.country?`<span class="chip">${esc(l.country)}</span>`:''}
-      ${l.source?`<span class="chip">${esc(l.source)}${l.ref?' via '+esc(l.ref):''}</span>`:''}
+      ${l.source?`<span class="chip">${esc(l.source)}</span>`:''}${l.ref?`<span class="chip" title="${esc(l.ref_partner||l.ref)}">🤝 ref: ${esc(leadRef(l))}</span>`:''}
       ${campaignLabel(l.campaign)?`<span class="chip" title="${
         esc(Object.entries(l.campaign).map(([k,v])=>k+'='+v).join('\n'))
       }">ad: ${esc(campaignLabel(l.campaign))}</span>`:''}

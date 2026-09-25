@@ -1,9 +1,13 @@
-"""Program poleceń partnera: zgłoszenie z `ref` i pierwsza wypłata idą do jego bazy.
+"""Program poleceń partnera: zgłoszenie z `ref`, zakup i wypłata idą do jego bazy.
 
 Partner widzi u siebie listę ludzi, których przyprowadził, i status
-„confirmed", gdy któryś dostał wypłatę. Oba fakty znamy tylko my: `ref` przychodzi
-z landingu razem z leadem, wypłatę zatwierdza admin. Dotąd partner dopisywał
+„confirmed", gdy któryś kupił konto. Oba fakty znamy tylko my: `ref` przychodzi
+z landingu razem z leadem, zakup widać w zamówieniach. Dotąd partner dopisywał
 poleconych ręcznie, a „confirmed" ktoś przestawiał w bazie z ręki.
+
+Za zakup partnerowi należy się konto tego samego planu i rozmiaru. 2-Step od
+razu; Instant dopiero po pierwszej wypłacie poleconego — to konto funded od
+pierwszego dnia i wydane z góry byłoby wypłatą bez żadnej ewaluacji.
 
 Po drugiej stronie jest jedna funkcja (`sync_referral`), którą wolno wołać tylko
 sekretnym kluczem tamtej bazy. Status zmienia się wyłącznie do przodu: drugie
@@ -19,9 +23,11 @@ import json
 import re
 import urllib.request
 
+from sqlalchemy import func
+
 from . import notify
 from .config import get_settings
-from .models import Lead
+from .models import Lead, Order, Product, Trader
 
 settings = get_settings()
 
@@ -35,7 +41,7 @@ def czysty_slug(ref: str | None) -> str | None:
     return slug if SLUG_RE.match(slug) else None
 
 
-def _post(url: str, body: dict, key: str) -> tuple[int, bytes]:
+def _post(url: str, body: dict, key: str, timeout: float = 6) -> tuple[int, bytes]:
     headers = {"apikey": key, "content-type": "application/json"}
     # Stary klucz service_role to JWT i idzie też jako Bearer. Nowy `sb_secret_…`
     # JWT-em nie jest — bramka sama zamienia go na rolę z nagłówka `apikey`.
@@ -43,7 +49,7 @@ def _post(url: str, body: dict, key: str) -> tuple[int, bytes]:
         headers["authorization"] = f"Bearer {key}"
     req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
                                  headers=headers)
-    with urllib.request.urlopen(req, timeout=6) as r:
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.status, r.read()
 
 
@@ -59,7 +65,7 @@ def wyslij(slug: str | None, email: str, rozmiar: str | None = None,
         return "no_ref"
     if not (settings.referral_sync_url and settings.referral_sync_key):
         return "off"
-    rodzaj = "payout" if wyplata else "lead"
+    rodzaj = "confirm" if wyplata else "lead"
     try:
         status, tresc = _post(settings.referral_sync_url,
                               {"p_slug": slug, "p_email": (email or "").strip().lower(),
@@ -71,6 +77,59 @@ def wyslij(slug: str | None, email: str, rozmiar: str | None = None,
     # Slug i wynik, bez maila: log funkcji czyta więcej osób niż panel.
     print(f"[polecenia] {rodzaj} {slug} -> {wynik}")
     return str(wynik)
+
+
+def wlasciciel(slug: str | None) -> str | None:
+    """„Imię · mail" partnera, do którego należy slug. Nigdy nie rzuca.
+
+    `""` — baza odpowiedziała, że takiego partnera nie ma (odpowiedź ostateczna).
+    `None` — nie wiadomo: automat wyłączony albo baza nie odpowiedziała.
+    """
+    slug = czysty_slug(slug)
+    if not slug:
+        return ""
+    if not (settings.referral_sync_url and settings.referral_sync_key):
+        return None
+    # Druga funkcja mieszka obok `sync_referral`, pod tym samym /rpc/.
+    url = settings.referral_sync_url.rstrip("/").rsplit("/", 1)[0] + "/referral_partner"
+    try:
+        status, tresc = _post(url, {"p_slug": slug}, settings.referral_sync_key, timeout=3)
+        if status >= 300:
+            raise ValueError(f"http {status}")
+        dane = json.loads(tresc or b"null")
+    except Exception as e:  # noqa: BLE001 — best-effort, lead ma wejść i bez tego
+        print(f"[polecenia] kto {slug} -> error {type(e).__name__}")
+        return None
+    if not isinstance(dane, dict):
+        return ""
+    return " · ".join(str(x) for x in (dane.get("name"), dane.get("email")) if x)[:160]
+
+
+def opis(lead: Lead) -> str:
+    """Kto polecił, jednym ciągiem do powiadomień: „Imię · mail (slug)" albo sam slug."""
+    if not lead.ref:
+        return ""
+    return f"{lead.ref_partner} ({lead.ref})" if lead.ref_partner else lead.ref
+
+
+def plan_leada(session, email: str | None) -> tuple[str, int] | None:
+    """Pierwszy opłacony plan tradera o tym mailu: (etykieta, steps) albo None.
+
+    Pierwszy, bo za niego należy się konto partnerowi — dokupione później nie
+    zmienia tego, co kupił jako polecony. Przy BOGO liczy się to, za co zapłacił
+    (`bogo_paid_key`), a nie większy tier przyznany przez admina.
+    """
+    email = (email or "").strip().lower()
+    if not email:
+        return None
+    zamowienie = (session.query(Order).join(Trader, Trader.id == Order.trader_id)
+                  .filter(func.lower(Trader.email) == email, Order.status == "paid")
+                  .order_by(Order.id).first())
+    if zamowienie is None:
+        return None
+    klucz = zamowienie.bogo_paid_key or zamowienie.product_key
+    prod = session.query(Product).filter(Product.key == klucz).one_or_none()
+    return (prod.label, prod.steps) if prod else (klucz, 2)
 
 
 def zglos(slug: str | None, email: str, rozmiar: str | None = None,
