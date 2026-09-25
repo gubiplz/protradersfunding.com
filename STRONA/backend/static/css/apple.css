@@ -172,6 +172,23 @@ html[data-theme=dark] .over-bg{background:rgba(0,0,0,.4)}
 tbody tr{transition:background .15s}
 .ticket-row{transition:background .15s,transform .35s var(--np-spring)}
 .ticket-row:active{transform:scale(.99)}
+/* Linia pod tematem (#ref · mail · kraj · wiadomości · data) nie może wyjść
+   poza swój blok. Mail to jedno słowo nie do złamania, a „· FR" trzyma przy
+   nim `nowrap`, więc na wąskim ekranie tekst wylewał się pod pastylkę statusu
+   i przeświecał przez jej półprzezroczyste tło („Closed" na „· FR"). */
+.ticket-row .sub>span{overflow-wrap:anywhere}
+/* Telefon: pastylka statusu schodzi POD tekst. Obok niej i X-a na tekst
+   zostawało ~150 px — temat ucinał się do „Pending Pa…", a mail nie miał
+   gdzie się zmieścić. Siatka zamiast flexa, bo ikona i X mają stać przy
+   obu liniach naraz. */
+@media(max-width:640px){
+  .ticket-row{display:grid;grid-template-columns:36px minmax(0,1fr) auto;
+    grid-template-areas:"ic sub x" "ic st x";column-gap:12px;row-gap:8px;align-items:start}
+  .ticket-row>.tile-ic{grid-area:ic}
+  .ticket-row>.sub{grid-area:sub}
+  .ticket-row>.status{grid-area:st;justify-self:start}
+  .ticket-row>.btn-x{grid-area:x;align-self:center}
+}
 /* ---------- kafelki podsumowań jak widżety iOS ----------
    Wszędzie ten sam znacznik (.stat-tile > .tile-ic + div z .lbl/.val/.sub),
    więc przebudowa samym CSS: mała ikona-squircle i etykieta w pierwszym
