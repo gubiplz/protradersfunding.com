@@ -401,6 +401,13 @@ class Settings:
     # publiczne, a stawka potrafi się zmienić szybciej niż deploy. 0 = okno
     # zamówienia w ogóle nie proponuje ceny partnerskiej.
     partner_discount_pct: float = float(os.getenv("PARTNER_DISCOUNT_PCT", "0") or 0)
+    # Program poleceń partnera: jego baza dostaje od nas dwa fakty o każdym
+    # poleconym — zgłoszenie z `ref` i pierwszą prawdziwą wypłatę — żeby
+    # polecenie dopisało się i potwierdziło samo (app/polecenia.py). Pełny adres
+    # funkcji i sekretny klucz jej bazy żyją wyłącznie tutaj, z tego samego
+    # powodu co adres wyżej. Puste którekolwiek = nic nie wychodzi.
+    referral_sync_url: str = os.getenv("REFERRAL_SYNC_URL", "").strip()
+    referral_sync_key: str = os.getenv("REFERRAL_SYNC_KEY", "").strip()
 
     # Payout BOT łapie swój dzienny slot także na ruchu strony (middleware w
     # main.py). To wyłącznik awaryjny tej ścieżki — cron /api/tick zostaje wtedy
