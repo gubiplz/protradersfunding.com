@@ -29,6 +29,9 @@ os.environ["SHOT_API_URL"] = ""
 # transport, tym samym wzorcem co kanał Telegrama wyżej.
 os.environ["REACH_API_URL"] = ""
 os.environ["REACH_API_KEY"] = ""
+# Baza programu poleceń partnera — testy poleceń podstawiają transport same.
+os.environ["REFERRAL_SYNC_URL"] = ""
+os.environ["REFERRAL_SYNC_KEY"] = ""
 # Poller nie moze chodzic w tle testow — przestawialby salda kont.
 os.environ["POLLER_ENABLED"] = "false"
 # Payout BOT nie moze publikowac „przy okazji" zwyklych odczytow dashboardu:

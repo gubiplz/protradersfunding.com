@@ -44,7 +44,7 @@ from sqlalchemy.exc import IntegrityError
 from . import (achievements, auth, billing, catalog, certshot, contentbot, countries,
                fields, inbox, insights, loyalty,
                lead_mail, mail_templates, metaquotes_web, notify, offers, origin,
-               payout_import, payoutbot, reach, statements,
+               payout_import, payoutbot, polecenia, reach, statements,
                poller, provisioning, push, rules, sms, telegram, telemetry, tradebot, zamki)
 from .config import get_settings
 from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint, zamek_migracji
@@ -3970,6 +3970,7 @@ def admin_approve_payout(req_id: int):
         notify.send("payout_approved", tr.email, {"name": tr.full_name or tr.email,
                     "login": acc.login, "trader_share": round(r.trader_share + fee_refund, 2),
                     "fee_refund": bool(fee_refund)})
+        polecenia.po_wyplacie(session, tr.email)
         return {"approved": req_id, "fee_refund": fee_refund,
                 "total_paid": round(r.trader_share + fee_refund, 2)}
     finally:
@@ -4102,6 +4103,7 @@ def admin_issue_payout(request: Request, account_id: int, payload: IssuePayoutIn
                         {"name": trader.full_name or trader.email, "login": acc.login,
                          "trader_share": share, "fee_refund": False,
                          "cert_url": f"{_public_base(request)}/payout/{p.cert_token}"})
+            polecenia.po_wyplacie(session, trader.email)
         return _payout_dict(p, acc)
     finally:
         session.close()
@@ -9895,7 +9897,11 @@ def leads_ingest(payload: LeadIn,
             kod_ip = (payload.ipCountry or "").strip().upper()[:2]
             lead.ip_country = kod_ip if kod_ip.isalpha() and kod_ip != "XX" else None
             lead.source = (payload.source or "")[:40]
-            lead.ref = (payload.ref or None)
+            # Pierwszy partner zostaje. Drugie zgłoszenie bez linku (wejście
+            # wprost, inna karta) kasowało `ref` i polecenie przepadało, zanim
+            # ktokolwiek zdążył je potwierdzić. Nie-slug nie wchodzi wcale —
+            # kolumna ma 40 znaków, a Postgres na dłuższym by się wywrócił.
+            lead.ref = lead.ref or polecenia.czysty_slug(payload.ref)
             lead.outcome = "not_qualified" if payload.outcome == "not_qualified" else "qualified"
             lead.tier = ocena.get("tier") or None
             lead.score = int(ocena.get("score") or 0)
@@ -9939,6 +9945,7 @@ def leads_ingest(payload: LeadIn,
 
         session.commit()
         lead_id, tekst = lead.id, _tekst_alertu(lead, dane)
+        polecony = (lead.ref, lead.email, str(dane.get("accountSize") or "")[:40] or None)
         czat = telegram.lead_chat_id(lead.source)
         # Atrybuty do pusha czytane PRZED close(): potem instancja jest odpięta.
         kto = lead.name or lead.email
@@ -9959,6 +9966,8 @@ def leads_ingest(payload: LeadIn,
     _lead_push(lead_id, f"New lead: {kto}", opis, event="lead_new")
     _, powod, message_id = telegram.send_lead_alert(lead_id, tekst, chat_id=czat)
     _zapamietaj_wysylke(lead_id, message_id, czat or None, powod)
+    # Polecony z linku partnera ląduje od razu na jego liście jako „pending".
+    polecenia.zglos(*polecony)
     return {"ok": True, "id": lead_id, "new": nowy}
 
 

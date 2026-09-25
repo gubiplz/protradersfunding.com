@@ -929,6 +929,16 @@ def _odloz(fn, *args) -> bool:
     return True
 
 
+def w_tle(fn, *args) -> None:
+    """Ta sama kolejka co maile, dla innych wywołań sieciowych.
+
+    Gdy trwa request, `fn` idzie po odesłaniu odpowiedzi; poza nim od razu.
+    `fn` nie może rzucać — nikt już nie czeka, żeby ten wyjątek obejrzeć.
+    """
+    if not _odloz(fn, *args):
+        fn(*args)
+
+
 def _zapisz_w_dzienniku(event: str, to_email: str, subject: str,
                         blad: str | None) -> None:
     """Ślad każdej próby wysyłki. Best-effort: dziennik nie ma prawa wywrócić
