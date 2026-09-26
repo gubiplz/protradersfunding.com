@@ -1986,6 +1986,17 @@ def submit_kyc(payload: KycIn, trader: Trader = Depends(auth.current_trader)):
         session.close()
 
 
+#: Minimalna wypłata z wniosku tradera: stała kwota ORAZ procent wielkości
+#: konta — liczy się wyższa. $500 chroni małe konta przed wypłatami groszy,
+#: 2% skaluje próg z kontem (konto $1M → minimum $20,000).
+PAYOUT_MIN_USD = 500.0
+PAYOUT_MIN_PCT = 2.0
+
+
+def payout_minimum(acc: Account) -> float:
+    return round(max(PAYOUT_MIN_USD, float(acc.initial_balance or 0) * PAYOUT_MIN_PCT / 100), 2)
+
+
 @app.post("/api/accounts/{account_id}/payout-request")
 def request_payout(account_id: int, payload: PayoutReqIn, trader: Trader = Depends(auth.current_trader)):
     session = SessionLocal()
@@ -2028,6 +2039,12 @@ def request_payout(account_id: int, payload: PayoutReqIn, trader: Trader = Depen
             raise HTTPException(400, "The payout amount must be greater than zero")
         if share > available:
             raise HTTPException(400, f"The amount exceeds your available share (${available:,.2f})")
+        if share < PAYOUT_MIN_USD:
+            raise HTTPException(400, f"The minimum payout is ${PAYOUT_MIN_USD:,.0f}")
+        minimum = payout_minimum(acc)
+        if share < minimum:
+            raise HTTPException(400, f"The minimum payout is {PAYOUT_MIN_PCT:g}% of your account size "
+                                     f"— ${minimum:,.2f} on this ${float(acc.initial_balance):,.0f} account")
         method = (payload.method or "").lower()
         details_json = _payout_details_json(method, payload.details or {})
         pr = PayoutRequest(account_id=acc.id, trader_id=tr.id, profit_amount=profit,

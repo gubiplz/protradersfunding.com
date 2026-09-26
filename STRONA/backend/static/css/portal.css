@@ -1784,3 +1784,12 @@ body.imp-on .cookie-note{bottom:calc(12px + 42px + env(safe-area-inset-bottom))}
 .em-code{font-size:22px;letter-spacing:.4em;text-align:center;font-variant-numeric:tabular-nums}
 .em-step.a-in{animation:a-in .32s cubic-bezier(.22,1,.36,1) both}
 @media (prefers-reduced-motion:reduce){.em-step.a-in{animation:none}}
+/* Wniosek o wypłatę: alert o minimum 2% wielkości konta (dół okna) */
+.po-min{font-size:12.5px;line-height:1.5;color:var(--muted);background:var(--acc-bg);border:1px solid var(--acc-line);
+  border-radius:10px;padding:10px 12px;margin-top:6px;transition:background .2s,border-color .2s,color .2s}
+.po-min b{color:var(--txt)}
+.po-min.bad{color:var(--red);background:var(--red-bg);border-color:var(--red)}
+.po-min.bad b{color:var(--red)}
+@keyframes po-shake{0%,100%{transform:none}20%,60%{transform:translateX(-5px)}40%,80%{transform:translateX(5px)}}
+.po-min.shake{animation:po-shake .35s ease}
+@media (prefers-reduced-motion:reduce){.po-min.shake{animation:none}}

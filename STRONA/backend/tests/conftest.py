@@ -84,6 +84,24 @@ os.environ["RATE_LIMIT_OFF"] = "true"
 os.environ["PROMO_UPGRADE"] = "false"
 
 
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _bez_progu_wyplaty(request, monkeypatch):
+    """Minimalna wypłata ($500 / 2% konta) wyłączona w testach, które sprawdzają
+    INNE reguły wniosku na małych kwotach (dni handlu, pula, pending, split).
+    Sam próg testuje tests/test_payout_minimum.py — ustawia PAYOUT_MIN_REAL."""
+    import sys
+    if getattr(request.module, "PAYOUT_MIN_REAL", False):
+        return
+    _m = sys.modules.get("app.main")      # tylko gdy test sam załadował aplikację
+    if _m is None:
+        return
+    monkeypatch.setattr(_m, "PAYOUT_MIN_USD", 0.0)
+    monkeypatch.setattr(_m, "PAYOUT_MIN_PCT", 0.0)
+
+
 def zrodlo_portalu() -> str:
     """Szkielet portalu RAZEM z jego kodem — logika siedzi w bundlu, nie w HTML-u.
 

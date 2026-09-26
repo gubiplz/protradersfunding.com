@@ -4365,16 +4365,29 @@ function payoutBtn(a,av,cls,label){
   return left
     ?`<button class="${cls}" disabled title="This plan unlocks its first payout after ${m.min_trading_days??0} trading days.">${
         esc(a.login)} · ${m.trading_days??0}/${m.min_trading_days??0} trading days</button>`
-    :`<button class="${cls}" onclick="openPayoutModal(${a.id},${av.toFixed(2)})">${label}</button>`;
+    :`<button class="${cls}" onclick="openPayoutModal(${a.id},${av.toFixed(2)},${+a.initial_balance||0})">${label}</button>`;
 }
-function openPayoutModal(id,avail){
+/* Minimalna wypłata = wyższa z: $500 i 2% wielkości konta (to samo pilnuje
+   serwer w request_payout). $500 pilnuje pole kwoty, więc alert na dole mówi
+   wyłącznie o progu 2% — i czerwienieje, gdy wpisana kwota go nie spełnia. */
+const PO_MIN_USD=500, PO_MIN_PCT=2;
+function poSprawdz(){
+  const box=$('po-min');if(!box)return true;
+  const amount=parseFloat($('po-amount').value||'0');
+  const zaMalo=!(amount>=+box.dataset.pct);
+  box.classList.toggle('bad',zaMalo);
+  return !zaMalo;
+}
+function openPayoutModal(id,avail,size){
+  const pct=Math.round((size||0)*PO_MIN_PCT)/100;
   const w=document.createElement('div'); w.id='po-modal'; w.className='modal-wrap';
   w.onclick=e=>{if(e.target===w)w.remove()};
   w.innerHTML=`<div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
     <div class="modal-head"><h3>Request a payout</h3></div>
     <p class="muted" style="font-size:12.5px;margin:2px 0 12px">Available on this account: <b>$${fmt(avail)}</b>, your split of current profit. You can request part of it.</p>
     <label class="muted" style="font-size:12px">Amount (USD)</label>
-    <input id="po-amount" class="inp" type="number" min="1" max="${avail}" step="0.01" value="${avail}" style="margin-bottom:10px">
+    <input id="po-amount" class="inp" type="number" min="${PO_MIN_USD}" max="${avail}" step="0.01" value="${avail}" style="margin-bottom:10px"
+      oninput="this.classList.remove('bad');poSprawdz()">
     <label class="muted" style="font-size:12px">Payout method</label>
     <select id="po-method" class="inp" onchange="poFields()" style="margin-bottom:10px">
       <option value="usdt">USDT — crypto</option>
@@ -4382,6 +4395,9 @@ function openPayoutModal(id,avail){
       <option value="wise">Wise</option>
     </select>
     <div id="po-fields"></div>
+    ${size?`<div class="po-min${avail<pct?' bad':''}" id="po-min" role="alert" data-pct="${pct}">
+      <b>Minimum payout: ${PO_MIN_PCT}% of your account size</b> — $${fmt(pct)} on this $${fmt0(size)} account.${
+      avail<pct?` Your available share is $${fmt(avail)}, so you can request a payout once it reaches $${fmt(pct)}.`:''}</div>`:''}
     <div style="display:flex;gap:10px;margin-top:14px">
       <button class="btn-p" onclick="submitPayout(${id})" id="po-send">Submit request</button>
       <button class="btn-o" onclick="$('po-modal').remove()">Cancel</button>
@@ -4433,6 +4449,13 @@ async function scaleUp(id){
 }
 async function submitPayout(id){
   const m=$('po-method').value, amount=parseFloat($('po-amount').value||'0');
+  /* Najpierw progi — wniosek poniżej minimum i tak odbiłby od serwera. */
+  if(!(amount>=PO_MIN_USD)){
+    $('po-amount').classList.add('bad');$('po-amount').focus();
+    toast(`The minimum payout is $${fmt0(PO_MIN_USD)}.`,'err');return}
+  if(!poSprawdz()){
+    const box=$('po-min');box.classList.remove('shake');void box.offsetWidth;box.classList.add('shake');
+    box.scrollIntoView({block:'nearest',behavior:'smooth'});return}
   const details=m==='usdt'?{network:$('po-network').value,address:$('po-address').value.trim()}
     :m==='bank'?{holder:$('po-holder').value.trim(),iban:$('po-iban').value.trim(),
                  swift:$('po-swift').value.trim(),bank_name:$('po-bank').value.trim()}
