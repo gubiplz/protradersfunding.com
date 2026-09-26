@@ -2508,3 +2508,16 @@ def test_eksport_ma_kolumny_zgodne_z_naglowkiem():
     naglowek = odp.content.decode("utf-8-sig").splitlines()[0].split(",")
     assert naglowek == [n for n, _ in app_main._KOLUMNY_CSV]
     assert all(len(w) == len(naglowek) and None not in w.values() for w in wiersze)
+
+
+def test_przypomnienie_na_kanale_daje_klikalny_uchwyt_z_malpa(_srodowisko):
+    """Formularz przyjmuje nick bez @ (albo link t.me) i tak zostaje w bazie.
+    Na kanale ma być @nick z linkiem — kliknięcie otwiera czat z leadem."""
+    for wpisany in ("sunnysohi", "https://t.me/sunnysohi"):
+        dane = _zgloszenie(telegram=wpisany)
+        lead_id = _wyslij(dane).json()["id"]
+        rid = _zaplanuj(lead_id, text="update konta", due_in_days=1).json()["id"]
+        _przesun_termin(rid, 1)
+        _cron()
+        tekst = next(t for t in _srodowisko["przypomnienie"] if dane["email"] in t)
+        assert '💬 <a href="https://t.me/sunnysohi">@sunnysohi</a>' in tekst

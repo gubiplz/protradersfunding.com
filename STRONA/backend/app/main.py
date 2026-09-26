@@ -9448,8 +9448,14 @@ _TG_HANDLE_RX = re.compile(r"@?[A-Za-z][A-Za-z0-9_]{4,31}")
 
 
 def _link_telegram(nick: str | None) -> str:
-    """Nick jako klikalny profil. Zwraca HTML, więc escape'uje sam."""
-    uchwyt = (nick or "").strip().lstrip("@")
+    """Nick jako klikalny profil. Zwraca HTML, więc escape'uje sam.
+
+    Zawsze jako @nick, także gdy człowiek wpisał go w formularzu bez małpy albo
+    wkleił link t.me — na kanale ma się dać kliknąć i od razu pisać. Pole
+    w bazie zostaje takie, jak przyszło.
+    """
+    uchwyt = re.sub(r"^(https?://)?(www\.)?t\.me/", "", (nick or "").strip(),
+                    flags=re.I).lstrip("@")
     if not uchwyt:
         return ""
     if not _TG_HANDLE_RX.fullmatch(uchwyt):
@@ -11844,7 +11850,7 @@ def _tekst_martwej_karty(lead: Lead, wiek_min: float) -> str:
     if lead.ref:
         linie.append(_linia_polecenia(lead))
     if lead.telegram:
-        linie.append(f"💬 {e(lead.telegram)}")
+        linie.append(f"💬 {_link_telegram(lead.telegram)}")
     if lead.phone:
         linie.append(f"📞 {e(lead.phone)}")
     linie.append(f"Zgłosił się {int(wiek_min // 60)} h temu i nie ma go na kanale. "
@@ -11875,7 +11881,7 @@ def _tekst_przypomnienia(lead: Lead, powod: str, paid: float, dni: int) -> str:
     if lead.ref:
         linie.append(_linia_polecenia(lead))
     if lead.telegram:
-        linie.append(f"💬 {e(lead.telegram)}")
+        linie.append(f"💬 {_link_telegram(lead.telegram)}")
     if lead.phone:
         linie.append(f"📞 {e(lead.phone)}")
     if lead.note:
@@ -11962,7 +11968,7 @@ def _tekst_zaplanowanego(lead: Lead, r: LeadReminder, ostatni: bool = False) -> 
     if lead.phone:
         linie.append(f"📞 {e(lead.phone)}")
     if lead.telegram:
-        linie.append(f"💬 {e(lead.telegram)}")
+        linie.append(f"💬 {_link_telegram(lead.telegram)}")
     if lead.owner:
         linie.append(f"👤 {e(lead.owner)}")
     linie.append(f"➡️ {e(r.text)}")
