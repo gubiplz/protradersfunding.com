@@ -2617,7 +2617,7 @@ const VIEWS={
             :`$${fmt(zablokowane)} of it unlocks at the trading-day minimum`}</div></div></div>
     </div>
     <p class="muted" style="font-size:13px;margin:-6px 0 14px">Payouts are <b>on demand</b> — request whenever
-      you are in profit. Every request is reviewed within <b>${data.summary.review_hours||24} hours</b>.${
+      you are in profit.${
       czeka?` Your ${esc(czeka.login)} plan unlocks its first payout after
         <b>${czeka.metrics?.min_trading_days??0} trading days</b> — a day counts once you trade on it.`:''}</p>
     ${funded.filter(a=>a.scale_up_to).map(a=>{
@@ -2647,7 +2647,6 @@ const VIEWS={
         <td class="num">$${fmt(r.profit_amount)}</td><td class="num">$${fmt(r.trader_share)}</td>
         <td class="muted">${esc(payoutMethodLabel(r.method))}</td>
         <td><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending':'failed'}"><span class="dot"></span>${esc(r.status)}</span>
-          ${r.status==='pending'&&r.expected_by?`<div class="muted" style="font-size:11px">decision by ${dstr(r.expected_by)}</div>`:''}
           ${r.status==='rejected'&&r.reject_reason?`<div class="muted" style="font-size:11px;max-width:220px">${esc(r.reject_reason)}</div>`:''}</td></tr>`).join('')+`
       </tbody></table></div>`
       :`<div class="empty"><h3>No payout requests yet</h3><p>Pass a challenge, get funded and request your first performance reward. Your challenge fee comes back with it.</p></div>`}

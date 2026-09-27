@@ -2,8 +2,9 @@
 
 Drugi „pending" na tym samym koncie to dubel z niecierpliwości — dwa wnioski
 na ten sam zysk rozjeżdżają księgowanie. Po decyzji admina (reject) droga
-otwiera się ponownie. Portal pisze „reviewed within 24 hours" z pola
-summary.review_hours, a pending wniosek niesie expected_by.
+otwiera się ponownie. API dalej niesie summary.review_hours i expected_by
+pending wniosku (panel i powiadomienia), ale portal tradera od 2026-09 nie
+obiecuje terminu: bez „reviewed within 24 hours" i bez „decision by …".
 """
 import os
 import tempfile
@@ -96,3 +97,11 @@ def test_zamkniety_wniosek_bez_expected_by():
         me = c.get("/api/me/payouts", headers=h).json()
     wiersz = next(x for x in me["requests"] if x["id"] == req_id)
     assert wiersz["expected_by"] is None
+
+
+def test_portal_nie_obiecuje_terminu_decyzji():
+    from conftest import zrodlo_portalu
+    kod = zrodlo_portalu()
+    assert "reviewed within" not in kod
+    assert "decision by" not in kod
+    assert "Payouts are <b>on demand</b>" in kod
