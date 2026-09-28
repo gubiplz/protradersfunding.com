@@ -11,12 +11,19 @@ brzmiało jak jeden szablon. Bez etykiet, punktorów i ciągu pauz: to znaki AI.
 Zasady treści jak w `lead_mail.tresc()`: liczby, nie przymiotniki; jedno
 zdanie o tym, co dalej; zero obietnic. Konto, które padło, dostaje zdanie
 wprost — nie da się napisać „update", który tego nie zauważa.
+
+Każda faza to osobny track record. Awans zeruje saldo, a transakcje zostają
+w jednej tabeli dla całego konta — bez odcięcia konto funded na $100,035
+szło do klienta z „80 closed trades, +$15,683 net" z obu ewaluacji. Liczymy
+tylko transakcje bieżącej fazy (`_transakcje_fazy`), tą samą granicą co
+widok konta w portalu (`main._phase_window`).
 """
 from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import datetime, timezone
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import func
 
@@ -49,8 +56,14 @@ class KontoInfo:
     streak: int = 0
     payouts_usd: float = 0.0
     split_pct: float = 0.0
+    # Tylko w danych dla panelu. Do tekstu nie trafia: klient na funded nie
+    # dostaje odliczania dni handlu do okna wypłaty.
     payout_days_left: int = 0
     breach_reason: str | None = None
+    # False = nie da się ustalić, które transakcje należą do bieżącej fazy.
+    # Tekst pomija wtedy zdanie o transakcjach, zamiast pokazać wynik
+    # z poprzednich faz jako dzisiejszy.
+    trades_known: bool = True
 
     def json(self) -> dict:
         return {k: (round(v, 2) if isinstance(v, float) else v) for k, v in self.__dict__.items()}
@@ -68,18 +81,99 @@ class Insights:
                 "variants": list(self.variants), "mail_variants": list(self.mail_variants)}
 
 
+def _bez_strefy(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    return dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
+
+
+def _kiedy(t: Trade) -> datetime | None:
+    # Ten sam znacznik co `main._w_oknie`: transakcja należy do fazy, w której
+    # się zamknęła — to wtedy jej wynik trafił na saldo.
+    return _bez_strefy(t.closed_at or t.opened_at)
+
+
+def _cele_zaliczonych_faz(acc: Account) -> list[float]:
+    """Cele (w %) faz, które konto musiało zaliczyć, żeby być tam, gdzie jest."""
+    p1, p2 = float(acc.profit_target_p1 or 0), float(acc.profit_target_p2 or 0)
+    if acc.phase == "eval_2":
+        return [p1]
+    if acc.phase == "funded":
+        return [p1, p2] if (acc.steps or 1) >= 2 else [p1]
+    return []
+
+
+def _transakcje_fazy(acc: Account, zamkniete: list[Trade],
+                     zdjete_wyplatami: float) -> list[Trade] | None:
+    """Zamknięte transakcje BIEŻĄCEJ fazy, od najstarszej; None = nie wiadomo.
+
+    Granica to `phase_started_at` — stawia ją każdy awans (poller i ręczne
+    przestawienie fazy w panelu) i reset historii. Pierwsza faza bez daty to
+    całe konto. Konto awansowane, zanim ta kolumna powstała, daty nie ma:
+    granicę odtwarzamy z księgi, bo na koncie botowym saldo fazy to suma jej
+    transakcji (plus zysk zdjęty wypłatami z resetem salda)."""
+    zamkniete = sorted(zamkniete, key=lambda t: _kiedy(t) or datetime.min)
+    od = _bez_strefy(acc.phase_started_at)
+    if od is not None:
+        return [t for t in zamkniete if (_kiedy(t) or datetime.min) >= od]
+    if acc.phase == "eval_1":
+        return zamkniete
+    start = float(acc.initial_balance or 0)
+    wynik_fazy = float(acc.balance or 0) - start + zdjete_wyplatami
+    pnl = [float(t.pnl or 0) for t in zamkniete]
+    ogon = [0.0] * (len(pnl) + 1)
+    for i in range(len(pnl) - 1, -1, -1):
+        ogon[i] = ogon[i + 1] + pnl[i]
+
+    def zgodne(i: int) -> bool:
+        return abs(ogon[i] - wynik_fazy) < 1.0
+
+    if zgodne(0):
+        return zamkniete          # całe konto w tej fazie (np. otwarte od razu jako funded)
+    cele = _cele_zaliczonych_faz(acc)
+    if not cele or not start:
+        return None
+    # Każda wcześniejsza faza skończyła się co najmniej na swoim celu, więc
+    # przed granicą leży zysk nie mniejszy niż suma celów — to odsiewa ogony,
+    # które zgadzają się z saldem przypadkiem.
+    prog = start * sum(cele) / 100.0
+    glowa = 0.0
+    for i, x in enumerate(pnl):
+        glowa += x
+        if glowa >= prog - 0.01 and zgodne(i + 1):
+            return zamkniete[i + 1:]
+    # Księga się nie zgadza (np. ręczna korekta salda): granica tam, gdzie
+    # saldo każdej fazy doszło do jej celu — tak awansuje silnik reguł.
+    faza, saldo = 0, start
+    for i, x in enumerate(pnl):
+        saldo += x
+        if saldo >= round(start * (1 + cele[faza] / 100.0), 2):
+            faza, saldo = faza + 1, start
+            if faza == len(cele):
+                return zamkniete[i + 1:]
+    return None
+
+
 def _konto(session, acc: Account) -> KontoInfo:
     cfg = rules.config_from_account(acc)
     m = rules.display_metrics(cfg, balance=acc.balance, equity=acc.equity,
                               peak_equity=acc.peak_equity, day_start_equity=acc.day_start_equity,
                               trading_days=acc.trading_days_count)
     start = float(acc.initial_balance or 0) or 1.0
-    trades = (session.query(Trade)
-              .filter(Trade.account_id == acc.id, Trade.status == "closed").all())
+    zamkniete = (session.query(Trade)
+                 .filter(Trade.account_id == acc.id, Trade.status == "closed").all())
+    zdjete = 0.0
+    if acc.phase == "funded" and acc.phase_started_at is None:
+        zdjete = float(session.query(func.coalesce(func.sum(Payout.profit_amount), 0.0))
+                       .filter(Payout.account_id == acc.id, Payout.balance_reset.is_(True))
+                       .scalar() or 0.0)
+    trades = _transakcje_fazy(acc, zamkniete, zdjete)
+    znane = trades is not None
+    trades = trades or []
     wins = [t for t in trades if (t.pnl or 0) > 0]
     # Seria z końca historii: +n = n zysków z rzędu, -n = n strat.
     streak = 0
-    for t in reversed(sorted(trades, key=lambda x: (x.closed_at or x.opened_at or datetime.min))):
+    for t in reversed(trades):
         pnl = t.pnl or 0
         if pnl > 0 and streak >= 0:
             streak += 1
@@ -100,7 +194,10 @@ def _konto(session, acc: Account) -> KontoInfo:
         login=str(acc.login), plan=acc.product_key, phase=acc.phase, status=acc.status,
         initial_balance=float(acc.initial_balance or 0),
         balance=float(acc.balance or 0), equity=float(acc.equity or 0),
-        profit_pct=float(m.get("profit_pct", (float(acc.balance or 0) - start) / start * 100)),
+        # Wprost z salda, nie z `display_metrics`: tam wynik jest już
+        # zaokrąglony do setnych, a drugie zaokrąglenie przy druku psuło
+        # połówki ($100,035 na $100,000 wychodziło jako 0.03 albo 0.0).
+        profit_pct=(float(acc.balance or 0) - start) / start * 100,
         target_pct=float(cfg.profit_target_pct or 0),
         days=int(acc.trading_days_count or 0), min_days=int(cfg.min_trading_days or 0),
         dd_used_pct=float(m.get("overall_dd_used_pct", 0) or 0),
@@ -110,6 +207,7 @@ def _konto(session, acc: Account) -> KontoInfo:
         split_pct=float(acc.profit_split_pct or 0),
         payout_days_left=int(poller.payout_days_left(acc)),
         breach_reason=acc.breach_reason,
+        trades_known=znane,
     )
 
 
@@ -121,8 +219,22 @@ def _usd_znak(x: float) -> str:
     return ("+" if x >= 0 else "-") + _usd(abs(x))
 
 
+def _pc(x: float) -> str:
+    """Wartość procentu bez znaku: 0.035 → „0.04", 4.80 → „4.8", 8.0 → „8".
+
+    Dwa miejsca po przecinku, połówki w górę przez Decimal — float 0.035 to
+    0.03499…, więc zwykłe round() dawało 0.03. Ruch mniejszy niż setna dostaje
+    trzecie miejsce: konto na plusie nie może czytać się jako „up 0%"."""
+    d = Decimal(repr(round(abs(x), 6)))
+    q = d.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if q == 0 and d > 0:
+        q = d.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+    s = format(q, "f")
+    return s.rstrip("0").rstrip(".") if "." in s else s
+
+
 def _proc(x: float) -> str:
-    return ("+" if x >= 0 else "") + f"{x:.1f}%"
+    return ("+" if x >= 0 else "-") + _pc(x) + "%"
 
 
 def _faza(k: KontoInfo) -> str:
@@ -142,7 +254,8 @@ def _faza(k: KontoInfo) -> str:
 # o transakcjach, o dalszym kroku, zakończenie i układ akapitów, a nie tylko
 # pierwsze zdanie. Styl jak pisze człowiek na Telegramie: akapity zamiast
 # etykiet i punktorów, najwyżej jedna pauza w wiadomości (jest tylko w jednym
-# ujęciu stanu konta). Dni handlowych celowo nie pokazujemy.
+# ujęciu stanu konta). Dni handlowych celowo nie pokazujemy — także na funded
+# nie ma odliczania do okna wypłaty.
 
 @dataclass(frozen=True)
 class Ujecie:
@@ -180,7 +293,7 @@ def _stan(k: KontoInfo, u: Ujecie, wiele: bool, *, blok: bool = False, pauza: bo
             f"{_usd(k.balance)} on a {_usd(k.initial_balance)} start.",
         ][u.stan % 2]
     wzrost = "up" if k.profit_pct >= 0 else "down"
-    p = f"{abs(k.profit_pct):.1f}%"
+    p = f"{_pc(k.profit_pct)}%"
     twoje = "Account" if wiele else "Your account"
     if blok:
         ujecia = [
@@ -205,16 +318,18 @@ def _stan(k: KontoInfo, u: Ujecie, wiele: bool, *, blok: bool = False, pauza: bo
     zd = [ujecia[i]]
     if faza != "funded" and k.target_pct > 0:
         zostalo = k.target_pct - k.profit_pct
+        cel = f"{_pc(k.target_pct)}%"
         if zostalo <= 0:
             zd.append(["The profit target is already hit.",
                        "Target is done.",
-                       f"The {k.target_pct:.0f}% target is already reached."][u.cel % 3])
+                       f"The {cel} target is already reached."][u.cel % 3])
         else:
-            zd.append([f"{zostalo:.1f}% left to the {k.target_pct:.0f}% target.",
-                       f"The {k.target_pct:.0f}% target is {zostalo:.1f}% away.",
-                       f"About {zostalo:.1f}% more gets it to the target."][u.cel % 3])
+            z = f"{_pc(zostalo)}%"
+            zd.append([f"{z} left to the {cel} target.",
+                       f"The {cel} target is {z} away.",
+                       f"About {z} more gets it to the target."][u.cel % 3])
     if k.dd_used_pct > 0:
-        dd = f"{k.dd_used_pct:.0f}%"
+        dd = f"{_pc(k.dd_used_pct)}%"
         if k.dd_used_pct >= 70:
             zd.append([f"We've used {dd} of the drawdown limit, so size stays small.",
                        f"Drawdown is at {dd} of the limit, which is why we're trading smaller.",
@@ -232,10 +347,6 @@ def _stan(k: KontoInfo, u: Ujecie, wiele: bool, *, blok: bool = False, pauza: bo
             zd.append([f"Paid out so far: {_usd(k.payouts_usd)}, your share at {k.split_pct:.0f}%.",
                        f"You've had {_usd(k.payouts_usd)} paid out so far ({k.split_pct:.0f}% split)."]
                       [u.cel % 2])
-        if k.payout_days_left > 0:
-            zd.append([f"First payout window opens in {k.payout_days_left} trading days.",
-                       f"{k.payout_days_left} more trading days until the first payout window."]
-                      [u.dd % 2])
     return " ".join(zd)
 
 
@@ -245,6 +356,8 @@ def _wynik(k: KontoInfo, u: Ujecie) -> str:
         return ["The last positions went against us and the limit closed it before it could turn.",
                 "The last few trades went the wrong way and the limit kicked in before they came back."
                 ][u.wynik % 2]
+    if not k.trades_known:
+        return ""
     if not k.trades:
         return ["Positions are going on, but nothing closed yet, so no result to show.",
                 "Nothing closed yet, so there's no trade result to report.",
@@ -267,7 +380,7 @@ def _wynik(k: KontoInfo, u: Ujecie) -> str:
         zd.append([f"The last {-k.streak} went against us, so size is down until it turns.",
                    f"{-k.streak} losers in a row, so we've cut size for now."][u.wynik % 2])
     if k.daily_used_pct >= 50:
-        zd.append(f"Today already used {k.daily_used_pct:.0f}% of the daily limit, "
+        zd.append(f"Today already used {_pc(k.daily_used_pct)}% of the daily limit, "
                   "so we're done for the day.")
     return " ".join(zd)
 
@@ -302,8 +415,8 @@ def _dalej(konta: list[KontoInfo], u: Ujecie) -> str:
         return ["Target's done, so next is moving it to the next stage.",
                 "With the target in, it goes to the next stage from here.",
                 "Next up is the move to the next stage."][u.dalej % 3]
-    if k.payout_days_left > 0:
-        return ["Next up is the first payout window.",
+    if k.payouts_usd <= 0:
+        return ["Next up is the first payout.",
                 "Now it's about getting to the first payout.",
                 "The first payout is the next thing on the list."][u.dalej % 3]
     return ["From here we keep it steady.",
@@ -351,6 +464,12 @@ def _ujecia(ile: int, n_otw: int, n_zak: int, ziarno: int) -> list[Ujecie]:
     return wszystkie[:ile]
 
 
+def _zlacz(sep: str, *czesci: str) -> str:
+    # Zdanie o transakcjach bywa puste (faza nie do ustalenia) — bez tego
+    # zostawałaby po nim pusta linia albo spacja na początku akapitu.
+    return sep.join(c for c in czesci if c)
+
+
 def _tresc(imie: str, konta: list[KontoInfo], u: Ujecie, otwarcie: str, zakonczenie: str) -> str:
     wiele = len(konta) > 1
     otw = (otwarcie.replace("{name}", imie)
@@ -365,21 +484,21 @@ def _tresc(imie: str, konta: list[KontoInfo], u: Ujecie, otwarcie: str, zakoncze
         for i, k in enumerate(konta):
             ui = replace(u, stan=u.stan + i, cel=u.cel + i, dd=u.dd + i, wynik=u.wynik + i,
                          otw=u.otw)
-            srodek.append(f"{_naglowek(k, ui)}\n{_stan(k, ui, True, blok=True, pauza=i == 0)}"
-                          f"\n{_wynik(k, ui)}")
+            srodek.append(_zlacz("\n", _naglowek(k, ui),
+                                 _stan(k, ui, True, blok=True, pauza=i == 0), _wynik(k, ui)))
         akapity = [otw, *srodek, dalej, zakonczenie]
     else:
         k = konta[0]
         stan, wynik = _stan(k, u, False), _wynik(k, u)
         if u.uklad == 3:
-            blok = f"{_naglowek(k, u)}\n{_stan(k, u, False, blok=True)}\n{wynik}"
+            blok = _zlacz("\n", _naglowek(k, u), _stan(k, u, False, blok=True), wynik)
             akapity = [otw, blok, dalej, zakonczenie]
         elif u.uklad == 0:
             akapity = [otw, stan, wynik, dalej, zakonczenie]
         elif u.uklad == 1:
             akapity = [f"{otw} {stan}", wynik, f"{dalej} {zakonczenie}"]
         else:
-            akapity = [otw, stan, f"{wynik} {dalej}", zakonczenie]
+            akapity = [otw, stan, _zlacz(" ", wynik, dalej), zakonczenie]
     return "\n\n".join(a for a in akapity if a)
 
 

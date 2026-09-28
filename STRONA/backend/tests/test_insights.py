@@ -136,6 +136,97 @@ def test_dwa_konta_to_dwa_bloki_bez_punktorow():
         assert "next stage from here" not in t and "Target's done" not in t
 
 
+def _konto_po_awansie(tid, *, phase, balance, initial=100_000.0, od=None, stare=(), nowe=(),
+                      status=None, days=1, min_days=5):
+    """Konto po awansie: `stare` zamknięte przed startem fazy, `nowe` po nim.
+    `od=None` = konto sprzed kolumny `phase_started_at` (bez daty awansu)."""
+    s = SessionLocal()
+    acc = Account(trader_id=tid, login=f"7{next(LICZNIK)}", product_key="2step-100k",
+                  initial_balance=initial, balance=balance, equity=balance,
+                  peak_equity=max(balance, initial), day_start_equity=balance,
+                  status=status or ("funded" if phase == "funded" else "active"), phase=phase,
+                  trading_days_count=days, min_trading_days=min_days,
+                  profit_target_p1=8.0, profit_target_p2=5.0, max_daily_loss_pct=5.0,
+                  max_overall_loss_pct=10.0, steps=2, profit_split_pct=80.0, source="purchase",
+                  phase_started_at=od)
+    s.add(acc); s.flush()
+    for i, (symbol, pnl) in enumerate([*stare, *nowe]):
+        # Stare dni temu, nowe w ostatnich godzinach — po kolei, jak w księdze.
+        kiedy = (TERAZ - timedelta(days=10, hours=-i) if i < len(stare)
+                 else TERAZ - timedelta(hours=4) + timedelta(minutes=i))
+        s.add(Trade(account_id=acc.id, symbol=symbol, side="buy", lots=0.1, open_price=1.0,
+                    close_price=1.0, pnl=pnl, status="closed", source="bot",
+                    opened_at=kiedy - timedelta(minutes=30), closed_at=kiedy))
+    s.commit(); login = acc.login; s.close()
+    return login
+
+
+def test_funded_po_awansie_to_nowy_track_record():
+    """Konto funded na $100,035: bez „80 closed trades, +$15,683" z ewaluacji,
+    z dokładnym procentem i bez odliczania dni do okna wypłaty."""
+    tid = _trader("Sunny Sohi")
+    ewaluacje = [("NAS100", 900.0)] * 15 + [("NAS100", -200.0)] * 5   # +12,500 w fazach 1 i 2
+    login = _konto_po_awansie(tid, phase="funded", balance=100_035.0,
+                              od=TERAZ - timedelta(hours=5), stare=ewaluacje,
+                              nowe=[("EURUSD", 20.0), ("XAUUSD", 15.0)])
+    dane = client.get(f"/api/admin/traders/{tid}/insights", headers=ADMIN).json()
+    (k,) = dane["accounts"]
+    assert k["trades"] == 2 and k["wins"] == 2 and k["net_pnl"] == 35.0
+    assert k["best_symbol"] == "EURUSD"
+    for tekst in dane["variants"] + dane["mail_variants"]:
+        assert login in tekst and "$100,035" in tekst and "0.04%" in tekst, tekst
+        assert "0.0%" not in tekst and "NAS100" not in tekst and "$12,500" not in tekst
+        assert "payout window" not in tekst and "trading days" not in tekst
+        _jak_czlowiek(tekst)
+    assert any("+$35" in t for t in dane["variants"])
+
+
+def test_phase_2_liczy_od_zera():
+    tid = _trader("Ola")
+    login = _konto_po_awansie(tid, phase="eval_2", balance=101_200.0,
+                              od=TERAZ - timedelta(hours=5),
+                              stare=[("US30", 5_000.0), ("US30", 3_400.0)],
+                              nowe=[("XAUUSD", 800.0), ("XAUUSD", 400.0)])
+    dane = client.get(f"/api/admin/traders/{tid}/insights", headers=ADMIN).json()
+    (k,) = dane["accounts"]
+    assert k["trades"] == 2 and k["net_pnl"] == 1_200.0 and k["best_symbol"] == "XAUUSD"
+    for tekst in dane["variants"]:
+        assert login in tekst and "1.2%" in tekst and "3.8%" in tekst   # 5% - 1.2%
+        assert "US30" not in tekst and "$9,600" not in tekst and "$8,400" not in tekst
+
+
+def test_stare_konto_bez_daty_awansu_odtwarza_granice_z_ksiegi():
+    """Awans sprzed kolumny `phase_started_at`: faza 1 skończyła się na +8%,
+    faza 2 na +5% — funded to dopiero dwie ostatnie transakcje."""
+    tid = _trader("Lee")
+    _konto_po_awansie(tid, phase="funded", balance=25_035.0, initial=25_000.0, od=None,
+                      stare=[("US30", 1_000.0), ("US30", 1_100.0), ("GER40", 700.0),
+                             ("GER40", 600.0)],
+                      nowe=[("EURUSD", 20.0), ("EURUSD", 15.0)])
+    (k,) = client.get(f"/api/admin/traders/{tid}/insights", headers=ADMIN).json()["accounts"]
+    assert k["trades_known"] and k["trades"] == 2 and k["net_pnl"] == 35.0
+
+
+def test_faza_nie_do_ustalenia_pomija_transakcje_zamiast_pokazac_stare():
+    tid = _trader("Kim")
+    _konto_po_awansie(tid, phase="funded", balance=25_035.0, initial=25_000.0, od=None,
+                      stare=[("US30", 100.0), ("US30", -50.0)])
+    dane = client.get(f"/api/admin/traders/{tid}/insights", headers=ADMIN).json()
+    assert dane["accounts"][0]["trades_known"] is False
+    for tekst in dane["variants"]:
+        assert "trades" not in tekst and "US30" not in tekst and "othing closed" not in tekst
+        assert "$25,035" in tekst and "0.14%" in tekst and "\n\n\n" not in tekst
+        assert " \n" not in tekst and "\n " not in tekst and not tekst.endswith("\n")
+
+
+def test_procent_bez_gubienia_malych_ruchow():
+    assert insights._pc(0.035) == "0.04"
+    assert insights._pc((100_035 - 100_000) / 100_000 * 100) == "0.04"
+    assert insights._pc(4.8) == "4.8" and insights._pc(8.0) == "8" and insights._pc(3.25) == "3.25"
+    assert insights._pc(0.004) == "0.004" and insights._pc(0) == "0"
+    assert insights._proc(-1.5) == "-1.5%" and insights._proc(0.035) == "+0.04%"
+
+
 def test_szablony_dynamiczne_i_wiecej_ujec():
     lista = {t["id"]: t for t in client.get("/api/admin/email-templates", headers=ADMIN).json()}
     assert lista["b:fx-weekly"]["dynamic"] == "insights"
