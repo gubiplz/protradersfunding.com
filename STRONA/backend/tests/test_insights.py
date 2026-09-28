@@ -177,8 +177,39 @@ def test_funded_po_awansie_to_nowy_track_record():
         assert login in tekst and "$100,035" in tekst and "0.04%" in tekst, tekst
         assert "0.0%" not in tekst and "NAS100" not in tekst and "$12,500" not in tekst
         assert "payout window" not in tekst and "trading days" not in tekst
+        # Co dalej na funded to sposób prowadzenia konta, nigdy wypłata.
+        assert "payout" not in tekst.lower()
         _jak_czlowiek(tekst)
     assert any("+$35" in t for t in dane["variants"])
+    # „Another wording" ma z czego zmieniać także zdanie o dalszym kroku.
+    dalej = {z for z in insights._DALEJ_FUNDED for t in dane["variants"] if z in t}
+    assert len(dalej) >= 7, dalej
+
+
+def test_funded_pod_startem_mowi_o_odrabianiu_nie_o_wyplacie():
+    tid = _trader("Max")
+    _konto_po_awansie(tid, phase="funded", balance=99_400.0, od=TERAZ - timedelta(hours=5),
+                      nowe=[("XAUUSD", -600.0)])
+    warianty = client.get(f"/api/admin/traders/{tid}/insights", headers=ADMIN).json()["variants"]
+    for tekst in warianty:
+        assert "payout" not in tekst.lower()
+        assert "down 0.6%" in tekst or "-0.6%" in tekst, tekst
+        assert any(z.replace("{it}", "it") in tekst for z in insights._DALEJ_FUNDED_POD_KRESKA)
+
+
+def test_duzo_roznych_ujec_dla_another_wording():
+    tid = _trader("Ada Obi")
+    _konto(tid, trades=[("XAUUSD", 300.0), ("XAUUSD", 500.0), ("US30", -100.0)])
+    dane = client.get(f"/api/admin/traders/{tid}/insights", headers=ADMIN).json()
+    dm, mail = dane["variants"], dane["mail_variants"]
+    assert len(dm) >= 100 and len(set(dm)) == len(dm)
+    assert len(mail) >= 50 and len(set(mail)) == len(mail)
+    # Otwarcia, zakończenia i zdania o transakcjach w wielu wersjach, nie w trzech.
+    assert len({t.split("\n")[0].split(".")[0] for t in dm}) >= 8
+    assert len({t.rsplit("\n\n", 1)[-1].split(". ")[-1] for t in dm}) >= 8
+    assert len({z for w in dm for z in re.findall(r"[^.\n]*trades[^.\n]*\.", w)}) >= 6
+    for tekst in dm + mail:
+        _jak_czlowiek(tekst)
 
 
 def test_phase_2_liczy_od_zera():
