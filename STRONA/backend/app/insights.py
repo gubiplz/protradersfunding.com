@@ -256,6 +256,10 @@ def _faza(k: KontoInfo) -> str:
 # etykiet i punktorów, najwyżej jedna pauza w wiadomości (jest tylko w jednym
 # ujęciu stanu konta). Dni handlowych celowo nie pokazujemy — także na funded
 # nie ma odliczania do okna wypłaty.
+#
+# Indeksy w `Ujecie` są duże i losowe, a klocek bierze swój modulo długości
+# puli (`_z`). Pule mogą więc mieć różne długości i rosnąć bez przeliczania
+# kombinacji — pełny iloczyn przy obecnych pulach miałby miliony pozycji.
 
 @dataclass(frozen=True)
 class Ujecie:
@@ -269,119 +273,164 @@ class Ujecie:
     uklad: int
 
 
+# NWW liczb 1..10: indeks modulo długości każdej puli do 10 rozkłada się równo.
+_ZAKRES = 2520
+
+
+def _z(pula: list[str], i: int) -> str:
+    return pula[i % len(pula)]
+
+
 def _naglowek(k: KontoInfo, u: Ujecie) -> str:
-    """Pierwsza linia bloku konta: numer i faza, bez ozdobników."""
-    return [f"Account {k.login}, {_faza(k)}", f"{k.login} ({_faza(k)})"][u.otw % 2]
+    """Pierwsza linia bloku konta: numer i faza, bez ozdobników. Styl nagłówka
+    bierze się z `uklad // 4`, więc przy kilku kontach wszystkie bloki jednej
+    wiadomości mają nagłówek w tej samej formie."""
+    f = _faza(k)
+    return _z([f"Account {k.login}, {f}", f"{k.login} ({f})",
+               f"Account {k.login} ({f})", f"{k.login}, {f}"], u.uklad // 4)
 
 
 def _stan(k: KontoInfo, u: Ujecie, wiele: bool, *, blok: bool = False, pauza: bool = True) -> str:
     """Stan konta: saldo, wynik od startu, faza, cel, drawdown, wypłaty.
     `blok` = nad zdaniem stoi nagłówek z numerem i fazą, więc zdanie ich nie
-    powtarza. `pauza=False` wyłącza jedyne ujęcie z pauzą (limit na wiadomość)."""
+    powtarza. `pauza=False` wyłącza ujęcia z pauzą (limit na wiadomość)."""
     faza = _faza(k)
+    bal, start = _usd(k.balance), _usd(k.initial_balance)
     if k.status == "failed":
         powod = f" ({k.breach_reason})" if k.breach_reason else ""
         if blok:
-            return [f"Hit a rule and got closed{powod}. Ended at {_usd(k.balance)} "
-                    f"from {_usd(k.initial_balance)}.",
-                    f"Closed after it hit a rule{powod}, finishing at {_usd(k.balance)} "
-                    f"on {_usd(k.initial_balance)}."][u.stan % 2]
-        return [
-            f"Account {k.login} hit a rule and is closed{powod}. It finished at "
-            f"{_usd(k.balance)} from the {_usd(k.initial_balance)} start.",
-            f"Account {k.login} is closed after it hit a rule{powod}, ending at "
-            f"{_usd(k.balance)} on a {_usd(k.initial_balance)} start.",
-        ][u.stan % 2]
+            return _z([f"Hit a rule and got closed{powod}. Ended at {bal} from {start}.",
+                       f"Closed after it hit a rule{powod}, finishing at {bal} on {start}.",
+                       f"This one is closed, it hit a rule{powod}. Final balance {bal} on a "
+                       f"{start} start.",
+                       f"Got closed on a rule{powod}, ending at {bal} from {start}."], u.stan)
+        return _z([
+            f"Account {k.login} hit a rule and is closed{powod}. It finished at {bal} from "
+            f"the {start} start.",
+            f"Account {k.login} is closed after it hit a rule{powod}, ending at {bal} on a "
+            f"{start} start.",
+            f"{k.login} got closed after hitting a rule{powod}. It ended at {bal} from {start}.",
+            f"Bad news on {k.login}, it hit a rule and is closed{powod}. Final balance {bal} "
+            f"on a {start} start.",
+        ], u.stan)
     wzrost = "up" if k.profit_pct >= 0 else "down"
-    p = f"{_pc(k.profit_pct)}%"
+    p, pr = f"{_pc(k.profit_pct)}%", _proc(k.profit_pct)
     twoje = "Account" if wiele else "Your account"
     if blok:
         ujecia = [
-            f"At {_usd(k.balance)}, {wzrost} {p} from the {_usd(k.initial_balance)} start.",
-            f"Balance {_usd(k.balance)}, {_proc(k.profit_pct)} on {_usd(k.initial_balance)}.",
-            f"Sitting at {_usd(k.balance)} – {_proc(k.profit_pct)} overall.",
-            f"{_usd(k.balance)} now, {wzrost} {p} since the start.",
+            f"At {bal}, {wzrost} {p} from the {start} start.",
+            f"Balance {bal}, {pr} on {start}.",
+            f"Sitting at {bal} – {pr} overall.",
+            f"{bal} now, {wzrost} {p} since the start.",
+            f"Now on {bal}, which is {pr} from {start}.",
+            f"{bal} on the account, {wzrost} {p} overall.",
         ]
     else:
         ujecia = [
-        f"{twoje} {k.login} is at {_usd(k.balance)}, {wzrost} {p} from the "
-        f"{_usd(k.initial_balance)} start. It's in {faza}.",
-        f"Account {k.login} is sitting at {_usd(k.balance)} – that's "
-        f"{_proc(k.profit_pct)} on {_usd(k.initial_balance)}, still in {faza}.",
-        f"{k.login} ({faza}) is on {_usd(k.balance)} right now, {wzrost} {p} overall.",
-        f"Balance on {k.login} is {_usd(k.balance)}, so {_proc(k.profit_pct)} since the start. "
-        f"We're in {faza}.",
+            f"{twoje} {k.login} is at {bal}, {wzrost} {p} from the {start} start. "
+            f"It's in {faza}.",
+            f"Account {k.login} is sitting at {bal} – that's {pr} on {start}, still in {faza}.",
+            f"{k.login} ({faza}) is on {bal} right now, {wzrost} {p} overall.",
+            f"Balance on {k.login} is {bal}, so {pr} since the start. We're in {faza}.",
+            f"{k.login} is in {faza} and on {bal}, {wzrost} {p} from {start}.",
+            f"Right now {k.login} shows {bal}, that's {pr} on the {start} start ({faza}).",
         ]
-    i = u.stan % 4
-    if i == (2 if blok else 1) and not pauza:
-        i = 0
-    zd = [ujecia[i]]
+    zdanie = _z(ujecia, u.stan)
+    if not pauza and "–" in zdanie:
+        zdanie = ujecia[0]
+    zd = [zdanie]
     if faza != "funded" and k.target_pct > 0:
         zostalo = k.target_pct - k.profit_pct
         cel = f"{_pc(k.target_pct)}%"
         if zostalo <= 0:
-            zd.append(["The profit target is already hit.",
-                       "Target is done.",
-                       f"The {cel} target is already reached."][u.cel % 3])
+            zd.append(_z(["The profit target is already hit.",
+                          "Target is done.",
+                          f"The {cel} target is already reached.",
+                          f"It's already past the {cel} target.",
+                          "The target is in."], u.cel))
         else:
             z = f"{_pc(zostalo)}%"
-            zd.append([f"{z} left to the {cel} target.",
-                       f"The {cel} target is {z} away.",
-                       f"About {z} more gets it to the target."][u.cel % 3])
+            zd.append(_z([f"{z} left to the {cel} target.",
+                          f"The {cel} target is {z} away.",
+                          f"About {z} more gets it to the target.",
+                          f"Still {z} to go for the {cel} target.",
+                          f"{z} more and the {cel} target is done."], u.cel))
     if k.dd_used_pct > 0:
         dd = f"{_pc(k.dd_used_pct)}%"
         if k.dd_used_pct >= 70:
-            zd.append([f"We've used {dd} of the drawdown limit, so size stays small.",
-                       f"Drawdown is at {dd} of the limit, which is why we're trading smaller.",
-                       f"{dd} of the max loss is used, so we're being careful with size."][u.dd % 3])
+            zd.append(_z([f"We've used {dd} of the drawdown limit, so size stays small.",
+                          f"Drawdown is at {dd} of the limit, which is why we're trading smaller.",
+                          f"{dd} of the max loss is used, so we're being careful with size.",
+                          f"With {dd} of the drawdown limit used, positions stay small for now.",
+                          f"{dd} of the loss limit is gone, so risk per position is cut."], u.dd))
         elif k.dd_used_pct < 40:
-            zd.append([f"Only {dd} of the drawdown limit used, so there's plenty of room.",
-                       f"Drawdown used is {dd} of the limit, lots of room left.",
-                       f"Risk is fine, {dd} of the max loss used."][u.dd % 3])
+            zd.append(_z([f"Only {dd} of the drawdown limit used, so there's plenty of room.",
+                          f"Drawdown used is {dd} of the limit, lots of room left.",
+                          f"Risk is fine, {dd} of the max loss used.",
+                          f"The drawdown limit is barely touched, {dd} used.",
+                          f"{dd} of the max loss used, so there's a good cushion."], u.dd))
         else:
-            zd.append([f"We've used {dd} of the drawdown limit.",
-                       f"Drawdown is at {dd} of the limit.",
-                       f"{dd} of the max loss used so far."][u.dd % 3])
-    if faza == "funded":
-        if k.payouts_usd > 0:
-            zd.append([f"Paid out so far: {_usd(k.payouts_usd)}, your share at {k.split_pct:.0f}%.",
-                       f"You've had {_usd(k.payouts_usd)} paid out so far ({k.split_pct:.0f}% split)."]
-                      [u.cel % 2])
+            zd.append(_z([f"We've used {dd} of the drawdown limit.",
+                          f"Drawdown is at {dd} of the limit.",
+                          f"{dd} of the max loss used so far.",
+                          f"The drawdown limit is {dd} used.",
+                          f"{dd} of the loss limit is used, so we're keeping an eye on it."], u.dd))
+    if faza == "funded" and k.payouts_usd > 0:
+        # Fakt z księgi, nie zapowiedź: pojawia się dopiero po realnej wypłacie.
+        zd.append(_z([f"Paid out so far: {_usd(k.payouts_usd)}, your share at {k.split_pct:.0f}%.",
+                      f"You've had {_usd(k.payouts_usd)} paid out so far ({k.split_pct:.0f}% split)."],
+                     u.cel // 5))
     return " ".join(zd)
 
 
 def _wynik(k: KontoInfo, u: Ujecie) -> str:
     """Co zrobiliśmy: z zamkniętych transakcji; bez nich mówi to wprost."""
     if k.status == "failed":
-        return ["The last positions went against us and the limit closed it before it could turn.",
-                "The last few trades went the wrong way and the limit kicked in before they came back."
-                ][u.wynik % 2]
+        return _z(["The last positions went against us and the limit closed it before it could turn.",
+                   "The last few trades went the wrong way and the limit kicked in before they came back.",
+                   "A run of losing positions took it to the limit before it could recover."], u.wynik)
     if not k.trades_known:
         return ""
     if not k.trades:
-        return ["Positions are going on, but nothing closed yet, so no result to show.",
-                "Nothing closed yet, so there's no trade result to report.",
-                "Trades are open and nothing closed yet. I'll have numbers next time."][u.wynik % 3]
-    wr = f"{100.0 * k.wins / k.trades:.0f}%"
+        return _z(["Positions are going on, but nothing closed yet, so no result to show.",
+                   "Nothing closed yet, so there's no trade result to report.",
+                   "Trades are open and nothing closed yet. I'll have numbers next time.",
+                   "Nothing closed yet on this one, so no trade numbers so far.",
+                   "We're in positions but nothing closed yet, results come once they do."], u.wynik)
+    n, wins = k.trades, k.wins
+    tr = "trade" if n == 1 else "trades"
+    wr = f"{100.0 * wins / n:.0f}%"
     net = _usd_znak(k.net_pnl)
     skad = k.best_symbol if k.best_symbol and k.net_pnl > 0 else None
-    zd = [[
-        f"{k.trades} trades closed, {wr} of them winners, net {net}."
+    zd = [_z([
+        f"{n} {tr} closed, {wr} of them winners, net {net}."
         + (f" Most of it came from {skad}." if skad else ""),
-        f"We've closed {k.trades} trades so far. {k.wins} won, net result {net}"
+        f"We've closed {n} {tr} so far. {wins} won, net result {net}"
         + (f", mostly from {skad}." if skad else "."),
-        f"So far {k.trades} closed trades at a {wr} win rate, {net} net."
+        f"So far {n} closed {tr} at a {wr} win rate, {net} net."
         + (f" {skad} did the most work." if skad else ""),
-    ][u.wynik % 3]]
+        f"{n} {tr} closed so far, {wins} of them green, {net} net."
+        + (f" {skad} brought in the most." if skad else ""),
+        f"There are {n} closed {tr} with a {wr} win rate, {net} overall."
+        + (f" {skad} was the strongest." if skad else ""),
+        f"Net result is {net} from {n} closed {tr}, {wins} of them winners."
+        + (f" Most of that came from {skad}." if skad else ""),
+    ], u.wynik)]
     if k.streak >= 3:
-        zd.append([f"The last {k.streak} were all winners.",
-                   f"Last {k.streak} in a row went our way."][u.wynik % 2])
+        zd.append(_z([f"The last {k.streak} were all winners.",
+                      f"Last {k.streak} in a row went our way.",
+                      f"{k.streak} winners in a row at the moment.",
+                      f"The last {k.streak} all closed green."], u.wynik // 7))
     elif k.streak <= -3:
-        zd.append([f"The last {-k.streak} went against us, so size is down until it turns.",
-                   f"{-k.streak} losers in a row, so we've cut size for now."][u.wynik % 2])
+        s = -k.streak
+        zd.append(_z([f"The last {s} went against us, so size is down until it turns.",
+                      f"{s} losers in a row, so we've cut size for now.",
+                      f"The last {s} closed red, so we're trading smaller until that changes.",
+                      f"{s} losing ones in a row, size is reduced for now."], u.wynik // 7))
     if k.daily_used_pct >= 50:
-        zd.append(f"Today already used {_pc(k.daily_used_pct)}% of the daily limit, "
-                  "so we're done for the day.")
+        d = f"{_pc(k.daily_used_pct)}%"
+        zd.append(_z([f"Today already used {d} of the daily limit, so we're done for the day.",
+                      f"{d} of today's loss limit is used, so we stop here for today."], u.dd // 5))
     return " ".join(zd)
 
 
@@ -389,39 +438,75 @@ def _dalej(konta: list[KontoInfo], u: Ujecie) -> str:
     """Jedno zdanie o najbliższym kroku (bez dni handlowych)."""
     zywe = [k for k in konta if k.status != "failed"]
     if not zywe:
-        return ["If you want to go again, say the word and I'll set the next account up.",
-                "If you want to go again, tell me and the next one gets set up."][u.dalej % 2]
+        return _z(["If you want to go again, say the word and I'll set the next account up.",
+                   "If you want to go again, tell me and the next one gets set up.",
+                   "If you want to go again, just say and we'll get a new account going."], u.dalej)
+
     def przed_celem(x: KontoInfo) -> bool:
         return _faza(x) != "funded" and x.target_pct > 0 and x.profit_pct < x.target_pct
 
     brakuje = [x for x in zywe if przed_celem(x)]
     if len(zywe) > 1 and brakuje and len(brakuje) < len(zywe):
         loginy = " and ".join(x.login for x in brakuje)
-        return [f"Next step is getting {loginy} over the target as well.",
-                f"{loginy} still needs the target, then everything moves on.",
-                f"Once {loginy} hits the target too, everything moves to the next stage."
-                ][u.dalej % 3]
+        return _z([f"Next step is getting {loginy} over the target as well.",
+                   f"{loginy} still needs the target, then everything moves on.",
+                   f"Once {loginy} hits the target too, everything moves to the next stage.",
+                   f"Main focus now is the target on {loginy}.",
+                   f"The target on {loginy} is the one thing left for now."], u.dalej)
     if len(zywe) > 1 and brakuje:
-        return ["Next step is the profit target on each of them.",
-                "From here it's getting each account to its target without forcing it.",
-                "Once the targets are in, the accounts move to the next stage."][u.dalej % 3]
+        return _z(["Next step is the profit target on each of them.",
+                   "From here it's getting each account to its target without forcing it.",
+                   "Once the targets are in, the accounts move to the next stage.",
+                   "Each of them still needs its target, so that's the focus.",
+                   "The targets are the job now, one account at a time."], u.dalej)
     k = brakuje[0] if brakuje else zywe[0]
     faza = _faza(k)
     if przed_celem(k):
-        return ["Next step is the profit target, then it moves on.",
-                "From here it's just getting to the target without forcing it.",
-                "Once the target is in, the account moves to the next stage."][u.dalej % 3]
+        return _z(["Next step is the profit target, then it moves on.",
+                   "From here it's just getting to the target without forcing it.",
+                   "Once the target is in, the account moves to the next stage.",
+                   "The target is the only thing on the list now.",
+                   "We keep working toward the target, no rushing it."], u.dalej)
     if faza != "funded":
-        return ["Target's done, so next is moving it to the next stage.",
-                "With the target in, it goes to the next stage from here.",
-                "Next up is the move to the next stage."][u.dalej % 3]
-    if k.payouts_usd <= 0:
-        return ["Next up is the first payout.",
-                "Now it's about getting to the first payout.",
-                "The first payout is the next thing on the list."][u.dalej % 3]
-    return ["From here we keep it steady.",
-            "Plan stays the same, steady and small.",
-            "Nothing changes from here, we keep it steady."][u.dalej % 3]
+        return _z(["Target's done, so next is moving it to the next stage.",
+                   "With the target in, it goes to the next stage from here.",
+                   "Next up is the move to the next stage.",
+                   "With the target reached, the next stage is what comes next.",
+                   "The move to the next stage is next, now that the target is reached."],
+                  u.dalej)
+    return _dalej_funded(zywe, u)
+
+
+# Co dalej na funded: sposób prowadzenia konta, nigdy wypłata — „teraz chodzi
+# o pierwszą wypłatę" czytało się jak obietnica i wracało w każdym update'cie.
+# Pula jest większa niż przy ewaluacji, bo funded dostaje update'y najdłużej,
+# a trzy zdania na zmianę po kilku tygodniach brzmią jak automat.
+_DALEJ_FUNDED = [
+    "From here we keep it steady.",
+    "Plan stays the same, steady and small.",
+    "Next few sessions we stick to the same setups and keep size where it is.",
+    "More of the same from here, clean entries and small risk.",
+    "We keep risk per position where it is and stay patient.",
+    "Coming days we're on the same markets and only taking the clean setups.",
+    "No rush from here, we take the good setups and skip the rest.",
+    "The focus now is a low drawdown and careful entries.",
+    "Same approach every day from here, nothing fancy.",
+    "Nothing changes in the plan, we keep doing what's been working.",
+]
+# Konto funded pod startem: zdanie o odrabianiu, bez „wygramy to z powrotem".
+_DALEJ_FUNDED_POD_KRESKA = [
+    "Next step is working {it} back above the start, without chasing it.",
+    "From here it's getting {it} back over the start slowly, no forcing.",
+    "We'll work {it} back up with smaller size rather than trying to win it back in one go.",
+    "The plan is to grind {it} back above the start, one clean position at a time.",
+    "Priority now is getting {it} back over the start without adding risk.",
+]
+
+
+def _dalej_funded(zywe: list[KontoInfo], u: Ujecie) -> str:
+    pula = (_DALEJ_FUNDED_POD_KRESKA if any(k.profit_pct < 0 for k in zywe)
+            else _DALEJ_FUNDED)
+    return _z(pula, u.dalej).replace("{it}", "them" if len(zywe) > 1 else "it")
 
 
 _OTWARCIA = [
@@ -430,6 +515,11 @@ _OTWARCIA = [
     "Hi {name}, short update from the desk.",
     "Hey {name}, where things are with your {konto}.",
     "{name}, quick one on your {konto}.",
+    "Hi {name}, here's the latest on your {konto}.",
+    "Hey {name}, checking in with the numbers.",
+    "{name}, a quick look at your {konto}.",
+    "Hi {name}, update on how your {konto} {jest} going.",
+    "Hey {name}, fresh numbers from the desk.",
 ]
 _ZAKONCZENIA = [
     "Any questions, just ask.",
@@ -437,31 +527,47 @@ _ZAKONCZENIA = [
     "If you want the full trade list, just say.",
     "That's it for now.",
     "Let me know if you want more detail on any of it.",
+    "Shout if anything's unclear.",
+    "More soon.",
+    "Happy to go through any of it if you want.",
+    "Talk soon.",
+    "I'll keep you posted.",
 ]
 _OTWARCIA_MAIL = [
     "Hi {name},\n\nQuick update on the {konto} we manage for you.",
     "Hi {name},\n\nHere is where your {konto} {jest} this week.",
     "Hi {name},\n\nA short update from the desk on your {konto}.",
+    "Hi {name},\n\nHere's the latest on the {konto} we trade for you.",
+    "Hi {name},\n\nYour update from the desk, with the current numbers.",
+    "Hi {name},\n\nChecking in with where your {konto} {jest} right now.",
 ]
 _ZAKONCZENIA_MAIL = [
     "Any questions, the desk is on Telegram:",
     "If you want more detail, message the desk on Telegram:",
     "You can always reach the desk on Telegram:",
+    "Happy to go through any of it, just message the desk:",
+    "For anything else, the desk is on Telegram:",
+    "If you want the full trade list, ask the desk on Telegram:",
 ]
 
 # Ile ujęć oddajemy panelowi. Kombinacji jest dużo więcej; bierzemy stały,
 # rozrzucony podzbiór (to samo ziarno = te same teksty między odświeżeniami).
-_ILE_UJEC = 48
-_ILE_UJEC_MAIL = 24
+# „Another wording" losuje z tych samych, więc im więcej, tym dłużej nie wraca
+# do zdania, które admin już wysłał temu klientowi.
+_ILE_UJEC = 120
+_ILE_UJEC_MAIL = 60
 
 
-def _ujecia(ile: int, n_otw: int, n_zak: int, ziarno: int) -> list[Ujecie]:
+def _ujecia(ile: int, ziarno: int) -> list[Ujecie]:
     los = random.Random(ziarno)
-    wszystkie = [Ujecie(o, s, c, d, w, n, z, l)
-                 for o in range(n_otw) for s in range(4) for c in range(3) for d in range(3)
-                 for w in range(3) for n in range(3) for z in range(n_zak) for l in range(4)]
-    los.shuffle(wszystkie)
-    return wszystkie[:ile]
+    out: list[Ujecie] = []
+    byly: set[Ujecie] = set()
+    while len(out) < ile:
+        u = Ujecie(*(los.randrange(_ZAKRES) for _ in range(8)))
+        if u not in byly:
+            byly.add(u)
+            out.append(u)
+    return out
 
 
 def _zlacz(sep: str, *czesci: str) -> str:
@@ -482,20 +588,20 @@ def _tresc(imie: str, konta: list[KontoInfo], u: Ujecie, otwarcie: str, zakoncze
         # bloki nie zaczynały się tym samym zdaniem; pauza najwyżej w pierwszym.
         srodek = []
         for i, k in enumerate(konta):
-            ui = replace(u, stan=u.stan + i, cel=u.cel + i, dd=u.dd + i, wynik=u.wynik + i,
-                         otw=u.otw)
+            ui = replace(u, stan=u.stan + i, cel=u.cel + i, dd=u.dd + i, wynik=u.wynik + i)
             srodek.append(_zlacz("\n", _naglowek(k, ui),
                                  _stan(k, ui, True, blok=True, pauza=i == 0), _wynik(k, ui)))
         akapity = [otw, *srodek, dalej, zakonczenie]
     else:
         k = konta[0]
         stan, wynik = _stan(k, u, False), _wynik(k, u)
-        if u.uklad == 3:
+        uklad = u.uklad % 4
+        if uklad == 3:
             blok = _zlacz("\n", _naglowek(k, u), _stan(k, u, False, blok=True), wynik)
             akapity = [otw, blok, dalej, zakonczenie]
-        elif u.uklad == 0:
+        elif uklad == 0:
             akapity = [otw, stan, wynik, dalej, zakonczenie]
-        elif u.uklad == 1:
+        elif uklad == 1:
             akapity = [f"{otw} {stan}", wynik, f"{dalej} {zakonczenie}"]
         else:
             akapity = [otw, stan, _zlacz(" ", wynik, dalej), zakonczenie]
@@ -509,8 +615,8 @@ def zloz(name: str | None, konta: list[KontoInfo]) -> list[str]:
     if not konta:
         return []
     out: list[str] = []
-    for u in _ujecia(_ILE_UJEC, len(_OTWARCIA), len(_ZAKONCZENIA), 7):
-        t = _tresc(imie, konta, u, _OTWARCIA[u.otw], _ZAKONCZENIA[u.zak])
+    for u in _ujecia(_ILE_UJEC, 7):
+        t = _tresc(imie, konta, u, _z(_OTWARCIA, u.otw), _z(_ZAKONCZENIA, u.zak))
         if t not in out:
             out.append(t)
     return out
@@ -523,12 +629,14 @@ def zloz_mail(name: str | None, konta: list[KontoInfo], telegram_url: str) -> li
     if not konta:
         return []
     out: list[str] = []
-    for u in _ujecia(_ILE_UJEC_MAIL, len(_OTWARCIA_MAIL), len(_ZAKONCZENIA_MAIL), 11):
-        ogon = (f"{_ZAKONCZENIA_MAIL[u.zak]}\n\n{telegram_url}" if telegram_url
+    for u in _ujecia(_ILE_UJEC_MAIL, 11):
+        ogon = (f"{_z(_ZAKONCZENIA_MAIL, u.zak)}\n\n{telegram_url}" if telegram_url
                 else "Any questions, just reply to this e-mail.")
-        # W mailu układ 1 (wszystko w trzech gęstych akapitach) odpada.
-        u_mail = replace(u, uklad=0 if u.uklad == 1 else u.uklad)
-        t = _tresc(imie, konta, u_mail, _OTWARCIA_MAIL[u.otw], ogon) + "\n\n--\nForex Passing"
+        # W mailu układ 1 (wszystko w trzech gęstych akapitach) odpada. Cofamy
+        # o jeden, a nie zerujemy: `uklad // 4` wybiera styl nagłówka.
+        u_mail = replace(u, uklad=u.uklad - 1) if u.uklad % 4 == 1 else u
+        t = (_tresc(imie, konta, u_mail, _z(_OTWARCIA_MAIL, u.otw), ogon)
+             + "\n\n--\nForex Passing")
         if t not in out:
             out.append(t)
     return out
