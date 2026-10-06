@@ -5120,7 +5120,17 @@ async function importArchive(){
   try{
     const r=await api('/api/admin/archive/import',{method:'POST',
       body:JSON.stringify({posts,every_hours:h})});
-    toast(`Queued ${r.added} posts (${r.needs_review} need a look, ${r.skipped} already there).`);
+    const bez=r.photos_not_restored||[];
+    toast(`Queued ${r.added} posts (${r.needs_review} need a look, ${r.skipped} already there)`
+      +(r.photos_restored?` · photos put back on ${r.photos_restored} queued posts`:'')
+      +(r.photos_missing?` · ${r.photos_missing} photos could not be copied — those posts wait as drafts`:'')
+      +(bez.length?` · ${bez.length} queued posts still have no photo — see below`:'')+'.');
+    if(bez.length){
+      // Zostaje na ekranie importu: powod (miniatura filmu, nieudane pobranie)
+      // jest tym, co trzeba wiedziec, zeby dopiac grafike recznie.
+      $('arch-info').innerHTML='<b>Still without a photo:</b><br>'+bez.map(esc).join('<br>');
+      return;
+    }
     go('telegram');
   }catch(e){toast('Import failed — '+e.message,'err')}
 }
@@ -5269,12 +5279,16 @@ function tgpOdswiez(){
     tytul:_tytulyKanalow[p.channel]||TGP_KANALY[p.channel]||p.channel,godzina,post:p});
   tgDopasujZrzuty($('tgp-live'));
 
-  const t=tgHtml(p.body),g=tgGrafika(p),limit=tgLimit(p.kind);
+  const t=tgHtml(p.body),g=tgGrafika(p),limit=tgLimit(p.kind,g.typ);
   const problemy=[...t.problemy];
   if(g.problem)problemy.push(g.problem);
   if(t.widoczne>limit)problemy.push(`The text has ${t.widoczne} characters and the limit `
-    +`${p.kind==='text'?'for a text post':'under a photo or video'} is ${limit} — it will not be approved.`);
-  const zrodlo={image:'ready image — Telegram fetches this exact file',
+    +`${limit===TG_LIMIT_TEKSTU?'for this post':'under a video or page screenshot'} is ${limit} — it will not be approved.`);
+  // Telegram tnie podpis pod zdjeciem na 1024 znakach; dluzszy tekst wychodzi
+  // jako zwykly post z duzym podgladem tego zdjecia nad tekstem.
+  const dlugi=g.typ==='image'&&t.widoczne>TG_LIMIT_PODPISU;
+  const zrodlo={image:dlugi?'ready image, shown as a large preview above the text (over 1,024 characters is too long for a photo caption)'
+      :'ready image — Telegram fetches this exact file',
     page:'screenshot of a page — the channel gets a 1320 × 1320 px capture of what you see here',
     video:'video clip',none:'no graphic, text only'}[g.typ];
   $('tgp-stan').innerHTML=`<div class="tgp-counter${t.widoczne>limit?' over':''}">`

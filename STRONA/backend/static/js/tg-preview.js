@@ -14,8 +14,8 @@
  *  - tgMakieta   — dymek w ciemnym motywie Telegrama.
  *
  * Liczenie znakow jak `contentbot.dlugosc_widoczna`: po zdjeciu znacznikow
- * i rozwinieciu encji, w punktach kodowych — limit 1024 pod zdjeciem/filmem,
- * 4096 dla samego tekstu.
+ * i rozwinieciu encji, w punktach kodowych — limit 1024 pod filmem i zrzutem
+ * strony, 4096 dla tekstu i gotowego obrazu (patrz `tgLimit`).
  */
 const TG_LIMIT_PODPISU = 1024, TG_LIMIT_TEKSTU = 4096, TG_ZRZUT = 660;
 
@@ -167,7 +167,11 @@ function tgGrafika(post){
   return {typ:'page', url, problem:''};
 }
 
-const tgLimit = kind => (kind === 'photo' || kind === 'video') ? TG_LIMIT_PODPISU : TG_LIMIT_TEKSTU;
+/* Jak `contentbot.limit_tresci`: gotowy obraz (`typ` z tgGrafika === 'image')
+   z dluzszym tekstem wychodzi jako post z duzym podgladem zdjecia nad tekstem,
+   wiec dostaje limit tekstu. Zrzut strony i film zostaja przy limicie podpisu. */
+const tgLimit = (kind, typ) => kind === 'text' || (kind === 'photo' && typ === 'image')
+  ? TG_LIMIT_TEKSTU : TG_LIMIT_PODPISU;
 
 /* Dymek kanalu. `godzina` przychodzi gotowa, zeby ten plik nie zalezal od strefy. */
 function tgMakieta({tytul, godzina, post}){

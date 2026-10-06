@@ -25,6 +25,10 @@ from __future__ import annotations
 
 import html
 import re
+import secrets
+import urllib.error
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 from datetime import datetime, timedelta, timezone
 
@@ -32,7 +36,7 @@ from sqlalchemy import func
 
 from . import certshot, reach, telegram
 from .config import get_settings
-from .models import Account, ChannelPost, Payout, Trader
+from .models import Account, ChannelPost, Payout, PostMedia, Trader
 
 settings = get_settings()
 
@@ -154,6 +158,88 @@ def _jest_filmem(adres: str) -> bool:
 
 LIMIT_TEKSTU = 4096
 
+
+def _gotowy_obraz(post: ChannelPost) -> bool:
+    """Zdjęcie, które Telegram pobiera spod adresu (a nie zrzut strony)."""
+    return post.kind == "photo" and bool(post.media_url) and (
+        (post.origin or "").startswith("archive:") or _jest_obrazkiem(post.media_url))
+
+
+def limit_tresci(post: ChannelPost) -> int:
+    """Ile widocznych znaków może mieć treść TEGO posta.
+
+    Podpis pod zdjęciem Telegram tnie na 1024 znakach, ale zwykły post ma 4096
+    i potrafi pokazać zdjęcie jako duży podgląd linku NAD tekstem. Tak wychodzi
+    gotowy obraz z dłuższym tekstem (`telegram.send_content`) — wcześniej import
+    zdejmował z takiego posta grafikę, a panel nie pozwalał jej przypiąć z
+    powrotem. Zrzut strony nie ma adresu pliku, a film nie ma podglądu, więc
+    dla nich limit podpisu zostaje.
+    """
+    if post.kind == "text" or _gotowy_obraz(post):
+        return LIMIT_TEKSTU
+    return LIMIT_PODPISU
+
+
+# Telegram przyjmuje zdjęcie podane ADRESEM tylko do 5 MB (plik wysłany wprost
+# może mieć 10 MB, ale ta ścieżka go nie używa). Większe odbija dopiero przy
+# publikacji, czyli za późno — więc odmawiamy już przy wgrywaniu.
+POST_MEDIA_MAX = 5 * 1024 * 1024
+
+
+def wymiary_obrazka(dane: bytes) -> tuple[str, int, int] | None:
+    """(mime, szerokość, wysokość) dla PNG albo JPEG; `None` dla czegokolwiek innego.
+
+    Tylko te dwa formaty, bo tylko je Telegram na pewno pokaże jako ZDJĘCIE
+    pobrane z adresu — WebP potrafi wrócić jako naklejka albo dokument.
+    Wymiary czytane z nagłówka, bez dekodowania pikseli i bez Pillow.
+    """
+    if dane.startswith(b"\x89PNG\r\n\x1a\n") and len(dane) >= 24:
+        return ("image/png", int.from_bytes(dane[16:20], "big"),
+                int.from_bytes(dane[20:24], "big"))
+    if dane.startswith(b"\xff\xd8"):
+        i = 2
+        while i + 9 < len(dane):
+            if dane[i] != 0xFF:
+                i += 1
+                continue
+            znacznik = dane[i + 1]
+            if znacznik in (0xD8, 0x01) or 0xD0 <= znacznik <= 0xD7 or znacznik == 0xFF:
+                i += 1 if znacznik == 0xFF else 2
+                continue
+            dlugosc = int.from_bytes(dane[i + 2:i + 4], "big")
+            # SOF0..SOF15 poza DHT (C4), JPG (C8) i DAC (CC) niosą wymiary.
+            if 0xC0 <= znacznik <= 0xCF and znacznik not in (0xC4, 0xC8, 0xCC):
+                return ("image/jpeg", int.from_bytes(dane[i + 7:i + 9], "big"),
+                        int.from_bytes(dane[i + 5:i + 7], "big"))
+            i += 2 + dlugosc
+        return None
+    return None
+
+
+def zdjecie_ok(szer: int, wys: int) -> bool:
+    """Limity Telegrama dla zdjęć: suma boków do 10 000 px, proporcje do 1:20."""
+    return szer > 0 and wys > 0 and szer + wys <= 10000 and max(szer, wys) <= 20 * min(szer, wys)
+
+
+def zapisz_grafike(session, dane: bytes) -> tuple[str, str]:
+    """Zapisuje obraz jako `PostMedia`. -> (publiczny adres, powód odmowy)."""
+    if len(dane) > POST_MEDIA_MAX:
+        return "", "over 5 MB"
+    info = wymiary_obrazka(dane)
+    if not info:
+        return "", "not a PNG or JPG"
+    mime, szer, wys = info
+    if not zdjecie_ok(szer, wys):
+        return "", f"{szer}×{wys} px is outside Telegram photo limits"
+    m = PostMedia(token=secrets.token_urlsafe(18), mime=mime,
+                  width=szer, height=wys, data=dane)
+    session.add(m)
+    session.flush()
+    rozszerzenie = "png" if mime == "image/png" else "jpg"
+    baza = (settings.app_base_url or "").rstrip("/")
+    return f"{baza}/media/posts/{m.token}.{rozszerzenie}", ""
+
+
 # Cokolwiek, co wygląda na twierdzenie liczbowe: kwota, procent albo licznik.
 # Tekst bez `proof` nie ma prawa zawierać żadnego z nich — nie dlatego, że
 # liczby są złe, tylko dlatego, że nikt nie wskazał, skąd pochodzą.
@@ -238,8 +324,9 @@ def waliduj(session, post: ChannelPost) -> None:
 
     # Odmowa, nie ciche przycięcie. Telegram utnie podpis do 1024 znaków
     # w połowie zdania, a obcięte zdanie potrafi znaczyć coś innego niż całe.
-    # Podpis pod zdjęciem I pod filmem ma ten sam limit 1024 znaków.
-    limit = LIMIT_PODPISU if post.kind in ZE_ZALACZNIKIEM else LIMIT_TEKSTU
+    # Podpis pod filmem i pod zrzutem strony ma limit 1024 znaków; gotowy obraz
+    # z dłuższym tekstem wychodzi jako post z podglądem (patrz `limit_tresci`).
+    limit = limit_tresci(post)
     dlugosc = dlugosc_widoczna(post.body)
     sprawdz(dlugosc <= limit,
             f"treść ma {dlugosc} znaków, a limit dla tego typu posta to {limit} "
@@ -452,8 +539,10 @@ def wyslij_zaplanowane(session, now: datetime | None = None) -> dict:
 # zrzut osiemnastu postów wyglądałby jak awaria, nie jak prowadzenie kanału.
 #
 # Archiwum NIE leży w tym repozytorium i leżeć nie może: jest publiczne, a to
-# są treści partnera. Plik wgrywa się z panelu, a zdjęcia lecą ADRESEM — Telegram
-# pobiera je sam ze swojego CDN-u, więc nie trzeba ich nigdzie kopiować.
+# są treści partnera. Plik wgrywa się z panelu, a zdjęcia import KOPIUJE do bazy
+# (`PostMedia`). Adresy z podglądu `t.me` (cdn*.telesco.pe) żyją kilka dni:
+# post zaplanowany na za dwa tygodnie trzymał martwy link i wychodził na błąd,
+# więc grafiki trzeba było ręcznie przenosić na inną domenę.
 
 # Twierdzenia ZWIĄZANE Z CZASEM. Post, który mówi „w zeszłym miesiącu" albo
 # podaje konkretną datę, powtórzony za pół roku jest po prostu nieprawdziwy —
@@ -514,9 +603,75 @@ def podglad_archiwum(posty: list[dict]) -> dict:
             "manual": len(czasowe)}
 
 
+# Ile czekać na jedno zdjęcie i ile pobierać naraz. Import idzie w jednym
+# żądaniu z panelu, a funkcja na Vercelu ma limit czasu — 18 zdjęć po kolei
+# przy wolnym CDN-ie to minuta, równolegle kilka sekund.
+POBIERANIE_SEK = 10
+POBIERANIE_NARAZ = 6
+_NAGLOWKI_POBIERANIA = {
+    # t.me bez przeglądarkowego User-Agenta potrafi oddać okrojoną odpowiedź.
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0 Safari/537.36"}
+
+
+def _pobierz_zdjecie(adres: str) -> tuple[bytes, str]:
+    """(dane, powód odmowy). Nie rzuca — import nie może paść na jednym pliku.
+
+    Tylko https i tylko CDN Telegrama: adres przychodzi z wgranego pliku,
+    a serwer nie ma sięgać pod dowolny adres, który ktoś w nim wpisze."""
+    if not str(adres).lower().startswith("https://") or not _jest_cdn_telegrama(adres):
+        return b"", "only https links to Telegram's CDN are copied"
+    try:
+        req = urllib.request.Request(adres, headers=_NAGLOWKI_POBIERANIA)
+        with urllib.request.urlopen(req, timeout=POBIERANIE_SEK) as odp:
+            return odp.read(POST_MEDIA_MAX + 1), ""
+    except urllib.error.HTTPError as e:
+        return b"", f"HTTP {e.code}"
+    except Exception as e:  # sieć, timeout, zły adres
+        return b"", str(e)[:120] or type(e).__name__
+
+
+def _pobierz_wszystkie(adresy: list[str], pobierz) -> dict[str, tuple[bytes, str]]:
+    unikalne = list(dict.fromkeys(a for a in adresy if a))
+    if not unikalne:
+        return {}
+    with ThreadPoolExecutor(max_workers=POBIERANIE_NARAZ) as pula:
+        return dict(zip(unikalne, pula.map(pobierz, unikalne)))
+
+
+def _jest_cdn_telegrama(adres: str | None) -> bool:
+    """Adres z podglądu `t.me` — wygasa po kilku dniach."""
+    host = str(adres or "").split("//", 1)[-1].split("/", 1)[0].lower()
+    return host.endswith(("telesco.pe", "telegram-cdn.org", "cdn-telegram.org"))
+
+
+def _jest_nasza_grafika(adres: str | None) -> bool:
+    """Grafika z naszej bazy (`/media/posts/…`) — ta nie wygasa."""
+    return "/media/posts/" in str(adres or "")
+
+
+# Archiwizator bierze do `photos` każdy obrazek w tle posta, a podgląd `t.me`
+# rysuje tak też MINIATURĘ FILMU i obrazek z podglądu linku. Na starym kanale
+# #10 i #23 były filmami (miniatury 180×320), a #21 nie miał mediów wcale
+# (logo 160×160 z podglądu linku). Zdjęcia kanału mają 800 px i więcej.
+MIN_BOK_ZDJECIA = 400
+
+
+def _skopiuj(session, adres: str, pobrane: dict) -> tuple[str, str]:
+    """Kopiuje zdjęcie do bazy. -> (nasz adres, powód odmowy)."""
+    dane, powod = pobrane.get(adres, (b"", "not downloaded"))
+    if not dane:
+        return "", powod
+    info = wymiary_obrazka(dane)
+    if info and max(info[1], info[2]) < MIN_BOK_ZDJECIA:
+        return "", (f"the archive only has a {info[1]}×{info[2]} thumbnail — on the old "
+                    f"channel this was a video or a link preview, not a photo")
+    return zapisz_grafike(session, dane)
+
+
 def importuj_archiwum(session, posty: list[dict], *, kanal: str = "mgmt",
                       co_ile_godzin: int = 24, start: datetime | None = None,
-                      now: datetime | None = None) -> dict:
+                      now: datetime | None = None, pobierz=None) -> dict:
     """Wrzuca archiwalne posty do kolejki, rozłożone co `co_ile_godzin`.
 
     Post bez twierdzeń związanych z czasem dostaje dowód `archive:` i status
@@ -525,42 +680,92 @@ def importuj_archiwum(session, posty: list[dict], *, kanal: str = "mgmt",
     zatwierdzi. To jest granica, której automat nie przekracza.
 
     Idempotentne po `origin`: ponowne wgranie tego samego pliku nie zdubluje
-    tego, co już wisi w kolejce.
+    tego, co już wisi w kolejce. Za to NAPRAWIA grafiki: post z kolejki, który
+    jeszcze nie wyszedł, a stracił zdjęcie (stary import zdejmował je z długich
+    postów) albo trzyma wygasający adres `t.me`, dostaje kopię z bazy — bez
+    zmiany statusu, terminu i treści. Grafika podpięta ręcznie z innej domeny zostaje.
+
+    `pobierz(adres) -> (dane, powód)` podstawiają testy.
     """
     teraz = now or datetime.now(timezone.utc)
     kiedy = start or (teraz + timedelta(hours=co_ile_godzin))
+    pobierz = pobierz or _pobierz_zdjecie
 
-    juz = {o for (o,) in session.query(ChannelPost.origin)
+    juz = {p.origin: p for p in session.query(ChannelPost)
            .filter(ChannelPost.origin.like("archive:%")).all()}
 
-    dodane = pominiete = recznie = 0
-    for wpis in _wpisy_archiwum(posty):
+    wpisy = _wpisy_archiwum(posty)
+
+    def foto_wpisu(wpis):
+        return (wpis.get("photos") or [None])[0]
+
+    def do_naprawy(post, wpis):
+        # Treści nie porównujemy: posty w kolejce dostały po imporcie nowy
+        # uchwyt admina i linki, a naprawa dotyczy grafiki, nie tekstu — ten
+        # zostaje dokładnie taki, jaki jest w kolejce.
+        return (post.status != "published" and bool(foto_wpisu(wpis))
+                and post.kind in ("text", "photo")
+                and not _jest_nasza_grafika(post.media_url)
+                # Grafika podpięta ręcznie z innej domeny jest decyzją człowieka.
+                and (post.kind == "text" or _jest_cdn_telegrama(post.media_url)))
+
+    potrzebne = []
+    for wpis in wpisy:
+        stary = juz.get(f"archive:{kanal}/{wpis['id']}")
+        if stary is None or do_naprawy(stary, wpis):
+            potrzebne.append(foto_wpisu(wpis))
+    pobrane = _pobierz_wszystkie(potrzebne, pobierz)
+
+    dodane = pominiete = recznie = naprawione = bez_zdjecia = 0
+    nienaprawione: list[str] = []
+    for wpis in wpisy:
         origin = f"archive:{kanal}/{wpis['id']}"
-        if origin in juz:
+        foto = foto_wpisu(wpis)
+        stary = juz.get(origin)
+        if stary is not None:
             pominiete += 1
+            if do_naprawy(stary, wpis):
+                adres, blad = _skopiuj(session, foto, pobrane)
+                if adres:
+                    stary.kind, stary.media_url = "photo", adres
+                    if stary.status == "failed":
+                        stary.last_error = ""
+                    stary.updated_at = teraz
+                    naprawione += 1
+                else:
+                    # Panel ma o tym powiedzieć — inaczej import wyglądałby
+                    # na udany, a post dalej czekałby bez grafiki.
+                    nienaprawione.append(f"{origin}: {blad}")
             continue
         tresc = str(wpis["text"]).strip()
-        czasowy = bool(wymaga_czlowieka(tresc))
-        # Zdjęcie tylko wtedy, gdy podpis się w nim mieści — Telegram tnie
-        # podpis na 1024 znakach, a obcięte zdanie potrafi znaczyć co innego.
-        foto = (wpis.get("photos") or [None])[0]
-        # Mierzymy TEKST WIDOCZNY, nie surowy HTML — inaczej post, ktory
-        # miesci sie w podpisie, traci zdjecie przez wlasne znaczniki.
-        ze_zdjeciem = bool(foto) and dlugosc_widoczna(tresc) <= LIMIT_PODPISU
+        powod = wymaga_czlowieka(tresc)
+        adres = brak_zdjecia = ""
+        if foto:
+            adres, blad = _skopiuj(session, foto, pobrane)
+            if not adres:
+                # Bez kopii post wyszedłby bez grafiki albo na martwy link.
+                # Zostaje szkicem z powodem; grafikę da się wgrać w edytorze.
+                brak_zdjecia = (f"photo from the archive could not be copied ({blad}) "
+                                f"— upload it in the editor or re-export the archive")
+                powod = powod or brak_zdjecia
+                bez_zdjecia += 1
         session.add(ChannelPost(
             channel=kanal,
-            kind="photo" if ze_zdjeciem else "text",
+            kind="photo" if adres else "text",
             body=tresc,
-            media_url=foto if ze_zdjeciem else None,
+            media_url=adres or None,
             proof=origin,
-            status="draft" if czasowy else "scheduled",
+            status="draft" if powod else "scheduled",
             scheduled_for=kiedy,
             origin=origin,
+            last_error=brak_zdjecia[:300],
             created_by="import"))
         kiedy += timedelta(hours=co_ile_godzin)
         dodane += 1
-        if czasowy:
+        if powod:
             recznie += 1
     session.commit()
     return {"added": dodane, "skipped": pominiete, "needs_review": recznie,
+            "photos_restored": naprawione, "photos_missing": bez_zdjecia,
+            "photos_not_restored": nienaprawione,
             "every_hours": co_ile_godzin}

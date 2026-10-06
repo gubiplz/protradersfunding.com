@@ -45,7 +45,7 @@ def tg(monkeypatch):
     log = {"edit": [], "delete": [], "ok": True, "reason": ""}
     monkeypatch.setattr(contentbot, "chat_id", lambda kanal: "-1001234567890")
 
-    def edit(chat, mid, text, *, kind="text", token=None, transport=None):
+    def edit(chat, mid, text, *, kind="text", photo_url=None, token=None, transport=None):
         log["edit"].append((chat, mid, text, kind))
         return log["ok"], log["reason"]
 

@@ -6974,7 +6974,8 @@ def admin_channel_post_edit(post_id: int, payload: ChannelPostIn):
                 ok, powod = telegram.edit_content(contentbot.chat_id(p.channel),
                                                   p.message_id,
                                                   contentbot.dolinkuj(tekst),
-                                                  kind=p.kind)
+                                                  kind=p.kind,
+                                                  photo_url=p.media_url)
                 if not ok:
                     raise HTTPException(502, f"Telegram refused the edit: {powod}")
                 p.body = tekst
@@ -7104,40 +7105,10 @@ def admin_channel_post_publish(post_id: int):
         session.close()
 
 
-# Telegram przyjmuje zdjęcie podane ADRESEM tylko do 5 MB (plik wysłany wprost
-# może mieć 10 MB, ale ta ścieżka go nie używa). Większe odbija dopiero przy
-# publikacji, czyli za późno — więc odmawiamy już przy wgrywaniu.
-POST_MEDIA_MAX = 5 * 1024 * 1024
-
-
-def wymiary_obrazka(dane: bytes) -> tuple[str, int, int] | None:
-    """(mime, szerokość, wysokość) dla PNG albo JPEG; `None` dla czegokolwiek innego.
-
-    Tylko te dwa formaty, bo tylko je Telegram na pewno pokaże jako ZDJĘCIE
-    pobrane z adresu — WebP potrafi wrócić jako naklejka albo dokument.
-    Wymiary czytane z nagłówka, bez dekodowania pikseli i bez Pillow.
-    """
-    if dane.startswith(b"\x89PNG\r\n\x1a\n") and len(dane) >= 24:
-        return ("image/png", int.from_bytes(dane[16:20], "big"),
-                int.from_bytes(dane[20:24], "big"))
-    if dane.startswith(b"\xff\xd8"):
-        i = 2
-        while i + 9 < len(dane):
-            if dane[i] != 0xFF:
-                i += 1
-                continue
-            znacznik = dane[i + 1]
-            if znacznik in (0xD8, 0x01) or 0xD0 <= znacznik <= 0xD7 or znacznik == 0xFF:
-                i += 1 if znacznik == 0xFF else 2
-                continue
-            dlugosc = int.from_bytes(dane[i + 2:i + 4], "big")
-            # SOF0..SOF15 poza DHT (C4), JPG (C8) i DAC (CC) niosą wymiary.
-            if 0xC0 <= znacznik <= 0xCF and znacznik not in (0xC4, 0xC8, 0xCC):
-                return ("image/jpeg", int.from_bytes(dane[i + 7:i + 9], "big"),
-                        int.from_bytes(dane[i + 5:i + 7], "big"))
-            i += 2 + dlugosc
-        return None
-    return None
+# Limit i rozpoznawanie formatu siedzą w `contentbot`, bo tej samej bramki
+# używa import archiwum, kopiując zdjęcia starego kanału do bazy.
+POST_MEDIA_MAX = contentbot.POST_MEDIA_MAX
+wymiary_obrazka = contentbot.wymiary_obrazka
 
 
 @app.post("/api/admin/post-media", dependencies=[Depends(auth.require_admin)])
@@ -7158,7 +7129,7 @@ async def admin_post_media_upload(file: UploadFile = File(...)):
                                  "the channel as a file instead of a photo.")
     mime, szer, wys = info
     # Limity Telegrama dla zdjęć: suma boków do 10 000 px, proporcje do 1:20.
-    if szer <= 0 or wys <= 0 or szer + wys > 10000 or max(szer, wys) > 20 * min(szer, wys):
+    if not contentbot.zdjecie_ok(szer, wys):
         raise HTTPException(400, f"Telegram will not take a {szer}×{wys} photo "
                                  "(sides may add up to 10,000 px, ratio at most 1:20).")
     session = SessionLocal()
