@@ -40,6 +40,25 @@ _TOKEN_HTML_RX = re.compile(r"<[^>]*>|&(?:#\d+|#x[0-9a-fA-F]+|\w+);")
 _NAZWA_ZNACZNIKA_RX = re.compile(r"^<\s*(/?)\s*([a-zA-Z0-9-]+)")
 
 
+def dlugosc_html(tekst: str) -> int:
+    """Widoczne znaki tekstu w `parse_mode=HTML` — tak liczy Telegram."""
+    return len(html.unescape(_TOKEN_HTML_RX.sub(lambda m: "" if m.group(0).startswith("<")
+                                                else m.group(0), tekst or "")))
+
+
+LIMIT_PODPISU = 1024
+
+
+def _podglad_zdjecia(photo_url: str) -> str:
+    """Zdjęcie jako DUŻY podgląd linku nad tekstem.
+
+    Tak wychodzi zdjęcie z tekstem dłuższym niż 1024 znaki: podpis pod zdjęciem
+    Telegram by uciął, a zwykły post ma 4096 i pokazuje obraz z adresu w
+    podglądzie. Adres nie musi stać w treści — wskazuje go `url`."""
+    return json.dumps({"url": photo_url, "prefer_large_media": True,
+                       "show_above_text": True})
+
+
 def przytnij_html(tekst: str, limit: int) -> str:
     """Tekst w `parse_mode=HTML` skrócony do `limit` WIDOCZNYCH znaków.
 
@@ -51,8 +70,7 @@ def przytnij_html(tekst: str, limit: int) -> str:
     znakami (nigdy w znaczniku ani encji), a otwarte znaczniki domykane.
     """
     tekst = tekst or ""
-    if len(html.unescape(_TOKEN_HTML_RX.sub(lambda m: "" if m.group(0).startswith("<")
-                                            else m.group(0), tekst))) <= limit:
+    if dlugosc_html(tekst) <= limit:
         return tekst
     wynik, otwarte, zostalo, poz = [], [], limit, 0
     for m in _TOKEN_HTML_RX.finditer(tekst):
@@ -235,9 +253,10 @@ def send_content(chat_id: str, text: str, *, png: bytes | None = None,
     więc czat jest tu argumentem, a token dobierany tak samo jak wszędzie
     indziej — po czacie, nie po domyśle wywołującego.
 
-    Limit podpisu pod zdjęciem to 1024 znaki, samego tekstu 4096. Walidator
-    kolejki odmawia wcześniej, żeby Telegram nie uciął twierdzenia w połowie
-    zdania — tutaj przycięcie zostaje wyłącznie jako ostatni bezpiecznik.
+    Limit podpisu pod zdjęciem to 1024 znaki, samego tekstu 4096. Zdjęcie spod
+    adresu z dłuższym tekstem wychodzi jako post z podglądem (`_podglad_zdjecia`).
+    Walidator kolejki odmawia wcześniej, żeby Telegram nie uciął twierdzenia
+    w połowie zdania — tutaj przycięcie zostaje wyłącznie jako ostatni bezpiecznik.
     """
     token = token or bot_token_czatu(chat_id)
     if not token or not chat_id:
@@ -251,6 +270,12 @@ def send_content(chat_id: str, text: str, *, png: bytes | None = None,
                             {"chat_id": str(chat_id), "video": video_url,
                              "caption": przytnij_html(text, 1024), "parse_mode": "HTML",
                              "supports_streaming": "true"},
+                            None, transport, token=token)
+    if photo_url and dlugosc_html(text) > LIMIT_PODPISU:
+        return _strzal_json("sendMessage",
+                            {"chat_id": str(chat_id), "text": przytnij_html(text, 4096),
+                             "parse_mode": "HTML",
+                             "link_preview_options": _podglad_zdjecia(photo_url)},
                             None, transport, token=token)
     if photo_url:
         # Telegram pobiera zdjęcie z podanego adresu SAM. Dzięki temu post
@@ -294,25 +319,45 @@ def post_url(dane: dict) -> str:
 
 
 def edit_content(chat_id: str, message_id: int, text: str, *, kind: str = "text",
-                 token: str | None = None, transport=None) -> tuple[bool, str]:
+                 photo_url: str | None = None, token: str | None = None,
+                 transport=None) -> tuple[bool, str]:
     """Przepisuje OPUBLIKOWANY post na kanale — tekst albo podpis pod grafiką.
 
     Telegram ma dwie metody, bo to dwa różne pola: `editMessageText` dla
     wiadomości tekstowej, `editMessageCaption` dla zdjęcia i klipu. Pomylenie
     ich kończy się „message can't be edited" bez słowa o powodzie. Samej
     grafiki nie da się podmienić tą drogą (`editMessageMedia` wymaga pliku
-    pod adresem) — panel mówi to wprost i nie próbuje."""
+    pod adresem) — panel mówi to wprost i nie próbuje.
+
+    Zdjęcie z długim tekstem wyszło jako WIADOMOŚĆ z podglądem, nie jako
+    zdjęcie z podpisem — a to, którą drogą wyszło, nie jest nigdzie zapisane.
+    Dlatego przy zdjęciu krótki tekst próbuje podpisu, a gdy Telegram odpowie,
+    że podpisu nie ma, przechodzi na tekst z tym samym podglądem."""
     token = token or bot_token_czatu(chat_id)
     if not token or not chat_id or not message_id:
         return False, "no bot token, chat or message"
+    jako_tekst = {"chat_id": str(chat_id), "message_id": str(message_id),
+                  "text": przytnij_html(text, 4096), "parse_mode": "HTML"}
+    if kind == "photo" and photo_url:
+        jako_tekst["link_preview_options"] = _podglad_zdjecia(photo_url)
+        if dlugosc_html(text) <= LIMIT_PODPISU:
+            ok, powod = _strzal("editMessageCaption",
+                                {"chat_id": str(chat_id), "message_id": str(message_id),
+                                 "caption": text, "parse_mode": "HTML"},
+                                None, transport, token)
+            if ok or "no caption" not in (powod or "").lower():
+                return ok, powod
+        ok, powod = _strzal("editMessageText", jako_tekst, None, transport, token)
+        if not ok and "no text" in (powod or "").lower():
+            powod = ("this post went out as a photo with a caption, and Telegram "
+                     "caps captions at 1,024 characters — shorten the text")
+        return ok, powod
     if kind in ("photo", "video"):
         pola = {"chat_id": str(chat_id), "message_id": str(message_id),
                 "caption": przytnij_html(text, 1024), "parse_mode": "HTML"}
         return _strzal("editMessageCaption", pola, None, transport, token)
-    pola = {"chat_id": str(chat_id), "message_id": str(message_id),
-            "text": przytnij_html(text, 4096), "parse_mode": "HTML",
-            "disable_web_page_preview": "true"}
-    return _strzal("editMessageText", pola, None, transport, token)
+    jako_tekst["disable_web_page_preview"] = "true"
+    return _strzal("editMessageText", jako_tekst, None, transport, token)
 
 
 def delete_content(chat_id: str, message_id: int, *, token: str | None = None,

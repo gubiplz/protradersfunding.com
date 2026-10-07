@@ -92,12 +92,19 @@ def test_post_ktory_miesci_sie_po_odjeciu_znacznikow_przechodzi(sesja):
 
 
 def test_naprawde_za_dlugi_podpis_dalej_odpada(sesja):
-    """Poprawka ma przestac liczyc ZNACZNIKI, a nie przestac pilnowac limitu."""
+    """Poprawka ma przestac liczyc ZNACZNIKI, a nie przestac pilnowac limitu.
+
+    Gotowy obraz z tekstem ponad 1024 wychodzi jako post z podgladem zdjecia
+    (limit 4096); zrzut strony nie ma adresu pliku, wiec zostaje przy 1024."""
     s, _ = sesja
-    post = _post(sesja, kind="photo", body="x" * 1100,
+    post = _post(sesja, kind="photo", body="x" * 4100,
                  media_url="https://forexpassing.com/tg/arch/6.jpg")
-    with pytest.raises(contentbot.NieprawdziwyPost, match="1100"):
+    with pytest.raises(contentbot.NieprawdziwyPost, match="4100"):
         contentbot.waliduj(s, post)
+    zrzut = _post(sesja, kind="photo", body="x" * 1100,
+                  media_url="https://protradersfunding.com/payout/abc?bare=1")
+    with pytest.raises(contentbot.NieprawdziwyPost, match="1100"):
+        contentbot.waliduj(s, zrzut)
 
 
 # --------------------------------------------------------------------------- #

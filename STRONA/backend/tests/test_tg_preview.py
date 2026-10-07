@@ -147,6 +147,20 @@ def test_limity_jak_w_walidatorze():
     assert foto == film == contentbot.LIMIT_PODPISU
 
 
+def test_gotowy_obraz_ma_limit_tekstu_jak_w_walidatorze():
+    """Jak `contentbot.limit_tresci`: gotowy obraz z długim tekstem wychodzi
+    jako post z podglądem zdjęcia, więc panel nie może go blokować na 1024."""
+    wynik = subprocess.run(
+        ["node", str(HARNESS), str(MODUL), json.dumps(
+            [{"fn": "tgLimit", "args": ["photo", "image"]},
+             {"fn": "tgLimit", "args": ["photo", "page"]},
+             {"fn": "tgLimit", "args": ["video", "video"]}])],
+        capture_output=True, text=True, timeout=30)
+    obraz, strona, film = json.loads(wynik.stdout)
+    assert obraz == contentbot.LIMIT_TEKSTU
+    assert strona == film == contentbot.LIMIT_PODPISU
+
+
 def test_makieta_niesie_tresc_grafike_i_godzine():
     html = _wolaj(("tgMakieta", {"tytul": "Account Management", "godzina": "20:48",
                                  "post": {"kind": "photo", "body": "<b>Hi</b>",
