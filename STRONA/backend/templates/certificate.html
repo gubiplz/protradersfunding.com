@@ -29,7 +29,7 @@
     <h1 class="cert-title">Certificate</h1>
 
     <div class="cert-amountlabel">{{ amount_label }}</div>
-    <div class="cert-amount">{{ amount }}</div>
+    <div class="cert-amount">{% if amount_icon %}<img class="cert-coin" src="{{ amount_icon }}" alt="vUSDT">{% endif %}{{ amount }}</div>
 
     <div class="cert-presented">presented to</div>
     <div class="cert-person">{{ trader_name }}</div>

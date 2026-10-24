@@ -823,7 +823,8 @@
       card.classList.toggle('cert-variant-payout', d.variant === 'payout');
       $('#pv-eyebrow').textContent = d.eyebrow;
       $('#pv-amountlabel').textContent = d.amount_label;
-      $('#pv-amount').textContent = d.amount;
+      $('#pv-amount').innerHTML = (d.amount_icon
+        ? `<img class="cert-coin" src="${esc(d.amount_icon)}" alt="vUSDT">` : '') + esc(d.amount);
       $('#pv-person').textContent = d.trader_name;
       $('#pv-meta').innerHTML = d.meta.map(m =>
         `<div><b>${esc(m.value)}</b><span>${esc(m.label)}</span></div>`).join('');

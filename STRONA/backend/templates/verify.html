@@ -33,7 +33,11 @@
             <div><span>{{ 'Document' if result.kind == 'payout' else 'Achievement' }}</span><span>{{ result.status }}</span></div>
             <div><span>Trader</span><span>{{ result.trader }}</span></div>
             {% if result.kind == 'payout' %}
+            {% if result.coin %}
+            <div><span>Amount paid</span><span class="verify-coin"><img src="{{ result.coin }}" alt="">{{ "{:,.2f}".format(result.amount) }} vUSDT</span></div>
+            {% else %}
             <div><span>Amount paid</span><span>${{ "{:,.2f}".format(result.amount) }}</span></div>
+            {% endif %}
             <div><span>Paid on</span><span>{{ result.issued }}</span></div>
             {% endif %}
             <div><span>Account size</span><span>${{ "{:,.0f}".format(result.size) }}</span></div>
@@ -64,7 +68,7 @@
           <h2 class="cert-title">Certificate</h2>
 
           <div class="cert-amountlabel">{{ preview.amount_label if preview else 'Account size' }}</div>
-          <div class="cert-amount">{{ preview.amount if preview else '$100,000' }}</div>
+          <div class="cert-amount">{% if preview and preview.amount_icon %}<img class="cert-coin" src="{{ preview.amount_icon }}" alt="vUSDT">{% endif %}{{ preview.amount if preview else '$100,000' }}</div>
 
           <div class="cert-presented">presented to</div>
           <div class="cert-person">{{ preview.person if preview else 'Your Name' }}</div>

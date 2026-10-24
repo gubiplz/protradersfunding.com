@@ -8743,7 +8743,8 @@ _NOTATKI_WEWNETRZNE = {payout_import.IMPORT_NOTE, payoutbot.NOTATKA}
 
 
 def _cert_ctx(request, *, headline_plain, eyebrow, trader_name, amount_label, amount,
-              blurb, meta, cert_token, seal, note=None, variant="pass", bare=False) -> dict:
+              blurb, meta, cert_token, seal, note=None, variant="pass", bare=False,
+              amount_icon=None) -> dict:
     """Wspólny kontekst obu certyfikatów — jeden szablon, dwa warianty.
 
     Świadomie BEZ numeru rachunku MT5: dokument idzie na zewnątrz, a numer konta
@@ -8770,7 +8771,22 @@ def _cert_ctx(request, *, headline_plain, eyebrow, trader_name, amount_label, am
         "qr_svg": _qr_svg(weryfikacja),
         "signatory": settings.cert_signatory or None,
         "signatory_label": settings.cert_signatory_label,
+        "amount_icon": amount_icon,
     }
+
+
+VUSDT_COIN = "/static/img/vusdt.svg"
+
+
+def _cert_kwota(p: Payout) -> tuple[str, str | None]:
+    """Kwota wypłaty na dokument i ikona waluty przed nią.
+
+    Wypłata w vUSDT nie jest wypłatą w dolarach — zamiast „$" stoi moneta tokena.
+    """
+    kwota = payoutbot.kwota_txt(p.trader_share)
+    if p.method == "vusdt":
+        return kwota.removeprefix("$"), VUSDT_COIN
+    return kwota, None
 
 
 @app.middleware("http")
@@ -8818,11 +8834,10 @@ def verify_api(request: Request, cert_token: str):
         payout = session.query(Payout).filter(Payout.cert_token == cert_token).first()
         if payout:
             pacc = session.get(Account, payout.account_id)
-            kwota = (f"${payout.trader_share:,.0f}" if float(payout.trader_share).is_integer()
-                     else f"${payout.trader_share:,.2f}")
+            kwota, ikona = _cert_kwota(payout)
             data = (payout.ts or datetime.now(timezone.utc)).strftime("%d %b %Y")
             return {"found": True, "variant": "payout", "eyebrow": "Payout",
-                    "amount_label": "For the amount of", "amount": kwota,
+                    "amount_label": "For the amount of", "amount": kwota, "amount_icon": ikona,
                     "trader_name": (pacc.trader_name if pacc else None) or "—",
                     "meta": [{"value": data, "label": "Date"},
                              {"value": f"${(pacc.initial_balance if pacc else 0):,.0f}",
@@ -8903,13 +8918,13 @@ def payout_certificate(request: Request, cert_token: str, bare: int = 0):
         # Kwota bez groszy, gdy okrągła — „$9,070" czyta się lepiej niż „$9,070.00",
         # ale przy 1 049,78 nie wolno zgubić reszty. Ta sama funkcja składa podpis
         # posta na Telegramie: rozjazd między dokumentem a podpisem byłby widoczny.
-        kwota = payoutbot.kwota_txt(p.trader_share)
+        kwota, ikona = _cert_kwota(p)
         ctx = _cert_ctx(
             request,
             headline_plain="Payout certificate",
             eyebrow="Payout",
             trader_name=(acc.trader_name if acc else None),
-            amount_label="For the amount of", amount=kwota,
+            amount_label="For the amount of", amount=kwota, amount_icon=ikona,
             blurb=("This trader has earned a payout, reflecting the discipline and risk "
                    "management required to trade a funded account. Their profit share has been "
                    "released in full."),
@@ -13135,7 +13150,7 @@ def pay_start(request: Request, token: str,
 
 
 def _cert_preview(request, cert_token: str, trader_masked: str, acc: Account | None, *,
-                  eyebrow: str, when, payout_share: float | None = None) -> dict:
+                  eyebrow: str, when, payout: Payout | None = None) -> dict:
     """Dane repliki dokumentu pokazywanej obok formularza weryfikacji.
 
     Dokładnie to, co widnieje na samym certyfikacie, z JEDNYM wyjątkiem:
@@ -13144,11 +13159,10 @@ def _cert_preview(request, cert_token: str, trader_masked: str, acc: Account | N
     """
     data = (when or datetime.now(timezone.utc)).strftime("%d %b %Y")
     rozmiar = f"${(acc.initial_balance if acc else 0):,.0f}"
-    if payout_share is not None:
-        kwota = (f"${payout_share:,.0f}" if float(payout_share).is_integer()
-                 else f"${payout_share:,.2f}")
+    if payout is not None:
+        kwota, ikona = _cert_kwota(payout)
         return {"variant": "payout", "eyebrow": eyebrow, "amount_label": "For the amount of",
-                "amount": kwota, "person": trader_masked,
+                "amount": kwota, "amount_icon": ikona, "person": trader_masked,
                 "meta": [{"value": data, "label": "Date"},
                          {"value": rozmiar, "label": "Account size"}],
                 "token": cert_token,
@@ -13217,11 +13231,11 @@ def verify_page(request: Request, cert_token: str | None = None):
                           "product": etykieta(pacc),
                           "status": "Payout paid",
                           "amount": round(payout.trader_share, 2),
+                          "coin": _cert_kwota(payout)[1],
                           "issued": payout.ts.strftime("%d %b %Y") if payout.ts else None,
                           "token": cert_token}
                 podglad = _cert_preview(request, cert_token, result["trader"], pacc,
-                                        eyebrow="Payout", when=payout.ts,
-                                        payout_share=payout.trader_share)
+                                        eyebrow="Payout", when=payout.ts, payout=payout)
             else:
                 result = {"found": False}
         finally:
