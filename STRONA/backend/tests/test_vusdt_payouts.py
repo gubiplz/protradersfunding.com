@@ -405,9 +405,9 @@ def test_certyfikat_vusdt_ma_monete_zamiast_dolara():
         u = c.get(f"/payout/cert-usdt-{aid}").text
         api = c.get(f"/api/verify/cert-vusdt-{aid}").json()
         ver = c.get(f"/verify/cert-vusdt-{aid}").text
-    assert 'class="cert-coin" src="/static/img/vusdt.svg"' in v and "$7,980" not in v
-    assert "7,980" in v
-    assert "cert-coin" not in u and "$7,980" in u
+    # Decyzja właściciela: KAŻDA wypłata (nie tylko method=="vusdt") pokazuje monetę.
+    assert 'class="cert-coin" src="/static/img/vusdt.svg"' in v and "$7,980" not in v and "7,980" in v
+    assert 'class="cert-coin" src="/static/img/vusdt.svg"' in u and "$7,980" not in u and "7,980" in u
     assert api["amount"] == "7,980" and api["amount_icon"] == "/static/img/vusdt.svg"
     assert ver.count("/static/img/vusdt.svg") == 2 and "$7,980" not in ver
 
@@ -431,3 +431,15 @@ def test_pas_landingu_daje_monete_dla_vusdt():
     wg = {r["amount_usd"]: r for r in rows}
     assert wg[7980]["coin"] == "/static/img/vusdt.svg"
     assert wg[6000]["coin"] is None
+
+
+
+def test_verify_bez_tokenu_pokazuje_probke_vusdt():
+    """Domyślna próbka (bez wpisanego ID) na /verify to certyfikat wypłaty vUSDT:
+    zielona moneta zamiast „$", wariant payout. Marketing LP ma od razu pokazywać
+    nowy wygląd, a nie starą kartę „Account size $100,000"."""
+    with TestClient(app) as c:
+        html = c.get("/verify").text
+    assert "/static/img/vusdt.svg" in html
+    assert "For the amount of" in html
+    assert "cert-variant-payout" in html

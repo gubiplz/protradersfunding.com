@@ -349,22 +349,22 @@
     {# The preview uses EXACTLY the same classes as the real certificate
        (cert.css), so the landing never drifts from the document on the next
        redesign. #}
-    <div class="cert-card cert-demo" data-rv id="pv-card">
+    <div class="cert-card cert-demo cert-variant-payout" data-rv id="pv-card">
       <div class="cert-inner">
         <div class="cert-logo"><img src="/static/img/logo.png" alt=""><span>{{ site_name }}</span></div>
 
-        <div class="cert-eyebrow"><s></s><span id="pv-eyebrow">Funded trader</span><s></s></div>
+        <div class="cert-eyebrow"><s></s><span id="pv-eyebrow">Payout</span><s></s></div>
         <h3 class="cert-title">Certificate</h3>
 
-        <div class="cert-amountlabel" id="pv-amountlabel">Account size</div>
-        <div class="cert-amount" id="pv-amount">$100,000</div>
+        <div class="cert-amountlabel" id="pv-amountlabel">For the amount of</div>
+        <div class="cert-amount" id="pv-amount"><img class="cert-coin" src="/static/img/vusdt.svg" alt="vUSDT">5,000</div>
 
         <div class="cert-presented">presented to</div>
         <div class="cert-person" id="pv-person">Your Name</div>
 
         <div class="cert-meta" id="pv-meta">
           <div><b>On your pass date</b><span>Date</span></div>
-          <div><b>2-Step</b><span>Program</span></div>
+          <div><b>$100,000</b><span>Account size</span></div>
         </div>
 
         {# No descriptive paragraph — the same message already stands on the left,
