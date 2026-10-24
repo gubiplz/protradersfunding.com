@@ -46,6 +46,7 @@ from . import (achievements, auth, billing, catalog, certshot, contentbot, count
                lead_mail, mail_templates, metaquotes_web, notify, offers, origin,
                payout_import, payoutbot, polecenia, reach, statements,
                poller, provisioning, push, rules, sms, telegram, telemetry, tradebot, zamki)
+from . import vusdt
 from .config import get_settings
 from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint, zamek_migracji
 from .models import (LEAD_LOST_STATUSES, LEAD_STATUSES, LOST_REASONS,
@@ -57,6 +58,7 @@ from .models import (LEAD_LOST_STATUSES, LEAD_STATUSES, LOST_REASONS,
                      Order, Payout, PayoutRequest, PoolAccount, PostMedia, Product,
                      PushSubscription,
                      RewardCode, SupportTicket, TelemetryEvent, TicketMessage, Trade, Trader,
+                     VusdtTransfer,
                      nowy_znak_biletu)
 
 settings = get_settings()
@@ -925,6 +927,11 @@ _RL_HITS: dict[tuple[str, str], list[float]] = {}
 _RL_DISABLED = os.getenv("RATE_LIMIT_OFF", "false").lower() == "true"
 # Wzorzec mieszka teraz w `fields`, zeby serwer i formularze mialy jedna regule.
 _EMAIL_RX = fields.EMAIL_RX
+
+
+def _client_ip(request: Request) -> str:
+    return (request.headers.get("x-forwarded-for")
+            or (request.client.host if request.client else "")).split(",")[0].strip()
 
 
 def _rate_limit(request: Request, bucket: str, limit: int, window: int = 60) -> None:
@@ -1803,6 +1810,8 @@ class PayoutReqIn(BaseModel):
     # KAŻDE porównanie z saldem (share > available == False).
     amount: float | None = Field(default=None, allow_inf_nan=False)  # None = cała dostępna działka
     details: dict | None = None      # dane wypłaty zależne od metody
+    # Tryb testowy vUSDT: token z widgetu Cloudflare Turnstile w modalu.
+    turnstile_token: str | None = Field(default=None, max_length=2048)
 
     @field_validator("amount", mode="before")
     @classmethod
@@ -1865,6 +1874,8 @@ def my_accounts(trader: Trader = Depends(auth.current_trader)):
             _ensure_cert_token(session, a)
             d = _account_dict(a, with_credentials=True)
             d["paid_out"] = round(paid.get(a.id, 0.0), 2)
+            nastepna = payout_next_at(session, a) if a.status == "funded" else None
+            d["payout_next_at"] = nastepna.isoformat() + "Z" if nastepna else None
             out.append(d)
         return out
     finally:
@@ -1993,12 +2004,32 @@ PAYOUT_MIN_USD = 500.0
 PAYOUT_MIN_PCT = 2.0
 
 
+def payout_next_at(session, acc: Account) -> datetime | None:
+    """Kiedy konto może złożyć następny wniosek (PAYOUT_INTERVAL_DAYS), albo None,
+    gdy już może. Liczy się ostatni NIEODRZUCONY wniosek i ostatnia wypłata —
+    odrzucenie niczego nie wypłaciło, więc nie zabiera traderowi okna."""
+    dni = settings.payout_interval_days
+    if dni <= 0:
+        return None
+    ostatnie = [
+        session.query(func.max(PayoutRequest.ts))
+        .filter(PayoutRequest.account_id == acc.id, PayoutRequest.status != "rejected").scalar(),
+        session.query(func.max(Payout.ts)).filter(Payout.account_id == acc.id).scalar(),
+    ]
+    ostatnie = [t.replace(tzinfo=None) if t.tzinfo else t for t in ostatnie if t]
+    if not ostatnie:
+        return None
+    nastepny = max(ostatnie) + timedelta(days=dni)
+    return nastepny if nastepny > datetime.now(timezone.utc).replace(tzinfo=None) else None
+
+
 def payout_minimum(acc: Account) -> float:
     return round(max(PAYOUT_MIN_USD, float(acc.initial_balance or 0) * PAYOUT_MIN_PCT / 100), 2)
 
 
 @app.post("/api/accounts/{account_id}/payout-request")
-def request_payout(account_id: int, payload: PayoutReqIn, trader: Trader = Depends(auth.current_trader)):
+def request_payout(account_id: int, payload: PayoutReqIn, request: Request,
+                   trader: Trader = Depends(auth.current_trader)):
     session = SessionLocal()
     try:
         acc = session.get(Account, account_id)
@@ -2016,6 +2047,11 @@ def request_payout(account_id: int, payload: PayoutReqIn, trader: Trader = Depen
             raise HTTPException(400, f"This plan pays out after {int(acc.min_trading_days)} "
                                      f"trading days — {int(acc.trading_days_count or 0)} done, "
                                      f"{brak_dni} to go")
+        nastepna = payout_next_at(session, acc)
+        if nastepna:
+            raise HTTPException(400, f"Payouts are available every {settings.payout_interval_days} days "
+                                     f"on this account — the next one opens on "
+                                     f"{nastepna:%b %-d, %Y at %H:%M} UTC")
         tr = session.get(Trader, trader.id)
         if tr.kyc_status != "approved":
             raise HTTPException(403, "Complete KYC verification first")
@@ -2046,11 +2082,29 @@ def request_payout(account_id: int, payload: PayoutReqIn, trader: Trader = Depen
             raise HTTPException(400, f"The minimum payout is {PAYOUT_MIN_PCT:g}% of your account size "
                                      f"— ${minimum:,.2f} on this ${float(acc.initial_balance):,.0f} account")
         method = (payload.method or "").lower()
-        details_json = _payout_details_json(method, payload.details or {})
+        testowy = vusdt.enabled()
+        if testowy:
+            # Preview: jedyna metoda to testowy vUSDT na Polygonie, wysyłany od
+            # razu po złożeniu wniosku (jak „Send me vUSDT" w kraniku).
+            if method != "vusdt":
+                raise HTTPException(400, "Test mode: payouts are sent in vUSDT on Polygon only")
+            try:
+                details_json = vusdt.details_json(payload.details)
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+            if not vusdt.verify_turnstile(payload.turnstile_token, _client_ip(request)):
+                raise HTTPException(400, "Captcha verification failed. Complete the check again.")
+        else:
+            details_json = _payout_details_json(method, payload.details or {})
         pr = PayoutRequest(account_id=acc.id, trader_id=tr.id, profit_amount=profit,
                            trader_share=share, method=method, details=details_json,
                            status="pending")
         session.add(pr)
+        if testowy:
+            session.flush()
+            session.add(VusdtTransfer(payout_request_id=pr.id,
+                                      address=json.loads(details_json)["address"],
+                                      amount_units=vusdt.to_units(share)))
         try:
             session.commit()
         except IntegrityError:
@@ -2062,7 +2116,31 @@ def request_payout(account_id: int, payload: PayoutReqIn, trader: Trader = Depen
         notify.send("payout_requested", tr.email, {"name": tr.full_name or tr.email,
                     "login": acc.login, "profit_amount": profit, "trader_share": share})
         notify.notify_admins("admin_payout", f"Payout request ${share:,.2f}", tr.email)
-        return {"id": pr.id, "profit_amount": profit, "trader_share": share, "status": "pending"}
+        out = {"id": pr.id, "profit_amount": profit, "trader_share": share, "status": "pending"}
+        if testowy:
+            vusdt.process_queue(session)
+            t = session.query(VusdtTransfer).filter(VusdtTransfer.payout_request_id == pr.id).one()
+            out["vusdt"] = vusdt.view(t)
+        return out
+    finally:
+        session.close()
+
+
+@app.get("/api/me/payout-requests/{req_id}/vusdt")
+def my_payout_vusdt(req_id: int, trader: Trader = Depends(auth.current_trader)):
+    """Status testowej wysyłki vUSDT — modal odpytuje go do potwierdzenia.
+    Polling napędza też kolejkę: zaległy transfer próbuje wyjść przy każdym odczycie."""
+    session = SessionLocal()
+    try:
+        pr = session.get(PayoutRequest, req_id)
+        if not pr or pr.trader_id != trader.id:
+            raise HTTPException(404, "Payout request not found")
+        t = session.query(VusdtTransfer).filter(VusdtTransfer.payout_request_id == pr.id).first()
+        if not t:
+            raise HTTPException(404, "This payout has no vUSDT transfer")
+        if vusdt.enabled():
+            t = vusdt.refresh(session, t)
+        return vusdt.view(t)
     finally:
         session.close()
 
@@ -2785,6 +2863,8 @@ def my_payouts(trader: Trader = Depends(auth.current_trader)):
                 .order_by(PayoutRequest.id.desc()).all()) if acc_ids else []
         pays = (session.query(Payout).filter(Payout.account_id.in_(acc_ids)).all()) if acc_ids else []
         available = sum(_payout_available(a) for a in accs if a.status == "funded")
+        vusdt_tx = {t.payout_request_id: t for t in session.query(VusdtTransfer).filter(
+            VusdtTransfer.payout_request_id.in_([r.id for r in reqs])).all()} if reqs else {}
         return {
             "summary": {
                 "total_paid": round(sum(p.trader_share for p in pays), 2),
@@ -2793,6 +2873,8 @@ def my_payouts(trader: Trader = Depends(auth.current_trader)):
                 # Harmonogram wypłat = on-demand z przeglądem do 24 h; portal
                 # pisze to zdanie z tej liczby, nie z zaszytego stringa.
                 "review_hours": 24,
+                # 0 = on demand; inaczej co ile dni konto może złożyć wniosek.
+                "interval_days": settings.payout_interval_days,
             },
             "requests": [{"id": r.id, "ts": r.ts.isoformat(),
                           "account": by_id[r.account_id].login if r.account_id in by_id else "?",
@@ -2801,7 +2883,9 @@ def my_payouts(trader: Trader = Depends(auth.current_trader)):
                           "express": bool(by_id[r.account_id].express_payout) if r.account_id in by_id else False,
                           "expected_by": ((r.ts + timedelta(hours=24)).isoformat()
                                           if r.status == "pending" else None),
-                          "reject_reason": r.reject_reason} for r in reqs],
+                          "reject_reason": r.reject_reason,
+                          "vusdt": vusdt.view(vusdt_tx[r.id]) if r.id in vusdt_tx else None}
+                         for r in reqs],
             # Zrealizowane wyplaty — wniosek to dopiero prosba, a trader chce
             # widziec, co faktycznie do niego trafilo i miec do tego certyfikat.
             "history": [{"id": p.id, "ts": p.ts.isoformat(),
@@ -12420,7 +12504,8 @@ def _page(request: Request, template: str, **extra):
            "ga_id": settings.ga_measurement_id,
            "clarity_id": settings.clarity_project_id, "promo": _promo_ctx(),
            "bogo_promo": _bogo_promo_active(),
-           "google_client_id": settings.google_client_id, **extra}
+           "google_client_id": settings.google_client_id,
+           "vusdt_test": vusdt.public_config(), **extra}
     return jinja.TemplateResponse(request, template, ctx)
 
 

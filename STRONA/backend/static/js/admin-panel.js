@@ -1646,8 +1646,8 @@ function renderPayoutsView(){
       <td data-l="Trader">${esc(r.trader_email||'—')}${freeChip(r)}</td>
       <td class="num" data-l="Profit">$${fmt(r.profit_amount)}</td><td class="num up" data-l="Share">$${fmt(r.trader_share)}</td>
       <td data-l="Method">${(()=>{const d=r.details||{};
-        const label=r.method==='usdt'?'USDT':r.method==='wise'?'Wise':'Bank';
-        if(r.method==='usdt')return esc(label)+payAddrHtml(d.network,d.address);
+        const label=r.method==='usdt'?'USDT':r.method==='vusdt'?'vUSDT (test)':r.method==='wise'?'Wise':'Bank';
+        if(r.method==='usdt'||r.method==='vusdt')return esc(label)+payAddrHtml(d.network,d.address);
         const info=r.method==='wise'?(d.email||'')
           :[d.holder,d.iban,d.swift,d.bank_name].filter(Boolean).join(' · ');
         return `${esc(label)}${info?`<div class="muted mono" style="font-size:var(--fs-cap);max-width:260px;word-break:break-all">${esc(info)}</div>`:''}`})()}</td>

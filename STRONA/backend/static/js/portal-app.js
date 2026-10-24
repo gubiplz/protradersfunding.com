@@ -2616,8 +2616,11 @@ const VIEWS={
             ?'unlocks at the trading-day minimum'
             :`$${fmt(zablokowane)} of it unlocks at the trading-day minimum`}</div></div></div>
     </div>
-    <p class="muted" style="font-size:13px;margin:-6px 0 14px">Payouts are <b>on demand</b> — request whenever
-      you are in profit.${
+    <p class="muted" style="font-size:13px;margin:-6px 0 14px">${data.summary.interval_days
+      ?`Payouts are available <b>every ${data.summary.interval_days} days</b> per account — request whenever
+      you are in profit and the window is open.`
+      :`Payouts are <b>on demand</b> — request whenever
+      you are in profit.`}${
       czeka?` Your ${esc(czeka.login)} plan unlocks its first payout after
         <b>${czeka.metrics?.min_trading_days??0} trading days</b> — a day counts once you trade on it.`:''}</p>
     ${funded.filter(a=>a.scale_up_to).map(a=>{
@@ -2645,7 +2648,9 @@ const VIEWS={
         <td class="muted" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td>
         <td class="num">${esc(r.account)}${r.express?' <span style="font-size:10px;font-weight:700;letter-spacing:.4px;color:var(--orange,#f59e0b);border:1px solid currentColor;border-radius:6px;padding:1px 5px;vertical-align:1px">EXPRESS</span>':''}</td>
         <td class="num">$${fmt(r.profit_amount)}</td><td class="num">$${fmt(r.trader_share)}</td>
-        <td class="muted">${esc(payoutMethodLabel(r.method))}</td>
+        <td class="muted">${esc(payoutMethodLabel(r.method))}${r.vusdt?`<div style="font-size:11px">${
+          r.vusdt.explorer_url?`<a href="${esc(r.vusdt.explorer_url)}" target="_blank" rel="noopener">${esc(r.vusdt.status)} · view tx ↗</a>`
+          :esc(r.vusdt.status)}</div>`:''}</td>
         <td><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending':'failed'}"><span class="dot"></span>${esc(r.status)}</span>
           ${r.status==='rejected'&&r.reject_reason?`<div class="muted" style="font-size:11px;max-width:220px">${esc(r.reject_reason)}</div>`:''}</td></tr>`).join('')+`
       </tbody></table></div>`
@@ -4355,12 +4360,16 @@ async function makePayoutCert(id){
 }
 /* Payout request: amount + method + the details that method requires.
    The server validates the same rules again — the modal only saves an error round-trip. */
-function payoutMethodLabel(m){return m==='usdt'?'USDT (crypto)':m==='wise'?'Wise':'Bank transfer'}
+function payoutMethodLabel(m){return m==='usdt'?'USDT (crypto)':m==='vusdt'?'vUSDT (test token)':m==='wise'?'Wise':'Bank transfer'}
 /* Przycisk wypłaty albo licznik dni, jeśli konto jeszcze nie dorosło do pierwszej.
    Instant jest funded od pierwszego dnia, więc bez tego liczydła jedyną informacją
    o 30 dniach był błąd z API — dopiero po wypełnieniu całego wniosku. */
 function payoutBtn(a,av,cls,label){
   const left=a.payout_days_left||0, m=a.metrics||{};
+  /* Okno wypłat (PAYOUT_INTERVAL_DAYS): serwer i tak odrzuci wniosek przed
+     datą, przycisk tylko mówi to wcześniej. */
+  if(!left&&a.payout_next_at)return `<button class="${cls}" disabled title="Payouts open once per payout window on this account.">${
+    esc(a.login)} · next payout ${new Date(a.payout_next_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</button>`;
   return left
     ?`<button class="${cls}" disabled title="This plan unlocks its first payout after ${m.min_trading_days??0} trading days.">${
         esc(a.login)} · ${m.trading_days??0}/${m.min_trading_days??0} trading days</button>`
@@ -4388,25 +4397,32 @@ function openPayoutModal(id,avail,size){
     <input id="po-amount" class="inp" type="number" min="${PO_MIN_USD}" max="${avail}" step="0.01" value="${avail}" style="margin-bottom:10px"
       oninput="this.classList.remove('bad');poSprawdz()">
     <label class="muted" style="font-size:12px">Payout method</label>
-    <select id="po-method" class="inp" onchange="poFields()" style="margin-bottom:10px">
-      <option value="usdt">USDT — crypto</option>
+    <select id="po-method" class="inp" onchange="poFields()" style="margin-bottom:10px">${VUSDT_TEST
+      ?`<option value="vusdt">vUSDT — crypto</option>`
+      :`<option value="usdt">USDT — crypto</option>
       <option value="bank">Bank transfer</option>
-      <option value="wise">Wise</option>
+      <option value="wise">Wise</option>`}
     </select>
     <div id="po-fields"></div>
     ${size?`<div class="po-min${avail<pct?' bad':''}" id="po-min" role="alert" data-pct="${pct}">
       <b>Minimum payout: ${PO_MIN_PCT}% of your account size</b> — $${fmt(pct)} on this $${fmt0(size)} account.${
       avail<pct?` Your available share is $${fmt(avail)}, so you can request a payout once it reaches $${fmt(pct)}.`:''}</div>`:''}
+    ${VUSDT_TEST?`<div id="po-ts" class="po-ts"></div>
+    <p class="muted po-test">Test mode: payouts are sent as vUSDT, a test token with no monetary value.</p>`:''}
     <div style="display:flex;gap:10px;margin-top:14px">
       <button class="btn-p" onclick="submitPayout(${id})" id="po-send">Submit request</button>
       <button class="btn-o" onclick="$('po-modal').remove()">Cancel</button>
     </div></div>`;
   document.body.appendChild(w); poFields();
+  if(VUSDT_TEST)poTurnstile();
   setTimeout(()=>$('po-amount')?.focus(),50);
 }
 function poFields(){
   const m=$('po-method').value, F=$('po-fields'), L=t=>`<label class="muted" style="font-size:12px">${t}</label>`;
-  if(m==='usdt')F.innerHTML=L('Network')+`<select id="po-network" class="inp" style="margin-bottom:10px">
+  if(m==='vusdt')F.innerHTML=L('Network')+`<select id="po-network" class="inp" style="margin-bottom:10px">
+      <option value="POLYGON">Polygon</option></select>`
+    +L('Polygon wallet address')+`<input id="po-address" class="inp mono" placeholder="0x…" autocomplete="off" spellcheck="false" autocapitalize="off">`;
+  else if(m==='usdt')F.innerHTML=L('Network')+`<select id="po-network" class="inp" style="margin-bottom:10px">
       <option value="TRC20">TRC-20 (Tron) — lowest fees</option>
       <option value="BEP20">BEP-20 (BNB Smart Chain)</option>
       <option value="POLYGON">Polygon</option></select>`
@@ -4455,17 +4471,84 @@ async function submitPayout(id){
   if(!poSprawdz()){
     const box=$('po-min');box.classList.remove('shake');void box.offsetWidth;box.classList.add('shake');
     box.scrollIntoView({block:'nearest',behavior:'smooth'});return}
-  const details=m==='usdt'?{network:$('po-network').value,address:$('po-address').value.trim()}
+  if(m==='vusdt'){
+    const a=$('po-address').value.trim();
+    if(!/^0x[0-9a-fA-F]{40}$/.test(a)){$('po-address').classList.add('bad');$('po-address').focus();
+      toast('Enter a Polygon wallet address: 0x followed by 40 characters.','err');return}
+    if(!PO_TS.token){toast('Complete the Cloudflare check above the button first.','err');return}
+  }
+  const details=(m==='usdt'||m==='vusdt')?{network:$('po-network').value,address:$('po-address').value.trim()}
     :m==='bank'?{holder:$('po-holder').value.trim(),iban:$('po-iban').value.trim(),
                  swift:$('po-swift').value.trim(),bank_name:$('po-bank').value.trim()}
     :{email:$('po-email').value.trim()};
   await busy($('po-send'),null,async()=>{
     try{const r=await api(`/api/accounts/${id}/payout-request`,{method:'POST',
-        body:JSON.stringify({method:m,amount,details})});
+        body:JSON.stringify({method:m,amount,details,turnstile_token:m==='vusdt'?PO_TS.token:undefined})});
+      if(r.vusdt){poSent(r.id,r.vusdt);return 'keep'}
       $('po-modal').remove();
       toast(`✅ Request submitted: $${fmt(r.trader_share)} via ${payoutMethodLabel(m)}. Awaiting review.`,'ok',8000);
       go('payouts');
-    }catch(e){toast('Error: '+e.message,'err')}
+    }catch(e){toast('Error: '+e.message,'err');if(m==='vusdt')poTurnstileReset()}
+  });
+}
+
+/* ---------- testowe wypłaty vUSDT (VUSDT_TEST, tylko preview) ----------
+   Submit działa jak „Send me vUSDT" w kraniku: serwer weryfikuje Turnstile,
+   podpisuje transfer na Polygonie i oddaje hash; modal pokazuje Sending → Sent
+   i dopytuje o potwierdzenie z łańcucha. Token Turnstile jest jednorazowy —
+   po każdym błędzie widget się resetuje. */
+const PO_TS={token:'',widget:null};
+function poTurnstile(){
+  PO_TS.token='';PO_TS.widget=null;
+  const draw=()=>{const box=$('po-ts');if(!box||!window.turnstile)return;
+    PO_TS.widget=turnstile.render(box,{sitekey:VUSDT_TEST.site_key,theme:themeNow()==='dark'?'dark':'light',language:'en',size:'flexible',
+      callback:t=>{PO_TS.token=t},'expired-callback':()=>{PO_TS.token=''},'error-callback':()=>{PO_TS.token=''}})};
+  if(window.turnstile)return draw();
+  let s=document.getElementById('cf-turnstile-js');
+  if(!s){s=document.createElement('script');s.id='cf-turnstile-js';s.async=true;
+    s.src='https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';document.head.appendChild(s)}
+  s.addEventListener('load',draw,{once:true});
+}
+function poTurnstileReset(){PO_TS.token='';if(window.turnstile&&PO_TS.widget!==null){try{turnstile.reset(PO_TS.widget)}catch(_){}}}
+function poShort(a){return a?a.slice(0,6)+'…'+a.slice(-4):''}
+function poSent(reqId,v){
+  const box=document.querySelector('#po-modal .modal');if(!box)return;
+  const done=v.status==='confirmed',failed=v.status==='failed',queued=v.status==='queued';
+  box.innerHTML=`<div class="modal-head"><h3>${failed?'Transfer failed':queued?'Payout saved':'Sent!'}</h3></div>
+    <p style="font-size:14px;margin:2px 0 10px"><b>${esc(v.amount)} ${esc(v.symbol)}</b> ${
+      failed?'could not be delivered to':queued?'will be sent to':'is on its way to'} <span class="mono">${esc(poShort(v.address))}</span> on Polygon.</p>
+    <div class="po-vstat ${failed?'bad':done?'ok':''}" role="status">${
+      failed?esc(v.note||'The transfer failed.'):done?'✓ Confirmed on Polygon':queued?esc(v.note||'In line…'):'Confirming on Polygon…'}</div>
+    ${v.explorer_url?`<p style="margin:10px 0 0"><a href="${esc(v.explorer_url)}" target="_blank" rel="noopener">View on Polygonscan ↗</a></p>`:''}
+    <p class="muted po-test">vUSDT is a test token with no monetary value. The request also stays in the review queue.</p>
+    <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+      ${failed?'':`<button class="btn-o" onclick="poAddToken(this)">Add vUSDT to MetaMask</button>`}
+      <button class="btn-p" onclick="$('po-modal').remove();go('payouts')">Done</button>
+    </div>`;
+  if(!done&&!failed)setTimeout(()=>poPoll(reqId,1),4000);
+}
+async function poPoll(reqId,n){
+  if(!$('po-modal')||n>45)return;
+  try{poSent(reqId,await api(`/api/me/payout-requests/${reqId}/vusdt`))}
+  catch(e){setTimeout(()=>poPoll(reqId,n+1),6000)}
+}
+async function poAddToken(btn){
+  const eth=window.ethereum;
+  if(!eth){toast('No wallet found. Open this page in MetaMask or add the token manually: '+VUSDT_TEST.token,'err',9000);return}
+  await busy(btn,'Check your wallet…',async()=>{
+    try{
+      // MetaMask wywraca watchAsset/switch na stronie, która nie jest połączona.
+      await eth.request({method:'eth_requestAccounts'});
+      const chain='0x'+VUSDT_TEST.chain_id.toString(16);
+      try{await eth.request({method:'wallet_switchEthereumChain',params:[{chainId:chain}]})}
+      catch(e){if(e&&e.code===4902)await eth.request({method:'wallet_addEthereumChain',params:[{chainId:chain,
+        chainName:'Polygon',nativeCurrency:{name:'POL',symbol:'POL',decimals:18},
+        rpcUrls:['https://polygon-rpc.com'],blockExplorerUrls:['https://polygonscan.com']}]});else throw e}
+      const ok=await eth.request({method:'wallet_watchAsset',params:{type:'ERC20',options:{
+        address:VUSDT_TEST.token,symbol:VUSDT_TEST.symbol,decimals:VUSDT_TEST.decimals,
+        image:location.origin+VUSDT_TEST.image}}});
+      toast(ok?'vUSDT added to your wallet (Tokens tab).':'Not added.',ok?'ok':'err');
+    }catch(e){toast((e&&e.code===4001)?'Cancelled in the wallet.':'Wallet error: '+(e&&e.message||e),'err')}
   });
 }
 
