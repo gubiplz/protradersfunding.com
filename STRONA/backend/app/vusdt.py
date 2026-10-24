@@ -1,8 +1,8 @@
 """Testowe wypłaty w vUSDT na Polygonie — PTF sam podpisuje i wysyła transfer.
 
 vUSDT („Virtual USDT", 6 miejsc po przecinku) to token TESTOWY bez wartości,
-kontrakt z ~/vusdt-faucet. Tryb istnieje po to, żeby przećwiczyć ścieżkę
-„Submit request → token na portfelu tradera"; włącza go
+kontrakt z ~/vusdt-faucet. Ścieżka: trader prosi → admin odblokowuje → trader
+podaje kwotę + adres 0x (+ Turnstile) → transfer wychodzi sam. Włącza go
 `Settings.vusdt_payouts_enabled` (flaga VUSDT_TEST_PAYOUTS + klucze).
 
 Logika przeniesiona z kranika (lib/sender.ts, lib/sweep.ts):

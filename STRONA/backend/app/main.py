@@ -2036,11 +2036,11 @@ def payout_minimum(acc: Account) -> float:
 
 #: Wniosek idzie w dwóch krokach: trader prosi o wypłatę (`review`) → admin
 #: ogląda konto i ją odblokowuje (`unlocked`) → trader wybiera kwotę i podaje
-#: portfel USDT (`pending`) → admin wysyła i oznacza jako wypłaconą (`paid`).
-#: Każdy z tych trzech stanów to OTWARTY wniosek — drugi na to samo konto nie
-#: przejdzie. Własna nazwa `unlocked` zamiast `approved`, bo stare wiersze
-#: mogą mieć `approved` z dawnego przepływu i nie mogą nagle otworzyć traderowi
-#: formularza kwoty.
+#: portfel (`pending`). Dalej zależy od metody: zwykły USDT kończy admin
+#: („Mark as paid"), testowy vUSDT wychodzi sam z łańcucha. Każdy z tych
+#: trzech stanów to OTWARTY wniosek — drugi na to samo konto nie przejdzie.
+#: Własna nazwa `unlocked` zamiast `approved`, bo stare wiersze mogą mieć
+#: `approved` z dawnego przepływu i nie mogą nagle otworzyć traderowi formularza.
 PAYOUT_OTWARTE = ("review", "unlocked", "pending")
 
 
@@ -2071,8 +2071,8 @@ def _kwota_wyplaty(acc: Account, amount: float | None) -> float:
 
 
 @app.post("/api/accounts/{account_id}/payout-request")
-def request_payout(account_id: int, payload: PayoutReqIn, request: Request,
-                   trader: Trader = Depends(auth.current_trader)):
+def request_payout(account_id: int, trader: Trader = Depends(auth.current_trader),
+                   payload: PayoutReqIn | None = None):  # body opcjonalny — krok 1 nic z niego nie bierze
     session = SessionLocal()
     try:
         acc = session.get(Account, account_id)
@@ -2107,73 +2107,27 @@ def request_payout(account_id: int, payload: PayoutReqIn, request: Request,
         if otwarty:
             raise HTTPException(400, "A payout request for this account is already under review")
         profit = _zysk_do_wyplaty(acc)
-        testowy = vusdt.enabled()
-        if not testowy:
-            # Krok 1 z 2: sama prośba, bez kwoty i portfela. Admin najpierw
-            # ogląda konto; kwotę i adres USDT trader poda dopiero po
-            # odblokowaniu (POST /api/me/payout-requests/{id}/details). Próg
-            # minimum sprawdzamy już teraz — wniosek, z którego i tak nie da się
-            # wypłacić, nie powinien czekać na przegląd.
-            available = _kwota_wyplaty(acc, None)
-            pr = PayoutRequest(account_id=acc.id, trader_id=tr.id, profit_amount=profit,
-                               trader_share=available, method="usdt", details=None,
-                               status="review")
-            session.add(pr)
-            try:
-                session.commit()
-            except IntegrityError:
-                session.rollback()
-                raise HTTPException(400, "A payout request for this account is already under review")
-            notify.send("payout_requested", tr.email, {"name": tr.full_name or tr.email,
-                        "login": acc.login, "review": True})
-            notify.notify_admins("admin_payout", f"Payout request to review ({acc.login})", tr.email)
-            return {"id": pr.id, "profit_amount": profit, "available": available,
-                    "status": "review"}
-        # Dalej już tylko tryb testowy vUSDT — jeden krok, bez przeglądu admina
-        # (zachowanie bez zmian). Trader sam wybiera kwotę.
-        share = _kwota_wyplaty(acc, payload.amount)
-        method = (payload.method or "").lower()
-        if testowy:
-            # Preview: jedyna metoda to testowy vUSDT na Polygonie, wysyłany od
-            # razu po złożeniu wniosku (jak „Send me vUSDT" w kraniku).
-            if method != "vusdt":
-                raise HTTPException(400, "Test mode: payouts are sent in vUSDT on Polygon only")
-            try:
-                details_json = vusdt.details_json(payload.details)
-            except ValueError as e:
-                raise HTTPException(400, str(e))
-            if not vusdt.verify_turnstile(payload.turnstile_token, _client_ip(request)):
-                raise HTTPException(400, "Captcha verification failed. Complete the check again.")
+        # Krok 1 z 2 — dla USDT i dla testowego vUSDT: sama prośba, bez kwoty
+        # i portfela. Admin ogląda konto; kwotę i adres trader poda dopiero po
+        # odblokowaniu (POST /api/me/payout-requests/{id}/details). Próg minimum
+        # sprawdzamy już teraz — wniosek, z którego i tak nie da się wypłacić,
+        # nie powinien czekać na przegląd.
+        available = _kwota_wyplaty(acc, None)
+        method = "vusdt" if vusdt.enabled() else "usdt"
         pr = PayoutRequest(account_id=acc.id, trader_id=tr.id, profit_amount=profit,
-                           trader_share=share, method=method, details=details_json,
-                           status="pending")
+                           trader_share=available, method=method, details=None,
+                           status="review")
         session.add(pr)
-        if testowy:
-            session.flush()
-            # Wniosek rozlicza się sam po potwierdzeniu transferu, więc zwrot
-            # opłaty przy pierwszej wypłacie jedzie w tym samym transferze.
-            zwrot = _zwrot_oplaty(session, acc)
-            session.add(VusdtTransfer(payout_request_id=pr.id,
-                                      address=json.loads(details_json)["address"],
-                                      amount_units=vusdt.to_units(share + zwrot)))
         try:
             session.commit()
         except IntegrityError:
-            # Podwójne kliknięcie: drugi request przeszedł sprawdzenie w Pythonie
-            # równolegle z pierwszym, ale baza (ux_payout_requests_pending) nie
-            # przepuściła drugiego wiersza.
             session.rollback()
             raise HTTPException(400, "A payout request for this account is already under review")
         notify.send("payout_requested", tr.email, {"name": tr.full_name or tr.email,
-                    "login": acc.login, "profit_amount": profit, "trader_share": share})
-        notify.notify_admins("admin_payout", f"Payout request ${share:,.2f}", tr.email)
-        out = {"id": pr.id, "profit_amount": profit, "trader_share": share, "status": "pending"}
-        if testowy:
-            vusdt.process_queue(session)
-            t = _transfer_vusdt(session, pr.id)
-            out["vusdt"] = vusdt.view(t)
-            out["fee_refund"] = round(int(t.amount_units) / 10 ** vusdt.DECIMALS - share, 2)
-        return out
+                    "login": acc.login, "review": True})
+        notify.notify_admins("admin_payout", f"Payout request to review ({acc.login})", tr.email)
+        return {"id": pr.id, "profit_amount": profit, "available": available,
+                "status": "review"}
     finally:
         session.close()
 
@@ -2182,6 +2136,8 @@ class PayoutDetailsIn(BaseModel):
     amount: float = Field(allow_inf_nan=False)
     network: str = Field(default="", max_length=20)
     address: str = Field(default="", max_length=120)
+    # Tryb testowy vUSDT: token z widgetu Cloudflare Turnstile w modalu kroku 2.
+    turnstile_token: str | None = Field(default=None, max_length=2048)
 
     @field_validator("amount", mode="before")
     @classmethod
@@ -2192,12 +2148,12 @@ class PayoutDetailsIn(BaseModel):
 
 
 @app.post("/api/me/payout-requests/{req_id}/details")
-def submit_payout_details(req_id: int, payload: PayoutDetailsIn,
+def submit_payout_details(req_id: int, payload: PayoutDetailsIn, request: Request,
                           trader: Trader = Depends(auth.current_trader)):
     """Krok 2 z 2: po odblokowaniu przez admina trader wybiera kwotę i podaje
-    portfel USDT. Kwotę liczymy od salda TERAZ, nie z chwili prośby — trader
-    mógł w międzyczasie handlować. Wniosek przechodzi do `pending`, czyli do
-    admina, który wysyła USDT i oznacza wypłatę jako zrobioną."""
+    portfel. Kwotę liczymy od salda TERAZ, nie z chwili prośby — trader mógł
+    w międzyczasie handlować. Przy vUSDT (flaga testowa) podpisujemy transfer
+    od razu; przy zwykłym USDT wniosek czeka na „Mark as paid" admina."""
     session = SessionLocal()
     try:
         pr = session.get(PayoutRequest, req_id)
@@ -2216,23 +2172,51 @@ def submit_payout_details(req_id: int, payload: PayoutDetailsIn,
             raise HTTPException(403, "Complete KYC verification first")
         profit = _zysk_do_wyplaty(acc)
         share = _kwota_wyplaty(acc, payload.amount)
-        details_json = _payout_details_json("usdt", {"network": payload.network,
-                                                     "address": payload.address})
+        testowy = vusdt.enabled()
+        if testowy:
+            try:
+                details_json = vusdt.details_json({"network": payload.network,
+                                                   "address": payload.address})
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+            if not vusdt.verify_turnstile(payload.turnstile_token, _client_ip(request)):
+                raise HTTPException(400, "Captcha verification failed. Complete the check again.")
+            method = "vusdt"
+        else:
+            details_json = _payout_details_json("usdt", {"network": payload.network,
+                                                         "address": payload.address})
+            method = "usdt"
         # Warunkowy UPDATE: dwa równoległe wysłania formularza nie nadpiszą
         # sobie kwoty i adresu — drugie dostaje 400.
         zajete = (session.query(PayoutRequest)
                   .filter(PayoutRequest.id == pr.id, PayoutRequest.status == "unlocked")
                   .update({"status": "pending", "trader_share": share, "profit_amount": profit,
-                           "method": "usdt", "details": details_json,
+                           "method": method, "details": details_json,
                            "ts": datetime.now(timezone.utc)},
                           synchronize_session=False))
         if not zajete:
             raise HTTPException(400, "This payout request is no longer waiting for details")
+        if testowy:
+            # Zwrot opłaty przy pierwszej wypłacie jedzie w tym samym transferze —
+            # wniosek rozlicza się sam po potwierdzeniu na łańcuchu.
+            zwrot = _zwrot_oplaty(session, acc)
+            session.add(VusdtTransfer(payout_request_id=pr.id,
+                                      address=json.loads(details_json)["address"],
+                                      amount_units=vusdt.to_units(share + zwrot)))
         session.commit()
-        notify.notify_admins("admin_payout", f"Payout ${share:,.2f} USDT to send ({acc.login})",
-                             tr.email)
-        return {"id": pr.id, "profit_amount": profit, "trader_share": share,
-                "method": "usdt", "status": "pending"}
+        out = {"id": pr.id, "profit_amount": profit, "trader_share": share,
+               "method": method, "status": "pending"}
+        if testowy:
+            vusdt.process_queue(session)
+            t = _transfer_vusdt(session, pr.id)
+            out["vusdt"] = vusdt.view(t)
+            out["fee_refund"] = round(int(t.amount_units) / 10 ** vusdt.DECIMALS - share, 2)
+            notify.notify_admins("admin_payout",
+                                 f"Payout ${share:,.2f} vUSDT sending ({acc.login})", tr.email)
+        else:
+            notify.notify_admins("admin_payout",
+                                 f"Payout ${share:,.2f} USDT to send ({acc.login})", tr.email)
+        return out
     finally:
         session.close()
 
@@ -4264,7 +4248,7 @@ def admin_approve_payout(req_id: int):
         if r.status == "review":
             return _odblokuj_wyplate(session, r)
         if r.status == "unlocked":
-            raise HTTPException(400, "Waiting for the trader to choose the amount and USDT "
+            raise HTTPException(400, "Waiting for the trader to choose the amount and "
                                      "wallet — there is nothing to pay yet.")
         if _transfer_vusdt(session, req_id):
             raise HTTPException(400, "This payout is settled automatically from the Polygon "

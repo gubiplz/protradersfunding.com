@@ -2,14 +2,15 @@
 
 Sieć jest podmieniona: `vusdt.rpc` to sztuczny węzeł Polygonu, który dekoduje
 podpisane transakcje, a Turnstile odpowiada z flagi. Sprawdzamy, że:
-- tryb testowy przyjmuje TYLKO vUSDT + adres 0x i wymaga captchy,
+- wniosek idzie w dwóch krokach: review → admin unlock → kwota + adres 0x,
+- tryb testowy przyjmuje TYLKO vUSDT + adres 0x i wymaga captchy w kroku 2,
 - transfer jest podpisany na właściwy kontrakt, kwotę i chainId 137,
 - nonce rośnie, nawet gdy RPC spóźnia się z licznikiem `pending`,
 - bez POL wysyłka czeka w kolejce i wychodzi sama po doładowaniu,
 - VERCEL_ENV=production nie blokuje trybu przy ustawionej fladze i kluczach,
 - PAYOUT_INTERVAL_DAYS blokuje kolejny wniosek na koncie po stronie serwera,
 - wniosek rozlicza się SAM z łańcucha: potwierdzony transfer = paid (z tym samym
-  księgowaniem co Approve), nieudany = rejected; admin nie zatwierdza.
+  księgowaniem co Approve), nieudany = rejected; admin nie klika Mark as paid.
 """
 import os
 import tempfile
@@ -110,11 +111,35 @@ def _funded():
     return aid, {"Authorization": f"Bearer {auth.make_token(tid)}"}
 
 
+def _prosba(c, aid, h):
+    return c.post(f"/api/accounts/{aid}/payout-request", headers=h, json={})
+
+
+def _odblokuj(c, rid):
+    r = c.post(f"/api/admin/payout-requests/{rid}/approve", headers=ADMIN_H)
+    assert r.status_code == 200 and r.json() == {"unlocked": rid}, r.text
+
+
 def _wniosek(c, aid, h, **kw):
-    body = {"method": "vusdt", "amount": 5688.9,
-            "details": {"network": "POLYGON", "address": ODBIORCA}, "turnstile_token": "ok"}
+    """Pełna ścieżka: prośba → unlock → kwota + adres 0x + captcha.
+
+    Gdy krok 1 albo 2 zwróci błąd (okno wypłat, zły adres, captcha), oddajemy
+    tę odpowiedź — testy asercjami łapią status_code.
+    """
+    r1 = _prosba(c, aid, h)
+    if r1.status_code != 200:
+        return r1
+    rid = r1.json()["id"]
+    _odblokuj(c, rid)
+    body = {"amount": 5688.9, "network": "POLYGON", "address": ODBIORCA,
+            "turnstile_token": "ok"}
     body.update(kw)
-    return c.post(f"/api/accounts/{aid}/payout-request", headers=h, json=body)
+    if "details" in body:
+        d = body.pop("details") or {}
+        body.setdefault("network", d.get("network", "POLYGON"))
+        body.setdefault("address", d.get("address", ODBIORCA))
+    body.pop("method", None)
+    return c.post(f"/api/me/payout-requests/{rid}/details", headers=h, json=body)
 
 
 def test_bez_flagi_wniosek_idzie_do_przegladu_bez_transferu(monkeypatch):
@@ -122,12 +147,14 @@ def test_bez_flagi_wniosek_idzie_do_przegladu_bez_transferu(monkeypatch):
     monkeypatch.setattr(get_settings(), "vusdt_test_payouts", False)
     aid, h = _funded()
     with TestClient(app) as c:
-        r = _wniosek(c, aid, h)
+        r = _prosba(c, aid, h)
     assert r.status_code == 200 and r.json()["status"] == "review"
     s = SessionLocal()
     try:
+        pr = s.get(PayoutRequest, r.json()["id"])
+        assert pr.method == "usdt" and pr.details is None
         assert s.query(VusdtTransfer).filter(
-            VusdtTransfer.payout_request_id == r.json()["id"]).count() == 0
+            VusdtTransfer.payout_request_id == pr.id).count() == 0
     finally:
         s.close()
 
@@ -139,10 +166,23 @@ def test_produkcja_tez_wlacza_przy_fladze(siec, monkeypatch):
     assert vusdt.public_config() is not None
 
 
-def test_submit_wysyla_vusdt_od_razu(siec):
+def test_submit_po_odblokowaniu_wysyla_vusdt(siec):
     aid, h = _funded()
     with TestClient(app) as c:
-        r = _wniosek(c, aid, h)
+        # Przed unlockiem formularza kwoty nie ma — nic nie wychodzi.
+        r1 = _prosba(c, aid, h)
+        assert r1.status_code == 200 and r1.json()["status"] == "review"
+        rid = r1.json()["id"]
+        r = c.post(f"/api/me/payout-requests/{rid}/details", headers=h,
+                   json={"amount": 5688.9, "network": "POLYGON", "address": ODBIORCA,
+                         "turnstile_token": "ok"})
+        assert r.status_code == 400 and "still being reviewed" in r.json()["detail"]
+        assert siec.wyslane == []
+
+        _odblokuj(c, rid)
+        r = c.post(f"/api/me/payout-requests/{rid}/details", headers=h,
+                   json={"amount": 5688.9, "network": "POLYGON", "address": ODBIORCA,
+                         "turnstile_token": "ok"})
         assert r.status_code == 200, r.text
         v = r.json()["vusdt"]
         assert v["status"] == "sent" and v["amount"] == "5,688.90" and v["symbol"] == "vUSDT"
@@ -157,8 +197,7 @@ def test_submit_wysyla_vusdt_od_razu(siec):
         assert tx["nonce"] == 5
 
         # do potwierdzenia wniosek wisi jako pending z adresem Polygon i metodą vusdt,
-        # a admin nie ma czego zatwierdzać
-        rid = r.json()["id"]
+        # a admin nie ma czego zatwierdzać (Mark as paid)
         rows = c.get("/api/admin/payout-requests", headers=ADMIN_H).json()
         mine = next(x for x in rows if x["id"] == rid)
         assert mine["method"] == "vusdt" and mine["status"] == "pending"
@@ -186,21 +225,27 @@ def test_submit_wysyla_vusdt_od_razu(siec):
     assert konto.balance == pytest.approx(KAPITAL + ZYSK - 5688.9 / 0.8, abs=0.01)
 
 
-def test_zly_captcha_nic_nie_zapisuje(siec):
+def test_zly_captcha_zostawia_wniosek_odblokowany(siec):
     aid, h = _funded()
     with TestClient(app) as c:
-        r = _wniosek(c, aid, h, turnstile_token="zly")
+        rid = _prosba(c, aid, h).json()["id"]
+        _odblokuj(c, rid)
+        r = c.post(f"/api/me/payout-requests/{rid}/details", headers=h,
+                   json={"amount": 5688.9, "network": "POLYGON", "address": ODBIORCA,
+                         "turnstile_token": "zly"})
     assert r.status_code == 400 and "Captcha" in r.json()["detail"]
     s = SessionLocal()
-    assert s.query(PayoutRequest).filter(PayoutRequest.account_id == aid).count() == 0
+    pr = s.get(PayoutRequest, rid)
+    assert pr.status == "unlocked" and pr.details is None
+    assert s.query(VusdtTransfer).filter(VusdtTransfer.payout_request_id == rid).count() == 0
     s.close()
     assert siec.wyslane == []
 
 
 @pytest.mark.parametrize("body", [
-    {"method": "usdt", "details": {"network": "TRC20", "address": "TQmZ1kD4w9uPq8xYb3nR5tV7cE2sA6fGh9"}},
-    {"details": {"network": "POLYGON", "address": "TQmZ1kD4w9uPq8xYb3nR5tV7cE2sA6fGh9"}},
-    {"details": {"network": "POLYGON", "address": TOKEN}},
+    {"network": "TRC20", "address": "TQmZ1kD4w9uPq8xYb3nR5tV7cE2sA6fGh9"},
+    {"network": "POLYGON", "address": "TQmZ1kD4w9uPq8xYb3nR5tV7cE2sA6fGh9"},
+    {"network": "POLYGON", "address": TOKEN},
 ])
 def test_tryb_testowy_tylko_vusdt_na_adres_0x(siec, body):
     aid, h = _funded()

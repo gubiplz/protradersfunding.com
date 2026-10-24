@@ -1667,7 +1667,7 @@ function renderPayoutsView(){
             <button class="btn-o sm" onclick="revokeCert(${r.id})">Revoke</button>`
           :`<button class="btn-o sm" onclick="askCertLp(${r.id})">Generate</button>`}</td>
       <td class="rt-acts" style="text-align:right;white-space:nowrap">${r.kind==='request'&&r.status==='review'
-        ?`<button class="btn-p sm" onclick="unlockPayout(${r.id},this)" title="The trader then chooses the amount and USDT wallet">Approve request</button>
+        ?`<button class="btn-p sm" onclick="unlockPayout(${r.id},this)" title="The trader then chooses the amount and wallet">Approve request</button>
           <button class="btn-o sm" onclick="rejectPayout(${r.id},this)">Reject</button>`
         :r.kind==='request'&&r.status==='unlocked'
         ?`<span class="muted" style="font-size:var(--fs-cap)">Waiting for the amount &amp; wallet</span>
@@ -1683,7 +1683,7 @@ function renderPayoutsView(){
         +XBTN(`deletePayoutRow('${r.kind}',${r.id},${r.trader_share},'${jsq(r.account_login||'')}')`,
               r.kind==='payout'?'Delete payout':'Delete request')}</td></tr>`).join('')}
     </tbody></table></div>
-    <p class="muted" style="font-size:11.5px;margin-top:10px">Two steps: <b>Approve request</b> lets the trader choose the amount and USDT wallet. Once they do, send the USDT and click <b>Mark as paid</b>. That books the payout and refunds the challenge fee on the first payout for that account.</p>`
+    <p class="muted" style="font-size:11.5px;margin-top:10px">Two steps: <b>Approve request</b> lets the trader choose the amount and wallet. For USDT, send it and click <b>Mark as paid</b>. For vUSDT the transfer settles on Polygon by itself. That books the payout and refunds the challenge fee on the first payout for that account.</p>`
     /* Gdy WSZYSTKO, co jest w ksiedze, to wiersze archiwalne, zwykle "No payouts
        match" wskazywaloby na wyszukiwarke -- a schowal je przelacznik. */
     :!widoczne.length&&ukryte?`<div class="empty"><h3>Only imported payouts here</h3>
