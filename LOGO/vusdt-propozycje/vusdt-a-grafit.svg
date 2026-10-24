@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="disc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5B6670"/>
+      <stop offset="1" stop-color="#2E353C"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4FD39F"/>
+      <stop offset="1" stop-color="#1F9468"/>
+    </linearGradient>
+  </defs>
+  <circle cx="128" cy="128" r="128" fill="url(#disc)"/>
+  <circle cx="128" cy="128" r="119" fill="none" stroke="#8A949C" stroke-opacity=".35" stroke-width="2"/>
+  <ellipse cx="128" cy="128" rx="68" ry="17" fill="none" stroke="url(#mark)" stroke-width="11"/>
+  <g fill="url(#mark)">
+    <rect x="66" y="62" width="124" height="30" rx="4"/>
+    <rect x="111" y="92" width="34" height="108" rx="3"/>
+  </g>
+</svg>
