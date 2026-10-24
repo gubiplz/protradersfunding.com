@@ -4432,13 +4432,15 @@ async function submitPayoutAsk(id){
 function openPayoutDetails(reqId,avail,size){
   const pct=Math.round((size||0)*PO_MIN_PCT)/100;
   const v=!!VUSDT_TEST;
+  /* Same dolary — pole i max bez centów (serwer i tak odrzuci ułamek). */
+  const max=Math.floor(+avail||0);
   const w=document.createElement('div'); w.id='po-modal'; w.className='modal-wrap';
   w.onclick=e=>{if(e.target===w)w.remove()};
   w.innerHTML=`<div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
     <div class="modal-head"><h3>Your payout is approved</h3></div>
-    <p class="muted" style="font-size:12.5px;margin:2px 0 12px">Choose how much to take out and where to send it. Available now: <b>$${fmt(avail)}</b>. You can take part of it.</p>
+    <p class="muted" style="font-size:12.5px;margin:2px 0 12px">Choose how much to take out and where to send it. Available now: <b>$${fmt(avail)}</b>. Whole dollars only — you can take part of it.</p>
     <label class="muted" style="font-size:12px">Amount (${v?'vUSDT':'USD, paid in USDT'})</label>
-    <input id="po-amount" class="inp" type="number" inputmode="decimal" min="${PO_MIN_USD}" max="${avail}" step="0.01" value="${avail}" style="margin-bottom:10px"
+    <input id="po-amount" class="inp" type="number" inputmode="numeric" min="${PO_MIN_USD}" max="${max}" step="1" value="${max}" style="margin-bottom:10px"
       oninput="this.classList.remove('bad');poSprawdz()">
     <label class="muted" style="font-size:12px">Network</label>
     <select id="po-network" class="inp" style="margin-bottom:10px">${v
@@ -4454,17 +4456,21 @@ function openPayoutDetails(reqId,avail,size){
       <b>Minimum payout: ${PO_MIN_PCT}% of your account size</b> — $${fmt(pct)} on this $${fmt0(size)} account.</div>`:''}
     ${v?`<div id="po-ts" class="po-ts"></div>`:''}
     <div style="display:flex;gap:10px;margin-top:14px">
-      <button class="btn-p" onclick="submitPayoutDetails(${reqId})" id="po-send">${v?`Send $${fmt(avail)} vUSDT`:`Request $${fmt(avail)}`}</button>
+      <button class="btn-p" onclick="submitPayoutDetails(${reqId})" id="po-send">${v?`Send $${fmt0(max)} vUSDT`:`Request $${fmt0(max)}`}</button>
       <button class="btn-o" onclick="$('po-modal').remove()">Later</button>
     </div></div>`;
   document.body.appendChild(w);
-  $('po-amount').addEventListener('input',()=>{const n=parseFloat($('po-amount').value||'0');
-    $('po-send').textContent=n>0?(v?`Send $${fmt(n)} vUSDT`:`Request $${fmt(n)}`):(v?'Send vUSDT':'Request payout')});
+  $('po-amount').addEventListener('input',()=>{const n=parseInt($('po-amount').value||'0',10)||0;
+    $('po-send').textContent=n>0?(v?`Send $${fmt0(n)} vUSDT`:`Request $${fmt0(n)}`):(v?'Send vUSDT':'Request payout')});
   if(v)poTurnstile();
   setTimeout(()=>$('po-amount')?.focus(),50);
 }
 async function submitPayoutDetails(reqId){
-  const amount=parseFloat($('po-amount').value||'0'), address=$('po-address').value.trim(), v=!!VUSDT_TEST;
+  const raw=($('po-amount').value||'').trim().replace(',','.');
+  const amount=Number(raw), address=$('po-address').value.trim(), v=!!VUSDT_TEST;
+  if(!Number.isFinite(amount)||amount!==Math.floor(amount)){
+    $('po-amount').classList.add('bad');$('po-amount').focus();
+    toast('Enter a whole-dollar amount (no cents).','err');return}
   if(!(amount>=PO_MIN_USD)){
     $('po-amount').classList.add('bad');$('po-amount').focus();
     toast(`The minimum payout is $${fmt0(PO_MIN_USD)}.`,'err');return}

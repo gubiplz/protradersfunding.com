@@ -15,6 +15,7 @@ import hashlib
 import html
 import io
 import json
+import math
 import os
 import urllib.request
 import random
@@ -2054,9 +2055,19 @@ def _zysk_do_wyplaty(acc: Account) -> float:
 
 
 def _kwota_wyplaty(acc: Account, amount: float | None) -> float:
-    """Kwota, o którą prosi trader (część lub całość dostępnej działki), po progach."""
+    """Kwota, o którą prosi trader (część lub całość dostępnej działki), po progach.
+
+    Same dolary — bez centów (731, nie 731,20). Pełna działka też idzie w dół
+    do pełnego dolara, żeby nie dało się wypłacić ułamka „całością".
+    """
     available = _payout_available(acc)
-    share = round(float(amount), 2) if amount is not None else available
+    if amount is None:
+        share = float(math.floor(available))
+    else:
+        raw = round(float(amount), 2)
+        if raw != math.floor(raw):
+            raise HTTPException(400, "Enter a whole-dollar amount (no cents)")
+        share = float(math.floor(raw))
     if share <= 0:
         raise HTTPException(400, "The payout amount must be greater than zero")
     if share > available:
