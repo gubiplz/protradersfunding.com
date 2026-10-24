@@ -307,3 +307,35 @@ def test_bez_okna_dalej_on_demand(siec, monkeypatch):
     with TestClient(app) as c:
         konto = next(a for a in c.get("/api/me/accounts", headers=h).json() if a["id"] == aid)
     assert konto["payout_next_at"] is None
+
+
+def test_undo_testowej_wyplaty_oddaje_zysk_i_kasuje_wniosek(siec):
+    aid, h = _funded()
+    with TestClient(app) as c:
+        r = _wniosek(c, aid, h, amount=500)
+        siec.receipts[r.json()["vusdt"]["tx_hash"]] = {"status": "0x1"}
+        assert c.get("/api/me/payouts", headers=h).json()["requests"][0]["status"] == "paid"
+        db = SessionLocal()
+        pid = db.query(Payout).filter(Payout.account_id == aid).one().id
+        assert db.get(Account, aid).balance == pytest.approx(KAPITAL + ZYSK - 500 / 0.8)
+        db.close()
+
+        u = c.post(f"/api/admin/payouts/{pid}/undo", headers=ADMIN_H)
+        assert u.status_code == 200, u.text
+        assert u.json()["request_removed"] and u.json()["balance_restored"] == 625.0
+        me = c.get("/api/me/payouts", headers=h).json()
+        assert me["requests"] == [] and me["summary"]["total_paid"] == 0
+    db = SessionLocal()
+    assert db.get(Account, aid).balance == pytest.approx(KAPITAL + ZYSK)
+    assert db.query(VusdtTransfer).filter(VusdtTransfer.payout_request_id == r.json()["id"]).count() == 0
+    db.close()
+
+
+def test_undo_tylko_dla_vusdt(siec):
+    aid, _ = _funded()
+    db = SessionLocal()
+    p = Payout(account_id=aid, profit_amount=100, trader_share=80, paid=True, method="usdt")
+    db.add(p); db.commit(); pid = p.id; db.close()
+    with TestClient(app) as c:
+        u = c.post(f"/api/admin/payouts/{pid}/undo", headers=ADMIN_H)
+    assert u.status_code == 400

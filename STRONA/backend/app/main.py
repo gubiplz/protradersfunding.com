@@ -4441,6 +4441,61 @@ def admin_payout_certificate_revoke(payout_id: int):
         session.close()
 
 
+@app.post("/api/admin/payouts/{payout_id}/undo", dependencies=[Depends(auth.require_admin)])
+def admin_payout_undo(payout_id: int):
+    """Cofa TESTOWĄ wypłatę vUSDT w całości: wpis wypłaty i wniosek znikają,
+    a zdjęty zysk wraca na konto (w trybie puli — do puli). Tokeny na łańcuchu
+    zostają, to token testowy. Zwykłe „Delete payout" zostawia saldo, więc
+    test wypłaty bez tego trwale zjadałby zysk konta.
+
+    Tylko metoda vusdt: cofanie prawdziwych wypłat to inna rozmowa (pieniądze
+    już wyszły), a reset salda na żywym koncie musi zostać decyzją ręczną.
+    """
+    session = SessionLocal()
+    try:
+        p = session.get(Payout, payout_id)
+        if not p:
+            raise HTTPException(404, "Payout not found")
+        if p.method != "vusdt":
+            raise HTTPException(400, "Only vUSDT test payouts can be undone")
+        acc = session.get(Account, p.account_id)
+        # Wniosek, z którego powstała: rozliczony vUSDT na tym koncie, którego
+        # transfer (działka + ewentualny zwrot opłaty) równa się kwocie wypłaty.
+        r = None
+        for kand, t in (session.query(PayoutRequest, VusdtTransfer)
+                        .join(VusdtTransfer, VusdtTransfer.payout_request_id == PayoutRequest.id)
+                        .filter(PayoutRequest.account_id == acc.id, PayoutRequest.status == "paid",
+                                PayoutRequest.method == "vusdt")
+                        .order_by(PayoutRequest.id.desc()).all()):
+            if abs(int(t.amount_units) / 10 ** vusdt.DECIMALS - p.trader_share) < 0.005:
+                r = kand
+                break
+        share = r.trader_share if r else p.trader_share
+        przywrocono = 0.0
+        if p.balance_reset:
+            split = acc.profit_split_pct / 100.0 if acc.profit_split_pct else 1.0
+            przywrocono = round(share / split, 2)
+            acc.balance = round(acc.balance + przywrocono, 2)
+            acc.equity = round(acc.equity + przywrocono, 2)
+            acc.peak_equity = max(acc.peak_equity or 0.0, acc.balance)
+            acc.day_start_equity = round((acc.day_start_equity or 0.0) + przywrocono, 2)
+            acc.day_start_balance = round((acc.day_start_balance or 0.0) + przywrocono, 2)
+        elif getattr(acc, "payout_pool_usd", None) is not None:
+            acc.payout_pool_usd = round(float(acc.payout_pool_usd) + share, 2)
+        mial_certyfikat = bool(p.cert_token)
+        if r:
+            session.query(VusdtTransfer).filter(VusdtTransfer.payout_request_id == r.id).delete()
+            session.delete(r)
+        session.delete(p)
+        session.commit()
+        if mial_certyfikat:
+            _PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)
+        return {"undone": payout_id, "request_removed": bool(r),
+                "balance_restored": przywrocono, "balance": acc.balance}
+    finally:
+        session.close()
+
+
 @app.delete("/api/admin/payouts/{payout_id}", dependencies=[Depends(auth.require_admin)])
 def admin_payout_delete(payout_id: int):
     """Kasuje wiersz wypłaty z ewidencji — pomyłkowy wpis albo cofnięcie importu.

@@ -4407,8 +4407,7 @@ function openPayoutModal(id,avail,size){
     ${size?`<div class="po-min${avail<pct?' bad':''}" id="po-min" role="alert" data-pct="${pct}">
       <b>Minimum payout: ${PO_MIN_PCT}% of your account size</b> — $${fmt(pct)} on this $${fmt0(size)} account.${
       avail<pct?` Your available share is $${fmt(avail)}, so you can request a payout once it reaches $${fmt(pct)}.`:''}</div>`:''}
-    ${VUSDT_TEST?`<div id="po-ts" class="po-ts"></div>
-    <p class="muted po-test">Test mode: payouts are sent as vUSDT, a test token with no monetary value.</p>`:''}
+    ${VUSDT_TEST?`<div id="po-ts" class="po-ts"></div>`:''}
     <div style="display:flex;gap:10px;margin-top:14px">
       <button class="btn-p" onclick="submitPayout(${id})" id="po-send">Submit request</button>
       <button class="btn-o" onclick="$('po-modal').remove()">Cancel</button>

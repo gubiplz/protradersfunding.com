@@ -1668,7 +1668,10 @@ function renderPayoutsView(){
           ?`<span class="muted" style="font-size:var(--fs-cap)" title="Paid automatically once the Polygon transfer confirms">Settles on-chain</span>`
           :`<button class="btn-p sm" onclick="approvePayout(${r.id},this)">Approve &amp; pay</button>
           <button class="btn-o sm" onclick="rejectPayout(${r.id},this)">Reject</button>`)
-        :XBTN(`deletePayoutRow('${r.kind}',${r.id},${r.trader_share},'${jsq(r.account_login||'')}')`,
+        :(r.kind==='payout'&&r.method==='vusdt'
+          ?`<button class="btn-o sm" onclick="undoVusdtPayout(${r.id},${r.trader_share},'${jsq(r.account_login||'')}')"
+              title="Removes the payout and its request and puts the profit back on the account">Undo test payout</button> `:'')
+        +XBTN(`deletePayoutRow('${r.kind}',${r.id},${r.trader_share},'${jsq(r.account_login||'')}')`,
               r.kind==='payout'?'Delete payout':'Delete request')}</td></tr>`).join('')}
     </tbody></table></div>
     <p class="muted" style="font-size:11.5px;margin-top:10px">Approving pays the trader share and refunds the challenge fee on the first payout for that account.</p>`
@@ -5903,6 +5906,18 @@ function deletePayoutRow(kind,id,amount,login){
     +`The account balance stays as it is now. This cannot be undone.`,
     ()=>VIEWS.payouts(),
     r=>r.had_certificate?'Deleted. Its certificate is gone from the landing page too.':'Deleted.');
+}
+
+/* Testowa wypłata vUSDT: w przeciwieństwie do „Delete payout" oddaje zysk na
+   konto i kasuje wniosek, więc konto wraca do stanu sprzed testu. */
+async function undoVusdtPayout(id,amount,login){
+  if(!await askConfirm({title:`Undo the $${fmt(amount)} vUSDT test payout on ${esc(login)}?`,
+    body:'The payout and its request disappear and the profit goes back on the account. '
+      +'The tokens already sent stay on-chain (test token).',ok:'Undo payout',danger:true}))return;
+  try{const r=await api(`/api/admin/payouts/${id}/undo`,{method:'POST'});
+    toast(`Undone. ${r.balance_restored?`$${fmt(r.balance_restored)} back on the account.`:''}`,'ok');
+    VIEWS.payouts();
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 
 function deleteAccountRow(id,login,trader){
