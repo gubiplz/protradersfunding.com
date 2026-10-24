@@ -31,6 +31,7 @@ _SKIP = {"password_reset"}
 # Do jakiego widoku portalu prowadzi klik w powiadomienie (reszta -> Challenges).
 _EVENT_VIEW = {
     "payout_requested": "payouts", "payout_approved": "payouts", "payout_rejected": "payouts",
+    "payout_unlocked": "payouts",
     "kyc_approved": "kyc", "kyc_rejected": "kyc",
     "ticket_reply": "support",
     "daily_recap": "analytics",
@@ -55,6 +56,7 @@ _BODY: dict[str, str] = {
     "breached": "A trading rule was breached on your account. See details.",
     "payout_requested": "We received your payout request. It's under review.",
     "payout_approved": "Your payout was approved.",
+    "payout_unlocked": "Payout approved. Choose the amount and your USDT wallet.",
     "payout_rejected": "Your payout request needs attention.",
     "kyc_approved": "Identity verified. You're cleared for payouts.",
     "kyc_rejected": "Your verification needs another look.",

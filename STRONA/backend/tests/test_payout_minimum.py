@@ -3,6 +3,7 @@
 $500 chroni małe konta przed wypłatami groszy, 2% skaluje próg z kontem
 (konto $1M → co najmniej $20,000 na jeden wniosek).
 """
+from conftest import zloz_wniosek
 import os
 import tempfile
 
@@ -39,7 +40,7 @@ def _konto(kapital: float, zysk: float):
 
 
 def _wniosek(aid, h, kwota):
-    return client.post(f"/api/accounts/{aid}/payout-request", headers=h,
+    return zloz_wniosek(client, aid, headers=h,
                        json={"method": "usdt", "amount": kwota, "details": USDT})
 
 

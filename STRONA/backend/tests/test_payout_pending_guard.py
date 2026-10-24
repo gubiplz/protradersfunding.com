@@ -6,6 +6,7 @@ otwiera się ponownie. API dalej niesie summary.review_hours i expected_by
 pending wniosku (panel i powiadomienia), ale portal tradera od 2026-09 nie
 obiecuje terminu: bez „reviewed within 24 hours" i bez „decision by …".
 """
+from conftest import zloz_wniosek
 import os
 import tempfile
 
@@ -56,9 +57,9 @@ WNIOSEK = {"method": "wise", "amount": 100, "details": {"email": "trader@example
 def test_drugi_wniosek_przy_otwartym_odbija_sie():
     aid, h = _funded("guard-dubel@test.pl")
     with TestClient(app) as c:
-        assert c.post(f"/api/accounts/{aid}/payout-request", headers=h,
+        assert zloz_wniosek(c, aid, headers=h,
                       json=WNIOSEK).status_code == 200
-        r = c.post(f"/api/accounts/{aid}/payout-request", headers=h, json=WNIOSEK)
+        r = zloz_wniosek(c, aid, headers=h, json=WNIOSEK)
         assert r.status_code == 400
         assert "already under review" in r.json()["detail"]
 
@@ -66,18 +67,18 @@ def test_drugi_wniosek_przy_otwartym_odbija_sie():
 def test_po_decyzji_admina_droga_znow_otwarta():
     aid, h = _funded("guard-po-reject@test.pl")
     with TestClient(app) as c:
-        req_id = c.post(f"/api/accounts/{aid}/payout-request", headers=h,
+        req_id = zloz_wniosek(c, aid, headers=h,
                         json=WNIOSEK).json()["id"]
         assert c.post(f"/api/admin/payout-requests/{req_id}/reject", headers=ADMIN_H,
                       json={"reason": "test"}).status_code == 200
-        assert c.post(f"/api/accounts/{aid}/payout-request", headers=h,
+        assert zloz_wniosek(c, aid, headers=h,
                       json=WNIOSEK).status_code == 200
 
 
 def test_summary_niesie_harmonogram_a_pending_expected_by():
     aid, h = _funded("guard-harmonogram@test.pl")
     with TestClient(app) as c:
-        c.post(f"/api/accounts/{aid}/payout-request", headers=h, json=WNIOSEK)
+        zloz_wniosek(c, aid, headers=h, json=WNIOSEK)
         me = c.get("/api/me/payouts", headers=h).json()
     assert me["summary"]["review_hours"] == 24
     wiersz = me["requests"][0]
@@ -90,7 +91,7 @@ def test_summary_niesie_harmonogram_a_pending_expected_by():
 def test_zamkniety_wniosek_bez_expected_by():
     aid, h = _funded("guard-done@test.pl")
     with TestClient(app) as c:
-        req_id = c.post(f"/api/accounts/{aid}/payout-request", headers=h,
+        req_id = zloz_wniosek(c, aid, headers=h,
                         json=WNIOSEK).json()["id"]
         c.post(f"/api/admin/payout-requests/{req_id}/reject", headers=ADMIN_H,
                json={"reason": "test"})

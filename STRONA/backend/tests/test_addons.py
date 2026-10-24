@@ -6,6 +6,7 @@ modal też dostaje 400. Provisioning przenosi boost na `profit_split_pct`
 konta (70→80), a flaga express na koncie ustawia pill i sortowanie w panelu.
 Ceny planów z `_CATALOG` pozostają nietknięte (baza wiedzy Forex Passing).
 """
+from conftest import zloz_wniosek
 import os
 import tempfile
 
@@ -209,9 +210,9 @@ def test_express_pending_idzie_na_gore_kolejki_admina():
     with TestClient(app) as c:
         # express NAJPIERW (niższe id) — domyślny porządek „najnowsze pierwsze"
         # chowałby go pod zwykłym wnioskiem, sortowanie ma go wyciągnąć na górę
-        req_e = c.post(f"/api/accounts/{aid_express}/payout-request", headers=h,
+        req_e = zloz_wniosek(c, aid_express, headers=h,
                        json=WNIOSEK).json()["id"]
-        req_n = c.post(f"/api/accounts/{aid_zwykle}/payout-request", headers=h,
+        req_n = zloz_wniosek(c, aid_zwykle, headers=h,
                        json=WNIOSEK).json()["id"]
         assert req_n > req_e
 

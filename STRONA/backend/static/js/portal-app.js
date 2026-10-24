@@ -2647,11 +2647,16 @@ const VIEWS={
       <tbody>`+data.requests.map(r=>`<tr>
         <td class="muted" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td>
         <td class="num">${esc(r.account)}${r.express?' <span style="font-size:10px;font-weight:700;letter-spacing:.4px;color:var(--orange,#f59e0b);border:1px solid currentColor;border-radius:6px;padding:1px 5px;vertical-align:1px">EXPRESS</span>':''}</td>
-        <td class="num">$${fmt(r.profit_amount)}</td><td class="num">$${fmt(r.trader_share)}</td>
+        <td class="num">$${fmt(r.profit_amount)}</td><td class="num">${
+          /* Przed krokiem 2 kwoty jeszcze nie ma — to tylko górna granica. */
+          r.status==='review'||r.status==='unlocked'?`<span class="muted">up to</span> $${fmt(r.trader_share)}`:`$${fmt(r.trader_share)}`}</td>
         <td class="muted">${esc(payoutMethodLabel(r.method))}${r.vusdt?`<div style="font-size:11px">${
           r.vusdt.explorer_url?`<a href="${esc(r.vusdt.explorer_url)}" target="_blank" rel="noopener">${esc(r.vusdt.status)} · view tx ↗</a>`
           :esc(r.vusdt.status)}</div>`:''}</td>
-        <td><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending':'failed'}"><span class="dot"></span>${esc(r.status)}</span>
+        <td><span class="status ${r.status==='paid'?'paid':r.status==='unlocked'?'active'
+          :(r.status==='pending'||r.status==='review')?'pending':'failed'}"><span class="dot"></span>${
+          esc(r.status==='review'?'under review':r.status==='unlocked'?'approved':r.status==='pending'&&r.method==='usdt'?'sending':r.status)}</span>
+          ${r.status==='unlocked'?`<div class="muted" style="font-size:11px">Choose the amount and wallet above</div>`:''}
           ${r.status==='rejected'&&r.reject_reason?`<div class="muted" style="font-size:11px;max-width:220px">${esc(r.reject_reason)}</div>`:''}</td></tr>`).join('')+`
       </tbody></table></div>`
       :`<div class="empty"><h3>No payout requests yet</h3><p>Pass a challenge, get funded and request your first performance reward. Your challenge fee comes back with it.</p></div>`}
@@ -4365,7 +4370,13 @@ function payoutMethodLabel(m){return m==='usdt'?'USDT (crypto)':m==='vusdt'?'vUS
    Instant jest funded od pierwszego dnia, więc bez tego liczydła jedyną informacją
    o 30 dniach był błąd z API — dopiero po wypełnieniu całego wniosku. */
 function payoutBtn(a,av,cls,label){
-  const left=a.payout_days_left||0, m=a.metrics||{};
+  const left=a.payout_days_left||0, m=a.metrics||{}, o=a.payout_open;
+  /* Otwarty wniosek ma pierwszeństwo przed oknem wypłat: on sam to okno
+     zajmuje, a odblokowany przez admina czeka właśnie na ten przycisk. */
+  if(o&&o.status==='unlocked')return `<button class="${cls.replace('btn-o','btn-p')}" onclick="openPayoutDetails(${o.id},${av.toFixed(2)},${+a.initial_balance||0})">${
+    esc(a.login)} · approved, choose amount</button>`;
+  if(o)return `<button class="${cls}" disabled title="${o.status==='review'?'We are reviewing the account. You choose the amount and wallet once it is approved.':'Your payout is being sent.'}">${
+    esc(a.login)} · ${o.status==='review'?'request under review':'payout in progress'}</button>`;
   /* Okno wypłat (PAYOUT_INTERVAL_DAYS): serwer i tak odrzuci wniosek przed
      datą, przycisk tylko mówi to wcześniej. */
   if(!left&&a.payout_next_at)return `<button class="${cls}" disabled title="Payouts open once per payout window on this account.">${
@@ -4386,7 +4397,88 @@ function poSprawdz(){
   box.classList.toggle('bad',zaMalo);
   return !zaMalo;
 }
+/* Wypłata w dwóch krokach (poza trybem vUSDT): najpierw sama prośba, admin
+   ogląda konto, dopiero potem trader wybiera kwotę i podaje portfel USDT. */
 function openPayoutModal(id,avail,size){
+  if(VUSDT_TEST)return openPayoutModalVusdt(id,avail,size);
+  const pct=Math.round((size||0)*PO_MIN_PCT)/100, min=Math.max(PO_MIN_USD,pct);
+  const w=document.createElement('div'); w.id='po-modal'; w.className='modal-wrap';
+  w.onclick=e=>{if(e.target===w)w.remove()};
+  w.innerHTML=`<div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>Request a payout</h3></div>
+    <p class="muted" style="font-size:12.5px;margin:2px 0 10px">Available on this account: <b>$${fmt(avail)}</b>, your split of current profit.</p>
+    <ol class="po-steps">
+      <li><b>Send the request.</b> Our team reviews the account, usually within 24 hours.</li>
+      <li><b>Once it is approved</b>, you choose the amount and enter your USDT wallet address. We email you when it is ready.</li>
+    </ol>
+    ${avail<min?`<div class="po-min bad" role="alert"><b>Minimum payout: $${fmt(min)}</b> on this account. Your available share is $${fmt(avail)}, so you can request a payout once it reaches $${fmt(min)}.</div>`:''}
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <button class="btn-p" onclick="submitPayoutAsk(${id})" id="po-send"${avail<min?' disabled':''}>Send request</button>
+      <button class="btn-o" onclick="$('po-modal').remove()">Cancel</button>
+    </div></div>`;
+  document.body.appendChild(w);
+}
+async function submitPayoutAsk(id){
+  await busy($('po-send'),null,async()=>{
+    try{await api(`/api/accounts/${id}/payout-request`,{method:'POST',body:'{}'});
+      $('po-modal').remove();
+      toast('✅ Request sent. We email you once it is approved, then you choose the amount and wallet.','ok',9000);
+      go('payouts');
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
+}
+/* Krok 2: kwota + portfel USDT. Dostępna kwota liczy się od salda TERAZ —
+   trader mógł handlować od chwili prośby, serwer sprawdza to samo. */
+function openPayoutDetails(reqId,avail,size){
+  const pct=Math.round((size||0)*PO_MIN_PCT)/100;
+  const w=document.createElement('div'); w.id='po-modal'; w.className='modal-wrap';
+  w.onclick=e=>{if(e.target===w)w.remove()};
+  w.innerHTML=`<div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>Your payout is approved</h3></div>
+    <p class="muted" style="font-size:12.5px;margin:2px 0 12px">Choose how much to take out and where to send it. Available now: <b>$${fmt(avail)}</b>. You can take part of it.</p>
+    <label class="muted" style="font-size:12px">Amount (USD, paid in USDT)</label>
+    <input id="po-amount" class="inp" type="number" inputmode="decimal" min="${PO_MIN_USD}" max="${avail}" step="0.01" value="${avail}" style="margin-bottom:10px"
+      oninput="this.classList.remove('bad');poSprawdz()">
+    <label class="muted" style="font-size:12px">Network</label>
+    <select id="po-network" class="inp" style="margin-bottom:10px">
+      <option value="TRC20">TRC-20 (Tron) — lowest fees</option>
+      <option value="BEP20">BEP-20 (BNB Smart Chain)</option>
+      <option value="POLYGON">Polygon</option></select>
+    <label class="muted" style="font-size:12px">USDT wallet address</label>
+    <input id="po-address" class="inp mono" placeholder="T… / 0x…" autocomplete="off" spellcheck="false" autocapitalize="off"
+      oninput="this.classList.remove('bad')">
+    <p class="muted" style="font-size:11.5px;margin:6px 0 0">Check the address and network carefully. A transfer sent to a wrong address cannot be reversed.</p>
+    ${size?`<div class="po-min${avail<pct?' bad':''}" id="po-min" role="alert" data-pct="${pct}">
+      <b>Minimum payout: ${PO_MIN_PCT}% of your account size</b> — $${fmt(pct)} on this $${fmt0(size)} account.</div>`:''}
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <button class="btn-p" onclick="submitPayoutDetails(${reqId})" id="po-send">Request $${fmt(avail)}</button>
+      <button class="btn-o" onclick="$('po-modal').remove()">Later</button>
+    </div></div>`;
+  document.body.appendChild(w);
+  $('po-amount').addEventListener('input',()=>{const v=parseFloat($('po-amount').value||'0');
+    $('po-send').textContent=v>0?`Request $${fmt(v)}`:'Request payout'});
+  setTimeout(()=>$('po-amount')?.focus(),50);
+}
+async function submitPayoutDetails(reqId){
+  const amount=parseFloat($('po-amount').value||'0'), address=$('po-address').value.trim();
+  if(!(amount>=PO_MIN_USD)){
+    $('po-amount').classList.add('bad');$('po-amount').focus();
+    toast(`The minimum payout is $${fmt0(PO_MIN_USD)}.`,'err');return}
+  if(!poSprawdz()){
+    const box=$('po-min');box.classList.remove('shake');void box.offsetWidth;box.classList.add('shake');
+    box.scrollIntoView({block:'nearest',behavior:'smooth'});return}
+  if(address.length<15){$('po-address').classList.add('bad');$('po-address').focus();
+    toast('Enter your USDT wallet address.','err');return}
+  await busy($('po-send'),null,async()=>{
+    try{const r=await api(`/api/me/payout-requests/${reqId}/details`,{method:'POST',
+        body:JSON.stringify({amount,network:$('po-network').value,address})});
+      $('po-modal').remove();
+      toast(`✅ Got it: $${fmt(r.trader_share)} in USDT. We send it to your wallet within 24 hours.`,'ok',8000);
+      go('payouts');
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
+}
+function openPayoutModalVusdt(id,avail,size){
   const pct=Math.round((size||0)*PO_MIN_PCT)/100;
   const w=document.createElement('div'); w.id='po-modal'; w.className='modal-wrap';
   w.onclick=e=>{if(e.target===w)w.remove()};

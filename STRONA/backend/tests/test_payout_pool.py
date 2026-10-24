@@ -5,6 +5,7 @@ Każda zaksięgowana wypłata schodzi z puli (podłoga 0), a saldo NIE resetuje 
 — w trybie puli saldo maluje bot i reset by z nim walczył. NULL = stara formuła,
 więc istniejące konta nie zmieniają zachowania.
 """
+from conftest import zloz_wniosek
 import os
 import tempfile
 
@@ -58,12 +59,12 @@ def test_pula_wiaze_nawet_przy_zerowym_zysku_i_blokuje_nadwyzke():
         assert moje["payout_available"] == 500.0
         assert c.get("/api/me/payouts", headers=h).json()["summary"]["available"] == 500.0
 
-        r = c.post(f"/api/accounts/{aid}/payout-request", headers=h,
+        r = zloz_wniosek(c, aid, headers=h,
                    json={"method": "wise", "amount": 600,
                          "details": {"email": "trader@example.com"}})
         assert r.status_code == 400 and "exceeds" in r.json()["detail"]
 
-        r = c.post(f"/api/accounts/{aid}/payout-request", headers=h,
+        r = zloz_wniosek(c, aid, headers=h,
                    json={"method": "wise", "amount": 200,
                          "details": {"email": "trader@example.com"}})
         assert r.status_code == 200, r.text
@@ -74,7 +75,7 @@ def test_approve_dekrementuje_pule_bez_resetu_salda():
     with TestClient(app) as c:
         c.post(f"/api/admin/accounts/{aid}/payout-pool", headers=ADMIN_H,
                json={"amount": 500})
-        r = c.post(f"/api/accounts/{aid}/payout-request", headers=h,
+        r = zloz_wniosek(c, aid, headers=h,
                    json={"method": "wise", "amount": 200,
                          "details": {"email": "trader@example.com"}})
         req_id = r.json()["id"]
@@ -132,7 +133,7 @@ def test_pula_zero_znaczy_wyczerpana_a_nie_formula():
     with TestClient(app) as c:
         c.post(f"/api/admin/accounts/{aid}/payout-pool", headers=ADMIN_H,
                json={"amount": 0})
-        r = c.post(f"/api/accounts/{aid}/payout-request", headers=h,
+        r = zloz_wniosek(c, aid, headers=h,
                    json={"method": "wise", "amount": 100,
                          "details": {"email": "trader@example.com"}})
         # mimo $800 „formułowych" na wykresie pula 0 blokuje wniosek

@@ -668,7 +668,8 @@ const VIEWS={
     api('/api/admin/tickets'),api('/api/admin/orders')]);
   /* Suma z serwera (cała tabela); lista zamówień niżej to tylko 100 ostatnich. */
   const revenue=s.revenue_usd!=null?s.revenue_usd:orders.filter(o=>o.status==='paid').reduce((x,o)=>x+o.amount_usd,0);
-  const pendingPay=pay.filter(r=>r.status==='pending').length;
+  // Do zrobienia przez admina: przegląd (review) i wysyłka (pending); `unlocked` czeka na tradera.
+  const pendingPay=pay.filter(r=>r.status==='pending'||r.status==='review').length;
   const openTick=tick.filter(t=>t.status==='open').length;
   const tile=(cls,ico,lbl,val,sub)=>`<div class="stat-tile"><div class="tile-ic ${cls}">${ICO[ico]}</div>
     <div><div class="lbl">${lbl}</div><div class="val">${val}</div>${sub?`<div class="sub">${sub}</div>`:''}</div></div>`;
@@ -1651,8 +1652,10 @@ function renderPayoutsView(){
         const info=r.method==='wise'?(d.email||'')
           :[d.holder,d.iban,d.swift,d.bank_name].filter(Boolean).join(' · ');
         return `${esc(label)}${info?`<div class="muted mono" style="font-size:var(--fs-cap);max-width:260px;word-break:break-all">${esc(info)}</div>`:''}`})()}</td>
-      <td data-l="Status"><span class="status ${r.status==='paid'?'paid':r.status==='pending'?'pending'
-        :r.status==='approved'?'active':'failed'}"><span class="dot"></span>${esc(r.status)}</span>
+      <td data-l="Status"><span class="status ${r.status==='paid'?'paid':(r.status==='pending'||r.status==='review')?'pending'
+        :(r.status==='approved'||r.status==='unlocked')?'active':'failed'}"><span class="dot"></span>${
+        esc(r.kind!=='request'?r.status:r.status==='review'?'to review':r.status==='unlocked'?'awaiting trader'
+          :r.status==='pending'&&r.method==='usdt'?'to send':r.status)}</span>
         ${r.status==='rejected'&&r.reject_reason?`<div class="muted" style="font-size:var(--fs-cap);max-width:200px">${esc(r.reject_reason)}</div>`:''}</td>
       <td class="rt-acts" style="white-space:nowrap">${r.kind!=='payout'?'<span class="muted">—</span>'
         :r.cert_url
@@ -1663,10 +1666,16 @@ function renderPayoutsView(){
               ${r.show_on_lp?'Take off the LP':'Put on the LP'}</button>
             <button class="btn-o sm" onclick="revokeCert(${r.id})">Revoke</button>`
           :`<button class="btn-o sm" onclick="askCertLp(${r.id})">Generate</button>`}</td>
-      <td class="rt-acts" style="text-align:right;white-space:nowrap">${r.kind==='request'&&r.status==='pending'
+      <td class="rt-acts" style="text-align:right;white-space:nowrap">${r.kind==='request'&&r.status==='review'
+        ?`<button class="btn-p sm" onclick="unlockPayout(${r.id},this)" title="The trader then chooses the amount and USDT wallet">Approve request</button>
+          <button class="btn-o sm" onclick="rejectPayout(${r.id},this)">Reject</button>`
+        :r.kind==='request'&&r.status==='unlocked'
+        ?`<span class="muted" style="font-size:var(--fs-cap)">Waiting for the amount &amp; wallet</span>
+          <button class="btn-o sm" onclick="rejectPayout(${r.id},this)">Reject</button>`
+        :r.kind==='request'&&r.status==='pending'
         ?(r.method==='vusdt'
           ?`<span class="muted" style="font-size:var(--fs-cap)" title="Paid automatically once the Polygon transfer confirms">Settles on-chain</span>`
-          :`<button class="btn-p sm" onclick="approvePayout(${r.id},this)">Approve &amp; pay</button>
+          :`<button class="btn-p sm" onclick="approvePayout(${r.id},this)" title="Send the USDT to the wallet first">Mark as paid</button>
           <button class="btn-o sm" onclick="rejectPayout(${r.id},this)">Reject</button>`)
         :(r.kind==='payout'&&r.method==='vusdt'
           ?`<button class="btn-o sm" onclick="undoVusdtPayout(${r.id},${r.trader_share},'${jsq(r.account_login||'')}')"
@@ -1674,7 +1683,7 @@ function renderPayoutsView(){
         +XBTN(`deletePayoutRow('${r.kind}',${r.id},${r.trader_share},'${jsq(r.account_login||'')}')`,
               r.kind==='payout'?'Delete payout':'Delete request')}</td></tr>`).join('')}
     </tbody></table></div>
-    <p class="muted" style="font-size:11.5px;margin-top:10px">Approving pays the trader share and refunds the challenge fee on the first payout for that account.</p>`
+    <p class="muted" style="font-size:11.5px;margin-top:10px">Two steps: <b>Approve request</b> lets the trader choose the amount and USDT wallet. Once they do, send the USDT and click <b>Mark as paid</b>. That books the payout and refunds the challenge fee on the first payout for that account.</p>`
     /* Gdy WSZYSTKO, co jest w ksiedze, to wiersze archiwalne, zwykle "No payouts
        match" wskazywaloby na wyszukiwarke -- a schowal je przelacznik. */
     :!widoczne.length&&ukryte?`<div class="empty"><h3>Only imported payouts here</h3>
@@ -4734,11 +4743,20 @@ async function rejectPayout(id,btn){
     catch(e){toast('Error: '+e.message,'err')}
   });
 }
+/* Krok 1 z 2: odblokowanie wniosku — nic nie płaci, trader dostaje maila i
+   formularz kwoty z portfelem. Jeden tap jak przy KYC, bo pomyłkę zamyka Reject. */
+async function unlockPayout(id,btn){
+  await busy(btn,null,async()=>{
+    try{await api(`/api/admin/payout-requests/${id}/approve`,{method:'POST'});
+      toast('Approved. The trader now chooses the amount and USDT wallet.','ok');go('payouts');
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
+}
 async function approvePayout(id,btn){
   await busy(btn,null,async()=>{
-    if(!await askConfirm({title:'Approve and pay this request?',
-      body:'This pays the trader share, plus the fee refund on a first payout. <b>It cannot be undone.</b>',
-      ok:'Approve & pay',danger:true}))return;
+    if(!await askConfirm({title:'Mark this payout as paid?',
+      body:'Send the USDT to the trader\'s wallet first. This books the trader share, plus the fee refund on a first payout. <b>It cannot be undone.</b>',
+      ok:'Mark as paid',danger:true}))return;
     try{const d=await api(`/api/admin/payout-requests/${id}/approve`,{method:'POST'});
       toast(`✅ Paid $${fmt(d.total_paid)}${d.fee_refund?` (incl. $${fmt(d.fee_refund)} fee refund)`:''}`,'ok');
       go('payouts');
@@ -6735,7 +6753,7 @@ function npGoTo(i){
   if(i.lead_id){go('leads');openLead(i.lead_id);return}
   if(i.type==='ticket'&&i.ref){go('tickets');openTicket(i.ref);return}
   go(i.view);
-  const sel={payout:[`[onclick^="approvePayout(${i.ref},"]`,`[onclick^="deletePayoutRow('request',${i.ref},"]`],
+  const sel={payout:[`[onclick^="approvePayout(${i.ref},"]`,`[onclick^="unlockPayout(${i.ref},"]`,`[onclick^="deletePayoutRow('request',${i.ref},"]`],
     kyc:[`[onclick="approveKyc(${i.ref})"]`],
     order:[`[onclick^="deleteOrderRow(${i.ref},"]`,`[onclick^="markOrderPaid(${i.ref},"]`]}[i.type];
   if(sel&&i.ref)npReveal(sel.map(s=>'#view '+s).join(','));

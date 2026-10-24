@@ -117,13 +117,19 @@ def _wniosek(c, aid, h, **kw):
     return c.post(f"/api/accounts/{aid}/payout-request", headers=h, json=body)
 
 
-def test_bez_flagi_vusdt_to_nieznana_metoda(monkeypatch):
+def test_bez_flagi_wniosek_idzie_do_przegladu_bez_transferu(monkeypatch):
+    """Bez flagi nie ma trybu vUSDT: prośba czeka na admina, nic nie wychodzi."""
     monkeypatch.setattr(get_settings(), "vusdt_test_payouts", False)
     aid, h = _funded()
     with TestClient(app) as c:
         r = _wniosek(c, aid, h)
-    assert r.status_code == 400
-    assert "Unknown payout method" in r.json()["detail"]
+    assert r.status_code == 200 and r.json()["status"] == "review"
+    s = SessionLocal()
+    try:
+        assert s.query(VusdtTransfer).filter(
+            VusdtTransfer.payout_request_id == r.json()["id"]).count() == 0
+    finally:
+        s.close()
 
 
 def test_produkcja_tez_wlacza_przy_fladze(siec, monkeypatch):

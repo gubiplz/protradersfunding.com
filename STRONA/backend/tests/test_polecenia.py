@@ -4,6 +4,7 @@ Dotąd partner dopisywał poleconych ręcznie, a „confirmed" ktoś przestawia�
 w bazie z ręki. Teraz robi to backend, bo tylko on zna oba fakty: `ref` przychodzi
 z landingu razem z leadem, wypłatę zatwierdza admin.
 """
+from conftest import zloz_wniosek
 import json
 import os
 import tempfile
@@ -165,7 +166,7 @@ def test_zatwierdzona_wyplata_potwierdza_polecenie(wyslane):
     _zgloszenie(email)
     wyslane.clear()
     aid, h = _funded(email)
-    r = client.post(f"/api/accounts/{aid}/payout-request", headers=h,
+    r = zloz_wniosek(client, aid, headers=h,
                     json={"method": "wise", "amount": 200, "details": {"email": "x@test.pl"}})
     assert r.status_code == 200, r.text
     assert wyslane == []  # sam wniosek to jeszcze nie pieniądze

@@ -370,6 +370,10 @@ def _relax_not_null() -> None:
 _UNIQUE_GUARDS: list[tuple[str, str, str, str]] = [
     # jedna wypłata „pending" na konto
     ("ux_payout_requests_pending", "payout_requests", "account_id", "status = 'pending'"),
+    # jeden OTWARTY wniosek na konto w przepływie dwuetapowym
+    # (review → unlocked → pending, patrz main.PAYOUT_OTWARTE)
+    ("ux_payout_requests_open", "payout_requests", "account_id",
+     "status IN ('review', 'unlocked', 'pending')"),
 ]
 
 

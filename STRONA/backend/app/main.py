@@ -1869,11 +1869,18 @@ def my_accounts(trader: Trader = Depends(auth.current_trader)):
         for p in (session.query(Payout).filter(Payout.account_id.in_([a.id for a in accs])).all()
                   if accs else []):
             paid[p.account_id] = paid.get(p.account_id, 0.0) + p.trader_share
+        # Otwarty wniosek per konto — portal zamiast „Request payout" pokazuje
+        # „w przeglądzie" albo, po odblokowaniu, formularz kwoty i portfela.
+        otwarte = {r.account_id: {"id": r.id, "status": r.status} for r in (
+            session.query(PayoutRequest)
+            .filter(PayoutRequest.account_id.in_([a.id for a in accs]),
+                    PayoutRequest.status.in_(PAYOUT_OTWARTE)).all() if accs else [])}
         out = []
         for a in accs:
             _ensure_cert_token(session, a)
             d = _account_dict(a, with_credentials=True)
             d["paid_out"] = round(paid.get(a.id, 0.0), 2)
+            d["payout_open"] = otwarte.get(a.id)
             nastepna = payout_next_at(session, a) if a.status == "funded" else None
             d["payout_next_at"] = nastepna.isoformat() + "Z" if nastepna else None
             out.append(d)
@@ -2027,6 +2034,42 @@ def payout_minimum(acc: Account) -> float:
     return round(max(PAYOUT_MIN_USD, float(acc.initial_balance or 0) * PAYOUT_MIN_PCT / 100), 2)
 
 
+#: Wniosek idzie w dwóch krokach: trader prosi o wypłatę (`review`) → admin
+#: ogląda konto i ją odblokowuje (`unlocked`) → trader wybiera kwotę i podaje
+#: portfel USDT (`pending`) → admin wysyła i oznacza jako wypłaconą (`paid`).
+#: Każdy z tych trzech stanów to OTWARTY wniosek — drugi na to samo konto nie
+#: przejdzie. Własna nazwa `unlocked` zamiast `approved`, bo stare wiersze
+#: mogą mieć `approved` z dawnego przepływu i nie mogą nagle otworzyć traderowi
+#: formularza kwoty.
+PAYOUT_OTWARTE = ("review", "unlocked", "pending")
+
+
+def _zysk_do_wyplaty(acc: Account) -> float:
+    profit = round(acc.balance - acc.initial_balance, 2)
+    # Pula ustawiona ręcznie jest wiążąca nawet przy zerowym zysku na
+    # wykresie — bramka „brak zysku" pilnuje tylko trybu formuły.
+    if getattr(acc, "payout_pool_usd", None) is None and profit <= 0:
+        raise HTTPException(400, "No profit available to pay out")
+    return profit
+
+
+def _kwota_wyplaty(acc: Account, amount: float | None) -> float:
+    """Kwota, o którą prosi trader (część lub całość dostępnej działki), po progach."""
+    available = _payout_available(acc)
+    share = round(float(amount), 2) if amount is not None else available
+    if share <= 0:
+        raise HTTPException(400, "The payout amount must be greater than zero")
+    if share > available:
+        raise HTTPException(400, f"The amount exceeds your available share (${available:,.2f})")
+    if share < PAYOUT_MIN_USD:
+        raise HTTPException(400, f"The minimum payout is ${PAYOUT_MIN_USD:,.0f}")
+    minimum = payout_minimum(acc)
+    if share < minimum:
+        raise HTTPException(400, f"The minimum payout is {PAYOUT_MIN_PCT:g}% of your account size "
+                                 f"— ${minimum:,.2f} on this ${float(acc.initial_balance):,.0f} account")
+    return share
+
+
 @app.post("/api/accounts/{account_id}/payout-request")
 def request_payout(account_id: int, payload: PayoutReqIn, request: Request,
                    trader: Trader = Depends(auth.current_trader)):
@@ -2060,29 +2103,36 @@ def request_payout(account_id: int, payload: PayoutReqIn, request: Request,
         # tylko rozjeżdża księgowanie (dwa wnioski na ten sam zysk).
         otwarty = (session.query(PayoutRequest)
                    .filter(PayoutRequest.account_id == acc.id,
-                           PayoutRequest.status == "pending").first())
+                           PayoutRequest.status.in_(PAYOUT_OTWARTE)).first())
         if otwarty:
             raise HTTPException(400, "A payout request for this account is already under review")
-        profit = round(acc.balance - acc.initial_balance, 2)
-        # Pula ustawiona ręcznie jest wiążąca nawet przy zerowym zysku na
-        # wykresie — bramka „brak zysku" pilnuje tylko trybu formuły.
-        if getattr(acc, "payout_pool_usd", None) is None and profit <= 0:
-            raise HTTPException(400, "No profit available to pay out")
-        available = _payout_available(acc)
-        # Trader sam wybiera kwotę (część lub całość dostępnej działki).
-        share = round(float(payload.amount), 2) if payload.amount is not None else available
-        if share <= 0:
-            raise HTTPException(400, "The payout amount must be greater than zero")
-        if share > available:
-            raise HTTPException(400, f"The amount exceeds your available share (${available:,.2f})")
-        if share < PAYOUT_MIN_USD:
-            raise HTTPException(400, f"The minimum payout is ${PAYOUT_MIN_USD:,.0f}")
-        minimum = payout_minimum(acc)
-        if share < minimum:
-            raise HTTPException(400, f"The minimum payout is {PAYOUT_MIN_PCT:g}% of your account size "
-                                     f"— ${minimum:,.2f} on this ${float(acc.initial_balance):,.0f} account")
-        method = (payload.method or "").lower()
+        profit = _zysk_do_wyplaty(acc)
         testowy = vusdt.enabled()
+        if not testowy:
+            # Krok 1 z 2: sama prośba, bez kwoty i portfela. Admin najpierw
+            # ogląda konto; kwotę i adres USDT trader poda dopiero po
+            # odblokowaniu (POST /api/me/payout-requests/{id}/details). Próg
+            # minimum sprawdzamy już teraz — wniosek, z którego i tak nie da się
+            # wypłacić, nie powinien czekać na przegląd.
+            available = _kwota_wyplaty(acc, None)
+            pr = PayoutRequest(account_id=acc.id, trader_id=tr.id, profit_amount=profit,
+                               trader_share=available, method="usdt", details=None,
+                               status="review")
+            session.add(pr)
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                raise HTTPException(400, "A payout request for this account is already under review")
+            notify.send("payout_requested", tr.email, {"name": tr.full_name or tr.email,
+                        "login": acc.login, "review": True})
+            notify.notify_admins("admin_payout", f"Payout request to review ({acc.login})", tr.email)
+            return {"id": pr.id, "profit_amount": profit, "available": available,
+                    "status": "review"}
+        # Dalej już tylko tryb testowy vUSDT — jeden krok, bez przeglądu admina
+        # (zachowanie bez zmian). Trader sam wybiera kwotę.
+        share = _kwota_wyplaty(acc, payload.amount)
+        method = (payload.method or "").lower()
         if testowy:
             # Preview: jedyna metoda to testowy vUSDT na Polygonie, wysyłany od
             # razu po złożeniu wniosku (jak „Send me vUSDT" w kraniku).
@@ -2094,8 +2144,6 @@ def request_payout(account_id: int, payload: PayoutReqIn, request: Request,
                 raise HTTPException(400, str(e))
             if not vusdt.verify_turnstile(payload.turnstile_token, _client_ip(request)):
                 raise HTTPException(400, "Captcha verification failed. Complete the check again.")
-        else:
-            details_json = _payout_details_json(method, payload.details or {})
         pr = PayoutRequest(account_id=acc.id, trader_id=tr.id, profit_amount=profit,
                            trader_share=share, method=method, details=details_json,
                            status="pending")
@@ -2126,6 +2174,65 @@ def request_payout(account_id: int, payload: PayoutReqIn, request: Request,
             out["vusdt"] = vusdt.view(t)
             out["fee_refund"] = round(int(t.amount_units) / 10 ** vusdt.DECIMALS - share, 2)
         return out
+    finally:
+        session.close()
+
+
+class PayoutDetailsIn(BaseModel):
+    amount: float = Field(allow_inf_nan=False)
+    network: str = Field(default="", max_length=20)
+    address: str = Field(default="", max_length=120)
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _przecinek_dziesietny(cls, v):
+        if isinstance(v, str):
+            return v.strip().replace(",", ".")
+        return v
+
+
+@app.post("/api/me/payout-requests/{req_id}/details")
+def submit_payout_details(req_id: int, payload: PayoutDetailsIn,
+                          trader: Trader = Depends(auth.current_trader)):
+    """Krok 2 z 2: po odblokowaniu przez admina trader wybiera kwotę i podaje
+    portfel USDT. Kwotę liczymy od salda TERAZ, nie z chwili prośby — trader
+    mógł w międzyczasie handlować. Wniosek przechodzi do `pending`, czyli do
+    admina, który wysyła USDT i oznacza wypłatę jako zrobioną."""
+    session = SessionLocal()
+    try:
+        pr = session.get(PayoutRequest, req_id)
+        if not pr or pr.trader_id != trader.id:
+            raise HTTPException(404, "Payout request not found")
+        if pr.status == "review":
+            raise HTTPException(400, "Your request is still being reviewed. You can choose the "
+                                     "amount and wallet once it is approved.")
+        if pr.status != "unlocked":
+            raise HTTPException(400, "This payout request is no longer waiting for details")
+        acc = session.get(Account, pr.account_id)
+        if not acc or acc.status != "funded":
+            raise HTTPException(400, "Payouts are available on funded accounts only")
+        tr = session.get(Trader, trader.id)
+        if tr.kyc_status != "approved":
+            raise HTTPException(403, "Complete KYC verification first")
+        profit = _zysk_do_wyplaty(acc)
+        share = _kwota_wyplaty(acc, payload.amount)
+        details_json = _payout_details_json("usdt", {"network": payload.network,
+                                                     "address": payload.address})
+        # Warunkowy UPDATE: dwa równoległe wysłania formularza nie nadpiszą
+        # sobie kwoty i adresu — drugie dostaje 400.
+        zajete = (session.query(PayoutRequest)
+                  .filter(PayoutRequest.id == pr.id, PayoutRequest.status == "unlocked")
+                  .update({"status": "pending", "trader_share": share, "profit_amount": profit,
+                           "method": "usdt", "details": details_json,
+                           "ts": datetime.now(timezone.utc)},
+                          synchronize_session=False))
+        if not zajete:
+            raise HTTPException(400, "This payout request is no longer waiting for details")
+        session.commit()
+        notify.notify_admins("admin_payout", f"Payout ${share:,.2f} USDT to send ({acc.login})",
+                             tr.email)
+        return {"id": pr.id, "profit_amount": profit, "trader_share": share,
+                "method": "usdt", "status": "pending"}
     finally:
         session.close()
 
@@ -2875,7 +2982,7 @@ def my_payouts(trader: Trader = Depends(auth.current_trader)):
         return {
             "summary": {
                 "total_paid": round(sum(p.trader_share for p in pays), 2),
-                "pending": sum(1 for r in reqs if r.status == "pending"),
+                "pending": sum(1 for r in reqs if r.status in PAYOUT_OTWARTE),
                 "available": round(available, 2),
                 # Harmonogram wypłat = on-demand z przeglądem do 24 h; portal
                 # pisze to zdanie z tej liczby, nie z zaszytego stringa.
@@ -2889,7 +2996,7 @@ def my_payouts(trader: Trader = Depends(auth.current_trader)):
                           "method": r.method, "status": r.status,
                           "express": bool(by_id[r.account_id].express_payout) if r.account_id in by_id else False,
                           "expected_by": ((r.ts + timedelta(hours=24)).isoformat()
-                                          if r.status == "pending" else None),
+                                          if r.status in ("review", "pending") else None),
                           "reject_reason": r.reject_reason,
                           "vusdt": vusdt.view(vusdt_tx[r.id]) if r.id in vusdt_tx else None}
                          for r in reqs],
@@ -3873,7 +3980,7 @@ def admin_payout_requests():
         # na Overview) zamkniętych nie ogląda, a te mają swoje wiersze w widoku
         # Payouts (/api/admin/payouts). Bez filtra każde wejście na Overview
         # ciągnęło całą tabelę, która rośnie z każdym miesiącem.
-        rows = (session.query(PayoutRequest).filter(PayoutRequest.status == "pending")
+        rows = (session.query(PayoutRequest).filter(PayoutRequest.status.in_(PAYOUT_OTWARTE))
                 .order_by(PayoutRequest.id.desc()).all())
         # Konta i maile hurtem: dwa `session.get` na wniosek to bylo 600 round-tripow
         # przy 300 wnioskach.
@@ -4152,14 +4259,37 @@ def admin_approve_payout(req_id: int):
     session = SessionLocal()
     try:
         r = session.get(PayoutRequest, req_id)
-        if not r or r.status != "pending":
+        if not r or r.status not in PAYOUT_OTWARTE:
             raise HTTPException(404, "The request does not exist or was already handled")
+        if r.status == "review":
+            return _odblokuj_wyplate(session, r)
+        if r.status == "unlocked":
+            raise HTTPException(400, "Waiting for the trader to choose the amount and USDT "
+                                     "wallet — there is nothing to pay yet.")
         if _transfer_vusdt(session, req_id):
             raise HTTPException(400, "This payout is settled automatically from the Polygon "
                                      "transfer — there is nothing to approve.")
         return _rozlicz_wyplate(session, r)
     finally:
         session.close()
+
+
+def _odblokuj_wyplate(session, r: PayoutRequest) -> dict:
+    """Krok 1 → 2: admin przejrzał konto, trader może podać kwotę i portfel."""
+    acc = session.get(Account, r.account_id)
+    if not acc or acc.status != "funded":
+        raise HTTPException(400, "The account is no longer funded — reject this request instead.")
+    zajete = (session.query(PayoutRequest)
+              .filter(PayoutRequest.id == r.id, PayoutRequest.status == "review")
+              .update({"status": "unlocked"}, synchronize_session=False))
+    if not zajete:
+        raise HTTPException(404, "The request does not exist or was already handled")
+    session.commit()
+    tr = session.get(Trader, r.trader_id)
+    if tr:
+        notify.send("payout_unlocked", tr.email, {"name": tr.full_name or tr.email,
+                    "login": acc.login})
+    return {"unlocked": r.id}
 
 
 class PayoutRejectIn(BaseModel):
@@ -4175,7 +4305,7 @@ def admin_reject_payout(req_id: int, payload: PayoutRejectIn):
     session = SessionLocal()
     try:
         r = session.get(PayoutRequest, req_id)
-        if not r or r.status != "pending":
+        if not r or r.status not in PAYOUT_OTWARTE:
             raise HTTPException(404, "The request does not exist or was already handled")
         reason = (payload.reason or "").strip()[:200] or None
         t = _transfer_vusdt(session, req_id)
@@ -4193,7 +4323,7 @@ def admin_reject_payout(req_id: int, payload: PayoutRejectIn):
         # Warunkowy UPDATE jak przy approve — równoległy approve i reject tego
         # samego wniosku nie mogą przejść oba (wypłata + „odrzucono" naraz).
         zajete = (session.query(PayoutRequest)
-                  .filter(PayoutRequest.id == req_id, PayoutRequest.status == "pending")
+                  .filter(PayoutRequest.id == req_id, PayoutRequest.status.in_(PAYOUT_OTWARTE))
                   .update({"status": "rejected", "reject_reason": reason},
                           synchronize_session=False))
         if not zajete:
@@ -4533,7 +4663,7 @@ def admin_payout_request_delete(req_id: int):
         r = session.get(PayoutRequest, req_id)
         if not r:
             raise HTTPException(404, "Payout request not found")
-        if r.status == "pending":
+        if r.status in PAYOUT_OTWARTE:
             raise HTTPException(400, "Approve or reject this request first — a trader is "
                                      "waiting for an answer, deleting it in silence is not one")
         session.delete(r)
@@ -6751,7 +6881,7 @@ def admin_inbox(authorization: str | None = Header(default=None)):
         kyc = (session.query(Trader).filter(Trader.kyc_status == "pending")
                .order_by(Trader.kyc_submitted_at.desc().nullslast()).limit(10).all())
         wnioski = (bez_ukrytych(session.query(PayoutRequest), PayoutRequest.id, "payout")
-                   .filter(PayoutRequest.status == "pending")
+                   .filter(PayoutRequest.status.in_(("review", "pending")))
                    .order_by(PayoutRequest.id.desc()).limit(10).all())
         bilety = (bez_ukrytych(session.query(TicketMessage, SupportTicket), TicketMessage.id, "ticket")
                   .join(SupportTicket, SupportTicket.id == TicketMessage.ticket_id)
@@ -6780,9 +6910,14 @@ def admin_inbox(authorization: str | None = Header(default=None)):
                               "title": f"KYC pending · {t.kyc_fullname or t.email}",
                               "body": t.email, "view": "kyc"})
         for pr in wnioski:
-            items.append({"id": f"payout:{pr.id}", "kind": "payout", "ref": pr.id,
+            # Ten sam wniosek wraca do admina dwa razy (przegląd, potem wysyłka),
+            # więc krok 1 ma własne id — przeczytany przegląd nie gasi wysyłki.
+            przeglad = pr.status == "review"
+            items.append({"id": f"payout:{pr.id}" + (":review" if przeglad else ""),
+                          "kind": "payout", "ref": pr.id,
                           "type": "payout", "ts": pr.ts.isoformat(),
-                          "title": f"Payout request ${pr.trader_share:,.2f}",
+                          "title": ("Payout request to review" if przeglad
+                                    else f"Payout request ${pr.trader_share:,.2f}"),
                           "body": email_of(pr.trader_id), "view": "payouts"})
         for m, t in bilety:
             items.append({"id": f"ticket:{m.id}", "kind": "ticket", "ref": t.id,

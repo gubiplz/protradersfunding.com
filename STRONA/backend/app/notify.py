@@ -205,8 +205,16 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
         ),
         "payout_requested": (
             f"Payout request received ({login})",
-            f"{name}, we registered your payout request for {ctx.get('trader_share')} "
-            f"(profit {ctx.get('profit_amount')}). Status: under review.",
+            (f"{name}, we received your payout request. Our team is reviewing the account now. "
+             f"Once it is approved, you choose the amount and your USDT wallet in the dashboard.")
+            if ctx.get("review") else
+            (f"{name}, we registered your payout request for {ctx.get('trader_share')} "
+             f"(profit {ctx.get('profit_amount')}). Status: under review."),
+        ),
+        "payout_unlocked": (
+            f"Payout approved: choose your amount ({login})",
+            f"{name}, your payout request for account {login} has been approved. Open your "
+            f"dashboard, choose the amount and enter your USDT wallet address to receive it.",
         ),
         "payout_approved": (
             f"Payout approved 🤑 ({login})",
@@ -644,6 +652,14 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                        f"You can review the details in your dashboard and start a new challenge anytime."),
             _button_html("Start a New Challenge", f"{portal}?view=store"),
         ]
+    elif event == "payout_requested" and ctx.get("review"):
+        parts = [
+            _head_html("Payout", "Payout request received",
+                       f"{name}, we received your payout request. Our team is reviewing the "
+                       f"account now. Once it is approved, you choose the amount and your USDT "
+                       f"wallet in the dashboard."),
+            _button_html("View Payouts", f"{portal}?view=payouts"),
+        ]
     elif event == "payout_requested":
         parts = [
             _head_html("Payout", "Payout request received",
@@ -652,6 +668,13 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                         ("Profit", ctx.get("profit_amount")),
                         ("Status", "Under review")]),
             _button_html("View Payouts", f"{portal}?view=payouts"),
+        ]
+    elif event == "payout_unlocked":
+        parts = [
+            _head_html("Payout", "Your payout is approved",
+                       f"{name}, your payout request for account {login} has been approved. "
+                       f"Choose the amount and enter your USDT wallet address to receive it."),
+            _button_html("Choose amount & wallet", f"{portal}?view=payouts"),
         ]
     elif event == "payout_approved":
         parts = [
@@ -866,6 +889,7 @@ _PREF_BY_EVENT = {
     "target_50": "notify_trading", "target_75": "notify_trading",
     "min_days_met": "notify_trading", "payout_ready": "notify_trading",
     "payout_requested": "notify_payouts", "payout_approved": "notify_payouts",
+    "payout_unlocked": "notify_payouts",
     "payout_rejected": "notify_payouts",
     # recap idzie tylko przez push/centrum (push.daily_recap), nie mailem
     "daily_recap": "notify_marketing",
