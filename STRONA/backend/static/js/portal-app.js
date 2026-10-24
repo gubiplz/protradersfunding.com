@@ -4401,7 +4401,6 @@ function poSprawdz(){
    dopiero potem trader wybiera kwotę i podaje portfel (USDT albo vUSDT). */
 function openPayoutModal(id,avail,size){
   const pct=Math.round((size||0)*PO_MIN_PCT)/100, min=Math.max(PO_MIN_USD,pct);
-  const token=VUSDT_TEST?'vUSDT':'USDT';
   const w=document.createElement('div'); w.id='po-modal'; w.className='modal-wrap';
   w.onclick=e=>{if(e.target===w)w.remove()};
   w.innerHTML=`<div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
@@ -4409,7 +4408,7 @@ function openPayoutModal(id,avail,size){
     <p class="muted" style="font-size:12.5px;margin:2px 0 10px">Available on this account: <b>$${fmt(avail)}</b>, your split of current profit.</p>
     <ol class="po-steps">
       <li><b>Send the request.</b> Our team reviews the account, usually within 24 hours.</li>
-      <li><b>Once it is approved</b>, you choose the amount and enter your ${token} wallet address. We email you when it is ready.</li>
+      <li><b>Once it is approved</b>, you select how much to withdraw and provide your payout details. We will email you when you can proceed.</li>
     </ol>
     ${avail<min?`<div class="po-min bad" role="alert"><b>Minimum payout: $${fmt(min)}</b> on this account. Your available share is $${fmt(avail)}, so you can request a payout once it reaches $${fmt(min)}.</div>`:''}
     <div style="display:flex;gap:10px;margin-top:14px">
