@@ -650,7 +650,9 @@ class PayoutRequest(Base):
     # Dane wypłaty (JSON): usdt -> network+address, bank -> holder+iban+swift(+bank_name),
     # wise -> email. Bez nich admin nie miałby dokąd wysłać pieniędzy.
     details: Mapped[str | None] = mapped_column(String(400), nullable=True)
-    status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|approved|paid|rejected
+    # review → unlocked → pending → paid | rejected (main.PAYOUT_OTWARTE); `approved`
+    # zostaje tylko w starych wierszach.
+    status: Mapped[str] = mapped_column(String(16), default="pending")
     # Powód odrzucenia — trader widzi go przy wniosku, więc pisany do klienta.
     reject_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
 

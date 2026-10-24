@@ -118,3 +118,42 @@ def zrodlo_portalu() -> str:
     baza = Path(__file__).resolve().parents[1]
     return ((baza / "templates" / "portal.html").read_text()
             + (baza / "static" / "js" / "portal-app.js").read_text())
+
+
+#: Portfel USDT, którym helper wypełnia krok 2, gdy test podał inną metodę.
+PORTFEL_TESTOWY = {"network": "TRC20", "address": "TQrZ9wBzFHtBPHm9bRUGbn3zW6r3mJ8YkS"}
+
+
+def zloz_wniosek(client, account_id, headers=None, json=None):
+    """Wniosek o wypłatę tak, jak przechodzi go trader z adminem: prośba →
+    admin odblokowuje → trader podaje kwotę i portfel USDT.
+
+    Zwraca odpowiedź OSTATNIEGO kroku, który się wykonał — błąd bramki z kroku 1
+    (dni handlu, KYC, otwarty wniosek) wraca od razu, tak jak w starym jednym
+    kroku. W trybie vUSDT krok 1 jest jedynym krokiem i też wraca od razu."""
+    from app.config import get_settings
+    body = dict(json or {})
+    # Odrzucony krok 2 (np. kwota ponad dostępną) zostawia wniosek odblokowany —
+    # trader poprawia go w tym samym oknie, więc helper też do niego wraca.
+    konto = next((a for a in client.get("/api/me/accounts", headers=headers).json()
+                  if a["id"] == account_id), {})
+    otwarty = konto.get("payout_open") or {}
+    if otwarty.get("status") == "unlocked":
+        rid = otwarty["id"]
+    else:
+        r = client.post(f"/api/accounts/{account_id}/payout-request", headers=headers, json=body)
+        if r.status_code != 200 or r.json().get("status") != "review":
+            return r
+        rid = r.json()["id"]
+        u = client.post(f"/api/admin/payout-requests/{rid}/approve",
+                        headers={"X-Admin-Token": get_settings().admin_token})
+        assert u.status_code == 200, u.text
+    det = body.get("details") or {}
+    if body.get("method", "usdt") != "usdt":
+        det = PORTFEL_TESTOWY
+    amount = body.get("amount")
+    if amount is None:
+        amount = next(a for a in client.get("/api/me/accounts", headers=headers).json()
+                      if a["id"] == account_id)["payout_available"]
+    return client.post(f"/api/me/payout-requests/{rid}/details", headers=headers, json={
+        "amount": amount, "network": det.get("network", ""), "address": det.get("address", "")})

@@ -1,11 +1,13 @@
-"""Wniosek o wypłatę: kwota wybrana przez tradera + metoda + dane wypłaty.
+"""Wniosek o wypłatę: kwota wybrana przez tradera + portfel USDT.
 
-Trader wskazuje ILE chce wypłacić (część lub całość swojej działki) oraz
-DOKĄD: USDT (sieć+adres), przelew bankowy (posiadacz/IBAN/SWIFT) albo Wise
-(e-mail). Bez kompletu danych wniosek nie przechodzi — admin nie miałby jak
-wykonać przelewu. Duży kapitał kont trzyma procent zysku nisko, żeby nie
-wypychać cudzych kont z top-20 publicznego rankingu.
+Wniosek idzie w dwóch krokach (patrz test_payout_dwa_etapy.py) — helper
+`zloz_wniosek` przechodzi oba. W kroku 2 trader wskazuje ILE chce wypłacić
+(część lub całość swojej działki) oraz DOKĄD (sieć + adres USDT). Bez kompletu
+danych wniosek nie przechodzi — admin nie miałby jak wykonać przelewu. Duży
+kapitał kont trzyma procent zysku nisko, żeby nie wypychać cudzych kont z
+top-20 publicznego rankingu.
 """
+from conftest import zloz_wniosek
 import os
 import tempfile
 
@@ -51,7 +53,7 @@ def _funded(email):
 def test_wniosek_czesciowy_usdt_z_danymi():
     aid, h = _funded("po-usdt@test.pl")
     with TestClient(app) as c:
-        r = c.post(f"/api/accounts/{aid}/payout-request", headers=h,
+        r = zloz_wniosek(c, aid, headers=h,
                    json={"method": "usdt", "amount": 200,
                          "details": {"network": "trc-20", "address": "TQmZ1kD4w9uPq8xYb3nR5tV7cE2sA6fGh9"}})
         assert r.status_code == 200, r.text
@@ -72,7 +74,7 @@ def test_wniosek_czesciowy_usdt_z_danymi():
 def test_kwota_ponad_dostepna_dzialke_odrzucona():
     aid, h = _funded("po-za-duzo@test.pl")
     with TestClient(app) as c:
-        r = c.post(f"/api/accounts/{aid}/payout-request", headers=h,
+        r = zloz_wniosek(c, aid, headers=h,
                    json={"method": "wise", "amount": 800.01,
                          "details": {"email": "trader@example.com"}})
     assert r.status_code == 400
@@ -82,25 +84,22 @@ def test_kwota_ponad_dostepna_dzialke_odrzucona():
 def test_brak_danych_wyplaty_odrzucony():
     aid, h = _funded("po-bez-danych@test.pl")
     with TestClient(app) as c:
-        r = c.post(f"/api/accounts/{aid}/payout-request", headers=h,
-                   json={"method": "bank", "amount": 100})
+        # Krok 2 przyjmuje wyłącznie portfel USDT — bez adresu nie ma dokąd wysłać.
+        r = zloz_wniosek(c, aid, headers=h,
+                   json={"method": "usdt", "amount": 100, "details": {"network": "TRC20"}})
         assert r.status_code == 400
-        assert "account holder" in r.json()["detail"]
+        assert "wallet address" in r.json()["detail"]
 
-        r = c.post(f"/api/accounts/{aid}/payout-request", headers=h,
+        r = zloz_wniosek(c, aid, headers=h,
                    json={"method": "usdt", "amount": 100,
                          "details": {"network": "SOLANA", "address": "x" * 30}})
         assert r.status_code == 400 and "network" in r.json()["detail"].lower()
-
-        r = c.post(f"/api/accounts/{aid}/payout-request", headers=h,
-                   json={"method": "wise", "amount": 100, "details": {"email": "nie-mail"}})
-        assert r.status_code == 400
 
 
 def test_reject_z_powodem_widocznym_dla_tradera():
     aid, h = _funded("po-reject@test.pl")
     with TestClient(app) as c:
-        r = c.post(f"/api/accounts/{aid}/payout-request", headers=h,
+        r = zloz_wniosek(c, aid, headers=h,
                    json={"method": "wise", "amount": 150,
                          "details": {"email": "trader@example.com"}})
         req_id = r.json()["id"]
@@ -127,7 +126,7 @@ def test_drugi_approve_tego_samego_wniosku_odpada():
     maila i zwrot opłaty."""
     aid, h = _funded("po-dubel@test.pl")
     with TestClient(app) as c:
-        r = c.post(f"/api/accounts/{aid}/payout-request", headers=h,
+        r = zloz_wniosek(c, aid, headers=h,
                    json={"method": "wise", "amount": 200,
                          "details": {"email": "trader@example.com"}})
         req_id = r.json()["id"]
@@ -147,7 +146,7 @@ def test_approve_po_spadku_zysku_odrzucony():
     approve ma odmówić — bez tego brakującą różnicę po cichu dopłacała firma."""
     aid, h = _funded("po-strata@test.pl")
     with TestClient(app) as c:
-        r = c.post(f"/api/accounts/{aid}/payout-request", headers=h,
+        r = zloz_wniosek(c, aid, headers=h,
                    json={"method": "wise", "amount": 800,
                          "details": {"email": "trader@example.com"}})
         req_id = r.json()["id"]
@@ -170,7 +169,7 @@ def test_approve_czesciowej_wyplaty_nie_zeruje_konta_do_startu():
     niewyplacone $750 dzialki."""
     aid, h = _funded("po-partial@test.pl")
     with TestClient(app) as c:
-        r = c.post(f"/api/accounts/{aid}/payout-request", headers=h,
+        r = zloz_wniosek(c, aid, headers=h,
                    json={"method": "bank", "amount": 200,
                          "details": {"holder": "Payout Flow", "iban": "PL61109010140000071219812874",
                                      "swift": "WBKPPLPP", "bank_name": "Test Bank"}})
