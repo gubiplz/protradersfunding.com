@@ -175,7 +175,7 @@ def _fees() -> tuple[int, int] | None:
 #  Kolejka                                                                     #
 # --------------------------------------------------------------------------- #
 @contextmanager
-def _jeden_nadawca(session):
+def jeden_nadawca(session):
     """Zamek na czas transakcji sesji — puszcza go commit/rollback wołającego."""
     if session.get_bind().dialect.name == "postgresql":
         session.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _ZAMEK_KLUCZ})
@@ -201,7 +201,7 @@ def process_queue(session) -> str | None:
     konto = _konto()
     powod = None
     try:
-        with _jeden_nadawca(session):
+        with jeden_nadawca(session):
             kolejka = (session.query(VusdtTransfer).filter(VusdtTransfer.status == "queued")
                        .order_by(VusdtTransfer.id).limit(5).all())
             if not kolejka:

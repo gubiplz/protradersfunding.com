@@ -2102,9 +2102,12 @@ def request_payout(account_id: int, payload: PayoutReqIn, request: Request,
         session.add(pr)
         if testowy:
             session.flush()
+            # Wniosek rozlicza się sam po potwierdzeniu transferu, więc zwrot
+            # opłaty przy pierwszej wypłacie jedzie w tym samym transferze.
+            zwrot = _zwrot_oplaty(session, acc)
             session.add(VusdtTransfer(payout_request_id=pr.id,
                                       address=json.loads(details_json)["address"],
-                                      amount_units=vusdt.to_units(share)))
+                                      amount_units=vusdt.to_units(share + zwrot)))
         try:
             session.commit()
         except IntegrityError:
@@ -2119,8 +2122,9 @@ def request_payout(account_id: int, payload: PayoutReqIn, request: Request,
         out = {"id": pr.id, "profit_amount": profit, "trader_share": share, "status": "pending"}
         if testowy:
             vusdt.process_queue(session)
-            t = session.query(VusdtTransfer).filter(VusdtTransfer.payout_request_id == pr.id).one()
+            t = _transfer_vusdt(session, pr.id)
             out["vusdt"] = vusdt.view(t)
+            out["fee_refund"] = round(int(t.amount_units) / 10 ** vusdt.DECIMALS - share, 2)
         return out
     finally:
         session.close()
@@ -2140,7 +2144,9 @@ def my_payout_vusdt(req_id: int, trader: Trader = Depends(auth.current_trader)):
             raise HTTPException(404, "This payout has no vUSDT transfer")
         if vusdt.enabled():
             t = vusdt.refresh(session, t)
-        return vusdt.view(t)
+            _vusdt_rozlicz(session, t)
+            session.refresh(pr)
+        return {**vusdt.view(t), "request_status": pr.status}
     finally:
         session.close()
 
@@ -2856,6 +2862,7 @@ def my_payout_certificate(payout_id: int, trader: Trader = Depends(auth.current_
 def my_payouts(trader: Trader = Depends(auth.current_trader)):
     session = SessionLocal()
     try:
+        _vusdt_sweep(session)
         accs = session.query(Account).filter(Account.trader_id == trader.id).all()
         by_id = {a.id: a for a in accs}
         acc_ids = list(by_id)
@@ -3861,6 +3868,7 @@ def admin_kyc_doc(trader_id: int, kind: str):
 def admin_payout_requests():
     session = SessionLocal()
     try:
+        _vusdt_sweep(session)
         # Tylko OTWARTE wnioski: jedyny konsument tej listy (licznik pendingów
         # na Overview) zamkniętych nie ogląda, a te mają swoje wiersze w widoku
         # Payouts (/api/admin/payouts). Bez filtra każde wejście na Overview
@@ -3934,6 +3942,7 @@ def admin_payouts_all():
     """
     session = SessionLocal()
     try:
+        _vusdt_sweep(session)
         out = []
         rows = (session.query(Payout, Account, Trader)
                 .join(Account, Payout.account_id == Account.id)
@@ -4003,6 +4012,141 @@ def admin_payouts_all():
         session.close()
 
 
+def _zwrot_oplaty(session, acc: Account) -> float:
+    """Zwrot opłaty za challenge przy PIERWSZEJ wypłacie (jak FTMO/The5ers).
+    Granty odpadają: zamówienie grantowe BOGO nosi cenę OPŁACONEGO tieru
+    (dla faktury, patrz billing.grant_challenge) — zwrot z niego oddawałby
+    tę samą opłatę drugi raz, bo konto kupione zwraca ją u siebie."""
+    if session.query(Payout).filter(Payout.account_id == acc.id).count():
+        return 0.0
+    order = (session.query(Order).filter(Order.account_id == acc.id, Order.status == "paid",
+                                         Order.provider != "grant")
+             .order_by(Order.id).first())
+    return round(order.amount_usd, 2) if order else 0.0
+
+
+def _rozlicz_wyplate(session, r: PayoutRequest, fee_refund: float | None = None,
+                     sprawdz_pokrycie: bool = True) -> dict:
+    """Księguje wniosek jako wypłacony: Payout, zdjęcie zysku z konta, zwrot opłaty,
+    mail. Wspólne dla „Approve" admina i automatu vUSDT (transfer potwierdzony
+    na łańcuchu). `fee_refund=None` = policz zwrot teraz; automat podaje kwotę,
+    która RZECZYWIŚCIE poszła w transferze."""
+    acc = session.get(Account, r.account_id)
+    tr = session.get(Trader, r.trader_id)
+
+    # Kwota wniosku jest zamrożona z chwili złożenia, a przegląd trwa do
+    # 24 h — trader mógł w tym czasie zjechać zyskiem poniżej wnioskowanej
+    # działki. Bez tej kontroli brakującą różnicę po cichu dopłacałaby
+    # firma, bo clamp do salda startowego niżej maskuje brak pokrycia.
+    # Automat jej nie robi: tokeny już wyszły, księga musi to odnotować.
+    split = acc.profit_split_pct / 100.0 if acc.profit_split_pct else 1.0
+    pool = getattr(acc, "payout_pool_usd", None)
+    if sprawdz_pokrycie:
+        available = _payout_available(acc)
+        if r.trader_share > available:
+            raise HTTPException(400, f"The account no longer covers this payout "
+                                     f"(available share: ${available:,.2f}). Reject the "
+                                     f"request and ask the trader to submit a new one.")
+
+    # Przejęcie wniosku warunkowym UPDATE-em (ten sam wzorzec co przejęcie
+    # zamówienia w provisioning) — z dwóch równoległych approve zaksięguje
+    # tylko jedno, drugie dostaje 404 zamiast dublować wypłatę, mail
+    # i zwrot opłaty.
+    zajete = (session.query(PayoutRequest)
+              .filter(PayoutRequest.id == r.id, PayoutRequest.status == "pending")
+              .update({"status": "paid"}, synchronize_session=False))
+    if not zajete:
+        raise HTTPException(404, "The request does not exist or was already handled")
+
+    if fee_refund is None:
+        fee_refund = _zwrot_oplaty(session, acc)
+
+    session.add(Payout(account_id=acc.id, profit_amount=r.profit_amount,
+                       trader_share=round(r.trader_share + fee_refund, 2), paid=True,
+                       balance_reset=(pool is None), method=r.method))
+    if pool is not None:
+        # Tryb puli: anty-podwójnej-wypłacie jest dekrement puli, a saldo
+        # maluje bot — reset by z nim walczył. Zwrot opłaty NIE schodzi
+        # z puli, to bonus firmy jak w trybie formuły.
+        acc.payout_pool_usd = max(0.0, round(float(pool) - r.trader_share, 2))
+    else:
+        # Trader mógł poprosić o CZĘŚĆ dostępnej działki — z salda schodzi profit
+        # proporcjonalny do wypłaconej kwoty (kwota / split). Pełna kwota sprowadza
+        # konto dokładnie do salda startowego, jak dotychczasowy reset.
+        consumed = round(r.trader_share / split, 2)
+        new_balance = max(acc.initial_balance, round(acc.balance - consumed, 2))
+        acc.balance = new_balance
+        acc.equity = new_balance
+        acc.peak_equity = new_balance
+        acc.day_start_equity = new_balance
+        acc.day_start_balance = new_balance
+        acc.best_day_profit = 0.0
+    session.commit()
+    notify.send("payout_approved", tr.email, {"name": tr.full_name or tr.email,
+                "login": acc.login, "trader_share": round(r.trader_share + fee_refund, 2),
+                "fee_refund": bool(fee_refund)})
+    _polecenie_po_wyplacie(session, tr.email)
+    return {"approved": r.id, "fee_refund": fee_refund,
+            "total_paid": round(r.trader_share + fee_refund, 2)}
+
+
+def _transfer_vusdt(session, req_id: int) -> VusdtTransfer | None:
+    return session.query(VusdtTransfer).filter(VusdtTransfer.payout_request_id == req_id).first()
+
+
+def _vusdt_rozlicz(session, t: VusdtTransfer) -> None:
+    """Wniosek z transferem vUSDT rozlicza ŁAŃCUCH, nie admin: potwierdzony
+    transfer = wypłacony (to samo księgowanie co Approve), nieudany = odrzucony
+    z powodem dla tradera."""
+    pr = session.get(PayoutRequest, t.payout_request_id)
+    if not pr or pr.status != "pending":
+        return
+    if t.status == "confirmed":
+        wyslano = round(int(t.amount_units) / 10 ** vusdt.DECIMALS, 2)
+        try:
+            _rozlicz_wyplate(session, pr, fee_refund=max(0.0, round(wyslano - pr.trader_share, 2)),
+                             sprawdz_pokrycie=False)
+        except HTTPException:      # równoległy request rozliczył go pierwszy
+            session.rollback()
+    elif t.status == "failed":
+        n = (session.query(PayoutRequest)
+             .filter(PayoutRequest.id == pr.id, PayoutRequest.status == "pending")
+             .update({"status": "rejected",
+                      "reject_reason": "The vUSDT transfer failed on-chain. Submit a new request."},
+                     synchronize_session=False))
+        session.commit()
+        if n:
+            print(f"[vusdt] wniosek {pr.id} odrzucony: transfer {t.id} nie przeszedł")
+
+
+#: Ile otwartych transferów najwyżej odświeżamy naraz (każdy to 1–2 strzały RPC).
+VUSDT_SWEEP_MAX = 10
+
+
+def _vusdt_sweep(session=None) -> None:
+    """Dociąga statusy z łańcucha i rozlicza wnioski — z ruchu, z listy wypłat
+    i z panelu admina, więc wniosek domyka się sam także po zamknięciu modala."""
+    if not vusdt.enabled():
+        return
+    wlasna = session is None
+    session = session or SessionLocal()
+    try:
+        otwarte = (session.query(VusdtTransfer)
+                   .join(PayoutRequest, PayoutRequest.id == VusdtTransfer.payout_request_id)
+                   .filter(PayoutRequest.status == "pending")
+                   .order_by(VusdtTransfer.id).limit(VUSDT_SWEEP_MAX).all())
+        for t in otwarte:
+            if t.status in ("queued", "sent"):
+                t = vusdt.refresh(session, t)
+            _vusdt_rozlicz(session, t)
+    except Exception as e:  # pragma: no cover - sweep nie może wywrócić requestu
+        session.rollback()
+        print(f"[vusdt] sweep: {e}")
+    finally:
+        if wlasna:
+            session.close()
+
+
 @app.post("/api/admin/payout-requests/{req_id}/approve", dependencies=[Depends(auth.require_admin)])
 def admin_approve_payout(req_id: int):
     session = SessionLocal()
@@ -4010,70 +4154,10 @@ def admin_approve_payout(req_id: int):
         r = session.get(PayoutRequest, req_id)
         if not r or r.status != "pending":
             raise HTTPException(404, "The request does not exist or was already handled")
-        acc = session.get(Account, r.account_id)
-        tr = session.get(Trader, r.trader_id)
-
-        # Kwota wniosku jest zamrożona z chwili złożenia, a przegląd trwa do
-        # 24 h — trader mógł w tym czasie zjechać zyskiem poniżej wnioskowanej
-        # działki. Bez tej kontroli brakującą różnicę po cichu dopłacałaby
-        # firma, bo clamp do salda startowego niżej maskuje brak pokrycia.
-        split = acc.profit_split_pct / 100.0 if acc.profit_split_pct else 1.0
-        pool = getattr(acc, "payout_pool_usd", None)
-        available = _payout_available(acc)
-        if r.trader_share > available:
-            raise HTTPException(400, f"The account no longer covers this payout "
-                                     f"(available share: ${available:,.2f}). Reject the "
-                                     f"request and ask the trader to submit a new one.")
-
-        # Przejęcie wniosku warunkowym UPDATE-em (ten sam wzorzec co przejęcie
-        # zamówienia w provisioning) — z dwóch równoległych approve zaksięguje
-        # tylko jedno, drugie dostaje 404 zamiast dublować wypłatę, mail
-        # i zwrot opłaty.
-        zajete = (session.query(PayoutRequest)
-                  .filter(PayoutRequest.id == req_id, PayoutRequest.status == "pending")
-                  .update({"status": "paid"}, synchronize_session=False))
-        if not zajete:
-            raise HTTPException(404, "The request does not exist or was already handled")
-
-        # zwrot opłaty za challenge przy PIERWSZEJ wypłacie (jak FTMO/The5ers).
-        # Granty odpadają: zamówienie grantowe BOGO nosi cenę OPŁACONEGO tieru
-        # (dla faktury, patrz billing.grant_challenge) — zwrot z niego oddawałby
-        # tę samą opłatę drugi raz, bo konto kupione zwraca ją u siebie.
-        first_payout = session.query(Payout).filter(Payout.account_id == acc.id).count() == 0
-        fee_refund = 0.0
-        if first_payout:
-            order = (session.query(Order).filter(Order.account_id == acc.id, Order.status == "paid",
-                                                 Order.provider != "grant")
-                     .order_by(Order.id).first())
-            fee_refund = round(order.amount_usd, 2) if order else 0.0
-
-        session.add(Payout(account_id=acc.id, profit_amount=r.profit_amount,
-                           trader_share=round(r.trader_share + fee_refund, 2), paid=True,
-                           balance_reset=(pool is None), method=r.method))
-        if pool is not None:
-            # Tryb puli: anty-podwójnej-wypłacie jest dekrement puli, a saldo
-            # maluje bot — reset by z nim walczył. Zwrot opłaty NIE schodzi
-            # z puli, to bonus firmy jak w trybie formuły.
-            acc.payout_pool_usd = max(0.0, round(float(pool) - r.trader_share, 2))
-        else:
-            # Trader mógł poprosić o CZĘŚĆ dostępnej działki — z salda schodzi profit
-            # proporcjonalny do wypłaconej kwoty (kwota / split). Pełna kwota sprowadza
-            # konto dokładnie do salda startowego, jak dotychczasowy reset.
-            consumed = round(r.trader_share / split, 2)
-            new_balance = max(acc.initial_balance, round(acc.balance - consumed, 2))
-            acc.balance = new_balance
-            acc.equity = new_balance
-            acc.peak_equity = new_balance
-            acc.day_start_equity = new_balance
-            acc.day_start_balance = new_balance
-            acc.best_day_profit = 0.0
-        session.commit()
-        notify.send("payout_approved", tr.email, {"name": tr.full_name or tr.email,
-                    "login": acc.login, "trader_share": round(r.trader_share + fee_refund, 2),
-                    "fee_refund": bool(fee_refund)})
-        _polecenie_po_wyplacie(session, tr.email)
-        return {"approved": req_id, "fee_refund": fee_refund,
-                "total_paid": round(r.trader_share + fee_refund, 2)}
+        if _transfer_vusdt(session, req_id):
+            raise HTTPException(400, "This payout is settled automatically from the Polygon "
+                                     "transfer — there is nothing to approve.")
+        return _rozlicz_wyplate(session, r)
     finally:
         session.close()
 
@@ -4094,6 +4178,18 @@ def admin_reject_payout(req_id: int, payload: PayoutRejectIn):
         if not r or r.status != "pending":
             raise HTTPException(404, "The request does not exist or was already handled")
         reason = (payload.reason or "").strip()[:200] or None
+        t = _transfer_vusdt(session, req_id)
+        if t:
+            # Tokeny, które już wyszły, nie wrócą przez „Reject". Transfer jeszcze
+            # w kolejce anulujemy pod tym samym zamkiem co nadawca, żeby nie
+            # wyszedł w chwili odrzucania.
+            with vusdt.jeden_nadawca(session):
+                session.refresh(t)
+                if t.status != "queued":
+                    raise HTTPException(400, "The vUSDT transfer has already been sent — this "
+                                             "payout settles automatically from the chain.")
+                t.status, t.error = "failed", "Cancelled by admin"
+                session.commit()
         # Warunkowy UPDATE jak przy approve — równoległy approve i reject tego
         # samego wniosku nie mogą przejść oba (wypłata + „odrzucono" naraz).
         zajete = (session.query(PayoutRequest)
@@ -8796,6 +8892,9 @@ async def _lazy_tick_middleware(request: Request, call_next):
         # w srodku, wiec to najczesciej jeden test zegara.
         if settings.partner_ping_on_traffic:
             await run_in_threadpool(_ping_partnera)
+        # Testowe wypłaty vUSDT domykają się z łańcucha także bez otwartego portalu.
+        if vusdt.enabled():
+            await run_in_threadpool(_vusdt_sweep)
     return await call_next(request)
 
 

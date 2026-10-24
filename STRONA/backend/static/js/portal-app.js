@@ -4393,7 +4393,7 @@ function openPayoutModal(id,avail,size){
   w.innerHTML=`<div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
     <div class="modal-head"><h3>Request a payout</h3></div>
     <p class="muted" style="font-size:12.5px;margin:2px 0 12px">Available on this account: <b>$${fmt(avail)}</b>, your split of current profit. You can request part of it.</p>
-    <label class="muted" style="font-size:12px">Amount (USD)</label>
+    <label class="muted" style="font-size:12px">Amount (${VUSDT_TEST?'vUSDT':'USD'})</label>
     <input id="po-amount" class="inp" type="number" min="${PO_MIN_USD}" max="${avail}" step="0.01" value="${avail}" style="margin-bottom:10px"
       oninput="this.classList.remove('bad');poSprawdz()">
     <label class="muted" style="font-size:12px">Payout method</label>
@@ -4511,25 +4511,27 @@ function poTurnstile(){
 }
 function poTurnstileReset(){PO_TS.token='';if(window.turnstile&&PO_TS.widget!==null){try{turnstile.reset(PO_TS.widget)}catch(_){}}}
 function poShort(a){return a?a.slice(0,6)+'…'+a.slice(-4):''}
-function poSent(reqId,v){
+function poSent(reqId,v,n=0){
   const box=document.querySelector('#po-modal .modal');if(!box)return;
   const done=v.status==='confirmed',failed=v.status==='failed',queued=v.status==='queued';
   box.innerHTML=`<div class="modal-head"><h3>${failed?'Transfer failed':queued?'Payout saved':'Sent!'}</h3></div>
     <p style="font-size:14px;margin:2px 0 10px"><b>${esc(v.amount)} ${esc(v.symbol)}</b> ${
       failed?'could not be delivered to':queued?'will be sent to':'is on its way to'} <span class="mono">${esc(poShort(v.address))}</span> on Polygon.</p>
     <div class="po-vstat ${failed?'bad':done?'ok':''}" role="status">${
-      failed?esc(v.note||'The transfer failed.'):done?'✓ Confirmed on Polygon':queued?esc(v.note||'In line…'):'Confirming on Polygon…'}</div>
+      failed?esc(v.note||'The transfer failed.'):done?(v.request_status==='paid'?'✓ Confirmed on Polygon · payout paid':'✓ Confirmed on Polygon'):queued?esc(v.note||'In line…'):'Confirming on Polygon…'}</div>
     ${v.explorer_url?`<p style="margin:10px 0 0"><a href="${esc(v.explorer_url)}" target="_blank" rel="noopener">View on Polygonscan ↗</a></p>`:''}
-    <p class="muted po-test">vUSDT is a test token with no monetary value. The request also stays in the review queue.</p>
+    <p class="muted po-test">vUSDT is a test token with no monetary value. ${v.request_status==='paid'
+      ?'This payout is now marked as paid.':'The payout is marked as paid automatically once the transfer confirms — no manual review.'}</p>
     <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
       ${failed?'':`<button class="btn-o" onclick="poAddToken(this)">Add vUSDT to MetaMask</button>`}
       <button class="btn-p" onclick="$('po-modal').remove();go('payouts')">Done</button>
     </div>`;
-  if(!done&&!failed)setTimeout(()=>poPoll(reqId,1),4000);
+  // Do potwierdzenia ORAZ rozliczenia wniosku (paid przychodzi z tego samego odczytu).
+  if(!failed&&!(done&&v.request_status==='paid'))setTimeout(()=>poPoll(reqId,n+1),4000);
 }
 async function poPoll(reqId,n){
   if(!$('po-modal')||n>45)return;
-  try{poSent(reqId,await api(`/api/me/payout-requests/${reqId}/vusdt`))}
+  try{poSent(reqId,await api(`/api/me/payout-requests/${reqId}/vusdt`),n)}
   catch(e){setTimeout(()=>poPoll(reqId,n+1),6000)}
 }
 async function poAddToken(btn){

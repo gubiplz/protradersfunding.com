@@ -7,7 +7,9 @@ podpisane transakcje, a Turnstile odpowiada z flagi. Sprawdzamy, że:
 - nonce rośnie, nawet gdy RPC spóźnia się z licznikiem `pending`,
 - bez POL wysyłka czeka w kolejce i wychodzi sama po doładowaniu,
 - produkcja (VERCEL_ENV=production) nigdy nie włącza trybu,
-- PAYOUT_INTERVAL_DAYS blokuje kolejny wniosek na koncie po stronie serwera.
+- PAYOUT_INTERVAL_DAYS blokuje kolejny wniosek na koncie po stronie serwera,
+- wniosek rozlicza się SAM z łańcucha: potwierdzony transfer = paid (z tym samym
+  księgowaniem co Approve), nieudany = rejected; admin nie zatwierdza.
 """
 import os
 import tempfile
@@ -28,7 +30,7 @@ from app import auth, vusdt  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Account, PayoutRequest, Trader, VusdtTransfer  # noqa: E402
+from app.models import Account, Order, Payout, PayoutRequest, Trader, VusdtTransfer  # noqa: E402
 
 init_db()
 ADMIN_H = {"X-Admin-Token": get_settings().admin_token}
@@ -148,18 +150,34 @@ def test_submit_wysyla_vusdt_od_razu(siec):
         assert tx["maxPriorityFeePerGas"] == 30 * 10 ** 9       # podłoga napiwku na Polygonie
         assert tx["nonce"] == 5
 
-        # wniosek czeka na przegląd admina, z adresem Polygon i metodą vusdt
+        # do potwierdzenia wniosek wisi jako pending z adresem Polygon i metodą vusdt,
+        # a admin nie ma czego zatwierdzać
+        rid = r.json()["id"]
         rows = c.get("/api/admin/payout-requests", headers=ADMIN_H).json()
-        mine = next(x for x in rows if x["id"] == r.json()["id"])
+        mine = next(x for x in rows if x["id"] == rid)
         assert mine["method"] == "vusdt" and mine["status"] == "pending"
         assert mine["details"]["network"] == "POLYGON"
+        a = c.post(f"/api/admin/payout-requests/{rid}/approve", headers=ADMIN_H)
+        assert a.status_code == 400 and "automatically" in a.json()["detail"]
+        rj = c.post(f"/api/admin/payout-requests/{rid}/reject", headers=ADMIN_H, json={"reason": "x"})
+        assert rj.status_code == 400
 
-        # potwierdzenie z łańcucha przez polling portalu
+        # receipt na łańcuchu → wniosek sam przechodzi na paid
         siec.receipts[v["tx_hash"]] = {"status": "0x1"}
-        st = c.get(f"/api/me/payout-requests/{r.json()['id']}/vusdt", headers=h).json()
-        assert st["status"] == "confirmed"
-        lista = c.get("/api/me/payouts", headers=h).json()["requests"]
-        assert lista[0]["vusdt"]["status"] == "confirmed"
+        st = c.get(f"/api/me/payout-requests/{rid}/vusdt", headers=h).json()
+        assert st["status"] == "confirmed" and st["request_status"] == "paid"
+        lista = c.get("/api/me/payouts", headers=h).json()
+        assert lista["requests"][0]["status"] == "paid"
+        assert lista["requests"][0]["vusdt"]["status"] == "confirmed"
+        assert lista["summary"]["total_paid"] == 5688.9
+
+    db = SessionLocal()
+    wyplata = db.query(Payout).filter(Payout.account_id == aid).one()
+    konto = db.get(Account, aid)
+    db.close()
+    assert wyplata.method == "vusdt" and wyplata.trader_share == 5688.9
+    # z salda zeszła wypłacona działka / split (5688.9 / 0.8)
+    assert konto.balance == pytest.approx(KAPITAL + ZYSK - 5688.9 / 0.8, abs=0.01)
 
 
 def test_zly_captcha_nic_nie_zapisuje(siec):
@@ -215,8 +233,8 @@ def test_okno_wyplat_co_14_dni(siec, monkeypatch):
     with TestClient(app) as c:
         r = _wniosek(c, aid, h, amount=1000)
         assert r.status_code == 200, r.text
-        assert c.post(f"/api/admin/payout-requests/{r.json()['id']}/approve",
-                      headers=ADMIN_H).status_code == 200
+        siec.receipts[r.json()["vusdt"]["tx_hash"]] = {"status": "0x1"}
+        c.get("/api/me/payouts", headers=h)                 # sweep rozlicza z łańcucha
 
         r2 = _wniosek(c, aid, h, amount=1000)
         assert r2.status_code == 400 and "every 14 days" in r2.json()["detail"]
@@ -228,7 +246,6 @@ def test_okno_wyplat_co_14_dni(siec, monkeypatch):
         for m in (PayoutRequest,):
             for row in s.query(m).filter(m.account_id == aid).all():
                 row.ts = datetime.now(timezone.utc) - timedelta(days=15)
-        from app.models import Payout
         for row in s.query(Payout).filter(Payout.account_id == aid).all():
             row.ts = datetime.now(timezone.utc) - timedelta(days=15)
         s.commit(); s.close()
@@ -236,13 +253,49 @@ def test_okno_wyplat_co_14_dni(siec, monkeypatch):
 
 
 def test_odrzucony_wniosek_nie_zabiera_okna(siec, monkeypatch):
+    """Admin może odrzucić tylko transfer, który jeszcze nie wyszedł (kolejka) —
+    wtedy transfer jest anulowany, a okno wypłat zostaje traderowi."""
     monkeypatch.setattr(get_settings(), "payout_interval_days", 14)
+    siec.pol = 0                                          # transfer utknie w kolejce
     aid, h = _funded()
     with TestClient(app) as c:
         r = _wniosek(c, aid, h, amount=1000)
+        assert r.json()["vusdt"]["status"] == "queued"
         assert c.post(f"/api/admin/payout-requests/{r.json()['id']}/reject", headers=ADMIN_H,
                       json={"reason": "test"}).status_code == 200
+        siec.pol = 10 * 10 ** 18
         assert _wniosek(c, aid, h, amount=1000).status_code == 200
+    # anulowany transfer nigdy nie wyszedł — poszedł tylko drugi
+    assert len(siec.wyslane) == 1
+
+
+def test_nieudany_transfer_sam_odrzuca_wniosek(siec):
+    aid, h = _funded()
+    with TestClient(app) as c:
+        r = _wniosek(c, aid, h, amount=1000)
+        siec.receipts[r.json()["vusdt"]["tx_hash"]] = {"status": "0x0"}
+        st = c.get(f"/api/me/payout-requests/{r.json()['id']}/vusdt", headers=h).json()
+        assert st["status"] == "failed" and st["request_status"] == "rejected"
+        req = c.get("/api/me/payouts", headers=h).json()["requests"][0]
+    assert req["status"] == "rejected" and "failed on-chain" in req["reject_reason"]
+
+
+def test_zwrot_oplaty_jedzie_w_transferze_pierwszej_wyplaty(siec):
+    aid, h = _funded()
+    db = SessionLocal()
+    acc = db.get(Account, aid)
+    db.add(Order(trader_id=acc.trader_id, product_key="2step-50k", amount_usd=299.0,
+                 status="paid", provider="mock", account_id=aid))
+    db.commit(); db.close()
+    with TestClient(app) as c:
+        r = _wniosek(c, aid, h, amount=1000)
+        assert r.json()["fee_refund"] == 299.0
+        assert r.json()["vusdt"]["amount"] == "1,299.00"
+        siec.receipts[r.json()["vusdt"]["tx_hash"]] = {"status": "0x1"}
+        c.get("/api/me/payouts", headers=h)
+    db = SessionLocal()
+    assert db.query(Payout).filter(Payout.account_id == aid).one().trader_share == 1299.0
+    db.close()
 
 
 def test_bez_okna_dalej_on_demand(siec, monkeypatch):

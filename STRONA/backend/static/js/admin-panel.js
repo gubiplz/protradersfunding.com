@@ -1664,8 +1664,10 @@ function renderPayoutsView(){
             <button class="btn-o sm" onclick="revokeCert(${r.id})">Revoke</button>`
           :`<button class="btn-o sm" onclick="askCertLp(${r.id})">Generate</button>`}</td>
       <td class="rt-acts" style="text-align:right;white-space:nowrap">${r.kind==='request'&&r.status==='pending'
-        ?`<button class="btn-p sm" onclick="approvePayout(${r.id},this)">Approve &amp; pay</button>
-          <button class="btn-o sm" onclick="rejectPayout(${r.id},this)">Reject</button>`
+        ?(r.method==='vusdt'
+          ?`<span class="muted" style="font-size:var(--fs-cap)" title="Paid automatically once the Polygon transfer confirms">Settles on-chain</span>`
+          :`<button class="btn-p sm" onclick="approvePayout(${r.id},this)">Approve &amp; pay</button>
+          <button class="btn-o sm" onclick="rejectPayout(${r.id},this)">Reject</button>`)
         :XBTN(`deletePayoutRow('${r.kind}',${r.id},${r.trader_share},'${jsq(r.account_login||'')}')`,
               r.kind==='payout'?'Delete payout':'Delete request')}</td></tr>`).join('')}
     </tbody></table></div>
