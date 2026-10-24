@@ -412,7 +412,7 @@ def test_admin_wystawia_wyplate_z_certyfikatem():
         assert cert.status_code == 200
         # Asercje pilnują WYMAGAŃ dokumentu, nie brzmienia copy — inaczej każda
         # zmiana tekstu marketingowego wywala test bez żadnej wartości.
-        assert "$2,000<" in cert.text                     # okrągła kwota bez groszy
+        assert 'alt="vUSDT">2,000<' in cert.text           # okrągła kwota bez groszy, w vUSDT
         assert "Payout Owy" in cert.text                  # komu wystawiono
         assert p["cert_token"] in cert.text               # numer certyfikatu przy QR
         assert f"/verify/{p['cert_token']}" in cert.text  # weryfikowalne na naszej stronie
@@ -430,7 +430,7 @@ def test_weryfikacja_dziala_dla_certyfikatu_wyplaty():
         r = c.get(f"/verify/{p['cert_token']}")
         assert r.status_code == 200
         assert "Certificate is valid" in r.text and "Payout paid" in r.text
-        assert "$1,500.00" in r.text
+        assert "1,500.00 vUSDT" in r.text and "$1,500" not in r.text
         assert f'href="/payout/{p["cert_token"]}"' in r.text     # link do właściwego dokumentu
         # nazwisko na stronie weryfikacji zostaje maskowane
         assert "Payout Owy" not in r.text and "Payout O." in r.text
@@ -577,7 +577,7 @@ def test_certyfikat_nie_gubi_groszy_przy_niecalej_kwocie():
     with TestClient(app) as c:
         p = c.post(f"/api/admin/accounts/{aid}/payout", headers=ADMIN_H,
                    json={"amount": 1049.78}).json()
-        assert "$1,049.78" in c.get(p["cert_url"]).text
+        assert 'alt="vUSDT">1,049.78<' in c.get(p["cert_url"]).text
 
 
 def test_certyfikat_nie_pokazuje_numeru_konta_ani_rozbicia_wyplaty():

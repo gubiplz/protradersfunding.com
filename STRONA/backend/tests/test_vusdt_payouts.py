@@ -405,9 +405,9 @@ def test_certyfikat_vusdt_ma_monete_zamiast_dolara():
         u = c.get(f"/payout/cert-usdt-{aid}").text
         api = c.get(f"/api/verify/cert-vusdt-{aid}").json()
         ver = c.get(f"/verify/cert-vusdt-{aid}").text
-    assert 'class="cert-coin" src="/static/img/vusdt.svg"' in v and "$7,980" not in v
-    assert "7,980" in v
-    assert "cert-coin" not in u and "$7,980" in u
+    # Decyzja właściciela: KAŻDA wypłata (nie tylko method=="vusdt") pokazuje monetę.
+    assert 'class="cert-coin" src="/static/img/vusdt.svg"' in v and "$7,980" not in v and "7,980" in v
+    assert 'class="cert-coin" src="/static/img/vusdt.svg"' in u and "$7,980" not in u and "7,980" in u
     assert api["amount"] == "7,980" and api["amount_icon"] == "/static/img/vusdt.svg"
     assert ver.count("/static/img/vusdt.svg") == 2 and "$7,980" not in ver
 

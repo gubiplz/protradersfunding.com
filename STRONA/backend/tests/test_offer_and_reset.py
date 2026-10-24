@@ -134,7 +134,7 @@ def test_api_verify_zwraca_dane_certyfikatu_dla_podgladu():
     assert r["trader_name"] == "Verify Morph" and "<svg" in r["qr_svg"]
 
     r = client.get("/api/verify/tok-ver-payout-1").json()
-    assert r["variant"] == "payout" and r["amount"] == "$640.50"
+    assert r["variant"] == "payout" and r["amount"] == "640.50" and r["amount_icon"] == "/static/img/vusdt.svg"
     assert r["open_url"] == "/payout/tok-ver-payout-1"
 
     assert client.get("/api/verify/nie-ma").status_code == 404

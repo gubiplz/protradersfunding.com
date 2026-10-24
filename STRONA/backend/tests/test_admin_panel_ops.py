@@ -783,7 +783,7 @@ def test_certyfikat_nie_drukuje_notatki_z_importu():
     s.add(p); s.commit(); s.close()
 
     html = client.get("/payout/notka-token-1").text
-    assert html.count("$800") >= 1, "certyfikat sie nie wyrenderowal"
+    assert 'alt="vUSDT">800<' in html, "certyfikat sie nie wyrenderowal"
     assert payout_import.IMPORT_NOTE not in html
 
     s = SessionLocal()

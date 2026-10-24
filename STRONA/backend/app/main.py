@@ -8778,15 +8778,15 @@ def _cert_ctx(request, *, headline_plain, eyebrow, trader_name, amount_label, am
 VUSDT_COIN = "/static/img/vusdt.svg"
 
 
-def _cert_kwota(p: Payout) -> tuple[str, str | None]:
+def _cert_kwota(p: Payout) -> tuple[str, str]:
     """Kwota wypłaty na dokument i ikona waluty przed nią.
 
-    Wypłata w vUSDT nie jest wypłatą w dolarach — zamiast „$" stoi moneta tokena.
+    Decyzja właściciela: KAŻDA wypłata jest prezentowana w vUSDT — zamiast „$"
+    stoi moneta tokena. Rozmiar konta zostaje w „$" (to denominacja konta, nie
+    wypłaty). Pojedynczy rekord i tak weryfikuje /verify po ID, które pokazuje
+    realną metodę.
     """
-    kwota = payoutbot.kwota_txt(p.trader_share)
-    if p.method == "vusdt":
-        return kwota.removeprefix("$"), VUSDT_COIN
-    return kwota, None
+    return payoutbot.kwota_txt(p.trader_share).removeprefix("$"), VUSDT_COIN
 
 
 @app.middleware("http")
