@@ -2,8 +2,8 @@
 
 vUSDT („Virtual USDT", 6 miejsc po przecinku) to token TESTOWY bez wartości,
 kontrakt z ~/vusdt-faucet. Tryb istnieje po to, żeby przećwiczyć ścieżkę
-„Submit request → token na portfelu tradera" na preview; włącza go
-`Settings.vusdt_payouts_enabled`, który na produkcji zawsze zwraca False.
+„Submit request → token na portfelu tradera"; włącza go
+`Settings.vusdt_payouts_enabled` (flaga VUSDT_TEST_PAYOUTS + klucze).
 
 Logika przeniesiona z kranika (lib/sender.ts, lib/sweep.ts):
 - jeden nadawca naraz: `pg_advisory_xact_lock` (Postgres) albo zamek procesu

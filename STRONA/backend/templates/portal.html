@@ -223,7 +223,7 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
 const GOOGLE_CLIENT_ID={{ google_client_id|tojson }};
 const SITE_NAME={{ site_name|tojson }};
 const ASSET_V={{ asset_v|tojson }};
-/* Tryb testowy wypłat w vUSDT (tylko preview/lokalnie; null na produkcji). */
+/* Tryb testowy wypłat w vUSDT (null gdy VUSDT_TEST_PAYOUTS wyłączone / brak kluczy). */
 const VUSDT_TEST={{ vusdt_test|tojson }};
 </script>
 <script defer src="/countries.js?v={{ asset_v }}"></script>

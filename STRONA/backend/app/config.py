@@ -467,9 +467,9 @@ class Settings:
     payout_interval_days: int = int(os.getenv("PAYOUT_INTERVAL_DAYS", "0"))
 
     # --- Testowe wypłaty w vUSDT (Polygon Mainnet) ---
-    # vUSDT to token TESTOWY bez wartości (kontrakt z ~/vusdt-faucet). Tryb służy
-    # wyłącznie do przećwiczenia ścieżki wypłaty na preview/lokalnie — na
-    # produkcji (VERCEL_ENV=production) nie włącza się nawet przy ustawionej fladze.
+    # vUSDT to token TESTOWY bez wartości (kontrakt z ~/vusdt-faucet). Tryb
+    # włącza flaga VUSDT_TEST_PAYOUTS + komplet kluczy (sender, token, Turnstile)
+    # — także na produkcji, gdy env jest ustawiony.
     vusdt_test_payouts: bool = os.getenv("VUSDT_TEST_PAYOUTS", "false").lower() == "true"
     vusdt_sender_private_key: str = os.getenv("VUSDT_SENDER_PRIVATE_KEY", "")
     vusdt_token_address: str = os.getenv("VUSDT_TOKEN_ADDRESS",
@@ -486,8 +486,6 @@ class Settings:
 
     @property
     def vusdt_payouts_enabled(self) -> bool:
-        if os.getenv("VERCEL_ENV", "") == "production":
-            return False
         return self.vusdt_test_payouts and bool(
             self.vusdt_sender_private_key and self.vusdt_token_address
             and self.turnstile_site_key and self.turnstile_secret_key)

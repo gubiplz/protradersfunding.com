@@ -1,4 +1,4 @@
-"""Testowe wypłaty vUSDT (preview) i okno wypłat co N dni.
+"""Testowe wypłaty vUSDT i okno wypłat co N dni.
 
 Sieć jest podmieniona: `vusdt.rpc` to sztuczny węzeł Polygonu, który dekoduje
 podpisane transakcje, a Turnstile odpowiada z flagi. Sprawdzamy, że:
@@ -6,7 +6,7 @@ podpisane transakcje, a Turnstile odpowiada z flagi. Sprawdzamy, że:
 - transfer jest podpisany na właściwy kontrakt, kwotę i chainId 137,
 - nonce rośnie, nawet gdy RPC spóźnia się z licznikiem `pending`,
 - bez POL wysyłka czeka w kolejce i wychodzi sama po doładowaniu,
-- produkcja (VERCEL_ENV=production) nigdy nie włącza trybu,
+- VERCEL_ENV=production nie blokuje trybu przy ustawionej fladze i kluczach,
 - PAYOUT_INTERVAL_DAYS blokuje kolejny wniosek na koncie po stronie serwera,
 - wniosek rozlicza się SAM z łańcucha: potwierdzony transfer = paid (z tym samym
   księgowaniem co Approve), nieudany = rejected; admin nie zatwierdza.
@@ -126,11 +126,11 @@ def test_bez_flagi_vusdt_to_nieznana_metoda(monkeypatch):
     assert "Unknown payout method" in r.json()["detail"]
 
 
-def test_produkcja_nigdy_nie_wlacza_trybu(siec, monkeypatch):
+def test_produkcja_tez_wlacza_przy_fladze(siec, monkeypatch):
     assert vusdt.enabled()
     monkeypatch.setenv("VERCEL_ENV", "production")
-    assert not vusdt.enabled()
-    assert vusdt.public_config() is None
+    assert vusdt.enabled()
+    assert vusdt.public_config() is not None
 
 
 def test_submit_wysyla_vusdt_od_razu(siec):
