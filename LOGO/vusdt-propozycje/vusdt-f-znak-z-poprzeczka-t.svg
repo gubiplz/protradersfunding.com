@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<defs>
+  <radialGradient id="graf" cx=".35" cy=".3" r=".95"><stop offset="0" stop-color="#4A545D"/><stop offset="1" stop-color="#1F252A"/></radialGradient>
+  <linearGradient id="green" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3DBB8A"/><stop offset="1" stop-color="#17704F"/></linearGradient>
+  <linearGradient id="silver" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#D3D8DC"/><stop offset="1" stop-color="#7D8890"/></linearGradient>
+  <linearGradient id="mint" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5FDCA8"/><stop offset="1" stop-color="#22A070"/></linearGradient>
+</defs>
+<circle cx="128" cy="128" r="128" fill="url(#graf)"/>
+<circle cx="128" cy="128" r="101" fill="none" stroke="url(#mint)" stroke-width="11"/>
+<path d="M72 84h36l20 58 20-58h36l-40 100h-32z" fill="#F2F4F5"/>
+<line x1="128" y1="66" x2="128" y2="194" stroke="#3FC48F" stroke-width="11" stroke-linecap="round"/>
+<rect x="80" y="58" width="96" height="16" rx="8" fill="url(#mint)"/>
+</svg>
