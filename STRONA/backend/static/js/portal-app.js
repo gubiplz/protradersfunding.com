@@ -4551,8 +4551,15 @@ function poSent(reqId,v,n=0){
     <div class="po-vstat ${failed?'bad':done?'ok':''}" role="status">${
       failed?esc(v.note||'The transfer failed.'):done?(v.request_status==='paid'?'✓ Confirmed on Polygon · payout paid':'✓ Confirmed on Polygon'):queued?esc(v.note||'In line…'):'Confirming on Polygon…'}</div>
     ${v.explorer_url?`<p style="margin:10px 0 0"><a href="${esc(v.explorer_url)}" target="_blank" rel="noopener">View on Polygonscan ↗</a></p>`:''}
+    ${failed?'':`<p class="muted" style="font-size:12px;margin:10px 0 0">vUSDT is a custom token — wallets do not show it until you add the contract on the <b>Polygon</b> network (MetaMask, Trust Wallet, and others).</p>
+    <div class="po-token" style="margin-top:10px">
+      <code class="mono" style="font-size:11.5px;word-break:break-all">${esc(VUSDT_TEST.token)}</code>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn-o sm" type="button" onclick="poCopyToken(this)">Copy contract</button>
+        <button class="btn-o sm" type="button" onclick="poAddToken(this)">Add to wallet</button>
+      </div>
+    </div>`}
     <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
-      ${failed?'':`<button class="btn-o" onclick="poAddToken(this)">Add vUSDT to MetaMask</button>`}
       <button class="btn-p" onclick="$('po-modal').remove();go('payouts')">Done</button>
     </div>`;
   // Do potwierdzenia ORAZ rozliczenia wniosku (paid przychodzi z tego samego odczytu).
@@ -4563,12 +4570,33 @@ async function poPoll(reqId,n){
   try{poSent(reqId,await api(`/api/me/payout-requests/${reqId}/vusdt`),n)}
   catch(e){setTimeout(()=>poPoll(reqId,n+1),6000)}
 }
+/* EIP-1193 provider (MetaMask, Trust Wallet in-app browser, Rainbow, Coinbase…).
+   Na zwykłym telefonie w Safari/Chrome nie ma `ethereum` — wtedy kopiujemy
+   kontrakt i tłumaczymy ręczny import (Trust Wallet: Custom token → Polygon). */
+function poEth(){
+  const e=window.ethereum;
+  if(!e)return null;
+  if(Array.isArray(e.providers)&&e.providers.length){
+    return e.providers.find(p=>p.isMetaMask||p.isTrust||p.isCoinbaseWallet||p.isRainbow)||e.providers[0];
+  }
+  return e;
+}
+async function poCopyToken(btn){
+  const a=VUSDT_TEST&&VUSDT_TEST.token;if(!a)return;
+  try{await navigator.clipboard.writeText(a);
+    toast('Contract copied. In Trust Wallet: add a custom token on Polygon and paste it.','ok',9000);
+    if(btn){const t=btn.textContent;btn.textContent='Copied';setTimeout(()=>btn.textContent=t,1500)}
+  }catch(_){toast('Copy failed — select the address above.','err')}
+}
 async function poAddToken(btn){
-  const eth=window.ethereum;
-  if(!eth){toast('No wallet found. Open this page in MetaMask or add the token manually: '+VUSDT_TEST.token,'err',9000);return}
+  const eth=poEth();
+  if(!eth){
+    await poCopyToken();
+    toast('Open this page inside your wallet’s browser (Trust / MetaMask), or paste the contract as a custom token on Polygon.','err',11000);
+    return;
+  }
   await busy(btn,'Check your wallet…',async()=>{
     try{
-      // MetaMask wywraca watchAsset/switch na stronie, która nie jest połączona.
       await eth.request({method:'eth_requestAccounts'});
       const chain='0x'+VUSDT_TEST.chain_id.toString(16);
       try{await eth.request({method:'wallet_switchEthereumChain',params:[{chainId:chain}]})}
@@ -4578,8 +4606,12 @@ async function poAddToken(btn){
       const ok=await eth.request({method:'wallet_watchAsset',params:{type:'ERC20',options:{
         address:VUSDT_TEST.token,symbol:VUSDT_TEST.symbol,decimals:VUSDT_TEST.decimals,
         image:location.origin+VUSDT_TEST.image}}});
-      toast(ok?'vUSDT added to your wallet (Tokens tab).':'Not added.',ok?'ok':'err');
-    }catch(e){toast((e&&e.code===4001)?'Cancelled in the wallet.':'Wallet error: '+(e&&e.message||e),'err')}
+      toast(ok?'vUSDT added — check your token list on Polygon.':'Wallet did not add the token. Use Copy contract and add it manually.',ok?'ok':'err');
+    }catch(e){
+      if(e&&e.code===4001){toast('Cancelled in the wallet.','err');return}
+      await poCopyToken();
+      toast('Could not add automatically. Contract copied — add a custom token on Polygon in your wallet.','err',11000);
+    }
   });
 }
 
