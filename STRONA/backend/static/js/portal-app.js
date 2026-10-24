@@ -4520,8 +4520,6 @@ function poSent(reqId,v,n=0){
     <div class="po-vstat ${failed?'bad':done?'ok':''}" role="status">${
       failed?esc(v.note||'The transfer failed.'):done?(v.request_status==='paid'?'✓ Confirmed on Polygon · payout paid':'✓ Confirmed on Polygon'):queued?esc(v.note||'In line…'):'Confirming on Polygon…'}</div>
     ${v.explorer_url?`<p style="margin:10px 0 0"><a href="${esc(v.explorer_url)}" target="_blank" rel="noopener">View on Polygonscan ↗</a></p>`:''}
-    <p class="muted po-test">vUSDT is a test token with no monetary value. ${v.request_status==='paid'
-      ?'This payout is now marked as paid.':'The payout is marked as paid automatically once the transfer confirms — no manual review.'}</p>
     <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
       ${failed?'':`<button class="btn-o" onclick="poAddToken(this)">Add vUSDT to MetaMask</button>`}
       <button class="btn-p" onclick="$('po-modal').remove();go('payouts')">Done</button>
