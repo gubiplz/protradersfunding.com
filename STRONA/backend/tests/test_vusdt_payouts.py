@@ -431,3 +431,15 @@ def test_pas_landingu_daje_monete_dla_vusdt():
     wg = {r["amount_usd"]: r for r in rows}
     assert wg[7980]["coin"] == "/static/img/vusdt.svg"
     assert wg[6000]["coin"] is None
+
+
+
+def test_verify_bez_tokenu_pokazuje_probke_vusdt():
+    """Domyślna próbka (bez wpisanego ID) na /verify to certyfikat wypłaty vUSDT:
+    zielona moneta zamiast „$", wariant payout. Marketing LP ma od razu pokazywać
+    nowy wygląd, a nie starą kartę „Account size $100,000"."""
+    with TestClient(app) as c:
+        html = c.get("/verify").text
+    assert "/static/img/vusdt.svg" in html
+    assert "For the amount of" in html
+    assert "cert-variant-payout" in html

@@ -60,15 +60,15 @@
     {# Replica of the document behind the ID; without an ID it stays a sample,
        exactly like the preview on the landing page. #}
     <div>
-      <div class="cert-card cert-demo{% if preview and preview.variant == 'payout' %} cert-variant-payout{% endif %}{% if preview %} pv-flash{% endif %}" id="pv-card">
+      <div class="cert-card cert-demo{% if (preview and preview.variant == 'payout') or not preview %} cert-variant-payout{% endif %}{% if preview %} pv-flash{% endif %}" id="pv-card">
         <div class="cert-inner">
           <div class="cert-logo"><img src="/static/img/logo.png" alt=""><span>{{ site_name }}</span></div>
 
-          <div class="cert-eyebrow"><s></s><span>{{ preview.eyebrow if preview else 'Funded trader' }}</span><s></s></div>
+          <div class="cert-eyebrow"><s></s><span>{{ preview.eyebrow if preview else 'Payout' }}</span><s></s></div>
           <h2 class="cert-title">Certificate</h2>
 
-          <div class="cert-amountlabel">{{ preview.amount_label if preview else 'Account size' }}</div>
-          <div class="cert-amount">{% if preview and preview.amount_icon %}<img class="cert-coin" src="{{ preview.amount_icon }}" alt="vUSDT">{% endif %}{{ preview.amount if preview else '$100,000' }}</div>
+          <div class="cert-amountlabel">{{ preview.amount_label if preview else 'For the amount of' }}</div>
+          <div class="cert-amount">{% if preview and preview.amount_icon %}<img class="cert-coin" src="{{ preview.amount_icon }}" alt="vUSDT">{% elif not preview %}<img class="cert-coin" src="/static/img/vusdt.svg" alt="vUSDT">{% endif %}{{ preview.amount if preview else '5,000' }}</div>
 
           <div class="cert-presented">presented to</div>
           <div class="cert-person">{{ preview.person if preview else 'Your Name' }}</div>
@@ -78,7 +78,7 @@
               {% for m in preview.meta %}<div><b>{{ m.value }}</b><span>{{ m.label }}</span></div>{% endfor %}
             {% else %}
               <div><b>On your pass date</b><span>Date</span></div>
-              <div><b>2-Step</b><span>Program</span></div>
+              <div><b>$100,000</b><span>Account size</span></div>
             {% endif %}
           </div>
 
