@@ -75,8 +75,8 @@ def test_kwota_ponad_dostepna_dzialke_odrzucona():
     aid, h = _funded("po-za-duzo@test.pl")
     with TestClient(app) as c:
         r = zloz_wniosek(c, aid, headers=h,
-                   json={"method": "wise", "amount": 800.01,
-                         "details": {"email": "trader@example.com"}})
+                   json={"method": "usdt", "amount": 801,
+                         "details": {"network": "TRC20", "address": "TQmZ1kD4w9uPq8xYb3nR5tV7cE2sA6fGh9"}})
     assert r.status_code == 400
     assert "exceeds" in r.json()["detail"]
 

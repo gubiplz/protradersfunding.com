@@ -1,12 +1,12 @@
-"""Błąd walidacji ma być zdaniem dla człowieka, a przecinek w kwocie — kwotą.
+"""Błąd walidacji ma być zdaniem dla człowieka; przecinek w kwocie się parsuje.
 
 Pydantic oddaje 422 jako LISTĘ słowników, a portal wyświetla `detail` wprost —
-klient na ostatnim kroku wypłaty widział „[object Object]". Do tego europejska
-klawiatura numeryczna na iPhonie podpowiada przecinek: „123,45" wpisane w kwotę
-wypłaty wywalało się na float_parsing, choć intencja jest oczywista.
+klient na ostatnim kroku wypłaty widział „[object Object]". Europejska
+klawiatura na iPhonie podpowiada przecinek: „731,20" nadal się wczyta jako
+float, ale `_kwota_wyplaty` przyjmuje wyłącznie pełne dolary.
 
-Te testy przybijają kontrakt: `detail` z 422 to zawsze JEDEN string (frontend
-może go pokazać bez parsowania), a kwota z przecinkiem przechodzi walidację.
+Te testy przybijają kontrakt: `detail` z 422 to zawsze JEDEN string, a
+przecinek nie wywala float_parsing.
 """
 import os
 import tempfile
@@ -46,7 +46,7 @@ def test_422_to_jedno_zdanie_a_nie_lista():
 
 
 def test_przecinek_w_kwocie_to_kropka():
-    assert PayoutReqIn(amount="123,45").amount == 123.45
-    assert PayoutReqIn(amount=" 99,9 ").amount == 99.9
+    assert PayoutReqIn(amount="731,20").amount == 731.2
+    assert PayoutReqIn(amount=" 99 ").amount == 99.0
     assert PayoutReqIn(amount=250).amount == 250.0
     assert PayoutReqIn().amount is None       # brak kwoty = cała dostępna działka

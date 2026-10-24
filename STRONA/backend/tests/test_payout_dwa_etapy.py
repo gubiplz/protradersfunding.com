@@ -89,11 +89,17 @@ def test_pelna_sciezka_prosba_odblokowanie_kwota_wyplata(monkeypatch):
         assert r.status_code == 400 and "exceeds" in r.json()["detail"]
         assert _status(rid) == "unlocked"
 
-        # Krok 2: kwota + portfel USDT (przecinek dziesiętny z telefonu też przechodzi).
+        # Centy odpadają — kwota tylko w pełnych dolarach.
         r = c.post(f"/api/me/payout-requests/{rid}/details", headers=h,
                    json={"amount": "300,50", "network": "trc-20", "address": PORTFEL["address"]})
+        assert r.status_code == 400 and "whole-dollar" in r.json()["detail"]
+        assert _status(rid) == "unlocked"
+
+        # Krok 2: kwota całkowita + portfel USDT.
+        r = c.post(f"/api/me/payout-requests/{rid}/details", headers=h,
+                   json={"amount": 300, "network": "trc-20", "address": PORTFEL["address"]})
         assert r.status_code == 200, r.text
-        assert r.json()["status"] == "pending" and r.json()["trader_share"] == 300.5
+        assert r.json()["status"] == "pending" and r.json()["trader_share"] == 300.0
         lista = c.get("/api/admin/payout-requests", headers=ADMIN_H).json()
         moj = next(w for w in lista if w["id"] == rid)
         assert moj["method"] == "usdt"
@@ -110,8 +116,8 @@ def test_pelna_sciezka_prosba_odblokowanie_kwota_wyplata(monkeypatch):
         assert _otwarty(c, aid, h) is None
     s = SessionLocal()
     try:
-        # 300.50 przy splicie 80% zdejmuje z salda 375.625 zysku.
-        assert s.get(Account, aid).balance == round(KAPITAL + ZYSK - 300.5 / 0.8, 2)
+        # 300 przy splicie 80% zdejmuje z salda 375 zysku.
+        assert s.get(Account, aid).balance == round(KAPITAL + ZYSK - 300 / 0.8, 2)
     finally:
         s.close()
 

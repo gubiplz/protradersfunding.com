@@ -131,7 +131,7 @@ def _wniosek(c, aid, h, **kw):
         return r1
     rid = r1.json()["id"]
     _odblokuj(c, rid)
-    body = {"amount": 5688.9, "network": "POLYGON", "address": ODBIORCA,
+    body = {"amount": 5688, "network": "POLYGON", "address": ODBIORCA,
             "turnstile_token": "ok"}
     body.update(kw)
     if "details" in body:
@@ -174,25 +174,25 @@ def test_submit_po_odblokowaniu_wysyla_vusdt(siec):
         assert r1.status_code == 200 and r1.json()["status"] == "review"
         rid = r1.json()["id"]
         r = c.post(f"/api/me/payout-requests/{rid}/details", headers=h,
-                   json={"amount": 5688.9, "network": "POLYGON", "address": ODBIORCA,
+                   json={"amount": 5688, "network": "POLYGON", "address": ODBIORCA,
                          "turnstile_token": "ok"})
         assert r.status_code == 400 and "still being reviewed" in r.json()["detail"]
         assert siec.wyslane == []
 
         _odblokuj(c, rid)
         r = c.post(f"/api/me/payout-requests/{rid}/details", headers=h,
-                   json={"amount": 5688.9, "network": "POLYGON", "address": ODBIORCA,
+                   json={"amount": 5688, "network": "POLYGON", "address": ODBIORCA,
                          "turnstile_token": "ok"})
         assert r.status_code == 200, r.text
         v = r.json()["vusdt"]
-        assert v["status"] == "sent" and v["amount"] == "5,688.90" and v["symbol"] == "vUSDT"
+        assert v["status"] == "sent" and v["amount"] == "5,688.00" and v["symbol"] == "vUSDT"
         assert v["explorer_url"].endswith(v["tx_hash"])
 
         tx = siec.wyslane[-1]
         assert tx["chainId"] == 137 and "0x" + bytes(tx["to"]).hex() == TOKEN.lower() and tx["value"] == 0
         dane = "0x" + bytes(tx["data"]).hex() if not isinstance(tx["data"], str) else tx["data"]
         assert dane.startswith("0xa9059cbb" + ODBIORCA[2:].rjust(64, "0"))
-        assert int(dane[-64:], 16) == 5_688_900_000            # 6 miejsc po przecinku
+        assert int(dane[-64:], 16) == 5_688_000_000            # 6 miejsc po przecinku
         assert tx["maxPriorityFeePerGas"] == 30 * 10 ** 9       # podłoga napiwku na Polygonie
         assert tx["nonce"] == 5
 
@@ -214,15 +214,15 @@ def test_submit_po_odblokowaniu_wysyla_vusdt(siec):
         lista = c.get("/api/me/payouts", headers=h).json()
         assert lista["requests"][0]["status"] == "paid"
         assert lista["requests"][0]["vusdt"]["status"] == "confirmed"
-        assert lista["summary"]["total_paid"] == 5688.9
+        assert lista["summary"]["total_paid"] == 5688.0
 
     db = SessionLocal()
     wyplata = db.query(Payout).filter(Payout.account_id == aid).one()
     konto = db.get(Account, aid)
     db.close()
-    assert wyplata.method == "vusdt" and wyplata.trader_share == 5688.9
-    # z salda zeszła wypłacona działka / split (5688.9 / 0.8)
-    assert konto.balance == pytest.approx(KAPITAL + ZYSK - 5688.9 / 0.8, abs=0.01)
+    assert wyplata.method == "vusdt" and wyplata.trader_share == 5688.0
+    # z salda zeszła wypłacona działka / split (5688 / 0.8)
+    assert konto.balance == pytest.approx(KAPITAL + ZYSK - 5688 / 0.8, abs=0.01)
 
 
 def test_zly_captcha_zostawia_wniosek_odblokowany(siec):
@@ -231,7 +231,7 @@ def test_zly_captcha_zostawia_wniosek_odblokowany(siec):
         rid = _prosba(c, aid, h).json()["id"]
         _odblokuj(c, rid)
         r = c.post(f"/api/me/payout-requests/{rid}/details", headers=h,
-                   json={"amount": 5688.9, "network": "POLYGON", "address": ODBIORCA,
+                   json={"amount": 5688, "network": "POLYGON", "address": ODBIORCA,
                          "turnstile_token": "zly"})
     assert r.status_code == 400 and "Captcha" in r.json()["detail"]
     s = SessionLocal()
