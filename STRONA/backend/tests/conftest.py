@@ -28,6 +28,10 @@ os.environ["SHOT_API_URL"] = ""
 # za prawdziwe pieniądze. Testy Reach BOT-a włączają go same, podstawiając
 # transport, tym samym wzorcem co kanał Telegrama wyżej.
 os.environ["REACH_API_URL"] = ""
+# Testowe wypłaty vUSDT i okno wypłat — lokalny .env (preview) je włącza; testy
+# zaczynają od zachowania produkcji, a test_vusdt_payouts.py włącza je sam.
+os.environ["VUSDT_TEST_PAYOUTS"] = "false"
+os.environ["PAYOUT_INTERVAL_DAYS"] = "0"
 os.environ["REACH_API_KEY"] = ""
 # Baza programu poleceń partnera — testy poleceń podstawiają transport same.
 os.environ["REFERRAL_SYNC_URL"] = ""

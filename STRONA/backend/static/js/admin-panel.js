@@ -1646,8 +1646,8 @@ function renderPayoutsView(){
       <td data-l="Trader">${esc(r.trader_email||'—')}${freeChip(r)}</td>
       <td class="num" data-l="Profit">$${fmt(r.profit_amount)}</td><td class="num up" data-l="Share">$${fmt(r.trader_share)}</td>
       <td data-l="Method">${(()=>{const d=r.details||{};
-        const label=r.method==='usdt'?'USDT':r.method==='wise'?'Wise':'Bank';
-        if(r.method==='usdt')return esc(label)+payAddrHtml(d.network,d.address);
+        const label=r.method==='usdt'?'USDT':r.method==='vusdt'?'vUSDT (test)':r.method==='wise'?'Wise':'Bank';
+        if(r.method==='usdt'||r.method==='vusdt')return esc(label)+payAddrHtml(d.network,d.address);
         const info=r.method==='wise'?(d.email||'')
           :[d.holder,d.iban,d.swift,d.bank_name].filter(Boolean).join(' · ');
         return `${esc(label)}${info?`<div class="muted mono" style="font-size:var(--fs-cap);max-width:260px;word-break:break-all">${esc(info)}</div>`:''}`})()}</td>
@@ -1664,9 +1664,14 @@ function renderPayoutsView(){
             <button class="btn-o sm" onclick="revokeCert(${r.id})">Revoke</button>`
           :`<button class="btn-o sm" onclick="askCertLp(${r.id})">Generate</button>`}</td>
       <td class="rt-acts" style="text-align:right;white-space:nowrap">${r.kind==='request'&&r.status==='pending'
-        ?`<button class="btn-p sm" onclick="approvePayout(${r.id},this)">Approve &amp; pay</button>
-          <button class="btn-o sm" onclick="rejectPayout(${r.id},this)">Reject</button>`
-        :XBTN(`deletePayoutRow('${r.kind}',${r.id},${r.trader_share},'${jsq(r.account_login||'')}')`,
+        ?(r.method==='vusdt'
+          ?`<span class="muted" style="font-size:var(--fs-cap)" title="Paid automatically once the Polygon transfer confirms">Settles on-chain</span>`
+          :`<button class="btn-p sm" onclick="approvePayout(${r.id},this)">Approve &amp; pay</button>
+          <button class="btn-o sm" onclick="rejectPayout(${r.id},this)">Reject</button>`)
+        :(r.kind==='payout'&&r.method==='vusdt'
+          ?`<button class="btn-o sm" onclick="undoVusdtPayout(${r.id},${r.trader_share},'${jsq(r.account_login||'')}')"
+              title="Removes the payout and its request and puts the profit back on the account">Undo test payout</button> `:'')
+        +XBTN(`deletePayoutRow('${r.kind}',${r.id},${r.trader_share},'${jsq(r.account_login||'')}')`,
               r.kind==='payout'?'Delete payout':'Delete request')}</td></tr>`).join('')}
     </tbody></table></div>
     <p class="muted" style="font-size:11.5px;margin-top:10px">Approving pays the trader share and refunds the challenge fee on the first payout for that account.</p>`
@@ -5901,6 +5906,18 @@ function deletePayoutRow(kind,id,amount,login){
     +`The account balance stays as it is now. This cannot be undone.`,
     ()=>VIEWS.payouts(),
     r=>r.had_certificate?'Deleted. Its certificate is gone from the landing page too.':'Deleted.');
+}
+
+/* Testowa wypłata vUSDT: w przeciwieństwie do „Delete payout" oddaje zysk na
+   konto i kasuje wniosek, więc konto wraca do stanu sprzed testu. */
+async function undoVusdtPayout(id,amount,login){
+  if(!await askConfirm({title:`Undo the $${fmt(amount)} vUSDT test payout on ${esc(login)}?`,
+    body:'The payout and its request disappear and the profit goes back on the account. '
+      +'The tokens already sent stay on-chain (test token).',ok:'Undo payout',danger:true}))return;
+  try{const r=await api(`/api/admin/payouts/${id}/undo`,{method:'POST'});
+    toast(`Undone. ${r.balance_restored?`$${fmt(r.balance_restored)} back on the account.`:''}`,'ok');
+    VIEWS.payouts();
+  }catch(e){toast('Error: '+e.message,'err')}
 }
 
 function deleteAccountRow(id,login,trader){

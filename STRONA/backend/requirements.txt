@@ -40,3 +40,6 @@ pytest>=8.0
 # Wyciag z kont do Excela (app/statements.py). Czysty Python,
 # bez rozszerzen C — wchodzi do funkcji bezserwerowej bez budowania.
 openpyxl>=3.1
+
+# Testowe wypłaty vUSDT na Polygonie (app/vusdt.py) — podpis transakcji EIP-1559
+eth-account>=0.13

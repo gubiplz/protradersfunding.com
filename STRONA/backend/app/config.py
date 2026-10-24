@@ -461,6 +461,37 @@ class Settings:
     vapid_public_key: str = os.getenv("VAPID_PUBLIC_KEY", "")
     vapid_sub: str = os.getenv("VAPID_SUB", "")   # kontakt dla push service, np. mailto:...
 
+    # --- Częstotliwość wypłat ---
+    # Ile dni musi minąć od ostatniego wniosku (nieodrzuconego) albo wypłaty na
+    # koncie, zanim trader złoży następny. 0 = on demand (bez limitu).
+    payout_interval_days: int = int(os.getenv("PAYOUT_INTERVAL_DAYS", "0"))
+
+    # --- Testowe wypłaty w vUSDT (Polygon Mainnet) ---
+    # vUSDT to token TESTOWY bez wartości (kontrakt z ~/vusdt-faucet). Tryb służy
+    # wyłącznie do przećwiczenia ścieżki wypłaty na preview/lokalnie — na
+    # produkcji (VERCEL_ENV=production) nie włącza się nawet przy ustawionej fladze.
+    vusdt_test_payouts: bool = os.getenv("VUSDT_TEST_PAYOUTS", "false").lower() == "true"
+    vusdt_sender_private_key: str = os.getenv("VUSDT_SENDER_PRIVATE_KEY", "")
+    vusdt_token_address: str = os.getenv("VUSDT_TOKEN_ADDRESS",
+                                         "0x384D011E3775a2Da92A04fB84862cfaB3566CEb2")
+    # Pierwszy z listy jest główny, reszta to zapas (publiczne RPC padają bez ostrzeżenia).
+    polygon_rpc_urls: str = os.getenv(
+        "POLYGON_RPC_URLS",
+        "https://polygon-bor-rpc.publicnode.com,https://polygon.drpc.org,"
+        "https://1rpc.io/matic,https://polygon.gateway.tenderly.co")
+    vusdt_max_fee_gwei: float = float(os.getenv("VUSDT_MAX_FEE_GWEI", "500"))
+    vusdt_min_pol: float = float(os.getenv("VUSDT_MIN_POL", "0.05"))
+    turnstile_site_key: str = os.getenv("TURNSTILE_SITE_KEY", "")
+    turnstile_secret_key: str = os.getenv("TURNSTILE_SECRET_KEY", "")
+
+    @property
+    def vusdt_payouts_enabled(self) -> bool:
+        if os.getenv("VERCEL_ENV", "") == "production":
+            return False
+        return self.vusdt_test_payouts and bool(
+            self.vusdt_sender_private_key and self.vusdt_token_address
+            and self.turnstile_site_key and self.turnstile_secret_key)
+
     @property
     def push_enabled(self) -> bool:
         # PUSH_ENABLED=false to awaryjny wylacznik (testy, incydent) — normalnie

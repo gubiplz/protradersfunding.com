@@ -8,7 +8,7 @@ from __future__ import annotations
 import secrets
 from datetime import datetime, timezone
 
-from sqlalchemy import (Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text,
+from sqlalchemy import (BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text,
                         UniqueConstraint)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -655,6 +655,31 @@ class PayoutRequest(Base):
     reject_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     account: Mapped[Account] = relationship(back_populates="payout_requests")
+
+
+class VusdtTransfer(Base):
+    """Testowa wysyłka vUSDT (Polygon) do wniosku o wypłatę — patrz app/vusdt.py.
+
+    Jeden wiersz na wniosek (unikat na payout_request_id), więc powtórzony
+    request nie wyśle tokenów drugi raz. `nonce` trzymamy, bo publiczny RPC
+    potrafi spóźniać się z licznikiem `pending` — następny nonce to max(łańcuch,
+    nasz najwyższy + 1).
+    """
+    __tablename__ = "vusdt_transfers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    payout_request_id: Mapped[int] = mapped_column(ForeignKey("payout_requests.id", ondelete="CASCADE"),
+                                                   unique=True, index=True)
+    address: Mapped[str] = mapped_column(String(42))          # EIP-55
+    amount_units: Mapped[int] = mapped_column(BigInteger)     # 6 miejsc po przecinku
+    status: Mapped[str] = mapped_column(String(12), default="queued", index=True)  # queued|sent|confirmed|failed
+    tx_hash: Mapped[str | None] = mapped_column(String(66), nullable=True)
+    nonce: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    requeues: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class PoolAccount(Base):
