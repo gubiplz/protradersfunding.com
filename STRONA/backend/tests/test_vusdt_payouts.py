@@ -410,3 +410,24 @@ def test_certyfikat_vusdt_ma_monete_zamiast_dolara():
     assert "cert-coin" not in u and "$7,980" in u
     assert api["amount"] == "7,980" and api["amount_icon"] == "/static/img/vusdt.svg"
     assert ver.count("/static/img/vusdt.svg") == 2 and "$7,980" not in ver
+
+
+
+def test_pas_landingu_daje_monete_dla_vusdt():
+    """Pas „Recently issued" na landingu: wypłata vUSDT niesie ikonę monety,
+    stara wypłata w dolarach — nie. Bez tego miniatura pokazywałaby „$" przy
+    kwocie, której dokument pokazuje już monetę."""
+    import app.main as m
+    aid, _ = _funded()
+    db = SessionLocal()
+    db.add_all([Payout(account_id=aid, profit_amount=9975, trader_share=7980, paid=True,
+                       show_on_lp=True, method="vusdt", cert_token=f"lp-vusdt-{aid}"),
+                Payout(account_id=aid, profit_amount=9975, trader_share=6000, paid=True,
+                       show_on_lp=True, method="usdt", cert_token=f"lp-usdt-{aid}")])
+    db.commit(); db.close()
+    m._PUBLIC_CERTS_CACHE.update(ts=0.0, data=None)   # omiń 60 s cache
+    with TestClient(app) as c:
+        rows = c.get("/api/public/certificates/recent").json()
+    wg = {r["amount_usd"]: r for r in rows}
+    assert wg[7980]["coin"] == "/static/img/vusdt.svg"
+    assert wg[6000]["coin"] is None

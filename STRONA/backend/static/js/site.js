@@ -758,7 +758,9 @@
             <div class="cert-eyebrow"><s></s>${payout ? 'Payout' : esc(r.kind_label)}<s></s></div>
             <h3 class="cert-title">Certificate</h3>
             <div class="cert-amountlabel">${payout ? 'for the amount of' : 'Account size'}</div>
-            <div class="cert-amount">$${fmt(payout ? r.amount_usd : r.account_size)}</div>
+            <div class="cert-amount">${payout && r.coin
+              ? `<img class="cert-coin" src="${esc(r.coin)}" alt="vUSDT">${fmt(r.amount_usd)}`
+              : `$${fmt(payout ? r.amount_usd : r.account_size)}`}</div>
             <div class="cert-presented">presented to</div>
             <div class="cert-person">${esc(r.trader)}</div>
             <div class="cert-meta">${meta}</div>

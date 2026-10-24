@@ -9737,6 +9737,9 @@ def public_recent_certificates():
                 "kind_label": "Payout certificate",
                 "account_size": acc.initial_balance,
                 "amount_usd": int(round(pay.trader_share)),
+                # Wypłata w vUSDT: pas pokazuje monetę tokena zamiast „$", jak sam
+                # dokument. Reszta (stare wypłaty w dolarach) zostaje przy „$".
+                "coin": VUSDT_COIN if pay.method == "vusdt" else None,
                 "trader": _mask_name(tr.full_name),
                 "issued_at": pay.ts.isoformat() if pay.ts else None,
             })
