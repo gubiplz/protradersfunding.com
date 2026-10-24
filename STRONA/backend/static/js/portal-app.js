@@ -4491,7 +4491,7 @@ async function submitPayout(id){
   });
 }
 
-/* ---------- testowe wypłaty vUSDT (VUSDT_TEST, tylko preview) ----------
+/* ---------- testowe wypłaty vUSDT (VUSDT_TEST) ----------
    Submit działa jak „Send me vUSDT" w kraniku: serwer weryfikuje Turnstile,
    podpisuje transfer na Polygonie i oddaje hash; modal pokazuje Sending → Sent
    i dopytuje o potwierdzenie z łańcucha. Token Turnstile jest jednorazowy —
