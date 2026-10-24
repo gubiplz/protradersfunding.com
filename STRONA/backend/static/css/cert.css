@@ -151,7 +151,7 @@
 /* Moneta tokena zamiast „$" (wypłata w vUSDT). Wyraźnie niższa od cyfr, w osi ich wysokości,
    a cień to ta sama poświata co text-shadow kwoty — text-shadow obrazka nie obejmuje. */
 .cert-amount .cert-coin{
-  display:inline-block;width:.46em;height:.46em;margin:0 .1em 0 0;vertical-align:.12em;
+  display:inline-block;width:.53em;height:.53em;margin:0 .11em 0 0;vertical-align:.08em;
   filter:drop-shadow(0 0 .2em rgba(95,240,192,.45)) drop-shadow(0 .06em .12em rgba(0,0,0,.5));
 }
 .verify-coin{display:inline-flex;align-items:center;gap:6px}
