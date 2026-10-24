@@ -1646,7 +1646,7 @@ function renderPayoutsView(){
       <td data-l="Trader">${esc(r.trader_email||'—')}${freeChip(r)}</td>
       <td class="num" data-l="Profit">$${fmt(r.profit_amount)}</td><td class="num up" data-l="Share">$${fmt(r.trader_share)}</td>
       <td data-l="Method">${(()=>{const d=r.details||{};
-        const label=r.method==='usdt'?'USDT':r.method==='vusdt'?'vUSDT (test)':r.method==='wise'?'Wise':'Bank';
+        const label=r.method==='usdt'?'USDT':r.method==='vusdt'?'vUSDT':r.method==='wise'?'Wise':'Bank';
         if(r.method==='usdt'||r.method==='vusdt')return esc(label)+payAddrHtml(d.network,d.address);
         const info=r.method==='wise'?(d.email||'')
           :[d.holder,d.iban,d.swift,d.bank_name].filter(Boolean).join(' · ');
@@ -1670,7 +1670,7 @@ function renderPayoutsView(){
           <button class="btn-o sm" onclick="rejectPayout(${r.id},this)">Reject</button>`)
         :(r.kind==='payout'&&r.method==='vusdt'
           ?`<button class="btn-o sm" onclick="undoVusdtPayout(${r.id},${r.trader_share},'${jsq(r.account_login||'')}')"
-              title="Removes the payout and its request and puts the profit back on the account">Undo test payout</button> `:'')
+              title="Removes the payout and its request and puts the profit back on the account">Undo payout</button> `:'')
         +XBTN(`deletePayoutRow('${r.kind}',${r.id},${r.trader_share},'${jsq(r.account_login||'')}')`,
               r.kind==='payout'?'Delete payout':'Delete request')}</td></tr>`).join('')}
     </tbody></table></div>
@@ -5911,9 +5911,9 @@ function deletePayoutRow(kind,id,amount,login){
 /* Testowa wypłata vUSDT: w przeciwieństwie do „Delete payout" oddaje zysk na
    konto i kasuje wniosek, więc konto wraca do stanu sprzed testu. */
 async function undoVusdtPayout(id,amount,login){
-  if(!await askConfirm({title:`Undo the $${fmt(amount)} vUSDT test payout on ${esc(login)}?`,
+  if(!await askConfirm({title:`Undo the $${fmt(amount)} vUSDT payout on ${esc(login)}?`,
     body:'The payout and its request disappear and the profit goes back on the account. '
-      +'The tokens already sent stay on-chain (test token).',ok:'Undo payout',danger:true}))return;
+      +'The tokens already sent stay on-chain.',ok:'Undo payout',danger:true}))return;
   try{const r=await api(`/api/admin/payouts/${id}/undo`,{method:'POST'});
     toast(`Undone. ${r.balance_restored?`$${fmt(r.balance_restored)} back on the account.`:''}`,'ok');
     VIEWS.payouts();

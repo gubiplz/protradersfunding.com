@@ -4360,7 +4360,7 @@ async function makePayoutCert(id){
 }
 /* Payout request: amount + method + the details that method requires.
    The server validates the same rules again — the modal only saves an error round-trip. */
-function payoutMethodLabel(m){return m==='usdt'?'USDT (crypto)':m==='vusdt'?'vUSDT (test token)':m==='wise'?'Wise':'Bank transfer'}
+function payoutMethodLabel(m){return m==='usdt'?'USDT (crypto)':m==='vusdt'?'vUSDT':m==='wise'?'Wise':'Bank transfer'}
 /* Przycisk wypłaty albo licznik dni, jeśli konto jeszcze nie dorosło do pierwszej.
    Instant jest funded od pierwszego dnia, więc bez tego liczydła jedyną informacją
    o 30 dniach był błąd z API — dopiero po wypełnieniu całego wniosku. */
