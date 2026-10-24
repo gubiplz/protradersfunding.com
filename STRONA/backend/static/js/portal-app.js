@@ -4456,12 +4456,12 @@ function openPayoutDetails(reqId,avail,size){
       <b>Minimum payout: ${PO_MIN_PCT}% of your account size</b> — $${fmt(pct)} on this $${fmt0(size)} account.</div>`:''}
     ${v?`<div id="po-ts" class="po-ts"></div>`:''}
     <div style="display:flex;gap:10px;margin-top:14px">
-      <button class="btn-p" onclick="submitPayoutDetails(${reqId})" id="po-send">${v?`Send $${fmt0(max)} vUSDT`:`Request $${fmt0(max)}`}</button>
+      <button class="btn-p" onclick="submitPayoutDetails(${reqId})" id="po-send">${v?'Withdraw':`Request $${fmt0(max)}`}</button>
       <button class="btn-o" onclick="$('po-modal').remove()">Later</button>
     </div></div>`;
   document.body.appendChild(w);
-  $('po-amount').addEventListener('input',()=>{const n=parseInt($('po-amount').value||'0',10)||0;
-    $('po-send').textContent=n>0?(v?`Send $${fmt0(n)} vUSDT`:`Request $${fmt0(n)}`):(v?'Send vUSDT':'Request payout')});
+  if(!v)$('po-amount').addEventListener('input',()=>{const n=parseInt($('po-amount').value||'0',10)||0;
+    $('po-send').textContent=n>0?`Request $${fmt0(n)}`:'Request payout'});
   if(v)poTurnstile();
   setTimeout(()=>$('po-amount')?.focus(),50);
 }
