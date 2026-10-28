@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 535 205 290" fill="none">
+  <!-- Szewrony z lewego dolnego narożnika cert-motif.svg, łagodniej (opacity .5). -->
+  <defs>
+    <linearGradient id="chv" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#67d2ff"/>
+      <stop offset="1" stop-color="#1b4bd8"/>
+    </linearGradient>
+  </defs>
+  <g fill="url(#chv)" opacity=".5">
+    <path d="M60 640 L150 640 L110 720 L20 720 Z" fill-opacity=".075"/>
+    <path d="M105 735 L195 735 L155 815 L65 815 Z" fill-opacity=".05"/>
+    <path d="M20 545 L110 545 L70 625 L0 625 L0 585 Z" fill-opacity=".045"/>
+  </g>
+</svg>

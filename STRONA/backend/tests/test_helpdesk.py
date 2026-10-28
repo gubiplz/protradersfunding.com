@@ -248,9 +248,84 @@ def test_pisanie_w_panelu_przejmuje_rozmowe(klient, model, monkeypatch):
     assert r["taken_over"] is True and r["agent_typing"] is False
 
 
-def test_cli_tylko_lokalnie(monkeypatch):
+def test_cli_tylko_lokalnie_a_bez_klucza_silnik_faq(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     monkeypatch.setenv("HELPDESK_LOCAL_CLI", "1")
     monkeypatch.setenv("VERCEL", "1")
+    assert helpdesk.dostawca() == "faq"
+    monkeypatch.setenv("HELPDESK_ENGINE", "off")
     assert helpdesk.dostawca() is None
+
+
+# ---------------- silnik FAQ (bez API) ----------------
+@pytest.fixture
+def silnik_faq(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("HELPDESK_LOCAL_CLI", raising=False)
+    monkeypatch.delenv("HELPDESK_ENGINE", raising=False)
+    assert helpdesk.dostawca() == "faq"
+    from app import catalog
+    s = SessionLocal()
+    try:
+        catalog.seed_products(s)
+    finally:
+        s.close()
+
+
+def test_faq_odpowiada_bez_api(klient, silnik_faq):
+    h, _ = klient
+    chat = _wyslij(h, "How is the daily loss limit calculated?")
+    assert chat["status"] == "bot"
+    assert "equity at the start of the trading day" in chat["thread"][-1]["body"]
+    assert chat["title"] == "How is the daily loss limit calculated?"
+    chat = _wyslij(h, "Where do I upload my passport?", chat["id"])
+    assert "Open KYC in the menu" in chat["thread"][-1]["body"]
+
+
+def test_faq_liczby_planu_z_katalogu(klient, silnik_faq):
+    h, _ = klient
+    s = SessionLocal()
+    try:
+        from app.models import Product
+        p = s.query(Product).filter(Product.account_size == 25000, Product.steps >= 2, Product.active).first()
+    finally:
+        s.close()
+    chat = _wyslij(h, "What is the max daily loss on the 25k 2-step?")
+    assert f"max daily loss {p.max_daily_loss_pct:g}%" in chat["thread"][-1]["body"]
+
+
+def test_faq_bez_trafienia_najpierw_dopytuje_potem_czlowiek(klient, silnik_faq):
+    h, _ = klient
+    chat = _wyslij(h, "What leverage do you offer?")
+    assert chat["status"] == "bot" and chat["thread"][-1]["body"].startswith(helpdesk.NIE_WIEM)
+    assert chat["offer_human"] is True   # asystent nie pomógł — przycisk się pojawia
+    chat = _wyslij(h, "Leverage for indices please", chat["id"])
+    assert chat["status"] == "open"
+    pelny = client.get(f"/api/admin/tickets/{chat['id']}", headers=ADMIN).json()
+    assert any("No help-article match" in m["body"] for m in pelny["thread"] if m["author"] == "ai_note")
+
+
+def test_przycisk_czlowiek_dopiero_pozniej(klient, silnik_faq, monkeypatch):
+    from app import main as m
+    h, _ = klient
+    chat = _wyslij(h, "How do I change my password?")
+    assert chat["offer_human"] is False          # pierwsza odpowiedź trafiona — bez przycisku
+    chat = _wyslij(h, "Can I use an EA?", chat["id"])
+    assert chat["offer_human"] is False
+    chat = _wyslij(h, "What counts as a trading day?", chat["id"])
+    assert chat["offer_human"] is True           # trzecia wiadomość tradera
+    # Po 2 minutach od początku rozmowy — też.
+    drugi = _wyslij(h, "Can I run multiple challenges at once?")
+    assert drugi["offer_human"] is False
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    przyszlosc = _dt.now(_tz.utc) + _td(minutes=3)
+
+    class _Zegar(_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return przyszlosc if tz else przyszlosc.replace(tzinfo=None)
+
+    monkeypatch.setattr(m, "datetime", _Zegar)
+    assert client.get(f"/api/me/chat/{drugi['id']}", headers=h).json()["chat"]["offer_human"] is True

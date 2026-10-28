@@ -214,7 +214,10 @@
         }).join('') + '</div>' : '');
 
     var akcje = '', zamknieta = CHAT && CHAT.status === 'closed';
-    if (CHAT && CHAT.mode === 'assistant' && thread.length && !CZEKA)
+    // „Talk to a person" dopiero gdy asystent nie pomógł, po kilku wiadomościach
+    // albo po chwili rozmowy (serwer: offer_human; czas liczymy też tu, bez czekania na poll).
+    var poChwili = CHAT && CHAT.created_at && Date.now() - utc(CHAT.created_at) >= 120000;
+    if (CHAT && CHAT.mode === 'assistant' && thread.length && !CZEKA && (CHAT.offer_human || poChwili))
       akcje = '<button type="button" class="hd-link" onclick="hdHuman()">Didn\'t help? Talk to a person</button>';
     else if (CHAT && CHAT.status === 'open')
       akcje = '<span class="hd-note">Passed to our support team — they\'ll reply here and by email.</span>';

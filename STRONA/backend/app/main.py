@@ -3265,13 +3265,41 @@ def _czat_dict(session, t: SupportTicket) -> dict:
     pisze = _czat_pisanie(session, [t.id]).get(t.id)
     d["taken_over"] = pisze is not None or any(m["author"] == "admin" for m in d["thread"])
     d["agent_typing"] = pisze is not None and time.time() - pisze < PISZE_S and t.status != "closed"
+    d["offer_human"] = _czat_proponuj_czlowieka(t, d["thread"])
     return {"chat": d, **_czat_meta(session)}
+
+
+CHAT_CZLOWIEK_PO_WIAD = 3        # „Talk to a person" po tylu wiadomościach tradera…
+CHAT_CZLOWIEK_PO_S = 2 * 60      # …albo po tylu sekundach od początku rozmowy
+
+
+def _czat_proponuj_czlowieka(t: SupportTicket, thread: list[dict]) -> bool:
+    """Przycisk „Talk to a person" nie wisi od pierwszej sekundy: asystent ma
+    najpierw spróbować. Pokazujemy go, gdy asystent nie znalazł odpowiedzi,
+    po kilku wiadomościach tradera albo po chwili rozmowy."""
+    if t.status != "bot":
+        return False
+    trader = [m for m in thread if m["author"] == "trader"]
+    if not trader:
+        return False
+    ost_ai = next((m["body"] for m in reversed(thread) if m["author"] == "ai"), "")
+    if ost_ai.startswith(helpdesk.NIE_WIEM) or len(trader) >= CHAT_CZLOWIEK_PO_WIAD:
+        return True
+    # Świeżo utworzony ticket ma strefę (UTC), odczytany z bazy — już nie.
+    start = t.created_at.replace(tzinfo=None) if t.created_at.tzinfo else t.created_at
+    return (datetime.now(timezone.utc).replace(tzinfo=None) - start).total_seconds() >= CHAT_CZLOWIEK_PO_S
 
 
 def _czat_prompt(session) -> str:
     plany = helpdesk.zasady_planow(session.query(Product).all())
     return helpdesk.prompt_systemowy(settings.site_name, settings.support_email,
                                      str(TEMPLATES / "faq.html"), plany)
+
+
+def _czat_wiedza(session):
+    """Baza silnika FAQ (FAQ + przewodnik po portalu) i aktualne plany z katalogu."""
+    return (helpdesk.baza(settings.site_name, settings.support_email, str(TEMPLATES / "faq.html")),
+            session.query(Product).all())
 
 
 def _czat_przekaz(session, t: SupportTicket, trader: Trader, subject: str, summary: str,
@@ -3363,7 +3391,7 @@ def chat_send(payload: ChatIn, trader: Trader = Depends(auth.current_trader)):
             return _czat_dict(session, t)
 
         thread = _ticket_dict(session, t, with_thread=True, for_trader=True)["thread"]
-        wynik = helpdesk.odpowiedz(thread, _czat_prompt(session))
+        wynik = helpdesk.odpowiedz(thread, lambda: _czat_prompt(session), lambda: _czat_wiedza(session))
         session.add(TicketMessage(ticket_id=t.id, author="ai", body=wynik["reply"]))
         # Pierwsza odpowiedź asystenta nadaje rozmowie tytuł na liście („MT5 login on mobile").
         if t.subject.startswith("Chat: ") and wynik["subject"]:

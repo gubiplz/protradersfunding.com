@@ -31,7 +31,7 @@ html[data-theme=dark]{
   /* zasłona w kolorze płyty nad rombami: zostaje ok. 1/5 ich widoczności */
   --ct-veil:linear-gradient(rgba(8,14,32,.8),rgba(8,14,32,.8));
   --ct-eyebrow:#67d2ff;
-  --ct-dot:rgba(140,180,255,.07);
+  --ct-dot:rgba(140,180,255,.10);
   /* romby certyfikatu tylko na płycie i tylko w ciemnym (rysowane pod granat) */
   --ct-plate-motif:url('/static/img/cert-motif.svg') center bottom/102% auto no-repeat;
   --bg:#050914; --bg2:#070d1e; --bg3:#101b38;
@@ -49,11 +49,11 @@ html[data-theme=dark]{
   --lg-sheen:linear-gradient(150deg,rgba(150,200,255,.08) 0%,rgba(150,200,255,0) 40%);
   --lg-bar:rgba(5,9,20,.55);
   --lg-bar-solid:rgba(5,9,20,.96);
-  /* stonowane: poświata u góry i w rogu o ok. 40% słabsza niż na certyfikacie */
+  /* stonowane: poświata u góry i w rogu ok. 20% słabsza niż na certyfikacie */
   --lg-light:
-    radial-gradient(62% 44% at 50% 0%,rgba(43,139,255,.14),transparent 64%),
-    radial-gradient(70% 55% at 50% 0%,#0b1631 0%,transparent 72%),
-    radial-gradient(40vw 40vw at 100% 100%,rgba(43,139,255,.06),transparent 65%),
+    radial-gradient(62% 44% at 50% 0%,rgba(43,139,255,.19),transparent 64%),
+    radial-gradient(70% 55% at 50% 0%,#0c1834 0%,transparent 72%),
+    radial-gradient(40vw 40vw at 100% 100%,rgba(43,139,255,.08),transparent 65%),
     linear-gradient(168deg,#0b142c 0%,#070d1e 52%,#050914 100%);
   --pb-nav-on:linear-gradient(90deg,rgba(43,139,255,.3),rgba(43,139,255,0) 88%);
   --pb-neon-glow:rgba(103,210,255,.8);
@@ -64,7 +64,13 @@ html[data-theme=dark]{
    Romby i grawerunek certyfikatu NIE idą na całe tło — rozciągnięte na ekran
    i przycięte jego krawędzią wyglądały tanio; zostają na „płycie" (niżej).
    Obie warstwy nieruchome: rysują się raz, scroll ich nie przemalowuje. */
-html::before{background:var(--lg-light)}
+/* Romby certyfikatu jako ledwo widoczny wzorek w dwóch rogach ekranu — każdy
+   w całości (nie przycięty krawędzią), krycie o połowę niższe niż na certyfikacie.
+   Na jasnym tle te same pliki wychodzą jeszcze bladziej (ok. 3–6% krycia). */
+html::before{background:
+  url('/static/img/motif-tr.svg') right 2vw top 96px/min(26vw,300px) auto no-repeat,
+  url('/static/img/motif-bl.svg') left 1.5vw bottom 3vh/min(20vw,230px) auto no-repeat,
+  var(--lg-light)}
 html::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   background:radial-gradient(circle at 1px 1px,var(--ct-dot) 1px,transparent 1.5px) 0 0/28px 28px;
   -webkit-mask-image:radial-gradient(85% 60% at 50% 0%,#000 0%,rgba(0,0,0,.35) 45%,transparent 80%);
