@@ -1,22 +1,40 @@
 /* Dymek pomocy w prawym dolnym rogu portalu (zastępuje zakładkę Support).
  *
- * Najpierw odpowiada asystent AI (FAQ, platforma, zasady), a gdy nie pomoże —
- * albo temat dotyczy pieniędzy, wyniku konta czy reklamacji — rozmowa idzie do
- * zespołu i dalej odpisuje człowiek, w tym samym okienku. Logika i granice są
- * na serwerze (app/helpdesk.py, /api/me/chat*); tu tylko widok.
+ * Jak komunikator: lista rozmów (tytuł, podgląd, godzina, status, nieprzeczytane)
+ * i widok jednej rozmowy ze strzałką wstecz. W rozmowie najpierw odpowiada
+ * asystent AI (FAQ, platforma, zasady); gdy nie pomoże — albo temat dotyczy
+ * pieniędzy, wyniku konta czy reklamacji — rozmowa idzie do zespołu i dalej
+ * odpisuje człowiek w tym samym okienku. Logika i granice są na serwerze
+ * (app/helpdesk.py, /api/me/chat*); tu tylko widok.
  *
  * Korzysta z globali portal-app.js (ME, H) i chat-kit.js (chatHtml, chatCompose).
  * Własny fetch zamiast api(): odpowiedź modelu bywa dłuższa niż 15 s limitu api().
  */
 (function () {
   'use strict';
-  var CHAT = null, ASSIST = true, OTWARTY = false, CZEKA = false, TIMER = null;
+  var WIDOK = 'list', LISTA = [], CHAT = null, ASSIST = true, OTWARTY = false, CZEKA = false, TIMER = null;
   var AGENT = { name: 'Support', team: 'Support team', online: false };
-  var KLUCZ_WIDZIANE = 'pf_hd_seen';
+  var KLUCZ_WIDZIANE = 'pf_hd_seen2';
+  var NAZWA_AI = 'PTF AI Assistant';   // „AI" w nazwie: trader wie, że to nie człowiek
+  /* Gotowe pytania w nowej rozmowie — tylko tematy, na które asystent odpowiada
+     sam (FAQ, platforma, zasady). Klik wysyła pytanie od razu. */
+  var PYTANIA = [
+    'How do I log in to MT5?',
+    'How is the daily loss limit calculated?',
+    'Can I hold trades over the weekend or trade news?',
+    'What counts as a trading day?',
+    'How does KYC verification work?',
+    'Can I run multiple challenges at once?',
+  ];
   var esc = function (s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
+  };
+  // Baza zapisuje nagie UTC (bez strefy) — tak jak w chat-kit.js.
+  var utc = function (iso) {
+    var s = String(iso || '').replace(' ', 'T');
+    return new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : s + 'Z');
   };
   var zalogowany = function () { return typeof ME !== 'undefined' && !!ME; };
 
@@ -27,6 +45,10 @@
       if (!r.ok) throw new Error((await r.json().catch(function () { return {}; })).detail || r.status);
       return await r.json();
     } finally { clearTimeout(tm); }
+  }
+  function meta(r) {
+    if ('assistant' in r) ASSIST = r.assistant;
+    if (r.agent) AGENT = r.agent;
   }
 
   var IKONA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"'
@@ -39,6 +61,10 @@
     + '<circle cx="12" cy="8.5" r="3.5"/></svg>';
   var ZAMKNIJ = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">'
     + '<path d="M6 6l12 12M18 6L6 18"/></svg>';
+  var WSTECZ = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"'
+    + ' stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>';
+  var PLUS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">'
+    + '<path d="M12 5v14M5 12h14"/></svg>';
 
   function zbuduj() {
     if (document.getElementById('hd-fab')) return;
@@ -50,7 +76,9 @@
     var p = document.createElement('section');
     p.id = 'hd-panel'; p.className = 'hd-panel'; p.setAttribute('role', 'dialog');
     p.setAttribute('aria-label', 'Support chat'); p.hidden = true;
-    p.innerHTML = '<header class="hd-head"><div class="hd-av" id="hd-av"></div>'
+    p.innerHTML = '<header class="hd-head">'
+      + '<button type="button" class="hd-back" id="hd-back" aria-label="All conversations" onclick="hdList()">'
+      + WSTECZ + '</button><div class="hd-av" id="hd-av"></div>'
       + '<div class="hd-ttl"><b id="hd-name"></b><span id="hd-sub"></span></div>'
       + '<button type="button" class="hd-x" aria-label="Close" onclick="hdClose()">' + ZAMKNIJ + '</button></header>'
       + '<div class="hd-body" id="hd-body"></div><div class="hd-foot" id="hd-foot"></div>';
@@ -58,60 +86,141 @@
     document.body.appendChild(p);
   }
 
+  /* ---------- nieprzeczytane: odpowiedź zespołu, której trader nie otworzył ---------- */
+  function widziane() {
+    try { return JSON.parse(localStorage.getItem(KLUCZ_WIDZIANE) || '{}'); } catch (e) { return {}; }
+  }
+  function nieprzeczytana(c) {
+    return !!(c.last && c.last.author === 'admin' && c.last.ts > (widziane()[c.id] || ''));
+  }
+  function oznaczWidziane(c) {
+    if (!c || !c.thread || !c.thread.length) return;
+    var w = widziane();
+    w[c.id] = c.thread[c.thread.length - 1].ts;
+    try { localStorage.setItem(KLUCZ_WIDZIANE, JSON.stringify(w)); } catch (e) { /* tryb prywatny */ }
+  }
+  function kropka() {
+    var d = document.querySelector('#hd-fab .hd-dot');
+    if (d) d.classList.toggle('hidden', OTWARTY || !LISTA.some(nieprzeczytana));
+  }
+
+  /* ---------- nagłówek: z kim trader rozmawia ----------
+     Lista: „Messages". Rozmowa: asystent AI, kolejka zespołu (przekazane, nikt
+     jeszcze nie odpisał) albo konsultant, który przejął rozmowę. Kropka
+     „online" = ktoś z zespołu jest teraz w panelu (serwer: aktywność < 5 min). */
+  function awatar(el, rodzaj, maly) {
+    // Obecność pokazujemy tylko przy konsultancie, który przejął rozmowę.
+    var on = AGENT.online && rodzaj === 'person' ? '<span class="hd-online" title="Online"></span>' : '';
+    el.className = 'hd-av ' + rodzaj + (maly ? ' sm' : '');
+    el.innerHTML = rodzaj === 'ai' ? ISKRA
+      : rodzaj === 'person' ? esc((AGENT.name || 'S').charAt(0).toUpperCase()) + on
+        : rodzaj === 'team' ? ZESPOL + on : IKONA;
+  }
+  function rodzajRozmowy(c) {
+    if (!c || (c.mode === 'assistant' && ASSIST)) return 'ai';
+    return c.taken_over ? 'person' : 'team';
+  }
+  function naglowek() {
+    var av = document.getElementById('hd-av'), name = document.getElementById('hd-name'),
+      sub = document.getElementById('hd-sub');
+    document.getElementById('hd-back').hidden = WIDOK === 'list' || (!LISTA.length && !CHAT);
+    document.getElementById('hd-panel').classList.toggle('list', WIDOK === 'list');
+    av.hidden = WIDOK === 'list';
+    if (WIDOK === 'list') {
+      // Lista jak w komunikatorze: sam tytuł, bez awatara i bez statusu zespołu.
+      name.textContent = 'Messages';
+      sub.textContent = NAZWA_AI + ' and ' + AGENT.team;
+      return;
+    }
+    var rodzaj = rodzajRozmowy(CHAT);
+    awatar(av, rodzaj);
+    if (rodzaj === 'ai') {
+      name.textContent = NAZWA_AI;
+      sub.textContent = 'Replies instantly';
+    } else if (rodzaj === 'person') {
+      name.textContent = AGENT.name;
+      sub.innerHTML = esc(AGENT.team) + (AGENT.online ? ' · <span class="hd-on">Online</span>' : ' · replies here');
+    } else {
+      name.textContent = AGENT.team;
+      sub.textContent = 'A person will reply here and by email';
+    }
+  }
+
+  /* ---------- lista rozmów ---------- */
+  function kiedy(iso) {
+    var d = utc(iso), teraz = new Date();
+    if (d.toDateString() === teraz.toDateString())
+      return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    if (d.toDateString() === new Date(teraz - 864e5).toDateString()) return 'Yesterday';
+    if (teraz - d < 6 * 864e5) return d.toLocaleDateString('en-US', { weekday: 'short' });
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+  // Pigułka tylko tam, gdzie coś mówi: kto rozmawia, pokazuje już awatar.
+  var STATUS = { open: ['Waiting', 'st-wait'], closed: ['Closed', 'st-closed'] };
+  function wpis(c) {
+    var kto = !c.last ? '' : c.last.author === 'trader' ? 'You: '
+      : c.last.author === 'admin' ? AGENT.name + ': ' : 'AI: ';
+    var st = STATUS[c.status], nowe = nieprzeczytana(c);
+    var av = document.createElement('div');
+    awatar(av, rodzajRozmowy(c), true);
+    return '<button type="button" class="hd-item' + (nowe ? ' unread' : '') + '" onclick="hdOpen(' + c.id + ')">'
+      + av.outerHTML
+      + '<div class="hd-it"><div class="hd-it-top"><b>' + esc(c.title || 'Conversation') + '</b>'
+      + '<time>' + kiedy(c.last_ts) + '</time></div>'
+      + '<div class="hd-it-bot"><span class="hd-prev">' + esc(kto + (c.last ? c.last.body : '')) + '</span>'
+      + (nowe ? '<span class="hd-new"></span>' : st ? '<span class="hd-pill ' + st[1] + '">' + st[0] + '</span>' : '')
+      + '</div></div></button>';
+  }
+  function rysujListe() {
+    var body = document.getElementById('hd-body'), foot = document.getElementById('hd-foot');
+    body.innerHTML = LISTA.length
+      ? '<div class="hd-list">' + LISTA.map(wpis).join('') + '</div>'
+      : '<div class="hd-empty">No conversations yet.<br>Ask the AI assistant anything about getting started, MT5 or the rules.</div>';
+    body.scrollTop = 0;
+    body.dataset.chat = '';
+    foot.innerHTML = '<button type="button" class="hd-new-btn" onclick="hdNewChat()">' + PLUS + 'New conversation</button>';
+  }
+
+  /* ---------- jedna rozmowa ---------- */
   function powitanie() {
     var imie = (ME && (ME.first_name || (ME.full_name || '').split(' ')[0])) || '';
     var tekst = ASSIST
-      ? 'Hi' + (imie ? ' ' + imie : '') + ", I'm the AI assistant. I can help with getting started, MT5, the "
+      ? 'Hi' + (imie ? ' ' + imie : '') + ", I'm the PTF AI Assistant. I can help with getting started, MT5, the "
         + 'trading rules and the portal. Questions about payouts, refunds or your account results go '
         + 'straight to our team.'
       : 'Hi' + (imie ? ' ' + imie : '') + '! Send us your question and our support team will reply here.';
     return '<div class="chat"><div class="chat-row them first last by-ai"><div class="chat-who">'
-      + (ASSIST ? 'AI assistant' : 'Support team') + '</div><div class="bub">' + esc(tekst) + '</div></div></div>';
+      + (ASSIST ? NAZWA_AI : 'Support team') + '</div><div class="bub">' + esc(tekst) + '</div></div></div>';
   }
-
-  /* Nagłówek mówi, z kim trader rozmawia: z asystentem AI, z kolejką zespołu
-     (sprawa przekazana, nikt jeszcze nie odpisał) albo z konsultantem, który
-     przejął rozmowę. Kropka „online" = ktoś z zespołu jest teraz w panelu
-     (serwer: ostatnia aktywność panelu < 5 min), nie ozdobnik. */
-  function naglowek() {
-    var tryb = CHAT ? CHAT.mode : 'assistant', przejal = !!(CHAT && CHAT.taken_over);
-    var av = document.getElementById('hd-av'), name = document.getElementById('hd-name'),
-      sub = document.getElementById('hd-sub');
-    var kropka = AGENT.online ? '<span class="hd-online" title="Online"></span>' : '';
-    if (tryb === 'assistant' && ASSIST) {
-      av.className = 'hd-av ai'; av.innerHTML = ISKRA;
-      name.innerHTML = 'AI assistant <span class="hd-badge">AI</span>';
-      sub.textContent = 'Automated help · answers right away';
-    } else if (przejal) {
-      av.className = 'hd-av person'; av.innerHTML = esc((AGENT.name || 'S').charAt(0).toUpperCase()) + kropka;
-      name.textContent = AGENT.name;
-      sub.innerHTML = esc(AGENT.team) + (AGENT.online ? ' · <span class="hd-on">Online</span>' : ' · replies here');
-    } else {
-      av.className = 'hd-av team'; av.innerHTML = ZESPOL + kropka;
-      name.textContent = AGENT.team;
-      sub.textContent = AGENT.online ? 'Online · a person will reply here'
-        : 'A person will reply here and by email';
-    }
-  }
-
-  function rysuj() {
+  function rysujRozmowe() {
     var body = document.getElementById('hd-body'), foot = document.getElementById('hd-foot');
-    if (!body) return;
-    naglowek();
     var thread = (CHAT && CHAT.thread) || [];
+    // Na dół: przy wejściu w rozmowę albo gdy trader już był przy końcu. Ktoś, kto
+    // czyta starsze wiadomości, nie zostaje ściągnięty w dół przez odświeżenie.
+    var klucz = String((CHAT && CHAT.id) || 'new');
+    var naDol = body.dataset.chat !== klucz || body.scrollHeight - body.scrollTop - body.clientHeight < 80;
+    body.dataset.chat = klucz;
     body.innerHTML = powitanie() + (thread.length
-      ? chatHtml(thread, { me: 'trader', names: { ai: 'AI assistant', admin: AGENT.name + ' · ' + AGENT.team } })
+      ? chatHtml(thread, { me: 'trader', names: { ai: NAZWA_AI, admin: AGENT.name + ' · ' + AGENT.team } })
       : '')
-      + (CZEKA ? '<div class="hd-typing" aria-label="Assistant is typing"><i></i><i></i><i></i></div>' : '');
-    body.scrollTop = body.scrollHeight;
+      + (CZEKA ? '<div class="hd-typing" aria-label="Assistant is typing"><i></i><i></i><i></i></div>' : '')
+      + (!CZEKA && CHAT && CHAT.agent_typing
+        ? '<div class="hd-typing-who">' + esc(AGENT.name) + ' is typing…</div>'
+          + '<div class="hd-typing" aria-hidden="true"><i></i><i></i><i></i></div>' : '')
+      // Pusta rozmowa z asystentem: gotowe pytania do kliknięcia.
+      + (!thread.length && ASSIST && !CZEKA
+        ? '<div class="hd-sugg"><span>Popular questions</span>' + PYTANIA.map(function (q, i) {
+          return '<button type="button" class="hd-chip" onclick="hdAsk(' + i + ')">' + esc(q) + '</button>';
+        }).join('') + '</div>' : '');
 
-    var akcje = '';
+    var akcje = '', zamknieta = CHAT && CHAT.status === 'closed';
     if (CHAT && CHAT.mode === 'assistant' && thread.length && !CZEKA)
       akcje = '<button type="button" class="hd-link" onclick="hdHuman()">Didn\'t help? Talk to a person</button>';
     else if (CHAT && CHAT.status === 'open')
       akcje = '<span class="hd-note">Passed to our support team — they\'ll reply here and by email.</span>';
-    else if (CHAT && CHAT.status === 'answered')
-      akcje = '<button type="button" class="hd-link" onclick="hdNew()">Start a new conversation</button>';
+    else if (zamknieta)
+      akcje = '<span class="hd-note">This conversation is closed.</span> '
+        + '<button type="button" class="hd-link" onclick="hdNewChat()">Start a new one</button>';
     // Pole pisania przerysowane tylko gdy go nie ma — inaczej poll kasowałby wpisywany tekst.
     var ak = foot.querySelector('.hd-acts');
     if (!ak) {
@@ -120,40 +229,45 @@
       ak = foot.querySelector('.hd-acts');
     }
     ak.innerHTML = akcje;
+    var komp = foot.querySelector('.chat-compose');
+    if (komp) komp.hidden = !!zamknieta;
     var inp = document.getElementById('hd-inp');
     if (inp) inp.disabled = CZEKA;
+    // Dopiero teraz: pole pisania pod spodem zmienia wysokość okna rozmowy.
+    // Pusta rozmowa zostaje u góry — powitanie i pytania czyta się od początku.
+    if (!thread.length && !CZEKA) body.scrollTop = 0;
+    else if (naDol) body.scrollTop = body.scrollHeight;
   }
 
-  function nieprzeczytane() {
-    if (!CHAT || !CHAT.thread || !CHAT.thread.length) return false;
-    var ost = CHAT.thread[CHAT.thread.length - 1];
-    var widziane = '';
-    try { widziane = localStorage.getItem(KLUCZ_WIDZIANE) || ''; } catch (e) { /* tryb prywatny */ }
-    return ost.author === 'admin' && ost.ts > widziane;
-  }
-  function oznaczWidziane() {
-    if (!CHAT || !CHAT.thread || !CHAT.thread.length) return;
-    try { localStorage.setItem(KLUCZ_WIDZIANE, CHAT.thread[CHAT.thread.length - 1].ts); } catch (e) { /* j.w. */ }
-  }
-  function kropka() {
-    var d = document.querySelector('#hd-fab .hd-dot');
-    if (d) d.classList.toggle('hidden', OTWARTY || !nieprzeczytane());
+  function rysuj() {
+    if (!document.getElementById('hd-body')) return;
+    naglowek();
+    if (WIDOK === 'list') rysujListe(); else rysujRozmowe();
   }
 
+  /* ---------- dane ---------- */
+  async function pobierzListe() {
+    var r = await zapytaj('/api/me/chats');
+    LISTA = r.chats; meta(r);
+  }
   async function odswiez() {
     if (!zalogowany() || CZEKA) return;
     try {
-      var r = await zapytaj('/api/me/chat');
-      CHAT = r.chat; ASSIST = r.assistant; AGENT = r.agent || AGENT;
-      if (OTWARTY) { rysuj(); oznaczWidziane(); }
+      await pobierzListe();
+      if (WIDOK === 'chat' && CHAT && CHAT.id) {
+        var r = await zapytaj('/api/me/chat/' + CHAT.id);
+        CHAT = r.chat; meta(r);
+        if (OTWARTY) oznaczWidziane(CHAT);
+      }
+      if (OTWARTY) rysuj();
       kropka();
     } catch (e) { /* cicho: następny cykl spróbuje znowu */ }
   }
-
   function planuj() {
     clearTimeout(TIMER);
-    // Gdy rozmowa czeka na zespół i okno jest otwarte — częściej; w tle rzadko.
-    var ms = OTWARTY && CHAT && CHAT.mode === 'team' ? 15000 : 45000;
+    // Rozmowa czekająca na zespół w otwartym oknie — częściej; w tle rzadko.
+    // 5 s, żeby „is typing…" konsultanta i jego odpowiedź pojawiały się na bieżąco.
+    var ms = OTWARTY && WIDOK === 'chat' && CHAT && CHAT.mode === 'team' && CHAT.status !== 'closed' ? 5000 : 45000;
     TIMER = setTimeout(async function () {
       if (document.visibilityState === 'visible') await odswiez();
       planuj();
@@ -167,11 +281,15 @@
     p.hidden = false;
     requestAnimationFrame(function () { p.classList.add('open'); });
     document.getElementById('hd-fab').classList.add('on');
-    rysuj();
-    await odswiez();
-    oznaczWidziane(); kropka(); planuj();
+    try { await pobierzListe(); } catch (e) { /* pokaże pustą listę */ }
+    // Bez rozmów od razu nowa; z rozmowami — lista, jak w komunikatorze.
+    if (!LISTA.length) { WIDOK = 'chat'; CHAT = null; } else if (!CHAT) { WIDOK = 'list'; }
+    rysuj(); kropka(); planuj();
+    fokus();
+  }
+  function fokus() {
     var inp = document.getElementById('hd-inp');
-    if (inp && matchMedia('(hover: hover) and (pointer: fine)').matches) inp.focus();
+    if (WIDOK === 'chat' && inp && matchMedia('(hover: hover) and (pointer: fine)').matches) inp.focus();
   }
   function zamknij() {
     OTWARTY = false;
@@ -180,7 +298,27 @@
     p.classList.remove('open');
     setTimeout(function () { if (!OTWARTY) p.hidden = true; }, 220);
     document.getElementById('hd-fab').classList.remove('on');
+    kropka(); planuj();
+  }
+  async function otworzRozmowe(id) {
+    try {
+      var r = await zapytaj('/api/me/chat/' + id);
+      CHAT = r.chat; meta(r); WIDOK = 'chat';
+      oznaczWidziane(CHAT);
+      document.getElementById('hd-foot').innerHTML = '';
+      rysuj(); kropka(); planuj(); fokus();
+    } catch (e) { if (typeof toast === 'function') toast('Error: ' + e.message, 'err'); }
+  }
+  async function doListy() {
+    WIDOK = 'list'; CHAT = null;
+    rysuj();
+    await odswiez();
     planuj();
+  }
+  function nowaRozmowa() {
+    WIDOK = 'chat'; CHAT = null;
+    document.getElementById('hd-foot').innerHTML = '';
+    rysuj(); fokus();
   }
 
   async function wyslij() {
@@ -188,33 +326,29 @@
     var tekst = inp && inp.value.trim();
     if (!tekst || CZEKA) return;
     inp.value = ''; inp.dispatchEvent(new Event('input', { bubbles: true }));
+    var id = CHAT && CHAT.id;
     // Wiadomość widać od razu; odpowiedź asystenta dochodzi po chwili.
     CHAT = CHAT || { mode: 'assistant', status: 'bot', thread: [] };
     CHAT.thread = (CHAT.thread || []).concat([{ author: 'trader', body: tekst, ts: new Date().toISOString() }]);
     CZEKA = CHAT.mode === 'assistant';
     rysuj();
     try {
-      var r = await zapytaj('/api/me/chat', { method: 'POST', body: JSON.stringify({ message: tekst }) });
-      CHAT = r.chat; ASSIST = r.assistant; AGENT = r.agent || AGENT;
+      var r = await zapytaj('/api/me/chat', { method: 'POST', body: JSON.stringify({ message: tekst, chat_id: id || null }) });
+      CHAT = r.chat; meta(r);
     } catch (e) {
       if (typeof toast === 'function') toast('Message not sent: ' + e.message, 'err');
       CHAT.thread.pop();
       if (inp) inp.value = tekst;
     } finally {
-      CZEKA = false; rysuj(); oznaczWidziane(); planuj();
+      CZEKA = false; rysuj(); oznaczWidziane(CHAT); planuj();
+      pobierzListe().then(kropka).catch(function () {});
     }
   }
-
   async function czlowiek() {
+    if (!CHAT || !CHAT.id) return;
     try {
-      var r = await zapytaj('/api/me/chat/human', { method: 'POST' });
-      CHAT = r.chat; AGENT = r.agent || AGENT; rysuj(); planuj();
-    } catch (e) { if (typeof toast === 'function') toast('Error: ' + e.message, 'err'); }
-  }
-  async function nowa() {
-    try {
-      var r = await zapytaj('/api/me/chat/new', { method: 'POST' });
-      CHAT = r.chat; ASSIST = r.assistant; AGENT = r.agent || AGENT; rysuj();
+      var r = await zapytaj('/api/me/chat/' + CHAT.id + '/human', { method: 'POST' });
+      CHAT = r.chat; meta(r); rysuj(); planuj();
     } catch (e) { if (typeof toast === 'function') toast('Error: ' + e.message, 'err'); }
   }
 
@@ -222,7 +356,15 @@
   window.hdClose = zamknij;
   window.hdSend = wyslij;
   window.hdHuman = czlowiek;
-  window.hdNew = nowa;
+  window.hdOpen = otworzRozmowe;
+  window.hdList = doListy;
+  window.hdNewChat = nowaRozmowa;
+  window.hdAsk = function (i) {
+    var inp = document.getElementById('hd-inp');
+    if (!inp || CZEKA || !PYTANIA[i]) return;
+    inp.value = PYTANIA[i];
+    wyslij();
+  };
 
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && OTWARTY) zamknij(); });
 
@@ -234,6 +376,6 @@
     bylZalogowany = teraz;
     zbuduj();
     document.getElementById('hd-fab').classList.toggle('hidden', !teraz);
-    if (teraz) { odswiez(); planuj(); } else { zamknij(); CHAT = null; clearTimeout(TIMER); }
+    if (teraz) { odswiez(); planuj(); } else { zamknij(); CHAT = null; LISTA = []; clearTimeout(TIMER); }
   }, 1000);
 })();

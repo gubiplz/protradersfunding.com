@@ -82,7 +82,7 @@ html[data-theme=dark]{
   /* zasłona w kolorze płyty nad rombami: zostaje ok. 1/5 ich widoczności */
   --ct-veil:linear-gradient(rgba(8,14,32,.8),rgba(8,14,32,.8));
   --ct-eyebrow:#67d2ff;
-  --ct-dot:rgba(140,180,255,.13);
+  --ct-dot:rgba(140,180,255,.07);
   /* romby certyfikatu tylko na płycie i tylko w ciemnym (rysowane pod granat) */
   --ct-plate-motif:url('/static/img/cert-motif.svg') center bottom/102% auto no-repeat;
   --bg:#050914; --bg2:#070d1e; --bg3:#101b38;
@@ -100,10 +100,11 @@ html[data-theme=dark]{
   --lg-sheen:linear-gradient(150deg,rgba(150,200,255,.08) 0%,rgba(150,200,255,0) 40%);
   --lg-bar:rgba(5,9,20,.55);
   --lg-bar-solid:rgba(5,9,20,.96);
+  /* stonowane: poświata u góry i w rogu o ok. 40% słabsza niż na certyfikacie */
   --lg-light:
-    radial-gradient(62% 44% at 50% 0%,rgba(43,139,255,.24),transparent 64%),
-    radial-gradient(70% 55% at 50% 0%,#0d1a3a 0%,transparent 72%),
-    radial-gradient(40vw 40vw at 100% 100%,rgba(43,139,255,.10),transparent 65%),
+    radial-gradient(62% 44% at 50% 0%,rgba(43,139,255,.14),transparent 64%),
+    radial-gradient(70% 55% at 50% 0%,#0b1631 0%,transparent 72%),
+    radial-gradient(40vw 40vw at 100% 100%,rgba(43,139,255,.06),transparent 65%),
     linear-gradient(168deg,#0b142c 0%,#070d1e 52%,#050914 100%);
   --pb-nav-on:linear-gradient(90deg,rgba(43,139,255,.3),rgba(43,139,255,0) 88%);
   --pb-neon-glow:rgba(103,210,255,.8);

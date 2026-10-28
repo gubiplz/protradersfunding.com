@@ -65,8 +65,8 @@ def _odp(reply="Open the MT5 app and log in with the credentials from your dashb
             "subject": subject, "summary": summary}
 
 
-def _wyslij(h, tekst):
-    r = client.post("/api/me/chat", headers=h, json={"message": tekst})
+def _wyslij(h, tekst, chat_id=None):
+    r = client.post("/api/me/chat", headers=h, json={"message": tekst, "chat_id": chat_id})
     assert r.status_code == 200, r.text
     return r.json()["chat"]
 
@@ -135,26 +135,36 @@ def test_blad_modelu_przekazuje_do_zespolu(klient, model, zepsute):
 def test_po_przekazaniu_asystent_milknie(klient, model):
     h, _ = klient
     model["odp"] = _odp(resolution="needs_human", category="other")
-    _wyslij(h, "Something odd with the leaderboard")
+    pierwszy = _wyslij(h, "Something odd with the leaderboard")
     model["wywolania"] = 0
-    chat = _wyslij(h, "Any news?")
+    chat = _wyslij(h, "Any news?", pierwszy["id"])
     assert model["wywolania"] == 0
     assert chat["thread"][-1]["author"] == "trader" and chat["status"] == "open"
 
 
-def test_przycisk_czlowiek_i_nowa_rozmowa(klient, model):
+def test_przycisk_czlowiek_i_lista_rozmow(klient, model):
     h, _ = klient
-    model["odp"] = _odp()
+    model["odp"] = _odp(subject="MT5 password reset")
     pierwszy = _wyslij(h, "How do I reset my MT5 password?")
-    r = client.post("/api/me/chat/human", headers=h).json()["chat"]
+    # Asystent nadał rozmowie tytuł przy pierwszej odpowiedzi.
+    assert pierwszy["title"] == "MT5 password reset"
+    r = client.post(f"/api/me/chat/{pierwszy['id']}/human", headers=h).json()["chat"]
     assert r["status"] == "open" and r["id"] == pierwszy["id"]
-    # Sprawa czekająca na zespół nie znika po „nowej rozmowie".
-    client.post("/api/me/chat/new", headers=h)
-    assert client.get("/api/me/chat", headers=h).json()["chat"]["id"] == pierwszy["id"]
-    # Po odpowiedzi admina nowa rozmowa zamyka starą.
-    client.post(f"/api/admin/tickets/{pierwszy['id']}/reply", headers=ADMIN, json={"message": "Done."})
-    client.post("/api/me/chat/new", headers=h)
-    assert client.get("/api/me/chat", headers=h).json()["chat"] is None
+    # Druga, równoległa rozmowa — bez chat_id powstaje nowa.
+    model["odp"] = _odp(subject="KYC documents")
+    drugi = _wyslij(h, "Which documents do I need for KYC?")
+    assert drugi["id"] != pierwszy["id"]
+    lista = client.get("/api/me/chats", headers=h).json()
+    assert [c["id"] for c in lista["chats"]][:2] == [drugi["id"], pierwszy["id"]]
+    assert lista["chats"][0]["title"] == "KYC documents" and lista["chats"][0]["mode"] == "assistant"
+    assert lista["chats"][1]["mode"] == "team"
+    assert lista["chats"][0]["last"]["author"] == "ai"
+    # Zamknięta przez zespół rozmowa jest tylko do odczytu.
+    client.post(f"/api/admin/tickets/{pierwszy['id']}/reply", headers=ADMIN,
+                json={"message": "Done.", "close": True})
+    r = client.post("/api/me/chat", headers=h, json={"message": "one more thing", "chat_id": pierwszy["id"]})
+    assert r.status_code == 400
+    assert client.get(f"/api/me/chat/{pierwszy['id']}", headers=h).json()["chat"]["status"] == "closed"
 
 
 def test_bez_dostawcy_od_razu_czlowiek(klient, monkeypatch):
@@ -162,7 +172,7 @@ def test_bez_dostawcy_od_razu_czlowiek(klient, monkeypatch):
     h, _ = klient
     chat = _wyslij(h, "How do I install MT5 on Android?")
     assert chat["status"] == "open"
-    assert client.get("/api/me/chat", headers=h).json()["assistant"] is False
+    assert client.get("/api/me/chats", headers=h).json()["assistant"] is False
 
 
 def test_cudzy_czat_niewidoczny(klient, model):
@@ -174,8 +184,11 @@ def test_cudzy_czat_niewidoczny(klient, model):
     s.add(obcy); s.commit()
     oid = obcy.id
     s.close()
-    inny = client.get("/api/me/chat", headers={"Authorization": f"Bearer {auth.make_token(oid)}"}).json()
-    assert inny["chat"] is None or inny["chat"]["id"] != mine["id"]
+    obcy_h = {"Authorization": f"Bearer {auth.make_token(oid)}"}
+    assert client.get(f"/api/me/chat/{mine['id']}", headers=obcy_h).status_code == 404
+    assert all(c["id"] != mine["id"] for c in client.get("/api/me/chats", headers=obcy_h).json()["chats"])
+    r = client.post("/api/me/chat", headers=obcy_h, json={"message": "hi", "chat_id": mine["id"]})
+    assert r.status_code == 404
 
 
 def test_wiedza_asystenta_bez_obietnic_wyplat():
@@ -204,13 +217,35 @@ def test_konsultant_przejmuje_i_online_z_aktywnosci_panelu(klient, model, monkey
     chat = _wyslij(h, "The leaderboard does not show my name")
     assert chat["taken_over"] is False
     client.post(f"/api/admin/tickets/{chat['id']}/reply", headers=ADMIN, json={"message": "Fixed, thanks!"})
-    r = client.get("/api/me/chat", headers=h).json()
+    r = client.get(f"/api/me/chat/{chat['id']}", headers=h).json()
     assert r["chat"]["taken_over"] is True
     assert r["agent"]["name"] == m.SUPPORT_AGENT_NAME and r["agent"]["online"] is True
     # Sześć minut później, bez aktywności panelu — już nie online.
     teraz = _time.time()
     monkeypatch.setattr(m.time, "time", lambda: teraz + 6 * 60)
-    assert client.get("/api/me/chat", headers=h).json()["agent"]["online"] is False
+    assert client.get("/api/me/chats", headers=h).json()["agent"]["online"] is False
+
+
+def test_pisanie_w_panelu_przejmuje_rozmowe(klient, model, monkeypatch):
+    """Konsultant pojawia się u tradera dopiero, gdy zacznie pisać w panelu."""
+    import time as _time
+    from app import main as m
+    h, _ = klient
+    model["odp"] = _odp(resolution="needs_human", category="other")
+    chat = _wyslij(h, "Charts freeze on the dashboard")
+    assert chat["taken_over"] is False and chat["agent_typing"] is False
+    assert client.post(f"/api/admin/tickets/{chat['id']}/typing").status_code in (401, 403)
+    assert client.post("/api/admin/tickets/999999/typing", headers=ADMIN).status_code == 404
+    assert client.post(f"/api/admin/tickets/{chat['id']}/typing", headers=ADMIN).status_code == 200
+    r = client.get(f"/api/me/chat/{chat['id']}", headers=h).json()["chat"]
+    assert r["taken_over"] is True and r["agent_typing"] is True
+    lista = client.get("/api/me/chats", headers=h).json()["chats"]
+    assert next(c for c in lista if c["id"] == chat["id"])["taken_over"] is True
+    # Po kilku sekundach bez sygnału „pisze" gaśnie, ale przejęcie zostaje.
+    teraz = _time.time()
+    monkeypatch.setattr(m.time, "time", lambda: teraz + 10)
+    r = client.get(f"/api/me/chat/{chat['id']}", headers=h).json()["chat"]
+    assert r["taken_over"] is True and r["agent_typing"] is False
 
 
 def test_cli_tylko_lokalnie(monkeypatch):

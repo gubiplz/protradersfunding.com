@@ -3188,12 +3188,12 @@ def ticket_reply(ticket_id: int, payload: TicketReplyIn, trader: Trader = Depend
 # --------------------------------------------------------------------------- #
 class ChatIn(BaseModel):
     message: str
+    chat_id: int | None = None
 
 
 # Ile wiadomości do ASYSTENTA na godzinę (każda to wywołanie modelu). Po limicie
 # rozmowa idzie do człowieka, a nie zostaje bez odpowiedzi.
 CHAT_AI_LIMIT_H = int(os.getenv("HELPDESK_AI_PER_HOUR", "20"))
-CHAT_STATUSY = ("bot", "open", "answered")
 # Podpis konsultanta w okienku czatu, gdy rozmowę przejmie zespół.
 SUPPORT_AGENT_NAME = os.getenv("SUPPORT_AGENT_NAME", "Mark")
 # „Online" = ktoś z zespołu miał otwarty panel w tym oknie czasu.
@@ -3220,24 +3220,52 @@ def _zespol_online(session) -> bool:
     return bool(wpis and wpis.value.isdigit() and time.time() - int(wpis.value) < ZESPOL_ONLINE_S)
 
 
-def _czat_biezacy(session, trader_id: int) -> SupportTicket | None:
-    return (session.query(SupportTicket)
-            .filter(SupportTicket.trader_id == trader_id, SupportTicket.status.in_(CHAT_STATUSY))
-            .order_by(SupportTicket.id.desc()).first())
+PISZE_S = 6   # „Mark is typing…" gaśnie po tylu sekundach bez sygnału z panelu
 
 
-def _czat_dict(session, t: SupportTicket | None) -> dict:
-    out = {"chat": None, "assistant": helpdesk.dostawca() is not None,
-           "agent": {"name": SUPPORT_AGENT_NAME, "team": f"{settings.site_name} Support",
-                     "online": _zespol_online(session)}}
-    if t is None:
-        return out
+def _klucz_pisze(ticket_id: int) -> str:
+    return f"chat_typing:{ticket_id}"
+
+
+def _czat_pisanie(session, ids) -> dict[int, int]:
+    """Ostatni sygnał „konsultant pisze" per rozmowa (unix s). Istnienie wpisu
+    znaczy też, że konsultant przejął rozmowę — zaczął w niej pisać w panelu."""
+    klucze = {_klucz_pisze(i): i for i in ids}
+    if not klucze:
+        return {}
+    return {klucze[w.key]: int(w.value) for w in
+            session.query(AppSetting).filter(AppSetting.key.in_(list(klucze))).all() if w.value.isdigit()}
+
+
+def _czat_tytul(t: SupportTicket) -> str:
+    """Tytuł rozmowy na liście: temat od asystenta albo pierwsza wiadomość."""
+    s = t.subject or ""
+    return s[6:].strip() if s.startswith("Chat: ") else s
+
+
+def _czat_tradera(session, trader_id: int, chat_id: int) -> SupportTicket:
+    t = session.get(SupportTicket, chat_id)
+    if not t or t.trader_id != trader_id:
+        raise HTTPException(404, "Conversation not found")
+    return t
+
+
+def _czat_meta(session) -> dict:
+    return {"assistant": helpdesk.dostawca() is not None,
+            "agent": {"name": SUPPORT_AGENT_NAME, "team": f"{settings.site_name} Support",
+                      "online": _zespol_online(session)}}
+
+
+def _czat_dict(session, t: SupportTicket) -> dict:
     d = _ticket_dict(session, t, with_thread=True, for_trader=True)
+    d["title"] = _czat_tytul(t)
     d["mode"] = "assistant" if t.status == "bot" else "team"
-    # Konsultant „przejął" rozmowę, gdy w niej odpisał (samo przekazanie to jeszcze kolejka).
-    d["taken_over"] = any(m["author"] == "admin" for m in d["thread"])
-    out["chat"] = d
-    return out
+    # Konsultant „przejął" rozmowę, gdy zaczął w niej pisać w panelu albo odpisał.
+    # Samo przekazanie to jeszcze kolejka — wtedy trader widzi zespół, nie osobę.
+    pisze = _czat_pisanie(session, [t.id]).get(t.id)
+    d["taken_over"] = pisze is not None or any(m["author"] == "admin" for m in d["thread"])
+    d["agent_typing"] = pisze is not None and time.time() - pisze < PISZE_S and t.status != "closed"
+    return {"chat": d, **_czat_meta(session)}
 
 
 def _czat_prompt(session) -> str:
@@ -3260,24 +3288,54 @@ def _czat_przekaz(session, t: SupportTicket, trader: Trader, subject: str, summa
     notify.notify_admins("admin_ticket", f"New chat ticket: {t.subject[:80]}", trader.email)
 
 
-@app.get("/api/me/chat")
-def chat_view(trader: Trader = Depends(auth.current_trader)):
+@app.get("/api/me/chats")
+def chat_list(trader: Trader = Depends(auth.current_trader)):
+    """Lista rozmów jak w komunikatorze: najświeższa aktywność na górze."""
     session = SessionLocal()
     try:
-        return _czat_dict(session, _czat_biezacy(session, trader.id))
+        rows = (session.query(SupportTicket).filter(SupportTicket.trader_id == trader.id)
+                .order_by(SupportTicket.id.desc()).limit(50).all())
+        wiadomosci = _wiadomosci_biletow(session, [t.id for t in rows])
+        pisanie = _czat_pisanie(session, [t.id for t in rows])
+        out = []
+        for t in rows:
+            msgs = [m for m in wiadomosci[t.id] if m.author != "ai_note"]
+            ost = msgs[-1] if msgs else None
+            out.append({
+                "id": t.id, "ref": t.ref, "title": _czat_tytul(t), "status": t.status,
+                "mode": "assistant" if t.status == "bot" else "team",
+                "taken_over": t.id in pisanie or any(m.author == "admin" for m in msgs),
+                "last": {"author": ost.author, "body": ost.body[:140], "ts": ost.ts.isoformat()} if ost else None,
+                "last_ts": (ost.ts if ost else t.created_at).isoformat(),
+            })
+        out.sort(key=lambda c: c["last_ts"], reverse=True)
+        return {"chats": out, **_czat_meta(session)}
+    finally:
+        session.close()
+
+
+@app.get("/api/me/chat/{chat_id}")
+def chat_view(chat_id: int, trader: Trader = Depends(auth.current_trader)):
+    session = SessionLocal()
+    try:
+        return _czat_dict(session, _czat_tradera(session, trader.id, chat_id))
     finally:
         session.close()
 
 
 @app.post("/api/me/chat")
 def chat_send(payload: ChatIn, trader: Trader = Depends(auth.current_trader)):
+    """Wiadomość w rozmowie `chat_id` albo — bez niego — początek nowej rozmowy."""
     body = payload.message.strip()
     if not body:
         raise HTTPException(400, "A message is required")
     session = SessionLocal()
     try:
-        t = _czat_biezacy(session, trader.id)
-        if t is None:
+        if payload.chat_id:
+            t = _czat_tradera(session, trader.id, payload.chat_id)
+            if t.status == "closed":
+                raise HTTPException(400, "This conversation is closed. Start a new one.")
+        else:
             t = SupportTicket(trader_id=trader.id, subject=f"Chat: {body[:70]}", status="bot",
                               ref=_wolny_znak_biletu(session))
             session.add(t)
@@ -3307,6 +3365,9 @@ def chat_send(payload: ChatIn, trader: Trader = Depends(auth.current_trader)):
         thread = _ticket_dict(session, t, with_thread=True, for_trader=True)["thread"]
         wynik = helpdesk.odpowiedz(thread, _czat_prompt(session))
         session.add(TicketMessage(ticket_id=t.id, author="ai", body=wynik["reply"]))
+        # Pierwsza odpowiedź asystenta nadaje rozmowie tytuł na liście („MT5 login on mobile").
+        if t.subject.startswith("Chat: ") and wynik["subject"]:
+            t.subject = wynik["subject"][:200]
         session.commit()
         if wynik["escalate"]:
             _czat_przekaz(session, t, trader, wynik["subject"], wynik["summary"], wynik["category"],
@@ -3316,33 +3377,38 @@ def chat_send(payload: ChatIn, trader: Trader = Depends(auth.current_trader)):
         session.close()
 
 
-@app.post("/api/me/chat/human")
-def chat_human(trader: Trader = Depends(auth.current_trader)):
-    """Przycisk „Talk to a person": rozmowa z asystentem idzie do zespołu."""
+@app.post("/api/admin/tickets/{ticket_id}/typing", dependencies=[Depends(auth.require_admin)])
+def admin_ticket_typing(ticket_id: int):
+    """Panel: konsultant pisze w tej rozmowie. Trader widzi „Mark is typing…",
+    a rozmowa od tej chwili jest przejęta przez osobę. Panel wysyła to najwyżej
+    co 3 s, więc zapis jest tani."""
     session = SessionLocal()
     try:
-        t = _czat_biezacy(session, trader.id)
-        if t is None:
-            raise HTTPException(400, "Write your question first")
-        if t.status == "bot":
-            session.add(TicketMessage(ticket_id=t.id, author="ai", body=helpdesk.PRZEKAZANIE))
-            _czat_przekaz(session, t, trader, "", "", "other", "trader asked for a person")
-        return _czat_dict(session, t)
+        if not session.get(SupportTicket, ticket_id):
+            raise HTTPException(404, "Ticket not found")
+        klucz, teraz = _klucz_pisze(ticket_id), str(int(time.time()))
+        wpis = session.get(AppSetting, klucz)
+        if wpis is None:
+            session.add(AppSetting(key=klucz, value=teraz))
+        else:
+            wpis.value = teraz
+        _zespol_widziany(session)
+        session.commit()
+        return {"ok": True}
     finally:
         session.close()
 
 
-@app.post("/api/me/chat/new")
-def chat_new(trader: Trader = Depends(auth.current_trader)):
-    """Nowa rozmowa: bieżąca z asystentem albo już odpowiedziana zostaje zamknięta.
-    Sprawa czekająca na zespół (`open`) zostaje otwarta — nie znika adminowi."""
+@app.post("/api/me/chat/{chat_id}/human")
+def chat_human(chat_id: int, trader: Trader = Depends(auth.current_trader)):
+    """Przycisk „Talk to a person": rozmowa z asystentem idzie do zespołu."""
     session = SessionLocal()
     try:
-        t = _czat_biezacy(session, trader.id)
-        if t is not None and t.status in ("bot", "answered"):
-            t.status = "closed"
-            session.commit()
-        return _czat_dict(session, None)
+        t = _czat_tradera(session, trader.id, chat_id)
+        if t.status == "bot":
+            session.add(TicketMessage(ticket_id=t.id, author="ai", body=helpdesk.PRZEKAZANIE))
+            _czat_przekaz(session, t, trader, "", "", "other", "trader asked for a person")
+        return _czat_dict(session, t)
     finally:
         session.close()
 
