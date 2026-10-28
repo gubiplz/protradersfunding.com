@@ -30,6 +30,15 @@ ADMIN = {"X-Admin-Token": get_settings().admin_token}
 LICZNIK = iter(range(10000))
 
 
+@pytest.fixture(autouse=True)
+def bez_lokalnego_modelu(monkeypatch):
+    """Testy nie mogą zależeć od lokalnego .env (np. z kluczem Groq) ani wysyłać
+    prawdziwych zapytań do API — test, który potrzebuje API, ustawia je sam."""
+    for zm in ("HELPDESK_LLM_URL", "HELPDESK_LLM_MODEL", "HELPDESK_LLM_KEY", "HELPDESK_LOCAL_CLI",
+               "HELPDESK_ENGINE", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
+        monkeypatch.delenv(zm, raising=False)
+
+
 @pytest.fixture
 def klient():
     numer = next(LICZNIK)
@@ -116,11 +125,22 @@ def test_pieniadze_i_wyniki_ida_do_czlowieka_bez_modelu(klient, model, tekst):
 def test_kategoria_pieniedzy_przekazuje_nawet_gdy_model_odpowiedzial(klient, model):
     """Model „odpowiedział" na temat zastrzeżony dla zespołu — klient tej odpowiedzi nie dostaje."""
     h, _ = klient
-    model["odp"] = _odp(reply="Your money arrives tomorrow.", category="billing")
+    model["odp"] = _odp(reply="Your money arrives tomorrow.", category="payout")
     chat = _wyslij(h, "Question about the invoice layout")
     assert chat["status"] == "open"
     assert chat["thread"][-1]["body"] == helpdesk.PRZEKAZANIE
     assert "tomorrow" not in str(chat["thread"])
+
+
+def test_pytanie_o_cene_nie_idzie_do_zespolu_a_podwojna_oplata_tak(klient, model):
+    """Cena planu sklasyfikowana jako „billing" zostaje u asystenta; „charged twice" — zespół."""
+    h, _ = klient
+    model["odp"] = _odp(reply="Instant 50K costs $529.", category="billing")
+    chat = _wyslij(h, "and the instant one?")
+    assert chat["status"] == "bot" and chat["thread"][-1]["body"] == "Instant 50K costs $529."
+    model["wywolania"] = 0
+    chat = _wyslij(h, "I was charged twice for my challenge")
+    assert model["wywolania"] == 0 and chat["status"] == "open"
 
 
 @pytest.mark.parametrize("zepsute", [RuntimeError("API down"), {"reply": ""}, "not json"])
@@ -200,6 +220,14 @@ def test_czat_przez_api_openai_prompt_kompaktowy(klient, silnik_faq, monkeypatch
     assert [m["role"] for m in msgs] == ["user", "assistant", "user"]   # kontekst rozmowy
     pelny = helpdesk.prompt_systemowy("PTF", "s@x", str(TEMPLATES / "faq.html"), "", None)
     assert len(system) < len(pelny) / 2
+    # Cennik z katalogu jest w prompcie (bez niego model odsyłał pytania o cenę do zespołu).
+    s = SessionLocal()
+    try:
+        from app.models import Product
+        p = s.query(Product).filter(Product.account_size == 50000, Product.steps >= 2, Product.active).first()
+    finally:
+        s.close()
+    assert f"$50K ${p.price_usd:,.0f}" in system and "Plan prices, fees and rules listed below are public" in system
 
 
 def test_po_przekazaniu_asystent_milknie(klient, model):

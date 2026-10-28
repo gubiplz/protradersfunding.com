@@ -39,11 +39,15 @@ TIMEOUT_S = float(os.getenv("HELPDESK_TIMEOUT_S", "60"))
 KATEGORIE = ["how_to", "platform", "rules", "kyc", "account_result", "payout",
              "billing", "complaint", "other"]
 # Te kategorie zawsze idą do człowieka: asystent nie zna danych konta ani wypłat.
-KATEGORIE_CZLOWIEKA = {"account_result", "payout", "billing", "complaint"}
+# „billing" nie jest tu z rozmysłem: model wrzucał do niego pytania o cenę planu
+# („and the instant one?"), a problemy z płatnością łapie twarda bramka niżej
+# („charged", „billed") albo model sam daje needs_human.
+KATEGORIE_CZLOWIEKA = {"account_result", "payout", "complaint"}
 
 # Twarda bramka na treść wiadomości klienta — niezależna od modelu.
 _TYLKO_CZLOWIEK = re.compile(
     r"\b(payout|withdraw\w*|refund\w*|chargeback|money back|reimburs\w*|"
+    r"charged|overcharged|double charge\w*|billed twice|charged twice|"
     r"scam\w*|fraud\w*|lawyer|legal action|police|dispute|"
     r"breach\w*|fail\w*|lost|closed|terminat\w*|blocked|blown|disabled|banned|suspend\w*|"
     r"rigged|manipulat\w*|human|real person|agent|manager|admin)\b",
@@ -275,7 +279,8 @@ _FORMAT_JSON = (
     "\n\nAnswer ONLY with one JSON object, no other text, with exactly these keys: "
     '"reply" (your message to the trader, plain text, may contain line breaks), '
     '"resolution" ("answered" or "needs_human"), '
-    f'"category" (one of: {", ".join(KATEGORIE)}), '
+    f'"category" (one of: {", ".join(KATEGORIE)}; plan prices, fees and rules are "rules", '
+    '"billing" only for a problem with the trader\'s own payment), '
     '"subject" (short title of the conversation, max 80 characters), '
     '"summary" (2-4 sentences for the support team when needs_human, otherwise empty).')
 
@@ -668,6 +673,17 @@ def prompt_kompaktowy(thread: list[dict], baza_wiedzy: BazaWiedzy, produkty, sit
         f"2-Step and {f.max_instant:g}% on Instant Funding ({f.drawdown}); minimum trading days {f.dni_2step} per "
         f"phase on 2-Step and {f.dni_instant} on Instant Funding; max open volume from {f.loty_min:g} lots on "
         f"{_k(f.rozmiar_min)} to {f.loty_max:g} lots on {_k(f.rozmiar_max)}.\n")
+    # Cennik i cele zysku z katalogu — publiczne, krótkie, a bez nich model odsyłał
+    # pytania o cenę do zespołu.
+    akt = [p for p in produkty if p.active]
+    for nazwa, rodzina in (("2-Step", [p for p in akt if p.steps >= 2]), ("Instant Funding", [p for p in akt if p.steps <= 1])):
+        if rodzina:
+            rodzina.sort(key=lambda p: p.account_size)
+            ceny = ", ".join(f"{_k(p.account_size)} ${p.price_usd:,.0f}" for p in rodzina)
+            p0 = rodzina[0]
+            cel = (f"profit target {p0.profit_target_p1:g}% phase 1, {p0.profit_target_p2:g}% phase 2"
+                   if p0.steps >= 2 else "no profit target (no evaluation phase)")
+            liczby += f"{nazwa} one-time fees: {ceny}; {cel}.\n"
     wiedza = "\n\n".join(f"Q: {q}\nA: {a}" for q, a in wybrane)
     return f"""You are the AI support assistant in the {site_name} trader portal (prop trading challenges). \
 You are an AI, not a person. Answer the trader's latest message helpfully and naturally, using ONLY the \
@@ -676,10 +692,11 @@ Give step-by-step instructions when the trader asks how to do something. Keep it
 short numbered list, plain text, no markdown headings.
 
 Hand the conversation to the support team (resolution "needs_human") instead of answering when it is about: \
-a specific account's results, balance, status or why it failed; payouts, withdrawals, refunds, charges or \
-money; complaints or disputes; a request for a person; or anything the knowledge below does not cover. Never \
-invent rules, numbers, prices or policies and never promise payouts, refunds or timelines. All accounts are \
-demo accounts with simulated capital. Support email: {support_email}.
+a specific account's results, balance, status or why it failed; payouts, withdrawals, refunds, a charge on \
+the trader's card or any money owed to them; complaints or disputes; a request for a person; or anything the \
+knowledge below does not cover. Plan prices, fees and rules listed below are public — answer those directly. \
+Never invent rules, numbers, prices or policies and never promise payouts, refunds or timelines. All accounts \
+are demo accounts with simulated capital. Support email: {support_email}.
 
 {liczby}
 <knowledge>
