@@ -64,6 +64,7 @@ from .models import (LEAD_LOST_STATUSES, LEAD_STATUSES, LOST_REASONS,
                      nowy_znak_biletu)
 
 settings = get_settings()
+helpdesk.ustaw_strone(settings.site_name, settings.support_email)
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
 STATIC = Path(__file__).resolve().parent.parent / "static"
 UPLOADS = Path(__file__).resolve().parent.parent / "uploads"

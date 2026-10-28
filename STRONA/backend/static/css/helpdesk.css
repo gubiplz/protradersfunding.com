@@ -12,6 +12,9 @@
 .hd-fab:active{transform:scale(.94)}
 .hd-fab.on{transform:scale(.92)}
 .hd-fab.hidden{display:none}
+/* Odstęp na końcu widoku: po przewinięciu do końca ostatni kafelek nie chowa się
+   pod dymkiem (spacer zamiast padding, żeby nie ruszać istniejących odstępów). */
+#view::after{content:"";display:block;height:80px}
 .hd-dot{position:absolute;top:6px;right:6px;width:12px;height:12px;border-radius:50%;
   background:var(--red);box-shadow:0 0 0 2px var(--bg)}
 .hd-dot.hidden{display:none}

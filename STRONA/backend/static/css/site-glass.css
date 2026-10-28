@@ -75,6 +75,12 @@ html::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
   box-shadow:var(--lg-spec),var(--lg-hair);
 }
 :root:root body .cookie-note{box-shadow:var(--lg-spec),var(--lg-hair),var(--lg-drop)}
+/* Menu mobilne zasłania całą stronę z przyciskami — przy przezroczystym szkle
+   przyciski spod spodu (np. „Start a Challenge") prześwitywały między pozycjami menu. */
+:root:root body .mobile-menu{background:var(--lg-bar-solid)}
+/* Na telefonie menu zasłania cały ekran pod nagłówkiem — bez tego kończyło się
+   w połowie i przecinało przyciski strony pod spodem. */
+@media (max-width:960px){:root:root body .mobile-menu.open{bottom:0}}
 
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
   :root:root body :is(.nav.on,.mobile-menu,.cookie-note){background:var(--lg-bar-solid)}

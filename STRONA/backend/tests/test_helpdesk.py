@@ -124,12 +124,82 @@ def test_kategoria_pieniedzy_przekazuje_nawet_gdy_model_odpowiedzial(klient, mod
 
 
 @pytest.mark.parametrize("zepsute", [RuntimeError("API down"), {"reply": ""}, "not json"])
-def test_blad_modelu_przekazuje_do_zespolu(klient, model, zepsute):
+def test_blad_modelu_zapasowo_silnik_faq(klient, model, zepsute):
+    """Model nie odpowiedział — odpowiada silnik FAQ, rozmowa zostaje u asystenta."""
     h, _ = klient
     model["odp"] = zepsute
-    chat = _wyslij(h, "How do I change my email address?")
+    chat = _wyslij(h, "How do I change or reset my password?")
+    assert chat["status"] == "bot"
+    assert "Change Password" in chat["thread"][-1]["body"]
+
+
+def test_gdy_zawiedzie_model_i_silnik_faq_to_zespol(klient, model, monkeypatch):
+    h, _ = klient
+    model["odp"] = RuntimeError("API down")
+    monkeypatch.setattr(helpdesk, "odpowiedz_z_faq", lambda *a: (_ for _ in ()).throw(RuntimeError("x")))
+    chat = _wyslij(h, "How do I change or reset my password?")
     assert chat["status"] == "open"
     assert chat["thread"][-1]["body"] == helpdesk.BEZ_ASYSTENTA
+
+
+def test_api_w_formacie_openai(monkeypatch):
+    """Ollama / Groq / Gemini / OpenRouter: ten sam format; JSON bywa w ```json```."""
+    import httpx
+    wyslane = {}
+
+    class _Odp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": '```json\n{"reply": "Hi", "resolution": "answered", '
+                                             '"category": "how_to", "subject": "Hello", "summary": ""}\n```'}}]}
+
+    def _post(url, headers=None, json=None, timeout=None):
+        wyslane.update(url=url, headers=headers, body=json)
+        return _Odp()
+
+    monkeypatch.setattr(httpx, "post", _post)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("HELPDESK_ENGINE", raising=False)
+    monkeypatch.setenv("HELPDESK_LLM_URL", "http://127.0.0.1:11434/v1/")
+    monkeypatch.setenv("HELPDESK_LLM_MODEL", "llama3.1:8b")
+    monkeypatch.setenv("HELPDESK_LLM_KEY", "test-key")
+    assert helpdesk.dostawca() == "openai"
+    w = helpdesk._przez_openai("SYSTEM", [{"role": "user", "content": "hi"}])
+    assert w["reply"] == "Hi" and w["category"] == "how_to"
+    assert wyslane["url"] == "http://127.0.0.1:11434/v1/chat/completions"
+    assert wyslane["headers"]["Authorization"] == "Bearer test-key"
+    assert wyslane["body"]["model"] == "llama3.1:8b"
+    assert wyslane["body"]["messages"][0]["role"] == "system" and "JSON" in wyslane["body"]["messages"][0]["content"]
+    # Klucz Claude ma pierwszeństwo przed API w formacie OpenAI.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    assert helpdesk.dostawca() == "sdk"
+
+
+def test_czat_przez_api_openai_prompt_kompaktowy(klient, silnik_faq, monkeypatch):
+    """Darmowe API (np. Groq 8K tokenów/min): prompt z wiedzą dobraną do pytania
+    i kontekstem, dużo mniejszy niż pełne FAQ; odpowiedź modelu trafia do tradera."""
+    monkeypatch.setenv("HELPDESK_LLM_URL", "http://llm.test/v1")
+    monkeypatch.setenv("HELPDESK_LLM_KEY", "test-key")
+    wyslane = []
+
+    def udawany(system, msgs):
+        wyslane.append((system, msgs))
+        return {"reply": "1. Open Credentials…", "resolution": "answered", "category": "platform",
+                "subject": "MT5 login", "summary": ""}
+
+    monkeypatch.setattr(helpdesk, "_przez_openai", udawany)
+    h, _ = klient
+    chat = _wyslij(h, "How do I log in to MT5?")
+    chat = _wyslij(h, "how to do it on my phone", chat["id"])
+    assert chat["thread"][-1]["body"] == "1. Open Credentials…" and chat["title"] == "MT5 login"
+    system, msgs = wyslane[-1]
+    assert "log in to MT5" in system and "Plan facts" in system
+    assert [m["role"] for m in msgs] == ["user", "assistant", "user"]   # kontekst rozmowy
+    pelny = helpdesk.prompt_systemowy("PTF", "s@x", str(TEMPLATES / "faq.html"), "", None)
+    assert len(system) < len(pelny) / 2
 
 
 def test_po_przekazaniu_asystent_milknie(klient, model):
@@ -246,6 +316,18 @@ def test_pisanie_w_panelu_przejmuje_rozmowe(klient, model, monkeypatch):
     monkeypatch.setattr(m.time, "time", lambda: teraz + 10)
     r = client.get(f"/api/me/chat/{chat['id']}", headers=h).json()["chat"]
     assert r["taken_over"] is True and r["agent_typing"] is False
+
+
+def test_chmura_bez_klucza_to_silnik_faq_a_lokalna_ollama_bez_klucza_dziala(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("HELPDESK_ENGINE", raising=False)
+    monkeypatch.delenv("HELPDESK_LOCAL_CLI", raising=False)
+    monkeypatch.setenv("HELPDESK_LLM_KEY", "")
+    monkeypatch.setenv("HELPDESK_LLM_URL", "https://api.groq.com/openai/v1")
+    assert helpdesk.dostawca() == "faq"
+    monkeypatch.setenv("HELPDESK_LLM_URL", "http://127.0.0.1:11434/v1")
+    assert helpdesk.dostawca() == "openai"
 
 
 def test_cli_tylko_lokalnie_a_bez_klucza_silnik_faq(monkeypatch):

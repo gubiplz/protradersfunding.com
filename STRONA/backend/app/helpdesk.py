@@ -271,14 +271,63 @@ def _przez_cli(system: str, msgs: list[dict]) -> dict:
     return wynik
 
 
+_FORMAT_JSON = (
+    "\n\nAnswer ONLY with one JSON object, no other text, with exactly these keys: "
+    '"reply" (your message to the trader, plain text, may contain line breaks), '
+    '"resolution" ("answered" or "needs_human"), '
+    f'"category" (one of: {", ".join(KATEGORIE)}), '
+    '"subject" (short title of the conversation, max 80 characters), '
+    '"summary" (2-4 sentences for the support team when needs_human, otherwise empty).')
+
+
+def _json_z_tekstu(tekst: str) -> dict:
+    """JSON z odpowiedzi modelu — także owinięty w ```json … ``` albo z dopiskiem."""
+    t = (tekst or "").strip()
+    t = re.sub(r"^```(?:json)?\s*|\s*```$", "", t)
+    try:
+        return json.loads(t)
+    except ValueError:
+        m = re.search(r"\{.*\}", t, re.S)
+        if not m:
+            raise
+        return json.loads(m.group(0))
+
+
+def _przez_openai(system: str, msgs: list[dict]) -> dict:
+    """Dowolne API w formacie OpenAI (/v1/chat/completions): lokalna Ollama (Llama,
+    za darmo, bez klucza), Groq, Gemini (endpoint OpenAI), OpenRouter, OpenAI.
+    Konfiguracja: HELPDESK_LLM_URL (np. http://127.0.0.1:11434/v1),
+    HELPDESK_LLM_MODEL (np. llama3.1:8b), opcjonalnie HELPDESK_LLM_KEY."""
+    import httpx
+
+    url = os.environ["HELPDESK_LLM_URL"].rstrip("/") + "/chat/completions"
+    naglowki = {"Content-Type": "application/json"}
+    if os.getenv("HELPDESK_LLM_KEY"):
+        naglowki["Authorization"] = "Bearer " + os.environ["HELPDESK_LLM_KEY"]
+    r = httpx.post(url, headers=naglowki, timeout=TIMEOUT_S, json={
+        "model": os.getenv("HELPDESK_LLM_MODEL", "llama3.1:8b"),
+        "messages": [{"role": "system", "content": system + _FORMAT_JSON}] + msgs,
+        "temperature": 0.2,
+        "max_tokens": 900,
+        "response_format": {"type": "json_object"},
+    })
+    r.raise_for_status()
+    return _json_z_tekstu(r.json()["choices"][0]["message"]["content"])
+
+
 def dostawca() -> str | None:
-    """Kto odpowiada: model przez API (klucz), lokalne CLI (tylko podgląd) albo —
-    domyślnie, bez klucza i bez kosztów — silnik FAQ. `HELPDESK_ENGINE=off`
+    """Kto odpowiada, w tej kolejności: Claude przez API (klucz), dowolne API
+    w formacie OpenAI (Ollama/Groq/Gemini/OpenRouter — HELPDESK_LLM_URL), lokalne
+    CLI (tylko podgląd), a bez niczego — silnik FAQ. `HELPDESK_ENGINE=off`
     wyłącza asystenta (wszystko od razu do zespołu)."""
     if os.getenv("HELPDESK_ENGINE") == "off":
         return None
     if os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN"):
         return "sdk"
+    url = os.getenv("HELPDESK_LLM_URL", "")
+    # Chmura (Groq/Gemini/OpenRouter) wymaga klucza; lokalna Ollama — nie.
+    if url and (os.getenv("HELPDESK_LLM_KEY") or re.match(r"https?://(127\.0\.0\.1|localhost)", url)):
+        return "openai"
     if os.getenv("HELPDESK_LOCAL_CLI") == "1" and not os.getenv("VERCEL") and shutil.which("claude"):
         return "cli"
     return "faq"
@@ -290,22 +339,40 @@ def dostawca() -> str | None:
 # Przewodnik po portalu: tylko to, co faktycznie jest w portalu (nazwy z menu
 # i przycisków), bez obietnic wypłat.
 PORTAL = [
-    ("Where do I find my MT5 login, password and server?",
+    ("How do I log in to MT5 and connect my account to MetaTrader 5?",
+     "Here's how to log in to MT5:\n"
+     "1. In the portal open Challenges, click Dashboard on your account, then Credentials. Note the login, "
+     "password and server.\n"
+     "2. Install MetaTrader 5 — from metatrader5.com on Windows or macOS, or from the App Store / Google Play "
+     "on your phone. You can also use the MT5 web terminal in a browser.\n"
+     "3. Desktop: File → Login to Trade Account. Mobile: open the accounts screen and choose to log in to an "
+     "existing account.\n"
+     "4. Search for the server name exactly as shown in Credentials, select it, enter the login and password "
+     "and sign in."),
+    ("Where do I find my MT5 login, password and server credentials?",
      "Open Challenges, click Dashboard on your account and then Credentials. Your MT5 login, password "
      "and server are listed there. You also received them by email when the account was created."),
     ("How do I complete KYC identity verification?",
-     "Open KYC in the menu, fill in your details and upload a photo ID (passport, national ID or driver's "
-     "license) and a proof of residence. You only need to do it once."),
+     "Here's how to complete KYC:\n"
+     "1. Open KYC in the menu.\n"
+     "2. Fill in your full name, date of birth, address and country.\n"
+     "3. Choose the ID type (passport, national ID or driver's license), enter its number and upload the "
+     "front (and the back if asked).\n"
+     "4. Upload a proof of residence and submit. You'll get a notification once it's reviewed. You only need "
+     "to do it once."),
     ("How do I change or reset my password?",
-     "Open Settings in the menu and use Change Password. If you are logged out, use \"Forgot password?\" "
-     "on the login screen and follow the email."),
+     "To change your password, open Settings in the menu and use Change Password. If you're logged out, click "
+     "\"Forgot password?\" on the login screen and follow the link we email you."),
     ("How do I change my notification settings or email preferences?",
      "Open Settings in the menu and go to Notification Preferences."),
     ("Where are my invoices and payment history?",
      "Open Invoice in the menu. It lists your payment history, delivered accounts and invoices."),
     ("How do I buy or start a new challenge in the portal?",
-     "Click + New challenge at the top right of the portal, pick a plan and size, and complete checkout. "
-     "Your MT5 credentials are created automatically."),
+     "Here's how to start a new challenge:\n"
+     "1. Click + New challenge at the top right of the portal.\n"
+     "2. Choose 2-Step Evaluation or Instant Funding and the account size.\n"
+     "3. Add a coupon code if you have one and complete checkout.\n"
+     "4. Your MT5 credentials are created automatically and appear under Credentials on the account."),
     ("What is the leaderboard?",
      "Leaderboard shows the top traders across the platform, ranked by profit and by discipline."),
     ("What is the trading journal?",
@@ -510,6 +577,25 @@ _POWITANIE = re.compile(r"^\s*(hi|hey|hello|yo|good (morning|afternoon|evening)|
 _DZIEKI = re.compile(r"^\s*(thanks?|thank you|thx|ty|cheers|great|perfect|ok(ay)?|got it|cool)\b[\s!.,]*$", re.I)
 
 
+_ODWOLANIE = re.compile(r"\b(it|this|that|these|those|there|them|one|more|details?|explain|steps?|again|"
+                        r"elaborate|example|also|instead)\b|^\s*(and|but|what about|how about|ok so|so)\b", re.I)
+_PYTANIE_OTWARTE = re.compile(r"^\s*(how|where|what|when|why|which|who|tell|explain|show|steps?|guide)\b", re.I)
+
+
+def _dopytanie(pytanie: str) -> bool:
+    """Krótkie dopytanie o poprzednią odpowiedź: mało treści albo odwołanie
+    („it", „that", „more", „and on mobile?")."""
+    tresc = _tokeny(pytanie)
+    return len(pytanie.split()) <= 8 and (len(tresc) <= 1 or bool(_ODWOLANIE.search(pytanie)))
+
+
+def _bez_tak_nie(pytanie: str, odpowiedz: str) -> str:
+    """„How do I…?" → bez „Yes." na początku odpowiedzi pisanej pod pytanie tak/nie."""
+    if _PYTANIE_OTWARTE.match(pytanie):
+        return re.sub(r"^(Yes|No)[.,!]\s+", "", odpowiedz)
+    return odpowiedz
+
+
 def odpowiedz_z_faq(thread: list[dict], baza_wiedzy: BazaWiedzy, produkty) -> dict:
     """Asystent bez modelu. Zwraca ten sam kształt co model:
     {reply, resolution, category, subject, summary}."""
@@ -522,13 +608,33 @@ def odpowiedz_z_faq(thread: list[dict], baza_wiedzy: BazaWiedzy, produkty) -> di
     if _DZIEKI.match(pytanie):
         return wynik("Happy to help! If anything else comes up, just ask here.")
 
-    plan = _odpowiedz_o_planie(pytanie, produkty)
+    # Kontekst: krótkie dopytanie („how to do it", „and on mobile?") łączymy
+    # z poprzednim pytaniem, na które asystent odpowiedział.
+    poprzednie = [m["body"] for m in thread if m["author"] == "trader"][:-1]
+    ost_ai = next((m["body"] for m in reversed(thread) if m["author"] == "ai"), "")
+    dopytanie = bool(poprzednie) and _dopytanie(pytanie) and not ost_ai.startswith(NIE_WIEM) \
+        and not pomijana(ost_ai)
+    szukane = (poprzednie[-1] + " " + pytanie) if dopytanie else pytanie
+
+    plan = _odpowiedz_o_planie(szukane, produkty)
     if plan:
         return wynik(plan, cat="rules", subj=pytanie[:80])
 
-    trafienia = baza_wiedzy.szukaj(pytanie)
-    if trafienia and trafienia[0][0] >= 2.2 and trafienia[0][2] >= .5:
+    # Pytanie (np. gotowe z dymka) zgodne z początkiem pytania we wpisie — ten wpis.
+    rdzen = re.sub(r"[?!.\s]+$", "", pytanie.strip().lower())
+    dokladny = next((qa for qa in baza_wiedzy.wpisy if len(rdzen) > 8 and qa[0].lower().startswith(rdzen)), None)
+    if dokladny and not dopytanie:
+        return wynik(_bez_tak_nie(pytanie, dokladny[1]), cat="how_to", subj=dokladny[0][:80])
+
+    trafienia = baza_wiedzy.szukaj(szukane)
+    if trafienia and trafienia[0][0] >= 2.2 and trafienia[0][2] >= (.34 if dopytanie else .5):
         q, a = baza_wiedzy.wpisy[trafienia[0][1]]
+        a = _bez_tak_nie(pytanie if not dopytanie else szukane, a)
+        if dopytanie and a.strip() == ost_ai.strip():
+            # To samo by wyszło drugi raz — zamiast powtarzać, dopytujemy o konkret.
+            return wynik("That's everything I have on this topic, in the steps above. Which part is unclear? "
+                         "Tell me what you tried or where you got stuck, or tap \"Talk to a person\" below.",
+                         cat="how_to", subj=q[:80])
         return wynik(a, cat="how_to", subj=q[:80])
 
     # Bez trafienia: prośba o doprecyzowanie z podpowiedziami; trader ma od tej
@@ -548,6 +654,39 @@ def odpowiedz_z_faq(thread: list[dict], baza_wiedzy: BazaWiedzy, produkty) -> di
     return wynik(tekst, cat="other")
 
 
+def prompt_kompaktowy(thread: list[dict], baza_wiedzy: BazaWiedzy, produkty, site_name: str,
+                      support_email: str) -> str:
+    """Prompt dla darmowych API z niskim limitem tokenów (np. 8K/min): zasady +
+    fakty z kodu + tylko kilka wpisów wiedzy najbliższych pytaniu (z kontekstem
+    ostatnich pytań). Kilka razy mniejszy niż pełny, a odpowiedzi trafniejsze."""
+    pytania = [m["body"] for m in thread if m["author"] == "trader"][-3:]
+    trafienia = baza_wiedzy.szukaj(" ".join(pytania), k=6)
+    wybrane = [baza_wiedzy.wpisy[i] for s, i, _ in trafienia if s > 0.5] or baza_wiedzy.wpisy[:4]
+    f = fakty(produkty)
+    liczby = "" if f is None else (
+        f"Plan facts (from the live catalog): daily loss limit {f.dzienna:g}%; maximum loss {f.max_2step:g}% on "
+        f"2-Step and {f.max_instant:g}% on Instant Funding ({f.drawdown}); minimum trading days {f.dni_2step} per "
+        f"phase on 2-Step and {f.dni_instant} on Instant Funding; max open volume from {f.loty_min:g} lots on "
+        f"{_k(f.rozmiar_min)} to {f.loty_max:g} lots on {_k(f.rozmiar_max)}.\n")
+    wiedza = "\n\n".join(f"Q: {q}\nA: {a}" for q, a in wybrane)
+    return f"""You are the AI support assistant in the {site_name} trader portal (prop trading challenges). \
+You are an AI, not a person. Answer the trader's latest message helpfully and naturally, using ONLY the \
+knowledge below; use the earlier messages for context (e.g. "how to do it" refers to the previous topic). \
+Give step-by-step instructions when the trader asks how to do something. Keep it short: 1-6 sentences or a \
+short numbered list, plain text, no markdown headings.
+
+Hand the conversation to the support team (resolution "needs_human") instead of answering when it is about: \
+a specific account's results, balance, status or why it failed; payouts, withdrawals, refunds, charges or \
+money; complaints or disputes; a request for a person; or anything the knowledge below does not cover. Never \
+invent rules, numbers, prices or policies and never promise payouts, refunds or timelines. All accounts are \
+demo accounts with simulated capital. Support email: {support_email}.
+
+{liczby}
+<knowledge>
+{wiedza}
+</knowledge>"""
+
+
 def _poprawny(wynik) -> bool:
     return (isinstance(wynik, dict) and isinstance(wynik.get("reply"), str) and wynik["reply"].strip()
             and wynik.get("resolution") in ("answered", "needs_human")
@@ -564,6 +703,15 @@ BEZ_ASYSTENTA = ("Thanks — your message is with our support team. They'll repl
                  "and you'll also get an email when they do.")
 
 
+# (nazwa serwisu, e-mail supportu) do promptu kompaktowego — ustawia main.py przy starcie.
+_STRONA = ("Pro Traders Funding", "support@protradersfunding.com")
+
+
+def ustaw_strone(site_name: str, support_email: str) -> None:
+    global _STRONA
+    _STRONA = (site_name, support_email)
+
+
 def odpowiedz(thread: list[dict], system, wiedza) -> dict:
     """Następna tura asystenta: {reply, escalate, category, subject, summary}.
 
@@ -577,14 +725,32 @@ def odpowiedz(thread: list[dict], system, wiedza) -> dict:
     kto = dostawca()
     if kto is None:
         return awaryjnie
+    przez = {"sdk": _przez_sdk, "openai": _przez_openai, "cli": _przez_cli}
     try:
         if kto == "faq":
             wynik = odpowiedz_z_faq(thread, *wiedza())
+        elif kto == "openai":
+            # Darmowe API mają mały limit tokenów — prompt kompaktowy z wiedzą dobraną do pytania.
+            b, produkty = wiedza()
+            prompt = prompt_kompaktowy(thread, b, produkty, *_STRONA)
+            wynik = _przez_openai(prompt, _historia_dla_modelu(thread)[-8:])
+            if not _poprawny(wynik):
+                raise ValueError(f"invalid model output: {wynik!r}"[:300])
         else:
-            wynik = (_przez_sdk if kto == "sdk" else _przez_cli)(system(), _historia_dla_modelu(thread))
-    except Exception as e:   # model niedostępny / limit / timeout — klient nie może zostać bez odpowiedzi
+            wynik = przez[kto](system(), _historia_dla_modelu(thread))
+            if not _poprawny(wynik):
+                raise ValueError(f"invalid model output: {wynik!r}"[:300])
+    except Exception as e:   # model niedostępny / limit / timeout / zły JSON
         log.warning("helpdesk: model call failed (%s): %s", kto, e)
-        return awaryjnie
+        # Model nie odpowiedział — zapasowo silnik FAQ (za darmo, zawsze dostępny);
+        # dopiero gdy i on zawiedzie, rozmowa idzie do zespołu.
+        try:
+            wynik = odpowiedz_z_faq(thread, *wiedza()) if kto != "faq" else None
+        except Exception as e2:
+            log.warning("helpdesk: FAQ fallback failed: %s", e2)
+            wynik = None
+        if wynik is None:
+            return awaryjnie
     if not _poprawny(wynik):
         log.warning("helpdesk: invalid model output: %r", wynik)
         return awaryjnie
