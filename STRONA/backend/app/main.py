@@ -3273,17 +3273,33 @@ CHAT_CZLOWIEK_PO_WIAD = 3        # „Talk to a person" po tylu wiadomościach t
 CHAT_CZLOWIEK_PO_S = 2 * 60      # …albo po tylu sekundach od początku rozmowy
 
 
+def _czat_sensowne(thread: list[dict]) -> int:
+    """Wiadomości tradera, na które asystent faktycznie próbował odpowiedzieć —
+    bez bełkotu, powtórek i wiadomości ponad limit."""
+    n = 0
+    for i, m in enumerate(thread):
+        if m["author"] != "trader":
+            continue
+        nast = next((x["body"] for x in thread[i + 1:] if x["author"] == "ai"), "")
+        if not helpdesk.pomijana(nast):
+            n += 1
+    return n
+
+
 def _czat_proponuj_czlowieka(t: SupportTicket, thread: list[dict]) -> bool:
     """Przycisk „Talk to a person" nie wisi od pierwszej sekundy: asystent ma
     najpierw spróbować. Pokazujemy go, gdy asystent nie znalazł odpowiedzi,
-    po kilku wiadomościach tradera albo po chwili rozmowy."""
+    po kilku sensownych wiadomościach tradera albo po chwili rozmowy. Bełkot
+    i powtórki się nie liczą — spamem nie da się „wyklikać" przycisku."""
     if t.status != "bot":
         return False
-    trader = [m for m in thread if m["author"] == "trader"]
-    if not trader:
-        return False
+    sensowne = _czat_sensowne(thread)
     ost_ai = next((m["body"] for m in reversed(thread) if m["author"] == "ai"), "")
-    if ost_ai.startswith(helpdesk.NIE_WIEM) or len(trader) >= CHAT_CZLOWIEK_PO_WIAD:
+    if ost_ai.startswith((helpdesk.NIE_WIEM, helpdesk.LIMIT_AI)):
+        return True
+    if not sensowne:
+        return False
+    if sensowne >= CHAT_CZLOWIEK_PO_WIAD:
         return True
     # Świeżo utworzony ticket ma strefę (UTC), odczytany z bazy — już nie.
     start = t.created_at.replace(tzinfo=None) if t.created_at.tzinfo else t.created_at
@@ -3291,15 +3307,25 @@ def _czat_proponuj_czlowieka(t: SupportTicket, thread: list[dict]) -> bool:
 
 
 def _czat_prompt(session) -> str:
-    plany = helpdesk.zasady_planow(session.query(Product).all())
-    return helpdesk.prompt_systemowy(settings.site_name, settings.support_email,
-                                     str(TEMPLATES / "faq.html"), plany)
+    produkty = session.query(Product).all()
+    return helpdesk.prompt_systemowy(settings.site_name, settings.support_email, str(TEMPLATES / "faq.html"),
+                                     helpdesk.zasady_planow(produkty), helpdesk.fakty(produkty))
+
+
+def _czat_baza(session, produkty=None):
+    """Baza silnika FAQ: FAQ poprawione faktami z kodu + przewodnik po portalu."""
+    produkty = produkty if produkty is not None else session.query(Product).all()
+    return helpdesk.baza(settings.site_name, settings.support_email, str(TEMPLATES / "faq.html"),
+                         helpdesk.fakty(produkty))
 
 
 def _czat_wiedza(session):
-    """Baza silnika FAQ (FAQ + przewodnik po portalu) i aktualne plany z katalogu."""
-    return (helpdesk.baza(settings.site_name, settings.support_email, str(TEMPLATES / "faq.html")),
-            session.query(Product).all())
+    """Baza silnika FAQ i aktualne plany z katalogu."""
+    produkty = session.query(Product).all()
+    return _czat_baza(session, produkty), produkty
+
+
+CHAT_NA_MINUTE = 8   # limit tempa wiadomości tradera (wszystkie rozmowy razem)
 
 
 def _czat_przekaz(session, t: SupportTicket, trader: Trader, subject: str, summary: str,
@@ -3359,35 +3385,67 @@ def chat_send(payload: ChatIn, trader: Trader = Depends(auth.current_trader)):
         raise HTTPException(400, "A message is required")
     session = SessionLocal()
     try:
+        teraz = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        def wiadomosci_od(od):
+            return (session.query(TicketMessage).join(SupportTicket, SupportTicket.id == TicketMessage.ticket_id)
+                    .filter(SupportTicket.trader_id == trader.id, TicketMessage.author == "trader",
+                            TicketMessage.ts >= od).count())
+
+        # Limit tempa: zalew wiadomości nie trafia ani do asystenta, ani do zespołu.
+        if wiadomosci_od(teraz - timedelta(minutes=1)) >= CHAT_NA_MINUTE:
+            raise HTTPException(429, "You're sending messages too fast. Please wait a moment.")
+        slownik = _czat_baza(session).slownik
         if payload.chat_id:
             t = _czat_tradera(session, trader.id, payload.chat_id)
             if t.status == "closed":
                 raise HTTPException(400, "This conversation is closed. Start a new one.")
         else:
+            # Bełkot nie zakłada nowej rozmowy (nie zaśmieca listy ani panelu).
+            if helpdesk.bez_sensu(body, slownik):
+                raise HTTPException(400, "Please type your question in a few words.")
             t = SupportTicket(trader_id=trader.id, subject=f"Chat: {body[:70]}", status="bot",
                               ref=_wolny_znak_biletu(session))
             session.add(t)
             session.flush()
+        poprzednia = (session.query(TicketMessage.body)
+                      .filter(TicketMessage.ticket_id == t.id, TicketMessage.author == "trader")
+                      .order_by(TicketMessage.id.desc()).first())
+        powtorka = bool(poprzednia and poprzednia[0].strip().lower() == body.lower())
+        smiec = helpdesk.bez_sensu(body, slownik)
         session.add(TicketMessage(ticket_id=t.id, author="trader", body=body[:4000]))
         session.commit()
 
         if t.status != "bot":
-            # Rozmowa jest już u zespołu — wiadomość idzie do admina jak odpowiedź w bilecie.
+            # Rozmowa jest już u zespołu — wiadomość idzie do admina jak odpowiedź
+            # w bilecie. Bełkot i powtórki zostają w rozmowie, ale bez powiadomienia.
+            if smiec or powtorka:
+                return _czat_dict(session, t)
             t.status = "open"
             session.commit()
             notify.notify_admins("admin_ticket", f"Ticket reply: {t.subject[:80]}", trader.email)
             return _czat_dict(session, t)
 
-        godzina_temu = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
-        ostatnio = (session.query(TicketMessage).join(SupportTicket, SupportTicket.id == TicketMessage.ticket_id)
-                    .filter(SupportTicket.trader_id == trader.id, TicketMessage.author == "trader",
-                            TicketMessage.ts >= godzina_temu).count())
-        if helpdesk.do_czlowieka(body) or ostatnio > CHAT_AI_LIMIT_H:
-            # Pieniądze, wynik konta, reklamacja, prośba o człowieka (albo limit
-            # asystenta) — bez pytania modelu, prosto do zespołu.
+        if powtorka:
+            session.add(TicketMessage(ticket_id=t.id, author="ai", body=helpdesk.DUPLIKAT))
+            session.commit()
+            return _czat_dict(session, t)
+        if smiec:
+            session.add(TicketMessage(ticket_id=t.id, author="ai", body=helpdesk.NIE_ROZUMIEM + (
+                " Could you ask your question in a few words? For example: \"How do I log in to MT5?\"")))
+            session.commit()
+            return _czat_dict(session, t)
+        if helpdesk.do_czlowieka(body):
+            # Pieniądze, wynik konta, reklamacja, prośba o człowieka — bez pytania
+            # asystenta, prosto do zespołu.
             session.add(TicketMessage(ticket_id=t.id, author="ai", body=helpdesk.PRZEKAZANIE))
-            _czat_przekaz(session, t, trader, f"Chat: {body[:70]}", "", "other",
-                          "topic reserved for the team" if helpdesk.do_czlowieka(body) else "assistant limit")
+            _czat_przekaz(session, t, trader, f"Chat: {body[:70]}", "", "other", "topic reserved for the team")
+            return _czat_dict(session, t)
+        if wiadomosci_od(teraz - timedelta(hours=1)) > CHAT_AI_LIMIT_H:
+            # Limit asystenta: przerwa zamiast przerzucania spamu na zespół —
+            # trader ma przycisk „Talk to a person", jeśli sprawa jest prawdziwa.
+            session.add(TicketMessage(ticket_id=t.id, author="ai", body=helpdesk.LIMIT_AI))
+            session.commit()
             return _czat_dict(session, t)
 
         thread = _ticket_dict(session, t, with_thread=True, for_trader=True)["thread"]

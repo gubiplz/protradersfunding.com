@@ -26,6 +26,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
@@ -94,6 +95,75 @@ def faq_wpisy(sciezka: Path, kontekst: dict) -> list[tuple[str, str]]:
     return wpisy
 
 
+@dataclass(frozen=True)
+class Fakty:
+    """Liczby i zasady wzięte z KODU (katalog planów, catalog.py), nie z FAQ.
+    FAQ bywa nieaktualne — asystent mówi to, co faktycznie egzekwuje platforma."""
+    dni_2step: int
+    dni_instant: int
+    dzienna: float
+    max_2step: float
+    max_instant: float
+    drawdown: str
+    loty_min: float
+    loty_max: float
+    rozmiar_min: float
+    rozmiar_max: float
+    weekend_usd: float
+
+
+def fakty(produkty) -> Fakty | None:
+    """None, gdy katalog jest pusty — wtedy poprawki faktami są pomijane."""
+    from . import catalog
+    akt = [p for p in produkty if p.active] or list(produkty)
+    if not akt:
+        return None
+    dwa = [p for p in akt if p.steps >= 2] or akt
+    inst = [p for p in akt if p.steps <= 1] or akt
+    najm, najw = min(akt, key=lambda p: p.account_size), max(akt, key=lambda p: p.account_size)
+    return Fakty(
+        dni_2step=max(p.min_trading_days for p in dwa), dni_instant=max(p.min_trading_days for p in inst),
+        dzienna=max(p.max_daily_loss_pct for p in akt),
+        max_2step=max(p.max_overall_loss_pct for p in dwa), max_instant=max(p.max_overall_loss_pct for p in inst),
+        drawdown="static" if all(p.drawdown_type == "static" for p in akt) else "static or trailing",
+        loty_min=najm.max_lots, loty_max=najw.max_lots, rozmiar_min=najm.account_size, rozmiar_max=najw.account_size,
+        weekend_usd=catalog.WEEKEND_ADDON_USD)
+
+
+def _k(v: float) -> str:
+    return f"${v / 1e6:g}M" if v >= 1e6 else f"${v / 1e3:g}K"
+
+
+# Odpowiedzi FAQ niezgodne z kodem — nadpisane wersją zgodną z tym, co platforma
+# egzekwuje (rules.py, katalog planów). Klucz: początek pytania z faq.html.
+POPRAWKI = {
+    "what counts as a trading day": lambda f: (
+        "A trading day is a calendar day (server time) on which you have at least one open position. "
+        f"Minimum trading days: {f.dni_2step} per phase on 2-Step plans and {f.dni_instant} on Instant Funding."),
+    "is news trading allowed": lambda f: (
+        "Yes. There are no news blackouts, no weekend-flat requirement and no strategy bans, so EAs are allowed. "
+        f"The rules that apply are the loss limits ({f.dzienna:g}% daily; {f.max_2step:g}% maximum on 2-Step and "
+        f"{f.max_instant:g}% on Instant Funding, {f.drawdown}), the profit targets, the minimum trading days and a "
+        f"maximum open volume that depends on the account size (from {f.loty_min:g} lots on {_k(f.rozmiar_min)} to "
+        f"{f.loty_max:g} lots on {_k(f.rozmiar_max)}). The optional Weekend Trading add-on (${f.weekend_usd:,.0f}) "
+        "adds two extra trading days a week."),
+    "what happens when i break a rule": lambda f: (
+        "If your equity crosses the daily or maximum loss limit, or your open volume goes above your plan's lot "
+        "limit, the risk engine fails the account and closes open positions. The breach reason is shown in your "
+        "account dashboard. For a question about a specific account, our support team can help."),
+}
+
+
+def popraw_wiedze(wpisy: list[tuple[str, str]], f: Fakty | None) -> list[tuple[str, str]]:
+    if f is None:
+        return list(wpisy)
+    out = []
+    for q, a in wpisy:
+        klucz = next((k for k in POPRAWKI if q.lower().startswith(k)), None)
+        out.append((q, POPRAWKI[klucz](f) if klucz else a))
+    return out
+
+
 def zasady_planow(produkty) -> str:
     """Aktywne plany z katalogu (wiersze `Product`). Podział zysku celowo pominięty:
     to obietnica wypłaty, a o wypłatach rozmawia człowiek."""
@@ -112,11 +182,12 @@ def zasady_planow(produkty) -> str:
 
 
 @lru_cache(maxsize=4)
-def prompt_systemowy(site_name: str, support_email: str, faq_path: str, plany: str) -> str:
-    """Stały prompt (cache'owany po stronie API): rola, granice, FAQ, zasady planów.
-    Zero danych zmiennych (daty, imiona) — każda zmiana bajtu psuje cache."""
-    faq = "\n\n".join(f"Q: {q}\nA: {a}" for q, a in
-                      faq_wpisy(Path(faq_path), {"site_name": site_name, "support_email": support_email}))
+def prompt_systemowy(site_name: str, support_email: str, faq_path: str, plany: str, f: Fakty) -> str:
+    """Stały prompt (cache'owany po stronie API): rola, granice, FAQ (poprawione
+    faktami z kodu), przewodnik po portalu, zasady planów. Zero danych zmiennych
+    (daty, imiona) — każda zmiana bajtu psuje cache."""
+    wpisy = popraw_wiedze(faq_wpisy(Path(faq_path), {"site_name": site_name, "support_email": support_email}), f)
+    faq = "\n\n".join(f"Q: {q}\nA: {a}" for q, a in wpisy + PORTAL)
     return f"""You are the AI support assistant in the trader portal of {site_name}, a prop trading challenge \
 platform. You chat with logged-in traders. You are an AI, not a person: say so if asked, and never pretend \
 to be a member of the team.
@@ -297,6 +368,8 @@ class BazaWiedzy:
 
     def __init__(self, wpisy: list[tuple[str, str]]):
         self.wpisy = wpisy
+        # Słownik do odróżniania pytań od bełkotu: każde słowo z bazy wiedzy.
+        self.slownik = {w for q, a in wpisy for w in re.findall(r"[a-z]+", (q + " " + a).lower())}
         self.dok = [_tokeny(q) * 2 + _tokeny(a) for q, a in wpisy]
         n = len(self.dok)
         self.srednia = sum(map(len, self.dok)) / max(n, 1)
@@ -325,8 +398,11 @@ class BazaWiedzy:
 
 
 @lru_cache(maxsize=4)
-def baza(site_name: str, support_email: str, faq_path: str) -> BazaWiedzy:
-    return BazaWiedzy(faq_wpisy(Path(faq_path), {"site_name": site_name, "support_email": support_email}) + PORTAL)
+def baza(site_name: str, support_email: str, faq_path: str, f: Fakty) -> BazaWiedzy:
+    """FAQ poprawione faktami z kodu + przewodnik po portalu. Klucz cache obejmuje
+    fakty, więc zmiana katalogu planów od razu zmienia odpowiedzi."""
+    wpisy = faq_wpisy(Path(faq_path), {"site_name": site_name, "support_email": support_email})
+    return BazaWiedzy(popraw_wiedze(wpisy, f) + PORTAL)
 
 
 _ROZMIAR = re.compile(r"\$?\s?(\d{1,3}(?:[.,]\d{3})+|\d+(?:\.\d+)?\s?[km])\b", re.I)
@@ -383,6 +459,53 @@ def _odpowiedz_o_planie(pytanie: str, produkty) -> str | None:
 
 
 NIE_WIEM = "I couldn't find that in our help articles."
+NIE_ROZUMIEM = "Sorry, I didn't catch that."
+DUPLIKAT = "You just asked that — my answer is right above."
+LIMIT_AI = ("You've sent a lot of messages in a short time, so I'm taking a short break. "
+            "Please try again in a while, or tap \"Talk to a person\" below.")
+# Ile sensownych pytań bez odpowiedzi w jednej rozmowie, zanim asystent sam
+# przekaże ją zespołowi (wcześniej trader ma do tego przycisk).
+AUTO_PRZEKAZANIE_PO = 3
+
+# Odpowiedzi asystenta, które NIE są próbą pomocy (bełkot, powtórka, limit):
+# nie liczą się do przycisku „Talk to a person" ani do automatycznego przekazania.
+_ODPOWIEDZI_POMIJANE = (NIE_ROZUMIEM, DUPLIKAT, LIMIT_AI)
+
+_KLAWIATURA = ("qwert", "werty", "asdf", "sdfg", "dfgh", "fghj", "ghjk", "hjkl", "zxcv", "xcvb", "cvbn")
+_ZBITE_SPOLGLOSKI = re.compile(r"[bcdfghjklmnpqrstvwxz]{5,}")
+_POWTORZENIE = re.compile(r"(.)\1{4,}")
+_ZWYKLE = set("""yes no ok okay why how what when where who which can could would should is are do does did
+help need want account money trade trading broker forex gold chart charts problem issue error login password email
+support agent human person please question answer""".split())
+
+
+def bez_sensu(tekst: str, slownik: set[str] | None = None) -> bool:
+    """Bełkot: losowe litery, walenie w klawiaturę, ciąg tych samych znaków.
+    Celowo ostrożnie — pytanie w innym języku albo z literówką NIE jest bełkotem;
+    bełkotem jest tylko tekst bez żadnego znanego słowa i o nienaturalnych literach."""
+    t = (tekst or "").strip().lower()
+    slowa = re.findall(r"[a-ząćęłńóśźż]+", t)
+    if len(re.findall(r"[a-z0-9ąćęłńóśźż]", t)) < 2:
+        return True                      # same znaki interpunkcyjne, emotki
+    if any(k in t for k in _KLAWIATURA) or _POWTORZENIE.search(t):
+        return True
+    if re.search(r"\d", t):
+        return False                     # liczby to treść: „25k?", „100k fee"
+    znane = (slownik or set()) | _STOP | _ZWYKLE | set(_SYNONIMY)
+    if any(w in znane for w in slowa):
+        return False
+    dlugie = [w for w in slowa if len(w) >= 3]
+    if not dlugie:
+        return True                      # same strzępy: „sd fg hj"
+    for w in dlugie:
+        samogloski = sum(c in "aeiouyąęó" for c in w) / len(w)
+        if _ZBITE_SPOLGLOSKI.search(w) or samogloski < .2 or (len(w) >= 6 and samogloski > .8):
+            return True
+    return False
+
+
+def pomijana(odpowiedz_ai: str) -> bool:
+    return (odpowiedz_ai or "").startswith(_ODPOWIEDZI_POMIJANE)
 _POWITANIE = re.compile(r"^\s*(hi|hey|hello|yo|good (morning|afternoon|evening)|hiya|sup)\b[\s!.,?]*$", re.I)
 _DZIEKI = re.compile(r"^\s*(thanks?|thank you|thx|ty|cheers|great|perfect|ok(ay)?|got it|cool)\b[\s!.,]*$", re.I)
 
@@ -408,16 +531,20 @@ def odpowiedz_z_faq(thread: list[dict], baza_wiedzy: BazaWiedzy, produkty) -> di
         q, a = baza_wiedzy.wpisy[trafienia[0][1]]
         return wynik(a, cat="how_to", subj=q[:80])
 
-    # Bez trafienia: raz prosimy o doprecyzowanie z podpowiedziami, za drugim razem człowiek.
-    poprzednia_ai = next((m["body"] for m in reversed(thread) if m["author"] == "ai"), "")
-    if poprzednia_ai.startswith(NIE_WIEM):
-        return wynik("I still can't find an answer to that, so I'm handing it to our support team. "
-                     "They'll reply here in this chat and by email.", res="needs_human", cat="other",
-                     summ=f"No help-article match for: {pytanie[:300]}")
+    # Bez trafienia: prośba o doprecyzowanie z podpowiedziami; trader ma od tej
+    # chwili przycisk „Talk to a person". Sam asystent przekazuje rozmowę dopiero
+    # przy kolejnym (AUTO_PRZEKAZANIE_PO) sensownym pytaniu bez odpowiedzi.
+    bez_odpowiedzi = sum(1 for m in thread if m["author"] == "ai" and m["body"].startswith(NIE_WIEM)) + 1
+    if bez_odpowiedzi >= AUTO_PRZEKAZANIE_PO:
+        return wynik("I haven't been able to answer your questions, so I'm handing this conversation to our "
+                     "support team. They'll reply here in this chat and by email.", res="needs_human",
+                     cat="other", summ=f"{bez_odpowiedzi} questions without a help-article match; "
+                                       f"latest: {pytanie[:300]}")
     podobne = [baza_wiedzy.wpisy[i][0] for s, i, _ in trafienia if s >= 0.8][:3]
     tekst = NIE_WIEM + " Could you rephrase it?"
     if podobne:
         tekst += " Related topics: " + "; ".join(f'"{q}"' for q in podobne) + "."
+    tekst += " If it's something else, tap \"Talk to a person\" below."
     return wynik(tekst, cat="other")
 
 

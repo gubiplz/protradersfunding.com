@@ -296,15 +296,89 @@ def test_faq_liczby_planu_z_katalogu(klient, silnik_faq):
     assert f"max daily loss {p.max_daily_loss_pct:g}%" in chat["thread"][-1]["body"]
 
 
-def test_faq_bez_trafienia_najpierw_dopytuje_potem_czlowiek(klient, silnik_faq):
+def test_faq_bez_trafienia_przycisk_a_przekazanie_dopiero_po_trzech(klient, silnik_faq):
+    """Nie wie: przycisk „Talk to a person". Sam przekazuje dopiero przy trzecim
+    sensownym pytaniu bez odpowiedzi."""
     h, _ = klient
     chat = _wyslij(h, "What leverage do you offer?")
     assert chat["status"] == "bot" and chat["thread"][-1]["body"].startswith(helpdesk.NIE_WIEM)
-    assert chat["offer_human"] is True   # asystent nie pomógł — przycisk się pojawia
+    assert chat["offer_human"] is True
     chat = _wyslij(h, "Leverage for indices please", chat["id"])
-    assert chat["status"] == "open"
+    assert chat["status"] == "bot"                     # drugi raz — nadal tylko przycisk
+    chat = _wyslij(h, "Which brokers liquidity provider is behind the server", chat["id"])
+    assert chat["status"] == "open"                    # trzecie sensowne pytanie bez odpowiedzi
     pelny = client.get(f"/api/admin/tickets/{chat['id']}", headers=ADMIN).json()
-    assert any("No help-article match" in m["body"] for m in pelny["thread"] if m["author"] == "ai_note")
+    assert any("without a help-article match" in m["body"] for m in pelny["thread"] if m["author"] == "ai_note")
+
+
+def test_odpowiedzi_zgodne_z_kodem_nie_z_nieaktualnym_faq(klient, silnik_faq):
+    """FAQ mówi „typically 3–4" i „executed a trade"; kod: otwarta pozycja i dni z katalogu."""
+    h, _ = klient
+    s = SessionLocal()
+    try:
+        from app.models import Product
+        f = helpdesk.fakty(s.query(Product).all())
+    finally:
+        s.close()
+    odp = _wyslij(h, "What counts as a trading day?")["thread"][-1]["body"]
+    assert "open position" in odp and "3–4" not in odp
+    assert f"{f.dni_2step} per phase on 2-Step" in odp and f"{f.dni_instant} on Instant" in odp
+    odp = _wyslij(h, "Can I use an EA?")["thread"][-1]["body"]
+    assert "lots" in odp and "Weekend Trading add-on" in odp
+    odp = _wyslij(h, "What happens when I break a rule?")["thread"][-1]["body"]
+    assert "same code applies to everyone" not in odp and "discretionary" not in odp
+
+
+@pytest.mark.parametrize("smiec", ["asdfghjkl", "kkkkkkkkk", "xqzvbnmtrk wpl", "??"])
+def test_belkot_ignorowany(klient, model, smiec):
+    """Bełkot nie idzie do asystenta ani do zespołu, nie zakłada rozmowy i nie
+    liczy się do przycisku ani przekazania."""
+    h, _ = klient
+    r = client.post("/api/me/chat", headers=h, json={"message": smiec})
+    assert r.status_code == 400                        # nowej rozmowy z bełkotu nie ma
+    model["odp"] = _odp()
+    chat = _wyslij(h, "How do I log in to MT5?")
+    model["wywolania"] = 0
+    chat = _wyslij(h, smiec, chat["id"])
+    assert model["wywolania"] == 0 and chat["status"] == "bot"
+    assert chat["thread"][-1]["body"].startswith(helpdesk.NIE_ROZUMIEM)
+    for _ in range(3):
+        chat = _wyslij(h, smiec + "x", chat["id"])
+    assert chat["status"] == "bot" and chat["offer_human"] is False
+    assert chat["id"] not in _admin_ids()
+
+
+def test_powtorka_bez_nowej_odpowiedzi(klient, model):
+    h, _ = klient
+    model["odp"] = _odp()
+    chat = _wyslij(h, "How do I log in to MT5?")
+    model["wywolania"] = 0
+    chat = _wyslij(h, "how do i log in to mt5?", chat["id"])
+    assert model["wywolania"] == 0 and chat["thread"][-1]["body"] == helpdesk.DUPLIKAT
+
+
+def test_limit_tempa_i_limit_godzinny_bez_przerzucania_na_zespol(klient, model, monkeypatch):
+    from app import main as m
+    h, _ = klient
+    model["odp"] = _odp()
+    chat = _wyslij(h, "How do I log in to MT5?")
+    monkeypatch.setattr(m, "CHAT_NA_MINUTE", 3)
+    _wyslij(h, "What about the web terminal?", chat["id"])
+    _wyslij(h, "And on Android?", chat["id"])
+    r = client.post("/api/me/chat", headers=h, json={"message": "And on iOS?", "chat_id": chat["id"]})
+    assert r.status_code == 429
+    monkeypatch.setattr(m, "CHAT_NA_MINUTE", 100)
+    monkeypatch.setattr(m, "CHAT_AI_LIMIT_H", 2)
+    chat = _wyslij(h, "And on a Mac?", chat["id"])
+    assert chat["thread"][-1]["body"] == helpdesk.LIMIT_AI
+    assert chat["status"] == "bot" and chat["offer_human"] is True and chat["id"] not in _admin_ids()
+
+
+def test_bez_sensu_rozroznia_pytania():
+    for ok in ["How do I log in to MT5?", "jak sie zalogowac do mt5", "Bonjour, comment ça marche?", "ea?", "25k?"]:
+        assert helpdesk.bez_sensu(ok) is False, ok
+    for zle in ["asdfgh", "qwertyuiop", "kkkkkkk", "xzcvbnm", "!!!", "sdfkjhsdkfjh"]:
+        assert helpdesk.bez_sensu(zle) is True, zle
 
 
 def test_przycisk_czlowiek_dopiero_pozniej(klient, silnik_faq, monkeypatch):
