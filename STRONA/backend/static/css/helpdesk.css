@@ -1,0 +1,84 @@
+/* Dymek pomocy (helpdesk.js): okrągły przycisk w prawym dolnym rogu + okno
+   rozmowy. Kolory z tokenów portalu (--acc, --grad, --panel, --lg-*), więc
+   działa w jasnym i ciemnym motywie i w motywie certyfikatu. Dymki rozmowy
+   rysuje chat-kit.js stylami z apple.css. Animacje tylko na transform/opacity. */
+
+.hd-fab{position:fixed;right:24px;bottom:24px;z-index:45;width:56px;height:56px;border-radius:50%;
+  display:grid;place-items:center;border:0;cursor:pointer;color:#fff;background:var(--grad);
+  box-shadow:0 10px 28px -8px color-mix(in srgb,var(--acc) 70%,transparent),inset 0 1px 0 rgba(255,255,255,.3);
+  transition:transform .35s cubic-bezier(.34,1.56,.64,1),opacity .2s}
+.hd-fab svg{width:25px;height:25px}
+.hd-fab:hover{transform:translateY(-2px) scale(1.04)}
+.hd-fab:active{transform:scale(.94)}
+.hd-fab.on{transform:scale(.92)}
+.hd-fab.hidden{display:none}
+.hd-dot{position:absolute;top:6px;right:6px;width:12px;height:12px;border-radius:50%;
+  background:var(--red);box-shadow:0 0 0 2px var(--bg)}
+.hd-dot.hidden{display:none}
+
+.hd-panel{position:fixed;right:24px;bottom:92px;z-index:46;width:min(390px,calc(100vw - 32px));
+  height:min(600px,calc(100dvh - 120px));display:flex;flex-direction:column;overflow:hidden;
+  border-radius:20px;background:var(--panel);border:1px solid var(--line2);
+  box-shadow:0 30px 70px -24px rgba(0,0,0,.45),0 2px 8px rgba(0,0,0,.12);
+  opacity:0;transform:translateY(12px) scale(.98);transform-origin:100% 100%;
+  transition:opacity .2s ease,transform .25s cubic-bezier(.22,1,.36,1)}
+.hd-panel.open{opacity:1;transform:none}
+.hd-panel[hidden]{display:none}
+
+.hd-head{display:flex;align-items:center;gap:12px;padding:14px 14px 14px 16px;
+  border-bottom:1px solid var(--line);background:var(--panel2)}
+.hd-av{position:relative;width:40px;height:40px;flex:none;border-radius:50%;display:grid;place-items:center;
+  color:#fff;background:var(--grad);font-family:var(--display);font-weight:700;font-size:17px}
+.hd-av svg{width:20px;height:20px}
+/* asystent AI: ciemniejsza „technologiczna" tarcza z iskrą */
+.hd-av.ai{background:linear-gradient(135deg,#0f2a5c,#1b4bd8);box-shadow:inset 0 0 0 1px rgba(103,210,255,.45)}
+.hd-av.ai svg{color:#67d2ff}
+/* konsultant: inicjał na gradiencie marki */
+.hd-av.person{background:linear-gradient(135deg,#2b8bff,#1b4bd8)}
+.hd-online{position:absolute;right:-1px;bottom:-1px;width:12px;height:12px;border-radius:50%;
+  background:#22c55e;box-shadow:0 0 0 2.5px var(--panel2)}
+.hd-ttl{display:flex;flex-direction:column;min-width:0;flex:1}
+.hd-ttl b{font-family:var(--display);font-size:15px;display:flex;align-items:center;gap:7px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hd-badge{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.06em;padding:2px 6px;
+  border-radius:6px;color:var(--acc);background:var(--acc-bg);border:1px solid var(--acc-line)}
+.hd-on{color:#22c55e;font-weight:600}
+.hd-ttl span{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hd-x{width:34px;height:34px;flex:none;border-radius:50%;border:0;background:transparent;color:var(--muted);
+  display:grid;place-items:center;cursor:pointer}
+.hd-x:hover{background:var(--hover);color:var(--txt)}
+.hd-x svg{width:18px;height:18px}
+
+.hd-body{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:12px 14px}
+.hd-body .chat{margin:0}
+.hd-foot{border-top:1px solid var(--line);padding:8px 10px 10px;background:var(--panel)}
+.hd-foot .chat-compose{margin:0}
+.hd-acts{display:flex;justify-content:center;min-height:0}
+.hd-acts:not(:empty){padding:2px 4px 8px}
+.hd-link{border:0;background:none;color:var(--acc);font-weight:600;font-size:12.5px;cursor:pointer;padding:4px 6px}
+.hd-link:hover{text-decoration:underline}
+.hd-note{font-size:12px;color:var(--muted);text-align:center}
+
+/* „Pisze…" asystenta */
+.hd-typing{display:inline-flex;gap:4px;padding:10px 14px;margin:2px 0 6px;border-radius:16px;
+  background:var(--bg3)}
+.hd-typing i{width:6px;height:6px;border-radius:50%;background:var(--muted);opacity:.5;
+  animation:hd-blink 1.2s infinite ease-in-out}
+.hd-typing i:nth-child(2){animation-delay:.15s}
+.hd-typing i:nth-child(3){animation-delay:.3s}
+@keyframes hd-blink{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:.9;transform:translateY(-2px)}}
+
+/* Telefon: nad dolnym paskiem zakładek, okno rozmowy na cały ekran */
+@media (max-width:960px){
+  .hd-fab{right:16px;bottom:calc(58px + env(safe-area-inset-bottom) + 14px);width:52px;height:52px}
+}
+@media (max-width:640px){
+  /* Pełny ekran PONAD dolnym paskiem zakładek (z-index 50) i arkuszem „More" (61). */
+  .hd-panel{inset:0;width:auto;height:auto;border-radius:0;border:0;z-index:70;
+    padding-bottom:env(safe-area-inset-bottom)}
+  .hd-head{padding-top:calc(12px + env(safe-area-inset-top))}
+}
+@media (prefers-reduced-motion:reduce){
+  .hd-fab,.hd-panel{transition:none}
+  .hd-typing i{animation:none}
+}

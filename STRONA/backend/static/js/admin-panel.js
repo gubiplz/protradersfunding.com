@@ -4836,7 +4836,7 @@ async function openTicket(id){
       ${otwarty?`<button class="btn-o sm" style="margin-left:auto" onclick="replyTicket(${t.id},true)"
         title="Close the ticket. Anything typed below is sent first.">Close ticket</button>`:''}
     </div>
-    ${chatHtml(t.thread,{me:'admin',them:'Trader',tz:'Europe/Warsaw'})}
+    ${chatHtml(t.thread,{me:'admin',them:'Trader',tz:'Europe/Warsaw',names:{ai:'AI assistant',ai_note:'AI handover note (team only)'}})}
     ${otwarty?`<div class="tk-compose">${chatCompose({id:'tk-reply',send:`replyTicket(${t.id},false)`,
       placeholder:'Reply to the trader…'})}</div>`:'<p class="chat-closed">This ticket is closed.</p>'}`);
   /* Rozmowa otwiera się na OSTATNIEJ wiadomości, jak w komunikatorze. */

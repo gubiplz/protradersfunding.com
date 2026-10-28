@@ -43,3 +43,6 @@ openpyxl>=3.1
 
 # Testowe wypłaty vUSDT na Polygonie (app/vusdt.py) — podpis transakcji EIP-1559
 eth-account>=0.13
+
+# Asystent czatu pomocy (app/helpdesk.py) — używany tylko z ANTHROPIC_API_KEY
+anthropic>=1.0

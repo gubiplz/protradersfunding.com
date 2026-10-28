@@ -2,8 +2,9 @@
 /* ---------- portal ---------- */
 /* Logowanie = tablica certyfikatu: świecąca ramka gradientem i płyta z poświatą */
 :root:root body .auth-card{
-  border:2px solid transparent;
-  background:var(--ct-plate-glow) padding-box,var(--ct-plate-motif) padding-box,var(--ct-plate) padding-box,var(--ct-frame) border-box;
+  border:1px solid transparent;
+  background:var(--ct-plate-glow) padding-box,var(--ct-veil) padding-box,var(--ct-plate-motif) padding-box,
+    var(--ct-plate) padding-box,var(--ct-frame) border-box;
   box-shadow:var(--lg-spec),var(--ct-frame-glow),var(--lg-drop);
 }
 /* Pasek nad listą kont: ramka certyfikatu zamiast fioletowej tęczy */

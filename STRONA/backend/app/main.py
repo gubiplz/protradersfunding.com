@@ -48,6 +48,7 @@ from . import (achievements, auth, billing, catalog, certshot, contentbot, count
                payout_import, payoutbot, polecenia, reach, statements,
                poller, provisioning, push, rules, sms, telegram, telemetry, tradebot, zamki)
 from . import vusdt
+from . import helpdesk
 from .config import get_settings
 from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint, zamek_migracji
 from .models import (LEAD_LOST_STATUSES, LEAD_STATUSES, LOST_REASONS,
@@ -3101,10 +3102,14 @@ def _wolny_znak_biletu(session) -> str:
     raise HTTPException(500, "Could not allocate a ticket reference")
 
 
-def _ticket_dict(session, t: SupportTicket, with_thread: bool = False, msgs=None) -> dict:
+def _ticket_dict(session, t: SupportTicket, with_thread: bool = False, msgs=None,
+                 for_trader: bool = False) -> dict:
     if msgs is None:
         msgs = (session.query(TicketMessage).filter(TicketMessage.ticket_id == t.id)
                 .order_by(TicketMessage.id).all())
+    if for_trader:
+        # Streszczenie asystenta dla zespołu (`ai_note`) to notatka wewnętrzna.
+        msgs = [m for m in msgs if m.author != "ai_note"]
     d = {"id": t.id, "ref": t.ref, "subject": t.subject, "status": t.status,
          "created_at": t.created_at.isoformat(),
          "last_ts": msgs[-1].ts.isoformat() if msgs else t.created_at.isoformat(),
@@ -3152,7 +3157,7 @@ def ticket_view(ticket_id: int, trader: Trader = Depends(auth.current_trader)):
         t = session.get(SupportTicket, ticket_id)
         if not t or t.trader_id != trader.id:
             raise HTTPException(404, "Ticket not found")
-        return _ticket_dict(session, t, with_thread=True)
+        return _ticket_dict(session, t, with_thread=True, for_trader=True)
     finally:
         session.close()
 
@@ -3173,7 +3178,171 @@ def ticket_reply(ticket_id: int, payload: TicketReplyIn, trader: Trader = Depend
         t.status = "open"
         session.commit()
         notify.notify_admins("admin_ticket", f"Ticket reply: {t.subject[:80]}", trader.email)
-        return _ticket_dict(session, t, with_thread=True)
+        return _ticket_dict(session, t, with_thread=True, for_trader=True)
+    finally:
+        session.close()
+
+
+# --------------------------------------------------------------------------- #
+#  Czat pomocy (dymek w portalu) — asystent AI na FAQ, potem człowiek         #
+# --------------------------------------------------------------------------- #
+class ChatIn(BaseModel):
+    message: str
+
+
+# Ile wiadomości do ASYSTENTA na godzinę (każda to wywołanie modelu). Po limicie
+# rozmowa idzie do człowieka, a nie zostaje bez odpowiedzi.
+CHAT_AI_LIMIT_H = int(os.getenv("HELPDESK_AI_PER_HOUR", "20"))
+CHAT_STATUSY = ("bot", "open", "answered")
+# Podpis konsultanta w okienku czatu, gdy rozmowę przejmie zespół.
+SUPPORT_AGENT_NAME = os.getenv("SUPPORT_AGENT_NAME", "Mark")
+# „Online" = ktoś z zespołu miał otwarty panel w tym oknie czasu.
+ZESPOL_ONLINE_S = 5 * 60
+_KLUCZ_ZESPOL = "support_last_seen"
+
+
+def _zespol_widziany(session) -> None:
+    """Znacznik „zespół jest w panelu" — zapis najwyżej raz na minutę, bo dzwonek
+    panelu odpytuje serwer co kilkanaście sekund."""
+    teraz = int(time.time())
+    wpis = session.get(AppSetting, _KLUCZ_ZESPOL)
+    if wpis and wpis.value.isdigit() and teraz - int(wpis.value) < 60:
+        return
+    if wpis is None:
+        session.add(AppSetting(key=_KLUCZ_ZESPOL, value=str(teraz)))
+    else:
+        wpis.value = str(teraz)
+    session.commit()
+
+
+def _zespol_online(session) -> bool:
+    wpis = session.get(AppSetting, _KLUCZ_ZESPOL)
+    return bool(wpis and wpis.value.isdigit() and time.time() - int(wpis.value) < ZESPOL_ONLINE_S)
+
+
+def _czat_biezacy(session, trader_id: int) -> SupportTicket | None:
+    return (session.query(SupportTicket)
+            .filter(SupportTicket.trader_id == trader_id, SupportTicket.status.in_(CHAT_STATUSY))
+            .order_by(SupportTicket.id.desc()).first())
+
+
+def _czat_dict(session, t: SupportTicket | None) -> dict:
+    out = {"chat": None, "assistant": helpdesk.dostawca() is not None,
+           "agent": {"name": SUPPORT_AGENT_NAME, "team": f"{settings.site_name} Support",
+                     "online": _zespol_online(session)}}
+    if t is None:
+        return out
+    d = _ticket_dict(session, t, with_thread=True, for_trader=True)
+    d["mode"] = "assistant" if t.status == "bot" else "team"
+    # Konsultant „przejął" rozmowę, gdy w niej odpisał (samo przekazanie to jeszcze kolejka).
+    d["taken_over"] = any(m["author"] == "admin" for m in d["thread"])
+    out["chat"] = d
+    return out
+
+
+def _czat_prompt(session) -> str:
+    plany = helpdesk.zasady_planow(session.query(Product).all())
+    return helpdesk.prompt_systemowy(settings.site_name, settings.support_email,
+                                     str(TEMPLATES / "faq.html"), plany)
+
+
+def _czat_przekaz(session, t: SupportTicket, trader: Trader, subject: str, summary: str,
+                  category: str, powod: str) -> None:
+    """Rozmowa trafia do zespołu: status `open`, notatka dla admina, powiadomienie."""
+    t.status = "open"
+    if subject and t.subject.startswith("Chat"):
+        t.subject = subject[:200]
+    notatka = [f"Handed over by the AI assistant ({powod}). Category: {category}."]
+    if summary:
+        notatka.append(f"Summary: {summary}")
+    session.add(TicketMessage(ticket_id=t.id, author="ai_note", body="\n".join(notatka)))
+    session.commit()
+    notify.notify_admins("admin_ticket", f"New chat ticket: {t.subject[:80]}", trader.email)
+
+
+@app.get("/api/me/chat")
+def chat_view(trader: Trader = Depends(auth.current_trader)):
+    session = SessionLocal()
+    try:
+        return _czat_dict(session, _czat_biezacy(session, trader.id))
+    finally:
+        session.close()
+
+
+@app.post("/api/me/chat")
+def chat_send(payload: ChatIn, trader: Trader = Depends(auth.current_trader)):
+    body = payload.message.strip()
+    if not body:
+        raise HTTPException(400, "A message is required")
+    session = SessionLocal()
+    try:
+        t = _czat_biezacy(session, trader.id)
+        if t is None:
+            t = SupportTicket(trader_id=trader.id, subject=f"Chat: {body[:70]}", status="bot",
+                              ref=_wolny_znak_biletu(session))
+            session.add(t)
+            session.flush()
+        session.add(TicketMessage(ticket_id=t.id, author="trader", body=body[:4000]))
+        session.commit()
+
+        if t.status != "bot":
+            # Rozmowa jest już u zespołu — wiadomość idzie do admina jak odpowiedź w bilecie.
+            t.status = "open"
+            session.commit()
+            notify.notify_admins("admin_ticket", f"Ticket reply: {t.subject[:80]}", trader.email)
+            return _czat_dict(session, t)
+
+        godzina_temu = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+        ostatnio = (session.query(TicketMessage).join(SupportTicket, SupportTicket.id == TicketMessage.ticket_id)
+                    .filter(SupportTicket.trader_id == trader.id, TicketMessage.author == "trader",
+                            TicketMessage.ts >= godzina_temu).count())
+        if helpdesk.do_czlowieka(body) or ostatnio > CHAT_AI_LIMIT_H:
+            # Pieniądze, wynik konta, reklamacja, prośba o człowieka (albo limit
+            # asystenta) — bez pytania modelu, prosto do zespołu.
+            session.add(TicketMessage(ticket_id=t.id, author="ai", body=helpdesk.PRZEKAZANIE))
+            _czat_przekaz(session, t, trader, f"Chat: {body[:70]}", "", "other",
+                          "topic reserved for the team" if helpdesk.do_czlowieka(body) else "assistant limit")
+            return _czat_dict(session, t)
+
+        thread = _ticket_dict(session, t, with_thread=True, for_trader=True)["thread"]
+        wynik = helpdesk.odpowiedz(thread, _czat_prompt(session))
+        session.add(TicketMessage(ticket_id=t.id, author="ai", body=wynik["reply"]))
+        session.commit()
+        if wynik["escalate"]:
+            _czat_przekaz(session, t, trader, wynik["subject"], wynik["summary"], wynik["category"],
+                          "could not resolve")
+        return _czat_dict(session, t)
+    finally:
+        session.close()
+
+
+@app.post("/api/me/chat/human")
+def chat_human(trader: Trader = Depends(auth.current_trader)):
+    """Przycisk „Talk to a person": rozmowa z asystentem idzie do zespołu."""
+    session = SessionLocal()
+    try:
+        t = _czat_biezacy(session, trader.id)
+        if t is None:
+            raise HTTPException(400, "Write your question first")
+        if t.status == "bot":
+            session.add(TicketMessage(ticket_id=t.id, author="ai", body=helpdesk.PRZEKAZANIE))
+            _czat_przekaz(session, t, trader, "", "", "other", "trader asked for a person")
+        return _czat_dict(session, t)
+    finally:
+        session.close()
+
+
+@app.post("/api/me/chat/new")
+def chat_new(trader: Trader = Depends(auth.current_trader)):
+    """Nowa rozmowa: bieżąca z asystentem albo już odpowiedziana zostaje zamknięta.
+    Sprawa czekająca na zespół (`open`) zostaje otwarta — nie znika adminowi."""
+    session = SessionLocal()
+    try:
+        t = _czat_biezacy(session, trader.id)
+        if t is not None and t.status in ("bot", "answered"):
+            t.status = "closed"
+            session.commit()
+        return _czat_dict(session, None)
     finally:
         session.close()
 
@@ -3191,7 +3360,9 @@ def _pochodzenia_po_id(session, idki) -> dict:
 def admin_tickets():
     session = SessionLocal()
     try:
-        rows = session.query(SupportTicket).order_by(SupportTicket.id.desc()).limit(200).all()
+        # Rozmowy, które prowadzi jeszcze asystent czatu (`bot`), nie są sprawą dla zespołu.
+        rows = (session.query(SupportTicket).filter(SupportTicket.status != "bot")
+                .order_by(SupportTicket.id.desc()).limit(200).all())
         # Maile i wiadomosci hurtem: osobne zapytanie na kazdy bilet to bylo 400
         # round-tripow do bazy, a baza stoi za oceanem.
         wiadomosci = _wiadomosci_biletow(session, [t.id for t in rows])
@@ -3231,6 +3402,7 @@ def admin_ticket_view(ticket_id: int):
 def admin_ticket_reply(ticket_id: int, payload: AdminTicketReplyIn):
     session = SessionLocal()
     try:
+        _zespol_widziany(session)
         t = session.get(SupportTicket, ticket_id)
         if not t:
             raise HTTPException(404, "Ticket not found")
@@ -6857,6 +7029,7 @@ def admin_inbox(authorization: str | None = Header(default=None)):
     kto = _admin_id(authorization)
     session = SessionLocal()
     try:
+        _zespol_widziany(session)   # dzwonek odpytywany cyklicznie = ktoś siedzi w panelu
         marki = {m.item_id: m for m in session.query(AdminInboxMark)
                  .filter(AdminInboxMark.admin_id == kto).all()}
         # Usunięte wypadają JUŻ w zapytaniu: dawniej limit (25/10/60) liczył
@@ -6880,7 +7053,7 @@ def admin_inbox(authorization: str | None = Header(default=None)):
                    .order_by(PayoutRequest.id.desc()).limit(10).all())
         bilety = (bez_ukrytych(session.query(TicketMessage, SupportTicket), TicketMessage.id, "ticket")
                   .join(SupportTicket, SupportTicket.id == TicketMessage.ticket_id)
-                  .filter(TicketMessage.author == "trader")
+                  .filter(TicketMessage.author == "trader", SupportTicket.status != "bot")
                   .order_by(TicketMessage.id.desc()).limit(10).all())
         # Dzwonek odpytuje panel cyklicznie, wiec maile bierzemy jednym zapytaniem
         # po wszystkich kolejkach naraz zamiast dokladac round-trip na wiersz.

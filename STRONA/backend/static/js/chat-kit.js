@@ -9,7 +9,9 @@
  *
  * chatHtml(thread, {me, them, tz})
  *   thread — [{author, body, ts}], me — autor „moich" dymków ('admin'|'trader'),
- *   them — podpis rozmówcy nad pierwszym dymkiem grupy, tz — strefa (IANA).
+ *   them — podpis rozmówcy nad pierwszym dymkiem grupy, tz — strefa (IANA),
+ *   names — opcjonalnie podpis per autor ({ai: 'Assistant', admin: 'Support'}),
+ *   ważniejszy niż `them`; autor `ai_note` dostaje dymek notatki wewnętrznej.
  * chatCompose({id, send, placeholder}) — pasek pisania; `send` to kod onclick.
  * Enter wysyła na komputerze (Shift+Enter = nowa linia), na telefonie Enter
  * to nowa linia — jak w komunikatorach.
@@ -61,9 +63,10 @@
       var pierwsza = !ciagDalej(prev, m), ostatnia = !ciagDalej(m, next);
       var moja = m.author === o.me;
       var godz = d.toLocaleTimeString('en-GB', Object.assign({ hour: '2-digit', minute: '2-digit' }, tz));
+      var kto = (o.names && o.names[m.author]) || o.them;
       out.push('<div class="chat-row ' + (moja ? 'me' : 'them') + (pierwsza ? ' first' : '')
-        + (ostatnia ? ' last' : '') + '">'
-        + (!moja && pierwsza && o.them ? '<div class="chat-who">' + esc(o.them) + '</div>' : '')
+        + (ostatnia ? ' last' : '') + ' by-' + esc(m.author) + '">'
+        + (!moja && pierwsza && kto ? '<div class="chat-who">' + esc(kto) + '</div>' : '')
         // .bub-sp rezerwuje w ostatniej linii miejsce na godzinę (sztuczka WhatsAppa),
         // żeby tekst nigdy nie wszedł pod nią
         + '<div class="bub">' + linki(esc(m.body)) + '<span class="bub-sp"></span>'
