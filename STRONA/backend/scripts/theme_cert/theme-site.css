@@ -1,0 +1,17 @@
+
+/* ---------- landing ---------- */
+/* Eyebrow sekcji jak „PAYOUT" na certyfikacie: bez tła, wersaliki, rozstrzelone */
+:root:root body .pill{background:transparent;border-color:transparent;box-shadow:none;
+  color:var(--ct-eyebrow);letter-spacing:.16em;font-weight:700}
+@media (min-width:641px){:root:root body .pill{letter-spacing:.3em}}
+
+/* Gradientowy tekst („Keep up to 90%"): na granacie jaśniej, jak cyjan certyfikatu */
+html[data-theme=dark] body .grad-text{background-image:linear-gradient(135deg,#67d2ff,#2b8bff)}
+
+/* Konfigurator w hero = tablica certyfikatu: świecąca ramka gradientem,
+   granatowa (ciemny) / papierowa (jasny) płyta z poświatą u góry */
+:root:root body .cfg{
+  border:2px solid transparent;
+  background:var(--ct-plate-glow) padding-box,var(--ct-plate-motif) padding-box,var(--ct-plate) padding-box,var(--ct-frame) border-box;
+  box-shadow:var(--lg-spec),var(--ct-frame-glow),var(--lg-drop);
+}

@@ -1,0 +1,139 @@
+/* ============================================================
+   Motyw „Certificate" (site): paleta i tło certyfikatu wypłaty zamiast
+   fioletu marki, w jasnym i ciemnym motywie. Tylko wygląd.
+   Ładowany jako OSTATNI arkusz: ta sama specyficzność + później = wygrywa,
+   więc site.css / portal.css zostają bajt w bajt. Zdjęcie motywu = usunięcie linku.
+   Blok „wygenerowany" to te same selektory co w źródłach, z fioletem
+   przemapowanym na błękit certyfikatu (generator: gen_theme_cert.py).
+   ============================================================ */
+
+/* ---------- wygenerowany: fiolet -> błękit certyfikatu ---------- */
+/* z site.css: 22 reguł */
+:root{--acc:#1b6ef3;--acc2:#1b4bd8;--acc-soft:#1b6ef3;--acc-bg:#eaf4ff;--grad:linear-gradient(135deg,#1b6ef3 0%,#1b4bd8 100%);--shadow-lg:0 24px 60px -24px rgba(27,110,243,.18),0 2px 6px rgba(15,23,42,.05)}
+::selection{background:rgba(43,139,255,.18)}
+.btn{box-shadow:0 8px 20px -8px rgba(43,139,255,.5)}
+.btn:hover{box-shadow:0 12px 26px -8px rgba(43,139,255,.55)}
+.pill{color:#1b6ef3;border:1px solid #d3e6ff}
+.hero-glow{background:radial-gradient(55% 45% at 20% 0%,rgba(43,139,255,.12),transparent 65%),
+    radial-gradient(40% 35% at 88% 20%,rgba(27,75,216,.1),transparent 70%)}
+.cfg-size.on{box-shadow:0 6px 16px -8px rgba(43,139,255,.4)}
+.ptog.on{box-shadow:0 6px 16px -6px rgba(43,139,255,.5)}
+.psize.on{box-shadow:0 6px 16px -6px rgba(43,139,255,.5)}
+.pcfg-addbtn{border:1px solid #d3e6ff}
+.fork-n{border:1px solid #d3e6ff}
+.rung-bar{background:linear-gradient(180deg,rgba(43,139,255,.75),rgba(43,139,255,.12));border:1px solid rgba(43,139,255,.25)}
+.why-ic{border:1px solid #d3e6ff}
+.verify-box input:focus{box-shadow:0 0 0 3px rgba(43,139,255,.12)}
+.aff-band{background:linear-gradient(120deg,#eaf4ff,#eef8ff);border:1px solid #d3e6ff}
+.faq details[open]{border-color:#d3e6ff}
+.final-glow{background:radial-gradient(50% 60% at 50% 100%,rgba(43,139,255,.12),transparent 70%)}
+.notice{border:1px solid #d3e6ff}
+@media(hover:none){.btn:hover{box-shadow:0 8px 20px -8px rgba(43,139,255,.5)}}
+.promo-bar{background:linear-gradient(90deg,#1b6ef3 0%,#1b4bd8 55%,#2563eb 100%)}
+.promo-go{color:#1b6ef3}
+html.promo-applied .promo-tag{color:#1b6ef3}
+/* z site-motion.css: 2 reguł */
+@media(hover:hover){.card:hover,.fork-card:hover{box-shadow:0 22px 44px -26px rgba(27,110,243,.28),0 2px 6px rgba(15,23,42,.05)}}
+.faq details[open]{box-shadow:0 18px 40px -26px rgba(27,110,243,.3),0 2px 6px rgba(15,23,42,.04)}
+/* z site-theme.css: 6 reguł */
+html[data-theme=dark]{--acc:#67d2ff;--acc2:#8fdcff;--acc-soft:#67d2ff;--acc-bg:rgba(43,139,255,.18)}
+html[data-theme=dark] .faq details[open]{border-color:rgba(103,210,255,.35)}
+html[data-theme=dark] ::selection{background:rgba(103,210,255,.35)}
+html[data-theme=dark] .aff-band{background:linear-gradient(120deg,rgba(43,139,255,.16),rgba(27,75,216,.12)),var(--panel);border-color:rgba(103,210,255,.3)}
+html[data-theme=dark] :is(.pill,.pcfg-addbtn,.fork-n,.why-ic,.notice){border-color:rgba(103,210,255,.3)}
+html[data-theme=dark] .pill{color:#a9e4ff}
+/* z site-glass.css: 2 reguł */
+:root{--lg-drop:0 1px 2px rgba(15,23,42,.04),0 16px 36px -20px rgba(27,110,243,.24);--lg-light:radial-gradient(60vw 60vw at 4% -12%,rgba(43,139,255,.16),transparent 62%),
+    radial-gradient(52vw 52vw at 104% 24%,rgba(27,75,216,.13),transparent 60%),
+    radial-gradient(44vw 44vw at 68% 112%,rgba(242,134,15,.08),transparent 62%)}
+html[data-theme=dark]{--lg-light:radial-gradient(60vw 60vw at 4% -12%,rgba(43,139,255,.32),transparent 62%),
+    radial-gradient(52vw 52vw at 104% 24%,rgba(27,75,216,.24),transparent 60%),
+    radial-gradient(44vw 44vw at 68% 112%,rgba(242,134,15,.12),transparent 62%)}
+/* ciemny motyw: tekst w cyjanie certyfikatu (1 reguł) */
+html[data-theme=dark] .pill{color:#67d2ff}
+
+/* ---------- ręczna część: tokeny, tło i DNA certyfikatu ----------
+   Paleta wzięta 1:1 z cert.css (certyfikat wypłaty): granat #050914→#0b142c,
+   błękit #2b8bff, jasny #67d2ff, głęboki #1b4bd8, mięta #57e6b6, złoto #e8c47c.
+   Idzie PO bloku wygenerowanym, więc tu ustawione tokeny mają ostatnie słowo. */
+:root{
+  --ct-frame:linear-gradient(150deg,#67d2ff 0%,#2b8bff 38%,#1b4bd8 68%,#67d2ff 100%);
+  --ct-plate:linear-gradient(168deg,#ffffff 0%,#f7faff 60%,#f1f6ff 100%);
+  --ct-plate-glow:radial-gradient(62% 44% at 50% 0%,rgba(43,139,255,.10),rgba(43,139,255,0) 64%);
+  --ct-frame-glow:0 0 40px rgba(43,139,255,.3);
+  --ct-eyebrow:#1b4bd8;
+  --ct-dot:rgba(27,75,216,.10);
+  --ct-plate-motif:linear-gradient(transparent,transparent);
+  --bg:#f5f8fd;
+  --acc:#1b6ef3; --acc2:#1b4bd8;
+  /* przyciski od #1b6ef3, nie od #2b8bff: biały tekst 4,6:1 zamiast 3,4:1;
+     jaskrawy #2b8bff zostaje na poświaty i ramki */
+  --grad:linear-gradient(135deg,#1b6ef3,#1b4bd8);
+  --lg-light:
+    radial-gradient(70% 50% at 50% -6%,rgba(43,139,255,.16),transparent 70%),
+    radial-gradient(40vw 40vw at 100% 100%,rgba(103,210,255,.12),transparent 65%),
+    radial-gradient(36vw 36vw at 0% 72%,rgba(87,230,182,.07),transparent 65%);
+  --lg-drop:0 1px 2px rgba(15,23,42,.04),0 16px 36px -20px rgba(27,110,243,.24);
+  --pb-nav-on:linear-gradient(90deg,rgba(43,139,255,.14),rgba(43,139,255,0) 88%);
+  --pb-neon-glow:rgba(43,139,255,.5);
+}
+html[data-theme=dark]{
+  --ct-plate:linear-gradient(168deg,#0b142c 0%,#070d1e 52%,#050914 100%);
+  --ct-plate-glow:radial-gradient(62% 44% at 50% 0%,rgba(43,139,255,.24),rgba(43,139,255,0) 64%);
+  --ct-frame-glow:0 0 44px rgba(43,139,255,.45);
+  --ct-eyebrow:#67d2ff;
+  --ct-dot:rgba(140,180,255,.13);
+  /* romby certyfikatu tylko na płycie i tylko w ciemnym (rysowane pod granat) */
+  --ct-plate-motif:url('/static/img/cert-motif.svg') center bottom/102% auto no-repeat;
+  --bg:#050914; --bg2:#070d1e; --bg3:#101b38;
+  --panel:#0b142c; --panel2:#0e1934;
+  --line:rgba(120,170,255,.13); --line2:rgba(120,170,255,.22);
+  --txt:#f2f6ff; --muted:#93a3c9; --dim:#7787ad;
+  --acc:#67d2ff; --acc2:#2b8bff;
+  --grad:linear-gradient(135deg,#1b6ef3,#1b4bd8);
+  --green:#57e6b6; --green2:#57e6b6;
+  --hover:rgba(120,170,255,.05);
+  --lg-fill:rgba(120,170,255,.05);
+  --lg-fill-in:rgba(120,170,255,.035);
+  --lg-rim:rgba(120,170,255,.2);
+  --lg-spec:inset 0 1px 0 rgba(180,215,255,.16),inset 1px 0 0 rgba(180,215,255,.05),inset 0 -1px 0 rgba(180,215,255,.03);
+  --lg-sheen:linear-gradient(150deg,rgba(150,200,255,.08) 0%,rgba(150,200,255,0) 40%);
+  --lg-bar:rgba(5,9,20,.55);
+  --lg-bar-solid:rgba(5,9,20,.96);
+  --lg-light:
+    radial-gradient(62% 44% at 50% 0%,rgba(43,139,255,.24),transparent 64%),
+    radial-gradient(70% 55% at 50% 0%,#0d1a3a 0%,transparent 72%),
+    radial-gradient(40vw 40vw at 100% 100%,rgba(43,139,255,.10),transparent 65%),
+    linear-gradient(168deg,#0b142c 0%,#070d1e 52%,#050914 100%);
+  --pb-nav-on:linear-gradient(90deg,rgba(43,139,255,.3),rgba(43,139,255,0) 88%);
+  --pb-neon-glow:rgba(103,210,255,.8);
+}
+
+/* Tło aplikacji: spokojne. Granat certyfikatu + błękitna poświata u góry
+   (::before) i drobna siatka punktów wygaszana maską od góry (::after).
+   Romby i grawerunek certyfikatu NIE idą na całe tło — rozciągnięte na ekran
+   i przycięte jego krawędzią wyglądały tanio; zostają na „płycie" (niżej).
+   Obie warstwy nieruchome: rysują się raz, scroll ich nie przemalowuje. */
+html::before{background:var(--lg-light)}
+html::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:radial-gradient(circle at 1px 1px,var(--ct-dot) 1px,transparent 1.5px) 0 0/28px 28px;
+  -webkit-mask-image:radial-gradient(85% 60% at 50% 0%,#000 0%,rgba(0,0,0,.35) 45%,transparent 80%);
+  mask-image:radial-gradient(85% 60% at 50% 0%,#000 0%,rgba(0,0,0,.35) 45%,transparent 80%)}
+@media (prefers-reduced-transparency:reduce){html::before,html::after{display:none}}
+
+/* ---------- landing ---------- */
+/* Eyebrow sekcji jak „PAYOUT" na certyfikacie: bez tła, wersaliki, rozstrzelone */
+:root:root body .pill{background:transparent;border-color:transparent;box-shadow:none;
+  color:var(--ct-eyebrow);letter-spacing:.16em;font-weight:700}
+@media (min-width:641px){:root:root body .pill{letter-spacing:.3em}}
+
+/* Gradientowy tekst („Keep up to 90%"): na granacie jaśniej, jak cyjan certyfikatu */
+html[data-theme=dark] body .grad-text{background-image:linear-gradient(135deg,#67d2ff,#2b8bff)}
+
+/* Konfigurator w hero = tablica certyfikatu: świecąca ramka gradientem,
+   granatowa (ciemny) / papierowa (jasny) płyta z poświatą u góry */
+:root:root body .cfg{
+  border:2px solid transparent;
+  background:var(--ct-plate-glow) padding-box,var(--ct-plate-motif) padding-box,var(--ct-plate) padding-box,var(--ct-frame) border-box;
+  box-shadow:var(--lg-spec),var(--ct-frame-glow),var(--lg-drop);
+}

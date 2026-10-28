@@ -1,0 +1,68 @@
+/* ---------- ręczna część: tokeny, tło i DNA certyfikatu ----------
+   Paleta wzięta 1:1 z cert.css (certyfikat wypłaty): granat #050914→#0b142c,
+   błękit #2b8bff, jasny #67d2ff, głęboki #1b4bd8, mięta #57e6b6, złoto #e8c47c.
+   Idzie PO bloku wygenerowanym, więc tu ustawione tokeny mają ostatnie słowo. */
+:root{
+  --ct-frame:linear-gradient(150deg,#67d2ff 0%,#2b8bff 38%,#1b4bd8 68%,#67d2ff 100%);
+  --ct-plate:linear-gradient(168deg,#ffffff 0%,#f7faff 60%,#f1f6ff 100%);
+  --ct-plate-glow:radial-gradient(62% 44% at 50% 0%,rgba(43,139,255,.10),rgba(43,139,255,0) 64%);
+  --ct-frame-glow:0 0 40px rgba(43,139,255,.3);
+  --ct-eyebrow:#1b4bd8;
+  --ct-dot:rgba(27,75,216,.10);
+  --ct-plate-motif:linear-gradient(transparent,transparent);
+  --bg:#f5f8fd;
+  --acc:#1b6ef3; --acc2:#1b4bd8;
+  /* przyciski od #1b6ef3, nie od #2b8bff: biały tekst 4,6:1 zamiast 3,4:1;
+     jaskrawy #2b8bff zostaje na poświaty i ramki */
+  --grad:linear-gradient(135deg,#1b6ef3,#1b4bd8);
+  --lg-light:
+    radial-gradient(70% 50% at 50% -6%,rgba(43,139,255,.16),transparent 70%),
+    radial-gradient(40vw 40vw at 100% 100%,rgba(103,210,255,.12),transparent 65%),
+    radial-gradient(36vw 36vw at 0% 72%,rgba(87,230,182,.07),transparent 65%);
+  --lg-drop:0 1px 2px rgba(15,23,42,.04),0 16px 36px -20px rgba(27,110,243,.24);
+  --pb-nav-on:linear-gradient(90deg,rgba(43,139,255,.14),rgba(43,139,255,0) 88%);
+  --pb-neon-glow:rgba(43,139,255,.5);
+}
+html[data-theme=dark]{
+  --ct-plate:linear-gradient(168deg,#0b142c 0%,#070d1e 52%,#050914 100%);
+  --ct-plate-glow:radial-gradient(62% 44% at 50% 0%,rgba(43,139,255,.24),rgba(43,139,255,0) 64%);
+  --ct-frame-glow:0 0 44px rgba(43,139,255,.45);
+  --ct-eyebrow:#67d2ff;
+  --ct-dot:rgba(140,180,255,.13);
+  /* romby certyfikatu tylko na płycie i tylko w ciemnym (rysowane pod granat) */
+  --ct-plate-motif:url('/static/img/cert-motif.svg') center bottom/102% auto no-repeat;
+  --bg:#050914; --bg2:#070d1e; --bg3:#101b38;
+  --panel:#0b142c; --panel2:#0e1934;
+  --line:rgba(120,170,255,.13); --line2:rgba(120,170,255,.22);
+  --txt:#f2f6ff; --muted:#93a3c9; --dim:#7787ad;
+  --acc:#67d2ff; --acc2:#2b8bff;
+  --grad:linear-gradient(135deg,#1b6ef3,#1b4bd8);
+  --green:#57e6b6; --green2:#57e6b6;
+  --hover:rgba(120,170,255,.05);
+  --lg-fill:rgba(120,170,255,.05);
+  --lg-fill-in:rgba(120,170,255,.035);
+  --lg-rim:rgba(120,170,255,.2);
+  --lg-spec:inset 0 1px 0 rgba(180,215,255,.16),inset 1px 0 0 rgba(180,215,255,.05),inset 0 -1px 0 rgba(180,215,255,.03);
+  --lg-sheen:linear-gradient(150deg,rgba(150,200,255,.08) 0%,rgba(150,200,255,0) 40%);
+  --lg-bar:rgba(5,9,20,.55);
+  --lg-bar-solid:rgba(5,9,20,.96);
+  --lg-light:
+    radial-gradient(62% 44% at 50% 0%,rgba(43,139,255,.24),transparent 64%),
+    radial-gradient(70% 55% at 50% 0%,#0d1a3a 0%,transparent 72%),
+    radial-gradient(40vw 40vw at 100% 100%,rgba(43,139,255,.10),transparent 65%),
+    linear-gradient(168deg,#0b142c 0%,#070d1e 52%,#050914 100%);
+  --pb-nav-on:linear-gradient(90deg,rgba(43,139,255,.3),rgba(43,139,255,0) 88%);
+  --pb-neon-glow:rgba(103,210,255,.8);
+}
+
+/* Tło aplikacji: spokojne. Granat certyfikatu + błękitna poświata u góry
+   (::before) i drobna siatka punktów wygaszana maską od góry (::after).
+   Romby i grawerunek certyfikatu NIE idą na całe tło — rozciągnięte na ekran
+   i przycięte jego krawędzią wyglądały tanio; zostają na „płycie" (niżej).
+   Obie warstwy nieruchome: rysują się raz, scroll ich nie przemalowuje. */
+html::before{background:var(--lg-light)}
+html::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:radial-gradient(circle at 1px 1px,var(--ct-dot) 1px,transparent 1.5px) 0 0/28px 28px;
+  -webkit-mask-image:radial-gradient(85% 60% at 50% 0%,#000 0%,rgba(0,0,0,.35) 45%,transparent 80%);
+  mask-image:radial-gradient(85% 60% at 50% 0%,#000 0%,rgba(0,0,0,.35) 45%,transparent 80%)}
+@media (prefers-reduced-transparency:reduce){html::before,html::after{display:none}}

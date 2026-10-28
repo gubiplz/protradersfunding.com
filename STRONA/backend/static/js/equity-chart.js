@@ -21,7 +21,7 @@ window.chartTheme = function () {
   var s = getComputedStyle(document.documentElement);
   var t = function (name, fallback) { return (s.getPropertyValue(name) || fallback).trim(); };
   return {
-    acc: t('--acc', '#6366f1'),
+    acc: t('--acc', '#2b8bff'),
     txt: t('--txt', '#0f172a'),
     muted: t('--muted', '#64748b'),
     dim: t('--dim', '#94a3b8'),
@@ -110,7 +110,7 @@ window.equityChartConfig = function (curve, opts) {
   };
   var accFill = function (context) {
     var area = context.chart.chartArea;
-    if (!area) return 'rgba(99,102,241,.08)';
+    if (!area) return 'rgba(43,139,255,.08)';
     var g = context.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
     // Hex accent -> translucent gradient fill under the equity line.
     var hex = th.acc.replace('#', '');
