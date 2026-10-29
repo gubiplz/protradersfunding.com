@@ -280,6 +280,14 @@
   window.asTickets = function () { zamknij(); if (typeof go === 'function') go('tickets'); };
 
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && OTWARTY) zamknij(); });
+  // Klik w stronę poza oknem czatu zamyka je (jak Escape). pointerdown, nie click:
+  // klik w środku, który przerysowuje okno, odpinałby cel i liczył się jako „poza".
+  document.addEventListener('pointerdown', function (e) {
+    if (!OTWARTY) return;
+    var t = e.target;
+    if (t.closest && t.closest('#as-panel, #as-fab, #as-peek')) return;
+    zamknij();
+  });
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible' && zalogowany()) odswiez();
   });
