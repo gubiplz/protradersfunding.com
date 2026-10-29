@@ -12,7 +12,7 @@ const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
 const hasGsap=()=>typeof gsap!=='undefined';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-const PALETTE=['#6366f1','#8b5cf6','#a855f7','#fbbf24','#10b981'];
+const PALETTE=['#2b8bff','#67d2ff','#1b4bd8','#e8c47c','#57e6b6'];
 const GOLD=['#f59e0b','#fbbf24','#fde68a'];
 
 /* ---------------- confetti (canvas, rAF) ---------------- */

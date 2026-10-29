@@ -43,3 +43,7 @@ openpyxl>=3.1
 
 # Testowe wypłaty vUSDT na Polygonie (app/vusdt.py) — podpis transakcji EIP-1559
 eth-account>=0.13
+
+# Asystent czatu pomocy (app/helpdesk.py) chodzi przez httpx (API w formacie
+# OpenAI, np. Groq). SDK `anthropic` NIE jest wymagane — dociągnij je tylko,
+# jeśli ustawisz ANTHROPIC_API_KEY (bez niego czat spada na Groq / silnik FAQ).

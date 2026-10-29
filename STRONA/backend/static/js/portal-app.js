@@ -332,7 +332,7 @@ const NAV=[
   {v:'certificates',label:'Certificates',ico:'medal'},
   {v:'orders',label:'Invoice',ico:'file'},
   {v:'kyc',label:'KYC',ico:'shield'},
-  {v:'support',label:'Support',ico:'help'},
+  /* Support nie ma już pozycji w menu: pomoc to dymek czatu (helpdesk.js). */
   {v:'settings',label:'Settings',ico:'gear'},
 ];
 $('side-nav').innerHTML='<div class="side-sec sb-txt">Main menu</div>'+NAV.map(n=>
@@ -882,6 +882,9 @@ const LOADING_HTML=(h=240)=>`<div class="view-load">
 let PRZEJSCIE = 0;
 
 function go(v){
+  /* Stare wejścia do Support (powiadomienia, deep linki, przyciski) otwierają
+     dymek czatu zamiast widoku — widok zostaje w kodzie jako zapas bez JS czatu. */
+  if(v==='support'&&window.openHelpdesk){window.openHelpdesk();return}
   CURV=v; window._view=v; window._onDetail=false;
   /* Nazwa widoku w propsach: dziennik w adminie rozpisuje z tego, co klient
      faktycznie przegladal, nie tylko ze "otworzyl portal". */

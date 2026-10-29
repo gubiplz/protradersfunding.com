@@ -1,0 +1,202 @@
+/* ============================================================
+   Liquid glass portalu tradera (jasny i ciemny motyw). Tylko wygląd.
+   Ładowany zaraz po portal.css, ale PRZED apple.css, a apple.css ma
+   cienie kart na `html[data-theme=dark] .x` (0,2,1). Prefiks
+   `:root:root body` (0,3,1) wygrywa niezależnie od kolejności plików.
+   portal.css zostaje nietknięty (testy porównują go jako tekst).
+   Wydajność jak przed zmianą — te same zasady co site-glass.css:
+   - plamy światła to jedna nieruchoma warstwa `html::before` (fixed);
+   - backdrop-filter tylko na tym, co leży NAD przewijaną treścią
+     (topbar, dolny pasek, arkusz „More", wysunięty sidebar). Karty leżą
+     na gładkim gradiencie, więc szkło robią wypełnienie i odblaski;
+   - zero animacji tła i zero nowych przejść.
+   Jasny motyw ma te same reguły — różnią się tylko wartości tokenów.
+   ============================================================ */
+
+:root{
+  --lg-fill:rgba(255,255,255,.72);
+  --lg-fill-in:rgba(255,255,255,.55);
+  --lg-rim:rgba(255,255,255,.9);
+  --lg-hair:0 0 0 .5px rgba(15,23,42,.08);
+  --lg-spec:inset 0 1px 0 rgba(255,255,255,.95),inset 1px 0 0 rgba(255,255,255,.55),inset 0 -1px 0 rgba(255,255,255,.3);
+  --lg-sheen:linear-gradient(150deg,rgba(255,255,255,.75) 0%,rgba(255,255,255,0) 38%);
+  --lg-drop:0 1px 2px rgba(15,23,42,.04),0 16px 36px -20px rgba(79,70,229,.24);
+  --lg-side:rgba(255,255,255,.5);
+  --lg-bar:rgba(255,255,255,.6);
+  --lg-bar-solid:rgba(255,255,255,.96);
+  --lg-blur:blur(20px) saturate(1.8);
+  --lg-light:
+    radial-gradient(60vw 60vw at 4% -12%,rgba(99,102,241,.16),transparent 62%),
+    radial-gradient(52vw 52vw at 104% 24%,rgba(139,92,246,.13),transparent 60%),
+    radial-gradient(44vw 44vw at 68% 112%,rgba(242,134,15,.08),transparent 62%);
+}
+html[data-theme=dark]{
+  --lg-fill:rgba(255,255,255,.06);
+  --lg-fill-in:rgba(255,255,255,.035);
+  --lg-rim:rgba(255,255,255,.12);
+  --lg-hair:0 0 0 .5px rgba(0,0,0,.45);
+  --lg-spec:inset 0 1px 0 rgba(255,255,255,.16),inset 1px 0 0 rgba(255,255,255,.05),inset 0 -1px 0 rgba(255,255,255,.03);
+  --lg-sheen:linear-gradient(150deg,rgba(255,255,255,.075) 0%,rgba(255,255,255,0) 40%);
+  --lg-drop:0 2px 8px rgba(0,0,0,.25),0 18px 44px -22px rgba(0,0,0,.7);
+  --lg-side:rgba(255,255,255,.04);
+  --lg-bar:rgba(11,13,18,.48);
+  --lg-bar-solid:rgba(11,13,18,.96);
+  --lg-blur:blur(20px) saturate(1.6);
+  --lg-light:
+    radial-gradient(60vw 60vw at 4% -12%,rgba(99,102,241,.36),transparent 62%),
+    radial-gradient(52vw 52vw at 104% 24%,rgba(139,92,246,.28),transparent 60%),
+    radial-gradient(44vw 44vw at 68% 112%,rgba(242,134,15,.13),transparent 62%);
+}
+
+/* Tło: --bg zostaje na html, światło leży nad nim, treść nad światłem. */
+html::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background:var(--lg-light)}
+:root:root body,:root:root body .auth-form{background:transparent}
+
+/* Karty: szkło bez blura */
+:root:root body :is(.stat-tile,.sec-card,.panel,.card,.chal-list,.plan-card,.upsell,.auth-card){
+  background:var(--lg-sheen),var(--lg-fill);
+  border-color:var(--lg-rim);
+  box-shadow:var(--lg-spec),var(--lg-hair),var(--lg-drop);
+}
+:root:root body :is(.plan-card:not(.pop),.stat-tile.clickable):hover{
+  box-shadow:var(--lg-spec),var(--lg-hair),var(--shadow-lg)}
+
+/* Karta „Best value": złota poświata zostaje, tylko na szkle */
+:root:root body .plan-card.pop{
+  background:linear-gradient(180deg,rgba(240,165,60,.13),rgba(240,165,60,0) 170px),var(--lg-sheen),var(--lg-fill);
+  border-color:#f0b95c;
+  box-shadow:0 0 0 1px #f0b95c,var(--lg-spec),0 14px 34px -20px rgba(240,165,60,.45);
+}
+
+/* Baner gradientowy: kolory marki, z płynną krawędzią szkła */
+:root:root body .gradient-banner{
+  border:1px solid rgba(255,255,255,.18);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.32),inset 1px 0 0 rgba(255,255,255,.12),var(--lg-drop);
+}
+html[data-theme=dark] body .gradient-banner{
+  background:linear-gradient(100deg,rgba(109,40,217,.7) 0%,rgba(124,58,237,.62) 35%,rgba(168,85,247,.56) 100%)}
+
+/* Szkło w szkle: o stopień inna tafla, bez cienia (warstwy jak w iOS) */
+:root:root body :is(.sec-card,.panel,.card,.chal-list,.plan-card,.upsell,.auth-card,.sheet)
+  :is(.stat-tile,.sec-card,.panel,.card,.chal-list,.plan-card:not(.pop),.upsell){
+  background:var(--lg-sheen),var(--lg-fill-in);
+  box-shadow:var(--lg-spec),var(--lg-hair);
+}
+
+/* Sidebar: stoi nieruchomo nad nieruchomym tłem — szkło bez blura */
+:root:root body .side{
+  background:var(--lg-sheen),var(--lg-side);
+  -webkit-backdrop-filter:none;
+  backdrop-filter:none;
+  border-right:1px solid var(--lg-rim);
+  box-shadow:var(--lg-spec);
+}
+
+/* Paski nad przewijaną treścią: tu jest prawdziwy blur */
+:root:root body :is(.topbar,.tabbar,.botnav,.sheet,.side.open){
+  background:var(--lg-bar);
+  -webkit-backdrop-filter:var(--lg-blur);
+  backdrop-filter:var(--lg-blur);
+}
+:root:root body .topbar{box-shadow:none}
+:root:root body :is(.tabbar,.botnav){border-top:1px solid var(--lg-rim);box-shadow:var(--lg-spec)}
+:root:root body .sheet{box-shadow:var(--lg-spec),0 -20px 60px -20px rgba(0,0,0,.45)}
+:root:root body .side.open{box-shadow:var(--lg-spec),30px 0 80px -30px rgba(0,0,0,.45)}
+
+/* ============================================================
+   Dashboard: przepisy z playbooka code.xr (Glassy V5, Neon sidebar,
+   Minimal V14). Tylko CSS na istniejących klasach, żadnych nowych
+   elementów ani przejść. Ruchome części (glider, pigułka segmentu)
+   jeżdżą jak dotąd na transformie z ui-motion.js.
+   ============================================================ */
+:root{
+  --pb-ink:#0f172a; --pb-ink-txt:#fff;
+  --pb-nav-on:linear-gradient(90deg,rgba(99,102,241,.16),rgba(99,102,241,0) 88%);
+  --pb-neon-glow:rgba(124,58,237,.45);
+  --pb-glow:.35;
+}
+html[data-theme=dark]{
+  --pb-ink:rgba(255,255,255,.92); --pb-ink-txt:#0b0d12;
+  --pb-nav-on:linear-gradient(90deg,rgba(139,92,246,.34),rgba(139,92,246,0) 88%);
+  --pb-neon-glow:rgba(167,139,250,.8);
+  --pb-glow:.6;
+}
+
+/* Neon sidebar: aktywna pozycja = gradient od lewej + świecący pasek 4 px
+   na krawędzi panelu. Pasek siedzi na gliderze, więc jedzie razem z nim. */
+:root:root body .ui-glider{background:var(--pb-nav-on)}
+:root:root body .ui-glider::before,
+:root:root body .side-nav:not(.has-glider)>.sb-link.on::before{
+  content:"";display:block;position:absolute;left:-12px;top:8px;bottom:8px;width:4px;
+  border-radius:0 99px 99px 0;background:linear-gradient(180deg,#6366f1,#a855f7);
+  box-shadow:0 0 12px var(--pb-neon-glow),0 0 3px var(--pb-neon-glow);
+}
+:root:root body .side.collapsed .ui-glider::before{left:0}
+:root:root body .side-nav:not(.has-glider)>.sb-link.on{background:var(--pb-nav-on);border-color:transparent}
+
+/* Pływający topbar-pigułka (Glassy V5), tylko na desktopie */
+@media (min-width:961px){
+  :root:root body .topbar{top:10px;margin:10px 16px 0;border:1px solid var(--lg-rim);border-radius:18px;
+    box-shadow:var(--lg-spec),var(--lg-hair),var(--lg-drop)}
+}
+
+/* Przełączniki jako pill-group (Minimal V14 / Glassy V5): tor ze szkła,
+   aktywna pigułka czarna na jasnym, biała na ciemnym */
+:root:root body :is(.seg,.shop-tabs,.seg-mini .sw){
+  background:var(--lg-sheen),var(--lg-fill-in);
+  border:1px solid var(--lg-rim);
+  box-shadow:var(--lg-spec),var(--lg-hair);
+}
+:root:root body .ui-pill{background:var(--pb-ink);box-shadow:0 6px 16px -8px rgba(15,23,42,.5)}
+:root:root body :is(.has-pill>button.on,.has-pill>.shop-tab.on){color:var(--pb-ink-txt)}
+:root:root body :is(.seg,.shop-tabs):not(.has-pill)>.on,
+:root:root body .seg-mini button.on{background:var(--pb-ink);color:var(--pb-ink-txt)}
+
+/* Chipy akcji nad kartą konta: płynne pigułki */
+:root:root body .act-chip:not(.live){
+  background:var(--lg-sheen),var(--lg-fill-in);
+  border-color:var(--lg-rim);
+  box-shadow:var(--lg-spec),var(--lg-hair);
+}
+
+/* Ikony kafelków: lekka poświata w kolorze ikony */
+:root:root body .tile-ic{box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 6px 18px -8px currentColor}
+/* Klikalny kafelek unosi się wyraźniej (whileHover y:-5) — sam transform */
+:root:root body .stat-tile.clickable:hover{transform:translateY(-4px)}
+
+/* Paski postępu (Glassy V2): tor ze szkła, wypełnienie świeci swoim kolorem */
+:root:root body .prog-bar{overflow:visible;background:var(--lg-fill-in);
+  box-shadow:inset 0 1px 2px rgba(15,23,42,.1),var(--lg-hair)}
+html[data-theme=dark] body .prog-bar{background:rgba(255,255,255,.06)}
+:root:root body .prog-bar>i{box-shadow:inset 0 1px 0 rgba(255,255,255,.35),
+  0 0 14px -2px color-mix(in srgb,var(--pb-c,#8b5cf6) calc(var(--pb-glow)*100%),transparent)}
+:root:root body .prog-bar .ok{--pb-c:#10b981}
+:root:root body .prog-bar .mid{--pb-c:#8b5cf6}
+:root:root body .prog-bar .warn{--pb-c:#f59e0b}
+:root:root body .prog-bar .bad{--pb-c:#ef4444}
+
+/* Kalendarz: puste dni jako kafle szkła, dni z wynikiem świecą swoim kolorem */
+:root:root body .cal-day:not(.blank,.profit,.loss,.flat){
+  background:var(--lg-sheen),var(--lg-fill-in);
+  border-color:var(--lg-rim);
+  box-shadow:var(--lg-spec),var(--lg-hair);
+}
+:root:root body .cal-day.profit{box-shadow:inset 0 1px 0 rgba(255,255,255,.25),
+  0 0 18px -8px color-mix(in srgb,#10b981 calc(var(--pb-glow)*100%),transparent)}
+:root:root body .cal-day.loss{box-shadow:inset 0 1px 0 rgba(255,255,255,.25),
+  0 0 18px -8px color-mix(in srgb,#ef4444 calc(var(--pb-glow)*100%),transparent)}
+:root:root body .cal-day.sel{box-shadow:0 0 0 2px var(--acc)}
+
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  :root:root body :is(.topbar,.tabbar,.botnav,.sheet,.side.open){background:var(--lg-bar-solid)}
+}
+/* Prośba o mniej przezroczystości: pełne tła, bez blura i bez plam */
+@media (prefers-reduced-transparency:reduce){
+  html::before{display:none}
+  :root:root body{background:var(--bg)}
+  :root:root body :is(.side,.stat-tile,.sec-card,.panel,.card,.chal-list,.plan-card:not(.pop),.upsell,.auth-card){
+    background:var(--panel)}
+  :root:root body :is(.topbar,.tabbar,.botnav,.sheet,.side.open){background:var(--lg-bar-solid);
+    -webkit-backdrop-filter:none;backdrop-filter:none}
+  html[data-theme=dark] body .gradient-banner{background:linear-gradient(100deg,#6d28d9 0%,#7c3aed 35%,#a855f7 100%)}
+}

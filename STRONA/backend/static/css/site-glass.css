@@ -1,0 +1,96 @@
+/* ============================================================
+   Liquid glass strony publicznej (jasny i ciemny motyw). Tylko wygląd.
+   Osobny plik, bo site.css ma budżet rozmiaru pilnowany testem.
+   Wydajność jak przed zmianą:
+   - plamy światła to JEDNA nieruchoma warstwa `html::before` (fixed,
+     komponowana na GPU) zamiast `background-attachment:fixed`, które
+     przemalowuje się przy każdym przewinięciu;
+   - prawdziwy blur (backdrop-filter) tylko tam, gdzie pod spodem przewija
+     się treść: nagłówek, menu mobilne, cookies. Karty leżą na gładkim
+     gradiencie — jego rozmycie wygląda jak brak rozmycia, więc karty
+     dostają szkło z wypełnienia i odblasków, bez kosztu blura;
+   - zero animacji tła i zero nowych przejść.
+   Prefiks `:root:root body` (0,3,1) wygrywa z `html[data-theme=dark] .x`
+   z site-theme.css niezależnie od kolejności plików.
+   ============================================================ */
+
+:root{
+  --lg-fill:rgba(255,255,255,.7);
+  --lg-fill-in:rgba(255,255,255,.55);
+  --lg-rim:rgba(255,255,255,.9);
+  --lg-hair:0 0 0 .5px rgba(15,23,42,.08);
+  --lg-spec:inset 0 1px 0 rgba(255,255,255,.95),inset 1px 0 0 rgba(255,255,255,.55),inset 0 -1px 0 rgba(255,255,255,.3);
+  --lg-sheen:linear-gradient(150deg,rgba(255,255,255,.75) 0%,rgba(255,255,255,0) 38%);
+  --lg-drop:0 1px 2px rgba(15,23,42,.04),0 16px 36px -20px rgba(79,70,229,.24);
+  --lg-bar:rgba(255,255,255,.62);
+  --lg-bar-solid:rgba(255,255,255,.96);
+  --lg-blur:blur(20px) saturate(1.8);
+  --lg-light:
+    radial-gradient(60vw 60vw at 4% -12%,rgba(99,102,241,.16),transparent 62%),
+    radial-gradient(52vw 52vw at 104% 24%,rgba(139,92,246,.13),transparent 60%),
+    radial-gradient(44vw 44vw at 68% 112%,rgba(242,134,15,.08),transparent 62%);
+}
+html[data-theme=dark]{
+  --lg-fill:rgba(255,255,255,.055);
+  --lg-fill-in:rgba(255,255,255,.035);
+  --lg-rim:rgba(255,255,255,.11);
+  --lg-hair:0 0 0 .5px rgba(0,0,0,.45);
+  --lg-spec:inset 0 1px 0 rgba(255,255,255,.16),inset 1px 0 0 rgba(255,255,255,.05),inset 0 -1px 0 rgba(255,255,255,.03);
+  --lg-sheen:linear-gradient(150deg,rgba(255,255,255,.075) 0%,rgba(255,255,255,0) 40%);
+  --lg-drop:0 2px 8px rgba(0,0,0,.25),0 18px 44px -22px rgba(0,0,0,.7);
+  --lg-bar:rgba(11,13,18,.5);
+  --lg-bar-solid:rgba(11,13,18,.96);
+  --lg-blur:blur(20px) saturate(1.6);
+  --lg-light:
+    radial-gradient(60vw 60vw at 4% -12%,rgba(99,102,241,.32),transparent 62%),
+    radial-gradient(52vw 52vw at 104% 24%,rgba(139,92,246,.24),transparent 60%),
+    radial-gradient(44vw 44vw at 68% 112%,rgba(242,134,15,.12),transparent 62%);
+}
+
+/* Tło: --bg zostaje na html, światło leży nad nim, treść nad światłem. */
+html::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background:var(--lg-light)}
+:root:root body{background:transparent}
+
+/* Karty: szkło bez blura */
+:root:root body :is(.cfg,.mock,.stats-band,.card,.fork-card,.faq details,.pcfg,.prules,.verify-result,footer){
+  background:var(--lg-sheen),var(--lg-fill);
+  border-color:var(--lg-rim);
+  box-shadow:var(--lg-spec),var(--lg-hair),var(--lg-drop);
+}
+:root:root body footer{box-shadow:var(--lg-spec),var(--lg-hair)}
+:root:root body .aff-band{box-shadow:var(--lg-spec),var(--lg-hair),var(--lg-drop)}
+
+/* Elementy w karcie: o stopień inna tafla, bez cienia (warstwy jak w iOS) */
+:root:root body :is(.cfg-size:not(.on),.cfg-chip,.btn-ghost,.cfg-tabs,.ptog:not(.on),.code-btn){
+  background:var(--lg-sheen),var(--lg-fill-in);
+  border-color:var(--lg-rim);
+  box-shadow:var(--lg-spec),var(--lg-hair);
+}
+
+/* Paski nad przewijaną treścią: tu jest prawdziwy blur */
+:root:root body :is(.nav.on,.mobile-menu,.cookie-note){
+  background:var(--lg-bar);
+  -webkit-backdrop-filter:var(--lg-blur);
+  backdrop-filter:var(--lg-blur);
+  box-shadow:var(--lg-spec),var(--lg-hair);
+}
+:root:root body .cookie-note{box-shadow:var(--lg-spec),var(--lg-hair),var(--lg-drop)}
+/* Menu mobilne zasłania całą stronę z przyciskami — przy przezroczystym szkle
+   przyciski spod spodu (np. „Start a Challenge") prześwitywały między pozycjami menu. */
+:root:root body .mobile-menu{background:var(--lg-bar-solid)}
+/* Na telefonie menu zasłania cały ekran pod nagłówkiem — bez tego kończyło się
+   w połowie i przecinało przyciski strony pod spodem. */
+@media (max-width:960px){:root:root body .mobile-menu.open{bottom:0}}
+
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  :root:root body :is(.nav.on,.mobile-menu,.cookie-note){background:var(--lg-bar-solid)}
+}
+/* Prośba o mniej przezroczystości: pełne tła, bez blura i bez plam */
+@media (prefers-reduced-transparency:reduce){
+  html::before{display:none}
+  :root:root body{background:var(--bg)}
+  :root:root body :is(.cfg,.mock,.stats-band,.card,.fork-card,.faq details,.pcfg,.prules,.verify-result,footer,
+    .cfg-size:not(.on),.cfg-chip,.btn-ghost,.code-btn){background:var(--panel)}
+  :root:root body :is(.nav.on,.mobile-menu,.cookie-note){background:var(--lg-bar-solid);
+    -webkit-backdrop-filter:none;backdrop-filter:none}
+}

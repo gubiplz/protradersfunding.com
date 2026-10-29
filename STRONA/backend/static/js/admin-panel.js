@@ -4836,11 +4836,19 @@ async function openTicket(id){
       ${otwarty?`<button class="btn-o sm" style="margin-left:auto" onclick="replyTicket(${t.id},true)"
         title="Close the ticket. Anything typed below is sent first.">Close ticket</button>`:''}
     </div>
-    ${chatHtml(t.thread,{me:'admin',them:'Trader',tz:'Europe/Warsaw'})}
+    ${chatHtml(t.thread,{me:'admin',them:'Trader',tz:'Europe/Warsaw',names:{ai:'AI assistant',ai_note:'AI handover note (team only)'}})}
     ${otwarty?`<div class="tk-compose">${chatCompose({id:'tk-reply',send:`replyTicket(${t.id},false)`,
       placeholder:'Reply to the trader…'})}</div>`:'<p class="chat-closed">This ticket is closed.</p>'}`);
   /* Rozmowa otwiera się na OSTATNIEJ wiadomości, jak w komunikatorze. */
   requestAnimationFrame(()=>{const b=$('o-body');if(b)b.scrollTop=b.scrollHeight});
+  /* Pisanie = przejęcie rozmowy: trader widzi w czacie konsultanta i „is typing…".
+     Sygnał najwyżej co 3 s, tylko gdy w polu coś jest. */
+  const pole=$('tk-reply');
+  if(pole){let ost=0;pole.addEventListener('input',()=>{
+    const teraz=Date.now();
+    if(!pole.value.trim()||teraz-ost<3000)return;
+    ost=teraz;api('/api/admin/tickets/'+id+'/typing',{method:'POST'}).catch(()=>{});
+  })}
 }
 async function replyTicket(id,close){
   const el=$('tk-reply');const msg=el?el.value.trim():'';

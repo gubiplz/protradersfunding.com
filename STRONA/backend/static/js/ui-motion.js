@@ -127,6 +127,9 @@ new MutationObserver(ms=>{
     if(m.type==='attributes'){
       if(t.parentElement&&t.parentElement.matches&&t.parentElement.matches(SEG))doSeg.add(t.parentElement);
       if(t.classList&&t.classList.contains('sb-link'))doNav=true;
+      /* „Collapse" zmienia klasę na samym pasku, nie na pozycjach — bez tego
+         podświetlenie zostawało na szerokości rozwiniętego paska. */
+      if(t.id==='side')doNav=true;
       continue;
     }
     if(t.id==='view'||(t.closest&&t.closest('#view')))doWidok=true;
@@ -142,6 +145,12 @@ new MutationObserver(ms=>{
 addEventListener('resize',()=>{
   document.querySelectorAll(SEG).forEach(s=>pigulka(s,false));
   document.querySelectorAll('.side-nav').forEach(n=>slizg(n,false));
+});
+/* Pasek zwija się animacją szerokości: pozycje mają końcowe wymiary dopiero
+   po niej, więc po jej końcu podświetlenie liczymy jeszcze raz. */
+document.addEventListener('transitionend',e=>{
+  if(e.target.id==='side'&&(e.propertyName==='width'||e.propertyName==='flex-basis'))
+    document.querySelectorAll('.side-nav').forEach(n=>slizg(n,false));
 });
 document.addEventListener('DOMContentLoaded',()=>{
   document.querySelectorAll(SEG).forEach(s=>pigulka(s,false));

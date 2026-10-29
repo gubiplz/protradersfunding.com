@@ -833,7 +833,9 @@ def test_lista_traderow_do_grantu_bez_limitu_i_bez_usunietych():
     for i in range(60):
         s.add(Trader(email=f"masa{i}@test.pl", password_hash="x",
                      full_name=f"Masa {i}", referral_code=f"m{i:04d}"))
-    s.add(Trader(email="deleted-777@removed.invalid", password_hash="x",
+    # Adres, którego aplikacja sama nigdy nie nada („deleted-{id}"): z „deleted-777"
+    # wiersz kolidował z anonimizacją konta, które w pełnym przebiegu dostało id 777.
+    s.add(Trader(email="deleted-test-777@removed.invalid", password_hash="x",
                  full_name="Deleted User", referral_code="del777"))
     s.commit(); s.close()
 
