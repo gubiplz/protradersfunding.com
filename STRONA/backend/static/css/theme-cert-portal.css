@@ -27,7 +27,7 @@
 .ptr-spin{border-top-color:var(--acc,#1b6ef3)}
 html[data-theme=dark]{--acc:#67d2ff;--acc2:#8fdcff;--acc-bg:rgba(43,139,255,.16);--acc-line:rgba(103,210,255,.38);--purple:#8fdcff;--purple-bg:rgba(27,75,216,.16);--purple-line:rgba(143,220,255,.35)}
 html[data-theme=dark] ::selection{background:rgba(103,210,255,.35)}
-/* z portal-glass.css: 9 reguł */
+/* z portal-glass.css: 8 reguł */
 :root{--lg-drop:0 1px 2px rgba(15,23,42,.04),0 16px 36px -20px rgba(27,110,243,.24);--lg-light:radial-gradient(60vw 60vw at 4% -12%,rgba(43,139,255,.16),transparent 62%),
     radial-gradient(52vw 52vw at 104% 24%,rgba(27,75,216,.13),transparent 60%),
     radial-gradient(44vw 44vw at 68% 112%,rgba(242,134,15,.08),transparent 62%)}
@@ -42,7 +42,6 @@ html[data-theme=dark]{--pb-nav-on:linear-gradient(90deg,rgba(27,75,216,.34),rgba
 :root:root body .prog-bar>i{box-shadow:inset 0 1px 0 rgba(255,255,255,.35),
   0 0 14px -2px color-mix(in srgb,var(--pb-c,#1b4bd8) calc(var(--pb-glow)*100%),transparent)}
 :root:root body .prog-bar .mid{--pb-c:#1b4bd8}
-@media (prefers-reduced-transparency:reduce){html[data-theme=dark] body .gradient-banner{background:linear-gradient(100deg,#1440b8 0%,#1b4bd8 35%,#67d2ff 100%)}}
 /* z notifications.css: 2 reguł */
 .np .np-btn-p{box-shadow:0 12px 26px -14px rgba(43,139,255,.8)}
 .np-undo button{color:#a9e4ff}
@@ -126,9 +125,7 @@ html::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   background:radial-gradient(circle at 1px 1px,var(--ct-dot) 1px,transparent 1.5px) 0 0/28px 28px;
   -webkit-mask-image:radial-gradient(85% 60% at 50% 0%,#000 0%,rgba(0,0,0,.35) 45%,transparent 80%);
   mask-image:radial-gradient(85% 60% at 50% 0%,#000 0%,rgba(0,0,0,.35) 45%,transparent 80%)}
-/* „Ogranicz przezroczystość" (Windows: Efekty przezroczystości, macOS: Zmniejsz
-   przezroczystość) NIE wyłącza tła: to nieruchomy obraz pod treścią, nie szkło.
-   Pełne zamiast półprzezroczystych są paski i karty (portal-glass / site-glass). */
+/* „Ogranicz przezroczystość" niczego tu nie wyłącza — patrz portal-glass / site-glass. */
 
 /* ---------- portal ---------- */
 /* Logowanie = tablica certyfikatu: świecąca ramka gradientem i płyta z poświatą */

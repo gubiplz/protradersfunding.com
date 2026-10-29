@@ -85,11 +85,7 @@ html::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
   :root:root body :is(.nav.on,.mobile-menu,.cookie-note){background:var(--lg-bar-solid)}
 }
-/* Prośba o mniej przezroczystości: pełne tła, bez blura i bez plam */
-/* Tło certyfikatu zostaje (obraz, nie przezroczystość); pełne są tylko powierzchnie. */
-@media (prefers-reduced-transparency:reduce){
-  :root:root body :is(.cfg,.mock,.stats-band,.card,.fork-card,.faq details,.pcfg,.prules,.verify-result,footer,
-    .cfg-size:not(.on),.cfg-chip,.btn-ghost,.code-btn){background:var(--panel)}
-  :root:root body :is(.nav.on,.mobile-menu,.cookie-note){background:var(--lg-bar-solid);
-    -webkit-backdrop-filter:none;backdrop-filter:none}
-}
+/* „Ogranicz przezroczystość" (Windows: Efekty przezroczystości — wyłączone m.in. w trybie
+   oszczędzania baterii; macOS: Zmniejsz przezroczystość) NIE zmienia wyglądu: strona ma
+   wyglądać tak samo na każdym komputerze, a tekst i tak leży na ciemnej płycie, więc
+   czytelność nie cierpi. Pełne tła zostają tylko dla przeglądarek bez backdrop-filter. */
