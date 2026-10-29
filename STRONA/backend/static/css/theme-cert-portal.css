@@ -126,7 +126,9 @@ html::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   background:radial-gradient(circle at 1px 1px,var(--ct-dot) 1px,transparent 1.5px) 0 0/28px 28px;
   -webkit-mask-image:radial-gradient(85% 60% at 50% 0%,#000 0%,rgba(0,0,0,.35) 45%,transparent 80%);
   mask-image:radial-gradient(85% 60% at 50% 0%,#000 0%,rgba(0,0,0,.35) 45%,transparent 80%)}
-@media (prefers-reduced-transparency:reduce){html::before,html::after{display:none}}
+/* „Ogranicz przezroczystość" (Windows: Efekty przezroczystości, macOS: Zmniejsz
+   przezroczystość) NIE wyłącza tła: to nieruchomy obraz pod treścią, nie szkło.
+   Pełne zamiast półprzezroczystych są paski i karty (portal-glass / site-glass). */
 
 /* ---------- portal ---------- */
 /* Logowanie = tablica certyfikatu: świecąca ramka gradientem i płyta z poświatą */

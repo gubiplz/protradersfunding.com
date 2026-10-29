@@ -86,9 +86,8 @@ html::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
   :root:root body :is(.nav.on,.mobile-menu,.cookie-note){background:var(--lg-bar-solid)}
 }
 /* Prośba o mniej przezroczystości: pełne tła, bez blura i bez plam */
+/* Tło certyfikatu zostaje (obraz, nie przezroczystość); pełne są tylko powierzchnie. */
 @media (prefers-reduced-transparency:reduce){
-  html::before{display:none}
-  :root:root body{background:var(--bg)}
   :root:root body :is(.cfg,.mock,.stats-band,.card,.fork-card,.faq details,.pcfg,.prules,.verify-result,footer,
     .cfg-size:not(.on),.cfg-chip,.btn-ghost,.code-btn){background:var(--panel)}
   :root:root body :is(.nav.on,.mobile-menu,.cookie-note){background:var(--lg-bar-solid);

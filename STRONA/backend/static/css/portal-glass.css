@@ -198,10 +198,11 @@ html[data-theme=dark] body .prog-bar{background:rgba(255,255,255,.06)}
   :root:root body :is(.topbar,.tabbar,.botnav,.sheet,.side.open){background:var(--lg-bar-solid)}
 }
 /* Prośba o mniej przezroczystości: pełne tła, bez blura i bez plam */
+/* Tło certyfikatu (html::before/::after) zostaje — to obraz, nie przezroczystość;
+   bez niego strona na takim komputerze wyglądała gorzej niż reszta. Płyta
+   logowania (.auth-card) jest już pełna, więc też zostaje jak jest. */
 @media (prefers-reduced-transparency:reduce){
-  html::before{display:none}
-  :root:root body{background:var(--bg)}
-  :root:root body :is(.side,.stat-tile,.sec-card,.panel,.card,.chal-list,.plan-card:not(.pop),.upsell,.auth-card){
+  :root:root body :is(.side,.stat-tile,.sec-card,.panel,.card,.chal-list,.plan-card:not(.pop),.upsell){
     background:var(--panel)}
   :root:root body :is(.topbar,.tabbar,.botnav,.sheet,.side.open){background:var(--lg-bar-solid);
     -webkit-backdrop-filter:none;backdrop-filter:none}
