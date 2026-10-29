@@ -138,6 +138,13 @@ html[data-theme=dark]{
 @media (min-width:961px){
   :root:root body .topbar{top:10px;margin:10px 16px 0;border:1px solid var(--lg-rim);border-radius:18px;
     box-shadow:var(--lg-spec),var(--lg-hair),var(--lg-drop)}
+  /* Pasek filtrów panelu admina (admin.css: sticky pod topbarem) — druga pigułka
+     tego samego szkła. Topbar wisi 10 px od góry, więc sam pomiar jego wysokości
+     (--tb-h) stawiał pasek 10 px za wysoko, pod pigułką; +10 px odstępu. */
+  :root:root body #view>.toolbar{top:calc(var(--tb-h,58px) + 20px);margin:0 0 16px;padding:10px 12px;
+    row-gap:10px;border:1px solid var(--lg-rim);border-radius:16px;background:var(--lg-bar);
+    -webkit-backdrop-filter:var(--lg-blur);backdrop-filter:var(--lg-blur);
+    box-shadow:var(--lg-spec),var(--lg-hair),var(--lg-drop)}
 }
 
 /* Przełączniki jako pill-group (Minimal V14 / Glassy V5): tor ze szkła,

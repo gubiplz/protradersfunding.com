@@ -435,6 +435,14 @@
   };
 
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && OTWARTY) zamknij(); });
+  // Klik w stronę poza oknem czatu zamyka je (jak Escape). pointerdown, nie click:
+  // klik w środku, który przerysowuje okno, odpinałby cel i liczył się jako „poza".
+  document.addEventListener('pointerdown', function (e) {
+    if (!OTWARTY) return;
+    var t = e.target;
+    if (t.closest && t.closest('#hd-panel, #hd-fab, #hd-peek')) return;
+    zamknij();
+  });
   // Powrót do karty / PWA z tła i push na tym urządzeniu (sw.js) = odśwież od razu.
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible' && zalogowany()) odswiez();
