@@ -197,14 +197,7 @@ html[data-theme=dark] body .prog-bar{background:rgba(255,255,255,.06)}
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
   :root:root body :is(.topbar,.tabbar,.botnav,.sheet,.side.open){background:var(--lg-bar-solid)}
 }
-/* Prośba o mniej przezroczystości: pełne tła, bez blura i bez plam */
-/* Tło certyfikatu (html::before/::after) zostaje — to obraz, nie przezroczystość;
-   bez niego strona na takim komputerze wyglądała gorzej niż reszta. Płyta
-   logowania (.auth-card) jest już pełna, więc też zostaje jak jest. */
-@media (prefers-reduced-transparency:reduce){
-  :root:root body :is(.side,.stat-tile,.sec-card,.panel,.card,.chal-list,.plan-card:not(.pop),.upsell){
-    background:var(--panel)}
-  :root:root body :is(.topbar,.tabbar,.botnav,.sheet,.side.open){background:var(--lg-bar-solid);
-    -webkit-backdrop-filter:none;backdrop-filter:none}
-  html[data-theme=dark] body .gradient-banner{background:linear-gradient(100deg,#6d28d9 0%,#7c3aed 35%,#a855f7 100%)}
-}
+/* „Ogranicz przezroczystość" (Windows: Efekty przezroczystości — wyłączone m.in. w trybie
+   oszczędzania baterii; macOS: Zmniejsz przezroczystość) NIE zmienia wyglądu: strona ma
+   wyglądać tak samo na każdym komputerze, a tekst i tak leży na ciemnej płycie, więc
+   czytelność nie cierpi. Pełne tła zostają tylko dla przeglądarek bez backdrop-filter. */
