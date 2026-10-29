@@ -194,12 +194,15 @@ function przerysujCicho(v){
    liscie kont i trader musial sam znalezc to, o ktorym byl push. */
 function navFromUrl(u){
   try{const p=new URL(u,location.origin).searchParams;
-    return {v:p.get('view'),acc:+p.get('acc')||0};
+    return {v:p.get('view'),acc:+p.get('acc')||0,chat:+p.get('chat')||0};
   }catch(_){return {v:null,acc:0}}
 }
 function goNav(n){
   if(!n||!n.v)return false;
   if(n.v==='recap'){if(!n.acc)return false;openAcc(n.acc);return true}
+  /* Push/mail o odpowiedzi supportu: dymek czatu na tej rozmowie, a pod nim
+     zwykły ekran startowy (sam dymek nad pustym widokiem wyglądał jak awaria). */
+  if(n.v==='support'&&window.openHelpdesk){if(!CURV)go('accounts');window.openHelpdesk(n.chat);return true}
   if(!Object.prototype.hasOwnProperty.call(VIEWS,n.v))return false;
   go(n.v);return true;
 }
@@ -798,7 +801,7 @@ async function boot(){
   /* Deep links from notifications: _pendingView / fresh sw.js entry in Cache
      Storage (wins over a STALE ?view= left in the address after a previous
      deep link), finally ?view= from the URL (cold start via openWindow). */
-  const nav=(await pendingNavView())||{v:q.get('view'),acc:+q.get('acc')||0};
+  const nav=(await pendingNavView())||{v:q.get('view'),acc:+q.get('acc')||0,chat:+q.get('chat')||0};
   if(q.get('upsell')==='1')window._upsellJump=true;
   /* ?view/?upsell skonsumowane — bez sprzątnięcia każdy kolejny reload PWA
      skakał do starego deep linka. ?buy zostaje: konsumuje go (i czyści)
@@ -1415,7 +1418,10 @@ function unNav(nav){
    push i wpis w dzwonku naraz — tak działa backend (`notify._PREF_BY_EVENT`). */
 const UN_CATS=[['trading','Trading','Phase passes, funding, targets and limit warnings','trophy','green'],
   ['payouts','Payouts','Requested, approved and sent','wallet','purple'],
-  ['updates','Account & support','KYC results, support replies and credits','shield','blue'],
+  ['updates','Account','KYC results and store credit','shield','blue'],
+  /* Support ma własny przełącznik: mail + push o odpowiedzi zespołu w czacie.
+     W portalu odpowiedź pokazuje plakietka na dymku czatu, nie dzwonek. */
+  ['support','Support chat','Replies from our team in the chat (e-mail and push)','chat','acc'],
   ['marketing','Recaps & offers','Daily recap, weekly review and occasional offers','chart','acc']];
 function unCatsHtml(){
   const n=(ME&&ME.notify)||{};
@@ -1447,7 +1453,12 @@ function unRenderSettings(){
 async function unSetCat(k,on){
   const maluj=v=>npQ(`[data-un-cat="${k}"]`).forEach(s=>s.setAttribute('aria-checked',String(v)));
   maluj(on);
-  try{const r=await api('/api/me',{method:'PATCH',body:JSON.stringify({['notify_'+k]:on})});ME.notify=r.notify}
+  try{const r=await api('/api/me',{method:'PATCH',body:JSON.stringify({['notify_'+k]:on})});ME.notify=r.notify;
+    /* support siedzi w ui_prefs — lokalna kopia musi go znać, inaczej następny
+       zapis preferencji UI (cały obiekt) przywróciłby stary stan. Ten SAM obiekt
+       (patrz setUiPref), więc zmiana w miejscu. */
+    if(k==='support'){ME.ui_prefs=ME.ui_prefs||{};
+      if(on)delete ME.ui_prefs.notify_support;else ME.ui_prefs.notify_support=false}}
   catch(e){maluj(!on);toast('Error: '+e.message,'err')}
 }
 function unObserve(on){

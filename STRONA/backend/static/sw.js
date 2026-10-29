@@ -15,13 +15,18 @@ self.addEventListener('fetch', () => {});
 self.addEventListener('push', (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch (_) {}
-  e.waitUntil(self.registration.showNotification(d.title || 'ProTraders', {
+  /* Otwarte karty dostają sygnał „push": dymek czatu odświeża się od razu,
+     zamiast czekać na swój cykl. Strony bez nasłuchu po prostu go pomijają. */
+  const powiedz = self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+    .then((ws) => ws.forEach((w) => w.postMessage({ type: 'push', url: d.url || '', tag: d.tag || '' })))
+    .catch(() => {});
+  e.waitUntil(Promise.all([powiedz, self.registration.showNotification(d.title || 'ProTraders', {
     body: d.body || '',
     icon: '/static/img/icon-192.png',
     badge: '/static/img/icon-192.png',
     tag: d.tag || undefined,
     data: { url: d.url || '/portal' },
-  }));
+  })]));
 });
 
 self.addEventListener('notificationclick', (e) => {

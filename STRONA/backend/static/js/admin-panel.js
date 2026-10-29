@@ -6620,7 +6620,7 @@ function npRenderList(o={}){
   const items=npVisible();
   if(!items.length){
     box.innerHTML=`<div class="np-empty"><span class="np-e-ic">${npI('checkCircle')}</span><b>You're all caught up</b><span>${
-      NP.tab==='prop'?'Orders, KYC, payout requests and ticket messages land here.'
+      NP.tab==='prop'?'Orders, KYC and payout requests land here. Support chats have their own bubble.'
       :NP.tab==='free'?'Leads from the free funnel land here.'
       :'New leads, claims, statuses and follow-ups land here.'}</span></div>`;
   }else{
@@ -6808,7 +6808,9 @@ const PUSH_GROUPS=[
   ['Prop',[['admin_order','Orders & payments','New challenge purchases','bag','green'],
     ['admin_kyc','KYC submissions','Documents waiting for review','shield','blue'],
     ['admin_payout','Payout requests','Traders asking to be paid','wallet','purple'],
-    ['admin_ticket','Support tickets','Trader messages','chat','acc'],
+    /* Wiadomości supportu nie trafiają do dzwonka — w panelu pokazuje je dymek
+       czatu (admin-support.js); ten przełącznik steruje pushem na telefon. */
+    ['admin_ticket','Support chat','New trader messages in the support bubble','chat','acc'],
     ['admin_reach','Channel reach & balance','Telegram post milestones','megaphone','blue'],
     ['fraud','Chargebacks & fraud','Disputes and early fraud warnings','octagon','red']]],
 ];
@@ -7088,9 +7090,12 @@ async function tgLinkTest(btn){
    Osobny klucz od portalu, żeby na wspólnym profilu desktop żadna z aplikacji
    nie zjadała cudzych kliknięć. */
 function openLeadFromUrl(url){
-  let lead=null;
-  try{lead=new URL(url,location.origin).searchParams.get('lead')}catch(_){}
-  if(!lead||!ME)return;
+  let lead=null,chat=null;
+  try{const p=new URL(url,location.origin).searchParams;lead=p.get('lead');chat=p.get('chat')}catch(_){}
+  if(!ME)return;
+  /* Push supportu (/admin?chat=<id>) otwiera rozmowę w dymku czatu, nad bieżącym widokiem. */
+  if(chat&&window.asOpenChat){window.asOpenChat(+chat);return}
+  if(!lead)return;
   go('leads');openLead(+lead);
 }
 async function applyPendingLead(){
@@ -7129,6 +7134,7 @@ if(localStorage.getItem('pf_admin_collapsed')==='1')$('side').classList.add('col
        strony po wygaśnięciu ciasteczka trafia w celowy 404 serwera i admin
        "wylatuje z aplikacji", zamiast przejść przez furtkę i ekran logowania. */
     const lead=new URLSearchParams(location.search).get('lead');
+    const czat=new URLSearchParams(location.search).get('chat');
     /* Hasz trzeba odczytac PRZED przepisaniem adresu i dokleic z powrotem —
        inaczej `replaceState` nizej skasowalby wlasnie odzyskany stan. */
     const st=czytajHasz();
@@ -7139,6 +7145,7 @@ if(localStorage.getItem('pf_admin_collapsed')==='1')$('side').classList.add('col
     if(lead){go('leads');openLead(+lead)}   // deep-link z pusha wygrywa z haszem
     else if(st){ustawStan(st);go(st.view)}  // globale PRZED go(): widok czyta je od razu
     else go('overview');
+    if(czat&&window.asOpenChat)window.asOpenChat(+czat);   // push supportu: rozmowa w dymku
     applyPendingLead();
     loadInbox();
   }catch(e){

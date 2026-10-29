@@ -1396,6 +1396,14 @@ def _ui_prefs_dict(trader: Trader) -> dict:
         return {}
 
 
+def _notify_dict(tr: Trader) -> dict:
+    """Przełączniki kategorii powiadomień tradera. `support` (odpowiedzi zespołu
+    w czacie) siedzi w ui_prefs, bo nie ma własnej kolumny — brak wpisu = włączone."""
+    return {"updates": bool(tr.notify_updates), "trading": bool(tr.notify_trading),
+            "payouts": bool(tr.notify_payouts), "marketing": bool(tr.notify_marketing),
+            "support": _ui_prefs_dict(tr).get("notify_support") is not False}
+
+
 def _affiliate_earned(session, trader: Trader) -> float:
     """Prowizja naliczona ŁĄCZNIE z opłaconych zamówień poleconych traderów."""
     # Granty (BOGO) niosą amount_usd opłaconego tieru dla faktury, ale to
@@ -1474,8 +1482,7 @@ def me(trader: Trader = Depends(auth.current_trader)):
                 "checkin_last": trader.checkin_last,
                 "reveal_last": trader.reveal_last,
                 "streak_freezes": trader.streak_freezes or 0,
-                "notify": {"updates": bool(trader.notify_updates), "trading": bool(trader.notify_trading),
-                           "payouts": bool(trader.notify_payouts), "marketing": bool(trader.notify_marketing)},
+                "notify": _notify_dict(trader),
                 "affiliate": {"referred": referred, "commission_pct": catalog.AFFILIATE_COMMISSION_PCT,
                               "commission_earned": commission,
                               "commission_claimed": claimed,
@@ -2785,9 +2792,11 @@ def _kategoria_powiadomienia(event: str) -> str:
 
 def _moje_powiadomienia(session, trader_id: int):
     """Wiersze dzwonka TRADERA. Alerty działu (url `/admin…`) leżą w tej samej
-    tabeli pod kontem admina — w portalu nie mają czego szukać."""
+    tabeli pod kontem admina — w portalu nie mają czego szukać. Odpowiedzi
+    supportu też nie: mają własną plakietkę na dymku czatu (stare wpisy znikają)."""
     return session.query(Notification).filter(
         Notification.trader_id == trader_id,
+        Notification.event != "ticket_reply",
         or_(Notification.url.is_(None), ~Notification.url.like("/admin%")))
 
 
@@ -3133,7 +3142,8 @@ def ticket_create(payload: TicketIn, trader: Trader = Depends(auth.current_trade
         session.flush()
         session.add(TicketMessage(ticket_id=t.id, author="trader", body=message[:20000]))
         session.commit()
-        notify.notify_admins("admin_ticket", f"New ticket: {subject[:80]}", trader.email)
+        notify.notify_admins("admin_ticket", f"New ticket: {subject[:80]}", trader.email,
+                             url=f"/admin?chat={t.id}", tag=f"chat-{t.id}")
         return {"id": t.id, "ref": t.ref, "status": t.status}
     finally:
         session.close()
@@ -3178,7 +3188,8 @@ def ticket_reply(ticket_id: int, payload: TicketReplyIn, trader: Trader = Depend
         session.add(TicketMessage(ticket_id=t.id, author="trader", body=body[:20000]))
         t.status = "open"
         session.commit()
-        notify.notify_admins("admin_ticket", f"Ticket reply: {t.subject[:80]}", trader.email)
+        notify.notify_admins("admin_ticket", f"Ticket reply: {t.subject[:80]}", trader.email,
+                             url=f"/admin?chat={t.id}", tag=f"chat-{t.id}")
         return _ticket_dict(session, t, with_thread=True, for_trader=True)
     finally:
         session.close()
@@ -3340,7 +3351,8 @@ def _czat_przekaz(session, t: SupportTicket, trader: Trader, subject: str, summa
         notatka.append(f"Summary: {summary}")
     session.add(TicketMessage(ticket_id=t.id, author="ai_note", body="\n".join(notatka)))
     session.commit()
-    notify.notify_admins("admin_ticket", f"New chat ticket: {t.subject[:80]}", trader.email)
+    notify.notify_admins("admin_ticket", f"New chat ticket: {t.subject[:80]}", trader.email,
+                         url=f"/admin?chat={t.id}", tag=f"chat-{t.id}")
 
 
 @app.get("/api/me/chats")
@@ -3424,7 +3436,8 @@ def chat_send(payload: ChatIn, trader: Trader = Depends(auth.current_trader)):
                 return _czat_dict(session, t)
             t.status = "open"
             session.commit()
-            notify.notify_admins("admin_ticket", f"Ticket reply: {t.subject[:80]}", trader.email)
+            notify.notify_admins("admin_ticket", f"Ticket reply: {t.subject[:80]}", trader.email,
+                                 url=f"/admin?chat={t.id}", tag=f"chat-{t.id}")
             return _czat_dict(session, t)
 
         if powtorka:
@@ -3536,6 +3549,55 @@ def admin_tickets():
         session.close()
 
 
+@app.get("/api/admin/support/chats", dependencies=[Depends(auth.require_admin)])
+def admin_support_chats():
+    """Dymek supportu w panelu: rozmowy u zespołu jak lista w komunikatorze.
+
+    `waiting` (plakietka na dymku) = rozmowy, w których ostatnie słowo ma trader
+    i nikt z zespołu jeszcze nie odpisał (status `open`). Wspólne dla całego
+    działu — odpowiedź jednego admina gasi plakietkę u wszystkich. `last_id`
+    pozwala panelowi wykryć NOWĄ wiadomość tradera i pokazać jej podgląd.
+    Rozmowy prowadzone jeszcze przez asystenta (`bot`) nie są sprawą zespołu."""
+    session = SessionLocal()
+    try:
+        _zespol_widziany(session)   # dymek odpytywany cyklicznie = ktoś siedzi w panelu
+        tydzien = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)
+        rows = (session.query(SupportTicket)
+                .filter(SupportTicket.status != "bot",
+                        or_(SupportTicket.status != "closed", SupportTicket.created_at >= tydzien))
+                .order_by(SupportTicket.id.desc()).limit(60).all())
+        wiadomosci = _wiadomosci_biletow(session, [t.id for t in rows])
+        traderzy = {tr.id: tr for tr in session.query(Trader)
+                    .filter(Trader.id.in_({t.trader_id for t in rows})).all()} if rows else {}
+        out, last_id = [], 0
+        for t in rows:
+            msgs = [m for m in wiadomosci[t.id] if m.author != "ai_note"]
+            ost = msgs[-1] if msgs else None
+            od_tradera = [m for m in msgs if m.author == "trader"]
+            if od_tradera:
+                last_id = max(last_id, od_tradera[-1].id)
+            tr = traderzy.get(t.trader_id)
+            out.append({
+                "id": t.id, "ref": t.ref, "subject": t.subject, "status": t.status,
+                "waiting": t.status == "open",
+                "trader_email": tr.email if tr else None,
+                "trader_name": (tr.full_name or "") if tr else "",
+                "last": {"author": ost.author, "body": ost.body[:140], "ts": ost.ts.isoformat(),
+                         "id": ost.id} if ost else None,
+                # Podgląd przy dymku pokazuje słowa TRADERA — ostatnia w wątku bywa
+                # automatyczną odpowiedzią asystenta („przekazałem zespołowi").
+                "trader_last": {"id": od_tradera[-1].id, "body": od_tradera[-1].body[:140]}
+                if od_tradera else None,
+                "last_ts": (ost.ts if ost else t.created_at).isoformat(),
+            })
+        # Czekające na górze, w nich najświeższe pierwsze; potem reszta od najnowszej.
+        czeka = sorted([c for c in out if c["waiting"]], key=lambda c: c["last_ts"], reverse=True)
+        reszta = sorted([c for c in out if not c["waiting"]], key=lambda c: c["last_ts"], reverse=True)
+        return {"chats": czeka + reszta, "waiting": len(czeka), "last_id": last_id}
+    finally:
+        session.close()
+
+
 @app.get("/api/admin/tickets/{ticket_id}", dependencies=[Depends(auth.require_admin)])
 def admin_ticket_view(ticket_id: int):
     session = SessionLocal()
@@ -3564,9 +3626,11 @@ def admin_ticket_reply(ticket_id: int, payload: AdminTicketReplyIn):
             session.add(TicketMessage(ticket_id=t.id, author="admin", body=payload.message.strip()[:20000]))
         t.status = "closed" if payload.close else "answered"
         session.commit()
-        if payload.message.strip() and tr:
+        if payload.message.strip() and tr and _notify_dict(tr)["support"]:
+            # Mail + push na telefon (klik otwiera tę rozmowę w dymku). Do dzwonka
+            # nie trafia — w portalu odpowiedź pokazuje plakietka na dymku czatu.
             notify.send("ticket_reply", tr.email, {"name": tr.full_name or tr.email,
-                        "subject": t.subject, "ticket_ref": t.ref})
+                        "subject": t.subject, "ticket_ref": t.ref, "chat_id": t.id})
         return _ticket_dict(session, t, with_thread=True)
     finally:
         session.close()
@@ -3607,6 +3671,8 @@ class MePatch(BaseModel):
     notify_trading: bool | None = None
     notify_payouts: bool | None = None
     notify_marketing: bool | None = None
+    # Odpowiedzi zespołu w czacie pomocy (mail + push). Zapis w ui_prefs.notify_support.
+    notify_support: bool | None = None
     # Preferencje UI (np. sortowanie tabel) — mały JSON, nadpisywany w całości.
     ui_prefs: dict | None = None
 
@@ -3630,10 +3696,17 @@ def me_patch(payload: MePatch, trader: Trader = Depends(auth.current_trader)):
             if len(blob) > 2000:
                 raise HTTPException(400, "UI preferences too large")
             tr.ui_prefs = blob
+        if payload.notify_support is not None:
+            # Po ui_prefs: blob z panelu nie zgubi świeżo zmienionego przełącznika.
+            prefs = _ui_prefs_dict(tr)
+            if payload.notify_support:
+                prefs.pop("notify_support", None)
+            else:
+                prefs["notify_support"] = False
+            tr.ui_prefs = json.dumps(prefs, separators=(",", ":"))
         session.commit()
-        return {"ok": True, "full_name": tr.full_name,
-                "notify": {"updates": bool(tr.notify_updates), "trading": bool(tr.notify_trading),
-                           "payouts": bool(tr.notify_payouts), "marketing": bool(tr.notify_marketing)}}
+        return {"ok": True, "full_name": tr.full_name, "ui_prefs": _ui_prefs_dict(tr),
+                "notify": _notify_dict(tr)}
     finally:
         session.close()
 
@@ -7204,15 +7277,12 @@ def admin_inbox(authorization: str | None = Header(default=None)):
         wnioski = (bez_ukrytych(session.query(PayoutRequest), PayoutRequest.id, "payout")
                    .filter(PayoutRequest.status.in_(("review", "pending")))
                    .order_by(PayoutRequest.id.desc()).limit(10).all())
-        bilety = (bez_ukrytych(session.query(TicketMessage, SupportTicket), TicketMessage.id, "ticket")
-                  .join(SupportTicket, SupportTicket.id == TicketMessage.ticket_id)
-                  .filter(TicketMessage.author == "trader", SupportTicket.status != "bot")
-                  .order_by(TicketMessage.id.desc()).limit(10).all())
+        # Wiadomości supportu NIE idą do dzwonka: mają własny dymek czatu w panelu
+        # (plakietka z liczbą rozmów czekających, /api/admin/support/chats).
         # Dzwonek odpytuje panel cyklicznie, wiec maile bierzemy jednym zapytaniem
         # po wszystkich kolejkach naraz zamiast dokladac round-trip na wiersz.
         maile = _maile_traderow(session, [o.trader_id for o in zamowienia]
-                                + [r.trader_id for r in wnioski]
-                                + [t.trader_id for _, t in bilety])
+                                + [r.trader_id for r in wnioski])
 
         def email_of(tid: int) -> str:
             return maile.get(tid) or "?"
@@ -7240,11 +7310,6 @@ def admin_inbox(authorization: str | None = Header(default=None)):
                           "title": ("Payout request to review" if przeglad
                                     else f"Payout request ${pr.trader_share:,.2f}"),
                           "body": email_of(pr.trader_id), "view": "payouts"})
-        for m, t in bilety:
-            items.append({"id": f"ticket:{m.id}", "kind": "ticket", "ref": t.id,
-                          "type": "ticket", "ts": m.ts.isoformat(),
-                          "title": f"Ticket #{t.id}: {t.subject}",
-                          "body": email_of(t.trader_id), "view": "tickets"})
         # Leady tą samą listą co reszta kolejek: historia zdarzeń już istnieje
         # (lead_events), więc dzwonek tylko ją czyta. `lead_id` pozwala frontowi
         # otworzyć od razu kartę leada zamiast gołej zakładki.

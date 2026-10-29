@@ -52,13 +52,14 @@ def _wiersz(tid, event, url="/portal", title="T"):
 
 
 def test_pozycje_maja_kategorie_zakladki():
-    """Zakładki dzwonka: kategoria za przełącznikiem z Settings, recap pod Trading."""
+    """Zakładki dzwonka: kategoria za przełącznikiem z Settings, recap pod Trading.
+    Odpowiedź supportu (ticket_reply) nie trafia do dzwonka — ma plakietkę na dymku czatu."""
     tid, _, H = _trader()
     for ev in ("phase_passed", "payout_approved", "ticket_reply", "daily_recap", "flash_offer"):
         _wiersz(tid, ev)
     kat = {i["event"]: i["cat"] for i in client.get("/api/me/notifications", headers=H).json()["items"]}
     assert kat == {"phase_passed": "trading", "payout_approved": "payouts",
-                   "ticket_reply": "updates", "daily_recap": "trading", "flash_offer": "updates"}
+                   "daily_recap": "trading", "flash_offer": "updates"}
 
 
 def test_alerty_dzialu_nie_trafiaja_do_dzwonka_tradera():

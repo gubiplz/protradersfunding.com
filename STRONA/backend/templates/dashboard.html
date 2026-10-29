@@ -23,9 +23,14 @@
   document.querySelector('meta[name="theme-color"]').setAttribute('content','#0b0d12')}}catch(e){}
   if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('/sw.js'))</script>
   <link rel="stylesheet" href="/static/css/portal.css?v={{ asset_v }}">
+  <link rel="stylesheet" href="/static/css/portal-glass.css?v={{ asset_v }}">
   <link rel="stylesheet" href="/static/css/admin.css?v={{ asset_v }}">
   <link rel="stylesheet" href="/static/css/notifications.css?v={{ asset_v }}">
   <link rel="stylesheet" href="/static/css/apple.css?v={{ asset_v }}">
+  <link rel="stylesheet" href="/static/css/helpdesk.css?v={{ asset_v }}">
+  <!-- Motyw „Certificate" jak w portalu tradera + reguły fioletu z admin.css. -->
+  <link rel="stylesheet" href="/static/css/theme-cert-portal.css?v={{ asset_v }}">
+  <link rel="stylesheet" href="/static/css/theme-cert-admin.css?v={{ asset_v }}">
   <script defer src="/static/lib/chart.umd.min.js"></script>
 <script defer src="/static/js/equity-chart.js?v={{ asset_v }}"></script>
 <script defer src="/static/js/sortable.js?v={{ asset_v }}"></script>
@@ -100,6 +105,7 @@
 <script defer src="/static/js/np-kit.js?v={{ asset_v }}"></script>
 <script defer src="/static/js/chat-kit.js?v={{ asset_v }}"></script>
 <script defer src="/static/js/admin-panel.js?v={{ asset_v }}"></script>
+<script defer src="/static/js/admin-support.js?v={{ asset_v }}"></script>
 <script defer src="/static/js/ui-motion.js?v={{ asset_v }}"></script>
 </body>
 </html>

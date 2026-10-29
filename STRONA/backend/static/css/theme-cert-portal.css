@@ -4,7 +4,7 @@
    Ładowany jako OSTATNI arkusz: ta sama specyficzność + później = wygrywa,
    więc site.css / portal.css zostają bajt w bajt. Zdjęcie motywu = usunięcie linku.
    Blok „wygenerowany" to te same selektory co w źródłach, z fioletem
-   przemapowanym na błękit certyfikatu (generator: gen_theme_cert.py).
+   przemapowanym na błękit certyfikatu (generator: scripts/theme_cert/gen_theme_cert.py).
    ============================================================ */
 
 /* ---------- wygenerowany: fiolet -> błękit certyfikatu ---------- */

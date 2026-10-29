@@ -513,3 +513,85 @@ def test_przycisk_czlowiek_dopiero_pozniej(klient, silnik_faq, monkeypatch):
 
     monkeypatch.setattr(m, "datetime", _Zegar)
     assert client.get(f"/api/me/chat/{drugi['id']}", headers=h).json()["chat"]["offer_human"] is True
+
+
+# --- Powiadomienia supportu: tylko dymek czatu (+ mail/push), nigdy dzwonek ---
+
+@pytest.fixture
+def wysylki(monkeypatch):
+    from app import notify
+    stan = {"send": [], "admins": []}
+    monkeypatch.setattr(notify, "send", lambda ev, to, ctx=None: stan["send"].append((ev, to, ctx or {})))
+    monkeypatch.setattr(notify, "notify_admins",
+                        lambda ev, title, body="", url="/admin", tag=None: stan["admins"].append((ev, url, tag)))
+    return stan
+
+
+def test_odpowiedz_supportu_mail_i_push_do_rozmowy_bez_dzwonka(klient, model, wysylki):
+    h, tid = klient
+    chat = _wyslij(h, "I want a refund for my order")
+    # Push admina prowadzi do tej rozmowy w dymku panelu.
+    assert wysylki["admins"][-1] == ("admin_ticket", f"/admin?chat={chat['id']}", f"chat-{chat['id']}")
+    client.post(f"/api/admin/tickets/{chat['id']}/reply", headers=ADMIN, json={"message": "Checking it now."})
+    ev, _, ctx = wysylki["send"][-1]
+    assert ev == "ticket_reply" and ctx["chat_id"] == chat["id"]
+
+    from app import push
+    assert push.event_url("ticket_reply", {"chat_id": chat["id"]}) == f"/portal?view=support&chat={chat['id']}"
+    # Nawet gdyby wpis istniał (stary wiersz), dzwonek tradera go nie pokazuje.
+    from app.models import Notification
+    s = SessionLocal()
+    s.add(Notification(trader_id=tid, event="ticket_reply", title="Support replied", body="", url="/portal"))
+    s.commit(); s.close()
+    dzwonek = client.get("/api/me/notifications", headers=h).json()
+    assert all(i["event"] != "ticket_reply" for i in dzwonek["items"]) and dzwonek["unread"] == 0
+
+
+def test_push_odpowiedzi_bez_wpisu_w_dzwonku(klient, monkeypatch):
+    from app import push
+    from app.models import Notification
+    _, tid = klient
+    s = SessionLocal()
+    email = s.get(Trader, tid).email
+    s.close()
+    monkeypatch.setattr(push, "send_to_trader", lambda *a, **k: 1)
+    assert push.send_event("ticket_reply", email, "Support replied", {"chat_id": 1}) == 1
+    s = SessionLocal()
+    assert s.query(Notification).filter(Notification.trader_id == tid).count() == 0
+    s.close()
+
+
+def test_przelacznik_support_chat_wylacza_mail_i_push(klient, model, wysylki):
+    h, _ = klient
+    assert client.get("/api/auth/me", headers=h).json()["notify"]["support"] is True
+    r = client.patch("/api/me", headers=h, json={"notify_support": False}).json()
+    assert r["notify"]["support"] is False and r["ui_prefs"]["notify_support"] is False
+    # Cały ui_prefs z panelu (np. sortowanie) razem z przełącznikiem — przełącznik zostaje.
+    r = client.patch("/api/me", headers=h, json={"ui_prefs": {"sort": "x"}, "notify_support": False}).json()
+    assert r["ui_prefs"] == {"sort": "x", "notify_support": False}
+    chat = _wyslij(h, "I want a refund for my order")
+    ile = len(wysylki["send"])
+    client.post(f"/api/admin/tickets/{chat['id']}/reply", headers=ADMIN, json={"message": "Done."})
+    assert len(wysylki["send"]) == ile
+    r = client.patch("/api/me", headers=h, json={"notify_support": True}).json()
+    assert r["notify"]["support"] is True and "notify_support" not in r["ui_prefs"]
+
+
+def test_dymek_admina_liczy_czekajace_a_dzwonek_bez_supportu(klient, model, wysylki):
+    h, _ = klient
+    assert client.get("/api/admin/support/chats").status_code in (401, 403)
+    przed = client.get("/api/admin/support/chats", headers=ADMIN).json()
+    chat = _wyslij(h, "Please talk to a human about my payout")
+    po = client.get("/api/admin/support/chats", headers=ADMIN).json()
+    assert po["waiting"] == przed["waiting"] + 1 and po["last_id"] > przed["last_id"]
+    wpis = next(c for c in po["chats"] if c["id"] == chat["id"])
+    assert wpis["waiting"] and wpis["trader_name"] == "Czat Tester" and po["chats"][0]["waiting"]
+    # Rozmowy z asystentem (status bot) nie trafiają do dymka zespołu.
+    model["odp"] = _odp()
+    sam = _wyslij(h, "How do I log in to MT5?")
+    assert all(c["id"] != sam["id"] for c in client.get("/api/admin/support/chats", headers=ADMIN).json()["chats"])
+    # Dzwonek panelu nie dostaje już wiadomości supportu.
+    inbox = client.get("/api/admin/inbox", headers=ADMIN).json()
+    assert all(i.get("type") != "ticket" for i in inbox["items"])
+    client.post(f"/api/admin/tickets/{chat['id']}/reply", headers=ADMIN, json={"message": "On it."})
+    assert client.get("/api/admin/support/chats", headers=ADMIN).json()["waiting"] == przed["waiting"]

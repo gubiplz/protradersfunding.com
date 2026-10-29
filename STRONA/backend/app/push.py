@@ -27,6 +27,9 @@ settings = get_settings()
 # Zdarzenia, ktore NIE trafiaja do centrum ani pusha (akcje bezpieczenstwa —
 # wylacznie mail; link resetu hasla nie ma czego szukac w historii powiadomien).
 _SKIP = {"password_reset"}
+# Tylko push, bez wpisu w dzwonku: odpowiedź supportu ma w portalu własną
+# plakietkę na dymku czatu, a klik w push otwiera od razu tę rozmowę.
+_BEZ_CENTRUM = {"ticket_reply"}
 
 # Do jakiego widoku portalu prowadzi klik w powiadomienie (reszta -> Challenges).
 _EVENT_VIEW = {
@@ -60,7 +63,7 @@ _BODY: dict[str, str] = {
     "payout_rejected": "Your payout request needs attention.",
     "kyc_approved": "Identity verified. You're cleared for payouts.",
     "kyc_rejected": "Your verification needs another look.",
-    "ticket_reply": "Support replied to your ticket.",
+    "ticket_reply": "Support replied in your chat. Tap to read.",
     "credits_granted": "Store credit added. It applies automatically at your next checkout.",
     # Wyjątek od zasady „push nie komentuje wyników na żywo": ostrzeżenie o
     # limicie ISTNIEJE po to, żeby uratować konto — cisza tu kosztuje challenge.
@@ -88,6 +91,9 @@ def event_url(event: str, ctx: dict | None = None) -> str:
     acc_id = (ctx or {}).get("account_id")
     if event in _RECAP_EVENTS and acc_id:
         return f"/portal?view=recap&acc={acc_id}"
+    chat_id = (ctx or {}).get("chat_id")
+    if event == "ticket_reply" and chat_id:
+        return f"/portal?view=support&chat={int(chat_id)}"
     return f"/portal?view={_EVENT_VIEW.get(event, 'accounts')}"
 
 
@@ -176,8 +182,9 @@ def send_event(event: str, to_email: str | None, title: str, ctx: dict | None = 
                 return 0
         trader_id = tr.id
         url = event_url(event, ctx)
-        _center_row(session, trader_id, event, title, _BODY.get(event, ""), url)
-        session.commit()
+        if event not in _BEZ_CENTRUM:
+            _center_row(session, trader_id, event, title, _BODY.get(event, ""), url)
+            session.commit()
     finally:
         session.close()
     return send_to_trader(trader_id, title, _BODY.get(event, ""), url=url, tag=event)

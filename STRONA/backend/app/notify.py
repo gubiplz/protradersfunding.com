@@ -752,7 +752,8 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
         parts = [
             _head_html("Support", "New reply to your ticket",
                        f"{name}, our support team replied to “{html.escape(str(ctx.get('subject') or ''))}”."),
-            _button_html("Read the Reply", f"{portal}?view=support"),
+            _button_html("Read the Reply", f"{portal}?view=support"
+                         + (f"&chat={int(ctx['chat_id'])}" if ctx.get("chat_id") else "")),
         ]
     elif event == "credits_granted":
         parts = [
@@ -876,7 +877,8 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
 # wypłatę, a my myślimy, że poprosiliśmy.
 _PREF_BY_EVENT = {
     "kyc_approved": "notify_updates", "kyc_rejected": "notify_updates",
-    "ticket_reply": "notify_updates",
+    # ticket_reply: bez kategorii — bramką jest przełącznik „Support chat"
+    # (ui_prefs.notify_support), sprawdzany przed wysyłką w admin_ticket_reply.
     "credits_granted": "notify_updates",
     "phase_passed": "notify_trading", "account_funded": "notify_trading",
     "account_scaled": "notify_trading",

@@ -71,7 +71,7 @@
     var fab = document.createElement('button');
     fab.id = 'hd-fab'; fab.type = 'button'; fab.className = 'hd-fab hidden';
     fab.setAttribute('aria-label', 'Help & support chat');
-    fab.innerHTML = IKONA + '<span class="hd-dot hidden"></span>';
+    fab.innerHTML = IKONA + '<span class="hd-cnt hidden" aria-hidden="true"></span>';
     fab.onclick = function () { OTWARTY ? zamknij() : otworz(); };
     var p = document.createElement('section');
     p.id = 'hd-panel'; p.className = 'hd-panel'; p.setAttribute('role', 'dialog');
@@ -82,7 +82,13 @@
       + '<div class="hd-ttl"><b id="hd-name"></b><span id="hd-sub"></span></div>'
       + '<button type="button" class="hd-x" aria-label="Close" onclick="hdClose()">' + ZAMKNIJ + '</button></header>'
       + '<div class="hd-body" id="hd-body"></div><div class="hd-foot" id="hd-foot"></div>';
+    // Podgląd nowej odpowiedzi zespołu przy dymku (jak w komunikatorze): klik
+    // otwiera rozmowę, krzyżyk chowa podgląd — plakietka z liczbą zostaje.
+    var pk = document.createElement('div');
+    pk.id = 'hd-peek'; pk.className = 'hd-peek'; pk.hidden = true;
+    pk.setAttribute('role', 'status'); pk.setAttribute('aria-live', 'polite');
     document.body.appendChild(fab);
+    document.body.appendChild(pk);
     document.body.appendChild(p);
   }
 
@@ -99,9 +105,49 @@
     w[c.id] = c.thread[c.thread.length - 1].ts;
     try { localStorage.setItem(KLUCZ_WIDZIANE, JSON.stringify(w)); } catch (e) { /* tryb prywatny */ }
   }
+  /* Plakietka na dymku: liczba rozmów z nieprzeczytaną odpowiedzią zespołu.
+     To jedyne miejsce powiadomień supportu w portalu (dzwonek ich nie dostaje). */
   function kropka() {
-    var d = document.querySelector('#hd-fab .hd-dot');
-    if (d) d.classList.toggle('hidden', OTWARTY || !LISTA.some(nieprzeczytana));
+    var d = document.querySelector('#hd-fab .hd-cnt'), fab = document.getElementById('hd-fab');
+    if (!d) return;
+    var n = OTWARTY ? 0 : LISTA.filter(nieprzeczytana).length;
+    var bylo = +(d.dataset.n || 0);
+    d.dataset.n = n;
+    d.textContent = n > 9 ? '9+' : String(n);
+    d.classList.toggle('hidden', !n);
+    fab.setAttribute('aria-label', 'Help & support chat' + (n ? ' — ' + n + ' new repl' + (n > 1 ? 'ies' : 'y') : ''));
+    if (n > bylo) { fab.classList.remove('ping'); void fab.offsetWidth; fab.classList.add('ping'); }
+    if (!n) schowajPodglad();
+  }
+
+  /* ---------- podgląd nowej wiadomości przy dymku ----------
+     Raz na wiadomość: pamiętamy (w tej karcie) znacznik czasu ostatniej
+     pokazanej. Otwarte okno czatu albo przeczytana rozmowa = bez podglądu. */
+  var POKAZANE = {}, PODGLAD_T = null;
+  try { POKAZANE = JSON.parse(sessionStorage.getItem('pf_hd_peeked') || '{}'); } catch (e) { POKAZANE = {}; }
+  function podglad() {
+    if (OTWARTY) return;
+    var c = LISTA.filter(function (x) { return nieprzeczytana(x) && POKAZANE[x.id] !== x.last.ts; })[0];
+    if (!c) return;
+    POKAZANE[c.id] = c.last.ts;
+    try { sessionStorage.setItem('pf_hd_peeked', JSON.stringify(POKAZANE)); } catch (e) { /* tryb prywatny */ }
+    var pk = document.getElementById('hd-peek'), av = document.createElement('div');
+    awatar(av, 'person', true);
+    pk.innerHTML = '<button type="button" class="hd-peek-in" onclick="hdOpenPeek(' + c.id + ')">' + av.outerHTML
+      + '<span class="hd-peek-t"><b>' + esc(AGENT.name) + ' · ' + esc(AGENT.team) + '</b>'
+      + '<span>' + esc(c.last.body) + '</span></span></button>'
+      + '<button type="button" class="hd-peek-x" aria-label="Dismiss" onclick="hdPeekClose()">' + ZAMKNIJ + '</button>';
+    pk.hidden = false;
+    requestAnimationFrame(function () { pk.classList.add('show'); });
+    clearTimeout(PODGLAD_T);
+    PODGLAD_T = setTimeout(schowajPodglad, 9000);
+  }
+  function schowajPodglad() {
+    var pk = document.getElementById('hd-peek');
+    if (!pk || pk.hidden) return;
+    pk.classList.remove('show');
+    clearTimeout(PODGLAD_T);
+    setTimeout(function () { if (!pk.classList.contains('show')) pk.hidden = true; }, 220);
   }
 
   /* ---------- nagłówek: z kim trader rozmawia ----------
@@ -263,22 +309,33 @@
         if (OTWARTY) oznaczWidziane(CHAT);
       }
       if (OTWARTY) rysuj();
-      kropka();
+      kropka(); podglad();
     } catch (e) { /* cicho: następny cykl spróbuje znowu */ }
   }
   function planuj() {
     clearTimeout(TIMER);
-    // Rozmowa czekająca na zespół w otwartym oknie — częściej; w tle rzadko.
-    // 5 s, żeby „is typing…" konsultanta i jego odpowiedź pojawiały się na bieżąco.
-    var ms = OTWARTY && WIDOK === 'chat' && CHAT && CHAT.mode === 'team' && CHAT.status !== 'closed' ? 5000 : 45000;
+    // Rozmowa czekająca na zespół w otwartym oknie — co 5 s, żeby „is typing…"
+    // konsultanta i jego odpowiedź pojawiały się na bieżąco. W tle co 15 s, gdy
+    // trader ma rozmowę u zespołu (plakietka na dymku), inaczej rzadko. Push na
+    // tym urządzeniu i powrót do karty odświeżają od razu (nasłuch niżej).
+    var uZespolu = LISTA.some(function (c) { return c.mode === 'team' && c.status !== 'closed'; });
+    var ms = OTWARTY && WIDOK === 'chat' && CHAT && CHAT.mode === 'team' && CHAT.status !== 'closed' ? 5000
+      : uZespolu ? 15000 : 45000;
     TIMER = setTimeout(async function () {
       if (document.visibilityState === 'visible') await odswiez();
       planuj();
     }, ms);
   }
 
-  async function otworz() {
+  async function otworz(chatId) {
     zbuduj();
+    schowajPodglad();
+    // Deep link z pusha / maila (?view=support&chat=ID): od razu ta rozmowa.
+    if (chatId) {
+      OTWARTY = true; pokazPanel();
+      try { await pobierzListe(); } catch (e) { /* strzałka wstecz pokaże pustą listę */ }
+      return otworzRozmowe(chatId);
+    }
     OTWARTY = true;
     var p = document.getElementById('hd-panel');
     p.hidden = false;
@@ -289,6 +346,12 @@
     if (!LISTA.length) { WIDOK = 'chat'; CHAT = null; } else if (!CHAT) { WIDOK = 'list'; }
     rysuj(); kropka(); planuj();
     fokus();
+  }
+  function pokazPanel() {
+    var p = document.getElementById('hd-panel');
+    p.hidden = false;
+    requestAnimationFrame(function () { p.classList.add('open'); });
+    document.getElementById('hd-fab').classList.add('on');
   }
   function fokus() {
     var inp = document.getElementById('hd-inp');
@@ -355,7 +418,9 @@
     } catch (e) { if (typeof toast === 'function') toast('Error: ' + e.message, 'err'); }
   }
 
-  window.openHelpdesk = otworz;
+  window.openHelpdesk = function (chatId) { return otworz(+chatId || 0); };
+  window.hdOpenPeek = function (id) { otworz(id); };
+  window.hdPeekClose = schowajPodglad;
   window.hdClose = zamknij;
   window.hdSend = wyslij;
   window.hdHuman = czlowiek;
@@ -370,6 +435,15 @@
   };
 
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && OTWARTY) zamknij(); });
+  // Powrót do karty / PWA z tła i push na tym urządzeniu (sw.js) = odśwież od razu.
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && zalogowany()) odswiez();
+  });
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', function (e) {
+      if (e.data && e.data.type === 'push' && zalogowany()) odswiez();
+    });
+  }
 
   // Dymek pokazuje się dopiero po zalogowaniu (ME ustawia boot() portalu) i znika po wylogowaniu.
   var bylZalogowany = false;

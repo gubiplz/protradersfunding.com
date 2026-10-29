@@ -5,7 +5,11 @@ same selector (inside the same @media) with only the affected declarations, colo
 remapped. Loaded after the sources, equal specificity + later position wins, so
 site.css / portal.css stay byte-identical.
 
-usage: gen_theme_cert.py <backend dir> <out site css> <out portal css>
+usage: gen_theme_cert.py <backend dir> <out site css> <out portal css> [<out admin css>]
+
+The admin panel loads portal.css, admin.css and the portal theme together; its block
+maps admin.css and restores admin.css values the portal block would otherwise
+override (a selector admin.css recolours away from portal.css's purple).
 """
 import colorsys
 import re
@@ -172,14 +176,57 @@ def build(sources):
     return "\n".join(blocks) + "\n"
 
 
+def overridden_keys(sources):
+    """(media, selector, prop) of every declaration the generated block of `sources` sets."""
+    keys = set()
+    for src in sources:
+        for media, sel, body in walk(src.read_text()):
+            for d in split_decls(body):
+                if ":" not in d:
+                    continue
+                prop, val = d.split(":", 1)
+                if remap(val) != val:
+                    keys.add((media, sel.strip(), prop.strip()))
+    return keys
+
+
+def build_admin(admin_src, portal_sources):
+    """admin.css mapped like the rest, plus restores: where admin.css sets a NON-purple
+    value on a key the portal block overrides, the admin value is emitted again so the
+    later-loaded portal block does not undo the panel's own colour."""
+    out = build([admin_src])
+    keys = overridden_keys(portal_sources)
+    restores = []
+    for media, sel, body in walk(admin_src.read_text()):
+        decls = []
+        for d in split_decls(body):
+            if ":" not in d:
+                continue
+            prop, val = d.split(":", 1)
+            if remap(val) == val and (media, sel.strip(), prop.strip()) in keys:
+                decls.append(f"{prop.strip()}:{val.strip()}")
+        if decls:
+            rule = f"{sel}{{{';'.join(decls)}}}"
+            restores.append(f"{media}{{{rule}}}" if media else rule)
+    if restores:
+        out += f"/* admin.css nadpisuje fiolet portalu innym kolorem: {len(restores)} reguł */\n"
+        out += "\n".join(restores) + "\n"
+    return out
+
+
 def main():
     root, out_site, out_portal = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
     css = root / "static" / "css"
     site = build([css / f for f in ("site.css", "site-motion.css", "site-theme.css", "site-glass.css")])
-    portal = build([css / f for f in ("portal.css", "portal-glass.css", "notifications.css", "apple.css")])
+    portal_src = [css / f for f in ("portal.css", "portal-glass.css", "notifications.css", "apple.css")]
+    portal = build(portal_src)
     out_site.write_text(site)
     out_portal.write_text(portal)
     print(f"site: {site.count('{')} bloków, {len(site)} B; portal: {portal.count('{')} bloków, {len(portal)} B")
+    if len(sys.argv) > 4:
+        admin = build_admin(css / "admin.css", portal_src)
+        Path(sys.argv[4]).write_text(admin)
+        print(f"admin: {admin.count('{')} bloków, {len(admin)} B")
 
 
 if __name__ == "__main__":
