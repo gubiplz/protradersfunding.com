@@ -1,0 +1,12 @@
+/* ============================================================
+   Motyw „Certificate" (panel admina, po theme-cert-portal.css): paleta i tło certyfikatu wypłaty zamiast
+   fioletu marki, w jasnym i ciemnym motywie. Tylko wygląd.
+   Ładowany jako OSTATNI arkusz: ta sama specyficzność + później = wygrywa,
+   więc site.css / portal.css zostają bajt w bajt. Zdjęcie motywu = usunięcie linku.
+   Blok „wygenerowany" to te same selektory co w źródłach, z fioletem
+   przemapowanym na błękit certyfikatu (generator: scripts/theme_cert/gen_theme_cert.py).
+   ============================================================ */
+
+/* ---------- wygenerowany: fiolet -> błękit certyfikatu ---------- */
+/* z admin.css: 1 reguł */
+.tgp-ava{background:linear-gradient(135deg,#6a8cff,#5ca4f6)}

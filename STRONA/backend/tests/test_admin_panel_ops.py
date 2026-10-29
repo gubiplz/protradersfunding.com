@@ -220,11 +220,14 @@ def test_admin_inbox_agreguje_kolejki():
     s.commit(); s.close()
 
     items = client.get("/api/admin/inbox", headers=ADMIN).json()["items"]
-    assert {"order", "kyc", "ticket"} <= {i["type"] for i in items}
+    assert {"order", "kyc"} <= {i["type"] for i in items}
     for i in items:
-        assert i["view"] in ("orders", "kyc", "payouts", "tickets", "leads")
+        assert i["view"] in ("orders", "kyc", "payouts", "leads")
         assert i["ts"] and i["title"]
-    assert any(i["type"] == "ticket" and "Inbox test" in i["title"] for i in items)
+    # Wiadomości supportu mają własny dymek czatu w panelu, nie dzwonek.
+    assert not any(i["type"] == "ticket" for i in items)
+    czaty = client.get("/api/admin/support/chats", headers=ADMIN).json()
+    assert any(c["subject"] == "Inbox test" and c["waiting"] for c in czaty["chats"])
 
 
 def test_admin_delete_trader_zwalnia_email(monkeypatch):
