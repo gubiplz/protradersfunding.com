@@ -117,19 +117,21 @@
     <div class="steps">
       <div class="card step" data-rv>
         <div class="step-num">01</div>
+        {% if step_images.get(1) %}<div class="step-img"><img src="{{ step_images[1] }}?v={{ asset_v }}" alt="Three challenge plan cards: navy, gold and silver" width="1024" height="768" loading="lazy" decoding="async"></div>{% else %}
         <svg class="ill" viewBox="0 0 120 80" fill="none">
           <rect x="8" y="18" width="64" height="44" rx="8" stroke="#3b4674" stroke-width="2"/>
           <rect x="24" y="10" width="64" height="44" rx="8" fill="#101626" stroke="#2b8bff" stroke-width="2"/>
           <path d="M34 26h28M34 34h20" stroke="#8b94ab" stroke-width="2" stroke-linecap="round"/>
           <circle cx="76" cy="42" r="14" fill="#101626" stroke="#34d399" stroke-width="2"/>
           <path d="m70 42 4 4 8-8" stroke="#34d399" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <h3>Choose your challenge</h3>
+        </svg>{% endif %}
+        <h3>1. Choose your challenge</h3>
         <p>Pick an account size from $25,000 to $2,000,000: a 2-step evaluation, or Instant
            Funding if you'd rather skip the evaluation. One-time fee, no subscriptions.</p>
       </div>
       <div class="card step" data-rv>
         <div class="step-num">02</div>
+        {% if step_images.get(2) %}<div class="step-img"><img src="{{ step_images[2] }}?v={{ asset_v }}" alt="A tablet showing a live chart next to a golden key" width="1024" height="768" loading="lazy" decoding="async"></div>{% else %}
         <svg class="ill" viewBox="0 0 120 80" fill="none">
           <rect x="14" y="10" width="92" height="60" rx="8" fill="#101626" stroke="#3b4674" stroke-width="2"/>
           <path d="M14 24h92" stroke="#3b4674" stroke-width="2"/>
@@ -138,20 +140,21 @@
           <circle cx="78" cy="46" r="11" stroke="#67d2ff" stroke-width="2"/>
           <path d="M78 41v5l4 3" stroke="#67d2ff" stroke-width="2" stroke-linecap="round"/>
           <path d="M58 58h34" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-dasharray="2 5"/>
-        </svg>
-        <h3>Get MT5 credentials in minutes</h3>
+        </svg>{% endif %}
+        <h3>2. Get MT5 credentials in minutes</h3>
         <p>We open a real MetaTrader&nbsp;5 account for you automatically. Server, login and
            password land in your dashboard and inbox, usually within a minute of payment.</p>
       </div>
       <div class="card step" data-rv>
         <div class="step-num">03</div>
+        {% if step_images.get(3) %}<div class="step-img"><img src="{{ step_images[3] }}?v={{ asset_v }}" alt="An open vault with gold coins spilling out" width="1024" height="768" loading="lazy" decoding="async"></div>{% else %}
         <svg class="ill" viewBox="0 0 120 80" fill="none">
           <path d="M16 62 40 44l16 8 26-24" stroke="#34d399" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
           <path d="M70 26h12v12" stroke="#34d399" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
           <circle cx="96" cy="52" r="16" fill="#101626" stroke="#2b8bff" stroke-width="2"/>
           <path d="M96 44v16M92 48.5c0-1.9 1.8-3 4-3s4 1.1 4 3-1.8 2.6-4 3.1-4 1.2-4 3 1.8 3 4 3 4-1.1 4-3" stroke="#67d2ff" stroke-width="2" stroke-linecap="round"/>
-        </svg>
-        <h3>Trade, pass, get funded</h3>
+        </svg>{% endif %}
+        <h3>3. Trade, pass, get funded</h3>
         <p>Hit the profit target while respecting the loss limits. Pass verification, get funded
            and request payouts of your share of the simulated profits, up to 90%.</p>
       </div>

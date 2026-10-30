@@ -48,12 +48,12 @@
   var T_INBOX = SVG('<path d="M4 13l2.5-7.5A1 1 0 0 1 7.4 5h9.2a1 1 0 0 1 .9.5L20 13v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M4 13h4.5l1.5 2.5h4l1.5-2.5H20"/>');
   var T_ARTS = SVG('<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5zM20 5.5A1.5 1.5 0 0 0 18.5 4H13v16h5.5a1.5 1.5 0 0 0 1.5-1.5z"/>');
 
-  /* Ikona dymka jak w komunikatorach pomocy (Intercom, Crisp, Chatwoot): biały
-     dymek z trzema kropkami; po otwarciu płynnie zamienia się w strzałkę w dół. */
-  var FAB_IKONY = '<span class="hd-fab-ic hd-fab-chat" aria-hidden="true"><svg viewBox="0 0 28 28">'
-    + '<path class="hd-fab-bub" d="M14 4.2c-6 0-10.8 4.1-10.8 9.3 0 2.7 1.3 5.1 3.4 6.8l-.8 3.9 4.4-2.3c1.2.4 2.5.6 3.8.6'
-    + ' 6 0 10.8-4.1 10.8-9.2S20 4.2 14 4.2z"/><circle class="hd-fab-dot" cx="9.4" cy="13.6" r="1.55"/>'
-    + '<circle class="hd-fab-dot" cx="14" cy="13.6" r="1.55"/><circle class="hd-fab-dot" cx="18.6" cy="13.6" r="1.55"/></svg></span>'
+  /* Ikona dymka: ciemna szklana tarcza z białym dymkiem cienką kreską (jak karty
+     portalu); po otwarciu płynnie zamienia się w strzałkę w dół. */
+  var FAB_IKONY = '<span class="hd-fab-ic hd-fab-chat" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"'
+    + ' stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">'
+    + '<path d="M12 4.5c-4.7 0-8.5 3.2-8.5 7.2 0 2.1 1 4 2.7 5.3L5.5 20.5l4-1.9c.8.2 1.6.3 2.5.3 4.7 0 8.5-3.2 8.5-7.2S16.7 4.5 12 4.5z"/>'
+    + '<path d="M8.6 11.7h6.8M8.6 14.4h4"/></svg></span>'
     + '<span class="hd-fab-ic hd-fab-down" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
     + ' stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9.5l6 6 6-6"/></svg></span>';
 
@@ -214,12 +214,19 @@
   function rysujRozmowe() {
     var head = el('as-head'), body = el('as-body'), foot = el('as-foot');
     var zamknieta = CHAT.status === 'closed';
-    head.innerHTML = '<button type="button" class="hd-back" aria-label="Inbox" onclick="asList()">' + WSTECZ + '</button>'
-      + '<div class="hd-av person">' + inicjal(CHAT) + '</div>'
-      + '<div class="hd-ttl"><b>' + esc(kto(CHAT)) + '</b><span>'
-      + esc([CHAT.trader_email !== kto(CHAT) ? CHAT.trader_email : '', CHAT.ref ? '#' + CHAT.ref : ''].filter(Boolean).join(' · '))
-      + '</span></div>' + X_BTN;
-    var klucz = String(CHAT.id);
+    if (head.dataset.odcisk !== 'chat' + CHAT.id) {
+      head.dataset.odcisk = 'chat' + CHAT.id;
+      head.innerHTML = '<button type="button" class="hd-back" aria-label="Inbox" onclick="asList()">' + WSTECZ + '</button>'
+        + '<div class="hd-av person">' + inicjal(CHAT) + '</div>'
+        + '<div class="hd-ttl"><b>' + esc(kto(CHAT)) + '</b><span>'
+        + esc([CHAT.trader_email !== kto(CHAT) ? CHAT.trader_email : '', CHAT.ref ? '#' + CHAT.ref : ''].filter(Boolean).join(' · '))
+        + '</span></div>' + X_BTN;
+    }
+    var klucz = String(CHAT.id), watek = CHAT.thread || [], ost = watek[watek.length - 1];
+    // Odcisk: bez zmian = bez podmiany DOM (zaznaczony tekst, scroll i fokus zostają).
+    var odcisk = [klucz, watek.length, ost && ost.ts, ost && ost.author, CHAT.status].join('|');
+    if (body.dataset.odcisk === odcisk) return;
+    body.dataset.odcisk = odcisk;
     var naDol = body.dataset.chat !== klucz || body.scrollHeight - body.scrollTop - body.clientHeight < 80;
     body.dataset.chat = klucz;
     body.innerHTML = (temat(CHAT) ? '<div class="as-topic"><b>' + esc(temat(CHAT)) + '</b>'
@@ -339,6 +346,7 @@
     var p = el('as-panel');
     if (!p || !el('as-body')) return;
     var wRozmowie = ZAKLADKA === 'inbox' && WIDOK === 'chat' && CHAT;
+    if (!wRozmowie) { el('as-body').dataset.odcisk = ''; el('as-head').dataset.odcisk = ''; }
     p.dataset.tab = ZAKLADKA;
     p.classList.toggle('in-chat', !!wRozmowie);
     document.querySelectorAll('#as-tabs .hd-tab').forEach(function (b) {
@@ -390,9 +398,30 @@
     OTWARTY = true;
     var p = el('as-panel');
     p.hidden = false;
-    requestAnimationFrame(function () { p.classList.add('open'); });
+    requestAnimationFrame(function () { p.classList.add('open'); dopasujDoKlawiatury(); });
     el('as-fab').classList.add('on');
   }
+  /* Klawiatura na telefonie: okno na pełny ekran trzyma się układu strony, a Safari
+     przesuwa go, gdy wyjeżdża klawiatura — okno „odkleja się" od góry. Wysokość
+     i pozycja z visualViewport trzymają je w widocznej części ekranu. */
+  function dopasujDoKlawiatury() {
+    var p = el('as-panel'), vv = window.visualViewport;
+    if (!p || !vv) return;
+    var telefon = matchMedia('(max-width:640px)').matches;
+    var klawiatura = telefon && OTWARTY && vv.height < window.innerHeight - 120;
+    if (klawiatura) {
+      p.style.height = vv.height + 'px';
+      p.style.top = vv.offsetTop + 'px';
+      p.style.bottom = 'auto';
+    } else if (p.style.height) {
+      p.style.height = ''; p.style.top = ''; p.style.bottom = '';
+    }
+  }
+  if (window.visualViewport) {
+    visualViewport.addEventListener('resize', dopasujDoKlawiatury);
+    visualViewport.addEventListener('scroll', dopasujDoKlawiatury);
+  }
+
   async function otworz() {
     pokazPanel();
     ZAKLADKA = 'inbox'; WIDOK = 'list'; CHAT = null;
@@ -407,6 +436,7 @@
     var p = el('as-panel');
     if (!p) return;
     p.classList.remove('open');
+    dopasujDoKlawiatury();
     setTimeout(function () { if (!OTWARTY) p.hidden = true; }, 220);
     el('as-fab').classList.remove('on');
     planuj();

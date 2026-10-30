@@ -834,6 +834,22 @@ class TicketMessage(Base):
     ts: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
+class NewsletterSubscriber(Base):
+    """Zapis do newslettera ze strony publicznej (popup albo pasek nad stopką).
+
+    Osobno od leadów: to nie jest kolejka sprzedaży, tylko lista do okazjonalnych
+    maili o promocjach i nowościach. `token` to link wypisania w każdym mailu."""
+    __tablename__ = "newsletter_subscribers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    source: Mapped[str] = mapped_column(String(20), default="footer")   # popup | footer
+    consent: Mapped[bool] = mapped_column(Boolean, default=True)
+    token: Mapped[str] = mapped_column(String(32), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    unsubscribed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class PushSubscription(Base):
     """Subskrypcja web push jednego urządzenia (trader może mieć kilka).
 

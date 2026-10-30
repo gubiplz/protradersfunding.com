@@ -88,12 +88,12 @@
   var T_HELP = SVG('<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.7"/><path d="M12 17h.01"/>');
   var T_MSG = SVG('<path d="M5 5h14a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-4 3v-3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/><path d="M8 9.5h8M8 12.5h5"/>');
 
-  /* Ikona dymka jak w komunikatorach pomocy (Intercom, Crisp, Chatwoot): biały
-     dymek z trzema kropkami; po otwarciu płynnie zamienia się w strzałkę w dół. */
-  var FAB_IKONY = '<span class="hd-fab-ic hd-fab-chat" aria-hidden="true"><svg viewBox="0 0 28 28">'
-    + '<path class="hd-fab-bub" d="M14 4.2c-6 0-10.8 4.1-10.8 9.3 0 2.7 1.3 5.1 3.4 6.8l-.8 3.9 4.4-2.3c1.2.4 2.5.6 3.8.6'
-    + ' 6 0 10.8-4.1 10.8-9.2S20 4.2 14 4.2z"/><circle class="hd-fab-dot" cx="9.4" cy="13.6" r="1.55"/>'
-    + '<circle class="hd-fab-dot" cx="14" cy="13.6" r="1.55"/><circle class="hd-fab-dot" cx="18.6" cy="13.6" r="1.55"/></svg></span>'
+  /* Ikona dymka: ciemna szklana tarcza z białym dymkiem cienką kreską (jak karty
+     portalu); po otwarciu płynnie zamienia się w strzałkę w dół. */
+  var FAB_IKONY = '<span class="hd-fab-ic hd-fab-chat" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"'
+    + ' stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">'
+    + '<path d="M12 4.5c-4.7 0-8.5 3.2-8.5 7.2 0 2.1 1 4 2.7 5.3L5.5 20.5l4-1.9c.8.2 1.6.3 2.5.3 4.7 0 8.5-3.2 8.5-7.2S16.7 4.5 12 4.5z"/>'
+    + '<path d="M8.6 11.7h6.8M8.6 14.4h4"/></svg></span>'
     + '<span class="hd-fab-ic hd-fab-down" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
     + ' stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9.5l6 6 6-6"/></svg></span>';
 
@@ -337,6 +337,9 @@
   /* ================= MESSAGES ================= */
   function naglowekRozmowy() {
     var head = el('hd-head'), rodzaj = rodzajRozmowy(CHAT), nazwa, pod;
+    var odcisk = ['chat', CHAT && CHAT.id, rodzaj, AGENT.name, AGENT.team, AGENT.online].join('|');
+    if (head.dataset.odcisk === odcisk) return;
+    head.dataset.odcisk = odcisk;
     if (rodzaj === 'ai') { nazwa = NAZWA_AI; pod = 'Replies instantly'; }
     else if (rodzaj === 'person') {
       nazwa = esc(AGENT.name);
@@ -399,6 +402,25 @@
     // Na dół: przy wejściu w rozmowę albo gdy trader już był przy końcu. Ktoś, kto
     // czyta starsze wiadomości, nie zostaje ściągnięty w dół przez odświeżenie.
     var klucz = String((CHAT && CHAT.id) || 'new');
+    var akcje = '', zamknieta = CHAT && CHAT.status === 'closed';
+    // „Talk to a person" dopiero gdy asystent nie pomógł, po kilku wiadomościach
+    // albo po chwili rozmowy (serwer: offer_human; czas liczymy też tu, bez czekania na poll).
+    var poChwili = CHAT && CHAT.created_at && Date.now() - utc(CHAT.created_at) >= 120000;
+    if (CHAT && CHAT.mode === 'assistant' && thread.length && !CZEKA && (CHAT.offer_human || poChwili))
+      akcje = '<button type="button" class="hd-link" onclick="hdHuman()">Didn\'t help? Talk to a person</button>';
+    else if (CHAT && CHAT.status === 'open')
+      akcje = '<span class="hd-note">Passed to our support team — they\'ll reply here and by email.</span>';
+    else if (zamknieta)
+      akcje = '<span class="hd-note">This conversation is closed.</span> '
+        + '<button type="button" class="hd-link" onclick="hdNewChat()">Start a new one</button>';
+    // Odcisk tego, co widać: bez zmian = bez podmiany DOM. Poll co 5 s przebudowywał
+    // całą rozmowę i kasował zaznaczony tekst (kopiowanie na telefonie), gubił
+    // pozycję przewijania i restartował animację „pisze".
+    var ost = thread.length ? thread[thread.length - 1] : null;
+    var odcisk = [klucz, thread.length, ost && ost.ts, ost && ost.author, CZEKA, !!(CHAT && CHAT.agent_typing),
+      CHAT && CHAT.status, CHAT && CHAT.mode, ASSIST, AGENT.name, AGENT.online, akcje].join('|');
+    if (body.dataset.odcisk === odcisk) return;
+    body.dataset.odcisk = odcisk;
     var naDol = body.dataset.chat !== klucz || body.scrollHeight - body.scrollTop - body.clientHeight < 80;
     body.dataset.chat = klucz;
     body.innerHTML = powitanie() + (thread.length
@@ -414,17 +436,6 @@
           return '<button type="button" class="hd-chip" onclick="hdAsk(' + i + ')">' + esc(q) + '</button>';
         }).join('') + '</div>' : '');
 
-    var akcje = '', zamknieta = CHAT && CHAT.status === 'closed';
-    // „Talk to a person" dopiero gdy asystent nie pomógł, po kilku wiadomościach
-    // albo po chwili rozmowy (serwer: offer_human; czas liczymy też tu, bez czekania na poll).
-    var poChwili = CHAT && CHAT.created_at && Date.now() - utc(CHAT.created_at) >= 120000;
-    if (CHAT && CHAT.mode === 'assistant' && thread.length && !CZEKA && (CHAT.offer_human || poChwili))
-      akcje = '<button type="button" class="hd-link" onclick="hdHuman()">Didn\'t help? Talk to a person</button>';
-    else if (CHAT && CHAT.status === 'open')
-      akcje = '<span class="hd-note">Passed to our support team — they\'ll reply here and by email.</span>';
-    else if (zamknieta)
-      akcje = '<span class="hd-note">This conversation is closed.</span> '
-        + '<button type="button" class="hd-link" onclick="hdNewChat()">Start a new one</button>';
     // Pole pisania przerysowane tylko gdy go nie ma — inaczej poll kasowałby wpisywany tekst.
     var ak = foot.querySelector('.hd-acts');
     if (!ak) {
@@ -447,6 +458,7 @@
     var p = el('hd-panel');
     if (!p || !el('hd-body')) return;
     var wRozmowie = ZAKLADKA === 'messages' && WIDOK === 'chat' && zalogowany();
+    if (!wRozmowie) { el('hd-body').dataset.odcisk = ''; el('hd-head').dataset.odcisk = ''; }
     p.dataset.tab = ZAKLADKA;
     // W rozmowie i w artykule pasek zakładek znika — liczy się treść i pole pisania.
     p.classList.toggle('in-chat', wRozmowie);
@@ -506,9 +518,30 @@
     OTWARTY = true;
     var p = el('hd-panel');
     p.hidden = false;
-    requestAnimationFrame(function () { p.classList.add('open'); });
+    requestAnimationFrame(function () { p.classList.add('open'); dopasujDoKlawiatury(); });
     el('hd-fab').classList.add('on');
   }
+  /* Klawiatura na telefonie: okno na pełny ekran trzyma się układu strony, a Safari
+     przesuwa go, gdy wyjeżdża klawiatura — okno „odkleja się" od góry. Wysokość
+     i pozycja z visualViewport trzymają je w widocznej części ekranu. */
+  function dopasujDoKlawiatury() {
+    var p = el('hd-panel'), vv = window.visualViewport;
+    if (!p || !vv) return;
+    var telefon = matchMedia('(max-width:640px)').matches;
+    var klawiatura = telefon && OTWARTY && vv.height < window.innerHeight - 120;
+    if (klawiatura) {
+      p.style.height = vv.height + 'px';
+      p.style.top = vv.offsetTop + 'px';
+      p.style.bottom = 'auto';
+    } else if (p.style.height) {
+      p.style.height = ''; p.style.top = ''; p.style.bottom = '';
+    }
+  }
+  if (window.visualViewport) {
+    visualViewport.addEventListener('resize', dopasujDoKlawiatury);
+    visualViewport.addEventListener('scroll', dopasujDoKlawiatury);
+  }
+
   async function otworz(chatId) {
     pokazPanel();
     artykuly();
@@ -537,6 +570,7 @@
     var p = el('hd-panel');
     if (!p) return;
     p.classList.remove('open');
+    dopasujDoKlawiatury();
     setTimeout(function () { if (!OTWARTY) p.hidden = true; }, 220);
     el('hd-fab').classList.remove('on');
     kropka(); planuj();
@@ -613,6 +647,14 @@
   window.hdList = doListy;
   window.hdNewChat = nowaRozmowa;
   window.hdTab = zakladka;
+  // Przyciski na stronach (FAQ, kontakt): otwórz okienko na zakładce; `nowa` = od razu
+  // nowa rozmowa dla zalogowanego, gość widzi „Sign in to message us".
+  window.hdOpenTab = function (k, nowa) {
+    if (!OTWARTY) pokazPanel();
+    artykuly();
+    if (nowa && zalogowany()) { nowaRozmowa(); return; }
+    zakladka(k);
+  };
   window.hdArticle = function (id) {
     ZAKLADKA = 'help'; ART = id || null;
     if (!ART) el('hd-head').innerHTML = '';   // wróć do listy z polem wyszukiwania

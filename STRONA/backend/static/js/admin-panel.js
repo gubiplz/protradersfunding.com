@@ -836,7 +836,7 @@ const VIEWS={
   /* Lista z Resenda (wyslane i odebrane) dociaga sie w tle przy renderze —
      tu tylko zerujemy ja, zeby wejscie w zakladke pokazalo swiezy stan. */
   window._mailLog=await api('/api/admin/mail-log');
-  window._mailSentRs=null;window._mailIn=null;
+  window._mailSentRs=null;window._mailIn=null;window._nl=null;
   renderMailLog();
  },
 
@@ -1181,7 +1181,7 @@ function setMailBrand(b){
 function setMailBox(b){window._mailBox=b;window._mailAll=0;renderMailLog()}
 function mailSwitches(){
   const box=window._mailBox||'sent';
-  return `<div class="seg">${[['sent','Sent'],['in','Received']].map(([k,l])=>
+  return `<div class="seg">${[['sent','Sent'],['in','Received'],['nl','Newsletter']].map(([k,l])=>
       `<button class="${box===k?'on':''}" onclick="setMailBox('${k}')">${l}</button>`).join('')}</div>
     <div class="seg" title="Which brand: the platform address or the Forex Passing desk. Remembered across visits.">${
       [['all','All'],['ptf','PTF'],['fx','Forex Passing']].map(([k,l])=>
@@ -1277,8 +1277,81 @@ function renderMailInbox(){
       </tbody></table></div>${cap.more}`:pusto}`;
 }
 
+/* ---------- newsletter: lista zapisów ze strony + wysyłka do wszystkich ---------- */
+async function renderNewsletter(){
+  if(!window._nl){try{window._nl=await api('/api/admin/newsletter')}catch(e){window._nl={subscribers:[],active:0,total:0,error:e.message}}}
+  const d=window._nl, q=(window._nlQ||'').toLowerCase();
+  const rows=(d.subscribers||[]).filter(s=>!q||s.email.includes(q));
+  $('view').innerHTML=`
+    <div class="toolbar">${mailSwitches()}
+      ${searchBox('nl-q','_nlQ','renderNewsletter','Search email…')}
+      <span class="count-pill">${d.active} active · ${d.total} total</span>
+      <a class="btn-o sm" href="/api/admin/newsletter.csv" onclick="return nlCsv(event)">Export CSV</a>
+      <button class="btn-p sm" onclick="openNlCompose()">Send to all</button>
+    </div>
+    ${d.error?`<p class="lead-statline" style="color:var(--gold)">⚠ ${esc(d.error)}</p>`:''}
+    <p class="muted" style="font-size:12.5px;margin:0 0 12px">Signups from the landing page popup and the strip above the footer.
+      Every welcome email carries the <b>${esc(d.code||'WELCOME10')}</b> code; every newsletter carries an unsubscribe link.</p>
+    ${rows.length?`<div class="tbl-wrap rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.newsletter">
+      <thead><tr><th>Email</th><th>Source</th><th>Subscribed</th><th>Status</th></tr></thead>
+      <tbody>${rows.map(s=>`<tr>
+        <td class="rt-main" data-l="Email">${esc(s.email)}</td>
+        <td class="muted" data-l="Source">${esc(s.source||'—')}</td>
+        <td class="muted" data-l="Subscribed" data-sort="${esc(s.created_at||'')}">${s.created_at?dstr(s.created_at):'—'}</td>
+        <td data-l="Status"><span class="status ${s.unsubscribed_at?'failed':'paid'}"><span class="dot"></span>${s.unsubscribed_at?'unsubscribed':'active'}</span></td>
+      </tr>`).join('')}</tbody></table></div>`
+      :`<div class="empty"><h3>No subscribers yet</h3><p>Signups from the website land here.</p></div>`}`;
+}
+async function nlCsv(e){
+  /* Fetch z tokenem admina — zwykły link nie niesie nagłówka. */
+  e.preventDefault();
+  try{const r=await fetch('/api/admin/newsletter.csv',{headers:H()});const b=await r.blob();
+    const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='newsletter.csv';a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  }catch(err){toast('Error: '+err.message,'err')}
+  return false;
+}
+function openNlCompose(){
+  const w=document.createElement('div');w.id='nl-modal';w.className='modal-wrap';
+  w.onclick=e=>{if(e.target===w)w.remove()};
+  const n=(window._nl||{}).active||0;
+  w.innerHTML=`<div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>Newsletter to ${n} subscriber${n===1?'':'s'}</h3></div>
+    <label class="muted" style="font-size:12px">Subject</label>
+    <input id="nl-subj" class="inp" maxlength="160" placeholder="e.g. New $500K tier + 20% off this week" style="margin-bottom:10px">
+    <label class="muted" style="font-size:12px">Message (plain text, paragraphs separated by a blank line)</label>
+    <textarea id="nl-body" class="inp" rows="9" maxlength="20000" placeholder="Hi,&#10;&#10;…"></textarea>
+    <label class="muted" style="font-size:12px;display:block;margin-top:10px">Send a test first (optional)</label>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <input id="nl-test" class="inp" type="email" placeholder="your@email" style="flex:1">
+      <button class="btn-o" onclick="nlSend(true,this)">Send test</button>
+    </div>
+    <div style="display:flex;gap:10px">
+      <button class="btn-p" id="nl-go" onclick="nlSend(false,this)">Send to all (${n})</button>
+      <button class="btn-o" onclick="$('nl-modal').remove()">Cancel</button>
+    </div></div>`;
+  document.body.appendChild(w);
+  setTimeout(()=>$('nl-subj')?.focus(),50);
+}
+async function nlSend(test,btn){
+  const subject=$('nl-subj').value.trim(), body=$('nl-body').value.trim();
+  if(!subject||!body){toast('Subject and message are required.','err');return}
+  const test_to=test?$('nl-test').value.trim():null;
+  if(test&&!test_to){toast('Enter a test address.','err');return}
+  const n=(window._nl||{}).active||0;
+  if(!test&&!await askConfirm({title:`Send this newsletter to ${n} subscribers?`,
+    body:'It goes out right away, one email per subscriber, each with its own unsubscribe link. <b>It cannot be recalled.</b>',
+    ok:'Send to all',danger:true}))return;
+  await busy(btn,null,async()=>{
+    try{const r=await api('/api/admin/newsletter/send',{method:'POST',body:JSON.stringify({subject,body,test_to}),timeoutMs:120000});
+      toast(test?`✅ Test sent to ${test_to}`:`✅ Sent to ${r.sent} subscriber${r.sent===1?'':'s'}${r.failed?` (${r.failed} failed)`:''}`,'ok',8000);
+      if(!test)$('nl-modal').remove();
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
+}
 function renderMailLog(){
   if(window._mailBox==='in')return renderMailInbox();
+  if(window._mailBox==='nl')return renderNewsletter();
   const d=window._mailLog||{};
   const rs=window._mailSentRs;
   if(!rs)mailRemoteLater('sent');
@@ -7340,6 +7413,7 @@ addEventListener('click',e=>{
     const a=document.activeElement;
     if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))return; /* klawiatura otwarta */
     if(wewnetrznyScroll(e.target))return;
+    if(e.target.closest&&e.target.closest('#as-panel'))return; /* okno supportu */
     startY=e.touches[0].clientY;startX=e.touches[0].clientX;armed=true;pion=false;
   },{passive:true});
   addEventListener('touchmove',e=>{

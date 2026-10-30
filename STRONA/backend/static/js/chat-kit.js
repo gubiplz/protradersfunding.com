@@ -85,8 +85,13 @@
   };
 
   function rosnij(t) {
+    // Rosnące pole zabiera miejsce rozmowie nad nim: gdy czytający był na dole,
+    // zostaje na dole (inaczej ostatnie wiadomości wjeżdżały pod pasek pisania).
+    var body = t.closest('.hd-panel') && t.closest('.hd-panel').querySelector('.hd-body');
+    var naDole = body && body.scrollHeight - body.scrollTop - body.clientHeight < 80;
     t.style.height = 'auto';
     t.style.height = Math.min(t.scrollHeight, 140) + 'px';
+    if (naDole) body.scrollTop = body.scrollHeight;
     var b = t.parentElement && t.parentElement.querySelector('.chat-send');
     if (b) b.disabled = !t.value.trim();
   }

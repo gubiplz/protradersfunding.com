@@ -595,3 +595,38 @@ def test_dymek_admina_liczy_czekajace_a_dzwonek_bez_supportu(klient, model, wysy
     assert all(i.get("type") != "ticket" for i in inbox["items"])
     client.post(f"/api/admin/tickets/{chat['id']}/reply", headers=ADMIN, json={"message": "On it."})
     assert client.get("/api/admin/support/chats", headers=ADMIN).json()["waiting"] == przed["waiting"]
+
+
+def test_rozmowy_bez_ruchu_od_tygodnia_zamykaja_sie_same(klient, model, wysylki):
+    from datetime import datetime, timedelta
+
+    from app.main import _ticket_autoclose
+    from app.models import TicketMessage
+
+    h, _ = klient
+    stara = _wyslij(h, "Please talk to a human about my payout")
+    swieza = _wyslij(h, "Please talk to a human about a refund")
+    s = SessionLocal()
+    try:
+        dawno = datetime.utcnow() - timedelta(days=9)
+        for t in (s.get(SupportTicket, stara["id"]), s.get(SupportTicket, swieza["id"])):
+            t.created_at = dawno
+        for m in s.query(TicketMessage).filter(TicketMessage.ticket_id == stara["id"]):
+            m.ts = dawno
+        # Świeża rozmowa: trader dopisał wczoraj — zostaje otwarta.
+        for m in s.query(TicketMessage).filter(TicketMessage.ticket_id == swieza["id"]):
+            m.ts = datetime.utcnow() - timedelta(days=1)
+        s.commit()
+    finally:
+        s.close()
+    assert _ticket_autoclose()["closed"] == 1
+    assert _ticket_autoclose()["closed"] == 0      # drugi przebieg niczego nie dubluje
+    lista = {c["id"]: c for c in client.get("/api/me/chats", headers=h).json()["chats"]}
+    assert lista[stara["id"]]["status"] == "closed" and lista[swieza["id"]]["status"] == "open"
+    r = client.post("/api/me/chat", headers=h, json={"chat_id": stara["id"], "message": "hello?"})
+    assert r.status_code == 400
+    # Notka automatu tylko dla zespołu; cron raportuje liczbę.
+    watek = client.get(f"/api/admin/tickets/{stara['id']}", headers=ADMIN).json()["thread"]
+    assert any(m["author"] == "ai_note" and "automatically" in m["body"] for m in watek)
+    assert all("automatically" not in (m.get("body") or "") for m in
+               client.get(f"/api/me/chat/{stara['id']}", headers=h).json()["chat"]["thread"])

@@ -1,0 +1,16 @@
+{# Blok „Still need help?" — na /faq i /contact. Przyciski otwierają okienko pomocy
+   (helpdesk.js, ładowany z defer); zanim się załaduje, link prowadzi do portalu. #}
+<div class="help-cta" data-rv>
+  <h2>Still need help?</h2>
+  <p>Include your account login, order reference, approximate time and any error message.
+     Never share passwords or authentication codes.</p>
+  <div class="help-cta-btns">
+    <button type="button" class="btn" onclick="window.hdOpenTab?hdOpenTab('messages',true):location.assign('/portal?view=support')">Message support</button>
+    <button type="button" class="btn-ghost" onclick="window.hdOpenTab?hdOpenTab('messages'):location.assign('/portal?view=support')">View conversations</button>
+  </div>
+  <div class="help-cta-foot">
+    <a href="mailto:{{ support_email }}">{{ support_email }}</a>
+    {% if request.url.path != '/faq' %}<a href="/faq">Browse the FAQ</a>{% else %}<a href="/contact">Contact page</a>{% endif %}
+    <span>We reply within 24 hours, usually much faster.</span>
+  </div>
+</div>

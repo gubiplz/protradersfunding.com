@@ -270,7 +270,9 @@ if('serviceWorker' in navigator){
   let y0=null,pulled=false;
   const top=()=>((document.scrollingElement||document.documentElement).scrollTop||0)<=0;
   document.addEventListener('touchstart',e=>{
-    y0=(ME&&top()&&e.touches.length===1)?e.touches[0].clientY:null;pulled=false;
+    /* gest w oknie czatu pomocy przewija rozmowę, nie stronę */
+    const wCzacie=e.target.closest&&e.target.closest('#hd-panel');
+    y0=(ME&&top()&&!wCzacie&&e.touches.length===1)?e.touches[0].clientY:null;pulled=false;
   },{passive:true});
   document.addEventListener('touchmove',e=>{
     if(y0===null||pulled)return;

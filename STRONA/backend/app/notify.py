@@ -388,6 +388,20 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             ctx.get("subject") or f"A message from {brand}",
             ctx.get("body") or "",
         ),
+        # Newsletter: powitanie z kodem i zwykła wysyłka z panelu. Oba z linkiem
+        # wypisania — to lista marketingowa, nie maile transakcyjne.
+        "newsletter_welcome": (
+            f"Your {ctx.get('pct', 10):g}% code for {brand}",
+            f"Thanks for subscribing to the {brand} newsletter.\n\n"
+            f"Your code for {ctx.get('pct', 10):g}% off your first challenge: {ctx.get('code', '')}\n"
+            f"Enter it at checkout: {settings.app_base_url}/#pricing\n\n"
+            f"We send occasional emails about new challenge tiers, promotions and platform updates.\n"
+            f"Unsubscribe anytime: {ctx.get('unsubscribe_url', '')}",
+        ),
+        "newsletter_blast": (
+            ctx.get("subject") or f"News from {brand}",
+            f"{ctx.get('body') or ''}\n\nUnsubscribe: {ctx.get('unsubscribe_url', '')}",
+        ),
     }
     subject, body = T.get(event, (f"Notification: {event}", json.dumps(ctx, ensure_ascii=False)))
     return subject, body + footer
@@ -441,6 +455,17 @@ def _rows_html(pairs: list[tuple[str, object]]) -> str:
     return f"""
    <tr><td style="padding:28px 44px 4px">
      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">{rows}</table>
+   </td></tr>"""
+
+
+def _unsub_html(url: str | None) -> str:
+    """Stopka listy marketingowej: jednoklikowe wypisanie."""
+    if not url:
+        return ""
+    return f"""
+   <tr><td align="center" style="padding:26px 44px 0">
+     <p style="font:400 12px/1.6 {_FONT};color:{_MUTE};margin:0">You get this email because you subscribed on
+       our website. <a href="{html.escape(url, quote=True)}" style="color:{_MUTE}">Unsubscribe</a></p>
    </td></tr>"""
 
 
@@ -862,6 +887,23 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
         # klient nie może dostać maila zepsutego znakiem `<` w treści.
         parts = [_head_html(None, html.escape(ctx.get("subject") or brand), "")]
         parts += _tekst_html(str(ctx.get("body") or ""))
+    elif event == "newsletter_welcome":
+        kod = html.escape(str(ctx.get("code") or ""))
+        parts = [_head_html("Newsletter", f"{ctx.get('pct', 10):g}% off your first challenge",
+                            "Thanks for subscribing. Here is your code — enter it at checkout.")]
+        parts.append(f"""
+   <tr><td align="center" style="padding:28px 44px 0">
+     <div style="display:inline-block;border:1px dashed {_INK};border-radius:14px;padding:16px 30px;
+       font:700 26px/1 {_FONT};letter-spacing:.12em;color:{_INK}">{kod}</div>
+   </td></tr>""")
+        parts.append(_button_html("Choose a challenge", f"{settings.app_base_url}/#pricing"))
+        parts += _tekst_html("We send occasional emails about new challenge tiers, promotions and "
+                             "platform updates.")
+        parts.append(_unsub_html(ctx.get("unsubscribe_url")))
+    elif event == "newsletter_blast":
+        parts = [_head_html("Newsletter", html.escape(ctx.get("subject") or brand), "")]
+        parts += _tekst_html(str(ctx.get("body") or ""))
+        parts.append(_unsub_html(ctx.get("unsubscribe_url")))
     else:
         return None
     return _shell(parts)
