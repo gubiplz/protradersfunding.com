@@ -13494,7 +13494,7 @@ def home(request: Request):
     finally:
         session.close()
     # Rendery kroków (static/img/steps/step-N.webp): bez pliku karta pokazuje ikonę SVG.
-    kroki = {n: f"/static/img/steps/step-{n}.webp" for n in (1, 2, 3)
+    kroki = {n: f"/static/img/steps/step-{n}.webp" for n in (1, 2, 3, 4)
              if (STATIC / "img" / "steps" / f"step-{n}.webp").exists()}
     return _page(request, "home.html",
                  sample_qr=_qr_svg(f"{_public_base(request)}/verify"),

@@ -236,11 +236,13 @@
       setTimeout(() => { modal.hidden = true; }, 240);
       try { localStorage.setItem(NL_KEY, done ? 'done' : String(Date.now())); } catch (e) {}
     }
-    setTimeout(show, mobile ? 40000 : 25000);
+    // Dopiero po chwili na stronie: samo szybkie przewinięcie w dół nie wywołuje popupu.
+    const minMs = mobile ? 60000 : 30000;
+    setTimeout(show, mobile ? 75000 : 45000);
     const onScroll = () => {
       const h = document.documentElement;
       if ((h.scrollTop + innerHeight) / h.scrollHeight < 0.6) return;
-      if (mobile && Date.now() - t0 < 40000) return;
+      if (Date.now() - t0 < minMs) return;
       removeEventListener('scroll', onScroll); show();
     };
     addEventListener('scroll', onScroll, { passive: true });
