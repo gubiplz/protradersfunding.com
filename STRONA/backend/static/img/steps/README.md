@@ -7,7 +7,8 @@ gdy plik istnieje; bez pliku karta używa dotychczasowej ikony SVG. Pliki:
 |---|---|---|
 | `step-1.webp` | Choose your challenge | wachlarz trzech metalowych kart (granat, srebro, złoto), jedna ze świecącą błękitną krawędzią |
 | `step-2.webp` | Get MT5 credentials in minutes | ciemny szklany tablet z abstrakcyjnym błękitnym wykresem świecowym, obok mały złoty klucz |
-| `step-3.webp` | Trade, pass, get funded | granatowe drzwi sejfu uchylone, wysypujące się złote monety, błękitna poświata ze środka |
+| `step-3.webp` | Hit your target, get funded | granatowe drzwi sejfu uchylone, wysypujące się złote monety, błękitna poświata ze środka |
+| `step-4.webp` | Start earning | granatowy smartfon pod kątem z błękitnym wykresem zysku na ekranie, wokół unoszące się złote monety |
 
 Format: **webp, 1600×1200 (4:3), ≤ 120 kB**, obiekt na środku z zapasem miejsca, **czyste czarne tło**
 (karta ma ciemne tło, więc czarne tło obrazka zlewa się z nią). Bez tekstu, logo i ludzi.
@@ -27,6 +28,8 @@ Dopisz do niego obiekt:
    chart line; a small brushed-gold key rests beside it; soft light reflections on the glass.*
 3. `step-3.webp`: *A round dark-navy bank vault door, half open, with gold coins spilling out of it onto the
    floor; electric-blue glow coming from inside the vault.*
+4. `step-4.webp`: *A sleek dark-navy smartphone floating at a slight angle, its screen showing a glowing
+   electric-blue upward profit chart; a few brushed-gold coins drifting in the air around it.*
 
 Po wygenerowaniu: przytnij do 4:3, zapisz jako webp (np. `cwebp -q 82 in.png -o step-1.webp`) i wgraj
 do tego folderu. Nic więcej nie trzeba zmieniać.

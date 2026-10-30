@@ -3,8 +3,10 @@ Plus strona /contact i blok „Still need help?" na /faq."""
 import os
 import tempfile
 
-os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL") or \
-    "sqlite:///" + os.path.join(tempfile.gettempdir(), "pf_test_newsletter.db")
+_DB = os.path.join(tempfile.gettempdir(), "pf_test_newsletter.db")
+if not os.environ.get("TEST_DATABASE_URL") and os.path.exists(_DB):
+    os.remove(_DB)      # świeża baza: poprzedni przebieg zostawiał adresy i psuł asercje
+os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL") or "sqlite:///" + _DB
 os.environ.setdefault("ADMIN_TOKEN", "tajny-token")
 
 import pytest  # noqa: E402
