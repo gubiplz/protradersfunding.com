@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Contact Support — {{ site_name }}{% endblock %}
+{% block description %}Get help with your {{ site_name }} challenge: search the FAQ, then message our support team from the chat.{% endblock %}
+{% block og_title %}Contact Support — {{ site_name }}{% endblock %}
+
+{% block content %}
+<section class="page-head"><div class="wrap">
+  <span class="pill">Support</span>
+  <h1>Contact support</h1>
+  <p class="lede">Search our FAQ first. If you still need help, message our team below: the chat is the
+     fastest way to reach us, and every conversation stays in your portal.</p>
+</div></section>
+
+<section class="sec-tight sec">
+  <div class="wrap" style="max-width:830px">
+
+    <div class="contact-block" data-rv>
+      <h2>Before you contact us</h2>
+      <p class="muted">Most questions are already answered. Pick a topic or jump to a popular question.</p>
+      <div class="faq-chips">
+        {% for k in kategorie %}<a class="faq-chip" href="/faq#{{ slug(k) }}">{{ k }}</a>{% endfor %}
+      </div>
+      <div class="contact-q">
+        {% for a in popularne %}
+        <a class="contact-q-item" href="/faq#q-{{ a.id }}"><span>{{ a.title }}</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></a>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% include "_still_help.html" %}
+
+    <div class="contact-grid" data-rv>
+      <div class="contact-card">
+        <b>Email</b>
+        <a href="mailto:{{ support_email }}">{{ support_email }}</a>
+        <span>For anything you'd rather not type in a chat.</span>
+      </div>
+      <div class="contact-card">
+        <b>Response time</b>
+        <span>Within 24 hours, seven days a week. The AI assistant in the chat answers questions about rules,
+          MT5 and the portal instantly.</span>
+      </div>
+      <div class="contact-card">
+        <b>Your account</b>
+        <span>Payout requests, KYC and billing are handled from the <a href="/portal">trader portal</a>,
+          where our team sees your account.</span>
+      </div>
+    </div>
+
+  </div>
+</section>
+{% endblock %}

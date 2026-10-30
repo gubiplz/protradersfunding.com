@@ -56,7 +56,7 @@ from .models import (LEAD_LOST_STATUSES, LEAD_STATUSES, LOST_REASONS,
                      ChannelPost,
                      CreditLedger, EquitySnapshot, FlashOffer, JournalEntry, KycFile,
                      AdminInboxMark, Lead, LeadEvent,
-                     LeadMailTemplate, LeadReminder, MailLog, Notification,
+                     LeadMailTemplate, LeadReminder, MailLog, NewsletterSubscriber, Notification,
                      Order, Payout, PayoutRequest, PoolAccount, PostMedia, Product,
                      PushSubscription,
                      RewardCode, SupportTicket, TelemetryEvent, TicketMessage, Trade, Trader,
@@ -438,7 +438,7 @@ def robots():
 @app.get("/sitemap.xml", include_in_schema=False)
 def sitemap(request: Request):
     base = _public_base(request)
-    paths = ["/", "/objectives", "/faq", "/academy", "/affiliate", "/install", "/verify",
+    paths = ["/", "/objectives", "/faq", "/contact", "/academy", "/affiliate", "/install", "/verify",
              "/terms", "/privacy", "/risk-disclosure", "/refund-policy"]
     urls = "".join(f"<url><loc>{base}{p}</loc></url>" for p in paths)
     return Response('<?xml version="1.0" encoding="UTF-8"?>'
@@ -3343,6 +3343,143 @@ def _czat_baza(session, produkty=None):
                          helpdesk.fakty(produkty))
 
 
+# ---- Newsletter (strona publiczna → lista w panelu Mail) ----
+NEWSLETTER_CODE = "WELCOME10"      # kupon z catalog.COUPONS — nagroda za zapis
+
+
+class NewsletterIn(BaseModel):
+    email: str = Field(max_length=200)
+    consent: bool = True
+    source: str = Field(default="footer", max_length=20)
+
+
+def _newsletter_unsub_url(request: Request, token: str) -> str:
+    return f"{_public_base(request)}/newsletter/unsubscribe/{token}"
+
+
+@app.post("/api/newsletter/subscribe")
+def newsletter_subscribe(payload: NewsletterIn, request: Request):
+    """Zapis z popupu albo paska nad stopką. Kod rabatowy wraca od razu i idzie
+    mailem powitalnym. Duplikat dostaje to samo 200 — formularz na stronie nie
+    ma zdradzać, kto już jest na liście. Bez Telegramu i „New lead": to nie jest
+    lead sprzedażowy, tylko lista marketingowa."""
+    _rate_limit(request, "newsletter", 6, 600)
+    email = (payload.email or "").strip().lower()
+    if not _EMAIL_RX.match(email):
+        raise HTTPException(400, "Enter a valid email address")
+    if not payload.consent:
+        raise HTTPException(400, "Tick the consent box to subscribe")
+    pct = catalog.COUPONS.get(NEWSLETTER_CODE, 10.0)
+    session = SessionLocal()
+    try:
+        sub = session.query(NewsletterSubscriber).filter(NewsletterSubscriber.email == email).first()
+        nowy = sub is None
+        if nowy:
+            sub = NewsletterSubscriber(email=email, consent=True,
+                                       source=payload.source if payload.source in ("popup", "footer") else "footer",
+                                       token=secrets.token_urlsafe(24)[:32])
+            session.add(sub)
+        elif sub.unsubscribed_at:
+            sub.unsubscribed_at = None      # wrócił: zapis liczy się od nowa
+            nowy = True
+        session.commit()
+        if nowy:
+            notify.send("newsletter_welcome", email,
+                        {"code": NEWSLETTER_CODE, "pct": pct,
+                         "unsubscribe_url": _newsletter_unsub_url(request, sub.token)})
+        return {"ok": True, "code": NEWSLETTER_CODE, "pct": pct}
+    finally:
+        session.close()
+
+
+@app.get("/newsletter/unsubscribe/{token}", include_in_schema=False)
+def newsletter_unsubscribe(token: str, request: Request):
+    session = SessionLocal()
+    try:
+        sub = session.query(NewsletterSubscriber).filter(NewsletterSubscriber.token == token).first()
+        if sub and not sub.unsubscribed_at:
+            sub.unsubscribed_at = datetime.now(timezone.utc)
+            session.commit()
+        return _page(request, "newsletter_bye.html", found=bool(sub))
+    finally:
+        session.close()
+
+
+def _newsletter_dict(s: NewsletterSubscriber) -> dict:
+    return {"id": s.id, "email": s.email, "source": s.source,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+            "unsubscribed_at": s.unsubscribed_at.isoformat() if s.unsubscribed_at else None}
+
+
+@app.get("/api/admin/newsletter", dependencies=[Depends(auth.require_admin)])
+def admin_newsletter():
+    session = SessionLocal()
+    try:
+        rows = session.query(NewsletterSubscriber).order_by(NewsletterSubscriber.id.desc()).all()
+        aktywni = sum(1 for s in rows if not s.unsubscribed_at)
+        return {"subscribers": [_newsletter_dict(s) for s in rows], "active": aktywni,
+                "total": len(rows), "code": NEWSLETTER_CODE}
+    finally:
+        session.close()
+
+
+@app.get("/api/admin/newsletter.csv", dependencies=[Depends(auth.require_admin)])
+def admin_newsletter_csv():
+    session = SessionLocal()
+    try:
+        rows = session.query(NewsletterSubscriber).order_by(NewsletterSubscriber.id).all()
+        linie = ["email,source,subscribed_at,unsubscribed_at"]
+        for s in rows:
+            linie.append(",".join([s.email, s.source or "", s.created_at.isoformat() if s.created_at else "",
+                                   s.unsubscribed_at.isoformat() if s.unsubscribed_at else ""]))
+        return Response("\n".join(linie) + "\n", media_type="text/csv",
+                        headers={"Content-Disposition": "attachment; filename=newsletter.csv"})
+    finally:
+        session.close()
+
+
+class NewsletterSendIn(BaseModel):
+    subject: str = Field(min_length=1, max_length=160)
+    body: str = Field(min_length=1, max_length=20000)
+    test_to: str | None = Field(default=None, max_length=200)   # próbny mail na jeden adres
+
+
+NEWSLETTER_SEND_MAX = 500
+
+
+@app.post("/api/admin/newsletter/send", dependencies=[Depends(auth.require_admin)])
+def admin_newsletter_send(payload: NewsletterSendIn, request: Request):
+    """Wysyłka do wszystkich aktywnych (albo próbna na jeden adres). Każdy mail
+    ma własny link wypisania. Limit na wywołanie chroni funkcję Vercela przed
+    `maxDuration`; panel mówi, ile poszło."""
+    session = SessionLocal()
+    try:
+        if payload.test_to:
+            adres = payload.test_to.strip().lower()
+            if not _EMAIL_RX.match(adres):
+                raise HTTPException(400, "Enter a valid test address")
+            blad = notify.send_now("newsletter_blast", adres,
+                                   {"subject": payload.subject, "body": payload.body,
+                                    "unsubscribe_url": f"{_public_base(request)}/newsletter/unsubscribe/test"})
+            if blad:
+                raise HTTPException(502, f"Test email failed: {blad}")
+            return {"sent": 1, "test": True}
+        rows = (session.query(NewsletterSubscriber).filter(NewsletterSubscriber.unsubscribed_at.is_(None))
+                .order_by(NewsletterSubscriber.id).limit(NEWSLETTER_SEND_MAX).all())
+        wyslane, bledy = 0, 0
+        for s in rows:
+            blad = notify.send_now("newsletter_blast", s.email,
+                                   {"subject": payload.subject, "body": payload.body,
+                                    "unsubscribe_url": _newsletter_unsub_url(request, s.token)})
+            if blad:
+                bledy += 1
+            else:
+                wyslane += 1
+        return {"sent": wyslane, "failed": bledy, "total": len(rows)}
+    finally:
+        session.close()
+
+
 @app.get("/api/help/articles")
 def help_articles(response: Response):
     """Artykuły okienka pomocy (zakładki Home/Help) — publiczne, także dla
@@ -3618,14 +3755,50 @@ def admin_support_chats():
                 if od_tradera else None,
                 "last_ts": (ost.ts if ost else t.created_at).isoformat(),
             })
-        # Czekające na górze, w nich NAJDŁUŻEJ czekające pierwsze (kolejka: kto
-        # pierwszy napisał, ten pierwszy dostaje odpowiedź); potem reszta od najnowszej.
+        # Czekające na górze, od NAJNOWSZEJ wiadomości tradera (jak skrzynka:
+        # świeże na wierzchu, czas oczekiwania pokazuje pigułka); potem reszta od najnowszej.
         czeka = sorted([c for c in out if c["waiting"]],
-                       key=lambda c: (c["trader_last"] or {}).get("ts") or c["last_ts"])
+                       key=lambda c: (c["trader_last"] or {}).get("ts") or c["last_ts"], reverse=True)
         reszta = sorted([c for c in out if not c["waiting"]], key=lambda c: c["last_ts"], reverse=True)
         return {"chats": czeka + reszta, "waiting": len(czeka), "last_id": last_id}
     finally:
         session.close()
+
+
+#: Po tylu dniach bez wiadomości z żadnej strony rozmowa zamyka się sama.
+TICKET_AUTOCLOSE_DAYS = 7
+
+
+def _ticket_autoclose(session=None, teraz: datetime | None = None) -> dict:
+    """Zamyka rozmowy, w których od tygodnia nikt nic nie napisał — ani trader,
+    ani zespół, ani asystent. Bez maila: nie ma na co odpowiadać. Notka `ai_note`
+    w wątku mówi zespołowi, że to automat, a trader widzi zwykłe „Closed" i może
+    zacząć nową rozmowę. Z crona /api/tick, raz na dobę."""
+    wlasna = session is None
+    session = session or SessionLocal()
+    try:
+        teraz = teraz or datetime.now(timezone.utc).replace(tzinfo=None)
+        granica = teraz - timedelta(days=TICKET_AUTOCLOSE_DAYS)
+        otwarte = (session.query(SupportTicket).filter(SupportTicket.status != "closed",
+                                                        SupportTicket.created_at <= granica).all())
+        wiadomosci = _wiadomosci_biletow(session, [t.id for t in otwarte])
+        zamkniete = 0
+        for t in otwarte:
+            rozmowa = [m for m in wiadomosci[t.id] if m.author != "ai_note"]
+            ostatnia = rozmowa[-1].ts if rozmowa else t.created_at
+            if (ostatnia.replace(tzinfo=None) if ostatnia.tzinfo else ostatnia) > granica:
+                continue
+            t.status = "closed"
+            session.add(TicketMessage(ticket_id=t.id, author="ai_note",
+                                      body=f"Closed automatically after {TICKET_AUTOCLOSE_DAYS} days "
+                                           "without a message from either side."))
+            zamkniete += 1
+        if zamkniete:
+            session.commit()
+        return {"closed": zamkniete}
+    finally:
+        if wlasna:
+            session.close()
 
 
 @app.get("/api/admin/tickets/{ticket_id}", dependencies=[Depends(auth.require_admin)])
@@ -9684,6 +9857,9 @@ async def api_tick(request: Request):
     # Kolejka treści: JEDEN zaległy post na przebieg. Przy przenosinach archiwum
     # to jest cały sens — treść ma wracać rytmem, nie zrzutem 47 postów naraz.
     tresc = zadanie("channel_posts", _content_tick, {"sent": 0})
+    # Rozmowy supportu bez ruchu od tygodnia zamykają się same — porządek
+    # w skrzynce zespołu i w liście rozmów tradera.
+    bilety = zadanie("ticket_autoclose", _ticket_autoclose, {"closed": 0})
 
     # Retencja snapshotów equity NA KOŃCU i tylko z resztką budżetu — to
     # sprzątanie, nie może zjadać czasu zadaniom, które coś komuś wysyłają.
@@ -9701,12 +9877,14 @@ async def api_tick(request: Request):
                 "upsell_nudge": nudge.get("sent", 0),
                 "checkout_recovery": recovery.get("sent", 0), "payout_bot": payout,
                 "lead_followups": leady.get("sent", 0), "snapshots_pruned": pruned,
-                "reach": zasieg, "channel_posts": tresc.get("sent", 0)}
+                "reach": zasieg, "channel_posts": tresc.get("sent", 0),
+                "tickets_closed": bilety.get("closed", 0)}
     return {"tick": wynik, "daily_recap": recap, "weekly_review": weekly.get("sent", 0),
             "upsell_nudge": nudge.get("sent", 0),
             "checkout_recovery": recovery.get("sent", 0), "payout_bot": payout,
             "lead_followups": leady.get("sent", 0), "snapshots_pruned": pruned,
-            "reach": zasieg, "channel_posts": tresc.get("sent", 0)}
+            "reach": zasieg, "channel_posts": tresc.get("sent", 0),
+            "tickets_closed": bilety.get("closed", 0)}
 
 
 def _content_tick() -> dict:
@@ -13315,14 +13493,39 @@ def home(request: Request):
         prods = _products_payload(session)
     finally:
         session.close()
+    # Rendery kroków (static/img/steps/step-N.webp): bez pliku karta pokazuje ikonę SVG.
+    kroki = {n: f"/static/img/steps/step-{n}.webp" for n in (1, 2, 3)
+             if (STATIC / "img" / "steps" / f"step-{n}.webp").exists()}
     return _page(request, "home.html",
                  sample_qr=_qr_svg(f"{_public_base(request)}/verify"),
-                 products=prods, cfg=_cfg_ctx(prods))
+                 products=prods, cfg=_cfg_ctx(prods), step_images=kroki)
 
 
 @app.get("/faq")
 def faq_page(request: Request):
     return _page(request, "faq.html")
+
+
+@app.get("/contact")
+def contact_page(request: Request):
+    """Kontakt jak u dużych firm prop: najpierw FAQ, potem czat. Popularne
+    pytania to te same artykuły, które widzi okienko pomocy."""
+    session = SessionLocal()
+    try:
+        produkty = session.query(Product).all()
+        arts = helpdesk.artykuly(str(TEMPLATES / "faq.html"), settings.site_name,
+                                 settings.support_email, helpdesk.fakty(produkty))
+    finally:
+        session.close()
+    kategorie = []
+    for a in arts:
+        if a["category"] not in kategorie:
+            kategorie.append(a["category"])
+    popularne_klucze = ["how do i start", "how fast do i get", "how do payouts work", "when do i get my challenge fee",
+                        "how is the daily loss", "what if i fail"]
+    popularne = [next((a for a in arts if a["title"].lower().startswith(k)), None) for k in popularne_klucze]
+    return _page(request, "contact.html", kategorie=kategorie,
+                 popularne=[a for a in popularne if a], slug=helpdesk._slug)
 
 
 @app.get("/academy")

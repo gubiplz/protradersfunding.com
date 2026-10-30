@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Unsubscribed — {{ site_name }}{% endblock %}
+{% block description %}You have been removed from the {{ site_name }} newsletter.{% endblock %}
+{% block head_extra %}<meta name="robots" content="noindex">{% endblock %}
+
+{% block content %}
+<section class="page-head"><div class="wrap">
+  <span class="pill">Newsletter</span>
+  {% if found %}
+  <h1>You're unsubscribed.</h1>
+  <p class="lede">No more newsletter emails from {{ site_name }}. Emails about your own account and orders are
+     unaffected. Changed your mind? Subscribe again at the bottom of any page.</p>
+  {% else %}
+  <h1>This link has expired.</h1>
+  <p class="lede">We couldn't find a subscription for it. If you keep getting our emails, write to
+     <a href="mailto:{{ support_email }}">{{ support_email }}</a> and we'll take care of it.</p>
+  {% endif %}
+  <p style="margin-top:22px"><a class="btn-ghost" href="/">Back to the homepage</a></p>
+</div></section>
+<div style="height:60px"></div>
+{% endblock %}

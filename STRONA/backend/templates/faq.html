@@ -27,8 +27,20 @@
 <section class="sec-tight sec">
   <div class="wrap" style="max-width:830px">
 
+    <div class="faq-tools" data-rv>
+      <label class="faq-search"><input type="search" id="faqQ" placeholder="Search the FAQ" autocomplete="off" aria-label="Search the FAQ">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></label>
+      <div class="faq-chips">
+        <a class="faq-chip" href="#getting-started">Getting started</a>
+        <a class="faq-chip" href="#rules-objectives">Rules &amp; objectives</a>
+        <a class="faq-chip" href="#funded-accounts-payouts">Funded accounts &amp; payouts</a>
+        <a class="faq-chip" href="#billing-account">Billing &amp; account</a>
+      </div>
+      <p class="faq-none" id="faqNone" hidden>No answers match. <button type="button" class="linkish" onclick="window.hdOpenTab?hdOpenTab('messages',true):location.assign('/portal?view=support')">Ask us in the chat</button>.</p>
+    </div>
+
     <div class="faq-cat">Getting started</div>
-    <div class="faq">
+    <div class="faq" id="getting-started">
       <details>
         <summary>How do I start a challenge?</summary>
         <div class="a">Pick a plan on the <a href="/#pricing">pricing section</a>, create an account in the
@@ -60,7 +72,7 @@
     </div>
 
     <div class="faq-cat">Rules &amp; objectives</div>
-    <div class="faq">
+    <div class="faq" id="rules-objectives">
       <details>
         <summary>How is the daily loss limit calculated?</summary>
         <div class="a">Against your equity at the start of the trading day (server time), including
@@ -109,7 +121,7 @@
     </div>
 
     <div class="faq-cat">Funded accounts &amp; payouts</div>
-    <div class="faq">
+    <div class="faq" id="funded-accounts-payouts">
       <details>
         <summary>How do payouts work?</summary>
         <div class="a">Payouts are on demand: on a funded account, request a payout from your
@@ -143,7 +155,7 @@
     </div>
 
     <div class="faq-cat">Billing &amp; account</div>
-    <div class="faq">
+    <div class="faq" id="billing-account">
       <details>
         <summary>Is the fee one-time or recurring?</summary>
         <div class="a">One-time, per challenge. No subscriptions or hidden costs, and it's refunded with
@@ -163,6 +175,8 @@
         can start a new challenge at any time.</div>
       </details>
     </div>
+
+    {% include "_still_help.html" %}
 
   </div>
 </section>

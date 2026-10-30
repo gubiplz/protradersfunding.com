@@ -125,6 +125,25 @@ document.getElementById('bogoX').addEventListener('click',function(){
 
 {% block content %}{% endblock %}
 
+{# Newsletter nad stopką (każda strona publiczna) — zapis = kod 10% mailem. #}
+<section class="nl-sec"><div class="wrap">
+  <div class="nl-strip" data-rv>
+    <div class="nl-txt">
+      <h2>Get exclusive discounts, promos and updates</h2>
+      <p>Occasional emails about new challenge tiers, promotions and platform updates. Unsubscribe anytime.</p>
+    </div>
+    <form class="nl-form" data-source="footer" novalidate>
+      <div class="nl-row">
+        <input type="email" name="email" placeholder="Email address" autocomplete="email" required aria-label="Email address">
+        <button type="submit" class="btn">Subscribe</button>
+      </div>
+      <p class="nl-note">We care about your data. Read our <a href="/privacy">privacy policy</a>. Subscribing means
+        you agree to receive marketing emails from {{ site_name }}.</p>
+      <p class="nl-ok" hidden>Check your inbox — your 10% code is on its way.</p>
+    </form>
+  </div>
+</div></section>
+
 <footer>
   <div class="wrap">
     <div class="foot-grid">
@@ -154,7 +173,7 @@ document.getElementById('bogoX').addEventListener('click',function(){
            obrazek oceny są tam wprost wymienione jako nadużycie. #}
         <a href="https://www.trustpilot.com/review/protradersfunding.com"
            target="_blank" rel="noopener">Reviews on Trustpilot</a>
-        <a href="mailto:{{ support_email }}">Support</a>
+        <a href="/contact">Contact support</a>
       </div>
       <div class="foot-col">
         <h3>Legal</h3>
@@ -177,6 +196,35 @@ document.getElementById('bogoX').addEventListener('click',function(){
     </div>
   </div>
 </footer>
+
+{# Popup newslettera: raz, po chwili na stronie albo po przewinięciu (site.js). #}
+<div class="nl-modal" id="nlModal" hidden>
+  <div class="nl-card" role="dialog" aria-modal="true" aria-labelledby="nlTitle">
+    <button type="button" class="nl-x" id="nlX" aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <div class="nl-brand"><img src="/static/img/logo.png" alt="" width="34" height="34"><span>The {{ site_name }} newsletter</span></div>
+    <form class="nl-form nl-form-modal" data-source="popup" novalidate>
+      <h2 id="nlTitle">Get 10% off your first challenge.</h2>
+      <p>Occasional emails about new tiers, promos and platform updates. Your welcome email carries the code.</p>
+      <input type="email" name="email" id="nlEmail" placeholder="Enter your email address" autocomplete="email" required aria-label="Email address">
+      <label class="nl-consent"><input type="checkbox" name="consent"><span>Yes, I want to receive marketing emails from {{ site_name }}</span></label>
+      <div class="nl-btns">
+        <button type="submit" class="btn" disabled>Subscribe + Get 10% off</button>
+        <button type="button" class="nl-no" id="nlNo">No thanks</button>
+      </div>
+    </form>
+    <div class="nl-done" hidden>
+      <h2>You're in. Here's your code.</h2>
+      <p>Enter it at checkout for 10% off your first challenge. It's also in your inbox.</p>
+      <div class="nl-code" id="nlCode">WELCOME10</div>
+      <div class="nl-btns">
+        <button type="button" class="btn" id="nlUse">Use it now</button>
+        <button type="button" class="btn-ghost" id="nlCopy">Copy code</button>
+      </div>
+    </div>
+    <div class="nl-foot">Unsubscribe anytime · <a href="/privacy">Privacy</a></div>
+  </div>
+</div>
 
 <div class="cookie-note hidden" id="cookie-note" role="dialog" aria-label="Cookie notice">
   <div class="ck-txt">

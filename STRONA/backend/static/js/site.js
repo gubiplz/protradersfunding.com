@@ -178,6 +178,127 @@
 
   const yearEl = $('#year'); if (yearEl) yearEl.textContent = new Date().getFullYear();
 
+  /* ---------- newsletter: pasek nad stopką + popup ---------- */
+  const NL_KEY = 'pf_nl';
+  const emailOk = v => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v);
+  async function nlSubscribe(form) {
+    const inp = form.querySelector('input[type=email]');
+    const email = (inp.value || '').trim();
+    const consent = form.querySelector('input[name=consent]');
+    if (!emailOk(email)) { inp.classList.add('bad'); inp.focus(); return null; }
+    if (consent && !consent.checked) { consent.focus(); return null; }
+    const btn = form.querySelector('button[type=submit]');
+    const was = btn.textContent; btn.disabled = true; btn.textContent = 'Subscribing…';
+    try {
+      const r = await fetch('/api/newsletter/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, consent: true, source: form.dataset.source || 'footer' }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail || 'Try again');
+      try { localStorage.setItem(NL_KEY, 'done'); } catch (e) {}
+      return d;
+    } catch (e) {
+      inp.classList.add('bad'); btn.disabled = false; btn.textContent = was;
+      inp.setCustomValidity && inp.setCustomValidity(e.message);
+      return null;
+    }
+  }
+  $$('.nl-form[data-source=footer]').forEach(form => {
+    const inp = form.querySelector('input[type=email]');
+    inp.addEventListener('input', () => inp.classList.remove('bad'));
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const d = await nlSubscribe(form);
+      if (d) { form.classList.add('sent'); form.querySelector('.nl-ok').hidden = false; }
+    });
+  });
+  (function nlPopup() {
+    const modal = $('#nlModal'); if (!modal) return;
+    if (!/^\/(faq\/?)?$/.test(location.pathname)) return;
+    let st = null; try { st = localStorage.getItem(NL_KEY); } catch (e) {}
+    if (st === 'done' || (st && Date.now() - (+st || 0) < 7 * 864e5)) return;
+    const form = modal.querySelector('form'), consent = form.querySelector('input[name=consent]'),
+      submit = form.querySelector('button[type=submit]'), inp = $('#nlEmail');
+    const mobile = matchMedia('(max-width:640px)').matches, t0 = Date.now();
+    let shown = false;
+    const blocked = () => {
+      const hd = document.getElementById('hd-panel'), ck = document.getElementById('cookie-note');
+      return (hd && !hd.hidden) || (ck && !ck.classList.contains('hidden')) || document.activeElement === inp;
+    };
+    function show() {
+      if (shown) return;
+      if (blocked()) { setTimeout(show, 4000); return; }
+      shown = true; modal.hidden = false;
+      requestAnimationFrame(() => modal.classList.add('open'));
+      if (!mobile) setTimeout(() => inp.focus({ preventScroll: true }), 320);
+    }
+    function close(done) {
+      modal.classList.remove('open');
+      setTimeout(() => { modal.hidden = true; }, 240);
+      try { localStorage.setItem(NL_KEY, done ? 'done' : String(Date.now())); } catch (e) {}
+    }
+    setTimeout(show, mobile ? 40000 : 25000);
+    const onScroll = () => {
+      const h = document.documentElement;
+      if ((h.scrollTop + innerHeight) / h.scrollHeight < 0.6) return;
+      if (mobile && Date.now() - t0 < 40000) return;
+      removeEventListener('scroll', onScroll); show();
+    };
+    addEventListener('scroll', onScroll, { passive: true });
+    consent.addEventListener('change', () => { submit.disabled = !consent.checked; });
+    inp.addEventListener('input', () => inp.classList.remove('bad'));
+    $('#nlX').addEventListener('click', () => close(false));
+    $('#nlNo').addEventListener('click', () => close(false));
+    modal.addEventListener('click', e => { if (e.target === modal) close(false); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && !modal.hidden) close(false); });
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const d = await nlSubscribe(form);
+      if (!d) return;
+      $('#nlCode').textContent = d.code || 'WELCOME10';
+      form.hidden = true; modal.querySelector('.nl-done').hidden = false;
+      $('#nlUse').onclick = () => {
+        try { localStorage.setItem('pf_coupon_code', d.code); localStorage.setItem('pf_coupon_pct', String(d.pct || 10)); } catch (err) {}
+        close(true);
+        if (location.pathname === '/') { const p = $('#pricing'); p ? p.scrollIntoView({ behavior: 'smooth' }) : location.reload(); }
+        else location.assign('/#pricing');
+      };
+      $('#nlCopy').onclick = () => {
+        try { navigator.clipboard.writeText(d.code); $('#nlCopy').textContent = 'Copied'; } catch (err) {}
+      };
+    });
+  })();
+
+  /* ---------- FAQ: wyszukiwarka, kotwice pytań ---------- */
+  (function faqTools() {
+    const q = $('#faqQ'); if (!q) return;
+    const slug = t => t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+    const items = $$('.faq details');
+    items.forEach(d => { const s = d.querySelector('summary'); if (s && !d.id) d.id = 'q-' + slug(s.textContent); });
+    const openHash = () => {
+      if (!location.hash.startsWith('#q-')) return;
+      const d = document.getElementById(location.hash.slice(1));
+      if (d && d.tagName === 'DETAILS') { d.open = true; d.scrollIntoView({ block: 'start' }); }
+    };
+    openHash(); addEventListener('hashchange', openHash);
+    const none = $('#faqNone');
+    q.addEventListener('input', () => {
+      const t = q.value.trim().toLowerCase();
+      let hits = 0;
+      $$('.faq').forEach(group => {
+        let any = false;
+        $$('details', group).forEach(d => {
+          const ok = !t || d.textContent.toLowerCase().includes(t);
+          d.hidden = !ok; d.classList.toggle('hit', !!t && ok);
+          if (ok) { any = true; hits++; if (t) d.open = true; }
+        });
+        group.hidden = !any;
+        const cat = group.previousElementSibling;
+        if (cat && cat.classList.contains('faq-cat')) cat.hidden = !any;
+      });
+      none.hidden = !!hits || !t;
+    });
+  })();
+
   /* ---------- GSAP reveals + counters ---------- */
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const hasGsap = typeof gsap !== 'undefined' && typeof ScrollTrigger !== 'undefined';

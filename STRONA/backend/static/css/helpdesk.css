@@ -3,38 +3,27 @@
    działa w jasnym i ciemnym motywie i w motywie certyfikatu. Dymki rozmowy
    rysuje chat-kit.js stylami z apple.css. Animacje tylko na transform/opacity. */
 
-/* Dymek jak w komunikatorach pomocy (benchmark: Intercom, Crisp, Chatwoot):
-   gradient certyfikatu, połysk szkła u góry, biały dymek z trzema kropkami,
-   który po otwarciu obraca się w strzałkę w dół. Tylko transform/opacity. */
-.hd-fab{position:fixed;right:24px;bottom:24px;z-index:45;width:58px;height:58px;border-radius:50%;
-  display:grid;place-items:center;border:0;padding:0;cursor:pointer;color:#fff;isolation:isolate;
-  background:radial-gradient(120% 90% at 30% 15%,#4aa3ff 0,#2b8bff 38%,#1b4bd8 100%);
-  box-shadow:0 12px 30px -10px rgba(27,75,216,.75),0 3px 8px -2px rgba(0,0,0,.25),
-    inset 0 1px 0 rgba(255,255,255,.38),inset 0 -2px 6px rgba(8,26,90,.35);
-  transition:transform .35s cubic-bezier(.34,1.56,.64,1),opacity .2s,box-shadow .25s}
-/* połysk: miękkie światło w górnej części kuli */
-.hd-fab::before{content:"";position:absolute;inset:3px 7px 50% 7px;border-radius:50% 50% 45% 45%/70% 70% 30% 30%;
-  background:linear-gradient(180deg,rgba(255,255,255,.24),rgba(255,255,255,0));pointer-events:none;z-index:-1}
+/* Dymek: ciemna szklana tarcza jak karty portalu (granat certyfikatu, cienki
+   błękitny obrys, cicha poświata), biały dymek cienką kreską; po otwarciu
+   obraca się w strzałkę w dół. Bez połysku i gradientów. Tylko transform/opacity. */
+.hd-fab{position:fixed;right:24px;bottom:24px;z-index:45;width:56px;height:56px;border-radius:50%;
+  display:grid;place-items:center;border:1px solid rgba(103,210,255,.42);padding:0;cursor:pointer;color:#fff;
+  background:#0f172a;
+  box-shadow:0 10px 30px -12px rgba(43,139,255,.6),0 2px 6px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.08);
+  transition:transform .3s cubic-bezier(.34,1.4,.64,1),opacity .2s,box-shadow .25s,border-color .25s}
+html[data-theme=dark] .hd-fab{background:#0b142c}
 .hd-fab-ic{position:absolute;inset:0;display:grid;place-items:center;
-  transition:transform .38s cubic-bezier(.34,1.56,.64,1),opacity .2s ease}
-.hd-fab-chat svg{width:30px;height:30px;filter:drop-shadow(0 1px 1.5px rgba(8,26,90,.35))}
-.hd-fab-bub{fill:#fff}
-.hd-fab-dot{fill:#1b4bd8}
-.hd-fab-down svg{width:26px;height:26px}
-.hd-fab-down{opacity:0;transform:rotate(-90deg) scale(.5)}
-.hd-fab.on .hd-fab-chat{opacity:0;transform:rotate(60deg) scale(.5)}
+  transition:transform .34s cubic-bezier(.34,1.4,.64,1),opacity .18s ease}
+.hd-fab-chat svg,.hd-fab-down svg{width:26px;height:26px}
+.hd-fab-down{opacity:0;transform:rotate(-90deg) scale(.6)}
+.hd-fab.on .hd-fab-chat{opacity:0;transform:rotate(45deg) scale(.6)}
 .hd-fab.on .hd-fab-down{opacity:1;transform:none}
+.hd-fab.on{border-color:rgba(103,210,255,.6)}
 @media (hover:hover){
-  .hd-fab:hover{transform:translateY(-2px) scale(1.05);
-    box-shadow:0 16px 34px -10px rgba(27,75,216,.85),0 3px 8px -2px rgba(0,0,0,.25),
-      inset 0 1px 0 rgba(255,255,255,.38),inset 0 -2px 6px rgba(8,26,90,.35)}
-  .hd-fab:not(.on):hover .hd-fab-dot{animation:hd-dots 1s ease-in-out infinite}
-  .hd-fab:not(.on):hover .hd-fab-dot:nth-of-type(2){animation-delay:.12s}
-  .hd-fab:not(.on):hover .hd-fab-dot:nth-of-type(3){animation-delay:.24s}
+  .hd-fab:hover{transform:translateY(-2px);border-color:rgba(103,210,255,.7);
+    box-shadow:0 14px 34px -12px rgba(43,139,255,.8),0 2px 6px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.1)}
 }
-@keyframes hd-dots{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-1.6px)}}
-.hd-fab-dot{transform-box:fill-box;transform-origin:center}
-.hd-fab:active{transform:scale(.93)}
+.hd-fab:active{transform:scale(.94)}
 .hd-fab.hidden{display:none}
 /* Odstęp na końcu widoku: po przewinięciu do końca ostatni kafelek nie chowa się
    pod dymkiem (spacer zamiast padding, żeby nie ruszać istniejących odstępów). */
@@ -182,10 +171,19 @@
 
 /* Telefon: nad dolnym paskiem zakładek, okno rozmowy na cały ekran */
 @media (max-width:960px){
-  .hd-fab{right:16px;bottom:calc(58px + env(safe-area-inset-bottom) + 14px);width:54px;height:54px}
+  .hd-fab{right:16px;bottom:calc(58px + env(safe-area-inset-bottom) + 14px);width:52px;height:52px}
   .hd-peek{right:16px;bottom:calc(58px + env(safe-area-inset-bottom) + 76px)}
 }
+/* Długie przytrzymanie na telefonie zaznacza tylko treść dymka albo artykułu,
+   nie całe okno (iOS zaznaczał cały blok czatu, gdy palec trafił obok dymka). */
+.hd-panel{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.hd-panel :is(.bub,.hd-article-body,.hd-article h2,.chat-inp,input){-webkit-user-select:text;user-select:text;
+  -webkit-touch-callout:default}
 @media (max-width:640px){
+  /* Otwarte okno na pełny ekran: strona pod spodem stoi (bez przewijania i
+     „gumki" — gest w nagłówku czy pasku pisania nie rusza dokumentu). */
+  html:has(#hd-panel.open),html:has(#hd-panel.open) body,
+  html:has(#as-panel.open),html:has(#as-panel.open) body{overflow:hidden;overscroll-behavior:none}
   /* Pełny ekran PONAD dolnym paskiem zakładek (z-index 50) i arkuszem „More" (61). */
   .hd-panel{inset:0;width:auto;height:auto;border-radius:0;border:0;z-index:70;
     padding-bottom:env(safe-area-inset-bottom)}
@@ -344,6 +342,6 @@ button.hd-card:active,a.hd-card:active{transform:scale(.99)}
 body:has(.side.open) :is(.hd-fab,.hd-peek){opacity:0;pointer-events:none}
 @media (prefers-reduced-motion:reduce){
   .hd-fab,.hd-panel,.hd-peek{transition:none}
-  .hd-typing i,.hd-fab.ping::after,.hd-fab-dot{animation:none!important}
+  .hd-typing i,.hd-fab.ping::after{animation:none!important}
   .hd-fab-ic{transition:opacity .15s}
 }
