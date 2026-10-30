@@ -2663,7 +2663,7 @@ const VIEWS={
         <td class="num">${esc(r.account)}${r.express?' <span style="font-size:10px;font-weight:700;letter-spacing:.4px;color:var(--orange,#f59e0b);border:1px solid currentColor;border-radius:6px;padding:1px 5px;vertical-align:1px">EXPRESS</span>':''}</td>
         <td class="num">$${fmt(r.profit_amount)}</td><td class="num">${
           /* Przed krokiem 2 kwoty jeszcze nie ma — to tylko górna granica. */
-          r.status==='review'||r.status==='unlocked'?`<span class="muted">up to</span> $${fmt(r.trader_share)}`:`$${fmt(r.trader_share)}`}</td>
+          r.status==='review'||r.status==='unlocked'?`<span class="muted">up to</span> $${fmt(r.total??r.trader_share)}`:`$${fmt(r.total??r.trader_share)}`}</td>
         <td class="muted">${esc(payoutMethodLabel(r.method))}${r.vusdt?`<div style="font-size:11px">${
           r.vusdt.explorer_url?`<a href="${esc(r.vusdt.explorer_url)}" target="_blank" rel="noopener">${esc(r.vusdt.status)} · view tx ↗</a>`
           :esc(r.vusdt.status)}</div>`:''}</td>
@@ -4387,7 +4387,7 @@ function payoutBtn(a,av,cls,label){
   const left=a.payout_days_left||0, m=a.metrics||{}, o=a.payout_open;
   /* Otwarty wniosek ma pierwszeństwo przed oknem wypłat: on sam to okno
      zajmuje, a odblokowany przez admina czeka właśnie na ten przycisk. */
-  if(o&&o.status==='unlocked')return `<button class="${cls.replace('btn-o','btn-p')}" onclick="openPayoutDetails(${o.id},${av.toFixed(2)},${+a.initial_balance||0})">${
+  if(o&&o.status==='unlocked')return `<button class="${cls.replace('btn-o','btn-p')}" onclick="openPayoutDetails(${o.id},${av.toFixed(2)},${+a.initial_balance||0},${+a.payout_fee_refund||0})">${
     esc(a.login)} · approved, choose amount</button>`;
   if(o)return `<button class="${cls}" disabled title="${o.status==='review'?'We are reviewing the account. You choose the amount and wallet once it is approved.':'Your payout is being sent.'}">${
     esc(a.login)} · ${o.status==='review'?'request under review':'payout in progress'}</button>`;
@@ -4443,7 +4443,8 @@ async function submitPayoutAsk(id){
 /* Krok 2: kwota + portfel. Dostępna kwota liczy się od salda TERAZ —
    trader mógł handlować od chwili prośby, serwer sprawdza to samo.
    Przy VUSDT_TEST: tylko Polygon, captcha, token wychodzi od razu. */
-function openPayoutDetails(reqId,avail,size){
+function openPayoutDetails(reqId,avail,size,refund){
+  refund=+refund||0;
   const pct=Math.round((size||0)*PO_MIN_PCT)/100;
   const v=!!VUSDT_TEST;
   /* Same dolary — pole i max bez centów (serwer i tak odrzuci ułamek). */
@@ -4454,8 +4455,9 @@ function openPayoutDetails(reqId,avail,size){
     <div class="modal-head"><h3>Your payout is approved</h3></div>
     <p class="muted" style="font-size:12.5px;margin:2px 0 12px">Choose how much to take out and where to send it. Available now: <b>$${fmt(avail)}</b>. Whole dollars only — you can take part of it.</p>
     <label class="muted" style="font-size:12px">Amount (${v?'vUSDT':'USD, paid in USDT'})</label>
-    <input id="po-amount" class="inp" type="number" inputmode="numeric" min="${PO_MIN_USD}" max="${max}" step="1" value="${max}" style="margin-bottom:10px"
+    <input id="po-amount" class="inp" type="number" inputmode="numeric" min="${PO_MIN_USD}" max="${max}" step="1" value="${max}" style="margin-bottom:${refund?'6px':'10px'}"
       oninput="this.classList.remove('bad');poSprawdz()">
+    ${refund?`<div class="po-refund" id="po-refund" data-refund="${refund}">Includes your $${fmt(refund)} challenge fee refund · total <span id="po-total">$${fmt(max+refund)}</span></div>`:''}
     <label class="muted" style="font-size:12px">Network</label>
     <select id="po-network" class="inp" style="margin-bottom:10px">${v
       ?`<option value="POLYGON">Polygon</option>`
@@ -4470,12 +4472,15 @@ function openPayoutDetails(reqId,avail,size){
       <b>Minimum payout: ${PO_MIN_PCT}% of your account size</b> — $${fmt(pct)} on this $${fmt0(size)} account.</div>`:''}
     ${v?`<div id="po-ts" class="po-ts"></div>`:''}
     <div style="display:flex;gap:10px;margin-top:14px">
-      <button class="btn-p" onclick="submitPayoutDetails(${reqId})" id="po-send">${v?'Withdraw':`Request $${fmt0(max)}`}</button>
+      <button class="btn-p" onclick="submitPayoutDetails(${reqId})" id="po-send">${v?'Withdraw':`Request $${fmt0(max+refund)}`}</button>
       <button class="btn-o" onclick="$('po-modal').remove()">Later</button>
     </div></div>`;
   document.body.appendChild(w);
-  if(!v)$('po-amount').addEventListener('input',()=>{const n=parseInt($('po-amount').value||'0',10)||0;
-    $('po-send').textContent=n>0?`Request $${fmt0(n)}`:'Request payout'});
+  /* Zwrot opłaty jedzie w tej samej wypłacie — przycisk i podsumowanie
+     pokazują sumę, którą trader faktycznie dostanie. */
+  $('po-amount').addEventListener('input',()=>{const n=parseInt($('po-amount').value||'0',10)||0;
+    if($('po-total'))$('po-total').textContent='$'+fmt(n+refund);
+    if(!v)$('po-send').textContent=n>0?`Request $${fmt0(n+refund)}`:'Request payout'});
   if(v)poTurnstile();
   setTimeout(()=>$('po-amount')?.focus(),50);
 }
@@ -4503,7 +4508,7 @@ async function submitPayoutDetails(reqId){
           turnstile_token:v?PO_TS.token:undefined})});
       if(r.vusdt){poSent(r.id,r.vusdt);return 'keep'}
       $('po-modal').remove();
-      toast(`✅ Got it: $${fmt(r.trader_share)} in USDT. We send it to your wallet within 24 hours.`,'ok',8000);
+      toast(`✅ Got it: $${fmt(r.total??r.trader_share)} in USDT. We send it to your wallet within 24 hours.`,'ok',8000);
       go('payouts');
     }catch(e){toast('Error: '+e.message,'err');if(v)poTurnstileReset()}
   });
@@ -4519,8 +4524,9 @@ function openScaleModal(id,from,to){
     <p class="muted" style="font-size:12.5px;margin:2px 0 14px">
       You leave the <b>$${fmt0(from)}</b> account behind and we set up a fresh
       <b>$${fmt0(to)}</b> account, funded from day one, with that plan's limits. The profit you
-      made pays for the upgrade, so there is no payout this time. Your new login and password
-      arrive by email, usually within minutes.</p>
+      made pays for the upgrade, so there is no payout this time. The new account starts with a
+      clean track record: equity, trades and stats count from the move. Your new login and
+      password arrive by email, usually within minutes.</p>
     <div style="display:flex;gap:10px">
       <button class="btn-p" onclick="scaleUp(${id})" id="sc-go">Move up to $${fmt0(to)}</button>
       <button class="btn-o" onclick="$('sc-modal').remove()">Cancel</button>

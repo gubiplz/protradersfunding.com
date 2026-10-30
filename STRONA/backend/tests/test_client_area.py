@@ -1293,6 +1293,51 @@ def test_endpoint_scale_up_wgrywa_wyzszy_plan_i_widac_to_w_api():
         assert odznaki["scaled"]["unlocked"] is True
 
 
+def test_skalowanie_zaczyna_track_record_od_zera():
+    """Po skalowaniu konto to nowy rachunek: wykres equity, transakcje, statystyki
+    i aktywnosc startuja od zera. Stare wiersze zostaja w bazie (audyt, historia
+    admina), a wyplaty dalej w historii wyplat tradera."""
+    from datetime import datetime, timedelta
+
+    from app.models import Payout, Trade
+
+    tid, h = _trader("skalowanie-reset@test.pl")
+    aid = _konto(tid, "990109", status="funded", phase="funded", balance=11_500, initial=10_000)
+    s = SessionLocal()
+    acc = s.get(Account, aid)
+    acc.steps = 2
+    start = datetime.utcnow() - timedelta(days=20)
+    acc.prev_phase_started_at = start - timedelta(days=10)
+    acc.phase_started_at = start
+    for i, pnl in enumerate([900.0, 600.0]):
+        t0 = start + timedelta(days=i + 1)
+        s.add(Trade(account_id=aid, symbol="EURUSD", side="buy", lots=1.0, open_price=1.1,
+                    close_price=1.2, pnl=pnl, opened_at=t0, closed_at=t0 + timedelta(hours=1),
+                    status="closed"))
+    s.add(Payout(account_id=aid, profit_amount=500.0, trader_share=400.0, paid=True,
+                 balance_reset=False, ts=start + timedelta(days=3)))
+    s.commit(); s.close()
+    with TestClient(app) as c:
+        przed = c.get(f"/api/me/accounts/{aid}/stats", headers=h).json()
+        assert przed["trades"] == 2
+        assert c.post(f"/api/accounts/{aid}/scale-up", headers=h).status_code == 200
+        konto = c.get(f"/api/me/accounts/{aid}", headers=h).json()
+        assert not [p for p in konto["equity_curve"] if p.get("kind") == "trade"]
+        assert c.get(f"/api/me/accounts/{aid}/stats", headers=h).json()["trades"] == 0
+        akt = c.get(f"/api/me/accounts/{aid}/activity", headers=h).json()
+        assert akt["days"] == [] and akt["ledger"] == []
+        # Analytics nie podsuwa starej historii jako „Phase 2" nowego konta.
+        okna = c.get(f"/api/me/accounts/{aid}/stats?phase=eval_2", headers=h).json()
+        assert okna["trades"] == 0
+        # Wyplaty zostaja w historii wyplat tradera.
+        assert len(c.get("/api/me/payouts", headers=h).json()["history"]) == 1
+    s = SessionLocal()
+    try:
+        assert s.query(Trade).filter(Trade.account_id == aid).count() == 2
+    finally:
+        s.close()
+
+
 def test_otwarta_pozycja_blokuje_skalowanie():
     """Zysk otwartej pozycji rozliczylby sie juz wobec NOWEGO konta."""
     tid, h = _trader("skalowanie-pozycja@test.pl")

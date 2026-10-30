@@ -3,14 +3,38 @@
    działa w jasnym i ciemnym motywie i w motywie certyfikatu. Dymki rozmowy
    rysuje chat-kit.js stylami z apple.css. Animacje tylko na transform/opacity. */
 
-.hd-fab{position:fixed;right:24px;bottom:24px;z-index:45;width:56px;height:56px;border-radius:50%;
-  display:grid;place-items:center;border:0;cursor:pointer;color:#fff;background:var(--grad);
-  box-shadow:0 10px 28px -8px color-mix(in srgb,var(--acc) 70%,transparent),inset 0 1px 0 rgba(255,255,255,.3);
-  transition:transform .35s cubic-bezier(.34,1.56,.64,1),opacity .2s}
-.hd-fab svg{width:25px;height:25px}
-.hd-fab:hover{transform:translateY(-2px) scale(1.04)}
-.hd-fab:active{transform:scale(.94)}
-.hd-fab.on{transform:scale(.92)}
+/* Dymek jak w komunikatorach pomocy (benchmark: Intercom, Crisp, Chatwoot):
+   gradient certyfikatu, połysk szkła u góry, biały dymek z trzema kropkami,
+   który po otwarciu obraca się w strzałkę w dół. Tylko transform/opacity. */
+.hd-fab{position:fixed;right:24px;bottom:24px;z-index:45;width:58px;height:58px;border-radius:50%;
+  display:grid;place-items:center;border:0;padding:0;cursor:pointer;color:#fff;isolation:isolate;
+  background:radial-gradient(120% 90% at 30% 15%,#4aa3ff 0,#2b8bff 38%,#1b4bd8 100%);
+  box-shadow:0 12px 30px -10px rgba(27,75,216,.75),0 3px 8px -2px rgba(0,0,0,.25),
+    inset 0 1px 0 rgba(255,255,255,.38),inset 0 -2px 6px rgba(8,26,90,.35);
+  transition:transform .35s cubic-bezier(.34,1.56,.64,1),opacity .2s,box-shadow .25s}
+/* połysk: miękkie światło w górnej części kuli */
+.hd-fab::before{content:"";position:absolute;inset:3px 7px 50% 7px;border-radius:50% 50% 45% 45%/70% 70% 30% 30%;
+  background:linear-gradient(180deg,rgba(255,255,255,.24),rgba(255,255,255,0));pointer-events:none;z-index:-1}
+.hd-fab-ic{position:absolute;inset:0;display:grid;place-items:center;
+  transition:transform .38s cubic-bezier(.34,1.56,.64,1),opacity .2s ease}
+.hd-fab-chat svg{width:30px;height:30px;filter:drop-shadow(0 1px 1.5px rgba(8,26,90,.35))}
+.hd-fab-bub{fill:#fff}
+.hd-fab-dot{fill:#1b4bd8}
+.hd-fab-down svg{width:26px;height:26px}
+.hd-fab-down{opacity:0;transform:rotate(-90deg) scale(.5)}
+.hd-fab.on .hd-fab-chat{opacity:0;transform:rotate(60deg) scale(.5)}
+.hd-fab.on .hd-fab-down{opacity:1;transform:none}
+@media (hover:hover){
+  .hd-fab:hover{transform:translateY(-2px) scale(1.05);
+    box-shadow:0 16px 34px -10px rgba(27,75,216,.85),0 3px 8px -2px rgba(0,0,0,.25),
+      inset 0 1px 0 rgba(255,255,255,.38),inset 0 -2px 6px rgba(8,26,90,.35)}
+  .hd-fab:not(.on):hover .hd-fab-dot{animation:hd-dots 1s ease-in-out infinite}
+  .hd-fab:not(.on):hover .hd-fab-dot:nth-of-type(2){animation-delay:.12s}
+  .hd-fab:not(.on):hover .hd-fab-dot:nth-of-type(3){animation-delay:.24s}
+}
+@keyframes hd-dots{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-1.6px)}}
+.hd-fab-dot{transform-box:fill-box;transform-origin:center}
+.hd-fab:active{transform:scale(.93)}
 .hd-fab.hidden{display:none}
 /* Odstęp na końcu widoku: po przewinięciu do końca ostatni kafelek nie chowa się
    pod dymkiem (spacer zamiast padding, żeby nie ruszać istniejących odstępów). */
@@ -158,7 +182,7 @@
 
 /* Telefon: nad dolnym paskiem zakładek, okno rozmowy na cały ekran */
 @media (max-width:960px){
-  .hd-fab{right:16px;bottom:calc(58px + env(safe-area-inset-bottom) + 14px);width:52px;height:52px}
+  .hd-fab{right:16px;bottom:calc(58px + env(safe-area-inset-bottom) + 14px);width:54px;height:54px}
   .hd-peek{right:16px;bottom:calc(58px + env(safe-area-inset-bottom) + 76px)}
 }
 @media (max-width:640px){
@@ -166,10 +190,160 @@
   .hd-panel{inset:0;width:auto;height:auto;border-radius:0;border:0;z-index:70;
     padding-bottom:env(safe-area-inset-bottom)}
   .hd-head{padding-top:calc(12px + env(safe-area-inset-top))}
+  .hd-panel[data-tab=home] .hd-head{padding-top:calc(18px + env(safe-area-inset-top))}
 }
+/* ================= Zakładki Home / Help / Messages (centrum pomocy) =================
+   Strona publiczna nie ma części tokenów portalu (--hover, --acc-line…), stąd
+   wartości zapasowe w var(). */
+.hd-head:empty{display:none}
+.hd-foot:empty{display:none}
+.hd-tabs{display:grid;grid-template-columns:repeat(3,1fr);flex:none;border-top:1px solid var(--line);
+  background:var(--panel);padding:4px 6px calc(4px + env(safe-area-inset-bottom))}
+.hd-panel:not(.hd-public) .hd-tabs{padding-bottom:4px}
+.hd-tab{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 4px 7px;
+  border:0;border-radius:12px;background:transparent;color:var(--muted);font:inherit;font-size:12px;
+  font-weight:600;cursor:pointer;transition:color .15s,background .15s}
+.hd-tab svg{width:22px;height:22px}
+@media (hover:hover){.hd-tab:hover{color:var(--txt);background:var(--hover,rgba(127,127,127,.08))}}
+.hd-tab.on{color:var(--txt)}
+.hd-tab.on svg{stroke-width:2.4}
+.hd-tab-dot{position:absolute;top:6px;left:calc(50% + 7px);width:9px;height:9px;border-radius:50%;
+  background:var(--red);box-shadow:0 0 0 2px var(--panel)}
+.hd-tab-dot[hidden]{display:none}
+.hd-panel.in-chat .hd-tabs{display:none}
+
+/* Nagłówek zakładek: tytuł na środku (Help, Messages) */
+.hd-ttl.hd-center{align-items:center;padding-left:34px}
+.hd-ttl.hd-center b{font-size:16px}
+.hd-panel[data-tab=help]:not(.in-article) .hd-head,
+.hd-panel[data-tab=messages]:not(.in-chat) .hd-head{flex-wrap:wrap;background:var(--panel);row-gap:10px}
+
+/* Home: jasna łuna marki u góry, logo, powitanie, karty */
+.hd-panel[data-tab=home]{background:linear-gradient(180deg,color-mix(in srgb,var(--acc) 42%,var(--panel)) 0,
+  color-mix(in srgb,var(--acc) 14%,var(--panel)) 210px,var(--panel) 330px)}
+.hd-panel[data-tab=home] .hd-head{background:transparent;border-bottom:0;padding:18px 14px 6px 20px}
+.hd-panel[data-tab=home] .hd-tabs{background:transparent}
+.hd-panel[data-tab=home] .hd-x{color:var(--txt)}
+.hd-logo{width:28px;height:28px;border-radius:8px;object-fit:contain}
+.hd-brand{flex:1;font-family:var(--display);font-weight:700;font-size:14px;letter-spacing:.01em}
+.hd-hero{padding:26px 6px 18px}
+.hd-hero p{margin:0;font-family:var(--display);font-size:26px;font-weight:700;letter-spacing:-.01em;
+  color:color-mix(in srgb,var(--txt) 62%,transparent);line-height:1.15}
+.hd-hero h2{margin:2px 0 0;font-family:var(--display);font-size:26px;font-weight:700;letter-spacing:-.01em;
+  line-height:1.15;color:var(--txt)}
+.hd-card{display:block;width:100%;margin:0 0 10px;padding:14px 16px;border-radius:14px;border:1px solid var(--line);
+  background:var(--panel);color:var(--txt);text-align:left;text-decoration:none;font:inherit;
+  box-shadow:0 1px 2px rgba(0,0,0,.05),0 6px 18px -12px rgba(0,0,0,.25)}
+button.hd-card,a.hd-card{cursor:pointer;transition:border-color .15s,transform .15s}
+button.hd-card:hover,a.hd-card:hover{border-color:var(--line2)}
+button.hd-card:active,a.hd-card:active{transform:scale(.99)}
+.hd-row{display:flex;align-items:center;gap:12px}
+.hd-row>span:first-child{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+.hd-row b{font-size:14px;font-weight:700}
+.hd-row small{font-size:12.5px;color:var(--muted);line-height:1.4}
+.hd-ic{flex:none;display:grid;place-items:center;color:var(--acc)}
+.hd-ic svg{width:19px;height:19px}
+.hd-recent small{display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px}
+.hd-recent-row{display:flex;align-items:center;gap:11px}
+.hd-recent-row .hd-it-top b{font-size:13.5px}
+.hd-recent-row .hd-av.sm{width:36px;height:36px;font-size:15px}
+.hd-searchcard{padding:6px}
+.hd-search-btn{display:flex;align-items:center;justify-content:space-between;width:100%;padding:11px 12px;
+  border:0;border-radius:10px;background:var(--bg3,rgba(127,127,127,.1));color:var(--txt);font:inherit;
+  font-size:14px;font-weight:700;cursor:pointer}
+.hd-search-btn svg{width:18px;height:18px;color:var(--acc)}
+.hd-art{display:flex;align-items:center;gap:10px;width:100%;padding:11px 12px;border:0;border-radius:10px;
+  background:transparent;color:var(--txt);font:inherit;text-align:left;cursor:pointer}
+.hd-art:hover{background:var(--hover,rgba(127,127,127,.08))}
+.hd-art>span{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.hd-art b{font-size:13.5px;font-weight:500;line-height:1.4;color:var(--txt)}
+.hd-art small{font-size:11.5px;color:var(--dim)}
+.hd-art svg{flex:none;width:16px;height:16px;color:var(--acc)}
+.hd-skel{display:flex;flex-direction:column;gap:10px;padding:12px}
+.hd-skel i{display:block;height:13px;border-radius:6px;background:var(--bg3,rgba(127,127,127,.12));opacity:.7}
+.hd-skel i:nth-child(2n){width:72%}
+
+/* Help: pole wyszukiwania pod tytułem, grupy kategorii, artykuł */
+.hd-search{position:relative;flex-basis:100%;display:block}
+.hd-search input{width:100%;box-sizing:border-box;padding:11px 40px 11px 14px;border-radius:12px;
+  border:1px solid var(--line2);background:var(--bg3,rgba(127,127,127,.1));color:var(--txt);font:inherit;font-size:14px;
+  outline:none;-webkit-appearance:none;appearance:none}
+.hd-search input:focus{border-color:var(--acc);box-shadow:0 0 0 3px color-mix(in srgb,var(--acc) 22%,transparent)}
+.hd-search input::-webkit-search-cancel-button{display:none}
+.hd-search svg{position:absolute;right:13px;top:50%;width:18px;height:18px;transform:translateY(-50%);
+  color:var(--acc);pointer-events:none}
+.hd-count{margin:4px 6px 4px;font-size:12px;color:var(--dim)}
+.hd-group{margin:0 0 6px}
+.hd-group h3{display:flex;align-items:center;gap:8px;margin:12px 6px 4px;font-size:12px;font-weight:700;
+  letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.hd-group h3 span{font-weight:600;color:var(--dim);letter-spacing:0}
+.hd-group .hd-art{padding:10px 8px}
+.hd-group .hd-art+.hd-art{border-top:1px solid var(--line);border-radius:0}
+.hd-article{padding:6px 6px 4px}
+.hd-article small{font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--acc)}
+.hd-article h2{margin:6px 0 12px;font-family:var(--display);font-size:21px;line-height:1.25;letter-spacing:-.01em}
+.hd-article-body{font-size:14.5px;line-height:1.65;color:var(--txt)}
+.hd-article-body a{color:var(--acc);text-decoration:underline;text-underline-offset:2px}
+.hd-more{margin-top:18px;display:flex;flex-direction:column;gap:10px;text-align:center}
+.hd-more b{font-size:14px}
+.hd-new-btn{text-decoration:none}
+.hd-new-btn svg{width:17px;height:17px}
+
+/* Messages: pusta lista i gość (rozmowa wymaga konta) */
+.hd-guest{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:48px 18px 20px}
+.hd-guest>svg{width:34px;height:34px;color:var(--acc);margin-bottom:4px}
+.hd-guest h3{margin:0;font-family:var(--display);font-size:17px}
+.hd-guest p{margin:0 0 8px;font-size:13.5px;line-height:1.55;color:var(--muted);max-width:280px}
+.hd-guest .hd-new-btn{width:auto;padding:11px 26px}
+.hd-guest .hd-guest-mail{margin-top:10px;font-size:12.5px}
+.hd-guest-mail a{color:var(--acc)}
+
+/* ================= Panel admina (admin-support.js): skrzynka + artykuły ================= */
+.as-tabs{grid-template-columns:repeat(2,1fr)}
+.as-panel[data-tab=inbox]:not(.in-chat) .hd-head,
+.as-panel[data-tab=articles] .hd-head{flex-wrap:wrap;background:var(--panel);row-gap:10px}
+.as-filters{flex-basis:100%;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:0 -2px}
+.as-filters::-webkit-scrollbar{display:none}
+.as-f{flex:none;display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border-radius:99px;
+  border:1px solid var(--line2);background:transparent;color:var(--muted);font:inherit;font-size:12.5px;
+  font-weight:600;cursor:pointer;white-space:nowrap}
+.as-f span{min-width:18px;padding:0 5px;border-radius:9px;background:var(--bg3);color:var(--txt);
+  font-size:11px;line-height:18px;text-align:center;font-variant-numeric:tabular-nums}
+.as-f.on{background:var(--pb-ink,var(--txt));border-color:transparent;color:var(--pb-ink-txt,var(--panel))}
+.as-f.on span{background:color-mix(in srgb,currentColor 22%,transparent);color:inherit}
+@media (hover:hover){.as-f:not(.on):hover{color:var(--txt);border-color:var(--muted)}}
+.as-subj{font-size:12px;font-weight:600;color:var(--txt);opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hd-pill.st-late{color:#fff;background:var(--red)}
+.as-topic{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 12px;padding:9px 12px;
+  border-radius:12px;background:var(--bg3);font-size:12.5px}
+.as-topic b{font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.as-topic span{flex:none;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.as-acts{justify-content:space-between}
+.as-acts .hd-link{display:inline-flex;align-items:center;gap:6px}
+.as-acts .hd-link svg{width:15px;height:15px}
+.as-pick{margin:0 0 8px;padding:8px;border-radius:14px;border:1px solid var(--line2);background:var(--panel2)}
+.as-pick[hidden]{display:none}
+.as-pick-list{max-height:150px;overflow-y:auto;margin-top:6px}
+.as-pick .hd-search input{padding-top:9px;padding-bottom:9px}
+.as-art-acts{display:flex;margin-top:16px}
+
+/* Strona publiczna: bez dolnego paska portalu; dymek nad paskiem cookies (--ck-h z base.html) */
+.hd-fab.hd-public{bottom:calc(24px + var(--ck-h,0px))}
+.hd-peek.hd-public,.hd-panel.hd-public{bottom:calc(92px + var(--ck-h,0px))}
+/* Pod przyklejonym menu strony (ok. 100 px), nad nim w warstwach. */
+.hd-panel.hd-public{z-index:90;height:min(620px,calc(100dvh - 200px - var(--ck-h,0px)))}
+@media (max-width:960px){
+  .hd-fab.hd-public{right:16px;bottom:calc(16px + var(--ck-h,0px) + env(safe-area-inset-bottom))}
+  .hd-peek.hd-public{right:16px;bottom:calc(80px + var(--ck-h,0px) + env(safe-area-inset-bottom))}
+}
+@media (max-width:640px){
+  .hd-panel.hd-public{inset:0;height:auto;z-index:95}
+}
+
 /* Otwarta szuflada menu (telefon/tablet): dymek i podgląd nie wiszą nad jej tłem */
 body:has(.side.open) :is(.hd-fab,.hd-peek){opacity:0;pointer-events:none}
 @media (prefers-reduced-motion:reduce){
   .hd-fab,.hd-panel,.hd-peek{transition:none}
-  .hd-typing i,.hd-fab.ping::after{animation:none}
+  .hd-typing i,.hd-fab.ping::after,.hd-fab-dot{animation:none!important}
+  .hd-fab-ic{transition:opacity .15s}
 }

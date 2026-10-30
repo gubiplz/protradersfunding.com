@@ -176,6 +176,16 @@ def apply_scale_up(session, acc: Account) -> float:
     acc.min_days_at = acc.payout_ready_at = None
     acc.started_at = datetime.now(timezone.utc)
     acc.closed_at = None
+    # Track record nowego konta startuje od zera: okno fazy zaczyna się od
+    # skalowania, więc wykres equity, transakcje, statystyki i aktywność nie
+    # ciągną już historii starego rozmiaru. Wiersze Trade/EquitySnapshot/Payout
+    # zostają w bazie (historia admina, wypłaty tradera) — tylko ich nie liczymy.
+    # Dni limitów jak przy clear-history: stary dzień zablokowałby reset dnia.
+    acc.phase_started_at = acc.started_at
+    acc.prev_phase_started_at = None
+    acc.day_key = ""
+    acc.limit_warn_daily_day = ""
+    acc.limit_warn_dd_day = ""
 
     # Nowy rachunek MT5. Login MUSI się zmienić: SimulatedFeed cache'uje stan po
     # loginie, więc pod starym numerem wróciłoby stare saldo i konto poszłoby w

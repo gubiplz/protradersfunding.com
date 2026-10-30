@@ -682,6 +682,10 @@ def _phase_windows(acc: Account) -> list[dict]:
     okna: list[tuple[str, datetime | None, datetime | None]]
     if teraz is None or kolej.index(teraz) == 0 or start is None:
         okna = [(acc.phase, None, None)]
+    elif teraz == "funded" and (acc.scale_count or 0) > 0:
+        # Po skalowaniu konto to nowy rachunek od zera — historia sprzed
+        # skalowania nie jest żadną z faz tego konta, więc jej nie pokazujemy.
+        okna = [(teraz, start, None)]
     elif kolej.index(teraz) == 1:
         okna = [(kolej[0], None, start), (teraz, start, None)]
     elif prev is not None and prev < start:
@@ -1891,6 +1895,9 @@ def my_accounts(trader: Trader = Depends(auth.current_trader)):
             d = _account_dict(a, with_credentials=True)
             d["paid_out"] = round(paid.get(a.id, 0.0), 2)
             d["payout_open"] = otwarte.get(a.id)
+            # Zwrot opłaty, który wejdzie w NASTĘPNĄ wypłatę (tylko pierwsza z konta) —
+            # modal kwoty pokazuje od razu jedną sumę do przelewu.
+            d["payout_fee_refund"] = _zwrot_oplaty(session, a) if a.status == "funded" else 0.0
             nastepna = payout_next_at(session, a) if a.status == "funded" else None
             d["payout_next_at"] = nastepna.isoformat() + "Z" if nastepna else None
             out.append(d)
@@ -2206,36 +2213,39 @@ def submit_payout_details(req_id: int, payload: PayoutDetailsIn, request: Reques
             details_json = _payout_details_json("usdt", {"network": payload.network,
                                                          "address": payload.address})
             method = "usdt"
+        # Zwrot opłaty przy pierwszej wypłacie jest częścią kwoty wypłaty — ustalamy
+        # go tu, razem z kwotą, żeby trader i admin widzieli jedną sumę do przelewu.
+        zwrot = _zwrot_oplaty(session, acc)
         # Warunkowy UPDATE: dwa równoległe wysłania formularza nie nadpiszą
         # sobie kwoty i adresu — drugie dostaje 400.
         zajete = (session.query(PayoutRequest)
                   .filter(PayoutRequest.id == pr.id, PayoutRequest.status == "unlocked")
                   .update({"status": "pending", "trader_share": share, "profit_amount": profit,
-                           "method": method, "details": details_json,
+                           "fee_refund": zwrot, "method": method, "details": details_json,
                            "ts": datetime.now(timezone.utc)},
                           synchronize_session=False))
         if not zajete:
             raise HTTPException(400, "This payout request is no longer waiting for details")
         if testowy:
-            # Zwrot opłaty przy pierwszej wypłacie jedzie w tym samym transferze —
-            # wniosek rozlicza się sam po potwierdzeniu na łańcuchu.
-            zwrot = _zwrot_oplaty(session, acc)
+            # Zwrot jedzie w tym samym transferze — wniosek rozlicza się sam po
+            # potwierdzeniu na łańcuchu.
             session.add(VusdtTransfer(payout_request_id=pr.id,
                                       address=json.loads(details_json)["address"],
                                       amount_units=vusdt.to_units(share + zwrot)))
         session.commit()
+        total = round(share + zwrot, 2)
         out = {"id": pr.id, "profit_amount": profit, "trader_share": share,
-               "method": method, "status": "pending"}
+               "fee_refund": zwrot, "total": total, "method": method, "status": "pending"}
         if testowy:
             vusdt.process_queue(session)
             t = _transfer_vusdt(session, pr.id)
             out["vusdt"] = vusdt.view(t)
             out["fee_refund"] = round(int(t.amount_units) / 10 ** vusdt.DECIMALS - share, 2)
             notify.notify_admins("admin_payout",
-                                 f"Payout ${share:,.2f} vUSDT sending ({acc.login})", tr.email)
+                                 f"Payout ${total:,.2f} vUSDT sending ({acc.login})", tr.email)
         else:
             notify.notify_admins("admin_payout",
-                                 f"Payout ${share:,.2f} USDT to send ({acc.login})", tr.email)
+                                 f"Payout ${total:,.2f} USDT to send ({acc.login})", tr.email)
         return out
     finally:
         session.close()
@@ -2999,6 +3009,7 @@ def my_payouts(trader: Trader = Depends(auth.current_trader)):
             "requests": [{"id": r.id, "ts": r.ts.isoformat(),
                           "account": by_id[r.account_id].login if r.account_id in by_id else "?",
                           "profit_amount": r.profit_amount, "trader_share": r.trader_share,
+                          **_zwrot_wniosku(session, r, by_id.get(r.account_id)),
                           "method": r.method, "status": r.status,
                           "express": bool(by_id[r.account_id].express_payout) if r.account_id in by_id else False,
                           "expected_by": ((r.ts + timedelta(hours=24)).isoformat()
@@ -3011,6 +3022,7 @@ def my_payouts(trader: Trader = Depends(auth.current_trader)):
             "history": [{"id": p.id, "ts": p.ts.isoformat(),
                          "account": by_id[p.account_id].login if p.account_id in by_id else "?",
                          "profit_amount": p.profit_amount, "trader_share": p.trader_share,
+                         "fee_refund": round(p.fee_refund or 0.0, 2),
                          "method": p.method, "paid": bool(p.paid),
                          "cert_token": p.cert_token}
                         for p in sorted(pays, key=lambda x: x.ts, reverse=True)],
@@ -3331,6 +3343,21 @@ def _czat_baza(session, produkty=None):
                          helpdesk.fakty(produkty))
 
 
+@app.get("/api/help/articles")
+def help_articles(response: Response):
+    """Artykuły okienka pomocy (zakładki Home/Help) — publiczne, także dla
+    niezalogowanych na stronie głównej. Źródłem jest strona /faq."""
+    session = SessionLocal()
+    try:
+        produkty = session.query(Product).all()
+        lista = helpdesk.artykuly(str(TEMPLATES / "faq.html"), settings.site_name,
+                                  settings.support_email, helpdesk.fakty(produkty))
+    finally:
+        session.close()
+    response.headers["Cache-Control"] = "public, max-age=300"
+    return {"articles": list(lista), "support_email": settings.support_email}
+
+
 def _czat_wiedza(session):
     """Baza silnika FAQ i aktualne plany z katalogu."""
     produkty = session.query(Product).all()
@@ -3586,12 +3613,15 @@ def admin_support_chats():
                          "id": ost.id} if ost else None,
                 # Podgląd przy dymku pokazuje słowa TRADERA — ostatnia w wątku bywa
                 # automatyczną odpowiedzią asystenta („przekazałem zespołowi").
-                "trader_last": {"id": od_tradera[-1].id, "body": od_tradera[-1].body[:140]}
+                "trader_last": {"id": od_tradera[-1].id, "body": od_tradera[-1].body[:140],
+                                "ts": od_tradera[-1].ts.isoformat()}
                 if od_tradera else None,
                 "last_ts": (ost.ts if ost else t.created_at).isoformat(),
             })
-        # Czekające na górze, w nich najświeższe pierwsze; potem reszta od najnowszej.
-        czeka = sorted([c for c in out if c["waiting"]], key=lambda c: c["last_ts"], reverse=True)
+        # Czekające na górze, w nich NAJDŁUŻEJ czekające pierwsze (kolejka: kto
+        # pierwszy napisał, ten pierwszy dostaje odpowiedź); potem reszta od najnowszej.
+        czeka = sorted([c for c in out if c["waiting"]],
+                       key=lambda c: (c["trader_last"] or {}).get("ts") or c["last_ts"])
         reszta = sorted([c for c in out if not c["waiting"]], key=lambda c: c["last_ts"], reverse=True)
         return {"chats": czeka + reszta, "waiting": len(czeka), "last_id": last_id}
     finally:
@@ -4389,7 +4419,8 @@ def admin_payout_requests():
                 details = {}
             out.append({"id": r.id, "account_login": acc.login if acc else None,
                         "trader_email": tr_email, "profit_amount": r.profit_amount,
-                        "trader_share": r.trader_share, "method": r.method, "details": details,
+                        "trader_share": r.trader_share, **_zwrot_wniosku(session, r, acc),
+                        "method": r.method, "details": details,
                         "status": r.status, "reject_reason": r.reject_reason,
                         "express": bool(acc.express_payout) if acc else False,
                         "ts": r.ts.isoformat()})
@@ -4457,6 +4488,8 @@ def admin_payouts_all():
                 "trader_email": tr.email if tr else None,
                 "profit_amount": round(p.profit_amount, 2),
                 "trader_share": round(p.trader_share, 2),
+                "fee_refund": round(p.fee_refund or 0.0, 2),
+                "total": round(p.trader_share, 2),
                 "method": p.method or "bank", "details": {},
                 "status": "paid" if p.paid else "pending",
                 "reject_reason": None, "note": p.note, "express": False,
@@ -4483,6 +4516,7 @@ def admin_payouts_all():
                 "account_login": acc.login if acc else None,
                 "trader_email": tr_email,
                 "profit_amount": r.profit_amount, "trader_share": r.trader_share,
+                **_zwrot_wniosku(session, r, acc),
                 "method": r.method, "details": details,
                 "status": r.status, "reject_reason": r.reject_reason,
                 "note": None, "cert_url": None,
@@ -4525,6 +4559,19 @@ def _zwrot_oplaty(session, acc: Account) -> float:
     return round(order.amount_usd, 2) if order else 0.0
 
 
+def _zwrot_wniosku(session, r: PayoutRequest, acc: Account | None) -> dict:
+    """Zwrot opłaty i suma do przelewu dla wiersza wniosku. Po kroku 2 zwrot
+    jest zapisany na wniosku; przed nim pokazujemy, ile WEJDZIE w pierwszą
+    wypłatę, żeby admin i trader od początku widzieli tę samą kwotę."""
+    if r.status == "pending" or r.status == "paid":
+        zwrot = float(r.fee_refund or 0.0)
+    elif r.status in PAYOUT_OTWARTE and acc is not None:
+        zwrot = _zwrot_oplaty(session, acc)
+    else:
+        zwrot = 0.0
+    return {"fee_refund": round(zwrot, 2), "total": round(float(r.trader_share or 0) + zwrot, 2)}
+
+
 def _rozlicz_wyplate(session, r: PayoutRequest, fee_refund: float | None = None,
                      sprawdz_pokrycie: bool = True) -> dict:
     """Księguje wniosek jako wypłacony: Payout, zdjęcie zysku z konta, zwrot opłaty,
@@ -4559,11 +4606,14 @@ def _rozlicz_wyplate(session, r: PayoutRequest, fee_refund: float | None = None,
         raise HTTPException(404, "The request does not exist or was already handled")
 
     if fee_refund is None:
+        # Liczony od nowa, nie z wniosku: gdyby między krokiem 2 a przelewem
+        # zaksięgowano inną wypłatę z konta, zwrot nie może pójść drugi raz.
         fee_refund = _zwrot_oplaty(session, acc)
+    r.fee_refund = fee_refund
 
     session.add(Payout(account_id=acc.id, profit_amount=r.profit_amount,
                        trader_share=round(r.trader_share + fee_refund, 2), paid=True,
-                       balance_reset=(pool is None), method=r.method))
+                       fee_refund=fee_refund, balance_reset=(pool is None), method=r.method))
     if pool is not None:
         # Tryb puli: anty-podwójnej-wypłacie jest dekrement puli, a saldo
         # maluje bot — reset by z nim walczył. Zwrot opłaty NIE schodzi
@@ -4764,6 +4814,7 @@ def _payout_dict(p: Payout, acc: Account | None = None) -> dict:
     return {"id": p.id, "ts": p.ts.isoformat() if p.ts else None,
             "profit_amount": round(p.profit_amount, 2),
             "trader_share": round(p.trader_share, 2), "paid": p.paid,
+            "fee_refund": round(p.fee_refund or 0.0, 2),
             "method": p.method, "note": p.note, "cert_token": p.cert_token,
             "cert_url": f"/payout/{p.cert_token}" if p.cert_token else None,
             "show_on_lp": bool(getattr(p, "show_on_lp", True)),
@@ -4797,7 +4848,11 @@ def admin_issue_payout(request: Request, account_id: int, payload: IssuePayoutIn
         # W trybie puli saldo maluje bot i reset by z nim walczył —
         # anty-podwójnej-wypłacie jest dekrement puli.
         reset = bool(payload.reset_balance and profit > 0 and pool is None)
-        p = Payout(account_id=acc.id, profit_amount=profit, trader_share=share, paid=True,
+        # Pierwsza wypłata z konta niesie zwrot opłaty za challenge — w tej samej
+        # kwocie, jak przy wniosku tradera. Pula i saldo schodzą o samą działkę.
+        zwrot = _zwrot_oplaty(session, acc)
+        p = Payout(account_id=acc.id, profit_amount=profit,
+                   trader_share=round(share + zwrot, 2), fee_refund=zwrot, paid=True,
                    method=payload.method, note=(payload.note or None),
                    cert_token=secrets.token_urlsafe(16)[:32],
                    show_on_lp=bool(payload.show_on_lp),
@@ -4821,7 +4876,7 @@ def admin_issue_payout(request: Request, account_id: int, payload: IssuePayoutIn
         if trader:
             notify.send("payout_approved", trader.email,
                         {"name": trader.full_name or trader.email, "login": acc.login,
-                         "trader_share": share, "fee_refund": False,
+                         "trader_share": round(share + zwrot, 2), "fee_refund": bool(zwrot),
                          "cert_url": f"{_public_base(request)}/payout/{p.cert_token}"})
             _polecenie_po_wyplacie(session, trader.email)
         return _payout_dict(p, acc)
@@ -4842,6 +4897,8 @@ def admin_account_payouts(account_id: int):
                 "profit": round(max(0.0, acc.balance - acc.initial_balance), 2),
                 "split_pct": acc.profit_split_pct,
                 "suggested_share": _payout_available(acc),
+                # Pierwsza wypłata z konta: tyle zwrotu opłaty dojdzie do kwoty.
+                "fee_refund": _zwrot_oplaty(session, acc),
                 "payout_pool_usd": getattr(acc, "payout_pool_usd", None),
                 "payout_days_left": poller.payout_days_left(acc),
                 "min_trading_days": int(acc.min_trading_days or 0),
@@ -4993,7 +5050,7 @@ def admin_payout_undo(payout_id: int):
             if abs(int(t.amount_units) / 10 ** vusdt.DECIMALS - p.trader_share) < 0.005:
                 r = kand
                 break
-        share = r.trader_share if r else p.trader_share
+        share = r.trader_share if r else round(p.trader_share - (p.fee_refund or 0.0), 2)
         przywrocono = 0.0
         if p.balance_reset:
             split = acc.profit_split_pct / 100.0 if acc.profit_split_pct else 1.0

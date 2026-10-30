@@ -217,6 +217,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
     "payout_requests": {
         "details": "VARCHAR(400)",
         "reject_reason": "VARCHAR(200)",
+        "fee_refund": "FLOAT DEFAULT 0",
     },
     "payouts": {
         "method": "VARCHAR(40)",
@@ -226,6 +227,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         # DEFAULT TRUE robi za backfill: wypłaty wystawione przed tą zmianą
         # zostają na pasie na landingu, nic nie znika ze strony po deployu.
         "show_on_lp": "BOOLEAN DEFAULT TRUE",
+        "fee_refund": "FLOAT DEFAULT 0",
     },
     "accounts": {
         # Nieudane odcięcie od handlu po breachu — ponawiane przez tick ryzyka.
