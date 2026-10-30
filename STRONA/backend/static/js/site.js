@@ -270,6 +270,18 @@
     });
   })();
 
+  /* ---------- markets: klik w kartę = terminal z tym instrumentem (gdy jest), pełna lista pod przyciskiem ---------- */
+  $$('.asset[data-sym]').forEach(a => a.addEventListener('click', e => {
+    if (typeof window.openTerminal === 'function') { e.preventDefault(); window.openTerminal(a.dataset.sym); }
+  }));
+  const assetsBtn = $('#assetsAllBtn'), assetsAll = $('#assetsAll');
+  if (assetsBtn && assetsAll) assetsBtn.addEventListener('click', () => {
+    const open = assetsAll.hidden;
+    assetsAll.hidden = !open; assetsBtn.setAttribute('aria-expanded', String(open));
+    assetsBtn.textContent = open ? 'Hide the list' : 'See the full list';
+    if (open) revealize(assetsAll);
+  });
+
   /* ---------- FAQ: wyszukiwarka, kotwice pytań ---------- */
   (function faqTools() {
     const q = $('#faqQ'); if (!q) return;

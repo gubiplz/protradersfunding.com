@@ -89,22 +89,33 @@
   </div>
 </section>
 
-<!-- ============================ PLATFORM ============================ -->
-<div class="wrap">
-  <div class="platform-strip" data-rv>
-    <div class="platform-badge"><img src="/static/img/mt5.png" alt="MetaTrader 5"> Powered by <b>&nbsp;MetaTrader&nbsp;5</b></div>
-    <div class="market-chips">
-      <span class="chip">Forex</span><span class="chip">Indices</span>
-      <span class="chip">Gold &amp; Metals</span><span class="chip">Crypto CFDs</span>
+<!-- ============================ MARKETS ============================ -->
+{# Rynki jak u dużych firm prop: nagłówek z lewej, zdanie i „Powered by MT5" z prawej,
+   trzy przesuwające się rzędy kart (kierunki na przemian, pauza po najechaniu).
+   Lista jest statyczna — to CFD-y typowe dla kont MT5; pełny wykaz pod przyciskiem. #}
+<section class="sec assets" id="markets">
+  <div class="wrap">
+    <div class="sec-head how" data-rv>
+      <div><span class="pill">Markets</span><h2>The markets you can trade</h2></div>
+      <div class="assets-side">
+        <p>Forex, indices, metals, energies and crypto CFDs on one MetaTrader&nbsp;5 account, with the same rules
+           across all of them.</p>
+        <div class="assets-side-row">
+          <div class="platform-badge"><img src="/static/img/mt5.png" alt="MetaTrader 5"> Powered by <b>&nbsp;MetaTrader&nbsp;5</b></div>
+          <button type="button" class="btn-ghost btn-sm" id="assetsAllBtn" aria-expanded="false" aria-controls="assetsAll">See the full list</button>
+        </div>
+      </div>
     </div>
   </div>
-  <div class="marquee" aria-hidden="true">
-    <div class="marquee-track">
-      <span>EURUSD</span><span>XAUUSD</span><span>US30</span><span>NAS100</span><span>GBPUSD</span><span>BTCUSD</span><span>SPX500</span><span>USDJPY</span><span>GER40</span><span>USOIL</span><span>ETHUSD</span><span>AUDUSD</span><span>XAGUSD</span><span>EURGBP</span><span>USDCAD</span>
-      <span>EURUSD</span><span>XAUUSD</span><span>US30</span><span>NAS100</span><span>GBPUSD</span><span>BTCUSD</span><span>SPX500</span><span>USDJPY</span><span>GER40</span><span>USOIL</span><span>ETHUSD</span><span>AUDUSD</span><span>XAGUSD</span><span>EURGBP</span><span>USDCAD</span>
-    </div>
+  <div class="assets-rows">
+    <div class="assets-row"><div class="assets-track"><a class="asset" data-c="fx" data-sym="EURUSD" href="/portal?symbol=EURUSD" aria-label="EUR/USD chart"><i>€</i><b>EUR/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="GBPUSD" href="/portal?symbol=GBPUSD" aria-label="GBP/USD chart"><i>£</i><b>GBP/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="USDJPY" href="/portal?symbol=USDJPY" aria-label="USD/JPY chart"><i>¥</i><b>USD/JPY</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="AUDUSD" href="/portal?symbol=AUDUSD" aria-label="AUD/USD chart"><i>A$</i><b>AUD/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="USDCAD" href="/portal?symbol=USDCAD" aria-label="USD/CAD chart"><i>C$</i><b>USD/CAD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="USDCHF" href="/portal?symbol=USDCHF" aria-label="USD/CHF chart"><i>₣</i><b>USD/CHF</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="NZDUSD" href="/portal?symbol=NZDUSD" aria-label="NZD/USD chart"><i>NZ$</i><b>NZD/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="EURGBP" href="/portal?symbol=EURGBP" aria-label="EUR/GBP chart"><i>€£</i><b>EUR/GBP</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="EURJPY" href="/portal?symbol=EURJPY" aria-label="EUR/JPY chart"><i>€¥</i><b>EUR/JPY</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="GBPJPY" href="/portal?symbol=GBPJPY" aria-label="GBP/JPY chart"><i>£¥</i><b>GBP/JPY</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="EURUSD" href="/portal?symbol=EURUSD" aria-label="EUR/USD chart"><i>€</i><b>EUR/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="GBPUSD" href="/portal?symbol=GBPUSD" aria-label="GBP/USD chart"><i>£</i><b>GBP/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="USDJPY" href="/portal?symbol=USDJPY" aria-label="USD/JPY chart"><i>¥</i><b>USD/JPY</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="AUDUSD" href="/portal?symbol=AUDUSD" aria-label="AUD/USD chart"><i>A$</i><b>AUD/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="USDCAD" href="/portal?symbol=USDCAD" aria-label="USD/CAD chart"><i>C$</i><b>USD/CAD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="USDCHF" href="/portal?symbol=USDCHF" aria-label="USD/CHF chart"><i>₣</i><b>USD/CHF</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="NZDUSD" href="/portal?symbol=NZDUSD" aria-label="NZD/USD chart"><i>NZ$</i><b>NZD/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="EURGBP" href="/portal?symbol=EURGBP" aria-label="EUR/GBP chart"><i>€£</i><b>EUR/GBP</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="EURJPY" href="/portal?symbol=EURJPY" aria-label="EUR/JPY chart"><i>€¥</i><b>EUR/JPY</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="GBPJPY" href="/portal?symbol=GBPJPY" aria-label="GBP/JPY chart"><i>£¥</i><b>GBP/JPY</b><em>FOREX</em></a></div></div>
+    <div class="assets-row rev"><div class="assets-track"><a class="asset" data-c="idx" data-sym="US30" href="/portal?symbol=US30" aria-label="US30 chart"><i>US</i><b>US30</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="NAS100" href="/portal?symbol=NAS100" aria-label="NAS100 chart"><i>NQ</i><b>NAS100</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="SPX500" href="/portal?symbol=SPX500" aria-label="SPX500 chart"><i>SP</i><b>SPX500</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="GER40" href="/portal?symbol=GER40" aria-label="GER40 chart"><i>DE</i><b>GER40</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="UK100" href="/portal?symbol=UK100" aria-label="UK100 chart"><i>UK</i><b>UK100</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="JPN225" href="/portal?symbol=JPN225" aria-label="JPN225 chart"><i>JP</i><b>JPN225</b><em>INDEX</em></a><a class="asset" data-c="metal" data-sym="XAUUSD" href="/portal?symbol=XAUUSD" aria-label="XAU/USD chart"><i>Au</i><b>XAU/USD</b><em>METAL</em></a><a class="asset" data-c="metal" data-sym="XAGUSD" href="/portal?symbol=XAGUSD" aria-label="XAG/USD chart"><i>Ag</i><b>XAG/USD</b><em>METAL</em></a><a class="asset" data-c="energy" data-sym="USOIL" href="/portal?symbol=USOIL" aria-label="USOIL chart"><i>WTI</i><b>USOIL</b><em>ENERGY</em></a><a class="asset" data-c="energy" data-sym="UKOIL" href="/portal?symbol=UKOIL" aria-label="UKOIL chart"><i>BRT</i><b>UKOIL</b><em>ENERGY</em></a><a class="asset" data-c="energy" data-sym="NATGAS" href="/portal?symbol=NATGAS" aria-label="NATGAS chart"><i>NG</i><b>NATGAS</b><em>ENERGY</em></a><a class="asset" data-c="idx" data-sym="US30" href="/portal?symbol=US30" aria-label="US30 chart"><i>US</i><b>US30</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="NAS100" href="/portal?symbol=NAS100" aria-label="NAS100 chart"><i>NQ</i><b>NAS100</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="SPX500" href="/portal?symbol=SPX500" aria-label="SPX500 chart"><i>SP</i><b>SPX500</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="GER40" href="/portal?symbol=GER40" aria-label="GER40 chart"><i>DE</i><b>GER40</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="UK100" href="/portal?symbol=UK100" aria-label="UK100 chart"><i>UK</i><b>UK100</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="JPN225" href="/portal?symbol=JPN225" aria-label="JPN225 chart"><i>JP</i><b>JPN225</b><em>INDEX</em></a><a class="asset" data-c="metal" data-sym="XAUUSD" href="/portal?symbol=XAUUSD" aria-label="XAU/USD chart"><i>Au</i><b>XAU/USD</b><em>METAL</em></a><a class="asset" data-c="metal" data-sym="XAGUSD" href="/portal?symbol=XAGUSD" aria-label="XAG/USD chart"><i>Ag</i><b>XAG/USD</b><em>METAL</em></a><a class="asset" data-c="energy" data-sym="USOIL" href="/portal?symbol=USOIL" aria-label="USOIL chart"><i>WTI</i><b>USOIL</b><em>ENERGY</em></a><a class="asset" data-c="energy" data-sym="UKOIL" href="/portal?symbol=UKOIL" aria-label="UKOIL chart"><i>BRT</i><b>UKOIL</b><em>ENERGY</em></a><a class="asset" data-c="energy" data-sym="NATGAS" href="/portal?symbol=NATGAS" aria-label="NATGAS chart"><i>NG</i><b>NATGAS</b><em>ENERGY</em></a></div></div>
+    <div class="assets-row"><div class="assets-track"><a class="asset" data-c="crypto" data-sym="BTCUSD" href="/portal?symbol=BTCUSD" aria-label="BTC/USD chart"><i>₿</i><b>BTC/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="ETHUSD" href="/portal?symbol=ETHUSD" aria-label="ETH/USD chart"><i>Ξ</i><b>ETH/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="SOLUSD" href="/portal?symbol=SOLUSD" aria-label="SOL/USD chart"><i>◎</i><b>SOL/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="XRPUSD" href="/portal?symbol=XRPUSD" aria-label="XRP/USD chart"><i>X</i><b>XRP/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="LTCUSD" href="/portal?symbol=LTCUSD" aria-label="LTC/USD chart"><i>Ł</i><b>LTC/USD</b><em>CRYPTO</em></a><a class="asset" data-c="fx" data-sym="EURAUD" href="/portal?symbol=EURAUD" aria-label="EUR/AUD chart"><i>€A$</i><b>EUR/AUD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="AUDJPY" href="/portal?symbol=AUDJPY" aria-label="AUD/JPY chart"><i>A¥</i><b>AUD/JPY</b><em>FOREX</em></a><a class="asset" data-c="idx" data-sym="EU50" href="/portal?symbol=EU50" aria-label="EU50 chart"><i>EU</i><b>EU50</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="AUS200" href="/portal?symbol=AUS200" aria-label="AUS200 chart"><i>AU</i><b>AUS200</b><em>INDEX</em></a><a class="asset" data-c="metal" data-sym="XPTUSD" href="/portal?symbol=XPTUSD" aria-label="XPT/USD chart"><i>Pt</i><b>XPT/USD</b><em>METAL</em></a><a class="asset" data-c="crypto" data-sym="BTCUSD" href="/portal?symbol=BTCUSD" aria-label="BTC/USD chart"><i>₿</i><b>BTC/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="ETHUSD" href="/portal?symbol=ETHUSD" aria-label="ETH/USD chart"><i>Ξ</i><b>ETH/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="SOLUSD" href="/portal?symbol=SOLUSD" aria-label="SOL/USD chart"><i>◎</i><b>SOL/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="XRPUSD" href="/portal?symbol=XRPUSD" aria-label="XRP/USD chart"><i>X</i><b>XRP/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="LTCUSD" href="/portal?symbol=LTCUSD" aria-label="LTC/USD chart"><i>Ł</i><b>LTC/USD</b><em>CRYPTO</em></a><a class="asset" data-c="fx" data-sym="EURAUD" href="/portal?symbol=EURAUD" aria-label="EUR/AUD chart"><i>€A$</i><b>EUR/AUD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="AUDJPY" href="/portal?symbol=AUDJPY" aria-label="AUD/JPY chart"><i>A¥</i><b>AUD/JPY</b><em>FOREX</em></a><a class="asset" data-c="idx" data-sym="EU50" href="/portal?symbol=EU50" aria-label="EU50 chart"><i>EU</i><b>EU50</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="AUS200" href="/portal?symbol=AUS200" aria-label="AUS200 chart"><i>AU</i><b>AUS200</b><em>INDEX</em></a><a class="asset" data-c="metal" data-sym="XPTUSD" href="/portal?symbol=XPTUSD" aria-label="XPT/USD chart"><i>Pt</i><b>XPT/USD</b><em>METAL</em></a></div></div>
   </div>
-</div>
+  <div class="wrap"><div class="assets-all" id="assetsAll" hidden><div class="assets-group"><h4>Forex</h4><span>AUD/JPY</span><span>AUD/USD</span><span>EUR/AUD</span><span>EUR/GBP</span><span>EUR/JPY</span><span>EUR/USD</span><span>GBP/JPY</span><span>GBP/USD</span><span>NZD/USD</span><span>USD/CAD</span><span>USD/CHF</span><span>USD/JPY</span></div><div class="assets-group"><h4>Index</h4><span>AUS200</span><span>EU50</span><span>GER40</span><span>JPN225</span><span>NAS100</span><span>SPX500</span><span>UK100</span><span>US30</span></div><div class="assets-group"><h4>Metal</h4><span>XAG/USD</span><span>XAU/USD</span><span>XPT/USD</span></div><div class="assets-group"><h4>Energy</h4><span>NATGAS</span><span>UKOIL</span><span>USOIL</span></div><div class="assets-group"><h4>Crypto</h4><span>BTC/USD</span><span>ETH/USD</span><span>LTC/USD</span><span>SOL/USD</span><span>XRP/USD</span></div>
+    <p class="assets-note">Symbols as listed on the MT5 server. Lot limits per plan are in the <a href="/objectives">trading objectives</a>.</p>
+  </div></div>
+</section>
 
 <!-- ============================ HOW IT WORKS ============================ -->
 {# Jak u dużych firm prop: nagłówek z lewej, jedno zdanie z prawej, cztery karty
@@ -448,86 +459,59 @@
 </section>
 
 <!-- ============================ FAQ ============================ -->
+{# Jak u dużych firm prop: nagłówek z lewej, sześć pytań z cienkimi liniami z prawej,
+   reszta na /faq. Treść i liczby jak na stronie FAQ. #}
 <section class="sec" id="faq">
-  <div class="wrap">
-    <div class="sec-head center" data-rv>
+  <div class="wrap faq-split">
+    <div class="faq-split-head" data-rv>
       <span class="pill">FAQ</span>
-      <h2>Frequently asked questions</h2>
+      <h2>Common questions <svg class="faq-q" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.7"/><path d="M12 17h.01"/></svg></h2>
+      <p>What traders ask most before they start their first challenge.</p>
     </div>
-    <div class="faq" data-rv>
-      <details>
-        <summary>Are these live trading accounts?</summary>
-        <div class="a">No. All accounts are demo accounts with virtual funds running in a simulated
-        environment on real MetaTrader 5 servers. You are never trading real money. You earn
-        performance-based rewards for passing objectives and trading profitably.</div>
-      </details>
-      <details>
-        <summary>How fast do I get my account?</summary>
-        <div class="a">Account creation is fully automated. Your MT5 server, login and password usually
-        appear in your dashboard (and inbox) within a minute of completing checkout.</div>
-      </details>
-      <details>
-        <summary>How is the daily loss limit calculated?</summary>
-        <div class="a">The daily loss limit (5%) is measured against your equity at the start of the
-        trading day (server time) and includes floating P&amp;L. If your equity drops below the daily
-        floor, the account fails automatically.</div>
-      </details>
-      <details>
-        <summary>What is the difference between static and trailing drawdown?</summary>
-        <div class="a">Static drawdown is a fixed floor below your starting balance: 10% on 2-Step
-        plans, 8% on Instant Funding. Trailing drawdown instead follows your equity high-water mark;
-        we do not use it on any plan, so your loss limit never moves up with your profits.</div>
-      </details>
-      <details>
-        <summary>What happens if I break a rule?</summary>
-        <div class="a">The risk engine fails the account automatically, open positions are closed, and
-        you'll see the exact breach reason in your dashboard. You can always start a new challenge.</div>
-      </details>
-      <details>
-        <summary>Is there a limit on position size?</summary>
-        <div class="a">Yes. Every account has a cap on the <b>total volume of open positions</b>
-        (6 lots on a $100,000 account, scaled proportionally to account size). It exists so the
-        challenge measures skill rather than one all-in trade. Exceeding it breaches the account,
-        the same as a loss limit.</div>
-      </details>
-      <details>
-        <summary>What is Instant Funding?</summary>
-        <div class="a">A funded account without an evaluation. You skip the phases and can request
-        payouts from day one. In exchange the fee is higher, the risk limits are tighter (5% daily,
-        8% overall) and the profit split is 70% instead of 90%.</div>
-      </details>
-      <details>
-        <summary>Is news trading allowed? Can I hold over the weekend?</summary>
-        <div class="a">Yes and yes. There are no news blackouts, no weekend-flat requirements and no
-        banned strategies. The only rules are the loss limits and targets published on this page.</div>
-      </details>
-      <details>
-        <summary>How do payouts work?</summary>
-        <div class="a">On a funded account you can request a payout of your share (90%, or 70% on
-        Instant Funding) of the
-        simulated profits at any time. After a one-time KYC verification, each request is reviewed by
-        our team and paid out; your first payout also includes a full refund of the challenge fee.</div>
-      </details>
-      <details>
-        <summary>Is the fee really one-time? Any hidden costs?</summary>
-        <div class="a">One-time, per challenge. No subscriptions, no data fees, no platform fees, and
-        the fee is refunded in full with your first payout.</div>
-      </details>
-      <details>
-        <summary>Which platform and instruments can I trade?</summary>
-        <div class="a">MetaTrader 5: desktop, mobile and web terminal, with the same credentials. You
-        can trade whatever the MT5 server offers: forex pairs, indices, gold and metals, and crypto CFDs.</div>
-      </details>
-      <details>
-        <summary>Can I have multiple accounts?</summary>
-        <div class="a">Yes, you can run multiple challenges in parallel. Each account is evaluated
-        independently against its own objectives.</div>
-      </details>
+    <div class="faq-split-list" data-rv>
+      <div class="faq faq-lines">
+        <details>
+          <summary>Are these live trading accounts?</summary>
+          <div class="a">No. All accounts are demo accounts with virtual funds running in a simulated
+          environment on real MetaTrader 5 servers. You are never trading real money. You earn
+          performance-based rewards for passing objectives and trading profitably.</div>
+        </details>
+        <details>
+          <summary>What are the challenge rules?</summary>
+          <div class="a">A profit target, a daily loss limit (5%) measured against your equity at the start of
+          the trading day, a static overall drawdown (10% on 2-Step, 8% on Instant Funding) and a cap on the
+          total open volume. No time limit, no news blackouts, no weekend-flat rule. Break a limit and the
+          risk engine fails the account automatically.</div>
+        </details>
+        <details>
+          <summary>What can I trade?</summary>
+          <div class="a">MetaTrader 5: desktop, mobile and web terminal, with the same credentials. You
+          can trade whatever the MT5 server offers: forex pairs, indices, gold and metals, energies and crypto CFDs.</div>
+        </details>
+        <details>
+          <summary>How do payouts work?</summary>
+          <div class="a">On a funded account you can request a payout of your share (90%, or 70% on
+          Instant Funding) of the simulated profits at any time. After a one-time KYC verification, each
+          request is reviewed by our team and paid out; your first payout also includes a full refund of the
+          challenge fee.</div>
+        </details>
+        <details>
+          <summary>How fast do I get my account?</summary>
+          <div class="a">Account creation is fully automated. Your MT5 server, login and password usually
+          appear in your dashboard (and inbox) within a minute of completing checkout.</div>
+        </details>
+        <details>
+          <summary>Is there a limit on how many challenges I can buy?</summary>
+          <div class="a">No. You can run multiple challenges in parallel, and each account is evaluated
+          independently against its own objectives. The fee is one-time per challenge, with no subscriptions
+          or hidden costs.</div>
+        </details>
+      </div>
+      <div class="faq-split-foot">
+        <a class="btn-ghost" href="/faq">View full FAQ</a>
+        <span class="muted">or email <a href="mailto:{{ support_email }}">{{ support_email }}</a></span>
+      </div>
     </div>
-    <p style="text-align:center;margin-top:30px" class="muted" data-rv>
-      More questions? <a href="/faq" style="color:var(--acc-soft)">Read the full FAQ</a> or email
-      <a href="mailto:{{ support_email }}" style="color:var(--acc-soft)">{{ support_email }}</a>.
-    </p>
   </div>
 </section>
 

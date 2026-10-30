@@ -221,15 +221,8 @@ h1,h2,h3,.display{font-family:var(--display);letter-spacing:-.02em}
 .stats-note{text-align:center;font-size:12px;color:var(--dim);padding:0 20px 18px}
 
 /* ---------------- MARQUEE / PLATFORM ---------------- */
-.platform-strip{padding:34px 0 8px;display:flex;align-items:center;justify-content:center;gap:26px;flex-wrap:wrap}
 .platform-badge{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:14px}
 .platform-badge img{height:34px;width:auto;border-radius:8px}
-.market-chips{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
-.market-chips .chip{font-size:12.5px}
-.marquee{overflow:hidden;position:relative;padding:18px 0 8px;
-  mask-image:linear-gradient(90deg,transparent,#000 12%,#000 88%,transparent)}
-.marquee-track{display:flex;gap:38px;width:max-content;animation:mq 38s linear infinite}
-.marquee-track span{font-family:var(--mono);font-size:13.5px;color:var(--dim);letter-spacing:.06em;white-space:nowrap}
 @keyframes mq{to{transform:translateX(-50%)}}
 
 /* ---------------- SECTIONS ---------------- */
@@ -482,6 +475,82 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
 .foot-legal a:hover{color:var(--acc)}
 .foot-bottom{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;
   border-top:1px solid var(--line);margin-top:26px;padding-top:22px;color:var(--dim);font-size:12.5px}
+
+/* ---------------- markets: przesuwające się rzędy kart instrumentów ---------------- */
+.assets .sec-head.how{margin-bottom:36px}
+.assets-side{max-width:420px;display:flex;flex-direction:column;gap:14px;align-items:flex-end}
+.assets-side p{text-align:right;font-size:15.5px;color:var(--muted)}
+.assets-side-row{display:flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:flex-end}
+.assets-rows{display:flex;flex-direction:column;gap:14px;overflow:hidden;padding:6px 0;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent);
+          mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)}
+.assets-row{overflow:hidden}
+.assets-track{display:flex;gap:14px;width:max-content;animation:assets-drift 60s linear infinite}
+.assets-row.rev .assets-track{animation-direction:reverse}
+.assets-rows:hover .assets-track{animation-play-state:paused}
+@keyframes assets-drift{to{transform:translateX(-50%)}}
+.asset{--c:#2b8bff;position:relative;display:grid;grid-template-columns:1fr auto;align-items:end;gap:6px 10px;
+  width:218px;padding:16px 16px 14px;border-radius:18px;background:var(--panel);border:1px solid var(--line);
+  box-shadow:var(--shadow);overflow:hidden;isolation:isolate;color:var(--txt);text-decoration:none;
+  transition:transform .2s,border-color .2s}
+.asset:hover{transform:translateY(-3px);border-color:color-mix(in srgb,var(--c) 55%,var(--line))}
+.asset::after{content:"";position:absolute;inset:auto -20% -60% -20%;height:120%;z-index:-1;border-radius:50%;
+  background:radial-gradient(closest-side,color-mix(in srgb,var(--c) 28%,transparent),transparent 70%);opacity:.9}
+.asset i{grid-column:1/-1;justify-self:center;width:68px;height:68px;margin-bottom:10px;border-radius:50%;display:grid;place-items:center;
+  font:700 22px/1 var(--display);font-style:normal;letter-spacing:-.02em;color:#fff;
+  background:radial-gradient(circle at 35% 30%,color-mix(in srgb,var(--c) 70%,#fff) 0,var(--c) 55%,color-mix(in srgb,var(--c) 55%,#000) 100%);
+  box-shadow:0 10px 24px -10px var(--c),inset 0 1px 0 rgba(255,255,255,.35)}
+.asset b{font-size:14.5px;font-weight:600;color:var(--txt);white-space:nowrap}
+.asset em{font-style:normal;font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.08em;color:var(--muted)}
+.asset[data-c=fx]{--c:#2b8bff}
+.asset[data-c=idx]{--c:#7c6cf6}
+.asset[data-c=metal]{--c:#d4a537}
+.asset[data-c=energy]{--c:#f08a3c}
+.asset[data-c=crypto]{--c:#16b8a6}
+html[data-theme=dark] .asset::after{opacity:1}
+html[data-theme=dark] .asset i{color:#fff}
+.assets-all{margin-top:28px;padding:26px 28px;border-radius:20px;background:var(--panel);border:1px solid var(--line);
+  display:grid;grid-template-columns:repeat(5,1fr);gap:18px}
+.assets-all[hidden]{display:none}
+.assets-group h4{font-family:var(--display);font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:8px}
+.assets-group span{display:block;font-family:var(--mono);font-size:13px;color:var(--txt);padding:3px 0}
+.assets-note{grid-column:1/-1;margin:4px 0 0;font-size:12.5px;color:var(--muted)}
+.assets-note a{color:var(--acc);text-decoration:underline;text-underline-offset:2px}
+@media(prefers-reduced-motion:reduce){
+  .assets-track{animation:none}
+  .assets-row{overflow-x:auto;scrollbar-width:none}
+  .assets-rows{-webkit-mask-image:none;mask-image:none}
+}
+@media(max-width:860px){
+  .assets-side{align-items:flex-start;max-width:560px}
+  .assets-side p{text-align:left}
+  .assets-side-row{justify-content:flex-start}
+  .asset{width:176px;padding:14px 14px 12px}
+  .asset i{width:56px;height:56px;font-size:19px}
+  .assets-all{grid-template-columns:repeat(2,1fr);padding:20px}
+  .assets-track{animation-duration:45s}
+}
+
+/* ---------------- FAQ na landingu: nagłówek z lewej, pytania z liniami z prawej ---------------- */
+.faq-split{display:grid;grid-template-columns:.9fr 1.3fr;gap:56px;align-items:start}
+.faq-split-head h2{display:flex;align-items:center;gap:12px;font-size:clamp(28px,3.6vw,42px);line-height:1.12;margin:16px 0 14px}
+.faq-q{width:26px;height:26px;color:var(--dim);flex:none}
+.faq-split-head p{color:var(--muted);font-size:16.5px;max-width:420px}
+.faq.faq-lines{max-width:none;gap:0;margin:0}
+.faq-lines details{background:transparent;border:0;border-bottom:1px solid var(--line);border-radius:0;box-shadow:none}
+.faq-lines details:first-child{border-top:1px solid var(--line)}
+.faq-lines details[open]{border-color:var(--line)}
+.faq-lines summary{padding:20px 0;font-size:17px}
+.faq-lines summary::after{font-size:24px;font-weight:300;color:var(--muted)}
+.faq-lines details[open] summary::after{color:var(--acc)}
+.faq-lines .a{padding:0 40px 20px 0}
+.faq-split-foot{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:28px;font-size:14px}
+.faq-split-foot .muted{color:var(--muted)}
+.faq-split-foot .muted a{color:var(--acc);text-decoration:underline;text-underline-offset:2px}
+@media(max-width:860px){
+  .faq-split{grid-template-columns:1fr;gap:20px}
+  .faq-lines summary{font-size:15.5px;padding:16px 0}
+}
 
 /* ---------------- newsletter: pasek nad stopką + popup (tokeny motywu: biały w jasnym, granat w ciemnym) ---------------- */
 .nl-sec{padding:0 0 56px}
