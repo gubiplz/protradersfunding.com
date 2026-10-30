@@ -598,9 +598,11 @@ button.status-tap{border:0;cursor:pointer;font-family:inherit}
   .toolbar .tb-filters .count-pill{padding-right:2px}
   /* Bez przesuwanej pigułki (ui-motion.js) w pasku przewijanym palcem: Safari
      przewija go na osobnej warstwie, a pigułka na transformie zostawała w
-     miejscu, gdy chipy jechały w bok. Tło niesie sam wybrany przycisk. */
+     miejscu, gdy chipy jechały w bok. Tło niesie sam wybrany przycisk — to samo
+     ciemne (--pb-ink) co pigułka na desktopie, bo kolor tekstu (--pb-ink-txt)
+     jest dobrany pod nie; jasne --np-pill dawało biały tekst na białym. */
   .toolbar .tb-filters .ui-pill{display:none}
-  .toolbar .tb-filters .seg.has-pill>button.on{background:var(--np-pill)!important;
+  .toolbar .tb-filters .seg.has-pill>button.on{background:var(--pb-ink)!important;
     box-shadow:0 3px 8px rgba(0,0,0,.1),0 3px 1px rgba(0,0,0,.03),0 0 0 .5px rgba(0,0,0,.04)!important}
 }
 

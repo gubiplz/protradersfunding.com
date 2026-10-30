@@ -633,6 +633,9 @@ class Payout(Base):
     # zawsze. Wczesniej jedynym sposobem zdjecia wyplaty ze strony bylo cofniecie
     # certyfikatu, ktore zabijalo tez publiczny link tradera.
     show_on_lp: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Ile z trader_share to zwrot opłaty za challenge (pierwsza wypłata z konta).
+    # trader_share to kwota, która RZECZYWIŚCIE poszła do tradera — zwrot w środku.
+    fee_refund: Mapped[float] = mapped_column(Float, default=0.0)
 
     account: Mapped[Account] = relationship(back_populates="payouts")
 
@@ -655,6 +658,9 @@ class PayoutRequest(Base):
     status: Mapped[str] = mapped_column(String(16), default="pending")
     # Powód odrzucenia — trader widzi go przy wniosku, więc pisany do klienta.
     reject_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Zwrot opłaty za challenge przy pierwszej wypłacie z konta — ustalany w kroku 2
+    # razem z kwotą. Trader dostaje JEDEN przelew: trader_share + fee_refund.
+    fee_refund: Mapped[float] = mapped_column(Float, default=0.0)
 
     account: Mapped[Account] = relationship(back_populates="payout_requests")
 

@@ -201,3 +201,6 @@ html[data-theme=dark] body .prog-bar{background:rgba(255,255,255,.06)}
    oszczędzania baterii; macOS: Zmniejsz przezroczystość) NIE zmienia wyglądu: strona ma
    wyglądać tak samo na każdym komputerze, a tekst i tak leży na ciemnej płycie, więc
    czytelność nie cierpi. Pełne tła zostają tylko dla przeglądarek bez backdrop-filter. */
+
+/* Zwrot opłaty w modalu kwoty wypłaty — jedna suma do przelewu */
+.po-refund{font-size:11.5px;line-height:1.5;color:var(--muted);margin:0 0 10px}

@@ -191,3 +191,83 @@ def test_konto_ktore_stracilo_funded_nie_odblokuje_sie():
         r = c.post(f"/api/admin/payout-requests/{rid}/approve", headers=ADMIN_H)
         assert r.status_code == 400 and "no longer funded" in r.json()["detail"]
         assert _status(rid) == "review"
+
+
+# ---- Zwrot opłaty za challenge w kwocie pierwszej wypłaty (jak w FAQ) ----
+
+def _z_zamowieniem(email, cena=299.0):
+    from app.models import Order
+    aid, h = _funded(email)
+    s = SessionLocal()
+    acc = s.get(Account, aid)
+    s.add(Order(trader_id=acc.trader_id, product_key="2step-50k", amount_usd=cena,
+                status="paid", provider="mock", account_id=aid))
+    s.commit(); s.close()
+    return aid, h
+
+
+def test_usdt_pierwsza_wyplata_niesie_zwrot_w_jednej_kwocie(monkeypatch):
+    from app.models import Payout
+    monkeypatch.setattr(notify, "send", lambda *a, **k: None)
+    aid, h = _z_zamowieniem("de-zwrot-usdt@test.pl")
+    with TestClient(app) as c:
+        konto = next(a for a in c.get("/api/me/accounts", headers=h).json() if a["id"] == aid)
+        assert konto["payout_fee_refund"] == 299.0
+        rid = c.post(f"/api/accounts/{aid}/payout-request", headers=h, json={}).json()["id"]
+        # Admin od początku widzi kwotę ze zwrotem — nawet przed krokiem 2.
+        wiersz = next(w for w in c.get("/api/admin/payouts", headers=ADMIN_H).json()
+                      if w["kind"] == "request" and w["id"] == rid)
+        assert wiersz["fee_refund"] == 299.0 and wiersz["total"] == 800.0 + 299.0
+        c.post(f"/api/admin/payout-requests/{rid}/approve", headers=ADMIN_H)
+        r = c.post(f"/api/me/payout-requests/{rid}/details", headers=h,
+                   json={"amount": 600, **PORTFEL}).json()
+        assert r["fee_refund"] == 299.0 and r["total"] == 899.0
+        wiersz = next(w for w in c.get("/api/admin/payout-requests", headers=ADMIN_H).json()
+                      if w["id"] == rid)
+        assert wiersz["trader_share"] == 600.0 and wiersz["total"] == 899.0
+        d = c.post(f"/api/admin/payout-requests/{rid}/approve", headers=ADMIN_H).json()
+        assert d["total_paid"] == 899.0 and d["fee_refund"] == 299.0
+        hist = c.get("/api/me/payouts", headers=h).json()["history"]
+        assert hist[0]["trader_share"] == 899.0 and hist[0]["fee_refund"] == 299.0
+    s = SessionLocal()
+    try:
+        p = s.query(Payout).filter(Payout.account_id == aid).one()
+        assert p.trader_share == 899.0 and p.fee_refund == 299.0
+        # Saldo schodzi o samą działkę (600 / 0.8) — zwrot to pieniądze firmy.
+        assert s.get(Account, aid).balance == round(KAPITAL + ZYSK - 600 / 0.8, 2)
+        assert s.get(PayoutRequest, rid).fee_refund == 299.0
+    finally:
+        s.close()
+
+
+def test_druga_wyplata_bez_zwrotu(monkeypatch):
+    monkeypatch.setattr(notify, "send", lambda *a, **k: None)
+    monkeypatch.setattr(get_settings(), "payout_interval_days", 0)
+    aid, h = _z_zamowieniem("de-zwrot-drugi@test.pl")
+    with TestClient(app) as c:
+        for oczekiwany in (299.0, 0.0):
+            s = SessionLocal()
+            acc = s.get(Account, aid)
+            acc.balance = acc.equity = KAPITAL + ZYSK
+            s.commit(); s.close()
+            rid = c.post(f"/api/accounts/{aid}/payout-request", headers=h, json={}).json()["id"]
+            c.post(f"/api/admin/payout-requests/{rid}/approve", headers=ADMIN_H)
+            r = c.post(f"/api/me/payout-requests/{rid}/details", headers=h,
+                       json={"amount": 500, **PORTFEL}).json()
+            assert r["fee_refund"] == oczekiwany
+            d = c.post(f"/api/admin/payout-requests/{rid}/approve", headers=ADMIN_H).json()
+            assert d["total_paid"] == 500.0 + oczekiwany
+
+
+def test_issue_payout_admina_tez_dolicza_zwrot(monkeypatch):
+    monkeypatch.setattr(notify, "send", lambda *a, **k: None)
+    aid, h = _z_zamowieniem("de-zwrot-issue@test.pl", cena=549.0)
+    with TestClient(app) as c:
+        karta = c.get(f"/api/admin/accounts/{aid}/payouts", headers=ADMIN_H).json()
+        assert karta["fee_refund"] == 549.0
+        p = c.post(f"/api/admin/accounts/{aid}/payout", headers=ADMIN_H,
+                   json={"amount": 800, "method": "crypto"}).json()
+        assert p["trader_share"] == 1349.0 and p["fee_refund"] == 549.0
+        # Zwrot zużyty — kolejna wypłata z tego konta już go nie niesie.
+        assert c.get(f"/api/admin/accounts/{aid}/payouts",
+                     headers=ADMIN_H).json()["fee_refund"] == 0.0

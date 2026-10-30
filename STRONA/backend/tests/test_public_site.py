@@ -650,3 +650,25 @@ def test_ga4_na_kazdej_stronie_odwiedzajacego_i_poza_panelem(monkeypatch):
         bez = c.get("/payout/ga4-payout-token?bare=1")
         assert bez.status_code == 200 and "G-TESTOWY" not in bez.text, \
             "zrzut dla bota podbija statystyki"
+
+
+def test_okienko_pomocy_na_stronie_i_artykuly_z_faq():
+    """Okienko pomocy jest też na stronie publicznej (gość: Home + Help), a jego
+    artykuły to wszystkie pytania ze strony /faq — z liczbami z katalogu planów
+    i bez HTML-a spoza białej listy."""
+    with TestClient(app) as c:
+        strona = c.get("/").text
+        assert "/static/js/helpdesk.js" in strona and "data-hd-public" in strona
+        r = c.get("/api/help/articles")
+        assert r.status_code == 200
+        arts = r.json()["articles"]
+        faq = c.get("/faq").text
+    assert len(arts) == faq.count("<summary>") and len(arts) >= 20
+    assert len({a["id"] for a in arts}) == len(arts)
+    for a in arts:
+        assert a["title"] and a["body"] and a["category"]
+        assert "<script" not in a["body"] and "{{" not in a["body"] and "onclick" not in a["body"]
+    po_tytule = {a["title"]: a for a in arts}
+    assert "first payout" in po_tytule["When do I get my challenge fee back?"]["body"]
+    # Nieaktualne „3–4" zastąpione liczbami z katalogu (te same co u asystenta).
+    assert "3–4" not in po_tytule["What counts as a trading day?"]["body"]

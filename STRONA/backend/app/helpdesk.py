@@ -168,6 +168,58 @@ def popraw_wiedze(wpisy: list[tuple[str, str]], f: Fakty | None) -> list[tuple[s
     return out
 
 
+_DOZWOLONE = re.compile(r"</?(b|strong|em|i|br)\s*/?>", re.I)
+_LINK = re.compile(r"<a\s+[^>]*href=\"([^\"]*)\"[^>]*>(.*?)</a>", re.I | re.S)
+
+
+def _tresc_artykulu(fragment: str, kontekst: dict) -> str:
+    """HTML odpowiedzi z faq.html do okienka pomocy: zmienne szablonu podstawione,
+    zostają tylko pogrubienia, przełamania i linki (względne, https, mailto)."""
+    fragment = re.sub(r"\{\{\s*(\w+)\s*\}\}", lambda m: html.escape(str(kontekst.get(m.group(1), ""))), fragment)
+    fragment = re.sub(r"\{%.*?%\}", "", fragment, flags=re.S)
+    linki: list[str] = []
+
+    def _link(m):
+        href, tekst = m.group(1), re.sub(r"<[^>]+>", "", m.group(2))
+        if not re.match(r"^(/|https://|mailto:)", href):
+            return tekst
+        cel = ' target="_blank" rel="noopener"' if href.startswith("https://") else ""
+        linki.append(f'<a href="{html.escape(href, quote=True)}"{cel}>{tekst}</a>')
+        return f"\x00{len(linki) - 1}\x00"
+
+    fragment = _LINK.sub(_link, fragment)
+    fragment = _DOZWOLONE.sub(lambda m: "\x01" + m.group(0).lower().replace(" ", "") + "\x01", fragment)
+    fragment = re.sub(r"<[^>]+>", "", fragment)
+    fragment = re.sub(r"\x01(.*?)\x01", r"\1", fragment)
+    fragment = re.sub(r"\x00(\d+)\x00", lambda m: linki[int(m.group(1))], fragment)
+    return re.sub(r"\s+", " ", fragment).strip()
+
+
+def _slug(tekst: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", tekst.lower()).strip("-")[:60]
+
+
+@lru_cache(maxsize=4)
+def artykuly(faq_path: str, site_name: str, support_email: str, f: Fakty | None) -> tuple[dict, ...]:
+    """Artykuły centrum pomocy = WSZYSTKIE pytania ze strony /faq, w kolejności
+    i kategoriach strony. To treść publiczna, więc bez filtra tematów pieniędzy,
+    którego używa asystent. Odpowiedzi niezgodne z kodem (POPRAWKI) dostają
+    wersję z liczbami z katalogu planów — ta sama prawda, którą mówi asystent."""
+    src = Path(faq_path).read_text(encoding="utf-8")
+    kontekst = {"site_name": site_name, "support_email": support_email}
+    kategoria, out = "", []
+    for m in re.finditer(r"<div class=\"faq-cat\">(.*?)</div>|<summary>(.*?)</summary>\s*<div class=\"a\">(.*?)</div>",
+                         src, re.S):
+        if m.group(1) is not None:
+            kategoria = _tekst(m.group(1), kontekst)
+            continue
+        tytul = _tekst(m.group(2), kontekst)
+        klucz = next((k for k in POPRAWKI if tytul.lower().startswith(k)), None)
+        tresc = html.escape(POPRAWKI[klucz](f)) if (klucz and f is not None) else _tresc_artykulu(m.group(3), kontekst)
+        out.append({"id": _slug(tytul), "title": tytul, "category": kategoria, "body": tresc})
+    return tuple(out)
+
+
 def zasady_planow(produkty) -> str:
     """Aktywne plany z katalogu (wiersze `Product`). Podział zysku celowo pominięty:
     to obietnica wypłaty, a o wypłatach rozmawia człowiek."""

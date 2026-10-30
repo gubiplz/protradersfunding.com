@@ -13,6 +13,7 @@
 <link rel="stylesheet" href="/static/css/site-theme.css?v={{ asset_v }}">
 <link rel="stylesheet" href="/static/css/site-glass.css?v={{ asset_v }}">
 <link rel="stylesheet" href="/static/css/theme-cert-site.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/css/helpdesk.css?v={{ asset_v }}" media="print" onload="this.media='all'">
 <script>/* motyw przed pierwszym malowaniem — bez białego błysku; klucz wspólny z portalem */
 try{if(localStorage.getItem('pf_theme2')==='dark')document.documentElement.dataset.theme='dark'}catch(e){}</script>
 <meta property="og:type" content="website">
@@ -209,6 +210,7 @@ ckSpace();addEventListener('resize',ckSpace);addEventListener('load',ckSpace);</
 <script src="/static/lib/ScrollTrigger.min.js" defer></script>
 <script src="/static/js/site.js?v={{ asset_v }}" defer></script>
 <script src="/static/js/site-motion.js?v={{ asset_v }}" defer></script>
+<script src="/static/js/helpdesk.js?v={{ asset_v }}" defer data-hd-public data-site="{{ site_name }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>
