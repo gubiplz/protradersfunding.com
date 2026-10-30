@@ -271,6 +271,11 @@
   })();
 
   /* ---------- markets: klik w kartę = terminal z tym instrumentem (gdy jest), pełna lista pod przyciskiem ---------- */
+  // Przesuwanie rzędów tylko w widoku: poza ekranem animacja stoi (bateria, telefon).
+  const assetsRows = $('.assets-rows');
+  if (assetsRows && 'IntersectionObserver' in window)
+    new IntersectionObserver(es => es.forEach(en => assetsRows.classList.toggle('off', !en.isIntersecting)), { rootMargin: '120px' })
+      .observe(assetsRows);
   $$('.asset[data-sym]').forEach(a => a.addEventListener('click', e => {
     if (typeof window.openTerminal === 'function') { e.preventDefault(); window.openTerminal(a.dataset.sym); }
   }));
