@@ -247,11 +247,14 @@ h1,h2,h3,.display{font-family:var(--display);letter-spacing:-.02em}
 .step:hover{transform:translateY(-4px)}
 .step-num{position:absolute;top:22px;right:24px;z-index:1;font-family:var(--mono);font-size:40px;font-weight:800;
   color:transparent;-webkit-text-stroke:1px rgba(120,170,255,.55)}
-.step-img{margin:12px 12px 0;aspect-ratio:4/3;border-radius:14px;background:#000;overflow:hidden;
-  border:1px solid rgba(120,170,255,.2);box-shadow:inset 0 0 0 1px rgba(0,0,0,.6)}
+/* Rendery mają przezroczyste tło — kafel maluje je motywem: jasna mgiełka w jasnym,
+   granat w ciemnym. Ten sam rozmiar w obu motywach. */
+.step-img{aspect-ratio:4/3;overflow:hidden;border-bottom:1px solid var(--line);
+  background:radial-gradient(70% 70% at 50% 60%,color-mix(in srgb,var(--acc) 16%,transparent),transparent 72%),
+    linear-gradient(180deg,var(--bg3),var(--panel))}
 .step-img img{display:block;width:100%;height:100%;object-fit:cover;transition:transform .5s}
 .step:hover .step-img img{transform:scale(1.03)}
-.step-img.fallback{display:grid;place-items:center;background:linear-gradient(160deg,#0f1a36,#050914)}
+.step-img.fallback{display:grid;place-items:center}
 .step svg.ill{height:46%;width:auto;margin:0}
 .step h3{font-size:17px;line-height:1.3;margin:18px 20px 8px}
 .step p{font-size:13.5px;line-height:1.55;color:var(--muted);margin:0 20px 10px}
@@ -262,7 +265,8 @@ html[data-theme=dark]:root:root body .card.step{background:#0b142c;border-color:
 html[data-theme=dark]:root:root body .card.step:hover{border-color:rgba(120,170,255,.4);box-shadow:0 24px 50px -24px rgba(43,139,255,.45)}
 html[data-theme=dark] .step h3{color:#f2f6ff}
 html[data-theme=dark] .step p{color:#93a3c9}
-html[data-theme=dark] .step-img{margin:0;border-radius:0;border:0;border-bottom:1px solid rgba(120,170,255,.16)}
+html[data-theme=dark] .step-img{border-bottom:1px solid rgba(120,170,255,.16);
+  background:radial-gradient(70% 70% at 50% 60%,rgba(43,139,255,.22),transparent 72%),linear-gradient(180deg,#0a1230,#050914)}
 html[data-theme=dark] .step-num{top:14px;right:18px;-webkit-text-stroke-color:rgba(120,170,255,.35)}
 @media (prefers-reduced-motion:reduce){.step,.step:hover,.step-img img{transform:none;transition:none}}
 
@@ -484,7 +488,8 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
 .assets-rows{display:flex;flex-direction:column;gap:14px;overflow:hidden;padding:6px 0;
   -webkit-mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent);
           mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)}
-.assets-row{overflow:hidden}
+.assets-row{overflow:hidden;padding:4px 0}
+.assets-rows.off .assets-track{animation-play-state:paused}
 .assets-track{display:flex;gap:14px;width:max-content;animation:assets-drift 60s linear infinite}
 .assets-row.rev .assets-track{animation-direction:reverse}
 .assets-rows:hover .assets-track{animation-play-state:paused}
@@ -492,14 +497,27 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
 .asset{--c:#2b8bff;position:relative;display:grid;grid-template-columns:1fr auto;align-items:end;gap:6px 10px;
   width:218px;padding:16px 16px 14px;border-radius:18px;background:var(--panel);border:1px solid var(--line);
   box-shadow:var(--shadow);overflow:hidden;isolation:isolate;color:var(--txt);text-decoration:none;
-  transition:transform .2s,border-color .2s}
-.asset:hover{transform:translateY(-3px);border-color:color-mix(in srgb,var(--c) 55%,var(--line))}
+  transition:border-color .2s,box-shadow .2s}
+/* Hover bez przesuwania: rząd jest przycięty (overflow) i uniesiona karta traciła górną krawędź. */
+.asset:hover{border-color:color-mix(in srgb,var(--c) 60%,var(--line));
+  box-shadow:0 0 0 1px color-mix(in srgb,var(--c) 35%,transparent),0 14px 30px -18px var(--c)}
 .asset::after{content:"";position:absolute;inset:auto -20% -60% -20%;height:120%;z-index:-1;border-radius:50%;
-  background:radial-gradient(closest-side,color-mix(in srgb,var(--c) 28%,transparent),transparent 70%);opacity:.9}
-.asset i{grid-column:1/-1;justify-self:center;width:68px;height:68px;margin-bottom:10px;border-radius:50%;display:grid;place-items:center;
-  font:700 22px/1 var(--display);font-style:normal;letter-spacing:-.02em;color:#fff;
-  background:radial-gradient(circle at 35% 30%,color-mix(in srgb,var(--c) 70%,#fff) 0,var(--c) 55%,color-mix(in srgb,var(--c) 55%,#000) 100%);
-  box-shadow:0 10px 24px -10px var(--c),inset 0 1px 0 rgba(255,255,255,.35)}
+  background:radial-gradient(closest-side,color-mix(in srgb,var(--c) 26%,transparent),transparent 70%)}
+/* ikony: flagi (pary = dwie nachodzące), logotypy monet, sztabki, kropla / płomień */
+.asset .ic{grid-column:1/-1;justify-self:center;position:relative;width:64px;height:64px;margin-bottom:10px;
+  display:grid;place-items:center;font-style:normal}
+.asset .ic img{width:60px;height:60px;border-radius:50%;object-fit:cover;display:block;
+  box-shadow:0 8px 18px -8px rgba(0,0,0,.55),0 0 0 2px var(--panel)}
+.asset .ic.pair img{position:absolute;width:44px;height:44px}
+.asset .ic.pair img:first-child{left:0;top:0;z-index:1}
+.asset .ic.pair img:last-child{right:0;bottom:0}
+.asset .ic.coin img{box-shadow:0 8px 18px -8px rgba(0,0,0,.55)}
+.asset .ic.metal,.asset .ic.energy{width:60px;height:60px;border-radius:50%;margin-top:2px;margin-bottom:12px;
+  box-shadow:0 8px 18px -8px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.35)}
+.asset .ic.metal{background:radial-gradient(circle at 35% 30%,color-mix(in srgb,var(--m) 45%,#fff),var(--m) 70%)}
+.asset .ic.energy{background:radial-gradient(circle at 35% 30%,#ffb46b,#f08a3c 60%,#b85d1c)}
+.asset[data-c=energy] .ic.energy svg path:first-child{fill:#1d1f2a}
+.asset .ic svg{width:38px;height:38px}
 .asset b{font-size:14.5px;font-weight:600;color:var(--txt);white-space:nowrap}
 .asset em{font-style:normal;font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.08em;color:var(--muted)}
 .asset[data-c=fx]{--c:#2b8bff}
@@ -507,8 +525,6 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
 .asset[data-c=metal]{--c:#d4a537}
 .asset[data-c=energy]{--c:#f08a3c}
 .asset[data-c=crypto]{--c:#16b8a6}
-html[data-theme=dark] .asset::after{opacity:1}
-html[data-theme=dark] .asset i{color:#fff}
 .assets-all{margin-top:28px;padding:26px 28px;border-radius:20px;background:var(--panel);border:1px solid var(--line);
   display:grid;grid-template-columns:repeat(5,1fr);gap:18px}
 .assets-all[hidden]{display:none}
@@ -526,7 +542,11 @@ html[data-theme=dark] .asset i{color:#fff}
   .assets-side p{text-align:left}
   .assets-side-row{justify-content:flex-start}
   .asset{width:176px;padding:14px 14px 12px}
-  .asset i{width:56px;height:56px;font-size:19px}
+  .asset .ic{width:54px;height:54px;margin-bottom:8px}
+  .asset .ic img{width:50px;height:50px}
+  .asset .ic.pair img{width:38px;height:38px}
+  .asset .ic.metal,.asset .ic.energy{width:50px;height:50px}
+  .asset .ic svg{width:32px;height:32px}
   .assets-all{grid-template-columns:repeat(2,1fr);padding:20px}
   .assets-track{animation-duration:45s}
 }
@@ -537,9 +557,11 @@ html[data-theme=dark] .asset i{color:#fff}
 .faq-q{width:26px;height:26px;color:var(--dim);flex:none}
 .faq-split-head p{color:var(--muted);font-size:16.5px;max-width:420px}
 .faq.faq-lines{max-width:none;gap:0;margin:0}
-.faq-lines details{background:transparent;border:0;border-bottom:1px solid var(--line);border-radius:0;box-shadow:none}
-.faq-lines details:first-child{border-top:1px solid var(--line)}
-.faq-lines details[open]{border-color:var(--line)}
+/* site-glass maluje .faq details jako szklany panel (:root:root body …) — tu mają być same linie */
+:root:root body .faq-lines details{background:transparent;border:0;border-bottom:1px solid var(--line);border-radius:0;
+  box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}
+:root:root body .faq-lines details:first-child{border-top:1px solid var(--line)}
+:root:root body .faq-lines details[open]{border-color:var(--line)}
 .faq-lines summary{padding:20px 0;font-size:17px}
 .faq-lines summary::after{font-size:24px;font-weight:300;color:var(--muted)}
 .faq-lines details[open] summary::after{color:var(--acc)}
