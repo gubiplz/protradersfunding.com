@@ -222,6 +222,12 @@
        publicznych (sumowane między podstronami w localStorage pf_nl_t), bez
        wcześniejszego wyzwalacza przewijania. Wariant, teksty i wyłącznik
        ustawia admin (Mail → Newsletter → Popup); wyłączony = brak #nlModal. */
+    /* Wejście z linku w mailu newslettera albo ze strony wypisania = ta osoba
+       już jest na liście (albo właśnie z niej zeszła) — popup jej nie zaczepia. */
+    if (/[?&]utm_source=newsletter\b/.test(location.search) || /^\/newsletter\//.test(location.pathname)) {
+      try { localStorage.setItem(NL_KEY, 'done'); } catch (e) {}
+      return;
+    }
     const modal = $('#nlModal'); if (!modal) return;
     let st = null; try { st = localStorage.getItem(NL_KEY); } catch (e) {}
     if (st === 'done' || (st && Date.now() - (+st || 0) < 14 * 864e5)) return;
@@ -250,6 +256,16 @@
       if (allowed && spent >= delay && !shown && !blocked()) show();
     };
     const timer = setInterval(tick, 2000);
+    /* Zalogowany (token portalu w tej przeglądarce): serwer wie, czy jest już
+       zapisany, wypisał się, już kupił albo wyłączył oferty w portalu. */
+    let tok = null; try { tok = localStorage.getItem('pf_token'); } catch (e) {}
+    if (tok) fetch('/api/me/newsletter', { headers: { Authorization: 'Bearer ' + tok } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!d || !(d.subscribed || d.unsubscribed || d.customer || d.marketing === false)) return;
+        shown = true; clearInterval(timer);
+        try { localStorage.setItem(NL_KEY, 'done'); localStorage.removeItem(T_KEY); } catch (e) {}
+      }).catch(() => {});
     document.addEventListener('visibilitychange', () => { last = Date.now(); });
     function show() {
       if (shown) return;

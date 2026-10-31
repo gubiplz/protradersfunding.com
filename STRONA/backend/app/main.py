@@ -3725,6 +3725,25 @@ def newsletter_unsubscribe(token: str, request: Request):
         session.close()
 
 
+@app.get("/api/me/newsletter")
+def my_newsletter(trader: Trader = Depends(auth.current_trader)):
+    """Czy zalogowanemu pokazywać popup newslettera. Popup sam pamięta zapis
+    tylko w tej przeglądarce — ktoś zapisany na telefonie, wypisany, klient,
+    który już kupił, albo ktoś z wyłączonymi ofertami w portalu dostawał go
+    na innym urządzeniu jeszcze raz."""
+    session = SessionLocal()
+    try:
+        sub = (session.query(NewsletterSubscriber)
+               .filter(NewsletterSubscriber.email == (trader.email or "").strip().lower()).first())
+        klient = session.query(Order.id).filter(Order.trader_id == trader.id,
+                                                Order.status == "paid").first() is not None
+        return {"subscribed": bool(sub and not sub.unsubscribed_at),
+                "unsubscribed": bool(sub and sub.unsubscribed_at),
+                "customer": klient, "marketing": bool(getattr(trader, "notify_marketing", True))}
+    finally:
+        session.close()
+
+
 def _newsletter_dict(s: NewsletterSubscriber) -> dict:
     return {"id": s.id, "email": s.email, "source": s.source, "campaign": s.campaign,
             "created_at": s.created_at.isoformat() if s.created_at else None,

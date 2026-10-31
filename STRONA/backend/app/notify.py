@@ -415,7 +415,7 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
                if ctx.get("variant") == "giveaway" else
                f"Your code for {ctx.get('pct', 10):g}% off "
                f"{'every challenge while the flash sale lasts' if ctx.get('variant') == 'flash' else 'your first challenge'}: "
-               f"{ctx.get('code', '')}\nEnter it at checkout: {settings.app_base_url}/#pricing\n\n"
+               f"{ctx.get('code', '')}\nEnter it at checkout: {settings.app_base_url}/?utm_source=newsletter#pricing\n\n"
                if ctx.get("code") else "")
             + f"We send occasional emails about new challenge tiers, promotions and platform updates.\n"
             f"Unsubscribe anytime: {ctx.get('unsubscribe_url', '')}",
@@ -950,7 +950,7 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
         else:
             parts = [_head_html("Newsletter", f"Welcome to the {brand} newsletter",
                                 "Thanks for subscribing.")]
-        parts.append(_button_html("Choose a challenge", f"{settings.app_base_url}/#pricing"))
+        parts.append(_button_html("Choose a challenge", f"{settings.app_base_url}/?utm_source=newsletter#pricing"))
         parts += _tekst_html("We send occasional emails about new challenge tiers, promotions and "
                              "platform updates.")
         parts.append(_unsub_html(ctx.get("unsubscribe_url")))

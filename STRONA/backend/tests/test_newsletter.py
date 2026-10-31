@@ -192,3 +192,32 @@ def test_flash_po_terminie_spada_do_samego_zapisu(monkeypatch):
              "ends_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()}
     oferta = main._nl_oferta(main._nl_czysc(json.loads(json.dumps(stary))))
     assert oferta["variant"] == "updates" and "code" not in oferta
+
+
+def test_zalogowany_zapisany_albo_klient_nie_dostaje_popupu(maile):
+    """Popup pamięta zapis tylko w jednej przeglądarce — dla zalogowanego
+    serwer mówi, czy ta osoba już jest na liście, wypisała się albo kupiła."""
+    from app import auth
+    from app.models import Order, Trader
+    s = SessionLocal()
+    tr = Trader(email="nl-portal@test.pl", password_hash=auth.hash_password("haslo1234"),
+                full_name="Nl Portal", referral_code=auth.secrets.token_hex(3))
+    s.add(tr); s.commit(); tid = tr.id; s.close()
+    h = {"Authorization": f"Bearer {auth.make_token(tid)}"}
+    with TestClient(app) as c:
+        assert c.get("/api/me/newsletter").status_code in (401, 403)
+        d = c.get("/api/me/newsletter", headers=h).json()
+        assert d == {"subscribed": False, "unsubscribed": False, "customer": False, "marketing": True}
+        # Zapis z innego urządzenia (ten sam mail, inna wielkość liter).
+        c.post("/api/newsletter/subscribe", json={"email": "NL-Portal@test.pl", "source": "footer"})
+        assert c.get("/api/me/newsletter", headers=h).json()["subscribed"] is True
+        c.get(f"/newsletter/unsubscribe/{_token('nl-portal@test.pl')}")
+        d = c.get("/api/me/newsletter", headers=h).json()
+        assert d["subscribed"] is False and d["unsubscribed"] is True
+        s = SessionLocal()
+        s.add(Order(trader_id=tid, product_key="2step-50k", amount_usd=299.0, status="paid", provider="mock"))
+        s.commit(); s.close()
+        assert c.get("/api/me/newsletter", headers=h).json()["customer"] is True
+    # Link w mailu powitalnym oznacza wejście z newslettera (site.js nie pokaże popupu).
+    _, body = notify._render("newsletter_welcome", {"code": "WELCOME10", "pct": 10, "unsubscribe_url": "u"})
+    assert "utm_source=newsletter" in body
