@@ -161,8 +161,8 @@ def parse_verify_token(token: str) -> int | None:
 BEZ_BLOKADY = ("/api/auth/me", "/api/auth/logout", "/api/me/kyc",
                "/api/me/tickets", "/api/me/verify-email", "/api/telemetry")
 KYC_BLOKADA = ("Your portal access is paused until we verify your identity. "
-               "Upload your documents in the Verification tab — we review them "
-               "within one business day. Your trading account keeps running.")
+               "Upload your documents in the Verification tab — we e-mail you once "
+               "they are reviewed. Your trading account keeps running.")
 
 
 def portal_wstrzymany(trader: Trader, sciezka: str) -> bool:

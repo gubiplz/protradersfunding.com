@@ -67,7 +67,7 @@ def test_pelna_sciezka_prosba_odblokowanie_kwota_wyplata(monkeypatch):
         assert r.status_code == 200, r.text
         assert r.json()["status"] == "review" and r.json()["available"] == 800.0
         rid = r.json()["id"]
-        assert _otwarty(c, aid, h) == {"id": rid, "status": "review"}
+        assert _otwarty(c, aid, h) == {"id": rid, "status": "review", "amount": 800.0}
         assert maile[-1][0] == "payout_requested" and maile[-1][1].get("review")
 
         # Przed akceptacją admina formularza kwoty nie ma.
@@ -271,3 +271,144 @@ def test_issue_payout_admina_tez_dolicza_zwrot(monkeypatch):
         # Zwrot zużyty — kolejna wypłata z tego konta już go nie niesie.
         assert c.get(f"/api/admin/accounts/{aid}/payouts",
                      headers=ADMIN_H).json()["fee_refund"] == 0.0
+
+
+# ---- Kwota w kroku 1, portfel po akceptacji, zapisany portfel i jego zmiana ----
+
+PORTFEL_2 = {"network": "TRC20", "address": "TXyZ9aB8cD7eF6gH5iJ4kL3mN2pQ1rS0tU"}
+
+
+def _do_kroku_2(c, aid, h, kwota=None):
+    body = {} if kwota is None else {"amount": kwota}
+    r = c.post(f"/api/accounts/{aid}/payout-request", headers=h, json=body)
+    assert r.status_code == 200, r.text
+    rid = r.json()["id"]
+    assert c.post(f"/api/admin/payout-requests/{rid}/approve", headers=ADMIN_H).status_code == 200
+    return rid
+
+
+def _reset_salda(aid):
+    s = SessionLocal()
+    acc = s.get(Account, aid)
+    acc.balance = acc.equity = KAPITAL + ZYSK
+    s.commit(); s.close()
+
+
+def test_kwota_w_kroku_1_i_brak_metody_przed_danymi(monkeypatch):
+    monkeypatch.setattr(notify, "send", lambda *a, **k: None)
+    aid, h = _funded("de-kwota1@test.pl")
+    with TestClient(app) as c:
+        r = c.post(f"/api/accounts/{aid}/payout-request", headers=h, json={"amount": 900})
+        assert r.status_code == 400 and "exceeds" in r.json()["detail"]
+        r = c.post(f"/api/accounts/{aid}/payout-request", headers=h, json={"amount": 300})
+        assert r.status_code == 200 and r.json()["amount"] == 300.0
+        rid = r.json()["id"]
+        wiersz = c.get("/api/me/payouts", headers=h).json()["requests"][0]
+        # Żadnego zgadniętego tokena, zanim trader poda portfel.
+        assert wiersz["method"] == "" and wiersz["trader_share"] == 300.0
+        c.post(f"/api/admin/payout-requests/{rid}/approve", headers=ADMIN_H)
+        # Więcej niż zatwierdzono — nie.
+        r = c.post(f"/api/me/payout-requests/{rid}/details", headers=h,
+                   json={"amount": 400, **PORTFEL})
+        assert r.status_code == 400 and "approved payout" in r.json()["detail"]
+        # Bez kwoty = zatwierdzona.
+        r = c.post(f"/api/me/payout-requests/{rid}/details", headers=h, json=PORTFEL)
+        assert r.status_code == 200 and r.json()["trader_share"] == 300.0
+
+
+def test_portfel_zapisany_po_pierwszej_i_podpowiadany(monkeypatch):
+    maile = []
+    monkeypatch.setattr(notify, "send", lambda ev, to, ctx=None: maile.append((ev, ctx or {})))
+    monkeypatch.setattr(get_settings(), "payout_interval_days", 0)
+    aid, h = _funded("de-portfel@test.pl")
+    with TestClient(app) as c:
+        assert c.get("/api/me/payout-wallet", headers=h).json()["saved"] is False
+        # Przed pierwszą wypłatą nie ma czego zmieniać.
+        r = c.post("/api/me/payout-wallet/code", headers=h, json=PORTFEL_2)
+        assert r.status_code == 400
+        rid = _do_kroku_2(c, aid, h, 500)
+        assert maile[-1][0] == "payout_unlocked" and not maile[-1][1]["saved_wallet"]
+        r = c.post(f"/api/me/payout-requests/{rid}/details", headers=h, json={"use_saved": True})
+        assert r.status_code == 400 and "no saved wallet" in r.json()["detail"]
+        assert c.post(f"/api/me/payout-requests/{rid}/details", headers=h,
+                      json=PORTFEL).status_code == 200
+        portfel = c.get("/api/me/payouts", headers=h).json()["wallet"]
+        assert portfel["saved"] and portfel["address"] == PORTFEL["address"]
+        assert portfel["network"] == "TRC20"
+        c.post(f"/api/admin/payout-requests/{rid}/approve", headers=ADMIN_H)
+
+        # Druga wypłata: mail mówi „confirm", zapisany portfel przechodzi bez kodu.
+        _reset_salda(aid)
+        rid = _do_kroku_2(c, aid, h, 500)
+        assert maile[-1][0] == "payout_unlocked" and maile[-1][1]["saved_wallet"]
+        r = c.post(f"/api/me/payout-requests/{rid}/details", headers=h, json={"use_saved": True})
+        assert r.status_code == 200, r.text
+        lista = c.get("/api/admin/payout-requests", headers=ADMIN_H).json()
+        assert next(w for w in lista if w["id"] == rid)["wallet_new"] is False
+
+
+def test_zmiana_portfela_tylko_z_kodem(monkeypatch):
+    maile = []
+    monkeypatch.setattr(notify, "send", lambda ev, to, ctx=None: maile.append((ev, ctx or {})))
+    monkeypatch.setattr(get_settings(), "payout_interval_days", 0)
+    aid, h = _funded("de-zmiana@test.pl")
+    with TestClient(app) as c:
+        rid = _do_kroku_2(c, aid, h, 500)
+        c.post(f"/api/me/payout-requests/{rid}/details", headers=h, json=PORTFEL)
+        c.post(f"/api/admin/payout-requests/{rid}/approve", headers=ADMIN_H)
+        _reset_salda(aid)
+        rid = _do_kroku_2(c, aid, h, 500)
+
+        # Inny portfel bez kodu: odmowa, wniosek dalej czeka.
+        r = c.post(f"/api/me/payout-requests/{rid}/details", headers=h, json=PORTFEL_2)
+        assert r.status_code == 400 and "6-digit code" in r.json()["detail"]
+        assert _status(rid) == "unlocked"
+        # Kod idzie mailem i jest przypięty do konkretnego adresu.
+        assert c.post("/api/me/payout-wallet/code", headers=h,
+                      json=PORTFEL).status_code == 400          # to już zapisany
+        assert c.post("/api/me/payout-wallet/code", headers=h,
+                      json=PORTFEL_2).status_code == 200
+        ev, ctx = maile[-1]
+        assert ev == "payout_wallet_code" and ctx["address"] == PORTFEL_2["address"]
+        kod = ctx["code"]
+        zly = "000000" if kod != "000000" else "111111"
+        r = c.post(f"/api/me/payout-requests/{rid}/details", headers=h,
+                   json={**PORTFEL_2, "code": zly})
+        assert r.status_code == 400
+        r = c.post(f"/api/me/payout-requests/{rid}/details", headers=h,
+                   json={**PORTFEL_2, "code": kod})
+        assert r.status_code == 200, r.text
+        assert c.get("/api/me/payout-wallet", headers=h).json()["address"] == PORTFEL_2["address"]
+        wiersz = next(w for w in c.get("/api/admin/payouts", headers=ADMIN_H).json()
+                      if w["kind"] == "request" and w["id"] == rid)
+        assert wiersz["wallet_new"] is True
+        # Zużytego kodu nie da się użyć drugi raz (ustawienia).
+        r = c.post("/api/me/payout-wallet", headers=h, json={**PORTFEL, "code": kod})
+        assert r.status_code == 400
+
+
+def test_zmiana_portfela_z_ustawien_i_wygasly_kod(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    maile = []
+    monkeypatch.setattr(notify, "send", lambda ev, to, ctx=None: maile.append((ev, ctx or {})))
+    aid, h = _funded("de-ustawienia@test.pl")
+    with TestClient(app) as c:
+        rid = _do_kroku_2(c, aid, h, 500)
+        c.post(f"/api/me/payout-requests/{rid}/details", headers=h, json=PORTFEL)
+        c.post("/api/me/payout-wallet/code", headers=h, json=PORTFEL_2)
+        kod = maile[-1][1]["code"]
+        # Kod na PORTFEL_2 nie przepuści innego adresu.
+        inny = {"network": "BEP20", "address": "0x" + "ab" * 20}
+        assert c.post("/api/me/payout-wallet", headers=h,
+                      json={**inny, "code": kod}).status_code == 400
+        s = SessionLocal()
+        tr = s.query(Trader).filter(Trader.email == "de-ustawienia@test.pl").one()
+        tr.payout_wallet_code_exp = (datetime.now(timezone.utc).replace(tzinfo=None)
+                                     - timedelta(minutes=1))
+        s.commit(); s.close()
+        assert c.post("/api/me/payout-wallet", headers=h,
+                      json={**PORTFEL_2, "code": kod}).status_code == 400
+        c.post("/api/me/payout-wallet/code", headers=h, json=PORTFEL_2)
+        kod = maile[-1][1]["code"]
+        r = c.post("/api/me/payout-wallet", headers=h, json={**PORTFEL_2, "code": kod})
+        assert r.status_code == 200 and r.json()["address"] == PORTFEL_2["address"]

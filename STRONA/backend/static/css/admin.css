@@ -95,6 +95,9 @@ html[data-theme=dark]{
 /* Add-on Express Payout: wniosek opłacony $49 ma być widoczny w kolejce od progu */
 .express-pill{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.4px;color:#f59e0b;
   border:1px solid #f59e0b;border-radius:6px;padding:1px 5px;vertical-align:1px}
+/* Portfel inny niż przy poprzedniej wypłacie tego tradera — sygnał ryzyka. */
+.wallet-new{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.3px;color:var(--red,#ef4444);
+  border:1px solid currentColor;border-radius:6px;padding:1px 5px;vertical-align:1px;margin-left:4px}
 
 /* mini bars inside table rows */
 .mini{height:5px;border-radius:99px;background:var(--bg3);overflow:hidden;min-width:78px}

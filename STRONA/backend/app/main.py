@@ -1885,7 +1885,8 @@ def my_accounts(trader: Trader = Depends(auth.current_trader)):
             paid[p.account_id] = paid.get(p.account_id, 0.0) + p.trader_share
         # Otwarty wniosek per konto — portal zamiast „Request payout" pokazuje
         # „w przeglądzie" albo, po odblokowaniu, formularz kwoty i portfela.
-        otwarte = {r.account_id: {"id": r.id, "status": r.status} for r in (
+        otwarte = {r.account_id: {"id": r.id, "status": r.status,
+                                  "amount": round(r.trader_share or 0, 2)} for r in (
             session.query(PayoutRequest)
             .filter(PayoutRequest.account_id.in_([a.id for a in accs]),
                     PayoutRequest.status.in_(PAYOUT_OTWARTE)).all() if accs else [])}
@@ -2099,7 +2100,7 @@ def _kwota_wyplaty(acc: Account, amount: float | None) -> float:
 
 @app.post("/api/accounts/{account_id}/payout-request")
 def request_payout(account_id: int, trader: Trader = Depends(auth.current_trader),
-                   payload: PayoutReqIn | None = None):  # body opcjonalny — krok 1 nic z niego nie bierze
+                   payload: PayoutReqIn | None = None):  # body opcjonalny — bez kwoty = cała działka
     session = SessionLocal()
     try:
         acc = session.get(Account, account_id)
@@ -2126,23 +2127,27 @@ def request_payout(account_id: int, trader: Trader = Depends(auth.current_trader
         if tr.kyc_status != "approved":
             raise HTTPException(403, "Complete KYC verification first")
         # Wypłaty on-demand: JEDEN otwarty wniosek na konto. Drugi „pending" to
-        # niemal zawsze dubel z niecierpliwości — przegląd trwa do 24 h i dubel
-        # tylko rozjeżdża księgowanie (dwa wnioski na ten sam zysk).
+        # niemal zawsze dubel z niecierpliwości — dubel tylko rozjeżdża
+        # księgowanie (dwa wnioski na ten sam zysk).
         otwarty = (session.query(PayoutRequest)
                    .filter(PayoutRequest.account_id == acc.id,
                            PayoutRequest.status.in_(PAYOUT_OTWARTE)).first())
         if otwarty:
             raise HTTPException(400, "A payout request for this account is already under review")
         profit = _zysk_do_wyplaty(acc)
-        # Krok 1 z 2 — dla USDT i dla testowego vUSDT: sama prośba, bez kwoty
-        # i portfela. Admin ogląda konto; kwotę i adres trader poda dopiero po
-        # odblokowaniu (POST /api/me/payout-requests/{id}/details). Próg minimum
-        # sprawdzamy już teraz — wniosek, z którego i tak nie da się wypłacić,
-        # nie powinien czekać na przegląd.
-        available = _kwota_wyplaty(acc, None)
-        method = "vusdt" if vusdt.enabled() else "usdt"
+        # Krok 1 z 2 — dla USDT i dla testowego vUSDT: trader podaje samą KWOTĘ
+        # (bez kwoty = cała działka). Admin ogląda konto, historię i KYC; portfel
+        # trader poda (albo potwierdzi zapisany) dopiero po akceptacji
+        # (POST /api/me/payout-requests/{id}/details). Progi minimum sprawdzamy
+        # już teraz — wniosek, z którego i tak nie da się wypłacić, nie powinien
+        # czekać na przegląd.
+        share = _kwota_wyplaty(acc, payload.amount if payload else None)
+        # Metoda zostaje PUSTA do kroku 2. Wcześniej wpisywaliśmy tu „vusdt"
+        # z flagi środowiska, więc trader widział vUSDT na wniosku, zanim podał
+        # jakikolwiek adres — a odrzucony na przeglądzie wniosek zostawał z tym
+        # napisem na zawsze. Kolumna jest NOT NULL, stąd "" zamiast None.
         pr = PayoutRequest(account_id=acc.id, trader_id=tr.id, profit_amount=profit,
-                           trader_share=available, method=method, details=None,
+                           trader_share=share, method="", details=None,
                            status="review")
         session.add(pr)
         try:
@@ -2151,18 +2156,25 @@ def request_payout(account_id: int, trader: Trader = Depends(auth.current_trader
             session.rollback()
             raise HTTPException(400, "A payout request for this account is already under review")
         notify.send("payout_requested", tr.email, {"name": tr.full_name or tr.email,
-                    "login": acc.login, "review": True})
-        notify.notify_admins("admin_payout", f"Payout request to review ({acc.login})", tr.email)
-        return {"id": pr.id, "profit_amount": profit, "available": available,
+                    "login": acc.login, "review": True, "amount": f"${share:,.0f}"})
+        notify.notify_admins("admin_payout",
+                             f"Payout request ${share:,.0f} to review ({acc.login})", tr.email)
+        return {"id": pr.id, "profit_amount": profit, "available": share, "amount": share,
                 "status": "review"}
     finally:
         session.close()
 
 
 class PayoutDetailsIn(BaseModel):
-    amount: float = Field(allow_inf_nan=False)
+    # Kwotę trader podał w kroku 1 i ją zatwierdzono. Tu może ją najwyżej
+    # zmniejszyć; brak kwoty = zatwierdzona (przycięta do salda na teraz).
+    amount: float | None = Field(default=None, allow_inf_nan=False)
     network: str = Field(default="", max_length=20)
     address: str = Field(default="", max_length=120)
+    # True = wyślij na zapisany portfel (podpowiadany od drugiej wypłaty).
+    use_saved: bool = False
+    # Kod z maila — wymagany, gdy podany portfel różni się od zapisanego.
+    code: str = Field(default="", max_length=6)
     # Tryb testowy vUSDT: token z widgetu Cloudflare Turnstile w modalu kroku 2.
     turnstile_token: str | None = Field(default=None, max_length=2048)
 
@@ -2174,21 +2186,120 @@ class PayoutDetailsIn(BaseModel):
         return v
 
 
+def _teraz_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _portfel_czysty(network: str, address: str, testowy: bool) -> dict:
+    """Waliduje portfel w trybie wypłat, który działa TERAZ, i zwraca
+    {network, address} w postaci do zapisu (sieć wielkimi literami, adres
+    vUSDT z sumą kontrolną)."""
+    if testowy:
+        try:
+            d = json.loads(vusdt.details_json({"network": network, "address": address}))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    else:
+        d = json.loads(_payout_details_json("usdt", {"network": network, "address": address}))
+    return {"network": d["network"], "address": d["address"]}
+
+
+def _ten_sam_portfel(a: dict | None, b: dict | None) -> bool:
+    if not a or not b or (a.get("network") or "").upper() != (b.get("network") or "").upper():
+        return False
+    x, y = str(a.get("address") or ""), str(b.get("address") or "")
+    # Adresy 0x nie rozróżniają wielkości liter (suma kontrolna to tylko zapis),
+    # base58 (TRC-20) już tak.
+    return x.lower() == y.lower() if x.lower().startswith("0x") else x == y
+
+
+def _zapisany_portfel(tr: Trader) -> dict | None:
+    if not tr.payout_address:
+        return None
+    return {"network": tr.payout_network or "", "address": tr.payout_address}
+
+
+def _kod_portfela_ok(tr: Trader, nowy: dict, code: str) -> None:
+    """Zmiana zapisanego portfela: kod z maila, ważny 15 min, przypięty do
+    TEGO adresu, o który trader prosił — inny adres z tym kodem nie przejdzie."""
+    try:
+        czekajacy = json.loads(tr.payout_wallet_new or "null")
+    except ValueError:
+        czekajacy = None
+    wygasa = tr.payout_wallet_code_exp
+    if wygasa is not None and wygasa.tzinfo:
+        wygasa = wygasa.replace(tzinfo=None)
+    if not (code and tr.payout_wallet_code
+            and secrets.compare_digest(code.strip(), tr.payout_wallet_code)
+            and wygasa and wygasa > _teraz_naive()
+            and _ten_sam_portfel(czekajacy, nowy)):
+        raise HTTPException(400, "This wallet is different from your saved one. Confirm the "
+                                 "change with the 6-digit code we e-mail you.")
+
+
+def _zapisz_portfel(tr: Trader, portfel: dict) -> None:
+    tr.payout_network = portfel["network"]
+    tr.payout_address = portfel["address"]
+    tr.payout_wallet_at = _teraz_naive()
+    tr.payout_wallet_new = tr.payout_wallet_code = tr.payout_wallet_code_exp = None
+
+
+def _portfel_widok(tr: Trader) -> dict:
+    z = _zapisany_portfel(tr)
+    return {"saved": bool(z), "network": z["network"] if z else None,
+            "address": z["address"] if z else None,
+            "updated_at": tr.payout_wallet_at.isoformat() if z and tr.payout_wallet_at else None,
+            # Token, w którym wyjdzie NASTĘPNA wypłata — portal pisze z tego etykiety.
+            "token": "vUSDT" if vusdt.enabled() else "USDT"}
+
+
+def _siec_wniosku(r: PayoutRequest) -> str | None:
+    try:
+        return (json.loads(r.details) or {}).get("network") if r.details else None
+    except ValueError:
+        return None
+
+
+def _nowe_portfele(session, rows) -> set[int]:
+    """Wnioski, których portfel różni się od portfela z poprzedniego wniosku
+    tego samego tradera — sygnał ryzyka dla admina („New wallet")."""
+    traderzy = {r.trader_id for r in rows if r.details}
+    if not traderzy:
+        return set()
+    historia: dict[int, list[tuple[int, dict]]] = {}
+    for r in (session.query(PayoutRequest)
+              .filter(PayoutRequest.trader_id.in_(traderzy), PayoutRequest.details.isnot(None))
+              .order_by(PayoutRequest.id).all()):
+        try:
+            d = json.loads(r.details) or {}
+        except ValueError:
+            continue
+        historia.setdefault(r.trader_id, []).append((r.id, d))
+    out = set()
+    for wpisy in historia.values():
+        for (_, poprzedni), (rid, biezacy) in zip(wpisy, wpisy[1:]):
+            if not _ten_sam_portfel(poprzedni, biezacy):
+                out.add(rid)
+    return out
+
+
 @app.post("/api/me/payout-requests/{req_id}/details")
 def submit_payout_details(req_id: int, payload: PayoutDetailsIn, request: Request,
                           trader: Trader = Depends(auth.current_trader)):
-    """Krok 2 z 2: po odblokowaniu przez admina trader wybiera kwotę i podaje
-    portfel. Kwotę liczymy od salda TERAZ, nie z chwili prośby — trader mógł
-    w międzyczasie handlować. Przy vUSDT (flaga testowa) podpisujemy transfer
-    od razu; przy zwykłym USDT wniosek czeka na „Mark as paid" admina."""
+    """Krok 2 z 2: po akceptacji admina trader podaje dane płatnicze — pierwszy
+    raz nowy portfel (zapisujemy go), przy kolejnych potwierdza zapisany albo
+    zmienia go kodem z maila. Kwota to ta zatwierdzona, przycięta do salda NA
+    TERAZ — trader mógł w międzyczasie handlować. Przy vUSDT (flaga testowa)
+    podpisujemy transfer od razu; przy zwykłym USDT wniosek czeka na
+    „Mark as paid" admina."""
     session = SessionLocal()
     try:
         pr = session.get(PayoutRequest, req_id)
         if not pr or pr.trader_id != trader.id:
             raise HTTPException(404, "Payout request not found")
         if pr.status == "review":
-            raise HTTPException(400, "Your request is still being reviewed. You can choose the "
-                                     "amount and wallet once it is approved.")
+            raise HTTPException(400, "Your request is still being reviewed. You can add your "
+                                     "payment details once it is approved.")
         if pr.status != "unlocked":
             raise HTTPException(400, "This payout request is no longer waiting for details")
         acc = session.get(Account, pr.account_id)
@@ -2198,20 +2309,33 @@ def submit_payout_details(req_id: int, payload: PayoutDetailsIn, request: Reques
         if tr.kyc_status != "approved":
             raise HTTPException(403, "Complete KYC verification first")
         profit = _zysk_do_wyplaty(acc)
-        share = _kwota_wyplaty(acc, payload.amount)
+        zatwierdzona = float(math.floor(pr.trader_share or 0))
+        if payload.amount is None:
+            share = _kwota_wyplaty(acc, min(zatwierdzona, math.floor(_payout_available(acc))))
+        else:
+            share = _kwota_wyplaty(acc, payload.amount)
+            if share > zatwierdzona:
+                raise HTTPException(400, f"The amount exceeds the approved payout "
+                                         f"(${zatwierdzona:,.0f})")
         testowy = vusdt.enabled()
+        zapisany = _zapisany_portfel(tr)
+        if payload.use_saved:
+            if not zapisany:
+                raise HTTPException(400, "There is no saved wallet yet. Enter your wallet address.")
+            portfel = _portfel_czysty(zapisany["network"], zapisany["address"], testowy)
+        else:
+            portfel = _portfel_czysty(payload.network, payload.address, testowy)
+            if zapisany and not _ten_sam_portfel(portfel, zapisany):
+                if payload.code:
+                    _rate_limit(request, "payout_wallet_try", 10, 600)
+                _kod_portfela_ok(tr, portfel, payload.code)
         if testowy:
-            try:
-                details_json = vusdt.details_json({"network": payload.network,
-                                                   "address": payload.address})
-            except ValueError as e:
-                raise HTTPException(400, str(e))
             if not vusdt.verify_turnstile(payload.turnstile_token, _client_ip(request)):
                 raise HTTPException(400, "Captcha verification failed. Complete the check again.")
+            details_json = vusdt.details_json(portfel)
             method = "vusdt"
         else:
-            details_json = _payout_details_json("usdt", {"network": payload.network,
-                                                         "address": payload.address})
+            details_json = json.dumps(portfel)
             method = "usdt"
         # Zwrot opłaty przy pierwszej wypłacie jest częścią kwoty wypłaty — ustalamy
         # go tu, razem z kwotą, żeby trader i admin widzieli jedną sumę do przelewu.
@@ -2226,11 +2350,15 @@ def submit_payout_details(req_id: int, payload: PayoutDetailsIn, request: Reques
                           synchronize_session=False))
         if not zajete:
             raise HTTPException(400, "This payout request is no longer waiting for details")
+        # Pierwsza wypłata zapisuje portfel, zmiana (już po kodzie) go podmienia —
+        # kolejna wypłata dostanie go podpowiedziany.
+        if not _ten_sam_portfel(portfel, zapisany):
+            _zapisz_portfel(tr, portfel)
         if testowy:
             # Zwrot jedzie w tym samym transferze — wniosek rozlicza się sam po
             # potwierdzeniu na łańcuchu.
             session.add(VusdtTransfer(payout_request_id=pr.id,
-                                      address=json.loads(details_json)["address"],
+                                      address=portfel["address"],
                                       amount_units=vusdt.to_units(share + zwrot)))
         session.commit()
         total = round(share + zwrot, 2)
@@ -2247,6 +2375,71 @@ def submit_payout_details(req_id: int, payload: PayoutDetailsIn, request: Reques
             notify.notify_admins("admin_payout",
                                  f"Payout ${total:,.2f} USDT to send ({acc.login})", tr.email)
         return out
+    finally:
+        session.close()
+
+
+class PortfelIn(BaseModel):
+    network: str = Field(default="", max_length=20)
+    address: str = Field(default="", max_length=120)
+    code: str = Field(default="", max_length=6)
+
+
+@app.get("/api/me/payout-wallet")
+def my_payout_wallet(trader: Trader = Depends(auth.current_trader)):
+    session = SessionLocal()
+    try:
+        return _portfel_widok(session.get(Trader, trader.id))
+    finally:
+        session.close()
+
+
+@app.post("/api/me/payout-wallet/code")
+def payout_wallet_code(payload: PortfelIn, request: Request,
+                       trader: Trader = Depends(auth.current_trader)):
+    """Kod do zmiany zapisanego portfela. Portfel zapisuje się przy pierwszej
+    wypłacie — dodać go wcześniej się nie da, bo nie ma do czego go przypiąć."""
+    _rate_limit(request, "payout_wallet_code", 5, 600)
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader.id)
+        zapisany = _zapisany_portfel(tr)
+        if not zapisany:
+            raise HTTPException(400, "Your wallet is saved with your first approved payout — "
+                                     "there is nothing to change yet.")
+        nowy = _portfel_czysty(payload.network, payload.address, vusdt.enabled())
+        if _ten_sam_portfel(nowy, zapisany):
+            raise HTTPException(400, "This is already your saved wallet.")
+        kod = f"{secrets.randbelow(1_000_000):06d}"
+        tr.payout_wallet_new = json.dumps(nowy)
+        tr.payout_wallet_code = kod
+        tr.payout_wallet_code_exp = _teraz_naive() + timedelta(minutes=15)
+        session.commit()
+        notify.send("payout_wallet_code", tr.email, {
+            "name": tr.full_name or tr.email, "code": kod,
+            "network": nowy["network"], "address": nowy["address"]})
+        return {"sent": True}
+    finally:
+        session.close()
+
+
+@app.post("/api/me/payout-wallet")
+def change_payout_wallet(payload: PortfelIn, request: Request,
+                         trader: Trader = Depends(auth.current_trader)):
+    """Zmiana zapisanego portfela z ustawień — ten sam kod co w kroku 2 wypłaty."""
+    _rate_limit(request, "payout_wallet_try", 10, 600)
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader.id)
+        if not _zapisany_portfel(tr):
+            raise HTTPException(400, "Your wallet is saved with your first approved payout — "
+                                     "there is nothing to change yet.")
+        nowy = _portfel_czysty(payload.network, payload.address, vusdt.enabled())
+        _kod_portfela_ok(tr, nowy, payload.code)
+        _zapisz_portfel(tr, nowy)
+        session.commit()
+        notify.notify_admins("admin_payout", "Payout wallet changed", tr.email)
+        return _portfel_widok(tr)
     finally:
         session.close()
 
@@ -3000,20 +3193,21 @@ def my_payouts(trader: Trader = Depends(auth.current_trader)):
                 "total_paid": round(sum(p.trader_share for p in pays), 2),
                 "pending": sum(1 for r in reqs if r.status in PAYOUT_OTWARTE),
                 "available": round(available, 2),
-                # Harmonogram wypłat = on-demand z przeglądem do 24 h; portal
-                # pisze to zdanie z tej liczby, nie z zaszytego stringa.
-                "review_hours": 24,
                 # 0 = on demand; inaczej co ile dni konto może złożyć wniosek.
+                # Czasu przeglądu celowo NIE podajemy — strona nie obiecuje terminów.
                 "interval_days": settings.payout_interval_days,
             },
+            # Zapisany portfel — krok 2 podpowiada go od drugiej wypłaty.
+            "wallet": _portfel_widok(session.get(Trader, trader.id)),
             "requests": [{"id": r.id, "ts": r.ts.isoformat(),
                           "account": by_id[r.account_id].login if r.account_id in by_id else "?",
                           "profit_amount": r.profit_amount, "trader_share": r.trader_share,
                           **_zwrot_wniosku(session, r, by_id.get(r.account_id)),
-                          "method": r.method, "status": r.status,
+                          # Metoda istnieje dopiero z danymi płatniczymi (krok 2) —
+                          # wcześniej portal pokazuje „—", a nie zgadnięty token.
+                          "method": r.method if r.details else "",
+                          "network": _siec_wniosku(r), "status": r.status,
                           "express": bool(by_id[r.account_id].express_payout) if r.account_id in by_id else False,
-                          "expected_by": ((r.ts + timedelta(hours=24)).isoformat()
-                                          if r.status in ("review", "pending") else None),
                           "reject_reason": r.reject_reason,
                           "vusdt": vusdt.view(vusdt_tx[r.id]) if r.id in vusdt_tx else None}
                          for r in reqs],
@@ -4582,6 +4776,7 @@ def admin_payout_requests():
         # przy 300 wnioskach.
         konta = _konta_po_id(session, (r.account_id for r in rows))
         maile = _maile_traderow(session, (r.trader_id for r in rows))
+        nowe = _nowe_portfele(session, rows)
         out = []
         for r in rows:
             acc = konta.get(r.account_id)
@@ -4594,6 +4789,7 @@ def admin_payout_requests():
                         "trader_email": tr_email, "profit_amount": r.profit_amount,
                         "trader_share": r.trader_share, **_zwrot_wniosku(session, r, acc),
                         "method": r.method, "details": details,
+                        "wallet_new": r.id in nowe,
                         "status": r.status, "reject_reason": r.reject_reason,
                         "express": bool(acc.express_payout) if acc else False,
                         "ts": r.ts.isoformat()})
@@ -4675,6 +4871,7 @@ def admin_payouts_all():
                 .order_by(PayoutRequest.id.desc()).all())
         konta = _konta_po_id(session, (r.account_id for r in reqs))
         maile = _maile_traderow(session, (r.trader_id for r in reqs))
+        nowe = _nowe_portfele(session, reqs)
         for r in reqs:
             acc = konta.get(r.account_id)
             tr_email = maile.get(r.trader_id)
@@ -4691,6 +4888,7 @@ def admin_payouts_all():
                 "profit_amount": r.profit_amount, "trader_share": r.trader_share,
                 **_zwrot_wniosku(session, r, acc),
                 "method": r.method, "details": details,
+                "wallet_new": r.id in nowe,
                 "status": r.status, "reject_reason": r.reject_reason,
                 "note": None, "cert_url": None,
                 "express": bool(acc.express_payout) if acc else False,
@@ -4904,7 +5102,9 @@ def _odblokuj_wyplate(session, r: PayoutRequest) -> dict:
     tr = session.get(Trader, r.trader_id)
     if tr:
         notify.send("payout_unlocked", tr.email, {"name": tr.full_name or tr.email,
-                    "login": acc.login})
+                    "login": acc.login, "amount": f"${float(r.trader_share or 0):,.0f}",
+                    "token": "vUSDT" if vusdt.enabled() else "USDT",
+                    "saved_wallet": bool(_zapisany_portfel(tr))})
     return {"unlocked": r.id}
 
 
@@ -13433,7 +13633,9 @@ def _page(request: Request, template: str, **extra):
            "clarity_id": settings.clarity_project_id, "promo": _promo_ctx(),
            "bogo_promo": _bogo_promo_active(),
            "google_client_id": settings.google_client_id,
-           "vusdt_test": vusdt.public_config(), **extra}
+           "vusdt_test": vusdt.public_config(),
+           # Wiersz „Reward frequency" w tabelach zasad: 0 = on demand.
+           "payout_days": settings.payout_interval_days, **extra}
     return jinja.TemplateResponse(request, template, ctx)
 
 
@@ -13521,7 +13723,7 @@ def contact_page(request: Request):
     for a in arts:
         if a["category"] not in kategorie:
             kategorie.append(a["category"])
-    popularne_klucze = ["how do i start", "how fast do i get", "how do payouts work", "when do i get my challenge fee",
+    popularne_klucze = ["how do i start", "when do i get my mt5", "how do payouts work", "when do i get my challenge fee",
                         "how is the daily loss", "what if i fail"]
     popularne = [next((a for a in arts if a["title"].lower().startswith(k)), None) for k in popularne_klucze]
     return _page(request, "contact.html", kategorie=kategorie,

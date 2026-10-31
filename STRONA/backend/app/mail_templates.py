@@ -56,14 +56,14 @@ WBUDOWANE: list[tuple[str, str, str, str, str]] = [
      "licence) and your address.\n\n"
      "Upload it in the portal under KYC:\n\n"
      "{portal_url}\n\n"
-     "We review requests within one business day and confirm by e-mail.\n\n"
+     "We review every submission and confirm the result by e-mail.\n\n"
      "--\nSupport · {support_email}"),
 
     ("ptf-payout-approved", PTF, "Payout approved",
      "Your payout has been approved",
      "Hi {name},\n\n"
-     "Your payout request has been approved. The transfer goes out within the "
-     "next business days to the details you gave in the portal.\n\n"
+     "Your payout request has been approved. The transfer goes out to the "
+     "payment details you confirmed in the portal.\n\n"
      "Trading on the account continues as normal — the approved amount is "
      "already deducted from the balance you see.\n\n"
      "You can check the status any time here:\n\n"

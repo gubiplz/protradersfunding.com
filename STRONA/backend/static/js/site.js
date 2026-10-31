@@ -459,7 +459,7 @@
       ['Maximum total drawdown', p.max_overall_loss_pct + '%'],
       ['Drawdown type', 'Balance-based'],
       ['Minimum trading days', p.min_trading_days + ' days before first payout'],
-      ['Reward frequency', 'Every 7 days'],
+      ['Reward frequency', czestotliwoscWyplat()],
       ['Profit split', p.profit_split_pct + '%'],
       ['Max open volume', p.max_lots + ' lots'],
       ['Weekend trading', wkVal],
@@ -472,7 +472,7 @@
       ['Maximum total drawdown', p.max_overall_loss_pct + '%'],
       ['Drawdown type', 'Balance-based'],
       ['Minimum trading days', p.min_trading_days + ' days per phase, and before your first payout'],
-      ['Reward frequency', 'Bi-weekly'],
+      ['Reward frequency', czestotliwoscWyplat()],
       ['Profit split', 'Up to ' + p.profit_split_pct + '%'],
       ['Max open volume', p.max_lots + ' lots'],
       ['Fee refund', '<span class="ok">✓ With your first payout</span>'],
@@ -549,7 +549,7 @@
       ['Maximum overall loss', r2.max_overall_loss_pct + '%', ...col(ri && ri.max_overall_loss_pct + '%')],
       ['Drawdown type', 'Balance-based', ...col('Balance-based')],
       ['Minimum trading days before first payout', r2.min_trading_days + ' days', ...col(ri && ri.min_trading_days + ' days')],
-      ['Reward frequency', 'Bi-weekly', ...col('Every 7 days')],
+      ['Reward frequency', czestotliwoscWyplat(), ...col(czestotliwoscWyplat())],
       ['News trading', '<span class="ok">✓ Allowed</span>', ...col('<span class="ok">✓ Allowed</span>')],
       ['Weekend trading', '$199 add-on', ...col('$199 add-on')],
       /* Oba modele dostaja 1:100, bo z taka dzwignia provisioning ZAKLADA konta
@@ -987,3 +987,11 @@
   $$('.stat-num[data-count]').forEach(countUp);
   stats(); products(); certsStrip();
 })();
+
+/* „Reward frequency" z ustawienia serwera (PAYOUT_INTERVAL_DAYS przez
+   data-payout-days na <body>): to zasada dla tradera — co ile dni może złożyć
+   wniosek — a nie obietnica terminu wypłaty. 0 = on demand. */
+function czestotliwoscWyplat() {
+  const d = +(document.body && document.body.dataset.payoutDays || 0);
+  return d > 0 ? `Every ${d} days between requests` : 'On demand';
+}

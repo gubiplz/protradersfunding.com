@@ -205,16 +205,31 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
         ),
         "payout_requested": (
             f"Payout request received ({login})",
-            (f"{name}, we received your payout request. Our team is reviewing the account now. "
-             f"Once it is approved, you choose the amount and your USDT wallet in the dashboard.")
+            (f"{name}, we received your payout request"
+             f"{' for ' + str(ctx.get('amount')) if ctx.get('amount') else ''}. Our team is "
+             f"reviewing the account, its trading history and your verification. We will "
+             f"e-mail you once it is approved — then you add your payment details in the "
+             f"dashboard.")
             if ctx.get("review") else
             (f"{name}, we registered your payout request for {ctx.get('trader_share')} "
              f"(profit {ctx.get('profit_amount')}). Status: under review."),
         ),
         "payout_unlocked": (
-            f"Payout approved: choose your amount ({login})",
-            f"{name}, your payout request for account {login} has been approved. Open your "
-            f"dashboard, choose the amount and enter your USDT wallet address to receive it.",
+            f"Payout approved: add your payment details ({login})",
+            f"{name}, your payout request"
+            f"{' for ' + str(ctx.get('amount')) if ctx.get('amount') else ''} on account "
+            f"{login} has been approved — your reward is confirmed. Open your dashboard and "
+            f"{'confirm' if ctx.get('saved_wallet') else 'add'} the {ctx.get('token') or 'USDT'} "
+            f"wallet we should send it to. The transfer starts once you confirm it.",
+        ),
+        "payout_wallet_code": (
+            f"{ctx.get('code')} is your {brand} wallet change code",
+            f"Hi {name},\n\nSomeone (hopefully you) asked to change the payout wallet on your "
+            f"{brand} account to:\n\n  {ctx.get('network')} {ctx.get('address')}\n\n"
+            f"  Confirmation code: {ctx.get('code')}\n\n"
+            f"Enter the code in the portal to confirm the change. The code is valid for "
+            f"15 minutes. If this wasn't you, don't share the code — change your password "
+            f"and contact support.",
         ),
         "payout_approved": (
             f"Payout approved 🤑 ({login})",
@@ -259,8 +274,8 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"{name}, "
             + ("we need to confirm who you are before you keep using the "
                "portal. Your trading account keeps running as normal — the "
-               "dashboard is paused until we have checked your documents, and "
-               "we do that within one business day."
+               "dashboard is paused until we have checked your documents. We "
+               "e-mail you once they are reviewed."
                if ctx.get("locked") else
                "identity verification is now open on your account — it is "
                "the step we need before we can send you a payout.")
@@ -681,8 +696,10 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
         parts = [
             _head_html("Payout", "Payout request received",
                        f"{name}, we received your payout request. Our team is reviewing the "
-                       f"account now. Once it is approved, you choose the amount and your USDT "
-                       f"wallet in the dashboard."),
+                       f"account, its trading history and your verification. We will e-mail you "
+                       f"once it is approved — then you add your payment details in the "
+                       f"dashboard."),
+            *([_stat_html("Requested", str(ctx["amount"]))] if ctx.get("amount") else []),
             _button_html("View Payouts", f"{portal}?view=payouts"),
         ]
     elif event == "payout_requested":
@@ -697,9 +714,26 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
     elif event == "payout_unlocked":
         parts = [
             _head_html("Payout", "Your payout is approved",
-                       f"{name}, your payout request for account {login} has been approved. "
-                       f"Choose the amount and enter your USDT wallet address to receive it."),
-            _button_html("Choose amount & wallet", f"{portal}?view=payouts"),
+                       f"{name}, your payout request for account {login} has been approved — "
+                       f"your reward is confirmed. "
+                       f"{'Confirm' if ctx.get('saved_wallet') else 'Add'} the "
+                       f"{ctx.get('token') or 'USDT'} wallet we should send it to; the transfer "
+                       f"starts once you confirm it."),
+            *([_stat_html("Approved payout", str(ctx["amount"]))] if ctx.get("amount") else []),
+            _button_html("Confirm payment details" if ctx.get("saved_wallet")
+                         else "Add payment details", f"{portal}?view=payouts"),
+        ]
+    elif event == "payout_wallet_code":
+        parts = [
+            _head_html("Security", "Confirm your new payout wallet",
+                       f"Hi {name}, someone (hopefully you) asked to change the payout wallet "
+                       f"on your {brand} account to "
+                       f"{html.escape(str(ctx.get('network') or ''))} "
+                       f"{html.escape(str(ctx.get('address') or ''))}."),
+            _stat_html("Confirmation code", str(ctx.get("code") or "")),
+            _note_html("Enter the code in the portal to confirm the change. It is valid for "
+                       "15 minutes. If this wasn't you, don't share the code — change your "
+                       "password and contact support."),
         ]
     elif event == "payout_approved":
         parts = [
@@ -739,8 +773,8 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                        if zablokowany else "One step left before your payout",
                        (f"{name}, we need to confirm who you are before you keep "
                         f"using the portal. Your trading account keeps running as "
-                        f"normal — only the dashboard is paused, and we review "
-                        f"documents within one business day."
+                        f"normal — only the dashboard is paused. We e-mail you "
+                        f"once your documents are reviewed."
                         if zablokowany else
                         f"{name}, identity verification is now open on your account "
                         f"— it is the last thing we need before sending you money.")

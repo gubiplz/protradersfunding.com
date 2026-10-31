@@ -259,7 +259,7 @@
       : '';
     var wiadomosc = '<button type="button" class="hd-card hd-row" onclick="hdNewChat()">'
       + '<span><b>Send us a message</b><small>' + (zalogowany()
-        ? 'The AI assistant replies instantly, our team within hours'
+        ? 'The AI assistant replies instantly, our team follows up when needed'
         : 'Sign in to chat with our assistant and support team') + '</small></span>'
       + '<span class="hd-ic">' + WYSLIJ + '</span></button>';
     var pop = ARTS ? popularne() : [];

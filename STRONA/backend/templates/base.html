@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{% block title %}{{ site_name }} — Prop Trading Challenges on Real MT5 Accounts{% endblock %}</title>
-<meta name="description" content="{% block description %}Trade our simulated capital on a real MetaTrader 5 account, with sizes up to $2,000,000. Pass the evaluation, get funded and keep up to 90% of the rewards. Clear rules, automated risk engine, credentials in minutes.{% endblock %}">
+<meta name="description" content="{% block description %}Trade our simulated capital on a real MetaTrader 5 account, with sizes up to $2,000,000. Pass the evaluation, get funded and keep up to 90% of the rewards. Clear rules, automated risk engine, automated account delivery.{% endblock %}">
 <link rel="icon" href="/static/img/favicon.png" type="image/png">
 <link rel="preload" href="/static/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/space-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin>
@@ -44,7 +44,7 @@ if(localStorage.getItem('pf_promo_code')||localStorage.getItem('pf_coupon_code')
 }catch(e){}
 </script>{% endif %}
 </head>
-<body>
+<body data-payout-days="{{ payout_days or 0 }}">
 
 {% if bogo_promo %}
 {# BOGO wins over the code promo — one bar, one message. No form and no code:

@@ -1720,14 +1720,18 @@ function renderPayoutsView(){
       <td data-l="Trader">${esc(r.trader_email||'—')}${freeChip(r)}</td>
       <td class="num" data-l="Profit">$${fmt(r.profit_amount)}</td><td class="num up" data-l="Amount" data-sort="${r.total??r.trader_share}">$${fmt(r.total??r.trader_share)}${r.fee_refund?`<div class="muted" style="font-size:var(--fs-cap);font-weight:400">incl. $${fmt(r.fee_refund)} fee refund</div>`:''}</td>
       <td data-l="Method">${(()=>{const d=r.details||{};
+        /* Wniosek bez danych płatniczych (przegląd / czeka na tradera) nie ma
+           jeszcze metody — „—" zamiast zgadniętego USDT. */
+        if(r.kind==='request'&&!d.address)return '<span class="muted">—</span>';
         const label=r.method==='usdt'?'USDT':r.method==='vusdt'?'vUSDT':r.method==='wise'?'Wise':'Bank';
-        if(r.method==='usdt'||r.method==='vusdt')return esc(label)+payAddrHtml(d.network,d.address);
+        const nowy=r.wallet_new?' <span class="wallet-new" title="Different from the wallet on this trader\'s previous payout">New wallet</span>':'';
+        if(r.method==='usdt'||r.method==='vusdt')return esc(label)+nowy+payAddrHtml(d.network,d.address);
         const info=r.method==='wise'?(d.email||'')
           :[d.holder,d.iban,d.swift,d.bank_name].filter(Boolean).join(' · ');
         return `${esc(label)}${info?`<div class="muted mono" style="font-size:var(--fs-cap);max-width:260px;word-break:break-all">${esc(info)}</div>`:''}`})()}</td>
       <td data-l="Status"><span class="status ${r.status==='paid'?'paid':(r.status==='pending'||r.status==='review')?'pending'
         :(r.status==='approved'||r.status==='unlocked')?'active':'failed'}"><span class="dot"></span>${
-        esc(r.kind!=='request'?r.status:r.status==='review'?'to review':r.status==='unlocked'?'awaiting trader'
+        esc(r.kind!=='request'?r.status:r.status==='review'?'to review':r.status==='unlocked'?'awaiting payment details'
           :r.status==='pending'&&r.method==='usdt'?'to send':r.status)}</span>
         ${r.status==='rejected'&&r.reject_reason?`<div class="muted" style="font-size:var(--fs-cap);max-width:200px">${esc(r.reject_reason)}</div>`:''}</td>
       <td class="rt-acts" style="white-space:nowrap">${r.kind!=='payout'?'<span class="muted">—</span>'
@@ -4823,7 +4827,7 @@ async function rejectPayout(id,btn){
 async function unlockPayout(id,btn){
   await busy(btn,null,async()=>{
     try{await api(`/api/admin/payout-requests/${id}/approve`,{method:'POST'});
-      toast('Approved. The trader now chooses the amount and USDT wallet.','ok');go('payouts');
+      toast('Approved. The trader now adds or confirms the payment details.','ok');go('payouts');
     }catch(e){toast('Error: '+e.message,'err')}
   });
 }
