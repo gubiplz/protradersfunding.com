@@ -27,13 +27,17 @@ function pigulka(seg,animuj=true){
   if(!p){p=document.createElement('span');p.className='ui-pill';p.setAttribute('aria-hidden','true');seg.prepend(p);seg.classList.add('has-pill')}
   const cel={x:on.offsetLeft,y:on.offsetTop,w:on.offsetWidth,h:on.offsetHeight};
   const k=kluczSeg(seg),byl=p.dataset.x!=null?{x:+p.dataset.x,y:+p.dataset.y,w:+p.dataset.w,h:+p.dataset.h}:pamiec.get(k);
-  const ustaw=r=>{p.style.transform=`translate(${r.x}px,${r.y}px)`;p.style.width=r.w+'px';p.style.height=r.h+'px'};
+  /* Pozycja przez left/top, NIE transform: na telefonie pasek filtrów przewija
+     się palcem w bok, a Safari kładzie element z transformem na osobnej warstwie
+     — pigułka zostawała w miejscu, gdy chipy jechały (stąd kiedyś była wyłączona
+     na telefonie i wybór przeskakiwał bez animacji). left/top jedzie z treścią. */
+  const ustaw=r=>{p.style.left=r.x+'px';p.style.top=r.y+'px';p.style.width=r.w+'px';p.style.height=r.h+'px'};
   p.style.opacity='1';
   if(animuj&&byl&&!RM()&&(byl.x!==cel.x||byl.y!==cel.y||byl.w!==cel.w)){
     p.getAnimations().forEach(a=>a.cancel());
-    p.animate([{transform:`translate(${byl.x}px,${byl.y}px)`,width:byl.w+'px',height:byl.h+'px'},
-               {transform:`translate(${cel.x}px,${cel.y}px)`,width:cel.w+'px',height:cel.h+'px'}],
-              {duration:520,easing:SPRING});
+    p.animate([{left:byl.x+'px',top:byl.y+'px',width:byl.w+'px',height:byl.h+'px'},
+               {left:cel.x+'px',top:cel.y+'px',width:cel.w+'px',height:cel.h+'px'}],
+              {duration:matchMedia('(max-width:640px)').matches?420:520,easing:SPRING});
   }
   ustaw(cel);
   Object.assign(p.dataset,{x:cel.x,y:cel.y,w:cel.w,h:cel.h});

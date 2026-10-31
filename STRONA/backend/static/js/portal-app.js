@@ -3505,31 +3505,26 @@ function openBuy(key){
           autocomplete="off" spellcheck="false"
           value="${esc(new URLSearchParams(location.search).get('coupon')||pfCoupon()||(p.promo_upgrade_size?pfPromo():''))}"
           oninput="codeInput()">
-        <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
+        <label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
           <input type="checkbox" id="c-weekend" onchange="quoteRefresh(true)"
-            ${new URLSearchParams(location.search).get('wt')==='1'?'checked':''}
-            style="width:15px;height:15px;accent-color:var(--acc)">
+            ${new URLSearchParams(location.search).get('wt')==='1'?'checked':''}>
           <span><b>Weekend Trading</b> — 2 extra trading days/week <b>+$199</b></span>
         </label>
-        ${p.steps===0?`<label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
-          <input type="checkbox" id="c-boost" onchange="quoteRefresh(true)"
-            style="width:15px;height:15px;accent-color:var(--acc)">
+        ${p.steps===0?`<label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
+          <input type="checkbox" id="c-boost" onchange="quoteRefresh(true)">
           <span><b>Profit Split Boost</b> — keep ${Math.min(100,(p.profit_split_pct||70)+10)}% instead of ${p.profit_split_pct||70}% <b>+$149</b></span>
         </label>`:''}
-        <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
-          <input type="checkbox" id="c-express" onchange="quoteRefresh(true)"
-            style="width:15px;height:15px;accent-color:var(--acc)">
+        <label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
+          <input type="checkbox" id="c-express" onchange="quoteRefresh(true)">
           <span><b>Express Payout</b> — your payout requests jump the review queue <b>+$49</b></span>
         </label>
-        ${p.copytrading_offered?`<label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
+        ${p.copytrading_offered?`<label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
           <input type="checkbox" id="c-copy" onchange="quoteRefresh(true)"
-            ${new URLSearchParams(location.search).get('ct')==='1'?'checked':''}
-            style="width:15px;height:15px;accent-color:var(--acc)">
+            ${new URLSearchParams(location.search).get('ct')==='1'?'checked':''}>
           <span><b>Copytrading</b> — copy trades between your own accounts, trade from more than one device <b>+$${fmt(p.copytrading_fee_usd||299)}</b></span>
         </label>`:''}
-        ${ME.credits_usd>0?`<label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
-          <input type="checkbox" id="c-usecr" checked onchange="quoteRefresh(true)"
-            style="width:15px;height:15px;accent-color:var(--acc)">
+        ${ME.credits_usd>0?`<label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
+          <input type="checkbox" id="c-usecr" checked onchange="quoteRefresh(true)">
           <span><b>Use my store credit</b> — $${fmt(ME.credits_usd)} available, 1 credit = $1</span>
         </label>`:''}
         <p id="buy-err" class="form-err hidden"></p>

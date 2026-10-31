@@ -101,6 +101,20 @@ html[data-theme=dark] .sec-card,html[data-theme=dark] .tbl-wrap,html[data-theme=
 .switch input:checked+i::after{transform:translateX(20px)}
 .switch input:focus-visible+i{outline:2px solid var(--acc);outline-offset:2px}
 
+/* ---------- checkboxy: ten sam wygląd co w popupie newslettera na stronie ----------
+   Zaokrąglony kwadrat, wypełnienie akcentem i biały ptaszek (SVG w tle — Firefox
+   nie rysuje ::after na <input>). Ramka stoi przy PIERWSZEJ linii etykiety:
+   etykiety mają align-items:flex-start, a margines wyrównuje kwadrat do linii. */
+input[type=checkbox]:not(.switch>input){appearance:none;-webkit-appearance:none;width:18px!important;height:18px!important;
+  flex:none;margin:max(0px,calc((1lh - 18px)/2)) 0 0;border-radius:5px;border:1.5px solid var(--line2,var(--line));
+  background:var(--panel) center/11px no-repeat;cursor:pointer;vertical-align:-4px;
+  transition:background-color .15s,border-color .15s}
+input[type=checkbox]:not(.switch>input):checked{background-color:var(--acc);border-color:var(--acc);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.4 6.3 5 8.7l4.6-5.2' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")}
+input[type=checkbox]:not(.switch>input):disabled{opacity:.45;cursor:not-allowed}
+input[type=checkbox]:not(.switch>input):focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.ck{display:flex;align-items:flex-start;gap:10px;font-size:13px;line-height:1.45;color:var(--muted);cursor:pointer}
+
 /* ---------- toasty: kapsułka z ikoną, sprężyna na wejściu i wyjściu ---------- */
 #toasts{right:20px;bottom:20px;gap:8px;align-items:flex-end}
 .toast{display:flex;align-items:center;gap:11px;border:0;border-radius:18px;padding:12px 18px 12px 12px;
