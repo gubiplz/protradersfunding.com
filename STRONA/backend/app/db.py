@@ -279,6 +279,24 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "payout_ready_at": "TIMESTAMP",
         "phase_started_at": "TIMESTAMP",
         "prev_phase_started_at": "TIMESTAMP",
+        "terminal_used": "BOOLEAN DEFAULT FALSE",
+        "terminal_open": "BOOLEAN DEFAULT FALSE",
+        "terminal_sync_at": "TIMESTAMP",
+        "terminal_eval_at": "TIMESTAMP",
+    },
+    # Pozycje z terminala PTF dzielą tabelę z Trade BOT-em (portal czyta jedną).
+    "trades": {
+        "venue": "VARCHAR(16)",
+        "qty": "FLOAT",
+        "leverage": "FLOAT",
+        "margin": "FLOAT",
+        "tp": "FLOAT",
+        "sl": "FLOAT",
+        "liq_price": "FLOAT",
+        "fee": "FLOAT",
+        "slippage": "FLOAT",
+        "close_reason": "VARCHAR(16)",
+        "tpsl_at": "TIMESTAMP",
     },
     # Karta leada na kanale. Tabela `leads` stoi na produkcji od pierwszego
     # zgloszenia, wiec `create_all` ja pomija — bez tych wpisow kazdy SELECT

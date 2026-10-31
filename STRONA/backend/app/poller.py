@@ -13,14 +13,14 @@ import random
 import time
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from .config import get_settings
 from .db import SessionLocal
 from .feed import Feed, make_feed
 from .models import Account, AppSetting, Breach, EquitySnapshot, Trade
-from . import catalog, notify, provisioning, push, rules, tradebot
+from . import catalog, notify, provisioning, push, rules, terminal, tradebot
 from .rules import AccountRuntime, EquityTick, Phase, Status
 
 # Plan skalowania kont funded: po +SCALE_TRIGGER% trader WYBIERA — wypłata albo
@@ -325,10 +325,16 @@ def _notify(acc: Account, event: str, extra: dict | None = None) -> None:
 
 async def process_account(session, acc: Account, feed: Feed) -> None:
     bot_driven = bool(getattr(acc, "bot_enabled", False))
+    # Konto handlowało w terminalu PTF: saldo prowadzi nasza księga, feed
+    # (np. losowy spacer `sim`) nie może go nadpisać.
+    ksiega = bool(getattr(acc, "terminal_used", False))
+    najnizsze = None
     if bot_driven:
         # Gałąź MUSI być przed feed.snapshot: MetaQuotesWebFeed odpala w tle
         # logowanie do web terminala już przy samym zapytaniu o snapshot.
         snap = tradebot.tick(session, acc)
+    elif ksiega:
+        snap = None
     elif (not getattr(acc, "mt5_backed", True)
           and settings.feed in ("metaquotes_web", "metaapi")):
         # Poświadczenia wygenerowane lokalnie — na MT5 takiego rachunku nie ma,
@@ -338,6 +344,8 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
     else:
         snap = await feed.snapshot(acc.login, acc.metaapi_account_id, acc.initial_balance,
                                    password=acc.platform_password, server=acc.platform_server)
+    if ksiega:
+        snap, najnizsze = terminal.snapshot_for(session, acc, snap)
     if snap is None:
         return
 
@@ -357,7 +365,13 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
         days_elapsed=(datetime.now(timezone.utc) - (acc.started_at.replace(tzinfo=timezone.utc) if acc.started_at.tzinfo is None else acc.started_at)).days,
     )
 
-    res = rules.evaluate(cfg, rt, tick)
+    # Dołek equity między przeglądami terminala (świece 1m) też może złamać
+    # limit — sprawdzany na kopii stanu, więc bez breachu nic nie zmienia.
+    dolek = terminal.evaluate_low(cfg, rt, tick, najnizsze) if ksiega else None
+    if dolek is not None:
+        res, rt = dolek
+    else:
+        res = rules.evaluate(cfg, rt, tick)
     _write_runtime(acc, rt)
 
     # snapshot do wykresu
@@ -379,6 +393,9 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
             # floatingu (tą samą mechaniką co `tradebot.stop`), a bota gasimy:
             # inaczej po ręcznym wskrzeszeniu konta zjazd ruszyłby od nowa.
             tradebot.stop(session, acc)
+        if ksiega:
+            # Pozycje z terminala zamykamy po bieżących cenach, zlecenia znikają.
+            terminal.flatten(session, acc, "breach")
         maid = acc.metaapi_account_id
         login, pw = acc.platform_login, acc.platform_password
         session.commit()
@@ -747,7 +764,10 @@ async def tick_ryzyka(min_odstep_s: float = 20.0) -> dict:
     start = time.monotonic()
     session = SessionLocal()
     try:
-        konta = (_active_query(session).filter(Account.metaapi_account_id.isnot(None))
+        # Plus konta z otwartymi pozycjami/zleceniami w terminalu PTF: ich TP/SL,
+        # limity i dzienna strata też mają być zauważone w minutach.
+        konta = (_active_query(session)
+                 .filter(or_(Account.metaapi_account_id.isnot(None), Account.terminal_open.is_(True)))
                  .order_by(Account.id).all())
         # Rotacja: przebieg przerwany budżetem czasu zaczyna następnym razem od
         # konta, na którym stanął — inaczej ogon listy nie byłby liczony nigdy.

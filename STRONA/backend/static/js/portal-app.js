@@ -340,8 +340,10 @@ const NAV=[
   /* Support nie ma już pozycji w menu: pomoc to dymek czatu (helpdesk.js). */
   {v:'settings',label:'Settings',ico:'gear'},
 ];
-$('side-nav').innerHTML='<div class="side-sec sb-txt">Main menu</div>'+NAV.map(n=>
-  `<button class="sb-link" data-v="${n.v}" onclick="go('${n.v}')" title="${n.label}">${ICO[n.ico]}<span class="sb-txt">${n.label}</span></button>`).join('')+
+/* Terminal /trade to osobna strona (pełny ekran), więc link, nie widok SPA — zaraz pod Challenges. */
+$('side-nav').innerHTML='<div class="side-sec sb-txt">Main menu</div>'+NAV.map((n,i)=>
+  `<button class="sb-link" data-v="${n.v}" onclick="go('${n.v}')" title="${n.label}">${ICO[n.ico]}<span class="sb-txt">${n.label}</span></button>`+
+  (i===0?`<a class="sb-link" href="/trade" title="Trade">${ICO.bars}<span class="sb-txt">Trade</span></a>`:'')).join('')+
   `<a class="sb-link" href="/academy" target="_blank" rel="noopener" title="Academy">${ICO.book}<span class="sb-txt">Academy</span></a>`;
 
 /* ---------- mobile tab bar + "More" sheet ---------- */
@@ -759,7 +761,8 @@ async function boot(){
     $('auth').classList.remove('hidden');$('app').classList.add('hidden');
     /* Wejscie z cennika (?buy=) to najczesciej NOWY klient — startujemy od
        rejestracji i mowimy wprost, ze zamowienie czeka tuz za tym krokiem. */
-    authTab(q0.get('buy')?'signup':'login');
+    /* ?signup=1 — „Sign Up" z terminala /trade: też od razu rejestracja. */
+    authTab(q0.get('buy')||q0.get('signup')?'signup':'login');
     if(q0.get('buy'))$('auth-buynote').classList.remove('hidden');
     loadAuthStats();return}
   _expired=false; /* świeże logowanie — łapacz 401 znowu uzbrojony */

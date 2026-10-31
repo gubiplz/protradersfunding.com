@@ -442,6 +442,17 @@ class Account(Base):
     # takie konto dostaje realny rachunek MT5 i realny odczyt equity.
     copytrading: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # --- Terminal PTF (zakładka Trade) ---
+    # `terminal_used`: konto handlowało w terminalu, więc jego saldo prowadzi
+    # NASZA księga (`trades` z source='terminal') — feed nie może go nadpisać.
+    # `terminal_open`: są otwarte pozycje albo zlecenia oczekujące; po tym
+    # tick ryzyka wybiera konta do przeliczenia co minutę.
+    # `terminal_sync_at`: do której chwili przejrzano świece 1m (TP/SL/limity).
+    terminal_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    terminal_open: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    terminal_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    terminal_eval_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     # --- Trade BOT (admin) ---
     # Gdy wlaczony, konto NIE jest czytane z MT5 — snapshoty generuje tradebot.py.
     bot_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -590,6 +601,46 @@ class Trade(Base):
     # w bazie, zeby restart nie przerywal transakcji w polowie.
     plan_pnl: Mapped[float] = mapped_column(Float, default=0.0)
     plan_close_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # --- Pozycje z terminala PTF (source='terminal') ---
+    # Ilość w jednostkach bazowych (BTC, uncje, baryłki); `lots` = qty / kontrakt
+    # i to ona idzie do limitu lotów. `pnl` zamkniętej jest NETTO (po opłatach),
+    # więc suma `pnl` zgadza się z ruchem salda; `fee` to opłaty z obu stron.
+    venue: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    qty: Mapped[float | None] = mapped_column(Float, nullable=True)
+    leverage: Mapped[float | None] = mapped_column(Float, nullable=True)
+    margin: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tp: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sl: Mapped[float | None] = mapped_column(Float, nullable=True)
+    liq_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fee: Mapped[float | None] = mapped_column(Float, nullable=True)
+    slippage: Mapped[float | None] = mapped_column(Float, nullable=True)   # % od mid przy wejściu
+    close_reason: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Od kiedy obowiązują bieżące TP/SL — świece sprzed tej chwili ich nie wyzwalają.
+    tpsl_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class TerminalOrder(Base):
+    """Zlecenie z terminala PTF: rynkowe (od razu wypełnione, zostaje jako
+    historia), limit i stop (czekają, aż świeca 1m przetnie cenę)."""
+    __tablename__ = "terminal_orders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    symbol: Mapped[str] = mapped_column(String(16))
+    side: Mapped[str] = mapped_column(String(4))                 # buy|sell
+    kind: Mapped[str] = mapped_column(String(8))                 # market|limit|stop
+    qty: Mapped[float] = mapped_column(Float)
+    price: Mapped[float | None] = mapped_column(Float, nullable=True)   # limit albo trigger stopu
+    leverage: Mapped[float] = mapped_column(Float, default=1.0)
+    tp: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sl: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reduce_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String(10), default="open", index=True)  # open|filled|cancelled|rejected
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    done_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    fill_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    trade_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    note: Mapped[str | None] = mapped_column(String(160), nullable=True)
 
 
 class Certificate(Base):

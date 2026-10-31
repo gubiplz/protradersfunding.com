@@ -49,6 +49,7 @@ from . import (achievements, auth, billing, catalog, certshot, contentbot, count
                poller, provisioning, push, rules, sms, telegram, telemetry, tradebot, zamki)
 from . import vusdt
 from . import helpdesk
+from . import markets, terminal
 from .config import get_settings
 from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint, zamek_migracji
 from .models import (LEAD_LOST_STATUSES, LEAD_STATUSES, LOST_REASONS,
@@ -371,6 +372,8 @@ async def lifespan(app: FastAPI):
 # wystawialoby cala mape API kazdemu.
 app = FastAPI(title=f"{settings.site_name} API", version="0.7.0", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
+# Terminal PTF (zakładka Trade): zlecenia, pozycje, login danymi MT5.
+app.include_router(terminal.router)
 
 
 @app.exception_handler(StaleDataError)
@@ -438,7 +441,7 @@ def robots():
 @app.get("/sitemap.xml", include_in_schema=False)
 def sitemap(request: Request):
     base = _public_base(request)
-    paths = ["/", "/objectives", "/faq", "/contact", "/academy", "/affiliate", "/install", "/verify",
+    paths = ["/", "/objectives", "/trade", "/faq", "/contact", "/academy", "/affiliate", "/install", "/verify",
              "/terms", "/privacy", "/risk-disclosure", "/refund-policy"]
     urls = "".join(f"<url><loc>{base}{p}</loc></url>" for p in paths)
     return Response('<?xml version="1.0" encoding="UTF-8"?>'
@@ -13922,6 +13925,19 @@ def home(request: Request):
 @app.get("/faq")
 def faq_page(request: Request):
     return _page(request, "faq.html")
+
+
+@app.get("/trade")
+@app.get("/trade/{symbol}")
+def trade_page(request: Request, symbol: str = "BTCUSD"):
+    """Terminal PTF. Symbol spoza listy (np. AUDUSD z landingu) otwiera BTCUSD
+    z informacją, że ten rynek jest na razie tylko w MT5."""
+    m = markets.get(symbol)
+    # `</` w JSON-ie zamknąłby <script> — nazwy rynków go nie mają, ale bez ryzyka.
+    lista = json.dumps(markets.public_list()).replace("</", "<\\/")
+    return _page(request, "trade.html", symbol=m.sym if m else "BTCUSD",
+                 missing_symbol=None if m else symbol.upper()[:16],
+                 market_name=m.name if m else "Bitcoin", markets_json=lista)
 
 
 @app.get("/contact")

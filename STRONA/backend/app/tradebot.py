@@ -641,8 +641,9 @@ def set_target(session, acc: Account, target_pct: float,
 
 
 def _open_trade(session, acc: Account) -> Trade | None:
+    # Tylko pozycje bota: te z terminala PTF prowadzi terminal.py.
     return (session.query(Trade)
-            .filter(Trade.account_id == acc.id, Trade.status == "open")
+            .filter(Trade.account_id == acc.id, Trade.status == "open", Trade.source == "bot")
             .order_by(Trade.id.desc()).first())
 
 
@@ -807,7 +808,7 @@ def _should_open(session, acc: Account, p: Persona, balance: float, now: datetim
 
     # 3) odstep po ostatniej transakcji
     last = (session.query(Trade)
-            .filter(Trade.account_id == acc.id, Trade.status == "closed")
+            .filter(Trade.account_id == acc.id, Trade.status == "closed", Trade.source == "bot")
             .order_by(Trade.id.desc()).first())
     if last is not None and last.closed_at is not None:
         # Przerwa to reszta cyklu po odjeciu czasu, ktory pozycja FAKTYCZNIE
