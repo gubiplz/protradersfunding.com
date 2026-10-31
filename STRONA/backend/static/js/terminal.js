@@ -103,15 +103,37 @@
   }
 
   /* ---------- menu rozwijane ---------- */
+  /* Menu stoi w pozycji `fixed` względem ekranu: paski z przewijaniem w bok
+     (narzędzia wykresu, pasek rynku, zakładki tabel) inaczej by je przycinały
+     albo same robiły się przewijalne. Przewinięcie strony zamyka menu. */
+  function placeMenu(btn, menu) {
+    const r = btn.getBoundingClientRect();
+    const up = !!menu.closest('.t-dd.up');
+    Object.assign(menu.style, { position: 'fixed', right: 'auto', left: '0px', top: up ? 'auto' : r.bottom + 4 + 'px', bottom: up ? innerHeight - r.top + 6 + 'px' : 'auto' });
+    const w = menu.offsetWidth;
+    menu.style.left = Math.max(8, Math.min(r.left, innerWidth - w - 8)) + 'px';
+    if (up) return;
+    // Za mało miejsca pod przyciskiem (np. zakładki tabel przy dolnej krawędzi) — menu w górę.
+    const pod = innerHeight - r.bottom - 12, nad = r.top - 12;
+    menu.style.maxHeight = '';
+    const h = menu.offsetHeight;
+    if (h > pod && nad > pod) {
+      menu.style.maxHeight = nad + 'px';
+      menu.style.top = Math.max(8, r.top - Math.min(h, nad) - 4) + 'px';
+    } else menu.style.maxHeight = Math.max(120, pod) + 'px';
+  }
+  const closeMenus = () => $$('.t-menu').forEach((x) => (x.hidden = true));
   function dropdown(btn, menu, fill) {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const was = !menu.hidden;
-      $$('.t-menu').forEach((x) => (x.hidden = true));
-      if (!was) { if (fill) fill(menu); menu.hidden = false; }
+      closeMenus();
+      if (!was) { if (fill) fill(menu); menu.hidden = false; placeMenu(btn, menu); }
     });
   }
-  document.addEventListener('click', (e) => { if (!e.target.closest('.t-menu')) $$('.t-menu').forEach((x) => (x.hidden = true)); });
+  document.addEventListener('click', (e) => { if (!e.target.closest('.t-menu')) closeMenus(); });
+  window.addEventListener('scroll', closeMenus, { passive: true });
+  window.addEventListener('resize', closeMenus);
 
   /* ---------- API ---------- */
   async function api(path, opts) {
