@@ -169,12 +169,22 @@ def test_limit_lotow_i_marzy(rynek):
     with TestClient(app) as c:
         r = _zlec(c, h, aid, qty=7)
         assert r.status_code == 409 and "Exposure cap" in r.json()["detail"]
-        r = _zlec(c, h, aid, qty=3, leverage=1)      # 150k wartości na 100k konta
-        assert r.status_code == 409 and "available margin" in r.json()["detail"]
-        r = _zlec(c, h, aid, qty=1, leverage=11)     # BTC max 10x
-        assert r.status_code == 400
         r = _zlec(c, h, aid, tp=49_000)              # TP poniżej wejścia na longu
         assert r.status_code == 400
+        # Dźwignia z klienta nie ma znaczenia — zawsze maksimum rynku (BTC 10x), bez ceny likwidacji.
+        st = _zlec(c, h, aid, qty=1, leverage=1).json()
+        assert st["positions"][0]["leverage"] == 10 and st["positions"][0]["liq"] is None
+    # Marża: 1 BTC przy 10x to ~5000 USD, a konto ma 2000 USD.
+    male, hm = _konto(balance=2_000.0, equity=2_000.0)
+    with TestClient(app) as c:
+        r = _zlec(c, hm, male, qty=1)
+        assert r.status_code == 409 and "available margin" in r.json()["detail"]
+
+
+def test_stop_out_przy_polowie_marzy():
+    assert not terminal.stop_out_due({"margin_used": 0.0, "equity": -5.0})
+    assert not terminal.stop_out_due({"margin_used": 10_000.0, "equity": 5_001.0})
+    assert terminal.stop_out_due({"margin_used": 10_000.0, "equity": 5_000.0})
 
 
 def test_stop_loss_ze_swiecy_pod_nieobecnosc(rynek):

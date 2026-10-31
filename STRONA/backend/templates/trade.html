@@ -148,10 +148,6 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
   </section>
 
   <aside class="t-ticket" data-pane="ticket" id="tTicket">
-    <div class="t-tk-top">
-      <button class="t-sel" id="tMarginMode" type="button" title="Each position has its own margin">Isolated<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
-      <button class="t-sel" id="tLevBtn" type="button"><span id="tLev">10×</span><svg viewBox="0 0 24 24"><path d="M4 7h10M4 17h6M18 7h2M14 17h6"/><circle cx="16" cy="7" r="2"/><circle cx="12" cy="17" r="2"/></svg></button>
-    </div>
     <div class="t-otabs" role="tablist">
       <button class="on" data-ot="market" type="button">Market</button>
       <button data-ot="limit" type="button">Limit</button>
@@ -168,7 +164,8 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
       <div class="t-in"><input id="tPx" inputmode="decimal" autocomplete="off" placeholder="0.00"><button class="t-mini" id="tPxMid" type="button">Mid</button><em>USD</em></div>
     </label>
     <label class="t-fld"><span>Size</span>
-      <div class="t-in"><input id="tSize" inputmode="decimal" autocomplete="off" placeholder="0.00"><button class="t-unit" id="tSizeUnit" type="button"><span id="tSizeUnitLbl">USD</span><svg viewBox="0 0 24 24"><path d="m7 9 5-5 5 5M7 15l5 5 5-5"/></svg></button></div>
+      <div class="t-in"><input id="tSize" inputmode="decimal" autocomplete="off" placeholder="0.00"><button class="t-unit" id="tSizeUnit" type="button" title="Switch unit: lots, USD or units"><span id="tSizeUnitLbl">Lots</span><svg viewBox="0 0 24 24"><path d="m7 9 5-5 5 5M7 15l5 5 5-5"/></svg></button></div>
+      <small class="t-size-hint num" id="tSizeHint"></small>
     </label>
     <div class="t-slider">
       <input type="range" id="tPct" min="0" max="100" step="1" value="0" aria-label="Size as a share of available margin">
@@ -190,6 +187,7 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
       <div><dt>Estimated Price</dt><dd class="num" id="tEstPx">—</dd></div>
       <div><dt>Order Value</dt><dd class="num" id="tEstVal">—</dd></div>
       <div><dt>Margin Required</dt><dd class="num" id="tEstMargin">—</dd></div>
+      <div><dt><abbr title="Set for each market, the same on every account">Leverage</abbr></dt><dd class="num" id="tEstLev">—</dd></div>
       <div><dt><button class="t-dt" id="tSlipBtn" type="button" title="Change the slippage limit">Max Slippage</button></dt><dd class="num" id="tSlip">1%</dd></div>
       <div><dt>Fees</dt><dd class="num" id="tFee">0.030%</dd></div>
       <div><dt><abbr title="Total open lots allowed on this account">Exposure Cap</abbr></dt><dd class="num" id="tCap">Sign In</dd></div>
@@ -283,18 +281,6 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
       <button class="t-btn wide" type="submit">Sign in</button>
       <p class="t-hint c">No account yet? <a href="/portal?signup=1">Sign up</a></p>
     </form>
-  </div>
-</div>
-
-<div class="t-modal" id="tLevModal" hidden role="dialog" aria-modal="true" aria-labelledby="tLevH">
-  <div class="t-card t-levc">
-    <button class="t-x" data-close type="button" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
-    <h2 id="tLevH">Adjust Leverage</h2>
-    <p class="t-hint" id="tLevHint"></p>
-    <div class="t-levrow"><input type="range" id="tLevRange" min="1" max="10" step="1" value="10"><div class="t-in sm"><input id="tLevIn" inputmode="numeric"><em>×</em></div></div>
-    <div class="t-levticks" id="tLevTicks"></div>
-    <p class="t-hint warn">Higher leverage means less margin per position and a liquidation price closer to your entry.</p>
-    <button class="t-btn wide" id="tLevOk" type="button">Confirm</button>
   </div>
 </div>
 

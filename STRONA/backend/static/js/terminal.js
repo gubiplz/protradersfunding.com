@@ -31,6 +31,10 @@
   const pct = (v) => (ok(v) ? (v > 0 ? '+' : '') + v.toFixed(2) + '%' : '—');
   const px = (m, v) => fx(v, m.px_dec);
   const qtyF = (m, v) => fx(v, Math.min(Math.max(m.qty_dec, 0), 6));
+  // Loty jak w MT5 (1 lot = m.contract jednostek); ułamki poniżej 0,01 lota z 4 miejscami.
+  const lotsF = (v) => fx(v, v > 0 && v < 0.01 ? 4 : 2);
+  const lotsOf = (m, q) => lotsF(q / m.contract) + ' lots';
+  const sizeCell = (m, q) => `${lotsOf(m, q)} <span class="sub">${qtyF(m, q)} ${esc(m.base)}</span>`;
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const cls = (v) => (v > 0 ? 'up' : v < 0 ? 'dn' : '');
   const tm = (iso) => { if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) + ' ' + d.toLocaleTimeString('en-GB', { hour12: false }); };
@@ -65,15 +69,17 @@
     sym: startSym, m: BY[startSym], venue: ls.get('pf_term_venue', 'hyperliquid'),
     interval: ls.get('pf_term_int', '15m'), ctype: ls.get('pf_term_ctype', 'candle_solid'),
     book: { bids: [], asks: [] }, trades: [], tk: {}, mids: {}, ctx: {},
-    side: 'buy', kind: 'market', unit: ls.get('pf_term_unit', 'usd'), slip: +ls.get('pf_term_slip', '1'),
+    // Jednostka pola Size: loty (domyślnie, jak w MT5), USD albo jednostka bazowa (BTC, oz…).
+    side: 'buy', kind: 'market', unit: ['lots', 'usd', 'base'].includes(ls.get('pf_term_unit2', 'lots')) ? ls.get('pf_term_unit2', 'lots') : 'lots', slip: +ls.get('pf_term_slip', '1'),
     quick: ls.json('pf_term_quick', [50, 100, 250]), watch: ls.json('pf_term_watch', ['BTCUSD', 'ETHUSD', 'XAUUSD']),
     token: ls.get('pf_token', null),   // tylko sesja konta PTF (wspólna z portalem)
     accounts: [], accId: +ls.get('pf_term_acc', '0') || null, st: null, ptab: 'positions',
-    cols: ls.json('pf_term_cols', { value: true, slippage: true, liq: true, lev: true, margin: true, tpsl: true }),
+    cols: ls.json('pf_term_cols2', { value: true, slippage: true, lev: true, margin: true, tpsl: true }),
     weekend: false, fee: 0.03, group: null, bookUnit: 'base', tickMode: ls.get('pf_term_tick', 'trending'),
   };
   if (!F.venuesFor(S.m).includes(S.venue)) S.venue = 'hyperliquid';
-  const lev = () => Math.min(S.m.max_lev, +ls.get('pf_term_lev_' + S.sym, String(Math.min(S.m.max_lev, 10))) || 1);
+  // Dźwignia nie jest do wyboru: z góry ustalona dla rynku (serwer i tak liczy po niej).
+  const lev = () => S.m.max_lev;
 
   /* ---------- toasty i okna ---------- */
   function toast(title, msg, bad) {
@@ -485,9 +491,9 @@
       ? 'Prices, the order book and fills come from Hyperliquid.'
       : `Prices, the order book and trades come from ${F.VENUES[S.venue].label}. Orders fill at Hyperliquid prices.`;
     $('tSrc').textContent = note;
-    $('tFillNote').textContent = note + ' Every position is isolated: you can lose at most its margin.';
-    $('tLev').textContent = lev() + '×';
-    $('tSizeUnitLbl').textContent = S.unit === 'usd' ? 'USD' : m.base;
+    $('tFillNote').textContent = note + ` Leverage on ${m.sym} is 1:${m.max_lev}, the same on every account. Margin is shared across the account; if equity falls to half of the margin in use, open positions are closed (stop-out).`;
+    $('tEstLev').textContent = '1:' + m.max_lev;
+    $('tSizeUnitLbl').textContent = unitLbl();
     $('tGo').textContent = (S.side === 'buy' ? 'Buy / Long ' : 'Sell / Short ') + baseName(m);
     buildBookCtl();
     renderInfo();
@@ -731,12 +737,21 @@
   }
   $$('[data-side]').forEach((b) => b.addEventListener('click', () => setSide(b.dataset.side)));
   $('tPxMid').onclick = () => { const p = markPx(); if (p) { $('tPx').value = p.toFixed(S.m.px_dec); updateTicket(); } };
+  /* Pole Size w wybranej jednostce: Lots → USD → jednostka bazowa → Lots. */
+  const UNITS = ['lots', 'usd', 'base'];
+  const unitLbl = () => (S.unit === 'usd' ? 'USD' : S.unit === 'lots' ? 'Lots' : S.m.base);
+  function toUnit(q) {
+    if (!(q > 0)) return '';
+    if (S.unit === 'usd') return notional(S.m, q, refPx()).toFixed(2);
+    if (S.unit === 'lots') return (Math.floor((q / S.m.contract) * 100 + 1e-9) / 100).toFixed(2);
+    return q.toFixed(S.m.qty_dec);
+  }
   $('tSizeUnit').onclick = () => {
     const q = orderQty();
-    S.unit = S.unit === 'usd' ? 'base' : 'usd';
-    ls.set('pf_term_unit', S.unit);
-    $('tSizeUnitLbl').textContent = S.unit === 'usd' ? 'USD' : S.m.base;
-    if (q > 0) $('tSize').value = S.unit === 'usd' ? notional(S.m, q, refPx()).toFixed(2) : q.toFixed(S.m.qty_dec);
+    S.unit = UNITS[(UNITS.indexOf(S.unit) + 1) % UNITS.length];
+    ls.set('pf_term_unit2', S.unit);
+    $('tSizeUnitLbl').textContent = unitLbl();
+    if (q > 0) $('tSize').value = toUnit(q);
     updateTicket();
   };
   function refPx() {
@@ -747,7 +762,7 @@
   function orderQty() {
     const v = +String($('tSize').value).replace(/,/g, '');
     if (!(v > 0)) return 0;
-    return S.unit === 'usd' ? qtyFromUsd(S.m, v, refPx()) : v;
+    return S.unit === 'usd' ? qtyFromUsd(S.m, v, refPx()) : S.unit === 'lots' ? v * S.m.contract : v;
   }
   function maxQty() {
     if (!S.st) return 0;
@@ -759,8 +774,7 @@
   function setPct(p) {
     p = Math.max(0, Math.min(100, Math.round(p)));
     $('tPct').value = p; $('tPctIn').value = p;
-    const q = (maxQty() * p) / 100;
-    $('tSize').value = q > 0 ? (S.unit === 'usd' ? notional(S.m, q, refPx()).toFixed(2) : q.toFixed(S.m.qty_dec)) : '';
+    $('tSize').value = toUnit((maxQty() * p) / 100);
     updateTicket();
   }
   $('tPct').oninput = (e) => setPct(+e.target.value);
@@ -780,12 +794,14 @@
     $('tSize').value = ''; $('tPx').value = ''; $('tTp').value = ''; $('tSl').value = '';
     $('tPct').value = 0; $('tPctIn').value = 0;
     if (S.kind !== 'market') setKind(S.kind);
-    $('tSizeUnitLbl').textContent = S.unit === 'usd' ? 'USD' : S.m.base;
+    $('tSizeUnitLbl').textContent = unitLbl();
     renderQuick(); updateTicket();
   }
   function updateTicket() {
     const m = S.m, q = orderQty(), p = refPx(), L = lev();
     const val = q > 0 ? notional(m, q, p) : 0;
+    // Przelicznik pod polem Size: loty ⇄ jednostki bazowe (⇄ USD).
+    $('tSizeHint').textContent = q > 0 ? `${lotsF(q / m.contract)} lots = ${qtyF(m, q)} ${m.base}${S.unit !== 'usd' && val ? ' ≈ ' + usd(val, 0) : ''}` : `1 lot = ${fx(m.contract, 0)} ${m.base}`;
     $('tEstPx').textContent = p ? px(m, p) : '—';
     $('tEstVal').textContent = val ? usd(val) : '—';
     $('tEstMargin').textContent = val ? usd(val / L) : '—';
@@ -807,9 +823,9 @@
     if (!b) return;
     const v = S.quick[+b.dataset.q];
     if (!S.token) return openModal('tReady');
-    $('tSize').value = S.unit === 'usd' ? v.toFixed(2) : qtyFromUsd(S.m, v, refPx()).toFixed(S.m.qty_dec);
     setKind('market');
-    submitOrder(true);
+    // Szybki rozmiar jest w USD niezależnie od jednostki pola — ilość idzie wprost.
+    submitOrder(true, qtyFromUsd(S.m, v, refPx()));
   });
   $('tQuickEdit').onclick = () => {
     if ($('tQuick').querySelector('input')) {
@@ -823,34 +839,14 @@
   };
   $('tQuick').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.matches('input')) $('tQuickEdit').click(); });
 
-  // dźwignia
-  $('tLevBtn').onclick = () => {
-    const mx = S.m.max_lev;
-    $('tLevRange').max = mx;
-    $('tLevRange').value = lev();
-    $('tLevIn').value = lev();
-    $('tLevHint').textContent = `${S.m.sym}: up to ${mx}× leverage. Applies to new orders on this market.`;
-    $('tLevTicks').innerHTML = [1, Math.round(mx / 4), Math.round(mx / 2), Math.round((mx * 3) / 4), mx].map((x) => `<span>${x}×</span>`).join('');
-    openModal('tLevModal');
-  };
-  $('tLevRange').oninput = (e) => { $('tLevIn').value = e.target.value; };
-  $('tLevIn').oninput = (e) => { const v = Math.max(1, Math.min(S.m.max_lev, Math.round(+e.target.value || 1))); $('tLevRange').value = v; };
-  $('tLevOk').onclick = () => {
-    const v = Math.max(1, Math.min(S.m.max_lev, Math.round(+$('tLevIn').value || 1)));
-    ls.set('pf_term_lev_' + S.sym, String(v));
-    $('tLev').textContent = v + '×';
-    closeModal();
-    setPct(+$('tPct').value);
-  };
-  $('tMarginMode').onclick = () => toast('Isolated margin', 'Each position has its own margin. A loss can never take more than that margin.');
 
   let sending = false;
-  async function submitOrder(quick) {
+  async function submitOrder(quick, qtyOverride) {
     if (!S.token) return openModal('tReady');
     if (!S.st || !S.st.account.tradable) {
       return toast('This account cannot trade', (S.st && S.st.account.reason) || 'Choose an active challenge account.', true);
     }
-    const m = S.m, q = orderQty();
+    const m = S.m, q = qtyOverride || orderQty();
     if (!(q > 0)) return toast('Enter a size', 'Type an amount or use the slider.', true);
     const body = {
       account_id: S.accId, symbol: m.sym, side: S.side, kind: S.kind, qty: +q.toFixed(Math.max(m.qty_dec, 2) + 2),
@@ -872,7 +868,7 @@
       setState(st);
       const what = S.kind === 'market' ? 'Order filled' : 'Order placed';
       const z = st.order_history && st.order_history[0];
-      toast(what, `${S.side === 'buy' ? 'Long' : 'Short'} ${qtyF(m, body.qty)} ${m.base} ${m.sym}${z && z.fill_price && S.kind === 'market' ? ' at ' + px(m, z.fill_price) : body.price ? ' at ' + px(m, body.price) : ''}`);
+      toast(what, `${S.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(m, body.qty)} (${qtyF(m, body.qty)} ${m.base}) ${m.sym}${z && z.fill_price && S.kind === 'market' ? ' at ' + px(m, z.fill_price) : body.price ? ' at ' + px(m, body.price) : ''}`);
       $('tSize').value = ''; $('tPct').value = 0; $('tPctIn').value = 0;
       updateTicket();
     } catch (e) {
@@ -957,8 +953,8 @@
   function notifyFills(a, b) {
     const was = new Set(a.positions.map((p) => p.id));
     const now = new Set(b.positions.map((p) => p.id));
-    b.history.filter((h) => was.has(h.id) && !now.has(h.id) && ['tp', 'sl', 'liquidation', 'breach'].includes(h.reason)).forEach((h) => {
-      const L = { tp: 'Take profit hit', sl: 'Stop loss hit', liquidation: 'Position liquidated', breach: 'Closed: account rule breached' }[h.reason];
+    b.history.filter((h) => was.has(h.id) && !now.has(h.id) && ['tp', 'sl', 'liquidation', 'stop_out', 'breach'].includes(h.reason)).forEach((h) => {
+      const L = { tp: 'Take profit hit', sl: 'Stop loss hit', liquidation: 'Position liquidated', stop_out: 'Stop-out: margin level too low', breach: 'Closed: account rule breached' }[h.reason];
       toast(L, `${h.symbol} ${sUsd(h.pnl)}`, h.pnl < 0);
     });
     const oldOpen = new Set(a.orders.map((o) => o.id));
@@ -1028,12 +1024,12 @@
     const up = css('--up'), dn = css('--dn'), acc = css('--acc'), warn = css('--warn');
     const line = (v, text, color) => v && chart.createOverlay({ name: 'ptfLine', groupId: 'ptf', lock: true, points: [{ timestamp: ts, value: v }], extendData: { text, color } });
     S.st.positions.filter((p) => p.symbol === S.sym).forEach((p) => {
-      line(p.entry, `${p.side === 'buy' ? 'Long' : 'Short'} ${qtyF(S.m, p.qty)} @ ${px(S.m, p.entry)}`, p.side === 'buy' ? up : dn);
+      line(p.entry, `${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, p.side === 'buy' ? up : dn);
       line(p.tp, 'TP ' + px(S.m, p.tp), acc);
       line(p.sl, 'SL ' + px(S.m, p.sl), warn);
       if (p.liq && p.liq > 0 && isFinite(p.liq)) line(p.liq, 'Liq. ' + px(S.m, p.liq), dn);
     });
-    S.st.orders.filter((o) => o.symbol === S.sym).forEach((o) => line(o.price, `${o.kind === 'limit' ? 'Limit' : 'Stop'} ${o.side} ${qtyF(S.m, o.qty)}`, o.side === 'buy' ? up : dn));
+    S.st.orders.filter((o) => o.symbol === S.sym).forEach((o) => line(o.price, `${o.kind === 'limit' ? 'Limit' : 'Stop'} ${o.side} ${lotsOf(S.m, o.qty)}`, o.side === 'buy' ? up : dn));
   }
 
   /* =====================================================================
@@ -1041,14 +1037,14 @@
      ===================================================================== */
   $('tColsMenu').addEventListener('click', (e) => e.stopPropagation());
   dropdown($('tColsBtn'), $('tColsMenu'), (mn) => {
-    const L = { value: 'Value', slippage: 'Slippage', liq: 'Liquidation Price', lev: 'Leverage', margin: 'Margin', tpsl: 'TP / SL' };
+    const L = { value: 'Value', slippage: 'Slippage', lev: 'Leverage', margin: 'Margin', tpsl: 'TP / SL' };
     mn.innerHTML = '<h6>Positions columns</h6>' + Object.entries(L).map(([k, l]) => `<label class="ck"><input type="checkbox" data-col="${k}"${S.cols[k] ? ' checked' : ''}><span>${l}</span></label>`).join('');
   });
   $('tColsMenu').addEventListener('change', (e) => {
     const c = e.target.dataset.col;
     if (!c) return;
     S.cols[c] = e.target.checked;
-    ls.set('pf_term_cols', JSON.stringify(S.cols));
+    ls.set('pf_term_cols2', JSON.stringify(S.cols));
     renderTables();
   });
   $$('.t-ptabs > [data-pt]').forEach((b) => b.addEventListener('click', () => setPTab(b.dataset.pt)));
@@ -1083,27 +1079,27 @@
       const head = [['Market'], ['Side'], ['Size', 1]].concat(c.value ? [['Value (USD)', 1]] : [], [['Entry Price', 1]], c.slippage ? [['Slippage', 1]] : [], [['Mark Price', 1]], c.liq ? [['Liq. Price', 1]] : [], [['PnL (ROE)', 1]], c.lev ? [['Leverage', 1]] : [], c.margin ? [['Margin', 1]] : [], c.tpsl ? [['TP / SL', 1]] : [], [['', 1]]);
       const rows = livePos().map((p) => {
         const m = BY[p.symbol];
-        return `<tr><td>${sym(p.symbol)}</td><td>${side(p.side)}</td><td class="num">${qtyF(m, p.qty)} ${esc(m.base)}</td>${c.value ? `<td class="num">${usd(p.value)}</td>` : ''}<td class="num">${px(m, p.entry)}</td>${c.slippage ? `<td class="num">${ok(p.slippage) ? p.slippage.toFixed(3) + '%' : '—'}</td>` : ''}<td class="num">${px(m, p.mark)}</td>${c.liq ? `<td class="num">${p.liq > 0 && isFinite(p.liq) ? px(m, p.liq) : '—'}</td>` : ''}<td class="num ${cls(p.pnl)}">${sUsd(p.pnl)} (${pct(p.roe)})</td>${c.lev ? `<td class="num">${p.leverage}×</td>` : ''}${c.margin ? `<td class="num">${usd(p.margin)}</td>` : ''}${c.tpsl ? `<td class="num"><button type="button" class="tpsl" data-tpsl="${p.id}">${p.tp ? px(m, p.tp) : '—'} / ${p.sl ? px(m, p.sl) : '—'}</button></td>` : ''}<td><div class="act"><button type="button" data-half="${p.id}">Close 50%</button><button type="button" class="dn" data-close="${p.id}">Close</button></div></td></tr>`;
+        return `<tr><td>${sym(p.symbol)}</td><td>${side(p.side)}</td><td class="num">${sizeCell(m, p.qty)}</td>${c.value ? `<td class="num">${usd(p.value)}</td>` : ''}<td class="num">${px(m, p.entry)}</td>${c.slippage ? `<td class="num">${ok(p.slippage) ? p.slippage.toFixed(3) + '%' : '—'}</td>` : ''}<td class="num">${px(m, p.mark)}</td>${c.liq ? `<td class="num">${p.liq > 0 && isFinite(p.liq) ? px(m, p.liq) : '—'}</td>` : ''}<td class="num ${cls(p.pnl)}">${sUsd(p.pnl)} (${pct(p.roe)})</td>${c.lev ? `<td class="num">1:${p.leverage}</td>` : ''}${c.margin ? `<td class="num">${usd(p.margin)}</td>` : ''}${c.tpsl ? `<td class="num"><button type="button" class="tpsl" data-tpsl="${p.id}">${p.tp ? px(m, p.tp) : '—'} / ${p.sl ? px(m, p.sl) : '—'}</button></td>` : ''}<td><div class="act"><button type="button" data-half="${p.id}">Close 50%</button><button type="button" class="dn" data-close="${p.id}">Close</button></div></td></tr>`;
       });
       el.innerHTML = table(head, rows, 'No open positions');
     } else if (S.ptab === 'orders') {
       el.innerHTML = table([['Time'], ['Market'], ['Type'], ['Side'], ['Size', 1], ['Price', 1], ['Reduce Only'], ['TP / SL', 1], ['', 1]], st.orders.map((o) => {
         const m = BY[o.symbol];
-        return `<tr><td>${tm(o.created_at)}</td><td>${sym(o.symbol)}</td><td>${o.kind === 'limit' ? 'Limit' : 'Stop Market'}</td><td>${side(o.side)}</td><td class="num">${qtyF(m, o.qty)}</td><td class="num">${px(m, o.price)}</td><td>${o.reduce_only ? 'Yes' : 'No'}</td><td class="num">${o.tp ? px(m, o.tp) : '—'} / ${o.sl ? px(m, o.sl) : '—'}</td><td><div class="act"><button type="button" class="dn" data-cancel="${o.id}">Cancel</button></div></td></tr>`;
+        return `<tr><td>${tm(o.created_at)}</td><td>${sym(o.symbol)}</td><td>${o.kind === 'limit' ? 'Limit' : 'Stop Market'}</td><td>${side(o.side)}</td><td class="num">${sizeCell(m, o.qty)}</td><td class="num">${px(m, o.price)}</td><td>${o.reduce_only ? 'Yes' : 'No'}</td><td class="num">${o.tp ? px(m, o.tp) : '—'} / ${o.sl ? px(m, o.sl) : '—'}</td><td><div class="act"><button type="button" class="dn" data-cancel="${o.id}">Cancel</button></div></td></tr>`;
       }), 'No open orders');
       if (st.orders.length) el.insertAdjacentHTML('afterbegin', '<div style="padding:8px 12px;text-align:right"><button class="t-danger" type="button" data-cancelall>Cancel all orders</button></div>');
     } else if (S.ptab === 'phist') {
-      const R = { close: 'Closed', reduce: 'Reduced', tp: 'Take profit', sl: 'Stop loss', liquidation: 'Liquidation', breach: 'Rule breach' };
+      const R = { close: 'Closed', reduce: 'Reduced', tp: 'Take profit', sl: 'Stop loss', liquidation: 'Liquidation', stop_out: 'Stop-out', breach: 'Rule breach' };
       el.innerHTML = table([['Closed'], ['Market'], ['Side'], ['Size', 1], ['Entry', 1], ['Exit', 1], ['PnL', 1], ['Fees', 1], ['Reason']], st.history.map((h) => {
         const m = BY[h.symbol] || S.m;
-        return `<tr><td>${tm(h.closed_at)}</td><td>${sym(h.symbol)}</td><td>${side(h.side)}</td><td class="num">${qtyF(m, h.qty)}</td><td class="num">${px(m, h.entry)}</td><td class="num">${px(m, h.close)}</td><td class="num ${cls(h.pnl)}">${sUsd(h.pnl)}</td><td class="num">${usd(h.fee)}</td><td><span class="t-pill ${h.reason === 'tp' ? 'ok' : ['sl', 'liquidation', 'breach'].includes(h.reason) ? 'bad' : ''}">${R[h.reason] || esc(h.reason || '')}</span></td></tr>`;
+        return `<tr><td>${tm(h.closed_at)}</td><td>${sym(h.symbol)}</td><td>${side(h.side)}</td><td class="num">${sizeCell(m, h.qty)}</td><td class="num">${px(m, h.entry)}</td><td class="num">${px(m, h.close)}</td><td class="num ${cls(h.pnl)}">${sUsd(h.pnl)}</td><td class="num">${usd(h.fee)}</td><td><span class="t-pill ${h.reason === 'tp' ? 'ok' : ['sl', 'liquidation', 'stop_out', 'breach'].includes(h.reason) ? 'bad' : ''}">${R[h.reason] || esc(h.reason || '')}</span></td></tr>`;
       }), 'No closed positions yet');
     } else if (S.ptab === 'ohist' || S.ptab === 'fills') {
       const list = S.ptab === 'fills' ? st.order_history.filter((o) => o.status === 'filled') : st.order_history;
       const K = { market: 'Market', limit: 'Limit', stop: 'Stop Market' };
       el.innerHTML = table([['Time'], ['Market'], ['Type'], ['Side'], ['Size', 1], ['Price', 1], ['Filled at', 1], ['Status'], ['Note']], list.map((o) => {
         const m = BY[o.symbol] || S.m;
-        return `<tr><td>${tm(o.done_at || o.created_at)}</td><td>${sym(o.symbol)}</td><td>${K[o.kind] || o.kind}${o.reduce_only ? ' · RO' : ''}</td><td>${side(o.side)}</td><td class="num">${qtyF(m, o.qty)}</td><td class="num">${o.price ? px(m, o.price) : 'Market'}</td><td class="num">${o.fill_price ? px(m, o.fill_price) : '—'}</td><td><span class="t-pill ${o.status === 'filled' ? 'ok' : o.status === 'rejected' ? 'bad' : ''}">${o.status}</span></td><td style="color:var(--muted);white-space:normal;min-width:180px">${esc(o.note || '')}</td></tr>`;
+        return `<tr><td>${tm(o.done_at || o.created_at)}</td><td>${sym(o.symbol)}</td><td>${K[o.kind] || o.kind}${o.reduce_only ? ' · RO' : ''}</td><td>${side(o.side)}</td><td class="num">${sizeCell(m, o.qty)}</td><td class="num">${o.price ? px(m, o.price) : 'Market'}</td><td class="num">${o.fill_price ? px(m, o.fill_price) : '—'}</td><td><span class="t-pill ${o.status === 'filled' ? 'ok' : o.status === 'rejected' ? 'bad' : ''}">${o.status}</span></td><td style="color:var(--muted);white-space:normal;min-width:180px">${esc(o.note || '')}</td></tr>`;
       }), S.ptab === 'fills' ? 'No trades yet' : 'No orders yet');
     } else if (S.ptab === 'rules') {
       const a = st.account, mt = a.metrics;

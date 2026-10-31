@@ -207,7 +207,6 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-trades .t-row span:last-child{color:var(--muted)}
 
 /* ---------- bilet zlecenia ---------- */
-.t-tk-top{display:flex;gap:8px}
 .t-sel{display:flex;align-items:center;justify-content:space-between;gap:8px;font-family:inherit;font-weight:550;height:40px;font-size:14px}
 .t-sel:hover{border-color:var(--acc)}
 .t-otabs{height:42px;gap:0}
@@ -227,6 +226,8 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-in.sm{height:36px;width:90px;flex:none}
 .t-unit,.t-mini{display:flex;align-items:center;gap:5px;height:30px;padding:0 9px;border-radius:7px;color:var(--muted);font-size:12.5px;font-weight:600}
 .t-unit:hover,.t-mini:hover{background:var(--panel2);color:var(--txt)}
+.t-unit{color:var(--acc)}
+.t-size-hint{font-size:11.5px;color:var(--dim);margin-top:-1px}
 .t-unit svg{width:13px;height:13px}
 .t-slider{display:grid;grid-template-columns:1fr 78px;gap:4px 10px;align-items:center}
 .t-slider input[type=range]{width:100%;accent-color:var(--acc);height:20px}
@@ -292,6 +293,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-table td.num,.t-table th.num{text-align:right}
 .t-table tr:hover td{background:var(--hover,rgba(148,178,200,.04))}
 .t-table .sym{display:flex;align-items:center;gap:8px;font-weight:600}
+.t-table .sub{color:var(--dim);margin-left:6px;font-size:11.5px}
 .t-table .side{font-weight:600}
 .t-table .act{display:flex;gap:6px;justify-content:flex-end}
 .t-table .act button{height:26px;padding:0 10px;border-radius:7px;border:1px solid var(--line2);font-size:12px}
@@ -361,10 +363,6 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-hint.warn{color:var(--warn)!important}
 .t-hint a{color:var(--acc);font-weight:600}
 .t-err{color:var(--dn)!important;font-size:13px!important}
-.t-levc .t-levrow{display:flex;gap:12px;align-items:center;margin:18px 0 6px}
-.t-levc input[type=range]{flex:1;accent-color:var(--acc)}
-.t-levticks{display:flex;justify-content:space-between;font:11.5px var(--mono);color:var(--dim);margin-bottom:14px}
-.t-levc .t-btn{margin-top:14px}
 .t-confirm dl{display:flex;flex-direction:column;gap:8px;margin-top:6px}
 .t-confirm dl div{display:flex;justify-content:space-between;font-size:14px}
 .t-confirm dt{color:var(--muted)}

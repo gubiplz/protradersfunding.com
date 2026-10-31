@@ -7,8 +7,11 @@ loguje się wyłącznie kontem PTF (ta sama sesja co portal) — danymi MT5 nie.
 
 Rozliczenie idzie po cenach Hyperliquid (patrz `markets.py`):
   - zlecenie rynkowe przechodzi przez księgę zleceń (VWAP), z limitem
-    poślizgu, opłatą od wartości i marżą izolowaną (wartość / dźwignia);
-  - limit, stop, TP, SL i likwidację rozstrzyga `sync()`: przegląda świece 1m
+    poślizgu i opłatą od wartości;
+  - marża jak w MT5: dźwignia jest z góry ustalona dla rynku (trader jej nie
+    wybiera), marża jest wspólna dla całego konta, a gdy equity spadnie do
+    połowy użytej marży, pozycje zamyka stop-out (bez ceny likwidacji per pozycja);
+  - limit, stop, TP i SL rozstrzyga `sync()`: przegląda świece 1m
     od ostatniego przeglądu, więc nic nie ucieka, gdy nikt nie patrzy;
   - pozycje są netowane per symbol, jak na giełdach perp: zlecenie w drugą
     stronę zmniejsza, zamyka albo odwraca pozycję.
@@ -39,7 +42,7 @@ settings = get_settings()
 
 FEE_PCT = 0.0003            # 0,03% wartości przy otwarciu i przy zamknięciu
 MAX_SLIPPAGE = 0.01         # domyślny limit poślizgu (1%)
-MMR = 0.005                 # marża utrzymaniowa (do ceny likwidacji)
+STOP_OUT = 0.5              # stop-out: equity ≤ 50% użytej marży (poziom jak u brokerów MT5)
 CANDLE_GAP_S = 50           # dłuższa przerwa od przeglądu = przegląd świecami 1m
 MAX_WINDOW_MS = 4800 * 60_000   # Hyperliquid oddaje do 5000 świec
 EVAL_EVERY_S = 30           # reguły ze snapshotem equity najwyżej co tyle (poza akcjami)
@@ -113,12 +116,9 @@ def _zamrozony(m: Market, t_ms: int) -> bool:
 # --------------------------------------------------------------------------- #
 #  Wycena i marża                                                              #
 # --------------------------------------------------------------------------- #
-def liq_price(m: Market, side: str, entry: float, lev: float) -> float:
-    """Cena, przy której izolowana marża (bez utrzymaniowej) jest stracona."""
-    k = max(0.0, 1.0 / max(lev, 1.0) - MMR)
-    if m.quote_inverse:
-        return entry / (1 + k) if side == "buy" else (entry / (1 - k) if k < 1 else float("inf"))
-    return entry * (1 - k) if side == "buy" else entry * (1 + k)
+def stop_out_due(fig: dict) -> bool:
+    """Czy konto wpadło w stop-out: equity nie pokrywa już połowy użytej marży."""
+    return fig["margin_used"] > 0 and fig["equity"] <= STOP_OUT * fig["margin_used"]
 
 
 def _open_positions(session, acc: Account) -> list[Trade]:
@@ -279,7 +279,7 @@ def _fill(session, acc: Account, m: Market, side: str, qty: float, px: float, le
             account_id=acc.id, symbol=m.sym, side=side, lots=markets.lots(m, zostalo),
             open_price=px, pnl=0.0, opened_at=when, status="open", source="terminal",
             venue="hyperliquid", qty=zostalo, leverage=lev, margin=round(wartosc / lev, 2),
-            tp=tp, sl=sl, liq_price=liq_price(m, side, px, lev), fee=round(oplata, 4),
+            tp=tp, sl=sl, liq_price=None, fee=round(oplata, 4),
             slippage=round(slip * 100, 4), tpsl_at=when if (tp or sl) else None,
         )
         session.add(pos)
@@ -290,7 +290,6 @@ def _fill(session, acc: Account, m: Market, side: str, qty: float, px: float, le
         pos.qty = nowa
         pos.lots = markets.lots(m, nowa)
         pos.margin = round(float(pos.margin or 0.0) + wartosc / (pos.leverage or lev), 2)
-        pos.liq_price = liq_price(m, side, pos.open_price, pos.leverage or lev)
         pos.fee = round(float(pos.fee or 0.0) + oplata, 4)
         if tp is not None or sl is not None:
             pos.tp = tp if tp is not None else pos.tp
@@ -475,6 +474,11 @@ def sync(session, acc: Account, now: datetime | None = None) -> tuple[list[Trade
     acc.terminal_open = bool(poz or _open_orders(session, acc))
     acc.terminal_sync_at = now
     marks = _marks(session, acc, poz, now)
+    if poz and stop_out_due(account_figures(session, acc, poz, marks)):
+        # Marża wspólna dla konta: zamykamy wszystko po bieżących cenach (MT5
+        # zamyka po kolei od najbardziej stratnej — przy jednym progu to samo).
+        flatten(session, acc, "stop_out", cancel_orders=False)
+        poz, marks = [], {}
     # Dołek zostaje przy obiekcie do końca requestu: reguły (`snapshot_for`)
     # robią własny przegląd, który widzi już tylko ostatnie sekundy — bez tego
     # dołek z pierwszego przeglądu by przepadł.
@@ -511,8 +515,9 @@ def snapshot_for(session, acc: Account, bot_snap: MarketSnapshot | None) -> tupl
     return snap, najnizsze
 
 
-def flatten(session, acc: Account, reason: str) -> int:
-    """Zamyka wszystko po bieżących cenach i anuluje zlecenia (breach)."""
+def flatten(session, acc: Account, reason: str, cancel_orders: bool = True) -> int:
+    """Zamyka wszystko po bieżących cenach; przy breachu anuluje też zlecenia
+    (stop-out ich nie rusza — konto dalej handluje)."""
     now = _now()
     poz = _open_positions(session, acc)
     marks = _marks(session, acc, poz, now)
@@ -523,10 +528,11 @@ def flatten(session, acc: Account, reason: str) -> int:
             continue
         _close_part(session, acc, pos, pos.qty or 0.0, px, reason, now)
         n += 1
-    for z in _open_orders(session, acc):
-        z.status, z.done_at, z.note = "cancelled", now, "Account closed"
+    if cancel_orders:
+        for z in _open_orders(session, acc):
+            z.status, z.done_at, z.note = "cancelled", now, "Account closed"
     session.flush()
-    acc.terminal_open = bool(_open_positions(session, acc))
+    acc.terminal_open = bool(_open_positions(session, acc) or _open_orders(session, acc))
     return n
 
 
@@ -721,7 +727,7 @@ class OrderIn(BaseModel):
     kind: str = Field(default="market", pattern="^(market|limit|stop)$")
     qty: float = Field(gt=0)
     price: float | None = Field(default=None, gt=0)
-    leverage: float = Field(default=1.0, ge=1)
+    leverage: float | None = None      # ignorowane: dźwignia jest z góry ustalona dla rynku
     tp: float | None = Field(default=None, ge=0)
     sl: float | None = Field(default=None, ge=0)
     reduce_only: bool = False
@@ -733,8 +739,7 @@ def api_order(payload: OrderIn, w: Who = Depends(who)):
     m = markets.get(payload.symbol)
     if m is None:
         raise HTTPException(404, "Unknown market")
-    if payload.leverage > m.max_lev:
-        raise HTTPException(400, f"Max leverage on {m.sym} is {m.max_lev}x.")
+    lev = float(m.max_lev)      # trader nie wybiera dźwigni — ta z klienta nie ma znaczenia
     tp = payload.tp or None
     sl = payload.sl or None
 
@@ -757,12 +762,12 @@ def api_order(payload: OrderIn, w: Who = Depends(who)):
             vwap, mid, slip = _vwap(m, payload.side, qty, payload.max_slippage_pct / 100)
             _tp_sl_ok(payload.side, vwap, tp, sl)
             if not payload.reduce_only:
-                _check_open(session, acc, m, payload.side, qty, vwap, payload.leverage)
+                _check_open(session, acc, m, payload.side, qty, vwap, lev)
             z = TerminalOrder(account_id=acc.id, symbol=m.sym, side=payload.side, kind="market", qty=qty,
-                              leverage=payload.leverage, tp=tp, sl=sl, reduce_only=payload.reduce_only,
+                              leverage=lev, tp=tp, sl=sl, reduce_only=payload.reduce_only,
                               created_at=teraz)
             session.add(z)
-            p = _fill(session, acc, m, payload.side, qty, vwap, payload.leverage, tp, sl,
+            p = _fill(session, acc, m, payload.side, qty, vwap, lev, tp, sl,
                       payload.reduce_only, teraz, slip)
             session.flush()
             z.status, z.done_at, z.fill_price = "filled", teraz, vwap
@@ -784,9 +789,9 @@ def api_order(payload: OrderIn, w: Who = Depends(who)):
                 raise HTTPException(400, "Limit price is at or through the market. Use a market order.")
             _tp_sl_ok(payload.side, payload.price, tp, sl)
             if not payload.reduce_only:
-                _check_open(session, acc, m, payload.side, qty, payload.price, payload.leverage)
+                _check_open(session, acc, m, payload.side, qty, payload.price, lev)
             session.add(TerminalOrder(account_id=acc.id, symbol=m.sym, side=payload.side, kind=payload.kind,
-                                      qty=qty, price=payload.price, leverage=payload.leverage, tp=tp, sl=sl,
+                                      qty=qty, price=payload.price, leverage=lev, tp=tp, sl=sl,
                                       reduce_only=payload.reduce_only, created_at=teraz))
         acc.terminal_used = True
         acc.terminal_open = True
