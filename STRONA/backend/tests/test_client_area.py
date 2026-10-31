@@ -1400,8 +1400,8 @@ def test_kyc_i_support_nie_trzymaja_szerokosci_inline():
     # 640px zostaje WYŁĄCZNIE w ustawieniach — te karty siedzą w układzie
     # wielokolumnowym (.card-cols), gdzie wąska kolumna jest zamierzona.
     # Prefiks bez cudzysłowu, bo „Danger Zone" dokłada w tym samym atrybucie
-    # jeszcze kolor obramowania.
-    assert html.count('style="max-width:640px') == 5
+    # jeszcze kolor obramowania. Szósta karta to „Payout Wallet".
+    assert html.count('style="max-width:640px') == 6
 
 
 def test_pas_upsellu_dzieli_sie_rowno_na_dwa_rzedy():

@@ -75,34 +75,22 @@ def test_po_decyzji_admina_droga_znow_otwarta():
                       json=WNIOSEK).status_code == 200
 
 
-def test_summary_niesie_harmonogram_a_pending_expected_by():
+def test_api_nie_podaje_terminu_przegladu():
+    """Strona nie obiecuje terminów — API też nie niesie „review_hours" ani
+    „expected_by", z których portal mógłby taki termin złożyć."""
     aid, h = _funded("guard-harmonogram@test.pl")
     with TestClient(app) as c:
         zloz_wniosek(c, aid, headers=h, json=WNIOSEK)
         me = c.get("/api/me/payouts", headers=h).json()
-    assert me["summary"]["review_hours"] == 24
+    assert "review_hours" not in me["summary"]
     wiersz = me["requests"][0]
-    assert wiersz["status"] == "pending"
-    # expected_by = ts + 24h; wystarczy sprawdzić, że jest i że to inny dzień/ta
-    # sama forma ISO — dokładną arytmetykę niesie timedelta w endpointcie
-    assert wiersz["expected_by"] and wiersz["expected_by"] > wiersz["ts"]
-
-
-def test_zamkniety_wniosek_bez_expected_by():
-    aid, h = _funded("guard-done@test.pl")
-    with TestClient(app) as c:
-        req_id = zloz_wniosek(c, aid, headers=h,
-                        json=WNIOSEK).json()["id"]
-        c.post(f"/api/admin/payout-requests/{req_id}/reject", headers=ADMIN_H,
-               json={"reason": "test"})
-        me = c.get("/api/me/payouts", headers=h).json()
-    wiersz = next(x for x in me["requests"] if x["id"] == req_id)
-    assert wiersz["expected_by"] is None
+    assert wiersz["status"] == "pending" and "expected_by" not in wiersz
 
 
 def test_portal_nie_obiecuje_terminu_decyzji():
     from conftest import zrodlo_portalu
     kod = zrodlo_portalu()
-    assert "reviewed within" not in kod
-    assert "decision by" not in kod
+    for zakazane in ("reviewed within", "decision by", "within 24 hours",
+                     "within one business day", "next business day"):
+        assert zakazane not in kod, zakazane
     assert "Payouts are <b>on demand</b>" in kod

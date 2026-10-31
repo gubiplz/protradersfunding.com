@@ -253,10 +253,9 @@ function toggleFree(on){
    przy rejestracji/logowaniu, prefiks numeru, KYC, IP zgloszenia). `desk`
    zostaje jak byl (sam lejek) — steruje Telegramem, nie tym filtrem. */
 const isFreeOrigin=t=>!!(t&&t.origin&&t.origin.free)||(t&&t.desk==='free');
-const freeCheckbox=()=>`<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;user-select:none"
+const freeCheckbox=()=>`<label style="display:flex;align-items:flex-start;gap:6px;font-size:12.5px;cursor:pointer;user-select:none"
     title="Free-funnel traffic: a lead from the free funnel, a free-program grant, or any Africa signal (IP at sign-up / sign-in, phone prefix, KYC). Unticking hides them.">
-    <input type="checkbox" ${FREE_SHOWN?'checked':''} onchange="toggleFree(this.checked)"
-      style="width:15px;height:15px;accent-color:var(--acc)">Free</label>`;
+    <input type="checkbox" ${FREE_SHOWN?'checked':''} onchange="toggleFree(this.checked)">Free</label>`;
 /* Chip mowi nie tylko ZE free, ale i SKAD: kraj obok, powody w tooltipie —
    inaczej „Free" przy kliencie z polskim KYC wyglada jak blad panelu. */
 const COUNTRY_VIA={kyc:'KYC document',phone:'phone prefix at checkout',login:'IP at last sign-in',
@@ -900,8 +899,8 @@ const VIEWS={
           <input id="sim-count" class="inp" type="number" min="1" max="50" value="5"></div>
       </div>
       <button class="btn-p" onclick="genSim()">Generate simulated accounts</button>
-      <label style="display:flex;align-items:center;gap:9px;margin-top:14px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="sim-fb" ${poolData.sim_fallback?'checked':''} onchange="setSimFallback(this.checked)" style="width:16px;height:16px;accent-color:var(--acc)">
+      <label style="display:flex;align-items:flex-start;gap:9px;margin-top:14px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="sim-fb" ${poolData.sim_fallback?'checked':''} onchange="setSimFallback(this.checked)">
         Auto-provision simulated credentials when the pool has no matching account
       </label>
       <p class="muted" style="font-size:12px;margin-top:6px">With this on, a paid challenge never waits: if no free account of the right size is in the pool, the platform generates simulated credentials and activates the account right away.</p>
@@ -918,8 +917,8 @@ const VIEWS={
           <input id="real-count" class="inp" type="number" min="1" max="10" value="1"></div>
       </div>
       <button class="btn-p" onclick="genReal()" ${poolData.can_generate?'':'disabled'}>Generate real MT5 accounts</button>
-      <label style="display:flex;align-items:center;gap:9px;margin-top:14px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="real-fb" ${poolData.real_fallback?'checked':''} onchange="setRealFallback(this.checked)" style="width:16px;height:16px;accent-color:var(--acc)">
+      <label style="display:flex;align-items:flex-start;gap:9px;margin-top:14px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="real-fb" ${poolData.real_fallback?'checked':''} onchange="setRealFallback(this.checked)">
         Auto-provision a real web MT5 demo when the pool has no matching account
       </label>
       <p class="muted" style="font-size:12px;margin-top:6px">Runs before the simulated fallback. Each open takes ~20–30 s and needs the browser channel above.</p>
@@ -928,8 +927,8 @@ const VIEWS={
     <div class="sec-card card-md">
       <h3>Copytrading accounts</h3>
       <p class="muted" style="font-size:12.5px;margin-bottom:14px">The Copytrading add-on ($299) is the only product that gives the buyer a <b>real</b> MT5 account. Everything else runs on local credentials. Each real account costs us a monthly fee at the provider, so this stays off until the channel is proven.</p>
-      <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="copy-real" ${poolData.copytrading_real?'checked':''} onchange="setCopytradingReal(this.checked)" style="width:16px;height:16px;accent-color:var(--acc)">
+      <label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="copy-real" ${poolData.copytrading_real?'checked':''} onchange="setCopytradingReal(this.checked)">
         Provision real MT5 accounts for Copytrading purchases
       </label>
       <p class="muted" style="font-size:12px;margin-top:6px">Off: those accounts get local credentials like everyone else, and the add-on stays what it is — a written permission to copy between the trader's own accounts. Turning this off never takes a real account away from someone who already has one.</p>
@@ -1280,36 +1279,137 @@ function renderMailInbox(){
 /* ---------- newsletter: lista zapisów ze strony + wysyłka do wszystkich ---------- */
 async function renderNewsletter(){
   if(!window._nl){try{window._nl=await api('/api/admin/newsletter')}catch(e){window._nl={subscribers:[],active:0,total:0,error:e.message}}}
-  const d=window._nl, q=(window._nlQ||'').toLowerCase();
-  const rows=(d.subscribers||[]).filter(s=>!q||s.email.includes(q));
+  if(!window._nlp){try{window._nlp=await api('/api/admin/newsletter/popup');window._nlp.saved=window._nlp.config.variant}catch(e){window._nlp=null}}
+  const d=window._nl, q=(window._nlQ||'').toLowerCase(), kamp=window._nlCamp||'';
+  const rows=(d.subscribers||[]).filter(s=>(!q||s.email.includes(q))&&(!kamp||s.campaign===kamp));
   $('view').innerHTML=`
     <div class="toolbar">${mailSwitches()}
       ${searchBox('nl-q','_nlQ','renderNewsletter','Search email…')}
+      ${(d.campaigns||[]).length?`<select class="inp" aria-label="Campaign" onchange="window._nlCamp=this.value;renderNewsletter()">
+        <option value="">All campaigns</option>${d.campaigns.map(c=>`<option value="${esc(c)}"${c===kamp?' selected':''}>${esc(nlpKampania(c))}</option>`).join('')}</select>`:''}
       <span class="count-pill">${d.active} active · ${d.total} total</span>
-      <a class="btn-o sm" href="/api/admin/newsletter.csv" onclick="return nlCsv(event)">Export CSV</a>
+      <a class="btn-o sm" href="/api/admin/newsletter.csv" onclick="return nlCsv(event)">Export CSV${kamp?' (campaign)':''}</a>
       <button class="btn-p sm" onclick="openNlCompose()">Send to all</button>
     </div>
     ${d.error?`<p class="lead-statline" style="color:var(--gold)">⚠ ${esc(d.error)}</p>`:''}
-    <p class="muted" style="font-size:12.5px;margin:0 0 12px">Signups from the landing page popup and the strip above the footer.
-      Every welcome email carries the <b>${esc(d.code||'WELCOME10')}</b> code; every newsletter carries an unsubscribe link.</p>
+    ${window._nlp?nlpCard(window._nlp):''}
+    <p class="muted" style="font-size:12.5px;margin:0 0 12px">Signups from the popup and the strip above the footer.
+      Every newsletter carries an unsubscribe link. Giveaway draws: pick the campaign above, export the CSV and draw from it.</p>
     ${rows.length?`<div class="tbl-wrap rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.newsletter">
-      <thead><tr><th>Email</th><th>Source</th><th>Subscribed</th><th>Status</th></tr></thead>
+      <thead><tr><th>Email</th><th>Source</th><th>Campaign</th><th>Subscribed</th><th>Status</th></tr></thead>
       <tbody>${rows.map(s=>`<tr>
         <td class="rt-main" data-l="Email">${esc(s.email)}</td>
         <td class="muted" data-l="Source">${esc(s.source||'—')}</td>
+        <td class="muted" data-l="Campaign">${esc(s.campaign?nlpKampania(s.campaign):'—')}</td>
         <td class="muted" data-l="Subscribed" data-sort="${esc(s.created_at||'')}">${s.created_at?dstr(s.created_at):'—'}</td>
         <td data-l="Status"><span class="status ${s.unsubscribed_at?'failed':'paid'}"><span class="dot"></span>${s.unsubscribed_at?'unsubscribed':'active'}</span></td>
       </tr>`).join('')}</tbody></table></div>`
       :`<div class="empty"><h3>No subscribers yet</h3><p>Signups from the website land here.</p></div>`}`;
+  nlpPodglad();
 }
 async function nlCsv(e){
   /* Fetch z tokenem admina — zwykły link nie niesie nagłówka. */
   e.preventDefault();
-  try{const r=await fetch('/api/admin/newsletter.csv',{headers:H()});const b=await r.blob();
+  const kamp=window._nlCamp||'';
+  try{const r=await fetch('/api/admin/newsletter.csv'+(kamp?'?campaign='+encodeURIComponent(kamp):''),{headers:H()});const b=await r.blob();
     const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='newsletter.csv';a.click();
     setTimeout(()=>URL.revokeObjectURL(a.href),2000);
   }catch(err){toast('Error: '+err.message,'err')}
   return false;
+}
+/* ---------- popup newslettera: wyłącznik, wariant, teksty, opóźnienie ---------- */
+const NLP_WARIANTY=[
+  ['discount','Discount','% off the first challenge'],
+  ['flash','Flash sale','% off with a countdown'],
+  ['giveaway','Giveaway','Win a free account'],
+  ['updates','Updates only','No incentive'],
+];
+function nlpKampania(c){
+  const [v,x]=String(c).split(':');
+  const n={discount:'Discount',flash:'Flash sale',giveaway:'Giveaway',updates:'Updates'}[v]||v;
+  return x?`${n} · ${x}`:n;
+}
+function nlpStan(){
+  /* Bieżący stan formularza (albo zapisany config, zanim ktoś coś ruszy). */
+  const c={...(window._nlp?.config||{})}, f=$('nlp-form');
+  if(!f)return c;
+  c.on=$('nlp-on').checked; c.variant=f.dataset.variant;
+  ['code','ends_at','prize','draw_date','title','body','cta','delay_s'].forEach(k=>{const el=$('nlp-'+k);if(el)c[k]=el.value});
+  c.delay_s=+c.delay_s||180;
+  if(c.ends_at&&!/[zZ]|[+-]\d\d:\d\d$/.test(c.ends_at))c.ends_at=new Date(c.ends_at).toISOString();
+  return c;
+}
+function nlpTekst(t,c){
+  const pct=((window._nlp?.coupons||[]).find(x=>x.code===c.code)||{}).pct??10;
+  const d=c.draw_date?new Date(c.draw_date+'T12:00:00Z'):null;
+  return String(t||'').replace(/\{pct\}/g,pct).replace(/\{prize\}/g,c.prize||'$50K')
+    .replace(/\{draw_date\}/g,d?d.toLocaleDateString('en-US',{month:'long',day:'numeric',timeZone:'UTC'}):'…');
+}
+function nlpPodglad(){
+  const c=nlpStan(), def=(window._nlp?.defaults||{})[c.variant]||{}, box=$('nlp-prev');
+  if(!box)return;
+  box.innerHTML=`<div class="nlp-prev-card${c.on?'':' off'}">
+    ${c.variant==='flash'?'<span class="nlp-prev-tag">Ends in 2d 4h 10m</span>':c.variant==='giveaway'?`<span class="nlp-prev-tag">Giveaway · draw on ${esc(nlpTekst('{draw_date}',c))}</span>`:''}
+    <b>${esc(nlpTekst(c.title||def.title,c))}</b><p>${esc(nlpTekst(c.body||def.body,c))}</p>
+    <span class="nlp-prev-btn">${esc(nlpTekst(c.cta||def.cta,c))}</span></div>
+    ${c.on?'':'<p class="muted" style="font-size:12px;margin:8px 0 0">The popup is off. The footer strip still uses this offer.</p>'}`;
+}
+function nlpCard(n){
+  const c=n.config, live=n.live||{};
+  const dl=c.ends_at?new Date(c.ends_at):null;
+  const lok=dl&&!isNaN(dl)?new Date(dl.getTime()-dl.getTimezoneOffset()*6e4).toISOString().slice(0,16):'';
+  const def=(n.defaults||{})[c.variant]||{};
+  const pole=(id,label,html)=>`<label class="nlp-f" for="nlp-${id}"><span>${label}</span>${html}</label>`;
+  const kody=`<select id="nlp-code" class="inp" onchange="nlpPodglad()">${(n.coupons||[]).map(k=>
+    `<option value="${esc(k.code)}"${k.code===c.code?' selected':''}>${esc(k.code)} · ${k.pct}%</option>`).join('')}</select>`;
+  const pola={
+    discount:pole('code','Coupon code',kody),
+    flash:pole('code','Coupon code',kody)+pole('ends_at','Ends (your time)',`<input id="nlp-ends_at" type="datetime-local" class="inp" value="${esc(lok)}" oninput="nlpPodglad()">`),
+    giveaway:pole('prize','Prize',`<input id="nlp-prize" class="inp" maxlength="30" value="${esc(c.prize||'')}" placeholder="$50K" oninput="nlpPodglad()">`)
+      +pole('draw_date','Draw date',`<input id="nlp-draw_date" type="date" class="inp" value="${esc(c.draw_date||'')}" oninput="nlpPodglad()">`),
+    updates:'',
+  }[c.variant];
+  const opoz=[60,120,180,300,600,900,1200];
+  return `<div class="panel nlp" id="nlp-form" data-variant="${esc(c.variant)}">
+    <div class="nlp-head">
+      <div><h3>Signup popup</h3>
+        <p class="muted">Shown after the visitor spends the time below on the public pages. The footer strip gives the same offer.</p></div>
+      <label class="nlp-sw"><span>${c.on?'On':'Off'}</span><label class="switch"><input type="checkbox" id="nlp-on" ${c.on?'checked':''}
+        onchange="this.closest('.nlp-sw').firstElementChild.textContent=this.checked?'On':'Off';nlpPodglad()"><i></i></label></label>
+    </div>
+    <div class="nlp-vars" role="radiogroup" aria-label="Popup offer">${NLP_WARIANTY.map(([k,t,o])=>
+      `<button type="button" role="radio" aria-checked="${k===c.variant}" class="nlp-var${k===c.variant?' on':''}" onclick="nlpWariant('${k}')"><b>${t}</b><span>${o}</span></button>`).join('')}</div>
+    <div class="nlp-grid">
+      <div class="nlp-fields">
+        ${pola}
+        ${pole('title','Headline',`<input id="nlp-title" class="inp" maxlength="120" value="${esc(c.title||'')}" placeholder="${esc(def.title||'')}" oninput="nlpPodglad()">`)}
+        ${pole('body','Text',`<textarea id="nlp-body" class="inp" rows="3" maxlength="400" placeholder="${esc(def.body||'')}" oninput="nlpPodglad()">${esc(c.body||'')}</textarea>`)}
+        ${pole('cta','Button',`<input id="nlp-cta" class="inp" maxlength="40" value="${esc(c.cta||'')}" placeholder="${esc(def.cta||'')}" oninput="nlpPodglad()">`)}
+        ${pole('delay_s','Show after',`<select id="nlp-delay_s" class="inp">${opoz.map(s=>`<option value="${s}"${s===c.delay_s?' selected':''}>${s<120?s+' seconds':s/60+' minutes'} on the site</option>`).join('')}</select>`)}
+        <p class="muted" style="font-size:11.5px;margin:0">Empty fields use the default text. Placeholders: {pct}, {prize}, {draw_date}.${c.variant==='flash'?' Coupon codes do not expire at checkout; the popup and its offer stop at the end time.':''}</p>
+      </div>
+      <div class="nlp-side"><span class="muted" style="font-size:12px">Preview</span><div id="nlp-prev"></div></div>
+    </div>
+    <div class="nlp-foot">
+      <span class="muted" style="font-size:12px">Live now: <b>${esc(live.on===false?'popup off':nlpKampania(live.campaign||'updates'))}</b>${
+        c.variant!==n.saved?' · <span style="color:var(--gold)">unsaved changes</span>'
+        :live.variant&&live.variant!==n.saved?' (the saved offer has ended)':''}</span>
+      <button type="button" class="btn-p sm" id="nlp-save" onclick="nlpZapisz(this)">Save popup</button>
+    </div>
+  </div>`;
+}
+function nlpWariant(v){
+  const c=nlpStan();c.variant=v;c.title=c.body=c.cta='';
+  window._nlp={...window._nlp,config:c};renderNewsletter();
+}
+async function nlpZapisz(btn){
+  const c=nlpStan();
+  await busy(btn,null,async()=>{
+    try{window._nlp=await api('/api/admin/newsletter/popup',{method:'POST',body:JSON.stringify(c)});window._nlp.saved=window._nlp.config.variant;
+      toast(c.on?'✅ Popup saved. It is live on the site within a minute.':'✅ Saved. The popup is off.','ok',7000);
+      renderNewsletter();
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
 }
 function openNlCompose(){
   const w=document.createElement('div');w.id='nl-modal';w.className='modal-wrap';
@@ -1720,14 +1820,18 @@ function renderPayoutsView(){
       <td data-l="Trader">${esc(r.trader_email||'—')}${freeChip(r)}</td>
       <td class="num" data-l="Profit">$${fmt(r.profit_amount)}</td><td class="num up" data-l="Amount" data-sort="${r.total??r.trader_share}">$${fmt(r.total??r.trader_share)}${r.fee_refund?`<div class="muted" style="font-size:var(--fs-cap);font-weight:400">incl. $${fmt(r.fee_refund)} fee refund</div>`:''}</td>
       <td data-l="Method">${(()=>{const d=r.details||{};
+        /* Wniosek bez danych płatniczych (przegląd / czeka na tradera) nie ma
+           jeszcze metody — „—" zamiast zgadniętego USDT. */
+        if(r.kind==='request'&&!d.address)return '<span class="muted">—</span>';
         const label=r.method==='usdt'?'USDT':r.method==='vusdt'?'vUSDT':r.method==='wise'?'Wise':'Bank';
-        if(r.method==='usdt'||r.method==='vusdt')return esc(label)+payAddrHtml(d.network,d.address);
+        const nowy=r.wallet_new?' <span class="wallet-new" title="Different from the wallet on this trader\'s previous payout">New wallet</span>':'';
+        if(r.method==='usdt'||r.method==='vusdt')return esc(label)+nowy+payAddrHtml(d.network,d.address);
         const info=r.method==='wise'?(d.email||'')
           :[d.holder,d.iban,d.swift,d.bank_name].filter(Boolean).join(' · ');
         return `${esc(label)}${info?`<div class="muted mono" style="font-size:var(--fs-cap);max-width:260px;word-break:break-all">${esc(info)}</div>`:''}`})()}</td>
       <td data-l="Status"><span class="status ${r.status==='paid'?'paid':(r.status==='pending'||r.status==='review')?'pending'
         :(r.status==='approved'||r.status==='unlocked')?'active':'failed'}"><span class="dot"></span>${
-        esc(r.kind!=='request'?r.status:r.status==='review'?'to review':r.status==='unlocked'?'awaiting trader'
+        esc(r.kind!=='request'?r.status:r.status==='review'?'to review':r.status==='unlocked'?'awaiting payment details'
           :r.status==='pending'&&r.method==='usdt'?'to send':r.status)}</span>
         ${r.status==='rejected'&&r.reject_reason?`<div class="muted" style="font-size:var(--fs-cap);max-width:200px">${esc(r.reject_reason)}</div>`:''}</td>
       <td class="rt-acts" style="white-space:nowrap">${r.kind!=='payout'?'<span class="muted">—</span>'
@@ -1740,10 +1844,10 @@ function renderPayoutsView(){
             <button class="btn-o sm" onclick="revokeCert(${r.id})">Revoke</button>`
           :`<button class="btn-o sm" onclick="askCertLp(${r.id})">Generate</button>`}</td>
       <td class="rt-acts" style="text-align:right;white-space:nowrap">${r.kind==='request'&&r.status==='review'
-        ?`<button class="btn-p sm" onclick="unlockPayout(${r.id},this)" title="The trader then chooses the amount and wallet">Approve request</button>
+        ?`<button class="btn-p sm" onclick="unlockPayout(${r.id},this)" title="Confirms the requested amount; the trader then adds or confirms the payment details">Approve request</button>
           <button class="btn-o sm" onclick="rejectPayout(${r.id},this)">Reject</button>`
         :r.kind==='request'&&r.status==='unlocked'
-        ?`<span class="muted" style="font-size:var(--fs-cap)">Waiting for the amount &amp; wallet</span>
+        ?`<span class="muted" style="font-size:var(--fs-cap)">Waiting for the payment details</span>
           <button class="btn-o sm" onclick="rejectPayout(${r.id},this)">Reject</button>`
         :r.kind==='request'&&r.status==='pending'
         ?(r.method==='vusdt'
@@ -1756,7 +1860,7 @@ function renderPayoutsView(){
         +XBTN(`deletePayoutRow('${r.kind}',${r.id},${r.trader_share},'${jsq(r.account_login||'')}')`,
               r.kind==='payout'?'Delete payout':'Delete request')}</td></tr>`).join('')}
     </tbody></table></div>
-    <p class="muted" style="font-size:11.5px;margin-top:10px">Two steps: <b>Approve request</b> lets the trader choose the amount and wallet. For USDT, send the full <b>Amount</b> and click <b>Mark as paid</b>. For vUSDT the transfer settles on Polygon by itself. The first payout on an account already includes the challenge fee refund in its Amount.</p>`
+    <p class="muted" style="font-size:11.5px;margin-top:10px">Two steps: the trader requests an amount; <b>Approve request</b> confirms it and the trader adds a wallet (or confirms the saved one — a change needs a code from their e-mail; <b>New wallet</b> marks it). For USDT, send the full <b>Amount</b> and click <b>Mark as paid</b>. For vUSDT the transfer settles on Polygon by itself. The first payout on an account already includes the challenge fee refund in its Amount.</p>`
     /* Gdy WSZYSTKO, co jest w ksiedze, to wiersze archiwalne, zwykle "No payouts
        match" wskazywaloby na wyszukiwarke -- a schowal je przelacznik. */
     :!widoczne.length&&ukryte?`<div class="empty"><h3>Only imported payouts here</h3>
@@ -3808,19 +3912,19 @@ function renderOffers(){
       <div id="of-keys-box" style="display:none;margin-top:10px">
         <div class="muted" style="font-size:12px;margin-bottom:6px">Covered plans</div>
         <div style="display:flex;flex-wrap:wrap;gap:8px 14px">${prods.map(p=>`
-          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer">
-            <input type="checkbox" class="of-key" value="${esc(p.key)}" style="width:15px;height:15px;accent-color:var(--acc)">
-            ${esc(p.label)} <span class="muted">$${fmt0(p.price_usd)}</span>
+          <label style="display:flex;align-items:flex-start;gap:6px;font-size:12.5px;cursor:pointer">
+            <input type="checkbox" class="of-key" value="${esc(p.key)}">
+            <span>${esc(p.label)} <span class="muted">$${fmt0(p.price_usd)}</span></span>
           </label>`).join('')}</div>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:10px 18px;margin-top:12px;font-size:13px">
-        <label style="display:flex;align-items:center;gap:7px;cursor:pointer">
-          <input type="checkbox" id="of-single" disabled style="width:15px;height:15px;accent-color:var(--acc)">
-          Single use <span class="muted">(personal offers only — burns after one purchase)</span></label>
-        <label style="display:flex;align-items:center;gap:7px;cursor:pointer">
-          <input type="checkbox" id="of-mail" style="width:15px;height:15px;accent-color:var(--acc)"> Send e-mail</label>
-        <label style="display:flex;align-items:center;gap:7px;cursor:pointer">
-          <input type="checkbox" id="of-push" style="width:15px;height:15px;accent-color:var(--acc)"> Send push</label>
+        <label style="display:flex;align-items:flex-start;gap:7px;cursor:pointer">
+          <input type="checkbox" id="of-single" disabled>
+          <span>Single use <span class="muted">(personal offers only — burns after one purchase)</span></span></label>
+        <label style="display:flex;align-items:flex-start;gap:7px;cursor:pointer">
+          <input type="checkbox" id="of-mail"> Send e-mail</label>
+        <label style="display:flex;align-items:flex-start;gap:7px;cursor:pointer">
+          <input type="checkbox" id="of-push"> Send push</label>
       </div>
       <p class="muted" style="font-size:12px;margin:8px 0 12px">The portal always shows a countdown banner to everyone the offer covers. E-mail and push go out only if ticked here.</p>
       <button class="btn-p" onclick="busy(this,'Creating…',offerCreate)">Create offer</button>
@@ -4381,7 +4485,7 @@ async function renderPayouts(id){
       <div><label class="muted" style="font-size:12px">Note (optional)</label>
         <input id="po-note" class="inp" placeholder="e.g. 1st payout"></div>
     </div>
-    <label style="display:flex;align-items:center;gap:8px;margin:12px 0;font-size:12.5px">
+    <label style="display:flex;align-items:flex-start;gap:8px;margin:12px 0;font-size:12.5px">
       <input type="checkbox" id="po-lp" checked>
       <span>Show this payout on the landing page strip
         <span class="muted">(the certificate, its QR and the verification link are created either
@@ -4823,7 +4927,7 @@ async function rejectPayout(id,btn){
 async function unlockPayout(id,btn){
   await busy(btn,null,async()=>{
     try{await api(`/api/admin/payout-requests/${id}/approve`,{method:'POST'});
-      toast('Approved. The trader now chooses the amount and USDT wallet.','ok');go('payouts');
+      toast('Approved. The trader now adds or confirms the payment details.','ok');go('payouts');
     }catch(e){toast('Error: '+e.message,'err')}
   });
 }
@@ -5027,7 +5131,7 @@ function reachChannelsHtml(rc){
     /* Puste pole ilosci = „jak globalnie" — placeholder pokazuje wtedy liczbe,
        ktora naprawde poleci, zeby admin nie musial jej szukac wyzej w karcie. */
     return `<div class="mod-row" style="flex-wrap:wrap;align-items:center;gap:10px">
-      <label style="display:flex;gap:9px;align-items:center;cursor:pointer;flex:1;min-width:0">
+      <label style="display:flex;gap:9px;align-items:flex-start;cursor:pointer;flex:1;min-width:0">
         <input type="checkbox" data-rcch="${i}" ${k.on?'checked':''} onchange="reachChannelEdit()">
         <span style="min-width:0">
           <span class="lbl" style="display:block">${esc(k.label||('@'+k.username))}</span>
@@ -5924,9 +6028,9 @@ async function openGrant(traderId){
         <select id="g-reason" class="inp" onchange="document.getElementById('g-note').value=this.value">
           ${GRANT_REASONS.map(r=>`<option>${r}</option>`).join('')}</select></div>
       <input id="g-note" class="inp" value="${GRANT_REASONS[0]}" placeholder="Label on the e-mail badge">
-      <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="g-funded" style="width:16px;height:16px;accent-color:var(--acc)">
-        Start as <b>funded</b>, skipping the evaluation entirely</label>
+      <label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="g-funded">
+        <span>Start as <b>funded</b>, skipping the evaluation entirely</span></label>
       <button class="btn-p lg" style="width:100%" id="g-go" onclick="submitGrant()">Grant &amp; create account</button>
       <p class="hint">Trader gets an e-mail with the allocation and MT5 credentials.</p>
     </div></div>`;
@@ -6189,28 +6293,28 @@ async function openManualOrder(traderId,lead){
             placeholder="e.g. 30" oninput="const p=$('mo-partner');if(p)p.checked=false;moPrice()"
             title="Recalculates the amount from the list price and shows a crossed-out list price on the payment page"></div>
       </div>
-      ${pct?`<label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="mo-partner"${lead?' checked':''} onchange="moPrice()" style="width:16px;height:16px;accent-color:var(--acc)">
+      ${pct?`<label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="mo-partner"${lead?' checked':''} onchange="moPrice()">
         <span>Partner price <b>−${pct}%</b>
           <span class="muted">— the rate agreed for customers the partner brings in</span></span></label>`:''}
-      <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="mo-bogo"${bogoOn?' checked':''} style="width:16px;height:16px;accent-color:var(--acc)">
+      <label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="mo-bogo"${bogoOn?' checked':''}>
         <span><b>Buy 1 Get 1 Free</b>
           <span class="muted">— a second account of the same size is created automatically once this order is paid</span></span></label>
-      <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="mo-weekend" onchange="moWeekend()" style="width:16px;height:16px;accent-color:var(--acc)">
+      <label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="mo-weekend" onchange="moWeekend()">
         <span><b>Weekend Trading</b> <b>+$199</b>
           <span class="muted">— 2 extra trading days/week; added on top of the amount, outside the discount</span></span></label>
-      <label id="mo-wkfree-row" style="display:none;align-items:center;gap:9px;font-size:13px;cursor:pointer;margin-left:25px">
-        <input type="checkbox" id="mo-wkfree" onchange="moPrice()" style="width:16px;height:16px;accent-color:var(--acc)">
+      <label id="mo-wkfree-row" style="display:none;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer;margin-left:25px">
+        <input type="checkbox" id="mo-wkfree" onchange="moPrice()">
         <span><b>On the house</b>
           <span class="muted">— the add-on still lands on the account, but the $199 is not charged; the page shows it as FREE</span></span></label>
-      <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="mo-copy" onchange="moPrice()" style="width:16px;height:16px;accent-color:var(--acc)">
+      <label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="mo-copy" onchange="moPrice()">
         <span><b>Copytrading</b> <b>+$299</b>
           <span class="muted">— copying between the customer's own accounts and more than one device; the account is provisioned on a real MT5 account when that is switched on in MT5 Pool</span></span></label>
-      <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="mo-funded" style="width:16px;height:16px;accent-color:var(--acc)">
+      <label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="mo-funded">
         <span><b>Open as funded</b>
           <span class="muted">— the account skips the evaluation and starts straight in the funded phase once this order is paid</span></span></label>
       <div class="stack" id="mo-crypto">
@@ -6218,11 +6322,11 @@ async function openManualOrder(traderId,lead){
           <input id="mo-network" class="inp" placeholder="e.g. USDT · TRC20" value="${esc(lastWallet().network||'')}"></div>
         <div><label class="muted" style="font-size:12px">Wallet address <span style="opacity:.65">(goes into the e-mail)</span></label>
           <input id="mo-address" class="inp" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="Paste the wallet address" value="${esc(lastWallet().address||'')}"></div>
-        <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
-          <input type="checkbox" id="mo-awaiting" checked style="width:16px;height:16px;accent-color:var(--acc)">
-          Mark as <b>awaiting crypto payment</b></label>
-        <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer">
-          <input type="checkbox" id="mo-mail" checked style="width:16px;height:16px;accent-color:var(--acc)">
+        <label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="mo-awaiting" checked>
+          <span>Mark as <b>awaiting crypto payment</b></span></label>
+        <label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="mo-mail" checked>
           E-mail the customer the payment instructions</label>
       </div>
       <button class="btn-p lg" style="width:100%" id="mo-go" onclick="submitManualOrder()">Create order</button>

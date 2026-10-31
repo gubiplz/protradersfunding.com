@@ -1885,7 +1885,8 @@ def my_accounts(trader: Trader = Depends(auth.current_trader)):
             paid[p.account_id] = paid.get(p.account_id, 0.0) + p.trader_share
         # Otwarty wniosek per konto — portal zamiast „Request payout" pokazuje
         # „w przeglądzie" albo, po odblokowaniu, formularz kwoty i portfela.
-        otwarte = {r.account_id: {"id": r.id, "status": r.status} for r in (
+        otwarte = {r.account_id: {"id": r.id, "status": r.status,
+                                  "amount": round(r.trader_share or 0, 2)} for r in (
             session.query(PayoutRequest)
             .filter(PayoutRequest.account_id.in_([a.id for a in accs]),
                     PayoutRequest.status.in_(PAYOUT_OTWARTE)).all() if accs else [])}
@@ -2099,7 +2100,7 @@ def _kwota_wyplaty(acc: Account, amount: float | None) -> float:
 
 @app.post("/api/accounts/{account_id}/payout-request")
 def request_payout(account_id: int, trader: Trader = Depends(auth.current_trader),
-                   payload: PayoutReqIn | None = None):  # body opcjonalny — krok 1 nic z niego nie bierze
+                   payload: PayoutReqIn | None = None):  # body opcjonalny — bez kwoty = cała działka
     session = SessionLocal()
     try:
         acc = session.get(Account, account_id)
@@ -2126,23 +2127,27 @@ def request_payout(account_id: int, trader: Trader = Depends(auth.current_trader
         if tr.kyc_status != "approved":
             raise HTTPException(403, "Complete KYC verification first")
         # Wypłaty on-demand: JEDEN otwarty wniosek na konto. Drugi „pending" to
-        # niemal zawsze dubel z niecierpliwości — przegląd trwa do 24 h i dubel
-        # tylko rozjeżdża księgowanie (dwa wnioski na ten sam zysk).
+        # niemal zawsze dubel z niecierpliwości — dubel tylko rozjeżdża
+        # księgowanie (dwa wnioski na ten sam zysk).
         otwarty = (session.query(PayoutRequest)
                    .filter(PayoutRequest.account_id == acc.id,
                            PayoutRequest.status.in_(PAYOUT_OTWARTE)).first())
         if otwarty:
             raise HTTPException(400, "A payout request for this account is already under review")
         profit = _zysk_do_wyplaty(acc)
-        # Krok 1 z 2 — dla USDT i dla testowego vUSDT: sama prośba, bez kwoty
-        # i portfela. Admin ogląda konto; kwotę i adres trader poda dopiero po
-        # odblokowaniu (POST /api/me/payout-requests/{id}/details). Próg minimum
-        # sprawdzamy już teraz — wniosek, z którego i tak nie da się wypłacić,
-        # nie powinien czekać na przegląd.
-        available = _kwota_wyplaty(acc, None)
-        method = "vusdt" if vusdt.enabled() else "usdt"
+        # Krok 1 z 2 — dla USDT i dla testowego vUSDT: trader podaje samą KWOTĘ
+        # (bez kwoty = cała działka). Admin ogląda konto, historię i KYC; portfel
+        # trader poda (albo potwierdzi zapisany) dopiero po akceptacji
+        # (POST /api/me/payout-requests/{id}/details). Progi minimum sprawdzamy
+        # już teraz — wniosek, z którego i tak nie da się wypłacić, nie powinien
+        # czekać na przegląd.
+        share = _kwota_wyplaty(acc, payload.amount if payload else None)
+        # Metoda zostaje PUSTA do kroku 2. Wcześniej wpisywaliśmy tu „vusdt"
+        # z flagi środowiska, więc trader widział vUSDT na wniosku, zanim podał
+        # jakikolwiek adres — a odrzucony na przeglądzie wniosek zostawał z tym
+        # napisem na zawsze. Kolumna jest NOT NULL, stąd "" zamiast None.
         pr = PayoutRequest(account_id=acc.id, trader_id=tr.id, profit_amount=profit,
-                           trader_share=available, method=method, details=None,
+                           trader_share=share, method="", details=None,
                            status="review")
         session.add(pr)
         try:
@@ -2151,18 +2156,25 @@ def request_payout(account_id: int, trader: Trader = Depends(auth.current_trader
             session.rollback()
             raise HTTPException(400, "A payout request for this account is already under review")
         notify.send("payout_requested", tr.email, {"name": tr.full_name or tr.email,
-                    "login": acc.login, "review": True})
-        notify.notify_admins("admin_payout", f"Payout request to review ({acc.login})", tr.email)
-        return {"id": pr.id, "profit_amount": profit, "available": available,
+                    "login": acc.login, "review": True, "amount": f"${share:,.0f}"})
+        notify.notify_admins("admin_payout",
+                             f"Payout request ${share:,.0f} to review ({acc.login})", tr.email)
+        return {"id": pr.id, "profit_amount": profit, "available": share, "amount": share,
                 "status": "review"}
     finally:
         session.close()
 
 
 class PayoutDetailsIn(BaseModel):
-    amount: float = Field(allow_inf_nan=False)
+    # Kwotę trader podał w kroku 1 i ją zatwierdzono. Tu może ją najwyżej
+    # zmniejszyć; brak kwoty = zatwierdzona (przycięta do salda na teraz).
+    amount: float | None = Field(default=None, allow_inf_nan=False)
     network: str = Field(default="", max_length=20)
     address: str = Field(default="", max_length=120)
+    # True = wyślij na zapisany portfel (podpowiadany od drugiej wypłaty).
+    use_saved: bool = False
+    # Kod z maila — wymagany, gdy podany portfel różni się od zapisanego.
+    code: str = Field(default="", max_length=6)
     # Tryb testowy vUSDT: token z widgetu Cloudflare Turnstile w modalu kroku 2.
     turnstile_token: str | None = Field(default=None, max_length=2048)
 
@@ -2174,21 +2186,120 @@ class PayoutDetailsIn(BaseModel):
         return v
 
 
+def _teraz_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _portfel_czysty(network: str, address: str, testowy: bool) -> dict:
+    """Waliduje portfel w trybie wypłat, który działa TERAZ, i zwraca
+    {network, address} w postaci do zapisu (sieć wielkimi literami, adres
+    vUSDT z sumą kontrolną)."""
+    if testowy:
+        try:
+            d = json.loads(vusdt.details_json({"network": network, "address": address}))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    else:
+        d = json.loads(_payout_details_json("usdt", {"network": network, "address": address}))
+    return {"network": d["network"], "address": d["address"]}
+
+
+def _ten_sam_portfel(a: dict | None, b: dict | None) -> bool:
+    if not a or not b or (a.get("network") or "").upper() != (b.get("network") or "").upper():
+        return False
+    x, y = str(a.get("address") or ""), str(b.get("address") or "")
+    # Adresy 0x nie rozróżniają wielkości liter (suma kontrolna to tylko zapis),
+    # base58 (TRC-20) już tak.
+    return x.lower() == y.lower() if x.lower().startswith("0x") else x == y
+
+
+def _zapisany_portfel(tr: Trader) -> dict | None:
+    if not tr.payout_address:
+        return None
+    return {"network": tr.payout_network or "", "address": tr.payout_address}
+
+
+def _kod_portfela_ok(tr: Trader, nowy: dict, code: str) -> None:
+    """Zmiana zapisanego portfela: kod z maila, ważny 15 min, przypięty do
+    TEGO adresu, o który trader prosił — inny adres z tym kodem nie przejdzie."""
+    try:
+        czekajacy = json.loads(tr.payout_wallet_new or "null")
+    except ValueError:
+        czekajacy = None
+    wygasa = tr.payout_wallet_code_exp
+    if wygasa is not None and wygasa.tzinfo:
+        wygasa = wygasa.replace(tzinfo=None)
+    if not (code and tr.payout_wallet_code
+            and secrets.compare_digest(code.strip(), tr.payout_wallet_code)
+            and wygasa and wygasa > _teraz_naive()
+            and _ten_sam_portfel(czekajacy, nowy)):
+        raise HTTPException(400, "This wallet is different from your saved one. Confirm the "
+                                 "change with the 6-digit code we e-mail you.")
+
+
+def _zapisz_portfel(tr: Trader, portfel: dict) -> None:
+    tr.payout_network = portfel["network"]
+    tr.payout_address = portfel["address"]
+    tr.payout_wallet_at = _teraz_naive()
+    tr.payout_wallet_new = tr.payout_wallet_code = tr.payout_wallet_code_exp = None
+
+
+def _portfel_widok(tr: Trader) -> dict:
+    z = _zapisany_portfel(tr)
+    return {"saved": bool(z), "network": z["network"] if z else None,
+            "address": z["address"] if z else None,
+            "updated_at": tr.payout_wallet_at.isoformat() if z and tr.payout_wallet_at else None,
+            # Token, w którym wyjdzie NASTĘPNA wypłata — portal pisze z tego etykiety.
+            "token": "vUSDT" if vusdt.enabled() else "USDT"}
+
+
+def _siec_wniosku(r: PayoutRequest) -> str | None:
+    try:
+        return (json.loads(r.details) or {}).get("network") if r.details else None
+    except ValueError:
+        return None
+
+
+def _nowe_portfele(session, rows) -> set[int]:
+    """Wnioski, których portfel różni się od portfela z poprzedniego wniosku
+    tego samego tradera — sygnał ryzyka dla admina („New wallet")."""
+    traderzy = {r.trader_id for r in rows if r.details}
+    if not traderzy:
+        return set()
+    historia: dict[int, list[tuple[int, dict]]] = {}
+    for r in (session.query(PayoutRequest)
+              .filter(PayoutRequest.trader_id.in_(traderzy), PayoutRequest.details.isnot(None))
+              .order_by(PayoutRequest.id).all()):
+        try:
+            d = json.loads(r.details) or {}
+        except ValueError:
+            continue
+        historia.setdefault(r.trader_id, []).append((r.id, d))
+    out = set()
+    for wpisy in historia.values():
+        for (_, poprzedni), (rid, biezacy) in zip(wpisy, wpisy[1:]):
+            if not _ten_sam_portfel(poprzedni, biezacy):
+                out.add(rid)
+    return out
+
+
 @app.post("/api/me/payout-requests/{req_id}/details")
 def submit_payout_details(req_id: int, payload: PayoutDetailsIn, request: Request,
                           trader: Trader = Depends(auth.current_trader)):
-    """Krok 2 z 2: po odblokowaniu przez admina trader wybiera kwotę i podaje
-    portfel. Kwotę liczymy od salda TERAZ, nie z chwili prośby — trader mógł
-    w międzyczasie handlować. Przy vUSDT (flaga testowa) podpisujemy transfer
-    od razu; przy zwykłym USDT wniosek czeka na „Mark as paid" admina."""
+    """Krok 2 z 2: po akceptacji admina trader podaje dane płatnicze — pierwszy
+    raz nowy portfel (zapisujemy go), przy kolejnych potwierdza zapisany albo
+    zmienia go kodem z maila. Kwota to ta zatwierdzona, przycięta do salda NA
+    TERAZ — trader mógł w międzyczasie handlować. Przy vUSDT (flaga testowa)
+    podpisujemy transfer od razu; przy zwykłym USDT wniosek czeka na
+    „Mark as paid" admina."""
     session = SessionLocal()
     try:
         pr = session.get(PayoutRequest, req_id)
         if not pr or pr.trader_id != trader.id:
             raise HTTPException(404, "Payout request not found")
         if pr.status == "review":
-            raise HTTPException(400, "Your request is still being reviewed. You can choose the "
-                                     "amount and wallet once it is approved.")
+            raise HTTPException(400, "Your request is still being reviewed. You can add your "
+                                     "payment details once it is approved.")
         if pr.status != "unlocked":
             raise HTTPException(400, "This payout request is no longer waiting for details")
         acc = session.get(Account, pr.account_id)
@@ -2198,20 +2309,33 @@ def submit_payout_details(req_id: int, payload: PayoutDetailsIn, request: Reques
         if tr.kyc_status != "approved":
             raise HTTPException(403, "Complete KYC verification first")
         profit = _zysk_do_wyplaty(acc)
-        share = _kwota_wyplaty(acc, payload.amount)
+        zatwierdzona = float(math.floor(pr.trader_share or 0))
+        if payload.amount is None:
+            share = _kwota_wyplaty(acc, min(zatwierdzona, math.floor(_payout_available(acc))))
+        else:
+            share = _kwota_wyplaty(acc, payload.amount)
+            if share > zatwierdzona:
+                raise HTTPException(400, f"The amount exceeds the approved payout "
+                                         f"(${zatwierdzona:,.0f})")
         testowy = vusdt.enabled()
+        zapisany = _zapisany_portfel(tr)
+        if payload.use_saved:
+            if not zapisany:
+                raise HTTPException(400, "There is no saved wallet yet. Enter your wallet address.")
+            portfel = _portfel_czysty(zapisany["network"], zapisany["address"], testowy)
+        else:
+            portfel = _portfel_czysty(payload.network, payload.address, testowy)
+            if zapisany and not _ten_sam_portfel(portfel, zapisany):
+                if payload.code:
+                    _rate_limit(request, "payout_wallet_try", 10, 600)
+                _kod_portfela_ok(tr, portfel, payload.code)
         if testowy:
-            try:
-                details_json = vusdt.details_json({"network": payload.network,
-                                                   "address": payload.address})
-            except ValueError as e:
-                raise HTTPException(400, str(e))
             if not vusdt.verify_turnstile(payload.turnstile_token, _client_ip(request)):
                 raise HTTPException(400, "Captcha verification failed. Complete the check again.")
+            details_json = vusdt.details_json(portfel)
             method = "vusdt"
         else:
-            details_json = _payout_details_json("usdt", {"network": payload.network,
-                                                         "address": payload.address})
+            details_json = json.dumps(portfel)
             method = "usdt"
         # Zwrot opłaty przy pierwszej wypłacie jest częścią kwoty wypłaty — ustalamy
         # go tu, razem z kwotą, żeby trader i admin widzieli jedną sumę do przelewu.
@@ -2226,11 +2350,15 @@ def submit_payout_details(req_id: int, payload: PayoutDetailsIn, request: Reques
                           synchronize_session=False))
         if not zajete:
             raise HTTPException(400, "This payout request is no longer waiting for details")
+        # Pierwsza wypłata zapisuje portfel, zmiana (już po kodzie) go podmienia —
+        # kolejna wypłata dostanie go podpowiedziany.
+        if not _ten_sam_portfel(portfel, zapisany):
+            _zapisz_portfel(tr, portfel)
         if testowy:
             # Zwrot jedzie w tym samym transferze — wniosek rozlicza się sam po
             # potwierdzeniu na łańcuchu.
             session.add(VusdtTransfer(payout_request_id=pr.id,
-                                      address=json.loads(details_json)["address"],
+                                      address=portfel["address"],
                                       amount_units=vusdt.to_units(share + zwrot)))
         session.commit()
         total = round(share + zwrot, 2)
@@ -2247,6 +2375,71 @@ def submit_payout_details(req_id: int, payload: PayoutDetailsIn, request: Reques
             notify.notify_admins("admin_payout",
                                  f"Payout ${total:,.2f} USDT to send ({acc.login})", tr.email)
         return out
+    finally:
+        session.close()
+
+
+class PortfelIn(BaseModel):
+    network: str = Field(default="", max_length=20)
+    address: str = Field(default="", max_length=120)
+    code: str = Field(default="", max_length=6)
+
+
+@app.get("/api/me/payout-wallet")
+def my_payout_wallet(trader: Trader = Depends(auth.current_trader)):
+    session = SessionLocal()
+    try:
+        return _portfel_widok(session.get(Trader, trader.id))
+    finally:
+        session.close()
+
+
+@app.post("/api/me/payout-wallet/code")
+def payout_wallet_code(payload: PortfelIn, request: Request,
+                       trader: Trader = Depends(auth.current_trader)):
+    """Kod do zmiany zapisanego portfela. Portfel zapisuje się przy pierwszej
+    wypłacie — dodać go wcześniej się nie da, bo nie ma do czego go przypiąć."""
+    _rate_limit(request, "payout_wallet_code", 5, 600)
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader.id)
+        zapisany = _zapisany_portfel(tr)
+        if not zapisany:
+            raise HTTPException(400, "Your wallet is saved with your first approved payout — "
+                                     "there is nothing to change yet.")
+        nowy = _portfel_czysty(payload.network, payload.address, vusdt.enabled())
+        if _ten_sam_portfel(nowy, zapisany):
+            raise HTTPException(400, "This is already your saved wallet.")
+        kod = f"{secrets.randbelow(1_000_000):06d}"
+        tr.payout_wallet_new = json.dumps(nowy)
+        tr.payout_wallet_code = kod
+        tr.payout_wallet_code_exp = _teraz_naive() + timedelta(minutes=15)
+        session.commit()
+        notify.send("payout_wallet_code", tr.email, {
+            "name": tr.full_name or tr.email, "code": kod,
+            "network": nowy["network"], "address": nowy["address"]})
+        return {"sent": True}
+    finally:
+        session.close()
+
+
+@app.post("/api/me/payout-wallet")
+def change_payout_wallet(payload: PortfelIn, request: Request,
+                         trader: Trader = Depends(auth.current_trader)):
+    """Zmiana zapisanego portfela z ustawień — ten sam kod co w kroku 2 wypłaty."""
+    _rate_limit(request, "payout_wallet_try", 10, 600)
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader.id)
+        if not _zapisany_portfel(tr):
+            raise HTTPException(400, "Your wallet is saved with your first approved payout — "
+                                     "there is nothing to change yet.")
+        nowy = _portfel_czysty(payload.network, payload.address, vusdt.enabled())
+        _kod_portfela_ok(tr, nowy, payload.code)
+        _zapisz_portfel(tr, nowy)
+        session.commit()
+        notify.notify_admins("admin_payout", "Payout wallet changed", tr.email)
+        return _portfel_widok(tr)
     finally:
         session.close()
 
@@ -3000,20 +3193,21 @@ def my_payouts(trader: Trader = Depends(auth.current_trader)):
                 "total_paid": round(sum(p.trader_share for p in pays), 2),
                 "pending": sum(1 for r in reqs if r.status in PAYOUT_OTWARTE),
                 "available": round(available, 2),
-                # Harmonogram wypłat = on-demand z przeglądem do 24 h; portal
-                # pisze to zdanie z tej liczby, nie z zaszytego stringa.
-                "review_hours": 24,
                 # 0 = on demand; inaczej co ile dni konto może złożyć wniosek.
+                # Czasu przeglądu celowo NIE podajemy — strona nie obiecuje terminów.
                 "interval_days": settings.payout_interval_days,
             },
+            # Zapisany portfel — krok 2 podpowiada go od drugiej wypłaty.
+            "wallet": _portfel_widok(session.get(Trader, trader.id)),
             "requests": [{"id": r.id, "ts": r.ts.isoformat(),
                           "account": by_id[r.account_id].login if r.account_id in by_id else "?",
                           "profit_amount": r.profit_amount, "trader_share": r.trader_share,
                           **_zwrot_wniosku(session, r, by_id.get(r.account_id)),
-                          "method": r.method, "status": r.status,
+                          # Metoda istnieje dopiero z danymi płatniczymi (krok 2) —
+                          # wcześniej portal pokazuje „—", a nie zgadnięty token.
+                          "method": r.method if r.details else "",
+                          "network": _siec_wniosku(r), "status": r.status,
                           "express": bool(by_id[r.account_id].express_payout) if r.account_id in by_id else False,
-                          "expected_by": ((r.ts + timedelta(hours=24)).isoformat()
-                                          if r.status in ("review", "pending") else None),
                           "reject_reason": r.reject_reason,
                           "vusdt": vusdt.view(vusdt_tx[r.id]) if r.id in vusdt_tx else None}
                          for r in reqs],
@@ -3344,7 +3538,129 @@ def _czat_baza(session, produkty=None):
 
 
 # ---- Newsletter (strona publiczna → lista w panelu Mail) ----
-NEWSLETTER_CODE = "WELCOME10"      # kupon z catalog.COUPONS — nagroda za zapis
+NEWSLETTER_CODE = "WELCOME10"      # domyślny kupon z catalog.COUPONS — nagroda za zapis
+
+# Popup newslettera: wariant, wyłącznik i opóźnienie ustawia admin (Mail →
+# Newsletter → Popup). Wariant decyduje też, co dostaje zapis z paska nad
+# stopką — wyłącznik chowa tylko sam popup. Puste title/body/cta = tekst
+# domyślny wariantu; {pct}, {prize}, {draw_date} podstawiamy przy renderze.
+NL_POPUP_KEY = "newsletter_popup"
+NL_WARIANTY = ("discount", "flash", "giveaway", "updates")
+NL_TEKSTY = {
+    "discount": ("Get {pct}% off your first challenge.",
+                 "Occasional emails about new tiers, promos and platform updates. "
+                 "Your welcome email carries the code.",
+                 "Subscribe + Get {pct}% off"),
+    "flash": ("Flash sale: {pct}% off every challenge.",
+              "Subscribe and your welcome email carries the code. The offer ends when the "
+              "timer runs out.",
+              "Get the {pct}% code"),
+    "giveaway": ("Win a free {prize} challenge.",
+                 "Subscribe to enter. One winner is drawn on {draw_date}. No purchase necessary.",
+                 "Enter the giveaway"),
+    "updates": ("Stay in the loop.",
+                "Occasional emails about new challenge tiers, promotions and platform updates.",
+                "Subscribe"),
+}
+NL_DOMYSLNE = {"on": True, "variant": "discount", "delay_s": 180, "code": NEWSLETTER_CODE,
+               "ends_at": "", "prize": "$50K", "draw_date": "", "title": "", "body": "", "cta": ""}
+_NL_CACHE: dict = {"ts": 0.0, "val": None}
+
+
+def _nl_czysc(raw: dict) -> dict:
+    cfg = dict(NL_DOMYSLNE)
+    for k, v in (raw or {}).items():
+        if k in cfg:
+            cfg[k] = v
+    cfg["on"] = bool(cfg["on"])
+    cfg["variant"] = cfg["variant"] if cfg["variant"] in NL_WARIANTY else "discount"
+    try:
+        cfg["delay_s"] = min(1200, max(60, int(cfg["delay_s"])))
+    except (TypeError, ValueError):
+        cfg["delay_s"] = NL_DOMYSLNE["delay_s"]
+    cfg["code"] = str(cfg["code"] or "").strip().upper()
+    if cfg["code"] not in catalog.COUPONS:
+        cfg["code"] = NEWSLETTER_CODE
+    for k, n in (("ends_at", 40), ("prize", 30), ("draw_date", 10),
+                 ("title", 120), ("body", 400), ("cta", 40)):
+        cfg[k] = str(cfg[k] or "").strip()[:n]
+    return cfg
+
+
+def _nl_konfig(odswiez: bool = False) -> dict:
+    teraz = time.time()
+    if odswiez or _NL_CACHE["val"] is None or teraz - _NL_CACHE["ts"] > 60:
+        s = SessionLocal()
+        try:
+            row = s.get(AppSetting, NL_POPUP_KEY)
+            try:
+                raw = json.loads(row.value) if row and row.value else {}
+            except ValueError:
+                raw = {}
+        finally:
+            s.close()
+        _NL_CACHE.update(ts=teraz, val=_nl_czysc(raw))
+    return dict(_NL_CACHE["val"])
+
+
+def _nl_koniec(cfg: dict) -> datetime | None:
+    try:
+        t = datetime.fromisoformat(cfg["ends_at"].replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def _nl_oferta(cfg: dict | None = None) -> dict:
+    """Oferta, którą dostaje NOWY zapis teraz, z tekstami popupu.
+
+    Flash po terminie i giveaway po dacie losowania spadają do „updates" —
+    nikt nie zapisze się pod ofertę, która już nie obowiązuje."""
+    cfg = cfg or _nl_konfig()
+    wariant = cfg["variant"]
+    koniec = _nl_koniec(cfg) if wariant == "flash" else None
+    if wariant == "flash" and (not koniec or koniec <= datetime.now(timezone.utc)):
+        wariant = "updates"
+    losowanie = None
+    if wariant == "giveaway":
+        try:
+            losowanie = date.fromisoformat(cfg["draw_date"])
+        except ValueError:
+            losowanie = None
+        if not losowanie or losowanie < datetime.now(timezone.utc).date():
+            wariant = "updates"
+    pct = catalog.COUPONS.get(cfg["code"], 10.0)
+    pola = {"pct": f"{pct:g}", "prize": cfg["prize"] or "$50K",
+            "draw_date": f"{losowanie:%B} {losowanie.day}" if losowanie else ""}
+    domyslne = NL_TEKSTY[wariant]
+    # Własne teksty admina tylko dla wariantu, który je dostał — po spadku do
+    # „updates" nie zostaje stary nagłówek o zniżce.
+    wlasne = wariant == cfg["variant"]
+    title, body, cta = ((cfg["title"] if wlasne and cfg["title"] else domyslne[0]),
+                        (cfg["body"] if wlasne and cfg["body"] else domyslne[1]),
+                        (cfg["cta"] if wlasne and cfg["cta"] else domyslne[2]))
+    try:
+        title, body, cta = (t.format(**pola) for t in (title, body, cta))
+    except (KeyError, IndexError, ValueError):
+        title, body, cta = (t.format(**pola) for t in domyslne)
+    out = {"variant": wariant, "title": title, "body": body, "cta": cta,
+           "delay_s": cfg["delay_s"], "on": cfg["on"]}
+    if wariant in ("discount", "flash"):
+        out.update(code=cfg["code"], pct=pct, campaign=f"{wariant}:{cfg['code']}")
+    elif wariant == "giveaway":
+        out.update(prize=pola["prize"], draw_date=pola["draw_date"],
+                   campaign=f"giveaway:{losowanie.isoformat()}")
+    else:
+        out["campaign"] = "updates"
+    if wariant == "flash":
+        out["ends_at"] = koniec.isoformat()
+    return out
+
+
+def _nl_popup_ctx() -> dict | None:
+    """Popup w szablonie: None = admin go wyłączył."""
+    oferta = _nl_oferta()
+    return oferta if oferta["on"] else None
 
 
 class NewsletterIn(BaseModel):
@@ -3369,7 +3685,7 @@ def newsletter_subscribe(payload: NewsletterIn, request: Request):
         raise HTTPException(400, "Enter a valid email address")
     if not payload.consent:
         raise HTTPException(400, "Tick the consent box to subscribe")
-    pct = catalog.COUPONS.get(NEWSLETTER_CODE, 10.0)
+    oferta = _nl_oferta()
     session = SessionLocal()
     try:
         sub = session.query(NewsletterSubscriber).filter(NewsletterSubscriber.email == email).first()
@@ -3377,17 +3693,21 @@ def newsletter_subscribe(payload: NewsletterIn, request: Request):
         if nowy:
             sub = NewsletterSubscriber(email=email, consent=True,
                                        source=payload.source if payload.source in ("popup", "footer") else "footer",
+                                       campaign=oferta["campaign"],
                                        token=secrets.token_urlsafe(24)[:32])
             session.add(sub)
         elif sub.unsubscribed_at:
             sub.unsubscribed_at = None      # wrócił: zapis liczy się od nowa
+            sub.campaign = oferta["campaign"]
             nowy = True
         session.commit()
         if nowy:
             notify.send("newsletter_welcome", email,
-                        {"code": NEWSLETTER_CODE, "pct": pct,
+                        {**{k: oferta[k] for k in ("variant", "code", "pct", "prize", "draw_date",
+                                                   "ends_at") if k in oferta},
                          "unsubscribe_url": _newsletter_unsub_url(request, sub.token)})
-        return {"ok": True, "code": NEWSLETTER_CODE, "pct": pct}
+        return {"ok": True, **{k: oferta[k] for k in ("variant", "code", "pct", "prize", "draw_date")
+                               if k in oferta}}
     finally:
         session.close()
 
@@ -3405,8 +3725,27 @@ def newsletter_unsubscribe(token: str, request: Request):
         session.close()
 
 
+@app.get("/api/me/newsletter")
+def my_newsletter(trader: Trader = Depends(auth.current_trader)):
+    """Czy zalogowanemu pokazywać popup newslettera. Popup sam pamięta zapis
+    tylko w tej przeglądarce — ktoś zapisany na telefonie, wypisany, klient,
+    który już kupił, albo ktoś z wyłączonymi ofertami w portalu dostawał go
+    na innym urządzeniu jeszcze raz."""
+    session = SessionLocal()
+    try:
+        sub = (session.query(NewsletterSubscriber)
+               .filter(NewsletterSubscriber.email == (trader.email or "").strip().lower()).first())
+        klient = session.query(Order.id).filter(Order.trader_id == trader.id,
+                                                Order.status == "paid").first() is not None
+        return {"subscribed": bool(sub and not sub.unsubscribed_at),
+                "unsubscribed": bool(sub and sub.unsubscribed_at),
+                "customer": klient, "marketing": bool(getattr(trader, "notify_marketing", True))}
+    finally:
+        session.close()
+
+
 def _newsletter_dict(s: NewsletterSubscriber) -> dict:
-    return {"id": s.id, "email": s.email, "source": s.source,
+    return {"id": s.id, "email": s.email, "source": s.source, "campaign": s.campaign,
             "created_at": s.created_at.isoformat() if s.created_at else None,
             "unsubscribed_at": s.unsubscribed_at.isoformat() if s.unsubscribed_at else None}
 
@@ -3418,24 +3757,93 @@ def admin_newsletter():
         rows = session.query(NewsletterSubscriber).order_by(NewsletterSubscriber.id.desc()).all()
         aktywni = sum(1 for s in rows if not s.unsubscribed_at)
         return {"subscribers": [_newsletter_dict(s) for s in rows], "active": aktywni,
-                "total": len(rows), "code": NEWSLETTER_CODE}
+                "total": len(rows), "code": _nl_konfig()["code"],
+                "campaigns": sorted({s.campaign for s in rows if s.campaign})}
     finally:
         session.close()
 
 
 @app.get("/api/admin/newsletter.csv", dependencies=[Depends(auth.require_admin)])
-def admin_newsletter_csv():
+def admin_newsletter_csv(campaign: str | None = None):
+    """Eksport listy; `campaign` zawęża do jednej kampanii (np. losowanie giveaway)."""
     session = SessionLocal()
     try:
-        rows = session.query(NewsletterSubscriber).order_by(NewsletterSubscriber.id).all()
-        linie = ["email,source,subscribed_at,unsubscribed_at"]
+        q = session.query(NewsletterSubscriber)
+        if campaign:
+            q = q.filter(NewsletterSubscriber.campaign == campaign)
+        rows = q.order_by(NewsletterSubscriber.id).all()
+        linie = ["email,source,campaign,subscribed_at,unsubscribed_at"]
         for s in rows:
-            linie.append(",".join([s.email, s.source or "", s.created_at.isoformat() if s.created_at else "",
+            linie.append(",".join([s.email, s.source or "", s.campaign or "",
+                                   s.created_at.isoformat() if s.created_at else "",
                                    s.unsubscribed_at.isoformat() if s.unsubscribed_at else ""]))
         return Response("\n".join(linie) + "\n", media_type="text/csv",
                         headers={"Content-Disposition": "attachment; filename=newsletter.csv"})
     finally:
         session.close()
+
+
+class NewsletterPopupIn(BaseModel):
+    on: bool = True
+    variant: Literal["discount", "flash", "giveaway", "updates"] = "discount"
+    delay_s: int = Field(default=180, ge=60, le=1200)
+    code: str = Field(default=NEWSLETTER_CODE, max_length=40)
+    ends_at: str = Field(default="", max_length=40)
+    prize: str = Field(default="", max_length=30)
+    draw_date: str = Field(default="", max_length=10)
+    title: str = Field(default="", max_length=120)
+    body: str = Field(default="", max_length=400)
+    cta: str = Field(default="", max_length=40)
+
+
+def _nl_popup_admin() -> dict:
+    cfg = _nl_konfig(odswiez=True)
+    return {"config": cfg, "live": _nl_oferta(cfg),
+            "coupons": [{"code": k, "pct": v} for k, v in sorted(catalog.COUPONS.items())],
+            "defaults": {k: {"title": t, "body": b, "cta": c} for k, (t, b, c) in NL_TEKSTY.items()}}
+
+
+@app.get("/api/admin/newsletter/popup", dependencies=[Depends(auth.require_admin)])
+def admin_newsletter_popup():
+    return _nl_popup_admin()
+
+
+@app.post("/api/admin/newsletter/popup", dependencies=[Depends(auth.require_admin)])
+def admin_newsletter_popup_save(payload: NewsletterPopupIn):
+    """Zapis ustawień popupu. Kod musi być z catalog.COUPONS (koszyk liczy
+    tylko te), flash wymaga przyszłego końca, giveaway przyszłej daty losowania."""
+    cfg = payload.model_dump()
+    cfg["code"] = cfg["code"].strip().upper()
+    if cfg["variant"] in ("discount", "flash") and cfg["code"] not in catalog.COUPONS:
+        raise HTTPException(400, "Pick a coupon code that exists at checkout")
+    if cfg["variant"] == "flash":
+        koniec = _nl_koniec(cfg)
+        if not koniec or koniec <= datetime.now(timezone.utc):
+            raise HTTPException(400, "Set a flash sale end time in the future")
+        cfg["ends_at"] = koniec.isoformat()
+    if cfg["variant"] == "giveaway":
+        try:
+            losowanie = date.fromisoformat(cfg["draw_date"])
+        except ValueError:
+            raise HTTPException(400, "Set the draw date (YYYY-MM-DD)")
+        if losowanie < datetime.now(timezone.utc).date():
+            raise HTTPException(400, "The draw date has already passed")
+        if not cfg["prize"].strip():
+            raise HTTPException(400, "Describe the prize, e.g. $50K")
+    for k in ("title", "body", "cta"):
+        try:
+            cfg[k].format(pct="", prize="", draw_date="")
+        except (KeyError, IndexError, ValueError):
+            raise HTTPException(400, "Placeholders allowed in the texts: {pct}, {prize}, {draw_date}")
+    session = SessionLocal()
+    try:
+        row = session.get(AppSetting, NL_POPUP_KEY) or AppSetting(key=NL_POPUP_KEY)
+        row.value = json.dumps(_nl_czysc(cfg))
+        session.add(row)
+        session.commit()
+    finally:
+        session.close()
+    return _nl_popup_admin()
 
 
 class NewsletterSendIn(BaseModel):
@@ -4582,6 +4990,7 @@ def admin_payout_requests():
         # przy 300 wnioskach.
         konta = _konta_po_id(session, (r.account_id for r in rows))
         maile = _maile_traderow(session, (r.trader_id for r in rows))
+        nowe = _nowe_portfele(session, rows)
         out = []
         for r in rows:
             acc = konta.get(r.account_id)
@@ -4594,6 +5003,7 @@ def admin_payout_requests():
                         "trader_email": tr_email, "profit_amount": r.profit_amount,
                         "trader_share": r.trader_share, **_zwrot_wniosku(session, r, acc),
                         "method": r.method, "details": details,
+                        "wallet_new": r.id in nowe,
                         "status": r.status, "reject_reason": r.reject_reason,
                         "express": bool(acc.express_payout) if acc else False,
                         "ts": r.ts.isoformat()})
@@ -4675,6 +5085,7 @@ def admin_payouts_all():
                 .order_by(PayoutRequest.id.desc()).all())
         konta = _konta_po_id(session, (r.account_id for r in reqs))
         maile = _maile_traderow(session, (r.trader_id for r in reqs))
+        nowe = _nowe_portfele(session, reqs)
         for r in reqs:
             acc = konta.get(r.account_id)
             tr_email = maile.get(r.trader_id)
@@ -4691,6 +5102,7 @@ def admin_payouts_all():
                 "profit_amount": r.profit_amount, "trader_share": r.trader_share,
                 **_zwrot_wniosku(session, r, acc),
                 "method": r.method, "details": details,
+                "wallet_new": r.id in nowe,
                 "status": r.status, "reject_reason": r.reject_reason,
                 "note": None, "cert_url": None,
                 "express": bool(acc.express_payout) if acc else False,
@@ -4904,7 +5316,9 @@ def _odblokuj_wyplate(session, r: PayoutRequest) -> dict:
     tr = session.get(Trader, r.trader_id)
     if tr:
         notify.send("payout_unlocked", tr.email, {"name": tr.full_name or tr.email,
-                    "login": acc.login})
+                    "login": acc.login, "amount": f"${float(r.trader_share or 0):,.0f}",
+                    "token": "vUSDT" if vusdt.enabled() else "USDT",
+                    "saved_wallet": bool(_zapisany_portfel(tr))})
     return {"unlocked": r.id}
 
 
@@ -13433,7 +13847,11 @@ def _page(request: Request, template: str, **extra):
            "clarity_id": settings.clarity_project_id, "promo": _promo_ctx(),
            "bogo_promo": _bogo_promo_active(),
            "google_client_id": settings.google_client_id,
-           "vusdt_test": vusdt.public_config(), **extra}
+           "vusdt_test": vusdt.public_config(),
+           # Wiersz „Reward frequency" w tabelach zasad: 0 = on demand.
+           "payout_days": settings.payout_interval_days,
+           # Popup newslettera z panelu (None = wyłączony) i oferta paska nad stopką.
+           "nl_popup": _nl_popup_ctx(), "nl_offer": _nl_oferta(), **extra}
     return jinja.TemplateResponse(request, template, ctx)
 
 
@@ -13521,7 +13939,7 @@ def contact_page(request: Request):
     for a in arts:
         if a["category"] not in kategorie:
             kategorie.append(a["category"])
-    popularne_klucze = ["how do i start", "how fast do i get", "how do payouts work", "when do i get my challenge fee",
+    popularne_klucze = ["how do i start", "when do i get my mt5", "how do payouts work", "when do i get my challenge fee",
                         "how is the daily loss", "what if i fail"]
     popularne = [next((a for a in arts if a["title"].lower().startswith(k)), None) for k in popularne_klucze]
     return _page(request, "contact.html", kategorie=kategorie,

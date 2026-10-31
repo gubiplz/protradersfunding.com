@@ -1564,7 +1564,7 @@ html:not(.pwa){overscroll-behavior-y:contain}
 .split-under i{display:block;height:100%;background:var(--acc)}
 .terms-row{display:flex;gap:9px;align-items:flex-start;font-size:12px;color:var(--muted);
   cursor:pointer;line-height:1.5}
-.terms-row input{margin-top:2px;width:15px;height:15px;flex:none;accent-color:var(--acc)}
+.terms-row input{flex:none}
 .terms-row a{color:var(--acc);text-decoration:underline}
 
 /* "Sign in with Google" block under the auth form (rendered only with a client id) */
@@ -1798,6 +1798,29 @@ body.imp-on .cookie-note{bottom:calc(12px + 42px + env(safe-area-inset-bottom))}
 .po-vstat.bad{color:var(--red);background:var(--red-bg);border-color:var(--red)}
 .po-min.bad{color:var(--red);background:var(--red-bg);border-color:var(--red)}
 .po-min.bad b{color:var(--red)}
+/* Krok 1: kwota + „Max"; krok 2: podsumowanie, wybór zapisanego portfela, kod z maila. */
+.po-amt{display:flex;gap:8px;align-items:center;margin-top:4px}
+.po-amt .inp{flex:1;min-width:0}
+.po-steps{margin-top:14px}
+.po-sum{display:grid;grid-template-columns:1fr auto;gap:6px 0;font-size:13px;color:var(--muted);
+  background:var(--acc-bg);border:1px solid var(--acc-line);border-radius:12px;padding:12px 14px;margin-bottom:14px}
+.po-sum b{color:var(--txt);text-align:right;font-variant-numeric:tabular-nums;padding-left:14px}
+.po-sum>:nth-last-child(-n+2){padding-top:6px;border-top:1px solid var(--acc-line)}
+.po-wsel{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+.po-wopt{display:flex;align-items:flex-start;gap:10px;padding:11px 12px;border:1px solid var(--line);border-radius:12px;cursor:pointer;
+  transition:border-color .2s,background .2s}
+.po-wopt:has(input:checked){border-color:var(--acc);background:var(--acc-bg)}
+.po-wopt input{margin-top:2px;accent-color:var(--acc)}
+.po-wopt>span{display:flex;flex-direction:column;gap:2px;font-size:13px;line-height:1.4;color:var(--muted);min-width:0}
+.po-wopt>span b{color:var(--txt)}
+.po-wopt .mono{word-break:break-all}
+#po-new[hidden]{display:none}
+.po-code{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap}
+.po-code .inp{flex:1;min-width:130px;letter-spacing:.2em}
+#po-new .ck{margin-top:12px}
+.pw-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.pw-flow{display:flex;flex-direction:column;gap:10px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.pw-flow .btn-p{align-self:flex-start}
 @keyframes po-shake{0%,100%{transform:none}20%,60%{transform:translateX(-5px)}40%,80%{transform:translateX(5px)}}
 .po-min.shake{animation:po-shake .35s ease}
 @media (prefers-reduced-motion:reduce){.po-min.shake{animation:none}}

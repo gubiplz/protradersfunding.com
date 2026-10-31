@@ -152,7 +152,8 @@ def test_bez_flagi_wniosek_idzie_do_przegladu_bez_transferu(monkeypatch):
     s = SessionLocal()
     try:
         pr = s.get(PayoutRequest, r.json()["id"])
-        assert pr.method == "usdt" and pr.details is None
+        # Metoda pusta do kroku 2 — trader nie podał jeszcze żadnego portfela.
+        assert pr.method == "" and pr.details is None
         assert s.query(VusdtTransfer).filter(
             VusdtTransfer.payout_request_id == pr.id).count() == 0
     finally:

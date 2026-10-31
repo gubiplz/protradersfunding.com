@@ -175,6 +175,12 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "streak_freezes": "INTEGER DEFAULT 1",
         "email_verified": "BOOLEAN DEFAULT TRUE",
         "email_verify_code": "VARCHAR(6)",
+        "payout_network": "VARCHAR(16)",
+        "payout_address": "VARCHAR(120)",
+        "payout_wallet_at": "TIMESTAMP",
+        "payout_wallet_new": "VARCHAR(160)",
+        "payout_wallet_code": "VARCHAR(6)",
+        "payout_wallet_code_exp": "TIMESTAMP",
         "terms_accepted_at": "TIMESTAMP",
         "google_sub": "VARCHAR(64)",
         "telegram_user_id": "VARCHAR(20)",
@@ -313,6 +319,11 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
     # wiersze uzupelnia `_nadaj_znaki_biletom` ponizej.
     "support_tickets": {
         "ref": "VARCHAR(12)",
+    },
+    # Kampania popupu, z której przyszedł zapis (np. "giveaway:2026-11-30") —
+    # losowanie i analiza ofert idą z eksportu CSV filtrowanego po kampanii.
+    "newsletter_subscribers": {
+        "campaign": "VARCHAR(60)",
     },
 }
 

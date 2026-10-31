@@ -316,7 +316,7 @@ _NOTKI = {
 def view(t: VusdtTransfer) -> dict:
     nota = None
     if t.status == "queued":
-        nota = _NOTKI.get(t.error or "", "In line, sending in a few seconds…")
+        nota = _NOTKI.get(t.error or "", "In line to be sent…")
     elif t.status == "failed":
         nota = "The transfer failed on-chain. Contact support."
     return {

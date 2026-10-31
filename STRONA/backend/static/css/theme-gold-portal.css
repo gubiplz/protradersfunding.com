@@ -1,0 +1,163 @@
+/* ============================================================
+   Paleta „złoto + teal" (portal): złoto #C6A15B = marka, teal = interfejs,
+   tła deep navy #0B1220 / off-white #F4F6F8. Tylko wygląd.
+   Ładowana jako OSTATNI arkusz (po theme-cert-*): ta sama specyficzność
+   + później = wygrywa. Zdjęcie palety = usunięcie linku.
+   Blok „wygenerowany": scripts/theme_cert/gen_theme_gold.py.
+   ============================================================ */
+
+/* z portal.css: 15 reguł */
+:root{--acc:#0f8a7e;--acc-line:#d5eeea;--grad:linear-gradient(135deg,#0f8a7e,#8b5cf6);--blue:#0a7d72;--blue-bg:#e6f4f2;--blue-line:#cbe9e4}
+::selection{background:rgba(15,138,126,.18)}
+.brand-pill{box-shadow:0 8px 18px -8px rgba(15,138,126,.5)}
+.btn-p{box-shadow:0 8px 18px -8px rgba(15,138,126,.5)}
+.inp:focus{box-shadow:0 0 0 3px rgba(15,138,126,.12)}
+.tel-cc:focus-visible{box-shadow:0 0 0 3px rgba(15,138,126,.12)}
+.acct-list::before{background:linear-gradient(90deg,#0f8a7e,#0f8a7e,#a855f7)}
+.auth-brand{background:radial-gradient(70% 60% at 20% 0%,rgba(15,138,126,.12),transparent 65%),
+  radial-gradient(50% 50% at 90% 100%,rgba(168,85,247,.1),transparent 70%),var(--panel)}
+.auth-tabs::before{box-shadow:0 4px 14px -6px rgba(15,138,126,.55)}
+.chal-list::before{background:linear-gradient(90deg,#0f8a7e,#0f8a7e,#a855f7)}
+.reveal-card{box-shadow:0 18px 44px -18px rgba(15,138,126,.55)}
+.celebrate-ic{box-shadow:0 22px 50px -16px rgba(15,138,126,.7)}
+.ptr-spin{border-top-color:var(--acc,#0f8a7e)}
+html[data-theme=dark]{--acc:#36b9a9;--acc-bg:rgba(15,138,126,.16);--acc-line:rgba(54,185,169,.38);--blue:#2fb3a4;--blue-bg:rgba(20,160,148,.14);--blue-line:rgba(47,179,164,.35)}
+html[data-theme=dark] ::selection{background:rgba(54,185,169,.35)}
+/* z portal-glass.css: 4 reguł */
+:root{--lg-light:radial-gradient(60vw 60vw at 4% -12%,rgba(15,138,126,.16),transparent 62%),
+    radial-gradient(52vw 52vw at 104% 24%,rgba(139,92,246,.13),transparent 60%),
+    radial-gradient(44vw 44vw at 68% 112%,rgba(242,134,15,.08),transparent 62%)}
+html[data-theme=dark]{--lg-light:radial-gradient(60vw 60vw at 4% -12%,rgba(15,138,126,.36),transparent 62%),
+    radial-gradient(52vw 52vw at 104% 24%,rgba(139,92,246,.28),transparent 60%),
+    radial-gradient(44vw 44vw at 68% 112%,rgba(242,134,15,.13),transparent 62%)}
+:root{--pb-nav-on:linear-gradient(90deg,rgba(15,138,126,.16),rgba(15,138,126,0) 88%)}
+:root:root body .ui-glider::before,
+:root:root body .side-nav:not(.has-glider)>.sb-link.on::before{background:linear-gradient(180deg,#0f8a7e,#a855f7)}
+/* z notifications.css: 2 reguł */
+.np .np-btn-p{box-shadow:0 12px 26px -14px rgba(15,138,126,.8)}
+.np-undo button{color:#9ad9d0}
+/* z apple.css: 1 reguł */
+.btn-p{box-shadow:0 8px 18px -10px rgba(15,138,126,.65)}
+/* z helpdesk.css: 8 reguł */
+.hd-fab{border:1px solid rgba(54,185,169,.42);box-shadow:0 10px 30px -12px rgba(21,158,145,.6),0 2px 6px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.08)}
+html[data-theme=dark] .hd-fab{background:#111a2e}
+.hd-fab.on{border-color:rgba(54,185,169,.6)}
+@media (hover:hover){.hd-fab:hover{border-color:rgba(54,185,169,.7);box-shadow:0 14px 34px -12px rgba(21,158,145,.8),0 2px 6px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.1)}}
+.hd-av.ai{background:linear-gradient(135deg,#123b4a,#07695f);box-shadow:inset 0 0 0 1px rgba(54,185,169,.45)}
+.hd-av.ai svg{color:#36b9a9}
+.hd-av.person{background:linear-gradient(135deg,#159e91,#07695f)}
+.hd-av.team{background:linear-gradient(135deg,#07695f,#054c45)}
+/* z theme-cert-portal.css: 30 reguł */
+:root{--acc:#0a8a7d;--acc2:#07695f;--acc-bg:#e7f5f3;--acc-line:#c9ebe5;--grad:linear-gradient(135deg,#0a8a7d,#07695f);--purple:#07695f;--purple-bg:#e6f6f3;--purple-line:#cdece7;--shadow-lg:0 24px 60px -24px rgba(10,138,125,.16),0 2px 6px rgba(15,23,42,.05)}
+::selection{background:rgba(21,158,145,.18)}
+.brand-pill{box-shadow:0 8px 18px -8px rgba(21,158,145,.5)}
+.btn-p{box-shadow:0 8px 18px -8px rgba(21,158,145,.5)}
+.inp:focus{box-shadow:0 0 0 3px rgba(21,158,145,.12)}
+.tel-cc:focus-visible{box-shadow:0 0 0 3px rgba(21,158,145,.12)}
+.gradient-banner{background:linear-gradient(100deg,#065a51 0%,#07695f 35%,#36b9a9 100%);box-shadow:0 14px 34px -14px rgba(7,105,95,.5)}
+.gb-btn{color:#07695f}
+.acct-list::before{background:linear-gradient(90deg,#0f8a7e,#0a8a7d,#36b9a9)}
+.auth-brand{background:radial-gradient(70% 60% at 20% 0%,rgba(21,158,145,.12),transparent 65%),
+  radial-gradient(50% 50% at 90% 100%,rgba(54,185,169,.1),transparent 70%),var(--panel)}
+.auth-tabs::before{box-shadow:0 4px 14px -6px rgba(21,158,145,.55)}
+.chal-list::before{background:linear-gradient(90deg,#0f8a7e,#0a8a7d,#36b9a9)}
+.reveal-card{box-shadow:0 18px 44px -18px rgba(21,158,145,.55)}
+.celebrate-ic{box-shadow:0 22px 50px -16px rgba(21,158,145,.7)}
+.ptr-spin{border-top-color:var(--acc,#0a8a7d)}
+html[data-theme=dark]{--acc:#36b9a9;--acc2:#66cbbe;--acc-bg:rgba(21,158,145,.16);--acc-line:rgba(54,185,169,.38);--purple:#66cbbe;--purple-bg:rgba(7,105,95,.16);--purple-line:rgba(102,203,190,.35)}
+html[data-theme=dark] ::selection{background:rgba(54,185,169,.35)}
+:root{--lg-drop:0 1px 2px rgba(15,23,42,.04),0 16px 36px -20px rgba(10,138,125,.24);--lg-light:radial-gradient(60vw 60vw at 4% -12%,rgba(21,158,145,.16),transparent 62%),
+    radial-gradient(52vw 52vw at 104% 24%,rgba(7,105,95,.13),transparent 60%),
+    radial-gradient(44vw 44vw at 68% 112%,rgba(242,134,15,.08),transparent 62%)}
+html[data-theme=dark]{--lg-light:radial-gradient(60vw 60vw at 4% -12%,rgba(21,158,145,.36),transparent 62%),
+    radial-gradient(52vw 52vw at 104% 24%,rgba(7,105,95,.28),transparent 60%),
+    radial-gradient(44vw 44vw at 68% 112%,rgba(242,134,15,.13),transparent 62%)}
+html[data-theme=dark] body .gradient-banner{background:linear-gradient(100deg,rgba(6,90,81,.7) 0%,rgba(7,105,95,.62) 35%,rgba(54,185,169,.56) 100%)}
+:root{--pb-nav-on:linear-gradient(90deg,rgba(21,158,145,.16),rgba(21,158,145,0) 88%);--pb-neon-glow:rgba(7,105,95,.45)}
+html[data-theme=dark]{--pb-nav-on:linear-gradient(90deg,rgba(7,105,95,.34),rgba(7,105,95,0) 88%);--pb-neon-glow:rgba(102,203,190,.8)}
+:root:root body .ui-glider::before,
+:root:root body .side-nav:not(.has-glider)>.sb-link.on::before{background:linear-gradient(180deg,#0a8a7d,#36b9a9)}
+:root:root body .prog-bar>i{box-shadow:inset 0 1px 0 rgba(255,255,255,.35),
+  0 0 14px -2px color-mix(in srgb,var(--pb-c,#07695f) calc(var(--pb-glow)*100%),transparent)}
+:root:root body .prog-bar .mid{--pb-c:#07695f}
+.np .np-btn-p{box-shadow:0 12px 26px -14px rgba(21,158,145,.8)}
+.np-undo button{color:#8ad8ce}
+.btn-p{box-shadow:0 8px 18px -10px rgba(21,158,145,.65)}
+:root{--ct-frame:linear-gradient(150deg,#36b9a9 0%,#159e91 38%,#07695f 68%,#36b9a9 100%);--ct-plate:linear-gradient(168deg,#ffffff 0%,#f7f9fa 60%,#f1f4f6 100%);--ct-plate-glow:radial-gradient(62% 44% at 50% 0%,rgba(21,158,145,.10),rgba(21,158,145,0) 64%);--ct-frame-glow:0 0 32px rgba(21,158,145,.16);--ct-eyebrow:#07695f;--ct-dot:rgba(7,105,95,.10);--bg:#f4f6f8;--acc:#0a8a7d;--acc2:#07695f;--grad:linear-gradient(135deg,#0a8a7d,#07695f);--lg-light:radial-gradient(70% 50% at 50% -6%,rgba(21,158,145,.16),transparent 70%),
+    radial-gradient(40vw 40vw at 100% 100%,rgba(54,185,169,.12),transparent 65%),
+    radial-gradient(36vw 36vw at 0% 72%,rgba(87,230,182,.07),transparent 65%);--lg-drop:0 1px 2px rgba(15,23,42,.04),0 16px 36px -20px rgba(10,138,125,.24);--pb-nav-on:linear-gradient(90deg,rgba(21,158,145,.14),rgba(21,158,145,0) 88%);--pb-neon-glow:rgba(21,158,145,.5)}
+html[data-theme=dark]{--ct-plate:linear-gradient(168deg,#111a2e 0%,#0d1525 52%,#0b1220 100%);--ct-plate-glow:radial-gradient(62% 44% at 50% 0%,rgba(21,158,145,.24),rgba(21,158,145,0) 64%);--ct-frame-glow:0 0 36px rgba(21,158,145,.2);--ct-veil:linear-gradient(rgba(11,18,32,.8),rgba(11,18,32,.8));--ct-eyebrow:#36b9a9;--ct-dot:rgba(140,190,196,.10);--bg:#0b1220;--bg2:#0d1525;--bg3:#16213a;--panel:#111a2e;--panel2:#15203a;--line:rgba(130,176,190,.13);--line2:rgba(130,176,190,.22);--acc:#36b9a9;--acc2:#159e91;--grad:linear-gradient(135deg,#0a8a7d,#07695f);--hover:rgba(130,176,190,.05);--lg-fill:rgba(130,176,190,.05);--lg-fill-in:rgba(130,176,190,.035);--lg-rim:rgba(130,176,190,.2);--lg-spec:inset 0 1px 0 rgba(190,226,224,.16),inset 1px 0 0 rgba(190,226,224,.05),inset 0 -1px 0 rgba(190,226,224,.03);--lg-sheen:linear-gradient(150deg,rgba(150,210,204,.08) 0%,rgba(150,210,204,0) 40%);--lg-light:radial-gradient(62% 44% at 50% 0%,rgba(21,158,145,.19),transparent 64%),
+    radial-gradient(70% 55% at 50% 0%,#13203a 0%,transparent 72%),
+    radial-gradient(40vw 40vw at 100% 100%,rgba(21,158,145,.08),transparent 65%),
+    linear-gradient(168deg,#111a2e 0%,#0d1525 52%,#0b1220 100%);--pb-nav-on:linear-gradient(90deg,rgba(21,158,145,.3),rgba(21,158,145,0) 88%);--pb-neon-glow:rgba(54,185,169,.8)}
+
+/* ---------- ręczna część: tokeny palety złoto + teal ----------
+   Złoto = kolor marki (logo, eyebrow sekcji, wyróżnienie w nagłówku, ramka
+   certyfikatu), teal = interfejs (przyciski, linki, fokus, aktywne stany).
+   Inny odcień w każdym motywie: teal #087F73 / #36B9A9, złoto #A17B39 / #C6A15B,
+   tła #F4F6F8 / #0B1220, tekst #0B1220 / #F8FAFC. --gold zostaje bursztynem
+   ostrzeżeń — marka ma własne --brand. */
+:root{
+  --brand:#A17B39; --brand2:#C6A15B;
+  --bg:#F4F6F8; --txt:#0B1220;
+  --acc:#087F73; --acc2:#066b61;
+  --grad:linear-gradient(135deg,#0a8a7d,#07695f);
+  --ct-eyebrow:var(--brand);
+  --ct-frame:linear-gradient(150deg,#d6b77a 0%,#C6A15B 28%,#159E91 64%,#36B9A9 100%);
+  --ct-plate:linear-gradient(168deg,#ffffff 0%,#f8fafa 60%,#f3f6f7 100%);
+  --ct-plate-glow:radial-gradient(62% 44% at 50% 0%,rgba(21,158,145,.10),rgba(21,158,145,0) 64%);
+  --ct-frame-glow:0 0 32px rgba(21,158,145,.14);
+  --ct-dot:rgba(11,18,32,.07);
+  --lg-light:
+    radial-gradient(70% 50% at 50% -6%,rgba(21,158,145,.12),transparent 70%),
+    radial-gradient(40vw 40vw at 100% 100%,rgba(198,161,91,.10),transparent 65%),
+    radial-gradient(36vw 36vw at 0% 72%,rgba(54,185,169,.06),transparent 65%);
+  --lg-drop:0 1px 2px rgba(11,18,32,.04),0 16px 36px -20px rgba(8,127,115,.22);
+  --pb-nav-on:linear-gradient(90deg,rgba(21,158,145,.14),rgba(21,158,145,0) 88%);
+  --pb-neon-glow:rgba(21,158,145,.45);
+}
+html[data-theme=dark]{
+  --brand:#C6A15B; --brand2:#e0c48c;
+  --bg:#0B1220; --bg2:#0d1525; --bg3:#16213a;
+  --panel:#111a2e; --panel2:#15203a;
+  --line:rgba(148,178,200,.13); --line2:rgba(148,178,200,.22);
+  --txt:#F8FAFC; --muted:#9aa8bf; --dim:#7b8aa3;
+  --acc:#36B9A9; --acc2:#159E91;
+  --grad:linear-gradient(135deg,#159E91,#0a7d72);
+  --hover:rgba(148,178,200,.05);
+  --lg-fill:rgba(148,178,200,.05);
+  --lg-fill-in:rgba(148,178,200,.035);
+  --lg-rim:rgba(148,178,200,.18);
+  --lg-sheen:linear-gradient(150deg,rgba(190,226,224,.07) 0%,rgba(190,226,224,0) 40%);
+  --lg-bar:rgba(11,18,32,.6);
+  --lg-bar-solid:rgba(11,18,32,.96);
+  --ct-eyebrow:var(--brand);
+  --ct-plate:linear-gradient(168deg,#111a2e 0%,#0d1525 52%,#0B1220 100%);
+  --ct-plate-glow:radial-gradient(62% 44% at 50% 0%,rgba(21,158,145,.2),rgba(21,158,145,0) 64%);
+  --ct-frame-glow:0 0 36px rgba(21,158,145,.18);
+  --ct-veil:linear-gradient(rgba(11,18,32,.8),rgba(11,18,32,.8));
+  --ct-dot:rgba(148,178,200,.09);
+  --lg-light:
+    radial-gradient(62% 44% at 50% 0%,rgba(21,158,145,.16),transparent 64%),
+    radial-gradient(70% 55% at 50% 0%,#101b30 0%,transparent 72%),
+    radial-gradient(40vw 40vw at 100% 100%,rgba(198,161,91,.07),transparent 65%),
+    linear-gradient(168deg,#111a2e 0%,#0d1525 52%,#0B1220 100%);
+  --pb-nav-on:linear-gradient(90deg,rgba(54,185,169,.26),rgba(54,185,169,0) 88%);
+  --pb-neon-glow:rgba(54,185,169,.7);
+}
+
+/* ---------- portal i admin: złoto marki ---------- */
+/* Pigułka marki w pasku bocznym: granat z napisem w złocie — marka to złoto,
+   teal zostaje dla interakcji. Złoty obrys, żeby na granatowym pasku w
+   ciemnym motywie nie zlała się z tłem. */
+:root:root body .brand-pill{background:#0B1220;color:#C6A15B;
+  box-shadow:0 8px 18px -10px rgba(11,18,32,.55),inset 0 0 0 1px rgba(198,161,91,.35)}
+
+/* Kolorowe ikonki (pasek boczny, kafelki Total balance / profit / accounts):
+   --blue i --purple wracają do błękitu i granatu sprzed palety — generator
+   zrobiłby z nich teal i cały pasek wyszedłby jednokolorowy. Razem z tealem
+   (--acc), złotem/bursztynem (--gold) i zielenią (--green) daje to pięć barw. */
+:root{--blue:#0284c7;--blue-bg:#e8f4fd;--blue-line:#cfe8f8;
+  --purple:#1b4bd8;--purple-bg:#e8eeff;--purple-line:#d3ddfb}
+html[data-theme=dark]{--blue:#38bdf8;--blue-bg:rgba(14,165,233,.14);--blue-line:rgba(56,189,248,.35);
+  --purple:#8fa8ff;--purple-bg:rgba(27,75,216,.2);--purple-line:rgba(143,168,255,.35)}

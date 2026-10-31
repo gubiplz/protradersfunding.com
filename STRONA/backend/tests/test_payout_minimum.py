@@ -75,7 +75,10 @@ def test_payout_minimum_liczy_wyzszy_prog():
 
 
 def test_okno_wyplaty_ma_minimum_500_i_alert_o_2_procentach():
+    """Kwota idzie w kroku 1: pole ma minimum = wyższe z $500 i 2% konta,
+    a gdy działka nie sięga progu, okno mówi o tym zamiast pola."""
     kod = zrodlo_portalu()
     assert "const PO_MIN_USD=500, PO_MIN_PCT=2;" in kod
-    assert 'min="${PO_MIN_USD}"' in kod
-    assert 'id="po-min" role="alert"' in kod and "% of your account size" in kod
+    assert "min=Math.max(PO_MIN_USD,pct)" in kod
+    assert 'id="po-amount" class="inp" type="number" inputmode="numeric" min="${min}"' in kod
+    assert 'class="po-min bad" role="alert"' in kod and "Minimum payout: $" in kod

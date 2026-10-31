@@ -208,56 +208,103 @@
     form.addEventListener('submit', async e => {
       e.preventDefault();
       const d = await nlSubscribe(form);
-      if (d) { form.classList.add('sent'); form.querySelector('.nl-ok').hidden = false; }
+      if (!d) return;
+      const ok = form.querySelector('.nl-ok');
+      /* Treść potwierdzenia zależy od oferty ustawionej w panelu (kod / losowanie / sam zapis). */
+      ok.textContent = d.code ? `Check your inbox — your ${d.pct || 10}% code is on its way.`
+        : d.variant === 'giveaway' ? "You're in the draw — check your inbox."
+        : "You're subscribed — check your inbox.";
+      form.classList.add('sent'); ok.hidden = false;
     });
   });
   (function nlPopup() {
+    /* Popup pokazuje się DOPIERO po delay_s sekundach spędzonych na stronach
+       publicznych (sumowane między podstronami w localStorage pf_nl_t), bez
+       wcześniejszego wyzwalacza przewijania. Wariant, teksty i wyłącznik
+       ustawia admin (Mail → Newsletter → Popup); wyłączony = brak #nlModal. */
+    /* Wejście z linku w mailu newslettera albo ze strony wypisania = ta osoba
+       już jest na liście (albo właśnie z niej zeszła) — popup jej nie zaczepia. */
+    if (/[?&]utm_source=newsletter\b/.test(location.search) || /^\/newsletter\//.test(location.pathname)) {
+      try { localStorage.setItem(NL_KEY, 'done'); } catch (e) {}
+      return;
+    }
     const modal = $('#nlModal'); if (!modal) return;
-    if (!/^\/(faq\/?)?$/.test(location.pathname)) return;
     let st = null; try { st = localStorage.getItem(NL_KEY); } catch (e) {}
-    if (st === 'done' || (st && Date.now() - (+st || 0) < 7 * 864e5)) return;
+    if (st === 'done' || (st && Date.now() - (+st || 0) < 14 * 864e5)) return;
+    const ends = modal.dataset.ends ? Date.parse(modal.dataset.ends) : 0;
+    if (ends && ends <= Date.now()) return;
+    const delay = Math.max(60, +modal.dataset.delay || 180) * 1000;
     const form = modal.querySelector('form'), consent = form.querySelector('input[name=consent]'),
       submit = form.querySelector('button[type=submit]'), inp = $('#nlEmail');
-    const mobile = matchMedia('(max-width:640px)').matches, t0 = Date.now();
-    let shown = false;
+    const mobile = matchMedia('(max-width:640px)').matches;
+    const T_KEY = 'pf_nl_t';
+    /* Czas liczy się na każdej stronie publicznej, ale popup nie wchodzi w płatność ani w certyfikaty. */
+    const allowed = !/^\/(pay|verify|payout|certificate|newsletter)/.test(location.pathname);
+    let spent = 0; try { spent = +localStorage.getItem(T_KEY) || 0; } catch (e) {}
+    let shown = false, last = Date.now();
     const blocked = () => {
       const hd = document.getElementById('hd-panel'), ck = document.getElementById('cookie-note');
-      return (hd && !hd.hidden) || (ck && !ck.classList.contains('hidden')) || document.activeElement === inp;
+      return (hd && !hd.hidden) || (ck && !ck.classList.contains('hidden'))
+        || document.activeElement === inp;
     };
+    /* Liczymy tylko czas z kartą na wierzchu — schowana karta nie „czyta" strony. */
+    const tick = () => {
+      const now = Date.now();
+      if (document.visibilityState === 'visible') spent += Math.min(now - last, 5000);
+      last = now;
+      try { localStorage.setItem(T_KEY, String(Math.round(spent))); } catch (e) {}
+      if (allowed && spent >= delay && !shown && !blocked()) show();
+    };
+    const timer = setInterval(tick, 2000);
+    /* Zalogowany (token portalu w tej przeglądarce): serwer wie, czy jest już
+       zapisany, wypisał się, już kupił albo wyłączył oferty w portalu. */
+    let tok = null; try { tok = localStorage.getItem('pf_token'); } catch (e) {}
+    if (tok) fetch('/api/me/newsletter', { headers: { Authorization: 'Bearer ' + tok } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!d || !(d.subscribed || d.unsubscribed || d.customer || d.marketing === false)) return;
+        shown = true; clearInterval(timer);
+        try { localStorage.setItem(NL_KEY, 'done'); localStorage.removeItem(T_KEY); } catch (e) {}
+      }).catch(() => {});
+    document.addEventListener('visibilitychange', () => { last = Date.now(); });
     function show() {
       if (shown) return;
-      if (blocked()) { setTimeout(show, 4000); return; }
-      shown = true; modal.hidden = false;
+      shown = true; clearInterval(timer); modal.hidden = false;
       requestAnimationFrame(() => modal.classList.add('open'));
       if (!mobile) setTimeout(() => inp.focus({ preventScroll: true }), 320);
+      if (ends) countdown();
+    }
+    function countdown() {
+      const el = $('#nlTimer'); if (!el) return;
+      const draw = () => {
+        const left = Math.max(0, ends - Date.now());
+        if (!left) { close(false); return; }
+        const h = Math.floor(left / 36e5), m = Math.floor(left / 6e4) % 60, sec = Math.floor(left / 1e3) % 60;
+        const d = Math.floor(h / 24);
+        el.textContent = 'Ends in ' + (d ? `${d}d ${h % 24}h ${m}m` : `${h}h ${String(m).padStart(2, '0')}m ${String(sec).padStart(2, '0')}s`);
+        if (!modal.hidden) setTimeout(draw, 1000);
+      };
+      draw();
     }
     function close(done) {
       modal.classList.remove('open');
       setTimeout(() => { modal.hidden = true; }, 240);
-      try { localStorage.setItem(NL_KEY, done ? 'done' : String(Date.now())); } catch (e) {}
+      try { localStorage.setItem(NL_KEY, done ? 'done' : String(Date.now())); localStorage.removeItem(T_KEY); } catch (e) {}
     }
-    // Dopiero po chwili na stronie: samo szybkie przewinięcie w dół nie wywołuje popupu.
-    const minMs = mobile ? 60000 : 30000;
-    setTimeout(show, mobile ? 75000 : 45000);
-    const onScroll = () => {
-      const h = document.documentElement;
-      if ((h.scrollTop + innerHeight) / h.scrollHeight < 0.6) return;
-      if (Date.now() - t0 < minMs) return;
-      removeEventListener('scroll', onScroll); show();
-    };
-    addEventListener('scroll', onScroll, { passive: true });
     consent.addEventListener('change', () => { submit.disabled = !consent.checked; });
     inp.addEventListener('input', () => inp.classList.remove('bad'));
     $('#nlX').addEventListener('click', () => close(false));
     $('#nlNo').addEventListener('click', () => close(false));
     modal.addEventListener('click', e => { if (e.target === modal) close(false); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && !modal.hidden) close(false); });
+    $$('#nlModal [data-nl-close]').forEach(b => b.addEventListener('click', () => close(true)));
     form.addEventListener('submit', async e => {
       e.preventDefault();
       const d = await nlSubscribe(form);
       if (!d) return;
-      $('#nlCode').textContent = d.code || 'WELCOME10';
       form.hidden = true; modal.querySelector('.nl-done').hidden = false;
+      if (!d.code) return;
+      $('#nlCode').textContent = d.code;
       $('#nlUse').onclick = () => {
         try { localStorage.setItem('pf_coupon_code', d.code); localStorage.setItem('pf_coupon_pct', String(d.pct || 10)); } catch (err) {}
         close(true);
@@ -459,7 +506,7 @@
       ['Maximum total drawdown', p.max_overall_loss_pct + '%'],
       ['Drawdown type', 'Balance-based'],
       ['Minimum trading days', p.min_trading_days + ' days before first payout'],
-      ['Reward frequency', 'Every 7 days'],
+      ['Reward frequency', czestotliwoscWyplat()],
       ['Profit split', p.profit_split_pct + '%'],
       ['Max open volume', p.max_lots + ' lots'],
       ['Weekend trading', wkVal],
@@ -472,7 +519,7 @@
       ['Maximum total drawdown', p.max_overall_loss_pct + '%'],
       ['Drawdown type', 'Balance-based'],
       ['Minimum trading days', p.min_trading_days + ' days per phase, and before your first payout'],
-      ['Reward frequency', 'Bi-weekly'],
+      ['Reward frequency', czestotliwoscWyplat()],
       ['Profit split', 'Up to ' + p.profit_split_pct + '%'],
       ['Max open volume', p.max_lots + ' lots'],
       ['Fee refund', '<span class="ok">✓ With your first payout</span>'],
@@ -549,7 +596,7 @@
       ['Maximum overall loss', r2.max_overall_loss_pct + '%', ...col(ri && ri.max_overall_loss_pct + '%')],
       ['Drawdown type', 'Balance-based', ...col('Balance-based')],
       ['Minimum trading days before first payout', r2.min_trading_days + ' days', ...col(ri && ri.min_trading_days + ' days')],
-      ['Reward frequency', 'Bi-weekly', ...col('Every 7 days')],
+      ['Reward frequency', czestotliwoscWyplat(), ...col(czestotliwoscWyplat())],
       ['News trading', '<span class="ok">✓ Allowed</span>', ...col('<span class="ok">✓ Allowed</span>')],
       ['Weekend trading', '$199 add-on', ...col('$199 add-on')],
       /* Oba modele dostaja 1:100, bo z taka dzwignia provisioning ZAKLADA konta
@@ -987,3 +1034,11 @@
   $$('.stat-num[data-count]').forEach(countUp);
   stats(); products(); certsStrip();
 })();
+
+/* „Reward frequency" z ustawienia serwera (PAYOUT_INTERVAL_DAYS przez
+   data-payout-days na <body>): to zasada dla tradera — co ile dni może złożyć
+   wniosek — a nie obietnica terminu wypłaty. 0 = on demand. */
+function czestotliwoscWyplat() {
+  const d = +(document.body && document.body.dataset.payoutDays || 0);
+  return d > 0 ? `Every ${d} days between requests` : 'On demand';
+}

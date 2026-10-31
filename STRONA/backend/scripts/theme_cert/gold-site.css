@@ -1,0 +1,6 @@
+
+/* ---------- landing: złoto marki ---------- */
+/* Wyróżnienie w nagłówku („Keep up to 90%") w złocie marki, nie w akcencie */
+:root:root body .grad-text{background-image:linear-gradient(135deg,#b88f45,#A17B39 55%,#8a6528);
+  -webkit-background-clip:text;background-clip:text;color:transparent}
+html[data-theme=dark]:root:root body .grad-text{background-image:linear-gradient(135deg,#e6cb94,#C6A15B 55%,#a98544)}

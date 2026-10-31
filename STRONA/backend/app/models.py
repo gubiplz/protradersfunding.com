@@ -105,6 +105,17 @@ class Trader(Base):
     email_verified: Mapped[bool] = mapped_column(Boolean, default=True)
     email_verify_code: Mapped[str | None] = mapped_column(String(6), nullable=True)
 
+    # Portfel do wypłat. Zapisuje się przy pierwszej wypłacie (po akceptacji
+    # admina) i jest podpowiadany przy kolejnych. Zmiana zapisanego portfela
+    # wymaga 6-cyfrowego kodu z maila — kod jest przypięty do KONKRETNEGO nowego
+    # adresu (`payout_wallet_new`), żeby nie dało się podmienić adresu po kodzie.
+    payout_network: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    payout_address: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    payout_wallet_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    payout_wallet_new: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    payout_wallet_code: Mapped[str | None] = mapped_column(String(6), nullable=True)
+    payout_wallet_code_exp: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     # Moment akceptacji regulaminu i polityki prywatności przy rejestracji
     # (checkbox jest wymagany; konta sprzed wdrożenia mają NULL).
     terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -844,6 +855,9 @@ class NewsletterSubscriber(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     email: Mapped[str] = mapped_column(String(200), unique=True, index=True)
     source: Mapped[str] = mapped_column(String(20), default="footer")   # popup | footer
+    # Oferta, pod którą się zapisał: "discount:WELCOME10", "flash:BLACKFRIDAY",
+    # "giveaway:<data losowania>", "updates". Przy ponownym zapisie się nie zmienia.
+    campaign: Mapped[str | None] = mapped_column(String(60), nullable=True)
     consent: Mapped[bool] = mapped_column(Boolean, default=True)
     token: Mapped[str] = mapped_column(String(32), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

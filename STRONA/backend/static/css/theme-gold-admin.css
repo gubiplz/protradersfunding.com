@@ -1,0 +1,14 @@
+/* ============================================================
+   Paleta „złoto + teal" (panel admina, po theme-gold-portal.css): złoto #C6A15B = marka, teal = interfejs,
+   tła deep navy #0B1220 / off-white #F4F6F8. Tylko wygląd.
+   Ładowana jako OSTATNI arkusz (po theme-cert-*): ta sama specyficzność
+   + później = wygrywa. Zdjęcie palety = usunięcie linku.
+   Blok „wygenerowany": scripts/theme_cert/gen_theme_gold.py.
+   ============================================================ */
+
+/* z admin.css: 3 reguł */
+.tgp-ava{background:linear-gradient(135deg,#3fb0a2,#8a5cf6)}
+.tgp-text a{color:#4fbcae}
+.tgp-text blockquote{border-left:3px solid #4fbcae}
+/* z theme-cert-admin.css: 1 reguł */
+.tgp-ava{background:linear-gradient(135deg,#3fb0a2,#3fae9f)}
