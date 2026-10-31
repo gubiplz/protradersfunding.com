@@ -121,3 +121,74 @@ def test_strona_kontaktu_i_faq_z_pomoca():
         assert 'id="nlModal"' in home and 'data-source="footer"' in home
         assert "/static/img/steps/step-1.webp" in home and "1. Choose your challenge" in home
         assert "/contact" in c.get("/sitemap.xml").text
+
+
+# ---- Popup: wyłącznik, warianty, kampania ----
+
+def _popup(c, **cfg):
+    r = c.post("/api/admin/newsletter/popup", headers=ADMIN, json=cfg)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_popup_wylacznik_i_warianty(maile):
+    from datetime import date, datetime, timedelta, timezone
+    with TestClient(app) as c:
+        try:
+            # Domyślnie: zniżka WELCOME10, popup po 3 min.
+            d = c.get("/api/admin/newsletter/popup", headers=ADMIN).json()
+            assert d["config"]["variant"] == "discount" and d["config"]["delay_s"] == 180
+            home = c.get("/").text
+            assert 'data-delay="180"' in home and "Get 10% off your first challenge." in home
+
+            # Wyłączony: brak popupu, pasek nad stopką dalej działa.
+            _popup(c, on=False, variant="discount")
+            home = c.get("/").text
+            assert 'id="nlModal"' not in home and 'data-source="footer"' in home
+
+            # Kupon spoza koszyka i flash bez przyszłego końca — odmowa.
+            assert c.post("/api/admin/newsletter/popup", headers=ADMIN,
+                          json={"variant": "discount", "code": "NIEMA"}).status_code == 400
+            assert c.post("/api/admin/newsletter/popup", headers=ADMIN,
+                          json={"variant": "flash", "code": "VIP20"}).status_code == 400
+            assert c.post("/api/admin/newsletter/popup", headers=ADMIN,
+                          json={"variant": "discount", "title": "Bad {oops}"}).status_code == 400
+
+            # Flash: kod VIP20 z odliczaniem.
+            koniec = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+            d = _popup(c, on=True, variant="flash", code="VIP20", ends_at=koniec, delay_s=300)
+            assert d["live"]["variant"] == "flash" and d["live"]["pct"] == 20
+            home = c.get("/").text
+            assert "Flash sale: 20% off every challenge." in home and "data-ends=" in home
+            r = c.post("/api/newsletter/subscribe", json={"email": "flash@test.pl", "source": "popup"}).json()
+            assert r["code"] == "VIP20" and r["variant"] == "flash"
+            assert maile[-1][2]["variant"] == "flash"
+
+            # Giveaway: bez kodu, zapis oznaczony kampanią, CSV per kampania.
+            dzien = (date.today() + timedelta(days=10)).isoformat()
+            _popup(c, on=True, variant="giveaway", prize="$100K", draw_date=dzien,
+                   title="Win {prize} now")
+            home = c.get("/").text
+            assert "Win $100K now" in home
+            r = c.post("/api/newsletter/subscribe", json={"email": "gw@test.pl", "source": "footer"}).json()
+            assert r["variant"] == "giveaway" and "code" not in r
+            lista = c.get("/api/admin/newsletter", headers=ADMIN).json()
+            assert f"giveaway:{dzien}" in lista["campaigns"]
+            csv = c.get(f"/api/admin/newsletter.csv?campaign=giveaway:{dzien}", headers=ADMIN).text
+            assert "gw@test.pl" in csv and "flash@test.pl" not in csv
+            subject, body = notify._render("newsletter_welcome", {"variant": "giveaway",
+                                           "prize": "$100K", "draw_date": "November 9",
+                                           "unsubscribe_url": "u"})
+            assert "giveaway" in subject and "No purchase necessary" in body
+        finally:
+            _popup(c, on=True, variant="discount", code="WELCOME10")
+
+
+def test_flash_po_terminie_spada_do_samego_zapisu(monkeypatch):
+    import json
+    from datetime import datetime, timedelta, timezone
+    from app import main
+    stary = {"variant": "flash", "code": "VIP20",
+             "ends_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()}
+    oferta = main._nl_oferta(main._nl_czysc(json.loads(json.dumps(stary))))
+    assert oferta["variant"] == "updates" and "code" not in oferta

@@ -855,6 +855,9 @@ class NewsletterSubscriber(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     email: Mapped[str] = mapped_column(String(200), unique=True, index=True)
     source: Mapped[str] = mapped_column(String(20), default="footer")   # popup | footer
+    # Oferta, pod którą się zapisał: "discount:WELCOME10", "flash:BLACKFRIDAY",
+    # "giveaway:<data losowania>", "updates". Przy ponownym zapisie się nie zmienia.
+    campaign: Mapped[str | None] = mapped_column(String(60), nullable=True)
     consent: Mapped[bool] = mapped_column(Boolean, default=True)
     token: Mapped[str] = mapped_column(String(32), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

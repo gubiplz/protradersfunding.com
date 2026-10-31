@@ -1280,36 +1280,135 @@ function renderMailInbox(){
 /* ---------- newsletter: lista zapisów ze strony + wysyłka do wszystkich ---------- */
 async function renderNewsletter(){
   if(!window._nl){try{window._nl=await api('/api/admin/newsletter')}catch(e){window._nl={subscribers:[],active:0,total:0,error:e.message}}}
-  const d=window._nl, q=(window._nlQ||'').toLowerCase();
-  const rows=(d.subscribers||[]).filter(s=>!q||s.email.includes(q));
+  if(!window._nlp){try{window._nlp=await api('/api/admin/newsletter/popup')}catch(e){window._nlp=null}}
+  const d=window._nl, q=(window._nlQ||'').toLowerCase(), kamp=window._nlCamp||'';
+  const rows=(d.subscribers||[]).filter(s=>(!q||s.email.includes(q))&&(!kamp||s.campaign===kamp));
   $('view').innerHTML=`
     <div class="toolbar">${mailSwitches()}
       ${searchBox('nl-q','_nlQ','renderNewsletter','Search email…')}
+      ${(d.campaigns||[]).length?`<select class="inp" aria-label="Campaign" onchange="window._nlCamp=this.value;renderNewsletter()">
+        <option value="">All campaigns</option>${d.campaigns.map(c=>`<option value="${esc(c)}"${c===kamp?' selected':''}>${esc(nlpKampania(c))}</option>`).join('')}</select>`:''}
       <span class="count-pill">${d.active} active · ${d.total} total</span>
-      <a class="btn-o sm" href="/api/admin/newsletter.csv" onclick="return nlCsv(event)">Export CSV</a>
+      <a class="btn-o sm" href="/api/admin/newsletter.csv" onclick="return nlCsv(event)">Export CSV${kamp?' (campaign)':''}</a>
       <button class="btn-p sm" onclick="openNlCompose()">Send to all</button>
     </div>
     ${d.error?`<p class="lead-statline" style="color:var(--gold)">⚠ ${esc(d.error)}</p>`:''}
-    <p class="muted" style="font-size:12.5px;margin:0 0 12px">Signups from the landing page popup and the strip above the footer.
-      Every welcome email carries the <b>${esc(d.code||'WELCOME10')}</b> code; every newsletter carries an unsubscribe link.</p>
+    ${window._nlp?nlpCard(window._nlp):''}
+    <p class="muted" style="font-size:12.5px;margin:0 0 12px">Signups from the popup and the strip above the footer.
+      Every newsletter carries an unsubscribe link. Giveaway draws: pick the campaign above, export the CSV and draw from it.</p>
     ${rows.length?`<div class="tbl-wrap rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.newsletter">
-      <thead><tr><th>Email</th><th>Source</th><th>Subscribed</th><th>Status</th></tr></thead>
+      <thead><tr><th>Email</th><th>Source</th><th>Campaign</th><th>Subscribed</th><th>Status</th></tr></thead>
       <tbody>${rows.map(s=>`<tr>
         <td class="rt-main" data-l="Email">${esc(s.email)}</td>
         <td class="muted" data-l="Source">${esc(s.source||'—')}</td>
+        <td class="muted" data-l="Campaign">${esc(s.campaign?nlpKampania(s.campaign):'—')}</td>
         <td class="muted" data-l="Subscribed" data-sort="${esc(s.created_at||'')}">${s.created_at?dstr(s.created_at):'—'}</td>
         <td data-l="Status"><span class="status ${s.unsubscribed_at?'failed':'paid'}"><span class="dot"></span>${s.unsubscribed_at?'unsubscribed':'active'}</span></td>
       </tr>`).join('')}</tbody></table></div>`
       :`<div class="empty"><h3>No subscribers yet</h3><p>Signups from the website land here.</p></div>`}`;
+  nlpPodglad();
 }
 async function nlCsv(e){
   /* Fetch z tokenem admina — zwykły link nie niesie nagłówka. */
   e.preventDefault();
-  try{const r=await fetch('/api/admin/newsletter.csv',{headers:H()});const b=await r.blob();
+  const kamp=window._nlCamp||'';
+  try{const r=await fetch('/api/admin/newsletter.csv'+(kamp?'?campaign='+encodeURIComponent(kamp):''),{headers:H()});const b=await r.blob();
     const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='newsletter.csv';a.click();
     setTimeout(()=>URL.revokeObjectURL(a.href),2000);
   }catch(err){toast('Error: '+err.message,'err')}
   return false;
+}
+/* ---------- popup newslettera: wyłącznik, wariant, teksty, opóźnienie ---------- */
+const NLP_WARIANTY=[
+  ['discount','Discount','% off the first challenge'],
+  ['flash','Flash sale','% off with a countdown'],
+  ['giveaway','Giveaway','Win a free account'],
+  ['updates','Updates only','No incentive'],
+];
+function nlpKampania(c){
+  const [v,x]=String(c).split(':');
+  const n={discount:'Discount',flash:'Flash sale',giveaway:'Giveaway',updates:'Updates'}[v]||v;
+  return x?`${n} · ${x}`:n;
+}
+function nlpStan(){
+  /* Bieżący stan formularza (albo zapisany config, zanim ktoś coś ruszy). */
+  const c={...(window._nlp?.config||{})}, f=$('nlp-form');
+  if(!f)return c;
+  c.on=$('nlp-on').checked; c.variant=f.dataset.variant;
+  ['code','ends_at','prize','draw_date','title','body','cta','delay_s'].forEach(k=>{const el=$('nlp-'+k);if(el)c[k]=el.value});
+  c.delay_s=+c.delay_s||180;
+  if(c.ends_at&&!/[zZ]|[+-]\d\d:\d\d$/.test(c.ends_at))c.ends_at=new Date(c.ends_at).toISOString();
+  return c;
+}
+function nlpTekst(t,c){
+  const pct=((window._nlp?.coupons||[]).find(x=>x.code===c.code)||{}).pct??10;
+  const d=c.draw_date?new Date(c.draw_date+'T12:00:00Z'):null;
+  return String(t||'').replace(/\{pct\}/g,pct).replace(/\{prize\}/g,c.prize||'$50K')
+    .replace(/\{draw_date\}/g,d?d.toLocaleDateString('en-US',{month:'long',day:'numeric',timeZone:'UTC'}):'…');
+}
+function nlpPodglad(){
+  const c=nlpStan(), def=(window._nlp?.defaults||{})[c.variant]||{}, box=$('nlp-prev');
+  if(!box)return;
+  box.innerHTML=`<div class="nlp-prev-card${c.on?'':' off'}">
+    ${c.variant==='flash'?'<span class="nlp-prev-tag">Ends in 2d 4h 10m</span>':c.variant==='giveaway'?`<span class="nlp-prev-tag">Giveaway · draw on ${esc(nlpTekst('{draw_date}',c))}</span>`:''}
+    <b>${esc(nlpTekst(c.title||def.title,c))}</b><p>${esc(nlpTekst(c.body||def.body,c))}</p>
+    <span class="nlp-prev-btn">${esc(nlpTekst(c.cta||def.cta,c))}</span></div>
+    ${c.on?'':'<p class="muted" style="font-size:12px;margin:8px 0 0">The popup is off. The footer strip still uses this offer.</p>'}`;
+}
+function nlpCard(n){
+  const c=n.config, live=n.live||{};
+  const dl=c.ends_at?new Date(c.ends_at):null;
+  const lok=dl&&!isNaN(dl)?new Date(dl.getTime()-dl.getTimezoneOffset()*6e4).toISOString().slice(0,16):'';
+  const def=(n.defaults||{})[c.variant]||{};
+  const pole=(id,label,html)=>`<label class="nlp-f" for="nlp-${id}"><span>${label}</span>${html}</label>`;
+  const kody=`<select id="nlp-code" class="inp" onchange="nlpPodglad()">${(n.coupons||[]).map(k=>
+    `<option value="${esc(k.code)}"${k.code===c.code?' selected':''}>${esc(k.code)} · ${k.pct}%</option>`).join('')}</select>`;
+  const pola={
+    discount:pole('code','Coupon code',kody),
+    flash:pole('code','Coupon code',kody)+pole('ends_at','Ends (your time)',`<input id="nlp-ends_at" type="datetime-local" class="inp" value="${esc(lok)}" oninput="nlpPodglad()">`),
+    giveaway:pole('prize','Prize',`<input id="nlp-prize" class="inp" maxlength="30" value="${esc(c.prize||'')}" placeholder="$50K" oninput="nlpPodglad()">`)
+      +pole('draw_date','Draw date',`<input id="nlp-draw_date" type="date" class="inp" value="${esc(c.draw_date||'')}" oninput="nlpPodglad()">`),
+    updates:'',
+  }[c.variant];
+  const opoz=[60,120,180,300,600,900,1200];
+  return `<div class="panel nlp" id="nlp-form" data-variant="${esc(c.variant)}">
+    <div class="nlp-head">
+      <div><h3>Signup popup</h3>
+        <p class="muted">Shown after the visitor spends the time below on the public pages. The footer strip gives the same offer.</p></div>
+      <label class="nlp-sw"><span>${c.on?'On':'Off'}</span><label class="switch"><input type="checkbox" id="nlp-on" ${c.on?'checked':''}
+        onchange="this.closest('.nlp-sw').firstElementChild.textContent=this.checked?'On':'Off';nlpPodglad()"><i></i></label></label>
+    </div>
+    <div class="nlp-vars" role="radiogroup" aria-label="Popup offer">${NLP_WARIANTY.map(([k,t,o])=>
+      `<button type="button" role="radio" aria-checked="${k===c.variant}" class="nlp-var${k===c.variant?' on':''}" onclick="nlpWariant('${k}')"><b>${t}</b><span>${o}</span></button>`).join('')}</div>
+    <div class="nlp-grid">
+      <div class="nlp-fields">
+        ${pola}
+        ${pole('title','Headline',`<input id="nlp-title" class="inp" maxlength="120" value="${esc(c.title||'')}" placeholder="${esc(def.title||'')}" oninput="nlpPodglad()">`)}
+        ${pole('body','Text',`<textarea id="nlp-body" class="inp" rows="3" maxlength="400" placeholder="${esc(def.body||'')}" oninput="nlpPodglad()">${esc(c.body||'')}</textarea>`)}
+        ${pole('cta','Button',`<input id="nlp-cta" class="inp" maxlength="40" value="${esc(c.cta||'')}" placeholder="${esc(def.cta||'')}" oninput="nlpPodglad()">`)}
+        ${pole('delay_s','Show after',`<select id="nlp-delay_s" class="inp">${opoz.map(s=>`<option value="${s}"${s===c.delay_s?' selected':''}>${s<120?s+' seconds':s/60+' minutes'} on the site</option>`).join('')}</select>`)}
+        <p class="muted" style="font-size:11.5px;margin:0">Empty fields use the default text. Placeholders: {pct}, {prize}, {draw_date}.${c.variant==='flash'?' Coupon codes do not expire at checkout; the popup and its offer stop at the end time.':''}</p>
+      </div>
+      <div class="nlp-side"><span class="muted" style="font-size:12px">Preview</span><div id="nlp-prev"></div></div>
+    </div>
+    <div class="nlp-foot">
+      <span class="muted" style="font-size:12px">Live now: <b>${esc(live.on===false?'popup off':nlpKampania(live.campaign||'updates'))}</b>${live.variant&&live.variant!==c.variant?' (the saved offer has ended)':''}</span>
+      <button type="button" class="btn-p sm" id="nlp-save" onclick="nlpZapisz(this)">Save popup</button>
+    </div>
+  </div>`;
+}
+function nlpWariant(v){
+  const c=nlpStan();c.variant=v;c.title=c.body=c.cta='';
+  window._nlp={...window._nlp,config:c};renderNewsletter();
+}
+async function nlpZapisz(btn){
+  const c=nlpStan();
+  await busy(btn,null,async()=>{
+    try{window._nlp=await api('/api/admin/newsletter/popup',{method:'POST',body:JSON.stringify(c)});
+      toast(c.on?'✅ Popup saved. It is live on the site within a minute.':'✅ Saved. The popup is off.','ok',7000);
+      renderNewsletter();
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
 }
 function openNlCompose(){
   const w=document.createElement('div');w.id='nl-modal';w.className='modal-wrap';

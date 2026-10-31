@@ -139,7 +139,7 @@ document.getElementById('bogoX').addEventListener('click',function(){
       </div>
       <p class="nl-note">We care about your data. Read our <a href="/privacy">privacy policy</a>. Subscribing means
         you agree to receive marketing emails from {{ site_name }}.</p>
-      <p class="nl-ok" hidden>Check your inbox — your 10% code is on its way.</p>
+      <p class="nl-ok" hidden>Check your inbox.</p>
     </form>
   </div>
 </div></section>
@@ -197,34 +197,50 @@ document.getElementById('bogoX').addEventListener('click',function(){
   </div>
 </footer>
 
-{# Popup newslettera: raz, po chwili na stronie albo po przewinięciu (site.js). #}
-<div class="nl-modal" id="nlModal" hidden>
+{# Popup newslettera: wariant, teksty, opóźnienie i wyłącznik z panelu
+   (Mail → Newsletter → Popup). Pokazuje się dopiero po delay_s sekundach na
+   stronach publicznych (site.js). Wyłączony = brak markupu. #}
+{% if nl_popup %}
+<div class="nl-modal nl-v-{{ nl_popup.variant }}" id="nlModal" hidden data-delay="{{ nl_popup.delay_s }}"{% if nl_popup.ends_at %} data-ends="{{ nl_popup.ends_at }}"{% endif %}>
   <div class="nl-card" role="dialog" aria-modal="true" aria-labelledby="nlTitle">
     <button type="button" class="nl-x" id="nlX" aria-label="Close">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     <div class="nl-brand"><img src="/static/img/logo.png" alt="" width="34" height="34"><span>The {{ site_name }} newsletter</span></div>
     <form class="nl-form nl-form-modal" data-source="popup" novalidate>
-      <h2 id="nlTitle">Get 10% off your first challenge.</h2>
-      <p>Occasional emails about new tiers, promos and platform updates. Your welcome email carries the code.</p>
+      {% if nl_popup.variant == 'flash' %}<div class="nl-timer" id="nlTimer"></div>{% endif %}
+      {% if nl_popup.variant == 'giveaway' %}<div class="nl-timer">Giveaway · draw on {{ nl_popup.draw_date }}</div>{% endif %}
+      <h2 id="nlTitle">{{ nl_popup.title }}</h2>
+      <p>{{ nl_popup.body }}</p>
       <input type="email" name="email" id="nlEmail" placeholder="Enter your email address" autocomplete="email" required aria-label="Email address">
-      <label class="nl-consent"><input type="checkbox" name="consent"><span>Yes, send me marketing emails from {{ site_name }}</span></label>
+      <label class="nl-consent ck"><input type="checkbox" name="consent"><span>Yes, send me marketing emails from {{ site_name }}</span></label>
       <div class="nl-btns">
-        <button type="submit" class="btn" disabled>Subscribe + Get 10% off</button>
+        <button type="submit" class="btn" disabled>{{ nl_popup.cta }}</button>
         <button type="button" class="nl-no" id="nlNo">No thanks</button>
       </div>
     </form>
     <div class="nl-done" hidden>
+      {% if nl_popup.code %}
       <h2>You're in. Here's your code.</h2>
-      <p>Enter it at checkout for 10% off your first challenge. It's also in your inbox.</p>
-      <div class="nl-code" id="nlCode">WELCOME10</div>
+      <p>Enter it at checkout for {{ '%g' % nl_popup.pct }}% off {{ 'every challenge' if nl_popup.variant == 'flash' else 'your first challenge' }}. It's also in your inbox.</p>
+      <div class="nl-code" id="nlCode">{{ nl_popup.code }}</div>
       <div class="nl-btns">
         <button type="button" class="btn" id="nlUse">Use it now</button>
         <button type="button" class="btn-ghost" id="nlCopy">Copy code</button>
       </div>
+      {% elif nl_popup.variant == 'giveaway' %}
+      <h2>You're in the draw.</h2>
+      <p>One subscriber wins a free {{ nl_popup.prize }} challenge on {{ nl_popup.draw_date }}. We e-mail the winner. No purchase necessary.</p>
+      <div class="nl-btns"><button type="button" class="btn" data-nl-close>Done</button></div>
+      {% else %}
+      <h2>You're subscribed.</h2>
+      <p>A welcome e-mail is in your inbox. Unsubscribe anytime with one click.</p>
+      <div class="nl-btns"><button type="button" class="btn" data-nl-close>Done</button></div>
+      {% endif %}
     </div>
     <div class="nl-foot">Unsubscribe anytime · <a href="/privacy">Privacy</a></div>
   </div>
 </div>
+{% endif %}
 
 <div class="cookie-note hidden" id="cookie-note" role="dialog" aria-label="Cookie notice">
   <div class="ck-txt">

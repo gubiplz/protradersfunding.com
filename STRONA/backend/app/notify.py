@@ -406,11 +406,18 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
         # Newsletter: powitanie z kodem i zwykła wysyłka z panelu. Oba z linkiem
         # wypisania — to lista marketingowa, nie maile transakcyjne.
         "newsletter_welcome": (
-            f"Your {ctx.get('pct', 10):g}% code for {brand}",
+            (f"You're in the {brand} giveaway" if ctx.get("variant") == "giveaway"
+             else f"Welcome to the {brand} newsletter" if not ctx.get("code")
+             else f"Your {ctx.get('pct', 10):g}% code for {brand}"),
             f"Thanks for subscribing to the {brand} newsletter.\n\n"
-            f"Your code for {ctx.get('pct', 10):g}% off your first challenge: {ctx.get('code', '')}\n"
-            f"Enter it at checkout: {settings.app_base_url}/#pricing\n\n"
-            f"We send occasional emails about new challenge tiers, promotions and platform updates.\n"
+            + (f"You're entered into the draw for a free {ctx.get('prize')} challenge. The winner "
+               f"is drawn on {ctx.get('draw_date')} and contacted by e-mail. No purchase necessary.\n\n"
+               if ctx.get("variant") == "giveaway" else
+               f"Your code for {ctx.get('pct', 10):g}% off "
+               f"{'every challenge while the flash sale lasts' if ctx.get('variant') == 'flash' else 'your first challenge'}: "
+               f"{ctx.get('code', '')}\nEnter it at checkout: {settings.app_base_url}/#pricing\n\n"
+               if ctx.get("code") else "")
+            + f"We send occasional emails about new challenge tiers, promotions and platform updates.\n"
             f"Unsubscribe anytime: {ctx.get('unsubscribe_url', '')}",
         ),
         "newsletter_blast": (
@@ -923,13 +930,26 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
         parts += _tekst_html(str(ctx.get("body") or ""))
     elif event == "newsletter_welcome":
         kod = html.escape(str(ctx.get("code") or ""))
-        parts = [_head_html("Newsletter", f"{ctx.get('pct', 10):g}% off your first challenge",
-                            "Thanks for subscribing. Here is your code — enter it at checkout.")]
-        parts.append(f"""
+        if ctx.get("variant") == "giveaway":
+            parts = [_head_html("Giveaway", "You're in the draw",
+                                f"Thanks for subscribing. You're entered into the draw for a free "
+                                f"{html.escape(str(ctx.get('prize') or ''))} challenge. The winner is drawn "
+                                f"on {html.escape(str(ctx.get('draw_date') or ''))} and contacted by "
+                                f"e-mail. No purchase necessary.")]
+        elif kod:
+            parts = [_head_html("Newsletter",
+                                f"{ctx.get('pct', 10):g}% off "
+                                + ("every challenge" if ctx.get("variant") == "flash" else "your first challenge"),
+                                "Thanks for subscribing. Here is your code — enter it at checkout."
+                                + (" Use it before the flash sale ends." if ctx.get("variant") == "flash" else ""))]
+            parts.append(f"""
    <tr><td align="center" style="padding:28px 44px 0">
      <div style="display:inline-block;border:1px dashed {_INK};border-radius:14px;padding:16px 30px;
        font:700 26px/1 {_FONT};letter-spacing:.12em;color:{_INK}">{kod}</div>
    </td></tr>""")
+        else:
+            parts = [_head_html("Newsletter", f"Welcome to the {brand} newsletter",
+                                "Thanks for subscribing.")]
         parts.append(_button_html("Choose a challenge", f"{settings.app_base_url}/#pricing"))
         parts += _tekst_html("We send occasional emails about new challenge tiers, promotions and "
                              "platform updates.")

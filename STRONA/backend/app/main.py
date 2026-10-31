@@ -3538,7 +3538,129 @@ def _czat_baza(session, produkty=None):
 
 
 # ---- Newsletter (strona publiczna → lista w panelu Mail) ----
-NEWSLETTER_CODE = "WELCOME10"      # kupon z catalog.COUPONS — nagroda za zapis
+NEWSLETTER_CODE = "WELCOME10"      # domyślny kupon z catalog.COUPONS — nagroda za zapis
+
+# Popup newslettera: wariant, wyłącznik i opóźnienie ustawia admin (Mail →
+# Newsletter → Popup). Wariant decyduje też, co dostaje zapis z paska nad
+# stopką — wyłącznik chowa tylko sam popup. Puste title/body/cta = tekst
+# domyślny wariantu; {pct}, {prize}, {draw_date} podstawiamy przy renderze.
+NL_POPUP_KEY = "newsletter_popup"
+NL_WARIANTY = ("discount", "flash", "giveaway", "updates")
+NL_TEKSTY = {
+    "discount": ("Get {pct}% off your first challenge.",
+                 "Occasional emails about new tiers, promos and platform updates. "
+                 "Your welcome email carries the code.",
+                 "Subscribe + Get {pct}% off"),
+    "flash": ("Flash sale: {pct}% off every challenge.",
+              "Subscribe and your welcome email carries the code. The offer ends when the "
+              "timer runs out.",
+              "Get the {pct}% code"),
+    "giveaway": ("Win a free {prize} challenge.",
+                 "Subscribe to enter. One winner is drawn on {draw_date}. No purchase necessary.",
+                 "Enter the giveaway"),
+    "updates": ("Stay in the loop.",
+                "Occasional emails about new challenge tiers, promotions and platform updates.",
+                "Subscribe"),
+}
+NL_DOMYSLNE = {"on": True, "variant": "discount", "delay_s": 180, "code": NEWSLETTER_CODE,
+               "ends_at": "", "prize": "$50K", "draw_date": "", "title": "", "body": "", "cta": ""}
+_NL_CACHE: dict = {"ts": 0.0, "val": None}
+
+
+def _nl_czysc(raw: dict) -> dict:
+    cfg = dict(NL_DOMYSLNE)
+    for k, v in (raw or {}).items():
+        if k in cfg:
+            cfg[k] = v
+    cfg["on"] = bool(cfg["on"])
+    cfg["variant"] = cfg["variant"] if cfg["variant"] in NL_WARIANTY else "discount"
+    try:
+        cfg["delay_s"] = min(1200, max(60, int(cfg["delay_s"])))
+    except (TypeError, ValueError):
+        cfg["delay_s"] = NL_DOMYSLNE["delay_s"]
+    cfg["code"] = str(cfg["code"] or "").strip().upper()
+    if cfg["code"] not in catalog.COUPONS:
+        cfg["code"] = NEWSLETTER_CODE
+    for k, n in (("ends_at", 40), ("prize", 30), ("draw_date", 10),
+                 ("title", 120), ("body", 400), ("cta", 40)):
+        cfg[k] = str(cfg[k] or "").strip()[:n]
+    return cfg
+
+
+def _nl_konfig(odswiez: bool = False) -> dict:
+    teraz = time.time()
+    if odswiez or _NL_CACHE["val"] is None or teraz - _NL_CACHE["ts"] > 60:
+        s = SessionLocal()
+        try:
+            row = s.get(AppSetting, NL_POPUP_KEY)
+            try:
+                raw = json.loads(row.value) if row and row.value else {}
+            except ValueError:
+                raw = {}
+        finally:
+            s.close()
+        _NL_CACHE.update(ts=teraz, val=_nl_czysc(raw))
+    return dict(_NL_CACHE["val"])
+
+
+def _nl_koniec(cfg: dict) -> datetime | None:
+    try:
+        t = datetime.fromisoformat(cfg["ends_at"].replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def _nl_oferta(cfg: dict | None = None) -> dict:
+    """Oferta, którą dostaje NOWY zapis teraz, z tekstami popupu.
+
+    Flash po terminie i giveaway po dacie losowania spadają do „updates" —
+    nikt nie zapisze się pod ofertę, która już nie obowiązuje."""
+    cfg = cfg or _nl_konfig()
+    wariant = cfg["variant"]
+    koniec = _nl_koniec(cfg) if wariant == "flash" else None
+    if wariant == "flash" and (not koniec or koniec <= datetime.now(timezone.utc)):
+        wariant = "updates"
+    losowanie = None
+    if wariant == "giveaway":
+        try:
+            losowanie = date.fromisoformat(cfg["draw_date"])
+        except ValueError:
+            losowanie = None
+        if not losowanie or losowanie < datetime.now(timezone.utc).date():
+            wariant = "updates"
+    pct = catalog.COUPONS.get(cfg["code"], 10.0)
+    pola = {"pct": f"{pct:g}", "prize": cfg["prize"] or "$50K",
+            "draw_date": f"{losowanie:%B} {losowanie.day}" if losowanie else ""}
+    domyslne = NL_TEKSTY[wariant]
+    # Własne teksty admina tylko dla wariantu, który je dostał — po spadku do
+    # „updates" nie zostaje stary nagłówek o zniżce.
+    wlasne = wariant == cfg["variant"]
+    title, body, cta = ((cfg["title"] if wlasne and cfg["title"] else domyslne[0]),
+                        (cfg["body"] if wlasne and cfg["body"] else domyslne[1]),
+                        (cfg["cta"] if wlasne and cfg["cta"] else domyslne[2]))
+    try:
+        title, body, cta = (t.format(**pola) for t in (title, body, cta))
+    except (KeyError, IndexError, ValueError):
+        title, body, cta = (t.format(**pola) for t in domyslne)
+    out = {"variant": wariant, "title": title, "body": body, "cta": cta,
+           "delay_s": cfg["delay_s"], "on": cfg["on"]}
+    if wariant in ("discount", "flash"):
+        out.update(code=cfg["code"], pct=pct, campaign=f"{wariant}:{cfg['code']}")
+    elif wariant == "giveaway":
+        out.update(prize=pola["prize"], draw_date=pola["draw_date"],
+                   campaign=f"giveaway:{losowanie.isoformat()}")
+    else:
+        out["campaign"] = "updates"
+    if wariant == "flash":
+        out["ends_at"] = koniec.isoformat()
+    return out
+
+
+def _nl_popup_ctx() -> dict | None:
+    """Popup w szablonie: None = admin go wyłączył."""
+    oferta = _nl_oferta()
+    return oferta if oferta["on"] else None
 
 
 class NewsletterIn(BaseModel):
@@ -3563,7 +3685,7 @@ def newsletter_subscribe(payload: NewsletterIn, request: Request):
         raise HTTPException(400, "Enter a valid email address")
     if not payload.consent:
         raise HTTPException(400, "Tick the consent box to subscribe")
-    pct = catalog.COUPONS.get(NEWSLETTER_CODE, 10.0)
+    oferta = _nl_oferta()
     session = SessionLocal()
     try:
         sub = session.query(NewsletterSubscriber).filter(NewsletterSubscriber.email == email).first()
@@ -3571,17 +3693,21 @@ def newsletter_subscribe(payload: NewsletterIn, request: Request):
         if nowy:
             sub = NewsletterSubscriber(email=email, consent=True,
                                        source=payload.source if payload.source in ("popup", "footer") else "footer",
+                                       campaign=oferta["campaign"],
                                        token=secrets.token_urlsafe(24)[:32])
             session.add(sub)
         elif sub.unsubscribed_at:
             sub.unsubscribed_at = None      # wrócił: zapis liczy się od nowa
+            sub.campaign = oferta["campaign"]
             nowy = True
         session.commit()
         if nowy:
             notify.send("newsletter_welcome", email,
-                        {"code": NEWSLETTER_CODE, "pct": pct,
+                        {**{k: oferta[k] for k in ("variant", "code", "pct", "prize", "draw_date",
+                                                   "ends_at") if k in oferta},
                          "unsubscribe_url": _newsletter_unsub_url(request, sub.token)})
-        return {"ok": True, "code": NEWSLETTER_CODE, "pct": pct}
+        return {"ok": True, **{k: oferta[k] for k in ("variant", "code", "pct", "prize", "draw_date")
+                               if k in oferta}}
     finally:
         session.close()
 
@@ -3600,7 +3726,7 @@ def newsletter_unsubscribe(token: str, request: Request):
 
 
 def _newsletter_dict(s: NewsletterSubscriber) -> dict:
-    return {"id": s.id, "email": s.email, "source": s.source,
+    return {"id": s.id, "email": s.email, "source": s.source, "campaign": s.campaign,
             "created_at": s.created_at.isoformat() if s.created_at else None,
             "unsubscribed_at": s.unsubscribed_at.isoformat() if s.unsubscribed_at else None}
 
@@ -3612,24 +3738,93 @@ def admin_newsletter():
         rows = session.query(NewsletterSubscriber).order_by(NewsletterSubscriber.id.desc()).all()
         aktywni = sum(1 for s in rows if not s.unsubscribed_at)
         return {"subscribers": [_newsletter_dict(s) for s in rows], "active": aktywni,
-                "total": len(rows), "code": NEWSLETTER_CODE}
+                "total": len(rows), "code": _nl_konfig()["code"],
+                "campaigns": sorted({s.campaign for s in rows if s.campaign})}
     finally:
         session.close()
 
 
 @app.get("/api/admin/newsletter.csv", dependencies=[Depends(auth.require_admin)])
-def admin_newsletter_csv():
+def admin_newsletter_csv(campaign: str | None = None):
+    """Eksport listy; `campaign` zawęża do jednej kampanii (np. losowanie giveaway)."""
     session = SessionLocal()
     try:
-        rows = session.query(NewsletterSubscriber).order_by(NewsletterSubscriber.id).all()
-        linie = ["email,source,subscribed_at,unsubscribed_at"]
+        q = session.query(NewsletterSubscriber)
+        if campaign:
+            q = q.filter(NewsletterSubscriber.campaign == campaign)
+        rows = q.order_by(NewsletterSubscriber.id).all()
+        linie = ["email,source,campaign,subscribed_at,unsubscribed_at"]
         for s in rows:
-            linie.append(",".join([s.email, s.source or "", s.created_at.isoformat() if s.created_at else "",
+            linie.append(",".join([s.email, s.source or "", s.campaign or "",
+                                   s.created_at.isoformat() if s.created_at else "",
                                    s.unsubscribed_at.isoformat() if s.unsubscribed_at else ""]))
         return Response("\n".join(linie) + "\n", media_type="text/csv",
                         headers={"Content-Disposition": "attachment; filename=newsletter.csv"})
     finally:
         session.close()
+
+
+class NewsletterPopupIn(BaseModel):
+    on: bool = True
+    variant: Literal["discount", "flash", "giveaway", "updates"] = "discount"
+    delay_s: int = Field(default=180, ge=60, le=1200)
+    code: str = Field(default=NEWSLETTER_CODE, max_length=40)
+    ends_at: str = Field(default="", max_length=40)
+    prize: str = Field(default="", max_length=30)
+    draw_date: str = Field(default="", max_length=10)
+    title: str = Field(default="", max_length=120)
+    body: str = Field(default="", max_length=400)
+    cta: str = Field(default="", max_length=40)
+
+
+def _nl_popup_admin() -> dict:
+    cfg = _nl_konfig(odswiez=True)
+    return {"config": cfg, "live": _nl_oferta(cfg),
+            "coupons": [{"code": k, "pct": v} for k, v in sorted(catalog.COUPONS.items())],
+            "defaults": {k: {"title": t, "body": b, "cta": c} for k, (t, b, c) in NL_TEKSTY.items()}}
+
+
+@app.get("/api/admin/newsletter/popup", dependencies=[Depends(auth.require_admin)])
+def admin_newsletter_popup():
+    return _nl_popup_admin()
+
+
+@app.post("/api/admin/newsletter/popup", dependencies=[Depends(auth.require_admin)])
+def admin_newsletter_popup_save(payload: NewsletterPopupIn):
+    """Zapis ustawień popupu. Kod musi być z catalog.COUPONS (koszyk liczy
+    tylko te), flash wymaga przyszłego końca, giveaway przyszłej daty losowania."""
+    cfg = payload.model_dump()
+    cfg["code"] = cfg["code"].strip().upper()
+    if cfg["variant"] in ("discount", "flash") and cfg["code"] not in catalog.COUPONS:
+        raise HTTPException(400, "Pick a coupon code that exists at checkout")
+    if cfg["variant"] == "flash":
+        koniec = _nl_koniec(cfg)
+        if not koniec or koniec <= datetime.now(timezone.utc):
+            raise HTTPException(400, "Set a flash sale end time in the future")
+        cfg["ends_at"] = koniec.isoformat()
+    if cfg["variant"] == "giveaway":
+        try:
+            losowanie = date.fromisoformat(cfg["draw_date"])
+        except ValueError:
+            raise HTTPException(400, "Set the draw date (YYYY-MM-DD)")
+        if losowanie < datetime.now(timezone.utc).date():
+            raise HTTPException(400, "The draw date has already passed")
+        if not cfg["prize"].strip():
+            raise HTTPException(400, "Describe the prize, e.g. $50K")
+    for k in ("title", "body", "cta"):
+        try:
+            cfg[k].format(pct="", prize="", draw_date="")
+        except (KeyError, IndexError, ValueError):
+            raise HTTPException(400, "Placeholders allowed in the texts: {pct}, {prize}, {draw_date}")
+    session = SessionLocal()
+    try:
+        row = session.get(AppSetting, NL_POPUP_KEY) or AppSetting(key=NL_POPUP_KEY)
+        row.value = json.dumps(_nl_czysc(cfg))
+        session.add(row)
+        session.commit()
+    finally:
+        session.close()
+    return _nl_popup_admin()
 
 
 class NewsletterSendIn(BaseModel):
@@ -13635,7 +13830,9 @@ def _page(request: Request, template: str, **extra):
            "google_client_id": settings.google_client_id,
            "vusdt_test": vusdt.public_config(),
            # Wiersz „Reward frequency" w tabelach zasad: 0 = on demand.
-           "payout_days": settings.payout_interval_days, **extra}
+           "payout_days": settings.payout_interval_days,
+           # Popup newslettera z panelu (None = wyłączony) i oferta paska nad stopką.
+           "nl_popup": _nl_popup_ctx(), "nl_offer": _nl_oferta(), **extra}
     return jinja.TemplateResponse(request, template, ctx)
 
 

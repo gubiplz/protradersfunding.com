@@ -320,6 +320,11 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
     "support_tickets": {
         "ref": "VARCHAR(12)",
     },
+    # Kampania popupu, z której przyszedł zapis (np. "giveaway:2026-11-30") —
+    # losowanie i analiza ofert idą z eksportu CSV filtrowanego po kampanii.
+    "newsletter_subscribers": {
+        "campaign": "VARCHAR(60)",
+    },
 }
 
 

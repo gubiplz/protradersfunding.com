@@ -614,15 +614,20 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
 /* autouzupełnianie przeglądarki malowało pole na biało — cień do wewnątrz je zakrywa */
 .nl-form-modal input:-webkit-autofill,.nl-row input:-webkit-autofill{-webkit-text-fill-color:var(--txt);
   -webkit-box-shadow:0 0 0 1000px var(--bg3) inset;caret-color:var(--txt);transition:background-color 9999s}
-.nl-consent{display:flex;align-items:center;gap:11px;margin:14px 0 18px;font-size:13.5px;line-height:1.4;color:var(--muted);cursor:pointer}
-.nl-consent input{appearance:none;-webkit-appearance:none;width:20px;height:20px;margin:0;flex:none;border-radius:6px;
-  border:1.5px solid var(--line2);background:var(--bg3);display:grid;place-items:center;cursor:pointer;
-  transition:background .15s,border-color .15s}
-.nl-consent input::after{content:"";width:11px;height:6px;border:2px solid #fff;border-top:0;border-right:0;
-  transform:rotate(-45deg) translate(1px,-1px);opacity:0}
-.nl-consent input:checked{background:var(--acc);border-color:var(--acc)}
-.nl-consent input:checked::after{opacity:1}
-.nl-consent input:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+/* Checkbox jak w popupie newslettera — jeden wygląd na całej stronie (portal
+   i admin: apple.css). Ptaszek to SVG w tle (Firefox nie rysuje ::after na
+   <input>); ramka stoi przy PIERWSZEJ linii etykiety, także po zawinięciu. */
+.ck{display:flex;align-items:flex-start;gap:11px;font-size:13.5px;line-height:1.45;color:var(--muted);cursor:pointer}
+.ck input[type=checkbox]{appearance:none;-webkit-appearance:none;width:20px;height:20px;margin:0;flex:none;border-radius:6px;
+  border:1.5px solid var(--line2);background:var(--bg3) center/12px no-repeat;cursor:pointer;
+  margin-top:max(0px,calc((1lh - 20px)/2));transition:background-color .15s,border-color .15s}
+.ck input[type=checkbox]:checked{background-color:var(--acc);border-color:var(--acc);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.4 6.3 5 8.7l4.6-5.2' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")}
+.ck input[type=checkbox]:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.nl-consent{margin:14px 0 18px}
+.nl-timer{display:inline-flex;align-items:center;gap:8px;margin:0 0 12px;padding:6px 12px;border-radius:999px;
+  font-size:12.5px;font-weight:700;letter-spacing:.02em;color:var(--acc);background:var(--acc-bg);font-variant-numeric:tabular-nums}
+.nl-timer:empty{display:none}
 .nl-btns{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .nl-btns .btn{padding:14px 24px;border-radius:12px}
 .nl-btns .btn:disabled{opacity:.45;transform:none;box-shadow:none;cursor:not-allowed;filter:none}
