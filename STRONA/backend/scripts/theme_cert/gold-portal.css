@@ -1,0 +1,7 @@
+
+/* ---------- portal i admin: złoto marki ---------- */
+/* Pigułka marki w pasku bocznym: granat z napisem w złocie — marka to złoto,
+   teal zostaje dla interakcji. Złoty obrys, żeby na granatowym pasku w
+   ciemnym motywie nie zlała się z tłem. */
+:root:root body .brand-pill{background:#0B1220;color:#C6A15B;
+  box-shadow:0 8px 18px -10px rgba(11,18,32,.55),inset 0 0 0 1px rgba(198,161,91,.35)}
