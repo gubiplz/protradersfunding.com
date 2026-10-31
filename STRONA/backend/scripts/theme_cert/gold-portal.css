@@ -5,3 +5,12 @@
    ciemnym motywie nie zlała się z tłem. */
 :root:root body .brand-pill{background:#0B1220;color:#C6A15B;
   box-shadow:0 8px 18px -10px rgba(11,18,32,.55),inset 0 0 0 1px rgba(198,161,91,.35)}
+
+/* Kolorowe ikonki (pasek boczny, kafelki Total balance / profit / accounts):
+   --blue i --purple wracają do błękitu i granatu sprzed palety — generator
+   zrobiłby z nich teal i cały pasek wyszedłby jednokolorowy. Razem z tealem
+   (--acc), złotem/bursztynem (--gold) i zielenią (--green) daje to pięć barw. */
+:root{--blue:#0284c7;--blue-bg:#e8f4fd;--blue-line:#cfe8f8;
+  --purple:#1b4bd8;--purple-bg:#e8eeff;--purple-line:#d3ddfb}
+html[data-theme=dark]{--blue:#38bdf8;--blue-bg:rgba(14,165,233,.14);--blue-line:rgba(56,189,248,.35);
+  --purple:#8fa8ff;--purple-bg:rgba(27,75,216,.2);--purple-line:rgba(143,168,255,.35)}
