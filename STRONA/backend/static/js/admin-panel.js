@@ -140,7 +140,7 @@ const TITLES={
   kyc:['KYC','Identity verifications awaiting review'],
   tickets:['Tickets','Support conversations with traders'],
   orders:['Orders','Purchases and revenue'],
-  offers:['Flash Sale Offers','Time-limited discounts on selected plans — per trader or for everyone'],
+  offers:['Flash Sale Offers','Time-limited discounts per trader or for everyone, plus the Free Trade Case'],
   pool:['MT5 Pool','Pre-provisioned accounts ready to assign'],
   mail:['Mail','Every e-mail the platform tried to send — and which ones failed'],
   telegram:['Telegram','Channels, bots and the posting queue — all in one place'],
@@ -826,8 +826,10 @@ const VIEWS={
  },
 
  async offers(){
-  const [d,prods]=await Promise.all([api('/api/admin/offers'),api('/api/products')]);
-  window._offers=d.offers||[]; window._offerProds=prods;
+  /* Trade Case dociaga sie obok ofert; jej blad nie zabiera zakladki ofertom. */
+  const [d,prods,tc]=await Promise.all([api('/api/admin/offers'),api('/api/products'),
+    api('/api/admin/trade-case').catch(e=>({error:e.message}))]);
+  window._offers=d.offers||[]; window._offerProds=prods; window._tc=tc;
   renderOffers();
  },
 
@@ -3947,7 +3949,146 @@ function renderOffers(){
             <button class="btn-o sm danger" onclick="offerCancel(${o.id})">Cancel</button>`:''}</td>
         </tr>`).join('')}</tbody></table></div>`
       :'<p class="muted" style="font-size:13px">No offers yet. The first one you create appears here with its live status and sales.</p>'}
-    </div>`;
+    </div>
+    ${tcCard()}`;
+  tcSzanse();
+}
+
+/* ---------- Free Trade Case: pula nagród, wyłącznik, statystyki ----------
+   Stan formularza czytamy z DOM-u (jak popup newslettera); tbody rysuje się od
+   nowa tylko przy dodaniu/usunięciu wiersza i zmianie typu. Klucze nagród
+   nadaje serwer z treści (typ + wartość), więc formularz ich nie pokazuje. */
+const TC_TYPY=[['code','Discount code'],['account','Free challenge'],['points','Bonus points']];
+function tcEtykieta(r){
+  if(r.type==='code')return `${+r.pct||0}% off any challenge`;
+  if(r.type==='points')return `${fmt0(+r.points||0)} bonus points`;
+  const p=((window._tc||{}).products||[]).find(x=>x.key===r.product_key);
+  return p?`Free ${p.label.replace(/(\d+(?:\.\d+)?[KM])$/,'$$$1')} challenge`:'Free challenge';
+}
+function tcWiersz(r,i){
+  const prods=(window._tc||{}).products||[];
+  const wartosc=r.type==='code'
+    ?`<span class="tc-unit"><input class="inp tc-pct" type="number" min="1" max="90" step="0.5" value="${esc(r.pct??10)}" oninput="tcAuto(${i})" aria-label="Discount %"><i>%</i></span>`
+    :r.type==='account'
+    ?`<select class="inp tc-prod" onchange="tcAuto(${i})" aria-label="Challenge">${prods.map(p=>
+        `<option value="${esc(p.key)}"${p.key===r.product_key?' selected':''}>${esc(p.label)} · $${fmt0(p.price_usd)}</option>`).join('')}
+        ${r.product_key&&!prods.some(p=>p.key===r.product_key)?`<option value="${esc(r.product_key)}" selected>${esc(r.product_key)} (not on sale)</option>`:''}</select>`
+    :`<span class="tc-unit"><input class="inp tc-pts" type="number" min="1" max="100000" step="1" value="${esc(r.points??100)}" oninput="tcAuto(${i})" aria-label="Points"><i>pts</i></span>`;
+  return `<tr data-i="${i}" data-auto="${r.auto?'1':'0'}">
+    <td class="rt-main" data-l="Prize"><input class="inp tc-label" maxlength="60" value="${esc(r.label||'')}"
+      placeholder="${esc(tcEtykieta(r))}" oninput="this.closest('tr').dataset.auto='0'" aria-label="Prize label"></td>
+    <td data-l="Type"><select class="inp tc-type" onchange="tcTyp(${i},this.value)" aria-label="Prize type">${TC_TYPY.map(([k,l])=>
+      `<option value="${k}"${k===r.type?' selected':''}>${l}</option>`).join('')}</select></td>
+    <td data-l="Value">${wartosc}</td>
+    <td data-l="Weight"><input class="inp tc-w" type="number" min="0" step="any" value="${esc(r.weight??1)}" oninput="tcSzanse()" aria-label="Weight"></td>
+    <td class="num tc-odds" data-l="Odds">—</td>
+    <td class="rt-acts"><button type="button" class="icon-btn" onclick="tcUsun(${i})" aria-label="Remove prize" title="Remove">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 6 6 18M6 6l12 12"/></svg></button></td>
+  </tr>`;
+}
+function tcStan(){
+  const rows=[...document.querySelectorAll('#tc-rows tr')].map(tr=>{
+    const typ=tr.querySelector('.tc-type').value;
+    const r={type:typ,label:tr.querySelector('.tc-label').value.trim(),weight:parseFloat(tr.querySelector('.tc-w').value),
+      auto:tr.dataset.auto==='1'};
+    /* Pole wartości czytamy po tym, co JEST w wierszu — po zmianie typu w
+       selekcie komórka ma jeszcze pole starego typu (tcTyp zaraz ją przerysuje). */
+    const pct=tr.querySelector('.tc-pct'),prod=tr.querySelector('.tc-prod'),pts=tr.querySelector('.tc-pts');
+    if(pct)r.pct=parseFloat(pct.value);
+    if(prod)r.product_key=prod.value;
+    if(pts)r.points=parseInt(pts.value,10);
+    return r;
+  });
+  return {on:!!$('tc-on')?.checked,prizes:rows};
+}
+function tcRysuj(prizes){
+  const tb=$('tc-rows');if(!tb)return;
+  tb.innerHTML=prizes.map(tcWiersz).join('');
+  $('tc-add').disabled=prizes.length>=((window._tc||{}).max_prizes||12);
+  tcSzanse();
+}
+/* Szansa = waga / suma wag — ta sama arytmetyka co trade_case.szanse. */
+function tcSzanse(){
+  const tr=[...document.querySelectorAll('#tc-rows tr')];
+  const w=tr.map(t=>{const v=parseFloat(t.querySelector('.tc-w').value);return v>0?v:0});
+  const suma=w.reduce((a,b)=>a+b,0);
+  tr.forEach((t,i)=>{const c=t.querySelector('.tc-odds');
+    c.textContent=suma&&w[i]?(Math.round(w[i]/suma*1000)/10)+'%':'—';
+    c.classList.toggle('bad',!w[i])});
+}
+/* Etykieta podąża za wartością, dopóki admin jej sam nie przepisał. */
+function tcAuto(i){
+  const tr=document.querySelector(`#tc-rows tr[data-i="${i}"]`);if(!tr)return;
+  const r=tcStan().prizes[i], pole=tr.querySelector('.tc-label');
+  pole.placeholder=tcEtykieta(r);
+  if(tr.dataset.auto==='1'||!pole.value.trim()){pole.value=tcEtykieta(r);tr.dataset.auto='1'}
+}
+function tcTyp(i,typ){
+  const s=tcStan(), r=s.prizes[i];
+  r.type=typ;
+  if(typ==='code')r.pct=r.pct||10;
+  if(typ==='points')r.points=r.points||100;
+  if(typ==='account')r.product_key=r.product_key||(((window._tc||{}).products||[])[0]||{}).key;
+  if(r.auto||!r.label){r.label=tcEtykieta(r);r.auto=true}
+  tcRysuj(s.prizes);
+}
+function tcDodaj(){
+  const s=tcStan();
+  const r={type:'code',pct:10,weight:1,auto:true};r.label=tcEtykieta(r);
+  s.prizes.push(r);tcRysuj(s.prizes);
+  document.querySelector('#tc-rows tr:last-child .tc-label')?.focus();
+}
+function tcUsun(i){const s=tcStan();s.prizes.splice(i,1);tcRysuj(s.prizes)}
+async function tcZapisz(btn){
+  const s=tcStan();
+  if(!s.prizes.length){toast('Add at least one prize','err');return}
+  if(s.prizes.some(r=>!(r.weight>0))){toast('Every prize needs a weight greater than 0','err');return}
+  s.prizes=s.prizes.map(({auto,...r})=>({...r,label:r.label||tcEtykieta(r)}));
+  await busy(btn,'Saving…',async()=>{
+    try{window._tc=await api('/api/admin/trade-case',{method:'POST',body:JSON.stringify(s)});
+      toast(s.on?'✅ Trade Case saved. Traders see the new pool within a minute.':'✅ Saved. The Trade Case is off.','ok',7000);
+      renderOffers();
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
+}
+function tcCard(){
+  const t=window._tc;
+  if(!t)return '';
+  if(t.error)return `<div class="sec-card"><h3>Free Trade Case</h3><p class="lead-statline" style="color:var(--gold)">⚠ ${esc(t.error)}</p></div>`;
+  const c=t.config, st=t.stats||{};
+  const nazwa=Object.fromEntries((c.prizes||[]).map(p=>[p.key,p.label]));
+  return `<div class="sec-card tc" id="tc-form">
+    <div class="nlp-head">
+      <div><h3>Free Trade Case</h3>
+        <p class="muted">One free case per verified trader: three face-down cards, every card pays. Shown as a banner on Challenges and a card in Rewards.
+          Direct link for campaigns: <code>/portal?case=1</code> (sign-up keeps it). Codes are personal, one-time and valid ${t.code_days||30} days.</p></div>
+      <label class="nlp-sw"><span>${c.on?'On':'Off'}</span><label class="switch"><input type="checkbox" id="tc-on" ${c.on?'checked':''}
+        onchange="this.closest('.nlp-sw').firstElementChild.textContent=this.checked?'On':'Off'"><i></i></label></label>
+    </div>
+    <div class="tbl-wrap rtbl-wrap tc-wrap"><table class="tbl rtbl tc-tbl">
+      <thead><tr><th>Prize (shown to traders)</th><th>Type</th><th>Value</th><th>Weight</th><th class="num">Odds</th><th class="no-sort"></th></tr></thead>
+      <tbody id="tc-rows">${(c.prizes||[]).map(p=>({...p,auto:p.label===tcEtykieta(p)})).map(tcWiersz).join('')}</tbody>
+    </table></div>
+    <div class="nlp-foot">
+      <button type="button" class="btn-o sm" id="tc-add" onclick="tcDodaj()" ${(c.prizes||[]).length>=(t.max_prizes||12)?'disabled':''}>+ Add prize</button>
+      <span class="muted tc-hint">Odds = weight ÷ total weight. A free challenge whose plan is taken off sale drops out of the pool.</span>
+      <button type="button" class="btn-p sm" onclick="tcZapisz(this)">Save case</button>
+    </div>
+    <div class="tc-stats">
+      <div class="tc-kpi"><b class="mono">${fmt0(st.opened||0)}</b><span>case${st.opened===1?'':'s'} opened</span></div>
+      <div class="tc-per">${(st.per_prize||[]).length?(st.per_prize||[]).map(p=>
+        `<span class="tc-chip">${esc(nazwa[p.key]||p.label)} <b class="mono">${fmt0(p.count)}</b></span>`).join('')
+        :'<span class="muted" style="font-size:12.5px">Nobody has opened a case yet.</span>'}</div>
+    </div>
+    ${(st.recent||[]).length?`<h4 class="tc-sub">Recent openings</h4>
+    <div class="tbl-wrap tw-sm rtbl-wrap"><table class="tbl rtbl">
+      <thead><tr><th>Trader</th><th>Prize</th><th>Opened</th></tr></thead>
+      <tbody>${st.recent.map(r=>`<tr>
+        <td class="rt-main" data-l="Trader">${esc(r.email)}</td>
+        <td data-l="Prize">${esc(r.prize)}${r.type==='account'&&r.account_id?` <span class="muted">· account #${r.account_id}</span>`:''}</td>
+        <td class="muted" data-l="Opened" data-sort="${esc(r.opened_at||'')}">${r.opened_at?dstr(r.opened_at):'—'}</td></tr>`).join('')}
+      </tbody></table></div>`:''}
+  </div>`;
 }
 async function offerCreate(){
   const scope=$('of-scope').value;

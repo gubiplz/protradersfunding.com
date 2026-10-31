@@ -1437,6 +1437,138 @@ html.pwa .notif-panel{top:calc(64px + env(safe-area-inset-top))}
 }
 .reveal-code .copy:hover{color:#fff;background:rgba(255,255,255,.2)}
 
+/* --- Free Trade Case (baner, karta w Rewards, modal z trzema kartami) ---
+   Karty i baner sa w barwach marki w OBU motywach: granat + zloto, teal na
+   akcentach. Specyficznosc `:root:root body` przebija szklo z portal-glass.css
+   i tlo banera z theme-gold-portal.css (ladowane pozniej). */
+:root:root body .gradient-banner.case-banner{
+  background:radial-gradient(120% 180% at 100% 0%,rgba(54,185,169,.26),transparent 55%),
+    linear-gradient(100deg,#0B1220 0%,#111a2e 55%,#16213a 100%);
+  border:1px solid rgba(198,161,91,.5);padding:9px 12px 9px 16px;
+  box-shadow:inset 0 1px 0 rgba(224,196,140,.16),0 14px 30px -18px rgba(11,18,32,.6)}
+.case-banner .gb-tag{color:#e0c48c}
+.case-banner .gb-sep{background:rgba(198,161,91,.35)}
+.case-banner .gb-txt{color:#F8FAFC}
+.case-banner .gb-btn{background:linear-gradient(135deg,#ecd39c,#C6A15B);color:#0B1220}
+.case-eyebrow{font-size:10.5px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:var(--brand,#A17B39)}
+:root:root body .panel.case-panel{
+  background:radial-gradient(90% 140% at 100% 0%,rgba(54,185,169,.2),transparent 60%),
+    radial-gradient(70% 120% at 0% 100%,rgba(198,161,91,.14),transparent 60%),
+    linear-gradient(160deg,#16213a 0%,#111a2e 45%,#0B1220 100%);
+  border-color:rgba(198,161,91,.42);color:#F8FAFC;margin-bottom:16px;
+  box-shadow:inset 0 1px 0 rgba(224,196,140,.12),0 18px 40px -22px rgba(11,18,32,.65)}
+.case-panel .case-eyebrow{color:#C6A15B}
+.case-panel h3{color:#F8FAFC;font-size:17px;margin:3px 0 2px}
+.case-panel .case-note{color:rgba(248,250,252,.74)}
+.case-panel .linklike{color:#36B9A9}
+.case-panel .btn-o{background:rgba(255,255,255,.06);color:#F8FAFC;border-color:rgba(198,161,91,.45)}
+.case-panel .case-code{background:rgba(198,161,91,.1)}
+.case-panel .case-code code{color:#f3e2b8}
+.case-panel .case-odds-list li{border-color:rgba(148,178,200,.18);color:rgba(248,250,252,.8)}
+.case-row{display:flex;align-items:center;gap:22px}
+.case-body{flex:1;min-width:0}
+.case-body .case-win-t{margin-top:4px}
+.case-acts{display:flex;align-items:center;gap:16px;margin-top:2px}
+.case-fine{font-size:11px;color:rgba(248,250,252,.5);margin-top:10px}
+/* trzy mini-karty rewersem do gory, wachlarzem */
+.case-art{position:relative;width:104px;height:86px;flex:none}
+.case-art i{position:absolute;top:8px;left:30px;width:46px;height:66px;border-radius:9px;
+  background:repeating-linear-gradient(45deg,rgba(198,161,91,.08) 0 2px,transparent 2px 9px),linear-gradient(160deg,#1b2846,#0B1220);
+  border:1.5px solid #C6A15B;box-shadow:0 10px 20px -10px rgba(0,0,0,.7)}
+.case-art i::after{content:"";position:absolute;left:50%;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;
+  border:1.5px solid #C6A15B;background:radial-gradient(circle,#e0c48c 0 2px,transparent 3px)}
+.case-art i:nth-child(1){transform:translateX(-24px) rotate(-14deg)}
+.case-art i:nth-child(3){transform:translateX(24px) rotate(14deg)}
+.case-art i:nth-child(2){z-index:1;box-shadow:0 0 0 3px rgba(54,185,169,.25),0 12px 24px -10px rgba(0,0,0,.75)}
+.case-panel.opened .case-art i:nth-child(2){background:linear-gradient(160deg,#2a3654,#111a2e);
+  box-shadow:0 0 0 3px rgba(198,161,91,.3),0 0 22px rgba(198,161,91,.35)}
+.case-odds{margin-top:10px}
+.case-odds-list{list-style:none;margin:0;padding:0;font-size:12.5px}
+.case-odds-list li{display:flex;justify-content:space-between;gap:14px;padding:5px 0;border-bottom:1px dashed var(--line)}
+.case-odds-list li:last-child{border-bottom:0}
+.case-odds-list b{font-weight:600}
+.case-foot{display:flex;align-items:center;justify-content:center;gap:6px 12px;flex-wrap:wrap;margin-top:14px;
+  font-size:11.5px;color:var(--dim)}
+.case-note{font-size:12.5px;color:var(--muted);margin:6px 0 12px;line-height:1.5}
+/* modal */
+.modal.case-modal{max-width:560px}
+.case-sub{font-size:13.5px;color:var(--muted);margin:2px 0 0}
+.case-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:16px 0 4px;perspective:1100px}
+.case-card{position:relative;aspect-ratio:3/4;border-radius:14px;padding:0;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;transition:transform .22s cubic-bezier(.22,1,.36,1)}
+.case-card:disabled{cursor:default}
+.case-card:not(:disabled):hover{transform:translateY(-5px)}
+.case-card:focus-visible{outline:2px solid var(--acc);outline-offset:3px}
+.case-card.picked{transform:translateY(-6px) scale(1.03)}
+.case-card.picked:not(.flipped) .cc-back{animation:cc-pulse 1s ease-in-out infinite}
+@keyframes cc-pulse{50%{box-shadow:inset 0 0 0 4px #0B1220,inset 0 0 0 5px rgba(198,161,91,.5),0 0 0 4px rgba(54,185,169,.35),0 16px 30px -16px rgba(11,18,32,.7)}}
+.cc-inner{position:absolute;inset:0;transform-style:preserve-3d;transition:transform .72s cubic-bezier(.3,1.2,.45,1)}
+.case-card.flipped .cc-inner{transform:rotateY(180deg)}
+.cc-face{position:absolute;inset:0;border-radius:14px;-webkit-backface-visibility:hidden;backface-visibility:hidden;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:12px 8px;
+  text-align:center;overflow:hidden;color:#F8FAFC}
+.cc-back{background:repeating-linear-gradient(45deg,rgba(198,161,91,.07) 0 2px,transparent 2px 12px),
+    radial-gradient(120% 80% at 50% 0%,rgba(54,185,169,.24),transparent 62%),linear-gradient(160deg,#1b2846,#0B1220);
+  border:1.5px solid #C6A15B;
+  box-shadow:inset 0 0 0 4px #0B1220,inset 0 0 0 5px rgba(198,161,91,.45),0 16px 30px -16px rgba(11,18,32,.7)}
+.cc-emblem{width:48px;height:48px;border-radius:50%;display:grid;place-items:center;
+  background:radial-gradient(circle at 50% 35%,#1b2846,#0B1220);border:1.5px solid #C6A15B;
+  box-shadow:0 0 22px rgba(198,161,91,.3)}
+.cc-emblem img{width:28px;height:28px;object-fit:contain}
+.cc-num{position:absolute;top:10px;left:12px;font:700 11px/1 var(--mono);color:#C6A15B;opacity:.85}
+.cc-hint{position:absolute;left:0;right:0;bottom:12px;font-size:9.5px;font-weight:800;letter-spacing:.14em;
+  text-transform:uppercase;color:rgba(224,196,140,.85)}
+.cc-front{transform:rotateY(180deg);background:linear-gradient(160deg,#1b2846,#0B1220);
+  border:1.5px solid rgba(148,178,200,.28)}
+.case-card.win .cc-front{background:radial-gradient(110% 70% at 50% 0%,rgba(198,161,91,.34),transparent 62%),
+    linear-gradient(160deg,#1f2c4b,#0B1220);
+  border:2px solid #C6A15B;box-shadow:0 0 0 3px rgba(198,161,91,.2),0 18px 40px -14px rgba(198,161,91,.6)}
+/* Pozostale karty: ten sam granat, tylko przygaszony — bez opacity, ktora na
+   bialym modalu robila z nich szare kafle. */
+.case-card.other .cc-front{background:linear-gradient(160deg,#243049,#141c30);border-color:rgba(148,178,200,.22)}
+.case-card.other .cc-big{color:rgba(248,250,252,.62)}
+.case-card.other .cc-lbl{color:rgba(248,250,252,.55)}
+.cc-tag{font-size:9.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#C6A15B}
+.case-card.other .cc-tag{color:#8796ae}
+.cc-big{font:800 32px/1 var(--display);letter-spacing:-.02em;color:#F8FAFC}
+.case-card.win .cc-big{background:linear-gradient(180deg,#f6e7c1,#C6A15B);-webkit-background-clip:text;
+  background-clip:text;color:transparent}
+.cc-lbl{font-size:11px;line-height:1.3;color:rgba(248,250,252,.8);overflow-wrap:anywhere}
+.case-card.no-anim .cc-inner{transition:none}
+.case-result:empty{display:none}
+.case-win{text-align:center;margin-top:14px;padding:16px;border-radius:14px;background:var(--panel2);
+  border:1px solid var(--line);animation:pop .3s cubic-bezier(.22,1,.36,1)}
+.case-win-t{font-family:var(--display);font-size:17px;font-weight:600;line-height:1.3}
+.case-code{display:inline-flex;align-items:center;gap:10px;margin:12px 0 2px;padding:7px 8px 7px 16px;
+  border-radius:12px;border:1px dashed #C6A15B;background:rgba(198,161,91,.08)}
+.case-code code{font:800 18px/1.2 var(--mono);letter-spacing:.06em}
+.case-code.spent code{text-decoration:line-through;opacity:.6}
+.case-win .case-note{margin:8px 0 14px}
+.case-win .btn-p.lg{width:100%}
+@media(max-width:600px){
+  .case-row{align-items:flex-start;gap:14px}
+  .case-art{width:74px;height:66px;margin-top:6px}
+  .case-art i{left:22px;width:32px;height:48px;border-radius:7px}
+  .case-art i::after{width:12px;height:12px;margin:-6px 0 0 -6px}
+  .case-art i:nth-child(1){transform:translateX(-16px) rotate(-14deg)}
+  .case-art i:nth-child(3){transform:translateX(16px) rotate(14deg)}
+  .case-cards{gap:8px}
+  .cc-face{padding:10px 5px;gap:4px}
+  .cc-big{font-size:22px}
+  .cc-tag{font-size:8px;letter-spacing:.1em}
+  .cc-lbl{font-size:9.5px}
+  .cc-emblem{width:36px;height:36px}
+  .cc-emblem img{width:21px;height:21px}
+  .cc-hint{font-size:8px;letter-spacing:.08em;bottom:9px}
+  .case-code code{font-size:15px}
+  .case-banner .gb-sep{display:none}
+}
+@media(prefers-reduced-motion:reduce){
+  .cc-inner{transition:none}
+  .case-card,.case-card.picked,.case-card:not(:disabled):hover{transform:none}
+  .case-card.picked:not(.flipped) .cc-back{animation:none}
+}
+
 /* --- celebration overlay (RFX.celebrate) --- */
 .celebrate-veil{position:fixed;inset:0;z-index:95;background:rgba(15,23,42,.55);
   backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);

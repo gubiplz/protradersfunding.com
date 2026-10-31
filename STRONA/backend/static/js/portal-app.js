@@ -402,7 +402,7 @@ function authTab(m){
   const card=document.querySelector('.auth-card');
   const spokoj=!card||!card.offsetParent||matchMedia('(prefers-reduced-motion: reduce)').matches;
   if(spokoj||m===AUTHMODE){_authTabUstaw(m);return}
-  const pola=[...card.querySelectorAll('.stack > *, #g-auth, #auth-buynote')];
+  const pola=[...card.querySelectorAll('.stack > *, #g-auth, #auth-buynote, #auth-casenote')];
   const bylo=new Set(pola.filter(e=>e.offsetParent));
   const tytul=$('auth-title').textContent;
   const przed=card.getBoundingClientRect().height;
@@ -738,6 +738,7 @@ async function handlePaymentReturn(){
 /* ---------- boot / navigation ---------- */
 async function boot(){
   const q0=new URLSearchParams(location.search);
+  caseLinkSeen();
   /* E-mail verification deep link: works without logging in (token from mail). */
   const vt=(window.__authQ||{}).verify||q0.get('verify');
   if(vt){
@@ -761,9 +762,13 @@ async function boot(){
     $('auth').classList.remove('hidden');$('app').classList.add('hidden');
     /* Wejscie z cennika (?buy=) to najczesciej NOWY klient — startujemy od
        rejestracji i mowimy wprost, ze zamowienie czeka tuz za tym krokiem. */
-    /* ?signup=1 — „Sign Up" z terminala /trade: też od razu rejestracja. */
-    authTab(q0.get('buy')||q0.get('signup')?'signup':'login');
+    /* Tak samo wejscie z popupu skrzynki (?case=1): to nowy klient, a skrzynka
+       otworzy sie sama zaraz po rejestracji i potwierdzeniu maila.
+       ?signup=1 — „Sign Up" z terminala /trade: też od razu rejestracja. */
+    const zCase=!q0.get('buy')&&casePending();
+    authTab(q0.get('buy')||zCase||q0.get('signup')?'signup':'login');
     if(q0.get('buy'))$('auth-buynote').classList.remove('hidden');
+    else if(zCase)$('auth-casenote')?.classList.remove('hidden');
     loadAuthStats();return}
   _expired=false; /* świeże logowanie — łapacz 401 znowu uzbrojony */
   try{ME=await api('/api/auth/me')}
@@ -818,6 +823,7 @@ async function boot(){
   else if(!goNav(nav))go('accounts');
   refreshNotif();
   maybeReviewNudge();
+  maybeOpenCaseFromLink();
 }
 
 /* Zostawiamy dokladnie dwie zakladki: te, ktora zdejmuje blokade (KYC), i te,
@@ -1116,6 +1122,213 @@ async function doReveal(){
   }catch(e){toast('Error: '+e.message,'err')}
   finally{delete c.dataset.busy}
 }
+/* ---------- Free Trade Case: jedna skrzynka na tradera, trzy karty ----------
+   Wynik losuje serwer (POST /api/me/case/open) — karta, w ktora trader kliknie,
+   niczego nie zmienia. Dwie pozostale karty dostaja po odslonie inne nagrody
+   z puli, wylacznie dla wygladu. Stan z GET /api/me/case trzyma CASE. */
+let CASE=null;
+async function loadCase(force){
+  if(CASE&&!force)return CASE;
+  try{CASE=await api('/api/me/case')}catch(e){CASE=CASE||null}
+  return CASE;
+}
+/* Deep link /portal?case=1 (popup na /trade): flaga w localStorage przezywa
+   rejestracje, bramke weryfikacji maila i link weryfikacyjny otwarty w nowej
+   karcie. Wygasa po 7 dniach, zeby stary link nie wyskakiwal miesiac pozniej. */
+const CASE_PENDING='pf_case_pending';
+function caseLinkSeen(){
+  try{if(new URLSearchParams(location.search).get('case')==='1')localStorage.setItem(CASE_PENDING,String(Date.now()))}catch(e){}
+}
+function casePending(){
+  try{const t=+localStorage.getItem(CASE_PENDING)||0;
+    if(t&&Date.now()-t<7*864e5)return true;
+    if(t)localStorage.removeItem(CASE_PENDING);
+  }catch(e){}
+  return false;
+}
+async function maybeOpenCaseFromLink(){
+  if(!casePending())return;
+  try{localStorage.removeItem(CASE_PENDING)}catch(e){}
+  const q=new URLSearchParams(location.search);
+  if(q.has('case')){q.delete('case');history.replaceState(null,'','/portal'+(q.toString()?'?'+q:''))}
+  const c=await loadCase(true);
+  if(c&&(c.available||c.opened))openCase();
+}
+/* Duza wartosc na karcie z samej etykiety — pozostale karty niosa tylko ja. */
+function caseBig(label){
+  const s=String(label||'');
+  let m=s.match(/(\d+(?:\.\d+)?)\s*%/);if(m)return {big:m[1]+'%',tag:'Discount code'};
+  m=s.match(/\$\s?\d+(?:[.,]\d+)?\s?[KkMm]\b/);if(m)return {big:m[0].replace(/\s/g,'').toUpperCase(),tag:'Free challenge'};
+  m=s.match(/([\d,]+)\s*(?:bonus\s*)?points?/i);if(m)return {big:'+'+m[1],tag:'Bonus points'};
+  return {big:'★',tag:'Prize'};
+}
+function caseFaceHtml(label,win){
+  const b=caseBig(label);
+  return `<span class="cc-tag">${win?'Your prize':esc(b.tag)}</span>
+    <span class="cc-big">${esc(b.big)}</span>
+    <span class="cc-lbl">${esc(label)}</span>`;
+}
+function caseBackHtml(i){
+  return `<span class="cc-emblem"><img src="/static/img/logo.png" alt=""></span>
+    <span class="cc-num">${i+1}</span>
+    <span class="cc-hint">Tap to reveal</span>`;
+}
+function caseBannerHtml(){
+  if(!CASE||!CASE.available)return '';
+  return `<div class="gradient-banner case-banner" id="case-banner">
+    <span class="gb-tag">${ICO.gift} Free Trade Case</span><span class="gb-sep"></span>
+    <span class="gb-txt">One free case per trader. Pick a card and win a discount code or a <b>free challenge</b>.</span>
+    <button class="gb-btn" onclick="openCase()">Open your case ›</button></div>`;
+}
+function caseExpires(iso){
+  return iso?dutc(iso).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'';
+}
+/* Ten sam opis wygranej w modalu i na karcie w Rewards. */
+function caseWinHtml(o,inModal){
+  if(o.type==='code'){
+    const zywy=o.code_status==='active';
+    return `<div class="case-win-t">You won <b>${esc(o.label)}</b></div>
+      ${o.code?`<div class="case-code${zywy?'':' spent'}"><code>${esc(o.code)}</code>
+        ${zywy?`<button class="btn-o sm" onclick="copyVal(this,'${jsq(o.code)}')">Copy</button>`
+          :`<span class="status ${o.code_status==='used'?'paid':'failed'}"><span class="dot"></span>${esc(o.code_status)}</span>`}</div>`:''}
+      <p class="case-note">${zywy?`Personal one-time code, works only on your account. Valid until ${esc(caseExpires(o.expires_at))}.`
+        :o.code_status==='used'?'You already used this code at checkout.':'This code has expired.'}</p>
+      ${zywy?`<button class="btn-p${inModal?' lg':' sm'}" onclick="useCaseCode('${jsq(o.code)}')">Use at checkout</button>`:''}`;
+  }
+  if(o.type==='account'){
+    return `<div class="case-win-t">Your challenge is ready</div>
+      <p class="case-note"><b>${esc(o.label)}</b>. ${o.account_status==='provisioning'
+        ?'Your MT5 account is being set up, credentials arrive in your inbox.'
+        :'It is under Challenges, and the credentials are in your inbox.'}</p>
+      ${o.account_id?`<button class="btn-p${inModal?' lg':' sm'}" onclick="closeCase();openAcc(${+o.account_id})">Open my challenge</button>`:''}`;
+  }
+  return `<div class="case-win-t">You won <b>+${fmt0(o.points||0)} loyalty points</b></div>
+    <p class="case-note">They are already on your balance. Trade them for a discount code on the Loyalty page.</p>
+    <button class="btn-p${inModal?' lg':' sm'}" onclick="closeCase();go('loyalty')">See my points</button>`;
+}
+function caseOddsHtml(){
+  const o=(CASE&&CASE.odds)||[];
+  return `<ul class="case-odds-list">${o.map(x=>`<li><span>${esc(x.label)}</span><b class="mono">${x.pct}%</b></li>`).join('')}</ul>`;
+}
+function toggleCaseOdds(btn,id){
+  const box=$(id);if(!box)return;
+  const open=box.classList.toggle('hidden')===false;
+  btn.setAttribute('aria-expanded',open?'true':'false');
+}
+/* „Co jest w skrzynce" z puli na zywo: admin moze zmienic nagrody w panelu. */
+function caseTeaser(){
+  const o=(CASE&&CASE.odds)||[];
+  const pct=Math.max(0,...o.filter(x=>x.type==='code').map(x=>{const m=String(x.label).match(/(\d+(?:\.\d+)?)\s*%/);return m?+m[1]:0}));
+  const czesci=[];
+  if(o.some(x=>x.type==='code'))czesci.push(pct?`a discount code of up to ${pct}%`:'a discount code');
+  if(o.some(x=>x.type==='points'))czesci.push('bonus points');
+  if(o.some(x=>x.type==='account'))czesci.push('a free challenge account');
+  return czesci.length>1?czesci.slice(0,-1).join(', ')+' or '+czesci[czesci.length-1]:(czesci[0]||'a prize');
+}
+/* Karta w Rewards: zaproszenie przed otwarciem, wynik po nim. */
+function caseCardHtml(){
+  if(!CASE||!(CASE.available||CASE.opened))return '';
+  const art=`<div class="case-art" aria-hidden="true"><i></i><i></i><i></i></div>`;
+  if(CASE.opened){
+    return `<div class="panel case-panel opened" id="case-panel">
+      <div class="case-row">${art}
+        <div class="case-body"><div class="case-eyebrow">Free Trade Case · opened ${esc(caseExpires(CASE.opened.opened_at))}</div>
+          ${caseWinHtml(CASE.opened,false)}</div></div></div>`;
+  }
+  return `<div class="panel case-panel" id="case-panel">
+    <div class="case-row">${art}
+      <div class="case-body"><div class="case-eyebrow">Free Trade Case</div>
+        <h3>Your free case is waiting</h3>
+        <p class="case-note">Pick one of three cards. Every card pays: ${esc(caseTeaser())}.</p>
+        <div class="case-acts"><button class="btn-p sm" onclick="openCase()">Open your case</button>
+          <button type="button" class="linklike" aria-expanded="false" aria-controls="case-odds-rw"
+            onclick="toggleCaseOdds(this,'case-odds-rw')">Odds</button></div>
+        <div class="case-odds hidden" id="case-odds-rw">${caseOddsHtml()}</div>
+        <p class="case-fine">No purchase necessary. One case per trader.</p></div></div></div>`;
+}
+function closeCase(){$('case-modal')?.remove()}
+function openCase(){
+  if(!CASE||$('case-modal'))return;
+  const w=document.createElement('div');w.id='case-modal';w.className='modal-wrap';
+  w.onclick=e=>{if(e.target===w)closeCase()};
+  const cards=[0,1,2].map(i=>`<button type="button" class="case-card" data-i="${i}" onclick="pickCase(${i})"
+      aria-label="Card ${i+1} of 3, face down">
+      <span class="cc-inner"><span class="cc-face cc-back">${caseBackHtml(i)}</span><span class="cc-face cc-front"></span></span>
+    </button>`).join('');
+  w.innerHTML=`<div class="modal case-modal" role="dialog" aria-modal="true" aria-labelledby="case-t" onclick="event.stopPropagation()">
+    <div class="modal-head"><div><div class="case-eyebrow">Free Trade Case</div><h3 id="case-t">Your Free Trade Case</h3></div>
+      <button class="icon-btn" onclick="closeCase()" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <p class="case-sub" id="case-sub">Pick a card to reveal your prize</p>
+    <div class="case-cards" id="case-cards" role="group" aria-label="Three face-down cards">${cards}</div>
+    <div class="case-result" id="case-result" aria-live="polite"></div>
+    <div class="case-foot"><button type="button" class="linklike" aria-expanded="false" aria-controls="case-odds-m"
+        onclick="toggleCaseOdds(this,'case-odds-m')">Odds</button><span>No purchase necessary. One case per trader.</span></div>
+    <div class="case-odds hidden" id="case-odds-m">${caseOddsHtml()}</div>
+  </div>`;
+  document.body.appendChild(w);
+  if(CASE.opened)caseShow(CASE.opened,false);
+  else setTimeout(()=>w.querySelector('.case-card')?.focus(),60);
+}
+/* Odslona: wybrana karta od razu, pozostale chwile pozniej. `anim=false` =
+   skrzynka byla juz otwarta (refresh, drugie urzadzenie) — stan koncowy bez gry. */
+function caseShow(o,anim){
+  const cards=[...document.querySelectorAll('#case-cards .case-card')];
+  if(!cards.length)return;
+  const win=Math.min(2,Math.max(0,+o.card||0));
+  const inne=(o.others||[]).slice(0,2);
+  const reszta=cards.filter((_,i)=>i!==win);
+  cards.forEach(c=>{c.disabled=true;c.onclick=null});
+  const odkryj=(c,label,wygrana)=>{
+    c.querySelector('.cc-front').innerHTML=caseFaceHtml(label,wygrana);
+    c.classList.add('flipped',wygrana?'win':'other');
+    c.setAttribute('aria-label',(wygrana?'Your prize: ':'Also in the case: ')+label);
+  };
+  const wynik=()=>{
+    $('case-sub').textContent=o.type==='account'?'Congratulations! A free challenge is yours.':'Here is your prize';
+    $('case-result').innerHTML=`<div class="case-win">${caseWinHtml(o,true)}</div>`;
+  };
+  if(!anim){
+    odkryj(cards[win],o.label,true);reszta.forEach((c,i)=>odkryj(c,inne[i]||'',false));
+    cards.forEach(c=>c.classList.add('no-anim'));wynik();return;
+  }
+  odkryj(cards[win],o.label,true);
+  const krok=RFX.reduced?0:1;
+  setTimeout(()=>{
+    if(!RFX.reduced)RFX.burstFrom(cards[win],{count:o.type==='account'?80:60,palette:RFX.GOLD});
+    wynik();
+  },560*krok);
+  setTimeout(()=>reszta.forEach((c,i)=>odkryj(c,inne[i]||'',false)),1150*krok);
+}
+async function pickCase(i){
+  const box=$('case-cards');
+  if(!box||box.dataset.busy)return;
+  box.dataset.busy='1';
+  const cards=[...box.querySelectorAll('.case-card')];
+  cards.forEach((c,k)=>{c.disabled=true;c.classList.toggle('picked',k===i)});
+  $('case-sub').textContent='Revealing…';
+  try{
+    const o=await api('/api/me/case/open',{method:'POST',body:JSON.stringify({card:i})});
+    CASE={...(CASE||{}),available:false,reason:'opened',opened:o};
+    /* Pod modalem: baner znika, karta w Rewards od razu pokazuje wynik. */
+    document.getElementById('case-banner')?.remove();
+    const pan=$('case-panel');if(pan)pan.outerHTML=caseCardHtml();
+    if(!o.already&&o.type==='points')ME.bonus_points=(ME.bonus_points||0)+(o.points||0);
+    caseShow(o,!o.already);
+  }catch(e){
+    toast('Error: '+e.message,'err');
+    cards.forEach(c=>{c.disabled=false;c.classList.remove('picked')});
+    $('case-sub').textContent='Pick a card to reveal your prize';
+    delete box.dataset.busy;
+  }
+}
+/* „Use at checkout": istniejacy deep link ?coupon= wypelnia pole kodu w oknie
+   zakupu — ten sam, ktorym przychodzi kod z cennika. */
+function useCaseCode(code){
+  history.replaceState(null,'','/portal?coupon='+encodeURIComponent(code));
+  closeCase();go('store');
+  toast('Pick a challenge. Your code is already filled in at checkout.','ok',7000);
+}
+
 /* Prowizja afiliacyjna -> kredyty sklepowe (min $10, pilnuje serwer). */
 async function claimAffiliate(btn){
   await busy(btn,'Claiming…',async()=>{
@@ -1802,7 +2015,12 @@ const VIEWS={
     api('/api/me/accounts'),
     PRODUCTS.length?null:api('/api/products').then(p=>{PRODUCTS=p}).catch(()=>{}),
     loadOffers(),
+    loadCase(),
   ]);
+  /* Darmowa skrzynka wygrywa z kazdym innym banerem: jest jednorazowa i znika
+     sama po otwarciu. Stoi tez nad pustym stanem — nowy klient z /trade nie
+     ma jeszcze zadnego konta. */
+  const caseB=caseBannerHtml();
   /* Konto z realnym rachunkiem MT5 (add-on Copytrading) ma equity, ktore ZMIENIA
      sie samo miedzy odslonami — reszta kont stoi. Minutowe odswiezanie wlacza sie
      wiec tylko wtedy, gdy jest co odswiezac; patrz refreshLive(). */
@@ -1815,7 +2033,7 @@ const VIEWS={
       </div>`
     :'';
   if(!accs.length){
-    $('view').innerHTML=`<div class="empty">
+    $('view').innerHTML=caseB+`<div class="empty">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>
       <h3>No challenges yet</h3><p>Start a challenge and your MT5 account will appear here automatically.</p>
       <button class="btn-p" onclick="go('store')">Browse challenges</button></div>`;
@@ -1982,7 +2200,7 @@ const VIEWS={
   /* Budzet ryzyka NAD podsumowaniami: kafelki mowia, ile trader ma, a ta karta
      — ile moze dzis stracic, zanim konto zniknie. Przy filtrze liczy z calego
      zbioru, bo limit dnia obowiazuje niezaleznie od tego, co jest na ekranie. */
-  $('view').innerHTML=(pushB||flashB||up.banner||banner)+riskCardHtml(accs)+stats+filterBar+list+up.html;
+  $('view').innerHTML=(caseB||pushB||flashB||up.banner||banner)+riskCardHtml(accs)+stats+filterBar+list+up.html;
   startOfferTimer();
   startRiskTimer();
   markSeen(accs);
@@ -2568,6 +2786,7 @@ const VIEWS={
  },
 
  async rewards(){
+  await loadCase(true);
   const aff=ME.affiliate||{};
   const revealHtml=`<div class="reveal-wrap"><div class="reveal-card" id="revealCard" role="button" tabindex="0" onclick="doReveal()">${revealBack()}</div></div>`;
   const link=location.origin+'/?ref='+ME.referral_code;
@@ -2598,7 +2817,7 @@ const VIEWS={
     {ic:'spark',cls:'blue',badge:'10% recurring',name:'Affiliate Program',desc:'Share your referral link and earn 10% of every challenge purchased by traders you refer — for life, not just the first order.',cond:['Share your link','Friend buys a challenge','Commission tracked live']},
     {ic:'crown',cls:'orange',badge:'Spend-based',name:'Loyalty Points',desc:'Every $1 spent earns a loyalty point, and check-ins add more. Trade the points for your own one-time discount code on the Loyalty page.',cond:['500 points: 15% off','1,000 points: 25% off','2,000 points: 35% off']},
   ];
-  $('view').innerHTML=revealHtml+affPanel+`<div class="badge-grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">`+cards.map(c=>`
+  $('view').innerHTML=caseCardHtml()+revealHtml+affPanel+`<div class="badge-grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">`+cards.map(c=>`
     <div class="panel">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
         <div class="tile-ic ${c.cls}">${ICO[c.ic]}</div>
