@@ -38,24 +38,27 @@ class Market:
     base: str = ""      # jednostka ilości w UI (BTC, oz, bbl…)
 
 
-def _c(sym, name, hl, bn, by, px_dec, qty_dec, icon, max_lev=10, base=None):
-    return Market(sym, name, "crypto", hl, bn, by, 1.0, px_dec, qty_dec, max_lev, icon,
+def _c(sym, name, hl, bn, by, contract, px_dec, qty_dec, icon, max_lev=10, base=None):
+    return Market(sym, name, "crypto", hl, bn, by, contract, px_dec, qty_dec, max_lev, icon,
                   base=base or sym[:-3])
 
 
+# Kontrakt krypto jak u brokerów MT5: 1 lot to kilka–kilkadziesiąt tysięcy
+# dolarów, a nie jedna moneta — inaczej limit lotów konta (6 na 100k) dawałby
+# na DOGE ekspozycję rzędu dolara, a na BTC prawie pół miliona.
 MARKETS: list[Market] = [
-    _c("BTCUSD", "Bitcoin", "BTC", "BTCUSDT", "BTCUSDT", 1, 5, "btc"),
-    _c("ETHUSD", "Ethereum", "ETH", "ETHUSDT", "ETHUSDT", 2, 4, "eth"),
-    _c("SOLUSD", "Solana", "SOL", "SOLUSDT", "SOLUSDT", 3, 2, "sol", 5),
-    _c("XRPUSD", "XRP", "XRP", "XRPUSDT", "XRPUSDT", 4, 0, "xrp", 5),
-    _c("LTCUSD", "Litecoin", "LTC", "LTCUSDT", "LTCUSDT", 2, 2, "ltc", 5),
-    _c("DOGEUSD", "Dogecoin", "DOGE", "DOGEUSDT", "DOGEUSDT", 5, 0, "", 5),
-    _c("BNBUSD", "BNB", "BNB", "BNBUSDT", "BNBUSDT", 2, 3, "", 5),
-    _c("ADAUSD", "Cardano", "ADA", "ADAUSDT", "ADAUSDT", 4, 0, "", 5),
-    _c("AVAXUSD", "Avalanche", "AVAX", "AVAXUSDT", "AVAXUSDT", 3, 2, "", 5),
-    _c("LINKUSD", "Chainlink", "LINK", "LINKUSDT", "LINKUSDT", 3, 1, "", 5),
-    _c("SUIUSD", "Sui", "SUI", "SUIUSDT", "SUIUSDT", 4, 1, "", 5),
-    _c("HYPEUSD", "Hyperliquid", "HYPE", "HYPEUSDT", "HYPEUSDT", 3, 2, "", 5),
+    _c("BTCUSD", "Bitcoin", "BTC", "BTCUSDT", "BTCUSDT", 1.0, 1, 5, "btc"),
+    _c("ETHUSD", "Ethereum", "ETH", "ETHUSDT", "ETHUSDT", 10.0, 2, 4, "eth"),
+    _c("SOLUSD", "Solana", "SOL", "SOLUSDT", "SOLUSDT", 100.0, 3, 2, "sol", 5),
+    _c("XRPUSD", "XRP", "XRP", "XRPUSDT", "XRPUSDT", 10_000.0, 4, 0, "xrp", 5),
+    _c("LTCUSD", "Litecoin", "LTC", "LTCUSDT", "LTCUSDT", 100.0, 2, 2, "ltc", 5),
+    _c("DOGEUSD", "Dogecoin", "DOGE", "DOGEUSDT", "DOGEUSDT", 100_000.0, 5, 0, "", 5),
+    _c("BNBUSD", "BNB", "BNB", "BNBUSDT", "BNBUSDT", 10.0, 2, 3, "", 5),
+    _c("ADAUSD", "Cardano", "ADA", "ADAUSDT", "ADAUSDT", 50_000.0, 4, 0, "", 5),
+    _c("AVAXUSD", "Avalanche", "AVAX", "AVAXUSDT", "AVAXUSDT", 1_000.0, 3, 2, "", 5),
+    _c("LINKUSD", "Chainlink", "LINK", "LINKUSDT", "LINKUSDT", 1_000.0, 3, 1, "", 5),
+    _c("SUIUSD", "Sui", "SUI", "SUIUSDT", "SUIUSDT", 10_000.0, 4, 1, "", 5),
+    _c("HYPEUSD", "Hyperliquid", "HYPE", "HYPEUSDT", "HYPEUSDT", 100.0, 3, 2, "", 5),
     Market("XAUUSD", "Gold", "metal", "xyz:GOLD", "XAUUSDT", "XAUUSDT", 100.0, 2, 4, 50, "xau", base="oz"),
     Market("XAGUSD", "Silver", "metal", "xyz:SILVER", "XAGUSDT", None, 5000.0, 3, 2, 50, "xag", base="oz"),
     Market("XPTUSD", "Platinum", "metal", "xyz:PLATINUM", "XPTUSDT", None, 100.0, 1, 3, 50, "xpt", base="oz"),

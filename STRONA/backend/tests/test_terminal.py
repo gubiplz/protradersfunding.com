@@ -265,6 +265,15 @@ def test_weekend_zamyka_rynki_poza_krypto(rynek, monkeypatch):
         assert _zlec(c, hw, ww).status_code == 200
 
 
+def test_kontrakty_krypto_daja_rozsadny_lot():
+    # 1 lot na każdym rynku krypto to tysiące dolarów, nie jedna moneta.
+    ceny = {"BTCUSD": 77_000, "ETHUSD": 2_250, "SOLUSD": 96, "XRPUSD": 1.25, "LTCUSD": 55, "DOGEUSD": 0.075,
+            "BNBUSD": 706, "ADAUSD": 0.19, "AVAXUSD": 8.5, "LINKUSD": 11.5, "SUIUSD": 0.9, "HYPEUSD": 88}
+    for sym, px in ceny.items():
+        m = markets.get(sym)
+        assert 4_000 <= m.contract * px <= 100_000, (sym, m.contract * px)
+
+
 def test_bot_nie_widzi_pozycji_z_terminala(rynek):
     aid, h = _konto()
     with TestClient(app) as c:
