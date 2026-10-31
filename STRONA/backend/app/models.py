@@ -332,6 +332,37 @@ class RewardCode(Base):
 
 
 # --------------------------------------------------------------------------- #
+#  RewardCase — darmowa „Trade Case": jedna skrzynka na tradera               #
+# --------------------------------------------------------------------------- #
+class RewardCase(Base):
+    """Wynik otwarcia darmowej skrzynki (app/trade_case.py).
+
+    UNIQUE na `trader_id` to twarda bramka „jedna skrzynka na tradera": dwa
+    równoległe otwarcia (SQLite nie zna FOR UPDATE) przegrywają na INSERT-cie,
+    a nie dopiero w aplikacji. Nagroda jest zapisana w wierszu wprost (typ,
+    etykieta, wartość), bo konfiguracja puli w panelu może się zmienić po
+    otwarciu — trader ma dalej widzieć to, co wygrał.
+
+    `reward_code_id` i `account_id` są zwykłymi liczbami, bez FK: kasowanie
+    konta albo kodu z panelu nie może się wywrócić na tej tabeli.
+    """
+    __tablename__ = "reward_cases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    trader_id: Mapped[int] = mapped_column(ForeignKey("traders.id"), unique=True, index=True)
+    opened_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    card_index: Mapped[int] = mapped_column(Integer, default=0)          # karta kliknięta (0..2)
+    prize_key: Mapped[str] = mapped_column(String(40))
+    prize_type: Mapped[str] = mapped_column(String(12))                  # code | account | points
+    prize_label: Mapped[str] = mapped_column(String(80))
+    prize_value: Mapped[float | None] = mapped_column(Float, nullable=True)  # pct albo punkty
+    reward_code_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    account_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # JSON: product_key, etykiety dwóch pozostałych kart (kosmetyka odsłony)
+    payload: Mapped[str] = mapped_column(Text, default="")
+
+
+# --------------------------------------------------------------------------- #
 #  FlashOffer — reczna oferta flash sale (cross-sell)                         #
 # --------------------------------------------------------------------------- #
 class FlashOffer(Base):

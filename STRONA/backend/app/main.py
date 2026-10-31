@@ -47,6 +47,7 @@ from . import (achievements, auth, billing, catalog, certshot, contentbot, count
                lead_mail, mail_templates, metaquotes_web, notify, offers, origin,
                payout_import, payoutbot, polecenia, reach, statements,
                poller, provisioning, push, rules, sms, telegram, telemetry, tradebot, zamki)
+from . import trade_case
 from . import vusdt
 from . import helpdesk
 from .config import get_settings
@@ -59,7 +60,7 @@ from .models import (LEAD_LOST_STATUSES, LEAD_STATUSES, LOST_REASONS,
                      LeadMailTemplate, LeadReminder, MailLog, NewsletterSubscriber, Notification,
                      Order, Payout, PayoutRequest, PoolAccount, PostMedia, Product,
                      PushSubscription,
-                     RewardCode, SupportTicket, TelemetryEvent, TicketMessage, Trade, Trader,
+                     RewardCase, RewardCode, SupportTicket, TelemetryEvent, TicketMessage, Trade, Trader,
                      VusdtTransfer,
                      nowy_znak_biletu)
 
@@ -4651,6 +4652,86 @@ def me_loyalty_redeem(payload: RedeemIn, trader: Trader = Depends(auth.current_t
         session.commit()
         telemetry.track("loyalty_redeem", trader.id, reward=payload.reward, pct=kod.pct)
         return {"code": loyalty.code_dict(kod), **_loyalty_payload(session, tr)}
+    finally:
+        session.close()
+
+
+# --- Free Trade Case: jedna skrzynka na tradera (logika w app/trade_case.py) ---
+class CaseOpenIn(BaseModel):
+    card: int = Field(default=0, ge=0, le=trade_case.KARTY - 1)   # kosmetyka: wynik losuje serwer
+
+
+_CASE_ODMOWY = {
+    "disabled": (409, "The Trade Case is not available right now"),
+    "empty": (409, "The Trade Case is not available right now"),
+    "admin": (403, "Administrator accounts cannot open the Trade Case"),
+    "verify_email": (403, "Confirm your e-mail first, then open your case"),
+}
+
+
+@app.get("/api/me/case")
+def me_case(trader: Trader = Depends(auth.current_trader)):
+    """Stan skrzynki: czy można ją otworzyć, wynik (jeśli już otwarta) i szanse."""
+    session = SessionLocal()
+    try:
+        return trade_case.stan(session, session.get(Trader, trader.id))
+    finally:
+        session.close()
+
+
+@app.post("/api/me/case/open")
+def me_case_open(payload: CaseOpenIn, request: Request, trader: Trader = Depends(auth.current_trader)):
+    """Otwiera skrzynkę raz na tradera. Drugie wywołanie oddaje ten sam wynik
+    z `already: true` — odświeżenie strony nie losuje od nowa."""
+    # Podgląd admina „oczami klienta" nie może spalić klientowi jedynej skrzynki.
+    if getattr(request.state, "impersonated", False):
+        raise HTTPException(403, "The case can't be opened while viewing the portal as a client")
+    session = SessionLocal()
+    try:
+        try:
+            return trade_case.otworz(session, trader.id, payload.card)
+        except trade_case.Niedostepna as e:
+            kod, tekst = _CASE_ODMOWY.get(e.args[0], (409, "The Trade Case is not available"))
+            raise HTTPException(kod, tekst)
+    finally:
+        session.close()
+
+
+class TradeCaseIn(BaseModel):
+    on: bool = True
+    prizes: list[dict] = Field(default_factory=list)   # treść waliduje trade_case.waliduj
+
+
+def _trade_case_admin(session) -> dict:
+    cfg = trade_case.konfig(odswiez=True)
+    produkty = (session.query(Product).filter(Product.active == True)              # noqa: E712
+                .order_by(Product.steps.desc(), Product.account_size).all())
+    return {"config": cfg, "odds": trade_case.szanse(trade_case.pula(session, cfg)),
+            "code_days": trade_case.KOD_DNI, "max_prizes": trade_case.MAX_NAGROD,
+            "products": [{"key": p.key, "label": p.label, "price_usd": p.price_usd} for p in produkty],
+            "stats": trade_case.statystyki(session, cfg)}
+
+
+@app.get("/api/admin/trade-case", dependencies=[Depends(auth.require_admin)])
+def admin_trade_case():
+    session = SessionLocal()
+    try:
+        return _trade_case_admin(session)
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/trade-case", dependencies=[Depends(auth.require_admin)])
+def admin_trade_case_save(payload: TradeCaseIn):
+    """Zapis puli: wagi > 0, rabat 1–90%, plan konta istnieje i jest w sprzedaży."""
+    session = SessionLocal()
+    try:
+        try:
+            cfg = trade_case.waliduj(session, payload.model_dump())
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        trade_case.zapisz(session, cfg)
+        return _trade_case_admin(session)
     finally:
         session.close()
 
@@ -9504,7 +9585,7 @@ def admin_delete_trader(trader_id: int):
         # Stąd: kody i księga przed zamówieniami, zamówienia i nagrody przed
         # kontami (te lecą na końcu). Dołożenie tabeli w złym miejscu tej listy
         # to 500 na „Delete client & all data" — i tylko na produkcji.
-        for model in (RewardCode, CreditLedger, AchievementReward, Order, Notification,
+        for model in (RewardCase, RewardCode, CreditLedger, AchievementReward, Order, Notification,
                       PayoutRequest, JournalEntry, PushSubscription, KycFile, TelemetryEvent):
             (session.query(model).filter(model.trader_id == trader_id)
              .delete(synchronize_session=False))

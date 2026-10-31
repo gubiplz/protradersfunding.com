@@ -684,3 +684,33 @@ html,body{overscroll-behavior-y:none}
   .nlp-vars{grid-template-columns:repeat(2,1fr)}
   .nlp-grid{grid-template-columns:1fr}
 }
+/* Offers → Free Trade Case: edytowalna pula nagród z szansami na żywo */
+.tc .nlp-head p code{font-family:var(--mono);font-size:11.5px;background:var(--panel2);border:1px solid var(--line);
+  border-radius:6px;padding:1px 6px;white-space:nowrap}
+.tc-wrap{margin-top:14px}
+.tc-tbl td{vertical-align:middle}
+.tc-tbl .inp{width:100%;min-width:0;padding:8px 10px;font-size:13px}
+.tc-tbl td:nth-child(1){min-width:220px}
+.tc-tbl td:nth-child(2){width:190px}
+.tc-tbl td:nth-child(3){width:220px}
+.tc-tbl td:nth-child(4){width:100px}
+.tc-tbl td.tc-odds{width:76px;font-family:var(--mono);font-weight:700;color:var(--acc);white-space:nowrap}
+.tc-tbl td.tc-odds.bad{color:var(--red)}
+.tc-tbl td:last-child{width:44px;text-align:right}
+.tc-unit{display:flex;align-items:center;gap:6px}
+.tc-unit i{font-style:normal;font-size:12px;color:var(--muted)}
+.tc-hint{font-size:12px;flex:1;min-width:200px}
+.tc-stats{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:16px;padding:14px 16px;border-radius:12px;
+  background:var(--panel2);border:1px solid var(--line)}
+.tc-kpi{display:flex;align-items:baseline;gap:8px;flex:none}
+.tc-kpi b{font-size:22px}
+.tc-kpi span{font-size:12.5px;color:var(--muted)}
+.tc-per{display:flex;flex-wrap:wrap;gap:6px}
+.tc-chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 10px;border-radius:999px;
+  border:1px solid var(--line);background:var(--panel)}
+.tc-chip b{color:var(--acc)}
+.tc-sub{font-size:13px;margin:18px 0 8px}
+@media(max-width:760px){
+  .tc-tbl td:nth-child(n){width:auto;min-width:0}
+  .tc-tbl td.rt-main .inp{font-size:15px}
+}
