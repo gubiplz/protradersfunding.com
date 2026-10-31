@@ -67,7 +67,7 @@
     book: { bids: [], asks: [] }, trades: [], tk: {}, mids: {}, ctx: {},
     side: 'buy', kind: 'market', unit: ls.get('pf_term_unit', 'usd'), slip: +ls.get('pf_term_slip', '1'),
     quick: ls.json('pf_term_quick', [50, 100, 250]), watch: ls.json('pf_term_watch', ['BTCUSD', 'ETHUSD', 'XAUUSD']),
-    token: ls.get('pf_token', null) || ls.get('pf_term_token', null), mt5: !ls.get('pf_token', null) && !!ls.get('pf_term_token', null),
+    token: ls.get('pf_token', null),   // tylko sesja konta PTF (wspólna z portalem)
     accounts: [], accId: +ls.get('pf_term_acc', '0') || null, st: null, ptab: 'positions',
     cols: ls.json('pf_term_cols', { value: true, slippage: true, liq: true, lev: true, margin: true, tpsl: true }),
     weekend: false, fee: 0.03, group: null, bookUnit: 'base', tickMode: ls.get('pf_term_tick', 'trending'),
@@ -865,11 +865,13 @@
   /* =====================================================================
      KONTO, LOGOWANIE, STAN
      ===================================================================== */
+  /* Wylogowanie = wylogowanie z PTF (ta sama sesja co portal). `silent` — sesja
+     wygasła sama (401), wtedy tylko czyścimy stan. */
   function signOut(silent) {
-    S.token = null; S.st = null; S.accounts = []; S.mt5 = false;
-    ls.del('pf_term_token');
-    if (!silent) { /* sesja portalu zostaje — wylogowujemy tylko terminal MT5 */ }
-    renderUser(); renderTables(); renderAccount(); drawLines();
+    S.token = null; S.st = null; S.accounts = [];
+    ls.del('pf_token');
+    if (!silent) toast('Signed out');
+    renderUser(); renderTables(); renderAccount(); drawLines(); updateTicket();
   }
   function renderUser() {
     $('tGuest').hidden = !!S.token;
@@ -886,13 +888,13 @@
   $('tAccBtn').parentElement.appendChild(accMenu);
   dropdown($('tAccBtn'), accMenu, (mn) => {
     mn.innerHTML = '<h6>Accounts</h6>' + (S.accounts.map((a) => `<button type="button" data-acc="${a.id}"><span class="mi sm" style="background:${a.tradable ? 'var(--up)' : 'var(--dim)'}"></span>#${esc(a.login)} · ${big(a.size)}<span class="tag">${phaseLbl(a)}</span>${a.id === S.accId ? '<span class="chk">✓</span>' : ''}</button>`).join('') || '<p class="t-hint" style="padding:8px 10px">No active challenge accounts.</p>')
-      + (S.mt5 ? '<button type="button" data-out="1">Log out of the terminal</button>' : '<a href="/portal">Open dashboard</a>')
-      + '<a href="/#pricing">Get a new challenge</a>';
+      + '<a href="/portal">Open dashboard</a><a href="/#pricing">Get a new challenge</a>'
+      + '<button type="button" data-out="1">Sign out</button>';
   });
   accMenu.addEventListener('click', (e) => {
     const b = e.target.closest('[data-acc]');
     if (b) { accMenu.hidden = true; selectAccount(+b.dataset.acc); }
-    if (e.target.closest('[data-out]')) { accMenu.hidden = true; signOut(); toast('Logged out of the terminal'); }
+    if (e.target.closest('[data-out]')) { accMenu.hidden = true; signOut(); }
   });
   const phaseLbl = (a) => (a.status === 'funded' || a.phase === 'funded' ? 'Funded' : a.phase === 'eval_2' ? 'Phase 2' : a.status === 'passed' ? 'Passed' : 'Phase 1');
 
@@ -901,7 +903,6 @@
     try {
       const d = await api('/api/terminal/accounts');
       S.accounts = d.accounts;
-      S.mt5 = d.mt5_session;
       if (!S.accounts.some((a) => a.id === S.accId)) {
         const t = S.accounts.find((a) => a.tradable) || S.accounts[0];
         S.accId = t ? t.id : null;
@@ -1146,11 +1147,7 @@
   function openLogin() { openModal('tLogin'); }
   $('tSignIn').onclick = openLogin;
   $('tReadySignIn').onclick = openLogin;
-  $$('[data-lt]').forEach((b) => b.addEventListener('click', () => {
-    $$('[data-lt]').forEach((x) => x.classList.toggle('on', x === b));
-    $('tLoginMt5').hidden = b.dataset.lt !== 'mt5';
-    $('tLoginPtf').hidden = b.dataset.lt !== 'ptf';
-  }));
+  ls.del('pf_term_token');   // sprzątanie po wycofanym logowaniu danymi MT5
   async function doLogin(form, path, body, store) {
     const err = form.querySelector('.t-err'), btn = form.querySelector('button[type=submit]');
     err.hidden = true; btn.disabled = true;
@@ -1160,23 +1157,15 @@
       if (!r.ok) throw new Error(typeof d.detail === 'string' ? d.detail : 'Sign in failed');
       store(d);
       closeModal();
-      toast('Signed in', S.mt5 ? 'MT5 account connected to the terminal.' : 'Your accounts are loaded.');
+      toast('Signed in', 'Your accounts are loaded.');
       await loadAccounts();
     } catch (e) { err.textContent = e.message; err.hidden = false; } finally { btn.disabled = false; }
   }
-  $('tLoginMt5').onsubmit = (e) => {
-    e.preventDefault();
-    const f = e.target;
-    doLogin(f, '/api/terminal/login', { login: f.login.value.trim(), password: f.password.value }, (d) => {
-      S.token = d.token; S.mt5 = true; S.accId = d.account_id;
-      ls.set('pf_term_token', d.token); ls.set('pf_term_acc', String(d.account_id));
-    });
-  };
   $('tLoginPtf').onsubmit = (e) => {
     e.preventDefault();
     const f = e.target;
     doLogin(f, '/api/auth/login', { email: f.email.value.trim(), password: f.password.value }, (d) => {
-      S.token = d.token; S.mt5 = false; ls.set('pf_token', d.token); ls.del('pf_term_token');
+      S.token = d.token; ls.set('pf_token', d.token);
     });
   };
 

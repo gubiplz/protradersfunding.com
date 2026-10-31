@@ -229,26 +229,20 @@ def test_dolek_equity_w_oknie_lamie_dzienna_strate(rynek):
         assert r.status_code == 409 and "closed for trading" in r.json()["detail"]
 
 
-def test_login_danymi_mt5_widzi_tylko_to_konto(rynek):
+def test_tylko_konto_ptf_i_tylko_wlasne_konta(rynek):
+    """Do terminala wchodzi się wyłącznie sesją konta PTF — logowania danymi MT5 nie ma."""
     aid, h = _konto()
     inne, _ = _konto()
     a = _acc(aid)
     with TestClient(app) as c:
-        assert c.post("/api/terminal/login", json={"login": a.platform_login, "password": "zle"}).status_code == 401
-        r = c.post("/api/terminal/login", json={"login": a.platform_login, "password": "Pw-123456"})
-        assert r.status_code == 200, r.text
-        th = {"Authorization": f"Bearer {r.json()['token']}"}
-        konta = c.get("/api/terminal/accounts", headers=th).json()
-        assert [k["id"] for k in konta["accounts"]] == [aid] and konta["mt5_session"] is True
-        # Token MT5 zawsze trafia w swoje konto, nawet gdy ktoś poda cudze id.
-        st = c.get(f"/api/terminal/state?account_id={inne}", headers=th).json()
-        assert st["account"]["id"] == aid
-        assert _zlec(c, th, None).status_code == 200
-        # Portalowa sesja tradera nie sięga cudzego konta.
+        assert c.post("/api/terminal/login",
+                      json={"login": a.platform_login, "password": "Pw-123456"}).status_code in (404, 405)
+        assert c.get("/api/terminal/accounts").status_code == 401
+        konta = c.get("/api/terminal/accounts", headers=h).json()
+        assert [k["id"] for k in konta["accounts"]] == [aid]
         assert c.get(f"/api/terminal/state?account_id={inne}", headers=h).status_code == 404
-        # Zmiana hasła MT5 unieważnia token terminala.
-        s = SessionLocal(); acc = s.get(Account, aid); acc.platform_password = "Nowe-654321"; s.commit(); s.close()
-        assert c.get("/api/terminal/accounts", headers=th).status_code == 401
+        assert _zlec(c, h, inne).status_code == 404
+        assert _zlec(c, h, None).status_code == 400
 
 
 def test_weekend_zamyka_rynki_poza_krypto(rynek, monkeypatch):

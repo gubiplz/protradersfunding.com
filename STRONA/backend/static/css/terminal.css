@@ -28,7 +28,7 @@
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{background:var(--bg);color:var(--txt);font:13px/1.4 Inter,system-ui,-apple-system,sans-serif;
-  -webkit-font-smoothing:antialiased;overflow:hidden}
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
 a{color:inherit;text-decoration:none}
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 input,select{font:inherit;color:inherit}
@@ -39,10 +39,15 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-grow{flex:1}
 .t-sep{width:1px;height:18px;background:var(--line2);flex:none;margin:0 4px}
 
-.term{display:flex;flex-direction:column;height:100vh;height:100dvh}
+/* Strona się przewija: góra (wykres, księga, bilet) wypełnia ekran, a tabele
+   pozycji leżą POD nią — przy krawędzi widać tylko ich pasek zakładek. Dzięki
+   temu wykres nie traci wysokości na rzecz tabel. */
+.term{display:flex;flex-direction:column;min-height:100vh;min-height:100dvh;
+  --head-h:54px; --mkt-h:62px; --foot-h:36px; --peek-h:44px;
+  --top-h:max(560px,calc(100dvh - var(--head-h) - var(--mkt-h) - var(--foot-h) - var(--peek-h)))}
 
 /* ---------- nagłówek ---------- */
-.t-head{display:flex;align-items:center;gap:28px;height:54px;padding:0 18px;border-bottom:1px solid var(--line);flex:none;background:var(--bg)}
+.t-head{display:flex;align-items:center;gap:28px;height:var(--head-h);padding:0 18px;border-bottom:1px solid var(--line);flex:none;background:var(--bg);position:sticky;top:0;z-index:30}
 .t-logo{display:flex;align-items:center;gap:9px;font-weight:700;font-size:15px;letter-spacing:-.01em;white-space:nowrap}
 .t-logo img{width:28px;height:28px;object-fit:contain}
 .t-logo span{background:linear-gradient(120deg,var(--brand2),var(--brand));-webkit-background-clip:text;background-clip:text;color:transparent}
@@ -74,7 +79,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-acc-btn .dot.off{background:var(--dim);box-shadow:none}
 
 /* ---------- pasek rynku ---------- */
-.t-mkt{display:flex;align-items:center;gap:26px;height:62px;padding:0 16px;border-bottom:1px solid var(--line);flex:none;overflow-x:auto;scrollbar-width:none}
+.t-mkt{display:flex;align-items:center;gap:26px;height:var(--mkt-h);padding:0 16px;border-bottom:1px solid var(--line);flex:none;overflow-x:auto;scrollbar-width:none}
 .t-mkt::-webkit-scrollbar{display:none}
 .t-sym{display:flex;align-items:center;gap:10px;font-size:19px;font-weight:700;white-space:nowrap;padding:6px 8px;margin-left:-8px;border-radius:9px}
 .t-sym:hover{background:var(--panel2)}
@@ -99,16 +104,16 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-mkt-r{margin-left:auto;display:flex;gap:6px}
 
 /* ---------- siatka ---------- */
-.t-grid{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 316px 332px;grid-template-rows:minmax(0,1fr) 264px}
+.t-grid{flex:none;display:grid;grid-template-columns:minmax(0,1fr) 316px 332px;grid-template-rows:var(--top-h) auto}
 .t-left{grid-column:1;grid-row:1;display:flex;flex-direction:column;min-width:0;min-height:0;border-right:1px solid var(--line)}
 .t-book{grid-column:2;grid-row:1;display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line)}
-.t-ticket{grid-column:3;grid-row:1/3;overflow-y:auto;padding:14px 14px 18px;display:flex;flex-direction:column;gap:12px;background:var(--bg2)}
+.t-ticket{grid-column:3;grid-row:1;overflow-y:auto;padding:14px 14px 18px;display:flex;flex-direction:column;gap:12px;background:var(--bg2);scrollbar-width:thin}
 .t-ticket>*{flex-shrink:0}
-.t-bottom{grid-column:1/3;grid-row:2;display:flex;flex-direction:column;min-height:0;border-top:1px solid var(--line)}
+.t-bottom{grid-column:1/-1;grid-row:2;display:flex;flex-direction:column;min-height:calc(100dvh - var(--head-h) - var(--foot-h));border-top:1px solid var(--line)}
 .t-mtabs,.t-mbar{display:none}
 
 /* pasek tickerów */
-.t-tick{display:flex;align-items:center;height:40px;border-bottom:1px solid var(--line);flex:none;min-width:0}
+.t-tick{display:flex;align-items:center;height:38px;border-bottom:1px solid var(--line);flex:none;min-width:0}
 .t-tick-track{flex:1;display:flex;overflow-x:auto;scroll-behavior:smooth;scrollbar-width:none;min-width:0;height:100%}
 .t-tick-track::-webkit-scrollbar{display:none}
 .t-ti{display:flex;align-items:center;gap:9px;padding:0 16px;border-right:1px solid var(--line);white-space:nowrap;font-size:12.5px;height:100%}
@@ -121,13 +126,13 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 
 /* zakładki wykresu */
 .t-ctabs,.t-btabs,.t-ptabs,.t-otabs{display:flex;align-items:center;gap:4px;border-bottom:1px solid var(--line);flex:none}
-.t-ctabs{height:44px;padding:0 10px}
+.t-ctabs{height:40px;padding:0 10px}
 .t-ctabs>button,.t-btabs>button,.t-ptabs [data-pt],.t-otabs [data-ot]{position:relative;height:100%;padding:0 12px;color:var(--muted);font-size:14px;display:flex;align-items:center;gap:5px;white-space:nowrap}
 .t-ctabs>button.on,.t-btabs>button.on,.t-ptabs [data-pt].on,.t-otabs [data-ot].on{color:var(--txt);font-weight:600}
 .t-ctabs>button.on::after,.t-btabs>button.on::after,.t-ptabs [data-pt].on::after,.t-otabs [data-ot].on::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;border-radius:2px;background:var(--acc)}
 .t-cpane{display:none;flex:1;min-height:0;flex-direction:column}
 .t-cpane.on{display:flex}
-.t-ctools{display:flex;align-items:center;gap:4px;height:42px;padding:0 6px;border-bottom:1px solid var(--line);flex:none;overflow-x:auto;scrollbar-width:none}
+.t-ctools{display:flex;align-items:center;gap:4px;height:38px;padding:0 6px;border-bottom:1px solid var(--line);flex:none;overflow-x:auto;scrollbar-width:none}
 .t-ctools::-webkit-scrollbar{display:none}
 .t-ints{display:flex;gap:2px}
 .t-ints button,.t-ranges button,.t-axis button{height:28px;min-width:30px;padding:0 7px;border-radius:7px;color:var(--muted);font-size:13px}
@@ -146,7 +151,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-chart{flex:1;min-width:0;position:relative}
 .t-legend{position:absolute;left:10px;top:6px;z-index:2;pointer-events:none;font-size:13px;color:var(--muted);line-height:1.5}
 .t-legend b{color:var(--txt);font-weight:500;font-size:14.5px}
-.t-cfoot{display:flex;align-items:center;gap:4px;height:36px;padding:0 8px;border-top:1px solid var(--line);flex:none;overflow-x:auto;scrollbar-width:none}
+.t-cfoot{display:flex;align-items:center;gap:4px;height:34px;padding:0 8px;border-top:1px solid var(--line);flex:none;overflow-x:auto;scrollbar-width:none}
 .t-cfoot::-webkit-scrollbar{display:none}
 .t-ranges,.t-axis{display:flex;gap:2px}
 .t-clock{color:var(--muted);font-size:12.5px;white-space:nowrap;padding:0 6px}
@@ -268,7 +273,8 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-fill-note{font-size:11.5px;color:var(--dim);line-height:1.45}
 
 /* ---------- dolne tabele ---------- */
-.t-ptabs{height:44px;padding:0 8px;gap:2px;overflow-x:auto;scrollbar-width:none}
+.t-ptabs{height:var(--peek-h,44px);padding:0 8px;gap:2px;overflow-x:auto;scrollbar-width:none;
+  position:sticky;top:var(--head-h,54px);z-index:6;background:var(--bg)}
 .t-ptabs::-webkit-scrollbar{display:none}
 .t-ptabs em{font-style:normal;color:var(--acc);font-size:12px;font-family:var(--mono)}
 .t-danger,.t-outline{height:30px;padding:0 12px;border-radius:8px;font-size:13px;font-weight:550;display:flex;align-items:center;gap:7px;white-space:nowrap}
@@ -277,7 +283,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-outline{border:1px solid var(--line2)}
 .t-outline:hover{border-color:var(--acc)}
 .t-ptabs .t-dd.r .t-menu,.t-ptabs .t-cols{right:0;left:auto}
-.t-table{flex:1;min-height:0;overflow:auto;scrollbar-width:thin}
+.t-table{flex:1;overflow-x:auto;scrollbar-width:thin}
 .t-table table{width:100%;border-collapse:collapse;font-size:12.5px;white-space:nowrap}
 .t-table th{position:sticky;top:0;background:var(--bg);text-align:left;font-weight:500;color:var(--dim);padding:9px 12px;border-bottom:1px solid var(--line);z-index:1}
 .t-table td{padding:8px 12px;border-bottom:1px solid var(--line)}
@@ -306,7 +312,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-meter i.warn{background:var(--warn)} .t-meter i.bad{background:var(--dn)}
 
 /* ---------- stopka ---------- */
-.t-foot{display:flex;align-items:center;gap:4px;height:36px;padding:0 10px;border-top:1px solid var(--line);flex:none;background:var(--bg);font-size:12.5px}
+.t-foot{display:flex;align-items:center;gap:4px;height:var(--foot-h);padding:0 10px;border-top:1px solid var(--line);flex:none;background:var(--bg);font-size:12.5px;position:sticky;bottom:0;z-index:30}
 .t-fbtn{display:flex;align-items:center;gap:7px;height:28px;padding:0 9px;border-radius:7px;color:var(--muted);white-space:nowrap}
 .t-fbtn:hover{color:var(--txt);background:var(--panel2)}
 .t-fbtn svg{width:15px;height:15px}
@@ -429,8 +435,8 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   .t-grid{display:flex;flex-direction:column}
   .t-left,.t-book,.t-ticket{border:0;display:none}
   .t-left.on,.t-book.on,.t-ticket.on{display:flex}
-  .t-left{height:min(72dvh,560px)}
-  .t-book{height:min(72dvh,560px)}
+  /* telefon: wykres na prawie cały ekran (nagłówek, pasek rynku, zakładki i przyciski kup/sprzedaj zostają) */
+  .t-left,.t-book{height:max(420px,calc(100dvh - 54px - 58px - 42px - 70px))}
   .t-book .t-btabs{display:none}
   .t-ticket{overflow:visible}
   .t-bottom{height:auto;min-height:280px;border-top:1px solid var(--line)}
@@ -443,6 +449,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   .t-draw{width:38px}
   .t-draw button{width:30px;height:30px}
   .t-tick-mode span,.t-tick #tTickPrev,.t-tick #tTickNext{display:none}
+  .t-ptabs{top:96px}   /* pod nagłówkiem i zakładkami paneli */
   .t-ptabs .t-grow,.t-ptabs #tColsBtn{display:none}
   .t-casec{grid-template-columns:1fr}
   .t-case-r{order:-1;border-left:0;border-bottom:1px solid var(--line);padding:18px}

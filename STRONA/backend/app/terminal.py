@@ -2,9 +2,8 @@
 
 To jest księga konta challenge'u: pozycja otwarta tutaj trafia do tej samej
 tabeli `trades` co historia z dashboardu, a zysk i strata zmieniają to samo
-saldo, które liczą reguły (daily loss, max drawdown, target). Trader loguje
-się do terminala tak jak do MT5 — loginem i hasłem konta — albo wchodzi
-z portalu swoją sesją.
+saldo, które liczą reguły (daily loss, max drawdown, target). Do terminala
+loguje się wyłącznie kontem PTF (ta sama sesja co portal) — danymi MT5 nie.
 
 Rozliczenie idzie po cenach Hyperliquid (patrz `markets.py`):
   - zlecenie rynkowe przechodzi przez księgę zleceń (VWAP), z limitem
@@ -23,12 +22,9 @@ from __future__ import annotations
 
 import asyncio
 import copy
-import hashlib
-import hmac
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from pydantic import BaseModel, Field
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -550,54 +546,22 @@ def evaluate_low(cfg, rt, tick, najnizsze: float | None):
 
 
 # --------------------------------------------------------------------------- #
-#  Dostęp: sesja portalu albo login MT5                                        #
+#  Dostęp: tylko sesja konta PTF (ta sama co portal)                           #
 # --------------------------------------------------------------------------- #
-_mt5_ser = URLSafeTimedSerializer(settings.secret_key, salt="terminal-mt5")
-MT5_TOKEN_MAX_AGE = 12 * 3600
-
-
-def _fp(acc: Account) -> str:
-    return hashlib.sha256(f"{acc.platform_login}:{acc.platform_password}".encode()).hexdigest()[:12]
-
-
-def make_mt5_token(acc: Account) -> str:
-    return _mt5_ser.dumps({"aid": acc.id, "fp": _fp(acc)})
-
-
 class Who:
-    def __init__(self, trader_id: int | None, account_id: int | None):
+    def __init__(self, trader_id: int):
         self.trader_id = trader_id
-        self.account_id = account_id     # sesja z loginu MT5 = tylko to konto
 
 
 def who(request: Request, authorization: str | None = Header(default=None)) -> Who:
-    if authorization and authorization.lower().startswith("bearer "):
-        token = authorization.split(" ", 1)[1].strip()
-        try:
-            dane = _mt5_ser.loads(token, max_age=MT5_TOKEN_MAX_AGE)
-        except (BadSignature, SignatureExpired):
-            dane = None
-        if dane:
-            session = SessionLocal()
-            try:
-                acc = session.get(Account, int(dane["aid"]))
-                if acc is None or _fp(acc) != dane.get("fp"):
-                    raise HTTPException(401, "Session expired. Log in with your MT5 credentials again.")
-                return Who(acc.trader_id, acc.id)
-            finally:
-                session.close()
-    trader = auth.current_trader(request, authorization)
-    return Who(trader.id, None)
+    return Who(auth.current_trader(request, authorization).id)
 
 
 def _konto(session, w: Who, account_id: int | None) -> Account:
-    aid = w.account_id or account_id
-    if not aid:
+    if not account_id:
         raise HTTPException(400, "Choose an account")
-    q = session.query(Account).filter(Account.id == int(aid))
-    acc = q.first()
-    if acc is None or (w.account_id is None and acc.trader_id != w.trader_id) \
-            or (w.account_id is not None and acc.id != w.account_id):
+    acc = session.get(Account, int(account_id))
+    if acc is None or acc.trader_id != w.trader_id:
         raise HTTPException(404, "Account not found")
     return acc
 
@@ -714,40 +678,13 @@ def api_markets():
             "weekend": tradebot.is_weekend()}
 
 
-class Mt5LoginIn(BaseModel):
-    login: str = Field(min_length=1, max_length=64)
-    password: str = Field(min_length=1, max_length=64)
-
-
-@router.post("/login")
-def api_login(payload: Mt5LoginIn, request: Request):
-    """Logowanie danymi MT5 — to samo konto, które trader ma w MetaTrader 5."""
-    from .main import _rate_limit
-    _rate_limit(request, "terminal_login", 10)
-    session = SessionLocal()
-    try:
-        acc = (session.query(Account)
-               .filter(Account.platform_login == payload.login.strip())
-               .order_by(Account.id.desc()).first())
-        if acc is None or not acc.platform_password or not hmac.compare_digest(
-                acc.platform_password.encode(), payload.password.encode()):
-            raise HTTPException(401, "Wrong login or password.")
-        return {"token": make_mt5_token(acc), "account_id": acc.id, "account": _konto_dict(acc)}
-    finally:
-        session.close()
-
-
 @router.get("/accounts")
 def api_accounts(w: Who = Depends(who)):
     session = SessionLocal()
     try:
-        if w.account_id is not None:
-            konta = [session.get(Account, w.account_id)]
-        else:
-            konta = (session.query(Account).filter(Account.trader_id == w.trader_id)
-                     .order_by(Account.id.desc()).all())
-        konta = [a for a in konta if a is not None and a.status in TRADABLE + ("passed",)]
-        return {"accounts": [_konto_dict(a) for a in konta], "mt5_session": w.account_id is not None}
+        konta = (session.query(Account).filter(Account.trader_id == w.trader_id)
+                 .order_by(Account.id.desc()).all())
+        return {"accounts": [_konto_dict(a) for a in konta if a.status in TRADABLE + ("passed",)]}
     finally:
         session.close()
 

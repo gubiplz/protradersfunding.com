@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>{{ symbol }} · Trade · {{ site_name }}</title>
-<meta name="description" content="Trade {{ market_name }} and other live markets on your {{ site_name }} challenge account: chart, order book, trades and one-click orders. The same account as your MT5 login.">
+<meta name="description" content="Trade {{ market_name }} and other live markets on your {{ site_name }} challenge account: chart, order book, trades and one-click orders.">
 <link rel="icon" href="/static/img/favicon.png" type="image/png">
 <link rel="preload" href="/static/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/css/terminal.css?v={{ asset_v }}">
@@ -275,16 +275,8 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
   <div class="t-card t-login">
     <button class="t-x" data-close type="button" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
     <h2 id="tLoginH">Sign In</h2>
-    <div class="t-seg" role="tablist"><button class="on" data-lt="mt5" type="button">MT5 login</button><button data-lt="ptf" type="button">{{ site_name }} account</button></div>
-    <form id="tLoginMt5" class="t-form">
-      <p class="t-hint">Use the login and password of your challenge account — the same ones you use in MetaTrader 5. It's the same account.</p>
-      <label class="t-fld"><span>Login</span><div class="t-in"><input name="login" inputmode="numeric" autocomplete="username" required></div></label>
-      <label class="t-fld"><span>Password</span><div class="t-in"><input name="password" type="password" autocomplete="current-password" required></div></label>
-      <p class="t-err" hidden></p>
-      <button class="t-btn wide" type="submit">Log in to the terminal</button>
-    </form>
-    <form id="tLoginPtf" class="t-form" hidden>
-      <p class="t-hint">Your dashboard login. You'll be able to switch between all your accounts.</p>
+    <form id="tLoginPtf" class="t-form">
+      <p class="t-hint">Use your {{ site_name }} account — the same login as your dashboard. You can switch between all your challenge accounts here.</p>
       <label class="t-fld"><span>Email</span><div class="t-in"><input name="email" type="email" autocomplete="email" required></div></label>
       <label class="t-fld"><span>Password</span><div class="t-in"><input name="password" type="password" autocomplete="current-password" required></div></label>
       <p class="t-err" hidden></p>
