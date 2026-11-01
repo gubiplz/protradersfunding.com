@@ -1153,7 +1153,7 @@
   $('tAccBtn').parentElement.classList.add('t-dd');
   $('tAccBtn').parentElement.appendChild(accMenu);
   dropdown($('tAccBtn'), accMenu, (mn) => {
-    mn.innerHTML = '<h6>Accounts</h6>' + (S.accounts.map((a) => `<button type="button" data-acc="${a.id}"><span class="mi sm" style="background:${a.tradable ? 'var(--up)' : 'var(--dim)'}"></span>#${esc(a.login)} · ${big(a.size)}<span class="tag">${phaseLbl(a)}</span>${a.id === S.accId ? '<span class="chk">✓</span>' : ''}</button>`).join('') || '<p class="t-hint" style="padding:8px 10px">No active challenge accounts.</p>')
+    mn.innerHTML = '<h6>Accounts</h6>' + (S.accounts.map((a) => `<button type="button" data-acc="${a.id}"><span class="mi sm" style="background:${a.tradable ? 'var(--up)' : 'var(--dim)'}"></span>#${esc(a.login)} · ${big(a.size)}<span class="tag">${a.status === 'failed' ? 'Breached' : phaseLbl(a)}</span>${a.id === S.accId ? '<span class="chk">✓</span>' : ''}</button>`).join('') || '<p class="t-hint" style="padding:8px 10px">No active challenge accounts.</p>')
       + '<a href="/portal">Open dashboard</a><a href="/#pricing">Get a new challenge</a>'
       + '<button type="button" data-out="1">Sign out</button>';
   });
@@ -1163,6 +1163,7 @@
     if (e.target.closest('[data-out]')) { accMenu.hidden = true; signOut(); }
   });
   const phaseLbl = (a) => (a.status === 'funded' || a.phase === 'funded' ? 'Funded' : a.phase === 'eval_2' ? 'Phase 2' : a.status === 'passed' ? 'Passed' : 'Phase 1');
+  const statusLbl = (a) => (a.tradable ? 'Active' : a.status === 'failed' ? 'Breached' : 'Not tradable');
 
   async function loadAccounts() {
     if (!S.token) { renderUser(); renderTables(); renderAccount(); return; }
@@ -1436,7 +1437,7 @@
       return;
     }
     if (S.ptab === 'accounts') {
-      el.innerHTML = S.accounts.length ? `<div class="t-accs">${S.accounts.map((a) => `<button type="button" class="t-accc${a.id === S.accId ? ' on' : ''}" data-acc="${a.id}"><small>#${esc(a.login)} · ${esc(a.server || '')}</small><b>${usd(a.balance)}</b><small>${big(a.size)} challenge · ${phaseLbl(a)} · <span class="t-pill ${a.tradable ? 'ok' : ''}">${a.tradable ? 'Active' : 'Not tradable'}</span></small></button>`).join('')}</div>`
+      el.innerHTML = S.accounts.length ? `<div class="t-accs">${S.accounts.map((a) => `<button type="button" class="t-accc${a.id === S.accId ? ' on' : ''}" data-acc="${a.id}"><small>#${esc(a.login)} · ${esc(a.server || '')}</small><b>${usd(a.balance)}</b><small>${big(a.size)} challenge · ${phaseLbl(a)} · <span class="t-pill ${a.tradable ? 'ok' : a.status === 'failed' ? 'bad' : ''}">${statusLbl(a)}</span></small></button>`).join('')}</div>`
         : `<div class="t-empty"><div>No active challenge account yet.<br><a class="t-btn" href="/#pricing">Choose a Challenge</a></div></div>`;
       return;
     }

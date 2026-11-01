@@ -906,8 +906,8 @@ def api_accounts(w: Who = Depends(who)):
     try:
         konta = (session.query(Account).filter(Account.trader_id == w.trader_id)
                  .order_by(Account.id.desc()).all())
-        # Konto zamknięte breachem po handlu w terminalu zostaje na liście (szare, „Not
-        # tradable", z powodem) — inaczej trader widzi „No account" i nie wie, co się stało.
+        # Konto zamknięte breachem po handlu w terminalu zostaje na liście („Breached",
+        # z powodem) — inaczej trader widzi „No account" i nie wie, co się stało.
         widoczne = [a for a in konta if a.status in TRADABLE + ("passed",)
                     or (a.status == "failed" and a.terminal_used)]
         widoczne.sort(key=lambda a: _blokada_handlu(a) is not None)
