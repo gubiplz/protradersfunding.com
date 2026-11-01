@@ -76,8 +76,9 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-tog{display:inline-grid;place-items:center;width:38px;height:38px;border-radius:50%;color:var(--nav-c);transition:background .15s,color .15s}
 .t-tog:hover{background:var(--panel2);color:var(--txt)}
 .t-tog svg{width:19px;height:19px;stroke-width:1.9}
-.t-login{font-size:14.5px;font-weight:500;color:var(--nav-c);white-space:nowrap;transition:color .15s}
-.t-login:hover{color:var(--txt)}
+/* „Log in" / „Dashboard" w nagłówku. Nie .t-login — tę klasę ma okno logowania (t-card t-login). */
+.t-hlogin{font-size:14.5px;font-weight:500;color:var(--nav-c);white-space:nowrap;transition:color .15s}
+.t-hlogin:hover{color:var(--txt)}
 .t-getf{display:inline-flex;align-items:center;justify-content:center;padding:9px 16px;border-radius:10px;font-size:14px;font-weight:600;color:#fff;white-space:nowrap;
   background:linear-gradient(135deg,#159e91,#0a7d72);box-shadow:0 8px 20px -8px rgba(21,158,145,.5);transition:filter .15s,transform .15s}
 :root[data-theme=light] .t-getf{background:linear-gradient(135deg,#0a8a7d,#07695f)}
@@ -495,7 +496,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   .t-head{gap:10px;padding:0 12px}
   .t-head-r{gap:8px}
   .t-hsearch{display:none}                 /* wyszukiwarkę otwiera przycisk rynku (BTCUSD ▾) */
-  .t-guest .t-login,.t-user .t-login{display:none}   /* są w menu, jak na stronie */
+  .t-guest .t-hlogin,.t-user .t-hlogin{display:none}   /* są w menu, jak na stronie */
   /* znak jak na stronie: cała nazwa, czcionka do szerokości ekranu, w razie czego „Pro Traders / Funding" */
   .t-logo{flex:1 1 auto;min-width:0}
   .t-logo-txt{white-space:normal;line-height:1.05;font-size:clamp(13px,3.9vw,19px)}
