@@ -31,6 +31,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import and_, or_
 from sqlalchemy.orm.exc import StaleDataError
 
 from . import auth, catalog, markets, rules, tradebot
@@ -144,8 +145,11 @@ def _open_orders(session, acc: Account) -> list[TerminalOrder]:
 def _inne_otwarte(session, acc: Account) -> tuple[float, float]:
     """(floating, loty) pozycji spoza terminala (Trade BOT): floating siedzi w equity,
     loty w tym samym limicie ekspozycji konta."""
+    # Plan Trade BOT-a na żywych cenach (venue='plan') nie jest pozycją — transakcja
+    # powstaje przy zamknięciu; jego lotów nie liczymy, klient ich nie widzi.
     rows = (session.query(Trade.pnl, Trade.lots)
-            .filter(Trade.account_id == acc.id, Trade.status == "open", Trade.source != "terminal")
+            .filter(Trade.account_id == acc.id, Trade.status == "open", Trade.source != "terminal",
+                    or_(Trade.venue.is_(None), Trade.venue != "plan"))
             .all())
     return sum(float(p or 0.0) for p, _ in rows), sum(float(lt or 0.0) for _, lt in rows)
 
@@ -681,10 +685,16 @@ def _pos_dict(t: Trade, marks: dict[str, float]) -> dict:
 
 
 def _closed_dict(t: Trade) -> dict:
-    return {"id": t.id, "symbol": t.symbol, "side": t.side, "qty": t.qty, "entry": t.open_price,
-            "close": t.close_price, "pnl": round(t.pnl or 0.0, 2), "fee": round(t.fee or 0.0, 2),
-            "reason": t.close_reason, "leverage": t.leverage, "opened_at": _iso(t.opened_at),
-            "closed_at": _iso(t.closed_at)}
+    d = {"id": t.id, "symbol": t.symbol, "side": t.side, "qty": t.qty, "entry": t.open_price,
+         "close": t.close_price, "pnl": round(t.pnl or 0.0, 2), "fee": round(t.fee or 0.0, 2),
+         "reason": t.close_reason, "leverage": t.leverage, "opened_at": _iso(t.opened_at),
+         "closed_at": _iso(t.closed_at), "by": t.source, "lots": round(t.lots or 0.0, 4)}
+    if t.source == "bot":
+        # Lot bota w jego własnej mierze (jak w portalu i MT5); ilość w jednostkach z wartości punktu.
+        inst = tradebot.INSTRUMENTS.get(t.symbol)
+        d["qty"] = round((t.lots or 0.0) * inst.point_value, 6) if inst else None
+        d["reason"] = "bot"
+    return d
 
 
 def _order_dict(z: TerminalOrder) -> dict:
@@ -709,8 +719,11 @@ def state_dict(session, acc: Account, poz: list[Trade], marks: dict[str, float])
                                 peak_equity=float(acc.peak_equity or acc.initial_balance or 0.0),
                                 day_start_equity=float(acc.day_start_equity or acc.initial_balance or 0.0),
                                 trading_days=int(acc.trading_days_count or 0))
+    # Historia: transakcje z terminala i Trade BOT-a na żywych cenach (venue='hyperliquid' —
+    # ich wejście i wyjście leżą na świecach wykresu; stare syntetyczne zostają tylko w portalu).
     zamk = (session.query(Trade)
-            .filter(Trade.account_id == acc.id, Trade.source == "terminal", Trade.status == "closed")
+            .filter(Trade.account_id == acc.id, Trade.status == "closed",
+                    or_(Trade.source == "terminal", and_(Trade.source == "bot", Trade.venue == "hyperliquid")))
             .order_by(Trade.closed_at.desc(), Trade.id.desc()).limit(100).all())
     hist_z = (session.query(TerminalOrder)
               .filter(TerminalOrder.account_id == acc.id, TerminalOrder.status != "open")

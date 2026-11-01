@@ -209,6 +209,18 @@
   }
 
   function registerOverlays() {
+    // Znacznik wejścia/wyjścia z historii (terminal i Trade BOT): trójkąt pod/nad ceną
+    // w świecy transakcji — ceny bota leżą na wykresie, więc znaczniki trafiają w świece.
+    klinecharts.registerOverlay({
+      name: 'ptfMark', totalStep: 2, lock: true, needDefaultPointFigure: false, needDefaultXAxisFigure: false, needDefaultYAxisFigure: false,
+      createPointFigures: ({ coordinates, overlay }) => {
+        const { x, y } = coordinates[0], e = overlay.extendData || {}, s = 5, gora = e.dir === 'up';
+        const y0 = gora ? y + 4 : y - 4, y1 = gora ? y0 + s * 1.6 : y0 - s * 1.6;
+        const fig = [{ type: 'polygon', attrs: { coordinates: [{ x, y: y0 }, { x: x - s, y: y1 }, { x: x + s, y: y1 }] }, styles: { style: 'fill', color: e.color }, ignoreEvent: true }];
+        if (e.text) fig.push({ type: 'text', attrs: { x, y: gora ? y1 + 8 : y1 - 8, text: e.text, align: 'center', baseline: 'middle' }, styles: { color: e.color, size: 9, weight: 700, backgroundColor: 'transparent', borderSize: 0, paddingLeft: 0, paddingRight: 0, paddingTop: 0, paddingBottom: 0 }, ignoreEvent: true });
+        return fig;
+      },
+    });
     // Linia ceny z etykietą: wejście, TP, SL, likwidacja, zlecenia oczekujące.
     klinecharts.registerOverlay({
       name: 'ptfLine', totalStep: 2, lock: true, needDefaultPointFigure: false, needDefaultXAxisFigure: false, needDefaultYAxisFigure: true,
@@ -276,6 +288,7 @@
   let pendingRange = null;
   function afterInit() {
     loadDrawn();
+    drawLines();          // linie pozycji i znaczniki historii nowego rynku od razu, nie po kolejnym odświeżeniu
     if (pendingRange) { const r = pendingRange; pendingRange = null; setTimeout(() => fitRange(r), 30); }
     drawLines();
   }
@@ -692,6 +705,25 @@
   // po zapisach do DOM wymuszało przeliczenie układu strony.
   let bookRows = 0;
   new ResizeObserver(() => { const h = $('tAsks').clientHeight; if (h) { bookRows = Math.max(5, Math.floor(h / 21)); renderBook(); } }).observe($('tAsks'));
+  /* Wiersze księgi zostają w DOM-ie, zmieniają się tylko liczby i paski. Przebudowa
+     innerHTML w każdej klatce podmieniała wiersz pod kursorem i podświetlenie migało. */
+  const setTxt = (n, v) => { if (n.textContent !== v) n.textContent = v; };
+  function fillBook(el, rows, m, sd, max) {
+    while (el.children.length < rows.length) {
+      const r = document.createElement('div');
+      r.className = 't-row';
+      r.innerHTML = '<i></i><span></span><span></span><span></span>';
+      el.appendChild(r);
+    }
+    while (el.children.length > rows.length) el.lastElementChild.remove();
+    rows.forEach(([p, q, t], i) => {
+      const r = el.children[i], [bar, a, b, c] = r.children;
+      r.dataset.px = p;
+      const w = ((t / max) * 100).toFixed(1) + '%';
+      if (bar.style.width !== w) bar.style.width = w;
+      setTxt(a, px(m, p)); setTxt(b, fx(q, sd)); setTxt(c, fx(t, sd));
+    });
+  }
   function renderBook() {
     const m = S.m, el = $('tAsks');
     if (!S.tk.mark) renderTicker();
@@ -704,9 +736,8 @@
     const aRows = asks.map(([p, q]) => { ca += val(p, q); return [p, val(p, q), ca]; });
     const bRows = bids.map(([p, q]) => { cb += val(p, q); return [p, val(p, q), cb]; });
     const max = Math.max(ca, cb) || 1;
-    const row = ([p, q, t]) => `<div class="t-row" data-px="${p}"><i style="width:${((t / max) * 100).toFixed(1)}%"></i><span>${px(m, p)}</span><span>${fx(q, sd)}</span><span>${fx(t, sd)}</span></div>`;
-    el.innerHTML = aRows.slice().reverse().map(row).join('');
-    $('tBids').innerHTML = bRows.map(row).join('');
+    fillBook(el, aRows.slice().reverse(), m, sd, max);
+    fillBook($('tBids'), bRows, m, sd, max);
     const a = S.book.asks[0], b = S.book.bids[0];
     if (a && b) {
       $('tSpread').textContent = px(m, a[0] - b[0]);
@@ -729,8 +760,21 @@
   function renderTrades() {
     const el = $('tTrades');
     if (!el.offsetParent && S.trades.length) return;    // schowane — narysuje się po przełączeniu zakładki
-    const m = S.m, sd = S.bookUnit === 'usd' ? 0 : Math.min(m.qty_dec, 4);
-    el.innerHTML = S.trades.slice(0, 60).map((t) => `<div class="t-row"><span class="${t.side === 'buy' ? 'up' : 'dn'}">${px(m, t.px)}</span><span>${fx(S.bookUnit === 'usd' ? notional(m, t.sz, t.px) : t.sz, sd)}</span><span>${TIME.format(t.t)}</span></div>`).join('');
+    const m = S.m, sd = S.bookUnit === 'usd' ? 0 : Math.min(m.qty_dec, 4), list = S.trades.slice(0, 60);
+    while (el.children.length < list.length) {
+      const r = document.createElement('div');
+      r.className = 't-row';
+      r.innerHTML = '<span></span><span></span><span></span>';
+      el.appendChild(r);
+    }
+    while (el.children.length > list.length) el.lastElementChild.remove();
+    list.forEach((t, i) => {
+      const [a, b, c] = el.children[i].children, k = t.side === 'buy' ? 'up' : 'dn';
+      if (a.className !== k) a.className = k;
+      setTxt(a, px(m, t.px));
+      setTxt(b, fx(S.bookUnit === 'usd' ? notional(m, t.sz, t.px) : t.sz, sd));
+      setTxt(c, TIME.format(t.t));
+    });
   }
   $$('[data-btab]').forEach((b) => b.addEventListener('click', () => {
     tabOn($$('[data-btab]'), (x) => x === b);
@@ -795,14 +839,14 @@
     renderStrip();
     if (S.st) renderLivePnl();
     // Wyszukiwarka odświeża ceny najwyżej co pół sekundy (midy przychodzą dwa razy na tick: główna giełda i xyz).
-    if (!$('tSearch').hidden && !searchT) searchT = setTimeout(() => { searchT = 0; if (!$('tSearch').hidden) renderSearch(); }, 500);
+    if (!$('tSearch').hidden && !searchT) searchT = setTimeout(() => { searchT = 0; if (!$('tSearch').hidden) searchPrices(); }, 500);
   });
   let searchT = 0;
   async function loadCtx() {
     try {
       S.ctx = await F.contexts();
       renderStrip(); renderTicker();
-      if (!$('tSearch').hidden) renderSearch();     // lista otwarta od wejścia (?list=all) — wolumeny od razu
+      if (!$('tSearch').hidden) searchPrices();     // lista otwarta od wejścia (?list=all) — wolumeny od razu
     } catch (e) {}
   }
   loadCtx();
@@ -810,6 +854,18 @@
 
   // wyszukiwarka rynków
   let sCat = 'all', sIdx = 0, sList = [];
+  // Ceny w otwartej liście: tylko liczby w istniejących wierszach (pełna przebudowa
+  // co pół sekundy migała podświetleniem pod kursorem i gubiła kliknięcia).
+  function searchPrices() {
+    const rows = $('tSearchList').querySelectorAll('.t-sr[data-sym]');
+    if (rows.length !== sList.length || [...rows].some((r, i) => r.dataset.sym !== sList[i].sym)) { renderSearch(); return; }
+    rows.forEach((r, i) => {
+      const m = sList[i], c = chg24(m), [p, ch, v] = r.querySelectorAll('.num'), ct = pct(c);
+      setTxt(p, px(m, mid(m)));
+      if (ch.textContent !== ct) { ch.textContent = ct; ch.className = 'num ' + cls(c); }
+      setTxt(v, big(vol24(m)));
+    });
+  }
   function renderSearch() {
     const q = $('tSearchIn').value.trim().toLowerCase();
     $('tSearchCats').innerHTML = [['all', 'All'], ['watch', 'Watchlist'], ...Object.entries(CLS)].map(([k, l]) => `<button type="button" data-cat="${k}" class="${k === sCat ? 'on' : ''}">${l}</button>`).join('');
@@ -1241,6 +1297,14 @@
       line(p.sl, 'SL ' + px(S.m, p.sl), warn);
     });
     S.st.orders.filter((o) => o.symbol === S.sym).forEach((o) => line(o.price, `${o.kind === 'limit' ? 'Limit' : 'Stop'} ${o.side} ${lotsOf(S.m, o.qty)}`, o.side === 'buy' ? up : dn));
+    // Zamknięte transakcje na tym rynku: wejście (▲ long / ▼ short) i wyjście; Trade BOT z podpisem.
+    const mark = (iso, v, dir, color, text) => iso && v && chart.createOverlay({ name: 'ptfMark', groupId: 'ptf', lock: true, points: [{ timestamp: Date.parse(iso), value: v }], extendData: { dir, color, text } });
+    const muted = css('--muted');
+    (S.st.history || []).filter((h) => h.symbol === S.sym).slice(0, 40).forEach((h) => {
+      const long = h.side === 'buy';
+      mark(h.opened_at, h.entry, long ? 'up' : 'down', long ? up : dn, h.by === 'bot' ? 'BOT' : '');
+      mark(h.closed_at, h.close, long ? 'down' : 'up', muted, '');
+    });
   }
 
   /* =====================================================================
@@ -1289,7 +1353,7 @@
       return;
     }
     if (!st) { el.innerHTML = `<div class="t-empty">${S.accounts.length ? 'Loading…' : 'No active challenge account yet.'}</div>`; return; }
-    const sym = (s) => { const m = BY[s]; return m ? `<span class="sym">${mIcon(m, true)}${s}</span>` : esc(s); };
+    const sym = (s, dop = '') => { const m = BY[s]; return m ? `<span class="sym">${mIcon(m, true)}${s}${dop}</span>` : esc(s) + dop; };
     const side = (s) => `<span class="side ${s === 'buy' ? 'up' : 'dn'}">${s === 'buy' ? 'Long' : 'Short'}</span>`;
     const table = (head, rows, empty) => (rows.length ? `<table><thead><tr>${head.map(([h, n]) => `<th class="${n ? 'num' : ''}">${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>` : `<div class="t-empty">${empty}</div>`);
     if (S.ptab === 'positions') {
@@ -1307,10 +1371,12 @@
       }), 'No open orders');
       if (st.orders.length) el.insertAdjacentHTML('afterbegin', '<div style="padding:8px 12px;text-align:right"><button class="t-danger" type="button" data-cancelall>Cancel all orders</button></div>');
     } else if (S.ptab === 'phist') {
-      const R = { close: 'Closed', reduce: 'Reduced', tp: 'Take profit', sl: 'Stop loss', liquidation: 'Liquidation', stop_out: 'Stop-out', breach: 'Rule breach', phase: 'Phase passed' };
+      const R = { close: 'Closed', reduce: 'Reduced', tp: 'Take profit', sl: 'Stop loss', liquidation: 'Liquidation', stop_out: 'Stop-out', breach: 'Rule breach', phase: 'Phase passed', bot: 'Trade BOT' };
       el.innerHTML = table([['Closed'], ['Market'], ['Side'], ['Size', 1], ['Entry', 1], ['Exit', 1], ['PnL', 1], ['Fees', 1], ['Reason']], st.history.map((h) => {
-        const m = BY[h.symbol] || S.m;
-        return `<tr><td>${tm(h.closed_at)}</td><td>${sym(h.symbol)}</td><td>${side(h.side)}</td><td class="num">${sizeCell(m, h.qty)}</td><td class="num">${px(m, h.entry)}</td><td class="num">${px(m, h.close)}</td><td class="num ${cls(h.pnl)}">${sUsd(h.pnl)}</td><td class="num">${usd(h.fee)}</td><td><span class="t-pill ${h.reason === 'tp' ? 'ok' : ['sl', 'liquidation', 'stop_out', 'breach'].includes(h.reason) ? 'bad' : ''}">${R[h.reason] || esc(h.reason || '')}</span></td></tr>`;
+        const m = BY[h.symbol] || S.m, bot = h.by === 'bot';
+        // Lot Trade BOT-a w jego mierze (jak w portalu), nie w kontrakcie terminala.
+        const size = bot ? `${lotsF(h.lots)} lots <span class="sub">${qtyF(m, h.qty)} ${esc(m.base)}</span>` : sizeCell(m, h.qty);
+        return `<tr><td>${tm(h.closed_at)}</td><td>${sym(h.symbol, bot ? '<span class="t-pill bot">BOT</span>' : '')}</td><td>${side(h.side)}</td><td class="num">${size}</td><td class="num">${px(m, h.entry)}</td><td class="num">${px(m, h.close)}</td><td class="num ${cls(h.pnl)}">${sUsd(h.pnl)}</td><td class="num">${usd(h.fee)}</td><td><span class="t-pill ${h.reason === 'tp' ? 'ok' : ['sl', 'liquidation', 'stop_out', 'breach'].includes(h.reason) ? 'bad' : ''}">${R[h.reason] || esc(h.reason || '')}</span></td></tr>`;
       }), 'No closed positions yet');
     } else if (S.ptab === 'ohist' || S.ptab === 'fills') {
       const list = S.ptab === 'fills' ? st.order_history.filter((o) => o.status === 'filled') : st.order_history;

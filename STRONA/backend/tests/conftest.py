@@ -79,6 +79,11 @@ os.environ.setdefault("TRAFFIC_SWEEP_SEC", "0")
 # rate-limitu włącza go sam (monkeypatch main._RL_DISABLED + czysty licznik).
 os.environ["RATE_LIMIT_OFF"] = "true"
 
+# Trade BOT na żywych cenach pyta Hyperliquid o świece. Testy silnika bota liczą
+# na ceny syntetyczne (bez sieci); testy trybu żywego włączają go same
+# (monkeypatch BOT_LIVE_PRICES + podstawione świece).
+os.environ["BOT_LIVE_PRICES"] = "false"
+
 # Promocja „Upgrade Your Size" jest domyślnie WŁĄCZONA w produkcji, ale w
 # testach musi być wyłączona: upgrade wymaga wprawdzie kodu promo, ale sama
 # aktywna promocja renderuje pasek na stronach publicznych i pola

@@ -197,7 +197,13 @@ def book(coin: str) -> tuple[list[tuple[float, float]], list[tuple[float, float]
 
 def candles_1m(coin: str, start_ms: int, end_ms: int) -> list[dict]:
     """Świece 1m [start, end] jako {t, o, h, l, c}. Hyperliquid oddaje do 5000 sztuk."""
+    return candles(coin, "1m", start_ms, end_ms)
+
+
+def candles(coin: str, interval: str, start_ms: int, end_ms: int) -> list[dict]:
+    """Świece [start, end] w danym interwale jako {t, o, h, l, c}. Hyperliquid
+    trzyma ostatnie 5000 świec każdego interwału (1m ≈ 3,5 dnia wstecz)."""
     d = _post({"type": "candleSnapshot",
-               "req": {"coin": coin, "interval": "1m", "startTime": int(start_ms), "endTime": int(end_ms)}})
+               "req": {"coin": coin, "interval": interval, "startTime": int(start_ms), "endTime": int(end_ms)}})
     return [{"t": int(x["t"]), "o": float(x["o"]), "h": float(x["h"]),
              "l": float(x["l"]), "c": float(x["c"])} for x in (d or [])]

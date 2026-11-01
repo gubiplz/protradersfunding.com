@@ -1943,7 +1943,10 @@ def my_account_positions(account_id: int, trader: Trader = Depends(auth.current_
         if not acc or acc.trader_id != trader.id:
             raise HTTPException(404, "Account not found")
         rows = (session.query(Trade)
-                .filter(Trade.account_id == acc.id, Trade.status == "open")
+                .filter(Trade.account_id == acc.id, Trade.status == "open",
+                        # Plan Trade BOT-a na żywych cenach: transakcja powstaje przy
+                        # zamknięciu (ceny z wykresu), do tego czasu klient jej nie widzi.
+                        or_(Trade.venue.is_(None), Trade.venue != tradebot.PLAN))
                 .order_by(Trade.opened_at.desc()).limit(50).all())
         return [{
             "ticket": t.id,

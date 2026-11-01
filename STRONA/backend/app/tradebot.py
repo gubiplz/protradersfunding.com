@@ -39,7 +39,7 @@ import random
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 
-from . import rules
+from . import bot_ceny, rules
 from .config import get_settings
 from .feed import MarketSnapshot
 from .models import Account, Trade
@@ -371,14 +371,65 @@ def _week_close(now: datetime) -> datetime:
 def _tradable(p: Persona, weekend: bool) -> tuple[tuple[str, ...], tuple[float, ...]]:
     """Koszyk instrumentow na teraz. W weekend zostaje samo krypto — a persona,
     ktora nie ma go w koszyku, dostaje je na ten czas z listy, bo inaczej konto
-    z dodatkiem Weekend Trading sterczaloby bezczynnie mimo otwartego rynku."""
+    z dodatkiem Weekend Trading sterczaloby bezczynnie mimo otwartego rynku.
+    Na żywych cenach tylko instrumenty notowane w terminalu (patrz `bot_ceny`)."""
+    pary = list(zip(p.symbols, p.weights))
+    if bot_ceny.wlaczone():
+        pary = [(s, w) for s, w in pary if bot_ceny.rynek(s)]
+        if not pary:
+            zywe = tuple(s for s in INSTRUMENTS if bot_ceny.rynek(s))
+            pary = [(s, 1.0) for s in zywe]
     if not weekend:
-        return p.symbols, p.weights
-    pary = [(s, w) for s, w in zip(p.symbols, p.weights) if s in CRYPTO_SYMBOLS]
+        return tuple(s for s, _ in pary), tuple(w for _, w in pary)
+    pary = [(s, w) for s, w in pary if s in CRYPTO_SYMBOLS]
     if not pary:
         krypto = tuple(sorted(CRYPTO_SYMBOLS))
         return krypto, tuple(1.0 for _ in krypto)
     return tuple(s for s, _ in pary), tuple(w for _, w in pary)
+
+
+# --------------------------------------------------------------------------- #
+#  Żywe ceny: plan w toku jest ukryty, transakcja powstaje przy zamknięciu      #
+# --------------------------------------------------------------------------- #
+PLAN = "plan"                       # Trade.venue planu w toku (klient go nie widzi)
+LIVE_CZEKAJ = timedelta(hours=2)    # po planowanym zamknięciu: czekamy na ruch, potem większy wolumen
+LIVE_PODDAJ = timedelta(hours=8)    # bez danych tak długo — zamknięcie po staremu (syntetycznie)
+
+
+def _plan_w_toku(tr: Trade | None) -> bool:
+    return tr is not None and tr.venue == PLAN
+
+
+def _zamknij_na_wykresie(session, acc: Account, tr: Trade, pnl: float, now: datetime) -> bool:
+    """Zamyka plan na prawdziwych świecach z wynikiem `pnl`. Najpierw tym samym
+    wolumenem; gdy rynek przez `LIVE_CZEKAJ` nie dał ruchu na plan — większym
+    (do wolnego limitu lotów konta). Po `LIVE_PODDAJ` bez danych: syntetycznie."""
+    plan_koniec = tr.plan_close_at or now
+    po = _naive(now) - _naive(plan_koniec)
+    koniec_tyg = None if tr.symbol in CRYPTO_SYMBOLS else _week_close(tr.opened_at)
+    # Pierwsza próba wychodzi w zaplanowanej chwili (dogrywka tyka co ~20 min,
+    # więc „teraz" bywa po planie); gdy rynek nie dał ruchu, czekamy i okno rośnie do „teraz".
+    wyj = bot_ceny.okno_wyjscia(tr, now, None) if po <= timedelta(minutes=30) else now
+    if koniec_tyg is not None and _naive(wyj) >= _naive(koniec_tyg):
+        wyj = koniec_tyg - timedelta(minutes=1)
+    wolne = None
+    if acc.max_lots and acc.max_lots > 0:
+        # Limit lotów konta minus pozycje z terminala (plan bota sam w nim nie siedzi):
+        # transakcja bota musi się zmieścić w tym, co trader zostawił wolne.
+        miejsce = max(MIN_LOT, math.floor(_wolne_loty(session, acc) * 100) / 100)
+        if (tr.lots or 0.0) > miejsce:
+            tr.lots = miejsce
+        if po > LIVE_CZEKAJ:
+            wolne = miejsce
+    rng = random.Random(f"{acc.bot_seed}:live:{tr.id}")
+    if bot_ceny.zamknij(tr, INSTRUMENTS[tr.symbol], _point_value, pnl, wyj, wolne, rng):
+        return True
+    if po > LIVE_PODDAJ:
+        print(f"[tradebot] {acc.login}: brak świec dla {tr.symbol} od {LIVE_PODDAJ} — zamknięcie syntetyczne", flush=True)
+        tr.venue = None
+        _close_trade(tr, pnl, now)
+        return True
+    return False
 
 
 # --------------------------------------------------------------------------- #
@@ -436,6 +487,10 @@ def stop(session, acc: Account, now: datetime | None = None) -> None:
     widzial juz to equity, wiec balans nie moze sie cofnac."""
     now = now or datetime.now(timezone.utc)
     open_tr = _open_trade(session, acc)
+    if _plan_w_toku(open_tr):
+        # Plan na żywych cenach nie był pokazany i nie ma floatingu — znika bez śladu.
+        session.delete(open_tr)
+        open_tr = None
     if open_tr is not None:
         _close_trade(open_tr, _floating_pnl(open_tr, now, swing_for(acc)), now)
         acc.balance = round((acc.balance or 0.0) + open_tr.pnl, 2)
@@ -626,6 +681,15 @@ def set_target(session, acc: Account, target_pct: float,
 
     if cap is not None:
         open_tr = _open_trade(session, acc)
+        if _plan_w_toku(open_tr) and balance + (open_tr.plan_pnl or 0.0) > cap:
+            # Plan na żywych cenach jest niewidoczny i bez floatingu — przycinamy go
+            # do nowego sufitu (albo zdejmujemy, gdy nie ma już miejsca na zysk).
+            reszta = round(max(0.0, cap - balance), 2)
+            if reszta > MIN_FILL:
+                open_tr.plan_pnl = reszta
+            else:
+                session.delete(open_tr)
+            open_tr = None
         if open_tr is not None and balance + (open_tr.plan_pnl or 0.0) > cap:
             _close_trade(open_tr, _floating_pnl(open_tr, now, swing_for(acc)), now)
             balance = round(balance + open_tr.pnl, 2)
@@ -666,7 +730,14 @@ def tick(session, acc: Account, now: datetime | None = None) -> MarketSnapshot:
     open_tr = _open_trade(session, acc)
 
     if open_tr is not None:
-        if open_tr.plan_close_at is not None and _naive(now) >= _naive(open_tr.plan_close_at):
+        if _plan_w_toku(open_tr) and open_tr.plan_close_at is not None and _naive(now) >= _naive(open_tr.plan_close_at):
+            # Żywe ceny: transakcja powstaje dopiero teraz — wejście i wyjście
+            # z prawdziwego wykresu, wynik z planu. Bez danych/ruchu plan czeka.
+            if _zamknij_na_wykresie(session, acc, open_tr, open_tr.plan_pnl, now):
+                balance = round(balance + open_tr.pnl, 2)
+                session.flush()
+                open_tr = None
+        elif open_tr.plan_close_at is not None and _naive(now) >= _naive(open_tr.plan_close_at):
             # Balans dopisujemy z `tr.pnl` PO zamknieciu, bo tam siedzi kwota
             # przeliczona z zaokraglonej ceny — inaczej tabela nie zgadzalaby sie
             # o kilka groszy z krzywa balansu.
@@ -687,7 +758,9 @@ def tick(session, acc: Account, now: datetime | None = None) -> MarketSnapshot:
         open_tr = _open_new(session, acc, p, balance, now)
 
     floating = round(_floating_pnl(open_tr, now, swing_for(acc)), 2) if open_tr is not None else 0.0
-    lots = open_tr.lots if open_tr is not None else 0.0
+    # Plan na żywych cenach nie wchodzi do wolumenu reguł: trader go nie widzi, więc
+    # nie może przez niego wpaść w limit lotów. Dzień handlowy liczy się normalnie.
+    lots = open_tr.lots if open_tr is not None and not _plan_w_toku(open_tr) else 0.0
     return MarketSnapshot(
         balance=round(balance, 2),
         equity=round(balance + floating, 2),
@@ -700,7 +773,11 @@ def tick(session, acc: Account, now: datetime | None = None) -> MarketSnapshot:
 
 def _floating_pnl(tr: Trade, now: datetime, swing: float = SWING_DOMYSLNY) -> float:
     """P&L otwartej pozycji: gladkie dojscie do zaplanowanego wyniku plus szum,
-    ktory wygasa do zera na zamknieciu (krzywa nie ma skoku przy realizacji)."""
+    ktory wygasa do zera na zamknieciu (krzywa nie ma skoku przy realizacji).
+    Plan na żywych cenach nie ma floatingu: klient nie widzi pozycji, więc
+    equity = saldo, a wynik wchodzi w całości przy zamknięciu."""
+    if _plan_w_toku(tr):
+        return 0.0
     if tr.plan_close_at is None:
         return tr.pnl or 0.0
     span = (_naive(tr.plan_close_at) - _naive(tr.opened_at)).total_seconds()
@@ -970,6 +1047,8 @@ def _open_new(session, acc: Account, p: Persona, balance: float, now: datetime) 
         open_price=open_price, pnl=0.0, opened_at=now, status="open", source="bot",
         plan_pnl=round(plan_pnl, 2),
         plan_close_at=close_at,
+        # Żywe ceny: to dopiero plan (strona i ceny ustalą się przy zamknięciu, z wykresu).
+        venue=PLAN if (bot_ceny.wlaczone() and bot_ceny.rynek(symbol)) else None,
     )
     session.add(tr)
     session.flush()   # nadaje tr.id — potrzebne fazie szumu floatingu
