@@ -282,6 +282,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "terminal_used": "BOOLEAN DEFAULT FALSE",
         "terminal_open": "BOOLEAN DEFAULT FALSE",
         "terminal_sync_at": "TIMESTAMP",
+        "terminal_candle_at": "TIMESTAMP",
         "terminal_eval_at": "TIMESTAMP",
     },
     # Pozycje z terminala PTF dzielą tabelę z Trade BOT-em (portal czyta jedną).

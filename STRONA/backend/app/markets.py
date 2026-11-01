@@ -74,6 +74,28 @@ MARKETS: list[Market] = [
            quote_inverse=True, base="USD"),
 ]
 BY_SYM: dict[str, Market] = {m.sym: m for m in MARKETS}
+
+# Dźwignia w terminalu = to, co PTF obiecuje na stronie („Up to 1:100"): maksimum
+# to forex i musi się równać dźwigni, z jaką provisioning zakłada konta MT5
+# (METAQUOTES_WEB_LEVERAGE / METAAPI_DEMO_LEVERAGE) — pilnuje tego test.
+MAX_LEVERAGE = max(m.max_lev for m in MARKETS)
+_KLASY = (("fx", "Forex"), ("metal", "Metals"), ("index", "Indices"), ("energy", "Energy"), ("crypto", "Crypto"))
+
+
+def leverage_text() -> str:
+    """Dźwignia per klasa rynku do opublikowania na stronach PTF, liczona z tej
+    samej listy, którą stosuje terminal: „Forex 1:100 · Metals and indices 1:50 · …"."""
+    grupy: dict[str, list[str]] = {}
+    for cls, nazwa in _KLASY:
+        levs = sorted({m.max_lev for m in MARKETS if m.cls == cls})
+        if levs:
+            wart = f"1:{levs[0]}" if len(levs) == 1 else f"1:{levs[0]}–1:{levs[-1]}"
+            grupy.setdefault(wart, []).append(nazwa)
+    out = []
+    for wart, nazwy in grupy.items():
+        nazwa = nazwy[0] if len(nazwy) == 1 else ", ".join(nazwy[:-1]) + " and " + nazwy[-1].lower()
+        out.append(f"{nazwa} {wart}")
+    return " · ".join(out)
 BY_COIN: dict[str, Market] = {m.hl: m for m in MARKETS}
 
 
@@ -117,10 +139,28 @@ def _http() -> httpx.Client:
     return _client
 
 
+_AWARIA_DO = 0.0     # monotonic: do kiedy po błędzie nie pytamy (bezpiecznik)
+_AWARIA_S = 5.0
+
+
 def _post(body: dict):
-    r = _http().post(HL_INFO, json=body)
-    r.raise_for_status()
-    return r.json()
+    """Zapytanie do Hyperliquid z bezpiecznikiem: po błędzie przez kilka sekund
+    od razu zgłaszamy awarię. Jeden request terminala pyta HL kilka razy, a każde
+    zapytanie przy awarii czekałoby do 7 s — razem ponad limit funkcji na Vercelu."""
+    global _AWARIA_DO
+    if time.monotonic() < _AWARIA_DO:
+        raise RuntimeError("Hyperliquid unavailable (retrying shortly)")
+    try:
+        r = _http().post(HL_INFO, json=body)
+        r.raise_for_status()
+        return r.json()
+    except httpx.TransportError:
+        _AWARIA_DO = time.monotonic() + _AWARIA_S
+        raise
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code >= 500 or e.response.status_code == 429:
+            _AWARIA_DO = time.monotonic() + _AWARIA_S
+        raise
 
 
 _MIDS_CACHE: dict[str, tuple[float, dict]] = {}

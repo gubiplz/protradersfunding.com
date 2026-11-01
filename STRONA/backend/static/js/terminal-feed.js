@@ -88,14 +88,17 @@
       },
     });
     function ping() { pingAt = Date.now(); s.send({ method: 'ping' }); }
-    setInterval(ping, 10000);
+    setInterval(() => { if (!document.hidden) ping(); }, 10000);   // opóźnienie tylko dla widocznej karty
     function sub(subscription, match, cb) {
       const k = key(subscription) + Math.random();
       subs.set(k, { sub: subscription, match, cb });
       s.send({ method: 'subscribe', subscription });
       return () => { subs.delete(k); if (![...subs.values()].some((x) => key(x.sub) === key(subscription))) s.send({ method: 'unsubscribe', subscription }); };
     }
-    return { sub, onLatency: (f) => { latCbs.push(f); if (lat != null) f(lat); }, onState: (f) => { stCbs.push(f); f(state.v); } };
+    // onState oddaje funkcję wypisania: strumień rynku rejestruje się przy każdej
+    // zmianie rynku/giełdy, a stare wywołania ustawiałyby status innej giełdy.
+    const onState = (f) => { stCbs.push(f); f(state.v); return () => { const i = stCbs.indexOf(f); if (i >= 0) stCbs.splice(i, 1); }; };
+    return { sub, onLatency: (f) => { latCbs.push(f); if (lat != null) f(lat); }, onState };
   })();
 
   /* Wszystkie midy (pasek tickerów, wyszukiwarka): główna giełda + HIP-3 xyz. */
@@ -126,8 +129,14 @@
     return streamHl(m, interval, h);
   }
 
+  /* Każdy strumień ma `interval(i)`: zmiana interwału podmienia tylko świece —
+     księga i transakcje płyną dalej bez ponownego łączenia. */
   function streamHl(m, interval, h) {
     const c = m.hl;
+    const candles = (i) => hl.sub({ type: 'candle', coin: c, interval: i }, (d) => d.channel === 'candle' && d.data.s === c && d.data.i === i, (k) => {
+      h.candle({ timestamp: k.t, open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v });
+    });
+    let offCandles = candles(interval);
     const off = [
       hl.sub({ type: 'l2Book', coin: c }, (d) => d.channel === 'l2Book' && d.data.coin === c, (d) => {
         const lv = d.levels || [[], []];
@@ -136,17 +145,17 @@
       hl.sub({ type: 'trades', coin: c }, (d) => d.channel === 'trades' && d.data[0] && d.data[0].coin === c, (d) => {
         h.trades(d.map((t) => ({ px: +t.px, sz: +t.sz, side: t.side === 'B' ? 'buy' : 'sell', t: t.time })));
       }),
-      hl.sub({ type: 'candle', coin: c, interval }, (d) => d.channel === 'candle' && d.data.s === c && d.data.i === interval, (k) => {
-        h.candle({ timestamp: k.t, open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v });
-      }),
       hl.sub({ type: 'activeAssetCtx', coin: c }, (d) => (d.channel === 'activeAssetCtx' || d.channel === 'activeSpotAssetCtx') && d.data.coin === c, (d) => {
         const x = d.ctx || {};
         const mark = num(x.markPx), prev = num(x.prevDayPx);
         h.ticker({ mark, mid: num(x.midPx), chg: prev ? (mark / prev - 1) * 100 : null, oiUsd: num(x.openInterest) * mark, vol: num(x.dayNtlVlm), funding: num(x.funding) });
       }),
+      hl.onState(h.status || (() => {})),
     ];
-    hl.onState(h.status || (() => {}));
-    return { close: () => off.forEach((f) => f()) };
+    return {
+      close: () => { off.forEach((f) => f()); offCandles(); },
+      interval: (i) => { offCandles(); offCandles = candles(i); },
+    };
   }
 
   function streamBinance(m, interval, h) {
@@ -159,19 +168,26 @@
         if (x && x.e === 'depthUpdate') h.book(x.b.map((v) => [+v[0], +v[1]]), x.a.map((v) => [+v[0], +v[1]]));
       },
     });
-    const mkt = socket(BN_MKT + [`${s}@aggTrade`, `${s}@kline_${interval}`, `${s}@ticker`, `${s}@markPrice@1s`].join('/'), {
+    const mkt = socket(BN_MKT + [`${s}@aggTrade`, `${s}@ticker`, `${s}@markPrice@1s`].join('/'), {
       onmessage: (d) => {
         const x = d.data || {};
         if (x.e === 'aggTrade') h.trades([{ px: +x.p, sz: +x.q, side: x.m ? 'sell' : 'buy', t: x.T }]);
-        else if (x.e === 'kline') { const k = x.k; h.candle({ timestamp: k.t, open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v }); }
         else if (x.e === '24hrTicker') { last = { ...last, chg: +x.P, vol: +x.q, lastPx: +x.c }; h.ticker({ ...last }); }
         else if (x.e === 'markPriceUpdate') { last = { ...last, mark: +x.p, funding: +x.r }; if (last.oi) last.oiUsd = last.oi * last.mark; h.ticker({ ...last }); }
       },
     });
+    // Świece osobnym gniazdem: zmiana interwału łączy od nowa tylko je.
+    const klines = (i) => socket(BN_MKT + `${s}@kline_${i}`, {
+      onmessage: (d) => { const x = d.data || {}; if (x.e === 'kline') { const k = x.k; h.candle({ timestamp: k.t, open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v }); } },
+    });
+    let kl = klines(interval);
     const oi = () => getJ(`${BN_REST}/fapi/v1/openInterest?symbol=${m.bn}`).then((d) => { last.oi = +d.openInterest; if (last.mark) { last.oiUsd = last.oi * last.mark; h.ticker({ ...last }); } }).catch(() => {});
     oi();
-    const t = setInterval(oi, 30000);
-    return { close: () => { pub.close(); mkt.close(); clearInterval(t); } };
+    const t = setInterval(() => { if (!document.hidden) oi(); }, 30000);
+    return {
+      close: () => { pub.close(); mkt.close(); kl.close(); clearInterval(t); },
+      interval: (i) => { kl.close(); kl = klines(i); },
+    };
   }
 
   function streamBybit(m, interval, h) {
@@ -183,11 +199,11 @@
       const a = [...asks].map(([p, q]) => [+p, q]).sort((x, y) => x[0] - y[0]).slice(0, 25);
       h.book(b, a);
     };
-    let ping;
+    let ping, kInt = interval;
     const s = socket(BY_WS, {
       onstate: h.status,
       onopen: (ws) => {
-        ws.send(JSON.stringify({ op: 'subscribe', args: [`orderbook.50.${sym}`, `publicTrade.${sym}`, `kline.${BY_INT[interval]}.${sym}`, `tickers.${sym}`] }));
+        ws.send(JSON.stringify({ op: 'subscribe', args: [`orderbook.50.${sym}`, `publicTrade.${sym}`, `kline.${BY_INT[kInt]}.${sym}`, `tickers.${sym}`] }));
         clearInterval(ping); ping = setInterval(() => s.send({ op: 'ping' }), 20000);
       },
       onmessage: (d) => {
@@ -200,7 +216,7 @@
           emitBook();
         } else if (tp.startsWith('publicTrade.')) {
           h.trades(d.data.map((t) => ({ px: +t.p, sz: +t.v, side: t.S === 'Buy' ? 'buy' : 'sell', t: t.T })));
-        } else if (tp.startsWith('kline.')) {
+        } else if (tp === `kline.${BY_INT[kInt]}.${sym}`) {      // spóźnione świece starego interwału odpadają
           d.data.forEach((k) => h.candle({ timestamp: +k.start, open: +k.open, high: +k.high, low: +k.low, close: +k.close, volume: +k.volume }));
         } else if (tp.startsWith('tickers.')) {
           const x = d.data;
@@ -209,7 +225,14 @@
         }
       },
     });
-    return { close: () => { clearInterval(ping); s.close(); } };
+    return {
+      close: () => { clearInterval(ping); s.close(); },
+      interval: (i) => {
+        s.send({ op: 'unsubscribe', args: [`kline.${BY_INT[kInt]}.${sym}`] });
+        kInt = i;
+        s.send({ op: 'subscribe', args: [`kline.${BY_INT[kInt]}.${sym}`] });
+      },
+    };
   }
 
   window.PTFeed = { VENUES, venuesFor, history, stream, allMids, contexts, onLatency: hl.onLatency, onHlState: hl.onState, MS };

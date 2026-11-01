@@ -4322,7 +4322,7 @@ async function openAcc(id){
         ${credCell('Server',a.platform_server)}
         ${credCell('Login',a.platform_login)}
         ${a.platform_password?credCell('Password',a.platform_password):''}
-        <div class="cred-cell"><div class="l">Leverage</div><div class="v">1:100</div></div>
+        <div class="cred-cell"><div class="l">Leverage</div><div class="v" title="Forex 1:100, lower on metals, indices, energy and crypto">Up to 1:100</div></div>
       </div>
       ${(!a.platform_password)?'<div class="creds-wait"><span class="spin"></span> Setting up your trading account: server, login and password appear here in a moment.</div>':''}
     </div>

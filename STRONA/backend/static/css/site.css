@@ -352,6 +352,9 @@ table.obj tr:hover td{background:#fafbff}
   padding:11px 0;border-bottom:1px solid var(--line);font-size:13.5px}
 .prule:last-child{border-bottom:0}
 .prule span{color:var(--muted)}
+/* „Leverage": maksimum + dźwignia per klasa rynku (z listy rynków terminala) */
+.lev-abbr{text-decoration:underline dotted var(--dim);text-underline-offset:3px;cursor:help}
+.lev-by{display:block;margin-top:3px;font-size:12px;font-weight:400;color:var(--muted);line-height:1.4}
 .prule b{font-weight:600;text-align:right}
 .prule .ok{color:var(--green)}
 .prules-fine{font-size:11px;color:var(--dim);margin-top:14px}
@@ -525,13 +528,6 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
 .asset[data-c=metal]{--c:#d4a537}
 .asset[data-c=energy]{--c:#f08a3c}
 .asset[data-c=crypto]{--c:#16b8a6}
-.assets-all{margin-top:28px;padding:26px 28px;border-radius:20px;background:var(--panel);border:1px solid var(--line);
-  display:grid;grid-template-columns:repeat(5,1fr);gap:18px}
-.assets-all[hidden]{display:none}
-.assets-group h4{font-family:var(--display);font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:8px}
-.assets-group span{display:block;font-family:var(--mono);font-size:13px;color:var(--txt);padding:3px 0}
-.assets-note{grid-column:1/-1;margin:4px 0 0;font-size:12.5px;color:var(--muted)}
-.assets-note a{color:var(--acc);text-decoration:underline;text-underline-offset:2px}
 @media(prefers-reduced-motion:reduce){
   .assets-track{animation:none}
   .assets-row{overflow-x:auto;scrollbar-width:none}
@@ -547,7 +543,6 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
   .asset .ic.pair img{width:38px;height:38px}
   .asset .ic.metal,.asset .ic.energy{width:50px;height:50px}
   .asset .ic svg{width:32px;height:32px}
-  .assets-all{grid-template-columns:repeat(2,1fr);padding:20px}
   .assets-track{animation-duration:45s}
 }
 

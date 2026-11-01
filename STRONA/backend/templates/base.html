@@ -45,7 +45,7 @@ if(localStorage.getItem('pf_promo_code')||localStorage.getItem('pf_coupon_code')
 }catch(e){}
 </script>{% endif %}
 </head>
-<body data-payout-days="{{ payout_days or 0 }}">
+<body data-payout-days="{{ payout_days or 0 }}" data-leverage-max="{{ leverage_max or 100 }}" data-leverage="{{ leverage_text or '' }}">
 
 {% if bogo_promo %}
 {# BOGO wins over the code promo — one bar, one message. No form and no code:

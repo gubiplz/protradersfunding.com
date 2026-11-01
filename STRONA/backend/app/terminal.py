@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import os
+import time
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -89,6 +91,7 @@ def market_closed(m: Market, acc: Account, now: datetime | None = None) -> str |
 
 
 _ZAMROZONE: dict[tuple[str, int], float] = {}
+_ZAMROZONE_BLAD: dict[tuple[str, int], float] = {}   # klucz → kiedy (monotonic) ostatnio się nie udało
 
 
 def _cena_weekendowa(coin: str, now: datetime) -> float | None:
@@ -99,11 +102,16 @@ def _cena_weekendowa(coin: str, now: datetime) -> float | None:
         koniec -= 7 * 86_400_000
     klucz = (coin, koniec)
     if klucz not in _ZAMROZONE:
+        # Nieudane pobranie pamiętamy przez minutę: przegląd pyta o tę cenę
+        # w każdej minucie okna, a bez tego awaria to tysiące zapytań w jednym requeście.
+        if time.monotonic() - _ZAMROZONE_BLAD.get(klucz, -1e9) < 60:
+            return None
         try:
             sw = markets.candles_1m(coin, koniec - 30 * 60_000, koniec - 1)
         except Exception:
-            return None
+            sw = None
         if not sw:
+            _ZAMROZONE_BLAD[klucz] = time.monotonic()
             return None
         _ZAMROZONE[klucz] = sw[-1]["c"]
     return _ZAMROZONE[klucz]
@@ -133,12 +141,17 @@ def _open_orders(session, acc: Account) -> list[TerminalOrder]:
             .order_by(TerminalOrder.id).all())
 
 
-def _inne_otwarte_pnl(session, acc: Account) -> float:
-    """Floating pozycji spoza terminala (Trade BOT) — też siedzi w equity."""
-    rows = (session.query(Trade)
+def _inne_otwarte(session, acc: Account) -> tuple[float, float]:
+    """(floating, loty) pozycji spoza terminala (Trade BOT): floating siedzi w equity,
+    loty w tym samym limicie ekspozycji konta."""
+    rows = (session.query(Trade.pnl, Trade.lots)
             .filter(Trade.account_id == acc.id, Trade.status == "open", Trade.source != "terminal")
             .all())
-    return sum(float(t.pnl or 0.0) for t in rows)
+    return sum(float(p or 0.0) for p, _ in rows), sum(float(lt or 0.0) for _, lt in rows)
+
+
+def _inne_otwarte_pnl(session, acc: Account) -> float:
+    return _inne_otwarte(session, acc)[0]
 
 
 def _marks(session, acc: Account, poz: list[Trade], now: datetime) -> dict[str, float]:
@@ -177,12 +190,13 @@ def account_figures(session, acc: Account, poz: list[Trade], marks: dict[str, fl
         floating += float(t.pnl or 0.0)
         margin += float(t.margin or 0.0)
         lots += markets.lots(m, t.qty or 0.0)
-    inne = _inne_otwarte_pnl(session, acc)
+    inne, inne_loty = _inne_otwarte(session, acc)
     balance = float(acc.balance or acc.initial_balance or 0.0)
     equity = balance + floating + inne
     return {"balance": round(balance, 2), "floating": round(floating, 2), "other_floating": round(inne, 2),
             "equity": round(equity, 2), "margin_used": round(margin, 2),
-            "available": round(max(0.0, equity - margin), 2), "open_lots": round(lots, 4)}
+            "available": round(max(0.0, equity - margin), 2), "open_lots": round(lots, 4),
+            "other_lots": round(inne_loty, 4)}
 
 
 # --------------------------------------------------------------------------- #
@@ -309,14 +323,20 @@ def _check_open(session, acc: Account, m: Market, side: str, qty: float, px: flo
         return
     marks = _marks(session, acc, poz, _now())
     fig = account_figures(session, acc, poz, marks)
+    wolne, loty = fig["available"], fig["open_lots"] + fig["other_lots"]   # limit wspólny z Trade BOT-em
+    if istn is not None and istn.side != side:
+        # Odwrócenie: stara pozycja najpierw się zamyka, więc jej marża i loty
+        # się zwalniają — inaczej 6 lotów long → 6 short odbijało się od limitu.
+        wolne += float(istn.margin or 0.0)      # jej P&L już siedzi w equity
+        loty = max(0.0, loty - markets.lots(m, istn.qty or 0.0))
     potrzeba = markets.notional_usd(m, przyrost, px) / lev * (1 + FEE_PCT * lev)
-    if potrzeba > fig["available"] + 0.01:
+    if potrzeba > wolne + 0.01:
         raise HTTPException(409, f"Not enough available margin: this order needs ${potrzeba:,.2f}, "
-                                 f"you have ${fig['available']:,.2f}.")
+                                 f"you have ${max(0.0, wolne):,.2f}.")
     limit = float(acc.max_lots or catalog.max_lots_for(acc.initial_balance or 0.0))
-    if limit > 0 and fig["open_lots"] + markets.lots(m, przyrost) > limit + 1e-9:
+    if limit > 0 and loty + markets.lots(m, przyrost) > limit + 1e-9:
         raise HTTPException(409, f"Exposure cap: {limit:g} lots open in total on this account "
-                                 f"(you have {fig['open_lots']:.2f}).")
+                                 f"(you have {loty:.2f}).")
 
 
 def _tp_sl_ok(side: str, ref: float, tp: float | None, sl: float | None) -> None:
@@ -377,32 +397,44 @@ def _wypelnij_oczekujace(session, acc: Account, z: TerminalOrder, px: float, whe
     z.trade_id = pos.id if pos is not None else None
 
 
-def sync(session, acc: Account, now: datetime | None = None) -> tuple[list[Trade], dict[str, float], float | None]:
+def sync(session, acc: Account, now: datetime | None = None,
+         dokladnie: bool = False) -> tuple[list[Trade], dict[str, float], float | None]:
     """Rozstrzyga wszystko, co wydarzyło się od ostatniego przeglądu.
 
     Zwraca (otwarte pozycje, ceny wyceny, najniższe equity w oknie albo None).
     Najniższe equity liczymy z ekstremów świec po stronie niekorzystnej — reguły
     sprawdzają je osobno, bo dzienna strata liczy się w każdej minucie, a nie
     tylko w chwili, w której ktoś akurat otworzył stronę.
+
+    Świece 1m idą od `terminal_candle_at` (ostatni PEŁNY przegląd świecami), nie
+    od ostatniego midu: przy odświeżaniu co kilkanaście sekund knot między
+    odczytami inaczej nigdy nie trafiłby na SL, limit ani dołek equity. Znacznik
+    rusza się tylko wtedy, gdy świece wszystkich rynków przyszły — awaria
+    Hyperliquid nie gubi okna, następny przegląd je powtórzy. `dokladnie`
+    (akcje tradera) pobiera świece zawsze: zanim ktoś przesunie SL albo zamknie
+    pozycję, sprawdzamy, czy rynek już jej nie zamknął.
     """
     now = now or _now()
     poz = _open_positions(session, acc)
     zlec = _open_orders(session, acc)
     if not poz and not zlec:
         acc.terminal_open = False
-        acc.terminal_sync_at = now
+        acc.terminal_sync_at = acc.terminal_candle_at = now
         return [], {}, None
     teraz_ms = _ms(now)
     pocz = acc.terminal_sync_at or min([t.opened_at for t in poz] + [z.created_at for z in zlec])
-    start_ms = max(_ms(pocz) - 60_000, teraz_ms - MAX_WINDOW_MS)
+    od_swiec = min(_ms(acc.terminal_candle_at or pocz), _ms(pocz))
+    start_ms = max(od_swiec - 60_000, teraz_ms - MAX_WINDOW_MS)
     coins = {markets.get(s).hl for s in {t.symbol for t in poz} | {z.symbol for z in zlec} if markets.get(s)}
 
     swiece: dict[str, dict[int, dict]] = {}
-    if teraz_ms - _ms(pocz) > CANDLE_GAP_S * 1000:
+    swiece_ok = dokladnie or teraz_ms - od_swiec > CANDLE_GAP_S * 1000
+    if swiece_ok:
         for coin in coins:
             try:
                 swiece[coin] = {c["t"]: c for c in markets.candles_1m(coin, start_ms, teraz_ms)}
             except Exception as e:  # pragma: no cover - siec
+                swiece_ok = False
                 print(f"[terminal] świece {coin}: {e}", flush=True)
     try:
         mids = markets.mids(coins)
@@ -414,8 +446,12 @@ def sync(session, acc: Account, now: datetime | None = None) -> tuple[list[Trade
         swiece.setdefault(coin, {})[teraz_ms - 1] = {"t": teraz_ms - 1, "o": px, "h": px, "l": px, "c": px}
 
     najnizsze: float | None = None
-    ostatnia: dict[str, float] = {}
+    # Cena startowa każdego rynku: otwarcie pierwszej świecy okna. Bez niej
+    # pozycja na rynku, który akurat nie miał świecy w danej minucie, wypadałaby
+    # z equity — i dołek wychodził niższy (albo wyższy), niż był naprawdę.
+    ostatnia: dict[str, float] = {coin: sw[min(sw)]["o"] for coin, sw in swiece.items() if sw}
     inne = _inne_otwarte_pnl(session, acc)
+    weekend_bez_dodatku = not bool(getattr(acc, "weekend_trading", False))
     # Listy w pamięci: zapytanie do bazy tylko po zdarzeniu (okno ma do 4800 minut).
     zl_lista = zlec
     for t in sorted({t for sw in swiece.values() for t in sw}):
@@ -431,8 +467,13 @@ def sync(session, acc: Account, now: datetime | None = None) -> tuple[list[Trade
             ostatnia[coin] = c["c"]
             if _zamrozony(m, t):
                 continue
+            # Krypto w weekend tylko z dodatkiem: oczekujące zlecenie, które coś
+            # otwiera, czeka do poniedziałku (tak jak przy składaniu zlecenia).
+            tylko_redukcja = m.cls == "crypto" and weekend_bez_dodatku and tradebot.is_weekend(_dt(t))
             for z in zl_lista:
                 if z.status == "open" and z.symbol == m.sym and _ms(z.created_at) < t:
+                    if tylko_redukcja and not z.reduce_only:
+                        continue
                     px = _wyzwolenie_zlecenia(z, c)
                     if px is not None:
                         _wypelnij_oczekujace(session, acc, z, px, kiedy)
@@ -456,8 +497,13 @@ def sync(session, acc: Account, now: datetime | None = None) -> tuple[list[Trade
         ruch = 0.0
         for pos in poz:
             m = markets.get(pos.symbol)
+            # Pozycja otwarta w tej minucie albo później: ekstremum mogło być
+            # przed wejściem, więc nie liczymy go jako jej straty.
+            if t != teraz_ms - 1 and _ms(pos.opened_at) >= t:
+                continue
             c = swiece.get(m.hl, {}).get(t) if m else None
             if m is None or (c is None and m.hl not in ostatnia):
+                ruch += float(pos.pnl or 0.0)     # brak ceny z okna: ostatnia znana wycena
                 continue
             if _zamrozony(m, t):
                 px = _cena_weekendowa(m.hl, now) or ostatnia.get(m.hl)
@@ -473,6 +519,8 @@ def sync(session, acc: Account, now: datetime | None = None) -> tuple[list[Trade
     poz = _open_positions(session, acc)
     acc.terminal_open = bool(poz or _open_orders(session, acc))
     acc.terminal_sync_at = now
+    if swiece_ok:
+        acc.terminal_candle_at = now
     marks = _marks(session, acc, poz, now)
     if poz and stop_out_due(account_figures(session, acc, poz, marks)):
         # Marża wspólna dla konta: zamykamy wszystko po bieżących cenach (MT5
@@ -515,6 +563,18 @@ def snapshot_for(session, acc: Account, bot_snap: MarketSnapshot | None) -> tupl
     return snap, najnizsze
 
 
+def _cena_z_wyceny(pos: Trade) -> float:
+    """Cena, przy której pozycja miała ostatnio zapisany P&L (odwrotność `markets.pnl_usd`)."""
+    m = markets.get(pos.symbol)
+    q, e, pnl = float(pos.qty or 0.0), float(pos.open_price or 0.0), float(pos.pnl or 0.0)
+    if m is None or q <= 0 or not e:
+        return e
+    if m.quote_inverse:
+        mian = q - pnl if pos.side == "buy" else q + pnl
+        return q * e / mian if mian > 0 else e
+    return e + pnl / q if pos.side == "buy" else e - pnl / q
+
+
 def flatten(session, acc: Account, reason: str, cancel_orders: bool = True) -> int:
     """Zamyka wszystko po bieżących cenach; przy breachu anuluje też zlecenia
     (stop-out ich nie rusza — konto dalej handluje)."""
@@ -525,7 +585,9 @@ def flatten(session, acc: Account, reason: str, cancel_orders: bool = True) -> i
     for pos in poz:
         px = marks.get(pos.symbol)
         if px is None:
-            continue
+            # Bez ceny z rynku zamykamy po ostatniej wycenie pozycji: na koncie
+            # po breachu nikt już jej nie zamknie, a otwarta dalej ruszałaby saldo.
+            px = _cena_z_wyceny(pos)
         _close_part(session, acc, pos, pos.qty or 0.0, px, reason, now)
         n += 1
     if cancel_orders:
@@ -561,6 +623,28 @@ class Who:
 
 def who(request: Request, authorization: str | None = Header(default=None)) -> Who:
     return Who(auth.current_trader(request, authorization).id)
+
+
+_TEMPO: dict[int, list[float]] = {}
+_TEMPO_OFF = os.getenv("RATE_LIMIT_OFF", "false").lower() == "true"
+TEMPO_LIMIT, TEMPO_OKNO_S = 20, 10
+
+
+def who_trade(request: Request, authorization: str | None = Header(default=None)) -> Who:
+    """Jak `who`, ale dla zleceń i zamknięć: nie w podglądzie admina „jako klient"
+    (tam handel byłby na cudzym koncie) i z limitem tempa na tradera — każde
+    zlecenie to zapytanie do Hyperliquid i pełna ocena reguł."""
+    w = who(request, authorization)
+    if getattr(request.state, "impersonated", False):
+        raise HTTPException(403, "Trading is off while viewing the portal as a client.")
+    if not _TEMPO_OFF:
+        teraz = time.monotonic()
+        ost = [t for t in _TEMPO.get(w.trader_id, []) if teraz - t < TEMPO_OKNO_S]
+        if len(ost) >= TEMPO_LIMIT:
+            raise HTTPException(429, "Too many requests. Wait a few seconds and try again.")
+        ost.append(teraz)
+        _TEMPO[w.trader_id] = ost
+    return w
 
 
 def _konto(session, w: Who, account_id: int | None) -> Account:
@@ -661,6 +745,16 @@ def _ocen(session, acc: Account) -> None:
     asyncio.run(poller.process_account(session, acc, NullFeed()))
 
 
+def _zapisz_i_odmow(session, acc: Account, kod: int, tekst: str):
+    """Przegląd przed akcją coś rozstrzygnął (SL, wypełnienie), więc akcja nie ma
+    już sensu — ale wynik przeglądu zapisujemy i oceniamy, zamiast cofać go wyjątkiem."""
+    session.flush()
+    if acc.terminal_used:
+        _ocen(session, acc)
+    session.commit()
+    raise HTTPException(kod, tekst)
+
+
 def _z_ponowieniem(fn):
     """Blokada optymistyczna konta: przy kolizji jedna powtórka na świeżych danych."""
     for proba in (1, 2):
@@ -720,22 +814,27 @@ def api_state(account_id: int | None = None, w: Who = Depends(who)):
     return _z_ponowieniem(run)
 
 
+# Liczby z JSON-a: bez Infinity/NaN (json.loads je przepuszcza, a NaN w saldzie
+# psuje każdy kolejny /state) i z rozsądnym sufitem.
+_LICZBA = dict(allow_inf_nan=False, lt=1e12)
+
+
 class OrderIn(BaseModel):
     account_id: int | None = None
     symbol: str
     side: str = Field(pattern="^(buy|sell)$")
     kind: str = Field(default="market", pattern="^(market|limit|stop)$")
-    qty: float = Field(gt=0)
-    price: float | None = Field(default=None, gt=0)
+    qty: float = Field(gt=0, **_LICZBA)
+    price: float | None = Field(default=None, gt=0, **_LICZBA)
     leverage: float | None = None      # ignorowane: dźwignia jest z góry ustalona dla rynku
-    tp: float | None = Field(default=None, ge=0)
-    sl: float | None = Field(default=None, ge=0)
+    tp: float | None = Field(default=None, ge=0, **_LICZBA)
+    sl: float | None = Field(default=None, ge=0, **_LICZBA)
     reduce_only: bool = False
-    max_slippage_pct: float = Field(default=MAX_SLIPPAGE * 100, gt=0, le=10)
+    max_slippage_pct: float = Field(default=MAX_SLIPPAGE * 100, gt=0, le=10, allow_inf_nan=False)
 
 
 @router.post("/orders")
-def api_order(payload: OrderIn, w: Who = Depends(who)):
+def api_order(payload: OrderIn, w: Who = Depends(who_trade)):
     m = markets.get(payload.symbol)
     if m is None:
         raise HTTPException(404, "Unknown market")
@@ -748,9 +847,14 @@ def api_order(payload: OrderIn, w: Who = Depends(who)):
         powod = _blokada_handlu(acc)
         if powod:
             raise HTTPException(409, powod)
-        if acc.terminal_open:
-            sync(session, acc)
+        bylo_otwarte = bool(acc.terminal_open)
+        if bylo_otwarte:
+            sync(session, acc, dokladnie=True)
         teraz = _now()
+        if payload.kind == "market" and _zamrozony(m, _ms(teraz)):
+            # W weekend pozycję na tym rynku zamyka tylko „Close" — po cenie z piątku.
+            # Zlecenie rynkowe wypełniłoby się po żywej księdze Hyperliquid.
+            raise HTTPException(409, "Market closed for the weekend. Close the position from the Positions tab.")
         pos = next((t for t in _open_positions(session, acc) if t.symbol == m.sym), None)
         zmniejsza = pos is not None and pos.side != payload.side and payload.qty <= (pos.qty or 0) + EPS
         if not (payload.reduce_only or zmniejsza):
@@ -758,6 +862,12 @@ def api_order(payload: OrderIn, w: Who = Depends(who)):
             if zamk:
                 raise HTTPException(409, zamk)
         qty = round(payload.qty, m.qty_dec + 3)
+        if payload.reduce_only and pos is not None and pos.side != payload.side:
+            qty = min(qty, pos.qty or 0.0)      # poślizg liczony na tym, co naprawdę się zamknie
+        krok = 10 ** -m.qty_dec
+        if qty < krok - EPS:
+            raise HTTPException(400, f"Minimum size on {m.sym} is {krok:g} {m.base} "
+                                     f"({markets.lots(m, krok):g} lots).")
         if payload.kind == "market":
             vwap, mid, slip = _vwap(m, payload.side, qty, payload.max_slippage_pct / 100)
             _tp_sl_ok(payload.side, vwap, tp, sl)
@@ -795,7 +905,10 @@ def api_order(payload: OrderIn, w: Who = Depends(who)):
                                       reduce_only=payload.reduce_only, created_at=teraz))
         acc.terminal_used = True
         acc.terminal_open = True
-        acc.terminal_sync_at = acc.terminal_sync_at or teraz
+        if not bylo_otwarte:
+            # Nic nie było otwarte, więc nie ma czego przeglądać wstecz. Stary
+            # znacznik kazałby przeglądowi wycenić nową pozycję na świecach sprzed jej otwarcia.
+            acc.terminal_sync_at = acc.terminal_candle_at = teraz
         session.flush()
         _ocen(session, acc)
         session.commit()
@@ -806,12 +919,19 @@ def api_order(payload: OrderIn, w: Who = Depends(who)):
 
 
 @router.delete("/orders/{order_id}")
-def api_cancel(order_id: int, account_id: int | None = None, w: Who = Depends(who)):
+def api_cancel(order_id: int, account_id: int | None = None, w: Who = Depends(who_trade)):
     def run(session):
         acc = _konto(session, w, account_id)
+        # Najpierw przegląd: zlecenie, które rynek już przeciął, jest wypełnione,
+        # a nie do anulowania. Przegląd zapisuje też konto (row_version), więc
+        # równoległe wypełnienie i anulowanie nie nadpiszą się po cichu.
+        if acc.terminal_open:
+            sync(session, acc, dokladnie=True)
         z = session.get(TerminalOrder, order_id)
-        if z is None or z.account_id != acc.id or z.status != "open":
+        if z is None or z.account_id != acc.id:
             raise HTTPException(404, "Order not found")
+        if z.status != "open":
+            _zapisz_i_odmow(session, acc, 409, "This order is no longer open (it was filled or cancelled).")
         z.status, z.done_at, z.note = "cancelled", _now(), "Cancelled by you"
         acc.terminal_open = bool(_open_positions(session, acc) or
                                  [o for o in _open_orders(session, acc) if o.id != z.id])
@@ -823,8 +943,8 @@ def api_cancel(order_id: int, account_id: int | None = None, w: Who = Depends(wh
 
 class CloseIn(BaseModel):
     account_id: int | None = None
-    qty: float | None = Field(default=None, gt=0)
-    max_slippage_pct: float = Field(default=MAX_SLIPPAGE * 100, gt=0, le=10)
+    qty: float | None = Field(default=None, gt=0, **_LICZBA)
+    max_slippage_pct: float = Field(default=MAX_SLIPPAGE * 100, gt=0, le=10, allow_inf_nan=False)
 
 
 def _zamknij_rynkowo(session, acc: Account, pos: Trade, qty: float, max_slip: float) -> None:
@@ -844,15 +964,17 @@ def _zamknij_rynkowo(session, acc: Account, pos: Trade, qty: float, max_slip: fl
 
 
 @router.post("/positions/{trade_id}/close")
-def api_close(trade_id: int, payload: CloseIn, w: Who = Depends(who)):
+def api_close(trade_id: int, payload: CloseIn, w: Who = Depends(who_trade)):
     def run(session):
         acc = _konto(session, w, payload.account_id)
         if acc.status not in TRADABLE:
             raise HTTPException(409, "This account is closed for trading.")
-        sync(session, acc)
+        sync(session, acc, dokladnie=True)
         pos = session.get(Trade, trade_id)
-        if pos is None or pos.account_id != acc.id or pos.status != "open" or pos.source != "terminal":
-            raise HTTPException(404, "Position already closed")
+        if pos is None or pos.account_id != acc.id or pos.source != "terminal":
+            raise HTTPException(404, "Position not found")
+        if pos.status != "open":
+            _zapisz_i_odmow(session, acc, 409, "Position already closed")
         qty = min(payload.qty or pos.qty or 0.0, pos.qty or 0.0)
         _zamknij_rynkowo(session, acc, pos, qty, payload.max_slippage_pct / 100)
         acc.terminal_open = bool(_open_positions(session, acc) or _open_orders(session, acc))
@@ -870,12 +992,12 @@ class AllIn(BaseModel):
 
 
 @router.post("/close-all")
-def api_close_all(payload: AllIn, w: Who = Depends(who)):
+def api_close_all(payload: AllIn, w: Who = Depends(who_trade)):
     def run(session):
         acc = _konto(session, w, payload.account_id)
         if acc.status not in TRADABLE:
             raise HTTPException(409, "This account is closed for trading.")
-        sync(session, acc)
+        sync(session, acc, dokladnie=True)
         for pos in _open_positions(session, acc):
             _zamknij_rynkowo(session, acc, pos, pos.qty or 0.0, 0.05)
         acc.terminal_open = bool(_open_orders(session, acc))
@@ -889,9 +1011,11 @@ def api_close_all(payload: AllIn, w: Who = Depends(who)):
 
 
 @router.post("/cancel-all")
-def api_cancel_all(payload: AllIn, w: Who = Depends(who)):
+def api_cancel_all(payload: AllIn, w: Who = Depends(who_trade)):
     def run(session):
         acc = _konto(session, w, payload.account_id)
+        if acc.terminal_open:
+            sync(session, acc, dokladnie=True)
         teraz = _now()
         for z in _open_orders(session, acc):
             z.status, z.done_at, z.note = "cancelled", teraz, "Cancelled by you"
@@ -904,17 +1028,23 @@ def api_cancel_all(payload: AllIn, w: Who = Depends(who)):
 
 class TpSlIn(BaseModel):
     account_id: int | None = None
-    tp: float | None = Field(default=None, ge=0)
-    sl: float | None = Field(default=None, ge=0)
+    tp: float | None = Field(default=None, ge=0, **_LICZBA)
+    sl: float | None = Field(default=None, ge=0, **_LICZBA)
 
 
 @router.patch("/positions/{trade_id}")
-def api_tpsl(trade_id: int, payload: TpSlIn, w: Who = Depends(who)):
+def api_tpsl(trade_id: int, payload: TpSlIn, w: Who = Depends(who_trade)):
     def run(session):
         acc = _konto(session, w, payload.account_id)
+        # Najpierw przegląd świecami: SL, który rynek już trafił, zamyka pozycję —
+        # nie da się go przesunąć po fakcie, patrząc na knot na wykresie.
+        if acc.terminal_open:
+            sync(session, acc, dokladnie=True)
         pos = session.get(Trade, trade_id)
-        if pos is None or pos.account_id != acc.id or pos.status != "open" or pos.source != "terminal":
-            raise HTTPException(404, "Position already closed")
+        if pos is None or pos.account_id != acc.id or pos.source != "terminal":
+            raise HTTPException(404, "Position not found")
+        if pos.status != "open":
+            _zapisz_i_odmow(session, acc, 409, "Position already closed")
         m = markets.get(pos.symbol)
         try:
             mid = markets.mids({m.hl}).get(m.hl) or pos.open_price

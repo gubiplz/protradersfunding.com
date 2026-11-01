@@ -640,6 +640,14 @@ def set_target(session, acc: Account, target_pct: float,
                                 if acc.bot_target_deadline else None)}
 
 
+def _wolne_loty(session, acc: Account) -> float:
+    """Ile lotow zostalo z limitu konta po pozycjach z terminala PTF (limit jest wspolny)."""
+    terminal = (session.query(Trade.lots)
+                .filter(Trade.account_id == acc.id, Trade.status == "open", Trade.source == "terminal")
+                .all())
+    return float(acc.max_lots or 0.0) - sum(float(x or 0.0) for (x,) in terminal)
+
+
 def _open_trade(session, acc: Account) -> Trade | None:
     # Tylko pozycje bota: te z terminala PTF prowadzi terminal.py.
     return (session.query(Trade)
@@ -785,6 +793,10 @@ def _should_open(session, acc: Account, p: Persona, balance: float, now: datetim
     #    tak jak przy wylaczeniu EA: nie porzuca sie transakcji w polowie.
     if getattr(acc, "bot_paused", False):
         return False
+    # 0b) limit lotow konta jest wspolny z terminalem PTF: gdy trader sam go
+    #     wykorzystal, bot nie dokłada wejscia ponad limit.
+    if acc.max_lots and acc.max_lots > 0 and _wolne_loty(session, acc) < MIN_LOT:
+        return False
 
     # 1) osiagniety docelowy zysk konta -> bot przestaje handlowac. Test jest
     #    KWOTOWY i z marginesem `MIN_FILL`: resztka rzedu centow nie przezyje
@@ -896,7 +908,7 @@ def _open_new(session, acc: Account, p: Persona, balance: float, now: datetime) 
         risk_usd = min(day_goal / (p.trades_per_day * edge), balance * p.risk_pct / 100.0)
     lots = max(MIN_LOT, round(risk_usd / (inst.stop_move * pv), 2))
     if acc.max_lots and acc.max_lots > 0:
-        lots = min(lots, round(acc.max_lots, 2))
+        lots = min(lots, max(MIN_LOT, math.floor(_wolne_loty(session, acc) * 100) / 100))
 
     if zejscie:
         # Lekko ujemna wartość oczekiwana: wygrane trochę rzadsze i mniejsze niż

@@ -411,6 +411,10 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
                       f"({acc.breach_reason}) — zamknięto {closed} pozycji", flush=True)
         _notify(acc, "breached", {"reason": acc.breach_reason})
     elif res.passed_phase:
+        if ksiega:
+            # Nowa faza startuje od czystego salda — pozycje i zlecenia z terminala
+            # nie mogą przejść do niej z P&L-em zarobionym (albo straconym) w starej.
+            terminal.flatten(session, acc, "phase")
         _advance_phase(acc, rt)
         session.commit()
         _notify(acc, "phase_passed", {"from_phase": rt.phase.value, "to_phase": acc.phase})

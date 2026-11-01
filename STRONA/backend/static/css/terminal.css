@@ -2,15 +2,19 @@
    Ciemny motyw domyślny, jasny po przełączniku (pf_term_theme). */
 @font-face{font-family:'Inter';src:url('/static/fonts/inter.woff2') format('woff2');font-weight:100 900;font-display:swap}
 @font-face{font-family:'JetBrains Mono';src:url('/static/fonts/jbmono.woff2') format('woff2');font-weight:100 800;font-display:swap}
+/* Space Grotesk — krój znaku PTF w nagłówku (te same pliki i zakresy co site.css) */
+@font-face{font-family:'Space Grotesk';src:url('/static/fonts/space-grotesk-latin.woff2') format('woff2');font-weight:300 700;font-display:swap;unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:'Space Grotesk';src:url('/static/fonts/space-grotesk-latin-ext.woff2') format('woff2');font-weight:300 700;font-display:swap;unicode-range:U+0100-024F,U+0259,U+1E00-1EFF,U+2020,U+20A0-20AB,U+20AD-20CF,U+2113,U+2C60-2C7F,U+A720-A7FF}
 
 :root{
   --bg:#0B1220; --bg2:#0e1626; --panel:#101a2c; --panel2:#15203a; --panel3:#1b2846;
   --line:rgba(148,178,200,.11); --line2:rgba(148,178,200,.2);
-  --txt:#EEF2F8; --muted:#93a1b8; --dim:#6c7a93;
+  --txt:#EEF2F8; --muted:#93a1b8; --dim:#7d8ba4;   /* --dim ≥ 4.5:1 na tle (WCAG AA) */
   --acc:#36B9A9; --acc2:#159E91; --acc-soft:rgba(54,185,169,.14);
   --up:#2ec4a0; --dn:#f0616d; --up-soft:rgba(46,196,160,.13); --dn-soft:rgba(240,97,109,.13);
   --brand:#C6A15B; --brand2:#e0c48c; --warn:#e6b450;
   --shadow:0 18px 50px -12px rgba(0,0,0,.55);
+  --hov:#111827;            /* nieprzezroczyste podświetlenie wiersza (przyklejone kolumny) */
   --radius:10px;
   --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
   color-scheme:dark;
@@ -18,11 +22,12 @@
 :root[data-theme=light]{
   --bg:#F4F6F8; --bg2:#ffffff; --panel:#ffffff; --panel2:#f1f4f7; --panel3:#e8edf2;
   --line:rgba(11,18,32,.08); --line2:rgba(11,18,32,.16);
-  --txt:#0B1220; --muted:#566275; --dim:#7a8597;
+  --txt:#0B1220; --muted:#566275; --dim:#5f6b82;
   --acc:#087F73; --acc2:#066b61; --acc-soft:rgba(8,127,115,.1);
   --up:#0b9873; --dn:#d64553; --up-soft:rgba(11,152,115,.1); --dn-soft:rgba(214,69,83,.1);
   --brand:#A17B39; --brand2:#C6A15B; --warn:#b7791f;
   --shadow:0 18px 50px -16px rgba(11,18,32,.25);
+  --hov:#eef1f5;
   color-scheme:light;
 }
 *{box-sizing:border-box;margin:0;padding:0}
@@ -43,20 +48,50 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
    pozycji leżą POD nią — przy krawędzi widać tylko ich pasek zakładek. Dzięki
    temu wykres nie traci wysokości na rzecz tabel. */
 .term{display:flex;flex-direction:column;min-height:100vh;min-height:100dvh;
-  --head-h:54px; --mkt-h:62px; --foot-h:36px; --peek-h:44px;
+  --head-h:68px; --mkt-h:62px; --foot-h:36px; --peek-h:44px;
   --top-h:max(560px,calc(100dvh - var(--head-h) - var(--mkt-h) - var(--foot-h) - var(--peek-h)))}
+/* Starsze Safari bez dvh: zmienna z dvh byłaby nieważna przy użyciu i układ by się rozjechał. */
+@supports not (height:100dvh){
+  .term{--top-h:max(560px,calc(100vh - var(--head-h) - var(--mkt-h) - var(--foot-h) - var(--peek-h)))}
+}
 
 /* ---------- nagłówek ---------- */
-.t-head{display:flex;align-items:center;gap:28px;height:var(--head-h);padding:0 18px;border-bottom:1px solid var(--line);flex:none;background:var(--bg);position:sticky;top:0;z-index:30}
-.t-logo{display:flex;align-items:center;gap:9px;font-weight:700;font-size:15px;letter-spacing:-.01em;white-space:nowrap}
-.t-logo img{width:28px;height:28px;object-fit:contain}
-.t-logo span{background:linear-gradient(120deg,var(--brand2),var(--brand));-webkit-background-clip:text;background-clip:text;color:transparent}
-.t-logo.sm img{width:22px;height:22px}
-.t-logo.sm{font-size:14px}
-.t-nav{display:flex;gap:24px;font-size:14px;color:var(--muted)}
-.t-nav a:hover{color:var(--txt)}
-.t-nav a.on{color:var(--acc);font-weight:600}
-.t-head-r{margin-left:auto;display:flex;align-items:center;gap:10px}
+/* Wymiary i kolory zmierzone na protradersfunding.com (header.nav): 68 px, znak
+   Space Grotesk 19/700, linki Inter 14,5/500, „Get Funded" z gradientem teal. */
+.term{--nav-c:#9aa8bf}
+:root[data-theme=light] .term{--nav-c:#5b6b80}
+.t-head{display:flex;align-items:center;gap:28px;height:var(--head-h);padding:0 24px;flex:none;position:sticky;top:0;z-index:30;
+  background:rgba(11,18,32,.86);backdrop-filter:blur(20px) saturate(1.6);-webkit-backdrop-filter:blur(20px) saturate(1.6);border-bottom:1px solid rgba(255,255,255,.1)}
+:root[data-theme=light] .t-head{background:rgba(255,255,255,.88);border-bottom-color:rgba(11,18,32,.08)}
+.t-logo{display:flex;align-items:center;gap:10px;font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;font-weight:700;font-size:19px;letter-spacing:-.01em;white-space:nowrap;color:var(--txt)}
+.t-logo img{width:30px;height:30px;object-fit:contain}
+.t-logo .lt-a{white-space:nowrap}
+.t-logo.sm img{width:24px;height:24px}
+.t-logo.sm{font-size:16px}
+.t-nav{display:flex;gap:26px;margin-left:12px;font-size:14.5px;font-weight:500;color:var(--nav-c);white-space:nowrap}
+.t-nav a{transition:color .15s}
+.t-nav a:hover,.t-nav a.on{color:var(--txt)}
+.t-nav a.on{font-weight:600}
+.t-head-r{margin-left:auto;display:flex;align-items:center;gap:14px}
+.t-tog{display:inline-grid;place-items:center;width:38px;height:38px;border-radius:50%;color:var(--nav-c);transition:background .15s,color .15s}
+.t-tog:hover{background:var(--panel2);color:var(--txt)}
+.t-tog svg{width:19px;height:19px;stroke-width:1.9}
+.t-login{font-size:14.5px;font-weight:500;color:var(--nav-c);white-space:nowrap;transition:color .15s}
+.t-login:hover{color:var(--txt)}
+.t-getf{display:inline-flex;align-items:center;justify-content:center;padding:9px 16px;border-radius:10px;font-size:14px;font-weight:600;color:#fff;white-space:nowrap;
+  background:linear-gradient(135deg,#159e91,#0a7d72);box-shadow:0 8px 20px -8px rgba(21,158,145,.5);transition:filter .15s,transform .15s}
+:root[data-theme=light] .t-getf{background:linear-gradient(135deg,#0a8a7d,#07695f)}
+.t-getf:hover{filter:brightness(1.08);transform:translateY(-1px)}
+.t-burger{display:none;flex-direction:column;align-items:center;justify-content:center;gap:5px;width:44px;height:44px;flex:0 0 44px}
+.t-burger span{width:22px;height:2px;background:var(--txt);border-radius:2px;transition:transform .2s,opacity .2s}
+.t-burger[aria-expanded=true] span:nth-child(1){transform:translateY(7px) rotate(45deg)}
+.t-burger[aria-expanded=true] span:nth-child(2){opacity:0}
+.t-burger[aria-expanded=true] span:nth-child(3){transform:translateY(-7px) rotate(-45deg)}
+.t-mmenu{position:fixed;left:0;right:0;top:var(--head-h);z-index:65;display:flex;flex-direction:column;padding:8px 16px 18px;
+  background:var(--bg);border-bottom:1px solid var(--line2);box-shadow:var(--shadow);max-height:calc(100dvh - var(--head-h));overflow-y:auto}
+.t-mmenu>a:not(.t-getf),.t-mmenu>button{display:flex;align-items:center;min-height:48px;font-size:16px;font-weight:500;color:var(--txt);border-bottom:1px solid var(--line);text-align:left}
+.t-mmenu>a.on{color:var(--acc)}
+.t-mmenu .t-getf{margin-top:14px;height:48px;font-size:15px}
 .t-ico{display:inline-grid;place-items:center;width:32px;height:32px;border-radius:8px;color:var(--muted)}
 .t-ico:hover{background:var(--panel2);color:var(--txt)}
 .t-ico.sm{width:26px;height:26px}
@@ -67,13 +102,15 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-link.acc{color:var(--acc);padding:0}
 .t-link.acc:hover{background:none;text-decoration:underline}
 .t-link.mute{color:var(--muted);font-weight:500;margin:6px auto 0;display:block}
-.t-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 16px;border-radius:9px;
-  background:var(--acc);color:#04201c;font-weight:650;white-space:nowrap;transition:filter .15s}
-:root[data-theme=light] .t-btn{color:#fff}
+/* Główny przycisk jak na stronie PTF („Get Funded"): gradient teal, biały tekst. */
+.t-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:38px;padding:0 16px;border-radius:10px;
+  background:linear-gradient(135deg,#159e91,#0a7d72);color:#fff;font-weight:600;white-space:nowrap;
+  box-shadow:0 8px 20px -8px rgba(21,158,145,.5);transition:filter .15s}
+:root[data-theme=light] .t-btn{background:linear-gradient(135deg,#0a8a7d,#07695f)}
 .t-btn:hover{filter:brightness(1.08)}
-.t-btn.ghost{background:transparent;color:var(--txt);border:1px solid var(--line2)}
+.t-btn.ghost{background:transparent;color:var(--txt);border:1px solid var(--line2);box-shadow:none}
 .t-btn.wide{width:100%;height:44px;font-size:15px}
-.t-guest,.t-user{display:flex;align-items:center;gap:6px}
+.t-guest,.t-user{display:flex;align-items:center;gap:14px}
 .t-acc-btn{display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;border:1px solid var(--line2);border-radius:9px;font-weight:600}
 .t-acc-btn .dot{width:8px;height:8px;border-radius:50%;background:var(--up);box-shadow:0 0 0 3px var(--up-soft)}
 .t-acc-btn .dot.off{background:var(--dim);box-shadow:none}
@@ -135,6 +172,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-cpane{display:none;flex:1;min-height:0;flex-direction:column}
 .t-cpane.on{display:flex}
 .t-ctools{display:flex;align-items:center;gap:4px;height:38px;padding:0 6px;border-bottom:1px solid var(--line);flex:none;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.t-ctools>*,.t-ints>*,.t-cfoot>*{flex-shrink:0}   /* ikony cofnij/ponów/zrzut miały po 16 px szerokości */
 .t-ctools::-webkit-scrollbar{display:none}
 .t-ints{display:flex;gap:2px}
 .t-ints button,.t-ranges button,.t-axis button{height:28px;min-width:30px;padding:0 7px;border-radius:7px;color:var(--muted);font-size:13px}
@@ -145,7 +183,15 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-cbody{flex:1;min-height:0;display:flex}
 .t-draw{width:44px;flex:none;border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;overflow-y:auto;scrollbar-width:none}
 .t-draw::-webkit-scrollbar{display:none}
+.t-draw>*{flex-shrink:0}      /* przyciski nie ściskają się do 20 px — pasek najwyżej się przewinie */
 .t-draw button{width:34px;height:34px;border-radius:8px;display:grid;place-items:center;color:var(--muted)}
+/* grupa narzędzi: ostatnio użyte + trójkącik w rogu otwierający resztę */
+.t-dgrp{position:relative}
+.t-dgrp::after{content:"";position:absolute;right:-1px;bottom:3px;border:3px solid transparent;border-right-color:var(--muted);border-bottom-color:var(--muted);opacity:.6;pointer-events:none}
+.t-dgrp:hover::after{opacity:1}
+.t-dfly{z-index:70;min-width:210px}
+.t-dfly svg{width:18px;height:18px;stroke-width:1.6;color:var(--muted)}
+.t-dfly h6{font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;padding:6px 10px 4px}
 .t-draw button svg{width:19px;height:19px;stroke-width:1.6}
 .t-draw button:hover{background:var(--panel2);color:var(--txt)}
 .t-draw button.on{background:var(--acc-soft);color:var(--acc)}
@@ -215,8 +261,9 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-side{display:grid;grid-template-columns:1fr 1fr;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:3px}
 .t-side button{height:36px;border-radius:8px;font-weight:600;color:var(--muted);font-size:14px;transition:background .15s,color .15s}
 .t-side button.on.buy{background:var(--up);color:#032018}
-.t-side button.on.sell{background:var(--dn);color:#fff}
-:root[data-theme=light] .t-side button.on.buy{color:#fff}
+.t-side button.on.sell{background:var(--dn);color:#2b0609}
+:root[data-theme=light] .t-side button.on.buy{color:#fff;background:#0a8565}
+:root[data-theme=light] .t-side button.on.sell{color:#fff;background:#c63b49}
 .t-fld{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}
 .t-fld>span{font-weight:550;color:var(--txt);font-size:14px}
 .t-in{display:flex;align-items:center;gap:6px;height:42px;padding:0 6px 0 12px;border-radius:9px;background:var(--panel);border:1px solid var(--line2);transition:border-color .15s}
@@ -260,8 +307,9 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-tpsl .t-fld>span{font-size:12.5px;color:var(--muted);font-weight:500}
 .t-go{height:48px;border-radius:11px;font-weight:700;font-size:15.5px;transition:filter .15s,transform .1s}
 .t-go.buy{background:var(--up);color:#032018}
-.t-go.sell{background:var(--dn);color:#fff}
-:root[data-theme=light] .t-go.buy{color:#fff}
+.t-go.sell{background:var(--dn);color:#2b0609}      /* ciemny tekst jak na Buy: biały na czerwieni miał 3,2:1 */
+:root[data-theme=light] .t-go.buy{color:#fff;background:#0a8565}
+:root[data-theme=light] .t-go.sell{color:#fff;background:#c63b49}
 .t-go:hover{filter:brightness(1.07)}
 .t-go:active{transform:scale(.99)}
 .t-go[disabled]{opacity:.55;cursor:not-allowed}
@@ -270,7 +318,8 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-est dt,.t-acct dt{color:var(--muted)}
 .t-est abbr{text-decoration:underline dotted var(--dim);text-underline-offset:3px;cursor:help}
 .t-dt{color:var(--muted);text-decoration:underline dotted var(--dim);text-underline-offset:3px}
-.t-acct .t-bar{height:4px;border-radius:3px;background:var(--panel3);overflow:hidden;display:block}
+.t-acct .t-bar{height:4px;border-radius:3px;background:var(--panel3);overflow:hidden;display:block;flex:1}
+.t-vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}   /* tylko dla czytnika ekranu */
 .t-acct .t-bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .4s}
 .t-acct .t-rule dt{color:var(--dim)}
 .t-fill-note{font-size:11.5px;color:var(--dim);line-height:1.45}
@@ -289,11 +338,18 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-table{flex:1;overflow-x:auto;scrollbar-width:thin}
 .t-table table{width:100%;border-collapse:collapse;font-size:12.5px;white-space:nowrap}
 .t-table th{position:sticky;top:0;background:var(--bg);text-align:left;font-weight:500;color:var(--dim);padding:9px 12px;border-bottom:1px solid var(--line);z-index:1}
-.t-table td{padding:8px 12px;border-bottom:1px solid var(--line)}
+.t-table td{padding:8px 10px;border-bottom:1px solid var(--line)}
+.t-table th{padding-left:10px;padding-right:10px}
 .t-table td.num,.t-table th.num{text-align:right}
-.t-table tr:hover td{background:var(--hover,rgba(148,178,200,.04))}
+.t-table tr:hover td{background:var(--hov)}
+/* Gdy kolumny nie mieszczą się w szerokości: rynek przyklejony z lewej, akcje
+   (Close / Cancel) z prawej — przycisk zamknięcia zawsze widać bez przewijania. */
+.t-table td:first-child,.t-table th:first-child{position:sticky;left:0;z-index:1;background:var(--bg)}
+.t-table td:last-child,.t-table th:last-child{position:sticky;right:0;z-index:1;background:var(--bg);box-shadow:-10px 0 12px -10px rgba(0,0,0,.45)}
+.t-table th:first-child,.t-table th:last-child{z-index:2}
+.t-table tr:hover td:first-child,.t-table tr:hover td:last-child{background:var(--hov)}
 .t-table .sym{display:flex;align-items:center;gap:8px;font-weight:600}
-.t-table .sub{color:var(--dim);margin-left:6px;font-size:11.5px}
+.t-table .sub{display:block;color:var(--dim);font-size:11px;margin-top:1px}   /* loty nad jednostkami — węższa kolumna */
 .t-table .side{font-weight:600}
 .t-table .act{display:flex;gap:6px;justify-content:flex-end}
 .t-table .act button{height:26px;padding:0 10px;border-radius:7px;border:1px solid var(--line2);font-size:12px}
@@ -343,7 +399,8 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 @keyframes tFade{from{opacity:0}to{opacity:1}}
 @keyframes tPop{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
 .t-card{position:relative;width:min(100%,460px);max-height:calc(100dvh - 32px);overflow-y:auto;background:var(--panel);border:1px solid var(--line2);border-radius:16px;padding:26px;box-shadow:var(--shadow);animation:tPop .22s cubic-bezier(.2,.8,.2,1)}
-.t-card h2{font-size:21px;font-weight:650;letter-spacing:-.01em;margin-bottom:10px;padding-right:30px}
+.t-card h2{font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;font-size:22px;font-weight:700;letter-spacing:-.01em;margin-bottom:10px;padding-right:30px}
+.t-case-l h2{font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif}
 .t-card p{color:var(--muted);font-size:14.5px;line-height:1.55}
 .t-x{position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:8px;display:grid;place-items:center;color:var(--muted)}
 .t-x:hover{background:var(--panel2);color:var(--txt)}
@@ -377,6 +434,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-search-head{font-size:12px;color:var(--dim);padding-top:10px;padding-bottom:6px}
 .t-search-head span:not(:first-child){text-align:right}
 .t-search-list{overflow-y:auto;max-height:min(460px,60dvh);padding-bottom:8px}
+.t-search-note{padding:10px 18px 14px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted);line-height:1.45}
 .t-sr{height:48px;cursor:pointer}
 .t-sr:hover,.t-sr.on{background:var(--panel2)}
 .t-sr .nm{display:flex;align-items:center;gap:10px;min-width:0}
@@ -411,24 +469,38 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 /* ---------- węższe ekrany ---------- */
+@media (max-width:1440px){ .t-nav{gap:20px} }
+@media (max-width:1300px){ .t-nav{gap:16px} }
+/* Na laptopie menu to panel przy burgerze; Log in i Get Funded są już w nagłówku. */
+@media (min-width:981px){
+  .t-mmenu{left:auto;right:16px;width:300px;top:calc(var(--head-h) + 6px);border:1px solid var(--line2);border-radius:12px;padding:6px 16px 8px}
+  .t-mmenu .t-mm-login,.t-mmenu .t-mm-dash,.t-mmenu .t-getf{display:none}
+  .t-mmenu>a:nth-last-child(4){border-bottom:0}
+}
 @media (max-width:1280px){
   .t-grid{grid-template-columns:minmax(0,1fr) 270px 300px}
-  .t-nav{gap:16px}
   .t-src{display:none}
 }
-@media (max-width:1100px){
-  .t-nav a:not(.on){display:none}
+/* Linki przestają się mieścić obok wyszukiwarki i konta — przechodzą do menu (jak burger na stronie). */
+@media (max-width:1240px){
+  .t-nav{display:none}
+  .t-burger{display:flex}
 }
 @media (max-width:980px){
   body{overflow:auto}
-  .term{height:auto;min-height:100dvh;padding-bottom:calc(64px + env(safe-area-inset-bottom))}
-  .t-head{gap:12px;padding:0 12px;position:sticky;top:0;z-index:30}
-  .t-nav{display:none}
-  .t-logo span{display:none}
+  .term{height:auto;min-height:100dvh;padding-bottom:calc(72px + env(safe-area-inset-bottom))}
+  .term{--head-h:56px}
+  .t-head{gap:10px;padding:0 12px}
+  .t-head-r{gap:8px}
+  .t-hsearch{display:none}                 /* wyszukiwarkę otwiera przycisk rynku (BTCUSD ▾) */
+  .t-guest .t-login,.t-user .t-login{display:none}   /* są w menu, jak na stronie */
+  /* znak jak na stronie: cała nazwa, czcionka do szerokości ekranu, w razie czego „Pro Traders / Funding" */
+  .t-logo{flex:1 1 auto;min-width:0}
+  .t-logo-txt{white-space:normal;line-height:1.05;font-size:clamp(13px,3.9vw,19px)}
   .t-mkt{gap:18px;height:58px;padding:0 12px}
   .t-sym{font-size:17px}
   .t-stat b{font-size:13.5px}
-  .t-mtabs{display:flex;border-bottom:1px solid var(--line);position:sticky;top:54px;z-index:25;background:var(--bg)}
+  .t-mtabs{display:flex;border-bottom:1px solid var(--line);position:sticky;top:var(--head-h);z-index:25;background:var(--bg)}
   .t-mtabs button{flex:1;height:42px;color:var(--muted);font-weight:550;position:relative}
   .t-mtabs button.on{color:var(--txt)}
   .t-mtabs button.on::after{content:"";position:absolute;left:18%;right:18%;bottom:0;height:2px;border-radius:2px;background:var(--acc)}
@@ -436,7 +508,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   .t-left,.t-book,.t-ticket{border:0;display:none}
   .t-left.on,.t-book.on,.t-ticket.on{display:flex}
   /* telefon: wykres na prawie cały ekran (nagłówek, pasek rynku, zakładki i przyciski kup/sprzedaj zostają) */
-  .t-left,.t-book{height:max(420px,calc(100dvh - 54px - 58px - 42px - 70px))}
+  .t-left,.t-book{height:max(420px,calc(100dvh - var(--head-h) - 58px - 42px - 70px))}
   .t-book .t-btabs{display:none}
   .t-ticket{overflow:visible}
   .t-bottom{height:auto;min-height:280px;border-top:1px solid var(--line)}
@@ -449,7 +521,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   .t-draw{width:38px}
   .t-draw button{width:30px;height:30px}
   .t-tick-mode span,.t-tick #tTickPrev,.t-tick #tTickNext{display:none}
-  .t-ptabs{top:96px}   /* pod nagłówkiem i zakładkami paneli */
+  .t-ptabs{top:calc(var(--head-h) + 43px)}   /* pod nagłówkiem i zakładkami paneli (42 + 1 px ramki) */
   .t-ptabs .t-grow,.t-ptabs #tColsBtn{display:none}
   .t-casec{grid-template-columns:1fr}
   .t-case-r{order:-1;border-left:0;border-bottom:1px solid var(--line);padding:18px}
@@ -459,12 +531,46 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   .t-case-l .t-logo span{display:inline}
   .t-search-head,.t-sr{grid-template-columns:minmax(0,1.5fr) 1fr 66px 28px}
   .t-search-head span:nth-child(4),.t-sr span.vol{display:none}
-  .t-toasts{bottom:80px;left:12px;right:12px}
+  /* Komunikaty u góry, pod zakładkami: na dole zasłaniały Buy/Sell przez 4–6 s. */
+  .t-toasts{top:calc(var(--head-h) + 50px + env(safe-area-inset-top));bottom:auto;left:12px;right:12px}
   .t-toast{max-width:none}
+
+  /* iOS przybliża stronę przy polu z czcionką < 16 px — na telefonie wszystkie mają 16. */
+  .t-in input,.t-tpsl .t-in input,.t-pct-in input,#tQuick input,.t-bctl select,.t-search-in input,.t-calc input{font-size:16px}
+
+  /* dotykowe cele ≥ 32 px */
+  .t-venue button{min-height:32px}
+  .t-ints button,.t-ranges button,.t-axis button{height:32px}
+  .t-draw{width:42px}
+  .t-draw button{width:34px;height:34px}
+
+  /* pasek rynku przewija się w bok — miękka krawędź pokazuje, że jest więcej */
+  .t-mkt.more{-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent)}
+
+  /* Tabele jako karty: P&L i „Close" widać bez przewijania w bok. Etykiety
+     z nagłówków kolumn (data-l, ustawia terminal.js). */
+  .t-bottom .t-table{overflow-x:visible}
+  .t-table table,.t-table tbody{display:block;white-space:normal}
+  .t-table thead{display:none}
+  .t-table tr{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px 14px;padding:14px 14px 12px;border-bottom:1px solid var(--line)}
+  .t-table tr:hover td{background:none}
+  .t-table td{display:block;padding:0;border:0;min-width:0;font-size:13.5px;overflow-wrap:anywhere}
+  .t-table td:first-child,.t-table td:last-child{position:static;background:none;box-shadow:none}
+  .t-table td.num{text-align:left}
+  .t-table td[data-l]::before{content:attr(data-l);display:block;color:var(--dim);font-family:Inter,system-ui,sans-serif;font-size:11.5px;font-weight:500;margin-bottom:3px}
+  .t-table td:not([data-l]),.t-table td[data-l="Note"]{grid-column:1/-1}
+  .t-table td[data-l="Note"]{min-width:0!important}
+  .t-table .sub{display:block;margin:2px 0 0}
+  .t-table .act{justify-content:stretch;gap:10px}
+  .t-table .act button{flex:1;height:40px;font-size:14px;font-weight:600}
 }
+@media (max-width:440px){
+  .t-tog{width:34px;height:34px}
+  .t-head .t-getf{padding:8px 11px}
+}
+@media (max-width:375px){ .t-head .t-getf{display:none} }   /* jak na stronie: zostaje w menu */
 @media (max-width:420px){
   .t-acc-btn #tAccLbl{max-width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .t-head-r .t-user .t-link{display:none}
   .t-ready-foot{flex-direction:column-reverse}
   .t-ready-foot .t-btn{width:100%}
 }

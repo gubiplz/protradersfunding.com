@@ -613,7 +613,7 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                 ("Server", ctx.get("platform_server")),
                 ("Login", ctx.get("platform_login")),
                 ("Password", ctx.get("platform_password")),
-                ("Leverage", "1:100"),
+                ("Leverage", "Up to 1:100"),
                 ("Profit split", f"{ctx.get('profit_split_pct')}%" if ctx.get("profit_split_pct") else None),
             ]),
         ]

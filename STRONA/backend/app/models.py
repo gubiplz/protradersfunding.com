@@ -478,10 +478,13 @@ class Account(Base):
     # NASZA księga (`trades` z source='terminal') — feed nie może go nadpisać.
     # `terminal_open`: są otwarte pozycje albo zlecenia oczekujące; po tym
     # tick ryzyka wybiera konta do przeliczenia co minutę.
-    # `terminal_sync_at`: do której chwili przejrzano świece 1m (TP/SL/limity).
+    # `terminal_sync_at`: ostatni przegląd (midy). `terminal_candle_at`: do której
+    # chwili przejrzano PEŁNE świece 1m — osobno, bo odświeżanie co kilkanaście
+    # sekund przesuwa sync, a knoty między odczytami muszą zostać sprawdzone.
     terminal_used: Mapped[bool] = mapped_column(Boolean, default=False)
     terminal_open: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     terminal_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    terminal_candle_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     terminal_eval_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # --- Trade BOT (admin) ---

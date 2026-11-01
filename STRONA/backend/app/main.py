@@ -13934,6 +13934,8 @@ def _page(request: Request, template: str, **extra):
            "vusdt_test": vusdt.public_config(),
            # Wiersz „Reward frequency" w tabelach zasad: 0 = on demand.
            "payout_days": settings.payout_interval_days,
+           # Wiersz „Leverage": maksimum i rozbicie na klasy rynków — z listy terminala.
+           "leverage_max": markets.MAX_LEVERAGE, "leverage_text": markets.leverage_text(),
            # Popup newslettera z panelu (None = wyłączony) i oferta paska nad stopką.
            "nl_popup": _nl_popup_ctx(), "nl_offer": _nl_oferta(), **extra}
     return jinja.TemplateResponse(request, template, ctx)

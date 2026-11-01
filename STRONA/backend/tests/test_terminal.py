@@ -289,6 +289,140 @@ def test_bot_nie_widzi_pozycji_z_terminala(rynek):
         s.close()
 
 
+def _przesun(aid, **kiedy):
+    """Ustawia znaczniki przeglądu konta (minuty temu) i postarza pozycje o `pozycje` minut."""
+    s = SessionLocal()
+    a = s.get(Account, aid)
+    teraz = datetime.now(timezone.utc)
+    if "sync" in kiedy:
+        a.terminal_sync_at = teraz - timedelta(minutes=kiedy["sync"])
+    if "swiece" in kiedy:
+        a.terminal_candle_at = teraz - timedelta(minutes=kiedy["swiece"])
+    if "pozycje" in kiedy:
+        for t in s.query(Trade).filter(Trade.account_id == aid, Trade.status == "open"):
+            t.opened_at = teraz - timedelta(minutes=kiedy["pozycje"])
+            t.tpsl_at = teraz - timedelta(minutes=kiedy["pozycje"]) if t.tpsl_at else None
+    s.commit(); s.close()
+
+
+def test_knot_miedzy_odswiezeniami_trafia_sl(rynek):
+    """Strona odświeża stan co kilkanaście sekund — knot z ostatnich minut i tak trafia SL."""
+    aid, h = _konto()
+    with TestClient(app) as c:
+        assert _zlec(c, h, aid, sl=49_000).status_code == 200
+        # Ostatni przegląd midem 20 s temu, pełny przegląd świecami 3 min temu.
+        _przesun(aid, sync=0.33, swiece=3, pozycje=4)
+        rynek.swiece["BTC"] = [_swieca(2, 50_000, 50_010, 48_800, 49_900)]
+        rynek.px["BTC"] = 49_900.0
+        st = c.get(f"/api/terminal/state?account_id={aid}", headers=h).json()
+        assert st["positions"] == [] and st["history"][0]["reason"] == "sl"
+
+
+def test_pierwsze_zlecenie_nie_widzi_starych_swiec(rynek):
+    """Konto bez nic otwartego od godzin: nowa pozycja nie jest wyceniana na krachu sprzed jej otwarcia."""
+    aid, h = _konto()
+    _przesun(aid, sync=180, swiece=180)
+    rynek.swiece["BTC"] = [_swieca(30, 50_000, 50_000, 40_000, 50_000)]
+    with TestClient(app) as c:
+        assert _zlec(c, h, aid, qty=1).status_code == 200
+        assert c.get(f"/api/terminal/state?account_id={aid}", headers=h).status_code == 200
+    assert _acc(aid).status == "active"
+
+
+def test_sl_nie_da_sie_przesunac_po_trafieniu(rynek):
+    aid, h = _konto()
+    with TestClient(app) as c:
+        p = _zlec(c, h, aid, sl=49_000).json()["positions"][0]
+        _przesun(aid, sync=0.2, swiece=3, pozycje=4)
+        rynek.swiece["BTC"] = [_swieca(1, 50_000, 50_000, 48_500, 49_800)]
+        rynek.px["BTC"] = 49_800.0
+        r = c.patch(f"/api/terminal/positions/{p['id']}", headers=h, json={"account_id": aid, "sl": None})
+        assert r.status_code == 409
+        st = c.get(f"/api/terminal/state?account_id={aid}", headers=h).json()
+        assert st["positions"] == [] and st["history"][0]["reason"] == "sl"
+
+
+def test_liczby_spoza_zakresu_i_za_male_zlecenie(rynek):
+    aid, h = _konto()
+    with TestClient(app) as c:
+        # Surowy JSON z Infinity/NaN (json.loads po stronie serwera je przepuszcza).
+        for zle in ('"qty": Infinity', '"qty": 1, "tp": NaN', '"qty": 1e300'):
+            r = c.post("/api/terminal/orders", headers={**h, "Content-Type": "application/json"},
+                       content='{"account_id": %d, "symbol": "BTCUSD", "side": "buy", %s}' % (aid, zle))
+            assert r.status_code == 422, (zle, r.text)
+        r = c.post("/api/terminal/orders", headers=h,
+                   json={"account_id": aid, "symbol": "EURUSD", "side": "buy", "qty": 0.0004})
+        assert r.status_code == 400 and "Minimum size" in r.json()["detail"]
+    assert _acc(aid).balance == 100_000.0
+
+
+def test_podglad_admina_nie_handluje(rynek):
+    aid, _ = _konto()
+    a = _acc(aid)
+    s = SessionLocal()
+    tr = s.get(Trader, a.trader_id)
+    imp = {"Authorization": f"Bearer {auth.make_impersonation_token(tr.id, tr.password_hash)}"}
+    s.close()
+    with TestClient(app) as c:
+        assert c.get(f"/api/terminal/state?account_id={aid}", headers=imp).status_code == 200
+        assert _zlec(c, imp, aid).status_code == 403
+
+
+def test_odwrocenie_zwalnia_limit_lotow(rynek):
+    aid, h = _konto()
+    with TestClient(app) as c:
+        assert _zlec(c, h, aid, qty=6).status_code == 200            # cały limit 6 lotów
+        st = _zlec(c, h, aid, side="sell", qty=12).json()           # 6 long → 6 short
+        assert [(p["side"], p["qty"]) for p in st["positions"]] == [("sell", 6)]
+
+
+def test_limit_lotow_wspolny_z_botem(rynek):
+    aid, h = _konto()
+    s = SessionLocal()
+    s.add(Trade(account_id=aid, symbol="EURUSD", side="buy", lots=5.0, open_price=1.1, pnl=0.0,
+                opened_at=datetime.now(timezone.utc), status="open", source="bot"))
+    s.commit()
+    a = s.get(Account, aid)
+    assert tradebot._wolne_loty(s, a) == pytest.approx(6.0)        # bot liczy tylko terminal
+    s.close()
+    with TestClient(app) as c:
+        r = _zlec(c, h, aid, qty=2)
+        assert r.status_code == 409 and "Exposure cap" in r.json()["detail"]
+        st = _zlec(c, h, aid, qty=1).json()
+        assert st["account"]["other_lots"] == 5.0
+    s = SessionLocal()
+    try:
+        assert tradebot._wolne_loty(s, s.get(Account, aid)) == pytest.approx(5.0)
+    finally:
+        s.close()
+
+
+def test_zaliczenie_fazy_zamyka_pozycje_terminala(rynek):
+    aid, h = _konto(balance=110_000.0, equity=110_000.0, peak_equity=110_000.0, trading_days_count=3,
+                    steps=2)
+    with TestClient(app) as c:
+        assert _zlec(c, h, aid).status_code == 200
+    a = _acc(aid)
+    assert a.phase == "eval_2" and a.balance == 100_000.0 and not a.terminal_open
+    assert [t[2:4] for t in _trades(aid)] == [("closed", "phase")]
+
+
+def test_dzwignia_zgodna_z_tym_co_obiecuje_ptf():
+    """Strona i portal mówią „Up to 1:100", z taką dźwignią provisioning zakłada konta
+    MT5, a tabele zasad pokazują rozbicie na rynki z tej samej listy co terminal."""
+    from app.config import get_settings
+    s = get_settings()
+    assert markets.MAX_LEVERAGE == s.metaquotes_web_leverage == s.metaapi_demo_leverage == 100
+    assert all(1 <= m.max_lev <= markets.MAX_LEVERAGE for m in markets.MARKETS)
+    assert markets.leverage_text().startswith("Forex 1:100")
+    with TestClient(app) as c:
+        html = c.get("/objectives").text
+    assert 'data-leverage-max="100"' in html and f'data-leverage="{markets.leverage_text()}"' in html
+    sciezka = os.path.join(os.path.dirname(__file__), "..", "static", "js", "site.js")
+    with open(sciezka, encoding="utf-8") as f:
+        assert "'Up to 1:100'" not in f.read()     # bez ręcznych kopii — wartość idzie z markets.py
+
+
 def test_strona_trade_i_rynki():
     with TestClient(app) as c:
         r = c.get("/trade")
@@ -299,3 +433,5 @@ def test_strona_trade_i_rynki():
         rynki = c.get("/api/terminal/markets").json()["markets"]
         assert {m["sym"] for m in rynki} >= {"BTCUSD", "XAUUSD", "EURUSD", "SPX500", "USOIL"}
         assert "/trade" in c.get("/sitemap.xml").text
+        # „See the full list" na stronie głównej prowadzi do terminala z listą rynków.
+        assert 'href="/trade?list=all"' in c.get("/").text

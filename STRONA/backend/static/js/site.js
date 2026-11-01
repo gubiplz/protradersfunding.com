@@ -326,13 +326,6 @@
   $$('.asset[data-sym]').forEach(a => a.addEventListener('click', e => {
     if (typeof window.openTerminal === 'function') { e.preventDefault(); window.openTerminal(a.dataset.sym); }
   }));
-  const assetsBtn = $('#assetsAllBtn'), assetsAll = $('#assetsAll');
-  if (assetsBtn && assetsAll) assetsBtn.addEventListener('click', () => {
-    const open = assetsAll.hidden;
-    assetsAll.hidden = !open; assetsBtn.setAttribute('aria-expanded', String(open));
-    assetsBtn.textContent = open ? 'Hide the list' : 'See the full list';
-    if (open) revealize(assetsAll);
-  });
 
   /* ---------- FAQ: wyszukiwarka, kotwice pytań ---------- */
   (function faqTools() {
@@ -512,7 +505,7 @@
       ['Weekend trading', wkVal],
       ...(oferujeCt(p) ? [['Copytrading', ctVal]] : []),
       ['News trading', '<span class="ok">✓ Allowed</span>'],
-      ['Leverage', 'Up to 1:100'],
+      ['Leverage', dzwignia()],
     ] : [
       ['Profit target', `Phase 1: ${p.profit_target_p1}% | Phase 2: ${p.profit_target_p2}%`],
       ['Maximum daily drawdown', p.max_daily_loss_pct + '%'],
@@ -526,7 +519,7 @@
       ['Weekend trading', wkVal],
       ...(oferujeCt(p) ? [['Copytrading', ctVal]] : []),
       ['News trading', '<span class="ok">✓ Allowed</span>'],
-      ['Leverage', 'Up to 1:100'],
+      ['Leverage', dzwignia()],
     ];
     /* The promo message is rebuilt on every render, because it depends on the
        size picked: the largest tier has nothing above it to upgrade to. */
@@ -602,7 +595,7 @@
       /* Oba modele dostaja 1:100, bo z taka dzwignia provisioning ZAKLADA konta
          (config: METAAPI_DEMO_LEVERAGE / METAQUOTES_WEB_LEVERAGE = 100). Kolumna
          Instant mowila 1:50 i klamala wobec tego, co trader dostawal w MT5. */
-      ['Leverage', 'Up to 1:100', ...col('Up to 1:100')],
+      ['Leverage', dzwignia(true), ...col(dzwignia(true))],
       ['Profit split', 'up to ' + Math.max(...g2.map(p => p.profit_split_pct)) + '%', ...col(ri && ri.profit_split_pct + '%')],
       /* The engine refunds the fee on the FIRST payout for every plan
          (main.py:1342) — Instant Funding included. */
@@ -1041,4 +1034,15 @@
 function czestotliwoscWyplat() {
   const d = +(document.body && document.body.dataset.payoutDays || 0);
   return d > 0 ? `Every ${d} days between requests` : 'On demand';
+}
+
+/* „Leverage" z listy rynków terminala (markets.py przez data-leverage na <body>):
+   maksimum to forex, reszta rynków ma niższą — ta sama, którą terminal stosuje.
+   `full` = rozbicie w drugiej linii (tabela Objectives); w wąskim panelu dymek. */
+function dzwignia(full) {
+  const b = document.body ? document.body.dataset : {};
+  const max = 'Up to 1:' + (+b.leverageMax || 100);
+  const by = b.leverage || '';
+  if (!by) return max;
+  return full ? `${max}<small class="lev-by">${by}</small>` : `<abbr class="lev-abbr" title="${by}">${max}</abbr>`;
 }
