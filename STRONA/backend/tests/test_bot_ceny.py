@@ -175,7 +175,9 @@ def test_terminal_pokazuje_transakcje_bota_a_planu_nie(zywe):
     with TestClient(app) as c:
         st = c.get(f"/api/terminal/state?account_id={aid}", headers=h).json()
         assert st["positions"] == [] and st["account"]["other_lots"] == 0
-        assert [(x["symbol"], x["by"], x["reason"], x["lots"]) for x in st["history"]] == [("BTCUSD", "bot", "bot", 0.3)]
+        # Zwykła zamknięta transakcja — bez znacznika, że zrobił ją bot.
+        assert [(x["symbol"], x["reason"], x["lots"]) for x in st["history"]] == [("BTCUSD", "close", 0.3)]
+        assert "by" not in st["history"][0]
         assert c.get(f"/api/me/accounts/{aid}/positions", headers=h).json() == []
 
 

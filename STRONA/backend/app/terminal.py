@@ -688,12 +688,13 @@ def _closed_dict(t: Trade) -> dict:
     d = {"id": t.id, "symbol": t.symbol, "side": t.side, "qty": t.qty, "entry": t.open_price,
          "close": t.close_price, "pnl": round(t.pnl or 0.0, 2), "fee": round(t.fee or 0.0, 2),
          "reason": t.close_reason, "leverage": t.leverage, "opened_at": _iso(t.opened_at),
-         "closed_at": _iso(t.closed_at), "by": t.source, "lots": round(t.lots or 0.0, 4)}
+         "closed_at": _iso(t.closed_at), "lots": round(t.lots or 0.0, 4)}
     if t.source == "bot":
-        # Lot bota w jego własnej mierze (jak w portalu i MT5); ilość w jednostkach z wartości punktu.
+        # W historii zwykła zamknięta transakcja (decyzja właściciela, 2026-11-01): lot
+        # w mierze konta (jak w portalu i MT5), ilość z wartości punktu, powód „Closed".
         inst = tradebot.INSTRUMENTS.get(t.symbol)
         d["qty"] = round((t.lots or 0.0) * inst.point_value, 6) if inst else None
-        d["reason"] = "bot"
+        d["reason"] = "close"
     return d
 
 

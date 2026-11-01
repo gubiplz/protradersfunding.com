@@ -84,6 +84,7 @@
     accounts: [], accId: +ls.get('pf_term_acc', '0') || null, st: null, ptab: 'positions',
     // Poślizg domyślnie schowany (jest w Columns): z nim tabela nie mieściła się pod wykresem nawet na 1440 px.
     cols: ls.json('pf_term_cols3', { value: true, slippage: false, lev: true, margin: true, tpsl: true }),
+    showTrades: ls.get('pf_term_trades', '1') === '1',     // historia transakcji na wykresie (przycisk „Trades")
     weekend: false, fee: 0.03, group: null, bookUnit: 'base', tickMode: ls.get('pf_term_tick', 'trending'),
   };
   if (!F.venuesFor(S.m).includes(S.venue)) S.venue = 'hyperliquid';
@@ -209,16 +210,23 @@
   }
 
   function registerOverlays() {
-    // Znacznik wejścia/wyjścia z historii (terminal i Trade BOT): trójkąt pod/nad ceną
-    // w świecy transakcji — ceny bota leżą na wykresie, więc znaczniki trafiają w świece.
+    // Zamknięta transakcja na wykresie jak w MT5 / cTrader: wejście (▲ long, ▼ short)
+    // w cenie i godzinie otwarcia, wyjście (kółko) w cenie i godzinie zamknięcia,
+    // przerywana linia między nimi w kolorze wyniku. Najechanie pogrubia całość.
     klinecharts.registerOverlay({
-      name: 'ptfMark', totalStep: 2, lock: true, needDefaultPointFigure: false, needDefaultXAxisFigure: false, needDefaultYAxisFigure: false,
+      name: 'ptfTrade', totalStep: 3, lock: true, needDefaultPointFigure: false, needDefaultXAxisFigure: false, needDefaultYAxisFigure: false,
       createPointFigures: ({ coordinates, overlay }) => {
-        const { x, y } = coordinates[0], e = overlay.extendData || {}, s = 5, gora = e.dir === 'up';
-        const y0 = gora ? y + 4 : y - 4, y1 = gora ? y0 + s * 1.6 : y0 - s * 1.6;
-        const fig = [{ type: 'polygon', attrs: { coordinates: [{ x, y: y0 }, { x: x - s, y: y1 }, { x: x + s, y: y1 }] }, styles: { style: 'fill', color: e.color }, ignoreEvent: true }];
-        if (e.text) fig.push({ type: 'text', attrs: { x, y: gora ? y1 + 8 : y1 - 8, text: e.text, align: 'center', baseline: 'middle' }, styles: { color: e.color, size: 9, weight: 700, backgroundColor: 'transparent', borderSize: 0, paddingLeft: 0, paddingRight: 0, paddingTop: 0, paddingBottom: 0 }, ignoreEvent: true });
-        return fig;
+        if (coordinates.length < 2) return [];
+        const [a, b] = coordinates, e = overlay.extendData || {}, hov = !!e.hover, s = hov ? 6.5 : 5;
+        const wynik = e.pnl >= 0 ? e.up : e.dn, strona = e.side === 'buy' ? e.up : e.dn;
+        const tri = e.side === 'buy'
+          ? [{ x: a.x, y: a.y - s }, { x: a.x - s, y: a.y + s * 0.85 }, { x: a.x + s, y: a.y + s * 0.85 }]
+          : [{ x: a.x, y: a.y + s }, { x: a.x - s, y: a.y - s * 0.85 }, { x: a.x + s, y: a.y - s * 0.85 }];
+        return [
+          { key: 'line', type: 'line', attrs: { coordinates: [a, b] }, styles: { style: 'dashed', dashedValue: [4, 3], color: wynik, size: hov ? 2 : 1 } },
+          { key: 'in', type: 'polygon', attrs: { coordinates: tri }, styles: { style: 'fill', color: strona } },
+          { key: 'out', type: 'circle', attrs: { x: b.x, y: b.y, r: hov ? 5.5 : 4 }, styles: { style: 'stroke_fill', color: e.bg, borderColor: wynik, borderSize: 2 } },
+        ];
       },
     });
     // Linia ceny z etykietą: wejście, TP, SL, likwidacja, zlecenia oczekujące.
@@ -1287,6 +1295,7 @@
   function drawLines() {
     if (!chart) return;
     chart.removeOverlay({ groupId: 'ptf' });
+    drawTrades();             // także bez stanu: po wylogowaniu transakcje znikają z wykresu
     if (!S.st) return;
     const ts = lastBar ? lastBar.timestamp : Date.now();
     const up = css('--up'), dn = css('--dn'), acc = css('--acc'), warn = css('--warn');
@@ -1297,15 +1306,67 @@
       line(p.sl, 'SL ' + px(S.m, p.sl), warn);
     });
     S.st.orders.filter((o) => o.symbol === S.sym).forEach((o) => line(o.price, `${o.kind === 'limit' ? 'Limit' : 'Stop'} ${o.side} ${lotsOf(S.m, o.qty)}`, o.side === 'buy' ? up : dn));
-    // Zamknięte transakcje na tym rynku: wejście (▲ long / ▼ short) i wyjście; Trade BOT z podpisem.
-    const mark = (iso, v, dir, color, text) => iso && v && chart.createOverlay({ name: 'ptfMark', groupId: 'ptf', lock: true, points: [{ timestamp: Date.parse(iso), value: v }], extendData: { dir, color, text } });
-    const muted = css('--muted');
-    (S.st.history || []).filter((h) => h.symbol === S.sym).slice(0, 40).forEach((h) => {
-      const long = h.side === 'buy';
-      mark(h.opened_at, h.entry, long ? 'up' : 'down', long ? up : dn, h.by === 'bot' ? 'BOT' : '');
-      mark(h.closed_at, h.close, long ? 'down' : 'up', muted, '');
-    });
   }
+
+  /* ---------- historia transakcji na wykresie (przycisk „Trades") ---------- */
+  let tradesKey = '', tipXY = [0, 0], tipT = 0;
+  function drawTrades(force) {
+    if (!chart) return;
+    const hist = S.showTrades && S.st ? (S.st.history || []).filter((h) => h.symbol === S.sym && h.opened_at && h.closed_at && h.entry && h.close).slice(0, 60) : [];
+    // Odświeżenie stanu co 15 s nie przerysowuje transakcji, gdy się nie zmieniły (najechanie zostaje).
+    const key = S.sym + '|' + hist.map((h) => h.id).join(',');
+    if (!force && key === tradesKey) return;
+    tradesKey = key;
+    chart.removeOverlay({ groupId: 'ptfTrades' });
+    hideTip();
+    const up = css('--up'), dn = css('--dn'), bg = css('--bg');
+    hist.forEach((h) => chart.createOverlay({
+      name: 'ptfTrade', groupId: 'ptfTrades', lock: true,
+      points: [{ timestamp: Date.parse(h.opened_at), value: h.entry }, { timestamp: Date.parse(h.closed_at), value: h.close }],
+      extendData: { side: h.side, pnl: h.pnl, up, dn, bg, h },
+      onMouseEnter: ({ overlay }) => hoverTrade(overlay, true),
+      onMouseLeave: ({ overlay }) => hoverTrade(overlay, false),
+      onClick: ({ overlay }) => { hoverTrade(overlay, true); clearTimeout(tipT); tipT = setTimeout(() => hoverTrade(overlay, false), 4000); return true; },
+    }));
+  }
+  function hoverTrade(overlay, on) {
+    const e = overlay.extendData || {};
+    if (!!e.hover !== on) chart.overrideOverlay({ id: overlay.id, extendData: { ...e, hover: on } });
+    if (on) showTip(e.h); else hideTip();
+  }
+  $('tChart').addEventListener('mousemove', (ev) => {
+    const r = $('tChart').getBoundingClientRect();
+    tipXY = [ev.clientX - r.left, ev.clientY - r.top];
+    if (!$('tTradeTip').hidden) placeTip();
+  });
+  function showTip(h) {
+    if (!h) return;
+    const m = BY[h.symbol] || S.m, t = $('tTradeTip');
+    const dur = Math.max(0, Date.parse(h.closed_at) - Date.parse(h.opened_at)) / 60000;
+    const czas = dur >= 1440 ? `${(dur / 1440).toFixed(1)} d` : dur >= 60 ? `${Math.floor(dur / 60)} h ${Math.round(dur % 60)} min` : `${Math.max(1, Math.round(dur))} min`;
+    t.innerHTML = `<div class="hd"><b class="${h.side === 'buy' ? 'up' : 'dn'}">${h.side === 'buy' ? 'Long' : 'Short'}</b> ${lotsF(h.lots)} lots · ${esc(h.symbol)}</div>
+      <div class="row"><span>Entry</span><b class="num">${px(m, h.entry)}</b><small>${tm(h.opened_at)}</small></div>
+      <div class="row"><span>Exit</span><b class="num">${px(m, h.close)}</b><small>${tm(h.closed_at)}</small></div>
+      <div class="row"><span>P&amp;L</span><b class="num ${cls(h.pnl)}">${sUsd(h.pnl)}</b><small>${czas}</small></div>`;
+    t.hidden = false;
+    placeTip();
+  }
+  function placeTip() {
+    const t = $('tTradeTip'), c = $('tChart');
+    const x = Math.min(tipXY[0] + 14, c.clientWidth - t.offsetWidth - 8), y = Math.min(tipXY[1] + 14, c.clientHeight - t.offsetHeight - 8);
+    t.style.left = Math.max(8, x) + 'px';
+    t.style.top = Math.max(8, y) + 'px';
+  }
+  function hideTip() { const t = $('tTradeTip'); if (t) t.hidden = true; }
+  $('tShowTrades').classList.toggle('on', S.showTrades);
+  $('tShowTrades').setAttribute('aria-pressed', S.showTrades ? 'true' : 'false');
+  $('tShowTrades').onclick = () => {
+    S.showTrades = !S.showTrades;
+    ls.set('pf_term_trades', S.showTrades ? '1' : '0');
+    $('tShowTrades').classList.toggle('on', S.showTrades);
+    $('tShowTrades').setAttribute('aria-pressed', S.showTrades ? 'true' : 'false');
+    drawTrades(true);
+  };
 
   /* =====================================================================
      TABELE NA DOLE
@@ -1353,7 +1414,7 @@
       return;
     }
     if (!st) { el.innerHTML = `<div class="t-empty">${S.accounts.length ? 'Loading…' : 'No active challenge account yet.'}</div>`; return; }
-    const sym = (s, dop = '') => { const m = BY[s]; return m ? `<span class="sym">${mIcon(m, true)}${s}${dop}</span>` : esc(s) + dop; };
+    const sym = (s) => { const m = BY[s]; return m ? `<span class="sym">${mIcon(m, true)}${s}</span>` : esc(s); };
     const side = (s) => `<span class="side ${s === 'buy' ? 'up' : 'dn'}">${s === 'buy' ? 'Long' : 'Short'}</span>`;
     const table = (head, rows, empty) => (rows.length ? `<table><thead><tr>${head.map(([h, n]) => `<th class="${n ? 'num' : ''}">${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>` : `<div class="t-empty">${empty}</div>`);
     if (S.ptab === 'positions') {
@@ -1371,12 +1432,12 @@
       }), 'No open orders');
       if (st.orders.length) el.insertAdjacentHTML('afterbegin', '<div style="padding:8px 12px;text-align:right"><button class="t-danger" type="button" data-cancelall>Cancel all orders</button></div>');
     } else if (S.ptab === 'phist') {
-      const R = { close: 'Closed', reduce: 'Reduced', tp: 'Take profit', sl: 'Stop loss', liquidation: 'Liquidation', stop_out: 'Stop-out', breach: 'Rule breach', phase: 'Phase passed', bot: 'Trade BOT' };
+      const R = { close: 'Closed', reduce: 'Reduced', tp: 'Take profit', sl: 'Stop loss', liquidation: 'Liquidation', stop_out: 'Stop-out', breach: 'Rule breach', phase: 'Phase passed' };
       el.innerHTML = table([['Closed'], ['Market'], ['Side'], ['Size', 1], ['Entry', 1], ['Exit', 1], ['PnL', 1], ['Fees', 1], ['Reason']], st.history.map((h) => {
-        const m = BY[h.symbol] || S.m, bot = h.by === 'bot';
-        // Lot Trade BOT-a w jego mierze (jak w portalu), nie w kontrakcie terminala.
-        const size = bot ? `${lotsF(h.lots)} lots <span class="sub">${qtyF(m, h.qty)} ${esc(m.base)}</span>` : sizeCell(m, h.qty);
-        return `<tr><td>${tm(h.closed_at)}</td><td>${sym(h.symbol, bot ? '<span class="t-pill bot">BOT</span>' : '')}</td><td>${side(h.side)}</td><td class="num">${size}</td><td class="num">${px(m, h.entry)}</td><td class="num">${px(m, h.close)}</td><td class="num ${cls(h.pnl)}">${sUsd(h.pnl)}</td><td class="num">${usd(h.fee)}</td><td><span class="t-pill ${h.reason === 'tp' ? 'ok' : ['sl', 'liquidation', 'stop_out', 'breach'].includes(h.reason) ? 'bad' : ''}">${R[h.reason] || esc(h.reason || '')}</span></td></tr>`;
+        const m = BY[h.symbol] || S.m;
+        // Loty z serwera (miara konta, jak w portalu i MT5) — ta sama postać dla każdej transakcji.
+        const size = `${lotsF(h.lots)} lots <span class="sub">${qtyF(m, h.qty)} ${esc(m.base)}</span>`;
+        return `<tr><td>${tm(h.closed_at)}</td><td>${sym(h.symbol)}</td><td>${side(h.side)}</td><td class="num">${size}</td><td class="num">${px(m, h.entry)}</td><td class="num">${px(m, h.close)}</td><td class="num ${cls(h.pnl)}">${sUsd(h.pnl)}</td><td class="num">${usd(h.fee)}</td><td><span class="t-pill ${h.reason === 'tp' ? 'ok' : ['sl', 'liquidation', 'stop_out', 'breach'].includes(h.reason) ? 'bad' : ''}">${R[h.reason] || esc(h.reason || '')}</span></td></tr>`;
       }), 'No closed positions yet');
     } else if (S.ptab === 'ohist' || S.ptab === 'fills') {
       const list = S.ptab === 'fills' ? st.order_history.filter((o) => o.status === 'filled') : st.order_history;
@@ -1519,7 +1580,7 @@
     const light = document.documentElement.dataset.theme !== 'light';
     document.documentElement.dataset.theme = light ? 'light' : 'dark';
     ls.set('pf_term_theme', light ? 'light' : 'dark');
-    if (chart) { chart.setStyles(chartStyles()); drawLines(); }
+    if (chart) { chart.setStyles(chartStyles()); drawLines(); drawTrades(true); }
   };
   $('tShare').onclick = () => {
     const u = location.origin + '/trade/' + S.sym;

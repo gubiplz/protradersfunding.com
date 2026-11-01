@@ -181,6 +181,13 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-ints button.on,.t-axis button.on{color:var(--txt);background:var(--panel3)}
 .t-txtbtn{display:flex;align-items:center;gap:7px;height:30px;padding:0 9px;border-radius:7px;color:var(--muted);font-size:13.5px}
 .t-txtbtn:hover{color:var(--txt);background:var(--panel2)}
+.t-txtbtn.on{color:var(--acc);background:var(--acc-soft)}
+/* dymek transakcji z wykresu (najechanie / dotknięcie), jak w cTrader */
+.t-ttip{position:absolute;z-index:6;pointer-events:none;min-width:220px;background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:9px 12px;box-shadow:var(--shadow);font-size:12.5px}
+.t-ttip .hd{font-weight:600;margin-bottom:6px;white-space:nowrap}
+.t-ttip .row{display:grid;grid-template-columns:40px auto 1fr;gap:10px;align-items:baseline;line-height:1.65;white-space:nowrap}
+.t-ttip .row span{color:var(--muted)}
+.t-ttip .row small{color:var(--dim);font-size:11px;text-align:right}
 .t-cbody{flex:1;min-height:0;display:flex}
 .t-draw{width:44px;flex:none;border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;overflow-y:auto;scrollbar-width:none}
 .t-draw::-webkit-scrollbar{display:none}
@@ -362,7 +369,6 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-empty .t-btn{margin-top:12px}
 .t-pill{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11.5px;font-weight:600;background:var(--panel2);color:var(--muted)}
 .t-pill.ok{background:var(--up-soft);color:var(--up)} .t-pill.bad{background:var(--dn-soft);color:var(--dn)}
-.t-pill.bot{background:rgba(198,161,91,.16);color:var(--brand);font-size:10.5px;letter-spacing:.04em}
 .t-pill.gold{background:rgba(198,161,91,.14);color:var(--brand)}
 .t-accs{padding:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
 .t-accc{border:1px solid var(--line);background:var(--panel);border-radius:var(--radius);padding:12px 14px;text-align:left;display:flex;flex-direction:column;gap:4px}
