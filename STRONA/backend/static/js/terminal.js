@@ -209,6 +209,11 @@
     };
   }
 
+  // Etykiety linii rysuje KLineChart tym krojem; szerokość mierzymy tak samo, żeby
+  // pole z P&L stanęło tuż za etykietą wejścia.
+  const LINE_FONT = 'Helvetica Neue';
+  const MIARA = document.createElement('canvas').getContext('2d');
+  const szerTekstu = (t) => { MIARA.font = `600 11px ${LINE_FONT}`; return MIARA.measureText(t || '').width; };
   function registerOverlays() {
     // Zamknięta transakcja na wykresie jak w MT5 / cTrader: wejście (▲ long, ▼ short)
     // w cenie i godzinie otwarcia, wyjście (kółko) w cenie i godzinie zamknięcia,
@@ -234,10 +239,14 @@
       name: 'ptfLine', totalStep: 2, lock: true, needDefaultPointFigure: false, needDefaultXAxisFigure: false, needDefaultYAxisFigure: true,
       createPointFigures: ({ coordinates, bounding, overlay }) => {
         const y = coordinates[0].y, e = overlay.extendData || {};
-        return [
+        const etykieta = { color: '#fff', size: 11, weight: 600, family: LINE_FONT, paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderSize: 0 };
+        const fig = [
           { type: 'line', attrs: { coordinates: [{ x: 0, y }, { x: bounding.width, y }] }, styles: { style: 'dashed', dashedValue: [5, 4], color: e.color, size: 1 }, ignoreEvent: true },
-          { type: 'text', attrs: { x: 10, y, text: e.text, baseline: 'middle' }, styles: { color: '#fff', backgroundColor: e.color, size: 11, weight: 600, paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderSize: 0 }, ignoreEvent: true },
+          { type: 'text', attrs: { x: 10, y, text: e.text, baseline: 'middle' }, styles: { ...etykieta, backgroundColor: e.color }, ignoreEvent: true },
         ];
+        // Pozycja: obok etykiety wejścia żywy P&L w kolorze wyniku (jak w MT5 / cTrader).
+        if (e.pnlText) fig.push({ type: 'text', attrs: { x: 10 + szerTekstu(e.text) + 12 + 4, y, text: e.pnlText, baseline: 'middle' }, styles: { ...etykieta, backgroundColor: e.pnlColor }, ignoreEvent: true });
+        return fig;
       },
     });
   }
@@ -1236,6 +1245,7 @@
     lastLive = t;
     renderAccount();
     if (S.ptab === 'positions') patchPositions();
+    updatePosLines();
     checkTriggers();
   }
   // Co tick zmieniamy tylko kurs, wartość i P&L w istniejących wierszach. Przebudowa
@@ -1299,13 +1309,30 @@
     if (!S.st) return;
     const ts = lastBar ? lastBar.timestamp : Date.now();
     const up = css('--up'), dn = css('--dn'), acc = css('--acc'), warn = css('--warn');
-    const line = (v, text, color) => v && chart.createOverlay({ name: 'ptfLine', groupId: 'ptf', lock: true, points: [{ timestamp: ts, value: v }], extendData: { text, color } });
-    S.st.positions.filter((p) => p.symbol === S.sym).forEach((p) => {
-      line(p.entry, `${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, p.side === 'buy' ? up : dn);
+    const line = (v, text, color, dod) => v && chart.createOverlay({ name: 'ptfLine', groupId: 'ptf', lock: true, points: [{ timestamp: ts, value: v }], extendData: { text, color, ...(dod || {}) } });
+    posLines = {};
+    livePos().filter((p) => p.symbol === S.sym).forEach((p) => {
+      const ext = { up, dn, pnlText: pnlTxt(p), pnlColor: p.pnl >= 0 ? up : dn };
+      const id = line(p.entry, `${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, p.side === 'buy' ? up : dn, ext);
+      if (id) posLines[p.id] = { id, ext: { text: `${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, color: p.side === 'buy' ? up : dn, ...ext } };
       line(p.tp, 'TP ' + px(S.m, p.tp), acc);
       line(p.sl, 'SL ' + px(S.m, p.sl), warn);
     });
     S.st.orders.filter((o) => o.symbol === S.sym).forEach((o) => line(o.price, `${o.kind === 'limit' ? 'Limit' : 'Stop'} ${o.side} ${lotsOf(S.m, o.qty)}`, o.side === 'buy' ? up : dn));
+  }
+  // Żywy P&L na linii pozycji: przy każdym ticku cen zmieniamy tylko pole z wynikiem.
+  let posLines = {};
+  const pnlTxt = (p) => (ok(p.pnl) ? `${sUsd(p.pnl)} (${pct(p.roe)})` : '');
+  function updatePosLines() {
+    if (!chart || !S.st) return;
+    livePos().filter((p) => p.symbol === S.sym).forEach((p) => {
+      const L = posLines[p.id];
+      if (!L) return;
+      const t = pnlTxt(p), c = p.pnl >= 0 ? L.ext.up : L.ext.dn;
+      if (L.ext.pnlText === t && L.ext.pnlColor === c) return;
+      L.ext = { ...L.ext, pnlText: t, pnlColor: c };
+      chart.overrideOverlay({ id: L.id, extendData: L.ext });
+    });
   }
 
   /* ---------- historia transakcji na wykresie (przycisk „Trades") ---------- */
