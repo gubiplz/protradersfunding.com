@@ -71,6 +71,11 @@ def _dt(ms: int) -> datetime:
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
 
 
+def _dzien_serwera(ms: int) -> str:
+    """Doba serwera MT5 dla chwili `ms` — ta sama co `poller.server_day_key`."""
+    return (_dt(ms) + timedelta(hours=settings.server_utc_offset_hours)).strftime("%Y-%m-%d")
+
+
 def _iso(dt: datetime | None) -> str | None:
     if dt is None:
         return None
@@ -402,13 +407,15 @@ def _wypelnij_oczekujace(session, acc: Account, z: TerminalOrder, px: float, whe
 
 
 def sync(session, acc: Account, now: datetime | None = None,
-         dokladnie: bool = False) -> tuple[list[Trade], dict[str, float], float | None]:
+         dokladnie: bool = False) -> tuple[list[Trade], dict[str, float], dict[str, dict]]:
     """Rozstrzyga wszystko, co wydarzyło się od ostatniego przeglądu.
 
-    Zwraca (otwarte pozycje, ceny wyceny, najniższe equity w oknie albo None).
-    Najniższe equity liczymy z ekstremów świec po stronie niekorzystnej — reguły
-    sprawdzają je osobno, bo dzienna strata liczy się w każdej minucie, a nie
-    tylko w chwili, w której ktoś akurat otworzył stronę.
+    Zwraca (otwarte pozycje, ceny wyceny, doby okna). Doba serwera → najniższe
+    equity (`low`), saldo na końcu (`end_bal`), czy była otwarta pozycja (`pos`)
+    i — gdy doba zaczęła się w oknie — equity i saldo z północy (`start_eq`,
+    `start_bal`). Najniższe equity liczymy z ekstremów świec po stronie
+    niekorzystnej — reguły sprawdzają je osobno, bo dzienna strata liczy się
+    w każdej minucie, a nie tylko w chwili, w której ktoś akurat otworzył stronę.
 
     Świece 1m idą od `terminal_candle_at` (ostatni PEŁNY przegląd świecami), nie
     od ostatniego midu: przy odświeżaniu co kilkanaście sekund knot między
@@ -424,7 +431,7 @@ def sync(session, acc: Account, now: datetime | None = None,
     if not poz and not zlec:
         acc.terminal_open = False
         acc.terminal_sync_at = acc.terminal_candle_at = now
-        return [], {}, None
+        return [], {}, {}
     teraz_ms = _ms(now)
     pocz = acc.terminal_sync_at or min([t.opened_at for t in poz] + [z.created_at for z in zlec])
     od_swiec = min(_ms(acc.terminal_candle_at or pocz), _ms(pocz))
@@ -449,17 +456,53 @@ def sync(session, acc: Account, now: datetime | None = None,
     for coin, px in mids.items():
         swiece.setdefault(coin, {})[teraz_ms - 1] = {"t": teraz_ms - 1, "o": px, "h": px, "l": px, "c": px}
 
-    najnizsze: float | None = None
     # Cena startowa każdego rynku: otwarcie pierwszej świecy okna. Bez niej
     # pozycja na rynku, który akurat nie miał świecy w danej minucie, wypadałaby
     # z equity — i dołek wychodził niższy (albo wyższy), niż był naprawdę.
     ostatnia: dict[str, float] = {coin: sw[min(sw)]["o"] for coin, sw in swiece.items() if sw}
     inne = _inne_otwarte_pnl(session, acc)
     weekend_bez_dodatku = not bool(getattr(acc, "weekend_trading", False))
+
+    def _equity(t: int, przy_otwarciu: bool) -> tuple[float, bool]:
+        """Equity w minucie `t`: na otwarciu albo na najgorszym ekstremum.
+        Drugi element mówi, czy w tej minucie była jakaś otwarta pozycja."""
+        ruch, byla = 0.0, False
+        for pos in poz:
+            m = markets.get(pos.symbol)
+            # Pozycja otwarta w tej minucie albo później: ekstremum mogło być
+            # przed wejściem, więc nie liczymy go jako jej straty.
+            if t != teraz_ms - 1 and _ms(pos.opened_at) >= t:
+                continue
+            byla = True
+            c = swiece.get(m.hl, {}).get(t) if m else None
+            if m is None or (c is None and m.hl not in ostatnia):
+                ruch += float(pos.pnl or 0.0)     # brak ceny z okna: ostatnia znana wycena
+                continue
+            if _zamrozony(m, t):
+                px = _cena_weekendowa(m.hl, now) or ostatnia.get(m.hl)
+            elif c is not None:
+                px = c["o"] if przy_otwarciu else (c["l"] if pos.side == "buy" else c["h"])
+            else:
+                px = ostatnia[m.hl]
+            if px:
+                ruch += markets.pnl_usd(m, pos.side, pos.qty or 0.0, pos.open_price, px)
+        return float(acc.balance or 0.0) + ruch + inne, byla
+
+    # Okno osobno dla każdej doby serwera: dzienna strata liczy się od equity
+    # z jej początku, więc dołek sprzed północy nie może trafić do nowej doby.
+    dni: dict[str, dict] = {}
+    poprzedni_dzien: str | None = None
     # Listy w pamięci: zapytanie do bazy tylko po zdarzeniu (okno ma do 4800 minut).
     zl_lista = zlec
     for t in sorted({t for sw in swiece.values() for t in sw}):
         kiedy = min(_dt(t + 59_999), now) if t != teraz_ms - 1 else now
+        dzien = _dzien_serwera(t)
+        if poprzedni_dzien is not None and dzien != poprzedni_dzien:
+            # Doba zaczęła się w tym oknie: jej baseline to equity z otwarcia
+            # pierwszej minuty (jak u brokera o północy), a nie z chwili, w której
+            # ktoś następnym razem otworzy stronę.
+            dni[dzien] = {"start_eq": _equity(t, True)[0], "start_bal": float(acc.balance or 0.0)}
+        poprzedni_dzien = dzien
         zmiana = False
         for coin, sw in swiece.items():
             c = sw.get(t)
@@ -498,27 +541,11 @@ def sync(session, acc: Account, now: datetime | None = None,
             session.flush()
             poz = _open_positions(session, acc)
         # equity na najgorszym ekstremum tej minuty
-        ruch = 0.0
-        for pos in poz:
-            m = markets.get(pos.symbol)
-            # Pozycja otwarta w tej minucie albo później: ekstremum mogło być
-            # przed wejściem, więc nie liczymy go jako jej straty.
-            if t != teraz_ms - 1 and _ms(pos.opened_at) >= t:
-                continue
-            c = swiece.get(m.hl, {}).get(t) if m else None
-            if m is None or (c is None and m.hl not in ostatnia):
-                ruch += float(pos.pnl or 0.0)     # brak ceny z okna: ostatnia znana wycena
-                continue
-            if _zamrozony(m, t):
-                px = _cena_weekendowa(m.hl, now) or ostatnia.get(m.hl)
-            elif c is not None:
-                px = c["l"] if pos.side == "buy" else c["h"]
-            else:
-                px = ostatnia[m.hl]
-            if px:
-                ruch += markets.pnl_usd(m, pos.side, pos.qty or 0.0, pos.open_price, px)
-        eq = float(acc.balance or 0.0) + ruch + inne
-        najnizsze = eq if najnizsze is None else min(najnizsze, eq)
+        eq, byla = _equity(t, False)
+        d = dni.setdefault(dzien, {})
+        d["low"] = min(d.get("low", eq), eq)
+        d["end_bal"] = float(acc.balance or 0.0)
+        d["pos"] = d.get("pos", False) or byla
 
     poz = _open_positions(session, acc)
     acc.terminal_open = bool(poz or _open_orders(session, acc))
@@ -531,40 +558,52 @@ def sync(session, acc: Account, now: datetime | None = None,
         # zamyka po kolei od najbardziej stratnej — przy jednym progu to samo).
         flatten(session, acc, "stop_out", cancel_orders=False)
         poz, marks = [], {}
-    # Dołek zostaje przy obiekcie do końca requestu: reguły (`snapshot_for`)
+    # Doby okna zostają przy obiekcie do końca requestu: reguły (`snapshot_for`)
     # robią własny przegląd, który widzi już tylko ostatnie sekundy — bez tego
     # dołek z pierwszego przeglądu by przepadł.
-    if najnizsze is not None:
-        stary = acc.__dict__.get("_terminal_dolek")
-        acc.__dict__["_terminal_dolek"] = najnizsze if stary is None else min(stary, najnizsze)
-    return poz, marks, najnizsze
+    zebrane = acc.__dict__.setdefault("_terminal_dni", {})
+    for dzien, d in dni.items():
+        s = zebrane.setdefault(dzien, {})
+        for k in ("start_eq", "start_bal"):       # początek doby: z wcześniejszego przeglądu
+            if k in d:
+                s.setdefault(k, d[k])
+        if "low" in d:
+            s["low"] = min(s.get("low", d["low"]), d["low"])
+            s["end_bal"] = d["end_bal"]
+            s["pos"] = s.get("pos", False) or d["pos"]
+    return poz, marks, dni
 
 
-def snapshot_for(session, acc: Account, bot_snap: MarketSnapshot | None) -> tuple[MarketSnapshot, float | None]:
-    """Snapshot equity dla pollera: księga terminala (+ bot, jeśli konto go ma)."""
+def snapshot_for(session, acc: Account, bot_snap: MarketSnapshot | None) -> tuple[MarketSnapshot, dict | None]:
+    """Snapshot equity dla pollera: księga terminala (+ bot, jeśli konto go ma).
+
+    Drugi element to doby okna (patrz `sync`) do `evaluate_window`."""
     przed = float(acc.balance or 0.0)
     poz, marks, _ = sync(session, acc)
-    najnizsze = acc.__dict__.pop("_terminal_dolek", None)
+    dni = acc.__dict__.pop("_terminal_dni", None) or None
+    dzis = dni.get(_dzien_serwera(_ms(_now()))) if dni else None
     fig = account_figures(session, acc, poz, marks)
     lots = fig["open_lots"]
+    # Pozycja zamknięta przez TP/SL pod nieobecność też robi z tej doby dzień handlowy.
+    byla = bool(poz) or bool(dzis and dzis.get("pos"))
     if bot_snap is not None:
         # Bot policzył saldo z `acc.balance` sprzed przeglądu (plus swoje
         # zamknięcie); dokładamy to, co terminal zrealizował w tym przeglądzie,
         # i floating terminala.
         saldo = round(bot_snap.balance + float(acc.balance or 0.0) - przed, 2)
-        if najnizsze is not None:
+        if dzis and "low" in dzis:
             # Dołek liczył floating bota z jego wiersza (już po ticku bota),
             # brakuje mu tylko zamknięcia bota, którego nie ma jeszcze w saldzie.
-            najnizsze += saldo - float(acc.balance or 0.0)
+            dzis["low"] += saldo - float(acc.balance or 0.0)
         snap = MarketSnapshot(
             balance=saldo, equity=round(saldo + bot_snap.open_pnl + fig["floating"], 2),
             open_pnl=round(bot_snap.open_pnl + fig["floating"], 2),
-            has_open_position=bot_snap.has_open_position or bool(poz),
+            has_open_position=bot_snap.has_open_position or byla,
             volume_lots=round(bot_snap.volume_lots + lots, 4), volume_known=True)
     else:
         snap = MarketSnapshot(balance=fig["balance"], equity=fig["equity"], open_pnl=fig["floating"],
-                              has_open_position=bool(poz), volume_lots=lots, volume_known=True)
-    return snap, najnizsze
+                              has_open_position=byla, volume_lots=lots, volume_known=True)
+    return snap, dni
 
 
 def _cena_z_wyceny(pos: Trade) -> float:
@@ -602,19 +641,49 @@ def flatten(session, acc: Account, reason: str, cancel_orders: bool = True) -> i
     return n
 
 
-def evaluate_low(cfg, rt, tick, najnizsze: float | None):
-    """Reguły na najniższym equity okna — na KOPII stanu konta.
+def evaluate_window(cfg, rt, tick, dni: dict | None):
+    """Reguły na przebiegu okna świec — doba po dobie serwera.
 
-    Gdy dołek nie łamie limitu, nic się nie zmienia (bez fałszywego szczytu
-    czy baseline'u dnia). Gdy łamie — wynik i stan z kopii zastępują zwykły."""
-    if najnizsze is None or najnizsze >= tick.equity - 0.005:
+    Okno może przejść przez północ (nikt nie patrzył na konto): wtedy minione
+    doby dostają SWÓJ dołek i SWÓJ baseline, a nowa — baseline z equity
+    o północy, nie z chwili przeglądu. Minione doby idą na prawdziwym stanie
+    (to już historia: ich saldo, best-day, dzień handlowy), bieżąca na KOPII —
+    dołek bez breachu nie może podbić szczytu ani ruszyć baseline'u. Zwraca
+    (wynik, stan), gdy któraś doba rozstrzyga konto (breach, zaliczenie fazy),
+    inaczej None i zwykła ocena bieżącego ticku."""
+    if not dni:
         return None
-    kopia = copy.deepcopy(rt)
-    dol = copy.copy(tick)
-    dol.equity = round(najnizsze, 2)
-    dol.open_pnl = round(najnizsze - tick.balance, 2)
-    res = rules.evaluate(cfg, kopia, dol)
-    return (res, kopia) if res.failed else None
+    for dzien in sorted(dni):
+        if dzien > tick.day_key or (rt.day_key and dzien < rt.day_key):
+            continue
+        d = dni[dzien]
+        if dzien != rt.day_key:
+            if "start_eq" in d:
+                rules.start_day(rt, dzien, d["start_bal"], d["start_eq"])
+            else:
+                # Północ wypadła przed oknem: najbliższy znany stan sprzed doby.
+                rules.start_day(rt, dzien, rt.balance or tick.balance, rt.equity or tick.equity)
+        if "low" not in d:
+            continue
+        if dzien < tick.day_key:
+            dol = copy.copy(tick)
+            dol.day_key = dzien
+            dol.balance = round(d["end_bal"], 2)
+            dol.equity = round(d["low"], 2)
+            dol.open_pnl = round(d["low"] - d["end_bal"], 2)
+            dol.has_open_position = bool(d.get("pos"))
+            res = rules.evaluate(cfg, rt, dol)
+            if res.failed or res.passed_phase:
+                return res, rt
+        elif d["low"] < tick.equity - 0.005:
+            kopia = copy.deepcopy(rt)
+            dol = copy.copy(tick)
+            dol.equity = round(d["low"], 2)
+            dol.open_pnl = round(d["low"] - tick.balance, 2)
+            res = rules.evaluate(cfg, kopia, dol)
+            if res.failed:
+                return res, kopia
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -662,6 +731,9 @@ def _konto(session, w: Who, account_id: int | None) -> Account:
 
 def _blokada_handlu(acc: Account) -> str | None:
     if acc.status not in TRADABLE:
+        if acc.status == "failed" and acc.breach_reason:
+            # Trader ma wiedzieć, która reguła zamknęła konto, a nie tylko że jest zamknięte.
+            return f"This account is closed for trading. {acc.breach_reason.rstrip('.')}."
         return "This account is closed for trading."
     if acc.metaapi_account_id:
         return "This account is tracked live from MetaTrader 5. Place trades in MT5."
@@ -757,13 +829,49 @@ def _ocen(session, acc: Account) -> None:
     from .feed import NullFeed
     acc.terminal_eval_at = _now()
     asyncio.run(poller.process_account(session, acc, NullFeed()))
+    acc.__dict__["_terminal_ocenione"] = True
+
+
+def _stan_ksiegi(session, acc: Account) -> tuple:
+    return (round(float(acc.balance or 0.0), 2), len(_open_positions(session, acc)),
+            len(_open_orders(session, acc)))
+
+
+def _okno_rozstrzyga(acc: Account, dni: dict) -> bool:
+    """Przegląd sięgnął innej doby serwera niż ostatnia ocena albo dołek dotknął
+    podłogi — reguły muszą to zobaczyć w tym samym requeście, bo doby okna
+    żyją tylko do jego końca."""
+    if not dni:
+        return False
+    if any(dzien != (acc.day_key or "") for dzien in dni):
+        return True
+    dolek = min((d["low"] for d in dni.values() if "low" in d), default=None)
+    return dolek is not None and dolek <= _najwyzsza_podloga(acc)
+
+
+def _przeglad_przed_akcja(session, acc: Account) -> None:
+    """Przegląd świecami przed akcją tradera — i ocena reguł, gdy coś rozstrzygnął.
+
+    Akcja nie może wyprzedzić tego, co rynek już zrobił: zlecenie złożone po
+    breachu, którego nikt jeszcze nie policzył, wypełniłoby się i zaraz zamknęło
+    z breachem (z opłatami), a po trafionym celu poszłoby jeszcze do starej fazy.
+    Anulowanie czy zmiana TP/SL nie mają własnej oceny, więc bez tego dołek
+    z okna przepadłby razem z requestem."""
+    przed = _stan_ksiegi(session, acc)
+    _, _, dni = sync(session, acc, dokladnie=True)
+    if acc.terminal_used and (_stan_ksiegi(session, acc) != przed or _okno_rozstrzyga(acc, dni)):
+        session.flush()
+        _ocen(session, acc)
+    if acc.status not in TRADABLE:
+        session.commit()
+        raise HTTPException(409, _blokada_handlu(acc))
 
 
 def _zapisz_i_odmow(session, acc: Account, kod: int, tekst: str):
     """Przegląd przed akcją coś rozstrzygnął (SL, wypełnienie), więc akcja nie ma
     już sensu — ale wynik przeglądu zapisujemy i oceniamy, zamiast cofać go wyjątkiem."""
     session.flush()
-    if acc.terminal_used:
+    if acc.terminal_used and not acc.__dict__.get("_terminal_ocenione"):
         _ocen(session, acc)
     session.commit()
     raise HTTPException(kod, tekst)
@@ -798,7 +906,12 @@ def api_accounts(w: Who = Depends(who)):
     try:
         konta = (session.query(Account).filter(Account.trader_id == w.trader_id)
                  .order_by(Account.id.desc()).all())
-        return {"accounts": [_konto_dict(a) for a in konta if a.status in TRADABLE + ("passed",)]}
+        # Konto zamknięte breachem po handlu w terminalu zostaje na liście (szare, „Not
+        # tradable", z powodem) — inaczej trader widzi „No account" i nie wie, co się stało.
+        widoczne = [a for a in konta if a.status in TRADABLE + ("passed",)
+                    or (a.status == "failed" and a.terminal_used)]
+        widoczne.sort(key=lambda a: _blokada_handlu(a) is not None)
+        return {"accounts": [_konto_dict(a) for a in widoczne]}
     finally:
         session.close()
 
@@ -808,16 +921,15 @@ def api_state(account_id: int | None = None, w: Who = Depends(who)):
     def run(session):
         acc = _konto(session, w, account_id)
         if acc.terminal_open:
-            przed = (round(float(acc.balance or 0.0), 2), len(_open_positions(session, acc)),
-                     len(_open_orders(session, acc)))
-            poz, marks, dolek = sync(session, acc)
-            po = (round(float(acc.balance or 0.0), 2), len(poz), len(_open_orders(session, acc)))
+            przed = _stan_ksiegi(session, acc)
+            poz, marks, dni = sync(session, acc)
+            po = _stan_ksiegi(session, acc)
             ostatnia = acc.terminal_eval_at
             if ostatnia is not None and ostatnia.tzinfo is None:
                 ostatnia = ostatnia.replace(tzinfo=timezone.utc)
             ocenic = (po != przed or ostatnia is None
                       or _now() - ostatnia > timedelta(seconds=EVAL_EVERY_S)
-                      or (dolek is not None and dolek <= _najwyzsza_podloga(acc)))
+                      or _okno_rozstrzyga(acc, dni))
             session.flush()
             if ocenic and acc.terminal_used:
                 _ocen(session, acc)
@@ -863,7 +975,7 @@ def api_order(payload: OrderIn, w: Who = Depends(who_trade)):
             raise HTTPException(409, powod)
         bylo_otwarte = bool(acc.terminal_open)
         if bylo_otwarte:
-            sync(session, acc, dokladnie=True)
+            _przeglad_przed_akcja(session, acc)
         teraz = _now()
         if payload.kind == "market" and _zamrozony(m, _ms(teraz)):
             # W weekend pozycję na tym rynku zamyka tylko „Close" — po cenie z piątku.
@@ -940,7 +1052,7 @@ def api_cancel(order_id: int, account_id: int | None = None, w: Who = Depends(wh
         # a nie do anulowania. Przegląd zapisuje też konto (row_version), więc
         # równoległe wypełnienie i anulowanie nie nadpiszą się po cichu.
         if acc.terminal_open:
-            sync(session, acc, dokladnie=True)
+            _przeglad_przed_akcja(session, acc)
         z = session.get(TerminalOrder, order_id)
         if z is None or z.account_id != acc.id:
             raise HTTPException(404, "Order not found")
@@ -983,7 +1095,7 @@ def api_close(trade_id: int, payload: CloseIn, w: Who = Depends(who_trade)):
         acc = _konto(session, w, payload.account_id)
         if acc.status not in TRADABLE:
             raise HTTPException(409, "This account is closed for trading.")
-        sync(session, acc, dokladnie=True)
+        _przeglad_przed_akcja(session, acc)
         pos = session.get(Trade, trade_id)
         if pos is None or pos.account_id != acc.id or pos.source != "terminal":
             raise HTTPException(404, "Position not found")
@@ -1011,7 +1123,7 @@ def api_close_all(payload: AllIn, w: Who = Depends(who_trade)):
         acc = _konto(session, w, payload.account_id)
         if acc.status not in TRADABLE:
             raise HTTPException(409, "This account is closed for trading.")
-        sync(session, acc, dokladnie=True)
+        _przeglad_przed_akcja(session, acc)
         for pos in _open_positions(session, acc):
             _zamknij_rynkowo(session, acc, pos, pos.qty or 0.0, 0.05)
         acc.terminal_open = bool(_open_orders(session, acc))
@@ -1029,7 +1141,7 @@ def api_cancel_all(payload: AllIn, w: Who = Depends(who_trade)):
     def run(session):
         acc = _konto(session, w, payload.account_id)
         if acc.terminal_open:
-            sync(session, acc, dokladnie=True)
+            _przeglad_przed_akcja(session, acc)
         teraz = _now()
         for z in _open_orders(session, acc):
             z.status, z.done_at, z.note = "cancelled", teraz, "Cancelled by you"
@@ -1053,7 +1165,7 @@ def api_tpsl(trade_id: int, payload: TpSlIn, w: Who = Depends(who_trade)):
         # Najpierw przegląd świecami: SL, który rynek już trafił, zamyka pozycję —
         # nie da się go przesunąć po fakcie, patrząc na knot na wykresie.
         if acc.terminal_open:
-            sync(session, acc, dokladnie=True)
+            _przeglad_przed_akcja(session, acc)
         pos = session.get(Trade, trade_id)
         if pos is None or pos.account_id != acc.id or pos.source != "terminal":
             raise HTTPException(404, "Position not found")

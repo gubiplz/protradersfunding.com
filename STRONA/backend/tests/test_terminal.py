@@ -237,6 +237,10 @@ def test_dolek_equity_w_oknie_lamie_dzienna_strate(rynek):
     with TestClient(app) as c:
         r = _zlec(c, h, aid)
         assert r.status_code == 409 and "closed for trading" in r.json()["detail"]
+        assert "daily loss floor" in r.json()["detail"]
+        # Konto zostaje w terminalu jako nieaktywne, z powodem — nie znika w „No account".
+        konto = next(a for a in c.get("/api/terminal/accounts", headers=h).json()["accounts"] if a["id"] == aid)
+        assert not konto["tradable"] and "daily loss floor" in konto["reason"]
 
 
 def test_tylko_konto_ptf_i_tylko_wlasne_konta(rynek):
@@ -405,6 +409,93 @@ def test_zaliczenie_fazy_zamyka_pozycje_terminala(rynek):
     a = _acc(aid)
     assert a.phase == "eval_2" and a.balance == 100_000.0 and not a.terminal_open
     assert [t[2:4] for t in _trades(aid)] == [("closed", "phase")]
+
+
+@pytest.mark.parametrize("akcja", ["order", "tpsl", "cancel-all"])
+def test_akcja_po_niepoliczonym_breachu(rynek, akcja):
+    """Pierwsza akcja po powrocie widzi breach z okna, zanim cokolwiek zrobi:
+    nowe zlecenie nie wypełnia się na koncie, które już straciło dzienny limit."""
+    aid, h = _konto()
+    with TestClient(app) as c:
+        pid = _zlec(c, h, aid, qty=5).json()["positions"][0]["id"]
+        _cofnij_przeglad(aid, 3)
+        rynek.swiece["BTC"] = [_swieca(2, 50_000, 50_000, 48_900, 49_950)]
+        rynek.px["BTC"] = 50_000.0
+        if akcja == "order":
+            r = _zlec(c, h, aid, qty=1)
+        elif akcja == "tpsl":
+            r = c.patch(f"/api/terminal/positions/{pid}", headers=h, json={"account_id": aid, "sl": 49_000})
+        else:
+            r = c.post("/api/terminal/cancel-all", headers=h, json={"account_id": aid})
+        assert r.status_code == 409 and "closed for trading" in r.json()["detail"]
+    assert _acc(aid).status == "failed"
+    assert [t[2:4] for t in _trades(aid)] == [("closed", "breach")]
+
+
+def _polnoc_serwera(monkeypatch, minut_temu):
+    """Strefa serwera, w której jego północ wypadła `minut_temu` minut temu."""
+    teraz = datetime.now(timezone.utc)
+    przes = (minut_temu - (teraz.hour * 60 + teraz.minute)) % 1440
+    monkeypatch.setattr(terminal.settings, "server_utc_offset_hours", przes / 60)
+    serwer = teraz + timedelta(minutes=przes)
+    return (serwer - timedelta(days=1)).strftime("%Y-%m-%d"), serwer.strftime("%Y-%m-%d")
+
+
+def _ocena_wczoraj(aid, wczoraj, minut_temu):
+    """Ostatnia ocena reguł była wczoraj (doby serwera), przy equity 100k."""
+    s = SessionLocal()
+    a = s.get(Account, aid)
+    a.day_key = wczoraj
+    a.day_start_equity = a.day_start_balance = 100_000.0
+    a.terminal_eval_at = datetime.now(timezone.utc) - timedelta(minutes=minut_temu)
+    s.commit(); s.close()
+
+
+def test_dzienna_strata_sprzed_polnocy_nie_ginie(rynek, monkeypatch):
+    """Nikt nie patrzył na konto przez północ: wczorajszy dołek liczy się do
+    WCZORAJSZEGO limitu, a nie znika przy baseline nowej doby."""
+    wczoraj, _ = _polnoc_serwera(monkeypatch, 30)
+    aid, h = _konto()
+    with TestClient(app) as c:
+        assert _zlec(c, h, aid, qty=5).status_code == 200
+        _cofnij_przeglad(aid, 60)
+        _ocena_wczoraj(aid, wczoraj, 60)
+        # 23:40 serwera: -1100 na 5 BTC (-5,5k przy limicie 5k); o 00:10 cena już wróciła.
+        rynek.swiece["BTC"] = [_swieca(50, 50_000, 50_000, 48_900, 49_950),
+                               _swieca(20, 50_000, 50_000, 50_000, 50_000)]
+        rynek.px["BTC"] = 50_000.0
+        c.get(f"/api/terminal/state?account_id={aid}", headers=h)
+    assert _acc(aid).status == "failed"
+    s = SessionLocal()
+    try:
+        assert s.query(Breach).filter(Breach.account_id == aid).first().type == "daily_loss"
+    finally:
+        s.close()
+
+
+def test_baseline_doby_to_equity_o_polnocy_serwera(rynek, monkeypatch):
+    """Dzienna strata liczy się od equity o północy serwera, nie od chwili,
+    w której ktoś pierwszy raz w tej dobie otworzył stronę."""
+    wczoraj, dzis = _polnoc_serwera(monkeypatch, 30)
+    aid, h = _konto()
+    with TestClient(app) as c:
+        st = _zlec(c, h, aid, qty=5).json()
+        saldo, wejscie = st["account"]["balance"], st["positions"][0]["entry"]
+        _cofnij_przeglad(aid, 60)
+        _ocena_wczoraj(aid, wczoraj, 60)
+        # Północ przy 50 000, potem zjazd do 49 200: -4k od północy, limit 5k stoi.
+        rynek.swiece["BTC"] = [_swieca(40, 50_000, 50_000, 50_000, 50_000),
+                               _swieca(29, 50_000, 50_000, 49_200, 49_200),
+                               _swieca(10, 49_200, 49_200, 49_200, 49_200)]
+        rynek.px["BTC"] = 49_200.0
+        c.get(f"/api/terminal/state?account_id={aid}", headers=h)
+        a = _acc(aid)
+        assert a.status == "active" and a.day_key == dzis
+        assert abs(a.day_start_equity - (saldo + 5 * (50_000 - wejscie))) < 1
+        # Jeszcze 300 w dół: -5,5k od północy, choć od pierwszego przeglądu doby tylko -1,5k.
+        rynek.px["BTC"] = 48_900.0
+        c.get(f"/api/terminal/state?account_id={aid}", headers=h)
+    assert _acc(aid).status == "failed"
 
 
 def test_dzwignia_zgodna_z_tym_co_obiecuje_ptf():

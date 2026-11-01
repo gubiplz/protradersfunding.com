@@ -194,10 +194,12 @@ def test_plaski_rynek_czeka_a_potem_wieksza_pozycja(monkeypatch):
     assert not bot_ceny.zamknij(tr, tradebot.INSTRUMENTS["BTCUSD"], tradebot._point_value, 350.0,
                                 teraz, 6.0, random.Random(1))
     # Z ruchem, ale za małym na 0,5 lota: większy wolumen (do limitu) trafia plan.
-    monkeypatch.setattr(markets, "candles", _swiece_z(0.05))
+    # Fala 0,2 o każdej porze: szybki składnik daje w oknie ≥ ~30 w jedną stronę
+    # (≤ ~12 lotów przy limicie 20), a całość ≤ ~520 — za mało na 0,5 lota (700).
+    monkeypatch.setattr(markets, "candles", _swiece_z(0.2))
     bot_ceny._CACHE.clear()
     assert bot_ceny.zamknij(tr, tradebot.INSTRUMENTS["BTCUSD"], tradebot._point_value, 350.0,
-                            teraz, 6.0, random.Random(1))
+                            teraz, 20.0, random.Random(1))
     assert tr.lots > 0.5 and abs(tr.pnl - 350.0) <= 0.1 * tr.lots + 0.011
     bot_ceny._CACHE.clear()
 

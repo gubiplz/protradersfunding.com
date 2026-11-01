@@ -114,6 +114,22 @@ def profit_target_equity(cfg: ChallengeConfig) -> float:
     return round(cfg.initial_balance * (1 + cfg.profit_target_pct / 100.0), 2)
 
 
+def start_day(rt: AccountRuntime, day_key: str, balance: float, equity: float) -> None:
+    """Zamyka poprzedni dzień (zysk do best-day) i ustawia baseline nowego.
+
+    Zwykle wołane z `evaluate` z wartościami pierwszego ticku dnia. Księga
+    terminala zna equity z samej północy serwera (świece 1m), więc podaje je
+    wprost — wtedy baseline nie zależy od tego, kiedy ktoś pierwszy raz spojrzał.
+    """
+    if rt.day_key:
+        prev_day_profit = rt.balance - rt.day_start_balance
+        if prev_day_profit > rt.best_day_profit:
+            rt.best_day_profit = prev_day_profit
+    rt.day_start_balance = balance
+    rt.day_key = day_key
+    rt.day_start_equity = equity
+
+
 def evaluate(cfg: ChallengeConfig, rt: AccountRuntime, tick: EquityTick) -> EvalResult:
     """Aktualizuje `rt` na podstawie `tick` i zwraca wynik (breache / pass).
 
@@ -128,13 +144,7 @@ def evaluate(cfg: ChallengeConfig, rt: AccountRuntime, tick: EquityTick) -> Eval
     if rt.day_start_balance == 0.0:
         rt.day_start_balance = tick.balance        # inicjalizacja przy pierwszym ticku
     if tick.day_key != rt.day_key:
-        if rt.day_key:  # zamknij poprzedni dzień: zapisz jego zysk do best-day
-            prev_day_profit = rt.balance - rt.day_start_balance
-            if prev_day_profit > rt.best_day_profit:
-                rt.best_day_profit = prev_day_profit
-        rt.day_start_balance = tick.balance
-        rt.day_key = tick.day_key
-        rt.day_start_equity = tick.equity
+        start_day(rt, tick.day_key, tick.balance, tick.equity)
 
     # --- 2. Aktualizacja bieżących wartości + szczytu ---
     rt.balance = tick.balance

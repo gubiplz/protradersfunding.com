@@ -328,7 +328,7 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
     # Konto handlowało w terminalu PTF: saldo prowadzi nasza księga, feed
     # (np. losowy spacer `sim`) nie może go nadpisać.
     ksiega = bool(getattr(acc, "terminal_used", False))
-    najnizsze = None
+    dni = None
     if bot_driven:
         # Gałąź MUSI być przed feed.snapshot: MetaQuotesWebFeed odpala w tle
         # logowanie do web terminala już przy samym zapytaniu o snapshot.
@@ -345,7 +345,7 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
         snap = await feed.snapshot(acc.login, acc.metaapi_account_id, acc.initial_balance,
                                    password=acc.platform_password, server=acc.platform_server)
     if ksiega:
-        snap, najnizsze = terminal.snapshot_for(session, acc, snap)
+        snap, dni = terminal.snapshot_for(session, acc, snap)
     if snap is None:
         return
 
@@ -365,11 +365,11 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
         days_elapsed=(datetime.now(timezone.utc) - (acc.started_at.replace(tzinfo=timezone.utc) if acc.started_at.tzinfo is None else acc.started_at)).days,
     )
 
-    # Dołek equity między przeglądami terminala (świece 1m) też może złamać
-    # limit — sprawdzany na kopii stanu, więc bez breachu nic nie zmienia.
-    dolek = terminal.evaluate_low(cfg, rt, tick, najnizsze) if ksiega else None
-    if dolek is not None:
-        res, rt = dolek
+    # Okno świec 1m terminala doba po dobie: dołek equity między przeglądami
+    # też może złamać limit, a doba przespana przez północ ma swój baseline.
+    okno = terminal.evaluate_window(cfg, rt, tick, dni) if ksiega else None
+    if okno is not None:
+        res, rt = okno
     else:
         res = rules.evaluate(cfg, rt, tick)
     _write_runtime(acc, rt)
