@@ -360,7 +360,7 @@
   }
   // Zdarzenia każdego rysunku: usunięcie prawym, zapis po przesunięciu, zaznaczenie (Delete).
   const drawEvts = {
-    onRightClick: ({ overlay }) => { removeDrawn(overlay.id); return true; },
+    onRightClick: ({ overlay }) => { prawyNaRysunku = Date.now(); removeDrawn(overlay.id); return true; },
     onPressedMoveEnd: ({ overlay }) => { const o = drawn.find((x) => x.id === overlay.id); if (o) { o.points = pts(overlay); saveDrawn(); } },
     onSelected: ({ overlay }) => { selDraw = overlay.id; },
     onDeselected: () => { selDraw = null; },
@@ -1629,6 +1629,86 @@
       openModal('tCase');
     }, 1000);
   }
+
+  /* ---------- prawy przycisk na wykresie (jak w TradingView) ---------- */
+  // Zlecenie po cenie spod kursora (limit albo stop — zależnie od strony rynku), widok,
+  // kopiowanie ceny, transakcje i rysunki na wykresie, wskaźniki.
+  let prawyNaRysunku = 0, ctxPx = null;
+  const ctxMenu = document.createElement('div');
+  ctxMenu.className = 't-menu t-ctx';
+  ctxMenu.hidden = true;
+  ctxMenu.setAttribute('role', 'menu');
+  document.body.appendChild(ctxMenu);
+  function resetView() { if (!chart) return; chart.setBarSpace(8); chart.scrollToRealTime(); }
+  $('tChart').addEventListener('contextmenu', (ev) => {
+    if (!chart) return;
+    ev.preventDefault();
+    const r = $('tChart').getBoundingClientRect(), x = ev.clientX - r.left, y = ev.clientY - r.top;
+    setTimeout(() => {
+      if (Date.now() - prawyNaRysunku < 400) return;      // prawy klik usunął rysunek — bez menu
+      let cena = null;
+      try {
+        const pane = chart.getSize('candle_pane');
+        if (!pane || y <= pane.top + pane.height) {
+          const pt = chart.convertFromPixel({ x, y }, { paneId: 'candle_pane', absolute: true });
+          if (pt && ok(pt.value) && pt.value > 0) cena = pt.value;
+        }
+      } catch (e) {}
+      ctxPx = cena;
+      openCtx(ev.clientX, ev.clientY);
+    }, 0);
+  });
+  function openCtx(cx, cy) {
+    const m = S.m, mark = markPx(), it = [];
+    const btn = (a, t, extra) => `<button type="button" role="menuitem" data-ctx="${a}">${t}${extra || ''}</button>`;
+    if (ctxPx) {
+      const ps = px(m, ctxPx), pod = !mark || ctxPx < mark;
+      it.push(btn('buy', `${pod ? 'Buy Limit' : 'Buy Stop'} at <b class="num">${ps}</b>`), btn('sell', `${pod ? 'Sell Stop' : 'Sell Limit'} at <b class="num">${ps}</b>`), '<hr>');
+    }
+    it.push(btn('reset', 'Reset chart view', '<kbd>⌥ R</kbd>'));
+    if (ctxPx) it.push(btn('copy', `Copy price <span class="num">${px(m, ctxPx)}</span>`));
+    it.push('<hr>', btn('trades', 'Show trades on chart', S.showTrades ? '<span class="chk">✓</span>' : ''),
+      btn('hidedraw', 'Hide drawings', $('tHideDraw').classList.contains('on') ? '<span class="chk">✓</span>' : ''));
+    if (drawn.length) it.push(btn('cleardraw', `Remove ${drawn.length} drawing${drawn.length > 1 ? 's' : ''}`));
+    if (inds.length) it.push(btn('rmind', `Remove ${inds.length} indicator${inds.length > 1 ? 's' : ''}`));
+    closeMenus();
+    ctxMenu.innerHTML = it.join('');
+    ctxMenu.hidden = false;
+    Object.assign(ctxMenu.style, { position: 'fixed', left: '0px', top: '0px', right: 'auto', bottom: 'auto' });
+    ctxMenu.style.left = Math.max(8, Math.min(cx, innerWidth - ctxMenu.offsetWidth - 8)) + 'px';
+    ctxMenu.style.top = Math.max(8, Math.min(cy, innerHeight - ctxMenu.offsetHeight - 8)) + 'px';
+  }
+  ctxMenu.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-ctx]');
+    if (!b) return;
+    e.stopPropagation();
+    ctxMenu.hidden = true;
+    const a = b.dataset.ctx, m = S.m;
+    if (a === 'buy' || a === 'sell') {
+      const pod = !markPx() || ctxPx < markPx();
+      setSide(a);
+      setKind((a === 'buy') === pod ? 'limit' : 'stop');
+      $('tPx').value = ctxPx.toFixed(m.px_dec);
+      updateTicket();
+      if (narrow.matches) setMPane('ticket');
+      $('tSize').focus();
+    } else if (a === 'reset') resetView();
+    else if (a === 'copy') {
+      const v = ctxPx.toFixed(m.px_dec);
+      const cb = navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(v) : Promise.reject();
+      cb.then(() => toast('Price copied', v), () => toast('Copy this price', v));
+    } else if (a === 'trades') $('tShowTrades').click();
+    else if (a === 'hidedraw') $('tHideDraw').click();
+    else if (a === 'cleardraw') $('tClearDraw').click();
+    else if (a === 'rmind') {
+      inds.forEach((n) => chart.removeIndicator({ name: n }));
+      inds = [];
+      ls.set('pf_term_inds', '[]');
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.altKey && e.code === 'KeyR' && !e.target.closest('input,textarea,select')) { e.preventDefault(); resetView(); }
+  });
 
   /* ---------- menu (burger) — jak na stronie PTF, gdy linki nie mieszczą się w nagłówku ---------- */
   function setMenu(open) {

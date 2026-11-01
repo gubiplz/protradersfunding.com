@@ -227,6 +227,11 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-menu>button.on{color:var(--acc)}
 .t-menu .tag{margin-left:auto;font-size:11px;color:var(--muted);background:var(--panel2);padding:2px 7px;border-radius:6px}
 .t-menu .chk{margin-left:auto;color:var(--acc)}
+/* menu pod prawym przyciskiem na wykresie */
+.t-ctx{min-width:250px;z-index:80}
+.t-ctx hr{border:0;border-top:1px solid var(--line2);margin:4px 2px}
+.t-ctx kbd{margin-left:auto;font:11.5px var(--mono);color:var(--dim)}
+.t-ctx b.num{font-weight:600}
 .t-menu h6{font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;padding:8px 10px 4px}
 .t-ind{width:260px;max-height:360px;overflow-y:auto}
 .t-cols{width:220px;left:auto;right:0}
