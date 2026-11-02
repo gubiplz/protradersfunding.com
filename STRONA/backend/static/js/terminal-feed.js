@@ -319,5 +319,41 @@
     };
   }
 
-  window.PTFeed = { VENUES, venuesFor, history, stream, allMids, contexts, onLatency: hl.onLatency, onHlState: hl.onState, MS };
+  /* ---------- Trading Data / Info ----------
+     Open interest history: Binance (value at historical mark prices) or Bybit (contracts,
+     valued at the candle close). Hyperliquid publishes no OI history. Results are cached
+     for a minute; CoinGecko coin data for 15 minutes (its free API is rate limited). */
+  const cache = new Map();
+  const cached = (key, ttl, load) => {
+    const hit = cache.get(key);
+    if (hit && Date.now() - hit.at < ttl) return hit.p;
+    const p = load();
+    cache.set(key, { at: Date.now(), p });
+    p.catch(() => cache.delete(key));
+    return p;
+  };
+  const OI_SRC = (m, venue) => (venue === 'bybit' && m.by ? 'bybit' : m.bn ? 'binance' : m.by ? 'bybit' : null);
+  const BY_OI = { '15m': '15min', '1h': '1h', '4h': '4h' };
+  function oiHistory(m, venue, period, n) {
+    const src = OI_SRC(m, venue);
+    if (!src) return Promise.resolve(null);
+    return cached(`oi:${src}:${m.sym}:${period}:${n}`, 60000, async () => {
+      if (src === 'binance') {
+        const d = await getJ(`${BN_REST}/futures/data/openInterestHist?symbol=${m.bn}&period=${period}&limit=${n}`);
+        return { src, rows: d.map((x) => ({ t: x.timestamp, qty: +x.sumOpenInterest, usd: +x.sumOpenInterestValue })) };
+      }
+      const [d, k] = await Promise.all([
+        getJ(`${BY_REST}/v5/market/open-interest?category=linear&symbol=${m.by}&intervalTime=${BY_OI[period]}&limit=${Math.min(n, 200)}`),
+        history('bybit', m, period, Date.now(), n + 2),
+      ]);
+      const close = new Map(k.map((c) => [c.timestamp, c.close]));
+      const rows = ((d.result && d.result.list) || []).map((x) => ({ t: +x.timestamp, qty: +x.openInterest }))
+        .map((r) => ({ ...r, usd: close.has(r.t) ? r.qty * close.get(r.t) : null })).filter((r) => r.usd != null);
+      return { src, rows: rows.sort((a, b) => a.t - b.t) };
+    });
+  }
+  const priceHistory = (venue, m, period, n) => cached(`px:${venue}:${m.sym}:${period}:${n}`, 60000, () => history(venue, m, period, Date.now(), n));
+  const coinInfo = (id) => cached('cg:' + id, 900000, () => getJ(`https://api.coingecko.com/api/v3/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`));
+
+  window.PTFeed = { VENUES, venuesFor, history, stream, allMids, contexts, onLatency: hl.onLatency, onHlState: hl.onState, MS, OI_SRC, oiHistory, priceHistory, coinInfo };
 })();

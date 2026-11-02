@@ -27,7 +27,7 @@
   const fx = (v, d) => (ok(v) ? nf(d).format(v) : '—');
   const usd = (v, d = 2) => (ok(v) ? (v < 0 ? '-$' : '$') + nf(d).format(Math.abs(v)) : '—');
   const sUsd = (v) => (ok(v) ? (v > 0 ? '+' : v < 0 ? '-' : '') + '$' + nf(2).format(Math.abs(v)) : '—');
-  const big = (v) => (!ok(v) ? '—' : v >= 1e9 ? '$' + (v / 1e9).toFixed(2) + 'B' : v >= 1e6 ? '$' + (v / 1e6).toFixed(2) + 'M' : v >= 1e3 ? '$' + (v / 1e3).toFixed(1) + 'K' : '$' + v.toFixed(0));
+  const big = (v) => (!ok(v) ? '—' : v >= 1e12 ? '$' + (v / 1e12).toFixed(2) + 'T' : v >= 1e9 ? '$' + (v / 1e9).toFixed(2) + 'B' : v >= 1e6 ? '$' + (v / 1e6).toFixed(2) + 'M' : v >= 1e3 ? '$' + (v / 1e3).toFixed(1) + 'K' : '$' + v.toFixed(0));
   const pct = (v) => (ok(v) ? (v > 0 ? '+' : '') + v.toFixed(2) + '%' : '—');
   const px = (m, v) => fx(v, m.px_dec);
   const qtyF = (m, v) => fx(v, Math.min(Math.max(m.qty_dec, 0), 6));
@@ -578,29 +578,222 @@
   setInterval(() => { if (!document.hidden) clock(); }, 1000); clock();
 
   // zakładki wykresu
+  let cTab = 'chart';
   $$('[data-ctab]').forEach((b) => b.addEventListener('click', () => {
     tabOn($$('[data-ctab]'), (x) => x === b);
     $$('[data-cpane]').forEach((p) => p.classList.toggle('on', p.dataset.cpane === b.dataset.ctab));
-    if (b.dataset.ctab === 'chart') setTimeout(() => chart && chart.resize(), 20);
-    else renderInfo();
+    cTab = b.dataset.ctab;
+    if (cTab === 'chart') setTimeout(() => chart && chart.resize(), 20);
+    else renderInfo(true);
   }));
-  function renderInfo() {
+  /* Trading Data and Info redraw only when they are open, and the slow parts (OI history,
+     coin data) only when the market, venue or range changes — renderInfo is called on
+     every market-head refresh. */
+  function renderInfo(force) {
+    if (cTab === 'data') drawData(force);
+    else if (cTab === 'info') drawInfo(force);
+  }
+  const kv = (k, v, p) => `<div class="t-kv"><small>${k}</small><b class="num">${v}</b>${p ? `<p>${p}</p>` : ''}</div>`;
+  const qtyBig = (v) => (!ok(v) ? '—' : v >= 1e9 ? (v / 1e9).toFixed(2) + 'B' : v >= 1e6 ? (v / 1e6).toFixed(2) + 'M' : v >= 1e3 ? (v / 1e3).toFixed(2) + 'K' : nf(2).format(v));
+  const when = (ms) => new Date(ms).toLocaleString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+
+  /* ---------- Trading Data: open interest ---------- */
+  const OI_RANGE = { '24h': ['15m', 96, '24 Hours'], '7d': ['1h', 168, '7 Days'], '30d': ['4h', 180, '30 Days'] };
+  let oiRange = '24h', dataKey = '', dataSeq = 0;
+  function drawData(force) {
+    const m = S.m, src = F.OI_SRC(m, S.venue), key = [m.sym, src, oiRange, S.venue].join('|');
+    snapshotKv();
+    if (!force && key === dataKey) return;
+    dataKey = key;
+    const nr = ++dataSeq, [per, n, lbl] = OI_RANGE[oiRange];
+    const name = m.cls === 'crypto' ? m.base : m.sym;
+    $('tData').innerHTML = `<div class="t-oi">
+      <div class="t-oi-h"><div><h3>${esc(name)} Futures OI</h3><p>${src ? `Open interest at historical mark prices · ${F.VENUES[src].label}` : 'Current open interest on Hyperliquid. This market publishes no open interest history.'}</p></div><small id="tOiAt"></small></div>
+      <div class="t-oi-cards" id="tOiCards">${['Positions', ...(src ? ['OI Change (1h)', 'OI Change (4h)', 'OI Change (12h)', 'OI Change (24h)'] : [])].map((k) => `<div class="t-kv"><small>${k}</small><b class="num">—</b></div>`).join('')}</div>
+      <div class="t-oi-ch-h"><h4>Historical ${esc(name)} ${src ? 'Futures OI' : 'Price'}</h4>
+        <span class="t-lg"><i style="background:var(--brand)"></i>${esc(name)} Price</span>${src ? '<span class="t-lg"><i style="background:var(--up)"></i>Open Interest</span>' : ''}
+        <div class="t-rng" role="tablist">${Object.entries(OI_RANGE).map(([k, v]) => `<button type="button" data-oir="${k}" class="${k === oiRange ? 'on' : ''}">${v[2]}</button>`).join('')}</div></div>
+      <div class="t-oi-chart" id="tOiChart"><div class="t-oi-msg">Loading…</div></div>
+      <h4 class="t-oi-sub">Market snapshot</h4><div class="t-oi-snap" id="tOiSnap"></div></div>`;
+    snapshotKv();
+    const venuePx = src || 'hyperliquid';
+    Promise.all([
+      src ? F.oiHistory(m, S.venue, per, n + 1) : Promise.resolve(null),
+      src ? F.oiHistory(m, S.venue, '15m', 97) : Promise.resolve(null),
+      F.priceHistory(venuePx, m, per, n + 1),
+    ]).then(([oi, oi24, pxs]) => {
+      if (nr !== dataSeq) return;
+      const c = S.ctx[m.hl] || {}, last = oi && oi.rows[oi.rows.length - 1];
+      const now = last || (c.oi ? { usd: c.oi * (c.mark || 0), qty: c.oi } : null);
+      const ch = (k) => { const r = oi24 && oi24.rows; if (!r || r.length <= k) return null; const a = r[r.length - 1 - k].usd, b = r[r.length - 1].usd; return a ? (b / a - 1) * 100 : null; };
+      $('tOiCards').innerHTML = `<div class="t-kv"><small>Positions</small><b class="num">${now ? big(now.usd) : '—'}</b><p class="num">${now ? '≈ ' + qtyBig(now.qty) + ' ' + esc(m.base) : ''}</p></div>`
+        + (src ? [[4, '1h'], [16, '4h'], [48, '12h'], [96, '24h']].map(([k, l]) => { const v = ch(k); return `<div class="t-kv"><small>OI Change (${l})</small><b class="num ${cls(v)}">${pct(v)}</b></div>`; }).join('') : '');
+      $('tOiAt').textContent = 'Last updated: ' + when(last ? last.t : Date.now());
+      oiChart($('tOiChart'), m, pxs || [], oi ? oi.rows : null, per);
+    }).catch((e) => {
+      if (nr !== dataSeq) return;
+      dataKey = '';
+      $('tOiChart').innerHTML = `<div class="t-oi-msg">Data unavailable right now (${esc(e.message)}).</div>`;
+    });
+  }
+  function snapshotKv() {
+    const el = $('tOiSnap');
+    if (!el) return;
     const m = S.m, t = S.tk, c = S.ctx[m.hl] || {};
-    const kv = (k, v, p) => `<div class="t-kv"><small>${k}</small><b class="num">${v}</b>${p ? `<p>${p}</p>` : ''}</div>`;
-    $('tData').innerHTML = [
+    el.innerHTML = [
       kv('Mark price', px(m, t.mark || c.mark)), kv('24h change', `<span class="${cls(t.chg)}">${pct(t.chg)}</span>`),
-      kv('24h volume', big(t.vol || c.vol)), kv('Open interest', big(t.oiUsd || (c.oi && c.mark ? c.oi * c.mark : null))),
+      kv('24h volume', big(t.vol || c.vol)),
       kv('Funding (1h)', ok(t.funding) ? (t.funding * 100).toFixed(4) + '%' : '—', 'Exchange funding rate, for reference. PTF positions do not pay funding.'),
-      kv('Spread', $('tSpread').textContent), kv('Bid depth', $('tBidD').textContent), kv('Ask depth', $('tAskD').textContent),
+      kv('Spread', $('tSpread').textContent), kv('Bid / ask depth', `${$('tBidD').textContent} / ${$('tAskD').textContent}`),
     ].join('');
-    $('tInfo').innerHTML = [
-      kv('Market', `${m.sym} · ${esc(m.name)}`), kv('Category', CLS[m.cls]),
+  }
+  $('tData').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-oir]');
+    if (b && b.dataset.oir !== oiRange) { oiRange = b.dataset.oir; drawData(true); }
+  });
+  /* Two-axis chart: open interest (area, left axis) and price (line, right axis). */
+  function oiChart(el, m, pxs, oi, per) {
+    const W = Math.max(320, el.clientWidth), H = 300, L = 62, R = 64, T = 12, B = 28;
+    const t0 = Math.min(...(oi && oi.length ? [oi[0].t] : []), pxs.length ? pxs[0].timestamp : Infinity);
+    const t1 = Math.max(...(oi && oi.length ? [oi[oi.length - 1].t] : []), pxs.length ? pxs[pxs.length - 1].timestamp : 0);
+    if (!(t1 > t0)) { el.innerHTML = '<div class="t-oi-msg">No data for this range.</div>'; return; }
+    const X = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - R);
+    const rng = (vs) => { const lo = Math.min(...vs), hi = Math.max(...vs), p = (hi - lo) * 0.08 || hi * 0.01 || 1; return [lo - p, hi + p]; };
+    const pr = rng(pxs.map((k) => k.close)), Yp = (v) => T + (1 - (v - pr[0]) / (pr[1] - pr[0])) * (H - T - B);
+    const or = oi && oi.length ? rng(oi.map((r) => r.usd)) : null, Yo = (v) => T + (1 - (v - or[0]) / (or[1] - or[0])) * (H - T - B);
+    const grid = [], ticks = 6;
+    for (let i = 0; i <= ticks; i++) {
+      const y = T + (i / ticks) * (H - T - B);
+      grid.push(`<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" class="g"/>`);
+      if (or) grid.push(`<text x="${L - 8}" y="${y + 4}" text-anchor="end">${big(or[1] - (i / ticks) * (or[1] - or[0]))}</text>`);
+      grid.push(`<text x="${W - R + 8}" y="${y + 4}">${px(m, pr[1] - (i / ticks) * (pr[1] - pr[0]))}</text>`);
+    }
+    const day = per !== '15m';
+    for (let i = 0; i <= 7; i++) {
+      const t = t0 + (i / 7) * (t1 - t0), d = new Date(t);
+      const s = day ? d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+      grid.push(`<text x="${X(t)}" y="${H - 8}" text-anchor="middle">${s}</text>`);
+    }
+    let oiSvg = '';
+    if (or) {
+      const line = oi.map((r, i) => `${i ? 'L' : 'M'}${X(r.t).toFixed(1)},${Yo(r.usd).toFixed(1)}`).join('');
+      oiSvg = `<path d="${line}L${X(oi[oi.length - 1].t).toFixed(1)},${H - B}L${X(oi[0].t).toFixed(1)},${H - B}Z" class="oa"/><path d="${line}" class="ol"/>`;
+    }
+    const pLine = pxs.map((k, i) => `${i ? 'L' : 'M'}${X(k.timestamp).toFixed(1)},${Yp(k.close).toFixed(1)}`).join('');
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Open interest and price history">
+      <defs><linearGradient id="tOiGrad" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--up)" stop-opacity=".28"/><stop offset="1" stop-color="var(--up)" stop-opacity="0"/></linearGradient></defs>
+      ${grid.join('')}${oiSvg}<path d="${pLine}" class="pl"/><line class="xh" y1="${T}" y2="${H - B}" x1="-10" x2="-10"/></svg><div class="t-oi-tip" hidden></div>`;
+    const svg = el.querySelector('svg'), xh = svg.querySelector('.xh'), tip = el.querySelector('.t-oi-tip');
+    const near = (arr, t, k) => { let best = null, bd = Infinity; for (const a of arr) { const d = Math.abs(k(a) - t); if (d < bd) { bd = d; best = a; } } return best; };
+    svg.addEventListener('mousemove', (e) => {
+      const r = svg.getBoundingClientRect(), x = ((e.clientX - r.left) / r.width) * W;
+      if (x < L || x > W - R) { tip.hidden = true; xh.setAttribute('x1', -10); xh.setAttribute('x2', -10); return; }
+      const t = t0 + ((x - L) / (W - L - R)) * (t1 - t0), k = near(pxs, t, (a) => a.timestamp), o = oi && near(oi, t, (a) => a.t);
+      const tx = X(k ? k.timestamp : t);
+      xh.setAttribute('x1', tx); xh.setAttribute('x2', tx);
+      tip.innerHTML = `<b>${when(k ? k.timestamp : t)}</b>${o ? `<span><i style="background:var(--up)"></i>Open interest <b class="num">${big(o.usd)}</b></span>` : ''}<span><i style="background:var(--brand)"></i>Price <b class="num">${k ? px(m, k.close) : '—'}</b></span>`;
+      tip.hidden = false;
+      const left = (tx / W) * r.width;
+      tip.style.left = Math.min(r.width - tip.offsetWidth - 4, Math.max(4, left + 12)) + 'px';
+    });
+    svg.addEventListener('mouseleave', () => { tip.hidden = true; xh.setAttribute('x1', -10); xh.setAttribute('x2', -10); });
+  }
+  new ResizeObserver(() => { if (cTab === 'data' && $('tOiChart')) { dataKey = ''; drawData(true); } }).observe($('tData'));
+
+  /* ---------- Info ---------- */
+  // CoinGecko ids for crypto markets; other markets get a short overview of our own.
+  const CG = { BTC: 'bitcoin', ETH: 'ethereum', SOL: 'solana', XRP: 'ripple', LTC: 'litecoin', DOGE: 'dogecoin', BNB: 'binancecoin', ADA: 'cardano', AVAX: 'avalanche-2', LINK: 'chainlink', SUI: 'sui', HYPE: 'hyperliquid' };
+  const ABOUT = {
+    XAUUSD: 'Gold priced in US dollars per troy ounce. Central banks hold it as a reserve asset and traders use it as a hedge against inflation, currency weakness and market stress. It tends to react to real interest rates, the US dollar and geopolitical risk.',
+    XAGUSD: 'Silver priced in US dollars per troy ounce. It trades partly as a precious metal alongside gold and partly as an industrial metal used in electronics and solar panels, so it usually moves more sharply than gold.',
+    XPTUSD: 'Platinum priced in US dollars per troy ounce. Most demand comes from catalytic converters, industry and jewellery, and supply is concentrated in South Africa and Russia, which makes the price sensitive to mining and car-industry news.',
+    USOIL: 'West Texas Intermediate, the US benchmark crude oil, priced in US dollars per barrel. It reacts to OPEC+ decisions, US inventory data, refinery demand and the global growth outlook.',
+    UKOIL: 'Brent crude, the international oil benchmark from the North Sea, priced in US dollars per barrel. Around two thirds of the world’s physically traded crude is priced against it.',
+    NATGAS: 'US natural gas (Henry Hub) priced in US dollars per million British thermal units. Weather, storage reports and LNG exports drive it, and it is one of the most volatile commodity markets.',
+    SPX500: 'The S&P 500 index of 500 large US companies, the most followed measure of the US stock market. Technology, healthcare and financials carry the largest weights.',
+    NAS100: 'The Nasdaq 100 index of the 100 largest non-financial companies listed on the Nasdaq. It is heavily weighted towards technology and tends to move more than the broader market.',
+    JPN225: 'The Nikkei 225 index of leading companies listed in Tokyo, priced in yen points. It is sensitive to the yen exchange rate, exports and Bank of Japan policy.',
+    EURUSD: 'The euro against the US dollar, the most traded currency pair in the world. It moves with the interest-rate gap between the European Central Bank and the Federal Reserve and with economic data from both regions.',
+    GBPUSD: 'The British pound against the US dollar, often called “Cable”. Bank of England decisions, UK inflation and US data drive it.',
+    USDJPY: 'The US dollar against the Japanese yen. The gap between US and Japanese interest rates drives it, and the yen often strengthens in risk-off moves.',
+  };
+  let infoKey = '', infoSeq = 0;
+  function conditionsKv(m) {
+    return [
       kv('Leverage', '1:' + m.max_lev, 'Set for each market, the same on every account. Margin is shared across the account.'),
       kv('Contract size', `1 lot = ${fx(m.contract, 0)} ${m.base}`, 'Lots count toward the exposure cap of your account.'),
       kv('Trading fee', S.fee.toFixed(3) + '% per side', 'Charged on the order value when a position opens and when it closes.'),
       kv('Trading hours', m.cls === 'crypto' ? '24/7' : 'Mon–Fri', m.cls === 'crypto' ? 'On weekends with the Weekend Trading add-on.' : 'Closed Saturday and Sunday (server time). Open positions are valued at the Friday close.'),
-      kv('Prices', F.VENUES[S.venue].label, 'Orders, TP/SL and stop-outs settle at Hyperliquid prices.'),
+      kv('Prices', 'Hyperliquid', 'Orders, TP/SL and stop-outs settle at Hyperliquid prices.'),
     ].join('');
+  }
+  const stat = (k, v) => `<div class="t-st"><span>${k}</span><b class="num">${v}</b></div>`;
+  const plain = (html) => (new DOMParser().parseFromString(html || '', 'text/html').body.textContent || '').trim();
+  const LINK_ICO = {
+    web: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+    paper: '<path d="M4 5h6a2 2 0 0 1 2 2v12a2 2 0 0 0-2-2H4zM20 5h-6a2 2 0 0 0-2 2v12a2 2 0 0 1 2-2h6z"/>',
+    code: '<path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14"/>',
+    chain: '<path d="M12 3 4 7.5v9L12 21l8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9"/>',
+    x: '<path d="M4 4l16 16M20 4 4 20"/>',
+  };
+  function drawInfo(force) {
+    const m = S.m, key = m.sym;
+    if (!force && key === infoKey) { const c = $('tInfoCond'); if (c) c.innerHTML = conditionsKv(m); return; }
+    infoKey = key;
+    const nr = ++infoSeq, id = m.cls === 'crypto' && CG[m.base];
+    const head = (rank, tags, links) => `<div class="t-in-h">${mIcon(m).replace('class="mi', 'class="mi lg')}<div><div class="t-in-name"><h3>${esc(m.name)}</h3><span>${esc(m.cls === 'crypto' ? m.base : m.sym)}</span>${rank ? `<em>Rank #${rank}</em>` : `<em>${CLS[m.cls]}</em>`}</div>
+      ${tags.length ? `<div class="t-in-tags">${tags.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}</div>
+      ${links.length ? `<div class="t-in-links">${links.map(([k, u, t]) => `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer" title="${t}" aria-label="${t}"><svg viewBox="0 0 24 24">${LINK_ICO[k]}</svg></a>`).join('')}</div>` : ''}</div>`;
+    const body = (h, about, stats1, stats2, credit) => `<div class="t-inf">${h}<div class="t-in-grid">
+      <section><h4>Overview</h4><div class="t-in-about">${about}</div></section>
+      <section>${stats1 ? `<h4>Market Statistics</h4>${stats1}` : ''}<h4>Price Statistics</h4><div id="tInfoPx">${stats2 || '<p class="t-oi-msg">Loading…</p>'}</div></section></div>
+      <h4>Trading at PTF</h4><div class="t-in-cond" id="tInfoCond">${conditionsKv(m)}</div>${credit ? `<p class="t-in-credit">${credit}</p>` : ''}</div>`;
+    if (!id) {
+      $('tInfo').innerHTML = body(head(null, [], []), `<p>${esc(ABOUT[m.sym] || m.name)}</p>`, '', '', '');
+      F.priceHistory('hyperliquid', m, '1d', 366).then((d) => {
+        if (nr !== infoSeq || !d.length) return;
+        const last = d[d.length - 1].close, back = (n) => { const k = d[d.length - 1 - n]; return k ? (last / k.close - 1) * 100 : null; };
+        const yr = d.slice(-365), hi = Math.max(...yr.map((k) => k.high)), lo = Math.min(...yr.map((k) => k.low));
+        const t = d[d.length - 1];
+        $('tInfoPx').innerHTML = [stat('Day High', px(m, t.high)), stat('Day Low', px(m, t.low)),
+          stat('7d Change', `<span class="${cls(back(7))}">${pct(back(7))}</span>`), stat('30d Change', `<span class="${cls(back(30))}">${pct(back(30))}</span>`),
+          stat('52-Week High', px(m, hi)), stat('52-Week Low', px(m, lo))].join('');
+      }).catch(() => { if (nr === infoSeq) $('tInfoPx').innerHTML = '<p class="t-oi-msg">Price history unavailable right now.</p>'; });
+      return;
+    }
+    $('tInfo').innerHTML = body(head(null, [], []), '<p class="t-oi-msg">Loading…</p>', '', '', '');
+    F.coinInfo(id).then((c) => {
+      if (nr !== infoSeq) return;
+      const md = c.market_data || {}, u = (o) => o && o.usd, L = c.links || {};
+      const links = [
+        L.homepage && L.homepage[0] && ['web', L.homepage[0], 'Website'],
+        L.whitepaper && ['paper', L.whitepaper, 'Whitepaper'],
+        L.repos_url && L.repos_url.github && L.repos_url.github[0] && ['code', L.repos_url.github[0], 'Source code'],
+        L.blockchain_site && L.blockchain_site.find(Boolean) && ['chain', L.blockchain_site.find(Boolean), 'Explorer'],
+        L.twitter_screen_name && ['x', 'https://x.com/' + L.twitter_screen_name, 'X'],
+      ].filter((x) => x && /^https:\/\//.test(x[1]));
+      const paras = plain(c.description && c.description.en).split(/\r?\n\s*\r?\n/).filter(Boolean).slice(0, 3);
+      const sup = (v) => (ok(v) && v ? qtyBig(v) : '—');
+      const ath = u(md.ath), athD = md.ath_date && md.ath_date.usd;
+      $('tInfo').innerHTML = body(
+        head(c.market_cap_rank, (c.categories || []).filter(Boolean).slice(0, 6), links),
+        paras.map((p) => `<p>${esc(p)}</p>`).join('') || `<p>${esc(m.name)}</p>`,
+        [stat('Market Cap', big(u(md.market_cap))), stat('Fully Diluted Value', big(u(md.fully_diluted_valuation))),
+          stat('Circulating Supply', sup(md.circulating_supply)), stat('Total Supply', sup(md.total_supply)),
+          stat('Maximum Supply', sup(md.max_supply)), stat('Market Cap Rank', c.market_cap_rank ? '#' + c.market_cap_rank : '—'),
+          stat('Launch Date', c.genesis_date ? new Date(c.genesis_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—')].join(''),
+        [stat('24h High', px(m, u(md.high_24h))), stat('24h Low', px(m, u(md.low_24h))),
+          stat('7d Change', `<span class="${cls(md.price_change_percentage_7d)}">${pct(md.price_change_percentage_7d)}</span>`),
+          stat('30d Change', `<span class="${cls(md.price_change_percentage_30d)}">${pct(md.price_change_percentage_30d)}</span>`),
+          stat('1y Change', `<span class="${cls(md.price_change_percentage_1y)}">${pct(md.price_change_percentage_1y)}</span>`),
+          stat('All-Time High', `${px(m, ath)}${athD ? ` <small>${new Date(athD).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</small>` : ''}`),
+          stat('All-Time Low', px(m, u(md.atl)))].join(''),
+        'Coin data: CoinGecko');
+    }).catch(() => {
+      if (nr !== infoSeq) return;
+      infoKey = '';
+      $('tInfo').innerHTML = body(head(null, [], []), `<p>${esc(m.name)}</p>`, '', '<p class="t-oi-msg">Coin data unavailable right now.</p>', '');
+    });
   }
 
   /* =====================================================================
