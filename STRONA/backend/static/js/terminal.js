@@ -1222,9 +1222,9 @@
     if (!(q > 0)) return '';
     if (S.unit === 'usd') return notional(S.m, q, refPx()).toFixed(2);
     if (S.unit === 'lots') {
-      // W dół (żeby 100% nie przebiło limitu), ale ułamki poniżej 0,01 lota z 4 miejscami — inaczej 0,005 BTC znikało jako „0.00".
-      const l = q / S.m.contract, d = l < 0.01 ? 4 : 2;
-      return (Math.floor(l * 10 ** d + 1e-9) / 10 ** d).toFixed(d);
+      // Down to the 0.01-lot step (so 100% never exceeds the cap); below 0.01 lots there is no order.
+      const l = Math.floor((q / S.m.contract) * 100 + 1e-9) / 100;
+      return l >= 0.01 ? l.toFixed(2) : '';
     }
     return q.toFixed(S.m.qty_dec);
   }
@@ -1316,8 +1316,11 @@
       return toast('This account cannot trade', (S.st && S.st.account.reason) || 'Choose an active challenge account.', true);
     }
     if (sending) return;
-    const m = S.m, q = orderQty();
-    if (!(q > 0)) return toast('Enter a size', 'Type an amount or use the slider.', true);
+    const m = S.m, raw = orderQty();
+    if (!(raw > 0)) return toast('Enter a size', 'Type an amount or use the slider.', true);
+    // Volume in steps of 0.01 lots, minimum 0.01 (as on MT5); USD or units are rounded down to the step.
+    const q = (Math.floor((raw / m.contract) * 100 + 1e-6) / 100) * m.contract;
+    if (q / m.contract < 0.01 - 1e-9) return toast('Order too small', `Minimum size is 0.01 lots (${fx(0.01 * m.contract, Math.max(0, m.qty_dec))} ${m.base}).`, true);
     const body = {
       account_id: S.accId, symbol: m.sym, side: S.side, kind: S.kind, qty: +q.toFixed(Math.max(m.qty_dec, 2) + 2),
       reduce_only: $('tReduce').checked, max_slippage_pct: S.slip,
@@ -1789,7 +1792,12 @@
       if (!p) return;
       try {
         const body = { account_id: S.accId, max_slippage_pct: Math.max(S.slip, 2) };
-        if (half) body.qty = +(p.qty / 2).toFixed(8);
+        if (half) {
+          // Half rounded down to 0.01 lots; at least 0.01 lots must stay open.
+          const m = BY[p.symbol], hl = Math.floor((p.qty / m.contract / 2) * 100 + 1e-9) / 100;
+          if (hl < 0.01) return toast('Position too small to split', 'Use Close to close the whole position.', true);
+          body.qty = +(hl * m.contract).toFixed(8);
+        }
         applyState(await api(`/api/terminal/positions/${id}/close`, { method: 'POST', body: JSON.stringify(body) }));
         const h = S.st && S.st.history[0];
         toast(half ? 'Closed 50%' : 'Position closed', h ? `${h.symbol} ${sUsd(h.pnl)}` : '');

@@ -348,6 +348,21 @@ def _check_open(session, acc: Account, m: Market, side: str, qty: float, px: flo
                                  f"(you have {loty:.2f}).")
 
 
+MIN_LOTS = 0.01            # najmniejsze zlecenie i krok wolumenu, jak w MT5
+
+
+def _wolumen_ok(m: Market, qty: float, pozostaje: float | None = None) -> None:
+    """Zlecenie co najmniej 0,01 lota, w krokach co 0,01 lota. `pozostaje` = ile lotów
+    zostanie z pozycji po częściowym zamknięciu (też co najmniej 0,01 albo zero)."""
+    loty = markets.lots(m, qty)
+    if loty < MIN_LOTS - 1e-9:
+        raise HTTPException(400, f"Minimum size is {MIN_LOTS:g} lots ({MIN_LOTS * m.contract:g} {m.base}).")
+    if abs(loty / MIN_LOTS - round(loty / MIN_LOTS)) > 1e-6:
+        raise HTTPException(400, f"Size goes in steps of {MIN_LOTS:g} lots.")
+    if pozostaje is not None and 1e-9 < pozostaje < MIN_LOTS - 1e-9:
+        raise HTTPException(400, f"At least {MIN_LOTS:g} lots must stay open — close the whole position instead.")
+
+
 def _tp_sl_ok(side: str, ref: float, tp: float | None, sl: float | None) -> None:
     if tp is not None and tp > 0 and ((side == "buy" and tp <= ref) or (side == "sell" and tp >= ref)):
         raise HTTPException(400, "Take profit must be above the entry for a long and below it for a short.")
@@ -1016,10 +1031,13 @@ def api_order(payload: OrderIn, w: Who = Depends(who_trade)):
         qty = round(payload.qty, m.qty_dec + 3)
         if payload.reduce_only and pos is not None and pos.side != payload.side:
             qty = min(qty, pos.qty or 0.0)      # poślizg liczony na tym, co naprawdę się zamknie
-        krok = 10 ** -m.qty_dec
-        if qty < krok - EPS:
-            raise HTTPException(400, f"Minimum size on {m.sym} is {krok:g} {m.base} "
-                                     f"({markets.lots(m, krok):g} lots).")
+        # Zlecenie zamykające dokładnie całą pozycję przechodzi zawsze (resztki sprzed limitu).
+        caly = pos is not None and pos.side != payload.side and abs(qty - (pos.qty or 0.0)) <= EPS
+        if not caly:
+            zostaje = None
+            if pos is not None and pos.side != payload.side and qty < (pos.qty or 0.0):
+                zostaje = markets.lots(m, (pos.qty or 0.0) - qty)
+            _wolumen_ok(m, qty, zostaje)
         if payload.kind == "market":
             vwap, mid, slip = _vwap(m, payload.side, qty, payload.max_slippage_pct / 100)
             _tp_sl_ok(payload.side, vwap, tp, sl)
@@ -1128,6 +1146,9 @@ def api_close(trade_id: int, payload: CloseIn, w: Who = Depends(who_trade)):
         if pos.status != "open":
             _zapisz_i_odmow(session, acc, 409, "Position already closed")
         qty = min(payload.qty or pos.qty or 0.0, pos.qty or 0.0)
+        mp = markets.get(pos.symbol)
+        if mp is not None and qty < (pos.qty or 0.0) - EPS:
+            _wolumen_ok(mp, qty, markets.lots(mp, (pos.qty or 0.0) - qty))
         _zamknij_rynkowo(session, acc, pos, qty, payload.max_slippage_pct / 100)
         acc.terminal_open = bool(_open_positions(session, acc) or _open_orders(session, acc))
         session.flush()

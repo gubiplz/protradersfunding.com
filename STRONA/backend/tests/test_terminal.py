@@ -372,6 +372,25 @@ def test_podglad_admina_nie_handluje(rynek):
         assert _zlec(c, imp, aid).status_code == 403
 
 
+def test_minimum_i_krok_0_01_lota(rynek):
+    aid, h = _konto()
+    with TestClient(app) as c:
+        r = _zlec(c, h, aid, qty=0.005)                                # 0,005 lota BTC
+        assert r.status_code == 400 and "Minimum size is 0.01 lots" in r.json()["detail"]
+        r = _zlec(c, h, aid, qty=0.015)
+        assert r.status_code == 400 and "steps of 0.01 lots" in r.json()["detail"]
+        st = _zlec(c, h, aid, qty=0.02).json()
+        p = st["positions"][0]
+        # Częściowe zamknięcie nie może zostawić mniej niż 0,01 lota…
+        r = c.post(f"/api/terminal/positions/{p['id']}/close", headers=h, json={"account_id": aid, "qty": 0.015})
+        assert r.status_code == 400
+        r = c.post(f"/api/terminal/positions/{p['id']}/close", headers=h, json={"account_id": aid, "qty": 0.01})
+        assert r.status_code == 200 and r.json()["positions"][0]["qty"] == pytest.approx(0.01)
+        # …a zlecenie zamykające dokładnie całą pozycję przechodzi zawsze.
+        r = _zlec(c, h, aid, side="sell", qty=0.01)
+        assert r.status_code == 200 and r.json()["positions"] == []
+
+
 def test_odwrocenie_zwalnia_limit_lotow(rynek):
     aid, h = _konto()
     with TestClient(app) as c:
