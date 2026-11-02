@@ -205,6 +205,15 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-draw button.on{background:var(--acc-soft);color:var(--acc)}
 .t-draw hr{width:24px;border:0;border-top:1px solid var(--line2);margin:3px 0}
 .t-chart{flex:1;min-width:0;position:relative}
+/* Position buttons on the entry line */
+.t-posbtns{position:absolute;inset:0;pointer-events:none;z-index:3;overflow:hidden}
+.t-pb{position:absolute;left:0;top:0;display:flex;gap:4px;pointer-events:auto}
+.t-pb[hidden]{display:none}
+.t-pb button{height:19px;min-width:22px;padding:0 6px;display:grid;place-items:center;border-radius:4px;background:var(--panel);border:1px solid var(--line2);color:var(--txt);font:600 11px 'Helvetica Neue',sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+.t-pb button:hover{border-color:var(--muted)}
+.t-pb button svg{width:12px;height:12px;stroke-width:2.2}
+.t-pb .x:hover{background:var(--dn);border-color:var(--dn);color:#fff}
+.t-pb button:disabled{opacity:.5}
 .t-legend{position:absolute;left:10px;top:6px;z-index:2;pointer-events:none;font-size:13px;color:var(--muted);line-height:1.5}
 .t-legend b{color:var(--txt);font-weight:500;font-size:14.5px}
 .t-cfoot{display:flex;align-items:center;gap:4px;height:34px;padding:0 8px;border-top:1px solid var(--line);flex:none;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}

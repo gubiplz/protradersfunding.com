@@ -268,9 +268,11 @@
       createPointFigures: ({ coordinates, bounding, overlay }) => {
         const y = coordinates[0].y, e = overlay.extendData || {};
         const etykieta = { color: '#fff', size: 11, weight: 600, family: LINE_FONT, paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderSize: 0 };
+        // Position (e.solid): solid line and an outlined label, so it can't be mistaken for
+        // the dashed last-price line with its filled label right next to it.
         const fig = [
-          { type: 'line', attrs: { coordinates: [{ x: 0, y }, { x: bounding.width, y }] }, styles: { style: 'dashed', dashedValue: [5, 4], color: e.color, size: 1 }, ignoreEvent: true },
-          { type: 'text', attrs: { x: 10, y, text: e.text, baseline: 'middle' }, styles: { ...etykieta, backgroundColor: e.color }, ignoreEvent: true },
+          { type: 'line', attrs: { coordinates: [{ x: 0, y }, { x: bounding.width, y }] }, styles: e.solid ? { style: 'solid', color: e.color, size: 1 } : { style: 'dashed', dashedValue: [5, 4], color: e.color, size: 1 }, ignoreEvent: true },
+          { type: 'text', attrs: { x: 10, y, text: e.text, baseline: 'middle' }, styles: e.solid ? { ...etykieta, color: e.color, backgroundColor: e.bg, borderColor: e.color, borderSize: 1 } : { ...etykieta, backgroundColor: e.color }, ignoreEvent: true },
         ];
         // Pozycja: obok etykiety wejścia żywy P&L w kolorze wyniku (jak w MT5 / cTrader).
         if (e.pnlText) fig.push({ type: 'text', attrs: { x: 10 + szerTekstu(e.text) + 12 + 4, y, text: e.pnlText, baseline: 'middle' }, styles: { ...etykieta, backgroundColor: e.pnlColor }, ignoreEvent: true });
@@ -1522,9 +1524,9 @@
     const line = (v, text, color, dod) => v && chart.createOverlay({ name: 'ptfLine', groupId: 'ptf', lock: true, points: [{ timestamp: ts, value: v }], extendData: { text, color, ...(dod || {}) } });
     posLines = {};
     livePos().filter((p) => p.symbol === S.sym).forEach((p) => {
-      const ext = { up, dn, pnlText: pnlTxt(p), pnlColor: p.pnl >= 0 ? up : dn };
+      const ext = { up, dn, solid: true, bg: css('--panel'), pnlText: pnlTxt(p), pnlColor: p.pnl >= 0 ? up : dn };
       const id = line(p.entry, `${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, p.side === 'buy' ? up : dn, ext);
-      if (id) posLines[p.id] = { id, ext: { text: `${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, color: p.side === 'buy' ? up : dn, ...ext } };
+      if (id) posLines[p.id] = { id, ts, entry: p.entry, ext: { text: `${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, color: p.side === 'buy' ? up : dn, ...ext } };
       line(p.tp, 'TP ' + px(S.m, p.tp), acc);
       line(p.sl, 'SL ' + px(S.m, p.sl), warn);
     });
@@ -1544,6 +1546,48 @@
       chart.overrideOverlay({ id: L.id, extendData: L.ext });
     });
   }
+
+  /* Position buttons on the entry line (as in cTrader): TP/SL, Reverse, Close. They are
+     HTML over the chart, right after the P&L box; each frame they follow the line's
+     y (scroll, zoom, price-scale changes) and hide when it leaves the price pane. */
+  const posBar = document.createElement('div');
+  posBar.className = 't-posbtns';
+  $('tChart').appendChild(posBar);
+  function placePosBtns() {
+    const ids = Object.keys(posLines);
+    const k = ids.join(',');
+    if (posBar.dataset.k !== k) {
+      posBar.dataset.k = k;
+      posBar.innerHTML = ids.map((id) => `<div class="t-pb" data-pb="${id}" hidden>
+        <button type="button" data-pbt="tpsl" title="Set take profit / stop loss">TP/SL</button>
+        <button type="button" data-pbt="rev" title="Reverse position" aria-label="Reverse position"><svg viewBox="0 0 24 24"><path d="M7 4v14M3 14l4 4 4-4M17 20V6M13 10l4-4 4 4"/></svg></button>
+        <button type="button" data-pbt="close" class="x" title="Close position" aria-label="Close position"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`).join('');
+    }
+    if (!ids.length || !chart || cTab !== 'chart') return;
+    let pane = null;
+    try { pane = chart.getSize('candle_pane'); } catch (e) {}
+    ids.forEach((id) => {
+      const L = posLines[id], el = posBar.querySelector(`[data-pb="${id}"]`);
+      if (!L || !el) return;
+      let y = null;
+      try { const c = chart.convertToPixel({ timestamp: L.ts, value: L.entry }, { paneId: 'candle_pane', absolute: true }); y = c && c.y; } catch (e) {}
+      const show = ok(y) && (!pane || (y > pane.top + 8 && y < pane.top + pane.height - 8));
+      el.hidden = !show;
+      if (!show) return;
+      const x = 10 + szerTekstu(L.ext.text) + 16 + (L.ext.pnlText ? szerTekstu(L.ext.pnlText) + 16 : 0);
+      const tr = `translate(${Math.round(x)}px,${Math.round(y)}px) translateY(-50%)`;
+      if (el.style.transform !== tr) el.style.transform = tr;
+    });
+  }
+  (function loop() { if (!document.hidden) placePosBtns(); requestAnimationFrame(loop); })();
+  posBar.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-pbt]');
+    if (!b) return;
+    const id = +b.closest('[data-pb]').dataset.pb;
+    if (b.dataset.pbt === 'close') closePos(id, false, b);
+    else if (b.dataset.pbt === 'rev') reversePos(id, b);
+    else editTpsl(id);
+  });
 
   /* ---------- historia transakcji na wykresie (przycisk „Trades") ---------- */
   let tradesKey = '', tipXY = [0, 0], tipT = 0;
@@ -1713,20 +1757,7 @@
     const acc = t.closest('[data-acc]');
     if (acc) return selectAccount(+acc.dataset.acc);
     const cl = t.closest('[data-close]'), hf = t.closest('[data-half]');
-    if (cl || hf) {
-      const id = +(cl || hf).dataset.close || +(hf && hf.dataset.half);
-      return once('pos' + id, cl || hf, async () => {
-        const p = S.st && S.st.positions.find((x) => x.id === id);
-        if (!p) return;
-        try {
-          const body = { account_id: S.accId, max_slippage_pct: Math.max(S.slip, 2) };
-          if (hf) body.qty = +(p.qty / 2).toFixed(8);
-          applyState(await api(`/api/terminal/positions/${id}/close`, { method: 'POST', body: JSON.stringify(body) }));
-          const h = S.st && S.st.history[0];
-          toast(hf ? 'Closed 50%' : 'Position closed', h ? `${h.symbol} ${sUsd(h.pnl)}` : '');
-        } catch (er) { toast('Close failed', er.message, true); refresh(true); }
-      });
-    }
+    if (cl || hf) return closePos(+(cl || hf).dataset.close || +(hf && hf.dataset.half), !!hf, cl || hf);
     const cn = t.closest('[data-cancel]');
     if (cn) {
       return once('ord' + cn.dataset.cancel, cn, async () => {
@@ -1742,6 +1773,36 @@
     const tps = t.closest('[data-tpsl]');
     if (tps) editTpsl(+tps.dataset.tpsl);
   });
+  function closePos(id, half, btn) {
+    return once('pos' + id, btn, async () => {
+      const p = S.st && S.st.positions.find((x) => x.id === id);
+      if (!p) return;
+      try {
+        const body = { account_id: S.accId, max_slippage_pct: Math.max(S.slip, 2) };
+        if (half) body.qty = +(p.qty / 2).toFixed(8);
+        applyState(await api(`/api/terminal/positions/${id}/close`, { method: 'POST', body: JSON.stringify(body) }));
+        const h = S.st && S.st.history[0];
+        toast(half ? 'Closed 50%' : 'Position closed', h ? `${h.symbol} ${sUsd(h.pnl)}` : '');
+      } catch (er) { toast('Close failed', er.message, true); refresh(true); }
+    });
+  }
+  /* Reverse as in cTrader: one market order of twice the size the other way — the
+     account nets it into the same size in the opposite direction. */
+  function reversePos(id, btn) {
+    return once('pos' + id, btn, async () => {
+      const p = S.st && S.st.positions.find((x) => x.id === id);
+      const m = p && BY[p.symbol];
+      if (!m) return;
+      const side = p.side === 'buy' ? 'sell' : 'buy';
+      try {
+        applyState(await api('/api/terminal/orders', { method: 'POST', body: JSON.stringify({
+          account_id: S.accId, symbol: m.sym, side, kind: 'market', qty: +(p.qty * 2).toFixed(Math.max(m.qty_dec, 2) + 2),
+          reduce_only: false, max_slippage_pct: Math.max(S.slip, 2),
+        }) }));
+        toast('Position reversed', `${side === 'buy' ? 'Long' : 'Short'} ${lotsOf(m, p.qty)} ${m.sym}`);
+      } catch (er) { toast('Reverse failed', er.message, true); refresh(true); }
+    });
+  }
   async function editTpsl(id) {
     const p = S.st.positions.find((x) => x.id === id);
     if (!p) return;
