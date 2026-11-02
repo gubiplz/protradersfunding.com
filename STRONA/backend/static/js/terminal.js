@@ -85,7 +85,7 @@
     // Poślizg domyślnie schowany (jest w Columns): z nim tabela nie mieściła się pod wykresem nawet na 1440 px.
     cols: ls.json('pf_term_cols3', { value: true, slippage: false, lev: true, margin: true, tpsl: true }),
     showTrades: ls.get('pf_term_trades', '1') === '1',     // historia transakcji na wykresie (przycisk „Trades")
-    weekend: false, fee: 0.03, group: null, bookUnit: 'base', tickMode: ls.get('pf_term_tick', 'trending'),
+    weekend: false, fee: 0.03, group: null, top: [0, 0], bookUnit: 'base', tickMode: ls.get('pf_term_tick', 'trending'),
   };
   if (!F.venuesFor(S.m).includes(S.venue)) S.venue = 'hyperliquid';
   // Dźwignia nie jest do wyboru: z góry ustalona dla rynku (serwer i tak liczy po niej).
@@ -590,7 +590,7 @@
   }
   function restream() {
     if (strm) strm.close();
-    S.book = { bids: [], asks: [] }; S.trades = []; S.tk = {};
+    S.book = { bids: [], asks: [] }; S.top = [0, 0]; S.trades = []; S.tk = {};
     barNext = null;
     $('tSpread').textContent = '—'; $('tSpreadPct').textContent = '—';
     renderBook(); renderTrades(); renderTicker();
@@ -600,7 +600,8 @@
       reloadChart();
     }
     strm = F.stream(S.venue, S.m, S.interval, {
-      book: (b, a) => { S.book = { bids: b, asks: a }; if (!bookRaf) bookRaf = requestAnimationFrame(() => { bookRaf = 0; renderBook(); updateTicket(); }); },
+      book: (b, a) => { S.book = { bids: b, asks: a }; drawBook(); },
+      top: (b, a) => { S.top = [b, a]; drawBook(); },
       trades: (list) => {
         S.trades = list.concat(S.trades).sort((x, y) => y.t - x.t).slice(0, 80);
         if (!tradesRaf) tradesRaf = requestAnimationFrame(() => { tradesRaf = 0; renderTrades(); });
@@ -609,7 +610,9 @@
       ticker: (t) => { S.tk = { ...S.tk, ...t }; if (!tickRaf) tickRaf = requestAnimationFrame(() => { tickRaf = 0; renderTicker(); }); },
       status: (s) => { venueState = s; renderConn(); },
     });
+    strm.group(S.group);
   }
+  const drawBook = () => { if (!bookRaf) bookRaf = requestAnimationFrame(() => { bookRaf = 0; renderBook(); updateTicket(); }); };
   let venueState = 'connecting', hlState = 'connecting', latency = null;
   F.onHlState((s) => { hlState = s; renderConn(); });
   F.onLatency((l) => { latency = l; renderConn(); });
@@ -623,8 +626,8 @@
 
   /* ---------- pasek rynku ---------- */
   function markPx() {
-    const b = S.book.bids[0], a = S.book.asks[0];
-    return S.tk.mark || (b && a ? (b[0] + a[0]) / 2 : S.mids[S.m.hl]) || null;
+    const [b, a] = S.top;
+    return S.tk.mark || (b && a ? (b + a) / 2 : S.mids[S.m.hl]) || null;
   }
   function renderTicker() {
     const m = S.m, c = S.ctx[m.hl] || {};
@@ -698,16 +701,34 @@
   function buildBookCtl() {
     const m = S.m;
     const t = Math.pow(10, -Math.min(m.px_dec, 6));
-    const opts = [1, 10, 100, 1000].map((k) => +(t * k).toFixed(Math.max(0, m.px_dec)));
-    if (!S.group || !opts.includes(S.group)) S.group = opts[0];
-    $('tGroup').innerHTML = opts.map((g) => `<option value="${g}"${g === S.group ? ' selected' : ''}>${g}</option>`).join('');
+    groupOpts = [1, 10, 100, 1000].map((k) => +(t * k).toFixed(Math.max(0, m.px_dec)));
+    groupFit = groupOpts.length;
+    fillGroups();
     $('tUnit').innerHTML = `<option value="base"${S.bookUnit === 'base' ? ' selected' : ''}>${esc(m.base)}</option><option value="usd"${S.bookUnit === 'usd' ? ' selected' : ''}>USD</option>`;
     const u = S.bookUnit === 'usd' ? 'USD' : m.base;
     $('tBhSize').textContent = `Size (${u})`;
     $('tBhTot').textContent = `Total (${u})`;
     $('tThSize').textContent = `Size (${u})`;
   }
-  $('tGroup').onchange = (e) => { S.group = +e.target.value; renderBook(); };
+  let groupOpts = [], groupFit = 0;
+  function fillGroups() {
+    const opts = groupOpts.slice(0, groupFit);
+    const g = opts.includes(S.group) ? S.group : (S.group && S.group > opts[opts.length - 1] ? opts[opts.length - 1] : opts[0]);
+    $('tGroup').innerHTML = opts.map((x) => `<option value="${x}"${x === g ? ' selected' : ''}>${x}</option>`).join('');
+    if (g !== S.group) { S.group = g; if (strm) strm.group(g); }
+  }
+  /* Binance and Bybit send the book at the finest tick only (up to 1000 levels), so a
+     step the data can't fill with rows is hidden; Hyperliquid aggregates on its side. */
+  function fitGroups() {
+    if (!strm || strm.aggregates || !groupOpts.length) return;
+    const { bids, asks } = S.book;
+    if (bids.length < 2 || asks.length < 2) return;
+    const span = Math.min(bids[0][0] - bids[bids.length - 1][0], asks[asks.length - 1][0] - asks[0][0]);
+    const fit = Math.max(1, groupOpts.filter((g) => span / g >= Math.max(10, bookRows)).length);
+    // Only shrinks (until the next market/venue switch), so a step doesn't blink in and out.
+    if (fit < groupFit) { groupFit = fit; fillGroups(); }
+  }
+  $('tGroup').onchange = (e) => { S.group = +e.target.value; strm.group(S.group); renderBook(); };
   $('tUnit').onchange = (e) => { S.bookUnit = e.target.value; buildBookCtl(); renderBook(); renderTrades(); };
   function grouped(levels, side) {
     const g = S.group || 0, out = new Map();
@@ -745,6 +766,7 @@
     const m = S.m, el = $('tAsks');
     if (!S.tk.mark) renderTicker();
     if (!el.offsetParent) return;          // księga schowana (telefon, zakładka Trades) — narysuje się po pokazaniu
+    fitGroups();
     const rows = bookRows || 11;
     const asks = grouped(S.book.asks, 'ask').slice(0, rows), bids = grouped(S.book.bids, 'bid').slice(0, rows);
     const val = (p, q) => (S.bookUnit === 'usd' ? notional(m, q, p) : q);
@@ -755,10 +777,10 @@
     const max = Math.max(ca, cb) || 1;
     fillBook(el, aRows.slice().reverse(), m, sd, max);
     fillBook($('tBids'), bRows, m, sd, max);
-    const a = S.book.asks[0], b = S.book.bids[0];
+    const [b, a] = S.top;
     if (a && b) {
-      $('tSpread').textContent = px(m, a[0] - b[0]);
-      $('tSpreadPct').textContent = (((a[0] - b[0]) / ((a[0] + b[0]) / 2)) * 100).toFixed(5) + '%';
+      $('tSpread').textContent = px(m, a - b);
+      $('tSpreadPct').textContent = (((a - b) / ((a + b) / 2)) * 100).toFixed(5) + '%';
     }
     const sum = (ca + cb) || 1;
     $('tBidD').textContent = ((cb / sum) * 100).toFixed(1) + '%';
@@ -993,8 +1015,8 @@
   };
   function refPx() {
     if (S.kind !== 'market') { const p = numOf($('tPx').value); if (p) return p; }
-    const a = S.book.asks[0], b = S.book.bids[0];
-    return (S.side === 'buy' ? a && a[0] : b && b[0]) || markPx() || 0;
+    const [b, a] = S.top;
+    return (S.side === 'buy' ? a : b) || markPx() || 0;
   }
   function orderQty() {
     const v = numOf($('tSize').value);

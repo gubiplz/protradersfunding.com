@@ -129,18 +129,47 @@
     return streamHl(m, interval, h);
   }
 
-  /* Każdy strumień ma `interval(i)`: zmiana interwału podmienia tylko świece —
-     księga i transakcje płyną dalej bez ponownego łączenia. */
+  /* Each stream has `interval(i)`: an interval change swaps only the candles, while
+     the book and trades keep flowing without reconnecting. `group(g)` = price step of
+     the book; `h.top(bid, ask)` = exact best prices (spread, ticket) even when the book
+     arrives in coarse buckets. */
+  const sortBook = (bids, asks, cap) => [
+    [...bids].map(([p, q]) => [+p, q]).sort((x, y) => y[0] - x[0]).slice(0, cap),
+    [...asks].map(([p, q]) => [+p, q]).sort((x, y) => x[0] - y[0]).slice(0, cap),
+  ];
+
   function streamHl(m, interval, h) {
     const c = m.hl;
     const candles = (i) => hl.sub({ type: 'candle', coin: c, interval: i }, (d) => d.channel === 'candle' && d.data.s === c && d.data.i === i, (k) => {
       h.candle({ timestamp: k.t, open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v });
     });
     let offCandles = candles(interval);
-    const off = [
-      hl.sub({ type: 'l2Book', coin: c }, (d) => d.channel === 'l2Book' && d.data.coin === c, (d) => {
+    /* Hyperliquid sends 20 levels per side. A coarser step is aggregated by the exchange
+       (nSigFigs 2–5), otherwise grouping 20 fine levels would leave a few rows. */
+    let grp = 0, mid = 0, sig, offBook = () => {};
+    const book = (n) => {
+      offBook();
+      sig = n;
+      const s = n ? { type: 'l2Book', coin: c, nSigFigs: n } : { type: 'l2Book', coin: c };
+      offBook = hl.sub(s, (d) => d.channel === 'l2Book' && d.data.coin === c, (d) => {
         const lv = d.levels || [[], []];
         h.book(lv[0].map((x) => [+x.px, +x.sz]), lv[1].map((x) => [+x.px, +x.sz]));
+      });
+    };
+    const regroup = () => {
+      if (!grp || !mid) return;
+      const n = Math.max(2, Math.round(Math.floor(Math.log10(mid)) + 1 - Math.log10(grp)));
+      const want = n >= 5 ? null : n;
+      if (want !== sig) book(want);
+    };
+    book(null);
+    const off = [
+      hl.sub({ type: 'bbo', coin: c }, (d) => d.channel === 'bbo' && d.data.coin === c, (d) => {
+        const [b, a] = d.bbo || [];
+        if (!b || !a) return;
+        h.top(+b.px, +a.px);
+        mid = (+b.px + +a.px) / 2;
+        regroup();
       }),
       hl.sub({ type: 'trades', coin: c }, (d) => d.channel === 'trades' && d.data[0] && d.data[0].coin === c, (d) => {
         h.trades(d.map((t) => ({ px: +t.px, sz: +t.sz, side: t.side === 'B' ? 'buy' : 'sell', t: t.time })));
@@ -153,20 +182,68 @@
       hl.onState(h.status || (() => {})),
     ];
     return {
-      close: () => { off.forEach((f) => f()); offCandles(); },
+      close: () => { off.forEach((f) => f()); offCandles(); offBook(); },
       interval: (i) => { offCandles(); offCandles = candles(i); },
+      group: (g) => { grp = g; regroup(); },
+      aggregates: true,
     };
   }
 
   function streamBinance(m, interval, h) {
     const s = m.bn.toLowerCase();
     let last = {};
-    const pub = socket(BN_PUB + `${s}@depth20@100ms`, {
+    /* Local book: REST snapshot (1000 levels) + diff stream, per Binance's recipe
+       (drop u < lastUpdateId, every next event continues pu = previous u, else resync).
+       depth20 gave only ~20 ticks, so grouping had almost nothing to merge. */
+    const bids = new Map(), asks = new Map();
+    let lastId = 0, prevU = 0, buf = [], loading = false, gen = 0, emitT = 0, lo = 0, hi = Infinity;
+    // Levels outside the snapshot's range are known only if they changed afterwards,
+    // so the book there has holes; drop them.
+    const trim = (map, ok) => { if (map.size > 1200) map.forEach((_, p) => { if (!ok(+p)) map.delete(p); }); };
+    const emit = () => {
+      if (emitT) return;
+      emitT = setTimeout(() => {
+        emitT = 0;
+        trim(bids, (p) => p >= lo); trim(asks, (p) => p <= hi);
+        let [b, a] = sortBook(bids, asks, 1000);
+        b = b.filter((x) => x[0] >= lo); a = a.filter((x) => x[0] <= hi);
+        if (b[0] && a[0]) h.top(b[0][0], a[0][0]);
+        h.book(b, a);
+      }, 100);
+    };
+    const put = (map, rows) => rows.forEach(([p, q]) => (+q ? map.set(p, +q) : map.delete(p)));
+    const apply = (x) => {
+      if (!lastId) { buf.push(x); if (buf.length > 600) buf.shift(); return; }
+      if (x.u < lastId) return;
+      if (prevU ? x.pu !== prevU : x.U > lastId) return resync();
+      prevU = x.u;
+      put(bids, x.b); put(asks, x.a);
+      emit();
+    };
+    async function resync() {
+      if (loading) return;
+      loading = true; lastId = 0; prevU = 0;
+      const my = ++gen;
+      try {
+        const d = await getJ(`${BN_REST}/fapi/v1/depth?symbol=${m.bn}&limit=1000`);
+        if (my !== gen) return;
+        bids.clear(); asks.clear();
+        put(bids, d.bids); put(asks, d.asks);
+        lo = d.bids.length ? +d.bids[d.bids.length - 1][0] : 0;
+        hi = d.asks.length ? +d.asks[d.asks.length - 1][0] : Infinity;
+        lastId = d.lastUpdateId;
+        loading = false;
+        const q = buf; buf = [];
+        q.forEach(apply);
+        emit();
+      } catch (_) {
+        if (my === gen) setTimeout(() => { loading = false; resync(); }, 3000);
+      }
+    }
+    const pub = socket(BN_PUB + `${s}@depth@100ms`, {
       onstate: h.status,
-      onmessage: (d) => {
-        const x = d.data;
-        if (x && x.e === 'depthUpdate') h.book(x.b.map((v) => [+v[0], +v[1]]), x.a.map((v) => [+v[0], +v[1]]));
-      },
+      onopen: () => { buf = []; loading = false; resync(); },
+      onmessage: (d) => { const x = d.data; if (x && x.e === 'depthUpdate') apply(x); },
     });
     const mkt = socket(BN_MKT + [`${s}@aggTrade`, `${s}@ticker`, `${s}@markPrice@1s`].join('/'), {
       onmessage: (d) => {
@@ -185,8 +262,9 @@
     oi();
     const t = setInterval(() => { if (!document.hidden) oi(); }, 30000);
     return {
-      close: () => { pub.close(); mkt.close(); kl.close(); clearInterval(t); },
+      close: () => { gen++; clearTimeout(emitT); pub.close(); mkt.close(); kl.close(); clearInterval(t); },
       interval: (i) => { kl.close(); kl = klines(i); },
+      group: () => {},
     };
   }
 
@@ -194,21 +272,26 @@
     const sym = m.by;
     const bids = new Map(), asks = new Map();
     let tk = {};
+    // 1000 levels (pushed every 200 ms) so a coarser step still fills the rows;
+    // orderbook.1 keeps the best bid/ask exact between those pushes.
+    let emitT = 0;
     const emitBook = () => {
-      const b = [...bids].map(([p, q]) => [+p, q]).sort((x, y) => y[0] - x[0]).slice(0, 25);
-      const a = [...asks].map(([p, q]) => [+p, q]).sort((x, y) => x[0] - y[0]).slice(0, 25);
-      h.book(b, a);
+      if (emitT) return;
+      emitT = setTimeout(() => { emitT = 0; const [b, a] = sortBook(bids, asks, 1000); h.book(b, a); }, 100);
     };
     let ping, kInt = interval;
     const s = socket(BY_WS, {
       onstate: h.status,
       onopen: (ws) => {
-        ws.send(JSON.stringify({ op: 'subscribe', args: [`orderbook.50.${sym}`, `publicTrade.${sym}`, `kline.${BY_INT[kInt]}.${sym}`, `tickers.${sym}`] }));
+        ws.send(JSON.stringify({ op: 'subscribe', args: [`orderbook.1000.${sym}`, `orderbook.1.${sym}`, `publicTrade.${sym}`, `kline.${BY_INT[kInt]}.${sym}`, `tickers.${sym}`] }));
         clearInterval(ping); ping = setInterval(() => s.send({ op: 'ping' }), 20000);
       },
       onmessage: (d) => {
         const tp = d.topic || '';
-        if (tp.startsWith('orderbook.')) {
+        if (tp === `orderbook.1.${sym}`) {
+          const x = d.data;
+          if (x.b[0] && x.a[0]) h.top(+x.b[0][0], +x.a[0][0]);
+        } else if (tp.startsWith('orderbook.')) {
           const x = d.data;
           if (d.type === 'snapshot') { bids.clear(); asks.clear(); }
           x.b.forEach(([p, q]) => (+q ? bids.set(p, +q) : bids.delete(p)));
@@ -226,12 +309,13 @@
       },
     });
     return {
-      close: () => { clearInterval(ping); s.close(); },
+      close: () => { clearInterval(ping); clearTimeout(emitT); s.close(); },
       interval: (i) => {
         s.send({ op: 'unsubscribe', args: [`kline.${BY_INT[kInt]}.${sym}`] });
         kInt = i;
         s.send({ op: 'subscribe', args: [`kline.${BY_INT[kInt]}.${sym}`] });
       },
+      group: () => {},
     };
   }
 
