@@ -188,7 +188,7 @@
         area: { lineColor: acc, backgroundColor: [{ offset: 0, color: acc + '33' }, { offset: 1, color: acc + '00' }] },
         priceMark: {
           high: { color: muted }, low: { color: muted },
-          last: { upColor: up, downColor: dn, noChangeColor: muted, text: { color: '#fff' } },
+          last: { upColor: up, downColor: dn, noChangeColor: muted, line: { style: 'dashed', dashedValue: [1, 3], size: 1 }, text: { color: '#fff' } },
         },
         tooltip: {
           showRule: rule,
@@ -268,11 +268,11 @@
       createPointFigures: ({ coordinates, bounding, overlay }) => {
         const y = coordinates[0].y, e = overlay.extendData || {};
         const etykieta = { color: '#fff', size: 11, weight: 600, family: LINE_FONT, paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderSize: 0 };
-        // Position (e.solid): solid line and an outlined label, so it can't be mistaken for
-        // the dashed last-price line with its filled label right next to it.
+        // Position (e.pos): dashed line with an outlined label; TP/SL and orders dashed with a
+        // filled label; the last-price line is dotted (chartStyles), so they never look alike.
         const fig = [
-          { type: 'line', attrs: { coordinates: [{ x: 0, y }, { x: bounding.width, y }] }, styles: e.solid ? { style: 'solid', color: e.color, size: 1 } : { style: 'dashed', dashedValue: [5, 4], color: e.color, size: 1 }, ignoreEvent: true },
-          { type: 'text', attrs: { x: 10, y, text: e.text, baseline: 'middle' }, styles: e.solid ? { ...etykieta, color: e.color, backgroundColor: e.bg, borderColor: e.color, borderSize: 1 } : { ...etykieta, backgroundColor: e.color }, ignoreEvent: true },
+          { type: 'line', attrs: { coordinates: [{ x: 0, y }, { x: bounding.width, y }] }, styles: e.pos ? { style: 'dashed', dashedValue: [7, 4], color: e.color, size: 1 } : { style: 'dashed', dashedValue: [5, 4], color: e.color, size: 1 }, ignoreEvent: true },
+          { type: 'text', attrs: { x: 10, y, text: e.text, baseline: 'middle' }, styles: e.pos ? { ...etykieta, color: e.color, backgroundColor: e.bg, borderColor: e.color, borderSize: 1 } : { ...etykieta, backgroundColor: e.color }, ignoreEvent: true },
         ];
         // Pozycja: obok etykiety wejścia żywy P&L w kolorze wyniku (jak w MT5 / cTrader).
         if (e.pnlText) fig.push({ type: 'text', attrs: { x: 10 + szerTekstu(e.text) + 12 + 4, y, text: e.pnlText, baseline: 'middle' }, styles: { ...etykieta, backgroundColor: e.pnlColor }, ignoreEvent: true });
@@ -1246,12 +1246,22 @@
     if (!v) return 0;
     return S.unit === 'usd' ? qtyFromUsd(S.m, v, refPx()) : S.unit === 'lots' ? v * S.m.contract : v;
   }
+  /* 100% of the slider = the largest order the server accepts (terminal._check_open):
+     free margin AND the account's lot cap (shared with Trade BOT). An opposite position
+     on this market closes first, so its size comes on top and its margin and lots free
+     up; with Reduce Only the maximum is that position. */
   function maxQty() {
     if (!S.st) return 0;
-    const avail = S.st.account.available, p = refPx(), L = lev();
-    if (!p || !(avail > 0)) return 0;
-    const usdMax = (avail * L) / (1 + (S.fee / 100) * L);
-    return qtyFromUsd(S.m, usdMax, p);
+    const a = S.st.account, m = S.m, p = refPx(), L = lev();
+    const istn = (S.st.positions || []).find((x) => x.symbol === m.sym);
+    const opp = istn && istn.side !== S.side ? istn : null;
+    if ($('tReduce').checked) return opp ? opp.qty : 0;
+    const base = opp ? opp.qty : 0;
+    const avail = (a.available || 0) + (opp ? opp.margin || 0 : 0);
+    if (!p || !(avail > 0)) return base;
+    const byMargin = qtyFromUsd(m, (avail * L) / (1 + (S.fee / 100) * L), p);
+    const cap = a.max_lots > 0 ? Math.max(0, a.max_lots - (openLots(a) - (opp ? opp.qty / m.contract : 0))) * m.contract : Infinity;
+    return base + Math.max(0, Math.min(byMargin, cap));
   }
   function setPct(p) {
     p = Math.max(0, Math.min(100, Math.round(p)));
@@ -1524,7 +1534,7 @@
     const line = (v, text, color, dod) => v && chart.createOverlay({ name: 'ptfLine', groupId: 'ptf', lock: true, points: [{ timestamp: ts, value: v }], extendData: { text, color, ...(dod || {}) } });
     posLines = {};
     livePos().filter((p) => p.symbol === S.sym).forEach((p) => {
-      const ext = { up, dn, solid: true, bg: css('--panel'), pnlText: pnlTxt(p), pnlColor: p.pnl >= 0 ? up : dn };
+      const ext = { up, dn, pos: true, bg: css('--panel'), pnlText: pnlTxt(p), pnlColor: p.pnl >= 0 ? up : dn };
       const id = line(p.entry, `${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, p.side === 'buy' ? up : dn, ext);
       if (id) posLines[p.id] = { id, ts, entry: p.entry, ext: { text: `${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, color: p.side === 'buy' ? up : dn, ...ext } };
       line(p.tp, 'TP ' + px(S.m, p.tp), acc);
