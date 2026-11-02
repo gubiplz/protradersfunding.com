@@ -817,7 +817,7 @@
     S.book = { bids: [], asks: [] }; S.top = [0, 0]; S.trades = []; S.tk = {};
     barNext = null;
     clearMeasure();
-    $('tSpread').textContent = '—'; $('tSpreadPct').textContent = '—';
+    $('tSpread').textContent = '—'; $('tSpreadPct').textContent = '—'; sideSpread();
     renderBook(); renderTrades(); renderTicker();
     if (chart) {
       lastBar = null;
@@ -837,7 +837,17 @@
     });
     strm.group(S.group);
   }
-  const drawBook = () => { if (!bookRaf) bookRaf = requestAnimationFrame(() => { bookRaf = 0; renderBook(); updateTicket(); }); };
+  const drawBook = () => { if (!bookRaf) bookRaf = requestAnimationFrame(() => { bookRaf = 0; renderBook(); sideSpread(); updateTicket(); }); };
+  // Live spread between the Buy and Sell buttons (best ask − best bid); amber when unusually wide.
+  function sideSpread() {
+    const el = $('tSideSpr'), [b, a] = S.top;
+    const v = a && b && a >= b ? a - b : null, t = v == null ? '—' : px(S.m, v);
+    const w = v != null && v / ((a + b) / 2) > 0.0005;
+    const n = el.querySelector('b');
+    if (n.textContent !== t) n.textContent = t;
+    el.classList.toggle('wide', w);
+    el.title = v == null ? 'Live spread' : `Live spread: ${t} (${((v / ((a + b) / 2)) * 100).toFixed(4)}%) on ${F.VENUES[S.venue].label}`;
+  }
   let venueState = 'connecting', hlState = 'connecting', latency = null;
   F.onHlState((s) => { hlState = s; renderConn(); });
   F.onLatency((l) => { latency = l; renderConn(); });

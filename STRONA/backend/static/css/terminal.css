@@ -338,7 +338,11 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-otabs{height:42px;gap:0}
 .t-otabs>button,.t-otabs .t-dd{flex:1;justify-content:center}
 .t-otabs .t-dd>button{width:100%;justify-content:center}
-.t-side{display:grid;grid-template-columns:1fr 1fr;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:3px}
+.t-spr{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:58px;padding:0 6px;line-height:1.15}
+.t-spr small{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+.t-spr b{font:600 12.5px var(--mono);color:var(--txt);transition:color .25s}
+.t-spr.wide b{color:var(--warn)}
+.t-side{display:grid;grid-template-columns:1fr auto 1fr;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:3px}
 .t-side button{height:36px;border-radius:8px;font-weight:600;color:var(--muted);font-size:14px;transition:background .15s,color .15s}
 .t-side button.on.buy{background:var(--up);color:#032018}
 .t-side button.on.sell{background:var(--dn);color:#2b0609}

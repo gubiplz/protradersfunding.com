@@ -24,7 +24,10 @@
     binance: { key: 'binance', label: 'Binance', sym: (m) => m.bn },
     bybit: { key: 'bybit', label: 'Bybit', sym: (m) => m.by },
   };
-  const venuesFor = (m) => Object.values(VENUES).filter((v) => !!v.sym(m)).map((v) => v.key);
+  // Fills settle at Hyperliquid prices. Binance/Bybit stay as a chart view only for crypto,
+  // where the gap is ~0.01–0.03%; gold, silver or oil there trade ~0.1–0.2% away, so an
+  // entry line drawn over their candles looked wrong.
+  const venuesFor = (m) => Object.values(VENUES).filter((v) => !!v.sym(m) && (v.key === 'hyperliquid' || m.cls === 'crypto')).map((v) => v.key);
 
   const num = (x) => (x == null || x === '' ? null : +x);
   const post = (body) => fetch(HL_INFO, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
