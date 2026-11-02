@@ -214,6 +214,26 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-pb button svg{width:12px;height:12px;stroke-width:2.2}
 .t-pb .x:hover{background:var(--dn);border-color:var(--dn);color:#fff}
 .t-pb button:disabled{opacity:.5}
+/* TP/SL editing on the chart */
+.t-tpsl-ed{position:absolute;inset:0;pointer-events:none;z-index:4;overflow:hidden}
+.t-tpsl-ed[hidden]{display:none}
+.t-th{position:absolute;left:0;top:0;display:flex;align-items:center;gap:6px;height:22px;padding:0 9px 0 6px;border-radius:5px;
+  font:600 11px 'Helvetica Neue',sans-serif;color:#fff;cursor:ns-resize;pointer-events:auto;user-select:none;box-shadow:0 3px 10px rgba(0,0,0,.3)}
+.t-th[hidden]{display:none}
+.t-th.tp{background:var(--acc)} .t-th.sl{background:var(--warn);color:#2a1a02}
+.t-th.bad{background:var(--dn);color:#fff}
+.t-th.drag{outline:2px solid #fff;outline-offset:1px}
+.t-th i{width:8px;height:12px;border-left:2px dotted currentColor;border-right:2px dotted currentColor;opacity:.75}
+.t-tp-panel{position:absolute;left:0;top:0;width:212px;padding:10px;border-radius:10px;background:var(--panel);border:1px solid var(--line2);
+  box-shadow:0 12px 30px rgba(0,0,0,.4);pointer-events:auto;display:flex;flex-direction:column;gap:7px}
+.t-tp-panel label{display:grid;grid-template-columns:24px 1fr 24px;align-items:center;gap:6px;font:600 11px var(--mono);color:var(--muted)}
+.t-tp-panel input{height:28px;border-radius:6px;border:1px solid var(--line);background:var(--bg2);color:var(--txt);font:13px var(--mono);padding:0 8px;width:100%;min-width:0;outline:0}
+.t-tp-panel input:focus{border-color:var(--acc)}
+.t-tp-panel label button{height:24px;border-radius:6px;color:var(--dim)} .t-tp-panel label button:hover{color:var(--dn)}
+.t-tp-panel .row{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:2px}
+.t-tp-panel .row button{height:30px;border-radius:7px;border:1px solid var(--line2);color:var(--txt);font-weight:600;font-size:12.5px}
+.t-tp-panel .row .ok{background:var(--acc);border-color:var(--acc);color:#04201c}
+.t-tp-panel small{color:var(--dim);font-size:11px}
 .t-legend{position:absolute;left:10px;top:6px;z-index:2;pointer-events:none;font-size:13px;color:var(--muted);line-height:1.5}
 .t-legend b{color:var(--txt);font-weight:500;font-size:14.5px}
 .t-cfoot{display:flex;align-items:center;gap:4px;height:34px;padding:0 8px;border-top:1px solid var(--line);flex:none;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}

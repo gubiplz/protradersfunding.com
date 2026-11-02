@@ -274,6 +274,7 @@
           { type: 'line', attrs: { coordinates: [{ x: 0, y }, { x: bounding.width, y }] }, styles: e.pos ? { style: 'dashed', dashedValue: [7, 4], color: e.color, size: 1 } : { style: 'dashed', dashedValue: [5, 4], color: e.color, size: 1 }, ignoreEvent: true },
           { type: 'text', attrs: { x: 10, y, text: e.text, baseline: 'middle' }, styles: e.pos ? { ...etykieta, color: e.color, backgroundColor: e.bg, borderColor: e.color, borderSize: 1 } : { ...etykieta, backgroundColor: e.color }, ignoreEvent: true },
         ];
+        if (e.noLabel) fig.pop();          // TP/SL being edited: the label is the draggable HTML handle
         // Pozycja: obok etykiety wejścia żywy P&L w kolorze wyniku (jak w MT5 / cTrader).
         if (e.pnlText) fig.push({ type: 'text', attrs: { x: 10 + szerTekstu(e.text) + 12 + 4, y, text: e.pnlText, baseline: 'middle' }, styles: { ...etykieta, backgroundColor: e.pnlColor }, ignoreEvent: true });
         return fig;
@@ -817,6 +818,7 @@
     S.book = { bids: [], asks: [] }; S.top = [0, 0]; S.trades = []; S.tk = {};
     barNext = null;
     clearMeasure();
+    stopTpsl();
     $('tSpread').textContent = '—'; $('tSpreadPct').textContent = '—'; sideSpread();
     renderBook(); renderTrades(); renderTicker();
     if (chart) {
@@ -1550,8 +1552,10 @@
       const ext = { up, dn, pos: true, bg: css('--panel'), pnlText: pnlTxt(p), pnlColor: p.pnl >= 0 ? up : dn };
       const id = line(p.entry, `${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, p.side === 'buy' ? up : dn, ext);
       if (id) posLines[p.id] = { id, ts, entry: p.entry, ext: { text: `${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, color: p.side === 'buy' ? up : dn, ...ext } };
-      line(p.tp, 'TP ' + px(S.m, p.tp), acc);
-      line(p.sl, 'SL ' + px(S.m, p.sl), warn);
+      if (!(tpslEd && tpslEd.id === p.id)) {
+        line(p.tp, 'TP ' + px(S.m, p.tp), acc);
+        line(p.sl, 'SL ' + px(S.m, p.sl), warn);
+      }
     });
     S.st.orders.filter((o) => o.symbol === S.sym).forEach((o) => line(o.price, `${o.kind === 'limit' ? 'Limit' : 'Stop'} ${o.side} ${lotsOf(S.m, o.qty)}`, o.side === 'buy' ? up : dn));
   }
@@ -1609,8 +1613,145 @@
     const id = +b.closest('[data-pb]').dataset.pb;
     if (b.dataset.pbt === 'close') closePos(id, false, b);
     else if (b.dataset.pbt === 'rev') reversePos(id, b);
-    else editTpsl(id);
+    else startTpsl(id);
   });
+
+  /* TP/SL on the chart (as in cTrader): the TP/SL button puts both levels on the chart as
+     lines with draggable handles — a level not set yet starts 0.4% from the price. The
+     handle shows the price and the position's P&L there, live while dragging; a small
+     panel beside the position line takes typed values (kept in sync with the lines) and
+     saves or cancels. Nothing is sent until Save. */
+  let tpslEd = null;   // { id, tp, sl, ov: {tp, sl} }
+  const tpslBar = document.createElement('div');
+  tpslBar.className = 't-tpsl-ed';
+  tpslBar.hidden = true;
+  $('tChart').appendChild(tpslBar);
+  const roundPx = (m, v) => +(+v).toFixed(m.px_dec);
+  function tpslOk(p, k, v) {
+    if (!v) return true;
+    const ref = markPx() || p.entry, long = p.side === 'buy';
+    return k === 'tp' ? (long ? v > ref : v < ref) : (long ? v < ref : v > ref);
+  }
+  function tpslLabel(p, k, v) {
+    const m = BY[p.symbol], pnl = pnlOf(m, p.side, p.qty, p.entry, v);
+    return `${k.toUpperCase()} ${px(m, v)} · ${sUsd(pnl)}`;
+  }
+  function tpslDraw(k) {
+    const p = S.st && S.st.positions.find((x) => x.id === tpslEd.id);
+    if (!p || !chart) return;
+    const v = tpslEd[k], col = css(k === 'tp' ? '--acc' : '--warn');
+    if (tpslEd.ov[k]) { chart.removeOverlay({ id: tpslEd.ov[k] }); tpslEd.ov[k] = null; }
+    if (!v) return;
+    tpslEd.ov[k] = chart.createOverlay({ name: 'ptfLine', groupId: 'tpslEd', lock: true,
+      points: [{ timestamp: lastBar ? lastBar.timestamp : Date.now(), value: v }],
+      extendData: { text: '', noLabel: true, color: tpslOk(p, k, v) ? col : css('--dn') } });
+  }
+  function tpslRender() {
+    if (!tpslEd) return;
+    const p = S.st && S.st.positions.find((x) => x.id === tpslEd.id);
+    if (!p) return stopTpsl();
+    ['tp', 'sl'].forEach((k) => {
+      tpslDraw(k);
+      const h = tpslBar.querySelector(`[data-h="${k}"]`), v = tpslEd[k];
+      h.hidden = !v;
+      if (v) { h.querySelector('span').textContent = tpslLabel(p, k, v); h.classList.toggle('bad', !tpslOk(p, k, v)); }
+      const inp = tpslBar.querySelector(`[data-in="${k}"]`);
+      if (document.activeElement !== inp) inp.value = v ? px(BY[p.symbol], v).replace(/,/g, '') : '';
+    });
+  }
+  function startTpsl(id) {
+    const p = S.st && S.st.positions.find((x) => x.id === id);
+    if (!p || p.symbol !== S.sym) return editTpsl(id);
+    stopTpsl();
+    const m = BY[p.symbol], ref = markPx() || p.entry, d = ref * 0.004, long = p.side === 'buy';
+    tpslEd = { id, tp: p.tp || roundPx(m, long ? ref + d : ref - d), sl: p.sl || roundPx(m, long ? ref - d : ref + d), ov: {} };
+    tpslBar.innerHTML = `
+      <div class="t-th tp" data-h="tp"><i></i><span></span></div>
+      <div class="t-th sl" data-h="sl"><i></i><span></span></div>
+      <div class="t-tp-panel" role="dialog" aria-label="Take profit and stop loss">
+        <label><span>TP</span><input data-in="tp" inputmode="decimal" aria-label="Take profit price"><button type="button" data-clr="tp" title="Remove take profit" aria-label="Remove take profit">✕</button></label>
+        <label><span>SL</span><input data-in="sl" inputmode="decimal" aria-label="Stop loss price"><button type="button" data-clr="sl" title="Remove stop loss" aria-label="Remove stop loss">✕</button></label>
+        <div class="row"><button type="button" class="ok" data-tp-act="save">Save</button><button type="button" data-tp-act="cancel">Cancel</button></div>
+        <small>Drag the lines or type a price.</small>
+      </div>`;
+    tpslBar.hidden = false;
+    drawLines();          // the position's fixed TP/SL lines step aside while editing
+    tpslRender();
+  }
+  function stopTpsl() {
+    if (!tpslEd) return;
+    if (chart) chart.removeOverlay({ groupId: 'tpslEd' });
+    tpslEd = null;
+    tpslBar.hidden = true;
+    tpslBar.innerHTML = '';
+    drawLines();
+  }
+  async function saveTpsl() {
+    if (!tpslEd) return;
+    const { id, tp, sl } = tpslEd;
+    await once('pos' + id, tpslBar.querySelector('[data-tp-act="save"]'), async () => {
+      try {
+        applyState(await api(`/api/terminal/positions/${id}`, { method: 'PATCH', body: JSON.stringify({ account_id: S.accId, tp: tp || null, sl: sl || null }) }));
+        toast('TP / SL updated', `${tp ? 'TP ' + px(S.m, tp) : 'No TP'} · ${sl ? 'SL ' + px(S.m, sl) : 'No SL'}`);
+        stopTpsl();
+      } catch (er) { toast('Could not update', er.message, true); }
+    });
+  }
+  tpslBar.addEventListener('click', (e) => {
+    const a = e.target.closest('[data-tp-act]'), c = e.target.closest('[data-clr]');
+    if (c) { tpslEd[c.dataset.clr] = null; tpslRender(); return; }
+    if (a) a.dataset.tpAct === 'save' ? saveTpsl() : stopTpsl();
+  });
+  tpslBar.addEventListener('input', (e) => {
+    const k = e.target.dataset.in;
+    if (!k || !tpslEd) return;
+    tpslEd[k] = numOf(e.target.value) || null;
+    tpslRender();
+  });
+  tpslBar.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); saveTpsl(); }
+    if (e.key === 'Escape') { e.stopPropagation(); stopTpsl(); }
+  });
+  // Dragging a handle: the chart's own pan must not start under it.
+  tpslBar.addEventListener('mousedown', (e) => {
+    const h = e.target.closest('[data-h]');
+    if (!h || !tpslEd) return;
+    e.preventDefault(); e.stopPropagation();
+    const k = h.dataset.h, m = S.m, r = $('tChart').getBoundingClientRect();
+    h.classList.add('drag');
+    const mv = (ev) => {
+      let pt = null;
+      try { pt = chart.convertFromPixel({ x: 40, y: ev.clientY - r.top }, { paneId: 'candle_pane', absolute: true }); } catch (er) {}
+      if (pt && ok(pt.value) && pt.value > 0) { tpslEd[k] = roundPx(m, pt.value); tpslRender(); }
+    };
+    const up = () => { h.classList.remove('drag'); window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', mv);
+    window.addEventListener('mouseup', up);
+  }, true);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && tpslEd) stopTpsl(); });
+  function placeTpsl() {
+    if (!tpslEd || !chart || cTab !== 'chart') return;
+    if (S.st && !S.st.positions.some((x) => x.id === tpslEd.id)) return stopTpsl();   // position closed meanwhile
+    const L = posLines[tpslEd.id];
+    let pane = null;
+    try { pane = chart.getSize('candle_pane'); } catch (e) {}
+    const yOf = (v) => { try { const c = chart.convertToPixel({ timestamp: lastBar ? lastBar.timestamp : Date.now(), value: v }, { paneId: 'candle_pane', absolute: true }); return c && c.y; } catch (e) { return null; } };
+    ['tp', 'sl'].forEach((k) => {
+      const h = tpslBar.querySelector(`[data-h="${k}"]`);
+      if (!h || !tpslEd[k]) return;
+      const y = yOf(tpslEd[k]);
+      const vis = ok(y) && (!pane || (y > pane.top && y < pane.top + pane.height));
+      h.style.visibility = vis ? '' : 'hidden';
+      if (vis) h.style.transform = `translate(10px,${Math.round(y)}px) translateY(-50%)`;
+    });
+    const panel = tpslBar.querySelector('.t-tp-panel'), g = posBar.querySelector(`[data-pb="${tpslEd.id}"]`);
+    if (panel && L) {
+      const y = yOf(L.entry);
+      const x = g && g.style.transform ? +(g.style.transform.match(/translate\((\d+)px/) || [0, 10])[1] : 10;
+      if (ok(y)) panel.style.transform = `translate(${x}px,${Math.round(y) + 16}px)`;
+    }
+  }
+  (function loop2() { if (!document.hidden) placeTpsl(); requestAnimationFrame(loop2); })();
 
   /* ---------- historia transakcji na wykresie (przycisk „Trades") ---------- */
   let tradesKey = '', tipXY = [0, 0], tipT = 0;
