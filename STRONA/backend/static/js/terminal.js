@@ -384,6 +384,22 @@
      per symbol w przeglądarce, więc wracają po przeładowaniu strony. */
   let drawn = [], redo = [], drawnSym = null, selDraw = null;
   let magnet = ls.get('pf_term_magnet', '0') === '1';
+  /* Magnet as in TradingView: points snap to the candle's open/high/low/close. Holding
+     ⌘ (macOS) or Ctrl (Windows/Linux) flips it while held. The mode is applied to every
+     drawing at once, including the one being drawn — set only at creation, a toggle
+     mid-drawing and moving saved drawings ignored it. */
+  const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+  const MAG_KEY = IS_MAC ? 'Meta' : 'Control';
+  let magnetHeld = false;
+  const magMode = () => (magnet !== magnetHeld ? 'strong_magnet' : 'normal');
+  function applyMagnet() {
+    if (chart) chart.overrideOverlay({ groupId: 'draw', mode: magMode() });
+    const b = $('tMagnet');
+    if (b) b.classList.toggle('on', magnet !== magnetHeld);
+  }
+  document.addEventListener('keydown', (e) => { if (e.key === MAG_KEY && !magnetHeld) { magnetHeld = true; applyMagnet(); } });
+  document.addEventListener('keyup', (e) => { if (e.key === MAG_KEY && magnetHeld) { magnetHeld = false; applyMagnet(); } });
+  window.addEventListener('blur', () => { if (magnetHeld) { magnetHeld = false; applyMagnet(); } });
   const drawKey = (s) => 'pf_term_draw_' + s;
   const pts = (o) => o.points.map((p) => ({ timestamp: p.timestamp, value: p.value }));
   function saveDrawn() {
@@ -397,7 +413,7 @@
     onDeselected: () => { selDraw = null; },
   };
   function mkOverlay(name, points) {
-    return chart.createOverlay({ name, groupId: 'draw', points, visible: !$('tHideDraw').classList.contains('on'), ...drawEvts });
+    return chart.createOverlay({ name, groupId: 'draw', points, mode: magMode(), visible: !$('tHideDraw').classList.contains('on'), ...drawEvts });
   }
   function loadDrawn() {
     if (!chart || drawnSym === S.sym) return;
@@ -434,7 +450,7 @@
     if (n === 'cross' || !chart) return;
     loadDrawn();
     chart.createOverlay({
-      name: n, groupId: 'draw', mode: magnet ? 'weak_magnet' : 'normal', ...drawEvts,
+      name: n, groupId: 'draw', mode: magMode(), ...drawEvts,
       onDrawEnd: ({ overlay }) => {
         drawn.push({ id: overlay.id, name: overlay.name, points: pts(overlay) });
         redo = [];
@@ -448,7 +464,7 @@
     const el = $('tDraw');
     el.innerHTML = GROUPS.map((g, gi) => (gi === 1 ? '<hr>' : '') + (g.length > 1 ? `<div class="t-dgrp">${groupBtn(gi)}</div>` : groupBtn(gi))).join('')
       + '<hr>'
-      + `<button type="button" id="tMagnet" title="Magnet mode" aria-label="Magnet mode" class="${magnet ? 'on' : ''}"><svg viewBox="0 0 24 24"><path d="M6 4v8a6 6 0 0 0 12 0V4h-4v8a2 2 0 0 1-4 0V4z"/><path d="M6 8h4M14 8h4"/></svg></button>`
+      + `<button type="button" id="tMagnet" title="Magnet mode (hold ${IS_MAC ? '⌘' : 'Ctrl'} to toggle)" aria-label="Magnet mode" class="${magnet ? 'on' : ''}"><svg viewBox="0 0 24 24"><path d="M6 4v8a6 6 0 0 0 12 0V4h-4v8a2 2 0 0 1-4 0V4z"/><path d="M6 8h4M14 8h4"/></svg></button>`
       + '<button type="button" id="tHideDraw" title="Hide drawings" aria-label="Hide drawings"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>'
       + '<button type="button" id="tClearDraw" title="Remove all drawings" aria-label="Remove all drawings"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>';
     el.addEventListener('click', (e) => {
@@ -460,7 +476,7 @@
       const r = b.getBoundingClientRect();
       if (grp && e.detail && e.clientX > r.right - 12 && e.clientY > r.bottom - 12) return openFly(+b.dataset.g, b);
       closeMenus();
-      if (b.id === 'tMagnet') { magnet = !magnet; b.classList.toggle('on', magnet); ls.set('pf_term_magnet', magnet ? '1' : '0'); return; }
+      if (b.id === 'tMagnet') { magnet = !magnet; ls.set('pf_term_magnet', magnet ? '1' : '0'); applyMagnet(); return; }
       if (b.id === 'tHideDraw') {
         const hide = !b.classList.contains('on');
         b.classList.toggle('on', hide);
