@@ -595,7 +595,8 @@
   }
   const kv = (k, v, p) => `<div class="t-kv"><small>${k}</small><b class="num">${v}</b>${p ? `<p>${p}</p>` : ''}</div>`;
   const qtyBig = (v) => (!ok(v) ? '—' : v >= 1e9 ? (v / 1e9).toFixed(2) + 'B' : v >= 1e6 ? (v / 1e6).toFixed(2) + 'M' : v >= 1e3 ? (v / 1e3).toFixed(2) + 'K' : nf(2).format(v));
-  const when = (ms) => new Date(ms).toLocaleString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  // "31 Oct '26 14:00" — fixed English, the same style as the axis (never the browser's language).
+  const when = (ms) => { const d = new Date(ms); return `${d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} '${String(d.getFullYear()).slice(2)} ${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })}`; };
 
   /* ---------- Trading Data: open interest ---------- */
   const OI_RANGE = { '24h': ['15m', 96, '24 Hours'], '7d': ['1h', 168, '7 Days'], '30d': ['4h', 180, '30 Days'] };
