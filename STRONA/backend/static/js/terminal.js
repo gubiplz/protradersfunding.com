@@ -262,6 +262,21 @@
         return fig;
       },
     });
+    // Magnet crosshair: dashed horizontal line at a candle's O/H/L/C, exact price on the axis.
+    klinecharts.registerOverlay({
+      name: 'ptfSnap', totalStep: 2, lock: true, needDefaultPointFigure: false, needDefaultXAxisFigure: false, needDefaultYAxisFigure: false,
+      createPointFigures: ({ coordinates, bounding }) => [{
+        type: 'line', ignoreEvent: true, attrs: { coordinates: [{ x: 0, y: coordinates[0].y }, { x: bounding.width, y: coordinates[0].y }] },
+        styles: { style: 'dashed', dashedValue: [4, 3], color: css('--muted'), size: 1 },
+      }],
+      // Price box on the axis, like the crosshair's own label (always shown, not only on hover).
+      createYAxisFigures: ({ coordinates, overlay, bounding }) => [{
+        type: 'text', ignoreEvent: true,
+        attrs: { x: 0, y: coordinates[0].y, text: px(S.m, overlay.points[0].value), align: 'left', baseline: 'middle' },
+        styles: { color: '#fff', size: 12, family: LINE_FONT, paddingLeft: 4, paddingRight: 4, paddingTop: 3, paddingBottom: 3,
+          borderRadius: 2, borderSize: 0, backgroundColor: css('--panel3') || '#3b4354' },
+      }],
+    });
     // Linia ceny z etykietą: wejście, TP, SL, likwidacja, zlecenia oczekujące.
     klinecharts.registerOverlay({
       name: 'ptfLine', totalStep: 2, lock: true, needDefaultPointFigure: false, needDefaultXAxisFigure: false, needDefaultYAxisFigure: true,
@@ -443,15 +458,60 @@
     Object.assign(drawFly.style, { position: 'fixed', left: r.right + 6 + 'px', top: '0px', right: 'auto', bottom: 'auto' });
     drawFly.style.top = Math.max(8, Math.min(r.top, innerHeight - drawFly.offsetHeight - 8)) + 'px';
   }
+  /* Esc (or picking another tool) drops a drawing that isn't finished yet — e.g. a trend
+     line with only its first point placed — and goes back to the cursor. */
+  let armedId = null;
+  function cancelDrawing(toCursor) {
+    if (!armedId) return false;
+    if (chart) chart.removeOverlay({ id: armedId });
+    armedId = null;
+    if (toCursor) $$('[data-d]', $('tDraw')).forEach((x) => x.classList.toggle('on', x.dataset.d === 'cross'));
+    return true;
+  }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !e.target.closest('input,textarea')) cancelDrawing(true); });
+
+  /* With the magnet on, the crosshair snaps too (as in TradingView). The chart's own
+     horizontal crosshair is hidden and a line of ours sits at the nearest open/high/low/close
+     of the candle under the cursor, with that exact price on the axis — the chart rounds its
+     crosshair to whole pixels, so moving it there would show a price a dollar or two off. */
+  let snapId = null, snapOn = false;
+  function snapMode(on) {
+    if (on === snapOn || !chart) return;
+    snapOn = on;
+    chart.setStyles({ crosshair: { horizontal: { show: !on } } });
+    if (!on && snapId) { chart.removeOverlay({ id: snapId }); snapId = null; }
+  }
+  $('tChart').addEventListener('mousemove', (ev) => {
+    if (!chart) return;
+    const on = magMode() !== 'normal';
+    snapMode(on);
+    if (!on || ev.buttons || ev.target.tagName !== 'CANVAS') return;
+    const r = $('tChart').getBoundingClientRect(), x = ev.clientX - r.left, y = ev.clientY - r.top;
+    try {
+      const pane = chart.getSize('candle_pane');
+      if (pane && (y < pane.top || y > pane.top + pane.height)) { if (snapId) { chart.removeOverlay({ id: snapId }); snapId = null; } return; }
+      const pt = chart.convertFromPixel({ x, y }, { paneId: 'candle_pane', absolute: true });
+      const k = pt && chart.getDataList()[pt.dataIndex];
+      if (!k || !ok(pt.value)) return;
+      const v = [k.open, k.high, k.low, k.close].reduce((a, c) => (Math.abs(c - pt.value) < Math.abs(a - pt.value) ? c : a));
+      const points = [{ timestamp: k.timestamp, value: v }];
+      if (snapId) chart.overrideOverlay({ id: snapId, points });
+      else snapId = chart.createOverlay({ name: 'ptfSnap', groupId: 'snap', lock: true, points });
+    } catch (e) {}
+  });
+  $('tChart').addEventListener('mouseleave', () => { if (snapId && chart) { chart.removeOverlay({ id: snapId }); snapId = null; } });
+
   function armTool(b) {
     const el = $('tDraw');
     $$('[data-d]', el).forEach((x) => x.classList.toggle('on', x === b));
     const n = b.dataset.d;
+    cancelDrawing(false);
     if (n === 'cross' || !chart) return;
     loadDrawn();
-    chart.createOverlay({
+    armedId = chart.createOverlay({
       name: n, groupId: 'draw', mode: magMode(), ...drawEvts,
       onDrawEnd: ({ overlay }) => {
+        armedId = null;
         drawn.push({ id: overlay.id, name: overlay.name, points: pts(overlay) });
         redo = [];
         saveDrawn();
