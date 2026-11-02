@@ -1732,24 +1732,30 @@
       h.hidden = !v;
       if (v) { h.querySelector('span').textContent = tpslLabel(p, k, v); h.classList.toggle('bad', !tpslOk(p, k, v)); }
       const inp = tpslBar.querySelector(`[data-in="${k}"]`);
-      if (document.activeElement !== inp) inp.value = v ? px(BY[p.symbol], v).replace(/,/g, '') : '';
+      if (inp && document.activeElement !== inp) inp.value = v ? px(BY[p.symbol], v).replace(/,/g, '') : '';
     });
   }
-  function startTpsl(id) {
+  /* Two ways in: the TP/SL button (both levels + a panel with typed prices), or grabbing
+     the dots on an existing TP/SL line (`line`: just the lines, applied with ✓ on the line). */
+  function startTpsl(id, line) {
     const p = S.st && S.st.positions.find((x) => x.id === id);
     if (!p || p.symbol !== S.sym) return editTpsl(id);
     stopTpsl();
     const m = BY[p.symbol], ref = markPx() || p.entry, d = ref * 0.004, long = p.side === 'buy';
-    tpslEd = { id, tp: p.tp || roundPx(m, long ? ref + d : ref - d), sl: p.sl || roundPx(m, long ? ref - d : ref + d), ov: {} };
+    tpslEd = line
+      ? { id, tp: p.tp || null, sl: p.sl || null, ov: {}, line: true }
+      : { id, tp: p.tp || roundPx(m, long ? ref + d : ref - d), sl: p.sl || roundPx(m, long ? ref - d : ref + d), ov: {} };
+    const acts = '<b class="acts"><button type="button" data-tp-act="save" title="Apply" aria-label="Apply">✓</button><button type="button" data-tp-act="cancel" title="Cancel" aria-label="Cancel">✕</button></b>';
+    tpslBar.classList.toggle('line', !!line);
     tpslBar.innerHTML = `
-      <div class="t-th tp" data-h="tp"><i></i><span></span></div>
-      <div class="t-th sl" data-h="sl"><i></i><span></span></div>
-      <div class="t-tp-panel" role="dialog" aria-label="Take profit and stop loss">
+      <div class="t-th tp" data-h="tp"><i></i><span></span>${acts}</div>
+      <div class="t-th sl" data-h="sl"><i></i><span></span>${acts}</div>
+      ${line ? '' : `<div class="t-tp-panel" role="dialog" aria-label="Take profit and stop loss">
         <label><span>TP</span><input data-in="tp" inputmode="decimal" aria-label="Take profit price"><button type="button" data-clr="tp" title="Remove take profit" aria-label="Remove take profit">✕</button></label>
         <label><span>SL</span><input data-in="sl" inputmode="decimal" aria-label="Stop loss price"><button type="button" data-clr="sl" title="Remove stop loss" aria-label="Remove stop loss">✕</button></label>
         <div class="row"><button type="button" class="ok" data-tp-act="save">Save</button><button type="button" data-tp-act="cancel">Cancel</button></div>
         <small>Drag the lines or type a price.</small>
-      </div>`;
+      </div>`}`;
     tpslBar.hidden = false;
     drawLines();          // the position's fixed TP/SL lines step aside while editing
     tpslRender();
@@ -1789,11 +1795,9 @@
     if (e.key === 'Escape') { e.stopPropagation(); stopTpsl(); }
   });
   // Dragging a handle: the chart's own pan must not start under it.
-  tpslBar.addEventListener('mousedown', (e) => {
-    const h = e.target.closest('[data-h]');
-    if (!h || !tpslEd) return;
-    e.preventDefault(); e.stopPropagation();
-    const k = h.dataset.h, m = S.m, r = $('tChart').getBoundingClientRect();
+  function dragLevel(k) {
+    const h = tpslBar.querySelector(`[data-h="${k}"]`), m = S.m, r = $('tChart').getBoundingClientRect();
+    if (!h) return;
     h.classList.add('drag');
     const mv = (ev) => {
       let pt = null;
@@ -1803,7 +1807,51 @@
     const up = () => { h.classList.remove('drag'); window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
     window.addEventListener('mousemove', mv);
     window.addEventListener('mouseup', up);
+  }
+  tpslBar.addEventListener('mousedown', (e) => {
+    const h = e.target.closest('[data-h]');
+    if (!h || !tpslEd || e.target.closest('button')) return;
+    e.preventDefault(); e.stopPropagation();
+    dragLevel(h.dataset.h);
   }, true);
+
+  /* Dots on the position's TP/SL lines (as in cTrader): grab one to move that level; the
+     new price shows on the line and is sent only after ✓ on it (✕ puts it back). */
+  const gripBar = document.createElement('div');
+  gripBar.className = 't-grips';
+  $('tChart').appendChild(gripBar);
+  function placeGrips() {
+    const want = [];
+    if (S.st && chart && cTab === 'chart') {
+      S.st.positions.filter((p) => p.symbol === S.sym && !(tpslEd && tpslEd.id === p.id)).forEach((p) => {
+        ['tp', 'sl'].forEach((k) => { if (p[k]) want.push({ id: p.id, k, v: p[k], text: `${k.toUpperCase()} ${px(S.m, p[k])}` }); });
+      });
+    }
+    const key = want.map((w) => `${w.id}${w.k}`).join(',');
+    if (gripBar.dataset.k !== key) {
+      gripBar.dataset.k = key;
+      gripBar.innerHTML = want.map((w) => `<button type="button" class="t-grip ${w.k}" data-gp="${w.id}" data-gk="${w.k}" title="Drag to move ${w.k === 'tp' ? 'take profit' : 'stop loss'}" aria-label="Move ${w.k === 'tp' ? 'take profit' : 'stop loss'}"><i></i></button>`).join('');
+    }
+    if (!want.length) return;
+    let pane = null;
+    try { pane = chart.getSize('candle_pane'); } catch (e) {}
+    want.forEach((w) => {
+      const el = gripBar.querySelector(`[data-gp="${w.id}"][data-gk="${w.k}"]`);
+      let y = null;
+      try { const c = chart.convertToPixel({ timestamp: lastBar ? lastBar.timestamp : Date.now(), value: w.v }, { paneId: 'candle_pane', absolute: true }); y = c && c.y; } catch (e) {}
+      const vis = ok(y) && (!pane || (y > pane.top + 8 && y < pane.top + pane.height - 8));
+      el.style.visibility = vis ? '' : 'hidden';
+      if (vis) el.style.transform = `translate(${Math.round(10 + szerTekstu(w.text) + 16)}px,${Math.round(y)}px) translateY(-50%)`;
+    });
+  }
+  gripBar.addEventListener('mousedown', (e) => {
+    const g = e.target.closest('[data-gk]');
+    if (!g) return;
+    e.preventDefault(); e.stopPropagation();
+    startTpsl(+g.dataset.gp, true);
+    if (tpslEd) dragLevel(g.dataset.gk);
+  }, true);
+  (function loop3() { if (!document.hidden) placeGrips(); requestAnimationFrame(loop3); })();
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && tpslEd) stopTpsl(); });
   function placeTpsl() {
     if (!tpslEd || !chart || cTab !== 'chart') return;
@@ -1815,10 +1863,11 @@
     ['tp', 'sl'].forEach((k) => {
       const h = tpslBar.querySelector(`[data-h="${k}"]`);
       if (!h || !tpslEd[k]) return;
-      const y = yOf(tpslEd[k]);
-      const vis = ok(y) && (!pane || (y > pane.top && y < pane.top + pane.height));
-      h.style.visibility = vis ? '' : 'hidden';
-      if (vis) h.style.transform = `translate(10px,${Math.round(y)}px) translateY(-50%)`;
+      // Off-screen levels stick to the pane's top/bottom edge, so ✓ / ✕ stay reachable.
+      let y = yOf(tpslEd[k]);
+      if (!ok(y)) return;
+      if (pane) y = Math.min(pane.top + pane.height - 12, Math.max(pane.top + 12, y));
+      h.style.transform = `translate(10px,${Math.round(y)}px) translateY(-50%)`;
     });
     const panel = tpslBar.querySelector('.t-tp-panel'), g = posBar.querySelector(`[data-pb="${tpslEd.id}"]`);
     if (panel && L) {

@@ -224,6 +224,18 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-th.bad{background:var(--dn);color:#fff}
 .t-th.drag{outline:2px solid #fff;outline-offset:1px}
 .t-th i{width:8px;height:12px;border-left:2px dotted currentColor;border-right:2px dotted currentColor;opacity:.75}
+.t-th .acts{display:none;gap:3px;margin-left:4px}
+.t-tpsl-ed.line .t-th .acts{display:flex}
+.t-th .acts button{width:20px;height:18px;border-radius:4px;display:grid;place-items:center;background:rgba(0,0,0,.28);color:#fff;font-size:11px;cursor:pointer}
+.t-th .acts button:hover{background:rgba(0,0,0,.5)}
+.t-th.sl .acts button{color:#fff}
+/* dots on the position's TP/SL lines */
+.t-grips{position:absolute;inset:0;pointer-events:none;z-index:3;overflow:hidden}
+.t-grip{position:absolute;left:0;top:0;width:18px;height:20px;border-radius:4px;display:grid;place-items:center;pointer-events:auto;cursor:ns-resize;
+  background:var(--panel);border:1px solid var(--line2)}
+.t-grip i{width:8px;height:12px;border-left:2px dotted currentColor;border-right:2px dotted currentColor}
+.t-grip.tp{color:var(--acc)} .t-grip.sl{color:var(--warn)}
+.t-grip:hover{border-color:currentColor}
 .t-tp-panel{position:absolute;left:0;top:0;width:212px;padding:10px;border-radius:10px;background:var(--panel);border:1px solid var(--line2);
   box-shadow:0 12px 30px rgba(0,0,0,.4);pointer-events:auto;display:flex;flex-direction:column;gap:7px}
 .t-tp-panel label{display:grid;grid-template-columns:24px 1fr 24px;align-items:center;gap:6px;font:600 11px var(--mono);color:var(--muted)}
