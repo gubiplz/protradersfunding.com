@@ -79,7 +79,7 @@
     book: { bids: [], asks: [] }, trades: [], tk: {}, mids: {}, ctx: {},
     // Jednostka pola Size: loty (domyślnie, jak w MT5), USD albo jednostka bazowa (BTC, oz…).
     side: 'buy', kind: 'market', unit: ['lots', 'usd', 'base'].includes(ls.get('pf_term_unit2', 'lots')) ? ls.get('pf_term_unit2', 'lots') : 'lots', slip: +ls.get('pf_term_slip', '1'),
-    quick: ls.json('pf_term_quick', [50, 100, 250]), watch: ls.json('pf_term_watch', ['BTCUSD', 'ETHUSD', 'XAUUSD']),
+    watch: ls.json('pf_term_watch', ['BTCUSD', 'ETHUSD', 'XAUUSD']),
     token: ls.get('pf_token', null),   // tylko sesja konta PTF (wspólna z portalem)
     accounts: [], accId: +ls.get('pf_term_acc', '0') || null, st: null, ptab: 'positions',
     // Poślizg domyślnie schowany (jest w Columns): z nim tabela nie mieściła się pod wykresem nawet na 1440 px.
@@ -232,6 +232,34 @@
           { key: 'in', type: 'polygon', attrs: { coordinates: tri }, styles: { style: 'fill', color: strona } },
           { key: 'out', type: 'circle', attrs: { x: b.x, y: b.y, r: hov ? 5.5 : 4 }, styles: { style: 'stroke_fill', color: e.bg, borderColor: wynik, borderSize: 2 } },
         ];
+      },
+    });
+    // Shift + click measure (as in TradingView / cTrader / MT5): a box from the start point
+    // to the cursor, arrows along both edges, and a label with the price move, %, pips,
+    // $ per lot, bar count and time. The text is computed outside and passed in extendData.
+    klinecharts.registerOverlay({
+      name: 'ptfMeasure', totalStep: 3, lock: true, needDefaultPointFigure: false, needDefaultXAxisFigure: true, needDefaultYAxisFigure: true,
+      createPointFigures: ({ coordinates, overlay }) => {
+        if (coordinates.length < 2) return [];
+        const [a, b] = coordinates, e = overlay.extendData || {};
+        const x1 = Math.min(a.x, b.x), x2 = Math.max(a.x, b.x), y1 = Math.min(a.y, b.y), y2 = Math.max(a.y, b.y);
+        const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2, c = e.color, s = 5;
+        const ln = (p, q) => ({ type: 'line', attrs: { coordinates: [p, q] }, styles: { color: c, size: 1 }, ignoreEvent: true });
+        const vy = b.y < a.y ? 1 : -1, hx = b.x < a.x ? 1 : -1;
+        const fig = [
+          { type: 'rect', attrs: { x: x1, y: y1, width: x2 - x1, height: y2 - y1 }, styles: { style: 'fill', color: e.fill }, ignoreEvent: true },
+          ln({ x: cx, y: a.y }, { x: cx, y: b.y }),
+          ln({ x: a.x, y: cy }, { x: b.x, y: cy }),
+        ];
+        if (y2 - y1 > 2 * s) fig.push(ln({ x: cx - s, y: b.y + vy * s }, { x: cx, y: b.y }), ln({ x: cx + s, y: b.y + vy * s }, { x: cx, y: b.y }));
+        if (x2 - x1 > 2 * s) fig.push(ln({ x: b.x + hx * s, y: cy - s }, { x: b.x, y: cy }), ln({ x: b.x + hx * s, y: cy + s }, { x: b.x, y: cy }));
+        const box = { color: '#fff', size: 11, weight: 600, family: LINE_FONT, paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, borderRadius: 4, borderSize: 0, backgroundColor: c };
+        const up = b.y <= a.y, ty = up ? y1 - 8 : y2 + 8;
+        (e.lines || []).forEach((t, i) => fig.push({
+          type: 'text', ignoreEvent: true, styles: box,
+          attrs: { x: cx, y: up ? ty - (e.lines.length - 1 - i) * 21 : ty + i * 21, text: t, align: 'center', baseline: up ? 'bottom' : 'top' },
+        }));
+        return fig;
       },
     });
     // Linia ceny z etykietą: wejście, TP, SL, likwidacja, zlecenia oczekujące.
@@ -592,6 +620,7 @@
     if (strm) strm.close();
     S.book = { bids: [], asks: [] }; S.top = [0, 0]; S.trades = []; S.tk = {};
     barNext = null;
+    clearMeasure();
     $('tSpread').textContent = '—'; $('tSpreadPct').textContent = '—';
     renderBook(); renderTrades(); renderTicker();
     if (chart) {
@@ -986,8 +1015,6 @@
     $$('[data-side]').forEach((b) => b.classList.toggle('on', b.dataset.side === s));
     $('tGo').className = 't-go ' + s;
     $('tGo').textContent = (s === 'buy' ? 'Buy / Long ' : 'Sell / Short ') + baseName(S.m);
-    $('tQuickSide').textContent = s === 'buy' ? 'Long' : 'Short';
-    $('tQuick').classList.toggle('sell', s === 'sell');
     updateTicket();
   }
   $$('[data-side]').forEach((b) => b.addEventListener('click', () => setSide(b.dataset.side)));
@@ -1054,7 +1081,7 @@
     $('tPct').value = 0; $('tPctIn').value = 0;
     if (S.kind !== 'market') setKind(S.kind);
     $('tSizeUnitLbl').textContent = unitLbl();
-    renderQuick(); updateTicket();
+    updateTicket();
   }
   function updateTicket() {
     const m = S.m, q = orderQty(), p = refPx(), L = lev();
@@ -1076,39 +1103,14 @@
   }
   // Limit lotów jest wspólny z Trade BOT-em: liczą się też jego otwarte pozycje.
   const openLots = (a) => (a.open_lots || 0) + (a.other_lots || 0);
-  function renderQuick() {
-    $('tQuick').innerHTML = S.quick.map((v, i) => `<button type="button" data-q="${i}">$${fx(v, 0)}</button>`).join('');
-  }
-  $('tQuick').addEventListener('click', async (e) => {
-    const b = e.target.closest('[data-q]');
-    if (!b) return;
-    const v = S.quick[+b.dataset.q];
-    if (!S.token) return openModal('tReady');
-    setKind('market');
-    // Szybki rozmiar jest w USD niezależnie od jednostki pola — ilość idzie wprost.
-    submitOrder(true, qtyFromUsd(S.m, v, refPx()));
-  });
-  $('tQuickEdit').onclick = () => {
-    if ($('tQuick').querySelector('input')) {
-      S.quick = $$('input', $('tQuick')).map((i) => Math.max(1, +i.value || 0));
-      ls.set('pf_term_quick', JSON.stringify(S.quick));
-      renderQuick();
-      return;
-    }
-    $('tQuick').innerHTML = S.quick.map((v) => `<input inputmode="decimal" value="${v}" aria-label="Quick size in USD">`).join('');
-    $('tQuick').querySelector('input').focus();
-  };
-  $('tQuick').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.matches('input')) $('tQuickEdit').click(); });
-
-
   let sending = false;
-  async function submitOrder(quick, qtyOverride) {
+  async function submitOrder() {
     if (!S.token) return openModal('tReady');
     if (!S.st || !S.st.account.tradable) {
       return toast('This account cannot trade', (S.st && S.st.account.reason) || 'Choose an active challenge account.', true);
     }
     if (sending) return;
-    const m = S.m, q = qtyOverride || orderQty();
+    const m = S.m, q = orderQty();
     if (!(q > 0)) return toast('Enter a size', 'Type an amount or use the slider.', true);
     const body = {
       account_id: S.accId, symbol: m.sym, side: S.side, kind: S.kind, qty: +q.toFixed(Math.max(m.qty_dec, 2) + 2),
@@ -1119,15 +1121,6 @@
       if (!body.price) return toast('Enter a price', S.kind === 'limit' ? 'Set the limit price for this order.' : 'Set the trigger price for this order.', true);
     }
     if ($('tTpsl').checked) { const tp = numOf($('tTp').value), sl = numOf($('tSl').value); if (tp) body.tp = tp; if (sl) body.sl = sl; }
-    if (quick && ls.get('pf_term_quick_ok', '0') !== '1') {
-      const okk = await confirmBox('Confirm quick order', `<p>${S.side === 'buy' ? 'Buy / Long' : 'Sell / Short'} <b>${usd(notional(m, q, refPx()))}</b> of ${m.sym} at market, leverage 1:${lev()}.</p>
-        <label class="ck" style="margin-top:14px"><input type="checkbox" id="tQuickNoAsk"><span>Don't ask again for quick orders</span></label>`, S.side === 'buy' ? 'Buy / Long' : 'Sell / Short');
-      if (!okk) return;
-      // Pole czytamy tylko tu: zostawione po anulowanym oknie nie może przestawić zgody przy zwykłym zleceniu.
-      const noAsk = $('tQuickNoAsk');
-      if (noAsk && noAsk.checked) ls.set('pf_term_quick_ok', '1');
-      if (sending) return;
-    }
     sending = true;
     $('tGo').disabled = true;
     try {
@@ -1145,7 +1138,7 @@
       $('tGo').disabled = false;
     }
   }
-  $('tGo').onclick = () => submitOrder(false);
+  $('tGo').onclick = () => submitOrder();
 
   /* =====================================================================
      KONTO, LOGOWANIE, STAN
@@ -1657,6 +1650,65 @@
   // Zlecenie po cenie spod kursora (limit albo stop — zależnie od strony rynku), widok,
   // kopiowanie ceny, transakcje i rysunki na wykresie, wskaźniki.
   let prawyNaRysunku = 0, ctxPx = null;
+  /* ---------- measure: Shift + left click ----------
+     Shift + press starts the box at the cursor; drag and release, or move and click
+     again, to finish. It stays on the chart until the next click or Esc. */
+  // Pip as on MT5 / cTrader: 0.0001 FX (0.01 JPY), 0.1 gold, 0.01 oil, 1 point on indices and BTC.
+  const pipOf = (m) => (m.cls === 'energy' ? Math.pow(10, -m.px_dec) : Math.pow(10, -Math.max(0, m.px_dec - 1)));
+  const durTxt = (min) => {
+    const d = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60), mm = Math.round(min % 60);
+    return [d && `${d}d`, h && `${h}h`, (mm || (!d && !h)) && `${mm}m`].filter(Boolean).join(' ');
+  };
+  let meas = null;
+  function measLabel(p0, p1) {
+    const m = S.m, d = p1.value - p0.value, up = d >= 0, sg = up ? '+' : '-';
+    const pct = p0.value ? (d / p0.value) * 100 : 0;
+    const perLot = m.quote_inverse ? (p1.value ? (d * m.contract) / p1.value : 0) : d * m.contract;
+    const bars = Math.abs((p1.dataIndex || 0) - (p0.dataIndex || 0));
+    const col = css(up ? '--up' : '--dn');
+    return {
+      color: col, fill: col + '26',
+      lines: [
+        `${sg}${px(m, Math.abs(d))} (${sg}${fx(Math.abs(pct), 2)}%) · ${sg}${fx(Math.abs(d) / pipOf(m), 1)} pips`,
+        `${sUsd(perLot)} per lot · ${bars} ${bars === 1 ? 'bar' : 'bars'}, ${durTxt((bars * F.MS[S.interval]) / 60000)}`,
+      ],
+    };
+  }
+  function measPt(ev, inPane) {
+    const r = $('tChart').getBoundingClientRect(), x = ev.clientX - r.left, y = ev.clientY - r.top;
+    try {
+      const pane = chart.getSize('candle_pane');
+      if (inPane && pane && (y < pane.top || y > pane.top + pane.height || x > pane.left + pane.width)) return null;
+      const pt = chart.convertFromPixel({ x, y }, { paneId: 'candle_pane', absolute: true });
+      if (!pt || !ok(pt.value) || !Number.isFinite(pt.dataIndex)) return null;
+      const out = { dataIndex: pt.dataIndex, value: pt.value };
+      if (ok(pt.timestamp)) out.timestamp = pt.timestamp;
+      return out;
+    } catch (e) { return null; }
+  }
+  function clearMeasure() { if (meas && chart) chart.removeOverlay({ id: meas.id }); meas = null; }
+  $('tChart').addEventListener('mousedown', (ev) => {
+    if (!chart || ev.button !== 0) return;
+    if (meas && meas.live) { ev.stopPropagation(); ev.preventDefault(); meas.live = false; return; }
+    if (!ev.shiftKey) { clearMeasure(); return; }
+    const pt = measPt(ev, true);
+    if (!pt) return;
+    // Capture phase: the chart must not start panning under the measure.
+    ev.stopPropagation(); ev.preventDefault();
+    clearMeasure();
+    const id = chart.createOverlay({ name: 'ptfMeasure', groupId: 'measure', lock: true, points: [pt, pt], extendData: measLabel(pt, pt) });
+    if (id) meas = { id, p0: pt, live: true, x0: ev.clientX, y0: ev.clientY };
+  }, true);
+  window.addEventListener('mousemove', (ev) => {
+    if (!meas || !meas.live) return;
+    const pt = measPt(ev, false);
+    if (pt) chart.overrideOverlay({ id: meas.id, points: [meas.p0, pt], extendData: measLabel(meas.p0, pt) });
+  });
+  window.addEventListener('mouseup', (ev) => {
+    if (meas && meas.live && Math.hypot(ev.clientX - meas.x0, ev.clientY - meas.y0) > 4) meas.live = false;
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') clearMeasure(); });
+
   const ctxMenu = document.createElement('div');
   ctxMenu.className = 't-menu t-ctx';
   ctxMenu.hidden = true;
@@ -1757,7 +1809,6 @@
   function boot() {
     renderMarketHead();
     setSide('buy');
-    renderQuick();
     $$('[data-i]', $('tInts')).forEach((b) => b.classList.toggle('on', b.dataset.i === S.interval));
     buildDrawRail();
     initChart();

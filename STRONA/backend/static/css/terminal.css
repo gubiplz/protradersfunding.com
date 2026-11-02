@@ -296,16 +296,6 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-pct-in input{width:100%;background:none;border:0;outline:0;text-align:right;font:13.5px var(--mono)}
 .t-pct-in em{font-style:normal;color:var(--muted);margin-left:3px}
 .t-ticks{display:flex;justify-content:space-between;font:11px var(--mono);color:var(--dim);padding:0 2px}
-.t-quick{display:flex;flex-direction:column;gap:8px}
-.t-quick-h{display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:13px}
-.t-quick-h span{display:flex;align-items:center;gap:6px}
-.t-quick-h svg{width:14px;height:14px}
-.t-quick-r{display:grid;grid-template-columns:44px 1fr;gap:8px;align-items:center;font-size:13px;color:var(--muted)}
-#tQuick{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-#tQuick button{height:36px;border-radius:8px;background:var(--up-soft);color:var(--up);font:600 13px var(--mono)}
-#tQuick button:hover{filter:brightness(1.2)}
-#tQuick.sell button{background:var(--dn-soft);color:var(--dn)}
-#tQuick input{height:36px;border-radius:8px;background:var(--panel);border:1px solid var(--acc);text-align:center;font:13px var(--mono);width:100%;outline:0}
 .ck{display:flex;align-items:flex-start;gap:10px;font-size:13.5px;line-height:1.45;color:var(--muted);cursor:pointer;user-select:none}
 .ck input[type=checkbox]{appearance:none;-webkit-appearance:none;width:18px;height:18px;margin:0;flex:none;border-radius:5px;
   border:1.5px solid var(--line2);background:var(--panel) center/11px no-repeat;cursor:pointer;
@@ -550,7 +540,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   .t-toast{max-width:none}
 
   /* iOS przybliża stronę przy polu z czcionką < 16 px — na telefonie wszystkie mają 16. */
-  .t-in input,.t-tpsl .t-in input,.t-pct-in input,#tQuick input,.t-bctl select,.t-search-in input,.t-calc input{font-size:16px}
+  .t-in input,.t-tpsl .t-in input,.t-pct-in input,.t-bctl select,.t-search-in input,.t-calc input{font-size:16px}
 
   /* dotykowe cele ≥ 32 px */
   .t-venue button{min-height:32px}
