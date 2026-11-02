@@ -178,6 +178,13 @@ def test_terminal_pokazuje_transakcje_bota_a_planu_nie(zywe):
         # Zwykła zamknięta transakcja — bez znacznika, że zrobił ją bot.
         assert [(x["symbol"], x["reason"], x["lots"]) for x in st["history"]] == [("BTCUSD", "close", 0.3)]
         assert "by" not in st["history"][0]
+        # Opłata i dźwignia jak w terminalu (0,03% × (wejście + wyjście)), P&L z planu.
+        zh = st["history"][0]
+        assert zh["fee"] == pytest.approx(round((77_000.0 + 77_500.0) * 0.3 * 0.0003, 2))
+        assert zh["leverage"] == 10.0 and zh["pnl"] == 150.0
+        # Order History: market na wejściu i market reduce-only na wyjściu.
+        assert [(o["side"], o["kind"], o["reduce_only"], o["status"], o["fill_price"]) for o in st["order_history"]] == [
+            ("sell", "market", True, "filled", 77_500.0), ("buy", "market", False, "filled", 77_000.0)]
         assert c.get(f"/api/me/accounts/{aid}/positions", headers=h).json() == []
 
 

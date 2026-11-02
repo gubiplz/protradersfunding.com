@@ -767,7 +767,29 @@ def _closed_dict(t: Trade) -> dict:
         inst = tradebot.INSTRUMENTS.get(t.symbol)
         d["qty"] = round((t.lots or 0.0) * inst.point_value, 6) if inst else None
         d["reason"] = "close"
+        # Opłata i dźwignia jak przy transakcji z terminala (0,03% przy wejściu i wyjściu,
+        # dźwignia rynku) — zero w kolumnie Fee odróżniałoby ją od reszty historii.
+        # P&L zostaje z planu: traktujemy go jako wynik po opłatach.
+        m = markets.get(t.symbol)
+        if m and d["qty"]:
+            d["fee"] = round((markets.notional_usd(m, d["qty"], t.open_price or 0.0)
+                              + markets.notional_usd(m, d["qty"], t.close_price or 0.0)) * FEE_PCT, 2)
+            d["leverage"] = float(m.max_lev)
     return d
+
+
+def _bot_orders(d: dict) -> list[dict]:
+    """Zlecenia Order History dla transakcji Trade BOT-a: market na wejściu i market
+    reduce-only na wyjściu, jak przy pozycji otwartej i zamkniętej w terminalu.
+    Bez nich historia pozycji miałaby transakcje, których nie poprzedziło żadne zlecenie."""
+    wspolne = {"symbol": d["symbol"], "kind": "market", "qty": d["qty"], "price": None, "tp": None,
+               "sl": None, "leverage": d.get("leverage"), "status": "filled", "note": ""}
+    return [
+        {**wspolne, "id": f"b{d['id']}c", "side": "sell" if d["side"] == "buy" else "buy", "reduce_only": True,
+         "fill_price": d["close"], "created_at": d["closed_at"], "done_at": d["closed_at"]},
+        {**wspolne, "id": f"b{d['id']}o", "side": d["side"], "reduce_only": False,
+         "fill_price": d["entry"], "created_at": d["opened_at"], "done_at": d["opened_at"]},
+    ]
 
 
 def _order_dict(z: TerminalOrder) -> dict:
@@ -801,14 +823,18 @@ def state_dict(session, acc: Account, poz: list[Trade], marks: dict[str, float])
     hist_z = (session.query(TerminalOrder)
               .filter(TerminalOrder.account_id == acc.id, TerminalOrder.status != "open")
               .order_by(TerminalOrder.id.desc()).limit(100).all())
+    historia = [_closed_dict(t) for t in zamk]
+    zlecenia = [_order_dict(z) for z in hist_z]
+    zlecenia += [o for t, d in zip(zamk, historia) if t.source == "bot" for o in _bot_orders(d)]
+    zlecenia.sort(key=lambda o: o["done_at"] or o["created_at"] or "", reverse=True)
     return {
         "account": {**_konto_dict(acc), **fig, "metrics": met,
                     "max_lots": float(acc.max_lots or catalog.max_lots_for(acc.initial_balance or 0.0)),
                     "day_start_equity": round(float(acc.day_start_equity or 0.0), 2)},
         "positions": [_pos_dict(t, marks) for t in poz],
         "orders": [_order_dict(z) for z in _open_orders(session, acc)],
-        "history": [_closed_dict(t) for t in zamk],
-        "order_history": [_order_dict(z) for z in hist_z],
+        "history": historia,
+        "order_history": zlecenia[:100],
         "fee_pct": FEE_PCT * 100, "server_time": _iso(_now()),
     }
 
