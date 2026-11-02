@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}{{ lesson.title }} — Trading Academy | {{ site_name }}{% endblock %}
+{% block description %}{{ lesson.summary }}{% endblock %}
+{% block og_title %}{{ lesson.title }} — {{ site_name }} Academy{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/css/academy.css?v={{ asset_v }}">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Article","headline":{{ lesson.title|tojson }},"description":{{ lesson.summary|tojson }},
+ "isPartOf":{"@type":"Course","name":{{ (module.title ~ " — " ~ site_name ~ " Academy")|tojson }},"provider":{"@type":"Organization","name":{{ site_name|tojson }}}},
+ "timeRequired":"PT{{ lesson.minutes }}M","url":"{{ base_url }}/academy/{{ lesson.slug }}"}</script>
+{% endblock %}
+
+{% block content %}
+<section class="ac-lesson" style="--k:{{ module.color }}">
+  <div class="wrap">
+    <nav class="ac-crumbs" aria-label="Breadcrumb"><a href="/academy">Academy</a><span>›</span>
+      <a href="/academy#{{ module.slug }}">{{ module.title }}</a><span>›</span><b>Lesson {{ lesson.n }}</b></nav>
+
+    <div class="ac-lgrid">
+      <aside class="ac-side" aria-label="Lessons in this module">
+        <div class="ac-side-h"><small>Module {{ (modules|map(attribute='slug')|list).index(module.slug) + 1 }}</small><b>{{ module.title }}</b>
+          <div class="ac-bar"><i id="acBar"></i></div><small id="acBarTxt">{{ module.lessons|length }} lessons · {{ module.minutes }} min</small></div>
+        <ol>
+          {% for l in module.lessons %}
+          <li><a href="/academy/{{ l.slug }}" data-slug="{{ l.slug }}" class="{{ 'on' if l.slug == lesson.slug }}"{{ ' aria-current="page"' if l.slug == lesson.slug }}>
+            <span class="ck">{{ l.n }}</span><span>{{ l.title }}<small>{{ l.minutes }} min</small></span></a></li>
+          {% endfor %}
+        </ol>
+      </aside>
+
+      <article class="ac-art">
+        <div class="ac-art-cover">{{ cover(lesson.motif, module.color, module.title|upper)|safe }}</div>
+        <div class="ac-tags"><span class="ac-mtag">{{ module.title }}</span><span class="ac-lv">{{ module.level }}</span>
+          <span class="ac-time"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>{{ lesson.minutes }} min read</span>
+          <span class="ac-time">Lesson {{ lesson.n }} of {{ module.lessons|length }}</span></div>
+        <h1>{{ lesson.title }}</h1>
+        <div class="ac-text">{{ body|safe }}</div>
+
+        <div class="ac-complete">
+          <button type="button" class="btn" id="acDone">Mark as complete</button>
+          <span id="acDoneTxt"></span>
+        </div>
+
+        <div class="ac-nav">
+          {% if prev %}<a href="/academy/{{ prev.slug }}" class="prev"><small>← Previous</small><b>{{ prev.title }}</b></a>{% else %}<span></span>{% endif %}
+          {% if next %}<a href="/academy/{{ next.slug }}" class="next"><small>Next →</small><b>{{ next.title }}</b></a>
+          {% else %}<a href="/#pricing" class="next"><small>Finished the Academy →</small><b>Choose a challenge</b></a>{% endif %}
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="sec-tight sec ac-more">
+  <div class="wrap">
+    <h2>More modules</h2>
+    <div class="ac-mods">
+      {% for m in modules if m.slug != module.slug %}
+      <a class="ac-card" href="/academy/{{ m.lessons[0].slug }}" style="--k:{{ m.color }}">
+        <div class="ac-cover">{{ cover(m.lessons[0].motif, m.color, m.title|upper)|safe }}</div>
+        <div class="ac-body"><div class="ac-tags"><span class="ac-lv">{{ m.level }}</span></div>
+          <h3>{{ m.title }}</h3><p>{{ m.desc }}</p>
+          <div class="ac-foot"><span>{{ m.lessons|length }} lessons</span><span>{{ m.minutes }} min</span></div></div>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<script>
+(function () {
+  'use strict';
+  var KEY = 'pf_academy_done', slug = {{ lesson.slug|tojson }}, done = {};
+  try { done = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
+  var btn = document.getElementById('acDone'), txt = document.getElementById('acDoneTxt');
+  var links = document.querySelectorAll('.ac-side [data-slug]');
+  function paint() {
+    var n = 0;
+    links.forEach(function (a) { var d = !!done[a.dataset.slug]; a.classList.toggle('is-done', d); if (d) n++; });
+    document.getElementById('acBar').style.width = (n / links.length * 100) + '%';
+    document.getElementById('acBarTxt').textContent = n + ' of ' + links.length + ' completed';
+    btn.textContent = done[slug] ? 'Completed ✓' : 'Mark as complete';
+    btn.classList.toggle('btn-ghost', !!done[slug]);
+    txt.textContent = done[slug] ? 'Saved in this browser.' : '';
+  }
+  btn.addEventListener('click', function () {
+    if (done[slug]) delete done[slug]; else done[slug] = 1;
+    try { localStorage.setItem(KEY, JSON.stringify(done)); } catch (e) {}
+    paint();
+  });
+  paint();
+})();
+</script>
+{% endblock %}

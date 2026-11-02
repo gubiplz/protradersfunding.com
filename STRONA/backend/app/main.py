@@ -51,6 +51,7 @@ from . import trade_case
 from . import vusdt
 from . import helpdesk
 from . import markets, terminal
+from . import academy
 from .config import get_settings
 from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint, zamek_migracji
 from .models import (LEAD_LOST_STATUSES, LEAD_STATUSES, LOST_REASONS,
@@ -443,7 +444,8 @@ def robots():
 def sitemap(request: Request):
     base = _public_base(request)
     paths = ["/", "/objectives", "/trade", "/faq", "/contact", "/academy", "/affiliate", "/install", "/verify",
-             "/terms", "/privacy", "/risk-disclosure", "/refund-policy"]
+             "/terms", "/privacy", "/risk-disclosure", "/refund-policy"] \
+        + [f"/academy/{x.slug}" for x in academy.LESSONS]
     urls = "".join(f"<url><loc>{base}{p}</loc></url>" for p in paths)
     return Response('<?xml version="1.0" encoding="UTF-8"?>'
                     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
@@ -14050,7 +14052,21 @@ def contact_page(request: Request):
 
 @app.get("/academy")
 def academy_page(request: Request):
-    return _page(request, "academy.html")
+    mods = academy.modules()
+    return _page(request, "academy.html", modules=mods, lessons=academy.LESSONS, cover=academy.cover_svg,
+                 total_minutes=sum(m["minutes"] for m in mods))
+
+
+@app.get("/academy/{slug}")
+def academy_lesson_page(request: Request, slug: str):
+    """Lekcja Academy: treść, spis lekcji modułu, poprzednia/następna."""
+    les = academy.BY_SLUG.get(slug)
+    if les is None:
+        raise HTTPException(404, "Lesson not found")
+    prev, nxt = academy.neighbours(les)
+    body = les.body.replace("{{ site_name }}", html.escape(settings.site_name))
+    return _page(request, "academy_lesson.html", lesson=les, body=body, module=academy.module_of(les),
+                 modules=academy.modules(), prev=prev, next=nxt, cover=academy.cover_svg)
 
 
 @app.get("/affiliate")

@@ -782,6 +782,16 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
 /* ---------------- mobile (dopisane na koncu — wygrywa kolejnoscia w pliku;
    szersze bloki przed wezszymi, hover:none na samym koncu) ---------------- */
 
+/* Z linkiem „Trade" menu łamało się w dwie linijki („How it / works") nawet przy 1440 px:
+   linki bez łamania, ciaśniej na średnich ekranach, burger od 1100 px. */
+.nav-links a,.nav-login{white-space:nowrap}
+@media(max-width:1320px){.nav-links{gap:18px}}
+@media(max-width:1100px){
+  .nav-links,.nav-login{display:none}
+  .burger{display:flex;align-items:center;justify-content:center;
+    width:44px;height:44px;padding:0;flex:0 0 44px}
+  .nav .logo{flex:1 1 auto;min-width:0}
+}
 @media(max-width:960px){
   /* burger przejmuje nawigacje juz od 960 px — miedzy 821 a 960 linki sie nie miescily */
   .nav-links,.nav-login{display:none}
