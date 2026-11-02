@@ -66,7 +66,9 @@ MARKETS: list[Market] = [
     Market("UKOIL", "Brent Crude Oil", "energy", "xyz:BRENTOIL", None, None, 1000.0, 2, 3, 20, "oil", base="bbl"),
     Market("NATGAS", "Natural Gas", "energy", "xyz:NATGAS", None, None, 10000.0, 3, 1, 20, "gas", base="MMBtu"),
     Market("SPX500", "S&P 500", "index", "xyz:SP500", None, None, 1.0, 1, 3, 50, "us", base="units"),
-    Market("NAS100", "Nasdaq 100", "index", "xyz:XYZ100", None, None, 1.0, 1, 3, 50, "us", base="units"),
+    # NAS100: 1 lot = 10 jednostek ($10 za punkt) — tak samo jak Trade BOT i portal
+    # (tradebot.INSTRUMENTS), żeby lot jego transakcji znaczył to samo co w terminalu.
+    Market("NAS100", "Nasdaq 100", "index", "xyz:XYZ100", None, None, 10.0, 1, 3, 50, "us", base="units"),
     Market("JPN225", "Nikkei 225", "index", "xyz:JP225", None, None, 1.0, 0, 3, 50, "jp", base="units"),
     Market("EURUSD", "Euro / US Dollar", "fx", "xyz:EUR", None, None, 100_000.0, 5, 0, 100, "eu-us", base="EUR"),
     Market("GBPUSD", "British Pound / US Dollar", "fx", "xyz:GBP", None, None, 100_000.0, 5, 0, 100, "gb-us", base="GBP"),

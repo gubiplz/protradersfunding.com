@@ -137,6 +137,14 @@ def zamknij(tr, inst, pv_fn, pnl: float, wyjscie: datetime, max_lots: float | No
         return False
     step = inst.tick
     p_x = round(round(ost["c"] / step) * step, _krok(step))
+    # Cienkie rynki HIP-3 (xyz:GBP…) mają minuty bez transakcji, więc bez świecy. Cena
+    # wyjścia to zamknięcie ostatniej świecy, więc i godzina wyjścia ląduje w niej —
+    # inaczej znacznik wyjścia wisiałby na wykresie w pustym miejscu.
+    if ost["t"] + krok_ms <= wyj_ms:
+        wyj_ms = rng.randint(ost["t"], ost["t"] + krok_ms - 1_000)
+        wyjscie = _dt(wyj_ms)
+        if wyj_ms <= start_ms:
+            return False
     trzymanie = max(MIN_HOLD_MS, int((wyj_ms - start_ms) * MIN_HOLD_UDZIAL))
     okno = [c for c in sw if c["t"] >= start_ms - krok_ms + 1 and c["t"] + krok_ms <= wyj_ms - trzymanie]
     if not okno:
@@ -149,14 +157,13 @@ def zamknij(tr, inst, pv_fn, pnl: float, wyjscie: datetime, max_lots: float | No
             sign = 1 if strona == "buy" else -1
             if not lots:
                 return None
-            # pnl = sign·(p_x − p_e)·lots·pv(p_e)  →  p_e = p_x − sign·pnl/(lots·pv).
-            # pv zależy od ceny tylko na USDJPY — dwa przybliżenia wystarczą.
-            p_e_dokl = p_x
-            for _ in range(2):
-                pv = pv_fn(inst, p_e_dokl)
-                if not pv:
-                    return None
-                p_e_dokl = p_x - sign * pnl / (lots * pv)
+            # pnl = sign·(p_x − p_e)·lots·pv(p_x)  →  p_e = p_x − sign·pnl/(lots·pv).
+            # pv zależy od ceny tylko na USDJPY: zysk w JPY przeliczony po kursie
+            # zamknięcia, tak jak liczy terminal i MT5 (kalkulator klienta się zgodzi).
+            pv = pv_fn(inst, p_x)
+            if not pv:
+                return None
+            p_e_dokl = p_x - sign * pnl / (lots * pv)
             if p_e_dokl <= 0:
                 continue
             # Wejście zaokrąglone w stronę wyjścia: wynik nigdy nie przebija planu
@@ -204,7 +211,7 @@ def zamknij(tr, inst, pv_fn, pnl: float, wyjscie: datetime, max_lots: float | No
     tr.opened_at = _dt(t_we)
     tr.close_price = p_x
     tr.closed_at = wyjscie
-    tr.pnl = round(sign * (p_x - p_e) * lots * pv_fn(inst, p_e), 2)
+    tr.pnl = round(sign * (p_x - p_e) * lots * pv_fn(inst, p_x), 2)
     tr.status = "closed"
     tr.venue = "hyperliquid"
     return True
