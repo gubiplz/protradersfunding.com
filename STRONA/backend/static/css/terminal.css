@@ -575,6 +575,21 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 /* pełny ekran wykresu */
 .term.full-chart .t-left{position:fixed;inset:0;z-index:60;background:var(--bg)}
 
+/* Motion for trading actions */
+.t-row-in{animation:tRowIn .32s cubic-bezier(.2,.8,.2,1) both}
+.t-row-out{animation:tRowOut .26s ease both;pointer-events:none}
+@keyframes tRowIn{from{opacity:0;transform:translateY(-6px);background:color-mix(in srgb,var(--acc) 14%,transparent)}to{opacity:1;transform:none;background:transparent}}
+@keyframes tRowOut{to{opacity:0;transform:translateX(10px)}}
+.t-fade{animation:tFade .18s ease both}
+@keyframes tFade{from{opacity:.25}to{opacity:1}}
+.t-toast{animation:tToastIn .26s cubic-bezier(.2,.8,.2,1) both}
+.t-toast.out{animation:tToastOut .2s ease both}
+@keyframes tToastIn{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}
+@keyframes tToastOut{to{opacity:0;transform:translateY(4px)}}
+.t-go:active:not(:disabled){transform:scale(.985)}
+.t-go.busy{position:relative;color:transparent!important}
+.t-go.busy::after{content:"";position:absolute;left:50%;top:50%;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;border:2px solid rgba(0,0,0,.25);border-top-color:#032018;animation:tSpin .7s linear infinite}
+@keyframes tSpin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 /* ---------- węższe ekrany ---------- */

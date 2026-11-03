@@ -1404,7 +1404,8 @@ def _flagi(acc: Account, tr: Trader | None, wpisy: list[TerminalLogin], ip_trade
         flagi.append({"key": "countries", "label": f"{len(kraje)} countries in {OKNO_FLAG_DNI} days",
                       "detail": ", ".join(sorted(kraje))})
     urzadzenia = {w.device_id for w in nowe if w.device_id}
-    if len(urzadzenia) > MAX_URZADZEN:
+    # Dodatek Copytrading wprost pozwala na wiele urządzeń (regulamin, sekcja 6).
+    if len(urzadzenia) > MAX_URZADZEN and not acc.copytrading:
         flagi.append({"key": "devices", "label": f"{len(urzadzenia)} devices in {OKNO_FLAG_DNI} days", "detail": ""})
     inni = set().union(*(ip_traderow.get(w.ip, set()) for w in nowe if w.ip), set()) - {acc.trader_id}
     if inni:

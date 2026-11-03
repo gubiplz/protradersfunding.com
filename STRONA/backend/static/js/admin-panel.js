@@ -865,7 +865,7 @@ const VIEWS={
  async pool(){
   const tab=window._termTab||'accounts';
   $('view').innerHTML=`<div class="toolbar" style="margin-bottom:14px"><div class="seg">${[['accounts','Accounts'],['logins','Login log'],['pool','MT5 pool']]
-    .map(([k,l])=>`<button class="${tab===k?'on':''}" onclick="window._termTab='${k}';go('pool')">${l}</button>`).join('')}</div></div><div id="term-pane"></div>`;
+    .map(([k,l])=>`<button class="${tab===k?'on':''}" data-all="1" onclick="window._termTab='${k}';go('pool')">${l}</button>`).join('')}</div></div><div id="term-pane"></div>`;
   if(tab==='accounts')return termAccounts();
   if(tab==='logins')return termLogins();
   const poolData=await api('/api/admin/pool');

@@ -23,14 +23,12 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
 <header class="t-head">
   <a class="t-logo" href="/" aria-label="{{ site_name }} home"><img src="/static/img/logo.png" alt=""><span class="t-logo-txt">{%- set _nm = site_name.rsplit(' ', 1) -%}{%- if _nm|length == 2 -%}<span class="lt-a">{{ _nm[0] }}</span> {{ _nm[1] }}{%- else -%}{{ site_name }}{%- endif -%}</span></a>
   <nav class="t-nav" aria-label="Main">
-    <a href="/#how">How it works</a>
-    <a href="/objectives">Objectives</a>
-    <a href="/#pricing">Pricing</a>
+    <a href="/#pricing">Challenges</a>
     <a class="on" href="/trade" aria-current="page">Trade</a>
-    <a href="/#certs">Payouts</a>
+    <a href="/verify">Payouts</a>
+    <a href="/#how">How it works</a>
     <a href="/faq">FAQ</a>
     <a href="/academy">Academy</a>
-    <a href="/affiliate">Affiliate</a>
   </nav>
   <div class="t-head-r">
     <button class="t-ico t-hsearch" id="tSearchBtn" type="button" aria-label="Search markets" title="Search markets (/)"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
@@ -47,14 +45,12 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
   </div>
 </header>
 <nav class="t-mmenu" id="tMMenu" hidden aria-label="Menu">
-  <a href="/#how">How it works</a>
-  <a href="/objectives">Objectives</a>
-  <a href="/#pricing">Pricing</a>
+  <a href="/#pricing">Challenges</a>
   <a class="on" href="/trade" aria-current="page">Trade</a>
-  <a href="/#certs">Payouts</a>
+  <a href="/verify">Payouts</a>
+  <a href="/#how">How it works</a>
   <a href="/faq">FAQ</a>
   <a href="/academy">Academy</a>
-  <a href="/affiliate">Affiliate</a>
   <button type="button" class="t-mm-login" id="tMMLogin">Log in</button>
   <a class="t-mm-dash" href="/portal" hidden>Dashboard</a>
   <a class="t-getf" href="/#pricing">Get Funded</a>

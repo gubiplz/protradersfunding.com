@@ -82,6 +82,8 @@
     watch: ls.json('pf_term_watch', ['BTCUSD', 'ETHUSD', 'XAUUSD']),
     token: null,    // session of the MT5 account in view; every saved account has its own
     logins: [],     // [{ token, id, login }], saved in this browser
+    closing: new Set(),      // positions leaving the screen while the server confirms
+    justClosed: new Set(),   // trades whose chart marker draws itself in
     imp: false,     // admin view opened from the panel: read-only, never saved
     accounts: [], accId: +ls.get('pf_term_acc', '0') || null, st: null, ptab: 'positions',
     // Poślizg domyślnie schowany (jest w Columns): z nim tabela nie mieściła się pod wykresem nawet na 1440 px.
@@ -99,7 +101,7 @@
     el.className = 't-toast' + (bad ? ' bad' : '');
     el.innerHTML = `<b>${esc(title)}</b>${msg ? `<span>${esc(msg)}</span>` : ''}`;
     $('tToasts').appendChild(el);
-    setTimeout(() => el.remove(), bad ? 6500 : 4200);
+    setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 220); }, bad ? 6500 : 4200);
   }
   let modalOpen = null;
   function openModal(id) { closeModal(); modalOpen = $(id); modalOpen.hidden = false; const f = modalOpen.querySelector('input:not([type=hidden]),button.t-btn,a.t-btn'); if (f && window.innerWidth > 980) setTimeout(() => f.focus(), 30); }
@@ -225,7 +227,8 @@
       name: 'ptfTrade', totalStep: 3, lock: true, needDefaultPointFigure: false, needDefaultXAxisFigure: false, needDefaultYAxisFigure: false,
       createPointFigures: ({ coordinates, overlay }) => {
         if (coordinates.length < 2) return [];
-        const [a, b] = coordinates, e = overlay.extendData || {}, hov = !!e.hover, s = hov ? 6.5 : 5;
+        const [a, b0] = coordinates, e = overlay.extendData || {}, hov = !!e.hover, s = hov ? 6.5 : 5;
+        const t = e.t == null ? 1 : e.t, b = { x: a.x + (b0.x - a.x) * t, y: a.y + (b0.y - a.y) * t };
         const wynik = e.pnl >= 0 ? e.up : e.dn, strona = e.side === 'buy' ? e.up : e.dn;
         const tri = e.side === 'buy'
           ? [{ x: a.x, y: a.y - s }, { x: a.x - s, y: a.y + s * 0.85 }, { x: a.x + s, y: a.y + s * 0.85 }]
@@ -233,7 +236,7 @@
         return [
           { key: 'line', type: 'line', attrs: { coordinates: [a, b] }, styles: { style: 'dashed', dashedValue: [4, 3], color: wynik, size: hov ? 2 : 1 } },
           { key: 'in', type: 'polygon', attrs: { coordinates: tri }, styles: { style: 'fill', color: strona } },
-          { key: 'out', type: 'circle', attrs: { x: b.x, y: b.y, r: hov ? 5.5 : 4 }, styles: { style: 'stroke_fill', color: e.bg, borderColor: wynik, borderSize: 2 } },
+          { key: 'out', type: 'circle', attrs: { x: b.x, y: b.y, r: (hov ? 5.5 : 4) * t }, styles: { style: 'stroke_fill', color: e.bg, borderColor: wynik, borderSize: 2 } },
         ];
       },
     });
@@ -1423,6 +1426,7 @@
     if ($('tTpsl').checked) { const tp = numOf($('tTp').value), sl = numOf($('tSl').value); if (tp) body.tp = tp; if (sl) body.sl = sl; }
     sending = true;
     $('tGo').disabled = true;
+    $('tGo').classList.add('busy');
     try {
       const st = await api('/api/terminal/orders', { method: 'POST', body: JSON.stringify(body) });
       applyState(st);
@@ -1436,6 +1440,7 @@
     } finally {
       sending = false;
       $('tGo').disabled = false;
+      $('tGo').classList.remove('busy');
     }
   }
   $('tGo').onclick = () => submitOrder();
@@ -1460,6 +1465,7 @@
   function clearView() {
     stateSeq++;
     S.st = null;
+    S.closing.clear(); S.justClosed.clear();
     renderUser(); renderTables(); renderAccount(); drawLines(); updateTicket();
   }
   /* Removes one saved account. If it was the one in view, the next saved one takes over. */
@@ -1564,7 +1570,12 @@
     S.st = st;
     const a = S.accounts.find((x) => x.id === st.account.id);
     if (a) Object.assign(a, { balance: st.account.balance, status: st.account.status, tradable: st.account.tradable });
-    if (before) notifyFills(before, st);
+    if (before) {
+      notifyFills(before, st);
+      const open = new Set(st.positions.map((p) => p.id));
+      before.positions.forEach((p) => { if (!open.has(p.id)) S.justClosed.add(p.id); });
+    }
+    S.closing.forEach((id) => { if (!st.positions.some((p) => p.id === id)) S.closing.delete(id); });
     S.fee = st.fee_pct;
     renderUser(); renderAccount(); renderTables(); drawLines(); updateTicket();
   }
@@ -1586,7 +1597,7 @@
   // live P&L po stronie przeglądarki (midy Hyperliquid, jak na serwerze)
   function livePos() {
     if (!S.st) return [];
-    return S.st.positions.map((p) => {
+    return S.st.positions.filter((p) => !S.closing.has(p.id)).map((p) => {
       const m = BY[p.symbol];
       if (!m) return p;                     // rynek spoza listy terminala: wycena z serwera
       const closed = S.st && S.weekend && m.cls !== 'crypto';
@@ -1681,6 +1692,7 @@
   }
   // Żywy P&L na linii pozycji: przy każdym ticku cen zmieniamy tylko pole z wynikiem.
   let posLines = {};
+  const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const pnlTxt = (p) => (ok(p.pnl) ? `${sUsd(p.pnl)} (${pct(p.roe)})` : '');
   function updatePosLines() {
     if (!chart || !S.st) return;
@@ -1934,14 +1946,28 @@
     chart.removeOverlay({ groupId: 'ptfTrades' });
     hideTip();
     const up = css('--up'), dn = css('--dn'), bg = css('--bg');
-    hist.forEach((h) => chart.createOverlay({
-      name: 'ptfTrade', groupId: 'ptfTrades', lock: true,
-      points: [{ timestamp: Date.parse(h.opened_at), value: h.entry }, { timestamp: Date.parse(h.closed_at), value: h.close }],
-      extendData: { side: h.side, pnl: h.pnl, up, dn, bg, h },
-      onMouseEnter: ({ overlay }) => hoverTrade(overlay, true),
-      onMouseLeave: ({ overlay }) => hoverTrade(overlay, false),
-      onClick: ({ overlay }) => { hoverTrade(overlay, true); clearTimeout(tipT); tipT = setTimeout(() => hoverTrade(overlay, false), 4000); return true; },
-    }));
+    hist.forEach((h) => {
+      const fresh = S.justClosed.has(h.id) && !REDUCED;
+      const ext = { side: h.side, pnl: h.pnl, up, dn, bg, h, t: fresh ? 0 : 1 };
+      const id = chart.createOverlay({
+        name: 'ptfTrade', groupId: 'ptfTrades', lock: true,
+        points: [{ timestamp: Date.parse(h.opened_at), value: h.entry }, { timestamp: Date.parse(h.closed_at), value: h.close }],
+        extendData: ext,
+        onMouseEnter: ({ overlay }) => hoverTrade(overlay, true),
+        onMouseLeave: ({ overlay }) => hoverTrade(overlay, false),
+        onClick: ({ overlay }) => { hoverTrade(overlay, true); clearTimeout(tipT); tipT = setTimeout(() => hoverTrade(overlay, false), 4000); return true; },
+      });
+      if (fresh && id) drawIn(id, ext);
+    });
+    S.justClosed.clear();
+  }
+  function drawIn(id, ext) {
+    const t0 = performance.now(), D = 520;
+    (function step(now) {
+      const k = Math.min(1, (now - t0) / D), t = 1 - Math.pow(1 - k, 3);
+      chart.overrideOverlay({ id, extendData: { ...ext, t } });
+      if (k < 1) requestAnimationFrame(step);
+    })(t0);
   }
   function hoverTrade(overlay, on) {
     const e = overlay.extendData || {};
@@ -2002,6 +2028,8 @@
   $('tMoreMenu').addEventListener('click', (e) => { const b = e.target.closest('[data-pt]'); if (b) { $('tMoreMenu').hidden = true; setPTab(b.dataset.pt); } });
   function setPTab(t) {
     S.ptab = t;
+    const tb = $('tTable');
+    tb.classList.remove('t-fade'); void tb.offsetWidth; tb.classList.add('t-fade');
     $$('.t-ptabs [data-pt]').forEach((b) => b.classList.toggle('on', b.dataset.pt === t || (b.id === 'tMoreBtn' && ['rules', 'fills'].includes(t))));
     renderTables();
   }
@@ -2011,6 +2039,28 @@
     const el = $('tTable');
     const th = $$('thead th', el).map((x) => x.textContent);
     $$('tbody tr', el).forEach((tr) => [...tr.children].forEach((td, i) => { if (th[i]) td.dataset.l = th[i]; }));
+    // A position that has just opened slides into the table.
+    if (S.ptab === 'positions' && S.st) {
+      const key = S.accId, known = rowsSeen.key === key;
+      $$('tr[data-pid]', el).forEach((tr) => { if (known && !rowsSeen.ids.has(+tr.dataset.pid)) tr.classList.add('t-row-in'); });
+      rowsSeen = { key, ids: new Set(S.st.positions.map((p) => p.id)) };
+    }
+  }
+  let rowsSeen = { key: null, ids: new Set() };
+  /* Closing feels instant: the row and the chart lines go at once, the server confirms
+     behind them. If it refuses, the position comes back with the error. */
+  function leaveRow(ids) {
+    ids.forEach((id) => {
+      S.closing.add(id);
+      const tr = $('tTable').querySelector(`tr[data-pid="${id}"]`);
+      if (tr) tr.classList.add('t-row-out');
+    });
+    drawLines();
+    updateTicket();
+  }
+  function comeBack(ids) {
+    ids.forEach((id) => S.closing.delete(id));
+    renderTables(); drawLines(); updateTicket();
   }
   function drawTables() {
     const el = $('tTable');
@@ -2117,11 +2167,11 @@
           const m = BY[p.symbol], hl = Math.floor((p.qty / m.contract / 2) * 100 + 1e-9) / 100;
           if (hl < 0.01) return toast('Position too small to split', 'Use Close to close the whole position.', true);
           body.qty = +(hl * m.contract).toFixed(8);
-        }
+        } else leaveRow([id]);
         applyState(await api(`/api/terminal/positions/${id}/close`, { method: 'POST', body: JSON.stringify(body) }));
         const h = S.st && S.st.history[0];
         toast(half ? 'Closed 50%' : 'Position closed', h ? `${h.symbol} ${sUsd(h.pnl)}` : '');
-      } catch (er) { toast('Close failed', er.message, true); refresh(true); }
+      } catch (er) { if (!half) comeBack([id]); toast('Close failed', er.message, true); refresh(true); }
     });
   }
   /* Reverse as in cTrader: one market order of twice the size the other way — the
@@ -2163,7 +2213,9 @@
     const okk = await confirmBox('Close all positions', `<p>Close <b>${S.st.positions.length}</b> open position(s) at market?</p>`, 'Close All', 'sell');
     if (!okk) return;
     await once('closeall', $('tCloseAll'), async () => {
-      try { applyState(await api('/api/terminal/close-all', { method: 'POST', body: JSON.stringify({ account_id: S.accId }) })); toast('All positions closed'); } catch (er) { toast('Close failed', er.message, true); refresh(true); }
+      const ids = S.st.positions.map((p) => p.id);
+      leaveRow(ids);
+      try { applyState(await api('/api/terminal/close-all', { method: 'POST', body: JSON.stringify({ account_id: S.accId }) })); toast('All positions closed'); } catch (er) { comeBack(ids); toast('Close failed', er.message, true); refresh(true); }
     });
   };
 
