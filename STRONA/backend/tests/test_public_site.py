@@ -383,7 +383,7 @@ def test_panel_admina_nie_jest_strona_publiczna():
     with TestClient(app) as c:
         r = c.get("/admin")
     assert r.status_code == 404
-    assert "MT5 Pool" not in r.text
+    assert "Built-in Terminal" not in r.text
 
 
 def test_weryfikacja_certyfikatu_na_stronie():

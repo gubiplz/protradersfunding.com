@@ -66,7 +66,7 @@ COPYTRADING_ADDON_USD = 299.0
 #
 # Brak wiersza = WIDOCZNY. Domyslka jest po stronie sprzedazy, bo dodatek sam
 # w sobie jest tylko zgoda regulaminowa i nic nas nie kosztuje; to REALNE konta
-# MT5 kosztuja i te maja osobny przelacznik (zakladka MT5 Pool), domyslnie
+# MT5 kosztuja i te maja osobny przelacznik (zakladka Built-in Terminal), domyslnie
 # wylaczony.
 COPYTRADING_OFFERED_KEY = "copytrading_offered"
 

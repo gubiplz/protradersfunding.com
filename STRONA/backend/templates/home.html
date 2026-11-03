@@ -84,12 +84,12 @@
 <section class="stats-band" id="statsBand">
   <div class="wrap">
     <div class="stats-grid">
-      <div class="stat"><div class="stat-num grad-text" id="statSpread">—</div><div class="stat-label">Live BTC spread, no markup</div></div>
-      <div class="stat"><div class="stat-num grad-text">{{ fee_pct }}%</div><div class="stat-label">Commission per side</div></div>
-      <div class="stat"><div class="stat-num grad-text">{{ max_split|int }}%</div><div class="stat-label">Profit split, up to</div></div>
-      <div class="stat"><div class="stat-num grad-text">1:{{ leverage_max }}</div><div class="stat-label">Leverage, up to</div></div>
+      <div class="stat"><div class="stat-num grad-text" data-spread="xyz:GOLD">—</div><div class="stat-label">Gold spread, live</div></div>
+      <div class="stat"><div class="stat-num grad-text" data-spread="xyz:SP500">—</div><div class="stat-label">S&amp;P 500 spread, live</div></div>
+      <div class="stat"><div class="stat-num grad-text" data-spread="xyz:CL">—</div><div class="stat-label">Oil spread, live</div></div>
+      <div class="stat"><div class="stat-num grad-text" data-spread="BTC">—</div><div class="stat-label">Bitcoin spread, live</div></div>
     </div>
-    <div class="stats-note">Spread and commission as in the Built-in Terminal. All accounts are simulated and trade virtual funds.</div>
+    <div class="stats-note">Market spreads with no markup in the Built-in Terminal, {{ fee_pct }}% commission per side. All accounts are simulated and trade virtual funds.</div>
   </div>
 </section>
 
@@ -213,37 +213,26 @@
     </div>
     <div class="chal-grid" id="chalGrid" data-rv></div>
     <div class="chal-extras" id="pcfg" data-rv>
-      <div class="pcfg-addon">
-        <div><b>Weekend Trading</b><span>Bonus add-on: $199 for 2 extra trading days/week</span></div>
-        <button class="pcfg-addbtn" id="pcfg-wt" type="button">Add $199</button>
+      <div class="chal-opt">
+        <span><b>Weekend trading</b><small>+$199</small></span>
+        <button class="chal-sw" id="pcfg-wt" type="button" role="switch" aria-checked="false" aria-label="Add weekend trading"></button>
       </div>
-      <div class="pcfg-addon" id="pcfg-ct-row" hidden>
-        <div><b>Copytrading</b><span>Copy trades between your own accounts · more than one device</span></div>
-        <button class="pcfg-addbtn" id="pcfg-ct" type="button">Add $299</button>
+      <div class="chal-opt" id="pcfg-ct-row" hidden>
+        <span><b>Copytrading</b><small id="pcfg-ct-price">+$299</small></span>
+        <button class="chal-sw" id="pcfg-ct" type="button" role="switch" aria-checked="false" aria-label="Add copytrading"></button>
       </div>
-      <div class="pcfg-addon static">
-        <div><b>News Trading</b><span>Trade straight through high-impact news</span></div>
-        <span class="ok">✓ Included</span>
+      <div class="chal-opt">
+        <span><b>News trading</b><small>Included</small></span>
       </div>
-      <div class="chal-code">
-        <div class="code-row">
-          <input id="pcfg-coupon" class="code-inp" autocomplete="off" placeholder="Coupon code" aria-label="Coupon code">
-          <button class="code-btn" id="pcfg-apply" type="button">Apply</button>
-        </div>
-        <div class="code-msg" id="pcfg-codemsg" hidden></div>
+      <div class="chal-opt chal-code">
+        <input id="pcfg-coupon" autocomplete="off" placeholder="Coupon code" aria-label="Coupon code">
+        <button id="pcfg-apply" type="button">Apply</button>
       </div>
     </div>
-    <p class="prules-fine chal-fine" data-rv>All trading takes place in a simulated environment on virtual funds.
-      Performance rewards are discretionary and not guaranteed. See <a href="/terms">Terms of Service</a>.</p>
-    <div class="pricing-note" data-rv>
-      <span>🔒 Secure checkout</span>
-      <span>⚡ Account delivered automatically</span>
-      <span>🏷️ Coupon codes accepted</span>
-    </div>
-    <p class="disc disc-c" data-rv>*The fee buys access to a trading evaluation on a simulated
-      account. No real money is deposited or traded at any point. Performance rewards, including
-      the refund of the fee, are discretionary and depend on meeting the objectives published
-      above. See our <a href="/terms">Terms of Service</a>.</p>
+    <div class="code-msg chal-msg" id="pcfg-codemsg" hidden></div>
+    <p class="chal-fine" data-rv>One-time fee for access to an evaluation on a simulated account. No real money is deposited or
+      traded at any point. Performance rewards, including the fee refund, are discretionary and not guaranteed.
+      <a href="/terms">Terms of Service</a></p>
   </div>
 </section>
 
@@ -327,12 +316,12 @@
       <p class="lpt-fail">The live preview can't connect right now. <a href="/trade">Open the terminal</a></p>
     </div>
     <ul class="lpt-feats" data-rv>
-      <li><b>Charting</b>Drawing tools, indicators and a measure tool on every timeframe.</li>
-      <li><b>Order book and trades</b>Depth, spread and the tape, updating as the market moves.</li>
-      <li><b>Orders on the chart</b>Set and drag TP and SL, close or reverse a position from its line.</li>
-      <li><b>Your accounts in one place</b>Switch between your MT5 accounts or add another in a click.</li>
+      <li><b>Charting</b>Drawing tools and indicators</li>
+      <li><b>Order book</b>Depth, spread and the tape</li>
+      <li><b>Chart trading</b>Drag TP and SL on the chart</li>
+      <li><b>MT5 accounts</b>Switch or add one in a click</li>
     </ul>
-    <p class="prules-fine chal-fine" data-rv>Prices are reference data from third-party venues, with which we are not affiliated. All trading is simulated on virtual funds.</p>
+    <p class="chal-fine" data-rv>Reference prices from third-party venues, with which we are not affiliated. All trading is simulated.</p>
   </div>
 </section>
 <script src="/static/js/terminal-preview.js?v={{ asset_v }}" defer></script>

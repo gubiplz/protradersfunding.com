@@ -456,13 +456,10 @@
     const ctRow = $('#pcfg-ct-row'), ct = $('#pcfg-ct');
     if (ctRow) ctRow.hidden = !anyOffersCt;
     if (!anyOffersCt) cfgCt = false;
-    if (ct) {
-      ct.textContent = cfgCt ? '✓ Added' : 'Add $' + cenaCt(shown[0]);
-      ct.classList.toggle('on', cfgCt);
-    }
-    const wt = $('#pcfg-wt');
-    wt.textContent = cfgWt ? '✓ Added' : 'Add $199';
-    wt.classList.toggle('on', cfgWt);
+    if (ct) ct.setAttribute('aria-checked', cfgCt);
+    const ctPrice = $('#pcfg-ct-price');
+    if (ctPrice) ctPrice.textContent = '+$' + cenaCt(shown[0]);
+    $('#pcfg-wt').setAttribute('aria-checked', cfgWt);
 
     const model = cfgType === 'instant' ? 'Instant' : '2-Step';
     const hot = shown.findIndex(x => x.popular);
@@ -476,8 +473,9 @@
       if (cfgCoupon) q.set('coupon', cfgCoupon);
       const open = flipped.has(p.key);
       return `<article class="chal-card pal-${cfgTier}-${i}${i === star ? ' star' : ''}${p.popular ? ' hot' : ''}${open ? ' flip' : ''}">
-        <div class="chal-flip"><div class="chal-inner">
+        <div class="chal-flip" role="button" tabindex="0" aria-label="$${p.account_size.toLocaleString('en-US')} ${model}: show or hide the rules"><div class="chal-inner">
           <div class="chal-face chal-front">
+            <i class="chal-lines"></i><i class="chal-glare"></i>
             <img class="chal-mark" src="/static/img/logo.png" alt="">
             <img class="chal-logo" src="/static/img/logo.png" alt="">
             <div class="chal-price">${cfgPct ? `<s>${usd(p.price_usd)}</s>` : ''}<b>${usd(fee)}</b> <small>USD</small></div>
@@ -487,10 +485,16 @@
               <strong>$${p.account_size.toLocaleString('en-US')}</strong>
               <span>${model} ${tierName}</span>
             </div>
+            <ul class="chal-specs">
+              <li><small>Target</small><b>${p.steps === 0 ? 'None' : p.profit_target_p1 + '%'}</b></li>
+              <li><small>Drawdown</small><b>${p.max_overall_loss_pct}%</b></li>
+              <li><small>Split</small><b>${p.profit_split_pct}%</b></li>
+            </ul>
           </div>
           <div class="chal-face chal-back">
+            <i class="chal-lines"></i>
             <img class="chal-logo" src="/static/img/logo.png" alt="">
-            <h4>$${p.account_size.toLocaleString('en-US')} ${model}</h4>
+            <h4><small>${model} ${tierName}</small>$${p.account_size.toLocaleString('en-US')}</h4>
             <dl>${cardRules(p).map(([l, v]) => `<div><dt>${l}</dt><dd>${v}</dd></div>`).join('')}</dl>
           </div>
         </div></div>
@@ -498,12 +502,36 @@
         <a class="chal-btn go" href="/portal?${q.toString()}">Start Challenge</a>
       </article>`;
     }).join('');
-    $$('[data-flip]', grid).forEach(b => b.addEventListener('click', () => {
-      const on = b.closest('.chal-card').classList.toggle('flip');
+    const turn = card => {
+      const b = $('[data-flip]', card), on = card.classList.toggle('flip');
       if (on) flipped.add(b.dataset.flip); else flipped.delete(b.dataset.flip);
       b.textContent = on ? 'Hide Rules' : 'View Rules';
       b.setAttribute('aria-expanded', on);
-    }));
+      card.classList.remove('tilt');
+      card.dataset.turnAt = Date.now();
+    };
+    $$('.chal-card', grid).forEach(card => {
+      const face = $('.chal-flip', card);
+      $('[data-flip]', card).addEventListener('click', () => turn(card));
+      face.addEventListener('click', () => turn(card));
+      face.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); turn(card); } });
+      if (reduced || !matchMedia('(hover:hover)').matches) return;
+      /* Light follows the pointer and the card leans a little towards it. */
+      face.addEventListener('pointermove', e => {
+        if (Date.now() - (+card.dataset.turnAt || 0) < 650) return;
+        const r = face.getBoundingClientRect(), x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+        card.classList.add('tilt');
+        face.style.setProperty('--ry', ((x - .5) * 7).toFixed(2) + 'deg');
+        face.style.setProperty('--rx', ((.5 - y) * 7).toFixed(2) + 'deg');
+        face.style.setProperty('--mx', (x * 100).toFixed(1) + '%');
+        face.style.setProperty('--my', (y * 100).toFixed(1) + '%');
+      });
+      face.addEventListener('pointerleave', () => {
+        card.classList.remove('tilt');
+        face.style.setProperty('--ry', '0deg');
+        face.style.setProperty('--rx', '0deg');
+      });
+    });
 
     if (cfgPromo) codeMsg('ok', `<b>${cfgPromo}</b> applied: you pay for the size you pick and trade one tier up.`);
     else if (cfgCoupon) codeMsg('ok', `<b>${cfgCoupon}</b> applied: <b>${cfgPct}% off</b> your challenge fee.`);

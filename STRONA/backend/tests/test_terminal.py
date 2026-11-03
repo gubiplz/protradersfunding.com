@@ -505,3 +505,14 @@ def test_strona_trade_i_rynki():
         assert "/trade" in c.get("/sitemap.xml").text
         # „See the full list" na stronie głównej prowadzi do terminala z listą rynków.
         assert 'href="/trade?list=all"' in c.get("/").text
+
+
+def test_retencja_logowan(rynek):
+    s = SessionLocal()
+    stary = TerminalLogin(login="stary-1", ok=False, created_at=datetime.now(timezone.utc) - timedelta(days=terminal.LOGOWANIA_DNI + 1))
+    nowy = TerminalLogin(login="nowy-1", ok=False)
+    s.add_all([stary, nowy]); s.commit()
+    assert terminal.wyczysc_logowania()["deleted"] >= 1
+    assert s.query(TerminalLogin).filter_by(login="stary-1").count() == 0
+    assert s.query(TerminalLogin).filter_by(login="nowy-1").count() == 1
+    s.close()

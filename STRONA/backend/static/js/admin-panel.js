@@ -111,7 +111,7 @@ const NAV=[
   {v:'tickets',label:'Tickets',ico:'chat'},
   {v:'orders',label:'Orders',ico:'file'},
   {v:'offers',label:'Offers',ico:'tag'},
-  {v:'pool',label:'MT5 Pool',ico:'bank'},
+  {v:'pool',label:'Built-in Terminal',ico:'bank'},
   {v:'mail',label:'Mail',ico:'mail'},
   {v:'telegram',label:'Telegram',ico:'chat'},
   {v:'telemetry',label:'Telemetry',ico:'trend'},
@@ -141,7 +141,7 @@ const TITLES={
   tickets:['Tickets','Support conversations with traders'],
   orders:['Orders','Purchases and revenue'],
   offers:['Flash Sale Offers','Time-limited discounts per trader or for everyone, plus the Free Trade Case'],
-  pool:['MT5 Pool','Pre-provisioned accounts ready to assign'],
+  pool:['Built-in Terminal','MT5 accounts, sign-ins and the pool of accounts ready to assign'],
   mail:['Mail','Every e-mail the platform tried to send — and which ones failed'],
   telegram:['Telegram','Channels, bots and the posting queue — all in one place'],
   telemetry:['Telemetry','Product events from the last 14 days'],
@@ -677,7 +677,7 @@ const VIEWS={
     <div><div class="n">${n}</div><div class="l">${label}</div></div><span class="go">${ICO.arrow}</span></div>`;
   /* Konto z ZAKUPU czeka na rachunek z puli po cichu: mail z poświadczeniami
      wychodzi dopiero przy uzbrojeniu, więc póki pula jest pusta, nikt nawet nie
-     próbuje wysyłać — i dziennik maili też milczy. Wiersz prowadzi do MT5 Pool,
+     próbuje wysyłać — i dziennik maili też milczy. Wiersz prowadzi do Built-in Terminal,
      bo tam widać, komu i jakiego rozmiaru rachunku brakuje. */
   /* Kolejność czytania: co czeka na mnie → jak stoi platforma → ostatnie
      zamówienia → stan systemu (konfiguracja, zwykle bez zmian — na dole). */
@@ -863,6 +863,11 @@ const VIEWS={
  },
 
  async pool(){
+  const tab=window._termTab||'accounts';
+  $('view').innerHTML=`<div class="toolbar" style="margin-bottom:14px"><div class="seg">${[['accounts','Accounts'],['logins','Login log'],['pool','MT5 pool']]
+    .map(([k,l])=>`<button class="${tab===k?'on':''}" onclick="window._termTab='${k}';go('pool')">${l}</button>`).join('')}</div></div><div id="term-pane"></div>`;
+  if(tab==='accounts')return termAccounts();
+  if(tab==='logins')return termLogins();
   const poolData=await api('/api/admin/pool');
   const rows=poolData.pool||[], waiting=poolData.waiting||[];
   const free=rows.filter(p=>!p.claimed).length;
@@ -874,7 +879,7 @@ const VIEWS={
   window._pool=rows; window._poolSizes=sizeList;
   const sizeOptions=(chosenSize)=>sizeList.map(r=>
     `<option value="${r}"${Number(chosenSize)===r?' selected':''}>$${fmt0(r)}</option>`).join('');
-  $('view').innerHTML=`
+  $('term-pane').innerHTML=`
     ${waiting.length?`<div class="sec-card card-sm" style="border-color:var(--gold-line);background:var(--gold-bg)">
       <h3>${waiting.length} paid ${waiting.length===1?'order is':'orders are'} waiting for an MT5 account</h3>
       <p class="muted" style="font-size:12.5px;margin:6px 0 12px">These challenges are paid for but not tradable yet: the pool has no free account of that size. Add one below or open a real MT5 demo for that trader.</p>
@@ -1022,10 +1027,10 @@ const VIEWS={
         permission — turning this off changes only what is on sale.
         ${cp.real_mt5
           ? `Accounts bought with it are provisioned as <b>real MT5</b> — switch that off in the
-             <a href="#" onclick="go('pool');return false">MT5 Pool</a> tab.`
+             <a href="#" onclick="window._termTab='pool';go('pool');return false">MT5 pool</a> section of the Built-in Terminal tab.`
           : `Accounts bought with it currently get <b>local credentials</b>, like every other
              account. Real MT5 for them is switched on in the
-             <a href="#" onclick="go('pool');return false">MT5 Pool</a> tab.`}</p></div>
+             <a href="#" onclick="window._termTab='pool';go('pool');return false">MT5 pool</a> section of the Built-in Terminal tab.`}</p></div>
 
     <div class="sec-card" style="max-width:560px"><h3>Notifications</h3>
       <div class="np-pr" data-push="${PUSH.st}" style="margin-top:12px">${npPushInner()}</div>
@@ -1730,6 +1735,103 @@ async function askFreeChannelKyc(btn){
 
 /* ---------- pool: search + state filter (list only — the forms above keep
    whatever the admin typed, so only #pool-list re-renders) ---------- */
+/* ---------- Built-in Terminal: who owns each MT5 account, where it signs in from ---------- */
+function termWhere(l){return [l.city,l.country].filter(Boolean).join(', ')||'—'}
+function termAccHtml(){
+  const d=window._term||{accounts:[]};
+  const q=(window._termQ||'').toLowerCase(), f=window._termFilter||'all';
+  const list=d.accounts.filter(a=>
+    (f==='all'||(f==='flagged'&&a.flags.length)||(f==='blocked'&&a.blocked)||(f==='never'&&!a.last_login))&&
+    (!q||String(a.login).includes(q)||(a.trader.email||'').toLowerCase().includes(q)||(a.trader.name||'').toLowerCase().includes(q)
+      ||((a.last_login||{}).ip||'').includes(q)));
+  return `<div class="toolbar">
+      ${searchBox('term-q','_termQ','renderTermList','Search login, trader or IP…')}
+      <div class="tb-filters"><div class="seg">${[['all','All'],['flagged','Flagged'],['blocked','Blocked'],['never','Never signed in']]
+        .map(([k,l])=>`<button class="${f===k?'on':''}"${k==='all'?' data-all="1"':''} onclick="window._termFilter='${f===k?'all':k}';renderTermList()">${l}</button>`).join('')}</div>
+      <span class="count-pill">${list.length} of ${d.accounts.length}</span></div>
+    </div>`
+    +(list.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.term">
+      <thead><tr><th>MT5 login</th><th>Owner</th><th>Account</th><th>Last sign-in</th><th>Checks</th><th class="no-sort"></th></tr></thead>
+      <tbody>${list.map(a=>{const l=a.last_login;return `<tr>
+        <td class="num rt-main" data-l="MT5 login"><b>${esc(a.login)}</b><div class="muted" style="font-size:12px">${esc(a.server||'')}</div></td>
+        <td data-l="Owner">${esc(a.trader.name||'—')}<div class="muted" style="font-size:12px">${esc(a.trader.email||'')} · portal ${esc(a.trader.portal_country||a.trader.signup_country||'—')}</div></td>
+        <td class="num" data-l="Account">${accLink(a.id)} · $${fmt0(a.size)}<div class="muted" style="font-size:12px">${esc(a.status)} · $${fmt0(a.equity)} · ${a.open_positions} open${a.bot?' · bot':''}${a.pool?(a.pool.simulated?' · simulated':' · pool #'+a.pool.id):''}</div></td>
+        <td data-l="Last sign-in" data-sort="${esc(l?l.at:'')}">${l?`${dstr(l.at)}<div class="muted" style="font-size:12px">${esc(l.ip||'—')} · ${esc(termWhere(l))}<br>${esc(l.device)}</div>`:'<span class="muted">Never</span>'}</td>
+        <td data-l="Checks">${a.blocked?'<div class="dn"><b>Blocked</b></div>':''}${a.pool_mismatch?'<div class="dn">Pool entry does not match</div>':''}${a.flags.map(x=>`<div style="color:var(--gold,#b8892f)" title="${esc(x.detail)}">${esc(x.label)}</div>`).join('')||(a.blocked||a.pool_mismatch?'':'<span class="muted">OK</span>')}</td>
+        <td class="rt-acts"><button class="btn-o sm" onclick="termView(${a.id})">View</button>
+          <button class="btn-o sm" onclick="termHistory(${a.id})">Log</button>
+          <button class="btn-o sm" onclick="termOut(${a.id})">Sign out</button>
+          <button class="btn-o sm" onclick="termBlock(${a.id},${!a.blocked})">${a.blocked?'Unblock':'Block'}</button></td></tr>`}).join('')}</tbody></table></div>`
+    :`<div class="empty"><h3>Nothing here</h3><p>No MT5 account matches this filter.</p></div>`);
+}
+function renderTermList(){const el=document.getElementById('term-list');if(el)el.innerHTML=termAccHtml()}
+async function termAccounts(){
+  const [d,poolData]=await Promise.all([api('/api/admin/terminal/overview'),api('/api/admin/pool')]);
+  window._term=d;
+  const s=d.stats, waiting=(poolData.waiting||[]).length;
+  $('term-pane').innerHTML=`
+    ${waiting?`<div class="warn-box" style="margin:0 0 14px"><div><b>${waiting}</b> paid ${waiting===1?'order is':'orders are'} waiting for an MT5 account. <a href="#" onclick="window._termTab='pool';go('pool');return false">Open the MT5 pool</a></div></div>`:''}
+    <div class="stats-row">
+      <div class="stat-tile"><div><div class="lbl">MT5 accounts</div><div class="val">${s.accounts}</div></div></div>
+      <div class="stat-tile"><div><div class="lbl">Signed in, last 30 days</div><div class="val">${s.signed_in}</div></div></div>
+      <div class="stat-tile"><div><div class="lbl">Sign-ins, 24 h</div><div class="val">${s.logins_24h}</div></div></div>
+      <div class="stat-tile"><div><div class="lbl">Failed sign-ins, 24 h</div><div class="val">${s.failed_24h}</div></div></div>
+      <div class="stat-tile"><div><div class="lbl">Flagged</div><div class="val">${s.flagged}</div></div></div>
+      <div class="stat-tile"><div><div class="lbl">Open positions</div><div class="val">${s.open_positions}</div></div></div>
+    </div>
+    <label style="display:flex;align-items:center;gap:9px;margin:0 0 14px;font-size:13px;cursor:pointer">
+      <input type="checkbox" ${d.orders_paused?'checked':''} onchange="termPause(this)">
+      Pause new orders in the terminal. Traders can still close positions and change TP/SL.
+    </label>
+    <p class="muted" style="font-size:12.5px;margin:0 0 14px">Checks cover the last 30 days. They only flag: a VPN or a trip looks the same, so nothing is blocked automatically.</p>
+    <div id="term-list">${termAccHtml()}</div>`;
+}
+async function termLogins(accountId){
+  const f=!!window._termFailed;
+  const d=await api('/api/admin/terminal/logins?limit=300'+(accountId?'&account_id='+accountId:'')+(f?'&failed=true':''));
+  $('term-pane').innerHTML=`<div class="toolbar"><div class="tb-filters"><div class="seg">
+      <button class="${f?'':'on'}" onclick="window._termFailed=false;termLogins(${accountId||0})">All</button>
+      <button class="${f?'on':''}" onclick="window._termFailed=true;termLogins(${accountId||0})">Failed</button></div>
+      ${accountId?`<span class="count-pill">Account #${accountId}</span>`:''}</div></div>`
+    +(d.logins.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.term-log">
+      <thead><tr><th>When</th><th>MT5 login</th><th>Result</th><th>IP</th><th>Location</th><th>Device</th><th>Last seen</th></tr></thead>
+      <tbody>${d.logins.map(l=>`<tr>
+        <td data-l="When" data-sort="${esc(l.at||'')}">${dstr(l.at)}</td>
+        <td class="num rt-main" data-l="MT5 login">${esc(l.login)}${l.account_id?` · ${accLink(l.account_id)}`:''}</td>
+        <td data-l="Result">${l.ok?(l.revoked?'<span class="muted">Signed out</span>':'<span class="up">Active</span>'):'<span class="dn">Failed</span>'}</td>
+        <td class="num" data-l="IP">${esc(l.ip||'—')}</td>
+        <td data-l="Location">${esc(termWhere(l))}</td>
+        <td data-l="Device">${esc(l.device)}${l.device_id?` <span class="muted mono">${esc(l.device_id)}</span>`:''}</td>
+        <td data-l="Last seen" data-sort="${esc(l.last_seen||'')}">${l.last_seen?dstr(l.last_seen):'—'}</td></tr>`).join('')}</tbody></table></div>`
+    :`<div class="empty"><h3>No sign-ins yet</h3><p>Terminal sign-ins appear here.</p></div>`);
+}
+function termHistory(id){
+  window._termTab='logins';
+  $$('#view .seg')[0]?.querySelectorAll('button').forEach((b,i)=>b.classList.toggle('on',i===1));
+  termLogins(id).catch(e=>toast('Error: '+e.message,'err'));
+}
+async function termView(id){
+  try{const r=await api(`/api/admin/terminal/accounts/${id}/view`,{method:'POST'});
+    window.open('/trade#imp='+encodeURIComponent(r.token),'_blank');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function termOut(id){
+  if(!await askConfirm({title:'Sign this account out of the terminal?',body:'Every open terminal session of this account ends. The trader can sign in again with the MT5 login.',ok:'Sign out'}))return;
+  try{const r=await api(`/api/admin/terminal/accounts/${id}/sign-out`,{method:'POST'});
+    toast(`${r.signed_out} ${r.signed_out===1?'session':'sessions'} ended.`,'ok');go('pool');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function termBlock(id,blocked){
+  if(blocked&&!await askConfirm({title:'Block terminal access?',body:'The trader is signed out and can\'t sign in to the terminal. Open positions stay open.',ok:'Block',danger:true}))return;
+  try{await api(`/api/admin/terminal/accounts/${id}/block`,{method:'POST',body:JSON.stringify({blocked})});
+    toast(blocked?'Terminal access blocked.':'Terminal access restored.','ok');go('pool');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function termPause(cb){
+  try{await api('/api/admin/terminal/orders-paused',{method:'POST',body:JSON.stringify({paused:cb.checked})});
+    toast(cb.checked?'New orders paused.':'New orders allowed.','ok');
+  }catch(e){cb.checked=!cb.checked;toast('Error: '+e.message,'err')}
+}
 function poolSizeOptions(chosen){
   return (window._poolSizes||[]).map(r=>`<option value="${r}"${Number(chosen)===r?' selected':''}>$${fmt0(r)}</option>`).join('');
 }

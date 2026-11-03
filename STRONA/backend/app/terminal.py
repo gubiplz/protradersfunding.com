@@ -1552,8 +1552,14 @@ def admin_orders_paused(payload: AdminPauseIn):
         session.close()
 
 
-def wyczysc_logowania(session) -> int:
-    """Retencja z polityki prywatności."""
-    return (session.query(TerminalLogin)
-            .filter(TerminalLogin.created_at < _now() - timedelta(days=LOGOWANIA_DNI))
-            .delete(synchronize_session=False))
+def wyczysc_logowania() -> dict:
+    """Retencja z polityki prywatności: logowania starsze niż LOGOWANIA_DNI znikają."""
+    session = SessionLocal()
+    try:
+        n = (session.query(TerminalLogin)
+             .filter(TerminalLogin.created_at < _now() - timedelta(days=LOGOWANIA_DNI))
+             .delete(synchronize_session=False))
+        session.commit()
+        return {"deleted": n}
+    finally:
+        session.close()

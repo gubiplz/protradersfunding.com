@@ -15,7 +15,7 @@ startuje jako 'provisioning' i czeka na poświadczenia z PULI, którą admin
 uzupełnia ręcznie w panelu (login, hasło, serwer, rozmiar). Poller przydziela
 pierwszy wolny rachunek o pasującym rozmiarze i zapisuje, komu przypadł. Gdy
 puli brakuje rachunku danego rozmiaru, konto po prostu czeka — panel pokazuje
-takie zamówienia w sekcji MT5 Pool.
+takie zamówienia w sekcji MT5 pool.
 
 Pula jest domyślnym i jedynym źródłem, bo brokerzy blokują programowe zakładanie
 dem, a admin wie, które rachunki naprawdę istnieją. `PROVISIONING_SOURCE=auto`
@@ -235,7 +235,7 @@ def chce_realnego_mt5(obiekt, settings=None, session=None) -> bool:
       * `MT5_PROVISIONING` w srodowisku — tryb globalny: REALNE rachunki dla
         wszystkich, niezaleznie od dodatkow. Tak dziala pula kont i tak bylo
         od poczatku; ta galaz zostaje nietknieta.
-      * przelacznik „Copytrading accounts" w zakladce MT5 Pool — dla
+      * przelacznik „Copytrading accounts" w zakladce Built-in Terminal — dla
         produkcji, gdzie env jest wylaczone i konta stoja na poswiadczeniach
         lokalnych. Wtedy realny rachunek dostaje WYLACZNIE ten, kto doplacil
         za add-on. Przelacznik siedzi w bazie, bo na hostingu bezserwerowym
@@ -392,7 +392,7 @@ async def zarejestruj_w_metaapi(session, acc: Account, settings=None,
         zapisz("no MT5 credentials on the account")
         return None
     if not chce_realnego_mt5(acc, settings, session):
-        zapisz("real MT5 is switched off for Copytrading accounts (MT5 Pool tab)")
+        zapisz("real MT5 is switched off for Copytrading accounts (Built-in Terminal tab)")
         return None
     # Przerwa po porazce chroni przed AUTOMATEM dobijajacym sie co tyknniecie.
     # Klikniecie „Connect them now" to swiadoma decyzja czlowieka, ktory wlasnie
@@ -571,7 +571,7 @@ async def _provision_one(session_factory, feed, aid: int) -> None:
             return
 
         # 5) konto czeka, aż admin doda rachunek do puli. Panel pokazuje takie
-        #    konta w sekcji MT5 Pool jako oczekujące.
+        #    konta w sekcji MT5 pool jako oczekujące.
         print(f"[provisioning] konto {aid} czeka na rachunek ${acc.initial_balance:,.0f} z puli")
     finally:
         s.close()
@@ -604,7 +604,7 @@ def real_fallback_enabled(session) -> bool:
 def copytrading_real_enabled(session) -> bool:
     """Czy konta z add-onem Copytrading maja dostawac REALNY rachunek MT5.
 
-    Przelacznik z zakladki MT5 Pool. Wylaczony = dodatek dalej sie sprzedaje
+    Przelacznik z zakladki Built-in Terminal. Wylaczony = dodatek dalej sie sprzedaje
     i dalej znaczy zgode na kopiowanie, ale konto idzie na lokalne
     poswiadczenia — tak jak cala dotychczasowa produkcja. Dzieki temu sprzedaz
     mozna wlaczyc, zanim rachunek u dostawcy bedzie gotowy, i nie zostawic

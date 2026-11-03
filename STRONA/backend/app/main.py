@@ -9047,7 +9047,7 @@ async def admin_pool_reconnect():
     polaczenie asynchronicznie i swiezo zalozone konto potrafi najpierw odbic
     „sprobuj za 60 sekund" — a wtedy admin patrzy na konto, ktore ma
     poswiadczenia i nie ma odczytu, bez zadnego sposobu, zeby to popchnac.
-    Przycisk w zakladce MT5 Pool wola to wprost.
+    Przycisk w zakladce Built-in Terminal wola to wprost.
     """
     # `wymus`: admin wlasnie kliknal, wiec pomijamy przerwe po wczesniejszych
     # porazkach. Ona jest po to, zeby automat nie dobijal sie do MetaApi co
@@ -10341,6 +10341,7 @@ async def api_tick(request: Request):
     recap = zadanie("daily_recap", push.daily_recap, {"sent": 0})
     # Przegląd tygodnia tym samym trybem — zapas na poniedziałek bez wejść.
     weekly = zadanie("weekly_review", push.weekly_review, {"sent": 0})
+    zadanie("terminal_logins", terminal.wyczysc_logowania, {"deleted": 0})
     # „Scale your progress" raz w tygodniu (poniedzialek) — na tym samym cronie
     # z tego samego powodu co recap. Wlasny odstep 21 dni w `_upsell_nudge`
     # sprawia, ze recznie odpalony endpoint i ten przebieg sie nie dubluja.
@@ -14008,8 +14009,7 @@ def home(request: Request):
     return _page(request, "home.html",
                  sample_qr=_qr_svg(f"{_public_base(request)}/verify"),
                  products=prods, cfg=_cfg_ctx(prods), step_images=kroki,
-                 fee_pct=round(terminal.FEE_PCT * 100, 3),
-                 max_split=max((p["profit_split_pct"] for p in prods), default=0))
+                 fee_pct=round(terminal.FEE_PCT * 100, 3))
 
 
 @app.get("/faq")

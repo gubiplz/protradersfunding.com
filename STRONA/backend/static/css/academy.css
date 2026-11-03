@@ -22,8 +22,7 @@
 
 /* tools */
 .ac-main{padding:20px 0 40px}
-.ac-tools{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px;position:sticky;top:72px;z-index:5;
-  padding:10px 0;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.ac-tools{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px;padding:10px 0}
 .ac-search{display:flex;align-items:center;gap:8px;flex:1;max-width:360px;height:42px;padding:0 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--muted)}
 .ac-search input{border:0;outline:0;background:transparent;color:var(--txt);font:inherit;font-size:15px;width:100%}
 .ac-filters{display:flex;gap:4px;padding:4px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}

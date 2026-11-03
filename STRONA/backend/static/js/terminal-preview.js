@@ -3,20 +3,20 @@
    and the stream stops while it is out of view. */
 (function () {
   'use strict';
-  /* Stats band: BTC spread measured from the live book, refreshed while it is on screen. */
-  const spr = document.getElementById('statSpread');
-  if (spr) {
+  /* Stats band: spreads measured from the live book of each market, while on screen. */
+  const tiles = [...document.querySelectorAll('[data-spread]')];
+  if (tiles.length) {
     let t = 0;
-    const read = () => fetch('https://api.hyperliquid.xyz/info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'l2Book', coin: 'BTC' }) })
+    const read = () => tiles.forEach((el) => fetch('https://api.hyperliquid.xyz/info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'l2Book', coin: el.dataset.spread }) })
       .then((r) => r.json())
       .then((d) => {
-        const b = +d.levels[0][0].px, a = +d.levels[1][0].px;
-        spr.textContent = ((a - b) / ((a + b) / 2) * 100).toFixed(4) + '%';
-      }).catch(() => {});
+        const bid = +d.levels[0][0].px, ask = +d.levels[1][0].px;
+        el.textContent = ((ask - bid) / ((ask + bid) / 2) * 100).toFixed(4) + '%';
+      }).catch(() => {}));
     new IntersectionObserver((en) => {
       clearInterval(t);
-      if (en[0].isIntersecting) { read(); t = setInterval(read, 10000); }
-    }).observe(spr);
+      if (en[0].isIntersecting) { read(); t = setInterval(read, 15000); }
+    }).observe(tiles[0]);
   }
 
   const box = document.getElementById('lpTerm');
@@ -121,6 +121,19 @@
       list = SYMS.map((s) => d.markets.find((x) => x.sym === s)).filter(Boolean);
       $('[data-syms]').innerHTML = list.map((x) => `<button type="button" data-sym="${x.sym}">${x.sym.replace('USD', '')}</button>`).join('');
       chart = klinecharts.init($('[data-chart]'), { styles: styles(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, locale: 'en-US' });
+      // The page keeps scrolling over the chart; zoom stays on Ctrl/⌘ + wheel and on pinch.
+      $('[data-chart]').addEventListener('wheel', (e) => { if (!e.ctrlKey && !e.metaKey) e.stopPropagation(); }, { capture: true, passive: true });
+      // Same on touch: a vertical swipe scrolls the page, a sideways one pans the chart.
+      const area = $('[data-chart]');
+      let tx = 0, ty = 0, dir = null;
+      area.addEventListener('touchstart', (e) => { dir = null; if (e.touches.length === 1) { tx = e.touches[0].clientX; ty = e.touches[0].clientY; } else dir = 'x'; }, { capture: true, passive: true });
+      area.addEventListener('touchmove', (e) => {
+        if (dir === null) {
+          const dx = Math.abs(e.touches[0].clientX - tx), dy = Math.abs(e.touches[0].clientY - ty);
+          if (dx + dy > 6) dir = dy > dx ? 'y' : 'x';
+        }
+        if (dir !== 'x') e.stopPropagation();
+      }, { capture: true, passive: true });
       chart.setDataLoader({
         getBars: async ({ type, timestamp, callback }) => {
           const nr = ++seq;
@@ -137,7 +150,7 @@
         subscribeBar: ({ callback }) => { barCb = callback; },
         unsubscribeBar: () => { barCb = null; },
       });
-      chart.createIndicator({ name: 'VOL', paneId: 'pane_VOL' });
+      chart.createIndicator({ name: 'VOL', calcParams: [], paneId: 'pane_VOL' });
       chart.setPaneOptions({ id: 'pane_VOL', height: 60 });
       chart.setPeriod(PERIODS[interval]);
       new ResizeObserver(() => chart.resize()).observe($('[data-chart]'));
