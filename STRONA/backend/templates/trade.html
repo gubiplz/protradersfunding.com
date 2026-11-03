@@ -163,6 +163,22 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
   </section>
 
   <aside class="t-ticket" data-pane="ticket" id="tTicket">
+    <section class="t-dock" id="tLogin" aria-labelledby="tLoginH">
+      <header class="t-dock-h">
+        <img src="/static/img/mt5.png" alt="">
+        <h2 id="tLoginH">Trading account</h2>
+        <span class="t-dock-st"><i></i>Offline</span>
+        <button class="t-dock-x" id="tLoginX" type="button" aria-label="Close" hidden><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </header>
+      <form id="tLoginMt5">
+        <label class="t-fld"><span>MT5 login</span><div class="t-in"><input name="login" type="text" inputmode="numeric" autocomplete="username" spellcheck="false" required></div></label>
+        <label class="t-fld"><span>MT5 password</span><div class="t-in"><input name="password" type="password" autocomplete="current-password" required></div></label>
+        <label class="ck"><input name="keep" type="checkbox" checked><span>Stay connected on this device</span></label>
+        <p class="t-err" hidden></p>
+        <button class="t-dock-go" type="submit">Connect</button>
+        <p class="t-dock-n">From your purchase e-mail, not your dashboard password. <a href="/portal">Find it in the dashboard</a> · <a href="/#pricing">Get a challenge</a></p>
+      </form>
+    </section>
     <div class="t-otabs" role="group" aria-label="Order type">
       <button class="on" data-ot="market" type="button">Market</button>
       <button data-ot="limit" type="button">Limit</button>
@@ -281,24 +297,6 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
       <a class="t-btn ghost" href="/portal?signup=1">Sign Up</a>
       <a class="t-btn" href="/#pricing">Choose a Challenge</a>
     </div>
-  </div>
-</div>
-
-<div class="t-modal" id="tLogin" hidden role="dialog" aria-modal="true" aria-labelledby="tLoginH">
-  <div class="t-mt5">
-    <div class="t-mt5-bar">
-      <img src="/static/img/mt5.png" alt="">
-      <h2 id="tLoginH">Connect MT5 account</h2>
-      <button class="t-mt5-x" data-close type="button" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
-    </div>
-    <form id="tLoginMt5">
-      <label class="t-mt5-row"><span>Login</span><input name="login" type="text" inputmode="numeric" autocomplete="username" spellcheck="false" required></label>
-      <label class="t-mt5-row"><span>Password</span><input name="password" type="password" autocomplete="current-password" required></label>
-      <label class="t-mt5-keep"><input name="keep" type="checkbox" checked><span>Stay connected on this device</span></label>
-      <p class="t-err" hidden></p>
-      <button class="t-mt5-go" type="submit">Connect</button>
-      <p class="t-mt5-note">Use the MT5 login and password from your purchase e-mail, not your dashboard password. You'll also find them in your <a href="/portal">dashboard</a>. No account yet? <a href="/#pricing">Choose a challenge</a></p>
-    </form>
   </div>
 </div>
 

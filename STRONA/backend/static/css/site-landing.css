@@ -156,3 +156,16 @@
 .spr-i small{font-size:12.5px;color:var(--muted)}
 .spr-i b{font-family:var(--mono);font-weight:600;color:var(--txt);font-variant-numeric:tabular-nums;min-width:48px}
 .spr-n{font-size:12px;color:var(--dim)}
+
+/* Markets: same width as the certificates strip, smaller tiles */
+#markets .assets-rows{max-width:1160px;margin-inline:auto;gap:10px;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 5%,#000 95%,transparent);
+          mask-image:linear-gradient(90deg,transparent,#000 5%,#000 95%,transparent)}
+#markets .assets-track{gap:10px}
+#markets .asset{min-width:0;width:172px;padding:11px 13px;border-radius:14px;gap:3px 8px;font-size:13px}
+#markets .asset .ic{width:46px;height:46px;margin-bottom:6px}
+#markets .asset .ic img{width:44px;height:44px}
+#markets .asset .ic.pair img{width:31px;height:31px}
+#markets .asset .ic.metal,#markets .asset .ic.energy{width:44px;height:44px;margin:0 0 7px}
+#markets .asset .ic svg{width:27px;height:27px}
+@media (max-width:1240px){#markets .assets-rows{margin-inline:16px}}

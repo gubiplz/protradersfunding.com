@@ -947,13 +947,10 @@
           </div>
         </div></div>`;
       };
-      /* Two rows, every other card in the lower one, so they never show the
-         same set. Each row gets an EVEN number of copies: the loop wraps at
+      /* The row gets an EVEN number of copies: the loop wraps at
          half the row, so after half a cycle the frame is identical and nothing
          jumps. Three certificates would not fill a wide screen with one copy,
          hence the count comes from a measurement: row width >= 2x the strip. */
-      const topRow = rows.filter((_, i) => i % 2 === 0);
-      const botRow = rows.filter((_, i) => i % 2 === 1);
       /* Unhide FIRST: w [hidden] KAZDY pomiar to zero — a poniewaz liczba kopii
          wynika z pomiaru, zero oznaczaloby tysiace kart i zawieszona strone.
          Stad tez twardy sufit na liczbe kopii. */
@@ -970,8 +967,7 @@
           el.innerHTML = one.repeat(need);
         }
       };
-      fill($('#certsStripRow'), topRow);
-      fill($('#certsStripRow2'), botRow);
+      fill($('#certsStripRow'), rows);
       /* transform:scale() keeps the 620px layout box — each wrapper gets the
          SCALED height of its card. */
       requestAnimationFrame(() => {

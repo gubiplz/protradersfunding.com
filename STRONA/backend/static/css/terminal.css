@@ -139,7 +139,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .v-ic{display:inline-grid;place-items:center;width:16px;height:16px}
 .v-ic svg{width:16px;height:16px;stroke:none}
 .t-src{font-size:12px;color:var(--muted);max-width:330px;white-space:normal;line-height:1.35}
-.t-mkt-r{margin-left:auto;display:flex;align-items:center;gap:10px;position:sticky;right:0;padding-left:10px;background:linear-gradient(90deg,transparent,var(--bg) 10px)}
+.t-mkt-r{margin-left:auto;display:flex;align-items:center;gap:10px;position:sticky;right:0;z-index:40;padding-left:10px;background:linear-gradient(90deg,transparent,var(--bg) 10px)}
 
 /* ---------- siatka ---------- */
 .t-grid{flex:none;display:grid;grid-template-columns:minmax(0,1fr) 316px 332px;grid-template-rows:var(--top-h) auto}
@@ -580,25 +580,28 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-connect:hover{border-color:var(--acc)}
 .t-connect i{width:7px;height:7px;border-radius:50%;background:var(--dim)}
 .t-mkt-r .t-acc-btn{height:30px;border-radius:6px;font-size:12.5px;white-space:nowrap}
-.t-mt5{width:min(372px,calc(100vw - 28px));border-radius:8px;overflow:hidden;background:var(--panel);border:1px solid var(--line2);box-shadow:0 30px 70px -24px rgba(0,0,0,.8)}
-.t-mt5-bar{display:flex;align-items:center;gap:9px;height:38px;padding:0 6px 0 12px;background:var(--bg);border-bottom:1px solid var(--line)}
-.t-mt5-bar img{width:18px;height:18px;object-fit:contain}
-.t-mt5-bar h2{margin:0;flex:1;font-size:13px;font-weight:600;letter-spacing:0}
-.t-mt5-x{width:26px;height:26px;display:grid;place-items:center;border-radius:5px;color:var(--muted)}
-.t-mt5-x:hover{background:var(--line);color:var(--txt)}
-.t-mt5-x svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2}
-.t-mt5 form{display:flex;flex-direction:column;gap:9px;padding:14px}
-.t-mt5-row{display:grid;grid-template-columns:76px 1fr;align-items:center;font-size:12.5px;color:var(--muted)}
-.t-mt5-row input{width:100%;height:32px;padding:0 9px;border-radius:4px;border:1px solid var(--line2);background:var(--bg);color:var(--txt);outline:0;font:500 13px var(--mono,monospace);transition:border-color .15s}
-.t-mt5-row input:focus{border-color:var(--acc)}
-.t-mt5-keep{display:flex;align-items:center;gap:8px;margin-left:76px;font-size:12px;color:var(--muted);cursor:pointer}
-.t-mt5-keep input{accent-color:var(--acc)}
-.t-mt5 .t-err{margin:0}
-.t-mt5-go{height:34px;border-radius:4px;background:var(--acc);color:#fff;font-size:13px;font-weight:600;transition:filter .15s}
-.t-mt5-go:hover{filter:brightness(1.1)}
-.t-mt5-go:disabled{opacity:.7}
-.t-mt5-note{margin:2px 0 0;font-size:11.5px;line-height:1.5;color:var(--dim)}
-.t-mt5-note a{color:var(--muted);text-decoration:underline;text-underline-offset:2px}
+.t-dock{margin:-14px -14px 0;padding:0 14px 14px;background:var(--bg);border-bottom:1px solid var(--line)}
+.t-dock[hidden]{display:none}
+.t-dock.flash{animation:tDockFlash .7s ease}
+@keyframes tDockFlash{0%{box-shadow:inset 0 0 0 1px var(--acc)}100%{box-shadow:inset 0 0 0 1px transparent}}
+.t-dock-h{display:flex;align-items:center;gap:8px;height:38px}
+.t-dock-h img{width:16px;height:16px;object-fit:contain}
+.t-dock-h h2{margin:0;flex:1;font-size:12.5px;font-weight:600;letter-spacing:0}
+.t-dock-st{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted)}
+.t-dock-st[hidden]{display:none}
+.t-dock-st i{width:6px;height:6px;border-radius:50%;background:var(--dim)}
+.t-dock-x{width:22px;height:22px;display:grid;place-items:center;border-radius:5px;color:var(--muted)}
+.t-dock-x[hidden]{display:none}
+.t-dock-x:hover{background:var(--line);color:var(--txt)}
+.t-dock-x svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2}
+.t-dock form{display:flex;flex-direction:column;gap:10px}
+.t-dock .t-in input{font-family:var(--mono,monospace)}
+.t-dock .t-err{margin:0}
+.t-dock-go{height:36px;border-radius:8px;background:var(--acc);color:#fff;font-size:13.5px;font-weight:600;transition:filter .15s,transform .08s}
+.t-dock-go:hover{filter:brightness(1.1)}.t-dock-go:active{transform:scale(.985)}
+.t-dock-go:disabled{opacity:.7}
+.t-dock-n{margin:0;font-size:11.5px;line-height:1.5;color:var(--dim)}
+.t-dock-n a{color:var(--muted);text-decoration:underline;text-underline-offset:2px}
 
 /* Trading tools */
 .t-plus{position:absolute;left:0;top:0;z-index:4;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font:600 14px/1 var(--mono,monospace);background:var(--panel);border:1px solid var(--line2);color:var(--txt);transition:background .12s,color .12s}

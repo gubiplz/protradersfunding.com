@@ -1492,6 +1492,7 @@
     toast('MT5 account disconnected');
   }
   function renderUser() {
+    renderDock();
     $('tGuest').hidden = !!S.token;
     $('tUser').hidden = !S.token;
     $('tMMLogin').hidden = !!S.token;
@@ -2547,16 +2548,32 @@
     }
     return d;
   }
+  /* The account panel sits at the top of the order column, as in MT5 and cTrader: always
+     there while offline, opened on request to add another account. */
+  let dockAdding = false;
+  function renderDock() {
+    const f = $('tLogin');
+    f.hidden = !!S.token && !dockAdding;
+    $('tLoginX').hidden = !S.token;
+    $('tLoginH').textContent = dockAdding ? 'Add MT5 account' : 'Trading account';
+    f.querySelector('.t-dock-st').hidden = !!S.token;
+  }
   function openLogin(adding) {
-    const f = $('tLoginMt5');
-    $('tLoginH').textContent = adding === true ? 'Add MT5 account' : 'Connect MT5 account';
+    dockAdding = adding === true;
+    renderDock();
+    if (window.matchMedia('(max-width:760px)').matches) setMPane('ticket');
+    const f = $('tLoginMt5'), dock = $('tLogin');
     f.reset();
     f.keep.checked = true;
     f.querySelector('.t-err').hidden = true;
-    f.login.value = ls.get('pf_term_prefill', '') || '';
+    f.login.value = ls.get('pf_term_prefill', '') || f.login.value;
     ls.del('pf_term_prefill');
-    openModal('tLogin');
+    closeModal();
+    $('tTicket').scrollTop = 0;
+    dock.classList.remove('flash'); void dock.offsetWidth; dock.classList.add('flash');
+    (f.login.value ? f.password : f.login).focus();
   }
+  $('tLoginX').onclick = () => { dockAdding = false; renderDock(); };
   $('tSignIn').onclick = openLogin;
   $('tReadySignIn').onclick = openLogin;
   $('tLoginMt5').onsubmit = async (e) => {
@@ -2571,7 +2588,8 @@
       saveLogins();
       S.accId = d.account.id; S.token = d.token; S.st = null;
       ls.set('pf_term_acc', String(d.account.id));
-      closeModal();
+      dockAdding = false;
+      f.password.value = '';
       toast('Connected', `MT5 account #${d.account.login}`);
       await loadAccounts();
     } catch (er) { err.textContent = er.message; err.hidden = false; } finally { btn.disabled = false; btn.textContent = 'Connect'; }
