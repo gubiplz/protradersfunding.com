@@ -276,9 +276,9 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
   <div class="t-card t-ready">
     <button class="t-x" data-close type="button" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
     <h2 id="tReadyH">Ready to Start Trading?</h2>
-    <p>You need to sign in or sign up and get a challenge account to trade on the platform.</p>
+    <p>You need a challenge account to trade here. Sign in with the MT5 login you received after your purchase.</p>
     <div class="t-ready-box">Trade simulated capital at live market prices, prove your strategy with professional tools, and work toward a funded account.</div>
-    <p class="t-ready-in">Already have an account? <button class="t-link acc" id="tReadySignIn" type="button">Sign In</button></p>
+    <p class="t-ready-in">Already have a challenge? <button class="t-link acc" id="tReadySignIn" type="button">Sign in with MT5</button></p>
     <div class="t-ready-foot">
       <a class="t-btn ghost" href="/portal?signup=1">Sign Up</a>
       <a class="t-btn" href="/#pricing">Choose a Challenge</a>
@@ -289,14 +289,14 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
 <div class="t-modal" id="tLogin" hidden role="dialog" aria-modal="true" aria-labelledby="tLoginH">
   <div class="t-card t-login">
     <button class="t-x" data-close type="button" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
-    <h2 id="tLoginH">Sign In</h2>
-    <form id="tLoginPtf" class="t-form">
-      <p class="t-hint">Use your {{ site_name }} account — the same login as your dashboard. You can switch between all your challenge accounts here.</p>
-      <label class="t-fld"><span>Email</span><div class="t-in"><input name="email" type="email" autocomplete="email" required></div></label>
-      <label class="t-fld"><span>Password</span><div class="t-in"><input name="password" type="password" autocomplete="current-password" required></div></label>
+    <h2 id="tLoginH">Sign in with MT5</h2>
+    <form id="tLoginMt5" class="t-form">
+      <p class="t-hint">Use the MT5 login and password we sent you after your challenge purchase. You'll also find them in your dashboard. Your dashboard password doesn't work here.</p>
+      <label class="t-fld"><span>MT5 login</span><div class="t-in"><input name="login" type="text" inputmode="numeric" autocomplete="username" required></div></label>
+      <label class="t-fld"><span>MT5 password</span><div class="t-in"><input name="password" type="password" autocomplete="current-password" required></div></label>
       <p class="t-err" hidden></p>
       <button class="t-btn wide" type="submit">Sign in</button>
-      <p class="t-hint c">No account yet? <a href="/portal?signup=1">Sign up</a></p>
+      <p class="t-hint c">No challenge yet? <a href="/#pricing">Choose a challenge</a></p>
     </form>
   </div>
 </div>

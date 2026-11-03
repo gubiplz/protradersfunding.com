@@ -3582,7 +3582,8 @@ function credsBlock(a, compact){
       ${row('Server', a.platform_server||'—')}
       ${row('Login', a.platform_login||'—')}
       ${row('Password', a.platform_password)}
-      ${compact?'':'<p style="font-size:11px;color:var(--dim);margin-top:6px">Works in MetaTrader 5 desktop, mobile and web, so pick this server name.</p>'}
+      ${compact?'':'<p style="font-size:11px;color:var(--dim);margin-top:6px">Works in MetaTrader 5 desktop, mobile and web, so pick this server name. The same login and password open the Built-in Terminal.</p>'}
+      <a class="creds-term" href="/trade" onclick="event.stopPropagation();try{localStorage.setItem('pf_term_prefill','${jsq(a.platform_login||'')}')}catch(e){}">Open Built-in Terminal</a>
     </div>`;
 }
 

@@ -376,6 +376,7 @@ app = FastAPI(title=f"{settings.site_name} API", version="0.7.0", lifespan=lifes
               docs_url=None, redoc_url=None, openapi_url=None)
 # Terminal PTF (zakładka Trade): zlecenia, pozycje, login danymi MT5.
 app.include_router(terminal.router)
+app.include_router(terminal.admin_router)
 
 
 @app.exception_handler(StaleDataError)

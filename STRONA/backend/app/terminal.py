@@ -26,12 +26,15 @@ from __future__ import annotations
 import asyncio
 import copy
 import os
+import secrets
 import time
 from datetime import datetime, timedelta, timezone
 
+from urllib.parse import unquote
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm.exc import StaleDataError
 
 from . import auth, catalog, markets, rules, tradebot
@@ -39,7 +42,7 @@ from .config import get_settings
 from .db import SessionLocal
 from .feed import MarketSnapshot
 from .markets import Market
-from .models import Account, TerminalOrder, Trade
+from .models import Account, AppSetting, PoolAccount, TerminalLogin, TerminalOrder, Trade, Trader
 
 settings = get_settings()
 
@@ -702,15 +705,46 @@ def evaluate_window(cfg, rt, tick, dni: dict | None):
 
 
 # --------------------------------------------------------------------------- #
-#  Dostęp: tylko sesja konta PTF (ta sama co portal)                           #
+#  Dostęp: dane MT5 konta dają sesję tego jednego konta                        #
 # --------------------------------------------------------------------------- #
 class Who:
-    def __init__(self, trader_id: int):
+    def __init__(self, trader_id: int, account_id: int, imp: bool = False):
         self.trader_id = trader_id
+        self.account_id = account_id
+        self.imp = imp
+
+
+SESJA_ODSWIEZ_S = 60
 
 
 def who(request: Request, authorization: str | None = Header(default=None)) -> Who:
-    return Who(auth.current_trader(request, authorization).id)
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(401, "Sign in with your MT5 login")
+    dane = auth.parse_terminal_token(authorization.split(" ", 1)[1].strip())
+    if dane is None:
+        raise HTTPException(401, "Session expired. Sign in again.")
+    session = SessionLocal()
+    try:
+        acc = session.get(Account, int(dane["aid"]))
+        if acc is None or acc.trader_id is None or acc.terminal_blocked \
+                or dane.get("pwf") != auth.terminal_pw_fp(acc.platform_password):
+            raise HTTPException(401, "Session expired. Sign in again.")
+        sid = dane.get("sid")
+        if sid:
+            wpis = session.get(TerminalLogin, int(sid))
+            if wpis is None or wpis.revoked_at is not None:
+                raise HTTPException(401, "Session expired. Sign in again.")
+            widziany = wpis.last_seen_at
+            if widziany is not None and widziany.tzinfo is None:
+                widziany = widziany.replace(tzinfo=timezone.utc)
+            if widziany is None or _now() - widziany > timedelta(seconds=SESJA_ODSWIEZ_S):
+                wpis.last_seen_at = _now()
+                session.commit()
+        elif not dane.get("imp"):
+            raise HTTPException(401, "Session expired. Sign in again.")
+        return Who(acc.trader_id, acc.id, bool(dane.get("imp")))
+    finally:
+        session.close()
 
 
 _TEMPO: dict[int, list[float]] = {}
@@ -723,8 +757,8 @@ def who_trade(request: Request, authorization: str | None = Header(default=None)
     (tam handel byłby na cudzym koncie) i z limitem tempa na tradera — każde
     zlecenie to zapytanie do Hyperliquid i pełna ocena reguł."""
     w = who(request, authorization)
-    if getattr(request.state, "impersonated", False):
-        raise HTTPException(403, "Trading is off while viewing the portal as a client.")
+    if w.imp:
+        raise HTTPException(403, "Trading is off while viewing the account as admin.")
     if not _TEMPO_OFF:
         teraz = time.monotonic()
         ost = [t for t in _TEMPO.get(w.trader_id, []) if teraz - t < TEMPO_OKNO_S]
@@ -739,7 +773,7 @@ def _konto(session, w: Who, account_id: int | None) -> Account:
     if not account_id:
         raise HTTPException(400, "Choose an account")
     acc = session.get(Account, int(account_id))
-    if acc is None or acc.trader_id != w.trader_id:
+    if acc is None or acc.id != w.account_id:
         raise HTTPException(404, "Account not found")
     return acc
 
@@ -941,18 +975,101 @@ def api_markets():
             "weekend": tradebot.is_weekend()}
 
 
+# --- logowanie danymi MT5 -----------------------------------------------------
+PROBY_LOGIN, PROBY_IP, PROBY_OKNO_MIN = 8, 40, 15
+LOGOWANIA_DNI = 365
+
+
+class LoginIn(BaseModel):
+    login: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=64)
+    device: str | None = Field(default=None, max_length=32)
+
+
+def _ip(request: Request) -> str | None:
+    """Adres klienta. Na Vercelu `x-real-ip`/`x-vercel-forwarded-for` ustawia platforma;
+    lewy wpis `x-forwarded-for` klient mógłby sobie dopisać sam."""
+    h = request.headers
+    ip = h.get("x-real-ip") or h.get("x-vercel-forwarded-for") or h.get("x-forwarded-for") \
+        or (request.client.host if request.client else "")
+    return ip.split(",")[0].strip()[:64] or None
+
+
+def _geo(request: Request) -> dict:
+    h = request.headers
+    kraj = (h.get("x-vercel-ip-country") or "").strip().upper()
+    return {"country": kraj if len(kraj) == 2 and kraj.isalpha() and kraj != "XX" else None,
+            "region": unquote(h.get("x-vercel-ip-country-region") or "")[:64] or None,
+            "city": unquote(h.get("x-vercel-ip-city") or "")[:80] or None}
+
+
+def _zapisz_probe(session, request: Request, login: str, device: str | None, acc: Account | None) -> TerminalLogin:
+    wpis = TerminalLogin(login=login[:64], account_id=acc.id if acc else None,
+                         trader_id=acc.trader_id if acc else None, ok=acc is not None, ip=_ip(request),
+                         user_agent=(request.headers.get("user-agent") or "")[:255] or None,
+                         device_id=device, last_seen_at=_now() if acc else None, **_geo(request))
+    session.add(wpis)
+    session.commit()
+    return wpis
+
+
+def _limit_prob(session, login: str, ip: str | None) -> None:
+    if _TEMPO_OFF:
+        return
+    od = _now() - timedelta(minutes=PROBY_OKNO_MIN)
+    baza = session.query(TerminalLogin).filter(TerminalLogin.ok.is_(False), TerminalLogin.created_at >= od)
+    if baza.filter(TerminalLogin.login == login).count() >= PROBY_LOGIN \
+            or (ip and baza.filter(TerminalLogin.ip == ip).count() >= PROBY_IP):
+        raise HTTPException(429, "Too many attempts. Try again in a few minutes.")
+
+
+@router.post("/login")
+def api_login(payload: LoginIn, request: Request):
+    """Logowanie danymi MT5 z maila po zakupie. Konto PTF nie jest tu potrzebne,
+    a hasło do dashboardu tu nie działa."""
+    login = payload.login.strip()
+    device = "".join(z for z in (payload.device or "") if z.isalnum())[:32] or None
+    session = SessionLocal()
+    try:
+        _limit_prob(session, login, _ip(request))
+        # Login nie ma constraintu unique, więc para login + hasło rozstrzyga o koncie.
+        trafione = [a for a in session.query(Account).filter(Account.platform_login == login).all()
+                    if a.trader_id and a.platform_password
+                    and secrets.compare_digest(a.platform_password.encode(), payload.password.encode())]
+        trafione.sort(key=lambda a: _blokada_handlu(a) is not None)
+        acc = trafione[0] if trafione else None
+        if acc is None:
+            _zapisz_probe(session, request, login, device, None)
+            raise HTTPException(401, "Wrong MT5 login or password")
+        if acc.terminal_blocked:
+            raise HTTPException(403, "Terminal access for this account is paused. Contact support.")
+        wpis = _zapisz_probe(session, request, login, device, acc)
+        return {"token": auth.make_terminal_token(acc.id, acc.platform_password, sid=wpis.id),
+                "account": _konto_dict(acc)}
+    finally:
+        session.close()
+
+
+@router.post("/logout")
+def api_logout(authorization: str | None = Header(default=None)):
+    dane = auth.parse_terminal_token((authorization or "").split(" ", 1)[-1].strip())
+    if dane and dane.get("sid"):
+        session = SessionLocal()
+        try:
+            wpis = session.get(TerminalLogin, int(dane["sid"]))
+            if wpis is not None and wpis.revoked_at is None:
+                wpis.revoked_at = _now()
+                session.commit()
+        finally:
+            session.close()
+    return {"ok": True}
+
+
 @router.get("/accounts")
 def api_accounts(w: Who = Depends(who)):
     session = SessionLocal()
     try:
-        konta = (session.query(Account).filter(Account.trader_id == w.trader_id)
-                 .order_by(Account.id.desc()).all())
-        # Konto zamknięte breachem po handlu w terminalu zostaje na liście („Breached",
-        # z powodem) — inaczej trader widzi „No account" i nie wie, co się stało.
-        widoczne = [a for a in konta if a.status in TRADABLE + ("passed",)
-                    or (a.status == "failed" and a.terminal_used)]
-        widoczne.sort(key=lambda a: _blokada_handlu(a) is not None)
-        return {"accounts": [_konto_dict(a) for a in widoczne]}
+        return {"accounts": [_konto_dict(session.get(Account, w.account_id))]}
     finally:
         session.close()
 
@@ -1002,6 +1119,8 @@ class OrderIn(BaseModel):
 
 @router.post("/orders")
 def api_order(payload: OrderIn, w: Who = Depends(who_trade)):
+    if _zlecenia_wstrzymane() and not payload.reduce_only:
+        raise HTTPException(503, "New orders are paused for maintenance. You can still manage open positions.")
     m = markets.get(payload.symbol)
     if m is None:
         raise HTTPException(404, "Unknown market")
@@ -1231,3 +1350,210 @@ def api_tpsl(trade_id: int, payload: TpSlIn, w: Who = Depends(who_trade)):
         poz = _open_positions(session, acc)
         return state_dict(session, acc, poz, _marks(session, acc, poz, _now()))
     return _z_ponowieniem(run)
+
+
+# --------------------------------------------------------------------------- #
+#  Panel admina: zakładka Built-in Terminal                                    #
+# --------------------------------------------------------------------------- #
+admin_router = APIRouter(prefix="/api/admin/terminal", dependencies=[Depends(auth.require_admin)])
+KLUCZ_WSTRZYMANE = "terminal_orders_paused"
+OKNO_FLAG_DNI = 30
+MAX_URZADZEN = 2
+
+
+def _zlecenia_wstrzymane() -> bool:
+    session = SessionLocal()
+    try:
+        wpis = session.get(AppSetting, KLUCZ_WSTRZYMANE)
+        return bool(wpis and wpis.value == "1")
+    finally:
+        session.close()
+
+
+def _urzadzenie(ua: str | None) -> str:
+    ua = ua or ""
+    przegl = next((n for k, n in (("Edg/", "Edge"), ("OPR/", "Opera"), ("Firefox/", "Firefox"), ("Chrome/", "Chrome"),
+                                  ("Safari/", "Safari")) if k in ua), "Browser")
+    sys_ = next((n for k, n in (("iPhone", "iPhone"), ("iPad", "iPad"), ("Android", "Android"), ("Mac OS", "macOS"),
+                                ("Windows", "Windows"), ("Linux", "Linux")) if k in ua), "unknown OS")
+    return f"{przegl} on {sys_}"
+
+
+def _login_dict(w: TerminalLogin) -> dict:
+    return {"id": w.id, "login": w.login, "account_id": w.account_id, "ok": bool(w.ok), "ip": w.ip,
+            "country": w.country, "region": w.region, "city": w.city, "device": _urzadzenie(w.user_agent),
+            "device_id": (w.device_id or "")[:6] or None, "at": _iso(w.created_at), "last_seen": _iso(w.last_seen_at),
+            "revoked": w.revoked_at is not None}
+
+
+def _utc(t: datetime) -> datetime:
+    return t.replace(tzinfo=timezone.utc) if t.tzinfo is None else t
+
+
+def _flagi(acc: Account, tr: Trader | None, wpisy: list[TerminalLogin], ip_traderow: dict[str, set[int]]) -> list[dict]:
+    """Sygnały dla admina. Niczego nie blokują: VPN albo wyjazd wyglądają tak samo."""
+    flagi = []
+    od = _now() - timedelta(days=OKNO_FLAG_DNI)
+    nowe = [w for w in wpisy if _utc(w.created_at) >= od]
+    kraje = {w.country for w in nowe if w.country}
+    znane = {k for k in ((tr.signup_country, tr.last_login_country) if tr else ()) if k}
+    if znane and kraje - znane:
+        flagi.append({"key": "country", "label": "Country differs from portal",
+                      "detail": f"Terminal {', '.join(sorted(kraje))}, portal {', '.join(sorted(znane))}"})
+    if len(kraje) > 1:
+        flagi.append({"key": "countries", "label": f"{len(kraje)} countries in {OKNO_FLAG_DNI} days",
+                      "detail": ", ".join(sorted(kraje))})
+    urzadzenia = {w.device_id for w in nowe if w.device_id}
+    if len(urzadzenia) > MAX_URZADZEN:
+        flagi.append({"key": "devices", "label": f"{len(urzadzenia)} devices in {OKNO_FLAG_DNI} days", "detail": ""})
+    inni = set().union(*(ip_traderow.get(w.ip, set()) for w in nowe if w.ip), set()) - {acc.trader_id}
+    if inni:
+        flagi.append({"key": "shared_ip", "label": "IP shared with another trader",
+                      "detail": "Trader ID " + ", ".join(map(str, sorted(inni)))})
+    return flagi
+
+
+@admin_router.get("/overview")
+def admin_overview():
+    session = SessionLocal()
+    try:
+        wpisy = (session.query(TerminalLogin)
+                 .filter(TerminalLogin.ok.is_(True), TerminalLogin.created_at >= _now() - timedelta(days=OKNO_FLAG_DNI))
+                 .order_by(TerminalLogin.id.desc()).all())
+        po_koncie: dict[int, list[TerminalLogin]] = {}
+        ip_traderow: dict[str, set[int]] = {}
+        for w in wpisy:
+            po_koncie.setdefault(w.account_id, []).append(w)
+            if w.ip:
+                ip_traderow.setdefault(w.ip, set()).add(w.trader_id)
+        konta = (session.query(Account).filter(Account.platform_login.isnot(None), Account.trader_id.isnot(None))
+                 .order_by(Account.id.desc()).limit(1000).all())
+        traderzy = {t.id: t for t in session.query(Trader).filter(Trader.id.in_({a.trader_id for a in konta})).all()}
+        pula = {p.claimed_by_account_id: p for p in session.query(PoolAccount)
+                .filter(PoolAccount.claimed_by_account_id.isnot(None)).all()}
+        otwarte: dict[int, int] = {}
+        for (aid,) in session.query(Trade.account_id).filter(Trade.status == "open", Trade.source == "terminal").all():
+            otwarte[aid] = otwarte.get(aid, 0) + 1
+        ostatnie = dict(session.query(TerminalLogin.account_id, func.max(TerminalLogin.id))
+                        .filter(TerminalLogin.ok.is_(True)).group_by(TerminalLogin.account_id).all())
+        ost_wpisy = {w.account_id: w for w in session.query(TerminalLogin)
+                     .filter(TerminalLogin.id.in_(ostatnie.values())).all()} if ostatnie else {}
+        wiersze = []
+        for a in konta:
+            tr, moje, ost, p = traderzy.get(a.trader_id), po_koncie.get(a.id, []), ost_wpisy.get(a.id), pula.get(a.id)
+            wiersze.append({
+                "id": a.id, "login": a.platform_login, "server": a.platform_server, "size": a.initial_balance,
+                "phase": a.phase, "status": a.status, "balance": round(float(a.balance or 0.0), 2),
+                "equity": round(float(a.equity or 0.0), 2), "open_positions": otwarte.get(a.id, 0),
+                "blocked": bool(a.terminal_blocked), "bot": bool(a.bot_enabled), "used": bool(a.terminal_used),
+                "trader": {"id": a.trader_id, "name": tr.full_name if tr else None, "email": tr.email if tr else None,
+                           "signup_country": tr.signup_country if tr else None,
+                           "portal_country": tr.last_login_country if tr else None},
+                "pool": {"id": p.id, "simulated": bool(p.simulated)} if p else None,
+                "pool_mismatch": bool(p and (p.claimed_by_trader_id != a.trader_id
+                                             or p.platform_login != a.platform_login)),
+                "last_login": _login_dict(ost) if ost else None, "logins_30d": len(moje),
+                "flags": _flagi(a, tr, moje, ip_traderow),
+            })
+        wiersze.sort(key=lambda r: (not r["flags"], not r["last_login"], -r["id"]))
+        doba = _now() - timedelta(days=1)
+        logi = session.query(TerminalLogin).filter(TerminalLogin.created_at >= doba)
+        return {"accounts": wiersze, "orders_paused": _zlecenia_wstrzymane(), "stats": {
+            "accounts": len(wiersze), "signed_in": sum(1 for r in wiersze if r["last_login"]),
+            "flagged": sum(1 for r in wiersze if r["flags"]), "blocked": sum(1 for r in wiersze if r["blocked"]),
+            "open_positions": sum(otwarte.values()),
+            "logins_24h": logi.filter(TerminalLogin.ok.is_(True)).count(),
+            "failed_24h": logi.filter(TerminalLogin.ok.is_(False)).count()}}
+    finally:
+        session.close()
+
+
+@admin_router.get("/logins")
+def admin_logins(account_id: int | None = None, failed: bool = False, limit: int = 200):
+    session = SessionLocal()
+    try:
+        q = session.query(TerminalLogin)
+        if account_id:
+            q = q.filter(TerminalLogin.account_id == account_id)
+        if failed:
+            q = q.filter(TerminalLogin.ok.is_(False))
+        return {"logins": [_login_dict(w) for w in q.order_by(TerminalLogin.id.desc()).limit(min(limit, 500)).all()]}
+    finally:
+        session.close()
+
+
+class AdminBlockIn(BaseModel):
+    blocked: bool
+
+
+class AdminPauseIn(BaseModel):
+    paused: bool
+
+
+def _cofnij_sesje(session, account_id: int) -> int:
+    return (session.query(TerminalLogin)
+            .filter(TerminalLogin.account_id == account_id, TerminalLogin.ok.is_(True),
+                    TerminalLogin.revoked_at.is_(None))
+            .update({TerminalLogin.revoked_at: _now()}, synchronize_session=False))
+
+
+@admin_router.post("/accounts/{account_id}/block")
+def admin_block(account_id: int, payload: AdminBlockIn):
+    session = SessionLocal()
+    try:
+        acc = session.get(Account, account_id)
+        if acc is None:
+            raise HTTPException(404, "Account not found")
+        acc.terminal_blocked = payload.blocked
+        if payload.blocked:
+            _cofnij_sesje(session, account_id)
+        session.commit()
+        return {"ok": True, "blocked": payload.blocked}
+    finally:
+        session.close()
+
+
+@admin_router.post("/accounts/{account_id}/sign-out")
+def admin_sign_out(account_id: int):
+    session = SessionLocal()
+    try:
+        n = _cofnij_sesje(session, account_id)
+        session.commit()
+        return {"ok": True, "signed_out": n}
+    finally:
+        session.close()
+
+
+@admin_router.post("/accounts/{account_id}/view")
+def admin_view(account_id: int):
+    """Podgląd konta oczami klienta: bez handlu, 2 godziny, nie zapisuje się w logowaniach."""
+    session = SessionLocal()
+    try:
+        acc = session.get(Account, account_id)
+        if acc is None or not acc.platform_password:
+            raise HTTPException(404, "Account has no MT5 credentials")
+        return {"token": auth.make_terminal_token(acc.id, acc.platform_password, imp=True)}
+    finally:
+        session.close()
+
+
+@admin_router.post("/orders-paused")
+def admin_orders_paused(payload: AdminPauseIn):
+    session = SessionLocal()
+    try:
+        wpis = session.get(AppSetting, KLUCZ_WSTRZYMANE)
+        if wpis is None:
+            session.add(AppSetting(key=KLUCZ_WSTRZYMANE, value="1" if payload.paused else "0"))
+        else:
+            wpis.value = "1" if payload.paused else "0"
+        session.commit()
+        return {"ok": True, "orders_paused": payload.paused}
+    finally:
+        session.close()
+
+
+def wyczysc_logowania(session) -> int:
+    """Retencja z polityki prywatności."""
+    return (session.query(TerminalLogin)
+            .filter(TerminalLogin.created_at < _now() - timedelta(days=LOGOWANIA_DNI))
+            .delete(synchronize_session=False))

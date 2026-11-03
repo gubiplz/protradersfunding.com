@@ -1,6 +1,6 @@
 /* Terminal PTF (zakładka Trade): wykres KLineChart, księga, transakcje, bilet
    zlecenia i tabele pozycji. Dane rynkowe z terminal-feed.js (prosto z giełd),
-   konto i zlecenia z /api/terminal/* — to samo konto co login MT5. */
+   account and orders from /api/terminal/*. Sign-in uses the MT5 credentials of each account. */
 (function () {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -80,7 +80,9 @@
     // Jednostka pola Size: loty (domyślnie, jak w MT5), USD albo jednostka bazowa (BTC, oz…).
     side: 'buy', kind: 'market', unit: ['lots', 'usd', 'base'].includes(ls.get('pf_term_unit2', 'lots')) ? ls.get('pf_term_unit2', 'lots') : 'lots', slip: +ls.get('pf_term_slip', '1'),
     watch: ls.json('pf_term_watch', ['BTCUSD', 'ETHUSD', 'XAUUSD']),
-    token: ls.get('pf_token', null),   // tylko sesja konta PTF (wspólna z portalem)
+    token: null,    // session of the MT5 account in view; every saved account has its own
+    logins: [],     // [{ token, id, login }], saved in this browser
+    imp: false,     // admin view opened from the panel: read-only, never saved
     accounts: [], accId: +ls.get('pf_term_acc', '0') || null, st: null, ptab: 'positions',
     // Poślizg domyślnie schowany (jest w Columns): z nim tabela nie mieściła się pod wykresem nawet na 1440 px.
     cols: ls.json('pf_term_cols3', { value: true, slippage: false, lev: true, margin: true, tpsl: true }),
@@ -154,12 +156,13 @@
   /* ---------- API ---------- */
   async function api(path, opts) {
     const h = { 'Content-Type': 'application/json' };
-    if (S.token) h.Authorization = 'Bearer ' + S.token;
+    const tok = S.token;
+    if (tok) h.Authorization = 'Bearer ' + tok;
     let r;
     try { r = await fetch(path, { ...(opts || {}), headers: h }); } catch (e) { throw new Error('Network error. Check your connection.'); }
     let d = null;
     try { d = await r.json(); } catch (e) {}
-    if (r.status === 401 && S.token) { signOut(true); throw new Error((d && d.detail) || 'Session expired. Sign in again.'); }
+    if (r.status === 401 && tok) { dropLogin(tok); throw new Error((d && d.detail) || 'Session expired. Sign in again.'); }
     if (!r.ok) {
       const det = d && d.detail;
       throw new Error(Array.isArray(det) ? det.map((x) => x.msg).join('; ') : det || 'Error ' + r.status);
@@ -1440,14 +1443,44 @@
   /* =====================================================================
      KONTO, LOGOWANIE, STAN
      ===================================================================== */
-  /* Wylogowanie = wylogowanie z PTF (ta sama sesja co portal). `silent` — sesja
-     wygasła sama (401), wtedy tylko czyścimy stan. */
-  function signOut(silent) {
+  /* Several MT5 accounts stay signed in side by side, each with its own session. */
+  function saveLogins() { if (!S.imp) ls.set('pf_term_logins', JSON.stringify(S.logins)); }
+  function restoreLogins() {
+    const m = /^#imp=(.+)$/.exec(location.hash);
+    if (m) {
+      S.imp = true;
+      S.logins = [{ token: decodeURIComponent(m[1]) }];
+      history.replaceState(null, '', location.pathname + location.search);
+    } else {
+      try { S.logins = JSON.parse(ls.get('pf_term_logins', '[]')) || []; } catch (e) { S.logins = []; }
+    }
+    const cur = S.logins.find((l) => l.id === S.accId) || S.logins[0];
+    S.token = cur ? cur.token : null;
+  }
+  function clearView() {
     stateSeq++;
-    S.token = null; S.st = null; S.accounts = [];
-    ls.del('pf_token');
-    if (!silent) toast('Signed out');
+    S.st = null;
     renderUser(); renderTables(); renderAccount(); drawLines(); updateTicket();
+  }
+  /* Removes one saved account. If it was the one in view, the next saved one takes over. */
+  function dropLogin(token) {
+    const gone = S.logins.find((l) => l.token === token);
+    S.logins = S.logins.filter((l) => l.token !== token);
+    if (gone) S.accounts = S.accounts.filter((a) => a.id !== gone.id);
+    saveLogins();
+    if (token !== S.token) { renderUser(); renderTables(); return; }
+    const next = S.logins[0];
+    S.token = next ? next.token : null;
+    S.accId = next ? next.id : null;
+    clearView();
+    if (next) refresh(true);
+  }
+  function signOut(token) {
+    const t = token || S.token;
+    if (!t) return;
+    fetch('/api/terminal/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + t } }).catch(() => {});
+    dropLogin(t);
+    toast('Signed out of the account');
   }
   function renderUser() {
     $('tGuest').hidden = !!S.token;
@@ -1465,39 +1498,50 @@
   $('tAccBtn').parentElement.classList.add('t-dd');
   $('tAccBtn').parentElement.appendChild(accMenu);
   dropdown($('tAccBtn'), accMenu, (mn) => {
-    mn.innerHTML = '<h6>Accounts</h6>' + (S.accounts.map((a) => `<button type="button" data-acc="${a.id}"><span class="mi sm" style="background:${a.tradable ? 'var(--up)' : 'var(--dim)'}"></span>#${esc(a.login)} · ${big(a.size)}<span class="tag">${a.status === 'failed' ? 'Breached' : phaseLbl(a)}</span>${a.id === S.accId ? '<span class="chk">✓</span>' : ''}</button>`).join('') || '<p class="t-hint" style="padding:8px 10px">No active challenge accounts.</p>')
+    mn.innerHTML = '<h6>MT5 accounts</h6>' + S.accounts.map((a) => `<button type="button" class="t-acc-row" data-acc="${a.id}"><span class="mi sm" style="background:${a.tradable ? 'var(--up)' : 'var(--dim)'}"></span>#${esc(a.login)} · ${big(a.size)}<span class="tag">${a.status === 'failed' ? 'Breached' : phaseLbl(a)}</span>${a.id === S.accId ? '<span class="chk">✓</span>' : ''}</button>`).join('')
+      + (S.imp ? '' : '<button type="button" class="t-acc-add" data-add="1">+ Add MT5 account</button>')
       + '<a href="/portal">Open dashboard</a><a href="/#pricing">Get a new challenge</a>'
-      + '<button type="button" data-out="1">Sign out</button>';
+      + (S.imp ? '' : '<button type="button" data-out="1">Sign out of this account</button>');
   });
   accMenu.addEventListener('click', (e) => {
     const b = e.target.closest('[data-acc]');
     if (b) { accMenu.hidden = true; selectAccount(+b.dataset.acc); }
+    if (e.target.closest('[data-add]')) { accMenu.hidden = true; openLogin(true); }
     if (e.target.closest('[data-out]')) { accMenu.hidden = true; signOut(); }
   });
   const phaseLbl = (a) => (a.status === 'funded' || a.phase === 'funded' ? 'Funded' : a.phase === 'eval_2' ? 'Phase 2' : a.status === 'passed' ? 'Passed' : 'Phase 1');
   const statusLbl = (a) => (a.tradable ? 'Active' : a.status === 'failed' ? 'Breached' : 'Not tradable');
 
   async function loadAccounts() {
-    if (!S.token) { renderUser(); renderTables(); renderAccount(); return; }
-    try {
-      const d = await api('/api/terminal/accounts');
-      S.accounts = d.accounts;
-      if (!S.accounts.some((a) => a.id === S.accId)) {
-        const t = S.accounts.find((a) => a.tradable) || S.accounts[0];
-        S.accId = t ? t.id : null;
-      }
-      renderUser();
-      if (S.accId) await refresh(); else { renderTables(); renderAccount(); }
-    } catch (e) { renderUser(); }
+    if (!S.logins.length) { S.token = null; S.accounts = []; renderUser(); renderTables(); renderAccount(); return; }
+    const res = await Promise.all(S.logins.map(async (l) => {
+      try {
+        const r = await fetch('/api/terminal/accounts', { headers: { Authorization: 'Bearer ' + l.token } });
+        if (r.status === 401) return { l, gone: true };
+        const d = await r.json();
+        return { l, a: d.accounts && d.accounts[0] };
+      } catch (e) { return { l, a: null }; }   // offline: keep the saved session, retry on the next load
+    }));
+    res.filter((x) => x.gone).forEach((x) => dropLogin(x.l.token));
+    res.filter((x) => x.a).forEach((x) => { x.l.id = x.a.id; x.l.login = x.a.login; });
+    saveLogins();
+    S.accounts = res.filter((x) => x.a).map((x) => x.a);
+    const cur = S.logins.find((l) => l.id === S.accId) || S.logins[0];
+    S.token = cur ? cur.token : null;
+    S.accId = cur ? cur.id : null;
+    renderUser();
+    if (S.accId) await refresh(); else { renderTables(); renderAccount(); }
   }
   function selectAccount(id) {
     if (id === S.accId && S.st) return;
+    const l = S.logins.find((x) => x.id === id);
+    if (!l) return;
     S.accId = id;
+    S.token = l.token;
     ls.set('pf_term_acc', String(id));
-    // Stan poprzedniego konta znika od razu: bilet nie może sprawdzać marży ani
-    // statusu starego konta, gdy zlecenie poszłoby już na nowe.
-    S.st = null;
-    renderUser(); renderTables(); renderAccount(); drawLines(); updateTicket();
+    // The previous account's state goes at once: the ticket must not check margin or
+    // status of the old account while an order would already go to the new one.
+    clearView();
     refresh(true);
   }
   /* Każda odpowiedź ze stanem ma numer. Spóźniony odczyt (poll wysłany przed
@@ -1979,8 +2023,7 @@
       return;
     }
     if (S.ptab === 'accounts') {
-      el.innerHTML = S.accounts.length ? `<div class="t-accs">${S.accounts.map((a) => `<button type="button" class="t-accc${a.id === S.accId ? ' on' : ''}" data-acc="${a.id}"><small>#${esc(a.login)} · ${esc(a.server || '')}</small><b>${usd(a.balance)}</b><small>${big(a.size)} challenge · ${phaseLbl(a)} · <span class="t-pill ${a.tradable ? 'ok' : a.status === 'failed' ? 'bad' : ''}">${statusLbl(a)}</span></small></button>`).join('')}</div>`
-        : `<div class="t-empty"><div>No active challenge account yet.<br><a class="t-btn" href="/#pricing">Choose a Challenge</a></div></div>`;
+      el.innerHTML = `<div class="t-accs">${S.accounts.map((a) => `<button type="button" class="t-accc${a.id === S.accId ? ' on' : ''}" data-acc="${a.id}"><small>#${esc(a.login)} · ${esc(a.server || '')}</small><b>${usd(a.balance)}</b><small>${big(a.size)} challenge · ${phaseLbl(a)} · <span class="t-pill ${a.tradable ? 'ok' : a.status === 'failed' ? 'bad' : ''}">${statusLbl(a)}</span></small></button>`).join('')}${S.imp ? '' : '<button type="button" class="t-accc add" data-add-acc="1"><b>+</b><small>Add MT5 account</small></button>'}</div>`;
       return;
     }
     if (!st) { el.innerHTML = `<div class="t-empty">${S.accounts.length ? 'Loading…' : 'No active challenge account yet.'}</div>`; return; }
@@ -2043,6 +2086,7 @@
   $('tTable').addEventListener('click', async (e) => {
     const t = e.target;
     if (t.closest('[data-signin]')) return openLogin();
+    if (t.closest('[data-add-acc]')) return openLogin(true);
     const acc = t.closest('[data-acc]');
     if (acc) return selectAccount(+acc.dataset.acc);
     const cl = t.closest('[data-close]'), hf = t.closest('[data-half]');
@@ -2123,30 +2167,42 @@
     });
   };
 
-  /* ---------- logowanie ---------- */
-  function openLogin() { openModal('tLogin'); }
+  /* ---------- sign-in with MT5 credentials ---------- */
+  function deviceId() {
+    let d = ls.get('pf_term_dev', '');
+    if (!d) {
+      d = [...crypto.getRandomValues(new Uint8Array(12))].map((x) => x.toString(16).padStart(2, '0')).join('');
+      ls.set('pf_term_dev', d);
+    }
+    return d;
+  }
+  function openLogin(adding) {
+    const f = $('tLoginMt5');
+    $('tLoginH').textContent = adding === true ? 'Add MT5 account' : 'Sign in with MT5';
+    f.reset();
+    f.querySelector('.t-err').hidden = true;
+    f.login.value = ls.get('pf_term_prefill', '') || '';
+    ls.del('pf_term_prefill');
+    openModal('tLogin');
+  }
   $('tSignIn').onclick = openLogin;
   $('tReadySignIn').onclick = openLogin;
-  ls.del('pf_term_token');   // sprzątanie po wycofanym logowaniu danymi MT5
-  async function doLogin(form, path, body, store) {
-    const err = form.querySelector('.t-err'), btn = form.querySelector('button[type=submit]');
+  $('tLoginMt5').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target, err = f.querySelector('.t-err'), btn = f.querySelector('button[type=submit]');
     err.hidden = true; btn.disabled = true;
     try {
-      const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const r = await fetch('/api/terminal/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login: f.login.value.trim(), password: f.password.value, device: deviceId() }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(typeof d.detail === 'string' ? d.detail : 'Sign in failed');
-      store(d);
+      S.logins = S.logins.filter((l) => l.id !== d.account.id).concat({ token: d.token, id: d.account.id, login: d.account.login });
+      saveLogins();
+      S.accId = d.account.id; S.token = d.token; S.st = null;
+      ls.set('pf_term_acc', String(d.account.id));
       closeModal();
-      toast('Signed in', 'Your accounts are loaded.');
+      toast('Signed in', `MT5 account #${d.account.login} is loaded.`);
       await loadAccounts();
-    } catch (e) { err.textContent = e.message; err.hidden = false; } finally { btn.disabled = false; }
-  }
-  $('tLoginPtf').onsubmit = (e) => {
-    e.preventDefault();
-    const f = e.target;
-    doLogin(f, '/api/auth/login', { email: f.email.value.trim(), password: f.password.value }, (d) => {
-      S.token = d.token; ls.set('pf_token', d.token);
-    });
+    } catch (er) { err.textContent = er.message; err.hidden = false; } finally { btn.disabled = false; }
   };
 
   /* ---------- telefon: zakładki paneli ---------- */
@@ -2183,7 +2239,7 @@
 
   /* ---------- monit „Free Trade Case" dla niezalogowanych ---------- */
   function casePrompt() {
-    if (S.token || ls.get('pf_case_prompt', '0') === '1') return;
+    if (S.token || ls.get('pf_token', null) || ls.get('pf_case_prompt', '0') === '1') return;
     const need = 10 + Math.floor(Math.random() * 30);   // 10–40 s patrzenia na stronę
     let seen = 0;
     const t = setInterval(() => {
@@ -2365,6 +2421,8 @@
     renderStrip();
     setPTab('positions');
     setMPane('chart');
+    restoreLogins();
+    if (S.imp) toast('Admin view', 'Read-only view of this account. Trading is off.');
     loadAccounts();
     fetch('/api/terminal/markets').then((r) => r.json()).then((d) => { S.weekend = !!d.weekend; S.fee = d.fee_pct; updateTicket(); renderInfo(); }).catch(() => {});
     if (root.dataset.missing) toast(`${root.dataset.missing} trades in MT5`, 'The web terminal has crypto, metals, energy, indices and EUR/GBP/JPY for now.');

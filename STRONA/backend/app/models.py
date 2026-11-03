@@ -483,6 +483,8 @@ class Account(Base):
     # sekund przesuwa sync, a knoty między odczytami muszą zostać sprawdzone.
     terminal_used: Mapped[bool] = mapped_column(Boolean, default=False)
     terminal_open: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    # Admin odciął to konto od terminala: logowanie odmawia, otwarte sesje wygasają.
+    terminal_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     terminal_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     terminal_candle_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     terminal_eval_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -675,6 +677,30 @@ class TerminalOrder(Base):
     fill_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     trade_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     note: Mapped[str | None] = mapped_column(String(160), nullable=True)
+
+
+class TerminalLogin(Base):
+    """Próba logowania do terminala danymi MT5 — udana (to też sesja) albo odrzucona.
+
+    Odpowiada na pytanie admina „kto, skąd i z jakiego urządzenia wchodził na to konto".
+    Odrzucone wiersze liczą też limit prób: na serverless licznik w pamięci procesu
+    chroniłby tylko jedną instancję."""
+    __tablename__ = "terminal_logins"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    login: Mapped[str] = mapped_column(String(64), index=True)
+    account_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    trader_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    ip: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    country: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    region: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    device_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class Certificate(Base):

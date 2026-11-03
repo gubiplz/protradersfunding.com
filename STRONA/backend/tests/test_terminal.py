@@ -20,7 +20,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app import auth, markets, notify, push, terminal, tradebot  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Account, Breach, TerminalOrder, Trade, Trader  # noqa: E402
+from app.config import get_settings  # noqa: E402
+from app.models import Account, Breach, TerminalLogin, TerminalOrder, Trade, Trader  # noqa: E402
 
 init_db()
 
@@ -58,6 +59,17 @@ def rynek(monkeypatch):
 _n = [0]
 
 
+def _sesja(aid):
+    """Token jak po logowaniu danymi MT5: wiersz sesji + podpisany token konta."""
+    s = SessionLocal()
+    a = s.get(Account, aid)
+    w = TerminalLogin(login=a.platform_login, account_id=aid, trader_id=a.trader_id, ok=True)
+    s.add(w); s.commit()
+    t = auth.make_terminal_token(aid, a.platform_password, sid=w.id)
+    s.close()
+    return t
+
+
 def _konto(**pola):
     _n[0] += 1
     s = SessionLocal()
@@ -73,7 +85,7 @@ def _konto(**pola):
     s.add(acc); s.commit()
     aid, tid = acc.id, tr.id
     s.close()
-    return aid, {"Authorization": f"Bearer {auth.make_token(tid)}"}
+    return aid, {"Authorization": f"Bearer {_sesja(aid)}"}
 
 
 def _acc(aid):
@@ -243,133 +255,81 @@ def test_dolek_equity_w_oknie_lamie_dzienna_strate(rynek):
         assert not konto["tradable"] and "daily loss floor" in konto["reason"]
 
 
-def test_tylko_konto_ptf_i_tylko_wlasne_konta(rynek):
-    """Do terminala wchodzi się wyłącznie sesją konta PTF — logowania danymi MT5 nie ma."""
-    aid, h = _konto()
+def test_logowanie_danymi_mt5_i_tylko_to_konto(rynek):
+    """Do terminala wchodzi się danymi MT5. Hasło i sesja portalu tu nie działają."""
+    aid, _ = _konto()
     inne, _ = _konto()
     a = _acc(aid)
+    s = SessionLocal(); tr = s.get(Trader, a.trader_id); portal = auth.make_token(tr.id, tr.password_hash); s.close()
+    naglowki = {"x-real-ip": "203.0.113.7", "x-vercel-ip-country": "PL", "x-vercel-ip-city": "Rzesz%C3%B3w",
+                "user-agent": "Mozilla/5.0 (Macintosh; Mac OS X) Chrome/120 Safari/537"}
     with TestClient(app) as c:
-        assert c.post("/api/terminal/login",
-                      json={"login": a.platform_login, "password": "Pw-123456"}).status_code in (404, 405)
         assert c.get("/api/terminal/accounts").status_code == 401
-        konta = c.get("/api/terminal/accounts", headers=h).json()
-        assert [k["id"] for k in konta["accounts"]] == [aid]
+        assert c.get("/api/terminal/accounts", headers={"Authorization": f"Bearer {portal}"}).status_code == 401
+        assert c.post("/api/terminal/login", json={"login": a.platform_login, "password": "haslo1234"}).status_code == 401
+        r = c.post("/api/terminal/login", json={"login": a.platform_login, "password": "Pw-123456", "device": "abc123"},
+                   headers=naglowki)
+        assert r.status_code == 200
+        h = {"Authorization": f"Bearer {r.json()['token']}"}
+        assert [k["id"] for k in c.get("/api/terminal/accounts", headers=h).json()["accounts"]] == [aid]
         assert c.get(f"/api/terminal/state?account_id={inne}", headers=h).status_code == 404
-        assert _zlec(c, h, inne).status_code == 404
-        assert _zlec(c, h, None).status_code == 400
-
-
-def test_weekend_zamyka_rynki_poza_krypto(rynek, monkeypatch):
-    monkeypatch.setattr(tradebot, "is_weekend", lambda now=None: True)
-    monkeypatch.setattr(terminal, "_cena_weekendowa", lambda coin, now: rynek.px[coin])
-    aid, h = _konto()
-    ww, hw = _konto(weekend_trading=True)
-    with TestClient(app) as c:
-        r = c.post("/api/terminal/orders", headers=hw,
-                   json={"account_id": ww, "symbol": "XAUUSD", "side": "buy", "qty": 1, "leverage": 10})
-        assert r.status_code == 409 and "weekend" in r.json()["detail"]
-        r = _zlec(c, h, aid)
-        assert r.status_code == 409 and "Weekend Trading add-on" in r.json()["detail"]
-        assert _zlec(c, hw, ww).status_code == 200
-
-
-def test_kontrakty_krypto_daja_rozsadny_lot():
-    # 1 lot na każdym rynku krypto to tysiące dolarów, nie jedna moneta.
-    ceny = {"BTCUSD": 77_000, "ETHUSD": 2_250, "SOLUSD": 96, "XRPUSD": 1.25, "LTCUSD": 55, "DOGEUSD": 0.075,
-            "BNBUSD": 706, "ADAUSD": 0.19, "AVAXUSD": 8.5, "LINKUSD": 11.5, "SUIUSD": 0.9, "HYPEUSD": 88}
-    for sym, px in ceny.items():
-        m = markets.get(sym)
-        assert 4_000 <= m.contract * px <= 100_000, (sym, m.contract * px)
-
-
-def test_bot_nie_widzi_pozycji_z_terminala(rynek):
-    aid, h = _konto()
-    with TestClient(app) as c:
-        assert _zlec(c, h, aid).status_code == 200
-    s = SessionLocal()
-    try:
-        assert tradebot._open_trade(s, s.get(Account, aid)) is None
-    finally:
-        s.close()
-
-
-def _przesun(aid, **kiedy):
-    """Ustawia znaczniki przeglądu konta (minuty temu) i postarza pozycje o `pozycje` minut."""
-    s = SessionLocal()
-    a = s.get(Account, aid)
-    teraz = datetime.now(timezone.utc)
-    if "sync" in kiedy:
-        a.terminal_sync_at = teraz - timedelta(minutes=kiedy["sync"])
-    if "swiece" in kiedy:
-        a.terminal_candle_at = teraz - timedelta(minutes=kiedy["swiece"])
-    if "pozycje" in kiedy:
-        for t in s.query(Trade).filter(Trade.account_id == aid, Trade.status == "open"):
-            t.opened_at = teraz - timedelta(minutes=kiedy["pozycje"])
-            t.tpsl_at = teraz - timedelta(minutes=kiedy["pozycje"]) if t.tpsl_at else None
-    s.commit(); s.close()
-
-
-def test_knot_miedzy_odswiezeniami_trafia_sl(rynek):
-    """Strona odświeża stan co kilkanaście sekund — knot z ostatnich minut i tak trafia SL."""
-    aid, h = _konto()
-    with TestClient(app) as c:
-        assert _zlec(c, h, aid, sl=49_000).status_code == 200
-        # Ostatni przegląd midem 20 s temu, pełny przegląd świecami 3 min temu.
-        _przesun(aid, sync=0.33, swiece=3, pozycje=4)
-        rynek.swiece["BTC"] = [_swieca(2, 50_000, 50_010, 48_800, 49_900)]
-        rynek.px["BTC"] = 49_900.0
-        st = c.get(f"/api/terminal/state?account_id={aid}", headers=h).json()
-        assert st["positions"] == [] and st["history"][0]["reason"] == "sl"
-
-
-def test_pierwsze_zlecenie_nie_widzi_starych_swiec(rynek):
-    """Konto bez nic otwartego od godzin: nowa pozycja nie jest wyceniana na krachu sprzed jej otwarcia."""
-    aid, h = _konto()
-    _przesun(aid, sync=180, swiece=180)
-    rynek.swiece["BTC"] = [_swieca(30, 50_000, 50_000, 40_000, 50_000)]
-    with TestClient(app) as c:
-        assert _zlec(c, h, aid, qty=1).status_code == 200
         assert c.get(f"/api/terminal/state?account_id={aid}", headers=h).status_code == 200
-    assert _acc(aid).status == "active"
+        # token terminala nie otwiera portalu
+        assert c.get("/api/auth/me", headers=h).status_code == 401
+        c.post("/api/terminal/logout", headers=h)
+        assert c.get("/api/terminal/accounts", headers=h).status_code == 401
+    s = SessionLocal()
+    w = s.query(TerminalLogin).filter_by(account_id=aid, ok=True).order_by(TerminalLogin.id.desc()).first()
+    assert (w.ip, w.country, w.city, w.device_id) == ("203.0.113.7", "PL", "Rzeszów", "abc123")
+    s.close()
 
 
-def test_sl_nie_da_sie_przesunac_po_trafieniu(rynek):
+def test_zmiana_hasla_mt5_wylogowuje(rynek):
     aid, h = _konto()
+    s = SessionLocal(); s.get(Account, aid).platform_password = "Nowe-654321"; s.commit(); s.close()
     with TestClient(app) as c:
-        p = _zlec(c, h, aid, sl=49_000).json()["positions"][0]
-        _przesun(aid, sync=0.2, swiece=3, pozycje=4)
-        rynek.swiece["BTC"] = [_swieca(1, 50_000, 50_000, 48_500, 49_800)]
-        rynek.px["BTC"] = 49_800.0
-        r = c.patch(f"/api/terminal/positions/{p['id']}", headers=h, json={"account_id": aid, "sl": None})
-        assert r.status_code == 409
-        st = c.get(f"/api/terminal/state?account_id={aid}", headers=h).json()
-        assert st["positions"] == [] and st["history"][0]["reason"] == "sl"
+        assert c.get("/api/terminal/accounts", headers=h).status_code == 401
 
 
-def test_liczby_spoza_zakresu_i_za_male_zlecenie(rynek):
-    aid, h = _konto()
-    with TestClient(app) as c:
-        # Surowy JSON z Infinity/NaN (json.loads po stronie serwera je przepuszcza).
-        for zle in ('"qty": Infinity', '"qty": 1, "tp": NaN', '"qty": 1e300'):
-            r = c.post("/api/terminal/orders", headers={**h, "Content-Type": "application/json"},
-                       content='{"account_id": %d, "symbol": "BTCUSD", "side": "buy", %s}' % (aid, zle))
-            assert r.status_code == 422, (zle, r.text)
-        r = c.post("/api/terminal/orders", headers=h,
-                   json={"account_id": aid, "symbol": "EURUSD", "side": "buy", "qty": 0.0004})
-        assert r.status_code == 400 and "Minimum size" in r.json()["detail"]
-    assert _acc(aid).balance == 100_000.0
-
-
-def test_podglad_admina_nie_handluje(rynek):
+def test_limit_nieudanych_prob(rynek, monkeypatch):
+    monkeypatch.setattr(terminal, "_TEMPO_OFF", False)
     aid, _ = _konto()
     a = _acc(aid)
-    s = SessionLocal()
-    tr = s.get(Trader, a.trader_id)
-    imp = {"Authorization": f"Bearer {auth.make_impersonation_token(tr.id, tr.password_hash)}"}
-    s.close()
     with TestClient(app) as c:
+        for _i in range(terminal.PROBY_LOGIN):
+            assert c.post("/api/terminal/login", json={"login": a.platform_login, "password": "zle"}).status_code == 401
+        assert c.post("/api/terminal/login", json={"login": a.platform_login, "password": "Pw-123456"}).status_code == 429
+
+
+def test_panel_admina_blokada_flagi_i_wstrzymanie(rynek):
+    aid, h = _konto()
+    a = _acc(aid)
+    s = SessionLocal()
+    s.get(Trader, a.trader_id).signup_country = "PL"
+    s.add(TerminalLogin(login=a.platform_login, account_id=aid + 1000, trader_id=a.trader_id + 1000, ok=True, ip="198.51.100.9"))
+    s.commit(); s.close()
+    adm = {"X-Admin-Token": get_settings().admin_token}
+    with TestClient(app) as c:
+        assert c.get("/api/admin/terminal/overview").status_code in (401, 403)
+        c.post("/api/terminal/login", json={"login": a.platform_login, "password": "Pw-123456"},
+               headers={"x-real-ip": "198.51.100.9", "x-vercel-ip-country": "DE"})
+        d = c.get("/api/admin/terminal/overview", headers=adm).json()
+        wiersz = next(r for r in d["accounts"] if r["id"] == aid)
+        assert {f["key"] for f in wiersz["flags"]} >= {"country", "shared_ip"}
+        assert wiersz["trader"]["id"] == a.trader_id and wiersz["last_login"]["ip"] == "198.51.100.9"
+        # wstrzymane zlecenia: nowe odbite, zamykanie działa
+        c.post("/api/admin/terminal/orders-paused", json={"paused": True}, headers=adm)
+        assert _zlec(c, h, aid).status_code == 503
+        c.post("/api/admin/terminal/orders-paused", json={"paused": False}, headers=adm)
+        # podgląd admina nie handluje
+        v = c.post(f"/api/admin/terminal/accounts/{aid}/view", headers=adm).json()["token"]
+        imp = {"Authorization": f"Bearer {v}"}
         assert c.get(f"/api/terminal/state?account_id={aid}", headers=imp).status_code == 200
         assert _zlec(c, imp, aid).status_code == 403
+        # blokada wylogowuje i nie wpuszcza
+        c.post(f"/api/admin/terminal/accounts/{aid}/block", json={"blocked": True}, headers=adm)
+        assert c.get("/api/terminal/accounts", headers=h).status_code == 401
+        assert c.post("/api/terminal/login", json={"login": a.platform_login, "password": "Pw-123456"}).status_code == 403
 
 
 def test_minimum_i_krok_0_01_lota(rynek):

@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app import auth, bot_ceny, markets, terminal, tradebot  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Account, Trade, Trader  # noqa: E402
+from app.models import Account, TerminalLogin, Trade, Trader  # noqa: E402
 
 init_db()
 
@@ -63,6 +63,23 @@ def zywe(monkeypatch):
     bot_ceny._CACHE.clear()
 
 
+def _portal(aid):
+    s = SessionLocal()
+    t = auth.make_token(s.get(Account, aid).trader_id)
+    s.close()
+    return {"Authorization": f"Bearer {t}"}
+
+
+def _sesja(aid):
+    s = SessionLocal()
+    a = s.get(Account, aid)
+    w = TerminalLogin(login=a.platform_login or a.login, account_id=aid, trader_id=a.trader_id, ok=True)
+    s.add(w); s.commit()
+    t = auth.make_terminal_token(aid, a.platform_password, sid=w.id)
+    s.close()
+    return t
+
+
 def _konto(login, **pola):
     s = SessionLocal()
     tr = Trader(email=f"{login}@botceny.test", password_hash=auth.hash_password("haslo1234"),
@@ -79,7 +96,7 @@ def _konto(login, **pola):
     s.commit()
     aid, tid = acc.id, tr.id
     s.close()
-    return aid, {"Authorization": f"Bearer {auth.make_token(tid)}"}, start
+    return aid, {"Authorization": f"Bearer {_sesja(aid)}"}, start
 
 
 def _swieca(coin, kiedy, interval="1m"):
@@ -105,7 +122,7 @@ def test_transakcje_bota_na_wykresie_z_wynikiem_z_planu(zywe):
                 assert otwarta.venue == tradebot.PLAN
                 assert snap.has_open_position and snap.volume_lots == 0 and snap.open_pnl == 0
                 if widziane_w_toku < 3:            # klient planu nie widzi
-                    assert c.get(f"/api/me/accounts/{aid}/positions", headers=h).json() == []
+                    assert c.get(f"/api/me/accounts/{aid}/positions", headers=_portal(aid)).json() == []
                     widziane_w_toku += 1
             t += timedelta(minutes=3)
     zamkniete = s.query(Trade).filter(Trade.account_id == aid, Trade.status == "closed").all()
@@ -185,7 +202,7 @@ def test_terminal_pokazuje_transakcje_bota_a_planu_nie(zywe):
         # Order History: market na wejściu i market reduce-only na wyjściu.
         assert [(o["side"], o["kind"], o["reduce_only"], o["status"], o["fill_price"]) for o in st["order_history"]] == [
             ("sell", "market", True, "filled", 77_500.0), ("buy", "market", False, "filled", 77_000.0)]
-        assert c.get(f"/api/me/accounts/{aid}/positions", headers=h).json() == []
+        assert c.get(f"/api/me/accounts/{aid}/positions", headers=_portal(aid)).json() == []
 
 
 def test_plaski_rynek_czeka_a_potem_wieksza_pozycja(monkeypatch):
