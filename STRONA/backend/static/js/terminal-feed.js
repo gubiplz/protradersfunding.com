@@ -1,10 +1,10 @@
-/* Terminal PTF — dane rynkowe prosto z giełd (przeglądarka ↔ WebSocket).
-   Serwer Vercela nie trzyma połączeń, więc wykres, księga i transakcje płyną
-   bezpośrednio z Hyperliquid, Binance albo Bybit. Rozliczenie zleceń i tak
-   robi serwer po cenach Hyperliquid (app/markets.py).
+/* PTF terminal — market data direct from exchanges (browser ↔ WebSocket).
+   The Vercel server holds no connections, so chart, book and trades flow
+   directly from Hyperliquid, Binance or Bybit. Orders are still settled
+   by the server at Hyperliquid prices (app/markets.py).
 
-   Binance od 2026 dzieli strumienie: księga na /public, reszta na /market —
-   stary adres /stream oddaje już tylko księgę. */
+   Since 2026 Binance splits streams: book on /public, the rest on /market —
+   old /stream now returns only the book. */
 (function () {
   'use strict';
 
@@ -34,7 +34,7 @@
     .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
   const getJ = (url) => fetch(url).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
 
-  /* ---------- historia świec ---------- */
+  /* ---------- candle history ---------- */
   async function history(venue, m, interval, endMs, limit) {
     limit = limit || 500;
     const end = endMs || Date.now();
@@ -51,7 +51,7 @@
     return (d || []).map((k) => ({ timestamp: k.t, open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v }));
   }
 
-  /* ---------- gniazdo z ponawianiem ---------- */
+  /* ---------- socket with retry ---------- */
   function socket(url, { onopen, onmessage, onstate }) {
     let ws, closed = false, tries = 0, timer;
     const open = () => {
@@ -74,9 +74,9 @@
     };
   }
 
-  /* ---------- Hyperliquid: jedno gniazdo, subskrypcje dokładane i zdejmowane ---------- */
+  /* ---------- Hyperliquid: one socket, subscriptions added and removed ---------- */
   const hl = (function () {
-    const subs = new Map();          // klucz → {sub, cb}
+    const subs = new Map();          // key → {sub, cb}
     let lat = null, pingAt = 0;
     const latCbs = [];
     const state = { v: 'connecting' };
@@ -91,27 +91,27 @@
       },
     });
     function ping() { pingAt = Date.now(); s.send({ method: 'ping' }); }
-    setInterval(() => { if (!document.hidden) ping(); }, 10000);   // opóźnienie tylko dla widocznej karty
+    setInterval(() => { if (!document.hidden) ping(); }, 10000);   // latency only for the visible tab
     function sub(subscription, match, cb) {
       const k = key(subscription) + Math.random();
       subs.set(k, { sub: subscription, match, cb });
       s.send({ method: 'subscribe', subscription });
       return () => { subs.delete(k); if (![...subs.values()].some((x) => key(x.sub) === key(subscription))) s.send({ method: 'unsubscribe', subscription }); };
     }
-    // onState oddaje funkcję wypisania: strumień rynku rejestruje się przy każdej
-    // zmianie rynku/giełdy, a stare wywołania ustawiałyby status innej giełdy.
+    // onState returns an unsubscribe: the market stream registers on every
+    // market/venue change, and old callbacks would set another venue's status.
     const onState = (f) => { stCbs.push(f); f(state.v); return () => { const i = stCbs.indexOf(f); if (i >= 0) stCbs.splice(i, 1); }; };
     return { sub, onLatency: (f) => { latCbs.push(f); if (lat != null) f(lat); }, onState };
   })();
 
-  /* Wszystkie midy (pasek tickerów, wyszukiwarka): główna giełda + HIP-3 xyz. */
+  /* All mids (ticker bar, search): the main exchange + HIP-3 xyz. */
   function allMids(cb) {
     const u1 = hl.sub({ type: 'allMids' }, (d) => d.channel === 'allMids' && !(d.data && d.data.dex), (d) => cb(d.mids || {}));
     const u2 = hl.sub({ type: 'allMids', dex: 'xyz' }, (d) => d.channel === 'allMids' && d.data && d.data.dex === 'xyz', (d) => cb(d.mids || {}));
     return () => { u1(); u2(); };
   }
 
-  /* 24h zmiana, wolumen, OI dla wszystkich rynków Hyperliquid (co 30 s z REST). */
+  /* 24h change, volume, OI for all Hyperliquid markets (every 30 s via REST). */
   async function contexts() {
     const out = {};
     const [a, b] = await Promise.all([post({ type: 'metaAndAssetCtxs' }), post({ type: 'metaAndAssetCtxs', dex: 'xyz' })]);
@@ -125,7 +125,7 @@
     return out;
   }
 
-  /* ---------- strumień jednego rynku ---------- */
+  /* ---------- single-market stream ---------- */
   function stream(venue, m, interval, h) {
     if (venue === 'binance') return streamBinance(m, interval, h);
     if (venue === 'bybit') return streamBybit(m, interval, h);
@@ -256,7 +256,7 @@
         else if (x.e === 'markPriceUpdate') { last = { ...last, mark: +x.p, funding: +x.r }; if (last.oi) last.oiUsd = last.oi * last.mark; h.ticker({ ...last }); }
       },
     });
-    // Świece osobnym gniazdem: zmiana interwału łączy od nowa tylko je.
+    // Separate candle socket: an interval change reconnects only it.
     const klines = (i) => socket(BN_MKT + `${s}@kline_${i}`, {
       onmessage: (d) => { const x = d.data || {}; if (x.e === 'kline') { const k = x.k; h.candle({ timestamp: k.t, open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v }); } },
     });
@@ -302,7 +302,7 @@
           emitBook();
         } else if (tp.startsWith('publicTrade.')) {
           h.trades(d.data.map((t) => ({ px: +t.p, sz: +t.v, side: t.S === 'Buy' ? 'buy' : 'sell', t: t.T })));
-        } else if (tp === `kline.${BY_INT[kInt]}.${sym}`) {      // spóźnione świece starego interwału odpadają
+        } else if (tp === `kline.${BY_INT[kInt]}.${sym}`) {      // late candles of the old interval are dropped
           d.data.forEach((k) => h.candle({ timestamp: +k.start, open: +k.open, high: +k.high, low: +k.low, close: +k.close, volume: +k.volume }));
         } else if (tp.startsWith('tickers.')) {
           const x = d.data;

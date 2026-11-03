@@ -1,20 +1,20 @@
-/* Terminal PTF (zakładka Trade). Paleta marki: złoto = marka, teal = interfejs.
-   Ciemny motyw domyślny, jasny po przełączniku (pf_term_theme). */
+/* PTF terminal (Trade tab). Brand palette: gold = brand, teal = interface.
+   Dark theme by default, light via the toggle (pf_term_theme). */
 @font-face{font-family:'Inter';src:url('/static/fonts/inter.woff2') format('woff2');font-weight:100 900;font-display:swap}
 @font-face{font-family:'JetBrains Mono';src:url('/static/fonts/jbmono.woff2') format('woff2');font-weight:100 800;font-display:swap}
-/* Space Grotesk — krój znaku PTF w nagłówku (te same pliki i zakresy co site.css) */
+/* Space Grotesk — PTF wordmark font in the header (same files, ranges as site.css) */
 @font-face{font-family:'Space Grotesk';src:url('/static/fonts/space-grotesk-latin.woff2') format('woff2');font-weight:300 700;font-display:swap;unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
 @font-face{font-family:'Space Grotesk';src:url('/static/fonts/space-grotesk-latin-ext.woff2') format('woff2');font-weight:300 700;font-display:swap;unicode-range:U+0100-024F,U+0259,U+1E00-1EFF,U+2020,U+20A0-20AB,U+20AD-20CF,U+2113,U+2C60-2C7F,U+A720-A7FF}
 
 :root{
   --bg:#0B1220; --bg2:#0e1626; --panel:#101a2c; --panel2:#15203a; --panel3:#1b2846;
   --line:rgba(148,178,200,.11); --line2:rgba(148,178,200,.2);
-  --txt:#EEF2F8; --muted:#93a1b8; --dim:#7d8ba4;   /* --dim ≥ 4.5:1 na tle (WCAG AA) */
+  --txt:#EEF2F8; --muted:#93a1b8; --dim:#7d8ba4;   /* --dim ≥ 4.5:1 on bg (WCAG AA) */
   --acc:#36B9A9; --acc2:#159E91; --acc-soft:rgba(54,185,169,.14);
   --up:#2ec4a0; --dn:#f0616d; --up-soft:rgba(46,196,160,.13); --dn-soft:rgba(240,97,109,.13);
   --brand:#C6A15B; --brand2:#e0c48c; --warn:#e6b450;
   --shadow:0 18px 50px -12px rgba(0,0,0,.55);
-  --hov:#111827;            /* nieprzezroczyste podświetlenie wiersza (przyklejone kolumny) */
+  --hov:#111827;            /* opaque row highlight (sticky columns) */
   --radius:10px;
   --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
   color-scheme:dark;
@@ -44,20 +44,20 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-grow{flex:1}
 .t-sep{width:1px;height:18px;background:var(--line2);flex:none;margin:0 4px}
 
-/* Strona się przewija: góra (wykres, księga, bilet) wypełnia ekran, a tabele
-   pozycji leżą POD nią — przy krawędzi widać tylko ich pasek zakładek. Dzięki
-   temu wykres nie traci wysokości na rzecz tabel. */
+/* The page scrolls: the top (chart, book, ticket) fills the screen, and the
+   position tables sit BELOW it — only their tab bar shows at the edge. That
+   way the chart doesn't lose height to the tables. */
 .term{display:flex;flex-direction:column;min-height:100vh;min-height:100dvh;
   --head-h:68px; --mkt-h:62px; --foot-h:36px; --peek-h:44px;
   --top-h:max(560px,calc(100dvh - var(--head-h) - var(--mkt-h) - var(--foot-h) - var(--peek-h)))}
-/* Starsze Safari bez dvh: zmienna z dvh byłaby nieważna przy użyciu i układ by się rozjechał. */
+/* Older Safari without dvh: a dvh variable would be invalid at use and break the layout. */
 @supports not (height:100dvh){
   .term{--top-h:max(560px,calc(100vh - var(--head-h) - var(--mkt-h) - var(--foot-h) - var(--peek-h)))}
 }
 
-/* ---------- nagłówek ---------- */
-/* Wymiary i kolory zmierzone na protradersfunding.com (header.nav): 68 px, znak
-   Space Grotesk 19/700, linki Inter 14,5/500, „Get Funded" z gradientem teal. */
+/* ---------- header ---------- */
+/* Sizes, colours measured on protradersfunding.com (header.nav): 68 px, wordmark
+   Space Grotesk 19/700, links Inter 14.5/500, "Get Funded" with a teal gradient. */
 .term{--nav-c:#9aa8bf}
 :root[data-theme=light] .term{--nav-c:#5b6b80}
 .t-head{display:flex;align-items:center;gap:28px;height:var(--head-h);padding:0 24px;flex:none;position:sticky;top:0;z-index:30;
@@ -76,7 +76,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-tog{display:inline-grid;place-items:center;width:38px;height:38px;border-radius:50%;color:var(--nav-c);transition:background .15s,color .15s}
 .t-tog:hover{background:var(--panel2);color:var(--txt)}
 .t-tog svg{width:19px;height:19px;stroke-width:1.9}
-/* „Log in" / „Dashboard" w nagłówku. Nie .t-login — tę klasę ma okno logowania (t-card t-login). */
+/* "Log in" / "Dashboard" in the header. Not .t-login — the sign-in dialog has it (t-card t-login). */
 .t-hlogin{font-size:14.5px;font-weight:500;color:var(--nav-c);white-space:nowrap;transition:color .15s}
 .t-hlogin:hover{color:var(--txt)}
 .t-getf{display:inline-flex;align-items:center;justify-content:center;padding:9px 16px;border-radius:10px;font-size:14px;font-weight:600;color:#fff;white-space:nowrap;
@@ -103,7 +103,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-link.acc{color:var(--acc);padding:0}
 .t-link.acc:hover{background:none;text-decoration:underline}
 .t-link.mute{color:var(--muted);font-weight:500;margin:6px auto 0;display:block}
-/* Główny przycisk jak na stronie PTF („Get Funded"): gradient teal, biały tekst. */
+/* Main button as on the PTF site ("Get Funded"): teal gradient, white text. */
 .t-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:38px;padding:0 16px;border-radius:10px;
   background:linear-gradient(135deg,#159e91,#0a7d72);color:#fff;font-weight:600;white-space:nowrap;
   box-shadow:0 8px 20px -8px rgba(21,158,145,.5);transition:filter .15s}
@@ -116,7 +116,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-acc-btn .dot{width:8px;height:8px;border-radius:50%;background:var(--up);box-shadow:0 0 0 3px var(--up-soft)}
 .t-acc-btn .dot.off{background:var(--dim);box-shadow:none}
 
-/* ---------- pasek rynku ---------- */
+/* ---------- market bar ---------- */
 .t-mkt{display:flex;align-items:center;gap:26px;height:var(--mkt-h);padding:0 16px;border-bottom:1px solid var(--line);flex:none;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
 .t-mkt::-webkit-scrollbar{display:none}
 .t-sym{display:flex;align-items:center;gap:10px;font-size:19px;font-weight:700;white-space:nowrap;padding:6px 8px;margin-left:-8px;border-radius:9px}
@@ -141,18 +141,18 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-src{font-size:12px;color:var(--muted);max-width:330px;white-space:normal;line-height:1.35}
 .t-mkt-r{margin-left:auto;display:flex;align-items:center;gap:10px;position:sticky;right:0;z-index:40;padding-left:10px;background:linear-gradient(90deg,transparent,var(--bg) 10px)}
 
-/* ---------- siatka ---------- */
+/* ---------- grid ---------- */
 .t-grid{flex:none;display:grid;grid-template-columns:minmax(0,1fr) 316px 332px;grid-template-rows:var(--top-h) auto}
 .t-left{grid-column:1;grid-row:1;display:flex;flex-direction:column;min-width:0;min-height:0;border-right:1px solid var(--line)}
 .t-book{grid-column:2;grid-row:1;display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line)}
-/* Bilet bez własnego przewijania (jeden pasek przewijania = strona): to kolumna,
-   która schodzi w dół obok tabel pozycji, jeśli nie mieści się na ekranie. */
+/* Ticket has no scroll of its own (one scrollbar = the page): it's a column that
+   runs down beside the position tables if it doesn't fit on screen. */
 .t-ticket{grid-column:3;grid-row:1/3;padding:14px 14px 18px;display:flex;flex-direction:column;gap:12px;background:var(--bg2);border-left:1px solid var(--line)}
 .t-ticket>*{flex-shrink:0}
 .t-bottom{grid-column:1/3;grid-row:2;display:flex;flex-direction:column;min-height:calc(100dvh - var(--head-h) - var(--foot-h));border-top:1px solid var(--line)}
 .t-mtabs,.t-mbar{display:none}
 
-/* pasek tickerów */
+/* ticker bar */
 .t-tick{display:flex;align-items:center;height:38px;border-bottom:1px solid var(--line);flex:none;min-width:0}
 .t-tick-track{flex:1;display:flex;overflow-x:auto;scroll-behavior:smooth;scrollbar-width:none;min-width:0;height:100%}
 .t-tick-track::-webkit-scrollbar{display:none}
@@ -164,7 +164,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-tick-mode{display:flex;align-items:center;gap:7px;padding:0 12px;height:100%;border-left:1px solid var(--line);color:var(--muted);font-size:12.5px;white-space:nowrap}
 .t-tick-mode:hover{color:var(--txt)}
 
-/* zakładki wykresu */
+/* chart tabs */
 .t-ctabs,.t-btabs,.t-ptabs,.t-otabs{display:flex;align-items:center;gap:4px;border-bottom:1px solid var(--line);flex:none}
 .t-ctabs{height:40px;padding:0 10px}
 .t-ctabs>button,.t-btabs>button,.t-ptabs>[data-pt],.t-ptabs>.t-dd>[data-pt],.t-otabs [data-ot]{position:relative;height:100%;padding:0 12px;color:var(--muted);font-size:14px;display:flex;align-items:center;gap:5px;white-space:nowrap}
@@ -173,7 +173,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-cpane{display:none;flex:1;min-height:0;flex-direction:column}
 .t-cpane.on{display:flex}
 .t-ctools{display:flex;align-items:center;gap:4px;height:38px;padding:0 6px;border-bottom:1px solid var(--line);flex:none;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
-.t-ctools>*,.t-ints>*,.t-cfoot>*{flex-shrink:0}   /* ikony cofnij/ponów/zrzut miały po 16 px szerokości */
+.t-ctools>*,.t-ints>*,.t-cfoot>*{flex-shrink:0}   /* undo/redo/snapshot icons were 16 px wide each */
 .t-ctools::-webkit-scrollbar{display:none}
 .t-ints{display:flex;gap:2px}
 .t-ints button,.t-ranges button,.t-axis button{height:28px;min-width:30px;padding:0 7px;border-radius:7px;color:var(--muted);font-size:13px}
@@ -182,7 +182,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-txtbtn{display:flex;align-items:center;gap:7px;height:30px;padding:0 9px;border-radius:7px;color:var(--muted);font-size:13.5px}
 .t-txtbtn:hover{color:var(--txt);background:var(--panel2)}
 .t-txtbtn.on{color:var(--acc);background:var(--acc-soft)}
-/* dymek transakcji z wykresu (najechanie / dotknięcie), jak w cTrader */
+/* chart trade tooltip (hover / touch), as in cTrader */
 .t-ttip{position:absolute;z-index:6;pointer-events:none;min-width:220px;background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:9px 12px;box-shadow:var(--shadow);font-size:12.5px}
 .t-ttip .hd{font-weight:600;margin-bottom:6px;white-space:nowrap}
 .t-ttip .row{display:grid;grid-template-columns:40px auto 1fr;gap:10px;align-items:baseline;line-height:1.65;white-space:nowrap}
@@ -191,9 +191,9 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-cbody{flex:1;min-height:0;display:flex}
 .t-draw{width:44px;flex:none;border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;overflow-y:auto;scrollbar-width:none}
 .t-draw::-webkit-scrollbar{display:none}
-.t-draw>*{flex-shrink:0}      /* przyciski nie ściskają się do 20 px — pasek najwyżej się przewinie */
+.t-draw>*{flex-shrink:0}      /* buttons don't squeeze to 20 px — at worst the bar scrolls */
 .t-draw button{width:34px;height:34px;border-radius:8px;display:grid;place-items:center;color:var(--muted)}
-/* grupa narzędzi: ostatnio użyte + trójkącik w rogu otwierający resztę */
+/* tool group: last used + corner triangle that opens the rest */
 .t-dgrp{position:relative}
 .t-dgrp::after{content:"";position:absolute;right:-1px;bottom:3px;border:3px solid transparent;border-right-color:var(--muted);border-bottom-color:var(--muted);opacity:.6;pointer-events:none}
 .t-dgrp:hover::after{opacity:1}
@@ -315,7 +315,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-kv b{font-size:16px;font-weight:550}
 .t-kv p{color:var(--muted);font-size:12.5px;margin-top:6px;line-height:1.45}
 
-/* menu rozwijane */
+/* dropdown menu */
 .t-dd{position:relative;display:flex;align-items:center;height:100%}
 .t-menu{position:absolute;top:calc(100% + 4px);left:0;z-index:40;min-width:170px;background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:5px;box-shadow:var(--shadow);display:flex;flex-direction:column}
 .t-dd.r .t-menu{left:auto;right:0}
@@ -325,7 +325,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-menu>button.on{color:var(--acc)}
 .t-menu .tag{margin-left:auto;font-size:11px;color:var(--muted);background:var(--panel2);padding:2px 7px;border-radius:6px}
 .t-menu .chk{margin-left:auto;color:var(--acc)}
-/* menu pod prawym przyciskiem na wykresie */
+/* chart right-click menu */
 .t-ctx{min-width:250px;z-index:80}
 .t-ctx hr{border:0;border-top:1px solid var(--line2);margin:4px 2px}
 .t-ctx kbd{margin-left:auto;font:11.5px var(--mono);color:var(--dim)}
@@ -334,7 +334,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-ind{width:260px;max-height:360px;overflow-y:auto}
 .t-cols{width:220px;left:auto;right:0}
 
-/* ---------- księga ---------- */
+/* ---------- book ---------- */
 .t-btabs{height:44px;padding:0 10px}
 .t-bpane{display:none;flex:1;min-height:0;flex-direction:column}
 .t-bpane.on{display:flex}
@@ -361,10 +361,10 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-depth-bar i.up{background:var(--up)} .t-depth-bar i.dn{background:var(--dn)}
 .t-trades{flex:1;min-height:0;overflow:hidden}
 .t-trades .t-row{cursor:default}
-.t-trades .t-row:hover{background:none}     /* transakcji nie da się kliknąć — bez podświetlenia */
+.t-trades .t-row:hover{background:none}     /* trades aren't clickable — no highlight */
 .t-trades .t-row span:last-child{color:var(--muted)}
 
-/* ---------- bilet zlecenia ---------- */
+/* ---------- order ticket ---------- */
 .t-sel{display:flex;align-items:center;justify-content:space-between;gap:8px;font-family:inherit;font-weight:550;height:40px;font-size:14px}
 .t-sel:hover{border-color:var(--acc)}
 .t-otabs{height:42px;gap:0}
@@ -413,7 +413,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-tpsl .t-fld>span{font-size:12.5px;color:var(--muted);font-weight:500}
 .t-go{height:48px;border-radius:11px;font-weight:700;font-size:15.5px;transition:filter .15s,transform .1s}
 .t-go.buy{background:var(--up);color:#032018}
-.t-go.sell{background:var(--dn);color:#2b0609}      /* ciemny tekst jak na Buy: biały na czerwieni miał 3,2:1 */
+.t-go.sell{background:var(--dn);color:#2b0609}      /* dark text as on Buy: white on red was 3.2:1 */
 :root[data-theme=light] .t-go.buy{color:#fff;background:#0a8565}
 :root[data-theme=light] .t-go.sell{color:#fff;background:#c63b49}
 .t-go:hover{filter:brightness(1.07)}
@@ -425,12 +425,12 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-est abbr{text-decoration:underline dotted var(--dim);text-underline-offset:3px;cursor:help}
 .t-dt{color:var(--muted);text-decoration:underline dotted var(--dim);text-underline-offset:3px}
 .t-acct .t-bar{height:4px;border-radius:3px;background:var(--panel3);overflow:hidden;display:block;flex:1}
-.t-vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}   /* tylko dla czytnika ekranu */
+.t-vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}   /* screen readers only */
 .t-acct .t-bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .4s}
 .t-acct .t-rule dt{color:var(--dim)}
 .t-fill-note{font-size:11.5px;color:var(--dim);line-height:1.45}
 
-/* ---------- dolne tabele ---------- */
+/* ---------- bottom tables ---------- */
 .t-ptabs{height:var(--peek-h,44px);padding:0 8px;gap:2px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;
   position:sticky;top:var(--head-h,54px);z-index:6;background:var(--bg)}
 .t-ptabs::-webkit-scrollbar{display:none}
@@ -448,14 +448,14 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-table th{padding-left:10px;padding-right:10px}
 .t-table td.num,.t-table th.num{text-align:right}
 .t-table tr:hover td{background:var(--hov)}
-/* Gdy kolumny nie mieszczą się w szerokości: rynek przyklejony z lewej, akcje
-   (Close / Cancel) z prawej — przycisk zamknięcia zawsze widać bez przewijania. */
+/* When columns don't fit the width: market sticks left, actions (Close / Cancel)
+   stick right — the close button is always visible without scrolling. */
 .t-table td:first-child,.t-table th:first-child{position:sticky;left:0;z-index:1;background:var(--bg)}
 .t-table td:last-child,.t-table th:last-child{position:sticky;right:0;z-index:1;background:var(--bg);box-shadow:-10px 0 12px -10px rgba(0,0,0,.45)}
 .t-table th:first-child,.t-table th:last-child{z-index:2}
 .t-table tr:hover td:first-child,.t-table tr:hover td:last-child{background:var(--hov)}
 .t-table .sym{display:flex;align-items:center;gap:8px;font-weight:600}
-.t-table .sub{display:block;color:var(--dim);font-size:11px;margin-top:1px}   /* loty nad jednostkami — węższa kolumna */
+.t-table .sub{display:block;color:var(--dim);font-size:11px;margin-top:1px}   /* lots above units — narrower column */
 .t-table .side{font-weight:600}
 .t-table .act{display:flex;gap:6px;justify-content:flex-end}
 .t-table .act button{height:26px;padding:0 10px;border-radius:7px;border:1px solid var(--line2);font-size:12px}
@@ -480,7 +480,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-meter i{display:block;height:100%;background:var(--acc)}
 .t-meter i.warn{background:var(--warn)} .t-meter i.bad{background:var(--dn)}
 
-/* ---------- stopka ---------- */
+/* ---------- footer ---------- */
 .t-foot{display:flex;align-items:center;gap:4px;height:var(--foot-h);padding:0 10px;border-top:1px solid var(--line);flex:none;background:var(--bg);font-size:12.5px;position:sticky;bottom:0;z-index:30}
 .t-fbtn{display:flex;align-items:center;gap:7px;height:28px;padding:0 9px;border-radius:7px;color:var(--muted);white-space:nowrap}
 .t-fbtn:hover{color:var(--txt);background:var(--panel2)}
@@ -502,7 +502,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-calc .row{display:flex;justify-content:space-between;font-size:13px;color:var(--muted)}
 .t-calc .row b{color:var(--txt)}
 
-/* ---------- okna ---------- */
+/* ---------- dialogs ---------- */
 .t-modal{position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:16px;background:rgba(5,9,18,.62);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);animation:tFade .18s ease}
 :root[data-theme=light] .t-modal{background:rgba(11,18,32,.35)}
 @keyframes tFade{from{opacity:0}to{opacity:1}}
@@ -554,7 +554,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-sr .star.on{color:var(--brand)}
 .t-sr .star.on svg{fill:currentColor}
 
-/* skrzynka (monit dla niezalogowanych) */
+/* box (prompt for signed-out visitors) */
 .t-casec{width:min(100%,880px);padding:0;display:grid;grid-template-columns:1fr 1fr;overflow:hidden}
 .t-case-l{padding:38px 36px;display:flex;flex-direction:column;gap:14px}
 .t-case-l h2{font-size:34px;line-height:1.12;letter-spacing:-.02em;margin:8px 0 0}
@@ -565,14 +565,14 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-case-art{width:100%;max-width:340px;height:auto;filter:drop-shadow(0 20px 30px rgba(0,0,0,.35));animation:tFloat 5s ease-in-out infinite}
 @keyframes tFloat{50%{transform:translateY(-6px)}}
 
-/* toasty */
+/* toasts */
 .t-toasts{position:fixed;right:16px;bottom:48px;z-index:200;display:flex;flex-direction:column;gap:8px;pointer-events:none}
 .t-toast{pointer-events:auto;min-width:260px;max-width:380px;background:var(--panel);border:1px solid var(--line2);border-left:3px solid var(--acc);border-radius:10px;padding:11px 14px;box-shadow:var(--shadow);font-size:13.5px;animation:tPop .2s ease}
 .t-toast.bad{border-left-color:var(--dn)}
 .t-toast b{display:block;margin-bottom:2px}
 .t-toast span{color:var(--muted)}
 
-/* pełny ekran wykresu */
+/* chart full screen */
 .term.full-chart .t-left{position:fixed;inset:0;z-index:60;background:var(--bg)}
 
 /* MT5 connection */
@@ -602,6 +602,11 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-dock-go:disabled{opacity:.7}
 .t-dock-n{margin:0;font-size:11.5px;line-height:1.5;color:var(--dim)}
 .t-dock-n a{color:var(--muted);text-decoration:underline;text-underline-offset:2px}
+
+@media (max-width:760px){
+  .t-head-r>.t-hlogin{display:none}
+  .t-mkt-r{background:var(--bg);box-shadow:-14px 0 14px var(--bg)}
+}
 
 /* Trading tools */
 .t-plus{position:absolute;left:0;top:0;z-index:4;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font:600 14px/1 var(--mono,monospace);background:var(--panel);border:1px solid var(--line2);color:var(--txt);transition:background .12s,color .12s}
@@ -662,10 +667,10 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 @keyframes tSpin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
-/* ---------- węższe ekrany ---------- */
+/* ---------- narrower screens ---------- */
 @media (max-width:1440px){ .t-nav{gap:20px} }
 @media (max-width:1300px){ .t-nav{gap:16px} }
-/* Na laptopie menu to panel przy burgerze; Log in i Get Funded są już w nagłówku. */
+/* On laptops the menu is a burger panel; Log in and Get Funded are in the header. */
 @media (min-width:981px){
   .t-mmenu{left:auto;right:16px;width:300px;top:calc(var(--head-h) + 6px);border:1px solid var(--line2);border-radius:12px;padding:6px 16px 8px}
   .t-mmenu .t-mm-login,.t-mmenu .t-mm-dash,.t-mmenu .t-getf{display:none}
@@ -675,7 +680,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   .t-grid{grid-template-columns:minmax(0,1fr) 270px 300px}
   .t-src{display:none}
 }
-/* Linki przestają się mieścić obok wyszukiwarki i konta — przechodzą do menu (jak burger na stronie). */
+/* Links stop fitting beside search and account — they move to the menu (like the site's burger). */
 @media (max-width:1240px){
   .t-nav{display:none}
   .t-burger{display:flex}
@@ -686,9 +691,9 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   .term{--head-h:56px}
   .t-head{gap:10px;padding:0 12px}
   .t-head-r{gap:8px}
-  .t-hsearch{display:none}                 /* wyszukiwarkę otwiera przycisk rynku (BTCUSD ▾) */
-  .t-guest .t-hlogin,.t-user .t-hlogin{display:none}   /* są w menu, jak na stronie */
-  /* znak jak na stronie: cała nazwa, czcionka do szerokości ekranu, w razie czego „Pro Traders / Funding" */
+  .t-hsearch{display:none}                 /* search opens from the market button (BTCUSD ▾) */
+  .t-guest .t-hlogin,.t-user .t-hlogin{display:none}   /* in the menu, as on the site */
+  /* wordmark as on the site: full name, font fits screen width, if needed "Pro Traders / Funding" */
   .t-logo{flex:1 1 auto;min-width:0}
   .t-logo-txt{white-space:normal;line-height:1.05;font-size:clamp(13px,3.9vw,19px)}
   .t-mkt{gap:18px;height:58px;padding:0 12px}
@@ -701,7 +706,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   .t-grid{display:flex;flex-direction:column}
   .t-left,.t-book,.t-ticket{border:0;display:none}
   .t-left.on,.t-book.on,.t-ticket.on{display:flex}
-  /* telefon: wykres na prawie cały ekran (nagłówek, pasek rynku, zakładki i przyciski kup/sprzedaj zostają) */
+  /* phone: chart fills nearly the whole screen (header, market bar, tabs and buy/sell buttons stay) */
   .t-left,.t-book{height:max(420px,calc(100dvh - var(--head-h) - 58px - 42px - 70px))}
   .t-book .t-btabs{display:none}
   .t-ticket{overflow:visible}
@@ -715,7 +720,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   .t-draw{width:38px}
   .t-draw button{width:30px;height:30px}
   .t-tick-mode span,.t-tick #tTickPrev,.t-tick #tTickNext{display:none}
-  .t-ptabs{top:calc(var(--head-h) + 43px)}   /* pod nagłówkiem i zakładkami paneli (42 + 1 px ramki) */
+  .t-ptabs{top:calc(var(--head-h) + 43px)}   /* below the header and panel tabs (42 + 1 px border) */
   .t-ptabs .t-grow,.t-ptabs #tColsBtn{display:none}
   .t-casec{grid-template-columns:1fr}
   .t-case-r{order:-1;border-left:0;border-bottom:1px solid var(--line);padding:18px}
@@ -725,24 +730,24 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   .t-case-l .t-logo span{display:inline}
   .t-search-head,.t-sr{grid-template-columns:minmax(0,1.5fr) 1fr 66px 28px}
   .t-search-head span:nth-child(4),.t-sr span.vol{display:none}
-  /* Komunikaty u góry, pod zakładkami: na dole zasłaniały Buy/Sell przez 4–6 s. */
+  /* Messages on top, under the tabs: at the bottom they hid Buy/Sell for 4–6 s. */
   .t-toasts{top:calc(var(--head-h) + 50px + env(safe-area-inset-top));bottom:auto;left:12px;right:12px}
   .t-toast{max-width:none}
 
-  /* iOS przybliża stronę przy polu z czcionką < 16 px — na telefonie wszystkie mają 16. */
+  /* iOS zooms the page on a field with a font < 16 px — on phones they all use 16. */
   .t-in input,.t-tpsl .t-in input,.t-pct-in input,.t-bctl select,.t-search-in input,.t-calc input{font-size:16px}
 
-  /* dotykowe cele ≥ 32 px */
+  /* touch targets ≥ 32 px */
   .t-venue button{min-height:32px}
   .t-ints button,.t-ranges button,.t-axis button{height:32px}
   .t-draw{width:42px}
   .t-draw button{width:34px;height:34px}
 
-  /* pasek rynku przewija się w bok — miękka krawędź pokazuje, że jest więcej */
+  /* market bar scrolls sideways — a soft edge shows there is more */
   .t-mkt.more{-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent)}
 
-  /* Tabele jako karty: P&L i „Close" widać bez przewijania w bok. Etykiety
-     z nagłówków kolumn (data-l, ustawia terminal.js). */
+  /* Tables as cards: P&L and "Close" show without sideways scrolling. Labels
+     from column headers (data-l, set by terminal.js). */
   .t-bottom .t-table{overflow-x:visible}
   .t-table table,.t-table tbody{display:block;white-space:normal}
   .t-table thead{display:none}
@@ -762,7 +767,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   .t-tog{width:34px;height:34px}
   .t-head .t-getf{padding:8px 11px}
 }
-@media (max-width:375px){ .t-head .t-getf{display:none} }   /* jak na stronie: zostaje w menu */
+@media (max-width:375px){ .t-head .t-getf{display:none} }   /* as on the site: stays in the menu */
 @media (max-width:420px){
   .t-acc-btn #tAccLbl{max-width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .t-ready-foot{flex-direction:column-reverse}

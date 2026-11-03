@@ -114,10 +114,6 @@ class Settings:
 
     # --- Marka / strona publiczna ---
     site_name: str = os.getenv("SITE_NAME", "Pro Traders Funding")
-    # Podpis na certyfikatach. Puste = blok podpisu w ogóle się nie pokazuje —
-    # nie wymyślamy nazwiska osoby, która miałaby firmować dokument.
-    # Podpis CEO na certyfikatach — STALA marki: kazdy dokument wychodzi z
-    # odrecznym podpisem Matthew Harrisona (krój Great Vibes w cert.css).
     support_email: str = os.getenv("SUPPORT_EMAIL", "support@protradersfunding.com")
     # Google Analytics 4 (Measurement ID typu G-XXXXXXX). Puste = brak snippetu
     # gtag na stronach — zero requestów do Google.

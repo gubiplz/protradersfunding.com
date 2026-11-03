@@ -476,8 +476,8 @@
         <div class="chal-flip" role="button" tabindex="0" aria-label="$${p.account_size.toLocaleString('en-US')} ${model}: show or hide the rules"><div class="chal-inner">
           <div class="chal-face chal-front">
             <i class="chal-lines"></i><i class="chal-glare"></i>
-            <img class="chal-mark" src="/static/img/logo.png" alt="">
-            <img class="chal-logo" src="/static/img/logo.png" alt="">
+            <i class="chal-mark"></i>
+            <i class="chal-logo"></i>
             <div class="chal-price">${cfgPct ? `<s>${usd(p.price_usd)}</s>` : ''}<b>${usd(fee)}</b> <small>USD</small></div>
             <div class="chal-size">
               ${p.popular ? '<i>Best value</i>' : ''}
@@ -493,13 +493,13 @@
           </div>
           <div class="chal-face chal-back">
             <i class="chal-lines"></i>
-            <img class="chal-logo" src="/static/img/logo.png" alt="">
+            <i class="chal-logo"></i>
             <h4><small>${model} ${tierName}</small>$${p.account_size.toLocaleString('en-US')}</h4>
             <dl>${cardRules(p).map(([l, v]) => `<div><dt>${l}</dt><dd>${v}</dd></div>`).join('')}</dl>
           </div>
         </div></div>
-        <button type="button" class="chal-btn" data-flip="${p.key}" aria-expanded="${open}">${open ? 'Hide Rules' : 'View Rules'}</button>
-        <a class="chal-btn go" href="/portal?${q.toString()}">Start Challenge</a>
+        <button type="button" class="btn-ghost chal-btn" data-flip="${p.key}" aria-expanded="${open}">${open ? 'Hide Rules' : 'View Rules'}</button>
+        <a class="btn chal-btn go" href="/portal?${q.toString()}">Start Challenge</a>
       </article>`;
     }).join('');
     const turn = card => {

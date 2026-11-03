@@ -1,5 +1,5 @@
-/* Terminal PTF (zakładka Trade): wykres KLineChart, księga, transakcje, bilet
-   zlecenia i tabele pozycji. Dane rynkowe z terminal-feed.js (prosto z giełd),
+/* PTF terminal (Trade tab): KLineChart chart, book, trades, order ticket and
+   position tables. Market data from terminal-feed.js (straight from exchanges),
    account and orders from /api/terminal/*. Sign-in uses the MT5 credentials of each account. */
 (function () {
   'use strict';
@@ -12,7 +12,7 @@
   const BY_COIN = Object.fromEntries(MKTS.map((m) => [m.hl, m]));
   const CLS = { crypto: 'Crypto', metal: 'Metals', energy: 'Energy', index: 'Indices', fx: 'Forex' };
 
-  /* ---------- pamięć przeglądarki (może być zablokowana) ---------- */
+  /* ---------- browser storage (may be blocked) ---------- */
   const ls = {
     get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
@@ -20,7 +20,7 @@
     json(k, d) { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } },
   };
 
-  /* ---------- formatowanie ---------- */
+  /* ---------- formatting ---------- */
   const NF = {};
   const nf = (d) => NF[d] || (NF[d] = new Intl.NumberFormat('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }));
   const ok = (v) => v != null && isFinite(v);
@@ -31,15 +31,15 @@
   const pct = (v) => (ok(v) ? (v > 0 ? '+' : '') + v.toFixed(2) + '%' : '—');
   const px = (m, v) => fx(v, m.px_dec);
   const qtyF = (m, v) => fx(v, Math.min(Math.max(m.qty_dec, 0), 6));
-  // Loty jak w MT5 (1 lot = m.contract jednostek); ułamki poniżej 0,01 lota z 4 miejscami.
+  // Lots as in MT5 (1 lot = m.contract units); fractions below 0.01 lot with 4 decimals.
   const lotsF = (v) => fx(v, v > 0 && v < 0.01 ? 4 : 2);
   const lotsOf = (m, q) => lotsF(q / m.contract) + ' lots';
   const sizeCell = (m, q) => `${lotsOf(m, q)} <span class="sub">${qtyF(m, q)} ${esc(m.base)}</span>`;
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const cls = (v) => (v > 0 ? 'up' : v < 0 ? 'dn' : '');
-  // Liczba z pola: przecinki tysięcy i spacje nie psują wartości („65,000" → 65000, a nie NaN).
+  // Number from a field: thousands commas and spaces don't break it ("65,000" → 65000, not NaN).
   const numOf = (v) => { const n = +String(v == null ? '' : v).replace(/[,\s]/g, ''); return isFinite(n) && n > 0 ? n : 0; };
-  // Zakładki: klasa .on i aria-selected razem (czytnik ekranu wie, która jest wybrana).
+  // Tabs: .on class and aria-selected together (screen readers know which is selected).
   const tabOn = (list, pred) => list.forEach((b) => {
     const on = !!pred(b);
     b.classList.toggle('on', on);
@@ -50,7 +50,7 @@
   const qtyFromUsd = (m, u, p) => (m.quote_inverse ? u : p ? u / p : 0);
   const pnlOf = (m, side, q, entry, p) => { const r = side === 'buy' ? p - entry : entry - p; return m.quote_inverse ? (p ? (q * r) / p : 0) : q * r; };
 
-  /* ---------- ikony rynków ---------- */
+  /* ---------- market icons ---------- */
   const FLAG = (c) => `<img src="/static/img/markets/flag-${c}.svg" alt="">`;
   const HUE = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
   function mIcon(m, sm) {
@@ -71,13 +71,13 @@
     bybit: '<svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="3" fill="#17181e"/><path fill="#F7A600" d="M14.6 9h1.1v6h-1.1z"/><path fill="#fff" d="M5 9.2h2.2c1.2 0 1.7.6 1.7 1.3 0 .5-.3.9-.7 1 .6.1 1 .6 1 1.2 0 .9-.6 1.5-1.8 1.5H5zm1.1 2.3h.9c.5 0 .8-.2.8-.6s-.3-.6-.8-.6h-.9zm0 2.4h1c.5 0 .9-.2.9-.7 0-.4-.3-.7-.9-.7h-1zM10.3 9.2h1.2l1.1 2.2 1.1-2.2h1.1l-1.7 3.3v2.4h-1v-2.4z"/></svg>',
   };
 
-  /* ---------- stan ---------- */
+  /* ---------- state ---------- */
   const startSym = BY[root.dataset.symbol] ? root.dataset.symbol : 'BTCUSD';
   const S = {
     sym: startSym, m: BY[startSym], venue: ls.get('pf_term_venue', 'hyperliquid'),
     interval: ls.get('pf_term_int', '15m'), ctype: ls.get('pf_term_ctype', 'candle_solid'),
     book: { bids: [], asks: [] }, trades: [], tk: {}, mids: {}, ctx: {},
-    // Jednostka pola Size: loty (domyślnie, jak w MT5), USD albo jednostka bazowa (BTC, oz…).
+    // Size field unit: lots (default, as in MT5), USD or the base unit (BTC, oz…).
     side: 'buy', kind: 'market', unit: ['lots', 'usd', 'base'].includes(ls.get('pf_term_unit2', 'lots')) ? ls.get('pf_term_unit2', 'lots') : 'lots', slip: +ls.get('pf_term_slip', '1'),
     watch: ls.json('pf_term_watch', ['BTCUSD', 'ETHUSD', 'XAUUSD']),
     token: null,    // session of the MT5 account in view; every saved account has its own
@@ -88,16 +88,16 @@
     alerts: [],
     imp: false,     // admin view opened from the panel: read-only, never saved
     accounts: [], accId: +ls.get('pf_term_acc', '0') || null, st: null, ptab: 'positions',
-    // Poślizg domyślnie schowany (jest w Columns): z nim tabela nie mieściła się pod wykresem nawet na 1440 px.
+    // Slippage hidden by default (it's in Columns): with it the table didn't fit under the chart even at 1440 px.
     cols: ls.json('pf_term_cols3', { value: true, slippage: false, lev: true, margin: true, tpsl: true }),
-    showTrades: ls.get('pf_term_trades', '1') === '1',     // historia transakcji na wykresie (przycisk „Trades")
+    showTrades: ls.get('pf_term_trades', '1') === '1',     // trade history on the chart ("Trades" button)
     weekend: false, fee: 0.03, group: null, top: [0, 0], bookUnit: 'base', tickMode: ls.get('pf_term_tick', 'trending'),
   };
   if (!F.venuesFor(S.m).includes(S.venue)) S.venue = 'hyperliquid';
-  // Dźwignia nie jest do wyboru: z góry ustalona dla rynku (serwer i tak liczy po niej).
+  // Leverage isn't selectable: fixed per market (the server calculates with it anyway).
   const lev = () => S.m.max_lev;
 
-  /* ---------- toasty i okna ---------- */
+  /* ---------- toasts and dialogs ---------- */
   function toast(title, msg, bad) {
     const el = document.createElement('div');
     el.className = 't-toast' + (bad ? ' bad' : '');
@@ -124,10 +124,10 @@
     });
   }
 
-  /* ---------- menu rozwijane ---------- */
-  /* Menu stoi w pozycji `fixed` względem ekranu: paski z przewijaniem w bok
-     (narzędzia wykresu, pasek rynku, zakładki tabel) inaczej by je przycinały
-     albo same robiły się przewijalne. Przewinięcie strony zamyka menu. */
+  /* ---------- dropdown menu ---------- */
+  /* The menu is `fixed` to the screen: sideways-scrolling bars (chart tools,
+     market bar, table tabs) would otherwise clip it or become scrollable
+     themselves. Scrolling the page closes the menu. */
   function placeMenu(btn, menu) {
     const r = btn.getBoundingClientRect();
     const up = !!menu.closest('.t-dd.up');
@@ -135,7 +135,7 @@
     const w = menu.offsetWidth;
     menu.style.left = Math.max(8, Math.min(r.left, innerWidth - w - 8)) + 'px';
     if (up) return;
-    // Za mało miejsca pod przyciskiem (np. zakładki tabel przy dolnej krawędzi) — menu w górę.
+    // Too little room below the button (e.g. table tabs at the bottom edge) — menu opens up.
     const pod = innerHeight - r.bottom - 12, nad = r.top - 12;
     menu.style.maxHeight = '';
     const h = menu.offsetHeight;
@@ -175,14 +175,14 @@
   }
 
   /* =====================================================================
-     WYKRES
+     CHART
      ===================================================================== */
   const INT_LBL = { '1m': '1', '3m': '3', '5m': '5', '15m': '15', '30m': '30', '1h': '60', '4h': '240', '1d': '1D', '1w': '1W' };
   const PERIOD = { '1m': ['minute', 1], '3m': ['minute', 3], '5m': ['minute', 5], '15m': ['minute', 15], '30m': ['minute', 30], '1h': ['hour', 1], '4h': ['hour', 4], '1d': ['day', 1], '1w': ['week', 1] };
   let chart = null, barCb = null, histLimit = 500, lastBar = null;
   const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-  // Wąski ekran: legenda OHLC i wskaźników tylko pod krzyżykiem (dotknięcie wykresu) —
-  // stała zakrywała ćwierć świec i nachodziła na etykietę maksimum.
+  // Narrow screen: OHLC and indicator legend only under the crosshair (chart touch) —
+  // a fixed one hid a quarter of the candles and the high label.
   const narrow = matchMedia('(max-width:980px)');
   function chartStyles() {
     const up = css('--up'), dn = css('--dn'), line = css('--line'), muted = css('--muted'), txt = css('--txt'), panel = css('--panel3'), acc = css('--acc');
@@ -200,7 +200,7 @@
         tooltip: {
           showRule: rule,
           title: { show: true, color: txt, size: 14, template: `${S.sym} · ${INT_LBL[S.interval]} · ${F.VENUES[S.venue].label}` },
-          // Czas jest już na osi pod krzyżykiem — bez niego legenda mieści się w jednej linii.
+          // Time is on the axis under the crosshair — without it the legend fits one line.
           legend: { color: muted, size: 12, template: [{ title: 'O ', value: '{open}' }, { title: 'H ', value: '{high}' }, { title: 'L ', value: '{low}' }, { title: 'C ', value: '{close}' }, { title: 'Chg ', value: '{change}' }, { title: 'Vol ', value: '{volume}' }] },
         },
       },
@@ -216,15 +216,15 @@
     };
   }
 
-  // Etykiety linii rysuje KLineChart tym krojem; szerokość mierzymy tak samo, żeby
-  // pole z P&L stanęło tuż za etykietą wejścia.
+  // KLineChart draws line labels in this font; we measure width the same way so the
+  // P&L box lands right after the entry label.
   const LINE_FONT = 'Helvetica Neue';
   const MIARA = document.createElement('canvas').getContext('2d');
   const szerTekstu = (t) => { MIARA.font = `600 11px ${LINE_FONT}`; return MIARA.measureText(t || '').width; };
   function registerOverlays() {
-    // Zamknięta transakcja na wykresie jak w MT5 / cTrader: wejście (▲ long, ▼ short)
-    // w cenie i godzinie otwarcia, wyjście (kółko) w cenie i godzinie zamknięcia,
-    // przerywana linia między nimi w kolorze wyniku. Najechanie pogrubia całość.
+    // Closed trade on the chart as in MT5 / cTrader: entry (▲ long, ▼ short) at the
+    // open price and time, exit (circle) at the close price and time, a dashed line
+    // between them in the result colour. Hovering thickens it all.
     klinecharts.registerOverlay({
       name: 'ptfTrade', totalStep: 3, lock: true, needDefaultPointFigure: false, needDefaultXAxisFigure: false, needDefaultYAxisFigure: false,
       createPointFigures: ({ coordinates, overlay }) => {
@@ -285,7 +285,7 @@
           borderRadius: 2, borderSize: 0, backgroundColor: css('--panel3') || '#3b4354' },
       }],
     });
-    // Linia ceny z etykietą: wejście, TP, SL, likwidacja, zlecenia oczekujące.
+    // Price line with a label: entry, TP, SL, liquidation, pending orders.
     klinecharts.registerOverlay({
       name: 'ptfLine', totalStep: 2, lock: true, needDefaultPointFigure: false, needDefaultXAxisFigure: false, needDefaultYAxisFigure: true,
       createPointFigures: ({ coordinates, bounding, overlay }) => {
@@ -298,7 +298,7 @@
           { type: 'text', attrs: { x: 10, y, text: e.text, baseline: 'middle' }, styles: e.pos ? { ...etykieta, color: e.color, backgroundColor: e.bg, borderColor: e.color, borderSize: 1 } : { ...etykieta, backgroundColor: e.color }, ignoreEvent: true },
         ];
         if (e.noLabel) fig.pop();          // TP/SL being edited: the label is the draggable HTML handle
-        // Pozycja: obok etykiety wejścia żywy P&L w kolorze wyniku (jak w MT5 / cTrader).
+        // Position: live P&L by the entry label, in result colour (as in MT5 / cTrader).
         if (e.pnlText) fig.push({ type: 'text', attrs: { x: 10 + szerTekstu(e.text) + 12 + 4, y, text: e.pnlText, baseline: 'middle' }, styles: { ...etykieta, backgroundColor: e.pnlColor }, ignoreEvent: true });
         return fig;
       },
@@ -311,8 +311,8 @@
     chart = klinecharts.init('tChart', { styles: chartStyles(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, locale: 'en-US' });
     chart.setDataLoader({
       getBars: async ({ type, timestamp, callback }) => {
-        // Każdy reset wykresu startuje własne ładowanie; odpowiedź, która
-        // przyszła po kolejnym resecie (inny rynek/interwał), idzie do kosza.
+        // Each chart reset starts its own load; a response that arrives
+        // after the next reset (other market/interval) is discarded.
         const nr = ++loadSeq;
         try {
           if (type === 'init') {
@@ -338,12 +338,12 @@
     loadIndicators();
     new ResizeObserver(() => chart && chart.resize()).observe($('tChart'));
     narrow.addEventListener('change', () => chart && chart.setStyles(chartStyles()));
-    // KLineChart daje płótnu tabindex=1 (wskakuje przed nawigację strony) — zwykła kolejność.
+    // KLineChart gives the canvas tabindex=1 (jumps ahead of the page nav) — use normal order.
     const cv = $('tChart').querySelector('[tabindex="1"]');
     if (cv) { cv.tabIndex = 0; cv.setAttribute('role', 'region'); cv.setAttribute('aria-label', 'Price chart'); }
   }
   let loadSeq = 0;
-  /* Przeładowanie wykresu jednym wywołaniem: setSymbol/setPeriod same robią reset. */
+  /* Reload the chart with one call: setSymbol/setPeriod reset on their own. */
   function reloadChart() {
     if (!chart) return;
     const want = { type: PERIOD[S.interval][0], span: PERIOD[S.interval][1] };
@@ -359,7 +359,7 @@
   let pendingRange = null;
   function afterInit() {
     loadDrawn();
-    drawLines();          // linie pozycji i znaczniki historii nowego rynku od razu, nie po kolejnym odświeżeniu
+    drawLines();          // new market's position lines and history markers at once, not after the next refresh
     if (pendingRange) { const r = pendingRange; pendingRange = null; setTimeout(() => fitRange(r), 30); }
     drawLines();
   }
@@ -372,7 +372,7 @@
     chart.scrollToRealTime();
   }
 
-  // Rysowanie: kolejka do cofania/ponawiania
+  // Drawing: undo/redo queue
   const DRAW = [
     ['cross', 'Crosshair', '<path d="M12 3v18M3 12h18"/>'],
     ['segment', 'Trend line', '<path d="M4 20 20 4"/><circle cx="4" cy="20" r="1.6"/><circle cx="20" cy="4" r="1.6"/>'],
@@ -391,9 +391,9 @@
     ['priceLine', 'Price label', '<path d="M3 12h11"/><path d="M14 8h7v8h-7z"/>'],
   ];
   const DI = Object.fromEntries(DRAW.map((d) => [d[0], d]));
-  /* Pasek narzędzi w grupach (jak w TradingView): 18 przycisków nie mieściło się
-     w wysokości wykresu na żadnym laptopie i ściskało się do ~20 px. Grupa pokazuje
-     ostatnio użyte narzędzie; strzałka (albo drugie dotknięcie) otwiera resztę. */
+  /* Toolbar in groups (as in TradingView): 18 buttons didn't fit the chart height
+     on any laptop and squeezed to ~20 px. A group shows the last used tool;
+     the arrow (or a second tap) opens the rest. */
   const GROUPS = [
     ['cross'],
     ['segment', 'rayLine', 'horizontalStraightLine', 'horizontalRayLine', 'verticalStraightLine'],
@@ -403,8 +403,8 @@
   ];
   const GNAME = ['', 'Lines', 'Channels and Fibonacci', 'Shapes', 'Notes'];
   const gSel = ls.json('pf_term_dgrp', {});
-  /* Rysunki należą do rynku: linia z BTC nie może wisieć na ETH. Trzymamy je
-     per symbol w przeglądarce, więc wracają po przeładowaniu strony. */
+  /* Drawings belong to a market: a BTC line must not hang on ETH. We keep them
+     per symbol in the browser, so they come back after a page reload. */
   let drawn = [], redo = [], drawnSym = null, selDraw = null;
   let magnet = ls.get('pf_term_magnet', '0') === '1';
   /* Magnet as in TradingView: points snap to the candle's open/high/low/close. Holding
@@ -428,7 +428,7 @@
   function saveDrawn() {
     if (drawnSym) ls.set(drawKey(drawnSym), JSON.stringify(drawn.slice(-200).map(({ name, points }) => ({ name, points }))));
   }
-  // Zdarzenia każdego rysunku: usunięcie prawym, zapis po przesunięciu, zaznaczenie (Delete).
+  // Events of each drawing: right-click removes, moving saves, selecting (Delete).
   const drawEvts = {
     onRightClick: ({ overlay }) => { prawyNaRysunku = Date.now(); removeDrawn(overlay.id); return true; },
     onPressedMoveEnd: ({ overlay }) => { const o = drawn.find((x) => x.id === overlay.id); if (o) { o.points = pts(overlay); saveDrawn(); } },
@@ -539,7 +539,7 @@
       const b = e.target.closest('button');
       if (!b || !chart) return;
       e.stopPropagation();
-      // Róg z trójkącikiem (12 px) otwiera listę grupy — bez osobnego, za małego przycisku.
+      // The corner triangle (12 px) opens the group's list — no separate, too-small button.
       const grp = b.dataset.g && GROUPS[+b.dataset.g].length > 1;
       const r = b.getBoundingClientRect();
       if (grp && e.detail && e.clientX > r.right - 12 && e.clientY > r.bottom - 12) return openFly(+b.dataset.g, b);
@@ -552,7 +552,7 @@
         return;
       }
       if (b.id === 'tClearDraw') { chart.removeOverlay({ groupId: 'draw' }); drawn = []; redo = []; saveDrawn(); return; }
-      // Drugie kliknięcie (dotknięcie, Enter) aktywnego narzędzia z grupy otwiera listę.
+      // A second click (tap, Enter) on the group's active tool opens the list.
       if (grp && b.classList.contains('on')) return openFly(+b.dataset.g, b);
       armTool(b);
     });
@@ -589,7 +589,7 @@
     else if ((e.key === 'Delete' || e.key === 'Backspace') && selDraw) { e.preventDefault(); removeDrawn(selDraw); }
   });
 
-  // Wskaźniki
+  // Indicators
   const IND_MAIN = [['MA', 'Moving Average'], ['EMA', 'Exponential MA'], ['SMA', 'Smoothed MA'], ['BOLL', 'Bollinger Bands'], ['SAR', 'Parabolic SAR'], ['BBI', 'Bull and Bear Index']];
   const IND_SUB = [['VOL', 'Volume'], ['MACD', 'MACD'], ['RSI', 'Relative Strength Index'], ['KDJ', 'Stochastic (KDJ)'], ['CCI', 'Commodity Channel Index'], ['WR', 'Williams %R'], ['OBV', 'On Balance Volume'], ['DMI', 'Directional Movement'], ['AO', 'Awesome Oscillator'], ['MTM', 'Momentum'], ['TRIX', 'TRIX'], ['ROC', 'Rate of Change']];
   let inds = ls.json('pf_term_inds', ['VOL']);
@@ -627,7 +627,7 @@
     $$('[data-i]', $('tInts')).forEach((b) => b.classList.toggle('on', b.dataset.i === i));
     if (!keepLimit) histLimit = 500;
     if (!strm || !strm.interval || !chart) return restream();
-    // Sam interwał: podmieniamy świece, księga i transakcje płyną dalej bez rozłączania.
+    // Interval only: swap the candles; book and trades keep flowing without reconnecting.
     strm.interval(i);
     lastBar = null; barNext = null;
     chart.setStyles({ candle: { tooltip: { title: { template: `${S.sym} · ${INT_LBL[S.interval]} · ${F.VENUES[S.venue].label}` } } } });
@@ -657,14 +657,14 @@
   $('tFull').onclick = () => { root.classList.toggle('full-chart'); setTimeout(() => chart && chart.resize(), 30); };
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (root.classList.contains('full-chart')) { root.classList.remove('full-chart'); chart && chart.resize(); } closeModal(); $$('.t-menu').forEach((x) => (x.hidden = true)); } });
 
-  // zegar
+  // clock
   function clock() {
     const d = new Date(), off = -d.getTimezoneOffset() / 60;
     $('tClock').textContent = d.toLocaleTimeString('en-GB', { hour12: false }) + ' UTC' + (off >= 0 ? '+' : '') + off;
   }
   setInterval(() => { if (!document.hidden) clock(); }, 1000); clock();
 
-  // zakładki wykresu
+  // chart tabs
   let cTab = 'chart';
   $$('[data-ctab]').forEach((b) => b.addEventListener('click', () => {
     tabOn($$('[data-ctab]'), (x) => x === b);
@@ -885,14 +885,14 @@
   }
 
   /* =====================================================================
-     STRUMIEŃ RYNKU
+     MARKET STREAM
      ===================================================================== */
-  /* Wszystko z gniazd idzie przez requestAnimationFrame: najwyżej jeden render
-     na klatkę (Binance śle dziesiątki transakcji na sekundę), a w ukrytej karcie
-     przeglądarka rAF wstrzymuje, więc nic się wtedy nie maluje. */
+  /* All socket data goes through requestAnimationFrame: at most one render
+     per frame (Binance sends dozens of trades a second), and in a hidden tab the
+     browser pauses rAF, so nothing paints then. */
   let strm = null, bookRaf = 0, tradesRaf = 0, tickRaf = 0, barRaf = 0, barNext = null;
   function pushBar(k) {
-    // Nowa świeca w tej samej klatce co poprawka poprzedniej: poprzednią domykamy od razu.
+    // New candle in the same frame as an update to the last one: close the last one at once.
     if (barNext && barNext.timestamp !== k.timestamp && barCb) barCb(barNext);
     barNext = k;
     if (!barRaf) barRaf = requestAnimationFrame(() => { barRaf = 0; if (barCb && barNext) barCb(barNext); barNext = null; });
@@ -945,7 +945,7 @@
     $('tLat').textContent = st === 'open' && latency != null ? latency + 'ms' : '';
   }
 
-  /* ---------- pasek rynku ---------- */
+  /* ---------- market bar ---------- */
   function markPx() {
     const [b, a] = S.top;
     return S.tk.mark || (b && a ? (b + a) / 2 : S.mids[S.m.hl]) || null;
@@ -965,7 +965,7 @@
     const m = S.m;
     $('tSymIc').innerHTML = mIcon(m);
     $('tSymName').textContent = m.sym;
-    $('tMaxLev').textContent = '1:' + m.max_lev;      // zapis dźwigni jak w całym PTF (1:100), nie „100×"
+    $('tMaxLev').textContent = '1:' + m.max_lev;      // leverage written as across PTF (1:100), not "100×"
     $('tVenueIc').innerHTML = V_ICON[S.venue];
     $('tVenueLbl').textContent = F.VENUES[S.venue].label;
     const note = S.venue === 'hyperliquid'
@@ -981,7 +981,7 @@
   }
   const baseName = (m) => (m.cls === 'crypto' ? m.base : m.sym);
 
-  // giełda (venue)
+  // exchange (venue)
   const venueMenu = document.createElement('div');
   venueMenu.className = 't-menu';
   venueMenu.hidden = true;
@@ -1002,7 +1002,7 @@
     renderConn();
   });
 
-  /* ---------- przełączenie rynku ---------- */
+  /* ---------- market switch ---------- */
   function setMarket(sym, push) {
     if (!BY[sym] || sym === S.sym) return;
     S.sym = sym; S.m = BY[sym];
@@ -1017,7 +1017,7 @@
   }
 
   /* =====================================================================
-     KSIĘGA I TRANSAKCJE
+     BOOK AND TRADES
      ===================================================================== */
   function buildBookCtl() {
     const m = S.m;
@@ -1060,12 +1060,12 @@
     });
     return [...out].map(([k, q]) => [+k, q]).sort((a, b) => (side === 'bid' ? b[0] - a[0] : a[0] - b[0]));
   }
-  // Liczba wierszy księgi z ResizeObservera: czytanie clientHeight w każdej klatce
-  // po zapisach do DOM wymuszało przeliczenie układu strony.
+  // Book row count from a ResizeObserver: reading clientHeight every frame after
+  // DOM writes forced a page layout recalculation.
   let bookRows = 0;
   new ResizeObserver(() => { const h = $('tAsks').clientHeight; if (h) { bookRows = Math.max(5, Math.floor(h / 21)); renderBook(); } }).observe($('tAsks'));
-  /* Wiersze księgi zostają w DOM-ie, zmieniają się tylko liczby i paski. Przebudowa
-     innerHTML w każdej klatce podmieniała wiersz pod kursorem i podświetlenie migało. */
+  /* Book rows stay in the DOM; only numbers and bars change. Rebuilding innerHTML
+     every frame swapped the row under the cursor and the highlight flickered. */
   const setTxt = (n, v) => { if (n.textContent !== v) n.textContent = v; };
   function fillBook(el, rows, m, sd, max) {
     while (el.children.length < rows.length) {
@@ -1086,7 +1086,7 @@
   function renderBook() {
     const m = S.m, el = $('tAsks');
     if (!S.tk.mark) renderTicker();
-    if (!el.offsetParent) return;          // księga schowana (telefon, zakładka Trades) — narysuje się po pokazaniu
+    if (!el.offsetParent) return;          // book hidden (phone, Trades tab) — it draws once shown
     fitGroups();
     const rows = bookRows || 11;
     const asks = grouped(S.book.asks, 'ask').slice(0, rows), bids = grouped(S.book.bids, 'bid').slice(0, rows);
@@ -1119,7 +1119,7 @@
   const TIME = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   function renderTrades() {
     const el = $('tTrades');
-    if (!el.offsetParent && S.trades.length) return;    // schowane — narysuje się po przełączeniu zakładki
+    if (!el.offsetParent && S.trades.length) return;    // hidden — it draws after the tab switches
     const m = S.m, sd = S.bookUnit === 'usd' ? 0 : Math.min(m.qty_dec, 4), list = S.trades.slice(0, 60);
     while (el.children.length < list.length) {
       const r = document.createElement('div');
@@ -1143,11 +1143,11 @@
   }));
 
   /* =====================================================================
-     PASEK TICKERÓW, WYSZUKIWARKA, STOPKA
+     TICKER BAR, SEARCH, FOOTER
      ===================================================================== */
   const mid = (m) => { const v = S.mids[m.hl]; return v != null ? +v : (S.ctx[m.hl] || {}).mid || null; };
   const chg24 = (m) => { const c = S.ctx[m.hl] || {}, p = mid(m); return c.prev && p ? (p / c.prev - 1) * 100 : null; };
-  // Brak kontekstu (jeszcze nie przyszedł) = „—", nie „$0" — sortowanie traktuje go jak zero.
+  // No context (not arrived yet) = "—", not "$0" — sorting treats it as zero.
   const vol24 = (m) => { const v = (S.ctx[m.hl] || {}).vol; return v == null ? null : v; };
   function sorted(mode) {
     let list = MKTS.slice();
@@ -1157,14 +1157,14 @@
     return list;
   }
   const MODES = { trending: 'Trending', volume: 'Top Volume', watch: 'Watchlist', all: 'All markets' };
-  /* Pasek tickerów: gdy kolejność rynków się nie zmieniła, podmieniamy tylko ceny
-     i zmiany w istniejących przyciskach (bez przebudowy ikon co 250 ms). */
+  /* Ticker bar: when the market order hasn't changed, swap only prices and
+     changes in the existing buttons (no icon rebuild every 250 ms). */
   let stripT = 0, stripKey = '';
   function renderStrip() {
     if (stripT) return;
     stripT = setTimeout(() => {
       stripT = 0;
-      if (document.hidden) return;          // powrót do karty i tak przerysuje
+      if (document.hidden) return;          // returning to the tab redraws anyway
       const el = $('tTicker'), list = sorted(S.tickMode);
       const key = S.tickMode + '|' + S.sym + '|' + list.map((m) => m.sym).join(',');
       if (key === stripKey && el.children.length === list.length) {
@@ -1198,7 +1198,7 @@
     for (const k in mids) if (BY_COIN[k]) S.mids[k] = +mids[k];
     renderStrip();
     if (S.st) renderLivePnl();
-    // Wyszukiwarka odświeża ceny najwyżej co pół sekundy (midy przychodzą dwa razy na tick: główna giełda i xyz).
+    // Search refreshes prices at most every half second (mids arrive twice per tick: main exchange and xyz).
     if (!$('tSearch').hidden && !searchT) searchT = setTimeout(() => { searchT = 0; if (!$('tSearch').hidden) searchPrices(); }, 500);
   });
   let searchT = 0;
@@ -1206,16 +1206,16 @@
     try {
       S.ctx = await F.contexts();
       renderStrip(); renderTicker();
-      if (!$('tSearch').hidden) searchPrices();     // lista otwarta od wejścia (?list=all) — wolumeny od razu
+      if (!$('tSearch').hidden) searchPrices();     // list open on arrival (?list=all) — volumes at once
     } catch (e) {}
   }
   loadCtx();
-  setInterval(() => { if (!document.hidden) loadCtx(); }, 30000);   // dwa duże zapytania — nie w ukrytej karcie
+  setInterval(() => { if (!document.hidden) loadCtx(); }, 30000);   // two big requests — not in a hidden tab
 
-  // wyszukiwarka rynków
+  // market search
   let sCat = 'all', sIdx = 0, sList = [];
-  // Ceny w otwartej liście: tylko liczby w istniejących wierszach (pełna przebudowa
-  // co pół sekundy migała podświetleniem pod kursorem i gubiła kliknięcia).
+  // Prices in the open list: only numbers in existing rows (a full rebuild every
+  // half second flickered the highlight under the cursor and lost clicks).
   function searchPrices() {
     const rows = $('tSearchList').querySelectorAll('.t-sr[data-sym]');
     if (rows.length !== sList.length || [...rows].some((r, i) => r.dataset.sym !== sList[i].sym)) { renderSearch(); return; }
@@ -1259,7 +1259,7 @@
   });
   document.addEventListener('keydown', (e) => { if (e.key === '/' && !e.target.closest('input,textarea') && !modalOpen) { e.preventDefault(); openSearch(); } });
 
-  // stopka: listy rynków i kalkulator
+  // footer: market lists and calculator
   const flist = (list, star) => list.map((m) => { const c = chg24(m); return `<button type="button" class="fl" data-sym="${m.sym}">${mIcon(m, true)}<b>${m.sym}</b><span class="num">${px(m, mid(m))}</span><span class="num ${cls(c)}">${pct(c)}</span></button>`; }).join('') || `<p class="t-hint" style="padding:10px">${star ? 'Star markets in search to build a watchlist.' : 'Loading…'}</p>`;
   dropdown($('tFTickers'), $('tFTickersMenu'), (mn) => { mn.innerHTML = flist(MKTS); });
   dropdown($('tFTop'), $('tFTopMenu'), (mn) => { mn.innerHTML = flist(sorted('volume').slice(0, 12)); });
@@ -1275,7 +1275,7 @@
       <label class="t-fld"><span>Stop loss</span><div class="t-in"><input id="cSl" inputmode="decimal" placeholder="price"><em>USD</em></div></label>
       <div class="row"><span>Size</span><b class="num" id="cOut">—</b></div><div class="row"><span>Lots</span><b class="num" id="cLots">—</b></div><div class="row"><span>Value</span><b class="num" id="cVal">—</b></div>`;
   });
-  // Słuchacze raz, poza wypełnianiem menu — wcześniej każde otwarcie dokładało kolejny.
+  // Listeners once, outside menu filling — before, every open added another one.
   $('tCalcMenu').addEventListener('input', () => {
     const eqv = numOf($('cEq').value), r = numOf($('cRisk').value) / 100, en = numOf($('cEn').value), sl = numOf($('cSl').value);
     if (!(eqv && r && en && sl && sl !== en)) { ['cOut', 'cLots', 'cVal'].forEach((id) => ($(id).textContent = '—')); return; }
@@ -1288,7 +1288,7 @@
   $('tCalcMenu').addEventListener('click', (e) => e.stopPropagation());
 
   /* =====================================================================
-     BILET ZLECENIA
+     ORDER TICKET
      ===================================================================== */
   function setKind(k) {
     S.kind = k;
@@ -1311,7 +1311,7 @@
   }
   $$('[data-side]').forEach((b) => b.addEventListener('click', () => setSide(b.dataset.side)));
   $('tPxMid').onclick = () => { const p = markPx(); if (p) { $('tPx').value = p.toFixed(S.m.px_dec); updateTicket(); } };
-  /* Pole Size w wybranej jednostce: Lots → USD → jednostka bazowa → Lots. */
+  /* Size field in the chosen unit: Lots → USD → base unit → Lots. */
   const UNITS = ['lots', 'usd', 'base'];
   const unitLbl = () => (S.unit === 'usd' ? 'USD' : S.unit === 'lots' ? 'Lots' : S.m.base);
   function toUnit(q) {
@@ -1388,7 +1388,7 @@
   function updateTicket() {
     const m = S.m, q = orderQty(), p = refPx(), L = lev();
     const val = q > 0 ? notional(m, q, p) : 0;
-    // Przelicznik pod polem Size: loty ⇄ jednostki bazowe (⇄ USD).
+    // Converter under the Size field: lots ⇄ base units (⇄ USD).
     $('tSizeHint').textContent = q > 0 ? `${lotsF(q / m.contract)} lots = ${qtyF(m, q)} ${m.base}${S.unit !== 'usd' && val ? ' ≈ ' + usd(val, 0) : ''}` : `1 lot = ${fx(m.contract, 0)} ${m.base}`;
     $('tEstPx').textContent = p ? px(m, p) : '—';
     $('tEstVal').textContent = val ? usd(val) : '—';
@@ -1403,7 +1403,7 @@
       $('tCap').textContent = `${fx(openLots(a), 2)} / ${fx(a.max_lots, 2)} lots`;
     } else $('tCap').textContent = S.token ? '—' : '—';
   }
-  // Limit lotów jest wspólny z Trade BOT-em: liczą się też jego otwarte pozycje.
+  // The lot cap is shared with Trade BOT: its open positions count too.
   const openLots = (a) => (a.open_lots || 0) + (a.other_lots || 0);
   let sending = false;
   async function submitOrder() {
@@ -1449,7 +1449,7 @@
   $('tGo').onclick = () => submitOrder();
 
   /* =====================================================================
-     KONTO, LOGOWANIE, STAN
+     ACCOUNT, SIGN-IN, STATE
      ===================================================================== */
   /* Several MT5 accounts stay signed in side by side, each with its own session. */
   function saveLogins() { if (!S.imp) ls.set('pf_term_logins', JSON.stringify(S.logins.filter((l) => !l.temp))); }
@@ -1553,8 +1553,8 @@
     clearView();
     refresh(true);
   }
-  /* Każda odpowiedź ze stanem ma numer. Spóźniony odczyt (poll wysłany przed
-     zleceniem, przed zmianą konta albo przed wylogowaniem) nie nadpisze nowszego. */
+  /* Each state response is numbered. A late read (poll sent before an order,
+     an account switch or a sign-out) won't overwrite a newer one. */
   let refreshing = false, stateSeq = 0;
   async function refresh(force) {
     if (!S.token || !S.accId || (refreshing && !force)) return;
@@ -1565,7 +1565,7 @@
       if (nr === stateSeq && acc === S.accId) setState(st);
     } catch (e) {} finally { refreshing = false; }
   }
-  // Stan z odpowiedzi na akcję (zlecenie, zamknięcie) — unieważnia odczyty w drodze.
+  // State from an action response (order, close) — invalidates reads in flight.
   function applyState(st) { stateSeq++; setState(st); }
   function setState(st) {
     if (!S.token || !st || !st.account || st.account.id !== S.accId) return;
@@ -1596,15 +1596,15 @@
     if (a.account.status !== b.account.status && b.account.status === 'failed') toast('Account closed', 'An account rule was breached. Check your dashboard for details.', true);
   }
   setInterval(() => { if (document.visibilityState === 'visible') refresh(); }, 15000);
-  // Powrót do karty: stan konta, kontekst rynków i pasek tickerów od razu, nie po kolejnym cyklu.
+  // Back to the tab: account state, market context and ticker bar at once, not after the next cycle.
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { refresh(); loadCtx(); renderStrip(); } });
 
-  // live P&L po stronie przeglądarki (midy Hyperliquid, jak na serwerze)
+  // live P&L in the browser (Hyperliquid mids, as on the server)
   function livePos() {
     if (!S.st) return [];
     return S.st.positions.filter((p) => !S.closing.has(p.id)).map((p) => {
       const m = BY[p.symbol];
-      if (!m) return p;                     // rynek spoza listy terminala: wycena z serwera
+      if (!m) return p;                     // market not in the terminal list: server price
       const closed = S.st && S.weekend && m.cls !== 'crypto';
       const mk = closed ? p.mark : (S.mids[m.hl] != null ? S.mids[m.hl] : p.mark);
       const pnl = mk != null ? pnlOf(m, p.side, p.qty, p.entry, mk) : p.pnl;
@@ -1621,8 +1621,8 @@
     updatePosLines();
     checkTriggers();
   }
-  // Co tick zmieniamy tylko kurs, wartość i P&L w istniejących wierszach. Przebudowa
-  // całej tabeli co 400 ms podmieniała przyciski w trakcie kliknięcia i „Close” potrafił nie zadziałać.
+  // Each tick changes only price, value and P&L in existing rows. Rebuilding the whole
+  // table every 400 ms swapped buttons mid-click and "Close" could fail to fire.
   function patchPositions() {
     const rows = $('tTable').querySelectorAll('tbody tr[data-pid]');
     const live = livePos();
@@ -1640,12 +1640,12 @@
       put('pnl', `${sUsd(p.pnl)} (${pct(p.roe)})`, cls(p.pnl));
     });
   }
-  // Cena przecięła TP/SL/limit — od razu prosimy serwer o przegląd (on rozstrzyga).
+  // Price crossed TP/SL/limit — ask the server for a review at once (it decides).
   let trigT = 0;
   function checkTriggers() {
     if (!S.st || document.hidden || Date.now() - trigT < 4000) return;
-    // Rynek zamknięty na weekend nic nie wyzwala (serwer wycenia go po piątku) —
-    // bez tego przecięte zlecenie pytało serwer co 4 s przez cały weekend.
+    // A weekend-closed market triggers nothing (server prices it at Friday's) —
+    // without this a crossed order asked the server every 4 s all weekend.
     const live = (m) => m && !(S.weekend && m.cls !== 'crypto');
     const hit = livePos().some((p) => live(BY[p.symbol]) && p.mark && ((p.side === 'buy' && ((p.tp && p.mark >= p.tp) || (p.sl && p.mark <= p.sl)))
       || (p.side === 'sell' && ((p.tp && p.mark <= p.tp) || (p.sl && p.mark >= p.sl)))))
@@ -1674,11 +1674,11 @@
     S.st.account.available = Math.max(0, eq - used);
   }
 
-  /* ---------- linie na wykresie ---------- */
+  /* ---------- chart lines ---------- */
   function drawLines() {
     if (!chart) return;
     chart.removeOverlay({ groupId: 'ptf' });
-    drawTrades();             // także bez stanu: po wylogowaniu transakcje znikają z wykresu
+    drawTrades();             // also without state: after sign-out trades leave the chart
     const ts = lastBar ? lastBar.timestamp : Date.now();
     const up = css('--up'), dn = css('--dn'), acc = css('--acc'), warn = css('--warn');
     const line = (v, text, color, dod) => v && chart.createOverlay({ name: 'ptfLine', groupId: 'ptf', lock: true, points: [{ timestamp: ts, value: v }], extendData: { text, color, ...(dod || {}) } });
@@ -1696,7 +1696,7 @@
     });
     S.st.orders.filter((o) => o.symbol === S.sym).forEach((o) => line(S.ordDrag && S.ordDrag.id === o.id ? S.ordDrag.v : o.price, `${o.kind === 'limit' ? 'Limit' : 'Stop'} ${o.side} ${lotsOf(S.m, o.qty)}`, o.side === 'buy' ? up : dn));
   }
-  // Żywy P&L na linii pozycji: przy każdym ticku cen zmieniamy tylko pole z wynikiem.
+  // Live P&L on the position line: each price tick changes only the result box.
   let posLines = {};
   const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const pnlTxt = (p) => (ok(p.pnl) ? `${sUsd(p.pnl)} (${pct(p.roe)})` : '');
@@ -1946,12 +1946,12 @@
   }
   (function loop2() { if (!document.hidden) placeTpsl(); requestAnimationFrame(loop2); })();
 
-  /* ---------- historia transakcji na wykresie (przycisk „Trades") ---------- */
+  /* ---------- trade history on the chart ("Trades" button) ---------- */
   let tradesKey = '', tipXY = [0, 0], tipT = 0;
   function drawTrades(force) {
     if (!chart) return;
     const hist = S.showTrades && S.st ? (S.st.history || []).filter((h) => h.symbol === S.sym && h.opened_at && h.closed_at && h.entry && h.close).slice(0, 60) : [];
-    // Odświeżenie stanu co 15 s nie przerysowuje transakcji, gdy się nie zmieniły (najechanie zostaje).
+    // The 15 s state refresh doesn't redraw trades when they haven't changed (hover stays).
     const key = S.sym + '|' + hist.map((h) => h.id).join(',');
     if (!force && key === tradesKey) return;
     tradesKey = key;
@@ -2021,7 +2021,7 @@
   };
 
   /* =====================================================================
-     TABELE NA DOLE
+     BOTTOM TABLES
      ===================================================================== */
   $('tColsMenu').addEventListener('click', (e) => e.stopPropagation());
   dropdown($('tColsBtn'), $('tColsMenu'), (mn) => {
@@ -2047,7 +2047,7 @@
   }
   function renderTables() {
     drawTables();
-    // nagłówek kolumny jako etykieta komórki: na telefonie wiersze są kartami (CSS td[data-l]::before)
+    // column header as the cell label: on phones rows are cards (CSS td[data-l]::before)
     const el = $('tTable');
     const th = $$('thead th', el).map((x) => x.textContent);
     $$('tbody tr', el).forEach((tr) => [...tr.children].forEach((td, i) => { if (th[i]) td.dataset.l = th[i]; }));
@@ -2111,7 +2111,7 @@
       const R = { close: 'Closed', reduce: 'Reduced', tp: 'Take profit', sl: 'Stop loss', liquidation: 'Liquidation', stop_out: 'Stop-out', breach: 'Rule breach', phase: 'Phase passed' };
       el.innerHTML = table([['Closed'], ['Market'], ['Side'], ['Size', 1], ['Entry', 1], ['Exit', 1], ['PnL', 1], ['Fees', 1], ['Reason']], st.history.map((h) => {
         const m = BY[h.symbol] || S.m;
-        // Loty z serwera (miara konta, jak w portalu i MT5) — ta sama postać dla każdej transakcji.
+        // Lots from the server (account measure, as in portal and MT5) — same form for each trade.
         const size = `${lotsF(h.lots)} lots <span class="sub">${qtyF(m, h.qty)} ${esc(m.base)}</span>`;
         return `<tr><td>${tm(h.closed_at)}</td><td>${sym(h.symbol)}</td><td>${side(h.side)}</td><td class="num">${size}</td><td class="num">${px(m, h.entry)}</td><td class="num">${px(m, h.close)}</td><td class="num ${cls(h.pnl)}">${sUsd(h.pnl)}</td><td class="num">${usd(h.fee)}</td><td><span class="t-pill ${h.reason === 'tp' ? 'ok' : ['sl', 'liquidation', 'stop_out', 'breach'].includes(h.reason) ? 'bad' : ''}">${R[h.reason] || esc(h.reason || '')}</span></td></tr>`;
       }), 'No closed positions yet');
@@ -2136,9 +2136,9 @@
       </div>`;
     }
   }
-  /* Akcje z tabel jedna naraz na obiekt: podwójne kliknięcie „Close 50%" wysyłało
-     dwie połówki i zamykało całą pozycję. Przycisk jest wyłączony do odpowiedzi
-     (wiersze nie są już przebudowywane co tick, więc to zostaje widoczne). */
+  /* Table actions one at a time per object: a double click on "Close 50%" sent two
+     halves and closed the whole position. The button is disabled until the reply
+     (rows are no longer rebuilt every tick, so this stays visible). */
   const busy = new Set();
   async function once(key, btn, fn) {
     if (busy.has(key)) return;
@@ -2595,7 +2595,7 @@
     } catch (er) { err.textContent = er.message; err.hidden = false; } finally { btn.disabled = false; btn.textContent = 'Connect'; }
   };
 
-  /* ---------- telefon: zakładki paneli ---------- */
+  /* ---------- phone: panel tabs ---------- */
   function setMPane(p) {
     root.dataset.mpane = p;
     tabOn($$('#tMTabs [data-pane]'), (b) => b.dataset.pane === p);
@@ -2613,7 +2613,7 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
 
-  /* ---------- motyw, udostępnianie ---------- */
+  /* ---------- theme, sharing ---------- */
   $('tTheme').onclick = () => {
     const light = document.documentElement.dataset.theme !== 'light';
     document.documentElement.dataset.theme = light ? 'light' : 'dark';
@@ -2622,15 +2622,15 @@
   };
   $('tShare').onclick = () => {
     const u = location.origin + '/trade/' + S.sym;
-    // writeText zwraca obietnicę — odmowa (brak uprawnień, http) przychodzi asynchronicznie.
+    // writeText returns a promise — a refusal (no permission, http) arrives asynchronously.
     const cb = navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(u) : Promise.reject();
     cb.then(() => toast('Link copied', u), () => toast('Copy this link', u));
   };
 
-  /* ---------- monit „Free Trade Case" dla niezalogowanych ---------- */
+  /* ---------- "Free Trade Case" prompt for guests ---------- */
   function casePrompt() {
     if (S.token || ls.get('pf_token', null) || ls.get('pf_case_prompt', '0') === '1') return;
-    const need = 10 + Math.floor(Math.random() * 30);   // 10–40 s patrzenia na stronę
+    const need = 10 + Math.floor(Math.random() * 30);   // 10–40 s viewing the page
     let seen = 0;
     const t = setInterval(() => {
       if (document.visibilityState !== 'visible' || modalOpen || S.token) return;
@@ -2641,9 +2641,9 @@
     }, 1000);
   }
 
-  /* ---------- prawy przycisk na wykresie (jak w TradingView) ---------- */
-  // Zlecenie po cenie spod kursora (limit albo stop — zależnie od strony rynku), widok,
-  // kopiowanie ceny, transakcje i rysunki na wykresie, wskaźniki.
+  /* ---------- chart right-click (as in TradingView) ---------- */
+  // Order at the cursor price (limit or stop — depending on the market side), view,
+  // copy price, trades and drawings on the chart, indicators.
   let prawyNaRysunku = 0, ctxPx = null;
   /* ---------- measure: Shift + left click ----------
      Shift + press starts the box at the cursor; drag and release, or move and click
@@ -2715,7 +2715,7 @@
     ev.preventDefault();
     const r = $('tChart').getBoundingClientRect(), x = ev.clientX - r.left, y = ev.clientY - r.top;
     setTimeout(() => {
-      if (Date.now() - prawyNaRysunku < 400) return;      // prawy klik usunął rysunek — bez menu
+      if (Date.now() - prawyNaRysunku < 400) return;      // right click removed a drawing — no menu
       let cena = null;
       try {
         const pane = chart.getSize('candle_pane');
@@ -2780,7 +2780,7 @@
     if (e.altKey && e.code === 'KeyR' && !e.target.closest('input,textarea,select')) { e.preventDefault(); resetView(); }
   });
 
-  /* ---------- menu (burger) — jak na stronie PTF, gdy linki nie mieszczą się w nagłówku ---------- */
+  /* ---------- menu (burger) — as on the PTF site, when links don't fit the header ---------- */
   function setMenu(open) {
     $('tMMenu').hidden = !open;
     $('tBurger').setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -2794,7 +2794,7 @@
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('tMMenu').hidden) setMenu(false); });
   window.addEventListener('scroll', () => { if (!$('tMMenu').hidden) setMenu(false); }, { passive: true });
 
-  // Pasek rynku przewijany w bok: miękka krawędź tylko wtedy, gdy za nią coś jeszcze jest.
+  // Market bar scrolling sideways: a soft edge only when there is more beyond it.
   const mktBar = document.querySelector('.t-mkt');
   const mktMore = () => mktBar.classList.toggle('more', mktBar.scrollLeft + mktBar.clientWidth < mktBar.scrollWidth - 2);
   mktBar.addEventListener('scroll', mktMore, { passive: true });
@@ -2816,7 +2816,7 @@
     loadAccounts();
     fetch('/api/terminal/markets').then((r) => r.json()).then((d) => { S.weekend = !!d.weekend; S.fee = d.fee_pct; updateTicket(); renderInfo(); }).catch(() => {});
     if (root.dataset.missing) toast(`${root.dataset.missing} trades in MT5`, 'The web terminal has crypto, metals, energy, indices and EUR/GBP/JPY for now.');
-    // „See the full list" ze strony głównej: /trade?list=all otwiera listę wszystkich rynków.
+    // "See the full list" from the home page: /trade?list=all opens the list of all markets.
     if (new URLSearchParams(location.search).has('list')) {
       history.replaceState(null, '', location.pathname);
       openSearch();
