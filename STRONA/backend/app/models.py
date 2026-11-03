@@ -647,6 +647,10 @@ class Trade(Base):
     margin: Mapped[float | None] = mapped_column(Float, nullable=True)
     tp: Mapped[float | None] = mapped_column(Float, nullable=True)
     sl: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Trailing stop: odległość od najlepszej ceny (w jednostkach ceny). SL idzie tylko w stronę zysku.
+    trail: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Notatka tradera w dzienniku.
+    journal: Mapped[str | None] = mapped_column(String(500), nullable=True)
     liq_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     fee: Mapped[float | None] = mapped_column(Float, nullable=True)
     slippage: Mapped[float | None] = mapped_column(Float, nullable=True)   # % od mid przy wejściu

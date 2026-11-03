@@ -294,6 +294,8 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "margin": "FLOAT",
         "tp": "FLOAT",
         "sl": "FLOAT",
+        "trail": "FLOAT",
+        "journal": "VARCHAR(500)",
         "liq_price": "FLOAT",
         "fee": "FLOAT",
         "slippage": "FLOAT",

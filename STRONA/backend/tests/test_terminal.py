@@ -516,3 +516,37 @@ def test_retencja_logowan(rynek):
     assert s.query(TerminalLogin).filter_by(login="stary-1").count() == 0
     assert s.query(TerminalLogin).filter_by(login="nowy-1").count() == 1
     s.close()
+
+
+def test_trailing_i_break_even_i_przesuniecie_zlecenia(rynek):
+    aid, h = _konto()
+    with TestClient(app) as c:
+        st = _zlec(c, h, aid, qty=0.01).json()
+        p = st["positions"][0]
+        # break-even tylko na zysku
+        r = c.post(f"/api/terminal/positions/{p['id']}/break-even", json={"account_id": aid}, headers=h)
+        assert r.status_code == 400 and "in profit" in r.json()["detail"]
+        # trailing ustawia SL poniżej ceny i nie cofa go
+        r = c.patch(f"/api/terminal/positions/{p['id']}", json={"account_id": aid, "tp": None, "sl": None, "trail": 100}, headers=h)
+        assert r.status_code == 200
+        q = r.json()["positions"][0]
+        assert q["trail"] == 100 and q["sl"] is not None and q["sl"] < q["entry"] + 1
+    s = SessionLocal()
+    pos = s.get(Trade, p["id"])
+    sl0 = pos.sl
+    terminal._podciagnij_sl(pos, {"h": sl0 + 500, "l": sl0 + 150})
+    assert pos.sl == sl0 + 400
+    terminal._podciagnij_sl(pos, {"h": sl0 + 200, "l": sl0 + 150})
+    assert pos.sl == sl0 + 400, "SL nie cofa się"
+    s.close()
+
+
+def test_notatka_i_historia(rynek):
+    aid, h = _konto()
+    with TestClient(app) as c:
+        p = _zlec(c, h, aid, qty=0.01).json()["positions"][0]
+        c.post(f"/api/terminal/positions/{p['id']}/close", json={"account_id": aid, "max_slippage_pct": 2}, headers=h)
+        d = c.get(f"/api/terminal/history?account_id={aid}", headers=h).json()
+        tid = d["history"][0]["id"]
+        assert c.put(f"/api/terminal/trades/{tid}/note", json={"account_id": aid, "note": "  plan ok "}, headers=h).json()["note"] == "plan ok"
+        assert c.get(f"/api/terminal/history?account_id={aid}", headers=h).json()["history"][0]["note"] == "plan ok"

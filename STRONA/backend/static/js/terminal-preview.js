@@ -11,7 +11,8 @@
       .then((r) => r.json())
       .then((d) => {
         const bid = +d.levels[0][0].px, ask = +d.levels[1][0].px;
-        el.textContent = ((ask - bid) / ((ask + bid) / 2) * 100).toFixed(4) + '%';
+        const v = ask - bid;
+        el.textContent = (el.dataset.pre || '') + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: v < 0.1 ? 3 : 2 }) + (el.dataset.post || '');
       }).catch(() => {}));
     new IntersectionObserver((en) => {
       clearInterval(t);

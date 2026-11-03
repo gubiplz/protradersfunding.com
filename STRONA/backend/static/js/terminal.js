@@ -84,6 +84,8 @@
     logins: [],     // [{ token, id, login }], saved in this browser
     closing: new Set(),      // positions leaving the screen while the server confirms
     justClosed: new Set(),   // trades whose chart marker draws itself in
+    ordDrag: null,           // pending order being dragged on the chart: { id, v }
+    alerts: [],
     imp: false,     // admin view opened from the panel: read-only, never saved
     accounts: [], accId: +ls.get('pf_term_acc', '0') || null, st: null, ptab: 'positions',
     // Poślizg domyślnie schowany (jest w Columns): z nim tabela nie mieściła się pod wykresem nawet na 1440 px.
@@ -164,7 +166,7 @@
     try { r = await fetch(path, { ...(opts || {}), headers: h }); } catch (e) { throw new Error('Network error. Check your connection.'); }
     let d = null;
     try { d = await r.json(); } catch (e) {}
-    if (r.status === 401 && tok) { dropLogin(tok); throw new Error((d && d.detail) || 'Session expired. Sign in again.'); }
+    if (r.status === 401 && tok) { dropLogin(tok); throw new Error((d && d.detail) || 'Session expired. Connect again.'); }
     if (!r.ok) {
       const det = d && d.detail;
       throw new Error(Array.isArray(det) ? det.map((x) => x.msg).join('; ') : det || 'Error ' + r.status);
@@ -1399,7 +1401,7 @@
     if (S.st) {
       const a = S.st.account;
       $('tCap').textContent = `${fx(openLots(a), 2)} / ${fx(a.max_lots, 2)} lots`;
-    } else $('tCap').textContent = S.token ? '—' : 'Sign In';
+    } else $('tCap').textContent = S.token ? '—' : '—';
   }
   // Limit lotów jest wspólny z Trade BOT-em: liczą się też jego otwarte pozycje.
   const openLots = (a) => (a.open_lots || 0) + (a.other_lots || 0);
@@ -1431,6 +1433,7 @@
       const st = await api('/api/terminal/orders', { method: 'POST', body: JSON.stringify(body) });
       applyState(st);
       const what = S.kind === 'market' ? 'Order filled' : 'Order placed';
+      beep('fill');
       const z = st.order_history && st.order_history[0];
       toast(what, `${S.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(m, body.qty)} (${qtyF(m, body.qty)} ${m.base}) ${m.sym}${z && z.fill_price && S.kind === 'market' ? ' at ' + px(m, z.fill_price) : body.price ? ' at ' + px(m, body.price) : ''}`);
       $('tSize').value = ''; $('tPct').value = 0; $('tPctIn').value = 0;
@@ -1449,7 +1452,7 @@
      KONTO, LOGOWANIE, STAN
      ===================================================================== */
   /* Several MT5 accounts stay signed in side by side, each with its own session. */
-  function saveLogins() { if (!S.imp) ls.set('pf_term_logins', JSON.stringify(S.logins)); }
+  function saveLogins() { if (!S.imp) ls.set('pf_term_logins', JSON.stringify(S.logins.filter((l) => !l.temp))); }
   function restoreLogins() {
     const m = /^#imp=(.+)$/.exec(location.hash);
     if (m) {
@@ -1486,13 +1489,12 @@
     if (!t) return;
     fetch('/api/terminal/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + t } }).catch(() => {});
     dropLogin(t);
-    toast('Signed out of the account');
+    toast('MT5 account disconnected');
   }
   function renderUser() {
     $('tGuest').hidden = !!S.token;
     $('tUser').hidden = !S.token;
     $('tMMLogin').hidden = !!S.token;
-    $('tMMenu').querySelector('.t-mm-dash').hidden = !S.token;
     const a = S.accounts.find((x) => x.id === S.accId);
     $('tAccLbl').textContent = a ? `#${a.login} · ${big(a.size).replace('.0K', 'K')}` : 'No account';
     $('tAccBtn').querySelector('.dot').classList.toggle('off', !(a && a.tradable));
@@ -1506,8 +1508,8 @@
   dropdown($('tAccBtn'), accMenu, (mn) => {
     mn.innerHTML = '<h6>MT5 accounts</h6>' + S.accounts.map((a) => `<button type="button" class="t-acc-row" data-acc="${a.id}"><span class="mi sm" style="background:${a.tradable ? 'var(--up)' : 'var(--dim)'}"></span>#${esc(a.login)} · ${big(a.size)}<span class="tag">${a.status === 'failed' ? 'Breached' : phaseLbl(a)}</span>${a.id === S.accId ? '<span class="chk">✓</span>' : ''}</button>`).join('')
       + (S.imp ? '' : '<button type="button" class="t-acc-add" data-add="1">+ Add MT5 account</button>')
-      + '<a href="/portal">Open dashboard</a><a href="/#pricing">Get a new challenge</a>'
-      + (S.imp ? '' : '<button type="button" data-out="1">Sign out of this account</button>');
+      + '<a href="/#pricing">Get a new challenge</a>'
+      + (S.imp ? '' : '<button type="button" data-out="1">Disconnect this account</button>');
   });
   accMenu.addEventListener('click', (e) => {
     const b = e.target.closest('[data-acc]');
@@ -1577,6 +1579,8 @@
     }
     S.closing.forEach((id) => { if (!st.positions.some((p) => p.id === id)) S.closing.delete(id); });
     S.fee = st.fee_pct;
+    watchLimits(st);
+    if (before && report && before.history[0] !== st.history[0] && (!before.history[0] || !st.history[0] || before.history[0].id !== st.history[0].id)) report = null;
     renderUser(); renderAccount(); renderTables(); drawLines(); updateTicket();
   }
   function notifyFills(a, b) {
@@ -1584,10 +1588,10 @@
     const now = new Set(b.positions.map((p) => p.id));
     b.history.filter((h) => was.has(h.id) && !now.has(h.id) && ['tp', 'sl', 'liquidation', 'stop_out', 'breach', 'phase'].includes(h.reason)).forEach((h) => {
       const L = { tp: 'Take profit hit', sl: 'Stop loss hit', liquidation: 'Position liquidated', stop_out: 'Stop-out: margin level too low', breach: 'Closed: account rule breached', phase: 'Phase passed: position closed' }[h.reason];
-      toast(L, `${h.symbol} ${sUsd(h.pnl)}`, h.pnl < 0);
+      signal(h.pnl < 0 ? 'bad' : 'good', L, `${h.symbol} ${sUsd(h.pnl)}`, h.pnl < 0);
     });
     const oldOpen = new Set(a.orders.map((o) => o.id));
-    b.order_history.filter((o) => oldOpen.has(o.id) && o.status === 'filled').forEach((o) => toast('Order filled', `${o.symbol} ${o.kind} ${o.side} at ${px(BY[o.symbol] || S.m, o.fill_price)}`));
+    b.order_history.filter((o) => oldOpen.has(o.id) && o.status === 'filled').forEach((o) => signal('fill', 'Order filled', `${o.symbol} ${o.kind} ${o.side} at ${px(BY[o.symbol] || S.m, o.fill_price)}`));
     if (a.account.status !== b.account.status && b.account.status === 'failed') toast('Account closed', 'An account rule was breached. Check your dashboard for details.', true);
   }
   setInterval(() => { if (document.visibilityState === 'visible') refresh(); }, 15000);
@@ -1674,10 +1678,11 @@
     if (!chart) return;
     chart.removeOverlay({ groupId: 'ptf' });
     drawTrades();             // także bez stanu: po wylogowaniu transakcje znikają z wykresu
-    if (!S.st) return;
     const ts = lastBar ? lastBar.timestamp : Date.now();
     const up = css('--up'), dn = css('--dn'), acc = css('--acc'), warn = css('--warn');
     const line = (v, text, color, dod) => v && chart.createOverlay({ name: 'ptfLine', groupId: 'ptf', lock: true, points: [{ timestamp: ts, value: v }], extendData: { text, color, ...(dod || {}) } });
+    S.alerts.filter((a) => a.sym === S.sym).forEach((a) => line(a.price, `Alert ${px(S.m, a.price)}`, css('--muted')));
+    if (!S.st) return;
     posLines = {};
     livePos().filter((p) => p.symbol === S.sym).forEach((p) => {
       const ext = { up, dn, pos: true, bg: css('--panel'), pnlText: pnlTxt(p), pnlColor: p.pnl >= 0 ? up : dn };
@@ -1685,10 +1690,10 @@
       if (id) posLines[p.id] = { id, ts, entry: p.entry, ext: { text: `${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, color: p.side === 'buy' ? up : dn, ...ext } };
       if (!(tpslEd && tpslEd.id === p.id)) {
         line(p.tp, 'TP ' + px(S.m, p.tp), acc);
-        line(p.sl, 'SL ' + px(S.m, p.sl), warn);
+        line(p.sl, `SL ${px(S.m, p.sl)}${p.trail ? ' · trailing' : ''}`, warn);
       }
     });
-    S.st.orders.filter((o) => o.symbol === S.sym).forEach((o) => line(o.price, `${o.kind === 'limit' ? 'Limit' : 'Stop'} ${o.side} ${lotsOf(S.m, o.qty)}`, o.side === 'buy' ? up : dn));
+    S.st.orders.filter((o) => o.symbol === S.sym).forEach((o) => line(S.ordDrag && S.ordDrag.id === o.id ? S.ordDrag.v : o.price, `${o.kind === 'limit' ? 'Limit' : 'Stop'} ${o.side} ${lotsOf(S.m, o.qty)}`, o.side === 'buy' ? up : dn));
   }
   // Żywy P&L na linii pozycji: przy każdym ticku cen zmieniamy tylko pole z wynikiem.
   let posLines = {};
@@ -1719,6 +1724,8 @@
       posBar.dataset.k = k;
       posBar.innerHTML = ids.map((id) => `<div class="t-pb" data-pb="${id}" hidden>
         <button type="button" data-pbt="tpsl" title="Set take profit / stop loss">TP/SL</button>
+        <button type="button" data-pbt="be" title="Move the stop to the entry price">BE</button>
+        <button type="button" data-pbt="trail" title="Trailing stop">Trail</button>
         <button type="button" data-pbt="rev" title="Reverse position" aria-label="Reverse position"><svg viewBox="0 0 24 24"><path d="M7 4v14M3 14l4 4 4-4M17 20V6M13 10l4-4 4 4"/></svg></button>
         <button type="button" data-pbt="close" class="x" title="Close position" aria-label="Close position"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`).join('');
     }
@@ -1745,6 +1752,8 @@
     const id = +b.closest('[data-pb]').dataset.pb;
     if (b.dataset.pbt === 'close') closePos(id, false, b);
     else if (b.dataset.pbt === 'rev') reversePos(id, b);
+    else if (b.dataset.pbt === 'be') breakEven(id, b);
+    else if (b.dataset.pbt === 'trail') trailDialog(id);
     else startTpsl(id);
   });
 
@@ -1880,8 +1889,9 @@
     const want = [];
     if (S.st && chart && cTab === 'chart') {
       S.st.positions.filter((p) => p.symbol === S.sym && !(tpslEd && tpslEd.id === p.id)).forEach((p) => {
-        ['tp', 'sl'].forEach((k) => { if (p[k]) want.push({ id: p.id, k, v: p[k], text: `${k.toUpperCase()} ${px(S.m, p[k])}` }); });
+        ['tp', 'sl'].forEach((k) => { if (p[k]) want.push({ id: p.id, k, v: p[k], text: `${k.toUpperCase()} ${px(S.m, p[k])}${k === 'sl' && p.trail ? ' · trailing' : ''}` }); });
       });
+      S.st.orders.filter((o) => o.symbol === S.sym).forEach((o) => want.push({ id: o.id, k: 'ord', v: S.ordDrag && S.ordDrag.id === o.id ? S.ordDrag.v : o.price, text: `${o.kind === 'limit' ? 'Limit' : 'Stop'} ${o.side} ${lotsOf(S.m, o.qty)}` }));
     }
     const key = want.map((w) => `${w.id}${w.k}`).join(',');
     if (gripBar.dataset.k !== key) {
@@ -1904,6 +1914,7 @@
     const g = e.target.closest('[data-gk]');
     if (!g) return;
     e.preventDefault(); e.stopPropagation();
+    if (g.dataset.gk === 'ord') return dragOrder(+g.dataset.gp);
     startTpsl(+g.dataset.gp, true);
     if (tpslEd) dragLevel(g.dataset.gk);
   }, true);
@@ -2069,7 +2080,7 @@
     $('tOrdN').textContent = st && st.orders.length ? ` (${st.orders.length})` : '';
     $('tCloseAll').disabled = !(st && st.positions.length);
     if (!S.token) {
-      el.innerHTML = `<div class="t-empty"><div>Sign in to see your trading activity<br><button class="t-btn" type="button" data-signin>Sign In</button></div></div>`;
+      el.innerHTML = `<div class="t-empty"><div>Connect your MT5 account to see your trading activity<br><button class="t-btn" type="button" data-signin>Connect MT5</button></div></div>`;
       return;
     }
     if (S.ptab === 'accounts') {
@@ -2077,6 +2088,7 @@
       return;
     }
     if (!st) { el.innerHTML = `<div class="t-empty">${S.accounts.length ? 'Loading…' : 'No active challenge account yet.'}</div>`; return; }
+    if (S.ptab === 'report') { if (!el.querySelector('input:focus')) el.innerHTML = reportHtml(); return; }
     const sym = (s) => { const m = BY[s]; return m ? `<span class="sym">${mIcon(m, true)}${s}</span>` : esc(s); };
     const side = (s) => `<span class="side ${s === 'buy' ? 'up' : 'dn'}">${s === 'buy' ? 'Long' : 'Short'}</span>`;
     const table = (head, rows, empty) => (rows.length ? `<table><thead><tr>${head.map(([h, n]) => `<th class="${n ? 'num' : ''}">${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>` : `<div class="t-empty">${empty}</div>`);
@@ -2171,6 +2183,7 @@
         applyState(await api(`/api/terminal/positions/${id}/close`, { method: 'POST', body: JSON.stringify(body) }));
         const h = S.st && S.st.history[0];
         toast(half ? 'Closed 50%' : 'Position closed', h ? `${h.symbol} ${sUsd(h.pnl)}` : '');
+        beep(h && h.pnl < 0 ? 'bad' : 'good');
       } catch (er) { if (!half) comeBack([id]); toast('Close failed', er.message, true); refresh(true); }
     });
   }
@@ -2219,6 +2232,312 @@
     });
   };
 
+  /* =====================================================================
+     TRADING TOOLS: break-even, trailing stop, orders from the chart, one-click,
+     keyboard, alerts, sounds and notifications, account report
+     ===================================================================== */
+  const lsJson = (k, d) => { try { return JSON.parse(ls.get(k, '')) || d; } catch (e) { return d; } };
+  const PREF = Object.assign({ oneClick: false, sounds: true, notify: false, lots: 0.01 }, lsJson('pf_term_prefs', {}));
+  const savePref = () => ls.set('pf_term_prefs', JSON.stringify(PREF));
+  const tradable = () => S.token && S.st && S.st.account && S.st.account.tradable && !S.imp;
+
+  /* ---------- sounds and notifications ---------- */
+  let audio = null;
+  function beep(kind) {
+    if (!PREF.sounds) return;
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const notes = { fill: [660, 880], good: [660, 990], bad: [440, 300], alert: [880, 880] }[kind] || [660];
+      notes.forEach((f, i) => {
+        const o = audio.createOscillator(), g = audio.createGain(), t = audio.currentTime + i * 0.11;
+        o.type = 'sine'; o.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.09, t + 0.015);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+        o.connect(g).connect(audio.destination);
+        o.start(t); o.stop(t + 0.11);
+      });
+    } catch (e) {}
+  }
+  function pushNote(title, body) {
+    if (!PREF.notify || !('Notification' in window) || Notification.permission !== 'granted' || !document.hidden) return;
+    try { new Notification(title, { body, icon: '/static/img/icon-192.png' }); } catch (e) {}
+  }
+  function signal(kind, title, body, bad) {
+    beep(kind);
+    pushNote(title, body);
+    if (title) toast(title, body, bad);
+  }
+  /* Warns once per account and day when equity gets close to a loss limit. */
+  function watchLimits(st) {
+    const a = st.account, m = a && a.metrics;
+    if (!m || !a.tradable) return;
+    const floor = Math.max(m.daily_floor || 0, m.overall_floor || 0), room = a.equity - floor;
+    const near = (a.size || 0) * 0.005;
+    const key = `${a.id}:${(st.server_time || '').slice(0, 10)}`;
+    if (floor > 0 && room <= near && room > 0 && watchLimits.seen !== key) {
+      watchLimits.seen = key;
+      signal('bad', 'Close to your loss limit', `${usd(room)} left before an account rule is breached.`, true);
+    }
+  }
+
+  /* ---------- break-even and trailing stop ---------- */
+  function breakEven(id, btn) {
+    return once('pos' + id, btn, async () => {
+      try {
+        applyState(await api(`/api/terminal/positions/${id}/break-even`, { method: 'POST', body: JSON.stringify({ account_id: S.accId }) }));
+        toast('Stop moved to break-even');
+      } catch (er) { toast('Break-even not set', er.message, true); }
+    });
+  }
+  async function trailDialog(id) {
+    const p = S.st.positions.find((x) => x.id === id);
+    if (!p) return;
+    const m = BY[p.symbol], mk = S.mids[m.hl] || p.mark || p.entry;
+    const preset = (pc) => roundPx(m, mk * pc / 100);
+    const okk = await confirmBox(`Trailing stop · ${p.symbol} ${p.side === 'buy' ? 'Long' : 'Short'}`, `
+      <p>The stop follows the best price at this distance and never moves back.</p>
+      <label class="t-fld" style="margin-top:12px"><span>Distance (price)</span><div class="t-in"><input id="eTrail" inputmode="decimal" value="${p.trail || preset(0.5)}"></div></label>
+      <div class="t-trail-pre">${[0.25, 0.5, 1, 2].map((v) => `<button type="button" data-v="${preset(v)}">${v}%</button>`).join('')}</div>
+      <p class="t-hint" style="margin-top:10px">Set 0 to turn trailing off. The current stop stays where it is.</p>`, 'Save');
+    if (!okk) return;
+    const trail = numOf($('eTrail').value) || 0;
+    await once('pos' + id, null, async () => {
+      try {
+        applyState(await api(`/api/terminal/positions/${id}`, { method: 'PATCH', body: JSON.stringify({ account_id: S.accId, tp: p.tp, sl: p.sl, trail }) }));
+        toast(trail ? 'Trailing stop on' : 'Trailing stop off', trail ? `Distance ${px(m, trail)}` : '');
+      } catch (er) { toast('Trailing stop not set', er.message, true); }
+    });
+  }
+  $('tConfirmBody').addEventListener('click', (e) => {
+    const b = e.target.closest('.t-trail-pre [data-v]');
+    if (b) $('eTrail').value = b.dataset.v;
+  });
+
+  /* ---------- orders and alerts from the chart ---------- */
+  const plus = document.createElement('button');
+  plus.type = 'button'; plus.className = 't-plus'; plus.hidden = true; plus.textContent = '+';
+  plus.title = 'Order or alert at this price';
+  const plusMenu = document.createElement('div');
+  plusMenu.className = 't-plus-menu'; plusMenu.hidden = true;
+  $('tChart').append(plus, plusMenu);
+  let plusPx = null;
+  const priceAtY = (y) => {
+    try { const pt = chart.convertFromPixel({ x: 40, y }, { paneId: 'candle_pane', absolute: true }); return pt && ok(pt.value) && pt.value > 0 ? pt.value : null; } catch (e) { return null; }
+  };
+  $('tChart').addEventListener('mousemove', (e) => {
+    if (!chart || !plusMenu.hidden || !matchMedia('(hover:hover)').matches) return;
+    if (armedId || e.target.closest('.t-grip,.t-pb,.t-th,.t-tp-panel,.t-oc')) { plus.hidden = true; return; }
+    const r = $('tChart').getBoundingClientRect(), y = e.clientY - r.top, v = priceAtY(y);
+    let w = 60;
+    try { w = chart.getSize('candle_pane', 'yAxis').width; } catch (er) {}
+    if (v == null || !S.m) { plus.hidden = true; return; }
+    plusPx = roundPx(S.m, v);
+    plus.hidden = false;
+    plus.style.transform = `translate(${Math.round(r.width - w - 26)}px,${Math.round(y - 10)}px)`;
+  });
+  $('tChart').addEventListener('mouseleave', () => { if (plusMenu.hidden) plus.hidden = true; });
+  ['mousedown', 'mouseup', 'click'].forEach((t) => [plus, plusMenu].forEach((el) => el.addEventListener(t, (e) => e.stopPropagation())));
+  plus.addEventListener('click', () => {
+    const m = S.m, mk = S.mids[m.hl] || 0, above = plusPx > mk, l = lotsF(PREF.lots);
+    const opt = (side, kind, label) => `<button type="button" data-po="${side}:${kind}"${tradable() ? '' : ' disabled'}><span class="${side === 'buy' ? 'up' : 'dn'}">${label}</span> ${l} lots</button>`;
+    plusMenu.innerHTML = `<h6>${px(m, plusPx)}</h6>`
+      + (above ? opt('sell', 'limit', 'Sell limit') + opt('buy', 'stop', 'Buy stop') : opt('buy', 'limit', 'Buy limit') + opt('sell', 'stop', 'Sell stop'))
+      + '<button type="button" data-po="alert">Set price alert</button>';
+    const r = $('tChart').getBoundingClientRect(), tr = plus.getBoundingClientRect();
+    plusMenu.hidden = false;
+    plusMenu.style.transform = `translate(${Math.round(tr.left - r.left - 170)}px,${Math.round(Math.min(tr.top - r.top, r.height - plusMenu.offsetHeight - 6))}px)`;
+  });
+  document.addEventListener('mousedown', (e) => { if (!plusMenu.hidden && !e.target.closest('.t-plus-menu,.t-plus')) { plusMenu.hidden = true; plus.hidden = true; } });
+  plusMenu.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-po]');
+    if (!b) return;
+    plusMenu.hidden = true; plus.hidden = true;
+    if (b.dataset.po === 'alert') return addAlert(S.sym, plusPx);
+    const [side, kind] = b.dataset.po.split(':'), m = S.m;
+    await placeOrder({ side, kind, price: plusPx, qty: +(PREF.lots * m.contract).toFixed(8) }, `${kind === 'limit' ? 'Limit' : 'Stop'} order placed`);
+  });
+  async function placeOrder(o, title) {
+    if (!S.token) return openModal('tReady');
+    const m = S.m;
+    try {
+      const st = await api('/api/terminal/orders', { method: 'POST', body: JSON.stringify({ account_id: S.accId, symbol: m.sym, reduce_only: false, max_slippage_pct: S.slip, ...o }) });
+      applyState(st);
+      toast(title, `${o.side === 'buy' ? 'Buy' : 'Sell'} ${lotsOf(m, o.qty)} ${m.sym}${o.price ? ' at ' + px(m, o.price) : ''}`);
+      beep('fill');
+    } catch (er) { toast('Order rejected', er.message, true); beep('bad'); }
+  }
+  /* Drag a pending order's dot: the line follows, the new price goes out on release. */
+  function dragOrder(id) {
+    const o = S.st && S.st.orders.find((x) => x.id === id);
+    if (!o) return;
+    const m = BY[o.symbol], r = $('tChart').getBoundingClientRect();
+    S.ordDrag = { id, v: o.price };
+    const mv = (ev) => {
+      const v = priceAtY(ev.clientY - r.top);
+      if (v != null) { S.ordDrag.v = roundPx(m, v); drawLines(); }
+    };
+    const up = async () => {
+      window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up);
+      const price = S.ordDrag.v;
+      if (price === o.price) { S.ordDrag = null; return drawLines(); }
+      try {
+        const st = await api(`/api/terminal/orders/${id}`, { method: 'PATCH', body: JSON.stringify({ account_id: S.accId, price }) });
+        S.ordDrag = null;
+        applyState(st);
+        toast('Order moved', `${o.symbol} at ${px(m, price)}`);
+      } catch (er) { S.ordDrag = null; drawLines(); toast('Order not moved', er.message, true); }
+    };
+    window.addEventListener('mousemove', mv);
+    window.addEventListener('mouseup', up);
+  }
+
+  /* ---------- price alerts: kept in this browser, checked while the tab is open ---------- */
+  S.alerts = lsJson('pf_term_alerts', []);
+  const saveAlerts = () => ls.set('pf_term_alerts', JSON.stringify(S.alerts));
+  function addAlert(sym, price) {
+    const m = BY[sym], mk = S.mids[m.hl];
+    if (!mk) return toast('No live price yet', 'Try again in a moment.', true);
+    S.alerts.push({ id: Date.now(), sym, price, above: price > mk });
+    saveAlerts(); drawLines();
+    toast('Price alert set', `${sym} at ${px(m, price)}`);
+  }
+  function checkAlerts() {
+    if (!S.alerts.length) return;
+    const hit = S.alerts.filter((a) => { const v = S.mids[BY[a.sym] ? BY[a.sym].hl : '']; return v && (a.above ? v >= a.price : v <= a.price); });
+    if (!hit.length) return;
+    S.alerts = S.alerts.filter((a) => !hit.includes(a));
+    saveAlerts(); drawLines();
+    hit.forEach((a) => signal('alert', `${a.sym} reached ${px(BY[a.sym], a.price)}`, 'Price alert'));
+  }
+  setInterval(checkAlerts, 1000);
+
+  /* ---------- one-click trading and keyboard ---------- */
+  const oc = document.createElement('div');
+  oc.className = 't-oc'; oc.hidden = true;
+  oc.innerHTML = `<button type="button" class="s" data-oc="sell"><small>Sell</small><b data-oc-b>—</b></button>
+    <input data-oc-l inputmode="decimal" aria-label="Lots" title="Lots">
+    <button type="button" class="b" data-oc="buy"><small>Buy</small><b data-oc-a>—</b></button>`;
+  $('tChart').appendChild(oc);
+  ['mousedown', 'mouseup', 'click', 'wheel'].forEach((t) => oc.addEventListener(t, (e) => e.stopPropagation()));
+  const ocLots = oc.querySelector('[data-oc-l]');
+  ocLots.addEventListener('change', () => {
+    const v = Math.max(0.01, Math.round((numOf(ocLots.value) || 0.01) * 100) / 100);
+    PREF.lots = v; savePref(); ocLots.value = v.toFixed(2);
+  });
+  function renderOc() {
+    oc.hidden = !PREF.oneClick || cTab !== 'chart';
+    if (oc.hidden || !S.m) return;
+    if (document.activeElement !== ocLots) ocLots.value = (+PREF.lots).toFixed(2);
+    const [bid, ask] = S.top || [];
+    oc.querySelector('[data-oc-b]').textContent = bid ? px(S.m, bid) : '—';
+    oc.querySelector('[data-oc-a]').textContent = ask ? px(S.m, ask) : '—';
+  }
+  setInterval(() => { if (!document.hidden) renderOc(); }, 200);
+  const quick = (side) => {
+    if (!tradable()) return S.token ? toast('Trading is off on this account', '', true) : openModal('tReady');
+    return placeOrder({ side, kind: 'market', qty: +(PREF.lots * S.m.contract).toFixed(8) }, 'Order filled');
+  };
+  oc.addEventListener('click', (e) => { const b = e.target.closest('[data-oc]'); if (b) quick(b.dataset.oc); });
+  document.addEventListener('keydown', (e) => {
+    if (!PREF.oneClick || e.repeat || e.metaKey || e.ctrlKey || e.altKey || modalOpen || e.target.closest('input,textarea,select')) return;
+    const k = e.key.toLowerCase(), p = S.st && S.st.positions.find((x) => x.symbol === S.sym);
+    if (k === 'b') quick('buy');
+    else if (k === 's') quick('sell');
+    else if (k === 'x' && p) closePos(p.id, false, null);
+    else if (k === 'r' && p) reversePos(p.id, null);
+    else return;
+    e.preventDefault();
+  });
+
+  /* ---------- settings menu in the footer ---------- */
+  dropdown($('tFTools'), $('tToolsMenu'), (mn) => {
+    const ck = (k, label, hint) => `<label class="t-tool"><input type="checkbox" data-pref="${k}"${PREF[k] ? ' checked' : ''}><span><b>${label}</b><small>${hint}</small></span></label>`;
+    mn.innerHTML = ck('oneClick', 'One-click trading', 'Buy and sell from the chart at once, with no confirmation. Keys: B buy, S sell, X close, R reverse.')
+      + ck('sounds', 'Sounds', 'Fills, TP and SL, alerts and loss-limit warnings.')
+      + ck('notify', 'Browser notifications', 'The same events while this tab is in the background.')
+      + `<h6>Price alerts</h6>${S.alerts.map((a) => `<div class="t-al"><span>${esc(a.sym)} ${px(BY[a.sym], a.price)}</span><button type="button" data-al="${a.id}" aria-label="Remove alert">✕</button></div>`).join('') || '<p class="t-hint" style="padding:2px 12px 8px">Hover the chart and press + to add one.</p>'}`;
+  });
+  $('tToolsMenu').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const b = e.target.closest('[data-al]');
+    if (b) {
+      S.alerts = S.alerts.filter((a) => a.id !== +b.dataset.al);
+      saveAlerts(); drawLines();
+      b.closest('.t-al').remove();
+    }
+  });
+  $('tToolsMenu').addEventListener('change', async (e) => {
+    const c = e.target.closest('[data-pref]');
+    if (!c) return;
+    const k = c.dataset.pref;
+    if (k === 'notify' && c.checked && 'Notification' in window && Notification.permission !== 'granted') {
+      const got = await Notification.requestPermission().catch(() => 'denied');
+      if (got !== 'granted') { c.checked = false; toast('Notifications are blocked', 'Allow them for this site in your browser settings.', true); return; }
+    }
+    PREF[k] = c.checked; savePref(); renderOc();
+    if (k === 'sounds' && c.checked) beep('fill');
+  });
+
+  /* ---------- account report and journal ---------- */
+  let report = null;
+  async function loadReport() {
+    const acc = S.accId;
+    try {
+      const d = await api('/api/terminal/history?account_id=' + acc);
+      if (acc !== S.accId) return;
+      report = { acc, rows: d.history, start: d.initial_balance };
+    } catch (er) { report = { acc, rows: [], start: 0, err: er.message }; }
+    if (S.ptab === 'report') renderTables();
+  }
+  function reportHtml() {
+    if (!report || report.acc !== S.accId) { loadReport(); return '<div class="t-empty">Loading…</div>'; }
+    if (report.err) return `<div class="t-empty">${esc(report.err)}</div>`;
+    const rows = report.rows;
+    if (!rows.length) return '<div class="t-empty">The report starts with your first closed trade.</div>';
+    const wins = rows.filter((r) => r.pnl > 0), losses = rows.filter((r) => r.pnl < 0);
+    const gw = wins.reduce((s, r) => s + r.pnl, 0), gl = -losses.reduce((s, r) => s + r.pnl, 0);
+    const net = gw - gl;
+    // Drawdown on closed results, oldest trade first, from the starting balance.
+    let bal = report.start || 0, peak = bal, dd = 0;
+    [...rows].reverse().forEach((r) => { bal += r.pnl; peak = Math.max(peak, bal); dd = Math.max(dd, peak - bal); });
+    const sym = {};
+    rows.forEach((r) => { const x = sym[r.symbol] = sym[r.symbol] || { n: 0, pnl: 0 }; x.n++; x.pnl += r.pnl; });
+    const kv = (l, v, c) => `<div class="t-rep-k"><small>${l}</small><b class="num ${c || ''}">${v}</b></div>`;
+    return `<div class="t-rep"><div class="t-rep-head"><b>Account report</b><button type="button" class="t-link acc" data-rep-csv>Export CSV</button></div>
+      <div class="t-rep-grid">
+        ${kv('Net result', sUsd(net), cls(net))}${kv('Trades', rows.length)}${kv('Win rate', (wins.length / rows.length * 100).toFixed(1) + '%')}
+        ${kv('Profit factor', gl ? (gw / gl).toFixed(2) : '—')}${kv('Average win', wins.length ? usd(gw / wins.length) : '—')}${kv('Average loss', losses.length ? usd(gl / losses.length) : '—')}
+        ${kv('Best trade', sUsd(Math.max(...rows.map((r) => r.pnl))))}${kv('Worst trade', sUsd(Math.min(...rows.map((r) => r.pnl))))}${kv('Max drawdown', usd(dd))}
+      </div>
+      <div class="t-rep-syms">${Object.entries(sym).sort((a, b) => b[1].n - a[1].n).map(([s, x]) => `<span>${esc(s)} <em>${x.n}</em> <b class="num ${cls(x.pnl)}">${sUsd(x.pnl)}</b></span>`).join('')}</div>
+      <table><thead><tr><th>Closed</th><th>Market</th><th>Side</th><th class="num">PnL</th><th>Journal note</th></tr></thead><tbody>
+      ${rows.slice(0, 200).map((r) => `<tr><td>${tm(r.closed_at)}</td><td>${esc(r.symbol)}</td><td class="${r.side === 'buy' ? 'up' : 'dn'}">${r.side === 'buy' ? 'Long' : 'Short'}</td><td class="num ${cls(r.pnl)}">${sUsd(r.pnl)}</td><td class="t-note"><input data-note="${r.id}" maxlength="500" value="${esc(r.note || '')}" placeholder="Add a note"></td></tr>`).join('')}
+      </tbody></table></div>`;
+  }
+  $('tTable').addEventListener('change', async (e) => {
+    const n = e.target.closest('[data-note]');
+    if (!n) return;
+    try {
+      await api(`/api/terminal/trades/${n.dataset.note}/note`, { method: 'PUT', body: JSON.stringify({ account_id: S.accId, note: n.value }) });
+      const r = report && report.rows.find((x) => x.id === +n.dataset.note);
+      if (r) r.note = n.value.trim() || null;
+      n.classList.add('saved');
+      setTimeout(() => n.classList.remove('saved'), 900);
+    } catch (er) { toast('Note not saved', er.message, true); }
+  });
+  $('tTable').addEventListener('click', (e) => {
+    if (!e.target.closest('[data-rep-csv]') || !report) return;
+    const q = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+    const lines = [['Closed', 'Opened', 'Market', 'Side', 'Lots', 'Entry', 'Exit', 'Fee', 'PnL', 'Reason', 'Note'].join(',')]
+      .concat(report.rows.map((r) => [r.closed_at, r.opened_at, r.symbol, r.side, r.lots, r.entry, r.close, r.fee, r.pnl, r.reason, r.note].map(q).join(',')));
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
+    a.download = `account-${(S.accounts.find((x) => x.id === S.accId) || {}).login || S.accId}-report.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  });
+
   /* ---------- sign-in with MT5 credentials ---------- */
   function deviceId() {
     let d = ls.get('pf_term_dev', '');
@@ -2230,8 +2549,9 @@
   }
   function openLogin(adding) {
     const f = $('tLoginMt5');
-    $('tLoginH').textContent = adding === true ? 'Add MT5 account' : 'Sign in with MT5';
+    $('tLoginH').textContent = adding === true ? 'Add MT5 account' : 'Connect MT5 account';
     f.reset();
+    f.keep.checked = true;
     f.querySelector('.t-err').hidden = true;
     f.login.value = ls.get('pf_term_prefill', '') || '';
     ls.del('pf_term_prefill');
@@ -2242,19 +2562,19 @@
   $('tLoginMt5').onsubmit = async (e) => {
     e.preventDefault();
     const f = e.target, err = f.querySelector('.t-err'), btn = f.querySelector('button[type=submit]');
-    err.hidden = true; btn.disabled = true;
+    err.hidden = true; btn.disabled = true; btn.textContent = 'Connecting…';
     try {
       const r = await fetch('/api/terminal/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login: f.login.value.trim(), password: f.password.value, device: deviceId() }) });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(typeof d.detail === 'string' ? d.detail : 'Sign in failed');
-      S.logins = S.logins.filter((l) => l.id !== d.account.id).concat({ token: d.token, id: d.account.id, login: d.account.login });
+      if (!r.ok) throw new Error(typeof d.detail === 'string' ? d.detail : 'Connection failed');
+      S.logins = S.logins.filter((l) => l.id !== d.account.id).concat({ token: d.token, id: d.account.id, login: d.account.login, temp: !f.keep.checked });
       saveLogins();
       S.accId = d.account.id; S.token = d.token; S.st = null;
       ls.set('pf_term_acc', String(d.account.id));
       closeModal();
-      toast('Signed in', `MT5 account #${d.account.login} is loaded.`);
+      toast('Connected', `MT5 account #${d.account.login}`);
       await loadAccounts();
-    } catch (er) { err.textContent = er.message; err.hidden = false; } finally { btn.disabled = false; }
+    } catch (er) { err.textContent = er.message; err.hidden = false; } finally { btn.disabled = false; btn.textContent = 'Connect'; }
   };
 
   /* ---------- telefon: zakładki paneli ---------- */

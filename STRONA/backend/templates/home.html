@@ -81,15 +81,14 @@
 </section>
 
 <!-- ============================ STATS ============================ -->
-<section class="stats-band" id="statsBand">
-  <div class="wrap">
-    <div class="stats-grid">
-      <div class="stat"><div class="stat-num grad-text" data-spread="xyz:GOLD">—</div><div class="stat-label">Gold spread, live</div></div>
-      <div class="stat"><div class="stat-num grad-text" data-spread="xyz:SP500">—</div><div class="stat-label">S&amp;P 500 spread, live</div></div>
-      <div class="stat"><div class="stat-num grad-text" data-spread="xyz:CL">—</div><div class="stat-label">Oil spread, live</div></div>
-      <div class="stat"><div class="stat-num grad-text" data-spread="BTC">—</div><div class="stat-label">Bitcoin spread, live</div></div>
-    </div>
-    <div class="stats-note">Market spreads with no markup in the Built-in Terminal, {{ fee_pct }}% commission per side. All accounts are simulated and trade virtual funds.</div>
+<section class="spr-band" id="statsBand">
+  <div class="wrap spr-in">
+    <span class="spr-t"><i></i>Live spreads</span>
+    <span class="spr-i"><small>Gold</small><b data-spread="xyz:GOLD" data-pre="$">—</b></span>
+    <span class="spr-i"><small>S&amp;P 500</small><b data-spread="xyz:SP500" data-post=" pts">—</b></span>
+    <span class="spr-i"><small>Oil</small><b data-spread="xyz:CL" data-pre="$">—</b></span>
+    <span class="spr-i"><small>Bitcoin</small><b data-spread="BTC" data-pre="$">—</b></span>
+    <span class="spr-n">No markup. {{ fee_pct }}% commission per side. Simulated accounts.</span>
   </div>
 </section>
 

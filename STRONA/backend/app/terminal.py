@@ -396,6 +396,21 @@ def _zdarzenia_pozycji(pos: Trade, m: Market, c: dict) -> tuple[float, str] | No
     return None
 
 
+def _podciagnij_sl(pos: Trade, c: dict) -> None:
+    """Trailing stop: po sprawdzeniu świecy SL idzie za najlepszą ceną, nigdy wstecz.
+    Dopiero po sprawdzeniu, bo w świecy nie wiemy, czy szczyt był przed dołkiem."""
+    if not pos.trail:
+        return
+    if pos.side == "buy":
+        nowy = c["h"] - pos.trail
+        if not pos.sl or nowy > pos.sl:
+            pos.sl = nowy
+    else:
+        nowy = c["l"] + pos.trail
+        if not pos.sl or nowy < pos.sl:
+            pos.sl = nowy
+
+
 def _wyzwolenie_zlecenia(z: TerminalOrder, c: dict) -> float | None:
     o, h, low = c["o"], c["h"], c["l"]
     if z.kind == "limit":
@@ -548,10 +563,13 @@ def sync(session, acc: Account, now: datetime | None = None,
                 if pos.status != "open" or pos.symbol != m.sym or _ms(pos.opened_at) >= t:
                     continue
                 zd = _zdarzenia_pozycji(pos, m, c)
+                ustawione_wczesniej = _ms(pos.tpsl_at or pos.opened_at) < t
                 if zd is None:
+                    if ustawione_wczesniej:
+                        _podciagnij_sl(pos, c)
                     continue
                 cena, powod = zd
-                if powod in ("tp", "sl") and _ms(pos.tpsl_at or pos.opened_at) >= t:
+                if powod in ("tp", "sl") and not ustawione_wczesniej:
                     continue
                 _close_part(session, acc, pos, pos.qty or 0.0, cena, powod, kiedy)
                 zmiana = True
@@ -719,21 +737,21 @@ SESJA_ODSWIEZ_S = 60
 
 def who(request: Request, authorization: str | None = Header(default=None)) -> Who:
     if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(401, "Sign in with your MT5 login")
+        raise HTTPException(401, "Connect your MT5 account")
     dane = auth.parse_terminal_token(authorization.split(" ", 1)[1].strip())
     if dane is None:
-        raise HTTPException(401, "Session expired. Sign in again.")
+        raise HTTPException(401, "Session expired. Connect again.")
     session = SessionLocal()
     try:
         acc = session.get(Account, int(dane["aid"]))
         if acc is None or acc.trader_id is None or acc.terminal_blocked \
                 or dane.get("pwf") != auth.terminal_pw_fp(acc.platform_password):
-            raise HTTPException(401, "Session expired. Sign in again.")
+            raise HTTPException(401, "Session expired. Connect again.")
         sid = dane.get("sid")
         if sid:
             wpis = session.get(TerminalLogin, int(sid))
             if wpis is None or wpis.revoked_at is not None:
-                raise HTTPException(401, "Session expired. Sign in again.")
+                raise HTTPException(401, "Session expired. Connect again.")
             widziany = wpis.last_seen_at
             if widziany is not None and widziany.tzinfo is None:
                 widziany = widziany.replace(tzinfo=timezone.utc)
@@ -741,7 +759,7 @@ def who(request: Request, authorization: str | None = Header(default=None)) -> W
                 wpis.last_seen_at = _now()
                 session.commit()
         elif not dane.get("imp"):
-            raise HTTPException(401, "Session expired. Sign in again.")
+            raise HTTPException(401, "Session expired. Connect again.")
         return Who(acc.trader_id, acc.id, bool(dane.get("imp")))
     finally:
         session.close()
@@ -800,7 +818,7 @@ def _pos_dict(t: Trade, marks: dict[str, float]) -> dict:
         "id": t.id, "symbol": t.symbol, "side": t.side, "qty": t.qty, "lots": round(t.lots or 0.0, 4),
         "entry": t.open_price, "mark": px, "value": round(wart, 2), "pnl": round(t.pnl or 0.0, 2),
         "roe": round((t.pnl or 0.0) / t.margin * 100, 2) if t.margin else None,
-        "leverage": t.leverage, "margin": t.margin, "liq": t.liq_price, "tp": t.tp, "sl": t.sl,
+        "leverage": t.leverage, "margin": t.margin, "liq": t.liq_price, "tp": t.tp, "sl": t.sl, "trail": t.trail,
         "fee": round(t.fee or 0.0, 2), "slippage": t.slippage, "opened_at": _iso(t.opened_at),
     }
 
@@ -809,7 +827,7 @@ def _closed_dict(t: Trade) -> dict:
     d = {"id": t.id, "symbol": t.symbol, "side": t.side, "qty": t.qty, "entry": t.open_price,
          "close": t.close_price, "pnl": round(t.pnl or 0.0, 2), "fee": round(t.fee or 0.0, 2),
          "reason": t.close_reason, "leverage": t.leverage, "opened_at": _iso(t.opened_at),
-         "closed_at": _iso(t.closed_at), "lots": round(t.lots or 0.0, 4)}
+         "closed_at": _iso(t.closed_at), "lots": round(t.lots or 0.0, 4), "note": t.journal}
     if t.source == "bot":
         # W historii zwykła zamknięta transakcja (decyzja właściciela, 2026-11-01): lot
         # w mierze konta (jak w portalu i MT5), ilość z wartości punktu, powód „Closed".
@@ -1322,6 +1340,101 @@ class TpSlIn(BaseModel):
     account_id: int | None = None
     tp: float | None = Field(default=None, ge=0, **_LICZBA)
     sl: float | None = Field(default=None, ge=0, **_LICZBA)
+    trail: float | None = Field(default=None, ge=0, **_LICZBA)
+
+
+@router.post("/positions/{trade_id}/break-even")
+def api_break_even(trade_id: int, payload: AllIn, w: Who = Depends(who_trade)):
+    """SL na cenę wejścia. Tylko na zysku: inaczej stop od razu leżałby po złej stronie ceny."""
+    def run(session):
+        acc = _konto(session, w, payload.account_id)
+        if acc.terminal_open:
+            _przeglad_przed_akcja(session, acc)
+        pos = session.get(Trade, trade_id)
+        if pos is None or pos.account_id != acc.id or pos.source != "terminal":
+            raise HTTPException(404, "Position not found")
+        if pos.status != "open":
+            _zapisz_i_odmow(session, acc, 409, "Position already closed")
+        m = markets.get(pos.symbol)
+        mid = markets.mids({m.hl}).get(m.hl)
+        if not mid or (pos.side == "buy" and mid <= pos.open_price) or (pos.side == "sell" and mid >= pos.open_price):
+            raise HTTPException(400, "The position must be in profit to move the stop to break-even.")
+        pos.sl, pos.tpsl_at = pos.open_price, _now()
+        session.commit()
+        poz = _open_positions(session, acc)
+        return state_dict(session, acc, poz, _marks(session, acc, poz, _now()))
+    return _z_ponowieniem(run)
+
+
+class OrderMoveIn(BaseModel):
+    account_id: int | None = None
+    price: float = Field(gt=0, **_LICZBA)
+
+
+@router.patch("/orders/{order_id}")
+def api_move_order(order_id: int, payload: OrderMoveIn, w: Who = Depends(who_trade)):
+    """Nowa cena oczekującego zlecenia (przeciągnięcie linii na wykresie)."""
+    def run(session):
+        acc = _konto(session, w, payload.account_id)
+        if acc.terminal_open:
+            _przeglad_przed_akcja(session, acc)
+        z = session.get(TerminalOrder, order_id)
+        if z is None or z.account_id != acc.id:
+            raise HTTPException(404, "Order not found")
+        if z.status != "open":
+            _zapisz_i_odmow(session, acc, 409, "This order is no longer open.")
+        m = markets.get(z.symbol)
+        mid = markets.mids({m.hl}).get(m.hl)
+        if not mid:
+            raise HTTPException(503, "No price for this market right now.")
+        if z.kind == "stop" and ((z.side == "buy" and payload.price <= mid) or (z.side == "sell" and payload.price >= mid)):
+            raise HTTPException(400, "Stop price is already crossed. Use a market order.")
+        if z.kind == "limit" and ((z.side == "buy" and payload.price >= mid) or (z.side == "sell" and payload.price <= mid)):
+            raise HTTPException(400, "Limit price is at or through the market. Use a market order.")
+        _tp_sl_ok(z.side, payload.price, z.tp, z.sl)
+        if not z.reduce_only:
+            _check_open(session, acc, m, z.side, z.qty, payload.price, float(z.leverage or m.max_lev))
+        # Czas złożenia = teraz: starsze świece nie mogą wypełnić zlecenia po nowej cenie.
+        z.price, z.created_at = payload.price, _now()
+        session.commit()
+        poz = _open_positions(session, acc)
+        return state_dict(session, acc, poz, _marks(session, acc, poz, _now()))
+    return _z_ponowieniem(run)
+
+
+@router.get("/history")
+def api_history(account_id: int | None = None, limit: int = 2000, w: Who = Depends(who)):
+    """Pełna historia do raportu konta i eksportu (state oddaje tylko ostatnie 100)."""
+    session = SessionLocal()
+    try:
+        acc = _konto(session, w, account_id)
+        zamk = (session.query(Trade)
+                .filter(Trade.account_id == acc.id, Trade.status == "closed",
+                        or_(Trade.source == "terminal", and_(Trade.source == "bot", Trade.venue == "hyperliquid")))
+                .order_by(Trade.closed_at.desc(), Trade.id.desc()).limit(min(limit, 5000)).all())
+        return {"history": [_closed_dict(t) for t in zamk], "initial_balance": acc.initial_balance}
+    finally:
+        session.close()
+
+
+class NoteIn(BaseModel):
+    account_id: int | None = None
+    note: str = Field(default="", max_length=500)
+
+
+@router.put("/trades/{trade_id}/note")
+def api_note(trade_id: int, payload: NoteIn, w: Who = Depends(who_trade)):
+    session = SessionLocal()
+    try:
+        acc = _konto(session, w, payload.account_id)
+        t = session.get(Trade, trade_id)
+        if t is None or t.account_id != acc.id:
+            raise HTTPException(404, "Trade not found")
+        t.journal = payload.note.strip() or None
+        session.commit()
+        return {"ok": True, "note": t.journal}
+    finally:
+        session.close()
 
 
 @router.patch("/positions/{trade_id}")
@@ -1344,6 +1457,14 @@ def api_tpsl(trade_id: int, payload: TpSlIn, w: Who = Depends(who_trade)):
             mid = pos.open_price
         tp = payload.tp or None
         sl = payload.sl or None
+        if "trail" in payload.model_fields_set:
+            pos.trail = payload.trail or None
+            if pos.trail:
+                start = mid - pos.trail if pos.side == "buy" else mid + pos.trail
+                lepszy = sl and ((pos.side == "buy" and sl > start) or (pos.side == "sell" and sl < start))
+                sl = sl if lepszy else start
+        elif sl is None:
+            pos.trail = None        # bez SL nie ma czego podciągać
         _tp_sl_ok(pos.side, mid, tp, sl)
         pos.tp, pos.sl, pos.tpsl_at = tp, sl, _now()
         session.commit()
