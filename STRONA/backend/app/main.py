@@ -9894,8 +9894,6 @@ def _cert_ctx(request, *, headline_plain, eyebrow, trader_name, amount_label, am
         "verify_url": f"/verify/{cert_token}",
         "verify_full_url": weryfikacja,
         "qr_svg": _qr_svg(weryfikacja),
-        "signatory": settings.cert_signatory or None,
-        "signatory_label": settings.cert_signatory_label,
         "amount_icon": amount_icon,
     }
 
@@ -10816,7 +10814,7 @@ def public_stats():
 
     Zero internali (feed/stripe/pula). Landing ukrywa metryki zerowe, więc
     świeża instalacja nie świeci "0 payouts" — po prostu nie pokazuje kafelka.
-    payouts_total_usd zawiera zwroty opłat (tak księgujemy trader_share).
+    Sumy wypłat tu nie ma (decyzja właściciela): walidator treści czyta je wprost z `contentbot`.
     """
     now = monotonic()
     if _PUBLIC_STATS_CACHE["data"] is not None and now - _PUBLIC_STATS_CACHE["ts"] < 60:
@@ -10827,7 +10825,8 @@ def public_stats():
         # treści: post twierdzący „$186,000 wypłat" musi być sprawdzany DOKŁADNIE
         # tą samą definicją, którą pokazuje strona. Dwie implementacje tych
         # samych liczb rozjechałyby się przy pierwszej zmianie definicji.
-        data = contentbot.statystyki_publiczne(session)
+        data = {k: v for k, v in contentbot.statystyki_publiczne(session).items()
+                if k not in ("payouts_total_usd", "payouts_count", "largest_payout_usd")}
         _PUBLIC_STATS_CACHE.update(ts=now, data=data)
         return data
     finally:
@@ -14008,7 +14007,9 @@ def home(request: Request):
              if (STATIC / "img" / "steps" / f"step-{n}.webp").exists()}
     return _page(request, "home.html",
                  sample_qr=_qr_svg(f"{_public_base(request)}/verify"),
-                 products=prods, cfg=_cfg_ctx(prods), step_images=kroki)
+                 products=prods, cfg=_cfg_ctx(prods), step_images=kroki,
+                 fee_pct=round(terminal.FEE_PCT * 100, 3),
+                 max_split=max((p["profit_split_pct"] for p in prods), default=0))
 
 
 @app.get("/faq")
@@ -14433,8 +14434,6 @@ def verify_page(request: Request, cert_token: str | None = None):
             session.close()
     return _page(request, "verify.html", result=result, preview=podglad,
                  token=cert_token or "",
-                 signatory=settings.cert_signatory or None,
-                 signatory_label=settings.cert_signatory_label.replace(":", ""),
                  sample_qr=_qr_svg(f"{_public_base(request)}/verify"))
 
 

@@ -2,7 +2,8 @@
 
 {# The certificate preview in the #certs section uses the same stylesheet as
    the real document, so the landing never drifts from it on the next change. #}
-{% block head_extra %}<link rel="preload" href="/static/fonts/signature.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/static/css/cert.css?v={{ asset_v }}">{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/css/cert.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/css/site-landing.css?v={{ asset_v }}">{% endblock %}
 
 {% block content %}
 
@@ -82,10 +83,13 @@
 <!-- ============================ STATS ============================ -->
 <section class="stats-band" id="statsBand">
   <div class="wrap">
-    <div class="stats-grid" id="statsGrid"></div>
-    <div class="stats-note">Live numbers pulled straight from our platform, nothing curated by hand.
-      All of them come from simulated accounts trading virtual funds: they describe activity on the
-      platform, not guaranteed outcomes.</div>
+    <div class="stats-grid">
+      <div class="stat"><div class="stat-num grad-text" id="statSpread">—</div><div class="stat-label">Live BTC spread, no markup</div></div>
+      <div class="stat"><div class="stat-num grad-text">{{ fee_pct }}%</div><div class="stat-label">Commission per side</div></div>
+      <div class="stat"><div class="stat-num grad-text">{{ max_split|int }}%</div><div class="stat-label">Profit split, up to</div></div>
+      <div class="stat"><div class="stat-num grad-text">1:{{ leverage_max }}</div><div class="stat-label">Leverage, up to</div></div>
+    </div>
+    <div class="stats-note">Spread and commission as in the Built-in Terminal. All accounts are simulated and trade virtual funds.</div>
   </div>
 </section>
 
@@ -154,7 +158,7 @@
             <path d="M78 41v5l4 3" stroke="#36b9a9" stroke-width="2" stroke-linecap="round"/>
           </svg>{% endif %}</div>
         <h3>2. Get your MT5 credentials</h3>
-        <p>We open a real MetaTrader&nbsp;5 account for you automatically. Server, login and password
+        <p>We open a MetaTrader&nbsp;5 account for you automatically. Server, login and password
            land in your dashboard and inbox once the payment is confirmed.</p>
         <p>Trade from the desktop terminal, the mobile app or the web terminal.</p>
       </div>
@@ -195,64 +199,42 @@
    it duplicated the Program Rules panel in the configurator, which shows the same
    limits for the plan the visitor is actually looking at. #}
 
-<!-- ============================ PRICING ============================ -->
+<!-- ============================ CHALLENGES ============================ -->
 <section class="sec" id="pricing">
   <div class="wrap">
     <div class="sec-head center" data-rv>
-      <span class="pill">Pricing</span>
-      <h2>Configure your challenge</h2>
+      <span class="pill">Challenges</span>
+      <h2>Choose your challenge</h2>
       <p>One-time fee. No recurring costs. 2-Step fees are refunded in full with your first payout.</p>
     </div>
-    <div class="pcfg-grid" data-rv>
-      <div class="pcfg" id="pcfg">
-        <div class="pcfg-head">
-          <h3 id="pcfg-title">2-Step Evaluation</h3>
-          <span class="pcfg-sub">One-time fee · simulated capital</span>
-        </div>
-        <div class="pcfg-toggle" id="pcfg-toggle"></div>
-        <div class="pcfg-label">Simulated account size</div>
-        <div class="pcfg-sizes" id="pcfg-sizes"></div>
-        <div class="pcfg-label">Platform</div>
-        <div class="pcfg-platform">MetaTrader&nbsp;5</div>
-        <div class="pcfg-addon">
-          <div><b>Weekend Trading</b><span>Bonus add-on: $199 for 2 extra trading days/week</span></div>
-          <button class="pcfg-addbtn" id="pcfg-wt" type="button">Add $199</button>
-        </div>
-        {# Widoczny tylko wtedy, gdy add-on jest w sprzedazy (przelacznik
-           w panelu, Settings). Pokazuje go renderPricing(). #}
-        <div class="pcfg-addon" id="pcfg-ct-row" hidden>
-          <div><b>Copytrading</b><span>Copy trades between your own accounts · more than one device</span></div>
-          <button class="pcfg-addbtn" id="pcfg-ct" type="button">Add $299</button>
-        </div>
-        <div class="pcfg-addon static">
-          <div><b>News Trading</b><span>Trade straight through high-impact news</span></div>
-          <span class="ok">✓ Included</span>
-        </div>
-        <div class="pcfg-label">Coupon code</div>
+    <div class="chal-switches" data-rv>
+      <div class="chal-tabs" id="chalModels"></div>
+      <div class="chal-tabs" id="chalTiers"></div>
+    </div>
+    <div class="chal-grid" id="chalGrid" data-rv></div>
+    <div class="chal-extras" id="pcfg" data-rv>
+      <div class="pcfg-addon">
+        <div><b>Weekend Trading</b><span>Bonus add-on: $199 for 2 extra trading days/week</span></div>
+        <button class="pcfg-addbtn" id="pcfg-wt" type="button">Add $199</button>
+      </div>
+      <div class="pcfg-addon" id="pcfg-ct-row" hidden>
+        <div><b>Copytrading</b><span>Copy trades between your own accounts · more than one device</span></div>
+        <button class="pcfg-addbtn" id="pcfg-ct" type="button">Add $299</button>
+      </div>
+      <div class="pcfg-addon static">
+        <div><b>News Trading</b><span>Trade straight through high-impact news</span></div>
+        <span class="ok">✓ Included</span>
+      </div>
+      <div class="chal-code">
         <div class="code-row">
-          <input id="pcfg-coupon" class="code-inp" autocomplete="off" aria-label="Coupon code">
+          <input id="pcfg-coupon" class="code-inp" autocomplete="off" placeholder="Coupon code" aria-label="Coupon code">
           <button class="code-btn" id="pcfg-apply" type="button">Apply</button>
         </div>
-        {# The applied code has to confirm itself right here. The fee line sits
-           further down and the upgrade does not change the price at all, so
-           without this the page looked like nothing happened. #}
         <div class="code-msg" id="pcfg-codemsg" hidden></div>
-        <div class="pcfg-feerow">
-          <div class="pcfg-feelabel">Total due</div>
-          <div class="pcfg-fee" id="pcfg-fee">$—</div>
-          <div class="pcfg-feesub" id="pcfg-feesub"></div>
-        </div>
-        <a class="btn btn-lg" id="pcfg-cta" href="/portal" style="width:100%;text-align:center">Continue to payment →</a>
-        <div class="pcfg-fine">Secure checkout · MT5 credentials delivered to your dashboard and inbox automatically.</div>
-      </div>
-      <div class="prules">
-        <h3>Program Rules</h3>
-        <div id="prules-rows"></div>
-        <p class="prules-fine">All trading takes place in a simulated environment on virtual funds.
-          Performance rewards are discretionary and not guaranteed. See
-          <a href="/terms">Terms of Service</a>.</p>
       </div>
     </div>
+    <p class="prules-fine chal-fine" data-rv>All trading takes place in a simulated environment on virtual funds.
+      Performance rewards are discretionary and not guaranteed. See <a href="/terms">Terms of Service</a>.</p>
     <div class="pricing-note" data-rv>
       <span>🔒 Secure checkout</span>
       <span>⚡ Account delivered automatically</span>
@@ -313,53 +295,47 @@
   </div>
 </section>
 
-<!-- ============================ WHY US ============================ -->
-<section class="sec sec-tight" id="why">
+<!-- ============================ BUILT-IN TERMINAL ============================ -->
+<section class="sec sec-tight" id="terminal">
   <div class="wrap">
     <div class="sec-head center" data-rv>
-      <span class="pill">Built different</span>
-      <h2>Transparency is the product</h2>
-      <p>Most of this industry runs on black boxes. We went the other way.</p>
+      <span class="pill">Built-in Terminal</span>
+      <h2>Trade right in your browser</h2>
+      <p>Every challenge comes with our own terminal, on top of MetaTrader&nbsp;5. No download: sign in with your MT5 login and trade the same account, under the same rules.</p>
     </div>
-    <div class="grid6">
-      <div class="card why" data-rv>
-        <div class="why-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M6 6.5h.01M6 17.5h.01"/></svg></div>
-        <h3>Real MT5 accounts</h3>
-        <p>Your challenge runs on a real MetaTrader 5 server account — not an in-house simulator
-           we could quietly tweak.</p>
+    <div class="lpt-venues" data-rv><span>Live prices from</span><b>Hyperliquid</b><b>Binance</b><b>Bybit</b></div>
+    <div class="lpt" id="lpTerm" data-v="{{ asset_v }}" data-rv>
+      <div class="lpt-top">
+        <div class="lpt-syms" data-syms></div>
+        <span class="lpt-lev" data-lev></span>
+        <div class="lpt-q"><small>Mark</small><b data-mark>—</b></div>
+        <div class="lpt-q"><small>24h change</small><b data-chg></b></div>
+        <a class="lpt-open" data-open href="/trade">Open full terminal →</a>
       </div>
-      <div class="card why" data-rv>
-        <div class="why-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2 4 6v6c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V6z"/><path d="m9 12 2 2 4-4"/></svg></div>
-        <h3>Automated risk engine</h3>
-        <p>Equity is monitored continuously. Daily loss and max drawdown are enforced by code,
-           the same way for every trader, every time.</p>
+      <div class="lpt-body">
+        <div class="lpt-main">
+          <div class="lpt-ints">
+            <button type="button" data-int="1m">1m</button><button type="button" data-int="5m">5m</button><button type="button" class="on" data-int="15m">15m</button><button type="button" data-int="1h">1h</button>
+          </div>
+          <div class="lpt-chart" data-chart></div>
+        </div>
+        <div class="lpt-side-wrap">
+          <div class="lpt-tabs"><button type="button" class="on" data-tab="book">Order Book</button><button type="button" data-tab="trades">Trades</button></div>
+          <div class="lpt-side" data-side></div>
+        </div>
       </div>
-      <div class="card why" data-rv>
-        <div class="why-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2z"/><path d="M19 17H6a2 2 0 0 0-2 2"/><path d="M9 7h6M9 11h4"/></svg></div>
-        <h3>Published rules = enforced rules</h3>
-        <p>Every number on this page is exactly what the engine checks. If it's not written here,
-           it's not a rule.</p>
-      </div>
-      <div class="card why" data-rv>
-        <div class="why-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg></div>
-        <h3>Automated delivery</h3>
-        <p>Provisioning is fully automated: server, login and password are generated and delivered
-           automatically after checkout.</p>
-      </div>
-      <div class="card why" data-rv>
-        <div class="why-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M8 2v4M16 2v4M3 9h18"/><path d="m9 15 2 2 4-4"/></svg></div>
-        <h3>News &amp; weekend trading allowed</h3>
-        <p>No news blackouts, no forced flat over the weekend, no banned strategies. Trade your edge.</p>
-      </div>
-      <div class="card why" data-rv>
-        <div class="why-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="9" r="6"/><path d="m8.5 13.5-1.7 7L12 18l5.2 2.5-1.7-7"/><path d="m9.7 8.8 1.6 1.6 3-3.2"/></svg></div>
-        <h3>Verifiable certificates</h3>
-        <p>Every pass and payout comes with a certificate ID that anyone can check against our
-           database — proof that can't be photoshopped.</p>
-      </div>
+      <p class="lpt-fail">The live preview can't connect right now. <a href="/trade">Open the terminal</a></p>
     </div>
+    <ul class="lpt-feats" data-rv>
+      <li><b>Charting</b>Drawing tools, indicators and a measure tool on every timeframe.</li>
+      <li><b>Order book and trades</b>Depth, spread and the tape, updating as the market moves.</li>
+      <li><b>Orders on the chart</b>Set and drag TP and SL, close or reverse a position from its line.</li>
+      <li><b>Your accounts in one place</b>Switch between your MT5 accounts or add another in a click.</li>
+    </ul>
+    <p class="prules-fine chal-fine" data-rv>Prices are reference data from third-party venues, with which we are not affiliated. All trading is simulated on virtual funds.</p>
   </div>
 </section>
+<script src="/static/js/terminal-preview.js?v={{ asset_v }}" defer></script>
 
 <!-- ============================ CERTIFICATES ============================ -->
 <section class="sec" id="certs">
@@ -402,11 +378,6 @@
         {# No descriptive paragraph — the same message already stands on the left,
            and in the narrower landing column it did not fit the square. #}
         <div class="cert-foot">
-          <div class="cert-signblock">
-            <b class="sig">Matthew Harrison</b>
-            <i class="sig-line"></i>
-            <span>Chief Executive Officer</span>
-          </div>
           <div class="cert-qr">
             <div class="qr-box" id="pv-qr">{{ sample_qr | safe }}</div>
             <b id="pv-token">a1b2-example</b>
@@ -471,7 +442,7 @@
         <details>
           <summary>Are these live trading accounts?</summary>
           <div class="a">No. All accounts are demo accounts with virtual funds running in a simulated
-          environment on real MetaTrader 5 servers. You are never trading real money. You earn
+          environment on MetaTrader 5 servers. You are never trading real money. You earn
           performance-based rewards for passing objectives and trading profitably.</div>
         </details>
         <details>

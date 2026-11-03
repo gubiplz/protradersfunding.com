@@ -75,8 +75,8 @@ def test_public_stats_bez_internali():
     assert data["traders_total"] >= 1
     # Kwoty na kaflach LP w pelnych dolarach — ".96" przy szesciocyfrowej
     # liczbie to szum, ktory poszerzal kafel az do obciecia tekstu.
-    assert isinstance(data["payouts_total_usd"], int)
-    assert isinstance(data["largest_payout_usd"], int)
+    for wyplaty in ("payouts_total_usd", "payouts_count", "largest_payout_usd"):
+        assert wyplaty not in data
 
 
 def test_operacyjne_stats_tylko_dla_admina():
@@ -501,7 +501,7 @@ def test_landing_oznacza_ten_sam_plan_co_sklep():
     """
     from pathlib import Path
     js = (Path(__file__).resolve().parents[1] / "static" / "js" / "site.js").read_text()
-    assert "x.popular ? ' hot'" in js, "plakietka musi isc za polem z API"
+    assert "p.popular ? ' hot'" in js, "plakietka musi isc za polem z API"
     assert "maxSize" not in js, "stary wybor (najwiekszy plan) musi zniknac"
 
     html = zrodlo_portalu()

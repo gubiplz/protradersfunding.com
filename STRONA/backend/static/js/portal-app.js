@@ -708,7 +708,6 @@ async function loadAuthStats(){
     const items=[];
     if(s.traders_total>=25)items.push([fmt0(s.traders_total),'Traders on board']);
     if(s.funded_accounts>=5)items.push([fmt0(s.funded_accounts),'Funded accounts']);
-    if(s.payouts_total_usd>=1000)items.push(['$'+fmt0(s.payouts_total_usd),'Paid in rewards']);
     if(s.countries_count>=5)items.push([fmt0(s.countries_count),'Countries']);
     if(!items.length)return;
     const el=$('auth-stats');

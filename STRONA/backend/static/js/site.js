@@ -389,30 +389,6 @@
   /* ---------- mockup: progress bars ---------- */
   setTimeout(() => $$('.mbar i').forEach(b => { b.style.width = (b.dataset.w || 0) + '%'; }), 500);
 
-  /* ---------- /api/public/stats — tiles only for non-zero metrics ---------- */
-  async function stats() {
-    const band = $('#statsBand'); if (!band) return;
-    try {
-      const s = await (await fetch('/api/public/stats')).json();
-      const defs = [
-        { v: s.accounts_total, label: 'Trading accounts created' },
-        { v: s.traders_total, label: 'Traders on the platform' },
-        { v: s.payouts_total_usd, label: 'Paid in rewards', prefix: '$' },
-        { v: s.funded_accounts, label: 'Funded accounts' },
-        { v: s.countries_count, label: 'Countries' },
-      ].filter(d => d.v > 0).slice(0, 4);
-      if (defs.length < 2) { band.remove(); return; }   // fresh install: fake nothing
-      $('#statsGrid').innerHTML = defs.map(d => {
-        /* Long figures (9+ digits incl. separators) get a smaller size class —
-           the tile must never clip the number. */
-        const dl = fmt(Math.round(d.v)).length + (d.prefix ? 1 : 0);
-        return `<div class="stat"><div class="stat-num grad-text${dl > 9 ? ' stat-num-l' : ''}" data-count="${Math.round(d.v)}"${d.prefix ? ` data-prefix="${d.prefix}"` : ''}></div>
-         <div class="stat-label">${d.label}</div></div>`;
-      }).join('');
-      $$('.stat-num', band).forEach(countUp);
-    } catch (e) { band.remove(); }
-  }
-
   /* ---------- /api/products — pricing + trading objectives ---------- */
   let PRODUCTS = [];
 
@@ -435,111 +411,105 @@
     .sort((a, b) => a.account_size - b.account_size);
   const sizeLabel = v => v >= 1e6 ? '$' + (v / 1e6) + 'M' : '$' + Math.round(v / 1e3) + 'K';
 
+  /* Challenges: model tabs, size tiers and one flip card per size. "View Rules" turns the
+     card over; the add-ons and the coupon below apply to whichever card starts checkout. */
+  const TIERS = [['starter', 'Starter', v => v < 200000], ['pro', 'Pro', v => v >= 200000 && v < 800000], ['elite', 'Elite', v => v >= 800000]];
+  const MODELS = [['2step', '2-Step Evaluation'], ['instant', 'Instant Funding']];
+  let cfgTier = 'starter';
+  const flipped = new Set();
+  const usd = v => '$' + v.toLocaleString('en-US', { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 });
+
+  function cardRules(p) {
+    const instant = p.steps === 0;
+    return [
+      ['Profit target', instant ? 'None' : `${p.profit_target_p1}% / ${p.profit_target_p2}%`],
+      ['Daily loss limit', p.max_daily_loss_pct + '%'],
+      ['Max drawdown', p.max_overall_loss_pct + '%'],
+      ['Min. trading days', p.min_trading_days + ''],
+      ['Profit split', (instant ? '' : 'Up to ') + p.profit_split_pct + '%'],
+      ['Rewards', czestotliwoscWyplat()],
+      ['Max open volume', p.max_lots + ' lots'],
+      ['Leverage', dzwignia()],
+      ['Fee refund', 'First payout'],
+    ];
+  }
+
   function renderPricing() {
-    const box = $('#pcfg'); if (!box) return;
+    const box = $('#pcfg'), grid = $('#chalGrid'); if (!box || !grid) return;
     const { promo: cfgPromo, coupon: cfgCoupon, pct: cfgPct } = readCode();
     let items = typeItems(cfgType);
     if (!items.length) { cfgType = cfgType === '2step' ? 'instant' : '2step'; items = typeItems(cfgType); }
-    if (!items.length) { box.closest('.pcfg-grid')?.remove(); return; }
-    if (!items.some(x => x.account_size === cfgSize)) cfgSize = items[0].account_size;
-    const p = items.find(x => x.account_size === cfgSize);
+    if (!items.length) { $('#pricing')?.remove(); return; }
+    const tiers = TIERS.filter(([, , f]) => items.some(x => f(x.account_size)));
+    if (!tiers.some(([id]) => id === cfgTier)) cfgTier = tiers[0][0];
+    const [, tierName, inTier] = TIERS.find(([id]) => id === cfgTier);
+    const shown = items.filter(x => inTier(x.account_size));
 
-    $('#pcfg-title').textContent = cfgType === 'instant' ? 'Instant Funding' : '2-Step Evaluation';
-    $('#pcfg-toggle').innerHTML = [['2step', '2-Step Evaluation'], ['instant', 'Instant Funding']]
-      .filter(([id]) => typeItems(id).length)
-      .map(([id, nm]) => `<button class="ptog${id === cfgType ? ' on' : ''}" data-t="${id}">${nm}</button>`).join('');
-    $$('#pcfg-toggle .ptog').forEach(b => b.addEventListener('click', () => { cfgType = b.dataset.t; renderPricing(); }));
+    $('#chalModels').innerHTML = MODELS.filter(([id]) => typeItems(id).length)
+      .map(([id, nm]) => `<button type="button" class="${id === cfgType ? 'on' : ''}" data-m="${id}">${nm}</button>`).join('');
+    $('#chalTiers').innerHTML = tiers
+      .map(([id, nm]) => `<button type="button" class="${id === cfgTier ? 'on' : ''}" data-t="${id}">${nm}</button>`).join('');
+    $$('#chalModels button').forEach(b => b.addEventListener('click', () => { cfgType = b.dataset.m; renderPricing(); }));
+    $$('#chalTiers button').forEach(b => b.addEventListener('click', () => { cfgTier = b.dataset.t; renderPricing(); }));
 
-    $('#pcfg-sizes').innerHTML = items.map(x =>
-      `<button class="psize${x.account_size === cfgSize ? ' on' : ''}${x.popular ? ' hot' : ''}" data-s="${x.account_size}">${x.popular ? '<i>Best value</i>' : ''}${sizeLabel(x.account_size)}</button>`).join('');
-    $$('#pcfg-sizes .psize').forEach(b => b.addEventListener('click', () => { cfgSize = +b.dataset.s; renderPricing(); }));
-
+    const anyOffersCt = shown.some(oferujeCt);
+    const ctRow = $('#pcfg-ct-row'), ct = $('#pcfg-ct');
+    if (ctRow) ctRow.hidden = !anyOffersCt;
+    if (!anyOffersCt) cfgCt = false;
+    if (ct) {
+      ct.textContent = cfgCt ? '✓ Added' : 'Add $' + cenaCt(shown[0]);
+      ct.classList.toggle('on', cfgCt);
+    }
     const wt = $('#pcfg-wt');
     wt.textContent = cfgWt ? '✓ Added' : 'Add $199';
     wt.classList.toggle('on', cfgWt);
 
-    /* Copytrading schodzi z karty razem z wylaczeniem sprzedazy w panelu —
-       i wtedy NIE moze zostac policzony w cenie, choćby ktos zdazyl go
-       wczesniej kliknac. */
-    const ctRow = $('#pcfg-ct-row'), ct = $('#pcfg-ct');
-    const ctOn = oferujeCt(p);
-    if (ctRow) ctRow.hidden = !ctOn;
-    if (!ctOn) cfgCt = false;
-    if (ct) {
-      ct.textContent = cfgCt ? '✓ Added' : 'Add $' + cenaCt(p);
-      ct.classList.toggle('on', cfgCt);
-    }
+    const model = cfgType === 'instant' ? 'Instant' : '2-Step';
+    const hot = shown.findIndex(x => x.popular);
+    const star = hot >= 0 ? hot : Math.floor(shown.length / 2);
+    grid.innerHTML = shown.map((p, i) => {
+      const fee = Math.round(p.price_usd * (1 - cfgPct / 100) * 100) / 100;
+      const upSize = cfgPromo && p.promo_upgrade_size ? p.promo_upgrade_size : null;
+      const q = new URLSearchParams({ buy: p.key });
+      if (cfgWt) q.set('wt', '1');
+      if (cfgCt && oferujeCt(p)) q.set('ct', '1');
+      if (cfgCoupon) q.set('coupon', cfgCoupon);
+      const open = flipped.has(p.key);
+      return `<article class="chal-card pal-${cfgTier}-${i}${i === star ? ' star' : ''}${p.popular ? ' hot' : ''}${open ? ' flip' : ''}">
+        <div class="chal-flip"><div class="chal-inner">
+          <div class="chal-face chal-front">
+            <img class="chal-mark" src="/static/img/logo.png" alt="">
+            <img class="chal-logo" src="/static/img/logo.png" alt="">
+            <div class="chal-price">${cfgPct ? `<s>${usd(p.price_usd)}</s>` : ''}<b>${usd(fee)}</b> <small>USD</small></div>
+            <div class="chal-size">
+              ${p.popular ? '<i>Best value</i>' : ''}
+              ${upSize ? `<i>You trade ${sizeLabel(upSize)}</i>` : ''}
+              <strong>$${p.account_size.toLocaleString('en-US')}</strong>
+              <span>${model} ${tierName}</span>
+            </div>
+          </div>
+          <div class="chal-face chal-back">
+            <img class="chal-logo" src="/static/img/logo.png" alt="">
+            <h4>$${p.account_size.toLocaleString('en-US')} ${model}</h4>
+            <dl>${cardRules(p).map(([l, v]) => `<div><dt>${l}</dt><dd>${v}</dd></div>`).join('')}</dl>
+          </div>
+        </div></div>
+        <button type="button" class="chal-btn" data-flip="${p.key}" aria-expanded="${open}">${open ? 'Hide Rules' : 'View Rules'}</button>
+        <a class="chal-btn go" href="/portal?${q.toString()}">Start Challenge</a>
+      </article>`;
+    }).join('');
+    $$('[data-flip]', grid).forEach(b => b.addEventListener('click', () => {
+      const on = b.closest('.chal-card').classList.toggle('flip');
+      if (on) flipped.add(b.dataset.flip); else flipped.delete(b.dataset.flip);
+      b.textContent = on ? 'Hide Rules' : 'View Rules';
+      b.setAttribute('aria-expanded', on);
+    }));
 
-    /* The upgrade promo does not touch the fee — it moves the account one tier
-       up, so the size has to be stated where the price is, or the offer reads
-       like nothing happened. */
-    const upSize = cfgPromo && p.promo_upgrade_size ? p.promo_upgrade_size : null;
-    const fee = Math.round((p.price_usd * (1 - cfgPct / 100)
-      + (cfgWt ? CENA_WT : 0) + (cfgCt ? cenaCt(p) : 0)) * 100) / 100;
-    $('#pcfg-fee').textContent = '$' + fee.toLocaleString('en-US',
-      { minimumFractionDigits: fee % 1 ? 2 : 0, maximumFractionDigits: 2 });
-    $('#pcfg-feesub').textContent = (cfgPct ? `${cfgPct}% coupon applied · ` : '')
-      + (upSize ? `${cfgPromo} applied: you trade ${sizeLabel(upSize)} for the price of ${sizeLabel(p.account_size)} · ` : '')
-      + (cfgType === 'instant' ? 'one-time fee, funded from day one'
-         : 'one-time fee for evaluation access, refunded with your first payout');
-
-    const q = new URLSearchParams({ buy: p.key });
-    if (cfgWt) q.set('wt', '1');
-    if (cfgCt) q.set('ct', '1');
-    if (cfgCoupon) q.set('coupon', cfgCoupon);
-    $('#pcfg-cta').href = '/portal?' + q.toString();
-
-    const wkVal = cfgWt ? '<span class="ok">✓ Added to your order</span>' : '$199 bonus add-on';
-    /* Wiersz pojawia sie tylko, gdy dodatek jest w sprzedazy — tabela regul ma
-       opisywac to, co mozna kupic DZIS, a nie to, co kiedys bylo w ofercie. */
-    const ctVal = cfgCt ? '<span class="ok">✓ Added to your order</span>' : `$${cenaCt(p)} add-on`;
-    const rows = cfgType === 'instant' ? [
-      ['Profit target', 'None. Funded from day one'],
-      ['Maximum daily drawdown', p.max_daily_loss_pct + '%'],
-      ['Maximum total drawdown', p.max_overall_loss_pct + '%'],
-      ['Drawdown type', 'Balance-based'],
-      ['Minimum trading days', p.min_trading_days + ' days before first payout'],
-      ['Reward frequency', czestotliwoscWyplat()],
-      ['Profit split', p.profit_split_pct + '%'],
-      ['Max open volume', p.max_lots + ' lots'],
-      ['Weekend trading', wkVal],
-      ...(oferujeCt(p) ? [['Copytrading', ctVal]] : []),
-      ['News trading', '<span class="ok">✓ Allowed</span>'],
-      ['Leverage', dzwignia()],
-    ] : [
-      ['Profit target', `Phase 1: ${p.profit_target_p1}% | Phase 2: ${p.profit_target_p2}%`],
-      ['Maximum daily drawdown', p.max_daily_loss_pct + '%'],
-      ['Maximum total drawdown', p.max_overall_loss_pct + '%'],
-      ['Drawdown type', 'Balance-based'],
-      ['Minimum trading days', p.min_trading_days + ' days per phase, and before your first payout'],
-      ['Reward frequency', czestotliwoscWyplat()],
-      ['Profit split', 'Up to ' + p.profit_split_pct + '%'],
-      ['Max open volume', p.max_lots + ' lots'],
-      ['Fee refund', '<span class="ok">✓ With your first payout</span>'],
-      ['Weekend trading', wkVal],
-      ...(oferujeCt(p) ? [['Copytrading', ctVal]] : []),
-      ['News trading', '<span class="ok">✓ Allowed</span>'],
-      ['Leverage', dzwignia()],
-    ];
-    /* The promo message is rebuilt on every render, because it depends on the
-       size picked: the largest tier has nothing above it to upgrade to. */
-    if (cfgPromo) {
-      codeMsg('ok', upSize
-        ? `<b>${cfgPromo}</b> applied: you pay for ${sizeLabel(p.account_size)} and trade `
-          + `<b>${sizeLabel(upSize)}</b>. Pick any size, the upgrade follows.`
-        : `<b>${cfgPromo}</b> applied, but ${sizeLabel(p.account_size)} is our largest account — `
-          + `there is nothing above it. Pick a smaller size to trade one tier up.`);
-    } else if (cfgCoupon) {
-      codeMsg('ok', `<b>${cfgCoupon}</b> applied: <b>${cfgPct}% off</b> your challenge fee.`);
-    } else {
-      codeMsg(null);
-    }
+    if (cfgPromo) codeMsg('ok', `<b>${cfgPromo}</b> applied: you pay for the size you pick and trade one tier up.`);
+    else if (cfgCoupon) codeMsg('ok', `<b>${cfgCoupon}</b> applied: <b>${cfgPct}% off</b> your challenge fee.`);
+    else codeMsg(null);
     const pinp = $('#pcfg-coupon');
     if (pinp && document.activeElement !== pinp) pinp.value = cfgPromo || cfgCoupon || '';
-    if (upSize) rows.unshift(['Account size',
-      `<span class="ok">${sizeLabel(upSize)} — upgraded from ${sizeLabel(p.account_size)}</span>`]);
-    $('#prules-rows').innerHTML = rows.map(([l, v]) =>
-      `<div class="prule"><span>${l}</span><b>${v}</b></div>`).join('');
   }
 
   /* The field takes EVERY kind of code, exactly like the promo bar and the
@@ -923,7 +893,6 @@
          minis can never drift from the real template. */
       const qr = ($('#pv-qr') && $('#pv-qr').innerHTML) || '';
       const brand = (document.querySelector('#pv-card .cert-logo span') || {}).textContent || '';
-      const signer = (document.querySelector('#pv-card .sig') || {}).textContent || '';
       const card = r => {
         const payout = r.kind === 'payout';
         const when = r.issued_at
@@ -945,7 +914,6 @@
             <div class="cert-person">${esc(r.trader)}</div>
             <div class="cert-meta">${meta}</div>
             <div class="cert-foot">
-              <div class="cert-signblock"><b class="sig">${esc(signer)}</b><i class="sig-line"></i><span>Chief Executive Officer</span></div>
               <div class="cert-qr"><div class="qr-box">${qr}</div><span>Scan to verify</span></div>
             </div>
           </div>
@@ -1025,7 +993,7 @@
   /* ---------- init ---------- */
   revealize(document);
   $$('.stat-num[data-count]').forEach(countUp);
-  stats(); products(); certsStrip();
+  products(); certsStrip();
 })();
 
 /* „Reward frequency" z ustawienia serwera (PAYOUT_INTERVAL_DAYS przez

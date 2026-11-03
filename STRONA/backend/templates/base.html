@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{% block title %}{{ site_name }} — Prop Trading Challenges on Real MT5 Accounts{% endblock %}</title>
-<meta name="description" content="{% block description %}Trade our simulated capital on a real MetaTrader 5 account, with sizes up to $2,000,000. Pass the evaluation, get funded and keep up to 90% of the rewards. Clear rules, automated risk engine, automated account delivery.{% endblock %}">
+<title>{% block title %}{{ site_name }} — Prop Trading Challenges on MT5 Accounts{% endblock %}</title>
+<meta name="description" content="{% block description %}Trade our simulated capital on a MetaTrader 5 account, with sizes up to $2,000,000. Pass the evaluation, get funded and keep up to 90% of the rewards. Clear rules, automated risk engine, automated account delivery.{% endblock %}">
 <link rel="icon" href="/static/img/favicon.png" type="image/png">
 <link rel="preload" href="/static/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/space-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin>
@@ -20,7 +20,7 @@ try{if(localStorage.getItem('pf_theme2')==='dark')document.documentElement.datas
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="{{ site_name }}">
 <meta property="og:title" content="{% block og_title %}{{ site_name }} — Get Funded to Trade{% endblock %}">
-<meta property="og:description" content="{% block og_description %}Prop trading challenges on real MT5 infrastructure, up to $2,000,000 in simulated capital. Keep up to 90% of the rewards.{% endblock %}">
+<meta property="og:description" content="{% block og_description %}Prop trading challenges on MT5 infrastructure, up to $2,000,000 in simulated capital. Keep up to 90% of the rewards.{% endblock %}">
 <meta property="og:image" content="{{ base_url }}/static/img/og.png">
 <meta property="og:url" content="{{ base_url }}{{ request.url.path }}">
 <link rel="canonical" href="{{ base_url }}{{ request.url.path }}">
@@ -93,7 +93,6 @@ document.getElementById('bogoX').addEventListener('click',function(){
   <div class="wrap nav-in">
     <a class="logo" href="/"><img src="/static/img/logo.png" alt=""> <span class="logo-txt">{%- set _nm = site_name.rsplit(' ', 1) -%}{%- if _nm|length == 2 -%}<span class="lt-a">{{ _nm[0] }}</span> {{ _nm[1] }}{%- else -%}{{ site_name }}{%- endif -%}</span></a>
     <nav class="nav-links">
-      <a href="/objectives">Objectives</a>
       <a href="/#pricing">Challenges</a>
       <a href="/trade">Trade</a>
       <a href="/verify">Payouts</a>
@@ -113,7 +112,6 @@ document.getElementById('bogoX').addEventListener('click',function(){
   </div>
 </header>
 <div class="mobile-menu" id="mobileMenu">
-  <a href="/objectives">Trading Objectives</a>
   <a href="/#pricing">Challenges</a>
   <a href="/trade">Trade</a>
   <a href="/verify">Payouts</a>
@@ -150,7 +148,7 @@ document.getElementById('bogoX').addEventListener('click',function(){
     <div class="foot-grid">
       <div class="foot-brand">
         <a class="logo" href="/"><img src="/static/img/logo.png" alt=""> {{ site_name }}</a>
-        <p>A technology-driven trading skills evaluation platform. Real MetaTrader 5 infrastructure, automated risk engine, transparent rules.</p>
+        <p>A technology-driven trading skills evaluation platform. MetaTrader 5 infrastructure, automated risk engine, transparent rules.</p>
       </div>
       <div class="foot-col">
         <h3>Product</h3>

@@ -164,51 +164,14 @@
     linear-gradient(168deg,#0b142c 0%,#070d1e 52%,#050914 100%);
 }
 
-/* --- footer: signature + QR with the certificate number --- */
+/* --- footer: QR with the certificate number --- */
 .cert-foot{
   margin-top:auto;width:100%;display:grid;
-  grid-template-columns:1fr auto;align-items:end;
+  grid-template-columns:auto;justify-content:center;align-items:end;
   gap:clamp(10px,2.4cqw,24px);
-  /* wyraźny oddech od krawędzi karty — podpis i QR nie mogą jej dotykać */
   padding:clamp(9px,2cqw,18px) clamp(64px,16cqw,160px) 0;
   border-top:1px solid var(--k-linia);
 }
-.cert-signblock{
-  /* kolumna wycentrowana wzgledem srodka podpisu: bazgrol siedzi NA cienkiej
-     linii, a tytul CEO stoi pod nia, w osi podpisu */
-  display:flex;flex-direction:column;align-items:center;gap:0;
-  justify-self:start;text-align:center;min-width:0;
-  /* linia podpisu ma wypadac ~w polowie wysokosci kodu QR (odrobine nizej) */
-  margin-bottom:clamp(26px,7.1cqw,64px);
-}
-.cert-signblock .sig-line{
-  align-self:stretch;height:1px;
-  background:linear-gradient(90deg,transparent,rgba(147,163,201,.7) 18%,rgba(147,163,201,.7) 82%,transparent);
-}
-/* CEO signature — Mr De Haviland: a thin, hurried, barely-legible pen stroke
-   (deliberately NOT neat calligraphy). Shipped with the site, so it looks the
-   same on every OS and in print. Slight tilt sells the "signed by hand" feel. */
-@font-face{
-  font-family:'SignatureScript';
-  src:url('/static/fonts/signature.woff2') format('woff2');
-  /* block: never paint the fallback script font first — pages preload this file,
-     so the real signature is ready by first paint instead of swapping in late */
-  font-weight:400;font-style:normal;font-display:block;
-}
-.cert-signblock .sig{
-  font-family:'SignatureScript',var(--script);font-weight:400;
-  font-size:clamp(28px,6.4cqw,58px);line-height:.85;letter-spacing:-.01em;
-  color:#e8edff;display:inline-block;transform:rotate(-4deg) skewX(-3deg);
-  text-shadow:0 0 1px rgba(232,237,255,.3);
-  /* ogonki liter maja przecinac linie — jak realny podpis zlozony na linii */
-  margin-bottom:-.22em;padding:0 .4em .02em;
-}
-.cert-signblock span{
-  font-family:var(--display);font-weight:600;text-transform:uppercase;
-  letter-spacing:.14em;font-size:clamp(6.5px,1.3cqw,10px);color:var(--k-cichy);
-  margin-top:.6em;
-}
-
 .cert-qr{
   display:flex;flex-direction:column;align-items:center;
   gap:clamp(3px,.7cqw,6px);
@@ -254,8 +217,6 @@
   .cert-inner{aspect-ratio:auto;padding-top:22px;padding-bottom:22px}
   .cert-foot{grid-template-columns:1fr;justify-items:center;gap:16px;
     padding-left:16px;padding-right:16px}   /* the 64px/side floor ate 42-55% of the card */
-  .cert-signblock{align-items:center;text-align:center;justify-self:center;margin-bottom:0}
-  .cert-signblock .sig{font-size:clamp(24px,8.5cqw,58px);white-space:nowrap}  /* one line at 320px */
   .cert-meta{gap:22px}
   .cert-actions{flex-wrap:wrap;justify-content:center}
   .cert-actions a{padding:10px 6px}
@@ -278,6 +239,4 @@
   .cert-demo .cert-inner{aspect-ratio:auto;padding-top:24px;padding-bottom:24px}
   .cert-demo .cert-foot{grid-template-columns:1fr;justify-items:center;
     padding-left:16px;padding-right:16px}
-  .cert-demo .cert-signblock{align-items:center;text-align:center;justify-self:center;margin-bottom:0}
-  .cert-demo .cert-signblock .sig{font-size:clamp(24px,8.5cqw,58px);white-space:nowrap}
 }

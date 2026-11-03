@@ -5,7 +5,7 @@
 
 {# The card on the right is the SAME markup and stylesheet as the real document,
    so the verification page can never drift from what it verifies. #}
-{% block head_extra %}<link rel="preload" href="/static/fonts/signature.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/static/css/cert.css?v={{ asset_v }}">{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/css/cert.css?v={{ asset_v }}">{% endblock %}
 
 {% block content %}
 <section class="sec verify-hero">
@@ -83,13 +83,6 @@
           </div>
 
           <div class="cert-foot">
-            <div class="cert-signblock">
-              {% if signatory %}
-              <b class="sig">{{ signatory }}</b>
-              <i class="sig-line"></i>
-              <span>{{ signatory_label }}</span>
-              {% endif %}
-            </div>
             <div class="cert-qr">
               <div class="qr-box">{{ (preview.qr_svg if preview else sample_qr)|safe }}</div>
               <b>{{ preview.token if preview else 'a1b2-example' }}</b>

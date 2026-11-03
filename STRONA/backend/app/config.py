@@ -118,8 +118,6 @@ class Settings:
     # nie wymyślamy nazwiska osoby, która miałaby firmować dokument.
     # Podpis CEO na certyfikatach — STALA marki: kazdy dokument wychodzi z
     # odrecznym podpisem Matthew Harrisona (krój Great Vibes w cert.css).
-    cert_signatory: str = os.getenv("CERT_SIGNATORY", "Matthew Harrison")
-    cert_signatory_label: str = os.getenv("CERT_SIGNATORY_LABEL", "Chief Executive Officer")
     support_email: str = os.getenv("SUPPORT_EMAIL", "support@protradersfunding.com")
     # Google Analytics 4 (Measurement ID typu G-XXXXXXX). Puste = brak snippetu
     # gtag na stronach — zero requestów do Google.
