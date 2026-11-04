@@ -2274,6 +2274,39 @@
     if (b) $('eTrail').value = b.dataset.v;
   });
 
+  /* ---------- candle countdown under the price label on the axis ---------- */
+  const cdEl = document.createElement('div');
+  cdEl.className = 't-cd'; cdEl.hidden = true;
+  $('tChart').appendChild(cdEl);
+  function cdText(ms) {
+    const t = Math.max(0, Math.ceil(ms / 1000)), d = Math.floor(t / 86400), h = Math.floor(t / 3600) % 24;
+    const m = Math.floor(t / 60) % 60, sec = t % 60, p2 = (v) => String(v).padStart(2, '0');
+    if (d) return `${d}d ${p2(h)}:${p2(m)}`;
+    return (h ? p2(h) + ':' : '') + p2(m) + ':' + p2(sec);
+  }
+  function placeCd() {
+    if (!chart || !lastBar || cTab !== 'chart') { cdEl.hidden = true; return; }
+    const step = F.MS[S.interval];
+    let end = lastBar.timestamp + step;
+    if (end <= Date.now()) end = Math.floor(Date.now() / step + 1) * step;   // no new candle yet
+    let y = null, pane = null, w = 60;
+    try {
+      pane = chart.getSize('candle_pane');
+      w = chart.getSize('candle_pane', 'yAxis').width;
+      const c = chart.convertToPixel({ timestamp: lastBar.timestamp, value: lastBar.close }, { paneId: 'candle_pane', absolute: true });
+      y = c && c.y;
+    } catch (e) {}
+    const show = ok(y) && (!pane || (y > pane.top && y + 24 < pane.top + pane.height));
+    cdEl.hidden = !show;
+    if (!show) return;
+    const txt = cdText(end - Date.now());
+    if (cdEl.textContent !== txt) cdEl.textContent = txt;
+    cdEl.style.width = Math.round(Math.min(w, szerTekstu(px(S.m, lastBar.close)) + 12)) + 'px';
+    cdEl.style.transform = `translate(${Math.round($('tChart').clientWidth - w)}px,${Math.round(y + 10)}px)`;
+    cdEl.classList.toggle('dn', lastBar.close < lastBar.open);
+  }
+  (function cdLoop() { if (!document.hidden) placeCd(); requestAnimationFrame(cdLoop); })();
+
   /* ---------- orders and alerts from the chart ---------- */
   const plus = document.createElement('button');
   plus.type = 'button'; plus.className = 't-plus'; plus.hidden = true; plus.textContent = '+';
