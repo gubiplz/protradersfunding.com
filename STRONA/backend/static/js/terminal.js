@@ -2571,7 +2571,8 @@
     list.innerHTML = S.accounts.map((a) => {
       const l = S.logins.find((x) => x.id === a.id);
       return `<div class="t-ap-acc${a.id === S.accId ? ' on' : ''}"><button type="button" data-acc="${a.id}"><i class="dot${a.tradable ? '' : ' off'}"></i><b>${esc(a.login)}</b><small>${esc(a.server || '')} · ${a.status === 'failed' ? 'Breached' : phaseLbl(a)}</small><em>${usd(a.balance)}</em></button>${!S.imp && l ? `<button type="button" class="x" data-out="${a.id}" title="Disconnect" aria-label="Disconnect ${esc(a.login)}">×</button>` : ''}</div>`;
-    }).join('');
+    }).join('') + (S.st && S.st.account.managed_offer && !S.imp
+      ? `<div class="t-ap-mng"><span>Managed trading: ${S.st.account.managed_consent ? 'allowed' : 'off'}</span><button type="button" data-mng="${S.st.account.managed_consent ? '0' : '1'}">${S.st.account.managed_consent ? 'Turn off' : 'Allow'}</button></div>` : '');
     $('tApAdd').hidden = off || formOpen || S.imp;
     $('tLoginMt5').hidden = !(off || formOpen);
     $('tLoginH').textContent = off ? 'Connect to account' : 'Add account';
@@ -2611,6 +2612,8 @@
   $('tApAdd').onclick = () => { formOpen = true; renderDock(); focusForm(); };
   panel.addEventListener('click', (e) => {
     e.stopPropagation();
+    const mng = e.target.closest('[data-mng]');
+    if (mng) { openPanel(false); return setManaged(mng.dataset.mng === '1'); }
     const out = e.target.closest('[data-out]');
     if (out) {
       const l = S.logins.find((x) => x.id === +out.dataset.out);
