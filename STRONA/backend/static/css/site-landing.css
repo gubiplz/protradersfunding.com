@@ -173,3 +173,5 @@
 #markets .asset .ic.metal,#markets .asset .ic.energy{width:44px;height:44px;margin:0 0 7px}
 #markets .asset .ic svg{width:27px;height:27px}
 @media (max-width:1240px){#markets .assets-rows{margin-inline:16px}}
+
+.pill-ic{width:13px;height:13px;flex:none}

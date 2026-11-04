@@ -1637,6 +1637,7 @@
     if (!S.st) {
       ['tMUsed', 'tMBal', 'tMAvail', 'tDayLeft', 'tDdLeft'].forEach((id) => ($(id).textContent = '—'));
       $('tMBar').style.width = '0';
+      $('tAcLine').hidden = true;
       updateTicket();
       return;
     }
@@ -1652,6 +1653,15 @@
     $('tDdLeft').textContent = usd(eq - a.metrics.overall_floor);
     $('tDayLeft').className = 'num ' + (eq - a.metrics.daily_floor < a.size * 0.01 ? 'dn' : '');
     S.st.account.available = Math.max(0, eq - used);
+    $('tAcLine').hidden = false;
+    $('tAlBal').textContent = usd(a.balance);
+    $('tAlEq').textContent = usd(eq);
+    $('tAlMar').textContent = usd(used);
+    $('tAlFree').textContent = usd(Math.max(0, eq - used));
+    $('tAlLvl').textContent = used > 0 ? nf(0).format((eq / used) * 100) + '%' : '—';
+    const al = $('tAlPnl');
+    al.textContent = sUsd(floating);
+    al.className = 'num ' + cls(floating);
   }
 
   /* ---------- chart lines ---------- */
@@ -2218,7 +2228,7 @@
      keyboard, alerts, sounds and notifications, account report
      ===================================================================== */
   const lsJson = (k, d) => { try { return JSON.parse(ls.get(k, '')) || d; } catch (e) { return d; } };
-  const PREF = Object.assign({ oneClick: false, sounds: true, notify: false, lots: 0.01 }, lsJson('pf_term_prefs', {}));
+  const PREF = Object.assign({ quick: true, keys: false, sounds: true, notify: false, lots: 0.01 }, lsJson('pf_term_prefs', {}));
   const savePref = () => ls.set('pf_term_prefs', JSON.stringify(PREF));
   const tradable = () => S.token && S.st && S.st.account && S.st.account.tradable && !S.imp;
 
@@ -2407,7 +2417,7 @@
     PREF.lots = v; savePref(); ocLots.value = v.toFixed(2);
   });
   function renderOc() {
-    oc.hidden = !PREF.oneClick || cTab !== 'chart';
+    oc.hidden = !PREF.quick || cTab !== 'chart';
     if (oc.hidden || !S.m) return;
     if (document.activeElement !== ocLots) ocLots.value = (+PREF.lots).toFixed(2);
     const [bid, ask] = S.top || [];
@@ -2421,7 +2431,7 @@
   };
   oc.addEventListener('click', (e) => { const b = e.target.closest('[data-oc]'); if (b) quick(b.dataset.oc); });
   document.addEventListener('keydown', (e) => {
-    if (!PREF.oneClick || e.repeat || e.metaKey || e.ctrlKey || e.altKey || modalOpen || e.target.closest('input,textarea,select')) return;
+    if (!PREF.keys || e.repeat || e.metaKey || e.ctrlKey || e.altKey || modalOpen || e.target.closest('input,textarea,select')) return;
     const k = e.key.toLowerCase(), p = S.st && S.st.positions.find((x) => x.symbol === S.sym);
     if (k === 'b') quick('buy');
     else if (k === 's') quick('sell');
@@ -2434,7 +2444,8 @@
   /* ---------- settings menu in the footer ---------- */
   dropdown($('tFTools'), $('tToolsMenu'), (mn) => {
     const ck = (k, label, hint) => `<label class="t-tool"><input type="checkbox" data-pref="${k}"${PREF[k] ? ' checked' : ''}><span><b>${label}</b><small>${hint}</small></span></label>`;
-    mn.innerHTML = ck('oneClick', 'One-click trading', 'Buy and sell from the chart at once, with no confirmation. Keys: B buy, S sell, X close, R reverse.')
+    mn.innerHTML = ck('quick', 'Quick Trade buttons', 'Buy and Sell on the chart. One click sends a market order, with no confirmation.')
+      + ck('keys', 'Keyboard trading', 'B buy, S sell, X close, R reverse. Orders go out at once.')
       + ck('sounds', 'Sounds', 'Fills, TP and SL, alerts and loss-limit warnings.')
       + ck('notify', 'Browser notifications', 'The same events while this tab is in the background.')
       + `<h6>Price alerts</h6>${S.alerts.map((a) => `<div class="t-al"><span>${esc(a.sym)} ${px(BY[a.sym], a.price)}</span><button type="button" data-al="${a.id}" aria-label="Remove alert">✕</button></div>`).join('') || '<p class="t-hint" style="padding:2px 12px 8px">Hover the chart and press + to add one.</p>'}`;
@@ -2784,7 +2795,7 @@
     const btn = (a, t, extra) => `<button type="button" role="menuitem" data-ctx="${a}">${t}${extra || ''}</button>`;
     if (ctxPx) {
       const ps = px(m, ctxPx), pod = !mark || ctxPx < mark;
-      it.push(btn('buy', `${pod ? 'Buy Limit' : 'Buy Stop'} at <b class="num">${ps}</b>`), btn('sell', `${pod ? 'Sell Stop' : 'Sell Limit'} at <b class="num">${ps}</b>`), '<hr>');
+      it.push(btn('buy', `${pod ? 'Buy Limit' : 'Buy Stop'} at <b class="num">${ps}</b>`), btn('sell', `${pod ? 'Sell Stop' : 'Sell Limit'} at <b class="num">${ps}</b>`), btn('alert', `Price alert at <b class="num">${ps}</b>`), '<hr>');
     }
     it.push(btn('reset', 'Reset chart view', '<kbd>⌥ R</kbd>'));
     if (ctxPx) it.push(btn('copy', `Copy price <span class="num">${px(m, ctxPx)}</span>`));
@@ -2805,6 +2816,7 @@
     e.stopPropagation();
     ctxMenu.hidden = true;
     const a = b.dataset.ctx, m = S.m;
+    if (a === 'alert') { ctxMenu.hidden = true; return addAlert(S.sym, roundPx(m, ctxPx)); }
     if (a === 'buy' || a === 'sell') {
       const pod = !markPx() || ctxPx < markPx();
       setSide(a);
