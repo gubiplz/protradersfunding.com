@@ -1960,9 +1960,11 @@
     const m = BY[h.symbol] || S.m, t = $('tTradeTip');
     const dur = Math.max(0, Date.parse(h.closed_at) - Date.parse(h.opened_at)) / 60000;
     const czas = dur >= 1440 ? `${(dur / 1440).toFixed(1)} d` : dur >= 60 ? `${Math.floor(dur / 60)} h ${Math.round(dur % 60)} min` : `${Math.max(1, Math.round(dur))} min`;
+    const pips = ((h.close - h.entry) * (h.side === 'buy' ? 1 : -1)) / pipOf(m);
     t.innerHTML = `<div class="hd"><b class="${h.side === 'buy' ? 'up' : 'dn'}">${h.side === 'buy' ? 'Long' : 'Short'}</b> ${lotsF(h.lots)} lots · ${esc(h.symbol)}</div>
       <div class="row"><span>Entry</span><b class="num">${px(m, h.entry)}</b><small>${tm(h.opened_at)}</small></div>
       <div class="row"><span>Exit</span><b class="num">${px(m, h.close)}</b><small>${tm(h.closed_at)}</small></div>
+      <div class="row"><span>Pips</span><b class="num ${cls(pips)}">${pips >= 0 ? '+' : '-'}${fx(Math.abs(pips), 1)}</b></div>
       <div class="row"><span>P&amp;L</span><b class="num ${cls(h.pnl)}">${sUsd(h.pnl)}</b><small>${czas}</small></div>`;
     t.hidden = false;
     placeTip();
