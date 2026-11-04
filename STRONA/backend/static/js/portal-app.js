@@ -2164,7 +2164,7 @@ const VIEWS={
     return `<div class="chal-row${dead?' dead':''}" role="button" tabindex="0" onclick="openAcc(${a.id})"
         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openAcc(${a.id})}">
       <div class="cr-id">
-        <div class="acct-ava"><img src="/static/img/mt5.png" alt="MT5"></div>
+        <div class="acct-ava acct-ava-txt">MT5</div>
         <div class="cr-txt">
           <div class="login">${a.status==='provisioning'?'<span class="muted">MT5 account pending…</span>':esc(a.login)}
             <span class="status ${esc(a.status)}"><span class="dot"></span>${a.status==='active'?'evaluation':esc(a.status)}</span>
@@ -4318,7 +4318,7 @@ async function openAcc(id){
         <a href="/terms">Terms</a>; undisclosed sharing can trigger an account review.</div>
       </div>
       <div class="creds-grid"${a.platform_password?'':' style="display:none"'}>
-        <div class="cred-cell"><div class="l">Platform</div><div class="v"><img src="/static/img/mt5.png" alt="MT5"></div></div>
+        <div class="cred-cell"><div class="l">Platform</div><div class="v">MT5</div></div>
         ${credCell('Server',a.platform_server)}
         ${credCell('Login',a.platform_login)}
         ${a.platform_password?credCell('Password',a.platform_password):''}

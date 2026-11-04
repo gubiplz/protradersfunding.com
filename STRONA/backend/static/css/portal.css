@@ -1958,3 +1958,4 @@ body.imp-on .cookie-note{bottom:calc(12px + 42px + env(safe-area-inset-bottom))}
 @keyframes po-shake{0%,100%{transform:none}20%,60%{transform:translateX(-5px)}40%,80%{transform:translateX(5px)}}
 .po-min.shake{animation:po-shake .35s ease}
 @media (prefers-reduced-motion:reduce){.po-min.shake{animation:none}}
+.acct-ava-txt{display:grid;place-items:center;font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--muted)}
