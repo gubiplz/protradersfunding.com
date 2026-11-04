@@ -4296,7 +4296,7 @@ async function openAcc(id){
         <tbody>${pos.map(t=>`<tr>
           <td class="num">${t.ticket}</td>
           <td class="num" data-sort="${esc(t.opened_at||'')}">${t.opened_at?dstr(t.opened_at):'—'}</td>
-          <td><span class="tside ${t.side==='buy'?'buy':'sell'}">${esc(t.side)}</span></td>
+          <td><span class="tside ${t.side==='buy'?'buy':'sell'}">${esc(t.side)}</span>${t.managed?' <small class="muted">Managed</small>':''}</td>
           <td class="num">${(t.lots??0).toFixed(2)}</td>
           <td class="num">${esc(t.symbol)}</td>
           <td><span class="pnl-pill ${t.pnl>=0?'up':'down'}">${t.pnl>=0?'+':'-'}$${fmt(Math.abs(t.pnl))}</span></td>

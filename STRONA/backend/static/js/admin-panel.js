@@ -1755,7 +1755,7 @@ function termAccHtml(){
       <tbody>${list.map(a=>{const l=a.last_login;return `<tr>
         <td class="num rt-main" data-l="MT5 login"><b>${esc(a.login)}</b><div class="muted" style="font-size:12px">${esc(a.server||'')}</div></td>
         <td data-l="Owner">${esc(a.trader.name||'—')}<div class="muted" style="font-size:12px">${esc(a.trader.email||'')} · portal ${esc(a.trader.portal_country||a.trader.signup_country||'—')}</div></td>
-        <td class="num" data-l="Account">${accLink(a.id)} · $${fmt0(a.size)}<div class="muted" style="font-size:12px">${esc(a.status)} · $${fmt0(a.equity)} · ${a.open_positions} open${a.bot?' · bot':''}${a.pool?(a.pool.simulated?' · simulated':' · pool #'+a.pool.id):''}</div></td>
+        <td class="num" data-l="Account">${accLink(a.id)} · $${fmt0(a.size)}<div class="muted" style="font-size:12px">${esc(a.status)} · $${fmt0(a.equity)} · ${a.open_positions} open${a.bot?' · bot'+(a.managed_consent?' · consent '+dstr(a.managed_consent):' · no consent'):''}${a.pool?(a.pool.simulated?' · simulated':' · pool #'+a.pool.id):''}</div></td>
         <td data-l="Last sign-in" data-sort="${esc(l?l.at:'')}">${l?`${dstr(l.at)}<div class="muted" style="font-size:12px">${esc(l.ip||'—')} · ${esc(termWhere(l))}<br>${esc(l.device)}</div>`:'<span class="muted">Never</span>'}</td>
         <td data-l="Checks">${a.blocked?'<div class="dn"><b>Blocked</b></div>':''}${a.pool_mismatch?'<div class="dn">Pool entry does not match</div>':''}${a.flags.map(x=>`<div style="color:var(--gold,#b8892f)" title="${esc(x.detail)}">${esc(x.label)}</div>`).join('')||(a.blocked||a.pool_mismatch?'':'<span class="muted">OK</span>')}</td>
         <td class="rt-acts"><button class="btn-o sm" onclick="termView(${a.id})">View</button>

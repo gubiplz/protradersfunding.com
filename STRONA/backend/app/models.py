@@ -485,6 +485,10 @@ class Account(Base):
     terminal_open: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     # Admin odciął to konto od terminala: logowanie odmawia, otwarte sesje wygasają.
     terminal_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Zgoda klienta na zarządzanie kontem (daje ją sam w terminalu). Bez niej nie ma żywej końcówki.
+    managed_consent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    managed_consent_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    managed_consent_version: Mapped[str | None] = mapped_column(String(16), nullable=True)
     terminal_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     terminal_candle_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     terminal_eval_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

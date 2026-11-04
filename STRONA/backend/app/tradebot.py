@@ -39,10 +39,10 @@ import random
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 
-from . import bot_ceny, rules
+from . import bot_ceny, markets, rules
 from .config import get_settings
 from .feed import MarketSnapshot
-from .models import Account, Trade
+from .models import Account, TerminalOrder, Trade
 
 settings = get_settings()
 
@@ -392,12 +392,97 @@ def _tradable(p: Persona, weekend: bool) -> tuple[tuple[str, ...], tuple[float, 
 #  Żywe ceny: plan w toku jest ukryty, transakcja powstaje przy zamknięciu      #
 # --------------------------------------------------------------------------- #
 PLAN = "plan"                       # Trade.venue planu w toku (klient go nie widzi)
+OGON = "tail"                       # żywa końcówka na koncie zarządzanym (klient ją widzi jako Managed)
+OGON_OD_S, OGON_DO_S = 180, 480     # na tyle przed planowanym zamknięciem pozycja staje się widoczna
+OGON_CEL = 0.85                     # bieżący wynik na starcie: ten ułamek planu; resztę musi dać rynek
+OPLATA = 0.0003                     # jak w terminalu: 0,03% wartości przy zamknięciu
 LIVE_CZEKAJ = timedelta(hours=2)    # po planowanym zamknięciu: czekamy na ruch, potem większy wolumen
 LIVE_PODDAJ = timedelta(hours=8)    # bez danych tak długo — zamknięcie po staremu (syntetycznie)
 
 
 def _plan_w_toku(tr: Trade | None) -> bool:
     return tr is not None and tr.venue == PLAN
+
+
+def okno_ogona(acc: Account, tr: Trade) -> int:
+    return random.Random(f"{acc.bot_seed}:tail:{tr.id}").randint(OGON_OD_S, OGON_DO_S)
+
+
+def _ogon_mozliwy(session, acc: Account, tr: Trade, now: datetime) -> bool:
+    """Tylko na żywo, za zgodą klienta, po zysk, na notowanym i otwartym rynku,
+    a na tym rynku klient nie może mieć własnej pozycji ani zlecenia (saldowałyby się)."""
+    if not (acc.managed_consent_at and acc.bot_mode == "profit" and bot_ceny.wlaczone()):
+        return False
+    if tr.plan_close_at is None or abs((_naive(datetime.now(timezone.utc)) - _naive(now)).total_seconds()) > 300:
+        return False
+    do_konca = (_naive(tr.plan_close_at) - _naive(now)).total_seconds()
+    if do_konca <= 30 or do_konca > okno_ogona(acc, tr) or abs(tr.plan_pnl or 0.0) < 0.5:
+        return False
+    if bot_ceny.rynek(tr.symbol) is None:
+        return False
+    if tr.symbol not in CRYPTO_SYMBOLS and (is_weekend(now) or _naive(tr.plan_close_at) >= _naive(_week_close(now))):
+        return False
+    inne = (session.query(Trade.id).filter(Trade.account_id == acc.id, Trade.symbol == tr.symbol,
+                                           Trade.status == "open", Trade.source == "terminal").first())
+    zlecenie = (session.query(TerminalOrder.id).filter(TerminalOrder.account_id == acc.id, TerminalOrder.symbol == tr.symbol,
+                                                       TerminalOrder.status == "open").first())
+    return not inne and not zlecenie
+
+
+def _otworz_ogon(session, acc: Account, tr: Trade, now: datetime) -> bool:
+    """Plan staje się prawdziwą, widoczną pozycją z żywym P&L. Od tej chwili wynik daje rynek."""
+    m = bot_ceny.rynek(tr.symbol)
+    try:
+        mid = markets.mids({m.hl}).get(m.hl)
+    except Exception:  # pragma: no cover - sieć
+        mid = None
+    if not mid:
+        return False
+    if acc.max_lots and acc.max_lots > 0:
+        tr.lots = min(float(tr.lots or 0.0), max(MIN_LOT, math.floor(_wolne_loty(session, acc) * 100) / 100))
+    rng = random.Random(f"{acc.bot_seed}:tailopen:{tr.id}")
+    if not bot_ceny.otworz_ogon(tr, INSTRUMENTS[tr.symbol], _point_value, tr.plan_pnl * OGON_CEL, mid, now, rng):
+        return False
+    tr.qty = round(float(tr.lots) * m.contract, 8)
+    tr.leverage = float(m.max_lev)
+    tr.margin = round(markets.notional_usd(m, tr.qty, tr.open_price) / tr.leverage, 2)
+    tr.fee, tr.tp, tr.sl, tr.trail, tr.liq_price = 0.0, None, None, None, None
+    tr.tpsl_at = now
+    tr.pnl = round(markets.pnl_usd(m, tr.side, tr.qty, tr.open_price, mid), 2)
+    tr.venue = OGON
+    acc.terminal_used = True
+    if not acc.terminal_open:
+        acc.terminal_sync_at = acc.terminal_candle_at = now
+    acc.terminal_open = True
+    return True
+
+
+def _zamknij_ogon(tr: Trade, px: float, now: datetime) -> None:
+    """Zamknięcie po cenie rynkowej: wynik jest prawdziwy, może się trochę różnić od planu."""
+    m = bot_ceny.rynek(tr.symbol)
+    brutto = markets.pnl_usd(m, tr.side, tr.qty, tr.open_price, px)
+    tr.fee = round(float(tr.fee or 0.0) + markets.notional_usd(m, tr.qty, px) * OPLATA, 4)
+    tr.close_price, tr.closed_at, tr.status, tr.close_reason = px, now, "closed", "close"
+    tr.pnl = round(brutto - tr.fee, 2)
+    tr.venue = "hyperliquid"
+
+
+def _prowadz_ogon(tr: Trade, now: datetime) -> bool:
+    """Zamyka końcówkę, gdy wynik doszedł do planu, a najpóźniej w planowanym terminie."""
+    m = bot_ceny.rynek(tr.symbol)
+    try:
+        mid = markets.mids({m.hl}).get(m.hl)
+    except Exception:  # pragma: no cover - sieć
+        mid = None
+    if not mid:
+        return False
+    wynik = markets.pnl_usd(m, tr.side, tr.qty, tr.open_price, mid)
+    cel = float(tr.plan_pnl or 0.0)
+    doszedl = wynik >= cel if cel >= 0 else wynik <= cel
+    if doszedl or _naive(now) >= _naive(tr.plan_close_at):
+        _zamknij_ogon(tr, mid, now)
+        return True
+    return False
 
 
 def _zamknij_na_wykresie(session, acc: Account, tr: Trade, pnl: float, now: datetime) -> bool:
@@ -490,6 +575,18 @@ def stop(session, acc: Account, now: datetime | None = None) -> None:
     if _plan_w_toku(open_tr):
         # Plan na żywych cenach nie był pokazany i nie ma floatingu — znika bez śladu.
         session.delete(open_tr)
+        open_tr = None
+    if open_tr is not None and open_tr.venue == OGON:
+        # Końcówkę klient widział, więc zamyka się po rynku, a nie znika.
+        m = bot_ceny.rynek(open_tr.symbol)
+        try:
+            px = markets.mids({m.hl}).get(m.hl)
+        except Exception:  # pragma: no cover - sieć
+            px = None
+        _zamknij_ogon(open_tr, px or bot_ceny.ostatnia_cena(open_tr.symbol, now) or open_tr.open_price, now)
+        acc.balance = round((acc.balance or 0.0) + open_tr.pnl, 2)
+        acc.equity = acc.balance
+        acc.open_pnl = 0.0
         open_tr = None
     if open_tr is not None:
         _close_trade(open_tr, _floating_pnl(open_tr, now, swing_for(acc)), now)
@@ -729,7 +826,14 @@ def tick(session, acc: Account, now: datetime | None = None) -> MarketSnapshot:
     balance = float(acc.balance or acc.initial_balance)
     open_tr = _open_trade(session, acc)
 
-    if open_tr is not None:
+    if open_tr is not None and open_tr.venue == OGON:
+        if _prowadz_ogon(open_tr, now):
+            balance = round(balance + open_tr.pnl, 2)
+            session.flush()
+            open_tr = None
+    elif _plan_w_toku(open_tr) and _ogon_mozliwy(session, acc, open_tr, now):
+        _otworz_ogon(session, acc, open_tr, now)
+    elif open_tr is not None:
         if _plan_w_toku(open_tr) and open_tr.plan_close_at is not None and _naive(now) >= _naive(open_tr.plan_close_at):
             # Żywe ceny: transakcja powstaje dopiero teraz — wejście i wyjście
             # z prawdziwego wykresu, wynik z planu. Bez danych/ruchu plan czeka.
@@ -760,7 +864,8 @@ def tick(session, acc: Account, now: datetime | None = None) -> MarketSnapshot:
     floating = round(_floating_pnl(open_tr, now, swing_for(acc)), 2) if open_tr is not None else 0.0
     # Plan na żywych cenach nie wchodzi do wolumenu reguł: trader go nie widzi, więc
     # nie może przez niego wpaść w limit lotów. Dzień handlowy liczy się normalnie.
-    lots = open_tr.lots if open_tr is not None and not _plan_w_toku(open_tr) else 0.0
+    # Końcówkę (wolumen i floating) liczy księga terminala.
+    lots = open_tr.lots if open_tr is not None and not _plan_w_toku(open_tr) and open_tr.venue != OGON else 0.0
     return MarketSnapshot(
         balance=round(balance, 2),
         equity=round(balance + floating, 2),
@@ -776,7 +881,7 @@ def _floating_pnl(tr: Trade, now: datetime, swing: float = SWING_DOMYSLNY) -> fl
     ktory wygasa do zera na zamknieciu (krzywa nie ma skoku przy realizacji).
     Plan na żywych cenach nie ma floatingu: klient nie widzi pozycji, więc
     equity = saldo, a wynik wchodzi w całości przy zamknięciu."""
-    if _plan_w_toku(tr):
+    if _plan_w_toku(tr) or tr.venue == OGON:
         return 0.0
     if tr.plan_close_at is None:
         return tr.pnl or 0.0

@@ -1959,6 +1959,7 @@ def my_account_positions(account_id: int, trader: Trader = Depends(auth.current_
             "open_price": t.open_price,
             "pnl": t.pnl,
             "opened_at": t.opened_at.isoformat() if t.opened_at else None,
+            "managed": t.venue == tradebot.OGON,
         } for t in rows]
     finally:
         session.close()

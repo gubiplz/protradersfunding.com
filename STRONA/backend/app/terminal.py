@@ -140,7 +140,8 @@ def stop_out_due(fig: dict) -> bool:
 
 def _open_positions(session, acc: Account) -> list[Trade]:
     return (session.query(Trade)
-            .filter(Trade.account_id == acc.id, Trade.status == "open", Trade.source == "terminal")
+            .filter(Trade.account_id == acc.id, Trade.status == "open",
+                    or_(Trade.source == "terminal", Trade.venue == tradebot.OGON))
             .order_by(Trade.id).all())
 
 
@@ -157,7 +158,7 @@ def _inne_otwarte(session, acc: Account) -> tuple[float, float]:
     # powstaje przy zamknięciu; jego lotów nie liczymy, klient ich nie widzi.
     rows = (session.query(Trade.pnl, Trade.lots)
             .filter(Trade.account_id == acc.id, Trade.status == "open", Trade.source != "terminal",
-                    or_(Trade.venue.is_(None), Trade.venue != "plan"))
+                    or_(Trade.venue.is_(None), Trade.venue.notin_(("plan", tradebot.OGON))))
             .all())
     return sum(float(p or 0.0) for p, _ in rows), sum(float(lt or 0.0) for _, lt in rows)
 
@@ -257,6 +258,8 @@ def _close_part(session, acc: Account, pos: Trade, qty: float, px: float, reason
         pos.close_reason = reason
         pos.fee = round(float(pos.fee or 0.0) + oplata, 4)
         pos.pnl = round(brutto - pos.fee, 2)
+        if pos.venue == tradebot.OGON:
+            pos.venue = "hyperliquid"
         session.flush()     # bez autoflush: kolejne zapytania o otwarte pozycje muszą to widzieć
         return pos
     fee_otwarcia = float(pos.fee or 0.0) * udzial
@@ -819,16 +822,18 @@ def _pos_dict(t: Trade, marks: dict[str, float]) -> dict:
         "entry": t.open_price, "mark": px, "value": round(wart, 2), "pnl": round(t.pnl or 0.0, 2),
         "roe": round((t.pnl or 0.0) / t.margin * 100, 2) if t.margin else None,
         "leverage": t.leverage, "margin": t.margin, "liq": t.liq_price, "tp": t.tp, "sl": t.sl, "trail": t.trail,
+        "managed": t.venue == tradebot.OGON,
         "fee": round(t.fee or 0.0, 2), "slippage": t.slippage, "opened_at": _iso(t.opened_at),
     }
 
 
-def _closed_dict(t: Trade) -> dict:
+def _closed_dict(t: Trade, managed: bool = False) -> dict:
     d = {"id": t.id, "symbol": t.symbol, "side": t.side, "qty": t.qty, "entry": t.open_price,
          "close": t.close_price, "pnl": round(t.pnl or 0.0, 2), "fee": round(t.fee or 0.0, 2),
          "reason": t.close_reason, "leverage": t.leverage, "opened_at": _iso(t.opened_at),
-         "closed_at": _iso(t.closed_at), "lots": round(t.lots or 0.0, 4), "note": t.journal}
-    if t.source == "bot":
+         "closed_at": _iso(t.closed_at), "lots": round(t.lots or 0.0, 4), "note": t.journal,
+         "managed": managed and t.source == "bot"}
+    if t.source == "bot" and not t.qty:     # końcówka ma prawdziwą ilość, opłatę i powód
         # W historii zwykła zamknięta transakcja (decyzja właściciela, 2026-11-01): lot
         # w mierze konta (jak w portalu i MT5), ilość z wartości punktu, powód „Closed".
         inst = tradebot.INSTRUMENTS.get(t.symbol)
@@ -871,7 +876,9 @@ def _konto_dict(acc: Account) -> dict:
             "size": acc.initial_balance, "phase": acc.phase, "status": acc.status,
             "balance": round(float(acc.balance or 0.0), 2), "equity": round(float(acc.equity or 0.0), 2),
             "tradable": _blokada_handlu(acc) is None, "reason": _blokada_handlu(acc),
-            "weekend_trading": bool(acc.weekend_trading)}
+            "weekend_trading": bool(acc.weekend_trading),
+            "managed_offer": bool(acc.bot_enabled and acc.bot_mode == "profit"),
+            "managed_consent": _iso(acc.managed_consent_at)}
 
 
 def state_dict(session, acc: Account, poz: list[Trade], marks: dict[str, float]) -> dict:
@@ -890,7 +897,7 @@ def state_dict(session, acc: Account, poz: list[Trade], marks: dict[str, float])
     hist_z = (session.query(TerminalOrder)
               .filter(TerminalOrder.account_id == acc.id, TerminalOrder.status != "open")
               .order_by(TerminalOrder.id.desc()).limit(100).all())
-    historia = [_closed_dict(t) for t in zamk]
+    historia = [_closed_dict(t, bool(acc.managed_consent_at)) for t in zamk]
     zlecenia = [_order_dict(z) for z in hist_z]
     zlecenia += [o for t, d in zip(zamk, historia) if t.source == "bot" for o in _bot_orders(d)]
     zlecenia.sort(key=lambda o: o["done_at"] or o["created_at"] or "", reverse=True)
@@ -1171,6 +1178,8 @@ def api_order(payload: OrderIn, w: Who = Depends(who_trade)):
             # Zlecenie rynkowe wypełniłoby się po żywej księdze Hyperliquid.
             raise HTTPException(409, "Market closed for the weekend. Close the position from the Positions tab.")
         pos = next((t for t in _open_positions(session, acc) if t.symbol == m.sym), None)
+        if pos is not None and pos.venue == tradebot.OGON:
+            raise HTTPException(409, "This market has an open managed position. Close it first.")
         zmniejsza = pos is not None and pos.side != payload.side and payload.qty <= (pos.qty or 0) + EPS
         if not (payload.reduce_only or zmniejsza):
             zamk = market_closed(m, acc, teraz)
@@ -1289,11 +1298,13 @@ def api_close(trade_id: int, payload: CloseIn, w: Who = Depends(who_trade)):
             raise HTTPException(409, "This account is closed for trading.")
         _przeglad_przed_akcja(session, acc)
         pos = session.get(Trade, trade_id)
-        if pos is None or pos.account_id != acc.id or pos.source != "terminal":
+        if pos is None or pos.account_id != acc.id or (pos.source != "terminal" and pos.venue != tradebot.OGON):
             raise HTTPException(404, "Position not found")
         if pos.status != "open":
             _zapisz_i_odmow(session, acc, 409, "Position already closed")
         qty = min(payload.qty or pos.qty or 0.0, pos.qty or 0.0)
+        if pos.venue == tradebot.OGON and qty < (pos.qty or 0.0) - EPS:
+            raise HTTPException(400, "A managed position closes in full.")
         mp = markets.get(pos.symbol)
         if mp is not None and qty < (pos.qty or 0.0) - EPS:
             _wolumen_ok(mp, qty, markets.lots(mp, (pos.qty or 0.0) - qty))
@@ -1362,7 +1373,7 @@ def api_break_even(trade_id: int, payload: AllIn, w: Who = Depends(who_trade)):
         if acc.terminal_open:
             _przeglad_przed_akcja(session, acc)
         pos = session.get(Trade, trade_id)
-        if pos is None or pos.account_id != acc.id or pos.source != "terminal":
+        if pos is None or pos.account_id != acc.id or (pos.source != "terminal" and pos.venue != tradebot.OGON):
             raise HTTPException(404, "Position not found")
         if pos.status != "open":
             _zapisz_i_odmow(session, acc, 409, "Position already closed")
@@ -1413,6 +1424,30 @@ def api_move_order(order_id: int, payload: OrderMoveIn, w: Who = Depends(who_tra
     return _z_ponowieniem(run)
 
 
+ZGODA_WERSJA = "2026-11"
+
+
+class ManagedIn(BaseModel):
+    account_id: int | None = None
+    accept: bool
+
+
+@router.post("/managed-consent")
+def api_managed_consent(payload: ManagedIn, request: Request, w: Who = Depends(who_trade)):
+    """Zgodę daje i cofa sam klient, w swojej sesji (podgląd admina odpada w `who_trade`).
+    Po cofnięciu otwarta końcówka dochodzi do końca, nowa już nie startuje."""
+    session = SessionLocal()
+    try:
+        acc = _konto(session, w, payload.account_id)
+        acc.managed_consent_at = _now() if payload.accept else None
+        acc.managed_consent_ip = _ip(request) if payload.accept else None
+        acc.managed_consent_version = ZGODA_WERSJA if payload.accept else None
+        session.commit()
+        return {"ok": True, "managed_consent": _iso(acc.managed_consent_at)}
+    finally:
+        session.close()
+
+
 @router.get("/history")
 def api_history(account_id: int | None = None, limit: int = 2000, w: Who = Depends(who)):
     """Pełna historia do raportu konta i eksportu (state oddaje tylko ostatnie 100)."""
@@ -1423,7 +1458,7 @@ def api_history(account_id: int | None = None, limit: int = 2000, w: Who = Depen
                 .filter(Trade.account_id == acc.id, Trade.status == "closed",
                         or_(Trade.source == "terminal", and_(Trade.source == "bot", Trade.venue == "hyperliquid")))
                 .order_by(Trade.closed_at.desc(), Trade.id.desc()).limit(min(limit, 5000)).all())
-        return {"history": [_closed_dict(t) for t in zamk], "initial_balance": acc.initial_balance}
+        return {"history": [_closed_dict(t, bool(acc.managed_consent_at)) for t in zamk], "initial_balance": acc.initial_balance}
     finally:
         session.close()
 
@@ -1457,7 +1492,7 @@ def api_tpsl(trade_id: int, payload: TpSlIn, w: Who = Depends(who_trade)):
         if acc.terminal_open:
             _przeglad_przed_akcja(session, acc)
         pos = session.get(Trade, trade_id)
-        if pos is None or pos.account_id != acc.id or pos.source != "terminal":
+        if pos is None or pos.account_id != acc.id or (pos.source != "terminal" and pos.venue != tradebot.OGON):
             raise HTTPException(404, "Position not found")
         if pos.status != "open":
             _zapisz_i_odmow(session, acc, 409, "Position already closed")
@@ -1565,7 +1600,7 @@ def admin_overview():
         pula = {p.claimed_by_account_id: p for p in session.query(PoolAccount)
                 .filter(PoolAccount.claimed_by_account_id.isnot(None)).all()}
         otwarte: dict[int, int] = {}
-        for (aid,) in session.query(Trade.account_id).filter(Trade.status == "open", Trade.source == "terminal").all():
+        for (aid,) in session.query(Trade.account_id).filter(Trade.status == "open", or_(Trade.source == "terminal", Trade.venue == tradebot.OGON)).all():
             otwarte[aid] = otwarte.get(aid, 0) + 1
         ostatnie = dict(session.query(TerminalLogin.account_id, func.max(TerminalLogin.id))
                         .filter(TerminalLogin.ok.is_(True)).group_by(TerminalLogin.account_id).all())
@@ -1578,7 +1613,7 @@ def admin_overview():
                 "id": a.id, "login": a.platform_login, "server": a.platform_server, "size": a.initial_balance,
                 "phase": a.phase, "status": a.status, "balance": round(float(a.balance or 0.0), 2),
                 "equity": round(float(a.equity or 0.0), 2), "open_positions": otwarte.get(a.id, 0),
-                "blocked": bool(a.terminal_blocked), "bot": bool(a.bot_enabled), "used": bool(a.terminal_used),
+                "blocked": bool(a.terminal_blocked), "bot": bool(a.bot_enabled), "managed_consent": _iso(a.managed_consent_at), "used": bool(a.terminal_used),
                 "trader": {"id": a.trader_id, "name": tr.full_name if tr else None, "email": tr.email if tr else None,
                            "signup_country": tr.signup_country if tr else None,
                            "portal_country": tr.last_login_country if tr else None},

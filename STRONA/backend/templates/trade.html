@@ -247,6 +247,10 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
         <div class="t-menu t-cols" id="tColsMenu" hidden></div>
       </div>
     </div>
+    <div class="t-mng" id="tMng" hidden>
+      <p><b>Managed trading is available on this account.</b> If you allow it, {{ site_name }} can place trades here. They are marked Managed, follow our plan, and you can close them yourself.</p>
+      <button type="button" class="t-mng-ok" id="tMngOk">Allow</button><button type="button" id="tMngNo">Not now</button>
+    </div>
     <dl class="t-acline" id="tAcLine" hidden>
       <div><dt>Balance</dt><dd class="num" id="tAlBal"></dd></div>
       <div><dt>Equity</dt><dd class="num" id="tAlEq"></dd></div>

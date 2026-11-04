@@ -217,6 +217,36 @@ def zamknij(tr, inst, pv_fn, pnl: float, wyjscie: datetime, max_lots: float | No
     return True
 
 
+def otworz_ogon(tr, inst, pv_fn, cel: float, mid: float, now: datetime, rng: random.Random) -> bool:
+    """Żywa końcówka: wejście z ostatnich świec, przy którym bieżący wynik to `cel`.
+    Ustawia stronę, cenę i czas wejścia. False, gdy żadna świeca nie zawiera takiej ceny."""
+    m = rynek(tr.symbol)
+    lots = float(tr.lots or 0.0)
+    pv = pv_fn(inst, mid)
+    if m is None or not lots or not pv:
+        return False
+    now_ms = _ms(now)
+    try:
+        iv, sw = swiece(m.hl, max(_ms(tr.opened_at), now_ms - 3_600_000), now_ms, now_ms)
+    except Exception as e:  # pragma: no cover - sieć
+        print(f"[bot-ceny] świece {m.hl}: {e}", flush=True)
+        return False
+    krok = _MS[iv]
+    okno = [c for c in sw if c["t"] + krok <= now_ms]
+    strony = ["buy", "sell"]
+    rng.shuffle(strony)
+    for strona in strony:
+        sign = 1 if strona == "buy" else -1
+        p_e = _do_ticka(mid - sign * cel / (lots * pv), inst.tick, True)
+        pasujace = [c for c in okno if p_e > 0 and c["l"] <= p_e <= c["h"]]
+        if pasujace:
+            c = rng.choice(pasujace)
+            tr.side, tr.open_price = strona, p_e
+            tr.opened_at = _dt(rng.randint(c["t"], c["t"] + krok - 1_000))
+            return True
+    return False
+
+
 def ostatnia_cena(symbol: str, kiedy: datetime, teraz: datetime | None = None) -> float | None:
     """Cena instrumentu w chwili `kiedy` (zamknięcie świecy) — do wycen awaryjnych."""
     m = rynek(symbol)

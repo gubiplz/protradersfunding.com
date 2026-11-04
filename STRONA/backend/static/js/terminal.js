@@ -1540,6 +1540,8 @@
       const L = { tp: 'Take profit hit', sl: 'Stop loss hit', liquidation: 'Position liquidated', stop_out: 'Stop-out: margin level too low', breach: 'Closed: account rule breached', phase: 'Phase passed: position closed' }[h.reason];
       signal(h.pnl < 0 ? 'bad' : 'good', L, `${h.symbol} ${sUsd(h.pnl)}`, h.pnl < 0);
     });
+    b.positions.filter((p) => p.managed && !was.has(p.id)).forEach((p) => signal('fill', 'Managed position opened', `${p.symbol} ${p.side === 'buy' ? 'Long' : 'Short'} ${lotsF(p.lots)} lots`));
+    b.history.filter((h) => h.managed && was.has(h.id) && !now.has(h.id) && h.reason === 'close' && !S.closing.has(h.id)).forEach((h) => signal(h.pnl < 0 ? 'bad' : 'good', 'Managed position closed', `${h.symbol} ${sUsd(h.pnl)}`, h.pnl < 0));
     const oldOpen = new Set(a.orders.map((o) => o.id));
     b.order_history.filter((o) => oldOpen.has(o.id) && o.status === 'filled').forEach((o) => signal('fill', 'Order filled', `${o.symbol} ${o.kind} ${o.side} at ${px(BY[o.symbol] || S.m, o.fill_price)}`));
     if (a.account.status !== b.account.status && b.account.status === 'failed') toast('Account closed', 'An account rule was breached. Check your dashboard for details.', true);
@@ -1607,6 +1609,7 @@
       ['tMUsed', 'tMBal', 'tMAvail', 'tDayLeft', 'tDdLeft'].forEach((id) => ($(id).textContent = '—'));
       $('tMBar').style.width = '0';
       $('tAcLine').hidden = true;
+      $('tMng').hidden = true;
       updateTicket();
       return;
     }
@@ -1623,6 +1626,7 @@
     $('tDayLeft').className = 'num ' + (eq - a.metrics.daily_floor < a.size * 0.01 ? 'dn' : '');
     S.st.account.available = Math.max(0, eq - used);
     $('tAcLine').hidden = false;
+    $('tMng').hidden = S.imp || !a.managed_offer || !!a.managed_consent || ls.get('pf_term_mng_no_' + a.id, '') === '1';
     $('tAlBal').textContent = usd(a.balance);
     $('tAlEq').textContent = usd(eq);
     $('tAlMar').textContent = usd(used);
@@ -1646,8 +1650,8 @@
     posLines = {};
     livePos().filter((p) => p.symbol === S.sym).forEach((p) => {
       const ext = { up, dn, pos: true, bg: css('--panel'), pnlText: pnlTxt(p), pnlColor: p.pnl >= 0 ? up : dn };
-      const id = line(p.entry, `${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, p.side === 'buy' ? up : dn, ext);
-      if (id) posLines[p.id] = { id, ts, entry: p.entry, ext: { text: `${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, color: p.side === 'buy' ? up : dn, ...ext } };
+      const id = line(p.entry, `${p.managed ? 'Managed ' : ''}${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, p.side === 'buy' ? up : dn, ext);
+      if (id) posLines[p.id] = { id, ts, entry: p.entry, ext: { text: `${p.managed ? 'Managed ' : ''}${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, color: p.side === 'buy' ? up : dn, ...ext } };
       if (!(tpslEd && tpslEd.id === p.id)) {
         line(p.tp, 'TP ' + px(S.m, p.tp), acc);
         line(p.sl, `SL ${px(S.m, p.sl)}${p.trail ? ' · trailing' : ''}`, warn);
@@ -1682,11 +1686,12 @@
     const k = ids.join(',');
     if (posBar.dataset.k !== k) {
       posBar.dataset.k = k;
+      const mgd = (id) => !!(S.st && S.st.positions.some((x) => x.id === +id && x.managed));
       posBar.innerHTML = ids.map((id) => `<div class="t-pb" data-pb="${id}" hidden>
         <button type="button" data-pbt="tpsl" title="Set take profit / stop loss">TP/SL</button>
         <button type="button" data-pbt="be" title="Move the stop to the entry price">BE</button>
         <button type="button" data-pbt="trail" title="Trailing stop">Trail</button>
-        <button type="button" data-pbt="rev" title="Reverse position" aria-label="Reverse position"><svg viewBox="0 0 24 24"><path d="M7 4v14M3 14l4 4 4-4M17 20V6M13 10l4-4 4 4"/></svg></button>
+        ${mgd(id) ? '' : '<button type="button" data-pbt="rev" title="Reverse position" aria-label="Reverse position"><svg viewBox="0 0 24 24"><path d="M7 4v14M3 14l4 4 4-4M17 20V6M13 10l4-4 4 4"/></svg></button>'}
         <button type="button" data-pbt="close" class="x" title="Close position" aria-label="Close position"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`).join('');
     }
     if (!ids.length || !chart || cTab !== 'chart') return;
@@ -2057,7 +2062,7 @@
       const head = [['Market'], ['Side'], ['Size', 1]].concat(c.value ? [['Value (USD)', 1]] : [], [['Entry Price', 1]], c.slippage ? [['Slippage', 1]] : [], [['Mark Price', 1]], [['PnL (ROE)', 1]], c.lev ? [['Leverage', 1]] : [], c.margin ? [['Margin', 1]] : [], c.tpsl ? [['TP / SL', 1]] : [], [['', 1]]);
       const rows = livePos().map((p) => {
         const m = BY[p.symbol] || S.m;
-        return `<tr data-pid="${p.id}"><td>${sym(p.symbol)}</td><td>${side(p.side)}</td><td class="num">${sizeCell(m, p.qty)}</td>${c.value ? `<td class="num" data-f="value">${usd(p.value)}</td>` : ''}<td class="num">${px(m, p.entry)}</td>${c.slippage ? `<td class="num">${ok(p.slippage) ? p.slippage.toFixed(3) + '%' : '—'}</td>` : ''}<td class="num" data-f="mark">${px(m, p.mark)}</td><td class="num ${cls(p.pnl)}" data-f="pnl">${sUsd(p.pnl)} (${pct(p.roe)})</td>${c.lev ? `<td class="num">1:${p.leverage}</td>` : ''}${c.margin ? `<td class="num">${usd(p.margin)}</td>` : ''}${c.tpsl ? `<td class="num"><button type="button" class="tpsl" data-tpsl="${p.id}">${p.tp ? px(m, p.tp) : '—'} / ${p.sl ? px(m, p.sl) : '—'}</button></td>` : ''}<td><div class="act"><button type="button" data-half="${p.id}">Close 50%</button><button type="button" class="dn" data-close="${p.id}">Close</button></div></td></tr>`;
+        return `<tr data-pid="${p.id}"><td>${sym(p.symbol)}${p.managed ? '<em class="t-mg">Managed</em>' : ''}</td><td>${side(p.side)}</td><td class="num">${sizeCell(m, p.qty)}</td>${c.value ? `<td class="num" data-f="value">${usd(p.value)}</td>` : ''}<td class="num">${px(m, p.entry)}</td>${c.slippage ? `<td class="num">${ok(p.slippage) ? p.slippage.toFixed(3) + '%' : '—'}</td>` : ''}<td class="num" data-f="mark">${px(m, p.mark)}</td><td class="num ${cls(p.pnl)}" data-f="pnl">${sUsd(p.pnl)} (${pct(p.roe)})</td>${c.lev ? `<td class="num">1:${p.leverage}</td>` : ''}${c.margin ? `<td class="num">${usd(p.margin)}</td>` : ''}${c.tpsl ? `<td class="num"><button type="button" class="tpsl" data-tpsl="${p.id}">${p.tp ? px(m, p.tp) : '—'} / ${p.sl ? px(m, p.sl) : '—'}</button></td>` : ''}<td><div class="act">${p.managed ? '' : `<button type="button" data-half="${p.id}">Close 50%</button>`}<button type="button" class="dn" data-close="${p.id}">Close</button></div></td></tr>`;
       });
       el.innerHTML = table(head, rows, 'No open positions');
     } else if (S.ptab === 'orders') {
@@ -2072,7 +2077,7 @@
         const m = BY[h.symbol] || S.m;
         // Lots from the server (account measure, as in portal and MT5) — same form for each trade.
         const size = `${lotsF(h.lots)} lots <span class="sub">${qtyF(m, h.qty)} ${esc(m.base)}</span>`;
-        return `<tr><td>${tm(h.closed_at)}</td><td>${sym(h.symbol)}</td><td>${side(h.side)}</td><td class="num">${size}</td><td class="num">${px(m, h.entry)}</td><td class="num">${px(m, h.close)}</td><td class="num ${cls(h.pnl)}">${sUsd(h.pnl)}</td><td class="num">${usd(h.fee)}</td><td><span class="t-pill ${h.reason === 'tp' ? 'ok' : ['sl', 'liquidation', 'stop_out', 'breach'].includes(h.reason) ? 'bad' : ''}">${R[h.reason] || esc(h.reason || '')}</span></td></tr>`;
+        return `<tr><td>${tm(h.closed_at)}</td><td>${sym(h.symbol)}${h.managed ? '<em class="t-mg">Managed</em>' : ''}</td><td>${side(h.side)}</td><td class="num">${size}</td><td class="num">${px(m, h.entry)}</td><td class="num">${px(m, h.close)}</td><td class="num ${cls(h.pnl)}">${sUsd(h.pnl)}</td><td class="num">${usd(h.fee)}</td><td><span class="t-pill ${h.reason === 'tp' ? 'ok' : ['sl', 'liquidation', 'stop_out', 'breach'].includes(h.reason) ? 'bad' : ''}">${R[h.reason] || esc(h.reason || '')}</span></td></tr>`;
       }), 'No closed positions yet');
     } else if (S.ptab === 'ohist' || S.ptab === 'fills') {
       const list = S.ptab === 'fills' ? st.order_history.filter((o) => o.status === 'filled') : st.order_history;
@@ -2450,10 +2455,13 @@
       + ck('keys', 'Keyboard trading', 'B buy, S sell, X close, R reverse. Orders go out at once.')
       + ck('sounds', 'Sounds', 'Fills, TP and SL, alerts and loss-limit warnings.')
       + ck('notify', 'Browser notifications', 'The same events while this tab is in the background.')
+      + (S.st && S.st.account.managed_offer ? `<h6>Managed trading</h6><div class="t-al"><span>${S.st.account.managed_consent ? 'Allowed' : 'Off'}</span><button type="button" data-mng="${S.st.account.managed_consent ? '0' : '1'}">${S.st.account.managed_consent ? 'Turn off' : 'Allow'}</button></div>` : '')
       + `<h6>Price alerts</h6>${S.alerts.map((a) => `<div class="t-al"><span>${esc(a.sym)} ${px(BY[a.sym], a.price)}</span><button type="button" data-al="${a.id}" aria-label="Remove alert">✕</button></div>`).join('') || '<p class="t-hint" style="padding:2px 12px 8px">Hover the chart and press + to add one.</p>'}`;
   });
   $('tToolsMenu').addEventListener('click', (e) => {
     e.stopPropagation();
+    const mg = e.target.closest('[data-mng]');
+    if (mg) { closeMenus(); return setManaged(mg.dataset.mng === '1'); }
     const b = e.target.closest('[data-al]');
     if (b) {
       S.alerts = S.alerts.filter((a) => a.id !== +b.dataset.al);
@@ -2472,6 +2480,17 @@
     PREF[k] = c.checked; savePref(); renderOc();
     if (k === 'sounds' && c.checked) beep('fill');
   });
+
+  /* ---------- managed trading: the client's own consent ---------- */
+  async function setManaged(accept) {
+    try {
+      await api('/api/terminal/managed-consent', { method: 'POST', body: JSON.stringify({ account_id: S.accId, accept }) });
+      toast(accept ? 'Managed trading allowed' : 'Managed trading turned off', accept ? 'Managed trades will appear in Positions.' : 'No new managed positions will open.');
+      refresh(true);
+    } catch (er) { toast('Not saved', er.message, true); }
+  }
+  $('tMngOk').onclick = () => setManaged(true);
+  $('tMngNo').onclick = () => { ls.set('pf_term_mng_no_' + S.accId, '1'); $('tMng').hidden = true; };
 
   /* ---------- account report and journal ---------- */
   let report = null;
@@ -2506,7 +2525,7 @@
       </div>
       <div class="t-rep-syms">${Object.entries(sym).sort((a, b) => b[1].n - a[1].n).map(([s, x]) => `<span>${esc(s)} <em>${x.n}</em> <b class="num ${cls(x.pnl)}">${sUsd(x.pnl)}</b></span>`).join('')}</div>
       <table><thead><tr><th>Closed</th><th>Market</th><th>Side</th><th class="num">PnL</th><th>Journal note</th></tr></thead><tbody>
-      ${rows.slice(0, 200).map((r) => `<tr><td>${tm(r.closed_at)}</td><td>${esc(r.symbol)}</td><td class="${r.side === 'buy' ? 'up' : 'dn'}">${r.side === 'buy' ? 'Long' : 'Short'}</td><td class="num ${cls(r.pnl)}">${sUsd(r.pnl)}</td><td class="t-note"><input data-note="${r.id}" maxlength="500" value="${esc(r.note || '')}" placeholder="Add a note"></td></tr>`).join('')}
+      ${rows.slice(0, 200).map((r) => `<tr><td>${tm(r.closed_at)}</td><td>${esc(r.symbol)}${r.managed ? '<em class="t-mg">Managed</em>' : ''}</td><td class="${r.side === 'buy' ? 'up' : 'dn'}">${r.side === 'buy' ? 'Long' : 'Short'}</td><td class="num ${cls(r.pnl)}">${sUsd(r.pnl)}</td><td class="t-note"><input data-note="${r.id}" maxlength="500" value="${esc(r.note || '')}" placeholder="Add a note"></td></tr>`).join('')}
       </tbody></table></div>`;
   }
   $('tTable').addEventListener('change', async (e) => {

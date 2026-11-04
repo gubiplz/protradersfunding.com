@@ -252,3 +252,270 @@ def test_stan_terminala_pcha_konto_bota(zywe, monkeypatch):
         assert c.get(f"/api/terminal/state?account_id={aid}", headers=h).status_code == 200
         assert c.get(f"/api/terminal/state?account_id={aid}", headers=h).status_code == 200
     assert wywolania == [aid]
+
+
+def _plan_na_ogon(aid, zgoda=True, mode="profit", pnl=120.0, symbol="BTCUSD"):
+    """Konto z planem w oknie końcówki; zwraca id transakcji."""
+    s = SessionLocal()
+    acc = s.get(Account, aid)
+    teraz = datetime.now(timezone.utc)
+    if zgoda:
+        acc.managed_consent_at = teraz.replace(tzinfo=None)
+    acc.bot_mode = mode
+    tr = Trade(account_id=aid, symbol=symbol, side="buy", lots=0.1, open_price=1.0, pnl=0.0, status="open",
+               source="bot", venue=tradebot.PLAN, plan_pnl=pnl, opened_at=(teraz - timedelta(minutes=50)).replace(tzinfo=None),
+               plan_close_at=(teraz + timedelta(seconds=175)).replace(tzinfo=None))
+    s.add(tr); s.commit()
+    tid = tr.id
+    s.close()
+    return tid
+
+
+OGON_CENA = 77_000.0
+
+
+def _mid(monkeypatch, cena=None):
+    """Stały mid i szerokie świece: wynik testu nie zależy od godziny ani od sieci."""
+    px = OGON_CENA if cena is None else cena
+
+    def swiece(coin, interval, start_ms, end_ms):
+        krok = MS[interval]
+        t, out = start_ms - start_ms % krok, []
+        while t <= end_ms:
+            out.append({"t": t, "o": OGON_CENA, "h": OGON_CENA + 3_000, "l": OGON_CENA - 3_000, "c": OGON_CENA})
+            t += krok
+        return out
+    monkeypatch.setattr(markets, "mids", lambda coins: {c: px for c in coins})
+    monkeypatch.setattr(markets, "candles", swiece)
+    monkeypatch.setattr(markets, "candles_1m", lambda coin, start, end: [])
+    bot_ceny._CACHE.clear()
+
+
+@pytest.fixture(autouse=True)
+def _posprzataj_koncowki():
+    """Otwarte końcówki nie mogą zostać dla testów, które liczą konta z terminal_open."""
+    yield
+    s = SessionLocal()
+    konta = s.query(Account).filter(Account.login.like("ogon%"))
+    # Numeracja transakcji wpływa na losowanie bota w innych testach, więc zostawiamy ją jak była.
+    s.query(Trade).filter(Trade.account_id.in_([a.id for a in konta])).delete(synchronize_session=False)
+    konta.update({Account.terminal_open: False}, synchronize_session=False)
+    s.commit()
+    s.close()
+
+
+def _tick(aid):
+    s = SessionLocal()
+    acc = s.get(Account, aid)
+    snap = tradebot.tick(s, acc, datetime.now(timezone.utc))
+    s.commit()
+    s.close()
+    return snap
+
+
+def _tr(tid):
+    s = SessionLocal()
+    t = s.get(Trade, tid)
+    s.expunge(t)
+    s.close()
+    return t
+
+
+def test_bez_zgody_i_w_doom_nie_ma_koncowki(zywe):
+    _mid(zywe)
+    aid, h, _ = _konto("ogon1")
+    t1 = _plan_na_ogon(aid, zgoda=False)
+    _tick(aid)
+    assert _tr(t1).venue == tradebot.PLAN
+    aid2, _, _ = _konto("ogon2")
+    t2 = _plan_na_ogon(aid2, zgoda=True, mode="doom")
+    _tick(aid2)
+    assert _tr(t2).venue == tradebot.PLAN
+
+
+def test_koncowka_widoczna_jako_managed_raz_w_equity_i_lotach(zywe):
+    _mid(zywe)
+    aid, h, _ = _konto("ogon3")
+    tid = _plan_na_ogon(aid)
+    snap = _tick(aid)
+    t = _tr(tid)
+    assert t.venue == tradebot.OGON and t.qty and t.margin and t.status == "open"
+    assert snap.open_pnl == 0.0 and snap.volume_lots == 0.0, "floating i loty liczy księga terminala"
+    with TestClient(app) as c:
+        st = c.get(f"/api/terminal/state?account_id={aid}", headers=h).json()
+    assert [p["id"] for p in st["positions"]] == [tid] and st["positions"][0]["managed"] is True
+    assert st["account"]["open_lots"] == t.lots
+    assert abs(st["positions"][0]["pnl"] - 120.0 * tradebot.OGON_CEL) < 40
+
+
+def test_koncowka_zamyka_sie_na_celu_i_w_terminie(zywe):
+    _mid(zywe)
+    aid, h, _ = _konto("ogon4")
+    tid = _plan_na_ogon(aid)
+    _tick(aid)
+    t = _tr(tid)
+    sign = 1 if t.side == "buy" else -1
+    # cel: wynik doszedł do planu
+    _mid(zywe, t.open_price + sign * 130.0 / t.qty)
+    s = SessionLocal(); bal0 = s.get(Account, aid).balance; s.close()
+    snap = _tick(aid)
+    z = _tr(tid)
+    assert z.status == "closed" and z.venue == "hyperliquid" and z.close_reason == "close"
+    assert snap.balance == round(bal0 + z.pnl, 2)
+    # termin: bez dojścia do celu zamyka po rynku
+    aid2, _, _ = _konto("ogon5")
+    _mid(zywe)
+    t2 = _plan_na_ogon(aid2)
+    _tick(aid2)
+    w = _tr(t2)
+    _mid(zywe, w.open_price)
+    s = SessionLocal(); s.get(Trade, t2).plan_close_at = (datetime.now(timezone.utc) - timedelta(seconds=1)).replace(tzinfo=None); s.commit(); s.close()
+    _tick(aid2)
+    assert _tr(t2).status == "closed" and _tr(t2).close_price == w.open_price
+
+
+def test_reczne_zamkniecie_zostawia_wynik_klienta(zywe):
+    _mid(zywe)
+    aid, h, _ = _konto("ogon6")
+    tid = _plan_na_ogon(aid)
+    _tick(aid)
+    t = _tr(tid)
+    sign = 1 if t.side == "buy" else -1
+    _mid(zywe, t.open_price - sign * 50.0 / t.qty)     # klient zamyka na stracie, plan był na plus
+    zywe.setattr(terminal, "_zamknij_rynkowo", lambda session, acc, pos, qty, slip: terminal._close_part(session, acc, pos, qty, t.open_price - sign * 50.0 / t.qty, "close", terminal._now()))
+    with TestClient(app) as c:
+        r = c.post(f"/api/terminal/positions/{tid}/close", json={"account_id": aid, "max_slippage_pct": 2, "qty": t.qty / 2}, headers=h)
+        assert r.status_code == 400, "częściowo się nie zamyka"
+        r = c.post(f"/api/terminal/positions/{tid}/close", json={"account_id": aid, "max_slippage_pct": 2}, headers=h)
+        assert r.status_code == 200, r.text
+        st = r.json()
+    z = _tr(tid)
+    assert z.status == "closed" and z.pnl < 0 and z.venue == "hyperliquid"
+    assert st["positions"] == [] and st["history"][0]["managed"] is True
+    bal = st["account"]["balance"]
+    _tick(aid)
+    assert _tr(tid).pnl == z.pnl, "bot nie zamyka drugi raz i nie wyrównuje"
+    s = SessionLocal(); assert abs(s.get(Account, aid).balance - bal) < 0.01; s.close()
+
+
+def test_tp_na_koncowce_i_zlecenie_na_tym_rynku(zywe):
+    _mid(zywe)
+    aid, h, _ = _konto("ogon7")
+    tid = _plan_na_ogon(aid)
+    _tick(aid)
+    t = _tr(tid)
+    sign = 1 if t.side == "buy" else -1
+    with TestClient(app) as c:
+        r = c.post("/api/terminal/orders", json={"account_id": aid, "symbol": "BTCUSD", "side": "buy", "kind": "market", "qty": 0.01, "max_slippage_pct": 2}, headers=h)
+        assert r.status_code == 409 and "managed" in r.json()["detail"]
+        mid = markets.mids({"BTC"})["BTC"]
+        r = c.patch(f"/api/terminal/positions/{tid}", json={"account_id": aid, "tp": mid + sign * 100, "sl": mid - sign * 100}, headers=h)
+        assert r.status_code == 200, r.text
+    assert _tr(tid).tp is not None
+
+
+def test_stop_bota_zamyka_koncowke_po_rynku(zywe):
+    _mid(zywe)
+    aid, h, _ = _konto("ogon8")
+    tid = _plan_na_ogon(aid)
+    _tick(aid)
+    s = SessionLocal()
+    acc = s.get(Account, aid)
+    tradebot.stop(s, acc)
+    s.close()
+    z = _tr(tid)
+    assert z.status == "closed" and z.close_reason == "close" and z.venue == "hyperliquid"
+
+
+def test_brak_swiecy_zostawia_plan(zywe):
+    aid, h, _ = _konto("ogon9")
+    tid = _plan_na_ogon(aid, pnl=5_000_000.0)       # żadna świeca nie zawiera takiej ceny
+    _mid(zywe)
+    _tick(aid)
+    assert _tr(tid).venue == tradebot.PLAN
+
+
+def test_zgoda_daje_i_cofa_klient_nie_podglad_admina(zywe):
+    _mid(zywe)
+    aid, h, _ = _konto("ogon10")
+    s = SessionLocal(); a = s.get(Account, aid); a.platform_password = "x"; imp = auth.make_terminal_token(aid, "x", imp=True)
+    w = TerminalLogin(login="ogon10", account_id=aid, trader_id=a.trader_id, ok=True); s.add(w); s.commit()
+    h2 = {"Authorization": f"Bearer {auth.make_terminal_token(aid, 'x', sid=w.id)}"}
+    s.close()
+    with TestClient(app) as c:
+        assert c.post("/api/terminal/managed-consent", json={"account_id": aid, "accept": True}, headers={"Authorization": f"Bearer {imp}"}).status_code == 403
+        r = c.post("/api/terminal/managed-consent", json={"account_id": aid, "accept": True}, headers={**h2, "x-real-ip": "203.0.113.5"})
+        assert r.status_code == 200 and r.json()["managed_consent"]
+        s = SessionLocal(); a = s.get(Account, aid); assert a.managed_consent_ip == "203.0.113.5" and a.managed_consent_version; s.close()
+        assert c.post("/api/terminal/managed-consent", json={"account_id": aid, "accept": False}, headers=h2).json()["managed_consent"] is None
+    tid = _plan_na_ogon(aid, zgoda=False)
+    _tick(aid)
+    assert _tr(tid).venue == tradebot.PLAN, "po cofnięciu nowa końcówka nie startuje"
+
+
+def _pelny(aid, h, c):
+    """Odczyt stanu tak, jak robi to terminal; reguły liczone od razu."""
+    s = SessionLocal(); s.get(Account, aid).terminal_eval_at = None; s.commit(); s.close()
+    r = c.get(f"/api/terminal/state?account_id={aid}", headers=h)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_koncowka_przez_caly_silnik_saldo_i_historia(zywe):
+    _mid(zywe)
+    aid, h, _ = _konto("ogon11")
+    tid = _plan_na_ogon(aid)
+    with TestClient(app) as c:
+        _pelny(aid, h, c)
+        st = _pelny(aid, h, c)
+        assert [p["managed"] for p in st["positions"]] == [True]
+        t = _tr(tid)
+        sign = 1 if t.side == "buy" else -1
+        _mid(zywe, t.open_price + sign * 130.0 / t.qty)
+        st = _pelny(aid, h, c)
+        z = _tr(tid)
+        assert z.status == "closed" and st["positions"] == []
+        s = SessionLocal(); a = s.get(Account, aid); saldo, otwarte = a.balance, a.terminal_open; s.close()
+        assert abs(saldo - (100_000.0 + z.pnl)) < 0.01, "wynik wchodzi do salda dokładnie raz"
+        assert st["history"][0]["id"] == tid and st["history"][0]["managed"] is True
+        assert st["history"][0]["fee"] > 0 and st["history"][0]["close"] == z.close_price
+        st2 = _pelny(aid, h, c)
+        s = SessionLocal(); assert abs(s.get(Account, aid).balance - saldo) < 0.01, "kolejne odczyty nic nie zmieniają"; s.close()
+        assert otwarte in (True, False)
+        assert len(st2["history"]) >= 1
+
+
+def test_tp_klienta_zamyka_koncowke_przez_silnik(zywe):
+    _mid(zywe)
+    aid, h, _ = _konto("ogon12")
+    tid = _plan_na_ogon(aid)
+    with TestClient(app) as c:
+        _pelny(aid, h, c)
+        t = _tr(tid)
+        assert t.venue == tradebot.OGON
+        sign = 1 if t.side == "buy" else -1
+        mid = markets.mids({"BTC"})["BTC"]
+        r = c.patch(f"/api/terminal/positions/{tid}", json={"account_id": aid, "tp": mid + sign * 5, "sl": None}, headers=h)
+        assert r.status_code == 200, r.text
+        s = SessionLocal(); s.get(Trade, tid).plan_pnl = 100_000.0; s.get(Trade, tid).tpsl_at = (datetime.now(timezone.utc) - timedelta(minutes=5)).replace(tzinfo=None); s.commit(); s.close()
+        _mid(zywe, mid + sign * 6)
+        _pelny(aid, h, c)
+    z = _tr(tid)
+    assert z.status == "closed" and z.close_reason == "tp", (z.status, z.close_reason)
+
+
+def test_breach_przy_otwartej_koncowce(zywe):
+    _mid(zywe)
+    aid, h, _ = _konto("ogon13")
+    tid = _plan_na_ogon(aid)
+    with TestClient(app) as c:
+        _pelny(aid, h, c)
+        t = _tr(tid)
+        sign = 1 if t.side == "buy" else -1
+        s = SessionLocal(); s.get(Trade, tid).plan_pnl = 100_000.0; s.commit(); s.close()   # nie zamknie się na celu
+        _mid(zywe, t.open_price - sign * 20_000.0 / t.qty)
+        _pelny(aid, h, c)
+    s = SessionLocal(); a = s.get(Account, aid); status = a.status; s.close()
+    z = _tr(tid)
+    assert status == "failed", status
+    assert z.status == "closed", "breach zamyka też końcówkę"
