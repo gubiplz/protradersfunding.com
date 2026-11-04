@@ -63,12 +63,6 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
   <div class="t-stat"><small>24h Volume</small><b class="num" id="tVol">—</b></div>
   <p class="t-src" id="tSrc"></p>
   <div class="t-mkt-r">
-    <div class="t-guest" id="tGuest">
-      <button class="t-connect" id="tSignIn" type="button"><i></i>Connect MT5</button>
-    </div>
-    <div class="t-user" id="tUser" hidden>
-      <button class="t-acc-btn" id="tAccBtn" type="button" aria-haspopup="listbox"><span class="dot"></span><span id="tAccLbl">Account</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
-    </div>
     <button class="t-ico" id="tShare" type="button" aria-label="Copy link" title="Copy link to this market"><svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg></button>
   </div>
 </div>
@@ -92,6 +86,29 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
       <button class="on" data-ctab="chart" type="button" role="tab" aria-selected="true">Chart</button>
       <button data-ctab="data" type="button" role="tab" aria-selected="false">Trading Data</button>
       <button data-ctab="info" type="button" role="tab" aria-selected="false">Info</button>
+      <div class="t-acw">
+        <button class="t-abar" id="tAccBtn" type="button" aria-haspopup="dialog"><i class="dot off"></i><span id="tAccLbl">Not connected</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+      <div class="t-apanel" id="tLogin" hidden role="dialog" aria-labelledby="tLoginH">
+        <div class="t-ap-list" id="tApList"></div>
+        <button class="t-ap-add" id="tApAdd" type="button" hidden>+ Add account</button>
+        <form id="tLoginMt5">
+          <h3 id="tLoginH">Connect to account</h3>
+          <label class="t-ap-row"><span>Login</span><input name="login" type="text" inputmode="numeric" autocomplete="username" spellcheck="false" required></label>
+          <label class="t-ap-row"><span>Password</span><input name="password" type="password" autocomplete="current-password" required></label>
+          <div class="t-ap-row"><label for="tSrvIn">Server</label>
+            <div class="t-ap-srv">
+              <input id="tSrvIn" name="server" type="text" autocomplete="off" spellcheck="false" placeholder="Type or pick" required>
+              <button id="tSrvBtn" type="button" aria-label="Saved servers"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+              <div class="t-ap-srvs" id="tSrvList" hidden></div>
+            </div>
+          </div>
+          <label class="t-ap-keep"><input name="keep" type="checkbox" checked><span>Stay connected</span></label>
+          <p class="t-err" hidden></p>
+          <button class="t-ap-go" type="submit">Connect</button>
+          <p class="t-ap-n">Login, password and server are in your purchase e-mail and <a href="/portal">dashboard</a>. No account? <a href="/#pricing">Get a challenge</a></p>
+        </form>
+      </div>
+      </div>
     </div>
     <div class="t-cpane on" data-cpane="chart">
       <div class="t-ctools">
@@ -163,22 +180,6 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
   </section>
 
   <aside class="t-ticket" data-pane="ticket" id="tTicket">
-    <section class="t-dock" id="tLogin" aria-labelledby="tLoginH">
-      <header class="t-dock-h">
-        <img src="/static/img/mt5.png" alt="">
-        <h2 id="tLoginH">Trading account</h2>
-        <span class="t-dock-st"><i></i>Offline</span>
-        <button class="t-dock-x" id="tLoginX" type="button" aria-label="Close" hidden><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
-      </header>
-      <form id="tLoginMt5">
-        <label class="t-fld"><span>MT5 login</span><div class="t-in"><input name="login" type="text" inputmode="numeric" autocomplete="username" spellcheck="false" required></div></label>
-        <label class="t-fld"><span>MT5 password</span><div class="t-in"><input name="password" type="password" autocomplete="current-password" required></div></label>
-        <label class="ck"><input name="keep" type="checkbox" checked><span>Stay connected on this device</span></label>
-        <p class="t-err" hidden></p>
-        <button class="t-dock-go" type="submit">Connect</button>
-        <p class="t-dock-n">From your purchase e-mail, not your dashboard password. <a href="/portal">Find it in the dashboard</a> · <a href="/#pricing">Get a challenge</a></p>
-      </form>
-    </section>
     <div class="t-otabs" role="group" aria-label="Order type">
       <button class="on" data-ot="market" type="button">Market</button>
       <button data-ot="limit" type="button">Limit</button>
@@ -282,7 +283,7 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
     <div class="t-search-cats" id="tSearchCats"></div>
     <div class="t-search-head"><span>Market</span><span>Price</span><span>24h</span><span>Volume</span></div>
     <div class="t-search-list" id="tSearchList"></div>
-    <p class="t-search-note">More forex pairs and indices (AUD/USD, US30, GER40 and others) trade in MetaTrader&nbsp;5 on the same account.</p>
+    <p class="t-search-note">More forex pairs and indices (AUD/USD, US30, GER40 and others) trade in MT5 on the same account.</p>
   </div>
 </div>
 

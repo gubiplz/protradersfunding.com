@@ -3581,8 +3581,8 @@ function credsBlock(a, compact){
       ${row('Server', a.platform_server||'—')}
       ${row('Login', a.platform_login||'—')}
       ${row('Password', a.platform_password)}
-      ${compact?'':'<p style="font-size:11px;color:var(--dim);margin-top:6px">Works in MetaTrader 5 desktop, mobile and web, so pick this server name. The same login and password open the Built-in Terminal.</p>'}
-      <a class="creds-term" href="/trade" onclick="event.stopPropagation();try{localStorage.setItem('pf_term_prefill','${jsq(a.platform_login||'')}')}catch(e){}">Open Built-in Terminal</a>
+      ${compact?'':'<p style="font-size:11px;color:var(--dim);margin-top:6px">Works in MT5 desktop, mobile and web, so pick this server name. The same login and password open the Built-in Terminal.</p>'}
+      <a class="creds-term" href="/trade" onclick="event.stopPropagation();try{localStorage.setItem('pf_term_prefill','${jsq(a.platform_login||'')}');localStorage.setItem('pf_term_prefill_srv','${jsq(a.platform_server||'')}')}catch(e){}">Open Built-in Terminal</a>
     </div>`;
 }
 
@@ -4318,7 +4318,7 @@ async function openAcc(id){
         <a href="/terms">Terms</a>; undisclosed sharing can trigger an account review.</div>
       </div>
       <div class="creds-grid"${a.platform_password?'':' style="display:none"'}>
-        <div class="cred-cell"><div class="l">Platform</div><div class="v"><img src="/static/img/mt5.png" alt="MetaTrader 5"></div></div>
+        <div class="cred-cell"><div class="l">Platform</div><div class="v"><img src="/static/img/mt5.png" alt="MT5"></div></div>
         ${credCell('Server',a.platform_server)}
         ${credCell('Login',a.platform_login)}
         ${a.platform_password?credCell('Password',a.platform_password):''}

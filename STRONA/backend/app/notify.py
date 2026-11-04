@@ -134,7 +134,7 @@ def _bez_hasla_txt(ctx: dict) -> str:
     """
     if not ctx.get("forgot_url"):
         return ""
-    return (f"\nThe password above is for MetaTrader 5 only. If you have never set a "
+    return (f"\nThe password above is for MT5 only. If you have never set a "
             f"password for the {settings.site_name} portal, get one here:\n"
             f"{ctx['forgot_url']}\n")
 
@@ -174,7 +174,7 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"  Password:   {ctx.get('platform_password')}\n"
             f"  Server:     {ctx.get('platform_server')}\n"
             f"  Capital:    {ctx.get('initial_balance')}\n\n"
-            f"Log in with MetaTrader 5 (desktop, mobile or web) using the server above.\n"
+            f"Log in with MT5 (desktop, mobile or web) using the server above.\n"
             + (f"\nWe opened your portal account for you, so it has no password yet. "
                f"Set one here (the link works for 7 days; after that use \"Forgot password\" "
                f"on the sign-in screen):\n{ctx.get('setup_url')}\n"
@@ -609,7 +609,7 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
             _head_html(badge, headline, intro),
             _stat_html("Account allocation", f"${_num(ctx.get('initial_balance'))}", kind),
             _rows_html([
-                ("Platform", "MetaTrader 5"),
+                ("Platform", "MT5"),
                 ("Server", ctx.get("platform_server")),
                 ("Login", ctx.get("platform_login")),
                 ("Password", ctx.get("platform_password")),
@@ -625,7 +625,7 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                 _note_html("We opened the portal account for you, so it has no password yet — "
                            "the button above sets one (the link works for 7 days; after that use "
                            "“Forgot password” on the sign-in screen). The credentials above are "
-                           "only for the MetaTrader 5 platform."),
+                           "only for the MT5 platform."),
             ]
         else:
             # Brak `setup_url` nie znaczy „ten klient ma hasło" — znaczy tylko
@@ -638,7 +638,7 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                 _button_html("View Dashboard", f"{portal}?view=accounts"),
                 _note_html("Sign in to the portal with your e-mail address and portal "
                            "password — the credentials above are only for the "
-                           "MetaTrader 5 platform." + zapomniane),
+                           "MT5 platform." + zapomniane),
             ]
     elif event == "welcome":
         mobile = f"""

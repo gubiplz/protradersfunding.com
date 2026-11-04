@@ -1493,31 +1493,11 @@
   }
   function renderUser() {
     renderDock();
-    $('tGuest').hidden = !!S.token;
-    $('tUser').hidden = !S.token;
     $('tMMLogin').hidden = !!S.token;
     const a = S.accounts.find((x) => x.id === S.accId);
-    $('tAccLbl').textContent = a ? `#${a.login} · ${big(a.size).replace('.0K', 'K')}` : 'No account';
+    $('tAccLbl').textContent = a ? `${a.login} · ${usd(a.balance, 0)}` : S.token ? 'Connecting…' : 'Not connected';
     $('tAccBtn').querySelector('.dot').classList.toggle('off', !(a && a.tradable));
   }
-  const accMenu = document.createElement('div');
-  accMenu.className = 't-menu';
-  accMenu.hidden = true;
-  accMenu.style.cssText = 'left:auto;right:0;min-width:260px';
-  $('tAccBtn').parentElement.classList.add('t-dd');
-  $('tAccBtn').parentElement.appendChild(accMenu);
-  dropdown($('tAccBtn'), accMenu, (mn) => {
-    mn.innerHTML = '<h6>MT5 accounts</h6>' + S.accounts.map((a) => `<button type="button" class="t-acc-row" data-acc="${a.id}"><span class="mi sm" style="background:${a.tradable ? 'var(--up)' : 'var(--dim)'}"></span>#${esc(a.login)} · ${big(a.size)}<span class="tag">${a.status === 'failed' ? 'Breached' : phaseLbl(a)}</span>${a.id === S.accId ? '<span class="chk">✓</span>' : ''}</button>`).join('')
-      + (S.imp ? '' : '<button type="button" class="t-acc-add" data-add="1">+ Add MT5 account</button>')
-      + '<a href="/#pricing">Get a new challenge</a>'
-      + (S.imp ? '' : '<button type="button" data-out="1">Disconnect this account</button>');
-  });
-  accMenu.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-acc]');
-    if (b) { accMenu.hidden = true; selectAccount(+b.dataset.acc); }
-    if (e.target.closest('[data-add]')) { accMenu.hidden = true; openLogin(true); }
-    if (e.target.closest('[data-out]')) { accMenu.hidden = true; signOut(); }
-  });
   const phaseLbl = (a) => (a.status === 'funded' || a.phase === 'funded' ? 'Funded' : a.phase === 'eval_2' ? 'Phase 2' : a.status === 'passed' ? 'Passed' : 'Phase 1');
   const statusLbl = (a) => (a.tradable ? 'Active' : a.status === 'failed' ? 'Breached' : 'Not tradable');
 
@@ -2081,7 +2061,7 @@
     $('tOrdN').textContent = st && st.orders.length ? ` (${st.orders.length})` : '';
     $('tCloseAll').disabled = !(st && st.positions.length);
     if (!S.token) {
-      el.innerHTML = `<div class="t-empty"><div>Connect your MT5 account to see your trading activity<br><button class="t-btn" type="button" data-signin>Connect MT5</button></div></div>`;
+      el.innerHTML = `<div class="t-empty"><div>Connect your MT5 account to see your trading activity<br><button class="t-btn" type="button" data-signin>Connect account</button></div></div>`;
       return;
     }
     if (S.ptab === 'accounts') {
@@ -2548,48 +2528,119 @@
     }
     return d;
   }
-  /* The account panel sits at the top of the order column, as in MT5 and cTrader: always
-     there while offline, opened on request to add another account. */
-  let dockAdding = false;
+  /* Account bar in the chart toolbar (as in cTrader): shows the account in view and opens
+     a panel over the chart with the connected accounts and the MT5 connect form. */
+  const panel = $('tLogin');
+  let formOpen = false;
   function renderDock() {
-    const f = $('tLogin');
-    f.hidden = !!S.token && !dockAdding;
-    $('tLoginX').hidden = !S.token;
-    $('tLoginH').textContent = dockAdding ? 'Add MT5 account' : 'Trading account';
-    f.querySelector('.t-dock-st').hidden = !!S.token;
+    const off = !S.token;
+    const list = $('tApList');
+    list.hidden = off;
+    list.innerHTML = S.accounts.map((a) => {
+      const l = S.logins.find((x) => x.id === a.id);
+      return `<div class="t-ap-acc${a.id === S.accId ? ' on' : ''}"><button type="button" data-acc="${a.id}"><i class="dot${a.tradable ? '' : ' off'}"></i><b>${esc(a.login)}</b><small>${esc(a.server || '')} · ${a.status === 'failed' ? 'Breached' : phaseLbl(a)}</small><em>${usd(a.balance)}</em></button>${!S.imp && l ? `<button type="button" class="x" data-out="${a.id}" title="Disconnect" aria-label="Disconnect ${esc(a.login)}">×</button>` : ''}</div>`;
+    }).join('');
+    $('tApAdd').hidden = off || formOpen || S.imp;
+    $('tLoginMt5').hidden = !(off || formOpen);
+    $('tLoginH').textContent = off ? 'Connect to account' : 'Add account';
   }
-  function openLogin(adding) {
-    dockAdding = adding === true;
-    renderDock();
-    if (window.matchMedia('(max-width:760px)').matches) setMPane('ticket');
-    const f = $('tLoginMt5'), dock = $('tLogin');
+  function openPanel(show) {
+    panel.hidden = !show;
+    $('tAccBtn').classList.toggle('open', show);
+    if (show) renderDock();
+  }
+  function focusForm() {
+    const f = $('tLoginMt5');
     f.reset();
     f.keep.checked = true;
     f.querySelector('.t-err').hidden = true;
-    f.login.value = ls.get('pf_term_prefill', '') || f.login.value;
+    f.login.value = ls.get('pf_term_prefill', '') || '';
     ls.del('pf_term_prefill');
-    closeModal();
-    $('tTicket').scrollTop = 0;
-    dock.classList.remove('flash'); void dock.offsetWidth; dock.classList.add('flash');
+    f.server.value = ls.get('pf_term_prefill_srv', '') || ls.get('pf_term_srv_last', '') || '';
+    ls.del('pf_term_prefill_srv');
     (f.login.value ? f.password : f.login).focus();
   }
-  $('tLoginX').onclick = () => { dockAdding = false; renderDock(); };
-  $('tSignIn').onclick = openLogin;
+  function openLogin(adding) {
+    formOpen = adding === true;
+    if (window.matchMedia('(max-width:760px)').matches) setMPane('chart');
+    const tab = document.querySelector('[data-ctab="chart"]');
+    if (tab && !tab.classList.contains('on')) tab.click();
+    closeModal();
+    openPanel(true);
+    if (!S.token || formOpen) focusForm();
+  }
+  $('tAccBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!panel.hidden) return openPanel(false);
+    openLogin(false);
+  });
   $('tReadySignIn').onclick = openLogin;
+  $('tApAdd').onclick = () => { formOpen = true; renderDock(); focusForm(); };
+  panel.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const out = e.target.closest('[data-out]');
+    if (out) {
+      const l = S.logins.find((x) => x.id === +out.dataset.out);
+      if (l) signOut(l.token);
+      renderDock();
+      return;
+    }
+    const b = e.target.closest('[data-acc]');
+    if (b) { selectAccount(+b.dataset.acc); openPanel(false); }
+    if (!$('tSrvList').hidden && !e.target.closest('.t-ap-srv')) $('tSrvList').hidden = true;
+  });
+  document.addEventListener('click', (e) => { if (!panel.hidden && !e.target.closest('#tLogin,#tAccBtn')) { formOpen = false; openPanel(false); } });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !panel.hidden) { formOpen = false; openPanel(false); } });
+
+  /* Servers as in MT5: type a name once, it stays on the list for next time. */
+  const srvs = () => lsJson('pf_term_servers', []);
+  function saveServer(name) {
+    const list = srvs().filter((x) => x.toLowerCase() !== name.toLowerCase());
+    list.unshift(name);
+    ls.set('pf_term_servers', JSON.stringify(list.slice(0, 20)));
+    ls.set('pf_term_srv_last', name);
+  }
+  function renderServers() {
+    const inp = $('tSrvIn'), q = inp.value.trim(), box = $('tSrvList'), all = srvs();
+    const shown = all.filter((x) => !q || x.toLowerCase().includes(q.toLowerCase()) || x === q);
+    const isNew = q && !all.some((x) => x.toLowerCase() === q.toLowerCase());
+    box.innerHTML = shown.map((x) => `<div class="t-ap-sv"><button type="button" data-srv="${esc(x)}">${esc(x)}</button><button type="button" class="x" data-srvx="${esc(x)}" aria-label="Remove ${esc(x)}">×</button></div>`).join('')
+      + (isNew ? `<button type="button" class="t-ap-svadd" data-srvadd="${esc(q)}">+ Add server “${esc(q)}”</button>` : '')
+      + (!shown.length && !isNew ? '<p>Type your server name to add it. It stays on this list.</p>' : '');
+    box.hidden = false;
+  }
+  $('tSrvIn').addEventListener('input', renderServers);
+  $('tSrvIn').addEventListener('focus', renderServers);
+  $('tSrvBtn').addEventListener('click', () => { if ($('tSrvList').hidden) renderServers(); else $('tSrvList').hidden = true; });
+  $('tSrvList').addEventListener('click', (e) => {
+    const pick = e.target.closest('[data-srv]'), add = e.target.closest('[data-srvadd]'), del = e.target.closest('[data-srvx]');
+    if (del) {
+      ls.set('pf_term_servers', JSON.stringify(srvs().filter((x) => x !== del.dataset.srvx)));
+      return renderServers();
+    }
+    if (add) saveServer(add.dataset.srvadd);
+    if (pick || add) {
+      $('tSrvIn').value = (pick ? pick.dataset.srv : add.dataset.srvadd);
+      $('tSrvList').hidden = true;
+      $('tLoginMt5').password.focus();
+    }
+  });
   $('tLoginMt5').onsubmit = async (e) => {
     e.preventDefault();
     const f = e.target, err = f.querySelector('.t-err'), btn = f.querySelector('button[type=submit]');
     err.hidden = true; btn.disabled = true; btn.textContent = 'Connecting…';
     try {
-      const r = await fetch('/api/terminal/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login: f.login.value.trim(), password: f.password.value, device: deviceId() }) });
+      const r = await fetch('/api/terminal/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login: f.login.value.trim(), password: f.password.value, server: f.server.value.trim(), device: deviceId() }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(typeof d.detail === 'string' ? d.detail : 'Connection failed');
       S.logins = S.logins.filter((l) => l.id !== d.account.id).concat({ token: d.token, id: d.account.id, login: d.account.login, temp: !f.keep.checked });
       saveLogins();
       S.accId = d.account.id; S.token = d.token; S.st = null;
       ls.set('pf_term_acc', String(d.account.id));
-      dockAdding = false;
+      saveServer(f.server.value.trim());
+      formOpen = false;
       f.password.value = '';
+      openPanel(false);
       toast('Connected', `MT5 account #${d.account.login}`);
       await loadAccounts();
     } catch (er) { err.textContent = er.message; err.hidden = false; } finally { btn.disabled = false; btn.textContent = 'Connect'; }

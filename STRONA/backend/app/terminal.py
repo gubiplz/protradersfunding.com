@@ -803,7 +803,7 @@ def _blokada_handlu(acc: Account) -> str | None:
             return f"This account is closed for trading. {acc.breach_reason.rstrip('.')}."
         return "This account is closed for trading."
     if acc.metaapi_account_id:
-        return "This account is tracked live from MetaTrader 5. Place trades in MT5."
+        return "This account is tracked live from MT5. Place trades in MT5."
     return None
 
 
@@ -1001,6 +1001,7 @@ LOGOWANIA_DNI = 365
 class LoginIn(BaseModel):
     login: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=64)
+    server: str = Field(min_length=1, max_length=64)
     device: str | None = Field(default=None, max_length=32)
 
 
@@ -1053,12 +1054,13 @@ def api_login(payload: LoginIn, request: Request):
         # Login nie ma constraintu unique, więc para login + hasło rozstrzyga o koncie.
         trafione = [a for a in session.query(Account).filter(Account.platform_login == login).all()
                     if a.trader_id and a.platform_password
+                    and (a.platform_server or "").strip().lower() == payload.server.strip().lower()
                     and secrets.compare_digest(a.platform_password.encode(), payload.password.encode())]
         trafione.sort(key=lambda a: _blokada_handlu(a) is not None)
         acc = trafione[0] if trafione else None
         if acc is None:
             _zapisz_probe(session, request, login, device, None)
-            raise HTTPException(401, "Wrong MT5 login or password")
+            raise HTTPException(401, "Wrong login, password or server")
         if acc.terminal_blocked:
             raise HTTPException(403, "Terminal access for this account is paused. Contact support.")
         wpis = _zapisz_probe(session, request, login, device, acc)

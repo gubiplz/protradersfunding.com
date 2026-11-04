@@ -7,7 +7,7 @@ mają `mt5_backed=False`, żeby po ewentualnym włączeniu feedu poller nie pró
 się nimi logować do web terminala wymyślonym loginem.
 
 UWAGA: te poświadczenia wskazują na serwer, na którym konta NIE MA — trader, który
-spróbuje zalogować się w MetaTraderze, dostanie błąd. To świadomy etap przejściowy;
+spróbuje zalogować się w MT5ze, dostanie błąd. To świadomy etap przejściowy;
 `MT5_PROVISIONING=true` przywraca realne konta poniżej.
 
 `MT5_PROVISIONING=true` (jak firmy fundingowe bez własnego serwera MT5): konto

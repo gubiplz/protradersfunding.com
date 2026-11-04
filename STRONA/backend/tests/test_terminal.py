@@ -266,8 +266,9 @@ def test_logowanie_danymi_mt5_i_tylko_to_konto(rynek):
     with TestClient(app) as c:
         assert c.get("/api/terminal/accounts").status_code == 401
         assert c.get("/api/terminal/accounts", headers={"Authorization": f"Bearer {portal}"}).status_code == 401
-        assert c.post("/api/terminal/login", json={"login": a.platform_login, "password": "haslo1234"}).status_code == 401
-        r = c.post("/api/terminal/login", json={"login": a.platform_login, "password": "Pw-123456", "device": "abc123"},
+        assert c.post("/api/terminal/login", json={"login": a.platform_login, "password": "haslo1234", "server": "PTF-Demo"}).status_code == 401
+        assert c.post("/api/terminal/login", json={"login": a.platform_login, "password": "Pw-123456", "server": "Inny-Serwer"}).status_code == 401
+        r = c.post("/api/terminal/login", json={"login": a.platform_login, "password": "Pw-123456", "server": "ptf-demo", "device": "abc123"},
                    headers=naglowki)
         assert r.status_code == 200
         h = {"Authorization": f"Bearer {r.json()['token']}"}
@@ -297,8 +298,8 @@ def test_limit_nieudanych_prob(rynek, monkeypatch):
     a = _acc(aid)
     with TestClient(app) as c:
         for _i in range(terminal.PROBY_LOGIN):
-            assert c.post("/api/terminal/login", json={"login": a.platform_login, "password": "zle"}).status_code == 401
-        assert c.post("/api/terminal/login", json={"login": a.platform_login, "password": "Pw-123456"}).status_code == 429
+            assert c.post("/api/terminal/login", json={"login": a.platform_login, "password": "zle", "server": "PTF-Demo"}).status_code == 401
+        assert c.post("/api/terminal/login", json={"login": a.platform_login, "password": "Pw-123456", "server": "PTF-Demo"}).status_code == 429
 
 
 def test_panel_admina_blokada_flagi_i_wstrzymanie(rynek):
@@ -311,7 +312,7 @@ def test_panel_admina_blokada_flagi_i_wstrzymanie(rynek):
     adm = {"X-Admin-Token": get_settings().admin_token}
     with TestClient(app) as c:
         assert c.get("/api/admin/terminal/overview").status_code in (401, 403)
-        c.post("/api/terminal/login", json={"login": a.platform_login, "password": "Pw-123456"},
+        c.post("/api/terminal/login", json={"login": a.platform_login, "password": "Pw-123456", "server": "PTF-Demo"},
                headers={"x-real-ip": "198.51.100.9", "x-vercel-ip-country": "DE"})
         d = c.get("/api/admin/terminal/overview", headers=adm).json()
         wiersz = next(r for r in d["accounts"] if r["id"] == aid)
@@ -329,7 +330,7 @@ def test_panel_admina_blokada_flagi_i_wstrzymanie(rynek):
         # blokada wylogowuje i nie wpuszcza
         c.post(f"/api/admin/terminal/accounts/{aid}/block", json={"blocked": True}, headers=adm)
         assert c.get("/api/terminal/accounts", headers=h).status_code == 401
-        assert c.post("/api/terminal/login", json={"login": a.platform_login, "password": "Pw-123456"}).status_code == 403
+        assert c.post("/api/terminal/login", json={"login": a.platform_login, "password": "Pw-123456", "server": "PTF-Demo"}).status_code == 403
 
 
 def test_minimum_i_krok_0_01_lota(rynek):

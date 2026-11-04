@@ -3958,7 +3958,7 @@ async function openAccount(id){
         Fills this account's dashboard with trading activity: varied instruments, a positive
         equity curve, always inside the account's own risk rules.
         <b>While the bot runs, this account is not read from MT5</b>, so the portal will
-        diverge from the trader's MetaTrader terminal, and stopping the bot resyncs the
+        diverge from the trader's MT5 terminal, and stopping the bot resyncs the
         balance back to the real account. <b>Pace is how many trades a day</b> the bot takes:
         it spreads them across the day and holds each position for a matching stretch, so
         Busy is around one trade an hour, not one a minute. Style shades that count: a
