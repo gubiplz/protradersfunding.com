@@ -464,21 +464,26 @@
     const model = cfgType === 'instant' ? 'Instant' : '2-Step';
     const hot = shown.findIndex(x => x.popular);
     const star = hot >= 0 ? hot : Math.floor(shown.length / 2);
+    /* Cards ease in only on a new model or tier, not when a price changes. */
+    const same = grid.dataset.k === cfgType + cfgTier;
+    grid.dataset.k = cfgType + cfgTier;
     grid.innerHTML = shown.map((p, i) => {
-      const fee = Math.round(p.price_usd * (1 - cfgPct / 100) * 100) / 100;
+      /* Same sum as the checkout: discounted fee plus add-ons at full price. */
+      const addons = (cfgWt ? CENA_WT : 0) + (cfgCt && oferujeCt(p) ? cenaCt(p) : 0);
+      const fee = Math.round((p.price_usd * (1 - cfgPct / 100) + addons) * 100) / 100;
       const upSize = cfgPromo && p.promo_upgrade_size ? p.promo_upgrade_size : null;
       const q = new URLSearchParams({ buy: p.key });
       if (cfgWt) q.set('wt', '1');
       if (cfgCt && oferujeCt(p)) q.set('ct', '1');
       if (cfgCoupon) q.set('coupon', cfgCoupon);
       const open = flipped.has(p.key);
-      return `<article class="chal-card pal-${cfgTier}-${i}${i === star ? ' star' : ''}${p.popular ? ' hot' : ''}${open ? ' flip' : ''}">
+      return `<article class="chal-card${same ? ' still' : ''} pal-${cfgTier}-${i}${i === star ? ' star' : ''}${p.popular ? ' hot' : ''}${open ? ' flip' : ''}">
         <div class="chal-flip" role="button" tabindex="0" aria-label="$${p.account_size.toLocaleString('en-US')} ${model}: show or hide the rules"><div class="chal-inner">
           <div class="chal-face chal-front">
             <i class="chal-lines"></i><i class="chal-glare"></i>
             <i class="chal-mark"></i>
             <i class="chal-logo"></i>
-            <div class="chal-price">${cfgPct ? `<s>${usd(p.price_usd)}</s>` : ''}<b>${usd(fee)}</b> <small>USD</small></div>
+            <div class="chal-price">${cfgPct ? `<s>${usd(p.price_usd + addons)}</s>` : ''}<b>${usd(fee)}</b> <small>USD</small>${addons ? `<em>incl. ${usd(addons)} add-ons</em>` : ''}</div>
             <div class="chal-size">
               ${p.popular ? '<i>Best value</i>' : ''}
               ${upSize ? `<i>You trade ${sizeLabel(upSize)}</i>` : ''}
