@@ -1112,6 +1112,15 @@ def api_state(account_id: int | None = None, w: Who = Depends(who)):
             if ocenic and acc.terminal_used:
                 _ocen(session, acc)
             session.commit()
+        elif acc.bot_enabled:
+            # Konto Trade BOT-a bez pozycji z terminala: nikt inny nie pcha go do przodu,
+            # gdy trader wchodzi tylko danymi MT5 (portal i jego odczyty nie są potrzebne).
+            ostatnia = acc.terminal_eval_at
+            if ostatnia is not None and ostatnia.tzinfo is None:
+                ostatnia = ostatnia.replace(tzinfo=timezone.utc)
+            if ostatnia is None or _now() - ostatnia > timedelta(seconds=EVAL_EVERY_S):
+                _ocen(session, acc)
+                session.commit()
         poz = _open_positions(session, acc)
         marks = _marks(session, acc, poz, _now())
         return state_dict(session, acc, poz, marks)

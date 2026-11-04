@@ -65,16 +65,11 @@
     if (k === 'gas') return `<span class="${c}" style="background:#1e2a3d"><svg viewBox="0 0 24 24" style="width:62%;height:62%;stroke:none;fill:#5aa9ff"><path d="M12 2c1 3 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5 0 2 1 3 2 3 0-3-1-5 1-8.5z"/></svg></span>`;
     return `<span class="${c}" style="background:hsl(${HUE(m.sym)} 45% 38%)">${esc(m.base.slice(0, sm ? 1 : 2))}</span>`;
   }
-  const V_ICON = {
-    hyperliquid: '<svg viewBox="0 0 24 24"><path fill="#36B9A9" d="M20.6 11.2c0 4-2.5 5.3-3.9 3.6-1.3-1.5-1.8-4.4-4.1-4.6-2.9-.3-3 3-4.9 3.2-2 .3-2.3-2.8-2.3-4.4C5.4 7.5 6.5 5 8.6 5c2.6 0 2.7 3.6 5.5 3.7 2.9.1 3-3 5-3 1.4.1 1.5 3.6 1.5 5.5z"/></svg>',
-    binance: '<svg viewBox="0 0 24 24"><path fill="#F0B90B" d="M12 3.5 14.6 6 9.4 11.2 6.8 8.6zM17.2 8.6l2.6 2.6L12 19l-7.8-7.8 2.6-2.6L12 13.8zM3.5 12 6 9.4 8.6 12 6 14.6zM18 9.4l2.5 2.6L18 14.6 15.4 12z"/></svg>',
-    bybit: '<svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="3" fill="#17181e"/><path fill="#F7A600" d="M14.6 9h1.1v6h-1.1z"/><path fill="#fff" d="M5 9.2h2.2c1.2 0 1.7.6 1.7 1.3 0 .5-.3.9-.7 1 .6.1 1 .6 1 1.2 0 .9-.6 1.5-1.8 1.5H5zm1.1 2.3h.9c.5 0 .8-.2.8-.6s-.3-.6-.8-.6h-.9zm0 2.4h1c.5 0 .9-.2.9-.7 0-.4-.3-.7-.9-.7h-1zM10.3 9.2h1.2l1.1 2.2 1.1-2.2h1.1l-1.7 3.3v2.4h-1v-2.4z"/></svg>',
-  };
 
   /* ---------- state ---------- */
   const startSym = BY[root.dataset.symbol] ? root.dataset.symbol : 'BTCUSD';
   const S = {
-    sym: startSym, m: BY[startSym], venue: ls.get('pf_term_venue', 'hyperliquid'),
+    sym: startSym, m: BY[startSym], venue: 'hyperliquid',
     interval: ls.get('pf_term_int', '15m'), ctype: ls.get('pf_term_ctype', 'candle_solid'),
     book: { bids: [], asks: [] }, trades: [], tk: {}, mids: {}, ctx: {},
     // Size field unit: lots (default, as in MT5), USD or the base unit (BTC, oz…).
@@ -888,7 +883,7 @@
      MARKET STREAM
      ===================================================================== */
   /* All socket data goes through requestAnimationFrame: at most one render
-     per frame (Binance sends dozens of trades a second), and in a hidden tab the
+     per frame (busy markets send dozens of trades a second), and in a hidden tab the
      browser pauses rAF, so nothing paints then. */
   let strm = null, bookRaf = 0, tradesRaf = 0, tickRaf = 0, barRaf = 0, barNext = null;
   function pushBar(k) {
@@ -919,7 +914,6 @@
       },
       candle: (k) => { if (barCb && (!lastBar || k.timestamp >= lastBar.timestamp)) { lastBar = k; pushBar(k); } },
       ticker: (t) => { S.tk = { ...S.tk, ...t }; if (!tickRaf) tickRaf = requestAnimationFrame(() => { tickRaf = 0; renderTicker(); }); },
-      status: (s) => { venueState = s; renderConn(); },
     });
     strm.group(S.group);
   }
@@ -934,11 +928,11 @@
     el.classList.toggle('wide', w);
     el.title = v == null ? 'Live spread' : `Live spread: ${t} (${((v / ((a + b) / 2)) * 100).toFixed(4)}%) on ${F.VENUES[S.venue].label}`;
   }
-  let venueState = 'connecting', hlState = 'connecting', latency = null;
+  let hlState = 'connecting', latency = null;
   F.onHlState((s) => { hlState = s; renderConn(); });
   F.onLatency((l) => { latency = l; renderConn(); });
   function renderConn() {
-    const st = S.venue === 'hyperliquid' ? hlState : venueState;
+    const st = hlState;
     const el = $('tConn');
     el.className = 't-conn ' + (st === 'open' ? 'ok' : st === 'closed' ? 'bad' : '');
     el.querySelector('b').textContent = st === 'open' ? 'Connected' : st === 'closed' ? 'Reconnecting' : 'Connecting';
@@ -966,11 +960,7 @@
     $('tSymIc').innerHTML = mIcon(m);
     $('tSymName').textContent = m.sym;
     $('tMaxLev').textContent = '1:' + m.max_lev;      // leverage written as across PTF (1:100), not "100×"
-    $('tVenueIc').innerHTML = V_ICON[S.venue];
-    $('tVenueLbl').textContent = F.VENUES[S.venue].label;
-    const note = S.venue === 'hyperliquid'
-      ? 'Prices, the order book and fills come from Hyperliquid.'
-      : `Prices, the order book and trades come from ${F.VENUES[S.venue].label}. Orders fill at Hyperliquid prices.`;
+    const note = 'Prices, the order book and fills come from Hyperliquid.';
     $('tSrc').textContent = note;
     $('tFillNote').textContent = note + ` Leverage on ${m.sym} is 1:${m.max_lev}, the same on every account. Margin is shared across the account; if equity falls to half of the margin in use, open positions are closed (stop-out).`;
     $('tEstLev').textContent = '1:' + m.max_lev;
@@ -980,27 +970,6 @@
     renderInfo();
   }
   const baseName = (m) => (m.cls === 'crypto' ? m.base : m.sym);
-
-  // exchange (venue)
-  const venueMenu = document.createElement('div');
-  venueMenu.className = 't-menu';
-  venueMenu.hidden = true;
-  $('tVenueBtn').parentElement.style.position = 'relative';
-  $('tVenueBtn').parentElement.appendChild(venueMenu);
-  dropdown($('tVenueBtn'), venueMenu, (menu) => {
-    const dost = F.venuesFor(S.m);
-    menu.innerHTML = Object.values(F.VENUES).map((v) => `<button type="button" data-v="${v.key}" ${dost.includes(v.key) ? '' : 'disabled style="opacity:.4"'}><span class="v-ic">${V_ICON[v.key]}</span>${v.label}${v.key === 'hyperliquid' ? '<span class="tag">Default</span>' : ''}${v.key === S.venue ? '<span class="chk">✓</span>' : ''}</button>`).join('');
-  });
-  venueMenu.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-v]');
-    if (!b || b.disabled) return;
-    S.venue = b.dataset.v;
-    ls.set('pf_term_venue', S.venue);
-    venueMenu.hidden = true;
-    renderMarketHead();
-    restream();
-    renderConn();
-  });
 
   /* ---------- market switch ---------- */
   function setMarket(sym, push) {
@@ -2578,6 +2547,7 @@
     if (tab && !tab.classList.contains('on')) tab.click();
     closeModal();
     openPanel(true);
+    window.scrollTo({ top: 0 });
     if (!S.token || formOpen) focusForm();
   }
   $('tAccBtn').addEventListener('click', (e) => {
@@ -2600,7 +2570,7 @@
     if (b) { selectAccount(+b.dataset.acc); openPanel(false); }
     if (!$('tSrvList').hidden && !e.target.closest('.t-ap-srv')) $('tSrvList').hidden = true;
   });
-  document.addEventListener('click', (e) => { if (!panel.hidden && !e.target.closest('#tLogin,#tAccBtn')) { formOpen = false; openPanel(false); } });
+  document.addEventListener('click', (e) => { if (!panel.hidden && !e.target.closest('#tLogin,#tAccBtn,#tReadySignIn,#tMMLogin,[data-signin],[data-add-acc]')) { formOpen = false; openPanel(false); } });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !panel.hidden) { formOpen = false; openPanel(false); } });
 
   /* Servers as in MT5: type a name once, it stays on the list for next time. */

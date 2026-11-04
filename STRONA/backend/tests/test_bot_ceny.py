@@ -237,3 +237,18 @@ def test_koszyk_tylko_z_notowanymi_rynkami(zywe):
     p2 = tradebot.Persona(**{**p.__dict__, "symbols": ("US30", "GER40"), "weights": (1, 1)})
     syms2, _ = tradebot._tradable(p2, False)
     assert set(syms2) == {s for s in tradebot.INSTRUMENTS if bot_ceny.rynek(s)}
+
+
+def test_stan_terminala_pcha_konto_bota(zywe, monkeypatch):
+    """Trader wchodzi tylko danymi MT5: sam odczyt stanu ma ruszać bota, ale nie przy każdym odświeżeniu."""
+    aid, h, _ = _konto("botceny9")
+    wywolania = []
+
+    def ocena(session, acc):
+        wywolania.append(acc.id)
+        acc.terminal_eval_at = terminal._now()
+    monkeypatch.setattr(terminal, "_ocen", ocena)
+    with TestClient(app) as c:
+        assert c.get(f"/api/terminal/state?account_id={aid}", headers=h).status_code == 200
+        assert c.get(f"/api/terminal/state?account_id={aid}", headers=h).status_code == 200
+    assert wywolania == [aid]

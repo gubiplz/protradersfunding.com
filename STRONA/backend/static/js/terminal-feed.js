@@ -1,10 +1,7 @@
 /* PTF terminal — market data direct from exchanges (browser ↔ WebSocket).
    The Vercel server holds no connections, so chart, book and trades flow
-   directly from Hyperliquid, Binance or Bybit. Orders are still settled
-   by the server at Hyperliquid prices (app/markets.py).
-
-   Since 2026 Binance splits streams: book on /public, the rest on /market —
-   old /stream now returns only the book. */
+   directly from Hyperliquid. Orders are settled
+   by the server at Hyperliquid prices (app/markets.py). */
 (function () {
   'use strict';
 
@@ -24,10 +21,8 @@
     binance: { key: 'binance', label: 'Binance', sym: (m) => m.bn },
     bybit: { key: 'bybit', label: 'Bybit', sym: (m) => m.by },
   };
-  // Fills settle at Hyperliquid prices. Binance/Bybit stay as a chart view only for crypto,
-  // where the gap is ~0.01–0.03%; gold, silver or oil there trade ~0.1–0.2% away, so an
-  // entry line drawn over their candles looked wrong.
-  const venuesFor = (m) => Object.values(VENUES).filter((v) => !!v.sym(m) && (v.key === 'hyperliquid' || m.cls === 'crypto')).map((v) => v.key);
+  // One source for chart, book, trades and fills. Binance and Bybit stay only for open interest history.
+  const venuesFor = () => ['hyperliquid'];
 
   const num = (x) => (x == null || x === '' ? null : +x);
   const post = (body) => fetch(HL_INFO, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -126,11 +121,7 @@
   }
 
   /* ---------- single-market stream ---------- */
-  function stream(venue, m, interval, h) {
-    if (venue === 'binance') return streamBinance(m, interval, h);
-    if (venue === 'bybit') return streamBybit(m, interval, h);
-    return streamHl(m, interval, h);
-  }
+  const stream = (venue, m, interval, h) => streamHl(m, interval, h);
 
   /* Each stream has `interval(i)`: an interval change swaps only the candles, while
      the book and trades keep flowing without reconnecting. `group(g)` = price step of
@@ -189,136 +180,6 @@
       interval: (i) => { offCandles(); offCandles = candles(i); },
       group: (g) => { grp = g; regroup(); },
       aggregates: true,
-    };
-  }
-
-  function streamBinance(m, interval, h) {
-    const s = m.bn.toLowerCase();
-    let last = {};
-    /* Local book: REST snapshot (1000 levels) + diff stream, per Binance's recipe
-       (drop u < lastUpdateId, every next event continues pu = previous u, else resync).
-       depth20 gave only ~20 ticks, so grouping had almost nothing to merge. */
-    const bids = new Map(), asks = new Map();
-    let lastId = 0, prevU = 0, buf = [], loading = false, gen = 0, emitT = 0, lo = 0, hi = Infinity;
-    // Levels outside the snapshot's range are known only if they changed afterwards,
-    // so the book there has holes; drop them.
-    const trim = (map, ok) => { if (map.size > 1200) map.forEach((_, p) => { if (!ok(+p)) map.delete(p); }); };
-    const emit = () => {
-      if (emitT) return;
-      emitT = setTimeout(() => {
-        emitT = 0;
-        trim(bids, (p) => p >= lo); trim(asks, (p) => p <= hi);
-        let [b, a] = sortBook(bids, asks, 1000);
-        b = b.filter((x) => x[0] >= lo); a = a.filter((x) => x[0] <= hi);
-        if (b[0] && a[0]) h.top(b[0][0], a[0][0]);
-        h.book(b, a);
-      }, 100);
-    };
-    const put = (map, rows) => rows.forEach(([p, q]) => (+q ? map.set(p, +q) : map.delete(p)));
-    const apply = (x) => {
-      if (!lastId) { buf.push(x); if (buf.length > 600) buf.shift(); return; }
-      if (x.u < lastId) return;
-      if (prevU ? x.pu !== prevU : x.U > lastId) return resync();
-      prevU = x.u;
-      put(bids, x.b); put(asks, x.a);
-      emit();
-    };
-    async function resync() {
-      if (loading) return;
-      loading = true; lastId = 0; prevU = 0;
-      const my = ++gen;
-      try {
-        const d = await getJ(`${BN_REST}/fapi/v1/depth?symbol=${m.bn}&limit=1000`);
-        if (my !== gen) return;
-        bids.clear(); asks.clear();
-        put(bids, d.bids); put(asks, d.asks);
-        lo = d.bids.length ? +d.bids[d.bids.length - 1][0] : 0;
-        hi = d.asks.length ? +d.asks[d.asks.length - 1][0] : Infinity;
-        lastId = d.lastUpdateId;
-        loading = false;
-        const q = buf; buf = [];
-        q.forEach(apply);
-        emit();
-      } catch (_) {
-        if (my === gen) setTimeout(() => { loading = false; resync(); }, 3000);
-      }
-    }
-    const pub = socket(BN_PUB + `${s}@depth@100ms`, {
-      onstate: h.status,
-      onopen: () => { buf = []; loading = false; resync(); },
-      onmessage: (d) => { const x = d.data; if (x && x.e === 'depthUpdate') apply(x); },
-    });
-    const mkt = socket(BN_MKT + [`${s}@aggTrade`, `${s}@ticker`, `${s}@markPrice@1s`].join('/'), {
-      onmessage: (d) => {
-        const x = d.data || {};
-        if (x.e === 'aggTrade') h.trades([{ px: +x.p, sz: +x.q, side: x.m ? 'sell' : 'buy', t: x.T }]);
-        else if (x.e === '24hrTicker') { last = { ...last, chg: +x.P, vol: +x.q, lastPx: +x.c }; h.ticker({ ...last }); }
-        else if (x.e === 'markPriceUpdate') { last = { ...last, mark: +x.p, funding: +x.r }; if (last.oi) last.oiUsd = last.oi * last.mark; h.ticker({ ...last }); }
-      },
-    });
-    // Separate candle socket: an interval change reconnects only it.
-    const klines = (i) => socket(BN_MKT + `${s}@kline_${i}`, {
-      onmessage: (d) => { const x = d.data || {}; if (x.e === 'kline') { const k = x.k; h.candle({ timestamp: k.t, open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v }); } },
-    });
-    let kl = klines(interval);
-    const oi = () => getJ(`${BN_REST}/fapi/v1/openInterest?symbol=${m.bn}`).then((d) => { last.oi = +d.openInterest; if (last.mark) { last.oiUsd = last.oi * last.mark; h.ticker({ ...last }); } }).catch(() => {});
-    oi();
-    const t = setInterval(() => { if (!document.hidden) oi(); }, 30000);
-    return {
-      close: () => { gen++; clearTimeout(emitT); pub.close(); mkt.close(); kl.close(); clearInterval(t); },
-      interval: (i) => { kl.close(); kl = klines(i); },
-      group: () => {},
-    };
-  }
-
-  function streamBybit(m, interval, h) {
-    const sym = m.by;
-    const bids = new Map(), asks = new Map();
-    let tk = {};
-    // 1000 levels (pushed every 200 ms) so a coarser step still fills the rows;
-    // orderbook.1 keeps the best bid/ask exact between those pushes.
-    let emitT = 0;
-    const emitBook = () => {
-      if (emitT) return;
-      emitT = setTimeout(() => { emitT = 0; const [b, a] = sortBook(bids, asks, 1000); h.book(b, a); }, 100);
-    };
-    let ping, kInt = interval;
-    const s = socket(BY_WS, {
-      onstate: h.status,
-      onopen: (ws) => {
-        ws.send(JSON.stringify({ op: 'subscribe', args: [`orderbook.1000.${sym}`, `orderbook.1.${sym}`, `publicTrade.${sym}`, `kline.${BY_INT[kInt]}.${sym}`, `tickers.${sym}`] }));
-        clearInterval(ping); ping = setInterval(() => s.send({ op: 'ping' }), 20000);
-      },
-      onmessage: (d) => {
-        const tp = d.topic || '';
-        if (tp === `orderbook.1.${sym}`) {
-          const x = d.data;
-          if (x.b[0] && x.a[0]) h.top(+x.b[0][0], +x.a[0][0]);
-        } else if (tp.startsWith('orderbook.')) {
-          const x = d.data;
-          if (d.type === 'snapshot') { bids.clear(); asks.clear(); }
-          x.b.forEach(([p, q]) => (+q ? bids.set(p, +q) : bids.delete(p)));
-          x.a.forEach(([p, q]) => (+q ? asks.set(p, +q) : asks.delete(p)));
-          emitBook();
-        } else if (tp.startsWith('publicTrade.')) {
-          h.trades(d.data.map((t) => ({ px: +t.p, sz: +t.v, side: t.S === 'Buy' ? 'buy' : 'sell', t: t.T })));
-        } else if (tp === `kline.${BY_INT[kInt]}.${sym}`) {      // late candles of the old interval are dropped
-          d.data.forEach((k) => h.candle({ timestamp: +k.start, open: +k.open, high: +k.high, low: +k.low, close: +k.close, volume: +k.volume }));
-        } else if (tp.startsWith('tickers.')) {
-          const x = d.data;
-          tk = { ...tk, ...Object.fromEntries(Object.entries(x).filter(([, v]) => v !== undefined && v !== '')) };
-          h.ticker({ mark: num(tk.markPrice), chg: num(tk.price24hPcnt) * 100, oiUsd: num(tk.openInterestValue), vol: num(tk.turnover24h), funding: num(tk.fundingRate), lastPx: num(tk.lastPrice) });
-        }
-      },
-    });
-    return {
-      close: () => { clearInterval(ping); clearTimeout(emitT); s.close(); },
-      interval: (i) => {
-        s.send({ op: 'unsubscribe', args: [`kline.${BY_INT[kInt]}.${sym}`] });
-        kInt = i;
-        s.send({ op: 'subscribe', args: [`kline.${BY_INT[kInt]}.${sym}`] });
-      },
-      group: () => {},
     };
   }
 
