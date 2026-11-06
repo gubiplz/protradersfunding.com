@@ -20,6 +20,7 @@ import os
 import urllib.request
 import random
 import re
+import asyncio
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -10292,6 +10293,15 @@ async def api_cron_risk():
 #: Ile sekund z `maxDuration` (60 s, vercel.json) wolno zużyć zadaniom crona
 #: po przebiegu kont — zapas na odpowiedź i na wolniejszy ostatni krok.
 TICK_BUDZET_S = 48.0
+#: Próbkowanie świec: tyle sekund co minutę, reszta minuty to zapas na zapis.
+CANDLES_BUDZET_S = 52.0
+
+
+@app.api_route("/api/cron/candles", methods=["GET", "POST"], include_in_schema=False, dependencies=[Depends(_require_cron)])
+async def api_cron_candles():
+    """Świece M1 z mid dla cienkich rynków (`markets.SAMPLED`): cron Vercela co minutę,
+    przez ~52 s próbka co sekundę, jeden zapis na końcu. Wątek, bo próbkowanie śpi."""
+    return await asyncio.to_thread(terminal.probkuj_swiece, CANDLES_BUDZET_S)
 
 
 @app.api_route("/api/tick", methods=["GET", "POST"], include_in_schema=False, dependencies=[Depends(_require_cron)])

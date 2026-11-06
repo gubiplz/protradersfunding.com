@@ -43,7 +43,23 @@
       return ((d.result && d.result.list) || []).map((k) => ({ timestamp: +k[0], open: +k[1], high: +k[2], low: +k[3], close: +k[4], volume: +k[5] })).reverse();
     }
     const d = await post({ type: 'candleSnapshot', req: { coin: m.hl, interval, startTime: end - step * Math.min(limit, 5000), endTime: end } });
-    return (d || []).map((k) => ({ timestamp: k.t, open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v }));
+    const bars = (d || []).map((k) => ({ timestamp: k.t, open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v }));
+    return m.sampled ? sampledOver(bars, m, interval, end, limit) : bars;
+  }
+  /* Thin markets (FX, JPN225, XPT): the exchange candle comes from a few prints a
+     minute, so it sits flat and jumps. Our cron samples the mid every second and
+     keeps true 1m O/H/L/C; those replace the exchange prices where we have them,
+     the exchange volume stays. Older history, from before the sampling, is unchanged. */
+  async function sampledOver(bars, m, interval, end, limit) {
+    let ours = [];
+    try { ours = (await getJ(`/api/terminal/candles?symbol=${m.sym}&interval=${interval}&end=${end}&limit=${Math.min(limit, 5000)}`)).candles || []; } catch (_) { return bars; }
+    if (!ours.length) return bars;
+    const byTs = new Map(bars.map((k) => [k.timestamp, k]));
+    ours.forEach((k) => {
+      const had = byTs.get(k.timestamp);
+      byTs.set(k.timestamp, { ...k, volume: had ? had.volume : 0 });
+    });
+    return [...byTs.values()].sort((a, b) => a.timestamp - b.timestamp);
   }
 
   /* ---------- socket with retry ---------- */

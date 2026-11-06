@@ -1302,3 +1302,23 @@ class AdminInboxMark(Base):
     read: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     hidden: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class TerminalCandle(Base):
+    """Minutowa świeca z mid Hyperliquida dla cienkich rynków (FX, JPN225, XPT).
+
+    Świece giełdy powstają z transakcji, a na tych rynkach drukuje się ich kilka na
+    minutę, przy 4 miejscach po przecinku: wykres M1 stał w miejscu i skakał. Cron
+    próbkuje mid co sekundę (`terminal.probkuj_swiece`) i składa z tego prawdziwe
+    O/H/L/C; terminal nakłada je na historię z giełdy, wolumen zostaje giełdowy."""
+    __tablename__ = "terminal_candles"
+    __table_args__ = (UniqueConstraint("coin", "ts", name="uq_terminal_candles_coin_ts"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    coin: Mapped[str] = mapped_column(String(32), index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, index=True)   # początek minuty, UTC
+    o: Mapped[float] = mapped_column(Float)
+    h: Mapped[float] = mapped_column(Float)
+    l: Mapped[float] = mapped_column(Float)
+    c: Mapped[float] = mapped_column(Float)
+    n: Mapped[int] = mapped_column(Integer, default=0)            # liczba próbek

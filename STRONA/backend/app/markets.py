@@ -105,8 +105,15 @@ def get(sym: str | None) -> Market | None:
     return BY_SYM.get((sym or "").strip().upper())
 
 
+# Rynki, na których Hyperliquid drukuje kilka transakcji na minutę: ich świece M1
+# składa cron z mid próbkowanego co sekundę (`terminal.probkuj_swiece`), a terminal
+# nakłada je na historię giełdy. Reszta rynków ma dość transakcji, żeby świece
+# giełdy były ciągłe.
+SAMPLED: frozenset[str] = frozenset({"xyz:EUR", "xyz:GBP", "xyz:JPY", "xyz:JP225", "xyz:PLATINUM"})
+
+
 def public_list() -> list[dict]:
-    return [asdict(m) for m in MARKETS]
+    return [{**asdict(m), "sampled": m.hl in SAMPLED} for m in MARKETS]
 
 
 # --------------------------------------------------------------------------- #

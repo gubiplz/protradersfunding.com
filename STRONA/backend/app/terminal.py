@@ -42,7 +42,7 @@ from .config import get_settings
 from .db import SessionLocal
 from .feed import MarketSnapshot
 from .markets import Market
-from .models import Account, AppSetting, PoolAccount, TerminalLogin, TerminalOrder, Trade, Trader
+from .models import Account, AppSetting, PoolAccount, TerminalCandle, TerminalLogin, TerminalOrder, Trade, Trader
 
 settings = get_settings()
 
@@ -995,6 +995,124 @@ def _z_ponowieniem(fn):
 # --------------------------------------------------------------------------- #
 #  Endpointy                                                                   #
 # --------------------------------------------------------------------------- #
+# --- świece M1 z próbkowanego mid dla cienkich rynków ------------------------
+PROBKA_S = 1.0                  # co tyle sekund próbka mid
+SWIECE_KLUCZ = "candles_tick_at"
+SWIECE_ODSTEP_S = 45.0          # drugi przebieg w tej samej minucie czeka
+_SWIECE_MS = {"1m": 60_000, "3m": 180_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000,
+              "1h": 3_600_000, "4h": 14_400_000}
+
+
+def _zajmij_przebieg(session, klucz: str, min_odstep_s: float) -> bool:
+    """Jeden przebieg naraz na hostingu bezserwerowym: warunkowy UPDATE w bazie,
+    jak `poller._zajmij_tick_ryzyka`. True = można liczyć."""
+    from sqlalchemy import update
+    from sqlalchemy.exc import IntegrityError
+    teraz = time.time()
+    row = session.get(AppSetting, klucz)
+    if row is None:
+        try:
+            session.add(AppSetting(key=klucz, value=str(teraz)))
+            session.commit()
+            return True
+        except IntegrityError:
+            session.rollback()
+            return False
+    poprzedni = row.value
+    try:
+        if teraz - float(poprzedni) < min_odstep_s:
+            return False
+    except (TypeError, ValueError):
+        pass
+    wynik = session.execute(update(AppSetting).where(AppSetting.key == klucz, AppSetting.value == poprzedni)
+                            .values(value=str(teraz)))
+    session.commit()
+    return wynik.rowcount == 1
+
+
+def _zapisz_swiece(swiece: dict) -> int:
+    """Scala próbki z wierszami w bazie: otwarcie zostaje, H/L rozszerzają się, zamknięcie
+    i liczba próbek idą dalej. Zwraca liczbę dotkniętych wierszy."""
+    if not swiece:
+        return 0
+    session = SessionLocal()
+    try:
+        n = 0
+        for (coin, minuta), (o, h, l, c, k) in sorted(swiece.items(), key=lambda x: (x[0][0], x[0][1])):
+            row = session.query(TerminalCandle).filter(TerminalCandle.coin == coin, TerminalCandle.ts == minuta).first()
+            if row is None:
+                session.add(TerminalCandle(coin=coin, ts=minuta, o=o, h=h, l=l, c=c, n=k))
+            else:
+                row.h, row.l, row.c, row.n = max(row.h, h), min(row.l, l), c, (row.n or 0) + k
+            n += 1
+        session.commit()
+        return n
+    finally:
+        session.close()
+
+
+def probkuj_swiece(budzet_s: float) -> dict:
+    """Przez `budzet_s` sekund co `PROBKA_S` bierze mid rynków `markets.SAMPLED` i składa
+    z tego świece M1. Zapis raz, na końcu; drugi przebieg w tej samej minucie odpada."""
+    session = SessionLocal()
+    try:
+        if not _zajmij_przebieg(session, SWIECE_KLUCZ, SWIECE_ODSTEP_S):
+            return {"skipped": True, "reason": "inny przebieg w toku"}
+    finally:
+        session.close()
+    coins = sorted(markets.SAMPLED)
+    start = time.monotonic()
+    swiece: dict[tuple[str, datetime], list] = {}
+    proby = 0
+    while True:
+        try:
+            ceny = markets.mids(coins)
+        except Exception:
+            ceny = {}
+        minuta = _now().replace(second=0, microsecond=0, tzinfo=None)
+        for coin, px in ceny.items():
+            s = swiece.get((coin, minuta))
+            if s is None:
+                swiece[(coin, minuta)] = [px, px, px, px, 1]
+            else:
+                s[1], s[2], s[3], s[4] = max(s[1], px), min(s[2], px), px, s[4] + 1
+        proby += 1
+        if time.monotonic() - start >= budzet_s:
+            break
+        time.sleep(PROBKA_S)
+    return {"coins": len(coins), "samples": proby, "rows": _zapisz_swiece(swiece)}
+
+
+@router.get("/candles")
+def api_candles(symbol: str, interval: str = "1m", end: int | None = None, limit: int = 500):
+    """Świece z próbkowanego mid dla rynku z `markets.SAMPLED`, złożone do żądanego
+    interwału; inne rynki i interwały dzienne dostają pustą listę."""
+    m = markets.get(symbol)
+    krok = _SWIECE_MS.get(interval)
+    if m is None or m.hl not in markets.SAMPLED or krok is None:
+        return {"candles": []}
+    limit = max(1, min(int(limit), 5000))
+    koniec = int(end) if end else _ms(_now())
+    od = datetime.fromtimestamp((koniec - krok * limit) / 1000, tz=timezone.utc).replace(tzinfo=None)
+    session = SessionLocal()
+    try:
+        rows = (session.query(TerminalCandle)
+                .filter(TerminalCandle.coin == m.hl, TerminalCandle.ts >= od,
+                        TerminalCandle.ts <= datetime.fromtimestamp(koniec / 1000, tz=timezone.utc).replace(tzinfo=None))
+                .order_by(TerminalCandle.ts).all())
+    finally:
+        session.close()
+    out: list[dict] = []
+    for r in rows:
+        t = (int(r.ts.replace(tzinfo=timezone.utc).timestamp() * 1000) // krok) * krok
+        if out and out[-1]["timestamp"] == t:
+            k = out[-1]
+            k["high"], k["low"], k["close"] = max(k["high"], r.h), min(k["low"], r.l), r.c
+        else:
+            out.append({"timestamp": t, "open": r.o, "high": r.h, "low": r.l, "close": r.c, "volume": 0.0})
+    return {"candles": out}
+
+
 @router.get("/markets")
 def api_markets():
     return {"markets": markets.public_list(), "fee_pct": round(FEE_PCT * 100, 3),

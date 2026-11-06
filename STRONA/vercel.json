@@ -12,6 +12,7 @@
   "crons": [
     { "path": "/api/tick", "schedule": "0 15 * * *" },
     { "path": "/api/cron/risk", "schedule": "* * * * *" },
+    { "path": "/api/cron/candles", "schedule": "* * * * *" },
     { "path": "/api/cron/streak-reminder", "schedule": "0 17 * * *" }
   ]
 }
