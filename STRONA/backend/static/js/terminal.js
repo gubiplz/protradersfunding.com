@@ -926,6 +926,34 @@
     barNext = k;
     if (!barRaf) barRaf = requestAnimationFrame(() => { barRaf = 0; if (barCb && barNext) barCb(barNext); barNext = null; });
   }
+  /* The live candle follows the mid quote, the way MT5 and cTrader draw from bid
+     ticks. A Hyperliquid candle moves only when a trade prints, and on FX, metals
+     and indices that is a few prints a minute: the last bar sat flat, then jumped.
+     The mid between the best bid and ask moves with every requote and carries the
+     full price precision (5 decimals on EUR/USD, where trades step by 0.0001).
+     Hyperliquid's own candle still brings the volume and the traded range. */
+  function tickBar(p) {
+    if (!barCb || !lastBar || !(p > 0)) return;
+    p = Math.round(p * 1e8) / 1e8;   // (bid + ask) / 2 leaves float dust such as 4048.8500000000004
+    const step = F.MS[S.interval], now = Date.now();
+    if (now >= lastBar.timestamp + step) {
+      // Next bar only on the exact boundary: daily and weekly bars don't start
+      // on epoch multiples, and after a hidden tab the exchange candle fills the gap.
+      if (now >= lastBar.timestamp + 2 * step) return;
+      lastBar = { timestamp: lastBar.timestamp + step, open: p, high: p, low: p, close: p, volume: 0 };
+    } else if (now < lastBar.timestamp) return;
+    else lastBar = { ...lastBar, high: Math.max(lastBar.high, p), low: Math.min(lastBar.low, p), close: p };
+    pushBar(lastBar);
+  }
+  // Read-only hook for the UI checks in .tools: the last bar the chart was given.
+  window.PTFTerm = { bar: () => lastBar };
+  function mergeBar(k) {
+    if (!barCb) return;
+    if (lastBar && k.timestamp === lastBar.timestamp) lastBar = { ...lastBar, high: Math.max(lastBar.high, k.high), low: Math.min(lastBar.low, k.low), volume: k.volume };
+    else if (!lastBar || k.timestamp > lastBar.timestamp) lastBar = k;
+    else return;
+    pushBar(lastBar);
+  }
   function restream() {
     if (strm) strm.close();
     S.book = { bids: [], asks: [] }; S.top = [0, 0]; S.trades = []; S.tk = {};
@@ -941,12 +969,12 @@
     }
     strm = F.stream(S.venue, S.m, S.interval, {
       book: (b, a) => { S.book = { bids: b, asks: a }; drawBook(); },
-      top: (b, a) => { S.top = [b, a]; drawBook(); },
+      top: (b, a) => { S.top = [b, a]; drawBook(); tickBar((b + a) / 2); },
       trades: (list) => {
         S.trades = list.concat(S.trades).sort((x, y) => y.t - x.t).slice(0, 80);
         if (!tradesRaf) tradesRaf = requestAnimationFrame(() => { tradesRaf = 0; renderTrades(); });
       },
-      candle: (k) => { if (barCb && (!lastBar || k.timestamp >= lastBar.timestamp)) { lastBar = k; pushBar(k); } },
+      candle: mergeBar,
       ticker: (t) => { S.tk = { ...S.tk, ...t }; if (!tickRaf) tickRaf = requestAnimationFrame(() => { tickRaf = 0; renderTicker(); }); },
     });
     strm.group(S.group);
