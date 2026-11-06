@@ -1718,3 +1718,25 @@ def test_review_nudge_tylko_dla_listy_trustpilot():
     with TestClient(app) as c:
         assert c.get("/api/auth/me", headers=h).json()["review_nudge"] is True
         assert c.get("/api/auth/me", headers=h2).json()["review_nudge"] is False
+
+
+def test_delete_kodem_z_maila_bez_hasla(monkeypatch):
+    """Konto z „Continue with Google" nie zna hasła — usuwa się kodem z e-maila."""
+    from app import notify
+    tid, h = _trader("google-del@test.pl", password_set=False, google_sub="g-123")
+    wyslane = []
+    monkeypatch.setattr(notify, "send", lambda ev, to, ctx=None: wyslane.append((ev, to, ctx or {})))
+    with TestClient(app) as c:
+        r = c.post("/api/me/delete/code", headers=h)
+        assert r.status_code == 200 and r.json()["sent"] and r.json()["email"].endswith("@test.pl")
+        ev, do, ctx = wyslane[-1]
+        assert ev == "account_delete_code" and do == "google-del@test.pl" and len(ctx["code"]) == 6
+        zly = "000000" if ctx["code"] != "000000" else "111111"
+        assert c.post("/api/me/delete", headers=h, json={"code": zly}).status_code == 400
+        assert c.post("/api/me/delete", headers=h, json={"password": "haslo1234"}).status_code == 400, \
+            "konto Google: hasło nie potwierdza usunięcia"
+        assert c.post("/api/me/delete", headers=h, json={"code": ctx["code"]}).json()["deleted"]
+        assert c.get("/api/auth/me", headers=h).status_code == 401
+    s = SessionLocal()
+    assert s.get(Trader, tid).email.endswith("@removed.invalid")
+    s.close()

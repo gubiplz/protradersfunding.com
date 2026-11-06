@@ -3134,9 +3134,9 @@ const VIEWS={
     <div class="sec-card" style="max-width:640px;border-color:var(--red-line)"><h3 style="color:var(--red)">Danger Zone</h3>
       <p class="muted" style="font-size:13px;margin:8px 0 14px">Deleting your account anonymizes your personal data and permanently disables login.
         Trading records are retained for accounting. This cannot be undone.</p>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <input id="s-delpass" type="password" class="inp" placeholder="Confirm with your password" style="max-width:280px">
-        <button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteAccount()">Delete Account</button>
+      <div id="s-del" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteCode()">Delete Account</button>
+        <span class="muted" style="font-size:12.5px">We e-mail you a 6-digit code first.</span>
       </div></div>
     </div>`;
   npPaintPush();refreshPush();pwLoad();
@@ -3334,10 +3334,23 @@ async function togglePush(){
   }catch(e){toast('Push setup failed: '+e.message,'err')}
   finally{btn.disabled=false;initPushUI()}
 }
+/* Deleting the account: a code from the e-mail instead of the password, because an
+   account opened with Google has no password the trader knows. */
+async function deleteCode(){
+  const box=$('s-del');
+  box.querySelector('button').disabled=true;
+  try{const r=await api('/api/me/delete/code',{method:'POST'});
+    box.innerHTML=`<input id="s-delcode" class="inp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code" style="max-width:160px;letter-spacing:.2em">
+      <button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteAccount()">Confirm deletion</button>
+      <span class="muted" style="font-size:12.5px">Code sent to ${esc(r.email)}. It works for 10 minutes. <a href="#" onclick="deleteCode();return false">Send again</a></span>`;
+    $('s-delcode').focus();
+  }catch(e){box.querySelector('button').disabled=false;toast('Error: '+e.message,'err')}
+}
 async function deleteAccount(){
-  const pass=$('s-delpass').value;
-  if(!pass){toast('Enter your password to confirm.','err');return}
-  try{await api('/api/me/delete',{method:'POST',body:JSON.stringify({password:pass})});
+  const code=($('s-delcode')||{}).value||'';
+  if(code.replace(/\D/g,'').length!==6){toast('Enter the 6-digit code from the e-mail.','err');return}
+  if(!confirm('Delete your account for good? This cannot be undone.'))return;
+  try{await api('/api/me/delete',{method:'POST',body:JSON.stringify({code:code.replace(/\D/g,'')})});
     toast('Account deleted.','ok');setTimeout(logout,800);
   }catch(e){toast('Error: '+e.message,'err')}
 }

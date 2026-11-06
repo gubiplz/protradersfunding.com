@@ -40,6 +40,9 @@ from .models import (Account, AppSetting, CreditLedger, FlashOffer, Order,
                      PoolAccount, Product, RewardCode, Trader)
 
 PLATFORM_SERVER = "MetaQuotes-Demo"
+#: Notatka grantu drugiego konta z promocji Buy 1 Get 1 Free — klient za nie zapłacił,
+#: więc panel nie liczy go do kont darmowych.
+BOGO_NOTE = "Buy 1 Get 1 Free"
 
 
 def _gen_login() -> str:
@@ -196,7 +199,7 @@ def create_account_from_order(session, order: Order, notify_admin: bool = True) 
     if getattr(order, "bogo", False) and order.provider != "grant":
         from . import billing
         try:
-            billing.grant_challenge(session, trader, order.product_key, "Buy 1 Get 1 Free")
+            billing.grant_challenge(session, trader, order.product_key, BOGO_NOTE)
         except Exception as e:
             print(f"[provisioning] BOGO grant dla zamowienia #{order.id} nie wyszedl: {e}", flush=True)
             # Sesja mogła zostać z na wpół dodanym grantem — bez rollbacku każdy

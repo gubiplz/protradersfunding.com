@@ -4153,6 +4153,14 @@ def admin_support_chats():
         wiadomosci = _wiadomosci_biletow(session, [t.id for t in rows])
         traderzy = {tr.id: tr for tr in session.query(Trader)
                     .filter(Trader.id.in_({t.trader_id for t in rows})).all()} if rows else {}
+        # Filtr „Free" w dymku: rozmowy klientów, którzy dostali konto za darmo (program
+        # FREE, Free Trade Case, nagroda za osiągnięcia, grant z panelu). Drugie konto z
+        # BOGO i wiersze z ewidencji wypłat to klienci, którzy zapłacili — odpadają.
+        darmowi = {aid for (aid,) in session.query(Account.trader_id)
+                   .filter(Account.trader_id.in_(traderzy.keys()), Account.source == "grant",
+                           func.lower(func.coalesce(Account.grant_note, "")).notin_(
+                               (provisioning.BOGO_NOTE.lower(), payout_import.IMPORT_NOTE.lower())))
+                   .all()} if traderzy else set()
         out, last_id = [], 0
         for t in rows:
             msgs = [m for m in wiadomosci[t.id] if m.author != "ai_note"]
@@ -4166,6 +4174,7 @@ def admin_support_chats():
                 "waiting": t.status == "open",
                 "trader_email": tr.email if tr else None,
                 "trader_name": (tr.full_name or "") if tr else "",
+                "free": t.trader_id in darmowi,
                 "last": {"author": ost.author, "body": ost.body[:140], "ts": ost.ts.isoformat(),
                          "id": ost.id} if ost else None,
                 # Podgląd przy dymku pokazuje słowa TRADERA — ostatnia w wątku bywa
@@ -4495,18 +4504,71 @@ def me_email_confirm(payload: EmailCodeIn, request: Request,
 
 
 class DeleteIn(BaseModel):
-    password: str
+    # Kod z e-maila (`/api/me/delete/code`) albo — dla kont z hasłem — samo hasło.
+    code: str | None = Field(default=None, max_length=12)
+    password: str | None = None
 
 
-@app.post("/api/me/delete")
-def me_delete(payload: DeleteIn, trader: Trader = Depends(auth.current_trader)):
-    """Danger zone: anonimizacja konta klienta. Konta tradingowe i zamówienia
-    zostają w bazie (księgowość/AML), ale profil traci dane osobowe i dostęp."""
+#: Kod usunięcia konta żyje jedno okno i jeszcze poprzednie: 10–20 minut.
+DELETE_CODE_WINDOW_S = 600
+
+
+def _kod_usuniecia(tr: Trader, okno: int) -> str:
+    """Sześć cyfr bez zapisu w bazie: HMAC z sekretu aplikacji, id, e-maila i okna
+    czasu. Zmiana e-maila albo usunięcie konta unieważnia kod same z siebie."""
+    import hmac
+    wiad = f"delete:{tr.id}:{tr.email}:{okno}".encode()
+    skrot = hmac.new(settings.secret_key.encode(), wiad, hashlib.sha256).digest()
+    return f"{int.from_bytes(skrot[:4], 'big') % 1_000_000:06d}"
+
+
+def _kod_usuniecia_ok(tr: Trader, kod: str | None) -> bool:
+    import hmac
+    kod = (kod or "").strip().replace(" ", "")
+    if len(kod) != 6 or not kod.isdigit():
+        return False
+    okno = int(time.time() // DELETE_CODE_WINDOW_S)
+    return any(hmac.compare_digest(_kod_usuniecia(tr, o), kod) for o in (okno, okno - 1))
+
+
+@app.post("/api/me/delete/code")
+def me_delete_code(request: Request, trader: Trader = Depends(auth.current_trader)):
+    """Krok 1 usuwania konta: kod na e-mail klienta. Hasło nie wchodzi w grę, bo konto
+    z „Continue with Google" żadnego nie zna — e-mail ma każdy."""
+    _rate_limit(request, "delete_code", 3, 600)
     session = SessionLocal()
     try:
         tr = session.get(Trader, trader.id)
-        if not auth.verify_password(payload.password, tr.password_hash):
-            raise HTTPException(400, "Wrong password")
+        if tr.is_admin:
+            raise HTTPException(400, "An administrator account cannot be deleted from the portal")
+        okno = int(time.time() // DELETE_CODE_WINDOW_S)
+        notify.send("account_delete_code", tr.email,
+                    {"name": tr.first_name or tr.full_name or "there", "code": _kod_usuniecia(tr, okno),
+                     "minutes": DELETE_CODE_WINDOW_S // 60})
+        telemetry.track("delete_code_sent", tr.id)
+        return {"sent": True, "email": _maskuj_email(tr.email)}
+    finally:
+        session.close()
+
+
+def _maskuj_email(adres: str) -> str:
+    nazwa, _, domena = (adres or "").partition("@")
+    return f"{nazwa[:2]}{'•' * max(2, len(nazwa) - 2)}@{domena}" if domena else adres
+
+
+@app.post("/api/me/delete")
+def me_delete(payload: DeleteIn, request: Request, trader: Trader = Depends(auth.current_trader)):
+    """Danger zone: anonimizacja konta klienta. Konta tradingowe i zamówienia
+    zostają w bazie (księgowość/AML), ale profil traci dane osobowe i dostęp.
+    Potwierdzenie: kod z e-maila (każde konto) albo hasło (konto, które je zna)."""
+    _rate_limit(request, "delete", 6, DELETE_CODE_WINDOW_S)
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, trader.id)
+        haslem = bool(payload.password) and _haslo_ustawione(tr) \
+            and auth.verify_password(payload.password, tr.password_hash)
+        if not haslem and not _kod_usuniecia_ok(tr, payload.code):
+            raise HTTPException(400, "Wrong or expired code" if payload.code or not payload.password else "Wrong password")
         if tr.is_admin:
             raise HTTPException(400, "An administrator account cannot be deleted from the portal")
         tr.email = f"deleted-{tr.id}@removed.invalid"
@@ -10300,8 +10362,10 @@ CANDLES_BUDZET_S = 52.0
 @app.api_route("/api/cron/candles", methods=["GET", "POST"], include_in_schema=False, dependencies=[Depends(_require_cron)])
 async def api_cron_candles():
     """Świece M1 z mid dla cienkich rynków (`markets.SAMPLED`): cron Vercela co minutę,
-    przez ~52 s próbka co sekundę, jeden zapis na końcu. Wątek, bo próbkowanie śpi."""
-    return await asyncio.to_thread(terminal.probkuj_swiece, CANDLES_BUDZET_S)
+    przez ~52 s próbka co sekundę, jeden zapis na końcu. Gdy skonfigurowano konto MetaApi
+    (`METAAPI_CANDLES_ACCOUNT_ID`), pierwsze sekundy przebiegu dociągają historię 1m
+    sprzed wdrożenia i łatają dziury. Wątek, bo próbkowanie śpi."""
+    return await asyncio.to_thread(terminal.cron_swiece, CANDLES_BUDZET_S)
 
 
 @app.api_route("/api/tick", methods=["GET", "POST"], include_in_schema=False, dependencies=[Depends(_require_cron)])

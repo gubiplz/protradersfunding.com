@@ -1753,17 +1753,30 @@ function termAccHtml(){
     +(list.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.term">
       <thead><tr><th>MT5 login</th><th>Owner</th><th>Account</th><th>Last sign-in</th><th>Checks</th><th class="no-sort"></th></tr></thead>
       <tbody>${list.map(a=>{const l=a.last_login;return `<tr>
-        <td class="num rt-main" data-l="MT5 login"><b>${esc(a.login)}</b><div class="muted" style="font-size:12px">${esc(a.server||'')}</div></td>
+        <td class="num rt-main" data-l="MT5 login"><b>${esc(a.login)}</b><div class="muted" style="font-size:12px">${esc(a.server||'')}</div>${termPwHtml(a)}</td>
         <td data-l="Owner">${esc(a.trader.name||'—')}<div class="muted" style="font-size:12px">${esc(a.trader.email||'')} · portal ${esc(a.trader.portal_country||a.trader.signup_country||'—')}</div></td>
         <td class="num" data-l="Account">${accLink(a.id)} · $${fmt0(a.size)}<div class="muted" style="font-size:12px">${esc(a.status)} · $${fmt0(a.equity)} · ${a.open_positions} open${a.bot?' · bot'+(a.managed_consent?' · consent '+dstr(a.managed_consent):' · no consent'):''}${a.pool?(a.pool.simulated?' · simulated':' · pool #'+a.pool.id):''}</div></td>
         <td data-l="Last sign-in" data-sort="${esc(l?l.at:'')}">${l?`${dstr(l.at)}<div class="muted" style="font-size:12px">${esc(l.ip||'—')} · ${esc(termWhere(l))}<br>${esc(l.device)}</div>`:'<span class="muted">Never</span>'}</td>
         <td data-l="Checks">${a.blocked?'<div class="dn"><b>Blocked</b></div>':''}${a.pool_mismatch?'<div class="dn">Pool entry does not match</div>':''}${a.flags.map(x=>`<div style="color:var(--gold,#b8892f)" title="${esc(x.detail)}">${esc(x.label)}</div>`).join('')||(a.blocked||a.pool_mismatch?'':'<span class="muted">OK</span>')}</td>
-        <td class="rt-acts"><button class="btn-o sm" onclick="termView(${a.id})">View</button>
-          <button class="btn-o sm" onclick="termHistory(${a.id})">Log</button>
-          <button class="btn-o sm" onclick="termOut(${a.id})">Sign out</button>
-          <button class="btn-o sm" onclick="termBlock(${a.id},${!a.blocked})">${a.blocked?'Unblock':'Block'}</button></td></tr>`}).join('')}</tbody></table></div>`
+        <td class="rt-acts"><button class="btn-o sm" onclick="termView(${a.id})" title="Open the terminal as this trader (read-only, 2 h)">View</button>
+          <button class="btn-o sm" onclick="termHistory(${a.id})" title="Sign-in log of this MT5 login">Log</button>
+          <button class="btn-o sm" onclick="termOut(${a.id})" title="End every terminal session of this account">Sign out</button>
+          <button class="btn-o sm" onclick="termBlock(${a.id},${!a.blocked})" title="${a.blocked?'Let the trader sign in again':'Sign out and refuse new sign-ins'}">${a.blocked?'Unblock':'Block'}</button>
+          ${a.open_positions?`<button class="btn-o sm" style="color:var(--red)" onclick="termCloseAll(${a.id},${a.open_positions})" title="Close every open position at the current price and cancel pending orders">Close all</button>`:''}</td></tr>`}).join('')}</tbody></table></div>`
     :`<div class="empty"><h3>Nothing here</h3><p>No MT5 account matches this filter.</p></div>`);
 }
+/* MT5 passwords under the login: hidden until clicked, click again to hide; the trader
+   password copies on click once shown. Investor password only when the account has one. */
+function termPwHtml(a){
+  if(!a.password)return '';
+  const shown=!!(window._termPw||{})[a.id];
+  if(!shown)return `<button type="button" class="muted" style="background:none;border:0;padding:0;cursor:pointer;font:inherit;font-size:12px;text-decoration:underline" onclick="termPwToggle(${a.id})">Show passwords</button>`;
+  return `<div class="mono" style="font-size:12px;line-height:1.5">pw <b style="cursor:copy" title="Click to copy" onclick="termCopy(this.textContent,'Password')">${esc(a.password)}</b>
+    ${a.investor_password?`<br>investor <b style="cursor:copy" title="Click to copy" onclick="termCopy(this.textContent,'Investor password')">${esc(a.investor_password)}</b>`:''}
+    <br><button type="button" class="muted" style="background:none;border:0;padding:0;cursor:pointer;font:inherit;font-size:12px;text-decoration:underline" onclick="termPwToggle(${a.id})">Hide</button></div>`;
+}
+function termPwToggle(id){window._termPw=window._termPw||{};window._termPw[id]=!window._termPw[id];renderTermList()}
+function termCopy(txt,co){(navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).then(()=>toast(co+' copied.','ok')).catch(()=>prompt('Copy:',txt))}
 function renderTermList(){const el=document.getElementById('term-list');if(el)el.innerHTML=termAccHtml()}
 async function termAccounts(){
   const [d,poolData]=await Promise.all([api('/api/admin/terminal/overview'),api('/api/admin/pool')]);
@@ -1825,6 +1838,12 @@ async function termBlock(id,blocked){
   if(blocked&&!await askConfirm({title:'Block terminal access?',body:'The trader is signed out and can\'t sign in to the terminal. Open positions stay open.',ok:'Block',danger:true}))return;
   try{await api(`/api/admin/terminal/accounts/${id}/block`,{method:'POST',body:JSON.stringify({blocked})});
     toast(blocked?'Terminal access blocked.':'Terminal access restored.','ok');go('pool');
+  }catch(e){toast('Error: '+e.message,'err')}
+}
+async function termCloseAll(id,n){
+  if(!await askConfirm({title:`Close ${n} open ${n===1?'position':'positions'}?`,body:'Every position of this account closes at the current price and pending orders are cancelled. The trader sees it in the history as "Closed by admin". This cannot be undone.',ok:'Close all',danger:true}))return;
+  try{const r=await api(`/api/admin/terminal/accounts/${id}/close-all`,{method:'POST'});
+    toast(`${r.closed} ${r.closed===1?'position':'positions'} closed.`,'ok');go('pool');
   }catch(e){toast('Error: '+e.message,'err')}
 }
 async function termPause(cb){

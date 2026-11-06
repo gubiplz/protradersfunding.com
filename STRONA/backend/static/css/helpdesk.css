@@ -134,6 +134,7 @@ html[data-theme=dark] .hd-fab{background:#0b142c}
 .hd-pill.st-wait{color:var(--gold);background:var(--gold-bg)}
 .hd-pill.st-ok{color:var(--green);background:var(--green-bg)}
 .hd-pill.st-closed{color:var(--dim);background:var(--bg3)}
+.hd-pill.st-free{flex:none;color:var(--teal,#0f9d8a);background:rgba(15,157,138,.12)}
 .hd-empty{margin:40px 12px;text-align:center;font-size:13.5px;line-height:1.6;color:var(--muted)}
 .hd-new-btn{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;border:0;
   border-radius:14px;background:var(--grad);color:#fff;font-weight:700;font-size:14px;cursor:pointer;
