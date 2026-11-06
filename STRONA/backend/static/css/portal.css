@@ -1741,10 +1741,44 @@ html:not(.pwa){overscroll-behavior-y:contain}
   .ck-actions{width:100%;justify-content:flex-end}
 }
 
-.auth-stats{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px}
-.as-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:118px}
-.as-card b{font-family:var(--mono);font-size:18px;display:block;letter-spacing:-.01em}
-.as-card span{font-size:11.5px;color:var(--muted)}
+/* Sign-in screen: one line of facts, a small live strip and the gold coin. */
+.auth-facts{margin-top:22px;font-size:12.5px;color:var(--muted)}
+.auth-facts b{font-family:var(--mono);color:var(--txt);font-weight:600}
+.auth-live{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-top:14px;font-size:11px;color:var(--muted)}
+.auth-live .al-t{display:flex;align-items:center;gap:6px;font-weight:600;color:var(--dim);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase}
+.auth-live .al-t i{width:6px;height:6px;border-radius:50%;background:var(--green2);box-shadow:0 0 0 3px rgba(46,189,133,.16);animation:al-pulse 2s infinite}
+@keyframes al-pulse{50%{box-shadow:0 0 0 5px rgba(46,189,133,.05)}}
+.auth-live .al-i{display:flex;flex-direction:column;gap:0;min-width:74px}
+.auth-live .al-i small{font-size:10px;color:var(--dim)}
+.auth-live .al-i b{font-family:var(--mono);font-size:11.5px;font-weight:600;color:var(--txt);font-variant-numeric:tabular-nums}
+.auth-live .al-i em{font-style:normal;font-size:9.5px;color:var(--dim)}
+/* Gold coin: a stack of thin discs gives it an edge, the pointer tilts it, dragging spins it.
+   Plain CSS 3D, nothing to download; sits in the empty right part of the brand column. */
+.auth-coin{--s:150px;position:absolute;right:72px;top:50%;width:var(--s);height:var(--s);margin-top:calc(var(--s)*-.62);
+  perspective:900px;touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
+.auth-coin:active{cursor:grabbing}
+.auth-coin .ac-c{position:absolute;inset:0;transform-style:preserve-3d;will-change:transform}
+.auth-coin .ac-l{position:absolute;inset:0;border-radius:50%;background:#9d6f22;transform:translateZ(var(--z))}
+.auth-coin .ac-l.edge{background:repeating-linear-gradient(90deg,#b8862b 0 2px,#7a5312 2px 4px)}
+.auth-coin .ac-face{position:absolute;inset:0;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(circle at 38% 30%,#fff6d2 0%,#f3d583 18%,#d9ac4f 42%,#b07c2a 68%,#73501a 92%,#5a3d10 100%);
+  box-shadow:inset 0 0 0 5px rgba(255,255,255,.22),inset 0 0 0 6px rgba(70,45,8,.55),inset 0 0 28px rgba(70,45,8,.35);
+  backface-visibility:hidden;overflow:hidden}
+.auth-coin .ac-face::before{content:"";position:absolute;inset:9%;border-radius:50%;border:1px solid rgba(70,45,8,.3);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.18)}
+.auth-coin .ac-face::after{content:"";position:absolute;inset:-40%;background:linear-gradient(115deg,transparent 38%,rgba(255,255,255,.45) 50%,transparent 62%);
+  animation:ac-glare 5.5s ease-in-out infinite}
+@keyframes ac-glare{0%,55%{transform:translateX(-60%)}100%{transform:translateX(60%)}}
+.auth-coin .ac-face img{width:50%;height:50%;object-fit:contain;opacity:.9;
+  filter:drop-shadow(0 1px 0 rgba(255,255,255,.4)) drop-shadow(0 -1px 1px rgba(60,35,0,.55))}
+.auth-coin .ac-face.back{transform:rotateY(180deg) translateZ(var(--z))}
+.auth-coin .ac-face.front{transform:translateZ(var(--z))}
+.auth-coin .ac-shadow{position:absolute;left:10%;right:10%;bottom:-30px;height:22px;border-radius:50%;
+  background:radial-gradient(ellipse at center,rgba(15,23,42,.3),transparent 70%);filter:blur(4px)}
+html[data-theme=dark] .auth-coin .ac-shadow{background:radial-gradient(ellipse at center,rgba(0,0,0,.65),transparent 70%)}
+@media(max-width:1400px){.auth-coin{--s:124px;right:44px}}
+@media(max-width:1200px){.auth-coin{display:none}}
+@media(prefers-reduced-motion:reduce){.auth-live .al-t i,.auth-coin .ac-face::after{animation:none}}
 .ot-title{display:flex;align-items:center;gap:9px;margin-bottom:6px}
 .pnl-pill{display:inline-block;font-family:var(--mono);font-weight:700;font-size:12.5px;
   border-radius:8px;padding:4px 10px;background:var(--bg3)}

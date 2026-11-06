@@ -436,6 +436,21 @@
     ];
   }
 
+  /* Segmented control like the sign-in tabs: one pill slides under the active button instead
+     of lighting up on one and going out on the other. The tabs are re-rendered on every
+     switch, so the pill starts where it was last time and glides to the new button. */
+  function slidePill(box) {
+    const on = box && box.querySelector('button.on');
+    if (!on) return;
+    let ind = box.querySelector('.chal-ind');
+    if (!ind) {
+      ind = document.createElement('i'); ind.className = 'chal-ind'; box.prepend(ind);
+      if (box.dataset.il) { ind.style.left = box.dataset.il + 'px'; ind.style.width = box.dataset.iw + 'px'; void ind.offsetWidth; }
+    }
+    const l = on.offsetLeft, w = on.offsetWidth;
+    ind.style.left = l + 'px'; ind.style.width = w + 'px';
+    box.dataset.il = l; box.dataset.iw = w;
+  }
   function renderPricing() {
     const box = $('#pcfg'), grid = $('#chalGrid'); if (!box || !grid) return;
     const { promo: cfgPromo, coupon: cfgCoupon, pct: cfgPct } = readCode();
@@ -453,6 +468,7 @@
       .map(([id, nm]) => `<button type="button" class="${id === cfgTier ? 'on' : ''}" data-t="${id}">${nm}</button>`).join('');
     $$('#chalModels button').forEach(b => b.addEventListener('click', () => { cfgType = b.dataset.m; renderPricing(); }));
     $$('#chalTiers button').forEach(b => b.addEventListener('click', () => { cfgTier = b.dataset.t; renderPricing(); }));
+    slidePill($('#chalModels')); slidePill($('#chalTiers'));
 
     const anyOffersCt = shown.some(oferujeCt);
     const ctRow = $('#pcfg-ct-row'), ct = $('#pcfg-ct');

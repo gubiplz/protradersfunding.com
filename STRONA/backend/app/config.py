@@ -60,6 +60,15 @@ class Settings:
     metaapi_provisioning_profile_id: str = os.getenv("METAAPI_PROVISIONING_PROFILE_ID", "")
     metaapi_account_type: str = os.getenv("METAAPI_ACCOUNT_TYPE", "standard")
     metaapi_region: str = os.getenv("METAAPI_REGION", "new-york")
+    # --- Historia świec M1 dla cienkich rynków terminala (EUR/GBP/JPY/XPT) ---
+    # Id konta MT5 w MetaApi (dowolne konto demo brokera z tymi symbolami); puste =
+    # terminal pokazuje tylko świece próbkowane od wdrożenia. Działa z METAAPI_TOKEN.
+    metaapi_candles_account_id: str = os.getenv("METAAPI_CANDLES_ACCOUNT_ID", "").strip()
+    # Bez MetaApi: klucz Twelve Data (plan darmowy: 8 zapytań/min, 800/dzień, FX i metale).
+    twelvedata_api_key: str = os.getenv("TWELVEDATA_API_KEY", "").strip()
+    candles_history_days: int = int(os.getenv("CANDLES_HISTORY_DAYS", "30"))
+    # Nazwy symboli u źródła, gdy inne niż domyślne, np. "xyz:JP225=JPN225,xyz:PLATINUM=XPTUSD".
+    candles_history_symbols: str = os.getenv("CANDLES_HISTORY_SYMBOLS", "")
     # Auto-tworzenie kont przez MetaApi (działa tylko u brokerów zezwalających na dema).
     # Gdy true — to jest ŚCIEŻKA GŁÓWNA, a pula (PoolAccount) służy jako awaryjna.
     metaapi_auto_create: bool = os.getenv("METAAPI_AUTO_CREATE", "false").lower() == "true"

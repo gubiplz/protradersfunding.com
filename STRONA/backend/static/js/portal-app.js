@@ -687,20 +687,75 @@ function bootRetry(msg){
   }
   el.querySelector('p').textContent=msg||'Check your connection and try again.';
 }
-/* Benefit numbers on the login screen — REAL platform stats only; each card
-   renders only past an honesty threshold, an empty strip simply stays hidden. */
+/* Sign-in screen: the market count from the terminal's list, live prices and spreads from
+   the order book (the same source as the terminal), and the glass cube. No head counts:
+   the owner does not want to advertise them (2026-11-06). Everything stops once the
+   trader is in — the strip polls only while the auth screen is on. */
+const AUTH_LIVE=[['Gold','xyz:GOLD',1,'$'],['S&P 500','xyz:SP500',1,''],['Bitcoin','BTC',0,'$'],['EUR/USD','xyz:EUR',5,'']];
+let authLiveT=0;
 async function loadAuthStats(){
-  try{
-    const s=await api('/api/public/stats');
-    const items=[];
-    if(s.traders_total>=25)items.push([fmt0(s.traders_total),'Traders on board']);
-    if(s.funded_accounts>=5)items.push([fmt0(s.funded_accounts),'Funded accounts']);
-    if(s.countries_count>=5)items.push([fmt0(s.countries_count),'Countries']);
-    if(!items.length)return;
-    const el=$('auth-stats');
-    el.innerHTML=items.slice(0,3).map(([v,l])=>`<div class="as-card"><b>${v}</b><span>${l}</span></div>`).join('');
-    el.classList.remove('hidden');
-  }catch(e){}
+  authCube();
+  try{const m=await api('/api/terminal/markets');if(m.markets&&m.markets.length>=10)$('auth-mkts').textContent=m.markets.length}catch(e){}
+  clearInterval(authLiveT);
+  const tick=async()=>{
+    if(!$('auth')||$('auth').classList.contains('hidden')||document.hidden){return}
+    const rows=await Promise.all(AUTH_LIVE.map(async([name,coin,dec,pre])=>{
+      try{const r=await fetch('https://api.hyperliquid.xyz/info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'l2Book',coin})});
+        const d=await r.json();const bid=+d.levels[0][0].px,ask=+d.levels[1][0].px,mid=(bid+ask)/2,sp=ask-bid;
+        const f=(v,n)=>v.toLocaleString('en-US',{minimumFractionDigits:n,maximumFractionDigits:n});
+        return `<span class="al-i"><small>${name}</small><b>${pre}${f(mid,dec)}</b><em>spread ${f(sp,sp<0.1?Math.max(dec,3):2)}</em></span>`;
+      }catch(e){return ''}}));
+    const html=rows.filter(Boolean).join('');
+    const el=$('auth-live');if(!el)return;
+    if(html){el.innerHTML=`<span class="al-t"><i></i>Live</span>${html}`;el.classList.remove('hidden')}
+  };
+  tick();authLiveT=setInterval(tick,15000);
+}
+/* Gold coin: idle spin, tilts after the pointer, drag to spin with inertia. The edge is a
+   stack of thin discs between the two faces. Plain CSS 3D — nothing to download. */
+function authCube(){
+  const box=$('authCoin'),c=$('authCoinInner');
+  if(!box||!c||box.dataset.on)return;
+  box.dataset.on='1';
+  if(!c.children.length){
+    const T=7,n=14,h=[];
+    for(let i=0;i<n;i++)h.push(`<i class="ac-l${i%2?' edge':''}" style="--z:${(-T+i*(2*T)/(n-1)).toFixed(2)}px"></i>`);
+    h.push(`<div class="ac-face back" style="--z:${T}px"><img src="/static/img/logo.png" alt=""></div>`);
+    h.push(`<div class="ac-face front" style="--z:${T}px"><img src="/static/img/logo.png" alt=""></div>`);
+    c.innerHTML=h.join('');
+  }
+  /* The coin faces the visitor and sways a little; a drag spins it (with inertia) and it
+     settles face-on again. A coin that never stops spinning is seen edge-on half the time. */
+  const RED=matchMedia('(prefers-reduced-motion:reduce)').matches;
+  let spin=0,tilt=0,vy=0,vx=0,drag=null,hx=0,hy=0;
+  const paint=(t)=>{
+    const sway=RED?0:Math.sin(t/1900)*13,bob=RED?0:Math.sin(t/2400)*5;
+    c.style.transform=`rotateX(${(-10+bob+tilt+hy).toFixed(2)}deg) rotateY(${(-22+sway+spin+hx).toFixed(2)}deg)`;
+  };
+  const step=(t)=>{
+    if(!$('auth')||$('auth').classList.contains('hidden')){box.dataset.on='';return}
+    if(!drag){
+      spin+=vy;tilt+=vx;vy*=.95;vx*=.9;
+      if(Math.abs(vy)<.6){const home=Math.round(spin/360)*360;spin+=(home-spin)*.04}
+      tilt*=.96;
+    }
+    paint(t);requestAnimationFrame(step);
+  };
+  box.addEventListener('pointerdown',(e)=>{drag={x:e.clientX,y:e.clientY,t:performance.now()};box.setPointerCapture(e.pointerId);e.preventDefault()});
+  box.addEventListener('pointermove',(e)=>{
+    if(!drag)return;
+    const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+    spin+=dx*.6;tilt=Math.max(-30,Math.min(30,tilt-dy*.3));
+    vy=dx*.6;vx=-dy*.3;drag={x:e.clientX,y:e.clientY,t:performance.now()};
+  });
+  const up=()=>{if(drag&&performance.now()-drag.t>80){vx=0;vy=0}drag=null};
+  box.addEventListener('pointerup',up);box.addEventListener('pointercancel',up);
+  const brand=box.parentElement;
+  if(!RED&&matchMedia('(hover:hover)').matches)brand.addEventListener('mousemove',(e)=>{
+    const r=brand.getBoundingClientRect();hx=((e.clientX-r.left)/r.width-.5)*14;hy=-((e.clientY-r.top)/r.height-.5)*10;
+  });
+  brand.addEventListener('mouseleave',()=>{hx=0;hy=0});
+  paint(0);requestAnimationFrame(step);
 }
 
 /* ---------- return from payment ---------- */
@@ -3134,9 +3189,9 @@ const VIEWS={
     <div class="sec-card" style="max-width:640px;border-color:var(--red-line)"><h3 style="color:var(--red)">Danger Zone</h3>
       <p class="muted" style="font-size:13px;margin:8px 0 14px">Deleting your account anonymizes your personal data and permanently disables login.
         Trading records are retained for accounting. This cannot be undone.</p>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <input id="s-delpass" type="password" class="inp" placeholder="Confirm with your password" style="max-width:280px">
-        <button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteAccount()">Delete Account</button>
+      <div id="s-del" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteCode()">Delete Account</button>
+        <span class="muted" style="font-size:12.5px">We e-mail you a 6-digit code first.</span>
       </div></div>
     </div>`;
   npPaintPush();refreshPush();pwLoad();
@@ -3334,10 +3389,23 @@ async function togglePush(){
   }catch(e){toast('Push setup failed: '+e.message,'err')}
   finally{btn.disabled=false;initPushUI()}
 }
+/* Deleting the account: a code from the e-mail instead of the password, because an
+   account opened with Google has no password the trader knows. */
+async function deleteCode(){
+  const box=$('s-del');
+  box.querySelector('button').disabled=true;
+  try{const r=await api('/api/me/delete/code',{method:'POST'});
+    box.innerHTML=`<input id="s-delcode" class="inp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code" style="max-width:160px;letter-spacing:.2em">
+      <button class="btn-o" style="border-color:var(--red-line);color:var(--red)" onclick="deleteAccount()">Confirm deletion</button>
+      <span class="muted" style="font-size:12.5px">Code sent to ${esc(r.email)}. It works for 10 minutes. <a href="#" onclick="deleteCode();return false">Send again</a></span>`;
+    $('s-delcode').focus();
+  }catch(e){box.querySelector('button').disabled=false;toast('Error: '+e.message,'err')}
+}
 async function deleteAccount(){
-  const pass=$('s-delpass').value;
-  if(!pass){toast('Enter your password to confirm.','err');return}
-  try{await api('/api/me/delete',{method:'POST',body:JSON.stringify({password:pass})});
+  const code=($('s-delcode')||{}).value||'';
+  if(code.replace(/\D/g,'').length!==6){toast('Enter the 6-digit code from the e-mail.','err');return}
+  if(!confirm('Delete your account for good? This cannot be undone.'))return;
+  try{await api('/api/me/delete',{method:'POST',body:JSON.stringify({code:code.replace(/\D/g,'')})});
     toast('Account deleted.','ok');setTimeout(logout,800);
   }catch(e){toast('Error: '+e.message,'err')}
 }

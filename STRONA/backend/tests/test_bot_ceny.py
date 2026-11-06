@@ -184,7 +184,7 @@ def test_terminal_pokazuje_transakcje_bota_a_planu_nie(zywe):
                 status="closed", source="bot", venue="hyperliquid"))
     s.add(Trade(account_id=aid, symbol="XAUUSD", side="sell", lots=0.2, open_price=2_385.0, close_price=2_380.0,
                 pnl=100.0, opened_at=teraz - timedelta(hours=5), closed_at=teraz - timedelta(hours=4),
-                status="closed", source="bot"))                       # stara, syntetyczna — nie w terminalu
+                status="closed", source="bot"))                       # starsza, bez venue — też w track recordzie
     s.add(Trade(account_id=aid, symbol="ETHUSD", side="buy", lots=1.0, open_price=3_550.0, pnl=0.0,
                 plan_pnl=80.0, plan_close_at=teraz + timedelta(hours=1), opened_at=teraz - timedelta(minutes=20),
                 status="open", source="bot", venue=tradebot.PLAN))
@@ -192,16 +192,19 @@ def test_terminal_pokazuje_transakcje_bota_a_planu_nie(zywe):
     with TestClient(app) as c:
         st = c.get(f"/api/terminal/state?account_id={aid}", headers=h).json()
         assert st["positions"] == [] and st["account"]["other_lots"] == 0
-        # Zwykła zamknięta transakcja — bez znacznika, że zrobił ją bot.
-        assert [(x["symbol"], x["reason"], x["lots"]) for x in st["history"]] == [("BTCUSD", "close", 0.3)]
+        # Zwykłe zamknięte transakcje — bez znacznika, że zrobił je bot. Starsza (bez venue)
+        # też: terminal pokazuje cały track record konta, jak dashboard (2026-11-06).
+        assert [(x["symbol"], x["reason"], x["lots"]) for x in st["history"]] == [("BTCUSD", "close", 0.3), ("XAUUSD", "close", 0.2)]
         assert "by" not in st["history"][0]
+        assert st["history"][1]["qty"] == 20.0 and st["history"][1]["fee"] > 0
         # Opłata i dźwignia jak w terminalu (0,03% × (wejście + wyjście)), P&L z planu.
         zh = st["history"][0]
         assert zh["fee"] == pytest.approx(round((77_000.0 + 77_500.0) * 0.3 * tradebot.OPLATA, 2))
         assert zh["leverage"] == 10.0 and zh["pnl"] == 150.0
         # Order History: market na wejściu i market reduce-only na wyjściu.
         assert [(o["side"], o["kind"], o["reduce_only"], o["status"], o["fill_price"]) for o in st["order_history"]] == [
-            ("sell", "market", True, "filled", 77_500.0), ("buy", "market", False, "filled", 77_000.0)]
+            ("sell", "market", True, "filled", 77_500.0), ("buy", "market", False, "filled", 77_000.0),
+            ("buy", "market", True, "filled", 2_380.0), ("sell", "market", False, "filled", 2_385.0)]
         assert c.get(f"/api/me/accounts/{aid}/positions", headers=_portal(aid)).json() == []
 
 

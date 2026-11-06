@@ -62,12 +62,18 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
       <h2>Your funded journey<br>starts here.</h2>
       <p>Log in to manage challenges, track objectives in real time and request payouts.</p>
       <div class="auth-points">
-        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> MT5 accounts, delivered automatically</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> MT5 accounts and a Built-in Terminal on live prices</span>
         <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> Automated risk engine — same rules for everyone</span>
         <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> Performance rewards with up to 90% profit split</span>
       </div>
-      <!-- Real platform numbers only (see /api/public/stats) — never invented. -->
-      <div class="auth-stats hidden" id="auth-stats"></div>
+      <!-- One quiet line of facts instead of head counts (the market count comes from the
+           terminal's list) and a small live strip from the order book. -->
+      <p class="auth-facts" id="auth-facts"><b>1:100</b> leverage on every plan · <b id="auth-mkts">20+</b> markets in the terminal</p>
+      <div class="auth-live hidden" id="auth-live" aria-label="Live markets"></div>
+    </div>
+    <div class="auth-coin" id="authCoin" aria-hidden="true">
+      <div class="ac-c" id="authCoinInner"></div>
+      <i class="ac-shadow"></i>
     </div>
     <div class="auth-foot">All accounts are demo accounts with virtual funds in a simulated environment.
       Rewards are performance-based and discretionary.</div>

@@ -140,10 +140,12 @@
 
   /* ================= INBOX ================= */
   // Filtry kolejki; domyślnie „Needs reply", gdy coś czeka — inaczej wszystko.
-  var FILTRY = [['waiting', 'Needs reply'], ['answered', 'Answered'], ['closed', 'Closed'], ['all', 'All']];
+  // "Free": traders who got an account for free (FREE program, Free Trade Case, achievement
+  // reward, a grant from the panel) — the backend marks them, the pill shows in the list.
+  var FILTRY = [['waiting', 'Needs reply'], ['answered', 'Answered'], ['closed', 'Closed'], ['free', 'Free'], ['all', 'All']];
   function pasuje(c, f) {
     return f === 'all' || (f === 'waiting' ? c.waiting : f === 'answered' ? (!c.waiting && c.status !== 'closed')
-      : c.status === 'closed');
+      : f === 'free' ? !!c.free : c.status === 'closed');
   }
   var STATUS = { answered: ['Answered', 'st-ok'], closed: ['Closed', 'st-closed'] };
   function wpis(c) {
@@ -160,6 +162,7 @@
     return '<button type="button" class="hd-item' + (c.waiting ? ' unread' : '') + '" onclick="asOpenChat(' + c.id + ')">'
       + '<div class="hd-av person sm">' + inicjal(c) + '</div>'
       + '<div class="hd-it"><div class="hd-it-top"><b>' + esc(kto(c)) + '</b>'
+      + (c.free ? '<span class="hd-pill st-free" title="Got an account for free">Free</span>' : '')
       + '<time>' + kiedy(c.last_ts) + '</time></div>'
       + (temat(c) ? '<div class="as-subj">' + esc(temat(c)) + '</div>' : '')
       + '<div class="hd-it-bot"><span class="hd-prev">' + esc(od + tekst) + '</span>' + pill

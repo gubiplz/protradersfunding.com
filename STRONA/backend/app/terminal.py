@@ -146,6 +146,16 @@ def _open_positions(session, acc: Account) -> list[Trade]:
             .order_by(Trade.id).all())
 
 
+def _zamkniete(session, acc: Account):
+    """Zamknięte transakcje konta od najnowszej: terminal, Trade BOT (żywe ceny i starsze
+    wpisy) — pełny track record, jak w dashboardzie. Plan w toku nigdy nie jest zamknięty,
+    więc osobny warunek nie jest potrzebny."""
+    return (session.query(Trade)
+            .filter(Trade.account_id == acc.id, Trade.status == "closed",
+                    or_(Trade.venue.is_(None), Trade.venue != tradebot.PLAN))
+            .order_by(Trade.closed_at.desc(), Trade.id.desc()))
+
+
 def _open_orders(session, acc: Account) -> list[TerminalOrder]:
     return (session.query(TerminalOrder)
             .filter(TerminalOrder.account_id == acc.id, TerminalOrder.status == "open")
@@ -889,12 +899,11 @@ def state_dict(session, acc: Account, poz: list[Trade], marks: dict[str, float])
                                 peak_equity=float(acc.peak_equity or acc.initial_balance or 0.0),
                                 day_start_equity=float(acc.day_start_equity or acc.initial_balance or 0.0),
                                 trading_days=int(acc.trading_days_count or 0))
-    # Historia: transakcje z terminala i Trade BOT-a na żywych cenach (venue='hyperliquid' —
-    # ich wejście i wyjście leżą na świecach wykresu; stare syntetyczne zostają tylko w portalu).
-    zamk = (session.query(Trade)
-            .filter(Trade.account_id == acc.id, Trade.status == "closed",
-                    or_(Trade.source == "terminal", and_(Trade.source == "bot", Trade.venue == "hyperliquid")))
-            .order_by(Trade.closed_at.desc(), Trade.id.desc()).limit(100).all())
+    # Historia: cały track record konta (decyzja właściciela, 2026-11-06) — transakcje z
+    # terminala, Trade BOT-a na żywych cenach i starsze wpisy bota z importu/portalu, czyli
+    # to samo, co dashboard. Wejście i wyjście starszych transakcji nie muszą leżeć na
+    # świecach Hyperliquida. Poza historią zostaje tylko plan w toku (venue='plan').
+    zamk = _zamkniete(session, acc).limit(100).all()
     hist_z = (session.query(TerminalOrder)
               .filter(TerminalOrder.account_id == acc.id, TerminalOrder.status != "open")
               .order_by(TerminalOrder.id.desc()).limit(100).all())
@@ -1051,15 +1060,17 @@ def _zapisz_swiece(swiece: dict) -> int:
         session.close()
 
 
-def probkuj_swiece(budzet_s: float) -> dict:
+def probkuj_swiece(budzet_s: float, zajmij: bool = True) -> dict:
     """Przez `budzet_s` sekund co `PROBKA_S` bierze mid rynków `markets.SAMPLED` i składa
-    z tego świece M1. Zapis raz, na końcu; drugi przebieg w tej samej minucie odpada."""
-    session = SessionLocal()
-    try:
-        if not _zajmij_przebieg(session, SWIECE_KLUCZ, SWIECE_ODSTEP_S):
-            return {"skipped": True, "reason": "inny przebieg w toku"}
-    finally:
-        session.close()
+    z tego świece M1. Zapis raz, na końcu; drugi przebieg w tej samej minucie odpada
+    (`zajmij=False`, gdy zamek wziął już `cron_swiece`)."""
+    if zajmij:
+        session = SessionLocal()
+        try:
+            if not _zajmij_przebieg(session, SWIECE_KLUCZ, SWIECE_ODSTEP_S):
+                return {"skipped": True, "reason": "inny przebieg w toku"}
+        finally:
+            session.close()
     coins = sorted(markets.SAMPLED)
     start = time.monotonic()
     swiece: dict[tuple[str, datetime], list] = {}
@@ -1081,6 +1092,224 @@ def probkuj_swiece(budzet_s: float) -> dict:
             break
         time.sleep(PROBKA_S)
     return {"coins": len(coins), "samples": proby, "rows": _zapisz_swiece(swiece)}
+
+
+# --- historia 1m z zewnętrznego źródła dla tych samych rynków -------------------
+# Próbkowanie zaczyna się w dniu wdrożenia, więc wykres EURUSD miał za sobą tylko
+# schodkową historię giełdy. Źródło historii: konto demo MT5 pod MetaApi
+# (`METAAPI_CANDLES_ACCOUNT_ID`, prawdziwe świece brokerskie) albo Twelve Data
+# (`TWELVEDATA_API_KEY`, plan darmowy wystarcza). Cron dociąga historię wstecz (porcja na
+# przebieg i rynek, do `CANDLES_HISTORY_DAYS`) i łata dziury po przerwach crona. Wiersze
+# z historii mają `n=0` — próbkowana świeca tej samej minuty ma pierwszeństwo.
+HIST_SYMBOLE = {
+    "metaapi": {"xyz:EUR": "EURUSD", "xyz:GBP": "GBPUSD", "xyz:JPY": "USDJPY",
+                "xyz:PLATINUM": "XPTUSD", "xyz:JP225": "JP225"},
+    "twelvedata": {"xyz:EUR": "EUR/USD", "xyz:GBP": "GBP/USD", "xyz:JPY": "USD/JPY",
+                   "xyz:PLATINUM": "XPT/USD"},      # indeksy są poza planem darmowym
+}
+HIST_PORCJA = {"metaapi": 1000, "twelvedata": 5000}   # maksimum świec na zapytanie
+HIST_BUDZET_S = 8.0             # tyle sekund przebiegu crona na dociąganie, reszta na próbki
+HIST_ZAPYTAN = 4                # zapytań na przebieg (Twelve Data free: 8/min, 800/dzień)
+HIST_DZIURA_MIN = 3             # luka w ostatniej dobie, którą warto załatać
+HIST_KONIEC_KLUCZ = "candles_hist_end:"   # AppSetting: źródło nie ma już starszych świec
+# Zgodność z nazwami sprzed zmiany (testy/skrypty).
+METAAPI_BUDZET_S, METAAPI_PORCJA, METAAPI_DZIURA_MIN = HIST_BUDZET_S, 1000, HIST_DZIURA_MIN
+
+
+def _zrodlo_historii() -> str | None:
+    s = get_settings()
+    if s.metaapi_token and s.metaapi_candles_account_id:
+        return "metaapi"
+    if s.twelvedata_api_key:
+        return "twelvedata"
+    return None
+
+
+def _hist_symbole(zrodlo: str) -> dict[str, str]:
+    out = dict(HIST_SYMBOLE.get(zrodlo, {}))
+    for para in (get_settings().candles_history_symbols or "").split(","):
+        if "=" in para:
+            coin, sym = para.split("=", 1)
+            out[coin.strip()] = sym.strip()
+    return out
+
+
+def _hist_transport(url: str, params: dict, headers: dict) -> tuple[int, object]:
+    import httpx
+    r = httpx.get(url, params=params, headers=headers, timeout=20.0)
+    try:
+        body = r.json()
+    except Exception:
+        body = None
+    return r.status_code, body
+
+
+def _hist_swiece(coin: str, start: datetime | None, limit: int, transport=None) -> list[dict] | None:
+    """Świece 1m ze źródła historii do `start` włącznie (wstecz, UTC); None = błąd lub
+    brak konfiguracji/symbolu."""
+    s = get_settings()
+    zrodlo = _zrodlo_historii()
+    sym = _hist_symbole(zrodlo).get(coin) if zrodlo else None
+    if not sym:
+        return None
+    limit = min(int(limit), HIST_PORCJA[zrodlo])
+    if zrodlo == "metaapi":
+        url = (f"https://mt-market-data-client-api-v1.{s.metaapi_region or 'new-york'}.agiliumtrade.ai"
+               f"/users/current/accounts/{s.metaapi_candles_account_id}/historical-market-data"
+               f"/symbols/{sym}/timeframes/1m/candles")
+        params: dict = {"limit": limit}
+        if start is not None:
+            params["startTime"] = start.replace(tzinfo=None).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        headers = {"auth-token": s.metaapi_token}
+    else:
+        url = "https://api.twelvedata.com/time_series"
+        params = {"symbol": sym, "interval": "1min", "outputsize": limit, "timezone": "UTC",
+                  "order": "desc", "apikey": s.twelvedata_api_key}
+        if start is not None:
+            params["end_date"] = start.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+        headers = {}
+    try:
+        status, body = (transport or _hist_transport)(url, params, headers)
+    except Exception as e:
+        print(f"[candles] {zrodlo} {sym}: {e}", flush=True)
+        return None
+    if zrodlo == "twelvedata":
+        if status == 200 and isinstance(body, dict) and body.get("status") == "ok":
+            body = [{"time": v.get("datetime", "").replace(" ", "T"), **v} for v in body.get("values", [])]
+        else:
+            body = None
+    if status != 200 or not isinstance(body, list):
+        print(f"[candles] {zrodlo} {sym} -> {status}: {str(body)[:160]}", flush=True)
+        return None
+    out = []
+    for k in body:
+        try:
+            t = datetime.strptime(str(k["time"])[:19].ljust(19, "0").replace(" ", "T"), "%Y-%m-%dT%H:%M:%S")
+            out.append({"ts": t.replace(second=0, microsecond=0), "o": float(k["open"]), "h": float(k["high"]),
+                        "l": float(k["low"]), "c": float(k["close"])})
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+_metaapi_swiece = _hist_swiece
+
+
+def _dopisz_brakujace(session, coin: str, swiece: list[dict]) -> int:
+    """Wstawia tylko minuty, których nie ma (próbkowane zostają). Zwraca liczbę nowych."""
+    if not swiece:
+        return 0
+    od, do = min(k["ts"] for k in swiece), max(k["ts"] for k in swiece)
+    mamy = {r[0] for r in session.query(TerminalCandle.ts)
+            .filter(TerminalCandle.coin == coin, TerminalCandle.ts >= od, TerminalCandle.ts <= do).all()}
+    n = 0
+    for k in swiece:
+        if k["ts"] in mamy:
+            continue
+        session.add(TerminalCandle(coin=coin, ts=k["ts"], o=k["o"], h=k["h"], l=k["l"], c=k["c"], n=0))
+        mamy.add(k["ts"])
+        n += 1
+    return n
+
+
+def _dziury(session, coin: str, od: datetime, do: datetime) -> list[tuple[datetime, int]]:
+    """Luki ≥ METAAPI_DZIURA_MIN minut między wierszami w oknie, poza weekendem:
+    (koniec luki, liczba brakujących minut)."""
+    ts = [r[0] for r in session.query(TerminalCandle.ts)
+          .filter(TerminalCandle.coin == coin, TerminalCandle.ts >= od, TerminalCandle.ts <= do)
+          .order_by(TerminalCandle.ts).all()]
+    out = []
+    for a, b in zip(ts, ts[1:]):
+        brak = int((b - a).total_seconds() // 60) - 1
+        if brak >= HIST_DZIURA_MIN and not tradebot.is_weekend(a.replace(tzinfo=timezone.utc) + timedelta(minutes=1)):
+            out.append((b - timedelta(minutes=1), brak))
+    return out
+
+
+def uzupelnij_historie(budzet_s: float, transport=None, teraz: datetime | None = None) -> dict:
+    """Jeden krok dociągania: dla każdego rynku najpierw łata dziury z ostatniej doby, potem
+    bierze porcję historii sprzed najstarszego wiersza, aż do `CANDLES_HISTORY_DAYS` wstecz
+    lub pustej odpowiedzi źródła. Kończy po budżecie czasu albo `HIST_ZAPYTAN` zapytaniach."""
+    s = get_settings()
+    zrodlo = _zrodlo_historii()
+    if not zrodlo:
+        return {"skipped": True, "reason": "no history source (METAAPI_CANDLES_ACCOUNT_ID or TWELVEDATA_API_KEY)"}
+    teraz = (teraz or _now()).replace(second=0, microsecond=0, tzinfo=None)
+    start = time.monotonic()
+    podloga = teraz - timedelta(days=max(1, int(s.candles_history_days)))
+    symbole = _hist_symbole(zrodlo)
+    porcja = HIST_PORCJA[zrodlo]
+    zapytania = 0
+    wynik: dict[str, dict] = {}
+
+    def koniec() -> bool:
+        return time.monotonic() - start >= budzet_s or zapytania >= HIST_ZAPYTAN
+
+    session = SessionLocal()
+    try:
+        for coin in sorted(markets.SAMPLED):
+            if coin not in symbole:
+                continue
+            st = wynik[coin] = {"gaps": 0, "rows": 0, "done": False}
+            # 1) dziury z ostatniej doby (przerwa crona, zimny start)
+            for dziura_koniec, brak in _dziury(session, coin, teraz - timedelta(days=1), teraz):
+                if koniec():
+                    break
+                zapytania += 1
+                sw = _hist_swiece(coin, dziura_koniec, min(brak, porcja), transport)
+                if sw:
+                    st["rows"] += _dopisz_brakujace(session, coin, sw)
+                    st["gaps"] += 1
+                    session.commit()
+            if koniec():
+                break
+            # 2) historia wstecz od najstarszego wiersza
+            klucz = HIST_KONIEC_KLUCZ + coin
+            if session.get(AppSetting, klucz) is not None:
+                st["done"] = True
+                continue
+            najstarszy = (session.query(func.min(TerminalCandle.ts))
+                          .filter(TerminalCandle.coin == coin).scalar())
+            if najstarszy is not None and najstarszy <= podloga:
+                st["done"] = True
+                continue
+            zapytania += 1
+            sw = _hist_swiece(coin, (najstarszy - timedelta(minutes=1)) if najstarszy else None, porcja, transport)
+            if sw is None:
+                continue
+            nowe = [k for k in sw if k["ts"] >= podloga and (najstarszy is None or k["ts"] < najstarszy)]
+            if not nowe:
+                # Źródło nie ma starszych świec: zapamiętaj, żeby nie pytać co minutę.
+                session.add(AppSetting(key=klucz, value=teraz.isoformat()))
+                st["done"] = True
+            else:
+                st["rows"] += _dopisz_brakujace(session, coin, nowe)
+            session.commit()
+            if koniec():
+                break
+        return {"source": zrodlo, "markets": wynik, "requests": zapytania,
+                "seconds": round(time.monotonic() - start, 1)}
+    finally:
+        session.close()
+
+
+uzupelnij_z_metaapi = uzupelnij_historie
+
+
+def cron_swiece(budzet_s: float) -> dict:
+    """Przebieg crona: zamek, dociąganie historii (gdy skonfigurowane, do HIST_BUDZET_S),
+    reszta budżetu na próbkowanie mid."""
+    session = SessionLocal()
+    try:
+        if not _zajmij_przebieg(session, SWIECE_KLUCZ, SWIECE_ODSTEP_S):
+            return {"skipped": True, "reason": "inny przebieg w toku"}
+    finally:
+        session.close()
+    start = time.monotonic()
+    hist = uzupelnij_historie(min(HIST_BUDZET_S, budzet_s / 2))
+    out = probkuj_swiece(max(5.0, budzet_s - (time.monotonic() - start)), zajmij=False)
+    out["history"] = hist
+    return out
 
 
 @router.get("/candles")
@@ -1573,10 +1802,7 @@ def api_history(account_id: int | None = None, limit: int = 2000, w: Who = Depen
     session = SessionLocal()
     try:
         acc = _konto(session, w, account_id)
-        zamk = (session.query(Trade)
-                .filter(Trade.account_id == acc.id, Trade.status == "closed",
-                        or_(Trade.source == "terminal", and_(Trade.source == "bot", Trade.venue == "hyperliquid")))
-                .order_by(Trade.closed_at.desc(), Trade.id.desc()).limit(min(limit, 5000)).all())
+        zamk = _zamkniete(session, acc).limit(min(limit, 5000)).all()
         return {"history": [_closed_dict(t, bool(acc.managed_consent_at)) for t in zamk], "initial_balance": acc.initial_balance}
     finally:
         session.close()
@@ -1730,6 +1956,8 @@ def admin_overview():
             tr, moje, ost, p = traderzy.get(a.trader_id), po_koncie.get(a.id, []), ost_wpisy.get(a.id), pula.get(a.id)
             wiersze.append({
                 "id": a.id, "login": a.platform_login, "server": a.platform_server, "size": a.initial_balance,
+                # Hasła MT5 dla admina (właściciel, 2026-11-06): to samo, co w puli i w portalu klienta.
+                "password": a.platform_password, "investor_password": a.platform_investor_password,
                 "phase": a.phase, "status": a.status, "balance": round(float(a.balance or 0.0), 2),
                 "equity": round(float(a.equity or 0.0), 2), "open_positions": otwarte.get(a.id, 0),
                 "blocked": bool(a.terminal_blocked), "bot": bool(a.bot_enabled), "managed_consent": _iso(a.managed_consent_at), "used": bool(a.terminal_used),
@@ -1822,6 +2050,23 @@ def admin_view(account_id: int):
         return {"token": auth.make_terminal_token(acc.id, acc.platform_password, imp=True)}
     finally:
         session.close()
+
+
+@admin_router.post("/accounts/{account_id}/close-all")
+def admin_close_all(account_id: int):
+    """Zamyka każdą pozycję terminala po bieżącej cenie i anuluje zlecenia — narzędzie
+    ryzyka admina (spór, podejrzenie manipulacji, awaria feedu). Powód `admin` widać
+    w historii klienta; saldo i reguły idą tą samą drogą co przy zamknięciu z ticketu."""
+    def run(session):
+        acc = session.get(Account, account_id)
+        if acc is None:
+            raise HTTPException(404, "Account not found")
+        n = flatten(session, acc, "admin")
+        if n:
+            _ocen(session, acc)
+        session.commit()
+        return {"ok": True, "closed": n}
+    return _z_ponowieniem(run)
 
 
 @admin_router.post("/orders-paused")

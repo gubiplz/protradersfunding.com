@@ -1598,8 +1598,8 @@
   function notifyFills(a, b) {
     const was = new Set(a.positions.map((p) => p.id));
     const now = new Set(b.positions.map((p) => p.id));
-    b.history.filter((h) => was.has(h.id) && !now.has(h.id) && ['tp', 'sl', 'liquidation', 'stop_out', 'breach', 'phase'].includes(h.reason)).forEach((h) => {
-      const L = { tp: 'Take profit hit', sl: 'Stop loss hit', liquidation: 'Position liquidated', stop_out: 'Stop-out: margin level too low', breach: 'Closed: account rule breached', phase: 'Phase passed: position closed' }[h.reason];
+    b.history.filter((h) => was.has(h.id) && !now.has(h.id) && ['tp', 'sl', 'liquidation', 'stop_out', 'breach', 'phase', 'admin'].includes(h.reason)).forEach((h) => {
+      const L = { tp: 'Take profit hit', sl: 'Stop loss hit', liquidation: 'Position liquidated', stop_out: 'Stop-out: margin level too low', breach: 'Closed: account rule breached', phase: 'Phase passed: position closed', admin: 'Position closed by the PTF team' }[h.reason];
       signal(h.pnl < 0 ? 'bad' : 'good', L, `${h.symbol} ${sUsd(h.pnl)}`, h.pnl < 0);
     });
     b.positions.filter((p) => p.managed && !was.has(p.id)).forEach((p) => signal('fill', 'Position opened', `${p.symbol} ${p.side === 'buy' ? 'Long' : 'Short'} ${lotsF(p.lots)} lots`));
@@ -2136,7 +2136,7 @@
       }), 'No open orders');
       if (st.orders.length) el.insertAdjacentHTML('afterbegin', '<div style="padding:8px 12px;text-align:right"><button class="t-danger" type="button" data-cancelall>Cancel all orders</button></div>');
     } else if (S.ptab === 'phist') {
-      const R = { close: 'Closed', reduce: 'Reduced', tp: 'Take profit', sl: 'Stop loss', liquidation: 'Liquidation', stop_out: 'Stop-out', breach: 'Rule breach', phase: 'Phase passed' };
+      const R = { close: 'Closed', reduce: 'Reduced', tp: 'Take profit', sl: 'Stop loss', liquidation: 'Liquidation', stop_out: 'Stop-out', breach: 'Rule breach', phase: 'Phase passed', admin: 'Closed by admin' };
       el.innerHTML = table([['Closed'], ['Market'], ['Side'], ['Size', 1], ['Entry', 1], ['Exit', 1], ['PnL', 1], ['Fees', 1], ['Reason']], st.history.map((h) => {
         const m = BY[h.symbol] || S.m;
         // Lots from the server (account measure, as in portal and MT5) — same form for each trade.

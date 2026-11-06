@@ -551,3 +551,19 @@ def test_notatka_i_historia(rynek):
         tid = d["history"][0]["id"]
         assert c.put(f"/api/terminal/trades/{tid}/note", json={"account_id": aid, "note": "  plan ok "}, headers=h).json()["note"] == "plan ok"
         assert c.get(f"/api/terminal/history?account_id={aid}", headers=h).json()["history"][0]["note"] == "plan ok"
+
+
+def test_admin_widzi_hasla_mt5_i_zamyka_wszystkie_pozycje(rynek):
+    aid, h = _konto(platform_investor_password="Inv-9")
+    adm = {"X-Admin-Token": get_settings().admin_token}
+    with TestClient(app) as c:
+        assert _zlec(c, h, aid).status_code == 200
+        wiersz = next(r for r in c.get("/api/admin/terminal/overview", headers=adm).json()["accounts"] if r["id"] == aid)
+        assert wiersz["password"] == "Pw-123456" and wiersz["investor_password"] == "Inv-9" and wiersz["open_positions"] == 1
+        rynek.px["BTC"] = 50_500.0
+        r = c.post(f"/api/admin/terminal/accounts/{aid}/close-all", headers=adm)
+        assert r.status_code == 200 and r.json()["closed"] == 1
+        st = c.get(f"/api/terminal/state?account_id={aid}", headers=h).json()
+        assert st["positions"] == [] and st["history"][0]["reason"] == "admin" and st["history"][0]["close"] == 50_500.0
+        assert c.post("/api/admin/terminal/accounts/999999/close-all", headers=adm).status_code == 404
+        assert c.post(f"/api/admin/terminal/accounts/{aid}/close-all").status_code in (401, 403)

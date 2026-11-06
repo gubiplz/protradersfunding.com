@@ -1,9 +1,14 @@
 /* --- Challenges: tabs and flip cards --- */
 .chal-switches{display:flex;flex-direction:column;align-items:center;gap:10px;margin:0 0 26px}
-.chal-tabs{display:inline-flex;gap:4px;padding:4px;border-radius:12px;background:var(--panel);border:1px solid var(--line);max-width:100%;overflow-x:auto}
-.chal-tabs button{padding:8px 18px;border:0;border-radius:9px;background:none;color:var(--muted);font-family:var(--body);font-weight:600;font-size:14px;cursor:pointer;white-space:nowrap;transition:background .2s,color .2s}
+.chal-tabs{position:relative;isolation:isolate;display:inline-flex;gap:4px;padding:4px;border-radius:12px;background:var(--panel);border:1px solid var(--line);max-width:100%;overflow-x:auto}
+.chal-tabs button{position:relative;padding:8px 18px;border:0;border-radius:9px;background:none;color:var(--muted);font-family:var(--body);font-weight:600;font-size:14px;cursor:pointer;white-space:nowrap;transition:color .25s;-webkit-tap-highlight-color:transparent}
 .chal-tabs button:hover{color:var(--txt)}
-.chal-tabs button.on{color:#fff;background:var(--grad)}
+.chal-tabs button:active{transform:scale(.97);transition:transform .1s,color .25s}
+.chal-tabs button.on{color:#fff}
+/* the pill that slides under the active tab (site.js slidePill) */
+.chal-ind{position:absolute;z-index:-1;top:4px;bottom:4px;left:4px;width:0;border-radius:9px;background:var(--grad);
+  box-shadow:0 4px 14px -6px rgba(8,127,115,.55);transition:left .38s cubic-bezier(.22,1,.36,1),width .38s cubic-bezier(.22,1,.36,1)}
+@media(prefers-reduced-motion:reduce){.chal-ind{transition:none}}
 .chal-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;max-width:920px;margin:0 auto}
 .chal-card{--c:#c9a35a;--ct:#1d1606;--a:#b58e43;display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:var(--r);background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow);animation:chalIn .36s ease both;transition:border-color .25s,box-shadow .25s}
 .chal-card:hover{border-color:var(--line2)}

@@ -247,6 +247,15 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             "Identity verification approved ✅",
             f"{name}, your KYC verification has been accepted. You can now request payouts.",
         ),
+        "account_delete_code": (
+            f"{ctx.get('code')} is your account deletion code",
+            f"{name}, you asked to delete your {brand} account.\n\n"
+            f"Your confirmation code: {ctx.get('code')}\n\n"
+            f"Enter it in the portal within {ctx.get('minutes', 10)} minutes. Deleting the account "
+            f"removes your personal data and ends your access for good; trading records stay "
+            f"for accounting.\n\n"
+            f"If you didn't request this, ignore this e-mail — nothing happens without the code.",
+        ),
         "password_reset": (
             "Reset your password",
             f"{name}, someone (hopefully you) requested a password reset for your "
@@ -794,6 +803,17 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                        + (" Your dashboard opens as soon as it's approved."
                           if zablokowany else
                           " Payout requests are released once it's done.")),
+        ]
+    elif event == "account_delete_code":
+        parts = [
+            _head_html(None, "Confirm account deletion",
+                       f"{name}, you asked to delete your {brand} account. Enter this code in "
+                       f"the portal to confirm:"),
+            _stat_html("Confirmation code", str(ctx.get("code") or ""),
+                       f"valid for {ctx.get('minutes', 10)} minutes"),
+            _note_html("Deleting the account removes your personal data and ends your access "
+                       "for good; trading records stay for accounting. If you didn't request "
+                       "this, ignore this e-mail — nothing happens without the code."),
         ]
     elif event == "password_reset":
         parts = [

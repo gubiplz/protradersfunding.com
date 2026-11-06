@@ -631,3 +631,27 @@ def test_rozmowy_bez_ruchu_od_tygodnia_zamykaja_sie_same(klient, model, wysylki)
     assert any(m["author"] == "ai_note" and "automatically" in m["body"] for m in watek)
     assert all("automatically" not in (m.get("body") or "") for m in
                client.get(f"/api/me/chat/{stara['id']}", headers=h).json()["chat"]["thread"])
+
+
+def test_dymek_oznacza_rozmowy_klientow_z_darmowym_kontem(klient, model):
+    from app.models import Account
+    h, tid = klient
+    model["odp"] = _odp(reply="Passed on.", resolution="needs_human", category="other",
+                        subject="Free account", summary="Asks about the free account.")
+    chat = _wyslij(h, "When does my free account arrive?")
+    s = SessionLocal()
+    s.add(Account(login=f"free{tid}", trader_id=tid, trader_name="Czat Tester", platform_login=f"free{tid}",
+                  platform_password="x", platform_server="MetaQuotes-Demo", product_key="2step-25k",
+                  initial_balance=25_000.0, balance=25_000.0, equity=25_000.0, peak_equity=25_000.0,
+                  day_start_equity=25_000.0, day_start_balance=25_000.0, status="active", phase="eval_1",
+                  source="grant", grant_note="Free Trade Case"))
+    s.commit(); s.close()
+    rozmowy = {c["id"]: c for c in client.get("/api/admin/support/chats", headers=ADMIN).json()["chats"]}
+    assert rozmowy[chat["id"]]["free"] is True
+    # Drugie konto z BOGO to klient, który zapłacił — bez oznaczenia.
+    s = SessionLocal()
+    a = s.query(Account).filter(Account.trader_id == tid).one()
+    a.grant_note = "Buy 1 Get 1 Free"
+    s.commit(); s.close()
+    rozmowy = {c["id"]: c for c in client.get("/api/admin/support/chats", headers=ADMIN).json()["chats"]}
+    assert rozmowy[chat["id"]]["free"] is False
