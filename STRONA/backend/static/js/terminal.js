@@ -2004,9 +2004,18 @@
   let tradesKey = '', tipXY = [0, 0], tipT = 0;
   function drawTrades(force) {
     if (!chart) return;
-    const hist = S.showTrades && S.st ? (S.st.history || []).filter((h) => h.symbol === S.sym && h.on_chart !== false && h.opened_at && h.closed_at && h.entry && h.close).slice(0, 60) : [];
+    const hist = S.showTrades && S.st ? (S.st.history || []).filter((h) => h.symbol === S.sym && h.opened_at && h.closed_at && h.entry && h.close).slice(0, 60) : [];
+    // Older Trade BOT entries (on_chart false) carry prices from their own simulation, not from
+    // these candles: their markers sit on the candle of that moment (clamped to its high/low) so
+    // they don't float beside the chart. The tooltip still shows the recorded prices.
+    const bars = chart.getDataList(), step = F.MS[S.interval];
+    const onBar = (t, v) => {
+      let lo = 0, hi = bars.length - 1, k = null;
+      while (lo <= hi) { const m = (lo + hi) >> 1; if (bars[m].timestamp <= t) { k = bars[m]; lo = m + 1; } else hi = m - 1; }
+      return k && t < k.timestamp + step ? Math.min(k.high, Math.max(k.low, v)) : v;
+    };
     // The 15 s state refresh doesn't redraw trades when they haven't changed (hover stays).
-    const key = S.sym + '|' + hist.map((h) => h.id).join(',');
+    const key = S.sym + '|' + S.interval + '|' + bars.length + '|' + hist.map((h) => h.id).join(',');
     if (!force && key === tradesKey) return;
     tradesKey = key;
     chart.removeOverlay({ groupId: 'ptfTrades' });
@@ -2017,7 +2026,9 @@
       const ext = { side: h.side, pnl: h.pnl, up, dn, bg, h, t: fresh ? 0 : 1 };
       const id = chart.createOverlay({
         name: 'ptfTrade', groupId: 'ptfTrades', lock: true,
-        points: [{ timestamp: Date.parse(h.opened_at), value: h.entry }, { timestamp: Date.parse(h.closed_at), value: h.close }],
+        points: h.on_chart === false
+          ? [{ timestamp: Date.parse(h.opened_at), value: onBar(Date.parse(h.opened_at), h.entry) }, { timestamp: Date.parse(h.closed_at), value: onBar(Date.parse(h.closed_at), h.close) }]
+          : [{ timestamp: Date.parse(h.opened_at), value: h.entry }, { timestamp: Date.parse(h.closed_at), value: h.close }],
         extendData: ext,
         onMouseEnter: ({ overlay }) => hoverTrade(overlay, true),
         onMouseLeave: ({ overlay }) => hoverTrade(overlay, false),

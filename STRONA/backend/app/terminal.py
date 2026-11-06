@@ -1110,6 +1110,8 @@ def _finnhub_swiece(coin: str, od_s: int, do_s: int, transport=None) -> list[dic
         return None
     if status == 429:
         _FEED_PAUZA["do"] = time.monotonic() + 60      # limit minutowy: reszta przebiegu bez feedu
+    elif status in (401, 403):
+        _FEED_PAUZA["do"] = time.monotonic() + 3600    # plan bez dostępu: nie pytamy co 12 s
     if status != 200 or not isinstance(body, dict) or body.get("s") not in ("ok", "no_data"):
         print(f"[candles] finnhub {sym} -> {status}: {str(body)[:160]}", flush=True)
         return None
