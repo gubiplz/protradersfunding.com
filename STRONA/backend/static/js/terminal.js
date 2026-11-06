@@ -349,7 +349,7 @@
         const nr = ++loadSeq;
         try {
           if (type === 'init') {
-            const d = await F.history(S.venue, S.m, S.interval, Date.now(), histLimit);
+            const d = await histCached(S.venue, S.m, S.interval, histLimit);
             if (nr !== loadSeq) return;
             lastBar = d[d.length - 1] || null;
             callback(d, { forward: d.length > 10, backward: false });
@@ -361,6 +361,7 @@
           } else callback([], { forward: false, backward: false });
         } catch (e) {
           if (nr !== loadSeq) return;
+          $('tChart').classList.remove('t-swap');
           callback([], { forward: false, backward: false });
           toast('Chart data unavailable', `${venueLbl()}: ${e.message}`, true);
         }
@@ -376,6 +377,26 @@
     if (cv) { cv.tabIndex = 0; cv.setAttribute('role', 'region'); cv.setAttribute('aria-label', 'Price chart'); }
   }
   let loadSeq = 0;
+  /* Interval switches: history kept 30 s per market and interval (going back to one is
+     instant), loaded ahead when the pointer is over an interval button. The live stream
+     fills the seconds since. */
+  const HIST_TTL = 30000, histMem = new Map();
+  const histKey = (v, m, i, n) => `${v}|${m.sym}|${i}|${n}`;
+  function histLoad(v, m, i, n) {
+    const k = histKey(v, m, i, n), hit = histMem.get(k);
+    if (hit && Date.now() - hit.at < HIST_TTL) return hit.p;
+    const p = F.history(v, m, i, Date.now(), n);
+    histMem.set(k, { at: Date.now(), p });
+    p.catch(() => histMem.delete(k));
+    if (histMem.size > 40) histMem.delete(histMem.keys().next().value);
+    return p;
+  }
+  // Copies: the chart may change the bars it was given.
+  const histCached = async (v, m, i, n) => (await histLoad(v, m, i, n)).map((k) => ({ ...k }));
+  $('tInts').addEventListener('pointerover', (e) => {
+    const b = e.target.closest('[data-i]');
+    if (b && b.dataset.i !== S.interval && S.m) histLoad(S.venue, S.m, b.dataset.i, 500).catch(() => {});
+  });
   /* Reload the chart with one call: setSymbol/setPeriod reset on their own. */
   function reloadChart() {
     if (!chart) return;
@@ -391,6 +412,7 @@
   }
   let pendingRange = null;
   function afterInit() {
+    $('tChart').classList.remove('t-swap');
     loadDrawn();
     drawLines();          // new market's position lines and history markers at once, not after the next refresh
     if (pendingRange) { const r = pendingRange; pendingRange = null; setTimeout(() => fitRange(r), 30); }
@@ -656,6 +678,7 @@
   });
   $('tInts').addEventListener('click', (e) => { const b = e.target.closest('[data-i]'); if (b) setInterval_(b.dataset.i); });
   function setInterval_(i, keepLimit) {
+    if (i !== S.interval) $('tChart').classList.add('t-swap');   // dims while the new candles come in
     S.interval = i;
     ls.set('pf_term_int', i);
     $$('[data-i]', $('tInts')).forEach((b) => b.classList.toggle('on', b.dataset.i === i));
@@ -663,7 +686,7 @@
     if (!strm || !strm.interval || !chart) return restream();
     // Interval only: swap the candles; book and trades keep flowing without reconnecting.
     strm.interval(i);
-    lastBar = null; barNext = null;
+    lastBar = null; shownBar = null; glide = null;
     chart.setStyles({ candle: { tooltip: { title: { template: `${S.sym} · ${INT_LBL[S.interval]} · ${venueLbl()}` } } } });
     reloadChart();
   }
@@ -924,12 +947,35 @@
   /* All socket data goes through requestAnimationFrame: at most one render
      per frame (busy markets send dozens of trades a second), and in a hidden tab the
      browser pauses rAF, so nothing paints then. */
-  let strm = null, bookRaf = 0, tradesRaf = 0, tickRaf = 0, barRaf = 0, barNext = null;
+  let strm = null, bookRaf = 0, tradesRaf = 0, tickRaf = 0, barRaf = 0;
+  /* The live candle glides to each new price (about 120 ms, easing out) instead of
+     jumping, and its wick grows with it, as on Bybit. A new candle starts at once; a
+     price that arrives mid-glide continues from where the candle is. */
+  const GLIDE_MS = 120;   // short enough that the candle never trails the price
+  let shownBar = null, glide = null, glideRaf = 0;
   function pushBar(k) {
-    // New candle in the same frame as an update to the last one: close the last one at once.
-    if (barNext && barNext.timestamp !== k.timestamp && barCb) barCb(barNext);
-    barNext = k;
-    if (!barRaf) barRaf = requestAnimationFrame(() => { barRaf = 0; if (barCb && barNext) barCb(barNext); barNext = null; });
+    if (!barCb) return;
+    // New candle: close the last one at its final price, start the new one without a glide.
+    if (!shownBar || shownBar.timestamp !== k.timestamp || REDUCED) {
+      if (glide && shownBar && shownBar.timestamp !== k.timestamp) barCb(glide.to);
+      glide = null;
+      shownBar = k;
+      if (!barRaf) barRaf = requestAnimationFrame(() => { barRaf = 0; if (barCb && shownBar) barCb(shownBar); });
+      return;
+    }
+    glide = { from: shownBar, to: k, t0: performance.now() };
+    if (!glideRaf) glideRaf = requestAnimationFrame(glideStep);
+  }
+  function glideStep(now) {
+    glideRaf = 0;
+    if (!glide || !barCb) return;
+    const { from, to, t0 } = glide;
+    const f = Math.min(1, Math.max(0, (now - t0) / GLIDE_MS)), e = 1 - Math.pow(1 - f, 3);
+    const c = from.close + (to.close - from.close) * e;
+    const bar = f >= 1 ? to : { ...to, close: c, high: Math.max(from.high, c), low: Math.min(from.low, c) };
+    shownBar = bar;
+    barCb(bar);
+    if (f < 1) glideRaf = requestAnimationFrame(glideStep); else glide = null;
   }
   /* The live candle follows the mid quote, the way MT5 and cTrader draw from bid
      ticks. A Hyperliquid candle moves only when a trade prints, and on FX, metals
@@ -953,6 +999,7 @@
   // Read-only hook for the UI checks in .tools: the last bar the chart was given.
   window.PTFTerm = {
     bar: () => lastBar,
+    shown: () => shownBar,   // the live candle as drawn (mid-glide)
     tradeBox: () => (tipH ? tradeBox(tipH) : null),
     // visible bars as [first, last] timestamps
     vis: () => { if (!chart) return null; const r = chart.getVisibleRange(), d = chart.getDataList(); return [d[Math.max(0, Math.floor(r.from))], d[Math.min(d.length - 1, Math.ceil(r.to) - 1)]].map((k) => k && k.timestamp); },
@@ -967,7 +1014,7 @@
   function restream() {
     if (strm) strm.close();
     S.book = { bids: [], asks: [] }; S.top = [0, 0]; S.trades = []; S.tk = {};
-    barNext = null;
+    shownBar = null; glide = null;
     clearMeasure();
     stopTpsl();
     $('tSpread').textContent = '—'; $('tSpreadPct').textContent = '—'; sideSpread();
@@ -1377,7 +1424,11 @@
     S.watch = S.watch.includes(sym) ? S.watch.filter((x) => x !== sym) : S.watch.concat(sym);
     ls.set('pf_term_watch', JSON.stringify(S.watch));
   }
-  function openSearch() { $('tSearchIn').value = ''; sCat = 'all'; sIdx = 0; renderSearch(); openModal('tSearch'); setTimeout(() => $('tSearchIn').focus(), 30); }
+  function openSearch(first) {
+    $('tSearchIn').value = first || ''; sCat = 'all'; sIdx = 0; renderSearch(); openModal('tSearch');
+    // Focus at once: the next keys of a fast "xauusd" land in the field, not on the page.
+    $('tSearchIn').focus(); setTimeout(() => $('tSearchIn').focus(), 30);
+  }
   $('tSym').onclick = openSearch;
   $('tSearchBtn').onclick = openSearch;
   $('tSearchIn').oninput = () => { sIdx = 0; renderSearch(); };
@@ -1394,6 +1445,54 @@
     else if (e.key === 'Enter' && sList[sIdx]) { closeModal(); setMarket(sList[sIdx].sym); }
   });
   document.addEventListener('keydown', (e) => { if (e.key === '/' && !e.target.closest('input,textarea') && !modalOpen) { e.preventDefault(); openSearch(); } });
+  /* Typing with no field focused, as in TradingView: a letter opens the market search with
+     it; a digit starts an interval ("5" → 5m, "15", "4h", "1d", "1w"; 60 and 240 minutes
+     become 1h and 4h), applied on Enter or after a short pause, Esc cancels. With
+     Keyboard trading on, B / S / X / R keep trading. */
+  let intBuf = '', intT = 0, intEl = null;
+  const INT_OK = ['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'];
+  const INT_NAME = { '1m': '1 minute', '3m': '3 minutes', '5m': '5 minutes', '15m': '15 minutes', '30m': '30 minutes', '1h': '1 hour', '4h': '4 hours', '1d': '1 day', '1w': '1 week' };
+  function intParse(v) {
+    const m = /^(\d+)([mhdw]?)$/.exec(v);
+    if (!m) return null;
+    let n = +m[1], u = m[2] || 'm';
+    if (u === 'm' && n >= 60 && n % 60 === 0) { n /= 60; u = 'h'; }
+    if (u === 'h' && n >= 24 && n % 24 === 0) { n /= 24; u = 'd'; }
+    const k = n + u;
+    return INT_OK.includes(k) ? k : null;
+  }
+  function intShow() {
+    if (!intEl) { intEl = document.createElement('div'); intEl.className = 't-intbox'; intEl.setAttribute('role', 'status'); $('tChart').appendChild(intEl); }
+    const k = intParse(intBuf);
+    intEl.innerHTML = `<b>${esc(intBuf)}</b><small>${k ? INT_NAME[k] : 'Not available'}</small>`;
+    intEl.classList.toggle('bad', !k);
+    intEl.hidden = false;
+  }
+  function intDone(apply) {
+    clearTimeout(intT);
+    const k = apply && intParse(intBuf);
+    intBuf = '';
+    if (intEl) intEl.hidden = true;
+    if (k && k !== S.interval) setInterval_(k);
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey || e.repeat || modalOpen) return;
+    if (e.target.closest('input,textarea,select,[contenteditable]')) return;
+    if (intBuf) {
+      if (e.key === 'Enter') { e.preventDefault(); return intDone(true); }
+      if (e.key === 'Escape') { e.preventDefault(); return intDone(false); }
+      if (e.key === 'Backspace') { e.preventDefault(); intBuf = intBuf.slice(0, -1); if (!intBuf) return intDone(false); intShow(); clearTimeout(intT); intT = setTimeout(() => intDone(true), 1500); return; }
+      if (/^[0-9]$/.test(e.key) || (/^[mhdw]$/i.test(e.key) && !/[mhdw]$/.test(intBuf))) {
+        e.preventDefault(); intBuf += e.key.toLowerCase(); intShow(); clearTimeout(intT); intT = setTimeout(() => intDone(true), 1500); return;
+      }
+      intDone(false);
+    }
+    if (e.key.length !== 1 || !/^[a-z0-9]$/i.test(e.key)) return;
+    if (/^[0-9]$/.test(e.key)) { e.preventDefault(); intBuf = e.key; intShow(); intT = setTimeout(() => intDone(true), 1500); return; }
+    if (PREF.keys && 'bsxr'.includes(e.key.toLowerCase())) return;
+    e.preventDefault();
+    openSearch(e.key);
+  });
 
   // footer: market lists and calculator
   const flist = (list, star) => list.map((m) => { const c = chg24(m); return `<button type="button" class="fl" data-sym="${m.sym}">${mIcon(m, true)}<b>${m.sym}</b><span class="num">${px(m, mid(m))}</span><span class="num ${cls(c)}">${pct(c)}</span></button>`; }).join('') || `<p class="t-hint" style="padding:10px">${star ? 'Star markets in search to build a watchlist.' : 'Loading…'}</p>`;
