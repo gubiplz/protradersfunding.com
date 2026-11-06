@@ -687,20 +687,59 @@ function bootRetry(msg){
   }
   el.querySelector('p').textContent=msg||'Check your connection and try again.';
 }
-/* Benefit numbers on the login screen — REAL platform stats only; each card
-   renders only past an honesty threshold, an empty strip simply stays hidden. */
+/* Sign-in screen: the market count from the terminal's list, live prices and spreads from
+   the order book (the same source as the terminal), and the glass cube. No head counts:
+   the owner does not want to advertise them (2026-11-06). Everything stops once the
+   trader is in — the strip polls only while the auth screen is on. */
+const AUTH_LIVE=[['Gold','xyz:GOLD',1,'$'],['S&P 500','xyz:SP500',1,''],['Bitcoin','BTC',0,'$'],['EUR/USD','xyz:EUR',5,'']];
+let authLiveT=0;
 async function loadAuthStats(){
-  try{
-    const s=await api('/api/public/stats');
-    const items=[];
-    if(s.traders_total>=25)items.push([fmt0(s.traders_total),'Traders on board']);
-    if(s.funded_accounts>=5)items.push([fmt0(s.funded_accounts),'Funded accounts']);
-    if(s.countries_count>=5)items.push([fmt0(s.countries_count),'Countries']);
-    if(!items.length)return;
-    const el=$('auth-stats');
-    el.innerHTML=items.slice(0,3).map(([v,l])=>`<div class="as-card"><b>${v}</b><span>${l}</span></div>`).join('');
-    el.classList.remove('hidden');
-  }catch(e){}
+  authCube();
+  try{const m=await api('/api/terminal/markets');if(m.markets&&m.markets.length>=10)$('auth-mkts').textContent=m.markets.length}catch(e){}
+  clearInterval(authLiveT);
+  const tick=async()=>{
+    if(!$('auth')||$('auth').classList.contains('hidden')||document.hidden){return}
+    const rows=await Promise.all(AUTH_LIVE.map(async([name,coin,dec,pre])=>{
+      try{const r=await fetch('https://api.hyperliquid.xyz/info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'l2Book',coin})});
+        const d=await r.json();const bid=+d.levels[0][0].px,ask=+d.levels[1][0].px,mid=(bid+ask)/2,sp=ask-bid;
+        const f=(v,n)=>v.toLocaleString('en-US',{minimumFractionDigits:n,maximumFractionDigits:n});
+        return `<span class="al-i"><small>${name}</small><b>${pre}${f(mid,dec)}</b><em>spread ${f(sp,sp<0.1?Math.max(dec,3):2)}</em></span>`;
+      }catch(e){return ''}}));
+    const html=rows.filter(Boolean).join('');
+    const el=$('auth-live');if(!el)return;
+    if(html){el.innerHTML=`<span class="al-t"><i></i>Live</span>${html}`;el.classList.remove('hidden')}
+  };
+  tick();authLiveT=setInterval(tick,15000);
+}
+/* Glass cube with the PTF coin: idle spin, tilts after the pointer, drag to spin with
+   inertia. Plain CSS 3D — no WebGL, nothing to download. */
+function authCube(){
+  const box=$('authCube'),c=$('authCubeInner');
+  if(!box||!c||box.dataset.on)return;
+  box.dataset.on='1';
+  const RED=matchMedia('(prefers-reduced-motion:reduce)').matches,BASE=RED?0:.16;
+  let rx=-22,ry=34,vx=0,vy=BASE,drag=null,hx=0,hy=0,last=0;
+  const paint=()=>{c.style.transform=`rotateX(${(rx+hy).toFixed(2)}deg) rotateY(${(ry+hx).toFixed(2)}deg)`};
+  const step=(t)=>{
+    if(!$('auth')||$('auth').classList.contains('hidden')){box.dataset.on='';return}
+    if(!drag){ry+=vy;rx+=vx;vx*=.94;vy+=(BASE-vy)*.03;rx=Math.max(-70,Math.min(70,rx))}
+    paint();requestAnimationFrame(step);
+  };
+  box.addEventListener('pointerdown',(e)=>{drag={x:e.clientX,y:e.clientY,t:performance.now()};box.setPointerCapture(e.pointerId);e.preventDefault()});
+  box.addEventListener('pointermove',(e)=>{
+    if(!drag)return;
+    const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+    ry+=dx*.45;rx=Math.max(-70,Math.min(70,rx-dy*.45));
+    vy=dx*.45;vx=-dy*.45;drag={x:e.clientX,y:e.clientY,t:performance.now()};
+  });
+  const up=()=>{if(drag&&performance.now()-drag.t>80){vx=0;vy=BASE}drag=null};
+  box.addEventListener('pointerup',up);box.addEventListener('pointercancel',up);
+  const brand=box.parentElement;
+  if(!RED&&matchMedia('(hover:hover)').matches)brand.addEventListener('mousemove',(e)=>{
+    const r=brand.getBoundingClientRect();hx=((e.clientX-r.left)/r.width-.5)*16;hy=-((e.clientY-r.top)/r.height-.5)*12;
+  });
+  brand.addEventListener('mouseleave',()=>{hx=0;hy=0});
+  paint();if(!RED)requestAnimationFrame(step);
 }
 
 /* ---------- return from payment ---------- */
