@@ -13,8 +13,9 @@ Rozliczenie idzie po cenach Hyperliquid (patrz `markets.py`):
     połowy użytej marży, pozycje zamyka stop-out (bez ceny likwidacji per pozycja);
   - limit, stop, TP i SL rozstrzyga `sync()`: przegląda świece 1m
     od ostatniego przeglądu, więc nic nie ucieka, gdy nikt nie patrzy;
-  - pozycje są netowane per symbol, jak na giełdach perp: zlecenie w drugą
-    stronę zmniejsza, zamyka albo odwraca pozycję.
+  - konto z hedgingiem, jak w MT5: każde zlecenie otwiera osobną pozycję
+    (long i short na jednym rynku stoją obok siebie); zamyka je Close albo
+    zlecenie reduce-only (przeciwne pozycje od najstarszej).
 
 Weekend: rynki inne niż krypto stoją (sobota–niedziela czasu serwera), więc
 nie przyjmujemy na nie zleceń, nie wyzwalamy TP/SL i wyceniamy je po cenie
@@ -298,66 +299,56 @@ def _close_part(session, acc: Account, pos: Trade, qty: float, px: float, reason
 def _fill(session, acc: Account, m: Market, side: str, qty: float, px: float, lev: float,
           tp: float | None, sl: float | None, reduce_only: bool, when: datetime,
           slip: float = 0.0) -> Trade | None:
-    """Wypełnia zlecenie po `px`: zmniejsza/zamyka/odwraca albo otwiera/dokłada.
-    Zwraca pozycję, która po wypełnieniu jest otwarta (albo None)."""
-    pos = next((t for t in _open_positions(session, acc) if t.symbol == m.sym), None)
-    zostalo = qty
-    if pos is not None and pos.side != side:
-        zamknij = min(zostalo, pos.qty or 0.0)
-        _close_part(session, acc, pos, zamknij, px, "reduce" if zamknij < (pos.qty or 0) - EPS else "close", when)
-        zostalo -= zamknij
-        if pos.status == "closed":
-            pos = None
-        if zostalo <= EPS or reduce_only:
-            return pos
-    elif reduce_only:
-        raise HTTPException(409, "Reduce-only order would open or increase a position.")
-    if zostalo <= EPS:
-        return pos
-    wartosc = markets.notional_usd(m, zostalo, px)
+    """Wypełnia zlecenie po `px` na koncie z hedgingiem (jak konto hedging w MT5).
+
+    Zwykłe zlecenie zawsze otwiera NOWĄ pozycję z własną ceną wejścia i własnym
+    TP/SL — nie dokłada do istniejącej i nie zamyka przeciwnej (long i short na
+    tym samym rynku stoją obok siebie). Reduce-only zamyka pozycje w przeciwną
+    stronę, od najstarszej. Zwraca pozycję otwartą po wypełnieniu (albo None)."""
+    if reduce_only:
+        przeciwne = _przeciwne(session, acc, m, side)
+        if not przeciwne:
+            raise HTTPException(409, "Reduce-only order has no opposite position to close.")
+        zostalo, ostatnia = qty, None
+        for pos in przeciwne:
+            if zostalo <= EPS:
+                break
+            zamknij = min(zostalo, pos.qty or 0.0)
+            _close_part(session, acc, pos, zamknij, px, "reduce" if zamknij < (pos.qty or 0) - EPS else "close", when)
+            zostalo -= zamknij
+            if pos.status == "open":
+                ostatnia = pos
+        return ostatnia
+    wartosc = markets.notional_usd(m, qty, px)
     oplata = wartosc * FEE_PCT
     acc.balance = round(float(acc.balance or 0.0) - oplata, 2)
-    if pos is None:
-        pos = Trade(
-            account_id=acc.id, symbol=m.sym, side=side, lots=markets.lots(m, zostalo),
-            open_price=px, pnl=0.0, opened_at=when, status="open", source="terminal",
-            venue="hyperliquid", qty=zostalo, leverage=lev, margin=round(wartosc / lev, 2),
-            tp=tp, sl=sl, liq_price=None, fee=round(oplata, 4),
-            slippage=round(slip * 100, 4), tpsl_at=when if (tp or sl) else None,
-        )
-        session.add(pos)
-        session.flush()     # sesja bez autoflush: następne wypełnienie musi tę pozycję zobaczyć
-    else:
-        nowa = (pos.qty or 0.0) + zostalo
-        pos.open_price = (pos.open_price * (pos.qty or 0.0) + px * zostalo) / nowa
-        pos.qty = nowa
-        pos.lots = markets.lots(m, nowa)
-        pos.margin = round(float(pos.margin or 0.0) + wartosc / (pos.leverage or lev), 2)
-        pos.fee = round(float(pos.fee or 0.0) + oplata, 4)
-        if tp is not None or sl is not None:
-            pos.tp = tp if tp is not None else pos.tp
-            pos.sl = sl if sl is not None else pos.sl
-            pos.tpsl_at = when
+    pos = Trade(
+        account_id=acc.id, symbol=m.sym, side=side, lots=markets.lots(m, qty),
+        open_price=px, pnl=0.0, opened_at=when, status="open", source="terminal",
+        venue="hyperliquid", qty=qty, leverage=lev, margin=round(wartosc / lev, 2),
+        tp=tp, sl=sl, liq_price=None, fee=round(oplata, 4),
+        slippage=round(slip * 100, 4), tpsl_at=when if (tp or sl) else None,
+    )
+    session.add(pos)
+    session.flush()     # sesja bez autoflush: następne wypełnienie musi tę pozycję zobaczyć
     return pos
 
 
+def _przeciwne(session, acc: Account, m: Market, side: str) -> list[Trade]:
+    """Otwarte pozycje terminala na tym rynku w stronę przeciwną do `side`, od najstarszej."""
+    return sorted((t for t in _open_positions(session, acc)
+                   if t.symbol == m.sym and t.side != side and t.venue != tradebot.OGON),
+                  key=lambda t: (t.opened_at, t.id))
+
+
 def _check_open(session, acc: Account, m: Market, side: str, qty: float, px: float, lev: float) -> None:
-    """Czy konto udźwignie nową ekspozycję: marża i limit lotów."""
+    """Czy konto udźwignie nową pozycję: marża i limit lotów. Przy hedgingu każda
+    pozycja ma własną marżę i liczy się do limitu — long i short na jednym rynku też."""
     poz = _open_positions(session, acc)
-    istn = next((t for t in poz if t.symbol == m.sym), None)
     przyrost = qty
-    if istn is not None and istn.side != side:
-        przyrost = max(0.0, qty - (istn.qty or 0.0))
-    if przyrost <= EPS:
-        return
     marks = _marks(session, acc, poz, _now())
     fig = account_figures(session, acc, poz, marks)
     wolne, loty = fig["available"], fig["open_lots"] + fig["other_lots"]   # limit wspólny z Trade BOT-em
-    if istn is not None and istn.side != side:
-        # Odwrócenie: stara pozycja najpierw się zamyka, więc jej marża i loty
-        # się zwalniają — inaczej 6 lotów long → 6 short odbijało się od limitu.
-        wolne += float(istn.margin or 0.0)      # jej P&L już siedzi w equity
-        loty = max(0.0, loty - markets.lots(m, istn.qty or 0.0))
     potrzeba = markets.notional_usd(m, przyrost, px) / lev * (1 + FEE_PCT * lev)
     if potrzeba > wolne + 0.01:
         raise HTTPException(409, f"Not enough available margin: this order needs ${potrzeba:,.2f}, "
@@ -1704,24 +1695,31 @@ def api_order(payload: OrderIn, w: Who = Depends(who_trade)):
             # W weekend pozycję na tym rynku zamyka tylko „Close" — po cenie z piątku.
             # Zlecenie rynkowe wypełniłoby się po żywej księdze Hyperliquid.
             raise HTTPException(409, "Market closed for the weekend. Close the position from the Positions tab.")
-        pos = next((t for t in _open_positions(session, acc) if t.symbol == m.sym), None)
-        if pos is not None and pos.venue == tradebot.OGON:
+        if any(t.symbol == m.sym and t.venue == tradebot.OGON for t in _open_positions(session, acc)):
             raise HTTPException(409, "This market has an open managed position. Close it first.")
-        zmniejsza = pos is not None and pos.side != payload.side and payload.qty <= (pos.qty or 0) + EPS
-        if not (payload.reduce_only or zmniejsza):
+        if not payload.reduce_only:
             zamk = market_closed(m, acc, teraz)
             if zamk:
                 raise HTTPException(409, zamk)
         qty = round(payload.qty, m.qty_dec + 3)
-        if payload.reduce_only and pos is not None and pos.side != payload.side:
-            qty = min(qty, pos.qty or 0.0)      # poślizg liczony na tym, co naprawdę się zamknie
-        # Zlecenie zamykające dokładnie całą pozycję przechodzi zawsze (resztki sprzed limitu).
-        caly = pos is not None and pos.side != payload.side and abs(qty - (pos.qty or 0.0)) <= EPS
-        if not caly:
-            zostaje = None
-            if pos is not None and pos.side != payload.side and qty < (pos.qty or 0.0):
-                zostaje = markets.lots(m, (pos.qty or 0.0) - qty)
-            _wolumen_ok(m, qty, zostaje)
+        if payload.reduce_only:
+            przeciwne = _przeciwne(session, acc, m, payload.side)
+            if not przeciwne:
+                raise HTTPException(409, "Reduce-only order has no opposite position to close.")
+            razem = sum(t.qty or 0.0 for t in przeciwne)
+            qty = min(qty, razem)       # poślizg liczony na tym, co naprawdę się zamknie
+            # Zamknięcie wszystkiego przechodzi zawsze (resztki sprzed limitu). Inaczej
+            # sprawdzamy krok i resztę pozycji, którą zlecenie zamknie tylko częściowo.
+            if abs(qty - razem) > EPS:
+                zostaje, reszta = None, qty
+                for t in przeciwne:
+                    if reszta < (t.qty or 0.0) - EPS:
+                        zostaje = markets.lots(m, (t.qty or 0.0) - reszta)
+                        break
+                    reszta -= t.qty or 0.0
+                _wolumen_ok(m, qty, zostaje)
+        else:
+            _wolumen_ok(m, qty)
         if payload.kind == "market":
             vwap, mid, slip = _vwap(m, payload.side, qty, payload.max_slippage_pct / 100)
             _tp_sl_ok(payload.side, vwap, tp, sl)

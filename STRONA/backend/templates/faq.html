@@ -17,7 +17,7 @@
  {"@type":"Question","name":"What can I trade, and when are markets open?","acceptedAnswer":{"@type":"Answer","text":"12 crypto pairs, gold, silver, platinum, WTI, Brent, natural gas, S&P 500, Nasdaq 100, Nikkei 225, and EURUSD, GBPUSD and USDJPY. Everything except crypto is closed Saturday and Sunday server time and reopens Monday 00:00 server time. Crypto trades around the clock on weekdays, and on weekends only with the Weekend Trading add-on."}},
  {"@type":"Question","name":"What commissions, spreads or swaps apply?","acceptedAnswer":{"@type":"Answer","text":"A commission of $9 per lot per side. No markup on prices: the spread is the reference venue's own spread and market orders fill through the order book with a default slippage limit of 1%. There are no swaps or overnight charges in the terminal."}},
  {"@type":"Question","name":"What leverage do I get, and are there position size limits?","acceptedAnswer":{"@type":"Answer","text":"Leverage is up to 1:100 and fixed per market: Forex 1:100, metals and indices 1:50, energy 1:20, crypto 1:5 to 1:10. A stop-out closes all positions when equity falls to 50% of used margin. Total open volume is capped at 6 lots per $100,000 of account size, counted across the terminal and MT5 together. Minimum order 0.01 lot."}},
- {"@type":"Question","name":"Are there limits on the number of orders or open positions?","acceptedAnswer":{"@type":"Answer","text":"No cap on the number of pending orders. Positions are netted per symbol, so a new order on the same market adds to, reduces or reverses the existing position. The hard limits are the total-volume cap and a rate limit of 20 order actions per 10 seconds."}},
+ {"@type":"Question","name":"Are there limits on the number of orders or open positions?","acceptedAnswer":{"@type":"Answer","text":"No cap on the number of pending orders. Accounts are hedging accounts, as in MT5: every order opens its own position, and a long and a short on the same market can be open side by side. The hard limits are the total-volume cap and a rate limit of 20 order actions per 10 seconds."}},
  {"@type":"Question","name":"Can I use MT5 and the Built-in Terminal on the same account at once?","acceptedAnswer":{"@type":"Answer","text":"Yes. Both show the same account: one balance, one set of rules, one exposure cap and one trading history. On accounts tracked live from MT5, such as those with the Copytrading add-on, the terminal is read-only and orders go through MT5."}},
  {"@type":"Question","name":"What time does the daily loss limit reset?","acceptedAnswer":{"@type":"Answer","text":"At 00:00 server time (UTC+2). We take a new snapshot of your equity including floating P&L, and the day's floor is that equity minus 5% of the starting balance. The floor stays fixed until the next midnight."}},
  {"@type":"Question","name":"Is there a consistency rule?","acceptedAnswer":{"@type":"Answer","text":"No. There is no best-day rule, no lot-size consistency and no per-day profit cap. The only size rule is the cap on total open volume."}},
@@ -163,9 +163,9 @@
       </details>
       <details>
         <summary>Are there limits on the number of orders or open positions?</summary>
-        <div class="a">There is no cap on the number of pending orders. Positions are netted per symbol, so
-        a second order on the same market adds to, reduces or reverses your existing position instead of
-        opening a second one. The only hard limits are the total-volume cap above and a rate limit of
+        <div class="a">There is no cap on the number of pending orders. Accounts are hedging accounts, as in
+        MT5: every order opens its own position with its own entry, TP and SL, and a long and a short on the
+        same market can be open side by side. Each position closes on its own. The only hard limits are the total-volume cap above and a rate limit of
         20 order actions per 10 seconds, which stops runaway scripts rather than normal trading.</div>
       </details>
       <details>
