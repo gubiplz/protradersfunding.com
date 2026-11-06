@@ -711,35 +711,51 @@ async function loadAuthStats(){
   };
   tick();authLiveT=setInterval(tick,15000);
 }
-/* Glass cube with the PTF coin: idle spin, tilts after the pointer, drag to spin with
-   inertia. Plain CSS 3D — no WebGL, nothing to download. */
+/* Gold coin: idle spin, tilts after the pointer, drag to spin with inertia. The edge is a
+   stack of thin discs between the two faces. Plain CSS 3D — nothing to download. */
 function authCube(){
-  const box=$('authCube'),c=$('authCubeInner');
+  const box=$('authCoin'),c=$('authCoinInner');
   if(!box||!c||box.dataset.on)return;
   box.dataset.on='1';
-  const RED=matchMedia('(prefers-reduced-motion:reduce)').matches,BASE=RED?0:.16;
-  let rx=-22,ry=34,vx=0,vy=BASE,drag=null,hx=0,hy=0,last=0;
-  const paint=()=>{c.style.transform=`rotateX(${(rx+hy).toFixed(2)}deg) rotateY(${(ry+hx).toFixed(2)}deg)`};
+  if(!c.children.length){
+    const T=7,n=14,h=[];
+    for(let i=0;i<n;i++)h.push(`<i class="ac-l${i%2?' edge':''}" style="--z:${(-T+i*(2*T)/(n-1)).toFixed(2)}px"></i>`);
+    h.push(`<div class="ac-face back" style="--z:${T}px"><img src="/static/img/logo.png" alt=""></div>`);
+    h.push(`<div class="ac-face front" style="--z:${T}px"><img src="/static/img/logo.png" alt=""></div>`);
+    c.innerHTML=h.join('');
+  }
+  /* The coin faces the visitor and sways a little; a drag spins it (with inertia) and it
+     settles face-on again. A coin that never stops spinning is seen edge-on half the time. */
+  const RED=matchMedia('(prefers-reduced-motion:reduce)').matches;
+  let spin=0,tilt=0,vy=0,vx=0,drag=null,hx=0,hy=0;
+  const paint=(t)=>{
+    const sway=RED?0:Math.sin(t/1900)*13,bob=RED?0:Math.sin(t/2400)*5;
+    c.style.transform=`rotateX(${(-10+bob+tilt+hy).toFixed(2)}deg) rotateY(${(-22+sway+spin+hx).toFixed(2)}deg)`;
+  };
   const step=(t)=>{
     if(!$('auth')||$('auth').classList.contains('hidden')){box.dataset.on='';return}
-    if(!drag){ry+=vy;rx+=vx;vx*=.94;vy+=(BASE-vy)*.03;rx=Math.max(-70,Math.min(70,rx))}
-    paint();requestAnimationFrame(step);
+    if(!drag){
+      spin+=vy;tilt+=vx;vy*=.95;vx*=.9;
+      if(Math.abs(vy)<.6){const home=Math.round(spin/360)*360;spin+=(home-spin)*.04}
+      tilt*=.96;
+    }
+    paint(t);requestAnimationFrame(step);
   };
   box.addEventListener('pointerdown',(e)=>{drag={x:e.clientX,y:e.clientY,t:performance.now()};box.setPointerCapture(e.pointerId);e.preventDefault()});
   box.addEventListener('pointermove',(e)=>{
     if(!drag)return;
     const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
-    ry+=dx*.45;rx=Math.max(-70,Math.min(70,rx-dy*.45));
-    vy=dx*.45;vx=-dy*.45;drag={x:e.clientX,y:e.clientY,t:performance.now()};
+    spin+=dx*.6;tilt=Math.max(-30,Math.min(30,tilt-dy*.3));
+    vy=dx*.6;vx=-dy*.3;drag={x:e.clientX,y:e.clientY,t:performance.now()};
   });
-  const up=()=>{if(drag&&performance.now()-drag.t>80){vx=0;vy=BASE}drag=null};
+  const up=()=>{if(drag&&performance.now()-drag.t>80){vx=0;vy=0}drag=null};
   box.addEventListener('pointerup',up);box.addEventListener('pointercancel',up);
   const brand=box.parentElement;
   if(!RED&&matchMedia('(hover:hover)').matches)brand.addEventListener('mousemove',(e)=>{
-    const r=brand.getBoundingClientRect();hx=((e.clientX-r.left)/r.width-.5)*16;hy=-((e.clientY-r.top)/r.height-.5)*12;
+    const r=brand.getBoundingClientRect();hx=((e.clientX-r.left)/r.width-.5)*14;hy=-((e.clientY-r.top)/r.height-.5)*10;
   });
   brand.addEventListener('mouseleave',()=>{hx=0;hy=0});
-  paint();if(!RED)requestAnimationFrame(step);
+  paint(0);requestAnimationFrame(step);
 }
 
 /* ---------- return from payment ---------- */
