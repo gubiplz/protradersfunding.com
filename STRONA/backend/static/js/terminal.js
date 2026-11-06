@@ -3066,18 +3066,37 @@
     cb.then(() => toast('Link copied', u), () => toast('Copy this link', u));
   };
 
-  /* ---------- "Free Trade Case" prompt for guests ---------- */
+  /* ---------- "Free Trade Case" prompt for guests ----------
+     Not right after the privacy choice: the count starts once the consent bar is gone,
+     then it needs a random 60–150 s with the tab visible AND 12–20 actions on the page
+     (clicks, keys, chart scrolls at most one per 1.5 s), and it waits for a pause
+     (2.5 s since the last action, no field focused, no menu or other dialog open). */
   function casePrompt() {
     if (S.token || ls.get('pf_token', null) || ls.get('pf_case_prompt', '0') === '1') return;
-    const need = 10 + Math.floor(Math.random() * 30);   // 10–40 s viewing the page
-    let seen = 0;
+    const needSec = 60 + Math.floor(Math.random() * 91), needActs = 12 + Math.floor(Math.random() * 9);
+    let seen = 0, acts = 0, lastAct = 0, lastWheel = 0;
+    const consentOpen = () => { const c = document.getElementById('pfCk'); return !!(c && !c.hidden); };
+    const act = (e) => {
+      if (consentOpen() || (e.target && e.target.closest && e.target.closest('#pfCk'))) return;
+      if (e.type === 'wheel') { if (Date.now() - lastWheel < 1500) return; lastWheel = Date.now(); }
+      acts++; lastAct = Date.now();
+    };
+    const evs = ['pointerdown', 'keydown', 'wheel'];
+    evs.forEach((n) => addEventListener(n, act, { passive: true, capture: true }));
     const t = setInterval(() => {
-      if (document.visibilityState !== 'visible' || modalOpen || S.token) return;
-      if (++seen < need) return;
-      clearInterval(t);
+      if (S.token) { stop(); return; }
+      if (document.visibilityState !== 'visible' || consentOpen()) return;
+      seen++;
+      if (seen < needSec || acts < needActs || modalOpen) return;
+      if (Date.now() - lastAct < 2500) return;
+      const f = document.activeElement;
+      if (f && /^(INPUT|TEXTAREA|SELECT)$/.test(f.tagName)) return;
+      if ([...document.querySelectorAll('.t-menu')].some((m) => !m.hidden)) return;
+      stop();
       ls.set('pf_case_prompt', '1');
       openModal('tCase');
     }, 1000);
+    function stop() { clearInterval(t); evs.forEach((n) => removeEventListener(n, act, { capture: true })); }
   }
 
   /* ---------- chart right-click (as in TradingView) ---------- */
