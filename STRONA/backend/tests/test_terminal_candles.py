@@ -66,7 +66,7 @@ def test_probkowanie_sklada_swiece_i_scala_z_istniejacymi(monkeypatch):
     monkeypatch.setattr(terminal, "_now", lambda: minuta.replace(tzinfo=timezone.utc) + timedelta(seconds=10))
     _mid_sekwencja(monkeypatch, [1.1150, 1.1158, 1.1147, 1.1153])
     w = terminal.probkuj_swiece(budzet_s=0.02)
-    assert w["coins"] == len(markets.SAMPLED) and w["rows"] == len(markets.SAMPLED) and w["samples"] >= 4
+    assert w["coins"] == len(markets.PROBKOWANE) and w["rows"] == len(markets.PROBKOWANE) and w["samples"] >= 4
     s = SessionLocal()
     r = s.query(TerminalCandle).filter(TerminalCandle.coin == "xyz:EUR").one()
     assert (r.o, r.h, r.l, r.c) == (1.1150, 1.1158, 1.1147, 1.1153) and r.n == w["samples"]
@@ -104,8 +104,10 @@ def test_api_candles_sklada_interwaly_i_ignoruje_inne_rynki():
         assert cl.get(f"/api/terminal/candles?symbol=BTCUSD&interval=1m&end={koniec}").json() == {"candles": []}
         assert cl.get(f"/api/terminal/candles?symbol=EURUSD&interval=1d&end={koniec}").json() == {"candles": []}
         # Lista rynków niesie flagę dla feedu w przeglądarce.
-        rynki = {m["sym"]: m["sampled"] for m in cl.get("/api/terminal/markets").json()["markets"]}
-        assert rynki["EURUSD"] is True and rynki["BTCUSD"] is False
+        rynki = {m["sym"]: (m["sampled"], m["mid_candles"]) for m in cl.get("/api/terminal/markets").json()["markets"]}
+        assert rynki["EURUSD"] == (True, False) and rynki["BTCUSD"] == (False, False)
+        # Cienkie krypto: świece z mid jak FX, ale na żywo zostaje strumień giełdy.
+        assert rynki["LTCUSD"] == (False, True)
 
 
 def test_cron_candles_wymaga_sekretu_i_oddaje_wynik(monkeypatch):
@@ -114,7 +116,7 @@ def test_cron_candles_wymaga_sekretu_i_oddaje_wynik(monkeypatch):
     with TestClient(app) as cl:
         assert cl.get("/api/cron/candles").status_code == 401
         r = cl.get("/api/cron/candles", headers=ADMIN)
-        assert r.status_code == 200 and r.json()["rows"] == len(markets.SAMPLED)
+        assert r.status_code == 200 and r.json()["rows"] == len(markets.PROBKOWANE)
 
 
 # --- historia 1m z zewnętrznego źródła (MetaApi / Twelve Data) ----------------
@@ -190,7 +192,7 @@ def test_bez_kluczy_cron_tylko_probkuje(monkeypatch):
     assert terminal.odswiez_feed()["skipped"] is True
     _mid_sekwencja(monkeypatch, [1.1, 1.2])
     w = terminal.cron_swiece(0.02)
-    assert w["rows"] == len(markets.SAMPLED) and w["history"]["skipped"] is True and w["feed_runs"] == 0
+    assert w["rows"] == len(markets.PROBKOWANE) and w["history"]["skipped"] is True and w["feed_runs"] == 0
 
 
 def test_twelve_data_jako_zrodlo_historii(monkeypatch):
@@ -310,4 +312,4 @@ def test_cron_odpala_ctrader_rownolegle_z_probkowaniem(monkeypatch):
     monkeypatch.setattr(terminal.get_settings(), "finnhub_api_key", "fh-key")
     _mid_sekwencja(monkeypatch, [1.1, 1.2])
     w = terminal.cron_swiece(0.05)
-    assert w["ctrader"] == {"ticks": 12, "rows": 3} and len(wywolania) == 1 and w["rows"] >= len(markets.SAMPLED)
+    assert w["ctrader"] == {"ticks": 12, "rows": 3} and len(wywolania) == 1 and w["rows"] >= len(markets.PROBKOWANE)

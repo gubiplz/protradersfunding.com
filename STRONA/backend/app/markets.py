@@ -110,10 +110,16 @@ def get(sym: str | None) -> Market | None:
 # nakłada je na historię giełdy. Reszta rynków ma dość transakcji, żeby świece
 # giełdy były ciągłe.
 SAMPLED: frozenset[str] = frozenset({"xyz:EUR", "xyz:GBP", "xyz:JPY", "xyz:JP225", "xyz:PLATINUM"})
+# Krypto z kilkoma transakcjami na minutę (w historii giełdy co czwarta świeca płaska).
+# Cron próbkuje ich mid tak samo jak SAMPLED i terminal nakłada te świece na historię,
+# ale na żywo zostaje strumień Hyperliquid (bbo i świece), bo jego ceny są dokładne.
+MID_CANDLES: frozenset[str] = frozenset({"LTC", "ADA", "AVAX", "LINK", "SUI", "BNB"})
+# Wszystko, co próbkuje cron świec.
+PROBKOWANE: frozenset[str] = SAMPLED | MID_CANDLES
 
 
 def public_list() -> list[dict]:
-    return [{**asdict(m), "sampled": m.hl in SAMPLED} for m in MARKETS]
+    return [{**asdict(m), "sampled": m.hl in SAMPLED, "mid_candles": m.hl in MID_CANDLES} for m in MARKETS]
 
 
 # --------------------------------------------------------------------------- #

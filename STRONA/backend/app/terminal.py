@@ -1176,7 +1176,7 @@ def odswiez_feed(transport=None) -> dict:
 
 
 def probkuj_swiece(budzet_s: float, zajmij: bool = True, feed: bool = True) -> dict:
-    """Przez `budzet_s` sekund co `PROBKA_S` bierze mid rynków `markets.SAMPLED` i składa
+    """Przez `budzet_s` sekund co `PROBKA_S` bierze mid rynków `markets.PROBKOWANE` i składa
     z tego świece M1; równolegle co FEED_CO_S odświeża feed spot (`feed=False` w testach
     próbkowania). Zapis próbek raz, na końcu; drugi przebieg w tej samej minucie odpada
     (`zajmij=False`, gdy zamek wziął już `cron_swiece`)."""
@@ -1187,7 +1187,7 @@ def probkuj_swiece(budzet_s: float, zajmij: bool = True, feed: bool = True) -> d
                 return {"skipped": True, "reason": "inny przebieg w toku"}
         finally:
             session.close()
-    coins = sorted(markets.SAMPLED)
+    coins = sorted(markets.PROBKOWANE)
     start = time.monotonic()
     swiece: dict[tuple[str, datetime], list] = {}
     proby = 0
@@ -1466,11 +1466,11 @@ def cron_swiece(budzet_s: float) -> dict:
 
 @router.get("/candles")
 def api_candles(symbol: str, interval: str = "1m", end: int | None = None, limit: int = 500):
-    """Świece z próbkowanego mid dla rynku z `markets.SAMPLED`, złożone do żądanego
+    """Świece z próbkowanego mid dla rynku z `markets.PROBKOWANE`, złożone do żądanego
     interwału; inne rynki i interwały dzienne dostają pustą listę."""
     m = markets.get(symbol)
     krok = _SWIECE_MS.get(interval)
-    if m is None or m.hl not in markets.SAMPLED or krok is None:
+    if m is None or m.hl not in markets.PROBKOWANE or krok is None:
         return {"candles": []}
     limit = max(1, min(int(limit), 5000))
     koniec = int(end) if end else _ms(_now())

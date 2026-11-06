@@ -44,9 +44,9 @@
     }
     const d = await post({ type: 'candleSnapshot', req: { coin: m.hl, interval, startTime: end - step * Math.min(limit, 5000), endTime: end } });
     const bars = (d || []).map((k) => ({ timestamp: k.t, open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v }));
-    return m.sampled ? sampledOver(bars, m, interval, end, limit) : bars;
+    return m.sampled || m.mid_candles ? sampledOver(bars, m, interval, end, limit) : bars;
   }
-  /* Thin markets (FX, JPN225, XPT): the exchange candle comes from a few prints a
+  /* Thin markets (FX, JPN225, XPT, quiet crypto): the exchange candle comes from a few prints a
      minute, so it sits flat and jumps. Our cron samples the mid every second and
      keeps true 1m O/H/L/C; those replace the exchange prices where we have them,
      the exchange volume stays. Older history, from before the sampling, is unchanged. */
