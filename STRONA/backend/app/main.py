@@ -10267,14 +10267,13 @@ def _require_cron(x_admin_token: str | None = Header(default=None),
 
 @app.api_route("/api/cron/risk", methods=["GET", "POST"], include_in_schema=False, dependencies=[Depends(_require_cron)])
 async def api_cron_risk():
-    """Silnik ryzyka dla kont z REALNYM rachunkiem MT5 — co minute, z zewnatrz.
+    """Silnik ryzyka co minute: realne rachunki MT5, terminal PTF, Trade BOT.
 
-    Cron Vercela na koncie Hobby chodzi raz na dobe i oba sloty sa zajete.
-    Konto, za ktore trader zaplacil i na ktorym naprawde handluje, nie moze
-    czekac na limit dziennej straty do jutra — wiec ten adres wola zewnetrzny
-    scheduler (cron-job.org / GitHub Actions) z naglowkiem
-    `Authorization: Bearer <CRON_SECRET>`. GET jest obsluzony, bo wiekszosc
-    schedulerow puka wlasnie GET-em.
+    Wola go cron Vercela (`vercel.json`, plan Pro: `* * * * *`) z naglowkiem
+    `Authorization: Bearer <CRON_SECRET>`, ktory Vercel dolacza sam. Konto,
+    za ktore trader zaplacil, nie moze czekac na limit dziennej straty do
+    jutra, a plany Trade BOT-a maja zamykac sie o czasie, nie przy dobowym
+    ticku. GET jest obsluzony, bo wiekszosc schedulerow puka wlasnie GET-em.
 
     NIE jest to `/api/tick` z wieksza czestotliwoscia. Tamten przy okazji
     odpala payout bota, powiadomienia push, dzienne i tygodniowe podsumowania,

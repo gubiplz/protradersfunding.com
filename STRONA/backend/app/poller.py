@@ -333,6 +333,11 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
         # Gałąź MUSI być przed feed.snapshot: MetaQuotesWebFeed odpala w tle
         # logowanie do web terminala już przy samym zapytaniu o snapshot.
         snap = tradebot.tick(session, acc)
+        # Stempel przeglądu: otwarcie planu nie zmienia nic na koncie, więc bez
+        # niego dwa równoległe przebiegi (dobowy tick i cron ryzyka mają osobne
+        # zamki) mogłyby otworzyć dwa plany. Każdy przebieg robi UPDATE na
+        # `accounts`, a `row_version` odrzuca ten, który commituje drugi.
+        acc.terminal_eval_at = datetime.now(timezone.utc)
     elif ksiega:
         snap = None
     elif (not getattr(acc, "mt5_backed", True)
@@ -731,17 +736,20 @@ def _zajmij_tick_ryzyka(session, min_odstep_s: float) -> bool:
 
 
 async def tick_ryzyka(min_odstep_s: float = 20.0) -> dict:
-    """Przebieg silnika TYLKO po kontach z realnym rachunkiem MT5.
+    """Przebieg silnika po kontach, ktorych equity rusza sie bez tradera.
 
     `tick_once` robi cala reszte roboty doby: payout bota, powiadomienia,
     podsumowania, publikacje na kanale, sprzatanie snapshotow. Odpalenie tego
     1440 razy dziennie zamiast raz nie byloby optymalizacja, tylko awaria.
-    Tutaj liczy sie jedno: konto, za ktore ktos zaplacil, handluje NAPRAWDE
-    i limit dziennej straty ma byc zauwazony w minutach, a nie nazajutrz.
+    Tutaj liczy sie jedno: limit dziennej straty ma byc zauwazony w minutach,
+    a nie nazajutrz.
 
-    Konta bez `metaapi_account_id` sa pomijane swiadomie — ich equity nie
-    rusza sie samo, wiec czestszy przebieg nic by dla nich nie zmienil,
-    a kosztowalby tyle samo.
+    Trzy grupy kont: z realnym rachunkiem MT5 (`metaapi_account_id`), z otwarta
+    pozycja albo zleceniem w terminalu PTF (`terminal_open`) i prowadzone przez
+    Trade BOT-a (`bot_enabled`) — te ostatnie bez tego przebiegu ruszaly sie
+    tylko raz na dobe, zamykaly plany z opoznieniem i liczyly baseline dnia
+    o godzinie dobowego crona zamiast o polnocy. Reszta jest pomijana
+    swiadomie: jej equity nie rusza sie samo.
     """
     global _feed
     if _feed is None:
@@ -768,10 +776,12 @@ async def tick_ryzyka(min_odstep_s: float = 20.0) -> dict:
     start = time.monotonic()
     session = SessionLocal()
     try:
-        # Plus konta z otwartymi pozycjami/zleceniami w terminalu PTF: ich TP/SL,
-        # limity i dzienna strata też mają być zauważone w minutach.
+        # Plus konta z otwartymi pozycjami/zleceniami w terminalu PTF (TP/SL,
+        # limity i dzienna strata w minutach) i konta Trade BOT-a (plany
+        # zamykane o czasie, baseline dnia o północy).
         konta = (_active_query(session)
-                 .filter(or_(Account.metaapi_account_id.isnot(None), Account.terminal_open.is_(True)))
+                 .filter(or_(Account.metaapi_account_id.isnot(None), Account.terminal_open.is_(True),
+                             Account.bot_enabled.is_(True)))
                  .order_by(Account.id).all())
         # Rotacja: przebieg przerwany budżetem czasu zaczyna następnym razem od
         # konta, na którym stanął — inaczej ogon listy nie byłby liczony nigdy.

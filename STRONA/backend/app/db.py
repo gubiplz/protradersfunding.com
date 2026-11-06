@@ -372,6 +372,8 @@ _NEW_INDEXES: list[tuple[str, str]] = [
     ("support_tickets", "ref"),
     # Każde „Continue with Google" szuka konta po tej kolumnie.
     ("traders", "google_sub"),
+    # Cron ryzyka co minutę wybiera konta z otwartą pozycją w terminalu PTF.
+    ("accounts", "terminal_open"),
 ]
 
 
