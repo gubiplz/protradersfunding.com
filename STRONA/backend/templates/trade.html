@@ -246,6 +246,10 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
       <span class="t-grow"></span>
       <button class="t-danger" id="tCloseAll" type="button" disabled>Close All</button>
       <div class="t-dd">
+        <button class="t-outline" id="tFiltBtn" type="button" aria-haspopup="true"><svg viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4-2v-4z"/></svg>Markets<em id="tFiltN"></em></button>
+        <div class="t-menu t-cols t-filt" id="tFiltMenu" hidden></div>
+      </div>
+      <div class="t-dd">
         <button class="t-outline" id="tColsBtn" type="button"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>Columns</button>
         <div class="t-menu t-cols" id="tColsMenu" hidden></div>
       </div>

@@ -456,6 +456,20 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-table th:first-child,.t-table th:last-child{z-index:2}
 .t-table tr:hover td:first-child,.t-table tr:hover td:last-child{background:var(--hov)}
 .t-table .sym{display:flex;align-items:center;gap:8px;font-weight:600}
+/* Rows of the lists open their trade on the chart; headers sort. */
+.t-table tr[data-go]{cursor:pointer}
+.t-table th.srt{cursor:pointer;user-select:none;-webkit-user-select:none}
+.t-table th.srt:hover,.t-table th.srt.on{color:var(--txt)}
+.t-table th.srt i{font-style:normal;margin-left:5px;opacity:.35;font-size:11px}
+.t-table th.srt.on i{opacity:1;color:var(--acc)}
+.t-table th.srt:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+.t-filt{width:240px;max-height:min(60vh,420px);overflow:auto}
+.t-filt .sym{display:flex;align-items:center;gap:7px}
+.t-fsort{display:flex;gap:6px;padding:4px 12px 10px}
+.t-fsort select{flex:1;height:30px;border-radius:8px;background:var(--bg);color:inherit;border:1px solid var(--line2);padding:0 8px;font:inherit;font-size:13px}
+.t-fsort .t-outline{width:34px;justify-content:center;padding:0}
+#tFiltBtn.on{border-color:var(--acc);color:var(--acc)}
+#tFiltBtn em{font-style:normal}
 .t-table .sub{display:block;color:var(--dim);font-size:11px;margin-top:1px}   /* lots above units — narrower column */
 .t-table .side{font-weight:600}
 .t-table .act{display:flex;gap:6px;justify-content:flex-end}

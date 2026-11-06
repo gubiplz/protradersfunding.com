@@ -85,6 +85,8 @@
     accounts: [], accId: +ls.get('pf_term_acc', '0') || null, st: null, ptab: 'positions',
     // Slippage hidden by default (it's in Columns): with it the table didn't fit under the chart even at 1440 px.
     cols: ls.json('pf_term_cols3', { value: true, slippage: false, lev: true, margin: true, tpsl: true }),
+    fsyms: new Set(ls.json('pf_term_fsyms', [])),   // market filter of the lists (empty = all)
+    sort: ls.json('pf_term_sort', {}),              // per list tab: { h: column label, dir: 'asc' | 'desc' }
     showTrades: ls.get('pf_term_trades', '1') === '1',     // trade history on the chart ("Trades" button)
     weekend: false, fee: 0.009, group: null, top: [0, 0], bookUnit: 'base', tickMode: ls.get('pf_term_tick', 'trending'),
   };
@@ -393,6 +395,7 @@
     drawLines();          // new market's position lines and history markers at once, not after the next refresh
     if (pendingRange) { const r = pendingRange; pendingRange = null; setTimeout(() => fitRange(r), 30); }
     drawLines();
+    if (pendingFocus) { const f = pendingFocus; pendingFocus = null; setTimeout(() => focusNow(f), 40); }
   }
   const RANGE = { '5y': ['1w', 5 * 365], '1y': ['1d', 365], '6m': ['1d', 182], '3m': ['4h', 91], '1mo': ['1h', 30], '5d': ['15m', 5], '1d': ['1m', 1] };
   function fitRange(r) {
@@ -948,7 +951,11 @@
     pushBar(lastBar);
   }
   // Read-only hook for the UI checks in .tools: the last bar the chart was given.
-  window.PTFTerm = { bar: () => lastBar };
+  window.PTFTerm = {
+    bar: () => lastBar,
+    // visible bars as [first, last] timestamps
+    vis: () => { if (!chart) return null; const r = chart.getVisibleRange(), d = chart.getDataList(); return [d[Math.max(0, Math.floor(r.from))], d[Math.min(d.length - 1, Math.ceil(r.to) - 1)]].map((k) => k && k.timestamp); },
+  };
   function mergeBar(k) {
     if (!barCb) return;
     if (lastBar && k.timestamp === lastBar.timestamp) lastBar = { ...lastBar, high: Math.max(lastBar.high, k.high), low: Math.min(lastBar.low, k.low), volume: k.volume };
@@ -2002,6 +2009,7 @@
 
   /* ---------- trade history on the chart ("Trades" button) ---------- */
   let tradesKey = '', tipXY = [0, 0], tipT = 0;
+  const tradeOv = new Map();   // history id → { id: overlay id, ext } (a row click opens its tooltip)
   function drawTrades(force) {
     if (!chart) return;
     const hist = S.showTrades && S.st ? (S.st.history || []).filter((h) => h.symbol === S.sym && h.opened_at && h.closed_at && h.entry && h.close).slice(0, 60) : [];
@@ -2009,16 +2017,33 @@
     // these candles: their markers sit on the candle of that moment (clamped to its high/low) so
     // they don't float beside the chart. The tooltip still shows the recorded prices.
     const bars = chart.getDataList(), step = F.MS[S.interval];
-    const onBar = (t, v) => {
+    // The bar holding moment t (binary search; daily and weekly bars don't start on epoch multiples).
+    const barAt = (t) => {
       let lo = 0, hi = bars.length - 1, k = null;
       while (lo <= hi) { const m = (lo + hi) >> 1; if (bars[m].timestamp <= t) { k = bars[m]; lo = m + 1; } else hi = m - 1; }
-      return k && t < k.timestamp + step ? Math.min(k.high, Math.max(k.low, v)) : v;
+      return k && t < k.timestamp + step ? k : null;
+    };
+    // Markers sit in the middle of their candle (the bar's own timestamp), not at the minute inside it.
+    const mid = (t) => { const k = barAt(t); return k ? k.timestamp : t; };
+    const clamp = (k, v) => (k ? Math.min(k.high, Math.max(k.low, v)) : v);
+    /* Off-chart prices: each end clamped to its candle, but the line keeps the trade's
+       direction — a winning long ends higher than it started even when the recorded prices
+       are outside both candles (then entry at one extreme, exit at the other). */
+    const offChart = (h) => {
+      const t0 = Date.parse(h.opened_at), t1 = Date.parse(h.closed_at), k0 = barAt(t0), k1 = barAt(t1);
+      let e = clamp(k0, h.entry), x = clamp(k1, h.close);
+      const want = Math.sign(h.close - h.entry);
+      if (want && Math.sign(x - e) !== want && k0 && k1) {
+        if (want > 0) { e = k0.low; x = k1.high; } else { e = k0.high; x = k1.low; }
+      }
+      return [{ timestamp: mid(t0), value: e }, { timestamp: mid(t1), value: x }];
     };
     // The 15 s state refresh doesn't redraw trades when they haven't changed (hover stays).
     const key = S.sym + '|' + S.interval + '|' + bars.length + '|' + hist.map((h) => h.id).join(',');
     if (!force && key === tradesKey) return;
     tradesKey = key;
     chart.removeOverlay({ groupId: 'ptfTrades' });
+    tradeOv.clear();
     hideTip();
     const up = css('--up'), dn = css('--dn'), bg = css('--bg');
     hist.forEach((h) => {
@@ -2027,13 +2052,14 @@
       const id = chart.createOverlay({
         name: 'ptfTrade', groupId: 'ptfTrades', lock: true,
         points: h.on_chart === false
-          ? [{ timestamp: Date.parse(h.opened_at), value: onBar(Date.parse(h.opened_at), h.entry) }, { timestamp: Date.parse(h.closed_at), value: onBar(Date.parse(h.closed_at), h.close) }]
-          : [{ timestamp: Date.parse(h.opened_at), value: h.entry }, { timestamp: Date.parse(h.closed_at), value: h.close }],
+          ? offChart(h)
+          : [{ timestamp: mid(Date.parse(h.opened_at)), value: h.entry }, { timestamp: mid(Date.parse(h.closed_at)), value: h.close }],
         extendData: ext,
         onMouseEnter: ({ overlay }) => hoverTrade(overlay, true),
         onMouseLeave: ({ overlay }) => hoverTrade(overlay, false),
         onClick: ({ overlay }) => { hoverTrade(overlay, true); clearTimeout(tipT); tipT = setTimeout(() => hoverTrade(overlay, false), 4000); return true; },
       });
+      if (id) tradeOv.set(h.id, { id, ext });
       if (fresh && id) drawIn(id, ext);
     });
     S.justClosed.clear();
@@ -2104,6 +2130,110 @@
     ls.set('pf_term_cols3', JSON.stringify(S.cols));
     renderTables();
   });
+  /* ---------- Markets filter and sorting of the lists ---------- */
+  const saveF = () => { ls.set('pf_term_fsyms', JSON.stringify([...S.fsyms])); ls.set('pf_term_sort', JSON.stringify(S.sort)); };
+  function toggleSort(h) {
+    const so = S.sort[S.ptab];
+    if (!so || so.h !== h) S.sort[S.ptab] = { h, dir: 'asc' };
+    else if (so.dir === 'asc') so.dir = 'desc';
+    else delete S.sort[S.ptab];
+    saveF(); renderTables();
+  }
+  function renderFiltN() {
+    const n = S.fsyms.size;
+    $('tFiltN').textContent = n ? ` (${n})` : '';
+    $('tFiltBtn').classList.toggle('on', !!n);
+  }
+  function fillFilt(mn) {
+    const st = S.st || {};
+    const seen = new Set([].concat(st.positions || [], st.orders || [], st.history || [], st.order_history || []).map((x) => x.symbol));
+    S.fsyms.forEach((s) => seen.add(s));
+    const syms = [...seen].filter((s) => BY[s]).sort();
+    const heads = $$('thead th[data-sort]', $('tTable')).map((x) => x.dataset.sort);
+    const so = S.sort[S.ptab];
+    mn.innerHTML = '<h6>Markets</h6>' + (syms.length
+      ? `<label class="ck"><input type="checkbox" data-fall${S.fsyms.size ? '' : ' checked'}><span>All markets</span></label>` + syms.map((s) => `<label class="ck"><input type="checkbox" data-fsym="${s}"${S.fsyms.has(s) ? ' checked' : ''}><span class="sym">${mIcon(BY[s], true)}${s}</span></label>`).join('')
+      : '<p class="t-hint" style="padding:4px 12px 8px">No trades yet</p>')
+      + (heads.length ? `<h6>Sort by</h6><div class="t-fsort"><select data-fsort><option value="">Default</option>${heads.map((h) => `<option value="${esc(h)}"${so && so.h === h ? ' selected' : ''}>${esc(h)}</option>`).join('')}</select><button type="button" class="t-outline" data-fdir aria-label="Sort direction">${so && so.dir === 'desc' ? '↓' : '↑'}</button></div>` : '');
+  }
+  dropdown($('tFiltBtn'), $('tFiltMenu'), fillFilt);
+  $('tFiltMenu').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (e.target.closest('[data-fdir]')) {
+      const so = S.sort[S.ptab];
+      if (so) { so.dir = so.dir === 'desc' ? 'asc' : 'desc'; saveF(); renderTables(); fillFilt($('tFiltMenu')); }
+    }
+  });
+  $('tFiltMenu').addEventListener('change', (e) => {
+    const t = e.target;
+    if (t.matches('[data-fall]')) S.fsyms.clear();
+    else if (t.dataset.fsym) { if (t.checked) S.fsyms.add(t.dataset.fsym); else S.fsyms.delete(t.dataset.fsym); }
+    else if (t.matches('[data-fsort]')) { if (t.value) S.sort[S.ptab] = { h: t.value, dir: (S.sort[S.ptab] || {}).dir || 'asc' }; else delete S.sort[S.ptab]; }
+    saveF(); renderFiltN(); renderTables(); fillFilt($('tFiltMenu'));
+  });
+  renderFiltN();
+  $('tTable').addEventListener('keydown', (e) => {
+    const th = e.target.closest && e.target.closest('th[data-sort]');
+    if (th && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggleSort(th.dataset.sort); }
+  });
+
+  /* ---------- a row of the lists → that trade on the chart ----------
+     Another market switches the chart first; the chart loads enough bars to reach the
+     trade (a coarser interval when the current one can't), then centres the trade,
+     zooms so it fills about half the width, and opens the closed trade's tooltip. */
+  let pendingFocus = null;
+  const INT_ORDER = ['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'];
+  function focusRow(tr) {
+    const sym = tr.dataset.go, t0 = +tr.dataset.t0 || 0, t1 = +tr.dataset.t1 || 0;
+    if (!BY[sym] || !chart) return;
+    const rec = { sym, t0: t0 || Date.now(), t1: t1 || 0, hid: +tr.dataset.hid || 0 };
+    // Interval: the current one if 4 800 bars reach back to the trade, otherwise the first coarser one that does.
+    const back = Date.now() - rec.t0;
+    let int = S.interval;
+    for (let i = Math.max(0, INT_ORDER.indexOf(S.interval)); i < INT_ORDER.length; i++) { int = INT_ORDER[i]; if (back / F.MS[int] + 80 <= 4800) break; }
+    const need = Math.min(4800, Math.max(500, Math.ceil(back / F.MS[int]) + 120));
+    const bars = chart.getDataList();
+    const covered = sym === S.sym && int === S.interval && bars.length && bars[0].timestamp <= rec.t0 - 20 * F.MS[int];
+    if (covered) return focusNow(rec);
+    pendingFocus = rec;
+    histLimit = need;
+    if (sym !== S.sym) {
+      if (int !== S.interval) { S.interval = int; ls.set('pf_term_int', int); $$('[data-i]', $('tInts')).forEach((b) => b.classList.toggle('on', b.dataset.i === int)); }
+      setMarket(sym);
+    } else setInterval_(int, true);
+  }
+  function focusNow(rec) {
+    if (!chart || rec.sym !== S.sym) return;
+    const step = F.MS[S.interval], w = Math.max(200, $('tChart').clientWidth - 70);
+    const end = rec.t1 || Date.now();
+    const span = Math.max(60, (end - rec.t0) / step);
+    chart.setBarSpace(Math.max(1, Math.min(24, (w * 0.5) / span)));
+    if (!rec.t1) { chart.scrollToRealTime(); } else {
+      // scrollToDataIndex puts a bar at the right edge: put there the bar half a chart
+      // width after the trade's middle, so the trade lands in the centre.
+      const mid = rec.t0 + (end - rec.t0) / 2, d = chart.getDataList();
+      let lo = 0, hi = d.length - 1, idx = 0;
+      while (lo <= hi) { const m = (lo + hi) >> 1; if (d[m].timestamp <= mid) { idx = m; lo = m + 1; } else hi = m - 1; }
+      const bs = chart.getBarSpace(), bar = typeof bs === 'number' ? bs : (bs && bs.bar) || 8;
+      const at = idx + Math.round(w / 2 / bar);
+      if (at >= d.length - 1) chart.scrollToRealTime(); else chart.scrollToDataIndex(at);
+    }
+    if (rec.hid) {
+      drawTrades();
+      const o = tradeOv.get(rec.hid), h = S.st && S.st.history.find((x) => x.id === rec.hid);
+      if (o && h) {
+        setTimeout(() => {
+          try { const c = chart.convertToPixel({ timestamp: Date.parse(h.closed_at), value: h.close }, { paneId: 'candle_pane', absolute: true }); if (c) tipXY = [c.x, c.y]; } catch (e) {}
+          const ov = { id: o.id, extendData: o.ext };
+          hoverTrade(ov, true);
+          clearTimeout(tipT); tipT = setTimeout(() => hoverTrade({ id: o.id, extendData: { ...o.ext, hover: true } }, false), 4000);
+        }, 60);
+      }
+    }
+    // The list sits under the chart: bring the chart back into view when it's off screen.
+    const r = $('tChart').getBoundingClientRect();
+    if (r.top < 60 || r.bottom > innerHeight) $('tChart').scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'center' });
+  }
   $$('.t-ptabs > [data-pt]').forEach((b) => b.addEventListener('click', () => setPTab(b.dataset.pt)));
   dropdown($('tMoreBtn'), $('tMoreMenu'));
   $('tMoreMenu').addEventListener('click', (e) => { const b = e.target.closest('[data-pt]'); if (b) { $('tMoreMenu').hidden = true; setPTab(b.dataset.pt); } });
@@ -2118,7 +2248,7 @@
     drawTables();
     // column header as the cell label: on phones rows are cards (CSS td[data-l]::before)
     const el = $('tTable');
-    const th = $$('thead th', el).map((x) => x.textContent);
+    const th = $$('thead th', el).map((x) => x.dataset.h || x.textContent);
     $$('tbody tr', el).forEach((tr) => [...tr.children].forEach((td, i) => { if (th[i]) td.dataset.l = th[i]; }));
     // A position that has just opened slides into the table.
     if (S.ptab === 'positions' && S.st) {
@@ -2161,36 +2291,67 @@
     if (S.ptab === 'report') { if (!el.querySelector('input:focus')) el.innerHTML = reportHtml(); return; }
     const sym = (s) => { const m = BY[s]; return m ? `<span class="sym">${mIcon(m, true)}${s}</span>` : esc(s); };
     const side = (s) => `<span class="side ${s === 'buy' ? 'up' : 'dn'}">${s === 'buy' ? 'Long' : 'Short'}</span>`;
-    const table = (head, rows, empty) => (rows.length ? `<table><thead><tr>${head.map(([h, n]) => `<th class="${n ? 'num' : ''}">${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>` : `<div class="t-empty">${empty}</div>`);
+    /* Lists: market filter (Markets menu), sorting by a header (click: ascending, again:
+       descending, a third time: back to the default order) and a click on a row moves the
+       chart to that trade. A head entry: [label, numeric, sort key]. */
+    const shown = (list) => (S.fsyms.size ? list.filter((x) => S.fsyms.has(x.symbol)) : list);
+    const sortList = (list, head) => {
+      const so = S.sort[S.ptab], col = so && head.find((c) => c[0] === so.h);
+      if (!col || !col[2]) return list;
+      const k = col[2], d = so.dir === 'desc' ? -1 : 1;
+      return list.slice().sort((a, b) => {
+        const x = k(a), y = k(b);
+        if (x == null || y == null) return x == null ? (y == null ? 0 : 1) : -1;
+        return (typeof x === 'string' ? x.localeCompare(y) : x - y) * d;
+      });
+    };
+    const table = (head, rows, empty, all) => {
+      if (!rows.length) {
+        return all && S.fsyms.size ? `<div class="t-empty"><div>Nothing for the selected markets<br><button class="t-btn" type="button" data-fclear>Show all markets</button></div></div>` : `<div class="t-empty">${empty}</div>`;
+      }
+      const so = S.sort[S.ptab];
+      return `<table><thead><tr>${head.map(([h, n, k], i) => {
+        const on = so && so.h === h;
+        const srt = k ? ` data-sort="${h}" aria-sort="${on ? (so.dir === 'desc' ? 'descending' : 'ascending') : 'none'}" tabindex="0"` : '';
+        return `<th class="${n ? 'num' : ''}${k ? ' srt' : ''}${on ? ' on' : ''}" data-h="${h}"${srt}>${h}${k ? `<i aria-hidden="true">${on ? (so.dir === 'desc' ? '↓' : '↑') : '↕'}</i>` : ''}</th>`;
+      }).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
+    };
+    const ts = (v) => (v ? Date.parse(v) : null);
+    const go = (sym, t0, t1, extra) => ` data-go="${esc(sym)}" data-t0="${t0 || ''}" data-t1="${t1 || ''}"${extra || ''}`;
     if (S.ptab === 'positions') {
       const c = S.cols;
-      const head = [['Market'], ['Side'], ['Size', 1]].concat(c.value ? [['Value (USD)', 1]] : [], [['Entry Price', 1]], c.slippage ? [['Slippage', 1]] : [], [['Mark Price', 1]], [['PnL (ROE)', 1]], c.lev ? [['Leverage', 1]] : [], c.margin ? [['Margin', 1]] : [], c.tpsl ? [['TP / SL', 1]] : [], [['', 1]]);
-      const rows = livePos().map((p) => {
+      const head = [['Market', 0, (p) => p.symbol], ['Side', 0, (p) => p.side], ['Size', 1, (p) => p.value]].concat(c.value ? [['Value (USD)', 1, (p) => p.value]] : [], [['Entry Price', 1]], c.slippage ? [['Slippage', 1, (p) => p.slippage]] : [], [['Mark Price', 1]], [['PnL (ROE)', 1, (p) => p.pnl]], c.lev ? [['Leverage', 1, (p) => p.leverage]] : [], c.margin ? [['Margin', 1, (p) => p.margin]] : [], c.tpsl ? [['TP / SL', 1]] : [], [['', 1]]);
+      const all = livePos();
+      const rows = sortList(shown(all), head).map((p) => {
         const m = BY[p.symbol] || S.m;
-        return `<tr data-pid="${p.id}"><td>${sym(p.symbol)}</td><td>${side(p.side)}</td><td class="num">${sizeCell(m, p.qty)}</td>${c.value ? `<td class="num" data-f="value">${usd(p.value)}</td>` : ''}<td class="num">${px(m, p.entry)}</td>${c.slippage ? `<td class="num">${ok(p.slippage) ? p.slippage.toFixed(3) + '%' : '—'}</td>` : ''}<td class="num" data-f="mark">${px(m, p.mark)}</td><td class="num ${cls(p.pnl)}" data-f="pnl">${sUsd(p.pnl)} (${pct(p.roe)})</td>${c.lev ? `<td class="num">1:${p.leverage}</td>` : ''}${c.margin ? `<td class="num">${usd(p.margin)}</td>` : ''}${c.tpsl ? `<td class="num"><button type="button" class="tpsl" data-tpsl="${p.id}">${p.tp ? px(m, p.tp) : '—'} / ${p.sl ? px(m, p.sl) : '—'}</button></td>` : ''}<td><div class="act">${p.managed ? '' : `<button type="button" data-half="${p.id}">Close 50%</button>`}<button type="button" class="dn" data-close="${p.id}">Close</button></div></td></tr>`;
+        return `<tr data-pid="${p.id}"${go(p.symbol, ts(p.opened_at), '')}><td>${sym(p.symbol)}</td><td>${side(p.side)}</td><td class="num">${sizeCell(m, p.qty)}</td>${c.value ? `<td class="num" data-f="value">${usd(p.value)}</td>` : ''}<td class="num">${px(m, p.entry)}</td>${c.slippage ? `<td class="num">${ok(p.slippage) ? p.slippage.toFixed(3) + '%' : '—'}</td>` : ''}<td class="num" data-f="mark">${px(m, p.mark)}</td><td class="num ${cls(p.pnl)}" data-f="pnl">${sUsd(p.pnl)} (${pct(p.roe)})</td>${c.lev ? `<td class="num">1:${p.leverage}</td>` : ''}${c.margin ? `<td class="num">${usd(p.margin)}</td>` : ''}${c.tpsl ? `<td class="num"><button type="button" class="tpsl" data-tpsl="${p.id}">${p.tp ? px(m, p.tp) : '—'} / ${p.sl ? px(m, p.sl) : '—'}</button></td>` : ''}<td><div class="act">${p.managed ? '' : `<button type="button" data-half="${p.id}">Close 50%</button>`}<button type="button" class="dn" data-close="${p.id}">Close</button></div></td></tr>`;
       });
-      el.innerHTML = table(head, rows, 'No open positions');
+      el.innerHTML = table(head, rows, 'No open positions', all.length);
     } else if (S.ptab === 'orders') {
-      el.innerHTML = table([['Time'], ['Market'], ['Type'], ['Side'], ['Size', 1], ['Price', 1], ['Reduce Only'], ['TP / SL', 1], ['', 1]], st.orders.map((o) => {
+      const head = [['Time', 0, (o) => ts(o.created_at)], ['Market', 0, (o) => o.symbol], ['Type', 0, (o) => o.kind], ['Side', 0, (o) => o.side], ['Size', 1, (o) => o.qty * (o.price || 0)], ['Price', 1, (o) => o.price], ['Reduce Only'], ['TP / SL', 1], ['', 1]];
+      el.innerHTML = table(head, sortList(shown(st.orders), head).map((o) => {
         const m = BY[o.symbol];
-        return `<tr><td>${tm(o.created_at)}</td><td>${sym(o.symbol)}</td><td>${o.kind === 'limit' ? 'Limit' : 'Stop Market'}</td><td>${side(o.side)}</td><td class="num">${sizeCell(m, o.qty)}</td><td class="num">${px(m, o.price)}</td><td>${o.reduce_only ? 'Yes' : 'No'}</td><td class="num">${o.tp ? px(m, o.tp) : '—'} / ${o.sl ? px(m, o.sl) : '—'}</td><td><div class="act"><button type="button" class="dn" data-cancel="${o.id}">Cancel</button></div></td></tr>`;
-      }), 'No open orders');
+        return `<tr${go(o.symbol, ts(o.created_at), '', ` data-px="${o.price || ''}"`)}><td>${tm(o.created_at)}</td><td>${sym(o.symbol)}</td><td>${o.kind === 'limit' ? 'Limit' : 'Stop Market'}</td><td>${side(o.side)}</td><td class="num">${sizeCell(m, o.qty)}</td><td class="num">${px(m, o.price)}</td><td>${o.reduce_only ? 'Yes' : 'No'}</td><td class="num">${o.tp ? px(m, o.tp) : '—'} / ${o.sl ? px(m, o.sl) : '—'}</td><td><div class="act"><button type="button" class="dn" data-cancel="${o.id}">Cancel</button></div></td></tr>`;
+      }), 'No open orders', st.orders.length);
       if (st.orders.length) el.insertAdjacentHTML('afterbegin', '<div style="padding:8px 12px;text-align:right"><button class="t-danger" type="button" data-cancelall>Cancel all orders</button></div>');
     } else if (S.ptab === 'phist') {
       const R = { close: 'Closed', reduce: 'Reduced', tp: 'Take profit', sl: 'Stop loss', liquidation: 'Liquidation', stop_out: 'Stop-out', breach: 'Rule breach', phase: 'Phase passed', admin: 'Closed by admin' };
-      el.innerHTML = table([['Closed'], ['Market'], ['Side'], ['Size', 1], ['Entry', 1], ['Exit', 1], ['PnL', 1], ['Fees', 1], ['Reason']], st.history.map((h) => {
+      const head = [['Closed', 0, (h) => ts(h.closed_at)], ['Market', 0, (h) => h.symbol], ['Side', 0, (h) => h.side], ['Size', 1, (h) => h.lots], ['Entry', 1], ['Exit', 1], ['PnL', 1, (h) => h.pnl], ['Fees', 1, (h) => h.fee], ['Reason', 0, (h) => R[h.reason] || h.reason || '']];
+      el.innerHTML = table(head, sortList(shown(st.history), head).map((h) => {
         const m = BY[h.symbol] || S.m;
         // Lots from the server (account measure, as in portal and MT5) — same form for each trade.
         const size = `${lotsF(h.lots)} lots <span class="sub">${qtyF(m, h.qty)} ${esc(m.base)}</span>`;
-        return `<tr><td>${tm(h.closed_at)}</td><td>${sym(h.symbol)}</td><td>${side(h.side)}</td><td class="num">${size}</td><td class="num">${px(m, h.entry)}</td><td class="num">${px(m, h.close)}</td><td class="num ${cls(h.pnl)}">${sUsd(h.pnl)}</td><td class="num">${usd(h.fee)}</td><td><span class="t-pill ${h.reason === 'tp' ? 'ok' : ['sl', 'liquidation', 'stop_out', 'breach'].includes(h.reason) ? 'bad' : ''}">${R[h.reason] || esc(h.reason || '')}</span></td></tr>`;
-      }), 'No closed positions yet');
+        return `<tr${go(h.symbol, ts(h.opened_at), ts(h.closed_at), ` data-hid="${h.id}"`)}><td>${tm(h.closed_at)}</td><td>${sym(h.symbol)}</td><td>${side(h.side)}</td><td class="num">${size}</td><td class="num">${px(m, h.entry)}</td><td class="num">${px(m, h.close)}</td><td class="num ${cls(h.pnl)}">${sUsd(h.pnl)}</td><td class="num">${usd(h.fee)}</td><td><span class="t-pill ${h.reason === 'tp' ? 'ok' : ['sl', 'liquidation', 'stop_out', 'breach'].includes(h.reason) ? 'bad' : ''}">${R[h.reason] || esc(h.reason || '')}</span></td></tr>`;
+      }), 'No closed positions yet', st.history.length);
     } else if (S.ptab === 'ohist' || S.ptab === 'fills') {
       const list = S.ptab === 'fills' ? st.order_history.filter((o) => o.status === 'filled') : st.order_history;
       const K = { market: 'Market', limit: 'Limit', stop: 'Stop Market' };
-      el.innerHTML = table([['Time'], ['Market'], ['Type'], ['Side'], ['Size', 1], ['Price', 1], ['Filled at', 1], ['Status'], ['Note']], list.map((o) => {
+      const head = [['Time', 0, (o) => ts(o.done_at || o.created_at)], ['Market', 0, (o) => o.symbol], ['Type', 0, (o) => K[o.kind] || o.kind], ['Side', 0, (o) => o.side], ['Size', 1, (o) => o.qty * (o.fill_price || o.price || 0)], ['Price', 1, (o) => o.price], ['Filled at', 1, (o) => o.fill_price], ['Status', 0, (o) => o.status], ['Note']];
+      el.innerHTML = table(head, sortList(shown(list), head).map((o) => {
         const m = BY[o.symbol] || S.m;
-        return `<tr><td>${tm(o.done_at || o.created_at)}</td><td>${sym(o.symbol)}</td><td>${K[o.kind] || o.kind}${o.reduce_only ? ' · RO' : ''}</td><td>${side(o.side)}</td><td class="num">${sizeCell(m, o.qty)}</td><td class="num">${o.price ? px(m, o.price) : 'Market'}</td><td class="num">${o.fill_price ? px(m, o.fill_price) : '—'}</td><td><span class="t-pill ${o.status === 'filled' ? 'ok' : o.status === 'rejected' ? 'bad' : ''}">${o.status}</span></td><td style="color:var(--muted);white-space:normal;min-width:180px">${esc(o.note || '')}</td></tr>`;
-      }), S.ptab === 'fills' ? 'No trades yet' : 'No orders yet');
+        const t = ts(o.done_at || o.created_at);
+        return `<tr${go(o.symbol, t, t)}><td>${tm(o.done_at || o.created_at)}</td><td>${sym(o.symbol)}</td><td>${K[o.kind] || o.kind}${o.reduce_only ? ' · RO' : ''}</td><td>${side(o.side)}</td><td class="num">${sizeCell(m, o.qty)}</td><td class="num">${o.price ? px(m, o.price) : 'Market'}</td><td class="num">${o.fill_price ? px(m, o.fill_price) : '—'}</td><td><span class="t-pill ${o.status === 'filled' ? 'ok' : o.status === 'rejected' ? 'bad' : ''}">${o.status}</span></td><td style="color:var(--muted);white-space:normal;min-width:180px">${esc(o.note || '')}</td></tr>`;
+      }), S.ptab === 'fills' ? 'No trades yet' : 'No orders yet', list.length);
     } else if (S.ptab === 'rules') {
       const a = st.account, mt = a.metrics;
       const eq = a.balance + livePos().reduce((s, p) => s + (p.pnl || 0), 0);
@@ -2221,6 +2382,9 @@
     if (t.closest('[data-add-acc]')) return openLogin(true);
     const acc = t.closest('[data-acc]');
     if (acc) return selectAccount(+acc.dataset.acc);
+    const sh = t.closest('th[data-sort]');
+    if (sh) return toggleSort(sh.dataset.sort);
+    if (t.closest('[data-fclear]')) { S.fsyms.clear(); saveF(); renderFiltN(); return renderTables(); }
     const cl = t.closest('[data-close]'), hf = t.closest('[data-half]');
     if (cl || hf) return closePos(+(cl || hf).dataset.close || +(hf && hf.dataset.half), !!hf, cl || hf);
     const cn = t.closest('[data-cancel]');
@@ -2236,7 +2400,9 @@
       });
     }
     const tps = t.closest('[data-tpsl]');
-    if (tps) editTpsl(+tps.dataset.tpsl);
+    if (tps) return editTpsl(+tps.dataset.tpsl);
+    const row = t.closest('tr[data-go]');
+    if (row && !t.closest('button, a, input, select, label')) focusRow(row);
   });
   function closePos(id, half, btn) {
     return once('pos' + id, btn, async () => {
