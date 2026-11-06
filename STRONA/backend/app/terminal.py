@@ -1085,9 +1085,10 @@ def _zrodlo_feedu() -> str | None:
     return "finnhub" if get_settings().finnhub_api_key else None
 
 
-def _http_get_json(url: str, params: dict) -> tuple[int, object]:
+def _http_get_json(url: str, params: dict, headers: dict | None = None) -> tuple[int, object]:
+    """GET z kluczem w NAGŁÓWKU: httpx loguje pełny URL, więc klucz w parametrze trafiałby do logów."""
     import httpx
-    r = httpx.get(url, params=params, timeout=8.0, headers={"Accept": "application/json"})
+    r = httpx.get(url, params=params, timeout=8.0, headers={"Accept": "application/json", **(headers or {})})
     try:
         body = r.json()
     except Exception:
@@ -1101,9 +1102,9 @@ def _finnhub_swiece(coin: str, od_s: int, do_s: int, transport=None) -> list[dic
     if not sym:
         return None
     url = "https://finnhub.io/api/v1/forex/candle"
-    params = {"symbol": sym, "resolution": "1", "from": int(od_s), "to": int(do_s), "token": get_settings().finnhub_api_key}
+    params = {"symbol": sym, "resolution": "1", "from": int(od_s), "to": int(do_s)}
     try:
-        status, body = (transport or _http_get_json)(url, params)
+        status, body = (transport or _http_get_json)(url, params, {"X-Finnhub-Token": get_settings().finnhub_api_key})
     except Exception as e:
         print(f"[candles] finnhub {sym}: {e}", flush=True)
         return None
@@ -1279,8 +1280,7 @@ def _hist_swiece(coin: str, start: datetime | None, limit: int, transport=None) 
     limit = min(int(limit), HIST_PORCJA[zrodlo])
     if zrodlo == "finnhub":
         do_s = int((start.replace(tzinfo=timezone.utc).timestamp()) if start else time.time())
-        return _finnhub_swiece(coin, do_s - limit * 60, do_s,
-                               transport=(lambda u, p: transport(u, p, {})) if transport else None)
+        return _finnhub_swiece(coin, do_s - limit * 60, do_s, transport=transport)
     if zrodlo == "metaapi":
         url = (f"https://mt-market-data-client-api-v1.{s.metaapi_region or 'new-york'}.agiliumtrade.ai"
                f"/users/current/accounts/{s.metaapi_candles_account_id}/historical-market-data"
@@ -1291,11 +1291,10 @@ def _hist_swiece(coin: str, start: datetime | None, limit: int, transport=None) 
         headers = {"auth-token": s.metaapi_token}
     else:
         url = "https://api.twelvedata.com/time_series"
-        params = {"symbol": sym, "interval": "1min", "outputsize": limit, "timezone": "UTC",
-                  "order": "desc", "apikey": s.twelvedata_api_key}
+        params = {"symbol": sym, "interval": "1min", "outputsize": limit, "timezone": "UTC", "order": "desc"}
         if start is not None:
             params["end_date"] = start.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
-        headers = {}
+        headers = {"Authorization": f"apikey {s.twelvedata_api_key}"}     # klucz w nagłówku, nie w logowanym URL
     try:
         status, body = (transport or _hist_transport)(url, params, headers)
     except Exception as e:
@@ -1304,6 +1303,11 @@ def _hist_swiece(coin: str, start: datetime | None, limit: int, transport=None) 
     if zrodlo == "twelvedata":
         if status == 200 and isinstance(body, dict) and body.get("status") == "ok":
             body = [{"time": v.get("datetime", "").replace(" ", "T"), **v} for v in body.get("values", [])]
+        elif status == 404 or (isinstance(body, dict) and body.get("code") in (400, 404)):
+            # Symbolu nie ma w tym planie (np. XPT/USD): pusta odpowiedź = koniec historii tego rynku,
+            # zamiast pytać co minutę.
+            print(f"[candles] twelvedata {sym}: not available ({status}) — skipping this market", flush=True)
+            return []
         else:
             body = None
     if status != 200 or not isinstance(body, list):

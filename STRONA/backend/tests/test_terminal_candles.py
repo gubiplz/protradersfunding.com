@@ -200,19 +200,26 @@ def test_twelve_data_jako_zrodlo_historii(monkeypatch):
 
     def transport(url, params, headers):
         zapytania.append((url, dict(params)))
-        assert url == "https://api.twelvedata.com/time_series" and headers == {}
+        # Klucz tylko w nagłówku: httpx loguje pełny URL, a logi Vercela czyta cały zespół.
+        assert url == "https://api.twelvedata.com/time_series" and headers == {"Authorization": "apikey td-key"}
         if params["symbol"] == "JP225":
-            return 200, {"status": "error", "code": 400, "message": "not available"}
+            return 500, {"status": "error", "code": 500, "message": "upstream"}
+        if params["symbol"] == "XPT/USD":
+            return 404, None                                 # symbolu nie ma w planie
         return 200, {"status": "ok", "values": [
             {"datetime": "2026-11-06 13:59:00", "open": "1.1500", "high": "1.1510", "low": "1.1490", "close": "1.1505"},
             {"datetime": "2026-11-06 13:58:00", "open": "1.1490", "high": "1.1502", "low": "1.1480", "close": "1.1500"}]}
 
     w = terminal.uzupelnij_historie(5.0, transport=transport, teraz=teraz)
     assert w["source"] == "twelvedata" and w["markets"]["xyz:EUR"]["rows"] == 2
-    assert w["markets"]["xyz:JP225"]["rows"] == 0 and w["markets"]["xyz:JP225"]["done"] is False
+    assert w["markets"]["xyz:JP225"]["rows"] == 0 and w["markets"]["xyz:JP225"]["done"] is False   # błąd: spróbuje znów
+    assert w["markets"]["xyz:PLATINUM"]["done"] is True                                           # 404: koniec, bez pytań co minutę
     q = {p["symbol"]: p for _, p in zapytania}
-    assert q["EUR/USD"]["interval"] == "1min" and q["EUR/USD"]["outputsize"] == 5000 and q["EUR/USD"]["apikey"] == "td-key"
+    assert q["EUR/USD"]["interval"] == "1min" and q["EUR/USD"]["outputsize"] == 5000 and "apikey" not in q["EUR/USD"]
     assert q["EUR/USD"]["end_date"] == "2026-11-06 14:00:00" and q["USD/JPY"]["timezone"] == "UTC"
+    n = len(zapytania)
+    terminal.uzupelnij_historie(5.0, transport=transport, teraz=teraz)
+    assert all(p["symbol"] != "XPT/USD" for _, p in zapytania[n:])
     s = SessionLocal()
     r = s.query(TerminalCandle).filter(TerminalCandle.coin == "xyz:EUR").order_by(TerminalCandle.ts).all()
     assert [(x.ts.minute, x.c, x.n) for x in r] == [(58, 1.15, 0), (59, 1.1505, 0)]
@@ -229,8 +236,8 @@ def test_feed_spot_nadpisuje_probki_a_probki_nie_nadpisuja_feedu(monkeypatch):
     s.commit(); s.close()
     zapytania = []
 
-    def transport(url, params):
-        zapytania.append((url, dict(params)))
+    def transport(url, params, headers):
+        zapytania.append((url, dict(params), dict(headers)))
         if params["symbol"] != "OANDA:EUR_USD":
             return 200, PUSTY_FH
         return 200, _fh_body([(sek, 1.11498, 1.11503, 1.11491, 1.11501), (sek + 60, 1.11501, None, 1.11499, 1.11502),
@@ -238,7 +245,8 @@ def test_feed_spot_nadpisuje_probki_a_probki_nie_nadpisuja_feedu(monkeypatch):
 
     w = terminal.odswiez_feed(transport=transport)
     assert w["xyz:EUR"] == 2 and w["xyz:GBP"] == 0 and "xyz:JP225" not in w
-    assert zapytania[0][0].endswith("/forex/candle") and zapytania[0][1]["resolution"] == "1" and zapytania[0][1]["token"] == "fh-key"
+    assert zapytania[0][0].endswith("/forex/candle") and zapytania[0][1]["resolution"] == "1"
+    assert "token" not in zapytania[0][1] and zapytania[0][2] == {"X-Finnhub-Token": "fh-key"}   # klucz tylko w nagłówku
     assert zapytania[0][1]["to"] - zapytania[0][1]["from"] == terminal.FEED_OKNO_S
     s = SessionLocal()
     r = {x.ts: x for x in s.query(TerminalCandle).filter(TerminalCandle.coin == "xyz:EUR").all()}
