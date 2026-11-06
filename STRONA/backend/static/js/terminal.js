@@ -953,6 +953,7 @@
   // Read-only hook for the UI checks in .tools: the last bar the chart was given.
   window.PTFTerm = {
     bar: () => lastBar,
+    tradeBox: () => (tipH ? tradeBox(tipH) : null),
     // visible bars as [first, last] timestamps
     vis: () => { if (!chart) return null; const r = chart.getVisibleRange(), d = chart.getDataList(); return [d[Math.max(0, Math.floor(r.from))], d[Math.min(d.length - 1, Math.ceil(r.to) - 1)]].map((k) => k && k.timestamp); },
   };
@@ -2055,9 +2056,9 @@
           ? offChart(h)
           : [{ timestamp: mid(Date.parse(h.opened_at)), value: h.entry }, { timestamp: mid(Date.parse(h.closed_at)), value: h.close }],
         extendData: ext,
-        onMouseEnter: ({ overlay }) => hoverTrade(overlay, true),
-        onMouseLeave: ({ overlay }) => hoverTrade(overlay, false),
-        onClick: ({ overlay }) => { hoverTrade(overlay, true); clearTimeout(tipT); tipT = setTimeout(() => hoverTrade(overlay, false), 4000); return true; },
+        onMouseEnter: ({ overlay }) => { tipMode = 'hover'; hoverTrade(overlay, true); },
+        onMouseLeave: ({ overlay }) => { if (tipMode === 'hover') hoverTrade(overlay, false); },
+        onClick: ({ overlay }) => { tipMode = 'focus'; hoverTrade(overlay, true); return true; },
       });
       if (id) tradeOv.set(h.id, { id, ext });
       if (fresh && id) drawIn(id, ext);
@@ -2074,16 +2075,36 @@
       if (k < 1) requestAnimationFrame(step);
     })(t0);
   }
+  /* Trade tooltip: placed beside the trade (never over its markers or line), not at the
+     cursor. Opened from a list row or by a click/tap on the trade ('focus') it closes on
+     the first move away from the trade or a scroll or drag of the chart; on hover it
+     lives while the cursor is on the trade. */
+  let tipMode = 'hover', tipOv = null, tipH = null;
   function hoverTrade(overlay, on) {
     const e = overlay.extendData || {};
-    if (!!e.hover !== on) chart.overrideOverlay({ id: overlay.id, extendData: { ...e, hover: on } });
-    if (on) showTip(e.h); else hideTip();
+    chart.overrideOverlay({ id: overlay.id, extendData: { ...e, hover: on } });
+    if (on) { tipOv = { id: overlay.id, ext: e }; showTip(e.h); } else { tipOv = null; hideTip(); }
+  }
+  function closeTip() {
+    if (tipOv) hoverTrade({ id: tipOv.id, extendData: tipOv.ext }, false); else hideTip();
+  }
+  // The trade's box on the chart (px, relative to #tChart): both markers and the line between them.
+  function tradeBox(h) {
+    if (!chart || !h) return null;
+    const o = tradeOv.get(h.id), pts = [];
+    const src = o && chart.getOverlays ? (chart.getOverlays({ id: o.id }) || [])[0] : null;
+    const points = (src && src.points) || [{ timestamp: Date.parse(h.opened_at), value: h.entry }, { timestamp: Date.parse(h.closed_at), value: h.close }];
+    points.forEach((q) => { try { const c = chart.convertToPixel({ timestamp: q.timestamp, value: q.value }, { paneId: 'candle_pane', absolute: true }); if (c && isFinite(c.x) && isFinite(c.y)) pts.push(c); } catch (e) {} });
+    if (!pts.length) return null;
+    const pad = 14;
+    return { l: Math.min(...pts.map((c) => c.x)) - pad, r: Math.max(...pts.map((c) => c.x)) + pad, t: Math.min(...pts.map((c) => c.y)) - pad, b: Math.max(...pts.map((c) => c.y)) + pad };
   }
   $('tChart').addEventListener('mousemove', (ev) => {
-    const r = $('tChart').getBoundingClientRect();
-    tipXY = [ev.clientX - r.left, ev.clientY - r.top];
-    if (!$('tTradeTip').hidden) placeTip();
+    if ($('tTradeTip').hidden || tipMode !== 'focus') return;
+    const r = $('tChart').getBoundingClientRect(), x = ev.clientX - r.left, y = ev.clientY - r.top, bx = tradeBox(tipH);
+    if (!bx || x < bx.l || x > bx.r || y < bx.t || y > bx.b) closeTip();
   });
+  ['wheel', 'pointerdown', 'touchstart'].forEach((n) => $('tChart').addEventListener(n, () => { if (tipMode === 'focus' && !$('tTradeTip').hidden) closeTip(); }, { passive: true }));
   function showTip(h) {
     if (!h) return;
     const m = BY[h.symbol] || S.m, t = $('tTradeTip');
@@ -2096,15 +2117,27 @@
       <div class="row"><span>Pips</span><b class="num ${cls(pips)}">${pips >= 0 ? '+' : '-'}${fx(Math.abs(pips), 1)}</b></div>
       <div class="row"><span>P&amp;L</span><b class="num ${cls(h.pnl)}">${sUsd(h.pnl)}</b><small>${czas}</small></div>`;
     t.hidden = false;
+    tipH = h;
     placeTip();
   }
+  /* Beside the trade box: right, left, above, below — the first that fits in the chart
+     (price axis excluded); otherwise the top corner farther from the trade. */
   function placeTip() {
-    const t = $('tTradeTip'), c = $('tChart');
-    const x = Math.min(tipXY[0] + 14, c.clientWidth - t.offsetWidth - 8), y = Math.min(tipXY[1] + 14, c.clientHeight - t.offsetHeight - 8);
-    t.style.left = Math.max(8, x) + 'px';
-    t.style.top = Math.max(8, y) + 'px';
+    const t = $('tTradeTip'), c = $('tChart'), M = 8, G = 10;
+    const W = c.clientWidth - 64, H = c.clientHeight - 30, tw = t.offsetWidth, th = t.offsetHeight;
+    const bx = tradeBox(tipH);
+    let x, y;
+    if (bx) {
+      const cy = Math.min(Math.max(M, (bx.t + bx.b) / 2 - th / 2), H - th - M), cx = Math.min(Math.max(M, (bx.l + bx.r) / 2 - tw / 2), W - tw - M);
+      const opts = [[bx.r + G, cy], [bx.l - G - tw, cy], [cx, bx.t - G - th], [cx, bx.b + G]];
+      const fit = opts.find(([a, b]) => a >= M && b >= M && a + tw <= W - M && b + th <= H - M);
+      if (fit) [x, y] = fit;
+      else { x = (bx.l + bx.r) / 2 > W / 2 ? M : W - tw - M; y = (bx.t + bx.b) / 2 > H / 2 ? M : H - th - M; }
+    } else { x = Math.min(tipXY[0] + 14, W - tw - M); y = Math.min(tipXY[1] + 14, H - th - M); }
+    t.style.left = Math.max(M, x) + 'px';
+    t.style.top = Math.max(M, y) + 'px';
   }
-  function hideTip() { const t = $('tTradeTip'); if (t) t.hidden = true; }
+  function hideTip() { const t = $('tTradeTip'); if (t) t.hidden = true; tipH = null; }
   $('tShowTrades').classList.toggle('on', S.showTrades);
   $('tShowTrades').setAttribute('aria-pressed', S.showTrades ? 'true' : 'false');
   $('tShowTrades').onclick = () => {
@@ -2223,10 +2256,8 @@
       const o = tradeOv.get(rec.hid), h = S.st && S.st.history.find((x) => x.id === rec.hid);
       if (o && h) {
         setTimeout(() => {
-          try { const c = chart.convertToPixel({ timestamp: Date.parse(h.closed_at), value: h.close }, { paneId: 'candle_pane', absolute: true }); if (c) tipXY = [c.x, c.y]; } catch (e) {}
-          const ov = { id: o.id, extendData: o.ext };
-          hoverTrade(ov, true);
-          clearTimeout(tipT); tipT = setTimeout(() => hoverTrade({ id: o.id, extendData: { ...o.ext, hover: true } }, false), 4000);
+          tipMode = 'focus';
+          hoverTrade({ id: o.id, extendData: o.ext }, true);
         }, 60);
       }
     }
