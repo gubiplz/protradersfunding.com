@@ -53,7 +53,7 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
 <div class="t-mkt">
   <button class="t-sym" id="tSym" type="button" aria-haspopup="dialog"><span class="t-sym-ic" id="tSymIc"></span><b id="tSymName">{{ symbol }}</b><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
   <span class="t-lev" id="tMaxLev" title="Leverage on this market">1:10</span>
-  <div class="t-stat"><small>Mark / Mid</small><b class="num" id="tMark">—</b></div>
+  <div class="t-stat"><small>Mark</small><b class="num" id="tMark">—</b></div>
   <div class="t-stat"><small>24h Change</small><b class="num" id="tChg">—</b></div>
   <div class="t-stat"><small>Open Interest</small><b class="num" id="tOi">—</b></div>
   <div class="t-stat"><small>24h Volume</small><b class="num" id="tVol">—</b></div>
@@ -193,7 +193,7 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
       <button class="sell" data-side="sell" type="button">Sell / Short</button>
     </div>
     <label class="t-fld" id="tPxRow" hidden><span id="tPxLbl">Price</span>
-      <div class="t-in"><input id="tPx" inputmode="decimal" autocomplete="off" placeholder="0.00"><button class="t-mini" id="tPxMid" type="button">Mid</button><em>USD</em></div>
+      <div class="t-in"><input id="tPx" inputmode="decimal" autocomplete="off" placeholder="0.00"><button class="t-mini" id="tPxMid" type="button" title="Use the current price">Mark</button><em>USD</em></div>
     </label>
     <label class="t-fld"><span>Size</span>
       <div class="t-in"><input id="tSize" inputmode="decimal" autocomplete="off" placeholder="0.00"><button class="t-unit" id="tSizeUnit" type="button" title="Switch unit: lots, USD or units"><span id="tSizeUnitLbl">Lots</span><svg viewBox="0 0 24 24"><path d="m7 9 5-5 5 5M7 15l5 5 5-5"/></svg></button></div>
