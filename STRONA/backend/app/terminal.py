@@ -227,9 +227,12 @@ def account_figures(session, acc: Account, poz: list[Trade], marks: dict[str, fl
 #  Wykonanie                                                                   #
 # --------------------------------------------------------------------------- #
 def _vwap(m: Market, side: str, qty: float, max_slip: float) -> tuple[float, float, float]:
-    """Cena wypełnienia z księgi Hyperliquid: (vwap, mid, poślizg)."""
+    """Cena wypełnienia z księgi (Hyperliquid albo bid/ask brokera, `markets.book`): (vwap, mid, poślizg)."""
+    from . import broker_quotes
     try:
         bids, asks = markets.book(m.hl)
+    except broker_quotes.Stale:
+        raise HTTPException(503, "Prices for this market are reconnecting. Try again in a few seconds.")
     except Exception:
         raise HTTPException(503, "Price feed unavailable. Try again in a moment.")
     if not bids or not asks:
@@ -1495,7 +1498,27 @@ def api_candles(response: Response, symbol: str, interval: str = "1m", end: int 
             k["high"], k["low"], k["close"] = max(k["high"], r.h), min(k["low"], r.l), r.c
         else:
             out.append({"timestamp": t, "open": r.o, "high": r.h, "low": r.l, "close": r.c, "volume": 0.0})
-    return {"candles": out}
+    wynik: dict = {"candles": out}
+    if end is None:
+        # Bid/ask brokera, po którym idą wypełnienia: terminal pokazuje z niego spread,
+        # cenę w tickecie i mark, żeby ekran zgadzał się z wypełnieniem.
+        from . import broker_quotes
+        q = broker_quotes.kwoty([m.hl]).get(m.hl)
+        if q is not None:
+            wynik["quote"] = {"bid": q[0], "ask": q[1], "age": round(q[2], 1),
+                              "live": q[2] <= broker_quotes.FILL_MAX_S}
+    return wynik
+
+
+@router.get("/quotes")
+def api_quotes(response: Response):
+    """Bid/ask brokera wszystkich rynków, które go mają (FX, metale, JPN225): pasek
+    tickerów, wyszukiwarka i PnL na żywo w terminalu liczą z tego samego co wypełnienia."""
+    from . import broker_quotes
+    response.headers["Cache-Control"] = "public, max-age=0, s-maxage=1, stale-while-revalidate=1"
+    coins = [m.hl for m in markets.MARKETS]
+    return {"quotes": {c: {"bid": b, "ask": a, "live": wiek <= broker_quotes.FILL_MAX_S}
+                       for c, (b, a, wiek) in broker_quotes.kwoty(coins).items() if wiek <= broker_quotes.MARK_MAX_S}}
 
 
 @router.get("/markets")

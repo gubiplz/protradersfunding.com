@@ -858,3 +858,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   .t-ready-foot{flex-direction:column-reverse}
   .t-ready-foot .t-btn{width:100%}
 }
+/* Broker-quoted markets: best bid / ask instead of a book (no depth), and why the tape is empty. */
+.t-bqrow span:not(:first-of-type){color:var(--dim)}
+.t-bqnote{margin:10px 12px 0;font-size:11.5px;line-height:1.5;color:var(--dim)}
+.t-trades .t-bq{padding:18px 14px;font-size:12px;line-height:1.5;color:var(--dim);text-align:left}

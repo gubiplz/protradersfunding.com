@@ -977,14 +977,18 @@
       chart.setStyles({ candle: { tooltip: { title: { template: `${S.sym} · ${INT_LBL[S.interval]} · ${venueLbl()}` } } } });
       reloadChart();
     }
-    /* Thin markets (FX, platinum): the chart follows the spot feed kept by the server
-       (see /api/terminal/candles), polled every few seconds; the exchange's ticks and
-       candles would pull the bar back to a 4-decimal mid. Orders still fill on Hyperliquid. */
+    /* Thin markets (FX, metals, JPN225): the chart follows the spot feed kept by the
+       server (see /api/terminal/candles), polled every 2 s. Where that feed carries the
+       broker's bid/ask (S.bq), orders fill on it, so the ticket, spread, mark and book
+       show it too and the exchange's book, ticks and tape are left out. */
     const spot = !!S.m.sampled;
+    S.bq = null;
+    srcNote();
     strm = F.stream(S.venue, S.m, S.interval, {
-      book: (b, a) => { S.book = { bids: b, asks: a }; drawBook(); },
-      top: (b, a) => { S.top = [b, a]; drawBook(); if (!spot) tickBar((b + a) / 2); },
+      book: (b, a) => { if (S.bq) return; S.book = { bids: b, asks: a }; drawBook(); },
+      top: (b, a) => { if (S.bq) return; S.top = [b, a]; drawBook(); if (!spot) tickBar((b + a) / 2); },
       trades: (list) => {
+        if (S.bq) return;
         S.trades = list.concat(S.trades).sort((x, y) => y.t - x.t).slice(0, 80);
         if (!tradesRaf) tradesRaf = requestAnimationFrame(() => { tradesRaf = 0; renderTrades(); });
       },
@@ -1006,6 +1010,14 @@
       try {
         const d = await (await fetch(`/api/terminal/candles?symbol=${S.sym}&interval=${S.interval}&limit=2`)).json();
         if (seq !== spotSeq || !d.candles) return;
+        if (d.quote) {
+          const was = !!S.bq;
+          S.bq = d.quote;
+          S.top = [d.quote.bid, d.quote.ask];
+          S.book = { bids: [[d.quote.bid, 0]], asks: [[d.quote.ask, 0]] };
+          if (!was) { S.trades = []; renderTrades(); srcNote(); }
+          drawBook(); renderTicker();
+        }
         d.candles.forEach((k) => {
           if (!lastBar) return;
           if (k.timestamp === lastBar.timestamp) lastBar = { ...k, volume: lastBar.volume };
@@ -1039,9 +1051,22 @@
     $('tLat').textContent = st === 'open' && latency != null ? latency + 'ms' : '';
   }
 
+  /* Broker quote instead of a book: best bid and ask (fills go there), no depth. */
+  function renderQuote() {
+    const m = S.m, q = S.bq;
+    const row = (p, k) => `<div class="t-row t-bqrow ${k}"><i></i><span>${px(m, p)}</span><span>—</span><span>—</span></div>`;
+    $('tAsks').innerHTML = row(q.ask, 'ask');
+    $('tBids').innerHTML = row(q.bid, 'bid') + `<p class="t-bqnote">${q.live ? 'Broker quote. Orders fill at this bid / ask.' : 'Broker quote is reconnecting. Orders wait until it is live again.'}</p>`;
+    $('tSpread').textContent = px(m, q.ask - q.bid);
+    $('tSpreadPct').textContent = (((q.ask - q.bid) / ((q.ask + q.bid) / 2)) * 100).toFixed(5) + '%';
+    $('tBidD').textContent = '—'; $('tAskD').textContent = '—';
+    $('tBidBar').style.flexGrow = 1; $('tAskBar').style.flexGrow = 1;
+  }
+
   /* ---------- market bar ---------- */
   function markPx() {
     const [b, a] = S.top;
+    if (S.bq) return (S.bq.bid + S.bq.ask) / 2;
     return S.tk.mark || (b && a ? (b + a) / 2 : S.mids[S.m.hl]) || null;
   }
   function renderTicker() {
@@ -1055,14 +1080,21 @@
     $('tVol').textContent = big(S.tk.vol || c.vol);
     if (mark) document.title = `${px(m, mark)} | ${m.sym} · Trade`;
   }
+  // Where prices and fills come from, for the market on screen (the broker quote arrives with the first 2 s poll).
+  function srcNote() {
+    const m = S.m;
+    const note = S.bq ? 'Prices and fills come from the broker quote (bid / ask).'
+      : m.sampled ? 'The chart follows the spot feed. The order book and fills come from Hyperliquid.'
+        : 'Prices, the order book and fills come from Hyperliquid.';
+    $('tSrc').textContent = note;
+    $('tFillNote').textContent = note + ` Leverage on ${m.sym} is 1:${m.max_lev}, the same on every account. Margin is shared across the account; if equity falls to half of the margin in use, open positions are closed (stop-out).`;
+  }
   function renderMarketHead() {
     const m = S.m;
     $('tSymIc').innerHTML = mIcon(m);
     $('tSymName').textContent = m.sym;
     $('tMaxLev').textContent = '1:' + m.max_lev;      // leverage written as across PTF (1:100), not "100×"
-    const note = 'Prices, the order book and fills come from Hyperliquid.';
-    $('tSrc').textContent = note;
-    $('tFillNote').textContent = note + ` Leverage on ${m.sym} is 1:${m.max_lev}, the same on every account. Margin is shared across the account; if equity falls to half of the margin in use, open positions are closed (stop-out).`;
+    srcNote();
     $('tEstLev').textContent = '1:' + m.max_lev;
     $('tSizeUnitLbl').textContent = unitLbl();
     $('tGo').textContent = (S.side === 'buy' ? 'Buy / Long ' : 'Sell / Short ') + baseName(m);
@@ -1156,6 +1188,8 @@
     const m = S.m, el = $('tAsks');
     if (!S.tk.mark) renderTicker();
     if (!el.offsetParent) return;          // book hidden (phone, Trades tab) — it draws once shown
+    if (S.bq) return renderQuote();
+    if (el.querySelector('.t-bqrow')) { el.innerHTML = ''; $('tBids').innerHTML = ''; }   // left over from a broker-quoted market
     fitGroups();
     const rows = bookRows || 11;
     const asks = grouped(S.book.asks, 'ask').slice(0, rows), bids = grouped(S.book.bids, 'bid').slice(0, rows);
@@ -1188,6 +1222,12 @@
   const TIME = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   function renderTrades() {
     const el = $('tTrades');
+    if (S.bq) {
+      // Broker-quoted market: the exchange tape trades at other prices than our fills.
+      if (!el.querySelector('.t-bq')) el.innerHTML = '<div class="t-empty t-bq">Prices on this market come from the broker quote. There is no public trade tape.</div>';
+      return;
+    }
+    if (el.querySelector('.t-bq')) el.innerHTML = '';
     if (!el.offsetParent && S.trades.length) return;    // hidden — it draws after the tab switches
     const m = S.m, sd = S.bookUnit === 'usd' ? 0 : Math.min(m.qty_dec, 4), list = S.trades.slice(0, 60);
     while (el.children.length < list.length) {
@@ -1263,8 +1303,35 @@
   $('tTickPrev').onclick = () => { $('tTicker').scrollLeft -= 360; };
   $('tTickNext').onclick = () => { $('tTicker').scrollLeft += 360; };
 
+  /* Broker-quoted markets (FX, metals, JPN225) price from the broker on the server; the
+     strip, search and live PnL take the same mids, not the exchange's. */
+  S.bmids = {};
+  async function loadQuotes() {
+    if (document.hidden) return;
+    try {
+      const q = (await (await fetch('/api/terminal/quotes')).json()).quotes || {};
+      S.bmids = {};
+      for (const k in q) if (BY_COIN[k]) { S.bmids[k] = (q[k].bid + q[k].ask) / 2; S.mids[k] = S.bmids[k]; }
+      renderStrip();
+      if (S.st) renderLivePnl();
+    } catch (e) {}
+  }
+  /* Every 3 s only when broker prices matter right now: a broker-quoted market on screen,
+     an open position or order on one, or the search open; otherwise every 30 s (the
+     ticker strip). The market on screen also gets its quote with the 2 s candle tail. */
+  let quotesAt = 0;
+  const quotesNeeded = () => {
+    const bq = (sym) => { const m = BY[sym]; return !!(m && m.sampled); };
+    return (S.m && S.m.sampled) || !$('tSearch').hidden
+      || !!(S.st && (S.st.positions.some((p) => bq(p.symbol)) || S.st.orders.some((o) => bq(o.symbol))));
+  };
+  loadQuotes(); quotesAt = Date.now();
+  setInterval(() => {
+    if (Date.now() - quotesAt < (quotesNeeded() ? 3000 : 30000)) return;
+    quotesAt = Date.now(); loadQuotes();
+  }, 1000);
   F.allMids((mids) => {
-    for (const k in mids) if (BY_COIN[k]) S.mids[k] = +mids[k];
+    for (const k in mids) if (BY_COIN[k] && !(k in S.bmids)) S.mids[k] = +mids[k];
     renderStrip();
     if (S.st) renderLivePnl();
     // Search refreshes prices at most every half second (mids arrive twice per tick: main exchange and xyz).

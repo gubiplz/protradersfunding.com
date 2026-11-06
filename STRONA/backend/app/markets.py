@@ -109,7 +109,7 @@ def get(sym: str | None) -> Market | None:
 # składa cron z mid próbkowanego co sekundę (`terminal.probkuj_swiece`), a terminal
 # nakłada je na historię giełdy. Reszta rynków ma dość transakcji, żeby świece
 # giełdy były ciągłe.
-SAMPLED: frozenset[str] = frozenset({"xyz:EUR", "xyz:GBP", "xyz:JPY", "xyz:JP225", "xyz:PLATINUM"})
+SAMPLED: frozenset[str] = frozenset({"xyz:EUR", "xyz:GBP", "xyz:JPY", "xyz:JP225", "xyz:PLATINUM", "xyz:SILVER"})
 # Krypto z kilkoma transakcjami na minutę (w historii giełdy co czwarta świeca płaska).
 # Cron próbkuje ich mid tak samo jak SAMPLED i terminal nakłada te świece na historię,
 # ale na żywo zostaje strumień Hyperliquid (bbo i świece), bo jego ceny są dokładne.
@@ -183,8 +183,13 @@ _MIDS_TTL = 1.0
 
 
 def mids(coins: set[str] | list[str]) -> dict[str, float]:
-    """Mid każdej z monet. Główna giełda i HIP-3 (`xyz:`) to osobne zapytania."""
-    out: dict[str, float] = {}
+    """Mid każdej z monet. Rynki z kwotowaniem brokera (FX, `broker_quotes`) biorą mid
+    brokera, gdy jest świeży; reszta z Hyperliquid — główna giełda i HIP-3 (`xyz:`)
+    to osobne zapytania."""
+    from . import broker_quotes
+    out: dict[str, float] = {c: (b + a) / 2 for c, (b, a, wiek) in broker_quotes.kwoty(coins).items()
+                             if wiek <= broker_quotes.MARK_MAX_S}
+    coins = [c for c in coins if c not in out]
     dexy = {c.split(":", 1)[0] if ":" in c else "" for c in coins}
     teraz = time.monotonic()
     for dex in dexy:
@@ -201,8 +206,20 @@ def mids(coins: set[str] | list[str]) -> dict[str, float]:
     return out
 
 
+#: Ilość na poziomie książki z kwotowania brokera: wypełnienie bez poślizgu po bid/ask.
+BROKER_SZ = 1e12
+
+
 def book(coin: str) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
-    """(bids, asks) jako listy (cena, ilość), najlepsze pierwsze."""
+    """(bids, asks) jako listy (cena, ilość), najlepsze pierwsze. Rynek z kwotowaniem
+    brokera: jeden poziom bid/ask brokera; za stare kwotowanie → `broker_quotes.Stale`."""
+    from . import broker_quotes
+    q = broker_quotes.kwoty([coin]).get(coin)
+    if q is not None:
+        bid, ask, wiek = q
+        if wiek > broker_quotes.FILL_MAX_S:
+            raise broker_quotes.Stale(f"broker quote for {coin} is {wiek:.0f} s old")
+        return [(bid, BROKER_SZ)], [(ask, BROKER_SZ)]
     d = _post({"type": "l2Book", "coin": coin}) or {}
     lv = d.get("levels") or [[], []]
     bids = [(float(x["px"]), float(x["sz"])) for x in lv[0]]
