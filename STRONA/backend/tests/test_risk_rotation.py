@@ -12,6 +12,8 @@ os.environ.setdefault("DATABASE_URL", f"sqlite:///{tempfile.NamedTemporaryFile(s
 os.environ.setdefault("FEED", "sim")
 os.environ.setdefault("AUTO_SEED", "false")
 
+from sqlalchemy import or_  # noqa: E402
+
 from app import poller, provisioning  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.models import Account, AppSetting  # noqa: E402
@@ -21,7 +23,10 @@ init_db()
 
 def _konta(n):
     s = SessionLocal()
-    s.query(Account).filter(Account.metaapi_account_id.isnot(None)) \
+    # Cron ryzyka bierze też konta bota i z otwartą pozycją w terminalu (inne pliki
+    # testowe zostawiają takie w bazie), więc do rotacji zostają tylko nasze.
+    s.query(Account).filter(or_(Account.metaapi_account_id.isnot(None), Account.bot_enabled.is_(True),
+                                Account.terminal_open.is_(True))) \
         .update({Account.status: "archived"}, synchronize_session=False)
     ids = []
     for i in range(n):

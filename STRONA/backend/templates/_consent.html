@@ -4,8 +4,9 @@
    Analytics (GA4 + Clarity, _analytics.html) load only after "analytics" is on;
    the ?ref= partner code (site.js) is kept only while "referral" is on.
    Any element with data-ck-prefs (the footer link) reopens the choices.
-   The old pf_cookie_ok key is read once and migrated. Styles use the CSS variables
-   every page defines (--panel, --txt, --muted, --line2, --acc) with fallbacks. #}
+   The old pf_cookie_ok key is read once and migrated. Styles and script live in
+   static/css/consent.css and static/js/consent.js so each page stays small and
+   the browser caches them across the site, the portal and the terminal. #}
 <div class="pf-ck" id="pfCk" hidden role="dialog" aria-label="Your privacy choices">
   <div class="pf-ck-opts" id="pfCkOpts" hidden>
     <label class="pf-ck-opt">
@@ -33,121 +34,5 @@
     </div>
   </div>
 </div>
-<style>
-/* Dark glass card on every theme: the bar floats over light and dark pages alike,
-   with the brand's gold hairline on top and the teal accent on the primary button. */
-.pf-ck{--ckt:#eef2f8;--ckm:#a9b4c6;--ckl:rgba(255,255,255,.12);--cka:#1db9a8;--ckg:#c9a24a;
-  position:fixed;left:16px;right:16px;bottom:16px;z-index:90;max-width:1180px;margin:0 auto;
-  background:linear-gradient(180deg,rgba(22,30,46,.94),rgba(12,18,31,.96));color:var(--ckt);
-  border:1px solid rgba(255,255,255,.1);border-radius:18px;overflow:hidden;
-  -webkit-backdrop-filter:blur(18px) saturate(1.3);backdrop-filter:blur(18px) saturate(1.3);
-  box-shadow:0 30px 70px -20px rgba(0,0,0,.6),0 0 0 1px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.08);
-  font-family:inherit;font-size:14px;animation:pfCkIn .36s cubic-bezier(.2,.8,.2,1)}
-.pf-ck::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;
-  background:linear-gradient(90deg,transparent,var(--ckg) 30%,var(--ckg) 70%,transparent)}
-@keyframes pfCkIn{from{opacity:0;transform:translateY(14px)}}
-.pf-ck[hidden],.pf-ck-opts[hidden],.pf-ck-act[hidden]{display:none}
-.pf-ck-bar{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:18px 24px}
-.pf-ck-txt{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;align-items:center}
-.pf-ck-txt::before{content:"";grid-row:1/3;width:34px;height:34px;border-radius:10px;
-  background:rgba(201,162,74,.14) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c9a24a' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z'/%3E%3Cpath d='M9 12l2 2 4-4'/%3E%3C/svg%3E") center/20px no-repeat;
-  box-shadow:inset 0 0 0 1px rgba(201,162,74,.28)}
-.pf-ck-txt b{display:block;font-size:15px;font-weight:600;letter-spacing:-.01em}
-.pf-ck-txt p{margin:0;font-size:13.5px;line-height:1.5;color:var(--ckm)}
-.pf-ck a{color:#f1d58a;text-decoration:underline;text-underline-offset:2px}
-.pf-ck a:hover{color:#fff}
-.pf-ck-act{display:flex;align-items:center;gap:10px;flex:none}
-.pf-ck button{font-family:inherit;cursor:pointer;font-size:14px;font-weight:600;border:0;background:none;color:var(--ckt)}
-.pf-ck .pf-ck-lnk{padding:10px 12px;color:var(--ckm);border-radius:10px}
-.pf-ck .pf-ck-lnk:hover{color:var(--ckt);background:rgba(255,255,255,.06)}
-.pf-ck .pf-ck-btn{padding:10px 18px;border-radius:11px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.04);transition:background .15s,border-color .15s,transform .15s}
-.pf-ck .pf-ck-btn:hover{border-color:rgba(255,255,255,.34);background:rgba(255,255,255,.08)}
-.pf-ck .pf-ck-btn:active{transform:translateY(1px)}
-.pf-ck .pf-ck-ok{background:var(--cka);border-color:transparent;color:#06221f;box-shadow:0 8px 20px -10px var(--cka)}
-.pf-ck .pf-ck-ok:hover{filter:brightness(1.1);border-color:transparent;background:var(--cka)}
-.pf-ck .pf-ck-x{width:36px;height:36px;border-radius:10px;color:var(--ckm);font-size:15px}
-.pf-ck .pf-ck-x:hover{color:var(--ckt);background:rgba(255,255,255,.08)}
-.pf-ck-opts{display:grid;grid-template-columns:1fr 1fr;gap:0 32px;padding:16px 24px 12px;border-bottom:1px solid var(--ckl);background:rgba(255,255,255,.025)}
-.pf-ck-opt{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:6px 0;cursor:pointer}
-.pf-ck-opt b{display:block;font-size:14.5px;font-weight:600;margin-bottom:3px}
-.pf-ck-opt small{display:block;font-size:13px;line-height:1.5;color:var(--ckm)}
-.pf-ck-opt input{position:absolute;opacity:0;width:0;height:0}
-.pf-ck-opt i{flex:none;width:44px;height:26px;margin-top:2px;border-radius:13px;background:rgba(255,255,255,.14);position:relative;transition:background .18s;box-shadow:inset 0 1px 2px rgba(0,0,0,.3)}
-.pf-ck-opt i::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35);transition:transform .18s}
-.pf-ck-opt input:checked+i{background:var(--cka)}
-.pf-ck-opt input:checked+i::after{transform:translateX(18px)}
-.pf-ck-opt input:focus-visible+i{outline:2px solid #f1d58a;outline-offset:2px}
-@media(max-width:760px){
-  .pf-ck{left:10px;right:10px;bottom:10px;border-radius:16px}
-  .pf-ck-bar{flex-direction:column;align-items:stretch;gap:14px;padding:16px}
-  .pf-ck-txt::before{display:none}
-  .pf-ck-txt{grid-template-columns:1fr}
-  .pf-ck-act{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-  .pf-ck-act .pf-ck-lnk{grid-column:1/-1;justify-self:start;padding:6px 0;margin:0}
-  .pf-ck-act .pf-ck-btn{text-align:center}
-  #pfCkSave{grid-template-columns:1fr auto}
-  .pf-ck-opts{grid-template-columns:1fr;padding:14px 16px 8px}
-  .pf-ck-txt p{font-size:13px}
-}
-@media(prefers-reduced-motion:reduce){.pf-ck{animation:none}}
-</style>
-<script>
-(function(){
-  var KEY='pf_consent', el=document.getElementById('pfCk');
-  if(!el) return;
-  var opts=document.getElementById('pfCkOpts'), act=document.getElementById('pfCkAct'), save=document.getElementById('pfCkSave');
-  var an=document.getElementById('pfCkAn'), rf=document.getElementById('pfCkRef');
-  function read(){
-    try{
-      var c=JSON.parse(localStorage.getItem(KEY)||'null');
-      if(c&&typeof c==='object') return c;
-      var old=localStorage.getItem('pf_cookie_ok');   // choice made under the old notice
-      if(old!==null){ c={v:1,analytics:old==='1',referral:old==='1',at:Date.now()}; localStorage.setItem(KEY,JSON.stringify(c)); return c; }
-    }catch(e){}
-    return null;
-  }
-  function space(){
-    var open=!el.hidden;
-    document.documentElement.style.setProperty('--ck-h', open?Math.ceil(innerHeight-el.getBoundingClientRect().top)+'px':'0px');
-  }
-  function apply(c){
-    if(!c) return;
-    try{
-      if(c.analytics && window.pfLoadAnalytics) window.pfLoadAnalytics();
-      var pending=sessionStorage.getItem('pf_ref_pending');
-      if(c.referral){
-        if(pending){ localStorage.setItem('pf_ref',pending); localStorage.setItem('pf_ref_ts',String(Date.now())); sessionStorage.removeItem('pf_ref_pending'); }
-      } else { localStorage.removeItem('pf_ref'); localStorage.removeItem('pf_ref_ts'); }
-    }catch(e){}
-  }
-  function store(analytics,referral){
-    var c={v:1,analytics:!!analytics,referral:!!referral,at:Date.now()};
-    try{ localStorage.setItem(KEY,JSON.stringify(c)); localStorage.setItem('pf_cookie_ok',analytics||referral?'1':'0'); }catch(e){}
-    apply(c); hide();
-  }
-  function show(manage){
-    var c=read();
-    an.checked=c?!!c.analytics:true; rf.checked=c?!!c.referral:true;
-    opts.hidden=!manage; act.hidden=!!manage; save.hidden=!manage;
-    el.hidden=false; space();
-  }
-  function hide(){ el.hidden=true; space(); }
-  el.addEventListener('click',function(e){
-    var b=e.target.closest('[data-ck]'); if(!b) return;
-    var k=b.getAttribute('data-ck');
-    if(k==='manage') show(true);
-    else if(k==='accept') store(true,true);
-    else if(k==='reject') store(false,false);
-    else if(k==='save') store(an.checked,rf.checked);
-    else if(k==='close') hide();
-  });
-  document.addEventListener('click',function(e){
-    var a=e.target.closest('[data-ck-prefs]'); if(!a) return;
-    e.preventDefault(); show(true);
-  });
-  window.pfConsent={read:read,open:function(){show(true);},apply:function(){apply(read());}};
-  var c=read();
-  if(c) apply(c); else show(false);
-  addEventListener('resize',space); addEventListener('load',space);
-})();
-</script>
+<link rel="stylesheet" href="/static/css/consent.css?v={{ asset_v }}">
+<script src="/static/js/consent.js?v={{ asset_v }}" defer></script>
