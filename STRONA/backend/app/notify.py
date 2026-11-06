@@ -219,7 +219,7 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"{name}, your payout request"
             f"{' for ' + str(ctx.get('amount')) if ctx.get('amount') else ''} on account "
             f"{login} has been approved — your reward is confirmed. Open your dashboard and "
-            f"{'confirm' if ctx.get('saved_wallet') else 'add'} the {ctx.get('token') or 'USDT'} "
+            f"{'confirm' if ctx.get('saved_wallet') else 'add'} the {ctx.get('token') or 'vUSDT'} "
             f"wallet we should send it to. The transfer starts once you confirm it.",
         ),
         "payout_wallet_code": (
@@ -733,7 +733,7 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                        f"{name}, your payout request for account {login} has been approved — "
                        f"your reward is confirmed. "
                        f"{'Confirm' if ctx.get('saved_wallet') else 'Add'} the "
-                       f"{ctx.get('token') or 'USDT'} wallet we should send it to; the transfer "
+                       f"{ctx.get('token') or 'vUSDT'} wallet we should send it to; the transfer "
                        f"starts once you confirm it."),
             *([_stat_html("Approved payout", str(ctx["amount"]))] if ctx.get("amount") else []),
             _button_html("Confirm payment details" if ctx.get("saved_wallet")

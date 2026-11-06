@@ -130,7 +130,7 @@ def seed_demo() -> None:
                 session.add(Account(
                     login=str(login_seq), trader_name=name, trader_id=tr.id,
                     platform_login=str(login_seq), platform_password="Demo1234xy",
-                    platform_server="PropFunding-SIM",
+                    platform_server=provisioning.SIM_SERVER,
                     product_key=pkey, preset=pkey, initial_balance=prod.account_size,
                     steps=prod.steps, profit_target_p1=prod.profit_target_p1,
                     profit_target_p2=prod.profit_target_p2, max_daily_loss_pct=prod.max_daily_loss_pct,
@@ -299,7 +299,7 @@ def _warn_if_placeholder_provisioning() -> None:
                       "        Napraw jednorazowo:  playwright install chromium")
     else:
         print(f"[start] provisioning: LOKALNY — konta dostają wygenerowane poświadczenia "
-              f"(serwer '{provisioning.PLATFORM_SERVER}') i są aktywne od razu, bez zakładania "
+              f"(serwer '{provisioning.SIM_SERVER}') i są aktywne od razu, bez zakładania "
               f"konta demo.\n"
               f"        Realne konta MT5: MT5_PROVISIONING=true + METAQUOTES_WEB_ENABLED=true w .env")
     if settings.feed == "local":
@@ -8294,7 +8294,7 @@ async def admin_pool_generate_simulated(payload: SimGenerateIn):
         for _ in range(payload.count):
             p = PoolAccount(platform_login=provisioning._gen_login(),
                             platform_password=provisioning._gen_password(),
-                            platform_server=provisioning.PLATFORM_SERVER,
+                            platform_server=provisioning.SIM_SERVER,
                             account_size=payload.account_size, simulated=True)
             session.add(p)
             session.flush()

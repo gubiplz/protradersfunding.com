@@ -66,6 +66,9 @@ class Settings:
     metaapi_candles_account_id: str = os.getenv("METAAPI_CANDLES_ACCOUNT_ID", "").strip()
     # Bez MetaApi: klucz Twelve Data (plan darmowy: 8 zapytań/min, 800/dzień, FX i metale).
     twelvedata_api_key: str = os.getenv("TWELVEDATA_API_KEY", "").strip()
+    # Feed spot FX dla wykresu (co kilkanaście sekund z crona): Finnhub, klucz z planu
+    # darmowego (60 zapytań/min). Bez klucza cienkie rynki zostają na próbkowanym mid.
+    finnhub_api_key: str = os.getenv("FINNHUB_API_KEY", "").strip()
     candles_history_days: int = int(os.getenv("CANDLES_HISTORY_DAYS", "30"))
     # Nazwy symboli u źródła, gdy inne niż domyślne, np. "xyz:JP225=JPN225,xyz:PLATINUM=XPTUSD".
     candles_history_symbols: str = os.getenv("CANDLES_HISTORY_SYMBOLS", "")

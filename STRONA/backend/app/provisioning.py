@@ -40,6 +40,9 @@ from .models import (Account, AppSetting, CreditLedger, FlashOffer, Order,
                      PoolAccount, Product, RewardCode, Trader)
 
 PLATFORM_SERVER = "MetaQuotes-Demo"
+#: Serwer w poświadczeniach kont symulowanych (bez rachunku MT5 za nimi): od 2026-11-06
+#: własna nazwa, bo takie konto handluje w Built-in Terminalu, a nie w MT5.
+SIM_SERVER = "PTF-sim"
 #: Notatka grantu drugiego konta z promocji Buy 1 Get 1 Free — klient za nie zapłacił,
 #: więc panel nie liczy go do kont darmowych.
 BOGO_NOTE = "Buy 1 Get 1 Free"
@@ -91,7 +94,7 @@ def create_account_from_order(session, order: Order, notify_admin: bool = True) 
         login=login, trader_name=trader.full_name or trader.email, trader_id=trader.id,
         platform_login=(None if real_mode else login),
         platform_password=(None if real_mode else password),
-        platform_server=(None if real_mode else PLATFORM_SERVER),
+        platform_server=(None if real_mode else SIM_SERVER),
         # False = poswiadczenia wygenerowane lokalnie, za kontem nie stoi rachunek MT5
         mt5_backed=real_mode,
         product_key=product.key, preset=product.key, initial_balance=bal,
@@ -631,7 +634,7 @@ def _apply_local_credentials(acc: Account) -> None:
     existing = acc.platform_login or acc.login
     acc.platform_login = existing if _looks_like_account_number(existing) else _gen_login()
     acc.platform_password = acc.platform_password or _gen_password()
-    acc.platform_server = acc.platform_server or PLATFORM_SERVER
+    acc.platform_server = acc.platform_server or SIM_SERVER
     acc.login = acc.platform_login
     acc.mt5_backed = False
 
