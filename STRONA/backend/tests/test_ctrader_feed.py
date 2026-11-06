@@ -17,6 +17,7 @@ os.environ.setdefault("DATABASE_URL", f"sqlite:///{tempfile.NamedTemporaryFile(s
 
 from app import ctrader_feed as cf  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
+from app import broker_quotes, markets  # noqa: E402
 from app.models import AppSetting, TerminalCandle  # noqa: E402
 
 init_db()
@@ -31,8 +32,15 @@ def _czysto(monkeypatch):
     monkeypatch.setattr(cf, "ZAPIS_CO_S", 0.05)
     db = SessionLocal()
     db.query(TerminalCandle).delete()
-    db.query(AppSetting).filter(AppSetting.key.in_((cf.TOKEN_KLUCZ, cf.KONTO_KLUCZ, cf.SYMBOLE_KLUCZ))).delete(synchronize_session=False)
+    db.query(AppSetting).filter(AppSetting.key.in_((cf.TOKEN_KLUCZ, cf.KONTO_KLUCZ, cf.SYMBOLE_KLUCZ, broker_quotes.KLUCZ))).delete(synchronize_session=False)
     db.commit(); db.close()
+    broker_quotes.wyczysc()
+    yield
+    # Quotes written here must not price FX in other test files.
+    db = SessionLocal()
+    db.query(AppSetting).filter(AppSetting.key == broker_quotes.KLUCZ).delete(synchronize_session=False)
+    db.commit(); db.close()
+    broker_quotes.wyczysc()
 
 
 class Serwer:
@@ -101,6 +109,9 @@ def test_ticki_skladaja_swiece_z_mid_i_zapisuja_wiersze_ostateczne():
     m = datetime.fromtimestamp(minuta_ms / 1000, tz=timezone.utc).replace(tzinfo=None)
     assert _wiersze("xyz:EUR")[m] == (1.11555, 1.1157, 1.11525, 1.11525, cf.FEED_N)
     assert _wiersze("xyz:JPY")[m] == (158.155, 158.155, 158.155, 158.155, cf.FEED_N)
+    # Ostatni bid/ask zapisany do wypełnień: EURUSD 1.11520/1.11530, USDJPY 158.15/158.16.
+    q = broker_quotes.kwoty(["xyz:EUR", "xyz:JPY", "BTC"])
+    assert q["xyz:EUR"][:2] == (1.1152, 1.1153) and q["xyz:JPY"][:2] == (158.15, 158.16) and "BTC" not in q
     # Konto demo wybrane spośród dwóch i zapamiętane; subskrypcja tylko znalezionych symboli.
     typy = [x["payloadType"] for x in srv.wyslane]
     assert typy[:4] == [cf.PT["APP_AUTH_REQ"], cf.PT["ACCOUNTS_REQ"], cf.PT["ACC_AUTH_REQ"], cf.PT["SYMBOLS_REQ"]]
@@ -173,3 +184,52 @@ def test_bez_konfiguracji_nic_nie_wychodzi(monkeypatch):
     monkeypatch.setattr(cf.get_settings(), "ctrader_client_id", "")
     assert cf.skonfigurowany() is False
     assert asyncio.run(cf.sluchaj(0.1, polacz=lambda: pytest.fail("no connection without config")))["skipped"] is True
+
+
+def test_kwotowanie_brokera_wycenia_i_wypelnia_fx(monkeypatch):
+    """Świeży bid/ask brokera: mid do wyceny i jeden poziom książki bez poślizgu; HL nie pytany."""
+    zapytania = []
+    monkeypatch.setattr(markets, "_post", lambda body: zapytania.append(body) or {})
+    broker_quotes.zapisz({"xyz:GBP": (1.33510, 1.33516)})
+    assert markets.mids({"xyz:GBP"}) == {"xyz:GBP": pytest.approx(1.33513)}
+    bids, asks = markets.book("xyz:GBP")
+    assert bids[0][0] == 1.3351 and asks[0][0] == 1.33516 and asks[0][1] >= 1e9
+    assert zapytania == []
+    # Stare kwotowanie: wypełnienie odrzucone, wycena jeszcze po brokerze do MARK_MAX_S.
+    broker_quotes.zapisz({"xyz:GBP": (1.33510, 1.33516)}, teraz=time.time() - 30)
+    with pytest.raises(broker_quotes.Stale):
+        markets.book("xyz:GBP")
+    assert "xyz:GBP" in markets.mids({"xyz:GBP"})
+    # Po MARK_MAX_S wycena wraca do Hyperliquida.
+    broker_quotes.zapisz({"xyz:GBP": (1.33510, 1.33516)}, teraz=time.time() - 120)
+    monkeypatch.setattr(markets, "_post", lambda body: {"xyz:GBP": "1.3348"})
+    markets._MIDS_CACHE.clear()
+    assert markets.mids({"xyz:GBP"}) == {"xyz:GBP": 1.3348}
+
+
+def test_zlecenie_fx_po_bid_ask_brokera(monkeypatch):
+    """1 lot GBPUSD: wejście po asku brokera, nie po książce Hyperliquida (~9 pipsów kosztu)."""
+    from app import terminal
+    from fastapi import HTTPException
+    broker_quotes.zapisz({"xyz:GBP": (1.33510, 1.33516)})
+    m = markets.get("GBPUSD")
+    vwap, mid, slip = terminal._vwap(m, "buy", 100_000.0, 0.01)
+    assert vwap == 1.33516 and mid == pytest.approx(1.33513) and slip < 0.00003
+    assert terminal._vwap(m, "sell", 100_000.0, 0.01)[0] == 1.3351
+    broker_quotes.zapisz({"xyz:GBP": (1.33510, 1.33516)}, teraz=time.time() - 30)
+    with pytest.raises(HTTPException) as e:
+        terminal._vwap(m, "buy", 100_000.0, 0.01)
+    assert e.value.status_code == 503 and "reconnecting" in e.value.detail
+
+
+def test_terminal_dostaje_bid_ask_brokera():
+    """Ogon świec niesie bid/ask brokera, a /quotes mid-y wszystkich takich rynków."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    broker_quotes.zapisz({"xyz:GBP": (1.33510, 1.33516)})
+    with TestClient(app) as cl:
+        d = cl.get("/api/terminal/candles?symbol=GBPUSD&interval=1m&limit=2").json()
+        assert d["quote"]["bid"] == 1.3351 and d["quote"]["ask"] == 1.33516 and d["quote"]["live"] is True
+        assert "quote" not in cl.get("/api/terminal/candles?symbol=EURUSD&interval=1m&limit=2").json()
+        q = cl.get("/api/terminal/quotes").json()["quotes"]
+        assert set(q) == {"xyz:GBP"} and q["xyz:GBP"]["live"] is True

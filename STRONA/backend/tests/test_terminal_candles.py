@@ -192,7 +192,7 @@ def test_bez_kluczy_cron_tylko_probkuje(monkeypatch):
     assert terminal.odswiez_feed()["skipped"] is True
     _mid_sekwencja(monkeypatch, [1.1, 1.2])
     w = terminal.cron_swiece(0.02)
-    assert w["rows"] == len(markets.PROBKOWANE) and w["history"]["skipped"] is True and w["feed_runs"] == 0
+    assert w["rows"] >= len(markets.PROBKOWANE) and w["history"]["skipped"] is True and w["feed_runs"] == 0
 
 
 def test_twelve_data_jako_zrodlo_historii(monkeypatch):

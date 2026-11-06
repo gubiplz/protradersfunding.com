@@ -24,6 +24,7 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 
+from . import broker_quotes
 from .config import get_settings
 from .db import SessionLocal
 from .models import AppSetting, TerminalCandle
@@ -32,6 +33,7 @@ from .models import AppSetting, TerminalCandle
 # Nazwy porównujemy bez "/", ".", spacji i podkreśleń; pierwsza znaleziona u brokera wygrywa.
 SYMBOLE = {"xyz:EUR": ("EURUSD",), "xyz:GBP": ("GBPUSD",), "xyz:JPY": ("USDJPY",),
            "xyz:PLATINUM": ("XPTUSD", "PLATINUM"),
+           "xyz:SILVER": ("XAGUSD", "SILVER"),
            "xyz:JP225": ("JP225", "JPN225", "JAPAN225", "NIKKEI225", "NIK225", "JP225CASH")}
 SKALA = 100_000                 # ceny w Open API są w 1/100000 jednostki
 FEED_N = -1                     # ten sam znacznik co terminal.FEED_N: wiersz ostateczny
@@ -245,6 +247,10 @@ class Swiece:
             s[1], s[2], s[3] = max(s[1], px), min(s[2], px), px
         self.ticki += 1
 
+    def kwoty(self) -> dict[str, tuple[float, float]]:
+        """Ostatni pełny bid/ask każdego symbolu (do wypełnień i wyceny, `broker_quotes`)."""
+        return {c: (b, a) for c, (b, a) in self.ba.items() if b and a}
+
     def zrzut(self) -> dict[tuple[str, datetime], list[float]]:
         out, self.sw = self.sw, {k: list(v) for k, v in self.sw.items() if k[1] >= _minuta(time.time())}
         return out
@@ -382,8 +388,10 @@ async def sluchaj(budzet_s: float, polacz=None) -> dict:
                         ostatni_hb = time.monotonic()
                     if time.monotonic() - ostatni_zapis >= ZAPIS_CO_S:
                         wynik["rows"] += await asyncio.to_thread(zapisz, swiece.zrzut())
+                        await asyncio.to_thread(broker_quotes.zapisz, swiece.kwoty())
                         ostatni_zapis = time.monotonic()
                 wynik["rows"] += await asyncio.to_thread(zapisz, swiece.zrzut())
+                await asyncio.to_thread(broker_quotes.zapisz, swiece.kwoty())
                 wynik["ticks"] = swiece.ticki
                 wynik["symbols"] = sorted(mapa.values())
                 return wynik
