@@ -1018,6 +1018,16 @@
       });
       return out;
     },
+    // open-position rings: candle it sits on and that candle's centre x (chart coordinates)
+    rings: () => {
+      if (!chart) return null;
+      const d = chart.getDataList();
+      return Object.entries(posLines).map(([id, L]) => {
+        const k = d[barIndexAt(d, L.opened)];
+        const c = k && chart.convertToPixel({ timestamp: k.timestamp, value: L.entry }, { paneId: 'candle_pane', absolute: true });
+        return { id, opened: new Date(L.opened).toISOString().slice(11, 19), bar: k && new Date(k.timestamp).toISOString().slice(11, 19), centreX: c && Math.round(c.x) };
+      });
+    },
     vis: () => { if (!chart) return null; const r = chart.getVisibleRange(), d = chart.getDataList(); return [d[Math.max(0, Math.floor(r.from))], d[Math.min(d.length - 1, Math.ceil(r.to) - 1)]].map((k) => k && k.timestamp); },
   };
   function mergeBar(k) {
@@ -1929,6 +1939,7 @@
       const ext = { up, dn, pos: true, bg: css('--panel'), pnlText: pnlTxt(p), pnlColor: p.pnl >= 0 ? up : dn };
       const id = line(p.entry, `${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, p.side === 'buy' ? up : dn, ext);
       if (id) posLines[p.id] = { id, ts, entry: p.entry, ext: { text: `${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, color: p.side === 'buy' ? up : dn, ...ext } };
+      if (id) { posLines[p.id].opened = p.opened_at ? Date.parse(p.opened_at) : null; posLines[p.id].side = p.side; }
       if (!(tpslEd && tpslEd.id === p.id)) {
         line(p.tp, 'TP ' + px(S.m, p.tp), acc);
         line(p.sl, `SL ${px(S.m, p.sl)}${p.trail ? ' · trailing' : ''}`, warn);
@@ -1969,18 +1980,29 @@
         <button type="button" data-pbt="be" title="Move the stop to the entry price">BE</button>
         <button type="button" data-pbt="trail" title="Trailing stop">Trail</button>
         ${mgd(id) ? '' : '<button type="button" data-pbt="rev" title="Reverse position" aria-label="Reverse position"><svg viewBox="0 0 24 24"><path d="M7 4v14M3 14l4 4 4-4M17 20V6M13 10l4-4 4 4"/></svg></button>'}
-        <button type="button" data-pbt="close" class="x" title="Close position" aria-label="Close position"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`).join('');
+        <button type="button" data-pbt="close" class="x" title="Close position" aria-label="Close position"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`).join('')
+        // Where it was opened: a ring on that candle at the entry price, above the buttons.
+        + ids.map((id) => `<i class="t-pring ${posLines[id].side === 'sell' ? 'dn' : 'up'}" data-pr="${id}" hidden></i>`).join('');
     }
     if (!ids.length || !chart || cTab !== 'chart') return;
     let pane = null;
     try { pane = chart.getSize('candle_pane'); } catch (e) {}
+    const bars = chart.getDataList();
     ids.forEach((id) => {
-      const L = posLines[id], el = posBar.querySelector(`[data-pb="${id}"]`);
+      const L = posLines[id], el = posBar.querySelector(`[data-pb="${id}"]`), ring = posBar.querySelector(`[data-pr="${id}"]`);
       if (!L || !el) return;
       let y = null;
       try { const c = chart.convertToPixel({ timestamp: L.ts, value: L.entry }, { paneId: 'candle_pane', absolute: true }); y = c && c.y; } catch (e) {}
       const show = ok(y) && (!pane || (y > pane.top + 8 && y < pane.top + pane.height - 8));
       el.hidden = !show;
+      if (ring) {
+        let rx = null;
+        const idx = L.opened ? barIndexAt(bars, L.opened) : null;
+        if (show && idx != null) { try { const c = chart.convertToPixel({ dataIndex: idx, value: L.entry }, { paneId: 'candle_pane', absolute: true }); rx = c && c.x; } catch (e) {} }
+        const inX = ok(rx) && rx > (pane ? pane.left : 0) + 4 && rx < (pane ? pane.left + pane.width : Infinity) - 4;
+        ring.hidden = !inX;
+        if (inX) { const t = `translate(${Math.round(rx)}px,${Math.round(y)}px) translate(-50%,-50%)`; if (ring.style.transform !== t) ring.style.transform = t; }
+      }
       if (!show) return;
       const x = 10 + szerTekstu(L.ext.text) + 16 + (L.ext.pnlText ? szerTekstu(L.ext.pnlText) + 16 : 0);
       const tr = `translate(${Math.round(x)}px,${Math.round(y)}px) translateY(-50%)`;
@@ -2530,11 +2552,11 @@
     const go = (sym, t0, t1, extra) => ` data-go="${esc(sym)}" data-t0="${t0 || ''}" data-t1="${t1 || ''}"${extra || ''}`;
     if (S.ptab === 'positions') {
       const c = S.cols;
-      const head = [['Market', 0, (p) => p.symbol], ['Side', 0, (p) => p.side], ['Size', 1, (p) => p.value]].concat(c.value ? [['Value (USD)', 1, (p) => p.value]] : [], [['Entry Price', 1]], c.slippage ? [['Slippage', 1, (p) => p.slippage]] : [], [['Mark Price', 1]], [['PnL (ROE)', 1, (p) => p.pnl]], c.lev ? [['Leverage', 1, (p) => p.leverage]] : [], c.margin ? [['Margin', 1, (p) => p.margin]] : [], c.tpsl ? [['TP / SL', 1]] : [], [['', 1]]);
+      const head = [['Opened', 0, (p) => ts(p.opened_at)], ['Market', 0, (p) => p.symbol], ['Side', 0, (p) => p.side], ['Size', 1, (p) => p.value]].concat(c.value ? [['Value (USD)', 1, (p) => p.value]] : [], [['Entry Price', 1]], c.slippage ? [['Slippage', 1, (p) => p.slippage]] : [], [['Mark Price', 1]], [['PnL (ROE)', 1, (p) => p.pnl]], c.lev ? [['Leverage', 1, (p) => p.leverage]] : [], c.margin ? [['Margin', 1, (p) => p.margin]] : [], c.tpsl ? [['TP / SL', 1]] : [], [['', 1]]);
       const all = livePos();
       const rows = sortList(shown(all), head).map((p) => {
         const m = BY[p.symbol] || S.m;
-        return `<tr data-pid="${p.id}"${go(p.symbol, ts(p.opened_at), '')}><td>${sym(p.symbol)}</td><td>${side(p.side)}</td><td class="num">${sizeCell(m, p.qty)}</td>${c.value ? `<td class="num" data-f="value">${usd(p.value)}</td>` : ''}<td class="num">${px(m, p.entry)}</td>${c.slippage ? `<td class="num">${ok(p.slippage) ? p.slippage.toFixed(3) + '%' : '—'}</td>` : ''}<td class="num" data-f="mark">${px(m, p.mark)}</td><td class="num ${cls(p.pnl)}" data-f="pnl">${sUsd(p.pnl)} (${pct(p.roe)})</td>${c.lev ? `<td class="num">1:${p.leverage}</td>` : ''}${c.margin ? `<td class="num">${usd(p.margin)}</td>` : ''}${c.tpsl ? `<td class="num"><button type="button" class="tpsl" data-tpsl="${p.id}">${p.tp ? px(m, p.tp) : '—'} / ${p.sl ? px(m, p.sl) : '—'}</button></td>` : ''}<td><div class="act">${p.managed ? '' : `<button type="button" data-half="${p.id}">Close 50%</button>`}<button type="button" class="dn" data-close="${p.id}">Close</button></div></td></tr>`;
+        return `<tr data-pid="${p.id}"${go(p.symbol, ts(p.opened_at), '')}><td class="num" style="white-space:nowrap">${tm(p.opened_at)}</td><td>${sym(p.symbol)}</td><td>${side(p.side)}</td><td class="num">${sizeCell(m, p.qty)}</td>${c.value ? `<td class="num" data-f="value">${usd(p.value)}</td>` : ''}<td class="num">${px(m, p.entry)}</td>${c.slippage ? `<td class="num">${ok(p.slippage) ? p.slippage.toFixed(3) + '%' : '—'}</td>` : ''}<td class="num" data-f="mark">${px(m, p.mark)}</td><td class="num ${cls(p.pnl)}" data-f="pnl">${sUsd(p.pnl)} (${pct(p.roe)})</td>${c.lev ? `<td class="num">1:${p.leverage}</td>` : ''}${c.margin ? `<td class="num">${usd(p.margin)}</td>` : ''}${c.tpsl ? `<td class="num"><button type="button" class="tpsl" data-tpsl="${p.id}">${p.tp ? px(m, p.tp) : '—'} / ${p.sl ? px(m, p.sl) : '—'}</button></td>` : ''}<td><div class="act">${p.managed ? '' : `<button type="button" data-half="${p.id}">Close 50%</button>`}<button type="button" class="dn" data-close="${p.id}">Close</button></div></td></tr>`;
       });
       el.innerHTML = table(head, rows, 'No open positions', all.length);
     } else if (S.ptab === 'orders') {
