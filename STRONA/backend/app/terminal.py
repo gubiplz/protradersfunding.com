@@ -1110,6 +1110,8 @@ def _finnhub_swiece(coin: str, od_s: int, do_s: int, transport=None) -> list[dic
         return None
     if status == 429:
         _FEED_PAUZA["do"] = time.monotonic() + 60      # limit minutowy: reszta przebiegu bez feedu
+    elif status in (401, 403):
+        _FEED_PAUZA["do"] = time.monotonic() + 3600    # plan bez dostępu: nie pytamy co 12 s
     if status != 200 or not isinstance(body, dict) or body.get("s") not in ("ok", "no_data"):
         print(f"[candles] finnhub {sym} -> {status}: {str(body)[:160]}", flush=True)
         return None
@@ -1438,8 +1440,26 @@ def cron_swiece(budzet_s: float) -> dict:
     finally:
         session.close()
     start = time.monotonic()
+    # cTrader (gdy skonfigurowany) słucha ticków FX w osobnym wątku przez cały przebieg;
+    # jego wiersze są ostateczne, więc próbki mid tych rynków ich nie nadpiszą.
+    from . import ctrader_feed
+    ct: dict = {}
+    watek = None
+    if ctrader_feed.skonfigurowany():
+        import threading
+
+        def _ct():
+            try:
+                ct.update(asyncio.run(ctrader_feed.sluchaj(max(5.0, budzet_s - 1.0))))
+            except Exception as e:
+                ct["error"] = f"{type(e).__name__}: {str(e)[:120]}"
+        watek = threading.Thread(target=_ct, daemon=True)
+        watek.start()
     hist = uzupelnij_historie(min(HIST_BUDZET_S, budzet_s / 2))
-    out = probkuj_swiece(max(5.0, budzet_s - (time.monotonic() - start)), zajmij=False)
+    out = probkuj_swiece(max(5.0, budzet_s - (time.monotonic() - start)), zajmij=False, feed=not watek)
+    if watek:
+        watek.join(timeout=5.0)
+        out["ctrader"] = ct
     out["history"] = hist
     return out
 

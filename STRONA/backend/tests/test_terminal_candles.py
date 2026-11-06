@@ -293,3 +293,21 @@ def test_finnhub_jako_zrodlo_historii_gdy_brak_innych_kluczy(monkeypatch):
     assert zapytania[0][1]["to"] == sek and zapytania[0][1]["to"] - zapytania[0][1]["from"] == 7 * 24 * 60 * 60
     w2 = terminal.uzupelnij_historie(5.0, transport=transport, teraz=teraz)
     assert w2["markets"]["xyz:EUR"]["done"] is True
+
+
+def test_cron_odpala_ctrader_rownolegle_z_probkowaniem(monkeypatch):
+    from app import ctrader_feed
+    _hist_zrodlo(monkeypatch)
+    wywolania = []
+
+    async def sluchaj(budzet_s, polacz=None):
+        wywolania.append(budzet_s)
+        return {"ticks": 12, "rows": 3}
+
+    monkeypatch.setattr(ctrader_feed, "skonfigurowany", lambda: True)
+    monkeypatch.setattr(ctrader_feed, "sluchaj", sluchaj)
+    monkeypatch.setattr(terminal, "odswiez_feed", lambda transport=None: pytest.fail("Finnhub not polled while cTrader runs"))
+    monkeypatch.setattr(terminal.get_settings(), "finnhub_api_key", "fh-key")
+    _mid_sekwencja(monkeypatch, [1.1, 1.2])
+    w = terminal.cron_swiece(0.05)
+    assert w["ctrader"] == {"ticks": 12, "rows": 3} and len(wywolania) == 1 and w["rows"] >= len(markets.SAMPLED)

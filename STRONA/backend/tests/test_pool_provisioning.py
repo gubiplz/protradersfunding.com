@@ -265,7 +265,7 @@ def test_generator_symulowanych_wpisow_i_przydzial_bez_mt5():
     s = SessionLocal()
     acc = s.get(Account, aid)
     assert acc.status == "active" and acc.mt5_backed is False
-    assert acc.platform_server == "MetaQuotes-Demo"
+    assert acc.platform_server == "PTF-sim"
     s.close()
 
     # limity generatora
@@ -297,7 +297,7 @@ def test_sim_fallback_aktywuje_konto_gdy_pula_pusta():
         acc = s.get(Account, aid)
         assert acc.status == "active" and acc.mt5_backed is False
         assert acc.platform_login and acc.platform_password
-        assert acc.platform_server == "MetaQuotes-Demo"
+        assert acc.platform_server == "PTF-sim"
         s.close()
     finally:
         client.post("/api/admin/pool/sim-fallback", headers=ADMIN_H, json={"enabled": False})
