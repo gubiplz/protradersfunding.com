@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>{{ symbol }} · Trade · {{ site_name }}</title>
+<meta name="description" content="Trade {{ market_name }} and other live markets on your {{ site_name }} challenge account: chart, order book, trades and one-click orders.">
+<link rel="icon" href="/static/img/favicon.png" type="image/png">
+<link rel="preload" href="/static/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/css/terminal.css?v={{ asset_v }}">
+<script>/* motyw terminala przed pierwszym malowaniem: ciemny, chyba że ktoś wybrał jasny */
+try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.dataset.theme='light'}catch(e){}</script>
+<meta property="og:title" content="Trade live markets · {{ site_name }}">
+<meta property="og:image" content="{{ base_url }}/static/img/og.png">
+<link rel="canonical" href="{{ base_url }}/trade">
+{% include "_analytics.html" %}
+</head>
+<body>
+<div id="terminal" class="term" data-symbol="{{ symbol }}"{% if missing_symbol %} data-missing="{{ missing_symbol }}"{% endif %}>
+
+{# Nagłówek jak na stronie PTF (base.html): ten sam znak, te same linki i przyciski,
+   te same rozmiary. Terminal dokłada tylko wyszukiwarkę rynków i menu konta. #}
+<header class="t-head">
+  <a class="t-logo" href="/" aria-label="{{ site_name }} home"><img src="/static/img/logo.png" alt=""><span class="t-logo-txt">{%- set _nm = site_name.rsplit(' ', 1) -%}{%- if _nm|length == 2 -%}<span class="lt-a">{{ _nm[0] }}</span> {{ _nm[1] }}{%- else -%}{{ site_name }}{%- endif -%}</span></a>
+  <nav class="t-nav" aria-label="Main">
+    <a href="/#pricing">Challenges</a>
+    <a class="on" href="/trade" aria-current="page">Trade</a>
+    <a href="/verify">Payouts</a>
+    <a href="/#how">How it works</a>
+    <a href="/faq">FAQ</a>
+    <a href="/academy">Academy</a>
+  </nav>
+  <div class="t-head-r">
+    <button class="t-ico t-hsearch" id="tSearchBtn" type="button" aria-label="Search markets" title="Search markets (/)"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
+    <button class="t-tog" id="tTheme" type="button" aria-label="Switch theme" title="Light / dark"><svg class="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg><svg class="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></svg></button>
+    <a class="t-hlogin" href="/portal">Log in</a>
+    <a class="t-getf" href="/#pricing">Get Funded</a>
+    <button class="t-burger" id="tBurger" type="button" aria-label="Menu" aria-expanded="false" aria-controls="tMMenu"><span></span><span></span><span></span></button>
+  </div>
+</header>
+<nav class="t-mmenu" id="tMMenu" hidden aria-label="Menu">
+  <a href="/#pricing">Challenges</a>
+  <a class="on" href="/trade" aria-current="page">Trade</a>
+  <a href="/verify">Payouts</a>
+  <a href="/#how">How it works</a>
+  <a href="/faq">FAQ</a>
+  <a href="/academy">Academy</a>
+  <button type="button" class="t-mm-login" id="tMMLogin">Connect MT5 account</button>
+  <a class="t-mm-dash" href="/portal">Log in</a>
+  <a class="t-getf" href="/#pricing">Get Funded</a>
+</nav>
+
+<div class="t-mkt">
+  <button class="t-sym" id="tSym" type="button" aria-haspopup="dialog"><span class="t-sym-ic" id="tSymIc"></span><b id="tSymName">{{ symbol }}</b><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+  <span class="t-lev" id="tMaxLev" title="Leverage on this market">1:10</span>
+  <div class="t-stat"><small>Mark</small><b class="num" id="tMark">—</b></div>
+  <div class="t-stat"><small>24h Change</small><b class="num" id="tChg">—</b></div>
+  <div class="t-stat"><small>Open Interest</small><b class="num" id="tOi">—</b></div>
+  <div class="t-stat"><small>24h Volume</small><b class="num" id="tVol">—</b></div>
+  <p class="t-src" id="tSrc"></p>
+  <div class="t-mkt-r">
+    <button class="t-ico" id="tShare" type="button" aria-label="Copy link" title="Copy link to this market"><svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg></button>
+  </div>
+</div>
+
+<div class="t-mtabs" id="tMTabs" role="tablist" aria-label="Panels">
+  <button class="on" data-pane="chart" type="button" role="tab" aria-selected="true">Chart</button>
+  <button data-pane="book" type="button" role="tab" aria-selected="false">Order Book</button>
+  <button data-pane="trades" type="button" role="tab" aria-selected="false">Trades</button>
+  <button data-pane="ticket" type="button" role="tab" aria-selected="false">Trade</button>
+</div>
+
+<main class="t-grid">
+  <section class="t-left" data-pane="chart">
+    <div class="t-tick">
+      <div class="t-tick-track" id="tTicker"></div>
+      <button class="t-tick-mode" id="tTickMode" type="button" title="Sort the strip"><svg viewBox="0 0 24 24"><path d="M4 6h10M4 12h16M4 18h7"/><circle cx="17" cy="6" r="2"/><circle cx="14" cy="18" r="2"/></svg><span id="tTickModeLbl">Trending</span></button>
+      <button class="t-ico sm" id="tTickPrev" type="button" aria-label="Scroll left"><svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg></button>
+      <button class="t-ico sm" id="tTickNext" type="button" aria-label="Scroll right"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></button>
+    </div>
+    <div class="t-ctabs">
+      {# The tablist holds only the tabs; the account bar beside them is not a tab. #}
+      <div class="t-tabset" role="tablist" aria-label="Chart views">
+        <button class="on" data-ctab="chart" type="button" role="tab" aria-selected="true">Chart</button>
+        <button data-ctab="data" type="button" role="tab" aria-selected="false">Trading Data</button>
+        <button data-ctab="info" type="button" role="tab" aria-selected="false">Info</button>
+      </div>
+      <div class="t-acw">
+        <button class="t-abar" id="tAccBtn" type="button" aria-haspopup="dialog"><i class="dot off"></i><span id="tAccLbl">Not connected</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+      <div class="t-apanel" id="tLogin" hidden role="dialog" aria-labelledby="tLoginH">
+        <div class="t-ap-list" id="tApList"></div>
+        <button class="t-ap-add" id="tApAdd" type="button" hidden>+ Add account</button>
+        <form id="tLoginMt5">
+          <h3 id="tLoginH">Connect to account</h3>
+          <label class="t-ap-row"><span>Login</span><input name="login" type="text" inputmode="numeric" autocomplete="username" spellcheck="false" required></label>
+          <label class="t-ap-row"><span>Password</span><input name="password" type="password" autocomplete="current-password" required></label>
+          <div class="t-ap-row"><label for="tSrvIn">Server</label>
+            <div class="t-ap-srv">
+              <input id="tSrvIn" name="server" type="text" autocomplete="off" spellcheck="false" placeholder="Type or pick" required>
+              <button id="tSrvBtn" type="button" aria-label="Saved servers"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+              <div class="t-ap-srvs" id="tSrvList" hidden></div>
+            </div>
+          </div>
+          <label class="t-ap-keep"><input name="keep" type="checkbox" checked><span>Stay connected</span></label>
+          <p class="t-err" hidden></p>
+          <button class="t-ap-go" type="submit">Connect</button>
+          <p class="t-ap-n">Login, password and server are in your purchase e-mail and <a href="/portal">dashboard</a>. No account? <a href="/#pricing">Get a challenge</a></p>
+        </form>
+      </div>
+      </div>
+    </div>
+    <div class="t-cpane on" data-cpane="chart">
+      <div class="t-ctools">
+        <div class="t-ints" id="tInts">
+          <button data-i="1m" type="button">1m</button><button data-i="3m" type="button">3m</button><button data-i="5m" type="button">5m</button><button data-i="15m" type="button">15m</button><button data-i="30m" type="button">30m</button><button data-i="1h" type="button">1h</button><button data-i="4h" type="button">4h</button><button data-i="1d" type="button">D</button><button data-i="1w" type="button">W</button>
+        </div>
+        <span class="t-sep"></span>
+        <div class="t-dd">
+          <button class="t-ico" id="tCType" type="button" title="Chart type" aria-label="Chart type"><svg viewBox="0 0 24 24"><path d="M7 3v4M7 17v4M17 3v6M17 19v2"/><rect x="5" y="7" width="4" height="10" rx="1"/><rect x="15" y="9" width="4" height="10" rx="1"/></svg></button>
+          <div class="t-menu" id="tCTypeMenu" hidden>
+            <button data-ct="candle_solid" type="button">Candles</button>
+            <button data-ct="candle_stroke" type="button">Hollow candles</button>
+            <button data-ct="ohlc" type="button">Bars</button>
+            <button data-ct="area" type="button">Area</button>
+          </div>
+        </div>
+        <span class="t-sep"></span>
+        <div class="t-dd">
+          <button class="t-txtbtn" id="tIndBtn" type="button"><svg viewBox="0 0 24 24"><path d="M4 18c3-8 5-8 7-3s4 5 9-9"/><path d="M15 21h6M18 18v6"/></svg>Indicators</button>
+          <div class="t-menu t-ind" id="tIndMenu" hidden></div>
+        </div>
+        <button class="t-txtbtn" id="tShowTrades" type="button" aria-pressed="true" title="Show your trades on the chart"><svg viewBox="0 0 24 24"><path d="M4 17 9 11l4 4 7-8"/><circle cx="4" cy="17" r="1.6"/><circle cx="20" cy="7" r="1.6"/></svg>Trades</button>
+        <span class="t-sep"></span>
+        <button class="t-ico" id="tUndo" type="button" title="Undo drawing" aria-label="Undo drawing"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
+        <button class="t-ico" id="tRedo" type="button" title="Redo drawing" aria-label="Redo drawing"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/></svg></button>
+        <span class="t-grow"></span>
+        <button class="t-ico" id="tShot" type="button" title="Save chart image" aria-label="Save chart image"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></button>
+        <button class="t-ico" id="tFull" type="button" title="Fullscreen" aria-label="Fullscreen chart"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+      </div>
+      <div class="t-cbody">
+        <div class="t-draw" id="tDraw" role="toolbar" aria-label="Drawing tools"></div>
+        <div class="t-chart" id="tChart"><div class="t-legend" id="tLegend"></div><div class="t-ttip" id="tTradeTip" hidden role="tooltip"></div></div>
+      </div>
+      <div class="t-cfoot">
+        <div class="t-ranges" id="tRanges">
+          <button data-r="5y" type="button">5y</button><button data-r="1y" type="button">1y</button><button data-r="6m" type="button">6m</button><button data-r="3m" type="button">3m</button><button data-r="1mo" type="button">1m</button><button data-r="5d" type="button">5d</button><button data-r="1d" type="button">1d</button>
+        </div>
+        <span class="t-grow"></span>
+        <span class="t-clock num" id="tClock"></span>
+        <span class="t-sep"></span>
+        <div class="t-axis" id="tAxis"><button data-ax="percentage" type="button">%</button><button data-ax="logarithm" type="button">log</button><button class="on" data-ax="normal" type="button">auto</button></div>
+      </div>
+    </div>
+    <div class="t-cpane" data-cpane="data"><div class="t-data" id="tData"></div></div>
+    <div class="t-cpane" data-cpane="info"><div class="t-info" id="tInfo"></div></div>
+  </section>
+
+  <section class="t-book" data-pane="book trades">
+    <div class="t-btabs" role="tablist" aria-label="Market depth">
+      <button class="on" data-btab="book" type="button" role="tab" aria-selected="true">Order Book</button>
+      <button data-btab="trades" type="button" role="tab" aria-selected="false">Trades</button>
+    </div>
+    <div class="t-bpane on" data-bpane="book">
+      <div class="t-bctl">
+        <select id="tGroup" aria-label="Price grouping"></select>
+        <select id="tUnit" aria-label="Size unit"></select>
+      </div>
+      <div class="t-bhead"><span>Price (USD)</span><span id="tBhSize">Size</span><span id="tBhTot">Total</span></div>
+      <div class="t-asks" id="tAsks"></div>
+      <div class="t-spread"><span>Spread</span><span class="num" id="tSpread">—</span><span class="num" id="tSpreadPct">—</span></div>
+      <div class="t-bids" id="tBids"></div>
+      <div class="t-depth"><span>Bid Depth <b class="num up" id="tBidD">—</b></span><span><b class="num dn" id="tAskD">—</b> Ask Depth</span>
+        <div class="t-depth-bar"><i class="up" id="tBidBar"></i><i class="dn" id="tAskBar"></i></div></div>
+    </div>
+    <div class="t-bpane" data-bpane="trades">
+      <div class="t-bhead"><span>Price (USD)</span><span id="tThSize">Size</span><span>Time</span></div>
+      <div class="t-trades" id="tTrades"></div>
+    </div>
+  </section>
+
+  <aside class="t-ticket" data-pane="ticket" id="tTicket">
+    <div class="t-otabs" role="group" aria-label="Order type">
+      <button class="on" data-ot="market" type="button">Market</button>
+      <button data-ot="limit" type="button">Limit</button>
+      <div class="t-dd">
+        <button data-ot="adv" id="tAdvBtn" type="button"><span id="tAdvLbl">Advanced</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+        <div class="t-menu" id="tAdvMenu" hidden><button data-adv="stop" type="button">Stop Market</button></div>
+      </div>
+    </div>
+    <div class="t-side" role="group" aria-label="Side">
+      <button class="on buy" data-side="buy" type="button">Buy / Long</button>
+      <span class="t-spr" id="tSideSpr" title="Live spread: best ask − best bid" aria-live="off"><small>Spread</small><b class="num">—</b></span>
+      <button class="sell" data-side="sell" type="button">Sell / Short</button>
+    </div>
+    <label class="t-fld" id="tPxRow" hidden><span id="tPxLbl">Price</span>
+      <div class="t-in"><input id="tPx" inputmode="decimal" autocomplete="off" placeholder="0.00"><button class="t-mini" id="tPxMid" type="button" title="Use the current price">Mark</button><em>USD</em></div>
+    </label>
+    <label class="t-fld"><span>Size</span>
+      <div class="t-in"><input id="tSize" inputmode="decimal" autocomplete="off" placeholder="0.00"><button class="t-unit" id="tSizeUnit" type="button" title="Switch unit: lots, USD or units"><span id="tSizeUnitLbl">Lots</span><svg viewBox="0 0 24 24"><path d="m7 9 5-5 5 5M7 15l5 5 5-5"/></svg></button></div>
+      <small class="t-size-hint num" id="tSizeHint"></small>
+    </label>
+    <div class="t-slider">
+      <input type="range" id="tPct" min="0" max="100" step="1" value="0" aria-label="Size as a share of available margin">
+      <div class="t-pct-in"><input id="tPctIn" inputmode="numeric" value="0" aria-label="Percent"><em>%</em></div>
+      <div class="t-ticks"><span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></div>
+    </div>
+    <label class="ck"><input type="checkbox" id="tReduce"><span>Reduce Only</span></label>
+    <label class="ck"><input type="checkbox" id="tTpsl"><span>Take Profit / Stop Loss</span></label>
+    <div class="t-tpsl" id="tTpslBox" hidden>
+      <label class="t-fld"><span>TP price</span><div class="t-in"><input id="tTp" inputmode="decimal" autocomplete="off" placeholder="—"><em id="tTpPct">%</em></div></label>
+      <label class="t-fld"><span>SL price</span><div class="t-in"><input id="tSl" inputmode="decimal" autocomplete="off" placeholder="—"><em id="tSlPct">%</em></div></label>
+    </div>
+    <button class="t-go buy" id="tGo" type="button">Buy / Long</button>
+    <dl class="t-est">
+      <div><dt>Estimated Price</dt><dd class="num" id="tEstPx">—</dd></div>
+      <div><dt>Order Value</dt><dd class="num" id="tEstVal">—</dd></div>
+      <div><dt>Margin Required</dt><dd class="num" id="tEstMargin">—</dd></div>
+      <div><dt><abbr title="Set for each market, the same on every account">Leverage</abbr></dt><dd class="num" id="tEstLev">—</dd></div>
+      <div><dt><button class="t-dt" id="tSlipBtn" type="button" title="Change the slippage limit">Max Slippage</button></dt><dd class="num" id="tSlip">1%</dd></div>
+      <div><dt>Fees</dt><dd class="num" id="tFee">0.009%</dd></div>
+      <div><dt><abbr title="Total open lots allowed on this account">Exposure Cap</abbr></dt><dd class="num" id="tCap">—</dd></div>
+    </dl>
+    <dl class="t-acct" id="tAcct">
+      <div><dt>Margin Used</dt><dd class="num" id="tMUsed">—</dd></div>
+      <div class="t-barrow"><dt class="t-vh">Margin used as a share of equity</dt><dd class="t-bar"><i id="tMBar"></i></dd></div>
+      <div><dt>Margin Balance</dt><dd class="num" id="tMBal">—</dd></div>
+      <div><dt>Available Balance</dt><dd class="num" id="tMAvail">—</dd></div>
+      <div class="t-rule"><dt>Daily loss left</dt><dd class="num" id="tDayLeft">—</dd></div>
+      <div class="t-rule"><dt>Max drawdown left</dt><dd class="num" id="tDdLeft">—</dd></div>
+    </dl>
+    <p class="t-fill-note" id="tFillNote"></p>
+  </aside>
+
+  <section class="t-bottom" data-pane="chart ticket">
+    <div class="t-ptabs" role="toolbar" aria-label="Account activity">
+      <button data-pt="accounts" type="button">Accounts</button>
+      <button class="on" data-pt="positions" type="button">Positions<em id="tPosN"></em></button>
+      <button data-pt="orders" type="button">Open Orders<em id="tOrdN"></em></button>
+      <button data-pt="phist" type="button">Position History</button>
+      <button data-pt="ohist" type="button">Order History</button>
+      <button data-pt="report" type="button">Report</button>
+      <div class="t-dd">
+        <button data-pt="more" id="tMoreBtn" type="button">More<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+        <div class="t-menu" id="tMoreMenu" hidden><button data-pt="rules" type="button">Account Rules</button><button data-pt="fills" type="button">Trade History</button></div>
+      </div>
+      <span class="t-grow"></span>
+      <button class="t-danger" id="tCloseAll" type="button" disabled>Close All</button>
+      <div class="t-dd">
+        <button class="t-outline" id="tColsBtn" type="button"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>Columns</button>
+        <div class="t-menu t-cols" id="tColsMenu" hidden></div>
+      </div>
+    </div>
+    <dl class="t-acline" id="tAcLine" hidden>
+      <div><dt>Balance</dt><dd class="num" id="tAlBal"></dd></div>
+      <div><dt>Equity</dt><dd class="num" id="tAlEq"></dd></div>
+      <div><dt>Margin</dt><dd class="num" id="tAlMar"></dd></div>
+      <div><dt>Free Margin</dt><dd class="num" id="tAlFree"></dd></div>
+      <div><dt>Margin Level</dt><dd class="num" id="tAlLvl"></dd></div>
+      <div><dt>Open P&amp;L</dt><dd class="num" id="tAlPnl"></dd></div>
+    </dl>
+    <div class="t-table" id="tTable"></div>
+  </section>
+</main>
+
+<footer class="t-foot">
+  <div class="t-dd up"><button class="t-fbtn" id="tFTickers" type="button"><span class="t-fic" id="tFTickIc"></span>Tickers<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button><div class="t-menu t-flist" id="tFTickersMenu" hidden></div></div>
+  <div class="t-dd up"><button class="t-fbtn" id="tFTop" type="button">Top Volume<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button><div class="t-menu t-flist" id="tFTopMenu" hidden></div></div>
+  <div class="t-dd up"><button class="t-fbtn" id="tFWatch" type="button"><svg viewBox="0 0 24 24"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></svg>Watchlist<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button><div class="t-menu t-flist" id="tFWatchMenu" hidden></div></div>
+  <span class="t-grow"></span>
+  <div class="t-dd up r"><button class="t-fbtn" id="tFTools" type="button"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>Trading tools<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button><div class="t-menu t-tools" id="tToolsMenu" hidden></div></div>
+  <div class="t-dd up r"><button class="t-fbtn" id="tFCalc" type="button"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 12h2M12 12h2M16 12h0M8 16h2M12 16h2M16 16h0"/></svg>Calculator<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button><div class="t-menu t-calc" id="tCalcMenu" hidden></div></div>
+  <span class="t-conn" id="tConn"><i></i><b>Connecting</b><em class="num" id="tLat"></em></span>
+  <span class="t-sep"></span>
+  <a class="t-fbtn" href="/affiliate"><svg viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="13" rx="1.5"/><path d="M12 8v13M3 12h18M12 8c-2-4-6-4-6-1.5S10 8 12 8zm0 0c2-4 6-4 6-1.5S14 8 12 8z"/></svg>Refer &amp; Earn</a>
+  <a class="t-fbtn" href="/contact"><svg viewBox="0 0 24 24"><path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="2" y="14" width="5" height="6" rx="1.5"/><rect x="17" y="14" width="5" height="6" rx="1.5"/></svg>Support</a>
+  <a class="t-fbtn" href="/faq" title="Help"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h0"/></svg></a>
+</footer>
+
+<div class="t-mbar" id="tMBarBtns">
+  <button class="t-go buy" data-quick="buy" type="button">Buy / Long</button>
+  <button class="t-go sell" data-quick="sell" type="button">Sell / Short</button>
+</div>
+
+</div>
+
+{# --- okna --- #}
+<div class="t-modal" id="tSearch" hidden role="dialog" aria-modal="true" aria-label="Search markets">
+  <div class="t-card t-search">
+    <div class="t-search-in"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="tSearchIn" placeholder="Search markets" autocomplete="off" aria-label="Search markets"><kbd>Esc</kbd></div>
+    <div class="t-search-cats" id="tSearchCats"></div>
+    <div class="t-search-head"><span>Market</span><span>Price</span><span>24h</span><span>Volume</span></div>
+    <div class="t-search-list" id="tSearchList"></div>
+    <p class="t-search-note">More forex pairs and indices (AUD/USD, US30, GER40 and others) trade in MT5 on the same account.</p>
+  </div>
+</div>
+
+<div class="t-modal" id="tReady" hidden role="dialog" aria-modal="true" aria-labelledby="tReadyH">
+  <div class="t-card t-ready">
+    <button class="t-x" data-close type="button" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    <h2 id="tReadyH">Ready to Start Trading?</h2>
+    <p>You need a challenge account to trade here. Connect it with the MT5 login you received after your purchase.</p>
+    <div class="t-ready-box">Trade simulated capital at live market prices, prove your strategy with professional tools, and work toward a funded account.</div>
+    <p class="t-ready-in">Already have a challenge? <button class="t-link acc" id="tReadySignIn" type="button">Connect MT5</button></p>
+    <div class="t-ready-foot">
+      <a class="t-btn ghost" href="/portal?signup=1">Sign Up</a>
+      <a class="t-btn" href="/#pricing">Choose a Challenge</a>
+    </div>
+  </div>
+</div>
+
+<div class="t-modal" id="tConfirm" hidden role="dialog" aria-modal="true" aria-labelledby="tConfirmH">
+  <div class="t-card t-confirm">
+    <button class="t-x" data-close type="button" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    <h2 id="tConfirmH">Confirm</h2>
+    <div id="tConfirmBody"></div>
+    <div class="t-ready-foot"><button class="t-btn ghost" data-close type="button">Cancel</button><button class="t-btn" id="tConfirmOk" type="button">Confirm</button></div>
+  </div>
+</div>
+
+<div class="t-modal t-case" id="tCase" hidden role="dialog" aria-modal="true" aria-labelledby="tCaseH">
+  <div class="t-card t-casec">
+    <button class="t-x" data-close type="button" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    <div class="t-case-l">
+      <a class="t-logo sm" href="/"><img src="/static/img/logo.png" alt=""><span>{{ site_name }}</span></a>
+      <h2 id="tCaseH">Your Free Trade Case Is Waiting</h2>
+      <p>Sign up for {{ site_name }} to claim and open your free Trade Case.</p>
+      <p class="gold">Every case pays a prize, up to a free $100K challenge.</p>
+      <a class="t-btn wide" id="tCaseGo" href="/portal?case=1">Sign Up &amp; Open My Free Case</a>
+      <button class="t-link mute" data-close type="button">No Thanks</button>
+    </div>
+    <div class="t-case-r" aria-hidden="true">
+      <svg viewBox="0 0 320 240" class="t-case-art">
+        <defs>
+          <linearGradient id="cgGold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f1d79a"/><stop offset=".55" stop-color="#C6A15B"/><stop offset="1" stop-color="#8a6526"/></linearGradient>
+          <linearGradient id="cgBody" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1d2a45"/><stop offset="1" stop-color="#0d1525"/></linearGradient>
+          <linearGradient id="cgLid" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#26365a"/><stop offset="1" stop-color="#16213a"/></linearGradient>
+        </defs>
+        <ellipse cx="160" cy="206" rx="120" ry="16" fill="#000" opacity=".35"/>
+        <rect x="56" y="104" width="208" height="96" rx="14" fill="url(#cgBody)" stroke="url(#cgGold)" stroke-width="3"/>
+        <path d="M60 104 Q64 62 104 58 H216 Q256 62 260 104 Z" fill="url(#cgLid)" stroke="url(#cgGold)" stroke-width="3"/>
+        <rect x="52" y="98" width="216" height="12" rx="6" fill="url(#cgGold)"/>
+        <rect x="140" y="92" width="40" height="34" rx="7" fill="url(#cgGold)"/>
+        <path d="M160 101v15" stroke="#3b2a0c" stroke-width="4" stroke-linecap="round"/>
+        <g transform="translate(78 140)">
+          <rect width="164" height="40" rx="8" fill="#0a111f" stroke="#2b3b5c"/>
+          <path d="M14 30 L44 18 L66 24 L98 9 L124 16 L150 6" fill="none" stroke="#36B9A9" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <g fill="#C6A15B"><rect x="20" y="20" width="4" height="12" rx="1"/><rect x="58" y="16" width="4" height="14" rx="1"/><rect x="110" y="10" width="4" height="12" rx="1"/></g>
+        </g>
+        <g fill="#f1d79a"><circle cx="70" cy="50" r="2.5"/><circle cx="258" cy="40" r="2"/><circle cx="276" cy="86" r="1.6"/><circle cx="46" cy="88" r="1.8"/></g>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<div class="t-toasts" id="tToasts" aria-live="polite"></div>
+{% include "_consent.html" %}
+
+<script id="tMarkets" type="application/json">{{ markets_json | safe }}</script>
+<script src="/static/lib/klinecharts.min.js?v={{ asset_v }}" defer></script>
+<script src="/static/js/terminal-feed.js?v={{ asset_v }}" defer></script>
+<script src="/static/js/terminal.js?v={{ asset_v }}" defer></script>
+</body>
+</html>

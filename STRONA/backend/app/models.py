@@ -332,6 +332,37 @@ class RewardCode(Base):
 
 
 # --------------------------------------------------------------------------- #
+#  RewardCase — darmowa „Trade Case": jedna skrzynka na tradera               #
+# --------------------------------------------------------------------------- #
+class RewardCase(Base):
+    """Wynik otwarcia darmowej skrzynki (app/trade_case.py).
+
+    UNIQUE na `trader_id` to twarda bramka „jedna skrzynka na tradera": dwa
+    równoległe otwarcia (SQLite nie zna FOR UPDATE) przegrywają na INSERT-cie,
+    a nie dopiero w aplikacji. Nagroda jest zapisana w wierszu wprost (typ,
+    etykieta, wartość), bo konfiguracja puli w panelu może się zmienić po
+    otwarciu — trader ma dalej widzieć to, co wygrał.
+
+    `reward_code_id` i `account_id` są zwykłymi liczbami, bez FK: kasowanie
+    konta albo kodu z panelu nie może się wywrócić na tej tabeli.
+    """
+    __tablename__ = "reward_cases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    trader_id: Mapped[int] = mapped_column(ForeignKey("traders.id"), unique=True, index=True)
+    opened_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    card_index: Mapped[int] = mapped_column(Integer, default=0)          # karta kliknięta (0..2)
+    prize_key: Mapped[str] = mapped_column(String(40))
+    prize_type: Mapped[str] = mapped_column(String(12))                  # code | account | points
+    prize_label: Mapped[str] = mapped_column(String(80))
+    prize_value: Mapped[float | None] = mapped_column(Float, nullable=True)  # pct albo punkty
+    reward_code_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    account_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # JSON: product_key, etykiety dwóch pozostałych kart (kosmetyka odsłony)
+    payload: Mapped[str] = mapped_column(Text, default="")
+
+
+# --------------------------------------------------------------------------- #
 #  FlashOffer — reczna oferta flash sale (cross-sell)                         #
 # --------------------------------------------------------------------------- #
 class FlashOffer(Base):
@@ -441,6 +472,26 @@ class Account(Base):
     # wiec panel NIE moze breachowac takiego konta za kopiowanie; (2) tylko
     # takie konto dostaje realny rachunek MT5 i realny odczyt equity.
     copytrading: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # --- Terminal PTF (zakładka Trade) ---
+    # `terminal_used`: konto handlowało w terminalu, więc jego saldo prowadzi
+    # NASZA księga (`trades` z source='terminal') — feed nie może go nadpisać.
+    # `terminal_open`: są otwarte pozycje albo zlecenia oczekujące; po tym
+    # tick ryzyka wybiera konta do przeliczenia co minutę.
+    # `terminal_sync_at`: ostatni przegląd (midy). `terminal_candle_at`: do której
+    # chwili przejrzano PEŁNE świece 1m — osobno, bo odświeżanie co kilkanaście
+    # sekund przesuwa sync, a knoty między odczytami muszą zostać sprawdzone.
+    terminal_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    terminal_open: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    # Admin odciął to konto od terminala: logowanie odmawia, otwarte sesje wygasają.
+    terminal_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Zgoda klienta na zarządzanie kontem (daje ją sam w terminalu). Bez niej nie ma żywej końcówki.
+    managed_consent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    managed_consent_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    managed_consent_version: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    terminal_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    terminal_candle_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    terminal_eval_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # --- Trade BOT (admin) ---
     # Gdy wlaczony, konto NIE jest czytane z MT5 — snapshoty generuje tradebot.py.
@@ -590,6 +641,74 @@ class Trade(Base):
     # w bazie, zeby restart nie przerywal transakcji w polowie.
     plan_pnl: Mapped[float] = mapped_column(Float, default=0.0)
     plan_close_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # --- Pozycje z terminala PTF (source='terminal') ---
+    # Ilość w jednostkach bazowych (BTC, uncje, baryłki); `lots` = qty / kontrakt
+    # i to ona idzie do limitu lotów. `pnl` zamkniętej jest NETTO (po opłatach),
+    # więc suma `pnl` zgadza się z ruchem salda; `fee` to opłaty z obu stron.
+    venue: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    qty: Mapped[float | None] = mapped_column(Float, nullable=True)
+    leverage: Mapped[float | None] = mapped_column(Float, nullable=True)
+    margin: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tp: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sl: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Trailing stop: odległość od najlepszej ceny (w jednostkach ceny). SL idzie tylko w stronę zysku.
+    trail: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Notatka tradera w dzienniku.
+    journal: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    liq_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fee: Mapped[float | None] = mapped_column(Float, nullable=True)
+    slippage: Mapped[float | None] = mapped_column(Float, nullable=True)   # % od mid przy wejściu
+    close_reason: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Od kiedy obowiązują bieżące TP/SL — świece sprzed tej chwili ich nie wyzwalają.
+    tpsl_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class TerminalOrder(Base):
+    """Zlecenie z terminala PTF: rynkowe (od razu wypełnione, zostaje jako
+    historia), limit i stop (czekają, aż świeca 1m przetnie cenę)."""
+    __tablename__ = "terminal_orders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    symbol: Mapped[str] = mapped_column(String(16))
+    side: Mapped[str] = mapped_column(String(4))                 # buy|sell
+    kind: Mapped[str] = mapped_column(String(8))                 # market|limit|stop
+    qty: Mapped[float] = mapped_column(Float)
+    price: Mapped[float | None] = mapped_column(Float, nullable=True)   # limit albo trigger stopu
+    leverage: Mapped[float] = mapped_column(Float, default=1.0)
+    tp: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sl: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reduce_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String(10), default="open", index=True)  # open|filled|cancelled|rejected
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    done_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    fill_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    trade_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    note: Mapped[str | None] = mapped_column(String(160), nullable=True)
+
+
+class TerminalLogin(Base):
+    """Próba logowania do terminala danymi MT5 — udana (to też sesja) albo odrzucona.
+
+    Odpowiada na pytanie admina „kto, skąd i z jakiego urządzenia wchodził na to konto".
+    Odrzucone wiersze liczą też limit prób: na serverless licznik w pamięci procesu
+    chroniłby tylko jedną instancję."""
+    __tablename__ = "terminal_logins"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    login: Mapped[str] = mapped_column(String(64), index=True)
+    account_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    trader_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    ip: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    country: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    region: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    device_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class Certificate(Base):
@@ -1183,3 +1302,23 @@ class AdminInboxMark(Base):
     read: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     hidden: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class TerminalCandle(Base):
+    """Minutowa świeca z mid Hyperliquida dla cienkich rynków (FX, JPN225, XPT).
+
+    Świece giełdy powstają z transakcji, a na tych rynkach drukuje się ich kilka na
+    minutę, przy 4 miejscach po przecinku: wykres M1 stał w miejscu i skakał. Cron
+    próbkuje mid co sekundę (`terminal.probkuj_swiece`) i składa z tego prawdziwe
+    O/H/L/C; terminal nakłada je na historię z giełdy, wolumen zostaje giełdowy."""
+    __tablename__ = "terminal_candles"
+    __table_args__ = (UniqueConstraint("coin", "ts", name="uq_terminal_candles_coin_ts"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    coin: Mapped[str] = mapped_column(String(32), index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, index=True)   # początek minuty, UTC
+    o: Mapped[float] = mapped_column(Float)
+    h: Mapped[float] = mapped_column(Float)
+    l: Mapped[float] = mapped_column(Float)
+    c: Mapped[float] = mapped_column(Float)
+    n: Mapped[int] = mapped_column(Integer, default=0)            # liczba próbek

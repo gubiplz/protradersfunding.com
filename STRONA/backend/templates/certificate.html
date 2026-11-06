@@ -10,7 +10,6 @@
    certyfikatu nie jest odwiedzającym i nie ma prawa podbijać statystyk. #}
 {% if not bare %}{% include "_analytics.html" %}{% endif %}
 <link rel="icon" href="/static/img/favicon.png" type="image/png">
-<link rel="preload" href="/static/fonts/signature.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/css/site.css?v={{ asset_v }}">
 <link rel="stylesheet" href="/static/css/cert.css?v={{ asset_v }}">
 <meta name="robots" content="noindex">
@@ -43,15 +42,7 @@
     <p class="cert-blurb">{{ blurb }}</p>
     {% if note %}<p class="cert-note">{{ note }}</p>{% endif %}
 
-    {# signature on the LEFT, QR on the RIGHT (1fr/auto grid) #}
     <div class="cert-foot">
-      <div class="cert-signblock">
-        {% if signatory %}
-        <b class="sig">{{ signatory }}</b>
-        <i class="sig-line"></i>
-        <span>{{ signatory_label|replace(':','') }}</span>
-        {% endif %}
-      </div>
       <div class="cert-qr" title="Scan to verify this certificate">
         <div class="qr-box">{{ qr_svg|safe }}</div>
         <b>{{ cert_token }}</b>

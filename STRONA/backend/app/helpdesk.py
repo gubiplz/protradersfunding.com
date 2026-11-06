@@ -396,11 +396,11 @@ def dostawca() -> str | None:
 # Przewodnik po portalu: tylko to, co faktycznie jest w portalu (nazwy z menu
 # i przycisków), bez obietnic wypłat.
 PORTAL = [
-    ("How do I log in to MT5 and connect my account to MetaTrader 5?",
+    ("How do I log in to MT5 and connect my account to MT5?",
      "Here's how to log in to MT5:\n"
      "1. In the portal open Challenges, click Dashboard on your account, then Credentials. Note the login, "
      "password and server.\n"
-     "2. Install MetaTrader 5 — from metatrader5.com on Windows or macOS, or from the App Store / Google Play "
+     "2. Install MT5 — from metatrader5.com on Windows or macOS, or from the App Store / Google Play "
      "on your phone. You can also use the MT5 web terminal in a browser.\n"
      "3. Desktop: File → Login to Trade Account. Mobile: open the accounts screen and choose to log in to an "
      "existing account.\n"

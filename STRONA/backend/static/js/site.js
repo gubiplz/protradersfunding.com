@@ -169,11 +169,13 @@
 
   /* ---------- ?ref= capture (partner code attaches at signup) ---------- */
   /* Timestamped: the signup form only prefills codes from a recent visit —
-     a partner code stored forever kept resurfacing months later. */
+     a partner code stored forever kept resurfacing months later. The code waits
+     in sessionStorage until the privacy choices allow "Referral attribution"
+     (_consent.html moves it to localStorage, or drops it). */
   const ref = new URLSearchParams(location.search).get('ref');
   if (ref) try {
-    localStorage.setItem('pf_ref', ref);
-    localStorage.setItem('pf_ref_ts', String(Date.now()));
+    sessionStorage.setItem('pf_ref_pending', ref);
+    if (window.pfConsent) pfConsent.apply();
   } catch (e) {}
 
   const yearEl = $('#year'); if (yearEl) yearEl.textContent = new Date().getFullYear();
@@ -326,13 +328,6 @@
   $$('.asset[data-sym]').forEach(a => a.addEventListener('click', e => {
     if (typeof window.openTerminal === 'function') { e.preventDefault(); window.openTerminal(a.dataset.sym); }
   }));
-  const assetsBtn = $('#assetsAllBtn'), assetsAll = $('#assetsAll');
-  if (assetsBtn && assetsAll) assetsBtn.addEventListener('click', () => {
-    const open = assetsAll.hidden;
-    assetsAll.hidden = !open; assetsBtn.setAttribute('aria-expanded', String(open));
-    assetsBtn.textContent = open ? 'Hide the list' : 'See the full list';
-    if (open) revealize(assetsAll);
-  });
 
   /* ---------- FAQ: wyszukiwarka, kotwice pytań ---------- */
   (function faqTools() {
@@ -396,30 +391,6 @@
   /* ---------- mockup: progress bars ---------- */
   setTimeout(() => $$('.mbar i').forEach(b => { b.style.width = (b.dataset.w || 0) + '%'; }), 500);
 
-  /* ---------- /api/public/stats — tiles only for non-zero metrics ---------- */
-  async function stats() {
-    const band = $('#statsBand'); if (!band) return;
-    try {
-      const s = await (await fetch('/api/public/stats')).json();
-      const defs = [
-        { v: s.accounts_total, label: 'Trading accounts created' },
-        { v: s.traders_total, label: 'Traders on the platform' },
-        { v: s.payouts_total_usd, label: 'Paid in rewards', prefix: '$' },
-        { v: s.funded_accounts, label: 'Funded accounts' },
-        { v: s.countries_count, label: 'Countries' },
-      ].filter(d => d.v > 0).slice(0, 4);
-      if (defs.length < 2) { band.remove(); return; }   // fresh install: fake nothing
-      $('#statsGrid').innerHTML = defs.map(d => {
-        /* Long figures (9+ digits incl. separators) get a smaller size class —
-           the tile must never clip the number. */
-        const dl = fmt(Math.round(d.v)).length + (d.prefix ? 1 : 0);
-        return `<div class="stat"><div class="stat-num grad-text${dl > 9 ? ' stat-num-l' : ''}" data-count="${Math.round(d.v)}"${d.prefix ? ` data-prefix="${d.prefix}"` : ''}></div>
-         <div class="stat-label">${d.label}</div></div>`;
-      }).join('');
-      $$('.stat-num', band).forEach(countUp);
-    } catch (e) { band.remove(); }
-  }
-
   /* ---------- /api/products — pricing + trading objectives ---------- */
   let PRODUCTS = [];
 
@@ -442,111 +413,138 @@
     .sort((a, b) => a.account_size - b.account_size);
   const sizeLabel = v => v >= 1e6 ? '$' + (v / 1e6) + 'M' : '$' + Math.round(v / 1e3) + 'K';
 
+  /* Challenges: model tabs, size tiers and one flip card per size. "View Rules" turns the
+     card over; the add-ons and the coupon below apply to whichever card starts checkout. */
+  const TIERS = [['starter', 'Starter', v => v < 200000], ['pro', 'Pro', v => v >= 200000 && v < 800000], ['elite', 'Elite', v => v >= 800000]];
+  const MODELS = [['2step', '2-Step Evaluation'], ['instant', 'Instant Funding']];
+  let cfgTier = 'starter';
+  const flipped = new Set();
+  const usd = v => '$' + v.toLocaleString('en-US', { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 });
+
+  function cardRules(p) {
+    const instant = p.steps === 0;
+    return [
+      ['Profit target', instant ? 'None' : `${p.profit_target_p1}% / ${p.profit_target_p2}%`],
+      ['Daily loss limit', p.max_daily_loss_pct + '%'],
+      ['Max drawdown', p.max_overall_loss_pct + '%'],
+      ['Min. trading days', p.min_trading_days + ''],
+      ['Profit split', (instant ? '' : 'Up to ') + p.profit_split_pct + '%'],
+      ['Rewards', czestotliwoscWyplat()],
+      ['Max open volume', p.max_lots + ' lots'],
+      ['Leverage', dzwignia()],
+      ['Fee refund', 'First payout'],
+    ];
+  }
+
   function renderPricing() {
-    const box = $('#pcfg'); if (!box) return;
+    const box = $('#pcfg'), grid = $('#chalGrid'); if (!box || !grid) return;
     const { promo: cfgPromo, coupon: cfgCoupon, pct: cfgPct } = readCode();
     let items = typeItems(cfgType);
     if (!items.length) { cfgType = cfgType === '2step' ? 'instant' : '2step'; items = typeItems(cfgType); }
-    if (!items.length) { box.closest('.pcfg-grid')?.remove(); return; }
-    if (!items.some(x => x.account_size === cfgSize)) cfgSize = items[0].account_size;
-    const p = items.find(x => x.account_size === cfgSize);
+    if (!items.length) { $('#pricing')?.remove(); return; }
+    const tiers = TIERS.filter(([, , f]) => items.some(x => f(x.account_size)));
+    if (!tiers.some(([id]) => id === cfgTier)) cfgTier = tiers[0][0];
+    const [, tierName, inTier] = TIERS.find(([id]) => id === cfgTier);
+    const shown = items.filter(x => inTier(x.account_size));
 
-    $('#pcfg-title').textContent = cfgType === 'instant' ? 'Instant Funding' : '2-Step Evaluation';
-    $('#pcfg-toggle').innerHTML = [['2step', '2-Step Evaluation'], ['instant', 'Instant Funding']]
-      .filter(([id]) => typeItems(id).length)
-      .map(([id, nm]) => `<button class="ptog${id === cfgType ? ' on' : ''}" data-t="${id}">${nm}</button>`).join('');
-    $$('#pcfg-toggle .ptog').forEach(b => b.addEventListener('click', () => { cfgType = b.dataset.t; renderPricing(); }));
+    $('#chalModels').innerHTML = MODELS.filter(([id]) => typeItems(id).length)
+      .map(([id, nm]) => `<button type="button" class="${id === cfgType ? 'on' : ''}" data-m="${id}">${nm}</button>`).join('');
+    $('#chalTiers').innerHTML = tiers
+      .map(([id, nm]) => `<button type="button" class="${id === cfgTier ? 'on' : ''}" data-t="${id}">${nm}</button>`).join('');
+    $$('#chalModels button').forEach(b => b.addEventListener('click', () => { cfgType = b.dataset.m; renderPricing(); }));
+    $$('#chalTiers button').forEach(b => b.addEventListener('click', () => { cfgTier = b.dataset.t; renderPricing(); }));
 
-    $('#pcfg-sizes').innerHTML = items.map(x =>
-      `<button class="psize${x.account_size === cfgSize ? ' on' : ''}${x.popular ? ' hot' : ''}" data-s="${x.account_size}">${x.popular ? '<i>Best value</i>' : ''}${sizeLabel(x.account_size)}</button>`).join('');
-    $$('#pcfg-sizes .psize').forEach(b => b.addEventListener('click', () => { cfgSize = +b.dataset.s; renderPricing(); }));
-
-    const wt = $('#pcfg-wt');
-    wt.textContent = cfgWt ? '✓ Added' : 'Add $199';
-    wt.classList.toggle('on', cfgWt);
-
-    /* Copytrading schodzi z karty razem z wylaczeniem sprzedazy w panelu —
-       i wtedy NIE moze zostac policzony w cenie, choćby ktos zdazyl go
-       wczesniej kliknac. */
+    const anyOffersCt = shown.some(oferujeCt);
     const ctRow = $('#pcfg-ct-row'), ct = $('#pcfg-ct');
-    const ctOn = oferujeCt(p);
-    if (ctRow) ctRow.hidden = !ctOn;
-    if (!ctOn) cfgCt = false;
-    if (ct) {
-      ct.textContent = cfgCt ? '✓ Added' : 'Add $' + cenaCt(p);
-      ct.classList.toggle('on', cfgCt);
-    }
+    if (ctRow) ctRow.hidden = !anyOffersCt;
+    if (!anyOffersCt) cfgCt = false;
+    if (ct) ct.setAttribute('aria-checked', cfgCt);
+    const ctPrice = $('#pcfg-ct-price');
+    if (ctPrice) ctPrice.textContent = '+$' + cenaCt(shown[0]);
+    $('#pcfg-wt').setAttribute('aria-checked', cfgWt);
 
-    /* The upgrade promo does not touch the fee — it moves the account one tier
-       up, so the size has to be stated where the price is, or the offer reads
-       like nothing happened. */
-    const upSize = cfgPromo && p.promo_upgrade_size ? p.promo_upgrade_size : null;
-    const fee = Math.round((p.price_usd * (1 - cfgPct / 100)
-      + (cfgWt ? CENA_WT : 0) + (cfgCt ? cenaCt(p) : 0)) * 100) / 100;
-    $('#pcfg-fee').textContent = '$' + fee.toLocaleString('en-US',
-      { minimumFractionDigits: fee % 1 ? 2 : 0, maximumFractionDigits: 2 });
-    $('#pcfg-feesub').textContent = (cfgPct ? `${cfgPct}% coupon applied · ` : '')
-      + (upSize ? `${cfgPromo} applied: you trade ${sizeLabel(upSize)} for the price of ${sizeLabel(p.account_size)} · ` : '')
-      + (cfgType === 'instant' ? 'one-time fee, funded from day one'
-         : 'one-time fee for evaluation access, refunded with your first payout');
+    const model = cfgType === 'instant' ? 'Instant' : '2-Step';
+    const hot = shown.findIndex(x => x.popular);
+    const star = hot >= 0 ? hot : Math.floor(shown.length / 2);
+    /* Cards ease in only on a new model or tier, not when a price changes. */
+    const same = grid.dataset.k === cfgType + cfgTier;
+    grid.dataset.k = cfgType + cfgTier;
+    grid.innerHTML = shown.map((p, i) => {
+      /* Same sum as the checkout: discounted fee plus add-ons at full price. */
+      const addons = (cfgWt ? CENA_WT : 0) + (cfgCt && oferujeCt(p) ? cenaCt(p) : 0);
+      const fee = Math.round((p.price_usd * (1 - cfgPct / 100) + addons) * 100) / 100;
+      const upSize = cfgPromo && p.promo_upgrade_size ? p.promo_upgrade_size : null;
+      const q = new URLSearchParams({ buy: p.key });
+      if (cfgWt) q.set('wt', '1');
+      if (cfgCt && oferujeCt(p)) q.set('ct', '1');
+      if (cfgCoupon) q.set('coupon', cfgCoupon);
+      const open = flipped.has(p.key);
+      return `<article class="chal-card${same ? ' still' : ''} pal-${cfgTier}-${i}${i === star ? ' star' : ''}${p.popular ? ' hot' : ''}${open ? ' flip' : ''}">
+        <div class="chal-flip" role="button" tabindex="0" aria-label="$${p.account_size.toLocaleString('en-US')} ${model}: show or hide the rules"><div class="chal-inner">
+          <div class="chal-face chal-front">
+            <i class="chal-lines"></i><i class="chal-glare"></i>
+            <i class="chal-mark"></i>
+            <i class="chal-logo"></i>
+            <div class="chal-price">${cfgPct ? `<s>${usd(p.price_usd + addons)}</s>` : ''}<b>${usd(fee)}</b> <small>USD</small>${addons ? `<em>incl. ${usd(addons)} add-ons</em>` : ''}</div>
+            <div class="chal-size">
+              ${p.popular ? '<i>Best value</i>' : ''}
+              ${upSize ? `<i>You trade ${sizeLabel(upSize)}</i>` : ''}
+              <strong>$${p.account_size.toLocaleString('en-US')}</strong>
+              <span>${model} ${tierName}</span>
+            </div>
+            <ul class="chal-specs">
+              <li><small>Target</small><b>${p.steps === 0 ? 'None' : p.profit_target_p1 + '%'}</b></li>
+              <li><small>Drawdown</small><b>${p.max_overall_loss_pct}%</b></li>
+              <li><small>Split</small><b>${p.profit_split_pct}%</b></li>
+            </ul>
+          </div>
+          <div class="chal-face chal-back">
+            <i class="chal-lines"></i>
+            <i class="chal-logo"></i>
+            <h3><small>${model} ${tierName}</small>$${p.account_size.toLocaleString('en-US')}</h3>
+            <dl>${cardRules(p).map(([l, v]) => `<div><dt>${l}</dt><dd>${v}</dd></div>`).join('')}</dl>
+          </div>
+        </div></div>
+        <button type="button" class="btn-ghost chal-btn" data-flip="${p.key}" aria-expanded="${open}">${open ? 'Hide Rules' : 'View Rules'}</button>
+        <a class="btn chal-btn go" href="/portal?${q.toString()}">Start Challenge</a>
+      </article>`;
+    }).join('');
+    const turn = card => {
+      const b = $('[data-flip]', card), on = card.classList.toggle('flip');
+      if (on) flipped.add(b.dataset.flip); else flipped.delete(b.dataset.flip);
+      b.textContent = on ? 'Hide Rules' : 'View Rules';
+      b.setAttribute('aria-expanded', on);
+      card.classList.remove('tilt');
+      card.dataset.turnAt = Date.now();
+    };
+    $$('.chal-card', grid).forEach(card => {
+      const face = $('.chal-flip', card);
+      $('[data-flip]', card).addEventListener('click', () => turn(card));
+      face.addEventListener('click', () => turn(card));
+      face.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); turn(card); } });
+      if (reduced || !matchMedia('(hover:hover)').matches) return;
+      /* Light follows the pointer and the card leans a little towards it. */
+      face.addEventListener('pointermove', e => {
+        if (Date.now() - (+card.dataset.turnAt || 0) < 650) return;
+        const r = face.getBoundingClientRect(), x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+        card.classList.add('tilt');
+        face.style.setProperty('--ry', ((x - .5) * 7).toFixed(2) + 'deg');
+        face.style.setProperty('--rx', ((.5 - y) * 7).toFixed(2) + 'deg');
+        face.style.setProperty('--mx', (x * 100).toFixed(1) + '%');
+        face.style.setProperty('--my', (y * 100).toFixed(1) + '%');
+      });
+      face.addEventListener('pointerleave', () => {
+        card.classList.remove('tilt');
+        face.style.setProperty('--ry', '0deg');
+        face.style.setProperty('--rx', '0deg');
+      });
+    });
 
-    const q = new URLSearchParams({ buy: p.key });
-    if (cfgWt) q.set('wt', '1');
-    if (cfgCt) q.set('ct', '1');
-    if (cfgCoupon) q.set('coupon', cfgCoupon);
-    $('#pcfg-cta').href = '/portal?' + q.toString();
-
-    const wkVal = cfgWt ? '<span class="ok">✓ Added to your order</span>' : '$199 bonus add-on';
-    /* Wiersz pojawia sie tylko, gdy dodatek jest w sprzedazy — tabela regul ma
-       opisywac to, co mozna kupic DZIS, a nie to, co kiedys bylo w ofercie. */
-    const ctVal = cfgCt ? '<span class="ok">✓ Added to your order</span>' : `$${cenaCt(p)} add-on`;
-    const rows = cfgType === 'instant' ? [
-      ['Profit target', 'None. Funded from day one'],
-      ['Maximum daily drawdown', p.max_daily_loss_pct + '%'],
-      ['Maximum total drawdown', p.max_overall_loss_pct + '%'],
-      ['Drawdown type', 'Balance-based'],
-      ['Minimum trading days', p.min_trading_days + ' days before first payout'],
-      ['Reward frequency', czestotliwoscWyplat()],
-      ['Profit split', p.profit_split_pct + '%'],
-      ['Max open volume', p.max_lots + ' lots'],
-      ['Weekend trading', wkVal],
-      ...(oferujeCt(p) ? [['Copytrading', ctVal]] : []),
-      ['News trading', '<span class="ok">✓ Allowed</span>'],
-      ['Leverage', 'Up to 1:100'],
-    ] : [
-      ['Profit target', `Phase 1: ${p.profit_target_p1}% | Phase 2: ${p.profit_target_p2}%`],
-      ['Maximum daily drawdown', p.max_daily_loss_pct + '%'],
-      ['Maximum total drawdown', p.max_overall_loss_pct + '%'],
-      ['Drawdown type', 'Balance-based'],
-      ['Minimum trading days', p.min_trading_days + ' days per phase, and before your first payout'],
-      ['Reward frequency', czestotliwoscWyplat()],
-      ['Profit split', 'Up to ' + p.profit_split_pct + '%'],
-      ['Max open volume', p.max_lots + ' lots'],
-      ['Fee refund', '<span class="ok">✓ With your first payout</span>'],
-      ['Weekend trading', wkVal],
-      ...(oferujeCt(p) ? [['Copytrading', ctVal]] : []),
-      ['News trading', '<span class="ok">✓ Allowed</span>'],
-      ['Leverage', 'Up to 1:100'],
-    ];
-    /* The promo message is rebuilt on every render, because it depends on the
-       size picked: the largest tier has nothing above it to upgrade to. */
-    if (cfgPromo) {
-      codeMsg('ok', upSize
-        ? `<b>${cfgPromo}</b> applied: you pay for ${sizeLabel(p.account_size)} and trade `
-          + `<b>${sizeLabel(upSize)}</b>. Pick any size, the upgrade follows.`
-        : `<b>${cfgPromo}</b> applied, but ${sizeLabel(p.account_size)} is our largest account — `
-          + `there is nothing above it. Pick a smaller size to trade one tier up.`);
-    } else if (cfgCoupon) {
-      codeMsg('ok', `<b>${cfgCoupon}</b> applied: <b>${cfgPct}% off</b> your challenge fee.`);
-    } else {
-      codeMsg(null);
-    }
+    if (cfgPromo) codeMsg('ok', `<b>${cfgPromo}</b> applied: you pay for the size you pick and trade one tier up.`);
+    else if (cfgCoupon) codeMsg('ok', `<b>${cfgCoupon}</b> applied: <b>${cfgPct}% off</b> your challenge fee.`);
+    else codeMsg(null);
     const pinp = $('#pcfg-coupon');
     if (pinp && document.activeElement !== pinp) pinp.value = cfgPromo || cfgCoupon || '';
-    if (upSize) rows.unshift(['Account size',
-      `<span class="ok">${sizeLabel(upSize)} — upgraded from ${sizeLabel(p.account_size)}</span>`]);
-    $('#prules-rows').innerHTML = rows.map(([l, v]) =>
-      `<div class="prule"><span>${l}</span><b>${v}</b></div>`).join('');
   }
 
   /* The field takes EVERY kind of code, exactly like the promo bar and the
@@ -602,7 +600,7 @@
       /* Oba modele dostaja 1:100, bo z taka dzwignia provisioning ZAKLADA konta
          (config: METAAPI_DEMO_LEVERAGE / METAQUOTES_WEB_LEVERAGE = 100). Kolumna
          Instant mowila 1:50 i klamala wobec tego, co trader dostawal w MT5. */
-      ['Leverage', 'Up to 1:100', ...col('Up to 1:100')],
+      ['Leverage', dzwignia(true), ...col(dzwignia(true))],
       ['Profit split', 'up to ' + Math.max(...g2.map(p => p.profit_split_pct)) + '%', ...col(ri && ri.profit_split_pct + '%')],
       /* The engine refunds the fee on the FIRST payout for every plan
          (main.py:1342) — Instant Funding included. */
@@ -930,7 +928,6 @@
          minis can never drift from the real template. */
       const qr = ($('#pv-qr') && $('#pv-qr').innerHTML) || '';
       const brand = (document.querySelector('#pv-card .cert-logo span') || {}).textContent || '';
-      const signer = (document.querySelector('#pv-card .sig') || {}).textContent || '';
       const card = r => {
         const payout = r.kind === 'payout';
         const when = r.issued_at
@@ -952,19 +949,15 @@
             <div class="cert-person">${esc(r.trader)}</div>
             <div class="cert-meta">${meta}</div>
             <div class="cert-foot">
-              <div class="cert-signblock"><b class="sig">${esc(signer)}</b><i class="sig-line"></i><span>Chief Executive Officer</span></div>
               <div class="cert-qr"><div class="qr-box">${qr}</div><span>Scan to verify</span></div>
             </div>
           </div>
         </div></div>`;
       };
-      /* Two rows, every other card in the lower one, so they never show the
-         same set. Each row gets an EVEN number of copies: the loop wraps at
+      /* The row gets an EVEN number of copies: the loop wraps at
          half the row, so after half a cycle the frame is identical and nothing
          jumps. Three certificates would not fill a wide screen with one copy,
          hence the count comes from a measurement: row width >= 2x the strip. */
-      const topRow = rows.filter((_, i) => i % 2 === 0);
-      const botRow = rows.filter((_, i) => i % 2 === 1);
       /* Unhide FIRST: w [hidden] KAZDY pomiar to zero — a poniewaz liczba kopii
          wynika z pomiaru, zero oznaczaloby tysiace kart i zawieszona strone.
          Stad tez twardy sufit na liczbe kopii. */
@@ -981,8 +974,7 @@
           el.innerHTML = one.repeat(need);
         }
       };
-      fill($('#certsStripRow'), topRow);
-      fill($('#certsStripRow2'), botRow);
+      fill($('#certsStripRow'), rows);
       /* transform:scale() keeps the 620px layout box — each wrapper gets the
          SCALED height of its card. */
       requestAnimationFrame(() => {
@@ -1032,7 +1024,7 @@
   /* ---------- init ---------- */
   revealize(document);
   $$('.stat-num[data-count]').forEach(countUp);
-  stats(); products(); certsStrip();
+  products(); certsStrip();
 })();
 
 /* „Reward frequency" z ustawienia serwera (PAYOUT_INTERVAL_DAYS przez
@@ -1041,4 +1033,15 @@
 function czestotliwoscWyplat() {
   const d = +(document.body && document.body.dataset.payoutDays || 0);
   return d > 0 ? `Every ${d} days between requests` : 'On demand';
+}
+
+/* „Leverage" z listy rynków terminala (markets.py przez data-leverage na <body>):
+   maksimum to forex, reszta rynków ma niższą — ta sama, którą terminal stosuje.
+   `full` = rozbicie w drugiej linii (tabela Objectives); w wąskim panelu dymek. */
+function dzwignia(full) {
+  const b = document.body ? document.body.dataset : {};
+  const max = 'Up to 1:' + (+b.leverageMax || 100);
+  const by = b.leverage || '';
+  if (!by) return max;
+  return full ? `${max}<small class="lev-by">${by}</small>` : `<abbr class="lev-abbr" title="${by}">${max}</abbr>`;
 }

@@ -78,14 +78,14 @@ def test_strona_admina_nie_istnieje_bez_logowania():
     """404, a nie 401/403: „brak dostepu" potwierdzaloby, ze cos tam jest.
 
     Wczesniej /admin zwracalo pelny HTML panelu — kazdy widzial nawigacje
-    (Accounts, Payouts, KYC, MT5 Pool...) i przyciski, zanim cokolwiek go
+    (Accounts, Payouts, KYC, Built-in Terminal...) i przyciski, zanim cokolwiek go
     zapytalo o haslo.
     """
     # WLASNY klient: wspoldzielony `client` nosi ciasteczko z logowan w innych
     # testach tego pliku i wpuscilby nas jako admin.
     r = TestClient(app).get("/admin")
     assert r.status_code == 404
-    assert "MT5 Pool" not in r.text and "Grant challenge" not in r.text
+    assert "Built-in Terminal" not in r.text and "Grant challenge" not in r.text
 
 
 def test_zwykly_trader_tez_nie_widzi_strony_admina():
@@ -109,7 +109,7 @@ def test_admin_dostaje_strone_po_zalogowaniu():
     # Bez tej drugiej asercji zepsuty link do bundla przeszedlby niezauwazony.
     assert 'src="/static/js/admin-panel.js' in strona.text
     bundle = c.get("/static/js/admin-panel.js")
-    assert bundle.status_code == 200 and "MT5 Pool" in bundle.text
+    assert bundle.status_code == 200 and "Built-in Terminal" in bundle.text
 
 
 def test_docs_zamkniete_jak_admin():

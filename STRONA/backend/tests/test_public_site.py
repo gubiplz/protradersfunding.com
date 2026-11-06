@@ -75,8 +75,8 @@ def test_public_stats_bez_internali():
     assert data["traders_total"] >= 1
     # Kwoty na kaflach LP w pelnych dolarach — ".96" przy szesciocyfrowej
     # liczbie to szum, ktory poszerzal kafel az do obciecia tekstu.
-    assert isinstance(data["payouts_total_usd"], int)
-    assert isinstance(data["largest_payout_usd"], int)
+    for wyplaty in ("payouts_total_usd", "payouts_count", "largest_payout_usd"):
+        assert wyplaty not in data
 
 
 def test_operacyjne_stats_tylko_dla_admina():
@@ -280,7 +280,12 @@ def test_stopka_bez_plakietek_ale_z_pelnym_disclaimerem():
     with TestClient(app) as c:
         html = c.get("/").text
     assert "foot-tags" not in html
-    assert "Risk Disclaimer:" in html and "demo accounts with virtual funds" in html
+    assert "Important disclaimers" in html and "demo accounts with virtual funds" in html
+    # Cztery bloki z _disclaimers.html i link do wyborów cookies obok dokumentów prawnych.
+    for naglowek in ("Simulated environment and reference prices", "Difficulty, hypothetical results and risk",
+                     "Abuse monitoring, testimonials and no advice", "Fees, jurisdictions, intellectual property and contact"):
+        assert naglowek in html
+    assert 'data-ck-prefs>Cookie Preferences' in html
 
 
 def test_link_afiliacyjny_bierze_host_z_zadania():
@@ -383,7 +388,7 @@ def test_panel_admina_nie_jest_strona_publiczna():
     with TestClient(app) as c:
         r = c.get("/admin")
     assert r.status_code == 404
-    assert "MT5 Pool" not in r.text
+    assert "Built-in Terminal" not in r.text
 
 
 def test_weryfikacja_certyfikatu_na_stronie():
@@ -501,7 +506,7 @@ def test_landing_oznacza_ten_sam_plan_co_sklep():
     """
     from pathlib import Path
     js = (Path(__file__).resolve().parents[1] / "static" / "js" / "site.js").read_text()
-    assert "x.popular ? ' hot'" in js, "plakietka musi isc za polem z API"
+    assert "p.popular ? ' hot'" in js, "plakietka musi isc za polem z API"
     assert "maxSize" not in js, "stary wybor (najwiekszy plan) musi zniknac"
 
     html = zrodlo_portalu()

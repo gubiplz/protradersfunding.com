@@ -8,7 +8,7 @@ Domyślnie system startuje w trybie 0 zł, ale z REALNYMI kontami MT5:
   - SMTP          -> brak => maile lecą na konsolę (+ opcjonalny webhook Make)
 
 FEED=sim wyłącza kontakt z MetaQuotes — konta dostają wtedy placeholder
-`PropFunding-SIM`, którego NIE MA w MetaTraderze (tryb tylko do dem/testów).
+`PropFunding-SIM`, którego NIE MA w MT5ze (tryb tylko do dem/testów).
 
 Produkcja: klucze Stripe, SMTP, DATABASE_URL (Supabase), AUTO_SEED=false.
 """
@@ -80,7 +80,7 @@ class Settings:
     # Zakłada realne konta na serwerze MetaQuotes-Demo, sterując formularzem
     # „Open Demo account" danymi klienta zebranymi przy płatności.
     # Domyślnie WŁĄCZONE — bez tego konta dostają placeholder PropFunding-SIM,
-    # który nie istnieje w MetaTraderze (świeży klon repo nie ma pliku .env).
+    # który nie istnieje w MT5ze (świeży klon repo nie ma pliku .env).
     metaquotes_web_enabled: bool = os.getenv("METAQUOTES_WEB_ENABLED", "true").lower() == "true"
     metaquotes_web_url: str = os.getenv("METAQUOTES_WEB_URL", "https://web.metatrader.app/terminal?mode=demo")
     metaquotes_web_headless: bool = os.getenv("METAQUOTES_WEB_HEADLESS", "true").lower() == "true"
@@ -114,12 +114,6 @@ class Settings:
 
     # --- Marka / strona publiczna ---
     site_name: str = os.getenv("SITE_NAME", "Pro Traders Funding")
-    # Podpis na certyfikatach. Puste = blok podpisu w ogóle się nie pokazuje —
-    # nie wymyślamy nazwiska osoby, która miałaby firmować dokument.
-    # Podpis CEO na certyfikatach — STALA marki: kazdy dokument wychodzi z
-    # odrecznym podpisem Matthew Harrisona (krój Great Vibes w cert.css).
-    cert_signatory: str = os.getenv("CERT_SIGNATORY", "Matthew Harrison")
-    cert_signatory_label: str = os.getenv("CERT_SIGNATORY_LABEL", "Chief Executive Officer")
     support_email: str = os.getenv("SUPPORT_EMAIL", "support@protradersfunding.com")
     # Google Analytics 4 (Measurement ID typu G-XXXXXXX). Puste = brak snippetu
     # gtag na stronach — zero requestów do Google.

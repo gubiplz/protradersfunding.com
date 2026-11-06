@@ -88,6 +88,36 @@ def parse_token(token: str) -> int | None:
     return int(data["tid"]) if data else None
 
 
+# Sesja terminala: jedno konto MT5, nie trader. Osobna sól, żeby nie działała w portalu
+# (i odwrotnie), a odcisk hasła MT5 wylogowuje po jego zmianie.
+_terminal_serializer = URLSafeTimedSerializer(settings.secret_key, salt="terminal-session")
+TERMINAL_MAX_AGE = 60 * 60 * 24 * 14  # 14 dni
+
+
+def make_terminal_token(account_id: int, password: str, sid: int | None = None, imp: bool = False) -> str:
+    payload: dict = {"aid": account_id, "pwf": _pw_fp(password)}
+    if sid:
+        payload["sid"] = sid
+    if imp:
+        payload["imp"] = 1
+    return _terminal_serializer.dumps(payload)
+
+
+def parse_terminal_token(token: str) -> dict | None:
+    try:
+        data = _terminal_serializer.loads(token, max_age=TERMINAL_MAX_AGE)
+        if data.get("imp"):
+            _terminal_serializer.loads(token, max_age=IMP_MAX_AGE)
+        int(data["aid"])
+        return data
+    except (BadSignature, Exception):
+        return None
+
+
+def terminal_pw_fp(password: str | None) -> str:
+    return _pw_fp(password or "")
+
+
 # Osobna sol: token resetu nie moze dzialac jako token sesji (i odwrotnie).
 _reset_serializer = URLSafeTimedSerializer(settings.secret_key, salt="pw-reset")
 RESET_MAX_AGE = 60 * 60  # godzina

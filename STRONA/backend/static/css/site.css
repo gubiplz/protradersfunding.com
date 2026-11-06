@@ -221,8 +221,7 @@ h1,h2,h3,.display{font-family:var(--display);letter-spacing:-.02em}
 .stats-note{text-align:center;font-size:12px;color:var(--dim);padding:0 20px 18px}
 
 /* ---------------- MARQUEE / PLATFORM ---------------- */
-.platform-badge{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:14px}
-.platform-badge img{height:34px;width:auto;border-radius:8px}
+.platform-badge{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:14px}
 @keyframes mq{to{transform:translateX(-50%)}}
 
 /* ---------------- SECTIONS ---------------- */
@@ -352,6 +351,9 @@ table.obj tr:hover td{background:#fafbff}
   padding:11px 0;border-bottom:1px solid var(--line);font-size:13.5px}
 .prule:last-child{border-bottom:0}
 .prule span{color:var(--muted)}
+/* „Leverage": maksimum + dźwignia per klasa rynku (z listy rynków terminala) */
+.lev-abbr{text-decoration:underline dotted var(--dim);text-underline-offset:3px;cursor:help}
+.lev-by{display:block;margin-top:3px;font-size:12px;font-weight:400;color:var(--muted);line-height:1.4}
 .prule b{font-weight:600;text-align:right}
 .prule .ok{color:var(--green)}
 .prules-fine{font-size:11px;color:var(--dim);margin-top:14px}
@@ -525,13 +527,6 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
 .asset[data-c=metal]{--c:#d4a537}
 .asset[data-c=energy]{--c:#f08a3c}
 .asset[data-c=crypto]{--c:#16b8a6}
-.assets-all{margin-top:28px;padding:26px 28px;border-radius:20px;background:var(--panel);border:1px solid var(--line);
-  display:grid;grid-template-columns:repeat(5,1fr);gap:18px}
-.assets-all[hidden]{display:none}
-.assets-group h4{font-family:var(--display);font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:8px}
-.assets-group span{display:block;font-family:var(--mono);font-size:13px;color:var(--txt);padding:3px 0}
-.assets-note{grid-column:1/-1;margin:4px 0 0;font-size:12.5px;color:var(--muted)}
-.assets-note a{color:var(--acc);text-decoration:underline;text-underline-offset:2px}
 @media(prefers-reduced-motion:reduce){
   .assets-track{animation:none}
   .assets-row{overflow-x:auto;scrollbar-width:none}
@@ -547,7 +542,6 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
   .asset .ic.pair img{width:38px;height:38px}
   .asset .ic.metal,.asset .ic.energy{width:50px;height:50px}
   .asset .ic svg{width:32px;height:32px}
-  .assets-all{grid-template-columns:repeat(2,1fr);padding:20px}
   .assets-track{animation-duration:45s}
 }
 
@@ -787,6 +781,16 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
 /* ---------------- mobile (dopisane na koncu — wygrywa kolejnoscia w pliku;
    szersze bloki przed wezszymi, hover:none na samym koncu) ---------------- */
 
+/* Z linkiem „Trade" menu łamało się w dwie linijki („How it / works") nawet przy 1440 px:
+   linki bez łamania, ciaśniej na średnich ekranach, burger od 1100 px. */
+.nav-links a,.nav-login{white-space:nowrap}
+@media(max-width:1320px){.nav-links{gap:18px}}
+@media(max-width:1100px){
+  .nav-links,.nav-login{display:none}
+  .burger{display:flex;align-items:center;justify-content:center;
+    width:44px;height:44px;padding:0;flex:0 0 44px}
+  .nav .logo{flex:1 1 auto;min-width:0}
+}
 @media(max-width:960px){
   /* burger przejmuje nawigacje juz od 960 px — miedzy 821 a 960 linki sie nie miescily */
   .nav-links,.nav-login{display:none}
@@ -941,22 +945,13 @@ html.promo-applied .promo-tag{background:rgba(255,255,255,.92);color:#4f46e5}
 .stat-num-l{font-size:clamp(20px,2.2vw,30px)}
 @media(max-width:960px){.stat-num-l{font-size:clamp(17px,4.6vw,24px)}}
 
-/* ---------------- cookie notice (full-width banner) ---------------- */
-.cookie-note{position:fixed;left:12px;right:12px;bottom:12px;z-index:80;display:flex;
-  align-items:center;justify-content:space-between;gap:22px;background:var(--panel);
-  border:1px solid var(--line2);border-radius:14px;padding:16px 22px;box-shadow:var(--shadow-lg)}
-.cookie-note .ck-txt b{font-size:15.5px}
-.cookie-note .ck-txt p{font-size:13.5px;color:var(--muted);margin-top:3px}
-.cookie-note a{color:var(--acc)}
-.ck-actions{display:flex;align-items:center;gap:16px;flex:none}
-.ck-decline{font-size:14px;font-weight:600;color:var(--muted);padding:9px 6px;background:none;
-  border:0;cursor:pointer;font-family:inherit}
-.ck-decline:hover{color:var(--txt)}
-.cookie-note.hidden{display:none}
-@media(max-width:640px){
-  /* Stacked, this banner ate a third of a phone screen — and the strip the page
-     has to reserve for it grew just as much. */
-  .cookie-note{flex-direction:column;align-items:flex-start;gap:10px;padding:13px 15px}
-  .cookie-note .ck-txt p{font-size:12.5px;line-height:1.45}
-  .ck-actions{width:100%;justify-content:flex-end}
-}
+/* The privacy choices bar styles itself (templates/_consent.html): it is shared with
+   the portal and the terminal, which load different stylesheets. */
+
+/* ---------------- footer disclaimers ---------------- */
+.disclaimers h2{font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:14px}
+.disclaimers h3{font-size:12.5px;font-weight:600;color:var(--txt);margin:14px 0 6px}
+.disclaimers h3:first-child{margin-top:0}
+.disclaimers-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 36px;margin-bottom:14px}
+.disclaimers-date{color:var(--muted)}
+@media(max-width:760px){.disclaimers-grid{grid-template-columns:1fr}}

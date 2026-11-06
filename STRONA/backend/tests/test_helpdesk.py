@@ -410,10 +410,11 @@ def test_faq_bez_trafienia_przycisk_a_przekazanie_dopiero_po_trzech(klient, siln
     """Nie wie: przycisk „Talk to a person". Sam przekazuje dopiero przy trzecim
     sensownym pytaniu bez odpowiedzi."""
     h, _ = klient
-    chat = _wyslij(h, "What leverage do you offer?")
+    # Dźwignia ma już wpis w FAQ; sonda bez odpowiedzi musi pytać o coś, czego FAQ nie zna.
+    chat = _wyslij(h, "Do you sell branded hoodies or merchandise?")
     assert chat["status"] == "bot" and chat["thread"][-1]["body"].startswith(helpdesk.NIE_WIEM)
     assert chat["offer_human"] is True
-    chat = _wyslij(h, "Leverage for indices please", chat["id"])
+    chat = _wyslij(h, "Any t-shirts with the logo please", chat["id"])
     assert chat["status"] == "bot"                     # drugi raz — nadal tylko przycisk
     chat = _wyslij(h, "Which brokers liquidity provider is behind the server", chat["id"])
     assert chat["status"] == "open"                    # trzecie sensowne pytanie bez odpowiedzi

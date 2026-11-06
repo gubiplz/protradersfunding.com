@@ -33,15 +33,26 @@ def test_academy_zwraca_lekcje():
     for kategoria in ["Getting started", "Risk management",
                       "Trading the challenge", "Psychology"]:
         assert kategoria in html
-    # ta sama mechanika co FAQ: rozwijane lekcje
-    assert html.count("<details>") == 19
+    # moduły z kafelkami lekcji: okładka, czas czytania, link do strony lekcji
+    assert html.count('class="ac-card"') == 19
+    assert "min read" in html and "<svg viewBox=\"0 0 400 225\"" in html
     assert '"@type":"ItemList"' in html
     assert "Trading Academy" in html
+
+
+def test_strona_lekcji():
+    from app import academy
+    r = client.get("/academy/understanding-the-daily-loss-limit")
+    assert r.status_code == 200
+    assert "Understanding the daily loss limit" in r.text and '"@type":"Article"' in r.text
+    assert "{{ site_name }}" not in client.get(f"/academy/{academy.LESSONS[0].slug}").text
+    assert client.get("/academy/nie-ma-takiej").status_code == 404
 
 
 def test_academy_w_sitemapie():
     xml = client.get("/sitemap.xml").text
     assert "/academy</loc>" in xml
+    assert "/academy/static-drawdown-explained</loc>" in xml
 
 
 def test_link_z_glownej():

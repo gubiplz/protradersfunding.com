@@ -116,7 +116,7 @@ def test_strona_kontaktu_i_faq_z_pomoca():
         assert "How do I start a challenge?" in r.text and "/faq#q-" in r.text
         faq = c.get("/faq").text
         assert "Still need help?" in faq and 'id="faqQ"' in faq and 'id="getting-started"' in faq
-        assert faq.count("<summary>") == 21
+        assert faq.count("<summary>") == 56
         home = c.get("/").text
         assert 'id="nlModal"' in home and 'data-source="footer"' in home
         assert "/static/img/steps/step-1.webp" in home and "1. Choose your challenge" in home

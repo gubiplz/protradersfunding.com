@@ -51,7 +51,7 @@ def rejestrator(monkeypatch):
 
 @pytest.fixture
 def wlaczone():
-    """Przełącznik „realne MT5 dla Copytradingu" z zakładki MT5 Pool."""
+    """Przełącznik „realne MT5 dla Copytradingu" z zakładki Built-in Terminal."""
     s = SessionLocal()
     row = s.get(AppSetting, provisioning.COPYTRADING_REAL_KEY)
     if row is None:

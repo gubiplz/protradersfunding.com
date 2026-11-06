@@ -8,7 +8,7 @@
 }
 
 /* wejście sekcji: krótszy dystans, delikatne rozmycie, sprężyna */
-.rv{opacity:0;transform:translateY(18px) scale(.985);filter:blur(4px)}
+.rv{opacity:0;transform:translateY(10px)}
 .rv.in{opacity:1;transform:none;filter:none;
   transition:opacity .75s var(--sm-ease),transform 1s var(--sm-spring),filter .75s var(--sm-ease)}
 

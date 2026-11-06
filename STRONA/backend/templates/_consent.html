@@ -1,0 +1,38 @@
+{# Privacy choices: one bar for the site, the portal and the terminal.
+   Choice stored as localStorage pf_consent = {"v":1,"analytics":bool,"referral":bool,"at":ms}.
+   Essential storage (login token, terminal sessions) is never behind a switch.
+   Analytics (GA4 + Clarity, _analytics.html) load only after "analytics" is on;
+   the ?ref= partner code (site.js) is kept only while "referral" is on.
+   Any element with data-ck-prefs (the footer link) reopens the choices.
+   The old pf_cookie_ok key is read once and migrated. Styles and script live in
+   static/css/consent.css and static/js/consent.js so each page stays small and
+   the browser caches them across the site, the portal and the terminal. #}
+<div class="pf-ck" id="pfCk" hidden role="dialog" aria-label="Your privacy choices">
+  <div class="pf-ck-opts" id="pfCkOpts" hidden>
+    <label class="pf-ck-opt">
+      <span><b>Analytics</b><small>Product analytics that show which pages and features are used. Declining keeps measurement off: no analytics cookies or identifiers are stored.</small></span>
+      <input type="checkbox" id="pfCkAn"><i></i>
+    </label>
+    <label class="pf-ck-opt">
+      <span><b>Referral attribution</b><small>Remembers the partner link you arrived through so that partner is credited if you buy a challenge later.</small></span>
+      <input type="checkbox" id="pfCkRef"><i></i>
+    </label>
+  </div>
+  <div class="pf-ck-bar">
+    <div class="pf-ck-txt">
+      <b>Your privacy choices</b>
+      <p>Essential cookies and local storage keep you signed in. With your permission we also measure usage and credit the partner who referred you. <a href="/privacy">Privacy Policy</a></p>
+    </div>
+    <div class="pf-ck-act" id="pfCkAct">
+      <button type="button" class="pf-ck-lnk" data-ck="manage">Manage choices</button>
+      <button type="button" class="pf-ck-btn" data-ck="reject">Reject all</button>
+      <button type="button" class="pf-ck-btn pf-ck-ok" data-ck="accept">Accept all</button>
+    </div>
+    <div class="pf-ck-act" id="pfCkSave" hidden>
+      <button type="button" class="pf-ck-btn pf-ck-ok" data-ck="save">Save choices</button>
+      <button type="button" class="pf-ck-x" data-ck="close" aria-label="Close">✕</button>
+    </div>
+  </div>
+</div>
+<link rel="stylesheet" href="/static/css/consent.css?v={{ asset_v }}">
+<script src="/static/js/consent.js?v={{ asset_v }}" defer></script>

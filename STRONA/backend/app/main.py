@@ -20,6 +20,7 @@ import os
 import urllib.request
 import random
 import re
+import asyncio
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -47,8 +48,11 @@ from . import (achievements, auth, billing, catalog, certshot, contentbot, count
                lead_mail, mail_templates, metaquotes_web, notify, offers, origin,
                payout_import, payoutbot, polecenia, reach, statements,
                poller, provisioning, push, rules, sms, telegram, telemetry, tradebot, zamki)
+from . import trade_case
 from . import vusdt
 from . import helpdesk
+from . import markets, terminal
+from . import academy
 from .config import get_settings
 from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint, zamek_migracji
 from .models import (LEAD_LOST_STATUSES, LEAD_STATUSES, LOST_REASONS,
@@ -59,7 +63,7 @@ from .models import (LEAD_LOST_STATUSES, LEAD_STATUSES, LOST_REASONS,
                      LeadMailTemplate, LeadReminder, MailLog, NewsletterSubscriber, Notification,
                      Order, Payout, PayoutRequest, PoolAccount, PostMedia, Product,
                      PushSubscription,
-                     RewardCode, SupportTicket, TelemetryEvent, TicketMessage, Trade, Trader,
+                     RewardCase, RewardCode, SupportTicket, TelemetryEvent, TicketMessage, Trade, Trader,
                      VusdtTransfer,
                      nowy_znak_biletu)
 
@@ -371,6 +375,9 @@ async def lifespan(app: FastAPI):
 # wystawialoby cala mape API kazdemu.
 app = FastAPI(title=f"{settings.site_name} API", version="0.7.0", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
+# Terminal PTF (zakładka Trade): zlecenia, pozycje, login danymi MT5.
+app.include_router(terminal.router)
+app.include_router(terminal.admin_router)
 
 
 @app.exception_handler(StaleDataError)
@@ -438,8 +445,9 @@ def robots():
 @app.get("/sitemap.xml", include_in_schema=False)
 def sitemap(request: Request):
     base = _public_base(request)
-    paths = ["/", "/objectives", "/faq", "/contact", "/academy", "/affiliate", "/install", "/verify",
-             "/terms", "/privacy", "/risk-disclosure", "/refund-policy"]
+    paths = ["/", "/objectives", "/trade", "/faq", "/contact", "/academy", "/affiliate", "/install", "/verify",
+             "/terms", "/privacy", "/risk-disclosure", "/refund-policy"] \
+        + [f"/academy/{x.slug}" for x in academy.LESSONS]
     urls = "".join(f"<url><loc>{base}{p}</loc></url>" for p in paths)
     return Response('<?xml version="1.0" encoding="UTF-8"?>'
                     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
@@ -1939,7 +1947,10 @@ def my_account_positions(account_id: int, trader: Trader = Depends(auth.current_
         if not acc or acc.trader_id != trader.id:
             raise HTTPException(404, "Account not found")
         rows = (session.query(Trade)
-                .filter(Trade.account_id == acc.id, Trade.status == "open")
+                .filter(Trade.account_id == acc.id, Trade.status == "open",
+                        # Plan Trade BOT-a na żywych cenach: transakcja powstaje przy
+                        # zamknięciu (ceny z wykresu), do tego czasu klient jej nie widzi.
+                        or_(Trade.venue.is_(None), Trade.venue != tradebot.PLAN))
                 .order_by(Trade.opened_at.desc()).limit(50).all())
         return [{
             "ticket": t.id,
@@ -1949,6 +1960,7 @@ def my_account_positions(account_id: int, trader: Trader = Depends(auth.current_
             "open_price": t.open_price,
             "pnl": t.pnl,
             "opened_at": t.opened_at.isoformat() if t.opened_at else None,
+            "managed": t.venue == tradebot.OGON,
         } for t in rows]
     finally:
         session.close()
@@ -4651,6 +4663,86 @@ def me_loyalty_redeem(payload: RedeemIn, trader: Trader = Depends(auth.current_t
         session.commit()
         telemetry.track("loyalty_redeem", trader.id, reward=payload.reward, pct=kod.pct)
         return {"code": loyalty.code_dict(kod), **_loyalty_payload(session, tr)}
+    finally:
+        session.close()
+
+
+# --- Free Trade Case: jedna skrzynka na tradera (logika w app/trade_case.py) ---
+class CaseOpenIn(BaseModel):
+    card: int = Field(default=0, ge=0, le=trade_case.KARTY - 1)   # kosmetyka: wynik losuje serwer
+
+
+_CASE_ODMOWY = {
+    "disabled": (409, "The Trade Case is not available right now"),
+    "empty": (409, "The Trade Case is not available right now"),
+    "admin": (403, "Administrator accounts cannot open the Trade Case"),
+    "verify_email": (403, "Confirm your e-mail first, then open your case"),
+}
+
+
+@app.get("/api/me/case")
+def me_case(trader: Trader = Depends(auth.current_trader)):
+    """Stan skrzynki: czy można ją otworzyć, wynik (jeśli już otwarta) i szanse."""
+    session = SessionLocal()
+    try:
+        return trade_case.stan(session, session.get(Trader, trader.id))
+    finally:
+        session.close()
+
+
+@app.post("/api/me/case/open")
+def me_case_open(payload: CaseOpenIn, request: Request, trader: Trader = Depends(auth.current_trader)):
+    """Otwiera skrzynkę raz na tradera. Drugie wywołanie oddaje ten sam wynik
+    z `already: true` — odświeżenie strony nie losuje od nowa."""
+    # Podgląd admina „oczami klienta" nie może spalić klientowi jedynej skrzynki.
+    if getattr(request.state, "impersonated", False):
+        raise HTTPException(403, "The case can't be opened while viewing the portal as a client")
+    session = SessionLocal()
+    try:
+        try:
+            return trade_case.otworz(session, trader.id, payload.card)
+        except trade_case.Niedostepna as e:
+            kod, tekst = _CASE_ODMOWY.get(e.args[0], (409, "The Trade Case is not available"))
+            raise HTTPException(kod, tekst)
+    finally:
+        session.close()
+
+
+class TradeCaseIn(BaseModel):
+    on: bool = True
+    prizes: list[dict] = Field(default_factory=list)   # treść waliduje trade_case.waliduj
+
+
+def _trade_case_admin(session) -> dict:
+    cfg = trade_case.konfig(odswiez=True)
+    produkty = (session.query(Product).filter(Product.active == True)              # noqa: E712
+                .order_by(Product.steps.desc(), Product.account_size).all())
+    return {"config": cfg, "odds": trade_case.szanse(trade_case.pula(session, cfg)),
+            "code_days": trade_case.KOD_DNI, "max_prizes": trade_case.MAX_NAGROD,
+            "products": [{"key": p.key, "label": p.label, "price_usd": p.price_usd} for p in produkty],
+            "stats": trade_case.statystyki(session, cfg)}
+
+
+@app.get("/api/admin/trade-case", dependencies=[Depends(auth.require_admin)])
+def admin_trade_case():
+    session = SessionLocal()
+    try:
+        return _trade_case_admin(session)
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/trade-case", dependencies=[Depends(auth.require_admin)])
+def admin_trade_case_save(payload: TradeCaseIn):
+    """Zapis puli: wagi > 0, rabat 1–90%, plan konta istnieje i jest w sprzedaży."""
+    session = SessionLocal()
+    try:
+        try:
+            cfg = trade_case.waliduj(session, payload.model_dump())
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        trade_case.zapisz(session, cfg)
+        return _trade_case_admin(session)
     finally:
         session.close()
 
@@ -8957,7 +9049,7 @@ async def admin_pool_reconnect():
     polaczenie asynchronicznie i swiezo zalozone konto potrafi najpierw odbic
     „sprobuj za 60 sekund" — a wtedy admin patrzy na konto, ktore ma
     poswiadczenia i nie ma odczytu, bez zadnego sposobu, zeby to popchnac.
-    Przycisk w zakladce MT5 Pool wola to wprost.
+    Przycisk w zakladce Built-in Terminal wola to wprost.
     """
     # `wymus`: admin wlasnie kliknal, wiec pomijamy przerwe po wczesniejszych
     # porazkach. Ona jest po to, zeby automat nie dobijal sie do MetaApi co
@@ -9504,7 +9596,7 @@ def admin_delete_trader(trader_id: int):
         # Stąd: kody i księga przed zamówieniami, zamówienia i nagrody przed
         # kontami (te lecą na końcu). Dołożenie tabeli w złym miejscu tej listy
         # to 500 na „Delete client & all data" — i tylko na produkcji.
-        for model in (RewardCode, CreditLedger, AchievementReward, Order, Notification,
+        for model in (RewardCase, RewardCode, CreditLedger, AchievementReward, Order, Notification,
                       PayoutRequest, JournalEntry, PushSubscription, KycFile, TelemetryEvent):
             (session.query(model).filter(model.trader_id == trader_id)
              .delete(synchronize_session=False))
@@ -9804,8 +9896,6 @@ def _cert_ctx(request, *, headline_plain, eyebrow, trader_name, amount_label, am
         "verify_url": f"/verify/{cert_token}",
         "verify_full_url": weryfikacja,
         "qr_svg": _qr_svg(weryfikacja),
-        "signatory": settings.cert_signatory or None,
-        "signatory_label": settings.cert_signatory_label,
         "amount_icon": amount_icon,
     }
 
@@ -10178,14 +10268,13 @@ def _require_cron(x_admin_token: str | None = Header(default=None),
 
 @app.api_route("/api/cron/risk", methods=["GET", "POST"], include_in_schema=False, dependencies=[Depends(_require_cron)])
 async def api_cron_risk():
-    """Silnik ryzyka dla kont z REALNYM rachunkiem MT5 — co minute, z zewnatrz.
+    """Silnik ryzyka co minute: realne rachunki MT5, terminal PTF, Trade BOT.
 
-    Cron Vercela na koncie Hobby chodzi raz na dobe i oba sloty sa zajete.
-    Konto, za ktore trader zaplacil i na ktorym naprawde handluje, nie moze
-    czekac na limit dziennej straty do jutra — wiec ten adres wola zewnetrzny
-    scheduler (cron-job.org / GitHub Actions) z naglowkiem
-    `Authorization: Bearer <CRON_SECRET>`. GET jest obsluzony, bo wiekszosc
-    schedulerow puka wlasnie GET-em.
+    Wola go cron Vercela (`vercel.json`, plan Pro: `* * * * *`) z naglowkiem
+    `Authorization: Bearer <CRON_SECRET>`, ktory Vercel dolacza sam. Konto,
+    za ktore trader zaplacil, nie moze czekac na limit dziennej straty do
+    jutra, a plany Trade BOT-a maja zamykac sie o czasie, nie przy dobowym
+    ticku. GET jest obsluzony, bo wiekszosc schedulerow puka wlasnie GET-em.
 
     NIE jest to `/api/tick` z wieksza czestotliwoscia. Tamten przy okazji
     odpala payout bota, powiadomienia push, dzienne i tygodniowe podsumowania,
@@ -10204,6 +10293,15 @@ async def api_cron_risk():
 #: Ile sekund z `maxDuration` (60 s, vercel.json) wolno zużyć zadaniom crona
 #: po przebiegu kont — zapas na odpowiedź i na wolniejszy ostatni krok.
 TICK_BUDZET_S = 48.0
+#: Próbkowanie świec: tyle sekund co minutę, reszta minuty to zapas na zapis.
+CANDLES_BUDZET_S = 52.0
+
+
+@app.api_route("/api/cron/candles", methods=["GET", "POST"], include_in_schema=False, dependencies=[Depends(_require_cron)])
+async def api_cron_candles():
+    """Świece M1 z mid dla cienkich rynków (`markets.SAMPLED`): cron Vercela co minutę,
+    przez ~52 s próbka co sekundę, jeden zapis na końcu. Wątek, bo próbkowanie śpi."""
+    return await asyncio.to_thread(terminal.probkuj_swiece, CANDLES_BUDZET_S)
 
 
 @app.api_route("/api/tick", methods=["GET", "POST"], include_in_schema=False, dependencies=[Depends(_require_cron)])
@@ -10253,6 +10351,7 @@ async def api_tick(request: Request):
     recap = zadanie("daily_recap", push.daily_recap, {"sent": 0})
     # Przegląd tygodnia tym samym trybem — zapas na poniedziałek bez wejść.
     weekly = zadanie("weekly_review", push.weekly_review, {"sent": 0})
+    zadanie("terminal_logins", terminal.wyczysc_logowania, {"deleted": 0})
     # „Scale your progress" raz w tygodniu (poniedzialek) — na tym samym cronie
     # z tego samego powodu co recap. Wlasny odstep 21 dni w `_upsell_nudge`
     # sprawia, ze recznie odpalony endpoint i ten przebieg sie nie dubluja.
@@ -10726,7 +10825,7 @@ def public_stats():
 
     Zero internali (feed/stripe/pula). Landing ukrywa metryki zerowe, więc
     świeża instalacja nie świeci "0 payouts" — po prostu nie pokazuje kafelka.
-    payouts_total_usd zawiera zwroty opłat (tak księgujemy trader_share).
+    Sumy wypłat tu nie ma (decyzja właściciela): walidator treści czyta je wprost z `contentbot`.
     """
     now = monotonic()
     if _PUBLIC_STATS_CACHE["data"] is not None and now - _PUBLIC_STATS_CACHE["ts"] < 60:
@@ -10737,7 +10836,8 @@ def public_stats():
         # treści: post twierdzący „$186,000 wypłat" musi być sprawdzany DOKŁADNIE
         # tą samą definicją, którą pokazuje strona. Dwie implementacje tych
         # samych liczb rozjechałyby się przy pierwszej zmianie definicji.
-        data = contentbot.statystyki_publiczne(session)
+        data = {k: v for k, v in contentbot.statystyki_publiczne(session).items()
+                if k not in ("payouts_total_usd", "payouts_count", "largest_payout_usd")}
         _PUBLIC_STATS_CACHE.update(ts=now, data=data)
         return data
     finally:
@@ -13850,6 +13950,8 @@ def _page(request: Request, template: str, **extra):
            "vusdt_test": vusdt.public_config(),
            # Wiersz „Reward frequency" w tabelach zasad: 0 = on demand.
            "payout_days": settings.payout_interval_days,
+           # Wiersz „Leverage": maksimum i rozbicie na klasy rynków — z listy terminala.
+           "leverage_max": markets.MAX_LEVERAGE, "leverage_text": markets.leverage_text(),
            # Popup newslettera z panelu (None = wyłączony) i oferta paska nad stopką.
            "nl_popup": _nl_popup_ctx(), "nl_offer": _nl_oferta(), **extra}
     return jinja.TemplateResponse(request, template, ctx)
@@ -13916,12 +14018,26 @@ def home(request: Request):
              if (STATIC / "img" / "steps" / f"step-{n}.webp").exists()}
     return _page(request, "home.html",
                  sample_qr=_qr_svg(f"{_public_base(request)}/verify"),
-                 products=prods, cfg=_cfg_ctx(prods), step_images=kroki)
+                 products=prods, cfg=_cfg_ctx(prods), step_images=kroki,
+                 fee_per_lot=terminal.FEE_PER_LOT_USD)
 
 
 @app.get("/faq")
 def faq_page(request: Request):
     return _page(request, "faq.html")
+
+
+@app.get("/trade")
+@app.get("/trade/{symbol}")
+def trade_page(request: Request, symbol: str = "BTCUSD"):
+    """Terminal PTF. Symbol spoza listy (np. AUDUSD z landingu) otwiera BTCUSD
+    z informacją, że ten rynek jest na razie tylko w MT5."""
+    m = markets.get(symbol)
+    # `</` w JSON-ie zamknąłby <script> — nazwy rynków go nie mają, ale bez ryzyka.
+    lista = json.dumps(markets.public_list()).replace("</", "<\\/")
+    return _page(request, "trade.html", symbol=m.sym if m else "BTCUSD",
+                 missing_symbol=None if m else symbol.upper()[:16],
+                 market_name=m.name if m else "Bitcoin", markets_json=lista)
 
 
 @app.get("/contact")
@@ -13948,7 +14064,21 @@ def contact_page(request: Request):
 
 @app.get("/academy")
 def academy_page(request: Request):
-    return _page(request, "academy.html")
+    mods = academy.modules()
+    return _page(request, "academy.html", modules=mods, lessons=academy.LESSONS, cover=academy.cover_svg,
+                 total_minutes=sum(m["minutes"] for m in mods))
+
+
+@app.get("/academy/{slug}")
+def academy_lesson_page(request: Request, slug: str):
+    """Lekcja Academy: treść, spis lekcji modułu, poprzednia/następna."""
+    les = academy.BY_SLUG.get(slug)
+    if les is None:
+        raise HTTPException(404, "Lesson not found")
+    prev, nxt = academy.neighbours(les)
+    body = les.body.replace("{{ site_name }}", html.escape(settings.site_name))
+    return _page(request, "academy_lesson.html", lesson=les, body=body, module=academy.module_of(les),
+                 modules=academy.modules(), prev=prev, next=nxt, cover=academy.cover_svg)
 
 
 @app.get("/affiliate")
@@ -14314,8 +14444,6 @@ def verify_page(request: Request, cert_token: str | None = None):
             session.close()
     return _page(request, "verify.html", result=result, preview=podglad,
                  token=cert_token or "",
-                 signatory=settings.cert_signatory or None,
-                 signatory_label=settings.cert_signatory_label.replace(":", ""),
                  sample_qr=_qr_svg(f"{_public_base(request)}/verify"))
 
 

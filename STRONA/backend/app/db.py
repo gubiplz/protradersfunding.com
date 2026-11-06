@@ -279,6 +279,31 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "payout_ready_at": "TIMESTAMP",
         "phase_started_at": "TIMESTAMP",
         "prev_phase_started_at": "TIMESTAMP",
+        "terminal_used": "BOOLEAN DEFAULT FALSE",
+        "terminal_open": "BOOLEAN DEFAULT FALSE",
+        "terminal_blocked": "BOOLEAN DEFAULT FALSE",
+        "managed_consent_at": "TIMESTAMP",
+        "managed_consent_ip": "VARCHAR(64)",
+        "managed_consent_version": "VARCHAR(16)",
+        "terminal_sync_at": "TIMESTAMP",
+        "terminal_candle_at": "TIMESTAMP",
+        "terminal_eval_at": "TIMESTAMP",
+    },
+    # Pozycje z terminala PTF dzielą tabelę z Trade BOT-em (portal czyta jedną).
+    "trades": {
+        "venue": "VARCHAR(16)",
+        "qty": "FLOAT",
+        "leverage": "FLOAT",
+        "margin": "FLOAT",
+        "tp": "FLOAT",
+        "sl": "FLOAT",
+        "trail": "FLOAT",
+        "journal": "VARCHAR(500)",
+        "liq_price": "FLOAT",
+        "fee": "FLOAT",
+        "slippage": "FLOAT",
+        "close_reason": "VARCHAR(16)",
+        "tpsl_at": "TIMESTAMP",
     },
     # Karta leada na kanale. Tabela `leads` stoi na produkcji od pierwszego
     # zgloszenia, wiec `create_all` ja pomija — bez tych wpisow kazdy SELECT
@@ -347,6 +372,8 @@ _NEW_INDEXES: list[tuple[str, str]] = [
     ("support_tickets", "ref"),
     # Każde „Continue with Google" szuka konta po tej kolumnie.
     ("traders", "google_sub"),
+    # Cron ryzyka co minutę wybiera konta z otwartą pozycją w terminalu PTF.
+    ("accounts", "terminal_open"),
 ]
 
 

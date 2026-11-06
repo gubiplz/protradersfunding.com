@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{% block title %}{{ site_name }} — Prop Trading Challenges on Real MT5 Accounts{% endblock %}</title>
-<meta name="description" content="{% block description %}Trade our simulated capital on a real MetaTrader 5 account, with sizes up to $2,000,000. Pass the evaluation, get funded and keep up to 90% of the rewards. Clear rules, automated risk engine, automated account delivery.{% endblock %}">
+<title>{% block title %}{{ site_name }} — Prop Trading Challenges on MT5 Accounts{% endblock %}</title>
+<meta name="description" content="{% block description %}Trade our simulated capital on an MT5 account, with sizes up to $2,000,000. Pass the evaluation, get funded and keep up to 90% of the rewards. Clear rules, automated risk engine, automated account delivery.{% endblock %}">
 <link rel="icon" href="/static/img/favicon.png" type="image/png">
 <link rel="preload" href="/static/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/space-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin>
@@ -20,7 +20,7 @@ try{if(localStorage.getItem('pf_theme2')==='dark')document.documentElement.datas
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="{{ site_name }}">
 <meta property="og:title" content="{% block og_title %}{{ site_name }} — Get Funded to Trade{% endblock %}">
-<meta property="og:description" content="{% block og_description %}Prop trading challenges on real MT5 infrastructure, up to $2,000,000 in simulated capital. Keep up to 90% of the rewards.{% endblock %}">
+<meta property="og:description" content="{% block og_description %}Prop trading challenges on MT5 infrastructure, up to $2,000,000 in simulated capital. Keep up to 90% of the rewards.{% endblock %}">
 <meta property="og:image" content="{{ base_url }}/static/img/og.png">
 <meta property="og:url" content="{{ base_url }}{{ request.url.path }}">
 <link rel="canonical" href="{{ base_url }}{{ request.url.path }}">
@@ -45,7 +45,7 @@ if(localStorage.getItem('pf_promo_code')||localStorage.getItem('pf_coupon_code')
 }catch(e){}
 </script>{% endif %}
 </head>
-<body data-payout-days="{{ payout_days or 0 }}">
+<body data-payout-days="{{ payout_days or 0 }}" data-leverage-max="{{ leverage_max or 100 }}" data-leverage="{{ leverage_text or '' }}">
 
 {% if bogo_promo %}
 {# BOGO wins over the code promo — one bar, one message. No form and no code:
@@ -93,13 +93,12 @@ document.getElementById('bogoX').addEventListener('click',function(){
   <div class="wrap nav-in">
     <a class="logo" href="/"><img src="/static/img/logo.png" alt=""> <span class="logo-txt">{%- set _nm = site_name.rsplit(' ', 1) -%}{%- if _nm|length == 2 -%}<span class="lt-a">{{ _nm[0] }}</span> {{ _nm[1] }}{%- else -%}{{ site_name }}{%- endif -%}</span></a>
     <nav class="nav-links">
+      <a href="/#pricing">Challenges</a>
+      <a href="/trade">Trade</a>
+      <a href="/verify">Payouts</a>
       <a href="/#how">How it works</a>
-      <a href="/objectives">Objectives</a>
-      <a href="/#pricing">Pricing</a>
-      <a href="/#certs">Payouts</a>
       <a href="/faq">FAQ</a>
       <a href="/academy">Academy</a>
-      <a href="/affiliate">Affiliate</a>
     </nav>
     <div class="nav-right">
       <button class="theme-tog" id="themeTog" type="button" aria-label="Switch to dark mode" title="Dark mode">
@@ -113,13 +112,12 @@ document.getElementById('bogoX').addEventListener('click',function(){
   </div>
 </header>
 <div class="mobile-menu" id="mobileMenu">
+  <a href="/#pricing">Challenges</a>
+  <a href="/trade">Trade</a>
+  <a href="/verify">Payouts</a>
   <a href="/#how">How it works</a>
-  <a href="/objectives">Trading Objectives</a>
-  <a href="/#pricing">Pricing</a>
-  <a href="/#certs">Payouts</a>
   <a href="/faq">FAQ</a>
   <a href="/academy">Academy</a>
-  <a href="/affiliate">Affiliate Program</a>
   <a href="/portal">Log in</a>
   <a class="btn" href="/#pricing">Get Funded</a>
 </div>
@@ -150,13 +148,13 @@ document.getElementById('bogoX').addEventListener('click',function(){
     <div class="foot-grid">
       <div class="foot-brand">
         <a class="logo" href="/"><img src="/static/img/logo.png" alt=""> {{ site_name }}</a>
-        <p>A technology-driven trading skills evaluation platform. Real MetaTrader 5 infrastructure, automated risk engine, transparent rules.</p>
+        <p>A technology-driven trading skills evaluation platform. MT5 infrastructure, automated risk engine, transparent rules.</p>
       </div>
       <div class="foot-col">
         <h3>Product</h3>
         <a href="/#how">How it works</a>
         <a href="/objectives">Trading Objectives</a>
-        <a href="/#pricing">Pricing</a>
+        <a href="/#pricing">Challenges</a>
         <a href="/#scaling">Scaling Plan</a>
         <a href="/install">Install the App</a>
         <a href="/faq">FAQ</a>
@@ -182,11 +180,13 @@ document.getElementById('bogoX').addEventListener('click',function(){
         <a href="/privacy">Privacy Policy</a>
         <a href="/risk-disclosure">Risk Disclosure</a>
         <a href="/refund-policy">Refund Policy</a>
+        <a href="#" data-ck-prefs>Cookie Preferences</a>
       </div>
     </div>
     <div class="foot-legal">
-      <p><b>Risk Disclaimer:</b> {{ site_name }} offers simulated trading evaluations. All accounts we provide are demo accounts with virtual funds and all trading activity takes place in a simulated environment. No real money is deposited or traded, and no order ever reaches the financial markets. A “funded account” on this website is a simulated account with a higher virtual balance and a profit split — it is not a real trading account, and no client money is ever held. Any “profits”, “payouts” or “rewards” mentioned anywhere on this website are performance-based rewards for demonstrating trading skill in that simulated environment; they are not returns from real trading. Such rewards are discretionary and are not guaranteed, and past results do not guarantee future outcomes.</p>
-      <p>Trading foreign exchange and CFDs carries a high level of risk and may not be suitable for all investors. The content of this website is provided for informational purposes only and does not constitute investment advice, financial advice, or a solicitation to trade. {{ site_name }} does not provide investment services, brokerage services, or real trading accounts, and nothing on this website is an offer of employment or a promise of income.</p>
+      {# The short Risk Disclaimer paragraphs used to sit here; the block below
+         says all of it in full, section by section. #}
+      {% include "_disclaimers.html" %}
       <p>By accessing this website or purchasing an evaluation you agree to our <a href="/terms">Terms of Service</a> and <a href="/privacy">Privacy Policy</a>. Please read the full <a href="/risk-disclosure">Risk Disclosure</a> and <a href="/refund-policy">Refund Policy</a> before you buy.</p>
     </div>
     {# The "Demo accounts / Virtual funds / Simulated environment" chips used to
@@ -243,33 +243,9 @@ document.getElementById('bogoX').addEventListener('click',function(){
 </div>
 {% endif %}
 
-<div class="cookie-note hidden" id="cookie-note" role="dialog" aria-label="Cookie notice">
-  <div class="ck-txt">
-    <b>🍪 Cookie Notice</b>
-    <p>We use cookies to enhance your experience. By continuing to visit this site,
-      you agree to our use of cookies. <a href="/privacy">Learn more in our Privacy Policy</a></p>
-  </div>
-  <div class="ck-actions">
-    <button class="ck-decline" onclick="cookieOk(0)">Decline</button>
-    <button class="btn btn-sm" onclick="cookieOk(1)">Accept All</button>
-  </div>
-</div>
-<script>/* Cookie notice; the pf_cookie_ok choice is shared with the portal.
-   Only essential cookies exist either way — Decline just records the choice.
-
-   The banner is fixed to the bottom, so the page has to give back the space it
-   covers — on a phone it stacks into three lines and parks on top of whatever
-   ends the page. --ck-h is that reserved strip; site.css turns it into padding. */
-function ckSpace(){
-  const el=document.getElementById('cookie-note');
-  const open=el&&!el.classList.contains('hidden');
-  document.documentElement.style.setProperty('--ck-h',
-    open?Math.ceil(innerHeight-el.getBoundingClientRect().top)+'px':'0px');
-}
-function cookieOk(v){try{localStorage.setItem('pf_cookie_ok',v?'1':'0')}catch(e){}
-  document.getElementById('cookie-note').classList.add('hidden');ckSpace()}
-try{if(localStorage.getItem('pf_cookie_ok')===null)document.getElementById('cookie-note').classList.remove('hidden')}catch(e){}
-ckSpace();addEventListener('resize',ckSpace);addEventListener('load',ckSpace);</script>
+{# Privacy choices bar; --ck-h (set by the include) is the strip the page gives
+   back as bottom padding in site.css while the bar is open. #}
+{% include "_consent.html" %}
 
 <script src="/static/lib/gsap.min.js" defer></script>
 <script src="/static/lib/ScrollTrigger.min.js" defer></script>

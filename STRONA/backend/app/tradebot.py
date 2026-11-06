@@ -39,10 +39,10 @@ import random
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 
-from . import rules
+from . import bot_ceny, markets, rules
 from .config import get_settings
 from .feed import MarketSnapshot
-from .models import Account, Trade
+from .models import Account, TerminalOrder, Trade
 
 settings = get_settings()
 
@@ -371,14 +371,150 @@ def _week_close(now: datetime) -> datetime:
 def _tradable(p: Persona, weekend: bool) -> tuple[tuple[str, ...], tuple[float, ...]]:
     """Koszyk instrumentow na teraz. W weekend zostaje samo krypto — a persona,
     ktora nie ma go w koszyku, dostaje je na ten czas z listy, bo inaczej konto
-    z dodatkiem Weekend Trading sterczaloby bezczynnie mimo otwartego rynku."""
+    z dodatkiem Weekend Trading sterczaloby bezczynnie mimo otwartego rynku.
+    Na żywych cenach tylko instrumenty notowane w terminalu (patrz `bot_ceny`)."""
+    pary = list(zip(p.symbols, p.weights))
+    if bot_ceny.wlaczone():
+        pary = [(s, w) for s, w in pary if bot_ceny.rynek(s)]
+        if not pary:
+            zywe = tuple(s for s in INSTRUMENTS if bot_ceny.rynek(s))
+            pary = [(s, 1.0) for s in zywe]
     if not weekend:
-        return p.symbols, p.weights
-    pary = [(s, w) for s, w in zip(p.symbols, p.weights) if s in CRYPTO_SYMBOLS]
+        return tuple(s for s, _ in pary), tuple(w for _, w in pary)
+    pary = [(s, w) for s, w in pary if s in CRYPTO_SYMBOLS]
     if not pary:
         krypto = tuple(sorted(CRYPTO_SYMBOLS))
         return krypto, tuple(1.0 for _ in krypto)
     return tuple(s for s, _ in pary), tuple(w for _, w in pary)
+
+
+# --------------------------------------------------------------------------- #
+#  Żywe ceny: plan w toku jest ukryty, transakcja powstaje przy zamknięciu      #
+# --------------------------------------------------------------------------- #
+PLAN = "plan"                       # Trade.venue planu w toku (klient go nie widzi)
+OGON = "tail"                       # żywa końcówka na koncie zarządzanym (klient ją widzi jako Managed)
+OGON_OD_S, OGON_DO_S = 180, 480     # na tyle przed planowanym zamknięciem pozycja staje się widoczna
+OGON_CEL = 0.85                     # bieżący wynik na starcie: ten ułamek planu; resztę musi dać rynek
+OPLATA = 0.00009                    # jak w terminalu: $9/lot ≈ 0,009% wartości przy zamknięciu
+LIVE_CZEKAJ = timedelta(hours=2)    # po planowanym zamknięciu: czekamy na ruch, potem większy wolumen
+LIVE_PODDAJ = timedelta(hours=8)    # bez danych tak długo — zamknięcie po staremu (syntetycznie)
+
+
+def _plan_w_toku(tr: Trade | None) -> bool:
+    return tr is not None and tr.venue == PLAN
+
+
+def okno_ogona(acc: Account, tr: Trade) -> int:
+    return random.Random(f"{acc.bot_seed}:tail:{tr.id}").randint(OGON_OD_S, OGON_DO_S)
+
+
+def _ogon_mozliwy(session, acc: Account, tr: Trade, now: datetime) -> bool:
+    """Tylko na żywo, za zgodą klienta, po zysk, na notowanym i otwartym rynku,
+    a na tym rynku klient nie może mieć własnej pozycji ani zlecenia (saldowałyby się)."""
+    if not (acc.managed_consent_at and acc.bot_mode == "profit" and bot_ceny.wlaczone()):
+        return False
+    if tr.plan_close_at is None or abs((_naive(datetime.now(timezone.utc)) - _naive(now)).total_seconds()) > 300:
+        return False
+    do_konca = (_naive(tr.plan_close_at) - _naive(now)).total_seconds()
+    if do_konca <= 30 or do_konca > okno_ogona(acc, tr) or abs(tr.plan_pnl or 0.0) < 0.5:
+        return False
+    if bot_ceny.rynek(tr.symbol) is None:
+        return False
+    if tr.symbol not in CRYPTO_SYMBOLS and (is_weekend(now) or _naive(tr.plan_close_at) >= _naive(_week_close(now))):
+        return False
+    inne = (session.query(Trade.id).filter(Trade.account_id == acc.id, Trade.symbol == tr.symbol,
+                                           Trade.status == "open", Trade.source == "terminal").first())
+    zlecenie = (session.query(TerminalOrder.id).filter(TerminalOrder.account_id == acc.id, TerminalOrder.symbol == tr.symbol,
+                                                       TerminalOrder.status == "open").first())
+    return not inne and not zlecenie
+
+
+def _otworz_ogon(session, acc: Account, tr: Trade, now: datetime) -> bool:
+    """Plan staje się prawdziwą, widoczną pozycją z żywym P&L. Od tej chwili wynik daje rynek."""
+    m = bot_ceny.rynek(tr.symbol)
+    try:
+        mid = markets.mids({m.hl}).get(m.hl)
+    except Exception:  # pragma: no cover - sieć
+        mid = None
+    if not mid:
+        return False
+    if acc.max_lots and acc.max_lots > 0:
+        tr.lots = min(float(tr.lots or 0.0), max(MIN_LOT, math.floor(_wolne_loty(session, acc) * 100) / 100))
+    rng = random.Random(f"{acc.bot_seed}:tailopen:{tr.id}")
+    if not bot_ceny.otworz_ogon(tr, INSTRUMENTS[tr.symbol], _point_value, tr.plan_pnl * OGON_CEL, mid, now, rng):
+        return False
+    tr.qty = round(float(tr.lots) * m.contract, 8)
+    tr.leverage = float(m.max_lev)
+    tr.margin = round(markets.notional_usd(m, tr.qty, tr.open_price) / tr.leverage, 2)
+    tr.fee, tr.tp, tr.sl, tr.trail, tr.liq_price = 0.0, None, None, None, None
+    tr.tpsl_at = now
+    tr.pnl = round(markets.pnl_usd(m, tr.side, tr.qty, tr.open_price, mid), 2)
+    tr.venue = OGON
+    acc.terminal_used = True
+    if not acc.terminal_open:
+        acc.terminal_sync_at = acc.terminal_candle_at = now
+    acc.terminal_open = True
+    return True
+
+
+def _zamknij_ogon(tr: Trade, px: float, now: datetime) -> None:
+    """Zamknięcie po cenie rynkowej: wynik jest prawdziwy, może się trochę różnić od planu."""
+    m = bot_ceny.rynek(tr.symbol)
+    brutto = markets.pnl_usd(m, tr.side, tr.qty, tr.open_price, px)
+    tr.fee = round(float(tr.fee or 0.0) + markets.notional_usd(m, tr.qty, px) * OPLATA, 4)
+    tr.close_price, tr.closed_at, tr.status, tr.close_reason = px, now, "closed", "close"
+    tr.pnl = round(brutto - tr.fee, 2)
+    tr.venue = "hyperliquid"
+
+
+def _prowadz_ogon(tr: Trade, now: datetime) -> bool:
+    """Zamyka końcówkę, gdy wynik doszedł do planu, a najpóźniej w planowanym terminie."""
+    m = bot_ceny.rynek(tr.symbol)
+    try:
+        mid = markets.mids({m.hl}).get(m.hl)
+    except Exception:  # pragma: no cover - sieć
+        mid = None
+    if not mid:
+        return False
+    wynik = markets.pnl_usd(m, tr.side, tr.qty, tr.open_price, mid)
+    cel = float(tr.plan_pnl or 0.0)
+    doszedl = wynik >= cel if cel >= 0 else wynik <= cel
+    if doszedl or _naive(now) >= _naive(tr.plan_close_at):
+        _zamknij_ogon(tr, mid, now)
+        return True
+    return False
+
+
+def _zamknij_na_wykresie(session, acc: Account, tr: Trade, pnl: float, now: datetime) -> bool:
+    """Zamyka plan na prawdziwych świecach z wynikiem `pnl`. Najpierw tym samym
+    wolumenem; gdy rynek przez `LIVE_CZEKAJ` nie dał ruchu na plan — większym
+    (do wolnego limitu lotów konta). Po `LIVE_PODDAJ` bez danych: syntetycznie."""
+    plan_koniec = tr.plan_close_at or now
+    po = _naive(now) - _naive(plan_koniec)
+    koniec_tyg = None if tr.symbol in CRYPTO_SYMBOLS else _week_close(tr.opened_at)
+    # Pierwsza próba wychodzi w zaplanowanej chwili (dogrywka tyka co ~20 min,
+    # więc „teraz" bywa po planie); gdy rynek nie dał ruchu, czekamy i okno rośnie do „teraz".
+    wyj = bot_ceny.okno_wyjscia(tr, now, None) if po <= timedelta(minutes=30) else now
+    if koniec_tyg is not None and _naive(wyj) >= _naive(koniec_tyg):
+        wyj = koniec_tyg - timedelta(minutes=1)
+    wolne = None
+    if acc.max_lots and acc.max_lots > 0:
+        # Limit lotów konta minus pozycje z terminala (plan bota sam w nim nie siedzi):
+        # transakcja bota musi się zmieścić w tym, co trader zostawił wolne.
+        miejsce = max(MIN_LOT, math.floor(_wolne_loty(session, acc) * 100) / 100)
+        if (tr.lots or 0.0) > miejsce:
+            tr.lots = miejsce
+        if po > LIVE_CZEKAJ:
+            wolne = miejsce
+    rng = random.Random(f"{acc.bot_seed}:live:{tr.id}")
+    if bot_ceny.zamknij(tr, INSTRUMENTS[tr.symbol], _point_value, pnl, wyj, wolne, rng):
+        return True
+    if po > LIVE_PODDAJ:
+        print(f"[tradebot] {acc.login}: brak świec dla {tr.symbol} od {LIVE_PODDAJ} — zamknięcie syntetyczne", flush=True)
+        tr.venue = None
+        _close_trade(tr, pnl, now)
+        return True
+    return False
 
 
 # --------------------------------------------------------------------------- #
@@ -436,6 +572,22 @@ def stop(session, acc: Account, now: datetime | None = None) -> None:
     widzial juz to equity, wiec balans nie moze sie cofnac."""
     now = now or datetime.now(timezone.utc)
     open_tr = _open_trade(session, acc)
+    if _plan_w_toku(open_tr):
+        # Plan na żywych cenach nie był pokazany i nie ma floatingu — znika bez śladu.
+        session.delete(open_tr)
+        open_tr = None
+    if open_tr is not None and open_tr.venue == OGON:
+        # Końcówkę klient widział, więc zamyka się po rynku, a nie znika.
+        m = bot_ceny.rynek(open_tr.symbol)
+        try:
+            px = markets.mids({m.hl}).get(m.hl)
+        except Exception:  # pragma: no cover - sieć
+            px = None
+        _zamknij_ogon(open_tr, px or bot_ceny.ostatnia_cena(open_tr.symbol, now) or open_tr.open_price, now)
+        acc.balance = round((acc.balance or 0.0) + open_tr.pnl, 2)
+        acc.equity = acc.balance
+        acc.open_pnl = 0.0
+        open_tr = None
     if open_tr is not None:
         _close_trade(open_tr, _floating_pnl(open_tr, now, swing_for(acc)), now)
         acc.balance = round((acc.balance or 0.0) + open_tr.pnl, 2)
@@ -626,6 +778,15 @@ def set_target(session, acc: Account, target_pct: float,
 
     if cap is not None:
         open_tr = _open_trade(session, acc)
+        if _plan_w_toku(open_tr) and balance + (open_tr.plan_pnl or 0.0) > cap:
+            # Plan na żywych cenach jest niewidoczny i bez floatingu — przycinamy go
+            # do nowego sufitu (albo zdejmujemy, gdy nie ma już miejsca na zysk).
+            reszta = round(max(0.0, cap - balance), 2)
+            if reszta > MIN_FILL:
+                open_tr.plan_pnl = reszta
+            else:
+                session.delete(open_tr)
+            open_tr = None
         if open_tr is not None and balance + (open_tr.plan_pnl or 0.0) > cap:
             _close_trade(open_tr, _floating_pnl(open_tr, now, swing_for(acc)), now)
             balance = round(balance + open_tr.pnl, 2)
@@ -640,9 +801,18 @@ def set_target(session, acc: Account, target_pct: float,
                                 if acc.bot_target_deadline else None)}
 
 
+def _wolne_loty(session, acc: Account) -> float:
+    """Ile lotow zostalo z limitu konta po pozycjach z terminala PTF (limit jest wspolny)."""
+    terminal = (session.query(Trade.lots)
+                .filter(Trade.account_id == acc.id, Trade.status == "open", Trade.source == "terminal")
+                .all())
+    return float(acc.max_lots or 0.0) - sum(float(x or 0.0) for (x,) in terminal)
+
+
 def _open_trade(session, acc: Account) -> Trade | None:
+    # Tylko pozycje bota: te z terminala PTF prowadzi terminal.py.
     return (session.query(Trade)
-            .filter(Trade.account_id == acc.id, Trade.status == "open")
+            .filter(Trade.account_id == acc.id, Trade.status == "open", Trade.source == "bot")
             .order_by(Trade.id.desc()).first())
 
 
@@ -656,8 +826,22 @@ def tick(session, acc: Account, now: datetime | None = None) -> MarketSnapshot:
     balance = float(acc.balance or acc.initial_balance)
     open_tr = _open_trade(session, acc)
 
-    if open_tr is not None:
-        if open_tr.plan_close_at is not None and _naive(now) >= _naive(open_tr.plan_close_at):
+    if open_tr is not None and open_tr.venue == OGON:
+        if _prowadz_ogon(open_tr, now):
+            balance = round(balance + open_tr.pnl, 2)
+            session.flush()
+            open_tr = None
+    elif _plan_w_toku(open_tr) and _ogon_mozliwy(session, acc, open_tr, now):
+        _otworz_ogon(session, acc, open_tr, now)
+    elif open_tr is not None:
+        if _plan_w_toku(open_tr) and open_tr.plan_close_at is not None and _naive(now) >= _naive(open_tr.plan_close_at):
+            # Żywe ceny: transakcja powstaje dopiero teraz — wejście i wyjście
+            # z prawdziwego wykresu, wynik z planu. Bez danych/ruchu plan czeka.
+            if _zamknij_na_wykresie(session, acc, open_tr, open_tr.plan_pnl, now):
+                balance = round(balance + open_tr.pnl, 2)
+                session.flush()
+                open_tr = None
+        elif open_tr.plan_close_at is not None and _naive(now) >= _naive(open_tr.plan_close_at):
             # Balans dopisujemy z `tr.pnl` PO zamknieciu, bo tam siedzi kwota
             # przeliczona z zaokraglonej ceny — inaczej tabela nie zgadzalaby sie
             # o kilka groszy z krzywa balansu.
@@ -678,7 +862,10 @@ def tick(session, acc: Account, now: datetime | None = None) -> MarketSnapshot:
         open_tr = _open_new(session, acc, p, balance, now)
 
     floating = round(_floating_pnl(open_tr, now, swing_for(acc)), 2) if open_tr is not None else 0.0
-    lots = open_tr.lots if open_tr is not None else 0.0
+    # Plan na żywych cenach nie wchodzi do wolumenu reguł: trader go nie widzi, więc
+    # nie może przez niego wpaść w limit lotów. Dzień handlowy liczy się normalnie.
+    # Końcówkę (wolumen i floating) liczy księga terminala.
+    lots = open_tr.lots if open_tr is not None and not _plan_w_toku(open_tr) and open_tr.venue != OGON else 0.0
     return MarketSnapshot(
         balance=round(balance, 2),
         equity=round(balance + floating, 2),
@@ -691,7 +878,11 @@ def tick(session, acc: Account, now: datetime | None = None) -> MarketSnapshot:
 
 def _floating_pnl(tr: Trade, now: datetime, swing: float = SWING_DOMYSLNY) -> float:
     """P&L otwartej pozycji: gladkie dojscie do zaplanowanego wyniku plus szum,
-    ktory wygasa do zera na zamknieciu (krzywa nie ma skoku przy realizacji)."""
+    ktory wygasa do zera na zamknieciu (krzywa nie ma skoku przy realizacji).
+    Plan na żywych cenach nie ma floatingu: klient nie widzi pozycji, więc
+    equity = saldo, a wynik wchodzi w całości przy zamknięciu."""
+    if _plan_w_toku(tr) or tr.venue == OGON:
+        return 0.0
     if tr.plan_close_at is None:
         return tr.pnl or 0.0
     span = (_naive(tr.plan_close_at) - _naive(tr.opened_at)).total_seconds()
@@ -784,6 +975,10 @@ def _should_open(session, acc: Account, p: Persona, balance: float, now: datetim
     #    tak jak przy wylaczeniu EA: nie porzuca sie transakcji w polowie.
     if getattr(acc, "bot_paused", False):
         return False
+    # 0b) limit lotow konta jest wspolny z terminalem PTF: gdy trader sam go
+    #     wykorzystal, bot nie dokłada wejscia ponad limit.
+    if acc.max_lots and acc.max_lots > 0 and _wolne_loty(session, acc) < MIN_LOT:
+        return False
 
     # 1) osiagniety docelowy zysk konta -> bot przestaje handlowac. Test jest
     #    KWOTOWY i z marginesem `MIN_FILL`: resztka rzedu centow nie przezyje
@@ -807,7 +1002,7 @@ def _should_open(session, acc: Account, p: Persona, balance: float, now: datetim
 
     # 3) odstep po ostatniej transakcji
     last = (session.query(Trade)
-            .filter(Trade.account_id == acc.id, Trade.status == "closed")
+            .filter(Trade.account_id == acc.id, Trade.status == "closed", Trade.source == "bot")
             .order_by(Trade.id.desc()).first())
     if last is not None and last.closed_at is not None:
         # Przerwa to reszta cyklu po odjeciu czasu, ktory pozycja FAKTYCZNIE
@@ -895,7 +1090,7 @@ def _open_new(session, acc: Account, p: Persona, balance: float, now: datetime) 
         risk_usd = min(day_goal / (p.trades_per_day * edge), balance * p.risk_pct / 100.0)
     lots = max(MIN_LOT, round(risk_usd / (inst.stop_move * pv), 2))
     if acc.max_lots and acc.max_lots > 0:
-        lots = min(lots, round(acc.max_lots, 2))
+        lots = min(lots, max(MIN_LOT, math.floor(_wolne_loty(session, acc) * 100) / 100))
 
     if zejscie:
         # Lekko ujemna wartość oczekiwana: wygrane trochę rzadsze i mniejsze niż
@@ -957,6 +1152,8 @@ def _open_new(session, acc: Account, p: Persona, balance: float, now: datetime) 
         open_price=open_price, pnl=0.0, opened_at=now, status="open", source="bot",
         plan_pnl=round(plan_pnl, 2),
         plan_close_at=close_at,
+        # Żywe ceny: to dopiero plan (strona i ceny ustalą się przy zamknięciu, z wykresu).
+        venue=PLAN if (bot_ceny.wlaczone() and bot_ceny.rynek(symbol)) else None,
     )
     session.add(tr)
     session.flush()   # nadaje tr.id — potrzebne fazie szumu floatingu

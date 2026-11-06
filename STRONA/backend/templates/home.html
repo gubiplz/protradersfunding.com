@@ -2,7 +2,8 @@
 
 {# The certificate preview in the #certs section uses the same stylesheet as
    the real document, so the landing never drifts from it on the next change. #}
-{% block head_extra %}<link rel="preload" href="/static/fonts/signature.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/static/css/cert.css?v={{ asset_v }}">{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/css/cert.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/css/site-landing.css?v={{ asset_v }}">{% endblock %}
 
 {% block content %}
 
@@ -11,11 +12,11 @@
   <div class="hero-glow"></div>
   <div class="wrap hero-grid">
     <div>
-      <span class="pill"><span class="dot"></span> Challenges run on MT5 infrastructure</span>
+      <span class="pill"><svg class="pill-ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5v3M4 11v3.5M12 1.5v5M12 12.5v2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><rect x="2.2" y="4.5" width="3.6" height="6.5" rx=".7" fill="currentColor"/><rect x="10.2" y="6.5" width="3.6" height="6" rx=".7" fill="none" stroke="currentColor" stroke-width="1.3"/></svg> Trade in our Built-in Terminal</span>
       <h1>Trade our capital.<br><span class="grad-text">Keep up to 90%</span> of the rewards.</h1>
       <p class="hero-sub">Pass an evaluation, get funded and earn
         performance-based rewards on simulated capital up to $2,000,000. Clear rules, an automated
-        risk engine and accounts delivered automatically after checkout.</p>
+        risk engine and a built-in terminal on live market prices.</p>
       {# Right under the claim it qualifies and above the button, so nobody
          reaches checkout without having read it. The full wording lives in the
          footer of every page; this is the short form. #}
@@ -39,7 +40,6 @@
       <div class="cfg-head">
         <div><h2>Configure your challenge</h2>
           <span class="cfg-sub">Real plans, live from our catalog</span></div>
-        <span class="mock-live"><span class="dot"></span> AUTOMATED DELIVERY</span>
       </div>
       {# Server-rendered default state — the panel is complete in the FIRST
          paint; renderConfigurator() re-renders the same values on boot and
@@ -80,41 +80,41 @@
 </section>
 
 <!-- ============================ STATS ============================ -->
-<section class="stats-band" id="statsBand">
-  <div class="wrap">
-    <div class="stats-grid" id="statsGrid"></div>
-    <div class="stats-note">Live numbers pulled straight from our platform, nothing curated by hand.
-      All of them come from simulated accounts trading virtual funds: they describe activity on the
-      platform, not guaranteed outcomes.</div>
+<section class="spr-band" id="statsBand">
+  <div class="wrap spr-in">
+    <span class="spr-t"><i></i>Live spreads</span>
+    <span class="spr-i"><small>Gold</small><b data-spread="xyz:GOLD" data-pre="$">—</b></span>
+    <span class="spr-i"><small>S&amp;P 500</small><b data-spread="xyz:SP500" data-post=" pts">—</b></span>
+    <span class="spr-i"><small>Oil</small><b data-spread="xyz:CL" data-pre="$">—</b></span>
+    <span class="spr-i"><small>Bitcoin</small><b data-spread="BTC" data-pre="$">—</b></span>
+    <span class="spr-n">No markup. ${{ fee_per_lot }}/lot commission per side. Simulated accounts.</span>
   </div>
 </section>
 
 <!-- ============================ MARKETS ============================ -->
 {# Rynki jak u dużych firm prop: nagłówek z lewej, zdanie i „Powered by MT5" z prawej,
    trzy przesuwające się rzędy kart (kierunki na przemian, pauza po najechaniu).
-   Lista jest statyczna — to CFD-y typowe dla kont MT5; pełny wykaz pod przyciskiem. #}
+   Karty prowadzą do terminala z danym rynkiem, „See the full list" — do terminala
+   z otwartą listą wszystkich rynków (żywe ceny, ta sama lista co w Trade). #}
 <section class="sec assets" id="markets">
   <div class="wrap">
     <div class="sec-head how" data-rv>
       <div><span class="pill">Markets</span><h2>The markets you can trade</h2></div>
       <div class="assets-side">
-        <p>Forex, indices, metals, energies and crypto CFDs on one MetaTrader&nbsp;5 account, with the same rules
+        <p>Forex, indices, metals, energies and crypto CFDs on one MT5 account, with the same rules
            across all of them.</p>
         <div class="assets-side-row">
-          <div class="platform-badge"><img src="/static/img/mt5.png" alt="MetaTrader 5"> Powered by <b>&nbsp;MetaTrader&nbsp;5</b></div>
-          <button type="button" class="btn-ghost btn-sm" id="assetsAllBtn" aria-expanded="false" aria-controls="assetsAll">See the full list</button>
+          <div class="platform-badge">Powered by <b>MT5</b></div>
+          <a class="btn-ghost btn-sm" href="/trade?list=all">See the full list</a>
         </div>
       </div>
     </div>
   </div>
   <div class="assets-rows">
-    <div class="assets-row"><div class="assets-track"><a class="asset" data-c="fx" data-sym="EURUSD" href="/portal?symbol=EURUSD" aria-label="EUR/USD chart"><i class="ic pair"><img src="/static/img/markets/flag-eu.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>EUR/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="GBPUSD" href="/portal?symbol=GBPUSD" aria-label="GBP/USD chart"><i class="ic pair"><img src="/static/img/markets/flag-gb.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>GBP/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="USDJPY" href="/portal?symbol=USDJPY" aria-label="USD/JPY chart"><i class="ic pair"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-jp.svg" alt="" loading="lazy"></i><b>USD/JPY</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="AUDUSD" href="/portal?symbol=AUDUSD" aria-label="AUD/USD chart"><i class="ic pair"><img src="/static/img/markets/flag-au.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>AUD/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="USDCAD" href="/portal?symbol=USDCAD" aria-label="USD/CAD chart"><i class="ic pair"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-ca.svg" alt="" loading="lazy"></i><b>USD/CAD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="USDCHF" href="/portal?symbol=USDCHF" aria-label="USD/CHF chart"><i class="ic pair"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-ch.svg" alt="" loading="lazy"></i><b>USD/CHF</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="NZDUSD" href="/portal?symbol=NZDUSD" aria-label="NZD/USD chart"><i class="ic pair"><img src="/static/img/markets/flag-nz.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>NZD/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="EURGBP" href="/portal?symbol=EURGBP" aria-label="EUR/GBP chart"><i class="ic pair"><img src="/static/img/markets/flag-eu.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-gb.svg" alt="" loading="lazy"></i><b>EUR/GBP</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="EURJPY" href="/portal?symbol=EURJPY" aria-label="EUR/JPY chart"><i class="ic pair"><img src="/static/img/markets/flag-eu.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-jp.svg" alt="" loading="lazy"></i><b>EUR/JPY</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="GBPJPY" href="/portal?symbol=GBPJPY" aria-label="GBP/JPY chart"><i class="ic pair"><img src="/static/img/markets/flag-gb.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-jp.svg" alt="" loading="lazy"></i><b>GBP/JPY</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="EURUSD" href="/portal?symbol=EURUSD" aria-label="EUR/USD chart"><i class="ic pair"><img src="/static/img/markets/flag-eu.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>EUR/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="GBPUSD" href="/portal?symbol=GBPUSD" aria-label="GBP/USD chart"><i class="ic pair"><img src="/static/img/markets/flag-gb.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>GBP/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="USDJPY" href="/portal?symbol=USDJPY" aria-label="USD/JPY chart"><i class="ic pair"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-jp.svg" alt="" loading="lazy"></i><b>USD/JPY</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="AUDUSD" href="/portal?symbol=AUDUSD" aria-label="AUD/USD chart"><i class="ic pair"><img src="/static/img/markets/flag-au.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>AUD/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="USDCAD" href="/portal?symbol=USDCAD" aria-label="USD/CAD chart"><i class="ic pair"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-ca.svg" alt="" loading="lazy"></i><b>USD/CAD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="USDCHF" href="/portal?symbol=USDCHF" aria-label="USD/CHF chart"><i class="ic pair"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-ch.svg" alt="" loading="lazy"></i><b>USD/CHF</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="NZDUSD" href="/portal?symbol=NZDUSD" aria-label="NZD/USD chart"><i class="ic pair"><img src="/static/img/markets/flag-nz.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>NZD/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="EURGBP" href="/portal?symbol=EURGBP" aria-label="EUR/GBP chart"><i class="ic pair"><img src="/static/img/markets/flag-eu.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-gb.svg" alt="" loading="lazy"></i><b>EUR/GBP</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="EURJPY" href="/portal?symbol=EURJPY" aria-label="EUR/JPY chart"><i class="ic pair"><img src="/static/img/markets/flag-eu.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-jp.svg" alt="" loading="lazy"></i><b>EUR/JPY</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="GBPJPY" href="/portal?symbol=GBPJPY" aria-label="GBP/JPY chart"><i class="ic pair"><img src="/static/img/markets/flag-gb.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-jp.svg" alt="" loading="lazy"></i><b>GBP/JPY</b><em>FOREX</em></a></div></div>
-    <div class="assets-row rev"><div class="assets-track"><a class="asset" data-c="idx" data-sym="US30" href="/portal?symbol=US30" aria-label="US30 chart"><i class="ic"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>US30</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="NAS100" href="/portal?symbol=NAS100" aria-label="NAS100 chart"><i class="ic"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>NAS100</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="SPX500" href="/portal?symbol=SPX500" aria-label="SPX500 chart"><i class="ic"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>SPX500</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="GER40" href="/portal?symbol=GER40" aria-label="GER40 chart"><i class="ic"><img src="/static/img/markets/flag-de.svg" alt="" loading="lazy"></i><b>GER40</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="UK100" href="/portal?symbol=UK100" aria-label="UK100 chart"><i class="ic"><img src="/static/img/markets/flag-gb.svg" alt="" loading="lazy"></i><b>UK100</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="JPN225" href="/portal?symbol=JPN225" aria-label="JPN225 chart"><i class="ic"><img src="/static/img/markets/flag-jp.svg" alt="" loading="lazy"></i><b>JPN225</b><em>INDEX</em></a><a class="asset" data-c="metal" data-sym="XAUUSD" href="/portal?symbol=XAUUSD" aria-label="XAU/USD chart"><i class="ic metal" style="--m:#b9862b"><svg viewBox="0 0 40 40" aria-hidden="true"><defs><linearGradient id="mXAUUSD" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f3d27a"/><stop offset="1" stop-color="#b9862b"/></linearGradient></defs><path d="M8 26h12l2 6H6z" fill="url(#mXAUUSD)"/><path d="M20 26h12l2 6H18z" fill="url(#mXAUUSD)" opacity=".9"/><path d="M14 16h12l2 6H12z" fill="url(#mXAUUSD)"/><path d="M14 16h12l2 6H12z" fill="#fff" opacity=".18"/></svg></i><b>XAU/USD</b><em>METAL</em></a><a class="asset" data-c="metal" data-sym="XAGUSD" href="/portal?symbol=XAGUSD" aria-label="XAG/USD chart"><i class="ic metal" style="--m:#8f98a8"><svg viewBox="0 0 40 40" aria-hidden="true"><defs><linearGradient id="mXAGUSD" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e6e9ef"/><stop offset="1" stop-color="#8f98a8"/></linearGradient></defs><path d="M8 26h12l2 6H6z" fill="url(#mXAGUSD)"/><path d="M20 26h12l2 6H18z" fill="url(#mXAGUSD)" opacity=".9"/><path d="M14 16h12l2 6H12z" fill="url(#mXAGUSD)"/><path d="M14 16h12l2 6H12z" fill="#fff" opacity=".18"/></svg></i><b>XAG/USD</b><em>METAL</em></a><a class="asset" data-c="energy" data-sym="USOIL" href="/portal?symbol=USOIL" aria-label="USOIL chart"><i class="ic energy"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 7c5 7 9 12 9 17.5A9 9 0 0 1 11 24.5C11 19 15 14 20 7z" fill="#1d1f2a"/><path d="M15.5 25.5a4.5 4.5 0 0 0 4.5 4.5" stroke="#fff" stroke-width="1.6" stroke-linecap="round" fill="none" opacity=".7"/></svg></i><b>USOIL</b><em>ENERGY</em></a><a class="asset" data-c="energy" data-sym="UKOIL" href="/portal?symbol=UKOIL" aria-label="UKOIL chart"><i class="ic energy"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 7c5 7 9 12 9 17.5A9 9 0 0 1 11 24.5C11 19 15 14 20 7z" fill="#1d1f2a"/><path d="M15.5 25.5a4.5 4.5 0 0 0 4.5 4.5" stroke="#fff" stroke-width="1.6" stroke-linecap="round" fill="none" opacity=".7"/></svg></i><b>UKOIL</b><em>ENERGY</em></a><a class="asset" data-c="energy" data-sym="NATGAS" href="/portal?symbol=NATGAS" aria-label="NATGAS chart"><i class="ic energy"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M21 6c1 6 7 8 7 16a8 8 0 0 1-16 0c0-4 2-6 3-8 .5 3 2 4 3 4 0-5 2-8 3-12z" fill="#fff"/><path d="M20 20c1 3 4 4 4 7.5a4 4 0 0 1-8 0c0-2 1-3.5 2-5 .3 1.5 1 2 2 2 0-2 0-3.5 0-4.5z" fill="#3aa0ff"/></svg></i><b>NATGAS</b><em>ENERGY</em></a><a class="asset" data-c="idx" data-sym="US30" href="/portal?symbol=US30" aria-label="US30 chart"><i class="ic"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>US30</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="NAS100" href="/portal?symbol=NAS100" aria-label="NAS100 chart"><i class="ic"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>NAS100</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="SPX500" href="/portal?symbol=SPX500" aria-label="SPX500 chart"><i class="ic"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>SPX500</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="GER40" href="/portal?symbol=GER40" aria-label="GER40 chart"><i class="ic"><img src="/static/img/markets/flag-de.svg" alt="" loading="lazy"></i><b>GER40</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="UK100" href="/portal?symbol=UK100" aria-label="UK100 chart"><i class="ic"><img src="/static/img/markets/flag-gb.svg" alt="" loading="lazy"></i><b>UK100</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="JPN225" href="/portal?symbol=JPN225" aria-label="JPN225 chart"><i class="ic"><img src="/static/img/markets/flag-jp.svg" alt="" loading="lazy"></i><b>JPN225</b><em>INDEX</em></a><a class="asset" data-c="metal" data-sym="XAUUSD" href="/portal?symbol=XAUUSD" aria-label="XAU/USD chart"><i class="ic metal" style="--m:#b9862b"><svg viewBox="0 0 40 40" aria-hidden="true"><defs><linearGradient id="mXAUUSD" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f3d27a"/><stop offset="1" stop-color="#b9862b"/></linearGradient></defs><path d="M8 26h12l2 6H6z" fill="url(#mXAUUSD)"/><path d="M20 26h12l2 6H18z" fill="url(#mXAUUSD)" opacity=".9"/><path d="M14 16h12l2 6H12z" fill="url(#mXAUUSD)"/><path d="M14 16h12l2 6H12z" fill="#fff" opacity=".18"/></svg></i><b>XAU/USD</b><em>METAL</em></a><a class="asset" data-c="metal" data-sym="XAGUSD" href="/portal?symbol=XAGUSD" aria-label="XAG/USD chart"><i class="ic metal" style="--m:#8f98a8"><svg viewBox="0 0 40 40" aria-hidden="true"><defs><linearGradient id="mXAGUSD" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e6e9ef"/><stop offset="1" stop-color="#8f98a8"/></linearGradient></defs><path d="M8 26h12l2 6H6z" fill="url(#mXAGUSD)"/><path d="M20 26h12l2 6H18z" fill="url(#mXAGUSD)" opacity=".9"/><path d="M14 16h12l2 6H12z" fill="url(#mXAGUSD)"/><path d="M14 16h12l2 6H12z" fill="#fff" opacity=".18"/></svg></i><b>XAG/USD</b><em>METAL</em></a><a class="asset" data-c="energy" data-sym="USOIL" href="/portal?symbol=USOIL" aria-label="USOIL chart"><i class="ic energy"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 7c5 7 9 12 9 17.5A9 9 0 0 1 11 24.5C11 19 15 14 20 7z" fill="#1d1f2a"/><path d="M15.5 25.5a4.5 4.5 0 0 0 4.5 4.5" stroke="#fff" stroke-width="1.6" stroke-linecap="round" fill="none" opacity=".7"/></svg></i><b>USOIL</b><em>ENERGY</em></a><a class="asset" data-c="energy" data-sym="UKOIL" href="/portal?symbol=UKOIL" aria-label="UKOIL chart"><i class="ic energy"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 7c5 7 9 12 9 17.5A9 9 0 0 1 11 24.5C11 19 15 14 20 7z" fill="#1d1f2a"/><path d="M15.5 25.5a4.5 4.5 0 0 0 4.5 4.5" stroke="#fff" stroke-width="1.6" stroke-linecap="round" fill="none" opacity=".7"/></svg></i><b>UKOIL</b><em>ENERGY</em></a><a class="asset" data-c="energy" data-sym="NATGAS" href="/portal?symbol=NATGAS" aria-label="NATGAS chart"><i class="ic energy"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M21 6c1 6 7 8 7 16a8 8 0 0 1-16 0c0-4 2-6 3-8 .5 3 2 4 3 4 0-5 2-8 3-12z" fill="#fff"/><path d="M20 20c1 3 4 4 4 7.5a4 4 0 0 1-8 0c0-2 1-3.5 2-5 .3 1.5 1 2 2 2 0-2 0-3.5 0-4.5z" fill="#3aa0ff"/></svg></i><b>NATGAS</b><em>ENERGY</em></a></div></div>
-    <div class="assets-row"><div class="assets-track"><a class="asset" data-c="crypto" data-sym="BTCUSD" href="/portal?symbol=BTCUSD" aria-label="BTC/USD chart"><i class="ic coin"><img src="/static/img/markets/coin-btc.svg" alt="" loading="lazy"></i><b>BTC/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="ETHUSD" href="/portal?symbol=ETHUSD" aria-label="ETH/USD chart"><i class="ic coin"><img src="/static/img/markets/coin-eth.svg" alt="" loading="lazy"></i><b>ETH/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="SOLUSD" href="/portal?symbol=SOLUSD" aria-label="SOL/USD chart"><i class="ic coin"><img src="/static/img/markets/coin-sol.svg" alt="" loading="lazy"></i><b>SOL/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="XRPUSD" href="/portal?symbol=XRPUSD" aria-label="XRP/USD chart"><i class="ic coin"><img src="/static/img/markets/coin-xrp.svg" alt="" loading="lazy"></i><b>XRP/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="LTCUSD" href="/portal?symbol=LTCUSD" aria-label="LTC/USD chart"><i class="ic coin"><img src="/static/img/markets/coin-ltc.svg" alt="" loading="lazy"></i><b>LTC/USD</b><em>CRYPTO</em></a><a class="asset" data-c="fx" data-sym="EURAUD" href="/portal?symbol=EURAUD" aria-label="EUR/AUD chart"><i class="ic pair"><img src="/static/img/markets/flag-eu.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-au.svg" alt="" loading="lazy"></i><b>EUR/AUD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="AUDJPY" href="/portal?symbol=AUDJPY" aria-label="AUD/JPY chart"><i class="ic pair"><img src="/static/img/markets/flag-au.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-jp.svg" alt="" loading="lazy"></i><b>AUD/JPY</b><em>FOREX</em></a><a class="asset" data-c="idx" data-sym="EU50" href="/portal?symbol=EU50" aria-label="EU50 chart"><i class="ic"><img src="/static/img/markets/flag-eu.svg" alt="" loading="lazy"></i><b>EU50</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="AUS200" href="/portal?symbol=AUS200" aria-label="AUS200 chart"><i class="ic"><img src="/static/img/markets/flag-au.svg" alt="" loading="lazy"></i><b>AUS200</b><em>INDEX</em></a><a class="asset" data-c="metal" data-sym="XPTUSD" href="/portal?symbol=XPTUSD" aria-label="XPT/USD chart"><i class="ic metal" style="--m:#7b8794"><svg viewBox="0 0 40 40" aria-hidden="true"><defs><linearGradient id="mXPTUSD" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#dfe6ee"/><stop offset="1" stop-color="#7b8794"/></linearGradient></defs><path d="M8 26h12l2 6H6z" fill="url(#mXPTUSD)"/><path d="M20 26h12l2 6H18z" fill="url(#mXPTUSD)" opacity=".9"/><path d="M14 16h12l2 6H12z" fill="url(#mXPTUSD)"/><path d="M14 16h12l2 6H12z" fill="#fff" opacity=".18"/></svg></i><b>XPT/USD</b><em>METAL</em></a><a class="asset" data-c="crypto" data-sym="BTCUSD" href="/portal?symbol=BTCUSD" aria-label="BTC/USD chart"><i class="ic coin"><img src="/static/img/markets/coin-btc.svg" alt="" loading="lazy"></i><b>BTC/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="ETHUSD" href="/portal?symbol=ETHUSD" aria-label="ETH/USD chart"><i class="ic coin"><img src="/static/img/markets/coin-eth.svg" alt="" loading="lazy"></i><b>ETH/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="SOLUSD" href="/portal?symbol=SOLUSD" aria-label="SOL/USD chart"><i class="ic coin"><img src="/static/img/markets/coin-sol.svg" alt="" loading="lazy"></i><b>SOL/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="XRPUSD" href="/portal?symbol=XRPUSD" aria-label="XRP/USD chart"><i class="ic coin"><img src="/static/img/markets/coin-xrp.svg" alt="" loading="lazy"></i><b>XRP/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="LTCUSD" href="/portal?symbol=LTCUSD" aria-label="LTC/USD chart"><i class="ic coin"><img src="/static/img/markets/coin-ltc.svg" alt="" loading="lazy"></i><b>LTC/USD</b><em>CRYPTO</em></a><a class="asset" data-c="fx" data-sym="EURAUD" href="/portal?symbol=EURAUD" aria-label="EUR/AUD chart"><i class="ic pair"><img src="/static/img/markets/flag-eu.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-au.svg" alt="" loading="lazy"></i><b>EUR/AUD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="AUDJPY" href="/portal?symbol=AUDJPY" aria-label="AUD/JPY chart"><i class="ic pair"><img src="/static/img/markets/flag-au.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-jp.svg" alt="" loading="lazy"></i><b>AUD/JPY</b><em>FOREX</em></a><a class="asset" data-c="idx" data-sym="EU50" href="/portal?symbol=EU50" aria-label="EU50 chart"><i class="ic"><img src="/static/img/markets/flag-eu.svg" alt="" loading="lazy"></i><b>EU50</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="AUS200" href="/portal?symbol=AUS200" aria-label="AUS200 chart"><i class="ic"><img src="/static/img/markets/flag-au.svg" alt="" loading="lazy"></i><b>AUS200</b><em>INDEX</em></a><a class="asset" data-c="metal" data-sym="XPTUSD" href="/portal?symbol=XPTUSD" aria-label="XPT/USD chart"><i class="ic metal" style="--m:#7b8794"><svg viewBox="0 0 40 40" aria-hidden="true"><defs><linearGradient id="mXPTUSD" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#dfe6ee"/><stop offset="1" stop-color="#7b8794"/></linearGradient></defs><path d="M8 26h12l2 6H6z" fill="url(#mXPTUSD)"/><path d="M20 26h12l2 6H18z" fill="url(#mXPTUSD)" opacity=".9"/><path d="M14 16h12l2 6H12z" fill="url(#mXPTUSD)"/><path d="M14 16h12l2 6H12z" fill="#fff" opacity=".18"/></svg></i><b>XPT/USD</b><em>METAL</em></a></div></div>
+    <div class="assets-row"><div class="assets-track"><a class="asset" data-c="fx" data-sym="EURUSD" href="/trade/EURUSD"><i class="ic pair"><img src="/static/img/markets/flag-eu.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>EUR/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="GBPUSD" href="/trade/GBPUSD"><i class="ic pair"><img src="/static/img/markets/flag-gb.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>GBP/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="USDJPY" href="/trade/USDJPY"><i class="ic pair"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-jp.svg" alt="" loading="lazy"></i><b>USD/JPY</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="AUDUSD" href="/trade/AUDUSD"><i class="ic pair"><img src="/static/img/markets/flag-au.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>AUD/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="USDCAD" href="/trade/USDCAD"><i class="ic pair"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-ca.svg" alt="" loading="lazy"></i><b>USD/CAD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="USDCHF" href="/trade/USDCHF"><i class="ic pair"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-ch.svg" alt="" loading="lazy"></i><b>USD/CHF</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="NZDUSD" href="/trade/NZDUSD"><i class="ic pair"><img src="/static/img/markets/flag-nz.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>NZD/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="EURGBP" href="/trade/EURGBP"><i class="ic pair"><img src="/static/img/markets/flag-eu.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-gb.svg" alt="" loading="lazy"></i><b>EUR/GBP</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="EURJPY" href="/trade/EURJPY"><i class="ic pair"><img src="/static/img/markets/flag-eu.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-jp.svg" alt="" loading="lazy"></i><b>EUR/JPY</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="GBPJPY" href="/trade/GBPJPY"><i class="ic pair"><img src="/static/img/markets/flag-gb.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-jp.svg" alt="" loading="lazy"></i><b>GBP/JPY</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="EURUSD" href="/trade/EURUSD"><i class="ic pair"><img src="/static/img/markets/flag-eu.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>EUR/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="GBPUSD" href="/trade/GBPUSD"><i class="ic pair"><img src="/static/img/markets/flag-gb.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>GBP/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="USDJPY" href="/trade/USDJPY"><i class="ic pair"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-jp.svg" alt="" loading="lazy"></i><b>USD/JPY</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="AUDUSD" href="/trade/AUDUSD"><i class="ic pair"><img src="/static/img/markets/flag-au.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>AUD/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="USDCAD" href="/trade/USDCAD"><i class="ic pair"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-ca.svg" alt="" loading="lazy"></i><b>USD/CAD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="USDCHF" href="/trade/USDCHF"><i class="ic pair"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-ch.svg" alt="" loading="lazy"></i><b>USD/CHF</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="NZDUSD" href="/trade/NZDUSD"><i class="ic pair"><img src="/static/img/markets/flag-nz.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>NZD/USD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="EURGBP" href="/trade/EURGBP"><i class="ic pair"><img src="/static/img/markets/flag-eu.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-gb.svg" alt="" loading="lazy"></i><b>EUR/GBP</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="EURJPY" href="/trade/EURJPY"><i class="ic pair"><img src="/static/img/markets/flag-eu.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-jp.svg" alt="" loading="lazy"></i><b>EUR/JPY</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="GBPJPY" href="/trade/GBPJPY"><i class="ic pair"><img src="/static/img/markets/flag-gb.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-jp.svg" alt="" loading="lazy"></i><b>GBP/JPY</b><em>FOREX</em></a></div></div>
+    <div class="assets-row rev"><div class="assets-track"><a class="asset" data-c="idx" data-sym="US30" href="/trade/US30"><i class="ic"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>US30</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="NAS100" href="/trade/NAS100"><i class="ic"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>NAS100</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="SPX500" href="/trade/SPX500"><i class="ic"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>SPX500</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="GER40" href="/trade/GER40"><i class="ic"><img src="/static/img/markets/flag-de.svg" alt="" loading="lazy"></i><b>GER40</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="UK100" href="/trade/UK100"><i class="ic"><img src="/static/img/markets/flag-gb.svg" alt="" loading="lazy"></i><b>UK100</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="JPN225" href="/trade/JPN225"><i class="ic"><img src="/static/img/markets/flag-jp.svg" alt="" loading="lazy"></i><b>JPN225</b><em>INDEX</em></a><a class="asset" data-c="metal" data-sym="XAUUSD" href="/trade/XAUUSD"><i class="ic metal" style="--m:#b9862b"><svg viewBox="0 0 40 40" aria-hidden="true"><defs><linearGradient id="mXAUUSD" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f3d27a"/><stop offset="1" stop-color="#b9862b"/></linearGradient></defs><path d="M8 26h12l2 6H6z" fill="url(#mXAUUSD)"/><path d="M20 26h12l2 6H18z" fill="url(#mXAUUSD)" opacity=".9"/><path d="M14 16h12l2 6H12z" fill="url(#mXAUUSD)"/><path d="M14 16h12l2 6H12z" fill="#fff" opacity=".18"/></svg></i><b>XAU/USD</b><em>METAL</em></a><a class="asset" data-c="metal" data-sym="XAGUSD" href="/trade/XAGUSD"><i class="ic metal" style="--m:#8f98a8"><svg viewBox="0 0 40 40" aria-hidden="true"><defs><linearGradient id="mXAGUSD" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e6e9ef"/><stop offset="1" stop-color="#8f98a8"/></linearGradient></defs><path d="M8 26h12l2 6H6z" fill="url(#mXAGUSD)"/><path d="M20 26h12l2 6H18z" fill="url(#mXAGUSD)" opacity=".9"/><path d="M14 16h12l2 6H12z" fill="url(#mXAGUSD)"/><path d="M14 16h12l2 6H12z" fill="#fff" opacity=".18"/></svg></i><b>XAG/USD</b><em>METAL</em></a><a class="asset" data-c="energy" data-sym="USOIL" href="/trade/USOIL"><i class="ic energy"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 7c5 7 9 12 9 17.5A9 9 0 0 1 11 24.5C11 19 15 14 20 7z" fill="#1d1f2a"/><path d="M15.5 25.5a4.5 4.5 0 0 0 4.5 4.5" stroke="#fff" stroke-width="1.6" stroke-linecap="round" fill="none" opacity=".7"/></svg></i><b>USOIL</b><em>ENERGY</em></a><a class="asset" data-c="energy" data-sym="UKOIL" href="/trade/UKOIL"><i class="ic energy"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 7c5 7 9 12 9 17.5A9 9 0 0 1 11 24.5C11 19 15 14 20 7z" fill="#1d1f2a"/><path d="M15.5 25.5a4.5 4.5 0 0 0 4.5 4.5" stroke="#fff" stroke-width="1.6" stroke-linecap="round" fill="none" opacity=".7"/></svg></i><b>UKOIL</b><em>ENERGY</em></a><a class="asset" data-c="energy" data-sym="NATGAS" href="/trade/NATGAS"><i class="ic energy"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M21 6c1 6 7 8 7 16a8 8 0 0 1-16 0c0-4 2-6 3-8 .5 3 2 4 3 4 0-5 2-8 3-12z" fill="#fff"/><path d="M20 20c1 3 4 4 4 7.5a4 4 0 0 1-8 0c0-2 1-3.5 2-5 .3 1.5 1 2 2 2 0-2 0-3.5 0-4.5z" fill="#3aa0ff"/></svg></i><b>NATGAS</b><em>ENERGY</em></a><a class="asset" data-c="idx" data-sym="US30" href="/trade/US30"><i class="ic"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>US30</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="NAS100" href="/trade/NAS100"><i class="ic"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>NAS100</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="SPX500" href="/trade/SPX500"><i class="ic"><img src="/static/img/markets/flag-us.svg" alt="" loading="lazy"></i><b>SPX500</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="GER40" href="/trade/GER40"><i class="ic"><img src="/static/img/markets/flag-de.svg" alt="" loading="lazy"></i><b>GER40</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="UK100" href="/trade/UK100"><i class="ic"><img src="/static/img/markets/flag-gb.svg" alt="" loading="lazy"></i><b>UK100</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="JPN225" href="/trade/JPN225"><i class="ic"><img src="/static/img/markets/flag-jp.svg" alt="" loading="lazy"></i><b>JPN225</b><em>INDEX</em></a><a class="asset" data-c="metal" data-sym="XAUUSD" href="/trade/XAUUSD"><i class="ic metal" style="--m:#b9862b"><svg viewBox="0 0 40 40" aria-hidden="true"><defs><linearGradient id="mXAUUSD" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f3d27a"/><stop offset="1" stop-color="#b9862b"/></linearGradient></defs><path d="M8 26h12l2 6H6z" fill="url(#mXAUUSD)"/><path d="M20 26h12l2 6H18z" fill="url(#mXAUUSD)" opacity=".9"/><path d="M14 16h12l2 6H12z" fill="url(#mXAUUSD)"/><path d="M14 16h12l2 6H12z" fill="#fff" opacity=".18"/></svg></i><b>XAU/USD</b><em>METAL</em></a><a class="asset" data-c="metal" data-sym="XAGUSD" href="/trade/XAGUSD"><i class="ic metal" style="--m:#8f98a8"><svg viewBox="0 0 40 40" aria-hidden="true"><defs><linearGradient id="mXAGUSD" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e6e9ef"/><stop offset="1" stop-color="#8f98a8"/></linearGradient></defs><path d="M8 26h12l2 6H6z" fill="url(#mXAGUSD)"/><path d="M20 26h12l2 6H18z" fill="url(#mXAGUSD)" opacity=".9"/><path d="M14 16h12l2 6H12z" fill="url(#mXAGUSD)"/><path d="M14 16h12l2 6H12z" fill="#fff" opacity=".18"/></svg></i><b>XAG/USD</b><em>METAL</em></a><a class="asset" data-c="energy" data-sym="USOIL" href="/trade/USOIL"><i class="ic energy"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 7c5 7 9 12 9 17.5A9 9 0 0 1 11 24.5C11 19 15 14 20 7z" fill="#1d1f2a"/><path d="M15.5 25.5a4.5 4.5 0 0 0 4.5 4.5" stroke="#fff" stroke-width="1.6" stroke-linecap="round" fill="none" opacity=".7"/></svg></i><b>USOIL</b><em>ENERGY</em></a><a class="asset" data-c="energy" data-sym="UKOIL" href="/trade/UKOIL"><i class="ic energy"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 7c5 7 9 12 9 17.5A9 9 0 0 1 11 24.5C11 19 15 14 20 7z" fill="#1d1f2a"/><path d="M15.5 25.5a4.5 4.5 0 0 0 4.5 4.5" stroke="#fff" stroke-width="1.6" stroke-linecap="round" fill="none" opacity=".7"/></svg></i><b>UKOIL</b><em>ENERGY</em></a><a class="asset" data-c="energy" data-sym="NATGAS" href="/trade/NATGAS"><i class="ic energy"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M21 6c1 6 7 8 7 16a8 8 0 0 1-16 0c0-4 2-6 3-8 .5 3 2 4 3 4 0-5 2-8 3-12z" fill="#fff"/><path d="M20 20c1 3 4 4 4 7.5a4 4 0 0 1-8 0c0-2 1-3.5 2-5 .3 1.5 1 2 2 2 0-2 0-3.5 0-4.5z" fill="#3aa0ff"/></svg></i><b>NATGAS</b><em>ENERGY</em></a></div></div>
+    <div class="assets-row"><div class="assets-track"><a class="asset" data-c="crypto" data-sym="BTCUSD" href="/trade/BTCUSD"><i class="ic coin"><img src="/static/img/markets/coin-btc.svg" alt="" loading="lazy"></i><b>BTC/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="ETHUSD" href="/trade/ETHUSD"><i class="ic coin"><img src="/static/img/markets/coin-eth.svg" alt="" loading="lazy"></i><b>ETH/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="SOLUSD" href="/trade/SOLUSD"><i class="ic coin"><img src="/static/img/markets/coin-sol.svg" alt="" loading="lazy"></i><b>SOL/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="XRPUSD" href="/trade/XRPUSD"><i class="ic coin"><img src="/static/img/markets/coin-xrp.svg" alt="" loading="lazy"></i><b>XRP/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="LTCUSD" href="/trade/LTCUSD"><i class="ic coin"><img src="/static/img/markets/coin-ltc.svg" alt="" loading="lazy"></i><b>LTC/USD</b><em>CRYPTO</em></a><a class="asset" data-c="fx" data-sym="EURAUD" href="/trade/EURAUD"><i class="ic pair"><img src="/static/img/markets/flag-eu.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-au.svg" alt="" loading="lazy"></i><b>EUR/AUD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="AUDJPY" href="/trade/AUDJPY"><i class="ic pair"><img src="/static/img/markets/flag-au.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-jp.svg" alt="" loading="lazy"></i><b>AUD/JPY</b><em>FOREX</em></a><a class="asset" data-c="idx" data-sym="EU50" href="/trade/EU50"><i class="ic"><img src="/static/img/markets/flag-eu.svg" alt="" loading="lazy"></i><b>EU50</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="AUS200" href="/trade/AUS200"><i class="ic"><img src="/static/img/markets/flag-au.svg" alt="" loading="lazy"></i><b>AUS200</b><em>INDEX</em></a><a class="asset" data-c="metal" data-sym="XPTUSD" href="/trade/XPTUSD"><i class="ic metal" style="--m:#7b8794"><svg viewBox="0 0 40 40" aria-hidden="true"><defs><linearGradient id="mXPTUSD" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#dfe6ee"/><stop offset="1" stop-color="#7b8794"/></linearGradient></defs><path d="M8 26h12l2 6H6z" fill="url(#mXPTUSD)"/><path d="M20 26h12l2 6H18z" fill="url(#mXPTUSD)" opacity=".9"/><path d="M14 16h12l2 6H12z" fill="url(#mXPTUSD)"/><path d="M14 16h12l2 6H12z" fill="#fff" opacity=".18"/></svg></i><b>XPT/USD</b><em>METAL</em></a><a class="asset" data-c="crypto" data-sym="BTCUSD" href="/trade/BTCUSD"><i class="ic coin"><img src="/static/img/markets/coin-btc.svg" alt="" loading="lazy"></i><b>BTC/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="ETHUSD" href="/trade/ETHUSD"><i class="ic coin"><img src="/static/img/markets/coin-eth.svg" alt="" loading="lazy"></i><b>ETH/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="SOLUSD" href="/trade/SOLUSD"><i class="ic coin"><img src="/static/img/markets/coin-sol.svg" alt="" loading="lazy"></i><b>SOL/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="XRPUSD" href="/trade/XRPUSD"><i class="ic coin"><img src="/static/img/markets/coin-xrp.svg" alt="" loading="lazy"></i><b>XRP/USD</b><em>CRYPTO</em></a><a class="asset" data-c="crypto" data-sym="LTCUSD" href="/trade/LTCUSD"><i class="ic coin"><img src="/static/img/markets/coin-ltc.svg" alt="" loading="lazy"></i><b>LTC/USD</b><em>CRYPTO</em></a><a class="asset" data-c="fx" data-sym="EURAUD" href="/trade/EURAUD"><i class="ic pair"><img src="/static/img/markets/flag-eu.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-au.svg" alt="" loading="lazy"></i><b>EUR/AUD</b><em>FOREX</em></a><a class="asset" data-c="fx" data-sym="AUDJPY" href="/trade/AUDJPY"><i class="ic pair"><img src="/static/img/markets/flag-au.svg" alt="" loading="lazy"><img src="/static/img/markets/flag-jp.svg" alt="" loading="lazy"></i><b>AUD/JPY</b><em>FOREX</em></a><a class="asset" data-c="idx" data-sym="EU50" href="/trade/EU50"><i class="ic"><img src="/static/img/markets/flag-eu.svg" alt="" loading="lazy"></i><b>EU50</b><em>INDEX</em></a><a class="asset" data-c="idx" data-sym="AUS200" href="/trade/AUS200"><i class="ic"><img src="/static/img/markets/flag-au.svg" alt="" loading="lazy"></i><b>AUS200</b><em>INDEX</em></a><a class="asset" data-c="metal" data-sym="XPTUSD" href="/trade/XPTUSD"><i class="ic metal" style="--m:#7b8794"><svg viewBox="0 0 40 40" aria-hidden="true"><defs><linearGradient id="mXPTUSD" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#dfe6ee"/><stop offset="1" stop-color="#7b8794"/></linearGradient></defs><path d="M8 26h12l2 6H6z" fill="url(#mXPTUSD)"/><path d="M20 26h12l2 6H18z" fill="url(#mXPTUSD)" opacity=".9"/><path d="M14 16h12l2 6H12z" fill="url(#mXPTUSD)"/><path d="M14 16h12l2 6H12z" fill="#fff" opacity=".18"/></svg></i><b>XPT/USD</b><em>METAL</em></a></div></div>
   </div>
-  <div class="wrap"><div class="assets-all" id="assetsAll" hidden><div class="assets-group"><h4>Forex</h4><span>AUD/JPY</span><span>AUD/USD</span><span>EUR/AUD</span><span>EUR/GBP</span><span>EUR/JPY</span><span>EUR/USD</span><span>GBP/JPY</span><span>GBP/USD</span><span>NZD/USD</span><span>USD/CAD</span><span>USD/CHF</span><span>USD/JPY</span></div><div class="assets-group"><h4>Index</h4><span>AUS200</span><span>EU50</span><span>GER40</span><span>JPN225</span><span>NAS100</span><span>SPX500</span><span>UK100</span><span>US30</span></div><div class="assets-group"><h4>Metal</h4><span>XAG/USD</span><span>XAU/USD</span><span>XPT/USD</span></div><div class="assets-group"><h4>Energy</h4><span>NATGAS</span><span>UKOIL</span><span>USOIL</span></div><div class="assets-group"><h4>Crypto</h4><span>BTC/USD</span><span>ETH/USD</span><span>LTC/USD</span><span>SOL/USD</span><span>XRP/USD</span></div>
-    <p class="assets-note">Symbols as listed on the MT5 server. Lot limits per plan are in the <a href="/objectives">trading objectives</a>.</p>
-  </div></div>
 </section>
 
 <!-- ============================ HOW IT WORKS ============================ -->
@@ -156,7 +156,7 @@
             <path d="M78 41v5l4 3" stroke="#36b9a9" stroke-width="2" stroke-linecap="round"/>
           </svg>{% endif %}</div>
         <h3>2. Get your MT5 credentials</h3>
-        <p>We open a real MetaTrader&nbsp;5 account for you automatically. Server, login and password
+        <p>We open an MT5 account for you automatically. Server, login and password
            land in your dashboard and inbox once the payment is confirmed.</p>
         <p>Trade from the desktop terminal, the mobile app or the web terminal.</p>
       </div>
@@ -197,73 +197,40 @@
    it duplicated the Program Rules panel in the configurator, which shows the same
    limits for the plan the visitor is actually looking at. #}
 
-<!-- ============================ PRICING ============================ -->
+<!-- ============================ CHALLENGES ============================ -->
 <section class="sec" id="pricing">
   <div class="wrap">
     <div class="sec-head center" data-rv>
-      <span class="pill">Pricing</span>
-      <h2>Configure your challenge</h2>
+      <span class="pill">Challenges</span>
+      <h2>Choose your challenge</h2>
       <p>One-time fee. No recurring costs. 2-Step fees are refunded in full with your first payout.</p>
     </div>
-    <div class="pcfg-grid" data-rv>
-      <div class="pcfg" id="pcfg">
-        <div class="pcfg-head">
-          <h3 id="pcfg-title">2-Step Evaluation</h3>
-          <span class="pcfg-sub">One-time fee · simulated capital</span>
-        </div>
-        <div class="pcfg-toggle" id="pcfg-toggle"></div>
-        <div class="pcfg-label">Simulated account size</div>
-        <div class="pcfg-sizes" id="pcfg-sizes"></div>
-        <div class="pcfg-label">Platform</div>
-        <div class="pcfg-platform">MetaTrader&nbsp;5</div>
-        <div class="pcfg-addon">
-          <div><b>Weekend Trading</b><span>Bonus add-on: $199 for 2 extra trading days/week</span></div>
-          <button class="pcfg-addbtn" id="pcfg-wt" type="button">Add $199</button>
-        </div>
-        {# Widoczny tylko wtedy, gdy add-on jest w sprzedazy (przelacznik
-           w panelu, Settings). Pokazuje go renderPricing(). #}
-        <div class="pcfg-addon" id="pcfg-ct-row" hidden>
-          <div><b>Copytrading</b><span>Copy trades between your own accounts · more than one device</span></div>
-          <button class="pcfg-addbtn" id="pcfg-ct" type="button">Add $299</button>
-        </div>
-        <div class="pcfg-addon static">
-          <div><b>News Trading</b><span>Trade straight through high-impact news</span></div>
-          <span class="ok">✓ Included</span>
-        </div>
-        <div class="pcfg-label">Coupon code</div>
-        <div class="code-row">
-          <input id="pcfg-coupon" class="code-inp" autocomplete="off" aria-label="Coupon code">
-          <button class="code-btn" id="pcfg-apply" type="button">Apply</button>
-        </div>
-        {# The applied code has to confirm itself right here. The fee line sits
-           further down and the upgrade does not change the price at all, so
-           without this the page looked like nothing happened. #}
-        <div class="code-msg" id="pcfg-codemsg" hidden></div>
-        <div class="pcfg-feerow">
-          <div class="pcfg-feelabel">Total due</div>
-          <div class="pcfg-fee" id="pcfg-fee">$—</div>
-          <div class="pcfg-feesub" id="pcfg-feesub"></div>
-        </div>
-        <a class="btn btn-lg" id="pcfg-cta" href="/portal" style="width:100%;text-align:center">Continue to payment →</a>
-        <div class="pcfg-fine">Secure checkout · MT5 credentials delivered to your dashboard and inbox automatically.</div>
+    <div class="chal-switches" data-rv>
+      <div class="chal-tabs" id="chalModels"></div>
+      <div class="chal-tabs" id="chalTiers"></div>
+    </div>
+    <div class="chal-grid" id="chalGrid" data-rv></div>
+    <div class="chal-extras" id="pcfg" data-rv>
+      <div class="chal-opt">
+        <span><b>Weekend trading</b><small>+$199</small></span>
+        <button class="chal-sw" id="pcfg-wt" type="button" role="switch" aria-checked="false" aria-label="Add weekend trading"></button>
       </div>
-      <div class="prules">
-        <h3>Program Rules</h3>
-        <div id="prules-rows"></div>
-        <p class="prules-fine">All trading takes place in a simulated environment on virtual funds.
-          Performance rewards are discretionary and not guaranteed. See
-          <a href="/terms">Terms of Service</a>.</p>
+      <div class="chal-opt" id="pcfg-ct-row" hidden>
+        <span><b>Copytrading</b><small id="pcfg-ct-price">+$299</small></span>
+        <button class="chal-sw" id="pcfg-ct" type="button" role="switch" aria-checked="false" aria-label="Add copytrading"></button>
+      </div>
+      <div class="chal-opt">
+        <span><b>News trading</b><small>Included</small></span>
+      </div>
+      <div class="chal-opt chal-code">
+        <input id="pcfg-coupon" autocomplete="off" placeholder="Coupon code" aria-label="Coupon code">
+        <button id="pcfg-apply" type="button">Apply</button>
       </div>
     </div>
-    <div class="pricing-note" data-rv>
-      <span>🔒 Secure checkout</span>
-      <span>⚡ Account delivered automatically</span>
-      <span>🏷️ Coupon codes accepted</span>
-    </div>
-    <p class="disc disc-c" data-rv>*The fee buys access to a trading evaluation on a simulated
-      account. No real money is deposited or traded at any point. Performance rewards, including
-      the refund of the fee, are discretionary and depend on meeting the objectives published
-      above. See our <a href="/terms">Terms of Service</a>.</p>
+    <div class="code-msg chal-msg" id="pcfg-codemsg" hidden></div>
+    <p class="chal-fine" data-rv>One-time fee for access to an evaluation on a simulated account. No real money is deposited or
+      traded at any point. Performance rewards, including the fee refund, are discretionary and not guaranteed.
+      <a href="/terms">Terms of Service</a></p>
   </div>
 </section>
 
@@ -315,53 +282,46 @@
   </div>
 </section>
 
-<!-- ============================ WHY US ============================ -->
-<section class="sec sec-tight" id="why">
+<!-- ============================ BUILT-IN TERMINAL ============================ -->
+<section class="sec sec-tight" id="terminal">
   <div class="wrap">
     <div class="sec-head center" data-rv>
-      <span class="pill">Built different</span>
-      <h2>Transparency is the product</h2>
-      <p>Most of this industry runs on black boxes. We went the other way.</p>
+      <span class="pill">Built-in Terminal</span>
+      <h2>Trade right in your browser</h2>
+      <p>Every challenge comes with our own terminal, on top of MT5. No download: sign in with your MT5 login and trade the same account, under the same rules.</p>
     </div>
-    <div class="grid6">
-      <div class="card why" data-rv>
-        <div class="why-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M6 6.5h.01M6 17.5h.01"/></svg></div>
-        <h3>Real MT5 accounts</h3>
-        <p>Your challenge runs on a real MetaTrader 5 server account — not an in-house simulator
-           we could quietly tweak.</p>
+    <div class="lpt" id="lpTerm" data-v="{{ asset_v }}" data-rv>
+      <div class="lpt-top">
+        <div class="lpt-syms" data-syms></div>
+        <span class="lpt-lev" data-lev></span>
+        <div class="lpt-q"><small>Mark</small><b data-mark>—</b></div>
+        <div class="lpt-q"><small>24h change</small><b data-chg></b></div>
+        <a class="lpt-open" data-open href="/trade">Open full terminal →</a>
       </div>
-      <div class="card why" data-rv>
-        <div class="why-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2 4 6v6c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V6z"/><path d="m9 12 2 2 4-4"/></svg></div>
-        <h3>Automated risk engine</h3>
-        <p>Equity is monitored continuously. Daily loss and max drawdown are enforced by code,
-           the same way for every trader, every time.</p>
+      <div class="lpt-body">
+        <div class="lpt-main">
+          <div class="lpt-ints">
+            <button type="button" data-int="1m">1m</button><button type="button" data-int="5m">5m</button><button type="button" class="on" data-int="15m">15m</button><button type="button" data-int="1h">1h</button>
+          </div>
+          <div class="lpt-chart" data-chart></div>
+        </div>
+        <div class="lpt-side-wrap">
+          <div class="lpt-tabs"><button type="button" class="on" data-tab="book">Order Book</button><button type="button" data-tab="trades">Trades</button></div>
+          <div class="lpt-side" data-side></div>
+        </div>
       </div>
-      <div class="card why" data-rv>
-        <div class="why-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2z"/><path d="M19 17H6a2 2 0 0 0-2 2"/><path d="M9 7h6M9 11h4"/></svg></div>
-        <h3>Published rules = enforced rules</h3>
-        <p>Every number on this page is exactly what the engine checks. If it's not written here,
-           it's not a rule.</p>
-      </div>
-      <div class="card why" data-rv>
-        <div class="why-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg></div>
-        <h3>Automated delivery</h3>
-        <p>Provisioning is fully automated: server, login and password are generated and delivered
-           automatically after checkout.</p>
-      </div>
-      <div class="card why" data-rv>
-        <div class="why-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M8 2v4M16 2v4M3 9h18"/><path d="m9 15 2 2 4-4"/></svg></div>
-        <h3>News &amp; weekend trading allowed</h3>
-        <p>No news blackouts, no forced flat over the weekend, no banned strategies. Trade your edge.</p>
-      </div>
-      <div class="card why" data-rv>
-        <div class="why-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="9" r="6"/><path d="m8.5 13.5-1.7 7L12 18l5.2 2.5-1.7-7"/><path d="m9.7 8.8 1.6 1.6 3-3.2"/></svg></div>
-        <h3>Verifiable certificates</h3>
-        <p>Every pass and payout comes with a certificate ID that anyone can check against our
-           database — proof that can't be photoshopped.</p>
-      </div>
+      <p class="lpt-fail">The live preview can't connect right now. <a href="/trade">Open the terminal</a></p>
     </div>
+    <ul class="lpt-feats" data-rv>
+      <li><b>Charting</b>Drawing tools and indicators</li>
+      <li><b>Order book</b>Depth, spread and the tape</li>
+      <li><b>Chart trading</b>Drag TP and SL on the chart</li>
+      <li><b>MT5 accounts</b>Switch or add one in a click</li>
+    </ul>
+    <p class="chal-fine" data-rv>Reference prices from Hyperliquid, with which we are not affiliated. All trading is simulated.</p>
   </div>
 </section>
+<script src="/static/js/terminal-preview.js?v={{ asset_v }}" defer></script>
 
 <!-- ============================ CERTIFICATES ============================ -->
 <section class="sec" id="certs">
@@ -404,11 +364,6 @@
         {# No descriptive paragraph — the same message already stands on the left,
            and in the narrower landing column it did not fit the square. #}
         <div class="cert-foot">
-          <div class="cert-signblock">
-            <b class="sig">Matthew Harrison</b>
-            <i class="sig-line"></i>
-            <span>Chief Executive Officer</span>
-          </div>
           <div class="cert-qr">
             <div class="qr-box" id="pv-qr">{{ sample_qr | safe }}</div>
             <b id="pv-token">a1b2-example</b>
@@ -427,7 +382,6 @@
       <div class="cs-head">Recent payout certificates</div>
       <div class="cs-marquee">
         <div class="cs-row" id="certsStripRow"></div>
-        <div class="cs-row cs-row-b" id="certsStripRow2"></div>
       </div>
     </div>
     {# Outside #certsStrip on purpose: the strip hides itself when the API has
@@ -473,7 +427,7 @@
         <details>
           <summary>Are these live trading accounts?</summary>
           <div class="a">No. All accounts are demo accounts with virtual funds running in a simulated
-          environment on real MetaTrader 5 servers. You are never trading real money. You earn
+          environment on MT5 servers. You are never trading real money. You earn
           performance-based rewards for passing objectives and trading profitably.</div>
         </details>
         <details>
@@ -485,7 +439,7 @@
         </details>
         <details>
           <summary>What can I trade?</summary>
-          <div class="a">MetaTrader 5: desktop, mobile and web terminal, with the same credentials. You
+          <div class="a">MT5: desktop, mobile and web terminal, with the same credentials. You
           can trade whatever the MT5 server offers: forex pairs, indices, gold and metals, energies and crypto CFDs.</div>
         </details>
         <details>
@@ -519,7 +473,7 @@
 <section class="final">
   <div class="final-glow"></div>
   <div class="wrap" data-rv>
-    <span class="pill"><span class="dot"></span> Accounts delivered automatically</span>
+    <span class="pill"><svg class="pill-ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5v3M4 11v3.5M12 1.5v5M12 12.5v2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><rect x="2.2" y="4.5" width="3.6" height="6.5" rx=".7" fill="currentColor"/><rect x="10.2" y="6.5" width="3.6" height="6" rx=".7" fill="none" stroke="currentColor" stroke-width="1.3"/></svg> Trade in our Built-in Terminal</span>
     <h2 style="margin-top:18px">Ready to prove your edge?</h2>
     <p>Pick a challenge, get your MT5 credentials automatically and start trading toward a funded account.</p>
     <a class="btn btn-lg" href="#pricing">Start Your Challenge</a>

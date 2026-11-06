@@ -207,14 +207,14 @@ def test_api_puli_wystawia_zamowienia_czekajace_na_rachunek():
 
 
 def test_czekajace_konto_widac_juz_na_overview():
-    """Kolejka po rachunek z puli musi być widoczna BEZ wchodzenia w MT5 Pool.
+    """Kolejka po rachunek z puli musi być widoczna BEZ wchodzenia w MT5 pool.
 
     Konto z zakupu zostaje w `provisioning`, a mail z poświadczeniami wychodzi
     dopiero przy uzbrojeniu — więc dopóki pula jest pusta, nikt nawet nie próbuje
     go wysłać i kafelek „e-mails failed" stoi na zerze. Cała awaria polega na tym,
     że nigdzie nic nie mruga: klient nie dostaje nic, a panel wygląda na zdrowy.
 
-    Licznik na Overview i lista w MT5 Pool muszą liczyć DOKŁADNIE ten sam zbiór —
+    Licznik na Overview i lista w MT5 pool muszą liczyć DOKŁADNIE ten sam zbiór —
     wiersz obiecuje, że po kliknięciu zobaczy się te konta, więc rozjazd zamieniłby
     alert w zagadkę.
     """

@@ -13,14 +13,14 @@ import random
 import time
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from .config import get_settings
 from .db import SessionLocal
 from .feed import Feed, make_feed
 from .models import Account, AppSetting, Breach, EquitySnapshot, Trade
-from . import catalog, notify, provisioning, push, rules, tradebot
+from . import catalog, notify, provisioning, push, rules, terminal, tradebot
 from .rules import AccountRuntime, EquityTick, Phase, Status
 
 # Plan skalowania kont funded: po +SCALE_TRIGGER% trader WYBIERA — wypłata albo
@@ -325,10 +325,21 @@ def _notify(acc: Account, event: str, extra: dict | None = None) -> None:
 
 async def process_account(session, acc: Account, feed: Feed) -> None:
     bot_driven = bool(getattr(acc, "bot_enabled", False))
+    # Konto handlowało w terminalu PTF: saldo prowadzi nasza księga, feed
+    # (np. losowy spacer `sim`) nie może go nadpisać.
+    ksiega = bool(getattr(acc, "terminal_used", False))
+    dni = None
     if bot_driven:
         # Gałąź MUSI być przed feed.snapshot: MetaQuotesWebFeed odpala w tle
         # logowanie do web terminala już przy samym zapytaniu o snapshot.
         snap = tradebot.tick(session, acc)
+        # Stempel przeglądu: otwarcie planu nie zmienia nic na koncie, więc bez
+        # niego dwa równoległe przebiegi (dobowy tick i cron ryzyka mają osobne
+        # zamki) mogłyby otworzyć dwa plany. Każdy przebieg robi UPDATE na
+        # `accounts`, a `row_version` odrzuca ten, który commituje drugi.
+        acc.terminal_eval_at = datetime.now(timezone.utc)
+    elif ksiega:
+        snap = None
     elif (not getattr(acc, "mt5_backed", True)
           and settings.feed in ("metaquotes_web", "metaapi")):
         # Poświadczenia wygenerowane lokalnie — na MT5 takiego rachunku nie ma,
@@ -338,6 +349,8 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
     else:
         snap = await feed.snapshot(acc.login, acc.metaapi_account_id, acc.initial_balance,
                                    password=acc.platform_password, server=acc.platform_server)
+    if ksiega:
+        snap, dni = terminal.snapshot_for(session, acc, snap)
     if snap is None:
         return
 
@@ -357,7 +370,13 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
         days_elapsed=(datetime.now(timezone.utc) - (acc.started_at.replace(tzinfo=timezone.utc) if acc.started_at.tzinfo is None else acc.started_at)).days,
     )
 
-    res = rules.evaluate(cfg, rt, tick)
+    # Okno świec 1m terminala doba po dobie: dołek equity między przeglądami
+    # też może złamać limit, a doba przespana przez północ ma swój baseline.
+    okno = terminal.evaluate_window(cfg, rt, tick, dni) if ksiega else None
+    if okno is not None:
+        res, rt = okno
+    else:
+        res = rules.evaluate(cfg, rt, tick)
     _write_runtime(acc, rt)
 
     # snapshot do wykresu
@@ -379,6 +398,9 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
             # floatingu (tą samą mechaniką co `tradebot.stop`), a bota gasimy:
             # inaczej po ręcznym wskrzeszeniu konta zjazd ruszyłby od nowa.
             tradebot.stop(session, acc)
+        if ksiega:
+            # Pozycje z terminala zamykamy po bieżących cenach, zlecenia znikają.
+            terminal.flatten(session, acc, "breach")
         maid = acc.metaapi_account_id
         login, pw = acc.platform_login, acc.platform_password
         session.commit()
@@ -394,6 +416,10 @@ async def process_account(session, acc: Account, feed: Feed) -> None:
                       f"({acc.breach_reason}) — zamknięto {closed} pozycji", flush=True)
         _notify(acc, "breached", {"reason": acc.breach_reason})
     elif res.passed_phase:
+        if ksiega:
+            # Nowa faza startuje od czystego salda — pozycje i zlecenia z terminala
+            # nie mogą przejść do niej z P&L-em zarobionym (albo straconym) w starej.
+            terminal.flatten(session, acc, "phase")
         _advance_phase(acc, rt)
         session.commit()
         _notify(acc, "phase_passed", {"from_phase": rt.phase.value, "to_phase": acc.phase})
@@ -710,17 +736,20 @@ def _zajmij_tick_ryzyka(session, min_odstep_s: float) -> bool:
 
 
 async def tick_ryzyka(min_odstep_s: float = 20.0) -> dict:
-    """Przebieg silnika TYLKO po kontach z realnym rachunkiem MT5.
+    """Przebieg silnika po kontach, ktorych equity rusza sie bez tradera.
 
     `tick_once` robi cala reszte roboty doby: payout bota, powiadomienia,
     podsumowania, publikacje na kanale, sprzatanie snapshotow. Odpalenie tego
     1440 razy dziennie zamiast raz nie byloby optymalizacja, tylko awaria.
-    Tutaj liczy sie jedno: konto, za ktore ktos zaplacil, handluje NAPRAWDE
-    i limit dziennej straty ma byc zauwazony w minutach, a nie nazajutrz.
+    Tutaj liczy sie jedno: limit dziennej straty ma byc zauwazony w minutach,
+    a nie nazajutrz.
 
-    Konta bez `metaapi_account_id` sa pomijane swiadomie — ich equity nie
-    rusza sie samo, wiec czestszy przebieg nic by dla nich nie zmienil,
-    a kosztowalby tyle samo.
+    Trzy grupy kont: z realnym rachunkiem MT5 (`metaapi_account_id`), z otwarta
+    pozycja albo zleceniem w terminalu PTF (`terminal_open`) i prowadzone przez
+    Trade BOT-a (`bot_enabled`) — te ostatnie bez tego przebiegu ruszaly sie
+    tylko raz na dobe, zamykaly plany z opoznieniem i liczyly baseline dnia
+    o godzinie dobowego crona zamiast o polnocy. Reszta jest pomijana
+    swiadomie: jej equity nie rusza sie samo.
     """
     global _feed
     if _feed is None:
@@ -747,7 +776,12 @@ async def tick_ryzyka(min_odstep_s: float = 20.0) -> dict:
     start = time.monotonic()
     session = SessionLocal()
     try:
-        konta = (_active_query(session).filter(Account.metaapi_account_id.isnot(None))
+        # Plus konta z otwartymi pozycjami/zleceniami w terminalu PTF (TP/SL,
+        # limity i dzienna strata w minutach) i konta Trade BOT-a (plany
+        # zamykane o czasie, baseline dnia o północy).
+        konta = (_active_query(session)
+                 .filter(or_(Account.metaapi_account_id.isnot(None), Account.terminal_open.is_(True),
+                             Account.bot_enabled.is_(True)))
                  .order_by(Account.id).all())
         # Rotacja: przebieg przerwany budżetem czasu zaczyna następnym razem od
         # konta, na którym stanął — inaczej ogon listy nie byłby liczony nigdy.
