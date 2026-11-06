@@ -945,22 +945,13 @@ html.promo-applied .promo-tag{background:rgba(255,255,255,.92);color:#4f46e5}
 .stat-num-l{font-size:clamp(20px,2.2vw,30px)}
 @media(max-width:960px){.stat-num-l{font-size:clamp(17px,4.6vw,24px)}}
 
-/* ---------------- cookie notice (full-width banner) ---------------- */
-.cookie-note{position:fixed;left:12px;right:12px;bottom:12px;z-index:80;display:flex;
-  align-items:center;justify-content:space-between;gap:22px;background:var(--panel);
-  border:1px solid var(--line2);border-radius:14px;padding:16px 22px;box-shadow:var(--shadow-lg)}
-.cookie-note .ck-txt b{font-size:15.5px}
-.cookie-note .ck-txt p{font-size:13.5px;color:var(--muted);margin-top:3px}
-.cookie-note a{color:var(--acc)}
-.ck-actions{display:flex;align-items:center;gap:16px;flex:none}
-.ck-decline{font-size:14px;font-weight:600;color:var(--muted);padding:9px 6px;background:none;
-  border:0;cursor:pointer;font-family:inherit}
-.ck-decline:hover{color:var(--txt)}
-.cookie-note.hidden{display:none}
-@media(max-width:640px){
-  /* Stacked, this banner ate a third of a phone screen — and the strip the page
-     has to reserve for it grew just as much. */
-  .cookie-note{flex-direction:column;align-items:flex-start;gap:10px;padding:13px 15px}
-  .cookie-note .ck-txt p{font-size:12.5px;line-height:1.45}
-  .ck-actions{width:100%;justify-content:flex-end}
-}
+/* The privacy choices bar styles itself (templates/_consent.html): it is shared with
+   the portal and the terminal, which load different stylesheets. */
+
+/* ---------------- footer disclaimers ---------------- */
+.disclaimers h2{font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:14px}
+.disclaimers h3{font-size:12.5px;font-weight:600;color:var(--txt);margin:14px 0 6px}
+.disclaimers h3:first-child{margin-top:0}
+.disclaimers-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 36px;margin-bottom:14px}
+.disclaimers-date{color:var(--muted)}
+@media(max-width:760px){.disclaimers-grid{grid-template-columns:1fr}}

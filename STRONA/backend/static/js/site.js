@@ -169,11 +169,13 @@
 
   /* ---------- ?ref= capture (partner code attaches at signup) ---------- */
   /* Timestamped: the signup form only prefills codes from a recent visit —
-     a partner code stored forever kept resurfacing months later. */
+     a partner code stored forever kept resurfacing months later. The code waits
+     in sessionStorage until the privacy choices allow "Referral attribution"
+     (_consent.html moves it to localStorage, or drops it). */
   const ref = new URLSearchParams(location.search).get('ref');
   if (ref) try {
-    localStorage.setItem('pf_ref', ref);
-    localStorage.setItem('pf_ref_ts', String(Date.now()));
+    sessionStorage.setItem('pf_ref_pending', ref);
+    if (window.pfConsent) pfConsent.apply();
   } catch (e) {}
 
   const yearEl = $('#year'); if (yearEl) yearEl.textContent = new Date().getFullYear();

@@ -1,25 +1,28 @@
 {# Analityka: GA4 (liczby) + Microsoft Clarity (nagrania sesji, heatmapy).
-   Jeden plik na trzy szablony — snippet powielony w każdym z osobna rozjeżdżał
+   Jeden plik na wszystkie szablony — snippet powielony w każdym z osobna rozjeżdżał
    się przy pierwszej zmianie, a wtedy część ruchu cicho przestaje się liczyć.
    Puste id = znacznik w ogóle nie wychodzi, więc lokalnie i w testach nie leci
    ani jeden request na zewnątrz. Panel admina (dashboard.html) celowo tego pliku
-   nie dołącza — nie nagrywamy cudzych danych w widoku operatora. #}
-{% if ga_id %}<link rel="preconnect" href="https://www.googletagmanager.com">
-<link rel="preconnect" href="https://region1.google-analytics.com">
-<script async src="https://www.googletagmanager.com/gtag/js?id={{ ga_id }}"></script>
-<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}
-gtag('js',new Date());gtag('config','{{ ga_id }}');</script>{% endif %}
-{# Clarity dopiero przy pierwszej interakcji (lub 4 s po `load`): jego bootstrap
-   (~0,5 s CPU na słabszym telefonie) konkurował z renderem hero i kosztował
-   ~10 pkt Lighthouse na LCP. Samo „po load" nie wystarczało — przy ciepłym
-   cache load odpala się PRZED pierwszym paintem i koszt wracał. Stub kolejkuje
-   wywołania `clarity()` od razu, więc API nie znika; nagraniu brakuje tylko
-   biernego początku sesji, a te i tak zaczynają być ciekawe od interakcji. #}
-{% if clarity_id %}<link rel="preconnect" href="https://www.clarity.ms">
-<script>window.clarity=window.clarity||function(){(window.clarity.q=window.clarity.q||[]).push(arguments)};
-(function(){var d=0,ev=["pointerdown","keydown","scroll"];function go(){if(d)return;d=1;
-ev.forEach(function(e){removeEventListener(e,go)});
-var t=document.createElement("script");t.async=1;
-t.src="https://www.clarity.ms/tag/{{ clarity_id }}";document.head.appendChild(t)}
-ev.forEach(function(e){addEventListener(e,go,{passive:true})});
-addEventListener("load",function(){setTimeout(go,4000)})})();</script>{% endif %}
+   nie dołącza — nie nagrywamy cudzych danych w widoku operatora.
+
+   Nic nie ładuje się samo: `pfLoadAnalytics()` odpala _consent.html dopiero po
+   zgodzie „Analytics" (zapisanej albo właśnie udzielonej). Bez zgody nie wychodzi
+   żaden request i nie powstaje żaden identyfikator. #}
+{% if ga_id or clarity_id %}<script>
+window.pfLoadAnalytics=function(){
+  if(window.__pfAnalytics)return;window.__pfAnalytics=1;
+  {% if ga_id %}window.dataLayer=window.dataLayer||[];window.gtag=window.gtag||function(){dataLayer.push(arguments)};
+  gtag('js',new Date());gtag('config','{{ ga_id }}');
+  var g=document.createElement('script');g.async=1;g.src='https://www.googletagmanager.com/gtag/js?id={{ ga_id }}';document.head.appendChild(g);{% endif %}
+  {# Clarity dopiero przy pierwszej interakcji (lub 4 s po `load`): jego bootstrap
+     (~0,5 s CPU na słabszym telefonie) konkurował z renderem hero i kosztował
+     ~10 pkt Lighthouse na LCP. Stub kolejkuje wywołania `clarity()` od razu. #}
+  {% if clarity_id %}window.clarity=window.clarity||function(){(window.clarity.q=window.clarity.q||[]).push(arguments)};
+  (function(){var d=0,ev=["pointerdown","keydown","scroll"];function go(){if(d)return;d=1;
+  ev.forEach(function(e){removeEventListener(e,go)});
+  var t=document.createElement("script");t.async=1;
+  t.src="https://www.clarity.ms/tag/{{ clarity_id }}";document.head.appendChild(t)}
+  ev.forEach(function(e){addEventListener(e,go,{passive:true})});
+  if(document.readyState==='complete')setTimeout(go,4000);else addEventListener("load",function(){setTimeout(go,4000)})})();{% endif %}
+};
+</script>{% endif %}

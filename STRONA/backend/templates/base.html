@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{% block title %}{{ site_name }} — Prop Trading Challenges on MT5 Accounts{% endblock %}</title>
-<meta name="description" content="{% block description %}Trade our simulated capital on a MT5 account, with sizes up to $2,000,000. Pass the evaluation, get funded and keep up to 90% of the rewards. Clear rules, automated risk engine, automated account delivery.{% endblock %}">
+<meta name="description" content="{% block description %}Trade our simulated capital on an MT5 account, with sizes up to $2,000,000. Pass the evaluation, get funded and keep up to 90% of the rewards. Clear rules, automated risk engine, automated account delivery.{% endblock %}">
 <link rel="icon" href="/static/img/favicon.png" type="image/png">
 <link rel="preload" href="/static/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/space-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin>
@@ -180,12 +180,13 @@ document.getElementById('bogoX').addEventListener('click',function(){
         <a href="/privacy">Privacy Policy</a>
         <a href="/risk-disclosure">Risk Disclosure</a>
         <a href="/refund-policy">Refund Policy</a>
+        <a href="#" data-ck-prefs>Cookie Preferences</a>
       </div>
     </div>
     <div class="foot-legal">
-      <p><b>Risk Disclaimer:</b> {{ site_name }} offers simulated trading evaluations. All accounts we provide are demo accounts with virtual funds and all trading activity takes place in a simulated environment. No real money is deposited or traded, and no order ever reaches the financial markets. A “funded account” on this website is a simulated account with a higher virtual balance and a profit split — it is not a real trading account, and no client money is ever held. Any “profits”, “payouts” or “rewards” mentioned anywhere on this website are performance-based rewards for demonstrating trading skill in that simulated environment; they are not returns from real trading. Such rewards are discretionary and are not guaranteed, and past results do not guarantee future outcomes.</p>
-      <p>Trading foreign exchange and CFDs carries a high level of risk and may not be suitable for all investors. The content of this website is provided for informational purposes only and does not constitute investment advice, financial advice, or a solicitation to trade. {{ site_name }} does not provide investment services, brokerage services, or real trading accounts, and nothing on this website is an offer of employment or a promise of income.</p>
-      <p>Prices in the Built-in Terminal are reference data from a third-party venue, with which we are not affiliated. No order reaches it.</p>
+      {# The short Risk Disclaimer paragraphs used to sit here; the block below
+         says all of it in full, section by section. #}
+      {% include "_disclaimers.html" %}
       <p>By accessing this website or purchasing an evaluation you agree to our <a href="/terms">Terms of Service</a> and <a href="/privacy">Privacy Policy</a>. Please read the full <a href="/risk-disclosure">Risk Disclosure</a> and <a href="/refund-policy">Refund Policy</a> before you buy.</p>
     </div>
     {# The "Demo accounts / Virtual funds / Simulated environment" chips used to
@@ -242,33 +243,9 @@ document.getElementById('bogoX').addEventListener('click',function(){
 </div>
 {% endif %}
 
-<div class="cookie-note hidden" id="cookie-note" role="dialog" aria-label="Cookie notice">
-  <div class="ck-txt">
-    <b>🍪 Cookie Notice</b>
-    <p>We use cookies to enhance your experience. By continuing to visit this site,
-      you agree to our use of cookies. <a href="/privacy">Learn more in our Privacy Policy</a></p>
-  </div>
-  <div class="ck-actions">
-    <button class="ck-decline" onclick="cookieOk(0)">Decline</button>
-    <button class="btn btn-sm" onclick="cookieOk(1)">Accept All</button>
-  </div>
-</div>
-<script>/* Cookie notice; the pf_cookie_ok choice is shared with the portal.
-   Only essential cookies exist either way — Decline just records the choice.
-
-   The banner is fixed to the bottom, so the page has to give back the space it
-   covers — on a phone it stacks into three lines and parks on top of whatever
-   ends the page. --ck-h is that reserved strip; site.css turns it into padding. */
-function ckSpace(){
-  const el=document.getElementById('cookie-note');
-  const open=el&&!el.classList.contains('hidden');
-  document.documentElement.style.setProperty('--ck-h',
-    open?Math.ceil(innerHeight-el.getBoundingClientRect().top)+'px':'0px');
-}
-function cookieOk(v){try{localStorage.setItem('pf_cookie_ok',v?'1':'0')}catch(e){}
-  document.getElementById('cookie-note').classList.add('hidden');ckSpace()}
-try{if(localStorage.getItem('pf_cookie_ok')===null)document.getElementById('cookie-note').classList.remove('hidden')}catch(e){}
-ckSpace();addEventListener('resize',ckSpace);addEventListener('load',ckSpace);</script>
+{# Privacy choices bar; --ck-h (set by the include) is the strip the page gives
+   back as bottom padding in site.css while the bar is open. #}
+{% include "_consent.html" %}
 
 <script src="/static/lib/gsap.min.js" defer></script>
 <script src="/static/lib/ScrollTrigger.min.js" defer></script>

@@ -350,6 +350,7 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
 </div>
 
 <div class="t-toasts" id="tToasts" aria-live="polite"></div>
+{% include "_consent.html" %}
 
 <script id="tMarkets" type="application/json">{{ markets_json | safe }}</script>
 <script src="/static/lib/klinecharts.min.js?v={{ asset_v }}" defer></script>

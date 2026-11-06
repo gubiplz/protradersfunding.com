@@ -1,0 +1,132 @@
+{# Privacy choices: one bar for the site, the portal and the terminal.
+   Choice stored as localStorage pf_consent = {"v":1,"analytics":bool,"referral":bool,"at":ms}.
+   Essential storage (login token, terminal sessions) is never behind a switch.
+   Analytics (GA4 + Clarity, _analytics.html) load only after "analytics" is on;
+   the ?ref= partner code (site.js) is kept only while "referral" is on.
+   Any element with data-ck-prefs (the footer link) reopens the choices.
+   The old pf_cookie_ok key is read once and migrated. Styles use the CSS variables
+   every page defines (--panel, --txt, --muted, --line2, --acc) with fallbacks. #}
+<div class="pf-ck" id="pfCk" hidden role="dialog" aria-label="Your privacy choices">
+  <div class="pf-ck-opts" id="pfCkOpts" hidden>
+    <label class="pf-ck-opt">
+      <span><b>Analytics</b><small>Product analytics that show which pages and features are used. Declining keeps measurement off: no analytics cookies or identifiers are stored.</small></span>
+      <input type="checkbox" id="pfCkAn"><i></i>
+    </label>
+    <label class="pf-ck-opt">
+      <span><b>Referral attribution</b><small>Remembers the partner link you arrived through so that partner is credited if you buy a challenge later.</small></span>
+      <input type="checkbox" id="pfCkRef"><i></i>
+    </label>
+  </div>
+  <div class="pf-ck-bar">
+    <div class="pf-ck-txt">
+      <b>Your privacy choices</b>
+      <p>Essential cookies and local storage keep you signed in. With your permission we also measure usage and credit the partner who referred you. <a href="/privacy">Privacy Policy</a></p>
+    </div>
+    <div class="pf-ck-act" id="pfCkAct">
+      <button type="button" class="pf-ck-lnk" data-ck="manage">Manage choices</button>
+      <button type="button" class="pf-ck-btn" data-ck="reject">Reject all</button>
+      <button type="button" class="pf-ck-btn pf-ck-ok" data-ck="accept">Accept all</button>
+    </div>
+    <div class="pf-ck-act" id="pfCkSave" hidden>
+      <button type="button" class="pf-ck-btn pf-ck-ok" data-ck="save">Save choices</button>
+      <button type="button" class="pf-ck-x" data-ck="close" aria-label="Close">✕</button>
+    </div>
+  </div>
+</div>
+<style>
+.pf-ck{position:fixed;left:12px;right:12px;bottom:12px;z-index:90;max-width:1400px;margin:0 auto;
+  background:var(--panel,#fff);color:var(--txt,#0f172a);border:1px solid var(--line2,#d8dcea);border-radius:14px;
+  box-shadow:0 18px 50px rgba(0,0,0,.22);font-family:inherit;font-size:14px}
+.pf-ck[hidden],.pf-ck-opts[hidden],.pf-ck-act[hidden]{display:none}
+.pf-ck-bar{display:flex;align-items:center;justify-content:space-between;gap:22px;padding:16px 22px}
+.pf-ck-txt b{display:block;font-size:15px;font-weight:600;margin-bottom:3px}
+.pf-ck-txt p{margin:0;font-size:13.5px;line-height:1.5;color:var(--muted,#5b6b80)}
+.pf-ck a{color:var(--acc,#6366f1);text-decoration:none}
+.pf-ck a:hover{text-decoration:underline}
+.pf-ck-act{display:flex;align-items:center;gap:10px;flex:none}
+.pf-ck button{font-family:inherit;cursor:pointer;font-size:14px;font-weight:600;border:0;background:none;color:var(--txt,#0f172a)}
+.pf-ck-lnk{padding:9px 10px;color:var(--muted,#5b6b80)}
+.pf-ck-lnk:hover{color:var(--txt,#0f172a)}
+.pf-ck-btn{padding:9px 16px;border-radius:9px;border:1px solid var(--line2,#d8dcea);background:transparent;transition:background .15s,border-color .15s}
+.pf-ck-btn:hover{border-color:var(--txt,#0f172a)}
+.pf-ck-ok{background:var(--acc,#6366f1);border-color:var(--acc,#6366f1);color:#fff}
+.pf-ck-ok:hover{filter:brightness(1.08);border-color:var(--acc,#6366f1)}
+.pf-ck-x{width:34px;height:34px;border-radius:9px;color:var(--muted,#5b6b80);font-size:15px}
+.pf-ck-x:hover{color:var(--txt,#0f172a);background:var(--line2,#d8dcea)}
+.pf-ck-opts{display:grid;grid-template-columns:1fr 1fr;gap:0 28px;padding:14px 22px 12px;border-bottom:1px solid var(--line2,#d8dcea)}
+.pf-ck-opt{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:6px 0;cursor:pointer}
+.pf-ck-opt b{display:block;font-size:14.5px;font-weight:600;margin-bottom:3px}
+.pf-ck-opt small{display:block;font-size:13px;line-height:1.5;color:var(--muted,#5b6b80)}
+.pf-ck-opt input{position:absolute;opacity:0;width:0;height:0}
+.pf-ck-opt i{flex:none;width:44px;height:26px;margin-top:2px;border-radius:13px;background:var(--line2,#d8dcea);position:relative;transition:background .18s}
+.pf-ck-opt i::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .18s}
+.pf-ck-opt input:checked+i{background:var(--acc,#6366f1)}
+.pf-ck-opt input:checked+i::after{transform:translateX(18px)}
+.pf-ck-opt input:focus-visible+i{outline:2px solid var(--acc,#6366f1);outline-offset:2px}
+@media(max-width:760px){
+  .pf-ck-bar{flex-direction:column;align-items:stretch;gap:12px;padding:14px 16px}
+  .pf-ck-act{justify-content:flex-end;flex-wrap:wrap}
+  .pf-ck-opts{grid-template-columns:1fr;padding:12px 16px 8px}
+  .pf-ck-txt p{font-size:13px}
+}
+</style>
+<script>
+(function(){
+  var KEY='pf_consent', el=document.getElementById('pfCk');
+  if(!el) return;
+  var opts=document.getElementById('pfCkOpts'), act=document.getElementById('pfCkAct'), save=document.getElementById('pfCkSave');
+  var an=document.getElementById('pfCkAn'), rf=document.getElementById('pfCkRef');
+  function read(){
+    try{
+      var c=JSON.parse(localStorage.getItem(KEY)||'null');
+      if(c&&typeof c==='object') return c;
+      var old=localStorage.getItem('pf_cookie_ok');   // choice made under the old notice
+      if(old!==null){ c={v:1,analytics:old==='1',referral:old==='1',at:Date.now()}; localStorage.setItem(KEY,JSON.stringify(c)); return c; }
+    }catch(e){}
+    return null;
+  }
+  function space(){
+    var open=!el.hidden;
+    document.documentElement.style.setProperty('--ck-h', open?Math.ceil(innerHeight-el.getBoundingClientRect().top)+'px':'0px');
+  }
+  function apply(c){
+    if(!c) return;
+    try{
+      if(c.analytics && window.pfLoadAnalytics) window.pfLoadAnalytics();
+      var pending=sessionStorage.getItem('pf_ref_pending');
+      if(c.referral){
+        if(pending){ localStorage.setItem('pf_ref',pending); localStorage.setItem('pf_ref_ts',String(Date.now())); sessionStorage.removeItem('pf_ref_pending'); }
+      } else { localStorage.removeItem('pf_ref'); localStorage.removeItem('pf_ref_ts'); }
+    }catch(e){}
+  }
+  function store(analytics,referral){
+    var c={v:1,analytics:!!analytics,referral:!!referral,at:Date.now()};
+    try{ localStorage.setItem(KEY,JSON.stringify(c)); localStorage.setItem('pf_cookie_ok',analytics||referral?'1':'0'); }catch(e){}
+    apply(c); hide();
+  }
+  function show(manage){
+    var c=read();
+    an.checked=c?!!c.analytics:true; rf.checked=c?!!c.referral:true;
+    opts.hidden=!manage; act.hidden=!!manage; save.hidden=!manage;
+    el.hidden=false; space();
+  }
+  function hide(){ el.hidden=true; space(); }
+  el.addEventListener('click',function(e){
+    var b=e.target.closest('[data-ck]'); if(!b) return;
+    var k=b.getAttribute('data-ck');
+    if(k==='manage') show(true);
+    else if(k==='accept') store(true,true);
+    else if(k==='reject') store(false,false);
+    else if(k==='save') store(an.checked,rf.checked);
+    else if(k==='close') hide();
+  });
+  document.addEventListener('click',function(e){
+    var a=e.target.closest('[data-ck-prefs]'); if(!a) return;
+    e.preventDefault(); show(true);
+  });
+  window.pfConsent={read:read,open:function(){show(true);},apply:function(){apply(read());}};
+  var c=read();
+  if(c) apply(c); else show(false);
+  addEventListener('resize',space); addEventListener('load',space);
+})();
+</script>

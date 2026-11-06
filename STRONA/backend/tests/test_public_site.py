@@ -280,7 +280,12 @@ def test_stopka_bez_plakietek_ale_z_pelnym_disclaimerem():
     with TestClient(app) as c:
         html = c.get("/").text
     assert "foot-tags" not in html
-    assert "Risk Disclaimer:" in html and "demo accounts with virtual funds" in html
+    assert "Important disclaimers" in html and "demo accounts with virtual funds" in html
+    # Cztery bloki z _disclaimers.html i link do wyborów cookies obok dokumentów prawnych.
+    for naglowek in ("Simulated environment and reference prices", "Difficulty, hypothetical results and risk",
+                     "Abuse monitoring, testimonials and no advice", "Fees, jurisdictions, intellectual property and contact"):
+        assert naglowek in html
+    assert 'data-ck-prefs>Cookie Preferences' in html
 
 
 def test_link_afiliacyjny_bierze_host_z_zadania():

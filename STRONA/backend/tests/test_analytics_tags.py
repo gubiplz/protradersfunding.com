@@ -66,6 +66,19 @@ def test_bez_id_nie_leci_ani_jeden_request_na_zewnatrz(sciezka, wylaczona_analit
     assert "clarity.ms" not in html, f"{sciezka}: Clarity wyszedł mimo pustego ID"
 
 
+@pytest.mark.parametrize("sciezka", STRONY + ["/trade"])
+def test_analityka_czeka_na_zgode(sciezka, wlaczona_analityka):
+    """Tagi siedzą w `pfLoadAnalytics()`, które odpala dopiero wybór „Analytics"
+    w pasku zgód (_consent.html). W HTML nie ma gotowego <script src> do Google
+    ani Microsoftu, a pasek z wyborami jest na każdej z tych stron."""
+    html = client.get(sciezka).text
+    assert "pfLoadAnalytics" in html
+    assert '<script async src="https://www.googletagmanager.com' not in html
+    assert '<script async src="https://www.clarity.ms' not in html
+    assert '<script src="https://www.clarity.ms' not in html
+    assert 'id="pfCk"' in html and 'data-ck="reject"' in html and 'data-ck="manage"' in html
+
+
 def test_panel_admina_nie_jest_nagrywany(wlaczona_analityka):
     """W panelu operatora na ekranie są cudze dane — nagranie sesji je utrwala."""
     html = client.get("/admin").text

@@ -128,21 +128,8 @@ function toggleTheme(){
 }
 paintTheme();
 
-/* ---------- cookie notice (essential cookies only; shared key with the site) ----------
-   The banner is fixed to the bottom and on a phone it is ~175px tall — tall
-   enough to sit right on top of the sign-up form's terms checkbox and its
-   Create account button, so taps landed on the notice and nothing happened.
-   --ck-h gives that strip back to the page as padding (portal.css). */
-function ckSpace(){
-  const el=$('cookie-note');
-  const open=el&&!el.classList.contains('hidden');
-  document.documentElement.style.setProperty('--ck-h',
-    open?Math.ceil(innerHeight-el.getBoundingClientRect().top)+'px':'0px');
-}
-function cookieOk(v){try{localStorage.setItem('pf_cookie_ok',v?'1':'0')}catch(e){}
-  $('cookie-note').classList.add('hidden');ckSpace()}
-try{if(localStorage.getItem('pf_cookie_ok')===null)$('cookie-note').classList.remove('hidden')}catch(e){}
-ckSpace();addEventListener('resize',ckSpace);addEventListener('load',ckSpace);
+/* The privacy choices bar lives in templates/_consent.html (shared with the site);
+   it sets --ck-h, the strip portal.css gives back as padding while it is open. */
 
 /* ---------- live refresh + push deep links ---------- */
 /* Fresh ME (credits, streak) + bell badge without a page reload. Re-render of
