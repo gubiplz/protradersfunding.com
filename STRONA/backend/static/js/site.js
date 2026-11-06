@@ -501,7 +501,7 @@
           <div class="chal-face chal-back">
             <i class="chal-lines"></i>
             <i class="chal-logo"></i>
-            <h4><small>${model} ${tierName}</small>$${p.account_size.toLocaleString('en-US')}</h4>
+            <h3><small>${model} ${tierName}</small>$${p.account_size.toLocaleString('en-US')}</h3>
             <dl>${cardRules(p).map(([l, v]) => `<div><dt>${l}</dt><dd>${v}</dd></div>`).join('')}</dl>
           </div>
         </div></div>

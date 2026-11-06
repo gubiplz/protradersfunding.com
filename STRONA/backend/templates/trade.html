@@ -78,10 +78,13 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
       <button class="t-ico sm" id="tTickPrev" type="button" aria-label="Scroll left"><svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg></button>
       <button class="t-ico sm" id="tTickNext" type="button" aria-label="Scroll right"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></button>
     </div>
-    <div class="t-ctabs" role="tablist" aria-label="Chart views">
-      <button class="on" data-ctab="chart" type="button" role="tab" aria-selected="true">Chart</button>
-      <button data-ctab="data" type="button" role="tab" aria-selected="false">Trading Data</button>
-      <button data-ctab="info" type="button" role="tab" aria-selected="false">Info</button>
+    <div class="t-ctabs">
+      {# The tablist holds only the tabs; the account bar beside them is not a tab. #}
+      <div class="t-tabset" role="tablist" aria-label="Chart views">
+        <button class="on" data-ctab="chart" type="button" role="tab" aria-selected="true">Chart</button>
+        <button data-ctab="data" type="button" role="tab" aria-selected="false">Trading Data</button>
+        <button data-ctab="info" type="button" role="tab" aria-selected="false">Info</button>
+      </div>
       <div class="t-acw">
         <button class="t-abar" id="tAccBtn" type="button" aria-haspopup="dialog"><i class="dot off"></i><span id="tAccLbl">Not connected</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
       <div class="t-apanel" id="tLogin" hidden role="dialog" aria-labelledby="tLoginH">
