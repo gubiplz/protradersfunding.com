@@ -597,7 +597,7 @@ button.status-tap{border:0;cursor:pointer;font-family:inherit}
   .toolbar .tb-filters>*{flex:none}
   .toolbar .tb-filters .seg{flex-wrap:nowrap;width:auto}
   .toolbar .tb-filters .seg button{flex:none;white-space:nowrap;min-height:34px;padding:6px 12px}
-  .toolbar .tb-filters select.inp{min-height:34px;height:34px;padding:4px 8px!important}
+  .toolbar .tb-filters select.inp{min-height:34px;height:34px;padding:4px 28px 4px 8px!important;background-position:right 9px center}
   .toolbar .tb-filters .count-pill{padding-right:2px}
   /* Pigułka (ui-motion.js) jedzie także tu: stoi na left/top, więc przewija się
      razem z chipami. Dotyk bez szarego błysku i bez czekania na dwuklik. */

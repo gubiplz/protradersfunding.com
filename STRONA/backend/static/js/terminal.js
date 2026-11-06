@@ -222,28 +222,28 @@
   const szerTekstu = (t) => { MIARA.font = `600 11px ${LINE_FONT}`; return MIARA.measureText(t || '').width; };
   // KLineChart places an overlay timestamp on the nearest candle centre. On H1 a
   // fill at 10:37 is closer to 11:00 than to 10:00, so a 28-minute trade is drawn
-  // across two hourly candles (the same shift shows up on M15). A candle's slot is
-  // one bar wide and centred on its index; the open sits on the left edge. Time
-  // maps linearly across that slot, so the marker stays on the candle that contains it.
+  // across two hourly candles (the same shift shows up on M15). A trade marker sits
+  // on the CENTRE of the candle that contains its moment, as in MT5: an entry at
+  // 19:17 on M5 is drawn on the 19:15 candle (index = that bar, never a fraction).
   function barIndexAt(bars, ts) {
     const n = bars && bars.length;
     if (!n || !Number.isFinite(ts)) return null;
     const t0 = bars[0].timestamp, tN = bars[n - 1].timestamp;
     if (ts >= tN) {
+      // Past the last candle (it hasn't been drawn yet): the slot it will take.
       const step = n >= 2 ? tN - bars[n - 2].timestamp : 0;
-      return step > 0 ? (n - 1) + (ts - tN) / step - 0.5 : n - 1.5;
+      return step > 0 ? (n - 1) + Math.floor((ts - tN) / step) : n - 1;
     }
-    if (ts <= t0) {
+    if (ts < t0) {
       const step = n >= 2 ? bars[1].timestamp - t0 : 0;
-      return step > 0 ? (ts - t0) / step - 0.5 : -0.5;
+      return step > 0 ? Math.floor((ts - t0) / step) : 0;
     }
     let lo = 0, hi = n - 1, s = 0;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
       if (bars[mid].timestamp <= ts) { s = mid; lo = mid + 1; } else hi = mid - 1;
     }
-    const step = bars[s + 1].timestamp - bars[s].timestamp;
-    return step > 0 ? s + (ts - bars[s].timestamp) / step - 0.5 : s;
+    return s;
   }
   function registerOverlays() {
     // Closed trade on the chart as in MT5 / cTrader: entry (▲ long, ▼ short) at the
@@ -1002,6 +1002,22 @@
     shown: () => shownBar,   // the live candle as drawn (mid-glide)
     tradeBox: () => (tipH ? tradeBox(tipH) : null),
     // visible bars as [first, last] timestamps
+    // trade markers vs candle centres: [{ entry ts, bar ts, marker x, candle centre x }]
+    snap: () => {
+      if (!chart) return null;
+      const d = chart.getDataList(), out = [];
+      tradeOv.forEach(({ id }) => {
+        const o = chart.getOverlays({ id })[0] || chart.getOverlayById && chart.getOverlayById(id);
+        const ov = Array.isArray(o) ? o[0] : o;
+        if (!ov) return;
+        ov.points.forEach((pt) => {
+          const i = barIndexAt(d, pt.timestamp), k = d[i];
+          const want = k && chart.convertToPixel({ timestamp: k.timestamp, value: pt.value }, { paneId: 'candle_pane' });
+          out.push({ t: new Date(pt.timestamp).toISOString().slice(11, 19), bar: k && new Date(k.timestamp).toISOString().slice(11, 19), idx: i, centreX: want && Math.round(want.x) });
+        });
+      });
+      return out;
+    },
     vis: () => { if (!chart) return null; const r = chart.getVisibleRange(), d = chart.getDataList(); return [d[Math.max(0, Math.floor(r.from))], d[Math.min(d.length - 1, Math.ceil(r.to) - 1)]].map((k) => k && k.timestamp); },
   };
   function mergeBar(k) {
@@ -1425,12 +1441,12 @@
     ls.set('pf_term_watch', JSON.stringify(S.watch));
   }
   function openSearch(first) {
-    $('tSearchIn').value = first || ''; sCat = 'all'; sIdx = 0; renderSearch(); openModal('tSearch');
+    $('tSearchIn').value = typeof first === 'string' ? first : ''; sCat = 'all'; sIdx = 0; renderSearch(); openModal('tSearch');
     // Focus at once: the next keys of a fast "xauusd" land in the field, not on the page.
     $('tSearchIn').focus(); setTimeout(() => $('tSearchIn').focus(), 30);
   }
-  $('tSym').onclick = openSearch;
-  $('tSearchBtn').onclick = openSearch;
+  $('tSym').onclick = () => openSearch();
+  $('tSearchBtn').onclick = () => openSearch();
   $('tSearchIn').oninput = () => { sIdx = 0; renderSearch(); };
   $('tSearchCats').addEventListener('click', (e) => { const b = e.target.closest('[data-cat]'); if (b) { sCat = b.dataset.cat; sIdx = 0; renderSearch(); } });
   $('tSearchList').addEventListener('click', (e) => {
@@ -1578,21 +1594,18 @@
     return S.unit === 'usd' ? qtyFromUsd(S.m, v, refPx()) : S.unit === 'lots' ? v * S.m.contract : v;
   }
   /* 100% of the slider = the largest order the server accepts (terminal._check_open):
-     free margin AND the account's lot cap (shared with Trade BOT). An opposite position
-     on this market closes first, so its size comes on top and its margin and lots free
-     up; with Reduce Only the maximum is that position. */
+     free margin AND the account's lot cap (shared with Trade BOT). The account hedges:
+     every order opens its own position, so an opposite position frees nothing. With
+     Reduce Only the maximum is all opposite positions on this market together. */
   function maxQty() {
     if (!S.st) return 0;
     const a = S.st.account, m = S.m, p = refPx(), L = lev();
-    const istn = (S.st.positions || []).find((x) => x.symbol === m.sym);
-    const opp = istn && istn.side !== S.side ? istn : null;
-    if ($('tReduce').checked) return opp ? opp.qty : 0;
-    const base = opp ? opp.qty : 0;
-    const avail = (a.available || 0) + (opp ? opp.margin || 0 : 0);
-    if (!p || !(avail > 0)) return base;
+    if ($('tReduce').checked) return (S.st.positions || []).filter((x) => x.symbol === m.sym && x.side !== S.side).reduce((s, x) => s + x.qty, 0);
+    const avail = a.available || 0;
+    if (!p || !(avail > 0)) return 0;
     const byMargin = qtyFromUsd(m, (avail * L) / (1 + (S.fee / 100) * L), p);
-    const cap = a.max_lots > 0 ? Math.max(0, a.max_lots - (openLots(a) - (opp ? opp.qty / m.contract : 0))) * m.contract : Infinity;
-    return base + Math.max(0, Math.min(byMargin, cap));
+    const cap = a.max_lots > 0 ? Math.max(0, a.max_lots - openLots(a)) * m.contract : Infinity;
+    return Math.max(0, Math.min(byMargin, cap));
   }
   function setPct(p) {
     p = Math.max(0, Math.min(100, Math.round(p)));
@@ -2620,8 +2633,9 @@
       } catch (er) { if (!half) comeBack([id]); toast('Close failed', er.message, true); refresh(true); }
     });
   }
-  /* Reverse as in cTrader: one market order of twice the size the other way — the
-     account nets it into the same size in the opposite direction. */
+  /* Reverse on a hedging account (as in MT5): close this position, then open the same
+     size the other way. Positions never net, so one doubled order would only add a
+     second, opposite position next to this one. */
   function reversePos(id, btn) {
     return once('pos' + id, btn, async () => {
       const p = S.st && S.st.positions.find((x) => x.id === id);
@@ -2629,12 +2643,15 @@
       if (!m) return;
       const side = p.side === 'buy' ? 'sell' : 'buy';
       try {
+        applyState(await api(`/api/terminal/positions/${id}/close`, { method: 'POST', body: JSON.stringify({ account_id: S.accId, max_slippage_pct: Math.max(S.slip, 2) }) }));
+      } catch (er) { toast('Reverse failed', er.message, true); refresh(true); return; }
+      try {
         applyState(await api('/api/terminal/orders', { method: 'POST', body: JSON.stringify({
-          account_id: S.accId, symbol: m.sym, side, kind: 'market', qty: +(p.qty * 2).toFixed(Math.max(m.qty_dec, 2) + 2),
+          account_id: S.accId, symbol: m.sym, side, kind: 'market', qty: p.qty,
           reduce_only: false, max_slippage_pct: Math.max(S.slip, 2),
         }) }));
         toast('Position reversed', `${side === 'buy' ? 'Long' : 'Short'} ${lotsOf(m, p.qty)} ${m.sym}`);
-      } catch (er) { toast('Reverse failed', er.message, true); refresh(true); }
+      } catch (er) { toast('Closed, new position not opened', er.message, true); refresh(true); }
     });
   }
   async function editTpsl(id) {
@@ -2881,18 +2898,56 @@
   /* ---------- one-click trading and keyboard ---------- */
   const oc = document.createElement('div');
   oc.className = 't-oc'; oc.hidden = true;
-  oc.innerHTML = `<button type="button" class="s" data-oc="sell"><small>Sell</small><b data-oc-b>—</b></button>
+  oc.innerHTML = `<span class="t-oc-grip" title="Drag to move · double-click to reset" aria-hidden="true"><svg viewBox="0 0 6 14" width="6" height="14"><circle cx="1.2" cy="2" r="1.1"/><circle cx="4.8" cy="2" r="1.1"/><circle cx="1.2" cy="7" r="1.1"/><circle cx="4.8" cy="7" r="1.1"/><circle cx="1.2" cy="12" r="1.1"/><circle cx="4.8" cy="12" r="1.1"/></svg></span>
+    <button type="button" class="s" data-oc="sell"><small>Sell</small><b data-oc-b>—</b></button>
     <input data-oc-l inputmode="decimal" aria-label="Lots" title="Lots">
     <button type="button" class="b" data-oc="buy"><small>Buy</small><b data-oc-a>—</b></button>`;
   $('tChart').appendChild(oc);
   ['mousedown', 'mouseup', 'click', 'wheel'].forEach((t) => oc.addEventListener(t, (e) => e.stopPropagation()));
+  /* The whole panel moves as one, by its grip. Kept as a share of the chart size, so it
+     stays in the same spot (and inside the chart) when the window resizes. */
+  const OC_KEY = 'pf_term_oc_pos', ocGrip = oc.querySelector('.t-oc-grip');
+  let ocPos = null;
+  try { ocPos = JSON.parse(localStorage.getItem(OC_KEY) || 'null'); } catch (e) { ocPos = null; }
+  function placeOc() {
+    if (!ocPos || oc.hidden) { oc.style.left = oc.style.top = oc.style.right = ''; return; }
+    const ch = $('tChart'), W = ch.clientWidth, H = ch.clientHeight;
+    const x = Math.max(0, Math.min(W - oc.offsetWidth, ocPos.x * W)), y = Math.max(0, Math.min(H - oc.offsetHeight, ocPos.y * H));
+    oc.style.right = 'auto'; oc.style.left = `${x}px`; oc.style.top = `${y}px`;
+  }
+  ocGrip.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault(); e.stopPropagation();
+    const ch = $('tChart'), r0 = ch.getBoundingClientRect(), b0 = oc.getBoundingClientRect();
+    const dx = e.clientX - b0.left, dy = e.clientY - b0.top;
+    ocGrip.setPointerCapture(e.pointerId); oc.classList.add('drag');
+    const move = (ev) => {
+      const W = ch.clientWidth, H = ch.clientHeight;
+      const x = Math.max(0, Math.min(W - oc.offsetWidth, ev.clientX - r0.left - dx));
+      const y = Math.max(0, Math.min(H - oc.offsetHeight, ev.clientY - r0.top - dy));
+      ocPos = { x: x / W, y: y / H }; placeOc();
+    };
+    const up = () => {
+      ocGrip.removeEventListener('pointermove', move); ocGrip.removeEventListener('pointerup', up); ocGrip.removeEventListener('pointercancel', up);
+      oc.classList.remove('drag');
+      try { if (ocPos) localStorage.setItem(OC_KEY, JSON.stringify(ocPos)); } catch (er) {}
+    };
+    ocGrip.addEventListener('pointermove', move); ocGrip.addEventListener('pointerup', up); ocGrip.addEventListener('pointercancel', up);
+  });
+  ocGrip.addEventListener('dblclick', (e) => {
+    e.stopPropagation(); ocPos = null; placeOc();
+    try { localStorage.removeItem(OC_KEY); } catch (er) {}
+  });
+  window.addEventListener('resize', placeOc);
   const ocLots = oc.querySelector('[data-oc-l]');
   ocLots.addEventListener('change', () => {
     const v = Math.max(0.01, Math.round((numOf(ocLots.value) || 0.01) * 100) / 100);
     PREF.lots = v; savePref(); ocLots.value = v.toFixed(2);
   });
   function renderOc() {
+    const was = oc.hidden;
     oc.hidden = !PREF.quick || cTab !== 'chart';
+    if (was && !oc.hidden) placeOc();
     if (oc.hidden || !S.m) return;
     if (document.activeElement !== ocLots) ocLots.value = (+PREF.lots).toFixed(2);
     const [bid, ask] = S.top || [];
@@ -2907,7 +2962,8 @@
   oc.addEventListener('click', (e) => { const b = e.target.closest('[data-oc]'); if (b) quick(b.dataset.oc); });
   document.addEventListener('keydown', (e) => {
     if (!PREF.keys || e.repeat || e.metaKey || e.ctrlKey || e.altKey || modalOpen || e.target.closest('input,textarea,select')) return;
-    const k = e.key.toLowerCase(), p = S.st && S.st.positions.find((x) => x.symbol === S.sym);
+    // Several positions can be open on one market (hedging): X and R act on the newest.
+    const k = e.key.toLowerCase(), p = S.st && S.st.positions.filter((x) => x.symbol === S.sym).sort((a, b) => b.id - a.id)[0];
     if (k === 'b') quick('buy');
     else if (k === 's') quick('sell');
     else if (k === 'x' && p) closePos(p.id, false, null);

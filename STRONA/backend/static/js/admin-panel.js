@@ -297,7 +297,7 @@ function countrySelect(all,render){
      (lista bylaby pusta) — opcja pokazuje go z zerem, zeby dalo sie go zdjac. */
   if(cur&&cur!=='-'&&!n[cur])n[cur]=0;
   const opts=Object.keys(n).filter(k=>k!=='-').sort().map(k=>`<option value="${k}"${cur===k?' selected':''}>${k} · ${n[k]}</option>`).join('');
-  return `<select class="inp" style="width:auto;padding:6px 10px;font-size:12.5px" aria-label="Country"
+  return `<select class="inp" style="width:auto;padding:6px 30px 6px 10px;background-position:right 10px center;font-size:12.5px" aria-label="Country"
       title="Country from KYC, phone prefix or IP. “No country” = no signal yet; it fills in at the next sign-in. Remembered across visits and shared by every tab."
       onchange="setCountryFilter(this.value,'${render}')">
       <option value="">Any country</option>${opts}${n['-']?`<option value="-"${cur==='-'?' selected':''}>No country · ${n['-']}</option>`:''}</select>`;

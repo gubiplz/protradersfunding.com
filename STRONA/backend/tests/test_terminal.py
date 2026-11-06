@@ -160,20 +160,27 @@ def test_rynkowe_otwarcie_i_zamkniecie_z_oplatami(rynek):
     assert a.terminal_used and not a.terminal_open
 
 
-def test_netowanie_zmniejsza_i_odwraca_pozycje(rynek):
+def test_hedging_kazde_zlecenie_to_osobna_pozycja(rynek):
     aid, h = _konto()
     with TestClient(app) as c:
-        assert _zlec(c, h, aid, qty=2).status_code == 200
-        st = _zlec(c, h, aid, side="sell", qty=0.5).json()
-        assert [(p["side"], p["qty"]) for p in st["positions"]] == [("buy", 1.5)]
+        assert _zlec(c, h, aid, qty=1, tp=60_000).status_code == 200
+        st = _zlec(c, h, aid, qty=0.5).json()
+        # Dokładka nie uśrednia: dwie pozycje long, każda z własnym TP.
+        assert sorted((p["side"], p["qty"], p["tp"]) for p in st["positions"]) == [("buy", 0.5, None), ("buy", 1, 60_000)]
         st = _zlec(c, h, aid, side="sell", qty=2).json()
-        assert [(p["side"], p["qty"]) for p in st["positions"]] == [("sell", 0.5)]
-        # Reduce-only nie otworzy nowej pozycji w tę samą stronę.
+        # Sell nie zamyka longów — short staje obok (hedging).
+        assert sorted((p["side"], p["qty"]) for p in st["positions"]) == [("buy", 0.5), ("buy", 1), ("sell", 2)]
+        # Reduce-only zamyka pozycje przeciwne od najstarszej: 1.2 = cały pierwszy long + 0.2 drugiego.
+        st = _zlec(c, h, aid, side="sell", qty=1.2, reduce_only=True).json()
+        assert sorted((p["side"], p["qty"]) for p in st["positions"]) == [("buy", pytest.approx(0.3)), ("sell", 2)]
+        r = _zlec(c, h, aid, side="sell", qty=5, reduce_only=True)
+        assert r.status_code == 200
+        assert [(p["side"], p["qty"]) for p in r.json()["positions"]] == [("sell", 2)]
+        # Bez pozycji przeciwnej reduce-only nie ma czego zamknąć.
         r = _zlec(c, h, aid, side="sell", qty=1, reduce_only=True)
         assert r.status_code == 409 and "Reduce-only" in r.json()["detail"]
-    # Pierwszy wiersz to pierwotna pozycja (domknięta resztą 1.5), drugi to
-    # zamknięta wcześniej część 0.5, trzeci — odwrócona pozycja short.
-    assert [t[:3] for t in _trades(aid)] == [("buy", 1.5, "closed"), ("buy", 0.5, "closed"), ("sell", 0.5, "open")]
+    assert sorted(t[:3] for t in _trades(aid)) == [("buy", 0.2, "closed"), ("buy", 0.3, "closed"),
+                                                   ("buy", 1, "closed"), ("sell", 2, "open")]
 
 
 def test_limit_lotow_i_marzy(rynek):
@@ -347,17 +354,19 @@ def test_minimum_i_krok_0_01_lota(rynek):
         assert r.status_code == 400
         r = c.post(f"/api/terminal/positions/{p['id']}/close", headers=h, json={"account_id": aid, "qty": 0.01})
         assert r.status_code == 200 and r.json()["positions"][0]["qty"] == pytest.approx(0.01)
-        # …a zlecenie zamykające dokładnie całą pozycję przechodzi zawsze.
-        r = _zlec(c, h, aid, side="sell", qty=0.01)
+        # …a zlecenie reduce-only zamykające dokładnie całą pozycję przechodzi zawsze.
+        r = _zlec(c, h, aid, side="sell", qty=0.01, reduce_only=True)
         assert r.status_code == 200 and r.json()["positions"] == []
 
 
-def test_odwrocenie_zwalnia_limit_lotow(rynek):
+def test_hedge_liczy_sie_do_limitu_lotow(rynek):
     aid, h = _konto()
     with TestClient(app) as c:
-        assert _zlec(c, h, aid, qty=6).status_code == 200            # cały limit 6 lotów
-        st = _zlec(c, h, aid, side="sell", qty=12).json()           # 6 long → 6 short
-        assert [(p["side"], p["qty"]) for p in st["positions"]] == [("sell", 6)]
+        assert _zlec(c, h, aid, qty=4).status_code == 200            # 4 z 6 lotów
+        r = _zlec(c, h, aid, side="sell", qty=3)                     # short obok: razem 7 > 6
+        assert r.status_code == 409 and "Exposure cap" in r.json()["detail"]
+        st = _zlec(c, h, aid, side="sell", qty=2).json()
+        assert sorted((p["side"], p["qty"]) for p in st["positions"]) == [("buy", 4), ("sell", 2)]
 
 
 def test_limit_lotow_wspolny_z_botem(rynek):
