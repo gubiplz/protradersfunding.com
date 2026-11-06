@@ -221,6 +221,8 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-posbtns{position:absolute;inset:0;pointer-events:none;z-index:3;overflow:hidden}
 .t-pb{position:absolute;left:0;top:0;display:flex;gap:4px;pointer-events:auto}
 .t-pb[hidden]{display:none}
+.t-pring{position:absolute;left:0;top:0;z-index:2;width:11px;height:11px;border-radius:50%;border:2px solid var(--up);background:var(--bg);pointer-events:none;box-sizing:border-box;box-shadow:0 0 0 2px color-mix(in srgb,var(--bg) 70%,transparent)}
+.t-pring.dn{border-color:var(--dn)}.t-pring[hidden]{display:none}
 .t-pb button{height:19px;min-width:22px;padding:0 6px;display:grid;place-items:center;border-radius:4px;background:var(--panel);border:1px solid var(--line2);color:var(--txt);font:600 11px 'Helvetica Neue',sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.25)}
 .t-pb button:hover{border-color:var(--muted)}
 .t-pb button svg{width:12px;height:12px;stroke-width:2.2}
