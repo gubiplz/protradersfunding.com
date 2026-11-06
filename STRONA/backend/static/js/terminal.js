@@ -2007,14 +2007,37 @@
       const x = 10 + szerTekstu(L.ext.text) + 16 + (L.ext.pnlText ? szerTekstu(L.ext.pnlText) + 16 : 0);
       const tr = `translate(${Math.round(x)}px,${Math.round(y)}px) translateY(-50%)`;
       if (el.style.transform !== tr) el.style.transform = tr;
+      // Buttons only while the pointer is on the entry line (anywhere along it), its label
+      // or the buttons, or after a tap on the line on a phone; a short grace keeps them
+      // while the pointer moves from the line onto them.
+      const w = pane ? pane.left + pane.width : Infinity, strip = x + el.offsetWidth + 8;
+      const hot = posPtr && posPtr.x >= 0 && posPtr.x <= w && Math.abs(posPtr.y - y) <= (posPtr.x <= strip ? 13 : 7);
+      if (hot) L.hotUntil = performance.now() + 350;
+      const on = pinnedPos === +id || (L.hotUntil || 0) > performance.now() || (tpslEd && tpslEd.id === +id);
+      if (el.classList.contains('on') !== on) el.classList.toggle('on', on);
+      L.hot = { x1: w, y };
     });
   }
+  let posPtr = null, pinnedPos = null;
+  $('tChart').addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'mouse') return;
+    const r = $('tChart').getBoundingClientRect();
+    posPtr = { x: e.clientX - r.left, y: e.clientY - r.top };
+  });
+  $('tChart').addEventListener('pointerleave', () => { posPtr = null; });
+  // Phone: a tap on a position's entry line shows its buttons; a tap elsewhere hides them.
+  $('tChart').addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' || e.target.closest('.t-pb')) return;
+    const r = $('tChart').getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    const hit = Object.entries(posLines).find(([, L]) => L.hot && x <= L.hot.x1 && Math.abs(y - L.hot.y) <= 16);
+    pinnedPos = hit ? +hit[0] : null;
+  }, true);
   (function loop() { if (!document.hidden) placePosBtns(); requestAnimationFrame(loop); })();
   posBar.addEventListener('click', (e) => {
     const b = e.target.closest('[data-pbt]');
     if (!b) return;
     const id = +b.closest('[data-pb]').dataset.pb;
-    if (b.dataset.pbt === 'close') closePos(id, false, b);
+    if (b.dataset.pbt === 'close') closePos(id, null, b);
     else if (b.dataset.pbt === 'rev') reversePos(id, b);
     else if (b.dataset.pbt === 'be') breakEven(id, b);
     else if (b.dataset.pbt === 'trail') trailDialog(id);
@@ -2556,7 +2579,7 @@
       const all = livePos();
       const rows = sortList(shown(all), head).map((p) => {
         const m = BY[p.symbol] || S.m;
-        return `<tr data-pid="${p.id}"${go(p.symbol, ts(p.opened_at), '')}><td class="num" style="white-space:nowrap">${tm(p.opened_at)}</td><td>${sym(p.symbol)}</td><td>${side(p.side)}</td><td class="num">${sizeCell(m, p.qty)}</td>${c.value ? `<td class="num" data-f="value">${usd(p.value)}</td>` : ''}<td class="num">${px(m, p.entry)}</td>${c.slippage ? `<td class="num">${ok(p.slippage) ? p.slippage.toFixed(3) + '%' : '—'}</td>` : ''}<td class="num" data-f="mark">${px(m, p.mark)}</td><td class="num ${cls(p.pnl)}" data-f="pnl">${sUsd(p.pnl)} (${pct(p.roe)})</td>${c.lev ? `<td class="num">1:${p.leverage}</td>` : ''}${c.margin ? `<td class="num">${usd(p.margin)}</td>` : ''}${c.tpsl ? `<td class="num"><button type="button" class="tpsl" data-tpsl="${p.id}">${p.tp ? px(m, p.tp) : '—'} / ${p.sl ? px(m, p.sl) : '—'}</button></td>` : ''}<td><div class="act">${p.managed ? '' : `<button type="button" data-half="${p.id}">Close 50%</button>`}<button type="button" class="dn" data-close="${p.id}">Close</button></div></td></tr>`;
+        return `<tr data-pid="${p.id}"${go(p.symbol, ts(p.opened_at), '')}><td class="num" style="white-space:nowrap">${tm(p.opened_at)}</td><td>${sym(p.symbol)}</td><td>${side(p.side)}</td><td class="num">${sizeCell(m, p.qty)}</td>${c.value ? `<td class="num" data-f="value">${usd(p.value)}</td>` : ''}<td class="num">${px(m, p.entry)}</td>${c.slippage ? `<td class="num">${ok(p.slippage) ? p.slippage.toFixed(3) + '%' : '—'}</td>` : ''}<td class="num" data-f="mark">${px(m, p.mark)}</td><td class="num ${cls(p.pnl)}" data-f="pnl">${sUsd(p.pnl)} (${pct(p.roe)})</td>${c.lev ? `<td class="num">1:${p.leverage}</td>` : ''}${c.margin ? `<td class="num">${usd(p.margin)}</td>` : ''}${c.tpsl ? `<td class="num"><button type="button" class="tpsl" data-tpsl="${p.id}">${p.tp ? px(m, p.tp) : '—'} / ${p.sl ? px(m, p.sl) : '—'}</button></td>` : ''}<td><div class="act">${p.managed ? '' : `<button type="button" class="more" data-half="${p.id}" title="Close part of the position" aria-label="Close part of the position">…</button>`}<button type="button" class="dn" data-close="${p.id}">Close</button></div></td></tr>`;
       });
       el.innerHTML = table(head, rows, 'No open positions', all.length);
     } else if (S.ptab === 'orders') {
@@ -2618,7 +2641,8 @@
     if (sh) return toggleSort(sh.dataset.sort);
     if (t.closest('[data-fclear]')) { S.fsyms.clear(); saveF(); renderFiltN(); return renderTables(); }
     const cl = t.closest('[data-close]'), hf = t.closest('[data-half]');
-    if (cl || hf) return closePos(+(cl || hf).dataset.close || +(hf && hf.dataset.half), !!hf, cl || hf);
+    if (hf) return closePart(+hf.dataset.half, hf);
+    if (cl) return closePos(+cl.dataset.close, null, cl);
     const cn = t.closest('[data-cancel]');
     if (cn) {
       return once('ord' + cn.dataset.cancel, cn, async () => {
@@ -2636,24 +2660,63 @@
     const row = t.closest('tr[data-go]');
     if (row && !t.closest('button, a, input, select, label')) focusRow(row);
   });
-  function closePos(id, half, btn) {
+  /* Close a position: `lots` = part of it (0.01 steps, at least 0.01 lots stay open),
+     null = all of it. */
+  function closePos(id, lots, btn) {
     return once('pos' + id, btn, async () => {
       const p = S.st && S.st.positions.find((x) => x.id === id);
       if (!p) return;
+      const m = BY[p.symbol];
+      const part = lots != null && m && lots < p.qty / m.contract - 1e-9;
       try {
         const body = { account_id: S.accId, max_slippage_pct: Math.max(S.slip, 2) };
-        if (half) {
-          // Half rounded down to 0.01 lots; at least 0.01 lots must stay open.
-          const m = BY[p.symbol], hl = Math.floor((p.qty / m.contract / 2) * 100 + 1e-9) / 100;
-          if (hl < 0.01) return toast('Position too small to split', 'Use Close to close the whole position.', true);
-          body.qty = +(hl * m.contract).toFixed(8);
-        } else leaveRow([id]);
+        if (part) body.qty = +(lots * m.contract).toFixed(8);
+        else leaveRow([id]);
         applyState(await api(`/api/terminal/positions/${id}/close`, { method: 'POST', body: JSON.stringify(body) }));
         const h = S.st && S.st.history[0];
-        toast(half ? 'Closed 50%' : 'Position closed', h ? `${h.symbol} ${sUsd(h.pnl)}` : '');
+        toast(part ? `Closed ${lots.toFixed(2)} lots` : 'Position closed', h ? `${h.symbol} ${sUsd(h.pnl)}` : '');
         beep(h && h.pnl < 0 ? 'bad' : 'good');
-      } catch (er) { if (!half) comeBack([id]); toast('Close failed', er.message, true); refresh(true); }
+      } catch (er) { if (!part) comeBack([id]); toast('Close failed', er.message, true); refresh(true); }
     });
+  }
+  /* "…" in the Positions row: choose how much to close, in lots or % of the position. */
+  async function closePart(id, btn) {
+    const p = S.st && S.st.positions.find((x) => x.id === id);
+    const m = p && BY[p.symbol];
+    if (!m) return;
+    const all = Math.round((p.qty / m.contract) * 100) / 100;
+    if (all < 0.02) return toast('Position too small to split', 'Use Close to close the whole position.', true);
+    const pr = (v) => `<button type="button" class="t-cp-pr" data-cp="${v}">${v}%</button>`;
+    const box = confirmBox(`Close part · ${p.symbol} ${p.side === 'buy' ? 'Long' : 'Short'} ${all.toFixed(2)} lots`, `
+      <div class="t-cp">
+        <label class="t-fld"><span>Lots to close</span><div class="t-in"><input id="cpLots" inputmode="decimal" value="${(Math.floor(all * 50) / 100).toFixed(2)}"></div></label>
+        <input id="cpRange" type="range" min="1" max="100" step="1" value="50" aria-label="Share of the position">
+        <div class="t-cp-row">${[25, 50, 75, 100].map(pr).join('')}</div>
+        <p class="t-hint" id="cpInfo"></p>
+      </div>`, 'Close');
+    const L = $('cpLots'), R = $('cpRange'), I = $('cpInfo'), ok_ = $('tConfirmOk');
+    const lotsOf_ = () => Math.round((numOf(L.value) || 0) * 100) / 100;
+    const check = () => {
+      const raw = numOf(L.value) || 0, v = lotsOf_(), rest = Math.round((all - v) * 100) / 100;
+      let msg = '', bad = false;
+      if (!(v >= 0.01)) { msg = 'Minimum is 0.01 lots.'; bad = true; }
+      else if (Math.abs(raw - v) > 1e-9) { msg = 'Size goes in steps of 0.01 lots.'; bad = true; }
+      else if (v > all + 1e-9) { msg = `The position has ${all.toFixed(2)} lots.`; bad = true; }
+      else if (rest > 1e-9 && rest < 0.01) { msg = 'At least 0.01 lots must stay open, or close all of it.'; bad = true; }
+      else msg = rest > 1e-9 ? `${v.toFixed(2)} lots close (${Math.round((v / all) * 100)}%), ${rest.toFixed(2)} lots stay open.` : 'The whole position closes.';
+      I.textContent = msg; I.classList.toggle('bad', bad); ok_.disabled = bad;
+    };
+    // Nearest 0.01 lots to that share; below 100% it always leaves at least 0.01 lots open.
+    const fromPct = (pc) => { L.value = (pc >= 100 ? all : Math.min(all - 0.01, Math.max(0.01, Math.round(all * pc) / 100))).toFixed(2); R.value = pc; check(); };
+    L.addEventListener('input', () => { R.value = Math.max(1, Math.min(100, Math.round((lotsOf_() / all) * 100))); check(); });
+    R.addEventListener('input', () => fromPct(+R.value));
+    $('tConfirmBody').querySelectorAll('[data-cp]').forEach((b) => b.addEventListener('click', () => fromPct(+b.dataset.cp)));
+    check();
+    const go = await box;
+    ok_.disabled = false;
+    if (!go) return;
+    const v = lotsOf_();
+    if (v >= 0.01 && v <= all + 1e-9) closePos(id, v >= all - 1e-9 ? null : v, btn);
   }
   /* Reverse on a hedging account (as in MT5): close this position, then open the same
      size the other way. Positions never net, so one doubled order would only add a
@@ -2988,7 +3051,7 @@
     const k = e.key.toLowerCase(), p = S.st && S.st.positions.filter((x) => x.symbol === S.sym).sort((a, b) => b.id - a.id)[0];
     if (k === 'b') quick('buy');
     else if (k === 's') quick('sell');
-    else if (k === 'x' && p) closePos(p.id, false, null);
+    else if (k === 'x' && p) closePos(p.id, null, null);
     else if (k === 'r' && p) reversePos(p.id, null);
     else return;
     e.preventDefault();
