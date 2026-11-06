@@ -56,8 +56,8 @@ h1 em{{font-style:normal;color:#6366f1}}
   <div class="brand"><img src="{logo}" alt=""><span>{nazwa}</span></div>
   <h1>Trade our capital.<br><em>Keep up to 90%</em> of the rewards.</h1>
   <div class="chips">
-    <div class="chip">MetaTrader 5</div>
-    <div class="chip">Up to $200,000</div>
+    <div class="chip">MT5 accounts</div>
+    <div class="chip">Up to $2,000,000</div>
     <div class="chip">Automated risk engine</div>
   </div>
 </div></body></html>"""
