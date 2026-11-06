@@ -66,7 +66,8 @@ class Serwer:
                 odp("ACC_AUTH_RES", {})
         elif t == cf.PT["SYMBOLS_REQ"]:
             odp("SYMBOLS_RES", {"symbol": [{"symbolId": 1, "symbolName": "EURUSD"}, {"symbolId": 2, "symbolName": "GBP/USD"},
-                                           {"symbolId": 3, "symbolName": "USDJPY"}, {"symbolId": 9, "symbolName": "BTCUSD"}]})
+                                           {"symbolId": 3, "symbolName": "USDJPY"}, {"symbolId": 9, "symbolName": "BTCUSD"},
+                                           {"symbolId": 5, "symbolName": "JPN.225"}]})
         elif t == cf.PT["TRENDBARS_REQ"]:
             odp("TRENDBARS_RES", {"trendbar": [b for b in self.trendbary if b["_sid"] == p["symbolId"]]})
         elif t == cf.PT["SUB_SPOTS_REQ"]:
@@ -96,7 +97,7 @@ def test_ticki_skladaja_swiece_z_mid_i_zapisuja_wiersze_ostateczne():
              {"symbolId": 9, "bid": 7500000000, "ask": 7500100000}]                       # spoza mapy
     srv = Serwer(ticki)
     w = asyncio.run(cf.sluchaj(0.3, polacz=lambda: srv))
-    assert w["ticks"] == 4 and w["symbols"] == ["xyz:EUR", "xyz:GBP", "xyz:JPY"] and not w.get("error")
+    assert w["ticks"] == 4 and w["symbols"] == ["xyz:EUR", "xyz:GBP", "xyz:JP225", "xyz:JPY"] and not w.get("error")
     m = datetime.fromtimestamp(minuta_ms / 1000, tz=timezone.utc).replace(tzinfo=None)
     assert _wiersze("xyz:EUR")[m] == (1.11555, 1.1157, 1.11525, 1.11525, cf.FEED_N)
     assert _wiersze("xyz:JPY")[m] == (158.155, 158.155, 158.155, 158.155, cf.FEED_N)
@@ -106,12 +107,24 @@ def test_ticki_skladaja_swiece_z_mid_i_zapisuja_wiersze_ostateczne():
     acc = next(x for x in srv.wyslane if x["payloadType"] == cf.PT["ACC_AUTH_REQ"])["payload"]
     assert acc == {"ctidTraderAccountId": 4242, "accessToken": "acc-1"}
     sub = next(x for x in srv.wyslane if x["payloadType"] == cf.PT["SUB_SPOTS_REQ"])["payload"]
-    assert sorted(sub["symbolId"]) == [1, 2, 3]
+    assert sorted(sub["symbolId"]) == [1, 2, 3, 5]
     # Drugi przebieg: konto i symbole z pamięci, bez ACCOUNTS_REQ i SYMBOLS_REQ.
     srv2 = Serwer([])
     asyncio.run(cf.sluchaj(0.1, polacz=lambda: srv2))
     assert cf.PT["ACCOUNTS_REQ"] not in [x["payloadType"] for x in srv2.wyslane]
     assert cf.PT["SYMBOLS_REQ"] not in [x["payloadType"] for x in srv2.wyslane]
+
+
+def test_mapa_ze_starej_wersji_przebudowana():
+    # Zapis sprzed dodania JPN225: bez podpisu, tylko EURUSD.
+    s = SessionLocal()
+    s.add(AppSetting(key=cf.SYMBOLE_KLUCZ, value=json.dumps({"konto": 4242, "mapa": {"1": "xyz:EUR"}})))
+    s.add(AppSetting(key=cf.KONTO_KLUCZ, value=json.dumps({"id": 4242})))
+    s.commit(); s.close()
+    srv = Serwer([])
+    w = asyncio.run(cf.sluchaj(0.1, polacz=lambda: srv))
+    assert cf.PT["SYMBOLS_REQ"] in [x["payloadType"] for x in srv.wyslane]
+    assert "xyz:JP225" in w["symbols"]
 
 
 def test_luki_latane_trendbarami_a_ticki_nadpisuja_probki():

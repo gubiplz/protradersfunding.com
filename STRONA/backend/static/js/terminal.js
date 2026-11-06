@@ -986,7 +986,7 @@
     strm.group(S.group);
     spotPoll(spot);
   }
-  /* Spot feed for thin markets: the last two bars of the open interval every 8 s. The
+  /* Spot feed for thin markets: the last two bars of the open interval every 2 s. The
      server keeps them fresh from its own feed; the browser never talks to the provider. */
   let spotT = 0, spotSeq = 0;
   function spotPoll(on) {
@@ -1007,7 +1007,7 @@
         });
       } catch (e) {}
     };
-    tick(); spotT = setInterval(tick, 8000);
+    tick(); spotT = setInterval(tick, 2000);
   }
   const drawBook = () => { if (!bookRaf) bookRaf = requestAnimationFrame(() => { bookRaf = 0; renderBook(); sideSpread(); updateTicket(); }); };
   // Live spread between the Buy and Sell buttons (best ask − best bid); amber when unusually wide.

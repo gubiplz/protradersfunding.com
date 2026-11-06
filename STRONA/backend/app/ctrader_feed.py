@@ -29,11 +29,13 @@ from .db import SessionLocal
 from .models import AppSetting, TerminalCandle
 
 # Rynki terminala (moneta Hyperliquida) → nazwy symboli, których szukamy u brokera.
+# Nazwy porównujemy bez "/", ".", spacji i podkreśleń; pierwsza znaleziona u brokera wygrywa.
 SYMBOLE = {"xyz:EUR": ("EURUSD",), "xyz:GBP": ("GBPUSD",), "xyz:JPY": ("USDJPY",),
-           "xyz:PLATINUM": ("XPTUSD", "XPTUSD.", "PLATINUM")}
+           "xyz:PLATINUM": ("XPTUSD", "PLATINUM"),
+           "xyz:JP225": ("JP225", "JPN225", "JAPAN225", "NIKKEI225", "NIK225", "JP225CASH")}
 SKALA = 100_000                 # ceny w Open API są w 1/100000 jednostki
 FEED_N = -1                     # ten sam znacznik co terminal.FEED_N: wiersz ostateczny
-ZAPIS_CO_S = 8.0
+ZAPIS_CO_S = 2.0               # przeglądarka dociąga co 2 s, CDN trzyma odpowiedź 1 s
 LUKA_MIN = 2                    # od tylu brakujących minut łatamy trendbarami
 TOKEN_KLUCZ = "ctrader_token"   # AppSetting: {"access": ..., "refresh": ..., "exp": ...}
 KONTO_KLUCZ = "ctrader_account"
@@ -185,21 +187,31 @@ async def _zaloguj(p: Polaczenie) -> int:
     return konto
 
 
+def _norm(nazwa: str) -> str:
+    return "".join(ch for ch in nazwa.upper() if ch not in "/. _-")
+
+
 async def _symbole(p: Polaczenie, konto: int) -> dict[int, str]:
     """symbolId → moneta terminala; lista brokera w pamięci bazy, żeby nie pytać co minutę."""
     zapis = _ustawienie(SYMBOLE_KLUCZ) or {}
-    if zapis.get("konto") == konto and zapis.get("mapa"):
+    # Podpis listy: nowy rynek w SYMBOLE przebudowuje mapę zapisaną przez starszą wersję.
+    podpis = json.dumps(SYMBOLE, sort_keys=True)
+    if zapis.get("konto") == konto and zapis.get("mapa") and zapis.get("podpis") == podpis:
         return {int(k): v for k, v in zapis["mapa"].items()}
     r = await p.zapytaj("SYMBOLS_REQ", {"ctidTraderAccountId": konto}, "SYMBOLS_RES", timeout=20.0)
-    po_nazwie = {(x.get("symbolName") or "").upper().replace("/", ""): int(x["symbolId"]) for x in r.get("symbol") or []
-                 if x.get("enabled", True)}
+    po_nazwie = {}
+    for x in r.get("symbol") or []:
+        if x.get("enabled", True):
+            po_nazwie.setdefault(_norm(x.get("symbolName") or ""), int(x["symbolId"]))
     mapa = {}
     for coin, nazwy in SYMBOLE.items():
         for n in nazwy:
-            if n in po_nazwie:
-                mapa[po_nazwie[n]] = coin
+            if _norm(n) in po_nazwie:
+                mapa[po_nazwie[_norm(n)]] = coin
                 break
-    _zapisz_ustawienie(SYMBOLE_KLUCZ, {"konto": konto, "mapa": {str(k): v for k, v in mapa.items()}})
+        else:
+            print(f"[ctrader] brak symbolu u brokera dla {coin}", flush=True)
+    _zapisz_ustawienie(SYMBOLE_KLUCZ, {"konto": konto, "podpis": podpis, "mapa": {str(k): v for k, v in mapa.items()}})
     return mapa
 
 

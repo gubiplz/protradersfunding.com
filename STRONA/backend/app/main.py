@@ -10356,12 +10356,12 @@ async def api_cron_risk():
 #: po przebiegu kont — zapas na odpowiedź i na wolniejszy ostatni krok.
 TICK_BUDZET_S = 48.0
 #: Próbkowanie świec: tyle sekund co minutę, reszta minuty to zapas na zapis.
-CANDLES_BUDZET_S = 52.0
+CANDLES_BUDZET_S = 55.0
 
 
 @app.api_route("/api/cron/candles", methods=["GET", "POST"], include_in_schema=False, dependencies=[Depends(_require_cron)])
 async def api_cron_candles():
-    """Świece M1 z mid dla cienkich rynków (`markets.SAMPLED`): cron Vercela co minutę,
+    """Świece M1 z mid dla cienkich rynków (`markets.PROBKOWANE`): cron Vercela co minutę,
     przez ~52 s próbka co sekundę, jeden zapis na końcu. Gdy skonfigurowano konto MetaApi
     (`METAAPI_CANDLES_ACCOUNT_ID`), pierwsze sekundy przebiegu dociągają historię 1m
     sprzed wdrożenia i łatają dziury. Wątek, bo próbkowanie śpi."""
