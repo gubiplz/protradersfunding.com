@@ -395,7 +395,7 @@ PLAN = "plan"                       # Trade.venue planu w toku (klient go nie wi
 OGON = "tail"                       # żywa końcówka na koncie zarządzanym (klient ją widzi jako Managed)
 OGON_OD_S, OGON_DO_S = 180, 480     # na tyle przed planowanym zamknięciem pozycja staje się widoczna
 OGON_CEL = 0.85                     # bieżący wynik na starcie: ten ułamek planu; resztę musi dać rynek
-OPLATA = 0.0003                     # jak w terminalu: 0,03% wartości przy zamknięciu
+OPLATA = 0.00009                    # jak w terminalu: $9/lot ≈ 0,009% wartości przy zamknięciu
 LIVE_CZEKAJ = timedelta(hours=2)    # po planowanym zamknięciu: czekamy na ruch, potem większy wolumen
 LIVE_PODDAJ = timedelta(hours=8)    # bez danych tak długo — zamknięcie po staremu (syntetycznie)
 

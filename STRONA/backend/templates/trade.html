@@ -214,7 +214,7 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
       <div><dt>Margin Required</dt><dd class="num" id="tEstMargin">—</dd></div>
       <div><dt><abbr title="Set for each market, the same on every account">Leverage</abbr></dt><dd class="num" id="tEstLev">—</dd></div>
       <div><dt><button class="t-dt" id="tSlipBtn" type="button" title="Change the slippage limit">Max Slippage</button></dt><dd class="num" id="tSlip">1%</dd></div>
-      <div><dt>Fees</dt><dd class="num" id="tFee">0.030%</dd></div>
+      <div><dt>Fees</dt><dd class="num" id="tFee">0.009%</dd></div>
       <div><dt><abbr title="Total open lots allowed on this account">Exposure Cap</abbr></dt><dd class="num" id="tCap">—</dd></div>
     </dl>
     <dl class="t-acct" id="tAcct">
@@ -246,10 +246,6 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
         <button class="t-outline" id="tColsBtn" type="button"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>Columns</button>
         <div class="t-menu t-cols" id="tColsMenu" hidden></div>
       </div>
-    </div>
-    <div class="t-mng" id="tMng" hidden>
-      <p><b>Managed trading is available on this account.</b> If you allow it, {{ site_name }} can place trades here. They are marked Managed, follow our plan, and you can close them yourself.</p>
-      <button type="button" class="t-mng-ok" id="tMngOk">Allow</button><button type="button" id="tMngNo">Not now</button>
     </div>
     <dl class="t-acline" id="tAcLine" hidden>
       <div><dt>Balance</dt><dd class="num" id="tAlBal"></dd></div>

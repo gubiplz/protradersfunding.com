@@ -14010,7 +14010,7 @@ def home(request: Request):
     return _page(request, "home.html",
                  sample_qr=_qr_svg(f"{_public_base(request)}/verify"),
                  products=prods, cfg=_cfg_ctx(prods), step_images=kroki,
-                 fee_pct=round(terminal.FEE_PCT * 100, 3))
+                 fee_per_lot=terminal.FEE_PER_LOT_USD)
 
 
 @app.get("/faq")

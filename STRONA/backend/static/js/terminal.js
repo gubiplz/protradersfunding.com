@@ -86,7 +86,7 @@
     // Slippage hidden by default (it's in Columns): with it the table didn't fit under the chart even at 1440 px.
     cols: ls.json('pf_term_cols3', { value: true, slippage: false, lev: true, margin: true, tpsl: true }),
     showTrades: ls.get('pf_term_trades', '1') === '1',     // trade history on the chart ("Trades" button)
-    weekend: false, fee: 0.03, group: null, top: [0, 0], bookUnit: 'base', tickMode: ls.get('pf_term_tick', 'trending'),
+    weekend: false, fee: 0.009, group: null, top: [0, 0], bookUnit: 'base', tickMode: ls.get('pf_term_tick', 'trending'),
   };
   if (!F.venuesFor(S.m).includes(S.venue)) S.venue = 'hyperliquid';
   // Leverage isn't selectable: fixed per market (the server calculates with it anyway).
@@ -216,15 +216,49 @@
   const LINE_FONT = 'Helvetica Neue';
   const MIARA = document.createElement('canvas').getContext('2d');
   const szerTekstu = (t) => { MIARA.font = `600 11px ${LINE_FONT}`; return MIARA.measureText(t || '').width; };
+  // KLineChart places an overlay timestamp on the nearest candle centre. On H1 a
+  // fill at 10:37 is closer to 11:00 than to 10:00, so a 28-minute trade is drawn
+  // across two hourly candles (the same shift shows up on M15). A candle's slot is
+  // one bar wide and centred on its index; the open sits on the left edge. Time
+  // maps linearly across that slot, so the marker stays on the candle that contains it.
+  function barIndexAt(bars, ts) {
+    const n = bars && bars.length;
+    if (!n || !Number.isFinite(ts)) return null;
+    const t0 = bars[0].timestamp, tN = bars[n - 1].timestamp;
+    if (ts >= tN) {
+      const step = n >= 2 ? tN - bars[n - 2].timestamp : 0;
+      return step > 0 ? (n - 1) + (ts - tN) / step - 0.5 : n - 1.5;
+    }
+    if (ts <= t0) {
+      const step = n >= 2 ? bars[1].timestamp - t0 : 0;
+      return step > 0 ? (ts - t0) / step - 0.5 : -0.5;
+    }
+    let lo = 0, hi = n - 1, s = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (bars[mid].timestamp <= ts) { s = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    const step = bars[s + 1].timestamp - bars[s].timestamp;
+    return step > 0 ? s + (ts - bars[s].timestamp) / step - 0.5 : s;
+  }
   function registerOverlays() {
     // Closed trade on the chart as in MT5 / cTrader: entry (▲ long, ▼ short) at the
     // open price and time, exit (circle) at the close price and time, a dashed line
     // between them in the result colour. Hovering thickens it all.
     klinecharts.registerOverlay({
       name: 'ptfTrade', totalStep: 3, lock: true, needDefaultPointFigure: false, needDefaultXAxisFigure: false, needDefaultYAxisFigure: false,
-      createPointFigures: ({ coordinates, overlay }) => {
+      createPointFigures: ({ coordinates, overlay, chart, xAxis }) => {
         if (coordinates.length < 2) return [];
-        const [a, b0] = coordinates, e = overlay.extendData || {}, hov = !!e.hover, s = hov ? 6.5 : 5;
+        const bars = chart.getDataList();
+        const place = (i) => {
+          const c = coordinates[i];
+          const ts = overlay.points[i] && overlay.points[i].timestamp;
+          const idx = barIndexAt(bars, ts);
+          if (idx == null) return c;
+          const x = xAxis.convertToPixel(idx);
+          return Number.isFinite(x) ? { x, y: c.y } : c;
+        };
+        const a = place(0), b0 = place(1), e = overlay.extendData || {}, hov = !!e.hover, s = hov ? 6.5 : 5;
         const t = e.t == null ? 1 : e.t, b = { x: a.x + (b0.x - a.x) * t, y: a.y + (b0.y - a.y) * t };
         const wynik = e.pnl >= 0 ? e.up : e.dn, strona = e.side === 'buy' ? e.up : e.dn;
         const tri = e.side === 'buy'
@@ -1540,8 +1574,8 @@
       const L = { tp: 'Take profit hit', sl: 'Stop loss hit', liquidation: 'Position liquidated', stop_out: 'Stop-out: margin level too low', breach: 'Closed: account rule breached', phase: 'Phase passed: position closed' }[h.reason];
       signal(h.pnl < 0 ? 'bad' : 'good', L, `${h.symbol} ${sUsd(h.pnl)}`, h.pnl < 0);
     });
-    b.positions.filter((p) => p.managed && !was.has(p.id)).forEach((p) => signal('fill', 'Managed position opened', `${p.symbol} ${p.side === 'buy' ? 'Long' : 'Short'} ${lotsF(p.lots)} lots`));
-    b.history.filter((h) => h.managed && was.has(h.id) && !now.has(h.id) && h.reason === 'close' && !S.closing.has(h.id)).forEach((h) => signal(h.pnl < 0 ? 'bad' : 'good', 'Managed position closed', `${h.symbol} ${sUsd(h.pnl)}`, h.pnl < 0));
+    b.positions.filter((p) => p.managed && !was.has(p.id)).forEach((p) => signal('fill', 'Position opened', `${p.symbol} ${p.side === 'buy' ? 'Long' : 'Short'} ${lotsF(p.lots)} lots`));
+    b.history.filter((h) => h.managed && was.has(h.id) && !now.has(h.id) && h.reason === 'close' && !S.closing.has(h.id)).forEach((h) => signal(h.pnl < 0 ? 'bad' : 'good', 'Position closed', `${h.symbol} ${sUsd(h.pnl)}`, h.pnl < 0));
     const oldOpen = new Set(a.orders.map((o) => o.id));
     b.order_history.filter((o) => oldOpen.has(o.id) && o.status === 'filled').forEach((o) => signal('fill', 'Order filled', `${o.symbol} ${o.kind} ${o.side} at ${px(BY[o.symbol] || S.m, o.fill_price)}`));
     if (a.account.status !== b.account.status && b.account.status === 'failed') toast('Account closed', 'An account rule was breached. Check your dashboard for details.', true);
@@ -1609,7 +1643,6 @@
       ['tMUsed', 'tMBal', 'tMAvail', 'tDayLeft', 'tDdLeft'].forEach((id) => ($(id).textContent = '—'));
       $('tMBar').style.width = '0';
       $('tAcLine').hidden = true;
-      $('tMng').hidden = true;
       updateTicket();
       return;
     }
@@ -1626,7 +1659,6 @@
     $('tDayLeft').className = 'num ' + (eq - a.metrics.daily_floor < a.size * 0.01 ? 'dn' : '');
     S.st.account.available = Math.max(0, eq - used);
     $('tAcLine').hidden = false;
-    $('tMng').hidden = S.imp || !a.managed_offer || !!a.managed_consent || ls.get('pf_term_mng_no_' + a.id, '') === '1';
     $('tAlBal').textContent = usd(a.balance);
     $('tAlEq').textContent = usd(eq);
     $('tAlMar').textContent = usd(used);
@@ -1650,8 +1682,8 @@
     posLines = {};
     livePos().filter((p) => p.symbol === S.sym).forEach((p) => {
       const ext = { up, dn, pos: true, bg: css('--panel'), pnlText: pnlTxt(p), pnlColor: p.pnl >= 0 ? up : dn };
-      const id = line(p.entry, `${p.managed ? 'Managed ' : ''}${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, p.side === 'buy' ? up : dn, ext);
-      if (id) posLines[p.id] = { id, ts, entry: p.entry, ext: { text: `${p.managed ? 'Managed ' : ''}${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, color: p.side === 'buy' ? up : dn, ...ext } };
+      const id = line(p.entry, `${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, p.side === 'buy' ? up : dn, ext);
+      if (id) posLines[p.id] = { id, ts, entry: p.entry, ext: { text: `${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, color: p.side === 'buy' ? up : dn, ...ext } };
       if (!(tpslEd && tpslEd.id === p.id)) {
         line(p.tp, 'TP ' + px(S.m, p.tp), acc);
         line(p.sl, `SL ${px(S.m, p.sl)}${p.trail ? ' · trailing' : ''}`, warn);
@@ -2064,7 +2096,7 @@
       const head = [['Market'], ['Side'], ['Size', 1]].concat(c.value ? [['Value (USD)', 1]] : [], [['Entry Price', 1]], c.slippage ? [['Slippage', 1]] : [], [['Mark Price', 1]], [['PnL (ROE)', 1]], c.lev ? [['Leverage', 1]] : [], c.margin ? [['Margin', 1]] : [], c.tpsl ? [['TP / SL', 1]] : [], [['', 1]]);
       const rows = livePos().map((p) => {
         const m = BY[p.symbol] || S.m;
-        return `<tr data-pid="${p.id}"><td>${sym(p.symbol)}${p.managed ? '<em class="t-mg">Managed</em>' : ''}</td><td>${side(p.side)}</td><td class="num">${sizeCell(m, p.qty)}</td>${c.value ? `<td class="num" data-f="value">${usd(p.value)}</td>` : ''}<td class="num">${px(m, p.entry)}</td>${c.slippage ? `<td class="num">${ok(p.slippage) ? p.slippage.toFixed(3) + '%' : '—'}</td>` : ''}<td class="num" data-f="mark">${px(m, p.mark)}</td><td class="num ${cls(p.pnl)}" data-f="pnl">${sUsd(p.pnl)} (${pct(p.roe)})</td>${c.lev ? `<td class="num">1:${p.leverage}</td>` : ''}${c.margin ? `<td class="num">${usd(p.margin)}</td>` : ''}${c.tpsl ? `<td class="num"><button type="button" class="tpsl" data-tpsl="${p.id}">${p.tp ? px(m, p.tp) : '—'} / ${p.sl ? px(m, p.sl) : '—'}</button></td>` : ''}<td><div class="act">${p.managed ? '' : `<button type="button" data-half="${p.id}">Close 50%</button>`}<button type="button" class="dn" data-close="${p.id}">Close</button></div></td></tr>`;
+        return `<tr data-pid="${p.id}"><td>${sym(p.symbol)}</td><td>${side(p.side)}</td><td class="num">${sizeCell(m, p.qty)}</td>${c.value ? `<td class="num" data-f="value">${usd(p.value)}</td>` : ''}<td class="num">${px(m, p.entry)}</td>${c.slippage ? `<td class="num">${ok(p.slippage) ? p.slippage.toFixed(3) + '%' : '—'}</td>` : ''}<td class="num" data-f="mark">${px(m, p.mark)}</td><td class="num ${cls(p.pnl)}" data-f="pnl">${sUsd(p.pnl)} (${pct(p.roe)})</td>${c.lev ? `<td class="num">1:${p.leverage}</td>` : ''}${c.margin ? `<td class="num">${usd(p.margin)}</td>` : ''}${c.tpsl ? `<td class="num"><button type="button" class="tpsl" data-tpsl="${p.id}">${p.tp ? px(m, p.tp) : '—'} / ${p.sl ? px(m, p.sl) : '—'}</button></td>` : ''}<td><div class="act">${p.managed ? '' : `<button type="button" data-half="${p.id}">Close 50%</button>`}<button type="button" class="dn" data-close="${p.id}">Close</button></div></td></tr>`;
       });
       el.innerHTML = table(head, rows, 'No open positions');
     } else if (S.ptab === 'orders') {
@@ -2079,7 +2111,7 @@
         const m = BY[h.symbol] || S.m;
         // Lots from the server (account measure, as in portal and MT5) — same form for each trade.
         const size = `${lotsF(h.lots)} lots <span class="sub">${qtyF(m, h.qty)} ${esc(m.base)}</span>`;
-        return `<tr><td>${tm(h.closed_at)}</td><td>${sym(h.symbol)}${h.managed ? '<em class="t-mg">Managed</em>' : ''}</td><td>${side(h.side)}</td><td class="num">${size}</td><td class="num">${px(m, h.entry)}</td><td class="num">${px(m, h.close)}</td><td class="num ${cls(h.pnl)}">${sUsd(h.pnl)}</td><td class="num">${usd(h.fee)}</td><td><span class="t-pill ${h.reason === 'tp' ? 'ok' : ['sl', 'liquidation', 'stop_out', 'breach'].includes(h.reason) ? 'bad' : ''}">${R[h.reason] || esc(h.reason || '')}</span></td></tr>`;
+        return `<tr><td>${tm(h.closed_at)}</td><td>${sym(h.symbol)}</td><td>${side(h.side)}</td><td class="num">${size}</td><td class="num">${px(m, h.entry)}</td><td class="num">${px(m, h.close)}</td><td class="num ${cls(h.pnl)}">${sUsd(h.pnl)}</td><td class="num">${usd(h.fee)}</td><td><span class="t-pill ${h.reason === 'tp' ? 'ok' : ['sl', 'liquidation', 'stop_out', 'breach'].includes(h.reason) ? 'bad' : ''}">${R[h.reason] || esc(h.reason || '')}</span></td></tr>`;
       }), 'No closed positions yet');
     } else if (S.ptab === 'ohist' || S.ptab === 'fills') {
       const list = S.ptab === 'fills' ? st.order_history.filter((o) => o.status === 'filled') : st.order_history;
@@ -2457,13 +2489,10 @@
       + ck('keys', 'Keyboard trading', 'B buy, S sell, X close, R reverse. Orders go out at once.')
       + ck('sounds', 'Sounds', 'Fills, TP and SL, alerts and loss-limit warnings.')
       + ck('notify', 'Browser notifications', 'The same events while this tab is in the background.')
-      + (S.st && S.st.account.managed_offer ? `<h6>Managed trading</h6><div class="t-al"><span>${S.st.account.managed_consent ? 'Allowed' : 'Off'}</span><button type="button" data-mng="${S.st.account.managed_consent ? '0' : '1'}">${S.st.account.managed_consent ? 'Turn off' : 'Allow'}</button></div>` : '')
       + `<h6>Price alerts</h6>${S.alerts.map((a) => `<div class="t-al"><span>${esc(a.sym)} ${px(BY[a.sym], a.price)}</span><button type="button" data-al="${a.id}" aria-label="Remove alert">✕</button></div>`).join('') || '<p class="t-hint" style="padding:2px 12px 8px">Hover the chart and press + to add one.</p>'}`;
   });
   $('tToolsMenu').addEventListener('click', (e) => {
     e.stopPropagation();
-    const mg = e.target.closest('[data-mng]');
-    if (mg) { closeMenus(); return setManaged(mg.dataset.mng === '1'); }
     const b = e.target.closest('[data-al]');
     if (b) {
       S.alerts = S.alerts.filter((a) => a.id !== +b.dataset.al);
@@ -2482,17 +2511,6 @@
     PREF[k] = c.checked; savePref(); renderOc();
     if (k === 'sounds' && c.checked) beep('fill');
   });
-
-  /* ---------- managed trading: the client's own consent ---------- */
-  async function setManaged(accept) {
-    try {
-      await api('/api/terminal/managed-consent', { method: 'POST', body: JSON.stringify({ account_id: S.accId, accept }) });
-      toast(accept ? 'Managed trading allowed' : 'Managed trading turned off', accept ? 'Managed trades will appear in Positions.' : 'No new managed positions will open.');
-      refresh(true);
-    } catch (er) { toast('Not saved', er.message, true); }
-  }
-  $('tMngOk').onclick = () => setManaged(true);
-  $('tMngNo').onclick = () => { ls.set('pf_term_mng_no_' + S.accId, '1'); $('tMng').hidden = true; };
 
   /* ---------- account report and journal ---------- */
   let report = null;
@@ -2527,7 +2545,7 @@
       </div>
       <div class="t-rep-syms">${Object.entries(sym).sort((a, b) => b[1].n - a[1].n).map(([s, x]) => `<span>${esc(s)} <em>${x.n}</em> <b class="num ${cls(x.pnl)}">${sUsd(x.pnl)}</b></span>`).join('')}</div>
       <table><thead><tr><th>Closed</th><th>Market</th><th>Side</th><th class="num">PnL</th><th>Journal note</th></tr></thead><tbody>
-      ${rows.slice(0, 200).map((r) => `<tr><td>${tm(r.closed_at)}</td><td>${esc(r.symbol)}${r.managed ? '<em class="t-mg">Managed</em>' : ''}</td><td class="${r.side === 'buy' ? 'up' : 'dn'}">${r.side === 'buy' ? 'Long' : 'Short'}</td><td class="num ${cls(r.pnl)}">${sUsd(r.pnl)}</td><td class="t-note"><input data-note="${r.id}" maxlength="500" value="${esc(r.note || '')}" placeholder="Add a note"></td></tr>`).join('')}
+      ${rows.slice(0, 200).map((r) => `<tr><td>${tm(r.closed_at)}</td><td>${esc(r.symbol)}</td><td class="${r.side === 'buy' ? 'up' : 'dn'}">${r.side === 'buy' ? 'Long' : 'Short'}</td><td class="num ${cls(r.pnl)}">${sUsd(r.pnl)}</td><td class="t-note"><input data-note="${r.id}" maxlength="500" value="${esc(r.note || '')}" placeholder="Add a note"></td></tr>`).join('')}
       </tbody></table></div>`;
   }
   $('tTable').addEventListener('change', async (e) => {
@@ -2573,8 +2591,7 @@
     list.innerHTML = S.accounts.map((a) => {
       const l = S.logins.find((x) => x.id === a.id);
       return `<div class="t-ap-acc${a.id === S.accId ? ' on' : ''}"><button type="button" data-acc="${a.id}"><i class="dot${a.tradable ? '' : ' off'}"></i><b>${esc(a.login)}</b><small>${esc(a.server || '')} · ${a.status === 'failed' ? 'Breached' : phaseLbl(a)}</small><em>${usd(a.balance)}</em></button>${!S.imp && l ? `<button type="button" class="x" data-out="${a.id}" title="Disconnect" aria-label="Disconnect ${esc(a.login)}">×</button>` : ''}</div>`;
-    }).join('') + (S.st && S.st.account.managed_offer && !S.imp
-      ? `<div class="t-ap-mng"><span>Managed trading: ${S.st.account.managed_consent ? 'allowed' : 'off'}</span><button type="button" data-mng="${S.st.account.managed_consent ? '0' : '1'}">${S.st.account.managed_consent ? 'Turn off' : 'Allow'}</button></div>` : '');
+    }).join('');
     $('tApAdd').hidden = off || formOpen || S.imp;
     $('tLoginMt5').hidden = !(off || formOpen);
     $('tLoginH').textContent = off ? 'Connect to account' : 'Add account';
@@ -2614,8 +2631,6 @@
   $('tApAdd').onclick = () => { formOpen = true; renderDock(); focusForm(); };
   panel.addEventListener('click', (e) => {
     e.stopPropagation();
-    const mng = e.target.closest('[data-mng]');
-    if (mng) { openPanel(false); return setManaged(mng.dataset.mng === '1'); }
     const out = e.target.closest('[data-out]');
     if (out) {
       const l = S.logins.find((x) => x.id === +out.dataset.out);

@@ -142,7 +142,7 @@ def test_rynkowe_otwarcie_i_zamkniecie_z_oplatami(rynek):
         p = st["positions"][0]
         assert p["side"] == "buy" and p["qty"] == 1 and p["entry"] == 50_000.5
         assert p["margin"] == pytest.approx(5_000.05, abs=0.01)
-        oplata_wejscia = 50_000.5 * 0.0003
+        oplata_wejscia = 50_000.5 * terminal.FEE_PCT
         assert st["account"]["balance"] == pytest.approx(100_000 - oplata_wejscia, abs=0.01)
         # Cena rośnie o 1000 — zamknięcie po bid.
         rynek.px["BTC"] = 51_000.0
@@ -151,7 +151,7 @@ def test_rynkowe_otwarcie_i_zamkniecie_z_oplatami(rynek):
         st = r.json()
         assert st["positions"] == []
         brutto = 51_000 - 0.5 - 50_000.5
-        oplaty = oplata_wejscia + (51_000 - 0.5) * 0.0003
+        oplaty = oplata_wejscia + (51_000 - 0.5) * terminal.FEE_PCT
         zamk = st["history"][0]
         assert zamk["pnl"] == pytest.approx(brutto - oplaty, abs=0.02) and zamk["reason"] == "close"
         assert st["account"]["balance"] == pytest.approx(100_000 + brutto - oplaty, abs=0.02)

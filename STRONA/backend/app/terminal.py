@@ -46,7 +46,8 @@ from .models import Account, AppSetting, PoolAccount, TerminalLogin, TerminalOrd
 
 settings = get_settings()
 
-FEE_PCT = 0.0003            # 0,03% wartości przy otwarciu i przy zamknięciu
+FEE_PER_LOT_USD = 9         # $9 / lot / side (standardowy lot FX ≈ $100k)
+FEE_PCT = 0.00009           # 0,009% wartości przy otwarciu i przy zamknięciu (= $9/lot)
 MAX_SLIPPAGE = 0.01         # domyślny limit poślizgu (1%)
 STOP_OUT = 0.5              # stop-out: equity ≤ 50% użytej marży (poziom jak u brokerów MT5)
 CANDLE_GAP_S = 50           # dłuższa przerwa od przeglądu = przegląd świecami 1m
@@ -909,7 +910,7 @@ def state_dict(session, acc: Account, poz: list[Trade], marks: dict[str, float])
         "orders": [_order_dict(z) for z in _open_orders(session, acc)],
         "history": historia,
         "order_history": zlecenia[:100],
-        "fee_pct": FEE_PCT * 100, "server_time": _iso(_now()),
+        "fee_pct": round(FEE_PCT * 100, 3), "server_time": _iso(_now()),
     }
 
 
@@ -996,8 +997,8 @@ def _z_ponowieniem(fn):
 # --------------------------------------------------------------------------- #
 @router.get("/markets")
 def api_markets():
-    return {"markets": markets.public_list(), "fee_pct": FEE_PCT * 100, "max_slippage_pct": MAX_SLIPPAGE * 100,
-            "weekend": tradebot.is_weekend()}
+    return {"markets": markets.public_list(), "fee_pct": round(FEE_PCT * 100, 3),
+            "max_slippage_pct": MAX_SLIPPAGE * 100, "weekend": tradebot.is_weekend()}
 
 
 # --- logowanie danymi MT5 -----------------------------------------------------
