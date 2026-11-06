@@ -219,9 +219,12 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-chart{flex:1;min-width:0;position:relative}
 /* Position buttons on the entry line */
 .t-posbtns{position:absolute;inset:0;pointer-events:none;z-index:3;overflow:hidden}
-.t-pb{position:absolute;left:0;top:0;display:flex;gap:4px;pointer-events:auto}
+/* Position buttons stay out of the way until the pointer is on the entry line (or a tap
+   on it on a phone): then they fade in above the entry ring. */
+.t-pb{position:absolute;left:0;top:0;z-index:2;display:flex;gap:4px;pointer-events:none;opacity:0;transition:opacity .14s}
+.t-pb.on{pointer-events:auto;opacity:1}
 .t-pb[hidden]{display:none}
-.t-pring{position:absolute;left:0;top:0;z-index:2;width:11px;height:11px;border-radius:50%;border:2px solid var(--up);background:var(--bg);pointer-events:none;box-sizing:border-box;box-shadow:0 0 0 2px color-mix(in srgb,var(--bg) 70%,transparent)}
+.t-pring{position:absolute;left:0;top:0;z-index:1;width:11px;height:11px;border-radius:50%;border:2px solid var(--up);background:var(--bg);pointer-events:none;box-sizing:border-box;box-shadow:0 0 0 2px color-mix(in srgb,var(--bg) 70%,transparent)}
 .t-pring.dn{border-color:var(--dn)}.t-pring[hidden]{display:none}
 .t-pb button{height:19px;min-width:22px;padding:0 6px;display:grid;place-items:center;border-radius:4px;background:var(--panel);border:1px solid var(--line2);color:var(--txt);font:600 11px 'Helvetica Neue',sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.25)}
 .t-pb button:hover{border-color:var(--muted)}
@@ -493,6 +496,15 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-table .act button{height:26px;padding:0 10px;border-radius:7px;border:1px solid var(--line2);font-size:12px}
 .t-table .act button:hover{border-color:var(--acc);color:var(--acc)}
 .t-table .act button.dn:hover{border-color:var(--dn);color:var(--dn)}
+.t-table .act button.more{min-width:34px;padding:0 8px;font-size:15px;line-height:1;letter-spacing:.5px}
+/* Close part: lots field, a share slider and quick shares */
+.t-cp{display:flex;flex-direction:column;gap:12px;margin-top:6px}
+.t-cp input[type=range]{width:100%;accent-color:var(--acc)}
+.t-cp-row{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.t-cp-pr{height:30px;border-radius:7px;border:1px solid var(--line2);font-size:12.5px;font-family:var(--mono)}
+.t-cp-pr:hover{border-color:var(--acc);color:var(--acc)}
+.t-cp .t-hint.bad{color:var(--dn)}
+#tConfirmOk:disabled{opacity:.45;cursor:not-allowed}
 .t-table .tpsl{color:var(--muted);text-decoration:underline dotted var(--dim);text-underline-offset:3px}
 .t-empty{display:grid;place-items:center;height:100%;min-height:120px;color:var(--muted);font-size:14px;text-align:center;padding:20px}
 .t-empty .t-btn{margin-top:12px}
