@@ -1742,7 +1742,7 @@ html:not(.pwa){overscroll-behavior-y:contain}
 }
 
 /* Sign-in screen: one line of facts, a small live strip and the gold coin. */
-.auth-facts{margin-top:22px;font-size:12.5px;color:var(--muted)}
+.auth-facts{margin-top:22px;font-size:12.5px;color:var(--muted);max-width:none;white-space:nowrap}
 .auth-facts b{font-family:var(--mono);color:var(--txt);font-weight:600}
 .auth-live{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-top:14px;font-size:11px;color:var(--muted)}
 .auth-live .al-t{display:flex;align-items:center;gap:6px;font-weight:600;color:var(--dim);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase}
