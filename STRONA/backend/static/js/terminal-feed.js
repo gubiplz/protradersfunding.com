@@ -156,15 +156,42 @@
     let offCandles = candles(interval);
     /* Hyperliquid sends 20 levels per side. A coarser step is aggregated by the exchange
        (nSigFigs 2–5), otherwise grouping 20 fine levels would leave a few rows. */
-    let grp = 0, mid = 0, sig, offBook = () => {};
+    /* Hyperliquid's l2Book socket now pushes a snapshot only every 3–5 s, while REST
+       l2Book is fresh on every call. So: socket for the first paint, REST every second
+       while the tab is visible, and between snapshots the best bid/ask from `bbo`
+       (several a second) patched onto the top of the book. Older snapshots are dropped. */
+    let grp = 0, mid = 0, sig, offBook = () => {}, bookT = 0, bids = [], asks = [], bookTimer = 0, bookBusy = false;
+    const emit = () => h.book(bids, asks);
+    const snap = (d) => {
+      if (!d || !d.levels || (d.time && d.time < bookT)) return;
+      bookT = d.time || bookT;
+      bids = d.levels[0].map((x) => [+x.px, +x.sz]);
+      asks = d.levels[1].map((x) => [+x.px, +x.sz]);
+      emit();
+    };
     const book = (n) => {
       offBook();
-      sig = n;
+      sig = n; bookT = 0;
       const s = n ? { type: 'l2Book', coin: c, nSigFigs: n } : { type: 'l2Book', coin: c };
-      offBook = hl.sub(s, (d) => d.channel === 'l2Book' && d.data.coin === c, (d) => {
-        const lv = d.levels || [[], []];
-        h.book(lv[0].map((x) => [+x.px, +x.sz]), lv[1].map((x) => [+x.px, +x.sz]));
-      });
+      offBook = hl.sub(s, (d) => d.channel === 'l2Book' && d.data.coin === c, snap);
+    };
+    const pollBook = async () => {
+      if (document.hidden || bookBusy) return;
+      bookBusy = true;
+      const want = sig;
+      try {
+        const d = await post(want ? { type: 'l2Book', coin: c, nSigFigs: want } : { type: 'l2Book', coin: c });
+        if (want === sig) snap(d);
+      } catch (_) {} finally { bookBusy = false; }
+    };
+    bookTimer = setInterval(pollBook, 1000);
+    // Best bid/ask onto the ungrouped book: levels crossed by the new top go, the top size is exact.
+    const patchTop = (b, a) => {
+      if (sig || !bids.length || !asks.length) return;
+      const bp = +b.px, ap = +a.px;
+      bids = bids.filter(([p]) => p < bp); bids.unshift([bp, +b.sz]);
+      asks = asks.filter(([p]) => p > ap); asks.unshift([ap, +a.sz]);
+      emit();
     };
     const regroup = () => {
       if (!grp || !mid) return;
@@ -179,6 +206,7 @@
         if (!b || !a) return;
         h.top(+b.px, +a.px);
         mid = (+b.px + +a.px) / 2;
+        patchTop(b, a);
         regroup();
       }),
       hl.sub({ type: 'trades', coin: c }, (d) => d.channel === 'trades' && d.data[0] && d.data[0].coin === c, (d) => {
@@ -192,7 +220,7 @@
       hl.onState(h.status || (() => {})),
     ];
     return {
-      close: () => { off.forEach((f) => f()); offCandles(); offBook(); },
+      close: () => { off.forEach((f) => f()); offCandles(); offBook(); clearInterval(bookTimer); },
       interval: (i) => { offCandles(); offCandles = candles(i); },
       group: (g) => { grp = g; regroup(); },
       aggregates: true,

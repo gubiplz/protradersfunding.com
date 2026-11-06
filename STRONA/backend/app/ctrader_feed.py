@@ -35,7 +35,7 @@ SYMBOLE = {"xyz:EUR": ("EURUSD",), "xyz:GBP": ("GBPUSD",), "xyz:JPY": ("USDJPY",
            "xyz:JP225": ("JP225", "JPN225", "JAPAN225", "NIKKEI225", "NIK225", "JP225CASH")}
 SKALA = 100_000                 # ceny w Open API są w 1/100000 jednostki
 FEED_N = -1                     # ten sam znacznik co terminal.FEED_N: wiersz ostateczny
-ZAPIS_CO_S = 8.0
+ZAPIS_CO_S = 2.0               # przeglądarka dociąga co 2 s, CDN trzyma odpowiedź 1 s
 LUKA_MIN = 2                    # od tylu brakujących minut łatamy trendbarami
 TOKEN_KLUCZ = "ctrader_token"   # AppSetting: {"access": ..., "refresh": ..., "exp": ...}
 KONTO_KLUCZ = "ctrader_account"

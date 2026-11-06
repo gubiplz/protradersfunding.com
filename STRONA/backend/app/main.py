@@ -10356,7 +10356,7 @@ async def api_cron_risk():
 #: po przebiegu kont — zapas na odpowiedź i na wolniejszy ostatni krok.
 TICK_BUDZET_S = 48.0
 #: Próbkowanie świec: tyle sekund co minutę, reszta minuty to zapas na zapis.
-CANDLES_BUDZET_S = 52.0
+CANDLES_BUDZET_S = 55.0
 
 
 @app.api_route("/api/cron/candles", methods=["GET", "POST"], include_in_schema=False, dependencies=[Depends(_require_cron)])

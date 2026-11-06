@@ -32,7 +32,7 @@ from datetime import datetime, timedelta, timezone
 
 from urllib.parse import unquote
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm.exc import StaleDataError
@@ -1465,13 +1465,17 @@ def cron_swiece(budzet_s: float) -> dict:
 
 
 @router.get("/candles")
-def api_candles(symbol: str, interval: str = "1m", end: int | None = None, limit: int = 500):
+def api_candles(response: Response, symbol: str, interval: str = "1m", end: int | None = None, limit: int = 500):
     """Świece z próbkowanego mid dla rynku z `markets.PROBKOWANE`, złożone do żądanego
     interwału; inne rynki i interwały dzienne dostają pustą listę."""
     m = markets.get(symbol)
     krok = _SWIECE_MS.get(interval)
     if m is None or m.hl not in markets.PROBKOWANE or krok is None:
         return {"candles": []}
+    if end is None:
+        # Ogon wykresu odpytywany co 2 s przez każdą otwartą kartę: CDN Vercela oddaje
+        # jedną odpowiedź na sekundę wszystkim, zamiast budzić funkcję na każde zapytanie.
+        response.headers["Cache-Control"] = "public, max-age=0, s-maxage=1, stale-while-revalidate=1"
     limit = max(1, min(int(limit), 5000))
     koniec = int(end) if end else _ms(_now())
     od = datetime.fromtimestamp((koniec - krok * limit) / 1000, tz=timezone.utc).replace(tzinfo=None)
