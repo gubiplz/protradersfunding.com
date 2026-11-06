@@ -1440,8 +1440,26 @@ def cron_swiece(budzet_s: float) -> dict:
     finally:
         session.close()
     start = time.monotonic()
+    # cTrader (gdy skonfigurowany) słucha ticków FX w osobnym wątku przez cały przebieg;
+    # jego wiersze są ostateczne, więc próbki mid tych rynków ich nie nadpiszą.
+    from . import ctrader_feed
+    ct: dict = {}
+    watek = None
+    if ctrader_feed.skonfigurowany():
+        import threading
+
+        def _ct():
+            try:
+                ct.update(asyncio.run(ctrader_feed.sluchaj(max(5.0, budzet_s - 1.0))))
+            except Exception as e:
+                ct["error"] = f"{type(e).__name__}: {str(e)[:120]}"
+        watek = threading.Thread(target=_ct, daemon=True)
+        watek.start()
     hist = uzupelnij_historie(min(HIST_BUDZET_S, budzet_s / 2))
-    out = probkuj_swiece(max(5.0, budzet_s - (time.monotonic() - start)), zajmij=False)
+    out = probkuj_swiece(max(5.0, budzet_s - (time.monotonic() - start)), zajmij=False, feed=not watek)
+    if watek:
+        watek.join(timeout=5.0)
+        out["ctrader"] = ct
     out["history"] = hist
     return out
 

@@ -20,6 +20,39 @@
     document.body.classList.toggle('menu-open', open);
   }
   if (burger) burger.addEventListener('click', () => menuSet(!mob.classList.contains('open')));
+
+  /* Arriving on /#how (or any section anchor) from another page: the browser jumps once,
+     on the first paint, and the configurator, the market strips and the cookie bar fill in
+     above the section afterwards. Chrome keeps the section in place (scroll anchoring),
+     Safari doesn't, so the visitor saw the top of the landing page and needed a second
+     click. For a few seconds the section is put back under the header whenever the layout
+     above it grows, until the visitor scrolls on their own. */
+  (function keepAnchor() {
+    const id = decodeURIComponent(location.hash.slice(1));
+    if (!id || id.startsWith('q-')) return;
+    const el = document.getElementById(id);
+    if (!el) return;
+    let own = false;
+    const mine = () => { own = true; };
+    ['wheel', 'touchstart', 'keydown', 'mousedown'].forEach(ev => addEventListener(ev, mine, { once: true, passive: true }));
+    const pad = () => parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop) || 0;
+    const fix = () => {
+      if (own) return;
+      const off = el.getBoundingClientRect().top - pad();
+      if (Math.abs(off) > 6) scrollTo({ top: scrollY + off, behavior: 'instant' });
+    };
+    const ro = 'ResizeObserver' in window ? new ResizeObserver(fix) : null;
+    if (ro) ro.observe(document.body);
+    // GSAP ScrollTrigger refreshes on `load` and restores the scroll it saw at that moment;
+    // caught mid-way through the browser's jump, it put the page back near the top. A scroll
+    // that wasn't the visitor's, in these first seconds, is undone.
+    let raf = 0;
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; fix(); }); };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('load', () => { fix(); setTimeout(fix, 50); setTimeout(fix, 300); }, { once: true });
+    [150, 600, 1500, 2500].forEach(ms => setTimeout(fix, ms));
+    setTimeout(() => { if (ro) ro.disconnect(); removeEventListener('scroll', onScroll); document.documentElement.style.scrollBehavior = ''; }, 4000);
+  })();
   if (mob) {
     $$('a', mob).forEach(a => a.addEventListener('click', () => menuSet(false)));
     document.addEventListener('keydown', e => { if (e.key === 'Escape') menuSet(false); });

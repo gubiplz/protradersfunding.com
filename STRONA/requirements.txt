@@ -35,3 +35,5 @@ httpx>=0.27
 # Testowe wypłaty vUSDT na Polygonie (app/vusdt.py): podpis transakcji EIP-1559.
 # Importowany leniwie — bez niego reszta aplikacji startuje normalnie.
 eth-account>=0.13
+# Feed FX z cTrader Open API w cronie świec (app/ctrader_feed.py). Import leniwy.
+websockets>=12
