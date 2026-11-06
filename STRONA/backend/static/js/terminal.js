@@ -2000,7 +2000,9 @@
   function drawIn(id, ext) {
     const t0 = performance.now(), D = 520;
     (function step(now) {
-      const k = Math.min(1, (now - t0) / D), t = 1 - Math.pow(1 - k, 3);
+      // The frame timestamp can precede t0 (taken mid-frame); a negative k gave the
+      // exit circle a negative radius and the canvas threw on arc().
+      const k = Math.min(1, Math.max(0, (now - t0) / D)), t = 1 - Math.pow(1 - k, 3);
       chart.overrideOverlay({ id, extendData: { ...ext, t } });
       if (k < 1) requestAnimationFrame(step);
     })(t0);
