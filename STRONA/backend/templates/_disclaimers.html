@@ -1,7 +1,7 @@
 {# Important disclaimers block for the footer. Include from base.html with
    {% include "_disclaimers.html" %}. Uses site_name and support_email, both
-   injected by _page() in app/main.py. Two TODO placeholders remain for the
-   owner: restricted jurisdictions and the legal entity name. #}
+   injected by _page() in app/main.py. The legal entity and the list of
+   restricted jurisdictions are not public yet: add them here when they are. #}
 <section class="disclaimers">
   <h2>Important disclaimers</h2>
   <div class="disclaimers-grid">
@@ -24,8 +24,8 @@
 
       <h3>Fees, jurisdictions, intellectual property and contact</h3>
       <p>Challenge fees are one-time payments and are non-refundable except as set out in the <a href="/refund-policy">Refund Policy</a>. The fee for an account is refunded together with the first reward on that account, as described in the Terms.</p>
-      <p>You must be at least 18 years old and of legal age where you live, and you are responsible for confirming that taking part is lawful in your country. We do not offer the service to residents of [[TODO: list of restricted jurisdictions, owner's decision]]. By registering you confirm that you are not located in, organised in or resident of a sanctioned jurisdiction, that you are not owned or controlled by a person who is, and that you do not appear on any sanctions list. We may refuse or end service to any person in order to comply with sanctions or anti-money-laundering law.</p>
-      <p>The {{ site_name }} brand, software, educational content and certificates are the property of [[TODO: legal entity name]] or its licensors. You receive a personal, non-transferable right to use them for their intended purpose. Questions about these disclaimers, our <a href="/privacy">Privacy Policy</a> or any other legal page: <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p>
+      <p>You must be at least 18 years old and of legal age where you live, and you are responsible for confirming that taking part is lawful in your country. By registering you confirm that you are not located in, organised in or resident of a sanctioned jurisdiction, that you are not owned or controlled by a person who is, and that you do not appear on any sanctions list. We may refuse or end service to any person in order to comply with sanctions or anti-money-laundering law.</p>
+      <p>The {{ site_name }} brand, software, educational content and certificates are the property of the operator of {{ site_name }} or its licensors. You receive a personal, non-transferable right to use them for their intended purpose. Questions about these disclaimers, our <a href="/privacy">Privacy Policy</a> or any other legal page: <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p>
       <p class="disclaimers-date">Effective date: November 2026</p>
     </div>
   </div>
