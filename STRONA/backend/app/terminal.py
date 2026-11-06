@@ -843,7 +843,10 @@ def _closed_dict(t: Trade, managed: bool = False) -> dict:
          "close": t.close_price, "pnl": round(t.pnl or 0.0, 2), "fee": round(t.fee or 0.0, 2),
          "reason": t.close_reason, "leverage": t.leverage, "opened_at": _iso(t.opened_at),
          "closed_at": _iso(t.closed_at), "lots": round(t.lots or 0.0, 4), "note": t.journal,
-         "managed": managed and t.source == "bot"}
+         "managed": managed and t.source == "bot",
+         # Na wykresie tylko transakcje z cenami z realnych świec (terminal, bot na żywych
+         # cenach); starsze wpisy bota miały własne ceny i leżałyby obok świec.
+         "on_chart": t.source == "terminal" or t.venue == "hyperliquid"}
     if t.source == "bot" and not t.qty:     # końcówka ma prawdziwą ilość, opłatę i powód
         # W historii zwykła zamknięta transakcja (decyzja właściciela, 2026-11-01): lot
         # w mierze konta (jak w portalu i MT5), ilość z wartości punktu, powód „Closed".
@@ -1051,6 +1054,8 @@ def _zapisz_swiece(swiece: dict) -> int:
             row = session.query(TerminalCandle).filter(TerminalCandle.coin == coin, TerminalCandle.ts == minuta).first()
             if row is None:
                 session.add(TerminalCandle(coin=coin, ts=minuta, o=o, h=h, l=l, c=c, n=k))
+            elif (row.n or 0) < 0:
+                continue        # minuta z feedu spot (n=-1) jest ostateczna — próbki mid jej nie ruszają
             else:
                 row.h, row.l, row.c, row.n = max(row.h, h), min(row.l, l), c, (row.n or 0) + k
             n += 1
@@ -1060,9 +1065,117 @@ def _zapisz_swiece(swiece: dict) -> int:
         session.close()
 
 
-def probkuj_swiece(budzet_s: float, zajmij: bool = True) -> dict:
+# --- feed spot dla FX i platyny ------------------------------------------------
+# Hyperliquid kwotuje EUR/GBP/JPY z czterema miejscami i rusza mid kilka razy na minutę,
+# więc próbkowanie dawało schodki. Z kluczem Finnhub (`FINNHUB_API_KEY`, plan darmowy:
+# 60 zapytań/min) cron co FEED_CO_S sekund dopisuje ostatnie minuty świec 1m spotu (OANDA,
+# 5 miejsc, bieżąca minuta włącznie) i nadpisuje nimi próbki (n = FEED_N). Przeglądarka
+# dociąga ostatnie świece co kilka sekund. Bez klucza zostaje próbkowanie mid.
+# Wypełnienia zleceń dalej idą po cenach Hyperliquida — wykres to cena referencyjna spotu.
+FINNHUB_SYMBOLE = {"xyz:EUR": "OANDA:EUR_USD", "xyz:GBP": "OANDA:GBP_USD", "xyz:JPY": "OANDA:USD_JPY",
+                   "xyz:PLATINUM": "OANDA:XPT_USD"}
+FEED_N = -1                     # znacznik wiersza z feedu spot
+FEED_CO_S = 12.0                # odstęp odświeżania feedu w przebiegu crona
+FEED_OKNO_S = 900               # ile sekund wstecz pobierać przy odświeżaniu
+FEED_LIMIT = 500                # maksimum świec feedu na rynek z jednego przebiegu
+_FEED_PAUZA = {"do": 0.0}       # po 429 feed czeka do tej chwili (w obrębie procesu)
+
+
+def _zrodlo_feedu() -> str | None:
+    return "finnhub" if get_settings().finnhub_api_key else None
+
+
+def _http_get_json(url: str, params: dict) -> tuple[int, object]:
+    import httpx
+    r = httpx.get(url, params=params, timeout=8.0, headers={"Accept": "application/json"})
+    try:
+        body = r.json()
+    except Exception:
+        body = None
+    return r.status_code, body
+
+
+def _finnhub_swiece(coin: str, od_s: int, do_s: int, transport=None) -> list[dict] | None:
+    """Świece 1m z Finnhub (OANDA) w oknie [od_s, do_s] (sekundy UTC); None = błąd."""
+    sym = FINNHUB_SYMBOLE.get(coin)
+    if not sym:
+        return None
+    url = "https://finnhub.io/api/v1/forex/candle"
+    params = {"symbol": sym, "resolution": "1", "from": int(od_s), "to": int(do_s), "token": get_settings().finnhub_api_key}
+    try:
+        status, body = (transport or _http_get_json)(url, params)
+    except Exception as e:
+        print(f"[candles] finnhub {sym}: {e}", flush=True)
+        return None
+    if status == 429:
+        _FEED_PAUZA["do"] = time.monotonic() + 60      # limit minutowy: reszta przebiegu bez feedu
+    if status != 200 or not isinstance(body, dict) or body.get("s") not in ("ok", "no_data"):
+        print(f"[candles] finnhub {sym} -> {status}: {str(body)[:160]}", flush=True)
+        return None
+    out: dict[datetime, dict] = {}
+    for t, o, h, l, c in zip(body.get("t") or [], body.get("o") or [], body.get("h") or [], body.get("l") or [], body.get("c") or []):
+        if None in (o, h, l, c):
+            continue
+        minuta = datetime.fromtimestamp(int(t) // 60 * 60, tz=timezone.utc).replace(tzinfo=None)
+        out[minuta] = {"ts": minuta, "o": round(float(o), 6), "h": round(float(h), 6), "l": round(float(l), 6), "c": round(float(c), 6)}
+    return [out[k] for k in sorted(out)]
+
+
+def _feed_swiece(coin: str, od_s: int | None = None, do_s: int | None = None, transport=None) -> list[dict] | None:
+    if not _zrodlo_feedu():
+        return None
+    do_s = int(do_s or time.time())
+    od_s = int(od_s or do_s - FEED_OKNO_S)
+    return _finnhub_swiece(coin, od_s, do_s, transport)
+
+
+def _nadpisz_feed(session, coin: str, swiece: list[dict]) -> int:
+    """Świece feedu zastępują próbki i historię tej samej minuty (n = FEED_N)."""
+    if not swiece:
+        return 0
+    od, do = min(k["ts"] for k in swiece), max(k["ts"] for k in swiece)
+    mamy = {r.ts: r for r in session.query(TerminalCandle)
+            .filter(TerminalCandle.coin == coin, TerminalCandle.ts >= od, TerminalCandle.ts <= do).all()}
+    n = 0
+    for k in swiece:
+        row = mamy.get(k["ts"])
+        if row is None:
+            session.add(TerminalCandle(coin=coin, ts=k["ts"], o=k["o"], h=k["h"], l=k["l"], c=k["c"], n=FEED_N))
+        elif (row.o, row.h, row.l, row.c) != (k["o"], k["h"], k["l"], k["c"]) or (row.n or 0) != FEED_N:
+            row.o, row.h, row.l, row.c, row.n = k["o"], k["h"], k["l"], k["c"], FEED_N
+        else:
+            continue
+        n += 1
+    return n
+
+
+def odswiez_feed(transport=None) -> dict:
+    """Jedno odświeżenie feedu spot: ostatnie FEED_OKNO_S sekund każdego rynku z FINNHUB_SYMBOLE."""
+    wynik = {}
+    if not _zrodlo_feedu():
+        return {"skipped": True, "reason": "FINNHUB_API_KEY not set"}
+    if time.monotonic() < _FEED_PAUZA["do"]:
+        return {"paused": True}
+    session = SessionLocal()
+    try:
+        for coin in sorted(FINNHUB_SYMBOLE):
+            if coin not in markets.SAMPLED or time.monotonic() < _FEED_PAUZA["do"]:
+                continue
+            sw = _feed_swiece(coin, transport=transport)
+            if sw is None:
+                wynik[coin] = None
+                continue
+            wynik[coin] = _nadpisz_feed(session, coin, sw[-FEED_LIMIT:])
+            session.commit()
+        return wynik
+    finally:
+        session.close()
+
+
+def probkuj_swiece(budzet_s: float, zajmij: bool = True, feed: bool = True) -> dict:
     """Przez `budzet_s` sekund co `PROBKA_S` bierze mid rynków `markets.SAMPLED` i składa
-    z tego świece M1. Zapis raz, na końcu; drugi przebieg w tej samej minucie odpada
+    z tego świece M1; równolegle co FEED_CO_S odświeża feed spot (`feed=False` w testach
+    próbkowania). Zapis próbek raz, na końcu; drugi przebieg w tej samej minucie odpada
     (`zajmij=False`, gdy zamek wziął już `cron_swiece`)."""
     if zajmij:
         session = SessionLocal()
@@ -1075,7 +1188,16 @@ def probkuj_swiece(budzet_s: float, zajmij: bool = True) -> dict:
     start = time.monotonic()
     swiece: dict[tuple[str, datetime], list] = {}
     proby = 0
+    feed_at, feed_runs = -1e9, 0
     while True:
+        # Feed spot co FEED_CO_S: zapis od razu, żeby przerwana funkcja niczego nie zgubiła.
+        if feed and _zrodlo_feedu() and time.monotonic() - feed_at >= FEED_CO_S:
+            feed_at = time.monotonic()
+            try:
+                if not odswiez_feed().get("skipped"):
+                    feed_runs += 1
+            except Exception as e:
+                print(f"[candles] feed: {e}", flush=True)
         try:
             ceny = markets.mids(coins)
         except Exception:
@@ -1091,7 +1213,7 @@ def probkuj_swiece(budzet_s: float, zajmij: bool = True) -> dict:
         if time.monotonic() - start >= budzet_s:
             break
         time.sleep(PROBKA_S)
-    return {"coins": len(coins), "samples": proby, "rows": _zapisz_swiece(swiece)}
+    return {"coins": len(coins), "samples": proby, "rows": _zapisz_swiece(swiece), "feed_runs": feed_runs}
 
 
 # --- historia 1m z zewnętrznego źródła dla tych samych rynków -------------------
@@ -1107,7 +1229,7 @@ HIST_SYMBOLE = {
     "twelvedata": {"xyz:EUR": "EUR/USD", "xyz:GBP": "GBP/USD", "xyz:JPY": "USD/JPY",
                    "xyz:PLATINUM": "XPT/USD"},      # indeksy są poza planem darmowym
 }
-HIST_PORCJA = {"metaapi": 1000, "twelvedata": 5000}   # maksimum świec na zapytanie
+HIST_PORCJA = {"metaapi": 1000, "twelvedata": 5000, "finnhub": 10080}   # maksimum świec na zapytanie (Finnhub: okno 7 dni)
 HIST_BUDZET_S = 8.0             # tyle sekund przebiegu crona na dociąganie, reszta na próbki
 HIST_ZAPYTAN = 4                # zapytań na przebieg (Twelve Data free: 8/min, 800/dzień)
 HIST_DZIURA_MIN = 3             # luka w ostatniej dobie, którą warto załatać
@@ -1122,11 +1244,13 @@ def _zrodlo_historii() -> str | None:
         return "metaapi"
     if s.twelvedata_api_key:
         return "twelvedata"
+    if s.finnhub_api_key:
+        return "finnhub"
     return None
 
 
 def _hist_symbole(zrodlo: str) -> dict[str, str]:
-    out = dict(HIST_SYMBOLE.get(zrodlo, {}))
+    out = dict(HIST_SYMBOLE.get(zrodlo, {}) if zrodlo != "finnhub" else FINNHUB_SYMBOLE)
     for para in (get_settings().candles_history_symbols or "").split(","):
         if "=" in para:
             coin, sym = para.split("=", 1)
@@ -1153,6 +1277,10 @@ def _hist_swiece(coin: str, start: datetime | None, limit: int, transport=None) 
     if not sym:
         return None
     limit = min(int(limit), HIST_PORCJA[zrodlo])
+    if zrodlo == "finnhub":
+        do_s = int((start.replace(tzinfo=timezone.utc).timestamp()) if start else time.time())
+        return _finnhub_swiece(coin, do_s - limit * 60, do_s,
+                               transport=(lambda u, p: transport(u, p, {})) if transport else None)
     if zrodlo == "metaapi":
         url = (f"https://mt-market-data-client-api-v1.{s.metaapi_region or 'new-york'}.agiliumtrade.ai"
                f"/users/current/accounts/{s.metaapi_candles_account_id}/historical-market-data"
@@ -1232,8 +1360,8 @@ def uzupelnij_historie(budzet_s: float, transport=None, teraz: datetime | None =
     lub pustej odpowiedzi źródła. Kończy po budżecie czasu albo `HIST_ZAPYTAN` zapytaniach."""
     s = get_settings()
     zrodlo = _zrodlo_historii()
-    if not zrodlo:
-        return {"skipped": True, "reason": "no history source (METAAPI_CANDLES_ACCOUNT_ID or TWELVEDATA_API_KEY)"}
+    if not zrodlo or not _hist_symbole(zrodlo):
+        return {"skipped": True, "reason": "no history source"}
     teraz = (teraz or _now()).replace(second=0, microsecond=0, tzinfo=None)
     start = time.monotonic()
     podloga = teraz - timedelta(days=max(1, int(s.candles_history_days)))
@@ -1274,7 +1402,7 @@ def uzupelnij_historie(budzet_s: float, transport=None, teraz: datetime | None =
                 st["done"] = True
                 continue
             zapytania += 1
-            sw = _hist_swiece(coin, (najstarszy - timedelta(minutes=1)) if najstarszy else None, porcja, transport)
+            sw = _hist_swiece(coin, (najstarszy - timedelta(minutes=1)) if najstarszy else teraz, porcja, transport)
             if sw is None:
                 continue
             nowe = [k for k in sw if k["ts"] >= podloga and (najstarszy is None or k["ts"] < najstarszy)]

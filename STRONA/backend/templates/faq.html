@@ -11,7 +11,7 @@
  {"@type":"Question","name":"How do payouts work?","acceptedAnswer":{"@type":"Answer","text":"On a funded account you request a payout of your share of simulated profits: 90% on evaluation plans, 70% on Instant Funding; after KYC each request is reviewed and paid, with the challenge fee refunded on the first payout."}},
  {"@type":"Question","name":"Is news trading allowed?","acceptedAnswer":{"@type":"Answer","text":"Yes. There are no news blackouts, weekend-flat requirements or strategy bans beyond abuse of the simulation."}},
  {"@type":"Question","name":"Can someone else trade my account?","acceptedAnswer":{"@type":"Answer","text":"Yes, with our written approval before trading starts. The account stays registered to you, you remain responsible for the trading objectives, and rewards are paid only to the verified account holder. Sharing credentials without an approved arrangement is prohibited."}},
- {"@type":"Question","name":"Where do the prices in the Built-in Terminal come from?","acceptedAnswer":{"@type":"Answer","text":"Every market in the terminal uses live reference prices from Hyperliquid, a third-party venue we are not affiliated with. Every simulated fill is settled on the reference price, which can differ from a real broker quote."}},
+ {"@type":"Question","name":"Where do the prices in the Built-in Terminal come from?","acceptedAnswer":{"@type":"Answer","text":"Every market in the terminal uses live reference prices from Hyperliquid, a third-party venue we are not affiliated with. Every simulated fill is settled on the reference price, which can differ from a real broker quote. On Forex pairs and platinum the chart draws from a consolidated spot feed, so it can differ from the fill price by about the spread."}},
  {"@type":"Question","name":"Are my trades sent to Hyperliquid or any broker?","acceptedAnswer":{"@type":"Answer","text":"No. No order leaves our platform. The terminal keeps a simulated ledger and fills your order against the reference order book. Fills, balances and equity are values inside the simulation, so what you earn is a performance reward, not a trading profit."}},
  {"@type":"Question","name":"Do I need MT5 installed, or can I trade in the browser?","acceptedAnswer":{"@type":"Answer","text":"You can trade entirely in the browser at /trade, signing in with the MT5 login, password and server from your dashboard. The same credentials also work in MT5 on desktop, mobile and web."}},
  {"@type":"Question","name":"What can I trade, and when are markets open?","acceptedAnswer":{"@type":"Answer","text":"12 crypto pairs, gold, silver, platinum, WTI, Brent, natural gas, S&P 500, Nasdaq 100, Nikkei 225, and EURUSD, GBPUSD and USDJPY. Everything except crypto is closed Saturday and Sunday server time and reopens Monday 00:00 server time. Crypto trades around the clock on weekdays, and on weekends only with the Weekend Trading add-on."}},
@@ -28,14 +28,14 @@
  {"@type":"Question","name":"Are EAs and bots allowed, also in the Built-in Terminal?","acceptedAnswer":{"@type":"Answer","text":"Yes in MT5: EAs, indicators and copiers run on your side, bound by the same loss limits, lot cap and market hours as manual trading. The Built-in Terminal has no EA or plugin layer and no public trading API, so there is no supported way to automate it. The prohibited-practices list applies to the result either way."}},
  {"@type":"Question","name":"Can I trade from a shared device or network, and can I use a VPN?","acceptedAnswer":{"@type":"Answer","text":"You can trade from any device as long as only you use your credentials. Every terminal sign-in is logged with IP, approximate location, browser and device, and that log is part of the review before a payout. Do not use a VPN, a proxy or any location-masking service: such sign-ins can lead to a review and a declined reward."}},
  {"@type":"Question","name":"Is there a minimum payout amount?","acceptedAnswer":{"@type":"Answer","text":"Yes: $500 or 2% of the account size, whichever is higher. That is $500 on a $25,000 account, $2,000 on $100,000 and $20,000 on $1,000,000. Amounts are whole dollars and you can request part of your available share."}},
- {"@type":"Question","name":"What do I need before requesting a payout?","acceptedAnswer":{"@type":"Answer","text":"A funded account with profit from closed trades, approved KYC, the minimum trading days on that funded account (5 on 2-Step, 30 on Instant Funding), an amount at or above the minimum, and no other open request on the account. You request an amount, our team reviews and unlocks it, you confirm the amount and your USDT wallet, and the transfer is marked paid with a certificate."}},
+ {"@type":"Question","name":"What do I need before requesting a payout?","acceptedAnswer":{"@type":"Answer","text":"A funded account with profit from closed trades, approved KYC, the minimum trading days on that funded account (5 on 2-Step, 30 on Instant Funding), an amount at or above the minimum, and no other open request on the account. You request an amount, our team reviews and unlocks it, you confirm the amount and your vUSDT wallet, and the transfer is marked paid with a certificate."}},
  {"@type":"Question","name":"Can I trade while my payout is under review?","acceptedAnswer":{"@type":"Answer","text":"Yes, the account stays open and all rules keep applying. The requested amount is checked again at approval: if your profit has dropped below it, the request is rejected and you submit a new one."}},
  {"@type":"Question","name":"What happens to my balance and drawdown after a payout?","acceptedAnswer":{"@type":"Answer","text":"The profit that paid for the payout (payout amount divided by your split) is deducted from the balance. A full payout brings the account back to its starting balance. Equity, the equity peak and the day-start baseline are set to the new balance; the static overall drawdown floor does not move."}},
  {"@type":"Question","name":"Does a payout count against my daily loss limit?","acceptedAnswer":{"@type":"Answer","text":"No. The deduction is booked together with a new day-start baseline equal to the new balance, so the daily floor is recalculated from there and the payout itself cannot trigger a breach."}},
  {"@type":"Question","name":"Is there a cap on total payouts?","acceptedAnswer":{"@type":"Answer","text":"No. There is no cap on the number of payouts, on the total paid from one account, or on how often you request. Each request is reviewed individually."}},
  {"@type":"Question","name":"What profit split applies to payouts on each plan?","acceptedAnswer":{"@type":"Answer","text":"90% on every 2-Step plan and 70% on Instant Funding, on all account sizes. The Split Boost add-on raises Instant Funding to 80%."}},
- {"@type":"Question","name":"Which networks or wallets can payouts be sent to?","acceptedAnswer":{"@type":"Answer","text":"Payouts go out in USDT to a wallet you control, on TRC-20, BEP-20 or Polygon. You add the wallet in the dashboard when your request is unlocked; changing a saved wallet requires a code emailed to your registered address."}},
- {"@type":"Question","name":"What payment methods do you accept, and can I pay in crypto?","acceptedAnswer":{"@type":"Answer","text":"Cards through Stripe at checkout. Crypto is possible on request: support issues an order with a USDT address and the account is activated once the transfer is confirmed manually. Store credits are applied at the end of the checkout."}},
+ {"@type":"Question","name":"Which networks or wallets can payouts be sent to?","acceptedAnswer":{"@type":"Answer","text":"Payouts go out in vUSDT, PTF's own token on the Polygon network, to a wallet you control. You add the Polygon wallet address in the dashboard when your request is unlocked; changing a saved wallet requires a code emailed to your registered address."}},
+ {"@type":"Question","name":"What payment methods do you accept, and can I pay in crypto?","acceptedAnswer":{"@type":"Answer","text":"Cards through Stripe at checkout. Crypto is possible on request: write to support with the plan you want, and the account is activated once the transfer is confirmed. Store credits are applied at the end of the checkout."}},
  {"@type":"Question","name":"Can I get a refund before I start trading?","acceptedAnswer":{"@type":"Answer","text":"Only if your MT5 credentials have not been delivered yet. Delivery is automatic right after payment, so that window is very short. Duplicate charges and accounts we could not provision are always refunded in full."}},
  {"@type":"Question","name":"Can I pay with someone else's card?","acceptedAnswer":{"@type":"Answer","text":"Pay with a card in your own name. The order must be placed from your own registration and rewards go only to you after KYC; mismatched payer details may be queried before a reward is approved. Contact us before opening a card dispute."}},
  {"@type":"Question","name":"Can I stack coupon codes?","acceptedAnswer":{"@type":"Answer","text":"No. One coupon code per order, and when a flash-sale offer is running the better single discount applies, not both. The Upgrade Your Size promo code is a separate field and can be combined with a coupon. Add-ons are charged at full price."}},
@@ -114,9 +114,11 @@
         <summary>Where do the prices in the Built-in Terminal come from?</summary>
         <div class="a">Every market in the terminal, from crypto and metals to oil, indices and FX pairs,
         uses live reference prices from Hyperliquid, a third-party venue we are not affiliated with. The
-        chart, the order book and the tape show that venue, and every simulated fill is settled on its
-        reference price. Reference prices can differ from what a real broker would have quoted at the
-        same moment.</div>
+        order book and the tape show that venue, and every simulated fill is settled on its reference
+        price. On Forex pairs and platinum, where Hyperliquid prints only a few trades a minute, the chart
+        draws from a consolidated spot feed instead, so it can differ from the fill price by about the
+        spread. Reference prices can differ from what a real broker would have quoted at the same
+        moment.</div>
       </details>
       <details>
         <summary>Are my trades sent to Hyperliquid or any broker?</summary>
@@ -306,7 +308,7 @@
         <summary>How long does a payout take?</summary>
         <div class="a">Each request is reviewed individually by our risk team, who check the account, its
         trading history and your verification. Once a request is unlocked, you confirm the amount and add
-        your USDT wallet in the dashboard (or confirm the saved one), the transfer goes out and you receive
+        your vUSDT wallet in the dashboard (or confirm the saved one), the transfer goes out and you receive
         a verifiable payout certificate. The Express Payout add-on places your requests at the front of
         the review queue.</div>
       </details>
@@ -338,7 +340,7 @@
         (KYC), and the minimum trading days on that funded account: 5 on 2-Step, 30 on Instant Funding.
         The request must be at or above the minimum amount, and only one request per account can be open
         at a time. The sequence is then: you request an amount, our team reviews the account and unlocks
-        the request, you confirm the amount and your USDT wallet, and the transfer is marked paid with a
+        the request, you confirm the amount and your vUSDT wallet, and the transfer is marked paid with a
         certificate.</div>
       </details>
       <details>
@@ -377,8 +379,9 @@
       </details>
       <details>
         <summary>Which networks or wallets can payouts be sent to?</summary>
-        <div class="a">Payouts go out in USDT to a wallet you control, on TRC-20, BEP-20 or Polygon. You
-        add the wallet in the dashboard when your request is unlocked, and it is saved for the next one.
+        <div class="a">Payouts go out in vUSDT, PTF's own token on the Polygon network, to a wallet you
+        control. You add the Polygon wallet address in the dashboard when your request is unlocked, and it
+        is saved for the next one.
         Changing a saved wallet requires a code we email to your registered address.</div>
       </details>
     </div>
@@ -407,8 +410,7 @@
         <summary>What payment methods do you accept, and can I pay in crypto?</summary>
         <div class="a">Cards through Stripe at checkout; we never see your card details. Crypto is possible
         on request: write to <a href="mailto:{{ support_email }}">{{ support_email }}</a> with the plan you
-        want, we issue an order with a Polygon address for vUSDT, and your account is activated once we
-        confirm the transfer. Store credits granted to your
+        want, and your account is activated once we confirm the transfer. Store credits granted to your
         account are applied at the end of the checkout.</div>
       </details>
       <details>

@@ -291,7 +291,7 @@ def test_zakup_daje_konto_aktywne_z_lokalnymi_poswiadczeniami():
     assert acc.status == "active"          # żadnego czekania w 'provisioning'
     assert len(acc.platform_login) == 9 and acc.platform_login.isdigit()
     assert acc.login == acc.platform_login
-    assert acc.platform_password and acc.platform_server == "MetaQuotes-Demo"
+    assert acc.platform_password and acc.platform_server == "PTF-sim"
     assert acc.platform_investor_password is None
     assert acc.mt5_backed is False
     s.close()
@@ -378,7 +378,7 @@ def test_bez_realnego_provisioningu_konto_konczy_sie_lokalnie():
     s = SessionLocal(); acc = s.get(Account, aid)
     assert acc.status == "active"
     assert acc.platform_login and len(acc.platform_login) == 9 and acc.platform_login.isdigit()
-    assert acc.platform_password and acc.platform_server == "MetaQuotes-Demo"
+    assert acc.platform_password and acc.platform_server == "PTF-sim"
     assert acc.platform_investor_password is None
     assert acc.mt5_backed is False
     s.close()

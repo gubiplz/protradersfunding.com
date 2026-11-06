@@ -25,9 +25,21 @@ init_db()
 ADMIN = {"X-Admin-Token": "tajny-token"}
 
 
+PUSTY_FH = {"s": "no_data"}
+
+
+def _fh_body(bary):
+    """Odpowiedź Finnhub z listy (sekundy UTC, o, h, l, c); None w świecy = minuta bez notowań."""
+    return {"s": "ok", "t": [b[0] for b in bary], "o": [b[1] for b in bary], "h": [b[2] for b in bary],
+            "l": [b[3] for b in bary], "c": [b[4] for b in bary], "v": [0 for _ in bary]}
+
+
 @pytest.fixture(autouse=True)
 def _czysto(monkeypatch):
     monkeypatch.setattr(terminal, "PROBKA_S", 0.001)
+    # Bez klucza feed i historia nie wychodzą do sieci; testy feedu ustawiają klucz same.
+    monkeypatch.setattr(terminal.get_settings(), "finnhub_api_key", "")
+    terminal._FEED_PAUZA["do"] = 0.0
     s = SessionLocal()
     s.query(TerminalCandle).delete()
     row = s.get(AppSetting, terminal.SWIECE_KLUCZ)
@@ -108,7 +120,7 @@ def test_cron_candles_wymaga_sekretu_i_oddaje_wynik(monkeypatch):
 # --- historia 1m z zewnętrznego źródła (MetaApi / Twelve Data) ----------------
 def _hist_zrodlo(monkeypatch, **pola):
     s = terminal.get_settings()
-    for k, v in {"metaapi_token": "", "metaapi_candles_account_id": "", "twelvedata_api_key": "",
+    for k, v in {"metaapi_token": "", "metaapi_candles_account_id": "", "twelvedata_api_key": "", "finnhub_api_key": "",
                  "candles_history_days": 2, "candles_history_symbols": "", **pola}.items():
         monkeypatch.setattr(s, k, v)
     monkeypatch.setattr(terminal, "HIST_ZAPYTAN", 20)
@@ -172,12 +184,13 @@ def test_dociaganie_historii_lata_dziury_i_idzie_wstecz(monkeypatch):
         assert len(m1) == 120 and m1[-1]["close"] == 1.1 and m1[0]["close"] == 1.205
 
 
-def test_bez_zrodla_historii_cron_tylko_probkuje(monkeypatch):
-    _hist_zrodlo(monkeypatch)
+def test_bez_kluczy_cron_tylko_probkuje(monkeypatch):
+    _hist_zrodlo(monkeypatch)                      # bez MetaApi, Twelve Data i Finnhub
     assert terminal.uzupelnij_historie(1.0)["skipped"] is True
+    assert terminal.odswiez_feed()["skipped"] is True
     _mid_sekwencja(monkeypatch, [1.1, 1.2])
     w = terminal.cron_swiece(0.02)
-    assert w["rows"] == len(markets.SAMPLED) and w["history"]["skipped"] is True
+    assert w["rows"] == len(markets.SAMPLED) and w["history"]["skipped"] is True and w["feed_runs"] == 0
 
 
 def test_twelve_data_jako_zrodlo_historii(monkeypatch):
@@ -199,8 +212,76 @@ def test_twelve_data_jako_zrodlo_historii(monkeypatch):
     assert w["markets"]["xyz:JP225"]["rows"] == 0 and w["markets"]["xyz:JP225"]["done"] is False
     q = {p["symbol"]: p for _, p in zapytania}
     assert q["EUR/USD"]["interval"] == "1min" and q["EUR/USD"]["outputsize"] == 5000 and q["EUR/USD"]["apikey"] == "td-key"
-    assert "end_date" not in q["EUR/USD"] and q["USD/JPY"]["timezone"] == "UTC"
+    assert q["EUR/USD"]["end_date"] == "2026-11-06 14:00:00" and q["USD/JPY"]["timezone"] == "UTC"
     s = SessionLocal()
     r = s.query(TerminalCandle).filter(TerminalCandle.coin == "xyz:EUR").order_by(TerminalCandle.ts).all()
     assert [(x.ts.minute, x.c, x.n) for x in r] == [(58, 1.15, 0), (59, 1.1505, 0)]
     s.close()
+
+
+# --- feed spot (Finnhub) dla FX: nadpisuje próbki mid, próbki go nie ruszają -------
+def test_feed_spot_nadpisuje_probki_a_probki_nie_nadpisuja_feedu(monkeypatch):
+    monkeypatch.setattr(terminal.get_settings(), "finnhub_api_key", "fh-key")
+    baza = datetime(2026, 11, 6, 15, 0)
+    sek = int(baza.replace(tzinfo=timezone.utc).timestamp())
+    s = SessionLocal()
+    _wiersz(s, "xyz:EUR", baza, n=40, px=1.1153)                     # próbka mid, 4 miejsca
+    s.commit(); s.close()
+    zapytania = []
+
+    def transport(url, params):
+        zapytania.append((url, dict(params)))
+        if params["symbol"] != "OANDA:EUR_USD":
+            return 200, PUSTY_FH
+        return 200, _fh_body([(sek, 1.11498, 1.11503, 1.11491, 1.11501), (sek + 60, 1.11501, None, 1.11499, 1.11502),
+                              (sek + 120 + 17, 1.11502, 1.11511, 1.11500, 1.11509)])
+
+    w = terminal.odswiez_feed(transport=transport)
+    assert w["xyz:EUR"] == 2 and w["xyz:GBP"] == 0 and "xyz:JP225" not in w
+    assert zapytania[0][0].endswith("/forex/candle") and zapytania[0][1]["resolution"] == "1" and zapytania[0][1]["token"] == "fh-key"
+    assert zapytania[0][1]["to"] - zapytania[0][1]["from"] == terminal.FEED_OKNO_S
+    s = SessionLocal()
+    r = {x.ts: x for x in s.query(TerminalCandle).filter(TerminalCandle.coin == "xyz:EUR").all()}
+    assert (r[baza].o, r[baza].h, r[baza].l, r[baza].c, r[baza].n) == (1.11498, 1.11503, 1.11491, 1.11501, terminal.FEED_N)
+    assert baza + timedelta(minutes=1) not in r                        # minuta z brakiem w feedzie pominięta
+    assert r[baza + timedelta(minutes=2)].c == 1.11509                  # 15:02:17 → minuta 15:02
+    s.close()
+    # Próbki mid tej minuty nie nadpisują feedu; nowa minuta bez feedu dalej z próbek.
+    terminal._zapisz_swiece({("xyz:EUR", baza): [1.115, 1.1156, 1.115, 1.1156, 5],
+                             ("xyz:EUR", baza + timedelta(minutes=3)): [1.1151, 1.1151, 1.1151, 1.1151, 5]})
+    s = SessionLocal()
+    r = {x.ts: x for x in s.query(TerminalCandle).filter(TerminalCandle.coin == "xyz:EUR").all()}
+    assert (r[baza].h, r[baza].n) == (1.11503, terminal.FEED_N) and r[baza + timedelta(minutes=3)].n == 5
+    s.close()
+    # Ta sama odpowiedź drugi raz: nic do zapisania.
+    assert terminal.odswiez_feed(transport=transport)["xyz:EUR"] == 0
+
+
+def test_probkowanie_odswieza_feed_w_trakcie(monkeypatch):
+    monkeypatch.setattr(terminal.get_settings(), "finnhub_api_key", "fh-key")
+    wywolania = []
+    monkeypatch.setattr(terminal, "odswiez_feed", lambda transport=None: wywolania.append(1) or {})
+    monkeypatch.setattr(terminal, "FEED_CO_S", 0.01)
+    _mid_sekwencja(monkeypatch, [1.1, 1.2, 1.3])
+    w = terminal.probkuj_swiece(budzet_s=0.05)
+    assert w["feed_runs"] >= 2 and len(wywolania) == w["feed_runs"]
+    assert terminal.probkuj_swiece(budzet_s=0.01, zajmij=False, feed=False)["feed_runs"] == 0
+
+
+def test_finnhub_jako_zrodlo_historii_gdy_brak_innych_kluczy(monkeypatch):
+    teraz = datetime(2026, 11, 6, 14, 0)
+    _hist_zrodlo(monkeypatch, finnhub_api_key="fh-key")                 # bez MetaApi i Twelve Data
+    sek = int(teraz.replace(tzinfo=timezone.utc).timestamp())
+    zapytania = []
+
+    def transport(url, params, headers):
+        zapytania.append((url, dict(params)))
+        if params["symbol"] != "OANDA:EUR_USD" or params["to"] < sek - 60:
+            return 200, PUSTY_FH
+        return 200, _fh_body([(sek - 120, 1.1, 1.1, 1.1, 1.1), (sek - 60, 1.1, 1.1, 1.1, 1.1)])
+
+    w = terminal.uzupelnij_historie(5.0, transport=transport, teraz=teraz)
+    assert w["source"] == "finnhub" and w["markets"]["xyz:EUR"]["rows"] == 2 and "xyz:JP225" not in w["markets"]
+    assert zapytania[0][1]["to"] == sek and zapytania[0][1]["to"] - zapytania[0][1]["from"] == 7 * 24 * 60 * 60
+    w2 = terminal.uzupelnij_historie(5.0, transport=transport, teraz=teraz)
+    assert w2["markets"]["xyz:EUR"]["done"] is True

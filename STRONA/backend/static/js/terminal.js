@@ -175,6 +175,8 @@
   const INT_LBL = { '1m': '1', '3m': '3', '5m': '5', '15m': '15', '30m': '30', '1h': '60', '4h': '240', '1d': '1D', '1w': '1W' };
   const PERIOD = { '1m': ['minute', 1], '3m': ['minute', 3], '5m': ['minute', 5], '15m': ['minute', 15], '30m': ['minute', 30], '1h': ['hour', 1], '4h': ['hour', 4], '1d': ['day', 1], '1w': ['week', 1] };
   let chart = null, barCb = null, histLimit = 500, lastBar = null;
+  // Chart source in the tooltip title: thin markets draw from the server's spot feed.
+  const venueLbl = () => (S.m && S.m.sampled ? 'Spot feed' : F.VENUES[S.venue].label);
   const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   // Narrow screen: OHLC and indicator legend only under the crosshair (chart touch) —
   // a fixed one hid a quarter of the candles and the high label.
@@ -194,7 +196,7 @@
         },
         tooltip: {
           showRule: rule,
-          title: { show: true, color: txt, size: 14, template: `${S.sym} · ${INT_LBL[S.interval]} · ${F.VENUES[S.venue].label}` },
+          title: { show: true, color: txt, size: 14, template: `${S.sym} · ${INT_LBL[S.interval]} · ${venueLbl()}` },
           // Time is on the axis under the crosshair — without it the legend fits one line.
           legend: { color: muted, size: 12, template: [{ title: 'O ', value: '{open}' }, { title: 'H ', value: '{high}' }, { title: 'L ', value: '{low}' }, { title: 'C ', value: '{close}' }, { title: 'Chg ', value: '{change}' }, { title: 'Vol ', value: '{volume}' }] },
         },
@@ -358,7 +360,7 @@
         } catch (e) {
           if (nr !== loadSeq) return;
           callback([], { forward: false, backward: false });
-          toast('Chart data unavailable', `${F.VENUES[S.venue].label}: ${e.message}`, true);
+          toast('Chart data unavailable', `${venueLbl()}: ${e.message}`, true);
         }
       },
       subscribeBar: ({ callback }) => { barCb = callback; },
@@ -659,7 +661,7 @@
     // Interval only: swap the candles; book and trades keep flowing without reconnecting.
     strm.interval(i);
     lastBar = null; barNext = null;
-    chart.setStyles({ candle: { tooltip: { title: { template: `${S.sym} · ${INT_LBL[S.interval]} · ${F.VENUES[S.venue].label}` } } } });
+    chart.setStyles({ candle: { tooltip: { title: { template: `${S.sym} · ${INT_LBL[S.interval]} · ${venueLbl()}` } } } });
     reloadChart();
   }
   $('tRanges').addEventListener('click', (e) => {
@@ -964,20 +966,48 @@
     renderBook(); renderTrades(); renderTicker();
     if (chart) {
       lastBar = null;
-      chart.setStyles({ candle: { tooltip: { title: { template: `${S.sym} · ${INT_LBL[S.interval]} · ${F.VENUES[S.venue].label}` } } } });
+      chart.setStyles({ candle: { tooltip: { title: { template: `${S.sym} · ${INT_LBL[S.interval]} · ${venueLbl()}` } } } });
       reloadChart();
     }
+    /* Thin markets (FX, platinum): the chart follows the spot feed kept by the server
+       (see /api/terminal/candles), polled every few seconds; the exchange's ticks and
+       candles would pull the bar back to a 4-decimal mid. Orders still fill on Hyperliquid. */
+    const spot = !!S.m.sampled;
     strm = F.stream(S.venue, S.m, S.interval, {
       book: (b, a) => { S.book = { bids: b, asks: a }; drawBook(); },
-      top: (b, a) => { S.top = [b, a]; drawBook(); tickBar((b + a) / 2); },
+      top: (b, a) => { S.top = [b, a]; drawBook(); if (!spot) tickBar((b + a) / 2); },
       trades: (list) => {
         S.trades = list.concat(S.trades).sort((x, y) => y.t - x.t).slice(0, 80);
         if (!tradesRaf) tradesRaf = requestAnimationFrame(() => { tradesRaf = 0; renderTrades(); });
       },
-      candle: mergeBar,
+      candle: (k) => { if (!spot) mergeBar(k); },
       ticker: (t) => { S.tk = { ...S.tk, ...t }; if (!tickRaf) tickRaf = requestAnimationFrame(() => { tickRaf = 0; renderTicker(); }); },
     });
     strm.group(S.group);
+    spotPoll(spot);
+  }
+  /* Spot feed for thin markets: the last two bars of the open interval every 8 s. The
+     server keeps them fresh from its own feed; the browser never talks to the provider. */
+  let spotT = 0, spotSeq = 0;
+  function spotPoll(on) {
+    clearInterval(spotT); spotT = 0;
+    if (!on) return;
+    const seq = ++spotSeq;
+    const tick = async () => {
+      if (document.hidden || !barCb || seq !== spotSeq) return;
+      try {
+        const d = await (await fetch(`/api/terminal/candles?symbol=${S.sym}&interval=${S.interval}&limit=2`)).json();
+        if (seq !== spotSeq || !d.candles) return;
+        d.candles.forEach((k) => {
+          if (!lastBar) return;
+          if (k.timestamp === lastBar.timestamp) lastBar = { ...k, volume: lastBar.volume };
+          else if (k.timestamp > lastBar.timestamp) lastBar = k;
+          else return;
+          pushBar(lastBar);
+        });
+      } catch (e) {}
+    };
+    tick(); spotT = setInterval(tick, 8000);
   }
   const drawBook = () => { if (!bookRaf) bookRaf = requestAnimationFrame(() => { bookRaf = 0; renderBook(); sideSpread(); updateTicket(); }); };
   // Live spread between the Buy and Sell buttons (best ask − best bid); amber when unusually wide.
@@ -988,7 +1018,7 @@
     const n = el.querySelector('b');
     if (n.textContent !== t) n.textContent = t;
     el.classList.toggle('wide', w);
-    el.title = v == null ? 'Live spread' : `Live spread: ${t} (${((v / ((a + b) / 2)) * 100).toFixed(4)}%) on ${F.VENUES[S.venue].label}`;
+    el.title = v == null ? 'Live spread' : `Live spread: ${t} (${((v / ((a + b) / 2)) * 100).toFixed(4)}%) on ${venueLbl()}`;
   }
   let hlState = 'connecting', latency = null;
   F.onHlState((s) => { hlState = s; renderConn(); });
@@ -1974,7 +2004,7 @@
   let tradesKey = '', tipXY = [0, 0], tipT = 0;
   function drawTrades(force) {
     if (!chart) return;
-    const hist = S.showTrades && S.st ? (S.st.history || []).filter((h) => h.symbol === S.sym && h.opened_at && h.closed_at && h.entry && h.close).slice(0, 60) : [];
+    const hist = S.showTrades && S.st ? (S.st.history || []).filter((h) => h.symbol === S.sym && h.on_chart !== false && h.opened_at && h.closed_at && h.entry && h.close).slice(0, 60) : [];
     // The 15 s state refresh doesn't redraw trades when they haven't changed (hover stays).
     const key = S.sym + '|' + hist.map((h) => h.id).join(',');
     if (!force && key === tradesKey) return;
@@ -2676,7 +2706,7 @@
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !panel.hidden) { formOpen = false; openPanel(false); } });
 
   /* Servers as in MT5: type a name once, it stays on the list for next time. */
-  const srvs = () => lsJson('pf_term_servers', []);
+  const srvs = () => lsJson('pf_term_servers', ['PTF-sim']);
   function saveServer(name) {
     const list = srvs().filter((x) => x.toLowerCase() !== name.toLowerCase());
     list.unshift(name);
