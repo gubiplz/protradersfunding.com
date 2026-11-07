@@ -339,7 +339,19 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .store-chal{margin:0 auto 18px}
 #view .chal-grid{max-width:920px;margin:0 auto}
 #view .chal-extras{max-width:920px}
-#view .chal-btn.go{border:0;font-weight:700}
+/* Portal nie ładuje site.css (.btn / .btn-ghost) — dociągamy wygląd jak na LP. */
+#view .chal-btn.go{border:0;font-weight:700;background:var(--grad);color:#fff;
+  box-shadow:0 8px 18px -10px color-mix(in srgb,var(--acc) 55%,transparent)}
+/* Star card keeps tier gold CTA like LP (ID rule above would otherwise force teal). */
+#view .chal-card.star .chal-btn.go{
+  background:linear-gradient(180deg,color-mix(in srgb,var(--c) 82%,#fff),var(--c));
+  color:var(--ct);box-shadow:0 8px 20px -10px var(--c)}
+#view .chal-btn.btn-ghost{background:transparent;border:1px solid var(--line2);color:var(--txt);font-weight:600}
+#view .chal-btn.btn-ghost:hover{border-color:var(--acc);color:var(--acc);background:var(--acc-bg)}
+#view .chal-msg{max-width:920px;margin:10px auto 0;font-size:12.5px;line-height:1.5;border-radius:10px;padding:9px 12px}
+#view .chal-msg.ok{background:color-mix(in srgb,var(--green) 9%,transparent);color:var(--green)}
+#view .chal-msg.bad{background:color-mix(in srgb,var(--red) 9%,transparent);color:var(--red)}
+#view .chal-msg[hidden]{display:none}
 @media (max-width:900px){
   #view .chal-grid{grid-template-columns:minmax(0,340px);justify-content:center}
 }

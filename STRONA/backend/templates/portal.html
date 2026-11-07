@@ -48,7 +48,7 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
 <!-- Dial codes and per-country phone lengths. Same table the server validates
      against, so the buy modal and /api/checkout can never disagree. -->
 </head>
-<body>
+<body data-payout-days="{{ payout_days or 14 }}" data-leverage-max="{{ leverage_max or 100 }}" data-leverage="{{ leverage_text or '' }}">
 
 <!-- ======================= AUTH (split screen) ======================= -->
 <div id="auth" class="auth-wrap hidden">
@@ -231,6 +231,9 @@ const SITE_NAME={{ site_name|tojson }};
 const ASSET_V={{ asset_v|tojson }};
 /* Tryb testowy wypłat w vUSDT (null gdy VUSDT_TEST_PAYOUTS wyłączone / brak kluczy). */
 const VUSDT_TEST={{ vusdt_test|tojson }};
+/* Same signals LP Challenges cards read from <body data-*>. */
+window.PAYOUT_DAYS={{ payout_days|default(14)|int }};
+window.LEVERAGE_MAX={{ leverage_max|default(100)|int }};
 </script>
 <script defer src="/countries.js?v={{ asset_v }}"></script>
 <script defer src="/static/js/np-kit.js?v={{ asset_v }}"></script>
