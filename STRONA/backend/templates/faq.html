@@ -34,7 +34,7 @@
  {"@type":"Question","name":"Does a payout count against my daily loss limit?","acceptedAnswer":{"@type":"Answer","text":"No. The deduction is booked together with a new day-start baseline equal to the new balance, so the daily floor is recalculated from there and the payout itself cannot trigger a breach."}},
  {"@type":"Question","name":"Is there a cap on total payouts?","acceptedAnswer":{"@type":"Answer","text":"No. There is no cap on the number of payouts or on the total paid from one account. By default requests are spaced every 14 calendar days (bi-weekly); with the On-demand Payout add-on there is no wait between requests. Each request is reviewed individually."}},
  {"@type":"Question","name":"What profit split applies to payouts on each plan?","acceptedAnswer":{"@type":"Answer","text":"90% on every 2-Step plan and 70% on Instant Funding, on all account sizes. The Split Boost add-on raises Instant Funding to 80%."}},
- {"@type":"Question","name":"Which networks or wallets can payouts be sent to?","acceptedAnswer":{"@type":"Answer","text":"Payouts go out in vUSDT, PTF's own token on the Polygon network, to a wallet you control. You add the Polygon wallet address in the dashboard when your request is unlocked; changing a saved wallet requires a code emailed to your registered address."}},
+ {"@type":"Question","name":"Which networks or wallets can payouts be sent to?","acceptedAnswer":{"@type":"Answer","text":"Payouts go out in vUSDT, PTF's native internal token on Polygon — not Tether USDT — to a wallet you control. It is transferable on Polygon; we do not redeem it for cash or fiat, and its value is not guaranteed. You add the Polygon wallet address in the dashboard when your request is unlocked; changing a saved wallet requires a code emailed to your registered address."}},
  {"@type":"Question","name":"What payment methods do you accept, and can I pay in crypto?","acceptedAnswer":{"@type":"Answer","text":"Cards through Stripe at checkout. Crypto is possible on request: write to support with the plan you want, and the account is activated once the transfer is confirmed. Store credits are applied at the end of the checkout."}},
  {"@type":"Question","name":"Can I get a refund before I start trading?","acceptedAnswer":{"@type":"Answer","text":"Only if your MT5 credentials have not been delivered yet. Delivery is automatic right after payment, so that window is very short. Duplicate charges and accounts we could not provision are always refunded in full."}},
  {"@type":"Question","name":"Can I pay with someone else's card?","acceptedAnswer":{"@type":"Answer","text":"Pay with a card in your own name. The order must be placed from your own registration and rewards go only to you after KYC; mismatched payer details may be queried before a reward is approved. Contact us before opening a card dispute."}},
@@ -386,10 +386,11 @@
       </details>
       <details>
         <summary>Which networks or wallets can payouts be sent to?</summary>
-        <div class="a">Payouts go out in vUSDT, PTF's own token on the Polygon network, to a wallet you
-        control. You add the Polygon wallet address in the dashboard when your request is unlocked, and it
-        is saved for the next one.
-        Changing a saved wallet requires a code we email to your registered address.</div>
+        <div class="a">Payouts go out in <b>vUSDT</b>, PTF's native internal token on Polygon — not
+        Tether USDT — to a wallet you control. It is transferable on Polygon; we do not redeem it for
+        cash or fiat, and its market value is not guaranteed. You add the Polygon wallet address in the
+        dashboard when your request is unlocked, and it is saved for the next one. Changing a saved
+        wallet requires a code we email to your registered address.</div>
       </details>
     </div>
 

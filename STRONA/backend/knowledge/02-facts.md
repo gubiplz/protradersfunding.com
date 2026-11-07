@@ -126,7 +126,9 @@ Requirements, all four enforced in code:
 2-Step and Instant, enforced via `PAYOUT_INTERVAL_DAYS`. Accounts with the **On-demand
 Payout** add-on (`ondemand_payout`) skip that wait. Rewards are paid in **vUSDT on Polygon**.
 The Challenge fee credit on first payout is additional vUSDT, not a card refund.
-Do not mention Express Payout ($49 / review queue) — that add-on was withdrawn.
+**vUSDT** is PTF's native internal token on Polygon — **not** Tether USDT. Transferable to the
+trader's wallet; **no** cash/fiat redemption by PTF; value not guaranteed. Do **not** publish
+a contract address. Do not mention Express Payout ($49 / review queue) — that add-on was withdrawn.
 
 ## 6. KYC
 
