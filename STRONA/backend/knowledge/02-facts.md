@@ -35,7 +35,7 @@ and a marked gap is safe. An invented answer about money is not.
 | Profit split           | **90%**           | **70%** |
 | Leverage               | up to 1:100       | up to 1:100 |
 | Weekend trading        | $199 add-on       | $199 add-on |
-| Fee refunded           | with first payout | with first payout |
+| Fee credited           | with first payout | with first payout |
 
 Instant Funding accounts are created with `phase="funded", status="funded"` — funded
 immediately on purchase, no evaluation.
@@ -115,8 +115,9 @@ Requirements, all four enforced in code:
 - **Methods:** USDT (TRC-20, BEP-20 or Polygon), bank transfer (holder, IBAN, SWIFT/BIC;
   bank name optional), Wise (email).
 - **Flow:** `pending` → reviewed by the team → `paid`, or `rejected` with a reason.
-- **First payout on an account includes a full refund of the challenge fee paid for that
-  account**, added on top of the profit share. Every plan, Instant Funding included.
+- **First payout on an account includes a full credit of the challenge fee paid for that
+  account** as additional vUSDT (not a card refund), added on top of the profit share.
+  Every plan, Instant Funding included.
 - After a payout the balance is reduced by the profit consumed; a full payout brings the
   account back to its starting balance.
 
@@ -143,12 +144,15 @@ Do not mention Express Payout ($49 / review queue) — that add-on was withdrawn
 
 **Payment:** Stripe Checkout, one-time, in USD.
 
-**Refund policy:**
-- Refunded: the full fee with your first payout; a cancellation *before* the MT5 account
-  has been created; our error (duplicate charge, or an account not provisioned within
-  24 hours).
-- Not refunded: after credentials have been delivered and trading is possible; after
-  failing a challenge; accounts terminated for prohibited conduct.
+**Refund / fee-credit policy:**
+- **Fee credit (vUSDT):** on the first approved payout from that funded account, the
+  challenge fee is credited as additional vUSDT — not a refund to the card.
+- **Card refunds:** a cancellation *before* the MT5 account has been created; our error
+  (duplicate charge, or an account not provisioned within 24 hours).
+- **Not refunded to card:** after credentials have been delivered and trading is
+  possible; after failing a challenge; accounts terminated for prohibited conduct.
+  (The fee may still be credited later as vUSDT on a first payout if the account is
+  funded and a reward is approved.)
 - With a coupon, a refund equals the amount **actually paid**, not the list price.
 - Approved refunds return to the original payment method, normally **5–10 business days**.
 - Chargebacks: ask the customer to contact us first. An unwarranted chargeback leads to

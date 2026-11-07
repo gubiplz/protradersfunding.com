@@ -234,7 +234,7 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
         "payout_approved": (
             f"Payout approved 🤑 ({login})",
             f"{name}, your payout of {ctx.get('trader_share')} has been approved"
-            f"{' (including your challenge fee refund)' if ctx.get('fee_refund') else ''}. "
+            f"{' (including your challenge fee credit)' if ctx.get('fee_refund') else ''}. "
             f"Funds are on the way.",
         ),
         "payout_rejected": (
@@ -755,7 +755,7 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
         parts = [
             _head_html("Payout", "Payout approved",
                        f"{name}, your payout has been approved"
-                       f"{', including your challenge fee refund' if ctx.get('fee_refund') else ''}. "
+                       f"{', including your challenge fee credit' if ctx.get('fee_refund') else ''}. "
                        f"Funds are on the way."),
             _stat_html("Your payout", str(ctx.get("trader_share") or "—")),
             _button_html("View Dashboard", f"{portal}?view=payouts"),
