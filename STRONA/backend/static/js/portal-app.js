@@ -2291,16 +2291,22 @@ const VIEWS={
   const hot=shown.findIndex(x=>x.popular);
   const star=hot>=0?hot:Math.floor(shown.length/2);
   const usd=v=>'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:v%1?2:0,maximumFractionDigits:2});
+  /* Same back-face rows as LP Challenges (site.js cardRules). */
   const rules=p=>{
     const instant=p.steps===0;
+    const lev='Up to 1:'+(window.LEVERAGE_MAX||100);
+    const rewards=window._shopOd?'On demand'
+      :((window.PAYOUT_DAYS|0)===0?'On demand'
+        :(window.PAYOUT_DAYS===14||window.PAYOUT_DAYS==null?'Bi-weekly':`Every ${window.PAYOUT_DAYS} days`));
     return [
       ['Profit target',instant?'None':`${p.profit_target_p1}% / ${p.profit_target_p2}%`],
       ['Daily loss limit',p.max_daily_loss_pct+'%'],
       ['Max drawdown',p.max_overall_loss_pct+'%'],
-      ['Min. trading days (funded)',String(p.min_trading_days)],
+      ['Min. trading days',String(p.min_trading_days)],
       ['Profit split',(instant?'':'Up to ')+p.profit_split_pct+'%'],
-      ['Rewards',window._shopOd?'On demand':'Bi-weekly'],
+      ['Rewards',rewards],
       ['Max open volume',p.max_lots+' lots'],
+      ['Leverage',lev],
       ['Fee credit','With first payout'],
     ];
   };
@@ -2354,8 +2360,13 @@ const VIEWS={
       ${anyCt?`<div class="chal-opt"><span><b>Copytrading</b><small>+$${ctCena}</small></span>
         <button class="chal-sw" id="shop-ct" type="button" role="switch" aria-checked="${window._shopCt}" aria-label="Add copytrading"></button></div>`:''}
       <div class="chal-opt"><span><b>News trading</b><small>Included</small></span></div>
+      <div class="chal-opt chal-code">
+        <input id="shop-coupon" autocomplete="off" placeholder="Coupon code" aria-label="Coupon code"
+          value="${esc(window._shopCode||pfCoupon()||pfPromo()||'')}">
+        <button id="shop-apply" type="button">Apply</button>
+      </div>
     </div>
-    <p class="chal-fine">Coupon codes apply at checkout. Fee credit with first payout is additional vUSDT, not a card refund.</p>`;
+    <div class="code-msg chal-msg" id="shop-codemsg" hidden></div>`;
   const slidePill=box=>{
     const on=box&&box.querySelector('button.on'); if(!on)return;
     let ind=box.querySelector('.chal-ind');
@@ -2365,11 +2376,33 @@ const VIEWS={
   const q1=(s,r)=> (r||document).querySelector(s);
   const qa=(s,r)=>[...(r||document).querySelectorAll(s)];
   slidePill($('shopModels')); slidePill($('shopTiers'));
-  qa('#shopModels button').forEach(b=>b.onclick=()=>{window._shopTab=b.dataset.m;VIEWS.store()});
-  qa('#shopTiers button').forEach(b=>b.onclick=()=>{window._shopTier=b.dataset.t;VIEWS.store()});
-  const wt=$('shop-wt'); if(wt)wt.onclick=()=>{window._shopWt=!window._shopWt;VIEWS.store()};
-  const od=$('shop-od'); if(od)od.onclick=()=>{window._shopOd=!window._shopOd;VIEWS.store()};
-  const ct=$('shop-ct'); if(ct)ct.onclick=()=>{window._shopCt=!window._shopCt;VIEWS.store()};
+  /* Defer full re-render: replacing the DOM on the same click lets the
+     synthetic mouseup/click land on a challenge card underneath (flip/buy). */
+  const shopRedraw=()=>{clearTimeout(window._shopRedraw);window._shopRedraw=setTimeout(()=>VIEWS.store(),80)};
+  const shopTab=(fn)=>e=>{
+    e.preventDefault(); e.stopPropagation();
+    fn();
+    if(window._shopFlip)window._shopFlip.clear();
+    shopRedraw();
+  };
+  qa('#shopModels button').forEach(b=>b.onclick=shopTab(()=>{window._shopTab=b.dataset.m}));
+  qa('#shopTiers button').forEach(b=>b.onclick=shopTab(()=>{window._shopTier=b.dataset.t}));
+  const shopToggle=(flag,btn)=>e=>{
+    e.preventDefault(); e.stopPropagation();
+    window[flag]=!window[flag];
+    if(btn)btn.setAttribute('aria-checked',window[flag]);
+    shopRedraw();
+  };
+  const wt=$('shop-wt'); if(wt)wt.onclick=shopToggle('_shopWt',wt);
+  const od=$('shop-od'); if(od)od.onclick=shopToggle('_shopOd',od);
+  const ct=$('shop-ct'); if(ct)ct.onclick=shopToggle('_shopCt',ct);
+  const shopApply=$('shop-apply'); if(shopApply)shopApply.onclick=e=>{e.preventDefault();e.stopPropagation();shopApplyCode()};
+  const shopInp=$('shop-coupon');
+  if(shopInp){
+    shopInp.onclick=e=>e.stopPropagation();
+    shopInp.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();shopApplyCode()}};
+  }
+  if(window._shopCodeMsg)shopCodeMsg(window._shopCodeMsg.kind,window._shopCodeMsg.html);
   qa('#shopGrid .chal-card').forEach(card=>{
     const turn=()=>{
       const on=card.classList.toggle('flip');
@@ -2389,6 +2422,8 @@ const VIEWS={
       if(window._shopWt)q.set('wt','1'); else q.delete('wt');
       if(window._shopOd)q.set('od','1'); else q.delete('od');
       if(window._shopCt)q.set('ct','1'); else q.delete('ct');
+      const code=(($('shop-coupon')&&$('shop-coupon').value)||window._shopCode||'').trim().toUpperCase();
+      if(code)q.set('coupon',code); else q.delete('coupon');
       history.replaceState({},'',location.pathname+'?'+q.toString()+location.hash);
       openBuy(key);
     };
@@ -3889,10 +3924,6 @@ function openBuy(key){
         <p class="hint" style="text-align:left;margin:-6px 0 0">Purchases are tied to your <b>account e-mail</b>, and credentials
           and the invoice are delivered there. Different address?
           <button type="button" class="linklike" onclick="closeBuy();logout()">Log out</button> and register with it.</p>
-        <input id="c-code" placeholder="Discount / promo code (optional)" class="inp"
-          autocomplete="off" spellcheck="false"
-          value="${esc(new URLSearchParams(location.search).get('coupon')||pfCoupon()||(p.promo_upgrade_size?pfPromo():''))}"
-          oninput="codeInput()">
         <div class="buy-addons${p.copytrading_offered?' buy-addons-3':''}">
           <label class="buy-addon">
             <input type="checkbox" id="c-weekend" onchange="quoteRefresh(true)"
@@ -3944,7 +3975,7 @@ function openBuy(key){
   window._buyKey=key;
   window._buyCode={coupon:null,promo:null};
   ccSet(kraj, false);
-  codeCheck();
+  hydrateBuyCode();
   syncBuyConsent();
   setTimeout(()=>$('c-first').focus(),50);
 }
@@ -4010,30 +4041,71 @@ async function quoteNow(){
 }
 function closeBuy(){document.getElementById('buy-modal')?.remove()}
 
-/* ONE field for every kind of code. A code recognized by /api/promo is the
-   "Upgrade Your Size" promo (bigger account, same fee) — anything else goes
-   to the server as a discount coupon. The server validates AGAIN at checkout,
-   this is display only. Classification lands in window._buyCode. */
-let _codeT=null;
-function codeInput(){clearTimeout(_codeT);_codeT=setTimeout(codeCheck,400)}
-async function codeCheck(){
-  const p=PRODUCTS.find(x=>x.key===window._buyKey), inp=$('c-code');
-  if(!p||!inp)return;
+/* Coupon lives on the shop strip (like LP). A /api/promo hit is the
+   "Upgrade Your Size" promo; anything else is a discount coupon. Server
+   re-validates at checkout — this only feeds the buy modal quote. */
+function shopCodeMsg(kind,html){
+  window._shopCodeMsg=kind?{kind,html}:null;
+  const el=$('shop-codemsg'), inp=$('shop-coupon');
+  if(inp){inp.classList.toggle('ok',kind==='ok');inp.classList.toggle('bad',kind==='bad')}
+  if(!el)return;
+  if(!kind){el.hidden=true;el.innerHTML='';return}
+  el.hidden=false; el.className='code-msg chal-msg '+kind;
+  el.innerHTML=`<span>${kind==='ok'?'✓':'✕'}</span><span>${html}</span>`;
+}
+async function shopValidateCode(code){
+  try{if((await api('/api/promo?code='+encodeURIComponent(code))).valid)return{promo:code,coupon:null,pct:0}}catch(e){}
+  try{
+    const d=await api('/api/coupon/'+encodeURIComponent(code));
+    if(d&&d.pct)return{promo:null,coupon:d.code||code,pct:d.pct};
+  }catch(e){}
+  return null;
+}
+async function shopApplyCode(){
+  const inp=$('shop-coupon'); if(!inp)return;
   const code=(inp.value||'').trim().toUpperCase();
   inp.value=code;
+  if(!code){
+    window._shopCode='';
+    try{localStorage.removeItem('pf_coupon_code');localStorage.removeItem('pf_coupon_pct');localStorage.removeItem('pf_promo_code')}catch(e){}
+    shopCodeMsg(null); return;
+  }
+  const state=await shopValidateCode(code);
+  if(!state){window._shopCode='';shopCodeMsg('bad',`<b>${esc(code)}</b> is not a valid code.`);return}
+  window._shopCode=code;
+  try{
+    if(state.promo){localStorage.setItem('pf_promo_code',code);localStorage.removeItem('pf_coupon_code');localStorage.removeItem('pf_coupon_pct')}
+    else{localStorage.setItem('pf_coupon_code',state.coupon);localStorage.setItem('pf_coupon_pct',String(state.pct||0));localStorage.removeItem('pf_promo_code')}
+  }catch(e){}
+  shopCodeMsg('ok', state.promo
+    ? `<b>${esc(code)}</b> applied: pay this size, trade one tier up.`
+    : `<b>${esc(state.coupon)}</b> applied: <b>${state.pct}% off</b> your challenge fee.`);
+}
+async function hydrateBuyCode(){
+  const p=PRODUCTS.find(x=>x.key===window._buyKey);
+  const code=(new URLSearchParams(location.search).get('coupon')
+    ||window._shopCode||($('shop-coupon')&&$('shop-coupon').value)||pfCoupon()||pfPromo()||'').trim().toUpperCase();
+  if(!p){window._buyCode={coupon:null,promo:null};return}
+  if(!code){
+    window._buyCode={coupon:null,promo:null};
+    const cap=$('buy-cap'); if(cap)cap.textContent='$'+fmt0(p.account_size);
+    const line=$('buy-promo'); if(line)line.hidden=true;
+    quoteRefresh(true); return;
+  }
   let promo=false;
-  if(code&&p.promo_upgrade_size){
+  if(p.promo_upgrade_size){
     try{promo=(await api('/api/promo?code='+encodeURIComponent(code))).valid}catch(e){}
   }
-  window._buyCode=promo?{coupon:null,promo:code}:{coupon:code||null,promo:null};
+  window._buyCode=promo?{coupon:null,promo:code}:{coupon:code,promo:null};
   try{
     if(promo)localStorage.setItem('pf_promo_code',code);
-    else if(!code)localStorage.removeItem('pf_promo_code');
+    else{localStorage.setItem('pf_coupon_code',code);localStorage.removeItem('pf_promo_code')}
   }catch(e){}
   const cap=$('buy-cap'); if(cap)cap.textContent='$'+fmt0(promo?p.promo_upgrade_size:p.account_size);
   const line=$('buy-promo'); if(line)line.hidden=!promo;
   quoteRefresh(true);
 }
+async function codeCheck(){return hydrateBuyCode()}
 
 function buyErr(msg){
   const el=$('buy-err');
