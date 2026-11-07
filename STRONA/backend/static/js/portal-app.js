@@ -4031,7 +4031,11 @@ async function quoteNow(){
   }catch(e){
     /* The preview must never block buying — fall back to the catalog price. */
     previewFailed=true;
-    if(e&&e.message&&/coupon/i.test(e.message))buyErr(e.message);
+    if(e&&e.message&&/coupon|personal|expired|already been used/i.test(e.message)){
+      buyErr(e.message);
+      try{localStorage.removeItem('pf_coupon_code');localStorage.removeItem('pf_coupon_pct')}catch(_){}
+      window._shopCode=''; window._buyCode={...(window._buyCode||{}),coupon:null};
+    }
     q={plan_price_usd:p.price_usd,discount_pct:0,discount_usd:0,
        weekend_fee_usd:wk?199:0,split_boost_fee_usd:sb?149:0,
        ondemand_payout_fee_usd:od?odCena:0,copytrading_fee_usd:cp?299:0,credits_used:0,
@@ -4039,8 +4043,13 @@ async function quoteNow(){
   }
   /* A coupon the server does not recognize changes nothing — say so instead
      of quietly showing the full price (promo codes are confirmed separately). */
-  if(!previewFailed&&bc.coupon&&!(q.discount_usd>0)){buyErr('This code is not valid right now. You can still buy without it.')}
-  else if(!previewFailed){const e=$('buy-err'); if(e)e.classList.add('hidden')}
+  if(previewFailed&&bc.coupon){
+    /* Keep the server's reason (e.g. personal/expired) — don't overwrite with a generic line. */
+  }else if(!previewFailed&&bc.coupon&&!(q.discount_usd>0)){
+    buyErr('This code is not valid right now. You can still buy without it.');
+    try{localStorage.removeItem('pf_coupon_code');localStorage.removeItem('pf_coupon_pct')}catch(e){}
+    window._shopCode=''; window._buyCode={coupon:null,promo:null};
+  }else if(!previewFailed){const e=$('buy-err'); if(e)e.classList.add('hidden')}
   const row=(l,v,cls)=>`<div class="q-row${cls?' '+cls:''}"><span>${l}</span><b class="mono">${v}</b></div>`;
   let h=row('Plan fee','$'+fmt(q.plan_price_usd));
   if(q.discount_usd>0)h+=row(q.discount_source==='offer'?(q.offer_title||`Flash sale (−${q.discount_pct}%)`):`Coupon (−${q.discount_pct}%)`,'−$'+fmt(q.discount_usd),'good');
@@ -4071,7 +4080,9 @@ async function shopValidateCode(code){
   try{
     const d=await api('/api/coupon/'+encodeURIComponent(code));
     if(d&&d.pct)return{promo:null,coupon:d.code||code,pct:d.pct};
-  }catch(e){}
+  }catch(e){
+    return{error:(e&&e.message)||'This code cannot be used right now.'};
+  }
   return null;
 }
 async function shopApplyCode(){
@@ -4084,7 +4095,14 @@ async function shopApplyCode(){
     shopCodeMsg(null); return;
   }
   const state=await shopValidateCode(code);
-  if(!state){window._shopCode='';shopCodeMsg('bad',`<b>${esc(code)}</b> is not a valid code.`);return}
+  if(!state||state.error){
+    window._shopCode='';
+    try{localStorage.removeItem('pf_coupon_code');localStorage.removeItem('pf_coupon_pct')}catch(e){}
+    shopCodeMsg('bad', state&&state.error
+      ? `<b>${esc(code)}</b> — ${esc(state.error)}`
+      : `<b>${esc(code)}</b> is not a valid code.`);
+    return;
+  }
   window._shopCode=code;
   try{
     if(state.promo){localStorage.setItem('pf_promo_code',code);localStorage.removeItem('pf_coupon_code');localStorage.removeItem('pf_coupon_pct')}

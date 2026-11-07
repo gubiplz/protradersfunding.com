@@ -227,13 +227,15 @@ def test_wymyslony_kod_z_prefiksem_nie_daje_cichego_zera():
 
 def test_podglad_kuponu_zna_kod_za_punkty():
     """Bez tego wlasny, swiezo wymieniony kod pokazywalby sie jako nieprawidlowy."""
-    tid, _ = _trader()
+    tid, h = _trader()
     kod = _kod(tid)
-    r = client.get(f"/api/coupon/{kod}")
+    # Personal PF-* wymaga sesji — anonim dostaje 401, nie fałszywy OK
+    assert client.get(f"/api/coupon/{kod}").status_code == 401
+    r = client.get(f"/api/coupon/{kod}", headers=h)
     assert r.status_code == 200 and r.json()["pct"] == 10.0
     # ale nie zdradza, czyj jest ani jaki ma status
     assert set(r.json()) == {"code", "pct"}
-    assert client.get("/api/coupon/PF-NIE-MA").status_code == 404
+    assert client.get("/api/coupon/PF-NIE-MA", headers=h).status_code == 400
 
 
 def test_generowany_kod_jest_czytelny_i_unikalny():

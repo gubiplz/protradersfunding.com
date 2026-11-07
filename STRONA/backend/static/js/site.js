@@ -97,7 +97,9 @@
       else { localStorage.removeItem('pf_coupon_code'); localStorage.removeItem('pf_coupon_pct'); }
     } catch (e) {}
   };
-  /** Sprawdza kod w API. Zwraca null, gdy nie jest ani promocją, ani kuponem. */
+  /** Sprawdza kod w API. Zwraca null, gdy nie jest ani promocją, ani kuponem.
+      Personal LUCKY/PF codes need a session — without it the API rejects them
+      here instead of at checkout. */
   async function validateCode(code) {
     try {
       if ((await (await fetch('/api/promo?code=' + encodeURIComponent(code))).json()).valid) {
@@ -105,10 +107,19 @@
       }
     } catch (e) {}
     try {
-      const r = await fetch('/api/coupon/' + encodeURIComponent(code));
+      const hdrs = {};
+      try {
+        const t = localStorage.getItem('pf_token');
+        if (t) hdrs.Authorization = 'Bearer ' + t;
+      } catch (e) {}
+      const r = await fetch('/api/coupon/' + encodeURIComponent(code), { headers: hdrs });
       if (r.ok) {
         const d = await r.json();
         if (d.pct) return { promo: null, coupon: d.code, pct: d.pct };
+      }
+      if (r.status === 400 || r.status === 401) {
+        const d = await r.json().catch(() => ({}));
+        return { error: d.detail || 'This code cannot be used right now.' };
       }
     } catch (e) {}
     return null;
@@ -645,8 +656,15 @@
     const state = await validateCode(code);
     /* Odrzucony kod kasuje takze to, co bylo zastosowane wczesniej: pole trzyma
        jeden kod naraz, wiec „UPGRADE applied" pod bledna wartoscia klamaloby. */
+    if (!state || state.error) {
+      applyCode(null);
+      inp.classList.add('bad');
+      msg('bad', state && state.error
+        ? `<b>${code}</b> — ${state.error}`
+        : `<b>${code}</b> is not a valid code.`);
+      return;
+    }
     applyCode(state);
-    if (!state) { inp.classList.add('bad'); msg('bad', `<b>${code}</b> is not a valid code.`); }
   }
 
   function renderObjectives() {

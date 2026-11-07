@@ -1589,24 +1589,52 @@ class CheckoutIn(BaseModel):
     consent_version: str | None = None
 
 
-@app.get("/api/coupon/{code}")
-def coupon_preview(code: str):
-    """Podgląd rabatu dla konfiguratora na landingu — sam procent, bez listy kodów.
+def _trader_id_z_authorization(authorization: str | None) -> int | None:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+    dane = auth._parse_session(authorization.split(" ", 1)[1].strip())
+    return int(dane["tid"]) if dane else None
 
-    Kody kupione za punkty też tu odpowiadają, inaczej trader dostawałby
-    „nieprawidłowy kod" na własny, świeżo wymieniony kod. Oddajemy WYŁĄCZNIE
-    procent: bez właściciela, bez statusu, bez terminu. Prawo do użycia i tak
-    sprawdza checkout, który zna zalogowanego tradera.
+
+@app.get("/api/coupon/{code}")
+def coupon_preview(code: str, authorization: str | None = Header(default=None)):
+    """Podgląd rabatu dla LP / portalu — te same reguły co checkout dla kodów osobistych.
+
+    Globalne kupony (WELCOME10…) działają anonimowo. LUCKY* i PF-* wymagają
+    sesji i aktywnego prawa użycia: inaczej kreator obiecywałby rabat, a modal
+    zakupu dopiero wywalał „personal and no longer active".
     """
     kod = code.strip().upper()
-    pct = catalog.COUPONS.get(kod)
-    if not pct and kod.startswith(loyalty.CODE_PREFIX):
+    tid = _trader_id_z_authorization(authorization)
+
+    if kod in catalog.LUCKY_CODES:
+        if tid is None:
+            raise HTTPException(401, "Sign in to use this personal coupon")
         session = SessionLocal()
         try:
-            k = session.query(RewardCode).filter(RewardCode.code == kod).first()
-            pct = k.pct if k else None
+            tr = session.get(Trader, tid)
+            if not tr or not billing._lucky_active(tr, kod):
+                raise HTTPException(400, "This coupon is personal and no longer active")
+            return {"code": kod, "pct": catalog.COUPONS[kod]}
         finally:
             session.close()
+
+    if kod.startswith(loyalty.CODE_PREFIX):
+        if tid is None:
+            raise HTTPException(401, "Sign in to use this personal coupon")
+        session = SessionLocal()
+        try:
+            tr = session.get(Trader, tid)
+            if not tr:
+                raise HTTPException(401, "Sign in to use this personal coupon")
+            k = loyalty.find_usable(session, tr, kod)
+            if k is None:
+                raise HTTPException(400, billing._powod_odmowy(session, tr, kod))
+            return {"code": kod, "pct": k.pct}
+        finally:
+            session.close()
+
+    pct = catalog.COUPONS.get(kod)
     if not pct:
         raise HTTPException(404, "Unknown coupon code")
     return {"code": kod, "pct": pct}

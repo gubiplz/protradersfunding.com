@@ -188,9 +188,10 @@ def test_reveal_kupon_lucky15_przy_najrzadszym_losie(monkeypatch):
         # waznosc ~48h od losowania
         delta = datetime.fromisoformat(expires) - datetime.now(timezone.utc)
         assert timedelta(hours=47) < delta <= timedelta(hours=48)
-        # endpoint informacyjny dalej zna kod (egzekwowanie jest w checkoucie)
-        assert c.get("/api/coupon/LUCKY15").json()["pct"] == 15.0
-        assert c.get("/api/coupon/LUCKY10").json()["pct"] == 10.0
+        # Personal LUCKY — podgląd wymaga sesji i aktywnego reveal (jak checkout)
+        assert c.get("/api/coupon/LUCKY15").status_code == 401
+        assert c.get("/api/coupon/LUCKY15", headers=h).json()["pct"] == 15.0
+        assert c.get("/api/coupon/LUCKY10", headers=h).status_code == 400
     assert _pole(tid, "bonus_points") in (0, None)   # kupon nie dosypuje punktow
 
 
