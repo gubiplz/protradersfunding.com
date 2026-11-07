@@ -956,10 +956,15 @@ html.promo-applied .promo-tag{background:rgba(255,255,255,.92);color:#4f46e5}
 /* The privacy choices bar styles itself (templates/_consent.html): it is shared with
    the portal and the terminal, which load different stylesheets. */
 
-/* ---------------- footer disclaimers ---------------- */
+/* ---------------- footer disclaimers ----------------
+   Jedna taśma tekstu w CSS columns: przeglądarka waży obie kolumny, więc
+   kończą się równo u dołu (jak wcześniej), zamiast sztywnego grida 2×1fr
+   z krótką lewą i wystającą prawą po dopisaniu payoutów. */
 .disclaimers h2{font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:14px}
-.disclaimers h3{font-size:12.5px;font-weight:600;color:var(--txt);margin:14px 0 6px}
-.disclaimers h3:first-child{margin-top:0}
-.disclaimers-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 36px;margin-bottom:14px}
+.disclaimers-flow{columns:2;column-gap:36px;column-fill:balance;margin-bottom:14px}
+.disclaimers-flow h3{font-size:12.5px;font-weight:600;color:var(--txt);margin:14px 0 6px;
+  break-after:avoid;break-inside:avoid;-webkit-column-break-after:avoid;-webkit-column-break-inside:avoid}
+.disclaimers-flow h3:first-child{margin-top:0}
+.disclaimers-flow p{margin:0 0 10px;break-inside:avoid;-webkit-column-break-inside:avoid}
 .disclaimers-date{color:var(--muted)}
-@media(max-width:760px){.disclaimers-grid{grid-template-columns:1fr}}
+@media(max-width:760px){.disclaimers-flow{columns:1}}
