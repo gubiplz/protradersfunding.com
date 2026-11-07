@@ -39,7 +39,7 @@
   <h2>4. Challenges, rules and enforcement</h2>
   <p>Each Challenge is governed by the objectives displayed on its plan card and on the
   <a href="/objectives">Trading Objectives</a> table at the time of purchase: profit targets, maximum
-  daily loss, maximum overall loss (static or trailing), and minimum trading days. These rules are
+  daily loss, maximum overall loss (static drawdown on every plan we sell), and minimum trading days. These rules are
   monitored and enforced automatically by our risk engine. If a rule is breached, the account is marked
   as failed and open positions may be closed. Breach data (rule, time, equity) is recorded and shown in
   your dashboard.</p>
@@ -48,10 +48,19 @@
   <ul>
     <li>After passing all phases of a Challenge, your account is granted "funded" status in the simulation.</li>
     <li>You may request a reward equal to your profit split as stated on your plan (90% on evaluation
-        plans, 70% on Instant Funding) of the simulated profits accrued on the funded account.</li>
+        plans, 70% on Instant Funding) of the simulated profits accrued on the funded account.
+        Rewards are paid in <strong>vUSDT</strong> on the Polygon network.</li>
+    <li>By default you may submit a reward request every <strong>14 calendar days</strong> (bi-weekly)
+        on 2-Step and Instant Funding accounts. The optional <strong>On-demand Payout</strong> add-on
+        ($299 on 2-Step, $399 on Instant Funding), when purchased with the account, removes that
+        14-day wait for that account.</li>
+    <li>Before the first reward on a funded account, the account must have the plan's minimum trading
+        days on that funded stage: <strong>5</strong> on 2-Step and <strong>30</strong> on Instant Funding.</li>
     <li>Reward requests require completed identity verification (KYC) and are reviewed by our team.
         We may refuse a reward where results were produced by prohibited conduct (Section&nbsp;6).</li>
-    <li>Your first reward includes a refund of the Challenge fee for that account.</li>
+    <li>Your first reward on a funded account for a Challenge includes a credit of that Challenge fee
+        as <strong>additional vUSDT</strong> on that payout. It is not a refund to the original payment
+        method.</li>
     <li>Scaling is your choice, not an automatic upgrade. Each time a funded account grows by +15%
         you may either request the reward or move up to the next account size in our pricing. The two
         are mutually exclusive: if you move up, the accrued profit is applied to the larger account
@@ -78,10 +87,11 @@
        wielu urzadzen — zakaz zyl wylacznie jako gotowy powod breachu w panelu.
        Dlatego to jest POTWIERDZENIE na pismie, a nie zdjecie zakazu, i dlatego
        nie dopisujemy tu zadnego nowego ograniczenia dla kont bez dodatku. -->
-  <p><strong>Copytrading add-on.</strong> An account purchased with this add-on carries a permission
-  recorded on the account itself: you may copy trades between accounts registered to you, and you may
-  connect to the platform from more than one device. Neither is treated as prohibited conduct on such
-  an account, and we do not close it for either reason.</p>
+  <p><strong>Copytrading add-on.</strong> This add-on is available only when offered at checkout
+  (admin toggle). An account purchased with it carries a permission recorded on the account itself —
+  purchased accounts keep that permission: you may copy trades between accounts registered to you, and
+  you may connect to the platform from more than one device. Neither is treated as prohibited conduct
+  on such an account, and we do not close it for either reason.</p>
   <p>The permission covers accounts registered to you. Copying to or from an account registered to
   someone else, and giving your credentials to another person, stay subject to this Section and to
   Section&nbsp;7.</p>

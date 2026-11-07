@@ -32,7 +32,7 @@ ARCHIWALNY_CSV = {
     "account_login": "90001", "trader_email": "john.smith@imported.local",
     "profit_amount": 4000, "trader_share": 3200, "method": "bank transfer",
     "details": {}, "status": "paid", "reject_reason": None,
-    "note": "imported from records", "express": False,
+    "note": "imported from records", "ondemand": False,
     "cert_url": "/payout/abc", "show_on_lp": True,
 }
 ARCHIWALNY_BOT = {**ARCHIWALNY_CSV, "id": 2, "ts": "2026-06-01T10:00:00",
@@ -43,7 +43,7 @@ PRAWDZIWY_WNIOSEK = {
     "account_login": "90003", "trader_email": "geolsarki@gmail.com",
     "profit_amount": 900, "trader_share": 720, "method": "usdt",
     "details": {"network": "TRC20", "address": "T123"}, "status": "pending",
-    "reject_reason": None, "note": None, "cert_url": None, "express": False,
+    "reject_reason": None, "note": None, "cert_url": None, "ondemand": False,
 }
 
 

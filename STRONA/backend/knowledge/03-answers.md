@@ -131,10 +131,12 @@ Answers are grouped the way customers actually think, not the way the product is
 > You choose when you submit the request.
 
 **"How often can I withdraw?"**
-> {Do not promise a date. Use:} You can request a payout whenever the account is in
-> profit. Our published reward cycle is bi-weekly on evaluation plans and every 7 days on
-> Instant Funding, and each request is reviewed by the team before payment. If you want a
-> firm date for a specific request, I'll have someone confirm it directly.
+> {Do not promise a payment date. Use:} By default you can request a payout every 14
+> calendar days (bi-weekly) once the funded account is in profit and past the first-payout
+> trading-day minimum (5 on 2-Step, 30 on Instant). The On-demand Payout add-on removes
+> the 14-day wait for that account. Each request is reviewed by the team before payment
+> in vUSDT on Polygon. If you want a firm date for a specific request, I'll have someone
+> confirm it directly.
 
 **"Why do I have to do KYC?"**
 > It's a one-time identity check before your first payout — we pay the verified account

@@ -591,6 +591,8 @@ def _account_dict(acc: Account, with_metrics: bool = True, with_credentials: boo
         # Portal rysuje z tego plakietke „Copytrading" i — co wazniejsze —
         # odswieza liczby tylko na kontach, za ktorymi stoi realny rachunek.
         "copytrading": bool(getattr(acc, "copytrading", False)),
+        # On-demand Payout: bez limitu 14 dni między wnioskami na tym koncie.
+        "ondemand_payout": bool(getattr(acc, "ondemand_payout", False)),
         "mt5_backed": bool(getattr(acc, "mt5_backed", False)),
         "max_lots": getattr(acc, "max_lots", 0.0) or 0.0,
         "phase": acc.phase, "status": acc.status,
@@ -1545,7 +1547,7 @@ class CheckoutIn(BaseModel):
     promo_code: str | None = None      # kod „Upgrade Your Size" (nie kupon rabatowy)
     weekend_trading: bool = False
     split_boost: bool = False          # +10 pp splitu (tylko Instant; pilnuje billing)
-    express_payout: bool = False       # wnioski o wypłatę na początek kolejki
+    ondemand_payout: bool = False      # bez limitu 14 dni między wnioskami
     copytrading: bool = False          # kopiowanie miedzy wlasnymi kontami + wiele urzadzen
     use_credits: bool = True           # False = zostaw kredyty sklepowe na później
     # Dane potrzebne do założenia konta demo MT5 na nazwisko klienta.
@@ -1692,7 +1694,7 @@ def checkout(payload: CheckoutIn, trader: Trader = Depends(auth.current_trader))
                                        promo_code=payload.promo_code,
                                        weekend_trading=payload.weekend_trading,
                                        split_boost=payload.split_boost,
-                                       express_payout=payload.express_payout,
+                                       ondemand_payout=payload.ondemand_payout,
                                        copytrading=payload.copytrading,
                                        use_credits=payload.use_credits)
     finally:
@@ -1701,7 +1703,7 @@ def checkout(payload: CheckoutIn, trader: Trader = Depends(auth.current_trader))
 
 @app.get("/api/checkout/preview")
 def checkout_preview(product_key: str, coupon: str | None = None, promo_code: str | None = None,
-                     weekend: bool = False, split_boost: bool = False, express: bool = False,
+                     weekend: bool = False, split_boost: bool = False, ondemand: bool = False,
                      copytrading: bool = False,
                      use_credits: bool = True,
                      trader: Trader = Depends(auth.current_trader)):
@@ -1712,13 +1714,13 @@ def checkout_preview(product_key: str, coupon: str | None = None, promo_code: st
     try:
         q = billing.compute_price(session, trader, product_key, coupon,
                                   promo_code=promo_code, weekend_trading=weekend,
-                                  split_boost=split_boost, express_payout=express,
+                                  split_boost=split_boost, ondemand_payout=ondemand,
                                   copytrading=copytrading,
                                   use_credits=use_credits)
         return {"plan_price_usd": q["plan_price_usd"], "discount_pct": q["discount_pct"],
                 "discount_usd": q["discount_usd"], "weekend_fee_usd": q["weekend_fee_usd"],
                 "split_boost_fee_usd": q["split_boost_fee_usd"],
-                "express_payout_fee_usd": q["express_payout_fee_usd"],
+                "ondemand_payout_fee_usd": q["ondemand_payout_fee_usd"],
                 "copytrading_fee_usd": q["copytrading_fee_usd"],
                 "credits_used": q["credits_used"], "total_due_usd": q["total_due_usd"],
                 "discount_source": q["discount_source"], "offer_title": q["offer_title"],
@@ -2041,11 +2043,20 @@ PAYOUT_MIN_USD = 500.0
 PAYOUT_MIN_PCT = 2.0
 
 
+def account_payout_interval_days(acc: Account) -> int:
+    """Interwał między wnioskami dla konta: 0 = on demand (add-on), inaczej bi-weekly."""
+    if getattr(acc, "ondemand_payout", False):
+        return 0
+    return max(0, int(settings.payout_interval_days))
+
+
 def payout_next_at(session, acc: Account) -> datetime | None:
-    """Kiedy konto może złożyć następny wniosek (PAYOUT_INTERVAL_DAYS), albo None,
-    gdy już może. Liczy się ostatni NIEODRZUCONY wniosek i ostatnia wypłata —
-    odrzucenie niczego nie wypłaciło, więc nie zabiera traderowi okna."""
-    dni = settings.payout_interval_days
+    """Kiedy konto może złożyć następny wniosek, albo None gdy już może.
+
+    Liczy się ostatni NIEODRZUCONY wniosek i ostatnia wypłata — odrzucenie
+    niczego nie wypłaciło, więc nie zabiera traderowi okna. Add-on On-demand
+    (acc.ondemand_payout) omija globalny PAYOUT_INTERVAL_DAYS."""
+    dni = account_payout_interval_days(acc)
     if dni <= 0:
         return None
     ostatnie = [
@@ -2132,7 +2143,8 @@ def request_payout(account_id: int, trader: Trader = Depends(auth.current_trader
                                      f"{brak_dni} to go")
         nastepna = payout_next_at(session, acc)
         if nastepna:
-            raise HTTPException(400, f"Payouts are available every {settings.payout_interval_days} days "
+            dni = account_payout_interval_days(acc)
+            raise HTTPException(400, f"Payouts are available every {dni} days "
                                      f"on this account — the next one opens on "
                                      f"{nastepna:%b %-d, %Y at %H:%M} UTC")
         tr = session.get(Trader, trader.id)
@@ -3205,8 +3217,8 @@ def my_payouts(trader: Trader = Depends(auth.current_trader)):
                 "total_paid": round(sum(p.trader_share for p in pays), 2),
                 "pending": sum(1 for r in reqs if r.status in PAYOUT_OTWARTE),
                 "available": round(available, 2),
-                # 0 = on demand; inaczej co ile dni konto może złożyć wniosek.
-                # Czasu przeglądu celowo NIE podajemy — strona nie obiecuje terminów.
+                # Domyślny interwał oferty (bi-weekly). Konta z On-demand mają 0
+                # lokalnie — portal czyta też flagę na wniosku/koncie.
                 "interval_days": settings.payout_interval_days,
             },
             # Zapisany portfel — krok 2 podpowiada go od drugiej wypłaty.
@@ -3219,7 +3231,8 @@ def my_payouts(trader: Trader = Depends(auth.current_trader)):
                           # wcześniej portal pokazuje „—", a nie zgadnięty token.
                           "method": r.method if r.details else "",
                           "network": _siec_wniosku(r), "status": r.status,
-                          "express": bool(by_id[r.account_id].express_payout) if r.account_id in by_id else False,
+                          "ondemand": bool(getattr(by_id[r.account_id], "ondemand_payout", False))
+                          if r.account_id in by_id else False,
                           "reject_reason": r.reject_reason,
                           "vusdt": vusdt.view(vusdt_tx[r.id]) if r.id in vusdt_tx else None}
                          for r in reqs],
@@ -4186,10 +4199,19 @@ def admin_support_chats():
             })
         # Czekające na górze, od NAJNOWSZEJ wiadomości tradera (jak skrzynka:
         # świeże na wierzchu, czas oczekiwania pokazuje pigułka); potem reszta od najnowszej.
+        # Plakietka `waiting` liczy TYLKO płatnych — rozmowy free są w filtrze Free
+        # w dymku i nie mają mieszać kolejki Needs reply / pingów fab.
         czeka = sorted([c for c in out if c["waiting"]],
                        key=lambda c: (c["trader_last"] or {}).get("ts") or c["last_ts"], reverse=True)
         reszta = sorted([c for c in out if not c["waiting"]], key=lambda c: c["last_ts"], reverse=True)
-        return {"chats": czeka + reszta, "waiting": len(czeka), "last_id": last_id}
+        czeka_platni = [c for c in czeka if not c["free"]]
+        last_platny = 0
+        for c in out:
+            if c["free"] or not c.get("trader_last"):
+                continue
+            last_platny = max(last_platny, int(c["trader_last"]["id"]))
+        return {"chats": czeka + reszta, "waiting": len(czeka_platni),
+                "last_id": last_platny}
     finally:
         session.close()
 
@@ -5159,11 +5181,8 @@ def admin_payout_requests():
                         "method": r.method, "details": details,
                         "wallet_new": r.id in nowe,
                         "status": r.status, "reject_reason": r.reject_reason,
-                        "express": bool(acc.express_payout) if acc else False,
+                        "ondemand": bool(getattr(acc, "ondemand_payout", False)) if acc else False,
                         "ts": r.ts.isoformat()})
-        # Klient zapłacił $49 za przeskoczenie kolejki — pending z add-onem
-        # Express idą na górę listy, reszta zostaje w porządku „najnowsze pierwsze".
-        out.sort(key=lambda w: (0 if (w["express"] and w["status"] == "pending") else 1))
         return out
     finally:
         session.close()
@@ -5229,7 +5248,7 @@ def admin_payouts_all():
                 "total": round(p.trader_share, 2),
                 "method": p.method or "bank", "details": {},
                 "status": "paid" if p.paid else "pending",
-                "reject_reason": None, "note": p.note, "express": False,
+                "reject_reason": None, "note": p.note, "ondemand": False,
                 "cert_url": f"/payout/{p.cert_token}" if p.cert_token else None,
                 "show_on_lp": bool(getattr(p, "show_on_lp", True)),
             })
@@ -5259,7 +5278,7 @@ def admin_payouts_all():
                 "wallet_new": r.id in nowe,
                 "status": r.status, "reject_reason": r.reject_reason,
                 "note": None, "cert_url": None,
-                "express": bool(acc.express_payout) if acc else False,
+                "ondemand": bool(getattr(acc, "ondemand_payout", False)) if acc else False,
             })
 
         # Pochodzenie (free lejek / grant / Afryka) dla checkboxa „Free" — to
@@ -5277,9 +5296,6 @@ def admin_payouts_all():
             w["desk"] = p.desk if p else None
 
         out.sort(key=lambda r: r["ts"] or "", reverse=True)
-        # Express ($49) = przeskoczenie kolejki: pending z add-onem nad resztą,
-        # w obu grupach zostaje porządek „najnowsze pierwsze" (sort stabilny).
-        out.sort(key=lambda w: (0 if (w["express"] and w["status"] == "pending") else 1))
         return out
     finally:
         session.close()

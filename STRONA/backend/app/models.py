@@ -216,11 +216,15 @@ class Order(Base):
     weekend_trading: Mapped[bool] = mapped_column(Boolean, default=False)
     # Add-on Split Boost: +10 pp do profit splitu (tylko Instant Funding).
     addon_split_boost: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Add-on Express Payout: wnioski o wypłatę z tego konta ida na poczatek kolejki.
+    # Dawny Express Payout ($49, kolejka) — wycofany ze sprzedaży; kolumna zostaje
+    # dla starych zamówień. Nowy add-on częstotliwości: On-demand Payout.
     addon_express_payout: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Add-on On-demand Payout: bez limitu 14 dni między wnioskami na tym koncie.
+    addon_ondemand_payout: Mapped[bool] = mapped_column(Boolean, default=False)
     # Add-on Copytrading ($299): zgoda na kopiowanie miedzy wlasnymi kontami
     # i na wiele urzadzen. Pociaga za soba REALNY rachunek MT5 — patrz
-    # `provisioning.chce_realnego_mt5`.
+    # `provisioning.chce_realnego_mt5`. Widoczność w koszyku: AppSetting
+    # `copytrading_offered` (panel admina).
     addon_copytrading: Mapped[bool] = mapped_column(Boolean, default=False)
     # Kredyty sklepowe odliczone od ceny tego zamowienia. Saldo tradera schodzi
     # dopiero przy DOMKNIECIU platnosci — porzucony checkout nie pali srodkow.
@@ -464,13 +468,16 @@ class Account(Base):
     # albo mail w ogole go nie zawiera.
     bogo_paid_size: Mapped[float | None] = mapped_column(Float, nullable=True)
     weekend_trading: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Add-on Express Payout kupiony przy checkoucie: wnioski o wypłatę z tego
-    # konta panel pokazuje na poczatku kolejki przegladu.
+    # Dawny Express Payout — wycofany; zostaje dla kont już sprzedanych.
     express_payout: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Add-on On-demand Payout: interval między wnioskami = 0 (pomija bi-weekly).
+    ondemand_payout: Mapped[bool] = mapped_column(Boolean, default=False)
     # Add-on Copytrading kupiony przy checkoucie. Dwa skutki: (1) traderowi
     # wolno kopiowac transakcje miedzy swoimi kontami i uzywac wielu urzadzen,
     # wiec panel NIE moze breachowac takiego konta za kopiowanie; (2) tylko
     # takie konto dostaje realny rachunek MT5 i realny odczyt equity.
+    # Oferta bywa wyłączona w panelu (`copytrading_offered`); kupione konta
+    # zachowują uprawnienie.
     copytrading: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # --- Terminal PTF (zakładka Trade) ---

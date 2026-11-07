@@ -1939,7 +1939,7 @@ function renderPayoutsView(){
     </div>`+(rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.payouts">
     <thead><tr><th>Date</th><th>Account</th><th>Trader</th><th>Profit</th><th>Amount</th><th>Method</th><th>Status</th><th class="no-sort">Certificate</th><th class="no-sort"></th></tr></thead>
     <tbody>${rows.map(r=>`<tr>
-      <td class="muted" data-l="Date" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td><td class="num rt-main" data-l="Account">${accLink(r.account_id,r.account_login)}${r.express?' <span class="express-pill" title="Express Payout add-on — this request jumps the review queue">EXPRESS</span>':''}</td>
+      <td class="muted" data-l="Date" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td><td class="num rt-main" data-l="Account">${accLink(r.account_id,r.account_login)}${r.ondemand?' <span class="express-pill" title="On-demand Payout add-on — no 14-day wait between requests">ON-DEMAND</span>':''}</td>
       <td data-l="Trader">${esc(r.trader_email||'—')}${freeChip(r)}</td>
       <td class="num" data-l="Profit">$${fmt(r.profit_amount)}</td><td class="num up" data-l="Amount" data-sort="${r.total??r.trader_share}">$${fmt(r.total??r.trader_share)}${r.fee_refund?`<div class="muted" style="font-size:var(--fs-cap);font-weight:400">incl. $${fmt(r.fee_refund)} fee refund</div>`:''}</td>
       <td data-l="Method">${(()=>{const d=r.details||{};

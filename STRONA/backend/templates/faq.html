@@ -8,7 +8,7 @@
 {"@context":"https://schema.org","@type":"FAQPage","mainEntity":[
  {"@type":"Question","name":"Are these live trading accounts?","acceptedAnswer":{"@type":"Answer","text":"No. All accounts are demo accounts with virtual funds in a simulated environment on MT5 servers. Rewards are performance-based."}},
  {"@type":"Question","name":"When do I get my account?","acceptedAnswer":{"@type":"Answer","text":"Provisioning is automated — MT5 credentials are created and delivered automatically once your payment is confirmed."}},
- {"@type":"Question","name":"How do payouts work?","acceptedAnswer":{"@type":"Answer","text":"On a funded account you request a payout of your share of simulated profits: 90% on evaluation plans, 70% on Instant Funding; after KYC each request is reviewed and paid, with the challenge fee refunded on the first payout."}},
+ {"@type":"Question","name":"How do payouts work?","acceptedAnswer":{"@type":"Answer","text":"On a funded account you request a payout of your share of simulated profits in vUSDT on Polygon: 90% on evaluation plans, 70% on Instant Funding. By default you can request every 14 calendar days (bi-weekly); the On-demand Payout add-on ($299 on 2-Step, $399 on Instant) removes that wait. After KYC each request is reviewed and paid. The challenge fee for that account is credited as additional vUSDT on the first payout — not a card refund."}},
  {"@type":"Question","name":"Is news trading allowed?","acceptedAnswer":{"@type":"Answer","text":"Yes. There are no news blackouts, weekend-flat requirements or strategy bans beyond abuse of the simulation."}},
  {"@type":"Question","name":"Can someone else trade my account?","acceptedAnswer":{"@type":"Answer","text":"Yes, with our written approval before trading starts. The account stays registered to you, you remain responsible for the trading objectives, and rewards are paid only to the verified account holder. Sharing credentials without an approved arrangement is prohibited."}},
  {"@type":"Question","name":"Where do the prices in the Built-in Terminal come from?","acceptedAnswer":{"@type":"Answer","text":"Every market in the terminal uses live reference prices from Hyperliquid, a third-party venue we are not affiliated with. Every simulated fill is settled on the reference price, which can differ from a real broker quote. On Forex pairs and platinum the chart draws from a consolidated spot feed, so it can differ from the fill price by about the spread."}},
@@ -32,7 +32,7 @@
  {"@type":"Question","name":"Can I trade while my payout is under review?","acceptedAnswer":{"@type":"Answer","text":"Yes, the account stays open and all rules keep applying. The requested amount is checked again at approval: if your profit has dropped below it, the request is rejected and you submit a new one."}},
  {"@type":"Question","name":"What happens to my balance and drawdown after a payout?","acceptedAnswer":{"@type":"Answer","text":"The profit that paid for the payout (payout amount divided by your split) is deducted from the balance. A full payout brings the account back to its starting balance. Equity, the equity peak and the day-start baseline are set to the new balance; the static overall drawdown floor does not move."}},
  {"@type":"Question","name":"Does a payout count against my daily loss limit?","acceptedAnswer":{"@type":"Answer","text":"No. The deduction is booked together with a new day-start baseline equal to the new balance, so the daily floor is recalculated from there and the payout itself cannot trigger a breach."}},
- {"@type":"Question","name":"Is there a cap on total payouts?","acceptedAnswer":{"@type":"Answer","text":"No. There is no cap on the number of payouts, on the total paid from one account, or on how often you request. Each request is reviewed individually."}},
+ {"@type":"Question","name":"Is there a cap on total payouts?","acceptedAnswer":{"@type":"Answer","text":"No. There is no cap on the number of payouts or on the total paid from one account. By default requests are spaced every 14 calendar days (bi-weekly); with the On-demand Payout add-on there is no wait between requests. Each request is reviewed individually."}},
  {"@type":"Question","name":"What profit split applies to payouts on each plan?","acceptedAnswer":{"@type":"Answer","text":"90% on every 2-Step plan and 70% on Instant Funding, on all account sizes. The Split Boost add-on raises Instant Funding to 80%."}},
  {"@type":"Question","name":"Which networks or wallets can payouts be sent to?","acceptedAnswer":{"@type":"Answer","text":"Payouts go out in vUSDT, PTF's own token on the Polygon network, to a wallet you control. You add the Polygon wallet address in the dashboard when your request is unlocked; changing a saved wallet requires a code emailed to your registered address."}},
  {"@type":"Question","name":"What payment methods do you accept, and can I pay in crypto?","acceptedAnswer":{"@type":"Answer","text":"Cards through Stripe at checkout. Crypto is possible on request: write to support with the plan you want, and the account is activated once the transfer is confirmed. Store credits are applied at the end of the checkout."}},
@@ -272,7 +272,8 @@
         is bet on one maximum-risk trade. If you find a platform bug, report it to support instead of
         using it: results produced this way are voided and the account is closed under Section 6 of the
         <a href="/terms">Terms</a>. Copying your own trades in the same direction between your accounts is
-        allowed only with the Copytrading add-on.</div>
+        allowed only on accounts purchased with the Copytrading add-on when that add-on was offered at
+        checkout.</div>
       </details>
       <details>
         <summary>Are EAs and bots allowed, also in the Built-in Terminal?</summary>
@@ -289,9 +290,9 @@
         terminal sign-in is logged with IP address, approximate location, browser and device, and that
         log is part of the review before a payout, so sign-ins by several people or from several places
         will be asked about. Do not use a VPN, a proxy or any service that masks your location: sign-ins
-        through them can lead to a review and to a reward being declined. The Copytrading add-on
-        additionally records a written permission to use several devices and to copy between your own
-        accounts.</div>
+        through them can lead to a review and to a reward being declined. When Copytrading is offered at
+        checkout and purchased with the account, that add-on records a written permission to use several
+        devices and to copy between your own accounts; purchased accounts keep that permission.</div>
       </details>
     </div>
 
@@ -299,22 +300,25 @@
     <div class="faq" id="funded-accounts-payouts">
       <details>
         <summary>How do payouts work?</summary>
-        <div class="a">Payouts are on demand: on a funded account, request a payout from your
-        dashboard whenever you have profit — there is no payout calendar and no minimum wait
-        between requests. After a one-time KYC verification each request is reviewed by our team
-        and paid out. Your share is 90% on evaluation plans and 70% on Instant Funding.</div>
+        <div class="a">On a funded account, request a payout from your dashboard when you have profit.
+        Rewards are paid in vUSDT on the Polygon network. By default you can request every 14 calendar
+        days (bi-weekly) on 2-Step and Instant. The On-demand Payout add-on removes that wait —
+        $299 on 2-Step, $399 on Instant Funding. After a one-time KYC verification each request is
+        reviewed by our team and paid out. Your share is 90% on evaluation plans and 70% on Instant
+        Funding. First payout eligibility on the funded account needs 5 trading days on 2-Step and
+        30 on Instant.</div>
       </details>
       <details>
         <summary>How long does a payout take?</summary>
         <div class="a">Each request is reviewed individually by our risk team, who check the account, its
         trading history and your verification. Once a request is unlocked, you confirm the amount and add
         your vUSDT wallet in the dashboard (or confirm the saved one), the transfer goes out and you receive
-        a verifiable payout certificate. The Express Payout add-on places your requests at the front of
-        the review queue.</div>
+        a verifiable payout certificate.</div>
       </details>
       <details>
         <summary>When do I get my challenge fee back?</summary>
-        <div class="a">The full fee is added to your first payout from the funded account.</div>
+        <div class="a">The full Challenge fee for that account is credited as additional vUSDT on your
+        first payout from the funded account — it is not a refund to your card.</div>
       </details>
       <details>
         <summary>How does the scaling plan work?</summary>
@@ -366,16 +370,17 @@
       </details>
       <details>
         <summary>Is there a cap on total payouts?</summary>
-        <div class="a">No. There is no cap on the number of payouts, on the total paid from one account, or
-        on how often you request (there is no payout calendar). Each request is reviewed individually.
-        Scaling is optional: at +15% you can choose to move up to the next account size instead of taking
-        the payout.</div>
+        <div class="a">No. There is no cap on the number of payouts or on the total paid from one account.
+        By default you can request every 14 calendar days (bi-weekly); with the On-demand Payout add-on
+        ($299 on 2-Step, $399 on Instant) there is no wait between requests. Each request is reviewed
+        individually. Scaling is optional: at +15% you can choose to move up to the next account size
+        instead of taking the payout.</div>
       </details>
       <details>
         <summary>What profit split applies to payouts on each plan?</summary>
         <div class="a">90% on every 2-Step plan and 70% on Instant Funding, on all account sizes. The
-        Split Boost add-on raises Instant Funding to 80%; it is not available on 2-Step. The Express Payout
-        add-on does not change the split; it puts your requests at the front of the review queue.</div>
+        Split Boost add-on raises Instant Funding to 80%; it is not available on 2-Step. The On-demand
+        Payout add-on does not change the split; it only removes the 14-day wait between requests.</div>
       </details>
       <details>
         <summary>Which networks or wallets can payouts be sent to?</summary>
@@ -390,8 +395,9 @@
     <div class="faq" id="billing-account">
       <details>
         <summary>Is the fee one-time or recurring?</summary>
-        <div class="a">One-time, per challenge. No subscriptions or hidden costs, and it's refunded with
-        your first payout. See the <a href="/refund-policy">refund policy</a> for details.</div>
+        <div class="a">One-time, per challenge. No subscriptions or hidden costs. The Challenge fee is
+        credited as additional vUSDT on your first payout from that funded account (not a card refund).
+        See the <a href="/refund-policy">refund policy</a> for details.</div>
       </details>
       <details>
         <summary>Do you accept coupon codes?</summary>
@@ -466,9 +472,9 @@
         <summary>Can I share my portal or MT5 login?</summary>
         <div class="a">No. Credentials are personal, and sign-ins are checked against the registered owner
         before a payout is approved. The one exception is an account management arrangement approved in writing before
-        trading starts (see "Can someone else trade my account?" above). The Copytrading add-on lets you
-        use several devices and copy between your own accounts, but still not hand credentials to someone
-        else.</div>
+        trading starts (see "Can someone else trade my account?" above). Copytrading is available only
+        when offered at checkout; accounts purchased with it keep permission to use several devices and
+        copy between your own accounts, but still not hand credentials to someone else.</div>
       </details>
       <details>
         <summary>Can I transfer or sell my account?</summary>

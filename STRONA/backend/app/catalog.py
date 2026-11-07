@@ -44,11 +44,20 @@ WEEKEND_ADDON_USD = 199.0
 
 # Add-ony checkoutu (ceny ROBOCZE — właściciel może skorygować jednym słowem).
 # Split Boost: +10 pp do profit splitu, WYŁĄCZNIE Instant Funding — plany 2-Step
-# startują z 90% i boost wychodziłby ponad 100. Express Payout: wnioski o
-# wypłatę z tego konta panel pokazuje na początku kolejki przeglądu.
+# startują z 90% i boost wychodziłby ponad 100.
+# On-demand Payout: usuwa bi-weekly (14 dni) między wnioskami na tym koncie.
+# Instant jest droższy, bo od razu jest funded.
 SPLIT_BOOST_ADDON_USD = 149.0
 SPLIT_BOOST_PP = 10
-EXPRESS_PAYOUT_ADDON_USD = 49.0
+ONDEMAND_PAYOUT_2STEP_USD = 299.0
+ONDEMAND_PAYOUT_INSTANT_USD = 399.0
+
+
+def ondemand_payout_fee_usd(product) -> float:
+    """Cena On-demand zależna od rodziny planu (steps==0 → Instant)."""
+    if getattr(product, "steps", None) == 0:
+        return ONDEMAND_PAYOUT_INSTANT_USD
+    return ONDEMAND_PAYOUT_2STEP_USD
 
 # Add-on Copytrading: wolno kopiowac transakcje miedzy WLASNYMI kontami tradera
 # i logowac sie z wiecej niz jednego urzadzenia. Bez tego dodatku obowiazuje

@@ -93,4 +93,6 @@ def test_portal_nie_obiecuje_terminu_decyzji():
     for zakazane in ("reviewed within", "decision by", "within 24 hours",
                      "within one business day", "next business day"):
         assert zakazane not in kod, zakazane
-    assert "Payouts are <b>on demand</b>" in kod
+    assert "bi-weekly" in kod
+    assert "On-demand Payout" in kod
+    assert "Express Payout" not in kod
