@@ -1582,6 +1582,11 @@ class CheckoutIn(BaseModel):
     last_name: str | None = None
     phone: str | None = None
     phone_country: str | None = None   # ISO2 z listy krajów; dlugosc numeru zalezy od kraju
+    # Trzy obowiązkowe deklaracje z panelu „Before you purchase" (bez osobnej tabeli).
+    consent_terms: bool = False
+    consent_risk: bool = False
+    consent_immediate: bool = False
+    consent_version: str | None = None
 
 
 @app.get("/api/coupon/{code}")
@@ -1708,6 +1713,9 @@ def _dane_klienta(payload: CheckoutIn, trader: Trader) -> tuple[str, str, str, s
 def checkout(payload: CheckoutIn, trader: Trader = Depends(auth.current_trader)):
     session = SessionLocal()
     try:
+        if not (payload.consent_terms and payload.consent_risk and payload.consent_immediate):
+            raise HTTPException(
+                400, "Please accept the required purchase declarations before continuing")
         # Te trzy pola ida prosto do formularza rejestracji konta demo u brokera,
         # wiec smiec = nieudany provisioning po pobraniu platnosci. Walidujemy
         # PRZED zapisem i przed utworzeniem zamowienia.
@@ -1715,6 +1723,12 @@ def checkout(payload: CheckoutIn, trader: Trader = Depends(auth.current_trader))
         billing.save_customer_details(
             session, trader,
             first_name=imie, last_name=nazwisko, phone=tel, phone_country=kraj,
+        )
+        # Ślad zgody w telemetrii (bez nowej kolumny Order) — wersja tekstu z UI.
+        telemetry.track(
+            "checkout_consent", trader.id,
+            version=(payload.consent_version or "checkout-consent-2026-11"),
+            terms=True, risk=True, immediate=True,
         )
         return billing.create_checkout(session, trader, payload.product_key, payload.coupon,
                                        promo_code=payload.promo_code,

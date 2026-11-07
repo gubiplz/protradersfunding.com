@@ -22,6 +22,7 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app import auth, catalog, countries, fields  # noqa: E402
+from tests.conftest import CHECKOUT_CONSENT
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import Account, Trader  # noqa: E402
@@ -36,9 +37,9 @@ LICZNIK = iter(range(1000))
 
 # Dane dokładnie ze zrzutu, który zgłosił właściciel produktu.
 ZE_ZRZUTU = {"first_name": "Dawid53", "last_name": "5Mazur",
-             "phone": "+4851206", "phone_country": "PL"}
+             "phone": "+4851206", "phone_country": "PL", **CHECKOUT_CONSENT}
 POPRAWNE = {"first_name": "Dawid", "last_name": "Mazur",
-            "phone": "512345678", "phone_country": "PL"}
+            "phone": "512345678", "phone_country": "PL", **CHECKOUT_CONSENT}
 
 
 def _trader(**pola):
@@ -212,7 +213,7 @@ def test_checkout_odrzuca_cyfry_w_nazwisku(pole, wartosc):
 
 def test_checkout_bez_danych_wymaga_ich_od_nowego_klienta():
     _, h = _trader()
-    r = client.post("/api/checkout", headers=h, json={"product_key": "2step-25k"})
+    r = client.post("/api/checkout", headers=h, json={"product_key": "2step-25k", **CHECKOUT_CONSENT})
     assert r.status_code == 400, "pusty formularz nie moze byc furtka wokol walidacji"
 
 
@@ -220,7 +221,7 @@ def test_drugi_zakup_nie_kaze_wpisywac_wszystkiego_od_nowa():
     """Klient z kompletem danych na profilu kupuje ponownie bez formularza."""
     _, h = _trader(first_name="Dawid", last_name="Mazur", phone="+48512345678",
                    phone_country="PL")
-    r = client.post("/api/checkout", headers=h, json={"product_key": "2step-25k"})
+    r = client.post("/api/checkout", headers=h, json={"product_key": "2step-25k", **CHECKOUT_CONSENT})
     assert r.status_code == 200, r.text
 
 

@@ -19,6 +19,7 @@ os.environ.setdefault("AUTO_SEED", "false")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from tests.conftest import CHECKOUT_CONSENT
 from app import auth, catalog  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
@@ -63,7 +64,7 @@ def test_split_boost_tylko_dla_instant():
                    headers=h)
     assert r.status_code == 400 and "Instant Funding" in r.json()["detail"]
     r = client.post("/api/checkout", headers=h,
-                    json={"product_key": "2step-25k", "split_boost": True})
+                    json={**CHECKOUT_CONSENT, "product_key": "2step-25k", "split_boost": True})
     assert r.status_code == 400 and "Instant Funding" in r.json()["detail"]
     # On-demand nie ma ograniczenia planu — 2-Step = $299
     ok = client.get("/api/checkout/preview?product_key=2step-25k&ondemand=true", headers=h)
@@ -74,7 +75,7 @@ def test_split_boost_tylko_dla_instant():
 def test_zakup_prowizjonuje_boost_i_flage_ondemand():
     _, h = _trader("addon-zakup@test.pl")
     r = client.post("/api/checkout", headers=h,
-                    json={"product_key": "instant-25k",
+                    json={**CHECKOUT_CONSENT, "product_key": "instant-25k",
                           "split_boost": True, "ondemand_payout": True})
     assert r.status_code == 200
     oid = r.json()["order_id"]
@@ -97,7 +98,7 @@ def test_zakup_prowizjonuje_boost_i_flage_ondemand():
 def test_zakup_2step_ondemand_299():
     _, h = _trader("addon-2step-od@test.pl")
     r = client.post("/api/checkout", headers=h,
-                    json={"product_key": "2step-25k", "ondemand_payout": True})
+                    json={**CHECKOUT_CONSENT, "product_key": "2step-25k", "ondemand_payout": True})
     assert r.status_code == 200
     oid = r.json()["order_id"]
     s = SessionLocal()
@@ -115,7 +116,7 @@ def test_zakup_2step_ondemand_299():
 def test_zakup_bez_addonow_zostaje_przy_katalogowym_splicie():
     _, h = _trader("addon-goly@test.pl")
     oid = client.post("/api/checkout", headers=h,
-                      json={"product_key": "instant-25k"}).json()["order_id"]
+                      json={**CHECKOUT_CONSENT, "product_key": "instant-25k"}).json()["order_id"]
     done = client.post(f"/api/checkout/{oid}/mock-complete", headers=h)
     s = SessionLocal()
     acc = s.get(Account, done.json()["account_id"])
@@ -147,7 +148,7 @@ def test_zakup_z_copytradingiem_znaczy_zamowienie_i_konto():
     _, h = _trader("addon-copy-zakup@test.pl")
 
     oid = client.post("/api/checkout", headers=h,
-                      json={"product_key": "instant-25k",
+                      json={**CHECKOUT_CONSENT, "product_key": "instant-25k",
                             "copytrading": True}).json()["order_id"]
     done = client.post(f"/api/checkout/{oid}/mock-complete", headers=h)
 
@@ -165,7 +166,7 @@ def test_zakup_bez_copytradingu_nie_ustawia_flagi():
     _, h = _trader("addon-copy-brak@test.pl")
 
     oid = client.post("/api/checkout", headers=h,
-                      json={"product_key": "instant-25k"}).json()["order_id"]
+                      json={**CHECKOUT_CONSENT, "product_key": "instant-25k"}).json()["order_id"]
     done = client.post(f"/api/checkout/{oid}/mock-complete", headers=h)
 
     s = SessionLocal()
@@ -179,7 +180,7 @@ def test_reczne_zamowienie_tez_sprzedaje_copytrading():
     """Sprzedaz poza Stripe'em (crypto, przelew) idzie WYLACZNIE ta droga —
     bez tego dodatku nie dalo sie sprzedac nikomu, kto nie placi karta."""
     r = client.post("/api/admin/orders", headers=ADMIN_H,
-                    json={"email": "reczne-copy@test.pl", "product_key": "instant-25k",
+                    json={**CHECKOUT_CONSENT, "email": "reczne-copy@test.pl", "product_key": "instant-25k",
                           "copytrading": True})
 
     assert r.status_code == 200, r.text
@@ -193,7 +194,7 @@ def test_reczne_zamowienie_tez_sprzedaje_copytrading():
 def test_reczna_kwota_zostaje_nietknieta():
     """Kwota wpisana recznie jest doklad­nie tym, co admin obiecal klientowi."""
     r = client.post("/api/admin/orders", headers=ADMIN_H,
-                    json={"email": "reczne-kwota@test.pl", "product_key": "instant-25k",
+                    json={**CHECKOUT_CONSENT, "email": "reczne-kwota@test.pl", "product_key": "instant-25k",
                           "copytrading": True, "amount_usd": 500.0})
 
     s = SessionLocal()

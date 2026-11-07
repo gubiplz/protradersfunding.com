@@ -14,6 +14,7 @@ os.environ.setdefault("AUTO_SEED", "false")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from tests.conftest import CHECKOUT_CONSENT
 from app import auth, catalog  # noqa: E402
 from app import main as main_mod  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
@@ -205,7 +206,7 @@ def test_checkout_lucky_bez_wygranego_losowania_odrzucony():
     _, h = _trader("lucky-obcy@test.pl")
     with TestClient(app) as c:
         r = c.post("/api/checkout", headers=h,
-                   json={**_DANE_MT5, "product_key": "2step-25k", "coupon": "LUCKY10"})
+                   json={**CHECKOUT_CONSENT, **_DANE_MT5, "product_key": "2step-25k", "coupon": "LUCKY10"})
     assert r.status_code == 400
     assert "personal" in r.json()["detail"]
 
@@ -215,7 +216,7 @@ def test_checkout_lucky_dziala_u_zwyciezcy_w_48h():
     _ustaw(tid, reveal_payload=_lucky_payload("LUCKY10", 10, godzin=24))
     with TestClient(app) as c:
         r = c.post("/api/checkout", headers=h,
-                   json={**_DANE_MT5, "product_key": "2step-25k", "coupon": "LUCKY10"})
+                   json={**CHECKOUT_CONSENT, **_DANE_MT5, "product_key": "2step-25k", "coupon": "LUCKY10"})
     assert r.status_code == 200
     d = r.json()
     assert d["discount_pct"] == 10.0 and d["amount"] == 269.1    # 299 - 10%
@@ -226,7 +227,7 @@ def test_checkout_lucky_wygasly_odrzucony():
     _ustaw(tid, reveal_payload=_lucky_payload("LUCKY15", 15, godzin=-1))
     with TestClient(app) as c:
         r = c.post("/api/checkout", headers=h,
-                   json={**_DANE_MT5, "product_key": "2step-25k", "coupon": "LUCKY15"})
+                   json={**CHECKOUT_CONSENT, **_DANE_MT5, "product_key": "2step-25k", "coupon": "LUCKY15"})
     assert r.status_code == 400
 
 
@@ -234,7 +235,7 @@ def test_checkout_zwykly_kupon_nie_wymaga_losowania():
     _, h = _trader("kupon-zwykly@test.pl")
     with TestClient(app) as c:
         r = c.post("/api/checkout", headers=h,
-                   json={**_DANE_MT5, "product_key": "2step-25k", "coupon": "WELCOME10"})
+                   json={**CHECKOUT_CONSENT, **_DANE_MT5, "product_key": "2step-25k", "coupon": "WELCOME10"})
     assert r.status_code == 200 and r.json()["discount_pct"] == 10.0
 
 

@@ -2301,7 +2301,7 @@ const VIEWS={
       ['Profit split',(instant?'':'Up to ')+p.profit_split_pct+'%'],
       ['Rewards',window._shopOd?'On demand':'Bi-weekly'],
       ['Max open volume',p.max_lots+' lots'],
-      ['Fee credit','vUSDT with first payout'],
+      ['Fee credit','With first payout'],
     ];
   };
   const cards=shown.map((p,i)=>{
@@ -3918,13 +3918,38 @@ function openBuy(key){
           <input type="checkbox" id="c-usecr" checked onchange="quoteRefresh(true)">
           <span><b>Use my store credit</b><small>$${fmt(ME.credits_usd)} available · 1 credit = $1</small></span>
         </label>`:''}
+        <div class="buy-consent" id="buy-consent">
+          <h4 class="buy-consent-h">Before you purchase</h4>
+          <p class="buy-consent-s">Please review the following before creating your evaluation account.</p>
+          <label class="buy-consent-item">
+            <input type="checkbox" id="c-consent-terms" onchange="syncBuyConsent()">
+            <span class="bc-body">
+              <b>Terms &amp; Refund Policy</b>
+              <span>I have read and agree to the <a href="/terms" target="_blank" rel="noopener">Terms of Service</a>, including the <a href="/refund-policy" target="_blank" rel="noopener">Refund Policy</a>.</span>
+              <i class="buy-consent-req">Required</i>
+            </span>
+          </label>
+          <label class="buy-consent-item">
+            <input type="checkbox" id="c-consent-risk" onchange="syncBuyConsent()">
+            <span class="bc-body">
+              <b>Simulated Trading &amp; Risk Disclosure</b>
+              <span>I acknowledge that ${esc(SITE_NAME)} provides simulated trading evaluations, that rewards are not guaranteed and that I have read the <a href="/risk-disclosure" target="_blank" rel="noopener">Risk Disclosure</a>.</span>
+              <i class="buy-consent-req">Required</i>
+            </span>
+          </label>
+          <label class="buy-consent-item">
+            <input type="checkbox" id="c-consent-immediate" onchange="syncBuyConsent()">
+            <span class="bc-body">
+              <b>Immediate Service Commencement</b>
+              <span>I expressly request that the evaluation service begins immediately, before the expiry of the statutory withdrawal period. I acknowledge that, where applicable, I will lose my right of withdrawal once the service has been fully performed.</span>
+              <i class="buy-consent-req">Required for immediate commencement</i>
+            </span>
+          </label>
+          <p class="buy-privacy">Your personal data is processed in accordance with our <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</p>
+        </div>
         <p id="buy-err" class="form-err hidden"></p>
-        <button id="buy-go" onclick="buy('${jsq(p.key)}')" class="btn-p lg" style="width:100%">Buy &amp; create my account</button>
+        <button id="buy-go" onclick="buy('${jsq(p.key)}')" class="btn-p lg" style="width:100%" disabled>Buy &amp; create my account</button>
         <p class="hint">One-time payment · fee credited with your first payout</p>
-        <p class="hint buy-legal">By paying I request immediate access to the evaluation (MT5 credentials).
-          I understand that once credentials are delivered I lose the right to withdraw from the purchase,
-          except where the <a href="/refund-policy" target="_blank" rel="noopener">Refund Policy</a> still
-          provides a money-back refund.</p>
       </div>
     </div>`;
   box.onclick=closeBuy;
@@ -3933,7 +3958,20 @@ function openBuy(key){
   window._buyCode={coupon:null,promo:null};
   ccSet(kraj, false);
   codeCheck();
+  syncBuyConsent();
   setTimeout(()=>$('c-first').focus(),50);
+}
+
+/* Checkout consent panel: all three declarations must be ticked before Buy. */
+const BUY_CONSENT_V='checkout-consent-2026-11';
+function buyConsentsOk(){
+  return !!($('c-consent-terms')&&$('c-consent-terms').checked)
+    && !!($('c-consent-risk')&&$('c-consent-risk').checked)
+    && !!($('c-consent-immediate')&&$('c-consent-immediate').checked);
+}
+function syncBuyConsent(){
+  const btn=$('buy-go'); if(!btn)return;
+  btn.disabled=!buyConsentsOk();
 }
 
 /* Price breakdown in the buy modal, fed by /api/checkout/preview — the exact
@@ -4221,6 +4259,11 @@ async function buy(key){
   await codeCheck();   /* fresh code classification, even if the debounce is still pending */
   const bc=window._buyCode||{};
   const coupon=bc.coupon||null, promo=bc.promo||null;
+  if(!buyConsentsOk()){
+    buyErr('Please accept the required declarations before purchasing.');
+    syncBuyConsent();
+    return;
+  }
   /* The MT5 demo account is registered with the broker under exactly these
      details, so a typo here means a paid order that cannot be provisioned. */
   ['c-first','c-last','c-phone'].forEach(clearFieldErr);
@@ -4239,7 +4282,9 @@ async function buy(key){
           split_boost:!!($('c-boost')&&$('c-boost').checked),
           ondemand_payout:!!($('c-ondemand')&&$('c-ondemand').checked),
           copytrading:!!($('c-copy')&&$('c-copy').checked),
-          use_credits:!$('c-usecr')||$('c-usecr').checked})});
+          use_credits:!$('c-usecr')||$('c-usecr').checked,
+          consent_terms:true,consent_risk:true,consent_immediate:true,
+          consent_version:BUY_CONSENT_V})});
       /* real Stripe: strona zaraz znika — przycisk ma zostać wyłączony */
       if(res.checkout_url && !res.mock){window.location=res.checkout_url;return 'keep'}
       let prov=res;
@@ -4254,6 +4299,7 @@ async function buy(key){
       go('accounts');
     }catch(e){buyErr('Error: '+e.message)}
   });
+  syncBuyConsent();   /* busy() re-enables the button — restore consent gating */
 }
 
 /* ---------- ACCOUNT DETAIL ---------- */
