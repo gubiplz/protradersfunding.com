@@ -2263,6 +2263,16 @@ const VIEWS={
   const TIERS=[['starter','Starter',v=>v<200000],['pro','Pro',v=>v>=200000&&v<800000],['elite','Elite',v=>v>=800000]];
   window._shopTab=window._shopTab||(models[0]&&models[0].id);
   window._shopTier=window._shopTier||'starter';
+  /* One-shot hydrate from LP deep link (?wt=1&sb=1&…). After that the
+     strip toggles own the flags — don't keep OR-ing the URL on every buy. */
+  if(!window._shopHydrated){
+    const boot=new URLSearchParams(location.search);
+    if(boot.get('wt')==='1')window._shopWt=true;
+    if(boot.get('od')==='1')window._shopOd=true;
+    if(boot.get('sb')==='1')window._shopSb=true;
+    if(boot.get('ct')==='1')window._shopCt=true;
+    window._shopHydrated=true;
+  }
   window._shopWt=!!window._shopWt;
   window._shopOd=!!window._shopOd;
   window._shopCt=!!window._shopCt;
@@ -2415,7 +2425,15 @@ const VIEWS={
   const shopToggle=(flag,btn)=>e=>{
     e.preventDefault(); e.stopPropagation();
     window[flag]=!window[flag];
-    if(btn)btn.setAttribute('aria-checked',window[flag]);
+    if(btn)btn.setAttribute('aria-checked',window[flag]?'true':'false');
+    /* Keep ?sb=1 (etc.) in sync — buyAddonsFromShop used to OR the URL and
+       resurrect Split Boost after the switch was turned off. */
+    const q=new URLSearchParams(location.search);
+    const map={_shopWt:'wt',_shopOd:'od',_shopSb:'sb',_shopCt:'ct'};
+    const k=map[flag];
+    if(k){if(window[flag])q.set(k,'1');else q.delete(k)}
+    const qs=q.toString();
+    history.replaceState({},'',location.pathname+(qs?'?'+qs:'')+location.hash);
     shopRedraw();
   };
   const wt=$('shop-wt'); if(wt)wt.onclick=shopToggle('_shopWt',wt);
@@ -4000,14 +4018,13 @@ function syncBuyConsent(){
 
 /* Add-ons are chosen on the shop strip (like LP), not in the buy modal. */
 function buyAddonsFromShop(){
-  const q=new URLSearchParams(location.search);
   const p=PRODUCTS.find(x=>x.key===window._buyKey);
   const instant=p&&p.steps===0;
-  const sbOk=instant&&!!(p&&p.split_boost_offered)&&(q.get('sb')==='1'||!!window._shopSb);
+  const sbOk=instant&&!!(p&&p.split_boost_offered)&&!!window._shopSb;
   return {
-    weekend: q.get('wt')==='1'||!!window._shopWt,
-    ondemand: q.get('od')==='1'||!!window._shopOd,
-    copytrading: q.get('ct')==='1'||!!window._shopCt,
+    weekend: !!window._shopWt,
+    ondemand: !!window._shopOd,
+    copytrading: !!window._shopCt,
     split_boost: sbOk,
   };
 }

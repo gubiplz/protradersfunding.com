@@ -529,7 +529,7 @@
     const ctRow = $('#pcfg-ct-row'), ct = $('#pcfg-ct');
     if (ctRow) ctRow.hidden = !anyOffersCt;
     if (!anyOffersCt) cfgCt = false;
-    if (ct) ct.setAttribute('aria-checked', cfgCt);
+    if (ct) ct.setAttribute('aria-checked', cfgCt ? 'true' : 'false');
     const ctPrice = $('#pcfg-ct-price');
     if (ctPrice) ctPrice.textContent = '+$' + cenaCt(shown[0]);
     /* Split Boost: tylko Instant + flaga admina. */
@@ -537,12 +537,12 @@
     const sbRow = $('#pcfg-sb-row'), sb = $('#pcfg-sb');
     if (sbRow) sbRow.hidden = !showSb;
     if (!showSb) cfgSb = false;
-    if (sb) sb.setAttribute('aria-checked', cfgSb);
+    if (sb) sb.setAttribute('aria-checked', cfgSb ? 'true' : 'false');
     const sbPrice = $('#pcfg-sb-price');
     if (sbPrice) sbPrice.textContent = '+$' + cenaSb(shown[0]);
-    $('#pcfg-wt').setAttribute('aria-checked', cfgWt);
+    $('#pcfg-wt').setAttribute('aria-checked', cfgWt ? 'true' : 'false');
     const od = $('#pcfg-od');
-    if (od) od.setAttribute('aria-checked', cfgOd);
+    if (od) od.setAttribute('aria-checked', cfgOd ? 'true' : 'false');
     const odPrice = $('#pcfg-od-price');
     if (odPrice) odPrice.textContent = '+$' + cenaOdTyp(cfgType);
 
@@ -824,7 +824,11 @@
     const pasek = $('#cfg-addons');
     if (pasek) {
       if (!oferujeCt(p)) cfgCt = false;
-      if (!(p.steps === 0 && oferujeSb(p))) cfgSb = false;
+      /* cfgSb is shared with the Challenges strip. Clearing it whenever the
+         hero card is on 2-Step left the Instant strip switch stuck ON: state
+         was false, aria still true, so every SB click flipped it back on.
+         Only drop it when neither surface can use Split Boost. */
+      if (!(p.steps === 0 && oferujeSb(p)) && cfgType !== 'instant') cfgSb = false;
       const chip = (id, on, txt) =>
         `<button type="button" class="cfg-chip${on ? ' on' : ''}" data-a="${id}">${txt}</button>`;
       pasek.innerHTML =
@@ -876,7 +880,8 @@
       const hsend = () => hi && submitCodeField(hi, heroMsg);
       const hb = $('#cfg-code-apply'); if (hb) hb.addEventListener('click', hsend);
       if (hi) hi.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); hsend(); } });
-      /* Defer redraw so the same click cannot land on a remounted challenge card. */
+      /* Defer card remount so this click cannot land on a new challenge card.
+         Sync aria immediately; don't wait on the timer for switch feedback. */
       const odswiez = () => {
         clearTimeout(window._chalRedraw);
         window._chalRedraw = setTimeout(() => {
@@ -884,14 +889,20 @@
           if ($('#cfg')) renderConfigurator();
         }, 80);
       };
-      const toggle = (fn) => (e) => {
+      const toggle = (flag, btn) => (e) => {
         e.preventDefault(); e.stopPropagation();
-        fn(); odswiez();
+        if (flag === 'wt') cfgWt = !cfgWt;
+        else if (flag === 'ct') cfgCt = !cfgCt;
+        else if (flag === 'od') cfgOd = !cfgOd;
+        else if (flag === 'sb') cfgSb = !cfgSb;
+        const on = flag === 'wt' ? cfgWt : flag === 'ct' ? cfgCt : flag === 'od' ? cfgOd : cfgSb;
+        if (btn) btn.setAttribute('aria-checked', on ? 'true' : 'false');
+        odswiez();
       };
-      const wt = $('#pcfg-wt'); if (wt) wt.addEventListener('click', toggle(() => { cfgWt = !cfgWt; wt.setAttribute('aria-checked', cfgWt); }));
-      const ct = $('#pcfg-ct'); if (ct) ct.addEventListener('click', toggle(() => { cfgCt = !cfgCt; ct.setAttribute('aria-checked', cfgCt); }));
-      const od = $('#pcfg-od'); if (od) od.addEventListener('click', toggle(() => { cfgOd = !cfgOd; od.setAttribute('aria-checked', cfgOd); }));
-      const sb = $('#pcfg-sb'); if (sb) sb.addEventListener('click', toggle(() => { cfgSb = !cfgSb; sb.setAttribute('aria-checked', cfgSb); }));
+      const wt = $('#pcfg-wt'); if (wt) wt.addEventListener('click', toggle('wt', wt));
+      const ct = $('#pcfg-ct'); if (ct) ct.addEventListener('click', toggle('ct', ct));
+      const od = $('#pcfg-od'); if (od) od.addEventListener('click', toggle('od', od));
+      const sb = $('#pcfg-sb'); if (sb) sb.addEventListener('click', toggle('sb', sb));
     };
     /* The server inlines the live catalog into the page (#pf-products) so the
        hero configurator paints together with the rest of the document; the
