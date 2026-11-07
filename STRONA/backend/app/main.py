@@ -30,7 +30,7 @@ from pathlib import Path
 from time import monotonic
 from typing import Literal
 
-from fastapi import (BackgroundTasks, Depends, FastAPI, File, Header, HTTPException,
+from fastapi import (BackgroundTasks, Body, Depends, FastAPI, File, Header, HTTPException,
                      Request, Response, UploadFile)
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
@@ -445,7 +445,8 @@ def robots():
 @app.get("/sitemap.xml", include_in_schema=False)
 def sitemap(request: Request):
     base = _public_base(request)
-    paths = ["/", "/objectives", "/trade", "/faq", "/contact", "/academy", "/affiliate", "/install", "/verify",
+    paths = ["/", "/objectives", "/trade", "/faq", "/contact", "/academy", "/affiliate", "/affiliate-terms",
+             "/install", "/verify",
              "/terms", "/privacy", "/risk-disclosure", "/refund-policy"] \
         + [f"/academy/{x.slug}" for x in academy.LESSONS]
     urls = "".join(f"<url><loc>{base}{p}</loc></url>" for p in paths)
@@ -1430,11 +1431,12 @@ def _affiliate_earned(session, trader: Trader) -> float:
 
 
 def _affiliate_claimed(session, trader_id: int) -> float:
-    """Prowizja już zamieniona na kredyty sklepowe. Źródłem prawdy jest ledger
-    (nota `affiliate:claim`) — audyt i suma w jednym, bez osobnej kolumny."""
+    """Prowizja już claimnięta (store credit lub vUSDT).
+
+    Store credit: nota `affiliate:claim`. vUSDT: `affiliate:claim:vusdt`."""
     suma = (session.query(func.coalesce(func.sum(CreditLedger.amount), 0.0))
             .filter(CreditLedger.trader_id == trader_id,
-                    CreditLedger.note == "affiliate:claim").scalar())
+                    CreditLedger.note.like("affiliate:claim%")).scalar())
     return round(float(suma or 0), 2)
 
 
@@ -1508,14 +1510,20 @@ def me(trader: Trader = Depends(auth.current_trader)):
 AFFILIATE_CLAIM_MIN_USD = 10.0
 
 
-@app.post("/api/me/affiliate/claim")
-def affiliate_claim(trader: Trader = Depends(auth.current_trader)):
-    """Zamiana naliczonej prowizji afiliacyjnej na kredyty sklepowe.
+class AffiliateClaimIn(BaseModel):
+    method: str = "store_credit"  # store_credit | vusdt
 
-    unclaimed = naliczone (opłacone zamówienia poleconych) − już wypłacone
-    (suma wpisów `affiliate:claim` w ledgerze). Blokada wiersza tradera +
-    clamp do zera zamykają wyścig dwóch równoległych claimów: drugi wylicza
-    unclaimed już PO wpisie pierwszego i dostaje 0."""
+
+@app.post("/api/me/affiliate/claim")
+def affiliate_claim(payload: AffiliateClaimIn = Body(default_factory=AffiliateClaimIn),
+                    trader: Trader = Depends(auth.current_trader)):
+    """Claim prowizji afiliacyjnej: store credit albo vUSDT (bez cash / support).
+
+    unclaimed = naliczone − suma wpisów `affiliate:claim%`. Blokada wiersza
+    tradera zamyka wyścig dwóch równoległych claimów."""
+    method = (payload.method or "store_credit").strip().lower()
+    if method not in ("store_credit", "vusdt"):
+        raise HTTPException(400, "Claim method must be store_credit or vusdt")
     session = SessionLocal()
     try:
         tr = (session.query(Trader).filter(Trader.id == trader.id)
@@ -1527,11 +1535,31 @@ def affiliate_claim(trader: Trader = Depends(auth.current_trader)):
             raise HTTPException(
                 400, f"You need at least ${AFFILIATE_CLAIM_MIN_USD:,.0f} in unclaimed "
                      f"commission (you have ${kwota:,.2f})")
-        tr.credits_usd = round(float(tr.credits_usd or 0) + kwota, 2)
-        session.add(CreditLedger(trader_id=tr.id, amount=kwota, note="affiliate:claim"))
+        if method == "store_credit":
+            tr.credits_usd = round(float(tr.credits_usd or 0) + kwota, 2)
+            session.add(CreditLedger(trader_id=tr.id, amount=kwota, note="affiliate:claim"))
+            session.commit()
+            telemetry.track("affiliate_claim", tr.id, amount=kwota, method="store_credit")
+            return {"claimed_usd": kwota, "method": "store_credit",
+                    "credits_usd": tr.credits_usd,
+                    "commission_claimed": round(claimed + kwota, 2),
+                    "commission_unclaimed": 0.0}
+        portfel = _zapisany_portfel(tr)
+        if not portfel or not portfel.get("address"):
+            raise HTTPException(
+                400, "Save a Polygon wallet in Payouts before claiming as vUSDT")
+        # Ledger zdejmuje unclaimed; nota trzyma adres do wysyłki vUSDT.
+        # Nie tworzymy PayoutRequest na koncie tradingowym — to nie jest nagroda funded.
+        addr = str(portfel.get("address") or "")[:42]
+        session.add(CreditLedger(
+            trader_id=tr.id, amount=kwota,
+            note=f"affiliate:claim:vusdt:{addr}"))
         session.commit()
-        telemetry.track("affiliate_claim", tr.id, amount=kwota)
-        return {"claimed_usd": kwota, "credits_usd": tr.credits_usd,
+        telemetry.track("affiliate_claim", tr.id, amount=kwota, method="vusdt",
+                        wallet=addr)
+        return {"claimed_usd": kwota, "method": "vusdt", "status": "queued",
+                "wallet": addr,
+                "credits_usd": round(float(tr.credits_usd or 0), 2),
                 "commission_claimed": round(claimed + kwota, 2),
                 "commission_unclaimed": 0.0}
     finally:
@@ -14164,6 +14192,11 @@ def academy_lesson_page(request: Request, slug: str):
 @app.get("/affiliate")
 def affiliate_page(request: Request):
     return _page(request, "affiliate.html")
+
+
+@app.get("/affiliate-terms")
+def affiliate_terms_page(request: Request):
+    return _page(request, "legal/affiliate-terms.html")
 
 
 @app.get("/install")

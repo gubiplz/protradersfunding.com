@@ -102,3 +102,35 @@ def test_kredyty_z_claimu_widzi_preview_checkoutu():
     q = client.get("/api/checkout/preview?product_key=2step-25k", headers=h).json()
     assert q["credits_balance"] == 50.0 and q["credits_used"] == 50.0
     assert q["total_due_usd"] == 249.0   # $299 − $50 kredytów
+
+
+def test_claim_vusdt_wymaga_portfela_i_nie_daje_kredytow():
+    tid, kod, h = _referrer("aff-vusdt@test.pl")
+    _polecony_z_zamowieniem(kod, "aff-vusdt-ref@test.pl", 500.0)
+    r = client.post("/api/me/affiliate/claim", headers=h,
+                    json={"method": "vusdt"})
+    assert r.status_code == 400 and "wallet" in r.json()["detail"].lower()
+
+    s = SessionLocal()
+    tr = s.get(Trader, tid)
+    tr.payout_network = "POLYGON"
+    tr.payout_address = "0x1111111111111111111111111111111111111111"
+    s.commit(); s.close()
+
+    r = client.post("/api/me/affiliate/claim", headers=h,
+                    json={"method": "vusdt"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["method"] == "vusdt" and body["claimed_usd"] == 50.0
+    assert body["credits_usd"] == 0.0 and body["status"] == "queued"
+
+    s = SessionLocal()
+    assert round(float(s.get(Trader, tid).credits_usd or 0), 2) == 0.0
+    wpis = (s.query(CreditLedger)
+            .filter(CreditLedger.trader_id == tid,
+                    CreditLedger.note.like("affiliate:claim:vusdt%")).one())
+    assert wpis.amount == 50.0
+    s.close()
+
+    me = client.get("/api/auth/me", headers=h).json()["affiliate"]
+    assert me["commission_claimed"] == 50.0 and me["commission_unclaimed"] == 0.0
