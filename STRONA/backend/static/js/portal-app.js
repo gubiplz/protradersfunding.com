@@ -2296,6 +2296,11 @@ const VIEWS={
   const star=hot>=0?hot:Math.floor(shown.length/2);
   const usd=v=>'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:v%1?2:0,maximumFractionDigits:2});
   /* Same back-face rows as LP Challenges (site.js cardRules). */
+  const splitPct=p=>{
+    const base=p.profit_split_pct||0;
+    const boost=(p.split_boost_pp||10);
+    return (window._shopSb&&showSb&&p.steps===0)?base+boost:base;
+  };
   const rules=p=>{
     const instant=p.steps===0;
     const lev='Up to 1:'+(window.LEVERAGE_MAX||100);
@@ -2307,7 +2312,7 @@ const VIEWS={
       ['Daily loss limit',p.max_daily_loss_pct+'%'],
       ['Max drawdown',p.max_overall_loss_pct+'%'],
       ['Min. trading days',String(p.min_trading_days)],
-      ['Profit split',(instant?'':'Up to ')+p.profit_split_pct+'%'],
+      ['Profit split',(instant?'':'Up to ')+splitPct(p)+'%'],
       ['Rewards',rewards],
       ['Max open volume',p.max_lots+' lots'],
       ['Leverage',lev],
@@ -2336,7 +2341,7 @@ const VIEWS={
             <ul class="chal-specs">
               <li><small>Target</small><b>${p.steps===0?'None':p.profit_target_p1+'%'}</b></li>
               <li><small>Drawdown</small><b>${p.max_overall_loss_pct}%</b></li>
-              <li><small>Split</small><b>${p.profit_split_pct}%</b></li>
+              <li><small>Split</small><b>${splitPct(p)}%</b></li>
             </ul>
           </div>
           <div class="chal-face chal-back">
@@ -2359,14 +2364,14 @@ const VIEWS={
     ${ME.credits_usd>0?`<div class="note" style="margin:0 auto 14px;max-width:920px"><b>Store credit: $${fmt(ME.credits_usd)}</b>, applied at checkout.</div>`:''}
     <div class="chal-grid" id="shopGrid">${cards||'<div class="empty"><h3>No plans in this tier</h3></div>'}</div>
     <div class="chal-extras" id="shopExtras">
-      <div class="chal-opt"><span><b>Weekend trading</b><small>+$199</small></span>
-        <button class="chal-sw" id="shop-wt" type="button" role="switch" aria-checked="${window._shopWt}" aria-label="Add weekend trading"></button></div>
-      <div class="chal-opt"><span><b>On-demand Payout</b><small>+$${odCena}</small></span>
-        <button class="chal-sw" id="shop-od" type="button" role="switch" aria-checked="${window._shopOd}" aria-label="Add on-demand payout"></button></div>
-      ${showSb?`<div class="chal-opt"><span><b>Split Boost</b><small>+$${sbCena}</small></span>
-        <button class="chal-sw" id="shop-sb" type="button" role="switch" aria-checked="${window._shopSb}" aria-label="Add split boost"></button></div>`:''}
+      <div class="chal-opt"><span><b>Weekend</b><small>+$199</small></span>
+        <button class="chal-sw" id="shop-wt" type="button" role="switch" aria-checked="${!!window._shopWt}" aria-label="Add weekend trading"></button></div>
       ${anyCt?`<div class="chal-opt"><span><b>Copytrading</b><small>+$${ctCena}</small></span>
-        <button class="chal-sw" id="shop-ct" type="button" role="switch" aria-checked="${window._shopCt}" aria-label="Add copytrading"></button></div>`:''}
+        <button class="chal-sw" id="shop-ct" type="button" role="switch" aria-checked="${!!window._shopCt}" aria-label="Add copytrading"></button></div>`:''}
+      <div class="chal-opt"><span><b>On-demand</b><small>+$${odCena}</small></span>
+        <button class="chal-sw" id="shop-od" type="button" role="switch" aria-checked="${!!window._shopOd}" aria-label="Add on-demand payout"></button></div>
+      ${showSb?`<div class="chal-opt"><span><b>Split Boost</b><small>+$${sbCena}</small></span>
+        <button class="chal-sw" id="shop-sb" type="button" role="switch" aria-checked="${!!window._shopSb}" aria-label="Add split boost"></button></div>`:''}
       <div class="chal-opt"><span><b>News trading</b><small>Included</small></span></div>
       <div class="chal-opt chal-code">
         <input id="shop-coupon" autocomplete="off" placeholder="Coupon code" aria-label="Coupon code"
@@ -3911,7 +3916,7 @@ function openBuy(key){
         <button class="icon-btn" onclick="closeBuy()" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
       </div>
       <div class="plan-line">
-        Simulated capital <span id="buy-cap">$${fmt0(pfPromo()&&p.promo_upgrade_size?p.promo_upgrade_size:p.account_size)}</span> · split ${p.profit_split_pct}%
+        Simulated capital <span id="buy-cap">$${fmt0(pfPromo()&&p.promo_upgrade_size?p.promo_upgrade_size:p.account_size)}</span> · split <span id="buy-split">${p.profit_split_pct + (buyAddonsFromShop().split_boost ? (p.split_boost_pp||10) : 0)}%</span>
       </div>
       ${p.promo_upgrade_size?`<div class="plan-promo" id="buy-promo" ${pfPromo()?'':'hidden'}><b>Upgrade Your Size</b> — you pay for the
         $${fmt0(p.account_size)} plan and we create a <b>$${fmt0(p.promo_upgrade_size)}</b> account.</div>`:''}

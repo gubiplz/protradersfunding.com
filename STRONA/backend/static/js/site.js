@@ -454,6 +454,12 @@
   const oferujeCt = p => !!(p && p.copytrading_offered);
   const cenaSb = p => (p && p.split_boost_fee_usd) || CENA_SB;
   const oferujeSb = p => !!(p && p.split_boost_offered);
+  const boostPp = p => (p && p.split_boost_pp) || 10;
+  /* Live split shown in the UI — base plan + Split Boost when that Instant add-on is on. */
+  const splitPct = p => {
+    const base = (p && p.profit_split_pct) || 0;
+    return (cfgSb && oferujeSb(p) && p.steps === 0) ? base + boostPp(p) : base;
+  };
   /* On-demand: Instant (steps==0) droższy — usuwa bi-weekly 14 dni. */
   const cenaOd = p => (p && p.steps === 0) ? CENA_OD_INSTANT : CENA_OD_2STEP;
   const cenaOdTyp = t => t === 'instant' ? CENA_OD_INSTANT : CENA_OD_2STEP;
@@ -477,7 +483,7 @@
       ['Daily loss limit', p.max_daily_loss_pct + '%'],
       ['Max drawdown', p.max_overall_loss_pct + '%'],
       ['Min. trading days', p.min_trading_days + ''],
-      ['Profit split', (instant ? '' : 'Up to ') + p.profit_split_pct + '%'],
+      ['Profit split', (instant ? '' : 'Up to ') + splitPct(p) + '%'],
       ['Rewards', cfgOd ? 'On demand' : czestotliwoscWyplat()],
       ['Max open volume', p.max_lots + ' lots'],
       ['Leverage', dzwignia()],
@@ -575,7 +581,7 @@
             <ul class="chal-specs">
               <li><small>Target</small><b>${p.steps === 0 ? 'None' : p.profit_target_p1 + '%'}</b></li>
               <li><small>Drawdown</small><b>${p.max_overall_loss_pct}%</b></li>
-              <li><small>Split</small><b>${p.profit_split_pct}%</b></li>
+              <li><small>Split</small><b>${splitPct(p)}%</b></li>
             </ul>
           </div>
           <div class="chal-face chal-back">
@@ -762,7 +768,7 @@
       $('#cfg-target').innerHTML = `+${p.profit_target_p1}% = $<span id="cfg-tusd"></span>`;
       tweenNum($('#cfg-tusd'), p.account_size * p.profit_target_p1 / 100, v => fmt(Math.round(v)));
     }
-    $('#cfg-split').textContent = p.profit_split_pct + '%';
+    $('#cfg-split').textContent = splitPct(p) + '%';
 
     /* Promo block: the size the account is actually created with. The API sends
        promo_upgrade_size only while the promo is live, and the upgrade itself
@@ -827,15 +833,19 @@
         + chip('od', cfgOd, `${cfgOd ? '✓ ' : '+ '}On-demand $${cenaOd(p)}`)
         + (p.steps === 0 && oferujeSb(p) ? chip('sb', cfgSb, `${cfgSb ? '✓ ' : '+ '}Split Boost $${cenaSb(p)}`) : '')
         + '<span class="cfg-chip-note">News trading <b>included</b></span>';
-      $$('#cfg-addons .cfg-chip').forEach(b => b.addEventListener('click', () => {
+      $$('#cfg-addons .cfg-chip').forEach(b => b.addEventListener('click', e => {
+        e.preventDefault(); e.stopPropagation();
         if (b.dataset.a === 'wt') cfgWt = !cfgWt;
         else if (b.dataset.a === 'ct') cfgCt = !cfgCt;
         else if (b.dataset.a === 'od') cfgOd = !cfgOd;
         else if (b.dataset.a === 'sb') cfgSb = !cfgSb;
+        /* Instant feedback on the chip row; defer the Challenges strip so a
+           remount cannot steal this click. */
         renderConfigurator();
-        /* Cennik nizej pokazuje te same dodatki — bez tego obie karty
-           twierdzilyby co innego o tym samym zamowieniu. */
-        if ($('#pcfg')) renderPricing();
+        if ($('#pcfg')) {
+          clearTimeout(window._chalRedraw);
+          window._chalRedraw = setTimeout(() => renderPricing(), 80);
+        }
       }));
     }
     const dodatki = (cfgWt ? CENA_WT : 0) + (cfgCt && oferujeCt(p) ? cenaCt(p) : 0)
@@ -866,11 +876,22 @@
       const hsend = () => hi && submitCodeField(hi, heroMsg);
       const hb = $('#cfg-code-apply'); if (hb) hb.addEventListener('click', hsend);
       if (hi) hi.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); hsend(); } });
-      const odswiez = () => { renderPricing(); if ($('#cfg')) renderConfigurator(); };
-      const wt = $('#pcfg-wt'); if (wt) wt.addEventListener('click', () => { cfgWt = !cfgWt; odswiez(); });
-      const ct = $('#pcfg-ct'); if (ct) ct.addEventListener('click', () => { cfgCt = !cfgCt; odswiez(); });
-      const od = $('#pcfg-od'); if (od) od.addEventListener('click', () => { cfgOd = !cfgOd; odswiez(); });
-      const sb = $('#pcfg-sb'); if (sb) sb.addEventListener('click', () => { cfgSb = !cfgSb; odswiez(); });
+      /* Defer redraw so the same click cannot land on a remounted challenge card. */
+      const odswiez = () => {
+        clearTimeout(window._chalRedraw);
+        window._chalRedraw = setTimeout(() => {
+          renderPricing();
+          if ($('#cfg')) renderConfigurator();
+        }, 80);
+      };
+      const toggle = (fn) => (e) => {
+        e.preventDefault(); e.stopPropagation();
+        fn(); odswiez();
+      };
+      const wt = $('#pcfg-wt'); if (wt) wt.addEventListener('click', toggle(() => { cfgWt = !cfgWt; wt.setAttribute('aria-checked', cfgWt); }));
+      const ct = $('#pcfg-ct'); if (ct) ct.addEventListener('click', toggle(() => { cfgCt = !cfgCt; ct.setAttribute('aria-checked', cfgCt); }));
+      const od = $('#pcfg-od'); if (od) od.addEventListener('click', toggle(() => { cfgOd = !cfgOd; od.setAttribute('aria-checked', cfgOd); }));
+      const sb = $('#pcfg-sb'); if (sb) sb.addEventListener('click', toggle(() => { cfgSb = !cfgSb; sb.setAttribute('aria-checked', cfgSb); }));
     };
     /* The server inlines the live catalog into the page (#pf-products) so the
        hero configurator paints together with the rest of the document; the
