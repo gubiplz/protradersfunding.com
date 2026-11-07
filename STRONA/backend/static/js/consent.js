@@ -44,6 +44,7 @@
     var b=e.target.closest('[data-ck]'); if(!b) return;
     var k=b.getAttribute('data-ck');
     if(k==='manage') show(true);
+    else if(k==='collapse') show(false);   // back to the compact banner, keep it open
     else if(k==='accept') store(true,true);
     else if(k==='reject') store(false,false);
     else if(k==='save') store(an.checked,rf.checked);
