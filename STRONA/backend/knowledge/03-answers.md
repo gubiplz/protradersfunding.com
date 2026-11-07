@@ -38,7 +38,7 @@ Answers are grouped the way customers actually think, not the way the product is
 
 **"How do you compare to {competitor}?"**
 > I'd rather give you our numbers than talk about theirs: 90% split on evaluation plans,
-> the fee refunded with your first payout, static drawdown only — never trailing, so your
+> the fee credited with your first payout (as vUSDT, not a card refund), static drawdown only — never trailing, so your
 > floor never chases your profits — no time limit on the evaluation, and no strategy bans
 > at all. News, weekends and EAs are fine. Compare that line by line and decide.
 
@@ -182,9 +182,9 @@ Answers are grouped the way customers actually think, not the way the product is
 > full refund — I'm passing it to the team now and it'll go back to your original payment
 > method, usually within 5–10 business days.
 > {After delivery:} Once credentials are delivered and trading is possible, the fee isn't
-> refundable — but it isn't lost either: it comes back in full with your first payout from
-> a funded account. If you think something went wrong on our side, tell me what happened
-> and I'll have the team look at it.
+> refundable to your card — but it isn't lost either: it is credited in full as additional
+> vUSDT with your first payout from a funded account. If you think something went wrong on
+> our side, tell me what happened and I'll have the team look at it.
 
 **"My account still hasn't arrived."**
 > {Escalate if past ~30 minutes.} That's not normal — provisioning usually completes in
@@ -270,5 +270,6 @@ mechanics: static drawdown, no time limit, no strategy bans, published rules, lo
 breaches. Let the contrast do the work.
 
 **Silence after a quote.**
-One follow-up, useful rather than pushy: the entry plan's price, the fee refund, and a
-direct link to /objectives so they can check the rules before deciding. Then stop.
+One follow-up, useful rather than pushy: the entry plan's price, the fee credit with
+first payout, and a direct link to /objectives so they can check the rules before
+deciding. Then stop.

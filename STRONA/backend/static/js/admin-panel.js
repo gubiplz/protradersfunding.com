@@ -1941,7 +1941,7 @@ function renderPayoutsView(){
     <tbody>${rows.map(r=>`<tr>
       <td class="muted" data-l="Date" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td><td class="num rt-main" data-l="Account">${accLink(r.account_id,r.account_login)}${r.ondemand?' <span class="express-pill" title="On-demand Payout add-on — no 14-day wait between requests">ON-DEMAND</span>':''}</td>
       <td data-l="Trader">${esc(r.trader_email||'—')}${freeChip(r)}</td>
-      <td class="num" data-l="Profit">$${fmt(r.profit_amount)}</td><td class="num up" data-l="Amount" data-sort="${r.total??r.trader_share}">$${fmt(r.total??r.trader_share)}${r.fee_refund?`<div class="muted" style="font-size:var(--fs-cap);font-weight:400">incl. $${fmt(r.fee_refund)} fee refund</div>`:''}</td>
+      <td class="num" data-l="Profit">$${fmt(r.profit_amount)}</td><td class="num up" data-l="Amount" data-sort="${r.total??r.trader_share}">$${fmt(r.total??r.trader_share)}${r.fee_refund?`<div class="muted" style="font-size:var(--fs-cap);font-weight:400">incl. $${fmt(r.fee_refund)} fee credit</div>`:''}</td>
       <td data-l="Method">${(()=>{const d=r.details||{};
         /* Wniosek bez danych płatniczych (przegląd / czeka na tradera) nie ma
            jeszcze metody — „—" zamiast zgadniętego USDT. */
@@ -1983,7 +1983,7 @@ function renderPayoutsView(){
         +XBTN(`deletePayoutRow('${r.kind}',${r.id},${r.trader_share},'${jsq(r.account_login||'')}')`,
               r.kind==='payout'?'Delete payout':'Delete request')}</td></tr>`).join('')}
     </tbody></table></div>
-    <p class="muted" style="font-size:11.5px;margin-top:10px">Two steps: the trader requests an amount; <b>Approve request</b> confirms it and the trader adds a wallet (or confirms the saved one — a change needs a code from their e-mail; <b>New wallet</b> marks it). For USDT, send the full <b>Amount</b> and click <b>Mark as paid</b>. For vUSDT the transfer settles on Polygon by itself. The first payout on an account already includes the challenge fee refund in its Amount.</p>`
+    <p class="muted" style="font-size:11.5px;margin-top:10px">Two steps: the trader requests an amount; <b>Approve request</b> confirms it and the trader adds a wallet (or confirms the saved one — a change needs a code from their e-mail; <b>New wallet</b> marks it). For USDT, send the full <b>Amount</b> and click <b>Mark as paid</b>. For vUSDT the transfer settles on Polygon by itself. The first payout on an account already includes the challenge fee credit in its Amount.</p>`
     /* Gdy WSZYSTKO, co jest w ksiedze, to wiersze archiwalne, zwykle "No payouts
        match" wskazywaloby na wyszukiwarke -- a schowal je przelacznik. */
     :!widoczne.length&&ukryte?`<div class="empty"><h3>Only imported payouts here</h3>
@@ -4696,7 +4696,7 @@ async function renderPayouts(id){
     <div class="kv" style="align-items:center;flex-wrap:wrap;row-gap:6px">
       <span>${dstr(p.ts)} · profit $${fmt(p.profit_amount)}${p.note?' · '+esc(p.note):''}</span>
       <span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;row-gap:6px">
-        <b class="up">$${fmt(p.trader_share)}</b>${p.fee_refund?`<span class="muted" style="font-size:11px">incl. $${fmt(p.fee_refund)} fee refund</span>`:''}
+        <b class="up">$${fmt(p.trader_share)}</b>${p.fee_refund?`<span class="muted" style="font-size:11px">incl. $${fmt(p.fee_refund)} fee credit</span>`:''}
         ${p.cert_url
           ? `<span class="status ${p.show_on_lp?'paid':'pending'}" title="Landing page strip">
                <span class="dot"></span>${p.show_on_lp?'On landing page':'Not published'}</span>
@@ -4737,7 +4737,7 @@ async function renderPayouts(id){
         <b>${esc(d.status)}</b>. Move the phase to Funded first.
         ${pool!=null?'The pool is already set and will apply once the account is funded.':''}</p>`:`
     <div class="pool-form" style="margin-top:14px">
-      <div><label class="muted" style="font-size:12px">Trader payout ($)${d.fee_refund?` <span title="First payout on this account: the challenge fee refund is added to this amount">+ $${fmt(d.fee_refund)} fee refund</span>`:''}</label>
+      <div><label class="muted" style="font-size:12px">Trader payout ($)${d.fee_refund?` <span title="First payout on this account: the challenge fee credit is added to this amount">+ $${fmt(d.fee_refund)} fee credit</span>`:''}</label>
         <input id="po-amount" class="inp" type="number" step="0.01" min="0.01" value="${d.suggested_share||''}"
           placeholder="${d.suggested_share?'':'enter an amount'}" data-refund="${d.fee_refund||0}"></div>
       <div><label class="muted" style="font-size:12px">Method</label>
@@ -4851,7 +4851,7 @@ async function issuePayout(id,poolMode){
   if(!await askConfirm({title:`Issue a payout of $${fmt(amount+zwrot)}?`,
     body:(poolMode?'It is booked as paid and deducted from the payout pool — the balance is not reset. '
                   :'It is booked as paid and the account balance resets to its starting capital. ')
-      +(zwrot?`It includes the $${fmt(zwrot)} challenge fee refund (first payout on this account). `:'')
+      +(zwrot?`It includes the $${fmt(zwrot)} challenge fee credit (first payout on this account). `:'')
       +(naLp?'The certificate will also show on the landing page.'
             :'The certificate stays off the landing page.'),
     ok:'Issue payout',danger:true}))return;
@@ -5197,12 +5197,12 @@ async function approvePayout(id,btn,total,refund){
   await busy(btn,null,async()=>{
     if(!await askConfirm({title:total?`Mark $${fmt(total)} as paid?`:'Mark this payout as paid?',
       body:(total?`Send <b>$${fmt(total)}</b> in USDT to the trader's wallet first`
-                 +(refund?` (the profit share plus the $${fmt(refund)} challenge fee refund)`:'')+'. '
+                 +(refund?` (the profit share plus the $${fmt(refund)} challenge fee credit)`:'')+'. '
                  :'Send the USDT to the trader\'s wallet first. ')
         +'This books the payout. <b>It cannot be undone.</b>',
       ok:'Mark as paid',danger:true}))return;
     try{const d=await api(`/api/admin/payout-requests/${id}/approve`,{method:'POST'});
-      toast(`✅ Paid $${fmt(d.total_paid)}${d.fee_refund?` (incl. $${fmt(d.fee_refund)} fee refund)`:''}`,'ok');
+      toast(`✅ Paid $${fmt(d.total_paid)}${d.fee_refund?` (incl. $${fmt(d.fee_refund)} fee credit)`:''}`,'ok');
       go('payouts');
     }catch(e){toast('Error: '+e.message,'err')}
   });

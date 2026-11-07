@@ -468,7 +468,7 @@
       ['Rewards', cfgOd ? 'On demand' : czestotliwoscWyplat()],
       ['Max open volume', p.max_lots + ' lots'],
       ['Leverage', dzwignia()],
-      ['Fee refund', 'First payout'],
+      ['Fee credit', 'First payout'],
     ];
   }
 
@@ -663,9 +663,9 @@
          Instant mowila 1:50 i klamala wobec tego, co trader dostawal w MT5. */
       ['Leverage', dzwignia(true), ...col(dzwignia(true))],
       ['Profit split', 'up to ' + Math.max(...g2.map(p => p.profit_split_pct)) + '%', ...col(ri && ri.profit_split_pct + '%')],
-      /* The engine refunds the fee on the FIRST payout for every plan
+      /* The engine credits the fee on the FIRST payout for every plan
          (main.py:1342) — Instant Funding included. */
-      ['Refundable fee', '<span class="ok">✓ With first payout</span>',
+      ['Fee credit', '<span class="ok">✓ With first payout</span>',
         ...col('<span class="ok">✓ With first payout</span>')],
       ['One-time fee', 'from ' + money(Math.min(...g2.map(p => p.price_usd))), ...col(ri && 'from ' + money(Math.min(...gi.map(p => p.price_usd))))],
     ];
@@ -781,8 +781,8 @@
     }
     if (fine) {
       fine.textContent = anyPromo && applied
-        ? '*You pay the price of the size you pick; with the promo applied we create the account one size up. Fee still refunded with your first payout.'
-        : "*One-time fee, refunded with your first payout. Rewards depend on your trading.";
+        ? '*You pay the price of the size you pick; with the promo applied we create the account one size up. Fee still credited with your first payout.'
+        : "*One-time fee, credited with your first payout. Rewards depend on your trading.";
     }
     /* Pasek dodatkow. Ten sam stan, co w cenniku nizej — wiec zaznaczenie
        przenosi sie miedzy kartami i cena zgadza sie w obu. */

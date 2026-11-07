@@ -33,8 +33,11 @@ html[data-theme=dark] .pf-ck{--ckbg:linear-gradient(180deg,rgba(22,30,46,.94),rg
 .pf-ck .pf-ck-btn:active{transform:translateY(1px)}
 .pf-ck .pf-ck-ok{background:var(--cka);border-color:transparent;color:var(--ckat);box-shadow:0 8px 18px -10px var(--cka)}
 .pf-ck .pf-ck-ok:hover{filter:brightness(1.08);background:var(--cka)}
-.pf-ck .pf-ck-x{width:32px;height:32px;border-radius:8px;color:var(--ckm);font-size:14px}
+.pf-ck .pf-ck-x{width:32px;height:32px;border-radius:8px;color:var(--ckm);font-size:14px;
+  display:inline-flex;align-items:center;justify-content:center;padding:0}
 .pf-ck .pf-ck-x:hover{color:var(--ckt);background:var(--ckh)}
+.pf-ck .pf-ck-collapse svg{display:block;transition:transform .18s}
+.pf-ck .pf-ck-collapse:hover svg{transform:translateY(1px)}
 .pf-ck-opts{display:grid;grid-template-columns:1fr 1fr;gap:0 26px;padding:11px 16px 8px;border-bottom:1px solid var(--ckl);background:var(--ckh)}
 .pf-ck-opt{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:4px 0;cursor:pointer}
 .pf-ck-opt b{display:block;font-size:13px;font-weight:600;margin-bottom:2px}
