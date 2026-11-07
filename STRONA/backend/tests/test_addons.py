@@ -24,7 +24,7 @@ from app import auth, catalog  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Account, Order, Trader  # noqa: E402
+from app.models import Account, AppSetting, Order, Trader  # noqa: E402
 
 init_db()
 s = SessionLocal(); catalog.seed_products(s); s.close()
@@ -70,6 +70,38 @@ def test_split_boost_tylko_dla_instant():
     ok = client.get("/api/checkout/preview?product_key=2step-25k&ondemand=true", headers=h)
     assert ok.status_code == 200 and ok.json()["ondemand_payout_fee_usd"] == 299.0
     assert ok.json()["ondemand_payout_fee_usd"] == catalog.ONDEMAND_PAYOUT_2STEP_USD
+
+
+def test_split_boost_admin_moze_schowac():
+    """Settings → Hide from cart: switch znika i serwer odrzuca goły POST."""
+    _, h = _trader("addon-sb-off@test.pl")
+    s = SessionLocal()
+    row = s.get(AppSetting, catalog.SPLIT_BOOST_OFFERED_KEY)
+    if row is None:
+        row = AppSetting(key=catalog.SPLIT_BOOST_OFFERED_KEY)
+        s.add(row)
+    row.value = "0"
+    s.commit(); s.close()
+    try:
+        r = client.get("/api/checkout/preview?product_key=instant-25k&split_boost=true",
+                       headers=h)
+        assert r.status_code == 400 and "not available" in r.json()["detail"]
+        prods = client.get("/api/products").json()
+        assert any(p["key"].startswith("instant-") and p.get("split_boost_offered") is False
+                   for p in prods)
+        off = client.post("/api/admin/split-boost-offer", headers=ADMIN_H,
+                          json={"enabled": False})
+        assert off.status_code == 200 and off.json()["enabled"] is False
+        on = client.post("/api/admin/split-boost-offer", headers=ADMIN_H,
+                         json={"enabled": True})
+        assert on.status_code == 200 and on.json()["enabled"] is True
+    finally:
+        s = SessionLocal()
+        row = s.get(AppSetting, catalog.SPLIT_BOOST_OFFERED_KEY)
+        if row is not None:
+            row.value = "1"
+            s.commit()
+        s.close()
 
 
 def test_zakup_prowizjonuje_boost_i_flage_ondemand():

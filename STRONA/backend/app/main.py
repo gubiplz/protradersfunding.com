@@ -1640,6 +1640,7 @@ def _products_payload(session, trader_id: int | None = None) -> list[dict]:
     upgrades = catalog.upgrade_map(prods)
     zywe = offers.live_for(session, trader_id)
     oferowany_copytrading = catalog.copytrading_offered(session)
+    oferowany_split_boost = catalog.split_boost_offered(session)
     out = []
     for p in prods:
         d = _product_dict(p)
@@ -1651,12 +1652,12 @@ def _products_payload(session, trader_id: int | None = None) -> list[dict]:
         d["offer_pct"] = oferta.discount_pct if oferta else None
         d["offer_price_usd"] = offers.price_after(p, oferta) if oferta else None
         d["offer_ends_at"] = (oferta.ends_at.isoformat() if oferta else None)
-        # Flaga globalna, ale jedzie przy KAZDYM planie, bo modal zakupu i tak
-        # ma w rece wlasnie ten slownik (tak samo czyta `steps` przy Split
-        # Boost). Osobne zapytanie o jeden bool byloby kolejnym round-tripem
-        # przed pokazaniem koszyka.
+        # Flagi globalne jadą przy każdym planie — UI koszyka/karty czyta ten
+        # sam słownik (steps + offered) bez ekstra round-tripu.
         d["copytrading_offered"] = oferowany_copytrading
         d["copytrading_fee_usd"] = catalog.COPYTRADING_ADDON_USD
+        d["split_boost_offered"] = oferowany_split_boost
+        d["split_boost_fee_usd"] = catalog.SPLIT_BOOST_ADDON_USD
         out.append(d)
     return out
 
@@ -7497,6 +7498,10 @@ class CopytradingOfferIn(BaseModel):
     enabled: bool
 
 
+class SplitBoostOfferIn(BaseModel):
+    enabled: bool
+
+
 @app.get("/api/admin/copytrading-offer", dependencies=[Depends(auth.require_admin)])
 def admin_copytrading_offer_state():
     session = SessionLocal()
@@ -7521,6 +7526,37 @@ def admin_copytrading_offer_set(payload: CopytradingOfferIn):
         row = session.get(AppSetting, catalog.COPYTRADING_OFFERED_KEY)
         if row is None:
             row = AppSetting(key=catalog.COPYTRADING_OFFERED_KEY)
+            session.add(row)
+        row.value = "1" if payload.enabled else "0"
+        session.commit()
+        return {"enabled": payload.enabled}
+    finally:
+        session.close()
+
+
+@app.get("/api/admin/split-boost-offer", dependencies=[Depends(auth.require_admin)])
+def admin_split_boost_offer_state():
+    session = SessionLocal()
+    try:
+        return {"enabled": catalog.split_boost_offered(session),
+                "price_usd": catalog.SPLIT_BOOST_ADDON_USD,
+                "boost_pp": catalog.SPLIT_BOOST_PP}
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/split-boost-offer", dependencies=[Depends(auth.require_admin)])
+def admin_split_boost_offer_set(payload: SplitBoostOfferIn):
+    """Czy Split Boost (+10 pp, tylko Instant) widać przy planach Instant.
+
+    Wyłączenie chowa switch na LP/portalu i odrzuca gołe POST-y. Konta już
+    kupione z boostem zachowują podniesiony split.
+    """
+    session = SessionLocal()
+    try:
+        row = session.get(AppSetting, catalog.SPLIT_BOOST_OFFERED_KEY)
+        if row is None:
+            row = AppSetting(key=catalog.SPLIT_BOOST_OFFERED_KEY)
             session.add(row)
         row.value = "1" if payload.enabled else "0"
         session.commit()

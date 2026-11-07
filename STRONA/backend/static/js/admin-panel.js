@@ -970,9 +970,10 @@ const VIEWS={
  async settings(){
   // Payout BOT i Reach BOT przeniosly sie do zakladki Telegram, wiec ten widok
   // nie ciagnie juz ich stanu — dwa zapytania mniej przy kazdym wejsciu.
-  const [s,bg,cp,up]=await Promise.all([api('/api/stats'),
+  const [s,bg,cp,sb,up]=await Promise.all([api('/api/stats'),
     api('/api/admin/bogo-promo').catch(()=>({enabled:false})),
     api('/api/admin/copytrading-offer').catch(()=>({enabled:false,price_usd:299,real_mt5:false})),
+    api('/api/admin/split-boost-offer').catch(()=>({enabled:false,price_usd:149,boost_pp:10})),
     api('/api/admin/upgrade-promo').catch(()=>null)]);
   $('view').innerHTML=`
     <div class="card-cols">
@@ -1012,6 +1013,19 @@ const VIEWS={
         turning it on does not add it to orders issued before. For a single lead you can always
         override this with the checkbox in the New order window or on the order itself.</p></div>
 
+    <div class="sec-card" style="max-width:560px"><h3>Split Boost add-on</h3>
+      <div class="chip-row" style="margin-bottom:12px">
+        <span class="status ${sb.enabled?'funded':'pending'}"><span class="dot"></span>${sb.enabled?'in the cart':'hidden'}</span>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn-p" onclick="setSplitBoostOffer(${sb.enabled?'false':'true'})">${sb.enabled?'Hide from the cart':'Show in the cart'}</button>
+      </div>
+      <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
+        <b>$${fmt(sb.price_usd||149)}</b> — raises Instant Funding profit split by
+        <b>+${sb.boost_pp||10} pp</b> (70% → 80%). Shown only when the shop is on
+        <b>Instant Funding</b>. While it's off the switch is gone <b>and the server refuses
+        the add-on</b>. Accounts already sold keep the boosted split.</p></div>
+
     <div class="sec-card" style="max-width:560px"><h3>Copytrading add-on</h3>
       <div class="chip-row" style="margin-bottom:12px">
         <span class="status ${cp.enabled?'funded':'pending'}"><span class="dot"></span>${cp.enabled?'in the cart':'hidden'}</span>
@@ -1021,8 +1035,8 @@ const VIEWS={
       </div>
       <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
         <b>$${fmt(cp.price_usd||299)}</b> — permission to copy trades between the trader's own
-        accounts and to log in from more than one device. While it's on, the checkbox appears in
-        the buy modal; while it's off the checkbox is gone <b>and the server refuses the add-on</b>,
+        accounts and to log in from more than one device. While it's on, the switch appears under
+        Challenges; while it's off it is gone <b>and the server refuses the add-on</b>,
         so it cannot be bought by a crafted request either. Accounts already sold keep the
         permission — turning this off changes only what is on sale.
         ${cp.real_mt5
@@ -5363,6 +5377,12 @@ async function setCopytradingReal(on){
 async function setCopytradingOffer(on){
   try{await api('/api/admin/copytrading-offer',{method:'POST',body:JSON.stringify({enabled:!!on})});
     toast(on?'Copytrading is now offered in the cart.':'Copytrading is hidden from the cart.','ok');
+  }catch(e){toast(e.message||'Could not save','err')}
+  go(VIEW);
+}
+async function setSplitBoostOffer(on){
+  try{await api('/api/admin/split-boost-offer',{method:'POST',body:JSON.stringify({enabled:!!on})});
+    toast(on?'Split Boost is now offered on Instant plans.':'Split Boost is hidden from the cart.','ok');
   }catch(e){toast(e.message||'Could not save','err')}
   go(VIEW);
 }
