@@ -49,8 +49,16 @@ WEEKEND_ADDON_USD = 199.0
 # Instant jest droższy, bo od razu jest funded.
 SPLIT_BOOST_ADDON_USD = 149.0
 SPLIT_BOOST_PP = 10
+# Widoczność w koszyku (Settings), jak Copytrading. Brak wiersza = WIDOCZNY.
+# Sam add-on i tak działa TYLKO na Instant Funding (billing + UI).
+SPLIT_BOOST_OFFERED_KEY = "split_boost_offered"
 ONDEMAND_PAYOUT_2STEP_USD = 299.0
 ONDEMAND_PAYOUT_INSTANT_USD = 399.0
+
+
+def split_boost_offered(session) -> bool:
+    row = session.get(AppSetting, SPLIT_BOOST_OFFERED_KEY)
+    return row is None or row.value == "1"
 
 
 def ondemand_payout_fee_usd(product) -> float:

@@ -144,6 +144,8 @@ def compute_price(session, trader: Trader, product_key: str, coupon: str | None,
     if split_boost:
         if product.steps != 0:
             raise HTTPException(400, "The profit split boost is available on Instant Funding plans only")
+        if not catalog.split_boost_offered(session):
+            raise HTTPException(400, "The profit split boost is not available right now")
         price = round(price + catalog.SPLIT_BOOST_ADDON_USD, 2)
     if ondemand_payout:
         price = round(price + catalog.ondemand_payout_fee_usd(product), 2)

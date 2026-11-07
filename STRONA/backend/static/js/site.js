@@ -435,12 +435,14 @@
   /* Dodatki sa WSPOLNE dla obu kreatorow (hero i cennik): to ta sama decyzja
      zakupowa, a dwa niezalezne stany znaczylyby, ze zaznaczenie w jednym znika
      po przewinieciu do drugiego. */
-  let cfgType = '2step', cfgSize = null, cfgWt = false, cfgCt = false, cfgOd = false;
-  const CENA_WT = 199, CENA_CT = 299, CENA_OD_2STEP = 299, CENA_OD_INSTANT = 399;
+  let cfgType = '2step', cfgSize = null, cfgWt = false, cfgCt = false, cfgOd = false, cfgSb = false;
+  const CENA_WT = 199, CENA_CT = 299, CENA_OD_2STEP = 299, CENA_OD_INSTANT = 399, CENA_SB = 149;
   /* Cene dodatku bierzemy z katalogu, gdy serwer ja podal — stala ponizej jest
      tylko awaryjna, zeby karta nie pokazala „$undefined" przy starym payloadzie. */
   const cenaCt = p => (p && p.copytrading_fee_usd) || CENA_CT;
   const oferujeCt = p => !!(p && p.copytrading_offered);
+  const cenaSb = p => (p && p.split_boost_fee_usd) || CENA_SB;
+  const oferujeSb = p => !!(p && p.split_boost_offered);
   /* On-demand: Instant (steps==0) droższy — usuwa bi-weekly 14 dni. */
   const cenaOd = p => (p && p.steps === 0) ? CENA_OD_INSTANT : CENA_OD_2STEP;
   const cenaOdTyp = t => t === 'instant' ? CENA_OD_INSTANT : CENA_OD_2STEP;
@@ -513,6 +515,14 @@
     if (ct) ct.setAttribute('aria-checked', cfgCt);
     const ctPrice = $('#pcfg-ct-price');
     if (ctPrice) ctPrice.textContent = '+$' + cenaCt(shown[0]);
+    /* Split Boost: tylko Instant + flaga admina. */
+    const showSb = cfgType === 'instant' && shown.some(oferujeSb);
+    const sbRow = $('#pcfg-sb-row'), sb = $('#pcfg-sb');
+    if (sbRow) sbRow.hidden = !showSb;
+    if (!showSb) cfgSb = false;
+    if (sb) sb.setAttribute('aria-checked', cfgSb);
+    const sbPrice = $('#pcfg-sb-price');
+    if (sbPrice) sbPrice.textContent = '+$' + cenaSb(shown[0]);
     $('#pcfg-wt').setAttribute('aria-checked', cfgWt);
     const od = $('#pcfg-od');
     if (od) od.setAttribute('aria-checked', cfgOd);
@@ -528,13 +538,14 @@
     grid.innerHTML = shown.map((p, i) => {
       /* Same sum as the checkout: discounted fee plus add-ons at full price. */
       const addons = (cfgWt ? CENA_WT : 0) + (cfgCt && oferujeCt(p) ? cenaCt(p) : 0)
-        + (cfgOd ? cenaOd(p) : 0);
+        + (cfgOd ? cenaOd(p) : 0) + (cfgSb && oferujeSb(p) && p.steps === 0 ? cenaSb(p) : 0);
       const fee = Math.round((p.price_usd * (1 - cfgPct / 100) + addons) * 100) / 100;
       const upSize = cfgPromo && p.promo_upgrade_size ? p.promo_upgrade_size : null;
       const q = new URLSearchParams({ buy: p.key });
       if (cfgWt) q.set('wt', '1');
       if (cfgCt && oferujeCt(p)) q.set('ct', '1');
       if (cfgOd) q.set('od', '1');
+      if (cfgSb && oferujeSb(p) && p.steps === 0) q.set('sb', '1');
       if (cfgCoupon) q.set('coupon', cfgCoupon);
       const open = flipped.has(p.key);
       return `<article class="chal-card${same ? ' still' : ''} pal-${cfgTier}-${i}${i === star ? ' star' : ''}${p.popular ? ' hot' : ''}${open ? ' flip' : ''}">
@@ -789,17 +800,20 @@
     const pasek = $('#cfg-addons');
     if (pasek) {
       if (!oferujeCt(p)) cfgCt = false;
+      if (!(p.steps === 0 && oferujeSb(p))) cfgSb = false;
       const chip = (id, on, txt) =>
         `<button type="button" class="cfg-chip${on ? ' on' : ''}" data-a="${id}">${txt}</button>`;
       pasek.innerHTML =
         chip('wt', cfgWt, `${cfgWt ? '✓ ' : '+ '}Weekend $${CENA_WT}`)
         + (oferujeCt(p) ? chip('ct', cfgCt, `${cfgCt ? '✓ ' : '+ '}Copytrading $${cenaCt(p)}`) : '')
         + chip('od', cfgOd, `${cfgOd ? '✓ ' : '+ '}On-demand $${cenaOd(p)}`)
+        + (p.steps === 0 && oferujeSb(p) ? chip('sb', cfgSb, `${cfgSb ? '✓ ' : '+ '}Split Boost $${cenaSb(p)}`) : '')
         + '<span class="cfg-chip-note">News trading <b>included</b></span>';
       $$('#cfg-addons .cfg-chip').forEach(b => b.addEventListener('click', () => {
         if (b.dataset.a === 'wt') cfgWt = !cfgWt;
         else if (b.dataset.a === 'ct') cfgCt = !cfgCt;
         else if (b.dataset.a === 'od') cfgOd = !cfgOd;
+        else if (b.dataset.a === 'sb') cfgSb = !cfgSb;
         renderConfigurator();
         /* Cennik nizej pokazuje te same dodatki — bez tego obie karty
            twierdzilyby co innego o tym samym zamowieniu. */
@@ -807,7 +821,7 @@
       }));
     }
     const dodatki = (cfgWt ? CENA_WT : 0) + (cfgCt && oferujeCt(p) ? cenaCt(p) : 0)
-      + (cfgOd ? cenaOd(p) : 0);
+      + (cfgOd ? cenaOd(p) : 0) + (cfgSb && oferujeSb(p) && p.steps === 0 ? cenaSb(p) : 0);
     const razem = Math.round((oplata + dodatki) * 100) / 100;
 
     const cta = $('#cfg-cta');
@@ -815,6 +829,7 @@
     if (cfgWt) q.set('wt', '1');
     if (cfgCt && oferujeCt(p)) q.set('ct', '1');
     if (cfgOd) q.set('od', '1');
+    if (cfgSb && oferujeSb(p) && p.steps === 0) q.set('sb', '1');
     if (kodKupon) q.set('coupon', kodKupon);   /* bez tego rabat ginal po klikniciu */
     cta.href = '/portal?' + q.toString();
     cta.textContent = `Start with ${sizeLabel(p.account_size)} → $${fmt(Math.round(razem))}`;
@@ -837,6 +852,7 @@
       const wt = $('#pcfg-wt'); if (wt) wt.addEventListener('click', () => { cfgWt = !cfgWt; odswiez(); });
       const ct = $('#pcfg-ct'); if (ct) ct.addEventListener('click', () => { cfgCt = !cfgCt; odswiez(); });
       const od = $('#pcfg-od'); if (od) od.addEventListener('click', () => { cfgOd = !cfgOd; odswiez(); });
+      const sb = $('#pcfg-sb'); if (sb) sb.addEventListener('click', () => { cfgSb = !cfgSb; odswiez(); });
     };
     /* The server inlines the live catalog into the page (#pf-products) so the
        hero configurator paints together with the rest of the document; the

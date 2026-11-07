@@ -2266,6 +2266,7 @@ const VIEWS={
   window._shopWt=!!window._shopWt;
   window._shopOd=!!window._shopOd;
   window._shopCt=!!window._shopCt;
+  window._shopSb=!!window._shopSb;
   window._shopFlip=window._shopFlip||new Set();
   const buyKey=new URLSearchParams(location.search).get('buy');
   if(buyKey){
@@ -2286,8 +2287,11 @@ const VIEWS={
   const model=g.id==='instant'?'Instant':'2-Step';
   const anyCt=shown.some(p=>p.copytrading_offered);
   if(!anyCt)window._shopCt=false;
+  const showSb=g.id==='instant'&&shown.some(p=>p.split_boost_offered);
+  if(!showSb)window._shopSb=false;
   const odCena=g.id==='instant'?399:299;
   const ctCena=(shown[0]&&shown[0].copytrading_fee_usd)||299;
+  const sbCena=(shown[0]&&shown[0].split_boost_fee_usd)||149;
   const hot=shown.findIndex(x=>x.popular);
   const star=hot>=0?hot:Math.floor(shown.length/2);
   const usd=v=>'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:v%1?2:0,maximumFractionDigits:2});
@@ -2311,7 +2315,9 @@ const VIEWS={
     ];
   };
   const cards=shown.map((p,i)=>{
-    const addons=(window._shopWt?199:0)+(window._shopOd?odCena:0)+(window._shopCt&&p.copytrading_offered?ctCena:0);
+    const addons=(window._shopWt?199:0)+(window._shopOd?odCena:0)
+      +(window._shopCt&&p.copytrading_offered?ctCena:0)
+      +(window._shopSb&&showSb?sbCena:0);
     const base=p.offer_price_usd!=null?p.offer_price_usd:p.price_usd;
     const fee=Math.round((base+addons)*100)/100;
     const open=window._shopFlip.has(p.key);
@@ -2357,6 +2363,8 @@ const VIEWS={
         <button class="chal-sw" id="shop-wt" type="button" role="switch" aria-checked="${window._shopWt}" aria-label="Add weekend trading"></button></div>
       <div class="chal-opt"><span><b>On-demand Payout</b><small>+$${odCena}</small></span>
         <button class="chal-sw" id="shop-od" type="button" role="switch" aria-checked="${window._shopOd}" aria-label="Add on-demand payout"></button></div>
+      ${showSb?`<div class="chal-opt"><span><b>Split Boost</b><small>+$${sbCena}</small></span>
+        <button class="chal-sw" id="shop-sb" type="button" role="switch" aria-checked="${window._shopSb}" aria-label="Add split boost"></button></div>`:''}
       ${anyCt?`<div class="chal-opt"><span><b>Copytrading</b><small>+$${ctCena}</small></span>
         <button class="chal-sw" id="shop-ct" type="button" role="switch" aria-checked="${window._shopCt}" aria-label="Add copytrading"></button></div>`:''}
       <div class="chal-opt"><span><b>News trading</b><small>Included</small></span></div>
@@ -2366,7 +2374,10 @@ const VIEWS={
         <button id="shop-apply" type="button">Apply</button>
       </div>
     </div>
-    <div class="code-msg chal-msg" id="shop-codemsg" hidden></div>`;
+    <div class="code-msg chal-msg" id="shop-codemsg" hidden></div>
+    <p class="chal-fine">One-time fee for access to an evaluation on a simulated account. No real money is deposited or
+      traded at any point. Performance rewards, including the fee credit, are discretionary and not guaranteed.
+      <a href="/terms">Terms of Service</a></p>`;
   const slidePill=box=>{
     const on=box&&box.querySelector('button.on'); if(!on)return;
     let ind=box.querySelector('.chal-ind');
@@ -2395,6 +2406,7 @@ const VIEWS={
   };
   const wt=$('shop-wt'); if(wt)wt.onclick=shopToggle('_shopWt',wt);
   const od=$('shop-od'); if(od)od.onclick=shopToggle('_shopOd',od);
+  const sbSw=$('shop-sb'); if(sbSw)sbSw.onclick=shopToggle('_shopSb',sbSw);
   const ct=$('shop-ct'); if(ct)ct.onclick=shopToggle('_shopCt',ct);
   const shopApply=$('shop-apply'); if(shopApply)shopApply.onclick=e=>{e.preventDefault();e.stopPropagation();shopApplyCode()};
   const shopInp=$('shop-coupon');
@@ -2421,6 +2433,7 @@ const VIEWS={
       q.set('buy',key);
       if(window._shopWt)q.set('wt','1'); else q.delete('wt');
       if(window._shopOd)q.set('od','1'); else q.delete('od');
+      if(window._shopSb&&showSb)q.set('sb','1'); else q.delete('sb');
       if(window._shopCt)q.set('ct','1'); else q.delete('ct');
       const code=(($('shop-coupon')&&$('shop-coupon').value)||window._shopCode||'').trim().toUpperCase();
       if(code)q.set('coupon',code); else q.delete('coupon');
@@ -3974,10 +3987,14 @@ function syncBuyConsent(){
 /* Add-ons are chosen on the shop strip (like LP), not in the buy modal. */
 function buyAddonsFromShop(){
   const q=new URLSearchParams(location.search);
+  const p=PRODUCTS.find(x=>x.key===window._buyKey);
+  const instant=p&&p.steps===0;
+  const sbOk=instant&&!!(p&&p.split_boost_offered)&&(q.get('sb')==='1'||!!window._shopSb);
   return {
     weekend: q.get('wt')==='1'||!!window._shopWt,
     ondemand: q.get('od')==='1'||!!window._shopOd,
     copytrading: q.get('ct')==='1'||!!window._shopCt,
+    split_boost: sbOk,
   };
 }
 
@@ -3990,7 +4007,7 @@ async function quoteNow(){
   const p=PRODUCTS.find(x=>x.key===window._buyKey),box=$('buy-quote');
   if(!p||!box)return;
   const a=buyAddonsFromShop();
-  const wk=a.weekend, sb=false, od=a.ondemand, cp=a.copytrading;
+  const wk=a.weekend, sb=a.split_boost, od=a.ondemand, cp=a.copytrading;
   const uc=!$('c-usecr')||$('c-usecr').checked;
   const odCena=p.steps===0?399:299;
   const bc=window._buyCode||{};
@@ -4326,7 +4343,7 @@ async function buy(key){
       const res=await api('/api/checkout',{method:'POST',
         body:JSON.stringify({product_key:key,coupon,promo_code:promo,first_name:first,last_name:last,phone,phone_country:CC,
           weekend_trading:a.weekend,
-          split_boost:false,
+          split_boost:a.split_boost,
           ondemand_payout:a.ondemand,
           copytrading:a.copytrading,
           use_credits:!$('c-usecr')||$('c-usecr').checked,
