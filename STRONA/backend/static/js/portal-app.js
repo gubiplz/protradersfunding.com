@@ -2371,22 +2371,31 @@ const VIEWS={
       <div class="chal-opt chal-code">
         <input id="shop-coupon" autocomplete="off" placeholder="Coupon code" aria-label="Coupon code"
           value="${esc(window._shopCode||pfCoupon()||pfPromo()||'')}">
-        <button id="shop-apply" type="button">Apply</button>
+        <button id="shop-apply" class="code-btn" type="button">Apply</button>
       </div>
     </div>
     <div class="code-msg chal-msg" id="shop-codemsg" hidden></div>
     <p class="chal-fine">One-time fee for access to an evaluation on a simulated account. No real money is deposited or
       traded at any point. Performance rewards, including the fee credit, are discretionary and not guaranteed.
       <a href="/terms">Terms of Service</a></p>`;
-  const slidePill=box=>{
+  /* Same as LP site.js slidePill: remounted tabs start the pill where it was
+     last, then glide — without that the portal jump looked broken. */
+  const slidePill=(box,key)=>{
     const on=box&&box.querySelector('button.on'); if(!on)return;
+    window._shopPill=window._shopPill||{};
+    const prev=window._shopPill[key];
     let ind=box.querySelector('.chal-ind');
-    if(!ind){ind=document.createElement('i');ind.className='chal-ind';box.prepend(ind)}
-    ind.style.left=on.offsetLeft+'px'; ind.style.width=on.offsetWidth+'px';
+    if(!ind){
+      ind=document.createElement('i'); ind.className='chal-ind'; box.prepend(ind);
+      if(prev){ind.style.left=prev.il+'px'; ind.style.width=prev.iw+'px'; void ind.offsetWidth}
+    }
+    const l=on.offsetLeft, w=on.offsetWidth;
+    ind.style.left=l+'px'; ind.style.width=w+'px';
+    window._shopPill[key]={il:l,iw:w};
   };
   const q1=(s,r)=> (r||document).querySelector(s);
   const qa=(s,r)=>[...(r||document).querySelectorAll(s)];
-  slidePill($('shopModels')); slidePill($('shopTiers'));
+  slidePill($('shopModels'),'models'); slidePill($('shopTiers'),'tiers');
   /* Defer full re-render: replacing the DOM on the same click lets the
      synthetic mouseup/click land on a challenge card underneath (flip/buy). */
   const shopRedraw=()=>{clearTimeout(window._shopRedraw);window._shopRedraw=setTimeout(()=>VIEWS.store(),80)};
