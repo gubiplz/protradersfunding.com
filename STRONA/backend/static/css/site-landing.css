@@ -85,11 +85,15 @@
 .chal-sw[aria-checked=true]{background:var(--grad)}
 .chal-sw[aria-checked=true]::after{transform:translateX(14px)}
 .chal-sw:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
-.chal-code{gap:8px}
+.chal-code{gap:8px;align-items:center}
 .chal-code input{flex:1;min-width:0;width:100%;padding:0;border:0;outline:0;background:none;color:var(--txt);font-size:13px;letter-spacing:.02em}
 .chal-code input::placeholder{color:var(--muted)}
-.chal-code button{flex:none;padding:0;border:0;background:none;color:var(--acc);font-size:13px;font-weight:600;cursor:pointer}
-.chal-code button:hover{text-decoration:underline;text-underline-offset:3px}
+/* Same language as hero configurator .code-btn — solid Apply chip, not a bare link. */
+.chal-code button,.chal-code .code-btn{flex:none;padding:7px 14px;border-radius:9px;border:1px solid var(--line2);
+  background:var(--panel2,var(--panel));color:var(--txt);font:inherit;font-size:13px;font-weight:600;
+  cursor:pointer;transition:border-color .15s,color .15s,background .15s,filter .15s;white-space:nowrap;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
+.chal-code button:hover,.chal-code .code-btn:hover{border-color:var(--acc);color:var(--acc);text-decoration:none;filter:brightness(1.06)}
 .chal-msg{max-width:920px;margin:10px auto 0}
 .chal-fine{max-width:640px;margin:18px auto 0;text-align:center;font-size:11.5px;line-height:1.6;color:var(--dim)}
 .chal-fine a{text-decoration:underline;text-underline-offset:2px}
