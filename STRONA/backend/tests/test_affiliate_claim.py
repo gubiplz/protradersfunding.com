@@ -1,9 +1,9 @@
 """Afiliacja: naliczona prowizja zamienia się w kredyty sklepowe NA ŻĄDANIE.
 
 unclaimed = prowizja z opłaconych zamówień poleconych − suma wpisów
-`affiliate:claim` w ledgerze. Claim poniżej $10 odbija się (koszt księgowania
-groszowych roszczeń), drugi claim z rzędu widzi 0 i też się odbija. Kredyty
-z claimu są zwykłymi kredytami sklepowymi — preview checkoutu je odlicza.
+`affiliate:claim` w ledgerze. Claim poniżej wewnętrznego progu odbija się,
+drugi claim z rzędu widzi 0 i też się odbija. Kredyty z claimu są zwykłymi
+kredytami sklepowymi — preview checkoutu je odlicza.
 """
 import os
 import tempfile
@@ -75,14 +75,14 @@ def test_drugi_claim_widzi_zero_i_sie_odbija():
     assert client.post("/api/me/affiliate/claim", headers=h).status_code == 200
     r = client.post("/api/me/affiliate/claim", headers=h)
     assert r.status_code == 400
-    assert "$10" in r.json()["detail"]
+    assert "claimable" in r.json()["detail"].lower()
 
 
 def test_ponizej_minimum_odbija_sie():
     _, kod, h = _referrer("aff-drobne@test.pl")
     _polecony_z_zamowieniem(kod, "aff-drobne-ref@test.pl", 50.0)   # prowizja $5
     r = client.post("/api/me/affiliate/claim", headers=h)
-    assert r.status_code == 400 and "$5.00" in r.json()["detail"]
+    assert r.status_code == 400 and "claimable" in r.json()["detail"].lower()
 
 
 def test_nowe_zamowienia_naliczaja_kolejna_transze():

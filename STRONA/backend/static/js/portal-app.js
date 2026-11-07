@@ -1370,7 +1370,7 @@ function useCaseCode(code){
   toast('Pick a challenge. Your code is already filled in at checkout.','ok',7000);
 }
 
-/* Prowizja afiliacyjna -> store credit albo vUSDT (min $10, pilnuje serwer). */
+/* Prowizja afiliacyjna -> store credit albo vUSDT (próg claimu pilnuje serwer). */
 async function claimAffiliate(btn,method){
   const m=method==='vusdt'?'vusdt':'store_credit';
   await busy(btn,'Claiming…',async()=>{
@@ -2956,8 +2956,7 @@ const VIEWS={
         ${(aff.commission_unclaimed??0)>=10?`<div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn-p sm" onclick="claimAffiliate(this,'store_credit')">Claim $${fmt(aff.commission_unclaimed)} as store credit</button>
             <button class="btn-o sm" onclick="claimAffiliate(this,'vusdt')">Claim as vUSDT</button>
-          </div>`
-          :(aff.commission_unclaimed??0)>0?`<span class="muted" style="font-size:12px">Claim unlocks at $10 unclaimed</span>`:''}
+          </div>`:''}
       </div>
       <p class="muted" style="font-size:12px;margin-top:12px">Affiliate commission is claimed here as
         <b>store credit</b> or as <b>vUSDT</b> (saved Polygon wallet) — not cash, not via support.
@@ -2966,7 +2965,7 @@ const VIEWS={
   const cards=[
     {ic:'wallet',cls:'green',badge:'Active',name:'Refundable Fee',desc:'Your one-time challenge fee is refunded in full, automatically added to your first payout from a funded account.',cond:['Pass the evaluation','Complete KYC','Request your first payout']},
     {ic:'trend',cls:'purple',badge:'Your call',name:'Scaling Plan',desc:'Grow a funded account by +15% and you choose: take the payout, or move up to the next plan in our pricing. Repeatable, no applications.',cond:['Funded account','+15% growth','You pick payout or a bigger plan']},
-    {ic:'spark',cls:'blue',badge:'10% recurring',name:'Affiliate Program',desc:'Share your referral link and earn 10% of every challenge purchased by traders you refer — for life. Claim from $10 as store credit or vUSDT in the portal.',cond:['Share your link','Friend buys a challenge','Claim store credit or vUSDT']},
+    {ic:'spark',cls:'blue',badge:'10% recurring',name:'Affiliate Program',desc:'Share your referral link and earn 10% of every challenge purchased by traders you refer — for life. Claim as store credit or vUSDT in the portal.',cond:['Share your link','Friend buys a challenge','Claim store credit or vUSDT']},
     {ic:'crown',cls:'orange',badge:'Spend-based',name:'Loyalty Points',desc:'Every $1 spent earns a loyalty point, and check-ins add more. Trade the points for your own one-time discount code on the Loyalty page.',cond:['500 points: 15% off','1,000 points: 25% off','2,000 points: 35% off']},
   ];
   $('view').innerHTML=caseCardHtml()+revealHtml+affPanel+`<div class="badge-grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">`+cards.map(c=>`

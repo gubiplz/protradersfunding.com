@@ -220,9 +220,9 @@ Answers are grouped the way customers actually think, not the way the product is
 
 **"Tell me about the affiliate program."**
 > You earn 10% commission on paid orders from anyone who signs up through your referral
-> code. Stats and your link are under Rewards in the portal. From $10 unclaimed you claim
-> there as store credit or as vUSDT to your saved Polygon wallet — not cash, and not by
-> emailing support. Full rules are on /affiliate-terms.
+> code. Stats and your link are under Rewards in the portal. You claim there as store
+> credit or as vUSDT to your saved Polygon wallet — not cash, and not by emailing support.
+> Full rules are on /affiliate-terms.
 
 **"Can I use my own MT5 app?"**
 > Yes — the credentials work in MetaTrader 5 on desktop, mobile and the web terminal. Just

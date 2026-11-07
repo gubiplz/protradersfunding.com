@@ -167,9 +167,9 @@ gives the next size up for the same fee.
 **Do not invent codes and do not offer one that is not on this list.**
 
 **Affiliate:** 10% commission on paid orders from referred traders, tracked by a unique
-referral code and shown under Rewards. From **$10** unclaimed, the trader claims in the
-portal as **store credit** or **vUSDT** (saved Polygon wallet). No cash payout and no
-commission paid by contacting support. Full rules: `/affiliate-terms`.
+referral code and shown under Rewards. The trader claims in the portal as **store credit**
+or **vUSDT** (saved Polygon wallet). No cash payout and no commission paid by contacting
+support. Do not quote a minimum unclaimed amount. Full rules: `/affiliate-terms`.
 
 ## 8. Platform, delivery, conduct
 
@@ -226,8 +226,8 @@ in bold.
    breach is measured on **equity**, so "balance-based" misleads. **Explain it as
    §4 does.**
 
-6. **RESOLVED — Affiliate claim is in the portal.** From $10 unclaimed: store credit or
-   vUSDT. No cash / no support payout. Point to `/affiliate-terms` for detail.
+6. **RESOLVED — Affiliate claim is in the portal.** Store credit or vUSDT. No cash /
+   no support payout. Do not quote a minimum unclaimed amount. Point to `/affiliate-terms`.
 
 7. **No minimum payout amount and no country restrictions exist in code.** If asked,
    say there is no minimum; for countries, escalate.

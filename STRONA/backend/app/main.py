@@ -1532,9 +1532,7 @@ def affiliate_claim(payload: AffiliateClaimIn = Body(default_factory=AffiliateCl
         claimed = _affiliate_claimed(session, tr.id)
         kwota = round(max(0.0, earned - claimed), 2)
         if kwota < AFFILIATE_CLAIM_MIN_USD:
-            raise HTTPException(
-                400, f"You need at least ${AFFILIATE_CLAIM_MIN_USD:,.0f} in unclaimed "
-                     f"commission (you have ${kwota:,.2f})")
+            raise HTTPException(400, "No claimable commission yet")
         if method == "store_credit":
             tr.credits_usd = round(float(tr.credits_usd or 0) + kwota, 2)
             session.add(CreditLedger(trader_id=tr.id, amount=kwota, note="affiliate:claim"))
