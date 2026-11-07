@@ -20,6 +20,7 @@ import pytest  # noqa: E402
 import stripe as stripe_sdk  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+from tests.conftest import CHECKOUT_CONSENT
 from app import auth, billing, catalog  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
@@ -68,7 +69,7 @@ def stripe_wysadzony(monkeypatch):
 
 def test_blad_stripe_to_4xx_a_nie_500(stripe_wysadzony):
     tid = _trader()
-    r = client.post("/api/checkout", json={"product_key": "2step-25k"},
+    r = client.post("/api/checkout", json={**CHECKOUT_CONSENT, "product_key": "2step-25k"},
                     headers={"Authorization": f"Bearer {auth.make_token(tid)}"})
     assert r.status_code == 400, f"kupujący dostał {r.status_code} zamiast czytelnego błędu"
     tresc = r.json().get("detail", "")
@@ -80,7 +81,7 @@ def test_blad_stripe_to_4xx_a_nie_500(stripe_wysadzony):
 
 def test_zamowienie_zostaje_pending_po_bledzie(stripe_wysadzony):
     tid = _trader()
-    client.post("/api/checkout", json={"product_key": "2step-25k"},
+    client.post("/api/checkout", json={**CHECKOUT_CONSENT, "product_key": "2step-25k"},
                 headers={"Authorization": f"Bearer {auth.make_token(tid)}"})
     s = SessionLocal()
     zam = s.query(Order).filter(Order.trader_id == tid).all()

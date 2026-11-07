@@ -59,6 +59,15 @@ h1{font-size:23px;letter-spacing:-.4px;margin:13px 0 20px;line-height:1.25}
 .btn[disabled]{opacity:.6;cursor:default;transform:none}
 .note{color:var(--muted);font-size:13px;margin-top:14px}
 .note b{color:var(--ink)}
+.pay-consent{margin-top:16px;padding:14px 14px 12px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+.pay-consent-h{font-size:15px;letter-spacing:-.2px;margin:0 0 4px}
+.pay-consent-item{display:flex;gap:10px;align-items:flex-start;padding:11px 0;border-top:1px solid var(--line);
+  font-size:13px;line-height:1.5;cursor:pointer}
+.pay-consent-item:first-of-type{border-top:0;padding-top:4px}
+.pay-consent-item input{margin-top:3px;flex:none;accent-color:var(--acc)}
+.pay-consent-item a{color:var(--acc);font-weight:600;text-decoration:underline;text-underline-offset:2px}
+.pay-req{display:inline-block;margin-top:6px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;
+  color:#b91c1c;background:color-mix(in srgb,var(--bad) 12%,#fff)}
 .alt{margin-top:22px;border-top:1px dashed var(--line);padding-top:18px}
 .alt h2{font-size:13.5px;margin-bottom:5px}
 .addr{display:flex;gap:8px;align-items:stretch;margin-top:9px}
@@ -128,10 +137,29 @@ footer svg{width:12px;height:12px}
     second account of the same size at no extra cost. Both accounts are created
     automatically once the payment clears.</p>
   {% endif %}
-  <button class="btn" id="payBtn" type="button">Pay ${{ amount }} by card</button>
-  <p class="note legal-note">By paying I request immediate access to the evaluation (MT5 credentials).
-    I understand that once credentials are delivered I lose the right to withdraw from the purchase,
-    except where the <a href="/refund-policy">Refund Policy</a> still provides a money-back refund.</p>
+  <div class="pay-consent" id="payConsent">
+    <h2 class="pay-consent-h">Before you purchase</h2>
+    <p class="note" style="margin:0 0 8px">Please review the following before paying for your evaluation account.</p>
+    <label class="pay-consent-item"><input type="checkbox" id="pay-c-terms" class="pay-c">
+      <span><b>Terms &amp; Refund Policy</b><br>
+      I have read and agree to the <a href="/terms">Terms of Service</a>, including the
+      <a href="/refund-policy">Refund Policy</a>.
+      <span class="pay-req">Required</span></span></label>
+    <label class="pay-consent-item"><input type="checkbox" id="pay-c-risk" class="pay-c">
+      <span><b>Simulated Trading &amp; Risk Disclosure</b><br>
+      I acknowledge that {{ brand_name }} provides simulated trading evaluations, that rewards are
+      not guaranteed and that I have read the <a href="/risk-disclosure">Risk Disclosure</a>.
+      <span class="pay-req">Required</span></span></label>
+    <label class="pay-consent-item"><input type="checkbox" id="pay-c-imm" class="pay-c">
+      <span><b>Immediate Service Commencement</b><br>
+      I expressly request that the evaluation service begins immediately, before the expiry of the
+      statutory withdrawal period. I acknowledge that, where applicable, I will lose my right of
+      withdrawal once the service has been fully performed.
+      <span class="pay-req">Required for immediate commencement</span></span></label>
+    <p class="note" style="margin:10px 0 0">Your personal data is processed in accordance with our
+      <a href="/privacy">Privacy Policy</a>.</p>
+  </div>
+  <button class="btn" id="payBtn" type="button" disabled>Pay ${{ amount }} by card</button>
   <p class="note">Payments are processed by Stripe — we never see your card details. Once the
     payment clears, your MT5 login{% if bogo %}s for both accounts are{% else %} is{% endif %}
     created automatically and sent to your e-mail address.</p>
@@ -143,11 +171,8 @@ footer svg{width:12px;height:12px}
     <p class="note" style="margin-top:0">Send exactly <b>${{ amount }}</b>{% if crypto_network %} via <b>{{ crypto_network }}</b>{% endif %} to this address:</p>
     <div class="addr"><code id="cryptoAddr">{{ crypto_address }}</code>
       <button class="copy" type="button" id="copyBtn">Copy</button></div>
-    <p class="note legal-note">By sending crypto I request immediate access to the evaluation (MT5
-      credentials). Once credentials are delivered I lose the right to withdraw from the purchase,
-      except where the <a href="/refund-policy">Refund Policy</a> still provides a money-back refund.</p>
     <p class="note">Crypto payments are confirmed manually — your account is activated as soon
-      as the transfer lands.</p>
+      as the transfer lands. The same declarations above apply when you send crypto.</p>
   </div>
   {% endif %}
 
@@ -197,7 +222,17 @@ footer svg{width:12px;height:12px}
 <script>
 /* The Stripe session is created on click, not when the link is generated —
    that is what keeps this link from expiring after 24 h. */
-document.getElementById('payBtn').addEventListener('click', async function(){
+const payBtn=document.getElementById('payBtn');
+function payConsentsOk(){
+  return ['pay-c-terms','pay-c-risk','pay-c-imm'].every(id=>{
+    const el=document.getElementById(id); return el&&el.checked;
+  });
+}
+function syncPayConsent(){ if(payBtn) payBtn.disabled=!payConsentsOk(); }
+document.querySelectorAll('.pay-c').forEach(el=>el.addEventListener('change',syncPayConsent));
+syncPayConsent();
+payBtn.addEventListener('click', async function(){
+  if(!payConsentsOk()){alert('Please accept the required declarations before paying.'); return;}
   const b=this; b.disabled=true; const t=b.textContent; b.textContent='Opening checkout…';
   try{
     const r=await fetch('/api/pay/{{ pay_token }}/start',{method:'POST'});
@@ -205,7 +240,7 @@ document.getElementById('payBtn').addEventListener('click', async function(){
     if(!r.ok||!d.checkout_url)throw new Error(d.detail||'Could not open the payment page.');
     location.href=d.checkout_url;
   }catch(e){
-    b.disabled=false; b.textContent=t;
+    b.disabled=false; b.textContent=t; syncPayConsent();
     alert(e.message+' Please try again{% if not fx %} or contact {{ support_email }}{% endif %}.');
   }
 });

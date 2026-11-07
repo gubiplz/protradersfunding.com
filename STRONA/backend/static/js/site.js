@@ -468,7 +468,7 @@
       ['Rewards', cfgOd ? 'On demand' : czestotliwoscWyplat()],
       ['Max open volume', p.max_lots + ' lots'],
       ['Leverage', dzwignia()],
-      ['Fee credit', 'First payout'],
+      ['Fee credit', 'With first payout'],
     ];
   }
 

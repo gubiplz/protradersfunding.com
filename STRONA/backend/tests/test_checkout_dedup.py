@@ -1,3 +1,4 @@
+from tests.conftest import CHECKOUT_CONSENT
 """Podwójny klik „Buy" to JEDNO zamówienie — i tylko jedna żywa sesja płatności.
 
 Na telefonie klik w „Buy" potrafi polecieć dwa razy (drganie palca, wolna sieć
@@ -50,7 +51,7 @@ def _trader() -> int:
 
 
 def _kup(tid: int, **extra):
-    return client.post("/api/checkout", json={"product_key": "2step-25k", **extra},
+    return client.post("/api/checkout", json={"product_key": "2step-25k", **CHECKOUT_CONSENT, **extra},
                        headers={"Authorization": f"Bearer {auth.make_token(tid)}"})
 
 

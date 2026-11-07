@@ -95,6 +95,15 @@ os.environ["PROMO_UPGRADE"] = "false"
 
 import pytest  # noqa: E402
 
+# Trzy obowiązkowe deklaracje z modala „Before you purchase" — testy checkoutu
+# doklejają je do POST /api/checkout (chyba że sprawdzają właśnie ich brak).
+CHECKOUT_CONSENT = {
+    "consent_terms": True,
+    "consent_risk": True,
+    "consent_immediate": True,
+    "consent_version": "checkout-consent-2026-11",
+}
+
 
 @pytest.fixture(autouse=True)
 def _bez_progu_wyplaty(request, monkeypatch):
