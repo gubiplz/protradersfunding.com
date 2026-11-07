@@ -66,7 +66,7 @@ Answers are grouped the way customers actually think, not the way the product is
 > day is $102,000 − $5,000 = **$97,000**. Touch it and the account fails automatically.
 > Equity includes floating P&L, so an open losing trade counts before you close it.
 
-*(Never quote $96,900 — see `02-facts.md` §9 gap 1.)*
+*(Never quote $96,900 from old screenshots — live FAQ and engine use $97,000.)*
 
 **"What's my overall drawdown floor?"**
 > Fixed for the life of the account. Your floor is your starting balance minus the overall
@@ -114,21 +114,26 @@ Answers are grouped the way customers actually think, not the way the product is
 ## Funded accounts and money
 
 **"How do payouts work?"**
-> Once your account is funded, request a payout from the dashboard whenever you're in
-> profit. You need one-time KYC verification first. Your share is 90% on evaluation plans
+> Once your account is funded and past the first-payout trading-day minimum (5 on 2-Step,
+> 30 on Instant), request a payout from the dashboard when you're in profit at or above
+> the minimum amount. You need one-time KYC first. Your share is 90% on evaluation plans
 > and 70% on Instant Funding, and you can request part of what's available rather than all
-> of it. Each request is reviewed by our team and then paid.
+> of it. By default you can request every 14 calendar days (bi-weekly); On-demand Payout
+> removes that wait. Each request is reviewed, then paid in vUSDT on Polygon.
 
 **"When do I get my fee back?"**
-> With your first payout from that funded account — the full fee is added on top of your
-> profit share, automatically. Every plan, Instant Funding included.
+> With your first payout from that funded account — the full fee is credited as additional
+> vUSDT on top of your profit share, automatically. It is not a card refund. Every plan,
+> Instant Funding included.
 
 **"Is there a minimum payout?"**
-> No minimum. If there's profit on the account, you can request it.
+> Yes: $500 or 2% of the account size, whichever is higher. That is $500 on $25,000,
+> $2,000 on $100,000, and $20,000 on $1,000,000. Amounts are whole dollars.
 
 **"How do you pay me?"**
-> USDT (TRC-20, BEP-20 or Polygon), bank transfer (holder, IBAN and SWIFT/BIC), or Wise.
-> You choose when you submit the request.
+> In vUSDT on Polygon — PTF's native internal token, not Tether USDT — to a wallet you
+> control. It is transferable on Polygon; we do not redeem it for cash or fiat, and its
+> value is not guaranteed. You confirm the wallet when the request is unlocked.
 
 **"How often can I withdraw?"**
 > {Do not promise a payment date. Use:} By default you can request a payout every 14
