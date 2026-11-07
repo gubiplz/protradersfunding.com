@@ -236,8 +236,9 @@ in bold.
    no support payout. Do not quote a minimum unclaimed amount. Point to `/affiliate-terms`.
 
 7. **RESOLVED — minimum payout is enforced:** $500 or 2% of account size, whichever is
-   higher. **No restricted-country list exists in code** — for country eligibility,
-   escalate; do not invent a blocked/allowed list.
+   higher. **No restricted-country list is published or enforced in code.** Public copy
+   only says access is subject to applicable sanctions/AML and we may refuse service.
+   For country eligibility questions, escalate — do not invent a blocked/allowed list.
 
 8. **RESOLVED — payout method is vUSDT on Polygon only.** Public FAQ/Terms match.
    Do not mention USDT TRC-20/BEP-20, bank transfer, or Wise as payout options.

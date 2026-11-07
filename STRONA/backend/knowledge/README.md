@@ -36,7 +36,8 @@ Publiczne FAQ i Terms są source of truth dla metod i limitów. Knowledge ma je 
 - bi-weekly (14 dni) + On-demand add-on; bez Express Payout
 - przykład daily loss: **$97,000**
 
-**Wciąż eskaluj (brak w kodzie):** lista krajów sankcjonowanych / restricted.
+**Wciąż eskaluj (brak listy w kodzie):** pytania o konkretne kraje / sanctions — publicznie
+jest tylko ogólny język AML/sanctions (Fix 9B), bez listy.
 
 ## Jak to podłączyć
 
