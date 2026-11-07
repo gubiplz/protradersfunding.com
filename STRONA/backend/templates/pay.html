@@ -129,6 +129,9 @@ footer svg{width:12px;height:12px}
     automatically once the payment clears.</p>
   {% endif %}
   <button class="btn" id="payBtn" type="button">Pay ${{ amount }} by card</button>
+  <p class="note legal-note">By paying I request immediate access to the evaluation (MT5 credentials).
+    I understand that once credentials are delivered I lose the right to withdraw from the purchase,
+    except where the <a href="/refund-policy">Refund Policy</a> still provides a money-back refund.</p>
   <p class="note">Payments are processed by Stripe — we never see your card details. Once the
     payment clears, your MT5 login{% if bogo %}s for both accounts are{% else %} is{% endif %}
     created automatically and sent to your e-mail address.</p>
@@ -140,6 +143,9 @@ footer svg{width:12px;height:12px}
     <p class="note" style="margin-top:0">Send exactly <b>${{ amount }}</b>{% if crypto_network %} via <b>{{ crypto_network }}</b>{% endif %} to this address:</p>
     <div class="addr"><code id="cryptoAddr">{{ crypto_address }}</code>
       <button class="copy" type="button" id="copyBtn">Copy</button></div>
+    <p class="note legal-note">By sending crypto I request immediate access to the evaluation (MT5
+      credentials). Once credentials are delivered I lose the right to withdraw from the purchase,
+      except where the <a href="/refund-policy">Refund Policy</a> still provides a money-back refund.</p>
     <p class="note">Crypto payments are confirmed manually — your account is activated as soon
       as the transfer lands.</p>
   </div>

@@ -3859,8 +3859,6 @@ function openBuy(key){
       ${p.promo_upgrade_size?`<div class="plan-promo" id="buy-promo" ${pfPromo()?'':'hidden'}><b>Upgrade Your Size</b> — you pay for the
         $${fmt0(p.account_size)} plan and we create a <b>$${fmt0(p.promo_upgrade_size)}</b> account.</div>`:''}
       <div class="quote-box" id="buy-quote"></div>
-      <div class="note">Your MT5 demo account is registered with MetaQuotes <b>under these details</b>,
-        they must be real; your credentials are delivered to them.</div>
       <div class="stack">
         <div class="grid2">
           <div><input id="c-first" placeholder="First name" class="inp" autocomplete="given-name"
@@ -3895,32 +3893,38 @@ function openBuy(key){
           autocomplete="off" spellcheck="false"
           value="${esc(new URLSearchParams(location.search).get('coupon')||pfCoupon()||(p.promo_upgrade_size?pfPromo():''))}"
           oninput="codeInput()">
-        <label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
-          <input type="checkbox" id="c-weekend" onchange="quoteRefresh(true)"
-            ${new URLSearchParams(location.search).get('wt')==='1'?'checked':''}>
-          <span><b>Weekend Trading</b> — 2 extra trading days/week <b>+$199</b></span>
-        </label>
-        ${p.steps===0?`<label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
-          <input type="checkbox" id="c-boost" onchange="quoteRefresh(true)">
-          <span><b>Profit Split Boost</b> — keep ${Math.min(100,(p.profit_split_pct||70)+10)}% instead of ${p.profit_split_pct||70}% <b>+$149</b></span>
-        </label>`:''}
-        <label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
-          <input type="checkbox" id="c-ondemand" onchange="quoteRefresh(true)"
-            ${new URLSearchParams(location.search).get('od')==='1'?'checked':''}>
-          <span><b>On-demand Payout</b> — request anytime, no 14-day wait <b>+$${p.steps===0?399:299}</b></span>
-        </label>
-        ${p.copytrading_offered?`<label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
-          <input type="checkbox" id="c-copy" onchange="quoteRefresh(true)"
-            ${new URLSearchParams(location.search).get('ct')==='1'?'checked':''}>
-          <span><b>Copytrading</b> — copy trades between your own accounts, trade from more than one device <b>+$${fmt(p.copytrading_fee_usd||299)}</b></span>
-        </label>`:''}
-        ${ME.credits_usd>0?`<label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
+        <div class="buy-addons${p.copytrading_offered?' buy-addons-3':''}">
+          <label class="buy-addon">
+            <input type="checkbox" id="c-weekend" onchange="quoteRefresh(true)"
+              ${new URLSearchParams(location.search).get('wt')==='1'?'checked':''}>
+            <span><b>Weekend Trading</b><small>2 extra days/week</small><em>+$199</em></span>
+          </label>
+          ${p.steps===0?`<label class="buy-addon">
+            <input type="checkbox" id="c-boost" onchange="quoteRefresh(true)">
+            <span><b>Split Boost</b><small>${Math.min(100,(p.profit_split_pct||70)+10)}% instead of ${p.profit_split_pct||70}%</small><em>+$149</em></span>
+          </label>`:''}
+          <label class="buy-addon">
+            <input type="checkbox" id="c-ondemand" onchange="quoteRefresh(true)"
+              ${new URLSearchParams(location.search).get('od')==='1'?'checked':''}>
+            <span><b>On-demand Payout</b><small>No 14-day wait</small><em>+$${p.steps===0?399:299}</em></span>
+          </label>
+          ${p.copytrading_offered?`<label class="buy-addon">
+            <input type="checkbox" id="c-copy" onchange="quoteRefresh(true)"
+              ${new URLSearchParams(location.search).get('ct')==='1'?'checked':''}>
+            <span><b>Copytrading</b><small>Own accounts + multi-device</small><em>+$${fmt(p.copytrading_fee_usd||299)}</em></span>
+          </label>`:''}
+        </div>
+        ${ME.credits_usd>0?`<label class="buy-addon buy-addon-full">
           <input type="checkbox" id="c-usecr" checked onchange="quoteRefresh(true)">
-          <span><b>Use my store credit</b> — $${fmt(ME.credits_usd)} available, 1 credit = $1</span>
+          <span><b>Use my store credit</b><small>$${fmt(ME.credits_usd)} available · 1 credit = $1</small></span>
         </label>`:''}
         <p id="buy-err" class="form-err hidden"></p>
         <button id="buy-go" onclick="buy('${jsq(p.key)}')" class="btn-p lg" style="width:100%">Buy &amp; create my account</button>
         <p class="hint">One-time payment · fee credited with your first payout</p>
+        <p class="hint buy-legal">By paying I request immediate access to the evaluation (MT5 credentials).
+          I understand that once credentials are delivered I lose the right to withdraw from the purchase,
+          except where the <a href="/refund-policy" target="_blank" rel="noopener">Refund Policy</a> still
+          provides a money-back refund.</p>
       </div>
     </div>`;
   box.onclick=closeBuy;
