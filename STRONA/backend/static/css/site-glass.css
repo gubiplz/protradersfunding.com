@@ -61,10 +61,16 @@ html::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 :root:root body .aff-band{box-shadow:var(--lg-spec),var(--lg-hair),var(--lg-drop)}
 
 /* Elementy w karcie: o stopień inna tafla, bez cienia (warstwy jak w iOS) */
-:root:root body :is(.cfg-size:not(.on),.cfg-chip,.btn-ghost,.cfg-tabs,.ptog:not(.on),.code-btn){
+/* .cfg-chip:not(.on) — bez tego szkło (wyższa specyficzność) nadpisywało
+   .cfg-chip.on i na light theme zostawał biały tekst na białej tafli. */
+:root:root body :is(.cfg-size:not(.on),.cfg-chip:not(.on),.btn-ghost,.cfg-tabs,.ptog:not(.on),.code-btn){
   background:var(--lg-sheen),var(--lg-fill-in);
   border-color:var(--lg-rim);
   box-shadow:var(--lg-spec),var(--lg-hair);
+}
+:root:root body .cfg-chip.on{
+  background:var(--green);border-color:var(--green);color:#fff;
+  box-shadow:none;
 }
 
 /* Paski nad przewijaną treścią: tu jest prawdziwy blur */
