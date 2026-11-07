@@ -1686,6 +1686,7 @@ def _products_payload(session, trader_id: int | None = None) -> list[dict]:
         d["copytrading_fee_usd"] = catalog.COPYTRADING_ADDON_USD
         d["split_boost_offered"] = oferowany_split_boost
         d["split_boost_fee_usd"] = catalog.SPLIT_BOOST_ADDON_USD
+        d["split_boost_pp"] = catalog.SPLIT_BOOST_PP
         out.append(d)
     return out
 
