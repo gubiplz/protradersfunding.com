@@ -48,9 +48,9 @@ a wniosek o wypłatę sprawdza tylko: status funded, KYC zaakceptowane, zysk > 0
 może poprosić o wypłatę pierwszego dnia. Albo dopisać warunek w kodzie, albo zdjąć
 liczbę ze strony — teraz obiecujesz regułę, której nie masz.
 
-**4. „Reward frequency: Bi-weekly / Every 7 days" to obietnica bez mechanizmu.**
-Nigdzie w kodzie nie ma harmonogramu wypłat. Bot ma zakaz podawania konkretnej daty,
-dopóki nie zdecydujesz, czy to zobowiązanie operacyjne zespołu, czy ma to robić system.
+**4. Reward frequency: bi-weekly (14 dni) jest egzekwowane; On-demand add-on omija limit.**
+Nie mylić z wycofanym Express Payout ($49 / kolejka). Bot nie obiecuje daty wypłaty —
+tylko kiedy wolno złożyć kolejny wniosek.
 
 Poza tym: brak minimalnej kwoty wypłaty, brak progu i harmonogramu prowizji afiliacyjnej,
 brak listy krajów wykluczonych. Bot ma to eskalować, a nie zmyślać.

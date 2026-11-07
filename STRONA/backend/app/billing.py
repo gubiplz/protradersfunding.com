@@ -84,7 +84,7 @@ def _powod_odmowy(session, trader: Trader, code: str) -> str:
 
 def compute_price(session, trader: Trader, product_key: str, coupon: str | None,
                   promo_code: str | None = None, weekend_trading: bool = False,
-                  split_boost: bool = False, express_payout: bool = False,
+                  split_boost: bool = False, ondemand_payout: bool = False,
                   copytrading: bool = False,
                   use_credits: bool = True) -> dict:
     """Jedyne miejsce, w ktorym liczy sie cena checkoutu.
@@ -145,9 +145,9 @@ def compute_price(session, trader: Trader, product_key: str, coupon: str | None,
         if product.steps != 0:
             raise HTTPException(400, "The profit split boost is available on Instant Funding plans only")
         price = round(price + catalog.SPLIT_BOOST_ADDON_USD, 2)
-    if express_payout:
-        price = round(price + catalog.EXPRESS_PAYOUT_ADDON_USD, 2)
-    # Copytrading: bez ograniczenia rodziny planow (jak Weekend i Express), ale
+    if ondemand_payout:
+        price = round(price + catalog.ondemand_payout_fee_usd(product), 2)
+    # Copytrading: bez ograniczenia rodziny planow (jak Weekend i On-demand), ale
     # z wylacznikiem sprzedazy. Walidacja TUTAJ, nie w UI — schowany checkbox
     # omija sie golym POST-em, a wtedy pobralibysmy $299 za dodatek, ktorego
     # swiadomie nie oferujemy.
@@ -194,7 +194,8 @@ def compute_price(session, trader: Trader, product_key: str, coupon: str | None,
             "offer_title": (oferta.title if oferta else None),
             "weekend_fee_usd": (catalog.WEEKEND_ADDON_USD if weekend_trading else 0.0),
             "split_boost_fee_usd": (catalog.SPLIT_BOOST_ADDON_USD if split_boost else 0.0),
-            "express_payout_fee_usd": (catalog.EXPRESS_PAYOUT_ADDON_USD if express_payout else 0.0),
+            "ondemand_payout_fee_usd": (
+                catalog.ondemand_payout_fee_usd(product) if ondemand_payout else 0.0),
             "copytrading_fee_usd": (catalog.COPYTRADING_ADDON_USD if copytrading else 0.0),
             "credits_used": (kredyt if kredyt > 0 else 0.0),
             "total_due_usd": price,
@@ -262,12 +263,12 @@ def open_stripe_session(session, order: Order, item_name: str, *,
 
 def create_checkout(session, trader: Trader, product_key: str, coupon: str | None,
                     promo_code: str | None = None, weekend_trading: bool = False,
-                    split_boost: bool = False, express_payout: bool = False,
+                    split_boost: bool = False, ondemand_payout: bool = False,
                     copytrading: bool = False,
                     use_credits: bool = True) -> dict:
     quote = compute_price(session, trader, product_key, coupon,
                           promo_code=promo_code, weekend_trading=weekend_trading,
-                          split_boost=split_boost, express_payout=express_payout,
+                          split_boost=split_boost, ondemand_payout=ondemand_payout,
                           copytrading=copytrading,
                           use_credits=use_credits)
     product, upgrade = quote["product"], quote["upgrade"]
@@ -295,7 +296,7 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
     order.flash_offer_id = quote["offer_id"]
     order.weekend_trading = bool(weekend_trading)
     order.addon_split_boost = bool(split_boost)
-    order.addon_express_payout = bool(express_payout)
+    order.addon_ondemand_payout = bool(ondemand_payout)
     order.addon_copytrading = bool(copytrading)
     order.credits_used = kredyt
     order.bogo_paid_key = quote["bogo_paid_key"]
@@ -322,7 +323,7 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
                  + (f" ({catalog.PROMO_NAME} promo)" if upgrade else "")
                  + (" + Weekend Trading" if weekend_trading else "")
                  + (" + Split Boost" if split_boost else "")
-                 + (" + Express Payout" if express_payout else "")
+                 + (" + On-demand Payout" if ondemand_payout else "")
                  + (" + Copytrading" if copytrading else ""))
         url = open_stripe_session(session, order, nazwa)
         return {"checkout_url": url, "order_id": order.id, "amount": price,

@@ -141,11 +141,14 @@
   /* ================= INBOX ================= */
   // Filtry kolejki; domyślnie „Needs reply", gdy coś czeka — inaczej wszystko.
   // "Free": traders who got an account for free (FREE program, Free Trade Case, achievement
-  // reward, a grant from the panel) — the backend marks them, the pill shows in the list.
+  // reward, a grant from the panel) — backend marks them. Free chats stay ONLY under this
+  // filter; Needs reply / Answered / Closed / All hide them so paid support is not mixed in.
   var FILTRY = [['waiting', 'Needs reply'], ['answered', 'Answered'], ['closed', 'Closed'], ['free', 'Free'], ['all', 'All']];
   function pasuje(c, f) {
+    if (f === 'free') return !!c.free;
+    if (c.free) return false;
     return f === 'all' || (f === 'waiting' ? c.waiting : f === 'answered' ? (!c.waiting && c.status !== 'closed')
-      : f === 'free' ? !!c.free : c.status === 'closed');
+      : c.status === 'closed');
   }
   var STATUS = { answered: ['Answered', 'st-ok'], closed: ['Closed', 'st-closed'] };
   function wpis(c) {
@@ -171,7 +174,8 @@
   function rysujListe() {
     var head = el('as-head');
     if (!FILTR) FILTR = CZEKA ? 'waiting' : 'all';
-    var najdluzej = LISTA.filter(function (c) { return c.waiting; })[0];
+    var czekaPlatni = LISTA.filter(function (c) { return c.waiting && !c.free; });
+    var najdluzej = czekaPlatni[0];
     var pod = CZEKA ? CZEKA + ' waiting · longest ' + ile(czekaOd(najdluzej)) : 'All caught up';
     // Pole wyszukiwania tylko raz — przerysowanie z pollingu kasowałoby fokus.
     if (!head.querySelector('#as-q')) {
@@ -371,9 +375,17 @@
     try {
       var r = await api('/api/admin/support/chats');
       var nowa = OSTATNI !== null && r.last_id > OSTATNI;
-      LISTA = r.chats || []; CZEKA = r.waiting || 0;
+      LISTA = r.chats || [];
+      // Plakietka i podgląd: tylko płatni — free siedzą wyłącznie pod filtrem Free.
+      CZEKA = typeof r.waiting === 'number' ? r.waiting
+        : LISTA.filter(function (c) { return c.waiting && !c.free; }).length;
       // Pierwszy odczyt tylko ustawia punkt odniesienia — stare rozmowy nie udają nowych.
-      if (nowa) podglad(LISTA.filter(function (c) { return c.trader_last && c.trader_last.id === r.last_id; })[0]);
+      if (nowa) {
+        var nowy = LISTA.filter(function (c) {
+          return c.trader_last && c.trader_last.id === r.last_id && !c.free;
+        })[0];
+        if (nowy) podglad(nowy);
+      }
       OSTATNI = Math.max(OSTATNI || 0, r.last_id || 0);
       if (OTWARTY && ZAKLADKA === 'inbox' && WIDOK === 'chat' && CHAT) {
         var t = await api('/api/admin/tickets/' + CHAT.id);

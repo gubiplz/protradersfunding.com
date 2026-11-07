@@ -335,6 +335,14 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .shop-tab:hover{color:var(--txt)}
 .shop-tab.on{background:var(--grad);color:#fff}
 .plan-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:20px}
+/* Store: te same karty challenges co na LP (site-landing.css). */
+.store-chal{margin:0 auto 18px}
+#view .chal-grid{max-width:920px;margin:0 auto}
+#view .chal-extras{max-width:920px}
+#view .chal-btn.go{border:0;font-weight:700}
+@media (max-width:900px){
+  #view .chal-grid{grid-template-columns:minmax(0,340px);justify-content:center}
+}
 /* Karta ma WIDOCZNA krawedz. Wczesniej w ciemnym motywie obramowanie mialo
    `--line`, czyli 7% bieli, cien byl czernia na prawie czarnym tle, a tlo
    karty roznilo sie od tla strony o dwa punkty jasnosci — dwie karty obok

@@ -435,12 +435,15 @@
   /* Dodatki sa WSPOLNE dla obu kreatorow (hero i cennik): to ta sama decyzja
      zakupowa, a dwa niezalezne stany znaczylyby, ze zaznaczenie w jednym znika
      po przewinieciu do drugiego. */
-  let cfgType = '2step', cfgSize = null, cfgWt = false, cfgCt = false;
-  const CENA_WT = 199, CENA_CT = 299;
+  let cfgType = '2step', cfgSize = null, cfgWt = false, cfgCt = false, cfgOd = false;
+  const CENA_WT = 199, CENA_CT = 299, CENA_OD_2STEP = 299, CENA_OD_INSTANT = 399;
   /* Cene dodatku bierzemy z katalogu, gdy serwer ja podal — stala ponizej jest
      tylko awaryjna, zeby karta nie pokazala „$undefined" przy starym payloadzie. */
   const cenaCt = p => (p && p.copytrading_fee_usd) || CENA_CT;
   const oferujeCt = p => !!(p && p.copytrading_offered);
+  /* On-demand: Instant (steps==0) droższy — usuwa bi-weekly 14 dni. */
+  const cenaOd = p => (p && p.steps === 0) ? CENA_OD_INSTANT : CENA_OD_2STEP;
+  const cenaOdTyp = t => t === 'instant' ? CENA_OD_INSTANT : CENA_OD_2STEP;
   const typeItems = t => PRODUCTS
     .filter(p => (t === 'instant' ? p.steps === 0 : p.steps === 2) && p.price_usd > 0)
     .sort((a, b) => a.account_size - b.account_size);
@@ -462,7 +465,7 @@
       ['Max drawdown', p.max_overall_loss_pct + '%'],
       ['Min. trading days', p.min_trading_days + ''],
       ['Profit split', (instant ? '' : 'Up to ') + p.profit_split_pct + '%'],
-      ['Rewards', czestotliwoscWyplat()],
+      ['Rewards', cfgOd ? 'On demand' : czestotliwoscWyplat()],
       ['Max open volume', p.max_lots + ' lots'],
       ['Leverage', dzwignia()],
       ['Fee refund', 'First payout'],
@@ -511,6 +514,10 @@
     const ctPrice = $('#pcfg-ct-price');
     if (ctPrice) ctPrice.textContent = '+$' + cenaCt(shown[0]);
     $('#pcfg-wt').setAttribute('aria-checked', cfgWt);
+    const od = $('#pcfg-od');
+    if (od) od.setAttribute('aria-checked', cfgOd);
+    const odPrice = $('#pcfg-od-price');
+    if (odPrice) odPrice.textContent = '+$' + cenaOdTyp(cfgType);
 
     const model = cfgType === 'instant' ? 'Instant' : '2-Step';
     const hot = shown.findIndex(x => x.popular);
@@ -520,12 +527,14 @@
     grid.dataset.k = cfgType + cfgTier;
     grid.innerHTML = shown.map((p, i) => {
       /* Same sum as the checkout: discounted fee plus add-ons at full price. */
-      const addons = (cfgWt ? CENA_WT : 0) + (cfgCt && oferujeCt(p) ? cenaCt(p) : 0);
+      const addons = (cfgWt ? CENA_WT : 0) + (cfgCt && oferujeCt(p) ? cenaCt(p) : 0)
+        + (cfgOd ? cenaOd(p) : 0);
       const fee = Math.round((p.price_usd * (1 - cfgPct / 100) + addons) * 100) / 100;
       const upSize = cfgPromo && p.promo_upgrade_size ? p.promo_upgrade_size : null;
       const q = new URLSearchParams({ buy: p.key });
       if (cfgWt) q.set('wt', '1');
       if (cfgCt && oferujeCt(p)) q.set('ct', '1');
+      if (cfgOd) q.set('od', '1');
       if (cfgCoupon) q.set('coupon', cfgCoupon);
       const open = flipped.has(p.key);
       return `<article class="chal-card${same ? ' still' : ''} pal-${cfgTier}-${i}${i === star ? ' star' : ''}${p.popular ? ' hot' : ''}${open ? ' flip' : ''}">
@@ -643,7 +652,10 @@
       ['Maximum overall loss', r2.max_overall_loss_pct + '%', ...col(ri && ri.max_overall_loss_pct + '%')],
       ['Drawdown type', 'Balance-based', ...col('Balance-based')],
       ['Minimum trading days before first payout', r2.min_trading_days + ' days', ...col(ri && ri.min_trading_days + ' days')],
-      ['Reward frequency', czestotliwoscWyplat(), ...col(czestotliwoscWyplat())],
+      ['Reward frequency', 'Every 14 days between requests (bi-weekly)',
+        ...col('Every 14 days between requests (bi-weekly)')],
+      ['On-demand Payout add-on', '$' + CENA_OD_2STEP,
+        ...col('$' + CENA_OD_INSTANT)],
       ['News trading', '<span class="ok">✓ Allowed</span>', ...col('<span class="ok">✓ Allowed</span>')],
       ['Weekend trading', '$199 add-on', ...col('$199 add-on')],
       /* Oba modele dostaja 1:100, bo z taka dzwignia provisioning ZAKLADA konta
@@ -782,22 +794,27 @@
       pasek.innerHTML =
         chip('wt', cfgWt, `${cfgWt ? '✓ ' : '+ '}Weekend $${CENA_WT}`)
         + (oferujeCt(p) ? chip('ct', cfgCt, `${cfgCt ? '✓ ' : '+ '}Copytrading $${cenaCt(p)}`) : '')
+        + chip('od', cfgOd, `${cfgOd ? '✓ ' : '+ '}On-demand $${cenaOd(p)}`)
         + '<span class="cfg-chip-note">News trading <b>included</b></span>';
       $$('#cfg-addons .cfg-chip').forEach(b => b.addEventListener('click', () => {
-        if (b.dataset.a === 'wt') cfgWt = !cfgWt; else cfgCt = !cfgCt;
+        if (b.dataset.a === 'wt') cfgWt = !cfgWt;
+        else if (b.dataset.a === 'ct') cfgCt = !cfgCt;
+        else if (b.dataset.a === 'od') cfgOd = !cfgOd;
         renderConfigurator();
         /* Cennik nizej pokazuje te same dodatki — bez tego obie karty
            twierdzilyby co innego o tym samym zamowieniu. */
         if ($('#pcfg')) renderPricing();
       }));
     }
-    const dodatki = (cfgWt ? CENA_WT : 0) + (cfgCt && oferujeCt(p) ? cenaCt(p) : 0);
+    const dodatki = (cfgWt ? CENA_WT : 0) + (cfgCt && oferujeCt(p) ? cenaCt(p) : 0)
+      + (cfgOd ? cenaOd(p) : 0);
     const razem = Math.round((oplata + dodatki) * 100) / 100;
 
     const cta = $('#cfg-cta');
     const q = new URLSearchParams({ buy: p.key });
     if (cfgWt) q.set('wt', '1');
     if (cfgCt && oferujeCt(p)) q.set('ct', '1');
+    if (cfgOd) q.set('od', '1');
     if (kodKupon) q.set('coupon', kodKupon);   /* bez tego rabat ginal po klikniciu */
     cta.href = '/portal?' + q.toString();
     cta.textContent = `Start with ${sizeLabel(p.account_size)} → $${fmt(Math.round(razem))}`;
@@ -819,6 +836,7 @@
       const odswiez = () => { renderPricing(); if ($('#cfg')) renderConfigurator(); };
       const wt = $('#pcfg-wt'); if (wt) wt.addEventListener('click', () => { cfgWt = !cfgWt; odswiez(); });
       const ct = $('#pcfg-ct'); if (ct) ct.addEventListener('click', () => { cfgCt = !cfgCt; odswiez(); });
+      const od = $('#pcfg-od'); if (od) od.addEventListener('click', () => { cfgOd = !cfgOd; odswiez(); });
     };
     /* The server inlines the live catalog into the page (#pf-products) so the
        hero configurator paints together with the rest of the document; the
@@ -1077,10 +1095,11 @@
 })();
 
 /* „Reward frequency" z ustawienia serwera (PAYOUT_INTERVAL_DAYS przez
-   data-payout-days na <body>): to zasada dla tradera — co ile dni może złożyć
-   wniosek — a nie obietnica terminu wypłaty. 0 = on demand. */
+   data-payout-days na <body>, domyślnie 14 = bi-weekly): to zasada dla tradera
+   — co ile dni może złożyć wniosek — a nie obietnica terminu wypłaty.
+   0 = on demand (globalnie); add-on On-demand omija limit per konto. */
 function czestotliwoscWyplat() {
-  const d = +(document.body && document.body.dataset.payoutDays || 0);
+  const d = +(document.body && document.body.dataset.payoutDays || 14);
   return d > 0 ? `Every ${d} days between requests` : 'On demand';
 }
 

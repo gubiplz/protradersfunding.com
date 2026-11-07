@@ -475,10 +475,11 @@ class Settings:
     vapid_public_key: str = os.getenv("VAPID_PUBLIC_KEY", "")
     vapid_sub: str = os.getenv("VAPID_SUB", "")   # kontakt dla push service, np. mailto:...
 
-    # --- Częstotliwość wypłat ---
+    # --- Częstotliwość wypłat (domyślnie bi-weekly) ---
     # Ile dni musi minąć od ostatniego wniosku (nieodrzuconego) albo wypłaty na
     # koncie, zanim trader złoży następny. 0 = on demand (bez limitu).
-    payout_interval_days: int = int(os.getenv("PAYOUT_INTERVAL_DAYS", "0"))
+    # Konta z add-onem On-demand Payout omijają ten limit (patrz Account.ondemand_payout).
+    payout_interval_days: int = int(os.getenv("PAYOUT_INTERVAL_DAYS", "14"))
 
     # --- Testowe wypłaty w vUSDT (Polygon Mainnet) ---
     # vUSDT to token TESTOWY bez wartości (kontrakt z ~/vusdt-faucet). Tryb

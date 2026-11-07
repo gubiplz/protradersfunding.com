@@ -2252,42 +2252,143 @@ const VIEWS={
  async store(){
   const [ps]=await Promise.all([api('/api/products'),loadOffers()]);
   PRODUCTS=ps;
-  const groups=[
-    {id:'2step',name:'2-Step',match:p=>p.steps===2&&p.price_usd>0},
+  const models=[
+    {id:'2step',name:'2-Step Evaluation',match:p=>p.steps===2&&p.price_usd>0},
     {id:'instant',name:'Instant Funding',match:p=>p.steps===0&&p.price_usd>0},
   ].filter(g=>ps.some(g.match));
-  window._shopTab=window._shopTab||(groups[0]&&groups[0].id);
+  const TIERS=[['starter','Starter',v=>v<200000],['pro','Pro',v=>v>=200000&&v<800000],['elite','Elite',v=>v>=800000]];
+  window._shopTab=window._shopTab||(models[0]&&models[0].id);
+  window._shopTier=window._shopTier||'starter';
+  window._shopWt=!!window._shopWt;
+  window._shopOd=!!window._shopOd;
+  window._shopCt=!!window._shopCt;
+  window._shopFlip=window._shopFlip||new Set();
   const buyKey=new URLSearchParams(location.search).get('buy');
-  if(buyKey){const g=groups.find(g=>ps.some(p=>g.match(p)&&p.key===buyKey));if(g)window._shopTab=g.id}
-  const g=groups.find(x=>x.id===window._shopTab)||groups[0];
+  if(buyKey){
+    const hit=ps.find(p=>p.key===buyKey);
+    if(hit){
+      window._shopTab=hit.steps===0?'instant':'2step';
+      const tier=TIERS.find(([, ,f])=>f(hit.account_size));
+      if(tier)window._shopTier=tier[0];
+    }
+  }
+  const g=models.find(x=>x.id===window._shopTab)||models[0];
   if(!g){$('view').innerHTML='<div class="empty"><h3>No plans available</h3></div>';return}
-  const items=ps.filter(g.match).sort((a,b)=>a.account_size-b.account_size);
+  const typeItems=ps.filter(g.match).sort((a,b)=>a.account_size-b.account_size);
+  const tiers=TIERS.filter(([, ,f])=>typeItems.some(x=>f(x.account_size)));
+  if(!tiers.some(([id])=>id===window._shopTier))window._shopTier=tiers[0]?tiers[0][0]:'starter';
+  const [,tierName,inTier]=TIERS.find(([id])=>id===window._shopTier)||TIERS[0];
+  const shown=typeItems.filter(x=>inTier(x.account_size));
+  const model=g.id==='instant'?'Instant':'2-Step';
+  const anyCt=shown.some(p=>p.copytrading_offered);
+  if(!anyCt)window._shopCt=false;
+  const odCena=g.id==='instant'?399:299;
+  const ctCena=(shown[0]&&shown[0].copytrading_fee_usd)||299;
+  const hot=shown.findIndex(x=>x.popular);
+  const star=hot>=0?hot:Math.floor(shown.length/2);
+  const usd=v=>'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:v%1?2:0,maximumFractionDigits:2});
+  const rules=p=>{
+    const instant=p.steps===0;
+    return [
+      ['Profit target',instant?'None':`${p.profit_target_p1}% / ${p.profit_target_p2}%`],
+      ['Daily loss limit',p.max_daily_loss_pct+'%'],
+      ['Max drawdown',p.max_overall_loss_pct+'%'],
+      ['Min. trading days (funded)',String(p.min_trading_days)],
+      ['Profit split',(instant?'':'Up to ')+p.profit_split_pct+'%'],
+      ['Rewards',window._shopOd?'On demand':'Every 14 days (bi-weekly)'],
+      ['Max open volume',p.max_lots+' lots'],
+      ['Fee refund','vUSDT with first payout'],
+    ];
+  };
+  const cards=shown.map((p,i)=>{
+    const addons=(window._shopWt?199:0)+(window._shopOd?odCena:0)+(window._shopCt&&p.copytrading_offered?ctCena:0);
+    const base=p.offer_price_usd!=null?p.offer_price_usd:p.price_usd;
+    const fee=Math.round((base+addons)*100)/100;
+    const open=window._shopFlip.has(p.key);
+    return `<article class="chal-card pal-${window._shopTier}-${i}${i===star?' star':''}${p.popular?' hot':''}${open?' flip':''}" data-plan="${esc(p.key)}">
+      <div class="chal-flip" role="button" tabindex="0" aria-label="Show or hide the rules">
+        <div class="chal-inner">
+          <div class="chal-face chal-front">
+            <i class="chal-lines"></i><i class="chal-glare"></i><i class="chal-mark"></i><i class="chal-logo"></i>
+            <div class="chal-price">${p.offer_price_usd!=null?`<s>${usd(p.price_usd+addons)}</s>`:''}<b>${usd(fee)}</b> <small>USD</small>${addons?`<em>incl. ${usd(addons)} add-ons</em>`:''}</div>
+            <div class="chal-size">
+              ${p.popular?'<i>Best value</i>':''}
+              ${p.promo_upgrade_size&&pfPromo()?`<i>You trade $${fmt0(p.promo_upgrade_size)}</i>`:''}
+              <strong>$${p.account_size.toLocaleString('en-US')}</strong>
+              <span>${model} ${tierName}</span>
+            </div>
+            <ul class="chal-specs">
+              <li><small>Target</small><b>${p.steps===0?'None':p.profit_target_p1+'%'}</b></li>
+              <li><small>Drawdown</small><b>${p.max_overall_loss_pct}%</b></li>
+              <li><small>Split</small><b>${p.profit_split_pct}%</b></li>
+            </ul>
+          </div>
+          <div class="chal-face chal-back">
+            <i class="chal-lines"></i><i class="chal-logo"></i>
+            <h3><small>${model} ${tierName}</small>$${p.account_size.toLocaleString('en-US')}</h3>
+            <dl>${rules(p).map(([l,v])=>`<div><dt>${l}</dt><dd>${v}</dd></div>`).join('')}</dl>
+          </div>
+        </div>
+      </div>
+      <button type="button" class="btn-ghost chal-btn" data-flip="${jsq(p.key)}" aria-expanded="${open}">${open?'Hide Rules':'View Rules'}</button>
+      <button type="button" class="btn chal-btn go" data-buy="${jsq(p.key)}">Start Challenge</button>
+    </article>`;
+  }).join('');
   $('view').innerHTML=`
     ${flashBannerHtml()}
-    <div class="shop-tabs">${groups.map(x=>`<button class="shop-tab${x.id===g.id?' on':''}" onclick="window._shopTab='${x.id}';VIEWS.store()">${x.name}</button>`).join('')}</div>
-    ${ME.credits_usd>0?`<div class="note" style="margin-bottom:14px"><b>Store credit: $${fmt(ME.credits_usd)}</b>, applied to your total automatically at checkout.</div>`:''}
-    <div class="plan-grid">`+items.map(p=>`
-    <div class="plan-card${p.popular?' pop':''}" data-plan="${esc(p.key)}">
-      ${p.popular?'<span class="plan-ribbon">Best value</span>':''}
-      <div class="plan-size">$${fmt0(p.account_size)}</div>
-      ${p.promo_upgrade_size&&pfPromo()?`<div class="plan-badge">→ trade $${fmt0(p.promo_upgrade_size)} with your promo</div>`:''}
-      <div class="plan-kind">${p.steps===0?'Instant Funding, no evaluation':'2-Step Evaluation'}</div>
-      <div class="plan-price">${p.offer_price_usd!=null
-        ?`<s style="opacity:.5;font-size:.68em;font-weight:500">$${fmt0(p.price_usd)}</s> $${fmt(p.offer_price_usd)}`
-        :`$${fmt0(p.price_usd)}`} <small>one-time</small></div>
-      ${p.offer_pct?`<div class="plan-badge" style="background:#e0234515;color:#e02345">⚡ Flash sale −${p.offer_pct%1?p.offer_pct.toFixed(2):p.offer_pct}%</div>`:''}
-      <div class="plan-refund">✓ Refunded with your first payout</div>
-      <ul class="plan-feats">
-        <li>${p.steps===0?'Funded from day one, <b>no profit target</b>'
-          :`Profit target <b>${p.profit_target_p1}%${p.steps>1?' / '+p.profit_target_p2+'%':''}</b>`}</li>
-        <li>Max daily loss <b>${p.max_daily_loss_pct}%</b></li>
-        <li>Max overall loss <b>${p.max_overall_loss_pct}% ${p.drawdown_type}</b></li>
-        <li>Max open volume <b>${p.max_lots} lots</b></li>
-        <li>Min trading days <b>${p.min_trading_days}</b> · split <b>${p.profit_split_pct}%</b></li>
-      </ul>
-      <button onclick="openBuy('${jsq(p.key)}')" class="btn-p">Start Challenge</button>
-    </div>`).join('')+`</div>
-    <p class="muted" style="font-size:12px;margin-top:16px">Coupon and promo codes accepted at checkout.</p>`;
+    <div class="chal-switches store-chal">
+      <div class="chal-tabs" id="shopModels">${models.map(x=>`<button type="button" class="${x.id===g.id?'on':''}" data-m="${x.id}">${x.name}</button>`).join('')}</div>
+      <div class="chal-tabs" id="shopTiers">${tiers.map(([id,nm])=>`<button type="button" class="${id===window._shopTier?'on':''}" data-t="${id}">${nm}</button>`).join('')}</div>
+    </div>
+    ${ME.credits_usd>0?`<div class="note" style="margin:0 auto 14px;max-width:920px"><b>Store credit: $${fmt(ME.credits_usd)}</b>, applied at checkout.</div>`:''}
+    <div class="chal-grid" id="shopGrid">${cards||'<div class="empty"><h3>No plans in this tier</h3></div>'}</div>
+    <div class="chal-extras" id="shopExtras">
+      <div class="chal-opt"><span><b>Weekend trading</b><small>+$199</small></span>
+        <button class="chal-sw" id="shop-wt" type="button" role="switch" aria-checked="${window._shopWt}" aria-label="Add weekend trading"></button></div>
+      <div class="chal-opt"><span><b>On-demand Payout</b><small>+$${odCena}</small></span>
+        <button class="chal-sw" id="shop-od" type="button" role="switch" aria-checked="${window._shopOd}" aria-label="Add on-demand payout"></button></div>
+      ${anyCt?`<div class="chal-opt"><span><b>Copytrading</b><small>+$${ctCena}</small></span>
+        <button class="chal-sw" id="shop-ct" type="button" role="switch" aria-checked="${window._shopCt}" aria-label="Add copytrading"></button></div>`:''}
+      <div class="chal-opt"><span><b>News trading</b><small>Included</small></span></div>
+    </div>
+    <p class="chal-fine">Coupon codes apply at checkout. Fee credit with first payout is additional vUSDT, not a card refund.</p>`;
+  const slidePill=box=>{
+    const on=box&&box.querySelector('button.on'); if(!on)return;
+    let ind=box.querySelector('.chal-ind');
+    if(!ind){ind=document.createElement('i');ind.className='chal-ind';box.prepend(ind)}
+    ind.style.left=on.offsetLeft+'px'; ind.style.width=on.offsetWidth+'px';
+  };
+  const q1=(s,r)=> (r||document).querySelector(s);
+  const qa=(s,r)=>[...(r||document).querySelectorAll(s)];
+  slidePill($('shopModels')); slidePill($('shopTiers'));
+  qa('#shopModels button').forEach(b=>b.onclick=()=>{window._shopTab=b.dataset.m;VIEWS.store()});
+  qa('#shopTiers button').forEach(b=>b.onclick=()=>{window._shopTier=b.dataset.t;VIEWS.store()});
+  const wt=$('shop-wt'); if(wt)wt.onclick=()=>{window._shopWt=!window._shopWt;VIEWS.store()};
+  const od=$('shop-od'); if(od)od.onclick=()=>{window._shopOd=!window._shopOd;VIEWS.store()};
+  const ct=$('shop-ct'); if(ct)ct.onclick=()=>{window._shopCt=!window._shopCt;VIEWS.store()};
+  qa('#shopGrid .chal-card').forEach(card=>{
+    const turn=()=>{
+      const on=card.classList.toggle('flip');
+      const b=q1('[data-flip]',card);
+      const key=b.dataset.flip;
+      if(on)window._shopFlip.add(key); else window._shopFlip.delete(key);
+      b.textContent=on?'Hide Rules':'View Rules';
+      b.setAttribute('aria-expanded',on);
+    };
+    q1('[data-flip]',card).onclick=e=>{e.stopPropagation();turn()};
+    q1('.chal-flip',card).onclick=turn;
+    q1('[data-buy]',card).onclick=e=>{
+      e.stopPropagation();
+      const key=e.currentTarget.dataset.buy;
+      const q=new URLSearchParams(location.search);
+      q.set('buy',key);
+      if(window._shopWt)q.set('wt','1'); else q.delete('wt');
+      if(window._shopOd)q.set('od','1'); else q.delete('od');
+      if(window._shopCt)q.set('ct','1'); else q.delete('ct');
+      history.replaceState({},'',location.pathname+'?'+q.toString()+location.hash);
+      openBuy(key);
+    };
+  });
   startOfferTimer();
   highlightPlanFromUrl();
  },
@@ -2895,11 +2996,14 @@ const VIEWS={
             ?'unlocks at the trading-day minimum'
             :`$${fmt(zablokowane)} of it unlocks at the trading-day minimum`}</div></div></div>
     </div>
-    <p class="muted" style="font-size:13px;margin:-6px 0 14px">${data.summary.interval_days
-      ?`Payouts are available <b>every ${data.summary.interval_days} days</b> per account — request whenever
-      you are in profit and the window is open.`
-      :`Payouts are <b>on demand</b> — request whenever
-      you are in profit.`}${
+    <p class="muted" style="font-size:13px;margin:-6px 0 14px">${(()=>{
+      const dni=data.summary.interval_days||14;
+      const maOd=funded.some(a=>a.ondemand_payout)||(data.requests||[]).some(r=>r.ondemand);
+      if(!dni)return `Payouts are <b>on demand</b> — request whenever you are in profit.`;
+      return `Payouts are available <b>every ${dni} days</b> (bi-weekly) by default`+
+        (maOd?`; accounts with the <b>On-demand Payout</b> add-on can request anytime`:'')+
+        ` — request whenever you are in profit and the window is open.`;
+    })()}${
       czeka?` Your ${esc(czeka.login)} plan unlocks its first payout after
         <b>${czeka.metrics?.min_trading_days??0} trading days</b> — a day counts once you trade on it.`:''}</p>
     ${funded.filter(a=>a.scale_up_to).map(a=>{
@@ -2925,7 +3029,7 @@ const VIEWS={
       <thead><tr><th>Date</th><th>Account</th><th>Profit</th><th>Requested</th><th>Method</th><th>Status</th></tr></thead>
       <tbody>`+data.requests.map(r=>`<tr>
         <td class="muted" data-sort="${esc(r.ts||'')}">${dstr(r.ts)}</td>
-        <td class="num">${esc(r.account)}${r.express?' <span style="font-size:10px;font-weight:700;letter-spacing:.4px;color:var(--orange,#f59e0b);border:1px solid currentColor;border-radius:6px;padding:1px 5px;vertical-align:1px">EXPRESS</span>':''}</td>
+        <td class="num">${esc(r.account)}${r.ondemand?' <span style="font-size:10px;font-weight:700;letter-spacing:.4px;color:var(--orange,#f59e0b);border:1px solid currentColor;border-radius:6px;padding:1px 5px;vertical-align:1px">ON-DEMAND</span>':''}</td>
         <td class="num">$${fmt(r.profit_amount)}</td><td class="num">$${fmt(r.total??r.trader_share)}</td>
         <td class="muted">${esc(payoutMethodLabel(r.method,r.network))}${r.vusdt?`<div style="font-size:11px">${
           r.vusdt.explorer_url?`<a href="${esc(r.vusdt.explorer_url)}" target="_blank" rel="noopener">${esc(r.vusdt.status)} · view tx ↗</a>`
@@ -3792,8 +3896,9 @@ function openBuy(key){
           <span><b>Profit Split Boost</b> — keep ${Math.min(100,(p.profit_split_pct||70)+10)}% instead of ${p.profit_split_pct||70}% <b>+$149</b></span>
         </label>`:''}
         <label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
-          <input type="checkbox" id="c-express" onchange="quoteRefresh(true)">
-          <span><b>Express Payout</b> — your payout requests jump the review queue <b>+$49</b></span>
+          <input type="checkbox" id="c-ondemand" onchange="quoteRefresh(true)"
+            ${new URLSearchParams(location.search).get('od')==='1'?'checked':''}>
+          <span><b>On-demand Payout</b> — request anytime, no 14-day wait <b>+$${p.steps===0?399:299}</b></span>
         </label>
         ${p.copytrading_offered?`<label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
           <input type="checkbox" id="c-copy" onchange="quoteRefresh(true)"
@@ -3828,9 +3933,10 @@ async function quoteNow(){
   if(!p||!box)return;
   const wk=!!($('c-weekend')&&$('c-weekend').checked);
   const sb=!!($('c-boost')&&$('c-boost').checked);
-  const ex=!!($('c-express')&&$('c-express').checked);
+  const od=!!($('c-ondemand')&&$('c-ondemand').checked);
   const cp=!!($('c-copy')&&$('c-copy').checked);
   const uc=!$('c-usecr')||$('c-usecr').checked;
+  const odCena=p.steps===0?399:299;
   const bc=window._buyCode||{};
   let q=null,previewFailed=false;
   try{
@@ -3838,7 +3944,7 @@ async function quoteNow(){
       +'&coupon='+encodeURIComponent(bc.coupon||'')
       +'&promo_code='+encodeURIComponent(bc.promo||'')
       +'&weekend='+(wk?'1':'0')+'&split_boost='+(sb?'1':'0')
-      +'&express='+(ex?'1':'0')+'&copytrading='+(cp?'1':'0')
+      +'&ondemand='+(od?'1':'0')+'&copytrading='+(cp?'1':'0')
       +'&use_credits='+(uc?'1':'0'));
   }catch(e){
     /* The preview must never block buying — fall back to the catalog price. */
@@ -3846,8 +3952,8 @@ async function quoteNow(){
     if(e&&e.message&&/coupon/i.test(e.message))buyErr(e.message);
     q={plan_price_usd:p.price_usd,discount_pct:0,discount_usd:0,
        weekend_fee_usd:wk?199:0,split_boost_fee_usd:sb?149:0,
-       express_payout_fee_usd:ex?49:0,copytrading_fee_usd:cp?299:0,credits_used:0,
-       total_due_usd:Math.round((p.price_usd+(wk?199:0)+(sb?149:0)+(ex?49:0)+(cp?299:0))*100)/100};
+       ondemand_payout_fee_usd:od?odCena:0,copytrading_fee_usd:cp?299:0,credits_used:0,
+       total_due_usd:Math.round((p.price_usd+(wk?199:0)+(sb?149:0)+(od?odCena:0)+(cp?299:0))*100)/100};
   }
   /* A coupon the server does not recognize changes nothing — say so instead
      of quietly showing the full price (promo codes are confirmed separately). */
@@ -3858,7 +3964,7 @@ async function quoteNow(){
   if(q.discount_usd>0)h+=row(q.discount_source==='offer'?(q.offer_title||`Flash sale (−${q.discount_pct}%)`):`Coupon (−${q.discount_pct}%)`,'−$'+fmt(q.discount_usd),'good');
   if(q.weekend_fee_usd>0)h+=row('Weekend Trading','+$'+fmt(q.weekend_fee_usd));
   if(q.split_boost_fee_usd>0)h+=row('Profit Split Boost','+$'+fmt(q.split_boost_fee_usd));
-  if(q.express_payout_fee_usd>0)h+=row('Express Payout','+$'+fmt(q.express_payout_fee_usd));
+  if(q.ondemand_payout_fee_usd>0)h+=row('On-demand Payout','+$'+fmt(q.ondemand_payout_fee_usd));
   if(q.copytrading_fee_usd>0)h+=row('Copytrading','+$'+fmt(q.copytrading_fee_usd));
   if(q.credits_used>0)h+=row('Store credit','−$'+fmt(q.credits_used),'good');
   h+=`<div class="q-row total"><span>Total due</span><b class="mono" id="buy-total">$${fmt(q.total_due_usd)}</b></div>`;
@@ -4118,7 +4224,7 @@ async function buy(key){
         body:JSON.stringify({product_key:key,coupon,promo_code:promo,first_name:first,last_name:last,phone,phone_country:CC,
           weekend_trading:!!($('c-weekend')&&$('c-weekend').checked),
           split_boost:!!($('c-boost')&&$('c-boost').checked),
-          express_payout:!!($('c-express')&&$('c-express').checked),
+          ondemand_payout:!!($('c-ondemand')&&$('c-ondemand').checked),
           copytrading:!!($('c-copy')&&$('c-copy').checked),
           use_credits:!$('c-usecr')||$('c-usecr').checked})});
       /* real Stripe: strona zaraz znika — przycisk ma zostać wyłączony */

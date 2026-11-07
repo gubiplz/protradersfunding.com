@@ -120,10 +120,12 @@ Requirements, all four enforced in code:
 - After a payout the balance is reduced by the profit consumed; a full payout brings the
   account back to its starting balance.
 
-**No minimum payout amount exists in the code** — any amount above zero can be requested.
-**No automated payout schedule exists in the code.** The objectives table publishes
-"Bi-weekly" (2-Step) and "Every 7 days" (Instant) as the reward frequency; that is an
-operational commitment by the team, not something the software enforces. See §9, gap 4.
+**Minimum payout** is enforced in code ($500 or 2% of account size, whichever is higher).
+**Reward frequency (default):** every 14 calendar days between requests (bi-weekly) on
+2-Step and Instant, enforced via `PAYOUT_INTERVAL_DAYS`. Accounts with the **On-demand
+Payout** add-on (`ondemand_payout`) skip that wait. Rewards are paid in **vUSDT on Polygon**.
+The Challenge fee credit on first payout is additional vUSDT, not a card refund.
+Do not mention Express Payout ($49 / review queue) — that add-on was withdrawn.
 
 ## 6. KYC
 
@@ -214,9 +216,10 @@ in bold.
    older references still point somewhere. **Answer from §5: the wait is real, it counts
    trading days rather than calendar days, and the account card shows the score.**
 
-4. **Reward frequency ("Bi-weekly" / "Every 7 days") is published but not enforced by any
-   scheduler.** Treat it as the team's service commitment. **Do not promise a specific
-   payment date.**
+4. **Reward frequency is bi-weekly (14 calendar days between requests) by default**,
+   enforced in code. On-demand Payout ($299 2-Step / $399 Instant) removes the wait for
+   that account. **Do not promise a specific payment date** for when a request is paid —
+   only when the next request may be submitted.
 
 5. **The objectives table calls the drawdown "Balance-based" while the FAQ calls it
    "static".** Same thing — a fixed floor derived from the starting balance. But the

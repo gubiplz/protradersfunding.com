@@ -107,7 +107,7 @@ def create_account_from_order(session, order: Order, notify_admin: bool = True) 
         profit_split_pct=(product.profit_split_pct
                           + (catalog.SPLIT_BOOST_PP
                              if getattr(order, "addon_split_boost", False) else 0)),
-        express_payout=bool(getattr(order, "addon_express_payout", False)),
+        ondemand_payout=bool(getattr(order, "addon_ondemand_payout", False)),
         # Copytrading: zgoda dla tradera, a dla nas decyzja o REALNYM rachunku
         # MT5 (patrz `chce_realnego_mt5`). Czytane przez `getattr`, bo ta sama
         # funkcja obsluguje zamowienia sprzed dodania kolumny.
