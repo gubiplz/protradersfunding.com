@@ -3924,27 +3924,6 @@ function openBuy(key){
         <p class="hint" style="text-align:left;margin:-6px 0 0">Purchases are tied to your <b>account e-mail</b>, and credentials
           and the invoice are delivered there. Different address?
           <button type="button" class="linklike" onclick="closeBuy();logout()">Log out</button> and register with it.</p>
-        <div class="buy-addons${p.copytrading_offered?' buy-addons-3':''}">
-          <label class="buy-addon">
-            <input type="checkbox" id="c-weekend" onchange="quoteRefresh(true)"
-              ${new URLSearchParams(location.search).get('wt')==='1'?'checked':''}>
-            <span><b>Weekend Trading</b><small>2 extra days/week</small><em>+$199</em></span>
-          </label>
-          ${p.steps===0?`<label class="buy-addon">
-            <input type="checkbox" id="c-boost" onchange="quoteRefresh(true)">
-            <span><b>Split Boost</b><small>${Math.min(100,(p.profit_split_pct||70)+10)}% instead of ${p.profit_split_pct||70}%</small><em>+$149</em></span>
-          </label>`:''}
-          <label class="buy-addon">
-            <input type="checkbox" id="c-ondemand" onchange="quoteRefresh(true)"
-              ${new URLSearchParams(location.search).get('od')==='1'?'checked':''}>
-            <span><b>On-demand Payout</b><small>No 14-day wait</small><em>+$${p.steps===0?399:299}</em></span>
-          </label>
-          ${p.copytrading_offered?`<label class="buy-addon">
-            <input type="checkbox" id="c-copy" onchange="quoteRefresh(true)"
-              ${new URLSearchParams(location.search).get('ct')==='1'?'checked':''}>
-            <span><b>Copytrading</b><small>Own accounts + multi-device</small><em>+$${fmt(p.copytrading_fee_usd||299)}</em></span>
-          </label>`:''}
-        </div>
         ${ME.credits_usd>0?`<label class="buy-addon buy-addon-full">
           <input type="checkbox" id="c-usecr" checked onchange="quoteRefresh(true)">
           <span><b>Use my store credit</b><small>$${fmt(ME.credits_usd)} available · 1 credit = $1</small></span>
@@ -3992,6 +3971,16 @@ function syncBuyConsent(){
   btn.disabled=!buyConsentsOk();
 }
 
+/* Add-ons are chosen on the shop strip (like LP), not in the buy modal. */
+function buyAddonsFromShop(){
+  const q=new URLSearchParams(location.search);
+  return {
+    weekend: q.get('wt')==='1'||!!window._shopWt,
+    ondemand: q.get('od')==='1'||!!window._shopOd,
+    copytrading: q.get('ct')==='1'||!!window._shopCt,
+  };
+}
+
 /* Price breakdown in the buy modal, fed by /api/checkout/preview — the exact
    math the real checkout will run (coupon -> weekend add-on -> store credit).
    Display only: the server recomputes everything again at POST /api/checkout. */
@@ -4000,10 +3989,8 @@ function quoteRefresh(now){clearTimeout(_quoteT);_quoteT=setTimeout(quoteNow,now
 async function quoteNow(){
   const p=PRODUCTS.find(x=>x.key===window._buyKey),box=$('buy-quote');
   if(!p||!box)return;
-  const wk=!!($('c-weekend')&&$('c-weekend').checked);
-  const sb=!!($('c-boost')&&$('c-boost').checked);
-  const od=!!($('c-ondemand')&&$('c-ondemand').checked);
-  const cp=!!($('c-copy')&&$('c-copy').checked);
+  const a=buyAddonsFromShop();
+  const wk=a.weekend, sb=false, od=a.ondemand, cp=a.copytrading;
   const uc=!$('c-usecr')||$('c-usecr').checked;
   const odCena=p.steps===0?399:299;
   const bc=window._buyCode||{};
@@ -4335,12 +4322,13 @@ async function buy(key){
   const first=imie.value, last=nazwisko.value, phone=tel.value;
   await busy($('buy-go'),'Processing…',async()=>{
     try{
+      const a=buyAddonsFromShop();
       const res=await api('/api/checkout',{method:'POST',
         body:JSON.stringify({product_key:key,coupon,promo_code:promo,first_name:first,last_name:last,phone,phone_country:CC,
-          weekend_trading:!!($('c-weekend')&&$('c-weekend').checked),
-          split_boost:!!($('c-boost')&&$('c-boost').checked),
-          ondemand_payout:!!($('c-ondemand')&&$('c-ondemand').checked),
-          copytrading:!!($('c-copy')&&$('c-copy').checked),
+          weekend_trading:a.weekend,
+          split_boost:false,
+          ondemand_payout:a.ondemand,
+          copytrading:a.copytrading,
           use_credits:!$('c-usecr')||$('c-usecr').checked,
           consent_terms:true,consent_risk:true,consent_immediate:true,
           consent_version:BUY_CONSENT_V})});
