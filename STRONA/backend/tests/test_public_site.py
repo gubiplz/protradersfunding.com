@@ -235,8 +235,8 @@ def test_certyfikat_po_tokenie_a_nie_po_id():
 
 def test_wszystkie_strony_publiczne_odpowiadaja():
     # /admin celowo NIE ma tu byc — panel jest zamkniety i dla goscia nie istnieje.
-    strony = ["/", "/faq", "/affiliate", "/objectives", "/terms", "/privacy", "/risk-disclosure",
-              "/refund-policy", "/verify", "/portal", "/robots.txt"]
+    strony = ["/", "/faq", "/affiliate", "/affiliate-terms", "/objectives", "/terms", "/privacy",
+              "/risk-disclosure", "/refund-policy", "/verify", "/portal", "/robots.txt"]
     with TestClient(app) as c:
         for path in strony:
             r = c.get(path)
@@ -295,6 +295,12 @@ def test_link_afiliacyjny_bierze_host_z_zadania():
         html = c.get("/affiliate").text
     assert "https://mypropfunds.example/?ref=YOURCODE" in html
     assert "localhost" not in html and "127.0.0.1" not in html
+    assert "store credit" in html and "vUSDT" in html
+    assert "/affiliate-terms" in html
+    assert "$50" not in html
+    assert "handled by our team" not in html
+    terms = c.get("/affiliate-terms").text
+    assert "Affiliate Program Terms" in terms and "store credit" in terms
 
 
 def test_portal_ma_domyslny_jasny_motyw_i_przelacznik():
@@ -644,7 +650,7 @@ def test_ga4_na_kazdej_stronie_odwiedzajacego_i_poza_panelem(monkeypatch):
                  cert_token="ga4-payout-token"))
     s.commit(); s.close()
 
-    z_pomiarem = ["/", "/faq", "/objectives", "/affiliate", "/install", "/terms",
+    z_pomiarem = ["/", "/faq", "/objectives", "/affiliate", "/affiliate-terms", "/install", "/terms",
                   "/privacy", "/refund-policy", "/risk-disclosure", "/portal",
                   "/certificate/ga4-cert-token", "/payout/ga4-payout-token"]
     with TestClient(app) as c:

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Affiliate Program — {{ site_name }}{% endblock %}
-{% block description %}Earn 10% commission on every challenge purchased by traders you refer. Built-in tracking, live earnings dashboard.{% endblock %}
+{% block description %}Earn 10% commission on every challenge purchased by traders you refer. Claim as store credit or vUSDT in the portal.{% endblock %}
 {% block og_title %}Affiliate Program — {{ site_name }}{% endblock %}
 
 {% block content %}
@@ -13,7 +13,7 @@
        no chasing screenshots.</p>
     <div style="margin-top:26px;display:flex;gap:14px;flex-wrap:wrap">
       <a class="btn btn-lg" href="/portal">Get your link</a>
-      <a class="btn-ghost btn-lg" href="mailto:{{ support_email }}?subject=Affiliate%20program">Talk to us</a>
+      <a class="btn-ghost btn-lg" href="/affiliate-terms">Affiliate Terms</a>
     </div>
   </div>
 </section>
@@ -23,20 +23,20 @@
     <div class="sec-head" data-rv>
       <h2>How it works</h2>
     </div>
-    <div class="steps">
-      <div class="card step" data-rv>
+    <div class="steps steps-3">
+      <div class="card step step-text" data-rv>
         <div class="step-num">01</div>
         <h3>Create an account</h3>
         <p>Every trader account comes with a personal referral code. Find yours in the portal under
            <b>Rewards</b>. Your link looks like <span class="mono" style="color:var(--txt)">{{ base_url }}/?ref=YOURCODE</span>.</p>
       </div>
-      <div class="card step" data-rv>
+      <div class="card step step-text" data-rv>
         <div class="step-num">02</div>
         <h3>Share your link</h3>
         <p>When someone opens the site through your link, your code is remembered and attached
            automatically when they sign up. They can also type it manually at registration.</p>
       </div>
-      <div class="card step" data-rv>
+      <div class="card step step-text" data-rv>
         <div class="step-num">03</div>
         <h3>Earn on every purchase</h3>
         <p>You earn <b>10% of every challenge fee</b> paid by your referrals — not just the first one.
@@ -45,9 +45,11 @@
     </div>
 
     <div class="notice" data-rv>
-      <b>Payouts of affiliate commission</b> are handled by our team. Request via
-      <a href="mailto:{{ support_email }}">{{ support_email }}</a> once your balance is above $50.
-      Self-referrals and coupon-stacking abuse are not eligible.
+      <b>How you claim commission.</b> From <b>$10</b> unclaimed, claim in the portal as
+      <b>store credit</b> (usable on challenge purchases) or as <b>vUSDT</b> on Polygon to your saved
+      wallet (save a wallet under Payouts first). There is no cash payout and no commission paid by
+      contacting support. Self-referrals and coupon-stacking abuse are not eligible.
+      Full rules: <a href="/affiliate-terms">Affiliate Program Terms</a>.
     </div>
   </div>
 </section>
