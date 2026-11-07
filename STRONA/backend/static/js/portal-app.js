@@ -3920,32 +3920,19 @@ function openBuy(key){
         </label>`:''}
         <div class="buy-consent" id="buy-consent">
           <h4 class="buy-consent-h">Before you purchase</h4>
-          <p class="buy-consent-s">Please review the following before creating your evaluation account.</p>
           <label class="buy-consent-item">
             <input type="checkbox" id="c-consent-terms" onchange="syncBuyConsent()">
-            <span class="bc-body">
-              <b>Terms &amp; Refund Policy</b>
-              <span>I have read and agree to the <a href="/terms" target="_blank" rel="noopener">Terms of Service</a>, including the <a href="/refund-policy" target="_blank" rel="noopener">Refund Policy</a>.</span>
-              <i class="buy-consent-req">Required</i>
-            </span>
+            <span class="bc-body">I agree to the <a href="/terms" target="_blank" rel="noopener">Terms</a> and <a href="/refund-policy" target="_blank" rel="noopener">Refund Policy</a>.</span>
           </label>
           <label class="buy-consent-item">
             <input type="checkbox" id="c-consent-risk" onchange="syncBuyConsent()">
-            <span class="bc-body">
-              <b>Simulated Trading &amp; Risk Disclosure</b>
-              <span>I acknowledge that ${esc(SITE_NAME)} provides simulated trading evaluations, that rewards are not guaranteed and that I have read the <a href="/risk-disclosure" target="_blank" rel="noopener">Risk Disclosure</a>.</span>
-              <i class="buy-consent-req">Required</i>
-            </span>
+            <span class="bc-body">I acknowledge simulated evaluations, that rewards are not guaranteed, and the <a href="/risk-disclosure" target="_blank" rel="noopener">Risk Disclosure</a>.</span>
           </label>
           <label class="buy-consent-item">
             <input type="checkbox" id="c-consent-immediate" onchange="syncBuyConsent()">
-            <span class="bc-body">
-              <b>Immediate Service Commencement</b>
-              <span>I expressly request that the evaluation service begins immediately, before the expiry of the statutory withdrawal period. I acknowledge that, where applicable, I will lose my right of withdrawal once the service has been fully performed.</span>
-              <i class="buy-consent-req">Required for immediate commencement</i>
-            </span>
+            <span class="bc-body">I request immediate commencement and, where applicable, lose the right of withdrawal once the service is fully performed.</span>
           </label>
-          <p class="buy-privacy">Your personal data is processed in accordance with our <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</p>
+          <p class="buy-privacy">Data processed per our <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</p>
         </div>
         <p id="buy-err" class="form-err hidden"></p>
         <button id="buy-go" onclick="buy('${jsq(p.key)}')" class="btn-p lg" style="width:100%" disabled>Buy &amp; create my account</button>
