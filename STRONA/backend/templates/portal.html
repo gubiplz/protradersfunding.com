@@ -69,7 +69,7 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
       </div>
       <!-- One quiet line of facts instead of head counts (the market count comes from the
            terminal's list) and a small live strip from the order book. -->
-      <p class="auth-facts" id="auth-facts">Leverage up to <b>1:100</b> · <b id="auth-mkts">20+</b> markets in the terminal</p>
+      <p class="auth-facts" id="auth-facts">Leverage up to <b>1:{{ leverage_max }}</b> · <b id="auth-mkts">{{ terminal_markets }}</b> markets in the terminal</p>
       <div class="auth-live hidden" id="auth-live" aria-label="Live markets"></div>
     </div>
     <div class="auth-coin" id="authCoin" aria-hidden="true">
