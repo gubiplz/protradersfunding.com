@@ -25,35 +25,18 @@ Wszystkie przeczytane z działającego kodu, nie z tekstów marketingowych:
 `rules.py`, zmianie regulaminu albo dodaniu kodu rabatowego. Baza wiedzy rozjechana
 z kodem jest gorsza niż jej brak — bot obiecuje wtedy rzeczy, których system nie zrobi.
 
-## Do Twojej decyzji — 4 rzeczy, które się nie zgadzają
+## Sync (Fix 7) — stan względem FAQ / kodu
 
-Nie zgadywałem, tylko wypisałem. Pełna lista w `02-facts.md` §9.
+Publiczne FAQ i Terms są source of truth dla metod i limitów. Knowledge ma je powtarzać.
 
-**1. Błąd w FAQ przy limicie dziennym — to najpilniejsze.**
-FAQ podaje przykład: konto 100k, limit 5%, dzień startuje z 102 000 → podłoga **96 900**.
-Silnik liczy **97 000** (sprawdziłem, uruchamiając `rules.evaluate`). FAQ liczy 5% od
-equity na starcie dnia, a kod liczy 5% od salda startowego.
+**Zsynchronizowane:**
+- wypłaty tylko **vUSDT na Polygon** (nie USDT TRC/BEP, bank, Wise)
+- minimum wypłaty **$500 lub 2%** (wyższa wartość)
+- funded trading days: **5 (2-Step) / 30 (Instant)** przed pierwszą wypłatą
+- bi-weekly (14 dni) + On-demand add-on; bez Express Payout
+- przykład daily loss: **$97,000**
 
-Różnica to 100 USD **na niekorzyść klienta** — konto pada wcześniej, niż obiecuje FAQ.
-Trader ścięty pomiędzy 97 000 a 96 900 ma uzasadnioną reklamację i zrzut ekranu z Twojej
-własnej strony. Do poprawienia w `templates/faq.html:68`. Powiedz, czy mam to zrobić.
-
-**2. FAQ: „minimum trading days typically 3–4".**
-Sprzedawane plany egzekwują **5**. Liczby 3–4 pochodzą z nieużywanych presetów
-w `rules.py` (`PRESETS`). `templates/faq.html:102`.
-
-**3. Instant Funding: „30 dni handlowych" nikt nie pilnuje.**
-Tabela objectives pokazuje 30 dni, ale konto Instant startuje od razu jako `funded`,
-a wniosek o wypłatę sprawdza tylko: status funded, KYC zaakceptowane, zysk > 0. Klient
-może poprosić o wypłatę pierwszego dnia. Albo dopisać warunek w kodzie, albo zdjąć
-liczbę ze strony — teraz obiecujesz regułę, której nie masz.
-
-**4. Reward frequency: bi-weekly (14 dni) jest egzekwowane; On-demand add-on omija limit.**
-Nie mylić z wycofanym Express Payout ($49 / kolejka). Bot nie obiecuje daty wypłaty —
-tylko kiedy wolno złożyć kolejny wniosek.
-
-Poza tym: brak minimalnej kwoty wypłaty, brak progu i harmonogramu prowizji afiliacyjnej,
-brak listy krajów wykluczonych. Bot ma to eskalować, a nie zmyślać.
+**Wciąż eskaluj (brak w kodzie):** lista krajów sankcjonowanych / restricted.
 
 ## Jak to podłączyć
 

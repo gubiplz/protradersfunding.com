@@ -31,7 +31,7 @@ and a marked gap is safe. An invented answer about money is not.
 | Max daily loss         | 5%                | 5% |
 | Max overall loss       | 10%               | 8% |
 | Drawdown type          | static            | static |
-| Minimum trading days   | 5 (to pass a phase) | 30 (before a payout) |
+| Minimum trading days   | 5 per phase + 5 on funded before first payout | 30 on funded before first payout |
 | Profit split           | **90%**           | **70%** |
 | Leverage               | up to 1:100       | up to 1:100 |
 | Weekend trading        | $199 add-on       | $199 add-on |
@@ -73,9 +73,7 @@ The subtracted amount is a percentage of the *starting balance*, not of today's 
 Example, $100,000 account at 5%, day opens at $102,000:
 floor = 102,000 − 5,000 = **$97,000**.
 
-> The public FAQ shows $96,900 for this exact example. **That is wrong** — it takes 5% of
-> the day-start equity instead of the starting balance. The engine fails the account at
-> $97,000. See §9, gap 1. Use $97,000. Never quote $96,900.
+> Live FAQ and the engine both use **$97,000**. Never quote $96,900 from old screenshots.
 
 **What is measured against the floors: EQUITY, including floating P&L.**
 An open losing position can breach the account before you close it.
@@ -103,18 +101,22 @@ the exact rule, time and equity are recorded in the trader's dashboard.
 
 Requirements, all four enforced in code:
 1. account status is `funded`,
-2. on **Instant Funding**, the account has at least **30 trading days** — a day counts once
-   the trader trades on it, so 30 trading days is longer than 30 calendar days. The counter
-   is on the account card ("Trading Days X / 30 min"). 2-Step accounts have no such wait:
-   their 5 minimum days are spent passing the evaluation,
+2. the funded account has the plan's **minimum trading days** before the first payout —
+   **5 on 2-Step**, **30 on Instant Funding**. A day counts once the trader trades on it
+   (so N trading days is longer than N calendar days). The counter is on the account card
+   ("Trading Days X / Y min"). Evaluation-phase days on 2-Step do **not** replace the
+   funded wait — the 5 funded days start after the account is funded,
 3. trader's KYC status is `approved`,
-4. profit (balance − starting balance) is greater than zero.
+4. profit (balance − starting balance) is greater than zero, and the requested amount meets
+   the **minimum payout** ($500 or 2% of account size, whichever is higher).
 
 - Available share = profit × the plan's split (90% or 70%).
-- The trader may request **part or all** of the available share.
-- **Methods:** USDT (TRC-20, BEP-20 or Polygon), bank transfer (holder, IBAN, SWIFT/BIC;
-  bank name optional), Wise (email).
-- **Flow:** `pending` → reviewed by the team → `paid`, or `rejected` with a reason.
+- The trader may request **part or all** of the available share (subject to the minimum).
+- **Methods:** **vUSDT on Polygon only** (PTF's native internal token — not Tether USDT).
+  Do **not** offer USDT TRC-20/BEP-20, bank transfer, Wise, or cash. Wallet is confirmed when
+  the request is unlocked; changing a saved wallet needs an emailed code.
+- **Flow:** `pending` → reviewed by the team → unlocked → trader confirms → `paid`, or
+  `rejected` with a reason.
 - **First payout on an account includes a full credit of the challenge fee paid for that
   account** as additional vUSDT (not a card refund), added on top of the profit share.
   Every plan, Instant Funding included.
@@ -208,19 +210,17 @@ These are places where the public site and the engine disagree, or where the sit
 promises something no code enforces. Until the owner resolves them, follow the guidance
 in bold.
 
-1. **FAQ daily-loss example is wrong by $100.** FAQ: floor $96,900. Engine: $97,000
-   (verified by running the risk engine). The error is against the customer — the account
-   fails $100 earlier than the FAQ promises. **Always quote the engine's math. If a
-   customer cites the FAQ figure and was failed between the two numbers, escalate
-   immediately — do not argue, that is a legitimate complaint.**
+1. **RESOLVED — FAQ daily-loss example matches the engine ($97,000).** Always quote
+   $97,000 for the $102,000 day-start / 5% example. Never quote $96,900 if a customer
+   cites an old screenshot — correct them gently to the live FAQ / engine math.
 
-2. **FAQ says minimum trading days are "typically 3–4".** The plans actually sold enforce
-   **5** (2-Step). The 3–4 figure comes from unused legacy presets. **Say 5.**
+2. **RESOLVED — minimum trading days are 5 per 2-Step phase** (not “typically 3–4”).
+   **Say 5.** First payout on a funded 2-Step also needs **5 trading days on the funded
+   account**; Instant Funding needs **30**.
 
-3. **RESOLVED 2026-09-09 — Instant Funding's 30 minimum trading days are now enforced**
-   on the payout request (they were advertised but unchecked). The gap number stays so
-   older references still point somewhere. **Answer from §5: the wait is real, it counts
-   trading days rather than calendar days, and the account card shows the score.**
+3. **RESOLVED — Instant Funding's 30 minimum trading days are enforced** on the payout
+   request. **Answer from §5: the wait is real, it counts trading days rather than
+   calendar days, and the account card shows the score.**
 
 4. **Reward frequency is bi-weekly (14 calendar days between requests) by default**,
    enforced in code. On-demand Payout ($299 2-Step / $399 Instant) removes the wait for
@@ -235,5 +235,9 @@ in bold.
 6. **RESOLVED — Affiliate claim is in the portal.** Store credit or vUSDT. No cash /
    no support payout. Do not quote a minimum unclaimed amount. Point to `/affiliate-terms`.
 
-7. **No minimum payout amount and no country restrictions exist in code.** If asked,
-   say there is no minimum; for countries, escalate.
+7. **RESOLVED — minimum payout is enforced:** $500 or 2% of account size, whichever is
+   higher. **No restricted-country list exists in code** — for country eligibility,
+   escalate; do not invent a blocked/allowed list.
+
+8. **RESOLVED — payout method is vUSDT on Polygon only.** Public FAQ/Terms match.
+   Do not mention USDT TRC-20/BEP-20, bank transfer, or Wise as payout options.
