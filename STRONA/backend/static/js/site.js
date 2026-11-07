@@ -843,13 +843,41 @@
         else if (b.dataset.a === 'ct') cfgCt = !cfgCt;
         else if (b.dataset.a === 'od') cfgOd = !cfgOd;
         else if (b.dataset.a === 'sb') cfgSb = !cfgSb;
-        /* Instant feedback on the chip row; defer the Challenges strip so a
-           remount cannot steal this click. */
-        renderConfigurator();
-        if ($('#pcfg')) {
-          clearTimeout(window._chalRedraw);
-          window._chalRedraw = setTimeout(() => renderPricing(), 80);
+        const on = b.dataset.a === 'wt' ? cfgWt
+          : b.dataset.a === 'ct' ? cfgCt
+          : b.dataset.a === 'od' ? cfgOd : cfgSb;
+        /* Paint this chip now — do NOT rebuild the row inside the same click.
+           Replacing innerHTML here made the synthetic click land on the new
+           Split Boost chip and toggle it straight back on. */
+        b.classList.toggle('on', on);
+        const label = b.dataset.a === 'wt' ? `Weekend $${CENA_WT}`
+          : b.dataset.a === 'ct' ? `Copytrading $${cenaCt(p)}`
+          : b.dataset.a === 'od' ? `On-demand $${cenaOd(p)}`
+          : `Split Boost $${cenaSb(p)}`;
+        b.textContent = `${on ? '✓ ' : '+ '}${label}`;
+        const splitEl = $('#cfg-split');
+        if (splitEl) splitEl.textContent = splitPct(p) + '%';
+        const feeBase = Math.round(p.price_usd * (1 - kodPct / 100) * 100) / 100;
+        const addNow = (cfgWt ? CENA_WT : 0) + (cfgCt && oferujeCt(p) ? cenaCt(p) : 0)
+          + (cfgOd ? cenaOd(p) : 0) + (cfgSb && oferujeSb(p) && p.steps === 0 ? cenaSb(p) : 0);
+        const cta = $('#cfg-cta');
+        if (cta) {
+          const q = new URLSearchParams({ buy: p.key });
+          if (cfgWt) q.set('wt', '1');
+          if (cfgCt && oferujeCt(p)) q.set('ct', '1');
+          if (cfgOd) q.set('od', '1');
+          if (cfgSb && oferujeSb(p) && p.steps === 0) q.set('sb', '1');
+          if (kodKupon) q.set('coupon', kodKupon);
+          cta.href = '/portal?' + q.toString();
+          cta.textContent = `Start with ${sizeLabel(p.account_size)} → $${fmt(Math.round(feeBase + addNow))}`;
         }
+        clearTimeout(window._chalRedraw);
+        window._chalAddonLock = true;
+        window._chalRedraw = setTimeout(() => {
+          renderConfigurator();
+          if ($('#pcfg')) renderPricing();
+          window._chalAddonLock = false;
+        }, 80);
       }));
     }
     const dodatki = (cfgWt ? CENA_WT : 0) + (cfgCt && oferujeCt(p) ? cenaCt(p) : 0)
@@ -887,10 +915,15 @@
         window._chalRedraw = setTimeout(() => {
           renderPricing();
           if ($('#cfg')) renderConfigurator();
+          window._chalAddonLock = false;
         }, 80);
       };
       const toggle = (flag, btn) => (e) => {
         e.preventDefault(); e.stopPropagation();
+        /* Ignore a second click while the deferred remount is pending — same
+           class of bug as the hero chips (click lands on the replacement). */
+        if (window._chalAddonLock) return;
+        window._chalAddonLock = true;
         if (flag === 'wt') cfgWt = !cfgWt;
         else if (flag === 'ct') cfgCt = !cfgCt;
         else if (flag === 'od') cfgOd = !cfgOd;
