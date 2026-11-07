@@ -652,8 +652,8 @@
       ['Maximum overall loss', r2.max_overall_loss_pct + '%', ...col(ri && ri.max_overall_loss_pct + '%')],
       ['Drawdown type', 'Balance-based', ...col('Balance-based')],
       ['Minimum trading days before first payout', r2.min_trading_days + ' days', ...col(ri && ri.min_trading_days + ' days')],
-      ['Reward frequency', 'Every 14 days between requests (bi-weekly)',
-        ...col('Every 14 days between requests (bi-weekly)')],
+      ['Reward frequency', 'Bi-weekly',
+        ...col('Bi-weekly')],
       ['On-demand Payout add-on', '$' + CENA_OD_2STEP,
         ...col('$' + CENA_OD_INSTANT)],
       ['News trading', '<span class="ok">✓ Allowed</span>', ...col('<span class="ok">✓ Allowed</span>')],
@@ -1100,7 +1100,8 @@
    0 = on demand (globalnie); add-on On-demand omija limit per konto. */
 function czestotliwoscWyplat() {
   const d = +(document.body && document.body.dataset.payoutDays || 14);
-  return d > 0 ? `Every ${d} days between requests` : 'On demand';
+  if (!(d > 0)) return 'On demand';
+  return d === 14 ? 'Bi-weekly' : `Every ${d} days`;
 }
 
 /* „Leverage" z listy rynków terminala (markets.py przez data-leverage na <body>):

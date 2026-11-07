@@ -2299,7 +2299,7 @@ const VIEWS={
       ['Max drawdown',p.max_overall_loss_pct+'%'],
       ['Min. trading days (funded)',String(p.min_trading_days)],
       ['Profit split',(instant?'':'Up to ')+p.profit_split_pct+'%'],
-      ['Rewards',window._shopOd?'On demand':'Every 14 days (bi-weekly)'],
+      ['Rewards',window._shopOd?'On demand':'Bi-weekly'],
       ['Max open volume',p.max_lots+' lots'],
       ['Fee credit','vUSDT with first payout'],
     ];
