@@ -476,7 +476,7 @@ footer{border-top:1px solid var(--line);background:#fff;padding:64px 0 34px;font
 .foot-grid{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:36px;margin-bottom:44px}
 .foot-brand p{color:var(--muted);font-size:13.5px;margin-top:14px;max-width:300px}
 .foot-col h3{font-family:var(--display);font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:16px}
-.foot-col a{display:block;color:var(--muted);padding:5px 0;transition:.15s;font-size:14px;font-weight:400}
+.foot-col a{display:block;color:var(--muted);padding:5px 0;transition:.15s;font-size:14px}
 .foot-col a:hover{color:var(--acc)}
 .foot-legal{border-top:1px solid var(--line);padding-top:26px;color:var(--dim);font-size:12px;line-height:1.7}
 .foot-legal p{margin-bottom:10px}
