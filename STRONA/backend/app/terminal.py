@@ -1434,19 +1434,27 @@ def cron_swiece(budzet_s: float) -> dict:
     finally:
         session.close()
     start = time.monotonic()
-    # cTrader (gdy skonfigurowany) słucha ticków FX w osobnym wątku przez cały przebieg;
+    # cTrader (FIX FTMO albo Open API) słucha ticków FX w osobnym wątku przez cały przebieg;
     # jego wiersze są ostateczne, więc próbki mid tych rynków ich nie nadpiszą.
-    from . import ctrader_feed
+    from . import ctrader_feed, ctrader_fix_feed
     ct: dict = {}
     watek = None
-    if ctrader_feed.skonfigurowany():
+    # FIX (konto FTMO z panelu) ma pierwszeństwo przed Open API / Spotware demo.
+    feed_run = None
+    if ctrader_fix_feed.skonfigurowany():
+        feed_run = ("fix", ctrader_fix_feed.sluchaj)
+    elif ctrader_feed.skonfigurowany():
+        feed_run = ("openapi", ctrader_feed.sluchaj)
+    if feed_run:
         import threading
+        rodzaj, fn = feed_run
 
         def _ct():
             try:
-                ct.update(asyncio.run(ctrader_feed.sluchaj(max(5.0, budzet_s - 1.0))))
+                ct.update(asyncio.run(fn(max(5.0, budzet_s - 1.0))))
             except Exception as e:
                 ct["error"] = f"{type(e).__name__}: {str(e)[:120]}"
+            ct.setdefault("via", rodzaj)
         watek = threading.Thread(target=_ct, daemon=True)
         watek.start()
     hist = uzupelnij_historie(min(HIST_BUDZET_S, budzet_s / 2))

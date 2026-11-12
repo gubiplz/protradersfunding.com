@@ -298,7 +298,7 @@ def test_finnhub_jako_zrodlo_historii_gdy_brak_innych_kluczy(monkeypatch):
 
 
 def test_cron_odpala_ctrader_rownolegle_z_probkowaniem(monkeypatch):
-    from app import ctrader_feed
+    from app import ctrader_feed, ctrader_fix_feed
     _hist_zrodlo(monkeypatch)
     wywolania = []
 
@@ -306,10 +306,30 @@ def test_cron_odpala_ctrader_rownolegle_z_probkowaniem(monkeypatch):
         wywolania.append(budzet_s)
         return {"ticks": 12, "rows": 3}
 
+    monkeypatch.setattr(ctrader_fix_feed, "skonfigurowany", lambda: False)
     monkeypatch.setattr(ctrader_feed, "skonfigurowany", lambda: True)
     monkeypatch.setattr(ctrader_feed, "sluchaj", sluchaj)
     monkeypatch.setattr(terminal, "odswiez_feed", lambda transport=None: pytest.fail("Finnhub not polled while cTrader runs"))
     monkeypatch.setattr(terminal.get_settings(), "finnhub_api_key", "fh-key")
     _mid_sekwencja(monkeypatch, [1.1, 1.2])
     w = terminal.cron_swiece(0.05)
-    assert w["ctrader"] == {"ticks": 12, "rows": 3} and len(wywolania) == 1 and w["rows"] >= len(markets.PROBKOWANE)
+    assert w["ctrader"] == {"ticks": 12, "rows": 3, "via": "openapi"} and len(wywolania) == 1 and w["rows"] >= len(markets.PROBKOWANE)
+
+
+def test_cron_woli_fix_ftmo_nad_openapi(monkeypatch):
+    from app import ctrader_feed, ctrader_fix_feed
+    _hist_zrodlo(monkeypatch)
+
+    async def fix_sluchaj(budzet_s, **kw):
+        return {"ticks": 5, "rows": 1, "source": "fix", "account": "17246722"}
+
+    async def oa_sluchaj(budzet_s, polacz=None):
+        pytest.fail("Open API must not run when FIX is configured")
+
+    monkeypatch.setattr(ctrader_fix_feed, "skonfigurowany", lambda: True)
+    monkeypatch.setattr(ctrader_fix_feed, "sluchaj", fix_sluchaj)
+    monkeypatch.setattr(ctrader_feed, "skonfigurowany", lambda: True)
+    monkeypatch.setattr(ctrader_feed, "sluchaj", oa_sluchaj)
+    _mid_sekwencja(monkeypatch, [1.1])
+    w = terminal.cron_swiece(0.05)
+    assert w["ctrader"]["via"] == "fix" and w["ctrader"]["account"] == "17246722"

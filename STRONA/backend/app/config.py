@@ -77,6 +77,16 @@ class Settings:
     ctrader_refresh_token: str = os.getenv("CTRADER_REFRESH_TOKEN", "").strip()
     ctrader_account_id: str = os.getenv("CTRADER_ACCOUNT_ID", "").strip()
     ctrader_host: str = os.getenv("CTRADER_HOST", "demo").strip()
+    # cTrader FIX API (app/ctrader_fix_feed.py) — Połączenie Cen z panelu konta (np. FTMO).
+    # Gdy CTRADER_FIX_PASSWORD jest ustawione, cron świec bierze ticki z FIX zamiast Open API.
+    ctrader_fix_password: str = os.getenv("CTRADER_FIX_PASSWORD", "").strip()
+    ctrader_fix_sender_comp_id: str = os.getenv("CTRADER_FIX_SENDER_COMP_ID", "live.ftmo.17246722").strip()
+    ctrader_fix_username: str = os.getenv("CTRADER_FIX_USERNAME", "").strip()
+    ctrader_fix_host: str = os.getenv("CTRADER_FIX_HOST", "live.cfixapi.com").strip()
+    ctrader_fix_quote_port: str = os.getenv("CTRADER_FIX_QUOTE_PORT", "5211").strip()
+    ctrader_fix_trade_port: str = os.getenv("CTRADER_FIX_TRADE_PORT", "5212").strip()
+    # RoE Spotware: CSERVER; panel FTMO pokazuje „cServer" — nadpisz env gdy broker wymaga inaczej.
+    ctrader_fix_target_comp_id: str = os.getenv("CTRADER_FIX_TARGET_COMP_ID", "CSERVER").strip()
     candles_history_days: int = int(os.getenv("CANDLES_HISTORY_DAYS", "30"))
     # Nazwy symboli u źródła, gdy inne niż domyślne, np. "xyz:JP225=JPN225,xyz:PLATINUM=XPTUSD".
     candles_history_symbols: str = os.getenv("CANDLES_HISTORY_SYMBOLS", "")
