@@ -331,6 +331,7 @@ def _przygotuj_baze() -> None:
         init_db()
         sync_catalog()    # oferta i cennik z kodu — niezależnie od trybu
         _przenies_payoutbota_na_warszawe()
+        _ustaw_granice_kredytu_instant()
         if settings.auto_seed:
             seed_demo()   # admin zawsze; konta demo tylko w trybie sim
         if odcisk:
@@ -5371,8 +5372,41 @@ def admin_payouts_all():
         session.close()
 
 
+INSTANT_KREDYT_KLUCZ = "instant_fee_credit_cutoff"   # AppSetting: chwila (UTC, ISO), od której Instant nie ma kredytu
+
+
+def _ustaw_granice_kredytu_instant() -> None:
+    """Kredyt opłaty przy pierwszej wypłacie dotyczy już tylko 2-Step. Konta Instant
+    kupione wcześniej kupowały przy obietnicy kredytu na każdym planie, więc go zachowują:
+    granicą jest pierwszy start tej wersji NA PRODUKCJI (podglądy PR chodzą na tej samej
+    bazie i nie mogą jej ustawić, zanim strona zacznie mówić klientom o zmianie)."""
+    if os.environ.get("VERCEL_ENV") != "production":
+        return
+    session = SessionLocal()
+    try:
+        if session.get(AppSetting, INSTANT_KREDYT_KLUCZ) is None:
+            session.add(AppSetting(key=INSTANT_KREDYT_KLUCZ,
+                                   value=datetime.now(timezone.utc).replace(tzinfo=None).isoformat()))
+            session.commit()
+    except Exception as e:      # start aplikacji ważniejszy; bez granicy Instant dalej dostaje kredyt
+        session.rollback()
+        print(f"[start] instant fee-credit cutoff not set: {type(e).__name__}", flush=True)
+    finally:
+        session.close()
+
+
+def _granica_kredytu_instant(session) -> datetime | None:
+    w = session.get(AppSetting, INSTANT_KREDYT_KLUCZ)
+    try:
+        return datetime.fromisoformat(w.value).replace(tzinfo=None) if w and w.value else None
+    except ValueError:
+        return None
+
+
 def _zwrot_oplaty(session, acc: Account) -> float:
-    """Zwrot opłaty za challenge przy PIERWSZEJ wypłacie (jak FTMO/The5ers).
+    """Kredyt opłaty za challenge przy PIERWSZEJ wypłacie — tylko plany z ewaluacją (2-Step).
+    Instant Funding (steps == 0) go nie dostaje, chyba że konto kupiono przed granicą
+    `_ustaw_granice_kredytu_instant` (wtedy obowiązywał kredyt na każdym planie).
     Granty odpadają: zamówienie grantowe BOGO nosi cenę OPŁACONEGO tieru
     (dla faktury, patrz billing.grant_challenge) — zwrot z niego oddawałby
     tę samą opłatę drugi raz, bo konto kupione zwraca ją u siebie."""
@@ -5381,7 +5415,14 @@ def _zwrot_oplaty(session, acc: Account) -> float:
     order = (session.query(Order).filter(Order.account_id == acc.id, Order.status == "paid",
                                          Order.provider != "grant")
              .order_by(Order.id).first())
-    return round(order.amount_usd, 2) if order else 0.0
+    if not order:
+        return 0.0
+    if (acc.steps if acc.steps is not None else 2) == 0:
+        granica = _granica_kredytu_instant(session)
+        kupione = order.created_at.replace(tzinfo=None) if order.created_at else None
+        if granica is not None and (kupione is None or kupione >= granica):
+            return 0.0
+    return round(order.amount_usd, 2)
 
 
 def _zwrot_wniosku(session, r: PayoutRequest, acc: Account | None) -> dict:
@@ -14242,7 +14283,7 @@ def contact_page(request: Request):
     for a in arts:
         if a["category"] not in kategorie:
             kategorie.append(a["category"])
-    popularne_klucze = ["how do i start", "when do i get my mt5", "how do payouts work", "when do i get my challenge fee",
+    popularne_klucze = ["how do i start", "when do i get my mt5", "how do payouts work", "when is my challenge fee",
                         "how is the daily loss", "what if i fail"]
     popularne = [next((a for a in arts if a["title"].lower().startswith(k)), None) for k in popularne_klucze]
     return _page(request, "contact.html", kategorie=kategorie,

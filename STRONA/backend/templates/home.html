@@ -32,7 +32,7 @@
       <div class="hero-note">
         <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> One-time fee</span>
         <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> No recurring costs</span>
-        <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> Fee credited with first payout</span>
+        <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> 2-Step fee credited with first payout</span>
       </div>
     </div>
     <div class="cfg" data-rv id="cfg">
@@ -48,7 +48,7 @@
       <div class="cfg-sizes" id="cfg-sizes">{% if cfg %}{% for s in cfg.sizes
         %}<button class="cfg-size{% if s.on %} on{% endif %}" data-key="{{ s.key }}">{{ s.label }}</button>{% endfor %}{% endif %}</div>
       <div class="cfg-rows">
-        <div class="cfg-row"><span>One-time fee</span><b><span id="cfg-fee"{% if cfg %} data-v="{{ cfg.fee_raw }}"{% endif %}>{% if cfg %}${{ cfg.fee }}{% else %}—{% endif %}</span> <em>credited with 1st payout</em></b></div>
+        <div class="cfg-row"><span>One-time fee</span><b><span id="cfg-fee"{% if cfg %} data-v="{{ cfg.fee_raw }}"{% endif %}>{% if cfg %}${{ cfg.fee }}{% else %}—{% endif %}</span> <em id="cfg-fee-note"{% if cfg and cfg.instant %} hidden{% endif %}>credited with 1st payout</em></b></div>
         <div class="cfg-row"><span id="cfg-target-label">{% if cfg and cfg.instant %}Profit target{% else %}Profit target — Phase 1{% endif %}</span><b id="cfg-target">{% if cfg %}{% if cfg.instant %}None. Funded from day one{% else %}+{{ cfg.target_pct }}% = $<span id="cfg-tusd" data-v="{{ cfg.target_usd_raw }}">{{ cfg.target_usd }}</span>{% endif %}{% else %}—{% endif %}</b></div>
         <div class="cfg-row"><span>Your profit split</span><b id="cfg-split">{% if cfg %}{{ cfg.split }}%{% else %}—{% endif %}</b></div>
       </div>
@@ -73,7 +73,7 @@
         <button class="code-change" id="cfg-code-change" type="button" hidden>Use a different code</button>
       </div>
       <a class="btn btn-lg" id="cfg-cta" href="{% if cfg %}/portal?buy={{ cfg.cta_key }}{% else %}/portal{% endif %}" style="width:100%">{% if cfg %}{{ cfg.cta_label }}{% else %}Start this challenge →{% endif %}</a>
-      <div class="cfg-fine" id="cfg-fine">{% if cfg %}*One-time fee, credited with your first payout. Rewards depend on your trading.{% else %}*Illustrative math based on this plan's real split, not a promise. Rewards depend on your trading.{% endif %}</div>
+      <div class="cfg-fine" id="cfg-fine">{% if cfg %}{% if cfg.instant %}*One-time fee. Rewards depend on your trading.{% else %}*One-time fee, credited with your first payout. Rewards depend on your trading.{% endif %}{% else %}*Illustrative math based on this plan's real split, not a promise. Rewards depend on your trading.{% endif %}</div>
     </div>
   </div>
 </section>
@@ -185,7 +185,7 @@
           </svg>{% endif %}</div>
         <h3>4. Start earning</h3>
         <p>Request payouts of your share of the simulated profits, up to 90%, straight from the dashboard.
-           Your challenge fee comes back with the first payout.</p>
+           On 2-Step plans the challenge fee is credited with your first payout.</p>
         <p>Grow the account by 15% and move up to the next size whenever you choose.</p>
       </div>
     </div>
@@ -202,7 +202,7 @@
     <div class="sec-head center" data-rv>
       <span class="pill">Challenges</span>
       <h2>Choose your challenge</h2>
-      <p>One-time fee. No recurring costs. 2-Step fees are credited in full with your first payout.</p>
+      <p>One-time fee. No recurring costs. 2-Step fees are credited in full with your first payout; Instant Funding has no fee credit.</p>
     </div>
     <div class="chal-switches" data-rv>
       <div class="chal-tabs" id="chalModels"></div>
@@ -236,7 +236,7 @@
     </div>
     <div class="code-msg chal-msg" id="pcfg-codemsg" hidden></div>
     <p class="chal-fine" data-rv>One-time fee for access to an evaluation on a simulated account. No real money is deposited or
-      traded at any point. Performance rewards, including the fee credit, are discretionary and not guaranteed.
+      traded at any point. Performance rewards, including the 2-Step fee credit, are discretionary and not guaranteed.
       <a href="/terms">Terms of Service</a></p>
   </div>
 </section>
@@ -261,8 +261,8 @@
         <p>Rewards are bi-weekly by default — every 14 calendar days between requests on 2-Step and
            Instant. The On-demand Payout add-on ($299 on 2-Step, $399 on Instant) removes that wait.
            Ask for your share when a funded account is in profit: 90% on evaluation accounts and
-           70% on Instant Funding. The challenge fee is credited as additional vUSDT on the first
-           payout.</p>
+           70% on Instant Funding. On 2-Step accounts the challenge fee is credited as additional
+           vUSDT on the first payout; Instant Funding has no fee credit.</p>
         <ol class="fork-steps">
           <li><b>Request</b> profit on a funded account when the bi-weekly window is open — or anytime with On-demand.</li>
           <li><b>Verify once.</b> KYC is one-time, then each request is reviewed individually by our risk team.</li>
@@ -454,10 +454,12 @@
         </details>
         <details>
           <summary>How do payouts work?</summary>
-          <div class="a">On a funded account you can request a payout of your share (90%, or 70% on
-          Instant Funding) of the simulated profits at any time. After a one-time KYC verification, each
-          request is reviewed by our team and paid out; your first payout also includes a full refund of the
-          challenge fee.</div>
+          <div class="a">On a funded account you request a payout of your share of the simulated profits:
+          90% on evaluation plans and 70% on Instant Funding. Rewards are paid in vUSDT on the Polygon
+          network. By default you can request every 14 calendar days; the On-demand Payout add-on removes
+          that wait. After a one-time KYC verification each request is reviewed by our team. On 2-Step
+          accounts the challenge fee is credited as additional vUSDT on the first payout (a credit, not a
+          card refund); Instant Funding has no fee credit.</div>
         </details>
         <details>
           <summary>When do I get my account?</summary>

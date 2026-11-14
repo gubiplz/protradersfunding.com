@@ -15,15 +15,20 @@
     <li><strong>Account data:</strong> e-mail, password (stored as a salted hash), full name.</li>
     <li><strong>Checkout data:</strong> first name, last name, phone number, required to open your
         MT5 account with the platform provider.</li>
-    <li><strong>KYC data:</strong> name, country and a document reference, submitted by you before
-        rewards are paid.</li>
+    <li><strong>KYC data:</strong> full name, country, date of birth, address, the type and number of
+        your identity document, images of that document and a proof of residence, submitted by you
+        before rewards are paid.</li>
+    <li><strong>Reward wallet:</strong> the Polygon wallet address you save for rewards.</li>
     <li><strong>Trading telemetry:</strong> equity/balance snapshots, rule-breach events and challenge
         progress of your simulated accounts.</li>
     <li><strong>Built-in Terminal sign-ins:</strong> IP address, approximate location derived from it,
         browser and device type, an identifier stored in your browser, and the time of each sign-in,
         including failed attempts.</li>
-    <li><strong>Payment data:</strong> processed by our payment provider (e.g. Stripe); we store order
+    <li><strong>Payment data:</strong> processed by our payment provider (Stripe); we store order
         metadata, never full card numbers.</li>
+    <li><strong>Support chat:</strong> the messages you send in the support chat, including those
+        answered by the AI assistant.</li>
+    <li><strong>Newsletter:</strong> your e-mail address, if you subscribe.</li>
   </ul>
 
   <h2>2. What we use it for</h2>
@@ -31,16 +36,29 @@
     <li>Providing the service: creating MT5 accounts, monitoring objectives, paying rewards.</li>
     <li>Transactional e-mail (credentials, phase results, payout status).</li>
     <li>Fraud prevention, keeping accounts secure and enforcing our Terms, including checking that an account is used by its registered owner.</li>
+    <li>Reviewing reward requests: the review uses your trading history, your verification and the
+        Built-in Terminal sign-in records (IP address, approximate location, device). The decision is
+        made by a member of our team, not by software alone.</li>
+    <li>Answering support questions, including through the AI assistant in the support chat.</li>
+    <li>Marketing e-mail, only if you subscribed; every message has an unsubscribe link.</li>
     <li>Legal obligations (accounting, AML/KYC where applicable).</li>
   </ul>
   <p>We do not sell personal data and we do not run third-party advertising trackers on this
   site.</p>
 
   <h2>3. Sharing</h2>
-  <p>Data is shared only with processors necessary to run the service: the MT5
-  infrastructure provider (account name on the demo server), the payment provider, e-mail delivery,
-  and — only if you accept Analytics in the cookie banner — Google (Google Analytics 4)
-  and Microsoft (Clarity). Each processes data under its own terms / agreement with us.</p>
+  <p>Data is shared only with processors necessary to run the service:</p>
+  <ul>
+    <li>the MT5 infrastructure provider (account name on the demo server);</li>
+    <li>Stripe, our payment provider;</li>
+    <li>Vercel (hosting) and Supabase (database hosting);</li>
+    <li>our e-mail delivery provider;</li>
+    <li>the AI model provider behind the support assistant, which receives the messages you type in
+        the support chat;</li>
+    <li>only if you accept Analytics in the cookie banner: Google (Google Analytics 4) and Microsoft
+        (Clarity).</li>
+  </ul>
+  <p>Each processes data under its own terms / agreement with us.</p>
 
   <h2>4. Retention</h2>
   <p>Account and order data are kept for as long as your account exists and thereafter as required by
@@ -52,12 +70,27 @@
   <h2>5. Your rights</h2>
   <p>Depending on your jurisdiction, you may have the right to access, rectify, export or erase your
   personal data, and to object to or restrict processing. Write to
-  <a href="mailto:{{ support_email }}">{{ support_email }}</a>. We respond within 30 days.</p>
+  <a href="mailto:{{ support_email }}">{{ support_email }}</a>. We respond within 30 days. You may
+  also lodge a complaint with the data protection authority of the country where you live.</p>
 
   <h2>6. Cookies and local storage</h2>
-  <p>Functional storage: your login token, the sessions of MT5 accounts you sign in to in the Built-in Terminal and, if you arrive through an affiliate link, the referral
-  code, all kept in your browser's local storage. These are needed for the site to work and are not
-  behind the Analytics switch.</p>
+  <p>We set no cookies of our own in your browser apart from the session cookie of the internal admin
+  panel. The site keeps the following in your browser's local or session storage:</p>
+  <ul>
+    <li><strong>Essential</strong> (needed for the site to work, no switch): your login token
+        (<code>pf_token</code>), the sessions of MT5 accounts you sign in to in the Built-in Terminal
+        and the device identifier recorded with those sign-ins (<code>pf_term_logins</code>,
+        <code>pf_term_acc</code>, <code>pf_term_dev</code>), and your privacy choice
+        (<code>pf_consent</code>).</li>
+    <li><strong>Preferences</strong> (kept until you clear them): theme, terminal layout, drawings and
+        watchlists (<code>pf_theme2</code>, <code>pf_term_*</code>), dismissed banners and prompts,
+        a coupon you applied (<code>pf_coupon_code</code>, <code>pf_promo_code</code>), and which
+        notifications and help messages you have already seen.</li>
+    <li><strong>Referral attribution</strong> (optional): if you arrive through an affiliate link, the
+        code is held for that browser tab only (<code>pf_ref_pending</code>). It is stored
+        (<code>pf_ref</code>, for up to 90 days) only if you allow Referral attribution in Cookie
+        Preferences, so that the partner can be credited.</li>
+  </ul>
 
   <h3>Analytics (optional — needs your consent)</h3>
   <p>If you click <strong>Accept all</strong> or enable <strong>Analytics</strong> under Cookie Preferences,
@@ -72,7 +105,8 @@
         meant to be recorded. Microsoft may set cookies and process technical identifiers under its own
         terms.</li>
   </ul>
-  <p>Neither tool loads until you consent. You can change your mind anytime via
+  <p>Neither tool loads until you consent. With your consent they also run in the trader portal and
+  the Built-in Terminal, not only on the public pages. You can change your mind anytime via
   <a href="#" data-ck-prefs>Cookie Preferences</a>. Declining or blocking them does not affect your
   account or the service. We do not sell this data and we do not use it for third-party advertising.</p>
 

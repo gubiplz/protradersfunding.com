@@ -910,7 +910,7 @@ const DISC_MIN_DAYS=10;
 
 const TITLES={
   accounts:['Challenges','Live overview of your challenge accounts'],
-  store:['New Challenge','One-time fee · credited with your first payout'],
+  store:['New Challenge','One-time fee · 2-Step fee credited with your first payout'],
   board:['Leaderboard','Top traders across the platform — by profit, and by discipline'],
   achievements:['Achievements','Milestones earned from your real activity'],
   loyalty:['Loyalty','Trade your points for a discount code'],
@@ -2326,7 +2326,7 @@ const VIEWS={
       ['Rewards',rewards],
       ['Max open volume',p.max_lots+' lots'],
       ['Leverage',lev],
-      ['Fee credit','With first payout'],
+      ['Fee credit',instant?'Not included':'With first payout'],
     ];
   };
   const cards=shown.map((p,i)=>{
@@ -2391,7 +2391,7 @@ const VIEWS={
     </div>
     <div class="code-msg chal-msg" id="shop-codemsg" hidden></div>
     <p class="chal-fine">One-time fee for access to an evaluation on a simulated account. No real money is deposited or
-      traded at any point. Performance rewards, including the fee credit, are discretionary and not guaranteed.
+      traded at any point. Performance rewards, including the 2-Step fee credit, are discretionary and not guaranteed.
       <a href="/terms">Terms of Service</a></p>`;
   /* Same as LP site.js slidePill: remounted tabs start the pill where it was
      last, then glide — without that the portal jump looked broken. */
@@ -3043,7 +3043,7 @@ const VIEWS={
         <a href="/affiliate-terms" target="_blank" rel="noopener" style="color:var(--acc)">Affiliate Terms</a>.</p>
     </div>`;
   const cards=[
-    {ic:'wallet',cls:'green',badge:'Active',name:'Fee credit',desc:'Your one-time challenge fee is credited in full as additional vUSDT on your first payout from a funded account — not a card refund.',cond:['Pass the evaluation','Complete KYC','Request your first payout']},
+    {ic:'wallet',cls:'green',badge:'Active',name:'Fee credit',desc:'On 2-Step plans your one-time challenge fee is credited in full as additional vUSDT on your first payout from a funded account — a credit, not a card refund. Instant Funding has no fee credit.',cond:['Pass the evaluation','Complete KYC','Request your first payout']},
     {ic:'trend',cls:'purple',badge:'Your call',name:'Scaling Plan',desc:'Grow a funded account by +15% and you choose: take the payout, or move up to the next plan in our pricing. Repeatable, no applications.',cond:['Funded account','+15% growth','You pick payout or a bigger plan']},
     {ic:'spark',cls:'blue',badge:'10% recurring',name:'Affiliate Program',desc:'Share your referral link and earn 10% of every challenge purchased by traders you refer — for life. Claim as store credit or vUSDT in the portal.',cond:['Share your link','Friend buys a challenge','Claim store credit or vUSDT']},
     {ic:'crown',cls:'orange',badge:'Spend-based',name:'Loyalty Points',desc:'Every $1 spent earns a loyalty point, and check-ins add more. Trade the points for your own one-time discount code on the Loyalty page.',cond:['500 points: 15% off','1,000 points: 25% off','2,000 points: 35% off']},
@@ -3129,7 +3129,7 @@ const VIEWS={
           ${r.status==='unlocked'?`<div class="muted" style="font-size:11px">Add your payment details above</div>`:''}
           ${r.status==='rejected'&&r.reject_reason?`<div class="muted" style="font-size:11px;max-width:220px">${esc(r.reject_reason)}</div>`:''}</td></tr>`).join('')+`
       </tbody></table></div>`
-      :`<div class="empty"><h3>No payout requests yet</h3><p>Pass a challenge, get funded and request your first performance reward. Your challenge fee comes back with it.</p></div>`}
+      :`<div class="empty"><h3>No payout requests yet</h3><p>Pass a challenge, get funded and request your first performance reward. On 2-Step plans the challenge fee is credited with it.</p></div>`}
 
     ${(data.history||[]).length?`<div class="sec-card" style="margin-top:18px">
       <h3>Payout history</h3>
@@ -3799,7 +3799,7 @@ function openInvoice(orderId){
     </table>
     <div class="inv-total"><span>Total</span><span>$${fmt(orderAmount(o))} USD</span></div>
     <div class="inv-foot">One-time fee for access to a simulated trading evaluation on a demo account with virtual funds.
-      No real-market trading service is provided. Fee credited with the first payout as vUSDT under the Refund Policy.</div>
+      No real-market trading service is provided. On 2-Step plans the fee is credited with the first payout as vUSDT under the Refund Policy.</div>
     <div class="noprint" style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
       <button class="btn-o sm" onclick="document.getElementById('inv-modal').remove()">Close</button>
       <button class="btn-p sm" onclick="window.print()">${ICO.print} Print / Save PDF</button>
@@ -3991,7 +3991,7 @@ function openBuy(key){
         </div>
         <p id="buy-err" class="form-err hidden"></p>
         <button id="buy-go" onclick="buy('${jsq(p.key)}')" class="btn-p lg" style="width:100%" disabled>Buy &amp; create my account</button>
-        <p class="hint">One-time payment · fee credited with your first payout</p>
+        <p class="hint">${p.steps===0?'One-time payment':'One-time payment · fee credited with your first payout'}</p>
       </div>
     </div>`;
   box.onclick=closeBuy;

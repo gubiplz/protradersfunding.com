@@ -70,11 +70,16 @@ class Settings:
     # darmowego (60 zapytań/min). Bez klucza cienkie rynki zostają na próbkowanym mid.
     finnhub_api_key: str = os.getenv("FINNHUB_API_KEY", "").strip()
     # cTrader Open API (app/ctrader_feed.py): darmowa aplikacja na openapi.ctrader.com
-    # + konto demo brokera z cTraderem. Ticki FX z 5 miejscami słuchane w cronie świec.
+    # + konto brokera z cTraderem. Ticki FX z 5 miejscami słuchane w cronie świec.
     ctrader_client_id: str = os.getenv("CTRADER_CLIENT_ID", "").strip()
     ctrader_client_secret: str = os.getenv("CTRADER_CLIENT_SECRET", "").strip()
     ctrader_access_token: str = os.getenv("CTRADER_ACCESS_TOKEN", "").strip()
     ctrader_refresh_token: str = os.getenv("CTRADER_REFRESH_TOKEN", "").strip()
+    # Które konto z tokenu daje kwotowania: fragment nazwy brokera (tak jak pokazuje ją
+    # cTrader) albo numer konta. Puste = pierwsze konto demo. Host (demo/live) wynika
+    # z wybranego konta; CTRADER_ACCOUNT_ID + CTRADER_HOST wymuszają konto na sztywno.
+    ctrader_broker: str = os.getenv("CTRADER_BROKER", "").strip()
+    ctrader_login: str = os.getenv("CTRADER_LOGIN", "").strip()
     ctrader_account_id: str = os.getenv("CTRADER_ACCOUNT_ID", "").strip()
     ctrader_host: str = os.getenv("CTRADER_HOST", "demo").strip()
     candles_history_days: int = int(os.getenv("CANDLES_HISTORY_DAYS", "30"))

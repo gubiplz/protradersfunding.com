@@ -487,7 +487,7 @@
       ['Rewards', cfgOd ? 'On demand' : czestotliwoscWyplat()],
       ['Max open volume', p.max_lots + ' lots'],
       ['Leverage', dzwignia()],
-      ['Fee credit', 'With first payout'],
+      ['Fee credit', instant ? 'Not included' : 'With first payout'],
     ];
   }
 
@@ -698,10 +698,9 @@
          Instant mowila 1:50 i klamala wobec tego, co trader dostawal w MT5. */
       ['Leverage', dzwignia(true), ...col(dzwignia(true))],
       ['Profit split', 'up to ' + Math.max(...g2.map(p => p.profit_split_pct)) + '%', ...col(ri && ri.profit_split_pct + '%')],
-      /* The engine credits the fee on the FIRST payout for every plan
-         (main.py:1342) — Instant Funding included. */
-      ['Fee credit', '<span class="ok">✓ With first payout</span>',
-        ...col('<span class="ok">✓ With first payout</span>')],
+      /* The engine credits the fee on the FIRST payout of evaluation plans only
+         (main.py _zwrot_oplaty): Instant Funding has no fee credit. */
+      ['Fee credit', '<span class="ok">✓ With first payout</span>', ...col('—')],
       ['One-time fee', 'from ' + money(Math.min(...g2.map(p => p.price_usd))), ...col(ri && 'from ' + money(Math.min(...gi.map(p => p.price_usd))))],
     ];
     body.innerHTML = rows.map(r => '<tr>' + r.map(c => `<td>${c}</td>`).join('') + '</tr>').join('');
@@ -759,6 +758,8 @@
        stoi w tej karcie, wiec bez tego wpisanie WELCOME10 nie robilo nic. */
     const oplata = Math.round(p.price_usd * (1 - kodPct / 100) * 100) / 100;
     tweenNum($('#cfg-fee'), oplata, v => '$' + fmt(Math.round(v)));
+    const feeNote = $('#cfg-fee-note');
+    if (feeNote) feeNote.hidden = instant;   // the fee credit exists on 2-Step plans only
     /* Instant Funding has no phases — the row says so instead of printing
        a "+0% = $0" target. */
     $('#cfg-target-label').textContent = instant ? 'Profit target' : 'Profit target — Phase 1';
@@ -816,8 +817,10 @@
     }
     if (fine) {
       fine.textContent = anyPromo && applied
-        ? '*You pay the price of the size you pick; with the promo applied we create the account one size up. Fee still credited with your first payout.'
-        : "*One-time fee, credited with your first payout. Rewards depend on your trading.";
+        ? '*You pay the price of the size you pick; with the promo applied we create the account one size up.'
+          + (instant ? '' : ' Fee still credited with your first payout.')
+        : (instant ? '*One-time fee. Rewards depend on your trading.'
+          : '*One-time fee, credited with your first payout. Rewards depend on your trading.');
     }
     /* Pasek dodatkow. Ten sam stan, co w cenniku nizej — wiec zaznaczenie
        przenosi sie miedzy kartami i cena zgadza sie w obu. */

@@ -273,6 +273,97 @@ def test_issue_payout_admina_tez_dolicza_zwrot(monkeypatch):
                      headers=ADMIN_H).json()["fee_refund"] == 0.0
 
 
+# ---- Kredyt opłaty tylko na 2-Step; Instant sprzed granicy go zachowuje ----
+
+def _instant_z_zamowieniem(email, kupione):
+    """Konto Instant Funding (steps=0) z opłaconym zamówieniem z chwili `kupione`."""
+    from app.models import Order
+    aid, h = _funded(email)
+    s = SessionLocal()
+    acc = s.get(Account, aid)
+    acc.steps, acc.product_key = 0, "instant-50k"
+    s.add(Order(trader_id=acc.trader_id, product_key="instant-50k", amount_usd=669.0,
+                status="paid", provider="mock", account_id=aid, created_at=kupione))
+    s.commit(); s.close()
+    return aid, h
+
+
+def _granica(kiedy):
+    from app.main import INSTANT_KREDYT_KLUCZ
+    from app.models import AppSetting
+    s = SessionLocal()
+    w = s.get(AppSetting, INSTANT_KREDYT_KLUCZ)
+    if kiedy is None:
+        if w is not None:
+            s.delete(w)
+    elif w is None:
+        s.add(AppSetting(key=INSTANT_KREDYT_KLUCZ, value=kiedy.isoformat()))
+    else:
+        w.value = kiedy.isoformat()
+    s.commit(); s.close()
+
+
+def test_kredyt_oplaty_tylko_2step_a_instant_sprzed_granicy_go_zachowuje():
+    from datetime import datetime, timedelta
+    from app.main import _zwrot_oplaty
+    granica = datetime(2026, 11, 20, 12, 0, 0)
+    po, _ = _instant_z_zamowieniem("kredyt-instant-po@test.pl", granica + timedelta(hours=1))
+    przed, _ = _instant_z_zamowieniem("kredyt-instant-przed@test.pl", granica - timedelta(hours=1))
+    dwustopniowe, _ = _z_zamowieniem("kredyt-2step@test.pl")
+    s = SessionLocal()
+    try:
+        konta = [s.get(Account, x) for x in (po, przed, dwustopniowe)]
+        # Bez ustawionej granicy (lokalnie, podgląd) nic się nie zmienia: kredyt na każdym planie.
+        _granica(None)
+        assert [_zwrot_oplaty(s, a) for a in konta] == [669.0, 669.0, 299.0]
+        _granica(granica)
+        s.expire_all()
+        assert [_zwrot_oplaty(s, a) for a in konta] == [0.0, 669.0, 299.0]
+    finally:
+        s.close()
+        _granica(None)
+
+
+def test_instant_po_granicy_portal_i_wyplata_bez_kredytu(monkeypatch):
+    from datetime import datetime, timedelta
+    monkeypatch.setattr(notify, "send", lambda *a, **k: None)
+    granica = datetime(2026, 11, 20, 12, 0, 0)
+    aid, h = _instant_z_zamowieniem("kredyt-instant-api@test.pl", granica + timedelta(days=1))
+    _granica(granica)
+    try:
+        with TestClient(app) as c:
+            konto = next(a for a in c.get("/api/me/accounts", headers=h).json() if a["id"] == aid)
+            assert konto["payout_fee_refund"] == 0.0
+            p = c.post(f"/api/admin/accounts/{aid}/payout", headers=ADMIN_H,
+                       json={"amount": 800, "method": "crypto"}).json()
+            assert p["trader_share"] == 800.0 and p["fee_refund"] == 0.0
+    finally:
+        _granica(None)
+
+
+def test_granica_kredytu_ustawiana_tylko_na_produkcji_i_tylko_raz(monkeypatch):
+    from app import main as m
+    from app.models import AppSetting
+    _granica(None)
+    monkeypatch.delenv("VERCEL_ENV", raising=False)
+    m._ustaw_granice_kredytu_instant()
+    monkeypatch.setenv("VERCEL_ENV", "preview")
+    m._ustaw_granice_kredytu_instant()
+    s = SessionLocal()
+    assert s.get(AppSetting, m.INSTANT_KREDYT_KLUCZ) is None       # podgląd PR nie ustawia granicy
+    s.close()
+    monkeypatch.setenv("VERCEL_ENV", "production")
+    m._ustaw_granice_kredytu_instant()
+    s = SessionLocal()
+    pierwsza = s.get(AppSetting, m.INSTANT_KREDYT_KLUCZ).value
+    s.close()
+    m._ustaw_granice_kredytu_instant()                             # kolejny deploy jej nie przesuwa
+    s = SessionLocal()
+    assert s.get(AppSetting, m.INSTANT_KREDYT_KLUCZ).value == pierwsza
+    s.close()
+    _granica(None)
+
+
 # ---- Kwota w kroku 1, portfel po akceptacji, zapisany portfel i jego zmiana ----
 
 PORTFEL_2 = {"network": "TRC20", "address": "TXyZ9aB8cD7eF6gH5iJ4kL3mN2pQ1rS0tU"}
