@@ -23,9 +23,9 @@
   market. Amounts referred to as "capital", "balance", "profit" or "drawdown" describe values inside the
   simulation. Payments made to traders are discretionary performance-based rewards calculated
   from simulated results, not proceeds of real trading.</p>
-  <p>Prices shown in the Built-in Terminal and used to simulate fills are reference data from a third-party
-  venue, Hyperliquid. We are not affiliated with it, no order is
-  sent to it, and simulated fills may differ from what a real market would have given.</p>
+  <p>Prices shown in the Built-in Terminal and used to simulate fills are reference data from third-party
+  venues and market-data providers, including Hyperliquid. We are not affiliated with any of them, no
+  order is sent to them, and simulated fills may differ from what a real market would have given.</p>
 
   <h2>3. Eligibility and account registration</h2>
   <ul>
@@ -62,11 +62,13 @@
         14-day wait for that account.</li>
     <li>Before the first reward on a funded account, the account must have the plan's minimum trading
         days on that funded stage: 5 on 2-Step and 30 on Instant Funding.</li>
+    <li>The minimum reward request is $500 or 2% of the account size, whichever is higher.</li>
     <li>Reward requests require completed identity verification (KYC) and are reviewed by our team.
         We may refuse a reward where results were produced by prohibited conduct (Section&nbsp;6).</li>
-    <li>Your first reward on a funded account for a Challenge includes a credit of that Challenge fee
-        as additional vUSDT on that payout. It is not a refund to the original payment
-        method.</li>
+    <li>On 2-Step plans, your first reward on a funded account includes a credit of that Challenge
+        fee as additional vUSDT on that payout. It is a credit, not a refund to the original payment
+        method. Instant Funding accounts carry no fee credit; an Instant Funding account purchased
+        while the credit was offered on every plan keeps it.</li>
     <li>Scaling is your choice, not an automatic upgrade. Each time a funded account grows by +15%
         you may either request the reward or move up to the next account size in our pricing. The two
         are mutually exclusive: if you move up, the accrued profit is applied to the larger account
@@ -80,6 +82,13 @@
   is prohibited and voids results:</p>
   <ul>
     <li>exploiting demo-environment artifacts (e.g. off-quotes pricing, latency or feed errors);</li>
+    <li>opening opposite or offsetting positions across accounts you hold, or in coordination with
+        other persons, so that one account is likely to pass;</li>
+    <li>placing all or most of an account's risk on a single trade across repeated Challenges;</li>
+    <li>high-frequency order activity intended to exploit the simulation;</li>
+    <li>accessing the Platform through a VPN, a proxy or another service that masks your location;</li>
+    <li>copying trades between accounts, unless the account carries the Copytrading permission
+        described below;</li>
     <li>buying, selling or transferring accounts, or letting anyone else trade your account
         outside an approved management arrangement (Section&nbsp;7);</li>
     <li>fraud, chargeback abuse, identity misrepresentation or KYC falsification;</li>
@@ -88,16 +97,10 @@
   <p>We may review an account before approving a reward, including its trading history and sign-in records.
   Where we find prohibited conduct, we may void the affected results and any reward based on them, and close
   the account.</p>
-  <!-- Wpisane, gdy dodatek Copytrading wszedl do sprzedazy. Uwaga: ten
-       regulamin NIGDY nie zakazywal kopiowania miedzy wlasnymi kontami ani
-       wielu urzadzen — zakaz zyl wylacznie jako gotowy powod breachu w panelu.
-       Dlatego to jest POTWIERDZENIE na pismie, a nie zdjecie zakazu, i dlatego
-       nie dopisujemy tu zadnego nowego ograniczenia dla kont bez dodatku. -->
-  <p>Copytrading add-on. This add-on is available only when offered at checkout
-  (admin toggle). An account purchased with it carries a permission recorded on the account itself —
-  purchased accounts keep that permission: you may copy trades between accounts registered to you, and
-  you may connect to the platform from more than one device. Neither is treated as prohibited conduct
-  on such an account, and we do not close it for either reason.</p>
+  <p>Copytrading add-on. This add-on is available only when offered at checkout. An account purchased
+  with it keeps the permission recorded on the account: you may copy trades between accounts registered
+  to you, and you may connect to the platform from more than one device. Neither is treated as
+  prohibited conduct on such an account, and we do not close it for either reason.</p>
   <p>The permission covers accounts registered to you. Copying to or from an account registered to
   someone else, and giving your credentials to another person, stay subject to this Section and to
   Section&nbsp;7.</p>
@@ -141,18 +144,29 @@
   the MT5 infrastructure (operated by third parties), or price feeds. Nothing on the Platform
   is investment advice or a promise of income. To the maximum extent permitted by law, our total
   liability under these Terms is limited to the fees you paid to us in the 12 months preceding the
-  claim.</p>
+  claim. Nothing in these Terms excludes or limits rights you have under mandatory consumer-protection
+  law, or liability that cannot be excluded by law.</p>
+  <p>Price errors and outages. Reference prices come from third parties and can be wrong, frozen or
+  unavailable. Where a simulated trade was opened, closed or valued at a clearly erroneous price, or
+  while the Platform or a price feed was not working properly, we may correct or void the affected
+  simulated trades and results, whether that works in your favour or against you. The risk engine's
+  recorded data is authoritative for rule enforcement.</p>
 
   <h2>12. Termination</h2>
   <p>You may stop using the Platform at any time. We may suspend or terminate accounts that violate
-  these Terms. Sections that by their nature should survive termination (liability, IP, disputes)
-  survive.</p>
+  these Terms. Sections that by their nature should survive termination (liability, intellectual
+  property) survive.</p>
 
   <h2>13. Changes</h2>
-  <p>We may update these Terms; material changes will be announced on the Platform. Challenges already
-  purchased remain governed by the objectives shown at their time of purchase.</p>
+  <p>We may update these Terms. We will tell you about material changes by e-mail or in the portal
+  before they take effect. If you do not agree with a change, you may stop using the Platform before it
+  applies. Challenges already purchased remain governed by the objectives shown at their time of
+  purchase.</p>
 
   <h2>14. Contact</h2>
   <p>Questions about these Terms: <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p>
+  <p>Complaints. To make a complaint, write to the same address with the subject "Complaint", your
+  account login and a description of what happened. We confirm that we have received it and answer in
+  the same thread.</p>
 </div></section>
 {% endblock %}

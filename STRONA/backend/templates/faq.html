@@ -8,10 +8,10 @@
 {"@context":"https://schema.org","@type":"FAQPage","mainEntity":[
  {"@type":"Question","name":"Are these live trading accounts?","acceptedAnswer":{"@type":"Answer","text":"No. All accounts are demo accounts with virtual funds in a simulated environment on MT5 servers. Rewards are performance-based."}},
  {"@type":"Question","name":"When do I get my account?","acceptedAnswer":{"@type":"Answer","text":"Provisioning is automated — MT5 credentials are created and delivered automatically once your payment is confirmed."}},
- {"@type":"Question","name":"How do payouts work?","acceptedAnswer":{"@type":"Answer","text":"On a funded account you request a payout of your share of simulated profits in vUSDT on Polygon: 90% on evaluation plans, 70% on Instant Funding. By default you can request every 14 calendar days (bi-weekly); the On-demand Payout add-on ($299 on 2-Step, $399 on Instant) removes that wait. After KYC each request is reviewed and paid. The challenge fee for that account is credited as additional vUSDT on the first payout — not a card refund."}},
+ {"@type":"Question","name":"How do payouts work?","acceptedAnswer":{"@type":"Answer","text":"On a funded account you request a payout of your share of simulated profits in vUSDT on Polygon: 90% on evaluation plans, 70% on Instant Funding. By default you can request every 14 calendar days (bi-weekly); the On-demand Payout add-on ($299 on 2-Step, $399 on Instant) removes that wait. After KYC each request is reviewed and paid. On 2-Step accounts the challenge fee is credited as additional vUSDT on the first payout — a credit, not a card refund. Instant Funding has no fee credit."}},
  {"@type":"Question","name":"Is news trading allowed?","acceptedAnswer":{"@type":"Answer","text":"Yes. There are no news blackouts, weekend-flat requirements or strategy bans beyond abuse of the simulation."}},
  {"@type":"Question","name":"Can someone else trade my account?","acceptedAnswer":{"@type":"Answer","text":"Yes, with our written approval before trading starts. The account stays registered to you, you remain responsible for the trading objectives, and rewards are paid only to the verified account holder. Sharing credentials without an approved arrangement is prohibited."}},
- {"@type":"Question","name":"Where do the prices in the Built-in Terminal come from?","acceptedAnswer":{"@type":"Answer","text":"Every market in the terminal uses live reference prices from Hyperliquid, a third-party venue we are not affiliated with. Every simulated fill is settled on the reference price, which can differ from a real broker quote. On Forex pairs and platinum the chart draws from a consolidated spot feed, so it can differ from the fill price by about the spread."}},
+ {"@type":"Question","name":"Where do the prices in the Built-in Terminal come from?","acceptedAnswer":{"@type":"Answer","text":"The terminal uses live reference prices from third-party sources we are not affiliated with. Crypto, gold, oil and most indices use Hyperliquid. Forex pairs, silver, platinum and the Japan 225 index use a broker spot feed for both the chart and simulated fills, because Hyperliquid quotes them too thinly. No order is sent to any of these sources, and reference prices can differ from a real broker quote."}},
  {"@type":"Question","name":"Are my trades sent to Hyperliquid or any broker?","acceptedAnswer":{"@type":"Answer","text":"No. No order leaves our platform. The terminal keeps a simulated ledger and fills your order against the reference order book. Fills, balances and equity are values inside the simulation, so what you earn is a performance reward, not a trading profit."}},
  {"@type":"Question","name":"Do I need MT5 installed, or can I trade in the browser?","acceptedAnswer":{"@type":"Answer","text":"You can trade entirely in the browser at /trade, signing in with the MT5 login, password and server from your dashboard. The same credentials also work in MT5 on desktop, mobile and web."}},
  {"@type":"Question","name":"What can I trade, and when are markets open?","acceptedAnswer":{"@type":"Answer","text":"12 crypto pairs, gold, silver, platinum, WTI, Brent, natural gas, S&P 500, Nasdaq 100, Nikkei 225, and EURUSD, GBPUSD and USDJPY. Everything except crypto is closed Saturday and Sunday server time and reopens Monday 00:00 server time. Crypto trades around the clock on weekdays, and on weekends only with the Weekend Trading add-on."}},
@@ -26,7 +26,7 @@
  {"@type":"Question","name":"Do the same rules apply once I'm funded (profit target, time limit, inactivity)?","acceptedAnswer":{"@type":"Answer","text":"There is no profit target and no time limit on a funded account. The 5% daily loss limit, the static overall drawdown (10% on 2-Step, 8% on Instant Funding) and the volume cap keep applying. The first payout needs 5 trading days on the funded account on 2-Step and 30 on Instant Funding. There is no inactivity rule."}},
  {"@type":"Question","name":"What trading practices are not allowed?","acceptedAnswer":{"@type":"Answer","text":"Anything that makes money from the simulation instead of from the market: exploiting delayed, frozen or wrong prices, latency arbitrage, opposite positions across your own accounts or coordinated with other traders, high-frequency order spam, and repeated all-in attempts across challenges. Report platform bugs instead of using them. Results produced this way are voided and the account is closed."}},
  {"@type":"Question","name":"Are EAs and bots allowed, also in the Built-in Terminal?","acceptedAnswer":{"@type":"Answer","text":"Yes in MT5: EAs, indicators and copiers run on your side, bound by the same loss limits, lot cap and market hours as manual trading. The Built-in Terminal has no EA or plugin layer and no public trading API, so there is no supported way to automate it. The prohibited-practices list applies to the result either way."}},
- {"@type":"Question","name":"Can I trade from a shared device or network, and can I use a VPN?","acceptedAnswer":{"@type":"Answer","text":"You can trade from any device as long as only you use your credentials. Every terminal sign-in is logged with IP, approximate location, browser and device, and that log is part of the review before a payout. Do not use a VPN, a proxy or any location-masking service: such sign-ins can lead to a review and a declined reward."}},
+ {"@type":"Question","name":"Can I trade from a shared device or network, and can I use a VPN?","acceptedAnswer":{"@type":"Answer","text":"You can trade from any device as long as only you use your credentials. Every terminal sign-in is logged with IP, approximate location, browser and device, and that log is part of the review before a payout. Do not use a VPN, a proxy or any location-masking service. Such sign-ins can lead to a review and a declined reward."}},
  {"@type":"Question","name":"Is there a minimum payout amount?","acceptedAnswer":{"@type":"Answer","text":"Yes: $500 or 2% of the account size, whichever is higher. That is $500 on a $25,000 account, $2,000 on $100,000 and $20,000 on $1,000,000. Amounts are whole dollars and you can request part of your available share."}},
  {"@type":"Question","name":"What do I need before requesting a payout?","acceptedAnswer":{"@type":"Answer","text":"A funded account with profit from closed trades, approved KYC, the minimum trading days on that funded account (5 on 2-Step, 30 on Instant Funding), an amount at or above the minimum, and no other open request on the account. You request an amount, our team reviews and unlocks it, you confirm the amount and your vUSDT wallet, and the transfer is marked paid with a certificate."}},
  {"@type":"Question","name":"Can I trade while my payout is under review?","acceptedAnswer":{"@type":"Answer","text":"Yes, the account stays open and all rules keep applying. The requested amount is checked again at approval: if your profit has dropped below it, the request is rejected and you submit a new one."}},
@@ -39,12 +39,12 @@
  {"@type":"Question","name":"Can I get a refund before I start trading?","acceptedAnswer":{"@type":"Answer","text":"Only if your MT5 credentials have not been delivered yet. Delivery is automatic right after payment, so that window is very short. Duplicate charges and accounts we could not provision are always refunded in full."}},
  {"@type":"Question","name":"Can I pay with someone else's card?","acceptedAnswer":{"@type":"Answer","text":"Pay with a card in your own name. The order must be placed from your own registration and rewards go only to you after KYC; mismatched payer details may be queried before a reward is approved. Contact us before opening a card dispute."}},
  {"@type":"Question","name":"Can I stack coupon codes?","acceptedAnswer":{"@type":"Answer","text":"No. One coupon code per order, and when a flash-sale offer is running the better single discount applies, not both. The Upgrade Your Size promo code is a separate field and can be combined with a coupon. Add-ons are charged at full price."}},
- {"@type":"Question","name":"Who can join, and is there an age requirement?","acceptedAnswer":{"@type":"Answer","text":"Anyone 18 or older who can legally enter into a contract, subject to country restrictions. One person holds one registration and can run several challenges under it."}},
- {"@type":"Question","name":"When do I need to complete KYC, and who handles it?","acceptedAnswer":{"@type":"Answer","text":"Verification opens in your dashboard once one of your accounts is funded and is required before the first payout request. You enter your details and upload your document in the portal; our own team reviews it. It is a one-time step for all your accounts."}},
+ {"@type":"Question","name":"Who can join, and is there an age requirement?","acceptedAnswer":{"@type":"Answer","text":"Anyone 18 or older who can legally enter into a contract, subject to applicable sanctions and anti-money-laundering laws. One person holds one registration and can run several challenges under it."}},
+ {"@type":"Question","name":"When do I need to complete KYC, and who handles it?","acceptedAnswer":{"@type":"Answer","text":"Verification opens in your dashboard once one of your accounts is funded and is required before the first payout request. You enter your details and upload your ID and a proof of residence in the portal; our own team reviews it. It is a one-time step for all your accounts."}},
  {"@type":"Question","name":"What personal data do you collect?","acceptedAnswer":{"@type":"Answer","text":"Account data, checkout data (name and phone), KYC data, trading telemetry, and Built-in Terminal sign-in records (IP, approximate location, browser and device) kept for 12 months. Card payments are processed by Stripe; we never store card numbers."}},
  {"@type":"Question","name":"Can I share my portal or MT5 login?","acceptedAnswer":{"@type":"Answer","text":"No. Credentials are personal and sign-ins are checked against the registered owner before a payout is approved. The only exception is an account management arrangement approved in writing before trading starts."}},
  {"@type":"Question","name":"Can I transfer or sell my account?","acceptedAnswer":{"@type":"Answer","text":"No. Buying, selling or transferring accounts is prohibited conduct under the Terms and voids the results. Rewards are paid only to the verified person who registered the account."}},
- {"@type":"Question","name":"How do I contact support?","acceptedAnswer":{"@type":"Answer","text":"Use the chat in your trader portal, where an AI assistant answers right away and a real person reads every message, or email support. Payout requests, KYC and billing are handled from the portal."}},
+ {"@type":"Question","name":"How do I contact support?","acceptedAnswer":{"@type":"Answer","text":"Use the chat in your trader portal, where an AI assistant answers rule and platform questions and a person from our team takes over when it cannot help or when you ask for one, or email support. Payout requests, KYC and billing are handled from the portal."}},
  {"@type":"Question","name":"Where are your Terms, Privacy and Refund policies?","acceptedAnswer":{"@type":"Answer","text":"At /terms, /privacy, /refund-policy, /risk-disclosure and /affiliate-terms, linked in the footer of every page. The objectives for each plan are on /objectives."}},
  {"@type":"Question","name":"How does the affiliate program work?","acceptedAnswer":{"@type":"Answer","text":"Every trader account has a referral link in portal Rewards. You earn 10% of the challenge fee paid on eligible orders by traders attributed to your code, on every purchase, not only the first. You claim in the portal as store credit or as vUSDT on Polygon. There is no cash payout and no commission paid by contacting support. Self-referrals and coupon-stacking abuse are not eligible. Full rules: /affiliate-terms."}}
 ]}</script>
@@ -95,7 +95,8 @@
       <details>
         <summary>Is there a free trial?</summary>
         <div class="a">No. Challenges start at $299 for a $25,000 account, and the fee is a one-time
-        fee credited in full with your first payout. Coupon codes are accepted at checkout.</div>
+        fee. On 2-Step plans it is credited in full with your first payout. Coupon codes are accepted at
+        checkout.</div>
       </details>
       <details>
         <summary>Are these live trading accounts?</summary>
@@ -114,13 +115,13 @@
     <div class="faq" id="terminal-prices-fees">
       <details>
         <summary>Where do the prices in the Built-in Terminal come from?</summary>
-        <div class="a">Every market in the terminal, from crypto and metals to oil, indices and FX pairs,
-        uses live reference prices from Hyperliquid, a third-party venue we are not affiliated with. The
-        order book and the tape show that venue, and every simulated fill is settled on its reference
-        price. On Forex pairs and platinum, where Hyperliquid prints only a few trades a minute, the chart
-        draws from a consolidated spot feed instead, so it can differ from the fill price by about the
-        spread. Reference prices can differ from what a real broker would have quoted at the same
-        moment.</div>
+        <div class="a">The terminal uses live reference prices from third-party sources we are not
+        affiliated with. Crypto, gold, oil and most indices use Hyperliquid: the chart, the order book
+        and the tape show that venue, and simulated fills are settled on its reference price. Forex
+        pairs, silver, platinum and the Japan 225 index use a broker spot feed for both the chart and
+        the simulated fills, because Hyperliquid quotes them too thinly. No order is sent to any of
+        these sources, and reference prices can differ from what a real broker would have quoted at the
+        same moment.</div>
       </details>
       <details>
         <summary>Are my trades sent to Hyperliquid or any broker?</summary>
@@ -199,8 +200,9 @@
       <details>
         <summary>What happens when I break a rule?</summary>
         <div class="a">The risk engine fails the account, open positions are closed and the exact breach
-        reason (which rule, at what equity) is recorded in your dashboard. There are no partial
-        penalties and no discretionary reviews — the same code applies to everyone.</div>
+        reason (which rule, at what equity) is recorded in your dashboard. Loss-limit and volume breaches
+        are decided by the engine automatically, and the same code applies to everyone. Separately, each
+        reward request is reviewed individually by our team before it is approved.</div>
       </details>
       <details>
         <summary>Is news trading allowed? Weekend holding? EAs?</summary>
@@ -215,14 +217,15 @@
         arrangement in writing, before any trading on your behalf starts. Write to
         <a href="mailto:{{ support_email }}">{{ support_email }}</a> from your registered address and name
         who will be trading. The account stays yours and so does responsibility for the rules: a limit
-        breached by your manager is still a breach of your account, and rewards are paid only to you
-        after KYC. Handing over credentials <b>without</b> an approved arrangement is prohibited and can
+        breached by your manager is still a breach of your account. Rewards are paid only to you after
+        KYC. Handing over credentials <b>without</b> an approved arrangement is prohibited and can
         trigger an account review. Full wording in Section 7 of the <a href="/terms">Terms</a>.</div>
       </details>
       <details>
         <summary>What counts as a trading day?</summary>
-        <div class="a">Any calendar day (server time) on which you executed at least one trade. Minimum
-        trading days per phase are listed on each plan card.</div>
+        <div class="a">Any calendar day (server time) on which your account had at least one open
+        position, including one opened or closed that day. Minimum trading days per phase are listed on
+        each plan card.</div>
       </details>
       <details>
         <summary>Is there a time limit on the evaluation?</summary>
@@ -273,9 +276,9 @@
         guaranteed to pass, high-frequency order spam, and repeated all-in attempts where each challenge
         is bet on one maximum-risk trade. If you find a platform bug, report it to support instead of
         using it: results produced this way are voided and the account is closed under Section 6 of the
-        <a href="/terms">Terms</a>. Copying your own trades in the same direction between your accounts is
-        allowed only on accounts purchased with the Copytrading add-on when that add-on was offered at
-        checkout.</div>
+        <a href="/terms">Terms</a>, which carries the full list. Copying your own trades in the same
+        direction between your accounts is allowed only on accounts purchased with the Copytrading add-on
+        when that add-on was offered at checkout.</div>
       </details>
       <details>
         <summary>Are EAs and bots allowed, also in the Built-in Terminal?</summary>
@@ -289,9 +292,9 @@
       <details>
         <summary>Can I trade from a shared device or network, and can I use a VPN?</summary>
         <div class="a">You can trade from any device, as long as only you use your credentials. Every
-        terminal sign-in is logged with IP address, approximate location, browser and device, and that
-        log is part of the review before a payout, so sign-ins by several people or from several places
-        will be asked about. Do not use a VPN, a proxy or any service that masks your location: sign-ins
+        terminal sign-in is logged with IP address, approximate location, browser and device. That log
+        is part of the review before a payout, so sign-ins by several people or from several places will
+        be asked about. Do not use a VPN, a proxy or any service that masks your location. Sign-ins
         through them can lead to a review and to a reward being declined. When Copytrading is offered at
         checkout and purchased with the account, that add-on records a written permission to use several
         devices and to copy between your own accounts; purchased accounts keep that permission.</div>
@@ -319,8 +322,9 @@
       </details>
       <details>
         <summary>When is my challenge fee credited?</summary>
-        <div class="a">The full Challenge fee for that account is credited as additional vUSDT on your
-        first payout from the funded account — it is not a refund to your card.</div>
+        <div class="a">On 2-Step plans the full Challenge fee for that account is credited as additional
+        vUSDT on your first payout from the funded account — it is a credit, not a refund to your card.
+        Instant Funding accounts have no fee credit.</div>
       </details>
       <details>
         <summary>How does the scaling plan work?</summary>
@@ -362,7 +366,7 @@
         deducted from the balance. A full payout brings the account back to its starting balance; a
         partial one leaves the rest of the profit on it. Equity, the equity peak and the day-start
         baseline are set to the new balance, while the overall drawdown floor is static and does not
-        move. The fee credit added to your first payout is on top and is not deducted.</div>
+        move. The 2-Step fee credit added to your first payout is on top and is not deducted.</div>
       </details>
       <details>
         <summary>Does a payout count against my daily loss limit?</summary>
@@ -398,13 +402,14 @@
     <div class="faq" id="billing-account">
       <details>
         <summary>Is the fee one-time or recurring?</summary>
-        <div class="a">One-time, per challenge. No subscriptions or hidden costs. The Challenge fee is
-        credited as additional vUSDT on your first payout from that funded account (not a card refund).
-        See the <a href="/refund-policy">refund policy</a> for details.</div>
+        <div class="a">One-time, per challenge. No subscriptions or hidden costs. On 2-Step plans the
+        Challenge fee is credited as additional vUSDT on your first payout from that funded account (a
+        credit, not a card refund); Instant Funding has no fee credit. See the
+        <a href="/refund-policy">refund policy</a> for details.</div>
       </details>
       <details>
         <summary>Do you accept coupon codes?</summary>
-        <div class="a">Yes. Enter the code at checkout and the discount is applied instantly.</div>
+        <div class="a">Yes. Enter the code at checkout and the discount is applied to the total.</div>
       </details>
       <details>
         <summary>Can I run multiple challenges?</summary>
@@ -435,7 +440,8 @@
         <div class="a">Pay with a card in your own name. The order must be placed from your own
         registration, and rewards go only to you after KYC; if the payer details do not match your
         identity documents, we may ask you to explain before a reward is approved. Contact us before
-        opening a card dispute: unwarranted chargebacks end the account under the Terms.</div>
+        opening a card dispute: a chargeback on a Challenge that was delivered as described ends the
+        account under the Terms.</div>
       </details>
       <details>
         <summary>Can I stack coupon codes?</summary>
@@ -458,8 +464,8 @@
       <details>
         <summary>How do I claim affiliate commission?</summary>
         <div class="a">Claim in the portal as <b>store credit</b> (usable on challenge purchases) or as
-        <b>vUSDT</b> on Polygon to your saved wallet. There is no cash payout and support does not send
-        affiliate commission by email. Self-referrals and coupon-stacking abuse are not eligible. See the
+        <b>vUSDT</b> on Polygon to your saved wallet. Commission is never paid in cash, and support does
+        not send it by email. Self-referrals and coupon-stacking abuse are not eligible. See the
         <a href="/affiliate-terms">Affiliate Program Terms</a>.</div>
       </details>
     </div>
@@ -468,8 +474,9 @@
     <div class="faq" id="account-kyc-support">
       <details>
         <summary>Who can join, and is there an age requirement?</summary>
-        <div class="a">Anyone 18 or older who can legally enter into a contract, subject to the country
-        restrictions below. One person holds one registration and can run as many challenges under it as
+        <div class="a">Anyone 18 or older who can legally enter into a contract, subject to applicable
+        sanctions and anti-money-laundering laws (see the disclaimers at the bottom of this page). One
+        person holds one registration and can run as many challenges under it as
         they like. Details at registration and checkout must be your own, as they are used to open your
         MT5 account and later to verify your identity.</div>
       </details>
@@ -478,7 +485,7 @@
         <div class="a">Verification opens in your dashboard once one of your accounts is funded and is
         required before the first payout request; if you want to verify earlier, support can open it for
         you. You enter your full name, country, date of birth, address and ID type and number, and upload
-        your document in the portal. Our own team reviews it. It is a one-time step that covers all your
+        your ID and a proof of residence in the portal. Our own team reviews it. It is a one-time step that covers all your
         accounts.</div>
       </details>
       <details>
@@ -491,7 +498,7 @@
       </details>
       <details>
         <summary>Can I share my portal or MT5 login?</summary>
-        <div class="a">No. Credentials are personal, and sign-ins are checked against the registered owner
+        <div class="a">No. Credentials are personal. Sign-ins are checked against the registered owner
         before a payout is approved. The one exception is an account management arrangement approved in writing before
         trading starts (see "Can someone else trade my account?" above). Copytrading is available only
         when offered at checkout; accounts purchased with it keep permission to use several devices and
@@ -505,8 +512,9 @@
       </details>
       <details>
         <summary>How do I contact support?</summary>
-        <div class="a">Fastest is the chat in your trader portal: an AI assistant answers rule and platform
-        questions right away, and a real person from our team reads every message. Email
+        <div class="a">Use the chat in your trader portal: an AI assistant answers rule and platform
+        questions, and a person from our team takes over when the assistant cannot help or when you ask
+        for one. Email
         <a href="mailto:{{ support_email }}">{{ support_email }}</a> for anything you prefer not to type in
         a chat. Payout requests, KYC and billing are handled from the portal itself. See also the
         <a href="/contact">contact page</a>.</div>

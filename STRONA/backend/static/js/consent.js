@@ -35,7 +35,8 @@
   }
   function show(manage){
     var c=read();
-    an.checked=c?!!c.analytics:true; rf.checked=c?!!c.referral:true;
+    // No choice yet: both optional switches start off. Consent is never pre-ticked.
+    an.checked=c?!!c.analytics:false; rf.checked=c?!!c.referral:false;
     opts.hidden=!manage; act.hidden=!!manage; save.hidden=!manage;
     el.hidden=false; space();
   }

@@ -288,6 +288,37 @@ def test_stopka_bez_plakietek_ale_z_pelnym_disclaimerem():
     assert 'data-ck-prefs>Cookie Preferences' in html
 
 
+def test_teksty_prawne_spojne_z_regulaminem():
+    """Przegląd dokumentów (XI 2026): strona główna nie może obiecywać więcej niż Terms,
+    zakazy egzekwowane przy przeglądzie konta stoją w Terms §6, a nie tylko w FAQ."""
+    import pathlib
+    with TestClient(app) as c:
+        home, terms, faq = c.get("/").text, c.get("/terms").text, c.get("/faq").text
+        risk, refund, contact = c.get("/risk-disclosure").text, c.get("/refund-policy").text, c.get("/contact").text
+    # Wypłaty: domyślnie co 14 dni, a opłata to kredyt (tylko 2-Step), nie zwrot.
+    assert "profits at any time" not in home and "full refund" not in home
+    assert "14 calendar days" in home and "Instant Funding has no fee credit" in home
+    assert "Instant Funding accounts carry no fee credit" in terms
+    # Terms: bez języka wewnętrznego i bez komentarza w źródle strony; pełna lista zakazów.
+    assert "admin toggle" not in terms and "<!--" not in terms.split('<div class="wrap prose">')[1].split("</section>")[0]
+    for zakaz in ("opposite or offsetting positions", "single trade across repeated Challenges",
+                  "high-frequency order activity", "VPN, a proxy", "copying trades between accounts"):
+        assert zakaz in terms
+    assert "Price errors and outages" in terms and "mandatory consumer-protection" in terms
+    assert "disputes)" not in terms and "Complaints." in terms
+    # FAQ nie przeczy już Terms w sprawie przeglądu nagród ani nie odsyła do nieistniejącej listy krajów.
+    assert "no discretionary reviews" not in faq and "country restrictions below" not in faq
+    assert "consolidated spot feed" not in faq
+    for strona in (risk, refund):
+        assert "Last updated: November 2026" in strona
+    assert "Section&nbsp;11" in risk and "not directed at residents" in home
+    # Pytanie o kredyt opłaty wróciło do popularnych na stronie kontaktu.
+    assert "When is my challenge fee credited?" in contact
+    # Zgody: przełączniki opcjonalne startują wyłączone, dopóki użytkownik nie wybierze.
+    js = pathlib.Path(__file__).resolve().parents[1].joinpath("static/js/consent.js").read_text()
+    assert "c.analytics:false" in js and "c.referral:false" in js and ":true; rf.checked" not in js
+
+
 def test_link_afiliacyjny_bierze_host_z_zadania():
     """Instrukcja na /affiliate pokazywala „http://localhost:8000/?ref=KOD" na
     produkcji, bo APP_BASE_URL nie bylo ustawione. Adres bierzemy z ZADANIA."""
@@ -680,6 +711,6 @@ def test_okienko_pomocy_na_stronie_i_artykuly_z_faq():
         assert a["title"] and a["body"] and a["category"]
         assert "<script" not in a["body"] and "{{" not in a["body"] and "onclick" not in a["body"]
     po_tytule = {a["title"]: a for a in arts}
-    assert "first payout" in po_tytule["When do I get my challenge fee back?"]["body"]
+    assert "first payout" in po_tytule["When is my challenge fee credited?"]["body"]
     # Nieaktualne „3–4" zastąpione liczbami z katalogu (te same co u asystenta).
     assert "3–4" not in po_tytule["What counts as a trading day?"]["body"]
