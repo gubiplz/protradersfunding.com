@@ -28,6 +28,10 @@
 .ac-filters{display:flex;gap:4px;padding:4px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
 .ac-filters button{padding:8px 14px;border-radius:9px;font:inherit;font-size:14px;color:var(--muted);background:none;border:0;cursor:pointer}
 .ac-filters button.on{background:var(--acc);color:#fff}
+/* the fill slides between the options (slide-ind.js) instead of jumping */
+.ac-filters button{transition:color .25s}
+.ac-filters.sl-box button.on{background:none}
+.ac-filters>.sl-ind{background:var(--acc)}
 
 /* modules */
 .ac-mod{padding:34px 0 10px}

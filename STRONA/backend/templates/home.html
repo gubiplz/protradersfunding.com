@@ -43,7 +43,7 @@
       {# Server-rendered default state — the panel is complete in the FIRST
          paint; renderConfigurator() re-renders the same values on boot and
          only then takes over interactions. Keep markup identical to the JS. #}
-      <div class="cfg-tabs" id="cfg-tabs">{% if cfg %}{% for t in cfg.tabs
+      <div class="cfg-tabs" id="cfg-tabs" data-slide>{% if cfg %}{% for t in cfg.tabs
         %}<button class="cfg-tab{% if t.on %} on{% endif %}" data-step="{{ t.id }}">{{ t.name }}<small>from ${{ t.from_usd }}</small></button>{% endfor %}{% endif %}</div>
       <div class="cfg-sizes" id="cfg-sizes">{% if cfg %}{% for s in cfg.sizes
         %}<button class="cfg-size{% if s.on %} on{% endif %}" data-key="{{ s.key }}">{{ s.label }}</button>{% endfor %}{% endif %}</div>
@@ -301,7 +301,7 @@
     </div>
     <div class="lpt" id="lpTerm" data-v="{{ asset_v }}" data-rv>
       <div class="lpt-top">
-        <div class="lpt-syms" data-syms></div>
+        <div class="lpt-syms" data-syms data-slide></div>
         <span class="lpt-lev" data-lev></span>
         <div class="lpt-q"><small>Mark</small><b data-mark>—</b></div>
         <div class="lpt-q"><small>24h change</small><b data-chg></b></div>
@@ -309,13 +309,13 @@
       </div>
       <div class="lpt-body">
         <div class="lpt-main">
-          <div class="lpt-ints">
+          <div class="lpt-ints" data-slide>
             <button type="button" data-int="1m">1m</button><button type="button" data-int="5m">5m</button><button type="button" class="on" data-int="15m">15m</button><button type="button" data-int="1h">1h</button>
           </div>
           <div class="lpt-chart" data-chart></div>
         </div>
         <div class="lpt-side-wrap">
-          <div class="lpt-tabs"><button type="button" class="on" data-tab="book">Order Book</button><button type="button" data-tab="trades">Trades</button></div>
+          <div class="lpt-tabs" data-slide><button type="button" class="on" data-tab="book">Order Book</button><button type="button" data-tab="trades">Trades</button></div>
           <div class="lpt-side" data-side></div>
         </div>
       </div>

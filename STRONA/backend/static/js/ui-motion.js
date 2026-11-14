@@ -116,6 +116,9 @@ function planuj(){
   requestAnimationFrame(()=>{
     zaplanowane=false;
     doSeg.forEach(s=>{if(document.contains(s))pigulka(s)});doSeg.clear();
+    /* switches outside .seg/.shop-tabs carry data-slide (slide-ind.js); views are rendered
+       from scratch, so new ones are picked up here */
+    if(window.pfSlide)pfSlide.scan();
     if(doNav){doNav=false;document.querySelectorAll('.side-nav').forEach(n=>slizg(n))}
     if(doWidok){
       doWidok=false;

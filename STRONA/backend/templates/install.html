@@ -27,6 +27,9 @@
   display:inline-flex;align-items:center;justify-content:center;gap:8px;transition:.15s}
 .inst-tab svg{width:16px;height:16px}
 .inst-tab.on{background:#087F73;border-color:#087F73;color:#fff}
+/* with the sliding indicator (slide-ind.js) the fill travels between the tabs */
+.inst-tabs.sl-box .inst-tab.on{background:transparent;border-color:transparent}
+.inst-tabs>.sl-ind{background:#087F73}
 .inst-warn{display:flex;gap:12px;align-items:flex-start;background:#fffbeb;border:1px solid #fde68a;color:#92400e;
   border-radius:14px;padding:14px 16px;margin-bottom:16px;font-size:14px;line-height:1.5}
 .inst-warn svg{width:20px;height:20px;flex:none;margin-top:1px}
@@ -75,7 +78,7 @@
       <small>One tap — your phone does the rest.</small>
     </div>
 
-    <div class="inst-tabs">
+    <div class="inst-tabs" data-slide>
       <button class="inst-tab" id="tb-ios" onclick="instShow('ios')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M11 18h2"/></svg>
         iPhone / iPad</button>

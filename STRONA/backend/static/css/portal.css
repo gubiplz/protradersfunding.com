@@ -2036,3 +2036,19 @@ body.imp-on .cookie-note{bottom:calc(12px + 42px + env(safe-area-inset-bottom))}
 .po-min.shake{animation:po-shake .35s ease}
 @media (prefers-reduced-motion:reduce){.po-min.shake{animation:none}}
 .acct-ava-txt{display:grid;place-items:center;font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--muted)}
+
+/* ---- Sliding indicator for segmented switches (static/js/slide-ind.js) ----
+   :where() keeps the positioning rule at zero specificity, so a group that is already
+   sticky or absolute stays that way. */
+:where(.sl-box){position:relative}
+.sl-ind{position:absolute;z-index:-1;left:0;top:0;width:0;height:0;pointer-events:none;
+  transition:left .38s cubic-bezier(.22,1,.36,1),top .38s cubic-bezier(.22,1,.36,1),width .38s cubic-bezier(.22,1,.36,1),height .38s cubic-bezier(.22,1,.36,1),background-color .25s,opacity .2s}
+.sl-ind.sl-now{transition:none}
+@media(prefers-reduced-motion:reduce){.sl-ind{transition:none}}
+.sl-box{isolation:isolate}
+/* risk card: account chips */
+.rc-tabs.sl-box .rc-tab.on{background:transparent}
+.rc-tabs>.sl-ind{background:var(--acc-bg)}
+/* account detail: Objective lines On / Off */
+:root:root body .seg-mini .sw.sl-box button.on{background:none}
+.seg-mini .sw>.sl-ind{background:var(--pb-ink,var(--acc))}

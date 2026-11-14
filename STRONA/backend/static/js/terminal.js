@@ -246,12 +246,14 @@
     return s;
   }
   function registerOverlays() {
-    // Closed trade on the chart as in MT5 / cTrader: entry (▲ long, ▼ short) at the
-    // open price and time, exit (circle) at the close price and time, a dashed line
-    // between them in the result colour. Hovering thickens it all.
+    // Closed trade on the chart as in cTrader: a triangle at the entry (▲ long, ▼ short, in
+    // the side's colour) and one at the exit pointing the other way, joined by a solid line
+    // in the result colour. Hovering lights the line up and writes the deal out beside each
+    // end: "Buy | 0.10 lots | price" at the entry, "Sell | 0.10 lots | price | Net profit |
+    // Pips" at the exit, each boxed in its own side's colour.
     klinecharts.registerOverlay({
       name: 'ptfTrade', totalStep: 3, lock: true, needDefaultPointFigure: false, needDefaultXAxisFigure: false, needDefaultYAxisFigure: false,
-      createPointFigures: ({ coordinates, overlay, chart, xAxis }) => {
+      createPointFigures: ({ coordinates, overlay, chart, xAxis, bounding }) => {
         if (coordinates.length < 2) return [];
         const bars = chart.getDataList();
         const place = (i) => {
@@ -264,15 +266,49 @@
         };
         const a = place(0), b0 = place(1), e = overlay.extendData || {}, hov = !!e.hover, s = hov ? 6.5 : 5;
         const t = e.t == null ? 1 : e.t, b = { x: a.x + (b0.x - a.x) * t, y: a.y + (b0.y - a.y) * t };
-        const wynik = e.pnl >= 0 ? e.up : e.dn, strona = e.side === 'buy' ? e.up : e.dn;
-        const tri = e.side === 'buy'
-          ? [{ x: a.x, y: a.y - s }, { x: a.x - s, y: a.y + s * 0.85 }, { x: a.x + s, y: a.y + s * 0.85 }]
-          : [{ x: a.x, y: a.y + s }, { x: a.x - s, y: a.y - s * 0.85 }, { x: a.x + s, y: a.y - s * 0.85 }];
-        return [
-          { key: 'line', type: 'line', attrs: { coordinates: [a, b] }, styles: { style: 'dashed', dashedValue: [4, 3], color: wynik, size: hov ? 2 : 1 } },
-          { key: 'in', type: 'polygon', attrs: { coordinates: tri }, styles: { style: 'fill', color: strona } },
-          { key: 'out', type: 'circle', attrs: { x: b.x, y: b.y, r: (hov ? 5.5 : 4) * t }, styles: { style: 'stroke_fill', color: e.bg, borderColor: wynik, borderSize: 2 } },
-        ];
+        const buy = e.side === 'buy', wynik = e.pnl >= 0 ? e.up : e.dn, strona = buy ? e.up : e.dn, wyjscie = buy ? e.dn : e.up;
+        const tri = (p, up, r) => (up
+          ? [{ x: p.x, y: p.y - r }, { x: p.x - r, y: p.y + r * 0.85 }, { x: p.x + r, y: p.y + r * 0.85 }]
+          : [{ x: p.x, y: p.y + r }, { x: p.x - r, y: p.y - r * 0.85 }, { x: p.x + r, y: p.y - r * 0.85 }]);
+        const fig = [];
+        if (hov) fig.push({ key: 'halo', type: 'line', attrs: { coordinates: [a, b] }, styles: { style: 'solid', color: e.halo, size: 9 }, ignoreEvent: true });
+        fig.push(
+          { key: 'line', type: 'line', attrs: { coordinates: [a, b] }, styles: { style: 'solid', color: wynik, size: hov ? 2 : 1.5 } },
+          { key: 'in', type: 'polygon', attrs: { coordinates: tri(a, buy, s) }, styles: { style: 'fill', color: strona } },
+          { key: 'out', type: 'polygon', attrs: { coordinates: tri(b, !buy, s * t) }, styles: { style: 'fill', color: wynik } },
+        );
+        if (!hov || !e.lin || t < 1) return fig;
+        // Deal labels: a row of boxes sharing borders, like one table row. The entry label
+        // sits on the side away from the line, the exit label past the exit; both stay
+        // inside the pane.
+        const PAD = 6, H = 18, W = bounding.width;
+        const row = (parts, color, x, y) => {
+          parts.forEach((txt) => {
+            const w = szerTekstu(txt) + PAD * 2;
+            fig.push({ type: 'text', ignoreEvent: true, attrs: { x, y, text: txt, align: 'left', baseline: 'middle' },
+              // 'stroke_fill' is what makes the library draw the box's border as well as its fill
+              styles: { style: 'stroke_fill', color, size: 11, weight: 600, family: LINE_FONT, paddingLeft: PAD, paddingRight: PAD, paddingTop: 3, paddingBottom: 3,
+                borderRadius: 0, borderSize: 1, borderColor: color, backgroundColor: e.bg } });
+            x += w - 1;
+          });
+        };
+        const wid = (parts) => parts.reduce((n, txt) => n + szerTekstu(txt) + PAD * 2 - 1, 1);
+        const fwd = b.x >= a.x, win = wid(e.lin), wout = wid(e.lout);
+        let xin = fwd ? a.x - 10 - win : a.x + 10;
+        xin = Math.min(Math.max(4, xin), W - win - 4);
+        // The entry label goes under a long's ▲ and over a short's ▼, clear of the marker.
+        const yin = a.y + (buy ? 1 : -1) * (s + H / 2 + 4);
+        let xout = fwd ? b.x + 12 : b.x - 12 - wout;
+        if (xout + wout > W - 4) xout = b.x - 12 - wout;
+        xout = Math.min(Math.max(4, xout), Math.max(4, W - wout - 4));
+        // The exit label goes on the other side of its marker (over a long's ▼, under a short's
+        // ▲): beside the marker it would sit on the pointer's row, under the crosshair line.
+        let yout = b.y - (buy ? 1 : -1) * (s + H / 2 + 4);
+        // Same candle or nearly the same price: keep the two rows apart.
+        if (Math.abs(yout - yin) < H + 2 && xout < xin + win && xin < xout + wout) yout = yin + (yout <= yin ? -1 : 1) * (H + 2);
+        row(e.lin, strona, xin, yin);
+        row(e.lout, wyjscie, xout, yout);
+        return fig;
       },
     });
     // Shift + click measure (as in TradingView / cTrader / MT5): a box from the start point
@@ -324,15 +360,14 @@
       createPointFigures: ({ coordinates, bounding, overlay }) => {
         const y = coordinates[0].y, e = overlay.extendData || {};
         const etykieta = { color: '#fff', size: 11, weight: 600, family: LINE_FONT, paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderSize: 0 };
-        // Position (e.pos): dashed line with an outlined label; TP/SL and orders dashed with a
-        // filled label; the last-price line is dotted (chartStyles), so they never look alike.
+        // Position (e.pos): a solid line in the side's colour, as in cTrader — its label is the
+        // HTML chip in posBar. TP/SL and orders are dashed with a filled label; the last-price
+        // line is dotted (chartStyles), so they never look alike.
         const fig = [
-          { type: 'line', attrs: { coordinates: [{ x: 0, y }, { x: bounding.width, y }] }, styles: e.pos ? { style: 'dashed', dashedValue: [7, 4], color: e.color, size: 1 } : { style: 'dashed', dashedValue: [5, 4], color: e.color, size: 1 }, ignoreEvent: true },
+          { type: 'line', attrs: { coordinates: [{ x: 0, y }, { x: bounding.width, y }] }, styles: e.pos ? { style: 'solid', color: e.color, size: 1 } : { style: 'dashed', dashedValue: [5, 4], color: e.color, size: 1 }, ignoreEvent: true },
           { type: 'text', attrs: { x: 10, y, text: e.text, baseline: 'middle' }, styles: e.pos ? { ...etykieta, color: e.color, backgroundColor: e.bg, borderColor: e.color, borderSize: 1 } : { ...etykieta, backgroundColor: e.color }, ignoreEvent: true },
         ];
-        if (e.noLabel) fig.pop();          // TP/SL being edited: the label is the draggable HTML handle
-        // Position: live P&L by the entry label, in result colour (as in MT5 / cTrader).
-        if (e.pnlText) fig.push({ type: 'text', attrs: { x: 10 + szerTekstu(e.text) + 12 + 4, y, text: e.pnlText, baseline: 'middle' }, styles: { ...etykieta, backgroundColor: e.pnlColor }, ignoreEvent: true });
+        if (e.noLabel || e.pos) fig.pop();   // TP/SL being edited and positions: the label is HTML
         return fig;
       },
     });
@@ -1001,6 +1036,18 @@
     bar: () => lastBar,
     shown: () => shownBar,   // the live candle as drawn (mid-glide)
     tradeBox: () => (tipH ? tradeBox(tipH) : null),
+    // closed-trade markers in #tChart pixels: [{ id, a: entry {x, y}, b: exit {x, y} }]
+    marks: () => {
+      if (!chart) return null;
+      const d = chart.getDataList(), out = [];
+      tradeOv.forEach(({ id }, hid) => {
+        const ov = (chart.getOverlays({ id }) || [])[0];
+        if (!ov) return;
+        const xy = ov.points.map((pt) => { const c = chart.convertToPixel({ dataIndex: barIndexAt(d, pt.timestamp), value: pt.value }, { paneId: 'candle_pane', absolute: true }); return c && { x: Math.round(c.x), y: Math.round(c.y) }; });
+        out.push({ id: hid, a: xy[0], b: xy[1] });
+      });
+      return out;
+    },
     // visible bars as [first, last] timestamps
     // trade markers vs candle centres: [{ entry ts, bar ts, marker x, candle centre x }]
     snap: () => {
@@ -1936,10 +1983,9 @@
     if (!S.st) return;
     posLines = {};
     livePos().filter((p) => p.symbol === S.sym).forEach((p) => {
-      const ext = { up, dn, pos: true, bg: css('--panel'), pnlText: pnlTxt(p), pnlColor: p.pnl >= 0 ? up : dn };
-      const id = line(p.entry, `${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, p.side === 'buy' ? up : dn, ext);
-      if (id) posLines[p.id] = { id, ts, entry: p.entry, ext: { text: `${p.side === 'buy' ? 'Long' : 'Short'} ${lotsOf(S.m, p.qty)} @ ${px(S.m, p.entry)}`, color: p.side === 'buy' ? up : dn, ...ext } };
-      if (id) { posLines[p.id].opened = p.opened_at ? Date.parse(p.opened_at) : null; posLines[p.id].side = p.side; }
+      // The line only; the label, live result and buttons are the HTML chip (placePosBtns).
+      const id = line(p.entry, '', p.side === 'buy' ? up : dn, { pos: true });
+      if (id) posLines[p.id] = { id, ts, entry: p.entry, side: p.side, lots: lotsOf(S.m, p.qty), opened: p.opened_at ? Date.parse(p.opened_at) : null };
       if (!(tpslEd && tpslEd.id === p.id)) {
         line(p.tp, 'TP ' + px(S.m, p.tp), acc);
         line(p.sl, `SL ${px(S.m, p.sl)}${p.trail ? ' · trailing' : ''}`, warn);
@@ -1947,42 +1993,57 @@
     });
     S.st.orders.filter((o) => o.symbol === S.sym).forEach((o) => line(S.ordDrag && S.ordDrag.id === o.id ? S.ordDrag.v : o.price, `${o.kind === 'limit' ? 'Limit' : 'Stop'} ${o.side} ${lotsOf(S.m, o.qty)}`, o.side === 'buy' ? up : dn));
   }
-  // Live P&L on the position line: each price tick changes only the result box.
+  // Live result in the position chip (pips and USD, shown on hover): each price tick
+  // changes only those two numbers.
   let posLines = {};
   const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const pnlTxt = (p) => (ok(p.pnl) ? `${sUsd(p.pnl)} (${pct(p.roe)})` : '');
+  const sgn = (v, d) => (ok(v) ? (v > 0 ? '+' : v < 0 ? '-' : '') + fx(Math.abs(v), d) : '—');
   function updatePosLines() {
     if (!chart || !S.st) return;
     livePos().filter((p) => p.symbol === S.sym).forEach((p) => {
-      const L = posLines[p.id];
-      if (!L) return;
-      const t = pnlTxt(p), c = p.pnl >= 0 ? L.ext.up : L.ext.dn;
-      if (L.ext.pnlText === t && L.ext.pnlColor === c) return;
-      L.ext = { ...L.ext, pnlText: t, pnlColor: c };
-      chart.overrideOverlay({ id: L.id, extendData: L.ext });
+      const L = posLines[p.id], el = L && posBar.querySelector(`[data-pb="${p.id}"]`);
+      if (!el) return;
+      const m = BY[p.symbol] || S.m, mk = S.mids[m.hl] != null ? S.mids[m.hl] : p.mark;
+      const pips = ok(mk) && ok(p.entry) ? ((mk - p.entry) * (p.side === 'buy' ? 1 : -1)) / pipOf(m) : null;
+      const a = sgn(pips, 1), b = sgn(p.pnl, 2);
+      const pe = el.querySelector('[data-pips]'), ue = el.querySelector('[data-usd]');
+      if (pe && pe.textContent !== a) pe.textContent = a;
+      if (ue && ue.textContent !== b) ue.textContent = b;
     });
   }
 
-  /* Position buttons on the entry line (as in cTrader): TP/SL, Reverse, Close. They are
-     HTML over the chart, right after the P&L box; each frame they follow the line's
-     y (scroll, zoom, price-scale changes) and hide when it leaves the price pane. */
+  /* The position on its entry line, as in cTrader. At rest: a chip in the side's colour at
+     the left edge with the size and the direction ("0.10 lots ↑"), and a dot on the candle
+     the position was opened on. With the pointer on the line (or after a tap on a phone) the
+     chip opens up: live pips and USD, then Break-even, Trailing stop, Reverse and Close, and
+     a TP and an SL handle above and below it (TP on the profit side) that start setting the
+     levels on the chart. All of it is HTML over the chart; each frame it follows the line's
+     y (scroll, zoom, price-scale changes) and hides when the line leaves the price pane. */
   const posBar = document.createElement('div');
   posBar.className = 't-posbtns';
   $('tChart').appendChild(posBar);
+  const GRIP = '<svg class="g" viewBox="0 0 8 12" aria-hidden="true"><circle cx="2" cy="2" r="1"/><circle cx="6" cy="2" r="1"/><circle cx="2" cy="6" r="1"/><circle cx="6" cy="6" r="1"/><circle cx="2" cy="10" r="1"/><circle cx="6" cy="10" r="1"/></svg>';
   function placePosBtns() {
     const ids = Object.keys(posLines);
-    const k = ids.join(',');
+    const k = ids.map((id) => id + ':' + posLines[id].side + ':' + posLines[id].lots).join(',');
     if (posBar.dataset.k !== k) {
       posBar.dataset.k = k;
       const mgd = (id) => !!(S.st && S.st.positions.some((x) => x.id === +id && x.managed));
-      posBar.innerHTML = ids.map((id) => `<div class="t-pb" data-pb="${id}" hidden>
-        <button type="button" data-pbt="tpsl" title="Set take profit / stop loss">TP/SL</button>
+      posBar.innerHTML = ids.map((id) => {
+        const L = posLines[id], buy = L.side !== 'sell';
+        return `<div class="t-pb ${buy ? 'up' : 'dn'}" data-pb="${id}" hidden>
+        <button type="button" class="t-pbh ${buy ? 'hi' : 'lo'}" data-pbt="tpsl" title="Set take profit on the chart">${GRIP}TP</button>
+        <button type="button" class="t-pbh ${buy ? 'lo' : 'hi'}" data-pbt="tpsl" title="Set stop loss on the chart">${GRIP}SL</button>
+        <span class="t-pbc"><b>${esc(L.lots)}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${buy ? 'M12 20V5M5 12l7-7 7 7' : 'M12 4v15M5 12l7 7 7-7'}"/></svg></b><span class="t-pbx"><em>Pips: <span data-pips>—</span></em><em>USD: <span data-usd>—</span></em></span></span>
+        <span class="t-pba">
         <button type="button" data-pbt="be" title="Move the stop to the entry price">BE</button>
         <button type="button" data-pbt="trail" title="Trailing stop">Trail</button>
         ${mgd(id) ? '' : '<button type="button" data-pbt="rev" title="Reverse position" aria-label="Reverse position"><svg viewBox="0 0 24 24"><path d="M7 4v14M3 14l4 4 4-4M17 20V6M13 10l4-4 4 4"/></svg></button>'}
-        <button type="button" data-pbt="close" class="x" title="Close position" aria-label="Close position"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`).join('')
-        // Where it was opened: a ring on that candle at the entry price, above the buttons.
+        <button type="button" data-pbt="close" class="x" title="Close position" aria-label="Close position"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></span></div>`;
+      }).join('')
+        // Where it was opened: a dot on that candle at the entry price, under the chip.
         + ids.map((id) => `<i class="t-pring ${posLines[id].side === 'sell' ? 'dn' : 'up'}" data-pr="${id}" hidden></i>`).join('');
+      updatePosLines();
     }
     if (!ids.length || !chart || cTab !== 'chart') return;
     let pane = null;
@@ -2004,17 +2065,21 @@
         if (inX) { const t = `translate(${Math.round(rx)}px,${Math.round(y)}px) translate(-50%,-50%)`; if (ring.style.transform !== t) ring.style.transform = t; }
       }
       if (!show) return;
-      const x = 10 + szerTekstu(L.ext.text) + 16 + (L.ext.pnlText ? szerTekstu(L.ext.pnlText) + 16 : 0);
-      const tr = `translate(${Math.round(x)}px,${Math.round(y)}px) translateY(-50%)`;
+      const x = 10;
+      const tr = `translate(${x}px,${Math.round(y)}px) translateY(-50%)`;
       if (el.style.transform !== tr) el.style.transform = tr;
-      // Buttons only while the pointer is on the entry line (anywhere along it), its label
-      // or the buttons, or after a tap on the line on a phone; a short grace keeps them
-      // while the pointer moves from the line onto them.
+      // The chip opens only while the pointer is on the entry line (anywhere along it), on
+      // the chip or on what it opened, or after a tap on the line on a phone; a short grace
+      // keeps it open while the pointer moves from the line onto the buttons. Once open, the
+      // zone over the chip is tall enough to reach the TP / SL handles above and below it.
       const w = pane ? pane.left + pane.width : Infinity, strip = x + el.offsetWidth + 8;
-      const hot = posPtr && posPtr.x >= 0 && posPtr.x <= w && Math.abs(posPtr.y - y) <= (posPtr.x <= strip ? 13 : 7);
+      const reach = posPtr && posPtr.x <= strip ? (el.classList.contains('on') ? 38 : 13) : 7;
+      const hot = posPtr && posPtr.x >= 0 && posPtr.x <= w && Math.abs(posPtr.y - y) <= reach;
       if (hot) L.hotUntil = performance.now() + 350;
-      const on = pinnedPos === +id || (L.hotUntil || 0) > performance.now() || (tpslEd && tpslEd.id === +id);
+      const ed = !!(tpslEd && tpslEd.id === +id);
+      const on = pinnedPos === +id || (L.hotUntil || 0) > performance.now() || ed;
       if (el.classList.contains('on') !== on) el.classList.toggle('on', on);
+      if (el.classList.contains('ed') !== ed) el.classList.toggle('ed', ed);   // levels being set: their own handles are on the chart
       L.hot = { x1: w, y };
     });
   }
@@ -2273,7 +2338,12 @@
     const up = css('--up'), dn = css('--dn'), bg = css('--bg');
     hist.forEach((h) => {
       const fresh = S.justClosed.has(h.id) && !REDUCED;
-      const ext = { side: h.side, pnl: h.pnl, up, dn, bg, h, t: fresh ? 0 : 1 };
+      // Deal labels shown on hover (ptfTrade): the entry row and the exit row.
+      const m = BY[h.symbol] || S.m, buy = h.side === 'buy', lots = `${lotsF(h.lots)} lots`;
+      const pips = ((h.close - h.entry) * (buy ? 1 : -1)) / pipOf(m);
+      const ext = { side: h.side, pnl: h.pnl, up, dn, bg, h, t: fresh ? 0 : 1, halo: (h.pnl >= 0 ? up : dn) + '40',
+        lin: [buy ? 'Buy' : 'Sell', lots, px(m, h.entry)],
+        lout: [buy ? 'Sell' : 'Buy', lots, px(m, h.close), `Net profit USD ${sgn(h.pnl, 2)}`, `Pips ${sgn(pips, 1)}`] };
       const id = chart.createOverlay({
         name: 'ptfTrade', groupId: 'ptfTrades', lock: true,
         points: h.on_chart === false
@@ -2307,7 +2377,9 @@
   function hoverTrade(overlay, on) {
     const e = overlay.extendData || {};
     chart.overrideOverlay({ id: overlay.id, extendData: { ...e, hover: on } });
-    if (on) { tipOv = { id: overlay.id, ext: e }; showTip(e.h); } else { tipOv = null; hideTip(); }
+    // Hover: the deal is written out on the chart beside its two ends (ptfTrade). The box
+    // with times and duration opens only for a trade picked by a click or from a list row.
+    if (on) { tipOv = { id: overlay.id, ext: e }; if (tipMode === 'focus') showTip(e.h); else hideTip(); } else { tipOv = null; hideTip(); }
   }
   function closeTip() {
     if (tipOv) hoverTrade({ id: tipOv.id, extendData: tipOv.ext }, false); else hideTip();
