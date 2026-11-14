@@ -48,6 +48,7 @@ KATEGORIE_CZLOWIEKA = {"account_result", "payout", "complaint"}
 # Pieniądze, skargi i prośba o człowieka: zawsze do zespołu.
 _TYLKO_CZLOWIEK = re.compile(
     r"\b(payout|withdraw\w*|refund\w*|chargeback|money back|reimburs\w*|"
+    r"fee back|fee credit\w*|fee return\w*|"      # kredyt opłaty zależy od planu i daty zakupu
     r"charged|overcharged|double charge\w*|billed twice|charged twice|"
     r"scam\w*|fraud\w*|lawyer|legal action|police|dispute|"
     r"rigged|manipulat\w*|human|real person|agent|manager|admin)\b",

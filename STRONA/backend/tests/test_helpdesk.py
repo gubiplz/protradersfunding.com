@@ -332,6 +332,8 @@ def test_filtr_pieniedzy_nie_wycina_regul():
     ("If I breach my daily loss, is the account closed?", False),
     # pieniądze i prośba o człowieka → zawsze zespół
     ("What if my payout is late?", True), ("Can I talk to an agent?", True),
+    ("When is my challenge fee credited?", True), ("Do I get my fee back on Instant?", True),
+    ("Is the fee one-time or recurring?", False),
 ])
 def test_bramka_czlowieka_tylko_dla_konkretnego_konta(tekst, czlowiek):
     assert helpdesk.do_czlowieka(tekst) is czlowiek
