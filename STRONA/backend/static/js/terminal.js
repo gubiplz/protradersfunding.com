@@ -420,7 +420,7 @@
   function histLoad(v, m, i, n) {
     const k = histKey(v, m, i, n), hit = histMem.get(k);
     if (hit && Date.now() - hit.at < HIST_TTL) return hit.p;
-    const p = F.history(v, m, i, Date.now(), n);
+    const p = F.history(v, m, i, openEnd(m, Date.now()), n);
     histMem.set(k, { at: Date.now(), p });
     p.catch(() => histMem.delete(k));
     if (histMem.size > 40) histMem.delete(histMem.keys().next().value);
@@ -432,6 +432,15 @@
   const wkndDay = (t) => { const d = new Date(t + S.srvOff * 3600e3).getUTCDay(); return d === 6 || d === 0; };
   const closedBar = (m, t, step) => !!m && m.cls !== 'crypto' && wkndDay(t) && wkndDay(t + (step || 60000) - 1);
   const openBars = (m, i, bars) => (m && m.cls !== 'crypto' ? bars.filter((k) => !closedBar(m, k.timestamp, F.MS[i])) : bars);
+  /* History of a closed market is loaded up to Friday's close (Saturday 00:00 server time):
+     loaded up to now, late on Saturday the whole window is weekend, every bar is left off
+     and the chart stays empty. */
+  const openEnd = (m, t) => {
+    if (!m || m.cls === 'crypto' || !wkndDay(t)) return t;
+    const off = S.srvOff * 3600e3, d = new Date(t + off);
+    d.setUTCHours(0, 0, 0, 0);
+    return d.getTime() - (d.getUTCDay() === 0 ? 86400e3 : 0) - off;
+  };
   // Copies: the chart may change the bars it was given.
   const histCached = async (v, m, i, n) => openBars(m, i, await histLoad(v, m, i, n)).map((k) => ({ ...k }));
   $('tInts').addEventListener('pointerover', (e) => {
