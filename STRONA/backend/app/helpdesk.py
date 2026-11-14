@@ -45,13 +45,22 @@ KATEGORIE = ["how_to", "platform", "rules", "kyc", "account_result", "payout",
 KATEGORIE_CZLOWIEKA = {"account_result", "payout", "complaint"}
 
 # Twarda bramka na treść wiadomości klienta — niezależna od modelu.
+# Pieniądze, skargi i prośba o człowieka: zawsze do zespołu.
 _TYLKO_CZLOWIEK = re.compile(
     r"\b(payout|withdraw\w*|refund\w*|chargeback|money back|reimburs\w*|"
     r"charged|overcharged|double charge\w*|billed twice|charged twice|"
     r"scam\w*|fraud\w*|lawyer|legal action|police|dispute|"
-    r"breach\w*|fail\w*|lost|closed|terminat\w*|blocked|blown|disabled|banned|suspend\w*|"
     r"rigged|manipulat\w*|human|real person|agent|manager|admin)\b",
     re.I)
+# Wynik konta („failed", „closed", „breach"…) idzie do człowieka tylko wtedy, gdy mowa
+# o konkretnym koncie. Samo słowo łapało też pytania o zasady: „What if I fail — can I
+# try again?" albo „Is the market closed on weekends?" — te zostają u asystenta.
+_WYNIK = re.compile(r"\b(breach\w*|fail\w*|terminat\w*|suspend\w*|lost|closed|blocked|blown|disabled|banned)\b", re.I)
+_WYNIK_PRZESZLY = re.compile(r"\b(failed|breached|lost|closed|terminated|blocked|blown|disabled|banned|suspended)\b",
+                             re.I)
+_CZYJES = re.compile(r"\b(i|i'm|i've|we|my|me|mine|our|account|accounts|challenge|login)\b", re.I)
+_MOJE = re.compile(r"\b(my|mine|our|why)\b", re.I)
+_HIPOTEZA = re.compile(r"^\W*(what if|what happens (if|when)|what would happen|if i|if my)\b", re.I)
 
 SCHEMAT = {
     "type": "object",
@@ -72,7 +81,7 @@ SCHEMAT = {
 
 # Pytania z FAQ, których asystent NIE dostaje: dotyczą pieniędzy (wypłaty,
 # zwrot opłaty, skalowanie po zysku). Takie sprawy rozstrzyga człowiek.
-_FAQ_POMIN = re.compile(r"payout|fee back|refund|scaling", re.I)
+_FAQ_POMIN = re.compile(r"payout|fee back|fee credited|refund|scaling", re.I)
 # Zdania o wypłatach/zwrotach wycinane z pozostałych odpowiedzi.
 _ZDANIE_O_PIENIADZACH = re.compile(r"[^.]*\b(payout|refund\w*|reward\w*)\b[^.]*\.\s*", re.I)
 
@@ -142,15 +151,18 @@ def _k(v: float) -> str:
 # egzekwuje (rules.py, katalog planów). Klucz: początek pytania z faq.html.
 POPRAWKI = {
     "what counts as a trading day": lambda f: (
-        "A trading day is a calendar day (server time) on which you have at least one open position. "
-        f"Minimum trading days: {f.dni_2step} per phase on 2-Step plans and {f.dni_instant} on Instant Funding."),
+        "A trading day is a calendar day (server time) on which your account has at least one open position, "
+        "including one opened or closed that day. "
+        f"Minimum trading days: {f.dni_2step} per phase on 2-Step plans, and again {f.dni_2step} on the funded "
+        f"account; {f.dni_instant} on an Instant Funding account, which is funded from day one."),
     "is news trading allowed": lambda f: (
-        "Yes. There are no news blackouts, no weekend-flat requirement and no strategy bans, so EAs are allowed. "
+        "Yes. There are no news blackouts and no weekend-flat requirement, and EAs are allowed. The only "
+        "strategy bans concern abuse of the simulation, listed in Section 6 of the Terms. "
         f"The rules that apply are the loss limits ({f.dzienna:g}% daily; {f.max_2step:g}% maximum on 2-Step and "
         f"{f.max_instant:g}% on Instant Funding, {f.drawdown}), the profit targets, the minimum trading days and a "
         f"maximum open volume that depends on the account size (from {f.loty_min:g} lots on {_k(f.rozmiar_min)} to "
-        f"{f.loty_max:g} lots on {_k(f.rozmiar_max)}). The optional Weekend Trading add-on (${f.weekend_usd:,.0f}) "
-        "adds two extra trading days a week."),
+        f"{f.loty_max:g} lots on {_k(f.rozmiar_max)}). Everything except crypto is closed on Saturday and Sunday; "
+        f"crypto trades on weekends only with the Weekend Trading add-on (${f.weekend_usd:,.0f})."),
     "what happens when i break a rule": lambda f: (
         "If your equity crosses the daily or maximum loss limit, or your open volume goes above your plan's lot "
         "limit, the risk engine fails the account and closes open positions. The breach reason is shown in your "
@@ -227,11 +239,12 @@ def zasady_planow(produkty) -> str:
     for p in sorted(produkty, key=lambda p: (p.steps, p.account_size)):
         if not p.active:
             continue
-        cel = (f"{p.profit_target_p1:g}% phase 1 / {p.profit_target_p2:g}% phase 2" if p.steps >= 2
-               else f"{p.profit_target_p1:g}%")
+        cel = (f"profit target {p.profit_target_p1:g}% phase 1 / {p.profit_target_p2:g}% phase 2" if p.steps >= 2
+               else "no profit target (funded from day one)" if p.steps == 0
+               else f"profit target {p.profit_target_p1:g}%")
         wiersze.append(
             f"- {p.label}: account size ${p.account_size:,.0f}, one-time fee ${p.price_usd:,.0f}, "
-            f"profit target {cel}, max daily loss {p.max_daily_loss_pct:g}%, max overall loss "
+            f"{cel}, max daily loss {p.max_daily_loss_pct:g}%, max overall loss "
             f"{p.max_overall_loss_pct:g}% ({p.drawdown_type}), min trading days {p.min_trading_days}, "
             f"max open volume {p.max_lots:g} lots")
     return "\n".join(wiersze)
@@ -400,8 +413,9 @@ PORTAL = [
      "Here's how to log in to MT5:\n"
      "1. In the portal open Challenges, click Dashboard on your account, then Credentials. Note the login, "
      "password and server.\n"
-     "2. Install MT5 — from metatrader5.com on Windows or macOS, or from the App Store / Google Play "
-     "on your phone. You can also use the MT5 web terminal in a browser.\n"
+     "2. Install MT5 on Windows or macOS, or from the App Store / Google Play on your phone. If you "
+     "prefer not to install anything, open the Built-in Terminal at /trade and sign in there with the same "
+     "login, password and server.\n"
      "3. Desktop: File → Login to Trade Account. Mobile: open the accounts screen and choose to log in to an "
      "existing account.\n"
      "4. Search for the server name exactly as shown in Credentials, select it, enter the login and password "
@@ -700,7 +714,8 @@ def odpowiedz_z_faq(thread: list[dict], baza_wiedzy: BazaWiedzy, produkty) -> di
     bez_odpowiedzi = sum(1 for m in thread if m["author"] == "ai" and m["body"].startswith(NIE_WIEM)) + 1
     if bez_odpowiedzi >= AUTO_PRZEKAZANIE_PO:
         return wynik("I haven't been able to answer your questions, so I'm handing this conversation to our "
-                     "support team. They'll reply here in this chat and by email.", res="needs_human",
+                     "support team. They'll reply here in this chat, and by email unless you turned support "
+                     "emails off.", res="needs_human",
                      cat="other", summ=f"{bez_odpowiedzi} questions without a help-article match; "
                                        f"latest: {pytanie[:300]}")
     podobne = [baza_wiedzy.wpisy[i][0] for s, i, _ in trafienia if s >= 0.8][:3]
@@ -763,13 +778,21 @@ def _poprawny(wynik) -> bool:
 
 
 def do_czlowieka(wiadomosc: str) -> bool:
-    return bool(_TYLKO_CZLOWIEK.search(wiadomosc or ""))
+    """Czy wiadomość idzie do zespołu bez pytania modelu."""
+    tekst = wiadomosc or ""
+    if _TYLKO_CZLOWIEK.search(tekst):
+        return True
+    if not _WYNIK.search(tekst) or _HIPOTEZA.search(tekst):
+        return False
+    if _WYNIK_PRZESZLY.search(tekst) and _CZYJES.search(tekst):
+        return True         # „my account was closed", „I failed the challenge"
+    return bool(_MOJE.search(tekst))   # „why did my account fail?"
 
 
 PRZEKAZANIE = ("I've passed this to our support team. They'll reply here in this chat, "
-               "and you'll also get an email when they do.")
+               "and by email unless you turned support emails off.")
 BEZ_ASYSTENTA = ("Thanks — your message is with our support team. They'll reply here in this chat, "
-                 "and you'll also get an email when they do.")
+                 "and by email unless you turned support emails off.")
 
 
 # (nazwa serwisu, e-mail supportu) do promptu kompaktowego — ustawia main.py przy starcie.

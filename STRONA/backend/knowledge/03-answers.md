@@ -10,48 +10,54 @@ Answers are grouped the way customers actually think, not the way the product is
 ## Before buying
 
 **"What is this exactly? Am I trading real money?"**
-> No, and that's by design. Every account is a demo account with virtual funds running on
-> real MetaTrader 5 infrastructure — the platform, spreads and price feed are the real
-> thing, the capital is simulated. You never deposit or risk real money. If you meet the
+> No, and that's by design. Every account is a demo account with virtual funds on MT5
+> infrastructure. Prices are live reference prices from third-party sources, so simulated
+> fills can differ from what a real broker would have given. You never deposit or risk real
+> money. If you meet the
 > objectives, you earn performance-based rewards on your simulated results. We're an
 > evaluation service, not a broker.
 
 **"Is there a free trial?"**
-> No free trial — but the fee comes back. Challenges start at $299 for a $25,000 account,
-> it's a single payment with no subscription, and the full amount is added to your first
-> payout from the funded account. Pass, and the evaluation has effectively cost you
-> nothing.
+> No free trial. Challenges start at $299 for a $25,000 account, and it's a single
+> payment with no subscription. On 2-Step plans the full fee is credited as additional
+> vUSDT with your first payout from the funded account (a credit, not a card refund).
+> Instant Funding has no fee credit.
 
 **"2-Step or Instant Funding — which should I take?"**
 > Depends on what you'd rather spend: time or money.
 > 2-Step is cheaper and pays more — $549 on a $100,000 account and a **90%** split — but
 > you prove yourself first: +10%, then +5%, with a 10% overall loss limit.
 > Instant Funding skips the evaluation entirely. You're funded from day one at a 70%
-> split, with a tighter 8% overall limit, and it costs $829 at the same size.
-> Most traders who are confident in their edge take 2-Step for the split. Instant is for
-> people who want to start earning immediately and will accept less per dollar.
+> split (80% with the Split Boost add-on), with a tighter 8% overall limit, no fee credit,
+> and it costs $829 at the same size.
+> Most traders who are confident in their edge take 2-Step for the split and the fee
+> credit. Instant is for people who would rather skip the evaluation and accept less per
+> dollar.
 
 **"How fast do I get my account?"**
-> Usually inside a minute. Provisioning is fully automated — nobody here has to click
-> anything. Your MT5 login, password and server land in your dashboard and in your inbox.
-> If anything ever delays it, the dashboard shows live status the whole time.
+> Provisioning is fully automated: once your payment is confirmed, your MT5 login,
+> password and server appear in your dashboard and in your inbox. The dashboard shows live
+> status while the account is being created.
 
 **"How do you compare to {competitor}?"**
 > I'd rather give you our numbers than talk about theirs: 90% split on evaluation plans,
-> the fee credited with your first payout (as vUSDT, not a card refund), static drawdown only — never trailing, so your
-> floor never chases your profits — no time limit on the evaluation, and no strategy bans
-> at all. News, weekends and EAs are fine. Compare that line by line and decide.
+> the 2-Step fee credited with your first payout (as vUSDT, not a card refund), static
+> drawdown only — never trailing, so your floor never chases your profits — and no time
+> limit on the evaluation. News, weekends and EAs are fine; the only strategy bans are
+> abuses of the simulation, listed in Section 6 of the Terms. Compare that line by line
+> and decide.
 
 **"Do you have a discount?"**
 > {If a public code is running: Yes — use **{CODE}** at checkout for {X}% off; the
-> discount applies instantly.}
+> discount is applied to the total.}
 > {If not: I can't create codes on my side, but there's a daily reveal in the trader
 > portal that hands out personal discount codes, and public promotions get announced to
 > registered traders first. Worth creating a free account now so you catch the next one.}
 
 **"How do I pay?"**
 > Card, through Stripe, in USD. One payment per challenge — no subscription and no
-> recurring charges of any kind.
+> recurring charges of any kind. Crypto payment is possible on request, and store credit
+> is applied at the end of checkout.
 
 **"Can I run more than one challenge?"**
 > Yes. Each account is evaluated independently against its own objectives, so a bad run on
@@ -82,17 +88,19 @@ Answers are grouped the way customers actually think, not the way the product is
 > 8% on Instant Funding. We don't offer trailing at all.
 
 **"What counts as a trading day?"**
-> Any server day on which your account held an open position. It counts once per day, and
-> you need 5 of them on a 2-Step evaluation.
+> Any server day on which your account held an open position. It counts once per day. You
+> need 5 of them per phase on a 2-Step evaluation and 5 more on the funded account before
+> the first payout; Instant Funding needs 30 on the funded account.
 
 **"Is there a time limit?"**
 > None. Take as long as you want — the account stays active as long as you respect the
 > loss limits. An evaluation can't expire underneath you.
 
 **"Can I trade news? Hold over the weekend? Use an EA?"**
-> Yes to all three. No news blackouts, no weekend-flat rule, no banned strategies. The
-> only things we enforce are the published loss limits, profit targets, minimum trading
-> days and the cap on total open volume.
+> Yes to all three. No news blackouts and no weekend-flat rule. What we enforce are the
+> published loss limits, profit targets, minimum trading days, the cap on total open
+> volume, and the ban on abusing the simulation in Section 6 of the Terms (for example
+> opposite positions across accounts, order spam, or trading through a VPN).
 
 **"Is there a maximum position size?"**
 > There's a cap on your **total** open volume: 6 lots per $100,000 of account size. So 1.5
@@ -100,15 +108,16 @@ Answers are grouped the way customers actually think, not the way the product is
 > by putting the whole account on one candle — and it's the only volume rule.
 
 **"What leverage do I get?"**
-> Up to 1:100, on both models.
+> It's fixed per market, on both models: Forex 1:100, metals and indices 1:50, energy
+> 1:20, crypto 1:5 to 1:10.
 
 **"Can I trade on weekends?"**
 > Weekend trading is a $199 add-on, same price on any account size.
 
 **"What happens when I break a rule?"**
 > The risk engine fails the account, open positions may be closed, and the exact reason —
-> which rule, at what equity, at what time — is written to your dashboard. No partial
-> penalties and no discretionary review: the identical code runs on every account,
+> which rule, at what equity, at what time — is written to your dashboard. Loss-limit and
+> volume breaches are decided by the engine, and the identical code runs on every account,
 > including the ones that pass. You can see precisely what happened.
 
 ## Funded accounts and money
@@ -122,9 +131,11 @@ Answers are grouped the way customers actually think, not the way the product is
 > removes that wait. Each request is reviewed, then paid in vUSDT on Polygon.
 
 **"When do I get my fee back?"**
-> With your first payout from that funded account — the full fee is credited as additional
-> vUSDT on top of your profit share, automatically. It is not a card refund. Every plan,
-> Instant Funding included.
+> {Check the plan first.} On a 2-Step plan: with your first payout from that funded
+> account — the full fee is credited as additional vUSDT on top of your profit share,
+> automatically. It is a credit, not a card refund. Instant Funding has no fee credit;
+> an Instant account bought before the November 2026 change keeps it, and the payout form
+> in the portal shows the credit whenever it applies.
 
 **"Is there a minimum payout?"**
 > Yes: $500 or 2% of the account size, whichever is higher. That is $500 on $25,000,
@@ -185,17 +196,16 @@ Answers are grouped the way customers actually think, not the way the product is
 > {Check `02-facts.md` §7 first, then either:}
 > {Before delivery:} Your MT5 account hasn't been created yet, so that's a straightforward
 > full refund — I'm passing it to the team now and it'll go back to your original payment
-> method, usually within 5–10 business days.
+> method. How long it takes to appear depends on your bank or payment provider.
 > {After delivery:} Once credentials are delivered and trading is possible, the fee isn't
-> refundable to your card — but it isn't lost either: it is credited in full as additional
-> vUSDT with your first payout from a funded account. If you think something went wrong on
-> our side, tell me what happened and I'll have the team look at it.
+> refundable to your card. {2-Step only:} It is credited in full as additional vUSDT with
+> your first payout from a funded account. If you think something went wrong on our side,
+> tell me what happened and I'll have the team look at it.
 
 **"My account still hasn't arrived."**
-> {Escalate if past ~30 minutes.} That's not normal — provisioning usually completes in
-> about a minute. Your dashboard shows live status while it's pending. I've flagged it to
-> the team; and if an account can't be provisioned within 24 hours, the fee is refunded in
-> full, no argument.
+> {Escalate.} That's not normal. Your dashboard shows live status while it's pending, and
+> I've flagged it to the team. If we cannot provision the account, the fee is refunded in
+> full to your original payment method.
 
 **"I'm going to open a chargeback."**
 > {Escalate immediately.} Please give us the chance first — legitimate refund claims are
@@ -207,9 +217,9 @@ Answers are grouped the way customers actually think, not the way the product is
 > Fair question, so here's the honest version. We're an evaluation service: you trade a
 > demo account with virtual funds, and if you hit the objectives you earn
 > performance-based rewards. Nobody deposits real money with us and nothing is guaranteed.
-> Every rule we enforce is published in full on /objectives, the risk engine applies the
-> same code to every account, and every breach is logged with its exact reason in your
-> dashboard. Certificates are publicly verifiable at /verify. Read /terms before buying —
+> The trading objectives are published on /objectives and the prohibited practices in
+> Section 6 of /terms, the risk engine applies the same code to every account, and every
+> breach is logged with its exact reason in your dashboard. Certificates are publicly verifiable at /verify. Read /terms before buying —
 > we'd rather you knew exactly what this is.
 
 ## Other
@@ -225,16 +235,20 @@ Answers are grouped the way customers actually think, not the way the product is
 
 **"Tell me about the affiliate program."**
 > You earn 10% commission on paid orders from anyone who signs up through your referral
-> code. Stats and your link are under Rewards in the portal. You claim there as store
+> code — on every purchase they make, not only the first. Stats and your link are under
+> Rewards in the portal. You claim there as store
 > credit or as vUSDT to your saved Polygon wallet — not cash, and not by emailing support.
 > Full rules are on /affiliate-terms.
 
 **"Can I use my own MT5 app?"**
-> Yes — the credentials work in MetaTrader 5 on desktop, mobile and the web terminal. Just
-> enter the server, login and password from your dashboard.
+> Yes — the credentials work in MT5 on desktop, mobile and the web terminal. Just enter
+> the server, login and password from your dashboard. You can also trade in the Built-in
+> Terminal at /trade with nothing to install.
 
 **"What can I trade?"**
-> Forex, indices, gold and metals, and crypto CFDs.
+> 12 crypto pairs, gold, silver and platinum, WTI, Brent and natural gas, the S&P 500,
+> Nasdaq 100 and Nikkei 225, and EURUSD, GBPUSD and USDJPY. Everything except crypto is
+> closed at weekends.
 
 **"What should I trade / what's your view on {market}?"**
 > I can't help there — we don't give trading advice, signals or market opinions, and I'd
@@ -246,16 +260,17 @@ Answers are grouped the way customers actually think, not the way the product is
 ## Objections, and what actually answers them
 
 **"Too expensive."**
-Reframe to net cost, don't discount. The fee returns with the first payout, so a trader
-who passes pays nothing for the evaluation. If price is genuinely the blocker, point at
-the $25,000 plan at $299 rather than inventing a code.
+Reframe to net cost, don't discount. On 2-Step the fee is credited as vUSDT with the
+first payout; say exactly that and do not call it a refund or "paying nothing". If price
+is genuinely the blocker, point at the $25,000 plan at $299 rather than inventing a code.
 
 **"Prop firms just want you to fail."**
 Meet it head-on — this is the objection the whole brand is built to answer. The rules are
 published in full, the same code runs on every account, and every breach is logged with
-its exact reason and equity in the dashboard. No discretionary reviews in either
-direction. And point out what a firm hunting for failures would actually do: trailing
-drawdown, time limits, news bans, consistency traps. We use none of them.
+its exact reason and equity in the dashboard. Be straight that reward requests are
+reviewed individually before they are paid. And point out what a firm hunting for
+failures would actually do: trailing drawdown, time limits, news bans, consistency traps.
+We use none of them.
 
 **"I don't want a time limit hanging over me."**
 There isn't one. The account stays active as long as the loss limits hold.
@@ -271,10 +286,10 @@ certificate. Don't over-promise beyond that — if they push further, escalate.
 
 **"I got burned by another prop firm."**
 Don't attack the competitor. Ask what specifically went wrong, then answer with our
-mechanics: static drawdown, no time limit, no strategy bans, published rules, logged
-breaches. Let the contrast do the work.
+mechanics: static drawdown, no time limit, published rules, logged breaches. Let the
+contrast do the work.
 
 **Silence after a quote.**
-One follow-up, useful rather than pushy: the entry plan's price, the fee credit with
-first payout, and a direct link to /objectives so they can check the rules before
+One follow-up, useful rather than pushy: the entry plan's price, the 2-Step fee credit
+with first payout, and a direct link to /objectives so they can check the rules before
 deciding. Then stop.

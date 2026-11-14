@@ -35,25 +35,30 @@ Publiczne FAQ i Terms są source of truth dla metod i limitów. Knowledge ma je 
 - funded trading days: **5 (2-Step) / 30 (Instant)** przed pierwszą wypłatą
 - bi-weekly (14 dni) + On-demand add-on; bez Express Payout
 - przykład daily loss: **$97,000**
+- kredyt opłaty przy pierwszej wypłacie **tylko na 2-Step** (Instant sprzed zmiany z XI 2026 go zachowuje)
+- pełna lista zakazów w Terms §6 (pozycje przeciwstawne, all-in, spam zleceń, VPN, kopiowanie bez dodatku)
+- ceny referencyjne: Hyperliquid + feed brokera dla FX, srebra, platyny i JP225 (brokera nie nazywamy)
 
 **Wciąż eskaluj (brak listy w kodzie):** pytania o konkretne kraje / sanctions — publicznie
 jest tylko ogólny język AML/sanctions (Fix 9B), bez listy.
 
 ## Jak to podłączyć
 
-Nie ma jeszcze żadnej integracji z LLM w repo (sprawdzone: zero wystąpień
-anthropic/openai/claude w `app/`). Kiedy będziesz podłączać:
+Asystent AI w dymku supportu już działa (`app/helpdesk.py`, czat przez `POST /api/me/chat`),
+ale **tych plików nie czyta**. Jego wiedza to:
 
-- `01-agent-brief.md` → prompt systemowy, w całości, na stałe
-- `02-facts.md` + `03-answers.md` → kontekst do odpowiedzi
+- `templates/faq.html` po filtrze: bez pytań o wypłaty, zwroty, opłatę i skalowanie oraz
+  bez zdań o nich w pozostałych odpowiedziach (te sprawy idą do człowieka),
+- gotowe odpowiedzi o portalu (`PORTAL`) i nadpisania (`POPRAWKI`) w `helpdesk.py`,
+- reguły planów z katalogu.
 
-Pliki są małe (~25 KB razem), więc na start można je wkleić w całości do promptu i w ogóle
-nie budować wyszukiwania. RAG ma sens dopiero, gdy baza urośnie kilkukrotnie.
+Wniosek praktyczny: żeby zmienić to, co mówi asystent, popraw FAQ (albo `helpdesk.py`),
+a nie te pliki. Reguła w FAQ musi stać w osobnym zdaniu bez słów „payout / reward / refund”,
+inaczej filtr wytnie ją razem ze zdaniem o pieniądzach (pilnuje tego
+`tests/test_helpdesk.py::test_filtr_pieniedzy_nie_wycina_regul`).
 
-Miejsce do wpięcia w istniejący system: zgłoszenia klientów siedzą już w modelach
-`SupportTicket` / `TicketMessage` (`app/models.py`), a klient zakłada je przez
-`POST /api/me/tickets`. Naturalny punkt: podpowiedź odpowiedzi dla admina przy zgłoszeniu,
-zanim bot zacznie odpisywać samodzielnie.
+Pliki tutaj są ściągą dla ludzi z supportu i dla narzędzi spoza repo. `01-agent-brief.md`
+opisuje ton i granice; nie jest promptem asystenta.
 
 ## Czego bot nie ma prawa robić
 

@@ -303,6 +303,51 @@ def test_wiedza_asystenta_bez_obietnic_wyplat():
     finally:
         s.close()
     assert "split" not in plany.lower()
+    # Instant Funding nie ma celu zysku: „profit target 0%" wprowadzało w błąd.
+    assert "profit target 0%" not in plany and "no profit target" in plany
+
+
+def test_filtr_pieniedzy_nie_wycina_regul():
+    """Filtr usuwa zdania o wypłatach, ale reguły stojące obok muszą zostać: w faq.html
+    każda z nich jest osobnym zdaniem, bez słów „payout / reward / refund"."""
+    wpisy = dict(helpdesk.faq_wpisy(TEMPLATES / "faq.html", {"site_name": "PTF", "support_email": "s@x"}))
+    vpn = wpisy["Can I trade from a shared device or network, and can I use a VPN?"]
+    assert "Do not use a VPN, a proxy or any service that masks your location." in vpn
+    assert wpisy["Can I share my portal or MT5 login?"].startswith("No. Credentials are personal.")
+    assert "still a breach of your account" in wpisy["Can someone else trade my account?"]
+    assert "never paid in cash" in wpisy["How do I claim affiliate commission?"]
+    # Pytanie o kredyt opłaty dalej idzie do człowieka — teraz wprost, nie przypadkiem.
+    assert not any("fee credited" in q.lower() for q in wpisy)
+    assert helpdesk._FAQ_POMIN.search("When is my challenge fee credited?")
+
+
+@pytest.mark.parametrize("tekst,czlowiek", [
+    # konkretne konto → zespół
+    ("Why did my account fail?", True), ("my account was closed yesterday", True),
+    ("I failed the challenge, what now?", True), ("Why was my account closed if I didn't breach?", True),
+    ("you banned me", True), ("I lost my account", True),
+    # pytania o zasady → asystent
+    ("What if I fail — can I try again?", False), ("Is the market closed on weekends?", False),
+    ("Can I try again if I fail?", False), ("What happens when I breach the daily loss limit?", False),
+    ("If I breach my daily loss, is the account closed?", False),
+    # pieniądze i prośba o człowieka → zawsze zespół
+    ("What if my payout is late?", True), ("Can I talk to an agent?", True),
+])
+def test_bramka_czlowieka_tylko_dla_konkretnego_konta(tekst, czlowiek):
+    assert helpdesk.do_czlowieka(tekst) is czlowiek
+
+
+def test_widzet_bez_obietnic_czasowych_i_z_prawda_o_czlowieku():
+    """„Replies instantly" to obietnica czasu, a „a real person reads every message" było
+    nieprawdą: rozmowy z asystentem zespół widzi dopiero po przekazaniu."""
+    from pathlib import Path
+    baza = Path(__file__).resolve().parents[1]
+    js = (baza / "static" / "js" / "helpdesk.js").read_text()
+    assert "instantly" not in js.lower() and "help articles" in js
+    for plik in ("_still_help.html", "contact.html", "faq.html"):
+        tresc = (baza / "templates" / plik).read_text()
+        assert "reads every message" not in tresc, plik
+        assert "instantly" not in tresc.lower(), plik
 
 
 def test_konsultant_przejmuje_i_online_z_aktywnosci_panelu(klient, model, monkeypatch):
@@ -433,9 +478,13 @@ def test_odpowiedzi_zgodne_z_kodem_nie_z_nieaktualnym_faq(klient, silnik_faq):
         s.close()
     odp = _wyslij(h, "What counts as a trading day?")["thread"][-1]["body"]
     assert "open position" in odp and "3–4" not in odp
-    assert f"{f.dni_2step} per phase on 2-Step" in odp and f"{f.dni_instant} on Instant" in odp
+    assert f"{f.dni_2step} per phase on 2-Step" in odp and f"{f.dni_instant} on an Instant Funding account" in odp
     odp = _wyslij(h, "Can I use an EA?")["thread"][-1]["body"]
     assert "lots" in odp and "Weekend Trading add-on" in odp
+    # Zakazy nadużyć symulacji istnieją (Terms §6): nadpisanie nie mówi już „no strategy bans".
+    news = helpdesk.POPRAWKI["is news trading allowed"](f)
+    assert "no strategy bans" not in news and "Section 6 of the Terms" in news
+    assert "two extra trading days" not in news and "crypto trades on weekends only" in news
     odp = _wyslij(h, "What happens when I break a rule?")["thread"][-1]["body"]
     assert "same code applies to everyone" not in odp and "discretionary" not in odp
 

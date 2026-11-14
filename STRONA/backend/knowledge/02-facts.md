@@ -1,8 +1,12 @@
 # Canonical facts — Pro Traders Funding
 
-Single source of truth for the support agent. Every number here was read out of the
-running code, not out of marketing copy. Where the public site disagrees with the
-engine, that is called out explicitly and the **engine wins**.
+Reference for the human support team. Every number here was read out of the running
+code, not out of marketing copy. For numbers, where the public site disagrees with the
+engine, that is called out explicitly and the **engine wins**; for what a customer was
+promised, the Terms and the FAQ they could read at purchase are what counts.
+
+The AI assistant in the support chat does **not** read this file: it answers from the
+public FAQ (`templates/faq.html`) and the plan catalog, see `README.md`.
 
 If a customer asks something not covered here, say you are checking with the team and
 escalate. Never fill a gap with a plausible guess — the gaps in this file are marked,
@@ -15,7 +19,7 @@ and a marked gap is safe. An invented answer about money is not.
 - Pro Traders Funding operates a **trading skills evaluation service**.
 - It is **not** a broker, investment firm, fund manager or financial adviser, and it does
   not accept deposits or execute real-market transactions. (Terms §1)
-- **Every account is a demo account with virtual funds** on MetaTrader 5 infrastructure.
+- **Every account is a demo account with virtual funds** on MT5 infrastructure.
   No real money is traded and no order reaches a real market. (Terms §2)
 - Words like "capital", "balance", "profit" and "drawdown" describe values **inside the
   simulation**. Payments to traders are **performance-based rewards** calculated from
@@ -32,10 +36,10 @@ and a marked gap is safe. An invented answer about money is not.
 | Max overall loss       | 10%               | 8% |
 | Drawdown type          | static            | static |
 | Minimum trading days   | 5 per phase + 5 on funded before first payout | 30 on funded before first payout |
-| Profit split           | **90%**           | **70%** |
-| Leverage               | up to 1:100       | up to 1:100 |
+| Profit split           | **90%**           | **70%** (80% with the Split Boost add-on) |
+| Leverage               | fixed per market: Forex 1:100, metals and indices 1:50, energy 1:20, crypto 1:5 to 1:10 | same |
 | Weekend trading        | $199 add-on       | $199 add-on |
-| Fee credited           | with first payout | with first payout |
+| Fee credited           | with first payout | no fee credit (accounts bought before the November 2026 change keep it) |
 
 Instant Funding accounts are created with `phase="funded", status="funded"` — funded
 immediately on purchase, no evaluation.
@@ -94,7 +98,7 @@ is reliable — a technical failure on our side never fails a trader.
 loss limits are respected.
 
 **Breach types the engine records:** `daily_loss`, `max_drawdown`, `max_lots`,
-`time_limit`. On breach the account is marked failed, open positions may be closed, and
+`time_limit` (present in the engine, but no plan on sale sets a time limit). On breach the account is marked failed, open positions may be closed, and
 the exact rule, time and equity are recorded in the trader's dashboard.
 
 ## 5. Payouts
@@ -102,7 +106,7 @@ the exact rule, time and equity are recorded in the trader's dashboard.
 Requirements, all four enforced in code:
 1. account status is `funded`,
 2. the funded account has the plan's **minimum trading days** before the first payout —
-   **5 on 2-Step**, **30 on Instant Funding**. A day counts once the trader trades on it
+   **5 on 2-Step**, **30 on Instant Funding**. A day counts when the account has an open position on it
    (so N trading days is longer than N calendar days). The counter is on the account card
    ("Trading Days X / Y min"). Evaluation-phase days on 2-Step do **not** replace the
    funded wait — the 5 funded days start after the account is funded,
@@ -110,16 +114,18 @@ Requirements, all four enforced in code:
 4. profit (balance − starting balance) is greater than zero, and the requested amount meets
    the **minimum payout** ($500 or 2% of account size, whichever is higher).
 
-- Available share = profit × the plan's split (90% or 70%).
+- Available share = profit × the plan's split (90%, or 70% on Instant Funding, 80% with Split Boost).
 - The trader may request **part or all** of the available share (subject to the minimum).
 - **Methods:** **vUSDT on Polygon only** (PTF's native internal token — not Tether USDT).
   Do **not** offer USDT TRC-20/BEP-20, bank transfer, Wise, or cash. Wallet is confirmed when
   the request is unlocked; changing a saved wallet needs an emailed code.
 - **Flow:** `pending` → reviewed by the team → unlocked → trader confirms → `paid`, or
   `rejected` with a reason.
-- **First payout on an account includes a full credit of the challenge fee paid for that
-  account** as additional vUSDT (not a card refund), added on top of the profit share.
-  Every plan, Instant Funding included.
+- **On 2-Step plans the first payout on an account includes a full credit of the challenge
+  fee paid for that account** as additional vUSDT (a credit, not a card refund), added on top
+  of the profit share. **Instant Funding has no fee credit.** Instant accounts bought before
+  the November 2026 change keep it; the portal shows the credit on the payout form when it
+  applies, so read it from there instead of calculating.
 - After a payout the balance is reduced by the profit consumed; a full payout brings the
   account back to its starting balance.
 
@@ -127,7 +133,7 @@ Requirements, all four enforced in code:
 **Reward frequency (default):** every 14 calendar days between requests (bi-weekly) on
 2-Step and Instant, enforced via `PAYOUT_INTERVAL_DAYS`. Accounts with the **On-demand
 Payout** add-on (`ondemand_payout`) skip that wait. Rewards are paid in **vUSDT on Polygon**.
-The Challenge fee credit on first payout is additional vUSDT, not a card refund.
+The 2-Step Challenge fee credit on first payout is additional vUSDT, not a card refund.
 **vUSDT** is PTF's native internal token on Polygon — **not** Tether USDT. Transferable to the
 trader's wallet; **no** cash/fiat redemption by PTF; value not guaranteed. Do **not** publish
 a contract address. Do not mention Express Payout ($49 / review queue) — that add-on was withdrawn.
@@ -146,21 +152,25 @@ a contract address. Do not mention Express Payout ($49 / review queue) — that 
 
 ## 7. Money, refunds, programs
 
-**Payment:** Stripe Checkout, one-time, in USD.
+**Payment:** Stripe Checkout, one-time, in USD. Crypto payment is possible on request; store
+credit is applied at the end of checkout.
 
 **Refund / fee-credit policy:**
-- **Fee credit (vUSDT):** on the first approved payout from that funded account, the
-  challenge fee is credited as additional vUSDT — not a refund to the card.
+- **Fee credit (vUSDT), 2-Step only:** on the first approved payout from that funded
+  account, the challenge fee is credited as additional vUSDT — not a refund to the card.
+  Instant Funding has no fee credit.
 - **Card refunds:** a cancellation *before* the MT5 account has been created; our error
-  (duplicate charge, or an account not provisioned within 24 hours).
+  (duplicate charge, or an account we could not provision).
 - **Not refunded to card:** after credentials have been delivered and trading is
   possible; after failing a challenge; accounts terminated for prohibited conduct.
-  (The fee may still be credited later as vUSDT on a first payout if the account is
-  funded and a reward is approved.)
+  (On 2-Step the fee is still credited later as vUSDT on a first payout if the account
+  is funded and a reward is approved.)
 - With a coupon, a refund equals the amount **actually paid**, not the list price.
-- Approved refunds return to the original payment method, normally **5–10 business days**.
-- Chargebacks: ask the customer to contact us first. An unwarranted chargeback leads to
-  termination.
+- Approved refunds return to the original payment method; how long they take to appear
+  depends on the customer's bank or payment provider. **Do not quote a number of days.**
+- Chargebacks: ask the customer to contact us first. A chargeback is unwarranted when it
+  disputes a Challenge that was delivered as described and was opened without contacting
+  us first; it leads to termination.
 
 **Scaling:** every time a funded account grows **+15%**, the trader chooses — take the
 reward, *or* move up to the next size. Mutually exclusive: moving up applies the profit
@@ -174,23 +184,44 @@ trader who won them. There is also an "Upgrade Your Size" promo which, while act
 gives the next size up for the same fee.
 **Do not invent codes and do not offer one that is not on this list.**
 
-**Affiliate:** 10% commission on paid orders from referred traders, tracked by a unique
-referral code and shown under Rewards. The trader claims in the portal as **store credit**
+**Affiliate:** 10% commission on paid orders from referred traders, on every purchase and
+not only the first, tracked by a unique referral code and shown under Rewards. The trader claims in the portal as **store credit**
 or **vUSDT** (saved Polygon wallet). No cash payout and no commission paid by contacting
 support. Do not quote a minimum unclaimed amount. Full rules: `/affiliate-terms`.
 
 ## 8. Platform, delivery, conduct
 
-- **MetaTrader 5.** Credentials work on desktop, mobile and the web terminal.
-- Provisioning is automated; credentials usually arrive **within a minute** of checkout
-  and appear in the dashboard and by email.
-- Markets: Forex, Indices, Gold & Metals, Crypto CFDs.
-- **Allowed:** news trading, weekend holding, expert advisors. No strategy bans, no news
-  blackouts, no weekend-flat requirement.
+- **MT5.** Credentials work on desktop, mobile and the web terminal, and in the Built-in
+  Terminal at `/trade` (nothing to install).
+- Provisioning is automated: credentials are created once the payment is confirmed and
+  appear in the dashboard and by email. **Do not quote how long that takes.**
+- Markets: 12 crypto pairs, gold, silver and platinum, WTI, Brent and natural gas, the
+  S&P 500, Nasdaq 100 and Nikkei 225, and EURUSD, GBPUSD and USDJPY. Everything except
+  crypto is closed at weekends; crypto trades at weekends only with the Weekend Trading
+  add-on.
+- **Prices are reference prices** from third-party sources (Terms §2). Crypto, gold, oil
+  and most indices use Hyperliquid; Forex pairs, silver, platinum and the Japan 225 index
+  use a broker spot feed for both chart and fills. No order reaches any of them. Do not
+  name the broker.
+- **Commission:** $9 per lot per side in the Built-in Terminal. No swaps there.
+- **Hedging accounts:** every order opens its own position; a long and a short on the
+  same market can be open side by side, and each closes on its own.
+- **Allowed:** news trading, weekend holding, expert advisors. No news blackouts and no
+  weekend-flat requirement. The only strategy bans are the abuses of the simulation below.
 - **Prohibited (Terms §6):** exploiting demo-environment artifacts (off-quotes, latency,
-  feed errors); buying, selling or transferring accounts; letting someone else trade
-  outside an approved arrangement; fraud, chargeback abuse, identity misrepresentation,
-  KYC falsification; attacking or reverse-engineering the platform.
+  feed errors); opposite or offsetting positions across own accounts or coordinated with
+  others; repeated all-in attempts across Challenges; high-frequency order activity aimed
+  at the simulation; a VPN, proxy or other location-masking service; copying trades
+  between accounts without the Copytrading permission; buying, selling or transferring
+  accounts; letting someone else trade outside an approved arrangement; fraud, chargeback
+  abuse, identity misrepresentation, KYC falsification; attacking or reverse-engineering
+  the platform.
+- **Copytrading add-on:** sold only when offered at checkout. An account bought with it
+  may copy trades between the trader's own accounts and sign in from several devices.
+  It never covers copying to or from someone else's account or handing over credentials.
+- **Reward review:** each request is reviewed by the team, including trading history and
+  terminal sign-in records. Rule breaches are decided by the engine; rewards are
+  discretionary (Terms §2, §6). Never say there is "no discretionary review".
 - **Managed accounts (Terms §7):** allowed **with written approval obtained before any
   trading on the trader's behalf begins**. Request from the registered email address,
   naming the person or company. The account stays registered to the trader, who remains
@@ -242,3 +273,8 @@ in bold.
 
 8. **RESOLVED — payout method is vUSDT on Polygon only.** Public FAQ/Terms match.
    Do not mention USDT TRC-20/BEP-20, bank transfer, or Wise as payout options.
+
+9. **Fee credit is 2-Step only since November 2026.** Before that the credit applied to
+   every plan. An Instant Funding account bought before the change keeps the credit; one
+   bought after has none. If a customer disputes which side of the change they are on,
+   escalate — do not decide from memory.

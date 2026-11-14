@@ -259,7 +259,7 @@
       : '';
     var wiadomosc = '<button type="button" class="hd-card hd-row" onclick="hdNewChat()">'
       + '<span><b>Send us a message</b><small>' + (zalogowany()
-        ? 'The AI assistant replies instantly, our team follows up when needed'
+        ? 'The AI assistant answers first, our team follows up when needed'
         : 'Sign in to chat with our assistant and support team') + '</small></span>'
       + '<span class="hd-ic">' + WYSLIJ + '</span></button>';
     var pop = ARTS ? popularne() : [];
@@ -340,7 +340,7 @@
     var odcisk = ['chat', CHAT && CHAT.id, rodzaj, AGENT.name, AGENT.team, AGENT.online].join('|');
     if (head.dataset.odcisk === odcisk) return;
     head.dataset.odcisk = odcisk;
-    if (rodzaj === 'ai') { nazwa = NAZWA_AI; pod = 'Replies instantly'; }
+    if (rodzaj === 'ai') { nazwa = NAZWA_AI; pod = 'Answers from our help articles'; }
     else if (rodzaj === 'person') {
       nazwa = esc(AGENT.name);
       pod = esc(AGENT.team) + (AGENT.online ? ' · <span class="hd-on">Online</span>' : ' · replies here');
@@ -390,7 +390,7 @@
     var tekst = ASSIST
       ? 'Hi' + (imie ? ' ' + imie : '') + ", I'm the PTF AI Assistant. I can help with getting started, MT5, the "
         + 'trading rules and the portal. Questions about payouts, refunds or your account results go '
-        + 'straight to our team.'
+        + 'straight to our team. I answer from our help articles; where they differ, the Terms of Service apply.'
       : 'Hi' + (imie ? ' ' + imie : '') + '! Send us your question and our support team will reply here.';
     return '<div class="chat"><div class="chat-row them first last by-ai"><div class="chat-who">'
       + (ASSIST ? NAZWA_AI : 'Support team') + '</div><div class="bub">' + esc(tekst) + '</div></div></div>';
