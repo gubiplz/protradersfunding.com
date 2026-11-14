@@ -27,12 +27,14 @@ init_db()
 def _czysto(monkeypatch):
     s = cf.get_settings()
     for k, v in {"ctrader_client_id": "cid", "ctrader_client_secret": "csec", "ctrader_access_token": "acc-1",
-                 "ctrader_refresh_token": "ref-1", "ctrader_account_id": "", "ctrader_host": "demo"}.items():
+                 "ctrader_refresh_token": "ref-1", "ctrader_account_id": "", "ctrader_host": "demo",
+                 "ctrader_broker": "", "ctrader_login": ""}.items():
         monkeypatch.setattr(s, k, v)
     monkeypatch.setattr(cf, "ZAPIS_CO_S", 0.05)
     db = SessionLocal()
     db.query(TerminalCandle).delete()
-    db.query(AppSetting).filter(AppSetting.key.in_((cf.TOKEN_KLUCZ, cf.KONTO_KLUCZ, cf.SYMBOLE_KLUCZ, broker_quotes.KLUCZ))).delete(synchronize_session=False)
+    db.query(AppSetting).filter(AppSetting.key.in_((cf.TOKEN_KLUCZ, cf.KONTO_KLUCZ, cf.SYMBOLE_KLUCZ, cf.ODRZUT_KLUCZ,
+                                                    broker_quotes.KLUCZ))).delete(synchronize_session=False)
     db.commit(); db.close()
     broker_quotes.wyczysc()
     yield
@@ -46,8 +48,13 @@ def _czysto(monkeypatch):
 class Serwer:
     """Atrapa: odpowiada na żądania po payloadType, po subskrypcji wypuszcza ticki."""
 
-    def __init__(self, ticki, trendbary=None, zly_token=None):
+    KONTA = [{"ctidTraderAccountId": 9001, "isLive": True}, {"ctidTraderAccountId": 4242, "isLive": False}]
+
+    def __init__(self, ticki, trendbary=None, zly_token=None, konta=None, odrzuc=None, live=False):
+        """`konta`: lista kont tokenu albo {access token: lista}; `odrzuc`: {id konta: kod błędu
+        przy autoryzacji}; `live`: host, z którym „połączono” tę atrapę."""
         self.ticki, self.trendbary, self.zly_token = list(ticki), trendbary or [], zly_token
+        self.konta, self.odrzuc, self.live = konta if konta is not None else self.KONTA, odrzuc or {}, live
         self.q: asyncio.Queue = asyncio.Queue()
         self.wyslane: list[dict] = []
 
@@ -65,11 +72,19 @@ class Serwer:
         if t == cf.PT["APP_AUTH_REQ"]:
             odp("APP_AUTH_RES", {})
         elif t == cf.PT["ACCOUNTS_REQ"]:
-            odp("ACCOUNTS_RES", {"ctidTraderAccount": [{"ctidTraderAccountId": 9001, "isLive": True},
-                                                       {"ctidTraderAccountId": 4242, "isLive": False}]})
+            if isinstance(self.konta, dict) and p.get("accessToken") not in self.konta:
+                odp("ERROR", {"errorCode": "CH_ACCESS_TOKEN_INVALID", "description": "unknown token"})
+            else:
+                odp("ACCOUNTS_RES", {"ctidTraderAccount": self.konta[p["accessToken"]] if isinstance(self.konta, dict)
+                                     else self.konta})
         elif t == cf.PT["ACC_AUTH_REQ"]:
+            konto = next((a for a in self._wszystkie() if a["ctidTraderAccountId"] == p["ctidTraderAccountId"]), None)
             if self.zly_token and p.get("accessToken") == self.zly_token:
                 odp("ERROR", {"errorCode": "CH_ACCESS_TOKEN_INVALID", "description": "expired"})
+            elif p["ctidTraderAccountId"] in self.odrzuc:
+                odp("ERROR", {"errorCode": self.odrzuc[p["ctidTraderAccountId"]], "description": "rejected"})
+            elif konto is not None and bool(konto.get("isLive")) != self.live:
+                odp("ERROR", {"errorCode": "CANT_ROUTE_REQUEST", "description": "wrong environment"})
             else:
                 odp("ACC_AUTH_RES", {})
         elif t == cf.PT["SYMBOLS_REQ"]:
@@ -85,6 +100,30 @@ class Serwer:
 
     async def recv(self):
         return await self.q.get()
+
+    def _wszystkie(self):
+        return [a for lista in self.konta.values() for a in lista] if isinstance(self.konta, dict) else self.konta
+
+    def typy(self):
+        return [x["payloadType"] for x in self.wyslane]
+
+    def auth(self):
+        """Konta, o których autoryzację poproszono na tym połączeniu."""
+        return [x["payload"]["ctidTraderAccountId"] for x in self.wyslane if x["payloadType"] == cf.PT["ACC_AUTH_REQ"]]
+
+
+class Hosty:
+    """Fabryka połączeń pamiętająca, z którym hostem (live/demo) łączono się po kolei."""
+
+    def __init__(self, **kw):
+        self.kw, self.serwery = kw, []
+
+    def __call__(self, live=False):
+        self.serwery.append(Serwer([], live=bool(live), **self.kw))
+        return self.serwery[-1]
+
+    def hosty(self):
+        return ["live" if s.live else "demo" for s in self.serwery]
 
 
 def _wiersze(coin):
@@ -104,7 +143,7 @@ def test_ticki_skladaja_swiece_z_mid_i_zapisuja_wiersze_ostateczne():
              {"symbolId": 3, "bid": 15815000, "ask": 15816000, "timestamp": minuta_ms + 1500},
              {"symbolId": 9, "bid": 7500000000, "ask": 7500100000}]                       # spoza mapy
     srv = Serwer(ticki)
-    w = asyncio.run(cf.sluchaj(0.3, polacz=lambda: srv))
+    w = asyncio.run(cf.sluchaj(0.3, polacz=lambda *_: srv))
     assert w["ticks"] == 4 and w["symbols"] == ["xyz:EUR", "xyz:GBP", "xyz:JP225", "xyz:JPY"] and not w.get("error")
     m = datetime.fromtimestamp(minuta_ms / 1000, tz=timezone.utc).replace(tzinfo=None)
     assert _wiersze("xyz:EUR")[m] == (1.11555, 1.1157, 1.11525, 1.11525, cf.FEED_N)
@@ -121,7 +160,7 @@ def test_ticki_skladaja_swiece_z_mid_i_zapisuja_wiersze_ostateczne():
     assert sorted(sub["symbolId"]) == [1, 2, 3, 5]
     # Drugi przebieg: konto i symbole z pamięci, bez ACCOUNTS_REQ i SYMBOLS_REQ.
     srv2 = Serwer([])
-    asyncio.run(cf.sluchaj(0.1, polacz=lambda: srv2))
+    asyncio.run(cf.sluchaj(0.1, polacz=lambda *_: srv2))
     assert cf.PT["ACCOUNTS_REQ"] not in [x["payloadType"] for x in srv2.wyslane]
     assert cf.PT["SYMBOLS_REQ"] not in [x["payloadType"] for x in srv2.wyslane]
 
@@ -133,7 +172,7 @@ def test_mapa_ze_starej_wersji_przebudowana():
     s.add(AppSetting(key=cf.KONTO_KLUCZ, value=json.dumps({"id": 4242})))
     s.commit(); s.close()
     srv = Serwer([])
-    w = asyncio.run(cf.sluchaj(0.1, polacz=lambda: srv))
+    w = asyncio.run(cf.sluchaj(0.1, polacz=lambda *_: srv))
     assert cf.PT["SYMBOLS_REQ"] in [x["payloadType"] for x in srv.wyslane]
     assert "xyz:JP225" in w["symbols"]
 
@@ -150,7 +189,7 @@ def test_luki_latane_trendbarami_a_ticki_nadpisuja_probki():
     bary = [{"_sid": 1, "low": 111500, "deltaOpen": 10, "deltaHigh": 40, "deltaClose": 20,
              "utcTimestampInMinutes": int(t.replace(tzinfo=timezone.utc).timestamp() // 60), "volume": 5} for t in dziura]
     srv = Serwer([], trendbary=bary)
-    w = asyncio.run(cf.sluchaj(0.1, polacz=lambda: srv))
+    w = asyncio.run(cf.sluchaj(0.1, polacz=lambda *_: srv))
     assert w["gap_rows"] == 5
     r = _wiersze("xyz:EUR")
     assert all(r[t] == (1.1151, 1.1154, 1.115, 1.1152, cf.FEED_N) for t in dziura)
@@ -172,7 +211,7 @@ def test_wygasly_token_odswiezony_i_zapisany():
     mod.odswiez_token = lambda transport_=None: stary(transport=transport)
     try:
         serwery = [Serwer([], zly_token="acc-1"), Serwer([], zly_token="acc-1")]
-        w = asyncio.run(cf.sluchaj(0.1, polacz=lambda: serwery.pop(0)))
+        w = asyncio.run(cf.sluchaj(0.1, polacz=lambda *_: serwery.pop(0)))
     finally:
         mod.odswiez_token = stary
     assert not w.get("error") and wymiany == [{"grant_type": "refresh_token", "refresh_token": "ref-1",
@@ -183,7 +222,129 @@ def test_wygasly_token_odswiezony_i_zapisany():
 def test_bez_konfiguracji_nic_nie_wychodzi(monkeypatch):
     monkeypatch.setattr(cf.get_settings(), "ctrader_client_id", "")
     assert cf.skonfigurowany() is False
-    assert asyncio.run(cf.sluchaj(0.1, polacz=lambda: pytest.fail("no connection without config")))["skipped"] is True
+    assert asyncio.run(cf.sluchaj(0.1, polacz=lambda *_: pytest.fail("no connection without config")))["skipped"] is True
+
+
+# --- wybór konta: broker / numer z env, host za kontem, zapas ---
+
+DEMO = {"ctidTraderAccountId": 4242, "isLive": False, "traderLogin": 5004242, "brokerTitleShort": "Demo Co"}
+ACME = {"ctidTraderAccountId": 7007, "isLive": True, "traderLogin": 1234567, "brokerTitleShort": "Acme Markets"}
+
+
+def _wybor_w_bazie():
+    return cf._ustawienie(cf.KONTO_KLUCZ) or {}
+
+
+def test_konto_wskazanego_brokera_wygrywa_i_laczy_z_hostem_live(monkeypatch):
+    monkeypatch.setattr(cf.get_settings(), "ctrader_broker", "acme")
+    h = Hosty(konta=[DEMO, ACME])
+    w = asyncio.run(cf.sluchaj(0.1, polacz=h))
+    # Lista kont pobrana na hoście startowym (demo), autoryzacja konta już na live.
+    assert h.hosty() == ["demo", "live"] and h.serwery[0].auth() == [] and h.serwery[1].auth() == [7007]
+    assert w["account"] == {"broker": "Acme Markets", "live": True} and "fallback" not in w and not w.get("error")
+    assert _wybor_w_bazie()["match"] is True
+    # Kolejny przebieg: od razu host live, bez pytania o listę kont.
+    h2 = Hosty(konta=[DEMO, ACME])
+    asyncio.run(cf.sluchaj(0.1, polacz=h2))
+    assert h2.hosty() == ["live"] and cf.PT["ACCOUNTS_REQ"] not in h2.serwery[0].typy()
+
+
+def test_numer_konta_z_env_wybiera_konto(monkeypatch):
+    monkeypatch.setattr(cf.get_settings(), "ctrader_login", "1234567")
+    h = Hosty(konta=[DEMO, ACME])
+    w = asyncio.run(cf.sluchaj(0.1, polacz=h))
+    assert h.serwery[-1].auth() == [7007] and w["account"]["broker"] == "Acme Markets"
+
+
+def test_stary_zapis_konta_bez_preferencji_jest_ignorowany(monkeypatch):
+    cf._zapisz_ustawienie(cf.KONTO_KLUCZ, {"id": 4242})      # wybór sprzed tej wersji: konto demo
+    monkeypatch.setattr(cf.get_settings(), "ctrader_broker", "Acme")
+    h = Hosty(konta=[DEMO, ACME])
+    asyncio.run(cf.sluchaj(0.1, polacz=h))
+    assert h.serwery[-1].auth() == [7007]
+
+
+def test_bez_wskazanego_konta_na_tokenie_feed_idzie_z_zapasowego(monkeypatch):
+    monkeypatch.setattr(cf.get_settings(), "ctrader_broker", "acme")
+    h = Hosty(konta=[DEMO])
+    w = asyncio.run(cf.sluchaj(0.1, polacz=h))
+    assert w["fallback"] is True and w["account"] == {"broker": "Demo Co", "live": False} and not w.get("error")
+    assert h.serwery[0].auth() == [4242]
+    # Przed upływem PONOW_S nie pytamy o listę ponownie.
+    h2 = Hosty(konta=[DEMO, ACME])
+    asyncio.run(cf.sluchaj(0.1, polacz=h2))
+    assert cf.PT["ACCOUNTS_REQ"] not in h2.serwery[0].typy() and h2.serwery[0].auth() == [4242]
+    # Po PONOW_S lista jest sprawdzana jeszcze raz i wskazane konto, już widoczne, przejmuje feed.
+    monkeypatch.setattr(cf, "PONOW_S", 0.0)
+    h3 = Hosty(konta=[DEMO, ACME])
+    w3 = asyncio.run(cf.sluchaj(0.1, polacz=h3))
+    assert h3.serwery[-1].auth() == [7007] and "fallback" not in w3 and w3["account"]["live"] is True
+
+
+def test_konto_odrzucone_przez_brokera_ustepuje_zapasowemu_w_tym_samym_przebiegu(monkeypatch):
+    monkeypatch.setattr(cf.get_settings(), "ctrader_broker", "acme")
+    h = Hosty(konta=[DEMO, ACME], odrzuc={7007: "RET_ACCOUNT_DISABLED"})
+    w = asyncio.run(cf.sluchaj(0.1, polacz=h))
+    assert h.hosty() == ["demo", "live", "demo"]
+    assert h.serwery[1].auth() == [7007] and h.serwery[2].auth() == [4242]
+    assert w["fallback"] is True and w["account"]["broker"] == "Demo Co" and not w.get("error")
+    assert 7007 in cf._odrzucone()
+    # Po ODRZUT_S konto wraca do puli i przy następnym sprawdzeniu listy jest próbowane znowu.
+    monkeypatch.setattr(cf, "ODRZUT_S", 0.0)
+    assert cf._odrzucone() == {}
+
+
+def test_blad_tokenu_przy_autoryzacji_nie_odrzuca_konta():
+    # Wygasły token to nie wina konta: odświeżenie się nie udaje (brak transportu → sieć),
+    # ale konto nie trafia na listę odrzuconych.
+    import app.ctrader_feed as mod
+    stary = mod.odswiez_token
+    mod.odswiez_token = lambda: False
+    try:
+        w = asyncio.run(cf.sluchaj(0.1, polacz=lambda *_: Serwer([], zly_token="acc-1")))
+    finally:
+        mod.odswiez_token = stary
+    assert w["error"] == "CH_ACCESS_TOKEN_INVALID" and cf._odrzucone() == {}
+
+
+def test_nowy_token_w_env_wygrywa_z_odswiezonym_w_bazie(monkeypatch):
+    # Wpis powstał z tokenu, który jest w env: baza ma pierwszeństwo (jest nowsza).
+    cf._zapisz_ustawienie(cf.TOKEN_KLUCZ, {"access": "db-acc", "refresh": "db-ref", "src": cf._odcisk("acc-1")})
+    assert cf._tokeny() == ("db-acc", "db-ref")
+    # W env ustawiono nowy token: wpis w bazie pochodzi ze starego i jest pomijany.
+    monkeypatch.setattr(cf.get_settings(), "ctrader_access_token", "acc-9")
+    monkeypatch.setattr(cf.get_settings(), "ctrader_refresh_token", "ref-9")
+    assert cf._tokeny() == ("acc-9", "ref-9")
+
+
+def test_wpis_tokenu_bez_stempla_ustepuje_gdy_token_z_env_widzi_wskazane_konto(monkeypatch):
+    cf._zapisz_ustawienie(cf.TOKEN_KLUCZ, {"access": "db-acc", "refresh": "db-ref"})   # sprzed stempla
+    monkeypatch.setattr(cf.get_settings(), "ctrader_broker", "acme")
+    h = Hosty(konta={"db-acc": [DEMO], "acc-1": [DEMO, ACME]})
+    w = asyncio.run(cf.sluchaj(0.1, polacz=h))
+    assert "fallback" not in w and h.serwery[-1].auth() == [7007]
+    acc = next(x for x in h.serwery[-1].wyslane if x["payloadType"] == cf.PT["ACC_AUTH_REQ"])["payload"]
+    assert acc["accessToken"] == "acc-1"
+    zapis = cf._ustawienie(cf.TOKEN_KLUCZ)
+    assert zapis["access"] == "acc-1" and zapis["src"] == cf._odcisk("acc-1")
+
+
+def test_wpis_tokenu_bez_stempla_zostaje_gdy_env_nic_nie_wnosi(monkeypatch):
+    cf._zapisz_ustawienie(cf.TOKEN_KLUCZ, {"access": "db-acc", "refresh": "db-ref"})
+    monkeypatch.setattr(cf.get_settings(), "ctrader_broker", "acme")
+    h = Hosty(konta={"db-acc": [DEMO]})          # token z env jest już nieważny u brokera
+    w = asyncio.run(cf.sluchaj(0.1, polacz=h))
+    assert w["fallback"] is True and not w.get("error") and cf._tokeny() == ("db-acc", "db-ref")
+
+
+def test_konto_wymuszone_w_env_omija_wybor(monkeypatch):
+    monkeypatch.setattr(cf.get_settings(), "ctrader_account_id", "7007")
+    monkeypatch.setattr(cf.get_settings(), "ctrader_host", "live")
+    monkeypatch.setattr(cf.get_settings(), "ctrader_broker", "demo co")
+    h = Hosty(konta=[DEMO, ACME])
+    w = asyncio.run(cf.sluchaj(0.1, polacz=h))
+    assert h.hosty() == ["live"] and h.serwery[0].auth() == [7007] and "fallback" not in w
+    assert cf.PT["ACCOUNTS_REQ"] not in h.serwery[0].typy()
 
 
 def test_kwotowanie_brokera_wycenia_i_wypelnia_fx(monkeypatch):
