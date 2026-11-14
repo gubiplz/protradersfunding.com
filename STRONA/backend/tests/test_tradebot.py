@@ -259,20 +259,19 @@ def test_start_nadaje_seed_i_ustawienia():
 
 
 # --------------------------------------------------------------------------- #
-#  Tempo = ile transakcji dziennie                                             #
+#  Styl = horyzont pozycji i liczba transakcji                                 #
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize("pace,dolna,gorna", [("light", 1, 2), ("steady", 4, 8),
-                                              ("busy", 20, 26)])
-def test_tempo_trzyma_sie_swoich_widelek(pace, dolna, gorna):
-    """Kontrakt trybu: ŻADEN styl nie może wypchnąć persony poza widełki tempa."""
-    for styl in tradebot.STYLES:
-        for i in range(6):
-            aid = _account(f"bot-tpd-{pace}-{styl}-{i}", pace=pace, style=styl)
+@pytest.mark.parametrize("styl,dolna,gorna", [("scalper", 10, 25), ("balanced", 2, 6),
+                                              ("swing", 2 / 7, 5 / 7)])
+def test_styl_wyznacza_tempo_niezaleznie_od_starego_tempa(styl, dolna, gorna):
+    """Liczba transakcji wynika ze stylu; zapisane w koncie tempo niczego nie zmienia."""
+    for pace in ("light", "steady", "busy"):
+        for i in range(4):
+            aid = _account(f"bot-tpd-{styl}-{pace}-{i}", pace=pace, style=styl)
             s = SessionLocal()
             p = tradebot.persona_for(s.get(Account, aid))
             s.close()
-            assert p.pace == pace
-            assert dolna <= p.trades_per_day <= gorna, \
+            assert dolna - 1e-9 <= p.trades_per_day <= gorna + 1e-9, \
                 f"{styl}/{pace}: {p.trades_per_day} poza {dolna}-{gorna}"
 
 
@@ -294,35 +293,38 @@ def test_stare_nazwy_temp_dalej_dzialaja():
     s.close()
 
 
-def test_tempa_roznia_sie_realna_liczba_transakcji():
-    """Nie sama deklaracja: po pięciu dobach jazdy „busy" musi mieć wyraźnie
-    więcej zamkniętych pozycji niż „steady", a „steady" niż „light"."""
+def test_style_roznia_sie_realna_liczba_transakcji():
+    """Nie sama deklaracja: w tygodniu handlowym scalper ma wyraźnie więcej zamkniętych
+    pozycji niż intraday, a intraday niż swing (2-5 tygodniowo)."""
     dni, tick_sek = 5, 600
     licz = {}
-    for pace in ("light", "steady", "busy"):
-        aid = _account(f"bot-tempo-{pace}", pace=pace)
+    for styl in ("scalper", "balanced", "swing"):
+        aid = _account(f"bot-tempo-{styl}", style=styl)
         _drive(aid, dni * 24 * 3600 // tick_sek, step_sec=tick_sek)
-        licz[pace] = len(_trades(aid))
-
-    assert licz["light"] < licz["steady"] < licz["busy"], licz
-    # Widełki luźne z rozmysłem: dzień kończy się też na osiągnięciu dziennego
-    # celu, więc realna liczba bywa niższa od zaplanowanej. Chodzi o RZĄD
-    # WIELKOŚCI — że „busy" to kilkanaście-dwadzieścia wejść dziennie, a nie 2000.
-    assert 3 <= licz["light"] <= 12, licz
-    assert 15 <= licz["steady"] <= 45, licz
-    assert 50 <= licz["busy"] <= 125, licz
+        licz[styl] = len(_trades(aid))
+    assert licz["swing"] < licz["balanced"] < licz["scalper"], licz
+    # Widełki luźne z rozmysłem: dzień kończy się też na osiągnięciu dziennego celu.
+    assert 1 <= licz["swing"] <= 6, licz
+    assert 6 <= licz["balanced"] <= 32, licz
+    assert 30 <= licz["scalper"] <= 130, licz
 
 
-def test_pozycja_nie_wisi_dluzej_niz_szesc_godzin():
-    """Sufit trzymania: przy 1 transakcji dziennie 40% doby to prawie 10 h
-    w rynku — day trader tyle nie siedzi w jednym wejściu."""
-    aid = _account("bot-hold-1", pace="light")
-    _drive(aid, 4 * 24 * 6)
+@pytest.mark.parametrize("styl", ["scalper", "balanced", "swing"])
+def test_pozycja_trwa_tyle_ile_horyzont_stylu(styl):
+    """Każda zamknięta pozycja mieści się w horyzoncie stylu (z tolerancją jednego ticka
+    jazdy): scalp nie siedzi godzinami, swing nie wychodzi po kwadransie. Wyjątek to
+    przycięcie do zamknięcia tygodnia — wtedy pozycja kończy się na nim."""
+    lo, hi = tradebot.trzymanie_stylu(styl)
+    tick = 300
+    aid = _account(f"bot-hold-{styl}", style=styl)
+    _drive(aid, (10 if styl == "swing" else 4) * 24 * 3600 // tick, step_sec=tick)
     trejdy = _trades(aid)
     assert trejdy
     for t in trejdy:
         trwanie = (t.closed_at - t.opened_at).total_seconds()
-        assert trwanie <= tradebot.HOLD_MAX_SEK + 601, f"{trwanie / 3600:.1f} h"
+        assert trwanie <= hi + tick + 1, f"{styl}: {trwanie / 3600:.2f} h > {hi / 3600:.2f} h"
+        przed_weekendem = (tradebot._naive(tradebot._week_close(t.opened_at)) - tradebot._naive(t.closed_at)).total_seconds() <= tick
+        assert trwanie >= lo - 1 or przed_weekendem, f"{styl}: {trwanie / 60:.0f} min < {lo / 60:.0f} min"
 
 
 def test_tempo_realistic_nie_handluje_w_weekend():
@@ -372,10 +374,24 @@ def test_bot_z_dodatkiem_handluje_w_weekend_samym_kryptem(pace):
     s.close()
 
 
-def test_pozycja_z_piatku_nie_zamyka_sie_w_weekend():
-    """Wejście na 5 minut przed zamknięciem tygodnia idzie flat na zamknięciu,
-    a nie „w sobotę" — poza krypto nie ma wtedy czego domykać."""
+def test_tuz_przed_weekendem_brak_wejsc_krotszych_niz_styl():
+    """Pięć minut przed zamknięciem tygodnia bot nie otwiera FX ani indeksów: intraday
+    trzyma co najmniej 45 minut, a pozycji nie da się przenieść przez weekend."""
     piatek = datetime(2026, 7, 10, 21, 55, tzinfo=timezone.utc)      # 23:55 serwera
+    for i in range(10):
+        aid = _account(f"bot-friday-late-{i}")
+        s = SessionLocal()
+        tradebot.tick(s, s.get(Account, aid), now=piatek)
+        s.commit()
+        tr = s.query(Trade).filter(Trade.account_id == aid).order_by(Trade.id.desc()).first()
+        assert tr is None or tr.symbol in tradebot.CRYPTO_SYMBOLS, f"{tr.symbol} otwarte 5 min przed weekendem"
+        s.close()
+
+
+def test_pozycja_z_piatku_nie_zamyka_sie_w_weekend():
+    """Wejście kilka godzin przed zamknięciem tygodnia idzie flat na zamknięciu,
+    a nie „w sobotę" — poza krypto nie ma wtedy czego domykać."""
+    piatek = datetime(2026, 7, 10, 18, 30, tzinfo=timezone.utc)      # 20:30 serwera
     zamkniecie = datetime(2026, 7, 10, 22, 0, tzinfo=timezone.utc)   # sobota 00:00 serwera
     sprawdzone = 0
     for i in range(10):
@@ -448,7 +464,7 @@ def test_start_i_stop_przez_api():
 
 def test_pauza_wstrzymuje_nowe_wejscia_ale_nie_oddaje_konta():
     """Pauza ≠ Stop: konto zostaje pod botem, saldo trzyma, brak nowych pozycji."""
-    aid = _account("bot-pause-1", pace="busy")
+    aid = _account("bot-pause-1", style="scalper", pace="busy")
     _drive(aid, 200, step_sec=30)
 
     s = SessionLocal()

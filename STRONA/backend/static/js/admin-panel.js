@@ -3853,7 +3853,8 @@ async function markOrderPaid(id,email,amount){
 }
 
 /* Bot pace is stored as a short key; the chip shows what it actually means. */
-const PACE_TXT={light:'1–2 trades/day',steady:'4–8 trades/day',busy:'~20 trades/day'};
+/* The style sets how long the bot holds a position and how many it takes (tradebot.STYLE_PLAN). */
+const STYLE_TXT={scalper:'Scalp · 5–45 min · 10–25 a day',balanced:'Intraday · 45 min–6 h · 2–6 a day',swing:'Swing · 6 h–3 days · 2–5 a week'};
 
 /* Numer konta w tabeli ma być drzwiami, nie ślepą liczbą — łańcuch
    zamówienie→konto kończył się na ręcznym szukaniu w zakładce Accounts. */
@@ -3951,8 +3952,7 @@ async function openAccount(id){
       ${a.bot_enabled?`
         <div class="chip-row" style="margin-bottom:12px">
           <span class="status ${a.bot_paused?'pending':'funded'}"><span class="dot"></span>${a.bot_paused?'paused':'running'}</span>
-          <span class="chip">style <b>${esc(a.bot_style||'balanced')}</b></span>
-          <span class="chip">pace <b>${esc(PACE_TXT[a.bot_pace]||a.bot_pace||'steady')}</b></span>
+          <span class="chip">style <b>${esc(STYLE_TXT[a.bot_style||'balanced']||a.bot_style)}</b></span>
           ${a.bot_target_pct?`<span class="chip">${a.bot_target_pct>0?'stops at':'drifts to'} <b>${pctS(a.bot_target_pct)}</b></span>`:''}
           ${(a.bot_outcome&&a.bot_outcome.mode==='doom')?`<span class="status failed"><span class="dot"></span>riding down</span>`:''}
         </div>
@@ -4004,15 +4004,9 @@ async function openAccount(id){
         <div class="pool-form">
           <div><label class="muted" style="font-size:12px">Style</label>
             <select id="bot-style" class="inp">
-              <option value="scalper">Scalper — many small trades</option>
-              <option value="balanced" selected>Balanced — day trader</option>
-              <option value="swing">Swing — fewer, larger trades</option>
-            </select></div>
-          <div><label class="muted" style="font-size:12px">Pace</label>
-            <select id="bot-pace" class="inp">
-              <option value="light">Light — 1–2 trades a day</option>
-              <option value="steady" selected>Steady — 4–8 trades a day</option>
-              <option value="busy">Busy — around 20 trades a day</option>
+              <option value="scalper">Scalp — 5–45 min per trade, 10–25 a day</option>
+              <option value="balanced" selected>Intraday — 45 min to 6 h, 2–6 a day</option>
+              <option value="swing">Swing — 6 h to 3 days, 2–5 a week</option>
             </select></div>
           <div><label class="muted" style="font-size:12px">Target %</label>
             <input id="bot-target" class="inp" type="number" step="0.1" min="-9.5" value="0"
@@ -4024,12 +4018,13 @@ async function openAccount(id){
         equity curve, always inside the account's own risk rules.
         <b>While the bot runs, this account is not read from MT5</b>, so the portal will
         diverge from the trader's MT5 terminal, and stopping the bot resyncs the
-        balance back to the real account. <b>Pace is how many trades a day</b> the bot takes:
-        it spreads them across the day and holds each position for a matching stretch, so
-        Busy is around one trade an hour, not one a minute. Style shades that count: a
-        scalper sits at the top of the range, a swing trader at the bottom.
-        <b>No pace trades over the weekend</b> unless the challenge has the Weekend Trading
-        add-on, and then the bot only touches crypto, the one market open on Saturday.</p>
+        balance back to the real account. <b>The style sets how long each position is held
+        and how many the bot takes</b>, the same in the history and in live trading, so on
+        any chart interval the account looks like one trader. Forex, metals and indices are
+        closed before the weekend, so the bot does not open them when there is not enough
+        week left for its shortest hold. <b>Nothing trades over the weekend</b> unless the
+        challenge has the Weekend Trading add-on, and then only crypto, which can be held
+        through it.</p>
     </div>
     <div class="sec-card" style="margin:0" id="bot-tune-card"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -4325,7 +4320,7 @@ function bar(label,pct,danger,suffix){const p=Math.min(100,Math.max(0,pct||0));
     <div class="prog-bar"><i class="${cls}" style="width:${p}%"></i></div></div>`}
 
 async function startBot(id){
-  const body={style:$('bot-style').value,pace:$('bot-pace').value,
+  const body={style:$('bot-style').value,
     target_pct:parseFloat($('bot-target').value||'0')||0};
   try{await api(`/api/admin/accounts/${id}/bot`,{method:'POST',body:JSON.stringify(body)});
     toast('🤖 Trade BOT started. The dashboard starts filling on the next poller tick.','ok',8000);

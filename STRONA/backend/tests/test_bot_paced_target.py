@@ -34,7 +34,7 @@ def _konto_z_botem(login: str, *, cel: float) -> int:
                   phase="eval_1", balance=START, equity=START, peak_equity=START,
                   day_start_equity=START, day_start_balance=START)
     s.add(acc); s.commit()
-    tradebot.start(s, acc, style="balanced", pace="demo", target_pct=cel)
+    tradebot.start(s, acc, style="scalper", pace="demo", target_pct=cel)
     aid = acc.id
     s.close()
     return aid

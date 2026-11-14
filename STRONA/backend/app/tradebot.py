@@ -11,8 +11,9 @@ Trzy zasady, ktore trzymaja to w ryzach:
 1. **Kazdy bot jest inny.** Persona wyprowadzana jest deterministycznie z konta
    (`bot_seed`): wlasny koszyk instrumentow, win rate, wielkosc pozycji, dzienny
    cel, szansa na dzien stratny. Dwa konta nie moga wygenerowac tej samej serii.
-   Admin wybiera tylko styl i TEMPO, czyli ile transakcji dziennie ma robic bot
-   (`PACE_TRADES`) — cala reszta rytmu dnia wynika z tej jednej liczby.
+   Admin wybiera tylko STYL (`STYLE_PLAN`): scalp, intraday albo swing. Styl
+   mowi, jak dlugo bot trzyma pozycje i ile ich robi — ten sam horyzont w historii
+   i na zywo, wiec na kazdym interwale wyglada to jak jeden trader.
 
 2. **Liczby sie zgadzaja.** Wolumen wynika z ryzyka i dystansu stopa, a cena
    zamkniecia jest policzona WSTECZ z P&L:
@@ -150,7 +151,7 @@ class Persona:
     risk_pct: float          # % balansu ryzykowane na jedna pozycje
     daily_target_pct: float  # dzienny cel zysku w % konta
     red_day_odds: float
-    trades_per_day: int
+    trades_per_day: float    # ze stylu; swing ponizej 1 (kilka tygodniowo)
     symbols: tuple[str, ...]
     weights: tuple[float, ...]
 
@@ -175,29 +176,26 @@ PACE_TRADES: dict[str, tuple[int, int]] = {
 PACE_ALIASY: dict[str, str] = {"realistic": "light", "active": "steady", "demo": "busy"}
 
 DZIEN_SEK = 24 * 3600
-# Ile z cyklu zajmuje trzymanie pozycji (reszta to przerwa miedzy wejsciami).
-HOLD_UDZIAL = (0.30, 0.50)
-# Sufit i podloga trzymania: przy 1 transakcji dziennie 40% doby to 10 godzin
-# w rynku, a przy 20 — kilkanascie minut. Jedno i drugie wyglada nienaturalnie.
-HOLD_MAX_SEK = 6 * 3600
-HOLD_MIN_SEK = 12 * 60
 
-# Mnozniki stylu: (win_rate, avg_r, risk_pct). Liczby transakcji tu NIE MA —
-# ustala ja tempo, styl tylko przesuwa ja w obrebie widelek (`_STYLE_UDZIAL`).
+# Styl wyznacza horyzont pozycji i tempo: (transakcje na dobe od-do, trzymanie
+# w sekundach od-do). Wczesniej czas trzymania wynikal z tempa i byl przyciety
+# do 6 h, a styl ruszal tylko skutecznosc — w historii scalper i swing trader
+# wygladali tak samo. Swing to 2-5 transakcji TYGODNIOWO.
+STYLE_PLAN: dict[str, tuple[tuple[float, float], tuple[float, float]]] = {
+    "scalper": ((10.0, 25.0), (5 * 60, 45 * 60)),
+    "balanced": ((2.0, 6.0), (45 * 60, 6 * 3600)),
+    "swing": ((2 / 7, 5 / 7), (6 * 3600, 3 * DZIEN_SEK)),
+}
+# Trzymanie zajmuje najwyzej taka czesc cyklu (reszta to przerwa przed kolejnym wejsciem).
+HOLD_CYKL_MAX = 0.8
+
+# Mnozniki stylu: (win_rate, avg_r, risk_pct). Liczba transakcji i horyzont: `STYLE_PLAN`.
 _STYLE_TUNING: dict[str, tuple[tuple[float, float], tuple[float, float], tuple[float, float]]] = {
     "scalper": ((0.66, 0.78), (1.1, 1.7), (0.12, 0.28)),
     "balanced": ((0.60, 0.72), (1.5, 2.2), (0.18, 0.38)),
     "swing": ((0.52, 0.64), (2.1, 3.2), (0.25, 0.50)),
 }
 
-# Gdzie w widelkach tempa siada dany styl: scalper przy gornej granicy,
-# swing przy dolnej. Zakresy zachodza na siebie, zeby dwa konta z tym samym
-# tempem i stylem nie musialy miec identycznej liczby wejsc.
-_STYLE_UDZIAL: dict[str, tuple[float, float]] = {
-    "scalper": (0.55, 1.00),
-    "balanced": (0.25, 0.75),
-    "swing": (0.00, 0.45),
-}
 
 
 def normalize_pace(value: str | None) -> str:
@@ -210,11 +208,23 @@ def normalize_pace(value: str | None) -> str:
 def _cykl_sek(p: Persona) -> float:
     """Ile sekund przypada na jedna transakcje: trzymanie + przerwa po niej.
 
-    Doba podzielona przez zadana liczbe wejsc. Dzieki temu „4-8 transakcji
-    dziennie" jest obietnica, ktora naprawde da sie policzyc w historii konta,
-    a nie luznym opisem trybu.
+    Doba podzielona przez liczbe wejsc ze stylu. Dzieki temu „10-25 transakcji
+    dziennie" albo „2-5 tygodniowo" da sie policzyc w historii konta.
     """
-    return DZIEN_SEK / max(1, p.trades_per_day)
+    return DZIEN_SEK / max(0.05, p.trades_per_day)
+
+
+def trzymanie_stylu(style: str | None) -> tuple[float, float]:
+    """Widelki trzymania pozycji (s) dla stylu — te same dla historii i pozycji na zywo."""
+    return STYLE_PLAN.get(style if style in STYLES else "balanced")[1]
+
+
+def _wybierz_trzymanie(p: Persona, rng: random.Random) -> float:
+    """Czas trzymania z widelek stylu, rozlozony logarytmicznie (krotkie i dlugie
+    pozycje wystepuja rownie czesto w skali), nie dluzszy niz `HOLD_CYKL_MAX` cyklu."""
+    lo, hi = trzymanie_stylu(p.style)
+    hi = max(lo, min(hi, _cykl_sek(p) * HOLD_CYKL_MAX))
+    return math.exp(rng.uniform(math.log(lo), math.log(hi)))
 
 
 def seed_for(acc: Account) -> int:
@@ -244,8 +254,8 @@ def auto_persona(acc: Account) -> Persona:
     # Wagi: jeden-dwa instrumenty „ulubione", reszta rzadziej — jak u ludzi.
     weights = tuple(rng.uniform(0.5, 3.0) for _ in symbols)
 
-    dolna, gorna = PACE_TRADES[pace]
-    udzial = rng.uniform(*_STYLE_UDZIAL[style])
+    dolna, gorna = STYLE_PLAN[style][0]
+    udzial = rng.uniform(0.0, 1.0)
     return Persona(
         style=style,
         pace=pace,
@@ -257,7 +267,7 @@ def auto_persona(acc: Account) -> Persona:
         # tez cel, wiec „wiecej transakcji" po cichu znaczylo „szybsza krzywa".
         daily_target_pct=rng.uniform(0.25, 1.10),
         red_day_odds=rng.uniform(0.08, 0.20),
-        trades_per_day=max(1, round(dolna + (gorna - dolna) * udzial)),
+        trades_per_day=round(dolna + (gorna - dolna) * udzial, 3),
         symbols=symbols,
         weights=weights,
     )
@@ -368,6 +378,24 @@ def _week_close(now: datetime) -> datetime:
     return sobota - timedelta(hours=settings.server_utc_offset_hours)
 
 
+def _do_zamkniecia_tygodnia(acc: Account, symbol: str, now: datetime) -> float | None:
+    """Ile sekund pozycja na `symbol` moze jeszcze trwac przed weekendem, albo None, gdy
+    moze go przetrzymac (krypto na koncie z dodatkiem Weekend Trading)."""
+    if symbol in CRYPTO_SYMBOLS and bool(getattr(acc, "weekend_trading", False)):
+        return None
+    return (_naive(_week_close(now)) - _naive(now)).total_seconds()
+
+
+def _koszyk(acc: Account, p: Persona, now: datetime) -> tuple[tuple[str, ...], tuple[float, ...]]:
+    """Koszyk na teraz bez rynkow, ktore trzeba by zamknac przed weekendem, zanim minie
+    najkrotsze trzymanie stylu — swing nie wchodzi w FX w piatek wieczorem na godzine."""
+    symbols, weights = _tradable(p, is_weekend(now))
+    lo = trzymanie_stylu(p.style)[0]
+    pary = [(s, w) for s, w in zip(symbols, weights)
+            if (_do_zamkniecia_tygodnia(acc, s, now) is None or _do_zamkniecia_tygodnia(acc, s, now) >= lo)]
+    return tuple(s for s, _ in pary), tuple(w for _, w in pary)
+
+
 def _tradable(p: Persona, weekend: bool) -> tuple[tuple[str, ...], tuple[float, ...]]:
     """Koszyk instrumentow na teraz. W weekend zostaje samo krypto — a persona,
     ktora nie ma go w koszyku, dostaje je na ten czas z listy, bo inaczej konto
@@ -398,6 +426,19 @@ OGON_CEL = 0.85                     # bieżący wynik na starcie: ten ułamek pl
 OPLATA = 0.00009                    # jak w terminalu: $9/lot ≈ 0,009% wartości przy zamknięciu
 LIVE_CZEKAJ = timedelta(hours=2)    # po planowanym zamknięciu: czekamy na ruch, potem większy wolumen
 LIVE_PODDAJ = timedelta(hours=8)    # bez danych tak długo — zamknięcie po staremu (syntetycznie)
+# Dla krótkich stylów oba progi maleją z horyzontem planu: scalp z planem na 20 minut
+# nie może wisieć 8 godzin, bo w historii wyglądałby jak swing.
+LIVE_MIN = timedelta(minutes=10)
+
+
+def _progi_dogrywki(tr: Trade) -> tuple[timedelta, timedelta]:
+    """(czekaj, poddaj) dla planu: najwyżej LIVE_CZEKAJ / LIVE_PODDAJ, a dla krótkich
+    planów odpowiednio ułamek i całość ich długości (nie mniej niż LIVE_MIN)."""
+    if tr.plan_close_at is None or tr.opened_at is None:
+        return LIVE_CZEKAJ, LIVE_PODDAJ
+    plan = _naive(tr.plan_close_at) - _naive(tr.opened_at)
+    poddaj = min(LIVE_PODDAJ, max(LIVE_MIN, plan))
+    return min(LIVE_CZEKAJ, max(LIVE_MIN / 2, poddaj / 4)), poddaj
 
 
 def _plan_w_toku(tr: Trade | None) -> bool:
@@ -491,10 +532,11 @@ def _zamknij_na_wykresie(session, acc: Account, tr: Trade, pnl: float, now: date
     (do wolnego limitu lotów konta). Po `LIVE_PODDAJ` bez danych: syntetycznie."""
     plan_koniec = tr.plan_close_at or now
     po = _naive(now) - _naive(plan_koniec)
+    czekaj, poddaj = _progi_dogrywki(tr)
     koniec_tyg = None if tr.symbol in CRYPTO_SYMBOLS else _week_close(tr.opened_at)
     # Pierwsza próba wychodzi w zaplanowanej chwili (dogrywka tyka co ~20 min,
     # więc „teraz" bywa po planie); gdy rynek nie dał ruchu, czekamy i okno rośnie do „teraz".
-    wyj = bot_ceny.okno_wyjscia(tr, now, None) if po <= timedelta(minutes=30) else now
+    wyj = bot_ceny.okno_wyjscia(tr, now, None) if po <= min(timedelta(minutes=30), czekaj) else now
     if koniec_tyg is not None and _naive(wyj) >= _naive(koniec_tyg):
         wyj = koniec_tyg - timedelta(minutes=1)
     wolne = None
@@ -504,13 +546,15 @@ def _zamknij_na_wykresie(session, acc: Account, tr: Trade, pnl: float, now: date
         miejsce = max(MIN_LOT, math.floor(_wolne_loty(session, acc) * 100) / 100)
         if (tr.lots or 0.0) > miejsce:
             tr.lots = miejsce
-        if po > LIVE_CZEKAJ:
+        if po > czekaj:
             wolne = miejsce
     rng = random.Random(f"{acc.bot_seed}:live:{tr.id}")
-    if bot_ceny.zamknij(tr, INSTRUMENTS[tr.symbol], _point_value, pnl, wyj, wolne, rng):
+    # Na wykresie pozycja trwa co najmniej tyle, ile najkrótsze trzymanie stylu.
+    min_hold = trzymanie_stylu(acc.bot_style)[0]
+    if bot_ceny.zamknij(tr, INSTRUMENTS[tr.symbol], _point_value, pnl, wyj, wolne, rng, min_hold_s=min_hold):
         return True
-    if po > LIVE_PODDAJ:
-        print(f"[tradebot] {acc.login}: brak świec dla {tr.symbol} od {LIVE_PODDAJ} — zamknięcie syntetyczne", flush=True)
+    if po > poddaj:
+        print(f"[tradebot] {acc.login}: brak świec dla {tr.symbol} od {poddaj} — zamknięcie syntetyczne", flush=True)
         tr.venue = None
         _close_trade(tr, pnl, now)
         return True
@@ -1020,6 +1064,9 @@ def _should_open(session, acc: Account, p: Persona, balance: float, now: datetim
     #    z dodatkiem Weekend Trading handluje dalej, ale samym krypto (_tradable).
     if market_closed_for(acc, now):
         return False
+    # 4b) przed weekendem: nic, co trzeba by zamknac szybciej, niz trzyma ten styl
+    if not _koszyk(acc, p, now)[0]:
+        return False
 
     # Godzin sesji NIE ma celowo: forex, zloto i indeksy chodza w dzien roboczy
     # praktycznie na okraglo, wiec wejscie o 04:00 jest tak samo prawdziwe jak
@@ -1033,7 +1080,9 @@ def _open_new(session, acc: Account, p: Persona, balance: float, now: datetime) 
     rng = random.Random(f"{acc.bot_seed}:{n}")
 
     weekend = is_weekend(now)
-    symbols, weights = _tradable(p, weekend)
+    symbols, weights = _koszyk(acc, p, now)
+    if not symbols:                      # wywolanie poza `_should_open` (testy, dogrywka)
+        symbols, weights = _tradable(p, weekend)
     symbol = rng.choices(symbols, weights=weights, k=1)[0]
     # Bez tego wagi potrafia wygenerowac cztery wejscia z rzedu w ten sam symbol,
     # a mial byc widoczny KOSZYK instrumentow. Jedno przelosowanie wystarczy.
@@ -1138,14 +1187,13 @@ def _open_new(session, acc: Account, p: Persona, balance: float, now: datetime) 
     if maks_lot < lots:
         lots = max(MIN_LOT, math.floor(maks_lot * 100) / 100)
 
-    hold = min(HOLD_MAX_SEK, max(HOLD_MIN_SEK, _cykl_sek(p) * rng.uniform(*HOLD_UDZIAL)))
+    hold = _wybierz_trzymanie(p, rng)
     close_at = now + timedelta(seconds=hold)
-    if not weekend and symbol not in CRYPTO_SYMBOLS:
+    zostalo = _do_zamkniecia_tygodnia(acc, symbol, now)
+    if not weekend and zostalo is not None and hold > zostalo:
         # Wejscie z piatkowego wieczoru nie moze miec daty zamkniecia „w sobote" —
-        # poza krypto rynku wtedy nie ma. Pozycja idzie flat na zamknieciu tygodnia.
-        koniec = _week_close(now)
-        if _naive(close_at) > _naive(koniec):
-            close_at = koniec
+        # poza krypto (i bez dodatku Weekend Trading) rynku wtedy nie ma.
+        close_at = _week_close(now)
 
     tr = Trade(
         account_id=acc.id, symbol=symbol, side=side, lots=lots,

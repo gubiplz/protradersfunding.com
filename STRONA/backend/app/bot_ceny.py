@@ -109,7 +109,7 @@ def _do_ticka(v: float, step: float, w_gore: bool) -> float:
 
 
 def zamknij(tr, inst, pv_fn, pnl: float, wyjscie: datetime, max_lots: float | None,
-            rng: random.Random, teraz: datetime | None = None) -> bool:
+            rng: random.Random, teraz: datetime | None = None, min_hold_s: float | None = None) -> bool:
     """Zamyka plan `tr` na prawdziwych cenach z wynikiem `pnl`.
 
     Wyjście: cena świecy, w której wypada `wyjscie`. Wejście: moment w oknie
@@ -146,6 +146,10 @@ def zamknij(tr, inst, pv_fn, pnl: float, wyjscie: datetime, max_lots: float | No
         if wyj_ms <= start_ms:
             return False
     trzymanie = max(MIN_HOLD_MS, int((wyj_ms - start_ms) * MIN_HOLD_UDZIAL))
+    if min_hold_s:
+        # Najkrótsze trzymanie stylu bota: swing nie może wyjść w historii na 1,5 h.
+        # Gdy plan był krótszy (przycięty do zamknięcia tygodnia), zostaje 90% planu.
+        trzymanie = max(trzymanie, int(min(min_hold_s * 1000, (wyj_ms - start_ms) * 0.9)))
     okno = [c for c in sw if c["t"] >= start_ms - krok_ms + 1 and c["t"] + krok_ms <= wyj_ms - trzymanie]
     if not okno:
         return False

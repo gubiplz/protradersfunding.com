@@ -115,7 +115,7 @@ def test_bot_handluje_wylacznie_wskazanym_instrumentem():
     aid = _konto("bt-tick")
     s = SessionLocal()
     acc = s.get(Account, aid)
-    tradebot.start(s, acc, style="balanced", pace="busy", target_pct=0.0)
+    tradebot.start(s, acc, style="scalper", pace="busy", target_pct=0.0)
     acc.bot_symbols = "BTCUSD"
     s.commit()
     # Środa w południe: w weekend bot nie otworzyłby nic i test byłby kalendarzowy.
