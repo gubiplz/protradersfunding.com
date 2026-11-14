@@ -47,6 +47,10 @@ SKALA = 100_000                 # ceny w Open API są w 1/100000 jednostki
 FEED_N = -1                     # ten sam znacznik co terminal.FEED_N: wiersz ostateczny
 ZAPIS_CO_S = 2.0               # przeglądarka dociąga co 2 s, CDN trzyma odpowiedź 1 s
 LUKA_MIN = 2                    # od tylu brakujących minut łatamy trendbarami
+# Open API wpuszcza 5 zapytań historycznych na sekundę; ponad to odpowiada
+# BLOCKED_PAYLOAD_TYPE i całe łatanie tego przebiegu przepada.
+PAUZA_HIST_S = 0.25
+MAX_HIST = 12                   # zapytań o trendbary na przebieg; reszta luk w następnym
 TOKEN_KLUCZ = "ctrader_token"   # AppSetting: {"access": ..., "refresh": ..., "exp": ...}
 KONTO_KLUCZ = "ctrader_account"  # AppSetting: {"id", "live", "broker", "pref", "at", "match"}
 SYMBOLE_KLUCZ = "ctrader_symbols"
@@ -445,11 +449,27 @@ def _luki(coin: str, teraz: datetime) -> list[tuple[datetime, datetime]]:
     return out[-6:]
 
 
+def _weekend(ts: datetime) -> bool:
+    """Czy chwila (UTC, bez strefy) wypada w weekend doby serwera — wtedy rynki z tego
+    feedu stoją i trendbarów nie ma (ta sama reguła co `tradebot.is_weekend`)."""
+    return (ts + timedelta(hours=get_settings().server_utc_offset_hours)).weekday() >= 5
+
+
 async def _latanie(p: Polaczenie, konto: int, mapa: dict[int, str], teraz: datetime) -> int:
-    """Trendbary M1 dla luk z ostatniej doby; wiersze z feedu (n=FEED_N) zastępują próbki."""
+    """Trendbary M1 dla luk z ostatniej doby; wiersze z feedu (n=FEED_N) zastępują próbki.
+    Luka cała w weekendzie nie ma czego łatać. Zapytania idą z odstępem PAUZA_HIST_S,
+    najwyżej MAX_HIST na przebieg — limit brokera to 5 na sekundę."""
     wiersze = {}
+    pytan = 0
     for sid, coin in mapa.items():
         for od, do in _luki(coin, teraz):
+            if _weekend(od) and _weekend(do):
+                continue
+            if pytan >= MAX_HIST:
+                break
+            if pytan:
+                await asyncio.sleep(PAUZA_HIST_S)
+            pytan += 1
             r = await p.zapytaj("TRENDBARS_REQ", {"ctidTraderAccountId": konto, "symbolId": sid, "period": M1,
                                                    "fromTimestamp": int(od.replace(tzinfo=timezone.utc).timestamp() * 1000),
                                                    "toTimestamp": int((do + timedelta(minutes=1)).replace(tzinfo=timezone.utc).timestamp() * 1000)},
@@ -524,11 +544,14 @@ async def sluchaj(budzet_s: float, polacz=None) -> dict:
                 mapa.update(await _symbole(p, konto))
                 if not mapa:
                     return {"skipped": True, "reason": "none of the FX symbols found at the broker"}
+                # Najpierw subskrypcja: ticki przychodzą już w trakcie łatania luk
+                # (`zapytaj` oddaje je do on_spot), więc pauzy między zapytaniami
+                # historycznymi nie kosztują żywych kwotowań.
+                await p.zapytaj("SUB_SPOTS_REQ", {"ctidTraderAccountId": konto, "symbolId": list(mapa)}, "SUB_SPOTS_RES")
                 try:
                     wynik["gap_rows"] = await _latanie(p, konto, mapa, _minuta(time.time()))
                 except (BladOA, TimeoutError) as e:
                     print(f"[ctrader] trendbars: {e}", flush=True)
-                await p.zapytaj("SUB_SPOTS_REQ", {"ctidTraderAccountId": konto, "symbolId": list(mapa)}, "SUB_SPOTS_RES")
                 ostatni_zapis = time.monotonic()
                 ostatni_hb = time.monotonic()
                 while True:

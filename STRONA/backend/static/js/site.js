@@ -536,7 +536,10 @@
     const showSb = cfgType === 'instant' && shown.some(oferujeSb);
     const sbRow = $('#pcfg-sb-row'), sb = $('#pcfg-sb');
     if (sbRow) sbRow.hidden = !showSb;
-    if (!showSb) cfgSb = false;
+    /* cfgSb is shared with the hero card, which picks its own plan. Do NOT clear it
+       here when this strip is on 2-Step: the hero may be on Instant, and wiping the
+       state under a chip that is painted "on" made every click switch it on again.
+       Prices and links already count Split Boost only where the plan offers it. */
     if (sb) sb.setAttribute('aria-checked', cfgSb ? 'true' : 'false');
     const sbPrice = $('#pcfg-sb-price');
     if (sbPrice) sbPrice.textContent = '+$' + cenaSb(shown[0]);
@@ -827,11 +830,10 @@
     const pasek = $('#cfg-addons');
     if (pasek) {
       if (!oferujeCt(p)) cfgCt = false;
-      /* cfgSb is shared with the Challenges strip. Clearing it whenever the
-         hero card is on 2-Step left the Instant strip switch stuck ON: state
-         was false, aria still true, so every SB click flipped it back on.
-         Only drop it when neither surface can use Split Boost. */
-      if (!(p.steps === 0 && oferujeSb(p)) && cfgType !== 'instant') cfgSb = false;
+      /* cfgSb is shared with the Challenges strip and is never cleared by a render:
+         each surface shows and charges Split Boost only on a plan that offers it
+         (steps === 0 && oferujeSb), so a stale "true" on 2-Step costs nothing and
+         the choice comes back when the visitor returns to Instant. */
       const chip = (id, on, txt) =>
         `<button type="button" class="cfg-chip${on ? ' on' : ''}" data-a="${id}">${txt}</button>`;
       pasek.innerHTML =

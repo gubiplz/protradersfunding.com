@@ -31,6 +31,9 @@ def _czysto(monkeypatch):
                  "ctrader_broker": "", "ctrader_login": ""}.items():
         monkeypatch.setattr(s, k, v)
     monkeypatch.setattr(cf, "ZAPIS_CO_S", 0.05)
+    # Testy luk nie mogą zależeć od dnia tygodnia ani czekać na pauzy między zapytaniami.
+    monkeypatch.setattr(cf, "_weekend", lambda ts: False)
+    monkeypatch.setattr(cf, "PAUZA_HIST_S", 0.0)
     db = SessionLocal()
     db.query(TerminalCandle).delete()
     db.query(AppSetting).filter(AppSetting.key.in_((cf.TOKEN_KLUCZ, cf.KONTO_KLUCZ, cf.SYMBOLE_KLUCZ, cf.ODRZUT_KLUCZ,
@@ -197,6 +200,52 @@ def test_luki_latane_trendbarami_a_ticki_nadpisuja_probki():
     okna = [(q["fromTimestamp"], q["toTimestamp"]) for q in req]
     od = int(dziura[0].replace(tzinfo=timezone.utc).timestamp() * 1000)
     assert (od, od + 5 * 60_000) in okna and all(q["period"] == cf.M1 for q in req)
+
+
+def _swiece_z_dziurami(coin, teraz, dziury):
+    """Ostatnie pół godziny z feedu, bez minut z `dziury` (lista zakresów minut wstecz)."""
+    s = SessionLocal()
+    for i in range(1, 30):
+        if not any(a <= i <= b for a, b in dziury):
+            s.add(TerminalCandle(coin=coin, ts=teraz - timedelta(minutes=i), o=1.1, h=1.1, l=1.1, c=1.1, n=cf.FEED_N))
+    s.commit(); s.close()
+
+
+def test_zapytania_historyczne_z_pauza_limitem_i_bez_weekendu(monkeypatch):
+    """Broker wpuszcza 5 zapytań historycznych na sekundę. Seria bez odstępów kończyła się
+    BLOCKED_PAYLOAD_TYPE co minutę i żadna luka nie była łatana."""
+    teraz = datetime.fromtimestamp(time.time() // 60 * 60, tz=timezone.utc).replace(tzinfo=None)
+    _swiece_z_dziurami("xyz:EUR", teraz, [(4, 6), (10, 12), (16, 18), (22, 24)])
+    pauzy = []
+    prawdziwy_sleep = asyncio.sleep
+
+    async def sleep(s):
+        pauzy.append(s)
+        await prawdziwy_sleep(0)
+
+    monkeypatch.setattr(cf.asyncio, "sleep", sleep)
+    monkeypatch.setattr(cf, "PAUZA_HIST_S", 0.25)
+    monkeypatch.setattr(cf, "MAX_HIST", 3)
+    srv = Serwer([])
+    asyncio.run(cf.sluchaj(0.1, polacz=lambda *_: srv))
+    hist = [x for x in srv.wyslane if x["payloadType"] == cf.PT["TRENDBARS_REQ"]]
+    assert len(hist) == 3 and pauzy.count(0.25) == 2            # limit na przebieg, pauza między zapytaniami
+    # Subskrypcja ticków idzie przed łataniem, żeby pauzy nie zjadały żywych kwotowań.
+    typy = srv.typy()
+    assert typy.index(cf.PT["SUB_SPOTS_REQ"]) < typy.index(cf.PT["TRENDBARS_REQ"])
+    # Weekend: rynki stoją, luk nie ma czym łatać — żadnego zapytania historycznego.
+    monkeypatch.setattr(cf, "_weekend", lambda ts: True)
+    srv2 = Serwer([])
+    asyncio.run(cf.sluchaj(0.1, polacz=lambda *_: srv2))
+    assert cf.PT["TRENDBARS_REQ"] not in srv2.typy()
+
+
+def test_weekend_liczony_w_dobie_serwera(monkeypatch):
+    monkeypatch.undo()                                         # prawdziwe _weekend, nie atrapa z fixture
+    monkeypatch.setattr(cf.get_settings(), "server_utc_offset_hours", 2)
+    assert cf._weekend(datetime(2026, 11, 13, 22, 0)) is True  # piątek 22:00 UTC = sobota 00:00 serwera
+    assert cf._weekend(datetime(2026, 11, 13, 21, 59)) is False
+    assert cf._weekend(datetime(2026, 11, 15, 22, 0)) is False  # niedziela 22:00 UTC = poniedziałek serwera
 
 
 def test_wygasly_token_odswiezony_i_zapisany():
