@@ -907,3 +907,30 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-intbox small{display:block;margin-top:4px;font-size:12px;color:var(--muted)}
 .t-intbox.bad small{color:var(--dn)}
 .t-intbox[hidden]{display:none}
+
+/* ---- Sliding indicator for segmented switches (static/js/slide-ind.js) ----
+   :where() keeps the positioning rule at zero specificity, so a group that is already
+   sticky or absolute stays that way. */
+:where(.sl-box){position:relative}
+.sl-ind{position:absolute;z-index:-1;left:0;top:0;width:0;height:0;pointer-events:none;
+  transition:left .38s cubic-bezier(.22,1,.36,1),top .38s cubic-bezier(.22,1,.36,1),width .38s cubic-bezier(.22,1,.36,1),height .38s cubic-bezier(.22,1,.36,1),background-color .25s,opacity .2s}
+.sl-ind.sl-now{transition:none}
+@media(prefers-reduced-motion:reduce){.sl-ind{transition:none}}
+.sl-box:not([data-slide=bar]){isolation:isolate}
+/* underline tabs: one bar that travels, instead of an underline per button */
+[data-slide=bar]>.sl-ind{z-index:1;top:auto;bottom:0;height:2px;border-radius:2px;background:var(--acc)}
+.t-ctabs.sl-box button[data-ctab].on::after,.t-btabs.sl-box>button.on::after,.t-ptabs.sl-box>[data-pt].on::after,
+.t-ptabs.sl-box>.t-dd>[data-pt].on::after,.t-otabs.sl-box [data-ot].on::after,.t-mtabs.sl-box button.on::after{content:none}
+/* chart intervals */
+.t-ints.sl-box button.on{background:none}
+.t-ints>.sl-ind{background:var(--panel3)}
+/* Buy / Sell: the fill slides across and changes colour on the way */
+.t-side.sl-box button.on.buy,.t-side.sl-box button.on.sell,
+:root[data-theme=light] .t-side.sl-box button.on{background:none}
+.t-side>.sl-ind{background:var(--up)}
+.t-side>.sl-ind.sell{background:var(--dn)}
+:root[data-theme=light] .t-side>.sl-ind{background:#0a8565}
+:root[data-theme=light] .t-side>.sl-ind.sell{background:#c63b49}
+/* market search categories */
+.t-search-cats.sl-box button.on{border-color:transparent;background:none}
+.t-search-cats>.sl-ind{box-sizing:border-box;border:1px solid var(--acc);background:var(--acc-soft)}

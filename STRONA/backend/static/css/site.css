@@ -965,3 +965,16 @@ html.promo-applied .promo-tag{background:rgba(255,255,255,.92);color:#4f46e5}
 .disclaimers-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 36px;align-items:start;margin-bottom:14px}
 .disclaimers-col p{margin:0 0 10px}
 @media(max-width:760px){.disclaimers-grid{grid-template-columns:1fr}}
+
+/* ---- Sliding indicator for segmented switches (static/js/slide-ind.js) ----
+   :where() keeps the positioning rule at zero specificity, so a group that is already
+   sticky or absolute stays that way. */
+:where(.sl-box){position:relative}
+.sl-ind{position:absolute;z-index:-1;left:0;top:0;width:0;height:0;pointer-events:none;
+  transition:left .38s cubic-bezier(.22,1,.36,1),top .38s cubic-bezier(.22,1,.36,1),width .38s cubic-bezier(.22,1,.36,1),height .38s cubic-bezier(.22,1,.36,1),background-color .25s,opacity .2s}
+.sl-ind.sl-now{transition:none}
+@media(prefers-reduced-motion:reduce){.sl-ind{transition:none}}
+.sl-box{isolation:isolate}
+/* hero configurator: 2-Step / Instant */
+.cfg-tabs.sl-box .cfg-tab.on{background:none}
+.cfg-tabs>.sl-ind{background:var(--grad);box-shadow:0 4px 14px -6px rgba(8,127,115,.55)}

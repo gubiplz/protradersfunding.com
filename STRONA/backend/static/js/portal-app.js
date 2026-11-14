@@ -1999,7 +1999,7 @@ function riskCardHtml(accs){
   const a=live.find(x=>x.id===wybor)
     ||live.reduce((b,x)=>riskRatio(riskOf(x))<riskRatio(riskOf(b))?x:b);
   const r=riskOf(a),m=a.metrics||{};
-  const chips=live.length>1?`<div class="rc-tabs">${live.map(x=>
+  const chips=live.length>1?`<div class="rc-tabs" data-slide data-slide-key="rc">${live.map(x=>
     `<button class="rc-tab${x.id===a.id?' on':''}" onclick="pickRiskAcc(${x.id})">${esc(x.login)}</button>`).join('')}</div>`:'';
   return `<div class="sec-card risk-card">
     <div class="rc-head">
@@ -4585,7 +4585,7 @@ async function openAcc(id){
       <div class="sec-card" style="margin-bottom:0">
         <div class="res-head"><h3>Current Results</h3>
           <div class="seg-mini"><span>Objective lines</span>
-            <span class="sw">
+            <span class="sw" data-slide data-slide-key="objl">
               <button data-on="1" class="${objOn?'on':''}" onclick="setObjLines(true)">On</button>
               <button data-on="0" class="${objOn?'':'on'}" onclick="setObjLines(false)">Off</button>
             </span></div>

@@ -18,7 +18,8 @@ const EASE='cubic-bezier(.22,1,.36,1)';
    „jechać" pod przyciskami (napis zmieniał kolor od razu, tło docierało
    później — wyglądało nienaturalnie). Zamiast tego wybrana opcja zapala się
    W MIEJSCU krótkim sprężystym wciśnięciem, a karta zmienia wysokość płynnie. */
-const GRUPY=[['#cfg-tabs','.cfg-tab','step'],['#pcfg-toggle','.ptog','t'],
+/* #cfg-tabs is not here: its fill slides under the labels (slide-ind.js). */
+const GRUPY=[['#pcfg-toggle','.ptog','t'],
              ['#pcfg-sizes','.psize','s'],['#cfg-sizes','.cfg-size','key']];
 const wybrane=new Map();
 function sprawdz(){

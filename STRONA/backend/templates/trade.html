@@ -63,7 +63,7 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
   </div>
 </div>
 
-<div class="t-mtabs" id="tMTabs" role="tablist" aria-label="Panels">
+<div class="t-mtabs" id="tMTabs" role="tablist" aria-label="Panels" data-slide="bar" data-slide-inset="18%">
   <button class="on" data-pane="chart" type="button" role="tab" aria-selected="true">Chart</button>
   <button data-pane="book" type="button" role="tab" aria-selected="false">Order Book</button>
   <button data-pane="trades" type="button" role="tab" aria-selected="false">Trades</button>
@@ -78,7 +78,7 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
       <button class="t-ico sm" id="tTickPrev" type="button" aria-label="Scroll left"><svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg></button>
       <button class="t-ico sm" id="tTickNext" type="button" aria-label="Scroll right"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></button>
     </div>
-    <div class="t-ctabs">
+    <div class="t-ctabs" data-slide="bar" data-slide-inset="10" data-slide-sel=".t-tabset > button.on">
       {# The tablist holds only the tabs; the account bar beside them is not a tab. #}
       <div class="t-tabset" role="tablist" aria-label="Chart views">
         <button class="on" data-ctab="chart" type="button" role="tab" aria-selected="true">Chart</button>
@@ -111,7 +111,7 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
     </div>
     <div class="t-cpane on" data-cpane="chart">
       <div class="t-ctools">
-        <div class="t-ints" id="tInts">
+        <div class="t-ints" id="tInts" data-slide>
           <button data-i="1m" type="button">1m</button><button data-i="3m" type="button">3m</button><button data-i="5m" type="button">5m</button><button data-i="15m" type="button">15m</button><button data-i="30m" type="button">30m</button><button data-i="1h" type="button">1h</button><button data-i="4h" type="button">4h</button><button data-i="1d" type="button">D</button><button data-i="1w" type="button">W</button>
         </div>
         <span class="t-sep"></span>
@@ -156,7 +156,7 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
   </section>
 
   <section class="t-book" data-pane="book trades">
-    <div class="t-btabs" role="tablist" aria-label="Market depth">
+    <div class="t-btabs" role="tablist" aria-label="Market depth" data-slide="bar" data-slide-inset="10">
       <button class="on" data-btab="book" type="button" role="tab" aria-selected="true">Order Book</button>
       <button data-btab="trades" type="button" role="tab" aria-selected="false">Trades</button>
     </div>
@@ -179,7 +179,7 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
   </section>
 
   <aside class="t-ticket" data-pane="ticket" id="tTicket">
-    <div class="t-otabs" role="group" aria-label="Order type">
+    <div class="t-otabs" role="group" aria-label="Order type" data-slide="bar" data-slide-inset="10" data-slide-sel="[data-ot].on">
       <button class="on" data-ot="market" type="button">Market</button>
       <button data-ot="limit" type="button">Limit</button>
       <div class="t-dd">
@@ -187,7 +187,7 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
         <div class="t-menu" id="tAdvMenu" hidden><button data-adv="stop" type="button">Stop Market</button></div>
       </div>
     </div>
-    <div class="t-side" role="group" aria-label="Side">
+    <div class="t-side" role="group" aria-label="Side" data-slide data-slide-sel="button.on" data-slide-copy="buy sell">
       <button class="on buy" data-side="buy" type="button">Buy / Long</button>
       <span class="t-spr" id="tSideSpr" title="Live spread: best ask − best bid" aria-live="off"><small>Spread</small><b class="num">—</b></span>
       <button class="sell" data-side="sell" type="button">Sell / Short</button>
@@ -232,7 +232,7 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
   </aside>
 
   <section class="t-bottom" data-pane="chart ticket">
-    <div class="t-ptabs" role="toolbar" aria-label="Account activity">
+    <div class="t-ptabs" role="toolbar" aria-label="Account activity" data-slide="bar" data-slide-inset="10" data-slide-sel=":scope > [data-pt].on, :scope > .t-dd > [data-pt].on">
       <button data-pt="accounts" type="button">Accounts</button>
       <button class="on" data-pt="positions" type="button">Positions<em id="tPosN"></em></button>
       <button data-pt="orders" type="button">Open Orders<em id="tOrdN"></em></button>
@@ -291,7 +291,7 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
 <div class="t-modal" id="tSearch" hidden role="dialog" aria-modal="true" aria-label="Search markets">
   <div class="t-card t-search">
     <div class="t-search-in"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="tSearchIn" placeholder="Search markets" autocomplete="off" aria-label="Search markets"><kbd>Esc</kbd></div>
-    <div class="t-search-cats" id="tSearchCats"></div>
+    <div class="t-search-cats" id="tSearchCats" data-slide></div>
     <div class="t-search-head"><span>Market</span><span>Price</span><span>24h</span><span>Volume</span></div>
     <div class="t-search-list" id="tSearchList"></div>
     <p class="t-search-note">More forex pairs and indices (AUD/USD, US30, GER40 and others) trade in MT5 on the same account.</p>
@@ -362,6 +362,7 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
 <script id="tMarkets" type="application/json">{{ markets_json | safe }}</script>
 <script src="/static/lib/klinecharts.min.js?v={{ asset_v }}" defer></script>
 <script src="/static/js/terminal-feed.js?v={{ asset_v }}" defer></script>
+<script src="/static/js/slide-ind.js?v={{ asset_v }}" defer></script>
 <script src="/static/js/terminal.js?v={{ asset_v }}" defer></script>
 </body>
 </html>

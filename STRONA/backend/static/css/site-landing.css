@@ -117,6 +117,8 @@
 .lpt-syms button,.lpt-ints button,.lpt-tabs button{padding:6px 11px;border-radius:8px;font-size:13px;font-weight:600;color:#8b9099;transition:color .15s,background .15s}
 .lpt-syms button:hover,.lpt-ints button:hover,.lpt-tabs button:hover{color:#fff}
 .lpt-syms .on,.lpt-ints .on,.lpt-tabs .on{color:#fff!important;background:#23252a}
+.lpt-syms.sl-box .on,.lpt-ints.sl-box .on,.lpt-tabs.sl-box .on{background:none}
+.lpt-syms>.sl-ind,.lpt-ints>.sl-ind,.lpt-tabs>.sl-ind{background:#23252a}
 .lpt-lev{font-size:12px;font-weight:700;color:#2ebd85;background:rgba(46,189,133,.13);padding:2px 8px;border-radius:7px}
 .lpt-q{display:flex;flex-direction:column;line-height:1.25}
 .lpt-q small{font-size:11px;color:#8b9099}
