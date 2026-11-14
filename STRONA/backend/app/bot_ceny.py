@@ -84,13 +84,52 @@ def _dzien(coin: str, iv: str, dzien: int, teraz_ms: int) -> list[dict]:
     return dane
 
 
+def _zapisane(coin: str, iv: str, start_ms: int, end_ms: int) -> dict[int, dict]:
+    """Świece z `terminal_candles` (feed brokera i próbki mid) złożone do `iv`, po czasie.
+    To one leżą na wykresie terminala na miejscu świec Hyperliquid (sampledOver w
+    terminal-feed.js), więc i transakcja bota musi z nich brać ceny."""
+    from .db import SessionLocal
+    from .models import TerminalCandle
+    krok = _MS[iv]
+    od = _dt(start_ms - krok).replace(tzinfo=None)
+    do = _dt(end_ms).replace(tzinfo=None)
+    session = SessionLocal()
+    try:
+        rows = (session.query(TerminalCandle)
+                .filter(TerminalCandle.coin == coin, TerminalCandle.ts >= od, TerminalCandle.ts <= do)
+                .order_by(TerminalCandle.ts).all())
+    finally:
+        session.close()
+    out: dict[int, dict] = {}
+    for r in rows:
+        t = (_ms(r.ts) // krok) * krok
+        k = out.get(t)
+        if k is None:
+            out[t] = {"t": t, "o": r.o, "h": r.h, "l": r.l, "c": r.c}
+        else:
+            k["h"], k["l"], k["c"] = max(k["h"], r.h), min(k["l"], r.l), r.c
+    return out
+
+
 def swiece(coin: str, start_ms: int, end_ms: int, teraz_ms: int | None = None) -> tuple[str, list[dict]]:
-    """(interwał, świece z [start, end]) — interwał dobrany do wieku okna."""
+    """(interwał, świece z [start, end]) — interwał dobrany do wieku okna. Na rynkach
+    z feedem brokera (FX, metale, JP225) zapisane świece zastępują Hyperliquid tam,
+    gdzie są — dokładnie tak, jak rysuje je wykres terminala."""
     teraz_ms = teraz_ms or int(time.time() * 1000)
     iv = _interwal(start_ms, teraz_ms)
     out: list[dict] = []
     for dzien in range(start_ms // _DZIEN_MS, end_ms // _DZIEN_MS + 1):
         out.extend(c for c in _dzien(coin, iv, dzien, teraz_ms) if start_ms - _MS[iv] < c["t"] <= end_ms)
+    if coin in markets.PROBKOWANE:
+        try:
+            nasze = _zapisane(coin, iv, start_ms, end_ms)
+        except Exception as e:  # pragma: no cover - baza
+            print(f"[bot-ceny] zapisane świece {coin}: {e}", flush=True)
+            nasze = {}
+        if nasze:
+            po_czasie = {c["t"]: c for c in out}
+            po_czasie.update({t: c for t, c in nasze.items() if start_ms - _MS[iv] < t <= end_ms})
+            out = list(po_czasie.values())
     out.sort(key=lambda c: c["t"])
     return iv, out
 
@@ -109,7 +148,7 @@ def _do_ticka(v: float, step: float, w_gore: bool) -> float:
 
 
 def zamknij(tr, inst, pv_fn, pnl: float, wyjscie: datetime, max_lots: float | None,
-            rng: random.Random, teraz: datetime | None = None) -> bool:
+            rng: random.Random, teraz: datetime | None = None, min_hold_s: float | None = None) -> bool:
     """Zamyka plan `tr` na prawdziwych cenach z wynikiem `pnl`.
 
     Wyjście: cena świecy, w której wypada `wyjscie`. Wejście: moment w oknie
@@ -146,6 +185,10 @@ def zamknij(tr, inst, pv_fn, pnl: float, wyjscie: datetime, max_lots: float | No
         if wyj_ms <= start_ms:
             return False
     trzymanie = max(MIN_HOLD_MS, int((wyj_ms - start_ms) * MIN_HOLD_UDZIAL))
+    if min_hold_s:
+        # Najkrótsze trzymanie stylu bota: swing nie może wyjść w historii na 1,5 h.
+        # Gdy plan był krótszy (przycięty do zamknięcia tygodnia), zostaje 90% planu.
+        trzymanie = max(trzymanie, int(min(min_hold_s * 1000, (wyj_ms - start_ms) * 0.9)))
     okno = [c for c in sw if c["t"] >= start_ms - krok_ms + 1 and c["t"] + krok_ms <= wyj_ms - trzymanie]
     if not okno:
         return False

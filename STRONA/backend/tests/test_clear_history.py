@@ -37,7 +37,7 @@ def _konto_po_bocie(login: str, *, status: str = "active", faza: str = "eval_1")
                   phase=faza, balance=START, equity=START, peak_equity=START,
                   day_start_equity=START, day_start_balance=START)
     s.add(acc); s.commit()
-    tradebot.start(s, acc, style="balanced", pace="busy", target_pct=10.0)
+    tradebot.start(s, acc, style="scalper", pace="busy", target_pct=10.0)
 
     # Slad, ktory bot zostawia po sobie w bazie: zamknieta i otwarta pozycja,
     # odczyty krzywej, obnizone saldo i liczniki fazy.

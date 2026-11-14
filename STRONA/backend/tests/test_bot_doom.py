@@ -80,7 +80,7 @@ def _konto(login: str, *, limit: str = "overall", dni: float = 3.0,
                   day_start_equity=size, day_start_balance=size,
                   started_at=START.replace(tzinfo=None))
     s.add(acc); s.commit()
-    tradebot.start(s, acc, pace="busy", mode="doom", doom_days=dni, doom_limit=limit)
+    tradebot.start(s, acc, style="scalper", pace="busy", mode="doom", doom_days=dni, doom_limit=limit)
     # Termin zjazdu przestawiamy na zegar symulacji — `start()` liczy go od
     # prawdziwego „teraz", a bieg jedzie po lipcu 2026: dystans do podlogi
     # rozlozylby sie na dziesiatki dni i konto nigdy by nie polegio.

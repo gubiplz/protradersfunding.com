@@ -6639,7 +6639,7 @@ async def admin_breach_account(account_id: int, payload: BreachIn):
 
 class BotIn(BaseModel):
     style: str = "balanced"      # scalper | balanced | swing
-    pace: str = "steady"         # light (1-2/dzień) | steady (4-8) | busy (~20)
+    pace: str = "steady"         # zostaje dla zgodności; liczbę transakcji wyznacza teraz styl (tradebot.STYLE_PLAN)
     target_pct: float = 0.0      # 0 = bez limitu; ujemny = spokojne zejście do tego poziomu
     mode: Literal["profit", "doom"] = "profit"
     doom_days: float | None = None      # w ilu dniach ma zjechać na podłogę

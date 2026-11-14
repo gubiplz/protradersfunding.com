@@ -864,10 +864,12 @@ const VIEWS={
 
  async pool(){
   const tab=window._termTab||'accounts';
-  $('view').innerHTML=`<div class="toolbar" style="margin-bottom:14px"><div class="seg">${[['accounts','Accounts'],['logins','Login log'],['pool','MT5 pool']]
-    .map(([k,l])=>`<button class="${tab===k?'on':''}" data-all="1" onclick="window._termTab='${k}';go('pool')">${l}</button>`).join('')}</div></div><div id="term-pane"></div>`;
+  /* window._termAcc: the account picked with "Log" on its row; a tab click clears it. */
+  $('view').innerHTML=`<div class="toolbar" style="margin-bottom:14px"><div class="seg">${[['accounts','Accounts'],['trades','Trades log'],['logins','Login log'],['pool','MT5 pool']]
+    .map(([k,l])=>`<button class="${tab===k?'on':''}" data-all="1" onclick="window._termTab='${k}';window._termAcc=0;go('pool')">${l}</button>`).join('')}</div></div><div id="term-pane"></div>`;
   if(tab==='accounts')return termAccounts();
-  if(tab==='logins')return termLogins();
+  if(tab==='logins')return termLogins(window._termAcc||0);
+  if(tab==='trades')return termTrades(window._termAcc||0);
   const poolData=await api('/api/admin/pool');
   const rows=poolData.pool||[], waiting=poolData.waiting||[];
   const free=rows.filter(p=>!p.claimed).length;
@@ -1773,7 +1775,7 @@ function termAccHtml(){
         <td data-l="Last sign-in" data-sort="${esc(l?l.at:'')}">${l?`${dstr(l.at)}<div class="muted" style="font-size:12px">${esc(l.ip||'—')} · ${esc(termWhere(l))}<br>${esc(l.device)}</div>`:'<span class="muted">Never</span>'}</td>
         <td data-l="Checks">${a.blocked?'<div class="dn"><b>Blocked</b></div>':''}${a.pool_mismatch?'<div class="dn">Pool entry does not match</div>':''}${a.flags.map(x=>`<div style="color:var(--gold,#b8892f)" title="${esc(x.detail)}">${esc(x.label)}</div>`).join('')||(a.blocked||a.pool_mismatch?'':'<span class="muted">OK</span>')}</td>
         <td class="rt-acts"><button class="btn-o sm" onclick="termView(${a.id})" title="Open the terminal as this trader (read-only, 2 h)">View</button>
-          <button class="btn-o sm" onclick="termHistory(${a.id})" title="Sign-in log of this MT5 login">Log</button>
+          <button class="btn-o sm" onclick="termHistory(${a.id})" title="Trades of this account and who opened each one (sign-ins are under Login log)">Log</button>
           <button class="btn-o sm" onclick="termOut(${a.id})" title="End every terminal session of this account">Sign out</button>
           <button class="btn-o sm" onclick="termBlock(${a.id},${!a.blocked})" title="${a.blocked?'Let the trader sign in again':'Sign out and refuse new sign-ins'}">${a.blocked?'Unblock':'Block'}</button>
           ${a.open_positions?`<button class="btn-o sm" style="color:var(--red)" onclick="termCloseAll(${a.id},${a.open_positions})" title="Close every open position at the current price and cancel pending orders">Close all</button>`:''}</td></tr>`}).join('')}</tbody></table></div>`
@@ -1819,7 +1821,7 @@ async function termLogins(accountId){
   $('term-pane').innerHTML=`<div class="toolbar"><div class="tb-filters"><div class="seg">
       <button class="${f?'':'on'}" onclick="window._termFailed=false;termLogins(${accountId||0})">All</button>
       <button class="${f?'on':''}" onclick="window._termFailed=true;termLogins(${accountId||0})">Failed</button></div>
-      ${accountId?`<span class="count-pill">Account #${accountId}</span>`:''}</div></div>`
+      ${accountId?`<span class="count-pill">Account #${accountId} <a href="#" onclick="window._termAcc=0;termLogins(0);return false" title="Show every account">×</a></span>`:''}</div></div>`
     +(d.logins.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.term-log">
       <thead><tr><th>When</th><th>MT5 login</th><th>Result</th><th>IP</th><th>Location</th><th>Device</th><th>Last seen</th></tr></thead>
       <tbody>${d.logins.map(l=>`<tr>
@@ -1832,10 +1834,40 @@ async function termLogins(accountId){
         <td data-l="Last seen" data-sort="${esc(l.last_seen||'')}">${l.last_seen?dstr(l.last_seen):'—'}</td></tr>`).join('')}</tbody></table></div>`
     :`<div class="empty"><h3>No sign-ins yet</h3><p>Terminal sign-ins appear here.</p></div>`);
 }
+/* "Log" on an account row: that account's trades (with who opened each one); the
+   Login log tab shows its sign-ins. The account stays picked until a tab is clicked. */
 function termHistory(id){
-  window._termTab='logins';
-  $$('#view .seg')[0]?.querySelectorAll('button').forEach((b,i)=>b.classList.toggle('on',i===1));
-  termLogins(id).catch(e=>toast('Error: '+e.message,'err'));
+  window._termTab='trades'; window._termAcc=id;
+  go('pool');
+}
+const TERM_SRC={terminal:['Terminal','Opened by the trader in the Built-in Terminal'],
+  bot:['Trade BOT','Placed by the Trade BOT'],bot_plan:['BOT plan','Trade BOT plan in progress, hidden from the trader until it closes'],
+  managed:['Managed','End of a Trade BOT plan shown to the trader as a Managed position']};
+async function termTrades(accountId){
+  const f=window._termSrc||'', st=window._termSt||'';
+  const q=new URLSearchParams({limit:'300'});
+  if(accountId)q.set('account_id',accountId); if(f)q.set('source',f); if(st)q.set('status',st);
+  const d=await api('/api/admin/terminal/trades?'+q);
+  const segBtn=(k,v,l,cur)=>`<button class="${cur===v?'on':''}" onclick="window.${k}='${v}';termTrades(${accountId||0})">${l}</button>`;
+  const px=(t,v)=>v==null?'—':Number(v).toFixed(t.px_dec);
+  $('term-pane').innerHTML=`<div class="toolbar"><div class="tb-filters">
+      <div class="seg">${segBtn('_termSrc','','All sources',f)}${segBtn('_termSrc','terminal','Terminal',f)}${segBtn('_termSrc','bot','Trade BOT',f)}${segBtn('_termSrc','managed','Managed',f)}</div>
+      <div class="seg">${segBtn('_termSt','','All',st)}${segBtn('_termSt','open','Open',st)}${segBtn('_termSt','closed','Closed',st)}</div>
+      ${accountId?`<span class="count-pill">Account #${accountId} <a href="#" onclick="window._termAcc=0;termTrades(0);return false" title="Show every account">×</a></span>`:''}</div></div>`
+    +(d.trades.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.term-trades">
+      <thead><tr><th>Opened</th><th>Account</th><th>Source</th><th>Market</th><th>Side</th><th>Lots</th><th>Entry</th><th>Exit</th><th>Closed</th><th>P&amp;L</th></tr></thead>
+      <tbody>${d.trades.map(t=>{const s=TERM_SRC[t.source]||[t.source,''];return `<tr>
+        <td data-l="Opened" data-sort="${esc(t.opened_at||'')}">${dstr(t.opened_at)}</td>
+        <td class="num rt-main" data-l="Account">${esc(t.login)} · ${accLink(t.account_id)}</td>
+        <td data-l="Source"><span class="${t.source==='terminal'?'':'muted'}" title="${esc(s[1])}"><b>${esc(s[0])}</b></span></td>
+        <td data-l="Market">${esc(t.symbol)}</td>
+        <td data-l="Side"><span class="${t.side==='buy'?'up':'dn'}">${t.side==='buy'?'Long':'Short'}</span></td>
+        <td class="num" data-l="Lots">${t.lots}</td>
+        <td class="num" data-l="Entry">${px(t,t.entry)}</td>
+        <td class="num" data-l="Exit">${t.status==='open'?'<span class="up">Open</span>':px(t,t.close)}</td>
+        <td data-l="Closed" data-sort="${esc(t.closed_at||t.plan_close_at||'')}">${t.closed_at?dstr(t.closed_at):(t.plan_close_at?`<span class="muted">plan ${dstr(t.plan_close_at)}</span>`:'—')}</td>
+        <td class="num ${t.pnl>=0?'up':'dn'}" data-l="P&amp;L">${t.source==='bot_plan'?`<span class="muted">plan ${t.plan_pnl>=0?'+':''}$${fmt0(t.plan_pnl||0)}</span>`:(t.pnl>=0?'+':'-')+'$'+Math.abs(t.pnl).toFixed(2)}</td></tr>`}).join('')}</tbody></table></div>`
+    :`<div class="empty"><h3>No trades</h3><p>Nothing matches this filter.</p></div>`);
 }
 async function termView(id){
   try{const r=await api(`/api/admin/terminal/accounts/${id}/view`,{method:'POST'});
@@ -3821,7 +3853,8 @@ async function markOrderPaid(id,email,amount){
 }
 
 /* Bot pace is stored as a short key; the chip shows what it actually means. */
-const PACE_TXT={light:'1–2 trades/day',steady:'4–8 trades/day',busy:'~20 trades/day'};
+/* The style sets how long the bot holds a position and how many it takes (tradebot.STYLE_PLAN). */
+const STYLE_TXT={scalper:'Scalp · 5–45 min · 10–25 a day',balanced:'Intraday · 45 min–6 h · 2–6 a day',swing:'Swing · 6 h–3 days · 2–5 a week'};
 
 /* Numer konta w tabeli ma być drzwiami, nie ślepą liczbą — łańcuch
    zamówienie→konto kończył się na ręcznym szukaniu w zakładce Accounts. */
@@ -3919,8 +3952,7 @@ async function openAccount(id){
       ${a.bot_enabled?`
         <div class="chip-row" style="margin-bottom:12px">
           <span class="status ${a.bot_paused?'pending':'funded'}"><span class="dot"></span>${a.bot_paused?'paused':'running'}</span>
-          <span class="chip">style <b>${esc(a.bot_style||'balanced')}</b></span>
-          <span class="chip">pace <b>${esc(PACE_TXT[a.bot_pace]||a.bot_pace||'steady')}</b></span>
+          <span class="chip">style <b>${esc(STYLE_TXT[a.bot_style||'balanced']||a.bot_style)}</b></span>
           ${a.bot_target_pct?`<span class="chip">${a.bot_target_pct>0?'stops at':'drifts to'} <b>${pctS(a.bot_target_pct)}</b></span>`:''}
           ${(a.bot_outcome&&a.bot_outcome.mode==='doom')?`<span class="status failed"><span class="dot"></span>riding down</span>`:''}
         </div>
@@ -3972,15 +4004,9 @@ async function openAccount(id){
         <div class="pool-form">
           <div><label class="muted" style="font-size:12px">Style</label>
             <select id="bot-style" class="inp">
-              <option value="scalper">Scalper — many small trades</option>
-              <option value="balanced" selected>Balanced — day trader</option>
-              <option value="swing">Swing — fewer, larger trades</option>
-            </select></div>
-          <div><label class="muted" style="font-size:12px">Pace</label>
-            <select id="bot-pace" class="inp">
-              <option value="light">Light — 1–2 trades a day</option>
-              <option value="steady" selected>Steady — 4–8 trades a day</option>
-              <option value="busy">Busy — around 20 trades a day</option>
+              <option value="scalper">Scalp — 5–45 min per trade, 10–25 a day</option>
+              <option value="balanced" selected>Intraday — 45 min to 6 h, 2–6 a day</option>
+              <option value="swing">Swing — 6 h to 3 days, 2–5 a week</option>
             </select></div>
           <div><label class="muted" style="font-size:12px">Target %</label>
             <input id="bot-target" class="inp" type="number" step="0.1" min="-9.5" value="0"
@@ -3992,12 +4018,13 @@ async function openAccount(id){
         equity curve, always inside the account's own risk rules.
         <b>While the bot runs, this account is not read from MT5</b>, so the portal will
         diverge from the trader's MT5 terminal, and stopping the bot resyncs the
-        balance back to the real account. <b>Pace is how many trades a day</b> the bot takes:
-        it spreads them across the day and holds each position for a matching stretch, so
-        Busy is around one trade an hour, not one a minute. Style shades that count: a
-        scalper sits at the top of the range, a swing trader at the bottom.
-        <b>No pace trades over the weekend</b> unless the challenge has the Weekend Trading
-        add-on, and then the bot only touches crypto, the one market open on Saturday.</p>
+        balance back to the real account. <b>The style sets how long each position is held
+        and how many the bot takes</b>, the same in the history and in live trading, so on
+        any chart interval the account looks like one trader. Forex, metals and indices are
+        closed before the weekend, so the bot does not open them when there is not enough
+        week left for its shortest hold. <b>Nothing trades over the weekend</b> unless the
+        challenge has the Weekend Trading add-on, and then only crypto, which can be held
+        through it.</p>
     </div>
     <div class="sec-card" style="margin:0" id="bot-tune-card"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -4293,7 +4320,7 @@ function bar(label,pct,danger,suffix){const p=Math.min(100,Math.max(0,pct||0));
     <div class="prog-bar"><i class="${cls}" style="width:${p}%"></i></div></div>`}
 
 async function startBot(id){
-  const body={style:$('bot-style').value,pace:$('bot-pace').value,
+  const body={style:$('bot-style').value,
     target_pct:parseFloat($('bot-target').value||'0')||0};
   try{await api(`/api/admin/accounts/${id}/bot`,{method:'POST',body:JSON.stringify(body)});
     toast('🤖 Trade BOT started. The dashboard starts filling on the next poller tick.','ok',8000);

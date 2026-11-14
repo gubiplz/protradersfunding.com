@@ -39,6 +39,9 @@ def _czysto(monkeypatch):
     monkeypatch.setattr(terminal, "PROBKA_S", 0.001)
     # Bez klucza feed i historia nie wychodzą do sieci; testy feedu ustawiają klucz same.
     monkeypatch.setattr(terminal.get_settings(), "finnhub_api_key", "")
+    # Próbkowanie biegnie w czasie rzeczywistym: w weekend pomija rynki zamknięte, więc
+    # testy nie mogą zależeć od dnia tygodnia. Weekend sprawdzają testy niżej, wprost.
+    monkeypatch.setattr(terminal.tradebot, "is_weekend", lambda now=None: False)
     terminal._FEED_PAUZA["do"] = 0.0
     s = SessionLocal()
     s.query(TerminalCandle).delete()
@@ -313,3 +316,40 @@ def test_cron_odpala_ctrader_rownolegle_z_probkowaniem(monkeypatch):
     _mid_sekwencja(monkeypatch, [1.1, 1.2])
     w = terminal.cron_swiece(0.05)
     assert w["ctrader"] == {"ticks": 12, "rows": 3} and len(wywolania) == 1 and w["rows"] >= len(markets.PROBKOWANE)
+
+
+def test_weekend_bez_swiec_na_rynkach_zamknietych(monkeypatch):
+    """W weekend forex, metale i indeksy stoją: próbkowanie nie zapisuje im świec, a krypto
+    tak; endpoint nie oddaje weekendowych wierszy rynku zamkniętego (także tych zapisanych
+    wcześniej), więc wykres nie dostaje płaskiej kreski ani skoku przy zmianie źródła."""
+    monkeypatch.setattr(terminal.tradebot, "is_weekend", lambda now=None: True)
+    _mid_sekwencja(monkeypatch, [1.1, 1.2, 1.3])
+    terminal.probkuj_swiece(0.05)
+    s = SessionLocal()
+    monety = {r.coin for r in s.query(TerminalCandle).all()}
+    s.close()
+    assert monety and not (monety & markets.SAMPLED) and monety <= markets.MID_CANDLES
+    # Prawdziwa reguła weekendu dla endpointu: sobota i niedziela czasu serwera.
+    monkeypatch.setattr(terminal.tradebot, "is_weekend", _prawdziwy_weekend)
+    piatek = datetime(2026, 11, 13, 21, 58, tzinfo=timezone.utc)     # 23:58 serwera (UTC+2)
+    s = SessionLocal()
+    s.query(TerminalCandle).delete()
+    for i in range(6):                                                # 21:58 … 22:03 UTC
+        t = (piatek + timedelta(minutes=i)).replace(tzinfo=None)
+        s.add(TerminalCandle(coin="xyz:EUR", ts=t, o=1.1, h=1.1, l=1.1, c=1.1, n=-1))
+        s.add(TerminalCandle(coin="LTC", ts=t, o=80.0, h=80.0, l=80.0, c=80.0, n=5))
+    s.commit(); s.close()
+    koniec = int((piatek + timedelta(minutes=10)).timestamp() * 1000)
+    with TestClient(app) as cl:
+        fx = cl.get(f"/api/terminal/candles?symbol=EURUSD&interval=1m&end={koniec}&limit=20").json()["candles"]
+        ltc = cl.get(f"/api/terminal/candles?symbol=LTCUSD&interval=1m&end={koniec}&limit=20").json()["candles"]
+        assert len(fx) == 2 and len(ltc) == 6                         # FX tylko do piątku 23:59 serwera
+        assert cl.get("/api/terminal/markets").json()["server_utc_offset_h"] == terminal.settings.server_utc_offset_hours
+
+
+def _prawdziwy_weekend(now=None):
+    from datetime import timedelta as _td
+    base = now or datetime.now(timezone.utc)
+    if base.tzinfo is None:
+        base = base.replace(tzinfo=timezone.utc)
+    return (base + _td(hours=terminal.settings.server_utc_offset_hours)).weekday() >= 5

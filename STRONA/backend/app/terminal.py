@@ -1200,7 +1200,12 @@ def probkuj_swiece(budzet_s: float, zajmij: bool = True, feed: bool = True) -> d
         except Exception:
             ceny = {}
         minuta = _now().replace(second=0, microsecond=0, tzinfo=None)
+        weekend = tradebot.is_weekend(minuta)
         for coin, px in ceny.items():
+            # Rynek zamknięty w weekend nie ma świec: mid stoi na piątkowym zamknięciu
+            # (albo skacze przy zmianie źródła), a płaska kreska psuła wykres.
+            if weekend and not markets.otwarty_w_weekend(coin):
+                continue
             s = swiece.get((coin, minuta))
             if s is None:
                 swiece[(coin, minuta)] = [px, px, px, px, 1]
@@ -1482,7 +1487,10 @@ def api_candles(response: Response, symbol: str, interval: str = "1m", end: int 
     finally:
         session.close()
     out: list[dict] = []
+    zamkniety_w_weekend = not markets.otwarty_w_weekend(m.hl)
     for r in rows:
+        if zamkniety_w_weekend and tradebot.is_weekend(r.ts):
+            continue
         t = (int(r.ts.replace(tzinfo=timezone.utc).timestamp() * 1000) // krok) * krok
         if out and out[-1]["timestamp"] == t:
             k = out[-1]
@@ -1515,7 +1523,8 @@ def api_quotes(response: Response):
 @router.get("/markets")
 def api_markets():
     return {"markets": markets.public_list(), "fee_pct": round(FEE_PCT * 100, 3),
-            "max_slippage_pct": MAX_SLIPPAGE * 100, "weekend": tradebot.is_weekend()}
+            "max_slippage_pct": MAX_SLIPPAGE * 100, "weekend": tradebot.is_weekend(),
+            "server_utc_offset_h": settings.server_utc_offset_hours}
 
 
 # --- logowanie danymi MT5 -----------------------------------------------------
@@ -2170,6 +2179,52 @@ def admin_logins(account_id: int | None = None, failed: bool = False, limit: int
         if failed:
             q = q.filter(TerminalLogin.ok.is_(False))
         return {"logins": [_login_dict(w) for w in q.order_by(TerminalLogin.id.desc()).limit(min(limit, 500)).all()]}
+    finally:
+        session.close()
+
+
+def zrodlo_transakcji(t: Trade) -> str:
+    """Kto otworzył pozycję: trader w terminalu, Trade BOT (ukryty plan, transakcja na
+    wykresie albo syntetyczna) czy końcówka planu pokazana klientowi jako Managed."""
+    if t.venue == tradebot.OGON:
+        return "managed"
+    if t.source == "terminal":
+        return "terminal"
+    if t.venue == tradebot.PLAN:
+        return "bot_plan"
+    return "bot"
+
+
+@admin_router.get("/trades")
+def admin_trades(account_id: int | None = None, source: str | None = None, status: str | None = None,
+                 limit: int = 300):
+    """Transakcje i pozycje z kont terminala z ich źródłem — do sprawdzenia, czy pozycję
+    otworzył trader, bot, czy to końcówka Managed. Otwarte najpierw, potem najnowsze."""
+    session = SessionLocal()
+    try:
+        q = session.query(Trade, Account.login).join(Account, Account.id == Trade.account_id)
+        if account_id:
+            q = q.filter(Trade.account_id == account_id)
+        if status in ("open", "closed"):
+            q = q.filter(Trade.status == status)
+        if source == "terminal":
+            q = q.filter(Trade.source == "terminal", or_(Trade.venue.is_(None), Trade.venue != tradebot.OGON))
+        elif source == "managed":
+            q = q.filter(Trade.venue == tradebot.OGON)
+        elif source == "bot":
+            q = q.filter(Trade.source != "terminal", or_(Trade.venue.is_(None), Trade.venue != tradebot.OGON))
+        rows = (q.order_by((Trade.status == "open").desc(), Trade.id.desc()).limit(min(max(limit, 1), 1000)).all())
+        out = []
+        for t, login in rows:
+            m = markets.get(t.symbol)
+            out.append({"id": t.id, "account_id": t.account_id, "login": login, "symbol": t.symbol, "side": t.side,
+                        "lots": round(float(t.lots or 0.0), 4), "status": t.status, "source": zrodlo_transakcji(t),
+                        "entry": t.open_price, "close": t.close_price, "pnl": round(float(t.pnl or 0.0), 2),
+                        "plan_pnl": t.plan_pnl if t.venue == tradebot.PLAN else None,
+                        "opened_at": _iso(t.opened_at), "closed_at": _iso(t.closed_at),
+                        "plan_close_at": _iso(t.plan_close_at), "reason": t.close_reason,
+                        "px_dec": m.px_dec if m else 5})
+        return {"trades": out}
     finally:
         session.close()
 

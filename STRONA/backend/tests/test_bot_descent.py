@@ -67,7 +67,7 @@ def _konto(login: str, *, cel: float, wynik_pct: float = 0.0) -> int:
                   day_start_equity=saldo, day_start_balance=saldo,
                   started_at=START.replace(tzinfo=None))
     s.add(acc); s.commit()
-    tradebot.start(s, acc, pace="busy", target_pct=cel)
+    tradebot.start(s, acc, style="scalper", pace="busy", target_pct=cel)
     acc.bot_seed = int.from_bytes(hashlib.sha256(login.encode()).digest()[:4], "big") & 0x7FFFFFFF
     s.commit()
     aid = acc.id

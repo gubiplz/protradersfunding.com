@@ -248,6 +248,15 @@ def test_weekend_liczony_w_dobie_serwera(monkeypatch):
     assert cf._weekend(datetime(2026, 11, 15, 22, 0)) is False  # niedziela 22:00 UTC = poniedziałek serwera
 
 
+def test_weekend_kwotowanie_zostaje_a_swiec_nie_ma(monkeypatch):
+    """W weekend rynki feedu stoją: bid/ask zostaje (terminal pokazuje piątkowe zamknięcie),
+    ale świec nie ma — płaskie minuty i skok przy zmianie źródła psuły wykres."""
+    monkeypatch.setattr(cf, "_weekend", lambda ts: True)
+    sw = cf.Swiece()
+    sw.tick("xyz:EUR", 1.10212, 1.10218, time.time())
+    assert sw.kwoty() == {"xyz:EUR": (1.10212, 1.10218)} and sw.zrzut() == {} and sw.ticki == 0
+
+
 def test_wygasly_token_odswiezony_i_zapisany():
     wymiany = []
 
