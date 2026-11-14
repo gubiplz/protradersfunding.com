@@ -233,6 +233,35 @@ def test_plaski_rynek_czeka_a_potem_wieksza_pozycja(monkeypatch):
     bot_ceny._CACHE.clear()
 
 
+def test_swiece_bota_z_feedu_brokera_tam_gdzie_wykres(zywe):
+    """FX z feedem brokera: zapisane świece (terminal_candles) zastępują Hyperliquid w tych
+    minutach, w których są — tak jak rysuje je wykres — więc wejście i wyjście bota leżą
+    na tej samej świecy, którą klient widzi. Gdzie zapisanych nie ma, zostaje Hyperliquid."""
+    from app.models import TerminalCandle
+    bot_ceny._CACHE.clear()
+    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0) - timedelta(hours=2)
+    s = SessionLocal()
+    s.query(TerminalCandle).filter(TerminalCandle.coin == "xyz:EUR").delete()
+    for i in range(10):                                       # 10 minut feedu brokera
+        t = (t0 + timedelta(minutes=i)).replace(tzinfo=None)
+        s.add(TerminalCandle(coin="xyz:EUR", ts=t, o=1.20 + i * 1e-4, h=1.21 + i * 1e-4, l=1.19 + i * 1e-4,
+                             c=1.205 + i * 1e-4, n=-1))
+    s.commit(); s.close()
+    start = int(t0.timestamp() * 1000)
+    iv, sw = bot_ceny.swiece("xyz:EUR", start, start + 20 * 60_000)
+    assert iv == "1m"
+    po = {c["t"]: c for c in sw}
+    assert po[start]["o"] == 1.20 and po[start + 9 * 60_000]["c"] == round(1.205 + 9e-4, 10)
+    # Minuty bez zapisanego wiersza: Hyperliquid (fala ~1.11, daleko od 1.20).
+    assert abs(po[start + 15 * 60_000]["c"] - 1.11) < 0.05
+    # Rynek bez feedu brokera nie czyta bazy.
+    _, btc = bot_ceny.swiece("BTC", start, start + 20 * 60_000)
+    assert all(abs(c["c"] - 77_000) < 77_000 * 0.05 for c in btc)
+    s = SessionLocal()
+    s.query(TerminalCandle).filter(TerminalCandle.coin == "xyz:EUR").delete()
+    s.commit(); s.close()
+
+
 def test_koszyk_tylko_z_notowanymi_rynkami(zywe):
     p = tradebot.Persona(style="balanced", pace="steady", win_rate=0.6, avg_r=1.5, risk_pct=0.3,
                          daily_target_pct=0.5, red_day_odds=0.2, trades_per_day=6,
@@ -377,6 +406,28 @@ def test_koncowka_zamyka_sie_na_celu_i_w_terminie(zywe):
     s = SessionLocal(); s.get(Trade, t2).plan_close_at = (datetime.now(timezone.utc) - timedelta(seconds=1)).replace(tzinfo=None); s.commit(); s.close()
     _tick(aid2)
     assert _tr(t2).status == "closed" and _tr(t2).close_price == w.open_price
+
+
+def test_koncowka_bez_ceny_nie_wisi_dniami(zywe):
+    """Gdy bieżącej ceny nie ma, końcówka Managed (widoczna dla klienta) czeka najwyżej
+    OGON_PODDAJ po terminie, potem zamyka się po ostatniej świecy wykresu."""
+    _mid(zywe)
+    aid, _, _ = _konto("ogon-bez-ceny")
+    tid = _plan_na_ogon(aid)
+    _tick(aid)
+    assert _tr(tid).venue == tradebot.OGON
+    zywe.setattr(markets, "mids", lambda coins: {})
+    s = SessionLocal()
+    s.get(Trade, tid).plan_close_at = (datetime.now(timezone.utc) - timedelta(minutes=5)).replace(tzinfo=None)
+    s.commit(); s.close()
+    _tick(aid)
+    assert _tr(tid).status == "open"                       # 5 min po terminie: jeszcze czeka
+    s = SessionLocal()
+    s.get(Trade, tid).plan_close_at = (datetime.now(timezone.utc) - tradebot.OGON_PODDAJ - timedelta(minutes=1)).replace(tzinfo=None)
+    s.commit(); s.close()
+    _tick(aid)
+    z = _tr(tid)
+    assert z.status == "closed" and z.close_price == OGON_CENA
 
 
 def test_reczne_zamkniecie_zostawia_wynik_klienta(zywe):

@@ -88,7 +88,7 @@
     fsyms: new Set(ls.json('pf_term_fsyms', [])),   // market filter of the lists (empty = all)
     sort: ls.json('pf_term_sort', {}),              // per list tab: { h: column label, dir: 'asc' | 'desc' }
     showTrades: ls.get('pf_term_trades', '1') === '1',     // trade history on the chart ("Trades" button)
-    weekend: false, fee: 0.009, group: null, top: [0, 0], bookUnit: 'base', tickMode: ls.get('pf_term_tick', 'trending'),
+    weekend: false, srvOff: 2, fee: 0.009, group: null, top: [0, 0], bookUnit: 'base', tickMode: ls.get('pf_term_tick', 'trending'),
   };
   if (!F.venuesFor(S.m).includes(S.venue)) S.venue = 'hyperliquid';
   // Leverage isn't selectable: fixed per market (the server calculates with it anyway).
@@ -392,7 +392,7 @@
           } else if (type === 'forward') {
             const d = await F.history(S.venue, S.m, S.interval, timestamp - 1, 500);
             if (nr !== loadSeq) return;
-            callback(d.filter((k) => k.timestamp < timestamp), { forward: d.length > 10, backward: false });
+            callback(openBars(S.m, S.interval, d).filter((k) => k.timestamp < timestamp), { forward: d.length > 10, backward: false });
           } else callback([], { forward: false, backward: false });
         } catch (e) {
           if (nr !== loadSeq) return;
@@ -426,8 +426,14 @@
     if (histMem.size > 40) histMem.delete(histMem.keys().next().value);
     return p;
   }
+  /* Forex, metals, energy and indices are closed from Friday's close to Monday's open
+     (server time). A bar that lies wholly in that window is a flat line at Friday's price,
+     or a jump when the source changed: it is left off the chart, so Monday follows Friday. */
+  const wkndDay = (t) => { const d = new Date(t + S.srvOff * 3600e3).getUTCDay(); return d === 6 || d === 0; };
+  const closedBar = (m, t, step) => !!m && m.cls !== 'crypto' && wkndDay(t) && wkndDay(t + (step || 60000) - 1);
+  const openBars = (m, i, bars) => (m && m.cls !== 'crypto' ? bars.filter((k) => !closedBar(m, k.timestamp, F.MS[i])) : bars);
   // Copies: the chart may change the bars it was given.
-  const histCached = async (v, m, i, n) => (await histLoad(v, m, i, n)).map((k) => ({ ...k }));
+  const histCached = async (v, m, i, n) => openBars(m, i, await histLoad(v, m, i, n)).map((k) => ({ ...k }));
   $('tInts').addEventListener('pointerover', (e) => {
     const b = e.target.closest('[data-i]');
     if (b && b.dataset.i !== S.interval && S.m) histLoad(S.venue, S.m, b.dataset.i, 500).catch(() => {});
@@ -990,6 +996,7 @@
   let shownBar = null, glide = null, glideRaf = 0;
   function pushBar(k) {
     if (!barCb) return;
+    if (closedBar(S.m, k.timestamp, F.MS[S.interval])) return;   // no live candle on a closed market
     // New candle: close the last one at its final price, start the new one without a glide.
     if (!shownBar || shownBar.timestamp !== k.timestamp || REDUCED) {
       if (glide && shownBar && shownBar.timestamp !== k.timestamp) barCb(glide.to);
@@ -1022,6 +1029,7 @@
     if (!barCb || !lastBar || !(p > 0)) return;
     p = Math.round(p * 1e8) / 1e8;   // (bid + ask) / 2 leaves float dust such as 4048.8500000000004
     const step = F.MS[S.interval], now = Date.now();
+    if (closedBar(S.m, now, step)) return;   // weekend on a closed market: the chart ends at Friday's close
     if (now >= lastBar.timestamp + step) {
       // Next bar only on the exact boundary: daily and weekly bars don't start
       // on epoch multiples, and after a hidden tab the exchange candle fills the gap.
@@ -1078,7 +1086,7 @@
     vis: () => { if (!chart) return null; const r = chart.getVisibleRange(), d = chart.getDataList(); return [d[Math.max(0, Math.floor(r.from))], d[Math.min(d.length - 1, Math.ceil(r.to) - 1)]].map((k) => k && k.timestamp); },
   };
   function mergeBar(k) {
-    if (!barCb) return;
+    if (!barCb || closedBar(S.m, k.timestamp, F.MS[S.interval])) return;
     if (lastBar && k.timestamp === lastBar.timestamp) lastBar = { ...lastBar, high: Math.max(lastBar.high, k.high), low: Math.min(lastBar.low, k.low), volume: k.volume };
     else if (!lastBar || k.timestamp > lastBar.timestamp) lastBar = k;
     else return;
@@ -3585,7 +3593,7 @@
     restoreLogins();
     if (S.imp) toast('Admin view', 'Read-only view of this account. Trading is off.');
     loadAccounts();
-    fetch('/api/terminal/markets').then((r) => r.json()).then((d) => { S.weekend = !!d.weekend; S.fee = d.fee_pct; updateTicket(); renderInfo(); }).catch(() => {});
+    fetch('/api/terminal/markets').then((r) => r.json()).then((d) => { S.weekend = !!d.weekend; if (Number.isFinite(d.server_utc_offset_h)) S.srvOff = d.server_utc_offset_h; S.fee = d.fee_pct; updateTicket(); renderInfo(); }).catch(() => {});
     if (root.dataset.missing) toast(`${root.dataset.missing} trades in MT5`, 'The web terminal has crypto, metals, energy, indices and EUR/GBP/JPY for now.');
     // "See the full list" from the home page: /trade?list=all opens the list of all markets.
     if (new URLSearchParams(location.search).has('list')) {

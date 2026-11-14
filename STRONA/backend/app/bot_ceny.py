@@ -84,13 +84,52 @@ def _dzien(coin: str, iv: str, dzien: int, teraz_ms: int) -> list[dict]:
     return dane
 
 
+def _zapisane(coin: str, iv: str, start_ms: int, end_ms: int) -> dict[int, dict]:
+    """Świece z `terminal_candles` (feed brokera i próbki mid) złożone do `iv`, po czasie.
+    To one leżą na wykresie terminala na miejscu świec Hyperliquid (sampledOver w
+    terminal-feed.js), więc i transakcja bota musi z nich brać ceny."""
+    from .db import SessionLocal
+    from .models import TerminalCandle
+    krok = _MS[iv]
+    od = _dt(start_ms - krok).replace(tzinfo=None)
+    do = _dt(end_ms).replace(tzinfo=None)
+    session = SessionLocal()
+    try:
+        rows = (session.query(TerminalCandle)
+                .filter(TerminalCandle.coin == coin, TerminalCandle.ts >= od, TerminalCandle.ts <= do)
+                .order_by(TerminalCandle.ts).all())
+    finally:
+        session.close()
+    out: dict[int, dict] = {}
+    for r in rows:
+        t = (_ms(r.ts) // krok) * krok
+        k = out.get(t)
+        if k is None:
+            out[t] = {"t": t, "o": r.o, "h": r.h, "l": r.l, "c": r.c}
+        else:
+            k["h"], k["l"], k["c"] = max(k["h"], r.h), min(k["l"], r.l), r.c
+    return out
+
+
 def swiece(coin: str, start_ms: int, end_ms: int, teraz_ms: int | None = None) -> tuple[str, list[dict]]:
-    """(interwał, świece z [start, end]) — interwał dobrany do wieku okna."""
+    """(interwał, świece z [start, end]) — interwał dobrany do wieku okna. Na rynkach
+    z feedem brokera (FX, metale, JP225) zapisane świece zastępują Hyperliquid tam,
+    gdzie są — dokładnie tak, jak rysuje je wykres terminala."""
     teraz_ms = teraz_ms or int(time.time() * 1000)
     iv = _interwal(start_ms, teraz_ms)
     out: list[dict] = []
     for dzien in range(start_ms // _DZIEN_MS, end_ms // _DZIEN_MS + 1):
         out.extend(c for c in _dzien(coin, iv, dzien, teraz_ms) if start_ms - _MS[iv] < c["t"] <= end_ms)
+    if coin in markets.PROBKOWANE:
+        try:
+            nasze = _zapisane(coin, iv, start_ms, end_ms)
+        except Exception as e:  # pragma: no cover - baza
+            print(f"[bot-ceny] zapisane świece {coin}: {e}", flush=True)
+            nasze = {}
+        if nasze:
+            po_czasie = {c["t"]: c for c in out}
+            po_czasie.update({t: c for t, c in nasze.items() if start_ms - _MS[iv] < t <= end_ms})
+            out = list(po_czasie.values())
     out.sort(key=lambda c: c["t"])
     return iv, out
 

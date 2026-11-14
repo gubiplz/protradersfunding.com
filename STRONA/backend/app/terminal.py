@@ -1200,7 +1200,12 @@ def probkuj_swiece(budzet_s: float, zajmij: bool = True, feed: bool = True) -> d
         except Exception:
             ceny = {}
         minuta = _now().replace(second=0, microsecond=0, tzinfo=None)
+        weekend = tradebot.is_weekend(minuta)
         for coin, px in ceny.items():
+            # Rynek zamknięty w weekend nie ma świec: mid stoi na piątkowym zamknięciu
+            # (albo skacze przy zmianie źródła), a płaska kreska psuła wykres.
+            if weekend and not markets.otwarty_w_weekend(coin):
+                continue
             s = swiece.get((coin, minuta))
             if s is None:
                 swiece[(coin, minuta)] = [px, px, px, px, 1]
@@ -1482,7 +1487,10 @@ def api_candles(response: Response, symbol: str, interval: str = "1m", end: int 
     finally:
         session.close()
     out: list[dict] = []
+    zamkniety_w_weekend = not markets.otwarty_w_weekend(m.hl)
     for r in rows:
+        if zamkniety_w_weekend and tradebot.is_weekend(r.ts):
+            continue
         t = (int(r.ts.replace(tzinfo=timezone.utc).timestamp() * 1000) // krok) * krok
         if out and out[-1]["timestamp"] == t:
             k = out[-1]
@@ -1515,7 +1523,8 @@ def api_quotes(response: Response):
 @router.get("/markets")
 def api_markets():
     return {"markets": markets.public_list(), "fee_pct": round(FEE_PCT * 100, 3),
-            "max_slippage_pct": MAX_SLIPPAGE * 100, "weekend": tradebot.is_weekend()}
+            "max_slippage_pct": MAX_SLIPPAGE * 100, "weekend": tradebot.is_weekend(),
+            "server_utc_offset_h": settings.server_utc_offset_hours}
 
 
 # --- logowanie danymi MT5 -----------------------------------------------------

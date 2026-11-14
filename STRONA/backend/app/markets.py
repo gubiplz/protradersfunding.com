@@ -118,6 +118,13 @@ MID_CANDLES: frozenset[str] = frozenset({"LTC", "ADA", "AVAX", "LINK", "SUI", "B
 PROBKOWANE: frozenset[str] = SAMPLED | MID_CANDLES
 
 
+def otwarty_w_weekend(coin: str) -> bool:
+    """Czy rynek (moneta Hyperliquida) chodzi w weekend — tylko krypto. Forex, metale,
+    surowce i indeksy stoją od piątkowego zamknięcia do poniedziałku (czas serwera)."""
+    m = next((x for x in MARKETS if x.hl == coin), None)
+    return bool(m and m.cls == "crypto")
+
+
 def public_list() -> list[dict]:
     return [{**asdict(m), "sampled": m.hl in SAMPLED, "mid_candles": m.hl in MID_CANDLES} for m in MARKETS]
 

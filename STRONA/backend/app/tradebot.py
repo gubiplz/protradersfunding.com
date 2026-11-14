@@ -423,6 +423,7 @@ PLAN = "plan"                       # Trade.venue planu w toku (klient go nie wi
 OGON = "tail"                       # żywa końcówka na koncie zarządzanym (klient ją widzi jako Managed)
 OGON_OD_S, OGON_DO_S = 180, 480     # na tyle przed planowanym zamknięciem pozycja staje się widoczna
 OGON_CEL = 0.85                     # bieżący wynik na starcie: ten ułamek planu; resztę musi dać rynek
+OGON_PODDAJ = timedelta(minutes=30) # bez bieżącej ceny tak długo po terminie — zamknięcie po ostatniej świecy
 OPLATA = 0.00009                    # jak w terminalu: $9/lot ≈ 0,009% wartości przy zamknięciu
 LIVE_CZEKAJ = timedelta(hours=2)    # po planowanym zamknięciu: czekamy na ruch, potem większy wolumen
 LIVE_PODDAJ = timedelta(hours=8)    # bez danych tak długo — zamknięcie po staremu (syntetycznie)
@@ -516,6 +517,13 @@ def _prowadz_ogon(tr: Trade, now: datetime) -> bool:
     except Exception:  # pragma: no cover - sieć
         mid = None
     if not mid:
+        # Bez bieżącej ceny końcówka nie może wisieć bez końca (a klient ją widzi): po
+        # OGON_PODDAJ od planowanego zamknięcia zamyka się po ostatniej cenie z wykresu.
+        if tr.plan_close_at is not None and _naive(now) >= _naive(tr.plan_close_at) + OGON_PODDAJ:
+            px = bot_ceny.ostatnia_cena(tr.symbol, now)
+            if px:
+                _zamknij_ogon(tr, px, now)
+                return True
         return False
     wynik = markets.pnl_usd(m, tr.side, tr.qty, tr.open_price, mid)
     cel = float(tr.plan_pnl or 0.0)

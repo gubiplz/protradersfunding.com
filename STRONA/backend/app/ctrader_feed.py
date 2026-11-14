@@ -389,6 +389,10 @@ class Swiece:
             ba[1] = ask
         if not (ba[0] and ba[1]):
             return
+        # Kwotowanie zostaje (terminal pokazuje piątkowe zamknięcie), ale w weekend rynki
+        # z tego feedu stoją: bez świec, żeby wykres nie dostał płaskich minut ani skoku.
+        if _weekend(_minuta(ts_s)):
+            return
         px = round((ba[0] + ba[1]) / 2, 6)
         k = (coin, _minuta(ts_s))
         s = self.sw.get(k)
