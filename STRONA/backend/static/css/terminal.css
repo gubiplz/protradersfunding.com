@@ -219,18 +219,40 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-chart{flex:1;min-width:0;position:relative}
 /* Position buttons on the entry line */
 .t-posbtns{position:absolute;inset:0;pointer-events:none;z-index:3;overflow:hidden}
-/* Position buttons stay out of the way until the pointer is on the entry line (or a tap
-   on it on a phone): then they fade in above the entry ring. */
-.t-pb{position:absolute;left:0;top:0;z-index:2;display:flex;gap:4px;pointer-events:none;opacity:0;transition:opacity .14s}
-.t-pb.on{pointer-events:auto;opacity:1}
+/* The position on its entry line, as in cTrader: a chip in the side's colour with the size
+   and the direction. With the pointer on the line (or a tap on a phone) it opens into live
+   pips and USD, the action buttons, and a TP and an SL handle above and below it. */
+.t-pb{position:absolute;left:0;top:0;z-index:2;display:flex;align-items:center;gap:6px;pointer-events:none;
+  --c:var(--up);--ink:#04241b;font:600 11.5px 'Helvetica Neue',sans-serif}
+.t-pb.dn{--c:var(--dn);--ink:#2b0609}
+:root[data-theme=light] .t-pb{--ink:#fff}
+.t-pb.on{pointer-events:auto}
 .t-pb[hidden]{display:none}
-.t-pring{position:absolute;left:0;top:0;z-index:1;width:11px;height:11px;border-radius:50%;border:2px solid var(--up);background:var(--bg);pointer-events:none;box-sizing:border-box;box-shadow:0 0 0 2px color-mix(in srgb,var(--bg) 70%,transparent)}
-.t-pring.dn{border-color:var(--dn)}.t-pring[hidden]{display:none}
-.t-pb button{height:19px;min-width:22px;padding:0 6px;display:grid;place-items:center;border-radius:4px;background:var(--panel);border:1px solid var(--line2);color:var(--txt);font:600 11px 'Helvetica Neue',sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.25)}
-.t-pb button:hover{border-color:var(--muted)}
-.t-pb button svg{width:12px;height:12px;stroke-width:2.2}
-.t-pb .x:hover{background:var(--dn);border-color:var(--dn);color:#fff}
-.t-pb button:disabled{opacity:.5}
+.t-pbc{display:flex;align-items:stretch;height:22px;border-radius:4px;background:var(--c);color:var(--ink);overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+.t-pbc b{display:flex;align-items:center;gap:5px;padding:0 8px;font-weight:600;white-space:nowrap}
+.t-pbc b svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.t-pbx{display:flex;max-width:0;opacity:0;transition:max-width .24s cubic-bezier(.22,1,.36,1),opacity .16s}
+.t-pb.on .t-pbx{max-width:280px;opacity:1}
+.t-pbx em{display:flex;align-items:center;gap:4px;padding:0 8px;font-style:normal;white-space:nowrap;font-variant-numeric:tabular-nums;
+  border-left:1px solid color-mix(in srgb,var(--ink) 50%,transparent)}
+.t-pba{display:flex;gap:4px;opacity:0;transform:translateX(-4px);pointer-events:none;transition:opacity .16s,transform .2s cubic-bezier(.22,1,.36,1)}
+.t-pb.on .t-pba{opacity:1;transform:none;pointer-events:auto}
+.t-pba button{height:22px;min-width:22px;padding:0 6px;display:grid;place-items:center;border-radius:4px;background:var(--c);color:var(--ink);font:inherit;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+.t-pba button:hover{filter:brightness(1.14)}
+.t-pba button svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.t-pba button:disabled{opacity:.5}
+/* TP / SL handles above and below the chip; TP sits on the profit side */
+.t-pbh{position:absolute;left:0;height:20px;padding:0 8px 0 5px;display:flex;align-items:center;gap:5px;border-radius:4px;
+  border:1px solid var(--line2);background:var(--bg);color:var(--muted);font:inherit;opacity:0;pointer-events:none;transition:opacity .16s}
+.t-pbh.hi{bottom:calc(100% + 3px)}
+.t-pbh.lo{top:calc(100% + 3px)}
+.t-pb.on .t-pbh{opacity:1;pointer-events:auto}
+.t-pb.ed .t-pbh{display:none}
+.t-pbh:hover{color:var(--txt);border-color:var(--muted)}
+.t-pbh .g{width:6px;height:10px;fill:currentColor;opacity:.8}
+/* the candle the position was opened on */
+.t-pring{position:absolute;left:0;top:0;z-index:1;width:10px;height:10px;border-radius:50%;background:var(--up);border:2px solid var(--bg);pointer-events:none;box-sizing:border-box}
+.t-pring.dn{background:var(--dn)}.t-pring[hidden]{display:none}
 /* TP/SL editing on the chart */
 .t-tpsl-ed{position:absolute;inset:0;pointer-events:none;z-index:4;overflow:hidden}
 .t-tpsl-ed[hidden]{display:none}
