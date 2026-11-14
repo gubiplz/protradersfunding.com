@@ -576,3 +576,38 @@ def test_admin_widzi_hasla_mt5_i_zamyka_wszystkie_pozycje(rynek):
         assert st["positions"] == [] and st["history"][0]["reason"] == "admin" and st["history"][0]["close"] == 50_500.0
         assert c.post("/api/admin/terminal/accounts/999999/close-all", headers=adm).status_code == 404
         assert c.post(f"/api/admin/terminal/accounts/{aid}/close-all").status_code in (401, 403)
+
+
+def test_admin_log_transakcji_pokazuje_zrodlo():
+    """Admin → Built-in Terminal → Trades log: przy każdej pozycji widać, kto ją otworzył
+    (trader w terminalu, Trade BOT, plan bota w toku, końcówka Managed), i da się filtrować."""
+    aid, _ = _konto()
+    teraz = datetime.now(timezone.utc).replace(tzinfo=None)
+    s = SessionLocal()
+    s.add_all([
+        Trade(account_id=aid, symbol="BTCUSD", side="buy", lots=0.1, open_price=65000.0, status="open",
+              source="terminal", opened_at=teraz),
+        Trade(account_id=aid, symbol="EURUSD", side="sell", lots=0.5, open_price=1.1, status="open",
+              source="bot", venue=tradebot.PLAN, plan_pnl=42.0, opened_at=teraz, plan_close_at=teraz + timedelta(hours=1)),
+        Trade(account_id=aid, symbol="USDJPY", side="buy", lots=1.0, open_price=158.4, status="open",
+              source="bot", venue=tradebot.OGON, opened_at=teraz),
+        Trade(account_id=aid, symbol="GBPUSD", side="buy", lots=0.3, open_price=1.32, close_price=1.33, pnl=300.0,
+              status="closed", source="bot", venue="hyperliquid", opened_at=teraz - timedelta(hours=2), closed_at=teraz),
+    ])
+    s.commit(); s.close()
+    adm = {"X-Admin-Token": get_settings().admin_token}
+    with TestClient(app) as c:
+        d = c.get(f"/api/admin/terminal/trades?account_id={aid}", headers=adm).json()["trades"]
+        assert {t["symbol"]: t["source"] for t in d} == {"BTCUSD": "terminal", "EURUSD": "bot_plan",
+                                                        "USDJPY": "managed", "GBPUSD": "bot"}
+        assert d[-1]["status"] == "closed"                                   # otwarte najpierw
+        assert next(t for t in d if t["symbol"] == "EURUSD")["plan_pnl"] == 42.0
+
+        def po(**q):
+            r = c.get("/api/admin/terminal/trades", headers=adm, params={"account_id": aid, **q})
+            return {t["symbol"] for t in r.json()["trades"]}
+        assert po(source="terminal") == {"BTCUSD"}
+        assert po(source="bot") == {"EURUSD", "GBPUSD"}
+        assert po(source="managed") == {"USDJPY"}
+        assert po(status="closed") == {"GBPUSD"}
+        assert c.get("/api/admin/terminal/trades").status_code in (401, 403)

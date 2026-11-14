@@ -864,10 +864,12 @@ const VIEWS={
 
  async pool(){
   const tab=window._termTab||'accounts';
-  $('view').innerHTML=`<div class="toolbar" style="margin-bottom:14px"><div class="seg">${[['accounts','Accounts'],['logins','Login log'],['pool','MT5 pool']]
-    .map(([k,l])=>`<button class="${tab===k?'on':''}" data-all="1" onclick="window._termTab='${k}';go('pool')">${l}</button>`).join('')}</div></div><div id="term-pane"></div>`;
+  /* window._termAcc: the account picked with "Log" on its row; a tab click clears it. */
+  $('view').innerHTML=`<div class="toolbar" style="margin-bottom:14px"><div class="seg">${[['accounts','Accounts'],['trades','Trades log'],['logins','Login log'],['pool','MT5 pool']]
+    .map(([k,l])=>`<button class="${tab===k?'on':''}" data-all="1" onclick="window._termTab='${k}';window._termAcc=0;go('pool')">${l}</button>`).join('')}</div></div><div id="term-pane"></div>`;
   if(tab==='accounts')return termAccounts();
-  if(tab==='logins')return termLogins();
+  if(tab==='logins')return termLogins(window._termAcc||0);
+  if(tab==='trades')return termTrades(window._termAcc||0);
   const poolData=await api('/api/admin/pool');
   const rows=poolData.pool||[], waiting=poolData.waiting||[];
   const free=rows.filter(p=>!p.claimed).length;
@@ -1773,7 +1775,7 @@ function termAccHtml(){
         <td data-l="Last sign-in" data-sort="${esc(l?l.at:'')}">${l?`${dstr(l.at)}<div class="muted" style="font-size:12px">${esc(l.ip||'—')} · ${esc(termWhere(l))}<br>${esc(l.device)}</div>`:'<span class="muted">Never</span>'}</td>
         <td data-l="Checks">${a.blocked?'<div class="dn"><b>Blocked</b></div>':''}${a.pool_mismatch?'<div class="dn">Pool entry does not match</div>':''}${a.flags.map(x=>`<div style="color:var(--gold,#b8892f)" title="${esc(x.detail)}">${esc(x.label)}</div>`).join('')||(a.blocked||a.pool_mismatch?'':'<span class="muted">OK</span>')}</td>
         <td class="rt-acts"><button class="btn-o sm" onclick="termView(${a.id})" title="Open the terminal as this trader (read-only, 2 h)">View</button>
-          <button class="btn-o sm" onclick="termHistory(${a.id})" title="Sign-in log of this MT5 login">Log</button>
+          <button class="btn-o sm" onclick="termHistory(${a.id})" title="Trades of this account and who opened each one (sign-ins are under Login log)">Log</button>
           <button class="btn-o sm" onclick="termOut(${a.id})" title="End every terminal session of this account">Sign out</button>
           <button class="btn-o sm" onclick="termBlock(${a.id},${!a.blocked})" title="${a.blocked?'Let the trader sign in again':'Sign out and refuse new sign-ins'}">${a.blocked?'Unblock':'Block'}</button>
           ${a.open_positions?`<button class="btn-o sm" style="color:var(--red)" onclick="termCloseAll(${a.id},${a.open_positions})" title="Close every open position at the current price and cancel pending orders">Close all</button>`:''}</td></tr>`}).join('')}</tbody></table></div>`
@@ -1819,7 +1821,7 @@ async function termLogins(accountId){
   $('term-pane').innerHTML=`<div class="toolbar"><div class="tb-filters"><div class="seg">
       <button class="${f?'':'on'}" onclick="window._termFailed=false;termLogins(${accountId||0})">All</button>
       <button class="${f?'on':''}" onclick="window._termFailed=true;termLogins(${accountId||0})">Failed</button></div>
-      ${accountId?`<span class="count-pill">Account #${accountId}</span>`:''}</div></div>`
+      ${accountId?`<span class="count-pill">Account #${accountId} <a href="#" onclick="window._termAcc=0;termLogins(0);return false" title="Show every account">×</a></span>`:''}</div></div>`
     +(d.logins.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.term-log">
       <thead><tr><th>When</th><th>MT5 login</th><th>Result</th><th>IP</th><th>Location</th><th>Device</th><th>Last seen</th></tr></thead>
       <tbody>${d.logins.map(l=>`<tr>
@@ -1832,10 +1834,40 @@ async function termLogins(accountId){
         <td data-l="Last seen" data-sort="${esc(l.last_seen||'')}">${l.last_seen?dstr(l.last_seen):'—'}</td></tr>`).join('')}</tbody></table></div>`
     :`<div class="empty"><h3>No sign-ins yet</h3><p>Terminal sign-ins appear here.</p></div>`);
 }
+/* "Log" on an account row: that account's trades (with who opened each one); the
+   Login log tab shows its sign-ins. The account stays picked until a tab is clicked. */
 function termHistory(id){
-  window._termTab='logins';
-  $$('#view .seg')[0]?.querySelectorAll('button').forEach((b,i)=>b.classList.toggle('on',i===1));
-  termLogins(id).catch(e=>toast('Error: '+e.message,'err'));
+  window._termTab='trades'; window._termAcc=id;
+  go('pool');
+}
+const TERM_SRC={terminal:['Terminal','Opened by the trader in the Built-in Terminal'],
+  bot:['Trade BOT','Placed by the Trade BOT'],bot_plan:['BOT plan','Trade BOT plan in progress, hidden from the trader until it closes'],
+  managed:['Managed','End of a Trade BOT plan shown to the trader as a Managed position']};
+async function termTrades(accountId){
+  const f=window._termSrc||'', st=window._termSt||'';
+  const q=new URLSearchParams({limit:'300'});
+  if(accountId)q.set('account_id',accountId); if(f)q.set('source',f); if(st)q.set('status',st);
+  const d=await api('/api/admin/terminal/trades?'+q);
+  const segBtn=(k,v,l,cur)=>`<button class="${cur===v?'on':''}" onclick="window.${k}='${v}';termTrades(${accountId||0})">${l}</button>`;
+  const px=(t,v)=>v==null?'—':Number(v).toFixed(t.px_dec);
+  $('term-pane').innerHTML=`<div class="toolbar"><div class="tb-filters">
+      <div class="seg">${segBtn('_termSrc','','All sources',f)}${segBtn('_termSrc','terminal','Terminal',f)}${segBtn('_termSrc','bot','Trade BOT',f)}${segBtn('_termSrc','managed','Managed',f)}</div>
+      <div class="seg">${segBtn('_termSt','','All',st)}${segBtn('_termSt','open','Open',st)}${segBtn('_termSt','closed','Closed',st)}</div>
+      ${accountId?`<span class="count-pill">Account #${accountId} <a href="#" onclick="window._termAcc=0;termTrades(0);return false" title="Show every account">×</a></span>`:''}</div></div>`
+    +(d.trades.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.term-trades">
+      <thead><tr><th>Opened</th><th>Account</th><th>Source</th><th>Market</th><th>Side</th><th>Lots</th><th>Entry</th><th>Exit</th><th>Closed</th><th>P&amp;L</th></tr></thead>
+      <tbody>${d.trades.map(t=>{const s=TERM_SRC[t.source]||[t.source,''];return `<tr>
+        <td data-l="Opened" data-sort="${esc(t.opened_at||'')}">${dstr(t.opened_at)}</td>
+        <td class="num rt-main" data-l="Account">${esc(t.login)} · ${accLink(t.account_id)}</td>
+        <td data-l="Source"><span class="${t.source==='terminal'?'':'muted'}" title="${esc(s[1])}"><b>${esc(s[0])}</b></span></td>
+        <td data-l="Market">${esc(t.symbol)}</td>
+        <td data-l="Side"><span class="${t.side==='buy'?'up':'dn'}">${t.side==='buy'?'Long':'Short'}</span></td>
+        <td class="num" data-l="Lots">${t.lots}</td>
+        <td class="num" data-l="Entry">${px(t,t.entry)}</td>
+        <td class="num" data-l="Exit">${t.status==='open'?'<span class="up">Open</span>':px(t,t.close)}</td>
+        <td data-l="Closed" data-sort="${esc(t.closed_at||t.plan_close_at||'')}">${t.closed_at?dstr(t.closed_at):(t.plan_close_at?`<span class="muted">plan ${dstr(t.plan_close_at)}</span>`:'—')}</td>
+        <td class="num ${t.pnl>=0?'up':'dn'}" data-l="P&amp;L">${t.source==='bot_plan'?`<span class="muted">plan ${t.plan_pnl>=0?'+':''}$${fmt0(t.plan_pnl||0)}</span>`:(t.pnl>=0?'+':'-')+'$'+Math.abs(t.pnl).toFixed(2)}</td></tr>`}).join('')}</tbody></table></div>`
+    :`<div class="empty"><h3>No trades</h3><p>Nothing matches this filter.</p></div>`);
 }
 async function termView(id){
   try{const r=await api(`/api/admin/terminal/accounts/${id}/view`,{method:'POST'});

@@ -2174,6 +2174,52 @@ def admin_logins(account_id: int | None = None, failed: bool = False, limit: int
         session.close()
 
 
+def zrodlo_transakcji(t: Trade) -> str:
+    """Kto otworzył pozycję: trader w terminalu, Trade BOT (ukryty plan, transakcja na
+    wykresie albo syntetyczna) czy końcówka planu pokazana klientowi jako Managed."""
+    if t.venue == tradebot.OGON:
+        return "managed"
+    if t.source == "terminal":
+        return "terminal"
+    if t.venue == tradebot.PLAN:
+        return "bot_plan"
+    return "bot"
+
+
+@admin_router.get("/trades")
+def admin_trades(account_id: int | None = None, source: str | None = None, status: str | None = None,
+                 limit: int = 300):
+    """Transakcje i pozycje z kont terminala z ich źródłem — do sprawdzenia, czy pozycję
+    otworzył trader, bot, czy to końcówka Managed. Otwarte najpierw, potem najnowsze."""
+    session = SessionLocal()
+    try:
+        q = session.query(Trade, Account.login).join(Account, Account.id == Trade.account_id)
+        if account_id:
+            q = q.filter(Trade.account_id == account_id)
+        if status in ("open", "closed"):
+            q = q.filter(Trade.status == status)
+        if source == "terminal":
+            q = q.filter(Trade.source == "terminal", or_(Trade.venue.is_(None), Trade.venue != tradebot.OGON))
+        elif source == "managed":
+            q = q.filter(Trade.venue == tradebot.OGON)
+        elif source == "bot":
+            q = q.filter(Trade.source != "terminal", or_(Trade.venue.is_(None), Trade.venue != tradebot.OGON))
+        rows = (q.order_by((Trade.status == "open").desc(), Trade.id.desc()).limit(min(max(limit, 1), 1000)).all())
+        out = []
+        for t, login in rows:
+            m = markets.get(t.symbol)
+            out.append({"id": t.id, "account_id": t.account_id, "login": login, "symbol": t.symbol, "side": t.side,
+                        "lots": round(float(t.lots or 0.0), 4), "status": t.status, "source": zrodlo_transakcji(t),
+                        "entry": t.open_price, "close": t.close_price, "pnl": round(float(t.pnl or 0.0), 2),
+                        "plan_pnl": t.plan_pnl if t.venue == tradebot.PLAN else None,
+                        "opened_at": _iso(t.opened_at), "closed_at": _iso(t.closed_at),
+                        "plan_close_at": _iso(t.plan_close_at), "reason": t.close_reason,
+                        "px_dec": m.px_dec if m else 5})
+        return {"trades": out}
+    finally:
+        session.close()
+
+
 class AdminBlockIn(BaseModel):
     blocked: bool
 
