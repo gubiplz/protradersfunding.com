@@ -3789,7 +3789,9 @@ function openInvoice(orderId){
   box.innerHTML=`<div class="inv-print" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
     <div class="inv-head">
       <div style="display:flex;align-items:center;gap:10px"><img src="/static/img/logo.png" alt="">
-        <div><div class="inv-h1">${esc(SITE_NAME)}</div><div style="font-size:11px;color:#64748b">Trading skills evaluation platform</div></div></div>
+        <div><div class="inv-h1">${esc(SITE_NAME)}</div><div style="font-size:11px;color:#64748b">Trading skills evaluation platform</div>
+          ${/* Seller identity: printed only once the operator details are configured. */''}
+          ${(typeof LEGAL_SELLER!=='undefined'&&LEGAL_SELLER.name)?`<div style="font-size:11px;color:#64748b;margin-top:4px">${esc(LEGAL_SELLER.name)}${LEGAL_SELLER.address?'<br>'+esc(LEGAL_SELLER.address):''}${LEGAL_SELLER.reg_no?'<br>'+esc(LEGAL_SELLER.reg_no):''}${LEGAL_SELLER.tax_id?'<br>'+esc(LEGAL_SELLER.tax_id):''}</div>`:''}</div></div>
       <div class="inv-meta"><b>INVOICE #${o.id}</b><br>${date}<br>Status: ${esc(o.status)}</div>
     </div>
     <div style="font-size:12.5px;color:#64748b">Billed to<br><b style="color:#0f172a">${esc(ME.full_name||ME.email)}</b><br>${esc(ME.email)}</div>
@@ -3799,7 +3801,8 @@ function openInvoice(orderId){
     </table>
     <div class="inv-total"><span>Total</span><span>$${fmt(orderAmount(o))} USD</span></div>
     <div class="inv-foot">One-time fee for access to a simulated trading evaluation on a demo account with virtual funds.
-      No real-market trading service is provided. On 2-Step plans the fee is credited with the first payout as vUSDT under the Refund Policy.</div>
+      No real-market trading service is provided. On 2-Step plans the fee is credited with the first payout as vUSDT under the Refund Policy.
+      Terms, Refund Policy and Right of Withdrawal: version ${esc(typeof LEGAL_DOCS_V!=='undefined'?LEGAL_DOCS_V:'')}.</div>
     <div class="noprint" style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
       <button class="btn-o sm" onclick="document.getElementById('inv-modal').remove()">Close</button>
       <button class="btn-p sm" onclick="window.print()">${ICO.print} Print / Save PDF</button>
@@ -3829,7 +3832,11 @@ function credsBlock(a, compact){
       ${row('Server', a.platform_server||'—')}
       ${row('Login', a.platform_login||'—')}
       ${row('Password', a.platform_password)}
-      ${compact?'':'<p style="font-size:11px;color:var(--dim);margin-top:6px">Works in MT5 desktop, mobile and web, so pick this server name. The same login and password open the Built-in Terminal.</p>'}
+      ${compact?'':(a.platform_server==='PTF-sim'
+        /* A PTF-sim login exists only in our terminal: saying it works in the
+           MetaTrader apps would send the customer to a login that always fails. */
+        ?'<p style="font-size:11px;color:var(--dim);margin-top:6px">These credentials open the Built-in Terminal in your browser. They do not work in the MetaTrader 5 apps.</p>'
+        :'<p style="font-size:11px;color:var(--dim);margin-top:6px">Works in MT5 desktop, mobile and web, so pick this server name. The same login and password open the Built-in Terminal.</p>')}
       <a class="creds-term" href="/trade" onclick="event.stopPropagation();try{localStorage.setItem('pf_term_prefill','${jsq(a.platform_login||'')}');localStorage.setItem('pf_term_prefill_srv','${jsq(a.platform_server||'')}')}catch(e){}">Open Built-in Terminal</a>
     </div>`;
 }
@@ -3981,11 +3988,11 @@ function openBuy(key){
           </label>
           <label class="buy-consent-item">
             <input type="checkbox" id="c-consent-risk" onchange="syncBuyConsent()">
-            <span class="bc-body">I acknowledge simulated evaluations, that rewards are not guaranteed, and the <a href="/risk-disclosure" target="_blank" rel="noopener">Risk Disclosure</a>.</span>
+            <span class="bc-body">I understand that evaluations are simulated, that rewards are not guaranteed, and I have read the <a href="/risk-disclosure" target="_blank" rel="noopener">Risk Disclosure</a>.</span>
           </label>
           <label class="buy-consent-item">
             <input type="checkbox" id="c-consent-immediate" onchange="syncBuyConsent()">
-            <span class="bc-body">I request immediate commencement and, where applicable, lose the right of withdrawal once the service is fully performed.</span>
+            <span class="bc-body">I request immediate commencement and, where applicable, lose the <a href="/withdrawal" target="_blank" rel="noopener">right of withdrawal</a> once the service is fully performed, which is when my MT5 credentials are delivered.</span>
           </label>
           <p class="buy-privacy">Data processed per our <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</p>
         </div>
@@ -4005,7 +4012,7 @@ function openBuy(key){
 }
 
 /* Checkout consent panel: all three declarations must be ticked before Buy. */
-const BUY_CONSENT_V='checkout-consent-2026-11';
+const BUY_CONSENT_V=(typeof LEGAL_DOCS_V!=='undefined'&&LEGAL_DOCS_V)||'checkout-consent-2026-11';
 function buyConsentsOk(){
   return !!($('c-consent-terms')&&$('c-consent-terms').checked)
     && !!($('c-consent-risk')&&$('c-consent-risk').checked)

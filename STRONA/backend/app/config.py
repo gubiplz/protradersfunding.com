@@ -140,6 +140,27 @@ class Settings:
     # --- Marka / strona publiczna ---
     site_name: str = os.getenv("SITE_NAME", "Pro Traders Funding")
     support_email: str = os.getenv("SUPPORT_EMAIL", "support@protradersfunding.com")
+
+    # --- Operator (legal entity) ---
+    # EMPTY by default on purpose: the legal pages, the footer and the invoice
+    # print each line only when it is set, so nothing made-up is ever published.
+    # Fill these in once the company is registered.
+    legal_entity_name: str = os.getenv("LEGAL_ENTITY_NAME", "").strip()
+    legal_reg_no: str = os.getenv("LEGAL_REG_NO", "").strip()          # e.g. "KRS 0000000000"
+    legal_tax_id: str = os.getenv("LEGAL_TAX_ID", "").strip()          # e.g. "NIP 0000000000"
+    legal_address: str = os.getenv("LEGAL_ADDRESS", "").strip()
+    legal_governing_law: str = os.getenv("LEGAL_GOVERNING_LAW", "").strip()   # e.g. "Poland"
+    legal_courts: str = os.getenv("LEGAL_COURTS", "").strip()          # e.g. "the courts of Poland"
+    legal_adr_body: str = os.getenv("LEGAL_ADR_BODY", "").strip()      # consumer ADR body, with its URL
+    legal_supervisory_authority: str = os.getenv("LEGAL_SUPERVISORY_AUTHORITY", "").strip()
+    privacy_email: str = os.getenv("PRIVACY_EMAIL", "").strip()        # empty = support_email
+    # Countries we do not serve, ISO2 comma-separated. The default is the set of
+    # comprehensively sanctioned countries every benchmark firm excludes; add
+    # more here (the list is printed on /restricted-countries).
+    restricted_countries: str = os.getenv("RESTRICTED_COUNTRIES", "KP,IR,SY,CU")
+    # E-mails of customers who get the Trustpilot review reminder in the portal,
+    # comma-separated. Kept out of the source code: it is personal data.
+    review_nudge_emails: str = os.getenv("REVIEW_NUDGE_EMAILS", "")
     # Google Analytics 4 (Measurement ID typu G-XXXXXXX). Puste = brak snippetu
     # gtag na stronach — zero requestów do Google.
     #

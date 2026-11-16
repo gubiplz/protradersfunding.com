@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Restricted Countries and Identity Verification — {{ site_name }}{% endblock %}
+{% block description %}Where {{ site_name }} is not available, who can take part and how identity verification works.{% endblock %}
+
+{% block content %}
+<section class="page-head"><div class="wrap">
+  <span class="pill">Legal</span>
+  <h1>Restricted Countries and Identity Verification</h1>
+  <p class="updated">Version {{ legal.version }} · Last updated: {{ legal.date }}</p>
+</div></section>
+
+<section class="sec sec-tight"><div class="wrap prose">
+  <h2>1. Who can take part</h2>
+  <ul>
+    <li>You must be at least 18 years old, or older if the law where you live sets a higher age for
+        entering into contracts.</li>
+    <li>You must not be resident in, or located in, a restricted country listed below.</li>
+    <li>You must not be subject to sanctions of the European Union, the United Nations or the United
+        States (OFAC), and must not act for anyone who is.</li>
+    <li>You must be allowed to use a service like ours under the law of the place where you live.
+        It is your responsibility to check this before you buy.</li>
+  </ul>
+
+  <h2>2. Restricted countries</h2>
+  {% if legal.restricted %}
+  <p>We do not offer the service to persons resident or located in:</p>
+  <ul>
+    {% for nazwa in legal.restricted %}<li>{{ nazwa }}</li>{% endfor %}
+  </ul>
+  {% else %}
+  <p>No country is currently on the restricted list.</p>
+  {% endif %}
+  <p>Registration, purchase and identity verification from these countries are refused. The list
+  can change; the version that applies to an order is the one published when the order was
+  placed.</p>
+
+  <h2>3. If a restriction applies to you</h2>
+  <p>An account opened in breach of this page is closed. Where the only issue is that you bought
+  from a restricted country, we refund the fee you paid for accounts on which no reward has been
+  paid. No reward is paid to a person to whom a restriction applies.</p>
+  <p>Using a VPN, a proxy or false details to hide where you are is prohibited conduct under the
+  <a href="/terms">Terms of Service</a>.</p>
+
+  <h2>4. Identity verification (KYC)</h2>
+  <ul>
+    <li>We verify your identity before any reward is paid. Verification opens when one of your
+        accounts reaches the funded stage, or earlier if we ask for it.</li>
+    <li>You provide your full name, country, date of birth, address and identity document number,
+        a photo of the document (front and back) and a proof of residence.</li>
+    <li>Verification is reviewed by a member of our team. We may ask you to correct or replace a
+        document.</li>
+    <li>The name on the account, on the verification and on the reward wallet request must be
+        yours. Rewards are paid only to the verified account holder.</li>
+    <li>If verification fails or is refused, no reward is paid. You can ask for the reason and
+        complain under the <a href="/complaints">Complaints Procedure</a>.</li>
+  </ul>
+  <p>How we store and protect these documents, and for how long, is described in the
+  <a href="/privacy">Privacy Policy</a>.</p>
+</div></section>
+{% endblock %}

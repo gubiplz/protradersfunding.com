@@ -309,8 +309,10 @@ def test_teksty_prawne_spojne_z_regulaminem():
     # FAQ nie przeczy już Terms w sprawie przeglądu nagród ani nie odsyła do nieistniejącej listy krajów.
     assert "no discretionary reviews" not in faq and "country restrictions below" not in faq
     assert "consolidated spot feed" not in faq
-    for strona in (risk, refund):
-        assert "Last updated: November 2026" in strona
+    # Każdy dokument pokazuje WERSJĘ i pełną datę — tę samą wersję zapisujemy przy zgodach.
+    from app import legal
+    for strona in (risk, refund, terms):
+        assert f"Version {legal.DOCS_VERSION}" in strona and f"Last updated: {legal.DOCS_DATE}" in strona
     assert "Section&nbsp;11" in risk and "not directed at residents" in home
     # Pytanie o kredyt opłaty wróciło do popularnych na stronie kontaktu.
     assert "When is my challenge fee credited?" in contact

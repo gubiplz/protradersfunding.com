@@ -51,9 +51,9 @@ def test_zapis_daje_kod_i_mail_powitalny_bez_zdradzania_duplikatu(maile):
         assert "/newsletter/unsubscribe/" in maile[-1][2]["unsubscribe_url"]
         # Duplikat: to samo 200, bez drugiego maila.
         n = len(maile)
-        assert c.post("/api/newsletter/subscribe", json={"email": "nowy@test.pl"}).status_code == 200
+        assert c.post("/api/newsletter/subscribe", json={"email": "nowy@test.pl", "consent": True}).status_code == 200
         assert len(maile) == n
-        assert c.post("/api/newsletter/subscribe", json={"email": "zle"}).status_code == 400
+        assert c.post("/api/newsletter/subscribe", json={"email": "zle", "consent": True}).status_code == 400
         assert c.post("/api/newsletter/subscribe", json={"email": "a@b.cc", "consent": False}).status_code == 400
         lista = c.get("/api/admin/newsletter", headers=ADMIN).json()
         assert any(s["email"] == "nowy@test.pl" and s["source"] == "popup" for s in lista["subscribers"])
@@ -62,7 +62,7 @@ def test_zapis_daje_kod_i_mail_powitalny_bez_zdradzania_duplikatu(maile):
 
 def test_wypisanie_i_powrot(maile):
     with TestClient(app) as c:
-        c.post("/api/newsletter/subscribe", json={"email": "bye@test.pl"})
+        c.post("/api/newsletter/subscribe", json={"email": "bye@test.pl", "consent": True})
         tok = _token("bye@test.pl")
         r = c.get(f"/newsletter/unsubscribe/{tok}")
         assert r.status_code == 200 and "unsubscribed" in r.text
@@ -73,7 +73,7 @@ def test_wypisanie_i_powrot(maile):
         assert csv.startswith("email,source,") and "bye@test.pl" in csv
         # Ponowny zapis przywraca i wysyła powitanie jeszcze raz.
         n = len(maile)
-        c.post("/api/newsletter/subscribe", json={"email": "bye@test.pl"})
+        c.post("/api/newsletter/subscribe", json={"email": "bye@test.pl", "consent": True})
         assert len(maile) == n + 1
         po = {s["email"]: s for s in c.get("/api/admin/newsletter", headers=ADMIN).json()["subscribers"]}
         assert not po["bye@test.pl"]["unsubscribed_at"]
@@ -82,7 +82,7 @@ def test_wypisanie_i_powrot(maile):
 def test_wysylka_pomija_wypisanych_i_ma_link_wypisania(maile):
     with TestClient(app) as c:
         for e in ("w1@test.pl", "w2@test.pl"):
-            c.post("/api/newsletter/subscribe", json={"email": e})
+            c.post("/api/newsletter/subscribe", json={"email": e, "consent": True})
         c.get(f"/newsletter/unsubscribe/{_token('w2@test.pl')}")
         maile.clear()
         r = c.post("/api/admin/newsletter/send", headers=ADMIN,
@@ -160,7 +160,7 @@ def test_popup_wylacznik_i_warianty(maile):
             assert d["live"]["variant"] == "flash" and d["live"]["pct"] == 20
             home = c.get("/").text
             assert "Flash sale: 20% off every challenge." in home and "data-ends=" in home
-            r = c.post("/api/newsletter/subscribe", json={"email": "flash@test.pl", "source": "popup"}).json()
+            r = c.post("/api/newsletter/subscribe", json={"email": "flash@test.pl", "source": "popup", "consent": True}).json()
             assert r["code"] == "VIP20" and r["variant"] == "flash"
             assert maile[-1][2]["variant"] == "flash"
 
@@ -170,7 +170,7 @@ def test_popup_wylacznik_i_warianty(maile):
                    title="Win {prize} now")
             home = c.get("/").text
             assert "Win $100K now" in home
-            r = c.post("/api/newsletter/subscribe", json={"email": "gw@test.pl", "source": "footer"}).json()
+            r = c.post("/api/newsletter/subscribe", json={"email": "gw@test.pl", "source": "footer", "consent": True}).json()
             assert r["variant"] == "giveaway" and "code" not in r
             lista = c.get("/api/admin/newsletter", headers=ADMIN).json()
             assert f"giveaway:{dzien}" in lista["campaigns"]
@@ -209,7 +209,7 @@ def test_zalogowany_zapisany_albo_klient_nie_dostaje_popupu(maile):
         d = c.get("/api/me/newsletter", headers=h).json()
         assert d == {"subscribed": False, "unsubscribed": False, "customer": False, "marketing": True}
         # Zapis z innego urządzenia (ten sam mail, inna wielkość liter).
-        c.post("/api/newsletter/subscribe", json={"email": "NL-Portal@test.pl", "source": "footer"})
+        c.post("/api/newsletter/subscribe", json={"email": "NL-Portal@test.pl", "source": "footer", "consent": True})
         assert c.get("/api/me/newsletter", headers=h).json()["subscribed"] is True
         c.get(f"/newsletter/unsubscribe/{_token('nl-portal@test.pl')}")
         d = c.get("/api/me/newsletter", headers=h).json()

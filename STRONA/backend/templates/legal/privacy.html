@@ -6,79 +6,161 @@
 <section class="page-head"><div class="wrap">
   <span class="pill">Legal</span>
   <h1>Privacy Policy</h1>
-  <p class="updated">Last updated: November 2026</p>
+  <p class="updated">Version {{ legal.version }} · Last updated: {{ legal.date }}</p>
 </div></section>
 
 <section class="sec sec-tight"><div class="wrap prose">
-  <h2>1. What we collect</h2>
+  <h2>1. Who is responsible for your data</h2>
+  <p>The data controller is the operator of {{ site_name }}:</p>
+  {% include "legal/_operator.html" %}
+  <p>For anything about personal data, write to
+  <a href="mailto:{{ legal.privacy_email }}">{{ legal.privacy_email }}</a>.</p>
+
+  <h2>2. What we collect</h2>
   <ul>
-    <li><strong>Account data:</strong> e-mail, password (stored as a salted hash), full name.</li>
-    <li><strong>Checkout data:</strong> first name, last name, phone number, required to open your
-        MT5 account with the platform provider.</li>
+    <li><strong>Account data:</strong> e-mail, password (stored as a salted hash), full name, and,
+        if you use "Continue with Google", your Google account identifier.</li>
+    <li><strong>Country from your IP address:</strong> recorded when you register and when you log
+        in.</li>
+    <li><strong>Checkout data:</strong> first name, last name and phone number.</li>
+    <li><strong>Proof of your declarations:</strong> which version of our documents you accepted,
+        when, and from which IP address and browser, for registration and for every order.</li>
     <li><strong>KYC data:</strong> full name, country, date of birth, address, the type and number of
         your identity document, images of that document and a proof of residence, submitted by you
         before rewards are paid.</li>
     <li><strong>Reward wallet:</strong> the Polygon wallet address you save for rewards.</li>
-    <li><strong>Trading telemetry:</strong> equity/balance snapshots, rule-breach events and challenge
-        progress of your simulated accounts.</li>
-    <li><strong>Built-in Terminal sign-ins:</strong> IP address, approximate location derived from it,
-        browser and device type, an identifier stored in your browser, and the time of each sign-in,
-        including failed attempts.</li>
+    <li><strong>Trading data:</strong> your simulated orders and trades, equity and balance
+        snapshots, rule-breach events and challenge progress.</li>
+    <li><strong>Built-in Terminal sign-ins:</strong> IP address, approximate location derived from it
+        (country, region, city), browser and device type, an identifier stored in your browser, and
+        the time of each sign-in, including failed attempts.</li>
     <li><strong>Payment data:</strong> processed by our payment provider (Stripe); we store order
         metadata, never full card numbers.</li>
-    <li><strong>Support chat:</strong> the messages you send in the support chat, including those
+    <li><strong>Support chat and e-mail:</strong> the messages you send us, including those
         answered by the AI assistant.</li>
+    <li><strong>Usage events:</strong> a record of actions in the portal (for example signing in,
+        opening checkout, submitting verification).</li>
     <li><strong>Newsletter:</strong> your e-mail address, if you subscribe.</li>
+    <li><strong>Contact forms on partner pages:</strong> if you leave your details in a form that
+        refers to us, we receive your name, e-mail, phone number, messaging handle, country and
+        your answers.</li>
+    <li><strong>Push notifications:</strong> if you enable them, the subscription address your
+        browser gives us.</li>
   </ul>
 
-  <h2>2. What we use it for</h2>
+  <h2>3. What we use it for, and on what legal basis</h2>
   <ul>
-    <li>Providing the service: creating MT5 accounts, monitoring objectives, paying rewards.</li>
-    <li>Transactional e-mail (credentials, phase results, payout status).</li>
-    <li>Fraud prevention, keeping accounts secure and enforcing our Terms, including checking that an account is used by its registered owner.</li>
-    <li>Reviewing reward requests: the review uses your trading history, your verification and the
-        Built-in Terminal sign-in records (IP address, approximate location, device). The decision is
-        made by a member of our team, not by software alone.</li>
-    <li>Answering support questions, including through the AI assistant in the support chat.</li>
-    <li>Marketing e-mail, only if you subscribed; every message has an unsubscribe link.</li>
-    <li>Legal obligations (accounting, AML/KYC where applicable).</li>
+    <li><strong>Providing the service</strong> (creating your account, running the simulation,
+        monitoring objectives, paying rewards, answering support questions): performance of our
+        contract with you.</li>
+    <li><strong>Transactional e-mail and notifications</strong> (credentials, phase results, payout
+        status): performance of the contract.</li>
+    <li><strong>Identity verification before a reward:</strong> performance of the contract and our
+        legitimate interest in paying rewards only to the real account holder; a legal obligation
+        where anti-money-laundering or sanctions law applies to us.</li>
+    <li><strong>Fraud prevention, account security and enforcing our Terms</strong>, including
+        checking that an account is used by its registered owner: our legitimate interest in
+        protecting the service and its users.</li>
+    <li><strong>Keeping proof of your declarations and records of orders and payouts:</strong> our
+        legitimate interest in being able to establish and defend legal claims, and legal
+        obligations (accounting and tax).</li>
+    <li><strong>Marketing e-mail:</strong> your consent, given when you subscribe; you can withdraw
+        it at any time with the unsubscribe link.</li>
+    <li><strong>Analytics and session replay</strong> (Google Analytics 4, Microsoft Clarity): your
+        consent, given in the cookie banner; you can withdraw it at any time in
+        <a href="#" data-ck-prefs>Cookie Preferences</a>.</li>
+    <li><strong>Remembering which affiliate referred you:</strong> your consent in Cookie
+        Preferences.</li>
+    <li><strong>Following up contact forms:</strong> steps taken at your request before a
+        contract.</li>
   </ul>
+  <p>You do not have to give us your data, but without account, checkout and (before a reward)
+  verification data we cannot provide the service or pay a reward.</p>
   <p>We do not sell personal data and we do not run third-party advertising trackers on this
   site.</p>
 
-  <h2>3. Sharing</h2>
-  <p>Data is shared only with processors necessary to run the service:</p>
+  <h2>4. Automated decisions and risk checks</h2>
+  <p>Whether a trading rule was breached is decided automatically by our risk engine from your
+  simulated trading data; a breach fails the account. This is necessary to perform the contract,
+  because the objectives are the service you bought. You can ask a member of our team to review any
+  such decision, give your point of view and contest it, under the
+  <a href="/complaints">Complaints Procedure</a>.</p>
+  <p>Before a reward is paid, our team reviews the request. To help that review we compute risk
+  indicators from your data: whether the country of your sign-ins matches your registration and
+  verification, how many devices and countries were used, whether an IP address is shared with
+  another trader, and the region your account originates from (from IP address, phone prefix and
+  verification country). These indicators are shown to the reviewer; the decision is made by a
+  person, not by software alone.</p>
+
+  <h2>5. Who receives your data</h2>
+  <p>We share data only with providers that help us run the service, each for its own task:</p>
   <ul>
-    <li>the MT5 infrastructure provider (account name on the demo server);</li>
-    <li>Stripe, our payment provider;</li>
+    <li>Stripe (payments);</li>
     <li>Vercel (hosting) and Supabase (database hosting);</li>
-    <li>our e-mail delivery provider;</li>
-    <li>the AI model provider behind the support assistant, which receives the messages you type in
-        the support chat;</li>
-    <li>only if you accept Analytics in the cookie banner: Google (Google Analytics 4) and Microsoft
-        (Clarity).</li>
+    <li>our e-mail delivery providers (currently Brevo and Resend);</li>
+    <li>Google, for "Continue with Google" sign-in, and, only if you accept Analytics, Google
+        Analytics 4;</li>
+    <li>Microsoft (Clarity), only if you accept Analytics;</li>
+    <li>Cloudflare (Turnstile), to tell people from bots on some forms;</li>
+    <li>the AI model provider behind the support assistant (currently Anthropic), which receives the
+        messages you type in the support chat;</li>
+    <li>Twilio (text messages), where you left a phone number in a contact form, and Telegram
+        (internal notifications to our team about new contact requests and account events);</li>
+    <li>the provider of your browser's push service, if you enable push notifications;</li>
+    <li>where your account runs on a third-party trading platform, the provider of that platform
+        (the account name on its demo server).</li>
   </ul>
-  <p>Each processes data under its own terms / agreement with us.</p>
+  <p><strong>Market data in your browser.</strong> Charts and live prices in the Built-in Terminal
+  are loaded by your browser directly from market-data providers (Hyperliquid, Binance and Bybit).
+  They receive your IP address, as any website you connect to does; we do not send them your account
+  details.</p>
+  <p><strong>Public blockchain.</strong> A reward in vUSDT is a transfer on the Polygon network. The
+  wallet address, the amount and the time are public and permanent, and we cannot delete them.</p>
+  <p><strong>Certificates.</strong> A payout or pass certificate shows your name and can be opened by
+  anyone who has its link. The public verification page shows the name in masked form.</p>
+  <p>We also disclose data where the law requires it, for example to a court or an authority.</p>
 
-  <h2>4. Retention</h2>
-  <p>Account and order data are kept for as long as your account exists and thereafter as required by
-  law (typically accounting periods). Trading telemetry of closed accounts is retained for record and
-  certificate verification purposes.</p>
+  <h2>6. Transfers outside the European Economic Area</h2>
+  <p>Several of these providers are based in the United States or process data there. Where data
+  leaves the European Economic Area, the transfer relies on a European Commission adequacy decision
+  (including the EU–US Data Privacy Framework for providers certified under it) or on the European
+  Commission's standard contractual clauses. You can ask us which applies to a given provider.</p>
 
-  <p>Built-in Terminal sign-in records are deleted after 12 months.</p>
+  <h2>7. How long we keep it</h2>
+  <ul>
+    <li><strong>Account and profile data:</strong> while your registration exists. When you delete
+        your registration in the portal, your name, contact details, verification details and
+        documents, reward wallet and Google link are erased or anonymised.</li>
+    <li><strong>Identity documents:</strong> while your registration exists and you may request
+        rewards; erased when you delete your registration, unless a law that applies to us requires
+        us to keep them longer.</li>
+    <li><strong>Orders, payouts and proof of your declarations:</strong> kept after the registration
+        is deleted, for as long as accounting and tax law requires and legal claims can be
+        brought.</li>
+    <li><strong>Trading data of closed accounts:</strong> kept in a form no longer linked to your
+        name, for record and certificate verification.</li>
+    <li><strong>Built-in Terminal sign-in records:</strong> deleted after 12 months.</li>
+    <li><strong>Support conversations:</strong> for as long as legal claims connected with them can
+        be brought.</li>
+    <li><strong>Newsletter:</strong> until you unsubscribe.</li>
+  </ul>
 
-  <h2>5. Your rights</h2>
-  <p>Depending on your jurisdiction, you may have the right to access, rectify, export or erase your
-  personal data, and to object to or restrict processing. Write to
-  <a href="mailto:{{ support_email }}">{{ support_email }}</a>. We respond within 30 days. You may
-  also lodge a complaint with the data protection authority of the country where you live.</p>
+  <h2>8. Your rights</h2>
+  <p>You have the right to access your data, to have it corrected or erased, to restrict its
+  processing, to receive it in a portable form, to object to processing based on our legitimate
+  interests, and to withdraw a consent at any time without affecting what was done before. Write to
+  <a href="mailto:{{ legal.privacy_email }}">{{ legal.privacy_email }}</a>. We answer within one
+  month. You can delete your registration yourself in the portal settings.</p>
+  <p>You may also lodge a complaint with a data protection authority{% if legal.supervisory_authority %}:
+  the authority competent for us is {{ legal.supervisory_authority }}, and you may also{% else %}; you
+  may{% endif %} contact the authority of the country where you live.</p>
 
-  <h2>6. Cookies and local storage</h2>
-  <p>We set no cookies of our own in your browser apart from the session cookie of the internal admin
-  panel. The site keeps the following in your browser's local or session storage:</p>
+  <h2>9. Cookies and local storage</h2>
+  <p>We set one cookie of our own: a session cookie (<code>pf_session</code>) when you log in, which
+  is essential. Everything else the site keeps is in your browser's local or session storage:</p>
   <ul>
     <li><strong>Essential</strong> (needed for the site to work, no switch): your login token
-        (<code>pf_token</code>), the sessions of MT5 accounts you sign in to in the Built-in Terminal
+        (<code>pf_token</code>), the sessions of accounts you sign in to in the Built-in Terminal
         and the device identifier recorded with those sign-ins (<code>pf_term_logins</code>,
         <code>pf_term_acc</code>, <code>pf_term_dev</code>), and your privacy choice
         (<code>pf_consent</code>).</li>
@@ -91,6 +173,9 @@
         (<code>pf_ref</code>, for up to 90 days) only if you allow Referral attribution in Cookie
         Preferences, so that the partner can be credited.</li>
   </ul>
+  <p>Some pages load a script from a third party because the page cannot work without it: Google's
+  sign-in button on the portal login page and Cloudflare Turnstile on forms it protects. These
+  providers may set their own cookies needed for that function.</p>
 
   <h3>Analytics (optional — needs your consent)</h3>
   <p>If you click <strong>Accept all</strong> or enable <strong>Analytics</strong> under Cookie Preferences,
@@ -110,12 +195,17 @@
   <a href="#" data-ck-prefs>Cookie Preferences</a>. Declining or blocking them does not affect your
   account or the service. We do not sell this data and we do not use it for third-party advertising.</p>
 
-  <h2>7. Security</h2>
+  <h2>10. Children</h2>
+  <p>The service is for adults. We do not knowingly collect data from anyone under 18.</p>
+
+  <h2>11. Security</h2>
   <p>Passwords are hashed (PBKDF2), credentials are transmitted over TLS, and access to production data
   is restricted. No system is perfectly secure — report concerns to
   <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p>
 
-  <h2>8. Contact</h2>
-  <p>Data controller: {{ site_name }} (contact: <a href="mailto:{{ support_email }}">{{ support_email }}</a>).</p>
+  <h2>12. Changes and contact</h2>
+  <p>When we change this policy we publish the new version here with its date, and tell you about
+  material changes by e-mail or in the portal. Contact:
+  <a href="mailto:{{ legal.privacy_email }}">{{ legal.privacy_email }}</a>.</p>
 </div></section>
 {% endblock %}

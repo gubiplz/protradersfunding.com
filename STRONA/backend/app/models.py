@@ -1056,6 +1056,28 @@ class TelemetryEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
 
 
+class ConsentRecord(Base):
+    """Proof of a declaration: who accepted which document version, when, from where.
+
+    One row per acceptance (sign-up, Google sign-up, each purchase, each pay
+    link, newsletter). Separate from telemetry, which is best-effort analytics
+    and is deleted with the customer's events; these rows are the evidence and
+    survive account anonymisation. `email` is filled only when there is no
+    trader to point at (newsletter)."""
+    __tablename__ = "consent_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    trader_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    order_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    email: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    kind: Mapped[str] = mapped_column(String(32), index=True)   # signup | signup_google | checkout | pay_link | newsletter
+    doc_version: Mapped[str] = mapped_column(String(40))
+    ip: Mapped[str] = mapped_column(String(64), default="")
+    user_agent: Mapped[str] = mapped_column(String(200), default="")
+    detail: Mapped[str] = mapped_column(String(300), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+
+
 class Lead(Base):
     """Zgłoszenie z landingu, zanim stanie się (albo nie stanie się) klientem.
 

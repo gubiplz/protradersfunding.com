@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Complaints Procedure — {{ site_name }}{% endblock %}
+{% block description %}How to make a complaint to {{ site_name }}, how we handle it and where you can take it further.{% endblock %}
+
+{% block content %}
+<section class="page-head"><div class="wrap">
+  <span class="pill">Legal</span>
+  <h1>Complaints Procedure</h1>
+  <p class="updated">Version {{ legal.version }} · Last updated: {{ legal.date }}</p>
+</div></section>
+
+<section class="sec sec-tight"><div class="wrap prose">
+  <h2>1. What you can complain about</h2>
+  <p>Anything about the service: an account that was not delivered or does not work as described,
+  a rule you believe was applied wrongly, a breach or a voided result you disagree with, a reward
+  request that was refused or reduced, a refund, a charge, or how we handled your personal data.</p>
+
+  <h2>2. How to complain</h2>
+  <p>Write to <a href="mailto:{{ support_email }}">{{ support_email }}</a> from the e-mail address
+  registered on your account, with the subject "Complaint". Tell us:</p>
+  <ul>
+    <li>your account login or order number;</li>
+    <li>what happened and when (for a trade or a breach: the instrument and the time);</li>
+    <li>what you are asking for (for example a refund, a correction of a result, a review of a
+        refused reward).</li>
+  </ul>
+  <p>A complaint costs nothing and does not affect your account.</p>
+
+  <h2>3. How we handle it</h2>
+  <ul>
+    <li>We confirm in the same e-mail thread that we received the complaint.</li>
+    <li>A member of our team reviews it. Where the complaint concerns a decision made
+        automatically by the risk engine (a breach) or a refused reward, it is reviewed by a person
+        who did not rely on the automatic result alone.</li>
+    <li>We answer in writing, in the same thread, within 14 days of receiving the complaint. The
+        answer says what we decided and why. If we reject the complaint in whole or in part, we give
+        the reasons and the data we relied on (for example the trades, the rule and the recorded
+        values).</li>
+  </ul>
+
+  <h2>4. If you are not satisfied</h2>
+  <p>You can take the matter to court. If you are a consumer, you can also use an out-of-court
+  dispute resolution body in the country where you live{% if legal.adr_body %}; the body competent
+  for us is {{ legal.adr_body }}{% endif %}. Consumers in the European Union can find the body for
+  their country on the European Commission's list of consumer dispute resolution bodies. Using such
+  a body is voluntary for both sides unless the law says otherwise.</p>
+  <p>For a complaint about personal data, you can also contact the data protection authority, as
+  described in the <a href="/privacy">Privacy Policy</a>.</p>
+
+  <h2>5. Your statutory rights</h2>
+  <p>This procedure does not limit rights you have under the mandatory consumer law of the country
+  where you live, including rights you have when a service is not in conformity with the
+  contract.</p>
+</div></section>
+{% endblock %}
