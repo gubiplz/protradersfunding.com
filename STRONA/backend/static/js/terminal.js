@@ -1061,7 +1061,7 @@
         const ov = (chart.getOverlays({ id }) || [])[0];
         if (!ov) return;
         const xy = ov.points.map((pt) => { const c = chart.convertToPixel({ dataIndex: barIndexAt(d, pt.timestamp), value: pt.value }, { paneId: 'candle_pane', absolute: true }); return c && { x: Math.round(c.x), y: Math.round(c.y) }; });
-        out.push({ id: hid, a: xy[0], b: xy[1] });
+        out.push({ id: hid, a: xy[0], b: xy[1], lit: !!(ov.extendData && ov.extendData.hover) });
       });
       return out;
     },
@@ -2393,7 +2393,13 @@
   let tipMode = 'hover', tipOv = null, tipH = null;
   function hoverTrade(overlay, on) {
     const e = overlay.extendData || {};
+    // One trade is lit at a time. The chart does not always report leaving a trade (two
+    // trades overlap, or the first one was picked by a click), so lighting one up puts
+    // out the one before it, and a late "left" from another trade does not touch this one.
+    const other = tipOv && tipOv.id !== overlay.id;
+    if (on && other) chart.overrideOverlay({ id: tipOv.id, extendData: { ...tipOv.ext, hover: false } });
     chart.overrideOverlay({ id: overlay.id, extendData: { ...e, hover: on } });
+    if (!on && other) return;
     // Hover: the deal is written out on the chart beside its two ends (ptfTrade). The box
     // with times and duration opens only for a trade picked by a click or from a list row.
     if (on) { tipOv = { id: overlay.id, ext: e }; if (tipMode === 'focus') showTip(e.h); else hideTip(); } else { tipOv = null; hideTip(); }
