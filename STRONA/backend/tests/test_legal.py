@@ -41,7 +41,7 @@ ADMIN_H = {"X-Admin-Token": settings.admin_token}
 ZGODY = {"consent_terms": True, "consent_risk": True, "consent_immediate": True}
 DANE = {"first_name": "Anna", "last_name": "Kowalska", "phone": "512345678", "phone_country": "PL"}
 STRONY = ("/terms", "/privacy", "/refund-policy", "/risk-disclosure", "/affiliate-terms",
-          "/legal", "/withdrawal", "/complaints", "/restricted-countries", "/promotions-terms")
+          "/withdrawal", "/complaints", "/restricted-countries", "/promotions-terms")
 
 
 def _trader(email, **extra):
@@ -70,23 +70,33 @@ def test_kazda_strona_prawna_renderuje_sie_z_ta_sama_wersja():
             assert r.status_code == 200, sciezka
             assert f"Version {legal.DOCS_VERSION}" in r.text, sciezka
         mapa = c.get("/sitemap.xml").text
-        stopka = c.get("/").text
-    for sciezka in ("/legal", "/withdrawal", "/complaints", "/restricted-countries"):
+        stopka = c.get("/").text.split("<footer>")[1]
+        terms, refund = c.get("/terms").text, c.get("/refund-policy").text
+        assert c.get("/legal").status_code == 404      # no separate "Legal Information" page
+    for sciezka in ("/withdrawal", "/complaints", "/restricted-countries"):
         assert f"{sciezka}</loc>" in mapa
-        assert f'href="{sciezka}"' in stopka
+    # Withdrawal and complaints are reached from the documents that mention
+    # them, not from the footer menu.
+    assert 'href="/withdrawal"' not in stopka and 'href="/complaints"' not in stopka
+    assert 'href="/legal"' not in stopka and 'href="/restricted-countries"' in stopka
+    for dokument in (terms, refund):
+        assert 'href="/withdrawal"' in dokument and 'href="/complaints"' in dokument
+    # Complaints go to the support address, stated in the Terms themselves.
+    kontakt = terms.split("14. Contact and complaints")[1]
+    assert f"mailto:{settings.support_email}" in kontakt and 'subject "Complaint"' in kontakt
 
 
 def test_dane_operatora_tylko_gdy_ustawione(monkeypatch):
     """Empty LEGAL_* settings print no company at all; filled ones appear in the
     Terms, the Privacy Policy, the Legal page and the footer."""
     with TestClient(app) as c:
-        assert "Registration:" not in c.get("/legal").text
+        assert "Registration:" not in c.get("/terms").text
         assert "is operated by" not in c.get("/").text
         monkeypatch.setattr(settings, "legal_entity_name", "Probe Trading sp. z o.o.")
         monkeypatch.setattr(settings, "legal_reg_no", "KRS 0000123456")
         monkeypatch.setattr(settings, "legal_address", "ul. Testowa 1, 00-001 Warszawa")
         monkeypatch.setattr(settings, "legal_governing_law", "Poland")
-        for sciezka in ("/legal", "/terms", "/privacy"):
+        for sciezka in ("/terms", "/privacy"):
             html = c.get(sciezka).text
             assert "Probe Trading sp. z o.o." in html and "KRS 0000123456" in html, sciezka
         assert "governed by the law of Poland" in c.get("/terms").text

@@ -450,7 +450,7 @@ def sitemap(request: Request):
     paths = ["/", "/objectives", "/trade", "/faq", "/contact", "/academy", "/affiliate", "/affiliate-terms",
              "/install", "/verify",
              "/terms", "/privacy", "/risk-disclosure", "/refund-policy",
-             "/legal", "/withdrawal", "/complaints", "/restricted-countries",
+             "/withdrawal", "/complaints", "/restricted-countries",
              "/promotions-terms"] \
         + [f"/academy/{x.slug}" for x in academy.LESSONS]
     urls = "".join(f"<url><loc>{base}{p}</loc></url>" for p in paths)
@@ -14402,12 +14402,6 @@ def risk_page(request: Request):
 @app.get("/refund-policy")
 def refund_page(request: Request):
     return _page(request, "legal/refund-policy.html")
-
-
-@app.get("/legal")
-def legal_page(request: Request):
-    """Operator details and the index of every legal document."""
-    return _page(request, "legal/legal.html")
 
 
 @app.get("/withdrawal")

@@ -156,7 +156,7 @@ def _potwierdzenie_zakupu_txt() -> str:
             f"  Refund Policy:       {baza}/refund-policy\n"
             f"  Right of Withdrawal: {baza}/withdrawal\n"
             f"  Risk Disclosure:     {baza}/risk-disclosure\n"
-            f"Operator details and complaints: {baza}/legal\n")
+            f"Complaints: {settings.support_email} ({baza}/complaints)\n")
 
 
 def _bez_hasla_txt(ctx: dict) -> str:
@@ -708,7 +708,7 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                              link("/refund-policy", "Refund Policy"),
                              link("/withdrawal", "Right of Withdrawal"),
                              link("/risk-disclosure", "Risk Disclosure"),
-                             link("/legal", "operator details and complaints")]) + "."))
+                             link("/complaints", "Complaints Procedure")]) + "."))
     elif event == "welcome":
         mobile = f"""
    <tr><td align="center" style="padding:40px 44px 0">
