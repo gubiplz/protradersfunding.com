@@ -63,7 +63,7 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
       <h2>Your funded journey<br>starts here.</h2>
       <p>Log in to manage challenges, track objectives in real time and request payouts.</p>
       <div class="auth-points">
-        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> MT5 accounts and a Built-in Terminal on market prices</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> Simulated accounts and a Built-in Terminal on market prices</span>
         <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> Published objectives and static drawdown on every plan</span>
         <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg> Performance rewards with up to 90% profit split</span>
       </div>
@@ -112,8 +112,8 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
         <input id="a-ref" placeholder="Referral code (optional)" class="inp hidden" autocomplete="off">
         <label class="terms-row hidden" id="a-terms-row"><input type="checkbox" id="a-terms">
           <span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms of Service</a> and the
-          <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>, and I understand all accounts
-          are simulated with virtual funds.</span></label>
+          <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>, I am 18 or older, and I
+          understand all accounts are simulated with virtual funds.</span></label>
         <button id="a-submit" type="submit" class="btn-p lg" style="width:100%">Log in</button>
         <button id="a-forgot" type="button" onclick="authTab('forgot')" style="font-size:12.5px;color:var(--muted);text-decoration:underline;background:none;border:0;cursor:pointer">Forgot password?</button>
         <button id="a-back" type="button" onclick="authTab('login')" class="hidden" style="font-size:13px;color:var(--muted);background:none;border:0;cursor:pointer">‹ Back to log in</button>
@@ -129,7 +129,8 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
         <div id="g-btn"></div>
         <p class="g-terms">By continuing with Google you agree to the
           <a href="/terms" target="_blank" rel="noopener">Terms of Service</a> and the
-          <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</p>
+          <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>, and you confirm that
+          you are 18 or older and understand all accounts are simulated with virtual funds.</p>
       </div>
       <!-- What replaces that block in an in-app browser. Deliberately a quiet
            footnote and not an offer: whoever signed up with Google has NO
@@ -228,6 +229,9 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
 <script>
 const GOOGLE_CLIENT_ID={{ google_client_id|tojson }};
 const SITE_NAME={{ site_name|tojson }};
+/* Seller details for the invoice — empty until the LEGAL_* settings are filled in. */
+const LEGAL_SELLER={{ {"name": legal.entity_name, "address": legal.address, "reg_no": legal.reg_no, "tax_id": legal.tax_id}|tojson }};
+const LEGAL_DOCS_V={{ legal.version|tojson }};
 const ASSET_V={{ asset_v|tojson }};
 /* Tryb testowy wypłat w vUSDT (null gdy VUSDT_TEST_PAYOUTS wyłączone / brak kluczy). */
 const VUSDT_TEST={{ vusdt_test|tojson }};

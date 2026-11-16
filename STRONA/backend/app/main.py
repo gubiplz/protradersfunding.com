@@ -53,6 +53,7 @@ from . import vusdt
 from . import helpdesk
 from . import markets, terminal
 from . import academy
+from . import legal
 from .config import get_settings
 from .db import SessionLocal, init_db, mark_schema_current, schema_fingerprint, zamek_migracji
 from .models import (LEAD_LOST_STATUSES, LEAD_STATUSES, LOST_REASONS,
@@ -448,7 +449,9 @@ def sitemap(request: Request):
     base = _public_base(request)
     paths = ["/", "/objectives", "/trade", "/faq", "/contact", "/academy", "/affiliate", "/affiliate-terms",
              "/install", "/verify",
-             "/terms", "/privacy", "/risk-disclosure", "/refund-policy"] \
+             "/terms", "/privacy", "/risk-disclosure", "/refund-policy",
+             "/withdrawal", "/complaints", "/restricted-countries",
+             "/promotions-terms"] \
         + [f"/academy/{x.slug}" for x in academy.LESSONS]
     urls = "".join(f"<url><loc>{base}{p}</loc></url>" for p in paths)
     return Response('<?xml version="1.0" encoding="UTF-8"?>'
@@ -1200,6 +1203,8 @@ def signup(payload: SignupIn, request: Request, response: Response):
         raise HTTPException(400, "The password must be at least 8 characters long")
     if not payload.terms_accepted:
         raise HTTPException(400, "You must accept the Terms of Service and Privacy Policy")
+    if legal.is_restricted(_kraj_z_ip(request)):
+        raise HTTPException(403, legal.RESTRICTED_MESSAGE)
     # Pole bywa ukryte (rejestracja przez Google), wiec puste zostaje dozwolone —
     # ale jesli cos wpisano, ma to byc imie i nazwisko, a nie „Dawid53".
     nazwa = (payload.full_name or "").strip()
@@ -1247,6 +1252,9 @@ def signup(payload: SignupIn, request: Request, response: Response):
             signup_country=_kraj_z_ip(request), last_login_country=_kraj_z_ip(request),
         )
         session.add(tr)
+        session.flush()
+        legal.record_consent(session, kind="signup", request=request, trader_id=tr.id,
+                             detail="Terms of Service + Privacy Policy, checkbox")
         session.commit()
         # welcome idzie dopiero po potwierdzeniu adresu — najpierw sam kod
         _wyslij_mail_weryfikacyjny(request, tr)
@@ -1359,6 +1367,10 @@ def google_login(payload: GoogleAuthIn, request: Request, response: Response):
         if odebral_konto:
             tr.must_set_password = False
         if nowy:
+            # Only a NEW registration is refused: an existing customer must still
+            # be able to sign in (and reach support) while travelling.
+            if legal.is_restricted(_kraj_z_ip(request)):
+                raise HTTPException(403, legal.RESTRICTED_MESSAGE)
             referred_by = None
             if payload.referral:
                 ref = payload.referral.strip().upper()
@@ -1385,6 +1397,9 @@ def google_login(payload: GoogleAuthIn, request: Request, response: Response):
                 signup_country=_kraj_z_ip(request),
             )
             session.add(tr)
+            session.flush()
+            legal.record_consent(session, kind="signup_google", request=request, trader_id=tr.id,
+                                 detail="Terms of Service + Privacy Policy, notice under the Google button")
         kraj = _kraj_z_ip(request)
         if kraj:
             tr.last_login_country = kraj
@@ -1444,21 +1459,11 @@ def _affiliate_claimed(session, trader_id: int) -> float:
 # Konta z kampanii "free challenge" (założone ZA klienta): tym osobom portal
 # przypomina co kilka dni popupem o opinii na Trustpilot. Lista w kodzie, nie
 # w publicznym JS — inaczej wyciekłyby adresy klientów. Zmiana listy = deploy.
-_TRUSTPILOT_NUDGE = frozenset({
-    "richleewal@gmail.com",
-    "bighybenfx@gmail.com",
-    "ifedilimatthew19@gmail.com",
-    "okechukwuchidibere1@gmail.com",
-    "austin.ashford@imported.local",
-    "salisalih340@gmail.com",
-    "jrw31013@gmail.com",
-    "hpdtravel@gmail.com",
-    "saleeskb@gmail.com",
-    "shamsushehupocket@gmail.com",
-    "joyful4sure@gmail.com",
-    "scheeperslucrecia522@gmail.com",
-    "conerstonepearl@gmail.com",
-})
+#
+# The addresses are personal data, so they live in the REVIEW_NUDGE_EMAILS
+# environment variable (comma-separated), not in the repository.
+_TRUSTPILOT_NUDGE = frozenset(
+    a.strip().lower() for a in settings.review_nudge_emails.split(",") if a.strip())
 
 
 @app.get("/api/auth/me")
@@ -1741,12 +1746,15 @@ def _dane_klienta(payload: CheckoutIn, trader: Trader) -> tuple[str, str, str, s
 
 
 @app.post("/api/checkout")
-def checkout(payload: CheckoutIn, trader: Trader = Depends(auth.current_trader)):
+def checkout(payload: CheckoutIn, request: Request,
+             trader: Trader = Depends(auth.current_trader)):
     session = SessionLocal()
     try:
         if not (payload.consent_terms and payload.consent_risk and payload.consent_immediate):
             raise HTTPException(
                 400, "Please accept the required purchase declarations before continuing")
+        if legal.is_restricted(_kraj_z_ip(request)) or legal.is_restricted(payload.phone_country):
+            raise HTTPException(403, legal.RESTRICTED_MESSAGE)
         # Te trzy pola ida prosto do formularza rejestracji konta demo u brokera,
         # wiec smiec = nieudany provisioning po pobraniu platnosci. Walidujemy
         # PRZED zapisem i przed utworzeniem zamowienia.
@@ -1755,19 +1763,26 @@ def checkout(payload: CheckoutIn, trader: Trader = Depends(auth.current_trader))
             session, trader,
             first_name=imie, last_name=nazwisko, phone=tel, phone_country=kraj,
         )
-        # Ślad zgody w telemetrii (bez nowej kolumny Order) — wersja tekstu z UI.
         telemetry.track(
             "checkout_consent", trader.id,
-            version=(payload.consent_version or "checkout-consent-2026-11"),
+            version=(payload.consent_version or legal.DOCS_VERSION),
             terms=True, risk=True, immediate=True,
         )
-        return billing.create_checkout(session, trader, payload.product_key, payload.coupon,
-                                       promo_code=payload.promo_code,
-                                       weekend_trading=payload.weekend_trading,
-                                       split_boost=payload.split_boost,
-                                       ondemand_payout=payload.ondemand_payout,
-                                       copytrading=payload.copytrading,
-                                       use_credits=payload.use_credits)
+        wynik = billing.create_checkout(session, trader, payload.product_key, payload.coupon,
+                                        promo_code=payload.promo_code,
+                                        weekend_trading=payload.weekend_trading,
+                                        split_boost=payload.split_boost,
+                                        ondemand_payout=payload.ondemand_payout,
+                                        copytrading=payload.copytrading,
+                                        use_credits=payload.use_credits)
+        # The proof of the three declarations sits next to the ORDER it belongs
+        # to (version of the documents, time, IP) — telemetry above is analytics
+        # only and is deleted with the customer's events.
+        legal.record_consent(session, kind="checkout", request=request, trader_id=trader.id,
+                             order_id=wynik.get("order_id"),
+                             detail="terms+refund; risk; immediate start / withdrawal")
+        session.commit()
+        return wynik
     finally:
         session.close()
 
@@ -2081,6 +2096,12 @@ def submit_kyc(payload: KycIn, trader: Trader = Depends(auth.current_trader)):
             kraj = fields.country_name(payload.country)
         except ValueError as e:
             raise HTTPException(400, str(e))
+        if legal.is_restricted_name(kraj):
+            raise HTTPException(403, legal.RESTRICTED_MESSAGE)
+        # The service is 18+ (Terms): a date of birth that parses and gives an age
+        # under 18 is refused here instead of being left for a manual reviewer to spot.
+        if legal.adult(payload.dob) is False:
+            raise HTTPException(400, "You must be at least 18 years old to use this service")
         # Poprawka zgłoszenia, którego admin jeszcze nie tknął, jest w porządku:
         # rozmazane zdjęcie dowodu trzeba dać wymienić, zanim ktoś je odrzuci.
         # Ale to JEST to samo zgłoszenie, więc nie robimy z niego nowego:
@@ -3761,7 +3782,9 @@ def _nl_popup_ctx() -> dict | None:
 
 class NewsletterIn(BaseModel):
     email: str = Field(max_length=200)
-    consent: bool = True
+    # False by default: marketing consent has to be SENT by the form (a ticked
+    # box), never assumed by the server when the field is missing.
+    consent: bool = False
     source: str = Field(default="footer", max_length=20)
 
 
@@ -3796,6 +3819,9 @@ def newsletter_subscribe(payload: NewsletterIn, request: Request):
             sub.unsubscribed_at = None      # wrócił: zapis liczy się od nowa
             sub.campaign = oferta["campaign"]
             nowy = True
+        if nowy:
+            legal.record_consent(session, kind="newsletter", request=request, email=email,
+                                 detail=f"marketing e-mail, {sub.source} form")
         session.commit()
         if nowy:
             notify.send("newsletter_welcome", email,
@@ -4671,6 +4697,18 @@ def me_delete(payload: DeleteIn, request: Request, trader: Trader = Depends(auth
         tr.kyc_dob = tr.kyc_address = tr.kyc_id_type = tr.kyc_id_number = None
         tr.kyc_doc_front = tr.kyc_doc_back = tr.kyc_doc_residence = None
         tr.kyc_status = "none"
+        # The identity scans themselves live in `kyc_files`, not on the profile:
+        # clearing the fields above left the documents in the database.
+        session.query(KycFile).filter(KycFile.trader_id == tr.id).delete(synchronize_session=False)
+        # Everything else that still pointed at the person: reward wallet, Google
+        # account link, Telegram handle, countries from IP, push subscriptions.
+        tr.payout_network = tr.payout_address = tr.payout_wallet_at = None
+        tr.payout_wallet_new = tr.payout_wallet_code = tr.payout_wallet_code_exp = None
+        tr.google_sub = tr.telegram_username = None
+        tr.signup_country = tr.last_login_country = tr.phone_country = None
+        tr.pending_email = None
+        session.query(PushSubscription).filter(
+            PushSubscription.trader_id == tr.id).delete(synchronize_session=False)
         tr.password_hash = auth.hash_password(secrets.token_hex(24))
         tr.notify_updates = tr.notify_trading = tr.notify_payouts = tr.notify_marketing = False
         session.commit()
@@ -5619,6 +5657,10 @@ def admin_reject_payout(req_id: int, payload: PayoutRejectIn):
         if not r or r.status not in PAYOUT_OTWARTE:
             raise HTTPException(404, "The request does not exist or was already handled")
         reason = (payload.reason or "").strip()[:200] or None
+        # The Terms promise the trader the reason for a refused reward, so a
+        # rejection without one cannot be sent.
+        if not reason:
+            raise HTTPException(400, "Give the reason for the rejection — the trader sees it")
         t = _transfer_vusdt(session, req_id)
         if t:
             # Tokeny, które już wyszły, nie wrócą przez „Reject". Transfer jeszcze
@@ -5646,7 +5688,7 @@ def admin_reject_payout(req_id: int, payload: PayoutRejectIn):
             notify.send("payout_rejected", tr.email, {
                 "name": tr.full_name or tr.email, "login": acc.login if acc else "",
                 "trader_share": r.trader_share,
-                "reason": reason or "not specified"})
+                "reason": reason})
         return {"rejected": req_id, "reason": reason}
     finally:
         session.close()
@@ -14173,6 +14215,8 @@ def _page(request: Request, template: str, **extra):
            "clarity_id": settings.clarity_project_id, "promo": _promo_ctx(),
            "bogo_promo": _bogo_promo_active(),
            "google_client_id": settings.google_client_id,
+           # Operator details, documents version, restricted countries (app/legal.py).
+           "legal": legal.context(),
            "vusdt_test": vusdt.public_config(),
            # Wiersz „Reward frequency" w tabelach zasad: 0 = on demand.
            "payout_days": settings.payout_interval_days,
@@ -14360,6 +14404,26 @@ def refund_page(request: Request):
     return _page(request, "legal/refund-policy.html")
 
 
+@app.get("/withdrawal")
+def withdrawal_page(request: Request):
+    return _page(request, "legal/withdrawal.html")
+
+
+@app.get("/complaints")
+def complaints_page(request: Request):
+    return _page(request, "legal/complaints.html")
+
+
+@app.get("/restricted-countries")
+def restricted_countries_page(request: Request):
+    return _page(request, "legal/restricted-countries.html")
+
+
+@app.get("/promotions-terms")
+def promotions_terms_page(request: Request):
+    return _page(request, "legal/promotions-terms.html")
+
+
 def _zamowienie_po_tokenie(session, token: str) -> Order:
     o = (session.query(Order).filter(Order.pay_token == token).first()
          if token else None)
@@ -14537,8 +14601,15 @@ def pay_order_public(request: Request, token: str,
         session.close()
 
 
+class PayStartIn(BaseModel):
+    # The same three declarations as the portal checkout (legal.DECLARATIONS).
+    consent_terms: bool = False
+    consent_risk: bool = False
+    consent_immediate: bool = False
+
+
 @app.post("/api/pay/{token}/start")
-def pay_start(request: Request, token: str,
+def pay_start(request: Request, token: str, payload: PayStartIn | None = None,
               x_partner_token: str | None = Header(default=None)):
     """Otwiera kasę dla linku /pay/<token>. Bez logowania — token JEST wstępem.
 
@@ -14569,6 +14640,22 @@ def pay_start(request: Request, token: str,
                            and secrets.compare_digest(x_partner_token, sekret))
         powrot = (f"{settings.partner_pay_base_url}/pay/{o.pay_token}"
                   if od_partnera and settings.partner_pay_base_url else None)
+        # Our own payment page must send the three declarations: before this the
+        # checkboxes lived only in the browser and nothing proved they were ticked.
+        # A partner's page collects them on its side and may pass them through.
+        zgody = bool(payload and payload.consent_terms and payload.consent_risk
+                     and payload.consent_immediate)
+        if not zgody and not od_partnera:
+            raise HTTPException(
+                400, "Please accept the required purchase declarations before continuing")
+        if legal.is_restricted(_kraj_z_ip(request)):
+            raise HTTPException(403, legal.RESTRICTED_MESSAGE)
+        if zgody:
+            legal.record_consent(session, kind="pay_link", request=request,
+                                 trader_id=o.trader_id, order_id=o.id,
+                                 detail="terms+refund; risk; immediate start / withdrawal"
+                                        + ("; partner page" if od_partnera else ""))
+            session.commit()
         if not settings.stripe_enabled:
             # Dev/mock: domknięcie robi portal (wymaga zalogowania), tak samo
             # jak przy zwykłym checkoucie bez kluczy Stripe'a.

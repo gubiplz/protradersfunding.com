@@ -147,8 +147,9 @@ a contract address. Do not mention Express Payout ($49 / review queue) — that 
 - Documents: ID front, ID back, proof of residence. JPG, PNG or PDF, **max 5 MB each**.
 - Rejection comes with a reason and **the trader can correct and resubmit**.
 - Minimum age **18**. (Terms §3)
-- **No restricted-country list exists in the code.** Do not tell anyone their country is
-  blocked or allowed — escalate.
+- **Restricted countries** are listed on `/restricted-countries`; registration, purchase
+  and verification from them are refused. Point the customer to that page. For any
+  question about whether a specific person may take part — escalate.
 
 ## 7. Money, refunds, programs
 
@@ -191,8 +192,11 @@ support. Do not quote a minimum unclaimed amount. Full rules: `/affiliate-terms`
 
 ## 8. Platform, delivery, conduct
 
-- **MT5.** Credentials work on desktop, mobile and the web terminal, and in the Built-in
-  Terminal at `/trade` (nothing to install).
+- **MT5 credentials.** The login, password and server open the Built-in Terminal at `/trade`
+  (nothing to install). They work in the MetaTrader 5 apps **only** when the server shown
+  with the account is a MetaTrader 5 server (for example accounts with the Copytrading
+  add-on). An account on server `PTF-sim` works in the Built-in Terminal only — never tell
+  that trader to log in with the MT5 desktop, mobile or web app.
 - Provisioning is automated: credentials are created once the payment is confirmed and
   appear in the dashboard and by email. **Do not quote how long that takes.**
 - Markets: 12 crypto pairs, gold, silver and platinum, WTI, Brent and natural gas, the

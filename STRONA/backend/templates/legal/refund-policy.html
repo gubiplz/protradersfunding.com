@@ -6,7 +6,7 @@
 <section class="page-head"><div class="wrap">
   <span class="pill">Legal</span>
   <h1>Refund Policy</h1>
-  <p class="updated">Last updated: November 2026</p>
+  <p class="updated">Version {{ legal.version }} · Last updated: {{ legal.date }}</p>
 </div></section>
 
 <section class="sec sec-tight"><div class="wrap prose">
@@ -16,18 +16,25 @@
 
   <h2>2. When you get the fee back</h2>
   <ul>
-    <li>Before delivery: if you paid but your MT5 account has not yet been created, you
-        may cancel for a full refund to the original payment method. Write to
-        <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</li>
-    <li>Money-back to the original payment method: duplicate charges, or an account
-        that we could not provision, are refunded in full to the method you paid with.</li>
+    <li>Before delivery: if you paid but your MT5 credentials have not yet been delivered, you
+        may cancel for a full refund to the original payment method. See the
+        <a href="/withdrawal">Right of Withdrawal</a> for how to do it and for the form.</li>
+    <li>Duplicate charges, and an account that we could not provision, are refunded
+        in full to the method you paid with.</li>
+    <li>Service not as described: if the account you received does not work or is not what
+        the plan card and these documents described, tell us under the
+        <a href="/complaints">Complaints Procedure</a>. If we cannot put it right, the fee is
+        refunded.</li>
+    <li>Restricted country: see Section&nbsp;3 of the
+        <a href="/restricted-countries">Restricted Countries</a> page.</li>
   </ul>
   <h3>Fee credit on 2-Step plans (a credit, not a refund)</h3>
   <p>On 2-Step plans, when you pass the Challenge and receive your first reward on the funded account,
-  the full Challenge fee for that account is credited as additional vUSDT on that payout. This is a
+  the fee you paid for that account is credited as additional vUSDT on that payout. This is a
   performance-reward credit in vUSDT. It is not a refund to your card or other original payment
-  method, and it depends on a first reward being approved. Instant Funding accounts have no fee
-  credit.</p>
+  method, and it depends on a first reward being approved. vUSDT is not money and may not be
+  convertible into money (see the <a href="/risk-disclosure">Risk Disclosure</a>). Instant Funding
+  accounts have no fee credit.</p>
 
   <h2>3. When the fee is not refundable</h2>
   <ul>
@@ -38,24 +45,26 @@
         entitle you to a refund.</li>
     <li>Accounts terminated for prohibited conduct under the <a href="/terms">Terms</a> are not refunded.</li>
   </ul>
+  <p>Nothing in this policy limits rights you have under the mandatory consumer law of the country
+  where you live.</p>
 
   <h2>4. Discounts and coupons</h2>
   <p>If a coupon was applied at checkout, any refund equals the amount actually paid, not the list
   price. Promotional discounts have no cash value on their own.</p>
 
   <h2>5. How refunds are processed</h2>
-  <p>Where this policy provides a money-back refund (duplicates, provisioning failure, or
-  cancellation before delivery), approved amounts go back to the original payment method; how long
-  they take to appear depends on your bank or payment provider. The 2-Step Challenge fee credit on
-  first reward is paid as additional vUSDT with that payout, not to your card. To request a money-back
-  refund, e-mail
-  <a href="mailto:{{ support_email }}">{{ support_email }}</a> from your registered address with the
-  order number.</p>
+  <p>To request a refund, e-mail <a href="mailto:{{ support_email }}">{{ support_email }}</a> from
+  your registered address with the order number. Approved amounts go back to the original payment
+  method. A withdrawal under the <a href="/withdrawal">Right of Withdrawal</a> is refunded no later
+  than 14 days from the day we receive it; how long the money then takes to appear depends on your
+  bank or payment provider. The 2-Step Challenge fee credit on first reward is paid as additional
+  vUSDT with that payout, not to your card.</p>
 
   <h2>6. Chargebacks</h2>
-  <p>Please contact us before opening a card dispute. A chargeback is unwarranted when it disputes a
-  Challenge that was delivered as described and was opened without contacting us first; unwarranted
-  chargebacks lead to account termination under the Terms. Legitimate refund claims are honoured
-  without a dispute.</p>
+  <p>Please contact us before opening a card dispute: a justified refund claim is honoured
+  without one. While a payment for an account is disputed, we may suspend that account and hold any
+  reward on it. If the dispute is decided in our favour, the account is restored. Disputing a payment
+  for a Challenge that was delivered and used as described is treated as chargeback abuse under the
+  Terms.</p>
 </div></section>
 {% endblock %}

@@ -31,6 +31,9 @@ from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import Order, Trader  # noqa: E402
 
+# Declarations our own payment page sends with every /start call.
+ZGODY = {"consent_terms": True, "consent_risk": True, "consent_immediate": True}
+
 init_db()
 s = SessionLocal(); catalog.seed_products(s); s.close()
 client = TestClient(app)
@@ -237,7 +240,7 @@ def test_strona_jest_samodzielna_bez_nawigacji_serwisu():
 def test_klikniecie_tworzy_sesje_stripe_i_zapisuje_ja_przy_zamowieniu(stripe_wlaczony):
     """SEDNO całego rozwiązania: bez `stripe_session_id` webhook zignoruje wpłatę."""
     oid, _, _ = _zamowienie(amount_usd=199.5)
-    r = client.post(f"/api/pay/{_token(oid)}/start")
+    r = client.post(f"/api/pay/{_token(oid)}/start", json=ZGODY)
     assert r.status_code == 200
     assert r.json()["checkout_url"].startswith("https://checkout.stripe.com/")
     s = SessionLocal(); o = s.get(Order, oid); sid = o.stripe_session_id; s.close()
@@ -246,7 +249,7 @@ def test_klikniecie_tworzy_sesje_stripe_i_zapisuje_ja_przy_zamowieniu(stripe_wla
 
 def test_kasa_pobiera_dokladnie_kwote_z_zamowienia(stripe_wlaczony):
     oid, _, _ = _zamowienie(amount_usd=199.5)
-    client.post(f"/api/pay/{_token(oid)}/start")
+    client.post(f"/api/pay/{_token(oid)}/start", json=ZGODY)
     kw = stripe_wlaczony.wywolania[-1][1]
     assert kw["line_items"][0]["price_data"]["unit_amount"] == 19950
     # Bez tego webhook nie ma jak trafić z powrotem w zamówienie.
@@ -256,7 +259,7 @@ def test_kasa_pobiera_dokladnie_kwote_z_zamowienia(stripe_wlaczony):
 def test_platnosc_z_linku_zaklada_konto(stripe_wlaczony):
     """Pełna pętla: link -> kasa -> webhook -> konto tradera."""
     oid, tid, _ = _zamowienie()
-    client.post(f"/api/pay/{_token(oid)}/start")
+    client.post(f"/api/pay/{_token(oid)}/start", json=ZGODY)
     s = SessionLocal(); o = s.get(Order, oid); sid, kwota = o.stripe_session_id, o.amount_usd; s.close()
     zdarzenie = json.dumps({"type": "checkout.session.completed", "data": {"object": {
         "id": sid, "payment_status": "paid", "client_reference_id": str(oid),
@@ -275,8 +278,8 @@ def test_powtorne_wejscie_daje_nowa_sesje_wiec_link_nie_wygasa(stripe_wlaczony):
     a przy zamówieniu zostaje ta ostatnia."""
     oid, _, _ = _zamowienie()
     token = _token(oid)
-    a = client.post(f"/api/pay/{token}/start").json()["checkout_url"]
-    b = client.post(f"/api/pay/{token}/start").json()["checkout_url"]
+    a = client.post(f"/api/pay/{token}/start", json=ZGODY).json()["checkout_url"]
+    b = client.post(f"/api/pay/{token}/start", json=ZGODY).json()["checkout_url"]
     assert a != b
     s = SessionLocal(); o = s.get(Order, oid); s.close()
     assert o.stripe_session_id == b.rsplit("/", 1)[1]
@@ -287,9 +290,9 @@ def test_stare_zamowienie_nie_domyka_starej_sesji(stripe_wlaczony):
     Klient płaci w tej, którą ma otwartą — a to zawsze ta ostatnio wydana."""
     oid, _, _ = _zamowienie()
     token = _token(oid)
-    client.post(f"/api/pay/{token}/start")
+    client.post(f"/api/pay/{token}/start", json=ZGODY)
     stara = stripe_wlaczony.wywolania[-1][0]
-    client.post(f"/api/pay/{token}/start")
+    client.post(f"/api/pay/{token}/start", json=ZGODY)
     s = SessionLocal(); o = s.get(Order, oid); kwota = o.amount_usd; s.close()
     zdarzenie = json.dumps({"type": "checkout.session.completed", "data": {"object": {
         "id": stara, "payment_status": "paid", "client_reference_id": str(oid),
@@ -306,7 +309,7 @@ def test_kasa_odmawia_gdy_zamowienie_juz_oplacone(stripe_wlaczony):
     oid, _, _ = _zamowienie()
     token = _token(oid)
     client.post(f"/api/admin/orders/{oid}/mark-paid", headers=ADMIN)
-    r = client.post(f"/api/pay/{token}/start")
+    r = client.post(f"/api/pay/{token}/start", json=ZGODY)
     assert r.status_code == 400 and "already been paid" in r.json()["detail"]
     assert stripe_wlaczony.wywolania == [], "sesja płatności za opłacone zamówienie"
 
@@ -315,20 +318,20 @@ def test_kasa_odmawia_gdy_zamowienie_zamkniete(stripe_wlaczony):
     oid, _, _ = _zamowienie()
     token = _token(oid)
     client.post(f"/api/admin/orders/{oid}/mark-failed", json={"reason": "x"}, headers=ADMIN)
-    r = client.post(f"/api/pay/{token}/start")
+    r = client.post(f"/api/pay/{token}/start", json=ZGODY)
     assert r.status_code == 400
     assert stripe_wlaczony.wywolania == []
 
 
 def test_kasa_nieznanego_tokenu_to_404(stripe_wlaczony):
-    assert client.post("/api/pay/zmyslony/start").status_code == 404
+    assert client.post("/api/pay/zmyslony/start", json=ZGODY).status_code == 404
     assert stripe_wlaczony.wywolania == []
 
 
 def test_bez_kluczy_stripe_link_prowadzi_do_mocka():
     """Dev bez kluczy: link nie ma prawa wywalić się 500 — domyka portal."""
     oid, _, _ = _zamowienie()
-    r = client.post(f"/api/pay/{_token(oid)}/start")
+    r = client.post(f"/api/pay/{_token(oid)}/start", json=ZGODY)
     assert r.status_code == 200 and f"mock_order={oid}" in r.json()["checkout_url"]
 
 

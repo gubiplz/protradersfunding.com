@@ -241,9 +241,10 @@ Answers are grouped the way customers actually think, not the way the product is
 > Full rules are on /affiliate-terms.
 
 **"Can I use my own MT5 app?"**
-> Yes — the credentials work in MT5 on desktop, mobile and the web terminal. Just enter
-> the server, login and password from your dashboard. You can also trade in the Built-in
-> Terminal at /trade with nothing to install.
+> Usually not. Your MT5 credentials open the Built-in Terminal at /trade, in your browser,
+> with nothing to install. They work in the MetaTrader 5 apps only when the server shown
+> with your account is a MetaTrader 5 server, for example on accounts with the Copytrading
+> add-on.
 
 **"What can I trade?"**
 > 12 crypto pairs, gold, silver and platinum, WTI, Brent and natural gas, the S&P 500,

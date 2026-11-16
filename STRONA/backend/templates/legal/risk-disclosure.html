@@ -6,7 +6,7 @@
 <section class="page-head"><div class="wrap">
   <span class="pill">Legal</span>
   <h1>Risk Disclosure</h1>
-  <p class="updated">Last updated: November 2026</p>
+  <p class="updated">Version {{ legal.version }} · Last updated: {{ legal.date }}</p>
 </div></section>
 
 <section class="sec sec-tight"><div class="wrap prose">
@@ -15,18 +15,28 @@
   trading activity conducted through the Platform is performed in a simulated environment. No real money
   is at risk in the markets, no deposits are accepted, and no actual financial transactions occur. Any
   reference to capital, profit or loss describes values inside the simulation.</p>
+  <p>Reference prices come from third-party exchanges and market-data providers (including
+  Hyperliquid, Binance and Bybit, depending on the instrument). We are not affiliated with,
+  sponsored by or endorsed by any of them, and your simulated account does not interact with any
+  real account, order book or funds on any exchange.</p>
 
   <h2>2. Rewards are not guaranteed</h2>
-  <p>Payments to traders are discretionary, performance-based rewards derived from simulated results
-  under our <a href="/terms">Terms of Service</a>. They are not investment returns. When paid, rewards
+  <p>Payments to traders are conditional, performance-based rewards derived from simulated results
+  under our <a href="/terms">Terms of Service</a>. They are not investment returns, and a reward
+  request can be refused for the reasons listed in Section&nbsp;5 of the Terms. When paid, rewards
   are issued in vUSDT on the Polygon network. By default you may request a reward every
   14 calendar days on a funded account; the On-demand Payout add-on removes that wait between requests
   but does not guarantee approval or transfer time. Past performance — yours or anyone else's — does
-  not guarantee future outcomes. Statistics displayed on this website are historical records of the
-  platform and are not a promise of future results.</p>
-  <p>vUSDT warning. vUSDT is {{ site_name }}'s native internal token on Polygon — not
-  Tether USDT. It is transferable to your wallet; we do not redeem it for cash or fiat. Its market
-  value is not guaranteed and may vary. Holding or receiving vUSDT is not an investment product.</p>
+  not guarantee future outcomes. Statistics, leaderboards, certificates and payout examples displayed
+  on this website do not show what a typical participant achieves and are not a promise of future
+  results. Across the evaluation industry, most people who buy an evaluation do not reach a
+  reward.</p>
+  <p>vUSDT warning. vUSDT is {{ site_name }}'s own internal token on Polygon — not
+  Tether USDT, not a stablecoin and not money. It is transferable to your wallet; we do not redeem it
+  for cash or for any other currency or asset, and we do not operate or guarantee any market on which
+  it can be exchanged. Its value is not guaranteed. You should assume that a reward paid in vUSDT may
+  not be convertible into money. A dollar amount shown for a reward is the number of vUSDT, not an
+  amount of US dollars. Holding or receiving vUSDT is not an investment product.</p>
   <p>Token risks. A reward exists only as vUSDT, so the usual risks of a token apply to it. Transfers
   depend on the Polygon network, which can be congested or unavailable. A transfer to a wrong or
   mistyped address cannot be reversed, and neither can the loss of your wallet or its keys; we cannot
@@ -36,7 +46,8 @@
   <h2>3. The fee is at risk</h2>
   <p>The Challenge fee is a payment for access to an evaluation program. If you do not meet the trading
   objectives, the fee is not returned as money to your card (see the
-  <a href="/refund-policy">Refund Policy</a>). On 2-Step plans, where a first reward is approved on
+  <a href="/refund-policy">Refund Policy</a> and the <a href="/withdrawal">Right of
+  Withdrawal</a>). On 2-Step plans, where a first reward is approved on
   that account, the Challenge fee is credited as additional vUSDT with that payout; Instant Funding has
   no fee credit. Do not purchase a Challenge with money you cannot afford to spend.</p>
 
@@ -53,10 +64,11 @@
   provide regulated financial services.</p>
 
   <h2>6. Technology risk</h2>
-  <p>The simulation depends on third-party MT5 infrastructure and market data feeds.
-  Outages, feed errors or maintenance windows can affect account monitoring. Price errors and
-  outages are handled under Section&nbsp;11 of our <a href="/terms">Terms</a>; the risk engine's
-  recorded data is authoritative for rule enforcement.</p>
+  <p>The simulation depends on our Built-in Terminal, on any third-party platform infrastructure
+  used for your account and on third-party market data feeds. Outages, feed errors or maintenance
+  windows can affect trading and account monitoring. Price errors and outages are handled under
+  Section&nbsp;11 of our <a href="/terms">Terms</a>; the risk engine's recorded data is the basis for
+  rule enforcement, and you can ask for it to be reviewed.</p>
 
   <h2>7. Questions</h2>
   <p>If any part of this disclosure is unclear, contact

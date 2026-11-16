@@ -141,11 +141,12 @@ footer svg{width:12px;height:12px}
     <label class="pay-consent-item"><input type="checkbox" id="pay-c-terms" class="pay-c">
       <span>I agree to the <a href="/terms">Terms</a> and <a href="/refund-policy">Refund Policy</a>.</span></label>
     <label class="pay-consent-item"><input type="checkbox" id="pay-c-risk" class="pay-c">
-      <span>I acknowledge simulated evaluations, that rewards are not guaranteed, and the
-      <a href="/risk-disclosure">Risk Disclosure</a>.</span></label>
+      <span>I understand that evaluations are simulated, that rewards are not guaranteed, and I have
+      read the <a href="/risk-disclosure">Risk Disclosure</a>.</span></label>
     <label class="pay-consent-item"><input type="checkbox" id="pay-c-imm" class="pay-c">
-      <span>I request immediate commencement and, where applicable, lose the right of withdrawal
-      once the service is fully performed.</span></label>
+      <span>I request immediate commencement and, where applicable, lose the
+      <a href="/withdrawal">right of withdrawal</a> once the service is fully performed, which is
+      when my MT5 credentials are delivered.</span></label>
     <p class="note">Data processed per our <a href="/privacy">Privacy Policy</a>.</p>
   </div>
   <button class="btn" id="payBtn" type="button" disabled>Pay ${{ amount }} by card</button>
@@ -161,7 +162,8 @@ footer svg{width:12px;height:12px}
     <div class="addr"><code id="cryptoAddr">{{ crypto_address }}</code>
       <button class="copy" type="button" id="copyBtn">Copy</button></div>
     <p class="note">Crypto payments are confirmed manually — your account is activated as soon
-      as the transfer lands. The same declarations above apply when you send crypto.</p>
+      as the transfer lands. Tick the three declarations above before you send crypto: they apply
+      to this payment too.</p>
   </div>
   {% endif %}
 
@@ -224,7 +226,11 @@ payBtn.addEventListener('click', async function(){
   if(!payConsentsOk()){alert('Please accept the required declarations before paying.'); return;}
   const b=this; b.disabled=true; const t=b.textContent; b.textContent='Opening checkout…';
   try{
-    const r=await fetch('/api/pay/{{ pay_token }}/start',{method:'POST'});
+    /* The declarations go to the server, which refuses to open the checkout
+       without them and stores the proof with the order. */
+    const r=await fetch('/api/pay/{{ pay_token }}/start',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({consent_terms:true,consent_risk:true,consent_immediate:true})});
     const d=await r.json().catch(()=>({}));
     if(!r.ok||!d.checkout_url)throw new Error(d.detail||'Could not open the payment page.');
     location.href=d.checkout_url;

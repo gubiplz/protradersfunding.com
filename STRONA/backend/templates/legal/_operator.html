@@ -1,0 +1,9 @@
+{# Who operates the Platform. Every line prints only when its LEGAL_* value is
+   set in the environment (app/config.py) — nothing here is ever made up. #}
+<p>
+  {% if legal.entity_name %}<strong>{{ legal.entity_name }}</strong>, trading as {{ site_name }}{% else %}<strong>{{ site_name }}</strong>{% endif %}
+  {% if legal.address %}<br>{{ legal.address }}{% endif %}
+  {% if legal.reg_no %}<br>Registration: {{ legal.reg_no }}{% endif %}
+  {% if legal.tax_id %}<br>Tax ID: {{ legal.tax_id }}{% endif %}
+  <br>E-mail: <a href="mailto:{{ support_email }}">{{ support_email }}</a>
+</p>

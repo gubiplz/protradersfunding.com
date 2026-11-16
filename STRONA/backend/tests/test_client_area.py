@@ -1710,10 +1710,15 @@ def test_flaga_przy_numerze_kierunkowym_jest_od_razu():
 
 # --- popup Trustpilot dla kont z kampanii free challenge -------------------------
 
-def test_review_nudge_tylko_dla_listy_trustpilot():
+def test_review_nudge_tylko_dla_listy_trustpilot(monkeypatch):
     """Przypomnienie o opinii dostają wyłącznie konta z listy na serwerze —
-    portal dostaje gotową flagę, adresy klientów nie wyciekają do JS."""
-    _, h = _trader("okechukwuchidibere1@gmail.com")
+    portal dostaje gotową flagę, adresy klientów nie wyciekają do JS.
+
+    Lista przychodzi ze zmiennej REVIEW_NUDGE_EMAILS, nie z kodu: adresy klientów
+    to dane osobowe i nie mają prawa leżeć w repozytorium."""
+    from app import main
+    monkeypatch.setattr(main, "_TRUSTPILOT_NUDGE", frozenset({"nudge-klient@probe.test"}))
+    _, h = _trader("nudge-klient@probe.test")
     _, h2 = _trader("zwykly-klient@probe.test")
     with TestClient(app) as c:
         assert c.get("/api/auth/me", headers=h).json()["review_nudge"] is True

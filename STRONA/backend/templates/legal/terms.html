@@ -6,56 +6,91 @@
 <section class="page-head"><div class="wrap">
   <span class="pill">Legal</span>
   <h1>Terms of Service</h1>
-  <p class="updated">Last updated: November 2026</p>
+  <p class="updated">Version {{ legal.version }} · Last updated: {{ legal.date }}</p>
 </div></section>
 
 <section class="sec sec-tight"><div class="wrap prose">
   <h2>1. Who we are and what we offer</h2>
-  <p>{{ site_name }} ("we", "us", "the Platform") operates a trading skills evaluation service. We sell
-  access to evaluation programs ("Challenges") conducted on demo trading accounts
-  with virtual funds. We are a technology and education
-  company: we are not a broker, investment firm, fund manager or financial adviser, and we do
-  not accept deposits or execute real-market transactions on your behalf.</p>
+  <p>These Terms are the agreement between you and the operator of {{ site_name }} ("we", "us",
+  "the Platform"):</p>
+  {% include "legal/_operator.html" %}
+  <p>We operate a trading skills evaluation service. We sell access to evaluation programs
+  ("Challenges") conducted on demo trading accounts with virtual funds. We are a technology and
+  education company: we are not a broker, investment firm, fund manager or financial adviser, we are
+  not supervised by any financial regulator, and we do not accept deposits or execute real-market
+  transactions on your behalf.</p>
+  <p>The following documents form part of these Terms: the <a href="/refund-policy">Refund
+  Policy</a>, the <a href="/withdrawal">Right of Withdrawal</a>, the
+  <a href="/risk-disclosure">Risk Disclosure</a>, the <a href="/complaints">Complaints
+  Procedure</a>, the <a href="/restricted-countries">Restricted Countries and Identity
+  Verification</a> page, the <a href="/promotions-terms">Promotions and Giveaway Terms</a>, the
+  <a href="/affiliate-terms">Affiliate Program Terms</a> and the
+  <a href="/objectives">Trading Objectives</a> of the plan you buy. How we use personal data is
+  described in the <a href="/privacy">Privacy Policy</a>.</p>
 
   <h2>2. Simulated environment</h2>
   <p>All accounts provided under these Terms are demo accounts. All trading occurs in a simulated
   environment with fictitious funds. No real money is traded and your activity does not reach any real
   market. Amounts referred to as "capital", "balance", "profit" or "drawdown" describe values inside the
-  simulation. Payments made to traders are discretionary performance-based rewards calculated
-  from simulated results, not proceeds of real trading.</p>
-  <p>Prices shown in the Built-in Terminal and used to simulate fills are reference data from third-party
-  venues and market-data providers, including Hyperliquid. We are not affiliated with any of them, no
-  order is sent to them, and simulated fills may differ from what a real market would have given.</p>
+  simulation. A "funded" account is a simulated account; it is not an account holding money. Payments
+  made to traders are performance-based rewards calculated from simulated results under
+  Section&nbsp;5, not proceeds of real trading.</p>
+  <h3>Reference prices: no affiliation with exchanges or data providers</h3>
+  <p>Prices and order books shown in the Built-in Terminal, and the prices used to simulate fills,
+  are modelled on publicly available data from third-party exchanges and market-data providers.
+  Depending on the instrument these include Hyperliquid, Binance and Bybit, and data providers for
+  forex, metals and indices. {{ site_name }} is not affiliated with, sponsored by, endorsed by or
+  otherwise connected to any of them or to their operators. Their names appear only to identify
+  where reference data comes from. Your simulated account is not connected to, and does not interact
+  with, any real account, order book or funds on any exchange: no order is sent to them. Simulated
+  fills may differ from what a real market would have given, and the sources we use may change.</p>
 
-  <h2>3. Eligibility and account registration</h2>
+  <h3>Your account and the trading platform</h3>
+  <p>You trade in our Built-in Terminal, which runs in your browser at <a href="/trade">/trade</a>.
+  After purchase you receive a login, a password and a server name for your simulated account. In the
+  portal and in our e-mails these are called your "MT5 credentials" or "MT5 login".</p>
+  <p>Unless the server name shown with your account is a MetaTrader 5 server, these credentials open
+  the Built-in Terminal only and do not work in the MetaTrader 5 desktop, mobile or web applications.
+  The instruments you can trade are the ones listed in the Built-in Terminal for your account.
+  MetaTrader and MT5 are trademarks of their owner; we are not affiliated with it.</p>
+
+  <h2>3. Eligibility and registration</h2>
   <ul>
     <li>You must be at least 18 years old and legally able to enter into contracts.</li>
-    <li>Information provided at registration and checkout (name, e-mail, phone) must be accurate, because it is
-        used, among other things, to open your MT5 account.</li>
-    <li>Access is subject to applicable sanctions and AML laws. We may refuse, suspend or end service where we
-        reasonably believe it is required to comply with those laws.</li>
+    <li>You must not be resident or located in a restricted country, and must not be subject to
+        sanctions. The list and the rules are on the
+        <a href="/restricted-countries">Restricted Countries and Identity Verification</a> page.</li>
+    <li>Information you give at registration, at checkout and during identity verification must be
+        accurate and must be your own.</li>
     <li>One person may hold one registration; running multiple Challenges under it is allowed.</li>
     <li>You are responsible for keeping your login credentials confidential.</li>
   </ul>
 
-  <h2>4. Challenges, rules and enforcement</h2>
+  <h2>4. Challenge rules and how they are enforced</h2>
   <p>Each Challenge is governed by the objectives displayed on its plan card and on the
   <a href="/objectives">Trading Objectives</a> table at the time of purchase: profit targets, maximum
-  daily loss, maximum overall loss (static drawdown on every plan we sell), and minimum trading days. These rules are
-  monitored and enforced automatically by our risk engine. If a rule is breached, the account is marked
-  as failed and open positions may be closed. Breach data (rule, time, equity) is recorded and shown in
-  your dashboard.</p>
+  daily loss, maximum overall loss (static drawdown on every plan we sell), minimum trading days and
+  the cap on total open volume. Objectives of a Challenge you have already bought do not change.</p>
+  <ul>
+    <li>The trading day runs on server time, which is {{ legal.server_utc }} all year round (it does
+        not move with daylight-saving time). The daily loss limit resets at 00:00 server time.</li>
+    <li>The daily loss limit is measured on equity, which includes the floating result of open
+        positions, against your equity at the start of the trading day.</li>
+    <li>The overall loss limit is measured on equity against the initial balance of the account.</li>
+    <li>A trading day is a server-time day on which the account had an open position.</li>
+    <li>A stop-out closes all positions when equity falls to 50% of used margin.</li>
+  </ul>
+  <p>These rules are monitored and enforced automatically by our risk engine. If a rule is breached,
+  the account is marked as failed and open positions are closed. The rule, the time and the equity
+  value are recorded and shown in your dashboard. You can ask a member of our team to review a breach
+  under the <a href="/complaints">Complaints Procedure</a>.</p>
 
   <h2>5. Funded accounts, rewards and scaling</h2>
   <ul>
-    <li>After passing all phases of a Challenge, your account is granted "funded" status in the simulation.</li>
+    <li>After passing all phases of a Challenge, your account is granted "funded" status in the
+        simulation.</li>
     <li>You may request a reward equal to your profit split as stated on your plan (90% on evaluation
-        plans, 70% on Instant Funding) of the simulated profits accrued on the funded account.
-        Rewards are paid in vUSDT on the Polygon network.</li>
-    <li>vUSDT is {{ site_name }}'s native internal token on Polygon. It is
-        not Tether USDT or any third-party stablecoin. Tokens are transferable on
-        Polygon to a wallet you control. We do not redeem vUSDT for cash, card payouts or other fiat.
-        vUSDT is a reward token only; its market value is not guaranteed and may vary.</li>
+        plans, 70% on Instant Funding) of the simulated profits accrued on the funded account.</li>
     <li>By default you may submit a reward request every 14 calendar days (bi-weekly)
         on 2-Step and Instant Funding accounts. The optional On-demand Payout add-on
         ($299 on 2-Step, $399 on Instant Funding), when purchased with the account, removes that
@@ -63,23 +98,48 @@
     <li>Before the first reward on a funded account, the account must have the plan's minimum trading
         days on that funded stage: 5 on 2-Step and 30 on Instant Funding.</li>
     <li>The minimum reward request is $500 or 2% of the account size, whichever is higher.</li>
-    <li>Reward requests require completed identity verification (KYC) and are reviewed by our team.
-        We may refuse a reward where results were produced by prohibited conduct (Section&nbsp;6).</li>
-    <li>On 2-Step plans, your first reward on a funded account includes a credit of that Challenge
-        fee as additional vUSDT on that payout. It is a credit, not a refund to the original payment
-        method. Instant Funding accounts carry no fee credit; an Instant Funding account purchased
-        while the credit was offered on every plan keeps it.</li>
+    <li>A reward request requires completed identity verification (KYC) and is reviewed by a member of
+        our team before it is paid.</li>
+    <li>On 2-Step plans, your first reward on a funded account includes a credit of the fee you paid
+        for that Challenge as additional vUSDT on that payout. It is a credit, not a refund to the
+        original payment method. Instant Funding accounts carry no fee credit; an Instant Funding
+        account purchased while the credit was offered on every plan keeps it.</li>
     <li>Scaling is your choice, not an automatic upgrade. Each time a funded account grows by +15%
         you may either request the reward or move up to the next account size in our pricing. The two
         are mutually exclusive: if you move up, the accrued profit is applied to the larger account
         and no reward is paid for that period. Moving up replaces the account with a new simulated
         account of the larger size, funded from the start, subject to that plan's objectives and
-        profit split. Scaling is available up to the largest size we offer.</li>
+        profit split. The minimum trading days before a reward start again on the new account.
+        Scaling is available up to the largest size we offer.</li>
   </ul>
+  <h3>How rewards are paid: vUSDT</h3>
+  <p>Rewards are paid in vUSDT on the Polygon network to a wallet you control. vUSDT is
+  {{ site_name }}'s own internal token. It is not Tether USDT or any third-party stablecoin, and it is
+  not money. We do not redeem vUSDT for cash, card payouts or any other currency or asset, and we do
+  not operate or guarantee any market on which it can be exchanged. Its value is not guaranteed. You
+  should assume that a reward paid in vUSDT may not be convertible into money. A dollar amount shown
+  for a reward is the number of vUSDT, not an amount of US dollars. Read the
+  <a href="/risk-disclosure">Risk Disclosure</a> before you buy.</p>
+  <h3>When a reward can be refused or reduced</h3>
+  <p>Rewards are conditional, not guaranteed. We may refuse a reward request, or reduce it to the
+  part not affected, only for one of these reasons:</p>
+  <ul>
+    <li>the result was produced by prohibited conduct (Section&nbsp;6);</li>
+    <li>identity verification is not completed, has failed, or shows that the account was not used by
+        its registered holder;</li>
+    <li>a restriction on the <a href="/restricted-countries">Restricted Countries</a> page applies to
+        you;</li>
+    <li>the trades behind the result were corrected or voided because of a price error or an outage
+        (Section&nbsp;11);</li>
+    <li>the account no longer shows the profit the request was based on;</li>
+    <li>the fee for that account was charged back or is the subject of a payment dispute.</li>
+  </ul>
+  <p>When we refuse or reduce a reward we tell you the reason in writing. You can complain under the
+  <a href="/complaints">Complaints Procedure</a>.</p>
 
   <h2>6. Prohibited conduct</h2>
   <p>We do not restrict trading styles (news trading, weekend holding and EAs are allowed). The following
-  is prohibited and voids results:</p>
+  is prohibited:</p>
   <ul>
     <li>exploiting demo-environment artifacts (e.g. off-quotes pricing, latency or feed errors);</li>
     <li>opening opposite or offsetting positions across accounts you hold, or in coordination with
@@ -94,9 +154,12 @@
     <li>fraud, chargeback abuse, identity misrepresentation or KYC falsification;</li>
     <li>attacking, reverse-engineering or disrupting the Platform.</li>
   </ul>
-  <p>We may review an account before approving a reward, including its trading history and sign-in records.
-  Where we find prohibited conduct, we may void the affected results and any reward based on them, and close
-  the account.</p>
+  <p>We may review an account before approving a reward, including its trading history and sign-in
+  records. We decide whether conduct is prohibited acting reasonably and on the basis of recorded
+  data. Where we find prohibited conduct, we may void the affected results and any reward based on
+  them and, for a serious or repeated breach, close the account. We tell you which rule was broken and
+  which trades or records the finding is based on, and you can contest it under the
+  <a href="/complaints">Complaints Procedure</a>.</p>
   <p>Copytrading add-on. This add-on is available only when offered at checkout. An account purchased
   with it keeps the permission recorded on the account: you may copy trades between accounts registered
   to you, and you may connect to the platform from more than one device. Neither is treated as
@@ -129,44 +192,84 @@
   referred registration. Commission is claimed in the portal as store credit or as
   vUSDT on Polygon — not as cash and not by contacting support. Self-referrals and
   abusive attribution are ineligible. The full rules are in the
-  <a href="/affiliate-terms">Affiliate Program Terms</a>, which form part of these Terms.</p>
+  <a href="/affiliate-terms">Affiliate Program Terms</a>.</p>
 
-  <h2>9. Fees and refunds</h2>
-  <p>Challenge fees are one-time payments per account, in USD, collected at checkout. Refund rights are
-  described in the <a href="/refund-policy">Refund Policy</a>, which forms part of these Terms.</p>
+  <h2>9. Fees, orders and refunds</h2>
+  <ul>
+    <li>The plan, its objectives, any add-ons and the full price in USD are shown at checkout before
+        you pay. The price shown is the full amount we charge; your bank or card issuer may add its
+        own currency-conversion fees.</li>
+    <li>The fee is a one-time payment per account. There are no recurring charges.</li>
+    <li>The agreement for a Challenge starts when we confirm your order by delivering the account
+        credentials to your portal and e-mail address. The confirmation e-mail records the
+        declarations you made at checkout and the version of these documents.</li>
+    <li>At checkout you ask us to start the service immediately. Your right to withdraw and to a
+        refund is described in the <a href="/withdrawal">Right of Withdrawal</a> and the
+        <a href="/refund-policy">Refund Policy</a>.</li>
+  </ul>
+  <p>Please contact us before disputing a payment with your bank; a justified claim is
+  refunded without a dispute.</p>
 
   <h2>10. Intellectual property</h2>
   <p>The Platform, its software, branding and content are our property or licensed to us. You receive a
   personal, non-transferable right to use the Platform for its intended purpose.</p>
 
-  <h2>11. Disclaimers and limitation of liability</h2>
-  <p>The Platform is provided "as is". We do not warrant uninterrupted availability of the simulation,
-  the MT5 infrastructure (operated by third parties), or price feeds. Nothing on the Platform
-  is investment advice or a promise of income. To the maximum extent permitted by law, our total
-  liability under these Terms is limited to the fees you paid to us in the 12 months preceding the
-  claim. Nothing in these Terms excludes or limits rights you have under mandatory consumer-protection
-  law, or liability that cannot be excluded by law.</p>
+  <h2>11. Availability, price errors and liability</h2>
+  <p>We provide the service with reasonable care and skill, but we do not promise that the
+  simulation, the Built-in Terminal or the price feeds will be available without interruption.
+  Nothing on the Platform is investment advice or a promise of income.</p>
   <p>Price errors and outages. Reference prices come from third parties and can be wrong, frozen or
   unavailable. Where a simulated trade was opened, closed or valued at a clearly erroneous price, or
   while the Platform or a price feed was not working properly, we may correct or void the affected
-  simulated trades and results, whether that works in your favour or against you. The risk engine's
-  recorded data is authoritative for rule enforcement.</p>
+  simulated trades and results, whether that works in your favour or against you. We tell you which
+  trades were affected and why. We may pause order entry for all accounts while such a problem lasts.
+  The risk engine's recorded data is the basis for rule enforcement; you can ask for it to be
+  reviewed.</p>
+  <p>To the maximum extent permitted by law, our total liability under these Terms is limited to the
+  fees you paid to us in the 12 months preceding the claim. This limit does not apply to liability
+  for fraud, for damage we cause intentionally or through gross negligence, for death or personal
+  injury, or to any liability that cannot be limited by law. Nothing in these Terms excludes or limits
+  rights you have under mandatory consumer-protection law.</p>
 
-  <h2>12. Termination</h2>
-  <p>You may stop using the Platform at any time. We may suspend or terminate accounts that violate
-  these Terms. Sections that by their nature should survive termination (liability, intellectual
-  property) survive.</p>
+  <h2>12. Suspension and termination</h2>
+  <ul>
+    <li>You may stop using the Platform at any time, and you can delete your registration in the
+        portal settings.</li>
+    <li>We may suspend an account while we review a suspected breach of these Terms, and we may
+        terminate an account for prohibited conduct (Section&nbsp;6), for a restriction under
+        Section&nbsp;3, or where the law requires it. We tell you the reason, unless the law prevents
+        us from doing so.</li>
+    <li>Termination does not cancel a reward for results that were achieved in line with these Terms
+        before the termination and that meets the conditions in Section&nbsp;5.</li>
+    <li>Sections that by their nature should survive termination (liability, intellectual
+        property, governing law) survive.</li>
+  </ul>
 
   <h2>13. Changes</h2>
-  <p>We may update these Terms. We will tell you about material changes by e-mail or in the portal
-  before they take effect. If you do not agree with a change, you may stop using the Platform before it
-  applies. Challenges already purchased remain governed by the objectives shown at their time of
-  purchase.</p>
+  <p>We may update these Terms for a good reason: a change in the law or in a regulator's position,
+  a change to the service or its security, or to correct an error. We tell you about material changes
+  by e-mail or in the portal before they take effect. If you do not agree with a
+  change, you may end the agreement before it applies by writing to us. Challenges already purchased remain governed by the objectives shown at
+  their time of purchase.</p>
 
-  <h2>14. Contact</h2>
+  <h2>14. Contact and complaints</h2>
   <p>Questions about these Terms: <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p>
-  <p>Complaints. To make a complaint, write to the same address with the subject "Complaint", your
-  account login and a description of what happened. We confirm that we have received it and answer in
-  the same thread.</p>
+  <p>Complaints. To make a complaint, write to
+  <a href="mailto:{{ support_email }}">{{ support_email }}</a> with the subject "Complaint", your
+  account login and a description of what happened. How we handle it is set out in the
+  <a href="/complaints">Complaints Procedure</a>.</p>
+
+  <h2>15. Governing law and disputes</h2>
+  {% if legal.governing_law %}
+  <p>These Terms are governed by the law of {{ legal.governing_law }}{% if legal.courts %}, and
+  disputes are heard by {{ legal.courts }}{% endif %}. If you are a consumer, this choice does not
+  take away the protection of the mandatory rules of the law of the country where you live, and you
+  may bring proceedings in the courts of that country.</p>
+  {% else %}
+  <p>If you are a consumer, you keep the protection of the mandatory rules of the law of the country
+  where you live, and you may bring proceedings in the courts of that country.</p>
+  {% endif %}
+  <p>Out-of-court dispute resolution is described in the <a href="/complaints">Complaints
+  Procedure</a>.</p>
 </div></section>
 {% endblock %}

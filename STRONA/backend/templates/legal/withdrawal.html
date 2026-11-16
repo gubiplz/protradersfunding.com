@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Right of Withdrawal — {{ site_name }}{% endblock %}
+{% block description %}When you can withdraw from a {{ site_name }} purchase, and the withdrawal form.{% endblock %}
+
+{% block content %}
+<section class="page-head"><div class="wrap">
+  <span class="pill">Legal</span>
+  <h1>Right of Withdrawal</h1>
+  <p class="updated">Version {{ legal.version }} · Last updated: {{ legal.date }}</p>
+</div></section>
+
+<section class="sec sec-tight"><div class="wrap prose">
+  <h2>1. Your right</h2>
+  <p>Where the law gives you, as a consumer, a right to withdraw from a purchase made online, you
+  may withdraw within 14 days of the day you placed the order, without giving any reason, until
+  the service has been fully performed.</p>
+
+  <h2>2. When the right ends</h2>
+  <p>At checkout you ask us to start the service immediately, so that your account is available as
+  soon as the payment clears, and you acknowledge that you lose the right of withdrawal once the
+  service is fully performed. We treat the service as performed in full when your MT5 credentials
+  have been delivered and trading is possible. Delivery is automatic right after payment, so in
+  practice that window is very short. Until the credentials are delivered you can cancel for a full
+  refund.</p>
+  <p>Where an order contains more than one account, this is assessed separately for each
+  account.</p>
+
+  <h2>3. How to withdraw</h2>
+  <p>Send us a clear statement that you withdraw, while the right still applies, from the e-mail address
+  registered on your account to <a href="mailto:{{ support_email }}">{{ support_email }}</a>. You
+  may use the form below, but you do not have to. It is enough that you send the statement before
+  the period ends.</p>
+
+  <h2>4. What happens next</h2>
+  <p>We confirm that we received your withdrawal. Where it is valid, we refund everything you paid for that account,
+  using the same payment method you used, without undue delay and no later than 14 days from the day
+  we received your statement. We do not charge any fee for the refund. The account is closed.</p>
+
+  <h2>5. Withdrawal form</h2>
+  <p>Copy the text below into an e-mail, fill it in and send it to
+  <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p>
+  <blockquote>
+    <p>To: {% if legal.entity_name %}{{ legal.entity_name }}, {% endif %}{{ site_name }}{% if legal.address %}, {{ legal.address }}{% endif %}, {{ support_email }}</p>
+    <p>I hereby give notice that I withdraw from my contract for the following service:</p>
+    <p>Order number: ____________<br>
+    Account login: ____________<br>
+    Ordered on: ____________<br>
+    Name: ____________<br>
+    E-mail address registered on the account: ____________<br>
+    Date: ____________</p>
+  </blockquote>
+
+  <h2>6. Other refunds</h2>
+  <p>Refunds outside the right of withdrawal (duplicate charges, an account we could not deliver,
+  a service that was not as described) are covered by the <a href="/refund-policy">Refund Policy</a>
+  and the <a href="/complaints">Complaints Procedure</a>. Nothing on this page limits rights you have
+  under the mandatory consumer law of the country where you live.</p>
+</div></section>
+{% endblock %}

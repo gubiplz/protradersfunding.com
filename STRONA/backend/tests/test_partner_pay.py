@@ -29,6 +29,9 @@ from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import Product, Trader  # noqa: E402
 
+# Declarations our own payment page sends with every /start call.
+ZGODY = {"consent_terms": True, "consent_risk": True, "consent_immediate": True}
+
 init_db()
 s = SessionLocal(); catalog.seed_products(s); s.close()
 client = TestClient(app)
@@ -292,7 +295,7 @@ def test_klient_partnera_wraca_na_domene_partnera(kasa):
 def test_nasza_strona_platnosci_dalej_wraca_do_portalu(kasa):
     """Ta sama funkcja obsługuje nasz własny /pay/<token>. Zmiana dla partnera
     nie ma prawa przekierować NASZYCH klientów na cudzą domenę."""
-    r = client.post(f"/api/pay/{_token(_zamowienie())}/start")
+    r = client.post(f"/api/pay/{_token(_zamowienie())}/start", json=ZGODY)
     assert r.status_code == 200, r.text
     assert kasa.ostatnie["success_url"].endswith("/portal?paid=1")
     assert BAZA_PARTNERA not in kasa.ostatnie["success_url"]
@@ -301,7 +304,7 @@ def test_nasza_strona_platnosci_dalej_wraca_do_portalu(kasa):
 def test_zly_sekret_nie_przestawia_adresu_powrotu(kasa):
     """`start` jest publiczny (token JEST wstępem), więc nagłówek niczego nie
     otwiera — ale nie może też po cichu przestawiać, dokąd trafi kupujący."""
-    r = client.post(f"/api/pay/{_token(_zamowienie())}/start",
+    r = client.post(f"/api/pay/{_token(_zamowienie())}/start", json=ZGODY,
                     headers={"X-Partner-Token": "nie-ten"})
     assert r.status_code == 200, r.text
     assert BAZA_PARTNERA not in kasa.ostatnie["success_url"]

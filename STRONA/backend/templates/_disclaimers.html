@@ -1,7 +1,8 @@
 {# Important disclaimers block for the footer. Include from base.html with
    {% include "_disclaimers.html" %}. Uses site_name and support_email, both
-   injected by _page() in app/main.py. The legal entity and the list of
-   restricted jurisdictions are not public yet: add them here when they are.
+   injected by _page() in app/main.py. The legal entity comes from the LEGAL_*
+   settings (the `legal` context, app/legal.py) and prints only when it is set;
+   the restricted countries are on /restricted-countries.
 
    Hard 2-column split: the right column always opens on the Abuse monitoring
    heading — never mid-paragraph from a CSS column break. #}
@@ -10,8 +11,8 @@
   <div class="disclaimers-grid">
     <div class="disclaimers-col">
       <h3>Simulated environment and reference prices</h3>
-      <p>{{ site_name }} provides simulated trading evaluations on MT5 demo accounts with virtual funds. No real capital is allocated to any participant, no live trading takes place, and no order placed on the Platform is sent to any exchange, broker or liquidity provider. A funded account is a simulated account with a larger virtual balance. We do not offer a pathway to trading real money and we never hold client funds.</p>
-      <p>Prices shown in the Built-in Terminal and used to simulate fills are reference data from third-party venues and market-data providers, including Hyperliquid. We are not affiliated with any of them and no order reaches them. Instrument categories (crypto, FX, metals, energy and indices) may change at any time.</p>
+      <p>{{ site_name }} provides simulated trading evaluations on demo accounts with virtual funds. No real capital is allocated to any participant, no live trading takes place, and no order placed on the Platform is sent to any exchange, broker or liquidity provider. A funded account is a simulated account with a larger virtual balance. We do not offer a pathway to trading real money and we never hold client funds.</p>
+      <p>Prices shown in the Built-in Terminal and used to simulate fills are modelled on publicly available data from third-party exchanges and market-data providers, including Hyperliquid, Binance and Bybit depending on the instrument. {{ site_name }} is not affiliated with, sponsored by, endorsed by or otherwise connected to any of them or their operators; their names only identify where reference data comes from. Simulated accounts are not connected to any real account, order book or funds on any exchange, and no order reaches them. Instrument categories (crypto, FX, metals, energy and indices) may change at any time.</p>
       <p>The simulation assesses trading discipline against published objectives. It cannot reproduce real slippage, latency, liquidity or the psychology of risking your own money. Passing an evaluation does not guarantee a funded simulated account or any reward.</p>
 
       <h3>Difficulty, hypothetical results and risk</h3>
@@ -21,14 +22,15 @@
     </div>
     <div class="disclaimers-col">
       <h3>Abuse monitoring, testimonials and no advice</h3>
-      <p>We monitor accounts for prohibited conduct under section 6 of our <a href="/terms">Terms of Service</a>. Where we find it, we may void results, withhold rewards and close the account. Rewards are discretionary, reviewed after identity verification, and paid in vUSDT ({{ site_name }}'s native internal Polygon token — not Tether USDT; transferable; not redeemable by us for cash; value not guaranteed) to your wallet — not as cash to your card.</p>
+      <p>We monitor accounts for prohibited conduct under section 6 of our <a href="/terms">Terms of Service</a>. Where we find it, we may void results, withhold rewards and close the account. Rewards are conditional and not guaranteed, are reviewed after identity verification, and are paid in vUSDT ({{ site_name }}'s own internal Polygon token — not Tether USDT and not money; transferable; not redeemable by us; value not guaranteed; it may not be convertible into money) to your wallet — not as cash to your card.</p>
       <p>Reward requests are bi-weekly by default (14 calendar days). On-demand Payout removes that wait; each request is still reviewed. First request needs the plan’s funded minimum trading days (5 on 2-Step, 30 on Instant Funding).</p>
       <p>Testimonials, statistics, leaderboards and certificates are individual and not typical — not a guarantee you will achieve the same. Nothing here is investment, tax or legal advice or a solicitation to buy or sell any instrument. {{ site_name }} is not a broker, dealer, investment adviser or money manager; any management of simulated accounts under the Terms concerns virtual funds only.</p>
 
       <h3>Fees, jurisdictions, intellectual property and contact</h3>
       <p>Challenge fees are one-time and non-refundable except as in the <a href="/refund-policy">Refund Policy</a>. On 2-Step plans the Challenge fee is credited as additional vUSDT on the first funded reward — a credit, not a card refund; Instant Funding has no fee credit. Other money-back cases follow the Refund Policy to the original payment method.</p>
-      <p>You must be 18+ and of legal age where you live. This website is not directed at residents of any country or jurisdiction where its distribution or use would be contrary to local law. Access is subject to applicable sanctions and AML laws. We may refuse, suspend or end service where we reasonably believe it is required to comply with those laws.</p>
+      <p>You must be 18+ and of legal age where you live. This website is not directed at residents of any country or jurisdiction where its distribution or use would be contrary to local law, and the service is not available in the <a href="/restricted-countries">restricted countries</a>. Access is subject to applicable sanctions and AML laws. We may refuse, suspend or end service where we reasonably believe it is required to comply with those laws.</p>
       <p>{{ site_name }} brand, software and content belong to the operator or its licensors. Personal, non-transferable use only. Questions: <a href="/privacy">Privacy Policy</a> or <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p>
+      {% if legal and legal.entity_name %}<p>{{ site_name }} is operated by {{ legal.entity_name }}{% if legal.address %}, {{ legal.address }}{% endif %}{% if legal.reg_no %}, {{ legal.reg_no }}{% endif %}{% if legal.tax_id %}, {{ legal.tax_id }}{% endif %}.</p>{% endif %}
     </div>
   </div>
 </section>

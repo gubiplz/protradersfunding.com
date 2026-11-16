@@ -7,8 +7,8 @@
    restores smooth scrolling after a few seconds). #}
 <script>if(location.hash&&!/^#q-/.test(location.hash))document.documentElement.style.scrollBehavior='auto'</script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{% block title %}{{ site_name }} — Prop Trading Challenges on MT5 Accounts{% endblock %}</title>
-<meta name="description" content="{% block description %}Trade our simulated capital on an MT5 account, with sizes up to $2,000,000. Pass the evaluation, get funded and keep up to 90% of the rewards. Clear rules, automated risk engine, automated account delivery.{% endblock %}">
+<title>{% block title %}{{ site_name }} — Prop Trading Challenges on Simulated Accounts{% endblock %}</title>
+<meta name="description" content="{% block description %}Trade our simulated capital in a browser terminal, with sizes up to $2,000,000. Pass the evaluation, get funded and keep up to 90% of the rewards. Clear rules, automated risk engine, automated account delivery.{% endblock %}">
 <link rel="icon" href="/static/img/favicon.png" type="image/png">
 <link rel="preload" href="/static/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/space-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin>
@@ -24,7 +24,7 @@ try{if(localStorage.getItem('pf_theme2')==='dark')document.documentElement.datas
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="{{ site_name }}">
 <meta property="og:title" content="{% block og_title %}{{ site_name }} — Get Funded to Trade{% endblock %}">
-<meta property="og:description" content="{% block og_description %}Prop trading challenges on MT5 infrastructure, up to $2,000,000 in simulated capital. Keep up to 90% of the rewards.{% endblock %}">
+<meta property="og:description" content="{% block og_description %}Prop trading challenges on simulated accounts, up to $2,000,000 in simulated capital. Keep up to 90% of the rewards.{% endblock %}">
 <meta property="og:image" content="{{ base_url }}/static/img/og.png">
 <meta property="og:url" content="{{ base_url }}{{ request.url.path }}">
 <link rel="canonical" href="{{ base_url }}{{ request.url.path }}">
@@ -140,8 +140,11 @@ document.getElementById('bogoX').addEventListener('click',function(){
         <input type="email" name="email" placeholder="Email address" autocomplete="email" required aria-label="Email address">
         <button type="submit" class="btn">Subscribe</button>
       </div>
-      <p class="nl-note">We care about your data. Read our <a href="/privacy">privacy policy</a>. Subscribing means
-        you agree to receive marketing emails from {{ site_name }}.</p>
+      {# Unticked box: marketing consent has to be given, not assumed from the
+         click on Subscribe. site.js refuses to send the form without it. #}
+      <label class="nl-consent ck"><input type="checkbox" name="consent"><span>Yes, send me marketing emails from {{ site_name }}</span></label>
+      <p class="nl-note">We care about your data. Read our <a href="/privacy">privacy policy</a>. Unsubscribe
+        anytime with one click.</p>
       <p class="nl-ok" hidden>Check your inbox.</p>
     </form>
   </div>
@@ -152,7 +155,7 @@ document.getElementById('bogoX').addEventListener('click',function(){
     <div class="foot-grid">
       <div class="foot-brand">
         <a class="logo" href="/"><img src="/static/img/logo.png" alt=""> {{ site_name }}</a>
-        <p>A technology-driven trading skills evaluation platform. MT5 accounts, performance-based rewards, built-in terminal, transparent rules.</p>
+        <p>A technology-driven trading skills evaluation platform. Simulated accounts, performance-based rewards, built-in terminal, transparent rules.</p>
       </div>
       <div class="foot-col">
         <h3>Product</h3>
@@ -184,6 +187,7 @@ document.getElementById('bogoX').addEventListener('click',function(){
         <a href="/privacy">Privacy Policy</a>
         <a href="/risk-disclosure">Risk Disclosure</a>
         <a href="/refund-policy">Refund Policy</a>
+        <a href="/restricted-countries">Restricted Countries</a>
         <a href="/affiliate-terms">Affiliate Terms</a>
         <a href="#" data-ck-prefs>Cookie Preferences</a>
       </div>
@@ -198,7 +202,7 @@ document.getElementById('bogoX').addEventListener('click',function(){
        sit here. The Risk Disclaimer right above says all three in full
        sentences, so they were saying the same thing twice. #}
     <div class="foot-bottom">
-      <span>© <span id="year"></span> {{ site_name }}. All rights reserved.</span>
+      <span>© <span id="year"></span> {% if legal and legal.entity_name %}{{ legal.entity_name }}, trading as {% endif %}{{ site_name }}. All rights reserved.</span>
     </div>
   </div>
 </footer>

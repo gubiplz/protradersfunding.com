@@ -123,6 +123,42 @@ def _bogo_intro(ctx: dict) -> str:
             "Same rules and the same profit split as a purchased account.")
 
 
+#: Server name of accounts that exist only in our own terminal — the same value
+#: as provisioning.SIM_SERVER (not imported: provisioning imports this module).
+_SIM_SERVER = "PTF-sim"
+
+
+def _tylko_terminal(ctx: dict) -> bool:
+    """True when the credentials open the Built-in Terminal only (no MetaTrader server)."""
+    return (ctx.get("platform_server") or "") == _SIM_SERVER
+
+
+def _gdzie_logowac_txt(ctx: dict) -> str:
+    """Where the credentials work. A PTF-sim login does not exist on any
+    MetaTrader server, so telling the customer to "log in with MT5" would send
+    them to a login that always fails."""
+    if _tylko_terminal(ctx):
+        return (f"Log in to the Built-in Terminal in your browser: {settings.app_base_url}/trade\n"
+                f"These credentials do not work in the MetaTrader 5 apps.\n")
+    return "Log in with MT5 (desktop, mobile or web) using the server above.\n"
+
+
+def _potwierdzenie_zakupu_txt() -> str:
+    """Purchase confirmation on a durable medium: the declarations made at
+    checkout, the version of the documents and where to find them."""
+    from . import legal          # late import: legal pulls in the models
+    baza = settings.app_base_url
+    zdania = "".join(f"  - {tekst}\n" for _, tekst in legal.DECLARATIONS)
+    return (f"\nYour order, for your records\n"
+            f"At checkout you declared:\n{zdania}"
+            f"Documents (version {legal.DOCS_VERSION}):\n"
+            f"  Terms of Service:    {baza}/terms\n"
+            f"  Refund Policy:       {baza}/refund-policy\n"
+            f"  Right of Withdrawal: {baza}/withdrawal\n"
+            f"  Risk Disclosure:     {baza}/risk-disclosure\n"
+            f"Complaints: {settings.support_email} ({baza}/complaints)\n")
+
+
 def _bez_hasla_txt(ctx: dict) -> str:
     """Akapit dla klienta, któremu nie mintujemy linku do ustawienia hasła.
 
@@ -174,7 +210,8 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"  Password:   {ctx.get('platform_password')}\n"
             f"  Server:     {ctx.get('platform_server')}\n"
             f"  Capital:    {ctx.get('initial_balance')}\n\n"
-            f"Log in with MT5 (desktop, mobile or web) using the server above.\n"
+            + _gdzie_logowac_txt(ctx)
+            + (_potwierdzenie_zakupu_txt() if event == "credentials" else "")
             + (f"\nWe opened your portal account for you, so it has no password yet. "
                f"Set one here (the link works for 7 days; after that use \"Forgot password\" "
                f"on the sign-in screen):\n{ctx.get('setup_url')}\n"
@@ -604,7 +641,9 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
             headline = ("Your upgraded challenge account is ready" if upgraded
                         else "Your challenge account is ready")
         steps = ctx.get("steps")
-        kind = f"{steps}-Step challenge on MT5" if steps else "Challenge on MT5"
+        # "on MT5" only where the account really is on a MetaTrader server.
+        gdzie = "in the Built-in Terminal" if _tylko_terminal(ctx) else "on MT5"
+        kind = f"{steps}-Step challenge {gdzie}" if steps else f"Challenge {gdzie}"
         lead = _bogo_intro(ctx)
         if granted:
             intro = f"Hi {name}, {lead[0].lower()}{lead[1:]}"
@@ -618,7 +657,7 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
             _head_html(badge, headline, intro),
             _stat_html("Account allocation", f"${_num(ctx.get('initial_balance'))}", kind),
             _rows_html([
-                ("Platform", "MT5"),
+                ("Platform", "Built-in Terminal (browser)" if _tylko_terminal(ctx) else "MT5"),
                 ("Server", ctx.get("platform_server")),
                 ("Login", ctx.get("platform_login")),
                 ("Password", ctx.get("platform_password")),
@@ -649,6 +688,27 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                            "password — the credentials above are only for the "
                            "MT5 platform." + zapomniane),
             ]
+        if _tylko_terminal(ctx):
+            parts.append(_note_html(
+                f"These credentials open the Built-in Terminal in your browser "
+                f"(<a href=\"{settings.app_base_url}/trade\" style=\"color:{_GOLD}\">open it here</a>). "
+                f"They do not work in the MetaTrader 5 apps."))
+        if event == "credentials":
+            # Durable-medium confirmation of the purchase: what was declared at
+            # checkout and which version of the documents applies.
+            from . import legal
+            baza = settings.app_base_url
+            link = lambda sciezka, nazwa: (f"<a href=\"{baza}{sciezka}\" "
+                                           f"style=\"color:{_GOLD}\">{nazwa}</a>")
+            parts.append(_note_html(
+                "For your records. At checkout you declared: "
+                + " ".join(html.escape(tekst) for _, tekst in legal.DECLARATIONS)
+                + f" Documents, version {legal.DOCS_VERSION}: "
+                + ", ".join([link("/terms", "Terms of Service"),
+                             link("/refund-policy", "Refund Policy"),
+                             link("/withdrawal", "Right of Withdrawal"),
+                             link("/risk-disclosure", "Risk Disclosure"),
+                             link("/complaints", "Complaints Procedure")]) + "."))
     elif event == "welcome":
         mobile = f"""
    <tr><td align="center" style="padding:40px 44px 0">
