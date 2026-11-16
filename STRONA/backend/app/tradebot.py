@@ -534,6 +534,72 @@ def _prowadz_ogon(tr: Trade, now: datetime) -> bool:
     return False
 
 
+DOPASUJ_KLUCZ = "bot_trades_on_chart"          # AppSetting: {"cursor": id, "done": bool, liczniki}
+DOPASUJ_KOPIA = "bot_chart_bak:"               # AppSetting: wartości sprzed przeniesienia, per partia
+
+
+def dopasuj_historie(limit: int = 40, budzet_s: float = 4.0) -> dict:
+    """Jednorazowe przejście po zamkniętych transakcjach bota na rynkach z zapisanymi
+    świecami (feed brokera, próbki mid): każda, która nie leży na świecach wykresu,
+    jest na nie przenoszona (`bot_ceny.dopasuj`; wynik i strona bez zmian).
+    Partiami z crona świec, z kursorem w AppSetting; po dojściu do końca nic nie robi.
+    Wartości sprzed zmiany zostają w AppSetting `bot_chart_bak:<pierwsze id>`."""
+    import json
+    import time as _time
+    from .db import SessionLocal
+    from .models import AppSetting
+    if not bot_ceny.wlaczone():
+        return {"skipped": True}
+    session = SessionLocal()
+    try:
+        row = session.get(AppSetting, DOPASUJ_KLUCZ)
+        try:
+            stan = json.loads(row.value) if row and row.value else {}
+        except ValueError:
+            stan = {}
+        if stan.get("done"):
+            return {"done": True}
+        symbole = [s for s in INSTRUMENTS if (m := bot_ceny.rynek(s)) and m.hl in markets.PROBKOWANE]
+        partia = (session.query(Trade)
+                  .filter(Trade.id > int(stan.get("cursor", 0)), Trade.status == "closed", Trade.source != "terminal",
+                          Trade.venue == "hyperliquid", Trade.symbol.in_(symbole))
+                  .order_by(Trade.id).limit(limit).all())
+        start, kopia, licz = _time.monotonic(), [], {}
+        limity = dict(session.query(Account.id, Account.max_lots)
+                      .filter(Account.id.in_({t.account_id for t in partia})).all()) if partia else {}
+        for tr in partia:
+            if _time.monotonic() - start > budzet_s:
+                break
+            przed = (tr.open_price, tr.close_price, tr.opened_at, tr.closed_at, tr.lots)
+            zamkniety = tr.symbol not in CRYPTO_SYMBOLS
+            # Większy wolumen tylko do limitu lotów konta (bez limitu: najwyżej 10x pierwotny).
+            limit_konta = limity.get(tr.account_id)
+            sufit = float(limit_konta) if limit_konta and limit_konta > 0 else 10 * float(tr.lots or 0.0)
+            try:
+                wynik = bot_ceny.dopasuj(tr, INSTRUMENTS[tr.symbol], _point_value, sufit_lotow=sufit,
+                                         pomin=(lambda ms: is_weekend(datetime.fromtimestamp(ms / 1000, tz=timezone.utc))) if zamkniety else None)
+            except Exception as e:  # pragma: no cover - baza
+                print(f"[tradebot] dopasowanie transakcji {tr.id}: {e}", flush=True)
+                wynik = "error"
+            licz[wynik] = licz.get(wynik, 0) + 1
+            if wynik == "moved":
+                kopia.append([tr.id, przed[0], przed[1], przed[2].isoformat(), przed[3].isoformat(), przed[4]])
+            stan["cursor"] = tr.id
+        if not partia:
+            stan["done"] = True
+        for k, v in licz.items():
+            stan[k] = int(stan.get(k, 0)) + v
+        if kopia:
+            session.merge(AppSetting(key=f"{DOPASUJ_KOPIA}{kopia[0][0]}", value=json.dumps(kopia)))
+        session.merge(AppSetting(key=DOPASUJ_KLUCZ, value=json.dumps(stan)))
+        session.commit()
+        if licz:
+            print(f"[tradebot] transakcje na świecach wykresu: {licz}, kursor {stan.get('cursor')}", flush=True)
+        return {"batch": licz, "cursor": stan.get("cursor"), "done": bool(stan.get("done"))}
+    finally:
+        session.close()
+
+
 def _zamknij_na_wykresie(session, acc: Account, tr: Trade, pnl: float, now: datetime) -> bool:
     """Zamyka plan na prawdziwych świecach z wynikiem `pnl`. Najpierw tym samym
     wolumenem; gdy rynek przez `LIVE_CZEKAJ` nie dał ruchu na plan — większym

@@ -14,6 +14,7 @@ trybie pomija — ich ceny nie miałyby się z czym zgadzać.
 """
 from __future__ import annotations
 
+import bisect
 import math
 import os
 import random
@@ -31,6 +32,12 @@ _DZIEN_MS = 86_400_000
 # Najkrótsze trzymanie: wejście co najmniej tyle przed wyjściem (i ułamek planu).
 MIN_HOLD_MS = 5 * 60_000
 MIN_HOLD_UDZIAL = 0.25
+# Świeca giełdy bliżej niż tyle od zapisanej świecy brokera to dziura do załatania, nie historia.
+BLISKO_MS = 10 * 60_000
+# Dopasowanie do wykresu: jak daleko od pierwotnego wejścia wolno szukać świecy z ceną wejścia.
+DOPASUJ_OKNO_MS = 12 * 3_600_000
+DOPASUJ_MAX_CEN = 240
+DOPASUJ_MAX_LOTOW = 150           # ile kolejnych wolumenów (co 0,01) wolno sprawdzić
 
 
 def wlaczone() -> bool:
@@ -127,7 +134,18 @@ def swiece(coin: str, start_ms: int, end_ms: int, teraz_ms: int | None = None) -
             print(f"[bot-ceny] zapisane świece {coin}: {e}", flush=True)
             nasze = {}
         if nasze:
-            po_czasie = {c["t"]: c for c in out}
+            # Minuta bez zapisanej świecy tuż obok zapisanych to dziura, którą feed zaraz
+            # załata swoją ceną (bieżąca minuta, zgubiony przebieg crona). Hyperliquid
+            # stoi kilka pipsów obok brokera, więc transakcja wyceniona tam na jego
+            # świecy po załataniu wisiałaby poza wykresem: takich świec bot nie bierze.
+            # Dalej od zapisanych (historia sprzed feedu, dłuższa przerwa) zostaje giełda.
+            czasy = sorted(nasze)
+            blisko = max(BLISKO_MS, 2 * _MS[iv])
+
+            def przy_zapisanych(t: int) -> bool:
+                i = bisect.bisect_left(czasy, t)
+                return any(0 <= j < len(czasy) and abs(czasy[j] - t) <= blisko for j in (i - 1, i))
+            po_czasie = {c["t"]: c for c in out if not przy_zapisanych(c["t"])}
             po_czasie.update({t: c for t, c in nasze.items() if start_ms - _MS[iv] < t <= end_ms})
             out = list(po_czasie.values())
     out.sort(key=lambda c: c["t"])
@@ -257,7 +275,125 @@ def zamknij(tr, inst, pv_fn, pnl: float, wyjscie: datetime, max_lots: float | No
     tr.pnl = round(sign * (p_x - p_e) * lots * pv_fn(inst, p_x), 2)
     tr.status = "closed"
     tr.venue = "hyperliquid"
+    if iv != "1m" and m.hl in markets.PROBKOWANE:
+        # Stare okno (dogrywka historii) liczone na grubszych świecach: na wykresie M1
+        # wejście wylosowane w obrębie świecy 15m albo 1h wisiałoby obok ceny. Zapisane
+        # świece 1m sięgają dalej niż giełda, więc transakcja siada na nich.
+        try:
+            dopasuj(tr, inst, pv_fn)
+        except Exception as e:  # pragma: no cover - baza
+            print(f"[bot-ceny] dopasowanie {tr.symbol}: {e}", flush=True)
     return True
+
+
+def dopasuj(tr, inst, pv_fn, pomin=None, sufit_lotow: float | None = None) -> str:
+    """Przenosi ZAMKNIĘTĄ transakcję bota na świece, które rysuje wykres (zapisane 1m).
+
+    Transakcje sprzed feedu brokera były wyceniane na świecach Hyperliquid, a wykres
+    rysuje dziś w tych minutach świece brokera, przesunięte o kilka pipsów (a skoków
+    cienkiej giełdy u brokera nie ma wcale): znaczniki wisiały obok świec. Wynik i strona
+    zostają. Cena wyjścia trafia do świecy z minuty zamknięcia (najbliżej dotychczasowej),
+    cena wejścia wynika z wyniku. Kolejno, do pierwszego trafienia:
+      1. ten sam wolumen, wejście w świecy najbliższej pierwotnej minucie (w oknie
+         długości trzymania, co najmniej 30 minut);
+      2. większy wolumen (do `sufit_lotow`): mniejszy ruch daje ten sam wynik;
+      3. ten sam wolumen, wejście do `DOPASUJ_OKNO_MS` przed pierwotnym.
+    `pomin(ms)` wyklucza świece, których wykres nie rysuje.
+
+    Zwraca "ok" (już leży na świecach; minuta wejścia bez zapisanej świecy to giełda,
+    na której transakcja powstała), "moved", "nodata" (brak zapisanych świec:
+    wykres pokazuje tam giełdę) albo "nofit" (żadna świeca nie daje wyniku).
+    """
+    m = rynek(tr.symbol)
+    lots0 = float(tr.lots or 0.0)
+    if m is None or not lots0 or tr.close_price is None or tr.closed_at is None:
+        return "nodata"
+    t_e, t_x = _ms(tr.opened_at), _ms(tr.closed_at)
+    if t_x <= t_e:
+        return "nodata"
+    blisko = min(DOPASUJ_OKNO_MS, max(30 * 60_000, t_x - t_e))
+    sw = _zapisane(m.hl, "1m", t_e - DOPASUJ_OKNO_MS, t_x)
+    if pomin is not None:
+        sw = {t: c for t, c in sw.items() if not pomin(t)}
+    step = inst.tick
+    pol = step / 2
+    min_e, min_x = t_e // 60_000 * 60_000, t_x // 60_000 * 60_000
+    # Świeca wyjścia: z minuty zamknięcia, a gdy jej nie ma — ostatnia do 5 minut wcześniej.
+    c_x = next((sw[t] for t in range(min_x, min_x - 6 * 60_000, -60_000) if t in sw), None)
+    if c_x is None:
+        return "nodata"
+    c_e = sw.get(min_e)
+    if (c_x["t"] == min_x and c_x["l"] - pol <= tr.close_price <= c_x["h"] + pol
+            and (c_e is None or c_e["l"] - pol <= tr.open_price <= c_e["h"] + pol)):
+        return "ok"
+    t_x_nowe = t_x if c_x["t"] == min_x else c_x["t"] + 59_000
+    sign = 1 if tr.side == "buy" else -1
+    brutto = float(tr.pnl or 0.0) + float(getattr(tr, "fee", None) or 0.0)
+    odstep = min(MIN_HOLD_MS, (t_x - t_e) // 2)
+    wszystkie = sorted((c for t, c in sw.items() if t + 60_000 <= t_x_nowe - odstep), key=lambda c: abs(c["t"] - min_e))
+    bliskie = [c for c in wszystkie if abs(c["t"] - min_e) <= blisko]
+    if not wszystkie:
+        return "nodata"
+    n_lo, n_hi = math.ceil(c_x["l"] / step - 1e-9), math.floor(c_x["h"] / step + 1e-9)
+    skok = max(1, (n_hi - n_lo + 1) // DOPASUJ_MAX_CEN)
+    ceny_x = sorted({round(n * step, _krok(step)) for n in range(n_lo, n_hi + 1, skok)},
+                    key=lambda p: abs(p - tr.close_price))
+
+    def szukaj(lots: float, kandydaci: list[dict]):
+        najlepsze = None                  # ((niedokładny wynik, odległość wejścia w czasie, zmiana wyjścia), …)
+        for p_x in ceny_x:
+            pv = pv_fn(inst, p_x)
+            if not pv:
+                continue
+            baza = round((p_x - sign * brutto / (lots * pv)) / step)
+            for n in (baza, baza - 1, baza + 1):
+                p_e = round(n * step, _krok(step))
+                if p_e <= 0:
+                    continue
+                rozjazd = abs(round(sign * (p_x - p_e) * lots * pv, 2) - round(brutto, 2))
+                if rozjazd > 0.005 and n != baza:
+                    continue              # sąsiedni tick tylko wtedy, gdy daje wynik co do centa
+                c = next((k for k in kandydaci if k["l"] <= p_e <= k["h"]), None)
+                if c is None:
+                    continue
+                ocena = (rozjazd > 0.005, abs(c["t"] - min_e), abs(p_x - tr.close_price))
+                if najlepsze is None or ocena < najlepsze[0]:
+                    najlepsze = (ocena, p_x, p_e, c, lots)
+            if najlepsze is not None and najlepsze[0][:2] == (False, 0):
+                break                     # wejście w pierwotnej minucie, wynik co do centa
+        return najlepsze
+
+    wynik = szukaj(lots0, bliskie) if bliskie else None
+    if wynik is None and bliskie and sufit_lotow and sufit_lotow > lots0 and abs(brutto) >= 0.005:
+        # Ruch w pobliżu za mały na ten wolumen: najmniejszy większy, który trafia w świecę.
+        pv = pv_fn(inst, c_x["c"])
+        w_gore = (-sign * brutto) > 0     # wejście powyżej wyjścia
+        zakres = (max(c["h"] for c in bliskie) - c_x["l"]) if w_gore else (c_x["h"] - min(c["l"] for c in bliskie))
+        if pv and zakres > step:
+            lots = max(round(lots0 + 0.01, 2), math.ceil(abs(brutto) / (zakres * pv) * 100) / 100)
+            niedokladne = None
+            for _ in range(DOPASUJ_MAX_LOTOW):
+                if lots > sufit_lotow + 1e-9:
+                    break
+                w = szukaj(lots, bliskie)
+                if w is not None and not w[0][0]:
+                    wynik = w
+                    break
+                niedokladne = niedokladne or w
+                lots = round(lots + 0.01, 2)
+            wynik = wynik or niedokladne
+    if wynik is None and len(wszystkie) > len(bliskie):
+        wynik = szukaj(lots0, wszystkie)
+    if wynik is None:
+        return "nofit"
+    _, p_x, p_e, c, lots = wynik
+    tr.close_price, tr.open_price, tr.lots = p_x, p_e, lots
+    if t_x_nowe != t_x:
+        tr.closed_at = _dt(t_x_nowe) if tr.closed_at.tzinfo else _dt(t_x_nowe).replace(tzinfo=None)
+    if c["t"] != min_e:
+        t_we = c["t"] + min(t_e % 60_000, 59_000)
+        tr.opened_at = _dt(t_we) if tr.opened_at.tzinfo else _dt(t_we).replace(tzinfo=None)
+    return "moved"
 
 
 def otworz_ogon(tr, inst, pv_fn, cel: float, mid: float, now: datetime, rng: random.Random) -> bool:

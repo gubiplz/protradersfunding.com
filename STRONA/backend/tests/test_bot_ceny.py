@@ -248,17 +248,127 @@ def test_swiece_bota_z_feedu_brokera_tam_gdzie_wykres(zywe):
                              c=1.205 + i * 1e-4, n=-1))
     s.commit(); s.close()
     start = int(t0.timestamp() * 1000)
-    iv, sw = bot_ceny.swiece("xyz:EUR", start, start + 20 * 60_000)
+    iv, sw = bot_ceny.swiece("xyz:EUR", start, start + 40 * 60_000)
     assert iv == "1m"
     po = {c["t"]: c for c in sw}
     assert po[start]["o"] == 1.20 and po[start + 9 * 60_000]["c"] == round(1.205 + 9e-4, 10)
-    # Minuty bez zapisanego wiersza: Hyperliquid (fala ~1.11, daleko od 1.20).
-    assert abs(po[start + 15 * 60_000]["c"] - 1.11) < 0.05
+    # Minuty bez zapisanego wiersza daleko od zapisanych: Hyperliquid (fala ~1.11, daleko od 1.20).
+    assert abs(po[start + 30 * 60_000]["c"] - 1.11) < 0.05
+    # Tuż za zapisanymi to dziura, którą feed załata swoją ceną: świecy giełdy bot nie bierze.
+    assert start + 15 * 60_000 not in po and start + 19 * 60_000 not in po and start + 20 * 60_000 in po
     # Rynek bez feedu brokera nie czyta bazy.
     _, btc = bot_ceny.swiece("BTC", start, start + 20 * 60_000)
     assert all(abs(c["c"] - 77_000) < 77_000 * 0.05 for c in btc)
     s = SessionLocal()
     s.query(TerminalCandle).filter(TerminalCandle.coin == "xyz:EUR").delete()
+    s.commit(); s.close()
+
+
+def _feed_eur(t0, minuty, baza=1.1090):
+    """Zapisane świece brokera: łagodna fala wokół `baza`, zakres 2 pipsy na minutę."""
+    from app.models import TerminalCandle
+    s = SessionLocal()
+    s.query(TerminalCandle).filter(TerminalCandle.coin == "xyz:EUR").delete()
+    for i in range(minuty):
+        mid = baza + 0.003 * math.sin(i / 9.0)
+        s.add(TerminalCandle(coin="xyz:EUR", ts=(t0 + timedelta(minutes=i)).replace(tzinfo=None),
+                             o=round(mid, 5), h=round(mid + 1e-4, 5), l=round(mid - 1e-4, 5), c=round(mid + 5e-5, 5), n=-1))
+    s.commit(); s.close()
+
+
+def _na_swiecy(coin, kiedy, cena):
+    from app.models import TerminalCandle
+    s = SessionLocal()
+    r = s.query(TerminalCandle).filter(TerminalCandle.coin == coin,
+                                       TerminalCandle.ts == kiedy.replace(second=0, microsecond=0, tzinfo=None)).first()
+    s.close()
+    return r is not None and r.l - 1e-9 <= cena <= r.h + 1e-9
+
+
+def test_stara_transakcja_bota_siada_na_swiecach_wykresu(zywe):
+    """Transakcja wyceniona kiedyś na Hyperliquid (kilka pipsów nad brokerem) wisiała obok
+    świec, które wykres rysuje dziś z feedu brokera. `dopasuj` przenosi ceny na zapisane
+    świece: wynik, wolumen, strona i godzina zamknięcia zostają, wynik zgadza się z cenami."""
+    from app.models import TerminalCandle
+    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0) - timedelta(hours=5)
+    _feed_eur(t0, 240)
+
+    class T:
+        fee = None
+    tr = T()
+    tr.symbol, tr.side, tr.lots, tr.pnl = "EURUSD", "sell", 0.30, 66.60
+    tr.opened_at, tr.closed_at = t0 + timedelta(minutes=60, seconds=20), t0 + timedelta(minutes=140, seconds=41)
+    tr.open_price, tr.close_price = 1.11152, 1.10930          # 22,2 pipsa, daleko nad świecami brokera
+    assert not _na_swiecy("xyz:EUR", tr.opened_at, tr.open_price)
+    inst = tradebot.INSTRUMENTS["EURUSD"]
+    zamkniecie = tr.closed_at
+    assert bot_ceny.dopasuj(tr, inst, tradebot._point_value) == "moved"
+    assert _na_swiecy("xyz:EUR", tr.opened_at, tr.open_price) and _na_swiecy("xyz:EUR", tr.closed_at, tr.close_price)
+    assert (tr.side, tr.lots, tr.pnl, tr.closed_at) == ("sell", 0.30, 66.60, zamkniecie)
+    assert round((tr.open_price - tr.close_price) * 0.30 * tradebot._point_value(inst, tr.close_price), 2) == 66.60
+    assert tr.opened_at < tr.closed_at and abs((tr.opened_at - (t0 + timedelta(minutes=60))).total_seconds()) <= 12 * 3600
+    # Rynek, który w pobliżu ruszył się za mało na ten wolumen: większy wolumen (do sufitu)
+    # daje ten sam wynik z mniejszego ruchu, a wejście zostaje blisko pierwotnego.
+    tr2 = T()
+    tr2.symbol, tr2.side, tr2.lots, tr2.pnl = "EURUSD", "sell", 0.30, 300.0     # 100 pipsów: fala ma ~60
+    tr2.opened_at, tr2.closed_at = tr.opened_at, zamkniecie
+    tr2.open_price, tr2.close_price = 1.1193, 1.1093
+    assert bot_ceny.dopasuj(tr2, inst, tradebot._point_value) == "nofit" and tr2.lots == 0.30
+    assert bot_ceny.dopasuj(tr2, inst, tradebot._point_value, sufit_lotow=5.0) == "moved"
+    assert 0.30 < tr2.lots <= 5.0 and tr2.pnl == 300.0
+    assert _na_swiecy("xyz:EUR", tr2.opened_at, tr2.open_price) and _na_swiecy("xyz:EUR", tr2.closed_at, tr2.close_price)
+    assert round((tr2.open_price - tr2.close_price) * tr2.lots * 100_000, 2) == 300.0
+    # Drugi raz nie ma czego ruszać.
+    przed = (tr.open_price, tr.close_price, tr.opened_at, tr.closed_at)
+    assert bot_ceny.dopasuj(tr, inst, tradebot._point_value) == "ok"
+    assert przed == (tr.open_price, tr.close_price, tr.opened_at, tr.closed_at)
+    # Bez zapisanej świecy w minucie zamknięcia wykres rysuje giełdę: transakcja zostaje.
+    tr.closed_at = t0 + timedelta(hours=4, minutes=30)
+    assert bot_ceny.dopasuj(tr, inst, tradebot._point_value) == "nodata"
+    s = SessionLocal()
+    s.query(TerminalCandle).filter(TerminalCandle.coin == "xyz:EUR").delete()
+    s.commit(); s.close()
+
+
+def test_przejscie_po_historii_bota_raz_z_kopia(zywe):
+    """Cron przenosi stare transakcje bota partiami: tylko zamknięte transakcje bota na
+    rynkach z zapisanymi świecami, z kopią wartości sprzed zmiany, a po końcu nie rusza nic."""
+    import json
+    from app.models import AppSetting, TerminalCandle
+    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0) - timedelta(hours=5)
+    _feed_eur(t0, 240)
+    s = SessionLocal()
+    for k in s.query(AppSetting).filter(AppSetting.key.like("bot_%")).all():
+        s.delete(k)
+    s.close()
+    aid = _konto("550771")[0]
+    s = SessionLocal()
+    wspolne = dict(account_id=aid, symbol="EURUSD", side="sell", lots=0.30, pnl=66.60, plan_pnl=66.60, status="closed",
+                   opened_at=(t0 + timedelta(minutes=60, seconds=20)).replace(tzinfo=None),
+                   closed_at=(t0 + timedelta(minutes=140, seconds=41)).replace(tzinfo=None),
+                   open_price=1.11152, close_price=1.10930)
+    s.add(Trade(source="bot", venue="hyperliquid", **wspolne))
+    s.add(Trade(source="terminal", venue="hyperliquid", **wspolne))       # trader: nietykalna
+    s.add(Trade(source="bot", venue=None, **wspolne))                     # syntetyczna: bez wykresu
+    s.commit()
+    ids = [t.id for t in s.query(Trade).filter(Trade.account_id == aid, Trade.open_price == 1.11152).order_by(Trade.id).all()]
+    s.close()
+    out = tradebot.dopasuj_historie()
+    assert out["batch"] == {"moved": 1} and out["cursor"] == ids[0]
+    s = SessionLocal()
+    bot, trader, synt = [s.get(Trade, i) for i in ids]
+    assert _na_swiecy("xyz:EUR", bot.opened_at, bot.open_price) and _na_swiecy("xyz:EUR", bot.closed_at, bot.close_price)
+    assert (bot.pnl, bot.lots, bot.side) == (66.60, 0.30, "sell")
+    assert (trader.open_price, synt.open_price) == (1.11152, 1.11152)
+    kopia = json.loads(s.get(AppSetting, f"bot_chart_bak:{ids[0]}").value)
+    assert kopia[0][:3] == [ids[0], 1.11152, 1.10930] and kopia[0][5] == 0.30
+    s.close()
+    assert tradebot.dopasuj_historie()["done"] is True and tradebot.dopasuj_historie() == {"done": True}
+    s = SessionLocal()
+    s.query(Trade).filter(Trade.account_id == aid).delete()
+    s.query(TerminalCandle).filter(TerminalCandle.coin == "xyz:EUR").delete()
+    for k in s.query(AppSetting).filter(AppSetting.key.like("bot_%")).all():
+        s.delete(k)
     s.commit(); s.close()
 
 

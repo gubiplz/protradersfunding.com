@@ -1454,12 +1454,18 @@ def cron_swiece(budzet_s: float) -> dict:
                 ct["error"] = f"{type(e).__name__}: {str(e)[:120]}"
         watek = threading.Thread(target=_ct, daemon=True)
         watek.start()
+    # Stare transakcje bota przenoszone na świece wykresu (jednorazowo, partiami).
+    try:
+        dopasowane = tradebot.dopasuj_historie()
+    except Exception as e:  # pragma: no cover - baza
+        dopasowane = {"error": f"{type(e).__name__}: {str(e)[:120]}"}
     hist = uzupelnij_historie(min(HIST_BUDZET_S, budzet_s / 2))
     out = probkuj_swiece(max(5.0, budzet_s - (time.monotonic() - start)), zajmij=False, feed=not watek)
     if watek:
         watek.join(timeout=5.0)
         out["ctrader"] = ct
     out["history"] = hist
+    out["bot_trades"] = dopasowane
     return out
 
 
