@@ -4678,17 +4678,23 @@ function askReason(opts){
           placeholder="Write your own reason"></textarea>
         <button class="btn-p lg" style="width:100%${opts.danger?';background:var(--red)':''}"
           id="rs-go">${opts.confirmLabel||'Confirm'}</button>
+        ${opts.altLabel?`<button class="btn-o lg" style="width:100%;color:var(--red);border-color:var(--red)"
+          id="rs-alt" title="${opts.altTitle||''}">${opts.altLabel}</button>`:''}
       </div></div>`;
     box.onclick=()=>done(null);
     box.querySelector('#rs-x').onclick=()=>done(null);
     const sel=box.querySelector('#rs-sel'),txt=box.querySelector('#rs-txt');
     sel.onchange=()=>{const c=sel.value==='__custom__';
       txt.classList.toggle('hidden',!c); if(c)txt.focus()};
-    box.querySelector('#rs-go').onclick=()=>{
+    /* Z altLabel wynik to {reason, alt} — alt=true po drugim przycisku.
+       Bez altLabel zostaje sam string, jak dla dotychczasowych wywolan. */
+    const wybierz=alt=>{
       const custom=sel.value==='__custom__';
       const v=custom?(txt.value||'').trim():sel.value;
       if(custom&&!v){txt.focus();return}
-      done(v)};
+      done(opts.altLabel?{reason:v,alt}:v)};
+    box.querySelector('#rs-go').onclick=()=>wybierz(false);
+    if(opts.altLabel)box.querySelector('#rs-alt').onclick=()=>wybierz(true);
     document.body.appendChild(box);
   });
 }
@@ -5197,7 +5203,7 @@ async function deleteTrader(tid,who){
    „already handled" zamiast po prostu nie zadziałać. */
 async function rejectPayout(id,btn){
   await busy(btn,null,async()=>{
-    const reason=await askReason({
+    const res=await askReason({
       title:'Reject this payout request',danger:true,confirmLabel:'Reject request',
       hint:'The trader sees the reason under the request status and gets it by e-mail.',
       /* Powody, ktore ODPADLY, bo wniosek z nimi nie ma jak dojsc do admina:
@@ -5217,11 +5223,17 @@ async function rejectPayout(id,btn){
         'Account traded by an unapproved third party — Terms §6-7',
         'More than one registration for the same person — Terms §3',
         'Chargeback or payment dispute on this account — Terms §6',
-        'Identity does not match the account holder — Terms §6']});
-    if(reason===null)return;   // Cancel
-    try{await api(`/api/admin/payout-requests/${id}/reject`,{method:'POST',
-        body:JSON.stringify({reason})});
-      toast('Request rejected.','ok');go('payouts')}
+        'Identity does not match the account holder — Terms §6'],
+      /* Drugi przycisk: odrzuca wniosek i zamyka konto jako failed z tym samym
+         powodem (serwer: breach=true, ta sama sciezka co Breach w karcie konta). */
+      altLabel:'Reject &amp; breach account',
+      altTitle:'Also closes the account as failed with this reason (portal + e-mail)'});
+    if(res===null)return;   // Cancel
+    const {reason,alt:breach}=res;
+    try{const d=await api(`/api/admin/payout-requests/${id}/reject`,{method:'POST',
+        body:JSON.stringify({reason,breach})});
+      toast(d.breached?'Request rejected and account breached.':'Request rejected.','ok',d.breached?8000:6000);
+      go('payouts')}
     catch(e){toast('Error: '+e.message,'err')}
   });
 }
