@@ -21,6 +21,7 @@ import urllib.request
 import random
 import re
 import asyncio
+import anyio
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -5643,6 +5644,9 @@ def _odblokuj_wyplate(session, r: PayoutRequest) -> dict:
 
 class PayoutRejectIn(BaseModel):
     reason: str = ""
+    # „Reject & breach account": oprócz odrzucenia wniosku zamyka konto jako
+    # failed z TYM SAMYM powodem (jak przycisk Breach w karcie konta).
+    breach: bool = False
 
 
 @app.post("/api/admin/payout-requests/{req_id}/reject", dependencies=[Depends(auth.require_admin)])
@@ -5650,7 +5654,13 @@ def admin_reject_payout(req_id: int, payload: PayoutRejectIn):
     """Odrzuca wniosek z powodem, który trader zobaczy przy swoim wniosku.
 
     Saldo konta nie zmienia się — odrzucenie niczego nie wypłaca, a trader może
-    złożyć nowy wniosek od razu (np. z poprawionymi danymi przelewu)."""
+    złożyć nowy wniosek od razu (np. z poprawionymi danymi przelewu).
+
+    Z `breach=true` konto wniosku jest dodatkowo zamykane za breach z tym samym
+    powodem. Wszystkie bramki breachu (konto istnieje, nie jest już zamknięte,
+    powód nie gryzie się z Copytradingiem) idą PRZED jakąkolwiek zmianą, a samo
+    odrzucenie i breach wchodzą jednym commitem — nie ma stanu „odrzucone, ale
+    konto dalej otwarte" po błędzie w połowie."""
     session = SessionLocal()
     try:
         r = session.get(PayoutRequest, req_id)
@@ -5661,6 +5671,13 @@ def admin_reject_payout(req_id: int, payload: PayoutRejectIn):
         # rejection without one cannot be sent.
         if not reason:
             raise HTTPException(400, "Give the reason for the rejection — the trader sees it")
+        acc = session.get(Account, r.account_id)
+        if payload.breach:
+            if not acc:
+                raise HTTPException(404, "The account of this request no longer exists")
+            if acc.status == "failed":
+                raise HTTPException(400, "This account is already closed — use Reject")
+            _sprawdz_powod_breachu(acc, reason)
         t = _transfer_vusdt(session, req_id)
         if t:
             # Tokeny, które już wyszły, nie wrócą przez „Reject". Transfer jeszcze
@@ -5681,15 +5698,27 @@ def admin_reject_payout(req_id: int, payload: PayoutRejectIn):
                           synchronize_session=False))
         if not zajete:
             raise HTTPException(404, "The request does not exist or was already handled")
-        acc = session.get(Account, r.account_id)
+        if payload.breach:
+            _zamknij_za_breach(session, acc, reason)
         tr = session.get(Trader, r.trader_id)
         session.commit()
+        zamkniete = 0
+        if payload.breach:
+            # Po commicie, jak w admin_breach_account: breach zostaje w bazie
+            # także wtedy, gdy broker milczy. Endpoint jest synchroniczny
+            # (działa w wątku), więc korutynę puszczamy przez pętlę serwera.
+            zamkniete = anyio.from_thread.run(poller.odetnij_od_handlu, acc)
         if tr:
             notify.send("payout_rejected", tr.email, {
                 "name": tr.full_name or tr.email, "login": acc.login if acc else "",
                 "trader_share": r.trader_share,
                 "reason": reason})
-        return {"rejected": req_id, "reason": reason}
+            if payload.breach:
+                notify.send("breached", tr.email,
+                            {"name": tr.full_name or tr.email,
+                             "login": acc.login, "reason": reason})
+        return {"rejected": req_id, "reason": reason, "breached": payload.breach,
+                "positions_closed": zamkniete}
     finally:
         session.close()
 
@@ -6616,6 +6645,34 @@ _POWODY_SPRZECZNE_Z_COPYTRADINGIEM = ("copy trading", "copytrading", "account sh
                                       "multiple devices", "more than one device")
 
 
+def _sprawdz_powod_breachu(acc: Account, powod: str) -> None:
+    """400, gdy powód jest sprzeczny z add-onem Copytrading na tym koncie."""
+    if getattr(acc, "copytrading", False):
+        maly = powod.lower()
+        if any(fragment in maly for fragment in _POWODY_SPRZECZNE_Z_COPYTRADINGIEM):
+            raise HTTPException(
+                400,
+                "This account holds the Copytrading add-on: copying between the "
+                "trader's own accounts and using more than one device are allowed "
+                "on it. Sharing credentials with someone else still is not — say "
+                "that explicitly if that is what happened.")
+
+
+def _zamknij_za_breach(session, acc: Account, powod: str) -> None:
+    """Zmiany w bazie przy ręcznym breachu, BEZ commita i bez brokera.
+
+    Wspólne dla „Breach account" i „Reject & breach" przy wniosku o wypłatę,
+    żeby obie drogi zostawiały ten sam ślad (wpis `manual` w historii, bot
+    zatrzymany). Odcięcie u brokera i mail robi wołający po commicie."""
+    if getattr(acc, "bot_enabled", False):
+        tradebot.stop(session, acc)
+    acc.status = "failed"
+    acc.breach_reason = powod
+    acc.closed_at = datetime.now(timezone.utc)
+    session.add(Breach(account_id=acc.id, type="manual", detail=powod,
+                       equity_at_breach=round(acc.equity or 0.0, 2)))
+
+
 @app.post("/api/admin/accounts/{account_id}/breach", dependencies=[Depends(auth.require_admin)])
 async def admin_breach_account(account_id: int, payload: BreachIn):
     """Ręczne zamknięcie konta za złamanie zasad.
@@ -6646,22 +6703,8 @@ async def admin_breach_account(account_id: int, payload: BreachIn):
             raise HTTPException(400, "This account is already closed")
 
         powod = (payload.reason or "").strip() or "Closed by the risk desk"
-        if getattr(acc, "copytrading", False):
-            maly = powod.lower()
-            if any(fragment in maly for fragment in _POWODY_SPRZECZNE_Z_COPYTRADINGIEM):
-                raise HTTPException(
-                    400,
-                    "This account holds the Copytrading add-on: copying between the "
-                    "trader's own accounts and using more than one device are allowed "
-                    "on it. Sharing credentials with someone else still is not — say "
-                    "that explicitly if that is what happened.")
-        if getattr(acc, "bot_enabled", False):
-            tradebot.stop(session, acc)
-        acc.status = "failed"
-        acc.breach_reason = powod
-        acc.closed_at = datetime.now(timezone.utc)
-        session.add(Breach(account_id=acc.id, type="manual", detail=powod,
-                           equity_at_breach=round(acc.equity or 0.0, 2)))
+        _sprawdz_powod_breachu(acc, powod)
+        _zamknij_za_breach(session, acc, powod)
         session.commit()
 
         # Po commicie: stan w bazie ma byc zapisany takze wtedy, gdy broker
