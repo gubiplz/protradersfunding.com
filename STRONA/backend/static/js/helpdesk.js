@@ -23,6 +23,7 @@
   'use strict';
   var ZAKLADKA = 'home', ART = null, SZUKAJ = '', ARTS = null, ARTS_P = null, MAIL = '';
   var WIDOK = 'list', LISTA = [], CHAT = null, ASSIST = true, OTWARTY = false, CZEKA = false, TIMER = null;
+  var ORB_OFF = null;   // wyłącznik orba „pisze…" (ptf-fx.js)
   var AGENT = { name: 'Support', team: 'Support team', online: false };
   var KLUCZ_WIDZIANE = 'pf_hd_seen2';
   var NAZWA_AI = 'PTF AI Assistant';   // „AI" w nazwie: trader wie, że to nie człowiek
@@ -422,11 +423,18 @@
     if (body.dataset.odcisk === odcisk) return;
     body.dataset.odcisk = odcisk;
     var naDol = body.dataset.chat !== klucz || body.scrollHeight - body.scrollTop - body.clientHeight < 80;
+    // Ile dymków było w TEJ rozmowie przed przerysowaniem — animujemy tylko nowe (jak w komunikatorze).
+    var bylo = body.dataset.chat === klucz ? body.querySelectorAll('.chat-row').length : -1;
     body.dataset.chat = klucz;
+    // Stary orb znika razem z treścią — wyłącz jego animację, zanim go nadpiszemy.
+    if (ORB_OFF) { ORB_OFF(); ORB_OFF = null; }
     body.innerHTML = powitanie() + (thread.length
       ? chatHtml(thread, { me: 'trader', names: { ai: NAZWA_AI, admin: AGENT.name + ' · ' + AGENT.team } })
       : '')
-      + (CZEKA ? '<div class="hd-typing" aria-label="Assistant is typing"><i></i><i></i><i></i></div>' : '')
+      // libraries.dev: prawdziwy ThinkingOrb (ptf-fx.js); bez bundla zostają stare kropki.
+      + (CZEKA ? (window.PTFFx
+        ? '<div class="hd-typing hd-typing-orb" aria-label="Assistant is typing"><span class="hd-orb"></span><span class="hd-orb-lbl">' + esc(NAZWA_AI) + ' is writing…</span></div>'
+        : '<div class="hd-typing" aria-label="Assistant is typing"><i></i><i></i><i></i></div>') : '')
       + (!CZEKA && CHAT && CHAT.agent_typing
         ? '<div class="hd-typing-who">' + esc(AGENT.name) + ' is typing…</div>'
           + '<div class="hd-typing" aria-hidden="true"><i></i><i></i><i></i></div>' : '')
@@ -448,10 +456,23 @@
     if (komp) komp.hidden = !!zamknieta;
     var inp = el('hd-inp');
     if (inp) inp.disabled = CZEKA;
+    // libraries.dev: orb w dymku „pisze…" + beam na polu, dopóki asystent odpowiada.
+    var orbEl = body.querySelector('.hd-orb');
+    if (orbEl && window.PTFFx) ORB_OFF = PTFFx.orb(orbEl, { state: 'composing', size: 20 });
+    if (inp && !inp.parentNode.classList.contains('fx-beam-wrap')) {
+      var wrap = document.createElement('span');
+      wrap.className = 'fx-beam-wrap';
+      inp.parentNode.insertBefore(wrap, inp);
+      wrap.appendChild(inp);
+    }
+    if (inp) inp.parentNode.classList.toggle('on', CZEKA);
     // Dopiero teraz: pole pisania pod spodem zmienia wysokość okna rozmowy.
     // Pusta rozmowa zostaje u góry — powitanie i pytania czyta się od początku.
+    var wiersze = body.querySelectorAll('.chat-row'), nowe = bylo >= 0 && wiersze.length > bylo;
+    for (var w = Math.max(bylo, 0); bylo >= 0 && w < wiersze.length; w++) wiersze[w].classList.add('hd-in');
     if (!thread.length && !CZEKA) body.scrollTop = 0;
-    else if (naDol) body.scrollTop = body.scrollHeight;
+    // Nowy dymek albo „pisze…" w otwartej rozmowie: płynny zjazd na dół; wejście w rozmowę: od razu.
+    else if (naDol) body.scrollTo({ top: body.scrollHeight, behavior: (nowe || CZEKA) && bylo >= 0 ? 'smooth' : 'auto' });
   }
 
   function rysuj() {

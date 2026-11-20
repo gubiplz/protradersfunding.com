@@ -92,7 +92,9 @@
     t.style.height = 'auto';
     t.style.height = Math.min(t.scrollHeight, 140) + 'px';
     if (naDole) body.scrollTop = body.scrollHeight;
-    var b = t.parentElement && t.parentElement.querySelector('.chat-send');
+    // Przycisk szukamy w całym pasku pisania: pole może siedzieć w otoczce (beam w helpdesku).
+    var komp = t.closest('.chat-compose') || t.parentElement;
+    var b = komp && komp.querySelector('.chat-send');
     if (b) b.disabled = !t.value.trim();
   }
   document.addEventListener('input', function (e) {
@@ -105,7 +107,7 @@
     if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
     if (!matchMedia('(hover: hover) and (pointer: fine)').matches) return;   // telefon: nowa linia
     e.preventDefault();
-    var b = t.parentElement.querySelector('.chat-send');
+    var b = (t.closest('.chat-compose') || t.parentElement).querySelector('.chat-send');
     if (b && !b.disabled) b.click();
   });
 })();

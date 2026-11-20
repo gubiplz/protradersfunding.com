@@ -346,3 +346,28 @@ body:has(.side.open) :is(.hd-fab,.hd-peek){opacity:0;pointer-events:none}
   .hd-typing i,.hd-fab.ping::after{animation:none!important}
   .hd-fab-ic{transition:opacity .15s}
 }
+
+/* ── libraries.dev demo: Thinking orb w dymku „pisze…" + beam na polu pisania ── */
+.hd-typing-orb{align-items:center;gap:8px;color:var(--muted);font-size:12.5px}
+.hd-typing-orb .hd-orb{display:inline-flex;width:20px;height:20px}
+@property --fx-a{syntax:'<angle>';inherits:false;initial-value:0deg}
+.fx-beam-wrap{position:relative;flex:1;min-width:0;display:flex;border-radius:20px}
+.fx-beam-wrap>.chat-inp{flex:1}
+.fx-beam-wrap::before,.fx-beam-wrap::after{content:"";position:absolute;inset:-1px;border-radius:21px;padding:1.5px;
+  background:conic-gradient(from var(--fx-a),transparent 0 62%,var(--acc,#36b9a9) 76%,#fbbf24 86%,transparent 96%);
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;
+  mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0);
+  opacity:0;transition:opacity .5s;pointer-events:none;animation:fx-spin 2.6s linear infinite}
+.fx-beam-wrap::after{filter:blur(7px);padding:3px}
+.fx-beam-wrap.on::before{opacity:1}
+.fx-beam-wrap.on::after{opacity:.55}
+@keyframes fx-spin{to{--fx-a:360deg}}
+@media (prefers-reduced-motion:reduce){.fx-beam-wrap::before,.fx-beam-wrap::after{animation:none}}
+
+/* Płynne wejście nowych dymków (jak Messenger/WhatsApp): tylko nowe wiersze dostają .hd-in */
+.hd-panel .chat-row.hd-in{animation:hd-in .34s cubic-bezier(.2,.9,.25,1.05) both}
+.hd-panel .chat-row.me.hd-in{transform-origin:100% 100%}
+.hd-panel .chat-row.them.hd-in{transform-origin:0 100%}
+.hd-panel .hd-typing{animation:hd-in .26s ease-out both;transform-origin:0 100%}
+@keyframes hd-in{from{opacity:0;transform:translateY(12px) scale(.94)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.hd-panel .chat-row.hd-in,.hd-panel .hd-typing{animation:none}}
