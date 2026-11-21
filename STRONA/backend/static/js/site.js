@@ -578,7 +578,7 @@
       if (cfgSb && oferujeSb(p) && p.steps === 0) q.set('sb', '1');
       if (cfgCoupon) q.set('coupon', cfgCoupon);
       const open = flipped.has(p.key);
-      return `<article class="chal-card${same ? ' still' : ''} pal-${cfgTier}-${i}${i === star ? ' star' : ''}${p.popular ? ' hot' : ''}${open ? ' flip' : ''}">
+      return `<article class="chal-card${same ? ' still nt' : ''} pal-${cfgTier}-${i}${i === star ? ' star' : ''}${p.popular ? ' hot' : ''}${open ? ' flip' : ''}">
         <div class="chal-flip" role="button" tabindex="0" aria-label="$${p.account_size.toLocaleString('en-US')} ${model}: show or hide the rules"><div class="chal-inner">
           <div class="chal-face chal-front">
             <i class="chal-lines"></i><i class="chal-glare"></i>
@@ -609,6 +609,8 @@
         <a class="btn chal-btn go" href="/portal?${q.toString()}">Start Challenge</a>
       </article>`;
     }).join('');
+    // Two frames: the browser paints the cards in their state first, then the flip animates again.
+    requestAnimationFrame(() => requestAnimationFrame(() => $$('.chal-card.nt', grid).forEach(c => c.classList.remove('nt'))));
     const turn = card => {
       const b = $('[data-flip]', card), on = card.classList.toggle('flip');
       if (on) flipped.add(b.dataset.flip); else flipped.delete(b.dataset.flip);
