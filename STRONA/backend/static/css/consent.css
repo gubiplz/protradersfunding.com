@@ -60,4 +60,22 @@ html[data-theme=dark] .pf-ck{--ckbg:linear-gradient(180deg,rgba(22,30,46,.94),rg
   .pf-ck-opts{grid-template-columns:1fr;padding:10px 14px 6px}
   .pf-ck-txt p{font-size:12.5px}
 }
+/* Placement (consent.js): under the header on site pages, a corner card in the terminal. */
+.pf-ck.pf-ck-top{bottom:auto;top:calc(var(--promo-h,0px) + 76px);max-width:1080px;animation-name:pfCkTop}
+@keyframes pfCkTop{from{opacity:0;transform:translateY(-10px)}}
+.pf-ck.pf-ck-corner{right:auto;max-width:min(520px,calc(100vw - 470px));margin:0}
+.pf-ck.pf-ck-corner .pf-ck-bar{flex-direction:column;align-items:stretch;gap:10px}
+.pf-ck.pf-ck-corner .pf-ck-act{justify-content:flex-end}
+@media(max-width:980px){.pf-ck.pf-ck-corner{right:10px;max-width:none}}
+@media(max-width:760px){
+  /* compact on phones: no title or icon, one short paragraph, the three choices in one row */
+  .pf-ck-top .pf-ck-txt,.pf-ck-corner .pf-ck-txt{display:block}
+  .pf-ck-top .pf-ck-txt::before,.pf-ck-top .pf-ck-txt b,
+  .pf-ck-corner .pf-ck-txt::before,.pf-ck-corner .pf-ck-txt b{display:none}
+  .pf-ck-top .pf-ck-txt p,.pf-ck-corner .pf-ck-txt p{font-size:12px;line-height:1.4}
+  .pf-ck-top .pf-ck-bar,.pf-ck-corner .pf-ck-bar{gap:8px;padding:10px 12px}
+  .pf-ck-top .pf-ck-act,.pf-ck-corner .pf-ck-act{grid-template-columns:auto 1fr 1fr;align-items:center}
+  .pf-ck-top .pf-ck-act .pf-ck-lnk,.pf-ck-corner .pf-ck-act .pf-ck-lnk{grid-column:auto;padding:4px 6px 4px 0;font-size:12.5px}
+  .pf-ck-top .pf-ck-btn,.pf-ck-corner .pf-ck-btn{height:30px;font-size:12.5px}
+}
 @media(prefers-reduced-motion:reduce){.pf-ck{animation:none}}

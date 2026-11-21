@@ -549,7 +549,9 @@ def test_landing_oznacza_ten_sam_plan_co_sklep():
     assert "maxSize" not in js, "stary wybor (najwiekszy plan) musi zniknac"
 
     html = zrodlo_portalu()
-    assert "plan-ribbon" in html and "p.popular?' pop'" in html
+    # Sklep w portalu ma od przebudowy te same karty co landing (chal-card):
+    # plakietka idzie za tym samym polem `popular`.
+    assert "p.popular?'<i>Best value</i>'" in html and "p.popular?' hot'" in html
 
 
 def test_wyroznienie_planu_mowi_jednym_glosem_w_trzech_miejscach():
@@ -569,7 +571,7 @@ def test_wyroznienie_planu_mowi_jednym_glosem_w_trzech_miejscach():
     js = (baza / "static" / "js" / "site.js").read_text()
 
     # jedna tresc we wszystkich trzech miejscach
-    assert '<span class="plan-ribbon">Best value</span>' in html
+    assert "p.popular?'<i>Best value</i>'" in html   # sklep (karty jak na landingu)
     assert '<span class="uc-ribbon">Best value</span>' in html
     assert "<i>Best value</i>" in js
     for plik, nazwa in ((html, "portal.html"), (js, "site.js")):

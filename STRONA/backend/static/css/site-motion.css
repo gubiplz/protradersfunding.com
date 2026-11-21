@@ -47,12 +47,18 @@
   .rv{filter:none}
 }
 
-/* logo na telefonie: CAŁA nazwa marki zamiast „Pro Traders…" — czcionka
-   dopasowana do szerokości ekranu, a gdy i tak brakuje miejsca, nazwa łamie
-   się na dwie linie („Pro Traders / Funding") zamiast ucinania */
+/* logo na telefonie: CAŁA nazwa marki w JEDNEJ linii (recenzja 21.11: dwie linie
+   wyglądały na błąd). Czcionka dopasowana do szerokości ekranu; na ≤480px ikonka
+   motywu schodzi do menu, żeby zrobić miejsce. */
 @media(max-width:960px){
-  .nav .logo-txt{overflow:visible;text-overflow:clip;white-space:normal;line-height:1.05;
-    font-size:clamp(13px,3.9vw,19px)}
+  .nav .logo-txt{overflow:visible;text-overflow:clip;white-space:nowrap;line-height:1.05;
+    font-size:clamp(14px,4vw,19px)}
+}
+.mobile-menu .mm-theme{display:none}
+@media(max-width:480px){
+  .nav-right .theme-tog{display:none}
+  .mobile-menu .mm-theme{display:block;width:100%;text-align:left;padding:10px 0;font:inherit;
+    color:inherit;background:none;border:0;cursor:pointer}
 }
 @media(max-width:440px){
   .theme-tog{width:34px;height:34px}

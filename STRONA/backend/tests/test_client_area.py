@@ -1428,7 +1428,8 @@ def test_pas_upsellu_dzieli_sie_rowno_na_dwa_rzedy():
     # ten sam bursztyn co w sklepie i na landingu — jeden jezyk dla „Best value"
     assert ".upsell-card.pop" in css and ".uc-ribbon" in css
     assert "#f0b95c" in css and "#fbbf4e,#f2860f" in css
-    assert "uc-ribbon" in html and "p.popular?' pop'" in html
+    assert "uc-ribbon" in html and "p.key===wyroznik?' pop'" in html
+    assert "const wyroznik=(fam.find(p=>p.popular)" in html   # wyroznik = plan z flaga popular
 
     # odstepy: 12px bylo za ciasno, kafelki zlewaly sie w pas
     assert "gap:12px;overflow-x:auto" not in css

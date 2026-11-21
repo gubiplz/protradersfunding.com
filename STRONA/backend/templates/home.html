@@ -38,7 +38,7 @@
     <div class="cfg" data-rv id="cfg">
       <div class="cfg-head">
         <div><h2>Configure your challenge</h2>
-          <span class="cfg-sub">Real plans, live from our catalog</span></div>
+          <span class="cfg-sub">Pick a plan and see its price and target</span></div>
       </div>
       {# Server-rendered default state — the panel is complete in the FIRST
          paint; renderConfigurator() re-renders the same values on boot and
@@ -86,7 +86,7 @@
     <span class="spr-i"><small>S&amp;P 500</small><b data-spread="xyz:SP500" data-post=" pts">—</b></span>
     <span class="spr-i"><small>Oil</small><b data-spread="xyz:CL" data-pre="$">—</b></span>
     <span class="spr-i"><small>Bitcoin</small><b data-spread="BTC" data-pre="$">—</b></span>
-    <span class="spr-n">No markup. ${{ fee_per_lot }}/lot commission per side. Simulated accounts.</span>
+    <span class="spr-n">No markup. {{ fee_pct }}% commission per side (about ${{ fee_per_lot }} per standard FX lot). Simulated accounts.</span>
   </div>
 </section>
 
@@ -103,7 +103,6 @@
         <p>Forex, indices, metals, energies and crypto on one simulated account, with the same rules
            across all of them.</p>
         <div class="assets-side-row">
-          <div class="platform-badge">Built-in <b>Terminal</b></div>
           <a class="btn-ghost btn-sm" href="/trade?list=all">See the full list</a>
         </div>
       </div>
@@ -207,6 +206,7 @@
     <div class="chal-switches" data-rv>
       <div class="chal-tabs" id="chalModels"></div>
       <div class="chal-tabs" id="chalTiers"></div>
+      <p class="chal-tier-note" id="chalTierNote"></p>
     </div>
     <div class="chal-grid" id="chalGrid" data-rv></div>
     <div class="chal-extras" id="pcfg" data-rv>
@@ -215,8 +215,8 @@
         <button class="chal-sw" id="pcfg-wt" type="button" role="switch" aria-checked="false" aria-label="Add weekend trading"></button>
       </div>
       <div class="chal-opt" id="pcfg-ct-row" hidden>
-        <span><b>Copytrading</b><small id="pcfg-ct-price">+$299</small></span>
-        <button class="chal-sw" id="pcfg-ct" type="button" role="switch" aria-checked="false" aria-label="Add copytrading"></button>
+        <span><b>EA Allowed</b><small id="pcfg-ct-price">+$299</small></span>
+        <button class="chal-sw" id="pcfg-ct" type="button" role="switch" aria-checked="false" aria-label="Add EA Allowed"></button>
       </div>
       <div class="chal-opt">
         <span><b>On-demand</b><small id="pcfg-od-price">+$299</small></span>
@@ -303,7 +303,7 @@
       <div class="lpt-top">
         <div class="lpt-syms" data-syms data-slide></div>
         <span class="lpt-lev" data-lev></span>
-        <div class="lpt-q"><small>Mark</small><b data-mark>—</b></div>
+        <div class="lpt-q"><small>Price</small><b data-mark>—</b></div>
         <div class="lpt-q"><small>24h change</small><b data-chg></b></div>
         <a class="lpt-open" data-open href="/trade">Open full terminal →</a>
       </div>

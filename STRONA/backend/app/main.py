@@ -6642,20 +6642,25 @@ class BreachIn(BaseModel):
 #: po calym napisie: panel podpowiada gotowe zdanie, ale pole jest wolnego
 #: tekstu i „copy trading on 2 devices" ma odbic sie tak samo.
 _POWODY_SPRZECZNE_Z_COPYTRADINGIEM = ("copy trading", "copytrading", "account sharing",
-                                      "multiple devices", "more than one device")
+                                      "multiple devices", "more than one device",
+                                      "expert advisor", "automated")
+#: Od 2026-11-21 add-on nazywa sie dla klienta „EA Allowed" i obejmuje EA. Krotkie
+#: slowa po granicy wyrazu — „bot" jako fragment trafilby w „both", „EA" w „each".
+_EA_RX = re.compile(r"\b(eas?|bots?|robots?)\b")
 
 
 def _sprawdz_powod_breachu(acc: Account, powod: str) -> None:
-    """400, gdy powód jest sprzeczny z add-onem Copytrading na tym koncie."""
+    """400, gdy powód jest sprzeczny z add-onem EA Allowed (copytrading) na tym koncie."""
     if getattr(acc, "copytrading", False):
         maly = powod.lower()
-        if any(fragment in maly for fragment in _POWODY_SPRZECZNE_Z_COPYTRADINGIEM):
+        if (any(fragment in maly for fragment in _POWODY_SPRZECZNE_Z_COPYTRADINGIEM)
+                or _EA_RX.search(maly)):
             raise HTTPException(
                 400,
-                "This account holds the Copytrading add-on: copying between the "
-                "trader's own accounts and using more than one device are allowed "
-                "on it. Sharing credentials with someone else still is not — say "
-                "that explicitly if that is what happened.")
+                "This account holds the EA Allowed add-on: EAs and other automated "
+                "trading, copying between the trader's own accounts and using more "
+                "than one device are allowed on it. Sharing credentials with someone "
+                "else still is not — say that explicitly if that is what happened.")
 
 
 def _zamknij_za_breach(session, acc: Account, powod: str) -> None:
@@ -14334,7 +14339,8 @@ def home(request: Request):
     return _page(request, "home.html",
                  sample_qr=_qr_svg(f"{_public_base(request)}/verify"),
                  products=prods, cfg=_cfg_ctx(prods), step_images=kroki,
-                 fee_per_lot=terminal.FEE_PER_LOT_USD)
+                 fee_per_lot=terminal.FEE_PER_LOT_USD,
+                 fee_pct=f"{terminal.FEE_PCT * 100:.3f}".rstrip("0").rstrip("."))
 
 
 @app.get("/faq")

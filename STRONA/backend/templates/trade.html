@@ -8,8 +8,11 @@
 <link rel="icon" href="/static/img/favicon.png" type="image/png">
 <link rel="preload" href="/static/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/css/terminal.css?v={{ asset_v }}">
-<script>/* motyw terminala przed pierwszym malowaniem: ciemny, chyba że ktoś wybrał jasny */
-try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.dataset.theme='light'}catch(e){}</script>
+<script>/* motyw terminala przed pierwszym malowaniem: własny wybór w terminalu wygrywa;
+   bez niego terminal idzie za stroną (pf_theme2, domyślnie jasna) — wejście z jasnej strony
+   nie przeskakuje w ciemny terminal */
+try{var tt=localStorage.getItem('pf_term_theme'),st=localStorage.getItem('pf_theme2');
+if(tt==='light'||(!tt&&st!=='dark'))document.documentElement.dataset.theme='light'}catch(e){document.documentElement.dataset.theme='light'}</script>
 <meta property="og:title" content="Trade live markets · {{ site_name }}">
 <meta property="og:image" content="{{ base_url }}/static/img/og.png">
 <link rel="canonical" href="{{ base_url }}/trade">
@@ -46,6 +49,7 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
   <a href="/faq">FAQ</a>
   <a href="/academy">Academy</a>
   <button type="button" class="t-mm-login" id="tMMLogin">Connect MT5 account</button>
+  <button type="button" class="t-mm-theme" id="tMMTheme">Dark mode</button>
   <a class="t-mm-dash" href="/portal">Log in</a>
   <a class="t-getf" href="/#pricing">Get started</a>
 </nav>
@@ -53,10 +57,11 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
 <div class="t-mkt">
   <button class="t-sym" id="tSym" type="button" aria-haspopup="dialog"><span class="t-sym-ic" id="tSymIc"></span><b id="tSymName">{{ symbol }}</b><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
   <span class="t-lev" id="tMaxLev" title="Leverage on this market">1:10</span>
-  <div class="t-stat"><small>Mark</small><b class="num" id="tMark">—</b></div>
+  <span class="t-closed" id="tClosed" hidden>Market closed</span>
+  <div class="t-stat"><small>Price</small><b class="num" id="tMark">—</b></div>
   <div class="t-stat"><small>24h Change</small><b class="num" id="tChg">—</b></div>
-  <div class="t-stat"><small>Open Interest</small><b class="num" id="tOi">—</b></div>
-  <div class="t-stat"><small>24h Volume</small><b class="num" id="tVol">—</b></div>
+  <div class="t-stat t-cry" id="tOiBox"><small>Open Interest</small><b class="num" id="tOi">—</b></div>
+  <div class="t-stat t-cry" id="tVolBox"><small>24h Volume</small><b class="num" id="tVol">—</b></div>
   <p class="t-src" id="tSrc"></p>
   <div class="t-mkt-r">
     <button class="t-ico" id="tShare" type="button" aria-label="Copy link" title="Copy link to this market"><svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg></button>
@@ -204,20 +209,21 @@ try{if(localStorage.getItem('pf_term_theme')==='light')document.documentElement.
       <div class="t-pct-in"><input id="tPctIn" inputmode="numeric" value="0" aria-label="Percent"><em>%</em></div>
       <div class="t-ticks"><span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></div>
     </div>
-    <label class="ck"><input type="checkbox" id="tReduce"><span>Reduce Only</span></label>
+    <label class="ck" title="The order can only reduce or close open positions, never open a new one"><input type="checkbox" id="tReduce"><span>Close only</span></label>
     <label class="ck"><input type="checkbox" id="tTpsl"><span>Take Profit / Stop Loss</span></label>
     <div class="t-tpsl" id="tTpslBox" hidden>
       <label class="t-fld"><span>TP price</span><div class="t-in"><input id="tTp" inputmode="decimal" autocomplete="off" placeholder="—"><em id="tTpPct">%</em></div></label>
       <label class="t-fld"><span>SL price</span><div class="t-in"><input id="tSl" inputmode="decimal" autocomplete="off" placeholder="—"><em id="tSlPct">%</em></div></label>
     </div>
     <button class="t-go buy" id="tGo" type="button">Buy / Long</button>
+    <p class="t-closed-note" id="tClosedNote" hidden></p>
     <dl class="t-est">
       <div><dt>Estimated Price</dt><dd class="num" id="tEstPx">—</dd></div>
       <div><dt>Order Value</dt><dd class="num" id="tEstVal">—</dd></div>
       <div><dt>Margin Required</dt><dd class="num" id="tEstMargin">—</dd></div>
       <div><dt><abbr title="Set for each market, the same on every account">Leverage</abbr></dt><dd class="num" id="tEstLev">—</dd></div>
-      <div><dt><button class="t-dt" id="tSlipBtn" type="button" title="Change the slippage limit">Max Slippage</button></dt><dd class="num" id="tSlip">1%</dd></div>
-      <div><dt>Fees</dt><dd class="num" id="tFee">0.009%</dd></div>
+      <div><dt><button class="t-dt" id="tSlipBtn" type="button" title="Change the largest price deviation allowed for a market order">Max deviation</button></dt><dd class="num" id="tSlip">1%</dd></div>
+      <div><dt><abbr title="Charged on the trade value when the position opens and again when it closes">Commission</abbr></dt><dd class="num" id="tFee">0.009% / side</dd></div>
       <div><dt><abbr title="Total open lots allowed on this account">Exposure Cap</abbr></dt><dd class="num" id="tCap">—</dd></div>
     </dl>
     <dl class="t-acct" id="tAcct">

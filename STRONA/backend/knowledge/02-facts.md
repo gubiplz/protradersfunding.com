@@ -194,7 +194,7 @@ support. Do not quote a minimum unclaimed amount. Full rules: `/affiliate-terms`
 
 - **MT5 credentials.** The login, password and server open the Built-in Terminal at `/trade`
   (nothing to install). They work in the MetaTrader 5 apps **only** when the server shown
-  with the account is a MetaTrader 5 server (for example accounts with the Copytrading
+  with the account is a MetaTrader 5 server (for example accounts with the EA Allowed
   add-on). An account on server `PTF-sim` works in the Built-in Terminal only — never tell
   that trader to log in with the MT5 desktop, mobile or web app.
 - Provisioning is automated: credentials are created once the payment is confirmed and
@@ -207,21 +207,25 @@ support. Do not quote a minimum unclaimed amount. Full rules: `/affiliate-terms`
   and most indices use Hyperliquid; Forex pairs, silver, platinum and the Japan 225 index
   use a broker spot feed for both chart and fills. No order reaches any of them. Do not
   name the broker.
-- **Commission:** $9 per lot per side in the Built-in Terminal. No swaps there.
+- **Commission:** 0.009% of the trade value per side in the Built-in Terminal (about $9 per
+  standard $100k Forex lot; on gold, indices and crypto it follows the position value). No
+  swaps there. Never quote it as a flat "$9 per lot" on every market.
 - **Hedging accounts:** every order opens its own position; a long and a short on the
   same market can be open side by side, and each closes on its own.
-- **Allowed:** news trading, weekend holding, expert advisors. No news blackouts and no
-  weekend-flat requirement. The only strategy bans are the abuses of the simulation below.
+- **Allowed:** news trading and weekend holding. No news blackouts and no weekend-flat
+  requirement. **EAs, bots and automated order entry only on accounts bought with the EA
+  Allowed add-on** (Terms §6); on any other account they are prohibited conduct. The only strategy bans are the abuses of the simulation below.
 - **Prohibited (Terms §6):** exploiting demo-environment artifacts (off-quotes, latency,
   feed errors); opposite or offsetting positions across own accounts or coordinated with
   others; repeated all-in attempts across Challenges; high-frequency order activity aimed
-  at the simulation; a VPN, proxy or other location-masking service; copying trades
-  between accounts without the Copytrading permission; buying, selling or transferring
+  at the simulation; a VPN, proxy or other location-masking service; using an EA or bot, or
+  copying trades between accounts, without the EA Allowed permission; buying, selling or transferring
   accounts; letting someone else trade outside an approved arrangement; fraud, chargeback
   abuse, identity misrepresentation, KYC falsification; attacking or reverse-engineering
   the platform.
-- **Copytrading add-on:** sold only when offered at checkout. An account bought with it
-  may copy trades between the trader's own accounts and sign in from several devices.
+- **EA Allowed add-on** (formerly called Copytrading): sold only when offered at checkout.
+  An account bought with it may run EAs and other automated trading, copy trades between the
+  trader's own accounts and sign in from several devices.
   It never covers copying to or from someone else's account or handing over credentials.
 - **Reward review:** each request is reviewed by the team, including trading history and
   terminal sign-in records. Rule breaches are decided by the engine; rewards are
