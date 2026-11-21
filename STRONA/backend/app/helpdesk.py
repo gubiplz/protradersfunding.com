@@ -157,8 +157,9 @@ POPRAWKI = {
         f"Minimum trading days: {f.dni_2step} per phase on 2-Step plans, and again {f.dni_2step} on the funded "
         f"account; {f.dni_instant} on an Instant Funding account, which is funded from day one."),
     "is news trading allowed": lambda f: (
-        "Yes. There are no news blackouts and no weekend-flat requirement, and EAs are allowed. The only "
-        "strategy bans concern abuse of the simulation, listed in Section 6 of the Terms. "
+        "Yes. There are no news blackouts and no weekend-flat requirement. EAs and other automated trading "
+        "are allowed only on accounts bought with the EA Allowed add-on. The only other strategy bans concern "
+        "abuse of the simulation, listed in Section 6 of the Terms. "
         f"The rules that apply are the loss limits ({f.dzienna:g}% daily; {f.max_2step:g}% maximum on 2-Step and "
         f"{f.max_instant:g}% on Instant Funding, {f.drawdown}), the profit targets, the minimum trading days and a "
         f"maximum open volume that depends on the account size (from {f.loty_min:g} lots on {_k(f.rozmiar_min)} to "
@@ -485,9 +486,15 @@ _SYNONIMY = {
 }
 
 
-def _tokeny(tekst: str) -> list[str]:
+def _tokeny(tekst: str, dok: bool = False) -> list[str]:
     out = []
-    for w in re.findall(r"[a-z0-9]+", (tekst or "").lower().replace("'", "")):
+    # W BAZIE WIEDZY nazwa add-onu „EA Allowed" to jeden token: inaczej każda wzmianka
+    # o dodatku liczyłaby się jak odpowiedź o EA. Pytania tego nie dostają — „Is EA
+    # allowed?" ma zostać pytaniem o EA.
+    tekst = (tekst or "").lower()
+    if dok:
+        tekst = re.sub(r"\bea allowed\b", "eaaddon", tekst)
+    for w in re.findall(r"[a-z0-9]+", tekst.replace("'", "")):
         if w in _STOP or len(w) < 2 and not w.isdigit():
             continue
         if w in _SYNONIMY:
@@ -509,7 +516,7 @@ class BazaWiedzy:
         self.wpisy = wpisy
         # Słownik do odróżniania pytań od bełkotu: każde słowo z bazy wiedzy.
         self.slownik = {w for q, a in wpisy for w in re.findall(r"[a-z]+", (q + " " + a).lower())}
-        self.dok = [_tokeny(q) * 2 + _tokeny(a) for q, a in wpisy]
+        self.dok = [_tokeny(q, dok=True) * 2 + _tokeny(a, dok=True) for q, a in wpisy]
         n = len(self.dok)
         self.srednia = sum(map(len, self.dok)) / max(n, 1)
         df: dict[str, int] = {}

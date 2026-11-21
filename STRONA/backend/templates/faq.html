@@ -9,23 +9,23 @@
  {"@type":"Question","name":"Are these live trading accounts?","acceptedAnswer":{"@type":"Answer","text":"No. All accounts are demo accounts with virtual funds in a simulated environment. Rewards are performance-based, paid in vUSDT and not guaranteed."}},
  {"@type":"Question","name":"When do I get my account?","acceptedAnswer":{"@type":"Answer","text":"Provisioning is automated — MT5 credentials are created and delivered automatically once your payment is confirmed."}},
  {"@type":"Question","name":"How do payouts work?","acceptedAnswer":{"@type":"Answer","text":"On a funded account you request a payout of your share of simulated profits in vUSDT on Polygon: 90% on evaluation plans, 70% on Instant Funding. By default you can request every 14 calendar days (bi-weekly); the On-demand Payout add-on ($299 on 2-Step, $399 on Instant) removes that wait. After KYC each request is reviewed and paid. On 2-Step accounts the challenge fee is credited as additional vUSDT on the first payout — a credit, not a card refund. Instant Funding has no fee credit."}},
- {"@type":"Question","name":"Is news trading allowed?","acceptedAnswer":{"@type":"Answer","text":"Yes. There are no news blackouts, weekend-flat requirements or strategy bans beyond abuse of the simulation."}},
+ {"@type":"Question","name":"Is news trading allowed?","acceptedAnswer":{"@type":"Answer","text":"Yes. There are no news blackouts and no weekend-flat requirement. EAs are allowed only with the EA Allowed add-on; beyond that, the only strategy bans are abuses of the simulation."}},
  {"@type":"Question","name":"Can someone else trade my account?","acceptedAnswer":{"@type":"Answer","text":"Yes, with our written approval before trading starts. The account stays registered to you, you remain responsible for the trading objectives, and rewards are paid only to the verified account holder. Sharing credentials without an approved arrangement is prohibited."}},
  {"@type":"Question","name":"Where do the prices in the Built-in Terminal come from?","acceptedAnswer":{"@type":"Answer","text":"The terminal uses live reference prices from third-party sources we are not affiliated with. Crypto, gold, oil and most indices use Hyperliquid. Forex pairs, silver, platinum and the Japan 225 index use a broker spot feed for both the chart and simulated fills, because Hyperliquid quotes them too thinly. No order is sent to any of these sources, and reference prices can differ from a real broker quote."}},
  {"@type":"Question","name":"Are my trades sent to Hyperliquid or any broker?","acceptedAnswer":{"@type":"Answer","text":"No. No order leaves our platform. The terminal keeps a simulated ledger and fills your order against the reference order book. Fills, balances and equity are values inside the simulation, so what you earn is a performance reward, not a trading profit."}},
  {"@type":"Question","name":"Do I need MT5 installed, or can I trade in the browser?","acceptedAnswer":{"@type":"Answer","text":"You can trade entirely in the browser at /trade, signing in with the MT5 login, password and server from your dashboard. There is nothing to download. The credentials do not work in the MetaTrader 5 apps unless your account's server is a MetaTrader 5 server."}},
  {"@type":"Question","name":"What can I trade, and when are markets open?","acceptedAnswer":{"@type":"Answer","text":"12 crypto pairs, gold, silver, platinum, WTI, Brent, natural gas, S&P 500, Nasdaq 100, Nikkei 225, and EURUSD, GBPUSD and USDJPY. Everything except crypto is closed Saturday and Sunday server time and reopens Monday 00:00 server time. Crypto trades around the clock on weekdays, and on weekends only with the Weekend Trading add-on."}},
- {"@type":"Question","name":"What commissions, spreads or swaps apply?","acceptedAnswer":{"@type":"Answer","text":"A commission of $9 per lot per side. No markup on prices: the spread is the reference venue's own spread and market orders fill through the order book with a default slippage limit of 1%. There are no swaps or overnight charges in the terminal."}},
+ {"@type":"Question","name":"What commissions, spreads or swaps apply?","acceptedAnswer":{"@type":"Answer","text":"A commission of 0.009% of the trade value per side, about $9 per standard Forex lot. No markup on prices: the spread is the reference venue's own spread and market orders fill through the order book with a default slippage limit of 1%. There are no swaps or overnight charges in the terminal."}},
  {"@type":"Question","name":"What leverage do I get, and are there position size limits?","acceptedAnswer":{"@type":"Answer","text":"Leverage is up to 1:100 and fixed per market: Forex 1:100, metals and indices 1:50, energy 1:20, crypto 1:5 to 1:10. A stop-out closes all positions when equity falls to 50% of used margin. Total open volume is capped at 6 lots per $100,000 of account size, counted across all open positions on the account. Minimum order 0.01 lot."}},
  {"@type":"Question","name":"Are there limits on the number of orders or open positions?","acceptedAnswer":{"@type":"Answer","text":"No cap on the number of pending orders. Accounts are hedging accounts, as in MT5: every order opens its own position, and a long and a short on the same market can be open side by side. The hard limits are the total-volume cap and a rate limit of 20 order actions per 10 seconds."}},
- {"@type":"Question","name":"Can I use MT5 and the Built-in Terminal on the same account at once?","acceptedAnswer":{"@type":"Answer","text":"Only on accounts that run on a MetaTrader 5 server, such as those with the Copytrading add-on: there the terminal is read-only and orders go through MT5. Every other account is traded in the Built-in Terminal only."}},
+ {"@type":"Question","name":"Can I use MT5 and the Built-in Terminal on the same account at once?","acceptedAnswer":{"@type":"Answer","text":"Only on accounts that run on a MetaTrader 5 server, such as those with the EA Allowed add-on: there the terminal is read-only and orders go through MT5. Every other account is traded in the Built-in Terminal only."}},
  {"@type":"Question","name":"What time does the daily loss limit reset?","acceptedAnswer":{"@type":"Answer","text":"At 00:00 server time (UTC+2). We take a new snapshot of your equity including floating P&L, and the day's floor is that equity minus 5% of the starting balance. The floor stays fixed until the next midnight."}},
  {"@type":"Question","name":"Is there a consistency rule?","acceptedAnswer":{"@type":"Answer","text":"No. There is no best-day rule, no lot-size consistency and no per-day profit cap. The only size rule is the cap on total open volume."}},
  {"@type":"Question","name":"What exactly do I need to pass each phase?","acceptedAnswer":{"@type":"Answer","text":"On 2-Step, Phase 1 ends when your balance from closed trades reaches +10% and Phase 2 at +5%, each with at least 5 trading days, while equity stays above the 5% daily floor and the 10% static overall floor. Instant Funding has no evaluation: the account is funded from day one."}},
  {"@type":"Question","name":"What happens after I pass?","acceptedAnswer":{"@type":"Answer","text":"The next phase opens on the same login with balance, floors and the trading-day counter reset to the starting values. After the last phase the account becomes funded, you get a certificate with a verifiable ID and identity verification opens in your dashboard."}},
  {"@type":"Question","name":"Do the same rules apply once I'm funded (profit target, time limit, inactivity)?","acceptedAnswer":{"@type":"Answer","text":"There is no profit target and no time limit on a funded account. The 5% daily loss limit, the static overall drawdown (10% on 2-Step, 8% on Instant Funding) and the volume cap keep applying. The first payout needs 5 trading days on the funded account on 2-Step and 30 on Instant Funding. There is no inactivity rule."}},
  {"@type":"Question","name":"What trading practices are not allowed?","acceptedAnswer":{"@type":"Answer","text":"Anything that makes money from the simulation instead of from the market: exploiting delayed, frozen or wrong prices, latency arbitrage, opposite positions across your own accounts or coordinated with other traders, high-frequency order spam, and repeated all-in attempts across challenges. Report platform bugs instead of using them. Results produced this way are voided and the account is closed."}},
- {"@type":"Question","name":"Are EAs and bots allowed, also in the Built-in Terminal?","acceptedAnswer":{"@type":"Answer","text":"On accounts that run on a MetaTrader 5 server, yes: EAs, indicators and copiers run on your side, bound by the same loss limits, lot cap and market hours as manual trading. The Built-in Terminal has no EA or plugin layer and no public trading API, so there is no supported way to automate it. The prohibited-practices list applies to the result either way."}},
+ {"@type":"Question","name":"Are EAs and bots allowed, also in the Built-in Terminal?","acceptedAnswer":{"@type":"Answer","text":"Only on accounts purchased with the EA Allowed add-on. An EA runs where the account is on a MetaTrader 5 server (the server name shown with your account): there EAs, indicators and copiers run on your side, bound by the same loss limits, lot cap and market hours as manual trading. On other accounts an EA or bot is prohibited conduct under Section 6 of the Terms. The Built-in Terminal has no EA or plugin layer and no public trading API, so there is no supported way to automate it. The prohibited-practices list applies to the result either way."}},
  {"@type":"Question","name":"Can I trade from a shared device or network, and can I use a VPN?","acceptedAnswer":{"@type":"Answer","text":"You can trade from any device as long as only you use your credentials. Every terminal sign-in is logged with IP, approximate location, browser and device, and that log is part of the review before a payout. Do not use a VPN, a proxy or any location-masking service. Such sign-ins can lead to a review and a declined reward."}},
  {"@type":"Question","name":"Is there a minimum payout amount?","acceptedAnswer":{"@type":"Answer","text":"Yes: $500 or 2% of the account size, whichever is higher. That is $500 on a $25,000 account, $2,000 on $100,000 and $20,000 on $1,000,000. Amounts are whole dollars and you can request part of your available share."}},
  {"@type":"Question","name":"What do I need before requesting a payout?","acceptedAnswer":{"@type":"Answer","text":"A funded account with profit from closed trades, approved KYC, the minimum trading days on that funded account (5 on 2-Step, 30 on Instant Funding), an amount at or above the minimum, and no other open request on the account. You request an amount, our team reviews and unlocks it, you confirm the amount and your vUSDT wallet, and the transfer is marked paid with a certificate."}},
@@ -108,7 +108,7 @@
         <summary>Can I use my own MT5 app?</summary>
         <div class="a">Usually not. Your MT5 credentials open the Built-in Terminal in your browser.
         They work in the MetaTrader 5 apps only when the server name shown with your account is a
-        MetaTrader 5 server, for example on accounts with the Copytrading add-on.</div>
+        MetaTrader 5 server, for example on accounts with the EA Allowed add-on.</div>
       </details>
     </div>
 
@@ -149,7 +149,9 @@
       </details>
       <details>
         <summary>What commissions, spreads or swaps apply?</summary>
-        <div class="a">A commission of $9 per lot per side, charged when you open and again when you close.
+        <div class="a">A commission of 0.009% of the trade value per side, charged when you open and again when
+        you close. On a standard Forex lot ($100,000) that is about $9 per side; on gold, indices and crypto
+        the amount follows the value of the position.
         There is no markup on prices: the spread you see in the order book is the reference venue's own
         spread, and market orders fill through that book at the volume-weighted price with a default
         slippage limit of 1%. There are no swaps or overnight charges in the terminal. Pending orders,
@@ -175,7 +177,7 @@
       <details>
         <summary>Can I use MT5 and the Built-in Terminal on the same account at once?</summary>
         <div class="a">Only on accounts that run on a MetaTrader 5 server, for example with the
-        Copytrading add-on: there the terminal shows the account read-only and orders go through MT5,
+        EA Allowed add-on: there the terminal shows the account read-only and orders go through MT5,
         with one balance, one set of rules and one trading history. Every other account is traded in
         the Built-in Terminal only.</div>
       </details>
@@ -206,9 +208,10 @@
       </details>
       <details>
         <summary>Is news trading allowed? Weekend holding? EAs?</summary>
-        <div class="a">Yes to all three. There are no news blackouts, no weekend-flat requirement and no
-        strategy bans beyond abuse of the simulation (see "What trading practices are not allowed?"
-        below). The only rules are the published loss limits, profit targets, minimum trading days and
+        <div class="a">News trading and weekend holding: yes, with no news blackouts and no weekend-flat
+        requirement. EAs: only on accounts purchased with the EA Allowed add-on (see "Are EAs and bots
+        allowed" below). Beyond that there are no strategy bans other than abuse of the simulation (see
+        "What trading practices are not allowed?" below). The only rules are the published loss limits, profit targets, minimum trading days and
         the cap on total open volume.</div>
       </details>
       <details>
@@ -277,14 +280,15 @@
         is bet on one maximum-risk trade. If you find a platform bug, report it to support instead of
         using it: results produced this way are voided and the account is closed under Section 6 of the
         <a href="/terms">Terms</a>, which carries the full list. Copying your own trades in the same
-        direction between your accounts is allowed only on accounts purchased with the Copytrading add-on
+        direction between your accounts is allowed only on accounts purchased with the EA Allowed add-on
         when that add-on was offered at checkout.</div>
       </details>
       <details>
         <summary>Are EAs and bots allowed, also in the Built-in Terminal?</summary>
-        <div class="a">On accounts that run on a MetaTrader 5 server (for example with the Copytrading
-        add-on), yes: EAs, indicators and copiers run on your side and we do not inspect
-        them. An EA is bound by the same limits as manual trading: the loss limits, the cap on open
+        <div class="a">Only on accounts purchased with the EA Allowed add-on. An EA runs where the account
+        is on a MetaTrader 5 server (the server name shown with your account); there EAs, indicators
+        and copiers run on your side and we do not inspect them. On any other account, an EA, a bot or other automated order entry is prohibited conduct
+        under Section 6 of the <a href="/terms">Terms</a>. An EA is bound by the same limits as manual trading: the loss limits, the cap on open
         volume in lots, and market hours (crypto on weekends only with the Weekend Trading add-on). The
         Built-in Terminal has no EA or plugin layer and no public trading API, so there is no supported
         way to automate it; scripts hitting the order endpoints run into the rate limit. Whatever drives
@@ -296,9 +300,9 @@
         terminal sign-in is logged with IP address, approximate location, browser and device. That log
         is part of the review before a payout, so sign-ins by several people or from several places will
         be asked about. Do not use a VPN, a proxy or any service that masks your location. Sign-ins
-        through them can lead to a review and to a reward being declined. When Copytrading is offered at
-        checkout and purchased with the account, that add-on records a written permission to use several
-        devices and to copy between your own accounts; purchased accounts keep that permission.</div>
+        through them can lead to a review and to a reward being declined. When the EA Allowed add-on is offered
+        at checkout and purchased with the account, it records a written permission to use several devices
+        and to copy between your own accounts; purchased accounts keep that permission.</div>
       </details>
     </div>
 
@@ -503,9 +507,9 @@
         <summary>Can I share my portal or MT5 login?</summary>
         <div class="a">No. Credentials are personal. Sign-ins are checked against the registered owner
         before a payout is approved. The one exception is an account management arrangement approved in writing before
-        trading starts (see "Can someone else trade my account?" above). Copytrading is available only
-        when offered at checkout; accounts purchased with it keep permission to use several devices and
-        copy between your own accounts, but still not hand credentials to someone else.</div>
+        trading starts (see "Can someone else trade my account?" above). The EA Allowed add-on is available
+        only when offered at checkout; accounts purchased with it keep permission to use several devices
+        and copy between your own accounts, but still not hand credentials to someone else.</div>
       </details>
       <details>
         <summary>Can I transfer or sell my account?</summary>

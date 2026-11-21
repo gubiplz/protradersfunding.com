@@ -326,7 +326,7 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
                  + (" + Weekend Trading" if weekend_trading else "")
                  + (" + Split Boost" if split_boost else "")
                  + (" + On-demand Payout" if ondemand_payout else "")
-                 + (" + Copytrading" if copytrading else ""))
+                 + (" + EA Allowed" if copytrading else ""))
         url = open_stripe_session(session, order, nazwa)
         return {"checkout_url": url, "order_id": order.id, "amount": price,
                 "discount_pct": discount_pct, "credits_used": kredyt}

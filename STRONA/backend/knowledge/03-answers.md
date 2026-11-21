@@ -43,8 +43,8 @@ Answers are grouped the way customers actually think, not the way the product is
 > I'd rather give you our numbers than talk about theirs: 90% split on evaluation plans,
 > the 2-Step fee credited with your first payout (as vUSDT, not a card refund), static
 > drawdown only — never trailing, so your floor never chases your profits — and no time
-> limit on the evaluation. News, weekends and EAs are fine; the only strategy bans are
-> abuses of the simulation, listed in Section 6 of the Terms. Compare that line by line
+> limit on the evaluation. News trading and weekends are fine, EAs come with the EA
+> Allowed add-on, and the only other strategy bans are abuses of the simulation, listed in Section 6 of the Terms. Compare that line by line
 > and decide.
 
 **"Do you have a discount?"**
@@ -243,7 +243,7 @@ Answers are grouped the way customers actually think, not the way the product is
 **"Can I use my own MT5 app?"**
 > Usually not. Your MT5 credentials open the Built-in Terminal at /trade, in your browser,
 > with nothing to install. They work in the MetaTrader 5 apps only when the server shown
-> with your account is a MetaTrader 5 server, for example on accounts with the Copytrading
+> with your account is a MetaTrader 5 server, for example on accounts with the EA Allowed
 > add-on.
 
 **"What can I trade?"**

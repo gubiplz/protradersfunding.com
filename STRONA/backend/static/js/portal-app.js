@@ -2294,6 +2294,11 @@ const VIEWS={
   if(!tiers.some(([id])=>id===window._shopTier))window._shopTier=tiers[0]?tiers[0][0]:'starter';
   const [,tierName,inTier]=TIERS.find(([id])=>id===window._shopTier)||TIERS[0];
   const shown=typeItems.filter(x=>inTier(x.account_size));
+  /* Starter/Pro/Elite to tylko przedzialy rozmiaru — notka mowi to wprost (jak na landingu). */
+  const kLbl=v=>v>=1e6?'$'+(v/1e6)+'M':'$'+(v/1e3)+'K';
+  const shopTierNote=()=>TIERS.map(([,nm,f])=>{const s=typeItems.filter(x=>f(x.account_size)).map(x=>x.account_size).sort((a,b)=>a-b);
+      return s.length?`${nm} ${kLbl(s[0])}${s.length>1?'–'+kLbl(s[s.length-1]):''}`:null}).filter(Boolean).join(' · ')
+    +'. Same rules on every size: only the price and the max open volume grow with the account.';
   const model=g.id==='instant'?'Instant':'2-Step';
   const anyCt=shown.some(p=>p.copytrading_offered);
   if(!anyCt)window._shopCt=false;
@@ -2346,11 +2351,12 @@ const VIEWS={
               ${p.popular?'<i>Best value</i>':''}
               ${p.promo_upgrade_size&&pfPromo()?`<i>You trade $${fmt0(p.promo_upgrade_size)}</i>`:''}
               <strong>$${p.account_size.toLocaleString('en-US')}</strong>
-              <span>${model} ${tierName}</span>
+              <span>${model} ${tierName} · min. ${p.min_trading_days} days</span>
             </div>
             <ul class="chal-specs">
               <li><small>Target</small><b>${p.steps===0?'None':p.profit_target_p1+'%'}</b></li>
-              <li><small>Drawdown</small><b>${p.max_overall_loss_pct}%</b></li>
+              <li><small>Daily</small><b>${p.max_daily_loss_pct}%</b></li>
+              <li><small>Max DD</small><b>${p.max_overall_loss_pct}%</b></li>
               <li><small>Split</small><b>${splitPct(p)}%</b></li>
             </ul>
           </div>
@@ -2370,14 +2376,15 @@ const VIEWS={
     <div class="chal-switches store-chal">
       <div class="chal-tabs" id="shopModels">${models.map(x=>`<button type="button" class="${x.id===g.id?'on':''}" data-m="${x.id}">${x.name}</button>`).join('')}</div>
       <div class="chal-tabs" id="shopTiers">${tiers.map(([id,nm])=>`<button type="button" class="${id===window._shopTier?'on':''}" data-t="${id}">${nm}</button>`).join('')}</div>
+      <p class="chal-tier-note">${esc(shopTierNote())}</p>
     </div>
     ${ME.credits_usd>0?`<div class="note" style="margin:0 auto 14px;max-width:920px"><b>Store credit: $${fmt(ME.credits_usd)}</b>, applied at checkout.</div>`:''}
     <div class="chal-grid" id="shopGrid">${cards||'<div class="empty"><h3>No plans in this tier</h3></div>'}</div>
     <div class="chal-extras" id="shopExtras">
       <div class="chal-opt"><span><b>Weekend</b><small>+$199</small></span>
         <button class="chal-sw" id="shop-wt" type="button" role="switch" aria-checked="${!!window._shopWt}" aria-label="Add weekend trading"></button></div>
-      ${anyCt?`<div class="chal-opt"><span><b>Copytrading</b><small>+$${ctCena}</small></span>
-        <button class="chal-sw" id="shop-ct" type="button" role="switch" aria-checked="${!!window._shopCt}" aria-label="Add copytrading"></button></div>`:''}
+      ${anyCt?`<div class="chal-opt"><span><b>EA Allowed</b><small>+$${ctCena}</small></span>
+        <button class="chal-sw" id="shop-ct" type="button" role="switch" aria-checked="${!!window._shopCt}" aria-label="Add EA Allowed"></button></div>`:''}
       <div class="chal-opt"><span><b>On-demand</b><small>+$${odCena}</small></span>
         <button class="chal-sw" id="shop-od" type="button" role="switch" aria-checked="${!!window._shopOd}" aria-label="Add on-demand payout"></button></div>
       ${showSb?`<div class="chal-opt"><span><b>Split Boost</b><small>+$${sbCena}</small></span>
@@ -4085,7 +4092,7 @@ async function quoteNow(){
   if(q.weekend_fee_usd>0)h+=row('Weekend Trading','+$'+fmt(q.weekend_fee_usd));
   if(q.split_boost_fee_usd>0)h+=row('Profit Split Boost','+$'+fmt(q.split_boost_fee_usd));
   if(q.ondemand_payout_fee_usd>0)h+=row('On-demand Payout','+$'+fmt(q.ondemand_payout_fee_usd));
-  if(q.copytrading_fee_usd>0)h+=row('Copytrading','+$'+fmt(q.copytrading_fee_usd));
+  if(q.copytrading_fee_usd>0)h+=row('EA Allowed','+$'+fmt(q.copytrading_fee_usd));
   if(q.credits_used>0)h+=row('Store credit','−$'+fmt(q.credits_used),'good');
   h+=`<div class="q-row total"><span>Total due</span><b class="mono" id="buy-total">$${fmt(q.total_due_usd)}</b></div>`;
   box.innerHTML=h;

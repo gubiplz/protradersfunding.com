@@ -151,7 +151,7 @@ h1,h2,h3,.display{font-family:var(--display);letter-spacing:-.02em}
 .cfg-tab.on{background:var(--grad);color:#fff}
 .cfg-sizes{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .cfg-size{border:1px solid var(--line2);border-radius:10px;padding:10px 6px;text-align:center;
-  font-family:var(--mono);font-weight:700;font-size:14px;color:var(--txt);transition:.15s;background:#fff}
+  font-family:inherit;font-variant-numeric:tabular-nums;font-weight:700;font-size:14.5px;color:var(--txt);transition:.15s;background:#fff}
 .cfg-size:hover{border-color:var(--acc)}
 .cfg-size.on{border-color:transparent;background:linear-gradient(#fff,#fff) padding-box,var(--grad) border-box;
   color:var(--acc);box-shadow:0 6px 16px -8px rgba(99,102,241,.4)}

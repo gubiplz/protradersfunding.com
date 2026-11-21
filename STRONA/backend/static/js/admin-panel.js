@@ -934,13 +934,13 @@ const VIEWS={
     </div>
 
     <div class="sec-card card-md">
-      <h3>Copytrading accounts</h3>
-      <p class="muted" style="font-size:12.5px;margin-bottom:14px">The Copytrading add-on ($299) is the only product that gives the buyer a <b>real</b> MT5 account. Everything else runs on local credentials. Each real account costs us a monthly fee at the provider, so this stays off until the channel is proven.</p>
+      <h3>EA Allowed accounts</h3>
+      <p class="muted" style="font-size:12.5px;margin-bottom:14px">The EA Allowed add-on ($299) is the only product that gives the buyer a <b>real</b> MT5 account. Everything else runs on local credentials. Each real account costs us a monthly fee at the provider, so this stays off until the channel is proven.</p>
       <label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer">
         <input type="checkbox" id="copy-real" ${poolData.copytrading_real?'checked':''} onchange="setCopytradingReal(this.checked)">
-        Provision real MT5 accounts for Copytrading purchases
+        Provision real MT5 accounts for EA Allowed purchases
       </label>
-      <p class="muted" style="font-size:12px;margin-top:6px">Off: those accounts get local credentials like everyone else, and the add-on stays what it is — a written permission to copy between the trader's own accounts. Turning this off never takes a real account away from someone who already has one.</p>
+      <p class="muted" style="font-size:12px;margin-top:6px">Off: those accounts get local credentials like everyone else, and the add-on stays what it is — a written permission to run EAs and copy between the trader's own accounts — but an EA needs a real MT5 account to run on. Turning this off never takes a real account away from someone who already has one.</p>
       ${poolData.metaapi_ready?'':`<div class="warn-box" style="margin:12px 0 0"><div><b>No MetaApi token on this deployment.</b> Accounts still get their MT5 credentials from the pool, but nothing connects them to MetaApi — the risk engine reads nothing from them and the dashboard shows a frozen balance. Set <span class="mono">METAAPI_TOKEN</span> in the hosting environment <b>and redeploy</b> (environment variables only apply to a new deployment).</div></div>`}
       ${poolData.copytrading_bez_metaapi>0?`<div class="warn-box" style="margin:12px 0 0"><div><b>${poolData.copytrading_bez_metaapi}</b> live ${poolData.copytrading_bez_metaapi===1?'account has':'accounts have'} the add-on and working MT5 credentials but ${poolData.copytrading_bez_metaapi===1?'is':'are'} not connected to MetaApi yet. The risk engine retries every minute; if this number does not fall, the token or the MetaApi balance is the reason.</div>
         <button class="btn-o sm" style="margin-top:10px" onclick="connectMetaapi(this)">Connect them now</button></div>`:''}
@@ -1028,7 +1028,7 @@ const VIEWS={
         <b>Instant Funding</b>. While it's off the switch is gone <b>and the server refuses
         the add-on</b>. Accounts already sold keep the boosted split.</p></div>
 
-    <div class="sec-card" style="max-width:560px"><h3>Copytrading add-on</h3>
+    <div class="sec-card" style="max-width:560px"><h3>EA Allowed add-on</h3>
       <div class="chip-row" style="margin-bottom:12px">
         <span class="status ${cp.enabled?'funded':'pending'}"><span class="dot"></span>${cp.enabled?'in the cart':'hidden'}</span>
       </div>
@@ -1036,8 +1036,9 @@ const VIEWS={
         <button class="btn-p" onclick="setCopytradingOffer(${cp.enabled?'false':'true'})">${cp.enabled?'Hide from the cart':'Show in the cart'}</button>
       </div>
       <p class="muted" style="font-size:12px;margin-top:10px;line-height:1.55">
-        <b>$${fmt(cp.price_usd||299)}</b> — permission to copy trades between the trader's own
-        accounts and to log in from more than one device. While it's on, the switch appears under
+        <b>$${fmt(cp.price_usd||299)}</b> — permission to run EAs and other automated trading, to copy trades between the trader's own
+        accounts and to log in from more than one device. An EA only runs on a real MT5 account, so
+        switch on real MT5 for these purchases before selling it. While it's on, the switch appears under
         Challenges; while it's off it is gone <b>and the server refuses the add-on</b>,
         so it cannot be bought by a crafted request either. Accounts already sold keep the
         permission — turning this off changes only what is on sale.
@@ -2093,7 +2094,7 @@ function renderOrders(){
       <tbody>${cap.rows.map(o=>`<tr>
         <td class="num rt-hide" data-l="#">${o.id}</td><td class="muted" data-l="Date" data-sort="${esc(o.created_at||'')}">${dstr(o.created_at)}</td>
         <td class="rt-main" data-l="Trader">${esc(o.trader_email||'—')}${freeChip(o)}</td>
-        <td data-l="Product">${esc(o.product_key)}${o.bogo?` <span class="up" style="font-size:var(--fs-cap)" title="Buy 1 Get 1 Free — paying this order also creates a free second account of the same size">+1 free</span>`:''}${o.open_funded?` <span class="up" style="font-size:var(--fs-cap)" title="Opens straight as a funded account when paid — skips the evaluation">funded</span>`:''}${o.weekend_trading?` <span class="up" style="font-size:var(--fs-cap)" title="Weekend Trading add-on — 2 extra trading days/week">wknd</span>`:''}${o.copytrading?` <span class="up" style="font-size:var(--fs-cap)" title="Copytrading add-on — copying between the customer's own accounts and more than one device; real MT5 account">copy</span>`:''}${o.brand==='fx'?` <span class="up" style="font-size:var(--fs-cap)" title="The payment page shows Forex Passing branding — no PTF anywhere on it">FX</span>`:''}</td>
+        <td data-l="Product">${esc(o.product_key)}${o.bogo?` <span class="up" style="font-size:var(--fs-cap)" title="Buy 1 Get 1 Free — paying this order also creates a free second account of the same size">+1 free</span>`:''}${o.open_funded?` <span class="up" style="font-size:var(--fs-cap)" title="Opens straight as a funded account when paid — skips the evaluation">funded</span>`:''}${o.weekend_trading?` <span class="up" style="font-size:var(--fs-cap)" title="Weekend Trading add-on — 2 extra trading days/week">wknd</span>`:''}${o.copytrading?` <span class="up" style="font-size:var(--fs-cap)" title="Copytrading add-on — EAs, copying between the customer's own accounts and more than one device; real MT5 account">copy</span>`:''}${o.brand==='fx'?` <span class="up" style="font-size:var(--fs-cap)" title="The payment page shows Forex Passing branding — no PTF anywhere on it">FX</span>`:''}</td>
         <td class="num" data-l="Amount">$${fmt(o.amount_usd)}${o.coupon?` <span class="up" style="font-size:var(--fs-cap)">(${esc(o.coupon)})</span>`:''}</td>
         <td class="muted rt-hide" data-l="Provider">${esc(o.provider)}</td>
         <td data-l="Status"><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span>
@@ -4710,13 +4711,13 @@ function askReason(opts){
    wprost, własnymi słowami. */
 async function breachAccount(id,login,copytrading){
   const powody=['Daily loss limit exceeded','Maximum drawdown exceeded',
-    'Prohibited trading strategy','Copy trading between accounts',
+    'Prohibited trading strategy','Using an EA without the EA Allowed add-on','Copy trading between accounts',
     'News trading violation','Account sharing','Closed by the risk desk'];
   const breachReason=await askReason({
     title:login?`Breach account ${esc(login)}`:'Breach this account',danger:true,confirmLabel:'Breach account',
     hint:'The account is closed as <b>failed</b> and the reason below is shown to the trader in the portal and by e-mail.'
-      +(copytrading?'<br><b>This account holds the Copytrading add-on</b> — copying between the trader\'s own accounts and using more than one device are allowed on it.':''),
-    presets:copytrading?powody.filter(p=>!/copy trading|account sharing/i.test(p)):powody});
+      +(copytrading?'<br><b>This account holds the EA Allowed add-on</b> — EAs, copying between the trader\'s own accounts and using more than one device are allowed on it.':''),
+    presets:copytrading?powody.filter(p=>!/copy trading|account sharing|\bEA\b/i.test(p)):powody});
   if(breachReason===null)return;   // Cancel
   try{const r=await api(`/api/admin/accounts/${id}/breach`,{method:'POST',
       body:JSON.stringify({reason:breachReason})});
@@ -5410,12 +5411,12 @@ async function connectMetaapi(btn){
 }
 async function setCopytradingReal(on){
   try{await api('/api/admin/pool/copytrading-real',{method:'POST',body:JSON.stringify({enabled:!!on})});
-    toast(on?'Copytrading purchases will get real MT5 accounts.':'Copytrading purchases will get local credentials.','ok');
+    toast(on?'EA Allowed purchases will get real MT5 accounts.':'EA Allowed purchases will get local credentials.','ok');
   }catch(e){toast(e.message||'Could not save','err'); go(VIEW)}
 }
 async function setCopytradingOffer(on){
   try{await api('/api/admin/copytrading-offer',{method:'POST',body:JSON.stringify({enabled:!!on})});
-    toast(on?'Copytrading is now offered in the cart.':'Copytrading is hidden from the cart.','ok');
+    toast(on?'EA Allowed is now offered in the cart.':'EA Allowed is hidden from the cart.','ok');
   }catch(e){toast(e.message||'Could not save','err')}
   go(VIEW);
 }
@@ -6632,8 +6633,8 @@ async function openManualOrder(traderId,lead){
           <span class="muted">— the add-on still lands on the account, but the $199 is not charged; the page shows it as FREE</span></span></label>
       <label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer">
         <input type="checkbox" id="mo-copy" onchange="moPrice()">
-        <span><b>Copytrading</b> <b>+$299</b>
-          <span class="muted">— copying between the customer's own accounts and more than one device; the account is provisioned on a real MT5 account when that is switched on in MT5 Pool</span></span></label>
+        <span><b>EA Allowed</b> <b>+$299</b>
+          <span class="muted">— EAs, copying between the customer's own accounts and more than one device; the account is provisioned on a real MT5 account when that is switched on in MT5 Pool</span></span></label>
       <label style="display:flex;align-items:flex-start;gap:9px;font-size:13px;cursor:pointer">
         <input type="checkbox" id="mo-funded">
         <span><b>Open as funded</b>

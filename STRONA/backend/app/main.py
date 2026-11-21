@@ -6642,20 +6642,26 @@ class BreachIn(BaseModel):
 #: po calym napisie: panel podpowiada gotowe zdanie, ale pole jest wolnego
 #: tekstu i „copy trading on 2 devices" ma odbic sie tak samo.
 _POWODY_SPRZECZNE_Z_COPYTRADINGIEM = ("copy trading", "copytrading", "account sharing",
-                                      "multiple devices", "more than one device")
+                                      "multiple devices", "more than one device",
+                                      "expert advisor", "automated")
+#: Od 2026-11-21 add-on nazywa sie dla klienta „EA Allowed" i obejmuje EA. Krotkie
+#: slowa po granicy wyrazu — „bot" jako fragment trafilby w „both", „EA" w „each".
+_EA_RX = re.compile(r"\b(eas?|bots?|robots?)\b")
 
 
 def _sprawdz_powod_breachu(acc: Account, powod: str) -> None:
-    """400, gdy powód jest sprzeczny z add-onem Copytrading na tym koncie."""
+    """400, gdy powód jest sprzeczny z add-onem EA Allowed (copytrading) na tym koncie."""
     if getattr(acc, "copytrading", False):
-        maly = powod.lower()
-        if any(fragment in maly for fragment in _POWODY_SPRZECZNE_Z_COPYTRADINGIEM):
+        # Sama nazwa dodatku („…despite the EA Allowed add-on") nie jest powodem o EA.
+        maly = re.sub(r"\bea allowed\b", " ", powod.lower())
+        if (any(fragment in maly for fragment in _POWODY_SPRZECZNE_Z_COPYTRADINGIEM)
+                or _EA_RX.search(maly)):
             raise HTTPException(
                 400,
-                "This account holds the Copytrading add-on: copying between the "
-                "trader's own accounts and using more than one device are allowed "
-                "on it. Sharing credentials with someone else still is not — say "
-                "that explicitly if that is what happened.")
+                "This account holds the EA Allowed add-on: EAs and other automated "
+                "trading, copying between the trader's own accounts and using more "
+                "than one device are allowed on it. Sharing credentials with someone "
+                "else still is not — say that explicitly if that is what happened.")
 
 
 def _zamknij_za_breach(session, acc: Account, powod: str) -> None:

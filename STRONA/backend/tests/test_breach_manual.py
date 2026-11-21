@@ -212,7 +212,7 @@ def test_nie_wolno_zbreachowac_za_to_co_mu_sprzedalismy(broker):
                     json={"reason": "Copy trading between accounts"})
 
     assert r.status_code == 400
-    assert "Copytrading add-on" in r.json()["detail"]
+    assert "EA Allowed add-on" in r.json()["detail"]
     s = SessionLocal()
     assert s.get(Account, aid).status == "active", "konto ma zostać nietknięte"
     s.close()
@@ -246,4 +246,38 @@ def test_konto_bez_addonu_dalej_mozna_zbreachowac_za_kopiowanie(broker):
     r = client.post(f"/api/admin/accounts/{aid}/breach", headers=ADMIN,
                     json={"reason": "Copy trading between accounts"})
 
+    assert r.status_code == 200
+
+
+# --------------------------------------------------------------------------- #
+#  EA Allowed (od 2026-11-21 add-on obejmuje też EA)
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("powod", ["Using an EA without the EA Allowed add-on",
+                                   "Expert advisor detected", "trading bot", "automated order entry"])
+def test_ea_nie_jest_powodem_na_koncie_z_addonem(broker, powod):
+    aid = _konto(f"80001{len(powod) % 10}{len(powod) // 10}", copytrading=True,
+                 metaapi_id=f"acc-ea-{len(powod)}")
+    r = client.post(f"/api/admin/accounts/{aid}/breach", headers=ADMIN, json={"reason": powod})
+    assert r.status_code == 400 and "EA Allowed add-on" in r.json()["detail"]
+
+
+def test_ea_bez_addonu_mozna_zbreachowac(broker):
+    aid = _konto("800021", metaapi_id="acc-21")
+    r = client.post(f"/api/admin/accounts/{aid}/breach", headers=ADMIN,
+                    json={"reason": "Using an EA without the EA Allowed add-on"})
+    assert r.status_code == 200
+
+
+def test_krotkie_slowa_po_granicy_wyrazu(broker):
+    """„both"/„each" nie mogą trafić jako „bot"/„EA" — to zwykłe powody."""
+    aid = _konto("800022", copytrading=True, metaapi_id="acc-22")
+    r = client.post(f"/api/admin/accounts/{aid}/breach", headers=ADMIN,
+                    json={"reason": "Daily loss limit exceeded on both days, each time at the open"})
+    assert r.status_code == 200
+
+
+def test_sama_nazwa_dodatku_w_powodzie_nie_blokuje(broker):
+    aid = _konto("800023", copytrading=True, metaapi_id="acc-23")
+    r = client.post(f"/api/admin/accounts/{aid}/breach", headers=ADMIN,
+                    json={"reason": "Daily loss limit exceeded (account holds the EA Allowed add-on)"})
     assert r.status_code == 200

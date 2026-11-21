@@ -611,3 +611,22 @@ def test_admin_log_transakcji_pokazuje_zrodlo():
         assert po(source="managed") == {"USDJPY"}
         assert po(status="closed") == {"GBPUSD"}
         assert c.get("/api/admin/terminal/trades").status_code in (401, 403)
+
+
+def test_weekend_zamkniety_rynek_tylko_close_only_jako_limit(rynek, monkeypatch):
+    """Reguła, na której stoi przycisk w terminalu (terminal.js closedOk): na rynku
+    zamkniętym w weekend serwer bierze tylko zlecenie „Close only" i NIE jako rynkowe
+    (to wypełniłoby się po żywej księdze Hyperliquid); każde otwierające odbija."""
+    aid, h = _konto()
+    with TestClient(app) as c:
+        assert _zlec(c, h, aid, symbol="XAUUSD", qty=1).status_code == 200      # long w tygodniu
+        monkeypatch.setattr(tradebot, "is_weekend", lambda now=None: True)
+        r = _zlec(c, h, aid, symbol="XAUUSD", side="sell", qty=1, reduce_only=True)
+        assert r.status_code == 409 and "Market closed for the weekend" in r.json()["detail"]
+        r = _zlec(c, h, aid, symbol="XAUUSD", side="buy", qty=1)
+        assert r.status_code == 409
+        r = _zlec(c, h, aid, symbol="XAUUSD", side="buy", qty=1, kind="limit", price=1_900)
+        assert r.status_code == 409 and "Market closed" in r.json()["detail"]
+        r = _zlec(c, h, aid, symbol="XAUUSD", side="sell", qty=1, kind="limit", price=2_100,
+                  reduce_only=True)
+        assert r.status_code == 200, r.text

@@ -132,6 +132,16 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .mi.sm.pair{width:24px}
 .mi.sm.pair img{width:15px;height:15px}
 .t-lev{font:600 12px var(--mono);color:var(--acc);background:var(--acc-soft);padding:4px 7px;border-radius:7px;margin-left:-14px}
+/* Weekend: market closed (terminal.js renderClosed). */
+.t-closed{font:600 12px Inter,system-ui,sans-serif;color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent);padding:4px 8px;border-radius:7px;margin-left:-14px;white-space:nowrap;cursor:help}
+.t-closed[hidden],.t-closed-note[hidden]{display:none}
+.t-closed-note{margin:-4px 0 8px;font-size:12px;line-height:1.45;color:var(--warn)}
+.t-go:disabled{opacity:.45;cursor:not-allowed}
+.term.t-frozen .t-book,.t-frozen .t-book{position:relative}
+.t-frozen .t-book::after{content:'Weekend quotes. Not tradable here: this market is closed until Monday.';position:absolute;inset:auto 10px 10px;padding:10px 12px;border-radius:9px;font-size:12px;line-height:1.45;background:var(--panel2);border:1px solid var(--line2);color:var(--muted);box-shadow:var(--shadow);pointer-events:none}
+.t-frozen .t-asks,.t-frozen .t-bids{opacity:.45}
+.t-frozen .t-oc{display:none}   /* one-click Buy/Sell on the chart: live weekend quote, server refuses it */
+.t-frozen-lock [data-quick]{opacity:.45;pointer-events:none}
 .t-stat{display:flex;flex-direction:column;gap:3px;white-space:nowrap}
 .t-stat small{font-size:11.5px;color:var(--dim)}
 .t-stat b{font-size:14.5px;font-weight:500}
@@ -815,7 +825,12 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 @media (min-width:981px){
   .t-mmenu{left:auto;right:16px;width:300px;top:calc(var(--head-h) + 6px);border:1px solid var(--line2);border-radius:12px;padding:6px 16px 8px}
   .t-mmenu .t-mm-login,.t-mmenu .t-mm-dash,.t-mmenu .t-getf{display:none}
-  .t-mmenu>a:nth-last-child(4){border-bottom:0}
+  .t-mmenu>a:nth-last-child(5){border-bottom:0}   /* login, theme, dash, Get started follow the last link */
+}
+.t-mmenu .t-mm-theme{display:none}
+@media (max-width:480px){
+  #tTheme{display:none}
+  .t-mmenu .t-mm-theme{display:flex}
 }
 @media (max-width:1280px){
   .t-grid{grid-template-columns:minmax(0,1fr) 270px 300px}
@@ -834,9 +849,10 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   .t-head-r{gap:8px}
   .t-hsearch{display:none}                 /* search opens from the market button (BTCUSD ▾) */
   .t-guest .t-hlogin,.t-user .t-hlogin{display:none}   /* in the menu, as on the site */
-  /* wordmark as on the site: full name, font fits screen width, if needed "Pro Traders / Funding" */
+  /* wordmark as on the site: full name on ONE line, font fits screen width (review 21.11:
+     two lines looked broken); on ≤480px the theme toggle moves into the menu */
   .t-logo{flex:1 1 auto;min-width:0}
-  .t-logo-txt{white-space:normal;line-height:1.05;font-size:clamp(13px,3.9vw,19px)}
+  .t-logo-txt{white-space:nowrap;line-height:1.05;font-size:clamp(14px,4vw,19px)}
   .t-mkt{gap:18px;height:58px;padding:0 12px}
   .t-sym{font-size:17px}
   .t-stat b{font-size:13.5px}

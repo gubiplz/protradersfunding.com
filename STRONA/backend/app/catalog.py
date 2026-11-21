@@ -81,16 +81,16 @@ COPYTRADING_ADDON_USD = 299.0
 # Settings, trzymany w bazie — na hostingu bezserwerowym zmiana env to
 # redeploy, a to ma dzialac od klikniecia.
 #
-# Brak wiersza = WIDOCZNY. Domyslka jest po stronie sprzedazy, bo dodatek sam
-# w sobie jest tylko zgoda regulaminowa i nic nas nie kosztuje; to REALNE konta
-# MT5 kosztuja i te maja osobny przelacznik (zakladka Built-in Terminal), domyslnie
-# wylaczony.
+# Brak wiersza = UKRYTY (od 2026-11-21, decyzja ownera). Add-on nazywa sie dla
+# klienta „EA Allowed" i obiecuje EA, a EA chodzi tylko na REALNYM rachunku MT5
+# (osobny przelacznik w zakladce Built-in Terminal, domyslnie wylaczony). Wiec
+# w koszyku jest tylko wtedy, gdy admin swiadomie go wlaczyl.
 COPYTRADING_OFFERED_KEY = "copytrading_offered"
 
 
 def copytrading_offered(session) -> bool:
     row = session.get(AppSetting, COPYTRADING_OFFERED_KEY)
-    return row is None or row.value == "1"
+    return row is not None and row.value == "1"
 
 # Rozmiar oznaczany w sklepie jako „Best value". Etykieta marketingowa,
 # nie zmierzona statystyka — stala, nie zapytanie o sprzedaz. Gdyby miala byc

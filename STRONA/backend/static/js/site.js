@@ -476,6 +476,14 @@
   const flipped = new Set();
   const usd = v => '$' + v.toLocaleString('en-US', { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 });
 
+  /* Starter, Pro and Elite are size bands, nothing more: the note says so, with the bands
+     as they are in the catalog, so nobody hunts for a difference in the rules. */
+  const kLabel = v => v >= 1e6 ? '$' + (v / 1e6) + 'M' : '$' + (v / 1e3) + 'K';
+  function tierNote(items) {
+    const bands = TIERS.map(([, nm, f]) => { const s = items.filter(x => f(x.account_size)).map(x => x.account_size).sort((a, b) => a - b);
+      return s.length ? `${nm} ${kLabel(s[0])}${s.length > 1 ? '–' + kLabel(s[s.length - 1]) : ''}` : null; }).filter(Boolean);
+    return `${bands.join(' · ')}. Same rules on every size: only the price and the max open volume grow with the account.`;
+  }
   function cardRules(p) {
     const instant = p.steps === 0;
     return [
@@ -524,6 +532,8 @@
     $$('#chalModels button').forEach(b => b.addEventListener('click', () => { cfgType = b.dataset.m; renderPricing(); }));
     $$('#chalTiers button').forEach(b => b.addEventListener('click', () => { cfgTier = b.dataset.t; renderPricing(); }));
     slidePill($('#chalModels')); slidePill($('#chalTiers'));
+    const tn = $('#chalTierNote');
+    if (tn) tn.textContent = tierNote(items);
 
     const anyOffersCt = shown.some(oferujeCt);
     const ctRow = $('#pcfg-ct-row'), ct = $('#pcfg-ct');
@@ -579,11 +589,12 @@
               ${p.popular ? '<i>Best value</i>' : ''}
               ${upSize ? `<i>You trade ${sizeLabel(upSize)}</i>` : ''}
               <strong>$${p.account_size.toLocaleString('en-US')}</strong>
-              <span>${model} ${tierName}</span>
+              <span>${model} ${tierName} · min. ${p.min_trading_days} days</span>
             </div>
             <ul class="chal-specs">
               <li><small>Target</small><b>${p.steps === 0 ? 'None' : p.profit_target_p1 + '%'}</b></li>
-              <li><small>Drawdown</small><b>${p.max_overall_loss_pct}%</b></li>
+              <li><small>Daily</small><b>${p.max_daily_loss_pct}%</b></li>
+              <li><small>Max DD</small><b>${p.max_overall_loss_pct}%</b></li>
               <li><small>Split</small><b>${splitPct(p)}%</b></li>
             </ul>
           </div>
@@ -688,7 +699,7 @@
       ['Profit target — Phase 2', r2.profit_target_p2 + '%', ...col('—')],
       ['Maximum daily loss', r2.max_daily_loss_pct + '%', ...col(ri && ri.max_daily_loss_pct + '%')],
       ['Maximum overall loss', r2.max_overall_loss_pct + '%', ...col(ri && ri.max_overall_loss_pct + '%')],
-      ['Drawdown type', 'Balance-based', ...col('Balance-based')],
+      ['Drawdown type', 'Static, equity-based', ...col('Static, equity-based')],
       ['Minimum trading days before first payout', r2.min_trading_days + ' days', ...col(ri && ri.min_trading_days + ' days')],
       ['Reward frequency', 'Bi-weekly',
         ...col('Bi-weekly')],
@@ -696,6 +707,7 @@
         ...col('$' + CENA_OD_INSTANT)],
       ['News trading', '<span class="ok">✓ Allowed</span>', ...col('<span class="ok">✓ Allowed</span>')],
       ['Weekend trading', '$199 add-on', ...col('$199 add-on')],
+      ['EAs and automated trading', 'Only with the EA Allowed add-on', ...col('Only with the EA Allowed add-on')],
       /* Oba modele dostaja 1:100, bo z taka dzwignia provisioning ZAKLADA konta
          (config: METAAPI_DEMO_LEVERAGE / METAQUOTES_WEB_LEVERAGE = 100). Kolumna
          Instant mowila 1:50 i klamala wobec tego, co trader dostawal w MT5. */
@@ -838,7 +850,7 @@
         `<button type="button" class="cfg-chip${on ? ' on' : ''}" data-a="${id}">${txt}</button>`;
       pasek.innerHTML =
         chip('wt', cfgWt, `${cfgWt ? '✓ ' : '+ '}Weekend $${CENA_WT}`)
-        + (oferujeCt(p) ? chip('ct', cfgCt, `${cfgCt ? '✓ ' : '+ '}Copytrading $${cenaCt(p)}`) : '')
+        + (oferujeCt(p) ? chip('ct', cfgCt, `${cfgCt ? '✓ ' : '+ '}EA Allowed $${cenaCt(p)}`) : '')
         + chip('od', cfgOd, `${cfgOd ? '✓ ' : '+ '}On-demand $${cenaOd(p)}`)
         + (p.steps === 0 && oferujeSb(p) ? chip('sb', cfgSb, `${cfgSb ? '✓ ' : '+ '}Split Boost $${cenaSb(p)}`) : '')
         + '<span class="cfg-chip-note">News trading <b>included</b></span>';
@@ -856,7 +868,7 @@
            Split Boost chip and toggle it straight back on. */
         b.classList.toggle('on', on);
         const label = b.dataset.a === 'wt' ? `Weekend $${CENA_WT}`
-          : b.dataset.a === 'ct' ? `Copytrading $${cenaCt(p)}`
+          : b.dataset.a === 'ct' ? `EA Allowed $${cenaCt(p)}`
           : b.dataset.a === 'od' ? `On-demand $${cenaOd(p)}`
           : `Split Boost $${cenaSb(p)}`;
         b.textContent = `${on ? '✓ ' : '+ '}${label}`;

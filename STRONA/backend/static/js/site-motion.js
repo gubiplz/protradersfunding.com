@@ -87,10 +87,14 @@ if(menu&&!RM){
 /* ---------- motyw jasny/ciemny: ikonka w nagłówku ----------
    Klucz `pf_theme2` wspólny z portalem tradera — jeden wybór dla całego PTF. */
 const tog=document.getElementById('themeTog');
+/* Na telefonie ikonka schodzi z nagłówka do menu (miejsce na nazwę marki w jednej linii). */
+const togMm=document.querySelector('[data-theme-tog]');
 if(tog){
   const opis=()=>{const d=document.documentElement.dataset.theme==='dark';
-    tog.setAttribute('aria-label',d?'Switch to light mode':'Switch to dark mode');tog.title=d?'Light mode':'Dark mode'};
+    tog.setAttribute('aria-label',d?'Switch to light mode':'Switch to dark mode');tog.title=d?'Light mode':'Dark mode';
+    if(togMm)togMm.textContent=d?'Light mode':'Dark mode'};
   opis();
+  if(togMm)togMm.addEventListener('click',()=>tog.click());
   tog.addEventListener('click',()=>{
     const ciemny=document.documentElement.dataset.theme!=='dark';
     const ustaw=()=>{document.documentElement.dataset.theme=ciemny?'dark':'light';

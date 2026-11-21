@@ -1526,6 +1526,24 @@ def api_quotes(response: Response):
                        for c, (b, a, wiek) in broker_quotes.kwoty(coins).items() if wiek <= broker_quotes.MARK_MAX_S}}
 
 
+@router.get("/weekend-close")
+def api_weekend_close(symbol: str, response: Response):
+    """Cena z zamknięcia tygodnia dla rynku zamkniętego w weekend — ta, po której
+    serwer wycenia pozycje (`_cena_weekendowa`). Terminal pokazuje ją zamiast żywej
+    ceny Hyperliquid, który notuje złoto czy indeksy 24/7: bez tego wykres stał na
+    piątku, a cena obok szła dalej i wyglądało to na zepsuty feed."""
+    m = markets.get(symbol)
+    if not m:
+        raise HTTPException(404, "Unknown market")
+    teraz = _now()
+    if m.cls == "crypto" or not tradebot.is_weekend(teraz):
+        return {"symbol": m.sym, "closed": False, "price": None}
+    cena = _cena_weekendowa(m.hl, teraz)
+    if cena is not None:
+        response.headers["Cache-Control"] = "public, max-age=60, s-maxage=300"
+    return {"symbol": m.sym, "closed": True, "price": cena}
+
+
 @router.get("/markets")
 def api_markets():
     return {"markets": markets.public_list(), "fee_pct": round(FEE_PCT * 100, 3),

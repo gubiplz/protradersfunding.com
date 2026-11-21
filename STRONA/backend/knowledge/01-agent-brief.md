@@ -54,8 +54,8 @@ factual, so use those:
   refund; Instant Funding has no fee credit) — never say a trader "pays nothing";
 - 90% split on evaluation plans, 70% on Instant Funding;
 - no time limit — the evaluation cannot expire under you;
-- news trading, weekend holding and EAs all allowed; the only strategy bans are abuses of
-  the simulation listed in Terms §6;
+- news trading and weekend holding allowed; EAs only with the EA Allowed add-on; the only
+  other strategy bans are abuses of the simulation listed in Terms §6;
 - static drawdown only, never trailing, so the floor never chases you;
 - credentials are created automatically once payment is confirmed;
 - a failed challenge costs nothing beyond that account.

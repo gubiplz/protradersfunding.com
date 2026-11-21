@@ -124,7 +124,7 @@ def test_copytrading_powod_sprzeczny_nic_nie_zmienia(broker, maile):
         req_id = zloz_wniosek(c, aid, headers=h, json=WNIOSEK).json()["id"]
         r = c.post(f"/api/admin/payout-requests/{req_id}/reject", headers=ADMIN_H,
                    json={"reason": "Copy trading between accounts", "breach": True})
-    assert r.status_code == 400 and "Copytrading" in r.json()["detail"]
+    assert r.status_code == 400 and "EA Allowed" in r.json()["detail"]
     status, _, req_status, _, breache = _stan(aid, req_id)
     assert (status, req_status, breache) == ("funded", "pending", [])
     assert "payout_rejected" not in maile and "breached" not in maile

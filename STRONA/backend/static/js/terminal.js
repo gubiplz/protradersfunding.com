@@ -88,7 +88,7 @@
     fsyms: new Set(ls.json('pf_term_fsyms', [])),   // market filter of the lists (empty = all)
     sort: ls.json('pf_term_sort', {}),              // per list tab: { h: column label, dir: 'asc' | 'desc' }
     showTrades: ls.get('pf_term_trades', '1') === '1',     // trade history on the chart ("Trades" button)
-    weekend: false, srvOff: 2, fee: 0.009, group: null, top: [0, 0], bookUnit: 'base', tickMode: ls.get('pf_term_tick', 'trending'),
+    weekend: false, srvOff: 2, fee: 0.009, wclose: {}, group: null, top: [0, 0], bookUnit: 'base', tickMode: ls.get('pf_term_tick', 'trending'),
   };
   if (!F.venuesFor(S.m).includes(S.venue)) S.venue = 'hyperliquid';
   // Leverage isn't selectable: fixed per market (the server calculates with it anyway).
@@ -430,7 +430,10 @@
      (server time). A bar that lies wholly in that window is a flat line at Friday's price,
      or a jump when the source changed: it is left off the chart, so Monday follows Friday. */
   const wkndDay = (t) => { const d = new Date(t + S.srvOff * 3600e3).getUTCDay(); return d === 6 || d === 0; };
-  const closedBar = (m, t, step) => !!m && m.cls !== 'crypto' && wkndDay(t) && wkndDay(t + (step || 60000) - 1);
+  /* A bar that STARTS in the weekend is left off. Requiring the whole bar inside the weekend
+     let daily, weekly and 4h bars through: they are aligned to UTC, so with a UTC+2 server the
+     Sunday daily bar runs into Monday and drew Hyperliquid's weekend prints. */
+  const closedBar = (m, t) => !!m && m.cls !== 'crypto' && wkndDay(t);
   const openBars = (m, i, bars) => (m && m.cls !== 'crypto' ? bars.filter((k) => !closedBar(m, k.timestamp, F.MS[i])) : bars);
   /* History of a closed market is loaded up to Friday's close (Saturday 00:00 server time):
      loaded up to now, late on Saturday the whole window is weekend, every bar is left off
@@ -1202,9 +1205,47 @@
 
   /* ---------- market bar ---------- */
   function markPx() {
+    if (frozen(S.m) && S.wclose[S.m.sym]) return S.wclose[S.m.sym];
     const [b, a] = S.top;
     if (S.bq) return (S.bq.bid + S.bq.ask) / 2;
     return S.tk.mark || (b && a ? (b + a) / 2 : S.mids[S.m.hl]) || null;
+  }
+  /* ---------- weekend: market closed ----------
+     S.weekend comes from the server (/api/terminal/markets, re-read every minute) and the
+     Weekend Trading add-on from the account; the rule is market_closed() in terminal.py. */
+  const frozen = (m) => !!m && S.weekend && m.cls !== 'crypto';
+  function closedWhy(m) {
+    if (!S.weekend || !m) return null;
+    if (m.cls !== 'crypto') return 'Market closed for the weekend. It reopens Monday 00:00 server time. Open positions can be closed from the Positions tab at Friday\'s closing price.';
+    if (!(S.st && S.st.account.weekend_trading)) return 'Crypto trades on weekends only on accounts with the Weekend Trading add-on.';
+    return null;
+  }
+  // What the server still accepts on a closed market: close-only orders, but on a weekend-frozen
+  // market not as a market order (that would fill on Hyperliquid's live book).
+  const closedOk = (m) => $('tReduce').checked && (m.cls === 'crypto' || S.kind !== 'market');
+  const wkFail = {};
+  function loadWkClose(m) {
+    if (!frozen(m) || m.sym in S.wclose || Date.now() - (wkFail[m.sym] || 0) < 60000) return;
+    S.wclose[m.sym] = 0;
+    fetch('/api/terminal/weekend-close?symbol=' + encodeURIComponent(m.sym))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d && d.price) { S.wclose[m.sym] = d.price; if (S.m === m) { renderTicker(); updateTicket(); } } else { delete S.wclose[m.sym]; wkFail[m.sym] = Date.now(); }
+      })
+      .catch(() => { delete S.wclose[m.sym]; wkFail[m.sym] = Date.now(); });
+  }
+  function renderClosed() {
+    const m = S.m, why = closedWhy(m);
+    $('tClosed').hidden = !why;
+    if (why) { $('tClosed').title = why; $('tClosed').textContent = m.cls === 'crypto' ? 'Weekend: add-on only' : 'Market closed'; }
+    const blocked = !!why && !closedOk(m);
+    $('tClosedNote').hidden = !blocked;
+    if (blocked) $('tClosedNote').textContent = why;
+    // A guest keeps a working button: it opens the connect window, the note says the rest.
+    if (!$('tGo').classList.contains('busy')) $('tGo').disabled = blocked && !!S.token;
+    root.classList.toggle('t-frozen', frozen(m));
+    root.classList.toggle('t-frozen-lock', frozen(m) && !!S.token);   // guests keep the quick buttons (they open sign-in)
+    loadWkClose(m);
   }
   function renderTicker() {
     const m = S.m, c = S.ctx[m.hl] || {};
@@ -1213,6 +1254,8 @@
     const chg = ok(S.tk.chg) ? S.tk.chg : c.prev && mark ? (mark / c.prev - 1) * 100 : null;
     $('tChg').textContent = pct(chg);
     $('tChg').className = 'num ' + cls(chg);
+    // Open interest and volume are Hyperliquid's own numbers: shown for crypto only.
+    $('tOiBox').hidden = $('tVolBox').hidden = m.cls !== 'crypto';
     $('tOi').textContent = big(S.tk.oiUsd || (c.oi && c.mark ? c.oi * c.mark : null));
     $('tVol').textContent = big(S.tk.vol || c.vol);
     if (mark) document.title = `${px(m, mark)} | ${m.sym} · Trade`;
@@ -1659,6 +1702,7 @@
   };
   function refPx() {
     if (S.kind !== 'market') { const p = numOf($('tPx').value); if (p) return p; }
+    if (frozen(S.m) && S.wclose[S.m.sym]) return S.wclose[S.m.sym];   // weekend: Friday's close, not Hyperliquid's live book
     const [b, a] = S.top;
     return (S.side === 'buy' ? a : b) || markPx() || 0;
   }
@@ -1716,7 +1760,7 @@
     $('tEstVal').textContent = val ? usd(val) : '—';
     $('tEstMargin').textContent = val ? usd(val / L) : '—';
     $('tSlip').textContent = S.kind === 'market' ? S.slip + '%' : '—';
-    $('tFee').textContent = S.fee.toFixed(3) + '%';
+    $('tFee').textContent = S.fee.toFixed(3) + '% / side';
     const tp = numOf($('tTp').value), sl = numOf($('tSl').value), ref = p || markPx();
     $('tTpPct').textContent = tp > 0 && ref ? pct(((S.side === 'buy' ? tp - ref : ref - tp) / ref) * 100 * L) : 'ROE';
     $('tSlPct').textContent = sl > 0 && ref ? pct(((S.side === 'buy' ? sl - ref : ref - sl) / ref) * 100 * L) : 'ROE';
@@ -1724,6 +1768,7 @@
       const a = S.st.account;
       $('tCap').textContent = `${fx(openLots(a), 2)} / ${fx(a.max_lots, 2)} lots`;
     } else $('tCap').textContent = S.token ? '—' : '—';
+    renderClosed();
   }
   // The lot cap is shared with Trade BOT: its open positions count too.
   const openLots = (a) => (a.open_lots || 0) + (a.other_lots || 0);
@@ -1766,6 +1811,7 @@
       sending = false;
       $('tGo').disabled = false;
       $('tGo').classList.remove('busy');
+      renderClosed();
     }
   }
   $('tGo').onclick = () => submitOrder();
@@ -3388,12 +3434,17 @@
   });
 
   /* ---------- theme, sharing ---------- */
+  // On phones the header toggle moves into the menu (room for the name on one line).
+  const mmTheme = () => { const b = $('tMMTheme'); if (b) b.textContent = document.documentElement.dataset.theme === 'light' ? 'Dark mode' : 'Light mode'; };
   $('tTheme').onclick = () => {
     const light = document.documentElement.dataset.theme !== 'light';
     document.documentElement.dataset.theme = light ? 'light' : 'dark';
     ls.set('pf_term_theme', light ? 'light' : 'dark');
     if (chart) { chart.setStyles(chartStyles()); drawLines(); drawTrades(true); }
+    mmTheme();
   };
+  if ($('tMMTheme')) $('tMMTheme').onclick = () => $('tTheme').click();
+  mmTheme();
   $('tShare').onclick = () => {
     const u = location.origin + '/trade/' + S.sym;
     // writeText returns a promise — a refusal (no permission, http) arrives asynchronously.
@@ -3608,7 +3659,15 @@
     restoreLogins();
     if (S.imp) toast('Admin view', 'Read-only view of this account. Trading is off.');
     loadAccounts();
-    fetch('/api/terminal/markets').then((r) => r.json()).then((d) => { S.weekend = !!d.weekend; if (Number.isFinite(d.server_utc_offset_h)) S.srvOff = d.server_utc_offset_h; S.fee = d.fee_pct; updateTicket(); renderInfo(); }).catch(() => {});
+    // Re-read every minute: a page left open over Friday's close must switch to "closed" by itself.
+    const loadMkts = () => fetch('/api/terminal/markets').then((r) => r.json()).then((d) => {
+      const was = S.weekend;
+      S.weekend = !!d.weekend; if (Number.isFinite(d.server_utc_offset_h)) S.srvOff = d.server_utc_offset_h; S.fee = d.fee_pct;
+      if (was !== S.weekend) { S.wclose = {}; renderTicker(); }
+      updateTicket(); renderInfo();
+    }).catch(() => {});
+    loadMkts();
+    setInterval(() => { if (!document.hidden) loadMkts(); }, 60000);
     if (root.dataset.missing) toast(`${root.dataset.missing} trades in MT5`, 'The web terminal has crypto, metals, energy, indices and EUR/GBP/JPY for now.');
     // "See the full list" from the home page: /trade?list=all opens the list of all markets.
     if (new URLSearchParams(location.search).has('list')) {

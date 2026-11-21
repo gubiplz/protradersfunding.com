@@ -161,7 +161,43 @@ def test_zakup_bez_addonow_zostaje_przy_katalogowym_splicie():
 # realny rachunek MT5 czytany przez MetaApi. Dlatego flaga musi dojechac az na
 # konto — z niej, a nie z zamowienia, bierze sie decyzja o provisioningu.
 
-def test_copytrading_dolicza_299_na_kazdym_planie():
+def _ct_offer(value):
+    """Przelacznik „EA Allowed add-on" w Settings; None = brak wiersza."""
+    s = SessionLocal()
+    row = s.get(AppSetting, catalog.COPYTRADING_OFFERED_KEY)
+    if value is None:
+        if row is not None:
+            s.delete(row)
+    else:
+        if row is None:
+            row = AppSetting(key=catalog.COPYTRADING_OFFERED_KEY)
+            s.add(row)
+        row.value = value
+    s.commit(); s.close()
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture
+def ct_wlaczony():
+    _ct_offer("1")
+    yield
+    _ct_offer(None)
+
+
+def test_ea_allowed_bez_przelacznika_jest_ukryty_i_odrzucany():
+    """Od 2026-11-21 brak wiersza = add-on UKRYTY (sprzedaje EA, a EA chodzi tylko na
+    realnym MT5) — w sklepie go nie ma i serwer odbija goly request."""
+    _ct_offer(None)
+    _, h = _trader("addon-ea-default@test.pl")
+    r = client.get("/api/checkout/preview?product_key=instant-25k&copytrading=true", headers=h)
+    assert r.status_code == 400 and "not available" in r.json()["detail"]
+    prods = client.get("/api/products").json()
+    assert prods and all(not p.get("copytrading_offered") for p in prods)
+
+
+def test_copytrading_dolicza_299_na_kazdym_planie(ct_wlaczony):
     """Bez ograniczenia rodziny planow — inaczej niz Split Boost."""
     _, h = _trader("addon-copy-preview@test.pl")
 
@@ -176,7 +212,7 @@ def test_copytrading_dolicza_299_na_kazdym_planie():
     assert dwustop.json()["copytrading_fee_usd"] == 299.0
 
 
-def test_zakup_z_copytradingiem_znaczy_zamowienie_i_konto():
+def test_zakup_z_copytradingiem_znaczy_zamowienie_i_konto(ct_wlaczony):
     _, h = _trader("addon-copy-zakup@test.pl")
 
     oid = client.post("/api/checkout", headers=h,
