@@ -76,6 +76,9 @@ html[data-theme=dark] .pf-ck{--ckbg:linear-gradient(180deg,rgba(22,30,46,.94),rg
   .pf-ck-top .pf-ck-bar,.pf-ck-corner .pf-ck-bar{gap:8px;padding:10px 12px}
   .pf-ck-top .pf-ck-act,.pf-ck-corner .pf-ck-act{grid-template-columns:auto 1fr 1fr;align-items:center}
   .pf-ck-top .pf-ck-act .pf-ck-lnk,.pf-ck-corner .pf-ck-act .pf-ck-lnk{grid-column:auto;padding:4px 6px 4px 0;font-size:12.5px}
-  .pf-ck-top .pf-ck-btn,.pf-ck-corner .pf-ck-btn{height:30px;font-size:12.5px}
+  .pf-ck-top .pf-ck-btn,.pf-ck-corner .pf-ck-btn{height:30px;font-size:12.5px;padding:0 8px;white-space:nowrap}
+  .pf-ck-top .pf-ck-lnk,.pf-ck-corner .pf-ck-lnk{white-space:nowrap}
 }
+/* With the phone menu open the bar would sit over its first links: step aside until it closes. */
+body.menu-open .pf-ck{display:none}
 @media(prefers-reduced-motion:reduce){.pf-ck{animation:none}}

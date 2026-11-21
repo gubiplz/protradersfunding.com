@@ -58,7 +58,7 @@ def test_nazwa_copytrading_znika_z_tekstow_dla_klienta():
 
 
 def test_wersja_dokumentow_podbita():
-    assert legal.DOCS_VERSION == "2026-11-21"
+    assert legal.DOCS_VERSION >= "2026-11-21"   # zmiana §6 (EA) wymagała nowej wersji
     assert f"Version {legal.DOCS_VERSION}" in client.get("/terms").text
 
 
@@ -102,3 +102,18 @@ def test_w_tygodniu_rynek_otwarty(monkeypatch):
     monkeypatch.setattr(terminal.tradebot, "is_weekend", lambda now=None: False)
     r = client.get("/api/terminal/weekend-close?symbol=XAUUSD").json()
     assert r["closed"] is False and r["price"] is None
+
+
+def test_czat_odpowiada_o_ea_takze_na_pytanie_z_nazwa_dodatku():
+    """„EA Allowed" jest jednym tokenem tylko w bazie wiedzy — pytanie „Is EA allowed?"
+    zostaje pytaniem o EA i trafia w odpowiedź o EA, nie o MT5 czy urządzenia."""
+    from app import helpdesk
+    from app.config import get_settings
+    st = get_settings()
+    b = helpdesk.baza(st.site_name, st.support_email, str(ROOT / "templates" / "faq.html"), None)
+    for q in ("Is EA allowed?", "Can I use an EA?", "Are bots allowed?", "Can I run an expert advisor?"):
+        wynik = b.szukaj(q, 1)
+        assert wynik, q
+        pytanie, odp = b.wpisy[wynik[0][1]]
+        assert "EAs" in pytanie, (q, pytanie)          # jedno z dwóch pytań o EA w FAQ
+        assert "EA Allowed add-on" in odp, (q, odp[:120])

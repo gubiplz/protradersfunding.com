@@ -138,7 +138,7 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .t-closed-note{margin:-4px 0 8px;font-size:12px;line-height:1.45;color:var(--warn)}
 .t-go:disabled{opacity:.45;cursor:not-allowed}
 .term.t-frozen .t-book,.t-frozen .t-book{position:relative}
-.t-frozen .t-book::after{content:'Weekend quotes on Hyperliquid. Not tradable here: this market is closed until Monday.';position:absolute;inset:auto 10px 10px;padding:10px 12px;border-radius:9px;font-size:12px;line-height:1.45;background:var(--panel2);border:1px solid var(--line2);color:var(--muted);box-shadow:var(--shadow);pointer-events:none}
+.t-frozen .t-book::after{content:'Weekend quotes. Not tradable here: this market is closed until Monday.';position:absolute;inset:auto 10px 10px;padding:10px 12px;border-radius:9px;font-size:12px;line-height:1.45;background:var(--panel2);border:1px solid var(--line2);color:var(--muted);box-shadow:var(--shadow);pointer-events:none}
 .t-frozen .t-asks,.t-frozen .t-bids{opacity:.45}
 .t-frozen .t-oc{display:none}   /* one-click Buy/Sell on the chart: live weekend quote, server refuses it */
 .t-frozen [data-quick]{opacity:.45;pointer-events:none}

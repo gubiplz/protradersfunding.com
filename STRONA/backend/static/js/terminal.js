@@ -1223,15 +1223,16 @@
   // What the server still accepts on a closed market: close-only orders, but on a weekend-frozen
   // market not as a market order (that would fill on Hyperliquid's live book).
   const closedOk = (m) => $('tReduce').checked && (m.cls === 'crypto' || S.kind !== 'market');
+  const wkFail = {};
   function loadWkClose(m) {
-    if (!frozen(m) || m.sym in S.wclose) return;
+    if (!frozen(m) || m.sym in S.wclose || Date.now() - (wkFail[m.sym] || 0) < 60000) return;
     S.wclose[m.sym] = 0;
     fetch('/api/terminal/weekend-close?symbol=' + encodeURIComponent(m.sym))
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (d && d.price) { S.wclose[m.sym] = d.price; if (S.m === m) { renderTicker(); updateTicket(); } } else delete S.wclose[m.sym];
+        if (d && d.price) { S.wclose[m.sym] = d.price; if (S.m === m) { renderTicker(); updateTicket(); } } else { delete S.wclose[m.sym]; wkFail[m.sym] = Date.now(); }
       })
-      .catch(() => { delete S.wclose[m.sym]; });
+      .catch(() => { delete S.wclose[m.sym]; wkFail[m.sym] = Date.now(); });
   }
   function renderClosed() {
     const m = S.m, why = closedWhy(m);
@@ -1240,7 +1241,8 @@
     const blocked = !!why && !closedOk(m);
     $('tClosedNote').hidden = !blocked;
     if (blocked) $('tClosedNote').textContent = why;
-    if (!$('tGo').classList.contains('busy')) $('tGo').disabled = blocked;
+    // A guest keeps a working button: it opens the connect window, the note says the rest.
+    if (!$('tGo').classList.contains('busy')) $('tGo').disabled = blocked && !!S.token;
     root.classList.toggle('t-frozen', frozen(m));
     loadWkClose(m);
   }

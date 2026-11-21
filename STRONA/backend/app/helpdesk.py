@@ -486,11 +486,14 @@ _SYNONIMY = {
 }
 
 
-def _tokeny(tekst: str) -> list[str]:
+def _tokeny(tekst: str, dok: bool = False) -> list[str]:
     out = []
-    # Nazwa add-onu „EA Allowed" to jeden token: inaczej każda wzmianka o dodatku
-    # liczyłaby się jak pytanie o EA i wypychała właściwą odpowiedź.
-    tekst = re.sub(r"\bea allowed\b", "eaaddon", (tekst or "").lower())
+    # W BAZIE WIEDZY nazwa add-onu „EA Allowed" to jeden token: inaczej każda wzmianka
+    # o dodatku liczyłaby się jak odpowiedź o EA. Pytania tego nie dostają — „Is EA
+    # allowed?" ma zostać pytaniem o EA.
+    tekst = (tekst or "").lower()
+    if dok:
+        tekst = re.sub(r"\bea allowed\b", "eaaddon", tekst)
     for w in re.findall(r"[a-z0-9]+", tekst.replace("'", "")):
         if w in _STOP or len(w) < 2 and not w.isdigit():
             continue
@@ -513,7 +516,7 @@ class BazaWiedzy:
         self.wpisy = wpisy
         # Słownik do odróżniania pytań od bełkotu: każde słowo z bazy wiedzy.
         self.slownik = {w for q, a in wpisy for w in re.findall(r"[a-z]+", (q + " " + a).lower())}
-        self.dok = [_tokeny(q) * 2 + _tokeny(a) for q, a in wpisy]
+        self.dok = [_tokeny(q, dok=True) * 2 + _tokeny(a, dok=True) for q, a in wpisy]
         n = len(self.dok)
         self.srednia = sum(map(len, self.dok)) / max(n, 1)
         df: dict[str, int] = {}
