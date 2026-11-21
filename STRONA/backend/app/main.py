@@ -6652,7 +6652,8 @@ _EA_RX = re.compile(r"\b(eas?|bots?|robots?)\b")
 def _sprawdz_powod_breachu(acc: Account, powod: str) -> None:
     """400, gdy powód jest sprzeczny z add-onem EA Allowed (copytrading) na tym koncie."""
     if getattr(acc, "copytrading", False):
-        maly = powod.lower()
+        # Sama nazwa dodatku („…despite the EA Allowed add-on") nie jest powodem o EA.
+        maly = re.sub(r"\bea allowed\b", " ", powod.lower())
         if (any(fragment in maly for fragment in _POWODY_SPRZECZNE_Z_COPYTRADINGIEM)
                 or _EA_RX.search(maly)):
             raise HTTPException(

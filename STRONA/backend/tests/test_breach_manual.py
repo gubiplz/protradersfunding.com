@@ -274,3 +274,10 @@ def test_krotkie_slowa_po_granicy_wyrazu(broker):
     r = client.post(f"/api/admin/accounts/{aid}/breach", headers=ADMIN,
                     json={"reason": "Daily loss limit exceeded on both days, each time at the open"})
     assert r.status_code == 200
+
+
+def test_sama_nazwa_dodatku_w_powodzie_nie_blokuje(broker):
+    aid = _konto("800023", copytrading=True, metaapi_id="acc-23")
+    r = client.post(f"/api/admin/accounts/{aid}/breach", headers=ADMIN,
+                    json={"reason": "Daily loss limit exceeded (account holds the EA Allowed add-on)"})
+    assert r.status_code == 200

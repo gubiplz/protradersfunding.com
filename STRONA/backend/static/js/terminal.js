@@ -1244,6 +1244,7 @@
     // A guest keeps a working button: it opens the connect window, the note says the rest.
     if (!$('tGo').classList.contains('busy')) $('tGo').disabled = blocked && !!S.token;
     root.classList.toggle('t-frozen', frozen(m));
+    root.classList.toggle('t-frozen-lock', frozen(m) && !!S.token);   // guests keep the quick buttons (they open sign-in)
     loadWkClose(m);
   }
   function renderTicker() {
