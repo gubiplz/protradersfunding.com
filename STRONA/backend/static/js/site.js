@@ -849,9 +849,9 @@
       const chip = (id, on, txt) =>
         `<button type="button" class="cfg-chip${on ? ' on' : ''}" data-a="${id}">${txt}</button>`;
       pasek.innerHTML =
-        chip('wt', cfgWt, `${cfgWt ? '✓ ' : '+ '}Weekend $${CENA_WT}`)
+        chip('wt', cfgWt, `${cfgWt ? '✓ ' : '+ '}Weekend trading $${CENA_WT}`)
         + (oferujeCt(p) ? chip('ct', cfgCt, `${cfgCt ? '✓ ' : '+ '}EA Allowed $${cenaCt(p)}`) : '')
-        + chip('od', cfgOd, `${cfgOd ? '✓ ' : '+ '}On-demand $${cenaOd(p)}`)
+        + chip('od', cfgOd, `${cfgOd ? '✓ ' : '+ '}On-demand payouts $${cenaOd(p)}`)
         + (p.steps === 0 && oferujeSb(p) ? chip('sb', cfgSb, `${cfgSb ? '✓ ' : '+ '}Split Boost $${cenaSb(p)}`) : '')
         + '<span class="cfg-chip-note">News trading <b>included</b></span>';
       $$('#cfg-addons .cfg-chip').forEach(b => b.addEventListener('click', e => {
@@ -867,9 +867,9 @@
            Replacing innerHTML here made the synthetic click land on the new
            Split Boost chip and toggle it straight back on. */
         b.classList.toggle('on', on);
-        const label = b.dataset.a === 'wt' ? `Weekend $${CENA_WT}`
+        const label = b.dataset.a === 'wt' ? `Weekend trading $${CENA_WT}`
           : b.dataset.a === 'ct' ? `EA Allowed $${cenaCt(p)}`
-          : b.dataset.a === 'od' ? `On-demand $${cenaOd(p)}`
+          : b.dataset.a === 'od' ? `On-demand payouts $${cenaOd(p)}`
           : `Split Boost $${cenaSb(p)}`;
         b.textContent = `${on ? '✓ ' : '+ '}${label}`;
         const splitEl = $('#cfg-split');
