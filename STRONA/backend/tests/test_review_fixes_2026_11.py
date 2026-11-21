@@ -63,9 +63,9 @@ def test_wersja_dokumentow_podbita():
 
 
 def test_prowizja_procentem_nie_plaskie_9_dolarow():
+    # Pasek spreadów na stronie głównej zostaje „$9/lot" — decyzja ownera (21.11).
     home = _plain(client.get("/").text)
-    assert "/lot commission per side" not in home
-    assert "0.009% commission per side (about $9 per standard FX lot)" in home
+    assert "$9/lot commission per side" in home
     faq = _plain(client.get("/faq").text)
     assert "A commission of $9 per lot per side" not in faq
     assert "0.009% of the trade value per side" in faq
