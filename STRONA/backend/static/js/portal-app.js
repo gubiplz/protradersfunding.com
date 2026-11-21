@@ -2381,11 +2381,11 @@ const VIEWS={
     ${ME.credits_usd>0?`<div class="note" style="margin:0 auto 14px;max-width:920px"><b>Store credit: $${fmt(ME.credits_usd)}</b>, applied at checkout.</div>`:''}
     <div class="chal-grid" id="shopGrid">${cards||'<div class="empty"><h3>No plans in this tier</h3></div>'}</div>
     <div class="chal-extras" id="shopExtras">
-      <div class="chal-opt"><span><b>Weekend</b><small>+$199</small></span>
+      <div class="chal-opt"><span><b>Weekend trading</b><small>+$199</small></span>
         <button class="chal-sw" id="shop-wt" type="button" role="switch" aria-checked="${!!window._shopWt}" aria-label="Add weekend trading"></button></div>
       ${anyCt?`<div class="chal-opt"><span><b>EA Allowed</b><small>+$${ctCena}</small></span>
         <button class="chal-sw" id="shop-ct" type="button" role="switch" aria-checked="${!!window._shopCt}" aria-label="Add EA Allowed"></button></div>`:''}
-      <div class="chal-opt"><span><b>On-demand</b><small>+$${odCena}</small></span>
+      <div class="chal-opt"><span><b>On-demand payouts</b><small>+$${odCena}</small></span>
         <button class="chal-sw" id="shop-od" type="button" role="switch" aria-checked="${!!window._shopOd}" aria-label="Add on-demand payout"></button></div>
       ${showSb?`<div class="chal-opt"><span><b>Split Boost</b><small>+$${sbCena}</small></span>
         <button class="chal-sw" id="shop-sb" type="button" role="switch" aria-checked="${!!window._shopSb}" aria-label="Add split boost"></button></div>`:''}
@@ -4089,9 +4089,9 @@ async function quoteNow(){
   const row=(l,v,cls)=>`<div class="q-row${cls?' '+cls:''}"><span>${l}</span><b class="mono">${v}</b></div>`;
   let h=row('Plan fee','$'+fmt(q.plan_price_usd));
   if(q.discount_usd>0)h+=row(q.discount_source==='offer'?(q.offer_title||`Flash sale (−${q.discount_pct}%)`):`Coupon (−${q.discount_pct}%)`,'−$'+fmt(q.discount_usd),'good');
-  if(q.weekend_fee_usd>0)h+=row('Weekend Trading','+$'+fmt(q.weekend_fee_usd));
+  if(q.weekend_fee_usd>0)h+=row('Weekend trading','+$'+fmt(q.weekend_fee_usd));
   if(q.split_boost_fee_usd>0)h+=row('Profit Split Boost','+$'+fmt(q.split_boost_fee_usd));
-  if(q.ondemand_payout_fee_usd>0)h+=row('On-demand Payout','+$'+fmt(q.ondemand_payout_fee_usd));
+  if(q.ondemand_payout_fee_usd>0)h+=row('On-demand payouts','+$'+fmt(q.ondemand_payout_fee_usd));
   if(q.copytrading_fee_usd>0)h+=row('EA Allowed','+$'+fmt(q.copytrading_fee_usd));
   if(q.credits_used>0)h+=row('Store credit','−$'+fmt(q.credits_used),'good');
   h+=`<div class="q-row total"><span>Total due</span><b class="mono" id="buy-total">$${fmt(q.total_due_usd)}</b></div>`;
