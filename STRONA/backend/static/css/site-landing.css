@@ -35,7 +35,10 @@
 .chal-price b{font-size:21px}
 .chal-price em{display:block;font-family:var(--body);font-style:normal;font-size:11px;font-weight:600;opacity:.72}
 .chal-card.still{animation:none}
-.chal-card.still .chal-inner{transition:none}
+/* `nt` only for the first frames after a re-render (site.js removes it), so a card that is
+   already turned does not spin again; the flip itself must stay animated. Under `still`
+   the cards rendered on load (renderPricing runs several times) lost the flip animation. */
+.chal-card.nt .chal-inner{transition:none}
 .chal-price small{font-family:var(--body);font-size:12.5px;opacity:.72;font-weight:600}
 .chal-lines{position:absolute;inset:0;background:currentColor;opacity:.13;pointer-events:none;
   -webkit-mask:url(/static/img/guilloche.svg) center/cover;mask:url(/static/img/guilloche.svg) center/cover}
