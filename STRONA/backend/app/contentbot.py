@@ -240,10 +240,6 @@ def zapisz_grafike(session, dane: bytes) -> tuple[str, str]:
     return f"{baza}/media/posts/{m.token}.{rozszerzenie}", ""
 
 
-# Cokolwiek, co wygląda na twierdzenie liczbowe: kwota, procent albo licznik.
-# Tekst bez `proof` nie ma prawa zawierać żadnego z nich — nie dlatego, że
-# liczby są złe, tylko dlatego, że nikt nie wskazał, skąd pochodzą.
-LICZBY_RX = re.compile(r"\$\s?\d|\d[\d,. ]*\s?%|\b\d[\d,]{2,}\b")
 KWOTY_RX = re.compile(r"\$\s?([\d][\d,]*(?:\.\d+)?)")
 
 
@@ -342,10 +338,10 @@ def waliduj(session, post: ChannelPost) -> None:
 
     dowod = (post.proof or "").strip()
 
+    # Bez `proof` post przechodzi, także z liczbami (decyzja właściciela 25.11:
+    # liczby bez wskazanego źródła nie blokują publikacji). `proof` jest
+    # opcjonalny; gdy jest podany, nadal musi się zgadzać z danymi.
     if not dowod:
-        sprawdz(not LICZBY_RX.search(tresc),
-                "treść niesie liczbę, a nie ma wskazanego źródła. Dopisz `proof` "
-                "(`payout:<token>` albo `stat:<klucz>:<op>:<wartość>`) albo usuń liczbę")
         return
 
     if dowod.startswith("payout:"):

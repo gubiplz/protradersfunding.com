@@ -14,22 +14,12 @@
     }catch(e){}
     return null;
   }
-  /* Where the bar sits (review 21.11: at the bottom it covered "Start a Challenge" and the
-     configurator button on the first screen, and the order ticket in the terminal):
-     site pages: just under the fixed header, over the empty top of the hero;
-     terminal: a compact card in the bottom-left corner, away from the ticket. */
-  var nav=document.querySelector('header.nav'), term=document.querySelector('#terminal.term');   // the /trade app, not the home-page section with the same id
+  /* Where the bar sits: at the bottom on site pages (as before the 21.11 review; under the
+     header it covered the top of the hero), a compact card in the bottom-left corner of the
+     terminal, away from the order ticket. --ck-h reserves room at the bottom while it is open. */
+  var term=document.querySelector('#terminal.term');   // the /trade app, not the home-page section with the same id
   if(term) el.classList.add('pf-ck-corner');
-  else if(nav) el.classList.add('pf-ck-top');
-  function place(){
-    if(!nav||term||el.hidden) return;
-    el.style.top=Math.round(nav.getBoundingClientRect().bottom+8)+'px';
-  }
-  addEventListener('resize',place);
-  addEventListener('scroll',place,{passive:true});
   function space(){
-    place();
-    if(el.classList.contains('pf-ck-top')){ document.documentElement.style.setProperty('--ck-h','0px'); return; }
     var open=!el.hidden;
     document.documentElement.style.setProperty('--ck-h', open?Math.ceil(innerHeight-el.getBoundingClientRect().top)+'px':'0px');
   }

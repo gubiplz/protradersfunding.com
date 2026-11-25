@@ -117,7 +117,28 @@ def test_zalegly_termin_tez_uzbraja(sprzataj):
 
 
 def test_odmowa_walidatora_nie_uzbraja(sprzataj):
-    """Kwota bez dowodu ma zatrzymać post niezależnie od tego, że ma termin."""
+    """Dowód niezgodny z danymi ma zatrzymać post niezależnie od tego, że ma termin."""
+    termin = datetime.now(timezone.utc) + timedelta(days=1)
+    s = SessionLocal()
+    try:
+        p = ChannelPost(channel="mgmt", kind="text", proof="stat:payouts_count:gte:999999999",
+                        body="We paid out $6,180 last week.",
+                        status="draft", origin="panel", scheduled_for=termin)
+        s.add(p)
+        s.commit()
+        sprzataj.append(p.id)
+        pid = p.id
+    finally:
+        s.close()
+
+    odp = client.post(f"/api/admin/channel-posts/{pid}/approve", headers=ADMIN)
+
+    assert odp.status_code == 400
+    assert _stan(pid)[0] == "draft", "odrzucony post nie ma prawa byc uzbrojony"
+
+
+def test_liczba_bez_dowodu_nie_blokuje(sprzataj):
+    """Decyzja 25.11: kwota bez `proof` nie jest już powodem odmowy."""
     termin = datetime.now(timezone.utc) + timedelta(days=1)
     s = SessionLocal()
     try:
@@ -133,5 +154,5 @@ def test_odmowa_walidatora_nie_uzbraja(sprzataj):
 
     odp = client.post(f"/api/admin/channel-posts/{pid}/approve", headers=ADMIN)
 
-    assert odp.status_code == 400
-    assert _stan(pid)[0] == "draft", "odrzucony post nie ma prawa byc uzbrojony"
+    assert odp.status_code == 200, odp.text
+    assert _stan(pid)[0] == "scheduled"
