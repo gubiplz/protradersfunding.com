@@ -398,7 +398,7 @@ async def zarejestruj_w_metaapi(session, acc: Account, settings=None,
         zapisz("no MT5 credentials on the account")
         return None
     if not chce_realnego_mt5(acc, settings, session):
-        zapisz("real MT5 is switched off for Copytrading accounts (Built-in Terminal tab)")
+        zapisz("real MT5 is switched off for EA Allowed accounts (Built-in Terminal tab)")
         return None
     # Przerwa po porazce chroni przed AUTOMATEM dobijajacym sie co tyknniecie.
     # Klikniecie „Connect them now" to swiadoma decyzja czlowieka, ktory wlasnie

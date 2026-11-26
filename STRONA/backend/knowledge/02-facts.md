@@ -223,7 +223,7 @@ support. Do not quote a minimum unclaimed amount. Full rules: `/affiliate-terms`
   accounts; letting someone else trade outside an approved arrangement; fraud, chargeback
   abuse, identity misrepresentation, KYC falsification; attacking or reverse-engineering
   the platform.
-- **EA Allowed add-on** (formerly called Copytrading): sold only when offered at checkout.
+- **EA Allowed add-on**: sold only when offered at checkout.
   An account bought with it may run EAs and other automated trading, copy trades between the
   trader's own accounts and sign in from several devices.
   It never covers copying to or from someone else's account or handing over credentials.

@@ -6696,8 +6696,8 @@ async def admin_breach_account(account_id: int, payload: BreachIn):
        że konto „zamknięte" dalej gra. Teraz idzie tą samą drogą co silnik.
     2. **Nie pozwala zbreachować kogoś za to, co nam sprzedaliśmy.** Konto
        z add-onem Copytrading ma na piśmie zgodę na kopiowanie między własnymi
-       kontami i na wiele urządzeń — a panel ma „Copy trading between accounts"
-       na liście gotowych powodów. Jedno kliknięcie z rozpędu i klient ma
+       kontami i na wiele urządzeń — a panel miał „Copy trading between accounts"
+       na liście gotowych powodów (do 26.11; pole jest wolnym tekstem). Jedno kliknięcie z rozpędu i klient ma
        rację, a my zwrot $299 plus zgłoszenie. Taki powód odbija się z 400.
     """
     session = SessionLocal()
