@@ -536,7 +536,7 @@ button.status-tap{border:0;cursor:pointer;font-family:inherit}
 .tgp-miss{padding:28px 16px;text-align:center;color:#f0a8a8;font-size:12.5px;background:#2a1a1f}
 .tgp-text{padding:8px 12px 2px;white-space:pre-wrap;overflow-wrap:anywhere}
 .tgp-text a{color:#6ab3f3;text-decoration:none}
-.tgp-text code,.tgp-text pre{font-family:ui-monospace,Menlo,Consolas,'Roboto Mono',monospace;font-size:13px;color:#e6c07b}
+.tgp-text code,.tgp-text pre{font-family:ui-monospace,Menlo,monospace;font-size:13px;color:#e6c07b}
 .tgp-text pre{margin:4px 0;padding:8px;background:#0e1621;border-radius:6px;white-space:pre-wrap}
 .tgp-text blockquote{margin:4px 0;padding:2px 0 2px 10px;border-left:3px solid #6ab3f3}
 .tgp-spoiler{background:#5b6b7b;color:transparent;border-radius:3px}

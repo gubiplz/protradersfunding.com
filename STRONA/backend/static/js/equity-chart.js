@@ -17,8 +17,6 @@
  *                label badge at the left edge (target / floors / account size).
  *   opts.tz    — IANA zone for day boundaries and dates (default: browser's).
  */
-// Chart.js defaults to Helvetica Neue / Arial: on Windows every chart label was Arial, not the site's Inter.
-if (window.Chart) Chart.defaults.font.family = "Inter,'Helvetica Neue',Arial,sans-serif";
 window.chartTheme = function () {
   var s = getComputedStyle(document.documentElement);
   var t = function (name, fallback) { return (s.getPropertyValue(name) || fallback).trim(); };

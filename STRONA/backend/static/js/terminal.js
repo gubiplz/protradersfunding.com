@@ -217,7 +217,7 @@
 
   // KLineChart draws line labels in this font; we measure width the same way so the
   // P&L box lands right after the entry label.
-  const LINE_FONT = "Inter,'Helvetica Neue',Arial,sans-serif";   // Inter first: Windows has no Helvetica Neue (fell to the default serif)
+  const LINE_FONT = 'Helvetica Neue';
   const MIARA = document.createElement('canvas').getContext('2d');
   const szerTekstu = (t) => { MIARA.font = `600 11px ${LINE_FONT}`; return MIARA.measureText(t || '').width; };
   // KLineChart places an overlay timestamp on the nearest candle centre. On H1 a
