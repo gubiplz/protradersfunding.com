@@ -5782,7 +5782,7 @@ def admin_issue_payout(request: Request, account_id: int, payload: IssuePayoutIn
         share = round(float(share), 2)
         if share <= 0:
             raise HTTPException(400, "The payout amount must be greater than zero "
-                                     f"(zysk na koncie: ${profit:,.2f})")
+                                     f"(account profit: ${profit:,.2f})")
 
         # W trybie puli saldo maluje bot i reset by z nim walczył —
         # anty-podwójnej-wypłacie jest dekrement puli.
