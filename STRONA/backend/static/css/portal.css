@@ -5,8 +5,12 @@
    ============================================================ */
 
 @font-face{font-family:'Inter';src:url('/static/fonts/inter.woff2') format('woff2');font-weight:100 900;font-display:swap}
+/* Polish and other Latin Extended letters (ą ę ł ś ż…): without these faces they came from the system font mid-word (Segoe UI on Windows). */
+@font-face{font-family:'Inter';src:url('/static/fonts/inter-latin-ext.woff2') format('woff2');font-weight:100 900;font-display:swap;unicode-range:U+0100-024F,U+0259,U+1E00-1EFF,U+2020,U+20A0-20AB,U+20AD-20CF,U+2113,U+2C60-2C7F,U+A720-A7FF}
 @font-face{font-family:'Space Grotesk';src:url('/static/fonts/space-grotesk-latin.woff2') format('woff2');font-weight:300 700;font-display:swap}
+@font-face{font-family:'Space Grotesk';src:url('/static/fonts/space-grotesk-latin-ext.woff2') format('woff2');font-weight:300 700;font-display:swap;unicode-range:U+0100-024F,U+0259,U+1E00-1EFF,U+2020,U+20A0-20AB,U+20AD-20CF,U+2113,U+2C60-2C7F,U+A720-A7FF}
 @font-face{font-family:'JetBrains Mono';src:url('/static/fonts/jbmono.woff2') format('woff2');font-weight:100 800;font-display:swap}
+@font-face{font-family:'JetBrains Mono';src:url('/static/fonts/jbmono-latin-ext.woff2') format('woff2');font-weight:100 800;font-display:swap;unicode-range:U+0100-024F,U+0259,U+1E00-1EFF,U+2020,U+20A0-20AB,U+20AD-20CF,U+2113,U+2C60-2C7F,U+A720-A7FF}
 
 :root{
   --bg:#f6f7fb; --bg2:#ffffff; --bg3:#eef0f7;

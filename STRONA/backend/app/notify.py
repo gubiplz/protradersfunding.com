@@ -480,7 +480,7 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
 # dużo światła, czerń, złoto z logo jako jedyny akcent. Wyłącznie inline CSS
 # i tabele — klienty pocztowe nie mają nowoczesnego layoutu.
 # ---------------------------------------------------------------------------
-_FONT = "-apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif"
+_FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif"
 _MONO = "'SF Mono',SFMono-Regular,Menlo,Consolas,monospace"
 _INK, _MUTE, _FAINT = "#1d1d1f", "#6e6e73", "#86868b"
 _HAIR, _GOLD, _GOLD_BG = "#e8e8ed", "#b7924e", "#f7f1e6"

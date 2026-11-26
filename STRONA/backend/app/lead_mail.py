@@ -283,7 +283,7 @@ _FAINT = "#86868b"
 _HAIRLINE = "#d2d2d7"
 _ACCENT = "#16a34a"
 _FONT = ("-apple-system,BlinkMacSystemFont,'SF Pro Text','SF Pro Display',"
-         "'Helvetica Neue',Helvetica,Arial,sans-serif")
+         "'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif")
 
 _KROK = re.compile(r"^\s*(\d{1,2})[.)]\s+(.+)$")
 _ETYKIETA = re.compile(r"^[A-Z0-9][A-Z0-9 &'’/,-]{2,40}$")
