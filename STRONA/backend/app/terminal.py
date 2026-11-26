@@ -838,9 +838,10 @@ def _closed_dict(t: Trade, managed: bool = False) -> dict:
          "reason": t.close_reason, "leverage": t.leverage, "opened_at": _iso(t.opened_at),
          "closed_at": _iso(t.closed_at), "lots": round(t.lots or 0.0, 4), "note": t.journal,
          "managed": managed and t.source == "bot",
-         # Na wykresie tylko transakcje z cenami z realnych świec (terminal, bot na żywych
-         # cenach); starsze wpisy bota miały własne ceny i leżałyby obok świec.
-         "on_chart": t.source == "terminal" or t.venue == "hyperliquid"}
+         # Po surowej cenie tylko własne transakcje z terminala. Bot liczył ceny na świecach,
+         # które później nadpisuje feed brokera, a każdy interwał wykresu ma inne źródło —
+         # jego znaczniki wykres przykleja do świecy, którą akurat rysuje (2026-11-26).
+         "on_chart": t.source == "terminal"}
     if t.source == "bot" and not t.qty:     # końcówka ma prawdziwą ilość, opłatę i powód
         # W historii zwykła zamknięta transakcja (decyzja właściciela, 2026-11-01): lot
         # w mierze konta (jak w portalu i MT5), ilość z wartości punktu, powód „Closed".

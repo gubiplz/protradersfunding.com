@@ -2094,7 +2094,7 @@ function renderOrders(){
       <tbody>${cap.rows.map(o=>`<tr>
         <td class="num rt-hide" data-l="#">${o.id}</td><td class="muted" data-l="Date" data-sort="${esc(o.created_at||'')}">${dstr(o.created_at)}</td>
         <td class="rt-main" data-l="Trader">${esc(o.trader_email||'—')}${freeChip(o)}</td>
-        <td data-l="Product">${esc(o.product_key)}${o.bogo?` <span class="up" style="font-size:var(--fs-cap)" title="Buy 1 Get 1 Free — paying this order also creates a free second account of the same size">+1 free</span>`:''}${o.open_funded?` <span class="up" style="font-size:var(--fs-cap)" title="Opens straight as a funded account when paid — skips the evaluation">funded</span>`:''}${o.weekend_trading?` <span class="up" style="font-size:var(--fs-cap)" title="Weekend Trading add-on — 2 extra trading days/week">wknd</span>`:''}${o.copytrading?` <span class="up" style="font-size:var(--fs-cap)" title="Copytrading add-on — EAs, copying between the customer's own accounts and more than one device; real MT5 account">copy</span>`:''}${o.brand==='fx'?` <span class="up" style="font-size:var(--fs-cap)" title="The payment page shows Forex Passing branding — no PTF anywhere on it">FX</span>`:''}</td>
+        <td data-l="Product">${esc(o.product_key)}${o.bogo?` <span class="up" style="font-size:var(--fs-cap)" title="Buy 1 Get 1 Free — paying this order also creates a free second account of the same size">+1 free</span>`:''}${o.open_funded?` <span class="up" style="font-size:var(--fs-cap)" title="Opens straight as a funded account when paid — skips the evaluation">funded</span>`:''}${o.weekend_trading?` <span class="up" style="font-size:var(--fs-cap)" title="Weekend Trading add-on — 2 extra trading days/week">wknd</span>`:''}${o.copytrading?` <span class="up" style="font-size:var(--fs-cap)" title="EA Allowed (Expert Advisor) add-on — EAs, copying between the customer's own accounts and more than one device; real MT5 account">EA</span>`:''}${o.brand==='fx'?` <span class="up" style="font-size:var(--fs-cap)" title="The payment page shows Forex Passing branding — no PTF anywhere on it">FX</span>`:''}</td>
         <td class="num" data-l="Amount">$${fmt(o.amount_usd)}${o.coupon?` <span class="up" style="font-size:var(--fs-cap)">(${esc(o.coupon)})</span>`:''}</td>
         <td class="muted rt-hide" data-l="Provider">${esc(o.provider)}</td>
         <td data-l="Status"><span class="status ${o.status==='paid'?'paid':o.status==='failed'?'failed':'pending'}"><span class="dot"></span>${esc(o.status)}</span>
@@ -4711,7 +4711,7 @@ function askReason(opts){
    wprost, własnymi słowami. */
 async function breachAccount(id,login,copytrading){
   const powody=['Daily loss limit exceeded','Maximum drawdown exceeded',
-    'Prohibited trading strategy','Using an EA without the EA Allowed add-on','Copy trading between accounts',
+    'Prohibited trading strategy','Using an EA without the EA Allowed add-on',
     'News trading violation','Account sharing','Closed by the risk desk'];
   const breachReason=await askReason({
     title:login?`Breach account ${esc(login)}`:'Breach this account',danger:true,confirmLabel:'Breach account',

@@ -2366,15 +2366,21 @@
   function drawTrades(force) {
     if (!chart) return;
     const hist = S.showTrades && S.st ? (S.st.history || []).filter((h) => h.symbol === S.sym && h.opened_at && h.closed_at && h.entry && h.close).slice(0, 60) : [];
-    // Older Trade BOT entries (on_chart false) carry prices from their own simulation, not from
-    // these candles: their markers sit on the candle of that moment (clamped to its high/low) so
-    // they don't float beside the chart. The tooltip still shows the recorded prices.
+    // Trade BOT entries (on_chart false) were priced on candles the broker feed rewrites later,
+    // and each interval draws from a different source: their markers sit on the candle of that
+    // moment as drawn now (clamped to its high/low), on every interval. The tooltip still shows
+    // the recorded prices. Own terminal trades stay at their fill prices.
     const bars = chart.getDataList(), step = F.MS[S.interval];
     // The bar holding moment t (binary search; daily and weekly bars don't start on epoch multiples).
+    // A moment whose bar was left off (weekend start on 4h/1D, a minute without prints) takes the
+    // next bar, so a Monday-open trade isn't drawn on Friday or off the candles.
     const barAt = (t) => {
       let lo = 0, hi = bars.length - 1, k = null;
       while (lo <= hi) { const m = (lo + hi) >> 1; if (bars[m].timestamp <= t) { k = bars[m]; lo = m + 1; } else hi = m - 1; }
-      return k && t < k.timestamp + step ? k : null;
+      if (!k) return null;
+      if (t < k.timestamp + step) return k;
+      const nx = bars[lo];
+      return nx && nx.timestamp - t < 3 * 864e5 ? nx : null;
     };
     // Markers sit in the middle of their candle (the bar's own timestamp), not at the minute inside it.
     const mid = (t) => { const k = barAt(t); return k ? k.timestamp : t; };
@@ -2392,7 +2398,8 @@
       return [{ timestamp: mid(t0), value: e }, { timestamp: mid(t1), value: x }];
     };
     // The 15 s state refresh doesn't redraw trades when they haven't changed (hover stays).
-    const key = S.sym + '|' + S.interval + '|' + bars.length + '|' + hist.map((h) => h.id).join(',');
+    // First bar in the key: a reload with the same bar count still re-clamps to the new candles.
+    const key = S.sym + '|' + S.interval + '|' + bars.length + '|' + (bars[0] ? bars[0].timestamp : '') + '|' + hist.map((h) => h.id).join(',');
     if (!force && key === tradesKey) return;
     tradesKey = key;
     chart.removeOverlay({ groupId: 'ptfTrades' });

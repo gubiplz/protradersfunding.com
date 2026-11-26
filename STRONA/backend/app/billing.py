@@ -155,7 +155,7 @@ def compute_price(session, trader: Trader, product_key: str, coupon: str | None,
     # swiadomie nie oferujemy.
     if copytrading:
         if not catalog.copytrading_offered(session):
-            raise HTTPException(400, "The copytrading add-on is not available right now")
+            raise HTTPException(400, "The EA Allowed (Expert Advisor) add-on is not available right now")
         price = round(price + catalog.COPYTRADING_ADDON_USD, 2)
 
     # Promocja „Upgrade Your Size": TYLKO z poprawnym kodem promo zamowienie

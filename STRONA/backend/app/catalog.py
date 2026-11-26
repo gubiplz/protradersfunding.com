@@ -69,8 +69,8 @@ def ondemand_payout_fee_usd(product) -> float:
 
 # Add-on Copytrading: wolno kopiowac transakcje miedzy WLASNYMI kontami tradera
 # i logowac sie z wiecej niz jednego urzadzenia. Bez tego dodatku obowiazuje
-# dotychczasowy zakaz — panel ma „Copy trading between accounts" na liscie
-# powodow breachu i to sie nie zmienia dla kont bez dodatku.
+# dotychczasowy zakaz (gotowy powod „Copy trading between accounts" zniknal
+# z panelu 26.11 razem z nazwa copytrading; wpisany recznie dalej przechodzi).
 #
 # To jedyny add-on, ktory kosztuje NAS pieniadze po sprzedazy: konto z nim
 # dostaje realny rachunek MT5 u brokera, czytany przez MetaApi (oplata za konto

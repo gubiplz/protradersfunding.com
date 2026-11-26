@@ -197,8 +197,11 @@ def test_terminal_pokazuje_transakcje_bota_a_planu_nie(zywe):
         assert [(x["symbol"], x["reason"], x["lots"]) for x in st["history"]] == [("BTCUSD", "close", 0.3), ("XAUUSD", "close", 0.2)]
         assert "by" not in st["history"][0]
         assert st["history"][1]["qty"] == 20.0 and st["history"][1]["fee"] > 0
-        # Na wykresie tylko transakcja z cenami ze świec; starsza leżałaby obok nich.
-        assert st["history"][0]["on_chart"] is True and st["history"][1]["on_chart"] is False
+        # Każda transakcja bota (także na żywych cenach) jest przyklejana do rysowanych świec;
+        # po surowej cenie tylko własne transakcje z terminala.
+        assert st["history"][0]["on_chart"] is False and st["history"][1]["on_chart"] is False
+        wlasna = Trade(symbol="BTCUSD", side="buy", status="closed", source="terminal", open_price=1.0, close_price=2.0)
+        assert terminal._closed_dict(wlasna)["on_chart"] is True
         # Opłata i dźwignia jak w terminalu (0,03% × (wejście + wyjście)), P&L z planu.
         zh = st["history"][0]
         assert zh["fee"] == pytest.approx(round((77_000.0 + 77_500.0) * 0.3 * tradebot.OPLATA, 2))
