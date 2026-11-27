@@ -1448,39 +1448,66 @@ html.pwa .notif-panel{top:calc(64px + env(safe-area-inset-top))}
 .streak-chip:hover{filter:brightness(.97)}
 @media(max-width:380px){.streak-chip{padding:6px 9px;gap:4px}}
 
-/* --- daily reveal card --- */
-.reveal-wrap{perspective:1000px;max-width:420px;margin-bottom:16px}
-.reveal-card{aspect-ratio:16/9;border-radius:var(--r);cursor:pointer;position:relative;overflow:hidden;
-  background:var(--grad);color:#fff;display:flex;flex-direction:column;align-items:center;
-  justify-content:center;gap:7px;padding:18px;text-align:center;
-  box-shadow:0 18px 44px -18px rgba(99,102,241,.55);
-  transform-style:preserve-3d;will-change:transform;-webkit-tap-highlight-color:transparent}
+/* --- daily reveal card ---
+   Siostra karty Free Trade Case: ta sama ciemna baza i układ grafika + treść,
+   ale akcent turkusowy (Case ma złoty), żeby dwie karty obok siebie się nie zlewały.
+   Rzadki kupon przechodzi na złoto. */
+.reveal-wrap{perspective:1000px;margin-bottom:16px}
+:root:root body .reveal-card{position:relative;overflow:hidden;cursor:pointer;
+  display:flex;align-items:center;gap:22px;padding:22px 26px;min-height:150px;border-radius:var(--r);
+  color:#F8FAFC;text-align:left;border:1px solid rgba(54,185,169,.42);
+  background:radial-gradient(80% 140% at 100% 0%,rgba(54,185,169,.24),transparent 60%),
+    radial-gradient(60% 120% at 0% 100%,rgba(99,102,241,.14),transparent 60%),
+    linear-gradient(160deg,#16213a 0%,#111a2e 45%,#0B1220 100%);
+  box-shadow:inset 0 1px 0 rgba(140,224,212,.12),0 18px 40px -22px rgba(11,18,32,.65);
+  transform-style:preserve-3d;will-change:transform;-webkit-tap-highlight-color:transparent;
+  transition:border-color .2s,box-shadow .2s}
+:root:root body .reveal-card:not(.face-up):hover{border-color:rgba(54,185,169,.7);
+  box-shadow:inset 0 1px 0 rgba(140,224,212,.16),0 22px 46px -22px rgba(54,185,169,.45)}
+.reveal-card:focus-visible{outline:2px solid #36B9A9;outline-offset:3px}
 .reveal-card.face-up{cursor:default}
-.reveal-logo{position:absolute;right:-24px;bottom:-24px;width:150px;opacity:.1;pointer-events:none}
-.reveal-tag{font-size:10.5px;font-weight:800;letter-spacing:.18em;text-transform:uppercase;opacity:.85}
-.reveal-t{font-size:13px;opacity:.92;max-width:310px}
-.reveal-hint{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
-  border:1px solid rgba(255,255,255,.45);border-radius:999px;padding:5px 13px;margin-top:4px}
-.reveal-quote{font-family:var(--display);font-size:15.5px;line-height:1.45;font-weight:600;max-width:330px}
+/* grafika: jedna przechylona karta z ikoną, jak talia w Case */
+.reveal-art{position:relative;width:104px;height:86px;flex:none;display:grid;place-items:center}
+.reveal-art::before{content:"";position:absolute;inset:6px 18px;border-radius:12px;
+  background:radial-gradient(circle,rgba(54,185,169,.35),transparent 70%);filter:blur(10px)}
+.reveal-art i{position:relative;width:52px;height:72px;border-radius:10px;display:grid;place-items:center;
+  transform:rotate(-8deg);color:#5fe0cf;border:1.5px solid #36B9A9;
+  background:repeating-linear-gradient(45deg,rgba(54,185,169,.09) 0 2px,transparent 2px 9px),linear-gradient(160deg,#1b2846,#0B1220);
+  box-shadow:0 0 0 3px rgba(54,185,169,.18),0 12px 24px -10px rgba(0,0,0,.75);transition:transform .35s ease-out}
+.reveal-art i svg{width:26px;height:26px}
+.reveal-card:not(.face-up):hover .reveal-art i{transform:rotate(-2deg) translateY(-3px)}
+.reveal-card.face-up .reveal-art i{transform:rotate(0);background:linear-gradient(160deg,#21405a,#111a2e)}
+.reveal-body{flex:1;min-width:0}
+.reveal-tag{font-size:10.5px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:#5fe0cf}
+.reveal-h{font-size:17px;color:#F8FAFC;margin:3px 0 2px}
+.reveal-t{font-size:13px;color:rgba(248,250,252,.74);margin:4px 0 0;line-height:1.5}
+.reveal-hint{display:inline-flex;align-items:center;margin-top:12px;padding:8px 16px;border-radius:10px;
+  font-size:13px;font-weight:650;color:#0B1220;background:linear-gradient(135deg,#5fe0cf,#36B9A9);
+  box-shadow:0 8px 18px -10px rgba(54,185,169,.8)}
+.reveal-next{font-size:11px;color:rgba(248,250,252,.5);margin-top:10px}
+.reveal-quote{font-family:var(--display);font-size:16px;line-height:1.45;font-weight:600;margin:6px 0 0;color:#F8FAFC;max-width:640px}
 .reveal-quote::before{content:'\201C'}
 .reveal-quote::after{content:'\201D'}
-.reveal-big{font-size:44px;font-weight:800;line-height:1;letter-spacing:-.02em}
-.reveal-ic-big{display:flex;align-items:center;justify-content:center;color:#fff}
-.reveal-ic-big svg{width:42px;height:42px}
-.reveal-rare{background:linear-gradient(135deg,#f59e0b,#fbbf24);
-  box-shadow:0 18px 48px -14px rgba(245,158,11,.65)}
-.reveal-code{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.16);
-  border:1px dashed rgba(255,255,255,.55);border-radius:12px;padding:9px 14px}
-.reveal-code code{font-family:var(--mono);font-size:20px;font-weight:800;letter-spacing:.06em}
-.reveal-code .copy{color:#fff}
-/* Desktop: the card spans the content column like every panel around it —
-   a 420px 16:9 tile glued to the left looked broken on wide screens. */
-@media(min-width:701px){
-  .reveal-wrap{max-width:none}
-  .reveal-card{aspect-ratio:auto;min-height:230px}
-  .reveal-t{max-width:none}
+.reveal-big{font-size:40px;font-weight:800;line-height:1.05;letter-spacing:-.02em;margin-top:4px;color:#F8FAFC}
+:root:root body .reveal-card.reveal-rare{border-color:rgba(198,161,91,.6);
+  background:radial-gradient(80% 140% at 100% 0%,rgba(198,161,91,.26),transparent 60%),
+    linear-gradient(160deg,#1f2236 0%,#141a2c 45%,#0B1220 100%);
+  box-shadow:inset 0 1px 0 rgba(224,196,140,.16),0 18px 44px -18px rgba(198,161,91,.5)}
+.reveal-rare .reveal-tag{color:#e0c48c}
+.reveal-rare .reveal-art::before{background:radial-gradient(circle,rgba(198,161,91,.4),transparent 70%)}
+.reveal-rare .reveal-art i{color:#f3e2b8;border-color:#C6A15B;box-shadow:0 0 0 3px rgba(198,161,91,.3),0 0 22px rgba(198,161,91,.35)}
+.reveal-code{display:inline-flex;align-items:center;gap:10px;margin-top:8px;background:rgba(198,161,91,.1);
+  border:1px dashed rgba(198,161,91,.6);border-radius:12px;padding:8px 10px 8px 16px}
+.reveal-code code{font-family:var(--mono);font-size:20px;font-weight:800;letter-spacing:.06em;color:#f3e2b8}
+.reveal-code .copy{color:#F8FAFC}
+.reveal-code .copy:hover{color:#fff;background:rgba(255,255,255,.12)}
+@media(max-width:600px){
+  :root:root body .reveal-card{align-items:flex-start;gap:14px;padding:18px}
+  .reveal-art{width:64px;height:70px;margin-top:4px}
+  .reveal-art i{width:40px;height:56px}
+  .reveal-art i svg{width:20px;height:20px}
 }
-.reveal-code .copy:hover{color:#fff;background:rgba(255,255,255,.2)}
+@media(prefers-reduced-motion:reduce){.reveal-art i{transition:none}}
 
 /* --- Free Trade Case (baner, karta w Rewards, modal z trzema kartami) ---
    Karty i baner sa w barwach marki w OBU motywach: granat + zloto, teal na

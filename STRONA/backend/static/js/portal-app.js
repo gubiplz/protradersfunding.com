@@ -1125,28 +1125,29 @@ const TIPS=[
   'Weekend gaps ignore stops. Flatten swing risk before Friday close.',
   'Consistency passes challenges. Intensity blows them up.',
 ];
+/* Ten sam układ co karta Free Trade Case: grafika po lewej, treść po prawej. */
+const revealRow=(ico,body)=>`<div class="reveal-art" aria-hidden="true"><i>${ICO[ico]}</i></div>
+  <div class="reveal-body">${body}</div>`;
+const REVEAL_NEXT='<div class="reveal-next">New reveal tomorrow</div>';
 function revealBack(){
-  return `<img class="reveal-logo" src="/static/img/logo.png" alt="">
-    <div class="reveal-tag">Daily reveal</div>
-    <div class="reveal-t">Trading tips, bonus points or a rare coupon. One flip per day</div>
-    <div class="reveal-hint">Tap to flip</div>`;
+  return revealRow('spark',`<div class="reveal-tag">Daily reveal</div>
+    <h3 class="reveal-h">Today's card is ready</h3>
+    <p class="reveal-t">A trading tip, bonus loyalty points or a rare coupon. One flip per day.</p>
+    <span class="reveal-hint">Flip today's card</span>`);
 }
 function revealFace(p){
-  if(p.type==='tip')return `<div class="reveal-tag">Today's edge</div>
-    <blockquote class="reveal-quote">${esc(TIPS[(p.index||0)%TIPS.length])}</blockquote>
-    <div class="reveal-hint">New reveal tomorrow</div>`;
-  if(p.type==='points')return `<div class="reveal-tag">Bonus drop</div>
+  if(p.type==='tip')return revealRow('book',`<div class="reveal-tag">Today's edge</div>
+    <blockquote class="reveal-quote">${esc(TIPS[(p.index||0)%TIPS.length])}</blockquote>${REVEAL_NEXT}`);
+  if(p.type==='points')return revealRow('crown',`<div class="reveal-tag">Bonus drop</div>
     <div class="reveal-big mono">+${p.amount}</div>
-    <div class="reveal-t">loyalty points added to your account</div>
-    <div class="reveal-hint">New reveal tomorrow</div>`;
-  if(p.type==='freeze')return `<div class="reveal-tag">Streak insurance</div>
-    <div class="reveal-ic-big">${ICO.shield}</div>
-    <div class="reveal-t"><b>+1 Streak Freeze</b> — if you miss a day, your streak survives automatically</div>
-    <div class="reveal-hint">New reveal tomorrow</div>`;
-  return `<div class="reveal-tag">Rare drop · -${p.pct}% next challenge</div>
+    <p class="reveal-t">loyalty points added to your account</p>${REVEAL_NEXT}`);
+  if(p.type==='freeze')return revealRow('shield',`<div class="reveal-tag">Streak insurance</div>
+    <h3 class="reveal-h">+1 Streak Freeze</h3>
+    <p class="reveal-t">If you miss a day, your streak survives automatically.</p>${REVEAL_NEXT}`);
+  return revealRow('gift',`<div class="reveal-tag">Rare drop · -${p.pct}% next challenge</div>
     <div class="reveal-code"><code>${esc(p.code)}</code>
       <button class="copy" onclick="event.stopPropagation();copyVal(this,'${jsq(p.code)}')" title="Copy">${ICO.copy}</button></div>
-    <div class="reveal-t">valid 48h, personal, works only on your account</div>`;
+    <p class="reveal-t">Valid 48h, personal, works only on your account.</p>`);
 }
 function paintReveal(p){
   const c=$('revealCard'); if(!c)return;
