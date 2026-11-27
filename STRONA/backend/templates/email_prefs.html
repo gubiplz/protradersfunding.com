@@ -3,11 +3,12 @@
 {% block description %}Choose which emails you get from {{ site_name }}.{% endblock %}
 {% block head_extra %}<meta name="robots" content="noindex">
 <style>
-  .ep-card{max-width:620px;margin:22px 0 0;border:1px solid var(--line,#e5e7eb);border-radius:18px;padding:8px 22px;background:var(--card,#fff)}
+  .ep-card{max-width:620px;margin:22px 0 0;border:1px solid var(--line,#e5e7eb);border-radius:18px;padding:8px 22px;
+    background:var(--panel,#fff);color:var(--txt,#0f172a)}   /* kolory motywu: jasny i ciemny */
   .ep-row{display:flex;gap:14px;align-items:flex-start;padding:16px 0;border-bottom:1px solid var(--line,#e5e7eb);cursor:pointer}
   .ep-row:last-child{border-bottom:0}
-  .ep-row input{width:20px;height:20px;margin-top:2px;flex:none;accent-color:var(--accent,#0f766e)}
-  .ep-row b{display:block;font-size:15.5px}
+  .ep-row input{width:20px;height:20px;margin-top:2px;flex:none;accent-color:var(--acc,#0f8a7e)}
+  .ep-row b{display:block;font-size:15.5px;color:var(--txt,#0f172a)}
   .ep-row span{display:block;color:var(--muted,#6b7280);font-size:14px;line-height:1.5;margin-top:2px}
   .ep-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
   .ep-note{color:var(--muted,#6b7280);font-size:13.5px;line-height:1.6;max-width:620px;margin-top:16px}
