@@ -54,7 +54,7 @@ from . import (achievements, auth, billing, catalog, certshot, contentbot, count
 from . import trade_case
 from . import vusdt
 from . import helpdesk
-from . import markets, terminal
+from . import countdown, markets, terminal
 from . import academy
 from . import legal
 from .config import get_settings
@@ -4142,6 +4142,101 @@ def admin_newsletter_send(payload: NewsletterSendIn, request: Request):
                 "remaining": max(0, zostalo)}
     finally:
         session.close()
+
+
+@app.get("/email/countdown.gif", include_in_schema=False)
+def email_countdown(request: Request, end: int):
+    """Odliczanie w mailach kampanii: GIF liczony przy każdym otwarciu (bez cache)."""
+    _rate_limit(request, "countdown", 120, 60)
+    koniec = datetime.fromtimestamp(max(0, min(end, 4102444800)), tz=timezone.utc)
+    return Response(countdown.gif(koniec), media_type="image/gif",
+                    headers={"Cache-Control": "no-store, max-age=0"})
+
+
+class CampaignIn(BaseModel):
+    template: str = Field(max_length=40)
+    subject: str = Field(min_length=1, max_length=160)
+    offer: str = Field(default="", max_length=200)
+    body: str = Field(default="", max_length=4000)
+    cta_label: str = Field(default="Claim the offer", max_length=40)
+    cta_url: str = Field(default="", max_length=300)
+    ends_at: datetime | None = None
+    fine_print: str = Field(default="", max_length=600)
+    test_to: str | None = Field(default=None, max_length=200)
+
+
+def _kampania_ctx(p: CampaignIn) -> dict:
+    url = p.cta_url.strip() or f"{settings.app_base_url}/portal?view=store"
+    if not url.startswith(("https://", "http://localhost")):
+        raise HTTPException(400, "The button link must start with https://")
+    konc = p.ends_at
+    if konc is not None and konc.tzinfo is None:
+        konc = konc.replace(tzinfo=timezone.utc)
+    return {"template": p.template, "subject": p.subject, "offer": p.offer.strip(), "body": p.body.strip(),
+            "cta_label": p.cta_label.strip() or "Claim the offer", "cta_url": url,
+            "ends_ts": int(konc.timestamp()) if konc else None, "fine_print": p.fine_print.strip()}
+
+
+def _kampania_odbiorcy(session, request: Request) -> list[tuple[str, str, str]]:
+    """(adres, link wypisania, powód) — traderzy ze zgodą na oferty i newsletter, każdy adres raz.
+    Konto wygrywa z newsletterem: link wypisania z konta wyłącza oferty tam, gdzie żyją."""
+    out: dict[str, tuple[str, str, str]] = {}
+    for sub in session.query(NewsletterSubscriber).filter(NewsletterSubscriber.unsubscribed_at.is_(None)):
+        out[sub.email.lower()] = (sub.email, _newsletter_unsub_url(request, sub.token),
+                                  f"You're receiving this because you subscribed to {settings.site_name} updates.")
+    for tr in (session.query(Trader).filter(Trader.notify_marketing.is_(True), Trader.is_admin.is_(False))):
+        if tr.email and not tr.email.lower().endswith(("@imported.local", "@removed.invalid")):
+            out[tr.email.lower()] = (tr.email, _unsub_url(tr.id), None)
+    return sorted(out.values(), key=lambda x: x[0].lower())
+
+
+@app.get("/api/admin/campaign", dependencies=[Depends(auth.require_admin)])
+def admin_campaign_info(request: Request):
+    session = SessionLocal()
+    try:
+        return {"templates": [{"key": k, "label": v, "image": f"/static/img/campaigns/{k}.jpg"}
+                              for k, v in notify.CAMPAIGN_TEMPLATES.items()],
+                "audience": len(_kampania_odbiorcy(session, request))}
+    finally:
+        session.close()
+
+
+@app.post("/api/admin/campaign/send", dependencies=[Depends(auth.require_admin)])
+def admin_campaign_send(payload: CampaignIn, request: Request):
+    """Kampania z grafiką i odliczaniem: próbka na jeden adres albo wysyłka partiami po
+    NEWSLETTER_SEND_MAX. Kto już ją dostał (ten sam temat), jest pomijany, więc kolejne
+    „Send” dosyła resztę zamiast powtarzać pierwszą partię."""
+    if payload.template not in notify.CAMPAIGN_TEMPLATES:
+        raise HTTPException(400, "Unknown template")
+    ctx = _kampania_ctx(payload)
+    if payload.test_to:
+        adres = payload.test_to.strip().lower()
+        if not _EMAIL_RX.match(adres):
+            raise HTTPException(400, "Enter a valid test address")
+        with notify.bez_dubli_off():
+            blad = notify.send_now("campaign", adres, {**ctx, "unsubscribe_url": f"{settings.app_base_url}/email/unsubscribe/test"})
+        if blad:
+            raise HTTPException(502, f"Test email failed: {blad}")
+        return {"sent": 1, "test": True}
+    session = SessionLocal()
+    try:
+        odbiorcy = _kampania_odbiorcy(session, request)
+    finally:
+        session.close()
+    wyslane = bledy = juz = 0
+    for adres, wypisz, powod in odbiorcy:
+        if wyslane + bledy >= NEWSLETTER_SEND_MAX:
+            break
+        blad = notify.send_now("campaign", adres, {**ctx, "unsubscribe_url": wypisz,
+                                                   **({"unsubscribe_why": powod} if powod else {})})
+        if blad == notify.DUPLIKAT:
+            juz += 1
+        elif blad:
+            bledy += 1
+        else:
+            wyslane += 1
+    return {"sent": wyslane, "failed": bledy, "already_sent": juz, "total": len(odbiorcy),
+            "remaining": max(0, len(odbiorcy) - wyslane - bledy - juz)}
 
 
 class MailTestIn(BaseModel):

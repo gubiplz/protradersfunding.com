@@ -409,6 +409,14 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"and we'll sort it out."
             + (f"\n\nStop reminder and offer emails: {ctx['unsubscribe_url']}" if ctx.get("unsubscribe_url") else ""),
         ),
+        "campaign": (
+            str(ctx.get("subject") or "An offer from us"),
+            "\n\n".join(x for x in (
+                str(ctx.get("offer") or ""), str(ctx.get("body") or ""),
+                f"{ctx.get('cta_label') or 'Claim the offer'}: {ctx.get('cta_url') or settings.app_base_url + '/portal?view=store'}",
+                str(ctx.get("fine_print") or ""),
+                f"Unsubscribe: {ctx['unsubscribe_url']}" if ctx.get("unsubscribe_url") else "") if x),
+        ),
         "checkout_recovery_offer": (
             f"{_num(ctx.get('pct'))}% off the {ctx.get('product_label')} challenge",
             f"Hi {name},\n\nthe {ctx.get('product_label')} challenge you started is still "
@@ -632,17 +640,18 @@ def _footer_links_html(prefs_url: str | None) -> str:
             + " · ".join(pozycje) + "</p>")
 
 
-def _shell(parts: list[str], prefs_url: str | None = None) -> str:
+def _shell(parts: list[str], prefs_url: str | None = None, logo_row: bool = True) -> str:
     brand = settings.site_name
     logo = f"{settings.app_base_url}/static/img/logo.png"
+    naglowek = (f'''<tr><td align="center" style="padding:46px 44px 28px">
+     <img src="{logo}" width="46" height="46" alt="{brand}" style="display:block">
+   </td></tr>''' if logo_row else "")
     return f"""<!doctype html><html><body style="margin:0;padding:0;background:#f5f5f7">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f7;padding:44px 14px">
  <tr><td align="center">
   <table role="presentation" width="560" cellpadding="0" cellspacing="0"
-    style="max-width:560px;width:100%;background:#ffffff;border-radius:22px">
-   <tr><td align="center" style="padding:46px 44px 28px">
-     <img src="{logo}" width="46" height="46" alt="{brand}" style="display:block">
-   </td></tr>
+    style="max-width:560px;width:100%;background:#ffffff;border-radius:22px;overflow:hidden">
+   {naglowek}
    {''.join(parts)}
    <tr><td style="padding:0 0 46px"></td></tr>
   </table>
@@ -661,8 +670,49 @@ def _shell(parts: list[str], prefs_url: str | None = None) -> str:
 </table></body></html>"""
 
 
+CAMPAIGN_TEMPLATES = {
+    "black-friday": "Black Friday", "flash-sale": "Flash Sale",
+    "bogo": "Buy 1 Get 1 Free", "weekend-sale": "Weekend Sale",
+}
+
+
+def _campaign_parts(ctx: dict) -> list[str]:
+    """Mail kampanii jak u dużych nadawców: pasek z odliczaniem (GIF), grafika, złoty blok
+    oferty z przyciskiem, tekst, drugi przycisk, drobny druk, wypisanie."""
+    b = settings.app_base_url
+    szablon = ctx.get("template") if ctx.get("template") in CAMPAIGN_TEMPLATES else "flash-sale"
+    cta_url = ctx.get("cta_url") or f"{b}/portal?view=store"
+    cta = html.escape(ctx.get("cta_label") or "Claim the offer")
+    btn = (f'<a href="{html.escape(cta_url, quote=True)}" style="display:inline-block;background:#0f8a7e;color:#ffffff;'
+           f'font:600 16px/1 {_FONT};text-decoration:none;padding:17px 34px;border-radius:12px">{cta}</a>')
+    parts = []
+    if ctx.get("ends_ts"):
+        parts.append(f'<tr><td style="padding:0;line-height:0"><img src="{b}/email/countdown.gif?end={int(ctx["ends_ts"])}" '
+                     f'width="560" alt="Offer ends soon" style="display:block;width:100%;height:auto;border:0"></td></tr>')
+    parts.append(f'<tr><td style="padding:0;line-height:0;background:#070d18"><a href="{html.escape(cta_url, quote=True)}">'
+                 f'<img src="{b}/static/img/campaigns/{szablon}.jpg" width="560" alt="{html.escape(CAMPAIGN_TEMPLATES[szablon])}" '
+                 f'style="display:block;width:100%;height:auto;border:0"></a></td></tr>')
+    if ctx.get("offer"):
+        parts.append(f'<tr><td align="center" style="background:#070d18;padding:4px 32px 34px">'
+                     f'<div style="border:1px solid rgba(231,194,122,.45);border-radius:16px;padding:20px 22px;margin:0 0 24px">'
+                     f'<p style="font:700 21px/1.35 {_FONT};color:#e7c27a;margin:0">{html.escape(ctx["offer"])}</p></div>'
+                     f'{btn}</td></tr>')
+    tekst = "".join(f'<p style="font:400 16px/1.6 {_FONT};color:{_INK};margin:0 0 14px">{html.escape(a)}</p>'
+                    for a in str(ctx.get("body") or "").split("\n\n") if a.strip())
+    parts.append(f'<tr><td style="padding:34px 40px 8px">{tekst}</td></tr>')
+    parts.append(f'<tr><td align="center" style="padding:10px 40px 6px">{btn}</td></tr>')
+    if ctx.get("fine_print"):
+        parts.append(f'<tr><td align="center" style="padding:14px 40px 0">'
+                     f'<p style="font:400 12px/1.6 {_FONT};color:{_MUTE};margin:0">{html.escape(ctx["fine_print"])}</p></td></tr>')
+    parts.append(_unsub_html(ctx.get("unsubscribe_url"),
+                             ctx.get("unsubscribe_why") or _WHY_REMINDER.format(site=settings.site_name)))
+    return parts
+
+
 def _render_html(event: str, ctx: dict, subject: str) -> str | None:
     """Wersja HTML każdego maila — wspólny layout, treść per zdarzenie."""
+    if event == "campaign":
+        return _shell(_campaign_parts(ctx), ctx.get("preferences_url"), logo_row=False)
     brand = settings.site_name
     name = ctx.get("name") or "trader"
     login = ctx.get("login", "")
@@ -1134,6 +1184,7 @@ _PREF_BY_EVENT = {
     # z ofert, nie dostaje tez tego.
     "checkout_recovery": "notify_marketing",
     "checkout_recovery_offer": "notify_marketing",
+    "campaign": "notify_marketing",
     # Oferta flash to czysty marketing — kto wypisal sie z ofert, nie dostaje.
     "flash_offer": "notify_marketing",
 }
@@ -1201,7 +1252,7 @@ def w_tle(fn, *args) -> None:
 # Maile marketingowe (newsletter, oferty, porzucony koszyk) nie idą dwa razy z tą samą treścią na ten
 # sam adres: drugie kliknięcie „Send”, druga partia newslettera albo ta sama oferta uruchomiona
 # ponownie pomija tych, którzy już ją dostali. Tożsamość maila = zdarzenie + temat.
-_BEZ_DUBLI = {"newsletter_blast", "newsletter_welcome", "flash_offer",
+_BEZ_DUBLI = {"newsletter_blast", "newsletter_welcome", "flash_offer", "campaign",
               "checkout_recovery", "checkout_recovery_offer"}
 DUBEL_OKNO_DNI = 7
 DUPLIKAT = "ten sam mail poszedł już na ten adres (ostatnie 7 dni)"
