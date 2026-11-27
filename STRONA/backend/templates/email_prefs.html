@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Email preferences — {{ site_name }}{% endblock %}
+{% block description %}Choose which emails you get from {{ site_name }}.{% endblock %}
+{% block head_extra %}<meta name="robots" content="noindex">
+<style>
+  .ep-card{max-width:620px;margin:22px 0 0;border:1px solid var(--line,#e5e7eb);border-radius:18px;padding:8px 22px;background:var(--card,#fff)}
+  .ep-row{display:flex;gap:14px;align-items:flex-start;padding:16px 0;border-bottom:1px solid var(--line,#e5e7eb);cursor:pointer}
+  .ep-row:last-child{border-bottom:0}
+  .ep-row input{width:20px;height:20px;margin-top:2px;flex:none;accent-color:var(--accent,#0f766e)}
+  .ep-row b{display:block;font-size:15.5px}
+  .ep-row span{display:block;color:var(--muted,#6b7280);font-size:14px;line-height:1.5;margin-top:2px}
+  .ep-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
+  .ep-note{color:var(--muted,#6b7280);font-size:13.5px;line-height:1.6;max-width:620px;margin-top:16px}
+  .ep-ok{display:inline-block;margin-top:14px;padding:8px 14px;border-radius:10px;background:rgba(16,185,129,.12);color:#047857;font-weight:600}
+</style>{% endblock %}
+
+{% block content %}
+<section class="page-head"><div class="wrap">
+  <span class="pill">Emails</span>
+  {% if found %}
+  <h1>Email preferences</h1>
+  <p class="lede">For {{ masked }}. Choose which emails you'd like to get from {{ site_name }}.</p>
+  {% if saved %}<p class="ep-ok" role="status">Saved. Your preferences are updated.</p>{% endif %}
+  <form method="post">
+    <div class="ep-card">
+      {% for k in kategorie %}
+      <label class="ep-row"><input type="checkbox" name="{{ k.field }}" {% if k.on %}checked{% endif %}>
+        <div><b>{{ k.label }}</b><span>{{ k.desc }}</span></div></label>
+      {% endfor %}
+    </div>
+    <div class="ep-actions">
+      <button class="btn" type="submit">Save preferences</button>
+      <button class="btn-ghost" type="submit" name="all_off" value="1">Unsubscribe from all optional emails</button>
+    </div>
+  </form>
+  <p class="ep-note">Sign-in, password, payment and account-access emails are always sent, because they are part of
+     running your account. You can also change these settings in the portal under Settings.</p>
+  {% else %}
+  <h1>This link has expired.</h1>
+  <p class="lede">Change your email settings in the portal under Settings, or write to
+     <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p>
+  {% endif %}
+</div></section>
+<div style="height:60px"></div>
+{% endblock %}

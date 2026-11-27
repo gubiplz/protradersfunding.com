@@ -308,3 +308,30 @@ def test_probki_maili_z_panelu_ida_zawsze(maile):
         assert c.post("/api/admin/mail-test", json={"to": "probka@test.pl"}).status_code in (401, 403)
     zdarzenia = [m[0] for m in maile if m[1] == "probka@test.pl"]
     assert zdarzenia.count("checkout_recovery_offer") == 2 and "newsletter_blast" in zdarzenia
+
+
+def test_strona_preferencji_bez_logowania_i_stopka(monkeypatch):
+    tid, _, email = _porzucone(marketing=True)
+    sciezka = main_mod._unsub_url(tid).replace(get_settings().app_base_url, "").replace("/unsubscribe/", "/preferences/")
+    with TestClient(app) as c:
+        strona = c.get(sciezka)
+        assert strona.status_code == 200 and "Email preferences" in strona.text and "Offers &amp; reminders" in strona.text
+        # odznacz oferty, zostaw resztę
+        r = c.post(sciezka, data={"notify_trading": "on", "notify_payouts": "on", "notify_updates": "on"})
+        assert r.status_code == 200 and "Saved" in r.text
+        s = SessionLocal(); t = s.get(Trader, tid)
+        assert t.notify_marketing is False and t.notify_trading and t.notify_payouts and t.notify_updates
+        s.close()
+        c.post(sciezka, data={"all_off": "1"})
+        s = SessionLocal(); t = s.get(Trader, tid)
+        assert not (t.notify_marketing or t.notify_trading or t.notify_payouts or t.notify_updates)
+        s.close()
+        assert "This link has expired" in c.get("/email/preferences/zly").text
+    # stopka maila do posiadacza konta: dokumenty + link do preferencji z tokenem
+    html_maila = []
+    monkeypatch.setattr(notify.settings, "smtp_host", "")
+    monkeypatch.setattr(notify, "_render_html", (lambda orig: (lambda e, ctx, subj: html_maila.append(
+        orig(e, ctx, subj)) or html_maila[-1]))(notify._render_html))
+    notify.send_now("password_reset", email, {"name": "Jan", "reset_url": "https://x"})
+    assert "/email/preferences/" in html_maila[-1] and "/privacy" in html_maila[-1] and "/risk-disclosure" in html_maila[-1]
+    assert "All rights reserved" in html_maila[-1]

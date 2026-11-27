@@ -3931,6 +3931,44 @@ def marketing_unsubscribe(token: str, request: Request):
         session.close()
 
 
+# Kategorie strony preferencji: pole Tradera, nazwa, opis. Maile o logowaniu, haśle, płatności
+# i dane dostępowe nie mają przełącznika (idą zawsze), co strona mówi wprost.
+PREF_KATEGORIE = [
+    ("notify_marketing", "Offers & reminders", "Personal offers and reminders about an unfinished checkout."),
+    ("notify_trading", "Trading", "Phase passes, funding, targets, limit warnings, daily recap and weekly review."),
+    ("notify_payouts", "Payouts", "Payout requested, approved and sent."),
+    ("notify_updates", "Account", "Verification results and store credit."),
+]
+
+
+@app.api_route("/email/preferences/{token}", methods=["GET", "POST"], include_in_schema=False)
+async def email_preferences(token: str, request: Request):
+    """Preferencje maili bez logowania (link w stopce każdego maila), jak centrum subskrypcji."""
+    tid = auth.parse_unsub_token(token)
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, tid) if tid else None
+        zapisane = False
+        if tr and request.method == "POST":
+            form = await request.form()
+            wszystko = form.get("all_off") == "1"
+            for pole, _, _ in PREF_KATEGORIE:
+                setattr(tr, pole, False if wszystko else form.get(pole) == "on")
+            session.commit()
+            zapisane = True
+        kategorie = [{"field": p, "label": n, "desc": d, "on": bool(getattr(tr, p, False))}
+                     for p, n, d in PREF_KATEGORIE] if tr else []
+        return _page(request, "email_prefs.html", found=bool(tr), saved=zapisane, kategorie=kategorie,
+                     masked=(_maskuj_email(tr.email) if tr else ""))
+    finally:
+        session.close()
+
+
+def _maskuj_email(email: str) -> str:
+    login, _, domena = email.partition("@")
+    return f"{login[:3]}{'*' * max(3, len(login) - 3)}@{domena}"
+
+
 def _unsub_url(trader_id: int) -> str:
     return f"{settings.app_base_url}/email/unsubscribe/{auth.make_unsub_token(trader_id)}"
 
