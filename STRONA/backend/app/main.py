@@ -1054,6 +1054,13 @@ class ResetIn(BaseModel):
 RESET_MAILE_NA_GODZINE = 3
 
 
+def _w_newsletterze(session, email: str) -> bool:
+    """Adres zapisany (i niewypisany) do newslettera, czyli z udzieloną zgodą na maile marketingowe."""
+    return session.query(NewsletterSubscriber).filter(
+        func.lower(NewsletterSubscriber.email) == email.lower(),
+        NewsletterSubscriber.unsubscribed_at.is_(None)).first() is not None
+
+
 @app.post("/api/auth/forgot")
 def forgot_password(payload: ForgotIn, request: Request):
     """Zawsze 200 — odpowiedź nie może zdradzać, czy e-mail istnieje w bazie.
@@ -1298,7 +1305,8 @@ def signup(payload: SignupIn, request: Request, response: Response):
             password_set=True,
             terms_accepted_at=datetime.now(timezone.utc),
             signup_country=_kraj_z_ip(request), last_login_country=_kraj_z_ip(request),
-            notify_marketing=bool(payload.marketing_opt_in),
+            # Zgoda z checkboxa albo wcześniejszy zapis do newslettera (ta sama zgoda na maile marketingowe).
+            notify_marketing=bool(payload.marketing_opt_in) or _w_newsletterze(session, email),
         )
         session.add(tr)
         session.flush()
@@ -1307,6 +1315,9 @@ def signup(payload: SignupIn, request: Request, response: Response):
         if payload.marketing_opt_in:
             legal.record_consent(session, kind="marketing", request=request, trader_id=tr.id,
                                  detail="Marketing emails (checkout reminders, offers), optional checkbox at signup")
+        elif tr.notify_marketing:
+            legal.record_consent(session, kind="marketing", request=request, trader_id=tr.id, email=email,
+                                 detail="Marketing emails: consent given earlier on the newsletter form")
         session.commit()
         # welcome idzie dopiero po potwierdzeniu adresu — najpierw sam kod
         _wyslij_mail_weryfikacyjny(request, tr)
@@ -3874,6 +3885,12 @@ def newsletter_subscribe(payload: NewsletterIn, request: Request):
         if nowy:
             legal.record_consent(session, kind="newsletter", request=request, email=email,
                                  detail=f"marketing e-mail, {sub.source} form")
+        # Ta sama zgoda („send me marketing emails”) włącza oferty i przypomnienia na koncie z tym adresem.
+        tr = session.query(Trader).filter(func.lower(Trader.email) == email).first()
+        if tr and not tr.notify_marketing:
+            tr.notify_marketing = True
+            legal.record_consent(session, kind="marketing", request=request, trader_id=tr.id, email=email,
+                                 detail=f"marketing e-mail, newsletter {sub.source} form")
         session.commit()
         if nowy:
             notify.send("newsletter_welcome", email,

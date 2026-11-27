@@ -210,3 +210,25 @@ def test_zgoda_marketingowa_przy_rejestracji_jest_osobna_i_domyslnie_nie():
     rodzaje = lambda t: {r.kind for r in s.query(ConsentRecord).filter(ConsentRecord.trader_id == t.id)}  # noqa: E731
     assert "marketing" not in rodzaje(t_bez) and "marketing" in rodzaje(t_ze)
     s.close()
+
+
+def test_zapis_do_newslettera_wlacza_oferty_na_koncie_i_odwrotnie():
+    from app.models import ConsentRecord
+    with TestClient(app) as c:
+        # konto bez zgody → zapis do newslettera tym adresem włącza oferty i zostawia dowód
+        konto = f"nlkonto{next(LICZNIK)}@test.pl"
+        assert c.post("/api/auth/signup", json={"email": konto, "password": "haslo12345",
+                                                "terms_accepted": True}).status_code == 200
+        assert c.post("/api/newsletter/subscribe", json={"email": konto, "consent": True}).status_code == 200
+        # najpierw newsletter, potem rejestracja bez checkboxa → oferty od razu włączone
+        nl = f"nlnajpierw{next(LICZNIK)}@test.pl"
+        assert c.post("/api/newsletter/subscribe", json={"email": nl, "consent": True}).status_code == 200
+        assert c.post("/api/auth/signup", json={"email": nl, "password": "haslo12345",
+                                                "terms_accepted": True}).status_code == 200
+    s = SessionLocal()
+    for adres in (konto, nl):
+        t = s.query(Trader).filter(Trader.email == adres).one()
+        assert t.notify_marketing is True
+        assert s.query(ConsentRecord).filter(ConsentRecord.trader_id == t.id,
+                                             ConsentRecord.kind == "marketing").count() == 1
+    s.close()
