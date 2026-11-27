@@ -1,4 +1,5 @@
-"""Kopia maili ODEBRANYCH na skrzynkę zespołu (`MAIL_FORWARD_TO`).
+"""Kopia maili ODEBRANYCH na skrzynkę zespołu (panel: Mail → Received → Forwarding;
+bez ustawienia w panelu — `MAIL_FORWARD_TO`).
 
 Domena ma MX u Resenda, więc poczta ląduje tylko u niego (panel czyta ją
 przez `app/inbox.py`). Kopia na zwykłą skrzynkę jest po to, żeby kod z
@@ -27,7 +28,7 @@ from .config import get_settings
 from .db import SessionLocal
 from .inbox import _http_get, klucze
 from .lead_mail import RESEND_UA, RESEND_URL
-from .models import MailLog
+from .models import AppSetting, MailLog
 
 settings = get_settings()
 
@@ -35,14 +36,54 @@ EVENT = "inbound_forward"
 TIMEOUT_SEK = 15
 
 
-def cele() -> list[str]:
-    """Adresy kopii z `MAIL_FORWARD_TO`, bez pustych i duplikatów."""
+KLUCZ = "mail_forward"   # AppSetting: {"on": bool, "to": "a@x.com, b@y.com"} — z panelu
+MAX_ADRESOW = 5
+
+
+def adresy(tekst: str) -> list[str]:
+    """Adresy z listy po przecinku, bez pustych i duplikatów."""
     out = []
-    for a in (settings.mail_forward_to or "").split(","):
+    for a in (tekst or "").replace(";", ",").split(","):
         a = parseaddr(a.strip())[1].lower()
-        if "@" in a and a not in out:
+        if "@" in a and "." in a.rsplit("@", 1)[1] and a not in out:
             out.append(a)
     return out
+
+
+def ustawienia() -> dict:
+    """Stan z panelu; bez wpisu w bazie — `MAIL_FORWARD_TO` z env (jak przed panelem)."""
+    s = SessionLocal()
+    try:
+        w = s.get(AppSetting, KLUCZ)
+    finally:
+        s.close()
+    if w is None:
+        env = settings.mail_forward_to or ""
+        return {"on": bool(adresy(env)), "to": ", ".join(adresy(env))}
+    try:
+        d = json.loads(w.value or "{}")
+    except ValueError:
+        d = {}
+    return {"on": bool(d.get("on")), "to": str(d.get("to") or "")}
+
+
+def zapisz_ustawienia(on: bool, to: str) -> dict:
+    lista = adresy(to)
+    s = SessionLocal()
+    try:
+        w = s.get(AppSetting, KLUCZ) or AppSetting(key=KLUCZ)
+        w.value = json.dumps({"on": bool(on), "to": ", ".join(lista)})
+        s.merge(w)
+        s.commit()
+    finally:
+        s.close()
+    return ustawienia()
+
+
+def cele() -> list[str]:
+    """Adresy kopii, gdy przekazywanie jest włączone; inaczej pusta lista."""
+    u = ustawienia()
+    return adresy(u["to"]) if u["on"] else []
 
 
 def _nadawca() -> str:

@@ -1258,6 +1258,30 @@ const mailMatch=(q,pola)=>{
   return slowa.every(w=>tekst.includes(w));
 };
 
+/* Kopia odebranych maili na zwykłą skrzynkę (POST /api/admin/mail/forward). */
+function mailFwdBar(f){
+  f=f||{on:false,to:''};
+  return `<div class="panel" id="mfwd" style="display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;padding:12px 16px;margin:0 0 14px">
+    <b>Forwarding</b>
+    <label class="nlp-sw"><span>${f.on?'On':'Off'}</span><label class="switch"><input type="checkbox" id="mfwd-on" ${f.on?'checked':''}
+      aria-label="Forward received mail" onchange="this.closest('.nlp-sw').firstElementChild.textContent=this.checked?'On':'Off'"><i></i></label></label>
+    <input id="mfwd-to" class="inp" type="text" inputmode="email" maxlength="600" style="flex:1 1 240px;min-width:0"
+      value="${esc(f.to||'')}" placeholder="you@gmail.com, team@example.com" aria-label="Forward to">
+    <button class="btn-p sm" onclick="mailFwdSave(this)">Save</button>
+    <span class="muted" style="font-size:var(--fs-cap);flex-basis:100%">A copy of every received e-mail goes to these addresses (up to 5, comma-separated). Reply in your mailbox goes straight to the sender.</span>
+  </div>`;
+}
+async function mailFwdSave(btn){
+  const on=$('mfwd-on').checked,to=$('mfwd-to').value;
+  btn.disabled=true;
+  try{
+    const f=await api('/api/admin/mail/forward',{method:'POST',body:JSON.stringify({on,to})});
+    if(window._mailIn)window._mailIn.forward=f;
+    $('mfwd-to').value=f.to||'';
+    toast(f.on?'Forwarding on':'Forwarding off');
+  }catch(e){toast(e.message||'Could not save','err')}
+  finally{btn.disabled=false}
+}
 function renderMailInbox(){
   const d=window._mailIn;
   if(!d){
@@ -1287,6 +1311,7 @@ function renderMailInbox(){
       <button class="btn-o sm" onclick="refreshMailRemote(this)">Refresh</button>
       <button class="btn-p sm" onclick="openMailCompose()">Compose</button>
     </div>
+    ${mailFwdBar(d.forward)}
     ${(d.errors||[]).map(e=>`<p class="lead-statline" style="color:var(--gold)">⚠ ${esc(e)}</p>`).join('')}
     ${rows.length?`<div class="tbl-wrap tw-wide rtbl-wrap"><table class="tbl sortable rtbl" data-tkey="admin.inbox">
       <thead><tr><th>Date</th><th>From</th><th>Subject</th><th>To</th><th>Brand</th></tr></thead>
