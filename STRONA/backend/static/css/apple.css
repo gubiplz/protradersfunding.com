@@ -18,11 +18,11 @@ h2,h3{letter-spacing:-.015em}
 .side-sec{letter-spacing:.02em;text-transform:none;font-size:12px;font-weight:600;padding:14px 10px 6px}
 .side-nav{gap:1px}
 .sb-link{gap:11px;padding:6px 10px;border:0;border-radius:10px;color:var(--txt);font-weight:500;
-  transition:background .2s,transform .35s var(--np-spring)}
+  transition:background .15s,transform .15s ease-out}
 /* Kafelek jak ikona w dzwonku: miękki odcień + kolorowy znak, nie pełny kolor.
    Paleta ograniczona do barw PTF i pogrupowana znaczeniem, żeby menu nie było tęczą. */
 .sb-link svg{width:30px;height:30px;flex:0 0 30px;padding:6px;border-radius:9px;opacity:1;color:var(--k,var(--muted));
-  background:color-mix(in srgb,var(--k,var(--muted)) var(--np-tint),transparent);transition:background .25s,transform .4s var(--np-spring)}
+  background:color-mix(in srgb,var(--k,var(--muted)) var(--np-tint),transparent);transition:background .25s,transform .2s ease-out}
 .sb-link.on svg{background:color-mix(in srgb,var(--k,var(--muted)) 24%,transparent)}
 .sb-link:hover svg{transform:scale(1.06)}
 .sb-link:hover{background:var(--np-fill);color:var(--txt)}
