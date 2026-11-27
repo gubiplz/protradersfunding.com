@@ -403,6 +403,7 @@ def test_cron_upsell_nudge(monkeypatch):
                   max_daily_loss_pct=5, max_overall_loss_pct=10, min_trading_days=3,
                   drawdown_type="static", profit_split_pct=80, phase="eval_1", status="active",
                   balance=26_000, equity=26_000, peak_equity=26_000))
+    s.get(Trader, tid).notify_marketing = True   # od 27.11 zachęty tylko po zgodzie marketingowej
     s.commit(); s.close()
 
     r = client.post("/api/cron/upsell-nudge", headers=ADMIN)

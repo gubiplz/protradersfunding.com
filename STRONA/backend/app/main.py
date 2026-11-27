@@ -956,6 +956,8 @@ class SignupIn(BaseModel):
     full_name: str = Field(default="", max_length=120)
     referral: str | None = Field(default=None, max_length=64)
     terms_accepted: bool = False
+    # Osobna, dobrowolna zgoda na maile marketingowe (przypomnienia o koszyku, oferty). Domyślnie NIE.
+    marketing_opt_in: bool = False
 
 
 class LoginIn(BaseModel):
@@ -1296,11 +1298,15 @@ def signup(payload: SignupIn, request: Request, response: Response):
             password_set=True,
             terms_accepted_at=datetime.now(timezone.utc),
             signup_country=_kraj_z_ip(request), last_login_country=_kraj_z_ip(request),
+            notify_marketing=bool(payload.marketing_opt_in),
         )
         session.add(tr)
         session.flush()
         legal.record_consent(session, kind="signup", request=request, trader_id=tr.id,
                              detail="Terms of Service + Privacy Policy, checkbox")
+        if payload.marketing_opt_in:
+            legal.record_consent(session, kind="marketing", request=request, trader_id=tr.id,
+                                 detail="Marketing emails (checkout reminders, offers), optional checkbox at signup")
         session.commit()
         # welcome idzie dopiero po potwierdzeniu adresu — najpierw sam kod
         _wyslij_mail_weryfikacyjny(request, tr)
@@ -11017,7 +11023,7 @@ def _upsell_nudge(min_days: int = 21) -> dict:
     wynikiem i pokazujemy, ile ten sam procent dalby na najwiekszym rozmiarze w
     tej rodzinie. Zero obietnic — to przeliczenie wlasnego wyniku tradera.
 
-    Bramki: kategoria „Daily Recap & Offers" (notify_marketing) oraz odstep
+    Bramki: zgoda marketingowa (notify_marketing, „Offers & reminders”) oraz odstep
     min_days od poprzedniego takiego powiadomienia — to promocja, wiec nie moze
     wracac co dobe. Klikniecie prowadzi do zakladki Challenges z parametrem
     `upsell=1`, ktory przewija do panelu i go podswietla.

@@ -192,3 +192,21 @@ def test_wypisanie_blokuje_oba_maile(maile):
     s = SessionLocal()
     assert s.query(FlashOffer).filter(FlashOffer.trader_id == tid).count() == 0
     s.close()
+
+
+def test_zgoda_marketingowa_przy_rejestracji_jest_osobna_i_domyslnie_nie():
+    from app.models import ConsentRecord
+    with TestClient(app) as c:
+        bez = f"bezzgody{next(LICZNIK)}@test.pl"
+        ze = f"zezgoda{next(LICZNIK)}@test.pl"
+        assert c.post("/api/auth/signup", json={"email": bez, "password": "haslo12345",
+                                                "terms_accepted": True}).status_code == 200
+        assert c.post("/api/auth/signup", json={"email": ze, "password": "haslo12345", "terms_accepted": True,
+                                                "marketing_opt_in": True}).status_code == 200
+    s = SessionLocal()
+    t_bez = s.query(Trader).filter(Trader.email == bez).one()
+    t_ze = s.query(Trader).filter(Trader.email == ze).one()
+    assert t_bez.notify_marketing is False and t_ze.notify_marketing is True
+    rodzaje = lambda t: {r.kind for r in s.query(ConsentRecord).filter(ConsentRecord.trader_id == t.id)}  # noqa: E731
+    assert "marketing" not in rodzaje(t_bez) and "marketing" in rodzaje(t_ze)
+    s.close()

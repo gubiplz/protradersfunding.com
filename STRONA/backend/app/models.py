@@ -85,7 +85,9 @@ class Trader(Base):
     notify_updates: Mapped[bool] = mapped_column(Boolean, default=True)     # welcome/creds/kyc
     notify_trading: Mapped[bool] = mapped_column(Boolean, default=True)     # fazy/funded/breach
     notify_payouts: Mapped[bool] = mapped_column(Boolean, default=True)
-    notify_marketing: Mapped[bool] = mapped_column(Boolean, default=True)   # przypomnienia o porzuconym checkoucie, oferty
+    # Przypomnienia o porzuconym checkoucie i oferty. Domyślnie wyłączone: tylko po wyraźnej zgodzie
+    # (checkbox przy rejestracji albo przełącznik w ustawieniach) — decyzja właściciela 27.11.
+    notify_marketing: Mapped[bool] = mapped_column(Boolean, default=False)
     # Wylogowanie: tokeny sesji wydane przed ta chwila przestaja dzialac (na wszystkich urzadzeniach).
     sessions_revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Preferencje UI (JSON jako string, np. {"sort": {...}}) — zapisywane z
@@ -1074,7 +1076,7 @@ class ConsentRecord(Base):
     trader_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     order_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     email: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    kind: Mapped[str] = mapped_column(String(32), index=True)   # signup | signup_google | checkout | pay_link | newsletter
+    kind: Mapped[str] = mapped_column(String(32), index=True)   # signup | signup_google | checkout | pay_link | newsletter | marketing
     doc_version: Mapped[str] = mapped_column(String(40))
     ip: Mapped[str] = mapped_column(String(64), default="")
     user_agent: Mapped[str] = mapped_column(String(200), default="")

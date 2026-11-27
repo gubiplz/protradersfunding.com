@@ -207,7 +207,8 @@ def test_zalogowany_zapisany_albo_klient_nie_dostaje_popupu(maile):
     with TestClient(app) as c:
         assert c.get("/api/me/newsletter").status_code in (401, 403)
         d = c.get("/api/me/newsletter", headers=h).json()
-        assert d == {"subscribed": False, "unsubscribed": False, "customer": False, "marketing": True}
+        # Od 27.11 zgoda marketingowa jest osobna i domyślnie wyłączona.
+        assert d == {"subscribed": False, "unsubscribed": False, "customer": False, "marketing": False}
         # Zapis z innego urządzenia (ten sam mail, inna wielkość liter).
         c.post("/api/newsletter/subscribe", json={"email": "NL-Portal@test.pl", "source": "footer", "consent": True})
         assert c.get("/api/me/newsletter", headers=h).json()["subscribed"] is True

@@ -1099,10 +1099,10 @@ _PREF_BY_EVENT = {
     "payout_requested": "notify_payouts", "payout_approved": "notify_payouts",
     "payout_unlocked": "notify_payouts",
     "payout_rejected": "notify_payouts",
-    # recap idzie tylko przez push/centrum (push.daily_recap), nie mailem
-    "daily_recap": "notify_marketing",
-    # to samo dla poniedziałkowego przeglądu tygodnia (push.weekly_review)
-    "weekly_review": "notify_marketing",
+    # recap i przegląd tygodnia (tylko push/centrum) mówią o WŁASNYM koncie, więc od 27.11 pod
+    # „trading”; zgoda marketingowa (osobny checkbox przy rejestracji) obejmuje tylko oferty i koszyk.
+    "daily_recap": "notify_trading",
+    "weekly_review": "notify_trading",
     # Przypomnienie o porzuconym koszyku dotyczy wlasnego zakupu klienta, ale
     # jest zachęta do kupna — wiec pod marketingiem, jak recap. Kto wypisal sie
     # z ofert, nie dostaje tez tego.

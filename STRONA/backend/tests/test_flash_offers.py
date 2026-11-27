@@ -50,7 +50,8 @@ def _trader() -> int:
     email = f"flash{next(LICZNIK)}@test.pl"
     s = SessionLocal()
     tr = Trader(email=email, password_hash=auth.hash_password("haslo12345"),
-                full_name="Flash Tester", referral_code=email.split("@")[0].upper())
+                full_name="Flash Tester", referral_code=email.split("@")[0].upper(),
+                notify_marketing=True)   # od 27.11 oferty tylko po zgodzie
     s.add(tr); s.commit(); tid = tr.id; s.close()
     return tid
 
