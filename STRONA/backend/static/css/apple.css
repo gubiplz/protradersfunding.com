@@ -18,11 +18,11 @@ h2,h3{letter-spacing:-.015em}
 .side-sec{letter-spacing:.02em;text-transform:none;font-size:12px;font-weight:600;padding:14px 10px 6px}
 .side-nav{gap:1px}
 .sb-link{gap:11px;padding:6px 10px;border:0;border-radius:10px;color:var(--txt);font-weight:500;
-  transition:background .2s,transform .35s var(--np-spring)}
+  transition:background .15s,transform .15s ease-out}
 /* Kafelek jak ikona w dzwonku: miękki odcień + kolorowy znak, nie pełny kolor.
    Paleta ograniczona do barw PTF i pogrupowana znaczeniem, żeby menu nie było tęczą. */
 .sb-link svg{width:30px;height:30px;flex:0 0 30px;padding:6px;border-radius:9px;opacity:1;color:var(--k,var(--muted));
-  background:color-mix(in srgb,var(--k,var(--muted)) var(--np-tint),transparent);transition:background .25s,transform .4s var(--np-spring)}
+  background:color-mix(in srgb,var(--k,var(--muted)) var(--np-tint),transparent);transition:background .25s,transform .2s ease-out}
 .sb-link.on svg{background:color-mix(in srgb,var(--k,var(--muted)) 24%,transparent)}
 .sb-link:hover svg{transform:scale(1.06)}
 .sb-link:hover{background:var(--np-fill);color:var(--txt)}
@@ -38,6 +38,9 @@ h2,h3{letter-spacing:-.015em}
 .sb-link[data-v=clients],.sb-link[data-v=kyc],.sb-link[data-v=journal],.sb-link[data-v=analytics]{--k:var(--blue)}
 .sb-link[data-v=payouts],.sb-link[data-v=orders],.sb-link[data-v=certificates]{--k:var(--green)}
 .sb-link.sheet-signout{--k:var(--red);color:var(--red)}
+/* Kolorowe ikony menu (Fluent Color) niosą własne barwy: kafelek neutralny, aktywny w akcencie marki. */
+.sb-link svg.fc{padding:5px;background:color-mix(in srgb,var(--txt) 6%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--txt) 6%,transparent)}
+.sb-link.on svg.fc{background:color-mix(in srgb,var(--acc) 18%,transparent)}
 .side-foot,.side-bottom{border-top:.5px solid var(--np-hair)}
 .collapse-btn,.signout{border-radius:10px;transition:background .2s,transform .35s var(--np-spring)}
 .collapse-btn:active,.signout:active{transform:scale(.97)}

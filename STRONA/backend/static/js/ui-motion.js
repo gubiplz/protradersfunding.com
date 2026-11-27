@@ -62,6 +62,18 @@ function slizg(nav,animuj=true){
   g.dataset.y=cel.y;g.dataset.h=cel.h;
 }
 
+/* Dymek `title` tylko na zwiniętym pasku: przy widocznej etykiecie jest zbędny,
+   a Chrome na macOS przy szybkim ruchu kursora zostawia go w miejscu poprzedniej pozycji. */
+function dymki(){
+  const side=document.getElementById('side');if(!side)return;
+  const zwiniety=side.classList.contains('collapsed');
+  side.querySelectorAll('.side-nav .sb-link').forEach(a=>{
+    if(a.title)a.dataset.tip=a.title;
+    if(!a.dataset.tip)return;
+    if(zwiniety)a.title=a.dataset.tip;else a.removeAttribute('title');
+  });
+}
+
 /* ---------- wejście widoku ---------- */
 let czekaNaWidok=false;
 const _go=window.go;
@@ -119,7 +131,7 @@ function planuj(){
     /* switches outside .seg/.shop-tabs carry data-slide (slide-ind.js); views are rendered
        from scratch, so new ones are picked up here */
     if(window.pfSlide)pfSlide.scan();
-    if(doNav){doNav=false;document.querySelectorAll('.side-nav').forEach(n=>slizg(n))}
+    if(doNav){doNav=false;document.querySelectorAll('.side-nav').forEach(n=>slizg(n));dymki()}
     if(doWidok){
       doWidok=false;
       const v=document.getElementById('view');
@@ -162,6 +174,7 @@ document.addEventListener('transitionend',e=>{
 document.addEventListener('DOMContentLoaded',()=>{
   document.querySelectorAll(SEG).forEach(s=>pigulka(s,false));
   document.querySelectorAll('.side-nav').forEach(n=>slizg(n,false));
+  dymki();
 });
 
 /* ---------- okna zsuwane palcem w dół (telefon) ----------
