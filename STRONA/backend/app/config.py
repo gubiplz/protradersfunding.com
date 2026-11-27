@@ -370,6 +370,10 @@ class Settings:
     # na domenę platformy, gdy ta domena siedzi na innym koncie Resenda niż
     # domena landingu (`app/inbox.py`). Pusty = wszystko z `RESEND_API_KEY`.
     resend_api_key_ptf: str = os.getenv("RESEND_API_KEY_PTF", "").strip()
+    # Kopia każdego ODEBRANEGO maila (webhook Resenda `email.received`) na
+    # te adresy, po przecinku (`app/mail_forward.py`). Pusty = bez kopii,
+    # maile są tylko w panelu. Adres prywatny — w env, nie w kodzie.
+    mail_forward_to: str = os.getenv("MAIL_FORWARD_TO", "").strip()
     # Nadawca spod marki landingu. Przy ustawionym kluczu Resend WYGRYWA
     # `RESEND_FROM`: domena nadawcy musi być zweryfikowana u Resenda, a stary
     # `LEAD_MAIL_FROM` był dobierany pod SMTP i może wskazywać skrzynkę, której
