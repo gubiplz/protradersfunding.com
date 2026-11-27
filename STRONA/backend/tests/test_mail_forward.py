@@ -93,3 +93,46 @@ def test_inne_zdarzenia_i_wylaczone(resend, monkeypatch):
     monkeypatch.setattr(get_settings(), "mail_forward_to", "", raising=False)
     assert _hook(str(uuid.uuid4())).json()["status"] == "forwarding off"
     assert resend["wyslane"] == []
+
+
+ADMIN_H = {"X-Admin-Token": get_settings().admin_token}
+
+
+@pytest.fixture
+def bez_ustawienia():
+    from app.db import SessionLocal
+    from app.models import AppSetting
+
+    def czysc():
+        s = SessionLocal()
+        s.query(AppSetting).filter(AppSetting.key == mail_forward.KLUCZ).delete()
+        s.commit()
+        s.close()
+    czysc()
+    yield
+    czysc()
+
+
+def test_przelacznik_z_panelu_wygrywa_z_env(resend, bez_ustawienia):
+    # bez wpisu w bazie: env (MAIL_FORWARD_TO) jak dotąd
+    assert mail_forward.ustawienia() == {"on": True, "to": "kopia@example.com"}
+    r = client.post("/api/admin/mail/forward", headers=ADMIN_H,
+                    json={"on": True, "to": "Ja@Gmail.com; drugi@example.com, ja@gmail.com"})
+    assert r.status_code == 200 and r.json() == {"on": True, "to": "ja@gmail.com, drugi@example.com"}
+    _hook(str(uuid.uuid4()))
+    assert resend["wyslane"][-1]["to"] == ["ja@gmail.com", "drugi@example.com"]
+    # wyłączone w panelu: nic nie wychodzi, mimo adresów i env
+    assert client.post("/api/admin/mail/forward", headers=ADMIN_H,
+                       json={"on": False, "to": "ja@gmail.com"}).json()["on"] is False
+    assert _hook(str(uuid.uuid4())).json()["status"] == "forwarding off"
+    assert len(resend["wyslane"]) == 1
+
+
+def test_walidacja_i_admin_only(bez_ustawienia):
+    def post(j, h=ADMIN_H):
+        return client.post("/api/admin/mail/forward", headers=h, json=j)
+    assert post({"on": True, "to": ""}).status_code == 400
+    assert post({"on": False, "to": "to-nie-mail"}).status_code == 400
+    assert post({"on": True, "to": ",".join(f"a{i}@x.com" for i in range(6))}).status_code == 400
+    assert post({"on": False, "to": ""}).status_code == 200   # wyłączenie bez adresu OK
+    assert post({"on": False, "to": ""}, h={}).status_code in (401, 403)

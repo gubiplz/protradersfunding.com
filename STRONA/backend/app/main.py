@@ -13163,9 +13163,29 @@ def admin_mail_inbox(brand: str = "all"):
     klienta i leada po mailu, żeby z listy dało się przejść do karty i odpisać
     spod właściwej marki.
     """
+    from . import mail_forward
     if brand not in ("all", *inbox.MARKI):
         raise HTTPException(400, "brand must be all, ptf or fx")
-    return _z_ludzmi(inbox.lista(brand))
+    return {**_z_ludzmi(inbox.lista(brand)), "forward": mail_forward.ustawienia()}
+
+
+class MailForwardIn(BaseModel):
+    on: bool
+    to: str = Field("", max_length=600)
+
+
+@app.post("/api/admin/mail/forward", dependencies=[Depends(auth.require_admin)])
+def admin_mail_forward(payload: MailForwardIn):
+    """Włącznik kopii odebranych maili i adresy, na które idzie (po przecinku)."""
+    from . import mail_forward
+    lista = mail_forward.adresy(payload.to)
+    if payload.to.strip() and not lista:
+        raise HTTPException(400, "Enter a valid e-mail address.")
+    if len(lista) > mail_forward.MAX_ADRESOW:
+        raise HTTPException(400, f"Up to {mail_forward.MAX_ADRESOW} addresses.")
+    if payload.on and not lista:
+        raise HTTPException(400, "Add an address to forward to before turning forwarding on.")
+    return mail_forward.zapisz_ustawienia(payload.on, payload.to)
 
 
 def _z_ludzmi(dane: dict) -> dict:
