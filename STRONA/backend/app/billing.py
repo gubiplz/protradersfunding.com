@@ -8,6 +8,7 @@ Darmowy trial (cena 0) jest provisionowany natychmiast.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -290,6 +291,9 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
     if order is None:
         order = Order(trader_id=trader.id, product_key=prowizjonowany.key)
         session.add(order)
+    else:
+        # Nowa próba płatności: mail „płatność nie doszła” liczy wiek od tej chwili, nie od pierwszej próby.
+        order.created_at = datetime.now(timezone.utc).replace(tzinfo=None)
     order.amount_usd = price
     # Gdy wygrala oferta flash, kupon NIE schodzi z zamowienia jako uzyty —
     # inaczej provisioning spali kod PF- kupiony za punkty za rabat, ktorego
@@ -303,6 +307,8 @@ def create_checkout(session, trader: Trader, product_key: str, coupon: str | Non
     order.credits_used = kredyt
     order.bogo_paid_key = quote["bogo_paid_key"]
     order.bogo = bogo_active(session)
+    if not settings.stripe_enabled and mock_zablokowany():
+        raise HTTPException(503, "Payments are temporarily unavailable. Please try again later.")
     order.provider = "stripe" if settings.stripe_enabled else "mock"
     # `commit`, nie `flush`: `telemetry.track` otwiera WLASNA sesje, a wolane na
     # otwartej transakcji zapisu potrafi zablokowac sie na wlasnym zamowieniu.
@@ -372,6 +378,12 @@ def grant_challenge(session, trader: Trader, product_key: str, note: str | None,
             "account_size": acc.initial_balance, **_account_view(acc)}
 
 
+def mock_zablokowany() -> bool:
+    """Płatność testowa (mock) tylko lokalnie i w testach. Produkcja albo preview bez klucza
+    Stripe (np. preview na bazie produkcyjnej) dawałyby darmowe konta."""
+    return os.getenv("VERCEL_ENV", "") in ("production", "preview")
+
+
 def mock_complete(session, order_id: int, trader_id: int):
     order = session.get(Order, order_id)
     if not order or order.trader_id != trader_id:
@@ -383,6 +395,8 @@ def mock_complete(session, order_id: int, trader_id: int):
     # zamówienie bez płacenia (order_id dostaje w odpowiedzi checkoutu).
     if order.provider != "mock":
         raise HTTPException(400, "This order is completed by the payment provider")
+    if mock_zablokowany():
+        raise HTTPException(400, "Test payments are disabled on this site")
     acc = provisioning.create_account_from_order(session, order)
     return {"order_id": order.id, "account_id": acc.id, **_account_view(acc)}
 

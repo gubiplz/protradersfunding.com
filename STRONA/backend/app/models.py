@@ -85,7 +85,11 @@ class Trader(Base):
     notify_updates: Mapped[bool] = mapped_column(Boolean, default=True)     # welcome/creds/kyc
     notify_trading: Mapped[bool] = mapped_column(Boolean, default=True)     # fazy/funded/breach
     notify_payouts: Mapped[bool] = mapped_column(Boolean, default=True)
-    notify_marketing: Mapped[bool] = mapped_column(Boolean, default=True)   # nic nie wysylamy, ale pref istnieje
+    # Przypomnienia o porzuconym checkoucie i oferty. Domyślnie wyłączone: tylko po wyraźnej zgodzie
+    # (checkbox przy rejestracji albo przełącznik w ustawieniach) — decyzja właściciela 27.11.
+    notify_marketing: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Wylogowanie: tokeny sesji wydane przed ta chwila przestaja dzialac (na wszystkich urzadzeniach).
+    sessions_revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Preferencje UI (JSON jako string, np. {"sort": {...}}) — zapisywane z
     # portalu i panelu admina przez PATCH /api/me, trzymane na koncie.
     # Dla adminów niesie też `admin_push` (wyciszone kategorie web pushy).
@@ -265,6 +269,8 @@ class Order(Base):
     # ZAMOWIENIU, nie przy traderze, bo tylko to daje jeden mail na jedna
     # porzucona probe — ta sama osoba moze porzucic checkout kilka razy.
     recovery_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Drugi mail porzuconego checkoutu: jednorazowy rabat (FlashOffer) dla tej osoby i tego planu.
+    recovery_offer_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Indeks: zamowienia konta czyta sie w petli po kontach (lista kont,
     # ranking, faktury) — bez niego kazdy obrot skanuje cala tabele zamowien.
     account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"), nullable=True, index=True)
@@ -1070,7 +1076,7 @@ class ConsentRecord(Base):
     trader_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     order_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     email: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    kind: Mapped[str] = mapped_column(String(32), index=True)   # signup | signup_google | checkout | pay_link | newsletter
+    kind: Mapped[str] = mapped_column(String(32), index=True)   # signup | signup_google | checkout | pay_link | newsletter | marketing
     doc_version: Mapped[str] = mapped_column(String(40))
     ip: Mapped[str] = mapped_column(String(64), default="")
     user_agent: Mapped[str] = mapped_column(String(200), default="")

@@ -187,6 +187,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "telegram_link_code": "VARCHAR(12)",
         "telegram_username": "VARCHAR(40)",
         "weekly_rules": "VARCHAR(40)",
+        "sessions_revoked_at": "TIMESTAMP",
     },
     "products": {
         "max_lots": "FLOAT DEFAULT 6.0",
@@ -199,6 +200,7 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
         "flag": "VARCHAR(24)",
         "fail_reason": "VARCHAR(200)",
         "recovery_sent_at": "TIMESTAMP",
+        "recovery_offer_at": "TIMESTAMP",
         "payment_address": "VARCHAR(200)",
         "payment_network": "VARCHAR(40)",
         "pay_token": "VARCHAR(32)",

@@ -124,9 +124,10 @@ def test_tydzien_bez_transakcji_to_cisza():
     assert _wpisy(tid) == []
 
 
-def test_wypisany_z_ofert_nie_dostaje_przegladu():
+def test_wypisany_z_powiadomien_o_koncie_nie_dostaje_przegladu():
+    # Od 27.11 przegląd tygodnia jest pod „trading” (własne konto), nie pod zgodą marketingową.
     _wyczysc_guard()
-    tid = _trader("bezofert@example.com", notify_marketing=False)
+    tid = _trader("bezofert@example.com", notify_trading=False)
     aid = _konto(tid, "wk-optout")
     _trade(aid, 2, 500.0)
     push.weekly_review(now=PONIEDZIALEK)

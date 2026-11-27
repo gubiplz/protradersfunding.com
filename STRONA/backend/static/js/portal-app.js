@@ -417,6 +417,7 @@ function _authTabUstaw(m){AUTHMODE=m;
   $('a-name').classList.toggle('hidden',!signup);
   $('a-ref').classList.toggle('hidden',!signup);
   $('a-terms-row').classList.toggle('hidden',!signup);
+  $('a-mkt-row').classList.toggle('hidden',!signup);
   $('a-pass').classList.toggle('hidden',forgot);
   $('a-pass2').classList.toggle('hidden',!(reset||signup));
   $('a-pass2').placeholder=signup?'Repeat password':'Repeat new password';
@@ -497,7 +498,7 @@ async function doAuth(){
   const body={email:$('a-email').value,password:$('a-pass').value};
   try{let res;
     if(AUTHMODE==='signup'){body.full_name=$('a-name').value;body.referral=$('a-ref').value||null;
-      body.terms_accepted=$('a-terms').checked;res=await api('/api/auth/signup',{method:'POST',body:JSON.stringify(body)});
+      body.terms_accepted=$('a-terms').checked;body.marketing_opt_in=$('a-mkt').checked;res=await api('/api/auth/signup',{method:'POST',body:JSON.stringify(body)});
       clearRef();  /* attribution consumed — the code must not resurface later */}
     else res=await api('/api/auth/login',{method:'POST',body:JSON.stringify(body)});
     TOKEN=res.token;localStorage.setItem('pf_token',TOKEN);
@@ -637,13 +638,15 @@ async function changeVerifyEmail(){
     toast('Address updated. A new code is on its way to '+r.email,'ok',8000);
   }catch(e){toast('Error: '+e.message,'err')}
 }
+// Powrót przyciskiem „Wstecz” z pamięci przeglądarki (bfcache): po wylogowaniu nie pokazuj starego widoku konta.
+addEventListener('pageshow',e=>{if(e.persisted)location.reload()});
 function logout(){
   /* Tryb podglądu: NIE wolno dotknąć localStorage (sesja właściciela) ani
      /api/auth/logout (skasowałby cookie serwera bramkujące /admin). */
   if(IMP){try{sessionStorage.removeItem('pf_imp')}catch(e){}location.reload();return}
   // The session cookie is held by the server (it gates /admin), so clearing
   // localStorage alone would not be enough.
-  fetch('/api/auth/logout',{method:'POST'}).finally(()=>{
+  fetch('/api/auth/logout',{method:'POST',headers:TOKEN?{Authorization:'Bearer '+TOKEN}:{}}).finally(()=>{
     TOKEN=null;localStorage.removeItem('pf_token');location.reload()});
 }
 /* Token wygasł w trakcie sesji. Bez location.reload(): offline reload w PWA
@@ -1679,13 +1682,13 @@ function unNav(nav){
 }
 /* Kategorie = te same przełączniki co w Settings (notify_*): gaszą mail,
    push i wpis w dzwonku naraz — tak działa backend (`notify._PREF_BY_EVENT`). */
-const UN_CATS=[['trading','Trading','Phase passes, funding, targets and limit warnings','trophy','green'],
+const UN_CATS=[['trading','Trading','Phase passes, funding, targets, limit warnings, daily recap and weekly review','trophy','green'],
   ['payouts','Payouts','Requested, approved and sent','wallet','purple'],
   ['updates','Account','KYC results and store credit','shield','blue'],
   /* Support ma własny przełącznik: mail + push o odpowiedzi zespołu w czacie.
      W portalu odpowiedź pokazuje plakietka na dymku czatu, nie dzwonek. */
   ['support','Support chat','Replies from our team in the chat (e-mail and push)','chat','acc'],
-  ['marketing','Recaps & offers','Daily recap, weekly review and occasional offers','chart','acc']];
+  ['marketing','Offers & reminders','Personal offers and reminders about an unfinished checkout','chart','acc']];
 function unCatsHtml(){
   const n=(ME&&ME.notify)||{};
   return `<div class="np-grp flat">${UN_CATS.map(([k,t,d,ic,c])=>`<div class="np-cell"><span class="np-ci" style="--k:var(--${c})">${npI(ic,2)}</span>

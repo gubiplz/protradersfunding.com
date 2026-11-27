@@ -20,8 +20,8 @@ settings = get_settings()
 
 #: Version of the published legal documents. Stored with every acceptance, so
 #: bump it whenever the wording of Terms / Refund / Risk / Privacy changes.
-DOCS_VERSION = "2026-11-21"
-DOCS_DATE = "21 November 2026"
+DOCS_VERSION = "2026-11-27"
+DOCS_DATE = "27 November 2026"
 
 #: Text of the three purchase declarations. The portal checkout, the /pay page
 #: and the confirmation e-mail all print these exact sentences.

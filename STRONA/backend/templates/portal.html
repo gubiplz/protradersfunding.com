@@ -114,6 +114,9 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
           <span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms of Service</a> and the
           <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>, I am 18 or older, and I
           understand all accounts are simulated with virtual funds.</span></label>
+        <label class="terms-row hidden" id="a-mkt-row"><input type="checkbox" id="a-mkt">
+          <span>Optional: email me reminders about an unfinished checkout and personal offers. You can switch
+          this off any time in Settings or with the link in every such email.</span></label>
         <button id="a-submit" type="submit" class="btn-p lg" style="width:100%">Log in</button>
         <button id="a-forgot" type="button" onclick="authTab('forgot')" style="font-size:12.5px;color:var(--muted);text-decoration:underline;background:none;border:0;cursor:pointer">Forgot password?</button>
         <button id="a-back" type="button" onclick="authTab('login')" class="hidden" style="font-size:13px;color:var(--muted);background:none;border:0;cursor:pointer">‹ Back to log in</button>

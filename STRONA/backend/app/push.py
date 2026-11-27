@@ -207,7 +207,7 @@ def daily_recap(now: datetime | None = None) -> dict:
 
     Zasady: nie wcześniej niż 06:00 czasu polskiego, raz na dobę (guard w
     AppSetting), BRAK transakcji = CISZA (żadnego pustego pingu), kategoria
-    notify_marketing („Daily Recap & Offers"). Komentuje wyłącznie ZAMKNIĘTY
+    notify_trading (od 27.11: to wiadomość o WŁASNYM koncie, nie oferta). Komentuje wyłącznie ZAMKNIĘTY
     dzień — nigdy otwarte pozycje. `now` wstrzykują testy.
     """
     try:
@@ -251,7 +251,7 @@ def _daily_recap(now: datetime | None = None) -> dict:
         wyslane = 0
         for tid, ts in per.items():
             tr = session.get(Trader, tid)
-            if not tr or (tr.notify_marketing is not None and not tr.notify_marketing):
+            if not tr or (tr.notify_trading is not None and not tr.notify_trading):
                 continue
             pnl = sum(float(t.pnl or 0) for t in ts)
             konta = {t.account_id for t in ts}
@@ -394,7 +394,7 @@ def weekly_observations(s: dict, prev: dict) -> list[tuple[str, str]]:
 def weekly_review(now: datetime | None = None) -> dict:
     """Przegląd zamkniętego tygodnia: poniedziałek od 06:00 czasu polskiego.
 
-    Raz na tydzień (guard w AppSetting), kategoria notify_marketing, tydzień
+    Raz na tydzień (guard w AppSetting), kategoria notify_trading, tydzień
     BEZ transakcji = cisza. Tytuł nigdy nie niesie liczby — kwota w powiadomieniu
     systemowym czytałaby się jak wynik do pobicia. `now` wstrzykują testy.
     """
@@ -431,7 +431,7 @@ def _weekly_review(now: datetime | None = None) -> dict:
         wyslane = 0
         for tid in sorted(traderzy):
             tr = session.get(Trader, tid)
-            if not tr or (tr.notify_marketing is not None and not tr.notify_marketing):
+            if not tr or (tr.notify_trading is not None and not tr.notify_trading):
                 continue
             s = weekly_stats(session, tid, start, koniec)
             if not s["trades"]:

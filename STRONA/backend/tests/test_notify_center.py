@@ -145,7 +145,7 @@ def _konto_z_trejdem(tid, *, pnl, login, closed_at=None):
 def test_daily_recap_raz_na_dobe_i_tylko_dla_handlujacych():
     tid_a, _, _ = _trader()
     tid_b, _, _ = _trader()                       # bez transakcji = cisza
-    tid_c, _, _ = _trader(notify_marketing=False)  # wylaczyl recap
+    tid_c, _, _ = _trader(notify_trading=False)  # wylaczyl recap (od 27.11 pod „trading”)
     _konto_z_trejdem(tid_a, pnl=120.0, login="880001")
     _konto_z_trejdem(tid_c, pnl=50.0, login="880002")
     # Stale `now` w poludnie UTC: ta sama doba co realny zegar (guard i okno

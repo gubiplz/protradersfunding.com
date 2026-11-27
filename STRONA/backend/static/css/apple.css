@@ -263,8 +263,14 @@ html[data-theme=dark] .todo{box-shadow:0 0 0 .5px var(--np-hair),0 12px 32px -20
 }
 @media(max-width:480px){
   /* „+ New challenge" w portalu: na wąskim ekranie okrągły plus */
-  .top-right>.btn-p.sm[onclick^="go('store')"]{font-size:0;width:38px;height:38px;padding:0;border-radius:50%}
-  .top-right>.btn-p.sm[onclick^="go('store')"]::before{content:"+";font-size:22px;font-weight:500;line-height:1}
+  .top-right>.btn-p.sm[onclick^="go('store')"]{font-size:0;width:38px;height:38px;min-height:38px;padding:0;
+    border-radius:50%;position:relative;flex:none}
+  /* Plus z dwóch kresek, wyśrodkowany absolutnie: znak „+" siedział na linii bazowej czcionki, a ukryty
+     tekst przycisku i min-height 40px spychały go nad środek (kółko 38×40). */
+  .top-right>.btn-p.sm[onclick^="go('store')"]::before{content:"";position:absolute;inset:0;margin:auto;
+    width:16px;height:16px;
+    background:linear-gradient(currentColor,currentColor) center/100% 2px no-repeat,
+               linear-gradient(currentColor,currentColor) center/2px 100% no-repeat}
 }
 /* Zmiana motywu: przenikanie całej strony */
 ::view-transition-old(root),::view-transition-new(root){animation-duration:.4s;animation-timing-function:var(--np-ease)}
