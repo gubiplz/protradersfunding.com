@@ -13508,6 +13508,29 @@ _BREVO_ZDARZENIA = {
 }
 
 
+@app.post("/api/mail/inbound")
+async def mail_inbound_webhook(request: Request):
+    """Webhook Resenda `email.received` → kopia maila na `MAIL_FORWARD_TO`.
+
+    Bez sekretu: z ciała bierzemy tylko ID, treść `mail_forward` pobiera
+    własnym kluczem, a powtórkę blokuje dziennik. 502 tylko przy błędzie,
+    który warto ponowić — Resend wtedy spróbuje jeszcze raz.
+    """
+    from . import mail_forward
+    try:
+        dane = await request.json() or {}
+    except Exception:  # noqa: BLE001 — śmieci w ciele: nie ma czego ponawiać
+        return {"ok": True}
+    if dane.get("type") != "email.received":
+        return {"ok": True}
+    d = dane.get("data") or {}
+    ok, opis = await run_in_threadpool(
+        mail_forward.przekaz, str(d.get("email_id") or d.get("id") or ""))
+    if not ok:
+        return JSONResponse({"ok": False, "error": opis}, status_code=502)
+    return {"ok": True, "status": opis}
+
+
 @app.post("/api/brevo/webhook")
 async def brevo_webhook(request: Request, token: str = ""):
     """Co dostawca poczty zrobił z mailem do leada — prosto do jego historii.
