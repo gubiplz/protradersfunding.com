@@ -335,3 +335,38 @@ def test_strona_preferencji_bez_logowania_i_stopka(monkeypatch):
     notify.send_now("password_reset", email, {"name": "Jan", "reset_url": "https://x"})
     assert "/email/preferences/" in html_maila[-1] and "/privacy" in html_maila[-1] and "/risk-disclosure" in html_maila[-1]
     assert "All rights reserved" in html_maila[-1]
+
+
+def test_kampania_z_odliczaniem_raz_na_adres(maile):
+    from app.models import NewsletterSubscriber
+    with TestClient(app) as c:
+        gif = c.get(f"/email/countdown.gif?end={int(time.time()) + 3600}")
+        assert gif.status_code == 200 and gif.headers["content-type"] == "image/gif" and gif.content[:3] == b"GIF"
+        assert "no-store" in gif.headers["cache-control"]
+    # ten sam adres w newsletterze i na koncie ze zgodą → jeden mail, z linkiem wypisania z konta
+    wspolny = f"kampania{next(LICZNIK)}@test.pl"
+    tylko_nl = f"kampanianl{next(LICZNIK)}@test.pl"
+    bez_zgody = f"kampaniabez{next(LICZNIK)}@test.pl"
+    s = SessionLocal()
+    tr = Trader(email=wspolny, password_hash=auth.hash_password("haslo12345"), referral_code=f"KM{next(LICZNIK)}",
+                notify_marketing=True)
+    s.add(tr)
+    s.add(Trader(email=bez_zgody, password_hash=auth.hash_password("haslo12345"), referral_code=f"KB{next(LICZNIK)}",
+                 notify_marketing=False))
+    for a in (wspolny, tylko_nl):
+        s.add(NewsletterSubscriber(email=a, consent=True, source="footer", token=f"k{next(LICZNIK)}x"))
+    s.commit(); tid = tr.id; s.close()
+    dane = {"template": "black-friday", "subject": f"BF {next(LICZNIK)}", "offer": "Second challenge free",
+            "body": "Hi,\n\nit's on.", "ends_at": "2030-01-01T00:00:00Z", "fine_print": "Terms apply."}
+    with TestClient(app) as c:
+        r = c.post("/api/admin/campaign/send", json=dane, headers=ADMIN)
+        assert r.status_code == 200, r.text
+        assert c.post("/api/admin/campaign/send", json={**dane, "template": "nope"}, headers=ADMIN).status_code == 400
+    moje = {m[1]: m[2] for m in maile if m[0] == "campaign"}
+    assert wspolny in moje and tylko_nl in moje and bez_zgody not in moje
+    assert str(auth.make_unsub_token(tid)) in moje[wspolny]["unsubscribe_url"]        # link z konta
+    assert "/newsletter/unsubscribe/" in moje[tylko_nl]["unsubscribe_url"]
+    assert moje[wspolny]["ends_ts"] == 1893456000 and moje[wspolny]["template"] == "black-friday"
+    tresc = notify._render_html("campaign", moje[wspolny], dane["subject"])
+    assert "/email/countdown.gif?end=1893456000" in tresc and "/static/img/campaigns/black-friday.jpg" in tresc
+    assert "Second challenge free" in tresc and "Unsubscribe" in tresc

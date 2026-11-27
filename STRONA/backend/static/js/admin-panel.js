@@ -1313,6 +1313,7 @@ async function renderNewsletter(){
         <option value="">All campaigns</option>${d.campaigns.map(c=>`<option value="${esc(c)}"${c===kamp?' selected':''}>${esc(nlpKampania(c))}</option>`).join('')}</select>`:''}
       <span class="count-pill">${d.active} active · ${d.total} total</span>
       <a class="btn-o sm" href="/api/admin/newsletter.csv" onclick="return nlCsv(event)">Export CSV${kamp?' (campaign)':''}</a>
+      <button class="btn-o sm" onclick="openCampaign()">Campaign with timer</button>
       <button class="btn-p sm" onclick="openNlCompose()">Send to all</button>
     </div>
     ${d.error?`<p class="lead-statline" style="color:var(--gold)">⚠ ${esc(d.error)}</p>`:''}
@@ -1456,6 +1457,60 @@ function openNlCompose(){
     </div></div>`;
   document.body.appendChild(w);
   setTimeout(()=>$('nl-subj')?.focus(),50);
+}
+/* Kampania z grafiką i odliczaniem: newsletter + traderzy ze zgodą na oferty, każdy adres raz. */
+async function openCampaign(){
+  let info;try{info=await api('/api/admin/campaign')}catch(e){toast('Error: '+e.message,'err');return}
+  window._camp={tpl:info.templates[0].key};
+  const w=document.createElement('div');w.id='camp-modal';w.className='modal-wrap';
+  w.onclick=e=>{if(e.target===w)w.remove()};
+  const kaf=info.templates.map(t=>`<button type="button" class="camp-tpl" data-k="${esc(t.key)}" onclick="campTpl('${jsq(t.key)}')"
+      style="border:2px solid transparent;border-radius:12px;padding:0;background:none;cursor:pointer;overflow:hidden">
+      <img src="${esc(t.image)}" alt="${esc(t.label)}" style="display:block;width:100%;aspect-ratio:1"></button>`).join('');
+  w.innerHTML=`<div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()" style="max-width:640px">
+    <div class="modal-head"><h3>Campaign to ${info.audience} recipient${info.audience===1?'':'s'}</h3></div>
+    <p class="muted" style="font-size:12.5px;margin:0 0 10px">Newsletter subscribers and traders who agreed to offers. Each address gets it once; unsubscribed people are skipped.</p>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">${kaf}</div>
+    <label class="muted" style="font-size:12px">Subject</label>
+    <input id="camp-subj" class="inp" maxlength="160" placeholder="e.g. Black Friday: a second challenge on us" style="margin-bottom:8px">
+    <label class="muted" style="font-size:12px">Offer (gold box under the picture)</label>
+    <input id="camp-offer" class="inp" maxlength="200" placeholder="e.g. Buy any challenge, get a second one of the same size free" style="margin-bottom:8px">
+    <label class="muted" style="font-size:12px">Message (paragraphs separated by a blank line)</label>
+    <textarea id="camp-body" class="inp" rows="4" maxlength="4000" style="margin-bottom:8px"></textarea>
+    <div style="display:grid;grid-template-columns:1fr 2fr;gap:8px">
+      <div><label class="muted" style="font-size:12px">Button</label><input id="camp-cta" class="inp" maxlength="40" value="Claim the offer"></div>
+      <div><label class="muted" style="font-size:12px">Button link (empty = store)</label><input id="camp-url" class="inp" maxlength="300" placeholder="https://protradersfunding.com/portal?view=store"></div>
+    </div>
+    <label class="muted" style="font-size:12px;display:block;margin-top:8px">Offer ends (your local time) — shown as a live countdown; empty = no timer</label>
+    <input id="camp-end" class="inp" type="datetime-local" style="margin-bottom:8px">
+    <label class="muted" style="font-size:12px">Fine print (terms, limits)</label>
+    <input id="camp-fine" class="inp" maxlength="600" placeholder="e.g. Offer ends 30 Nov 23:59 UTC. One free account per customer." style="margin-bottom:10px">
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <input id="camp-test" class="inp" type="email" placeholder="your@email" style="flex:1">
+      <button class="btn-o" onclick="campSend(true,this)">Send test</button>
+    </div>
+    <div style="display:flex;gap:10px">
+      <button class="btn-p" onclick="campSend(false,this)">Send to all (${info.audience})</button>
+      <button class="btn-o" onclick="$('camp-modal').remove()">Cancel</button>
+    </div></div>`;
+  document.body.appendChild(w);campTpl(window._camp.tpl);
+}
+function campTpl(k){window._camp.tpl=k;document.querySelectorAll('.camp-tpl').forEach(b=>b.style.borderColor=b.dataset.k===k?'var(--acc)':'transparent')}
+async function campSend(test,btn){
+  const v=id=>$(id).value.trim(), end=v('camp-end');
+  const body={template:window._camp.tpl,subject:v('camp-subj'),offer:v('camp-offer'),body:v('camp-body'),
+    cta_label:v('camp-cta'),cta_url:v('camp-url'),fine_print:v('camp-fine'),ends_at:end?new Date(end).toISOString():null,
+    test_to:test?v('camp-test'):null};
+  if(!body.subject){toast('Subject is required.','err');return}
+  if(test&&!body.test_to){toast('Enter a test address.','err');return}
+  if(!test&&!await askConfirm({title:'Send this campaign now?',
+    body:'One email per recipient, each with its own unsubscribe link. Up to 500 per click; click again to continue with the rest. <b>It cannot be recalled.</b>',
+    ok:'Send',danger:true}))return;
+  await busy(btn,null,async()=>{
+    try{const r=await api('/api/admin/campaign/send',{method:'POST',body:JSON.stringify(body),timeoutMs:120000});
+      toast(test?`✅ Test sent to ${body.test_to}`:`✅ Sent ${r.sent}${r.already_sent?`, ${r.already_sent} already had it`:''}${r.failed?`, ${r.failed} failed`:''}${r.remaining?` · ${r.remaining} left: click Send again`:''}`,'ok',10000);
+    }catch(e){toast('Error: '+e.message,'err')}
+  });
 }
 async function nlSend(test,btn){
   const subject=$('nl-subj').value.trim(), body=$('nl-body').value.trim();
