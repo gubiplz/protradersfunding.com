@@ -42,8 +42,8 @@ h2,h3{letter-spacing:-.015em}
 .sb-link svg.fc{padding:5px;background:color-mix(in srgb,var(--txt) 6%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--txt) 6%,transparent)}
 .sb-link.on svg.fc{background:color-mix(in srgb,var(--acc) 18%,transparent)}
 /* Każda ikona ma własny odcień (--fh): kafelek bierze tę samą barwę, delikatnie. */
-.sb-link svg.fc[style*="--fh"]{background:hsl(var(--fh) 75% 55% / .13);box-shadow:inset 0 0 0 1px hsl(var(--fh) 75% 60% / .16)}
-.sb-link.on svg.fc[style*="--fh"]{background:hsl(var(--fh) 75% 55% / .26);box-shadow:inset 0 0 0 1px hsl(var(--fh) 75% 60% / .35)}
+.sb-link svg.fc[style*="--fh"]{background:hsl(var(--fh) 30% 55% / .07);box-shadow:inset 0 0 0 1px hsl(var(--fh) 30% 60% / .1)}
+.sb-link.on svg.fc[style*="--fh"]{background:color-mix(in srgb,var(--acc) 18%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--acc) 30%,transparent)}
 .side-foot,.side-bottom{border-top:.5px solid var(--np-hair)}
 .collapse-btn,.signout{border-radius:10px;transition:background .2s,transform .35s var(--np-spring)}
 .collapse-btn:active,.signout:active{transform:scale(.97)}
