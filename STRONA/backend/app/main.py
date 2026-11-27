@@ -54,7 +54,7 @@ from . import (achievements, auth, billing, catalog, certshot, contentbot, count
 from . import trade_case
 from . import vusdt
 from . import helpdesk
-from . import countdown, markets, terminal
+from . import markets, terminal
 from . import academy
 from . import legal
 from .config import get_settings
@@ -4148,6 +4148,7 @@ def admin_newsletter_send(payload: NewsletterSendIn, request: Request):
 def email_countdown(request: Request, end: int):
     """Odliczanie w mailach kampanii: GIF liczony przy każdym otwarciu (bez cache)."""
     _rate_limit(request, "countdown", 120, 60)
+    from . import countdown          # leniwie: brak Pillow nie może wywrócić startu aplikacji
     koniec = datetime.fromtimestamp(max(0, min(end, 4102444800)), tz=timezone.utc)
     return Response(countdown.gif(koniec), media_type="image/gif",
                     headers={"Cache-Control": "no-store, max-age=0"})
