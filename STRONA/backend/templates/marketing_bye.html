@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Unsubscribed — {{ site_name }}{% endblock %}
+{% block description %}Reminder and offer emails from {{ site_name }} are switched off.{% endblock %}
+{% block head_extra %}<meta name="robots" content="noindex">{% endblock %}
+
+{% block content %}
+<section class="page-head"><div class="wrap">
+  <span class="pill">Emails</span>
+  {% if found %}
+  <h1>You're unsubscribed.</h1>
+  <p class="lede">No more checkout reminders or offers from {{ site_name }}. Emails about your accounts, payments
+     and payouts are unaffected. You can switch them back on in the portal under Settings.</p>
+  {% else %}
+  <h1>This link has expired.</h1>
+  <p class="lede">Turn reminder and offer emails off in the portal under Settings, or write to
+     <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p>
+  {% endif %}
+  <p style="margin-top:22px"><a class="btn-ghost" href="/">Back to the homepage</a></p>
+</div></section>
+<div style="height:60px"></div>
+{% endblock %}

@@ -405,7 +405,20 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             + f"Nothing was charged. Pick up where you left off:\n"
             f"{settings.app_base_url}/portal?view=store\n\n"
             f"If you ran into an error on the payment page, reply to this e-mail "
-            f"and we'll sort it out.",
+            f"and we'll sort it out."
+            + (f"\n\nStop reminder and offer emails: {ctx['unsubscribe_url']}" if ctx.get("unsubscribe_url") else ""),
+        ),
+        "checkout_recovery_offer": (
+            f"{_num(ctx.get('pct'))}% off the {ctx.get('product_label')} challenge",
+            f"Hi {name},\n\nthe {ctx.get('product_label')} challenge you started is still "
+            f"available, now {_num(ctx.get('pct'))}% off for you.\n\n"
+            f"  Challenge: {ctx.get('product_label')}\n"
+            f"  Price:     ${_num(ctx.get('price'))} instead of ${_num(ctx.get('amount'))}\n"
+            f"  Offer ends: {ctx.get('ends')}\n\n"
+            f"The discount is applied automatically at checkout, no code needed. "
+            f"It's for your account only and can be used once.\n"
+            f"{settings.app_base_url}/portal?view=store&buy={ctx.get('product_key')}"
+            + (f"\n\nStop reminder and offer emails: {ctx['unsubscribe_url']}" if ctx.get("unsubscribe_url") else ""),
         ),
         "flash_offer": (
             ctx.get("title") or f"Flash sale: {_num(ctx.get('pct'))}% off — limited time",
@@ -526,15 +539,19 @@ def _rows_html(pairs: list[tuple[str, object]]) -> str:
    </td></tr>"""
 
 
-def _unsub_html(url: str | None) -> str:
+def _unsub_html(url: str | None,
+                why: str = "You get this email because you subscribed on our website.") -> str:
     """Stopka listy marketingowej: jednoklikowe wypisanie."""
     if not url:
         return ""
     return f"""
    <tr><td align="center" style="padding:26px 44px 0">
-     <p style="font:400 12px/1.6 {_FONT};color:{_MUTE};margin:0">You get this email because you subscribed on
-       our website. <a href="{html.escape(url, quote=True)}" style="color:{_MUTE}">Unsubscribe</a></p>
+     <p style="font:400 12px/1.6 {_FONT};color:{_MUTE};margin:0">{html.escape(why)}
+       <a href="{html.escape(url, quote=True)}" style="color:{_MUTE}">Unsubscribe</a></p>
    </td></tr>"""
+
+
+_WHY_REMINDER = "Reminder and offer emails about your {site} account."
 
 
 def _button_html(label: str, url: str) -> str:
@@ -961,6 +978,19 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
                  f"purchase. " if kredyt > 0 else "")
                 + "Ran into an error on the payment page? Reply to this e-mail and "
                   "we'll sort it out."),
+            _unsub_html(ctx.get("unsubscribe_url"), _WHY_REMINDER.format(site=settings.site_name)),
+        ]
+    elif event == "checkout_recovery_offer":
+        parts = [
+            _head_html("Your offer", f"{_num(ctx.get('pct'))}% off your challenge",
+                       f"Hi {name}, the challenge you started is still available, now "
+                       f"{_num(ctx.get('pct'))}% off for you. The discount applies automatically "
+                       f"at checkout, no code needed."),
+            _stat_html("Challenge", str(ctx.get("product_label") or ""),
+                       f"${_num(ctx.get('price'))} instead of ${_num(ctx.get('amount'))}"),
+            _button_html("Complete Your Purchase", f"{portal}?view=store&buy={ctx.get('product_key')}"),
+            _note_html(f"Offer ends {ctx.get('ends')}. It's for your account only and can be used once."),
+            _unsub_html(ctx.get("unsubscribe_url"), _WHY_REMINDER.format(site=settings.site_name)),
         ]
     elif event == "flash_offer":
         parts = [
@@ -1077,6 +1107,7 @@ _PREF_BY_EVENT = {
     # jest zachęta do kupna — wiec pod marketingiem, jak recap. Kto wypisal sie
     # z ofert, nie dostaje tez tego.
     "checkout_recovery": "notify_marketing",
+    "checkout_recovery_offer": "notify_marketing",
     # Oferta flash to czysty marketing — kto wypisal sie z ofert, nie dostaje.
     "flash_offer": "notify_marketing",
 }

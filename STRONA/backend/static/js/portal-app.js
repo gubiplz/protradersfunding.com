@@ -637,13 +637,15 @@ async function changeVerifyEmail(){
     toast('Address updated. A new code is on its way to '+r.email,'ok',8000);
   }catch(e){toast('Error: '+e.message,'err')}
 }
+// Powrót przyciskiem „Wstecz” z pamięci przeglądarki (bfcache): po wylogowaniu nie pokazuj starego widoku konta.
+addEventListener('pageshow',e=>{if(e.persisted)location.reload()});
 function logout(){
   /* Tryb podglądu: NIE wolno dotknąć localStorage (sesja właściciela) ani
      /api/auth/logout (skasowałby cookie serwera bramkujące /admin). */
   if(IMP){try{sessionStorage.removeItem('pf_imp')}catch(e){}location.reload();return}
   // The session cookie is held by the server (it gates /admin), so clearing
   // localStorage alone would not be enough.
-  fetch('/api/auth/logout',{method:'POST'}).finally(()=>{
+  fetch('/api/auth/logout',{method:'POST',headers:TOKEN?{Authorization:'Bearer '+TOKEN}:{}}).finally(()=>{
     TOKEN=null;localStorage.removeItem('pf_token');location.reload()});
 }
 /* Token wygasł w trakcie sesji. Bez location.reload(): offline reload w PWA

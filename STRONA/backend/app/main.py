@@ -39,9 +39,11 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.exception_handlers import http_exception_handler
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm.exc import StaleDataError
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 
 from . import (achievements, auth, billing, catalog, certshot, contentbot, countries,
@@ -368,6 +370,9 @@ async def lifespan(app: FastAPI):
     _warn_if_placeholder_provisioning()
     for o in ostrzezenia_bezpieczenstwa():
         print(f"[start] BEZPIECZENSTWO: {o}", flush=True)
+    # Na Vercelu klucz z .env.example (albo pusty) to podrabialne sesje admina: lepiej nie wstać.
+    if os.getenv("VERCEL") and settings.secret_key.strip().lower() in _DOMYSLNE_SEKRETY:
+        raise RuntimeError("SECRET_KEY is a default value on Vercel; set a long random SECRET_KEY")
     if settings.poller_enabled:
         poller.start()
     yield
@@ -403,6 +408,22 @@ async def _ludzkie_422(request: Request, exc: RequestValidationError):
     msg = err.get("msg") or "Invalid value"
     return JSONResponse(status_code=422,
                         content={"detail": f"{pole}: {msg}" if pole else msg})
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _strona_404(request: Request, exc: StarletteHTTPException):
+    """Nieznany adres w przeglądarce dostaje stronę 404 serwisu zamiast surowego JSON-a.
+    API, pliki statyczne i pozostałe kody idą domyślną drogą FastAPI."""
+    sciezka = request.url.path
+    if (exc.status_code == 404 and request.method == "GET" and "text/html" in request.headers.get("accept", "")
+            and not sciezka.startswith(("/api/", "/static/", "/media/"))):
+        try:
+            odp = _page(request, "404.html")
+            odp.status_code = 404
+            return odp
+        except Exception:                      # strona błędu nie może sama wywrócić odpowiedzi
+            pass
+    return await http_exception_handler(request, exc)
 
 
 class _CachedStatic(StaticFiles):
@@ -929,16 +950,17 @@ def _konto_wreczone():
 #  AUTH / onboarding                                                          #
 # --------------------------------------------------------------------------- #
 class SignupIn(BaseModel):
-    email: str
-    password: str
-    full_name: str = ""
-    referral: str | None = None
+    # Limity jak kolumny w bazie: za długie pole to czytelne 422, nie 500 z Postgresa.
+    email: str = Field(max_length=180)
+    password: str = Field(max_length=128)
+    full_name: str = Field(default="", max_length=120)
+    referral: str | None = Field(default=None, max_length=64)
     terms_accepted: bool = False
 
 
 class LoginIn(BaseModel):
-    email: str
-    password: str
+    email: str = Field(max_length=180)
+    password: str = Field(max_length=128)
 
 
 SESSION_COOKIE = "pf_session"
@@ -999,18 +1021,35 @@ def _ustaw_ciasteczko_sesji(response: Response, token: str) -> None:
 
 
 @app.post("/api/auth/logout")
-def logout(response: Response):
+def logout(request: Request, response: Response, authorization: str | None = Header(default=None)):
+    """Wylogowanie unieważnia sesje po stronie serwera: skopiowany token przestaje działać.
+    Token z nagłówka (portal) albo z cookie (panel); podgląd „oczami klienta" niczego nie odwołuje."""
+    token = (authorization.split(" ", 1)[1].strip() if authorization and authorization.lower().startswith("bearer ")
+             else request.cookies.get(SESSION_COOKIE))
+    dane = auth._parse_session(token) if token else None
+    if dane and not dane.get("imp"):
+        session = SessionLocal()
+        try:
+            tr = session.get(Trader, int(dane["tid"]))
+            if tr:
+                tr.sessions_revoked_at = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)   # token ma czas w sekundach
+                session.commit()
+        finally:
+            session.close()
     response.delete_cookie(SESSION_COOKIE)
     return {"ok": True}
 
 
 class ForgotIn(BaseModel):
-    email: str
+    email: str = Field(max_length=180)
 
 
 class ResetIn(BaseModel):
     token: str
     password: str
+
+
+RESET_MAILE_NA_GODZINE = 3
 
 
 @app.post("/api/auth/forgot")
@@ -1027,6 +1066,12 @@ def forgot_password(payload: ForgotIn, request: Request):
     try:
         tr = (session.query(Trader)
               .filter(func.lower(Trader.email) == payload.email.strip().lower()).first())
+        # Limit IP siedzi w pamięci jednej instancji; ten liczy z dziennika maili, więc
+        # wiele adresów IP nie zasypie jednej skrzynki. Odpowiedź zostaje ta sama.
+        if tr and (session.query(func.count(MailLog.id))
+                   .filter(MailLog.event == "password_reset", MailLog.to_email == tr.email,
+                           MailLog.ts >= datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)).scalar() or 0) >= RESET_MAILE_NA_GODZINE:
+            tr = None
         if tr:
             # Odcisk hasła w tokenie = link jednorazowy (po resecie hash sie
             # zmienia i ten sam link juz nie przejdzie walidacji).
@@ -1906,13 +1951,13 @@ def my_credits(trader: Trader = Depends(auth.current_trader)):
 #  PORTAL TRADERA — moje konta, KYC, wypłaty                                  #
 # --------------------------------------------------------------------------- #
 class KycIn(BaseModel):
-    full_name: str
-    country: str
-    doc_ref: str = ""
-    dob: str | None = None
-    address: str | None = None
-    id_type: str | None = None      # Passport | National ID | Driver's License
-    id_number: str | None = None
+    full_name: str = Field(max_length=120)
+    country: str = Field(max_length=64)
+    doc_ref: str = Field(default="", max_length=120)
+    dob: str | None = Field(default=None, max_length=20)
+    address: str | None = Field(default=None, max_length=200)
+    id_type: str | None = Field(default=None, max_length=40)      # Passport | National ID | Driver's License
+    id_number: str | None = Field(default=None, max_length=64)
 
 
 class PayoutReqIn(BaseModel):
@@ -3397,8 +3442,8 @@ def journal_delete(entry_id: int, trader: Trader = Depends(auth.current_trader))
 
 # --- Support: tickety -------------------------------------------------------
 class TicketIn(BaseModel):
-    subject: str
-    message: str
+    subject: str = Field(max_length=200)
+    message: str = Field(max_length=5000)
 
 
 class TicketReplyIn(BaseModel):
@@ -3523,7 +3568,7 @@ def ticket_reply(ticket_id: int, payload: TicketReplyIn, trader: Trader = Depend
 #  Czat pomocy (dymek w portalu) — asystent AI na FAQ, potem człowiek         #
 # --------------------------------------------------------------------------- #
 class ChatIn(BaseModel):
-    message: str
+    message: str = Field(max_length=2000)
     chat_id: int | None = None
 
 
@@ -3846,6 +3891,25 @@ def newsletter_unsubscribe(token: str, request: Request):
         return _page(request, "newsletter_bye.html", found=bool(sub))
     finally:
         session.close()
+
+
+@app.get("/email/unsubscribe/{token}", include_in_schema=False)
+def marketing_unsubscribe(token: str, request: Request):
+    """Link z maili o porzuconym checkoucie i ofertach: wyłącza `notify_marketing` jednym kliknięciem."""
+    tid = auth.parse_unsub_token(token)
+    session = SessionLocal()
+    try:
+        tr = session.get(Trader, tid) if tid else None
+        if tr and tr.notify_marketing:
+            tr.notify_marketing = False
+            session.commit()
+        return _page(request, "marketing_bye.html", found=bool(tr))
+    finally:
+        session.close()
+
+
+def _unsub_url(trader_id: int) -> str:
+    return f"{settings.app_base_url}/email/unsubscribe/{auth.make_unsub_token(trader_id)}"
 
 
 @app.get("/api/me/newsletter")
@@ -4418,7 +4482,7 @@ def admin_ticket_delete(ticket_id: int):
 
 # --- Settings ---------------------------------------------------------------
 class MePatch(BaseModel):
-    full_name: str | None = None
+    full_name: str | None = Field(default=None, max_length=120)
     notify_updates: bool | None = None
     notify_trading: bool | None = None
     notify_payouts: bool | None = None
@@ -5167,7 +5231,7 @@ def admin_telemetry_events(name: str | None = None, day: str | None = None,
 # --- KYC: dokumenty ---------------------------------------------------------
 _KYC_KINDS = {"id_front": "kyc_doc_front", "id_back": "kyc_doc_back", "residence": "kyc_doc_residence"}
 _KYC_MIME = {"image/jpeg": ".jpg", "image/png": ".png", "application/pdf": ".pdf"}
-_KYC_MAX_BYTES = 5 * 1024 * 1024
+_KYC_MAX_BYTES = 4 * 1024 * 1024   # Vercel tnie ciało żądania >4,5 MB, więc większy limit był nieosiągalny
 
 
 def _kyc_zgodny_typ(mime: str, data: bytes) -> bool:
@@ -5213,7 +5277,7 @@ async def kyc_upload_docs(trader: Trader = Depends(auth.current_trader),
             # +1 bajt: wystarczy, żeby stwierdzić „za duży", bez czytania całości
             data = await up.read(_KYC_MAX_BYTES + 1)
             if len(data) > _KYC_MAX_BYTES:
-                raise HTTPException(400, f"{kind}: the file is larger than 5 MB")
+                raise HTTPException(400, f"{kind}: the file is larger than 4 MB")
             if not _kyc_zgodny_typ(up.content_type, data):
                 raise HTTPException(400, f"{kind}: the file doesn't look like a real "
                                          f"JPG, PNG or PDF. Please upload the original file")
@@ -6511,6 +6575,9 @@ def _ustaw_faze(session, acc: Account, faza: str) -> None:
     """Ręczne przestawienie fazy konta (admin). Resetuje metryki tak samo jak
     automatyczny awans w pollerze — inaczej konto weszłoby w nową fazę z cudzym
     dorobkiem, licznikiem dni i szczytem equity."""
+    if getattr(acc, "terminal_used", False):
+        # Jak w pollerze: pozycje i zlecenia z terminala nie przechodzą do nowej fazy.
+        terminal.flatten(session, acc, "phase")
     acc.phase = faza
     acc.status = "funded" if faza == "funded" else "active"
     acc.balance = acc.initial_balance
@@ -6524,6 +6591,7 @@ def _ustaw_faze(session, acc: Account, faza: str) -> None:
     acc.last_counted_trading_day = ""
     acc.breach_reason = None
     acc.closed_at = None
+    acc.target_50_at = acc.target_75_at = acc.min_days_at = None   # progi nowej fazy liczą się od nowa
     acc.prev_phase_started_at = acc.phase_started_at or acc.started_at
     acc.phase_started_at = datetime.now(timezone.utc)
     # Termin bota z poprzedniej fazy żądałby całego nowego targetu w resztce
@@ -6622,6 +6690,10 @@ def admin_set_phase(account_id: int, payload: PhaseIn):
             raise HTTPException(404, "Account not found")
         if payload.phase == "eval_2" and acc.steps < 2:
             raise HTTPException(400, "This plan has no second stage")
+        if acc.metaapi_account_id:
+            # Saldo konta MT5 trzyma broker: następny odczyt cofnąłby reset z bazy.
+            raise HTTPException(400, "This account is tracked live from MT5. Reset its balance at the broker "
+                                     "first, then change the phase.")
         _ustaw_faze(session, acc, payload.phase)
         trader = session.get(Trader, acc.trader_id) if acc.trader_id else None
         if trader and payload.phase == "funded":
@@ -10235,7 +10307,9 @@ async def _html_no_cache(request: Request, call_next):
     potrafila trzymac stara strone z linkami do starych wersji."""
     resp = await call_next(request)
     if resp.headers.get("content-type", "").startswith("text/html"):
-        resp.headers["Cache-Control"] = "no-cache"
+        # Strony z danymi konta nie trafiają do pamięci podręcznej: po wylogowaniu „Wstecz” ich nie pokaże.
+        prywatna = request.url.path.startswith(("/portal", "/admin", "/trade", "/dashboard"))
+        resp.headers["Cache-Control"] = "no-store" if prywatna else "no-cache"
     return resp
 
 
@@ -10828,7 +10902,11 @@ def _checkout_recovery(min_minutes: int = 60, max_hours: int = 72) -> dict:
     session = SessionLocal()
     try:
         kandydaci = (session.query(Order)
-                     .filter(Order.status == "pending",
+                     # Stripe sam ustawia `failed` po wygaśnięciu sesji (~24 h): to nadal porzucony
+                     # koszyk, a bez tego warunku cron co godzinę nie zdążał z mailem.
+                     .filter(or_(Order.status == "pending",
+                                 and_(Order.status == "failed",
+                                      Order.fail_reason.like(f"{STRIPE_WYGASLA}%"))),
                              Order.recovery_sent_at.is_(None),
                              Order.created_at <= now - timedelta(minutes=min_minutes),
                              Order.created_at >= now - timedelta(hours=max_hours),
@@ -10843,6 +10921,7 @@ def _checkout_recovery(min_minutes: int = 60, max_hours: int = 72) -> dict:
                      .all())
         etykiety = {p.key: p.label for p in session.query(Product).all()}
         sent = 0
+        wyslane_do = []
         for zam in kandydaci:
             zam.recovery_sent_at = now
             # Kupil pozniej cokolwiek innego — sprawa sama sie rozwiazala
@@ -10859,12 +10938,69 @@ def _checkout_recovery(min_minutes: int = 60, max_hours: int = 72) -> dict:
                 "product_label": etykiety.get(zam.product_key, zam.product_key),
                 "amount": zam.amount_usd,
                 "credits_used": zam.credits_used or 0,
+                "unsubscribe_url": _unsub_url(tr.id),
             })
+            wyslane_do.append((tr.id, zam.id))
             sent += 1
         session.commit()
-        return {"sent": sent, "candidates": len(kandydaci)}
+        # Telemetria otwiera własną sesję: dopiero po commicie (patrz komentarz w billing.create_checkout).
+        for tid, oid in wyslane_do:
+            telemetry.track("checkout_recovery_sent", trader_id=tid, order_id=oid)
+        oferty = _checkout_recovery_offer(session, now)
+        return {"sent": sent, "candidates": len(kandydaci), "offers": oferty}
     finally:
         session.close()
+
+
+STRIPE_WYGASLA = "Stripe checkout expired"
+RECOVERY_RABAT_PCT = 15.0          # decyzja właściciela 27.11: 15% na 48 h, tylko porzucony plan
+RECOVERY_OFERTA_PO = timedelta(hours=24)
+RECOVERY_OFERTA_WAZNA = timedelta(hours=48)
+
+
+def _checkout_recovery_offer(session, now: datetime) -> int:
+    """Krok 2: doba po przypomnieniu, wciąż bez zakupu → jednorazowy rabat na porzucony plan.
+
+    Oferta to zwykły FlashOffer (jednorazowy, tylko ta osoba i ten plan), więc checkout
+    nalicza go sam, bez kodu. Kto wyłączył przypomnienia i oferty, nie dostaje ani maila,
+    ani oferty. Okno 72 h od pierwszego maila chroni przed odkopaniem starych zamówień."""
+    teraz = now.replace(tzinfo=None)
+    kandydaci = (session.query(Order)
+                 .filter(Order.recovery_sent_at.isnot(None), Order.recovery_offer_at.is_(None),
+                         Order.recovery_sent_at <= teraz - RECOVERY_OFERTA_PO,
+                         Order.recovery_sent_at >= teraz - timedelta(hours=72),
+                         Order.status != "paid", Order.flag.is_(None), Order.provider != "manual")
+                 .all())
+    wyslane, zdarzenia = 0, []
+    for zam in kandydaci:
+        zam.recovery_offer_at = teraz
+        if (session.query(Order)
+                .filter(Order.trader_id == zam.trader_id, Order.status == "paid",
+                        Order.created_at >= zam.created_at).first()):
+            continue
+        tr = session.get(Trader, zam.trader_id)
+        produkt = session.query(Product).filter(Product.key == zam.product_key, Product.active == True).first()  # noqa: E712
+        if tr is None or not tr.email or not tr.notify_marketing or produkt is None:
+            continue
+        oferta = FlashOffer(discount_pct=RECOVERY_RABAT_PCT, trader_id=tr.id, scope="keys",
+                            plan_keys=produkt.key, title="Your challenge offer",
+                            ends_at=teraz + RECOVERY_OFERTA_WAZNA, single_use=True)
+        session.add(oferta)
+        session.flush()
+        notify.send("checkout_recovery_offer", tr.email, {
+            "name": tr.first_name or tr.full_name or "trader",
+            "product_label": produkt.label, "product_key": produkt.key,
+            "pct": RECOVERY_RABAT_PCT, "amount": produkt.price_usd,
+            "price": offers.price_after(produkt, oferta),
+            "ends": oferta.ends_at.strftime("%d %b %Y, %H:%M UTC"),
+            "unsubscribe_url": _unsub_url(tr.id),
+        })
+        zdarzenia.append((tr.id, zam.id))
+        wyslane += 1
+    session.commit()
+    for tid, oid in zdarzenia:
+        telemetry.track("checkout_recovery_offer_sent", trader_id=tid, order_id=oid)
+    return wyslane
 
 
 @app.api_route("/api/cron/upsell-nudge", methods=["GET", "POST"], include_in_schema=False,

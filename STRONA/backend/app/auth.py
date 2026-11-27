@@ -74,13 +74,25 @@ def make_impersonation_token(trader_id: int, password_hash: str | None = None) -
 
 def _parse_session(token: str) -> dict | None:
     try:
-        data = _serializer.loads(token, max_age=TOKEN_MAX_AGE)
+        data, wydany = _serializer.loads(token, max_age=TOKEN_MAX_AGE, return_timestamp=True)
+        data["_iat"] = wydany
         if data.get("imp"):
             _serializer.loads(token, max_age=IMP_MAX_AGE)
         int(data["tid"])
         return data
     except (BadSignature, Exception):
         return None
+
+
+def _odwolany(trader, data: dict) -> bool:
+    """Token wydany przed wylogowaniem (`sessions_revoked_at`) już nie działa."""
+    kiedy = getattr(trader, "sessions_revoked_at", None)
+    wydany = data.get("_iat")
+    if not kiedy or wydany is None:
+        return False
+    # Czas tokenu jest w pełnych sekundach, `kiedy` też: odrzucamy także token z sekundy wylogowania
+    # (skopiowany tuż przed nim); nowe logowanie działa od następnej sekundy.
+    return wydany.replace(tzinfo=None) <= kiedy.replace(tzinfo=None)
 
 
 def parse_token(token: str) -> int | None:
@@ -121,6 +133,22 @@ def terminal_pw_fp(password: str | None) -> str:
 # Osobna sol: token resetu nie moze dzialac jako token sesji (i odwrotnie).
 _reset_serializer = URLSafeTimedSerializer(settings.secret_key, salt="pw-reset")
 RESET_MAX_AGE = 60 * 60  # godzina
+
+
+# Link „wypisz z przypomnień i ofert" w mailach: bez daty ważności (mail bywa czytany po tygodniach),
+# własna sól, więc nie da się go użyć jako sesji ani resetu hasła.
+_unsub_serializer = URLSafeTimedSerializer(settings.secret_key, salt="marketing-unsub")
+
+
+def make_unsub_token(trader_id: int) -> str:
+    return _unsub_serializer.dumps({"tid": trader_id})
+
+
+def parse_unsub_token(token: str) -> int | None:
+    try:
+        return int(_unsub_serializer.loads(token)["tid"])
+    except Exception:
+        return None
 
 
 def make_reset_token(trader_id: int, password_hash: str | None = None) -> str:
@@ -222,6 +250,8 @@ def current_trader(request: Request,
         pwf = data.get("pwf")
         if pwf and pwf != _pw_fp(trader.password_hash):
             raise HTTPException(401, "Invalid or expired token")
+        if _odwolany(trader, data):
+            raise HTTPException(401, "Signed out. Please sign in again.")
         if portal_wstrzymany(trader, request.url.path):
             raise HTTPException(403, KYC_BLOKADA)
         session.expunge(trader)
@@ -248,6 +278,8 @@ def admin_z_tokenu(token: str) -> Trader | None:
             return None
         pwf = data.get("pwf")
         if pwf and pwf != _pw_fp(tr.password_hash):
+            return None
+        if _odwolany(tr, data):
             return None
         session.expunge(tr)
         return tr
