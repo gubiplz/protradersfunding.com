@@ -393,6 +393,9 @@
             const d = await F.history(S.venue, S.m, S.interval, timestamp - 1, 500);
             if (nr !== loadSeq) return;
             callback(openBars(S.m, S.interval, d).filter((k) => k.timestamp < timestamp), { forward: d.length > 10, backward: false });
+            // Trade BOT markers older than the first bar were drawn at raw prices (no candle to
+            // clamp to); re-clamp them now that those candles exist, not at the next 15 s refresh.
+            drawTrades();
           } else callback([], { forward: false, backward: false });
         } catch (e) {
           if (nr !== loadSeq) return;
