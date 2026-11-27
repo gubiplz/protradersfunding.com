@@ -4257,10 +4257,13 @@ def admin_mail_test(payload: MailTestIn):
                                "unsubscribe_url": wypisz}),
         ("checkout_recovery_offer", {"name": "there", "product_label": "2-Step 25K", "product_key": "2step-25k",
                                      "pct": RECOVERY_RABAT_PCT, "amount": 299.0, "price": 254.15,
-                                     "ends": "in 48 hours (sample)", "unsubscribe_url": wypisz}),
+                                     "ends": "in 48 hours (sample)", "unsubscribe_url": wypisz,
+                                     "ends_ts": int(time.time()) + 48 * 3600}),
         ("flash_offer", {"name": "there", "title": "Flash sale (sample)", "pct": 20, "plans": "all 2-Step plans",
-                         "ends": "Sunday 23:59 UTC (sample)", "url": f"{settings.app_base_url}/portal?view=store",
-                         "unsubscribe_url": wypisz}),
+                         "ends": "in 12 hours (sample)", "url": f"{settings.app_base_url}/portal?view=store",
+                         "unsubscribe_url": wypisz, "template": "flash-sale", "ends_ts": int(time.time()) + 12 * 3600}),
+        ("newsletter_welcome", {"variant": "discount", "code": "WELCOME10", "pct": 10,
+                                "unsubscribe_url": f"{settings.app_base_url}/newsletter/unsubscribe/test"}),
         ("newsletter_blast", {"subject": "Newsletter (sample)", "body": "Hi,\n\nthis is a sample newsletter.",
                               "unsubscribe_url": f"{settings.app_base_url}/newsletter/unsubscribe/test"}),
     ]
@@ -8070,6 +8073,7 @@ class FlashOfferIn(BaseModel):
     single_use: bool = False
     send_email: bool = False
     send_push: bool = False
+    email_template: str | None = None     # grafika maila (notify.CAMPAIGN_TEMPLATES)
 
 
 class FlashOfferNotifyIn(BaseModel):
@@ -8140,6 +8144,8 @@ def _offer_blast(offer_id: int, email: bool, push_too: bool) -> dict:
                     "plans": plans, "ends": ends,
                     "url": f"{settings.app_base_url}{url}",
                     "unsubscribe_url": _unsub_url(tr.id),
+                    "template": o.email_template or "flash-sale",
+                    "ends_ts": int(offers._aware(o.ends_at).timestamp()),
                 })
                 emailed += 1
         return {"emailed": emailed, "pushed": pushed, "skipped_optout": skipped}
@@ -8230,7 +8236,9 @@ def admin_offer_create(payload: FlashOfferIn, background: BackgroundTasks):
                        title=(payload.title or "").strip()[:120] or None,
                        starts_at=(starts.replace(tzinfo=None) if starts else None),
                        ends_at=ends.replace(tzinfo=None),
-                       single_use=single_use)
+                       single_use=single_use,
+                       email_template=(payload.email_template if payload.email_template in notify.CAMPAIGN_TEMPLATES
+                                       else None))
         session.add(o)
         session.commit()
         wynik = {"emailed": 0, "pushed": 0, "skipped_optout": 0}
@@ -11191,6 +11199,7 @@ def _checkout_recovery_offer(session, now: datetime) -> int:
             "pct": RECOVERY_RABAT_PCT, "amount": produkt.price_usd,
             "price": offers.price_after(produkt, oferta),
             "ends": oferta.ends_at.strftime("%d %b %Y, %H:%M UTC"),
+            "ends_ts": int(oferta.ends_at.replace(tzinfo=timezone.utc).timestamp()),
             "unsubscribe_url": _unsub_url(tr.id),
         })
         zdarzenia.append((tr.id, zam.id))

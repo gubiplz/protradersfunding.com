@@ -673,6 +673,7 @@ def _shell(parts: list[str], prefs_url: str | None = None, logo_row: bool = True
 CAMPAIGN_TEMPLATES = {
     "black-friday": "Black Friday", "flash-sale": "Flash Sale",
     "bogo": "Buy 1 Get 1 Free", "weekend-sale": "Weekend Sale",
+    "welcome": "Welcome", "just-for-you": "Just for you",
 }
 
 
@@ -692,11 +693,16 @@ def _campaign_parts(ctx: dict) -> list[str]:
     parts.append(f'<tr><td style="padding:0;line-height:0;background:#070d18"><a href="{html.escape(cta_url, quote=True)}">'
                  f'<img src="{b}/static/img/campaigns/{szablon}.jpg" width="560" alt="{html.escape(CAMPAIGN_TEMPLATES[szablon])}" '
                  f'style="display:block;width:100%;height:auto;border:0"></a></td></tr>')
-    if ctx.get("offer"):
+    if ctx.get("offer") or ctx.get("code"):
+        kod = (f'<p style="font:400 13px/1.4 {_FONT};color:#9aa7b5;margin:16px 0 8px">Your code</p>'
+               f'<div style="display:inline-block;border:1px dashed #e7c27a;border-radius:12px;padding:12px 26px;'
+               f'font:700 26px/1 {_FONT};letter-spacing:.12em;color:#ffffff">{html.escape(str(ctx["code"]))}</div>'
+               if ctx.get("code") else "")
+        oferta = (f'<p style="font:700 21px/1.35 {_FONT};color:#e7c27a;margin:0">{html.escape(ctx["offer"])}</p>'
+                  if ctx.get("offer") else "")
         parts.append(f'<tr><td align="center" style="background:#070d18;padding:4px 32px 34px">'
                      f'<div style="border:1px solid rgba(231,194,122,.45);border-radius:16px;padding:20px 22px;margin:0 0 24px">'
-                     f'<p style="font:700 21px/1.35 {_FONT};color:#e7c27a;margin:0">{html.escape(ctx["offer"])}</p></div>'
-                     f'{btn}</td></tr>')
+                     f'{oferta}{kod}</div>{btn}</td></tr>')
     tekst = "".join(f'<p style="font:400 16px/1.6 {_FONT};color:{_INK};margin:0 0 14px">{html.escape(a)}</p>'
                     for a in str(ctx.get("body") or "").split("\n\n") if a.strip())
     parts.append(f'<tr><td style="padding:34px 40px 8px">{tekst}</td></tr>')
@@ -709,10 +715,56 @@ def _campaign_parts(ctx: dict) -> list[str]:
     return parts
 
 
+def _ts(iso) -> int | None:
+    try:
+        d = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        return int((d if d.tzinfo else d.replace(tzinfo=timezone.utc)).timestamp())
+    except (TypeError, ValueError):
+        return None
+
+
+def _jako_kampania(event: str, ctx: dict) -> dict | None:
+    """Maile z ofertą albo kodem w układzie kampanii (grafika, odliczanie, złoty blok);
+    None = zwykły układ (np. powitanie bez kodu, losowanie)."""
+    wypisz = {"unsubscribe_url": ctx.get("unsubscribe_url")}
+    if event == "flash_offer":
+        return {**wypisz, "template": ctx.get("template") or "flash-sale",
+                "offer": f"{_num(ctx.get('pct'))}% off {ctx.get('plans') or 'selected challenges'}",
+                "body": "A limited-time discount just went live on your account. It's applied automatically "
+                        "at checkout, no code needed.",
+                "cta_label": "See the offer", "cta_url": ctx.get("url"), "ends_ts": ctx.get("ends_ts"),
+                "fine_print": f"The offer ends {ctx.get('ends')}. After that the regular price applies."}
+    if event == "checkout_recovery_offer":
+        return {**wypisz, "template": "just-for-you",
+                "offer": f"{_num(ctx.get('pct'))}% off the {ctx.get('product_label')} challenge: "
+                         f"${_num(ctx.get('price'))} instead of ${_num(ctx.get('amount'))}",
+                "body": f"Hi {ctx.get('name') or 'there'}, the challenge you started is still available. "
+                        f"The discount is applied automatically at checkout, no code needed.",
+                "cta_label": "Complete your purchase",
+                "cta_url": f"{settings.app_base_url}/portal?view=store&buy={ctx.get('product_key')}",
+                "ends_ts": ctx.get("ends_ts"),
+                "fine_print": f"Offer ends {ctx.get('ends')}. It's for your account only and can be used once."}
+    if event == "newsletter_welcome" and ctx.get("code") and ctx.get("variant") != "giveaway":
+        flash = ctx.get("variant") == "flash"
+        return {**wypisz, "template": "flash-sale" if flash else "welcome",
+                "unsubscribe_why": f"You get this email because you subscribed on our website.",
+                "offer": f"{_num(ctx.get('pct', 10))}% off " + ("every challenge" if flash else "your first challenge"),
+                "code": ctx.get("code"),
+                "body": "Thanks for subscribing. Enter the code at checkout."
+                        + (" Use it before the flash sale ends." if flash else ""),
+                "cta_label": "Choose a challenge", "cta_url": f"{settings.app_base_url}/?utm_source=newsletter#pricing",
+                "ends_ts": _ts(ctx.get("ends_at")) if flash else None,
+                "fine_print": "We send occasional emails about new challenge tiers, promotions and platform updates."}
+    return None
+
+
 def _render_html(event: str, ctx: dict, subject: str) -> str | None:
     """Wersja HTML każdego maila — wspólny layout, treść per zdarzenie."""
     if event == "campaign":
         return _shell(_campaign_parts(ctx), ctx.get("preferences_url"), logo_row=False)
+    kamp = _jako_kampania(event, ctx)
+    if kamp is not None:
+        return _shell(_campaign_parts(kamp), ctx.get("preferences_url"), logo_row=False)
     brand = settings.site_name
     name = ctx.get("name") or "trader"
     login = ctx.get("login", "")
