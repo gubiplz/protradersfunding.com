@@ -210,3 +210,101 @@ def test_zgoda_marketingowa_przy_rejestracji_jest_osobna_i_domyslnie_nie():
     rodzaje = lambda t: {r.kind for r in s.query(ConsentRecord).filter(ConsentRecord.trader_id == t.id)}  # noqa: E731
     assert "marketing" not in rodzaje(t_bez) and "marketing" in rodzaje(t_ze)
     s.close()
+
+
+def test_zapis_do_newslettera_wlacza_oferty_na_koncie_i_odwrotnie():
+    from app.models import ConsentRecord
+    with TestClient(app) as c:
+        # konto bez zgody → zapis do newslettera tym adresem włącza oferty i zostawia dowód
+        konto = f"nlkonto{next(LICZNIK)}@test.pl"
+        assert c.post("/api/auth/signup", json={"email": konto, "password": "haslo12345",
+                                                "terms_accepted": True}).status_code == 200
+        assert c.post("/api/newsletter/subscribe", json={"email": konto, "consent": True}).status_code == 200
+        # najpierw newsletter, potem rejestracja bez checkboxa → oferty od razu włączone
+        nl = f"nlnajpierw{next(LICZNIK)}@test.pl"
+        assert c.post("/api/newsletter/subscribe", json={"email": nl, "consent": True}).status_code == 200
+        assert c.post("/api/auth/signup", json={"email": nl, "password": "haslo12345",
+                                                "terms_accepted": True}).status_code == 200
+    s = SessionLocal()
+    for adres in (konto, nl):
+        t = s.query(Trader).filter(Trader.email == adres).one()
+        assert t.notify_marketing is True
+        assert s.query(ConsentRecord).filter(ConsentRecord.trader_id == t.id,
+                                             ConsentRecord.kind == "marketing").count() == 1
+    s.close()
+
+
+def test_ten_sam_mail_marketingowy_nie_idzie_dwa_razy(monkeypatch):
+    """Drugie „Send” newslettera i ta sama oferta drugi raz pomijają tych, którzy już ją dostali."""
+    from app.models import NewsletterSubscriber
+    wyslane = []
+
+    class _FakeSMTP:
+        def __init__(self, *a, **k): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def starttls(self): pass
+        def login(self, *a): pass
+        def send_message(self, msg): wyslane.append((msg["To"], msg["Subject"]))
+
+    monkeypatch.setattr(notify.settings, "smtp_host", "smtp.atrapa")
+    monkeypatch.setattr(notify.smtplib, "SMTP", _FakeSMTP)
+    moje = [f"dubel{next(LICZNIK)}@test.pl" for _ in range(2)]
+    s = SessionLocal()
+    for a in moje:
+        s.add(NewsletterSubscriber(email=a, consent=True, source="footer", token=f"t{next(LICZNIK)}x"))
+    s.commit(); s.close()
+    temat = f"Weekend promo {next(LICZNIK)}"
+    with TestClient(app) as c:
+        r1 = c.post("/api/admin/newsletter/send", json={"subject": temat, "body": "Hi"}, headers=ADMIN).json()
+        r2 = c.post("/api/admin/newsletter/send", json={"subject": temat, "body": "Hi"}, headers=ADMIN).json()
+    do_moich = [w for w in wyslane if w[0] in moje]
+    assert sorted(w[0] for w in do_moich) == sorted(moje)          # każdy dokładnie raz
+    assert r1["sent"] >= 2 and r2["already_sent"] >= 2
+    # bezpośrednio przez notify: ten sam mail na ten sam adres drugi raz → pominięty
+    ctx = {"name": "Jan", "title": "Only today", "pct": 20, "plans": "2-Step", "ends": "x", "url": "u"}
+    assert notify.send_now("flash_offer", moje[0], ctx) is None
+    assert notify.send_now("flash_offer", moje[0], ctx) == notify.DUPLIKAT
+    assert len([w for w in wyslane if w == (moje[0], "Only today")]) == 1
+
+
+def test_mail_marketingowy_ma_wypisanie_jednym_kliknieciem(monkeypatch):
+    """Nagłówki List-Unsubscribe (+ One-Click) dla Gmaila/Yahoo, POST na link wypisuje."""
+    naglowki = []
+
+    class _FakeSMTP:
+        def __init__(self, *a, **k): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def starttls(self): pass
+        def login(self, *a): pass
+        def send_message(self, msg): naglowki.append(dict(msg.items()))
+
+    monkeypatch.setattr(notify.settings, "smtp_host", "smtp.atrapa")
+    monkeypatch.setattr(notify.smtplib, "SMTP", _FakeSMTP)
+    tid, _, email = _porzucone()
+    url = "https://protradersfunding.com/email/unsubscribe/abc"
+    notify.send_now("flash_offer", email, {"name": "Jan", "title": f"Click {next(LICZNIK)}", "pct": 10,
+                                           "plans": "2-Step", "ends": "x", "url": "u", "unsubscribe_url": url})
+    s = SessionLocal(); s.get(Trader, tid).notify_marketing = True; s.commit(); s.close()
+    notify.send_now("flash_offer", email, {"name": "Jan", "title": f"Click {next(LICZNIK)}", "pct": 10,
+                                           "plans": "2-Step", "ends": "x", "url": "u", "unsubscribe_url": url})
+    h = naglowki[-1]
+    assert h["List-Unsubscribe"].startswith(f"<{url}>") and h["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
+    with TestClient(app) as c:
+        r = c.post(main_mod._unsub_url(tid).replace(get_settings().app_base_url, ""),
+                   data={"List-Unsubscribe": "One-Click"})
+        assert r.status_code == 200
+    s = SessionLocal()
+    assert s.get(Trader, tid).notify_marketing is False
+    s.close()
+
+
+def test_probki_maili_z_panelu_ida_zawsze(maile):
+    with TestClient(app) as c:
+        for _ in range(2):          # drugi raz też — próbki omijają blokadę dubli
+            r = c.post("/api/admin/mail-test", json={"to": "probka@test.pl"}, headers=ADMIN)
+            assert r.status_code == 200
+        assert c.post("/api/admin/mail-test", json={"to": "probka@test.pl"}).status_code in (401, 403)
+    zdarzenia = [m[0] for m in maile if m[1] == "probka@test.pl"]
+    assert zdarzenia.count("checkout_recovery_offer") == 2 and "newsletter_blast" in zdarzenia

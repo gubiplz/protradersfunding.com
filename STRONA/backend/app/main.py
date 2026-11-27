@@ -1054,6 +1054,13 @@ class ResetIn(BaseModel):
 RESET_MAILE_NA_GODZINE = 3
 
 
+def _w_newsletterze(session, email: str) -> bool:
+    """Adres zapisany (i niewypisany) do newslettera, czyli z udzieloną zgodą na maile marketingowe."""
+    return session.query(NewsletterSubscriber).filter(
+        func.lower(NewsletterSubscriber.email) == email.lower(),
+        NewsletterSubscriber.unsubscribed_at.is_(None)).first() is not None
+
+
 @app.post("/api/auth/forgot")
 def forgot_password(payload: ForgotIn, request: Request):
     """Zawsze 200 — odpowiedź nie może zdradzać, czy e-mail istnieje w bazie.
@@ -1298,7 +1305,8 @@ def signup(payload: SignupIn, request: Request, response: Response):
             password_set=True,
             terms_accepted_at=datetime.now(timezone.utc),
             signup_country=_kraj_z_ip(request), last_login_country=_kraj_z_ip(request),
-            notify_marketing=bool(payload.marketing_opt_in),
+            # Zgoda z checkboxa albo wcześniejszy zapis do newslettera (ta sama zgoda na maile marketingowe).
+            notify_marketing=bool(payload.marketing_opt_in) or _w_newsletterze(session, email),
         )
         session.add(tr)
         session.flush()
@@ -1307,6 +1315,9 @@ def signup(payload: SignupIn, request: Request, response: Response):
         if payload.marketing_opt_in:
             legal.record_consent(session, kind="marketing", request=request, trader_id=tr.id,
                                  detail="Marketing emails (checkout reminders, offers), optional checkbox at signup")
+        elif tr.notify_marketing:
+            legal.record_consent(session, kind="marketing", request=request, trader_id=tr.id, email=email,
+                                 detail="Marketing emails: consent given earlier on the newsletter form")
         session.commit()
         # welcome idzie dopiero po potwierdzeniu adresu — najpierw sam kod
         _wyslij_mail_weryfikacyjny(request, tr)
@@ -3874,6 +3885,12 @@ def newsletter_subscribe(payload: NewsletterIn, request: Request):
         if nowy:
             legal.record_consent(session, kind="newsletter", request=request, email=email,
                                  detail=f"marketing e-mail, {sub.source} form")
+        # Ta sama zgoda („send me marketing emails”) włącza oferty i przypomnienia na koncie z tym adresem.
+        tr = session.query(Trader).filter(func.lower(Trader.email) == email).first()
+        if tr and not tr.notify_marketing:
+            tr.notify_marketing = True
+            legal.record_consent(session, kind="marketing", request=request, trader_id=tr.id, email=email,
+                                 detail=f"marketing e-mail, newsletter {sub.source} form")
         session.commit()
         if nowy:
             notify.send("newsletter_welcome", email,
@@ -3886,7 +3903,7 @@ def newsletter_subscribe(payload: NewsletterIn, request: Request):
         session.close()
 
 
-@app.get("/newsletter/unsubscribe/{token}", include_in_schema=False)
+@app.api_route("/newsletter/unsubscribe/{token}", methods=["GET", "POST"], include_in_schema=False)
 def newsletter_unsubscribe(token: str, request: Request):
     session = SessionLocal()
     try:
@@ -3899,7 +3916,7 @@ def newsletter_unsubscribe(token: str, request: Request):
         session.close()
 
 
-@app.get("/email/unsubscribe/{token}", include_in_schema=False)
+@app.api_route("/email/unsubscribe/{token}", methods=["GET", "POST"], include_in_schema=False)
 def marketing_unsubscribe(token: str, request: Request):
     """Link z maili o porzuconym checkoucie i ofertach: wyłącza `notify_marketing` jednym kliknięciem."""
     tid = auth.parse_unsub_token(token)
@@ -4066,19 +4083,59 @@ def admin_newsletter_send(payload: NewsletterSendIn, request: Request):
                 raise HTTPException(502, f"Test email failed: {blad}")
             return {"sent": 1, "test": True}
         rows = (session.query(NewsletterSubscriber).filter(NewsletterSubscriber.unsubscribed_at.is_(None))
-                .order_by(NewsletterSubscriber.id).limit(NEWSLETTER_SEND_MAX).all())
-        wyslane, bledy = 0, 0
+                .order_by(NewsletterSubscriber.id).all())
+        # Kto już dostał ten mail, jest pomijany (notify: bez dubli), więc kolejne „Send” dosyła
+        # następną partię zamiast tej samej pierwszej pięćsetki.
+        wyslane, bledy, pominiete = 0, 0, 0
         for s in rows:
+            if wyslane + bledy >= NEWSLETTER_SEND_MAX:
+                break
             blad = notify.send_now("newsletter_blast", s.email,
                                    {"subject": payload.subject, "body": payload.body,
                                     "unsubscribe_url": _newsletter_unsub_url(request, s.token)})
-            if blad:
+            if blad == notify.DUPLIKAT:
+                pominiete += 1
+            elif blad:
                 bledy += 1
             else:
                 wyslane += 1
-        return {"sent": wyslane, "failed": bledy, "total": len(rows)}
+        zostalo = len(rows) - wyslane - bledy - pominiete
+        return {"sent": wyslane, "failed": bledy, "already_sent": pominiete, "total": len(rows),
+                "remaining": max(0, zostalo)}
     finally:
         session.close()
+
+
+class MailTestIn(BaseModel):
+    to: str = Field(max_length=200)
+
+
+@app.post("/api/admin/mail-test", dependencies=[Depends(auth.require_admin)])
+def admin_mail_test(payload: MailTestIn):
+    """Próbka maili marketingowych (przypomnienie, oferta 15%, flash, newsletter) na jeden adres —
+    do sprawdzenia wyglądu i stopek. Przykładowe dane; link wypisania prowadzi do strony „link wygasł”."""
+    adres = payload.to.strip().lower()
+    if not _EMAIL_RX.match(adres):
+        raise HTTPException(400, "Enter a valid address")
+    wypisz = f"{settings.app_base_url}/email/unsubscribe/test"
+    probki = [
+        ("checkout_recovery", {"name": "there", "product_label": "2-Step 25K", "amount": 299.0, "credits_used": 0,
+                               "unsubscribe_url": wypisz}),
+        ("checkout_recovery_offer", {"name": "there", "product_label": "2-Step 25K", "product_key": "2step-25k",
+                                     "pct": RECOVERY_RABAT_PCT, "amount": 299.0, "price": 254.15,
+                                     "ends": "in 48 hours (sample)", "unsubscribe_url": wypisz}),
+        ("flash_offer", {"name": "there", "title": "Flash sale (sample)", "pct": 20, "plans": "all 2-Step plans",
+                         "ends": "Sunday 23:59 UTC (sample)", "url": f"{settings.app_base_url}/portal?view=store",
+                         "unsubscribe_url": wypisz}),
+        ("newsletter_blast", {"subject": "Newsletter (sample)", "body": "Hi,\n\nthis is a sample newsletter.",
+                              "unsubscribe_url": f"{settings.app_base_url}/newsletter/unsubscribe/test"}),
+    ]
+    # Próbki pomijają blokadę dubli: właściciel może wysłać je sobie kilka razy.
+    wynik = {}
+    with notify.bez_dubli_off():
+        for event, ctx in probki:
+            wynik[event] = notify.send_now(event, adres, ctx) or "sent"
+    return {"to": adres, "result": wynik}
 
 
 @app.get("/api/help/articles")
@@ -7948,6 +8005,7 @@ def _offer_blast(offer_id: int, email: bool, push_too: bool) -> dict:
                     "title": o.title, "pct": o.discount_pct,
                     "plans": plans, "ends": ends,
                     "url": f"{settings.app_base_url}{url}",
+                    "unsubscribe_url": _unsub_url(tr.id),
                 })
                 emailed += 1
         return {"emailed": emailed, "pushed": pushed, "skipped_optout": skipped}

@@ -429,7 +429,8 @@ def _render(event: str, ctx: dict) -> tuple[str, str]:
             f"  Ends:      {ctx.get('ends')}\n\n"
             f"The discount is applied automatically at checkout — no code needed:\n"
             f"{ctx.get('url') or settings.app_base_url + '/portal?view=store'}\n\n"
-            f"After the deadline the regular price applies.",
+            f"After the deadline the regular price applies."
+            + (f"\n\nStop reminder and offer emails: {ctx['unsubscribe_url']}" if ctx.get("unsubscribe_url") else ""),
         ),
         "order_awaiting_payment": (
             f"Awaiting your payment — {ctx.get('product_label')}",
@@ -609,6 +610,16 @@ def _note_html(text: str) -> str:
    </td></tr>"""
 
 
+def _operator_html() -> str:
+    """Nadawca z nazwą i adresem w stopce, gdy LEGAL_* jest wypełnione (wymóg m.in. CAN-SPAM dla maili handlowych)."""
+    nazwa = (getattr(settings, "legal_entity_name", "") or "").strip()
+    adres = (getattr(settings, "legal_address", "") or "").strip()
+    if not (nazwa or adres):
+        return ""
+    return (f'\n     <p style="font:400 11px/1.7 {_FONT};color:#b0b0b5;margin:4px 0 0">'
+            f'{html.escape(" · ".join(x for x in (nazwa, adres) if x))}</p>')
+
+
 def _shell(parts: list[str]) -> str:
     brand = settings.site_name
     logo = f"{settings.app_base_url}/static/img/logo.png"
@@ -626,7 +637,8 @@ def _shell(parts: list[str]) -> str:
   <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%">
    <tr><td align="center" style="padding:26px 30px 0">
      <p style="font:400 12px/1.7 {_FONT};color:{_FAINT};margin:0">
-       {brand} · <a href="mailto:{settings.support_email}" style="color:{_GOLD};text-decoration:none">{settings.support_email}</a></p>
+       {brand} · <a href="mailto:{settings.support_email}" style="color:{_GOLD};text-decoration:none">{settings.support_email}</a>
+       · <a href="{settings.app_base_url}/portal?view=settings" style="color:{_FAINT}">Email preferences</a></p>{_operator_html()}
      <p style="font:400 11px/1.7 {_FONT};color:#b0b0b5;margin:6px 0 0">
        Demo accounts with virtual funds in a simulated trading environment.
        Rewards are performance-based and discretionary.</p>
@@ -1003,6 +1015,7 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
             _button_html("See the Offer", ctx.get("url") or f"{portal}?view=store"),
             _note_html(f"The offer ends {ctx.get('ends')}. After that the regular "
                        f"price applies."),
+            _unsub_html(ctx.get("unsubscribe_url"), _WHY_REMINDER.format(site=settings.site_name)),
         ]
     elif event == "order_awaiting_payment":
         dane = _payment_lines(ctx)
@@ -1172,6 +1185,49 @@ def w_tle(fn, *args) -> None:
         fn(*args)
 
 
+# Maile marketingowe (newsletter, oferty, porzucony koszyk) nie idą dwa razy z tą samą treścią na ten
+# sam adres: drugie kliknięcie „Send”, druga partia newslettera albo ta sama oferta uruchomiona
+# ponownie pomija tych, którzy już ją dostali. Tożsamość maila = zdarzenie + temat.
+_BEZ_DUBLI = {"newsletter_blast", "newsletter_welcome", "flash_offer",
+              "checkout_recovery", "checkout_recovery_offer"}
+DUBEL_OKNO_DNI = 7
+DUPLIKAT = "ten sam mail poszedł już na ten adres (ostatnie 7 dni)"
+
+
+_DUBLE_WYLACZONE: ContextVar[bool] = ContextVar("_DUBLE_WYLACZONE", default=False)
+
+
+@contextmanager
+def bez_dubli_off():
+    """Próbki z panelu (POST /api/admin/mail-test) idą zawsze, także drugi raz na ten sam adres."""
+    znak = _DUBLE_WYLACZONE.set(True)
+    try:
+        yield
+    finally:
+        _DUBLE_WYLACZONE.reset(znak)
+
+
+def _juz_wyslany(event: str, to_email: str, subject: str) -> bool:
+    if event not in _BEZ_DUBLI or _DUBLE_WYLACZONE.get():
+        return False
+    try:
+        from datetime import datetime, timedelta, timezone
+        from sqlalchemy import func
+        from .db import SessionLocal
+        from .models import MailLog
+        session = SessionLocal()
+        try:
+            od = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=DUBEL_OKNO_DNI)
+            return session.query(MailLog.id).filter(
+                MailLog.event == event, MailLog.ok.is_(True), MailLog.ts >= od,
+                func.lower(MailLog.to_email) == to_email.lower(),
+                MailLog.subject == (subject or "")[:200]).first() is not None
+        finally:
+            session.close()
+    except Exception:  # pragma: no cover - dziennik nie może zablokować wysyłki
+        return False
+
+
 def _zapisz_w_dzienniku(event: str, to_email: str, subject: str,
                         blad: str | None) -> None:
     """Ślad każdej próby wysyłki. Best-effort: dziennik nie ma prawa wywrócić
@@ -1245,6 +1301,10 @@ def _send_teraz(event: str, to_email: str | None,
         print(f"[notify] pominięto mail '{event}' do {to_email} (preferencje tradera)")
         pominiete = "klient wyłączył tę kategorię maili w ustawieniach portalu"
         to_email = None
+    if to_email and _juz_wyslany(event, to_email, subject):
+        print(f"[notify] pominięto mail '{event}' do {to_email} (już wysłany)")
+        pominiete = DUPLIKAT
+        to_email = None
     if to_email:
         tresc_html = _render_html(event, ctx, subject)
         if settings.smtp_host:
@@ -1253,6 +1313,11 @@ def _send_teraz(event: str, to_email: str | None,
                 msg["From"] = settings.mail_from
                 msg["To"] = to_email
                 msg["Subject"] = subject
+                wypisz = ctx.get("unsubscribe_url") if event in _BEZ_DUBLI else None
+                if wypisz and str(wypisz).startswith("https://"):
+                    # Gmail/Yahoo (od 2024) pokazują przycisk „Unsubscribe” i wymagają tego od nadawców masowych.
+                    msg["List-Unsubscribe"] = f"<{wypisz}>, <mailto:{settings.support_email}?subject=unsubscribe>"
+                    msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
                 msg.set_content(body)
                 if tresc_html:
                     msg.add_alternative(tresc_html, subtype="html")
