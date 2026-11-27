@@ -241,6 +241,11 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.01em}
 .tile-ic.green{background:var(--green-bg);color:var(--green)}
 .tile-ic.blue{background:var(--blue-bg);color:var(--blue)}
 .tile-ic.orange{background:var(--gold-bg);color:var(--gold)}
+/* dwie dodatkowe barwy, żeby kafelki w rzędzie się nie powtarzały: turkus marki i koral */
+.tile-ic.teal{background:rgba(31,158,143,.12);color:#1f9e8f}
+.tile-ic.coral{background:rgba(226,103,79,.12);color:#d9583f}
+html[data-theme=dark] .tile-ic.teal{background:rgba(54,185,169,.15);color:#4fd1c0}
+html[data-theme=dark] .tile-ic.coral{background:rgba(240,128,106,.15);color:#f39a85}
 .stat-tile .lbl{font-size:12.5px;color:var(--muted);margin-bottom:2px}
 .stat-tile .val{font-family:var(--mono);font-size:21px;font-weight:700;letter-spacing:-.02em;line-height:1.2}
 .stat-tile .val small{font-size:13px;color:var(--muted);font-weight:500;font-family:var(--body)}
