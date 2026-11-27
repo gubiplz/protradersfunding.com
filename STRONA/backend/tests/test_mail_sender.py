@@ -341,7 +341,7 @@ def test_panel_ma_jedno_okno_maila_z_nadawca_i_compose():
     assert 'onclick="openMailCompose()"' in kod
     assert 'id="lm-from"' in kod and 'id="lm-to"' in kod
     assert "'/api/admin/mail/send'" in kod and "'/api/admin/mail/senders'" in kod
-    assert "JSON.stringify({subject,body,sender})" in kod
+    assert "JSON.stringify({subject,body,sender,...th})" in kod
     assert "JSON.stringify({name,subject,body,sender})" in kod
     assert "t.builtin" in kod                           # wbudowane bez Delete
     assert "client-mail-modal" not in kod and "lead-mail-modal" not in kod

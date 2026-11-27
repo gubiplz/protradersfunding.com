@@ -1625,7 +1625,8 @@ function replyMailItem(){
   const t=m.trader_id?(window._clients||[]).find(x=>x.id===m.trader_id):null;
   const temat=/^re:/i.test(m.subject||'')?m.subject:'Re: '+(m.subject||'');
   const cytat=(m.text||'').trim().split('\n').slice(0,20).map(l=>'> '+l).join('\n');
-  return openMailComposer({trader:t||null,email:m.from_email,from:m.brand||'ptf',
+  const thread=m.message_id?{in_reply_to:m.message_id,references:m.references||''}:null;
+  return openMailComposer({trader:t||null,email:m.from_email,from:m.brand||'ptf',thread,
     subject:temat,body:'\n\n'+(cytat?`On ${dstr(m.created_at)}, ${m.from} wrote:\n${cytat}`:'')});
 }
 /* Ponowienie NIE jest kopia archiwalnego maila: tokeny w linkach sa jednorazowe
@@ -2368,6 +2369,8 @@ async function openMailComposer(ctx){
   ctx=ctx||{};
   const t=ctx.trader||null,l=ctx.lead||null;
   _mailCtx={trader:t,lead:l,mark:ctx.mark||null,
+    /* Reply na odebrany mail: naglowki watku, zeby odpowiedz byla u klienta w tym samym watku */
+    thread:ctx.thread||null,
     email:(t&&t.email)||(l&&l.email)||(ctx.email||''),
     name:(t&&(t.full_name||''))||(l&&(l.name||''))||''};
   let tpls=[],senders={ptf:{ready:true,missing:[]},fx:{ready:false,missing:['?']}};
@@ -2836,9 +2839,10 @@ async function sendComposedMail(){
   await busy($('lm-send'),'Sending…',async()=>{
     try{
       const id=c.trader?c.trader.id:(c.lead?c.lead.id:null);
-      if(c.trader)await api('/api/admin/traders/'+id+'/email',{method:'POST',body:JSON.stringify({subject,body,sender})});
-      else if(c.lead)await api('/api/admin/leads/'+id+'/email-custom',{method:'POST',body:JSON.stringify({subject,body,sender,mark:c.mark||undefined})});
-      else await api('/api/admin/mail/send',{method:'POST',body:JSON.stringify({to,subject,body,sender})});
+      const th=c.thread||{};
+      if(c.trader)await api('/api/admin/traders/'+id+'/email',{method:'POST',body:JSON.stringify({subject,body,sender,...th})});
+      else if(c.lead)await api('/api/admin/leads/'+id+'/email-custom',{method:'POST',body:JSON.stringify({subject,body,sender,mark:c.mark||undefined,...th})});
+      else await api('/api/admin/mail/send',{method:'POST',body:JSON.stringify({to,subject,body,sender,...th})});
       document.getElementById('mail-modal')?.remove();
       toast('E-mail sent.');
       if(c.lead){if(VIEW==='leads')await VIEWS.leads();if(window._leadOpen&&window._leadOpen.id===id)openLead(id)}

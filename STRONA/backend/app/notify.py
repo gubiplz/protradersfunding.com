@@ -1396,6 +1396,11 @@ def _send_teraz(event: str, to_email: str | None,
                 msg["From"] = settings.mail_from
                 msg["To"] = to_email
                 msg["Subject"] = subject
+                # Odpowiedź z panelu na odebrany mail: ten sam wątek u klienta.
+                # Wartości przefiltrowane w `main._naglowki_watku`.
+                for h in ("In-Reply-To", "References"):
+                    if (ctx.get("thread_headers") or {}).get(h):
+                        msg[h] = ctx["thread_headers"][h]
                 wypisz = ctx.get("unsubscribe_url") if event in _BEZ_DUBLI else None
                 if wypisz and str(wypisz).startswith("https://"):
                     # Gmail/Yahoo (od 2024) pokazują przycisk „Unsubscribe” i wymagają tego od nadawców masowych.

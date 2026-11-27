@@ -12832,7 +12832,7 @@ def _nadawca_z_pola(sender: str | None, domyslny: str) -> str:
 
 def _wyslij_z_panelu(session, *, sender: str, email: str, temat: str, tekst: str,
                      trader: Trader | None = None, lead: Lead | None = None,
-                     oznacz: str = "new") -> bool:
+                     oznacz: str = "new", watek: dict | None = None) -> bool:
     """Jedna wysyłka maila pisanego z ręki — dla klienta, leada i gołego adresu.
 
     Dwa okna w panelu (Clients, Leads) i przycisk w zakładce Mail otwierają to
@@ -12867,7 +12867,8 @@ def _wyslij_z_panelu(session, *, sender: str, email: str, temat: str, tekst: str
         if not lead_mail.nadawca_gotowy():
             raise HTTPException(400, "Sender not configured: set "
                                 + " and ".join(lead_mail.czego_brakuje_nadawcy()))
-        poszlo, powod = lead_mail.wyslij(email, temat, tekst, tylko_nadawca=True)
+        poszlo, powod = lead_mail.wyslij(email, temat, tekst, tylko_nadawca=True,
+                                         naglowki=watek)
         notify._zapisz_w_dzienniku("admin_message_fx", email, temat,
                                    None if poszlo else (powod or "not sent")[:500])
         if not poszlo:
@@ -12875,7 +12876,8 @@ def _wyslij_z_panelu(session, *, sender: str, email: str, temat: str, tekst: str
     else:
         imie = (trader.full_name if trader else None) or (lead.name if lead else None) or email
         blad = notify.send_now("admin_message", email,
-                               {"name": imie, "subject": temat, "body": tekst})
+                               {"name": imie, "subject": temat, "body": tekst,
+                                **({"thread_headers": watek} if watek else {})})
         if blad:
             raise HTTPException(400, blad)
     if trader is not None:
@@ -12896,7 +12898,30 @@ def _wyslij_z_panelu(session, *, sender: str, email: str, temat: str, tekst: str
     return False
 
 
-class LeadMailIn(BaseModel):
+class _WatekIn(BaseModel):
+    """Odpowiedź na odebrany mail: Message-ID oryginału i jego References,
+    żeby klient zobaczył odpowiedź w TYM SAMYM wątku, a nie jako nowy list."""
+    in_reply_to: str | None = None
+    references: str | None = None
+
+
+_MSGID_RX = re.compile(r"<[^<>\s]{3,250}>")
+
+
+def _naglowki_watku(dane: "_WatekIn") -> dict[str, str]:
+    """`In-Reply-To` i `References` z pól okna — tylko poprawne Message-ID.
+
+    Wartość idzie do nagłówka maila, więc filtr jest ścisły (żadnych spacji,
+    nowych linii ani nawiasów w środku). References: ostatnie 10 identyfikatorów
+    oryginału + jego własny, jak robią klienty poczty."""
+    rid = (dane.in_reply_to or "").strip()
+    if not _MSGID_RX.fullmatch(rid):
+        return {}
+    refs = [r for r in _MSGID_RX.findall(dane.references or "") if r != rid][-10:]
+    return {"In-Reply-To": rid, "References": " ".join(refs + [rid])}
+
+
+class LeadMailIn(_WatekIn):
     subject: str
     body: str
     sender: str | None = None     # domyślnie "fx" — lead zna markę landingu
@@ -12938,7 +12963,8 @@ def admin_lead_email_custom(lead_id: int, dane: LeadMailIn):
                   .first())
         oznaczony = _wyslij_z_panelu(session, sender=nadawca, email=lead.email, temat=temat,
                                      tekst=tekst, trader=trader, lead=lead,
-                                     oznacz="first" if dane.mark == "first" else "new")
+                                     oznacz="first" if dane.mark == "first" else "new",
+                                     watek=_naglowki_watku(dane))
         session.commit()
         wynik = {"ok": True, "id": lead_id, "status": lead.status, "sender": nadawca,
                  "marked": oznaczony}
@@ -13082,13 +13108,13 @@ def admin_trader_portal_invite(trader_id: int, send: bool = True):
         session.close()
 
 
-class TraderMailIn(BaseModel):
+class TraderMailIn(_WatekIn):
     subject: str
     body: str
     sender: str | None = None     # domyślnie "ptf" — klient zna platformę
 
 
-class MailSendIn(BaseModel):
+class MailSendIn(_WatekIn):
     to: str
     subject: str
     body: str
@@ -13213,7 +13239,8 @@ def admin_mail_send(dane: MailSendIn):
         trader = session.query(Trader).filter(func.lower(Trader.email) == email).first()
         lead = session.query(Lead).filter(func.lower(Lead.email) == email).first()
         _wyslij_z_panelu(session, sender=nadawca, email=email, temat=temat,
-                         tekst=tekst, trader=trader, lead=lead)
+                         tekst=tekst, trader=trader, lead=lead,
+                         watek=_naglowki_watku(dane))
         session.commit()
         return {"ok": True, "email": email, "sender": nadawca,
                 "trader_id": trader.id if trader else None,
@@ -13262,7 +13289,7 @@ def admin_trader_email(trader_id: int, dane: TraderMailIn):
         if not tr:
             raise HTTPException(404, "Trader not found")
         _wyslij_z_panelu(session, sender=nadawca, email=tr.email, temat=temat,
-                         tekst=tekst, trader=tr)
+                         tekst=tekst, trader=tr, watek=_naglowki_watku(dane))
         session.commit()
         return {"ok": True, "email": tr.email, "subject": temat, "sender": nadawca}
     finally:
