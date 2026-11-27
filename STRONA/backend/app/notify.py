@@ -16,6 +16,7 @@ import smtplib
 import tempfile
 import urllib.request
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from contextvars import ContextVar
 from email.message import EmailMessage
 from pathlib import Path
@@ -620,7 +621,18 @@ def _operator_html() -> str:
             f'{html.escape(" · ".join(x for x in (nazwa, adres) if x))}</p>')
 
 
-def _shell(parts: list[str]) -> str:
+def _footer_links_html(prefs_url: str | None) -> str:
+    """Wiersz linków stopki: dokumenty i preferencje (strona bez logowania, gdy adres ma konto)."""
+    b = settings.app_base_url
+    link = lambda href, txt: f'<a href="{html.escape(href, quote=True)}" style="color:{_FAINT}">{txt}</a>'  # noqa: E731
+    pozycje = [link(f"{b}/privacy", "Privacy policy"), link(f"{b}/risk-disclosure", "Risk disclosure"),
+               link(f"{b}/terms", "Terms"),
+               link(prefs_url or f"{b}/portal?view=settings", "Manage email preferences")]
+    return (f'\n     <p style="font:400 11px/1.7 {_FONT};color:{_FAINT};margin:6px 0 0">'
+            + " · ".join(pozycje) + "</p>")
+
+
+def _shell(parts: list[str], prefs_url: str | None = None) -> str:
     brand = settings.site_name
     logo = f"{settings.app_base_url}/static/img/logo.png"
     return f"""<!doctype html><html><body style="margin:0;padding:0;background:#f5f5f7">
@@ -637,8 +649,9 @@ def _shell(parts: list[str]) -> str:
   <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%">
    <tr><td align="center" style="padding:26px 30px 0">
      <p style="font:400 12px/1.7 {_FONT};color:{_FAINT};margin:0">
-       {brand} · <a href="mailto:{settings.support_email}" style="color:{_GOLD};text-decoration:none">{settings.support_email}</a>
-       · <a href="{settings.app_base_url}/portal?view=settings" style="color:{_FAINT}">Email preferences</a></p>{_operator_html()}
+       Need a hand? Reply to this email or write to
+       <a href="mailto:{settings.support_email}" style="color:{_GOLD};text-decoration:none">{settings.support_email}</a></p>
+     <p style="font:400 11px/1.7 {_FONT};color:{_FAINT};margin:6px 0 0">© {datetime.now(timezone.utc).year} {brand}. All rights reserved.</p>{_operator_html()}{_footer_links_html(prefs_url)}
      <p style="font:400 11px/1.7 {_FONT};color:#b0b0b5;margin:6px 0 0">
        Demo accounts with virtual funds in a simulated trading environment.
        Rewards are performance-based and discretionary.</p>
@@ -1083,7 +1096,7 @@ def _render_html(event: str, ctx: dict, subject: str) -> str | None:
         parts.append(_unsub_html(ctx.get("unsubscribe_url")))
     else:
         return None
-    return _shell(parts)
+    return _shell(parts, ctx.get("preferences_url"))
 
 
 # Kategoria preferencji per zdarzenie (Settings -> Notification Preferences).
@@ -1207,6 +1220,23 @@ def bez_dubli_off():
         _DUBLE_WYLACZONE.reset(znak)
 
 
+def _preferences_url(to_email: str) -> str | None:
+    """Link do strony preferencji bez logowania (podpisany token konta) albo None, gdy adres nie ma konta."""
+    try:
+        from sqlalchemy import func
+        from . import auth
+        from .db import SessionLocal
+        from .models import Trader
+        session = SessionLocal()
+        try:
+            tr = session.query(Trader.id).filter(func.lower(Trader.email) == to_email.lower()).first()
+        finally:
+            session.close()
+        return f"{settings.app_base_url}/email/preferences/{auth.make_unsub_token(tr[0])}" if tr else None
+    except Exception:  # pragma: no cover - stopka nie może zablokować wysyłki
+        return None
+
+
 def _juz_wyslany(event: str, to_email: str, subject: str) -> bool:
     if event not in _BEZ_DUBLI or _DUBLE_WYLACZONE.get():
         return False
@@ -1305,6 +1335,8 @@ def _send_teraz(event: str, to_email: str | None,
         print(f"[notify] pominięto mail '{event}' do {to_email} (już wysłany)")
         pominiete = DUPLIKAT
         to_email = None
+    if to_email and "preferences_url" not in ctx:
+        ctx = {**ctx, "preferences_url": _preferences_url(to_email)}
     if to_email:
         tresc_html = _render_html(event, ctx, subject)
         if settings.smtp_host:
