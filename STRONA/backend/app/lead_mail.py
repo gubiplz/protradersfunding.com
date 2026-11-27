@@ -474,6 +474,7 @@ def _smtp_transport(msg: EmailMessage) -> None:
 
 RESEND_URL = "https://api.resend.com/emails"
 RESEND_UA = "propfunding-mailer/1.0 (+stdlib urllib)"
+WATEK = ("In-Reply-To", "References")
 
 
 def _resend_transport(msg: EmailMessage) -> None:
@@ -492,6 +493,9 @@ def _resend_transport(msg: EmailMessage) -> None:
             "html": html.get_content() if html else None}
     if msg["Reply-To"]:
         dane["reply_to"] = msg["Reply-To"]
+    naglowki = {h: msg[h] for h in WATEK if msg[h]}
+    if naglowki:
+        dane["headers"] = naglowki
     # `User-Agent` NIE jest kosmetyką: api.resend.com stoi za Cloudflarem, a ten
     # odrzuca domyślne `Python-urllib/3.x` jako sygnaturę bota — 403 z ciałem
     # „error code: 1010", zanim żądanie w ogóle dotrze do Resenda. Zmierzone
@@ -525,7 +529,8 @@ def _transport():
 
 
 def wyslij(email: str | None, temat: str, tekst: str, *,
-           transport=None, tylko_nadawca: bool = False) -> tuple[bool, str]:
+           transport=None, tylko_nadawca: bool = False,
+           naglowki: dict | None = None) -> tuple[bool, str]:
     """`(czy poszło, powód odmowy)`. Nigdy nie rzuca.
 
     `tylko_nadawca=True` to tryb maila pisanego z ręki w panelu: potrzebuje
@@ -550,6 +555,10 @@ def wyslij(email: str | None, temat: str, tekst: str, *,
     # skrzynkę firmy, o której lead nie słyszał — i pierwsza odpowiedź w tej
     # relacji zdradziłaby to, czego reszta systemu pilnuje.
     msg["Reply-To"] = _odpowiedz_do()
+    # Odpowiedź na odebrany mail — ten sam wątek u odbiorcy (`main._naglowki_watku`).
+    for h in WATEK:
+        if (naglowki or {}).get(h):
+            msg[h] = naglowki[h]
     msg.set_content(tekst)
     # HTML jako ALTERNATYWA, nigdy zamiast. Klient z wyłączoną grafiką, czytnik
     # ekranowy i filtr antyspamowy, który punktuje mail bez wersji tekstowej,

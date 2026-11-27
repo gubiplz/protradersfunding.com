@@ -1459,9 +1459,54 @@ function openNlCompose(){
   setTimeout(()=>$('nl-subj')?.focus(),50);
 }
 /* Kampania z grafiką i odliczaniem: newsletter + traderzy ze zgodą na oferty, każdy adres raz. */
-async function openCampaign(){
+/* Gotowe teksty kampanii. {pct} i {plans} wypelnia oferta (przycisk Campaign
+   w Offers); bez oferty trzeba je wpisac recznie — campSend nie wysle maila
+   z niewypelnionym nawiasem. Drobny druk mowi tylko to, co robi kasa (rabat
+   sam przy checkoucie, lepsza z dwoch znizek) — zadnych obietnic czasu. */
+const CAMP_FINE='Discount applies automatically at checkout to {plans}. If you also have a coupon, the better of the two applies.';
+const CAMP_PRESETS=[
+  {label:'Flash sale',tpl:'flash-sale',subject:'Flash sale: {pct}% off until the timer runs out',
+   offer:'{pct}% off {plans}',cta:'Claim {pct}% off',
+   body:'For a short time every covered challenge is {pct}% cheaper.\n\nNo code needed: the discount is already in the price at checkout. When the timer hits zero, prices go back to normal.',fine:CAMP_FINE},
+  {label:'Black Friday',tpl:'black-friday',subject:'Black Friday: {pct}% off every challenge',
+   offer:'Black Friday: {pct}% off {plans}',cta:'Get my challenge',
+   body:'Our biggest discount of the year is live.\n\nPick your account size and the {pct}% discount is applied at checkout automatically. It ends with the countdown above.',fine:CAMP_FINE},
+  {label:'Cyber Monday',tpl:'flash-sale',subject:'Cyber Monday: {pct}% off, last day',
+   offer:'Cyber Monday: {pct}% off {plans}',cta:'Claim the offer',
+   body:'Missed Black Friday? This is the last call.\n\n{pct}% off is applied at checkout until the timer runs out.',fine:CAMP_FINE},
+  {label:'Weekend sale',tpl:'weekend-sale',subject:'Weekend sale: {pct}% off challenges',
+   offer:'{pct}% off {plans} this weekend',cta:'Start this weekend',
+   body:'Markets are closed, which makes it a good moment to set up your next challenge.\n\n{pct}% off is applied at checkout until Sunday night.',fine:CAMP_FINE},
+  {label:'Last chance',tpl:'flash-sale',subject:'Last chance: {pct}% off ends soon',
+   offer:'{pct}% off {plans}, ending soon',cta:'Use it before it ends',
+   body:'A quick reminder: the {pct}% discount is about to end.\n\nIf you planned to start a challenge, now is the cheapest moment.',fine:CAMP_FINE},
+  {label:'Buy 1 Get 1 Free',tpl:'bogo',subject:'Buy one challenge, get a second one free',
+   offer:'Buy any challenge, get a second one of the same size free',cta:'Claim my free account',
+   body:'Two attempts for the price of one.\n\nBuy any challenge while the timer runs and we add a second account of the same size to your dashboard.',
+   fine:'One free account per customer, same size as the purchased challenge.'},
+  {label:'New year',tpl:'flash-sale',subject:'New year, new account: {pct}% off',
+   offer:'{pct}% off {plans} to start the year',cta:'Start the year funded',
+   body:'Start the new year with a fresh challenge.\n\n{pct}% off is applied at checkout until the timer runs out.',fine:CAMP_FINE},
+];
+function campVars(s){const v=(window._camp||{}).vars||{};
+  return String(s||'').replace(/\{(pct|plans)\}/g,(m,k)=>v[k]!=null&&v[k]!==''?v[k]:m)}
+function campPreset(i){
+  const p=CAMP_PRESETS[+i];if(!p)return;
+  $('camp-subj').value=campVars(p.subject);$('camp-offer').value=campVars(p.offer);
+  $('camp-body').value=campVars(p.body);$('camp-cta').value=campVars(p.cta);
+  $('camp-fine').value=campVars(p.fine);campTpl(p.tpl);
+}
+/* Z oferty: rabat, plany i koniec oferty jako licznik — reszta z presetu. */
+function offerCampaign(id){
+  const o=(window._offers||[]).find(x=>x.id===id);if(!o)return;
+  const pct=o.discount_pct%1?o.discount_pct.toFixed(2):String(o.discount_pct);
+  const plans=(o.plans_label&&!/^all/i.test(o.plans_label))?o.plans_label:'every challenge';
+  return openCampaign({vars:{pct,plans},ends_at:o.ends_at,preset:0,title:o.title||''});
+}
+async function openCampaign(pre){
+  pre=pre||{};
   let info;try{info=await api('/api/admin/campaign')}catch(e){toast('Error: '+e.message,'err');return}
-  window._camp={tpl:info.templates[0].key};
+  window._camp={tpl:info.templates[0].key,vars:pre.vars||null};
   const w=document.createElement('div');w.id='camp-modal';w.className='modal-wrap';
   w.onclick=e=>{if(e.target===w)w.remove()};
   const kaf=info.templates.map(t=>`<button type="button" class="camp-tpl" data-k="${esc(t.key)}" onclick="campTpl('${jsq(t.key)}')"
@@ -1470,6 +1515,9 @@ async function openCampaign(){
   w.innerHTML=`<div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()" style="max-width:640px">
     <div class="modal-head"><h3>Campaign to ${info.audience} recipient${info.audience===1?'':'s'}</h3></div>
     <p class="muted" style="font-size:12.5px;margin:0 0 10px">Newsletter subscribers and traders who agreed to offers. Each address gets it once; unsubscribed people are skipped.</p>
+    <label class="muted" style="font-size:12px">Ready text${pre.vars?` <span class="muted">(filled from offer: −${esc(pre.vars.pct)}%)</span>`:''}</label>
+    <select id="camp-preset" class="inp" onchange="campPreset(this.value)" style="margin-bottom:10px">
+      <option value="">Choose a preset…</option>${CAMP_PRESETS.map((p,i)=>`<option value="${i}">${esc(p.label)}</option>`).join('')}</select>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">${kaf}</div>
     <label class="muted" style="font-size:12px">Subject</label>
     <input id="camp-subj" class="inp" maxlength="160" placeholder="e.g. Black Friday: a second challenge on us" style="margin-bottom:8px">
@@ -1494,6 +1542,8 @@ async function openCampaign(){
       <button class="btn-o" onclick="$('camp-modal').remove()">Cancel</button>
     </div></div>`;
   document.body.appendChild(w);campTpl(window._camp.tpl);
+  if(pre.ends_at){const t=new Date(pre.ends_at);if(!isNaN(t)){t.setMinutes(t.getMinutes()-t.getTimezoneOffset());$('camp-end').value=t.toISOString().slice(0,16)}}
+  if(pre.preset!=null){$('camp-preset').value=String(pre.preset);campPreset(pre.preset)}
 }
 function campTpl(k){window._camp.tpl=k;document.querySelectorAll('.camp-tpl').forEach(b=>b.style.borderColor=b.dataset.k===k?'var(--acc)':'transparent')}
 async function campSend(test,btn){
@@ -1502,6 +1552,8 @@ async function campSend(test,btn){
     cta_label:v('camp-cta'),cta_url:v('camp-url'),fine_print:v('camp-fine'),ends_at:end?new Date(end).toISOString():null,
     test_to:test?v('camp-test'):null};
   if(!body.subject){toast('Subject is required.','err');return}
+  const brak=[body.subject,body.offer,body.body,body.cta_label,body.fine_print].join(' ').match(/\{(pct|plans)\}/);
+  if(brak){toast(`Fill in ${brak[0]} first (or open the campaign from an offer).`,'err',8000);return}
   if(test&&!body.test_to){toast('Enter a test address.','err');return}
   if(!test&&!await askConfirm({title:'Send this campaign now?',
     body:'One email per recipient, each with its own unsubscribe link. Up to 500 per click; click again to continue with the rest. <b>It cannot be recalled.</b>',
@@ -1625,7 +1677,8 @@ function replyMailItem(){
   const t=m.trader_id?(window._clients||[]).find(x=>x.id===m.trader_id):null;
   const temat=/^re:/i.test(m.subject||'')?m.subject:'Re: '+(m.subject||'');
   const cytat=(m.text||'').trim().split('\n').slice(0,20).map(l=>'> '+l).join('\n');
-  return openMailComposer({trader:t||null,email:m.from_email,from:m.brand||'ptf',
+  const thread=m.message_id?{in_reply_to:m.message_id,references:m.references||''}:null;
+  return openMailComposer({trader:t||null,email:m.from_email,from:m.brand||'ptf',thread,
     subject:temat,body:'\n\n'+(cytat?`On ${dstr(m.created_at)}, ${m.from} wrote:\n${cytat}`:'')});
 }
 /* Ponowienie NIE jest kopia archiwalnego maila: tokeny w linkach sa jednorazowe
@@ -2368,6 +2421,8 @@ async function openMailComposer(ctx){
   ctx=ctx||{};
   const t=ctx.trader||null,l=ctx.lead||null;
   _mailCtx={trader:t,lead:l,mark:ctx.mark||null,
+    /* Reply na odebrany mail: naglowki watku, zeby odpowiedz byla u klienta w tym samym watku */
+    thread:ctx.thread||null,
     email:(t&&t.email)||(l&&l.email)||(ctx.email||''),
     name:(t&&(t.full_name||''))||(l&&(l.name||''))||''};
   let tpls=[],senders={ptf:{ready:true,missing:[]},fx:{ready:false,missing:['?']}};
@@ -2836,9 +2891,10 @@ async function sendComposedMail(){
   await busy($('lm-send'),'Sending…',async()=>{
     try{
       const id=c.trader?c.trader.id:(c.lead?c.lead.id:null);
-      if(c.trader)await api('/api/admin/traders/'+id+'/email',{method:'POST',body:JSON.stringify({subject,body,sender})});
-      else if(c.lead)await api('/api/admin/leads/'+id+'/email-custom',{method:'POST',body:JSON.stringify({subject,body,sender,mark:c.mark||undefined})});
-      else await api('/api/admin/mail/send',{method:'POST',body:JSON.stringify({to,subject,body,sender})});
+      const th=c.thread||{};
+      if(c.trader)await api('/api/admin/traders/'+id+'/email',{method:'POST',body:JSON.stringify({subject,body,sender,...th})});
+      else if(c.lead)await api('/api/admin/leads/'+id+'/email-custom',{method:'POST',body:JSON.stringify({subject,body,sender,mark:c.mark||undefined,...th})});
+      else await api('/api/admin/mail/send',{method:'POST',body:JSON.stringify({to,subject,body,sender,...th})});
       document.getElementById('mail-modal')?.remove();
       toast('E-mail sent.');
       if(c.lead){if(VIEW==='leads')await VIEWS.leads();if(window._leadOpen&&window._leadOpen.id===id)openLead(id)}
@@ -4159,7 +4215,8 @@ function renderOffers(){
     </div>
 
     <div class="sec-card">
-      <h3>Offers${zywe.length?` <small class="muted">(${zywe.length} live)</small>`:''}</h3>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">Offers${zywe.length?` <small class="muted">(${zywe.length} live)</small>`:''}</h3>
+        <button class="btn-o sm" style="margin-left:auto" onclick="openCampaign()">Campaign with timer</button></div>
       ${rows.length?`<div class="tbl-wrap tw-sm rtbl-wrap"><table class="tbl rtbl">
         <thead><tr><th>#</th><th>Offer</th><th>Who</th><th>Plans</th><th>Window</th><th>Status</th><th>Bought</th><th class="no-sort"></th></tr></thead>
         <tbody>${rows.map(o=>`<tr>
@@ -4171,6 +4228,7 @@ function renderOffers(){
           <td data-l="Status"><span class="status ${OFFER_STATUS_CLS[o.status]||'provisioning'}"><span class="dot"></span>${esc(o.status)}</span></td>
           <td class="num" data-l="Bought">${o.bought||0}${o.revenue_usd?` <small class="muted">$${fmt(o.revenue_usd)}</small>`:''}</td>
           <td class="rt-acts">${['active','pending'].includes(o.status)?`
+            ${o.trader_email?'':`<button class="btn-o sm" onclick="offerCampaign(${o.id})" title="Campaign e-mail with countdown, filled from this offer">Campaign</button>`}
             <button class="btn-o sm" onclick="offerNotify(${o.id})">Notify</button>
             <button class="btn-o sm danger" onclick="offerCancel(${o.id})">Cancel</button>`:''}</td>
         </tr>`).join('')}</tbody></table></div>`

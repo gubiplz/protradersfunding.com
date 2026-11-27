@@ -157,6 +157,9 @@ def jeden(email_id: str, k: int = 0, *, wyslany: bool = False) -> dict:
             "to": do, "cc": m.get("cc") or [],
             "reply_to": m.get("reply_to") or [],
             "subject": m.get("subject") or "", "created_at": m.get("created_at"),
+            # Do odpowiedzi w tym samym wątku (In-Reply-To / References).
+            "message_id": m.get("message_id") or "",
+            "references": str((m.get("headers") or {}).get("references") or ""),
             "text": m.get("text") or "", "html": m.get("html") or "",
             "attachments": [{"filename": a.get("filename"), "size": a.get("size")}
                             for a in (m.get("attachments") or [])]}
