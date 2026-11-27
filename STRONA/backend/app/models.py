@@ -403,6 +403,8 @@ class FlashOffer(Base):
     # Jednorazowosc ma sens tylko imiennie; globalna jednorazowa bylaby wyscigiem
     # „kto pierwszy" — endpoint wymusza False dla globalnych.
     single_use: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Grafika maila o ofercie (notify.CAMPAIGN_TEMPLATES); NULL = Flash Sale.
+    email_template: Mapped[str | None] = mapped_column(String(40), nullable=True)
     used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"), nullable=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -370,3 +370,29 @@ def test_kampania_z_odliczaniem_raz_na_adres(maile):
     tresc = notify._render_html("campaign", moje[wspolny], dane["subject"])
     assert "/email/countdown.gif?end=1893456000" in tresc and "/static/img/campaigns/black-friday.jpg" in tresc
     assert "Second challenge free" in tresc and "Unsubscribe" in tresc
+
+
+def test_maile_ofert_i_kodow_w_ukladzie_kampanii(maile):
+    """Oferta z zakładki Offers (wybrana grafika + odliczanie do końca), rabat po porzuconym
+    koszyku i kod powitalny newslettera idą w układzie kampanii."""
+    tid, _, email = _porzucone(marketing=True)
+    koniec = (datetime.now(timezone.utc) + timedelta(hours=10)).replace(microsecond=0)
+    with TestClient(app) as c:
+        r = c.post("/api/admin/offers", headers=ADMIN, json={
+            "discount_pct": 25, "scope": "all", "trader_email": email, "ends_at": koniec.isoformat(),
+            "title": f"Weekend {next(LICZNIK)}", "single_use": True, "send_email": True, "email_template": "weekend-sale"})
+        assert r.status_code == 200, r.text
+    s = SessionLocal()
+    assert s.query(FlashOffer).filter(FlashOffer.trader_id == tid).one().email_template == "weekend-sale"
+    s.close()
+    ctx = [m[2] for m in maile if m[1] == email and m[0] == "flash_offer"][-1]
+    tresc = notify._render_html("flash_offer", ctx, "x")
+    assert "/static/img/campaigns/weekend-sale.jpg" in tresc
+    assert f"/email/countdown.gif?end={int(koniec.timestamp())}" in tresc and "25% off" in tresc
+    rec = notify._render_html("checkout_recovery_offer", {"product_label": "2-Step 25K", "product_key": "2step-25k",
+                              "pct": 15, "price": 254.15, "amount": 299, "ends": "x", "ends_ts": 1893456000}, "x")
+    assert "just-for-you.jpg" in rec and "countdown.gif?end=1893456000" in rec
+    nl = notify._render_html("newsletter_welcome", {"variant": "discount", "code": "WELCOME10", "pct": 10}, "x")
+    assert "welcome.jpg" in nl and "WELCOME10" in nl and "countdown.gif" not in nl
+    los = notify._render_html("newsletter_welcome", {"variant": "giveaway", "prize": "$50K", "draw_date": "Dec 1"}, "x")
+    assert "campaigns/" not in los                                     # losowanie zostaje w zwykłym układzie

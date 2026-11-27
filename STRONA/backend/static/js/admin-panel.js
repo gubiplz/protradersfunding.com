@@ -4102,6 +4102,9 @@ async function openAccount(id){
 /* ---------- Flash sale offers ---------- */
 /* Chipy statusow reuzywaja klas kont z portal.css — oferta nie ma wlasnych. */
 const OFFER_STATUS_CLS={active:'active',pending:'pending',expired:'provisioning',used:'passed',cancelled:'failed'};
+// Grafiki maili o ofertach (notify.CAMPAIGN_TEMPLATES): mail ma odliczanie do końca oferty.
+const OFFER_TPL=[['flash-sale','Flash Sale'],['black-friday','Black Friday'],['bogo','Buy 1 Get 1 Free'],
+  ['weekend-sale','Weekend Sale'],['just-for-you','Just for you'],['welcome','Welcome']];
 function renderOffers(){
   const rows=window._offers||[],prods=window._offerProds||[];
   const zywe=rows.filter(o=>['active','pending'].includes(o.status));
@@ -4128,6 +4131,11 @@ function renderOffers(){
           <input id="of-ends" class="inp" type="datetime-local" value="${za24}" style="width:100%"></div>
         <div><label class="muted" style="display:block;font-size:12px;margin-bottom:4px">Title (banner &amp; mail)</label>
           <input id="of-title" class="inp" placeholder="Weekend flash sale" style="width:100%"></div>
+        <div><label class="muted" style="display:block;font-size:12px;margin-bottom:4px">E-mail picture</label>
+          <div style="display:flex;gap:8px;align-items:center">
+          <select id="of-tpl" class="inp" style="flex:1" onchange="$('of-tpl-img').src='/static/img/campaigns/'+this.value+'.jpg'">
+            ${OFFER_TPL.map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select>
+          <img id="of-tpl-img" src="/static/img/campaigns/flash-sale.jpg" alt="" style="width:38px;height:38px;border-radius:8px;object-fit:cover"></div></div>
       </div>
       <div id="of-keys-box" style="display:none;margin-top:10px">
         <div class="muted" style="font-size:12px;margin-bottom:6px">Covered plans</div>
@@ -4323,7 +4331,7 @@ async function offerCreate(){
     ends_at:new Date(ends).toISOString(),
     title:$('of-title').value.trim()||null,
     single_use:$('of-single').checked,
-    send_email:$('of-mail').checked,send_push:$('of-push').checked};
+    send_email:$('of-mail').checked,send_push:$('of-push').checked,email_template:$('of-tpl').value};
   try{
     const r=await api('/api/admin/offers',{method:'POST',body:JSON.stringify(body)});
     toast(r.queued?'Offer created — notifications are going out in the background'

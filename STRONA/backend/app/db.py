@@ -351,6 +351,9 @@ _NEW_COLUMNS: dict[str, dict[str, str]] = {
     },
     # Kampania popupu, z której przyszedł zapis (np. "giveaway:2026-11-30") —
     # losowanie i analiza ofert idą z eksportu CSV filtrowanego po kampanii.
+    "flash_offers": {
+        "email_template": "VARCHAR(40)",
+    },
     "newsletter_subscribers": {
         "campaign": "VARCHAR(60)",
     },
