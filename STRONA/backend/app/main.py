@@ -10949,6 +10949,8 @@ async def api_tick(request: Request):
     # Przegląd tygodnia tym samym trybem — zapas na poniedziałek bez wejść.
     weekly = zadanie("weekly_review", push.weekly_review, {"sent": 0})
     zadanie("terminal_logins", terminal.wyczysc_logowania, {"deleted": 0})
+    # Baza partnerów (darmowy Supabase) usypia po tygodniu ciszy — dobowe szturchnięcie.
+    zadanie("referral_keepalive", polecenia.podtrzymaj, {"alive": False})
     # „Scale your progress" raz w tygodniu (poniedzialek) — na tym samym cronie
     # z tego samego powodu co recap. Wlasny odstep 21 dni w `_upsell_nudge`
     # sprawia, ze recznie odpalony endpoint i ten przebieg sie nie dubluja.

@@ -105,6 +105,18 @@ def wlasciciel(slug: str | None) -> str | None:
     return " · ".join(str(x) for x in (dane.get("name"), dane.get("email")) if x)[:160]
 
 
+def podtrzymaj() -> dict:
+    """Jedno zapytanie do bazy partnera raz na dobę (cron /api/tick).
+
+    Darmowy plan Supabase usypia projekt po tygodniu bez ruchu, a ruch od nas
+    bywa rzadszy (lead z ref-linku, wypłata). Uśpiona baza znika z DNS i wtedy
+    przepadają kliknięcia i zgłoszenia partnerów (stało się 2026-11). Odczyt
+    nieistniejącego sluga: nic nie zapisuje, a bazę trzyma przy życiu.
+    """
+    wynik = wlasciciel("ptf-keepalive")
+    return {"alive": wynik is not None}
+
+
 def opis(lead: Lead) -> str:
     """Kto polecił, jednym ciągiem do powiadomień: „Imię · mail (slug)" albo sam slug."""
     if not lead.ref:
