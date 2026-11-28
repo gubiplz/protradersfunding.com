@@ -303,3 +303,14 @@ def test_baza_partnera_padla_przy_zgloszeniu_cron_dopyta(wyslane, kanal, monkeyp
     _cron()
     [tekst] = kupil()
     assert KTO in tekst
+
+
+def test_podtrzymanie_bazy_partnera_tylko_czyta(wyslane, monkeypatch):
+    # Dobowe szturchnięcie: odczyt właściciela, żadnego zgłoszenia na listę.
+    assert polecenia.podtrzymaj() == {"alive": True}
+    assert wyslane == []
+
+    def pada(url, body, key, timeout=6):
+        raise OSError("baza uśpiona")
+    monkeypatch.setattr(polecenia, "_post", pada)
+    assert polecenia.podtrzymaj() == {"alive": False}
